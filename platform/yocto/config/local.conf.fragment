@@ -1,0 +1,17 @@
+# Raspberry Pi 4 / Xen 이미지 빌드에 적용할 프로젝트 설정 조각.
+# 빌드 환경의 conf/local.conf에 수동으로 반영한다.
+
+MACHINE = "raspberrypi4-64"
+DISTRO = "poky"
+
+INIT_MANAGER = "systemd"
+DISTRO_FEATURES:append = " virtualization xen"
+
+PREFERRED_PROVIDER_virtual/kernel = "linux-raspberrypi"
+
+# Xen dom0 메모리 할당.
+RPI_DOM0_MEM = "1024M"
+
+# 현재 WSL2 빌드의 임시 자원 제한값이며 호스트에 맞게 조정한다.
+BB_NUMBER_THREADS = "4"
+PARALLEL_MAKE = "-j 4"
