@@ -1,0 +1,111 @@
+# ============================================================
+# Perseus - Xen multi-OS platform
+# Ignore generated/local files; keep source, recipes and configs.
+# ============================================================
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local environment and credentials (examples remain trackable)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Python / FastAPI / VM agents
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+
+# React / JavaScript / TypeScript
+node_modules/
+dist/
+.next/
+.nuxt/
+.vite/
+.npm/
+.pnpm-store/
+coverage/
+*.tsbuildinfo
+
+# Java / Spring Boot (reserved for future expansion)
+.gradle/
+target/
+*.class
+.classpath
+.project
+.settings/
+
+# Generic local build outputs
+build/
+/out/
+/artifacts/
+/release/
+*.tmp
+*.bak
+*.log
+*.log.*
+# Small, curated test logs are allowed as fixtures.
+!/tests/fixtures/*.log
+!/tests/fixtures/**/*.log
+
+# Yocto / BitBake: generated trees only
+# Keep platform/yocto/meta-perseus/, kas manifests, .bb/.bbappend,
+# .conf, patches, .wks, and other build definitions in Git.
+/platform/yocto/build-*/
+/platform/yocto/build_*/
+/platform/yocto/downloads/
+/platform/yocto/sstate-cache/
+/platform/yocto/.kas/
+/platform/yocto/layers/
+/platform/yocto/sources/
+
+# OS images / virtual disks: distribute as release artifacts, not Git
+*.wic
+*.wic.*
+*.bmap
+*.sdimg
+*.img
+*.ext3
+*.ext4
+*.qcow2
+*.vhdx
+*.vmdk
+*.iso
+*.squashfs
+
+# Runtime-generated databases and state
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.pid
+*.sock
