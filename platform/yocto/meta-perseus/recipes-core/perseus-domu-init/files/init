@@ -1,0 +1,43 @@
+#!/bin/sh
+# PID 1 inside the intentionally ephemeral Xen test guest.
+# This is NOT a full Debian/Ubuntu/Alpine domU.
+set -u
+
+/bin/mount -t proc proc /proc 2>/dev/null || :
+/bin/mount -t sysfs sysfs /sys 2>/dev/null || :
+/bin/mount -t devtmpfs devtmpfs /dev 2>/dev/null || :
+mkdir -p /dev/pts /run /tmp
+/bin/mount -t devpts devpts /dev/pts 2>/dev/null || :
+
+if [ -e /dev/hvc0 ]; then
+    exec </dev/hvc0 >/dev/hvc0 2>&1
+fi
+
+echo '[perseus-domu] /init reached. Xen guest started.'
+uname -a
+ip link set lo up 2>/dev/null || :
+
+# Xenbus/netfront may appear shortly after the shell init has started.
+i=0
+while [ ! -d /sys/class/net/eth0 ] && [ "$i" -lt 20 ]; do
+    sleep 1
+    i=$((i + 1))
+done
+
+if [ -d /sys/class/net/eth0 ]; then
+    ip link set eth0 up
+    echo '[perseus-domu] guest eth0 detected; requesting DHCP address'
+    udhcpc -i eth0 -n -q -t 5 -T 2 -s /etc/perseus/udhcpc.script || \
+        echo '[perseus-domu] DHCP did not succeed. Use ip link/ip addr to diagnose.'
+else
+    echo '[perseus-domu] WARNING: eth0 absent; verify CONFIG_XEN_NETDEV_FRONTEND and dom0 netback.'
+fi
+
+ip -br address 2>/dev/null || ip address
+printf '\n[perseus-domu] Minimal guest shell (PID 1). Check: ping -c 2 192.168.77.1\n'
+printf '[perseus-domu] Use xl shutdown/destroy from dom0 to stop this disposable guest.\n\n'
+while true; do
+    /bin/sh -i
+    echo '[perseus-domu] shell exited; restarting for diagnostics'
+    sleep 1
+done
