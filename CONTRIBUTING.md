@@ -33,13 +33,18 @@ master            ← 통합 데모·발표용 안정 버전
 
 ```text
 S15P31E110/
-├── platform/   # Xen·U-Boot·커널 빌드, 이미지 파이프라인, 부팅 테스트, domU 템플릿
-├── agent/      # VM 에이전트
-├── backend/    # dom0 VM 관리 서버
-├── frontend/   # 웹 관리 콘솔, VM별 화면, VM 애플리케이션
-├── display/    # dom0 표시 서비스(화면 라우터 수신측)
-├── deploy/     # 배포·실행 스크립트, 환경 설정
-├── docs/       # OpenAPI 명세, 스키마, 에이전트 프로토콜, 설계·가이드 문서
+├── platform/                 # Yocto·Xen·U-Boot 빌드, 부팅 환경, domU 템플릿, 네트워크
+├── services/
+│   ├── dom0-manager/         # Python 제어 계층 (하이퍼바이저 추상화·복구 엔진)
+│   ├── vm-agent/             # VM 에이전트
+│   └── display/              # dom0 표시 서비스 (화면 라우터 수신측·키오스크)
+├── backend/                  # Spring Boot VM 관리 서버
+├── frontend/                 # React 웹 관리 콘솔, VM별 화면(OS face)
+├── apps/                     # VM 애플리케이션 (RC카 시나리오 앱)
+├── contracts/                # VM 간 메시징·에이전트·관리 API 계약
+├── deploy/                   # 배포·실행 스크립트, 환경 설정
+├── scripts/                  # 빌드 스크립트
+├── docs/                     # 설계·가이드 문서
 └── .gitlab-ci.yml
 ```
 
@@ -58,13 +63,15 @@ CI 설정(`.gitlab-ci.yml`)은 모든 브랜치에서 동작해야 하므로 루
 
 | part | 대상 폴더 |
 | --- | --- |
-| `platform` | `platform/` |
-| `agent` | `agent/` |
+| `platform` | `platform/`, `scripts/` |
+| `ctrl` | `services/dom0-manager/` |
+| `agent` | `services/vm-agent/` |
+| `display` | `services/display/` |
 | `backend` | `backend/` |
 | `frontend` | `frontend/` |
-| `display` | `display/` |
+| `app` | `apps/` |
 | `deploy` | `deploy/`, `.gitlab-ci.yml` |
-| `common` | `docs/`, 루트 설정 등 여러 파트에 걸친 변경 |
+| `common` | `docs/`, `contracts/`, 루트 설정 등 여러 파트에 걸친 변경 |
 
 **type**: `feat`, `fix`, `refactor`, `test`, `docs`, `chore` (커밋 타입과 동일)
 
@@ -107,6 +114,29 @@ git push -u origin backend/feat/S15P31E110-12-vm-lifecycle-api
 
 rebase 후 이미 push했던 브랜치를 다시 올릴 때는 `git push --force-with-lease`를 사용합니다.
 (`--force`는 쓰지 않습니다. 본인 기능 브랜치에만 사용합니다.)
+
+### Jira 이슈로 브랜치 만들기 (Claude Code)
+
+Claude Code에서 `/branch {Jira키}`를 실행하면 1)~2) 단계를 대신합니다.
+이슈 제목의 접두어로 part를, 이슈 내용으로 type과 영어 설명을 정하고, Jira 이슈를 '진행 중'으로 바꿉니다.
+
+```text
+/branch S15P31E110-56
+→ platform/feat/S15P31E110-56-rpi4-xen-boot
+```
+
+| Jira 접두어 | part |
+| --- | --- |
+| `[PLATFORM]` | `platform` |
+| `[CTRL]` | `ctrl` |
+| `[AGENT]` | `agent` |
+| `[DISPLAY]` | `display` |
+| `[BE]` | `backend` |
+| `[FE]` | `frontend` |
+| `[APP]` | `app` |
+| `[DEPLOY]` | `deploy` |
+| `[COMMON]` | `common` |
+| `[TEST]` | 대상 폴더의 part (type은 `test`) |
 
 ---
 
@@ -162,6 +192,18 @@ git config commit.template .gitmessage
 - 머지 방식은 **Squash merge**를 기본으로 합니다. MR 제목이 커밋 메시지가 되므로 커밋 규칙과 같은 형식으로 씁니다
 - 머지 후 소스 브랜치는 삭제합니다
 - MR 작성 시 템플릿(`Default`)을 사용합니다
+
+### Jira 자동 완료
+
+GitLab–Jira 연동이 설정되어 있어, MR 설명에 `Closes {Jira키}`를 쓰고 develop에 머지하면 해당 Jira 이슈가 자동으로 '완료'가 됩니다.
+
+```text
+Closes S15P31E110-56
+Closes S15P31E110-57      # 여러 이슈를 함께 끝낼 때는 줄마다 하나씩
+```
+
+- 작업이 끝나지 않은 이슈는 `Closes` 없이 키만 적습니다. (Jira에 MR 링크만 남습니다)
+- 브랜치·커밋·MR에 Jira 키가 들어가면 Jira 이슈의 개발 정보에 자동으로 연결됩니다.
 
 ### 공통 계약 변경
 
