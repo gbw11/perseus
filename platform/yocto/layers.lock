@@ -1,0 +1,21 @@
+# 현재 Yocto 빌드에 사용하는 외부 저장소의 URL과 커밋을 기록한다.
+# 형식: <repository> <url> <commit>
+# 저장소는 작업 공간의 layers/<repository>/에 배치한다.
+# 이 파일은 Yocto가 자동으로 읽지 않는 수동 기록 파일이다.
+#
+# BBLAYERS 경로와 등록 순서 (layers/ 기준):
+#   openembedded-core/meta
+#   meta-yocto/meta-poky
+#   meta-openembedded/meta-oe
+#   meta-openembedded/meta-python
+#   meta-openembedded/meta-networking
+#   meta-openembedded/meta-filesystems
+#   meta-raspberrypi
+#   meta-virtualization
+
+openembedded-core https://git.openembedded.org/openembedded-core 0f03c732a0a2d0506b41b1abe60b3f368b2300dc
+bitbake https://git.openembedded.org/bitbake 51fd94a67fa17650a9ff623492005972bbc7d26f
+meta-yocto https://git.yoctoproject.org/meta-yocto 7c25b11156553145fa6b241a2d4f65d94438f804
+meta-raspberrypi https://git.yoctoproject.org/meta-raspberrypi 919588393f41b48cb6c5d832aa35e58a19b6762d
+meta-virtualization https://git.yoctoproject.org/meta-virtualization 2807579615834a143c8ed453b463f93f43446019
+meta-openembedded https://git.openembedded.org/meta-openembedded 47d7dbdd10890bbd429bc0cccbe14435c37e5af1
