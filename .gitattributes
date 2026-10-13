@@ -1,0 +1,65 @@
+# ============================================================
+# Perseus - Cross-platform line endings
+# Normalize detected text to LF in the Git index and checkout.
+# ============================================================
+
+# Windows, WSL2, GitLab CI, Linux and Yocto: LF for source text
+* text=auto eol=lf
+
+# Explicit LF for executable scripts and Yocto / embedded metadata
+*.sh         text eol=lf
+*.bash       text eol=lf
+*.py         text eol=lf
+*.go         text eol=lf
+*.js         text eol=lf
+*.jsx        text eol=lf
+*.ts         text eol=lf
+*.tsx        text eol=lf
+*.json       text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.md         text eol=lf
+*.html       text eol=lf
+*.css        text eol=lf
+*.bb         text eol=lf
+*.bbappend   text eol=lf
+*.inc        text eol=lf
+*.conf       text eol=lf
+*.cfg        text eol=lf
+*.wks        text eol=lf
+*.dts        text eol=lf
+*.dtsi       text eol=lf
+*.patch      text eol=lf
+*.service    text eol=lf
+*.socket     text eol=lf
+*.target     text eol=lf
+*.timer      text eol=lf
+
+# Windows-only command scripts
+*.bat        text eol=crlf
+*.cmd        text eol=crlf
+
+# Binary files: no line-ending conversion or text merging
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.webp       binary
+*.ico        binary
+*.pdf        binary
+*.woff       binary
+*.woff2      binary
+*.ttf        binary
+*.zip        binary
+*.gz         binary
+*.xz         binary
+*.zst        binary
+*.7z         binary
+*.dtb        binary
+*.dtbo       binary
+*.elf        binary
+*.bin        binary
+*.img        binary
+*.wic        binary
+*.ext4       binary
+*.qcow2      binary
