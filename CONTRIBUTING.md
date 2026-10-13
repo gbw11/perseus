@@ -195,6 +195,8 @@ git config commit.template .gitmessage
 
 ### Jira 자동 완료
 
+이슈 작성 규칙은 [docs/jira-convention.md](docs/jira-convention.md)를 참고합니다.
+
 GitLab–Jira 연동이 설정되어 있어, MR 설명에 `Closes {Jira키}`를 쓰고 develop에 머지하면 해당 Jira 이슈가 자동으로 '완료'가 됩니다.
 
 ```text
