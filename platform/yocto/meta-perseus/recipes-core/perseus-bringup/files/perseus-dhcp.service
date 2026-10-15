@@ -1,0 +1,14 @@
+[Unit]
+Description=Perseus test-only DHCP server on xenbr0 (DNS disabled)
+Requires=perseus-bridge.service
+After=perseus-bridge.service
+
+[Service]
+Type=simple
+RuntimeDirectory=perseus
+ExecStart=@SBINDIR@/dnsmasq --keep-in-foreground --conf-file=/etc/perseus/dnsmasq-bringup.conf
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
