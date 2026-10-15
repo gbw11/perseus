@@ -33,3 +33,9 @@ perseus:
     refresh-cookie-secure: ${AUTH_COOKIE_SECURE:false}
     max-login-attempts: ${MAX_LOGIN_ATTEMPTS:5}
     login-attempt-window: ${LOGIN_ATTEMPT_WINDOW:5m}
+  dom0-manager:
+    base-url: ${DOM0_MANAGER_BASE_URL:http://127.0.0.1:8081}
+    service-token: ${DOM0_MANAGER_SERVICE_TOKEN:}
+    connect-timeout: ${DOM0_MANAGER_CONNECT_TIMEOUT:5s}
+    query-timeout: ${DOM0_MANAGER_QUERY_TIMEOUT:10s}
+    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:45s}
