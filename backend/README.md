@@ -40,11 +40,14 @@ GET http://localhost:8080/actuator/health
 ```text
 POST /api/v1/auth/signup
 POST /api/v1/auth/login
+POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 ```
 
 로그인은 15분 유효한 JWT Access Token을 응답 본문으로, 7일 유효한 Refresh Token을
-`HttpOnly` 쿠키로 발급합니다. 로그아웃은 두 토큰을 서버에서 폐기합니다.
+`HttpOnly` 쿠키로 발급합니다. 재발급은 Refresh Token 쿠키로 두 토큰을 새로 발급하고 기존
+Refresh Token은 폐기합니다. 이미 폐기된 Refresh Token이 다시 사용되면 탈취로 보고 해당 사용자의
+모든 Refresh Token을 폐기합니다. 로그아웃은 두 토큰을 서버에서 폐기합니다.
 
 로컬 실행에는 개발용 JWT 비밀값과 H2 파일 DB가 사용됩니다. 운영 환경에서는 반드시 다음
 환경변수를 설정해야 합니다.

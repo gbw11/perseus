@@ -85,24 +85,35 @@ public class AuthService {
         }
         loginRateLimiter.reset(username);
 
-        IssuedAccessToken accessToken = jwtTokenService.issueAccessToken(user);
-        String refreshTokenValue = createRefreshTokenValue();
-        Instant now = clock.instant();
-        Instant refreshExpiresAt = now.plus(properties.refreshTokenTtl());
-        refreshTokenRepository.save(new RefreshToken(
-                UUID.randomUUID().toString(),
-                user.getId(),
-                jwtTokenService.hash(refreshTokenValue),
-                refreshExpiresAt,
-                now));
+        return issueTokens(user, clock.instant());
+    }
 
-        LoginResponse response = new LoginResponse(
-                accessToken.value(),
-                "Bearer",
-                properties.accessTokenTtl().toSeconds(),
-                accessToken.expiresAt(),
-                new LoginResponse.UserResponse(user.getId(), user.getUsername()));
-        return new LoginResult(response, refreshTokenValue);
+    // Rolled-back revocations would undo reuse detection, so ApiException must not roll back.
+    @Transactional(noRollbackFor = ApiException.class)
+    public LoginResult refresh(String refreshTokenValue) {
+        if (refreshTokenValue == null || refreshTokenValue.isBlank()) {
+            throw invalidRefreshToken();
+        }
+
+        Instant now = clock.instant();
+        RefreshToken current = refreshTokenRepository
+                .findByTokenHashForUpdate(jwtTokenService.hash(refreshTokenValue))
+                .orElseThrow(this::invalidRefreshToken);
+
+        if (current.isRevoked()) {
+            // A revoked token presented again may have been stolen, so end every session of the user.
+            refreshTokenRepository.findAllByUserIdAndRevokedAtIsNull(current.getUserId())
+                    .forEach(token -> token.revoke(now));
+            throw invalidRefreshToken();
+        }
+        if (!current.isActive(now)) {
+            throw invalidRefreshToken();
+        }
+
+        User user = userRepository.findById(current.getUserId())
+                .orElseThrow(this::invalidRefreshToken);
+        current.revoke(now);
+        return issueTokens(user, now);
     }
 
     @Transactional
@@ -126,6 +137,29 @@ public class AuthService {
                     .filter(token -> token.isActive(now))
                     .ifPresent(token -> token.revoke(now));
         }
+    }
+
+    private LoginResult issueTokens(User user, Instant now) {
+        IssuedAccessToken accessToken = jwtTokenService.issueAccessToken(user);
+        String refreshTokenValue = createRefreshTokenValue();
+        refreshTokenRepository.save(new RefreshToken(
+                UUID.randomUUID().toString(),
+                user.getId(),
+                jwtTokenService.hash(refreshTokenValue),
+                now.plus(properties.refreshTokenTtl()),
+                now));
+
+        LoginResponse response = new LoginResponse(
+                accessToken.value(),
+                "Bearer",
+                properties.accessTokenTtl().toSeconds(),
+                accessToken.expiresAt(),
+                new LoginResponse.UserResponse(user.getId(), user.getUsername()));
+        return new LoginResult(response, refreshTokenValue);
+    }
+
+    private ApiException invalidRefreshToken() {
+        return new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN", "유효하지 않거나 만료된 리프레시 토큰입니다.");
     }
 
     private String createRefreshTokenValue() {

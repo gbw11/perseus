@@ -40,6 +40,14 @@ public class RefreshToken {
         this.createdAt = createdAt;
     }
 
+    public String getUserId() {
+        return userId;
+    }
+
+    public boolean isRevoked() {
+        return revokedAt != null;
+    }
+
     public boolean isActive(Instant now) {
         return revokedAt == null && expiresAt.isAfter(now);
     }
