@@ -145,3 +145,29 @@ SSTATE_MIRRORS = "file://.* file:///home/ssafy/yocto-workspace/build-rpi4-xen/ss
 - 커널 configure를 새로 수행한 결과와 원본 §.config§ 전체의 비교, cache 없는 전체 컴파일, 새 SD 이미지 완성, 이미지 바이트 재현성은 이번 범위에서 확인하지 않았다.
 - 실보드 UART 부팅·Xen/dom0 실행·xl 명령·domU 부팅·Bridge/DHCP 통신·HDMI는 미검증이다.
 - 외부 URL의 미래 가용성, 완전한 오프라인 빌드, 다른 호스트 배포판 조합은 별도 검증이 필요하다.
+
+## 최종 GitLab 순수 Clone 검증
+
+구현·문서 커밋 `e455397`을 작업 브랜치에 일반 push한 뒤,
+`/home/ssafy/yocto-repro-final-20261015/S15P31E110`에 GitLab URL에서 **다시 Clone**했다.
+최종 Clone에는 소스·설정 파일을 수동 복사하지 않았고 모든 Git 추적 파일의 바이트가
+푸시한 원본과 동일함을 확인했다. 외부 의존성은 사전 검증에서 URL로 새로 Clone한
+6개 저장소를 재사용했으며 기존 `/home/ssafy/yocto-workspace/layers`는 사용하지 않았다.
+
+```bash
+cd /home/ssafy/yocto-repro-final-20261015/S15P31E110
+python3 -m unittest discover -s tests/platform -v
+YOCTO_WORKSPACE=/home/ssafy/yocto-repro-validation-20261015/workspace \
+YOCTO_BUILD_DIR=/home/ssafy/yocto-repro-final-20261015/build-rpi4-xen \
+  bash scripts/setup-yocto.sh --verify
+git status --short
+```
+
+결과: **종료 코드 0**, 9개 레이어, 3212개 레시피 파싱 오류 0건,
+이미지 3종의 MACHINE/DISTRO/init/kernel/dom0 메모리·산출물 경로 및 U-Boot append 검증 통과,
+회귀 테스트 8개 통과, Clone 작업 트리 clean.
+새 conf에는 원본 작업 공간 경로가 없고 site.conf·auto.conf·cache mirror도 없다.
+최종 검증은 환경·메타데이터 검사만 수행했으며 실제 이미지 빌드는 실행하지 않았다.
+
+로그: `/home/ssafy/yocto-repro-final-20261015/logs/setup-verify.log`, `tests.log`.
+이 결과를 추가하는 후속 커밋은 감사 문서만 변경한다.
