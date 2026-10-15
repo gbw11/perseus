@@ -1,6 +1,14 @@
 # Raspberry Pi 4 Yocto/Xen 환경 재구성 및 domU 인계
 
-GitLab의 최신 프로젝트와 그 버전의 `platform/yocto/layers.lock`으로 **새 Linux 작업 경로**에 환경을 준비한다. 원본 빌드의 `conf`, 외부 레이어 복사본, ZIP은 필요하지 않다. 실제 검증 범위는 [감사 기록](yocto-rpi4-xen-audit-20261015.md)에 기록한다.
+**이 문서가 팀원의 환경 준비 시작점이다.** GitLab에서 Clone한 최신 프로젝트와 그 안의 `platform/yocto/layers.lock`을 출발점으로 **새 Linux 작업 경로**에 환경을 준비한다. 문서화된 호스트 패키지·GitLab 인증·외부 소스 다운로드를 위한 네트워크는 필요하다. 기존 서버의 `conf`, 외부 레이어 복사본, 개인 스크립트나 ZIP은 필요하지 않다.
+
+| 하려는 작업 | 읽을 문서 / 범위 |
+| --- | --- |
+| 처음 환경 준비·최신 프로젝트 갱신 | 이 문서 1~2절. `--verify` 완료 후 종료 |
+| 실제 이미지 생성·domU 통합 개발 | 이 문서 3~6절. 빌드는 별도 선택 단계 |
+| 커널·이미지·실보드 검증 | [최소 bring-up 검증](yocto-rpi4-xen-minimal-bringup.md) |
+| 과거에 확인한 환경·성공 로그·한계 조회 | [2026-10-15 감사 기록](yocto-rpi4-xen-audit-20261015.md). 현재 실행 절차는 이 문서를 따름 |
+
 
 프로젝트는 팀이 사용하는 통합 브랜치의 최신 버전을 받는다. 스크립트·자체 레시피·공통 설정·잠금 파일은 같은 checkout의 파일을 함께 사용한다. 팀원마다 환경 구성 스크립트를 따로 만들거나 복사할 필요는 없다.
 
@@ -10,7 +18,37 @@ GitLab의 최신 프로젝트와 그 버전의 `platform/yocto/layers.lock`으�
 
 감사한 호스트는 Ubuntu 24.04.5 LTS / x86_64 / WSL2, Python 3.12.3, Git 2.43.0이다. Linux 파일시스템을 사용한다. `/mnt/c`의 프로젝트·빌드 경로 및 공백·따옴표가 있는 경로는 설정 도구가 거부한다. 전체 빌드에는 충분한 디스크와 메모리가 필요하며 현재 병렬 작업 설정은 4개다.
 
-기존 빌드 안내에서 사용한 Ubuntu 호스트 패키지는 다음과 같다. 이미 준비된 호스트에서는 재설치하지 않아도 된다. 설정 도구는 시스템 패키지나 인증 설정을 설치·변경하지 않는다.
+### Windows 사용자의 WSL 준비
+
+이미 Ubuntu Linux를 사용한다면 이 단계는 생략한다. WSL이 없다면 관리자 PowerShell에서 설치하고, 재부팅·최초 Linux 계정 생성을 마친다.
+
+```powershell
+wsl --install -d Ubuntu-24.04
+```
+
+PowerShell에서 배포판과 WSL 버전 2를 확인한 뒤 Ubuntu 터미널로 들어간다.
+
+```powershell
+wsl -l -v
+wsl --status
+wsl -d Ubuntu-24.04
+```
+
+선택적으로 WSL 자원 상한을 조정할 수 있다. 기존 32GB RAM PC에서 `%USERPROFILE%\.wslconfig`에 `memory=20GB`, `swap=8GB`를 사용한 사례가 있으며 필수값은 아니다. 설정 반영을 위해 WSL을 재시작할 때는 먼저 실행 중인 작업을 종료한다.
+
+### Linux 호스트 확인과 패키지
+
+이하 명령은 Ubuntu Bash에서 실행한다. 프로젝트·외부 소스·빌드 경로 모두 Linux 파일시스템을 사용한다. WSL 내부 여유 공간과 Windows 실제 디스크 여유 공간을 함께 확인한다.
+
+```bash
+cat /etc/os-release
+uname -m
+nproc
+free -h
+df -h "$HOME"
+```
+
+Ubuntu 호스트 패키지는 다음과 같다. 이미 준비된 호스트에서는 재설치하지 않아도 된다. 설정 도구는 시스템 패키지나 인증 설정을 설치·변경하지 않는다.
 
 ```bash
 sudo apt update
@@ -21,6 +59,8 @@ sudo apt install -y \
   python3-pip python3-subunit python3-websockets \
   socat texinfo unzip wget xz-utils zstd
 locale -a | grep -i en_US || sudo locale-gen en_US.UTF-8
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
 ```
 
 GitLab 인증은 본인의 기존 Git 인증 도구로 준비한다. 비밀번호·토큰을 URL, 잠금 파일 또는 설정에 넣지 않는다.
@@ -73,9 +113,11 @@ GitLab 기본 브랜치가 변경되어도 기존 Clone의 현재 브랜치는 �
 새 작업 공간이 필요할 때만 아래를 실행한다. 실행할 때마다 고유한 새 디렉터리를 만들며 기존 작업 공간은 유지한다.
 
 ```bash
-export YOCTO_WORKSPACE="$(mktemp -d "$HOME/perseus-repro/workspace.XXXXXX")"
-export YOCTO_BUILD_DIR="$YOCTO_WORKSPACE/build-rpi4-xen"
-bash "$PERSEUS_PROJECT/scripts/setup-yocto.sh" --verify
+if YOCTO_WORKSPACE="$(mktemp -d "$HOME/perseus-repro/workspace.XXXXXX")"; then
+  export YOCTO_WORKSPACE
+  export YOCTO_BUILD_DIR="$YOCTO_WORKSPACE/build-rpi4-xen"
+  bash "$PERSEUS_PROJECT/scripts/setup-yocto.sh" --verify
+fi
 ```
 
 항상 최신 checkout에 포함된 `layers.lock`으로 외부 의존성을 구성한다. 외부 저장소를 임의의 최신 HEAD로 올리거나 불일치하는 기존 설정을 자동 덮어쓰지 않는다.
@@ -100,29 +142,34 @@ python3 -m unittest discover -s tests/platform -v
 
 재실행 시 관리 블록은 일치해야 한다. 기존 수동 빌드나 이전 도구 버전의 설정은 자동 전환하지 않는다. `not owned` 또는 `managed settings differ`이면 기존 디렉터리를 보존하고 새 빌드 디렉터리를 선택한다. fragment를 바꿀 때에도 기존 설정을 자동 덮어쓰지 않는다.
 
-## 3. 이미지 빌드와 산출물
+## 3. 선택: 실제 이미지 빌드와 산출물
 
-설정 도구는 호출한 셸의 BitBake 환경을 유지하지 않으므로 다시 source한다.
+**환경만 준비하는 팀원은 이 절을 실행하지 않는다.** `--verify`에는 이미지 컴파일이 포함되지 않는다. 실제 빌드 담당자만 아래 절차를 수행한다. 처음 bring-up 이미지를 만들 때는 [커널 필수 옵션 검사](yocto-rpi4-xen-minimal-bringup.md#1-호스트에서-커널-필수-옵션-검사)를 먼저 확인한다.
+
+설정 도구는 호출한 셸의 BitBake 환경을 유지하지 않으므로, 1절에서 지정한 프로젝트·작업 공간·빌드 경로 변수를 사용해 다시 source한다.
 
 ```bash
 source "$YOCTO_WORKSPACE/layers/openembedded-core/oe-init-build-env" "$YOCTO_BUILD_DIR"
-bitbake-layers show-layers
-bitbake -p
+
+# 선택: 실행 계획만 확인. 실제 컴파일은 하지 않는다.
 bitbake -n perseus-xen-bringup-image
-
-# 기존 기본 Xen/dom0 이미지
-bitbake xen-image-minimal
-
-# 진단 도구와 테스트 domU 자산을 포함한 dom0 이미지
-bitbake perseus-xen-bringup-image
-
-# 필요하면 테스트 domU initramfs만 생성
-bitbake perseus-domu-initramfs
-
-ls -lh tmp/deploy/images/raspberrypi4-64/
 ```
 
-`bitbake -n`은 실행 계획 확인이며 실제 이미지 빌드와 구분한다.
+실제 이미지를 생성하려면 아래에서 목적에 맞는 타깃을 선택한다.
+
+| 명령 | 목적 |
+| --- | --- |
+| `bitbake xen-image-minimal` | 기본 Xen/dom0 이미지 생성 |
+| `bitbake perseus-xen-bringup-image` | 진단 도구와 최소 테스트 domU 자산을 포함한 dom0 이미지 생성 |
+| `bitbake perseus-domu-initramfs` | 최소 테스트 domU initramfs만 별도 생성 |
+
+bring-up 이미지 타깃은 domU initramfs와 커널 deploy를 의존성으로 연결한다. 이 타깃을 만들기 위해 기본 dom0 이미지와 domU 타깃을 각각 먼저 빌드할 필요는 없다. 실제 빌드의 최종 종료 코드·오류·태스크 요약을 확인하고, 실패한 태스크의 로그를 보존한다. 기존 빌드 전체나 캐시를 삭제하지 않는다.
+
+```bash
+ls -lh "$YOCTO_BUILD_DIR/tmp/deploy/images/raspberrypi4-64/"
+```
+
+`bitbake -n`의 완료는 실행 계획 검사 결과다. 실제 이미지 생성과 실보드 부팅 결과는 각각 별도로 기록한다.
 
 | 타깃 | 산출물 및 의미 |
 | --- | --- |
@@ -135,7 +182,7 @@ ls -lh tmp/deploy/images/raspberrypi4-64/
 
 ## 4. 현재 구성과 부트 체인
 
-확인한 구성은 `raspberrypi4-64`, `poky` 6.0.4, `systemd`, `linux-raspberrypi` 6.18.33+git, Xen 4.21.0+stable, U-Boot 2026.01이다. 선택된 버전과 원본 로그의 근거는 감사 기록을 참고한다.
+프로젝트 공통 정책은 `platform/yocto/config/local.conf.fragment`, 외부 레이어 버전은 `platform/yocto/layers.lock`, Xen·Linux·U-Boot의 소스 선택은 그 고정 레이어의 레시피가 기준이다. 레이어 등록과 설정 생성은 `scripts/setup-yocto.sh`가 담당한다. 문서에서 SHA나 공통 설정 전체를 복사해 별도로 유지하지 않는다. 과거에 확인한 구체적인 버전과 원본 로그는 감사 기록을 참고한다.
 
 Pi 펌웨어 → U-Boot → `boot.scr` → Xen → dom0 순서다. 외부 meta-virtualization의 Raspberry Pi 동적 레이어가 Xen 부트 스크립트를 제공한다. 프로젝트 bbappend는 unpack 경로 호환성만 보완한다. 생성된 `boot.scr`는 FAT에서 `xen`·`Image`를 적재하며 dom0 rootfs는 두 번째 SD 파티션의 PARTUUID로 찾는다. Xen dom0 메모리는 `RPI_DOM0_MEM = "1024M"`, 콘솔은 `hvc0`다.
 
@@ -172,14 +219,7 @@ xl create -c /etc/xen/perseus-domu.cfg
 
 네트워크는 물리 NIC에 연결하지 않은 `xenbr0`, dom0 `192.168.77.1/24`, DHCP `192.168.77.100~150`, MAC `02:16:3e:20:00:01`이다. DNS·기본 라우터를 제공하지 않는다. 네트워크 unit은 수동 시작한다.
 
-```bash
-# 커널 configure/빌드 후 호스트에서 필수 옵션 검사
-bash "$PERSEUS_PROJECT/scripts/check-xen-bringup-prereqs.sh"
-
-# 아래는 실보드 dom0에서 수행할 후속 검증이며 이번 감사의 부팅 성공 증거가 아니다.
-systemctl start perseus-bridge.service perseus-dhcp.service
-xl create -c /etc/xen/perseus-domu.cfg
-```
+실제 커널 옵션 검사와 네트워크·VM 실행 명령은 [bring-up 검증 절차](yocto-rpi4-xen-minimal-bringup.md)에 모아 관리한다.
 
 bring-up 이미지는 기존 설정대로 root 빈 비밀번호를 허용하고 SSH 도구를 포함한다. UART 진단용 설정이므로 배포 이미지에 적용하기 전에 인증 정책을 별도로 정해야 한다. 임시 게스트 PID 1은 셸 재시작 루프이며 정상 종료 처리는 미구현이다. `xl destroy`는 정상 종료 검증이 아니다. 보드 점검은 [bring-up 절차](yocto-rpi4-xen-minimal-bringup.md)를 따른다.
 
@@ -195,3 +235,20 @@ SSTATE_MIRRORS = "file://.* file:///absolute/existing-build/sstate-cache/PATH"
 ```
 
 패키지 공급자·소스 URL의 장기 가용성이나 모든 호스트 조합까지 검증한 것은 아니다. 완전한 오프라인 빌드가 필요하면 다운로드·sstate mirror를 별도로 운영해야 한다.
+
+## 7. 환경 준비와 빌드 문제 해결
+
+| 증상 | 확인할 내용 |
+| --- | --- |
+| GitLab 인증 실패 / 필요한 프로젝트 파일 없음 | 본인 접근 권한과 현재 통합 상태를 확인한다. 파일을 다른 버전에서 개별 복사하지 않는다. |
+| `Permission denied`로 setup 실행 불가 | `bash scripts/setup-yocto.sh --verify`로 실행한다. |
+| origin·HEAD 불일치 / `local changes` | 현재 `layers.lock`과 외부 checkout을 대조한다. 로컬 변경을 보존하고 필요하면 1절의 새 작업 공간을 사용한다. |
+| `not owned` / `managed settings differ` | 기존 수동 conf를 덮어쓰지 않는다. 새 빌드 경로 또는 새 작업 공간에서 구성한다. |
+| systemd 요구 / 커널 제공자 오류 | 현재 fragment·레이어가 적용됐는지 확인한다. 임시 설정을 local.conf에 중복 추가하지 않는다. |
+| Xen 부트 스크립트 unpack 경로 오류 | meta-perseus의 U-Boot bbappend 등록과 `S == UNPACKDIR` 검증 결과를 확인한다. |
+| `meta-virt-xen.inc` 중복 inclusion | local.conf에 해당 include를 수동으로 추가했는지 확인한다. |
+| `Reconnecting to bitbake server` / 원본 URL 재시도 경고 | 문구만으로 성공·실패를 판정하지 않는다. 최종 종료 코드와 오류, 실패 태스크 로그를 확인한다. |
+| WSL의 `systemd-binfmt.service` 오류 | `sudo dpkg --audit`, `sudo apt-get check`로 패키지 상태를 확인한다. QEMU 실행 관련 문제는 별도 조사한다. |
+| 호스트 `CONFIG_TASK_IO_ACCOUNTING` / VHDX 경고 | 각각 호스트 I/O 통계와 저장 공간 관련 경고다. 최종 결과와 실제 디스크 여유를 함께 확인한다. |
+
+커널 설정·SD 이미지·실보드 부팅·domU 통신 문제는 [bring-up 검증](yocto-rpi4-xen-minimal-bringup.md#6-실패할-때-먼저-볼-항목)을 참고한다. 캐시 없는 전체 컴파일·이미지 바이트 동일성·실보드 동작을 검증했다는 뜻으로 환경 준비 성공을 표현하지 않는다.

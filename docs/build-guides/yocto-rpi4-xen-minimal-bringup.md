@@ -1,7 +1,8 @@
-# Raspberry Pi 4 + Xen — 최소 Bring-up 전용 Yocto 이미지
+# Raspberry Pi 4 + Xen — 커널·이미지·실보드 bring-up 검증
 
-> **용도:** 실보드 수령 후 ① Xen/dom0 부팅, ② dom0 기본 기능, ③ xl 툴스택, ④ 임시 domU 부팅, ⑤ 격리 브릿지·DHCP·MAC을 단계적으로 검증한다.  
-> **상태 정정 (2026-10-15 감사):** 기존 빌드의 `20261013142007.log`에서 bring-up 이미지 6584개 태스크 성공 및 SD 이미지·domU initramfs를 확인했다. 이미지 내부 VM 설정과 게스트 자산도 확인했다. **실보드 부팅·domU 실행은 미검증**이다. 새 경로 검증 범위는 [감사 기록](yocto-rpi4-xen-audit-20261015.md)을 참고한다.
+이 문서는 커널 필수 조건, 생성 이미지의 정적 검사, 실보드 Xen/dom0·최소 domU·격리 Bridge/DHCP 검증 절차를 다룬다. 환경 설치·Clone·업데이트·이미지 빌드 명령·domU 통합 계약은 [재구성 및 인계](yocto-rpi4-xen-reproduce.md)를 따른다.
+
+**현재 실보드 부팅·domU 실행·통신은 미검증이다.** 기존 이미지 생성과 내부 자산을 확인한 근거, 새 환경 검증 범위는 [2026-10-15 감사 기록](yocto-rpi4-xen-audit-20261015.md)에 보존한다. 아래 명령과 합격 조건은 앞으로 수행할 검증 절차다.
 
 ## 원칙
 
@@ -11,79 +12,126 @@
 - 테스트 서비스는 이미지에 설치되지만 **부팅 시 자동 시작하지 않는다**. `dnsmasq_%.bbappend`로 기본 `dnsmasq.service` 자동 기동도 비활성화하고, 분리된 `perseus-dhcp.service`만 수동 실행한다. 1~3단계 검증 후 운영자가 명령으로 시작한다.
 - 이 실험 이미지만 **root 빈 비밀번호** 허용 설정을 갖고, `serial-getty@hvc0.service`를 활성화하려고 시도한다. 디버깅 목적이며 인터넷/공용망 연결 금지. 실제 배포 이미지에 사용하지 않는다. 특히 SSH 서비스가 제공되므로 신뢰할 수 없는 네트워크에 연결하지 않는다.
 
-## 0. GitLab에서 환경 준비
+## 0. 입력과 실행 위치
 
-레시피·스크립트는 이미 GitLab에 포함되어 있다. ZIP 설치는 필요하지 않다.
-[재구성 안내](yocto-rpi4-xen-reproduce.md)에 따라 새 경로에서
-환경 구성·파싱 검증을 먼저 수행한다. 아래의 기존 경로는 최초 빌드 사례이며
-새 환경에서는 본인의 프로젝트·작업 공간 경로로 바꾼다.
+재구성 문서에서 지정한 `PERSEUS_PROJECT`, `YOCTO_WORKSPACE`, `YOCTO_BUILD_DIR`를 사용한다. 호스트의 Ubuntu Bash와 실보드 dom0/게스트 콘솔에서 실행할 명령을 구분한다. 새 터미널에서는 자신의 실제 경로로 변수를 다시 지정한다. 최초 성공 빌드나 특정 사용자의 홈 경로는 필수 입력이 아니다.
 
-## 1. 빌드 전 커널 옵션 검사 — 반드시 먼저
+| 단계 | 필요한 입력 |
+| --- | --- |
+| 커널 옵션 검사 | 현재 빌드의 커널 `.config`. 새 환경에는 아직 없을 수 있음 |
+| 이미지 정적 검사 | 현재 빌드에서 생성된 bring-up 이미지·manifest·부트 자산 |
+| 보드·VM 검증 | 정적 검사를 마친 SD 이미지와 Raspberry Pi 4 / UART |
 
-**이미 전체 빌드에 성공한** `build-rpi4-xen/` 디렉터리를 사용해 `.config`를 검사한다.
+`setup-yocto.sh --verify`만 완료한 환경에는 커널 `.config`나 이미지가 생성되어 있지 않아도 정상이다. 환경 준비만 하는 팀원은 여기의 태스크 실행·보드 검증을 수행할 필요가 없다.
+
+## 1. 호스트에서 커널 필수 옵션 검사
+
+현재 작업 공간의 빌드 환경을 활성화한다.
 
 ```bash
-source ~/yocto-workspace/layers/openembedded-core/oe-init-build-env \
-  ~/yocto-workspace/build-rpi4-xen
-
-cd ~/S15P31E110
-bash scripts/check-xen-bringup-prereqs.sh
+source "$YOCTO_WORKSPACE/layers/openembedded-core/oe-init-build-env" "$YOCTO_BUILD_DIR"
 ```
 
-기본 요구:
+이미 커널 configure/빌드를 수행해 `.config`가 있다면 다음 태스크는 생략한다. 새 환경에서 커널 옵션을 확인하려는 빌드 담당자만 실행한다. **실제 configure 태스크를 수행하며 다운로드·의존성 작업이 발생할 수 있다. 환경 파싱 검증에 포함되지 않는다.**
+
+```bash
+bitbake -c configure linux-raspberrypi
+```
+
+현재 빌드의 `.config`를 검사한다. 오류 메시지에 과거 성공 빌드가 언급되어도 검사 대상은 현재 BitBake가 해석한 `B/.config`이며, 새 빌드에서 생성한 설정을 사용할 수 있다.
+
+```bash
+bash "$PERSEUS_PROJECT/scripts/check-xen-bringup-prereqs.sh"
+```
 
 | 심볼 | 필요값 | 이유 |
 | --- | --- | --- |
 | `CONFIG_XEN`, `CONFIG_XEN_DOM0` | `y` | Xen 기반 Linux |
-| `CONFIG_XEN_NETDEV_BACKEND` | `y` 또는 `m` | dom0의 VIF 처리 |
-| `CONFIG_XEN_NETDEV_FRONTEND` | **`y`** | **같은 Image**를 domU에 재사용하고 초기 initramfs에는 netfront 모듈을 따로 넣지 않음 |
-| `CONFIG_HVC_XEN` | **`y`** | domU 가상 콘솔 hvc0 |
-| `CONFIG_BRIDGE` | `y` 또는 `m` | xenbr0 생성. `m`이면 dom0에 bridge.ko 설치·적재 필요 |
+| `CONFIG_XEN_NETDEV_FRONTEND` | `y` | dom0와 같은 Image를 domU에 재사용하고 최소 initramfs에 netfront 모듈을 넣지 않음 |
+| `CONFIG_HVC_XEN` | `y` | 게스트 hvc0 콘솔 |
+| `CONFIG_XEN_NETDEV_BACKEND` | `y` 또는 `m` | dom0 VIF 처리 |
+| `CONFIG_BRIDGE` | `y` 또는 `m` | xenbr0 생성 |
 | `CONFIG_BLK_DEV_INITRD`, `CONFIG_RD_GZIP`, `CONFIG_DEVTMPFS` | `y` | 게스트 initramfs 실행 |
 
-`[BLOCKER]`가 하나라도 나오면 **빌드를 멈추고 해당 설정을 검토**한다. 검사 통과가 보드 부팅을 보증하는 것은 아니다. 특히 `BRIDGE=m`인 경우 생성한 이미지의 패키지 manifest에 `kernel-module-bridge`가 포함됐는지 나중에 확인한다.
+`[BLOCKER]`가 나오면 bring-up 이미지 구성을 그대로 진행하기 전에 커널·게스트 요구 조건을 검토한다. `=m`은 모듈 빌드 설정을 뜻하므로 실제 패키지 설치와 적재도 확인해야 한다. 검사 통과가 보드 부팅 성공을 보증하지 않는다.
 
-## 2. 레시피 검증 (이미지 빌드 없음)
-
-터미널에서 다시 Yocto 환경을 불러오거나 `bitbake`가 잡혀 있는지 확인한다.
+추가 dom0 문제를 조사할 때는 해석된 커널 빌드 경로에서 blkback·grant·XenFS 등도 확인할 수 있다.
 
 ```bash
-source ~/yocto-workspace/layers/openembedded-core/oe-init-build-env \
-  ~/yocto-workspace/build-rpi4-xen
-
-bitbake -p
-bitbake -e perseus-xen-bringup-image | grep -E '^(PN|MACHINE|IMAGE_INSTALL|IMAGE_FSTYPES)='
-bitbake -e perseus-domu-initramfs | grep -E '^(PN|IMAGE_INSTALL|IMAGE_FSTYPES)='
-
-bitbake -n perseus-xen-bringup-image > ~/perseus-bringup-dryrun.log 2>&1
-tail -n 25 ~/perseus-bringup-dryrun.log
+KERNEL_B="$(bitbake -e linux-raspberrypi | sed -n 's/^B="\([^"]*\)"$/\1/p')"
+for symbol in XEN_BLKDEV_BACKEND XEN_GNTDEV XEN_GRANT_DEV_ALLOC XEN_WDT XENFS XEN_PRIVCMD; do
+  grep -E "^(CONFIG_${symbol}=|# CONFIG_${symbol} is not set)" "$KERNEL_B/.config" ||
+    printf '%s: not present\n' "$symbol"
+done
 ```
 
-이 명령이 끝나기 전에는 실제 빌드를 시작하지 않는다. BitBake 파싱 오류나 레시피 이름 불일치가 나오면 즉시 수정한다.
+## 2. 호스트에서 생성 이미지 정적 검사
 
-## 3. Bring-up 전용 이미지 빌드
+이미지 생성은 [재구성 문서의 선택적 빌드 단계](yocto-rpi4-xen-reproduce.md#3-선택-실제-이미지-빌드와-산출물)를 따른다. 아래는 **생성된 이미지 파일을 읽는 검사**이며 원본 이미지·빌드 캐시를 삭제·수정하지 않는다.
+
+### 산출물과 설치 패키지
+
+안정된 이름의 심볼릭 링크가 가리키는 현재 이미지와 manifest를 선택한다. 서로 다른 빌드 시점의 파일을 섞지 않는다.
 
 ```bash
-cd ~/yocto-workspace/build-rpi4-xen
-bitbake perseus-xen-bringup-image
+IMG_DIR="$YOCTO_BUILD_DIR/tmp/deploy/images/raspberrypi4-64"
+IMAGE_PREFIX="$IMG_DIR/perseus-xen-bringup-image-raspberrypi4-64.rootfs"
+SD_IMG="$IMAGE_PREFIX.rpi-sdimg"
+BOOT_IMG="$IMAGE_PREFIX.vfat"
+ROOTFS_IMG="$IMAGE_PREFIX.ext3"
+MANIFEST="$IMAGE_PREFIX.manifest"
+
+ls -lh "$SD_IMG" "$BOOT_IMG" "$ROOTFS_IMG" "$MANIFEST"
+grep -E '^(xen-tools|perseus-bringup|dnsmasq|iproute2|kernel-module-bridge|kernel-module-xen-netback)' "$MANIFEST"
 ```
 
-이미 수행한 `xen-image-minimal`의 빌드 작업은 BitBake 캐시가 가능한 범위에서 재사용된다. **새 테스트 게스트 initramfs와 rootfs 조립 등 추가 작업은 필요**하며, 작업량·빌드 성공은 현재 예측할 수 없다. `bitbake -c cleanall`, `rm -rf tmp`, `rm -rf sstate-cache`는 하지 않는다.
+커널에서 bridge·netback을 `m`으로 설정했다면 대응 모듈 패키지가 manifest에 포함되어야 한다. `y`라면 별도 모듈 패키지는 필요하지 않다. 설치 목록과 실제 rootfs 파일 존재 여부를 함께 확인한다.
 
-성공 후 **새로운 이미지 파일만** 확인한다.
+### FAT·SD 파티션과 부트 인자
+
+`mdir`/`mtype`은 FAT 내용, `fdisk`/`sfdisk`는 파티션 정보, `debugfs`는 ext3 내부 파일 확인에 사용한다. 필요한 검사 도구가 없는 Ubuntu 호스트에서만 설치한다. 이 도구들은 이미지 검사에 사용하며 타깃 이미지의 런타임 의존성을 추가하지 않는다.
 
 ```bash
-cd ~/yocto-workspace/build-rpi4-xen
-ls -lh tmp/deploy/images/raspberrypi4-64/*perseus-xen-bringup-image*.rpi-sdimg
-ls -lh tmp/deploy/images/raspberrypi4-64/*perseus-xen-bringup-image*.manifest
-
-# dom0의 Xen 도구와 진단 패키지 포함 여부
-ls tmp/deploy/images/raspberrypi4-64/*perseus-xen-bringup-image*.manifest | head -n 1
+sudo apt install -y mtools fdisk e2fsprogs
 ```
 
-manifest 확인은 `grep -E 'xen-tools|perseus-bringup|dnsmasq|iproute2|kernel-module-bridge' <선택한 .manifest 파일>` 형태로 수행한다. 설치 패키지 목록과 실제 파일 배치는 검증 결과로 기록한다.
+```bash
+mdir -i "$BOOT_IMG" ::/
+strings "$IMG_DIR/boot.scr" | grep -E 'dom0_mem|fatload|root=PARTUUID'
+fdisk -l "$SD_IMG"
+```
 
-실제 rootfs 안에 다음 자원이 있어야 한다.
+FAT에서 `xen`, `Image`, `boot.scr`, `kernel8.img`, Pi 4 DTB 등을 확인한다. `boot.scr`의 dom0 메모리·rootfs 인자를 현재 프로젝트 설정과 대조하고, SD 첫 파티션이 FAT 부트 영역, 두 번째가 Linux rootfs인지 확인한다.
+
+최종 SD 이미지 안쪽을 검사할 때는 과거 이미지의 고정 오프셋을 재사용하지 않고 **현재 이미지의 첫 파티션 시작 섹터 × 섹터 크기**로 계산한다.
+
+```bash
+BOOT_OFFSET="$(python3 - "$SD_IMG" <<'PYOFFSET'
+import json
+import subprocess
+import sys
+
+table = json.loads(subprocess.check_output(["sfdisk", "--json", sys.argv[1]]))["partitiontable"]
+if table["unit"] != "sectors" or not table.get("partitions"):
+    sys.exit("Cannot determine the boot partition offset")
+print(table["partitions"][0]["start"] * table["sectorsize"])
+PYOFFSET
+)"
+mdir -i "${SD_IMG}@@${BOOT_OFFSET}" ::/
+mtype -i "${SD_IMG}@@${BOOT_OFFSET}" ::config.txt
+mtype -i "${SD_IMG}@@${BOOT_OFFSET}" ::cmdline.txt
+```
+
+`config.txt`의 UART·GIC 설정과 부트 자산을 확인한다. `cmdline.txt`의 일반 Linux 인자와 U-Boot가 Device Tree에 설정하는 Xen/dom0 인자를 구분한다.
+
+### dom0 내부 게스트 자산과 VM 설정
+
+```bash
+debugfs -R 'ls -l /opt/perseus/bringup' "$ROOTFS_IMG"
+debugfs -R 'cat /etc/xen/perseus-domu.cfg' "$ROOTFS_IMG"
+```
+
+bring-up rootfs에는 다음 자원이 있어야 한다. 게스트 kernel/ramdisk 경로는 설치된 VM 설정과 일치해야 한다.
 
 ```text
 /etc/xen/perseus-domu.cfg
@@ -95,16 +143,14 @@ manifest 확인은 `grep -E 'xen-tools|perseus-bringup|dnsmasq|iproute2|kernel-m
 systemd: perseus-bridge.service / perseus-dhcp.service (기본 비활성)
 ```
 
-**주의:** `setup-yocto.sh`는 여전히 이 이미지를 자동으로 빌드하지 않는다. 기존 스크립트의 역할은 환경 구성이다.
-
-## 4. 실보드 준비와 UART
+## 3. 실보드 준비와 UART
 
 1. 새로운 `perseus-xen-bringup-image-...rpi-sdimg`를 PC의 별도 폴더로 복사한다. Raspberry Pi Imager에서 확장자를 인식하지 못하면 **복사본**의 확장자를 `.img`로 변경하여 'Use custom'으로 Flash한다. SD 카드의 기존 데이터는 덮어써진다.
 2. **3.3V TTL USB-UART**를 사용한다. Pi 40핀 헤더의 물리적 **6번 GND ↔ 어댑터 GND**, **8번 GPIO14/TXD ↔ 어댑터 RX**, **10번 GPIO15/RXD ↔ 어댑터 TX**를 연결한다. **어댑터 VCC를 Pi에 연결하지 않는다.** 실제 제품의 핀 배치를 먼저 확인한다.
 3. PC 시리얼 프로그램: **115200 baud, 8N1**, 흐름 제어 없음. Pi 전원을 넣기 **전부터** 로그를 캡처한다.
 4. `U-Boot → Xen → dom0` 로그 경계를 구분하여 저장한다. 초기 Bring-up에서 HDMI 출력은 합격 조건이 아니다.
 
-## 5. 실보드 단계별 검증 — 성공 판정은 사람이 확인
+## 4. 실보드 단계별 검증
 
 ### 1~3단계: Xen, dom0, xl
 
@@ -124,7 +170,7 @@ xl dmesg
 perseus-bringup-check
 ```
 
-기대: `xl info`에서 Xen 4.21 계열 확인, `xl list`에 `Domain-0` 표시. `xl info` 실패 시 `systemctl list-unit-files | grep xen` 등으로 toolstack 및 `xenstored` 실행 상태를 조사한다. UART 로그가 보이지만 로그인 프롬프트가 없으면 `console=hvc0`, `serial-getty@hvc0` 생성 및 로그인 설정을 따로 확인한다.
+기대: `xl info`에서 현재 고정 레시피의 Xen 버전을 확인하고, `xl list`에 `Domain-0`가 표시되어야 한다. `xl info` 실패 시 `systemctl list-unit-files | grep xen` 등으로 toolstack 및 `xenstored` 실행 상태를 조사한다. UART 로그가 보이지만 로그인 프롬프트가 없으면 `console=hvc0`, `serial-getty@hvc0` 생성 및 로그인 설정을 따로 확인한다.
 
 ### 4단계: 테스트 domU 생성
 
@@ -161,7 +207,7 @@ ping -c 2 192.168.77.1
 
 게스트 쉘은 테스트 종료 시 `xl destroy perseus-test`로 강제 제거할 수 있다. **이는 정상 종료(shutdown) 검증이 아니다.** 정상 종료는 이후 정식 init 환경을 갖춘 domU에서 따로 확인한다.
 
-## 6. 합격 기준과 예외
+## 5. 합격 기준과 예외
 
 | 검증 | 합격 조건 |
 | --- | --- |
@@ -174,7 +220,7 @@ ping -c 2 192.168.77.1
 
 미포함: Agent, MQTT, FastAPI 관리 서버, React 관리 UI, HDMI 키오스크, multi-node, 공유메모리, 정식 Debian/Ubuntu/Alpine 게스트.
 
-## 7. 실패할 때 특히 먼저 볼 항목
+## 6. 실패할 때 먼저 볼 항목
 
 - **Pi가 부팅되지 않음:** Xen/U-Boot/DTB/펌웨어, SD 부트 파티션, UART log를 먼저 수집한다.
 - **로그는 나오는데 dom0 로그인 불가:** `console=hvc0`와 `serial-getty@hvc0`, 사용자 인증 설정 점검. 도구/게스트 코드를 수정하기 전에 해결한다.
