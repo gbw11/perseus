@@ -1,6 +1,10 @@
 # Raspberry Pi 4 Yocto/Xen 환경 재구성 및 domU 인계
 
-GitLab 프로젝트와 `platform/yocto/layers.lock`만으로 **새 Linux 작업 경로**에 환경을 준비한다. 원본 빌드의 `conf`, 외부 레이어 복사본, ZIP은 필요하지 않다. 실제 검증 범위는 [감사 기록](yocto-rpi4-xen-audit-20261015.md)에 기록한다.
+GitLab의 최신 프로젝트와 그 버전의 `platform/yocto/layers.lock`으로 **새 Linux 작업 경로**에 환경을 준비한다. 원본 빌드의 `conf`, 외부 레이어 복사본, ZIP은 필요하지 않다. 실제 검증 범위는 [감사 기록](yocto-rpi4-xen-audit-20261015.md)에 기록한다.
+
+프로젝트는 팀이 사용하는 통합 브랜치의 최신 버전을 받는다. 스크립트·자체 레시피·공통 설정·잠금 파일은 같은 checkout의 파일을 함께 사용한다. 팀원마다 환경 구성 스크립트를 따로 만들거나 복사할 필요는 없다.
+
+외부 레이어는 **현재 프로젝트의 `layers.lock`에 기록된 정확한 커밋**을 사용한다. 프로젝트의 최신 버전을 받는 것과 외부 의존성을 고정하는 것은 함께 유지한다. 감사 기록의 프로젝트 SHA는 과거 검증 대상을 식별하는 기록이며, 아래 실행 절차에서 checkout할 버전이 아니다.
 
 ## 1. 호스트 준비와 Clone
 
@@ -21,21 +25,60 @@ locale -a | grep -i en_US || sudo locale-gen en_US.UTF-8
 
 GitLab 인증은 본인의 기존 Git 인증 도구로 준비한다. 비밀번호·토큰을 URL, 잠금 파일 또는 설정에 넣지 않는다.
 
+### 처음 Clone하여 환경만 준비
+
+아래 명령은 GitLab에서 지정한 **기본 브랜치의 최신 버전**을 받는다. 이 문서와 `scripts/setup-yocto.sh`, `meta-perseus`의 해당 변경이 기본 브랜치에 병합되어 있어야 한다. 아직 없는 파일은 다른 브랜치에서 개별 복사하지 말고 팀의 통합 상태를 확인한다.
+
 ```bash
 mkdir -p "$HOME/perseus-repro"
 cd "$HOME/perseus-repro"
-git clone --branch feat/platform/yocto-build-setup --single-branch \
-  https://lab.ssafy.com/s15-final/S15P31E110.git
+git clone https://lab.ssafy.com/s15-final/S15P31E110.git
 cd S15P31E110
 export PERSEUS_PROJECT="$PWD"
-git status --short
+git status --short --branch
 
 export YOCTO_WORKSPACE="$HOME/perseus-repro/workspace"
 export YOCTO_BUILD_DIR="$YOCTO_WORKSPACE/build-rpi4-xen"
 bash scripts/setup-yocto.sh --verify
 ```
 
-`YOCTO_WORKSPACE`와 `YOCTO_BUILD_DIR`는 **새 경로**를 선택한다. 최초 외부 소스 확보에는 네트워크가 필요하다. `--verify`는 이미지를 컴파일하지 않는다.
+`YOCTO_WORKSPACE`와 `YOCTO_BUILD_DIR`는 **새 경로**를 선택한다. 최초 외부 소스 확보에는 네트워크가 필요하다. `--verify`는 소스 확보·설정 생성·메타데이터 검증만 수행하며 이미지를 컴파일하지 않는다. `Setup complete (no image build or boot test performed)`가 출력되고 종료 코드가 0이면 환경 준비가 끝난다. 환경만 준비할 때는 여기서 멈춘다.
+
+### 기존 Clone을 최신 프로젝트로 갱신
+
+기존 Clone은 현재 브랜치가 추적하는 원격 브랜치의 최신 버전을 받는다. 먼저 자신의 프로젝트 경로에서 상태를 확인한다.
+
+```bash
+cd "$HOME/perseus-repro/S15P31E110"
+export PERSEUS_PROJECT="$PWD"
+git status --short --branch
+```
+
+미커밋 변경이나 진행 중인 merge/rebase가 없고, 현재 브랜치에 올바른 원격 추적 대상이 설정되어 있는지 확인한 뒤 실행한다. detached HEAD 상태라면 팀에서 사용할 브랜치를 먼저 정해야 한다. `git pull --ff-only`가 실패하면 로컬 변경이나 갈라진 이력을 자동 덮어쓰지 말고 원인을 확인한다.
+
+```bash
+git pull --ff-only
+
+export YOCTO_WORKSPACE="$HOME/perseus-repro/workspace"
+export YOCTO_BUILD_DIR="$YOCTO_WORKSPACE/build-rpi4-xen"
+bash scripts/setup-yocto.sh --verify
+```
+
+GitLab 기본 브랜치가 변경되어도 기존 Clone의 현재 브랜치는 자동 전환되지 않는다. 팀에서 통합 대상을 바꾸면 각자 작업 상태를 확인하고 사용할 추적 브랜치를 선택한다. 설정 도구는 프로젝트 브랜치를 전환하거나 프로젝트 커밋을 checkout하지 않는다.
+
+### 잠금 파일·공통 설정이 갱신된 경우
+
+업데이트된 `layers.lock`과 기존 외부 checkout의 SHA가 다르거나, 공통 fragment와 기존 관리 블록이 다르면 설정 도구는 중단한다. 기존 빌드·캐시·소스 변경을 보존하기 위한 동작이다.
+
+새 작업 공간이 필요할 때만 아래를 실행한다. 실행할 때마다 고유한 새 디렉터리를 만들며 기존 작업 공간은 유지한다.
+
+```bash
+export YOCTO_WORKSPACE="$(mktemp -d "$HOME/perseus-repro/workspace.XXXXXX")"
+export YOCTO_BUILD_DIR="$YOCTO_WORKSPACE/build-rpi4-xen"
+bash "$PERSEUS_PROJECT/scripts/setup-yocto.sh" --verify
+```
+
+항상 최신 checkout에 포함된 `layers.lock`으로 외부 의존성을 구성한다. 외부 저장소를 임의의 최신 HEAD로 올리거나 불일치하는 기존 설정을 자동 덮어쓰지 않는다.
 
 ## 2. 설정 도구의 계약
 
