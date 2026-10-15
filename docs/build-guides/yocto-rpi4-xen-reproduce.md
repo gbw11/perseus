@@ -8,9 +8,10 @@
 
 | 하려는 작업 | 읽을 문서 / 범위 |
 | --- | --- |
-| 처음 환경 준비·최신 프로젝트 갱신 | 이 문서 1~2절. `--verify` 완료 후 종료 |
-| 실제 이미지 생성·domU 통합 개발 | 이 문서 3~6절. 빌드는 별도 선택 단계 |
-| 커널·이미지·실보드 검증 | [최소 bring-up 검증](yocto-rpi4-xen-minimal-bringup.md) |
+| 처음 환경 준비 | 이 문서 1-1~1-6. `--verify` 완료 후 종료 |
+| 처음 이미지 생성 | 이 문서 1-1~1-6 → 3-1~3-3 순서. 커널 검사까지 이 문서에서 실행 |
+| 기존 Clone 갱신·domU 통합 개발 | 1절의 갱신 안내, 4~6절의 구성·통합 계약 |
+| 생성 이미지·실보드 검증과 추가 커널 진단 | [최소 bring-up 검증](yocto-rpi4-xen-minimal-bringup.md) |
 | 과거에 확인한 환경·성공 로그·한계 조회 | [2026-10-15 감사 기록](yocto-rpi4-xen-audit-20261015.md). 현재 실행 절차는 이 문서를 따름 |
 
 
@@ -20,7 +21,9 @@
 
 ## 1. 호스트 준비와 Clone
 
-감사한 호스트는 Ubuntu 24.04.5 LTS / x86_64 / WSL2, Python 3.12.3, Git 2.43.0이다. Linux 파일시스템을 사용한다. `/mnt/c`의 프로젝트·빌드 경로 및 공백·따옴표가 있는 경로는 설정 도구가 거부한다. 전체 빌드에는 충분한 디스크와 메모리가 필요하며 현재 병렬 작업 설정은 4개다.
+감사한 호스트는 Ubuntu 24.04.5 LTS / x86_64 / WSL2, Python 3.12.3, Git 2.43.0이다. Linux 파일시스템을 사용한다. `/mnt/c`의 프로젝트·빌드 경로 및 공백·따옴표가 있는 경로는 설정 도구가 거부한다. 현재 병렬 작업 설정은 4개다.
+
+환경 준비와 실제 이미지 빌드의 자원 요구를 구분한다. [Yocto 6.0 공식 자원 안내](https://docs.yoctoproject.org/6.0/ref-manual/system-requirements.html)는 `core-image-sato/qemux86-64` 참고 이미지에 여유 디스크 140GB, RAM 32GB / CPU 4코어를 제시한다. 이 숫자는 Raspberry Pi Xen 이미지의 실측 최소 요구값이 아니다. 이 프로젝트의 새 환경 전체 빌드에 필요한 최대 디스크·메모리는 아직 측정하지 않았으므로, `--verify` 통과만으로 전체 빌드 자원이 충분하다고 판정하지 않는다.
 
 ### 1-1. Windows 11에서 WSL 설치 — 관리자 PowerShell
 
@@ -147,7 +150,18 @@ done
 
 모든 파일이 `[OK]`이고 새 Clone에 미커밋 변경이 없어야 한다. `[MISSING]`이 하나라도 나오면 **여기서 중단**하고 기본 브랜치의 통합 상태를 확인한다. 다른 브랜치에서 파일을 개별 복사하지 않는다.
 
-### 1-6. 새 Linux 작업 공간 준비 및 검증 — Ubuntu Bash
+### 1-6. Yocto 빌드 도구·레이어 준비 및 검증 — Ubuntu Bash
+
+**이 프로젝트에서 Yocto 환경을 준비한다는 것은 BitBake와 메타데이터 레이어를 잠금 버전으로 확보하고 빌드 설정을 생성하는 것이다.** BitBake는 레시피를 읽어 소스 다운로드·크로스 컴파일·이미지 생성을 실행하는 도구다. 1-3의 `apt` 명령은 이 도구들을 실행할 Ubuntu 호스트 패키지를 설치한다. 프로젝트에서 사용할 BitBake·OE-Core·레이어는 아래 `setup-yocto.sh --verify`가 준비한다.
+
+| 준비 대상 | 담당 단계 |
+| --- | --- |
+| BitBake·OE-Core·meta-yocto·meta-raspberrypi·meta-openembedded·meta-virtualization | setup이 `layers.lock`의 URL·SHA로 `$YOCTO_WORKSPACE/layers/`에 확보 |
+| MACHINE·DISTRO·자체 meta-perseus 활성화 | setup이 `oe-init-build-env`를 사용하고 `local.conf`·`bblayers.conf` 생성 |
+| BitBake 실행 환경(PATH 등) | 실제 빌드 직전에 3-1의 `source oe-init-build-env`로 현재 셸에 활성화 |
+| Linux·Xen·U-Boot 및 이미지 패키지 소스 | 3-2의 BitBake 태스크가 고정 레이어의 레시피에 따라 추가 다운로드·빌드 |
+
+별도의 Yocto 설치 파일이나 이전 개발자의 SDK를 전달받는 단계는 없다. BitBake는 잠금 파일로 받은 사본을 사용한다.
 
 같은 Ubuntu 터미널에서 새 작업 경로를 지정한다. 이 예시는 프로젝트 옆에 별도 작업 공간을 만들며 기존 `~/yocto-workspace`를 사용하지 않는다.
 
@@ -172,7 +186,7 @@ fi
 | 파싱·이미지 설정 | `bitbake -p`와 이미지 3종의 설정 검사에서 오류 없이 통과 |
 | 스크립트 종료 | `Setup complete (no image build or boot test performed)`와 위 블록의 `환경 준비 검증 완료` 출력 |
 
-**환경만 준비하는 팀원은 여기서 멈춘다.** `Baseline dom0: bitbake ...` 등의 마지막 출력은 이후 빌드 담당자를 위한 안내이며 자동 실행 결과가 아니다. 아직 SD 이미지나 커널 산출물이 없어도 정상이다. `tmp/deploy/images/` 확인은 실제 빌드 뒤에 한다.
+**환경만 준비하는 팀원은 여기서 멈춘다. 처음 이미지를 만드는 팀원은 3절로 바로 이동한다.** 아래의 기존 Clone 갱신·작업 공간 교체와 2절은 최초 빌드의 추가 실행 단계가 아니다. `Baseline dom0: bitbake ...` 등의 마지막 출력은 이후 빌드 담당자를 위한 안내이며 자동 실행 결과가 아니다. 아직 SD 이미지나 커널 산출물이 없어도 정상이다. `tmp/deploy/images/` 확인은 실제 빌드 뒤에 한다.
 
 터미널을 닫았다면 다시 `wsl -d Ubuntu-24.04`로 들어와 `cd "$HOME/perseus-repro/S15P31E110"`, `PERSEUS_PROJECT`·`YOCTO_WORKSPACE`·`YOCTO_BUILD_DIR`와 locale의 export를 다시 지정하면 된다. 매번 Clone할 필요는 없다.
 
@@ -236,32 +250,74 @@ python3 -m unittest discover -s tests/platform -v
 
 ## 3. 선택: 실제 이미지 빌드와 산출물
 
-**환경만 준비하는 팀원은 이 절을 실행하지 않는다.** `--verify`에는 이미지 컴파일이 포함되지 않는다. 실제 빌드 담당자만 아래 절차를 수행한다. 처음 bring-up 이미지를 만들 때는 [커널 필수 옵션 검사](yocto-rpi4-xen-minimal-bringup.md#1-호스트에서-커널-필수-옵션-검사)를 먼저 확인한다.
+**이 절은 실제 이미지를 만드는 팀원만 실행한다.** 1-6의 `--verify` 성공 후 아래 3-1 → 3-2 → 3-3을 순서대로 따른다. 최초 타깃은 `perseus-xen-bringup-image`로 정한다. 커널 설정 생성·필수 옵션 검사·이미지 생성 명령을 여기에 모았으므로 빌드를 위해 다른 문서로 이동할 필요가 없다.
 
-설정 도구는 호출한 셸의 BitBake 환경을 유지하지 않으므로, 1절에서 지정한 프로젝트·작업 공간·빌드 경로 변수를 사용해 다시 source한다.
+### 3-1. 현재 셸에서 Yocto 환경 활성화 — Ubuntu Bash
+
+1절과 같은 터미널이면 기존 경로 변수를 유지한다. 새 터미널이면 아래 기본 경로를 사용한다. 1절에서 다른 경로로 준비했다면 먼저 세 변수에 자신의 실제 경로를 지정한다. 설정 도구는 실행한 자식 셸 안에서 초기화하므로, 빌드를 시작할 현재 셸에서도 `source`가 필요하다.
 
 ```bash
-source "$YOCTO_WORKSPACE/layers/openembedded-core/oe-init-build-env" "$YOCTO_BUILD_DIR"
+export PERSEUS_PROJECT="${PERSEUS_PROJECT:-$HOME/perseus-repro/S15P31E110}"
+export YOCTO_WORKSPACE="${YOCTO_WORKSPACE:-$HOME/perseus-repro/workspace}"
+export YOCTO_BUILD_DIR="${YOCTO_BUILD_DIR:-$YOCTO_WORKSPACE/build-rpi4-xen}"
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
 
-# 선택: 실행 계획만 확인. 실제 컴파일은 하지 않는다.
-bitbake -n perseus-xen-bringup-image
+source "$YOCTO_WORKSPACE/layers/openembedded-core/oe-init-build-env" "$YOCTO_BUILD_DIR"
+command -v bitbake
+pwd
 ```
 
-실제 이미지를 생성하려면 아래에서 목적에 맞는 타깃을 선택한다.
+`bitbake` 경로가 잠금 버전으로 받은 `layers/bitbake/bin/bitbake`이고, 현재 디렉터리가 `YOCTO_BUILD_DIR`인지 확인한다. `source`가 실패하면 다음 블록으로 진행하지 않는다.
+
+### 3-2. 커널 설정 생성 → 검사 → bring-up 이미지 생성
+
+다음은 **실제 태스크 실행**이다. 커널 configure에도 소스 다운로드와 의존 도구 빌드가 발생할 수 있으며 전체 이미지 빌드는 오래 걸린다. 아래 블록은 앞 명령이 성공해야 다음 명령을 실행한다. 커널 configure나 필수 옵션 검사가 실패하면 이미지 빌드를 시작하지 않는다.
+
+```bash
+bitbake -c configure linux-raspberrypi &&
+bash "$PERSEUS_PROJECT/scripts/check-xen-bringup-prereqs.sh" &&
+bitbake perseus-xen-bringup-image &&
+printf '\n[OK] Bring-up image build completed.\n'
+```
+
+커널 설정은 현재 빌드의 `B/.config`에 생성된다. 이전 성공 빌드 디렉터리는 필요하지 않다. 이미 configure된 커널이라면 BitBake가 태스크 상태를 확인한다.
+
+| 필수 심볼 | 필요값 | 목적 |
+| --- | --- | --- |
+| `CONFIG_XEN`, `CONFIG_XEN_DOM0` | `y` | Xen 기반 Linux |
+| `CONFIG_XEN_NETDEV_FRONTEND` | `y` | 최소 initramfs가 dom0 커널을 게스트용으로 재사용 |
+| `CONFIG_HVC_XEN` | `y` | 게스트 hvc0 콘솔 |
+| `CONFIG_XEN_NETDEV_BACKEND`, `CONFIG_BRIDGE` | `y` 또는 `m` | dom0 VIF·브릿지 |
+| `CONFIG_BLK_DEV_INITRD`, `CONFIG_RD_GZIP`, `CONFIG_DEVTMPFS` | `y` | 게스트 initramfs 실행 |
+
+`[BLOCKER]`가 나오면 출력된 심볼과 현재 커널 설정을 담당자에게 전달하고 원인을 해결한다. `=m`인 기능은 최종 이미지에 대응 모듈 패키지도 포함되어야 한다. 이 검사는 커널 설정 조건을 확인하며 실보드 부팅 결과를 대신하지 않는다.
+
+bring-up 타깃은 기본 Xen/dom0 이미지 구성을 상속하고, 최소 domU initramfs와 커널 deploy를 의존성으로 연결한다. 기본 이미지와 domU 타깃을 각각 먼저 빌드할 필요는 없다.
+
+BitBake의 최종 태스크 요약이 성공이고 `[OK] Bring-up image build completed.`가 출력된 경우에만 3-3으로 진행한다. 실패하면 오류에 표시된 태스크 로그를 보존하고 원인을 해결한 뒤 이 블록을 다시 실행한다. 기존 빌드 전체나 캐시를 삭제하지 않는다.
+
+### 3-3. 생성된 이미지 확인
+
+```bash
+IMG_DIR="$YOCTO_BUILD_DIR/tmp/deploy/images/raspberrypi4-64"
+ls -lhL \
+  "$IMG_DIR/perseus-xen-bringup-image-raspberrypi4-64.rootfs.rpi-sdimg" \
+  "$IMG_DIR/perseus-xen-bringup-image-raspberrypi4-64.rootfs.manifest" \
+  "$IMG_DIR/perseus-domu-initramfs-raspberrypi4-64.rootfs.cpio.gz"
+```
+
+SD 이미지, 설치 패키지 manifest, 최소 domU ramdisk가 모두 있어야 한다. 이미지 생성 이후의 FAT·rootfs 검사, SD 기록·UART·보드 검증은 [생성 이미지와 실보드 검증](yocto-rpi4-xen-minimal-bringup.md#2-호스트에서-생성-이미지-정적-검사)을 따른다. 이미지 생성 완료와 보드 부팅 성공은 별도로 기록한다.
+
+### 참고: 다른 타깃과 산출물
+
+처음 빌드하는 팀원은 위 3-1~3-3으로 충분하다. 아래 명령은 다른 목적의 참고용이며 모두 추가 실행하는 순서가 아니다. 활성화된 같은 빌드 환경에서 사용한다.
 
 | 명령 | 목적 |
 | --- | --- |
-| `bitbake xen-image-minimal` | 기본 Xen/dom0 이미지 생성 |
-| `bitbake perseus-xen-bringup-image` | 진단 도구와 최소 테스트 domU 자산을 포함한 dom0 이미지 생성 |
+| `bitbake xen-image-minimal` | 기본 Xen/dom0 이미지만 생성 |
 | `bitbake perseus-domu-initramfs` | 최소 테스트 domU initramfs만 별도 생성 |
-
-bring-up 이미지 타깃은 domU initramfs와 커널 deploy를 의존성으로 연결한다. 이 타깃을 만들기 위해 기본 dom0 이미지와 domU 타깃을 각각 먼저 빌드할 필요는 없다. 실제 빌드의 최종 종료 코드·오류·태스크 요약을 확인하고, 실패한 태스크의 로그를 보존한다. 기존 빌드 전체나 캐시를 삭제하지 않는다.
-
-```bash
-ls -lh "$YOCTO_BUILD_DIR/tmp/deploy/images/raspberrypi4-64/"
-```
-
-`bitbake -n`의 완료는 실행 계획 검사 결과다. 실제 이미지 생성과 실보드 부팅 결과는 각각 별도로 기록한다.
+| `bitbake -n perseus-xen-bringup-image` | 실행 계획만 검사. 실제 이미지 생성 성공을 뜻하지 않음 |
 
 | 타깃 | 산출물 및 의미 |
 | --- | --- |
@@ -311,7 +367,7 @@ xl create -c /etc/xen/perseus-domu.cfg
 
 네트워크는 물리 NIC에 연결하지 않은 `xenbr0`, dom0 `192.168.77.1/24`, DHCP `192.168.77.100~150`, MAC `02:16:3e:20:00:01`이다. DNS·기본 라우터를 제공하지 않는다. 네트워크 unit은 수동 시작한다.
 
-실제 커널 옵션 검사와 네트워크·VM 실행 명령은 [bring-up 검증 절차](yocto-rpi4-xen-minimal-bringup.md)에 모아 관리한다.
+빌드 전 커널 필수 옵션 검사는 이 문서 3-2에서 수행한다. 생성 이미지·추가 커널 진단·네트워크·VM 실행 명령은 [bring-up 검증 절차](yocto-rpi4-xen-minimal-bringup.md)를 따른다.
 
 bring-up 이미지는 기존 설정대로 root 빈 비밀번호를 허용하고 SSH 도구를 포함한다. UART 진단용 설정이므로 배포 이미지에 적용하기 전에 인증 정책을 별도로 정해야 한다. 임시 게스트 PID 1은 셸 재시작 루프이며 정상 종료 처리는 미구현이다. `xl destroy`는 정상 종료 검증이 아니다. 보드 점검은 [bring-up 절차](yocto-rpi4-xen-minimal-bringup.md)를 따른다.
 

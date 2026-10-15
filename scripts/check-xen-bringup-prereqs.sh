@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Run only AFTER `source .../oe-init-build-env ...` in your successful build dir.
+# 현재 BitBake 환경의 커널 .config에서 필수 옵션을 검사한다. 빌드 태스크는 실행하지 않는다.
 set -euo pipefail
 command -v bitbake >/dev/null || { echo 'Please source the Yocto environment first' >&2; exit 1; }
 B="$(bitbake -e linux-raspberrypi | sed -n 's/^B="\([^"]*\)"$/\1/p')"
-[[ -n "$B" && -f "$B/.config" ]] || { echo 'Kernel .config missing. Use the original successful build dir.' >&2; exit 1; }
+[[ -n "$B" ]] || { echo 'Could not resolve kernel B. Check the active BitBake environment.' >&2; exit 1; }
+if [[ ! -f "$B/.config" ]]; then
+    printf 'Kernel .config is missing: %s\n' "$B/.config" >&2
+    printf 'Run in this build environment: bitbake -c configure linux-raspberrypi\nThen rerun this check.\n' >&2
+    exit 1
+fi
 echo "Kernel config: $B/.config"
 errors=0
 for symbol in XEN XEN_DOM0 XEN_NETDEV_FRONTEND XEN_NETDEV_BACKEND HVC_XEN BRIDGE BLK_DEV_INITRD RD_GZIP DEVTMPFS; do

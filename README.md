@@ -6,8 +6,8 @@ GitLab 프로젝트와 그 안의 `platform/yocto/layers.lock`을 기준으로 �
 
 | 목적 | 문서 |
 | --- | --- |
-| 처음 환경 준비·최신 프로젝트 갱신·선택적 이미지 빌드·domU 통합 개발 | [재구성 및 domU 인계](docs/build-guides/yocto-rpi4-xen-reproduce.md) |
-| 커널·SD 이미지 검사와 실보드 Xen/dom0·domU 검증 | [최소 bring-up 검증](docs/build-guides/yocto-rpi4-xen-minimal-bringup.md) |
+| WSL·Yocto 준비·커널 필수 검사·이미지 빌드·domU 통합 개발 | [재구성 및 domU 인계](docs/build-guides/yocto-rpi4-xen-reproduce.md) |
+| 생성 이미지·추가 커널 진단·실보드 Xen/dom0·domU 검증 | [최소 bring-up 검증](docs/build-guides/yocto-rpi4-xen-minimal-bringup.md) |
 | 이전 환경·성공 로그·검증 한계 조회 | [2026-10-15 감사 기록](docs/build-guides/yocto-rpi4-xen-audit-20261015.md) |
 
-환경만 준비하려면 재구성 문서의 1~2절을 따르고 `setup-yocto.sh --verify` 완료 후 멈추면 됩니다. 감사 기록은 당시의 관측 기록이며 현재 실행 절차는 재구성 문서를 따릅니다.
+환경만 준비하려면 재구성 문서의 1-1~1-6을 따르고 `setup-yocto.sh --verify` 완료 후 멈추면 됩니다. 처음 이미지까지 만들려면 이어서 같은 문서의 3-1~3-3을 순서대로 실행합니다. 감사 기록은 당시의 관측 기록이며 현재 실행 절차는 재구성 문서를 따릅니다.

@@ -1,6 +1,6 @@
 # Raspberry Pi 4 + Xen — 커널·이미지·실보드 bring-up 검증
 
-이 문서는 커널 필수 조건, 생성 이미지의 정적 검사, 실보드 Xen/dom0·최소 domU·격리 Bridge/DHCP 검증 절차를 다룬다. 환경 설치·Clone·업데이트·이미지 빌드 명령·domU 통합 계약은 [재구성 및 인계](yocto-rpi4-xen-reproduce.md)를 따른다.
+이 문서는 추가 커널 진단, 생성 이미지의 정적 검사, 실보드 Xen/dom0·최소 domU·격리 Bridge/DHCP 검증 절차를 다룬다. 환경 설치·Clone·업데이트·커널 설정 생성·필수 옵션 검사·이미지 빌드·domU 통합 계약은 [재구성 및 인계](yocto-rpi4-xen-reproduce.md)를 따른다.
 
 **현재 실보드 부팅·domU 실행·통신은 미검증이다.** 기존 이미지 생성과 내부 자산을 확인한 근거, 새 환경 검증 범위는 [2026-10-15 감사 기록](yocto-rpi4-xen-audit-20261015.md)에 보존한다. 아래 명령과 합격 조건은 앞으로 수행할 검증 절차다.
 
@@ -22,38 +22,17 @@
 | 이미지 정적 검사 | 현재 빌드에서 생성된 bring-up 이미지·manifest·부트 자산 |
 | 보드·VM 검증 | 정적 검사를 마친 SD 이미지와 Raspberry Pi 4 / UART |
 
-`setup-yocto.sh --verify`만 완료한 환경에는 커널 `.config`나 이미지가 생성되어 있지 않아도 정상이다. 환경 준비만 하는 팀원은 여기의 태스크 실행·보드 검증을 수행할 필요가 없다.
+`setup-yocto.sh --verify`만 완료한 환경에는 커널 `.config`나 이미지가 생성되어 있지 않아도 정상이다. 환경 준비만 하는 팀원은 이 문서의 이미지·보드 검증을 수행할 필요가 없다.
 
-## 1. 호스트에서 커널 필수 옵션 검사
+## 1. 호스트에서 추가 커널 진단
 
-현재 작업 공간의 빌드 환경을 활성화한다.
+이 절은 최초 이미지 빌드의 필수 순서가 아니다. 커널 configure → 필수 옵션 검사 → 이미지 생성은 [재구성 문서 3절](yocto-rpi4-xen-reproduce.md#3-선택-실제-이미지-빌드와-산출물)에 모아 관리한다. 아래는 configure/빌드 후 dom0 문제를 조사할 때 선택적으로 실행하는 진단이다.
+
+새 터미널에서는 0절의 경로 변수를 지정하고 현재 빌드 환경을 활성화한다.
 
 ```bash
 source "$YOCTO_WORKSPACE/layers/openembedded-core/oe-init-build-env" "$YOCTO_BUILD_DIR"
 ```
-
-이미 커널 configure/빌드를 수행해 `.config`가 있다면 다음 태스크는 생략한다. 새 환경에서 커널 옵션을 확인하려는 빌드 담당자만 실행한다. **실제 configure 태스크를 수행하며 다운로드·의존성 작업이 발생할 수 있다. 환경 파싱 검증에 포함되지 않는다.**
-
-```bash
-bitbake -c configure linux-raspberrypi
-```
-
-현재 빌드의 `.config`를 검사한다. 오류 메시지에 과거 성공 빌드가 언급되어도 검사 대상은 현재 BitBake가 해석한 `B/.config`이며, 새 빌드에서 생성한 설정을 사용할 수 있다.
-
-```bash
-bash "$PERSEUS_PROJECT/scripts/check-xen-bringup-prereqs.sh"
-```
-
-| 심볼 | 필요값 | 이유 |
-| --- | --- | --- |
-| `CONFIG_XEN`, `CONFIG_XEN_DOM0` | `y` | Xen 기반 Linux |
-| `CONFIG_XEN_NETDEV_FRONTEND` | `y` | dom0와 같은 Image를 domU에 재사용하고 최소 initramfs에 netfront 모듈을 넣지 않음 |
-| `CONFIG_HVC_XEN` | `y` | 게스트 hvc0 콘솔 |
-| `CONFIG_XEN_NETDEV_BACKEND` | `y` 또는 `m` | dom0 VIF 처리 |
-| `CONFIG_BRIDGE` | `y` 또는 `m` | xenbr0 생성 |
-| `CONFIG_BLK_DEV_INITRD`, `CONFIG_RD_GZIP`, `CONFIG_DEVTMPFS` | `y` | 게스트 initramfs 실행 |
-
-`[BLOCKER]`가 나오면 bring-up 이미지 구성을 그대로 진행하기 전에 커널·게스트 요구 조건을 검토한다. `=m`은 모듈 빌드 설정을 뜻하므로 실제 패키지 설치와 적재도 확인해야 한다. 검사 통과가 보드 부팅 성공을 보증하지 않는다.
 
 추가 dom0 문제를 조사할 때는 해석된 커널 빌드 경로에서 blkback·grant·XenFS 등도 확인할 수 있다.
 
