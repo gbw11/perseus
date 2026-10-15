@@ -2,6 +2,10 @@
 
 **이 문서가 팀원의 환경 준비 시작점이다.** GitLab에서 Clone한 최신 프로젝트와 그 안의 `platform/yocto/layers.lock`을 출발점으로 **새 Linux 작업 경로**에 환경을 준비한다. 문서화된 호스트 패키지·GitLab 인증·외부 소스 다운로드를 위한 네트워크는 필요하다. 기존 서버의 `conf`, 외부 레이어 복사본, 개인 스크립트나 ZIP은 필요하지 않다.
 
+**팀 배포 전 조건:** 이 안내서·설정 도구·자체 레시피가 GitLab의 기본 브랜치에 함께 통합되어 있어야 아래의 일반 Clone으로 같은 구성을 받는다. 기본 브랜치에 아직 없는 파일은 담당자가 먼저 통합해야 한다. 팀원에게 특정 기능 브랜치나 프로젝트 SHA를 고정해서 안내하지 않는다.
+
+**현재 검증 범위:** 이미 설치된 WSL2 Ubuntu 24.04에서 GitLab Clone, 새 Linux 작업 경로의 설정 생성과 BitBake 파싱을 확인했다. Windows 11 초기 상태에서 WSL 설치·재부팅·계정 생성·개인 토큰 발급까지 처음부터 실행한 검증은 아직 하지 않았다.
+
 | 하려는 작업 | 읽을 문서 / 범위 |
 | --- | --- |
 | 처음 환경 준비·최신 프로젝트 갱신 | 이 문서 1~2절. `--verify` 완료 후 종료 |
@@ -18,29 +22,49 @@
 
 감사한 호스트는 Ubuntu 24.04.5 LTS / x86_64 / WSL2, Python 3.12.3, Git 2.43.0이다. Linux 파일시스템을 사용한다. `/mnt/c`의 프로젝트·빌드 경로 및 공백·따옴표가 있는 경로는 설정 도구가 거부한다. 전체 빌드에는 충분한 디스크와 메모리가 필요하며 현재 병렬 작업 설정은 4개다.
 
-### Windows 사용자의 WSL 준비
+### 1-1. Windows 11에서 WSL 설치 — 관리자 PowerShell
 
-이미 Ubuntu Linux를 사용한다면 이 단계는 생략한다. WSL이 없다면 관리자 PowerShell에서 설치하고, 재부팅·최초 Linux 계정 생성을 마친다.
+Windows 11 x64 PC, 관리자 권한, 인터넷 연결과 GitLab 프로젝트 읽기 권한을 준비한다. Clone 전에는 Windows 브라우저에서 GitLab에 로그인해 이 문서를 읽는다. 아래 `powershell` 블록은 Windows PowerShell에서, `bash` 블록은 Ubuntu 터미널에서 실행한다. 한 블록이 실패하면 오류를 해결한 뒤 다음 단계로 간다.
+
+시작 메뉴에서 **PowerShell → 관리자 권한으로 실행**을 선택하고 다음을 실행한다. 이미 Ubuntu 24.04 / WSL2가 설치되어 있으면 1-2로 간다.
 
 ```powershell
 wsl --install -d Ubuntu-24.04
 ```
 
-PowerShell에서 배포판과 WSL 버전 2를 확인한 뒤 Ubuntu 터미널로 들어간다.
+설치가 끝나면 작업을 저장하고 **Windows를 재부팅**한다. 재부팅 후 시작 메뉴에서 **Ubuntu 24.04**를 실행해 최초 압축 해제를 기다린다.
+
+- Linux 사용자 이름을 입력한다. 예: `perseus`. Windows 계정명·GitLab 계정명과 같을 필요는 없다.
+- Linux 비밀번호를 두 번 입력한다. 입력 중 글자나 `*`가 보이지 않는 것이 정상이다.
+- 이 비밀번호는 이후 Ubuntu의 `sudo` 명령에서 사용한다. GitLab 인증과는 별개다.
+- `사용자@PC:~$` 형태의 프롬프트가 나오면 Linux 계정 생성이 끝난 것이다.
+
+설치·재부팅·계정 생성은 [Microsoft WSL 설치 안내](https://learn.microsoft.com/en-us/windows/wsl/install)와 [최초 사용자 설정](https://learn.microsoft.com/en-us/windows/wsl/setup/environment#set-up-your-linux-username-and-password)을 따른다.
+
+### 1-2. WSL2 확인 후 Ubuntu로 진입 — PowerShell → Bash
+
+Windows에서 새 PowerShell 창을 열어 확인한다. 기존 WSL을 업데이트할 때는 실행 중인 작업을 먼저 마친다.
 
 ```powershell
+wsl --update
 wsl -l -v
 wsl --status
+```
+
+`wsl -l -v`에서 `Ubuntu-24.04` 행의 `VERSION`이 **2**여야 한다. `STATE`가 `Stopped`여도 설치 오류가 아니다. 신규 설치인데 `VERSION`이 1이면 PowerShell에서 `wsl --set-version Ubuntu-24.04 2`를 실행한 뒤 다시 확인한다. 이는 Ubuntu 버전(24.04)이나 WSL 프로그램 버전과 별개의 값이다. `wsl --status`의 WSL1 미지원 안내가 있더라도 이 문서의 대상인 WSL2 행과 Ubuntu 실행이 정상이면 진행할 수 있다. [WSL 기본 명령](https://learn.microsoft.com/en-us/windows/wsl/basic-commands)
+
+이제 같은 PowerShell에서 Ubuntu로 들어간다.
+
+```powershell
 wsl -d Ubuntu-24.04
 ```
 
-선택적으로 WSL 자원 상한을 조정할 수 있다. 기존 32GB RAM PC에서 `%USERPROFILE%\.wslconfig`에 `memory=20GB`, `swap=8GB`를 사용한 사례가 있으며 필수값은 아니다. 설정 반영을 위해 WSL을 재시작할 때는 먼저 실행 중인 작업을 종료한다.
-
-### Linux 호스트 확인과 패키지
-
-이하 명령은 Ubuntu Bash에서 실행한다. 프로젝트·외부 소스·빌드 경로 모두 Linux 파일시스템을 사용한다. WSL 내부 여유 공간과 Windows 실제 디스크 여유 공간을 함께 확인한다.
+**이후부터는 Ubuntu Bash에서 실행한다.** PowerShell에서 진입하면 현재 경로가 `/mnt/c/windows/system32` 등일 수 있으므로 먼저 홈으로 이동한다.
 
 ```bash
+cd "$HOME"
+whoami
+pwd
 cat /etc/os-release
 uname -m
 nproc
@@ -48,7 +72,13 @@ free -h
 df -h "$HOME"
 ```
 
-Ubuntu 호스트 패키지는 다음과 같다. 이미 준비된 호스트에서는 재설치하지 않아도 된다. 설정 도구는 시스템 패키지나 인증 설정을 설치·변경하지 않는다.
+확인 기준은 일반 Linux 사용자(`root` 아님), `/home/<Linux사용자>` 경로, Ubuntu `VERSION_ID="24.04"`, `x86_64`다. 이 안내의 검증 대상은 이 조합이다. 프로젝트·외부 소스·빌드는 모두 이 Linux 파일시스템 아래에 만든다. `/mnt/c`에 Clone하지 않는다. WSL 내부 여유 공간 외에 Windows의 해당 드라이브 여유 공간도 확인한다.
+
+WSL 자원 상한 조정은 선택이다. 기존 32GB RAM PC에서 `%USERPROFILE%\.wslconfig`의 `[wsl2]` 절 아래 `memory=20GB`, `swap=8GB`를 사용한 사례가 있으며 필수값은 아니다. 자원 조정 없이 먼저 환경 준비를 진행할 수 있다.
+
+### 1-3. Linux 호스트 패키지 설치 — Ubuntu Bash
+
+아래 `sudo` 비밀번호에는 1-1에서 만든 **Linux 비밀번호**를 입력한다. 입력이 보이지 않는 것이 정상이다. 기존 Ubuntu 호스트에서는 이미 설치된 패키지를 다시 준비할 필요가 없다. 설정 도구는 시스템 패키지나 인증 설정을 설치·변경하지 않는다.
 
 ```bash
 sudo apt update
@@ -61,28 +91,90 @@ sudo apt install -y \
 locale -a | grep -i en_US || sudo locale-gen en_US.UTF-8
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
+git --version
+python3 --version
+locale charmap
 ```
 
-GitLab 인증은 본인의 기존 Git 인증 도구로 준비한다. 비밀번호·토큰을 URL, 잠금 파일 또는 설정에 넣지 않는다.
+`apt`가 오류 없이 끝나고 Git·Python 버전, `UTF-8`이 출력되는지 확인한다. 새 터미널에서는 `LANG`·`LC_ALL` export를 다시 실행한다. 실제 감사한 버전은 Git 2.43.0, Python 3.12.3이다.
 
-### 처음 Clone하여 환경만 준비
+### 1-4. GitLab 읽기 인증 준비 — Windows 브라우저
 
-아래 명령은 GitLab에서 지정한 **기본 브랜치의 최신 버전**을 받는다. 이 문서와 `scripts/setup-yocto.sh`, `meta-perseus`의 해당 변경이 기본 브랜치에 병합되어 있어야 한다. 아직 없는 파일은 다른 브랜치에서 개별 복사하지 말고 팀의 통합 상태를 확인한다.
+새 WSL의 Git 인증은 별도로 준비한다. Windows 브라우저에 로그인되어 있다는 사실만으로 Ubuntu의 `git clone` 인증이 끝난 것은 아니다. 이미 Ubuntu에서 프로젝트 Clone이 가능한 인증을 구성했다면 다음으로 간다.
+
+새 환경에서는 HTTPS용 **개인 액세스 토큰(PAT)**을 사용할 수 있다.
+
+1. Windows 브라우저에서 [프로젝트](https://lab.ssafy.com/s15-final/S15P31E110)에 로그인하고 저장소가 보이는지 확인한다. 보이지 않으면 프로젝트 접근 권한을 먼저 받는다.
+2. 프로필의 **Edit profile / Preferences → Access Tokens / Personal access tokens**에서 토큰 생성 화면을 연다. 서버 버전에 따라 메뉴 이름은 다를 수 있다.
+3. 구분 가능한 이름(예: `yocto-read`), 만료일, `read_repository` 범위를 지정해 생성한다. 이 문서의 Clone·갱신에는 저장소 읽기 권한을 사용한다.
+4. 생성된 토큰을 개인 비밀 저장소에 보관한다. 아래 Clone에서 `Username` 질문에는 GitLab 사용자 이름, `Password` 질문에는 **계정 비밀번호 대신 토큰**을 입력한다. 토큰 입력도 화면에 표시되지 않는다.
+
+토큰을 명령어·URL·문서·Git 설정에 직접 넣지 않는다. 아래 예시는 인증 값을 저장하지 않으므로 이후 `git pull`에서 다시 물을 수 있다. 토큰 발급 메뉴가 없거나 정책상 막혔다면 프로젝트 관리자가 승인한 인증 방식을 준비해야 한다. 서버의 개인 토큰 허용 정책과 팀원별 발급 과정은 이 작업에서 확인하지 않았다. [GitLab HTTPS 인증 안내](https://docs.gitlab.com/user/profile/personal_access_tokens/#clone-repository-using-personal-access-token), [토큰 범위](https://docs.gitlab.com/security/tokens/access_token_scopes/)
+
+### 1-5. 최신 프로젝트 Clone 및 파일 확인 — Ubuntu Bash
+
+아래 명령은 GitLab에서 지정한 **기본 브랜치의 최신 버전**을 받는다. 1절 앞의 팀 배포 조건을 먼저 충족해야 한다. 새 경로에서 실행하며, 같은 이름의 Clone이 이미 있으면 아래의 기존 Clone 갱신 절차를 사용한다.
 
 ```bash
 mkdir -p "$HOME/perseus-repro"
 cd "$HOME/perseus-repro"
+
 git clone https://lab.ssafy.com/s15-final/S15P31E110.git
-cd S15P31E110
+```
+
+Clone이 성공한 뒤에만 다음 블록으로 넘어간다. 인증 실패나 `destination path ... already exists`를 무시하고 진행하지 않는다.
+
+```bash
+cd "$HOME/perseus-repro/S15P31E110"
 export PERSEUS_PROJECT="$PWD"
 git status --short --branch
 
-export YOCTO_WORKSPACE="$HOME/perseus-repro/workspace"
-export YOCTO_BUILD_DIR="$YOCTO_WORKSPACE/build-rpi4-xen"
-bash scripts/setup-yocto.sh --verify
+for file in \
+  docs/build-guides/yocto-rpi4-xen-reproduce.md \
+  scripts/setup-yocto.sh \
+  platform/yocto/layers.lock \
+  platform/yocto/config/local.conf.fragment \
+  platform/yocto/meta-perseus/recipes-core/images/perseus-xen-bringup-image.bb \
+  platform/yocto/meta-perseus/recipes-core/images/perseus-domu-initramfs.bb
+do
+  if test -f "$file"; then
+    printf '[OK] %s\n' "$file"
+  else
+    printf '[MISSING] %s\n' "$file"
+  fi
+done
 ```
 
-`YOCTO_WORKSPACE`와 `YOCTO_BUILD_DIR`는 **새 경로**를 선택한다. 최초 외부 소스 확보에는 네트워크가 필요하다. `--verify`는 소스 확보·설정 생성·메타데이터 검증만 수행하며 이미지를 컴파일하지 않는다. `Setup complete (no image build or boot test performed)`가 출력되고 종료 코드가 0이면 환경 준비가 끝난다. 환경만 준비할 때는 여기서 멈춘다.
+모든 파일이 `[OK]`이고 새 Clone에 미커밋 변경이 없어야 한다. `[MISSING]`이 하나라도 나오면 **여기서 중단**하고 기본 브랜치의 통합 상태를 확인한다. 다른 브랜치에서 파일을 개별 복사하지 않는다.
+
+### 1-6. 새 Linux 작업 공간 준비 및 검증 — Ubuntu Bash
+
+같은 Ubuntu 터미널에서 새 작업 경로를 지정한다. 이 예시는 프로젝트 옆에 별도 작업 공간을 만들며 기존 `~/yocto-workspace`를 사용하지 않는다.
+
+```bash
+export YOCTO_WORKSPACE="$HOME/perseus-repro/workspace"
+export YOCTO_BUILD_DIR="$YOCTO_WORKSPACE/build-rpi4-xen"
+if bash "$PERSEUS_PROJECT/scripts/setup-yocto.sh" --verify; then
+  printf '\n환경 준비 검증 완료. 이미지 빌드는 실행하지 않았습니다.\n'
+else
+  printf '\n환경 준비 실패. 위 오류를 해결한 뒤 같은 명령을 다시 실행하세요.\n' >&2
+fi
+```
+
+최초 실행에는 외부 저장소 6개의 다운로드가 포함되므로 네트워크가 필요하다. `--verify`는 소스 확보·설정 생성·메타데이터 검증만 수행하며 이미지를 컴파일하지 않는다.
+
+완료 판단은 다음과 같다.
+
+| 확인 지점 | 통과 기준 |
+| --- | --- |
+| 외부 저장소 | 6개 저장소의 URL·정확한 잠금 SHA·깨끗한 작업 트리 확인 |
+| 레이어 | `show-layers`에 `meta-perseus`를 포함한 9개 레이어 표시 |
+| 파싱·이미지 설정 | `bitbake -p`와 이미지 3종의 설정 검사에서 오류 없이 통과 |
+| 스크립트 종료 | `Setup complete (no image build or boot test performed)`와 위 블록의 `환경 준비 검증 완료` 출력 |
+
+**환경만 준비하는 팀원은 여기서 멈춘다.** `Baseline dom0: bitbake ...` 등의 마지막 출력은 이후 빌드 담당자를 위한 안내이며 자동 실행 결과가 아니다. 아직 SD 이미지나 커널 산출물이 없어도 정상이다. `tmp/deploy/images/` 확인은 실제 빌드 뒤에 한다.
+
+터미널을 닫았다면 다시 `wsl -d Ubuntu-24.04`로 들어와 `cd "$HOME/perseus-repro/S15P31E110"`, `PERSEUS_PROJECT`·`YOCTO_WORKSPACE`·`YOCTO_BUILD_DIR`와 locale의 export를 다시 지정하면 된다. 매번 Clone할 필요는 없다.
 
 ### 기존 Clone을 최신 프로젝트로 갱신
 
@@ -240,6 +332,9 @@ SSTATE_MIRRORS = "file://.* file:///absolute/existing-build/sstate-cache/PATH"
 
 | 증상 | 확인할 내용 |
 | --- | --- |
+| WSL 설치가 0.0%에서 멈춤 | 관리자 PowerShell에서 `wsl --install --web-download -d Ubuntu-24.04`를 사용한다. [Microsoft 설치 안내](https://learn.microsoft.com/en-us/windows/wsl/install)를 참고한다. |
+| WSL 오류 `0x80370102` / 가상 머신 시작 불가 | BIOS/UEFI의 가상화와 Windows Virtual Machine Platform 조건을 [WSL 설치 문제 해결](https://learn.microsoft.com/en-us/windows/wsl/troubleshooting#installation-issues)에서 확인한다. Ubuntu가 실행되기 전에는 Linux 명령을 진행하지 않는다. |
+| Ubuntu 경로가 `/mnt/c/windows/system32` | Ubuntu Bash에서 `cd "$HOME"` 후 `pwd`가 `/home/<사용자>`인지 확인한다. |
 | GitLab 인증 실패 / 필요한 프로젝트 파일 없음 | 본인 접근 권한과 현재 통합 상태를 확인한다. 파일을 다른 버전에서 개별 복사하지 않는다. |
 | `Permission denied`로 setup 실행 불가 | `bash scripts/setup-yocto.sh --verify`로 실행한다. |
 | origin·HEAD 불일치 / `local changes` | 현재 `layers.lock`과 외부 checkout을 대조한다. 로컬 변경을 보존하고 필요하면 1절의 새 작업 공간을 사용한다. |
