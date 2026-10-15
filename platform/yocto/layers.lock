@@ -1,7 +1,8 @@
 # 현재 Yocto 빌드에 사용하는 외부 저장소의 URL과 커밋을 기록한다.
 # 형식: <repository> <url> <commit>
 # 저장소는 작업 공간의 layers/<repository>/에 배치한다.
-# 이 파일은 Yocto가 자동으로 읽지 않는 수동 기록 파일이다.
+# scripts/setup-yocto.sh가 이 파일을 읽어 URL·정확한 커밋·작업 트리를 검증한다.
+# BitBake 자체는 이 파일을 읽지 않는다. 외부 의존성 버전의 단일 기준이다.
 #
 # BBLAYERS 경로와 등록 순서 (layers/ 기준):
 #   openembedded-core/meta

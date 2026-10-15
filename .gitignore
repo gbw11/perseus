@@ -1,0 +1,42 @@
+# Local credentials and editor files
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+id_rsa
+id_ed25519
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+
+# Yocto external checkouts, workspaces, caches and generated output
+/yocto-workspace/
+/platform/yocto/layers/
+/platform/yocto/sources/
+/platform/yocto/build*/
+/platform/yocto/.kas/
+tmp/
+downloads/
+sstate-cache/
+*.log
+*.log.*
+*.pid
+*.sock
+
+# Images are release artifacts; recipes, patches and configs remain tracked
+*.rootfs.*
+*.rpi-sdimg
+*.wic
+*.wic.*
+*.bmap
+*.img
+*.ext2
+*.ext3
+*.ext4
+*.cpio
+*.cpio.gz
+*.qcow2
+*.vhdx

@@ -1,7 +1,7 @@
 # Raspberry Pi 4 + Xen — 최소 Bring-up 전용 Yocto 이미지
 
 > **용도:** 실보드 수령 후 ① Xen/dom0 부팅, ② dom0 기본 기능, ③ xl 툴스택, ④ 임시 domU 부팅, ⑤ 격리 브릿지·DHCP·MAC을 단계적으로 검증한다.  
-> **현재 상태:** 2026-10-13에 작성한 **테스트 구성 초안**. 기존 `xen-image-minimal`의 실물 SD 이미지 생성은 완료되었지만 **이 신규 레시피의 BitBake 파싱·컴파일·실보드 검증은 아직 수행되지 않았다.**
+> **상태 정정 (2026-10-15 감사):** 기존 빌드의 `20261013142007.log`에서 bring-up 이미지 6584개 태스크 성공 및 SD 이미지·domU initramfs를 확인했다. 이미지 내부 VM 설정과 게스트 자산도 확인했다. **실보드 부팅·domU 실행은 미검증**이다. 새 경로 검증 범위는 [감사 기록](yocto-rpi4-xen-audit-20261015.md)을 참고한다.
 
 ## 원칙
 
@@ -11,20 +11,12 @@
 - 테스트 서비스는 이미지에 설치되지만 **부팅 시 자동 시작하지 않는다**. `dnsmasq_%.bbappend`로 기본 `dnsmasq.service` 자동 기동도 비활성화하고, 분리된 `perseus-dhcp.service`만 수동 실행한다. 1~3단계 검증 후 운영자가 명령으로 시작한다.
 - 이 실험 이미지만 **root 빈 비밀번호** 허용 설정을 갖고, `serial-getty@hvc0.service`를 활성화하려고 시도한다. 디버깅 목적이며 인터넷/공용망 연결 금지. 실제 배포 이미지에 사용하지 않는다. 특히 SSH 서비스가 제공되므로 신뢰할 수 없는 네트워크에 연결하지 않는다.
 
-## 0. 파일 설치 (WSL2)
+## 0. GitLab에서 환경 준비
 
-본 ZIP의 루트 경로는 GitLab `S15P31E110/` 기준이다. ZIP을 WSL 리눅스 파일시스템에 복사한 후 **프로젝트 루트에서** 압축을 푼다.
-
-```bash
-cd ~/S15P31E110
-unzip -l /path/to/perseus-xen-bringup-kit.zip
-unzip /path/to/perseus-xen-bringup-kit.zip -d .
-chmod +x scripts/check-xen-bringup-prereqs.sh
-
-git status --short
-```
-
-ZIP은 새 레시피와 문서·검사 스크립트만 포함한다. 기존 `scripts/setup-yocto.sh`나 `meta-perseus/conf/layer.conf`는 덮어쓰지 않는다. 원한다면 패키지 파일을 먼저 읽은 뒤 추가한다.
+레시피·스크립트는 이미 GitLab에 포함되어 있다. ZIP 설치는 필요하지 않다.
+[재구성 안내](yocto-rpi4-xen-reproduce.md)에 따라 새 경로에서
+환경 구성·파싱 검증을 먼저 수행한다. 아래의 기존 경로는 최초 빌드 사례이며
+새 환경에서는 본인의 프로젝트·작업 공간 경로로 바꾼다.
 
 ## 1. 빌드 전 커널 옵션 검사 — 반드시 먼저
 
