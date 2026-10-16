@@ -8,3 +8,6 @@
 
 UNPACKDIR = "${WORKDIR}/sources"
 S = "${UNPACKDIR}"
+
+# 실보드에서 검증한 working FDT 복사와 MMC 선택을 프로젝트 템플릿에 반영한다.
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"

@@ -1,5 +1,5 @@
 [Unit]
-Description=Perseus test-only isolated xenbr0 bridge (no physical NIC attached)
+Description=Perseus isolated internal xenbr0 bridge (no physical NIC attached)
 After=systemd-udev-settle.service
 
 [Service]

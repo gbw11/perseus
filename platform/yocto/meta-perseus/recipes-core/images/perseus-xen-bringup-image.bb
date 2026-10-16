@@ -4,11 +4,28 @@ require recipes-extended/images/xen-image-minimal.bb
 SUMMARY = "Perseus Raspberry Pi 4 Xen minimal bring-up image"
 DESCRIPTION = "xen-image-minimal plus diagnostic tools, isolated bridge/DHCP and a small preloaded Arm64 domU"
 
-IMAGE_INSTALL:append = " perseus-bringup iproute2 bridge-utils dnsmasq kmod iputils-ping"
+IMAGE_INSTALL:append = " perseus-platform perseus-bringup iproute2 bridge-utils dnsmasq kmod iputils-ping"
 
-# BENCH IMAGE ONLY: local UART/root debugging. Do not connect to untrusted networks.
-# This is limited to this image recipe; it does not alter xen-image-minimal.
-IMAGE_FEATURES:append = " empty-root-password allow-empty-password"
+# 팀 개발망 최초 로그인. 기존 사용자 암호는 부팅 시 재설정하지 않는다.
+IMAGE_FEATURES:remove = "empty-root-password allow-empty-password debug-tweaks serial-autologin-root"
+IMAGE_FEATURES:append = " allow-root-login"
+inherit extrausers
+# 1234의 SHA-512 crypt 해시. 개발용 공개 초기값이며 런타임 reset 서비스는 없다.
+EXTRA_USERS_PARAMS = "usermod -p '\$6\$perseus-dev\$uqz/PNLD2CDIZm1VIVOFPkMANu8CHr2KHPKO3th9aIL6nu6f.aLwxZ8oHjw3haeQHSsLzWokvwcuaAcMVpy800' root;"
+ROOTFS_POSTPROCESS_COMMAND:append = " perseus_platform_policy; "
+
+perseus_platform_policy() {
+    # Xen의 기본 저장/복원·자동 시작과 Perseus의 중복 실행을 막는다.
+    install -d "${IMAGE_ROOTFS}${sysconfdir}/systemd/system"
+    ln -snf /dev/null "${IMAGE_ROOTFS}${sysconfdir}/systemd/system/xendomains.service"
+    # OpenSSH는 먼저 읽은 값을 사용한다. 다른 include보다 앞에 초기 정책을 둔다.
+    for config in sshd_config sshd_config_readonly; do
+        target="${IMAGE_ROOTFS}${sysconfdir}/ssh/$config"
+        [ -f "$target" ] || continue
+        { printf 'Include /etc/ssh/perseus-auth.conf\n'; cat "$target"; } > "$target.perseus"
+        mv "$target.perseus" "$target"
+    done
+}
 
 # One guest uses the same Arm64 Image as dom0 (guest support is a preflight gate).
 # Its tiny initramfs is embedded in the dom0 root filesystem during do_rootfs.

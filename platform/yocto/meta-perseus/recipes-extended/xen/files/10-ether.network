@@ -1,0 +1,7 @@
+# 기존 패키지 파일명을 유지하되 물리 NIC는 매칭하지 않는다.
+# VIF의 브릿지 연결과 해제는 Xen vif-bridge가 담당한다.
+[Match]
+Name=vif*
+
+[Link]
+Unmanaged=yes

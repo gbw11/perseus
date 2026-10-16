@@ -2,15 +2,17 @@
 
 이 문서는 추가 커널 진단, 생성 이미지의 정적 검사, 실보드 Xen/dom0·최소 domU·격리 Bridge/DHCP 검증 절차를 다룬다. 환경 설치·Clone·업데이트·커널 설정 생성·필수 옵션 검사·이미지 빌드·domU 통합 계약은 [재구성 및 인계](yocto-rpi4-xen-reproduce.md)를 따른다.
 
-**현재 실보드 부팅·domU 실행·통신은 미검증이다.** 기존 이미지 생성과 내부 자산을 확인한 근거, 새 환경 검증 범위는 [2026-10-15 감사 기록](yocto-rpi4-xen-audit-20261015.md)에 보존한다. 아래 명령과 합격 조건은 앞으로 수행할 검증 절차다.
+**기존 이미지에서 수동 보정 후 Xen/dom0/BusyBox domU 부팅·DHCP·양방향 Ping에 성공했다는 사용자 보고가 있다.** [2026-10-16 1차 소스 감사](yocto-rpi4-xen-source-audit-20261016.md)에서 이를 소스에 반영했다. 수정본은 아직 빌드·실보드 검증하지 않았다. 이전 정적 증거는 [2026-10-15 감사 기록](yocto-rpi4-xen-audit-20261015.md)에 보존하며, 아래 절차로 2차 빌드 후 자동 동작을 다시 확인한다.
 
 ## 원칙
 
-- **기존 성공 이미지 `xen-image-minimal`을 보존**한다. 다른 타깃 `perseus-xen-bringup-image`를 추가하며 외부 Yocto 레이어, `layers.lock`, 기존 성공한 커널/부팅 스크립트 설정을 교체하지 않는다.
+현재 영구 플랫폼의 운영·인증·저장소·Ubuntu/Debian 수락 조건은 [영구 플랫폼 가이드](perseus-persistent-platform.md)를 따른다. 아래 BusyBox 게스트는 기본 자동 시작 VM을 대신하지 않는 회귀 시험이다.
+
+- **기존 성공 이미지 `xen-image-minimal`을 보존**한다. 다른 타깃 `perseus-xen-bringup-image`를 추가하며 외부 Yocto 레이어·`layers.lock`·커널 설정은 유지한다. 확인된 부팅·네트워크 결함은 자체 레이어의 bbappend와 템플릿에서 수정한다.
 - `perseus-domu-initramfs`로 **디스크가 없는 테스트 domU**를 만든다. Debian·Ubuntu·Alpine의 최종 게스트 구성이 아니며, Linux Arm64 커널 `Image`는 기존 dom0 커널을 **테스트용으로 재사용한다**. 이를 지원할 커널 옵션이 없으면 빌드를 진행하지 말고 게스트 커널부터 조정한다.
 - `xenbr0 = 192.168.77.1/24`는 **물리 NIC에 연결하지 않은 고립된 브릿지**다. `perseus-dhcp.service`는 `192.168.77.100~150` 주소를 제공하며 DNS는 비활성화한다. `eth0`를 브릿지에 추가하지 않는다.
-- 테스트 서비스는 이미지에 설치되지만 **부팅 시 자동 시작하지 않는다**. `dnsmasq_%.bbappend`로 기본 `dnsmasq.service` 자동 기동도 비활성화하고, 분리된 `perseus-dhcp.service`만 수동 실행한다. 1~3단계 검증 후 운영자가 명령으로 시작한다.
-- 이 실험 이미지만 **root 빈 비밀번호** 허용 설정을 갖고, `serial-getty@hvc0.service`를 활성화하려고 시도한다. 디버깅 목적이며 인터넷/공용망 연결 금지. 실제 배포 이미지에 사용하지 않는다. 특히 SSH 서비스가 제공되므로 신뢰할 수 없는 네트워크에 연결하지 않는다.
+- 브릿지·DHCP는 **부팅 시 자동 시작한다**. `dnsmasq_%.bbappend`로 배포판 기본 `dnsmasq.service`는 비활성화하고, 격리된 `perseus-dhcp.service`만 사용한다. BusyBox 게스트 자체는 수동 회귀 시험이다.
+- 이 이미지는 팀 개발망 최초 인증 **root / 1234**와 빈 암호 거부 설정을 갖고, `serial-getty@hvc0.service`를 활성화하려고 시도한다. 디버깅 목적이며 인터넷/공용망 연결 금지. 실제 배포 이미지에 사용하지 않는다. 특히 SSH 서비스가 제공되므로 신뢰할 수 없는 네트워크에 연결하지 않는다.
 
 ## 0. 입력과 실행 위치
 
@@ -119,7 +121,7 @@ bring-up rootfs에는 다음 자원이 있어야 한다. 게스트 kernel/ramdis
 /opt/perseus/bringup/domU-initramfs.cpio.gz
 /usr/sbin/perseus-bringup-check
 /usr/sbin/perseus-bridge-up
-systemd: perseus-bridge.service / perseus-dhcp.service (기본 비활성)
+systemd: perseus-bridge.service / perseus-dhcp.service (기본 활성)
 ```
 
 ## 3. 실보드 준비와 UART
@@ -153,12 +155,15 @@ perseus-bringup-check
 
 ### 4단계: 테스트 domU 생성
 
-다음 명령으로 **격리 브릿지/DHCP 서비스를 먼저 시작**한다. 네트워크가 준비되지 않아도 순수 domU 부팅과 독립적으로 원인을 분리할 수 있도록 로그를 남긴다.
+부팅 시 자동 준비된 **격리 브릿지/DHCP 상태부터 확인**한다. 아래 start는 재실행해도 기존 상태를 유지한다. 네트워크가 준비되지 않아도 순수 domU 부팅과 독립적으로 원인을 분리할 수 있도록 로그를 남긴다.
 
 ```bash
 systemctl start perseus-bridge.service
 systemctl start perseus-dhcp.service
 ip -br address show xenbr0
+bridge link
+networkctl status eth0 xenbr0
+# eth0에 master xenbr0가 없어야 한다. xenbr0는 unmanaged여야 한다.
 systemctl --no-pager status perseus-bridge.service perseus-dhcp.service
 
 xl create -c /etc/xen/perseus-domu.cfg
@@ -182,7 +187,10 @@ ping -c 2 192.168.77.1
 - domU MAC `02:16:3e:20:00:01` (설정 파일에 지정한 **고정 MAC**)
 - domU IPv4 `192.168.77.100~150` 중 하나 (dom0의 **dnsmasq DHCP**)
 - domU ↔ dom0 `192.168.77.1` Ping 성공
-- dom0의 `ip link`, `bridge link`, `xl network-list perseus-test`에서 VIF/브릿지 연결 확인
+- dom0의 `ip link`, `bridge link`, `xl network-list perseus-test`에서 VIF/브릿지 연결 확인. domid는 실행 시마다 달라질 수 있다.
+- `networkctl status xenbr0 vif<domid>.0`에서 unmanaged 확인. networkd 재시작 후에도 `eth0` 분리·브릿지 고정 IP·VIF 부착 유지 확인
+- dom0에서 `ping -c 2 <실제 domU DHCP 주소>`도 성공해야 양방향 Ping 합격이다.
+- 게스트 `/proc/mounts`·`/sys/class/net/eth0/address` 접근, 수동 DHCP 없이 주소 획득 확인. NIC가 없으면 최대 20초 대기 후 진단 셸로 진행한다.
 
 게스트 쉘은 테스트 종료 시 `xl destroy perseus-test`로 강제 제거할 수 있다. **이는 정상 종료(shutdown) 검증이 아니다.** 정상 종료는 이후 정식 init 환경을 갖춘 domU에서 따로 확인한다.
 

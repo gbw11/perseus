@@ -1,0 +1,13 @@
+[Unit]
+Description=Perseus persistent VM data (pre-provisioned ext4, never formatted here)
+JobTimeoutSec=20s
+
+[Mount]
+What=/dev/disk/by-label/perseus-data
+Where=/srv/perseus
+Type=ext4
+Options=nodev,nosuid,noexec
+TimeoutSec=15s
+
+[Install]
+WantedBy=multi-user.target

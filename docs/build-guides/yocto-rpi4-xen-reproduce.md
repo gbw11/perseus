@@ -330,11 +330,13 @@ SD 이미지, 설치 패키지 manifest, 최소 domU ramdisk가 모두 있어야
 
 ## 4. 현재 구성과 부트 체인
 
+영구 Ubuntu·Debian VM, 자동 네트워크·시작/종료, 초기 인증과 데이터 영역의 현재 계약은 [영구 플랫폼 가이드](perseus-persistent-platform.md)를 우선 따른다. 이 문서의 BusyBox는 회귀 시험용이다.
+
 프로젝트 공통 정책은 `platform/yocto/config/local.conf.fragment`, 외부 레이어 버전은 `platform/yocto/layers.lock`, Xen·Linux·U-Boot의 소스 선택은 그 고정 레이어의 레시피가 기준이다. 레이어 등록과 설정 생성은 `scripts/setup-yocto.sh`가 담당한다. 문서에서 SHA나 공통 설정 전체를 복사해 별도로 유지하지 않는다. 과거에 확인한 구체적인 버전과 원본 로그는 감사 기록을 참고한다.
 
-Pi 펌웨어 → U-Boot → `boot.scr` → Xen → dom0 순서다. 외부 meta-virtualization의 Raspberry Pi 동적 레이어가 Xen 부트 스크립트를 제공한다. 프로젝트 bbappend는 unpack 경로 호환성만 보완한다. 생성된 `boot.scr`는 FAT에서 `xen`·`Image`를 적재하며 dom0 rootfs는 두 번째 SD 파티션의 PARTUUID로 찾는다. Xen dom0 메모리는 `RPI_DOM0_MEM = "1024M"`, 콘솔은 `hvc0`다.
+Pi 펌웨어 → U-Boot → `boot.scr` → Xen → dom0 순서다. 외부 meta-virtualization의 Raspberry Pi 동적 레이어가 Xen 부트 스크립트를 제공한다. 프로젝트 bbappend는 unpack 경로 호환성을 보완하고 자체 `boot.cmd.xen.in`을 선택한다. 현재 U-Boot 2026.01의 `bootflow scan`이 전달하는 `devtype/devnum`으로 MMC를 선택하며, 수동 `source`에서 변수가 없을 때만 `mmc 0`을 기본값으로 쓴다. Control FDT를 `${fdt_addr_r}`에 복사한 뒤 그 복사본만 수정한다. 생성된 `boot.scr`는 FAT에서 `xen`·`Image`를 적재하며 dom0 rootfs는 두 번째 SD 파티션의 PARTUUID로 찾는다. Xen dom0 메모리는 `RPI_DOM0_MEM = "1024M"`, 콘솔은 `hvc0`다.
 
-현재 rootfs에 자산이 포함되었다는 정적 증거는 있다. 실보드 UART 부팅, `xl info`, 게스트 부팅·통신 성공은 별도 검증 대상이다.
+기존 이미지에서 수동 보정 후 Xen/dom0/BusyBox domU 부팅·DHCP·양방향 Ping에 성공했다는 사용자 보고가 있다. 이를 소스에 반영한 [2026-10-16 1차 소스 감사](yocto-rpi4-xen-source-audit-20261016.md)는 빌드 없이 수행했으며, 수정본의 자동 부팅과 네트워크는 2차 빌드·실보드 재검증 대상이다.
 
 ## 5. domU 담당자가 수정할 위치
 
@@ -346,10 +348,11 @@ Pi 펌웨어 → U-Boot → `boot.scr` → Xen → dom0 순서다. 외부 meta-v
 | `recipes-core/perseus-domu-init/` | `/init` 및 `/etc/perseus/udhcpc.script`. proc/sys/dev 마운트, hvc0 연결, DHCP, 대화형 셸 |
 | `recipes-core/images/perseus-xen-bringup-image.bb` | domU 이미지 완료와 커널 deploy를 의존성으로 연결. rootfs 후처리에서 게스트 자산 2개 복사 |
 | `recipes-core/perseus-bringup/files/perseus-domu.cfg` | `xl create`에 전달할 VM 설정. kernel/ramdisk 경로, 메모리·vCPU·MAC·bridge 연결 |
-| `recipes-core/perseus-bringup/perseus-bringup_1.0.bb` | 진단 스크립트·VM 설정·systemd unit 설치. 네트워크 unit 자동 활성화는 disable |
+| `recipes-core/perseus-bringup/perseus-bringup_1.0.bb` | 진단 스크립트·VM 설정·systemd unit 설치. 브릿지·DHCP unit 기본 활성화 |
 | `recipes-core/perseus-bringup/files/` | Bridge, DHCP, 진단 스크립트와 service 원본 |
 | `recipes-support/dnsmasq/dnsmasq_%.bbappend` | 기본 dnsmasq unit 자동 기동 비활성화. **dnsmasq를 설치하는 다른 이미지에도 적용되는 레이어 범위 설정** |
-| `recipes-bsp/xen-rpi-u-boot-scr/` | 기존 Xen 부트 스크립트 unpack 경로 호환성 보완 |
+| `recipes-bsp/xen-rpi-u-boot-scr/` | unpack 경로 호환성, 부트 장치 선택, Control FDT 복사 및 Xen/dom0 부팅 템플릿 |
+| `recipes-extended/xen/` | `xen-tools-net-conf`의 기본 브릿지 정책 대체. 물리 NIC 자동 편입·브릿지 자동 생성 제거, `vif*`·`xenbr0` networkd 비관리 |
 
 연결 관계:
 
@@ -365,11 +368,11 @@ xl create -c /etc/xen/perseus-domu.cfg
 
 현재 게스트는 `perseus-test`, `type="pvh"`, 256MiB, 1 vCPU이고 dom0 커널을 재사용한다. 영구 디스크·정식 배포판 init·애플리케이션·에이전트가 없는 임시 진단 이미지다. Debian/Ubuntu/Alpine 완성형 템플릿이나 3종 domU 통합은 구현되어 있지 않다. 후속 담당자는 디스크 rootfs 또는 initramfs 방식, 게스트 전용 커널, 서비스·정상 종료·저장 정책을 결정하고 새 이미지 레시피와 VM 설정으로 확장한다.
 
-네트워크는 물리 NIC에 연결하지 않은 `xenbr0`, dom0 `192.168.77.1/24`, DHCP `192.168.77.100~150`, MAC `02:16:3e:20:00:01`이다. DNS·기본 라우터를 제공하지 않는다. 네트워크 unit은 수동 시작한다.
+네트워크는 물리 NIC에 연결하지 않은 `xenbr0`, dom0 `192.168.77.1/24`, DHCP `192.168.77.100~150`, MAC `02:16:3e:20:00:01`이다. DNS·기본 라우터를 제공하지 않는다. 브릿지·DHCP unit은 기본 자동 시작한다. Perseus 스크립트가 브릿지 생성·고정 IP를, Xen `vif-bridge`가 VIF 부착·해제를 담당한다. systemd-networkd는 `vif*`와 `xenbr0`를 관리하지 않으며, 물리 NIC에는 기존 일반 networkd 정책이 적용된다. `xen-tools` bbappend는 meta-perseus를 사용하는 Xen 이미지 전체에 적용된다.
 
 빌드 전 커널 필수 옵션 검사는 이 문서 3-2에서 수행한다. 생성 이미지·추가 커널 진단·네트워크·VM 실행 명령은 [bring-up 검증 절차](yocto-rpi4-xen-minimal-bringup.md)를 따른다.
 
-bring-up 이미지는 기존 설정대로 root 빈 비밀번호를 허용하고 SSH 도구를 포함한다. UART 진단용 설정이므로 배포 이미지에 적용하기 전에 인증 정책을 별도로 정해야 한다. 임시 게스트 PID 1은 셸 재시작 루프이며 정상 종료 처리는 미구현이다. `xl destroy`는 정상 종료 검증이 아니다. 보드 점검은 [bring-up 절차](yocto-rpi4-xen-minimal-bringup.md)를 따른다.
+현재 소스는 dom0 초기 암호를 root / 1234로 설정하고 SSH의 빈 암호 인증을 거부한다. 암호는 이미지 준비 시 설정하며 부팅 때 재설정하지 않는다. UART 진단용 설정이므로 배포 이미지에 적용하기 전에 인증 정책을 별도로 정해야 한다. 임시 게스트 PID 1은 셸 재시작 루프이며 정상 종료 처리는 미구현이다. `xl destroy`는 정상 종료 검증이 아니다. 보드 점검은 [bring-up 절차](yocto-rpi4-xen-minimal-bringup.md)를 따른다.
 
 ## 6. 재현성의 경계
 

@@ -89,3 +89,18 @@ tests/platform/test_yocto_setup.py
 기본 이미지 `xen-image-minimal.bb`와 Xen 부트 템플릿 `boot.cmd.xen.in`은 외부 `meta-virtualization`에서 제공한다. 커널·U-Boot·펌웨어 원본과 기본 설정도 고정 외부 레시피·소스에서 받으며, 프로젝트 변경은 위 자체 레이어와 fragment로 적용한다.
 
 생성 경로(Git 추적 제외): `$YOCTO_BUILD_DIR/conf/local.conf`·`conf/bblayers.conf`, `tmp/deploy/images/raspberrypi4-64/`, `tmp/`·`downloads/`·`sstate-cache/`. 산출 타깃은 `xen-image-minimal`, `perseus-xen-bringup-image`, `perseus-domu-initramfs`다.
+
+## 2026-10-16 1차 소스 수정 (빌드 전)
+
+- 감사 시작 소스: `7152ce47859779c888119e1bd15c8a0d85a4a3bc`, 브랜치 `feat/platform/yocto-build-setup`.
+- 기존 잠금 SHA·버전·커널 설정을 유지한다. 새 이미지 생성·배포·commit/push는 수행하지 않았다.
+- 변경한 소스: `recipes-bsp/xen-rpi-u-boot-scr/`의 자체 `files/boot.cmd.xen.in`과 bbappend, `recipes-extended/xen/`의 새 `xen-tools_%.bbappend`와 비관리 networkd 규칙 2개, `recipes-core/perseus-bringup/`의 DHCP unit/경로 치환, `recipes-core/perseus-domu-init/files/init`.
+- 기존 이미지에서의 수동 성공 보고와 수정 소스의 자동 동작 검증을 구분한다. 원인·검증·2차 빌드 확인 목록은 [1차 소스 감사](yocto-rpi4-xen-source-audit-20261016.md)에 기록한다.
+
+
+## 2026-10-16 영구 플랫폼 소스 (생성 전)
+
+- 기존 1차 소스 감사 수정 위에 `perseus-platform` 레시피·저장소/자동 시작/종료 unit·VM 관리 CLI를 추가한다.
+- Ubuntu 24.04 / Debian 13 ARM64 공식 입력과 게스트 커널 패키지는 `platform/guests/sources.lock.json`으로 관리한다. 외부 Yocto `layers.lock`과 dom0 커널 버전은 변경하지 않는다.
+- 초기 인증은 root / 1234, VM별 raw 영구 디스크, 단일 자동 시작 소유자, 별도 ext4 데이터 마운트 계약이다.
+- 생성 도구·회귀 테스트·후속 수락 절차는 [영구 플랫폼 가이드](perseus-persistent-platform.md)에 모았다. 새 이미지·템플릿 생성/배포나 실보드 수락 시험은 아직 수행하지 않았다.

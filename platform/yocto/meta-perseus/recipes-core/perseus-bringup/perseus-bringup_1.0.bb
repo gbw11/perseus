@@ -16,10 +16,10 @@ S = "${UNPACKDIR}"
 inherit systemd
 
 SYSTEMD_SERVICE:${PN} = "perseus-bridge.service perseus-dhcp.service"
-# On first boot verify Xen/dom0 BEFORE starting guest-network services manually.
-SYSTEMD_AUTO_ENABLE:${PN} = "disable"
+# 내부 브릿지·DHCP는 외부 LAN이나 VM 저장소 없이도 준비한다.
+SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
-RDEPENDS:${PN} = "iproute2 dnsmasq kmod"
+RDEPENDS:${PN} = "iproute2 dnsmasq kmod perseus-platform"
 # If CONFIG_BRIDGE=m, prefer to install the packaged bridge kernel module.
 # If CONFIG_BRIDGE=y, no module package exists and this weak recommendation is ignored.
 RRECOMMENDS:${PN} += "kernel-module-bridge"
@@ -33,7 +33,7 @@ do_install() {
     install -m 0644 "${S}/dnsmasq-bringup.conf" "${D}${sysconfdir}/perseus/dnsmasq-bringup.conf"
     sed -e 's|@SBINDIR@|${sbindir}|g' "${S}/perseus-bridge.service" \
         > "${D}${systemd_system_unitdir}/perseus-bridge.service"
-    sed -e 's|@SBINDIR@|${sbindir}|g' "${S}/perseus-dhcp.service" \
+    sed -e 's|@BINDIR@|${bindir}|g' "${S}/perseus-dhcp.service" \
         > "${D}${systemd_system_unitdir}/perseus-dhcp.service"
 }
 
