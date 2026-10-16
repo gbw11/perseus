@@ -77,7 +77,7 @@ public class AgentDataService {
         ProcessSnapshot snapshot = processSnapshotRepository.findById(sample.getVmId())
                 .orElseGet(() -> new ProcessSnapshot(sample.getVmId()));
         if (snapshot.getObservedAt() == null || !sample.getObservedAt().isBefore(snapshot.getObservedAt())) {
-            snapshot.update(processes, sample.getObservedAt(), sample.getReceivedAt());
+            snapshot.update(sample.getBootId(), processes, sample.getObservedAt(), sample.getReceivedAt());
             processSnapshotRepository.save(snapshot);
         }
         return true;
@@ -86,6 +86,21 @@ public class AgentDataService {
     @Transactional(readOnly = true)
     public Optional<AgentInventory> findInventory(String vmId) {
         return inventoryRepository.findById(vmId);
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<ProcessSnapshot> findProcessSnapshot(String vmId) {
+        return processSnapshotRepository.findById(vmId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<MetricSample> findMetricSamples(String vmId, Instant from, Instant to) {
+        return metricSampleRepository.findByVmIdAndObservedAtGreaterThanEqualAndObservedAtLessThanOrderByObservedAtAsc(
+                vmId, from, to);
+    }
+
+    public boolean isStale(Instant observedAt, Instant now) {
+        return observedAt == null || Duration.between(observedAt, now).compareTo(properties.staleAfter()) > 0;
     }
 
     @Transactional(readOnly = true)

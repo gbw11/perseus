@@ -18,6 +18,9 @@ public class ProcessSnapshot {
     @Column(name = "vm_id", length = 36)
     private String vmId;
 
+    @Column(name = "boot_id", length = 64)
+    private String bootId;
+
     @Column(name = "observed_at", nullable = false)
     private Instant observedAt;
 
@@ -36,7 +39,8 @@ public class ProcessSnapshot {
         this.vmId = vmId;
     }
 
-    public void update(List<ProcessInfo> processes, Instant observedAt, Instant receivedAt) {
+    public void update(String bootId, List<ProcessInfo> processes, Instant observedAt, Instant receivedAt) {
+        this.bootId = bootId;
         this.processes = processes;
         this.observedAt = observedAt;
         this.receivedAt = receivedAt;
@@ -44,6 +48,10 @@ public class ProcessSnapshot {
 
     public String getVmId() {
         return vmId;
+    }
+
+    public String getBootId() {
+        return bootId;
     }
 
     public Instant getObservedAt() {
