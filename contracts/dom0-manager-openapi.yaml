@@ -1,0 +1,276 @@
+openapi: 3.1.0
+info:
+  title: Perseus dom0 manager API
+  version: 1.0.0
+  description: >-
+    Spring Boot backend and Python dom0-manager contract. The service binds to
+    127.0.0.1:8081 and is not exposed outside dom0.
+servers:
+  - url: http://127.0.0.1:8081
+    description: dom0 localhost
+tags:
+  - name: VMs
+paths:
+  /api/v1/vms:
+    get:
+      tags: [VMs]
+      operationId: listVms
+      summary: List managed VMs
+      x-driver-timeout-seconds: 5
+      responses:
+        '200':
+          description: Managed VM list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Vm'
+        '500':
+          $ref: '#/components/responses/DriverError'
+    post:
+      tags: [VMs]
+      operationId: createVm
+      summary: Register a VM definition
+      description: >-
+        Spring generates vm_id. Repeating the same vm_id with the same request
+        returns the existing VM. Reusing vm_id with different values or using an
+        active VM name returns VMExists.
+      x-driver-timeout-seconds: 30
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVmRequest'
+      responses:
+        '201':
+          description: VM definition created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vm'
+        '200':
+          description: An identical request for the same vm_id already completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vm'
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
+        '409':
+          description: VMExists or InsufficientResources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/DriverError'
+  /api/v1/vms/{vm_id}:
+    parameters:
+      - $ref: '#/components/parameters/VmId'
+    get:
+      tags: [VMs]
+      operationId: getVm
+      summary: Get one managed VM
+      x-driver-timeout-seconds: 5
+      responses:
+        '200':
+          description: VM
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vm'
+        '404':
+          $ref: '#/components/responses/VmNotFound'
+        '500':
+          $ref: '#/components/responses/DriverError'
+    delete:
+      tags: [VMs]
+      operationId: destroyVm
+      summary: Delete a VM definition while preserving its disk image
+      description: Idempotent. A VM that is already absent also returns 204.
+      x-driver-timeout-seconds: 30
+      responses:
+        '204':
+          description: VM is absent; disk image is preserved
+        '409':
+          description: InvalidState
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/DriverError'
+  /api/v1/vms/{vm_id}/start:
+    parameters:
+      - $ref: '#/components/parameters/VmId'
+    post:
+      tags: [VMs]
+      operationId: startVm
+      summary: Start a VM and wait for the Xen runtime to be running
+      description: Idempotent. An already running VM returns its current state with 200.
+      x-driver-timeout-seconds: 30
+      responses:
+        '200':
+          description: Xen runtime is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vm'
+        '404':
+          $ref: '#/components/responses/VmNotFound'
+        '409':
+          description: InvalidState or InsufficientResources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/DriverError'
+  /api/v1/vms/{vm_id}/stop:
+    parameters:
+      - $ref: '#/components/parameters/VmId'
+    post:
+      tags: [VMs]
+      operationId: stopVm
+      summary: Stop a VM and wait for shutdown
+      description: Idempotent. An already shutdown VM returns its current state with 200.
+      x-driver-timeout-seconds: 30
+      responses:
+        '200':
+          description: VM is shutdown
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vm'
+        '404':
+          $ref: '#/components/responses/VmNotFound'
+        '409':
+          description: InvalidState
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/DriverError'
+components:
+  parameters:
+    VmId:
+      name: vm_id
+      in: path
+      required: true
+      description: Immutable UUID assigned by Spring when the VM is created
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    VmState:
+      type: string
+      enum: [running, paused, stopping, shutdown, crashed]
+    Vm:
+      type: object
+      additionalProperties: false
+      required: [vm_id, name, state, template_id, template_version, vcpus, memory_mib]
+      properties:
+        vm_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        state:
+          $ref: '#/components/schemas/VmState'
+        template_id:
+          type: string
+          minLength: 1
+        template_version:
+          type: string
+          minLength: 1
+        vcpus:
+          type: integer
+          minimum: 1
+        memory_mib:
+          type: integer
+          minimum: 1
+    CreateVmRequest:
+      type: object
+      additionalProperties: false
+      required: [vm_id, name, template_id, template_version, vcpus, memory_mib]
+      properties:
+        vm_id:
+          type: string
+          format: uuid
+          description: Generated once by Spring and reused on retries
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        template_id:
+          type: string
+          minLength: 1
+        template_version:
+          type: string
+          minLength: 1
+        vcpus:
+          type: integer
+          minimum: 1
+        memory_mib:
+          type: integer
+          minimum: 1
+    ResourceError:
+      type: object
+      additionalProperties: false
+      required: [name, requested, available]
+      properties:
+        name:
+          type: string
+          enum: [vcpus, memory_mib]
+        requested:
+          type: integer
+        available:
+          type: integer
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - VMNotFound
+            - VMExists
+            - InvalidState
+            - InvalidArgument
+            - InsufficientResources
+            - DriverError
+        message:
+          type: string
+        detail:
+          type: [string, 'null']
+          description: Xen detail for backend logs; never expose it to the frontend
+        resource:
+          oneOf:
+            - $ref: '#/components/schemas/ResourceError'
+            - type: 'null'
+          description: Present only for InsufficientResources
+  responses:
+    VmNotFound:
+      description: VMNotFound
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InvalidArgument:
+      description: InvalidArgument
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DriverError:
+      description: DriverError
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
