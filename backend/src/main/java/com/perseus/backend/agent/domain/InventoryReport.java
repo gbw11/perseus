@@ -11,5 +11,6 @@ public record InventoryReport(
         String kernelRelease,
         String hostname,
         List<NetworkInterface> interfaces,
+        String agentVersion,
         Instant observedAt) {
 }

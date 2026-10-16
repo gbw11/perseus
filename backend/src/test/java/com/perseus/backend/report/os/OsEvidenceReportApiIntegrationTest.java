@@ -158,8 +158,8 @@ class OsEvidenceReportApiIntegrationTest {
         String bootId = vmId + "-boot-1";
         agentDataService.recordInventory(vmId, new InventoryReport(
                 bootId, osId, "1", prettyName, "6.6.31", vmId + "-host",
-                List.of(new NetworkInterface("00:16:3e:00:00:01", List.of("10.0.0.11"))),
-                receivedAt), receivedAt);
-        agentDataService.recordHeartbeat(vmId, bootId, "agent-1", receivedAt, receivedAt);
+                List.of(new NetworkInterface("eth0", "00:16:3e:00:00:01", List.of("10.0.0.11"))),
+                "0.1.0", receivedAt), receivedAt);
+        agentDataService.recordHeartbeat(vmId, bootId, "agent-1", 1L, receivedAt, receivedAt);
     }
 }

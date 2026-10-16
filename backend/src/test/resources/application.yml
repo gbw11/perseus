@@ -45,6 +45,11 @@ perseus:
         - alpine
       observation-window: 30s
       build-id: test-build
+  mqtt:
+    enabled: false
+    broker-url: tcp://127.0.0.1:1883
+    client-id: perseus-backend-test
+    reconnect-interval: 1s
   dom0-manager:
     base-url: http://127.0.0.1:18081
     service-token: test-service-token

@@ -41,6 +41,9 @@ public class AgentInventory {
     @Column(name = "interfaces")
     private List<NetworkInterface> interfaces;
 
+    @Column(name = "agent_version", length = 64)
+    private String agentVersion;
+
     @Column(name = "observed_at")
     private Instant observedAt;
 
@@ -54,6 +57,11 @@ public class AgentInventory {
         this.vmId = vmId;
     }
 
+    // A report older than the stored one (e.g. a late retained message) must not overwrite it.
+    public boolean isSupersededBy(Instant reportObservedAt) {
+        return observedAt == null || reportObservedAt == null || !reportObservedAt.isBefore(observedAt);
+    }
+
     public void update(InventoryReport report, Instant receivedAt) {
         this.bootId = report.bootId();
         this.osId = report.osId();
@@ -62,6 +70,7 @@ public class AgentInventory {
         this.kernelRelease = report.kernelRelease();
         this.hostname = report.hostname();
         this.interfaces = report.interfaces();
+        this.agentVersion = report.agentVersion();
         this.observedAt = report.observedAt();
         this.receivedAt = receivedAt;
     }
@@ -96,6 +105,10 @@ public class AgentInventory {
 
     public List<NetworkInterface> getInterfaces() {
         return interfaces == null ? List.of() : interfaces;
+    }
+
+    public String getAgentVersion() {
+        return agentVersion;
     }
 
     public Instant getObservedAt() {
