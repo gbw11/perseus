@@ -11,13 +11,13 @@ Jira 이슈 `$ARGUMENTS`로 작업 브랜치를 만든다. 규칙은 `CONTRIBUTI
    - 인자가 비어 있거나 `S15P31E110-숫자` 형식이 아니면 멈추고 키를 물어본다.
    - 이슈 유형이 에픽이나 스토리면 브랜치를 만들지 말고, 그 아래 작업 키로 다시 실행하라고 안내한다.
 
-2. 브랜치 이름 `{part}/{type}/{키}-{설명}` 결정
+2. 브랜치 이름 `{type}/{part}/{키}-{설명}` 결정
    - part: 제목 접두어로 정한다.
      `[PLATFORM]`→platform, `[CTRL]`→ctrl, `[AGENT]`→agent, `[DISPLAY]`→display, `[BE]`→backend, `[FE]`→frontend, `[APP]`→app, `[DEPLOY]`→deploy, `[COMMON]`→common.
      `[TEST]`는 이슈 내용의 대상 폴더로 part를 정한다 (CONTRIBUTING 3장 표 참고).
    - type: `feat | fix | refactor | test | docs | chore` 중 이슈 내용에 맞는 것. `[TEST]`는 test, 문서 작성 이슈는 docs, 빌드·설정·CI는 chore, 그 외 기능 구현은 feat.
    - 설명: 이슈 제목을 영어 kebab-case 2~5단어로 줄인다 (소문자, 하이픈, 영숫자만).
-   - 예: `[PLATFORM] RPi4 U-Boot → Xen → dom0 부팅` → `platform/feat/S15P31E110-56-rpi4-xen-boot`
+   - 예: `[PLATFORM] RPi4 U-Boot → Xen → dom0 부팅` → `feat/platform/S15P31E110-56-rpi4-xen-boot`
 
 3. 브랜치 생성
    - `git status --porcelain`이 비어 있지 않으면 멈추고, 변경 사항을 커밋하거나 stash할지 사용자에게 묻는다.

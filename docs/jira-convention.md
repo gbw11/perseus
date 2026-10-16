@@ -163,7 +163,7 @@ dom0에 Linux Bridge와 DHCP를 구성해 VM마다 고유한 MAC/IP를 부여한
 | MR 생성 | MR 설명에 `Closes {Jira키}` | — |
 | develop 머지 | GitLab–Jira 연동이 자동 처리 | **완료** |
 
-- 브랜치 이름: `{part}/{type}/{Jira키}-{설명}` (예: `platform/feat/S15P31E110-56-rpi4-xen-boot`)
+- 브랜치 이름: `{type}/{part}/{Jira키}-{설명}` (예: `feat/platform/S15P31E110-56-rpi4-xen-boot`)
 - 아직 끝나지 않은 이슈는 MR에 `Closes` 없이 키만 적습니다. Jira에 MR 링크만 남습니다.
 - 여러 이슈를 함께 끝낼 때는 `Closes` 줄을 이슈마다 하나씩 씁니다.
 - 자동 완료는 develop(기본 브랜치)에 머지될 때만 동작합니다.

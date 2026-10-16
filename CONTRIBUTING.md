@@ -10,10 +10,10 @@
 ```text
 master            ← 통합 데모·발표용 안정 버전
 └── develop       ← 전 파트 통합 브랜치 (기본 브랜치)
-    ├── platform/feat/xen-bringup
-    ├── agent/feat/heartbeat
-    ├── backend/feat/vm-lifecycle-api
-    ├── frontend/feat/vm-list-card
+    ├── feat/platform/xen-bringup
+    ├── feat/agent/heartbeat
+    ├── feat/backend/vm-lifecycle-api
+    ├── feat/frontend/vm-list-card
     └── ...
 ```
 
@@ -21,11 +21,11 @@ master            ← 통합 데모·발표용 안정 버전
 | --- | --- | --- |
 | `master` | 통합 데모·발표 기준 버전 | develop에서만 MR로 머지, 통합 데모 직전에만 반영 |
 | `develop` | 모든 파트의 작업이 매일 합쳐지는 통합 브랜치 | 기능 브랜치에서 MR로만 머지 |
-| `{part}/{type}/*` | 개인 작업용 단기 브랜치 | develop에서 생성, 1~3일 내 머지, 머지 후 삭제 |
+| `{type}/{part}/*` | 개인 작업용 단기 브랜치 | develop에서 생성, 1~3일 내 머지, 머지 후 삭제 |
 
-- 파트는 **브랜치가 아니라 폴더와 브랜치 접두어**로 구분합니다. 파트별 장기 브랜치(`backend/develop` 등)는 만들지 않습니다.
+- 파트는 **브랜치가 아니라 폴더와 브랜치 이름의 part**로 구분합니다. 파트별 장기 브랜치(`backend/develop` 등)는 만들지 않습니다.
 - `master`, `develop`은 직접 push가 막혀 있습니다. 반드시 MR로 머지합니다.
-- `backend`처럼 파트 이름만으로 된 브랜치는 만들지 마세요. Git 구조상 `backend/feat/*` 브랜치를 만들 수 없게 됩니다.
+- `feat`처럼 type 이름만으로 된 브랜치는 만들지 마세요. Git 구조상 `feat/*` 브랜치를 만들 수 없게 됩니다.
 
 ---
 
@@ -55,8 +55,8 @@ CI 설정(`.gitlab-ci.yml`)은 모든 브랜치에서 동작해야 하므로 루
 ## 3. 브랜치 네이밍
 
 ```text
-{part}/{type}/{설명}
-{part}/{type}/{Jira키}-{설명}     # Jira 이슈가 있는 경우 (권장)
+{type}/{part}/{설명}
+{type}/{part}/{Jira키}-{설명}     # Jira 이슈가 있는 경우 (권장)
 ```
 
 **part**
@@ -78,14 +78,14 @@ CI 설정(`.gitlab-ci.yml`)은 모든 브랜치에서 동작해야 하므로 루
 **설명**: 영어 소문자 + 하이픈(kebab-case), 짧게
 
 ```text
-platform/feat/S15P31E110-5-xen-bringup
-agent/feat/S15P31E110-18-heartbeat
-backend/feat/S15P31E110-12-vm-lifecycle-api
-backend/fix/S15P31E110-33-websocket-reconnect
-frontend/feat/S15P31E110-20-vm-list-card
-display/feat/hdmi-router
-deploy/chore/gitlab-ci-pytest
-common/docs/openapi-v1
+feat/platform/S15P31E110-5-xen-bringup
+feat/agent/S15P31E110-18-heartbeat
+feat/backend/S15P31E110-12-vm-lifecycle-api
+fix/backend/S15P31E110-33-websocket-reconnect
+feat/frontend/S15P31E110-20-vm-list-card
+feat/display/hdmi-router
+chore/deploy/gitlab-ci-pytest
+docs/common/openapi-v1
 ```
 
 ---
@@ -98,7 +98,7 @@ git switch develop
 git pull origin develop
 
 # 2) 기능 브랜치 생성
-git switch -c backend/feat/S15P31E110-12-vm-lifecycle-api
+git switch -c feat/backend/S15P31E110-12-vm-lifecycle-api
 
 # 3) 작업 & 커밋
 git add .
@@ -109,7 +109,7 @@ git fetch origin
 git rebase origin/develop      # 충돌 시 해결 후 git rebase --continue
 
 # 5) push 후 GitLab에서 MR 생성 (target: develop)
-git push -u origin backend/feat/S15P31E110-12-vm-lifecycle-api
+git push -u origin feat/backend/S15P31E110-12-vm-lifecycle-api
 ```
 
 rebase 후 이미 push했던 브랜치를 다시 올릴 때는 `git push --force-with-lease`를 사용합니다.
@@ -122,7 +122,7 @@ Claude Code에서 `/branch {Jira키}`를 실행하면 1)~2) 단계를 대신합�
 
 ```text
 /branch S15P31E110-56
-→ platform/feat/S15P31E110-56-rpi4-xen-boot
+→ feat/platform/S15P31E110-56-rpi4-xen-boot
 ```
 
 | Jira 접두어 | part |
