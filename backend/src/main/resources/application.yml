@@ -39,6 +39,21 @@ perseus:
     refresh-cookie-secure: ${AUTH_COOKIE_SECURE:false}
     max-login-attempts: ${MAX_LOGIN_ATTEMPTS:5}
     login-attempt-window: ${LOGIN_ATTEMPT_WINDOW:5m}
+  # 1차 템플릿 목록. 버전과 최소 메모리는 P2 확인 전 임시값이다.
+  template-catalog:
+    templates:
+      - template-id: alpine
+        version: "1.2.0"
+        display-name: Alpine 1.2.0
+        min-memory-mib: 128
+      - template-id: debian
+        version: "12"
+        display-name: Debian 12
+        min-memory-mib: 256
+      - template-id: ubuntu
+        version: "24.04"
+        display-name: Ubuntu 24.04
+        min-memory-mib: 512
   dom0-manager:
     base-url: ${DOM0_MANAGER_BASE_URL:http://127.0.0.1:8081}
     service-token: ${DOM0_MANAGER_SERVICE_TOKEN:}

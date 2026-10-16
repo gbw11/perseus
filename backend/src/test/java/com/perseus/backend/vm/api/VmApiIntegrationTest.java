@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -99,11 +100,45 @@ class VmApiIntegrationTest {
                 .andExpect(jsonPath("$.errors[0].field").value("name"));
     }
 
+    @Test
+    void templatesAreListedInSnakeCase() throws Exception {
+        mockMvc.perform(get("/api/v1/templates")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].template_id").value("debian"))
+                .andExpect(jsonPath("$[0].version").value("12"))
+                .andExpect(jsonPath("$[0].display_name").value("Debian 12"))
+                .andExpect(jsonPath("$[1].min_memory_mib").value(512));
+    }
+
+    @Test
+    void createRejectsUnknownTemplate() throws Exception {
+        createVm("debian-01", "debian", "11", 1, 256)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("TEMPLATE_NOT_FOUND"));
+
+        verify(vmControlPort, never()).create(anyString(), any(CreateVmCommand.class));
+    }
+
+    @Test
+    void createRejectsMemoryBelowTemplateMinimum() throws Exception {
+        createVm("ubuntu-01", "ubuntu", "24.04", 1, 511)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        verify(vmControlPort, never()).create(anyString(), any(CreateVmCommand.class));
+    }
+
     private org.springframework.test.web.servlet.ResultActions createVm(String name, int vcpus, int memoryMib)
             throws Exception {
+        return createVm(name, "debian", "12", vcpus, memoryMib);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions createVm(
+            String name, String templateId, String templateVersion, int vcpus, int memoryMib) throws Exception {
         String body = """
-                {"name":"%s","template_id":"debian","template_version":"12","vcpus":%d,"memory_mib":%d}
-                """.formatted(name, vcpus, memoryMib);
+                {"name":"%s","template_id":"%s","template_version":"%s","vcpus":%d,"memory_mib":%d}
+                """.formatted(name, templateId, templateVersion, vcpus, memoryMib);
         return mockMvc.perform(post("/api/v1/vms")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .contentType(MediaType.APPLICATION_JSON)
