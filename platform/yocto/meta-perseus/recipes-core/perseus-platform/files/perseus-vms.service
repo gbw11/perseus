@@ -1,0 +1,15 @@
+[Unit]
+Description=Start registered Perseus VMs once (OS/app readiness is separate)
+Requires=srv-perseus.mount perseus-xen-ready.service perseus-dhcp.service perseus-vm-shutdown.service
+After=srv-perseus.mount perseus-xen-ready.service perseus-dhcp.service perseus-vm-shutdown.service
+RequiresMountsFor=/srv/perseus
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/perseus-vm autostart
+TimeoutStartSec=150s
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

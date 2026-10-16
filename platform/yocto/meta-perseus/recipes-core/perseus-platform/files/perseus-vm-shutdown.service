@@ -1,0 +1,16 @@
+[Unit]
+Description=Gracefully stop registered Perseus guests before storage/toolstack stop
+Requires=srv-perseus.mount perseus-xen-ready.service
+After=srv-perseus.mount perseus-xen-ready.service xenstored.service xenconsoled.service xen-init-dom0.service
+Before=perseus-vms.service
+RequiresMountsFor=/srv/perseus
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/sbin/perseus-vm shutdown-all
+TimeoutStopSec=110s
+
+[Install]
+WantedBy=multi-user.target

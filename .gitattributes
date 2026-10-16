@@ -63,3 +63,8 @@
 *.wic        binary
 *.ext4       binary
 *.qcow2      binary
+
+# Yocto metadata and archive rules from the WSL build setup
+*.fragment text eol=lf
+*.lock text eol=lf
+*.bz2 binary
