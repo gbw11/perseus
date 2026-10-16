@@ -3,6 +3,7 @@ package com.perseus.backend.auth.api;
 import com.perseus.backend.auth.application.AuthService;
 import com.perseus.backend.auth.application.AuthService.LoginResult;
 import com.perseus.backend.auth.infrastructure.AuthProperties;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.time.Duration;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@SecurityRequirements
 @RequestMapping("/api/v1/auth")
 public class AuthController {
 
