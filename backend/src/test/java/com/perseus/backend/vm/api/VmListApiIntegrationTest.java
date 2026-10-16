@@ -47,6 +47,7 @@ class VmListApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].vm_id").value("vm-1"))
                 .andExpect(jsonPath("$.items[0].state").value("running"))
+                .andExpect(jsonPath("$.items[0].agent_status").value("UNKNOWN"))
                 .andExpect(jsonPath("$.observed_at").isNotEmpty());
     }
 
