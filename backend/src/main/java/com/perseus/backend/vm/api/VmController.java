@@ -4,7 +4,7 @@ import com.perseus.backend.vm.application.VmService;
 import com.perseus.backend.vm.domain.Vm;
 import jakarta.validation.Valid;
 import java.net.URI;
-import java.util.List;
+import java.time.Clock;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,14 +19,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class VmController {
 
     private final VmService vmService;
+    private final Clock clock;
 
-    public VmController(VmService vmService) {
+    public VmController(VmService vmService, Clock clock) {
         this.vmService = vmService;
+        this.clock = clock;
     }
 
     @GetMapping
-    public List<Vm> list() {
-        return vmService.list();
+    public VmListResponse list() {
+        return new VmListResponse(vmService.list(), clock.instant());
     }
 
     @PostMapping
