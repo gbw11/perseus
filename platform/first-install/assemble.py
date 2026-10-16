@@ -31,6 +31,10 @@ spec = importlib.util.spec_from_file_location('perseus_prepare_existing', ROOT /
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
 
+rtos_spec = importlib.util.spec_from_file_location('perseus_rtos_template', ROOT / 'platform/guests/zephyr/template.py')
+rtos = importlib.util.module_from_spec(rtos_spec)
+rtos_spec.loader.exec_module(rtos)
+
 
 
 def read_layout(image):
@@ -122,10 +126,45 @@ def guest_info(config):
     return result
 
 
+
+def rtos_info(config):
+    """추가 RTOS는 명시적으로 검증한 불변 펌웨어만 보관한다. 기본 VM/seed는 추가하지 않는다."""
+    entries = config.get('rtos_templates', [])
+    if not isinstance(entries, list) or len(entries) > 1:
+        raise ValueError('at most one pinned Zephyr firmware template is supported')
+    result = []
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {'template_dir', 'template_manifest_sha256'}:
+            raise ValueError('RTOS template needs an explicit directory and manifest hash')
+        result.append(rtos.info(entry['template_dir'], entry['template_manifest_sha256']))
+    return result
+
+
+def copy_rtos_templates(data, entries):
+    """Linux 인스턴스 레지스트리와 별도 위치에 검증된 펌웨어만 복사하고 다시 검증한다."""
+    records = []
+    if entries:
+        directory = data / 'rtos-templates'
+        directory.mkdir()
+    for entry in entries:
+        source = Path(entry['template'])
+        verified = rtos.info(source, entry['template_manifest_sha256'])
+        if verified != entry:
+            raise ValueError('RTOS source changed after planning')
+        destination = directory / entry['id']
+        destination.mkdir()
+        for name in sorted(rtos.FILES | {'template.json'}):
+            shutil.copyfile(regular(source / name), destination / name)
+            (destination / name).chmod(0o444)
+        rtos.info(destination, entry['template_manifest_sha256'])
+        records.append({key: entry[key] for key in ('id', 'kind', 'template_manifest_sha256', 'metadata', 'logical_bytes')})
+    return records
+
+
 def plan(config, image, record, output, work, card_bytes):
     if config.get('schema') != 1:
         raise ValueError('unsupported assembly config schema')
-    if set(config) - {'schema','platform','guests','template_policy','operating_reserve_bytes'}:
+    if set(config) - {'schema','platform','guests','template_policy','operating_reserve_bytes','rtos_templates'}:
         raise ValueError('unknown deployment configuration fields')
     for path in (output, work):
         new_path(path)
@@ -137,6 +176,11 @@ def plan(config, image, record, output, work, card_bytes):
         raise ValueError('output/work paths must be separate dedicated directories')
     mbr, platform_bytes, table = read_layout(image)
     guests = guest_info(config)
+    firmware_templates = rtos_info(config)
+    for entry in firmware_templates:
+        for path in (output, work):
+            if path.is_relative_to(Path(entry['template'])):
+                raise ValueError('output/work cannot be inside an RTOS input template')
     for guest in guests:
         if guest.get('template'):
             for path in (output, work):
@@ -146,11 +190,12 @@ def plan(config, image, record, output, work, card_bytes):
     if type(reserve) is not int or reserve < 2 * GIB:
         raise ValueError('at least 2 GiB operating reserve is required')
     totals = capacity(platform_bytes, guests, template_policy=config.get('template_policy', 'full'),
-                      card_bytes=card_bytes, reserve_bytes=reserve)
+                      card_bytes=card_bytes, reserve_bytes=reserve,
+                      retained_firmware_bytes=sum(item['logical_bytes'] for item in firmware_templates))
     if totals['image_bytes'] > 2 ** 32 * SECTOR:
         raise ValueError('DOS image exceeds 2 TiB')
     return {'schema': 1, 'action': 'plan', 'platform': config['platform'], 'platform_source_commit': record['source_commit'],
-            'layout': table, 'guests': guests, 'capacity': totals, 'features_required': FEATURES,
+            'layout': table, 'guests': guests, 'rtos_templates': firmware_templates, 'capacity': totals, 'features_required': FEATURES,
             'platform_features_verified': False,
             'execution_gate': 'RO-mount and verify actual platform rootfs capabilities before any guest preparation; old images are rejected',
             'output_directory': str(output), 'work_directory': str(work),
@@ -325,7 +370,8 @@ def source_fingerprints():
              ROOT / 'platform/first-install/assemble.py', ROOT / 'platform/first-install/artifact_io.py',
              ROOT / 'platform/first-install/completed_artifacts.py', ROOT / 'scripts/publish-perseus-platform.py',
              ROOT / 'platform/first-install/first_install_contract.py',
-             ROOT / 'platform/guests/sources.lock.json', *sorted((ROOT / 'platform/guests/common').glob('*.py'))]
+             ROOT / 'platform/guests/sources.lock.json', *sorted((ROOT / 'platform/guests/common').glob('*.py')),
+             *(p for p in sorted((ROOT / 'platform/guests/zephyr').glob('*')) if p.is_file())]
     return {str(p.relative_to(ROOT)): sha(p) for p in paths}
 
 
@@ -400,8 +446,10 @@ def assemble(config, image, record, planned):
                             'seed_root_sha256': sha(seed / 'root.raw'), 'boot': boot})
             template_records.append({'id': guest['source_id'], 'metadata': tmeta, 'root_bytes': (template / 'root.raw').stat().st_size, 'template_manifest_sha256': sha(template / 'template.json'),
                                      'retained_root': planned['capacity']['template_policy'] == 'full'})
+        firmware_records = copy_rtos_templates(data, planned.get('rtos_templates', []))
         factory = {'schema': 1, 'features': FEATURES, 'factory_id': str(uuid.uuid4()), 'instances': bundles,
-                   'templates': template_records, 'template_policy': planned['capacity']['template_policy']}
+                   'templates': template_records, 'rtos_templates': firmware_records,
+                   'template_policy': planned['capacity']['template_policy']}
         (data / '.perseus-install.json').write_text(json.dumps(factory, indent=2) + '\n')
         stats = os.statvfs(data)
         actual_free = stats.f_bavail * stats.f_frsize
@@ -418,6 +466,8 @@ def assemble(config, image, record, planned):
         for guest in planned['guests']:
             template = templates[guest['id']]
             template_info(template, guest['source_id'], verified_templates[guest['id']])
+        for entry in planned.get('rtos_templates', []):
+            rtos.info(entry['template'], entry['template_manifest_sha256'])
         final = stage / 'perseus-first-install.img'
         shutil.copyfile(base, final)
         with final.open('r+b') as stream:

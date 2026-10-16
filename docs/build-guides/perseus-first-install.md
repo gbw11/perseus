@@ -1,6 +1,6 @@
 # 공통 SD 최초 설치 이미지 — 소스 계약과 후속 실행 절차
 
-이 문서는 WIC 수정 `70c85b90ef21e73b4d7b9daa97a65c0cacf3078c` 위의 후속 소스 구현이다. **소스·정적/모의 검증과 후속 dom0 빌드를 완료했다. 실제 템플릿/인스턴스 생성·완료 이미지 게시·조립·SD 기록·실보드 부팅은 실행하지 않았다.** 파일 내부 검사 통과와 실보드 성공은 구분한다. 완료 산출물 인계 수정과 검증 결과는 [후속 보고](perseus-completed-artifacts-20261016.md)에 기록했다.
+이 문서는 WIC 수정 `70c85b90ef21e73b4d7b9daa97a65c0cacf3078c` 위의 후속 소스 구현이다. **소스·정적/모의 검증·후속 dom0 빌드·완료 이미지 게시와 Ubuntu/Debian·Zephyr 템플릿 생성을 완료했다. 인스턴스/seed 생성·최종 조립·SD 기록·실보드 부팅은 실행하지 않았다.** 파일 내부 검사 통과와 실보드 성공은 구분한다. 완료 산출물 인계 수정과 검증 결과는 [후속 보고](perseus-completed-artifacts-20261016.md)에, 실제 템플릿·64GB 실측 계획과 조립 전 보완할 seed SSH 검사 문제는 [Linux 템플릿 생성 보고](perseus-guest-templates-20261016.md)와 [Zephyr 추가 보고](perseus-zephyr-template-20261016.md)에 기록했다.
 
 최종 사용자는 승인 후 만들어진 공통 `.img`를 선택 → 64GB/128GB SD에 기록 → 전원을 연결한다. 아래 절차는 그 이미지를 만드는 담당자용이다. SD 전체 재기록은 기존 데이터를 덮어쓰며, 데이터 보존 업데이트·백업·복원은 이 조립기 범위가 아니다.
 
@@ -8,7 +8,7 @@
 
 - 32GB 지원은 제외한다. 카드 상품 표기를 사용하지 않고 실제 장치 바이트 수로 판정한다.
 - Ubuntu·Debian 템플릿의 **전체 root.raw 원본을 SD에 보관**한다. 기본 VM은 `ubuntu-dev`, `debian-dev`이고 각각 별도 8GiB raw 디스크를 사용한다. 기존 기본 메모리·vCPU·내부 IP 정책도 유지한다.
-- Alpine은 확장용 디렉터리와 명확한 미지원 경계만 유지한다. 현재 활성 원본/adapter/템플릿/VM은 아니다.
+- 세 번째 템플릿은 Zephyr 4.4.0 Xen ARM64 콘솔 펌웨어다. Ubuntu·Debian과 별도 `rtos-templates/`에 보관하며 기본 자동 시작/영구 Linux 디스크/SSH 대상이 아니다. [RTOS 계약](../../platform/guests/zephyr/README.md)을 따른다.
 - 템플릿은 읽기 전용 sparse raw ext4를 선택했다. 압축/overlay 계층 없이 native ARM64에서 기존 생성 코드를 재사용할 수 있다. 2개 템플릿과 2개 VM의 논리 용량 32GiB에 시스템·메타데이터·운영 여유를 더해 64GB 범위를 검토한다. 압축 보관은 이번에 구현하지 않았다.
 - 시작·정지·재부팅은 디스크를 복제하거나 초기화하지 않는다. 최초 생성은 별도 명령이다. 템플릿을 갱신해도 기존 VM은 덮어쓰지 않는다.
 
@@ -74,7 +74,7 @@ python3 -B scripts/assemble-perseus-first-install.py plan \
 - 실제 rootfs의 capability 파일, 현재 소스와 일치하는 최초 부팅/공유 생성 모듈·unit·enable 링크.
 - 확장·생성 도구, SSH key 생성 선행 drop-in, `machine-id=uninitialized`, 공유 SSH host key 부재.
 
-**최초 설치 소스 이전의 성공 이미지는 기능 부족으로 거부한다.** 후속 빌드 `build-rpi4-xen-first-install-20261016-142155`는 종료 코드 0과 실제 WIC 최초 부팅 기능 47개 검사를 통과했다. 게시와 실제 조립은 아직 실행하지 않았다. 조립기가 rootfs에 서비스나 실행 파일을 끼워 넣어 우회하지 않는다. 게스트 준비는 이 gate가 통과한 뒤에만 시작한다.
+**최초 설치 소스 이전의 성공 이미지는 기능 부족으로 거부한다.** 후속 빌드 `build-rpi4-xen-first-install-20261016-142155`는 종료 코드 0과 실제 WIC 최초 부팅 기능 47개 검사를 통과했다. 완료 이미지 게시는 수행했으며 실제 조립은 아직 실행하지 않았다. seed SSH/chroot 검증 경로는 [후속 보완](perseus-seed-ssh-fix-20261016.md)에 반영했다. 해당 소스를 포함한 새 dom0 재빌드가 필요하다. 조립기가 rootfs에 서비스나 실행 파일을 끼워 넣어 우회하지 않는다. 게스트 준비는 이 gate가 통과한 뒤에만 시작한다.
 
 승인 후 계획 명령의 `plan`을 `assemble`로 바꾸고 `--execute`를 추가한다. 출력/작업 디렉터리는 기존 것이 없어야 하며 동일 filesystem에 두어야 한다. `/dev`, `/proc`, `/sys` 또는 symlink 경로를 출력으로 받지 않는다. 할당한 loop와 mount만 추적해 해제하고, 해제 실패 시 작업 경로를 보존하고 실패한다. 임시 경로도 임의 삭제하지 않는다.
 

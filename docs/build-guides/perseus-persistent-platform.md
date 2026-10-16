@@ -1,6 +1,6 @@
 # Perseus 영구 Xen 플랫폼 계약과 후속 수락 시험
 
-공통 SD 설치·64/128GB 확장·Pi 단독 최초 생성의 최신 계약은 [공통 최초 설치 이미지](perseus-first-install.md)를 따른다. 아래 문서의 초기 수동 저장소 준비 절차와 Alpine 계획은 당시 구현 기록이며, 현재 활성 템플릿은 Ubuntu·Debian이고 Alpine은 확장 구조만 유지한다.
+공통 SD 설치·64/128GB 확장·Pi 단독 최초 생성의 최신 계약은 [공통 최초 설치 이미지](perseus-first-install.md)를 따른다. 아래 문서의 초기 수동 저장소 준비 절차와 Alpine 계획은 당시 구현 기록이며, Linux 활성 템플릿은 Ubuntu·Debian이며, Alpine 확장 지점은 별도 Zephyr Xen 펌웨어 템플릿으로 교체했다. RTOS는 Linux 생명주기/SSH 계약에 포함되지 않는다.
 
 ## 현재 단계와 설계 결정
 
@@ -60,7 +60,7 @@ Debian [Cloud 설명](https://wiki.debian.org/Cloud)의 일반 커널 포함 `ge
 
 root는 파티션 없는 `/dev/xvda`다. 새 영구 게스트는 `net.ifnames=0`으로 단일 VIF를 `eth0`로 유지해 초기 networkd 매칭과 일치시킨다. 클라우드 원본의 EFI/fstab/cloud-init 설정은 **새 템플릿 준비 때만** 교체·비활성화한다. Xen Linux shutdown control과 systemd의 정상 종료, hvc0 콘솔, SSH는 후속 하드웨어 시험 대상이다. 게스트의 커널 패키지는 초기 버전으로 hold한다. 앱 업데이트는 자유롭게 하되, 게스트 커널을 바꿀 때는 외부 Image/initrd와 디스크 내부 모듈을 함께 갱신하는 별도 오프라인 검증이 필요하다.
 
-Alpine은 같은 bundle/인스턴스 계약으로 향후 추가할 수 있다. 현재 생성 도구의 게스트 설정은 Debian 계열 systemd/initramfs-tools 전용이며 Alpine rootfs를 그대로 넣어 실행할 수 있다는 뜻은 아니다. Alpine에는 별도 OS 준비 adapter와 커널 검증이 필요하다.
+기존 Linux bundle/인스턴스 계약은 Debian 계열 systemd/initramfs-tools 전용이다. 세 번째 Zephyr 템플릿은 별도 불변 Xen 펌웨어 번들이며 Linux rootfs·SSH·PV 블록/네트워크 지원을 가정하지 않는다. 세부 계약은 `platform/guests/zephyr/README.md`를 따른다.
 
 ## 생성·게시 경계와 호스트 도구
 

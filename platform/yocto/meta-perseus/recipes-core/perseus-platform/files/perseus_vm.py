@@ -181,7 +181,7 @@ class Platform:
                 raise PlatformError('invalid local template path')
             meta = json.loads(regular_asset(item, 'template.json').read_text())
             if meta.get('id') != item.name or meta.get('source', {}).get('distribution') not in ('ubuntu', 'debian'):
-                raise PlatformError('unsupported template adapter; Alpine remains an extension point')
+                raise PlatformError('unsupported Linux template adapter; RTOS firmware has a separate catalog')
             root = regular_asset(item, 'root.raw')
             if type(meta.get('size_gib')) is not int or not 4 <= meta['size_gib'] <= 32:
                 raise PlatformError('invalid template logical size')

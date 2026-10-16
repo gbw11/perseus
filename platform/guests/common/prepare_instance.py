@@ -1,8 +1,10 @@
 """PC와 Pi에서 공유하는 명시적 최초 인스턴스 생성. lifecycle start/stop은 호출하지 않는다."""
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import time
 
@@ -63,10 +65,42 @@ class Workspace:
         print('scratch retained for inspection:', self.path)
 
 
+@contextmanager
+def guest_runtime(work, root):
+    """SSH 오프라인 검사에만 필요한 /dev·/run을 전용 tmpfs로 덮고 역순 해제한다.
+
+    호스트 /dev를 bind하지 않는다. 기존 rootfs 디렉터리·키·런타임 파일은 보존한다.
+    해제 실패는 호출자에게 전달하며 미해제 항목은 Workspace.close의 재시도를 위해 남긴다.
+    """
+    checkpoint = len(work.mounts)
+    try:
+        for relative, options in [('dev', 'size=1m,mode=755,nosuid,noexec'),
+                                  ('run', 'size=1m,mode=755,nosuid,nodev,noexec')]:
+            target = inside(root, relative, follow_final=False, create_parents=False)
+            if target.is_symlink() or not target.is_dir():
+                raise ValueError('guest runtime mountpoint must be an existing unlinked directory: ' + relative)
+            command(['mount', '-t', 'tmpfs', '-o', options, 'tmpfs', target])
+            work.mounts.append(target)
+            if relative == 'dev':
+                # fresh tmpfs 안의 단일 장치만 만든다. inside()의 /dev 경로 거부를 우회하는 범위도 여기뿐이다.
+                null = target / 'null'
+                os.mknod(null, stat.S_IFCHR | 0o666, os.makedev(1, 3))
+                null.chmod(0o666)
+        inside(root, 'run/sshd').mkdir(mode=0o755)
+        yield
+    finally:
+        while len(work.mounts) > checkpoint:
+            command(['umount', work.mounts[-1]])
+            work.mounts.pop()
+
+
 def verify_guest_ssh(root, *, seed=False):
-    # /run/sshd는 임시 검증용이며 재부팅 초기화 스크립트가 아니다.
-    inside(root, 'run/sshd').mkdir(parents=True, exist_ok=True)
-    effective = subprocess.check_output(['chroot', str(root), '/usr/sbin/sshd', '-G' if seed else '-T', '-C', 'user=root,host=perseus,addr=192.168.77.1,laddr=192.168.77.10,lport=22'], text=True)
+    # -C의 Match 조건 검사는 -T가 필요하다. seed의 -G는 공유 host key 없이 설정만 검사한다.
+    options = ['-G', '-T'] if seed else ['-T']
+    effective = subprocess.check_output(
+        ['chroot', str(root), '/usr/sbin/sshd', *options, '-C',
+         'user=root,host=perseus,addr=192.168.77.1,laddr=192.168.77.10,lport=22'],
+        text=True, timeout=60)
     for entry in ('permitrootlogin yes', 'passwordauthentication yes', 'permitemptypasswords no', 'authenticationmethods any'):
         if entry not in effective.splitlines():
             raise ValueError('guest SSH effective policy mismatch: ' + entry)
@@ -101,7 +135,7 @@ def make_instance(args, *, vm, defaults_path, record_override=None):
     record = dict(record_override) if record_override is not None else next((dict(r) for r in defaults if r['id'] == args.id), None)
     if record is None:
         if not args.spec:
-            raise ValueError('custom/Alpine instance requires --spec JSON with all identity/resource fields')
+            raise ValueError('custom Linux instance requires --spec JSON with all identity/resource fields')
         record = json.loads(args.spec.read_text())
         if record.get('id') != args.id:
             raise ValueError('instance spec id differs from requested id')
@@ -122,7 +156,7 @@ def make_instance(args, *, vm, defaults_path, record_override=None):
     if (template / 'root.raw').stat().st_mode & 0o222:
         raise ValueError('template is writable, not an immutable source')
     if meta.get('source', {}).get('distribution') not in ('ubuntu', 'debian'):
-        raise ValueError('unsupported template adapter; Alpine remains an extension point')
+        raise ValueError('unsupported Linux template adapter; RTOS firmware uses its separate bundle')
     if digest(template / 'root.raw') != meta['root_sha256']:
         raise ValueError('template root disk changed since publication')
     boot = json.loads((template / 'boot.json').read_text())
@@ -154,7 +188,8 @@ def make_instance(args, *, vm, defaults_path, record_override=None):
             prepare_deployment_seed(root, record)
         else:
             prepare_instance(root, record, command=command)
-        verify_guest_ssh(root, seed=seed)
+        with guest_runtime(work, root):
+            verify_guest_ssh(root, seed=seed)
         os.sync()
         work.close()
         work.mounts, work.loops = [], []

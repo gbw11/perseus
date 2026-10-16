@@ -21,5 +21,11 @@
       "template_dir": "/absolute/verified-templates/debian-13-20261015",
       "template_manifest_sha256": "REPLACE_WITH_ACTUAL_TEMPLATE_JSON_SHA256"
     }
+  ],
+  "rtos_templates": [
+    {
+      "template_dir": "/absolute/verified-templates/zephyr-4.4.0-xenvm",
+      "template_manifest_sha256": "REPLACE_WITH_ACTUAL_TEMPLATE_JSON_SHA256"
+    }
   ]
 }

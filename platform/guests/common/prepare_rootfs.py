@@ -81,7 +81,7 @@ def prepare_template(root):
     root = Path(root)
     os_release = inside(root, 'etc/os-release', create_parents=False)
     if os_release.is_file() and 'ID=alpine' in os_release.read_text().replace(chr(34), '').splitlines():
-        raise ValueError('Alpine is an extension point only; no supported preparation adapter')
+        raise ValueError('unsupported Linux rootfs adapter; RTOS firmware is not a Linux rootfs')
     marker = inside(root, 'etc/perseus/template-prepared')
     if marker.exists() or inside(root, 'etc/perseus/instance-id').exists():
         raise ValueError('refusing to initialize an already prepared/instantiated rootfs')

@@ -73,6 +73,35 @@ def raw_kernel(source, destination):
     destination.write_bytes(data)
 
 
+
+def mount_source_boot(work, root, partitions):
+    """원본 fstab의 별도 /boot만 같은 private loop 안에서 찾아 읽기 전용으로 연결한다."""
+    fstab = inside(root, 'etc/fstab', create_parents=False)
+    entries = [row for line in fstab.read_text().splitlines()
+               if len(row := line.split('#', 1)[0].split()) >= 3 and row[1] == '/boot']
+    if not entries:
+        return
+    if len(entries) != 1 or entries[0][2] != 'ext4':
+        raise ValueError('unsupported or ambiguous separate guest /boot filesystem')
+    source = entries[0][0]
+    match = __import__('re').fullmatch(r'(LABEL|UUID|PARTUUID)=([A-Za-z0-9_.-]+)', source)
+    if not match:
+        raise ValueError('separate guest /boot must use LABEL/UUID/PARTUUID on the private source loop')
+    key = {'LABEL': 'LABEL', 'UUID': 'UUID', 'PARTUUID': 'PART_ENTRY_UUID'}[match[1]]
+    matches = []
+    for partition in partitions:
+        fields = subprocess.check_output(['blkid', '-p', '-o', 'export', str(partition)], text=True)
+        info = dict(line.split('=', 1) for line in fields.splitlines() if '=' in line)
+        if info.get('TYPE') == 'ext4' and info.get(key) == match[2]:
+            matches.append(partition)
+    if len(matches) != 1:
+        raise ValueError('separate guest /boot is missing or duplicated on the private source loop')
+    target = inside(root, 'boot', create_parents=False)
+    if not target.is_dir():
+        raise ValueError('source /boot mountpoint must already exist on the read-only root')
+    work.mount(matches[0], target, readonly=True)
+
+
 def root_partition(work, disk):
     loop = work.loop(disk, readonly=True, partitions=True)
     for _ in range(20):
@@ -85,7 +114,8 @@ def root_partition(work, disk):
             continue
         target = work.path / f'source-{index}'
         work.mount(partition, target, readonly=True)
-        if (target / 'etc/os-release').exists():
+        if inside(target, 'etc/os-release', create_parents=False).is_file():
+            mount_source_boot(work, target, partitions)
             return target
     raise ValueError('no ext4 Linux root partition found on the private source loop')
 

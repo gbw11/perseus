@@ -1,0 +1,17 @@
+{
+  "id": "zephyr-4.4.0-xenvm",
+  "kind": "zephyr-xen-firmware",
+  "version": "4.4.0",
+  "architecture": "arm64",
+  "repository": "https://github.com/zephyrproject-rtos/zephyr.git",
+  "tag": "v4.4.0",
+  "tag_object": "4f50f0ba8905f27b2f60123d0ee0934fda6fe134",
+  "commit": "684c9e8f32e4373a21098559f748f06915f950c9",
+  "spdx_url": "https://github.com/zephyrproject-rtos/zephyr/releases/download/v4.4.0/zephyr-v4.4.0.spdx",
+  "spdx_sha256": "1307753cf6fcb3d9a07d3eac0dd029b9411c8217f84216f57263a0ffd676f1d4",
+  "sample": "samples/synchronization",
+  "board": "xenvm",
+  "sdk_version": "1.0.0",
+  "toolchain_url": "https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v1.0.0/toolchain_gnu_linux-x86_64_aarch64-zephyr-elf.tar.xz",
+  "toolchain_sha256": "4015c637d21348db36bb31e849a00bcbccc02304feef519b897d0b83ce759760"
+}

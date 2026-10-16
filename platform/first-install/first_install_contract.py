@@ -63,17 +63,19 @@ def growth(current, device_bytes):
             'filesystem_max_bytes': size * SECTOR}
 
 
-def capacity(platform_bytes, guests, *, template_policy='full', card_bytes=None, reserve_bytes=2 * GIB):
+def capacity(platform_bytes, guests, *, template_policy='full', card_bytes=None, reserve_bytes=2 * GIB, retained_firmware_bytes=0):
     """희소 파일 점유량 대신 VM의 최대 논리 용량을 모두 예약한다. MiB/GiB는 2진 단위다."""
     if template_policy != 'full' or not guests:
         raise ValueError('invalid template policy or missing guests')
     for g in guests:
         if not 4 * GIB <= g['logical_bytes'] <= 32 * GIB or not 0 <= g['allocated_bytes'] <= g['logical_bytes']:
             raise ValueError('invalid guest disk accounting')
+    if type(retained_firmware_bytes) is not int or not 0 <= retained_firmware_bytes <= GIB:
+        raise ValueError('invalid retained RTOS firmware accounting')
     vm_bytes = sum(g['logical_bytes'] for g in guests)
     template_bytes = vm_bytes if template_policy == 'full' else 0
     boot_catalog = sum(g['boot_bytes'] for g in guests) * 2
-    payload = vm_bytes + template_bytes + boot_catalog
+    payload = vm_bytes + template_bytes + boot_catalog + retained_firmware_bytes
     metadata = align((payload + 19) // 20 + 256 * MIB)  # 실측치가 아닌 보수적 5% + 고정 메타데이터 여유.
     data_bytes = align(payload + metadata + reserve_bytes)
     start = align(platform_bytes)
@@ -83,7 +85,8 @@ def capacity(platform_bytes, guests, *, template_policy='full', card_bytes=None,
     result = {'template_policy': template_policy, 'platform_bytes': platform_bytes,
               'data_start_bytes': start, 'data_bytes': data_bytes, 'image_bytes': image_bytes,
               'minimum_card_bytes': image_bytes, 'vm_max_bytes': vm_bytes, 'retained_template_root_bytes': template_bytes,
-              'boot_catalog_bytes': boot_catalog, 'filesystem_metadata_allowance_bytes': metadata,
+              'boot_catalog_bytes': boot_catalog, 'retained_firmware_bytes': retained_firmware_bytes,
+              'filesystem_metadata_allowance_bytes': metadata,
               'operating_reserve_bytes': reserve_bytes,
               'initial_vm_allocated_bytes': sum(g['allocated_bytes'] for g in guests),
               'vm_growth_budget_bytes': vm_bytes - sum(g['allocated_bytes'] for g in guests),
