@@ -36,6 +36,7 @@ perseus:
   dom0-manager:
     base-url: ${DOM0_MANAGER_BASE_URL:http://127.0.0.1:8081}
     service-token: ${DOM0_MANAGER_SERVICE_TOKEN:}
-    connect-timeout: ${DOM0_MANAGER_CONNECT_TIMEOUT:5s}
-    query-timeout: ${DOM0_MANAGER_QUERY_TIMEOUT:10s}
-    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:45s}
+    connect-timeout: ${DOM0_MANAGER_CONNECT_TIMEOUT:2s}
+    query-timeout: ${DOM0_MANAGER_QUERY_TIMEOUT:6s}
+    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:35s}
+    retry-backoff: ${DOM0_MANAGER_RETRY_BACKOFF:500ms}

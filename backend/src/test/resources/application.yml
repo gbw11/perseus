@@ -30,3 +30,4 @@ perseus:
     connect-timeout: 1s
     query-timeout: 2s
     command-timeout: 3s
+    retry-backoff: 10ms

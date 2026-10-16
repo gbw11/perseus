@@ -9,5 +9,6 @@ public record Dom0ManagerProperties(
         String serviceToken,
         Duration connectTimeout,
         Duration queryTimeout,
-        Duration commandTimeout) {
+        Duration commandTimeout,
+        Duration retryBackoff) {
 }
