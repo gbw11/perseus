@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,18 +31,21 @@ public class AgentDataService {
     private final MetricSampleRepository metricSampleRepository;
     private final ProcessSnapshotRepository processSnapshotRepository;
     private final AgentProperties properties;
+    private final ApplicationEventPublisher eventPublisher;
 
     public AgentDataService(
             AgentInventoryRepository inventoryRepository,
             AgentHeartbeatRepository heartbeatRepository,
             MetricSampleRepository metricSampleRepository,
             ProcessSnapshotRepository processSnapshotRepository,
-            AgentProperties properties) {
+            AgentProperties properties,
+            ApplicationEventPublisher eventPublisher) {
         this.inventoryRepository = inventoryRepository;
         this.heartbeatRepository = heartbeatRepository;
         this.metricSampleRepository = metricSampleRepository;
         this.processSnapshotRepository = processSnapshotRepository;
         this.properties = properties;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -74,6 +78,7 @@ public class AgentDataService {
             return false;
         }
         metricSampleRepository.save(sample);
+        eventPublisher.publishEvent(new MetricSampleRecorded(sample));
         ProcessSnapshot snapshot = processSnapshotRepository.findById(sample.getVmId())
                 .orElseGet(() -> new ProcessSnapshot(sample.getVmId()));
         if (snapshot.getObservedAt() == null || !sample.getObservedAt().isBefore(snapshot.getObservedAt())) {
