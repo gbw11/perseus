@@ -1,5 +1,7 @@
 # Perseus 영구 Xen 플랫폼 계약과 후속 수락 시험
 
+공통 SD 설치·64/128GB 확장·Pi 단독 최초 생성의 최신 계약은 [공통 최초 설치 이미지](perseus-first-install.md)를 따른다. 아래 문서의 초기 수동 저장소 준비 절차와 Alpine 계획은 당시 구현 기록이며, 현재 활성 템플릿은 Ubuntu·Debian이고 Alpine은 확장 구조만 유지한다.
+
 ## 현재 단계와 설계 결정
 
 2026-10-16, WSL Ubuntu-24.04의 `~/S15P31E110`, `feat/platform/yocto-build-setup`에서 1차 소스 감사 수정본을 유지한 후 확장했다. 이번 단계는 소스·정적 검증이며 새 dom0 이미지, Ubuntu/Debian 템플릿, 인스턴스 디스크를 생성하지 않았다. 기존 VM·SD·빌드·캐시·외부 레이어 커밋도 변경하지 않는다. `root.raw` 테스트 fixture는 몇 바이트의 일반 파일이며 OS 이미지가 아니다.

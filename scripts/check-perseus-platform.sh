@@ -7,11 +7,13 @@ export PYTHONDONTWRITEBYTECODE=1
 cd "$ROOT"
 python3 -B -m unittest discover -s tests/platform -p 'test_perseus*.py' -v
 python3 -B tests/platform/check_perseus_bringup_regression.py
+python3 -B tests/platform/check_perseus_first_install_units.py
 bash -n scripts/setup-yocto.sh scripts/check-xen-bringup-prereqs.sh scripts/check-perseus-platform.sh
 sh -n platform/yocto/meta-perseus/recipes-core/perseus-domu-init/files/init
 sh -n platform/yocto/meta-perseus/recipes-core/perseus-domu-init/files/udhcpc.script
 sh -n platform/yocto/meta-perseus/recipes-core/perseus-bringup/files/perseus-bridge-up
 sh -n platform/yocto/meta-perseus/recipes-core/perseus-platform/files/perseus-vm
+sh -n platform/yocto/meta-perseus/recipes-core/perseus-platform/files/perseus-first-boot
 git diff --check
 [[ "${1:-}" == --metadata ]] || exit 0
 

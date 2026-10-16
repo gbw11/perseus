@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "date": "2026-10-16",
+  "source_baseline": {
+    "branch": "feat/platform/yocto-build-setup",
+    "commit": "70c85b90ef21e73b4d7b9daa97a65c0cacf3078c",
+    "initial_worktree": "clean",
+    "initial_build_processes": "none observed"
+  },
+  "scope": {
+    "phase": "source-static-mock-only",
+    "cards": "64GB/128GB, actual bytes",
+    "active_templates": [
+      "ubuntu",
+      "debian"
+    ],
+    "alpine": "extension only",
+    "template_storage": "full immutable raw roots on SD"
+  },
+  "unittest": {
+    "passed": 97,
+    "existing": 52,
+    "new": 45
+  },
+  "bringup_regression": {
+    "passed": 17
+  },
+  "systemd_loader": {
+    "normal_exit_code": 0,
+    "injected_cycle_exit_code": 1,
+    "actual_services_started": false
+  },
+  "checks": {
+    "final-checks": {
+      "exit_code": 0,
+      "log": "/home/ssafy/perseus-first-install-audit-20261016-131311/final-checks.log",
+      "sha256": "8f2f8dc3fb26b1f4e774300620e05e4a00474f372c9c0964ba4e409bf87356f2"
+    },
+    "metadata-checks": {
+      "exit_code": 0,
+      "log": "/home/ssafy/perseus-first-install-audit-20261016-131311/metadata-checks.log",
+      "sha256": "b8fec6758a0ba33dc6cfc6d6f0c96fea7387d54f89f941c0e36e44650c9a16b8"
+    },
+    "target-imports": {
+      "exit_code": 0,
+      "log": "/home/ssafy/perseus-first-install-audit-20261016-131311/target-imports.log",
+      "sha256": "b4bd14d138f1195f9d110d00af60c50afb3c40936d3f17b0c5efe5435a4eb53c"
+    },
+    "old-platform-rejection": {
+      "exit_code": 0,
+      "log": "/home/ssafy/perseus-first-install-audit-20261016-131311/old-platform-rejection.log",
+      "sha256": "73de00255039c31501f0ff27bf396e3f334500582d117f72042023ec50b9cb2e"
+    }
+  },
+  "metadata_attempt1": {
+    "exit_code": 1,
+    "reason": "Checker compared an unresolved shared FILESPATH with ../..; parser succeeded; checker changed to Path.resolve() and saved parsed metadata rechecked successfully.",
+    "log": "/home/ssafy/perseus-first-install-audit-20261016-131311/platform-checks-final-attempt1.log"
+  },
+  "preserved_success_artifacts": 15,
+  "preserved_build_configurations": 4,
+  "not_performed": [
+    "OS binary download",
+    "real template or instance creation",
+    "BitBake build tasks",
+    "real platform image assembly",
+    "SD access or modification",
+    "hardware boot or capacity test",
+    "git add/commit/push"
+  ],
+  "mock_assembly": "8KiB non-OS fixture only; mkfs/mount/guest preparation mocked",
+  "required_next_step": "Separate approval for a dom0 rebuild containing first-install capabilities, then actual assembly and 64GB/128GB hardware acceptance."
+}

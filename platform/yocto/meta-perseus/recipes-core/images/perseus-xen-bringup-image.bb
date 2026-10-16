@@ -22,6 +22,12 @@ perseus_platform_policy() {
     # Xen의 기본 저장/복원·자동 시작과 Perseus의 중복 실행을 막는다.
     install -d "${IMAGE_ROOTFS}${sysconfdir}/systemd/system"
     ln -snf /dev/null "${IMAGE_ROOTFS}${sysconfdir}/systemd/system/xendomains.service"
+    # 공통 SD에서 PID1이 부팅 초기에 machine-id를 확정한다. 런타임에 ID를 교체하지 않는다.
+    printf 'uninitialized\n' > "${IMAGE_ROOTFS}${sysconfdir}/machine-id"
+    install -d "${IMAGE_ROOTFS}${localstatedir}/lib/dbus"
+    ln -snf /etc/machine-id "${IMAGE_ROOTFS}${localstatedir}/lib/dbus/machine-id"
+    rm -f "${IMAGE_ROOTFS}${sysconfdir}"/ssh/ssh_host_*_key* \
+        "${IMAGE_ROOTFS}${localstatedir}/lib/systemd/random-seed"
     # OpenSSH는 먼저 읽은 값을 사용한다. 다른 include보다 앞에 초기 정책을 둔다.
     for config in sshd_config sshd_config_readonly; do
         target="${IMAGE_ROOTFS}${sysconfdir}/ssh/$config"

@@ -39,7 +39,7 @@ def run(args, timeout=15):
 
 def atomic_write(path, content, mode=0o600):
     """같은 디렉터리의 새 임시 파일을 fsync 후 교체하고 디렉터리도 동기화한다."""
-    temp = path.with_name(path.name + '.tmp-' + str(os.getpid()))
+    temp = path.with_name(path.name + '.tmp-' + str(os.getpid()) + '-' + os.urandom(6).hex())
     fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
     try:
         with os.fdopen(fd, 'w') as f:
@@ -69,6 +69,10 @@ def storage_check(data=DATA, mountinfo=Path('/proc/self/mountinfo')):
             found = True
     if not found:
         raise PlatformError(f'persistent storage is not mounted at {data}; no fallback disk is created')
+    if (data / '.perseus-install.json').exists():
+        state = json.loads((data / '.first-install-state.json').read_text())
+        if state.get('schema') != 1 or state.get('phase') != 'complete':
+            raise PlatformError('first installation incomplete; VM start refused')
     marker = json.loads((data / '.perseus-storage.json').read_text())
     if marker.get('schema') != 1 or not UUID.fullmatch(marker.get('uuid', '')):
         raise PlatformError('invalid persistent storage marker')
@@ -104,8 +108,10 @@ def validate_identity(record):
             raise PlatformError(f'invalid {key}')
 
 
-def validate_record(record, directory):
+def validate_record(record, directory, *, allow_seed=False):
     validate_identity(record)
+    if record.get('identity_state') == 'pending' and not allow_seed:
+        raise PlatformError('factory seed identity is pending; VM start refused')
     if record['id'] != directory.name:
         raise PlatformError('instance directory/id mismatch')
     # 디스크 경로는 사용자 문자열 대신 인스턴스 디렉터리에서만 결정한다.
@@ -124,6 +130,35 @@ def validate_record(record, directory):
     return record
 
 
+def load_records(data):
+    """마운트를 이미 검증한 호출자용 registry 검증. 디스크 생성이나 상태 변경은 없다."""
+    registry = data / 'instances'
+    if registry.is_symlink() or not registry.is_dir():
+        raise PlatformError('instance registry missing')
+    records, identities, disks = {}, set(), set()
+    for directory in sorted(registry.iterdir()):
+        if directory.name.startswith('.'):
+            continue
+        if directory.is_symlink() or not directory.is_dir():
+            raise PlatformError(f'invalid registry entry: {directory}')
+        r = validate_record(json.loads((directory / 'instance.json').read_text()), directory)
+        for key in ('id', 'name', 'hostname', 'uuid', 'mac', 'ipv4'):
+            identity = (key, r[key])
+            if identity in identities:
+                raise PlatformError(f'duplicate VM {key}: {r[key]}')
+            identities.add(identity)
+        st = (directory / 'root.raw').stat()
+        inode = (st.st_dev, st.st_ino)
+        if inode in disks:
+            raise PlatformError('same writable disk is registered more than once')
+        disks.add(inode)
+        template_disk = data / 'templates' / r['template'] / 'root.raw'
+        if template_disk.exists() and os.path.samefile(directory / 'root.raw', template_disk):
+            raise PlatformError('instance disk aliases immutable template')
+        records[r['id']] = r
+    return records
+
+
 class Platform:
     def __init__(self, data=DATA, runtime=RUN, command=run, sleep=time.sleep, clock=time.monotonic):
         self.data, self.runtime = Path(data), Path(runtime)
@@ -131,31 +166,65 @@ class Platform:
 
     def records(self):
         storage_check(self.data)
-        registry = self.data / 'instances'
-        if registry.is_symlink() or not registry.is_dir():
-            raise PlatformError('instance registry missing')
-        records, identities, disks = {}, set(), set()
-        for directory in sorted(registry.iterdir()):
-            if directory.name.startswith('.'):
+        return load_records(self.data)
+
+    def templates(self):
+        """SD의 불변 템플릿 목록. 전체 root 해시는 실제 생성 직전에 검증한다."""
+        directory = self.data / 'templates'
+        if directory.is_symlink() or not directory.is_dir():
+            raise PlatformError('local template directory missing')
+        result = []
+        for item in sorted(directory.iterdir()):
+            if item.name.startswith('.'):
                 continue
-            if directory.is_symlink() or not directory.is_dir():
-                raise PlatformError(f'invalid registry entry: {directory}')
-            r = validate_record(json.loads((directory / 'instance.json').read_text()), directory)
-            for key in ('id', 'name', 'hostname', 'uuid', 'mac', 'ipv4'):
-                identity = (key, r[key])
-                if identity in identities:
-                    raise PlatformError(f'duplicate VM {key}: {r[key]}')
-                identities.add(identity)
-            st = (directory / 'root.raw').stat()
-            inode = (st.st_dev, st.st_ino)
-            if inode in disks:
-                raise PlatformError('same writable disk is registered more than once')
-            disks.add(inode)
-            template_disk = self.data / 'templates' / r['template'] / 'root.raw'
-            if template_disk.exists() and os.path.samefile(directory / 'root.raw', template_disk):
-                raise PlatformError('instance disk aliases immutable template')
-            records[r['id']] = r
-        return records
+            if item.is_symlink() or not item.is_dir():
+                raise PlatformError('invalid local template path')
+            meta = json.loads(regular_asset(item, 'template.json').read_text())
+            if meta.get('id') != item.name or meta.get('source', {}).get('distribution') not in ('ubuntu', 'debian'):
+                raise PlatformError('unsupported template adapter; Alpine remains an extension point')
+            root = regular_asset(item, 'root.raw')
+            if type(meta.get('size_gib')) is not int or not 4 <= meta['size_gib'] <= 32:
+                raise PlatformError('invalid template logical size')
+            if root.stat().st_mode & 0o222 or root.stat().st_size != meta['size_gib'] * 1024 ** 3:
+                raise PlatformError('template root must be immutable and match its logical size')
+            result.append({'id': item.name, 'logical_bytes': root.stat().st_size, 'source': meta['source'], 'root_sha256': meta['root_sha256']})
+        return result
+
+    def create(self, args, records):
+        """명시적 최초 생성만 공유 준비 코드를 호출한다. start/stop은 이 경로를 사용하지 않는다."""
+        if args.id in records or not args.id or not ID.fullmatch(args.id):
+            raise PlatformError('new valid instance id required; existing instances are never overwritten')
+        available = {r['id']: r for r in self.templates()}
+        if args.template not in available:
+            raise PlatformError('local template missing/unsupported; no PC fallback or download')
+        template = self.data / 'templates' / args.template
+        boot = json.loads(regular_asset(template, 'boot.json').read_text())
+        mac = '02:' + ':'.join(f'{value:02x}' for value in os.urandom(5))
+        record = {'schema': 1, 'id': args.id, 'name': args.id, 'hostname': args.id, 'template': args.template,
+                  'uuid': '00000000-0000-4000-8000-000000000000', 'mac': mac, 'ipv4': args.ipv4,
+                  'kernel_release': boot['kernel_release'], 'memory_mib': args.memory_mib,
+                  'vcpus': args.vcpus, 'autostart': args.autostart}
+        validate_identity(record)
+        for existing in records.values():
+            if any(existing[k] == record[k] for k in ('id', 'name', 'hostname', 'mac', 'ipv4')):
+                raise PlatformError('new identity/IP conflicts with a registered instance')
+        stats = os.statvfs(self.data)
+        free = stats.f_bavail * stats.f_frsize
+        pending_growth = sum(max(0, (self.data / 'instances' / key / 'root.raw').stat().st_size
+                                 - (self.data / 'instances' / key / 'root.raw').stat().st_blocks * 512) for key in records)
+        required = available[args.template]['logical_bytes'] + pending_growth + 2 * 1024 ** 3
+        if free < required:
+            raise PlatformError(f'insufficient storage: need {required} free bytes including existing VM growth and reserve, have {free}')
+        print(json.dumps({'action': 'create' if args.execute else 'plan-create', 'record': record,
+                          'free_bytes': free, 'required_free_bytes': required, 'starts_guest': False}, indent=2))
+        if not args.execute:
+            return
+        from prepare_instance import make_instance
+        from argparse import Namespace
+        make_instance(Namespace(data_root=self.data, id=args.id, spec=None, template_root=None, deployment_seed=False),
+                      vm=sys.modules[__name__], defaults_path=Path('/etc/perseus/defaults.json'), record_override=record)
+        self.records()
+        print('new persistent instance registered; use start explicitly; immutable template retained')
 
     def domains(self):
         rows = json.loads(self.command(['xl', 'list', '-l']))
@@ -345,10 +414,16 @@ def dhcp_ready(pid, timeout=5):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['check-xen', 'check-network', 'dhcp-ready', 'autostart', 'start', 'stop', 'reboot', 'shutdown-all', 'autostart-set', 'status', 'destroy', 'poweroff', 'reboot-board'])
+    parser.add_argument('action', choices=['create', 'templates', 'check-xen', 'check-network', 'dhcp-ready', 'autostart', 'start', 'stop', 'reboot', 'shutdown-all', 'autostart-set', 'status', 'destroy', 'poweroff', 'reboot-board'])
     parser.add_argument('id', nargs='?')
     parser.add_argument('value', nargs='?')
     parser.add_argument('--force', action='store_true')
+    parser.add_argument('--execute', action='store_true', help='create only: explicitly allow new disk/identity creation')
+    parser.add_argument('--template')
+    parser.add_argument('--ipv4')
+    parser.add_argument('--memory-mib', type=int, default=512)
+    parser.add_argument('--vcpus', type=int, default=1)
+    parser.add_argument('--autostart', action='store_true', help='new instance: start on the next platform boot, not immediately')
     args = parser.parse_args(argv)
     p = Platform()
     if args.action == 'check-network':
@@ -374,7 +449,11 @@ def main(argv=None):
             raise PlatformError('another VM operation is in progress') from exc
         p.check_xen()
         records = p.records()
-        if args.action == 'status':
+        if args.action == 'templates':
+            print(json.dumps(p.templates(), indent=2))
+        elif args.action == 'create':
+            p.create(args, records)
+        elif args.action == 'status':
             print(json.dumps({'instances': list(records.values()), 'domains': p.domains()}, indent=2))
         elif args.action == 'autostart':
             defaults = json.loads(Path('/etc/perseus/defaults.json').read_text())['instances']
