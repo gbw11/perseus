@@ -22,10 +22,15 @@ Jira 이슈 `$ARGUMENTS`로 작업 브랜치를 만든다. 규칙은 `CONTRIBUTI
 3. 브랜치 생성
    - `git status --porcelain`이 비어 있지 않으면 멈추고, 변경 사항을 커밋하거나 stash할지 사용자에게 묻는다.
    - 같은 이름의 로컬·원격 브랜치가 있으면 새로 만들지 말고 그 브랜치로 전환할지 묻는다.
-   - `git switch develop` → `git pull origin develop` → `git switch -c {브랜치}`
+   - 기준 브랜치는 part의 파트 통합 브랜치다 (CONTRIBUTING 1장 표).
+     backend·ctrl→`backend`, frontend→`frontend`, platform·agent·display→`platform`, app→`vehicle`, common·deploy→`develop`.
+     원격에 기준 브랜치가 없으면 멈추고 알려준다.
+   - `git switch {기준}` → `git pull origin {기준}` → `git switch -c {브랜치}`
 
 4. Jira 상태 변경
    - 이슈가 '해야 할 일'이면 '진행 중'으로 전환한다. 담당자가 비어 있으면 그대로 두고 알려준다.
 
 5. 결과 보고
-   - 만든 브랜치 이름, Jira 상태 변경 여부, 그리고 MR 설명에 넣을 줄 `Closes $ARGUMENTS`를 알려준다 (develop 머지 시 Jira 자동 완료).
+   - 만든 브랜치 이름, 기준 브랜치(= MR target), Jira 상태 변경 여부를 알려준다.
+   - 기준이 파트 통합 브랜치면: MR 설명에는 키 `$ARGUMENTS`만 적고, `Closes $ARGUMENTS`는 그 통합 브랜치 → develop MR에 적어야 Jira가 자동 완료된다고 알려준다.
+   - 기준이 develop이면: MR 설명에 넣을 줄 `Closes $ARGUMENTS`를 알려준다 (develop 머지 시 Jira 자동 완료).
