@@ -160,12 +160,12 @@ dom0에 Linux Bridge와 DHCP를 구성해 VM마다 고유한 MAC/IP를 부여한
 | --- | --- | --- |
 | 작업 시작 | Claude Code에서 `/branch {Jira키}` 실행 (또는 직접 브랜치 생성) | 진행 중 |
 | 커밋 | 커밋 메시지 마지막 줄에 Jira 키 | — |
-| 파트 통합 브랜치로 MR | MR 설명에 Jira 키 (머지돼도 상태는 그대로) | — |
+| 기능별 develop 브랜치로 MR | MR 설명에 Jira 키 (머지돼도 상태는 그대로) | — |
 | develop으로 MR | MR 설명에 끝난 이슈마다 `Closes {Jira키}` | — |
 | develop 머지 | GitLab–Jira 연동이 자동 처리 | **완료** |
 
-- 브랜치 이름: `{type}/{part}/{Jira키}-{설명}` (예: `feat/platform/S15P31E110-56-rpi4-xen-boot`), 자기 파트 통합 브랜치(`backend` `frontend` `platform` `vehicle`)에서 생성 — [CONTRIBUTING.md](../CONTRIBUTING.md) 1장
-- 자동 완료는 develop(기본 브랜치)에 머지될 때만 동작합니다. 파트 통합 브랜치에 머지된 이슈는 그 통합 브랜치가 develop에 머지될 때 '완료'가 되므로, 파트 통합 브랜치 → develop MR에 `Closes`를 모아 적습니다.
+- 브랜치 이름: `{type}/{part}/{Jira키}-{설명}` (예: `feat/platform/S15P31E110-56-rpi4-xen-boot`), 자기 기능별 develop 브랜치(`backend` `frontend` `platform` `vehicle`)에서 생성 — [CONTRIBUTING.md](../CONTRIBUTING.md) 1장
+- 자동 완료는 develop(기본 브랜치)에 머지될 때만 동작합니다. 기능별 develop 브랜치에 머지된 이슈는 그 기능별 develop 브랜치가 develop에 머지될 때 '완료'가 되므로, 기능별 develop 브랜치 → develop MR에 `Closes`를 모아 적습니다.
 - 아직 끝나지 않은 이슈는 MR에 `Closes` 없이 키만 적습니다. Jira에 MR 링크만 남습니다.
 - 여러 이슈를 함께 끝낼 때는 `Closes` 줄을 이슈마다 하나씩 씁니다.
 

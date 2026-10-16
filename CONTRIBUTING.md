@@ -10,7 +10,7 @@
 ```text
 master                ← 통합 데모·발표용 안정 버전
 └── develop           ← 전 파트 통합 브랜치 (기본 브랜치)
-    ├── backend       ← 파트 통합 브랜치
+    ├── backend       ← 기능별 develop 브랜치
     │   ├── feat/backend/vm-lifecycle-api
     │   └── feat/ctrl/xen-driver
     ├── frontend
@@ -26,13 +26,13 @@ master                ← 통합 데모·발표용 안정 버전
 | 브랜치 | 역할 | 규칙 |
 | --- | --- | --- |
 | `master` | 통합 데모·발표 기준 버전 | develop에서만 MR로 머지, 통합 데모 직전에만 반영 |
-| `develop` | 모든 파트의 작업이 합쳐지는 통합 브랜치 | 파트 통합 브랜치(또는 `common`·`deploy` 작업 브랜치)에서 MR로만 머지 |
-| `backend` `frontend` `platform` `vehicle` | 파트 통합 브랜치 (파트별 develop) | 작업 브랜치에서 MR로만 머지, 동작하는 단위로 develop에 MR |
-| `{type}/{part}/*` | 개인 작업용 단기 브랜치 | 자기 파트 통합 브랜치에서 생성, 1~3일 내 머지, 머지 후 삭제 |
+| `develop` | 모든 파트의 작업이 합쳐지는 통합 브랜치 | 기능별 develop 브랜치(또는 `common`·`deploy` 작업 브랜치)에서 MR로만 머지 |
+| `backend` `frontend` `platform` `vehicle` | 기능별 develop 브랜치 | 작업 브랜치에서 MR로만 머지, 동작하는 단위로 develop에 MR |
+| `{type}/{part}/*` | 개인 작업용 단기 브랜치 | 자기 기능별 develop 브랜치에서 생성, 1~3일 내 머지, 머지 후 삭제 |
 
-**part → 파트 통합 브랜치**
+**part → 기능별 develop 브랜치**
 
-| 파트 통합 브랜치 | part |
+| 기능별 develop 브랜치 | part |
 | --- | --- |
 | `backend` | `backend`, `ctrl` |
 | `frontend` | `frontend` |
@@ -40,8 +40,8 @@ master                ← 통합 데모·발표용 안정 버전
 | `vehicle` | `app` |
 | `develop` (직접) | `common`, `deploy` |
 
-- `master`, `develop`, 파트 통합 브랜치는 직접 push하지 않습니다. 반드시 MR로 머지합니다.
-- `feat`처럼 type 이름만으로 된 브랜치나, `backend/...`처럼 파트 통합 브랜치 이름 아래의 브랜치는 만들지 마세요. Git 구조상 같은 이름이 브랜치와 폴더를 겸할 수 없습니다.
+- `master`, `develop`, 기능별 develop 브랜치는 직접 push하지 않습니다. 반드시 MR로 머지합니다.
+- `feat`처럼 type 이름만으로 된 브랜치나, `backend/...`처럼 기능별 develop 브랜치 이름 아래의 브랜치는 만들지 마세요. Git 구조상 같은 이름이 브랜치와 폴더를 겸할 수 없습니다.
 
 ---
 
@@ -109,7 +109,7 @@ docs/common/openapi-v1
 ## 4. 작업 흐름
 
 ```bash
-# 1) 자기 파트 통합 브랜치 최신화 (1장 표 참고, common·deploy 는 develop)
+# 1) 자기 기능별 develop 브랜치 최신화 (1장 표 참고, common·deploy 는 develop)
 git switch backend
 git pull origin backend
 
@@ -120,7 +120,7 @@ git switch -c feat/backend/S15P31E110-12-vm-lifecycle-api
 git add .
 git commit
 
-# 4) MR 올리기 전 파트 통합 브랜치 변경사항 반영
+# 4) MR 올리기 전 기능별 develop 브랜치 변경사항 반영
 git fetch origin
 git rebase origin/backend      # 충돌 시 해결 후 git rebase --continue
 
@@ -131,17 +131,17 @@ git push -u origin feat/backend/S15P31E110-12-vm-lifecycle-api
 rebase 후 이미 push했던 브랜치를 다시 올릴 때는 `git push --force-with-lease`를 사용합니다.
 (`--force`는 쓰지 않습니다. 본인 기능 브랜치에만 사용합니다.)
 
-### 파트 통합 브랜치 → develop
+### 기능별 develop 브랜치 → develop
 
-- 파트 통합 브랜치에서 기능이 동작하면 develop으로 MR을 올립니다. 통합 데모 전에는 최소 1번 반드시 올립니다.
+- 기능별 develop 브랜치에서 기능이 동작하면 develop으로 MR을 올립니다. 통합 데모 전에는 최소 1번 반드시 올립니다.
 - 이 MR은 **Squash 없이 Merge commit**으로 머지하고, 소스 브랜치는 **삭제하지 않습니다**.
-- develop의 변경(다른 파트 작업)은 파트 통합 브랜치에 **merge**로 받아옵니다. 여러 명이 쓰는 브랜치라 rebase·force push는 하지 않습니다.
+- develop의 변경(다른 파트 작업)은 GitLab에서 **develop → 기능별 develop 브랜치 MR**(Merge commit)로 받아옵니다. 여러 명이 쓰는 브랜치라 rebase·force push는 하지 않습니다.
+- 충돌이 나면 작업 브랜치를 하나 따서 해결한 뒤 그 브랜치로 MR을 올립니다.
 
 ```bash
-git switch backend
-git pull origin backend
+git switch -c chore/backend/sync-develop origin/backend
 git merge origin/develop       # 충돌 해결 후 커밋
-git push origin backend        # 통합 브랜치 push가 막혀 있으면 MR(develop → backend)로 받습니다
+git push -u origin chore/backend/sync-develop   # MR target: backend
 ```
 
 ### Jira 이슈로 브랜치 만들기 (Claude Code)
@@ -215,11 +215,11 @@ git config commit.template .gitmessage
 
 ## 6. Merge Request
 
-- target: 작업 브랜치는 **자기 파트 통합 브랜치**(1장 표), `common`·`deploy` 작업 브랜치와 파트 통합 브랜치는 `develop` (통합 데모 반영 시에만 `develop → master`)
+- target: 작업 브랜치는 **자기 기능별 develop 브랜치**(1장 표), `common`·`deploy` 작업 브랜치와 기능별 develop 브랜치는 `develop` (통합 데모 반영 시에만 `develop → master`)
 - 최소 **1명 리뷰 승인** + **CI 통과** 후 머지
 - 하루~이틀 분량으로 작게 올립니다. 기능 여러 개를 한 MR에 넣지 않습니다
 - 작업 브랜치 MR은 **Squash merge**를 기본으로 합니다. MR 제목이 커밋 메시지가 되므로 커밋 규칙과 같은 형식으로 씁니다
-- 작업 브랜치는 머지 후 삭제합니다. 파트 통합 브랜치 → develop MR은 Merge commit으로 머지하고 소스 브랜치를 남깁니다 (4장)
+- 작업 브랜치는 머지 후 삭제합니다. 기능별 develop 브랜치 → develop MR은 Merge commit으로 머지하고 소스 브랜치를 남깁니다 (4장)
 - MR 작성 시 템플릿(`Default`)을 사용합니다
 
 ### Jira 자동 완료
@@ -231,8 +231,8 @@ GitLab–Jira 연동은 **develop(기본 브랜치)에 머지될 때만** 이슈
 
 | MR | 설명에 적을 것 |
 | --- | --- |
-| 작업 브랜치 → 파트 통합 브랜치 | 이슈 키만 (`S15P31E110-56`) — Jira에 MR 링크가 남습니다 |
-| 파트 통합 브랜치 → develop | 이번에 끝난 이슈마다 `Closes {Jira키}` |
+| 작업 브랜치 → 기능별 develop 브랜치 | 이슈 키만 (`S15P31E110-56`) — Jira에 MR 링크가 남습니다 |
+| 기능별 develop 브랜치 → develop | 이번에 끝난 이슈마다 `Closes {Jira키}` |
 | `common`·`deploy` 작업 브랜치 → develop | `Closes {Jira키}` |
 
 ```text
