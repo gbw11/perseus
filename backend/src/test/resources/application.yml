@@ -24,3 +24,9 @@ perseus:
     refresh-cookie-secure: false
     max-login-attempts: 5
     login-attempt-window: 5m
+  dom0-manager:
+    base-url: http://127.0.0.1:18081
+    service-token: test-service-token
+    connect-timeout: 1s
+    query-timeout: 2s
+    command-timeout: 3s
