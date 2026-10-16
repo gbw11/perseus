@@ -44,6 +44,7 @@ bitbake -p > "$CHECK_DIR/logs/parse.log" 2>&1
 for recipe in xen-rpi-u-boot-scr xen-tools perseus-bringup perseus-platform perseus-xen-bringup-image; do
     bitbake -e "$recipe" > "$CHECK_DIR/logs/$recipe.env" 2> "$CHECK_DIR/logs/$recipe.err"
 done
+bitbake-getvar -r perseus-xen-bringup-image --value -f depends do_image_wic > "$CHECK_DIR/logs/wic-depends.txt" 2> "$CHECK_DIR/logs/wic-depends.err"
 sha256sum -c "$CHECK_DIR/logs/original.sha256"
 python3 -B "$ROOT/tests/platform/check_perseus_metadata.py" "$CHECK_DIR/logs"
 tail -n 12 "$CHECK_DIR/logs/parse.log"

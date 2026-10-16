@@ -6,6 +6,10 @@ DESCRIPTION = "xen-image-minimal plus diagnostic tools, isolated bridge/DHCP and
 
 IMAGE_INSTALL:append = " perseus-platform perseus-bringup iproute2 bridge-utils dnsmasq kmod iputils-ping"
 
+# BSP의 DEPLOYPAYLOAD는 rpi-sdimg 전용이다. WIC에도 boot.scr이 읽는 xen을 넣는다.
+IMAGE_BOOT_FILES:append = " xen-${MACHINE};xen"
+do_image_wic[depends] += "xen:do_deploy"
+
 # 팀 개발망 최초 로그인. 기존 사용자 암호는 부팅 시 재설정하지 않는다.
 IMAGE_FEATURES:remove = "empty-root-password allow-empty-password debug-tweaks serial-autologin-root"
 IMAGE_FEATURES:append = " allow-root-login"

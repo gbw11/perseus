@@ -54,6 +54,9 @@ required = {'python3-core', 'python3-json', 'iproute2', 'xen-tools-xl', 'openssh
 missing = required - set(platform['RDEPENDS:perseus-platform'].split())
 assert not missing, f'Required runtime packages are undeclared: {sorted(missing)}'
 text, image = load('perseus-xen-bringup-image')
+assert 'xen-' + image['MACHINE'] + ';xen' in image['IMAGE_BOOT_FILES'].split()
+assert 'xen:do_deploy' in (logs / 'wic-depends.txt').read_text().split()
+print('PASS WIC: Xen deploy file maps to xen, with explicit do_deploy dependency')
 assert not {'empty-root-password', 'allow-empty-password', 'debug-tweaks', 'serial-autologin-root'} & set(image['IMAGE_FEATURES'].split())
 assert 'usermod -p' in image['EXTRA_USERS_PARAMS'] and 'perseus-dev' in image['EXTRA_USERS_PARAMS']
 assert 'perseus_platform_policy' in image['ROOTFS_POSTPROCESS_COMMAND']
