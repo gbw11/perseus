@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -30,6 +31,14 @@ public class GlobalExceptionHandler {
                 .map(error -> new ErrorResponse.FieldError(toJsonName(error.getField()), error.getDefaultMessage()))
                 .toList();
 
+        return ResponseEntity.unprocessableEntity()
+                .body(new ErrorResponse("VALIDATION_ERROR", "요청 값이 올바르지 않습니다.", errors));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException exception) {
+        List<ErrorResponse.FieldError> errors = List.of(
+                new ErrorResponse.FieldError(exception.getName(), "형식이 올바르지 않습니다."));
         return ResponseEntity.unprocessableEntity()
                 .body(new ErrorResponse("VALIDATION_ERROR", "요청 값이 올바르지 않습니다.", errors));
     }
