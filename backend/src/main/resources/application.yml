@@ -54,6 +54,17 @@ perseus:
         version: "24.04"
         display-name: Ubuntu 24.04
         min-memory-mib: 512
+  agent:
+    stale-after: ${AGENT_STALE_AFTER:15s}
+    offline-after: ${AGENT_OFFLINE_AFTER:30s}
+  report:
+    os-evidence:
+      required-os-ids:
+        - debian
+        - ubuntu
+        - alpine
+      observation-window: ${OS_EVIDENCE_WINDOW:30s}
+      build-id: ${BUILD_ID:}
   dom0-manager:
     base-url: ${DOM0_MANAGER_BASE_URL:http://127.0.0.1:8081}
     service-token: ${DOM0_MANAGER_SERVICE_TOKEN:}
