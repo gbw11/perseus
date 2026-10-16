@@ -2,7 +2,7 @@
 
 이 문서는 추가 커널 진단, 생성 이미지의 정적 검사, 실보드 Xen/dom0·최소 domU·격리 Bridge/DHCP 검증 절차를 다룬다. 환경 설치·Clone·업데이트·커널 설정 생성·필수 옵션 검사·이미지 빌드·domU 통합 계약은 [재구성 및 인계](yocto-rpi4-xen-reproduce.md)를 따른다.
 
-**기존 이미지에서 수동 보정 후 Xen/dom0/BusyBox domU 부팅·DHCP·양방향 Ping에 성공했다는 사용자 보고가 있다.** [2026-10-16 1차 소스 감사](yocto-rpi4-xen-source-audit-20261016.md)에서 이를 소스에 반영했다. 수정본은 아직 빌드·실보드 검증하지 않았다. 이전 정적 증거는 [2026-10-15 감사 기록](yocto-rpi4-xen-audit-20261015.md)에 보존하며, 아래 절차로 2차 빌드 후 자동 동작을 다시 확인한다.
+**기존 이미지에서 수동 보정 후 Xen/dom0/BusyBox domU 부팅·DHCP·양방향 Ping에 성공했다는 사용자 보고가 있다.** [2026-10-16 1차 소스 감사](yocto-rpi4-xen-source-audit-20261016.md)에서 이를 소스에 반영했다. [2026-10-16 WIC 수정·빌드 검증](perseus-wic-xen-fix-20261016.md)에서 수정 이미지 빌드와 실제 산출물 검사를 완료했다. 수정 이미지의 실보드 자동 동작은 아직 재검증하지 않았다. 이전 정적 증거는 [2026-10-15 감사 기록](yocto-rpi4-xen-audit-20261015.md)에 보존하며, 아래 절차로 2차 빌드 후 자동 동작을 다시 확인한다.
 
 ## 원칙
 
@@ -104,6 +104,18 @@ mtype -i "${SD_IMG}@@${BOOT_OFFSET}" ::cmdline.txt
 ```
 
 `config.txt`의 UART·GIC 설정과 부트 자산을 확인한다. `cmdline.txt`의 일반 Linux 인자와 U-Boot가 Device Tree에 설정하는 Xen/dom0 인자를 구분한다.
+
+### WIC 내부 부팅 파일 검사
+
+`rpi-sdimg`의 부트 파일 설정은 WIC에 자동 적용되지 않는다. 프로젝트 이미지 레시피는 WIC의 `IMAGE_BOOT_FILES`에도 `xen-${MACHINE};xen`을 지정하고 `xen:do_deploy`를 선행 조건으로 둔다. WIC를 배포하려면 해당 파일 자체를 검사한다.
+
+```bash
+python3 -B scripts/check-perseus-wic.py \
+  --deploy-dir "$IMG_DIR" \
+  --output "$HOME/perseus-wic-inspection-$(date +%Y%m%d-%H%M%S)"
+```
+
+이 검사는 `.wic.bz2`의 MBR에서 FAT 위치를 읽고 `xen`, `Image`, `boot.scr`, 펌웨어가 읽는 U-Boot 파일(`kernel8.img`)을 추출하여 동일 deploy 디렉터리의 원본과 SHA-256을 비교한다. 추출된 `boot.scr`의 CRC와 Xen/FDT 부팅 명령도 검사한다. `--output`은 새 디렉터리여야 하며 추출 파일·FAT 목록·`result.json`을 남긴다. Python 표준 라이브러리와 호스트 `mtools`만 사용하고 SD 장치·마운트는 사용하지 않는다. 이는 부팅 파일의 정적 검사이며 실보드 자동 부팅 성공을 뜻하지 않는다.
 
 ### dom0 내부 게스트 자산과 VM 설정
 

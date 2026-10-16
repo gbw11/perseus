@@ -4,16 +4,17 @@
 보존하려면 최초 생성 뒤에는 다시 호출하지 않아야 한다.
 """
 from pathlib import Path
+import json
+import os
 import shutil
 import subprocess
 import time
-import uuid
 
 ROOT_HASH = '$6$perseus-dev$uqz/PNLD2CDIZm1VIVOFPkMANu8CHr2KHPKO3th9aIL6nu6f.aLwxZ8oHjw3haeQHSsLzWokvwcuaAcMVpy800'
 AUTH = 'PermitRootLogin yes\nPasswordAuthentication yes\nPermitEmptyPasswords no\nAuthenticationMethods any\n'
 
 
-def inside(root, relative, *, follow_final=True):
+def inside(root, relative, *, follow_final=True, create_parents=True):
     """게스트 기준으로 링크를 해석한다. 교체할 마지막 링크는 따라가지 않는다.
 
     절대 링크는 게스트 /에서 다시 시작하며, 상대 링크의 root 밖 ..와 순환은 거부한다.
@@ -45,10 +46,13 @@ def inside(root, relative, *, follow_final=True):
             pending = list(target_parts) + pending
         else:
             resolved.append(part)
+    if resolved and resolved[0] in ('proc','sys','dev') and len(resolved) > 1:
+        raise ValueError(f'guest path points into a special filesystem: {relative}')
     if not resolved:
         raise ValueError(f'guest path resolves to root directory: {relative}')
     p = root.joinpath(*resolved)
-    p.parent.mkdir(parents=True, exist_ok=True)
+    if create_parents:
+        p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
 
@@ -75,6 +79,9 @@ def enable(root, unit):
 
 def prepare_template(root):
     root = Path(root)
+    os_release = inside(root, 'etc/os-release', create_parents=False)
+    if os_release.is_file() and 'ID=alpine' in os_release.read_text().replace(chr(34), '').splitlines():
+        raise ValueError('unsupported Linux rootfs adapter; RTOS firmware is not a Linux rootfs')
     marker = inside(root, 'etc/perseus/template-prepared')
     if marker.exists() or inside(root, 'etc/perseus/instance-id').exists():
         raise ValueError('refusing to initialize an already prepared/instantiated rootfs')
@@ -131,7 +138,7 @@ def prepare_instance(root, record, command=subprocess.run):
         raise ValueError('existing instance: initialization is forbidden')
     write(root, 'etc/hostname', record['hostname'] + '\n')
     write(root, 'etc/hosts', '127.0.0.1 localhost\n127.0.1.1 ' + record['hostname'] + '\n')
-    write(root, 'etc/machine-id', uuid.uuid4().hex + '\n')
+    write(root, 'etc/machine-id', os.urandom(16).hex() + '\n')
     # 호스트 ssh-keygen을 사용해 새 인스턴스에만 고유 키를 한 번 생성한다.
     for kind in ('ed25519', 'ecdsa', 'rsa'):
         target = inside(root, 'etc/ssh/ssh_host_' + kind + '_key', follow_final=False)
@@ -139,3 +146,41 @@ def prepare_instance(root, record, command=subprocess.run):
             raise ValueError('template unexpectedly contains SSH host keys')
         command(['ssh-keygen', '-q', '-t', kind, '-N', '', '-f', str(target)], check=True)
     write(root, 'etc/perseus/instance-id', record['uuid'] + '\n', 0o600)
+
+
+def prepare_deployment_seed(root, record):
+    """새 공통 이미지 전용 인스턴스 사본. 식별자는 systemd/guest SSH gate까지 비운다."""
+    root = Path(root)
+    if not inside(root, 'etc/perseus/template-prepared').is_file():
+        raise ValueError('template preparation marker absent')
+    if inside(root, 'etc/perseus/instance-id').exists() or inside(root, 'etc/perseus/deployment-seed.json').exists():
+        raise ValueError('existing instance/seed must never be initialized again')
+    if not inside(root, 'usr/bin/python3').is_file():
+        raise ValueError('factory guest identity gate requires the cloud image Python 3')
+    if any(inside(root, 'etc/ssh').glob('ssh_host_*_key')):
+        raise ValueError('factory seed must not contain shared SSH host keys')
+    write(root, 'etc/hostname', record['hostname'] + '\n')
+    write(root, 'etc/hosts', '127.0.0.1 localhost\n127.0.1.1 ' + record['hostname'] + '\n')
+    write(root, 'etc/machine-id', 'uninitialized\n')
+    replace_link(root, 'var/lib/dbus/machine-id', '/etc/machine-id')
+    write(root, 'usr/lib/perseus/guest_identity.py', (Path(__file__).with_name('guest_identity.py')).read_text())
+    write(root, 'etc/perseus/deployment-seed.json', json.dumps({'schema': 1, 'id': record['id'], 'init': 'systemd'}) + '\n')
+    unit = """[Unit]
+Description=Establish factory guest identity before any SSH listener
+After=systemd-remount-fs.service
+Before=ssh.service ssh.socket sshd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/lib/perseus/guest_identity.py
+RemainAfterExit=yes
+TimeoutStartSec=240s
+
+[Install]
+WantedBy=multi-user.target
+"""
+    write(root, 'usr/lib/systemd/system/perseus-guest-identity.service', unit)
+    enable(root, 'perseus-guest-identity.service')
+    for name in ('ssh.service', 'ssh.socket', 'sshd.service'):
+        write(root, 'etc/systemd/system/' + name + '.d/10-perseus-identity.conf',
+              '[Unit]\nRequires=perseus-guest-identity.service\nAfter=perseus-guest-identity.service\n')

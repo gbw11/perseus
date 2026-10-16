@@ -50,7 +50,7 @@ GitLab 프로젝트와 그 안의 `platform/yocto/layers.lock`을 기준으로 �
 
 │   │   ├── ubuntu/                  # Ubuntu 템플릿 제작
 
-│   │   └── alpine/                  # Alpine 템플릿 제작
+│   │   └── zephyr/                  # Zephyr Xen 펌웨어 템플릿
 
 │   │
 

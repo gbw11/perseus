@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "date": "2026-10-16",
+  "baseline_commit": "70c85b90ef21e73b4d7b9daa97a65c0cacf3078c",
+  "scope": "source and small non-OS fixture regression only; commit/push authorized",
+  "preexisting_uncommitted_files": 30,
+  "unit_tests_passed": 123,
+  "new_handoff_tests": 26,
+  "bringup_regression_cases_passed": 17,
+  "systemd_loader": {
+    "normal_exit_code": 0,
+    "injected_cycle_exit_code": 1
+  },
+  "command": "bash scripts/check-perseus-platform.sh",
+  "exit_code": 0,
+  "log": "/home/ssafy/perseus-artifact-handoff-fix-20261016-143944/final-checks.log",
+  "log_sha256": "8c617d7c0e7b00f5e38af6e18f3b86f3db4d4df16d2c891e1fa09c6a59138188",
+  "actual_successful_build_receipt_publication_plan": {
+    "exit_code": 0,
+    "image_bytes": 200729167,
+    "source_image_read_or_copied": false,
+    "lock_created": false,
+    "output_created": false,
+    "log": "/home/ssafy/perseus-artifact-handoff-fix-20261016-143944/real-receipt-plan.log"
+  },
+  "initial_fixture_failure": {
+    "log": "/home/ssafy/perseus-artifact-handoff-fix-20261016-143944/new-tests-first.log",
+    "reason": "Test passed the publication action field as deployment config; corrected fixture to use only the platform block. Final regressions passed."
+  },
+  "runtime_yocto_guest_sources_unchanged_from_successful_build": true,
+  "host_fix_requires_dom0_rebuild": false,
+  "not_performed": [
+    "real platform publication",
+    "OS download",
+    "template/instance creation",
+    "image build",
+    "actual common SD assembly",
+    "SD access/change",
+    "hardware test"
+  ],
+  "staged_whitespace_note": "Baseline prepare_instance.py has one extra blank line at EOF. Preserved byte-identical packaged runtime; checked this path with blank-at-eof disabled only, and all other paths with default git diff --check. No Yocto QA disabled."
+}

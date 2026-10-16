@@ -22,7 +22,9 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'platform/guests/common'))
-from prepare_rootfs import prepare_template, prepare_instance
+sys.path.insert(0, str(ROOT / 'platform/first-install'))
+from prepare_rootfs import prepare_template, inside
+from prepare_instance import Workspace, make_instance as shared_make_instance
 
 
 def command(args, **kwargs):
@@ -71,38 +73,33 @@ def raw_kernel(source, destination):
     destination.write_bytes(data)
 
 
-class Workspace:
-    """전용 임시 경로·직접 할당한 loop 장치만 사용하고 해제 실패 시 보존한다."""
-    def __init__(self, parent):
-        self.path = Path(tempfile.mkdtemp(prefix='.perseus-preparing-', dir=parent))
-        self.mounts, self.loops = [], []
 
-    def loop(self, image, readonly=False, partitions=False):
-        args = ['losetup', '--find', '--show']
-        if readonly:
-            args.append('--read-only')
-        if partitions:
-            args.append('--partscan')
-        value = subprocess.check_output(args + [str(image)], text=True).strip()
-        if not __import__('re').fullmatch(r'/dev/loop[0-9]+', value):
-            raise ValueError('unexpected allocated loop device')
-        self.loops.append(value)
-        return value
-
-    def mount(self, device, target, readonly=False):
-        target.mkdir(parents=True, exist_ok=True)
-        command(['mount', '-o', 'ro,noload' if readonly else 'rw', device, target])
-        self.mounts.append(target)
-
-    def close(self):
-        while self.mounts:
-            command(['umount', self.mounts[-1]])
-            self.mounts.pop()
-        while self.loops:
-            command(['losetup', '--detach', self.loops[-1]])
-            self.loops.pop()
-        # 디버깅과 실패 분석을 위해 작업 경로를 자동 삭제하지 않는다.
-        print('scratch retained for inspection:', self.path)
+def mount_source_boot(work, root, partitions):
+    """원본 fstab의 별도 /boot만 같은 private loop 안에서 찾아 읽기 전용으로 연결한다."""
+    fstab = inside(root, 'etc/fstab', create_parents=False)
+    entries = [row for line in fstab.read_text().splitlines()
+               if len(row := line.split('#', 1)[0].split()) >= 3 and row[1] == '/boot']
+    if not entries:
+        return
+    if len(entries) != 1 or entries[0][2] != 'ext4':
+        raise ValueError('unsupported or ambiguous separate guest /boot filesystem')
+    source = entries[0][0]
+    match = __import__('re').fullmatch(r'(LABEL|UUID|PARTUUID)=([A-Za-z0-9_.-]+)', source)
+    if not match:
+        raise ValueError('separate guest /boot must use LABEL/UUID/PARTUUID on the private source loop')
+    key = {'LABEL': 'LABEL', 'UUID': 'UUID', 'PARTUUID': 'PART_ENTRY_UUID'}[match[1]]
+    matches = []
+    for partition in partitions:
+        fields = subprocess.check_output(['blkid', '-p', '-o', 'export', str(partition)], text=True)
+        info = dict(line.split('=', 1) for line in fields.splitlines() if '=' in line)
+        if info.get('TYPE') == 'ext4' and info.get(key) == match[2]:
+            matches.append(partition)
+    if len(matches) != 1:
+        raise ValueError('separate guest /boot is missing or duplicated on the private source loop')
+    target = inside(root, 'boot', create_parents=False)
+    if not target.is_dir():
+        raise ValueError('source /boot mountpoint must already exist on the read-only root')
+    work.mount(matches[0], target, readonly=True)
 
 
 def root_partition(work, disk):
@@ -117,33 +114,34 @@ def root_partition(work, disk):
             continue
         target = work.path / f'source-{index}'
         work.mount(partition, target, readonly=True)
-        if (target / 'etc/os-release').exists():
+        if inside(target, 'etc/os-release', create_parents=False).is_file():
+            mount_source_boot(work, target, partitions)
             return target
     raise ValueError('no ext4 Linux root partition found on the private source loop')
 
 
 def boot_assets(root, output, source):
     release = source['kernel_release']
-    config = root / 'boot' / ('config-' + release)
+    config = inside(root, 'boot/config-' + release, create_parents=False)
     kernel_config_ok(config.read_text())
-    if not (root / 'lib/modules' / release).is_dir():
+    if not inside(root, 'lib/modules/' + release, create_parents=False).is_dir():
         raise ValueError('matching guest kernel modules absent')
     version = subprocess.check_output(['chroot', str(root), 'dpkg-query', '-W', '-f=${Version}', source['kernel_package']], text=True)
     if version != source['kernel_package_version']:
         raise ValueError('guest kernel package version differs from sources.lock.json')
-    modules = root / 'etc/initramfs-tools/modules'
+    modules = inside(root, 'etc/initramfs-tools/modules')
     with modules.open('a') as f:
         f.write('\n# Perseus Xen root disk / network and ext4\nxen-blkfront\nxen-netfront\next4\n')
     # 네이티브 ARM64 또는 등록된 binfmt 환경이 필요하다. 패키지 설치·apt 실행은 하지 않는다.
     command(['chroot', root, '/bin/true'])
     command(['chroot', root, 'update-initramfs', '-u', '-k', release])
-    initrd = root / 'boot' / ('initrd.img-' + release)
+    initrd = inside(root, 'boot/initrd.img-' + release, create_parents=False)
     entries = subprocess.check_output(['chroot', str(root), 'lsinitramfs', '/boot/' + initrd.name], text=True)
     values = kernel_config_ok(config.read_text())
     for symbol, filename in [('XEN_BLKDEV_FRONTEND', 'xen-blkfront.ko'), ('XEN_NETDEV_FRONTEND', 'xen-netfront.ko'), ('EXT4_FS', 'ext4.ko')]:
         if values['CONFIG_' + symbol] == 'm' and filename not in entries:
             raise ValueError(f'{filename} absent from generated initramfs')
-    raw_kernel(root / 'boot' / ('vmlinuz-' + release), output / 'Image')
+    raw_kernel(inside(root, 'boot/vmlinuz-' + release, create_parents=False), output / 'Image')
     shutil.copyfile(initrd, output / 'initrd')
     shutil.copyfile(config, output / 'kernel.config')
     command(['chroot', root, 'apt-mark', 'manual', source['kernel_package']])
@@ -155,15 +153,6 @@ def boot_assets(root, output, source):
     }, indent=2) + '\n')
 
 
-def verify_guest_ssh(root):
-    # /run/sshd는 임시 검증용이며 재부팅 초기화 스크립트가 아니다.
-    (root / 'run/sshd').mkdir(parents=True, exist_ok=True)
-    effective = subprocess.check_output(['chroot', str(root), '/usr/sbin/sshd', '-T', '-C', 'user=root,host=perseus,addr=192.168.77.1,laddr=192.168.77.10,lport=22'], text=True)
-    for entry in ('permitrootlogin yes', 'passwordauthentication yes', 'permitemptypasswords no', 'authenticationmethods any'):
-        if entry not in effective.splitlines():
-            raise ValueError('guest SSH effective policy mismatch: ' + entry)
-
-
 def make_template(args, source):
     if not args.input.is_file() or digest(args.input, source['hash_algorithm']) != source['digest']:
         raise ValueError('official input digest mismatch or input is not a regular file')
@@ -173,7 +162,7 @@ def make_template(args, source):
         command(['qemu-img', 'convert', '-f', source['format'], '-O', 'raw', args.input, disk])
         original = root_partition(work, disk)
         expected_id = 'ID=' + source['distribution']
-        os_release = (original / 'etc/os-release').read_text().replace('"', '')
+        os_release = inside(original, 'etc/os-release', create_parents=False).read_text().replace('"', '')
         if expected_id not in os_release.splitlines():
             raise ValueError('upstream distribution differs from source lock')
         stage = work.path / 'template'
@@ -188,7 +177,7 @@ def make_template(args, source):
         prepare_template(root)
         # chroot 내 /dev, /proc, /sys는 작업 루트에만 마운트한다.
         for fs, relative in [('proc', 'proc'), ('sysfs', 'sys'), ('devtmpfs', 'dev')]:
-            target = root / relative
+            target = inside(root, relative)
             target.mkdir(exist_ok=True)
             command(['mount', '-t', fs, fs, target])
             work.mounts.append(target)
@@ -212,71 +201,10 @@ def make_instance(args):
     spec = importlib.util.spec_from_file_location('perseus_vm', ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/files/perseus_vm.py')
     vm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(vm)
-    vm.storage_check(args.data_root)
-    defaults = json.loads((ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/files/defaults.json').read_text())['instances']
-    if not vm.ID.fullmatch(args.id):
-        raise ValueError('invalid instance id')
-    record = next((dict(r) for r in defaults if r['id'] == args.id), None)
-    if record is None:
-        if not args.spec:
-            raise ValueError('custom/Alpine instance requires --spec JSON with all identity/resource fields')
-        record = json.loads(args.spec.read_text())
-        if record.get('id') != args.id:
-            raise ValueError('instance spec id differs from requested id')
-    if not __import__('re').fullmatch(r'[a-z0-9][a-z0-9.+_-]{0,99}', record.get('template', '')):
-        raise ValueError('invalid template id')
-    template = args.data_root / 'templates' / record['template']
-    if template.is_symlink() or template.resolve().parent != (args.data_root / 'templates').resolve():
-        raise ValueError('template path escapes persistent storage')
-    meta = json.loads((template / 'template.json').read_text())
-    if meta.get('id') != record['template']:
-        raise ValueError('template bundle id differs from selected template')
-    if digest(template / 'root.raw') != meta['root_sha256']:
-        raise ValueError('template root disk changed since publication')
-    boot = json.loads((template / 'boot.json').read_text())
-    if boot.get('source') != meta.get('source'):
-        raise ValueError('template root and boot provenance disagree')
-    for filename, key in [('Image', 'kernel_sha256'), ('initrd', 'initrd_sha256')]:
-        if digest(template / filename) != boot[key]:
-            raise ValueError('template boot asset digest mismatch')
-    output = args.data_root / 'instances' / args.id
-    require_new_output(output)
-    record.update(schema=1, uuid=str(uuid.uuid4()), kernel_release=boot['kernel_release'])
-    vm.validate_identity(record)
-    work = Workspace(output.parent)
-    try:
-        stage = work.path / args.id
-        stage.mkdir()
-        for filename in ('root.raw', 'Image', 'initrd', 'boot.json', 'kernel.config'):
-            shutil.copyfile(template / filename, stage / filename)
-        (stage / 'root.raw').chmod(0o600)
-        command(['tune2fs', '-U', 'random', stage / 'root.raw'])
-        root = work.path / 'root'
-        work.mount(work.loop(stage / 'root.raw'), root)
-        prepare_instance(root, record, command=command)
-        verify_guest_ssh(root)
-        os.sync()
-        work.close()
-        work.mounts, work.loops = [], []
-        (stage / 'instance.json').write_text(json.dumps(record, indent=2) + '\n')
-        vm.validate_record(record, stage)
-        # 전체 registry의 식별자·디스크 중복도 게시 전에 확인한다.
-        for other in (args.data_root / 'instances').iterdir():
-            if other.name.startswith('.'):
-                continue
-            current = json.loads((other / 'instance.json').read_text())
-            for field in ('id', 'uuid', 'name', 'hostname', 'mac', 'ipv4'):
-                if current[field] == record[field]:
-                    raise ValueError(f'duplicate {field} with {other.name}')
-        require_new_output(output)
-        stage.rename(output)
-        os.sync()
-    finally:
-        if work.mounts or work.loops:
-            work.close()
+    return shared_make_instance(args, vm=vm, defaults_path=ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/files/defaults.json')
 
 
-def initialize_storage(data):
+def initialize_storage(data, *, seed=False):
     # 포맷·마운트하지 않고 사전에 마운트한 빈 전용 영역만 등록한다.
     result = json.loads(subprocess.check_output(['findmnt', '--json', '--mountpoint', str(data), '-o', 'TARGET,SOURCE,FSTYPE,OPTIONS'], text=True))['filesystems'][0]
     if result['fstype'] != 'ext4' or result['target'] != str(data) or not result['source'].startswith('/dev/') or 'rw' not in result['options'].split(','):
@@ -286,9 +214,12 @@ def initialize_storage(data):
         raise ValueError('dedicated filesystem must already have label perseus-data')
     if any(p.name != 'lost+found' for p in data.iterdir()):
         raise ValueError('storage is not empty; no existing data is adopted/overwritten')
-    for name in ('templates', 'instances'):
+    for name in ('templates', 'instances', *(['seeds'] if seed else [])):
         (data / name).mkdir(mode=0o700)
-    (data / '.perseus-storage.json').write_text(json.dumps({'schema': 1, 'uuid': str(uuid.uuid4())}) + '\n')
+    if seed:
+        (data / '.perseus-seed-store.json').write_text(json.dumps({'schema': 1, 'purpose': 'factory-seeds'}) + '\n')
+    else:
+        (data / '.perseus-storage.json').write_text(json.dumps({'schema': 1, 'uuid': str(uuid.uuid4())}) + '\n')
     os.sync()
 
 
@@ -305,6 +236,8 @@ def main(argv=None):
     instance.add_argument('--data-root', type=Path, required=True)
     instance.add_argument('--id', required=True)
     instance.add_argument('--spec', type=Path)
+    instance.add_argument('--template-root', type=Path, help='verified external template bundle, factory seed mode only')
+    instance.add_argument('--deployment-seed', action='store_true', help='new factory seeds only; defer guest identity until first boot')
     storage = sub.add_parser('storage-init')
     storage.add_argument('--data-root', type=Path, required=True)
     args = parser.parse_args(argv)
