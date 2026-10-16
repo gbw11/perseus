@@ -16,6 +16,12 @@ server:
   port: ${SERVER_PORT:8080}
   shutdown: graceful
 
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}
+
 management:
   endpoints:
     web:
