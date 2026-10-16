@@ -101,6 +101,7 @@ build/
 *.squashfs
 
 # Runtime-generated databases and state
+/backend/data/
 *.db
 *.db-*
 *.sqlite
