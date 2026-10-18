@@ -3,10 +3,12 @@ package com.perseus.backend.vm.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.perseus.backend.common.error.ApiException;
-import com.perseus.backend.vm.domain.Vm;
+import com.perseus.backend.vm.domain.VmLaunchSpec;
+import com.perseus.backend.vm.domain.VmRuntime;
 import com.perseus.backend.vm.domain.VmState;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -23,10 +25,15 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+// Stub dom0-manager responses follow contracts/dom0-manager-openapi.yaml.
 class Dom0ManagerClientTest {
 
     private static final Duration RETRY_BACKOFF = Duration.ofMillis(200);
+    private static final String VM_ID = "550e8400-e29b-41d4-a716-446655440000";
+    private static final VmLaunchSpec SPEC = new VmLaunchSpec("alpine", "1.2.0", 1, 256);
 
+    private final ObjectMapper objectMapper = new ObjectMapper()
+            .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
     private HttpServer server;
     private Dom0ManagerClient client;
     private final AtomicReference<String> authorization = new AtomicReference<>();
@@ -47,8 +54,6 @@ class Dom0ManagerClientTest {
                 Duration.ofMillis(300),
                 Duration.ofMillis(300),
                 RETRY_BACKOFF);
-        ObjectMapper objectMapper = new ObjectMapper()
-                .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
         return new Dom0ManagerClient(properties, objectMapper);
     }
 
@@ -58,45 +63,76 @@ class Dom0ManagerClientTest {
     }
 
     @Test
-    void listReadsSnakeCaseResponseAndSendsServiceToken() {
+    void listReadsXenDomainsAndSendsServiceToken() {
         server.createContext("/api/v1/vms", exchange -> {
             authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
             respond(exchange, 200, """
-                    [{
-                      "vm_id":"550e8400-e29b-41d4-a716-446655440000",
-                      "name":"alpine-sensor",
-                      "state":"running",
-                      "template_id":"alpine",
-                      "template_version":"1.2.0",
-                      "vcpus":1,
-                      "memory_mib":256
-                    }]
-                    """);
+                    [{"vm_id":"%s","state":"running","vcpus":1,"memory_mib":256}]
+                    """.formatted(VM_ID));
         });
 
-        List<Vm> result = client.list();
+        List<VmRuntime> result = client.list();
 
-        assertThat(result).hasSize(1);
-        assertThat(result.getFirst().state()).isEqualTo(VmState.RUNNING);
-        assertThat(result.getFirst().memoryMib()).isEqualTo(256);
+        assertThat(result).containsExactly(new VmRuntime(VM_ID, VmState.RUNNING, 1, 256));
         assertThat(authorization.get()).isEqualTo("Bearer service-secret");
     }
 
     @Test
-    void mapsControlLayerErrorToPublicApiError() {
-        server.createContext("/api/v1/vms/missing", exchange -> respond(exchange, 404, """
-                {
-                  "code":"VMNotFound",
-                  "message":"missing VM",
-                  "detail":"xl: domain not found"
-                }
+    void findTreatsVmNotFoundAsAbsentDomain() {
+        server.createContext("/api/v1/vms/" + VM_ID, exchange -> respond(exchange, 404, """
+                {"code":"VMNotFound","message":"no domain","detail":"xl: domain not found"}
                 """));
 
-        assertThatThrownBy(() -> client.get("missing"))
+        assertThat(client.find(VM_ID)).isEmpty();
+    }
+
+    @Test
+    void launchPostsTheOpenApiBodyWithoutName() throws IOException {
+        AtomicReference<String> body = new AtomicReference<>();
+        AtomicReference<String> contentType = new AtomicReference<>();
+        server.createContext("/api/v1/vms", exchange -> {
+            contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            respond(exchange, 201, """
+                    {"vm_id":"%s","state":"running","vcpus":1,"memory_mib":256}
+                    """.formatted(VM_ID));
+        });
+
+        VmRuntime runtime = client.launch(VM_ID, SPEC);
+
+        assertThat(runtime.state()).isEqualTo(VmState.RUNNING);
+        assertThat(contentType.get()).startsWith("application/json");
+        JsonNode sent = objectMapper.readTree(body.get());
+        assertThat(sent.fieldNames()).toIterable()
+                .containsExactlyInAnyOrder("vm_id", "template_id", "template_version", "vcpus", "memory_mib");
+        assertThat(sent.path("vm_id").asText()).isEqualTo(VM_ID);
+    }
+
+    @Test
+    void stopAcceptsNoContent() {
+        AtomicInteger requests = new AtomicInteger();
+        server.createContext("/api/v1/vms/" + VM_ID + "/stop", exchange -> {
+            requests.incrementAndGet();
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+
+        client.stop(VM_ID);
+
+        assertThat(requests).hasValue(1);
+    }
+
+    @Test
+    void insufficientResourcesIsMappedToPublicError() {
+        server.createContext("/api/v1/vms", exchange -> respond(exchange, 507, """
+                {"code":"InsufficientResources","message":"메모리가 부족합니다.",
+                 "resource":{"name":"memory_mib","requested":1024,"available":512}}
+                """));
+
+        assertThatThrownBy(() -> client.launch(VM_ID, SPEC))
                 .isInstanceOfSatisfying(ApiException.class, exception -> {
-                    assertThat(exception.getStatus().value()).isEqualTo(404);
-                    assertThat(exception.getCode()).isEqualTo("VM_NOT_FOUND");
-                    assertThat(exception.getMessage()).isEqualTo("missing VM");
+                    assertThat(exception.getCode()).isEqualTo("INSUFFICIENT_RESOURCES");
+                    assertThat(exception.getMessage()).isEqualTo("메모리가 부족합니다.");
                 });
     }
 
@@ -118,13 +154,14 @@ class Dom0ManagerClientTest {
     @Test
     void commandTimeoutIsNotRetried() {
         AtomicInteger requests = new AtomicInteger();
-        server.createContext("/api/v1/vms/vm-1/start", exchange -> {
+        server.createContext("/api/v1/vms/" + VM_ID + "/stop", exchange -> {
             requests.incrementAndGet();
             sleep(Duration.ofSeconds(1));
-            respond(exchange, 200, "{}");
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
         });
 
-        assertThatThrownBy(() -> client.start("vm-1"))
+        assertThatThrownBy(() -> client.stop(VM_ID))
                 .isInstanceOfSatisfying(ApiException.class, exception -> {
                     assertThat(exception.getStatus().value()).isEqualTo(504);
                     assertThat(exception.getCode()).isEqualTo("VM_CONTROL_TIMEOUT");
@@ -141,7 +178,7 @@ class Dom0ManagerClientTest {
         Dom0ManagerClient unreachable = clientFor("http://127.0.0.1:" + closedPort);
 
         long startedAt = System.nanoTime();
-        assertThatThrownBy(() -> unreachable.start("vm-1"))
+        assertThatThrownBy(() -> unreachable.launch(VM_ID, SPEC))
                 .isInstanceOfSatisfying(ApiException.class, exception -> {
                     assertThat(exception.getStatus().value()).isEqualTo(503);
                     assertThat(exception.getCode()).isEqualTo("VM_CONTROL_UNAVAILABLE");
@@ -151,18 +188,18 @@ class Dom0ManagerClientTest {
     }
 
     @Test
-    void controlLayerErrorIsNotRetried() {
+    void vmExistsIsNotRetried() {
         AtomicInteger requests = new AtomicInteger();
-        server.createContext("/api/v1/vms/vm-1/stop", exchange -> {
+        server.createContext("/api/v1/vms", exchange -> {
             requests.incrementAndGet();
             respond(exchange, 409, """
-                    {"code":"InvalidState","message":"cannot stop"}
+                    {"code":"VMExists","message":"vm_id already exists"}
                     """);
         });
 
-        assertThatThrownBy(() -> client.stop("vm-1"))
+        assertThatThrownBy(() -> client.launch(VM_ID, SPEC))
                 .isInstanceOfSatisfying(ApiException.class, exception ->
-                        assertThat(exception.getCode()).isEqualTo("INVALID_VM_STATE"));
+                        assertThat(exception.getCode()).isEqualTo("VM_ALREADY_EXISTS"));
         assertThat(requests).hasValue(1);
     }
 

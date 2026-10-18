@@ -1,52 +1,200 @@
 package com.perseus.backend.vm.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.perseus.backend.common.error.ApiException;
 import com.perseus.backend.template.application.TemplateCatalog;
 import com.perseus.backend.template.domain.VmTemplate;
 import com.perseus.backend.template.infrastructure.TemplateCatalogProperties;
+import com.perseus.backend.vm.application.VmService.CreateResult;
 import com.perseus.backend.vm.domain.CreateVmCommand;
 import com.perseus.backend.vm.domain.Vm;
 import com.perseus.backend.vm.domain.VmControlPort;
+import com.perseus.backend.vm.domain.VmLaunchSpec;
+import com.perseus.backend.vm.domain.VmRecord;
+import com.perseus.backend.vm.domain.VmRecordRepository;
+import com.perseus.backend.vm.domain.VmRuntime;
 import com.perseus.backend.vm.domain.VmState;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 
 @ExtendWith(MockitoExtension.class)
 class VmServiceTest {
 
+    private static final Instant NOW = Instant.parse("2026-10-18T03:00:00Z");
+    private static final CreateVmCommand ALPINE = new CreateVmCommand("alpine-sensor", "alpine", "1.2.0", 1, 256);
+    private static final VmLaunchSpec ALPINE_SPEC = new VmLaunchSpec("alpine", "1.2.0", 1, 256);
+
     @Mock
     private VmControlPort vmControlPort;
 
-    private final TemplateCatalog templateCatalog = new TemplateCatalog(new TemplateCatalogProperties(
-            List.of(new VmTemplate("alpine", "1.2.0", "Alpine 1.2.0", 128))));
+    @Mock
+    private VmRecordRepository vmRecordRepository;
+
+    private VmService service;
+
+    @BeforeEach
+    void setUp() {
+        TemplateCatalog templateCatalog = new TemplateCatalog(new TemplateCatalogProperties(
+                List.of(new VmTemplate("alpine", "1.2.0", "Alpine 1.2.0", 128))));
+        service = new VmService(vmControlPort, vmRecordRepository, templateCatalog, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
 
     @Test
-    void createGeneratesUuidAndDelegatesToControlLayer() {
-        CreateVmCommand command = new CreateVmCommand("alpine-sensor", "alpine", "1.2.0", 1, 256);
-        when(vmControlPort.create(anyString(), eq(command))).thenAnswer(invocation -> new Vm(
-                invocation.getArgument(0),
-                command.name(),
-                VmState.SHUTDOWN,
-                command.templateId(),
-                command.templateVersion(),
-                command.vcpus(),
-                command.memoryMib()));
+    void listCombinesRecordsWithXenStateAndReportsAbsentDomainsAsStopped() {
+        VmRecord running = record("vm-1", "alpine-1");
+        VmRecord stopped = record("vm-2", "alpine-2");
+        when(vmRecordRepository.findAllByOrderByCreatedAtAsc()).thenReturn(List.of(running, stopped));
+        when(vmControlPort.list()).thenReturn(List.of(
+                new VmRuntime("vm-1", VmState.RUNNING, 1, 256),
+                new VmRuntime("unknown-domain", VmState.RUNNING, 1, 128)));
 
-        Vm vm = new VmService(vmControlPort, templateCatalog).create(command);
+        List<Vm> vms = service.list();
 
-        ArgumentCaptor<String> vmIdCaptor = ArgumentCaptor.forClass(String.class);
-        verify(vmControlPort).create(vmIdCaptor.capture(), eq(command));
-        assertThat(UUID.fromString(vmIdCaptor.getValue()).toString()).isEqualTo(vm.vmId());
-        assertThat(vm.state()).isEqualTo(VmState.SHUTDOWN);
+        assertThat(vms).extracting(Vm::vmId).containsExactly("vm-1", "vm-2");
+        assertThat(vms.get(0).state()).isEqualTo(VmState.RUNNING);
+        assertThat(vms.get(0).name()).isEqualTo("alpine-1");
+        assertThat(vms.get(1).state()).isEqualTo(VmState.STOPPED);
+        assertThat(vms.get(1).templateId()).isEqualTo("alpine");
+    }
+
+    @Test
+    void createSavesRecordAndLaunchesWithoutName() {
+        when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.empty());
+        when(vmRecordRepository.save(any(VmRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(vmControlPort.launch(anyString(), eq(ALPINE_SPEC))).thenAnswer(invocation ->
+                new VmRuntime(invocation.getArgument(0), VmState.RUNNING, 1, 256));
+
+        CreateResult result = service.create(ALPINE);
+
+        ArgumentCaptor<String> vmId = ArgumentCaptor.forClass(String.class);
+        verify(vmControlPort).launch(vmId.capture(), eq(ALPINE_SPEC));
+        assertThat(UUID.fromString(vmId.getValue()).toString()).isEqualTo(result.vm().vmId());
+        assertThat(result.created()).isTrue();
+        assertThat(result.vm().state()).isEqualTo(VmState.RUNNING);
+        assertThat(result.vm().name()).isEqualTo("alpine-sensor");
+    }
+
+    @Test
+    void retriedCreateWithSameSpecReturnsExistingVm() {
+        VmRecord existing = record("vm-1", "alpine-sensor");
+        when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.of(existing));
+        when(vmControlPort.find("vm-1")).thenReturn(Optional.of(new VmRuntime("vm-1", VmState.RUNNING, 1, 256)));
+
+        CreateResult result = service.create(ALPINE);
+
+        assertThat(result.created()).isFalse();
+        assertThat(result.vm().vmId()).isEqualTo("vm-1");
+        verify(vmRecordRepository, never()).save(any());
+        verify(vmControlPort, never()).launch(anyString(), any());
+    }
+
+    @Test
+    void createWithTakenNameAndDifferentSpecIsRejected() {
+        when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.of(record("vm-1", "alpine-sensor")));
+
+        assertThatThrownBy(() -> service.create(new CreateVmCommand("alpine-sensor", "alpine", "1.2.0", 2, 256)))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo("VM_NAME_CONFLICT"));
+        verify(vmControlPort, never()).launch(anyString(), any());
+    }
+
+    @Test
+    void createRejectedByDom0RemovesTheRecord() {
+        when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.empty());
+        when(vmRecordRepository.save(any(VmRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(vmControlPort.launch(anyString(), any())).thenThrow(
+                new ApiException(HttpStatus.CONFLICT, "INSUFFICIENT_RESOURCES", "메모리 부족"));
+
+        assertThatThrownBy(() -> service.create(ALPINE)).isInstanceOf(ApiException.class);
+        verify(vmRecordRepository).delete(any(VmRecord.class));
+    }
+
+    @Test
+    void createThatTimedOutKeepsTheRecordForARetry() {
+        when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.empty());
+        when(vmRecordRepository.save(any(VmRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(vmControlPort.launch(anyString(), any())).thenThrow(
+                new ApiException(HttpStatus.GATEWAY_TIMEOUT, "VM_CONTROL_TIMEOUT", "시간 초과"));
+
+        assertThatThrownBy(() -> service.create(ALPINE)).isInstanceOf(ApiException.class);
+        verify(vmRecordRepository, never()).delete(any(VmRecord.class));
+    }
+
+    @Test
+    void startLaunchesTheRecordedSpecAgainWhenTheDomainIsAbsent() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        when(vmControlPort.find("vm-1")).thenReturn(Optional.empty());
+        when(vmControlPort.launch("vm-1", ALPINE_SPEC)).thenReturn(new VmRuntime("vm-1", VmState.RUNNING, 1, 256));
+
+        assertThat(service.start("vm-1").state()).isEqualTo(VmState.RUNNING);
+    }
+
+    @Test
+    void startOfARunningVmDoesNotLaunchAgain() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        when(vmControlPort.find("vm-1")).thenReturn(Optional.of(new VmRuntime("vm-1", VmState.RUNNING, 1, 256)));
+
+        assertThat(service.start("vm-1").state()).isEqualTo(VmState.RUNNING);
+        verify(vmControlPort, never()).launch(anyString(), any());
+    }
+
+    @Test
+    void startTreatsVmExistsAsAlreadyStarted() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        when(vmControlPort.find("vm-1"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(new VmRuntime("vm-1", VmState.RUNNING, 1, 256)));
+        when(vmControlPort.launch("vm-1", ALPINE_SPEC)).thenThrow(
+                new ApiException(HttpStatus.CONFLICT, "VM_ALREADY_EXISTS", "exists"));
+
+        assertThat(service.start("vm-1").state()).isEqualTo(VmState.RUNNING);
+    }
+
+    @Test
+    void stopReturnsTheVmAsStopped() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+
+        assertThat(service.stop("vm-1").state()).isEqualTo(VmState.STOPPED);
+        verify(vmControlPort).stop("vm-1");
+    }
+
+    @Test
+    void destroyDeletesDomainDiskAndRecord() {
+        service.destroy("vm-1");
+
+        verify(vmControlPort).destroy("vm-1");
+        verify(vmRecordRepository).deleteById("vm-1");
+    }
+
+    @Test
+    void unknownVmIsNotFound() {
+        when(vmRecordRepository.findById("missing")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.get("missing"))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo("VM_NOT_FOUND"));
+    }
+
+    private static VmRecord record(String vmId, String name) {
+        return new VmRecord(vmId, new CreateVmCommand(name, "alpine", "1.2.0", 1, 256), NOW);
     }
 }

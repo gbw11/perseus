@@ -29,7 +29,7 @@ perseus:
       - template-id: debian
         version: "12"
         display-name: Debian 12
-        min-memory-mib: 100
+        min-memory-mib: 128
       - template-id: ubuntu
         version: "24.04"
         display-name: Ubuntu 24.04
