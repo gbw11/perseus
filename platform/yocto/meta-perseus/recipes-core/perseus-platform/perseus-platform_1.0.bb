@@ -6,7 +6,7 @@ SRC_URI = "file://verify-perseus-runtime-artifacts.py file://perseus_vm.py file:
            file://perseus-vm-shutdown.service file://perseus-vms.service \
            file://perseus-auth.conf file://perseus-first-boot file://perseus_first_boot.py \
            file://first_install_contract.py file://perseus-data-prepare.service \
-           file://perseus-first-boot.service file://first-install-capabilities.json file://perseus-sshd-keys.conf file://prepare_instance.py file://prepare_rootfs.py file://guest_identity.py"
+           file://perseus-first-boot.service file://first-install-capabilities.json file://perseus-sshd-keys.conf file://prepare_instance.py file://prepare_rootfs.py file://guest_identity.py file://update-perseus-guest-ssh.py"
 FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../../scripts:${THISDIR}/../../../../first-install:${THISDIR}/../../../../guests/common:"
 S = "${UNPACKDIR}"
 inherit systemd
@@ -38,6 +38,7 @@ do_install() {
     for module in prepare_instance.py prepare_rootfs.py guest_identity.py; do
         install -m 0644 "${S}/$module" "${D}${libdir}/perseus/$module"
     done
+    install -m 0644 "${S}/update-perseus-guest-ssh.py" "${D}${libdir}/perseus/update_guest_ssh.py"
     install -d "${D}${datadir}/perseus"
     install -m 0644 "${S}/first-install-capabilities.json" "${D}${datadir}/perseus/first-install-capabilities.json"
     for unit_name in sshd.service sshd@.service sshd.socket; do

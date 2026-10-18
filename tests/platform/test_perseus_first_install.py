@@ -471,7 +471,7 @@ class GuestIdentityTest(unittest.TestCase):
         root = self.root()
         self.assertEqual((root / 'etc/machine-id').read_text(), 'uninitialized\n')
         self.assertFalse(list((root / 'etc/ssh').glob('ssh_host_*_key')))
-        self.assertIn('Requires=perseus-guest-identity.service', (root / 'etc/systemd/system/ssh.socket.d/10-perseus-identity.conf').read_text())
+        self.assertIn('Requires=perseus-guest-identity.service', (root / 'etc/systemd/system/ssh.service.d/10-perseus-identity.conf').read_text())
 
     def test_first_guest_ssh_preparation_and_rerun_preserve_changed_password_and_keys(self):
         root = self.root()

@@ -157,6 +157,7 @@ def platform_root(root):
                'usr/lib/perseus/perseus_zephyr.py': FILES / 'perseus_zephyr.py',
                'etc/systemd/journald.conf.d/20-perseus.conf': FILES / 'perseus-journald.conf',
                'etc/systemd/system.conf.d/20-perseus.conf': FILES / 'perseus-system.conf'}
+    mapping['usr/lib/perseus/update_guest_ssh.py'] = ROOT / 'scripts/update-perseus-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         mapping['usr/lib/perseus/' + name] = ROOT / 'platform/guests/common' / name
     for path in [*FILES.glob('*.service'), *FILES.glob('*.mount')]:
