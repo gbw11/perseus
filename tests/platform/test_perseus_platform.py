@@ -69,7 +69,7 @@ class FakeXen:
         if args == ['xl', 'list', '-l']:
             return json.dumps(self.rows)
         if args == ['xl', 'list']:
-            return 'Name ID Mem VCPUs State Time(s)\nDomain-0 0 1024 4 r----- 0\n' + ''.join(f"{r['config']['c_info']['name']} {r['domid']} 512 1 -b---- 0\n" for r in self.rows)
+            return 'Name ID Mem VCPUs State Time(s)\nDomain-0 0 1024 4 r----- 0\n' + ''.join(f"{r['config']['c_info']['name']} {r['domid']} 512 1 r----- 0\n" for r in self.rows)
         if args[:2] == ['xl', 'create']:
             if self.fail_create:
                 raise vm.PlatformError('injected xl create failure')

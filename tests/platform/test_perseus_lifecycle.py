@@ -394,6 +394,7 @@ class ManagementTest(unittest.TestCase):
         def start(r):
             if r['id'] == 'ubuntu-dev':
                 raise KeyboardInterrupt('injected service interruption')
+            return 'running'
         with patch.object(self.p, 'start', side_effect=start), patch.object(self.p, 'prepare_dhcp'):
             with self.assertRaises(KeyboardInterrupt):
                 self.p.autostart(self.records, [])

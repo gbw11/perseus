@@ -131,15 +131,19 @@ def validate_record(record, directory, *, allow_seed=False):
 
 
 def load_records(data, *, validate_assets=True):
-    """마운트를 이미 검증한 호출자용 registry 검증. 디스크 생성이나 상태 변경은 없다."""
+    """공통 신원·경로·디스크 중복 검증. validate_assets는 전체 부팅 자산 검사도 요청한다.
+
+    CLI는 공통 검증 후 실행 대상만 자산을 검사한다. 누락된 비대상 부팅 자산은
+    종료/콘솔을 막지 않지만, 연결된 경로나 공유 쓰기 디스크는 항상 거부한다.
+    """
     registry = data / 'instances'
-    if registry.is_symlink() or not registry.is_dir():
+    if registry.is_symlink() or not registry.is_dir() or registry.resolve() != registry:
         raise PlatformError('instance registry missing')
     records, identities, disks = {}, set(), set()
     for directory in sorted(registry.iterdir()):
         if directory.name.startswith('.'):
             continue
-        if directory.is_symlink() or not directory.is_dir():
+        if directory.is_symlink() or not directory.is_dir() or directory.resolve() != directory:
             raise PlatformError(f'invalid registry entry: {directory}')
         r = json.loads(regular_asset(directory, 'instance.json').read_text())
         validate_identity(r)
@@ -153,8 +157,12 @@ def load_records(data, *, validate_assets=True):
                 raise PlatformError(f'duplicate VM {key}: {r[key]}')
             identities.add(identity)
         disk = directory / 'root.raw'
-        if guest_kind(r) == 'linux' and (validate_assets or (disk.is_file() and not disk.is_symlink())):
-            st = (directory / 'root.raw').stat()
+        if guest_kind(r) == 'linux' and disk.is_symlink():
+            raise PlatformError(f'linked writable disk: {disk}')
+        if guest_kind(r) == 'linux' and disk.exists():
+            if not disk.is_file():
+                raise PlatformError(f'invalid writable disk: {disk}')
+            st = disk.stat()
             inode = (st.st_dev, st.st_ino)
             if inode in disks:
                 raise PlatformError('same writable disk is registered more than once')
@@ -164,6 +172,32 @@ def load_records(data, *, validate_assets=True):
                 raise PlatformError('instance disk aliases immutable template')
         records[r['id']] = r
     return records
+
+
+def xen_state(flags):
+    """xl의 여섯 상태 열. 다섯째 열은 독립 crash flag가 아닌 shutdown reason이다."""
+    if flags[5] == 'd':
+        return 'dying'
+    if flags[3] == 's':
+        return 'crashed' if flags[4] == 'c' else 'shutdown'
+    for position, state in ((2, 'paused'), (1, 'blocked'), (0, 'running')):
+        if flags[position] != '-':
+            return state
+    return 'unknown'
+
+
+class DomainStateError(PlatformError):
+    """도메인은 존재하지만 start 성공으로 인정할 수 없는 관측 상태."""
+    def __init__(self, record, row):
+        self.xen_state = row['xen_state']
+        self.xen_state_flags = row['xen_state_flags']
+        super().__init__(f"{record['id']}: Xen domain is {self.xen_state} ({self.xen_state_flags}); no automatic recovery")
+
+
+def started_state(record, row):
+    if row['xen_state'] not in ('running', 'blocked'):
+        raise DomainStateError(record, row)
+    return row['xen_state']
 
 
 class Platform:
@@ -250,7 +284,7 @@ class Platform:
         from argparse import Namespace
         make_instance(Namespace(data_root=self.data, id=args.id, spec=None, template_root=None, deployment_seed=False),
                       vm=sys.modules[__name__], defaults_path=Path('/etc/perseus/defaults.json'), record_override=record)
-        self.records()
+        self.records(validate_assets=False)
         print('new persistent instance registered; use start explicitly; immutable template retained')
 
     def reserve_space(self, additional_bytes, records):
@@ -267,20 +301,51 @@ class Platform:
         return free, required
 
     def domains(self):
+        """고정 Xen의 상세 설정과 짧은 목록의 실행 상태를 domid/name으로 대조한다."""
         rows = json.loads(self.command(['xl', 'list', '-l']))
         if not isinstance(rows, list):
             raise PlatformError('xl list -l returned unexpected schema')
-        # xl long list는 설정 조회 실패 도메인을 생략하므로 짧은 목록과 대조한다.
-        short = self.command(['xl', 'list']).splitlines()
-        ids = {int(line.split()[1]) for line in short[1:] if line.strip()}
-        if (ids - {0}) != {row['domid'] for row in rows if row['domid'] != 0}:
-            raise PlatformError('xl omitted live domain configuration; writable-disk safety cannot be checked')
-        for row in rows:
-            if row.get('domid') == 0:
+        short = {}
+        for line in self.command(['xl', 'list']).splitlines()[1:]:
+            if not line.strip():
                 continue
-            config = row.get('config', {})
-            if not config.get('c_info', {}).get('uuid') or 'disks' not in config:
-                raise PlatformError('cannot inspect live domain UUID/disks; refusing unsafe action')
+            fields = line.split()
+            if len(fields) < 6 or not fields[1].isdigit() or not re.fullmatch(r'[r-][b-][p-][s-][-rscwS?][d-]', fields[4]):
+                raise PlatformError('xl list returned invalid domain identity/state')
+            domid = int(fields[1])
+            if domid in short:
+                raise PlatformError('duplicate live domain ID')
+            short[domid] = (fields[0], fields[4])
+        ids, identities = set(), set()
+        for row in rows:
+            if not isinstance(row, dict) or type(row.get('domid')) is not int or row['domid'] < 0 or row['domid'] in ids:
+                raise PlatformError('invalid/duplicate detailed domain ID')
+            domid = row['domid']
+            ids.add(domid)
+            if domid == 0:
+                continue
+            config = row.get('config')
+            info = config.get('c_info') if isinstance(config, dict) else None
+            if (not isinstance(info, dict) or not isinstance(info.get('uuid'), str)
+                    or not UUID.fullmatch(info['uuid']) or not isinstance(info.get('name'), str) or not info['name']):
+                raise PlatformError('cannot inspect live domain UUID/name; refusing unsafe action')
+            if domid not in short or short[domid][0] != info['name']:
+                raise PlatformError('xl domain lists disagree on domain ID/name')
+            for key in ('uuid', 'name'):
+                identity = (key, info[key])
+                if identity in identities:
+                    raise PlatformError(f'duplicate live {key}')
+                identities.add(identity)
+            # Xen 4.21 gentypes.py:get_default_expr는 길이 0인 배열을 생략한다.
+            # 설정 조회 실패는 xl_info.c:list_domains_details에서 도메인 전체를 생략한다.
+            disks = config.setdefault('disks', [])
+            if not isinstance(disks, list) or any(not isinstance(disk, dict) for disk in disks):
+                raise PlatformError('cannot inspect live domain disks; refusing unsafe action')
+            flags = short[domid][1]
+            row['xen_state_flags'] = flags
+            row['xen_state'] = xen_state(flags)
+        if (set(short) - {0}) != (ids - {0}):
+            raise PlatformError('xl omitted live domain configuration; writable-disk safety cannot be checked')
         return rows
 
     def check_xen(self):
@@ -358,12 +423,14 @@ class Platform:
         if (self.runtime / 'shutdown-requested').exists():
             raise PlatformError('board shutdown is in progress; VM start refused')
         self.command(['systemctl', 'is-active', '--quiet', 'perseus-vm-shutdown.service'])
-        domains = self.domains()
-        if self.matching(record, domains):
-            print(f"{record['id']}: already running; no duplicate create")
-            return
         directory = self.data / 'instances' / record['id']
         validate_record(record, directory)
+        domains = self.domains()
+        existing = self.matching(record, domains)
+        if existing:
+            state = started_state(record, existing[0])
+            print(f"{record['id']}: already {state}; no duplicate create; app_readiness=unknown")
+            return state
         disk = directory / 'root.raw' if guest_kind(record) == 'linux' else None
         for d in domains:
             for item in d.get('config', {}).get('disks', []):
@@ -374,9 +441,12 @@ class Platform:
         config = self.runtime / (record['id'] + '.cfg')
         atomic_write(config, self.config(record))
         self.command(['xl', 'create', str(config)], timeout=45)
-        if not self.matching(record, self.domains()):
+        created = self.matching(record, self.domains())
+        if not created:
             raise PlatformError(f"{record['id']}: xl create returned without a live domain")
-        print(f"{record['id']}: Xen domain created; guest OS/app readiness is not asserted")
+        state = started_state(record, created[0])
+        print(f"{record['id']}: Xen domain created ({state}); guest OS/app readiness is not asserted")
+        return state
 
     def autostart(self, records, required_ids):
         missing = [key for key in required_ids if key not in records]
@@ -398,11 +468,13 @@ class Platform:
             try:
                 if guest_kind(record) == 'linux':
                     self.prepare_dhcp(records)
-                self.start(record)
-                results[key] = {'result': 'running', 'app_readiness': 'unknown'}
+                state = self.start(record)
+                results[key] = {'result': state, 'xen_state': state, 'app_readiness': 'unknown'}
             except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
                 failures.append(f"{key}: {exc}")
-                results[key] = {'result': 'failed', 'error': str(exc)}
+                results[key] = {'result': 'failed', 'error': str(exc), 'app_readiness': 'unknown'}
+                if isinstance(exc, DomainStateError):
+                    results[key].update(xen_state=exc.xen_state, xen_state_flags=exc.xen_state_flags)
             save_results()
         print(json.dumps({'autostart_results': results}, indent=2))
         if failures:
@@ -466,6 +538,7 @@ class Platform:
             raise
 
     def reboot(self, record, timeout=90, *, force=False):
+        validate_record(record, self.data / 'instances' / record['id'])
         rows = self.matching(record, self.domains())
         if not rows:
             raise PlatformError('cannot reboot a stopped VM')
@@ -499,7 +572,8 @@ class Platform:
             except (PlatformError, OSError, ValueError, KeyError) as exc:
                 asset_error = str(exc)
             result.append({**r, 'asset_error': asset_error, 'guest_kind': guest_kind(r), 'registered': True,
-                           'xen_state': 'running' if rows else 'stopped',
+                           'xen_state': rows[0]['xen_state'] if rows else 'stopped',
+                           'xen_state_flags': rows[0]['xen_state_flags'] if rows else None,
                            'domid': rows[0]['domid'] if rows else None, 'app_readiness': 'unknown',
                            'graceful_shutdown_supported': guest_kind(r) == 'linux'})
         return {'instances': result, 'domains': domains, 'time': self.time_status()}
@@ -523,7 +597,7 @@ class Platform:
         if not expected:
             raise PlatformError('--sha256 of firmware manifest is required')
         if execute:
-            self.reserve_space(info['logical_bytes'] * 2, self.records())
+            self.reserve_space(info['logical_bytes'] * 2, self.records(validate_assets=False))
             zephyr.replace_firmware(directory, record, source, expected)
         print(json.dumps({'action': 'firmware-replace' if execute else 'plan-firmware-replace',
                           'id': record['id'], 'firmware': info, 'uuid': record['uuid'],
@@ -617,7 +691,8 @@ def main(argv=None):
         return
     board_action, console_uuid = None, None
     with operation_lock(p.runtime):
-        records = p.records(validate_assets=args.action not in ('autostart', 'status'))
+        # 전체 신원/경로 검증과 실행 대상의 부팅 자산 검증은 수명을 달리한다.
+        records = p.records(validate_assets=False)
         if ((p.runtime / 'shutdown-requested').exists()
                 and args.action in ('create', 'delete', 'firmware-replace', 'autostart-set')):
             raise PlatformError('board shutdown is in progress; registry mutation refused')
@@ -652,6 +727,7 @@ def main(argv=None):
                 p.check_xen()
                 p.reboot(record, force=args.force)
             elif args.action == 'config':
+                validate_record(record, p.data / 'instances' / record['id'])
                 ensure_runtime(p.runtime)
                 target = p.runtime / (record['id'] + '.cfg')
                 atomic_write(target, p.config(record))

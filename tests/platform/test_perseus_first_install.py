@@ -220,9 +220,20 @@ class AssemblyPipelineTest(unittest.TestCase):
                 shutil.copyfile(args[-2],args[-1])
             elif args[0] != 'mkfs.ext4':
                 raise AssertionError('unexpected command: ' + repr(args))
+        # 소스 스냅샷에도 Git 작업 트리는 없을 수 있다. 출처 조회도 외부 경계다.
+        def git_output(args, **_kwargs):
+            self.assertEqual(args[:3], ['git', '-C', str(ROOT)])
+            if args[3:] == ['rev-parse', 'HEAD']:
+                return 'a' * 40 + '\n'
+            if args[3:] == ['status', '--porcelain']:
+                return ' M fixture.py\n'
+            raise AssertionError('unexpected Git query: ' + repr(args))
         config = {'platform': {'sha256': assemble.sha(image)}}
-        with patch.object(assemble.os,'geteuid',return_value=0), patch.object(assemble.shutil,'which',return_value='/fixture/tool'), patch.object(assemble.prepare,'Workspace',Work), patch.object(assemble,'platform_mount',return_value=prepared_root), patch.object(assemble,'platform_boot_ok',return_value={'xen':'fixture-hash'}), patch.object(assemble.prepare,'initialize_storage',side_effect=init), patch.object(assemble.prepare,'make_instance',side_effect=seed), patch.object(assemble.prepare,'command',side_effect=command), patch.object(assemble,'template_info',return_value={}), patch.object(assemble.os,'sync'):
+        with patch.object(assemble.subprocess, 'check_output', side_effect=git_output) as git_query, patch.object(assemble.os,'geteuid',return_value=0), patch.object(assemble.shutil,'which',return_value='/fixture/tool'), patch.object(assemble.prepare,'Workspace',Work), patch.object(assemble,'platform_mount',return_value=prepared_root), patch.object(assemble,'platform_boot_ok',return_value={'xen':'fixture-hash'}), patch.object(assemble.prepare,'initialize_storage',side_effect=init), patch.object(assemble.prepare,'make_instance',side_effect=seed), patch.object(assemble.prepare,'command',side_effect=command), patch.object(assemble,'template_info',return_value={}), patch.object(assemble.os,'sync'):
             manifest = assemble.assemble(config,image,{},planned)
+        self.assertEqual(git_query.call_count, 2)
+        self.assertEqual(manifest['assembly_source_commit'], 'a' * 40)
+        self.assertTrue(manifest['assembly_source_dirty'])
         self.assertEqual(image.read_bytes(),content)
         self.assertEqual({p.name for p in output.iterdir()}, {'perseus-first-install.img','perseus-first-install.manifest.json','SHA256SUMS'})
         final = output / 'perseus-first-install.img'
