@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / 'platform/first-install'))
 sys.path.insert(0, str(ROOT / 'platform/yocto/meta-zenova/recipes-core/zenova-platform/files'))
 from zenova_runtime import operation_lock
 from prepare_rootfs import prepare_template, inside
+import template_recipe
 from prepare_instance import Workspace, make_instance as shared_make_instance
 
 
@@ -157,6 +158,8 @@ def boot_assets(root, output, source):
 def make_template(args, source):
     if not args.input.is_file() or digest(args.input, source['hash_algorithm']) != source['digest']:
         raise ValueError('official input digest mismatch or input is not a regular file')
+    recipe = getattr(args, 'recipe', None) or ROOT / 'platform/guests/linux' / args.source / 'recipe.json'
+    preparation = template_recipe.source_info(recipe, args.source)
     work = Workspace(args.output.parent)
     try:
         disk = work.path / 'source.raw'
@@ -175,6 +178,7 @@ def make_template(args, source):
         root = work.path / 'root'
         work.mount(work.loop(raw), root)
         command(['cp', '-a', str(original) + '/.', root])
+        template_recipe.apply(root, recipe, args.source)
         prepare_template(root)
         # chroot 내 /dev, /proc, /sys는 작업 루트에만 마운트한다.
         for fs, relative in [('proc', 'proc'), ('sysfs', 'sys'), ('devtmpfs', 'dev')]:
@@ -187,7 +191,13 @@ def make_template(args, source):
         work.close()
         work.mounts, work.loops = [], []
         metadata = {'schema': 1, 'id': args.source, 'source': source,
-                    'size_gib': args.size_gib, 'root_sha256': digest(raw)}
+                    'size_gib': args.size_gib, 'root_sha256': digest(raw),
+                    'version': preparation['recipe']['version'], 'platform': 'zenova',
+                    'preparation': preparation,
+                    'files': {name: {'sha256': digest(stage / name), 'bytes': (stage / name).stat().st_size}
+                              for name in ('root.raw', 'Image', 'initrd', 'kernel.config', 'boot.json')}}
+        if template_recipe.source_info(recipe, args.source) != preparation:
+            raise ValueError('template source changed during preparation; output not published')
         (stage / 'template.json').write_text(json.dumps(metadata, indent=2) + '\n')
         for path in stage.iterdir():
             path.chmod(0o444)
@@ -233,6 +243,7 @@ def main(argv=None):
     template.add_argument('--input', type=Path, required=True)
     template.add_argument('--output', type=Path, required=True)
     template.add_argument('--size-gib', type=int, default=8)
+    template.add_argument('--recipe', type=Path, help='editable recipe.json; defaults to the selected Linux profile')
     instance = sub.add_parser('instance')
     instance.add_argument('--data-root', type=Path, required=True)
     instance.add_argument('--id', required=True)

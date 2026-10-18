@@ -6,6 +6,7 @@
 `zenova-data`입니다. 이미지 타깃은 `zenova-xen-bringup-image`입니다.
 
 - [Zenova 실행·빌드·최초 설치 가이드](docs/build-guides/zenova-platform.md)
+- [기본 템플릿 커스터마이징·버전 게시](docs/build-guides/zenova-template-workflow.md)
 - [리브랜딩 범위와 후속 검증](docs/build-guides/zenova-rebranding.md)
 - [Zephyr Starter App](platform/guests/zephyr/starter-app/README.md)
 - 외부 Layer·버전은 `platform/yocto/layers.lock`을 따릅니다.

@@ -76,7 +76,7 @@ rc=$?; echo "build rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 
 Linux upstream ID·버전·digest는 `platform/guests/sources.lock.json`에 그대로다.
 이전 준비 템플릿 안에는 `/etc/perseus`·identity unit·SSH Include가 있을 수 있다.
-이 원본이나 기존 VM을 덮어쓰지 않는다. 새 Zenova 준비 템플릿은 이미 검증한
+현재 기본 카탈로그는 Zenova만 사용한다. 게시된 이전 버전은 이력으로 보존하고 새 이미지에 중복 탑재하지 않는다. 새 Zenova 준비 템플릿은 이미 검증한
 OS 입력에서 **새 경로에** 만들고 새 manifest 해시를 사용한다. 재다운로드가 필수는 아니다.
 이전 marker의 root는 새 instance/seed 준비 함수에서 거부한다. 기존 VM의 신원을
 Zenova 이름으로 자동 이전하는 기능이나 호환 CLI는 제공하지 않는다.
@@ -86,6 +86,8 @@ SDK 1.0.0, 앱 1.0.0, 1 vCPU/16MiB/GICv2는 유지한다. 이전 펌웨어/manif
 새 이름으로 다시 쓰지 않고, 후속 승인 후 새 빌드와 불변 번들을 준비한다.
 현재 소스 provenance는 `starter.lock.json`, 실제 binary revision은 향후 새
 `firmware.json`의 SHA-256이다. 자세한 명령은 Starter README를 따른다.
+
+커스터마이징·준비 버전·검증·현재 기본 참조는 [템플릿 워크플로](zenova-template-workflow.md)를 따른다.
 
 새 dom0 게시 도구는 `scripts/publish-zenova-platform.py`,
 Linux 준비 도구는 `scripts/prepare-zenova-guests.py`,

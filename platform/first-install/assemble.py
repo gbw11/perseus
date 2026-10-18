@@ -74,6 +74,23 @@ def template_info(directory, source_id, expected):
     for name, field in [('Image', 'kernel_sha256'), ('initrd', 'initrd_sha256'), ('kernel.config', 'config_sha256')]:
         path = checked(directory / name, boot[field])
         boot_bytes += path.stat().st_size
+    if meta.get('platform') == 'zenova':
+        import template_recipe
+        preparation = dict(meta.get('preparation', {}))
+        expected_source = preparation.pop('source_sha256', None)
+        if (not isinstance(meta.get('version'), str) or not template_recipe.VERSION.fullmatch(meta['version'])
+                or preparation.get('platform') != 'zenova'
+                or preparation.get('recipe', {}).get('version') != meta['version']
+                or preparation.get('recipe', {}).get('source_id') != source_id
+                or expected_source != hashlib.sha256(json.dumps(preparation, sort_keys=True, separators=(',', ':')).encode()).hexdigest()):
+            raise ValueError('Zenova template preparation provenance/version mismatch')
+        names = {'root.raw', 'Image', 'initrd', 'kernel.config', 'boot.json'}
+        if set(meta.get('files', {})) != names:
+            raise ValueError('Zenova template payload manifest incomplete')
+        for name in names:
+            asset = checked(directory / name, meta['files'][name]['sha256'])
+            if asset.stat().st_size != meta['files'][name]['bytes'] or asset.stat().st_mode & 0o222:
+                raise ValueError('Zenova template payload size/immutability mismatch')
     return {'logical_bytes': root.stat().st_size, 'allocated_bytes': root.stat().st_blocks * SECTOR,
             'boot_bytes': boot_bytes + 64 * 1024, 'preparation_scratch_bytes': 0,
             'source_id': source_id, 'template': str(directory), 'template_manifest_sha256': expected, 'root_sha256': meta['root_sha256'], 'boot': boot}
@@ -423,7 +440,13 @@ def download_source(guest):
 
 
 def source_fingerprints():
-    paths = [ROOT / 'scripts/assemble-zenova-first-install.py', ROOT / 'scripts/prepare-zenova-guests.py',
+    paths = [
+             ROOT / 'platform/guests/common/template_recipe.py',
+             ROOT / 'scripts/build-zenova-starter.py', ROOT / 'scripts/resolve-zenova-templates.py',
+             ROOT / 'scripts/verify-zenova-template.py', ROOT / 'scripts/refresh-zenova-starter-lock.py',
+             ROOT / 'platform/guests/default-templates.lock.json',
+             *(p for p in sorted((ROOT / 'platform/guests/linux').rglob('*')) if p.is_file()),
+             ROOT / 'scripts/assemble-zenova-first-install.py', ROOT / 'scripts/prepare-zenova-guests.py',
              ROOT / 'platform/first-install/assemble.py', ROOT / 'platform/first-install/artifact_io.py',
              ROOT / 'platform/first-install/completed_artifacts.py', ROOT / 'scripts/publish-zenova-platform.py',
              ROOT / 'platform/first-install/first_install_contract.py',

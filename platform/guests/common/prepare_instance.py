@@ -151,6 +151,11 @@ def make_instance(args, *, vm, defaults_path, record_override=None):
     for filename in ('root.raw', 'template.json', 'boot.json', 'Image', 'initrd', 'kernel.config'):
         vm.regular_asset(template, filename)
     meta = json.loads((template / 'template.json').read_text())
+    if meta.get('version') is not None:
+        if not isinstance(meta['version'], str) or not __import__('re').fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?', meta['version']):
+            raise ValueError('invalid template version')
+        record['template_version'] = meta['version']
+        record['template_manifest_sha256'] = digest(template / 'template.json')
     if meta.get('id') != record['template']:
         raise ValueError('template bundle id differs from selected template')
     if (template / 'root.raw').stat().st_mode & 0o222:

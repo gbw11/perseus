@@ -71,6 +71,20 @@ def main(argv=None):
         match = re.search(r'^ZEPHYR_BASE:PATH=(.+)$', cache, re.M)
         if not match or subprocess.check_output(['git', '-C', match[1], 'rev-parse', 'HEAD'], text=True).strip() != lock['zephyr_commit']:
             raise ValueError('Starter build does not reference the pinned Zephyr commit')
+        receipt_path = zephyr.asset(args.build_dir.parent, 'zenova-build-receipt.json')
+        receipt = json.loads(receipt_path.read_text())
+        if (receipt.get('schema') != 1 or any(receipt.get(key) != lock[key]
+                for key in ('id', 'version', 'app_files', 'app_source_sha256', 'zephyr_commit', 'sdk_version'))):
+            raise ValueError('Starter build receipt differs from pinned source/version')
+        for name in ('zephyr.bin', 'zephyr.elf', 'zephyr.dts', '.config', 'include/generated/zephyr/version.h'):
+            path = zephyr.asset(args.build_dir, name)
+            if receipt.get('payloads', {}).get(name) != {'sha256': zephyr.sha(path), 'bytes': path.stat().st_size}:
+                raise ValueError('Starter binary differs from completed build receipt')
+        for name in ('zephyr.bin', 'zephyr.elf'):
+            payload = (args.build_dir / name).read_bytes()
+            if b'Zenova / Zephyr / Xen' not in payload or b'Perseus / Zephyr / Xen' in payload:
+                raise ValueError('Starter payload does not contain the current Zenova banner')
+        meta['source']['build_receipt_sha256'] = zephyr.sha(receipt_path)
         meta.update(id=lock['id'], kind='zephyr-xen-firmware')
         meta['source'].update(zephyr_commit=lock['zephyr_commit'], sdk_version=lock['sdk_version'])
     if not args.execute:

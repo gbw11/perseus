@@ -238,7 +238,7 @@ class Platform:
                 raise PlatformError('invalid template logical size')
             if root.stat().st_mode & 0o222 or root.stat().st_size != meta['size_gib'] * 1024 ** 3:
                 raise PlatformError('template root must be immutable and match its logical size')
-            result.append({'id': item.name, 'guest_kind': 'linux', 'capabilities': {'graceful_shutdown': True, 'ssh': True, 'dhcp': True, 'guest_writable_persistent_storage': True}, 'logical_bytes': root.stat().st_size, 'source': meta['source'], 'root_sha256': meta['root_sha256']})
+            result.append({'id': item.name, 'guest_kind': 'linux', 'capabilities': {'graceful_shutdown': True, 'ssh': True, 'dhcp': True, 'guest_writable_persistent_storage': True}, 'version': meta.get('version'), 'logical_bytes': root.stat().st_size, 'source': meta['source'], 'root_sha256': meta['root_sha256']})
         catalog = self.data / 'rtos-templates'
         if catalog.exists():
             zephyr.plain(catalog)
