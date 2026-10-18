@@ -68,6 +68,13 @@ class FakeXen:
         self.calls.append(args)
         if args == ['xl', 'list', '-l']:
             return json.dumps(self.rows)
+        if args == ['xl', 'list', '-v']:
+            # 고정 xl_info.c의 verbose 출력. UUID를 실행 인자로 허용하지 않는다.
+            return ('Name ID Mem VCPUs State Time(s) UUID Reason-Code Security Label\n'
+                    'Domain-0 0 1024 4 r----- 0.0 00000000-0000-0000-0000-000000000000 - -\n'
+                    + ''.join(f"{r['config']['c_info']['name']} {r['domid']} 512 1 "
+                              f"{getattr(self, 'states', {}).get(r['domid'], 'r-----')} 0.0 "
+                              f"{r['config']['c_info']['uuid']} - -\n" for r in self.rows))
         if args == ['xl', 'list']:
             return 'Name ID Mem VCPUs State Time(s)\nDomain-0 0 1024 4 r----- 0\n' + ''.join(f"{r['config']['c_info']['name']} {r['domid']} 512 1 r----- 0\n" for r in self.rows)
         if args[:2] == ['xl', 'create']:
@@ -240,8 +247,7 @@ class LifecycleTest(unittest.TestCase):
         self.assertFalse(any(c == ['systemctl', 'poweroff'] for c in self.runner.calls))
 
     def test_unmount_failure_never_requests_poweroff(self):
-        self.p.runtime.mkdir()
-        (self.p.runtime / 'shutdown-requested').touch()
+        self.p.prepare_board_shutdown([self.r], 'poweroff')
         def failing(args, **kwargs):
             if args == ['systemctl', 'stop', 'srv-perseus.mount']:
                 raise vm.PlatformError('unmount failed')
@@ -252,8 +258,7 @@ class LifecycleTest(unittest.TestCase):
         self.assertFalse(any(c == ['systemctl', 'poweroff'] for c in self.runner.calls))
 
     def test_board_shutdown_orders_storage_before_poweroff(self):
-        self.p.runtime.mkdir()
-        (self.p.runtime / 'shutdown-requested').touch()
+        self.p.prepare_board_shutdown([self.r], 'poweroff')
         self.p.finish_board_shutdown('poweroff')
         calls = self.runner.calls
         self.assertLess(calls.index(['systemctl', 'stop', 'srv-perseus.mount']), calls.index(['systemctl', 'poweroff']))

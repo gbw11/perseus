@@ -366,6 +366,58 @@ class Platform:
             raise PlatformError('xl omitted live domain configuration; writable-disk safety cannot be checked')
         return rows
 
+    def removal_snapshot(self, deadline):
+        """종료 요청 후에만 사용한다. 디스크 설정 없이 현재 신원·상태를 읽는다.
+
+        Xen 4.21 xl_info.c:list_domains(verbose=true)의 고정 열 형식이다.
+        헤더/Domain-0/UUID까지 검증하므로 명령 실패나 빈 출력은 부재가 아니다.
+        """
+        lines = self.timed_command(['xl', 'list', '-v'], deadline).splitlines()
+        if not lines or lines[0].split() != [
+                'Name', 'ID', 'Mem', 'VCPUs', 'State', 'Time(s)', 'UUID',
+                'Reason-Code', 'Security', 'Label']:
+            raise PlatformError('invalid xl list -v header; removal not confirmed')
+        rows, ids, names, uuids = {}, set(), set(), set()
+        for line in lines[1:]:
+            if not line.strip():
+                continue
+            fields = line.split()
+            if (len(fields) < 9 or not fields[1].isdigit()
+                    or not fields[2].isdigit() or not fields[3].isdigit()
+                    or not re.fullmatch(r'[r-][b-][p-][s-][-rscwS?][d-]', fields[4])
+                    or not re.fullmatch(r'[0-9]+(?:\.[0-9]+)?', fields[5])
+                    or not UUID.fullmatch(fields[6])):
+                raise PlatformError('invalid xl list -v identity/state; removal not confirmed')
+            name, domid, uuid = fields[0], int(fields[1]), fields[6]
+            if domid in ids or name in names or uuid in uuids:
+                raise PlatformError('duplicate xl list -v identity; removal not confirmed')
+            ids.add(domid); names.add(name); uuids.add(uuid)
+            rows[domid] = {'domid': domid, 'name': name, 'uuid': uuid,
+                           'xen_state': xen_state(fields[4]), 'xen_state_flags': fields[4]}
+        if 0 not in rows or rows[0]['name'] != 'Domain-0':
+            raise PlatformError('Domain-0 missing from xl list -v; removal not confirmed')
+        return {key: row for key, row in rows.items() if key != 0}
+
+    def removal_observation(self, expected, deadline, *, board=False):
+        """성공한 두 전체 목록으로 제거를 확인하며 교체·새 도메인을 거부한다."""
+        snapshots = []
+        for _ in range(2):
+            rows = self.removal_snapshot(deadline)
+            for row in rows.values():
+                identity = (row['domid'], row['uuid'], row['name'])
+                if identity in expected:
+                    continue
+                if any(row['domid'] == old[0] or row['uuid'] == old[1] or row['name'] == old[2]
+                       for old in expected):
+                    raise PlatformError('replacement domain appeared during shutdown; no command sent to replacement')
+                if board:
+                    raise PlatformError('unexpected domain appeared during shutdown; board shutdown refused')
+            snapshots.append(rows)
+        return snapshots
+
+    def confirm_board_empty(self, deadline):
+        self.removal_observation(set(), deadline, board=True)
+
     def check_xen(self):
         if 'control_d' not in Path('/proc/xen/capabilities').read_text().split():
             raise PlatformError('not Xen dom0: control_d capability absent')
@@ -517,21 +569,24 @@ class Platform:
         if failures:
             raise PlatformError('; '.join(failures))
 
-    def stop_many(self, records, timeout=90, *, force=False, board=False):
-        """전체 사전 검사 후 요청하고 실제 도메인 제거까지 단조 시계로 확인한다.
-
-        board는 VM별 승인 정책을 사용한다. force는 명시적인 전역 파괴 요청이며
-        Linux에도 적용된다. 실패/시간 초과는 기록하고 자동 강제 종료하지 않는다.
-        """
+    def stop_many(self, records, timeout=90, *, force=False, board=False, deadline=None):
+        """사전 안전 검사와 요청 후 신원 관측을 분리한다. 자동 강제 종료는 없다."""
         ensure_runtime(self.runtime)
-        result = {'action': 'stop', 'stopped': [], 'already_stopped': [],
+        attempt = os.urandom(16).hex()
+        result = {'action': 'stop', 'attempt_id': attempt, 'stopped': [], 'already_stopped': [],
                   'forced': [], 'graceful_shutdown_requested': [], 'instances': {},
-                  'board_shutdown': board, 'global_force': force}
+                  'board_shutdown': board, 'global_force': force,
+                  'observation': {'samples': 0, 'changed_pairs': 0, 'recent_changes': []}}
         def save():
-            atomic_write(self.runtime / 'last-stop.json', json.dumps(result, indent=2) + '\n')
-        deadline = self.clock() + timeout
+            text = json.dumps(result, indent=2) + '\n'
+            atomic_write(self.runtime / ('stop-attempt-' + attempt + '.json'), text)
+            atomic_write(self.runtime / 'last-stop.json', text)
+        if deadline is None:
+            deadline = self.clock() + timeout
         try:
             domains = self.domains(deadline=deadline)
+            expected = {(d['domid'], d['config']['c_info']['uuid'], d['config']['c_info']['name'])
+                        for d in domains if d['domid'] != 0}
             planned, known = [], set()
             for record in records:
                 rows = self.matching(record, domains)
@@ -578,50 +633,54 @@ class Platform:
                     message = ('forced removal not observed before deadline' if strategy == 'forced' else
                                'graceful shutdown timed out; disks retained, no destroy')
                     result['instances'][record['id']].update(result='timeout', error=message, stage='removal-timeout')
-                save()
                 break
             try:
-                domains = self.domains(deadline=deadline)
+                before, after = self.removal_observation(expected, deadline, board=board)
             except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
                 for record, row, strategy in pending:
                     result['instances'][record['id']].update(result='failed', error=str(exc), stage='removal-query-failed')
                 break
+            observation = result['observation']
+            observation['samples'] += 2
+            before_ids, after_ids = sorted(before), sorted(after)
+            if before_ids != after_ids:
+                observation['changed_pairs'] += 1
+                observation['recent_changes'] = (observation['recent_changes'] + [
+                    {'before_domids': before_ids[:32], 'after_domids': after_ids[:32]}])[-4:]
             remaining = []
             for record, row, strategy in pending:
-                key = record['id']
-                try:
-                    rows = self.matching(record, domains)
-                    if rows and rows[0]['domid'] != row['domid']:
-                        raise PlatformError('replacement domain appeared during shutdown; no command sent to replacement')
-                except PlatformError as exc:
-                    result['instances'][key].update(result='failed', error=str(exc))
-                    continue
-                if not rows:
+                key, domid = record['id'], row['domid']
+                if domid not in before and domid not in after:
                     result['stopped'].append(key)
-                    result['instances'][key].update(result=strategy, stage='domain-removed')
-                elif self.clock() >= deadline:
-                    message = ('forced removal not observed before deadline' if strategy == 'forced' else
-                               'graceful shutdown timed out; disks retained, no destroy')
-                    result['instances'][key].update(result='timeout', error=message, stage='removal-timeout',
-                                                     xen_state=rows[0]['xen_state'])
+                    result['instances'][key].update(result=strategy, stage='domain-removed', xen_state='stopped')
                 else:
+                    current = after.get(domid) or before[domid]
+                    result['instances'][key]['xen_state'] = current['xen_state']
                     remaining.append((record, row, strategy))
             pending = remaining
             save()
-            if pending:
-                self.sleep(1)
+            if pending and self.clock() < deadline:
+                self.sleep(min(1, max(0, deadline - self.clock())))
+        if board and not any(item['result'] in ('failed', 'timeout') for item in result['instances'].values()):
+            try:
+                self.confirm_board_empty(deadline)
+            except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
+                result['final_check_error'] = str(exc)
         os.sync()
         save()
         print(json.dumps(result, indent=2))
         failures = [f"{key}: {item.get('error', item['result'])}" for key, item in result['instances'].items()
                     if item['result'] in ('failed', 'timeout')]
+        if result.get('final_check_error'):
+            failures.append(result['final_check_error'])
         if failures:
             raise PlatformError('; '.join(failures))
         return result
 
     def prepare_board_shutdown(self, records, action, *, force=False):
+        self._shutdown_deadline = self.clock() + 90
         try:
-            result = self.stop_many(records, force=force, board=True)
+            result = self.stop_many(records, force=force, board=True, deadline=self._shutdown_deadline)
         except (PlatformError, OSError, ValueError, KeyError, TypeError):
             if (self.runtime / 'last-stop.json').is_file():
                 result = json.loads((self.runtime / 'last-stop.json').read_text())
@@ -632,13 +691,18 @@ class Platform:
 
     def finish_board_shutdown(self, action):
         try:
-            if any(row['domid'] != 0 for row in self.domains()):
-                raise PlatformError('domain appeared before board shutdown; OS request refused')
+            # 내부 CLI는 marker로 새 기동을 막는다. 외부 xl과 원자적인 배제는 아니다.
+            self.confirm_board_empty(self._shutdown_deadline)
             self.command(['systemctl', 'stop', 'perseus-vms.service', 'perseus-vm-shutdown.service', 'perseus-dhcp.service'], timeout=110)
+            self.confirm_board_empty(self._shutdown_deadline)
             self.command(['systemctl', 'stop', 'srv-perseus.mount'], timeout=30)
             self.command(['systemctl', action])
-        except PlatformError:
+        except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
             (self.runtime / 'shutdown-requested').unlink(missing_ok=True)
+            path = self.runtime / 'board-shutdown-result.json'
+            result = json.loads(path.read_text())
+            result['final_check_error'] = str(exc)
+            atomic_write(path, json.dumps(result, indent=2) + '\n')
             raise
 
     def reboot(self, record, timeout=90, *, force=False):
