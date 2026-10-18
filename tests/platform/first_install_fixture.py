@@ -171,12 +171,14 @@ def platform_root(root):
     cap.write_text(json.dumps(contract.FEATURES))
     (root / 'etc/machine-id').write_text('uninitialized\n')
     (root / 'etc/ssh').mkdir()
-    for name in ('sshd.service', 'sshd@.service', 'sshd.socket'):
-        drop = root / 'etc/systemd/system' / (name + '.d/10-perseus-keys.conf')
-        drop.parent.mkdir(parents=True)
-        drop.write_bytes((FILES / 'perseus-sshd-keys.conf').read_bytes())
+    from dom0_ssh_fixture import install_policy
+    install_policy(root)
+    keys = root / 'usr/lib/systemd/system/sshdgenkeys.service'
+    keys.write_text('[Service]\\nExecStart=/usr/libexec/openssh/sshd_check_keys\\n')
+    checker = root / 'usr/libexec/openssh/sshd_check_keys'
+    checker.parent.mkdir(parents=True); checker.write_text('packaging fixture: not executed')
     wants = root / 'etc/systemd/system/multi-user.target.wants'
-    wants.mkdir()
+    wants.mkdir(exist_ok=True)
     for name in ('perseus-first-boot.service', 'srv-perseus.mount', 'perseus-vms.service', 'perseus-vm-shutdown.service'):
         (wants / name).symlink_to('/usr/lib/systemd/system/' + name)
     tools = root / 'usr/bin'

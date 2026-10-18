@@ -41,16 +41,18 @@ do_install() {
     install -m 0644 "${S}/update-perseus-guest-ssh.py" "${D}${libdir}/perseus/update_guest_ssh.py"
     install -d "${D}${datadir}/perseus"
     install -m 0644 "${S}/first-install-capabilities.json" "${D}${datadir}/perseus/first-install-capabilities.json"
-    for unit_name in sshd.service sshd@.service sshd.socket; do
-        install -d "${D}${sysconfdir}/systemd/system/$unit_name.d"
-        install -m 0644 "${S}/perseus-sshd-keys.conf" "${D}${sysconfdir}/systemd/system/$unit_name.d/10-perseus-keys.conf"
-    done
+    install -d "${D}${sysconfdir}/systemd/system/sshd.service.d" "${D}${sysconfdir}/systemd/system-generators"
+    install -m 0644 "${S}/perseus-sshd-keys.conf" "${D}${sysconfdir}/systemd/system/sshd.service.d/10-perseus-keys.conf"
+    # systemd 259의 SSH generator가 AF_UNIX/VSOCK/추가 socket 경로를 재생성하지 않게 한다.
+    ln -s /dev/null "${D}${sysconfdir}/systemd/system-generators/systemd-ssh-generator"
     for unit in perseus-data-prepare.service perseus-first-boot.service srv-perseus.mount perseus-xen-ready.service perseus-vm-shutdown.service perseus-vms.service; do
         install -m 0644 "${S}/$unit" "${D}${systemd_system_unitdir}/$unit"
     done
 }
 # 소유권은 enable 목록과 별개다. static readiness unit도 반드시 패키징한다.
 FILES:${PN} += "${libdir}/perseus ${datadir}/perseus /srv/perseus \
+    ${sysconfdir}/systemd/system/sshd.service.d/10-perseus-keys.conf \
+    ${sysconfdir}/systemd/system-generators/systemd-ssh-generator \
     ${systemd_system_unitdir}/perseus-data-prepare.service \
     ${systemd_system_unitdir}/perseus-first-boot.service \
     ${systemd_system_unitdir}/srv-perseus.mount \

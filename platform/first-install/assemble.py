@@ -268,10 +268,30 @@ def platform_root_ok(root):
         raise ValueError('common dom0 machine-id must be uninitialized for PID1')
     if any(path('etc/ssh').glob('ssh_host_*_key')):
         raise ValueError('common dom0 must not contain shared SSH host keys')
-    for name in ('sshd.service', 'sshd@.service', 'sshd.socket'):
-        dropin = path('etc/systemd/system/' + name + '.d/10-perseus-keys.conf')
-        if dropin.read_bytes() != (FILES / 'perseus-sshd-keys.conf').read_bytes():
-            raise ValueError('SSH host-key gate missing')
+    dropin = path('etc/systemd/system/sshd.service.d/10-perseus-keys.conf')
+    if dropin.read_bytes() != (FILES / 'perseus-sshd-keys.conf').read_bytes():
+        raise ValueError('SSH host-key gate missing')
+    service = path('usr/lib/systemd/system/sshd.service')
+    keys = path('usr/lib/systemd/system/sshdgenkeys.service')
+    if not service.is_file() or not keys.is_file() or not path('usr/libexec/openssh/sshd_check_keys').is_file():
+        raise ValueError('dom0 SSH service/key preparation package missing')
+    if any(path('usr/lib/systemd/system/' + name).exists() for name in ('sshd.socket', 'sshd@.service')):
+        raise ValueError('dom0 SSH socket mode must be replaced by service mode')
+    link = root / 'etc/systemd/system/multi-user.target.wants/sshd.service'
+    if not link.is_symlink() or path('etc/systemd/system/multi-user.target.wants/sshd.service').read_bytes() != service.read_bytes():
+        raise ValueError('dom0 SSH service not enabled')
+    for directory in ('etc/systemd/system', 'usr/lib/systemd/system'):
+        base = path(directory)
+        for suffix in ('wants', 'requires'):
+            parents = [path(str(parent.relative_to(root))) for parent in base.glob('*.' + suffix)]
+            if any(p.name in ('sshd.socket', 'sshd@.service') for parent in parents for p in parent.iterdir()):
+                raise ValueError('dom0 SSH socket dependency remains')
+    generator = root / 'etc/systemd/system-generators/systemd-ssh-generator'
+    if not generator.is_symlink() or generator.readlink() != Path('/dev/null'):
+        raise ValueError('dom0 SSH generator must be disabled for the single service path')
+    preset = path('usr/lib/systemd/system-preset/98-openssh-sshd.preset').read_text()
+    if 'enable sshd.service' not in preset.splitlines() or 'enable sshd.socket' in preset.splitlines():
+        raise ValueError('dom0 SSH preset selects wrong activation mode')
     enabled = ['perseus-first-boot.service', 'perseus-vms.service', 'perseus-vm-shutdown.service', 'srv-perseus.mount']
     for unit in enabled:
         link = root / 'etc/systemd/system/multi-user.target.wants' / unit
