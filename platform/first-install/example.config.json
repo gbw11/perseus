@@ -24,7 +24,7 @@
   ],
   "rtos_templates": [
     {
-      "template_dir": "/absolute/verified-templates/zephyr-4.4.0-xenvm",
+      "template_dir": "/absolute/verified-templates/perseus-zephyr-starter-1.0.0",
       "template_manifest_sha256": "REPLACE_WITH_ACTUAL_TEMPLATE_JSON_SHA256"
     }
   ]

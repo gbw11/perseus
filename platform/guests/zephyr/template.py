@@ -37,6 +37,23 @@ def info(directory, expected_manifest):
     directory = Path(directory)
     if not directory.is_absolute() or directory.resolve() != directory or directory.is_symlink():
         raise ValueError('RTOS template path must be canonical without links')
+    if (directory / 'firmware.json').exists():
+        # 신규 Starter 카탈로그는 앱 출처를 가진 firmware.json을 그대로 사용한다.
+        # 기존 synchronization의 엄격한 source.lock 검증은 아래에서 유지한다.
+        import perseus_zephyr as zephyr
+        info = zephyr.bundle_info(directory, expected_manifest)
+        meta = json.loads((directory / 'firmware.json').read_text())
+        lock = json.loads((HERE / 'starter.lock.json').read_text())
+        if (meta.get('id') != lock['id'] or meta.get('kind') != 'zephyr-xen-firmware'
+                or meta.get('version') != lock['version']
+                or any(meta['source'].get(k) != lock[k] for k in ('app', 'app_files', 'app_source_sha256', 'zephyr_commit', 'sdk_version'))
+                or meta['source'].get('source_revision') != 'sha256:' + lock['app_source_sha256']):
+            raise ValueError('unexpected Starter catalog provenance')
+        return {'id': lock['id'], 'kind': 'zephyr-xen-firmware', 'template': str(directory),
+                'template_manifest_sha256': expected_manifest, 'logical_bytes': info['logical_bytes'],
+                'allocated_bytes': sum(p.stat().st_blocks * 512 for p in directory.iterdir()),
+                'metadata': meta, 'autostart': False, 'storage_directory': 'rtos-templates',
+                'runtime_hardware_verified': False, 'bundle_manifest': info['manifest'], 'payloads': info['payloads']}
     checked(directory / 'template.json', expected_manifest)
     meta = json.loads((directory / 'template.json').read_text())
     lock = source_lock()

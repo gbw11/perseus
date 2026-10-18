@@ -1,5 +1,5 @@
 [Unit]
-Description=Gracefully stop registered Perseus guests before storage/toolstack stop
+Description=Stop registered guests by per-VM board shutdown policy before storage/toolstack stop
 Requires=perseus-first-boot.service srv-perseus.mount perseus-xen-ready.service
 After=perseus-first-boot.service srv-perseus.mount perseus-xen-ready.service xenstored.service xenconsoled.service xen-init-dom0.service
 Before=perseus-vms.service

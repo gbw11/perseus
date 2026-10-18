@@ -199,8 +199,10 @@ def copy_revision(source, parent, expected):
     return info
 
 
-def new_instance(data, key, template, records, *, autostart=False, registry='instances', seed=False):
+def new_instance(data, key, template, records, *, autostart=False, board_shutdown_policy='refuse', registry='instances', seed=False):
     """신규 인스턴스만 생성한다. seed는 새 조립 저장소에서만 호출한다."""
+    if board_shutdown_policy not in ('refuse', 'force-allowed'):
+        raise PlatformError('invalid Zephyr board shutdown policy')
     data, template = Path(data), plain(template)
     if not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', key) or key in records:
         raise PlatformError('new valid instance id required')
@@ -210,7 +212,7 @@ def new_instance(data, key, template, records, *, autostart=False, registry='ins
         raise PlatformError('instance output already exists')
     info = bundle_info(template)
     meta = json.loads(asset(template, info['manifest']).read_text())
-    if info['manifest'] != 'template.json' or not TOKEN.fullmatch(meta.get('id', '')):
+    if meta.get('kind') != 'zephyr-xen-firmware' or not TOKEN.fullmatch(meta.get('id', '')):
         raise PlatformError('create requires an immutable catalog template')
     identity = uuid4()
     if any(r['uuid'] == identity or r['name'] == key for r in records.values()):
@@ -218,7 +220,7 @@ def new_instance(data, key, template, records, *, autostart=False, registry='ins
     record = {'schema': 2, 'guest_kind': 'zephyr', 'id': key, 'name': key, 'uuid': identity,
               'template': meta['id'], 'autostart': bool(autostart), 'memory_mib': 16, 'vcpus': 1,
               'hardware_profile': copy.deepcopy(PROFILE), 'capabilities': dict(CAPABILITIES),
-              'shutdown_policy': 'explicit-force',
+              'shutdown_policy': 'explicit-force', 'board_shutdown_policy': board_shutdown_policy,
               'creation_origin': {'template': meta['id'], 'manifest_sha256': info['revision'], 'source': info['source']},
               'active_firmware': {k: info[k] for k in ('manifest', 'revision', 'version', 'sha256')}}
     if seed:

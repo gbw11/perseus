@@ -77,8 +77,18 @@ def identity_fields(record):
     return ('id', 'name', 'uuid') + (('hostname', 'mac', 'ipv4') if guest_kind(record) == 'linux' else ())
 
 
+def board_shutdown_policy(record):
+    """기존 등록은 Linux=graceful, Zephyr=refuse. 자동 시작은 종료 승인이 아니다."""
+    linux = guest_kind(record) == 'linux'
+    policy = record.get('board_shutdown_policy', 'graceful' if linux else 'refuse')
+    if policy not in (('graceful',) if linux else ('refuse', 'force-allowed')):
+        raise PlatformError('invalid board shutdown policy for guest kind')
+    return policy
+
+
 def validate_identity(record):
     kind = guest_kind(record)
+    board_shutdown_policy(record)
     for key in ('id', 'name') + (('hostname',) if kind == 'linux' else ()):
         if not ID.fullmatch(record.get(key, '')):
             raise PlatformError(f'invalid instance {key}')
@@ -237,7 +247,7 @@ class Platform:
                     continue
                 info = zephyr.bundle_info(item)
                 meta = json.loads((item / info['manifest']).read_text())
-                if info['manifest'] != 'template.json' or meta.get('id') != item.name:
+                if meta.get('kind') != 'zephyr-xen-firmware' or meta.get('id') != item.name:
                     raise PlatformError('invalid Zephyr template catalog entry')
                 result.append({'id': item.name, 'guest_kind': 'zephyr', 'version': info['version'],
                                'manifest_sha256': info['revision'], 'capabilities': zephyr.CAPABILITIES,
@@ -300,13 +310,21 @@ class Platform:
             raise PlatformError(f'insufficient storage: need {required} free bytes including existing VM growth and reserve, have {free}')
         return free, required
 
-    def domains(self):
+    def timed_command(self, args, deadline=None):
+        if deadline is None:
+            return self.command(args)
+        remaining = deadline - self.clock()
+        if remaining <= 0:
+            raise PlatformError('guest operation deadline exceeded')
+        return self.command(args, timeout=min(15, remaining))
+
+    def domains(self, *, deadline=None):
         """고정 Xen의 상세 설정과 짧은 목록의 실행 상태를 domid/name으로 대조한다."""
-        rows = json.loads(self.command(['xl', 'list', '-l']))
+        rows = json.loads(self.timed_command(['xl', 'list', '-l'], deadline))
         if not isinstance(rows, list):
             raise PlatformError('xl list -l returned unexpected schema')
         short = {}
-        for line in self.command(['xl', 'list']).splitlines()[1:]:
+        for line in self.timed_command(['xl', 'list'], deadline).splitlines()[1:]:
             if not line.strip():
                 continue
             fields = line.split()
@@ -419,6 +437,25 @@ class Platform:
             raise PlatformError('duplicate live UUID')
         return matching
 
+    def resolve_domain(self, record, *, expected=None, deadline=None):
+        """영구 UUID/name을 현재 domid에 대조한다. domid는 저장하지 않는다.
+
+        각 제어 호출 직전에 다시 조회한다. 외부 xl과 조회/실행 사이의 경쟁까지
+        원자적으로 차단하지는 못하므로 이전 조회와 domid가 달라지면 거부한다.
+        """
+        rows = self.matching(record, self.domains(deadline=deadline))
+        if not rows:
+            raise PlatformError(f"{record['id']}: domain disappeared or instance is stopped")
+        row = rows[0]
+        if expected is not None and row['domid'] != expected['domid']:
+            raise PlatformError(f"{record['id']}: domid changed before operation; refusing replacement domain")
+        return row
+
+    def control(self, record, action, expected, *, deadline=None):
+        row = self.resolve_domain(record, expected=expected, deadline=deadline)
+        self.timed_command(['xl', action, str(row['domid'])], deadline)
+        return row
+
     def start(self, record):
         if (self.runtime / 'shutdown-requested').exists():
             raise PlatformError('board shutdown is in progress; VM start refused')
@@ -480,57 +517,124 @@ class Platform:
         if failures:
             raise PlatformError('; '.join(failures))
 
-    def stop_many(self, records, timeout=90, *, force=False):
-        """실행 중인 게스트의 종료 정책을 먼저 검사한다. force일 때만 즉시 제거한다."""
-        domains = self.domains()
-        pending = [r for r in records if self.matching(r, domains)]
-        unsupported = [r['id'] for r in pending if guest_kind(r) == 'zephyr']
-        if unsupported and not force:
-            raise PlatformError('Zephyr graceful shutdown unsupported; explicit --force required: ' + ','.join(unsupported))
-        requested = [r['id'] for r in pending]
-        forced, graceful = [], []
-        for record in pending:
-            if guest_kind(record) == 'zephyr' or force:
-                self.command(['xl', 'destroy', record['uuid']])
-                forced.append(record['id'])
-            else:
-                self.command(['xl', 'shutdown', record['uuid']])
-                graceful.append(record['id'])
-        deadline = self.clock() + timeout
-        while pending:
-            domains = self.domains()
-            pending = [r for r in pending if self.matching(r, domains)]
-            if not pending:
-                break
-            if self.clock() >= deadline:
-                message = 'forced removal not observed before deadline: ' if force else 'graceful shutdown timed out; disks retained, no destroy: '
-                raise PlatformError(message + ','.join(r['id'] for r in pending))
-            self.sleep(1)
-        os.sync()
-        result = {'action': 'stop', 'stopped': requested,
-                  'already_stopped': [r['id'] for r in records if r['id'] not in requested],
-                  'forced': forced, 'graceful_shutdown_requested': graceful}
+    def stop_many(self, records, timeout=90, *, force=False, board=False):
+        """전체 사전 검사 후 요청하고 실제 도메인 제거까지 단조 시계로 확인한다.
+
+        board는 VM별 승인 정책을 사용한다. force는 명시적인 전역 파괴 요청이며
+        Linux에도 적용된다. 실패/시간 초과는 기록하고 자동 강제 종료하지 않는다.
+        """
         ensure_runtime(self.runtime)
-        atomic_write(self.runtime / 'last-stop.json', json.dumps(result, indent=2) + '\n')
+        result = {'action': 'stop', 'stopped': [], 'already_stopped': [],
+                  'forced': [], 'graceful_shutdown_requested': [], 'instances': {},
+                  'board_shutdown': board, 'global_force': force}
+        def save():
+            atomic_write(self.runtime / 'last-stop.json', json.dumps(result, indent=2) + '\n')
+        deadline = self.clock() + timeout
+        try:
+            domains = self.domains(deadline=deadline)
+            planned, known = [], set()
+            for record in records:
+                rows = self.matching(record, domains)
+                if not rows:
+                    result['already_stopped'].append(record['id'])
+                    result['instances'][record['id']] = {'result': 'already_stopped', 'stage': 'domain-absent'}
+                    continue
+                row = rows[0]
+                known.add(row['domid'])
+                strategy = 'forced' if force else 'graceful'
+                if guest_kind(record) == 'zephyr':
+                    if not force and not (board and board_shutdown_policy(record) == 'force-allowed'):
+                        raise PlatformError('Zephyr graceful shutdown unsupported; explicit --force or board force-allowed policy required: ' + record['id'])
+                    strategy = 'forced'
+                planned.append((record, row, strategy))
+            if board:
+                unknown = [d['domid'] for d in domains if d['domid'] != 0 and d['domid'] not in known]
+                if unknown:
+                    raise PlatformError('running unregistered domain has no shutdown policy: ' + str(unknown))
+        except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
+            result['preflight_error'] = str(exc)
+            for record in records:
+                result['instances'].setdefault(record['id'], {'result': 'not_requested', 'stage': 'preflight-refused'})
+            save()
+            raise
+        pending = []
+        for record, row, strategy in planned:
+            key = record['id']
+            result['instances'][key] = {'result': 'pending', 'method': strategy, 'domid': row['domid'],
+                                        'stage': 'identity-recheck'}
+            save()
+            try:
+                self.control(record, 'destroy' if strategy == 'forced' else 'shutdown', row, deadline=deadline)
+            except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
+                result['instances'][key].update(result='failed', error=str(exc))
+            else:
+                result['instances'][key]['stage'] = 'request-accepted'
+                result['forced' if strategy == 'forced' else 'graceful_shutdown_requested'].append(key)
+                pending.append((record, row, strategy))
+            save()
+        while pending:
+            if self.clock() >= deadline:
+                for record, row, strategy in pending:
+                    message = ('forced removal not observed before deadline' if strategy == 'forced' else
+                               'graceful shutdown timed out; disks retained, no destroy')
+                    result['instances'][record['id']].update(result='timeout', error=message, stage='removal-timeout')
+                save()
+                break
+            try:
+                domains = self.domains(deadline=deadline)
+            except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
+                for record, row, strategy in pending:
+                    result['instances'][record['id']].update(result='failed', error=str(exc), stage='removal-query-failed')
+                break
+            remaining = []
+            for record, row, strategy in pending:
+                key = record['id']
+                try:
+                    rows = self.matching(record, domains)
+                    if rows and rows[0]['domid'] != row['domid']:
+                        raise PlatformError('replacement domain appeared during shutdown; no command sent to replacement')
+                except PlatformError as exc:
+                    result['instances'][key].update(result='failed', error=str(exc))
+                    continue
+                if not rows:
+                    result['stopped'].append(key)
+                    result['instances'][key].update(result=strategy, stage='domain-removed')
+                elif self.clock() >= deadline:
+                    message = ('forced removal not observed before deadline' if strategy == 'forced' else
+                               'graceful shutdown timed out; disks retained, no destroy')
+                    result['instances'][key].update(result='timeout', error=message, stage='removal-timeout',
+                                                     xen_state=rows[0]['xen_state'])
+                else:
+                    remaining.append((record, row, strategy))
+            pending = remaining
+            save()
+            if pending:
+                self.sleep(1)
+        os.sync()
+        save()
         print(json.dumps(result, indent=2))
+        failures = [f"{key}: {item.get('error', item['result'])}" for key, item in result['instances'].items()
+                    if item['result'] in ('failed', 'timeout')]
+        if failures:
+            raise PlatformError('; '.join(failures))
         return result
 
     def prepare_board_shutdown(self, records, action, *, force=False):
-        domains = self.domains()
-        known = set()
-        for record in records:
-            known.update(row['domid'] for row in self.matching(record, domains))
-        unknown = [d['domid'] for d in domains if d['domid'] != 0 and d['domid'] not in known]
-        if unknown:
-            raise PlatformError('running unregistered domain has no shutdown policy: ' + str(unknown))
-        result = self.stop_many(records, force=force)
-        ensure_runtime(self.runtime)
+        try:
+            result = self.stop_many(records, force=force, board=True)
+        except (PlatformError, OSError, ValueError, KeyError, TypeError):
+            if (self.runtime / 'last-stop.json').is_file():
+                result = json.loads((self.runtime / 'last-stop.json').read_text())
+                atomic_write(self.runtime / 'board-shutdown-result.json', json.dumps({'board_action': action, **result}, indent=2) + '\n')
+            raise
         atomic_write(self.runtime / 'board-shutdown-result.json', json.dumps({'board_action': action, **result}, indent=2) + '\n')
         atomic_write(self.runtime / 'shutdown-requested', action + '\n')
 
     def finish_board_shutdown(self, action):
         try:
-            self.command(['systemctl', 'stop', 'perseus-vms.service', 'perseus-vm-shutdown.service'], timeout=110)
+            if any(row['domid'] != 0 for row in self.domains()):
+                raise PlatformError('domain appeared before board shutdown; OS request refused')
+            self.command(['systemctl', 'stop', 'perseus-vms.service', 'perseus-vm-shutdown.service', 'perseus-dhcp.service'], timeout=110)
             self.command(['systemctl', 'stop', 'srv-perseus.mount'], timeout=30)
             self.command(['systemctl', action])
         except PlatformError:
@@ -550,11 +654,12 @@ class Platform:
             print(json.dumps({'action': 'reboot', 'id': record['id'], 'forced': True, 'app_readiness': 'unknown'}))
             return
         previous = rows[0]['domid']
-        self.command(['xl', 'reboot', record['uuid']])
+        self.control(record, 'reboot', rows[0])
         deadline = self.clock() + timeout
         while self.clock() < deadline:
             rows = self.matching(record, self.domains())
             if rows and rows[0]['domid'] != previous:
+                started_state(record, rows[0])
                 print('guest domain restarted with same UUID/disk; OS readiness not asserted')
                 return
             self.sleep(1)
@@ -575,7 +680,8 @@ class Platform:
                            'xen_state': rows[0]['xen_state'] if rows else 'stopped',
                            'xen_state_flags': rows[0]['xen_state_flags'] if rows else None,
                            'domid': rows[0]['domid'] if rows else None, 'app_readiness': 'unknown',
-                           'graceful_shutdown_supported': guest_kind(r) == 'linux'})
+                           'graceful_shutdown_supported': guest_kind(r) == 'linux',
+                           'effective_board_shutdown_policy': board_shutdown_policy(r)})
         return {'instances': result, 'domains': domains, 'time': self.time_status()}
 
     def time_status(self):
@@ -652,10 +758,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['create', 'templates', 'check-xen', 'check-network', 'dhcp-ready',
         'autostart', 'start', 'stop', 'reboot', 'shutdown-all', 'autostart-set', 'status', 'destroy',
-        'poweroff', 'reboot-board', 'console', 'delete', 'firmware-replace', 'diagnose', 'config'])
+        'poweroff', 'reboot-board', 'console', 'delete', 'firmware-replace', 'diagnose', 'config', 'board-shutdown-set'])
     parser.add_argument('id', nargs='?')
     parser.add_argument('value', nargs='?')
-    parser.add_argument('--force', action='store_true', help='explicit immediate domain destruction; guest cleanup not guaranteed')
+    parser.add_argument('--force', action='store_true', help='explicit immediate destruction; board/shutdown-all force applies to all guests including Linux')
     parser.add_argument('--execute', action='store_true', help='explicitly publish create/delete/firmware-replace; otherwise plan only')
     parser.add_argument('--template')
     parser.add_argument('--bundle', type=Path)
@@ -689,12 +795,12 @@ def main(argv=None):
         print(json.dumps({'time': p.time_status(), 'cmdline': Path('/proc/cmdline').read_text(),
                           'uptime': Path('/proc/uptime').read_text().split()[0]}, indent=2))
         return
-    board_action, console_uuid = None, None
+    board_action, console_target = None, None
     with operation_lock(p.runtime):
         # 전체 신원/경로 검증과 실행 대상의 부팅 자산 검증은 수명을 달리한다.
         records = p.records(validate_assets=False)
         if ((p.runtime / 'shutdown-requested').exists()
-                and args.action in ('create', 'delete', 'firmware-replace', 'autostart-set')):
+                and args.action in ('create', 'delete', 'firmware-replace', 'autostart-set', 'board-shutdown-set')):
             raise PlatformError('board shutdown is in progress; registry mutation refused')
         if args.action == 'templates':
             print(json.dumps(p.templates(), indent=2))
@@ -708,7 +814,7 @@ def main(argv=None):
             p.autostart(records, [r['id'] for r in defaults if not retired_instance(p.data, r['id'])])
         elif args.action in ('shutdown-all', 'poweroff', 'reboot-board'):
             if args.action == 'shutdown-all':
-                p.stop_many(list(records.values()), force=args.force)
+                p.stop_many(list(records.values()), force=args.force, board=True)
             else:
                 board_action = 'reboot' if args.action == 'reboot-board' else 'poweroff'
                 p.prepare_board_shutdown(list(records.values()), board_action, force=args.force)
@@ -733,9 +839,8 @@ def main(argv=None):
                 atomic_write(target, p.config(record))
                 print(target)
             elif args.action == 'console':
-                if not p.matching(record, p.domains()):
-                    raise PlatformError('cannot connect console of a stopped instance')
-                console_uuid = record['uuid']
+                row = p.resolve_domain(record)
+                console_target = str(p.resolve_domain(record, expected=row)['domid'])
             elif args.action == 'firmware-replace':
                 if args.bundle is None:
                     raise PlatformError('firmware-replace requires --bundle and --sha256')
@@ -747,13 +852,18 @@ def main(argv=None):
                     raise PlatformError('autostart-set requires on or off')
                 record['autostart'] = args.value == 'on'
                 atomic_write(p.data / 'instances' / args.id / 'instance.json', json.dumps(record, indent=2) + '\n')
+            elif args.action == 'board-shutdown-set':
+                updated = {**record, 'board_shutdown_policy': args.value}
+                validate_identity(updated)
+                atomic_write(p.data / 'instances' / args.id / 'instance.json', json.dumps(updated, indent=2) + '\n')
+                print(json.dumps({'id': args.id, 'board_shutdown_policy': board_shutdown_policy(updated), 'starts_guest': False}))
             elif args.action == 'destroy':
                 if not args.force:
                     raise PlatformError('destroy requires --force; this is not graceful shutdown')
                 p.stop_many([record], force=True)
-    if console_uuid:
-        # 대화형 콘솔은 잠금을 점유하지 않는다. UUID를 사용해 동명 도메인 교체와 혼동하지 않는다.
-        os.execvp('xl', ['xl', 'console', console_uuid, '-t', 'pv'])
+    if console_target:
+        # 직전 조회로 검증한 domid만 전달한다. 콘솔 세션 동안 작업 잠금은 보유하지 않는다.
+        os.execvp('xl', ['xl', 'console', '-t', 'pv', console_target])
     if board_action:
         # ExecStop도 같은 잠금을 사용하므로 잠금 밖에서 서비스를 중지한다.
         p.finish_board_shutdown(board_action)

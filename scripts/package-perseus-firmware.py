@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """완료된 Zephyr 앱 빌드에서 새 배포 번들을 게시한다. 컴파일·원본 수정·다운로드는 하지 않는다."""
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +26,8 @@ def main(argv=None):
     parser.add_argument('--source-revision', required=True)
     parser.add_argument('--build-id', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--app-source', type=Path, help='application source files to fingerprint; no build or source changes')
+    parser.add_argument('--template-id', help='publish a new catalog entry for the pinned Starter App')
     parser.add_argument('--execute', action='store_true')
     args = parser.parse_args(argv)
     zephyr.plain(args.build_dir)
@@ -42,6 +46,33 @@ def main(argv=None):
             'hardware_profile': zephyr.PROFILE, 'capabilities': zephyr.CAPABILITIES}
     if not all(value.strip() for value in meta['source'].values()):
         raise ValueError('firmware provenance values must not be empty')
+    if args.app_source is not None:
+        zephyr.plain(args.app_source)
+        cache = zephyr.asset(args.build_dir.parent, 'CMakeCache.txt').read_text()
+        if not re.search(r'^CMAKE_HOME_DIRECTORY:INTERNAL=' + re.escape(str(args.app_source)) + r'$', cache, re.M):
+            raise ValueError('application source does not match completed CMake build')
+        fingerprints = {}
+        for path in sorted(args.app_source.rglob('*')):
+            if path.is_symlink():
+                raise ValueError('linked application source is forbidden')
+            if path.is_file():
+                fingerprints[str(path.relative_to(args.app_source))] = {'sha256': zephyr.sha(path), 'bytes': path.stat().st_size}
+        if not fingerprints:
+            raise ValueError('empty application source')
+        meta['source']['app_files'] = fingerprints
+        meta['source']['app_source_sha256'] = hashlib.sha256(json.dumps(fingerprints, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    if args.template_id is not None:
+        lock = json.loads((ROOT / 'platform/guests/zephyr/starter.lock.json').read_text())
+        if (args.template_id != lock['id'] or args.version != lock['version'] or args.app != lock['app']
+                or meta['source'].get('app_files') != lock['app_files']
+                or meta['source'].get('app_source_sha256') != lock['app_source_sha256']
+                or args.source_revision != 'sha256:' + lock['app_source_sha256']):
+            raise ValueError('catalog publication requires the pinned Starter source/version')
+        match = re.search(r'^ZEPHYR_BASE:PATH=(.+)$', cache, re.M)
+        if not match or subprocess.check_output(['git', '-C', match[1], 'rev-parse', 'HEAD'], text=True).strip() != lock['zephyr_commit']:
+            raise ValueError('Starter build does not reference the pinned Zephyr commit')
+        meta.update(id=lock['id'], kind='zephyr-xen-firmware')
+        meta['source'].update(zephyr_commit=lock['zephyr_commit'], sdk_version=lock['sdk_version'])
     if not args.execute:
         print(json.dumps({'action': 'plan-firmware-bundle', 'output': str(args.output), 'metadata': meta,
                           'hardware_boot_tested': False}, indent=2))
@@ -68,6 +99,6 @@ def main(argv=None):
 if __name__ == '__main__':
     try:
         main()
-    except (OSError, ValueError, zephyr.PlatformError) as exc:
+    except (OSError, ValueError, subprocess.SubprocessError, zephyr.PlatformError) as exc:
         print('[perseus-firmware] ERROR:', exc, file=sys.stderr)
         sys.exit(1)

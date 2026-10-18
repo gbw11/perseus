@@ -46,10 +46,6 @@ class SnapshotXen(FakeXen):
                     else:
                         row['config']['disks'] = []
             return json.dumps(rows)
-        if args[:2] == ['xl', 'destroy']:
-            self.calls.append(args)
-            self.rows = [r for r in self.rows if r['config']['c_info']['uuid'] != args[2]]
-            return ''
         return super().__call__(args, **kwargs)
 
 
@@ -167,7 +163,7 @@ class DomainReviewTest(unittest.TestCase):
                         self.live(self.linux)
                     console = self.cli(action, self.linux['id'])
                     if action == 'console':
-                        console.assert_called_once_with('xl', ['xl', 'console', self.linux['uuid'], '-t', 'pv'])
+                        console.assert_called_once_with('xl', ['xl', 'console', '-t', 'pv', '1'])
                     if action == 'stop':
                         self.assertFalse(self.xen.rows)
             image.write_bytes(original)
@@ -229,7 +225,7 @@ class DomainReviewTest(unittest.TestCase):
         self.live(other, 2)
         self.cli('poweroff')
         shutdowns = [c for c in self.xen.calls if c[:2] == ['xl', 'shutdown']]
-        self.assertEqual({c[2] for c in shutdowns}, {self.linux['uuid'], other['uuid']})
+        self.assertEqual({c[2] for c in shutdowns}, {'1', '2'})
         self.assertEqual(self.xen.calls[-1], ['systemctl', 'poweroff'])
         self.assertFalse(self.xen.rows)
 

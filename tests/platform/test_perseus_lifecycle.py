@@ -47,10 +47,6 @@ def application_bundle(source, target):
 
 class Xen(FakeXen):
     def __call__(self, args, **kwargs):
-        if args[:2] == ['xl', 'destroy']:
-            self.calls.append(args)
-            self.rows = [r for r in self.rows if r['config']['c_info']['uuid'] != args[2]]
-            return ''
         if args[0] == 'timedatectl':
             self.calls.append(args)
             return 'NTPSynchronized=no\nNTP=yes\nTimezone=UTC\n'
@@ -412,7 +408,7 @@ class ManagementTest(unittest.TestCase):
         self.assertTrue((self.p.runtime / 'zephyr-dev.cfg').exists())
         self.assertFalse(any(c[:2] == ['xl', 'create'] for c in self.xen.calls))
 
-    def test_cli_console_uses_pv_uuid_and_releases_operation_lock(self):
+    def test_cli_console_uses_verified_pv_domid_and_releases_operation_lock(self):
         self.p.start(self.z)
         calls = []
         def console(binary, args):
@@ -420,7 +416,7 @@ class ManagementTest(unittest.TestCase):
                 calls.append((binary, args))
         with patch.object(vm, 'Platform', return_value=self.p), patch.object(self.p, 'records', return_value=self.records), patch.object(vm.os, 'execvp', side_effect=console):
             vm.main(['console', 'zephyr-dev'])
-        self.assertEqual(calls, [('xl', ['xl', 'console', self.z['uuid'], '-t', 'pv'])])
+        self.assertEqual(calls, [('xl', ['xl', 'console', '-t', 'pv', '1'])])
 
     def test_cli_start_zephyr_skips_dhcp_and_stop_requires_explicit_force(self):
         with patch.object(vm, 'Platform', return_value=self.p), patch.object(self.p, 'records', return_value=self.records), patch.object(self.p, 'check_xen'), patch.object(self.p, 'prepare_dhcp', side_effect=AssertionError('not used')):

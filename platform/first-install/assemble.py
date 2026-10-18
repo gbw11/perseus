@@ -156,7 +156,7 @@ def copy_rtos_templates(data, entries):
             raise ValueError('RTOS source changed after planning')
         destination = directory / entry['id']
         destination.mkdir()
-        for name in sorted(rtos.FILES | {'template.json'}):
+        for name in sorted(set(entry.get('payloads', rtos.FILES)) | {entry.get('bundle_manifest', 'template.json')}):
             shutil.copyfile(regular(source / name), destination / name)
             (destination / name).chmod(0o444)
         rtos.info(destination, entry['template_manifest_sha256'])
@@ -169,10 +169,13 @@ def copy_rtos_seeds(data, entries):
     if len(entries) != 1:
         raise ValueError('new first-install images require one verified Zephyr template')
     default = json.loads((FILES / 'defaults.json').read_text())['firmware_instances'][0]
-    if entries[0]['id'] != default['template']:
+    if entries[0]['id'] == rtos.source_lock()['id']:
+        # 명시적으로 선택한 이전 진단 펌웨어는 기존 안전 정책을 유지한다.
+        default = {'id': 'zephyr-dev', 'template': entries[0]['id'], 'autostart': False, 'board_shutdown_policy': 'refuse'}
+    elif entries[0]['id'] != default['template']:
         raise ValueError('default Zephyr template mismatch')
     record = zephyr.new_instance(data, default['id'], data / 'rtos-templates' / default['template'],
-                                 {}, autostart=default['autostart'], registry='seeds', seed=True)
+                                 {}, autostart=default['autostart'], board_shutdown_policy=default['board_shutdown_policy'], registry='seeds', seed=True)
     return [{'record': record}]
 
 
@@ -239,6 +242,7 @@ def platform_root_ok(root):
                 'usr/lib/perseus/perseus_zephyr.py': FILES / 'perseus_zephyr.py',
                 'etc/systemd/journald.conf.d/20-perseus.conf': FILES / 'perseus-journald.conf',
                 'etc/systemd/system.conf.d/20-perseus.conf': FILES / 'perseus-system.conf'}
+    expected['usr/lib/perseus/update_guest_ssh.py'] = ROOT / 'scripts/update-perseus-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         expected['usr/lib/perseus/' + name] = ROOT / 'platform/guests/common' / name
     units = ['perseus-data-prepare.service', 'perseus-first-boot.service', 'srv-perseus.mount',
@@ -405,6 +409,10 @@ def source_fingerprints():
              ROOT / 'platform/first-install/first_install_contract.py',
              *sorted(p for p in FILES.iterdir() if p.is_file()),
              ROOT / 'scripts/verify-perseus-runtime-artifacts.py', ROOT / 'scripts/package-perseus-firmware.py',
+             ROOT / 'scripts/update-perseus-guest-ssh.py', ROOT / 'scripts/collect-perseus-guest-evidence.py',
+             *sorted((ROOT / 'platform/guests/zephyr/starter-app').rglob('*.*')),
+             ROOT / 'platform/yocto/meta-perseus/recipes-extended/xen/xen_4.21.bbappend',
+             ROOT / 'platform/yocto/meta-perseus/recipes-extended/xen/files/0001-arm-rpi4-find-bcm2711-power-management-watchdog.patch',
              ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/perseus-platform_1.0.bb',
              ROOT / 'platform/yocto/meta-perseus/recipes-devtools/qemu/qemu_10.2.0.bbappend',
              ROOT / 'platform/yocto/meta-perseus/recipes-bsp/xen-rpi-u-boot-scr/files/boot.cmd.xen.in',

@@ -1,0 +1,26 @@
+{
+  "id": "perseus-zephyr-starter-1.0.0",
+  "app": "perseus-starter",
+  "version": "1.0.0",
+  "zephyr_commit": "684c9e8f32e4373a21098559f748f06915f950c9",
+  "sdk_version": "1.0.0",
+  "app_source_sha256": "c3cb8c3642b486c312c8fbc278206a889fc3215d92a26cdaf255be1970ad8a0e",
+  "app_files": {
+    "CMakeLists.txt": {
+      "sha256": "03614b8ebb260818c714e594324ba5e807ced70d4e9b7f243a4152392626fe97",
+      "bytes": 195
+    },
+    "README.md": {
+      "sha256": "b0e934e224cba145bae8e07275aff2f787f1cfbee932611f156f07757d5f8308",
+      "bytes": 2495
+    },
+    "prj.conf": {
+      "sha256": "d6468f5d946ec86a885b60b35b3f63dd5d78de90ece8b4a013b27bee27e699e1",
+      "bytes": 100
+    },
+    "src/main.c": {
+      "sha256": "1bfd13b76304cd2bd3a9af1c44e4982b44713367ba9b5ffb886e43c05c6c1112",
+      "bytes": 466
+    }
+  }
+}
