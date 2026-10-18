@@ -104,4 +104,5 @@ Raspberry Pi 4 + Xen 멀티 OS 플랫폼을 자율주행 RC카에 올린다. 세
 ## 상세 문서
 
 - [차량 제어 상세 명세](design/vehicle-control-spec.md): 게이트웨이 상태 머신, 명령 검증, 세션·epoch, ESP32 안전 규칙, 전환 시간 측정, 메시지·MQTT·CAN·시리얼 계약, 전원 계통 후보값
+- [VM 관리 API 계약 v1](contracts/vm-api-contract-v1.md): Spring ↔ dom0-manager 경계의 계층 책임, 상태 모델, 엔드포인트, 디스크 수명주기, 오류 코드, 타임아웃·재시도
 - [브링업 가이드](build-guides/)
