@@ -138,7 +138,7 @@ class Board:
             meta = {'schema': 1, 'id': r['template'], 'root_sha256': hashlib.sha256((template / 'root.raw').read_bytes()).hexdigest(), 'source': {'distribution': 'ubuntu' if r['id'] == 'ubuntu-dev' else 'debian'}}
             (template / 'template.json').write_text(json.dumps(meta))
             templates.append({'id': r['template'], 'metadata': meta, 'root_bytes': (template / 'root.raw').stat().st_size})
-        factory = {'schema': 1, 'features': contract.FEATURES, 'factory_id': 'fixture-common-factory', 'instances': bundles, 'templates': templates}
+        factory = {'schema': 1, 'features': contract.LEGACY_FEATURES, 'factory_id': 'fixture-common-factory', 'instances': bundles, 'templates': templates}
         (self.data / '.perseus-install.json').write_text(json.dumps(factory))
         return factory
 
@@ -150,7 +150,14 @@ def platform_root(root):
                'etc/perseus/defaults.json': FILES / 'defaults.json',
                'usr/lib/perseus/perseus_first_boot.py': FILES / 'perseus_first_boot.py',
                'usr/lib/perseus/first_install_contract.py': ROOT / 'platform/first-install/first_install_contract.py',
-               'usr/sbin/perseus-first-boot': FILES / 'perseus-first-boot'}
+               'usr/sbin/perseus-first-boot': FILES / 'perseus-first-boot',
+               'usr/sbin/perseus-vm': FILES / 'perseus-vm',
+               'usr/sbin/perseus-verify-artifacts': ROOT / 'scripts/verify-perseus-runtime-artifacts.py',
+               'usr/lib/perseus/perseus_runtime.py': FILES / 'perseus_runtime.py',
+               'usr/lib/perseus/perseus_zephyr.py': FILES / 'perseus_zephyr.py',
+               'etc/systemd/journald.conf.d/20-perseus.conf': FILES / 'perseus-journald.conf',
+               'etc/systemd/system.conf.d/20-perseus.conf': FILES / 'perseus-system.conf'}
+    mapping['usr/lib/perseus/update_guest_ssh.py'] = ROOT / 'scripts/update-perseus-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         mapping['usr/lib/perseus/' + name] = ROOT / 'platform/guests/common' / name
     for path in [*FILES.glob('*.service'), *FILES.glob('*.mount')]:
@@ -174,7 +181,30 @@ def platform_root(root):
         (wants / name).symlink_to('/usr/lib/systemd/system/' + name)
     tools = root / 'usr/bin'
     tools.mkdir(parents=True)
-    for name in ('sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen'):
+    for name in ('sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl', 'qemu-system-i386'):
         (tools / name).write_text('fixture: not executed')
         (tools / name).chmod(0o755)
+    for name, text in [('qemu-config-host.h', '#define CONFIG_VNC 1\n#define CONFIG_XEN_BACKEND 1\n'),
+                       ('qemu-i386-config-target.h', '#define CONFIG_XEN 1\n')]:
+        (root / 'usr/share/perseus' / name).write_text(text)
     return root
+
+
+def profile_dts():
+    """드라이버 실행 대신 정적 프로필의 cell 검증만 하는 작은 DTS fixture."""
+    return '''/dts-v1/;
+/ {
+ cpu@0 { reg = <0x0>; };
+ memory@40000000 { reg = <0 0x40000000 0 0x1000000>; };
+ interrupt-controller@3001000 {
+  #interrupt-cells = <4>;
+  reg = <0 0x3001000 0 0x1000 0 0x3002000 0 0x2000>;
+ };
+ hypervisor@38000000 {
+  reg = <0 0x38000000 0 0x1000000>;
+  interrupts = <1 15 4 160>;
+ };
+ timer { interrupts = <1 13 2 160 1 14 2 160 1 11 2 160>; };
+ hvc { compatible = "xen,hvc-uart"; };
+};
+'''

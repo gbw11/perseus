@@ -69,16 +69,22 @@ class FakeXen:
         if args == ['xl', 'list', '-l']:
             return json.dumps(self.rows)
         if args == ['xl', 'list']:
-            return 'Name ID Mem VCPUs State Time(s)\nDomain-0 0 1024 4 r----- 0\n' + ''.join(f"{r['config']['c_info']['name']} {r['domid']} 512 1 -b---- 0\n" for r in self.rows)
+            return 'Name ID Mem VCPUs State Time(s)\nDomain-0 0 1024 4 r----- 0\n' + ''.join(f"{r['config']['c_info']['name']} {r['domid']} 512 1 r----- 0\n" for r in self.rows)
         if args[:2] == ['xl', 'create']:
             if self.fail_create:
                 raise vm.PlatformError('injected xl create failure')
             key = Path(args[2]).stem
             self.rows.append(domain(self.records[key], self.base / 'instances' / key / 'root.raw', len(self.rows) + 1))
-        if args[:2] == ['xl', 'shutdown'] and not self.hang_shutdown:
-            self.rows = [r for r in self.rows if r['config']['c_info']['uuid'] != args[2]]
-        if args[:2] == ['xl', 'reboot']:
-            self.rows[0]['domid'] += 10
+        if args[:2] in (['xl', 'shutdown'], ['xl', 'reboot'], ['xl', 'destroy']):
+            target = args[2]
+            rows = [r for r in self.rows if str(r['domid']) == target or r['config']['c_info']['name'] == target]
+            if len(rows) != 1:
+                raise vm.PlatformError('invalid domain identifier (UUID is not an xl execution identifier): ' + target)
+            row = rows[0]
+            if args[1] == 'destroy' or (args[1] == 'shutdown' and not self.hang_shutdown):
+                self.rows.remove(row)
+            elif args[1] == 'reboot':
+                row['domid'] += 10
         return ''
 
 

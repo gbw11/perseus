@@ -6,8 +6,10 @@ SCHEMA = 1
 MIB = 1024 ** 2
 GIB = 1024 ** 3
 SECTOR = 512
-FEATURES = {'schema': SCHEMA, 'layout': 'dos-boot1-root2-data3-v1',
+LEGACY_FEATURES = {'schema': SCHEMA, 'layout': 'dos-boot1-root2-data3-v1',
             'growth': 'actual-device-last-ext4-v1', 'identity': 'systemd-machine-id-guest-seed-v1'}
+
+FEATURES = {**LEGACY_FEATURES, 'vm_management': 'linux-zephyr-persistent-v2', 'qemu': 'xenpv-vnc-none-v1'}
 
 
 def align(value, unit=4 * MIB):

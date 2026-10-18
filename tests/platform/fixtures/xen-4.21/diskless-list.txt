@@ -1,0 +1,3 @@
+Name ID Mem VCPUs State Time(s)
+Domain-0 0 1024 4 r----- 0
+zephyr-dev 1 16 1 -b---- 0

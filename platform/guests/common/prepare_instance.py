@@ -167,7 +167,7 @@ def make_instance(args, *, vm, defaults_path, record_override=None):
             raise ValueError('template boot asset digest mismatch')
     output = args.data_root / ('seeds' if seed else 'instances') / args.id
     require_new_output(output)
-    record.update(schema=1, uuid='00000000-0000-4000-8000-000000000000' if seed else uuid4(), kernel_release=boot['kernel_release'])
+    record.update(schema=1, guest_kind='linux', uuid='00000000-0000-4000-8000-000000000000' if seed else uuid4(), kernel_release=boot['kernel_release'])
     if seed:
         record['identity_state'] = 'pending'
     vm.validate_identity(record)
@@ -203,7 +203,7 @@ def make_instance(args, *, vm, defaults_path, record_override=None):
                 raise ValueError('invalid existing instance registry entry')
             current = json.loads(vm.regular_asset(other, 'instance.json').read_text())
             for field in ('id', 'uuid', 'name', 'hostname', 'mac', 'ipv4'):
-                if current[field] == record[field] and not (seed and field == 'uuid'):
+                if current.get(field) == record[field] and not (seed and field == 'uuid'):
                     raise ValueError(f'duplicate {field} with {other.name}')
         if digest(template / 'root.raw') != meta['root_sha256']:
             raise ValueError('immutable template changed during instance preparation')

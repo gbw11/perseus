@@ -1,18 +1,18 @@
 SUMMARY = "Persistent Perseus Xen VM lifecycle and boot readiness"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
-SRC_URI = "file://perseus_vm.py file://perseus-vm file://defaults.json \
+SRC_URI = "file://verify-perseus-runtime-artifacts.py file://perseus_vm.py file://perseus_runtime.py file://perseus_zephyr.py file://perseus-vm file://defaults.json file://perseus-journald.conf file://perseus-system.conf \
            file://srv-perseus.mount file://perseus-xen-ready.service \
            file://perseus-vm-shutdown.service file://perseus-vms.service \
            file://perseus-auth.conf file://perseus-first-boot file://perseus_first_boot.py \
            file://first_install_contract.py file://perseus-data-prepare.service \
-           file://perseus-first-boot.service file://first-install-capabilities.json file://perseus-sshd-keys.conf file://prepare_instance.py file://prepare_rootfs.py file://guest_identity.py"
-FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../first-install:${THISDIR}/../../../../guests/common:"
+           file://perseus-first-boot.service file://first-install-capabilities.json file://perseus-sshd-keys.conf file://prepare_instance.py file://prepare_rootfs.py file://guest_identity.py file://update-perseus-guest-ssh.py"
+FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../../scripts:${THISDIR}/../../../../first-install:${THISDIR}/../../../../guests/common:"
 S = "${UNPACKDIR}"
 inherit systemd
 
 # 기존 이미지의 Python 코어에 사용자 승인한 표준 JSON 패키지를 추가한다.
-RDEPENDS:${PN} = "python3-core python3-json iproute2 xen-tools-xl openssh-sshd \
+RDEPENDS:${PN} = "python3-core python3-json python3-crypt iproute2 iproute2-ss util-linux-lsblk xen-tools-xl openssh-sshd \
     util-linux-sfdisk util-linux-partx util-linux-blockdev util-linux-blkid \
     e2fsprogs-e2fsck e2fsprogs-resize2fs e2fsprogs-dumpe2fs \
     util-linux-losetup util-linux-mount util-linux-umount util-linux-findmnt e2fsprogs-tune2fs coreutils"
@@ -22,8 +22,14 @@ SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 do_install() {
     install -d "${D}${sbindir}" "${D}${libdir}/perseus" "${D}${sysconfdir}/perseus" \
         "${D}${sysconfdir}/ssh" "${D}${systemd_system_unitdir}" "${D}/srv/perseus"
+    install -m 0755 "${S}/verify-perseus-runtime-artifacts.py" "${D}${sbindir}/perseus-verify-artifacts"
     install -m 0755 "${S}/perseus-vm" "${D}${sbindir}/perseus-vm"
-    install -m 0644 "${S}/perseus_vm.py" "${D}${libdir}/perseus/perseus_vm.py"
+    for module in perseus_vm.py perseus_runtime.py perseus_zephyr.py; do
+        install -m 0644 "${S}/$module" "${D}${libdir}/perseus/$module"
+    done
+    install -d "${D}${sysconfdir}/systemd/journald.conf.d" "${D}${sysconfdir}/systemd/system.conf.d"
+    install -m 0644 "${S}/perseus-journald.conf" "${D}${sysconfdir}/systemd/journald.conf.d/20-perseus.conf"
+    install -m 0644 "${S}/perseus-system.conf" "${D}${sysconfdir}/systemd/system.conf.d/20-perseus.conf"
     install -m 0644 "${S}/defaults.json" "${D}${sysconfdir}/perseus/defaults.json"
     install -m 0644 "${S}/perseus-auth.conf" "${D}${sysconfdir}/ssh/perseus-auth.conf"
     install -m 0755 "${S}/perseus-first-boot" "${D}${sbindir}/perseus-first-boot"
@@ -32,6 +38,7 @@ do_install() {
     for module in prepare_instance.py prepare_rootfs.py guest_identity.py; do
         install -m 0644 "${S}/$module" "${D}${libdir}/perseus/$module"
     done
+    install -m 0644 "${S}/update-perseus-guest-ssh.py" "${D}${libdir}/perseus/update_guest_ssh.py"
     install -d "${D}${datadir}/perseus"
     install -m 0644 "${S}/first-install-capabilities.json" "${D}${datadir}/perseus/first-install-capabilities.json"
     for unit_name in sshd.service sshd@.service sshd.socket; do
@@ -50,4 +57,4 @@ FILES:${PN} += "${libdir}/perseus ${datadir}/perseus /srv/perseus \
     ${systemd_system_unitdir}/perseus-xen-ready.service \
     ${systemd_system_unitdir}/perseus-vm-shutdown.service \
     ${systemd_system_unitdir}/perseus-vms.service"
-CONFFILES:${PN} += "${sysconfdir}/perseus/defaults.json ${sysconfdir}/ssh/perseus-auth.conf"
+CONFFILES:${PN} += "${sysconfdir}/perseus/defaults.json ${sysconfdir}/ssh/perseus-auth.conf ${sysconfdir}/systemd/journald.conf.d/20-perseus.conf ${sysconfdir}/systemd/system.conf.d/20-perseus.conf"
