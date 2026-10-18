@@ -2,6 +2,7 @@ package com.perseus.backend.vm.api;
 
 import com.perseus.backend.agent.application.AgentDataService;
 import com.perseus.backend.vm.application.VmService;
+import com.perseus.backend.vm.application.VmService.CreateResult;
 import com.perseus.backend.vm.domain.Vm;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -36,10 +37,14 @@ public class VmController {
         return new VmListResponse(vmService.list().stream().map(vm -> withAgentStatus(vm, now)).toList(), now);
     }
 
+    // 201 for a new VM, 200 when the same name and spec were already created (retry).
     @PostMapping
     public ResponseEntity<Vm> create(@Valid @RequestBody CreateVmRequest request) {
-        Vm vm = vmService.create(request.toCommand());
-        return ResponseEntity.created(URI.create("/api/v1/vms/" + vm.vmId())).body(vm);
+        CreateResult result = vmService.create(request.toCommand());
+        if (!result.created()) {
+            return ResponseEntity.ok(result.vm());
+        }
+        return ResponseEntity.created(URI.create("/api/v1/vms/" + result.vm().vmId())).body(result.vm());
     }
 
     @GetMapping("/{vmId}")

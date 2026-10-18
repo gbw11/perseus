@@ -57,6 +57,9 @@ perseus:
   agent:
     stale-after: ${AGENT_STALE_AFTER:15s}
     offline-after: ${AGENT_OFFLINE_AFTER:30s}
+  # 에이전트 상태(ONLINE/STALE/OFFLINE) 변화를 이벤트로 남기기 위해 확인하는 주기
+  event:
+    agent-status-check-interval-ms: ${EVENT_AGENT_STATUS_CHECK_INTERVAL_MS:5000}
   report:
     os-evidence:
       required-os-ids:

@@ -1,5 +1,7 @@
 # 백엔드 VM API 규약 v1
 
+> 이 규약은 [VM 관리 API 계약 v1](contracts/vm-api-contract-v1.md)에 통합됐습니다. 두 문서가 다르면 계약 문서를 따릅니다.
+
 Spring 백엔드의 VM API에 적용하는 규약입니다. 아래 세 가지를 정합니다.
 
 1. dom0-manager 호출의 타임아웃과 재시도
@@ -35,10 +37,12 @@ Spring 백엔드의 VM API에 적용하는 규약입니다. 아래 세 가지를
 | --- | --- |
 | `name` | 1~63자, 소문자·숫자·하이픈(`-`)만 |
 | `vcpus` | 1~4 |
-| `memory_mib` | 템플릿의 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 100) |
+| `memory_mib` | 템플릿의 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 128) |
 | 배수 제약 | 없음. 화면 입력만 64씩 오르내림 |
 
-규칙을 벗어나면 Spring이 dom0-manager를 호출하지 않고 `422 VALIDATION_ERROR`로 거절합니다.
+규칙을 벗어나면 Spring이 dom0-manager를 호출하지 않고 `422 VALIDATION_ERROR`로 거절합니다. 템플릿 목록에 없는 템플릿은 `404 TEMPLATE_NOT_FOUND`입니다.
+
+공통 하한은 128입니다. Xen domU에서 100MiB로는 커널 부팅이 불안정하고, dom0-manager도 128 미만을 `400 InvalidArgument`로 거부합니다.
 
 ## 3. 템플릿 목록
 

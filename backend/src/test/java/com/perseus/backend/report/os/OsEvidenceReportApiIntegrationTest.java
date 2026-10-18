@@ -15,8 +15,11 @@ import com.perseus.backend.agent.domain.AgentInventoryRepository;
 import com.perseus.backend.agent.domain.InventoryReport;
 import com.perseus.backend.agent.domain.NetworkInterface;
 import com.perseus.backend.common.error.ApiException;
-import com.perseus.backend.vm.domain.Vm;
+import com.perseus.backend.vm.domain.CreateVmCommand;
 import com.perseus.backend.vm.domain.VmControlPort;
+import com.perseus.backend.vm.domain.VmRecord;
+import com.perseus.backend.vm.domain.VmRecordRepository;
+import com.perseus.backend.vm.domain.VmRuntime;
 import com.perseus.backend.vm.domain.VmState;
 import java.time.Instant;
 import java.util.List;
@@ -39,10 +42,10 @@ class OsEvidenceReportApiIntegrationTest {
     private static final String CREDENTIALS = """
             {"username":"report-os-user","password":"password123!"}
             """;
-    private static final List<Vm> VMS = List.of(
-            new Vm("vm-debian", "debian-01", VmState.RUNNING, "debian", "12", 1, 256),
-            new Vm("vm-ubuntu", "ubuntu-01", VmState.RUNNING, "ubuntu", "24.04", 1, 512),
-            new Vm("vm-alpine", "alpine-01", VmState.RUNNING, "alpine", "1.2.0", 1, 128));
+    private static final List<CreateVmCommand> VMS = List.of(
+            new CreateVmCommand("debian-01", "debian", "12", 1, 256),
+            new CreateVmCommand("ubuntu-01", "ubuntu", "24.04", 1, 512),
+            new CreateVmCommand("alpine-01", "alpine", "1.2.0", 1, 128));
 
     @Autowired
     private MockMvc mockMvc;
@@ -62,6 +65,9 @@ class OsEvidenceReportApiIntegrationTest {
     @MockitoBean
     private VmControlPort vmControlPort;
 
+    @Autowired
+    private VmRecordRepository vmRecordRepository;
+
     private String accessToken;
 
     @BeforeEach
@@ -76,7 +82,16 @@ class OsEvidenceReportApiIntegrationTest {
                         .content(CREDENTIALS))
                 .andReturn().getResponse().getContentAsString();
         accessToken = objectMapper.readTree(body).get("access_token").asText();
-        when(vmControlPort.list()).thenReturn(VMS);
+        vmRecordRepository.deleteAll();
+        Instant createdAt = Instant.now().minusSeconds(60);
+        for (int i = 0; i < VMS.size(); i++) {
+            CreateVmCommand command = VMS.get(i);
+            String vmId = "vm-" + command.templateId();
+            vmRecordRepository.save(new VmRecord(vmId, command, createdAt.plusSeconds(i)));
+        }
+        when(vmControlPort.list()).thenReturn(VMS.stream()
+                .map(command -> new VmRuntime("vm-" + command.templateId(), VmState.RUNNING, 1, command.memoryMib()))
+                .toList());
     }
 
     @Test
