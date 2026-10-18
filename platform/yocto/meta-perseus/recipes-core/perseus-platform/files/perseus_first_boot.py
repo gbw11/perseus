@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 """공통 SD의 검증·마지막 ext4 확장·최초 VM 등록. 포맷/VM 생성/xl 실행/암호 변경은 하지 않는다."""
 import argparse
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -11,8 +10,11 @@ import subprocess
 import sys
 import time
 
-from first_install_contract import FEATURES, SECTOR, growth, layout, uuid4
-from perseus_vm import PlatformError, atomic_write, load_records, validate_identity, validate_record
+from first_install_contract import FEATURES, LEGACY_FEATURES, SECTOR, growth, layout, uuid4
+from perseus_vm import (PlatformError, atomic_write, load_records, validate_identity, validate_record,
+                        guest_kind, identity_fields, retired_instance)
+from perseus_runtime import operation_lock
+import perseus_zephyr as zephyr
 
 
 def invoke(args, *, input=None, allow=(0,), timeout=120):
@@ -186,6 +188,13 @@ class FirstBoot:
         return info
 
     def verify_bundle(self, directory, spec):
+        if guest_kind(spec['record']) == 'zephyr':
+            current = read_json(directory / 'instance.json')
+            # 현재 참조를 검증한다. 합법적인 교체를 factory 버전으로 되돌리지 않는다.
+            if current.get('creation_origin') != spec['record'].get('creation_origin'):
+                raise ValueError('Zephyr creation origin differs from factory manifest')
+            zephyr.validate_instance(current, directory)
+            return
         for name in ('root.raw', 'Image', 'initrd', 'boot.json', 'instance.json', 'kernel.config'):
             asset(directory, name)
         if (directory / 'root.raw').stat().st_size != spec['root_bytes']:
@@ -197,15 +206,24 @@ class FirstBoot:
     def register(self):
         self.verify_mount()
         factory = read_json(self.data / '.perseus-install.json')
-        if factory.get('features') != FEATURES or factory.get('schema') != 1:
+        if factory.get('features') not in (FEATURES, LEGACY_FEATURES) or factory.get('schema') != 1:
             raise ValueError('unsupported factory manifest/capabilities')
         specs = factory['instances']
         if len(specs) != 2 or {s['record']['id'] for s in specs} != {'ubuntu-dev', 'debian-dev'}:
             raise ValueError('factory must contain the two default development instances')
+        firmware_specs = factory.get('firmware_instances', [])
+        if (not isinstance(firmware_specs, list) or len(firmware_specs) > 1
+                or any(s.get('record', {}).get('id') != 'zephyr-dev'
+                       or guest_kind(s['record']) != 'zephyr' for s in firmware_specs)):
+            raise ValueError('invalid factory Zephyr instance specification')
+        if factory['features'] == FEATURES and len(firmware_specs) != 1:
+            raise ValueError('new factory contract requires zephyr-dev firmware seed')
+        linux_specs = specs
+        specs = specs + firmware_specs
         for directory in ('instances', 'seeds', 'templates'):
             plain(self.data / directory)
         templates = factory.get('templates', [])
-        if len(templates) != 2 or {t['id'] for t in templates} != {s['record']['template'] for s in specs}:
+        if len(templates) != 2 or {t['id'] for t in templates} != {s['record']['template'] for s in linux_specs}:
             raise ValueError('both immutable local templates must be retained')
         for item in templates:
             if not re.fullmatch('[a-z0-9][a-z0-9.+_-]{0,99}', item['id']):
@@ -234,11 +252,13 @@ class FirstBoot:
             identities, seen = {}, set()
             for spec in specs:
                 key = spec['record']['id']
-                mac = new_mac()
-                while mac in seen:
+                identities[key] = {'uuid': uuid4()}
+                if guest_kind(spec['record']) == 'linux':
                     mac = new_mac()
-                seen.add(mac)
-                identities[key] = {'uuid': uuid4(), 'mac': mac}
+                    while mac in seen:
+                        mac = new_mac()
+                    seen.add(mac)
+                    identities[key]['mac'] = mac
             state = {'schema': 1, 'phase': 'identities-planned', 'factory_id': factory['factory_id'],
                      'dom0_machine_id': mid, 'storage_uuid': uuid4(), 'identities': identities, 'registered': []}
             self.save(state_path, state)
@@ -251,11 +271,13 @@ class FirstBoot:
         for spec in specs:
             planned = {**spec['record'], **state['identities'][spec['record']['id']], 'identity_state': 'ready'}
             validate_identity(planned)
-            for field in ('uuid', 'mac', 'name', 'hostname', 'ipv4'):
+            for field in identity_fields(planned):
                 item = (field, planned[field])
                 if item in seen_identities:
                     raise ValueError('duplicate identity in factory progress')
                 seen_identities.add(item)
+        completed = state['phase'] == 'complete'
+        asset_errors = {}
         inodes = set()
         for spec in specs:
             key = spec['record']['id']
@@ -263,12 +285,17 @@ class FirstBoot:
                 raise ValueError('invalid factory instance path')
             seed, target = self.data / 'seeds' / key, self.data / 'instances' / key
             expected = {**spec['record'], **state['identities'][key], 'identity_state': 'ready'}
+            if (not target.exists() and not target.is_symlink() and state['phase'] == 'complete'
+                    and retired_instance(self.data, key, expected['uuid'])):
+                continue
             if target.exists() or target.is_symlink():
                 plain(target)
                 if seed.exists() or seed.is_symlink():
                     raise ValueError('both seed and live instance exist; refusing ambiguous recovery')
                 current = read_json(target / 'instance.json')
-                if any(current.get(k) != expected[k] for k in ('id', 'uuid', 'mac', 'name', 'hostname', 'ipv4', 'template', 'kernel_release')):
+                fields = (('id', 'uuid', 'name', 'template', 'creation_origin') if guest_kind(expected) == 'zephyr'
+                          else ('id', 'uuid', 'mac', 'name', 'hostname', 'ipv4', 'template', 'kernel_release'))
+                if any(current.get(k) != expected[k] for k in fields):
                     raise ValueError('live identity differs from planned identity; no reset')
             else:
                 if state['phase'] == 'complete':
@@ -280,14 +307,22 @@ class FirstBoot:
                 self.save(seed / 'instance.json', expected)
                 os.rename(seed, target)
                 os.sync()
-            self.verify_bundle(target, spec)
             current = read_json(target / 'instance.json')
-            validate_record(current, target)
-            disk = (target / 'root.raw').stat()
-            inode = (disk.st_dev, disk.st_ino)
-            if inode in inodes:
-                raise ValueError('factory VMs share a writable disk')
-            inodes.add(inode)
+            try:
+                self.verify_bundle(target, spec)
+                validate_record(current, target)
+            except (PlatformError, OSError, ValueError, KeyError) as exc:
+                if not completed:
+                    raise
+                # 완료된 등록의 자산 오류는 개별 start가 실패하게 한다. 다른 VM의 기동은 계속한다.
+                asset_errors[key] = str(exc)
+                continue
+            if guest_kind(current) == 'linux':
+                disk = (target / 'root.raw').stat()
+                inode = (disk.st_dev, disk.st_ino)
+                if inode in inodes:
+                    raise ValueError('factory VMs share a writable disk')
+                inodes.add(inode)
             if key not in state['registered']:
                 state['registered'].append(key)
                 state['phase'] = 'registering'
@@ -300,10 +335,13 @@ class FirstBoot:
         else:
             self.save(marker, desired)
         # 완료 표식보다 먼저 전체 registry의 중복/boot 계약을 확인한다.
-        load_records(self.data)
+        load_records(self.data, validate_assets=not completed)
         state['phase'] = 'complete'
         self.save(state_path, state)
-        self.save(self.run / 'install-ready.json', {'factory_id': factory['factory_id'], 'dom0_machine_id': mid})
+        self.save(self.run / 'install-ready.json', {'factory_id': factory['factory_id'], 'dom0_machine_id': mid,
+                                                 'asset_errors': asset_errors})
+        if asset_errors:
+            print(json.dumps({'registration': 'complete', 'asset_errors': asset_errors}))
         print('installation verified; hand off to existing VM autostart service')
 
 
@@ -311,9 +349,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['grow', 'register'])
     args = parser.parse_args()
-    lock_path = Path('/run/lock/perseus-first-boot.lock')
-    with lock_path.open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with operation_lock():
         boot = FirstBoot()
         if args.action == 'grow':
             boot.grow()

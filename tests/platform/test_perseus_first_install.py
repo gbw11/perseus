@@ -188,8 +188,11 @@ class AssemblyPipelineTest(unittest.TestCase):
         board.factory()
         defaults = json.loads((FILES / 'defaults.json').read_text())['instances']
         guests = [{'id': r['id'], 'source_id': r['template'], 'template': str(board.data / 'templates' / r['template'])} for r in defaults]
+        from test_perseus_zephyr import bundle
+        firmware = bundle(base / 'zephyr-template')
+        firmware_entry = assemble.rtos.info(firmware, assemble.sha(firmware / 'template.json'))
         workdir, output = base / 'scratch', base / 'release'
-        planned = {'guests': guests, 'output_directory': str(output), 'work_directory': str(workdir),
+        planned = {'rtos_templates': [firmware_entry], 'guests': guests, 'output_directory': str(output), 'work_directory': str(workdir),
                    'layout': contract.layout(content[:512], len(content)), 'features_required': contract.FEATURES,
                    'capacity': {'wsl_scratch_upper_bound_bytes': 0, 'data_bytes': 4096, 'image_bytes': 8192,
                                 'data_start_bytes': 4096, 'template_policy': 'full', 'operating_reserve_bytes': 0}}
@@ -228,6 +231,8 @@ class AssemblyPipelineTest(unittest.TestCase):
         self.assertEqual(data[494:2048],content[494:2048])
         self.assertTrue(assemble.verify(final,manifest)['verified'])
         self.assertEqual(manifest['layout']['disk_id'],'1234abcd')
+        self.assertEqual(manifest['factory']['firmware_instances'][0]['record']['id'], 'zephyr-dev')
+        self.assertFalse(manifest['factory']['firmware_instances'][0]['record']['autostart'])
         self.assertEqual([t['retained_root'] for t in manifest['factory']['templates']], [True,True])
         with final.open('r+b') as stream:
             stream.seek(1024); stream.write(b'corruption')

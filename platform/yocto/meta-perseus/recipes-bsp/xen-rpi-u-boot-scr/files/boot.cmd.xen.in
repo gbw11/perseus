@@ -43,7 +43,13 @@ sleep 1
 part uuid mmc ${devnum}:2 rootfs_partuuid || exit 1
 
 echo Add boot arguments for dom0
-setenv dom0_bootargs "console=hvc0 earlycon=xenboot debug root=PARTUUID=${rootfs_partuuid} rootwait"
+# U-Boot에서 setenv perseus_debug 1을 지정한 부팅만 상세 로그를 출력한다.
+if test "${perseus_debug}" = "1"; then
+    setenv perseus_logargs "earlycon=xenboot debug loglevel=7 systemd.log_level=debug systemd.log_target=console systemd.show_status=yes"
+else
+    setenv perseus_logargs "loglevel=4 systemd.log_level=info systemd.log_target=journal-or-kmsg systemd.show_status=error"
+fi
+setenv dom0_bootargs "console=hvc0 ${perseus_logargs} root=PARTUUID=${rootfs_partuuid} rootwait"
 fdt set /chosen xen,dom0-bootargs "${dom0_bootargs}" || exit 1
 
 echo Load Xen into memory

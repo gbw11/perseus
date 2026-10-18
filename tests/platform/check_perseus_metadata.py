@@ -72,3 +72,19 @@ assert "printf 'uninitialized\\n'" in text and 'ln -snf /etc/machine-id' in text
 assert 'ln -snf /dev/null' in text and 'xendomains.service' in text
 assert 'Include /etc/ssh/perseus-auth.conf' in text
 print('PASS metadata: selected boot/network sources, DHCP bindir, enabled services, JSON dependency, nonempty password and single autostart owner')
+
+_, qemu = load('qemu')
+assert qemu['PV'] == '10.2.0'
+assert {'pixman', 'vnc', 'xen'} <= set(qemu['PACKAGECONFIG'].split())
+for flag in ('--enable-pixman', '--enable-vnc', '--enable-xen'):
+    assert flag in qemu['PACKAGECONFIG_CONFARGS'].split(), flag
+for flag in ('--disable-pixman', '--disable-vnc', '--disable-xen'):
+    assert flag not in qemu['PACKAGECONFIG_CONFARGS'].split(), flag
+assert 'i386-softmmu' in qemu['EXTRA_OECONF']
+assert {'python3-crypt', 'iproute2-ss', 'util-linux-lsblk'} <= set(platform['RDEPENDS:perseus-platform'].split())
+for module in ('perseus_runtime.py', 'perseus_zephyr.py'):
+    assert selected(platform, module) == LAYER / 'recipes-core/perseus-platform/files' / module
+assert selected(platform, 'verify-perseus-runtime-artifacts.py').resolve() == ROOT / 'scripts/verify-perseus-runtime-artifacts.py'
+for header in ('qemu-config-host.h', 'qemu-i386-config-target.h'):
+    assert header in (LAYER / 'recipes-devtools/qemu/qemu_10.2.0.bbappend').read_text()
+print('PASS frozen QEMU target: VNC/pixman/Xen enabled, i386 target retained, no listener configured')

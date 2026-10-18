@@ -144,7 +144,8 @@ class CompletedArtifactTest(unittest.TestCase):
         before = self.snapshot()
         guests = [{'logical_bytes': 8 * contract.GIB, 'allocated_bytes': 1024, 'boot_bytes': 1024} for _ in range(2)]
         with releases.completed_input(config) as (image, record):
-            with patch.object(assemble, 'read_layout', return_value=(mbr(), 4096, contract.layout(mbr()))), patch.object(assemble, 'guest_info', return_value=guests):
+            firmware = [{'id': 'zephyr-4.4.0-xenvm', 'logical_bytes': 1024, 'template': str(self.base / 'firmware')}]
+            with patch.object(assemble, 'read_layout', return_value=(mbr(), 4096, contract.layout(mbr()))), patch.object(assemble, 'guest_info', return_value=guests), patch.object(assemble, 'rtos_info', return_value=firmware):
                 plan = assemble.plan({'schema': 1, **config}, image, record, self.base / 'out', self.base / 'work', 64_000_000_000)
         self.assertEqual(plan['action'], 'plan')
         self.assertEqual(self.snapshot(), before)

@@ -2,13 +2,15 @@
 
 이 문서는 WIC 수정 `70c85b90ef21e73b4d7b9daa97a65c0cacf3078c` 위의 후속 소스 구현이다. **소스·정적/모의 검증·후속 dom0 빌드·완료 이미지 게시와 Ubuntu/Debian·Zephyr 템플릿 생성을 완료했다. 인스턴스/seed 생성·최종 조립·SD 기록·실보드 부팅은 실행하지 않았다.** 파일 내부 검사 통과와 실보드 성공은 구분한다. 완료 산출물 인계 수정과 검증 결과는 [후속 보고](perseus-completed-artifacts-20261016.md)에, 실제 템플릿·64GB 실측 계획과 조립 전 보완할 seed SSH 검사 문제는 [Linux 템플릿 생성 보고](perseus-guest-templates-20261016.md)와 [Zephyr 추가 보고](perseus-zephyr-template-20261016.md)에 기록했다.
 
+**2026-10-17 소스 갱신:** 공통 Zephyr 영구 관리·조기 잠금·Linux target 순서·QEMU VNC 옵션·로그/진단 변경을 포함한 dom0 재빌드가 필요하다. 과거 완료 WIC는 보존 기준이며 새 조립의 소스 일치 gate를 통과하지 않는다. 기존 세 템플릿은 변환 없이 재사용한다. 현재 CLI·펌웨어 배포·실보드 DTB 검사는 [영구 플랫폼 후속 계약](perseus-persistent-platform.md#2026-10-17-공통-관리펌웨어-배포-계약)을 따른다.
+
 최종 사용자는 승인 후 만들어진 공통 `.img`를 선택 → 64GB/128GB SD에 기록 → 전원을 연결한다. 아래 절차는 그 이미지를 만드는 담당자용이다. SD 전체 재기록은 기존 데이터를 덮어쓰며, 데이터 보존 업데이트·백업·복원은 이 조립기 범위가 아니다.
 
 ## 확정한 저장소 정책
 
 - 32GB 지원은 제외한다. 카드 상품 표기를 사용하지 않고 실제 장치 바이트 수로 판정한다.
 - Ubuntu·Debian 템플릿의 **전체 root.raw 원본을 SD에 보관**한다. 기본 VM은 `ubuntu-dev`, `debian-dev`이고 각각 별도 8GiB raw 디스크를 사용한다. 기존 기본 메모리·vCPU·내부 IP 정책도 유지한다.
-- 세 번째 템플릿은 Zephyr 4.4.0 Xen ARM64 콘솔 펌웨어다. Ubuntu·Debian과 별도 `rtos-templates/`에 보관하며 기본 자동 시작/영구 Linux 디스크/SSH 대상이 아니다. [RTOS 계약](../../platform/guests/zephyr/README.md)을 따른다.
+- 세 번째 템플릿은 Zephyr 4.4.0 Xen ARM64 콘솔 펌웨어다. Ubuntu·Debian과 불변 원본을 `rtos-templates/`에 보관하고 새 이미지에 독립 `zephyr-dev` seed를 함께 준비한다. 최초 부팅에 공통 registry로 등록하되 자동 시작은 false다. Linux 디스크·SSH·DHCP는 사용하지 않는다. [RTOS 계약](../../platform/guests/zephyr/README.md)을 따른다.
 - 템플릿은 읽기 전용 sparse raw ext4를 선택했다. 압축/overlay 계층 없이 native ARM64에서 기존 생성 코드를 재사용할 수 있다. 2개 템플릿과 2개 VM의 논리 용량 32GiB에 시스템·메타데이터·운영 여유를 더해 64GB 범위를 검토한다. 압축 보관은 이번에 구현하지 않았다.
 - 시작·정지·재부팅은 디스크를 복제하거나 초기화하지 않는다. 최초 생성은 별도 명령이다. 템플릿을 갱신해도 기존 VM은 덮어쓰지 않는다.
 
@@ -17,7 +19,9 @@
 파티션 2: 기존 Yocto dom0 rootfs
 파티션 3: ext4 LABEL=perseus-data → /srv/perseus
   templates/<template-id>/           불변 원본 6개 파일, root.raw 포함
-  seeds/{ubuntu-dev,debian-dev}/     최초 배포용 디스크·pending 설정
+  rtos-templates/<template-id>/      불변 Zephyr 펌웨어 원본
+  seeds/{ubuntu-dev,debian-dev}/     최초 배포용 Linux 디스크·pending 설정
+  seeds/zephyr-dev/                  독립 펌웨어·pending UUID·자동 시작 false
   instances/<id>/                    등록된 VM의 고유 설정·독립 디스크
   .perseus-install.json              공통 설치 자산 manifest
   .first-install-state.json          단계·계획된 고유 식별자·등록 진행
@@ -78,7 +82,7 @@ python3 -B scripts/assemble-perseus-first-install.py plan \
 
 승인 후 계획 명령의 `plan`을 `assemble`로 바꾸고 `--execute`를 추가한다. 출력/작업 디렉터리는 기존 것이 없어야 하며 동일 filesystem에 두어야 한다. `/dev`, `/proc`, `/sys` 또는 symlink 경로를 출력으로 받지 않는다. 할당한 loop와 mount만 추적해 해제하고, 해제 실패 시 작업 경로를 보존하고 실패한다. 임시 경로도 임의 삭제하지 않는다.
 
-새 데이터 ext4 파일에 템플릿과 두 seed를 준비한다. 실제 free bytes가 VM의 남은 성장 가능량+운영 여유를 충족하는지 검사한다. 기존 FAT/root 파티션 해시 보존과 최종 파일/레이아웃/파티션 복사 검증 후에만 `renameat2(NOREPLACE)`로 새 출력 디렉터리를 게시한다. 중단된 작업은 완성 이름으로 공개하지 않고 기존 출력도 덮어쓰지 않는다.
+새 데이터 ext4 파일에 세 템플릿과 Linux 두 seed·Zephyr 한 seed를 준비한다. 실제 free bytes가 VM의 남은 성장 가능량+운영 여유를 충족하는지 검사한다. 기존 FAT/root 파티션 해시 보존과 최종 파일/레이아웃/파티션 복사 검증 후에만 `renameat2(NOREPLACE)`로 새 출력 디렉터리를 게시한다. 중단된 작업은 완성 이름으로 공개하지 않고 기존 출력도 덮어쓰지 않는다.
 
 ```text
 new-release/
@@ -100,7 +104,7 @@ python3 -B scripts/assemble-perseus-first-install.py verify \
 2. `perseus-data-prepare.service`가 현재 `/`의 major:minor와 sysfs를 통해 실제 root 2번·같은 부모의 data 3번을 찾는다. root PARTUUID와 부팅 인자를 대조한다. 다른 연결 매체의 동일 root PARTUUID가 발견되면 추측하지 않고 거부한다. label 첫 검색이나 고정 mmc 번호로 장치를 선택하지 않는다.
 3. 실제 `blockdev --getsize64`까지 마지막 파티션만 늘리고(서명 wipe는 명시적으로 `never`) `partx --update --nr 3`로 커널 반영을 확인한 후 offline ext4 검사/확장을 수행한다. 기존 시작 위치·앞 파티션·filesystem UUID는 보존한다. 64/128GB 모두 같은 계산이며 이미 확장됐으면 크기 변경 명령을 실행하지 않는다. VM root.raw와 게스트 filesystem은 늘리지 않는다.
 4. 검증한 실제 장치에 대한 `/run/perseus/data-device`를 통해 `srv-perseus.mount`를 수행한다. `perseus-first-boot.service`가 해당 mount와 실제 자산을 검증하고, VM별 UUID/MAC·저장소 UUID를 먼저 영구 journal에 저장한다. seed 설정 저장→디렉터리 rename→등록 단계 갱신으로 진행한다. 중단 후에는 같은 계획을 재사용한다. 기존 인스턴스/불일치/손상은 삭제·초기화하지 않고 실패한다.
-5. 전체 registry 검증 후 완료 상태를 기록하고 기존 `perseus-vms.service`에 인계한다. 자동 시작 소유자는 여전히 이 서비스 하나이며 `xendomains`는 mask한다. Xen 준비·DHCP·종료 보호 조건도 함께 요구한다. 불완전 설치는 CLI의 storage 검사와 서비스 의존성에서 VM 시작을 막는다.
+5. 전체 registry 검증 후 완료 상태를 기록하고 기존 `perseus-vms.service`에 인계한다. 자동 시작 소유자는 여전히 이 서비스 하나이며 `xendomains`는 mask한다. Xen 준비·종료 보호 조건을 공통으로 요구하고 DHCP는 Linux 시작에만 요구한다. 불완전 설치는 CLI의 storage 검사와 서비스 의존성에서 VM 시작을 막는다.
 6. 공통 seed의 guest machine-id는 systemd가 최초 부팅 때 생성한다. guest identity service가 SSH 서비스/socket보다 먼저 필요한 키를 만들고 완료 상태를 기록한다. 이후에는 ID/키 존재와 일치만 확인하며 암호·키·ID를 다시 발급하지 않는다. 완료 기록과 실제 자산이 불일치하면 SSH를 막고 진단한다.
 
 진행 상태만 보고 skip하지 않는다. 매 부팅 root.raw의 일반 파일/독립성/논리 크기, boot/config 해시, registry/템플릿을 확인한다. 사용 중인 raw의 내용은 바뀌므로 최초 SHA로 매 부팅 덮어쓰거나 원복하지 않는다. 전체 raw 해시는 PC 조립 시와 신규 생성 직전 불변 템플릿 검증에 사용한다.
@@ -135,4 +139,4 @@ bash scripts/check-perseus-platform.sh --metadata
 
 첫 명령은 일반 파일/명령 대역·8KiB 비 OS 조립 fixture와 실제 systemd loader의 순환 검사를 실행한다. 두 번째는 별도 `/tmp` 빌드 경로의 파싱/환경 조회만 추가한다. 실제 BitBake 빌드 태스크·다운로드·mount·SD·VM은 실행하지 않는다.
 
-현재 후속 dom0 빌드와 실제 WIC/rootfs 기능·패키징 검사는 완료했다. 별도 승인 후 순서는 완료 플랫폼 게시 → 공식 원본 검증/템플릿 준비 → 계획/실제 조립/verify → 64GB·128GB SD 기록 → 실보드 수락이다. 반드시 확인할 항목은 수동 명령 없는 Xen/dom0 부팅, 실제 용량 확장/재부팅 no-op, 각 VM 콘솔·SSH, 두 카드의 ID/키 차이, Pi 단독 신규 VM 생성, 중복/부족 용량 거부, 암호·파일·패키지 보존, 고유화/확장 도중 중단 후 복구, 정상 종료→저장소 해제다. 하드웨어/OS 호환·SD 속도·전원 차단 복구는 모의 시험으로 보증하지 않는다.
+2026-10-16 당시 dom0/WIC 검사는 완료했지만, 2026-10-17 소스와 QEMU 옵션을 포함한 새 빌드·실제 패키징/조립 검사는 미수행이다. 별도 승인 후 순서는 완료 플랫폼 게시 → 공식 원본 검증/템플릿 준비 → 계획/실제 조립/verify → 64GB·128GB SD 기록 → 실보드 수락이다. 반드시 확인할 항목은 수동 명령 없는 Xen/dom0 부팅, 실제 용량 확장/재부팅 no-op, 각 VM 콘솔·SSH, 두 카드의 ID/키 차이, Pi 단독 신규 VM 생성, 중복/부족 용량 거부, 암호·파일·패키지 보존, 고유화/확장 도중 중단 후 복구, 정상 종료→저장소 해제다. 하드웨어/OS 호환·SD 속도·전원 차단 복구는 모의 시험으로 보증하지 않는다.

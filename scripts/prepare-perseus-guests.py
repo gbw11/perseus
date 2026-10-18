@@ -5,7 +5,6 @@ QCOW2 원본의 해시를 확인하고 새 ext4 템플릿 또는 새 인스턴�
 기존 출력/인스턴스는 절대 갱신하지 않으며, SD/물리 블록 장치를 출력으로 받지 않는다.
 """
 import argparse
-import fcntl
 import gzip
 import hashlib
 import importlib.util
@@ -23,6 +22,8 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'platform/guests/common'))
 sys.path.insert(0, str(ROOT / 'platform/first-install'))
+sys.path.insert(0, str(ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/files'))
+from perseus_runtime import operation_lock
 from prepare_rootfs import prepare_template, inside
 from prepare_instance import Workspace, make_instance as shared_make_instance
 
@@ -264,8 +265,7 @@ def main(argv=None):
         if not args.data_root.is_absolute() or args.data_root.is_symlink():
             raise ValueError('data-root must be an absolute mountpoint without symlink')
         # 모든 게시·최초 생성은 같은 호스트에서 직렬화한다. 보드가 꺼진 오프라인 작업이다.
-        with Path('/run/lock/perseus-provision.lock').open('a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with operation_lock():
             if args.action == 'storage-init':
                 initialize_storage(args.data_root)
             else:

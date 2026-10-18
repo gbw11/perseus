@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from first_install_fixture import ROOT, assemble, contract
+from first_install_fixture import ROOT, assemble, contract, profile_dts
 
 rtos = assemble.rtos
 spec = importlib.util.spec_from_file_location('prepare_zephyr', ROOT/'scripts/prepare-perseus-zephyr.py')
@@ -24,7 +24,7 @@ def bundle(directory):
     struct.pack_into('<H', elf, 18, 183); struct.pack_into('<Q', elf, 24, 0x40001000)
     payloads = {'zephyr.bin': bytes(binary), 'zephyr.elf': bytes(elf),
                 'zephyr.config': ('\n'.join(rtos.REQUIRED_CONFIG)+'\n').encode(),
-                'zephyr.dts': b'fixture only; not hardware evidence',
+                'zephyr.dts': profile_dts().encode(),
                 'xen.cfg.in': (rtos.HERE/'xen.cfg.in').read_bytes(), 'LICENSE': b'license fixture'}
     for name, data in payloads.items():
         (directory/name).write_bytes(data); (directory/name).chmod(0o444)

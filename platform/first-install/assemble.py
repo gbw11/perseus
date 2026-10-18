@@ -26,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FILES = ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/files'
 sys.path.insert(0, str(ROOT / 'platform/guests/common'))
 from prepare_rootfs import inside
+sys.path.insert(0, str(FILES))
+import perseus_zephyr as zephyr
 
 spec = importlib.util.spec_from_file_location('perseus_prepare_existing', ROOT / 'scripts/prepare-perseus-guests.py')
 prepare = importlib.util.module_from_spec(spec)
@@ -128,7 +130,7 @@ def guest_info(config):
 
 
 def rtos_info(config):
-    """추가 RTOS는 명시적으로 검증한 불변 펌웨어만 보관한다. 기본 VM/seed는 추가하지 않는다."""
+    """불변 Zephyr 원본을 검증한다. 독립 기본 seed 생성은 별도 공통 경로가 담당한다."""
     entries = config.get('rtos_templates', [])
     if not isinstance(entries, list) or len(entries) > 1:
         raise ValueError('at most one pinned Zephyr firmware template is supported')
@@ -136,6 +138,7 @@ def rtos_info(config):
     for entry in entries:
         if not isinstance(entry, dict) or set(entry) != {'template_dir', 'template_manifest_sha256'}:
             raise ValueError('RTOS template needs an explicit directory and manifest hash')
+        zephyr.bundle_info(Path(entry['template_dir']), entry['template_manifest_sha256'])
         result.append(rtos.info(entry['template_dir'], entry['template_manifest_sha256']))
     return result
 
@@ -161,6 +164,18 @@ def copy_rtos_templates(data, entries):
     return records
 
 
+def copy_rtos_seeds(data, entries):
+    """새 조립 저장소에만 기본 Zephyr 독립 자산을 준비한다. 기존 저장소는 대상이 아니다."""
+    if len(entries) != 1:
+        raise ValueError('new first-install images require one verified Zephyr template')
+    default = json.loads((FILES / 'defaults.json').read_text())['firmware_instances'][0]
+    if entries[0]['id'] != default['template']:
+        raise ValueError('default Zephyr template mismatch')
+    record = zephyr.new_instance(data, default['id'], data / 'rtos-templates' / default['template'],
+                                 {}, autostart=default['autostart'], registry='seeds', seed=True)
+    return [{'record': record}]
+
+
 def plan(config, image, record, output, work, card_bytes):
     if config.get('schema') != 1:
         raise ValueError('unsupported assembly config schema')
@@ -177,6 +192,8 @@ def plan(config, image, record, output, work, card_bytes):
     mbr, platform_bytes, table = read_layout(image)
     guests = guest_info(config)
     firmware_templates = rtos_info(config)
+    if len(firmware_templates) != 1:
+        raise ValueError('new first-install images require the verified Zephyr template; existing stores use create')
     for entry in firmware_templates:
         for path in (output, work):
             if path.is_relative_to(Path(entry['template'])):
@@ -191,7 +208,7 @@ def plan(config, image, record, output, work, card_bytes):
         raise ValueError('at least 2 GiB operating reserve is required')
     totals = capacity(platform_bytes, guests, template_policy=config.get('template_policy', 'full'),
                       card_bytes=card_bytes, reserve_bytes=reserve,
-                      retained_firmware_bytes=sum(item['logical_bytes'] for item in firmware_templates))
+                      retained_firmware_bytes=sum(item['logical_bytes'] * 2 + 64 * 1024 for item in firmware_templates))
     if totals['image_bytes'] > 2 ** 32 * SECTOR:
         raise ValueError('DOS image exceeds 2 TiB')
     return {'schema': 1, 'action': 'plan', 'platform': config['platform'], 'platform_source_commit': record['source_commit'],
@@ -215,7 +232,13 @@ def platform_root_ok(root):
                 'etc/perseus/defaults.json': FILES / 'defaults.json',
                 'usr/lib/perseus/perseus_first_boot.py': FILES / 'perseus_first_boot.py',
                 'usr/lib/perseus/first_install_contract.py': ROOT / 'platform/first-install/first_install_contract.py',
-                'usr/sbin/perseus-first-boot': FILES / 'perseus-first-boot'}
+                'usr/sbin/perseus-first-boot': FILES / 'perseus-first-boot',
+                'usr/sbin/perseus-vm': FILES / 'perseus-vm',
+                'usr/sbin/perseus-verify-artifacts': ROOT / 'scripts/verify-perseus-runtime-artifacts.py',
+                'usr/lib/perseus/perseus_runtime.py': FILES / 'perseus_runtime.py',
+                'usr/lib/perseus/perseus_zephyr.py': FILES / 'perseus_zephyr.py',
+                'etc/systemd/journald.conf.d/20-perseus.conf': FILES / 'perseus-journald.conf',
+                'etc/systemd/system.conf.d/20-perseus.conf': FILES / 'perseus-system.conf'}
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         expected['usr/lib/perseus/' + name] = ROOT / 'platform/guests/common' / name
     units = ['perseus-data-prepare.service', 'perseus-first-boot.service', 'srv-perseus.mount',
@@ -224,10 +247,19 @@ def platform_root_ok(root):
     for relative, source in expected.items():
         if not path(relative).is_file() or path(relative).read_bytes() != source.read_bytes():
             raise ValueError('platform source/installed contract mismatch: ' + relative)
-    for name in ['sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen']:
+    for name in ['sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl']:
         if not any(path(prefix + name).is_file() and path(prefix + name).stat().st_mode & 0o111
                    for prefix in ('usr/sbin/', 'usr/bin/', 'sbin/', 'bin/')):
             raise ValueError('required platform growth tool missing: ' + name)
+    for relative, defines in [
+        ('usr/share/perseus/qemu-config-host.h', ('CONFIG_VNC', 'CONFIG_XEN_BACKEND')),
+        ('usr/share/perseus/qemu-i386-config-target.h', ('CONFIG_XEN',)),
+    ]:
+        header = path(relative)
+        if not header.is_file() or any(not re.search(r'^#define ' + symbol + r'(?:\s+1)?\s*$', header.read_text(), re.M) for symbol in defines):
+            raise ValueError('platform lacks built QEMU VNC/Xen configuration: ' + relative)
+    if not path('usr/bin/qemu-system-i386').is_file() or not path('usr/bin/qemu-system-i386').stat().st_mode & 0o111:
+        raise ValueError('required dom0 qemu-system-i386 missing')
     if path('etc/machine-id').read_text() != 'uninitialized\n':
         raise ValueError('common dom0 machine-id must be uninitialized for PID1')
     if any(path('etc/ssh').glob('ssh_host_*_key')):
@@ -283,7 +315,8 @@ def platform_boot_ok(image, table, output):
         raise ValueError('invalid U-Boot script length')
     script = boot[72:72 + length].decode()
     for marker in ('part uuid mmc ${devnum}:2', 'fatload mmc ${devnum}:1 ${xen_loadaddr} xen',
-                   'fdt move ${fdtcontroladdr} ${fdt_addr_r}', 'booti ${xen_loadaddr} - ${fdt_addr_r}'):
+                   'fdt move ${fdtcontroladdr} ${fdt_addr_r}', 'booti ${xen_loadaddr} - ${fdt_addr_r}',
+                   'perseus_debug', 'loglevel=4', 'systemd.show_status=error'):
         if marker not in script:
             raise ValueError('platform lacks validated Xen boot/PARTUUID contract: ' + marker)
     return result
@@ -370,6 +403,11 @@ def source_fingerprints():
              ROOT / 'platform/first-install/assemble.py', ROOT / 'platform/first-install/artifact_io.py',
              ROOT / 'platform/first-install/completed_artifacts.py', ROOT / 'scripts/publish-perseus-platform.py',
              ROOT / 'platform/first-install/first_install_contract.py',
+             *sorted(p for p in FILES.iterdir() if p.is_file()),
+             ROOT / 'scripts/verify-perseus-runtime-artifacts.py', ROOT / 'scripts/package-perseus-firmware.py',
+             ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/perseus-platform_1.0.bb',
+             ROOT / 'platform/yocto/meta-perseus/recipes-devtools/qemu/qemu_10.2.0.bbappend',
+             ROOT / 'platform/yocto/meta-perseus/recipes-bsp/xen-rpi-u-boot-scr/files/boot.cmd.xen.in',
              ROOT / 'platform/guests/sources.lock.json', *sorted((ROOT / 'platform/guests/common').glob('*.py')),
              *(p for p in sorted((ROOT / 'platform/guests/zephyr').glob('*')) if p.is_file())]
     return {str(p.relative_to(ROOT)): sha(p) for p in paths}
@@ -447,8 +485,9 @@ def assemble(config, image, record, planned):
             template_records.append({'id': guest['source_id'], 'metadata': tmeta, 'root_bytes': (template / 'root.raw').stat().st_size, 'template_manifest_sha256': sha(template / 'template.json'),
                                      'retained_root': planned['capacity']['template_policy'] == 'full'})
         firmware_records = copy_rtos_templates(data, planned.get('rtos_templates', []))
+        firmware_instances = copy_rtos_seeds(data, planned.get('rtos_templates', []))
         factory = {'schema': 1, 'features': FEATURES, 'factory_id': str(uuid.uuid4()), 'instances': bundles,
-                   'templates': template_records, 'rtos_templates': firmware_records,
+                   'templates': template_records, 'rtos_templates': firmware_records, 'firmware_instances': firmware_instances,
                    'template_policy': planned['capacity']['template_policy']}
         (data / '.perseus-install.json').write_text(json.dumps(factory, indent=2) + '\n')
         stats = os.statvfs(data)

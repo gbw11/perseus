@@ -14,7 +14,9 @@ Alpine 확장 지점을 Zephyr 4.4.0으로 교체한다. 공식 `xenvm` GICv2 �
 
 공통 SD에는 `/srv/perseus/rtos-templates/zephyr-4.4.0-xenvm/`으로 보관한다. Linux의 `/srv/perseus/templates/`와 인스턴스 레지스트리를 오인하게 하지 않는다. 조립 설정에 `rtos_templates`를 명시하면 조립기가 검증·용량 계산·복사·최종 입력 재검사를 수행한다. 현재 기본 자동 시작 인스턴스는 `ubuntu-dev`, `debian-dev` 두 개다. RTOS 자동 시작·Linux `perseus-vm` 생명주기 통합은 이번 구현에 포함하지 않는다.
 
-Pi에는 새 RTOS VM을 만드는 데 필요한 완성 펌웨어와 설정 원본이 모두 남는다. 개발 PC의 원본이 없어도 새 전용 디렉터리에 펌웨어·설정을 복사해 이름·UUID·경로를 채운 후 수동 `xl create`가 가능한 형태다. 이는 디스크 없는 별도 수동 Xen 도메인이며 Linux 등록 VM으로 표시하지 않는다. 새 앱이 필요하면 Zephyr를 다시 빌드해야 한다. Linux식 패키지 설치·강제 제거 없는 정상 종료 경로·네트워크가 준비됐다고 주장하지 않는다.
+Pi에서는 `perseus-vm create <id> --template zephyr-4.4.0-xenvm --execute`로 독립 사본을 만든다. 공통 start/status/console/autostart-set을 사용하고, stop/reboot는 게스트 협조형 종료가 없어 명시적 --force만 허용한다. 펌웨어 교체는 정지 상태의 firmware-replace 경로다. IP·root.raw·SSH 고유화는 요구하지 않는다. dom0에 보관한 파일은 게스트 앱의 쓰기 가능한 영구 저장소가 아니다.
+
+현재 프로필은 정적 펌웨어 검사 결과이며 실보드 검증은 아니다. Zephyr IRQ flags 2는 LEVEL, 4는 EDGE다. Xen 표준 DT의 flags와 인코딩이 다르며, event channel의 edge 대 Xen 소스 level-low 차이는 실보드 DTB/드라이버 대조가 남아 있다. 원본 펌웨어를 임의 수정하지 않았다. [공통 CLI·번들 배포·실제 DTB 수집 절차](../../../docs/build-guides/perseus-persistent-platform.md#2026-10-17-공통-관리펌웨어-배포-계약)를 따른다.
 
 ## 재현 가능한 준비
 
@@ -41,7 +43,7 @@ python3 -B scripts/prepare-perseus-zephyr.py \
   --output /absolute/new-templates/zephyr-4.4.0-xenvm --execute
 ```
 
-조립 설정의 선택적 추가 항목:
+새 최초 설치 이미지에 필요한 조립 항목:
 
 ```json
 "rtos_templates": [
@@ -52,6 +54,6 @@ python3 -B scripts/prepare-perseus-zephyr.py \
 ]
 ```
 
-각 파일의 실제 바이트를 추가로 예약한다. RTOS에 Linux의 8GiB root 디스크를 임의 배정하지 않는다. 생성한 RTOS VM 사본이나 다른 새 Linux VM은 카드의 운영 여유에서 공간을 사용하며 무제한 생성은 보장하지 않는다.
+원본과 독립 seed 사본, 메타데이터의 바이트를 함께 예약한다. RTOS에 Linux의 8GiB root 디스크를 임의 배정하지 않는다. 생성한 RTOS VM 사본이나 다른 새 Linux VM은 카드의 운영 여유에서 공간을 사용하며 무제한 생성은 보장하지 않는다.
 
 현재 dom0 완료 WIC는 이전 소스 기준이므로 source-byte gate에 맞는 후속 재빌드가 필요하다. Linux seed SSH 옵션과 전용 chroot 런타임 보완은 공유 소스에 반영했으며 회귀/실제 guest sshd 검사를 통과했다. 이를 포함한 새 dom0 재빌드가 필요하다. 이번 단계에서 dom0 재빌드·최종 조립·SD 기록은 실행하지 않는다.
