@@ -1,0 +1,15 @@
+[Unit]
+Description=Verify/resume factory registration before any Zenova VM starts
+Requires=srv-zenova.mount
+After=srv-zenova.mount
+Before=zenova-vm-shutdown.service zenova-vms.service
+RequiresMountsFor=/srv/zenova
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/zenova-first-boot register
+RemainAfterExit=yes
+TimeoutStartSec=300s
+
+[Install]
+WantedBy=multi-user.target

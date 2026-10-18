@@ -1,0 +1,13 @@
+[Unit]
+Description=Verify boot medium and grow only the last Zenova ext4 data partition
+DefaultDependencies=no
+Requires=systemd-remount-fs.service
+After=systemd-remount-fs.service systemd-udev-trigger.service
+Before=srv-zenova.mount local-fs.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/zenova-first-boot grow
+RemainAfterExit=yes
+TimeoutStartSec=300s

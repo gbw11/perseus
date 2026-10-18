@@ -1,0 +1,16 @@
+[Unit]
+Description=Stop registered guests by per-VM board shutdown policy before storage/toolstack stop
+Requires=zenova-first-boot.service srv-zenova.mount zenova-xen-ready.service
+After=zenova-first-boot.service srv-zenova.mount zenova-xen-ready.service xenstored.service xenconsoled.service xen-init-dom0.service
+Before=zenova-vms.service
+RequiresMountsFor=/srv/zenova
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/sbin/zenova-vm shutdown-all
+TimeoutStopSec=110s
+
+[Install]
+WantedBy=multi-user.target

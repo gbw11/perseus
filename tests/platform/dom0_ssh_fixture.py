@@ -15,7 +15,7 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-FILES = ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/files'
+FILES = ROOT / 'platform/yocto/meta-zenova/recipes-core/zenova-platform/files'
 FIXTURE = ROOT / 'tests/platform/fixtures/dom0-systemd'
 PROVENANCE = json.loads((FIXTURE / 'provenance.json').read_text())
 
@@ -63,7 +63,7 @@ def extract(root):
             for match in re.finditer(r'^Exec\w*=[-+!:@]*([^\s;]+)', path.read_text(), re.M):
                 if match[1].startswith('/'):
                     commands.add(match[1])
-    commands.update(('/usr/sbin/sshd', '/usr/bin/mkdir', '/usr/sbin/perseus-vm'))
+    commands.update(('/usr/sbin/sshd', '/usr/bin/mkdir', '/usr/sbin/zenova-vm'))
     for name in commands:
         path = root / name.lstrip('/')
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -71,18 +71,61 @@ def extract(root):
             path.write_text('#!/bin/sh\nexit 0\n'); path.chmod(0o755)
 
 
+
+def project_zenova_units(root):
+    """검증된 과거 fixture의 프로젝트 유닛만 새 소스로 투영한다. 원본 증거는 불변이다."""
+    old_units = ('perseus-bridge.service', 'perseus-data-prepare.service',
+                 'perseus-dhcp.service', 'perseus-first-boot.service',
+                 'perseus-vm-shutdown.service', 'perseus-vms.service',
+                 'perseus-xen-ready.service', 'srv-perseus.mount')
+    units = root / 'usr/lib/systemd/system'
+    for old in old_units:
+        current = old.replace('perseus', 'zenova')
+        old_path = units / old
+        if old_path.exists():
+            old_path.unlink()
+            origin = (ROOT / 'platform/yocto/meta-zenova/recipes-core/zenova-bringup/files'
+                      if old in ('perseus-bridge.service', 'perseus-dhcp.service') else FILES)
+            # bringup 레시피와 동일한 두 경로 치환만 적용한다.
+            text = (origin / current).read_text().replace('@SBINDIR@', '/usr/sbin').replace('@BINDIR@', '/usr/bin')
+            (units / current).write_text(text)
+    wants = root / 'etc/systemd/system/multi-user.target.wants'
+    if wants.exists():
+        for old in old_units:
+            link = wants / old
+            if link.is_symlink():
+                link.unlink()
+                (wants / old.replace('perseus', 'zenova')).symlink_to(
+                    '/usr/lib/systemd/system/' + old.replace('perseus', 'zenova'))
+    for old in ('98-perseus-bringup.preset', '98-perseus-platform.preset'):
+        path = root / 'usr/lib/systemd/system-preset' / old
+        if path.exists():
+            text = path.read_text()
+            path.unlink()
+            path.with_name(old.replace('perseus', 'zenova')).write_text(text.replace('perseus', 'zenova'))
+    for unit in ('sshd.service', 'sshd.socket', 'sshd@.service'):
+        old = root / 'etc/systemd/system' / (unit + '.d/10-perseus-keys.conf')
+        old.unlink(missing_ok=True)
+    for command in ('zenova-vm', 'zenova-first-boot', 'zenova-bridge-up'):
+        path = root / 'usr/sbin' / command
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text('#!/bin/sh\\nexit 0\\n'); path.chmod(0o755)
+
+
 def install_policy(root, *, replay_recipe=False):
     """새 패키지 설치 결과를 재생한다. 이전 WIC에 제자리 갱신하는 도구가 아니다."""
-    append = ROOT / 'platform/yocto/meta-perseus/recipes-connectivity/openssh/openssh_%.bbappend'
+    project_zenova_units(root)
+    append = ROOT / 'platform/yocto/meta-zenova/recipes-connectivity/openssh/openssh_%.bbappend'
     text = append.read_text()
     if ('PACKAGECONFIG:remove = "systemd-sshd-socket-mode"' not in text
             or 'PACKAGECONFIG:append = " systemd-sshd-service-mode"' not in text):
         raise ValueError('OpenSSH recipe no longer selects the tested service mode')
-    # clean rootfs의 openssh-sshd/perseus-platform 패키지 소유 파일 차이를 재생한다.
+    # clean rootfs의 openssh-sshd/zenova-platform 패키지 소유 파일 차이를 재생한다.
     for name in ('sshd.socket', 'sshd@.service'):
         (root / 'usr/lib/systemd/system' / name).unlink(missing_ok=True)
     for name in ('sshd.service', 'sshd.socket', 'sshd@.service'):
-        (root / 'etc/systemd/system' / (name + '.d/10-perseus-keys.conf')).unlink(missing_ok=True)
+        (root / 'etc/systemd/system' / (name + '.d/10-zenova-keys.conf')).unlink(missing_ok=True)
     (root / 'etc/systemd/system/sockets.target.wants/sshd.socket').unlink(missing_ok=True)
     unit = root / 'usr/lib/systemd/system/sshd.service'
     unit.parent.mkdir(parents=True, exist_ok=True); unit.write_text(vendor_service())
@@ -93,9 +136,9 @@ def install_policy(root, *, replay_recipe=False):
     if not enabled.is_symlink():
         enabled.symlink_to('/usr/lib/systemd/system/sshd.service')
     if replay_recipe:
-        recipe = ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/perseus-platform_1.0.bb'
+        recipe = ROOT / 'platform/yocto/meta-zenova/recipes-core/zenova-platform/zenova-platform_1.0.bb'
         body = recipe.read_text().split('do_install() {\n', 1)[1].split('\n}\n', 1)[0]
-        with tempfile.TemporaryDirectory(prefix='perseus-dom0-recipe-source-') as tmp:
+        with tempfile.TemporaryDirectory(prefix='zenova-dom0-recipe-source-') as tmp:
             source = Path(tmp)
             for directory in (FILES, ROOT / 'scripts', ROOT / 'platform/guests/common', ROOT / 'platform/first-install'):
                 for path in directory.iterdir():
@@ -106,25 +149,25 @@ def install_policy(root, *, replay_recipe=False):
                    'systemd_system_unitdir': '/usr/lib/systemd/system'}
             subprocess.run(['sh', '-eu', '-c', body], env=env, check=True, capture_output=True)
     else:
-        drop = root / 'etc/systemd/system/sshd.service.d/10-perseus-keys.conf'
+        drop = root / 'etc/systemd/system/sshd.service.d/10-zenova-keys.conf'
         drop.parent.mkdir(parents=True, exist_ok=True)
-        drop.write_bytes((FILES / 'perseus-sshd-keys.conf').read_bytes())
+        drop.write_bytes((FILES / 'zenova-sshd-keys.conf').read_bytes())
         generator = root / 'etc/systemd/system-generators/systemd-ssh-generator'
         generator.parent.mkdir(parents=True, exist_ok=True); generator.symlink_to('/dev/null')
 
 
 def verify(root, *units):
-    prefix = json.loads(os.environ.get('PERSEUS_DOM0_SYSTEMD_ANALYZE', '["systemd-analyze"]'))
+    prefix = json.loads(os.environ.get('ZENOVA_DOM0_SYSTEMD_ANALYZE', '["systemd-analyze"]'))
     version = subprocess.run(prefix + ['--version'], text=True, capture_output=True, check=True)
     if int(version.stdout.split()[1]) < 259:
-        raise ValueError('dom0 fixture requires a systemd >=259 loader; set PERSEUS_DOM0_SYSTEMD_ANALYZE JSON argv')
+        raise ValueError('dom0 fixture requires a systemd >=259 loader; set ZENOVA_DOM0_SYSTEMD_ANALYZE JSON argv')
     empty_generators = root / 'disabled-environment-generators'
     empty_generators.mkdir(exist_ok=True)
     result = subprocess.run(prefix + ['verify', '--recursive-errors=yes', '--generators=no',
         '--man=no', '--root=' + str(root), 'multi-user.target', *units], text=True, capture_output=True,
         env={**os.environ, 'SYSTEMD_LOG_LEVEL': 'debug',
              'SYSTEMD_ENVIRONMENT_GENERATOR_PATH': str(empty_generators)}, timeout=60)
-    if os.environ.get('PERSEUS_TEST_LOG_DIR'):
-        log = Path(os.environ['PERSEUS_TEST_LOG_DIR']) / (root.name + '-' + str(time.monotonic_ns()) + '.dom0-systemd.log')
+    if os.environ.get('ZENOVA_TEST_LOG_DIR'):
+        log = Path(os.environ['ZENOVA_TEST_LOG_DIR']) / (root.name + '-' + str(time.monotonic_ns()) + '.dom0-systemd.log')
         log.write_text(json.dumps({'argv': result.args, 'returncode': result.returncode}) + '\n' + result.stdout + result.stderr)
     return result

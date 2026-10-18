@@ -33,7 +33,7 @@ def require_new_output(path):
 class Workspace:
     """전용 임시 경로·직접 할당한 loop 장치만 사용하고 해제 실패 시 보존한다."""
     def __init__(self, parent):
-        self.path = Path(parent) / ('.perseus-preparing-' + uuid4())
+        self.path = Path(parent) / ('.zenova-preparing-' + uuid4())
         self.path.mkdir(mode=0o700)
         self.mounts, self.loops = [], []
 
@@ -99,7 +99,7 @@ def verify_guest_ssh(root, *, seed=False):
     options = ['-G', '-T'] if seed else ['-T']
     effective = subprocess.check_output(
         ['chroot', str(root), '/usr/sbin/sshd', *options, '-C',
-         'user=root,host=perseus,addr=192.168.77.1,laddr=192.168.77.10,lport=22'],
+         'user=root,host=zenova,addr=192.168.77.1,laddr=192.168.77.10,lport=22'],
         text=True, timeout=60)
     for entry in ('permitrootlogin yes', 'passwordauthentication yes', 'permitemptypasswords no', 'authenticationmethods any'):
         if entry not in effective.splitlines():
@@ -112,10 +112,10 @@ def seed_store_check(data):
     if (result['fstype'] != 'ext4' or result['target'] != str(data)
             or not result['source'].startswith('/dev/loop') or 'rw' not in result['options'].split(',')):
         raise ValueError('factory seed preparation requires the private writable ext4 loop mount')
-    marker = data / '.perseus-seed-store.json'
+    marker = data / '.zenova-seed-store.json'
     if marker.is_symlink() or json.loads(marker.read_text()) != {'schema': 1, 'purpose': 'factory-seeds'}:
         raise ValueError('not a factory seed staging store')
-    if (data / '.perseus-storage.json').exists() or any((data / 'instances').iterdir()):
+    if (data / '.zenova-storage.json').exists() or any((data / 'instances').iterdir()):
         raise ValueError('existing live storage/instances must never become factory seeds')
 
 

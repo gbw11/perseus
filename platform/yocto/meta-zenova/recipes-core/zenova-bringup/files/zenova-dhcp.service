@@ -1,0 +1,19 @@
+[Unit]
+Description=Zenova internal DHCP server on xenbr0 (DNS disabled)
+Requires=zenova-bridge.service
+After=zenova-bridge.service
+
+[Service]
+Type=simple
+RuntimeDirectory=zenova
+RuntimeDirectoryPreserve=yes
+ExecStartPre=/usr/sbin/zenova-vm check-network
+ExecStart=@BINDIR@/dnsmasq --keep-in-foreground --conf-file=/etc/zenova/dnsmasq-bringup.conf
+ExecStartPost=/usr/sbin/zenova-vm dhcp-ready $MAINPID
+ExecReload=/bin/kill -HUP $MAINPID
+TimeoutStartSec=15s
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

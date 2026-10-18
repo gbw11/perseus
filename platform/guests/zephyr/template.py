@@ -40,7 +40,7 @@ def info(directory, expected_manifest):
     if (directory / 'firmware.json').exists():
         # 신규 Starter 카탈로그는 앱 출처를 가진 firmware.json을 그대로 사용한다.
         # 기존 synchronization의 엄격한 source.lock 검증은 아래에서 유지한다.
-        import perseus_zephyr as zephyr
+        import zenova_zephyr as zephyr
         info = zephyr.bundle_info(directory, expected_manifest)
         meta = json.loads((directory / 'firmware.json').read_text())
         lock = json.loads((HERE / 'starter.lock.json').read_text())

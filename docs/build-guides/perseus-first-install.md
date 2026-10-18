@@ -1,3 +1,5 @@
+> **리브랜딩 이전 보존 문서입니다.** 아래 본문은 당시 Perseus 소스·산출물·검증 기록이며, 현재 명령과 경로는 [Zenova 플랫폼 가이드](zenova-platform.md)를 따릅니다.
+
 # 공통 SD 최초 설치 이미지 — 소스 계약과 후속 실행 절차
 
 이 문서는 WIC 수정 `70c85b90ef21e73b4d7b9daa97a65c0cacf3078c` 위의 후속 소스 구현이다. **소스·정적/모의 검증·후속 dom0 빌드·완료 이미지 게시와 Ubuntu/Debian·Zephyr 템플릿 생성을 완료했다. 인스턴스/seed 생성·최종 조립·SD 기록·실보드 부팅은 실행하지 않았다.** 파일 내부 검사 통과와 실보드 성공은 구분한다. 완료 산출물 인계 수정과 검증 결과는 [후속 보고](perseus-completed-artifacts-20261016.md)에, 실제 템플릿·64GB 실측 계획과 조립 전 보완할 seed SSH 검사 문제는 [Linux 템플릿 생성 보고](perseus-guest-templates-20261016.md)와 [Zephyr 추가 보고](perseus-zephyr-template-20261016.md)에 기록했다.

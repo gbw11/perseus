@@ -3,7 +3,7 @@
   "template_policy": "full",
   "operating_reserve_bytes": 2147483648,
   "platform": {
-    "image": "/absolute/completed-platform/perseus-xen-bringup-image-raspberrypi4-64.rootfs-TIMESTAMP.wic.bz2",
+    "image": "/absolute/completed-platform/zenova-xen-bringup-image-raspberrypi4-64.rootfs-TIMESTAMP.wic.bz2",
     "sha256": "REPLACE_WITH_ACTUAL_IMAGE_SHA256",
     "build_record": "/absolute/completed-platform/BUILD-RESULT.json",
     "build_record_sha256": "REPLACE_WITH_ACTUAL_RECORD_SHA256",
@@ -24,7 +24,7 @@
   ],
   "rtos_templates": [
     {
-      "template_dir": "/absolute/verified-templates/perseus-zephyr-starter-1.0.0",
+      "template_dir": "/absolute/verified-templates/zenova-zephyr-starter-1.0.0",
       "template_manifest_sha256": "REPLACE_WITH_ACTUAL_TEMPLATE_JSON_SHA256"
     }
   ]
