@@ -1,166 +1,22 @@
-# 제어 계층과 백엔드 HTTP 계약 v1.0
+# 제어 계층과 백엔드 HTTP 계약 v1.0 (폐기)
 
-## 확정 범위
+> **이 문서는 더 이상 기준이 아닙니다.** 내용은 [VM 관리 API 계약 v1](contracts/vm-api-contract-v1.md)에 통합됐고, 이후 리뷰에서 여러 결정이 바뀌었습니다. 구현과 리뷰는 계약 문서와 [contracts/dom0-manager-openapi.yaml](../contracts/dom0-manager-openapi.yaml)을 기준으로 합니다.
 
-Spring Boot 백엔드는 Python 객체를 직접 호출하지 않는다. Python `dom0-manager`가 FastAPI로 내부 HTTP API를 제공하고, FastAPI 내부에서 설정에 따라 `MockDriver` 또는 `XenDriver`를 선택한다.
+## v1.0 이후 바뀐 결정
 
-```text
-Frontend -> Spring Boot :8080 -> FastAPI :8081 -> VMDriver -> Mock/Xen
-```
+이 문서를 예전에 읽었다면 아래 차이를 확인하세요.
 
-1차에서는 Spring Boot와 FastAPI를 같은 dom0에서 실행한다. FastAPI는 `127.0.0.1:8081`에만 바인딩하며 외부 네트워크에 공개하지 않는다. 사용자 JWT는 Spring 공개 API에서만 사용하고, localhost 내부 호출에는 전달하지 않는다.
-
-머신 분리가 필요해지는 시점에 mTLS 또는 서비스 토큰을 별도 계약으로 추가한다.
-
-## 확정 결정
-
-| 항목 | 결정 |
-| --- | --- |
-| 통신 방식 | FastAPI HTTP/JSON |
-| 실행 위치 | Spring Boot와 FastAPI 모두 dom0 |
-| 내부 주소 | `http://127.0.0.1:8081` |
-| JSON 표기 | `snake_case` |
-| 경로 버전 | `/api/v1` |
-| `vm_id` | Spring이 UUID를 한 번 생성하고 재시도에도 같은 값을 사용 |
-| start/stop | Xen runtime의 목표 상태가 확인될 때까지 동기 대기 |
-| 게스트 준비 상태 | 2차 heartbeat로 별도 판단 |
-| 드라이버 타임아웃 | 조회 5초, 변경 명령 30초 |
-| Spring 타임아웃 | 조회 10초, 변경 명령 45초 |
-| 멱등성 | 목표 상태 기준 |
-| uvicorn | 워커 1개 |
-| 계약 원본 | `contracts/dom0-manager-openapi.yaml` |
-
-## 역할 경계
-
-### Spring Boot
-
-- 사용자 인증과 권한 확인
-- `vm_id` 생성
-- 사용자 요청과 작업 이력 저장
-- FastAPI 호출 및 오류 변환
-- 연결 실패를 `503 VM_CONTROL_UNAVAILABLE`로 변환
-- 클라이언트 타임아웃을 `504 VM_CONTROL_TIMEOUT`으로 변환
-- FastAPI 오류의 `detail`은 로그에만 기록
-- 향후 heartbeat 감시와 복구 정책 수행
-
-### FastAPI dom0-manager
-
-- HTTP/JSON을 Python 호출로 변환
-- Pydantic 검증 오류를 `400 InvalidArgument`로 정규화
-- 설정에 따라 Mock/Xen 드라이버 선택
-- 동시 자원 승인과 VM 상태 전이 직렬화
-- 모든 Xen 오류를 공개 오류 6종 중 하나로 변환
-- OpenAPI 스키마 제공
-
-### VMDriver
-
-- `list`, `get`, `create`, `start`, `stop`, `destroy` 구현
-- Xen 용어와 원문을 Spring에 직접 노출하지 않음
-- 정책, 사용자 권한, 복구 횟수를 판단하지 않음
-
-## 엔드포인트
-
-| 메서드 | 경로 | 성공 응답 |
+| 항목 | v1.0 (이 문서) | 현재 계약 |
 | --- | --- | --- |
-| GET | `/api/v1/vms` | `200 VM[]` |
-| POST | `/api/v1/vms` | 신규 `201 VM`, 동일 재시도 `200 VM` |
-| GET | `/api/v1/vms/{vm_id}` | `200 VM` |
-| POST | `/api/v1/vms/{vm_id}/start` | `200 VM(state=running)` |
-| POST | `/api/v1/vms/{vm_id}/stop` | `200 VM(state=shutdown)` |
-| DELETE | `/api/v1/vms/{vm_id}` | `204`, 디스크 보존 |
-
-## VM 객체
-
-```json
-{
-  "vm_id": "550e8400-e29b-41d4-a716-446655440000",
-  "name": "alpine-sensor",
-  "state": "running",
-  "template_id": "alpine",
-  "template_version": "1.2.0",
-  "vcpus": 1,
-  "memory_mib": 256
-}
-```
-
-`vm_id`는 불변 식별자이고 `name`은 표시 이름이다. `state`는 `running`, `paused`, `stopping`, `shutdown`, `crashed`만 사용한다. `starting`은 공개 runtime 상태에서 제거한다. `running`은 Xen runtime이 실행 중이라는 뜻이며 게스트 OS나 애플리케이션이 준비됐다는 뜻이 아니다.
-
-## 생성 요청
-
-```json
-{
-  "vm_id": "550e8400-e29b-41d4-a716-446655440000",
-  "name": "alpine-sensor",
-  "template_id": "alpine",
-  "template_version": "1.2.0",
-  "vcpus": 1,
-  "memory_mib": 256
-}
-```
-
-Spring이 `vm_id`를 생성하므로 응답 유실 후에도 같은 요청을 안전하게 다시 보낼 수 있다. 같은 `vm_id`와 동일한 요청은 기존 VM을 `200`으로 반환한다. 같은 `vm_id`에 다른 명세를 보내거나 활성 VM과 같은 이름을 사용하면 `409 VMExists`를 반환한다.
-
-## 오류 계약
-
-```json
-{
-  "code": "InvalidState",
-  "message": "VM cannot transition from paused to shutdown",
-  "detail": "xl: original driver message",
-  "resource": null
-}
-```
-
-`detail`과 `resource`는 선택 필드다. `detail`은 Spring 로그 전용이고 프론트에 노출하지 않는다. `resource`는 `InsufficientResources`일 때만 사용한다.
-
-| code | HTTP | 의미 |
-| --- | ---: | --- |
-| `VMNotFound` | 404 | 조회하거나 명령할 `vm_id`가 없음 |
-| `VMExists` | 409 | `vm_id` 또는 활성 이름이 충돌함 |
-| `InvalidState` | 409 | 존재하는 VM이 목표 상태로 전이할 수 없음 |
-| `InvalidArgument` | 400 | 형식이나 범위가 잘못됨 |
-| `InsufficientResources` | 409 | 현재 가용 자원으로 실행할 수 없음 |
-| `DriverError` | 500 | Xen 실패, 드라이버 타임아웃, 분류되지 않은 실패 |
-
-Spring이 FastAPI에 연결하지 못한 경우는 FastAPI 오류 본문이 없으므로 별도로 처리한다.
-
-| 상황 | Spring 공개 응답 |
-| --- | --- |
-| Connection refused, DNS 또는 소켓 연결 실패 | `503 VM_CONTROL_UNAVAILABLE` |
-| Spring HTTP 클라이언트 타임아웃 | `504 VM_CONTROL_TIMEOUT` |
-| FastAPI의 `DriverError` | `500 VM_DRIVER_ERROR` |
-
-## 타임아웃과 재시도
-
-| 호출 | 드라이버 | Spring 클라이언트 | 자동 재시도 |
-| --- | ---: | ---: | --- |
-| GET 목록·단건 | 5초 | 10초 | 최대 1회 허용 |
-| POST 생성 | 30초 | 45초 | 같은 `vm_id`로 1회 허용 |
-| POST start | 30초 | 45초 | 목표 상태 기준 1회 허용 |
-| POST stop | 30초 | 45초 | 목표 상태 기준 1회 허용 |
-| DELETE | 30초 | 45초 | 1회 허용, 이미 없으면 204 |
-
-재시도 사이에는 짧은 백오프를 둔다. Spring 클라이언트 타임아웃은 드라이버 타임아웃보다 길어야 한다.
-
-## 멱등성 규칙
-
-- 이미 `running`인 VM에 start를 호출하면 현재 VM을 `200`으로 반환한다.
-- 이미 `shutdown`인 VM에 stop을 호출하면 현재 VM을 `200`으로 반환한다.
-- 이미 사라진 VM에 DELETE를 호출하면 `204`를 반환한다.
-- 없는 VM을 GET, start 또는 stop하면 `404 VMNotFound`를 반환한다.
-- 동일 `vm_id`와 동일 명세로 create를 재호출하면 기존 VM을 `200`으로 반환한다.
-- 동일 `vm_id`에 다른 명세를 보내면 `409 VMExists`를 반환한다.
-
-## 구현 완료 조건
-
-- FastAPI가 `DRIVER=mock`으로 기동된다.
-- 여섯 엔드포인트가 OpenAPI 계약을 만족한다.
-- FastAPI 검증 오류가 `400 InvalidArgument` 형식으로 반환된다.
-- OpenAPI 파일이 CI에서 FastAPI 생성 스키마와 비교된다.
-- Spring이 Mock FastAPI의 목록과 단건 조회에 성공한다.
-- Spring이 생성, 시작, 종료, 삭제 흐름을 통합 테스트한다.
-- 없는 `vm_id`가 `404 VMNotFound`로 전달된다.
-- FastAPI 중단 시 Spring이 `503 VM_CONTROL_UNAVAILABLE`을 반환한다.
-- 지연 응답 시 Spring이 `504 VM_CONTROL_TIMEOUT`을 반환한다.
-- FastAPI는 uvicorn 워커 1개로 실행된다.
-
+| 실행 위치 | Spring과 dom0-manager 모두 dom0, `127.0.0.1:8081` | Spring은 EC2, dom0-manager는 보드. 접속 방식(바인드 주소·서비스 인증)은 미확정 (계약 13장) |
+| `start` 엔드포인트 | `POST /api/v1/vms/{vm_id}/start` | **없음.** 같은 `vm_id`로 `POST /api/v1/vms` 재호출 (계약 4.2) |
+| stop 응답 | `200 VM(state=shutdown)` | dom0-manager `204` 본문 없음. Spring 공개 API는 `200 VM(state=stopped)` |
+| DELETE | 디스크 보존 | 강제 종료 후 **디스크 삭제** (계약 4.4, 6장) |
+| 생성 재시도 | dom0-manager가 동일 요청에 `200` | dom0-manager는 `201` 또는 `409 VMExists`만. "동일 재시도 200"은 Spring 동작 (계약 4.2, 10.1) |
+| 생성 요청의 `name` | dom0-manager에 전달 | 전달하지 않음. 이름은 Spring만 보유 (계약 1.2, 9장) |
+| dom0-manager VM 객체 | `name`, `template_*` 포함 | `vm_id`, `state`, `vcpus`, `memory_mib`만 (계약 2.1) |
+| state 값 | `running`, `paused`, `stopping`, `shutdown`, `crashed` | dom0-manager는 `running`, `stopping`, `paused`, `crashed`. "꺼짐"은 도메인 부재이며 Spring 공개 API에서만 `stopped` (계약 3장) |
+| 자원 부족 | `409 InsufficientResources` | dom0-manager `507`, Spring 공개 `409 INSUFFICIENT_RESOURCES` (계약 8장) |
+| Spring 타임아웃 | 조회 10초, 명령 45초 | 조회 6초, 명령 35초, 연결 2초 (계약 10장) |
+| 명령 재시도 | 목표 상태 기준 1회 허용 | 연결 실패만 1회 재시도, 응답 타임아웃은 재시도 안 함 (계약 10장) |
+| 복구 | Spring이 heartbeat 감시와 복구 정책 수행 | 복구 주체 미확정. 결정 전까지 Spring은 복구를 수행하지 않음 (계약 13장) |

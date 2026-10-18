@@ -1,10 +1,10 @@
 # VM 관리 API 계약 v1
 
-**최종 갱신** 2026-10-16
+**최종 갱신** 2026-10-19
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼
 **구성 계층** 프론트 ↔ Spring (공개 API) ↔ dom0-manager (FastAPI) ↔ Xen `xl`
 
-이 문서는 계약 확정안 v1.0, 리뷰 v1.1, 백엔드 VM API 규약 v1, 리뷰 v1.2에서 확정된 내용을 하나로 합친 것입니다. 구현의 기준 문서이며, 실측으로 수치가 바뀌면 이 문서를 갱신합니다.
+이 문서는 계약 확정안 v1.0, 리뷰 v1.1, 백엔드 VM API 규약 v1, 리뷰 v1.2에서 확정된 내용을 하나로 합친 것입니다. 구현의 기준 문서이며, 실측으로 수치가 바뀌면 이 문서를 갱신합니다. v1.1에서 dom0-manager 골격(`services/dom0-manager`)과 Spring 클라이언트의 실제 동작에 맞춰 보완했습니다(14장).
 
 ---
 
@@ -55,30 +55,50 @@ Xen에서 직접 읽히는 필드만 포함합니다.
 
 ### 2.2 VM 객체 — 프론트 공개
 
-Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다.
+Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 목록·단건 조회 응답에는 에이전트 상태(`agent_status`)가 함께 들어갑니다.
 
 ```json
 {
   "vm_id": "550e8400-e29b-41d4-a716-446655440000",
   "name": "web-01",
   "state": "running",
-  "vcpus": 1,
-  "memory_mib": 256,
+  "agent_status": "ONLINE",
   "template_id": "debian",
-  "template_version": "12"
+  "template_version": "12",
+  "vcpus": 1,
+  "memory_mib": 256
 }
 ```
 
+| 필드 | 의미 |
+|---|---|
+| `vm_id` | VM 고유 ID. Spring이 생성 |
+| `name` | 표시 이름. Spring 레코드 |
+| `state` | Xen 기준 실행 상태 (3.3절). 도메인이 없으면 `stopped` |
+| `agent_status` | heartbeat 기준 에이전트 상태 `UNKNOWN`/`ONLINE`/`STALE`/`OFFLINE`. **목록·단건 조회에만** 있고 생성·시작·정지 응답에는 없음 |
+| `template_id`, `template_version` | 생성에 쓴 템플릿. Spring 레코드 |
+| `vcpus`, `memory_mib` | 실행 중이면 dom0-manager가 관측한 값, 꺼져 있으면 Spring 레코드의 값 |
+
 ### 2.3 템플릿 객체
+
+`GET /api/v1/templates`는 아래 객체의 배열을 반환합니다.
 
 | 필드 | 의미 |
 |---|---|
 | `template_id` | 템플릿 ID (예: `debian`) |
-| `template_version` | 템플릿 버전 |
+| `version` | 템플릿 버전. VM 생성 요청에서는 이 값을 `template_version`으로 보냄 |
 | `display_name` | 드롭다운 표시 이름 (예: `Debian 12`) |
 | `min_memory_mib` | 이 템플릿의 최소 메모리 |
 
-1차 데이터는 Spring 설정 파일에 고정하며, OS(Alpine·Debian·Ubuntu)마다 버전 하나를 고정합니다.
+```json
+[
+  { "template_id": "alpine", "version": "1.2.0", "display_name": "Alpine 1.2.0", "min_memory_mib": 128 },
+  { "template_id": "debian", "version": "12", "display_name": "Debian 12", "min_memory_mib": 256 },
+  { "template_id": "ubuntu", "version": "24.04", "display_name": "Ubuntu 24.04", "min_memory_mib": 512 }
+]
+```
+
+1차 데이터는 Spring 설정 파일(`application.yml`의 `perseus.template-catalog.templates`)에 고정하며, OS(Alpine·Debian·Ubuntu)마다 버전 하나를 고정합니다. 버전과 최소 메모리 값은 P2 실측 전 임시값입니다(13장).
 
 ---
 
@@ -104,10 +124,25 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다.
 | `xl list` 상태 문자 | 공개 state |
 |---|---|
 | `r` (running), `b` (blocked) | `running` |
+| `------` (플래그 없음) | `running` |
 | `s` (shutdown), `d` (dying) | `stopping` |
 | `p` (paused) | `paused` |
 | `c` (crashed) | `crashed` |
 | 도메인 없음 | 404 / 목록에서 제외 |
+| 그 밖의 문자 | `running`으로 넘기지 않고 `500 DriverError` |
+
+`------`는 스케줄링 순간에 아무 플래그도 서지 않은 정상 도메인입니다. dom0-manager 골격이 이 규칙으로 구현돼 있어 계약에 추가했습니다.
+
+`crashed`가 남아 있는 이유는 플랫폼 도메인 설정이 `on_crash = 'preserve'`이기 때문입니다(`perseus_vm.py`). 정리(stop 또는 DELETE)하기 전까지 이 상태로 남습니다.
+
+### 3.3 Spring 공개 state
+
+Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니다.
+
+| state | 의미 |
+|---|---|
+| `running` / `stopping` / `paused` / `crashed` | dom0-manager가 알려 준 Xen 상태 그대로 |
+| `stopped` | Spring 레코드는 있지만 Xen에 도메인이 없음. **Spring만 만드는 값이며 dom0-manager는 반환하지 않음** |
 
 ---
 
@@ -116,11 +151,13 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다.
 | 메서드 | 경로 | 성공 응답 | 오류 |
 |---|---|---|---|
 | `GET` | `/api/v1/vms` | `200` VM 배열 | — |
-| `POST` | `/api/v1/vms` | `201` VM | `400`, `409`, `507` |
-| `GET` | `/api/v1/vms/{vm_id}` | `200` VM | `404` |
-| `POST` | `/api/v1/vms/{vm_id}/stop` | `204` | — |
-| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | — |
+| `POST` | `/api/v1/vms` | `201` VM | `400`, `409`, `507`, `500` |
+| `GET` | `/api/v1/vms/{vm_id}` | `200` VM | `404`, `500` |
+| `POST` | `/api/v1/vms/{vm_id}/stop` | `204` | `500` |
+| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `500` |
 | `GET` | `/healthz` | `200` | `503` |
+
+`500 DriverError`는 `xl` 실행 실패·타임아웃이며 모든 엔드포인트에서 날 수 있습니다(8.1절). 현재 골격의 Xen 모드는 생성·정지·삭제가 아직 구현되지 않아 `501`(code `DriverError`)을 반환합니다(S15P31E110-115).
 
 ### 4.1 `GET /api/v1/vms`
 
@@ -152,7 +189,14 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다.
 
 ### 4.5 `GET /healthz`
 
-dom0-manager는 정상이지만 Xen이 응답하지 않는 상황을 구분하기 위한 엔드포인트입니다. 2차 `RecoveryService` 구현 시 필수입니다.
+dom0-manager는 정상이지만 Xen이 응답하지 않는 상황을 구분하기 위한 엔드포인트입니다.
+
+| 응답 | 본문 | 의미 |
+|---|---|---|
+| `200` | `{"status": "ok"}` | dom0-manager와 Xen 모두 응답 |
+| `503` | `{"status": "xen_unavailable"}` | dom0-manager는 살아 있지만 Xen(`xl`)이 응답하지 않음 |
+
+Spring의 시스템 상태 점검(REST-28)에서 Xen 상태를 판단할 때 사용합니다. 자동 복구의 주체(보드 또는 Spring)는 아직 정하지 않았으며(13장), 정해지면 이 엔드포인트의 사용처를 갱신합니다.
 
 ---
 
@@ -160,15 +204,17 @@ dom0-manager는 정상이지만 Xen이 응답하지 않는 상황을 구분하�
 
 프론트에 노출되는 엔드포인트 6개를 유지합니다. `start`는 dom0-manager의 `POST /api/v1/vms` 재호출로 구현합니다.
 
-| 메서드 | 경로 | 비고 |
-|---|---|---|
-| `GET` | `/api/v1/vms` | 자기 레코드와 조합한 전체 목록 |
-| `POST` | `/api/v1/vms` | 신규 `201`, 동일 명세 재시도 `200` |
-| `GET` | `/api/v1/vms/{vm_id}` | — |
-| `POST` | `/api/v1/vms/{vm_id}/start` | 내부적으로 create 재호출 |
-| `POST` | `/api/v1/vms/{vm_id}/stop` | — |
-| `DELETE` | `/api/v1/vms/{vm_id}` | — |
-| `GET` | `/api/v1/templates` | 설정 파일 고정 데이터 |
+| 메서드 | 경로 | 성공 응답 | 비고 |
+|---|---|---|---|
+| `GET` | `/api/v1/vms` | `200` `{items: VM[], observed_at}` | 자기 레코드와 조합한 전체 목록. 생성 순 정렬. Spring에 레코드가 없는 도메인은 제외 |
+| `POST` | `/api/v1/vms` | 신규 `201` VM, 동일 명세 재시도 `200` VM | 같은 이름에 다른 명세면 `409 VM_NAME_CONFLICT` |
+| `GET` | `/api/v1/vms/{vm_id}` | `200` VM | — |
+| `POST` | `/api/v1/vms/{vm_id}/start` | `200` VM | dom0 단건 조회 후 도메인이 없을 때만 create 재호출. 이미 도메인이 있으면 상태와 관계없이 그대로 반환 |
+| `POST` | `/api/v1/vms/{vm_id}/stop` | `200` VM (`state: stopped`) | dom0는 `204`지만 Spring은 레코드로 VM 객체를 만들어 반환 |
+| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | dom0 삭제 성공 뒤 Spring 레코드 삭제. 없는 VM도 `204` |
+| `GET` | `/api/v1/templates` | `200` 템플릿 배열 | 설정 파일 고정 데이터 (2.3절) |
+
+모든 공개 API는 `Authorization: Bearer {access_token}`이 필요합니다. 생성·시작·정지·삭제가 성공하면 이벤트(`vm.created`, `vm.state.changed`, `vm.deleted`)가 기록됩니다.
 
 ---
 
@@ -208,7 +254,27 @@ dom0-manager는 정상이지만 Xen이 응답하지 않는 상황을 구분하�
 | `404` | `VMNotFound` | `GET` 대상 도메인 부재 |
 | `409` | `VMExists` | `vm_id` 충돌 (단일 의미) |
 | `507` | `InsufficientResources` | 가용 메모리 부족 |
+| `500` | `DriverError` | `xl` 실행 실패·타임아웃, 모르는 상태 문자. **임시 정의** — OpenAPI yaml의 오류 코드 목록에는 아직 없음(13장) |
+| `501` | `DriverError` | 아직 구현하지 않은 드라이버 기능 (현재 Xen 모드의 생성·정지·삭제) |
 | — | `InvalidState` | **현재 구현에서는 반환하지 않음.** 예비로 유지하며, pause/unpause 엔드포인트가 추가되면 생산자가 생긴다 |
+
+오류 본문:
+
+```json
+{
+  "code": "InsufficientResources",
+  "message": "insufficient memory_mib: requested 1024, available 512",
+  "detail": null,
+  "resource": { "name": "memory_mib", "requested": 1024, "available": 512 }
+}
+```
+
+| 필드 | 의미 |
+|---|---|
+| `code` | 위 표의 명명 |
+| `message` | 사람이 읽는 설명 |
+| `detail` | 선택. Xen 원문 등 상세. **Spring 로그 전용**이며 프론트에 노출하지 않음 |
+| `resource` | 선택. `InsufficientResources`일 때만 `{name, requested, available}` |
 
 FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환하므로 `400 InvalidArgument`로 정규화합니다. 예외 핸들러 교체만으로는 부족하며, **생성 스키마에서 422 응답 정의와 `HTTPValidationError` 모델까지 제거**해야 OpenAPI 차이 검사가 통과합니다.
 
@@ -216,11 +282,37 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 
 ### 8.2 Spring
 
+공개 오류 본문은 `{code, message}`이며, 입력 필드 검증 실패일 때만 `errors: [{field, reason}]`가 붙습니다.
+
+**Spring이 직접 판단하는 오류**
+
 | 코드 | 명명 | 조건 |
 |---|---|---|
+| `401` | `UNAUTHORIZED` / `INVALID_TOKEN` / `TOKEN_REVOKED` | 토큰 없음 / 잘못됐거나 만료 / 로그아웃으로 폐기 |
 | `422` | `VALIDATION_ERROR` | 입력값 규칙 위반 — dom0-manager를 호출하지 않고 거절 |
-| `503` | — | 연결 실패 재시도 후에도 실패 |
-| `504` | — | 응답 타임아웃 |
+| `404` | `TEMPLATE_NOT_FOUND` | 템플릿 목록에 없는 `template_id`·`template_version` |
+| `404` | `VM_NOT_FOUND` | Spring 레코드에 없는 `vm_id` |
+| `409` | `VM_NAME_CONFLICT` | 같은 이름의 VM이 다른 명세로 이미 있음 |
+
+**dom0-manager 오류 변환** (dom0 본문의 `code`로 판단하며 `detail`은 로그에만 남김)
+
+| dom0 | Spring 공개 |
+|---|---|
+| `404 VMNotFound` | 단건 조회에서는 오류가 아니라 "도메인 없음"(`stopped`)으로 처리. 그 밖에는 `404 VM_NOT_FOUND` |
+| `409 VMExists` | 생성·시작에서는 성공으로 처리(10.1절). 그 밖에는 `409 VM_ALREADY_EXISTS` |
+| `409 InvalidState` | `409 INVALID_VM_STATE` |
+| `400 InvalidArgument` | `400 INVALID_ARGUMENT` |
+| `507 InsufficientResources` | **`409 INSUFFICIENT_RESOURCES`** (공개 API에서는 507 대신 409를 씀) |
+| `500`/`501 DriverError` | `500 VM_DRIVER_ERROR` |
+| 해석할 수 없는 본문, 모르는 `code`, 본문이 필요한데 없음 | `502 VM_CONTROL_BAD_RESPONSE` |
+
+**전송 실패**
+
+| 상황 | Spring 공개 |
+|---|---|
+| 연결 실패 (재시도 후에도) | `503 VM_CONTROL_UNAVAILABLE` |
+| 요청을 보낸 뒤 연결이 끊김 | `503 VM_CONTROL_UNAVAILABLE` (명령은 재시도하지 않음) |
+| 응답 타임아웃 | `504 VM_CONTROL_TIMEOUT` |
 
 ---
 
@@ -299,9 +391,11 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 오류 코드 명명 규칙 | 백엔드 | `VALIDATION_ERROR` / `InvalidArgument` 중 한쪽으로 통일 권고 |
 | OS별 실제 버전 값 | 제어 계층 | 이미지 빌드 시 실측 |
 | OS별 `min_memory_mib` | 제어 계층 | 이미지 빌드 시 실측 |
-| `vm_id`를 Xen 도메인에 심는 방법 | 제어 계층 | 1안 — `xl` 도메인 설정의 `uuid`에 `vm_id` 지정 후 `xl list -l`로 역조회 / 2안 — Xen 도메인 이름을 `vm_id`로 사용 |
+| `DriverError`의 HTTP 코드 | 제어 계층 | 현재 `500`(구현 안 된 기능은 `501`)으로 임시 운영. OpenAPI yaml의 `ErrorCode`에 추가할지 결정 |
+| 배포 분리 시 접속 방식 | 공통 | Spring은 EC2, dom0-manager는 보드에서 실행(Tailscale 연결 예정). dom0-manager는 지금 `127.0.0.1`에만 바인딩하고 인증이 없음. 바인드 주소와 서비스 인증(Spring은 `DOM0_MANAGER_SERVICE_TOKEN`이 설정되면 `Authorization: Bearer`를 보냄)을 정해야 함 |
+| 자동 복구 주체 | 공통 | 보드(Xen `on_crash`·dom0 감시) 또는 Spring. 결정 전까지 Spring은 복구를 수행하지 않음 |
 
-`vm_id` 저장 방식은 무상태 구조의 전제입니다. `vm_id`로 도메인을 역조회해야 하므로 `vm_id`가 Xen 도메인 자체에 기록되어야 합니다. 표시 이름은 Spring이 보유하므로 2안에서도 충돌은 없습니다.
+`vm_id` 저장 방식은 **1안으로 확정**했습니다. 도메인 설정의 `uuid`에 `vm_id`를 넣고 `xl list -l`의 `config.c_info.uuid`로 역조회합니다. 플랫폼 도구(`perseus_vm.py`)와 dom0-manager XenDriver가 같은 방식을 씁니다.
 
 ---
 
@@ -310,3 +404,4 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 버전 | 일자 | 내용 |
 |---|---|---|
 | v1 | 2026-10-16 | 계약 확정안 v1.0, 리뷰 v1.1, 백엔드 VM API 규약 v1, 리뷰 v1.2의 확정 사항 통합 |
+| v1.1 | 2026-10-19 | 구현에 맞춰 보완: 공개 VM 객체에 `agent_status`, Spring 공개 state `stopped`(3.3), 템플릿 응답 필드 `version`, `xl` 플래그 없음(`------`) 매핑, `DriverError` 500/501, `/healthz` 본문, Spring 오류 변환표(8.2), 공개 API 응답 형식(5장), `vm_id` 저장 1안 확정, 배포 분리·복구 주체 미확정 항목 추가 |
