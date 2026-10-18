@@ -109,3 +109,16 @@ build/
 *.sqlite3-*
 *.pid
 *.sock
+
+# Additional Yocto workspaces, caches and image artifacts
+*.pyc
+/yocto-workspace/
+/platform/yocto/build*/
+tmp/
+downloads/
+sstate-cache/
+*.rootfs.*
+*.rpi-sdimg
+*.ext2
+*.cpio
+*.cpio.gz
