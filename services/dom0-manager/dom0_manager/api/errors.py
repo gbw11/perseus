@@ -1,0 +1,40 @@
+"""예외 → HTTP 변환. FastAPI 기본 422 는 계약대로 400 InvalidArgument 로 정규화한다(계약 8.1)."""
+
+from __future__ import annotations
+
+import logging
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+from ..errors import Dom0ManagerError, DriverError
+
+log = logging.getLogger(__name__)
+
+
+def _validation_detail(exc: RequestValidationError) -> str:
+    parts = []
+    for err in exc.errors()[:10]:
+        loc = ".".join(str(p) for p in err.get("loc", ()) if p != "body")
+        parts.append(f"{loc or '<body>'}: {err.get('msg', 'invalid')}")
+    return "; ".join(parts)
+
+
+def install_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(RequestValidationError)
+    async def on_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={"code": "InvalidArgument", "message": "invalid request", "detail": _validation_detail(exc)},
+        )
+
+    @app.exception_handler(Dom0ManagerError)
+    async def on_service_error(_: Request, exc: Dom0ManagerError) -> JSONResponse:
+        if isinstance(exc, DriverError):
+            log.error("driver error: %s (%s)", exc.message, exc.detail)
+        return JSONResponse(status_code=exc.status_code, content=exc.body())
+
+    @app.exception_handler(NotImplementedError)
+    async def on_not_implemented(_: Request, exc: NotImplementedError) -> JSONResponse:
+        return JSONResponse(status_code=501, content={"code": "DriverError", "message": f"not implemented: {exc}"})
