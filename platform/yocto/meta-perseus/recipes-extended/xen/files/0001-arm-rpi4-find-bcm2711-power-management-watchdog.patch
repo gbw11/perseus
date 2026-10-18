@@ -1,0 +1,32 @@
+From: Perseus Platform <platform@perseus.local>
+Subject: [PATCH] arm/rpi4: accept the BCM2711 PM compatible for reset
+
+The deployed BCM2711 DTB advertises brcm,bcm2711-pm and
+brcm,bcm2835-pm-wdt, not brcm,bcm2835-pm. The latter-only lookup
+returns NULL and the watchdog reset is never attempted. Match the
+BCM2711 PM node as well and keep it out of the hardware domain.
+
+Keep the existing register translation, password and reset sequence.
+The old compatible remains supported. Hardware reboot is not tested.
+
+Upstream-Status: Pending
+---
+--- a/xen/arch/arm/platforms/brcm-raspberry-pi.c
++++ b/xen/arch/arm/platforms/brcm-raspberry-pi.c
+@@ -43,6 +43,7 @@
+     DT_MATCH_COMPATIBLE("brcm,bcm2835-aux"),
+     /* Special device used for rebooting */
+     DT_MATCH_COMPATIBLE("brcm,bcm2835-pm"),
++    DT_MATCH_COMPATIBLE("brcm,bcm2711-pm"),
+     { /* sentinel */ },
+ };
+ 
+@@ -61,6 +62,8 @@
+     int ret;
+ 
+     node = dt_find_compatible_node(NULL, NULL, "brcm,bcm2835-pm");
++    if ( !node )
++        node = dt_find_compatible_node(NULL, NULL, "brcm,bcm2711-pm");
+     if ( !node )
+         return NULL;
+ 
