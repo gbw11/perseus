@@ -1,6 +1,6 @@
 # Perseus 영구 Xen 플랫폼 계약과 후속 수락 시험
 
-공통 SD 설치·64/128GB 확장·Pi 단독 최초 생성의 최신 계약은 [공통 최초 설치 이미지](perseus-first-install.md)를 따른다. 아래 문서의 초기 수동 저장소 준비 절차와 Alpine 계획은 당시 구현 기록이며, Linux 활성 템플릿은 Ubuntu·Debian이며, Alpine 확장 지점은 별도 Zephyr Xen 펌웨어 템플릿으로 교체했다. 2026-10-17부터 Zephyr도 공통 영구 관리 CLI에 포함한다. SSH·DHCP·게스트 쓰기 저장소·협조형 종료는 미지원이다. 문서 끝의 2026-10-17 계약을 우선한다.
+공통 SD 설치·64/128GB 확장·Pi 단독 최초 생성의 최신 계약은 [공통 최초 설치 이미지](perseus-first-install.md)를 따른다. 아래 문서의 초기 수동 저장소 준비 절차와 Alpine 계획은 당시 구현 기록이며, Linux 활성 템플릿은 Ubuntu·Debian이며, Alpine 확장 지점은 별도 Zephyr Xen 펌웨어 템플릿으로 교체했다. 2026-10-17부터 Zephyr도 공통 영구 관리 CLI에 포함한다. SSH·DHCP·게스트 쓰기 저장소·협조형 종료는 미지원이다. 현행 변경은 [2026-10-18 실보드 수락 보완](perseus-acceptance-20261018.md)을 우선한다.
 
 ## 현재 단계와 설계 결정
 
@@ -124,9 +124,9 @@ perseus-vm reboot-board
 perseus-vm poweroff
 ```
 
-`stop`은 `xl shutdown UUID` 후 도메인 소멸을 최대 90초 기다린다. 자동 복구·destroy로 바꾸지 않는다. `reboot`은 `xl reboot UUID`를 요청하고 같은 UUID의 새 domid가 관측되는지 제한 시간 내 확인한다. OS/SSH 준비 완료는 별도다. 강제 제거는 `perseus-vm destroy <id> --force`로 분리했으며 정상 종료 성공으로 기록하지 않는다. 디스크 삭제/초기화는 수행하지 않는다.
+`stop`은 `xl shutdown <직전에 검증한 domid>` 후 도메인 소멸을 최대 90초 기다린다. 자동 복구·destroy로 바꾸지 않는다. `reboot`은 `xl reboot <직전에 검증한 domid>`를 요청하고 같은 UUID의 새 domid가 관측되는지 제한 시간 내 확인한다. OS/SSH 준비 완료는 별도다. 강제 제거는 `perseus-vm destroy <id> --force`로 분리했으며 정상 종료 성공으로 기록하지 않는다. 디스크 삭제/초기화는 수행하지 않는다.
 
-보드의 정상 종료 경로는 `perseus-vm poweroff`/`reboot-board`다. 게스트 모두 정상 종료 → `sync` → VM 서비스 중지 → 저장소 unmount → 보드 종료 요청 순서다. 게스트 종료/저장소 해제 실패 시 종료 요청을 하지 않고 오류를 반환한다. 종료 표식이 생성된 뒤에는 새 시작을 거부한다.
+보드의 정상 종료 경로는 `perseus-vm poweroff`/`reboot-board`다. Linux 정상 종료·도메인 제거 확인 + VM별 승인된 Zephyr만 강제 제거 → `sync` → VM 서비스 중지 → 저장소 unmount → 보드 종료 요청 순서다. 게스트 종료/저장소 해제 실패 시 종료 요청을 하지 않고 오류를 반환한다. 종료 표식이 생성된 뒤에는 새 시작을 거부한다.
 
 일반 systemd 종료에도 독립된 `perseus-vm-shutdown.service`가 자동 시작 성공 여부와 무관하게 등록 게스트를 정리하도록 순서를 잡았다. 다만 **systemd의 ExecStop 실패 자체는 이미 진행 중인 호스트 shutdown을 취소하지 못한다**. 따라서 직접 `systemctl poweroff/reboot`, 전원 차단, 장치 강제 제거에는 위의 실패 시 중단 보장을 적용할 수 없다. 90초 제한/110초 서비스 제한을 넘으면 오류를 남기며 정상 종료라고 보고하지 않는다. 이 경계를 피하려고 무기한 종료를 막거나 강제 destroy를 자동 수행하지 않는다.
 
@@ -174,7 +174,7 @@ JSON 런타임 패키지 추가는 승인·반영했다. 다음 단계의 승인
 
 ## 2026-10-17 공통 관리·펌웨어 배포 계약
 
-기존 Linux schema 1은 변경 없이 읽는다. Zephyr만 schema 2와 `guest_kind: zephyr`를 사용한다. guest_kind는 관리 분류이며 Xen의 type=pvh와 별개다. 기존 Linux UUID/MAC/IP/디스크/SSH 키를 재발급하지 않는다. 기본 자동 시작은 ubuntu-dev=true, debian-dev=true, zephyr-dev=false다. Zephyr의 off는 실보드 수락 전 정책이며 사용자가 on으로 저장하면 동일한 perseus-vms.service가 다음 부팅에 처리한다.
+기존 Linux schema 1은 변경 없이 읽는다. Zephyr만 schema 2와 `guest_kind: zephyr`를 사용한다. guest_kind는 관리 분류이며 Xen의 type=pvh와 별개다. 기존 Linux UUID/MAC/IP/디스크/SSH 키를 재발급하지 않는다. 기존 synchronization 진단 seed는 ubuntu-dev=true, debian-dev=true, zephyr-dev=false를 유지한다. 새 Starter 배포의 zephyr-dev는 true와 board_shutdown_policy=force-allowed를 명시한다. 기존 설치 정책은 변경하지 않으며 동일한 perseus-vms.service가 저장된 정책만 다음 부팅에 처리한다.
 
 | 기능 | Linux | 현재 Zephyr 콘솔 펌웨어 |
 | --- | --- | --- |
@@ -324,3 +324,5 @@ perseus-vm console zephyr-dev
 Zephyr arm-gic.h는 flags 2=IRQ_TYPE_LEVEL, 4=IRQ_TYPE_EDGE이며 네 번째 cell은 priority다. 표준 Xen DT는 interrupt-cells=3이고 cpumask와 trigger를 세 번째 cell에 담는다. 고정 Xen은 timer/event 모두 (0xf<<8)|8=0xf08(level-low)을 생성한다. timer는 level로 대응하지만 event는 Zephyr edge와 **소스 수준의 차이**가 있다. raw cells가 같아야 한다고 검사하거나 숫자 차이만으로 수정하지 않는다. 실제 DTB·드라이버 해석·콘솔·event/timer 동작을 대조해야 한다. runtime_hardware_verified=false와 소스 비교 정보를 함께 노출한다. 기존 펌웨어·메모리·GIC는 변경하지 않았다.
 
 보드에서는 VM/보드 stop/start/reboot 뒤 UUID·활성 펌웨어·정책 유지, 원본 불변, 명시적 force 결과, autostart on/off 다음 부팅 반영, 미지원/손상 번들 교체 거부와 이전 버전 사용 가능 여부를 확인한다.
+
+2026-10-18부터 영구 UUID는 신원 검증에, 직전 재조회로 확인한 domid는 xl 제어에 쓴다. 보드 종료·SSH 설정 갱신·Starter 배포의 명령과 제한은 [실보드 수락 보완](perseus-acceptance-20261018.md)을 따른다.
