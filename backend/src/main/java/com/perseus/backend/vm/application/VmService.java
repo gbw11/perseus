@@ -1,6 +1,7 @@
 package com.perseus.backend.vm.application;
 
 import com.perseus.backend.common.error.ApiException;
+import com.perseus.backend.event.application.EventRecorder;
 import com.perseus.backend.template.application.TemplateCatalog;
 import com.perseus.backend.template.domain.VmTemplate;
 import com.perseus.backend.vm.domain.CreateVmCommand;
@@ -9,6 +10,7 @@ import com.perseus.backend.vm.domain.VmControlPort;
 import com.perseus.backend.vm.domain.VmRecord;
 import com.perseus.backend.vm.domain.VmRecordRepository;
 import com.perseus.backend.vm.domain.VmRuntime;
+import com.perseus.backend.vm.domain.VmState;
 import java.time.Clock;
 import java.util.List;
 import java.util.Map;
@@ -27,20 +29,25 @@ public class VmService {
     // dom0-manager rejected the request itself, so no domain or disk was created for this vm_id.
     private static final Set<String> REJECTED_BY_DOM0 = Set.of("INVALID_ARGUMENT", "INSUFFICIENT_RESOURCES");
     private static final String DOMAIN_EXISTS = "VM_ALREADY_EXISTS";
+    private static final String CAUSE_USER_START = "user_start";
+    private static final String CAUSE_USER_STOP = "user_stop";
 
     private final VmControlPort vmControlPort;
     private final VmRecordRepository vmRecordRepository;
     private final TemplateCatalog templateCatalog;
+    private final EventRecorder eventRecorder;
     private final Clock clock;
 
     public VmService(
             VmControlPort vmControlPort,
             VmRecordRepository vmRecordRepository,
             TemplateCatalog templateCatalog,
+            EventRecorder eventRecorder,
             Clock clock) {
         this.vmControlPort = vmControlPort;
         this.vmRecordRepository = vmRecordRepository;
         this.templateCatalog = templateCatalog;
+        this.eventRecorder = eventRecorder;
         this.clock = clock;
     }
 
@@ -80,9 +87,12 @@ public class VmService {
 
         VmRecord record = vmRecordRepository.save(new VmRecord(UUID.randomUUID().toString(), command, clock.instant()));
         try {
-            return new CreateResult(Vm.of(record, vmControlPort.launch(record.getVmId(), record.launchSpec())), true);
+            Vm vm = Vm.of(record, vmControlPort.launch(record.getVmId(), record.launchSpec()));
+            eventRecorder.vmCreated(record);
+            return new CreateResult(vm, true);
         } catch (ApiException exception) {
             if (DOMAIN_EXISTS.equals(exception.getCode())) {
+                eventRecorder.vmCreated(record);
                 return new CreateResult(get(record.getVmId()), true);
             }
             // On a timeout the domain may still be coming up, so the record is kept and a retry can recover it.
@@ -101,13 +111,16 @@ public class VmService {
     public Vm stop(String vmId) {
         VmRecord record = findRecord(vmId);
         vmControlPort.stop(vmId);
+        eventRecorder.vmStateChanged(vmId, null, VmState.STOPPED, CAUSE_USER_STOP);
         return Vm.of(record, null);
     }
 
     // dom0-manager deletes the disk as well, so the VM cannot be started again and its record is removed.
     public void destroy(String vmId) {
+        String name = vmRecordRepository.findById(vmId).map(VmRecord::getName).orElse(null);
         vmControlPort.destroy(vmId);
         vmRecordRepository.deleteById(vmId);
+        eventRecorder.vmDeleted(vmId, name);
     }
 
     private Vm ensureRunning(VmRecord record) {
@@ -115,15 +128,18 @@ public class VmService {
         if (runtime != null) {
             return Vm.of(record, runtime);
         }
+        Vm vm;
         try {
-            return Vm.of(record, vmControlPort.launch(record.getVmId(), record.launchSpec()));
+            vm = Vm.of(record, vmControlPort.launch(record.getVmId(), record.launchSpec()));
         } catch (ApiException exception) {
             // 409 VMExists for our own vm_id means an earlier launch already succeeded (contract 10.1).
-            if (DOMAIN_EXISTS.equals(exception.getCode())) {
-                return Vm.of(record, vmControlPort.find(record.getVmId()).orElse(null));
+            if (!DOMAIN_EXISTS.equals(exception.getCode())) {
+                throw exception;
             }
-            throw exception;
+            vm = Vm.of(record, vmControlPort.find(record.getVmId()).orElse(null));
         }
+        eventRecorder.vmStateChanged(record.getVmId(), VmState.STOPPED, vm.state(), CAUSE_USER_START);
+        return vm;
     }
 
     private VmRecord findRecord(String vmId) {

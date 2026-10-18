@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.perseus.backend.common.error.ApiException;
+import com.perseus.backend.event.application.EventRecorder;
 import com.perseus.backend.template.application.TemplateCatalog;
 import com.perseus.backend.template.domain.VmTemplate;
 import com.perseus.backend.template.infrastructure.TemplateCatalogProperties;
@@ -49,13 +50,16 @@ class VmServiceTest {
     @Mock
     private VmRecordRepository vmRecordRepository;
 
+    @Mock
+    private EventRecorder eventRecorder;
+
     private VmService service;
 
     @BeforeEach
     void setUp() {
         TemplateCatalog templateCatalog = new TemplateCatalog(new TemplateCatalogProperties(
                 List.of(new VmTemplate("alpine", "1.2.0", "Alpine 1.2.0", 128))));
-        service = new VmService(vmControlPort, vmRecordRepository, templateCatalog, Clock.fixed(NOW, ZoneOffset.UTC));
+        service = new VmService(vmControlPort, vmRecordRepository, templateCatalog, eventRecorder, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -91,6 +95,7 @@ class VmServiceTest {
         assertThat(result.created()).isTrue();
         assertThat(result.vm().state()).isEqualTo(VmState.RUNNING);
         assertThat(result.vm().name()).isEqualTo("alpine-sensor");
+        verify(eventRecorder).vmCreated(any(VmRecord.class));
     }
 
     @Test
@@ -146,6 +151,7 @@ class VmServiceTest {
         when(vmControlPort.launch("vm-1", ALPINE_SPEC)).thenReturn(new VmRuntime("vm-1", VmState.RUNNING, 1, 256));
 
         assertThat(service.start("vm-1").state()).isEqualTo(VmState.RUNNING);
+        verify(eventRecorder).vmStateChanged("vm-1", VmState.STOPPED, VmState.RUNNING, "user_start");
     }
 
     @Test
@@ -155,6 +161,7 @@ class VmServiceTest {
 
         assertThat(service.start("vm-1").state()).isEqualTo(VmState.RUNNING);
         verify(vmControlPort, never()).launch(anyString(), any());
+        verify(eventRecorder, never()).vmStateChanged(anyString(), any(), any(), anyString());
     }
 
     @Test
@@ -175,14 +182,28 @@ class VmServiceTest {
 
         assertThat(service.stop("vm-1").state()).isEqualTo(VmState.STOPPED);
         verify(vmControlPort).stop("vm-1");
+        verify(eventRecorder).vmStateChanged("vm-1", null, VmState.STOPPED, "user_stop");
     }
 
     @Test
     void destroyDeletesDomainDiskAndRecord() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+
         service.destroy("vm-1");
 
         verify(vmControlPort).destroy("vm-1");
         verify(vmRecordRepository).deleteById("vm-1");
+        verify(eventRecorder).vmDeleted("vm-1", "alpine-1");
+    }
+
+    @Test
+    void failedStopRecordsNoEvent() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        org.mockito.Mockito.doThrow(new ApiException(HttpStatus.GATEWAY_TIMEOUT, "VM_CONTROL_TIMEOUT", "시간 초과"))
+                .when(vmControlPort).stop("vm-1");
+
+        assertThatThrownBy(() -> service.stop("vm-1")).isInstanceOf(ApiException.class);
+        verify(eventRecorder, never()).vmStateChanged(anyString(), any(), any(), anyString());
     }
 
     @Test
