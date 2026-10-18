@@ -3,39 +3,49 @@ info:
   title: Perseus dom0 manager API
   version: 1.0.0
   description: >-
-    Spring Boot backend and Python dom0-manager contract. The service binds to
-    127.0.0.1:8081 and is not exposed outside dom0.
+    Spring Boot 관리 서버와 Python dom0-manager 사이의 내부 계약.
+    기준 문서는 docs/contracts/vm-api-contract-v1.md 이며, 이 파일은 그 문서의 기계 판독용 원본이다.
+    서비스는 127.0.0.1:8081 에만 바인딩하고 dom0 밖으로 노출하지 않는다.
+    dom0-manager 는 무상태다. 모든 조회는 xl 질의 결과에서 파생하며, Xen 에 없는 도메인은
+    목록에서 빠지고 단건 조회는 404 다. "꺼짐"은 state 값이 아니라 도메인의 부재로 표현한다.
+    FastAPI 기본 422(HTTPValidationError)는 400 InvalidArgument 로 정규화하고, 생성 스키마에서
+    422 응답과 HTTPValidationError 모델을 제거해야 이 파일과의 차이 검사가 통과한다.
 servers:
   - url: http://127.0.0.1:8081
     description: dom0 localhost
 tags:
   - name: VMs
+  - name: Health
 paths:
   /api/v1/vms:
     get:
       tags: [VMs]
       operationId: listVms
-      summary: List managed VMs
+      summary: Xen 에 존재하는 도메인 목록
+      description: >-
+        Xen 에 현재 존재하는 도메인만 반환한다. 종료된 VM 을 포함한 전체 목록은
+        Spring 이 자기 레코드와 조합해 만든다.
       x-driver-timeout-seconds: 5
       responses:
         '200':
-          description: Managed VM list
+          description: VM 배열
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/Vm'
-        '500':
-          $ref: '#/components/responses/DriverError'
     post:
       tags: [VMs]
       operationId: createVm
-      summary: Register a VM definition
+      summary: VM 생성 또는 재시작
       description: >-
-        Spring generates vm_id. Repeating the same vm_id with the same request
-        returns the existing VM. Reusing vm_id with different values or using an
-        active VM name returns VMExists.
+        vm_id 의 디스크가 있으면 재사용하고 없으면 template_id/template_version 으로 새로 만든다.
+        디스크 경로는 vm_id 에서 파생한다. 꺼진 VM 의 재시작은 같은 vm_id 로 이 엔드포인트를
+        다시 호출하는 것이며 별도 start 엔드포인트는 없다.
+        Spring 불변조건: 같은 vm_id 에는 항상 같은 template_id/template_version 을 보낸다.
+        무상태 dom0-manager 는 위반을 탐지할 수 없다.
+        "동일 요청 재시도 200"은 Spring 계층의 동작이며 이 계약에 없다. 충돌은 409 VMExists 뿐이다.
       x-driver-timeout-seconds: 30
       requestBody:
         required: true
@@ -45,13 +55,7 @@ paths:
               $ref: '#/components/schemas/CreateVmRequest'
       responses:
         '201':
-          description: VM definition created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Vm'
-        '200':
-          description: An identical request for the same vm_id already completed
+          description: 도메인 생성됨 (state 는 running)
           content:
             application/json:
               schema:
@@ -59,20 +63,16 @@ paths:
         '400':
           $ref: '#/components/responses/InvalidArgument'
         '409':
-          description: VMExists or InsufficientResources
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/DriverError'
+          $ref: '#/components/responses/VMExists'
+        '507':
+          $ref: '#/components/responses/InsufficientResources'
   /api/v1/vms/{vm_id}:
     parameters:
       - $ref: '#/components/parameters/VmId'
     get:
       tags: [VMs]
       operationId: getVm
-      summary: Get one managed VM
+      summary: VM 단건 조회
       x-driver-timeout-seconds: 5
       responses:
         '200':
@@ -82,112 +82,89 @@ paths:
               schema:
                 $ref: '#/components/schemas/Vm'
         '404':
-          $ref: '#/components/responses/VmNotFound'
-        '500':
-          $ref: '#/components/responses/DriverError'
+          $ref: '#/components/responses/VMNotFound'
     delete:
       tags: [VMs]
-      operationId: destroyVm
-      summary: Delete a VM definition while preserving its disk image
-      description: Idempotent. A VM that is already absent also returns 204.
+      operationId: deleteVm
+      summary: 강제 종료 후 디스크 삭제
+      description: >-
+        xl destroy 로 강제 종료하고 디스크를 삭제한다. 멱등이며 없는 VM 에 대한 호출도 204 다.
+        삭제 후에는 재시작할 수 없다.
       x-driver-timeout-seconds: 30
       responses:
         '204':
-          description: VM is absent; disk image is preserved
-        '409':
-          description: InvalidState
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/DriverError'
-  /api/v1/vms/{vm_id}/start:
-    parameters:
-      - $ref: '#/components/parameters/VmId'
-    post:
-      tags: [VMs]
-      operationId: startVm
-      summary: Start a VM and wait for the Xen runtime to be running
-      description: Idempotent. An already running VM returns its current state with 200.
-      x-driver-timeout-seconds: 30
-      responses:
-        '200':
-          description: Xen runtime is running
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Vm'
-        '404':
-          $ref: '#/components/responses/VmNotFound'
-        '409':
-          description: InvalidState or InsufficientResources
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/DriverError'
+          description: 도메인과 디스크가 모두 없는 상태
   /api/v1/vms/{vm_id}/stop:
     parameters:
       - $ref: '#/components/parameters/VmId'
     post:
       tags: [VMs]
       operationId: stopVm
-      summary: Stop a VM and wait for shutdown
-      description: Idempotent. An already shutdown VM returns its current state with 200.
+      summary: 정상 종료 (디스크 보존)
+      description: >-
+        xl shutdown 으로 graceful shutdown 을 요청하고 도메인이 소멸할 때까지 기다린다.
+        디스크는 보존되므로 같은 vm_id 로 POST /api/v1/vms 를 호출하면 재시작된다.
+        멱등성은 목표 상태 기준이다. 없는 VM 에 대한 호출도 204 다.
+        25초 안에 소멸하지 않으면 xl destroy 로 전환하며 전체 응답은 30초를 넘지 않는다.
+        이 경우 디스크는 unclean 상태일 수 있다. paused 는 unpause 후 종료하고 crashed 는 destroy 로 처리한다.
       x-driver-timeout-seconds: 30
       responses:
+        '204':
+          description: 도메인이 없는 상태 (디스크 보존)
+  /healthz:
+    get:
+      tags: [Health]
+      operationId: healthz
+      summary: dom0-manager 와 Xen 응답 여부
+      description: >-
+        dom0-manager 프로세스는 살아 있지만 Xen(xl) 이 응답하지 않는 상황을 구분한다.
+        2차 RecoveryService 가 사용한다.
+      x-driver-timeout-seconds: 5
+      responses:
         '200':
-          description: VM is shutdown
+          description: dom0-manager 와 Xen 모두 응답
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Vm'
-        '404':
-          $ref: '#/components/responses/VmNotFound'
-        '409':
-          description: InvalidState
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: Xen 이 응답하지 않음
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/DriverError'
+                $ref: '#/components/schemas/Health'
 components:
   parameters:
     VmId:
       name: vm_id
       in: path
       required: true
-      description: Immutable UUID assigned by Spring when the VM is created
+      description: >-
+        Spring 이 생성하는 불변 UUID. Xen 도메인에서 역조회할 수 있어야 한다
+        (저장 방식은 계약 문서 13장 미확정 항목).
       schema:
         type: string
         format: uuid
   schemas:
     VmState:
       type: string
-      enum: [running, paused, stopping, shutdown, crashed]
+      description: >-
+        전부 xl list 에서 읽히는 실제 Xen 상태다. API 가 만드는 상태는 running 뿐이고 나머지는
+        조회로만 관찰된다. 매핑: r,b → running / s,d → stopping / p → paused / c → crashed.
+        b(blocked) 는 I/O 대기 중인 정상 상태이며 장애가 아니다. "꺼짐"은 도메인의 부재다.
+      enum: [running, stopping, paused, crashed]
     Vm:
       type: object
+      description: >-
+        Xen 에서 직접 읽히는 필드만 담는다. name, template_id, template_version 은 Spring 이 보유한다.
       additionalProperties: false
-      required: [vm_id, name, state, template_id, template_version, vcpus, memory_mib]
+      required: [vm_id, state, vcpus, memory_mib]
       properties:
         vm_id:
           type: string
           format: uuid
-        name:
-          type: string
-          minLength: 1
-          maxLength: 64
         state:
           $ref: '#/components/schemas/VmState'
-        template_id:
-          type: string
-          minLength: 1
-        template_version:
-          type: string
-          minLength: 1
         vcpus:
           type: integer
           minimum: 1
@@ -196,29 +173,32 @@ components:
           minimum: 1
     CreateVmRequest:
       type: object
+      description: >-
+        name 은 Spring 이 단독으로 검증·보유하므로 보내지 않는다. 템플릿별 min_memory_mib 하한은
+        Spring 이 검사하고, dom0-manager 는 공통 범위만 검사한다.
       additionalProperties: false
-      required: [vm_id, name, template_id, template_version, vcpus, memory_mib]
+      required: [vm_id, template_id, template_version, vcpus, memory_mib]
       properties:
         vm_id:
           type: string
           format: uuid
-          description: Generated once by Spring and reused on retries
-        name:
-          type: string
-          minLength: 1
-          maxLength: 64
+          description: Spring 이 한 번 생성해 재시도에도 재사용한다
         template_id:
           type: string
           minLength: 1
+          description: 예 debian, ubuntu, alpine
         template_version:
           type: string
           minLength: 1
         vcpus:
           type: integer
           minimum: 1
+          maximum: 4
         memory_mib:
           type: integer
-          minimum: 1
+          minimum: 128
+          maximum: 1024
+          description: 배수 제약 없음. 64 단위는 화면 입력 규칙일 뿐이다
     ResourceError:
       type: object
       additionalProperties: false
@@ -238,38 +218,53 @@ components:
       properties:
         code:
           type: string
+          description: >-
+            InvalidState 는 예비 값이다. pause/unpause 엔드포인트가 생기기 전까지 현재 구현은 반환하지 않는다.
           enum:
+            - InvalidArgument
             - VMNotFound
             - VMExists
-            - InvalidState
-            - InvalidArgument
             - InsufficientResources
-            - DriverError
+            - InvalidState
         message:
           type: string
         detail:
           type: [string, 'null']
-          description: Xen detail for backend logs; never expose it to the frontend
+          description: 백엔드 로그용 Xen 상세. 프론트에 노출하지 않는다
         resource:
           oneOf:
             - $ref: '#/components/schemas/ResourceError'
             - type: 'null'
-          description: Present only for InsufficientResources
+          description: InsufficientResources 에만 있다
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, xen_unavailable]
   responses:
-    VmNotFound:
-      description: VMNotFound
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
     InvalidArgument:
-      description: InvalidArgument
+      description: 형식 또는 범위 오류 (FastAPI 422 를 400 으로 정규화)
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
-    DriverError:
-      description: DriverError
+    VMNotFound:
+      description: 대상 도메인이 Xen 에 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    VMExists:
+      description: vm_id 충돌 (단일 의미). 표시 이름 중복은 Spring 이 판정한다
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InsufficientResources:
+      description: xl info 의 free_memory 기준 가용 자원 부족. resource 에 name/requested/available
       content:
         application/json:
           schema:
