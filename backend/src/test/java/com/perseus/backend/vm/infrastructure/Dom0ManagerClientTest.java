@@ -12,15 +12,20 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class Dom0ManagerClientTest {
+
+    private static final Duration RETRY_BACKOFF = Duration.ofMillis(200);
 
     private HttpServer server;
     private Dom0ManagerClient client;
@@ -29,16 +34,22 @@ class Dom0ManagerClientTest {
     @BeforeEach
     void setUp() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(Executors.newCachedThreadPool());
         server.start();
+        client = clientFor("http://127.0.0.1:" + server.getAddress().getPort());
+    }
+
+    private Dom0ManagerClient clientFor(String baseUrl) {
         Dom0ManagerProperties properties = new Dom0ManagerProperties(
-                "http://127.0.0.1:" + server.getAddress().getPort(),
+                baseUrl,
                 "service-secret",
                 Duration.ofSeconds(1),
-                Duration.ofSeconds(2),
-                Duration.ofSeconds(3));
+                Duration.ofMillis(300),
+                Duration.ofMillis(300),
+                RETRY_BACKOFF);
         ObjectMapper objectMapper = new ObjectMapper()
                 .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
-        client = new Dom0ManagerClient(properties, objectMapper);
+        return new Dom0ManagerClient(properties, objectMapper);
     }
 
     @AfterEach
@@ -87,6 +98,80 @@ class Dom0ManagerClientTest {
                     assertThat(exception.getCode()).isEqualTo("VM_NOT_FOUND");
                     assertThat(exception.getMessage()).isEqualTo("missing VM");
                 });
+    }
+
+    @Test
+    void queryTimeoutIsRetriedOnceThenReportedAsTimeout() {
+        AtomicInteger requests = new AtomicInteger();
+        server.createContext("/api/v1/vms", exchange -> {
+            requests.incrementAndGet();
+            sleep(Duration.ofSeconds(1));
+            respond(exchange, 200, "[]");
+        });
+
+        assertThatThrownBy(() -> client.list())
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo("VM_CONTROL_TIMEOUT"));
+        assertThat(requests).hasValue(2);
+    }
+
+    @Test
+    void commandTimeoutIsNotRetried() {
+        AtomicInteger requests = new AtomicInteger();
+        server.createContext("/api/v1/vms/vm-1/start", exchange -> {
+            requests.incrementAndGet();
+            sleep(Duration.ofSeconds(1));
+            respond(exchange, 200, "{}");
+        });
+
+        assertThatThrownBy(() -> client.start("vm-1"))
+                .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getStatus().value()).isEqualTo(504);
+                    assertThat(exception.getCode()).isEqualTo("VM_CONTROL_TIMEOUT");
+                });
+        assertThat(requests).hasValue(1);
+    }
+
+    @Test
+    void commandConnectFailureIsRetriedOnceThenReportedAsUnavailable() throws IOException {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        Dom0ManagerClient unreachable = clientFor("http://127.0.0.1:" + closedPort);
+
+        long startedAt = System.nanoTime();
+        assertThatThrownBy(() -> unreachable.start("vm-1"))
+                .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getStatus().value()).isEqualTo(503);
+                    assertThat(exception.getCode()).isEqualTo("VM_CONTROL_UNAVAILABLE");
+                });
+        // The single retry waits for the backoff before the second attempt.
+        assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isGreaterThanOrEqualTo(RETRY_BACKOFF);
+    }
+
+    @Test
+    void controlLayerErrorIsNotRetried() {
+        AtomicInteger requests = new AtomicInteger();
+        server.createContext("/api/v1/vms/vm-1/stop", exchange -> {
+            requests.incrementAndGet();
+            respond(exchange, 409, """
+                    {"code":"InvalidState","message":"cannot stop"}
+                    """);
+        });
+
+        assertThatThrownBy(() -> client.stop("vm-1"))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo("INVALID_VM_STATE"));
+        assertThat(requests).hasValue(1);
+    }
+
+    private void sleep(Duration duration) {
+        try {
+            Thread.sleep(duration);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void respond(HttpExchange exchange, int status, String body) throws IOException {

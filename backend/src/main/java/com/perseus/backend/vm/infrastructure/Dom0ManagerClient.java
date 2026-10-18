@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.Arrays;
@@ -31,19 +32,23 @@ public class Dom0ManagerClient implements VmControlPort {
 
     private static final Logger log = LoggerFactory.getLogger(Dom0ManagerClient.class);
 
+    private static final int MAX_ATTEMPTS = 2;
+
     private final RestClient queryClient;
     private final RestClient commandClient;
     private final ObjectMapper objectMapper;
+    private final Duration retryBackoff;
 
     public Dom0ManagerClient(Dom0ManagerProperties properties, ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
+        this.retryBackoff = properties.retryBackoff();
         this.queryClient = createClient(properties, properties.queryTimeout());
         this.commandClient = createClient(properties, properties.commandTimeout());
     }
 
     @Override
     public List<Vm> list() {
-        Vm[] response = execute(() -> queryClient.get()
+        Vm[] response = executeQuery(() -> queryClient.get()
                 .uri("/api/v1/vms")
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
@@ -53,7 +58,7 @@ public class Dom0ManagerClient implements VmControlPort {
 
     @Override
     public Vm get(String vmId) {
-        return requireBody(execute(() -> queryClient.get()
+        return requireBody(executeQuery(() -> queryClient.get()
                 .uri("/api/v1/vms/{vmId}", vmId)
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
@@ -62,7 +67,7 @@ public class Dom0ManagerClient implements VmControlPort {
 
     @Override
     public Vm create(String vmId, CreateVmCommand command) {
-        return requireBody(execute(() -> commandClient.post()
+        return requireBody(executeCommand(() -> commandClient.post()
                 .uri("/api/v1/vms")
                 .body(Dom0CreateVmRequest.of(vmId, command))
                 .retrieve()
@@ -72,7 +77,7 @@ public class Dom0ManagerClient implements VmControlPort {
 
     @Override
     public Vm start(String vmId) {
-        return requireBody(execute(() -> commandClient.post()
+        return requireBody(executeCommand(() -> commandClient.post()
                 .uri("/api/v1/vms/{vmId}/start", vmId)
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
@@ -81,7 +86,7 @@ public class Dom0ManagerClient implements VmControlPort {
 
     @Override
     public Vm stop(String vmId) {
-        return requireBody(execute(() -> commandClient.post()
+        return requireBody(executeCommand(() -> commandClient.post()
                 .uri("/api/v1/vms/{vmId}/stop", vmId)
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
@@ -90,7 +95,7 @@ public class Dom0ManagerClient implements VmControlPort {
 
     @Override
     public void destroy(String vmId) {
-        execute(() -> {
+        executeCommand(() -> {
             commandClient.delete()
                     .uri("/api/v1/vms/{vmId}", vmId)
                     .retrieve()
@@ -162,44 +167,63 @@ public class Dom0ManagerClient implements VmControlPort {
         };
     }
 
-    private <T> T execute(ClientCall<T> call) {
-        try {
-            return call.execute();
-        } catch (ApiException exception) {
-            throw exception;
-        } catch (ResourceAccessException exception) {
-            if (isTimeout(exception)) {
+    // Reads are safe to repeat, so any transport failure is retried once.
+    private <T> T executeQuery(ClientCall<T> call) {
+        return execute(call, true);
+    }
+
+    // A command that timed out may still be running in dom0-manager (single worker),
+    // so only failures where the request never arrived are retried.
+    private <T> T executeCommand(ClientCall<T> call) {
+        return execute(call, false);
+    }
+
+    private <T> T execute(ClientCall<T> call, boolean retryAfterSend) {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return call.execute();
+            } catch (ApiException exception) {
+                throw exception;
+            } catch (ResourceAccessException exception) {
+                TransportFailure failure = classify(exception);
+                boolean retryable = failure == TransportFailure.CONNECT || retryAfterSend;
+                if (!retryable || attempt >= MAX_ATTEMPTS) {
+                    throw failure.toApiException();
+                }
+                log.warn("dom0-manager call failed ({}), retrying once", failure);
+                pauseBeforeRetry();
+            } catch (RestClientException exception) {
                 throw new ApiException(
-                        HttpStatus.GATEWAY_TIMEOUT,
-                        "VM_CONTROL_TIMEOUT",
-                        "VM 제어 서비스의 응답 시간이 초과되었습니다.");
+                        HttpStatus.BAD_GATEWAY,
+                        "VM_CONTROL_BAD_RESPONSE",
+                        "VM 제어 서비스의 응답을 처리할 수 없습니다.");
             }
-            throw new ApiException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
-                    "VM_CONTROL_UNAVAILABLE",
-                    "VM 제어 서비스에 연결할 수 없습니다.");
-        } catch (RestClientException exception) {
-            throw new ApiException(
-                    HttpStatus.BAD_GATEWAY,
-                    "VM_CONTROL_BAD_RESPONSE",
-                    "VM 제어 서비스의 응답을 처리할 수 없습니다.");
         }
     }
 
-    private boolean isTimeout(Throwable throwable) {
+    private TransportFailure classify(Throwable throwable) {
         Throwable current = throwable;
         while (current != null) {
+            if (current instanceof HttpConnectTimeoutException || current instanceof ConnectException) {
+                return TransportFailure.CONNECT;
+            }
             if (current instanceof HttpTimeoutException
                     || current instanceof SocketTimeoutException
                     || current instanceof TimeoutException) {
-                return true;
-            }
-            if (current instanceof ConnectException) {
-                return false;
+                return TransportFailure.TIMEOUT;
             }
             current = current.getCause();
         }
-        return false;
+        return TransportFailure.INTERRUPTED;
+    }
+
+    private void pauseBeforeRetry() {
+        try {
+            Thread.sleep(retryBackoff);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw TransportFailure.CONNECT.toApiException();
+        }
     }
 
     private Vm requireBody(Vm vm) {
@@ -210,6 +234,28 @@ public class Dom0ManagerClient implements VmControlPort {
                     "VM 제어 서비스가 응답 본문을 반환하지 않았습니다.");
         }
         return vm;
+    }
+
+    private enum TransportFailure {
+        // The request never reached dom0-manager.
+        CONNECT,
+        // dom0-manager accepted the request but did not answer in time.
+        TIMEOUT,
+        // The connection broke after the request may have been sent.
+        INTERRUPTED;
+
+        ApiException toApiException() {
+            if (this == TIMEOUT) {
+                return new ApiException(
+                        HttpStatus.GATEWAY_TIMEOUT,
+                        "VM_CONTROL_TIMEOUT",
+                        "VM 제어 서비스의 응답 시간이 초과되었습니다.");
+            }
+            return new ApiException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "VM_CONTROL_UNAVAILABLE",
+                    "VM 제어 서비스에 연결할 수 없습니다.");
+        }
     }
 
     @FunctionalInterface

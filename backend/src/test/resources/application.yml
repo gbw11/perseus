@@ -24,9 +24,36 @@ perseus:
     refresh-cookie-secure: false
     max-login-attempts: 5
     login-attempt-window: 5m
+  template-catalog:
+    templates:
+      - template-id: debian
+        version: "12"
+        display-name: Debian 12
+        min-memory-mib: 100
+      - template-id: ubuntu
+        version: "24.04"
+        display-name: Ubuntu 24.04
+        min-memory-mib: 512
+  agent:
+    stale-after: 15s
+    offline-after: 30s
+  report:
+    os-evidence:
+      required-os-ids:
+        - debian
+        - ubuntu
+        - alpine
+      observation-window: 30s
+      build-id: test-build
+  mqtt:
+    enabled: false
+    broker-url: tcp://127.0.0.1:1883
+    client-id: perseus-backend-test
+    reconnect-interval: 1s
   dom0-manager:
     base-url: http://127.0.0.1:18081
     service-token: test-service-token
     connect-timeout: 1s
     query-timeout: 2s
     command-timeout: 3s
+    retry-backoff: 10ms
