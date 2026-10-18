@@ -104,14 +104,27 @@ public class VmService {
     }
 
     // There is no start endpoint: the same vm_id is launched again and its preserved disk is reused.
+    // A domain that is still in Xen but not running is refused, as the platform CLI does: there is no automatic
+    // recovery, so the user stops it first and starts again.
     public Vm start(String vmId) {
-        return ensureRunning(findRecord(vmId));
+        VmRecord record = findRecord(vmId);
+        VmRuntime runtime = vmControlPort.find(vmId).orElse(null);
+        if (runtime == null) {
+            return launch(record);
+        }
+        rejectUnstartable(runtime.state());
+        return Vm.of(record, runtime);
     }
 
+    // The state is read first so the event says what was stopped; a VM that is already off records nothing.
     public Vm stop(String vmId) {
         VmRecord record = findRecord(vmId);
+        VmState before = vmControlPort.find(vmId).map(VmRuntime::state).orElse(null);
+        if (before == null) {
+            return Vm.of(record, null);
+        }
         vmControlPort.stop(vmId);
-        eventRecorder.vmStateChanged(vmId, null, VmState.STOPPED, CAUSE_USER_STOP);
+        eventRecorder.vmStateChanged(vmId, before, VmState.STOPPED, CAUSE_USER_STOP);
         return Vm.of(record, null);
     }
 
@@ -128,6 +141,23 @@ public class VmService {
         if (runtime != null) {
             return Vm.of(record, runtime);
         }
+        return launch(record);
+    }
+
+    private static void rejectUnstartable(VmState state) {
+        String message = switch (state) {
+            case RUNNING -> null;
+            case CRASHED -> "VM이 크래시 상태입니다. 정지한 뒤 다시 시작하세요.";
+            case PAUSED -> "VM이 일시정지 상태입니다. 정지한 뒤 다시 시작하세요.";
+            case STOPPING -> "VM이 종료되는 중입니다. 종료된 뒤 다시 시작하세요.";
+            case STOPPED -> null;
+        };
+        if (message != null) {
+            throw new ApiException(HttpStatus.CONFLICT, "INVALID_VM_STATE", message);
+        }
+    }
+
+    private Vm launch(VmRecord record) {
         Vm vm;
         try {
             vm = Vm.of(record, vmControlPort.launch(record.getVmId(), record.launchSpec()));

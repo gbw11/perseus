@@ -95,7 +95,10 @@ class EventApiIntegrationTest {
     @Test
     void vmLifecycleIsRecordedNewestFirst() throws Exception {
         String vmId = createVm("event-web-01");
-        when(vmControlPort.find(vmId)).thenReturn(Optional.empty());
+        // Running before the stop, absent afterwards so the start launches it again.
+        when(vmControlPort.find(vmId))
+                .thenReturn(Optional.of(new VmRuntime(vmId, VmState.RUNNING, 1, 512)))
+                .thenReturn(Optional.empty());
         mockMvc.perform(authorized(post("/api/v1/vms/" + vmId + "/stop"))).andExpect(status().isOk());
         mockMvc.perform(authorized(post("/api/v1/vms/" + vmId + "/start"))).andExpect(status().isOk());
         mockMvc.perform(authorized(delete("/api/v1/vms/" + vmId))).andExpect(status().isNoContent());
@@ -111,6 +114,7 @@ class EventApiIntegrationTest {
         assertThat(started.path("payload").path("to").asText()).isEqualTo("running");
         assertThat(started.path("payload").path("cause").asText()).isEqualTo("user_start");
         assertThat(items.get(2).path("payload").path("cause").asText()).isEqualTo("user_stop");
+        assertThat(items.get(2).path("payload").path("from").asText()).isEqualTo("running");
         assertThat(items.get(3).path("payload").path("name").asText()).isEqualTo("event-web-01");
         assertThat(items.get(3).path("payload").path("template_id").asText()).isEqualTo("debian");
         assertThat(items.get(0).path("payload").path("name").asText()).isEqualTo("event-web-01");
@@ -121,7 +125,10 @@ class EventApiIntegrationTest {
     @Test
     void afterEventIdReturnsLaterEventsOldestFirst() throws Exception {
         String vmId = createVm("event-web-02");
-        when(vmControlPort.find(vmId)).thenReturn(Optional.empty());
+        // Running before the stop, absent afterwards so the start launches it again.
+        when(vmControlPort.find(vmId))
+                .thenReturn(Optional.of(new VmRuntime(vmId, VmState.RUNNING, 1, 512)))
+                .thenReturn(Optional.empty());
         mockMvc.perform(authorized(post("/api/v1/vms/" + vmId + "/stop"))).andExpect(status().isOk());
         mockMvc.perform(authorized(post("/api/v1/vms/" + vmId + "/start"))).andExpect(status().isOk());
         String createdEventId = events("?type=vm.created").get(0).path("event_id").asText();

@@ -32,6 +32,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -176,13 +178,50 @@ class VmServiceTest {
         assertThat(service.start("vm-1").state()).isEqualTo(VmState.RUNNING);
     }
 
-    @Test
-    void stopReturnsTheVmAsStopped() {
+    @ParameterizedTest
+    @EnumSource(value = VmState.class, names = {"CRASHED", "PAUSED", "STOPPING"})
+    void startOfADomainThatIsNotRunningIsRefused(VmState state) {
         when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        when(vmControlPort.find("vm-1")).thenReturn(Optional.of(new VmRuntime("vm-1", state, 1, 256)));
+
+        assertThatThrownBy(() -> service.start("vm-1"))
+                .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(exception.getCode()).isEqualTo("INVALID_VM_STATE");
+                });
+        verify(vmControlPort, never()).launch(anyString(), any());
+        verify(eventRecorder, never()).vmStateChanged(anyString(), any(), any(), anyString());
+    }
+
+    @Test
+    void stopRecordsTheStateItStoppedFrom() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        when(vmControlPort.find("vm-1")).thenReturn(Optional.of(new VmRuntime("vm-1", VmState.RUNNING, 1, 256)));
 
         assertThat(service.stop("vm-1").state()).isEqualTo(VmState.STOPPED);
         verify(vmControlPort).stop("vm-1");
-        verify(eventRecorder).vmStateChanged("vm-1", null, VmState.STOPPED, "user_stop");
+        verify(eventRecorder).vmStateChanged("vm-1", VmState.RUNNING, VmState.STOPPED, "user_stop");
+    }
+
+    @Test
+    void stopOfACrashedVmRecordsCrashedAsTheFormerState() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        when(vmControlPort.find("vm-1")).thenReturn(Optional.of(new VmRuntime("vm-1", VmState.CRASHED, 1, 256)));
+
+        service.stop("vm-1");
+
+        verify(vmControlPort).stop("vm-1");
+        verify(eventRecorder).vmStateChanged("vm-1", VmState.CRASHED, VmState.STOPPED, "user_stop");
+    }
+
+    @Test
+    void stopOfAVmThatIsAlreadyOffDoesNothing() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        when(vmControlPort.find("vm-1")).thenReturn(Optional.empty());
+
+        assertThat(service.stop("vm-1").state()).isEqualTo(VmState.STOPPED);
+        verify(vmControlPort, never()).stop(anyString());
+        verify(eventRecorder, never()).vmStateChanged(anyString(), any(), any(), anyString());
     }
 
     @Test
@@ -199,6 +238,7 @@ class VmServiceTest {
     @Test
     void failedStopRecordsNoEvent() {
         when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        when(vmControlPort.find("vm-1")).thenReturn(Optional.of(new VmRuntime("vm-1", VmState.RUNNING, 1, 256)));
         org.mockito.Mockito.doThrow(new ApiException(HttpStatus.GATEWAY_TIMEOUT, "VM_CONTROL_TIMEOUT", "시간 초과"))
                 .when(vmControlPort).stop("vm-1");
 
