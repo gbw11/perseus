@@ -85,10 +85,10 @@ class UnavailableProvisioner(Provisioner):
     def ensure_instance(
         self, vm_id: UUID, template_id: str, template_version: str, *, vcpus: int, memory_mib: int
     ) -> InstancePaths:
-        raise NotImplementedError("Provisioner: xen 모드는 조회 전용. 생성은 XENOVA_DRIVER=platform 을 쓴다 (S15P31E110-115)")
+        raise NotImplementedError("Provisioner: xen 모드는 조회 전용. 생성은 XENOVA_DRIVER=platform 에서 지원한다")
 
     def instance_exists(self, vm_id: UUID) -> bool:
         return (self._root / str(vm_id)).is_dir()
 
     def delete_instance(self, vm_id: UUID) -> None:
-        raise NotImplementedError("Provisioner: 플랫폼 인스턴스 삭제 연동 전 (S15P31E110-115, P2 합의 필요)")
+        raise NotImplementedError("Provisioner: xen 모드는 조회 전용. 보관(retire)은 XENOVA_DRIVER=platform 에서 지원한다")

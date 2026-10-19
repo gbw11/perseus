@@ -252,7 +252,7 @@ def test_create_running_vm_is_409(client, manager):
 
 
 def test_platform_assigns_ip_without_dom0_manager_hint(client, manager):
-    """리뷰 반영: IP 정책은 플랫폼이 단독 소유한다. dom0-manager 는 ipv4 를 보내지 않고 플랫폼이 쓰이지 않은 주소를 고른다."""
+    """IP 정책은 플랫폼이 단독 소유한다. dom0-manager 는 ipv4 를 보내지 않고 플랫폼이 쓰이지 않은 주소를 고른다."""
     manager.register(VM_B, ipv4="192.168.77.2")
     created = client.post("/api/v1/vms", json=create_body(VM_A, template_id=TEMPLATE["template_id"], template_version="1.0.0"))
     assert created.status_code == 201
@@ -307,7 +307,7 @@ def test_unknown_template_is_400(client):
 
 
 def test_platform_invalid_spec_is_400(client, manager):
-    """리뷰 반영: 플랫폼의 INVALID_SPEC 은 501 로 바꾸지 않고 400 InvalidArgument 그대로다 (플랫폼은 vm_id 를 필수로 받는다)."""
+    """플랫폼의 INVALID_SPEC 은 400 InvalidArgument 다 (플랫폼은 vm_id 를 필수로 받으므로 501 로 바꿀 이유가 없다)."""
     manager.fail_create = {"code": "INVALID_SPEC", "message": "invalid VM name"}
     rejected = client.post("/api/v1/vms", json=create_body(VM_A, template_id=TEMPLATE["template_id"], template_version="1.0.0"))
     assert rejected.status_code == 400, rejected.text
@@ -326,7 +326,7 @@ def test_instance_paths_use_platform_internal_name(manager):
 
 
 def test_health_stays_within_query_budget_while_platform_is_busy():
-    """리뷰 반영: xl info 5초 + Manager 대기 5초 = 10초는 Spring 의 6초 대기를 넘긴다. health 는 전체 예산 안에서 끝낸다."""
+    """xl info 5초 + Manager 대기 5초 = 10초는 Spring 의 6초 대기를 넘긴다. health 는 전체 예산 안에서 끝낸다."""
     import threading
     import time
 
@@ -380,7 +380,7 @@ def test_load_manager_without_module_is_503():
 
 
 def test_serialized_manager_never_overlaps_calls():
-    """리뷰 반영: Manager 는 요청별 상태를 인스턴스 변수에 두므로 call 이 겹치면 안 된다. 스레드 8개가 동시에 불러도 내부 동시성은 1 이다."""
+    """Manager 는 요청별 상태를 인스턴스 변수에 두므로 call 이 겹치면 안 된다. 스레드 8개가 동시에 불러도 내부 동시성은 1 이다."""
     import threading
     import time
     from concurrent.futures import ThreadPoolExecutor
@@ -437,7 +437,7 @@ def test_build_driver_wraps_manager_and_provisioner_reuses_it(monkeypatch):
 
 
 def test_serialized_manager_busy_timeout_is_retryable_503():
-    """리뷰 반영: 정지가 최대 90초 잠금을 쥐는 동안 다른 요청이 무한정 줄을 서면 안 된다. 대기 한도를 넘기면 플랫폼 잠금
+    """정지가 최대 90초 잠금을 쥐는 동안 다른 요청이 무한정 줄을 서면 안 된다. 대기 한도를 넘기면 플랫폼 잠금
     충돌과 같은 OPERATION_IN_PROGRESS 봉투 → 503 PlatformUnavailable(재시도 가능). health 는 바쁜 것을 장애로 보지 않는다."""
     import threading
 
