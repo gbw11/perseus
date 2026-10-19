@@ -17,7 +17,7 @@ dom0에서 도는 Python 제어 서비스입니다. Spring 관리 서버가 호�
 ```bash
 cd services/dom0-manager
 python -m pip install -e .[test]
-PERSEUS_DRIVER=mock PERSEUS_MOCK_SAMPLES=1 python -m dom0_manager
+XENOVA_DRIVER=mock XENOVA_MOCK_SAMPLES=1 python -m dom0_manager
 # → http://127.0.0.1:8081/docs 에서 내부 API 문서 확인
 ```
 
@@ -28,30 +28,30 @@ curl -s -X POST localhost:8081/api/v1/vms -H 'content-type: application/json' \
 curl -i -X POST localhost:8081/api/v1/vms/11111111-1111-4111-8111-111111111111/stop   # 204
 ```
 
-`PERSEUS_MOCK_SAMPLES=1`이면 배포판 3종 샘플 VM이 미리 떠 있습니다. vm_id는 고정(uuid5)이라 그대로 써도 됩니다.
+`XENOVA_MOCK_SAMPLES=1`이면 배포판 3종 샘플 VM이 미리 떠 있습니다. vm_id는 고정(uuid5)이라 그대로 써도 됩니다.
 
 | 이름 | vm_id | vcpus / memory_mib |
 | --- | --- | --- |
-| alpine-drive | `59b3e0d6-499d-517e-ab0a-27e3a4d56e89` | 1 / 256 |
-| debian-safety | `c552c812-a816-534f-932b-fd4023d352b7` | 1 / 512 |
-| ubuntu-infotainment | `d97823ca-68a2-5c6a-8e4e-f353071064bd` | 2 / 512 |
+| alpine-drive | `fe629065-6ee9-5f0f-ab42-38eb60186d85` | 1 / 256 |
+| debian-safety | `b926423f-e3e9-5e1e-95f8-6caf6d91a63e` | 1 / 512 |
+| ubuntu-infotainment | `96d76964-4eaa-5700-a642-747aa91f0cc0` | 2 / 512 |
 
-값은 `uuid5(NAMESPACE_URL, "perseus/mock/<이름>")`이며 `dom0_manager.drivers.mock.SAMPLE_VMS`에 있습니다.
+값은 `uuid5(NAMESPACE_URL, "xenova/mock/<이름>")`이며 `dom0_manager.drivers.mock.SAMPLE_VMS`에 있습니다.
 
 ## 설정 (환경변수)
 
 | 변수 | 기본값 | 의미 |
 | --- | --- | --- |
-| `PERSEUS_DRIVER` | `mock` | `mock` 또는 `xen` |
-| `PERSEUS_HOST` / `PERSEUS_PORT` | `127.0.0.1` / `8081` | 바인드 주소. dom0 밖으로 열지 않습니다 |
-| `PERSEUS_XL_QUERY_TIMEOUT` | `5` | 조회용 xl 호출 한도(초). Spring 조회 대기 6초 안 |
-| `PERSEUS_XL_COMMAND_TIMEOUT` | `95` | 명령용 xl 호출 한도(초) |
-| `PERSEUS_SHUTDOWN_GRACE` | `90` | 정상 종료 대기(초). 계약 v1.1: 시간이 지나도 자동 강제 종료하지 않고 실패로 보고 |
-| `PERSEUS_SERVICE_TOKEN` | (없음) | 설정하면 `/healthz`를 포함한 모든 요청에 `Authorization: Bearer <토큰>`을 요구(401). Tailscale 바인드 배포에서는 필수 |
-| `PERSEUS_HOST_CPUS` | `4` | vcpus 상한 기본값. `xl info`의 nr_cpus가 있으면 그 값 우선 |
-| `PERSEUS_INSTANCE_ROOT` | `/srv/perseus/instances` | 인스턴스 루트 (플랫폼 도구와 동일) |
-| `PERSEUS_MOCK_SAMPLES` | `0` | Mock 샘플 VM 3종 미리 생성 |
-| `PERSEUS_LOG_LEVEL` | `INFO` | |
+| `XENOVA_DRIVER` | `mock` | `mock` 또는 `xen` |
+| `XENOVA_HOST` / `XENOVA_PORT` | `127.0.0.1` / `8081` | 바인드 주소. dom0 밖으로 열지 않습니다 |
+| `XENOVA_XL_QUERY_TIMEOUT` | `5` | 조회용 xl 호출 한도(초). Spring 조회 대기 6초 안 |
+| `XENOVA_XL_COMMAND_TIMEOUT` | `95` | 명령용 xl 호출 한도(초) |
+| `XENOVA_SHUTDOWN_GRACE` | `90` | 정상 종료 대기(초). 계약 v1.1: 시간이 지나도 자동 강제 종료하지 않고 실패로 보고 |
+| `XENOVA_SERVICE_TOKEN` | (없음) | 설정하면 `/healthz`를 포함한 모든 요청에 `Authorization: Bearer <토큰>`을 요구(401). Tailscale 바인드 배포에서는 필수 |
+| `XENOVA_HOST_CPUS` | `4` | vcpus 상한 기본값. `xl info`의 nr_cpus가 있으면 그 값 우선 |
+| `XENOVA_INSTANCE_ROOT` | `/srv/xenova/instances` | 인스턴스 루트 (플랫폼 도구와 동일) |
+| `XENOVA_MOCK_SAMPLES` | `0` | Mock 샘플 VM 3종 미리 생성 |
+| `XENOVA_LOG_LEVEL` | `INFO` | |
 
 ## 구조
 
@@ -98,7 +98,7 @@ tests/
 
 ## Xen 모드 현황
 
-`PERSEUS_DRIVER=xen`에서 지금 되는 것은 `GET /healthz`, `GET /api/v1/vms`, `GET /api/v1/vms/{vm_id}`입니다. `xl list`로 상태를, `xl list -l`의 `config.c_info.uuid`로 vm_id를 읽습니다(플랫폼 도구와 같은 방식). 생성·정지·삭제는 501을 내며 S15P31E110-115에서 구현합니다.
+`XENOVA_DRIVER=xen`에서 지금 되는 것은 `GET /healthz`, `GET /api/v1/vms`, `GET /api/v1/vms/{vm_id}`입니다. `xl list`로 상태를, `xl list -l`의 `config.c_info.uuid`로 vm_id를 읽습니다(플랫폼 도구와 같은 방식). 생성·정지·삭제는 501을 내며 S15P31E110-115에서 구현합니다.
 
 ## 테스트
 

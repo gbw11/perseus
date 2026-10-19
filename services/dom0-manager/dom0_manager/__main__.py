@@ -1,4 +1,4 @@
-"""`python -m dom0_manager` 로 서비스를 띄운다. 설정은 환경변수(PERSEUS_*)에서 읽는다."""
+"""`python -m dom0_manager` 로 서비스를 띄운다. 설정은 환경변수(XENOVA_*)에서 읽는다."""
 
 import uvicorn
 
