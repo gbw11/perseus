@@ -32,11 +32,7 @@ def build_driver(settings: Settings) -> Driver:
         return XenDriver(_xl(settings))
     from .platform import PlatformDriver, load_manager
 
-    return PlatformDriver(
-        load_manager(settings.platform_lib, busy_timeout_s=settings.platform_busy_timeout_s),
-        _xl(settings),
-        health_budget_s=settings.xl_query_timeout_s,
-    )
+    return PlatformDriver(load_manager(settings.platform_lib, busy_timeout_s=settings.platform_busy_timeout_s), _xl(settings))
 
 
 def build_provisioner(settings: Settings, driver: Driver | None = None) -> Provisioner:

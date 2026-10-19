@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from uuid import UUID
 
@@ -36,7 +37,8 @@ class FakeManager:
     실제 플랫폼처럼 create 는 vm_id 를 필수로 받고, 내부 실행 이름(vm-<hex>)과 Linux IP(192.168.77.2..pool_end) 를 스스로 고르며,
     IP 가 바닥나면 IP_POOL_EXHAUSTED 를 낸다. fail_create 는 다음 create 한 번만 그 오류로 실패시킨다."""
 
-    data = Path("/srv/xenova")
+    data = Path(tempfile.mkdtemp(prefix="dom0-fake-registry-"))  # /healthz 가 보는 registry 저장소 (instances/ 가 있어야 정상)
+    (data / "instances").mkdir()
 
     def __init__(self, *, templates=(TEMPLATE, ZEPHYR), pool_end=99):
         self.templates = list(templates)
@@ -204,12 +206,15 @@ def test_stop_is_idempotent_and_maps_timeout(driver, manager):
     assert manager.calls[-1][1]["force"] is True
 
 
-def test_health_requires_xl_and_registry(driver, manager):
+def test_health_requires_xl_and_registry_storage(driver, manager, tmp_path):
+    """health 는 xl info 와 registry 디렉터리 존재만 본다. Manager 는 부르지 않으므로 registry 내용 오류는 목록 호출이 알린다."""
     assert driver.health() is True
     manager.fail_next = {"code": "STORAGE_UNAVAILABLE", "message": "registry unavailable"}
+    assert driver.health() is True and manager.fail_next is not None  # Manager 를 부르지 않았다
+    manager.fail_next = None
+    manager.data = tmp_path  # instances/ 없음 = 저장소가 마운트되지 않음
     assert driver.health() is False
-    manager.fail_next = {"code": "OPERATION_IN_PROGRESS", "message": "another platform operation is in progress"}
-    assert driver.health() is True  # 다른 작업이 잠금을 쥔 것은 장애가 아니다
+    manager.data = FakeManager.data
     broken = PlatformDriver(manager, Xl(FakeRunner({})))
     assert broken.health() is False
 
@@ -319,14 +324,15 @@ def test_instance_paths_use_platform_internal_name(manager):
     manager.register(VM_A, name="web", vcpus=1, memory_mib=256)
     provisioner = PlatformProvisioner(manager)
     paths = provisioner.ensure_instance(VM_A, TEMPLATE["template_id"], "1.0.0", vcpus=1, memory_mib=256)
-    assert paths.root == Path("/srv/xenova") / "instances" / f"vm-{VM_A.hex}"
+    assert paths.root == Path(manager.data) / "instances" / f"vm-{VM_A.hex}"
     del manager.registry[str(VM_A)]["configuration"]["id"]
     with pytest.raises(DriverError):
         provisioner.ensure_instance(VM_A, TEMPLATE["template_id"], "1.0.0", vcpus=1, memory_mib=256)
 
 
-def test_health_stays_within_query_budget_while_platform_is_busy():
-    """xl info 5초 + Manager 대기 5초 = 10초는 Spring 의 6초 대기를 넘긴다. health 는 전체 예산 안에서 끝낸다."""
+def test_health_does_not_wait_for_manager_or_slow_list():
+    """xl info 5초 + Manager 잠금 대기 + xl list 두 번은 Spring 의 6초 대기를 넘길 수 있다. health 는 Manager 를 부르지 않으므로
+    다른 요청이 잠금을 쥐고 있어도, 잠금을 얻은 뒤의 list 가 느려도 바로 돌아온다."""
     import threading
     import time
 
@@ -341,21 +347,26 @@ def test_health_stays_within_query_budget_while_platform_is_busy():
         if action == "stop":
             entered.set()
             release.wait(5)
+        if action == "list":
+            time.sleep(2)  # 잠금을 얻은 뒤의 xl list 지연
         return original(action, spec, **kwargs)
 
     inner.call = slow_call
-    wrapped = SerializedManager(inner, busy_timeout_s=5.0)  # 일반 호출은 5초까지 기다리지만 health 는 예산 0.3초
-    driver = PlatformDriver(wrapped, Xl(FakeRunner({("xl", "info"): XL_INFO})), health_budget_s=0.3)
+    wrapped = SerializedManager(inner, busy_timeout_s=5.0)
+    driver = PlatformDriver(wrapped, Xl(FakeRunner({("xl", "info"): XL_INFO})))
     holder = threading.Thread(target=wrapped.call, args=("stop", {"vm_id": str(VM_A), "force": False}), kwargs={"execute": True})
     holder.start()
     try:
         assert entered.wait(2)
         started = time.monotonic()
-        assert driver.health() is True  # 바쁨은 장애가 아니다
+        assert driver.health() is True
         assert time.monotonic() - started < 1.0
     finally:
         release.set()
         holder.join(5)
+    started = time.monotonic()
+    assert driver.health() is True  # 잠금이 비어 있어도 느린 list 를 기다리지 않는다
+    assert time.monotonic() - started < 1.0
 
 
 def test_delete_requires_stopped_and_retires(client, manager):
@@ -433,7 +444,6 @@ def test_build_driver_wraps_manager_and_provisioner_reuses_it(monkeypatch):
     assert isinstance(driver.manager, SerializedManager)
     assert provisioner.manager is driver.manager
     assert driver.manager.busy_timeout_s == 0.5
-    assert driver.health_budget_s == settings.xl_query_timeout_s
 
 
 def test_serialized_manager_busy_timeout_is_retryable_503():

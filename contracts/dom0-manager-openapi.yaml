@@ -174,7 +174,8 @@ paths:
       operationId: healthz
       summary: dom0-manager 와 Xen 응답 여부
       description: >-
-        dom0-manager 프로세스는 살아 있지만 Xen(xl) 이 응답하지 않는 상황을 구분한다.
+        dom0-manager 프로세스는 살아 있지만 Xen(xl) 이 응답하지 않거나 registry 저장소가 없는 상황을 구분한다.
+        플랫폼 Manager 를 거치지 않으므로(잠금·xl list 실행 시간) 조회 한도 안에 응답한다.
         Spring 이 dom0-manager 접속 상태를 판단할 때 쓴다 (자동 복구 주체는 계약 13장 미확정).
       x-driver-timeout-seconds: 5
       responses:
