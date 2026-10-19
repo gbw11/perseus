@@ -12,7 +12,7 @@ dom0에서 도는 Python 제어 서비스입니다. Spring 관리 서버가 호�
 
 ## 실행 (Mock 모드)
 
-보드·Xen 없이 바로 띄울 수 있습니다. 수환·송하 연동용입니다.
+보드·Xen 없이 바로 띄울 수 있습니다. 백엔드·프론트엔드 연동용입니다.
 
 ```bash
 cd services/dom0-manager
@@ -98,7 +98,7 @@ tests/
 
 ## platform 모드 (보드 실제 연동, S15P31E110-115)
 
-`PERSEUS_DRIVER=platform`은 신영의 플랫폼 관리 라이브러리 `xenova_management.Manager`를 직접 import해서 registry(`/srv/xenova/instances`)와 Xen을 함께 다룹니다. xl 명령을 직접 부르지 않습니다(`xl info`만 자원 조회용).
+`PERSEUS_DRIVER=platform`은 플랫폼 파트의 관리 라이브러리 `xenova_management.Manager`를 직접 import해서 registry(`/srv/xenova/instances`)와 Xen을 함께 다룹니다. xl 명령을 직접 부르지 않습니다(`xl info`만 자원 조회용).
 
 ```bash
 # 보드(dom0)에서
@@ -125,7 +125,7 @@ PERSEUS_DRIVER=platform PERSEUS_PLATFORM_LIB=/usr/lib/xenova PERSEUS_SERVICE_TOK
 
 **막힌 것**: 플랫폼 `create`가 아직 `spec['vm_id']`를 받지 않고 보드에서 UUID를 발급합니다. 팀 결정(Spring 발급)과 달라서, 새 VM 생성은 플랫폼이 `vm_id`를 받을 때까지 501을 냅니다. 조회·시작·정지·보관은 영향 없습니다.
 
-테스트: `tests/test_platform_driver.py`는 봉투를 흉내 내는 FakeManager, `tests/test_platform_integration.py`는 저장소의 실제 `xenova_management`를 신영 픽스처(FakeXen·임시 registry)로 돌립니다.
+테스트: `tests/test_platform_driver.py`는 봉투를 흉내 내는 FakeManager, `tests/test_platform_integration.py`는 저장소의 실제 `xenova_management`를 플랫폼 파트 픽스처(FakeXen·임시 registry)로 돌립니다.
 
 ## Xen 모드 현황
 
