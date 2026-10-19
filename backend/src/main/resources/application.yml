@@ -60,6 +60,8 @@ perseus:
   # 에이전트 상태(ONLINE/STALE/OFFLINE) 변화를 이벤트로 남기기 위해 확인하는 주기
   event:
     agent-status-check-interval-ms: ${EVENT_AGENT_STATUS_CHECK_INTERVAL_MS:5000}
+    # 사용자 조작 없이 바뀐 VM 상태(크래시 등)를 찾으려고 dom0-manager 목록을 조회하는 주기
+    vm-state-check-interval-ms: ${EVENT_VM_STATE_CHECK_INTERVAL_MS:5000}
   report:
     os-evidence:
       required-os-ids:

@@ -38,8 +38,9 @@ perseus:
     stale-after: 15s
     offline-after: 30s
   event:
-    # Tests call AgentStatusWatcher.check() themselves.
+    # Tests call AgentStatusWatcher.check() and VmStateWatcher.check() themselves.
     agent-status-check-interval-ms: 3600000
+    vm-state-check-interval-ms: 3600000
   report:
     os-evidence:
       required-os-ids:

@@ -2,6 +2,7 @@ package com.perseus.backend.vm.application;
 
 import com.perseus.backend.common.error.ApiException;
 import com.perseus.backend.event.application.EventRecorder;
+import com.perseus.backend.event.application.VmStateTracker;
 import com.perseus.backend.template.application.TemplateCatalog;
 import com.perseus.backend.template.domain.VmTemplate;
 import com.perseus.backend.vm.domain.CreateVmCommand;
@@ -17,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -29,13 +31,12 @@ public class VmService {
     // dom0-manager rejected the request itself, so no domain or disk was created for this vm_id.
     private static final Set<String> REJECTED_BY_DOM0 = Set.of("INVALID_ARGUMENT", "INSUFFICIENT_RESOURCES");
     private static final String DOMAIN_EXISTS = "VM_ALREADY_EXISTS";
-    private static final String CAUSE_USER_START = "user_start";
-    private static final String CAUSE_USER_STOP = "user_stop";
 
     private final VmControlPort vmControlPort;
     private final VmRecordRepository vmRecordRepository;
     private final TemplateCatalog templateCatalog;
     private final EventRecorder eventRecorder;
+    private final VmStateTracker stateTracker;
     private final Clock clock;
 
     public VmService(
@@ -43,11 +44,13 @@ public class VmService {
             VmRecordRepository vmRecordRepository,
             TemplateCatalog templateCatalog,
             EventRecorder eventRecorder,
+            VmStateTracker stateTracker,
             Clock clock) {
         this.vmControlPort = vmControlPort;
         this.vmRecordRepository = vmRecordRepository;
         this.templateCatalog = templateCatalog;
         this.eventRecorder = eventRecorder;
+        this.stateTracker = stateTracker;
         this.clock = clock;
     }
 
@@ -82,25 +85,31 @@ public class VmService {
             if (!existing.hasSameSpec(command)) {
                 throw new ApiException(HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "이미 사용 중인 VM 이름입니다.");
             }
-            return new CreateResult(ensureRunning(existing), false);
+            return new CreateResult(underOperation(existing.getVmId(), () -> ensureRunning(existing)), false);
         }
 
         VmRecord record = vmRecordRepository.save(new VmRecord(UUID.randomUUID().toString(), command, clock.instant()));
+        return new CreateResult(underOperation(record.getVmId(), () -> launchNew(record)), true);
+    }
+
+    private Vm launchNew(VmRecord record) {
+        Vm vm;
         try {
-            Vm vm = Vm.of(record, vmControlPort.launch(record.getVmId(), record.launchSpec()));
-            eventRecorder.vmCreated(record);
-            return new CreateResult(vm, true);
+            vm = Vm.of(record, vmControlPort.launch(record.getVmId(), record.launchSpec()));
         } catch (ApiException exception) {
-            if (DOMAIN_EXISTS.equals(exception.getCode())) {
-                eventRecorder.vmCreated(record);
-                return new CreateResult(get(record.getVmId()), true);
+            if (!DOMAIN_EXISTS.equals(exception.getCode())) {
+                // On a timeout the domain may still be coming up, so the record is kept and a retry can recover it.
+                if (REJECTED_BY_DOM0.contains(exception.getCode())) {
+                    vmRecordRepository.delete(record);
+                }
+                throw exception;
             }
-            // On a timeout the domain may still be coming up, so the record is kept and a retry can recover it.
-            if (REJECTED_BY_DOM0.contains(exception.getCode())) {
-                vmRecordRepository.delete(record);
-            }
-            throw exception;
+            vm = get(record.getVmId());
         }
+        eventRecorder.vmCreated(record);
+        // vm.created already tells the story; the state is only remembered so polling does not repeat it.
+        stateTracker.remember(record.getVmId(), vm.state());
+        return vm;
     }
 
     // There is no start endpoint: the same vm_id is launched again and its preserved disk is reused.
@@ -108,32 +117,51 @@ public class VmService {
     // recovery, so the user stops it first and starts again.
     public Vm start(String vmId) {
         VmRecord record = findRecord(vmId);
-        VmRuntime runtime = vmControlPort.find(vmId).orElse(null);
-        if (runtime == null) {
-            return launch(record);
-        }
-        rejectUnstartable(runtime.state());
-        return Vm.of(record, runtime);
+        return underOperation(vmId, () -> {
+            VmRuntime runtime = vmControlPort.find(vmId).orElse(null);
+            if (runtime == null) {
+                return launch(record);
+            }
+            rejectUnstartable(runtime.state());
+            return Vm.of(record, runtime);
+        });
     }
 
     // The state is read first so the event says what was stopped; a VM that is already off records nothing.
     public Vm stop(String vmId) {
         VmRecord record = findRecord(vmId);
-        VmState before = vmControlPort.find(vmId).map(VmRuntime::state).orElse(null);
-        if (before == null) {
+        return underOperation(vmId, () -> {
+            VmState before = vmControlPort.find(vmId).map(VmRuntime::state).orElse(null);
+            if (before == null) {
+                return Vm.of(record, null);
+            }
+            vmControlPort.stop(vmId);
+            stateTracker.changedByUser(vmId, before, VmState.STOPPED, VmStateTracker.CAUSE_USER_STOP);
             return Vm.of(record, null);
-        }
-        vmControlPort.stop(vmId);
-        eventRecorder.vmStateChanged(vmId, before, VmState.STOPPED, CAUSE_USER_STOP);
-        return Vm.of(record, null);
+        });
     }
 
     // dom0-manager deletes the disk as well, so the VM cannot be started again and its record is removed.
     public void destroy(String vmId) {
         String name = vmRecordRepository.findById(vmId).map(VmRecord::getName).orElse(null);
-        vmControlPort.destroy(vmId);
-        vmRecordRepository.deleteById(vmId);
+        underOperation(vmId, () -> {
+            vmControlPort.destroy(vmId);
+            vmRecordRepository.deleteById(vmId);
+            stateTracker.forget(vmId);
+            return null;
+        });
         eventRecorder.vmDeleted(vmId, name);
+    }
+
+    // Marks the VM busy so the periodic state check does not report this operation's
+    // intermediate states as detected changes.
+    private <T> T underOperation(String vmId, Supplier<T> operation) {
+        stateTracker.beginOperation(vmId);
+        try {
+            return operation.get();
+        } finally {
+            stateTracker.endOperation(vmId);
+        }
     }
 
     private Vm ensureRunning(VmRecord record) {
@@ -168,7 +196,7 @@ public class VmService {
             }
             vm = Vm.of(record, vmControlPort.find(record.getVmId()).orElse(null));
         }
-        eventRecorder.vmStateChanged(record.getVmId(), VmState.STOPPED, vm.state(), CAUSE_USER_START);
+        stateTracker.changedByUser(record.getVmId(), VmState.STOPPED, vm.state(), VmStateTracker.CAUSE_USER_START);
         return vm;
     }
 
