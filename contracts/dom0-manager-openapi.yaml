@@ -3,13 +3,22 @@ info:
   title: Xenova dom0 manager API
   version: 1.0.0
   description: >-
-    Spring 요청 DTO와 Xenova 공통 Manager를 연결하는 내부 HTTP 계약의 생성/조회 모델.
-    현재 관리 규칙은 docs/build-guides/xenova-vm-management.md 를 따른다.
-    UUID는 Spring이 발급하며 플랫폼의 영구 registry/journal에서 멱등성을 판정한다.
-    HTTP 어댑터 구현과 제어/삭제 엔드포인트의 연결은 이 문서만으로 완료되지 않는다.
+    Spring Boot 관리 서버와 Python dom0-manager 사이의 내부 계약.
+    기준 문서는 docs/contracts/vm-api-contract-v1.md 이며, 이 파일은 HTTP 계약의 기계 판독용 원본이다.
+    플랫폼 공통 Manager/CLI의 JSON envelope와 동일한 스키마가 아니다.
+    생성·시작·등록 목록·예약 IP·수명주기 전달의 계층 경계는 기준 문서 1.4절과 13장을 따른다.
+    서비스는 보드의 Tailscale 주소에 바인딩하고 모든 엔드포인트에서 Bearer 서비스 토큰을 검사한다.
+    Spring 이 발급한 vm_id 를 플랫폼 registry 와 Xen UUID의 영구 식별자로 사용한다.
+    FastAPI 기본 422(HTTPValidationError)는 400 InvalidArgument 로 정규화하고, 생성 스키마에서
+    422 응답과 HTTPValidationError 모델을 제거해야 이 파일과의 차이 검사가 통과한다.
 servers:
-  - url: http://127.0.0.1:8081
-    description: dom0 localhost
+  - url: http://{tailscale_address}:8081
+    description: dom0 Tailscale address
+    variables:
+      tailscale_address:
+        default: 100.64.0.1
+security:
+  - ServiceToken: []
 tags:
   - name: VMs
   - name: Health
@@ -18,9 +27,10 @@ paths:
     get:
       tags: [VMs]
       operationId: listVms
-      summary: 등록된 VM 목록
+      summary: Xen 에 존재하는 도메인 목록
       description: >-
-        영구 등록된 VM을 정지 상태까지 포함해 반환한다. 보관/삭제 이력은 공통 관리 필터로 조회한다.
+        Xen 에 현재 존재하는 도메인만 반환한다. 종료된 VM 을 포함한 전체 목록은
+        Spring 이 자기 레코드와 조합해 만든다.
       x-driver-timeout-seconds: 5
       responses:
         '200':
@@ -34,12 +44,15 @@ paths:
     post:
       tags: [VMs]
       operationId: createVm
-      summary: 정지 VM 등록
+      summary: VM 생성 또는 재시작
       description: >-
-        외부 vm_id를 영구 UUID와 Xen UUID로 그대로 사용한다. 표시 이름은 경로와 분리한다.
-        같은 UUID/최초 명세는 기존 작업과 현재 설정을 반환하고 다른 명세는 충돌이다.
-        Linux IP는 플랫폼이 잠금 안에서 예약한다. Zephyr ipv4는 null이다.
-        생성은 실행과 분리하며 보관/삭제된 UUID를 되살리지 않는다.
+        vm_id 의 디스크가 있으면 재사용하고 없으면 template_id/template_version 으로 새로 만든다.
+        디스크 경로는 vm_id 에서 파생한다. 꺼진 VM 의 재시작은 같은 vm_id 로 이 엔드포인트를
+        다시 호출하는 것이며 별도 start 엔드포인트는 없다.
+        Spring 불변조건: 같은 vm_id 에는 항상 같은 생성 명세를 보낸다.
+        실행 도메인이 있으면 명세 비교 없이 409 VMExists 를 반환하며 Spring 이 자기 명세와 대조한다.
+        플랫폼 공통 create 는 정지 등록이므로 실제 도메인 시작은 별도 start 연결이 필요하다.
+        Linux IP 는 플랫폼 전역 잠금 안에서 자동 할당한다.
       x-driver-timeout-seconds: 30
       requestBody:
         required: true
@@ -48,14 +61,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateVmRequest'
       responses:
-        '200':
-          description: 동일 UUID·최초 명세의 재전달
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Vm'
         '201':
-          description: 정지 인스턴스 등록됨
+          description: 도메인 생성됨 (state 는 running)
           content:
             application/json:
               schema:
@@ -86,14 +93,18 @@ paths:
     delete:
       tags: [VMs]
       operationId: deleteVm
-      summary: VM 삭제 요청 (공통 retire/purge 정책과 별도 매핑 필요)
+      summary: 정지된 VM 숨김 보관
       description: >-
-        공통 delete는 정지 VM 보관(retire)이며 purge는 별도 승인/세대/작업 키가 필요하다.
-        이 엔드포인트를 자동 강제 종료·영구 삭제로 연결하지 않는다.
-      x-driver-timeout-seconds: 30
+        실행 중인 VM 은 409 로 거부한다. 정지된 VM 은 retire 생명주기로 숨김 보관하며
+        tombstone 과 generation 을 유지한다. 같은 디스크를 restore 하면 기존 vm_id 를 유지한다.
+      x-driver-timeout-seconds: 90
       responses:
         '204':
-          description: 도메인과 디스크가 모두 없는 상태
+          description: VM 이 숨김 보관됨
+        '404':
+          $ref: '#/components/responses/VMNotFound'
+        '409':
+          $ref: '#/components/responses/InvalidState'
   /api/v1/vms/{vm_id}/stop:
     parameters:
       - $ref: '#/components/parameters/VmId'
@@ -102,10 +113,12 @@ paths:
       operationId: stopVm
       summary: 정상 종료 (디스크 보존)
       description: >-
-        현재 공통 stop은 최대 90초 동안 도메인 제거를 동기 확인하고 Linux를 자동 강제 종료하지 않는다.
-        Zephyr 개별 종료는 명시적 force가 필요하다. HTTP 성공 본문/타임아웃 연결은
-        docs/dom0-backend-http-contract-v1.md 의 현재 코드 차이를 함께 확인한다.
-      x-driver-timeout-seconds: 30
+        xl shutdown 으로 graceful shutdown 을 요청하고 도메인이 소멸할 때까지 기다린다.
+        디스크는 보존되므로 같은 vm_id 로 POST /api/v1/vms 를 호출하면 재시작된다.
+        멱등성은 목표 상태 기준이다. 없는 VM 에 대한 호출도 204 다.
+        호출은 동기 방식이며 최대 90초까지 소멸을 기다린다. 일반 stop 은 시간 초과 시
+        자동으로 강제 종료하지 않는다. 강제 종료는 명시적인 force 정책에서만 수행한다.
+      x-driver-timeout-seconds: 90
       responses:
         '204':
           description: 도메인이 없는 상태 (디스크 보존)
@@ -116,7 +129,7 @@ paths:
       summary: dom0-manager 와 Xen 응답 여부
       description: >-
         dom0-manager 프로세스는 살아 있지만 Xen(xl) 이 응답하지 않는 상황을 구분한다.
-        2차 RecoveryService 가 사용한다.
+        Spring 이 dom0-manager 접속 상태를 판단할 때 쓴다 (자동 복구 주체는 계약 13장 미확정).
       x-driver-timeout-seconds: 5
       responses:
         '200':
@@ -132,13 +145,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/Health'
 components:
+  securitySchemes:
+    ServiceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque service token
   parameters:
     VmId:
       name: vm_id
       in: path
       required: true
       description: >-
-        Spring 이 생성하는 불변 UUID. registry.uuid 및 Xen 설정 uuid와 같은 값이다.
+        Spring 이 생성하는 불변 UUID. Xen 도메인에서 역조회할 수 있어야 한다
+        (도메인 설정의 uuid 에 기록하고 xl list -l 의 config.c_info.uuid 로 역조회. 계약 13장).
       schema:
         type: string
         format: uuid
@@ -146,34 +165,20 @@ components:
     VmState:
       type: string
       description: >-
-        HTTP 축약 상태다. 공통 Manager의 xen_state와 앱 준비 unknown은 별개로 유지한다.
-        blocked는 running, dying은 stopping, 도메인 부재는 shutdown으로 매핑한다.
-        blocked는 정상 I/O 대기이며 장애나 복구 사유가 아니다.
-      enum: [running, stopping, shutdown, paused, crashed]
+        전부 xl list 에서 읽히는 실제 Xen 상태다. API 가 만드는 상태는 running 뿐이고 나머지는
+        조회로만 관찰된다. 매핑: r,b → running / s,d → stopping / p → paused / c → crashed.
+        b(blocked) 는 I/O 대기 중인 정상 상태이며 장애가 아니다. "꺼짐"은 도메인의 부재다.
+      enum: [running, stopping, paused, crashed]
     Vm:
       type: object
       description: >-
-        영구 설정과 생성 출처 및 Xen 관측을 연결한 VM이다. IP는 배정 주소이며 실제 획득 증거가 아니다.
+        Xen 에서 직접 읽히는 필드만 담는다. name, template_id, template_version 은 Spring 이 보유한다.
       additionalProperties: false
-      required: [vm_id, name, state, template_id, template_version, guest_kind, vcpus, memory_mib, ipv4]
+      required: [vm_id, state, vcpus, memory_mib]
       properties:
         vm_id:
           type: string
           format: uuid
-        name:
-          type: string
-          minLength: 1
-          maxLength: 63
-        template_id:
-          type: [string, 'null']
-        template_version:
-          type: [string, 'null']
-        guest_kind:
-          type: string
-          enum: [linux, zephyr]
-        ipv4:
-          type: [string, 'null']
-          description: Linux 배정 주소. Zephyr는 null
         state:
           $ref: '#/components/schemas/VmState'
         vcpus:
@@ -185,20 +190,15 @@ components:
     CreateVmRequest:
       type: object
       description: >-
-        정확한 공개 카탈로그 ID·버전과 표시 이름을 전달한다. guest_kind는 카탈로그에서,
-        Linux IP는 플랫폼에서 결정한다. 외부 idempotency_key는 요구하지 않는다.
+        name 은 Spring 이 단독으로 검증·보유하므로 보내지 않는다. 템플릿별 min_memory_mib 하한은
+        Spring 이 검사하고, dom0-manager 는 공통 범위만 검사한다.
       additionalProperties: false
-      required: [vm_id, name, template_id, template_version, vcpus, memory_mib]
+      required: [vm_id, template_id, template_version, vcpus, memory_mib]
       properties:
         vm_id:
           type: string
           format: uuid
           description: Spring 이 한 번 생성해 재시도에도 재사용한다
-        name:
-          type: string
-          minLength: 1
-          maxLength: 63
-          description: 한글·공백을 포함하는 표시 이름. 경로/Xen 이름으로 사용하지 않는다
         template_id:
           type: string
           minLength: 1
@@ -212,9 +212,9 @@ components:
           maximum: 4
         memory_mib:
           type: integer
-          minimum: 16
-          maximum: 8192
-          description: Linux 128..8192, Zephyr 16 고정. 카탈로그에서 종류별 최종 검사
+          minimum: 128
+          maximum: 1024
+          description: 배수 제약 없음. 64 단위는 화면 입력 규칙일 뿐이다
     ResourceError:
       type: object
       additionalProperties: false
@@ -235,7 +235,8 @@ components:
         code:
           type: string
           description: >-
-            InvalidState 는 보관/삭제 UUID의 create 또는 수명주기 충돌을 포함한다.
+            InvalidState 는 실행 중인 VM 을 DELETE 할 때 반환한다 (409, 계약 4.4).
+            분류되지 않은 실패의 500 DriverError 는 아직 이 목록에 없다 (계약 8.1·13장).
           enum:
             - InvalidArgument
             - VMNotFound
@@ -279,8 +280,14 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    InvalidState:
+      description: 현재 VM 생명주기에서 요청을 수행할 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     InsufficientResources:
-      description: IP 풀 고갈 또는 저장공간 등 자원 부족. resource는 선택 정보다
+      description: xl info 의 free_memory 기준 가용 자원 부족. resource 에 name/requested/available
       content:
         application/json:
           schema:
