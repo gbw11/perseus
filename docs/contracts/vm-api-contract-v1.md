@@ -184,14 +184,14 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 
 | 메서드 | 경로 | 성공 응답 | 오류 |
 |---|---|---|---|
-| `GET` | `/api/v1/vms` | `200` VM 배열 | — |
-| `POST` | `/api/v1/vms` | `201` VM | `400`, `409`, `507`, `500` |
-| `GET` | `/api/v1/vms/{vm_id}` | `200` VM | `404`, `500` |
-| `POST` | `/api/v1/vms/{vm_id}/stop` | `204` | `500` |
-| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `404`, `409`, `500` |
-| `GET` | `/healthz` | `200` | `503` |
+| `GET` | `/api/v1/vms` | `200` VM 배열 | `401`, `500`, `503`, `504` |
+| `POST` | `/api/v1/vms` | `201` VM | `400`, `401`, `409`, `507`, `500`, `501`, `503`, `504` |
+| `GET` | `/api/v1/vms/{vm_id}` | `200` VM | `401`, `404`, `500`, `503`, `504` |
+| `POST` | `/api/v1/vms/{vm_id}/stop` | `204` | `401`, `500`, `501`, `503`, `504` |
+| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `401`, `404`, `409`, `500`, `501`, `503`, `504` |
+| `GET` | `/healthz` | `200` | `401`, `503` |
 
-드라이버·플랫폼 실패는 모든 엔드포인트에서 날 수 있으며 code와 HTTP 상태가 1:1입니다(8.1절). `500 DriverError`는 분류되지 않은 실행 실패, `503 PlatformUnavailable`은 일시 장애(재시도 가능), `504 DriverTimeout`은 호출 시한 초과, `501 NotSupported`는 드라이버·플랫폼이 제공하지 않는 동작입니다. 서비스 토큰이 설정된 배포에서는 토큰이 없거나 틀리면 `401 Unauthorized`입니다.
+드라이버·플랫폼 실패는 모든 엔드포인트에서 날 수 있으며 code와 HTTP 상태가 1:1입니다(8.1절). `500 DriverError`는 분류되지 않은 실행 실패, `503 PlatformUnavailable`은 일시 장애(재시도 가능), `504 DriverTimeout`은 호출 시한 초과, `501 NotSupported`는 드라이버·플랫폼이 제공하지 않는 동작입니다. 서비스 토큰이 설정된 배포에서는 토큰이 없거나 틀리면 `401 Unauthorized`입니다. `XENOVA_SERVICE_TOKEN`이 설정된 배포에서는 `/healthz`를 포함한 모든 엔드포인트가 토큰이 없거나 틀리면 `401 Unauthorized`를 냅니다. OpenAPI는 `ServiceToken` bearer 보안 스킴을 전역 security로 선언하고 각 엔드포인트에 `401`을 명시합니다.
 
 ### 4.1 `GET /api/v1/vms`
 
@@ -203,10 +203,13 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 
 - 해당 `vm_id`의 디스크가 존재하면 **재사용**하고, 존재하지 않으면 `template_id`·`template_version`으로 새로 생성한다.
 - 디스크 경로는 `vm_id`에서 파생한다.
-- Xen에 같은 `vm_id`의 도메인이 이미 있으면 명세와 관계없이 `409 VMExists`로 거부한다. dom0-manager는 명세를 비교하지 않으며, 동일 명세 재요청을 성공으로 바꾸는 것은 Spring이다(10.1절).
+- Xen에 같은 `vm_id`의 도메인이 이미 있으면 명세와 관계없이 `409 VMExists`로 거부한다. 실행 중인 도메인에 대해서는 dom0-manager가 명세를 비교하지 않으며, 동일 명세 재요청을 성공으로 바꾸는 것은 Spring이다(10.1절).
 - Linux IP는 Spring이 전달하지 않는다. 플랫폼이 전역 잠금 안에서 IP 풀과 registry를 확인해 빈 주소를 자동 할당한다.
+- 플랫폼 `create`에는 Spring 발급 `vm_id`, 표시 이름(dom0-manager가 `<template_id 정규화>-<vm_id 앞 12자리>`로 만든다), 템플릿 ID·버전, vcpus·memory_mib를 보낸다. 내부 실행 이름(`vm-<hex>`)·MAC·IP는 플랫폼이 발급하고, IP가 바닥나면 플랫폼 `IP_POOL_EXHAUSTED`를 `507 InsufficientResources`(`resource.name=ipv4`)로 낸다. 플랫폼 `INVALID_SPEC`은 `400 InvalidArgument`다.
 
 **Spring 불변조건** — 동일한 `vm_id`에는 항상 동일한 생성 명세를 전송한다. 플랫폼은 registry의 기존 생성 명세와 비교해 위반을 거부한다.
+
+- 도메인이 없고 등록된 디스크만 있을 때(재시작)는 요청 명세가 기록된 최초 명세와 다르면 `409 VMExists`로 거부한다(1.4절 "다른 최초 명세는 충돌"). 같은 명세면 `201`로 재시작한다.
 
 `start` 엔드포인트는 두지 않습니다. 꺼진 VM의 재시작은 같은 `vm_id`로 이 엔드포인트를 재호출하는 방식이며, 디스크가 보존되어 있으므로 데이터는 유지됩니다.
 
@@ -293,10 +296,10 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 | `400` | `InvalidArgument` | 형식 또는 범위 오류 |
 | `404` | `VMNotFound` | `GET` 대상 도메인 부재 |
 | `409` | `VMExists` | `vm_id` 충돌 (단일 의미) |
-| `507` | `InsufficientResources` | 가용 자원 부족. `resource.name`: `memory_mib`, `vcpus`, `ipv4`(Linux VM IP 풀 고갈 — 플랫폼 드라이버 브랜치 S15P31E110-115) |
+| `507` | `InsufficientResources` | 가용 자원 부족. `resource.name`: `memory_mib`, `vcpus`, `ipv4`(플랫폼 Linux IP 풀 고갈, `IP_POOL_EXHAUSTED`) |
 | `401` | `Unauthorized` | Bearer 서비스 토큰 없음·불일치 (`/healthz` 포함) |
-| `501` | `NotSupported` | 드라이버·플랫폼이 제공하지 않는 동작. xen 모드의 명령, 플랫폼이 아직 받지 않는 호출자 지정 `vm_id` (P2 지원 전까지 신규 생성은 이 오류) |
-| `503` | `PlatformUnavailable` | registry·저장소·Xen 일시 장애, 또는 다른 플랫폼 작업이 잠금을 쥐고 있음. 재시도 가능 |
+| `501` | `NotSupported` | 드라이버·플랫폼이 제공하지 않는 동작. xen 모드의 생성·정지·삭제 명령 |
+| `503` | `PlatformUnavailable` | registry·저장소·Xen 일시 장애, 또는 다른 플랫폼 작업이 잠금을 쥐고 있어 대기 한도(`XENOVA_PLATFORM_BUSY_TIMEOUT`, 기본 5초) 안에 차례가 오지 않음(플랫폼 `OPERATION_IN_PROGRESS`). 재시도 가능. `/healthz`는 Manager를 부르지 않아 바쁜 상태의 영향을 받지 않는다 |
 | `504` | `DriverTimeout` | `xl`·플랫폼 호출 시한 초과 (정지 90초 대기 포함) |
 | `500` | `DriverError` | 그 밖의 실행 실패, 모르는 상태 문자 |
 | `409` | `InvalidState` | 실행 중인 VM을 `DELETE` (4.4절). 먼저 정지해야 한다 |
@@ -321,7 +324,7 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 
 FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환하므로 `400 InvalidArgument`로 정규화합니다. 예외 핸들러 교체만으로는 부족하며, **생성 스키마에서 422 응답 정의와 `HTTPValidationError` 모델까지 제거**해야 OpenAPI 차이 검사가 통과합니다.
 
-`VMExists`는 `vm_id` 충돌 단일 의미입니다. dom0-manager는 표시 이름을 모르므로 이름 중복은 Spring이 판정합니다.
+`VMExists`는 `vm_id` 충돌 단일 의미입니다. 정지된 등록 VM에 다른 생성 명세가 와도 `409 VMExists`입니다(4.2절). dom0-manager는 표시 이름을 모르므로 이름 중복은 Spring이 판정합니다.
 
 ### 8.2 Spring
 
@@ -370,7 +373,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 |---|---|---|
 | `name` | 1~63자, 한글·공백 허용. 제어문자·줄 구분 문자와 앞뒤 공백 금지 | Spring 단독 |
 | `vcpus` | 1~4 | Spring, dom0-manager |
-| `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16) | 템플릿별 하한은 Spring, 공통 범위는 dom0-manager |
+| `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16) | 템플릿별 하한은 Spring, 템플릿별 범위(`resource_limits`)는 플랫폼 카탈로그가 create 때 검사(벗어나면 `400 InvalidArgument`), 공통 범위는 dom0-manager |
 | 배수 제약 | 없음. 화면 입력만 64 단위 | — |
 | `template_id` | 공개 카탈로그 ID·버전을 그대로 전달 | Spring 목록 검사 + 플랫폼의 정확한 ID·버전·해시 검사 |
 
@@ -438,13 +441,10 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 조회 응답 대기 6초의 기산점 | 백엔드 | 연결 시간 포함 여부. 미포함이면 최악 소요가 16.5초로 예산 15초를 초과하므로 예산 18초 또는 대기 5초로 조정 필요 |
 | 오류 코드 명명 규칙 | 백엔드 | `VALIDATION_ERROR` / `InvalidArgument` 중 한쪽으로 통일 권고 |
 | OS별 실제 버전 값 | 제어 계층 | 이미지 빌드 시 실측 |
-| OS별 `min_memory_mib` | 제어 계층 | 이미지 빌드 시 실측 |
+| 템플릿별 `min_memory_mib` | 플랫폼·백엔드 | 플랫폼 카탈로그 `resource_limits`를 버전별 descriptor로 옮기고(Zephyr는 min=max) Spring 설정이 그 값을 따른다. Zephyr starter 1.0.0은 16 |
 | 서비스 토큰 배포·회전 | 공통 | Spring과 dom0-manager에 같은 Bearer 서비스 토큰을 안전하게 배포하고 회전하는 운영 절차 |
 | 자동 복구 주체 | 공통 | 보드(Xen `on_crash`·dom0 감시) 또는 Spring. 결정 전까지 Spring은 복구를 수행하지 않음 |
-| HTTP → 공통 Manager 입력 | 제어 계층 + 플랫폼 | HTTP 5개 필드와 Manager의 필수 `name`·최초 명세를 연결하는 규칙. 임의 기본값이나 Spring 입력 필드 추가로 우회하지 않음 |
-| Zephyr 자원 범위 | 제어 계층 + 플랫폼 | 공통 Manager는 고정 1 vCPU/16MiB이고 Spring은 공통 하한 16, Zephyr 템플릿 하한 16으로 맞춤(v1.6). 이 브랜치의 dom0-manager HTTP 모델(`contracts/dom0-manager-openapi.yaml`)은 아직 최소 128MiB라, 16MiB로 바꾸는 플랫폼 드라이버 브랜치(S15P31E110-115)가 병합되기 전에는 Zephyr 16MiB 생성이 `400 InvalidArgument`로 거부될 수 있음. Spring은 Zephyr에도 vCPU 1~4를 받으므로 템플릿별 vCPU 상한은 추후 결정 |
 | 수명주기·강제 종료 전달 | 제어 계층 + 플랫폼 | retire/restore/purge의 작업 키·operation_id·대상 세대와 개별 force 전달. 보드 종료 정책을 개별 강제 종료 승인으로 사용하지 않음 |
-| IP 고갈 오류 스키마 | 제어 계층 + 백엔드 | 플랫폼 IP_POOL_EXHAUSTED와 HTTP 507의 연결, resource.name=ipv4 표현. 현재 HTTP ResourceName은 vcpus/memory_mib만 지원 |
 
 dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포함한 내부 API에서 Bearer 서비스 토큰을 검사합니다. Spring은 `DOM0_MANAGER_BASE_URL`에 Tailscale 주소를 설정하고 `DOM0_MANAGER_SERVICE_TOKEN`을 `Authorization: Bearer`로 전송합니다. 연결 실패는 `503 VM_CONTROL_UNAVAILABLE`로 변환합니다.
 
@@ -463,3 +463,5 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1.4 | 2026-10-19 | Spring 공개 API 보완: VM 이름에 한글·공백 허용(제어문자·앞뒤 공백 금지, 9장), 공개 VM 객체에 `ipv4` 추가(에이전트 보고 기준, Zephyr는 `null`, 2.2절), dom0-manager `507 InsufficientResources`를 공개 API에서도 `507`로 전달하고 IP 풀 고갈(`ipv4`) 메시지 추가(8.1·8.2절) |
 | v1.5 | 2026-10-19 | 공통 Manager와 HTTP 계약을 분리하고 생성/시작·등록 목록·예약 IP·수명주기 세대·Zephyr 종료/메모리의 연결 경계를 명시. Spring의 현재 DTO·설정과 플랫폼 구현은 유지 |
 | v1.6 | 2026-10-19 | dom0-manager 오류 code 분리(플랫폼 드라이버 S15P31E110-115 계약) 반영: `401 Unauthorized`, `501 NotSupported`, `503 PlatformUnavailable`, `504 DriverTimeout`과 Spring 변환(8.1·8.2절). 요청 메모리 공통 하한 128 → 16, Zephyr starter `min_memory_mib` 16(2.3절·9장) |
+| v1.7 | 2026-10-19 | 플랫폼 드라이버(S15P31E110-115) 반영: 모든 엔드포인트 응답 목록에 `401`·`500`·`501`·`503`·`504` 명시(4장), OpenAPI에 `ServiceToken` bearer 보안 스킴·전역 security 선언, HTTP 모델의 `ResourceError.name`에 `ipv4`와 `memory_mib` 하한 16, 정지된 등록 VM에 다른 생성 명세는 `409 VMExists`(4.2절), 플랫폼 Manager 잠금 대기 한도(`XENOVA_PLATFORM_BUSY_TIMEOUT`, 기본 5초) 초과 시 `503`(재시도 가능)이며 `/healthz`는 바쁜 상태를 장애로 보지 않음(8.1절). 13장에서 해결된 Zephyr 자원 범위·IP 고갈 스키마 항목 정리 |
+| v1.8 | 2026-10-19 | 플랫폼이 `create`에 `vm_id`를 필수로 받고 내부 실행 이름·MAC·Linux IP를 발급하게 되어 dom0-manager의 IP 풀 선택·재시도와 `INVALID_SPEC`→501 임시 처리를 제거. 플랫폼 `IP_POOL_EXHAUSTED`→`507 ipv4`, 인스턴스 디렉터리는 `configuration.id`, `/healthz`는 Manager를 거치지 않고 `xl info`(조회 한도)와 registry 저장소 존재만 확인해 조회 한도 안에서 끝남. 13장 HTTP→Manager 입력 항목 해결 |
