@@ -34,9 +34,10 @@ class ManagementTest(unittest.TestCase):
         (self.data/'instances').mkdir()
         self.run=Path(self.tmp.name)/'run'
         self.xen=FakeXen(self.data,{})
-        self.p=vm.Platform(self.data,self.run,command=self.xen)
+        self.p=vm.Platform(self.data,self.run,command=self.xen,defaults_path=FILES/'defaults.json')
         self.storage=patch.object(vm,'storage_check');self.storage.start();self.addCleanup(self.storage.stop)
-        self.m=management.Manager(self.p,preparer=self.prepare,usage_check=lambda *args:None)
+        self.m=management.Manager(self.p,preparer=self.prepare,usage_check=lambda *args:None, defaults_path=FILES/'defaults.json')
+        network=patch.object(self.p,'check_network');network.start();self.addCleanup(network.stop)
         self.copies=0
         source=self.data/'templates/source';source.mkdir(parents=True)
         for name in ('root.raw','Image','initrd','kernel.config'):
@@ -56,16 +57,19 @@ class ManagementTest(unittest.TestCase):
                          'manifest_sha256':catalog.sha(source/'template.json')}
         d=self.data/'catalog/ubuntu-24.04-arm64';d.mkdir(parents=True)
         (d/'1.0.0.json').write_text(json.dumps(self.descriptor))
-        self.spec={'name':'custom','template_id':'ubuntu-24.04-arm64','template_version':'1.0.0',
+        self.spec={'vm_id':'550e8400-e29b-41d4-a716-446655440000','name':'custom','template_id':'ubuntu-24.04-arm64','template_version':'1.0.0',
                    'vcpus':1,'memory_mib':512,'ipv4':'192.168.77.30'}
+
+        self.key=management.internal_name(self.spec['vm_id'])
 
     def prepare(self,op):
         self.copies+=1
-        spec=op['initial_spec'];r=record()
-        r.update(id=spec['name'],name=spec['name'],hostname=spec['name'],uuid=op['vm_id'],
-                 mac=op['assigned']['mac'],ipv4=spec['ipv4'],memory_mib=spec['memory_mib'],vcpus=spec['vcpus'],
+        spec=op['initial_spec'];r=record();name=op['assigned']['internal_name']
+        r.update(guest_kind='linux',id=name,name=name,hostname=name,display_name=spec['name'],uuid=op['vm_id'],
+                 mac=op['assigned']['mac'],ipv4=op['assigned']['ipv4'],memory_mib=spec['memory_mib'],vcpus=spec['vcpus'],
                  autostart=False,creation_spec=spec,creation_operation_id=op['operation_id'],
-                 template_manifest_sha256=op['template']['manifest_sha256'])
+                 template_manifest_sha256=op['template']['manifest_sha256'],
+                 template_id=spec['template_id'],template_version=spec['template_version'])
         directory=fixture(self.data,r)
         with (directory/'root.raw').open('wb') as stream:
             stream.seek(1080);stream.write(b'\x53\xef')
@@ -95,7 +99,7 @@ class ManagementTest(unittest.TestCase):
 
     def test_uuid_is_vm_id_same_key_replays_without_resetting_current_configuration(self):
         identity=self.create()
-        path=self.data/'instances/custom/instance.json'
+        path=self.data/f'instances/{self.key}/instance.json'
         r=json.loads(path.read_text());r['memory_mib']=768;r['autostart']=True;path.write_text(json.dumps(r))
         again=self.call('create',dict(reversed(list(self.spec.items()))))
         self.assertTrue(again['ok'],again);self.assertTrue(again['replayed'])
@@ -107,10 +111,10 @@ class ManagementTest(unittest.TestCase):
         identity=self.create()
         conflict=self.call('create',{**self.spec,'memory_mib':768})
         self.assertEqual(conflict['error']['code'],'IDEMPOTENCY_CONFLICT')
-        conflict=self.call('retire',{'vm_id':identity},key='create')
+        conflict=self.call('retire',{'vm_id':identity},key='create:'+self.spec['vm_id'])
         self.assertEqual(conflict['error']['code'],'IDEMPOTENCY_CONFLICT')
         conflict=self.call('create',self.spec,key='other')
-        self.assertEqual(conflict['error']['code'],'VM_NAME_CONFLICT')
+        self.assertTrue(conflict['ok'],conflict);self.assertTrue(conflict['replayed'])
 
     def test_explicit_version_and_ip_and_resource_validation(self):
         for spec,code in [
@@ -120,11 +124,11 @@ class ManagementTest(unittest.TestCase):
             ({**self.spec,'template_id':'../escape'},'INVALID_SPEC'),
             ({**self.spec,'vcpus':True},'INVALID_SPEC'),
             ({**self.spec,'memory_mib':1},'RESOURCE_UNSUPPORTED'),
-            ({k:v for k,v in self.spec.items() if k!='ipv4'},'INVALID_SPEC')]:
+            ({k:v for k,v in self.spec.items() if k!='vm_id'},'INVALID_SPEC')]:
             result=self.call('create',spec)
             self.assertFalse(result['ok'],result);self.assertEqual(result['error']['code'],code,result)
         self.create()
-        result=self.call('create',{**self.spec,'name':'another'},key='other')
+        result=self.call('create',{**self.spec,'vm_id':'750e8400-e29b-41d4-a716-446655440000','name':'another'},key='other')
         self.assertEqual(result['error']['code'],'IP_CONFLICT')
 
     def test_manifest_content_and_parent_links_cannot_select_another_artifact(self):
@@ -157,12 +161,12 @@ class ManagementTest(unittest.TestCase):
     def test_published_before_success_response_recovers_without_copy(self):
         self.m.checkpoint=lambda phase,op: (_ for _ in ()).throw(Interrupted()) if phase=='published' else None
         with self.assertRaises(Interrupted):self.call('create',self.spec)
-        before=json.loads((self.data/'instances/custom/instance.json').read_text())['uuid']
+        before=json.loads((self.data/f'instances/{self.key}/instance.json').read_text())['uuid']
         self.m.checkpoint=lambda *args:None
         self.assertEqual(self.create(),before);self.assertEqual(self.copies,1)
 
     def test_retire_restore_preserve_assets_and_old_retire_does_not_mutate_again(self):
-        identity=self.create();directory=self.data/'instances/custom'
+        identity=self.create();directory=self.data/f'instances/{self.key}'
         before={p.name:p.read_bytes() for p in directory.iterdir()}
         retired=self.call('retire',{'vm_id':identity})
         self.assertTrue(retired['ok'],retired);self.assertFalse(directory.exists())
@@ -185,8 +189,8 @@ class ManagementTest(unittest.TestCase):
             self.assertTrue(result['ok'],result)
 
     def test_running_vm_cannot_retire_and_identity_mismatch_is_not_a_stopped_vm(self):
-        identity=self.create();r=json.loads((self.data/'instances/custom/instance.json').read_text())
-        self.xen.rows=[domain(r,self.data/'instances/custom/root.raw')]
+        identity=self.create();r=json.loads((self.data/f'instances/{self.key}/instance.json').read_text())
+        self.xen.rows=[domain(r,self.data/f'instances/{self.key}/root.raw')]
         self.assertEqual(self.call('retire',{'vm_id':identity})['error']['code'],'VM_NOT_STOPPED')
         self.xen.rows[0]['config']['c_info']['uuid']='bbbb0000-1111-4222-8333-123456789abc'
         self.assertEqual(self.call('retire',{'vm_id':identity})['error']['code'],'TARGET_CHANGED')
@@ -209,7 +213,7 @@ class ManagementTest(unittest.TestCase):
         self.assertTrue((self.data/'tombstones'/(identity+'.json')).is_file())
         self.assertGreater(result['data']['space']['logical_bytes'],0)
         self.assertEqual(self.call('create',self.spec)['error']['code'],'VM_PURGED')
-        self.assertEqual(self.call('create',self.spec,key='new')['error']['code'],'VM_NAME_CONFLICT')
+        self.assertEqual(self.call('create',self.spec,key='new')['error']['code'],'VM_PURGED')
 
     def test_partial_purge_resume_blocks_restore_and_reuses_inventory(self):
         identity=self.create();self.call('retire',{'vm_id':identity})
@@ -239,10 +243,10 @@ class ManagementTest(unittest.TestCase):
         self.assertEqual(list(target.iterdir()),[])
 
     def test_cli_real_main_records_path_returns_single_json_for_success_and_invalid_input(self):
-        with patch.object(vm,'Platform',return_value=self.p):
+        with patch.object(cli,'Manager',side_effect=lambda: management.Manager(self.p, defaults_path=FILES/'defaults.json')):
             output=io.StringIO()
             with redirect_stdout(output):
-                vm.main(['create','custom','--template-id','ubuntu-24.04-arm64','--template-version','1.0.0',
+                vm.main(['create','custom','--vm-id',self.spec['vm_id'],'--template-id','ubuntu-24.04-arm64','--template-version','1.0.0',
                          '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','cli','--json'])
             result=json.loads(output.getvalue());self.assertTrue(result['ok'],result)
             self.assertFalse((self.data/'operations').exists())
@@ -263,13 +267,13 @@ class ManagementTest(unittest.TestCase):
                     'guest_kind':'zephyr','asset_directory':'rtos-templates/starter-artifact','source_template_id':'starter-artifact',
                     'manifest_sha256':catalog.sha(self.data/'rtos-templates/starter-artifact/firmware.json')}
         d=self.data/'catalog/zephyr-xenvm-starter-arm64';d.mkdir();(d/'1.0.0.json').write_text(json.dumps(descriptor))
-        spec={'name':'rtos-app','template_id':descriptor['template_id'],'template_version':'1.0.0','vcpus':1,'memory_mib':16}
+        spec={'vm_id':'650e8400-e29b-41d4-a716-446655440000','name':'rtos-app','template_id':descriptor['template_id'],'template_version':'1.0.0','vcpus':1,'memory_mib':16}
         self.m.preparer=self.m._prepare
         result=self.call('create',spec,key='zephyr')
         self.assertTrue(result['ok'],result)
         r=result['data']['configuration']
         self.assertEqual(r['board_shutdown_policy'],'refuse');self.assertFalse(r['autostart'])
-        self.assertNotIn('ipv4',r);self.assertFalse((self.data/'instances/rtos-app/root.raw').exists())
+        self.assertNotIn('ipv4',r);self.assertFalse((self.data/('instances/'+management.internal_name(spec['vm_id'])+'/root.raw')).exists())
         self.assertEqual(self.call('create',spec,key='zephyr')['data']['current']['vm_id'],r['uuid'])
 
 
@@ -296,11 +300,11 @@ class ManagementTest(unittest.TestCase):
         self.m.checkpoint=lambda *args:None
         tombpath=self.data/'tombstones'/(identity+'.json')
         tomb=json.loads(tombpath.read_text());tomb['generation']+=2;tomb['lifecycle']='REGISTERED'
-        archive=self.data/tomb['archive'];archive.rename(self.data/'instances/custom')
+        archive=self.data/tomb['archive'];archive.rename(self.data/f'instances/{self.key}')
         tomb['archive']=None;tombpath.write_text(json.dumps(tomb))
         result=self.call('purge',{'vm_id':identity,'confirm_vm_id':identity})
         self.assertEqual(result['error']['code'],'TARGET_CHANGED',result)
-        self.assertEqual((self.data/'instances/custom/saved-user-file').read_text(),'keep me')
+        self.assertEqual((self.data/f'instances/{self.key}/saved-user-file').read_text(),'keep me')
 
     def test_global_lock_concurrent_invocation_does_not_generate_another_identity(self):
         from xenova_runtime import operation_lock
@@ -312,12 +316,12 @@ class ManagementTest(unittest.TestCase):
 
     def test_factory_reservation_survives_purge_and_restore_clears_retired_state(self):
         identity=self.create();self.call('retire',{'vm_id':identity})
-        self.assertTrue(vm.retired_instance(self.data,'custom',identity))
+        self.assertTrue(vm.retired_instance(self.data,self.key,identity))
         self.call('restore',{'vm_id':identity})
-        self.assertFalse(vm.retired_instance(self.data,'custom',identity))
+        self.assertFalse(vm.retired_instance(self.data,self.key,identity))
         self.call('retire',{'vm_id':identity},key='retire2')
         self.call('purge',{'vm_id':identity,'confirm_vm_id':identity})
-        self.assertTrue(vm.retired_instance(self.data,'custom',identity))
+        self.assertTrue(vm.retired_instance(self.data,self.key,identity))
 
     def test_subprocess_failure_is_one_error_envelope_and_does_not_remove_published_assets(self):
         import subprocess
@@ -328,7 +332,7 @@ class ManagementTest(unittest.TestCase):
         result=self.call('create',self.spec)
         self.assertFalse(result['ok'],result)
         self.assertEqual(result['error']['code'],'RECOVERY_REQUIRED')
-        self.assertTrue((self.data/'instances/custom/saved-user-file').is_file())
+        self.assertTrue((self.data/f'instances/{self.key}/saved-user-file').is_file())
         self.m.preparer=self.prepare
         self.assertTrue(self.call('create',self.spec)['ok'])
         self.assertEqual(self.copies,1)
@@ -346,7 +350,7 @@ class ManagementTest(unittest.TestCase):
         self.assertTrue((actual/'saved-user-file').is_file())
 
     def test_restore_writable_disk_does_not_compare_template_hash_or_recreate_missing_disk(self):
-        identity=self.create();disk=self.data/'instances/custom/root.raw'
+        identity=self.create();disk=self.data/f'instances/{self.key}/root.raw'
         with disk.open('ab') as stream:stream.write(b'user writes')
         retired=self.call('retire',{'vm_id':identity});self.assertTrue(retired['ok'],retired)
         result=self.call('restore',{'vm_id':identity});self.assertTrue(result['ok'],result)
@@ -378,7 +382,7 @@ class ManagementTest(unittest.TestCase):
         self.m.checkpoint=lambda phase,op: (_ for _ in ()).throw(Interrupted()) if phase=='recorded' else None
         with self.assertRaises(Interrupted):self.call('create',self.spec)
         self.m.checkpoint=lambda *args:None
-        result=self.call('operation',{'idempotency_key':'create'})
+        result=self.call('operation',{'idempotency_key':'create:'+self.spec['vm_id']})
         self.assertTrue(result['ok']);self.assertTrue(result['data']['recovery_required'])
         self.assertEqual(result['data']['effective_status'],'RECOVERY_REQUIRED')
         self.assertEqual(self.copies,0)
@@ -407,7 +411,7 @@ class ManagementTest(unittest.TestCase):
         self.m.preparer=noisy
         out=io.StringIO()
         with redirect_stdout(out):
-            result=cli.main(['create','custom','--template-id','ubuntu-24.04-arm64','--template-version','1.0.0',
+            result=cli.main(['create','custom','--vm-id',self.spec['vm_id'],'--template-id','ubuntu-24.04-arm64','--template-version','1.0.0',
                          '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','cli',
                          '--execute','--json'],manager=self.m)
         self.assertEqual(json.loads(out.getvalue()),result)
@@ -417,11 +421,8 @@ class ManagementTest(unittest.TestCase):
 
     def test_uuid_collision_with_existing_vm_is_rejected_before_journal(self):
         old=record();directory=fixture(self.data,old)
-        request='10000000-1111-4222-8333-123456789abc'
-        operation='20000000-1111-4222-8333-123456789abc'
-        with patch.object(management,'uuid4',side_effect=[request,operation,old['uuid']]):
-            result=self.call('create',self.spec)
-        self.assertEqual(result['error']['code'],'VM_NAME_CONFLICT',result)
+        result=self.call('create',{**self.spec,'vm_id':old['uuid']})
+        self.assertEqual(result['error']['code'],'IDEMPOTENCY_CONFLICT',result)
         self.assertFalse((self.data/'operations').exists())
         self.assertTrue((directory/'instance.json').is_file())
 
@@ -450,7 +451,7 @@ class ManagementTest(unittest.TestCase):
         self.p.command=command
         result=self.call('restore',{'vm_id':identity})
         self.assertFalse(result['ok'],result)
-        self.assertFalse((self.data/'instances/custom').exists())
+        self.assertFalse((self.data/f'instances/{self.key}').exists())
         self.assertEqual(self.copies,1)
 
     def test_purge_can_remove_corrupted_owned_boot_asset_without_repair_or_template_copy(self):

@@ -38,6 +38,13 @@ def settings(ssid, password, country):
             '\n    psk='+psk+'\n    key_mgmt=WPA-PSK\n    proto=RSN\n}\n')
 
 
+class ActivationError(PlatformError):
+    """자격증명/하위 명령 출력을 포함하지 않는 활성화 단계 오류."""
+    def __init__(self, action, stage):
+        self.activation = {'action': action, 'result': 'failed', 'stage': stage}
+        super().__init__('Wi-Fi activation failed during ' + stage + '; saved configuration retained')
+
+
 class Wifi:
     def __init__(self, root=Path('/'), run=command):
         self.root=Path(root);self.run=run
@@ -81,8 +88,40 @@ class Wifi:
             if [p for p in directory.glob('*.conf') if p.name!=target.name]:
                 raise PlatformError('another wireless interface is configured; explicit removal required')
             atomic_write(target,content,0o600)
-            atomic_write(path,'[Match]\nName='+name+'\nType=wlan\n\n[Link]\nRequiredForOnline=no\n\n[Network]\nDHCP=ipv4\nIPv6AcceptRA=no\n\n[DHCPv4]\nRouteMetric=600\n')
+            atomic_write(path,'[Match]\nName='+name+'\nType=wlan\n\n[Link]\nRequiredForOnline=no\n\n[Network]\nDHCP=ipv4\nIPv6AcceptRA=no\n\n[DHCPv4]\nRouteMetric=600\n', 0o644)
+            # root 셸의 umask가 0077이어도 비밀 없는 networkd 입력은 읽을 수 있어야 한다.
+            path.chmod(0o644)
         return {'configured':True,'interface':name,'credentials':'stored root-only','activation_required':True}
+
+    def activate(self, name):
+        """소유한 단일 서비스를 시작/재시작한다. 요청 성공은 AP 인증/IP 성공과 별개다."""
+        self.interface(name)
+        with operation_lock(self.root / 'run/xenova-wifi'):
+            conf = plain(self.root / 'etc/xenova/wifi' / (name + '.conf'))
+            if conf.stat().st_mode & 0o077:
+                raise PlatformError('Wi-Fi configuration must be root-only')
+            unit = 'xenova-wifi@' + name + '.service'
+            action, stage = None, 'state-query'
+            try:
+                state = self.run(['systemctl', 'show', '--property=ActiveState', '--value', unit]).strip()
+                if state not in ('active', 'inactive', 'failed'):
+                    raise ActivationError(None, 'service-state')
+                action = 'restart' if state == 'active' else 'start'
+                stage = 'enable'
+                self.run(['systemctl', 'enable', unit])
+                stage = 'supplicant'
+                self.run(['systemctl', action, unit])
+                stage = 'network-reload'
+                self.run(['networkctl', 'reload'])
+                stage = 'network-reconfigure'
+                self.run(['networkctl', 'reconfigure', name])
+            except ActivationError:
+                raise
+            except (PlatformError, OSError, subprocess.SubprocessError) as exc:
+                raise ActivationError(action, stage) from exc
+            result = self.status(name)
+            result['activation'] = {'action': action, 'result': 'requested', 'stage': 'complete'}
+            return result
 
     def status(self,name):
         self.interface(name)
@@ -123,23 +162,21 @@ def main(argv=None):
         password=getpass.getpass('Wi-Fi PSK (hidden): ')
         result=wifi.configure(args.interface,ssid,password,args.country)
     elif args.action=='activate':
-        wifi.interface(args.interface)
-        conf=wifi.root/'etc/xenova/wifi'/(args.interface+'.conf')
-        plain(conf)
-        if conf.stat().st_mode & 0o077:
-            raise PlatformError('Wi-Fi configuration must be root-only')
-        command(['systemctl','enable','--now','xenova-wifi@'+args.interface+'.service'])
-        command(['networkctl','reload'])
-        command(['networkctl','reconfigure',args.interface])
-        result=wifi.status(args.interface)
+        try:
+            result=wifi.activate(args.interface)
+        except ActivationError as exc:
+            print(json.dumps({'interface':args.interface, 'activation':exc.activation,
+                              'error':str(exc)},indent=2))
+            return 1
     else:
         result=wifi.status(args.interface)
     print(json.dumps(result,indent=2))
+    return 0
 
 
 if __name__=='__main__':
     try:
-        main()
+        sys.exit(main())
     except (PlatformError,OSError,subprocess.SubprocessError):
         print('[xenova-wifi] operation failed; check interface, root-only configuration and service status',file=sys.stderr)
         sys.exit(1)
