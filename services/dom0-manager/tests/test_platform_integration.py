@@ -3,7 +3,8 @@
 저장소(모노레포) 안의 platform/… 모듈과 tests/platform 픽스처를 그대로 빌린다. 보드가 없어도 registry 읽기·조회·시작·정지·보관·생성
 경로가 실제 플랫폼 코드와 맞물리는지 확인하는 것이 목적이다.
 
-건너뛰는 경우는 플랫폼 소스 디렉터리 자체가 없을 때(배포 패키지 단독 테스트)뿐이다. 소스가 있는데 import 가 깨지면 테스트 실패다.
+건너뛰는 경우는 플랫폼 소스 디렉터리가 없을 때(배포 패키지 단독 테스트)와 fcntl 이 없는 비 POSIX 환경뿐이다.
+소스가 있는데 import 가 깨지면 테스트 실패다.
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ import xenova_vm as vm  # noqa: E402
 from test_xenova_platform import FakeXen, domain, fixture, record  # noqa: E402
 
 from dom0_manager.config import Settings  # noqa: E402
-from dom0_manager.drivers.platform import PlatformDriver, PlatformProvisioner  # noqa: E402
+from dom0_manager.drivers.platform import PlatformDriver, PlatformProvisioner, SerializedManager  # noqa: E402
 from dom0_manager.drivers.xl import Xl  # noqa: E402
 from dom0_manager.main import create_app  # noqa: E402
 from test_xl import XL_INFO, FakeRunner  # noqa: E402
@@ -128,8 +129,9 @@ def board():
 
 @pytest.fixture
 def client(board):
-    driver = PlatformDriver(board.manager, Xl(FakeRunner({("xl", "info"): XL_INFO})))
-    app = create_app(Settings(driver="platform", log_level="WARNING"), driver=driver, provisioner=PlatformProvisioner(board.manager))
+    manager = SerializedManager(board.manager)  # 실제 조립 경로(load_manager)와 같은 포장
+    driver = PlatformDriver(manager, Xl(FakeRunner({("xl", "info"): XL_INFO})))
+    app = create_app(Settings(driver="platform", log_level="WARNING"), driver=driver, provisioner=PlatformProvisioner(manager))
     return TestClient(app)
 
 
@@ -162,8 +164,14 @@ def test_real_manager_restart_registered_vm(client, board):
 
 
 def _platform_accepts_vm_id(manager) -> bool:
-    probe = manager.call("create", {"vm_id": str(NEW_VM), "name": "probe", "template_id": TEMPLATE_ID,
-                                    "template_version": TEMPLATE_VERSION, "vcpus": 1, "memory_mib": 512, "ipv4": "192.168.77.90"})
+    """create 를 계획 모드(execute=False)로 불러 spec['vm_id'] 를 받는지 본다. 작업 기록·디스크를 만들지 않는다.
+    변경 동작은 실행 여부와 무관하게 idempotency_key 를 검사하므로 유효한 키를 준다. 키가 없으면 지원 여부와 상관없이
+    INVALID_SPEC 이 나와 판정이 틀어진다."""
+    spec = {"vm_id": str(NEW_VM), "name": "probe", "template_id": TEMPLATE_ID, "template_version": TEMPLATE_VERSION,
+            "vcpus": 1, "memory_mib": 512, "ipv4": "192.168.77.90"}
+    probe = manager.call("create", spec, execute=False, idempotency_key=f"probe-vm-id-{NEW_VM}")
+    error = probe.get("error") or {}
+    assert probe.get("ok") or error.get("code") == "INVALID_SPEC", probe  # 그 밖의 실패는 픽스처 문제다
     return bool(probe.get("ok"))
 
 

@@ -68,11 +68,15 @@ class FakeManager:
         if action == "get":
             view = self.registry.get(spec.get("vm_id"))
             return _ok({"vm": view}) if view else _err("VM_NOT_FOUND", "registered VM not found")
-        if action == "create":
-            if "vm_id" in spec and not self.accept_vm_id:
+        if action in ("create", "retire", "restore", "purge"):
+            # 실제 Manager._mutate 순서: 명세 정규화(모르는 키 거부) → idempotency_key 검사 → 계획/실행
+            if action == "create" and "vm_id" in spec and not self.accept_vm_id:
                 return _err("INVALID_SPEC", "name, template_id, template_version, vcpus and memory_mib required")
+            if not isinstance(idempotency_key, str) or not 1 <= len(idempotency_key.encode("utf-8")) <= 200:
+                return _err("INVALID_SPEC", "idempotency_key of 1..200 UTF-8 bytes required")
+        if action == "create":
             if not execute:
-                return _ok({"plan": spec})
+                return _ok({"plan": True, "action": action, "spec": spec})
             if any(v["configuration"].get("ipv4") == spec.get("ipv4") for v in self.registry.values() if spec.get("ipv4")):
                 return _err("IP_CONFLICT", "address already registered")
             vm_id = spec.get("vm_id") or "99999999-9999-4999-8999-999999999999"
@@ -304,3 +308,58 @@ def test_load_manager_without_module_is_503():
 
     with pytest.raises(PlatformUnavailable):
         load_manager("Z:/definitely/not/here")
+
+
+def test_serialized_manager_never_overlaps_calls():
+    """리뷰 반영: Manager 는 요청별 상태를 인스턴스 변수에 두므로 call 이 겹치면 안 된다. 스레드 8개가 동시에 불러도 내부 동시성은 1 이다."""
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from dom0_manager.drivers.platform import SerializedManager
+
+    class Inner:
+        data = Path("/srv/xenova")
+
+        def __init__(self):
+            self.active = 0
+            self.max_active = 0
+            self.calls = 0
+            self._lock = threading.Lock()
+
+        def call(self, action, spec=None, **kwargs):
+            with self._lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            time.sleep(0.002)
+            with self._lock:
+                self.active -= 1
+                self.calls += 1
+            return _ok({"action": action})
+
+    inner = Inner()
+    wrapped = SerializedManager(inner)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda i: wrapped.call("list", {"i": i}), range(40)))
+    assert inner.calls == 40
+    assert inner.max_active == 1
+    assert wrapped.data == inner.data
+
+
+def test_build_driver_wraps_manager_and_provisioner_reuses_it(monkeypatch):
+    """실제 조립 경로: load_manager 가 SerializedManager 로 감싸고, build_provisioner 는 드라이버의 Manager 를 그대로 쓴다."""
+    import sys
+    import types
+
+    from dom0_manager.drivers import build_driver, build_provisioner
+    from dom0_manager.drivers.platform import SerializedManager
+
+    fake_module = types.ModuleType("xenova_management")
+    fake_module.Manager = FakeManager
+    monkeypatch.setitem(sys.modules, "xenova_management", fake_module)
+
+    settings = Settings(driver="platform", platform_lib="")
+    driver = build_driver(settings)
+    provisioner = build_provisioner(settings, driver)
+    assert isinstance(driver.manager, SerializedManager)
+    assert provisioner.manager is driver.manager
