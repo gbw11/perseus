@@ -7,12 +7,17 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+import java.util.regex.Pattern;
 
 // Latest OS report from the agent inside a VM (MQTT-02 inventory). One row per VM.
 @Entity
 @Table(name = "agent_inventories")
 public class AgentInventory {
+
+    private static final Pattern IPV4 = Pattern.compile("^(\\d{1,3})(\\.\\d{1,3}){3}$");
 
     @Id
     @Column(name = "vm_id", length = 36)
@@ -105,6 +110,15 @@ public class AgentInventory {
 
     public List<NetworkInterface> getInterfaces() {
         return interfaces == null ? List.of() : interfaces;
+    }
+
+    // The address shown for the VM: the first IPv4 the agent reported, eth0 first, loopback skipped.
+    public Optional<String> primaryIpv4() {
+        return getInterfaces().stream()
+                .sorted(Comparator.comparing((NetworkInterface nic) -> !"eth0".equals(nic.name())))
+                .flatMap(nic -> nic.ips().stream())
+                .filter(ip -> IPV4.matcher(ip).matches() && !ip.startsWith("127."))
+                .findFirst();
     }
 
     public String getAgentVersion() {

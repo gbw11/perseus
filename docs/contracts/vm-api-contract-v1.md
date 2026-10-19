@@ -61,8 +61,9 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
   "guest_kind": "linux",
   "state": "running",
   "agent_status": "ONLINE",
-  "template_id": "debian",
-  "template_version": "12",
+  "ipv4": "192.168.77.20",
+  "template_id": "debian-13-arm64",
+  "template_version": "1.0.0",
   "vcpus": 1,
   "memory_mib": 256
 }
@@ -75,6 +76,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 | `guest_kind` | VM 종류 `linux` / `zephyr`. 생성 때 템플릿에서 복사해 Spring 레코드에 저장. **Spring만 쓰는 값이며 dom0-manager 계약에는 없음.** `zephyr`는 에이전트·네트워크·정상 종료가 없는 콘솔 전용 펌웨어라 `agent_status`가 항상 `UNKNOWN` |
 | `state` | Xen 기준 실행 상태 (3.3절). 도메인이 없으면 `stopped` |
 | `agent_status` | heartbeat 기준 에이전트 상태 `UNKNOWN`/`ONLINE`/`STALE`/`OFFLINE`. **목록·단건 조회에만** 있고 생성·시작·정지 응답에는 없음 |
+| `ipv4` | 에이전트가 마지막으로 보고한 IPv4 (eth0 우선, loopback 제외). 꺼져 있어도 마지막 값을 유지. 보고가 없으면 `null`, `zephyr`는 항상 `null`. **목록·단건 조회에만** 있음. dom0-manager VM 객체에는 IP가 없어 에이전트 보고를 씀 |
 | `template_id`, `template_version` | 생성에 쓴 템플릿. Spring 레코드 |
 | `vcpus`, `memory_mib` | 실행 중이면 dom0-manager가 관측한 값, 꺼져 있으면 Spring 레코드의 값 |
 
@@ -84,7 +86,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 
 | 필드 | 의미 |
 |---|---|
-| `template_id` | 템플릿 ID (예: `debian`) |
+| `template_id` | 플랫폼 공개 카탈로그 ID (예: `debian-13-arm64`) |
 | `version` | 템플릿 버전. VM 생성 요청에서는 이 값을 `template_version`으로 보냄 |
 | `display_name` | 드롭다운 표시 이름 (예: `Debian 12`) |
 | `min_memory_mib` | 이 템플릿의 최소 메모리 |
@@ -92,15 +94,15 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 
 ```json
 [
-  { "template_id": "ubuntu", "version": "24.04-20260926", "display_name": "Ubuntu 24.04", "min_memory_mib": 512, "guest_kind": "linux" },
-  { "template_id": "debian", "version": "13-20261015", "display_name": "Debian 13", "min_memory_mib": 256, "guest_kind": "linux" },
-  { "template_id": "zephyr", "version": "starter-1.0.0", "display_name": "Zephyr Starter 1.0.0", "min_memory_mib": 128, "guest_kind": "zephyr" }
+  { "template_id": "ubuntu-24.04-arm64", "version": "1.0.0", "display_name": "Ubuntu 24.04", "min_memory_mib": 512, "guest_kind": "linux" },
+  { "template_id": "debian-13-arm64", "version": "1.0.0", "display_name": "Debian 13", "min_memory_mib": 256, "guest_kind": "linux" },
+  { "template_id": "zephyr-xenvm-starter-arm64", "version": "1.0.0", "display_name": "Zephyr Starter 1.0.0", "min_memory_mib": 128, "guest_kind": "zephyr" }
 ]
 ```
 
-플랫폼 기본 Ubuntu·Debian·Zephyr 템플릿 카탈로그에 맞춘 값입니다. `template_id`는 OS 검증 리포트가 에이전트의 os-release ID와 비교하므로 OS ID로 두고, `version`은 플랫폼 카탈로그 버전을 사용합니다.
+플랫폼 기본 Ubuntu·Debian·Zephyr 공개 카탈로그의 ID와 버전을 그대로 사용합니다. dom0-manager는 템플릿 값을 변환하지 않습니다. OS 검증에서는 카탈로그 ID를 게스트의 `os-release` ID(`ubuntu`, `debian`)와 별도로 대응시킵니다.
 
-1차 데이터는 Spring 설정 파일(`application.yml`의 `perseus.template-catalog.templates`)에 고정하며, OS(Ubuntu·Debian·Zephyr)마다 버전 하나를 고정합니다. 버전과 최소 메모리 값은 P2 실측 전 임시값입니다(13장).
+1차 데이터는 Spring 설정 파일(`application.yml`의 `perseus.template-catalog.templates`)에 고정하며, Ubuntu·Debian·Zephyr마다 플랫폼이 공개한 버전 하나를 사용합니다. 최소 메모리 값은 실측에 따라 조정할 수 있습니다.
 
 ---
 
@@ -260,7 +262,7 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 | `400` | `InvalidArgument` | 형식 또는 범위 오류 |
 | `404` | `VMNotFound` | `GET` 대상 도메인 부재 |
 | `409` | `VMExists` | `vm_id` 충돌 (단일 의미) |
-| `507` | `InsufficientResources` | 가용 메모리 부족 |
+| `507` | `InsufficientResources` | 가용 자원 부족. `resource.name`: `memory_mib`, `vcpus`, `ipv4`(Linux VM IP 풀 고갈 — 플랫폼 드라이버 브랜치 S15P31E110-115) |
 | `500` | `DriverError` | `xl` 실행 실패·타임아웃, 모르는 상태 문자. **임시 정의** — OpenAPI yaml의 오류 코드 목록에는 아직 없음(13장) |
 | `409` | `InvalidState` | 실행 중인 VM을 `DELETE` (4.4절). 먼저 정지해야 한다 |
 
@@ -309,7 +311,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | `409 VMExists` | 생성·시작에서는 성공으로 처리(10.1절). 그 밖에는 `409 VM_ALREADY_EXISTS` |
 | `409 InvalidState` | `409 INVALID_VM_STATE` |
 | `400 InvalidArgument` | `400 INVALID_ARGUMENT` |
-| `507 InsufficientResources` | **`409 INSUFFICIENT_RESOURCES`** (공개 API에서는 507 대신 409를 씀) |
+| `507 InsufficientResources` | `507 INSUFFICIENT_RESOURCES`. message는 `resource.name`에 따라 메모리·CPU 부족 또는 "VM에 할당할 수 있는 IP 주소가 없습니다."(`ipv4`, Linux VM IP 풀 고갈) |
 | `500 DriverError` | `500 VM_DRIVER_ERROR` |
 | 해석할 수 없는 본문, 모르는 `code`, 본문이 필요한데 없음 | `502 VM_CONTROL_BAD_RESPONSE` |
 
@@ -327,7 +329,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 
 | 항목 | 규칙 | 검증 계층 |
 |---|---|---|
-| `name` | 1~63자, 소문자·숫자·하이픈(`-`) | Spring 단독 |
+| `name` | 1~63자, 한글·공백 허용. 제어문자·줄 구분 문자와 앞뒤 공백 금지 | Spring 단독 |
 | `vcpus` | 1~4 | Spring, dom0-manager |
 | `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 128) | 템플릿별 하한은 Spring, 공통 범위는 dom0-manager |
 | 배수 제약 | 없음. 화면 입력만 64 단위 | — |
@@ -400,7 +402,6 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | OS별 `min_memory_mib` | 제어 계층 | 이미지 빌드 시 실측 |
 | `DriverError`의 세부 분류 | 제어 계층 | 알려진 입력·없음·충돌·자원·시간 초과·일시 장애는 각각 400·404·409·507·504·503으로 분리하고, 분류되지 않은 실패만 500 사용 |
 | 서비스 토큰 배포·회전 | 공통 | Spring과 dom0-manager에 같은 Bearer 서비스 토큰을 안전하게 배포하고 회전하는 운영 절차 |
-| 템플릿 이름 변환 | 제어 계층 | Spring `template_id`+`version`(예: `ubuntu` + `24.04-20260926`)을 플랫폼 템플릿 이름(`ubuntu-24.04-20260926`, `perseus-zephyr-starter-1.0.0`)으로 바꾸는 규칙 |
 | 자동 복구 주체 | 공통 | 보드(Xen `on_crash`·dom0 감시) 또는 Spring. 결정 전까지 Spring은 복구를 수행하지 않음 |
 
 dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포함한 내부 API에서 Bearer 서비스 토큰을 검사합니다. Spring은 `DOM0_MANAGER_BASE_URL`에 Tailscale 주소를 설정하고 `DOM0_MANAGER_SERVICE_TOKEN`을 `Authorization: Bearer`로 전송합니다. 연결 실패는 `503 VM_CONTROL_UNAVAILABLE`로 변환합니다.
@@ -415,5 +416,6 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 |---|---|---|
 | v1 | 2026-10-16 | 계약 확정안 v1.0, 리뷰 v1.1, 백엔드 VM API 규약 v1, 리뷰 v1.2의 확정 사항 통합 |
 | v1.1 | 2026-10-19 | 구현에 맞춰 보완: 공개 VM 객체에 `agent_status`, Spring 공개 state `stopped`(3.3), 템플릿 응답 필드 `version`, `xl` 플래그 없음(`------`) 매핑, `DriverError` 500/501, `/healthz` 본문, Spring 오류 변환표(8.2), 공개 API 응답 형식(5장), `vm_id` 저장 1안 확정, 배포 분리·복구 주체 미확정 항목 추가. Spring 시작은 실행 중이 아닌 도메인을 `409 INVALID_VM_STATE`로 거부, 정지는 이전 상태를 조회해 이벤트 `from`에 기록. Spring이 VM 상태를 주기 조회해 `cause: detected` 이벤트 기록. 템플릿을 플랫폼 기본값(Ubuntu·Debian·Zephyr)으로 교체하고 템플릿·공개 VM 객체에 `guest_kind` 추가 |
-| v1.2 | 2026-10-19 | Spring 선발급 `vm_id`를 유일한 영구 식별자·생성 멱등성 키로 확정. 플랫폼 자동 IP 할당, 동기 stop 90초와 Spring 100초 제한, retire/restore/purge 생명주기, Spring `RETIRED` 명세 보존, Tailscale+Bearer 내부 연결을 반영 |
+| v1.2 | 2026-10-19 | Spring 선발급 `vm_id`를 유일한 영구 식별자·생성 멱등성 키로 확정. 플랫폼 자동 IP 할당, 동기 stop 90초와 Spring 100초 제한, retire/restore/purge 생명주기, Spring `RETIRED` 명세 보존, Tailscale+Bearer 내부 연결을 반영. Spring이 플랫폼 공개 템플릿 ID·버전을 그대로 전달하고 제어 계층 변환을 제거 |
 | v1.3 | 2026-10-19 | API 문서 통일(S15P31E110-230): `docs/dom0-backend-http-contract-v1.md`(v1.0 폐기본)와 `docs/backend-vm-api-rules-v1.md`(백엔드 VM API 규약)를 삭제하고 이 문서로 일원화. 코드 기준으로 정정 — dom0-manager는 기존 도메인에 명세와 관계없이 `409 VMExists`(4.2·7장), `InvalidState`는 실행 중 VM 삭제에 반환(8.1절), 템플릿 OS는 Ubuntu·Debian·Zephyr(2.3절) |
+| v1.4 | 2026-10-19 | Spring 공개 API 보완: VM 이름에 한글·공백 허용(제어문자·앞뒤 공백 금지, 9장), 공개 VM 객체에 `ipv4` 추가(에이전트 보고 기준, Zephyr는 `null`, 2.2절), dom0-manager `507 InsufficientResources`를 공개 API에서도 `507`로 전달하고 IP 풀 고갈(`ipv4`) 메시지 추가(8.1·8.2절) |
