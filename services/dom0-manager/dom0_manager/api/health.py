@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from ..models import Health, HealthStatus
+from ..models import Error, Health, HealthStatus
 from ..service import VmService
 from . import get_service
 
@@ -13,7 +13,10 @@ router = APIRouter(tags=["Health"])
     operation_id="healthz",
     summary="dom0-manager 와 Xen 응답 여부",
     response_model=Health,
-    responses={503: {"model": Health, "description": "Xen 이 응답하지 않음"}},
+    responses={
+        401: {"model": Error, "description": "Unauthorized: Bearer 서비스 토큰 없음·불일치 (미들웨어)"},
+        503: {"model": Health, "description": "Xen 이 응답하지 않음"},
+    },
 )
 def healthz(service: VmService = Depends(get_service)):
     if service.health():

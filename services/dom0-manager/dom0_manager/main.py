@@ -31,7 +31,7 @@ def create_app(
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     driver = driver or build_driver(settings)
-    provisioner = provisioner or build_provisioner(settings)
+    provisioner = provisioner or build_provisioner(settings, driver)
 
     app = FastAPI(title="Xenova dom0 manager API", version="1.0.0", description=DESCRIPTION)
     app.state.settings = settings
@@ -71,7 +71,8 @@ def _install_bearer_auth(app: FastAPI, token: str) -> None:
 
 
 def _contract_openapi(app: FastAPI):
-    """생성 스키마에서 422 응답과 HTTPValidationError 모델을 제거한다(계약 8.1). 계약 테스트가 이 결과를 yaml 과 비교한다."""
+    """생성 스키마에서 422 응답과 HTTPValidationError 모델을 제거하고(계약 8.1) Bearer 보안 스킴을 전역으로 선언한다.
+    계약 테스트가 이 결과를 yaml 과 비교한다."""
 
     def custom_openapi():
         if app.openapi_schema:
@@ -84,6 +85,13 @@ def _contract_openapi(app: FastAPI):
         components = schema.get("components", {}).get("schemas", {})
         components.pop("HTTPValidationError", None)
         components.pop("ValidationError", None)
+        # 인증은 미들웨어라 라우트에서 보이지 않는다. 계약(yaml)과 같은 ServiceToken 보안 스킴을 전역 security 로 선언한다
+        schema.setdefault("components", {}).setdefault("securitySchemes", {})["ServiceToken"] = {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "opaque service token",
+        }
+        schema["security"] = [{"ServiceToken": []}]
         app.openapi_schema = schema
         return schema
 

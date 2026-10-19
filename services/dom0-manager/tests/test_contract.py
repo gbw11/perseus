@@ -51,3 +51,14 @@ def test_error_codes_and_states_match(client):
     assert actual["VmState"]["enum"] == contract["VmState"]["enum"]
     assert actual["CreateVmRequest"]["required"] == contract["CreateVmRequest"]["required"]
     assert set(actual["Vm"]["required"]) == set(contract["Vm"]["required"])
+
+
+def test_security_scheme_and_401_are_declared(client):
+    """인증은 미들웨어라 라우트에 안 보인다. 라이브 OpenAPI 도 yaml 처럼 ServiceToken 을 전역 security 로 선언하고 모든
+    엔드포인트가 401 을 명시해야 한다."""
+    contract = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))
+    spec = client.app.openapi()
+    assert spec["security"] == contract["security"] == [{"ServiceToken": []}]
+    assert spec["components"]["securitySchemes"] == contract["components"]["securitySchemes"]
+    for key, op in _operations(spec).items():
+        assert "401" in op["responses"], key
