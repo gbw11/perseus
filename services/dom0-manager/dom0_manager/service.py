@@ -61,7 +61,13 @@ class VmService:
                     raise InsufficientResources("vcpus", request.vcpus, host.nr_cpus)
                 if request.memory_mib > host.free_memory_mib:
                     raise InsufficientResources("memory_mib", request.memory_mib, host.free_memory_mib)
-                instance = self._provisioner.ensure_instance(request.vm_id, request.template_id, request.template_version)
+                instance = self._provisioner.ensure_instance(
+                    request.vm_id,
+                    request.template_id,
+                    request.template_version,
+                    vcpus=request.vcpus,
+                    memory_mib=request.memory_mib,
+                )
                 spec = CreateSpec(
                     vm_id=request.vm_id,
                     vcpus=request.vcpus,

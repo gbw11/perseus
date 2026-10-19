@@ -96,6 +96,37 @@ tests/
 
 상태 매핑은 계약 3.2장을 따릅니다. `b`(blocked)는 I/O 대기 중인 정상 상태이고, 플래그가 없는 `------`도 running으로 봅니다. 그 외 모르는 문자는 조용히 running으로 넘기지 않고 `DriverError`를 냅니다.
 
+## platform 모드 (보드 실제 연동, S15P31E110-115)
+
+`PERSEUS_DRIVER=platform`은 신영의 플랫폼 관리 라이브러리 `xenova_management.Manager`를 직접 import해서 registry(`/srv/xenova/instances`)와 Xen을 함께 다룹니다. xl 명령을 직접 부르지 않습니다(`xl info`만 자원 조회용).
+
+```bash
+# 보드(dom0)에서
+PERSEUS_DRIVER=platform PERSEUS_PLATFORM_LIB=/usr/lib/xenova PERSEUS_SERVICE_TOKEN=<토큰> python -m dom0_manager
+```
+
+| 변수 | 기본값 | 의미 |
+| --- | --- | --- |
+| `PERSEUS_PLATFORM_LIB` | `/usr/lib/xenova` | `xenova_management` 등 플랫폼 모듈 경로. 여러 개면 OS 경로 구분자로 |
+| `PERSEUS_IP_POOL_START` / `END` | `2` / `99` | Linux VM에 줄 `192.168.77.x` 풀. 플랫폼이 자동 배정하기 전까지 dom0-manager가 빈 주소를 고르고 `IP_CONFLICT`면 다음 주소로 재시도 |
+
+동작 대응:
+
+| API | 플랫폼 호출 |
+| --- | --- |
+| `GET /vms`, `GET /vms/{id}` | `list` / `get`. `domid`가 있는 항목만 도메인으로 봄. 등록만 된 VM은 목록에 없고 단건은 404 |
+| `POST /vms` | 등록이 없으면 `create`(`idempotency_key=create-<vm_id>`, Spring 발급 `vm_id`를 그대로 전달) → `start` |
+| `POST /vms/{id}/stop` | `stop` (`force=false`, 플랫폼이 최대 90초 대기). 시한 초과는 504 |
+| `DELETE /vms/{id}` | 실행 중 409 → 정지 후 `retire`(숨김 보관) |
+
+플랫폼 오류 코드 → HTTP: `INVALID_SPEC`·템플릿 없음 400 / `VM_NOT_FOUND` 404 / 이름·IP·멱등성 충돌과 `VM_NOT_STOPPED`·`OPERATION_IN_PROGRESS` 등 409 / `INSUFFICIENT_STORAGE` 507 / `STORAGE_UNAVAILABLE`·`RECOVERY_REQUIRED`·`CLEANUP_INCOMPLETE` 503 / 시한 초과 504 / 그 외 500.
+
+플랫폼 `xen_state` → 계약 상태: `running`·`blocked`·`unknown`(플래그 없음) → running, `paused` → paused, `shutdown`·`dying` → stopping, `crashed` → crashed, `stopped` → 도메인 없음.
+
+**막힌 것**: 플랫폼 `create`가 아직 `spec['vm_id']`를 받지 않고 보드에서 UUID를 발급합니다. 팀 결정(Spring 발급)과 달라서, 새 VM 생성은 플랫폼이 `vm_id`를 받을 때까지 501을 냅니다. 조회·시작·정지·보관은 영향 없습니다.
+
+테스트: `tests/test_platform_driver.py`는 봉투를 흉내 내는 FakeManager, `tests/test_platform_integration.py`는 저장소의 실제 `xenova_management`를 신영 픽스처(FakeXen·임시 registry)로 돌립니다.
+
 ## Xen 모드 현황
 
 `PERSEUS_DRIVER=xen`에서 지금 되는 것은 `GET /healthz`, `GET /api/v1/vms`, `GET /api/v1/vms/{vm_id}`입니다. `xl list`로 상태를, `xl list -l`의 `config.c_info.uuid`로 vm_id를 읽습니다(플랫폼 도구와 같은 방식). 생성·정지·삭제는 501을 내며 S15P31E110-115에서 구현합니다.

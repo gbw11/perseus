@@ -128,11 +128,13 @@ class Driver(ABC):
 
 
 class Provisioner(ABC):
-    """템플릿 → 인스턴스(디스크·커널·initrd) 준비. 실제 구현은 P2 플랫폼 도구와 연결한다."""
+    """템플릿 → 인스턴스(디스크·커널·initrd) 준비. 실제 구현은 플랫폼 관리 계층(xenova_management)과 연결한다."""
 
     @abstractmethod
-    def ensure_instance(self, vm_id: UUID, template_id: str, template_version: str) -> InstancePaths:
-        """디스크가 있으면 재사용하고 없으면 템플릿에서 만든다(계약 4.2)."""
+    def ensure_instance(
+        self, vm_id: UUID, template_id: str, template_version: str, *, vcpus: int, memory_mib: int
+    ) -> InstancePaths:
+        """등록(디스크)이 있으면 재사용하고 없으면 템플릿에서 만든다(계약 4.2). 생성 명세는 registry 에 기록된다."""
 
     @abstractmethod
     def instance_exists(self, vm_id: UUID) -> bool: ...
