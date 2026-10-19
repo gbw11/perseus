@@ -227,7 +227,7 @@ factory 신규 등록은 defaults의 공개 ID/버전을 보존한다.
 HTTP와 이 가이드의 Manager/CLI는 별도 인터페이스다.
 
 Spring의 Dom0LaunchRequest는 vm_id·template_id·template_version·vcpus·memory_mib의
-5개 필드를 전송한다. 이 가이드의 Manager.create는 name을 포함한 6개 필드가 필수다.
+name을 포함한 6개 필드를 전송한다. PlatformProvisioner는 Spring의 name을 기존 Manager.create 입력으로 전달한다.
 tests/contracts/spring-create-request.json은 Manager용 6개 필드 시험 명세이며,
 실제 Spring HTTP 요청의 직렬화 결과로 사용하지 않는다.
 tests/contracts/spring_manager_bridge.py는 이 명세로 실제 파일/registry/journal/IP 예약을
@@ -235,7 +235,7 @@ tests/contracts/spring_manager_bridge.py는 이 명세로 실제 파일/registry
 
     python3 -B -m unittest discover -s tests/platform -p 'test_xenova_spring_contract.py' -v
 
-검사는 현재 Spring DTO의 5개 필드와 Manager 필수 name의 차이를 명시적으로 대조한다.
+검사는 현재 Spring DTO의 name을 포함한 6개 필드와 실제 Manager의 display_name 저장·조회 경로를 대조한다.
 Python 소스 대조는 Java 실행·HTTP 배포·실보드 검증을 대신하지 않는다.
 services/dom0-manager에는 HTTP 서비스·Xen 조회 드라이버와 명령/Provisioner 인터페이스가 있다.
 XenDriver의 create/shutdown/destroy와 UnavailableProvisioner의 변경 연산은 아직

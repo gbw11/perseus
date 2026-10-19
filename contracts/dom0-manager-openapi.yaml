@@ -239,15 +239,20 @@ components:
     CreateVmRequest:
       type: object
       description: >-
-        name 은 Spring 이 단독으로 검증·보유하므로 보내지 않는다. 템플릿별 min_memory_mib 하한은
+        name은 Spring의 표시 이름을 플랫폼 create에 그대로 전달한다. 템플릿별 min_memory_mib 하한은
         Spring 이 검사하고, dom0-manager 는 공통 범위만 검사한다.
       additionalProperties: false
-      required: [vm_id, template_id, template_version, vcpus, memory_mib]
+      required: [vm_id, name, template_id, template_version, vcpus, memory_mib]
       properties:
         vm_id:
           type: string
           format: uuid
           description: Spring 이 한 번 생성해 재시도에도 재사용한다
+        name:
+          type: string
+          minLength: 1
+          maxLength: 63
+          description: Spring 표시 이름. 한글·공백 허용, 제어·줄 구분 문자와 앞뒤 공백 금지
         template_id:
           type: string
           minLength: 1

@@ -18,7 +18,6 @@ from __future__ import annotations
 import importlib
 import logging
 import os
-import re
 import sys
 import threading
 from pathlib import Path
@@ -41,8 +40,6 @@ from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provision
 from .xl import Xl
 
 log = logging.getLogger(__name__)
-
-_ID_RE = re.compile(r"[a-z][a-z0-9-]{0,39}\Z")
 
 
 class ManagerLike(Protocol):
@@ -227,20 +224,6 @@ def view_to_domain(view: dict[str, Any]) -> Domain | None:
         raise DriverError("platform view is missing vm_id/vcpus/memory_mib", detail=str(view)[:200]) from exc
 
 
-def instance_name(template_id: str, vm_id: UUID) -> str:
-    """플랫폼 registry 이름 규칙 [a-z][a-z0-9-]{0,39}: <template_id 정규화>-<vm_id 앞 12자리>."""
-    suffix = vm_id.hex[:12]
-    base = re.sub(r"[^a-z0-9-]+", "-", template_id.lower()).strip("-")
-    base = re.sub(r"-{2,}", "-", base)
-    if not base or not base[0].isalpha():
-        base = "vm-" + base
-    base = base[: 40 - len(suffix) - 1].rstrip("-")
-    name = f"{base}-{suffix}"
-    if not _ID_RE.fullmatch(name):
-        raise InvalidArgument(f"cannot derive a valid instance name from template_id {template_id!r}")
-    return name
-
-
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -388,7 +371,7 @@ class PlatformProvisioner(Provisioner):
         return [k for k, v in recorded.items() if v is not None and str(v) != str(requested[k])]
 
     def ensure_instance(
-        self, vm_id: UUID, template_id: str, template_version: str, *, vcpus: int, memory_mib: int
+        self, vm_id: UUID, template_id: str, template_version: str, *, name: str, vcpus: int, memory_mib: int
     ) -> InstancePaths:
         existing = self._registration(vm_id)
         if existing is not None:
@@ -399,7 +382,6 @@ class PlatformProvisioner(Provisioner):
                 )
             return self._paths(existing)
 
-        name = instance_name(template_id, vm_id)  # 표시 이름. 내부 실행 이름(vm-<hex>)·MAC·IP 는 플랫폼이 발급한다
         spec: dict[str, Any] = {
             "vm_id": str(vm_id),  # 팀 결정: Spring 발급 UUID 를 registry·Xen UUID 로 그대로 쓴다
             "name": name,

@@ -83,7 +83,7 @@ class UnavailableProvisioner(Provisioner):
         self._root = Path(instance_root)
 
     def ensure_instance(
-        self, vm_id: UUID, template_id: str, template_version: str, *, vcpus: int, memory_mib: int
+        self, vm_id: UUID, template_id: str, template_version: str, *, name: str, vcpus: int, memory_mib: int
     ) -> InstancePaths:
         raise NotImplementedError("Provisioner: xen 모드는 조회 전용. 생성은 XENOVA_DRIVER=platform 에서 지원한다")
 

@@ -211,11 +211,13 @@ class SpringContractTest(unittest.TestCase):
         fields = re.search(r'record Dom0LaunchRequest\((.*?)\)', source, re.S).group(1)
         names = re.findall(r'(?:String|int)\s+(\w+)', fields)
         names = {re.sub(r'([A-Z])', lambda m:'_'+m[1].lower(), name) for name in names}
-        self.assertEqual(names, {'vm_id','template_id','template_version','vcpus','memory_mib'})
-        self.assertEqual(set(request) - names, {'name'})
+        self.assertEqual(names, {'vm_id','name','template_id','template_version','vcpus','memory_mib'})
+        self.assertEqual(set(request), names)
         http_request = {key:request[key] for key in names}
-        self.error(self.f.m.call('create', http_request, execute=True), 'INVALID_SPEC')
-        self.assertFalse((self.f.data/'operations').exists())
+        created = self.f.m.call('create', http_request, execute=True)
+        self.assertTrue(created['ok'], created)
+        view = self.f.m.call('get', {'vm_id':http_request['vm_id']})['data']['vm']
+        self.assertEqual(view['configuration']['display_name'], request['name'])
         calls = [
             {'spec':request}, {'spec':request},
             {'spec':{**request,'memory_mib':768}},
