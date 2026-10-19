@@ -1,4 +1,4 @@
-"""계약 v1.1: PERSEUS_SERVICE_TOKEN 이 설정되면 /healthz 를 포함한 모든 내부 API 가 Bearer 토큰을 요구한다."""
+"""계약 v1.1: XENOVA_SERVICE_TOKEN 이 설정되면 /healthz 를 포함한 모든 내부 API 가 Bearer 토큰을 요구한다."""
 
 from fastapi.testclient import TestClient
 
@@ -39,6 +39,6 @@ def test_correct_token_passes_and_docs_stay_public():
 
 
 def test_settings_reads_token_from_env():
-    s = Settings.from_env({"PERSEUS_SERVICE_TOKEN": "abc", "PERSEUS_DRIVER": "mock"})
+    s = Settings.from_env({"XENOVA_SERVICE_TOKEN": "abc", "XENOVA_DRIVER": "mock"})
     assert s.service_token == "abc"
-    assert Settings.from_env({"PERSEUS_DRIVER": "mock"}).service_token == ""
+    assert Settings.from_env({"XENOVA_DRIVER": "mock"}).service_token == ""

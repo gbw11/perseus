@@ -1,8 +1,8 @@
 spring:
   application:
-    name: perseus-backend
+    name: xenova-backend
   datasource:
-    url: ${DB_URL:jdbc:h2:file:./data/perseus;AUTO_SERVER=TRUE}
+    url: ${DB_URL:jdbc:h2:file:./data/xenova;AUTO_SERVER=TRUE}
     username: ${DB_USERNAME:sa}
     password: ${DB_PASSWORD:}
   jpa:
@@ -31,9 +31,9 @@ management:
     health:
       show-details: never
 
-perseus:
+xenova:
   auth:
-    jwt-secret: ${JWT_SECRET:perseus-local-development-secret-change-before-production}
+    jwt-secret: ${JWT_SECRET:xenova-local-development-secret-change-before-production}
     access-token-ttl: ${ACCESS_TOKEN_TTL:15m}
     refresh-token-ttl: ${REFRESH_TOKEN_TTL:7d}
     refresh-cookie-secure: ${AUTH_COOKIE_SECURE:false}
@@ -77,7 +77,7 @@ perseus:
   mqtt:
     enabled: ${MQTT_ENABLED:true}
     broker-url: ${MQTT_BROKER_URL:tcp://127.0.0.1:1883}
-    client-id: ${MQTT_CLIENT_ID:perseus-backend}
+    client-id: ${MQTT_CLIENT_ID:xenova-backend}
     username: ${MQTT_USERNAME:}
     password: ${MQTT_PASSWORD:}
     reconnect-interval: ${MQTT_RECONNECT_INTERVAL:5s}
