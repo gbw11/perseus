@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import sys
+import threading
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Protocol
@@ -66,6 +67,27 @@ class ManagerLike(Protocol):
 # ---------------------------------------------------------------------------
 
 
+class SerializedManager:
+    """Manager.call 을 프로세스 안에서 직렬화한다.
+
+    현재 Manager 는 요청별 상태(current_operation, replayed)를 인스턴스 변수에 두므로 FastAPI 스레드 여러 개가
+    같은 객체를 동시에 부르면 operation_id·복구 기록이 섞일 수 있다. 플랫폼의 파일 잠금(/run/xenova)은 임계 구간만
+    보호하고 그 앞뒤의 인스턴스 변수는 보호하지 않는다. 플랫폼이 요청별 context 로 바뀌어도 이 직렬화는 해가 없다.
+    """
+
+    def __init__(self, inner: ManagerLike) -> None:
+        self._inner = inner
+        self._lock = threading.Lock()
+
+    @property
+    def data(self) -> Path:
+        return self._inner.data
+
+    def call(self, action: str, spec: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+        with self._lock:
+            return self._inner.call(action, spec, **kwargs)
+
+
 def load_manager(platform_lib: str) -> ManagerLike:
     """PERSEUS_PLATFORM_LIB 의 디렉터리들을 sys.path 에 넣고 xenova_management.Manager() 를 만든다."""
     for entry in [p for p in platform_lib.split(os.pathsep) if p]:
@@ -77,7 +99,7 @@ def load_manager(platform_lib: str) -> ManagerLike:
         raise PlatformUnavailable(
             "xenova_management not importable; set PERSEUS_PLATFORM_LIB (board: /usr/lib/xenova)", detail=str(exc)
         ) from exc
-    return module.Manager()
+    return SerializedManager(module.Manager())
 
 
 # ---------------------------------------------------------------------------
@@ -340,11 +362,31 @@ class PlatformProvisioner(Provisioner):
 
     # ---- 생성·보관 ----
 
+    @staticmethod
+    def _spec_mismatch(existing: dict[str, Any], template_id: str, template_version: str, vcpus: int, memory_mib: int) -> list[str]:
+        """계약 4.2 Spring 불변조건: 같은 vm_id 에는 같은 생성 명세. 기록된 값과 다른 항목을 돌려준다."""
+        initial = existing.get("initial_spec") or {}
+        configuration = existing.get("configuration") or {}
+        recorded = {
+            "template_id": initial.get("template_id"),
+            "template_version": initial.get("template_version"),
+            "vcpus": initial.get("vcpus", configuration.get("vcpus")),
+            "memory_mib": initial.get("memory_mib", configuration.get("memory_mib")),
+        }
+        requested = {"template_id": template_id, "template_version": template_version, "vcpus": vcpus, "memory_mib": memory_mib}
+        # 공장 기본 VM 처럼 initial_spec 이 없는 옛 등록은 템플릿을 비교할 수 없어 자원만 비교한다
+        return [k for k, v in recorded.items() if v is not None and str(v) != str(requested[k])]
+
     def ensure_instance(
         self, vm_id: UUID, template_id: str, template_version: str, *, vcpus: int, memory_mib: int
     ) -> InstancePaths:
         existing = self._registration(vm_id)
         if existing is not None:
+            mismatch = self._spec_mismatch(existing, template_id, template_version, vcpus, memory_mib)
+            if mismatch:
+                raise VMExists(
+                    f"vm {vm_id} is registered with a different spec ({', '.join(mismatch)}); same vm_id must keep the same spec"
+                )
             return self._paths(existing)
 
         name = instance_name(template_id, vm_id)

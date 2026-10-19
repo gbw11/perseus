@@ -27,7 +27,8 @@ def test_non_uuid_vm_id_in_body_and_path(client):
 
 
 def test_range_rules(client):
-    _assert_invalid(client.post("/api/v1/vms", json=create_body(memory_mib=64)))
+    _assert_invalid(client.post("/api/v1/vms", json=create_body(memory_mib=8)))  # 공통 하한 16 (Zephyr 프로필)
+    assert client.post("/api/v1/vms", json=create_body(memory_mib=16)).status_code == 201
     _assert_invalid(client.post("/api/v1/vms", json=create_body(memory_mib=2048)))
     _assert_invalid(client.post("/api/v1/vms", json=create_body(vcpus=0)))
     _assert_invalid(client.post("/api/v1/vms", json=create_body(vcpus=5)))

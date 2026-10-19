@@ -92,7 +92,8 @@ class Driver(ABC):
 
     @abstractmethod
     def shutdown(self, vm_id: UUID, *, grace_s: float) -> None:
-        """정상 종료 요청 후 grace_s 안에 소멸하지 않으면 강제 종료로 전환한다. 디스크 보존. 멱등."""
+        """정상 종료를 요청하고 grace_s 까지 소멸을 기다린다. 시간이 지나도 자동 강제 종료하지 않고 DriverTimeout 을 낸다(계약 v1.1).
+        디스크 보존. 없는 VM 은 그냥 성공(멱등)."""
 
     @abstractmethod
     def destroy(self, vm_id: UUID) -> None:

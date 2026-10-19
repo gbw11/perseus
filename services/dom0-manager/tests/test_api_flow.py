@@ -79,7 +79,7 @@ def test_hanging_domain_is_not_forced(client, driver):
     driver.inject_hang(VM_A)
     failed = client.post(f"/api/v1/vms/{VM_A}/stop")
     assert failed.status_code == 504
-    assert failed.json()["code"] == "DriverError"
+    assert failed.json()["code"] == "DriverTimeout"
     assert driver.events[-1][2] == {"forced": False, "grace_s": 90.0, "timed_out": True}
     assert client.get(f"/api/v1/vms/{VM_A}").json()["state"] == "running"
 
@@ -88,7 +88,7 @@ def test_driver_timeout_does_not_take_service_down(client, driver):
     driver.inject_next_create("timeout")
     failed = client.post("/api/v1/vms", json=create_body())
     assert failed.status_code == 504
-    assert failed.json()["code"] == "DriverError"
+    assert failed.json()["code"] == "DriverTimeout"
     assert client.get("/api/v1/vms").status_code == 200
 
 

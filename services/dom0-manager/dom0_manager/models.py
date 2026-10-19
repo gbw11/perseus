@@ -38,12 +38,17 @@ class CreateVmRequest(BaseModel):
     template_id: str = Field(min_length=1, description="예 debian, ubuntu, alpine")
     template_version: str = Field(min_length=1)
     vcpus: int = Field(ge=1, le=4)
-    memory_mib: int = Field(ge=128, le=1024, description="배수 제약 없음. 64 단위는 화면 입력 규칙일 뿐이다")
+    memory_mib: int = Field(
+        ge=16,
+        le=1024,
+        description="공통 하한 16(Zephyr 고정 프로필). 템플릿별 하한·상한은 플랫폼 템플릿 resource_limits 와 Spring 설정이 검사한다",
+    )
 
 
 class ResourceName(str, Enum):
     vcpus = "vcpus"
     memory_mib = "memory_mib"
+    ipv4 = "ipv4"  # Linux VM IP 풀(192.168.77.2..99) 고갈
 
 
 class ResourceError(BaseModel):
@@ -60,6 +65,11 @@ class ErrorCode(str, Enum):
     VMExists = "VMExists"
     InsufficientResources = "InsufficientResources"
     InvalidState = "InvalidState"  # 예비. pause/unpause 엔드포인트가 생기기 전까지 반환하지 않는다
+    # 드라이버·플랫폼 실패. HTTP 상태와 1:1 로 둔다 (Spring 이 code 로 매핑하므로 상태만으로 구분하지 않는다)
+    DriverError = "DriverError"  # 500 그 외 실행 오류
+    DriverTimeout = "DriverTimeout"  # 504 xl·플랫폼 시한 초과
+    PlatformUnavailable = "PlatformUnavailable"  # 503 registry·저장소·Xen 일시 장애
+    NotSupported = "NotSupported"  # 501 플랫폼이 아직 제공하지 않는 동작
 
 
 class Error(BaseModel):
