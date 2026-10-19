@@ -2,6 +2,7 @@ package com.perseus.backend.report.os.application;
 
 import com.perseus.backend.agent.domain.AgentStatus;
 import com.perseus.backend.agent.domain.NetworkInterface;
+import com.perseus.backend.template.domain.GuestKind;
 import com.perseus.backend.vm.domain.VmState;
 import java.time.Instant;
 import java.util.List;
@@ -22,10 +23,12 @@ public record OsEvidenceReport(
         BLOCKED
     }
 
+    // NOT_APPLICABLE: a zephyr guest has no agent, so there is no in-guest report to compare.
     public enum Match {
         MATCH,
         MISMATCH,
-        UNKNOWN
+        UNKNOWN,
+        NOT_APPLICABLE
     }
 
     public record ObservationWindow(Instant from, Instant to) {
@@ -39,6 +42,7 @@ public record OsEvidenceReport(
 
     public record Evidence(
             String vmId,
+            GuestKind guestKind,
             String runId,
             String bootId,
             VmState xenState,

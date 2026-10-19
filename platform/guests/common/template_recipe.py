@@ -12,7 +12,7 @@ from prepare_rootfs import inside
 
 ROOT = Path(__file__).resolve().parents[3]
 VERSION = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?')
-RESERVED = ('etc/zenova/', 'usr/lib/zenova/', 'etc/ssh/', 'etc/systemd/',
+RESERVED = ('etc/xenova/', 'usr/lib/xenova/', 'etc/ssh/', 'etc/systemd/',
             'usr/lib/systemd/', 'etc/machine-id', 'etc/shadow', 'etc/os-release',
             'usr/lib/os-release', 'boot/', 'lib/modules/', 'usr/lib/modules/')
 
@@ -47,11 +47,11 @@ def source_info(recipe, source_id):
             raise ValueError('template overlay source must be regular without parent links')
         targets.add(str(dst))
         sources[str(src)] = {'sha256': sha(asset), 'bytes': asset.stat().st_size}
-    common = [ROOT / 'scripts/prepare-zenova-guests.py',
+    common = [ROOT / 'scripts/prepare-xenova-guests.py',
               ROOT / 'platform/guests/common/prepare_rootfs.py',
               ROOT / 'platform/guests/common/guest_identity.py',
               ROOT / 'platform/guests/common/prepare_instance.py', Path(__file__).resolve()]
-    preparation = {'platform': 'zenova', 'recipe': meta, 'recipe_files': sources,
+    preparation = {'platform': 'xenova', 'recipe': meta, 'recipe_files': sources,
                    'preparer_files': {str(p.relative_to(ROOT)): sha(p) for p in common}}
     preparation['source_sha256'] = hashlib.sha256(
         json.dumps(preparation, sort_keys=True, separators=(',', ':')).encode()).hexdigest()

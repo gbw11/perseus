@@ -9,14 +9,14 @@ import struct
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-FILES = ROOT / 'platform/yocto/meta-zenova/recipes-core/zenova-platform/files'
+FILES = ROOT / 'platform/yocto/meta-xenova/recipes-core/xenova-platform/files'
 sys.path.insert(0, str(ROOT / 'platform/first-install'))
 sys.path.insert(0, str(FILES))
 sys.path.insert(0, str(ROOT / 'platform/guests/common'))
 import assemble
 import first_install_contract as contract
-import zenova_first_boot as boot
-import zenova_vm as vm
+import xenova_first_boot as boot
+import xenova_vm as vm
 import guest_identity
 import prepare_rootfs
 
@@ -36,7 +36,7 @@ class Board:
         self.root, self.card_bytes = Path(root), card_bytes
         self.calls, self.failure, self.mounted = [], None, False
         self.kernel_bytes, self.fs_size = 4 * contract.GIB, 4 * contract.GIB
-        for name in ('proc/self', 'dev', 'sys/dev/block', 'sys/class/block', 'sys/devices/mock/block/sdz', 'etc', 'srv/zenova', 'run/zenova'):
+        for name in ('proc/self', 'dev', 'sys/dev/block', 'sys/class/block', 'sys/devices/mock/block/sdz', 'etc', 'srv/xenova', 'run/xenova'):
             (self.root / name).mkdir(parents=True, exist_ok=True)
         self.disk = self.root / 'dev/sdz'
         self.disk.write_bytes(mbr(self.kernel_bytes // 512))
@@ -55,13 +55,13 @@ class Board:
 
     @property
     def data(self):
-        return self.root / 'srv/zenova'
+        return self.root / 'srv/xenova'
 
     def set_mount(self, mounted):
         self.mounted = mounted
         text = '1 0 8:2 / / rw - ext4 /dev/sdz2 rw\n'
         if mounted:
-            text += '2 1 8:3 / /srv/zenova rw - ext4 /dev/sdz3 rw\n'
+            text += '2 1 8:3 / /srv/xenova rw - ext4 /dev/sdz3 rw\n'
         (self.root / 'proc/self/mountinfo').write_text(text)
 
     def table_bytes(self):
@@ -78,7 +78,7 @@ class Board:
         if tool == 'blkid':
             if 'PARTUUID' in args:
                 return '1234abcd-02\n'
-            return 'TYPE=ext4\nLABEL=zenova-data\nUUID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\n'
+            return 'TYPE=ext4\nLABEL=xenova-data\nUUID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\n'
         if tool == 'dumpe2fs':
             return f'Block count: {self.fs_size // 4096}\nBlock size: 4096\n'
         if tool == 'sfdisk':
@@ -139,38 +139,38 @@ class Board:
             (template / 'template.json').write_text(json.dumps(meta))
             templates.append({'id': r['template'], 'metadata': meta, 'root_bytes': (template / 'root.raw').stat().st_size})
         factory = {'schema': 1, 'features': contract.LEGACY_FEATURES, 'factory_id': 'fixture-common-factory', 'instances': bundles, 'templates': templates}
-        (self.data / '.zenova-install.json').write_text(json.dumps(factory))
+        (self.data / '.xenova-install.json').write_text(json.dumps(factory))
         return factory
 
 
 def platform_root(root):
     """새 Yocto 출력의 파일 계약만 모의한다. 도구 파일은 실행하지 않는 텍스트 fixture다."""
     root = Path(root)
-    mapping = {'usr/lib/zenova/zenova_vm.py': FILES / 'zenova_vm.py',
-               'etc/zenova/defaults.json': FILES / 'defaults.json',
-               'usr/lib/zenova/zenova_first_boot.py': FILES / 'zenova_first_boot.py',
-               'usr/lib/zenova/first_install_contract.py': ROOT / 'platform/first-install/first_install_contract.py',
-               'usr/sbin/zenova-first-boot': FILES / 'zenova-first-boot',
-               'usr/sbin/zenova-vm': FILES / 'zenova-vm',
-               'usr/sbin/zenova-verify-artifacts': ROOT / 'scripts/verify-zenova-runtime-artifacts.py',
-               'usr/lib/zenova/zenova_runtime.py': FILES / 'zenova_runtime.py',
-               'usr/lib/zenova/zenova_zephyr.py': FILES / 'zenova_zephyr.py',
-               'etc/systemd/journald.conf.d/20-zenova.conf': FILES / 'zenova-journald.conf',
-               'etc/systemd/system.conf.d/20-zenova.conf': FILES / 'zenova-system.conf'}
-    for name in ('zenova_management.py','zenova_management_cli.py','zenova_catalog.py','zenova_wifi.py'):
-        mapping['usr/lib/zenova/'+name] = FILES/name
-    mapping['usr/lib/zenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
-    mapping['usr/sbin/zenova-wifi'] = FILES/'zenova-wifi'
-    mapping['usr/lib/zenova/update_guest_ssh.py'] = ROOT / 'scripts/update-zenova-guest-ssh.py'
+    mapping = {'usr/lib/xenova/xenova_vm.py': FILES / 'xenova_vm.py',
+               'etc/xenova/defaults.json': FILES / 'defaults.json',
+               'usr/lib/xenova/xenova_first_boot.py': FILES / 'xenova_first_boot.py',
+               'usr/lib/xenova/first_install_contract.py': ROOT / 'platform/first-install/first_install_contract.py',
+               'usr/sbin/xenova-first-boot': FILES / 'xenova-first-boot',
+               'usr/sbin/xenova-vm': FILES / 'xenova-vm',
+               'usr/sbin/xenova-verify-artifacts': ROOT / 'scripts/verify-xenova-runtime-artifacts.py',
+               'usr/lib/xenova/xenova_runtime.py': FILES / 'xenova_runtime.py',
+               'usr/lib/xenova/xenova_zephyr.py': FILES / 'xenova_zephyr.py',
+               'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
+               'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
+    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py'):
+        mapping['usr/lib/xenova/'+name] = FILES/name
+    mapping['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
+    mapping['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
+    mapping['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
-        mapping['usr/lib/zenova/' + name] = ROOT / 'platform/guests/common' / name
+        mapping['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
     for path in [*FILES.glob('*.service'), *FILES.glob('*.mount')]:
         mapping['usr/lib/systemd/system/' + path.name] = path
     for relative, source in mapping.items():
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
-    cap = root / 'usr/share/zenova/first-install-capabilities.json'
+    cap = root / 'usr/share/xenova/first-install-capabilities.json'
     cap.parent.mkdir(parents=True)
     cap.write_text(json.dumps(contract.FEATURES))
     (root / 'etc/machine-id').write_text('uninitialized\n')
@@ -183,7 +183,7 @@ def platform_root(root):
     checker.parent.mkdir(parents=True); checker.write_text('packaging fixture: not executed')
     wants = root / 'etc/systemd/system/multi-user.target.wants'
     wants.mkdir(exist_ok=True)
-    for name in ('zenova-first-boot.service', 'srv-zenova.mount', 'zenova-vms.service', 'zenova-vm-shutdown.service'):
+    for name in ('xenova-first-boot.service', 'srv-xenova.mount', 'xenova-vms.service', 'xenova-vm-shutdown.service'):
         (wants / name).symlink_to('/usr/lib/systemd/system/' + name)
     tools = root / 'usr/bin'
     tools.mkdir(parents=True)
@@ -197,7 +197,7 @@ def platform_root(root):
         target.write_bytes(b'fixture: not real firmware')
     for name, text in [('qemu-config-host.h', '#define CONFIG_VNC 1\n#define CONFIG_XEN_BACKEND 1\n'),
                        ('qemu-i386-config-target.h', '#define CONFIG_XEN 1\n')]:
-        (root / 'usr/share/zenova' / name).write_text(text)
+        (root / 'usr/share/xenova' / name).write_text(text)
     return root
 
 

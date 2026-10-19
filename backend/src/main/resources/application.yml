@@ -39,30 +39,42 @@ perseus:
     refresh-cookie-secure: ${AUTH_COOKIE_SECURE:false}
     max-login-attempts: ${MAX_LOGIN_ATTEMPTS:5}
     login-attempt-window: ${LOGIN_ATTEMPT_WINDOW:5m}
-  # 1차 템플릿 목록. 버전과 최소 메모리는 P2 확인 전 임시값이다.
+  # 플랫폼 기본 템플릿(defaults.json)에 맞춘 목록. P2 확정 전 임시값이다.
+  # - template-id는 OS 검증 리포트가 에이전트의 os-release ID와 비교하는 값이라 ubuntu/debian으로 둔다.
+  # - version은 플랫폼 템플릿 이름(ubuntu-24.04-20260926 등)에서 OS ID를 뺀 부분이다.
+  #   dom0-manager가 이 값을 플랫폼 템플릿 이름으로 어떻게 바꿀지는 P2·P3 답변 후 확정한다.
+  # - guest-kind가 zephyr인 템플릿은 에이전트·네트워크·정상 종료가 없는 콘솔 전용 펌웨어다.
   template-catalog:
     templates:
-      - template-id: alpine
-        version: "1.2.0"
-        display-name: Alpine 1.2.0
-        min-memory-mib: 128
-      - template-id: debian
-        version: "12"
-        display-name: Debian 12
-        min-memory-mib: 256
       - template-id: ubuntu
-        version: "24.04"
+        version: "24.04-20260926"
         display-name: Ubuntu 24.04
         min-memory-mib: 512
+        guest-kind: linux
+      - template-id: debian
+        version: "13-20261015"
+        display-name: Debian 13
+        min-memory-mib: 256
+        guest-kind: linux
+      - template-id: zephyr
+        version: "starter-1.0.0"
+        display-name: Zephyr Starter 1.0.0
+        min-memory-mib: 128
+        guest-kind: zephyr
   agent:
     stale-after: ${AGENT_STALE_AFTER:15s}
     offline-after: ${AGENT_OFFLINE_AFTER:30s}
+  # 에이전트 상태(ONLINE/STALE/OFFLINE) 변화를 이벤트로 남기기 위해 확인하는 주기
+  event:
+    agent-status-check-interval-ms: ${EVENT_AGENT_STATUS_CHECK_INTERVAL_MS:5000}
+    # 사용자 조작 없이 바뀐 VM 상태(크래시 등)를 찾으려고 dom0-manager 목록을 조회하는 주기
+    vm-state-check-interval-ms: ${EVENT_VM_STATE_CHECK_INTERVAL_MS:5000}
   report:
     os-evidence:
+      # 에이전트 보고로 증명할 수 있는 Linux만 필수로 둔다. Zephyr는 에이전트가 없어 판정 방법 미정이다.
       required-os-ids:
         - debian
         - ubuntu
-        - alpine
       observation-window: ${OS_EVIDENCE_WINDOW:30s}
       build-id: ${BUILD_ID:}
   mqtt:
@@ -79,5 +91,6 @@ perseus:
     service-token: ${DOM0_MANAGER_SERVICE_TOKEN:}
     connect-timeout: ${DOM0_MANAGER_CONNECT_TIMEOUT:2s}
     query-timeout: ${DOM0_MANAGER_QUERY_TIMEOUT:6s}
-    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:35s}
+    # Platform graceful stop can wait up to 90s; keep the outer HTTP budget longer.
+    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:100s}
     retry-backoff: ${DOM0_MANAGER_RETRY_BACKOFF:500ms}

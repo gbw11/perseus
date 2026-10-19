@@ -4,11 +4,13 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 public enum VmState {
+    // Reported by dom0-manager from `xl list` (vm-api-contract-v1 3.1).
     RUNNING("running"),
-    PAUSED("paused"),
     STOPPING("stopping"),
-    SHUTDOWN("shutdown"),
-    CRASHED("crashed");
+    PAUSED("paused"),
+    CRASHED("crashed"),
+    // Spring-only: the VM is recorded but has no Xen domain. dom0-manager never returns it.
+    STOPPED("stopped");
 
     private final String value;
 

@@ -5,7 +5,7 @@
 
 int main(void)
 {
-	printk("Zenova / Zephyr / Xen\n"
+	printk("Xenova / Zephyr / Xen\n"
 	       "Starter App: edit, build and replace this firmware with your application.\n"
 	       "PV console only; board compatibility and application readiness require testing.\n");
 	k_sleep(K_FOREVER);
