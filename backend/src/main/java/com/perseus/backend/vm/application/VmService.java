@@ -88,7 +88,8 @@ public class VmService {
             return new CreateResult(underOperation(existing.getVmId(), () -> ensureRunning(existing)), false);
         }
 
-        VmRecord record = vmRecordRepository.save(new VmRecord(UUID.randomUUID().toString(), command, clock.instant()));
+        VmRecord record = vmRecordRepository.save(
+                new VmRecord(UUID.randomUUID().toString(), command, template.guestKind(), clock.instant()));
         return new CreateResult(underOperation(record.getVmId(), () -> launchNew(record)), true);
     }
 

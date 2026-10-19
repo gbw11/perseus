@@ -156,7 +156,26 @@ class VmApiIntegrationTest {
                 .andExpect(jsonPath("$[0].template_id").value("debian"))
                 .andExpect(jsonPath("$[0].version").value("12"))
                 .andExpect(jsonPath("$[0].display_name").value("Debian 12"))
-                .andExpect(jsonPath("$[1].min_memory_mib").value(512));
+                .andExpect(jsonPath("$[0].guest_kind").value("linux"))
+                .andExpect(jsonPath("$[1].min_memory_mib").value(512))
+                .andExpect(jsonPath("$[2].template_id").value("zephyr"))
+                .andExpect(jsonPath("$[2].guest_kind").value("zephyr"));
+    }
+
+    @Test
+    void vmsCarryTheGuestKindOfTheirTemplate() throws Exception {
+        createVm("zephyr-01", "zephyr", "starter-1.0.0", 1, 128)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.guest_kind").value("zephyr"));
+        createVm("debian-02", "debian", "12", 1, 256)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.guest_kind").value("linux"));
+
+        mockMvc.perform(get("/api/v1/vms")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.name == 'zephyr-01')].guest_kind").value("zephyr"))
+                .andExpect(jsonPath("$.items[?(@.name == 'zephyr-01')].agent_status").value("UNKNOWN"));
     }
 
     @Test

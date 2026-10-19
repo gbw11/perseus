@@ -13,6 +13,7 @@ import com.perseus.backend.common.error.ApiException;
 import com.perseus.backend.event.application.EventRecorder;
 import com.perseus.backend.event.application.VmStateTracker;
 import com.perseus.backend.template.application.TemplateCatalog;
+import com.perseus.backend.template.domain.GuestKind;
 import com.perseus.backend.template.domain.VmTemplate;
 import com.perseus.backend.template.infrastructure.TemplateCatalogProperties;
 import com.perseus.backend.vm.application.VmService.CreateResult;
@@ -64,7 +65,7 @@ class VmServiceTest {
     @BeforeEach
     void setUp() {
         TemplateCatalog templateCatalog = new TemplateCatalog(new TemplateCatalogProperties(
-                List.of(new VmTemplate("alpine", "1.2.0", "Alpine 1.2.0", 128))));
+                List.of(new VmTemplate("alpine", "1.2.0", "Alpine 1.2.0", 128, GuestKind.LINUX))));
         service = new VmService(vmControlPort, vmRecordRepository, templateCatalog, eventRecorder, stateTracker, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

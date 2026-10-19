@@ -15,6 +15,7 @@ import com.perseus.backend.agent.domain.AgentInventoryRepository;
 import com.perseus.backend.agent.domain.InventoryReport;
 import com.perseus.backend.agent.domain.NetworkInterface;
 import com.perseus.backend.common.error.ApiException;
+import com.perseus.backend.template.domain.GuestKind;
 import com.perseus.backend.vm.domain.CreateVmCommand;
 import com.perseus.backend.vm.domain.VmControlPort;
 import com.perseus.backend.vm.domain.VmRecord;
@@ -45,7 +46,7 @@ class OsEvidenceReportApiIntegrationTest {
     private static final List<CreateVmCommand> VMS = List.of(
             new CreateVmCommand("debian-01", "debian", "12", 1, 256),
             new CreateVmCommand("ubuntu-01", "ubuntu", "24.04", 1, 512),
-            new CreateVmCommand("alpine-01", "alpine", "1.2.0", 1, 128));
+            new CreateVmCommand("zephyr-01", "zephyr", "starter-1.0.0", 1, 128));
 
     @Autowired
     private MockMvc mockMvc;
@@ -87,7 +88,8 @@ class OsEvidenceReportApiIntegrationTest {
         for (int i = 0; i < VMS.size(); i++) {
             CreateVmCommand command = VMS.get(i);
             String vmId = "vm-" + command.templateId();
-            vmRecordRepository.save(new VmRecord(vmId, command, createdAt.plusSeconds(i)));
+            GuestKind kind = "zephyr".equals(command.templateId()) ? GuestKind.ZEPHYR : GuestKind.LINUX;
+            vmRecordRepository.save(new VmRecord(vmId, command, kind, createdAt.plusSeconds(i)));
         }
         when(vmControlPort.list()).thenReturn(VMS.stream()
                 .map(command -> new VmRuntime("vm-" + command.templateId(), VmState.RUNNING, 1, command.memoryMib()))
@@ -98,14 +100,14 @@ class OsEvidenceReportApiIntegrationTest {
     void passesWhenAllRequiredOsReportThemselvesWhileRunning() throws Exception {
         reportAgent("vm-debian", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
         reportAgent("vm-ubuntu", "ubuntu", "Ubuntu 24.04 LTS", Instant.now());
-        reportAgent("vm-alpine", "alpine", "Alpine Linux v3.20", Instant.now());
 
+        // The zephyr VM has no agent; it is listed but not judged.
         report()
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.verdict").value("PASS"))
                 .andExpect(jsonPath("$.reasons").isEmpty())
                 .andExpect(jsonPath("$.build_id").value("test-build"))
-                .andExpect(jsonPath("$.required_os_ids.length()").value(3))
+                .andExpect(jsonPath("$.required_os_ids.length()").value(2))
                 .andExpect(jsonPath("$.observation_window.from").isNotEmpty())
                 .andExpect(jsonPath("$.entries.length()").value(3))
                 .andExpect(jsonPath("$.entries[0].xen_state").value("running"))
@@ -113,14 +115,16 @@ class OsEvidenceReportApiIntegrationTest {
                 .andExpect(jsonPath("$.entries[0].expected_os.id").value("debian"))
                 .andExpect(jsonPath("$.entries[0].observed_os.pretty_name").value("Debian GNU/Linux 12 (bookworm)"))
                 .andExpect(jsonPath("$.entries[0].interfaces[0].ips[0]").value("10.0.0.11"))
-                .andExpect(jsonPath("$.entries[0].match").value("MATCH"));
+                .andExpect(jsonPath("$.entries[0].match").value("MATCH"))
+                .andExpect(jsonPath("$.entries[0].guest_kind").value("linux"))
+                .andExpect(jsonPath("$.entries[2].guest_kind").value("zephyr"))
+                .andExpect(jsonPath("$.entries[2].match").value("NOT_APPLICABLE"));
     }
 
     @Test
     void failsWhenAVmReportsADifferentOs() throws Exception {
         reportAgent("vm-debian", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
         reportAgent("vm-ubuntu", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
-        reportAgent("vm-alpine", "alpine", "Alpine Linux v3.20", Instant.now());
 
         report()
                 .andExpect(status().isOk())
@@ -132,14 +136,13 @@ class OsEvidenceReportApiIntegrationTest {
     @Test
     void isBlockedWhenAnAgentStoppedReporting() throws Exception {
         reportAgent("vm-debian", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
-        reportAgent("vm-ubuntu", "ubuntu", "Ubuntu 24.04 LTS", Instant.now());
-        reportAgent("vm-alpine", "alpine", "Alpine Linux v3.20", Instant.now().minusSeconds(60));
+        reportAgent("vm-ubuntu", "ubuntu", "Ubuntu 24.04 LTS", Instant.now().minusSeconds(60));
 
         report()
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.verdict").value("BLOCKED"))
-                .andExpect(jsonPath("$.entries[2].agent_status").value("OFFLINE"))
-                .andExpect(jsonPath("$.reasons", hasItem(startsWith("alpine VM"))));
+                .andExpect(jsonPath("$.entries[1].agent_status").value("OFFLINE"))
+                .andExpect(jsonPath("$.reasons", hasItem(startsWith("ubuntu VM"))));
     }
 
     @Test

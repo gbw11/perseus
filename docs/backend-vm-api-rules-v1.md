@@ -47,7 +47,7 @@ Spring 백엔드의 VM API에 적용하는 규약입니다. 아래 세 가지를
 ## 3. 템플릿 목록
 
 - **API:** `GET /api/v1/templates`를 제공합니다. 1차 데이터는 Spring 설정 파일에 고정합니다.
-- **버전:** OS(Alpine·Debian·Ubuntu)마다 하나로 고정합니다.
+- **버전:** OS(Ubuntu·Debian·Zephyr)마다 하나로 고정합니다. 플랫폼이 세 번째 템플릿을 Alpine에서 Zephyr로 바꿨습니다(2026-10-19 반영).
 - **화면:** 드롭다운 하나로 템플릿을 고르고, 고른 템플릿의 `min_memory_mib`를 메모리 입력 칸의 최솟값으로 씁니다.
 - **VM 생성 시 검증:** 없는 템플릿이거나, 메모리가 그 템플릿의 `min_memory_mib`보다 작으면 거절합니다.
 
@@ -59,14 +59,15 @@ Spring 백엔드의 VM API에 적용하는 규약입니다. 아래 세 가지를
 | `version` | 템플릿 버전 |
 | `display_name` | 드롭다운에 표시할 이름 (예: `Debian 12`) |
 | `min_memory_mib` | 이 템플릿으로 만들 때의 최소 메모리 |
+| `guest_kind` | VM 종류 `linux` / `zephyr` (Zephyr는 에이전트·네트워크·정상 종료가 없는 콘솔 전용 펌웨어) |
 
 응답 예시 (버전과 메모리 값은 예시이며 P2 확인 후 확정):
 
 ```json
 [
-  { "template_id": "alpine", "version": "1.2.0", "display_name": "Alpine 1.2.0", "min_memory_mib": 128 },
-  { "template_id": "debian", "version": "12", "display_name": "Debian 12", "min_memory_mib": 256 },
-  { "template_id": "ubuntu", "version": "24.04", "display_name": "Ubuntu 24.04", "min_memory_mib": 512 }
+  { "template_id": "ubuntu", "version": "24.04-20260926", "display_name": "Ubuntu 24.04", "min_memory_mib": 512, "guest_kind": "linux" },
+  { "template_id": "debian", "version": "13-20261015", "display_name": "Debian 13", "min_memory_mib": 256, "guest_kind": "linux" },
+  { "template_id": "zephyr", "version": "starter-1.0.0", "display_name": "Zephyr Starter 1.0.0", "min_memory_mib": 128, "guest_kind": "zephyr" }
 ]
 ```
 
