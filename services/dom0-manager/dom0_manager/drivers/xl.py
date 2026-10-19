@@ -61,22 +61,29 @@ class XlRow:
     flags: str
 
 
-# 계약 3.2 장. b(blocked) 는 I/O 대기 중인 정상 상태라 running 이다.
-# 플래그가 하나도 없는 '------' 는 실행 가능하지만 지금 pCPU 에 올라가 있지 않은 도메인이라 running 으로 본다.
-# 그 외 알 수 없는 문자는 조용히 running 으로 넘기지 않고 DriverError 로 올린다.
-_KNOWN_FLAGS = set("rbpsdc")
+# 계약 3.2 장. 열은 libxl list_domains 가 찍는 순서대로 고정이다 (xl.c, 저장소 픽스처 xl-list-source.txt):
+#   [0] r running  [1] b blocked  [2] p paused  [3] s shutdown  [4] shutdown reason  [5] d dying
+# 다섯째 열은 독립 crash 플래그가 아니라 shutdown reason 이다 ('-' 없음, 'r' reboot, 's' suspend,
+# 'c' crash, 'w' watchdog, 'S' soft reset). shutdown 이 아니면 항상 '-' 다.
+# b(blocked) 는 I/O 대기 중인 정상 상태라 running 이다. 플래그가 하나도 없는 '------' 는 실행 가능하지만
+# 지금 pCPU 에 올라가 있지 않은 도메인이라 running 으로 본다. 그 외 문자는 조용히 넘기지 않고 DriverError 다.
+_SHUTDOWN_REASONS = "-rscwS?"
 
 
 def map_state(flags: str) -> VmState:
-    letters = {ch for ch in flags if ch != "-"}
-    unknown = letters - _KNOWN_FLAGS
-    if unknown:
-        raise DriverError(f"unknown xl state flag(s) {''.join(sorted(unknown))!r} in {flags!r}")
-    if "c" in letters:
+    if len(flags) != 6:
+        raise DriverError(f"unexpected xl state column {flags!r}")
+    running, blocked, paused, shutdown, reason, dying = flags
+    for ch, allowed in ((running, "r-"), (blocked, "b-"), (paused, "p-"), (shutdown, "s-"), (dying, "d-")):
+        if ch not in allowed:
+            raise DriverError(f"unknown xl state flag {ch!r} in {flags!r}")
+    if reason not in _SHUTDOWN_REASONS:
+        raise DriverError(f"unknown xl shutdown reason {reason!r} in {flags!r}")
+    if shutdown == "s" and reason == "c":
         return VmState.crashed
-    if letters & {"s", "d"}:
+    if shutdown == "s" or dying == "d":
         return VmState.stopping
-    if "p" in letters:
+    if paused == "p":
         return VmState.paused
     return VmState.running
 

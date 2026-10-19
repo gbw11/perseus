@@ -73,18 +73,31 @@ def _healthy_runner(fail: dict[tuple[str, ...], Exception] | None = None):
         ("------", VmState.running),
         ("--p---", VmState.paused),
         ("---s--", VmState.stopping),
+        ("---sr-", VmState.stopping),  # shutdown reason: reboot
+        ("---sw-", VmState.stopping),  # shutdown reason: watchdog
+        ("---sS-", VmState.stopping),  # shutdown reason: soft reset
         ("-----d", VmState.stopping),
-        ("----c-", VmState.crashed),
-        ("-b--c-", VmState.crashed),
+        ("---s-d", VmState.stopping),
+        ("---sc-", VmState.crashed),  # shutdown reason: crash (on_crash=preserve 로 남은 도메인)
     ],
 )
 def test_map_state(flags, expected):
     assert map_state(flags) == expected
 
 
-def test_unknown_state_flag_is_not_silently_running():
+@pytest.mark.parametrize("flags", ["x-----", "rb----x", "-----", "---s?-x", "c-----"])
+def test_unknown_state_flag_is_not_silently_running(flags):
     with pytest.raises(DriverError):
-        map_state("x-----")
+        map_state(flags)
+
+
+def test_board_fixture_xen_4_21_diskless_list():
+    """tests/platform/fixtures/xen-4.21/diskless-list.txt (신영 실보드 Xen 4.21 출력) 그대로."""
+    rows = parse_xl_list("Name ID Mem VCPUs State Time(s)\nDomain-0 0 1024 4 r----- 0\nzephyr-dev 1 16 1 -b---- 0\n")
+    assert [(r.name, r.domid, r.mem_mib, r.vcpus, map_state(r.flags)) for r in rows] == [
+        ("Domain-0", 0, 1024, 4, VmState.running),
+        ("zephyr-dev", 1, 16, 1, VmState.running),
+    ]
 
 
 def test_parse_xl_list_and_info():
