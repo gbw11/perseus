@@ -21,7 +21,6 @@ import os
 import re
 import sys
 import threading
-import time
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
@@ -87,12 +86,8 @@ class SerializedManager:
         return self._inner.data
 
     def call(self, action: str, spec: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
-        return self.call_within(action, spec, timeout_s=self.busy_timeout_s, **kwargs)
-
-    def call_within(self, action: str, spec: dict[str, Any] | None = None, *, timeout_s: float, **kwargs: Any) -> dict[str, Any]:
-        """잠금 대기를 timeout_s 로 제한한 call. health 처럼 전체 시간 예산이 정해진 호출에 쓴다."""
-        if not self._lock.acquire(timeout=timeout_s):
-            return _busy_envelope(action, timeout_s, kwargs.get("request_id"))
+        if not self._lock.acquire(timeout=self.busy_timeout_s):
+            return _busy_envelope(action, self.busy_timeout_s, kwargs.get("request_id"))
         try:
             return self._inner.call(action, spec, **kwargs)
         finally:
@@ -254,11 +249,9 @@ def instance_name(template_id: str, vm_id: UUID) -> str:
 class PlatformDriver(Driver):
     name = "platform"
 
-    def __init__(self, manager: ManagerLike, xl: Xl | None = None, *, health_budget_s: float = 5.0) -> None:
+    def __init__(self, manager: ManagerLike, xl: Xl | None = None) -> None:
         self.manager = manager
         self._xl = xl
-        # /healthz 전체 예산. 조회 드라이버 한도(5초)와 같게 두어 Spring 의 6초 대기를 넘기지 않는다
-        self.health_budget_s = health_budget_s
 
     # ---- 조회 ----
 
@@ -328,22 +321,18 @@ class PlatformDriver(Driver):
         return self._xl.info()
 
     def health(self) -> bool:
-        """xl 과 registry 응답 여부. xl info 가 쓴 시간을 빼고 남은 예산만 Manager 잠금을 기다려 전체가 health_budget_s 안에 끝난다."""
-        started = time.monotonic()
+        """xl 응답과 registry 저장소 존재만 본다. Manager 를 거치지 않는다.
+
+        Manager.call("list") 는 잠금 대기에 더해 잠금을 얻은 뒤 xl list 를 두 번(각각 최대 15초) 실행할 수 있어 조회 한도 5초
+        (Spring 대기 6초) 안에 끝난다고 보장할 수 없다. 그래서 /healthz 는 xl info(xl_query_timeout_s 한도)와 registry 디렉터리
+        존재만 확인한다. registry 내용 오류(STORAGE_UNAVAILABLE)는 목록·생성 호출이 503 으로 알린다.
+        """
         if self._xl is not None:
             try:
                 self._xl.info()
             except DriverError:
                 return False
-        remaining = max(0.1, self.health_budget_s - (time.monotonic() - started))
-        if isinstance(self.manager, SerializedManager):
-            envelope = self.manager.call_within("list", {"lifecycle": "REGISTERED"}, timeout_s=remaining)
-        else:
-            envelope = self.manager.call("list", {"lifecycle": "REGISTERED"})
-        if envelope.get("ok"):
-            return True
-        # 다른 플랫폼 작업(최대 90초 정지 등)이 잠금을 쥔 것은 장애가 아니다. registry·저장소 장애만 false
-        return (envelope.get("error") or {}).get("code") == "OPERATION_IN_PROGRESS"
+        return (Path(self.manager.data) / "instances").is_dir()
 
 
 # ---------------------------------------------------------------------------
