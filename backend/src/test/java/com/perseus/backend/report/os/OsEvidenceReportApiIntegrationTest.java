@@ -44,9 +44,9 @@ class OsEvidenceReportApiIntegrationTest {
             {"username":"report-os-user","password":"password123!"}
             """;
     private static final List<CreateVmCommand> VMS = List.of(
-            new CreateVmCommand("debian-01", "debian", "12", 1, 256),
-            new CreateVmCommand("ubuntu-01", "ubuntu", "24.04", 1, 512),
-            new CreateVmCommand("zephyr-01", "zephyr", "starter-1.0.0", 1, 128));
+            new CreateVmCommand("debian-01", "debian-13-arm64", "1.0.0", 1, 256),
+            new CreateVmCommand("ubuntu-01", "ubuntu-24.04-arm64", "1.0.0", 1, 512),
+            new CreateVmCommand("zephyr-01", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 128));
 
     @Autowired
     private MockMvc mockMvc;
@@ -88,7 +88,7 @@ class OsEvidenceReportApiIntegrationTest {
         for (int i = 0; i < VMS.size(); i++) {
             CreateVmCommand command = VMS.get(i);
             String vmId = "vm-" + command.templateId();
-            GuestKind kind = "zephyr".equals(command.templateId()) ? GuestKind.ZEPHYR : GuestKind.LINUX;
+            GuestKind kind = command.templateId().startsWith("zephyr-") ? GuestKind.ZEPHYR : GuestKind.LINUX;
             vmRecordRepository.save(new VmRecord(vmId, command, kind, createdAt.plusSeconds(i)));
         }
         when(vmControlPort.list()).thenReturn(VMS.stream()
@@ -98,8 +98,8 @@ class OsEvidenceReportApiIntegrationTest {
 
     @Test
     void passesWhenAllRequiredOsReportThemselvesWhileRunning() throws Exception {
-        reportAgent("vm-debian", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
-        reportAgent("vm-ubuntu", "ubuntu", "Ubuntu 24.04 LTS", Instant.now());
+        reportAgent("vm-debian-13-arm64", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
+        reportAgent("vm-ubuntu-24.04-arm64", "ubuntu", "Ubuntu 24.04 LTS", Instant.now());
 
         // The zephyr VM has no agent; it is listed but not judged.
         report()
@@ -123,8 +123,8 @@ class OsEvidenceReportApiIntegrationTest {
 
     @Test
     void failsWhenAVmReportsADifferentOs() throws Exception {
-        reportAgent("vm-debian", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
-        reportAgent("vm-ubuntu", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
+        reportAgent("vm-debian-13-arm64", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
+        reportAgent("vm-ubuntu-24.04-arm64", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
 
         report()
                 .andExpect(status().isOk())
@@ -135,8 +135,8 @@ class OsEvidenceReportApiIntegrationTest {
 
     @Test
     void isBlockedWhenAnAgentStoppedReporting() throws Exception {
-        reportAgent("vm-debian", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
-        reportAgent("vm-ubuntu", "ubuntu", "Ubuntu 24.04 LTS", Instant.now().minusSeconds(60));
+        reportAgent("vm-debian-13-arm64", "debian", "Debian GNU/Linux 12 (bookworm)", Instant.now());
+        reportAgent("vm-ubuntu-24.04-arm64", "ubuntu", "Ubuntu 24.04 LTS", Instant.now().minusSeconds(60));
 
         report()
                 .andExpect(status().isOk())
