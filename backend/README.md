@@ -1,4 +1,4 @@
-# Perseus Backend
+# Xenova Backend
 
 Spring Boot 기반 VM 관리 서버입니다.
 
