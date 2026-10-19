@@ -1,5 +1,11 @@
 # VM 관리 API 계약 v1
 
+> 이 문서는 2026-10-16의 초기 설계 기록이다. 현재 UUID·표시 이름·생성 멱등성·
+> 자동 IP·템플릿·등록 목록은 [공통 관리 계약](../build-guides/xenova-vm-management.md)을 따른다.
+> 아래의 무상태/실행 도메인만 조회/create로 시작/자동 강제 종료/삭제 설명은 현재
+> 플랫폼 구현의 규약으로 사용하지 않는다. 배포용 dom0-manager는 아직 별도 구현 대상이다.
+
+
 **최종 갱신** 2026-10-16
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼
 **구성 계층** 프론트 ↔ Spring (공개 API) ↔ dom0-manager (FastAPI) ↔ Xen `xl`

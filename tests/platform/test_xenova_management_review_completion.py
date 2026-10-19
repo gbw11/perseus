@@ -36,7 +36,7 @@ class TargetIdentityCodeTest(ReviewFixture):
     def setUp(self):
         super().setUp()
         self.identity = self.f.create()
-        self.directory = self.f.data / 'instances/custom'
+        self.directory = self.f.data / f'instances/{self.f.key}'
         self.record = json.loads((self.directory / 'instance.json').read_text())
 
     def mismatched_live_domain(self):
@@ -113,7 +113,7 @@ class RestoreSpaceTest(ReviewFixture):
     def setUp(self):
         super().setUp()
         self.identity = self.f.create()
-        disk = self.f.data / 'instances/custom/root.raw'
+        disk = self.f.data / f'instances/{self.f.key}/root.raw'
         with disk.open('r+b') as stream:
             stream.truncate(8 * GIB)
         self.assertLess(disk.stat().st_blocks * 512, MIB)
@@ -139,7 +139,7 @@ class RestoreSpaceTest(ReviewFixture):
         with self.disk.open('rb') as stream:
             stream.seek(1080)
             self.assertEqual(stream.read(2), b'\x53\xef')
-        self.assertFalse((self.f.data / 'instances/custom').exists())
+        self.assertFalse((self.f.data / f'instances/{self.f.key}').exists())
         self.assertEqual(self.f.copies, 1)
 
     def interrupt_restore(self, phase):
@@ -175,7 +175,7 @@ class RestoreSpaceTest(ReviewFixture):
             self.assertTrue(result['ok'], result)
             self.f.p.reserve_space(0, self.f.p.records(validate_assets=False))
         self.assertEqual(result['data']['vm_id'], self.identity)
-        target = self.f.data / 'instances/custom'
+        target = self.f.data / f'instances/{self.f.key}'
         self.assertEqual((target / 'instance.json').read_bytes(), self.original_identity)
         self.assertEqual((target / 'root.raw').stat().st_ino, self.original_inode)
 
@@ -226,7 +226,7 @@ class RestoreSpaceTest(ReviewFixture):
 
     def test_after_move_retry_checks_one_restored_disk_and_never_rolls_back_assets(self):
         op = self.interrupt_restore('moved')
-        target = self.f.data / 'instances/custom'
+        target = self.f.data / f'instances/{self.f.key}'
         self.assertTrue(target.is_dir())
         with self.free(3 * GIB):
             result = self.restore()
@@ -270,11 +270,11 @@ class RestoreSpaceTest(ReviewFixture):
         descriptor.write_text(json.dumps(self.f.descriptor))
         self.f.m.checkpoint = lambda phase, op: (_ for _ in ()).throw(fixtures.Interrupted()) if phase == 'recorded' else None
         with self.assertRaises(fixtures.Interrupted):
-            self.f.call('create', {**self.f.spec, 'name': 'pending', 'ipv4': '192.168.77.31'}, key='pending-create')
+            self.f.call('create', {**self.f.spec, 'vm_id':'950e8400-e29b-41d4-a716-446655440000','name': 'pending', 'ipv4': '192.168.77.31'}, key='pending-create')
         self.f.m.checkpoint = lambda *args: None
-        op = next(o for o in self.f.m._operations() if o['idempotency_key'] == 'pending-create')
+        op = next(o for o in self.f.m._operations() if o['idempotency_key'] == 'create:950e8400-e29b-41d4-a716-446655440000')
         if allocated:
-            stage = self.f.data / op['owned_workspace'] / 'pending'
+            stage = self.f.data / op['owned_workspace'] / 'vm-950e8400e29b41d4a716446655440000'
             stage.mkdir(parents=True)
             with (stage / 'root.raw').open('wb') as stream:
                 stream.write(bytes(allocated))
@@ -299,7 +299,7 @@ class RestoreSpaceTest(ReviewFixture):
     def test_partly_copied_creation_keeps_unallocated_budget_without_double_charge(self):
         self.small_restore_disk()
         op = self.pending_creation(allocated=MIB)
-        stage = self.f.data / op['owned_workspace'] / 'pending/root.raw'
+        stage = self.f.data / op['owned_workspace'] / 'vm-950e8400e29b41d4a716446655440000/root.raw'
         before = (stage.stat().st_ino, stage.stat().st_size, stage.stat().st_blocks)
         with self.free(2 * GIB + 4 * MIB):
             result = self.restore(execute=False)
@@ -315,7 +315,7 @@ class RestoreSpaceTest(ReviewFixture):
     def test_pending_fully_allocated_blocks_are_not_reserved_twice(self):
         self.small_restore_disk()
         op = self.pending_creation(allocated=4 * MIB)
-        stage = self.f.data / op['owned_workspace'] / 'pending/root.raw'
+        stage = self.f.data / op['owned_workspace'] / 'vm-950e8400e29b41d4a716446655440000/root.raw'
         self.assertEqual(stage.stat().st_size, stage.stat().st_blocks * 512)
         with self.free(2 * GIB + 3 * MIB):
             result = self.restore()
@@ -326,9 +326,9 @@ class RestoreSpaceTest(ReviewFixture):
         self.small_restore_disk()
         self.pending_creation(allocated=MIB)
         with self.free(2 * GIB + 6 * MIB):
-            result = self.f.call('create', {**self.f.spec, 'name': 'another', 'ipv4': '192.168.77.32'}, key='another')
+            result = self.f.call('create', {**self.f.spec, 'vm_id':'a50e8400-e29b-41d4-a716-446655440000','name': 'another', 'ipv4': '192.168.77.32'}, key='another')
         self.assert_error(result, 'INSUFFICIENT_STORAGE')
-        self.assertFalse((self.f.data / 'instances/another').exists())
+        self.assertFalse((self.f.data / 'instances/vm-a50e8400e29b41d4a716446655440000').exists())
         self.assert_archive_preserved()
 
     def test_published_incomplete_creation_is_counted_once_as_registered_disk(self):
@@ -336,16 +336,16 @@ class RestoreSpaceTest(ReviewFixture):
         self.pending_creation()
         def checkpoint(phase, op):
             if phase == 'published' and op['action'] == 'create':
-                disk = self.f.data / 'instances/pending/root.raw'
+                disk = self.f.data / 'instances/vm-950e8400e29b41d4a716446655440000/root.raw'
                 with disk.open('r+b') as stream:
                     stream.truncate(4 * MIB)
                 raise fixtures.Interrupted()
         self.f.m.checkpoint = checkpoint
-        spec = {**self.f.spec, 'name': 'pending', 'ipv4': '192.168.77.31'}
+        spec = {**self.f.spec, 'vm_id':'950e8400-e29b-41d4-a716-446655440000','name': 'pending', 'ipv4': '192.168.77.31'}
         with self.assertRaises(fixtures.Interrupted):
             self.f.call('create', spec, key='pending-create')
         self.f.m.checkpoint = lambda *args: None
-        disk = self.f.data / 'instances/pending/root.raw'
+        disk = self.f.data / 'instances/vm-950e8400e29b41d4a716446655440000/root.raw'
         before = disk.stat().st_ino
         with self.free(2 * GIB + 7 * MIB):
             result = self.restore()

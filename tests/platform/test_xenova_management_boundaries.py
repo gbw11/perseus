@@ -46,7 +46,7 @@ class ManagementBoundaryTest(unittest.TestCase):
         self.assertEqual(result['error']['code'], 'OPERATION_IN_PROGRESS', result)
         self.assertEqual(self.f.copies, 0)
         self.assertEqual(self.snapshot(), before)
-        self.assertTrue(self.f.call('operation', {'idempotency_key': 'create'})['ok'])
+        self.assertTrue(self.f.call('operation', {'idempotency_key': 'create:'+self.f.spec['vm_id']})['ok'])
         self.assertTrue(self.f.call('create', self.f.spec, execute=False)['ok'])
 
     def test_shutdown_blocks_published_create_recovery_without_reinitializing_assets(self):
@@ -64,7 +64,7 @@ class ManagementBoundaryTest(unittest.TestCase):
         self.shutdown()
         output = io.StringIO()
         with patch.object(vm, 'Platform', return_value=self.f.p), redirect_stdout(output), self.assertRaises(SystemExit) as caught:
-            vm.main(['autostart-set', 'custom', 'on', '--json'])
+            vm.main(['autostart-set', self.f.key, 'on', '--json'])
         self.assertEqual(caught.exception.code, 3)
         result = json.loads(output.getvalue())
         self.assertEqual(result['error']['code'], 'OPERATION_IN_PROGRESS', result)
@@ -76,7 +76,7 @@ class ManagementBoundaryTest(unittest.TestCase):
         root = self.f.data / 'tombstones'
         path = root / (identity + '.json.tmp-123-0123456789ab')
         path.touch()
-        self.assertFalse(vm.retired_instance(self.f.data, 'custom', identity))
+        self.assertFalse(vm.retired_instance(self.f.data, self.f.key, identity))
         self.assertTrue(self.f.call('list', {})['ok'])
         self.assertEqual(path.read_bytes(), b'')
         outside = self.f.data / 'outside-record'
@@ -84,14 +84,14 @@ class ManagementBoundaryTest(unittest.TestCase):
         path.unlink()
         path.symlink_to(outside)
         with self.assertRaises(vm.PlatformError):
-            vm.retired_instance(self.f.data, 'custom', identity)
+            vm.retired_instance(self.f.data, self.f.key, identity)
         self.assertFalse(self.f.call('list', {})['ok'])
         self.assertEqual(outside.read_text(), 'keep outside')
         path.unlink()
         unknown = root / 'unowned-record'
         unknown.write_text('{}')
         with self.assertRaises(vm.PlatformError):
-            vm.retired_instance(self.f.data, 'custom', identity)
+            vm.retired_instance(self.f.data, self.f.key, identity)
         self.assertFalse(self.f.call('list', {})['ok'])
         self.assertEqual(unknown.read_text(), '{}')
 
@@ -130,7 +130,7 @@ class ManagementBoundaryTest(unittest.TestCase):
                 result = self.f.call(action, spec)
                 self.assertEqual(result['error']['code'], 'OPERATION_IN_PROGRESS', result)
                 self.assertEqual(self.snapshot(), before)
-                self.assertFalse((self.f.run / 'custom.cfg').exists())
+                self.assertFalse((self.f.run / (self.f.key+'.cfg')).exists())
 
     def test_shutdown_allows_completed_replay_reads_and_plans_without_writes(self):
         identity = self.f.create()
@@ -141,11 +141,11 @@ class ManagementBoundaryTest(unittest.TestCase):
         self.assertTrue(result['replayed'])
         self.assertEqual(result['data']['vm_id'], identity)
         for action, spec in [('get', {'vm_id': identity}), ('list', {}),
-                             ('operation', {'idempotency_key': 'create'})]:
+                             ('operation', {'idempotency_key': 'create:'+self.f.spec['vm_id']})]:
             self.assertTrue(self.f.call(action, spec)['ok'])
-        self.assertTrue(self.f.call('create', {**self.f.spec, 'name': 'planned', 'ipv4': '192.168.77.31'},
+        self.assertTrue(self.f.call('create', {**self.f.spec, 'vm_id':'750e8400-e29b-41d4-a716-446655440000','name': 'planned', 'ipv4': '192.168.77.31'},
                                     key='planned', execute=False)['ok'])
-        result = self.f.call('create', {**self.f.spec, 'name': 'blocked', 'ipv4': '192.168.77.32'}, key='blocked')
+        result = self.f.call('create', {**self.f.spec, 'vm_id':'850e8400-e29b-41d4-a716-446655440000','name': 'blocked', 'ipv4': '192.168.77.32'}, key='blocked')
         self.assertEqual(result['error']['code'], 'OPERATION_IN_PROGRESS')
         self.assertEqual(self.snapshot(), before)
 
@@ -157,9 +157,9 @@ class ManagementBoundaryTest(unittest.TestCase):
         self.assertTrue(self.f.call('get', {'vm_id': identity})['ok'])
         self.assertTrue(self.f.call('list', {})['ok'])
         self.assertFalse(vm.retired_instance(self.f.data, 'ubuntu-dev'))
-        self.assertFalse(vm.retired_instance(self.f.data, 'custom', identity))
+        self.assertFalse(vm.retired_instance(self.f.data, self.f.key, identity))
         self.assertTrue(self.f.call('retire', {'vm_id': identity})['ok'])
-        self.assertTrue(vm.retired_instance(self.f.data, 'custom', identity))
+        self.assertTrue(vm.retired_instance(self.f.data, self.f.key, identity))
         self.assertEqual(temp.read_text(), '{"incomplete":')
 
     def test_corrupt_formal_tombstones_are_not_ignored(self):
@@ -251,7 +251,7 @@ class ManagementBoundaryTest(unittest.TestCase):
 
     def test_valid_operation_selectors_and_request_id_are_preserved(self):
         created = self.f.call('create', self.f.spec)
-        for spec in ({'operation_id': created['operation_id']}, {'idempotency_key': 'create'},
+        for spec in ({'operation_id': created['operation_id']}, {'idempotency_key': 'create:'+self.f.spec['vm_id']},
                      {'operation_id': created['operation_id'], 'idempotency_key': None}):
             result = self.f.m.call('operation', spec, request_id='backend-request-1')
             self.assertTrue(result['ok'], result)

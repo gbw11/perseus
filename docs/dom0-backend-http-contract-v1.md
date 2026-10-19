@@ -1,5 +1,9 @@
 # 제어 계층과 백엔드 HTTP 계약 v1.0
 
+> 현재 배포용 dom0-manager 구현은 없다. 이 문서는 HTTP 어댑터의 설계 경계이며,
+> 실제 공통 Manager 계약은 [관리 가이드](build-guides/xenova-vm-management.md)를 따른다.
+> UUID·자동 IP·템플릿의 간이 검사만 tests/contracts의 시험 연결부로 수행한다.
+
 ## 확정 범위
 
 Spring Boot 백엔드는 Python 객체를 직접 호출하지 않는다. Python `dom0-manager`가 FastAPI로 내부 HTTP API를 제공하고, FastAPI 내부에서 설정에 따라 `MockDriver` 또는 `XenDriver`를 선택한다.
@@ -74,12 +78,14 @@ Frontend -> Spring Boot :8080 -> FastAPI :8081 -> VMDriver -> Mock/Xen
 ```json
 {
   "vm_id": "550e8400-e29b-41d4-a716-446655440000",
-  "name": "alpine-sensor",
+  "name": "개발용 Ubuntu",
   "state": "running",
-  "template_id": "alpine",
-  "template_version": "1.2.0",
+  "template_id": "ubuntu-24.04-arm64",
+  "template_version": "1.0.0",
   "vcpus": 1,
-  "memory_mib": 256
+  "memory_mib": 512,
+  "guest_kind": "linux",
+  "ipv4": "192.168.77.2"
 }
 ```
 
@@ -90,15 +96,18 @@ Frontend -> Spring Boot :8080 -> FastAPI :8081 -> VMDriver -> Mock/Xen
 ```json
 {
   "vm_id": "550e8400-e29b-41d4-a716-446655440000",
-  "name": "alpine-sensor",
-  "template_id": "alpine",
-  "template_version": "1.2.0",
+  "name": "개발용 Ubuntu",
+  "template_id": "ubuntu-24.04-arm64",
+  "template_version": "1.0.0",
   "vcpus": 1,
   "memory_mib": 256
 }
 ```
 
-Spring이 `vm_id`를 생성하므로 응답 유실 후에도 같은 요청을 안전하게 다시 보낼 수 있다. 같은 `vm_id`와 동일한 요청은 기존 VM을 `200`으로 반환한다. 같은 `vm_id`에 다른 명세를 보내거나 활성 VM과 같은 이름을 사용하면 `409 VMExists`를 반환한다.
+Spring이 `vm_id`를 생성하므로 응답 유실 후에도 같은 요청을 안전하게 다시 보낼 수 있다. 같은 `vm_id`와 동일한 요청은 기존 VM을 `200`으로 반환한다. 같은 vm_id에 다른 최초 명세를 보내면 409 VMExists로 매핑한다.
+표시 이름 중복은 Spring 정책이며 플랫폼 신원 충돌이 아니다. name은 경로/Xen 이름이 아니다.
+IP와 guest_kind는 요청하지 않으며 카탈로그와 플랫폼 예약 결과에서 확정한다.
+생성은 정지 인스턴스 등록이며 start와 분리한다. 보관/삭제 UUID는 create로 되살리지 않는다.
 
 ## 오류 계약
 
@@ -116,10 +125,10 @@ Spring이 `vm_id`를 생성하므로 응답 유실 후에도 같은 요청을 �
 | code | HTTP | 의미 |
 | --- | ---: | --- |
 | `VMNotFound` | 404 | 조회하거나 명령할 `vm_id`가 없음 |
-| `VMExists` | 409 | `vm_id` 또는 활성 이름이 충돌함 |
+| `VMExists` | 409 | `vm_id` 의 최초 명세 또는 내부 신원이 충돌함 |
 | `InvalidState` | 409 | 존재하는 VM이 목표 상태로 전이할 수 없음 |
 | `InvalidArgument` | 400 | 형식이나 범위가 잘못됨 |
-| `InsufficientResources` | 409 | 현재 가용 자원으로 실행할 수 없음 |
+| `InsufficientResources` | 507 | IP 풀 고갈 또는 저장공간 부족을 포함한 자원 부족 |
 | `DriverError` | 500 | Xen 실패, 드라이버 타임아웃, 분류되지 않은 실패 |
 
 Spring이 FastAPI에 연결하지 못한 경우는 FastAPI 오류 본문이 없으므로 별도로 처리한다.
@@ -164,3 +173,21 @@ Spring이 FastAPI에 연결하지 못한 경우는 FastAPI 오류 본문이 없�
 - 지연 응답 시 Spring이 `504 VM_CONTROL_TIMEOUT`을 반환한다.
 - FastAPI는 uvicorn 워커 1개로 실행된다.
 
+
+## 현재 코드와 후속 연결 시 확인할 차이
+
+Spring 연결 시 요청·응답과 설정 카탈로그를 아래 플랫폼 계약에 맞춰야 한다.
+tests/contracts의 Python 연결부는 기존 Dom0CreateVmRequest 필드와 공통 Manager를 대조하는
+시험 코드이며 Java 직렬화·역직렬화 검사나 배포용 HTTP 어댑터를 대신하지 않는다.
+플랫폼 공개 카탈로그는 ubuntu-24.04-arm64 / debian-13-arm64 /
+zephyr-xenvm-starter-arm64 @ 1.0.0이다. 원본 OS/SDK 날짜와 해시는 플랫폼 catalog의 source다.
+Linux 최소 128MiB, Zephyr는 1 vCPU/16MiB로 카탈로그 검사를 따른다.
+create/list/get VM은 guest_kind와 ipv4(nullable)를 함께 반환한다.
+Manager envelope와 이 문서의 HTTP 본문은 별개이며 시험 연결부가 변환한다.
+Manager는 running/blocked/paused/shutdown/crashed/dying/stopped와 앱 준비 unknown을 구분한다.
+HTTP VM state의 축약 매핑은 blocked→running, dying→stopping, 도메인 부재→shutdown이다.
+이는 앱 준비 완료나 자동 복구를 의미하지 않는다.
+실제 Spring command-timeout은 35초, 플랫폼 정상 stop 마감은 최대 90초다.
+위 이전 설계 타임아웃 표는 현재 실행 결과가 아니며 후속 어댑터에서 합의해야 한다.
+retire/restore/purge는 호출자 재시도 키·operation_id·lifecycle generation 전달이 필요하다.
+현재 VmControlPort의 destroy만으로 이 계약이 모두 구현됐다고 해석하지 않는다.

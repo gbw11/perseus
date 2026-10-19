@@ -215,8 +215,9 @@ def started_state(record, row):
 
 
 class Platform:
-    def __init__(self, data=DATA, runtime=RUN, command=run, sleep=time.sleep, clock=time.monotonic):
+    def __init__(self, data=DATA, runtime=RUN, command=run, sleep=time.sleep, clock=time.monotonic, *, defaults_path=Path("/etc/xenova/defaults.json")):
         self.data, self.runtime = Path(data), Path(runtime)
+        self.defaults_path = Path(defaults_path)
         self.command, self.sleep, self.clock = command, sleep, clock
 
     def records(self, *, validate_assets=True):
@@ -261,7 +262,7 @@ class Platform:
     def create(self, args, records=None):
         """기존 Python 호출 지점도 공통 계약으로 위임한다. records 인자는 신뢰/재사용하지 않는다."""
         from xenova_management import Manager
-        spec = {'name':args.id, 'template_id':getattr(args,'template_id',getattr(args,'template',None)),
+        spec = {'vm_id':getattr(args,'vm_id',None), 'name':getattr(args,'name',None) or args.id, 'template_id':getattr(args,'template_id',getattr(args,'template',None)),
                 'template_version':getattr(args,'template_version',None),
                 'vcpus':getattr(args,'vcpus',None), 'memory_mib':getattr(args,'memory_mib',None)}
         if getattr(args,'ipv4',None) is not None:
@@ -428,7 +429,26 @@ class Platform:
         self.check_network()
         self.command(['systemctl', 'is-active', '--quiet', 'xenova-dhcp.service'])
         ensure_runtime(self.runtime)
-        hosts = ''.join(f"{r['mac']},{r['ipv4']},{r['hostname']},infinite\n" for r in records.values() if guest_kind(r) == 'linux')
+        known = {r.get('mac') for r in records.values()}
+        known.update(t['record'].get('mac') for t in read_tombstones(self.data).values())
+        preserved = []
+        path = self.runtime / 'dhcp-hosts'
+        if path.exists() or path.is_symlink():
+            st = path.lstat()
+            if path.is_symlink() or not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+                raise PlatformError('unsafe DHCP reservation file')
+            for row in path.read_text().splitlines():
+                if not row.strip() or row.lstrip().startswith('#'):
+                    continue
+                fields = row.split(',')
+                if len(fields) != 4 or not re.fullmatch(r'[0-9a-f]{2}(?::[0-9a-f]{2}){5}', fields[0]):
+                    raise PlatformError('cannot preserve unknown DHCP reservation')
+                # 플랫폼이 소유한 현재/보관 VM 예약만 재작성한다. 다른 정적 예약은 유지한다.
+                if fields[0] not in known:
+                    preserved.append(row + '\n')
+        hosts = ''.join(preserved) + ''.join(
+            f"{r['mac']},{r['ipv4']},{r['hostname']},infinite\n"
+            for r in records.values() if guest_kind(r) == 'linux')
         atomic_write(self.runtime / 'dhcp-hosts', hosts, 0o644)
         self.command(['systemctl', 'reload', 'xenova-dhcp.service'])
 

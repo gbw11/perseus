@@ -6,7 +6,11 @@ CLI와 Python 호출자는 같은 함수·잠금·작업 JSON·기존 인스턴�
 
 ## 신원과 응답
 
-vm_id는 기존 instance.json의 uuid와 같다. name/id는 기존 디렉터리와 사람이 읽는 이름,
+vm_id는 instance.json의 uuid 및 Xen UUID와 같다. 일반 create는 Spring이 먼저 발급한
+UUID를 필수로 받는다. 대문자·32자리 표기는 소문자 하이픈 표기로 정규화한다.
+공개 name은 한글·공백을 포함하는 1..63자 표시 이름이며 중복을 허용한다.
+instance.json의 display_name에 보관하고, 내부 id/name/hostname과 디렉터리는
+vm-<UUID의 하이픈 없는 표기>를 사용한다. 표시 이름은 Xen cfg나 경로에 삽입하지 않는다.
 domid는 매 실행 달라질 수 있는 Xen 번호다. UUID→domid 검증과 제어 직전 재조회는 유지한다.
 기존 UUID, MAC, IP, machine-id, SSH 키를 마이그레이션하거나 다시 발급하지 않는다.
 
@@ -25,7 +29,7 @@ console은 PV 바이트 스트림으로 기존 별도 명령이며 --json 관리
 Xen 조회 명령 실패·잘못된 자산을 문자열 패턴만으로 신원 변경으로 분류하지 않는다.
 INVALID_SPEC / VM_NOT_FOUND / VM_NAME_CONFLICT / TEMPLATE_NOT_FOUND /
 TEMPLATE_VERSION_NOT_FOUND / ARTIFACT_INVALID / STORAGE_UNAVAILABLE /
-INSUFFICIENT_STORAGE / IP_CONFLICT / RESOURCE_UNSUPPORTED / IDEMPOTENCY_CONFLICT /
+INSUFFICIENT_STORAGE / IP_POOL_EXHAUSTED / IP_CONFLICT / RESOURCE_UNSUPPORTED / IDEMPOTENCY_CONFLICT /
 OPERATION_IN_PROGRESS / VM_NOT_STOPPED / TARGET_CHANGED / ASSET_IN_USE /
 RESTORE_CONFLICT / VM_PURGED / CLEANUP_INCOMPLETE / RECOVERY_REQUIRED를 구분한다.
 
@@ -52,17 +56,22 @@ source_template_id, 실제 manifest_sha256을 고정한다. 동일 ID/버전 des
 source_template_id와 기존 instance.template은 과거 출처 식별자다. source lock 날짜·버전은 보존한다.
 기존 인스턴스의 template_id/version을 모르면 추측해 채우지 않는다.
 
-create spec은 name, template_id, template_version, vcpus, memory_mib,
-Linux에 한해 ipv4를 명시한다. latest 해석, IP 자동 배정, 사용자 지정 MAC/경로/bridge는 없다.
+create spec은 vm_id, name, template_id, template_version, vcpus, memory_mib다.
+guest_kind는 정확히 선택한 카탈로그에서 확정하며 호출자가 보내지 않는다.
+Spring은 ipv4/idempotency_key를 보내지 않는다. Linux의 IP 생략은 자동 예약을 뜻한다.
+CLI --auto-ip도 같은 경로다. 기존 CLI의 명시적 --ipv4는 충돌 검사 후 사용할 수 있다.
+latest 해석과 사용자 지정 MAC/경로/bridge는 없다.
 Linux 허용 범위는 1..4 vCPU, 128..8192MiB, 192.168.77.2..99다.
 Zephyr는 1 vCPU/16MiB이고 ipv4를 받지 않는다. 물리 호스트의 여유 자원을 보장하는 예약기는 아니다.
 새 일반 VM은 autostart=false이고 Zephyr board_shutdown_policy=refuse다.
 factory 기본 VM 3개의 기존 정책은 별도 defaults.json을 따른다.
+Spring에 연결되기 전 factory 준비만 기존 보드별 UUID 고유화를 예외로 유지한다.
+공통 이미지에 고정 UUID를 넣지 않으며 일반 create로 이 예외를 사용할 수 없다.
 
 예시(기본은 계획; --execute에서만 등록):
     xenova-vm templates --json
-    xenova-vm create demo --template-id ubuntu-24.04-arm64 --template-version 1.0.0 --vcpus 1 --memory-mib 512 --ipv4 192.168.77.30 --idempotency-key team-demo-create-1 --json
-    xenova-vm create demo --template-id ubuntu-24.04-arm64 --template-version 1.0.0 --vcpus 1 --memory-mib 512 --ipv4 192.168.77.30 --idempotency-key team-demo-create-1 --execute --json
+    xenova-vm create --vm-id <SPRING_UUID> --name "개발용 Ubuntu" --template-id ubuntu-24.04-arm64 --template-version 1.0.0 --vcpus 1 --memory-mib 512 --auto-ip --json
+    xenova-vm create --vm-id <SPRING_UUID> --name "개발용 Ubuntu" --template-id ubuntu-24.04-arm64 --template-version 1.0.0 --vcpus 1 --memory-mib 512 --auto-ip --execute --json
 
 생성 결과 data.vm_id로 후속 요청을 한다. 생성은 시작하지 않는다.
 최초 creation_spec은 바꾸지 않는다. 현재 설정은 instance.json, 실행 관측은 get의 xen_state/domid다.
@@ -75,7 +84,7 @@ factory 기본 VM 3개의 기존 정책은 별도 defaults.json을 따른다.
     xenova-vm list --lifecycle PURGED --json
     xenova-vm get <UUID> --json
     xenova-vm operation --operation-id <OPERATION_UUID> --json
-    xenova-vm operation --idempotency-key team-demo-create-1 --json
+    xenova-vm operation --idempotency-key create:<SPRING_UUID> --json
     xenova-vm start <UUID> --json
 
 기존 이름 기반 start/stop/reboot/console/status는 유지한다. JSON start/stop/reboot는
@@ -83,7 +92,11 @@ factory 기본 VM 3개의 기존 정책은 별도 defaults.json을 따른다.
 자동 시작 결과 파일은 시작 시점 기록이며 현재 상태 모니터가 아니다.
 --json을 붙인 status는 list의 등록 VM 응답과 같다.
 기존 delete는 retire의 보관 별칭이다. 영구 삭제로 의미가 바뀌지 않는다.
-create와 delete 별칭도 새 계약의 명시 버전/재시도 키 요건을 따른다.
+create는 외부 UUID·명시 버전을 요구한다. delete(retire)는 여전히 호출자 재시도 키가 필요하다.
+start/stop/reboot의 JSON 결과는 data.vm에 같은 VM 객체를 반환한다.
+stop은 기본 최대 90초의 전체 단조 시계 마감시간 내 도메인 제거를 동기 확인한다.
+--force는 명시적인 즉시 destroy이며 Linux에도 적용된다. 일반 stop은 시간 초과 시
+자동 destroy로 바꾸지 않는다. Zephyr 개별 stop/reboot는 --force 없이 거부한다.
 
 ## 보관·복원·삭제
 
@@ -114,25 +127,32 @@ Xen 디스크 참조, mountinfo, loop backing, 프로세스 fd를 확인할 수 
 purge는 신원·소유권을 확인하며, 손상된 부팅 파일을 고치거나 정상 부팅 가능해야 한다고 요구하지 않는다.
 부분 삭제 시 inventory/remaining_assets를 남긴다. 원래 key로 재시도하고 restore는 거부한다.
 논리 bytes, 할당 bytes, 파일시스템 free_bytes_delta를 구분한다. 보안 소거 기능이 아니다.
-UUID와 이름은 purge 후에도 예약되며 factory가 기본 VM을 재생성하지 않는다.
+UUID와 내부 이름은 purge 후에도 예약되며 factory가 기본 VM을 재생성하지 않는다.
 
 ## 영구 기록과 중단
 
-/srv/xenova/instances/<name>/instance.json
+/srv/xenova/instances/<internal_name>/instance.json
 /srv/xenova/operations/<operation_id>.json
 /srv/xenova/tombstones/<vm_id>.json
-/srv/xenova/instances/.retired-<name>-<vm_id>-g<generation>/
+/srv/xenova/instances/.retired-<internal_name>-<vm_id>-g<generation>/
 
 모든 변경은 기존 /run/xenova 공통 flock을 사용한다. 올바른 ext4 마운트/초기화 표식을
 확인하지 못하면 루트 파일시스템의 대체 저장소를 만들지 않는다.
 재시도 키는 저장소 전체에서 유일하고 작업·대상 간 재사용은 충돌이다. 키를 경로로 쓰지 않는다.
 명세 해시는 v1 canonical JSON(UTF-8, key 정렬, 공백 없음, ensure_ascii=false, NaN 금지)의 SHA-256이다.
-원래 입력과 최초 확정 명세를 기록한 다음 UUID/MAC를 재사용하여 준비한다.
+일반 create의 키는 create:<정규 UUID>로 유도한다. 전달된 기존 create idempotency_key는
+새 작업 선택에 사용하지 않는다. 같은 UUID의 최초 요청이 다르면 IDEMPOTENCY_CONFLICT다.
+원래 입력(request), guest_kind/기본 정책을 적용한 최초 명세(initial_spec), 배정한
+internal_name/MAC/ipv4(assigned)를 복사 전에 기록한다. 재호출은 당시 값을 재사용한다.
 메타데이터는 파일 fsync→원자적 교체→부모 fsync, 새 인스턴스/이동은 renameat2 NOREPLACE를 쓴다.
 여러 파일 전체가 하나의 트랜잭션은 아니다.
 
 같은 key/같은 요청의 성공 재호출은 original_result와 current를 반환한다.
-현재 설정을 처음 값으로 되돌리지 않는다. purge 후 오래된 create는 VM_PURGED다.
+create의 최상위 VM 필드는 현재 설정을 반영하며 original_result는 최초 결과다.
+현재 설정을 처음 값으로 되돌리지 않는다. RETIRED의 create는 TARGET_CHANGED,
+PURGED의 create는 VM_PURGED다. 과거 성공 기록은 operation 조회로 확인한다.
+retire/restore/purge는 각각 고유한 호출자 키와 operation_id·expected_generation을 유지한다.
+같은 UUID를 모든 수명주기 작업의 키로 쓰지 않는다. 오래된 작업에 새 키를 자동 발급하면 안 된다.
 retire→restore 후 오래된 retire/purge는 현재 세대의 자산을 다시 변경하지 않는다.
 중단 후 잠금을 얻은 호출만 이전 동기 작업을 재확인한다. PID 숫자만 신뢰하지 않는다.
 게시 완료·응답 소실은 기존 결과를 복원한다. 복사 도중 남은 작업 공간은 보존하고
@@ -169,10 +189,55 @@ synchronization 진단 번들은 Starter 공개 ID로 등록하지 않는다.
 
 기존 Platform.create/delete Python 메서드도 Manager.call에 위임하고 envelope를 반환한다.
 create의 기존 records 인자는 신뢰하거나 재사용하지 않는다. 기존 직접 호출자도
-template_version과 idempotency_key를 전달하고 ok/error를 검사해야 한다.
+vm_id와 template_version을 전달하고 ok/error를 검사해야 한다. retire/delete에는 재시도 키도 필요하다.
 공통 관리 API를 동시에 호출하는 프로그램도 기존 글로벌 잠금의 충돌 응답을 처리한다.
 
 후속 실제 dom0에서 먼저 import를 확인한다:
     PYTHONPATH=/usr/lib/xenova python3 -B -c 'import xenova_management, xenova_management_cli, xenova_catalog, xenova_wifi, artifact_io'
     echo $?
 WSL import 성공은 이 타깃 검사나 이미지 패키지 검사를 대신하지 않는다.
+
+## Linux IP 소유권과 공통 VM 필드
+
+/etc/xenova/defaults.json의 network.ipv4_pool은 192.168.77.2..99,
+reserved_ipv4는 기본 .10/.20이다. .1/네트워크/브로드캐스트는 풀 밖이다.
+선택·작업 기록·복사·게시·DHCP 반영은 기존 전역 잠금 안에서 실행한다.
+등록 VM, 보관 VM, 미완료 생성 assigned, 정적 DHCP 예약, 현재 lease를 제외한다.
+생성 중단/stop/start/retire는 주소를 유지하고 restore는 기존 주소 충돌을 다시 검사한다.
+purge 완료 후 현재 소유/예약/lease가 없으면 주소를 다시 선택할 수 있다.
+과거 성공 작업에 적힌 IP만으로 영구 점유하지 않는다. 정리 미완료 작업은 예약을 유지한다.
+풀 고갈은 IP_POOL_EXHAUSTED(종료 코드 4)이고 잠금 경합 OPERATION_IN_PROGRESS와 다르다.
+기존 정적 DHCP 예약은 보존한다. DHCP reload 실패는 dhcp-pending 단계에 남는다.
+게시된 디스크를 없애거나 새 IP로 바꾸지 않고 같은 작업으로 반영을 재시도한다.
+IP는 배정 주소이며 실제 게스트 DHCP 획득이나 SSH 준비 완료 증거가 아니다.
+Zephyr는 주소를 예약하지 않고 ipv4=null을 반환한다. SSH ProxyJump 허용 범위 .2..99와 같다.
+
+create의 data, list의 data.vms[], get의 data.vm은 다음 필드를 같은 위치에 제공한다:
+vm_id, name, template_id, template_version, guest_kind, vcpus, memory_mib, ipv4.
+configuration에는 내부 등록 설정, initial_spec에는 최초 생성 명세가 남는다.
+기존 형식에 없는 공개 템플릿 출처는 null로 반환하며 추측해서 채우지 않는다.
+factory 신규 등록은 defaults의 공개 ID/버전을 보존한다.
+기존 이름 기반 인스턴스·작업 기록은 읽되 경로를 이동하지 않는다.
+외부 UUID 없는 과거 create 요청의 자동 재실행은 제공하지 않는다.
+
+## Spring 연결 검사와 후속 연동 경계
+
+tests/contracts/spring-create-request.json은 실제 Dom0CreateVmRequest의 여섯 필드 fixture다.
+tests/contracts/spring_manager_bridge.py는 시험 전용 연결부이며 배포 서버가 아니다.
+실제 파일/registry/journal/예약은 공통 Manager가 처리하고 Xen·mount·OS 복사만 대역이다.
+backend의 SpringXenovaContractTest는 실제 DTO 직렬화와 Vm 역직렬화를 연결한다.
+
+    python3 -B -m unittest discover -s tests/platform -p 'test_xenova_spring_contract.py' -v
+    cd backend
+    ./mvnw test -Dtest=SpringXenovaContractTest,Dom0ManagerClientTest,VmServiceTest,VmApiIntegrationTest
+
+실행에는 기존 프로젝트의 Java 21/Maven 환경이 필요하다. Python fixture 대조 통과는
+Java 실행·HTTP 배포·실보드 검증을 대신하지 않는다.
+현재 services/dom0-manager는 .gitkeep만 있고 배포 어댑터는 구현되어 있지 않다.
+실제 Spring VmService는 UUID를 발급하지만 요청 UUID의 영구 저장/응답 유실 복구는
+아직 없다. Spring 외부 POST를 다시 호출하면 새 UUID가 생기므로 Spring이 같은 UUID를
+저장·재사용하는 후속 처리가 필요하다. 플랫폼 자체는 전달된 UUID로 멱등성을 보장한다.
+Spring VmControlPort에는 retire/restore/purge의 작업 키·세대 전달 경계가 없다.
+구현 시 operation_id/원래 재시도 키를 보존해야 하며 현재 세대로 매번 새 작업을 만들지 않는다.
+Spring command-timeout=35초와 플랫폼 stop 최대 90초는 아직 다르다.
+이번 변경은 이 타임아웃·동기 stop·인증/원격 배포를 재설계하지 않는다.

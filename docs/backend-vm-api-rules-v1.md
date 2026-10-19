@@ -1,5 +1,11 @@
 # 백엔드 VM API 규약 v1
 
+> 이 문서의 이전 템플릿 ID·이름/IP 입력 예시는
+> [현재 공통 관리 계약](build-guides/xenova-vm-management.md)과
+> [HTTP 연결 경계](dom0-backend-http-contract-v1.md)를 따른다.
+> Spring은 vm_id를 발급하고 공개 카탈로그 ID/버전을 전달하며 IP는 플랫폼이 예약한다.
+
+
 Spring 백엔드의 VM API에 적용하는 규약입니다. 아래 세 가지를 정합니다.
 
 1. dom0-manager 호출의 타임아웃과 재시도
