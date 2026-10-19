@@ -17,7 +17,7 @@ def resolve(release_root, catalog):
     root = Path(release_root)
     if not root.is_absolute() or root.resolve() != root or root.is_symlink():
         raise ValueError('canonical release root required')
-    entries = catalog.get('templates', [])
+    entries = [{**e, 'vm_id':e.get('vm_name',e.get('vm_id'))} for e in catalog.get('templates', [])]
     if catalog.get('schema') != 1 or len(entries) != 3 or {e['vm_id'] for e in entries} != {'ubuntu-dev', 'debian-dev', 'zephyr-dev'}:
         raise ValueError('one current default per VM required; no legacy compatibility catalog')
     defaults = json.loads((assembly.FILES / 'defaults.json').read_text())
@@ -27,6 +27,10 @@ def resolve(release_root, catalog):
         relative = Path(entry['directory'])
         if relative.is_absolute() or '..' in relative.parts:
             raise ValueError('template path escapes release root')
+        if entry.get('template_id') is not None:
+            public_ids={e['id']:e['template_id'] for e in defaults['instances']+defaults['firmware_instances']}
+            if entry['template_id'] != public_ids.get(entry['vm_id']):
+                raise ValueError('normalized default template identity mismatch')
         if entry.get('id') != selected[entry['vm_id']] or entry.get('guest_kind') != ('zephyr' if entry['vm_id']=='zephyr-dev' else 'linux'):
             raise ValueError('default template/VM pairing differs from deployment defaults')
         directory = root / relative
@@ -41,7 +45,7 @@ def resolve(release_root, catalog):
                                     'template_manifest_sha256': entry['manifest_sha256']})
         elif entry['guest_kind'] == 'zephyr':
             info = assembly.rtos.info(directory, entry['manifest_sha256'])
-            if info['id'] != entry['id'] or info['metadata']['version'] != entry['version']:
+            if info['id'] != entry['id'] or info['metadata'].get('template_version',info['metadata'].get('version')) != entry['version']:
                 raise ValueError('default Starter identity/version mismatch')
             result['rtos_templates'].append({'template_dir': str(directory),
                                             'template_manifest_sha256': entry['manifest_sha256']})

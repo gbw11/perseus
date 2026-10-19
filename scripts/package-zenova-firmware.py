@@ -28,6 +28,7 @@ def main(argv=None):
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--app-source', type=Path, help='application source files to fingerprint; no build or source changes')
     parser.add_argument('--template-id', help='publish a new catalog entry for the pinned Starter App')
+    parser.add_argument('--template-version', help='catalog deployment version; distinct from application firmware version')
     parser.add_argument('--execute', action='store_true')
     args = parser.parse_args(argv)
     zephyr.plain(args.build_dir)
@@ -85,7 +86,10 @@ def main(argv=None):
             if b'Zenova / Zephyr / Xen' not in payload or b'Perseus / Zephyr / Xen' in payload:
                 raise ValueError('Starter payload does not contain the current Zenova banner')
         meta['source']['build_receipt_sha256'] = zephyr.sha(receipt_path)
-        meta.update(id=lock['id'], kind='zephyr-xen-firmware')
+        meta.update(id=lock['id'], kind='zephyr-xen-firmware', template_id='zephyr-xenvm-starter-arm64',
+                    template_version=args.template_version or args.version, schema_version='1.0')
+        from zenova_catalog import identity
+        identity(meta['template_id'], meta['template_version'])
         meta['source'].update(zephyr_commit=lock['zephyr_commit'], sdk_version=lock['sdk_version'])
     if not args.execute:
         print(json.dumps({'action': 'plan-firmware-bundle', 'output': str(args.output), 'metadata': meta,

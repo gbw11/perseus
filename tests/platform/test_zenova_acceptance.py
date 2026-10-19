@@ -183,7 +183,8 @@ class AcceptanceTest(unittest.TestCase):
         defaults = json.loads((FILES / 'defaults.json').read_text())
         z = defaults['firmware_instances'][0]
         self.assertEqual(z, {'id': 'zephyr-dev', 'template': 'zenova-zephyr-starter-1.0.0',
-                             'autostart': True, 'board_shutdown_policy': 'force-allowed'})
+                             'autostart': True, 'board_shutdown_policy': 'force-allowed',
+                             'template_id':'zephyr-xenvm-starter-arm64','template_version':'1.0.0'})
         self.assertTrue(all(row['autostart'] for row in defaults['instances']))
         self.assertFalse(zephyr.CAPABILITIES['graceful_shutdown'])
         old = self.add_zephyr()

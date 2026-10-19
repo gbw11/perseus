@@ -229,7 +229,7 @@ class AssemblyPipelineTest(unittest.TestCase):
                 return ' M fixture.py\n'
             raise AssertionError('unexpected Git query: ' + repr(args))
         config = {'platform': {'sha256': assemble.sha(image)}}
-        with patch.object(assemble.subprocess, 'check_output', side_effect=git_output) as git_query, patch.object(assemble.os,'geteuid',return_value=0), patch.object(assemble.shutil,'which',return_value='/fixture/tool'), patch.object(assemble.prepare,'Workspace',Work), patch.object(assemble,'platform_mount',return_value=prepared_root), patch.object(assemble,'platform_boot_ok',return_value={'xen':'fixture-hash'}), patch.object(assemble.prepare,'initialize_storage',side_effect=init), patch.object(assemble.prepare,'make_instance',side_effect=seed), patch.object(assemble.prepare,'command',side_effect=command), patch.object(assemble,'template_info',return_value={}), patch.object(assemble.os,'sync'):
+        with patch.object(assemble.subprocess, 'check_output', side_effect=git_output) as git_query, patch.object(assemble.os,'geteuid',return_value=0), patch.object(assemble.shutil,'which',return_value='/fixture/tool'), patch.object(assemble.prepare,'Workspace',Work), patch.object(assemble,'platform_mount',return_value=prepared_root), patch.object(assemble,'platform_boot_ok',return_value={'xen':'fixture-hash'}), patch.object(assemble.prepare,'initialize_storage',side_effect=init), patch.object(assemble.prepare,'make_instance',side_effect=seed), patch.object(assemble.prepare,'command',side_effect=command), patch.object(assemble,'template_info',return_value={}), patch.object(assemble,'copy_management_catalog'), patch.object(assemble.os,'sync'):
             manifest = assemble.assemble(config,image,{},planned)
         self.assertEqual(git_query.call_count, 2)
         self.assertEqual(manifest['assembly_source_commit'], 'a' * 40)
@@ -525,71 +525,59 @@ class GuestIdentityTest(unittest.TestCase):
 
 
 class NativeCreateTest(unittest.TestCase):
+    def scenario(self):
+        from test_zenova_management import ManagementTest
+        case=ManagementTest()
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        return case
+
+    def arguments(self,case,execute):
+        return argparse.Namespace(id='custom',template=case.spec['template_id'],template_version='1.0.0',
+                                  ipv4=case.spec['ipv4'],memory_mib=512,vcpus=1,execute=execute,idempotency_key='facade')
+
     def test_missing_local_template_and_capacity_failure_do_not_create(self):
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        data = Path(temp.name)
-        p = vm.Platform(data)
-        args = argparse.Namespace(id='new-vm', template='missing', ipv4='192.168.77.30', memory_mib=512, vcpus=1, autostart=False, execute=True)
-        with patch.object(p, 'templates', return_value=[]):
-            with self.assertRaisesRegex(vm.PlatformError, 'local template'):
-                p.create(args, {})
-        self.assertEqual(list(data.iterdir()), [])
+        case=self.scenario();args=self.arguments(case,True);args.template='missing'
+        result=case.p.create(args,{})
+        self.assertEqual(result['error']['code'],'TEMPLATE_NOT_FOUND')
+        self.assertEqual(list((case.data/'instances').iterdir()),[])
+        self.assertFalse((case.data/'operations').exists())
 
     def test_native_plan_uses_local_template_and_never_creates_or_starts(self):
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        data = Path(temp.name)
-        template = data / 'templates/ubuntu-template'
-        template.mkdir(parents=True)
-        (template / 'boot.json').write_text('{"kernel_release":"6.8-fixture"}')
-        p = vm.Platform(data)
-        args = argparse.Namespace(id='new-vm', template='ubuntu-template', ipv4='192.168.77.30', memory_mib=512, vcpus=1, autostart=False, execute=False)
-        available = [{'id': 'ubuntu-template', 'logical_bytes': 8 * contract.GIB}]
+        case=self.scenario()
         import prepare_instance as backend
-        with patch.object(p, 'templates', return_value=available), patch.object(vm.os, 'statvfs', return_value=SimpleNamespace(f_bavail=64 * contract.GIB, f_frsize=1)), patch.object(backend, 'make_instance') as create, patch.object(p, 'start') as start:
-            p.create(args, {})
-        create.assert_not_called()
-        start.assert_not_called()
-        self.assertFalse((data / 'instances').exists())
+        with patch.object(backend,'make_instance') as create,patch.object(case.p,'start') as start:
+            result=case.p.create(self.arguments(case,False),{})
+        self.assertTrue(result['ok'],result);create.assert_not_called();start.assert_not_called()
+        self.assertFalse((case.data/'operations').exists())
 
     def test_native_create_reserves_existing_sparse_growth_before_copy(self):
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        data = Path(temp.name)
-        r = record()
-        directory = fixture(data, r)
-        template = data / 'templates/ubuntu-template'
-        template.mkdir(parents=True)
-        (template / 'boot.json').write_text('{"kernel_release":"6.8-fixture"}')
-        p = vm.Platform(data)
-        args = argparse.Namespace(id='new-vm', template='ubuntu-template', ipv4='192.168.77.30', memory_mib=512, vcpus=1, autostart=False, execute=True)
-        original_stat = Path.stat
-        def mocked_stat(path, *a, **kw):
-            if path == directory / 'root.raw':
-                return SimpleNamespace(st_size=8 * contract.GIB, st_blocks=0)
-            return original_stat(path, *a, **kw)
-        with patch.object(p, 'templates', return_value=[{'id':'ubuntu-template','logical_bytes':8 * contract.GIB}]), patch.object(vm.os, 'statvfs', return_value=SimpleNamespace(f_bavail=12 * contract.GIB, f_frsize=1)), patch.object(Path, 'stat', mocked_stat):
-            with self.assertRaisesRegex(vm.PlatformError, 'including existing VM growth'):
-                p.create(args, {r['id']: r})
-        self.assertFalse((data / 'instances/new-vm').exists())
+        case=self.scenario();existing=record();directory=fixture(case.data,existing)
+        original=Path.stat
+        def diskstat(path,*args,**kwargs):
+            st=original(path,*args,**kwargs)
+            if path==directory/'root.raw':
+                return SimpleNamespace(st_mode=st.st_mode,st_nlink=st.st_nlink,st_dev=st.st_dev,
+                                       st_ino=st.st_ino,st_size=8*contract.GIB,st_blocks=0)
+            return st
+        with patch.object(vm.os,'statvfs',return_value=SimpleNamespace(f_bavail=9*contract.GIB,f_frsize=1)),patch.object(Path,'stat',diskstat):
+            result=case.p.create(self.arguments(case,True),{})
+        self.assertEqual(result['error']['code'],'INSUFFICIENT_STORAGE',result)
+        self.assertFalse((case.data/'instances/custom').exists())
 
     def test_native_execute_delegates_once_to_shared_creator_without_starting_guest(self):
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        data = Path(temp.name)
-        directory = data / 'templates/ubuntu-template'
-        directory.mkdir(parents=True)
-        (directory / 'boot.json').write_text('{"kernel_release":"6.8-fixture"}')
-        p = vm.Platform(data)
-        args = argparse.Namespace(id='new-vm', template='ubuntu-template', ipv4='192.168.77.30', memory_mib=512, vcpus=1, autostart=False, execute=True)
+        case=self.scenario()
         import prepare_instance as backend
-        with patch.object(p, 'templates', return_value=[{'id':'ubuntu-template','logical_bytes':8 * contract.GIB}]), patch.object(vm.os,'statvfs',return_value=SimpleNamespace(f_bavail=64 * contract.GIB,f_frsize=1)), patch.object(backend,'make_instance') as create, patch.object(p,'records',return_value={}), patch.object(p,'start') as start:
-            p.create(args, {})
-        create.assert_called_once()
-        self.assertEqual(create.call_args.kwargs['record_override']['template'], 'ubuntu-template')
-        self.assertFalse(create.call_args.kwargs['record_override']['autostart'])
-        start.assert_not_called()
+        def create(args,**kwargs):
+            r=kwargs['record_override']
+            fixture(case.data,r)
+        with patch.object(backend,'make_instance',side_effect=create) as creator,patch.object(case.p,'start') as start:
+            result=case.p.create(self.arguments(case,True),{})
+        self.assertTrue(result['ok'],result);creator.assert_called_once();start.assert_not_called()
+        record_override=creator.call_args.kwargs['record_override']
+        self.assertEqual(record_override['template'],'source')
+        self.assertFalse(record_override['autostart'])
+        self.assertEqual(record_override['uuid'],result['data']['vm_id'])
 
     def test_shared_creator_refuses_linked_output_parent_before_storage_or_copy(self):
         temp = tempfile.TemporaryDirectory()
@@ -606,10 +594,12 @@ class NativeCreateTest(unittest.TestCase):
         self.assertEqual(list(outside.iterdir()),[])
 
     def test_existing_id_is_not_reinitialized(self):
-        p = vm.Platform()
-        args = argparse.Namespace(id='ubuntu-dev')
-        with self.assertRaisesRegex(vm.PlatformError, 'existing instances'):
-            p.create(args, {'ubuntu-dev': {}})
+        case=self.scenario()
+        case.create()
+        before=(case.data/'instances/custom/instance.json').read_bytes()
+        result=case.p.create(self.arguments(case,True),{})
+        self.assertEqual(result['error']['code'],'VM_NAME_CONFLICT',result)
+        self.assertEqual((case.data/'instances/custom/instance.json').read_bytes(),before)
 
 
 if __name__ == '__main__':

@@ -144,3 +144,6 @@ Perseus 소스·이미지·실보드의 역사적 기록입니다. 기존 로그
 
     └── validate-release.sh
 ```
+
+- [VM 관리 계약·작업 기록·보관/복원/삭제](docs/build-guides/zenova-vm-management.md)
+- [dom0 Wi-Fi 관리 접속](docs/build-guides/zenova-wifi-access.md)

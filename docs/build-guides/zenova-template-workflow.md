@@ -112,3 +112,13 @@ UUID·MAC/IP·독립 디스크·키 생성과 Linux/Zephyr 생명주기 계약�
 현재 소스와 일치하는 관리 모듈·SSH 구성을 확인하고, 이 default 참조로 새 seed와
 최종 이미지를 조립한다. 기존 사용 중 VM은 이번 템플릿 변경으로 초기화하지 않는다.
 실제 VM 부팅·SSH·앱·혼합 종료·reset·DTB/IRQ 수락은 별도다.
+
+
+## 공개 관리 ID와 기존 게시본
+
+VM API는 ubuntu-24.04-arm64, debian-13-arm64, zephyr-xenvm-starter-arm64와 명시적 버전을 사용한다.
+기존 게시본의 날짜 기반 id는 source_template_id/출처로 보존한다.
+새 catalog descriptor가 공개 ID+버전과 기존 불변 manifest 해시를 연결한다.
+기존 root.raw/firmware bytes나 manifest를 바꾸어 새 ID로 가장하지 않는다.
+새 게시 내용이 달라지면 새 배포 버전과 실제 해시를 선택한다.
+관리 카탈로그 게시와 최초 설치 연결은 zenova-vm-management.md의 절차를 따른다.

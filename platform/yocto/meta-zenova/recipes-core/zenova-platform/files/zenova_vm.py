@@ -115,11 +115,11 @@ def validate_identity(record):
             raise PlatformError(f'invalid {key}')
 
 
-def validate_record(record, directory, *, allow_seed=False):
+def validate_record(record, directory, *, allow_seed=False, allow_archive=False):
     validate_identity(record)
     if record.get('identity_state') == 'pending' and not allow_seed:
         raise PlatformError('factory seed identity is pending; VM start refused')
-    if record['id'] != directory.name:
+    if not allow_archive and record['id'] != directory.name:
         raise PlatformError('instance directory/id mismatch')
     if guest_kind(record) == 'zephyr':
         regular_asset(directory, 'instance.json')
@@ -254,48 +254,16 @@ class Platform:
                                'hardware_profile': zephyr.PROFILE, 'logical_bytes': info['logical_bytes']})
         return result
 
-    def create(self, args, records):
-        """명시적 최초 생성만 공유 준비 코드를 호출한다. start/stop은 이 경로를 사용하지 않는다."""
-        if args.id in records or not args.id or not ID.fullmatch(args.id) or retired_instance(self.data, args.id):
-            raise PlatformError('new valid instance id required; existing instances are never overwritten')
-        available = {r['id']: r for r in self.templates()}
-        if args.template not in available:
-            raise PlatformError('local template missing/unsupported; no PC fallback or download')
-        selected = available[args.template]
-        if selected.get('guest_kind', 'linux') == 'zephyr':
-            if args.ipv4 is not None or args.memory_mib not in (None, 16) or args.vcpus not in (None, 1):
-                raise PlatformError('Zephyr requires fixed 1 vCPU/16MiB profile and no IP')
-            if not args.execute:
-                print(json.dumps({'action': 'plan-create', 'guest_kind': 'zephyr', 'id': args.id,
-                                  'starts_guest': False, 'capabilities': zephyr.CAPABILITIES}, indent=2))
-                return
-            self.reserve_space(selected['logical_bytes'] * 2, records)
-            r = zephyr.new_instance(self.data, args.id, self.data / 'rtos-templates' / args.template,
-                                    records, autostart=args.autostart)
-            print(json.dumps({'action': 'create', 'registered': True, 'record': r, 'starts_guest': False}, indent=2))
-            return
-        template = self.data / 'templates' / args.template
-        boot = json.loads(regular_asset(template, 'boot.json').read_text())
-        mac = '02:' + ':'.join(f'{value:02x}' for value in os.urandom(5))
-        record = {'schema': 1, 'guest_kind': 'linux', 'id': args.id, 'name': args.id, 'hostname': args.id, 'template': args.template,
-                  'uuid': '00000000-0000-4000-8000-000000000000', 'mac': mac, 'ipv4': args.ipv4,
-                  'kernel_release': boot['kernel_release'], 'memory_mib': args.memory_mib if args.memory_mib is not None else 512,
-                  'vcpus': args.vcpus if args.vcpus is not None else 1, 'autostart': args.autostart}
-        validate_identity(record)
-        for existing in records.values():
-            if any(existing.get(k) == record[k] for k in ('id', 'name', 'hostname', 'mac', 'ipv4')):
-                raise PlatformError('new identity/IP conflicts with a registered instance')
-        free, required = self.reserve_space(selected['logical_bytes'], records)
-        print(json.dumps({'action': 'create' if args.execute else 'plan-create', 'record': record,
-                          'free_bytes': free, 'required_free_bytes': required, 'starts_guest': False}, indent=2))
-        if not args.execute:
-            return
-        from prepare_instance import make_instance
-        from argparse import Namespace
-        make_instance(Namespace(data_root=self.data, id=args.id, spec=None, template_root=None, deployment_seed=False),
-                      vm=sys.modules[__name__], defaults_path=Path('/etc/zenova/defaults.json'), record_override=record)
-        self.records(validate_assets=False)
-        print('new persistent instance registered; use start explicitly; immutable template retained')
+    def create(self, args, records=None):
+        """기존 Python 호출 지점도 공통 계약으로 위임한다. records 인자는 신뢰/재사용하지 않는다."""
+        from zenova_management import Manager
+        spec = {'name':args.id, 'template_id':getattr(args,'template_id',getattr(args,'template',None)),
+                'template_version':getattr(args,'template_version',None),
+                'vcpus':getattr(args,'vcpus',None), 'memory_mib':getattr(args,'memory_mib',None)}
+        if getattr(args,'ipv4',None) is not None:
+            spec['ipv4']=args.ipv4
+        return Manager(self).call('create',spec,execute=getattr(args,'execute',False),
+                                  idempotency_key=getattr(args,'idempotency_key',None))
 
     def reserve_space(self, additional_bytes, records):
         stats = os.statvfs(self.data)
@@ -773,23 +741,23 @@ class Platform:
                           'id': record['id'], 'firmware': info, 'uuid': record['uuid'],
                           'starts_guest': False}, indent=2))
 
-    def delete(self, record, *, execute=False):
-        if self.matching(record, self.domains()):
-            raise PlatformError('cannot delete a running domain')
-        directory = self.data / 'instances' / record['id']
-        validate_record(record, directory)
-        if execute:
-            # 레지스트리에서 원자적으로 제외한다. 사용자 자산은 숨김 보관하여 복구할 수 있다.
-            retired = directory.parent / ('.deleted-' + record['id'] + '-' + record['uuid'])
-            if retired.exists() or retired.is_symlink():
-                raise PlatformError('retired instance archive already exists')
-            directory.rename(retired)
-            sync_directory(directory.parent)
-        print(json.dumps({'action': 'delete' if execute else 'plan-delete', 'id': record['id'],
-                          'registered': not execute, 'assets': 'retained in hidden instance archive'}))
+    def delete(self, record, *, execute=False, idempotency_key=None):
+        """delete는 공통 retire의 보관 별칭이며 영구 삭제를 수행하지 않는다."""
+        from zenova_management import Manager
+        return Manager(self).call('retire',{'vm_id':record['uuid']},execute=execute,
+                                  idempotency_key=idempotency_key)
 
 
 def retired_instance(data, key, identity=None):
+    tombs = data / 'tombstones'
+    if tombs.exists() or tombs.is_symlink():
+        if tombs.is_symlink() or tombs.resolve() != tombs or not tombs.is_dir():
+            raise PlatformError('invalid tombstone storage')
+        for path in tombs.iterdir():
+            regular_asset(tombs, path.name)
+            tomb = json.loads(path.read_text())
+            if tomb.get('name') == key and (identity is None or tomb.get('vm_id') == identity):
+                return tomb.get('lifecycle') != 'REGISTERED'
     for path in (data / 'instances').glob('.deleted-' + key + '-*'):
         if path.is_symlink() or not path.is_dir():
             raise PlatformError('invalid retired instance path')
@@ -819,6 +787,11 @@ def dhcp_ready(pid, timeout=5):
 
 
 def main(argv=None):
+    raw = list(sys.argv[1:] if argv is None else argv)
+    managed = {'list','get','retire','restore','purge','operation','create','delete','templates'}
+    if '--json' in raw or (raw and raw[0] in managed):
+        from zenova_management_cli import main as management_main
+        return management_main(raw)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['create', 'templates', 'check-xen', 'check-network', 'dhcp-ready',
         'autostart', 'start', 'stop', 'reboot', 'shutdown-all', 'autostart-set', 'status', 'destroy',

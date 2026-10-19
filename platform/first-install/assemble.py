@@ -181,6 +181,34 @@ def copy_rtos_templates(data, entries):
     return records
 
 
+def copy_management_catalog(data):
+    """새 조립 저장소에만 factory public ID/version 카탈로그를 준비한다."""
+    from zenova_catalog import describe
+    from artifact_io import publish
+    factory=json.loads((FILES/'defaults.json').read_text())
+    selected={e['template']:e for e in factory['instances']+factory['firmware_instances']}
+    for kind, folder in [('linux','templates'),('zephyr','rtos-templates')]:
+        parent = data / folder
+        if not parent.exists():
+            continue
+        for directory in parent.iterdir():
+            if directory.name.startswith('.') or directory.name not in selected:
+                continue
+            manifest = directory / ('firmware.json' if (directory / 'firmware.json').exists() else 'template.json')
+            meta = json.loads(manifest.read_text())
+            descriptor = {'schema_version':'1.0','template_id':selected[directory.name]['template_id'],
+                          'template_version':selected[directory.name]['template_version'],'guest_kind':kind,
+                          'asset_directory':str(directory.relative_to(data)),
+                          'manifest_sha256':sha(manifest),'source_template_id':meta['id']}
+            describe(data, descriptor, full=True)
+            output = data / 'catalog' / descriptor['template_id']
+            output.mkdir(parents=True, exist_ok=True)
+            temp = output / '.descriptor'
+            temp.write_text(json.dumps(descriptor, indent=2) + '\n')
+            temp.chmod(0o444)
+            publish(temp, output / (meta['version'] + '.json'))
+
+
 def copy_rtos_seeds(data, entries):
     """새 조립 저장소에만 기본 Zephyr 독립 자산을 준비한다. 기존 저장소는 대상이 아니다."""
     if len(entries) != 1:
@@ -192,7 +220,7 @@ def copy_rtos_seeds(data, entries):
     elif entries[0]['id'] != default['template']:
         raise ValueError('default Zephyr template mismatch')
     record = zephyr.new_instance(data, default['id'], data / 'rtos-templates' / default['template'],
-                                 {}, autostart=default['autostart'], board_shutdown_policy=default['board_shutdown_policy'], registry='seeds', seed=True)
+                                 {}, autostart=default['autostart'], board_shutdown_policy=default['board_shutdown_policy'], registry='seeds', seed=True, metadata={k:default[k] for k in ('template_id','template_version') if k in default})
     return [{'record': record}]
 
 
@@ -259,6 +287,11 @@ def platform_root_ok(root):
                 'usr/lib/zenova/zenova_zephyr.py': FILES / 'zenova_zephyr.py',
                 'etc/systemd/journald.conf.d/20-zenova.conf': FILES / 'zenova-journald.conf',
                 'etc/systemd/system.conf.d/20-zenova.conf': FILES / 'zenova-system.conf'}
+    for name in ('zenova_management.py','zenova_management_cli.py','zenova_catalog.py','zenova_wifi.py'):
+        expected['usr/lib/zenova/'+name] = FILES/name
+    expected['usr/lib/zenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
+    expected['usr/sbin/zenova-wifi'] = FILES/'zenova-wifi'
+    expected['usr/lib/systemd/system/zenova-wifi@.service'] = FILES/'zenova-wifi@.service'
     expected['usr/lib/zenova/update_guest_ssh.py'] = ROOT / 'scripts/update-zenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         expected['usr/lib/zenova/' + name] = ROOT / 'platform/guests/common' / name
@@ -268,10 +301,16 @@ def platform_root_ok(root):
     for relative, source in expected.items():
         if not path(relative).is_file() or path(relative).read_bytes() != source.read_bytes():
             raise ValueError('platform source/installed contract mismatch: ' + relative)
-    for name in ['sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl']:
+    for name in ['sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl', 'wpa_supplicant', 'wpa_cli', 'iw', 'networkctl']:
         if not any(path(prefix + name).is_file() and path(prefix + name).stat().st_mode & 0o111
                    for prefix in ('usr/sbin/', 'usr/bin/', 'sbin/', 'bin/')):
             raise ValueError('required platform growth tool missing: ' + name)
+    for relative in ('usr/lib/firmware/brcm/brcmfmac43455-sdio.bin',
+                     'usr/lib/firmware/brcm/brcmfmac43455-sdio.clm_blob',
+                     'usr/lib/firmware/brcm/brcmfmac43455-sdio.raspberrypi,4-model-b.txt',
+                     'usr/lib/firmware/regulatory.db','usr/lib/firmware/regulatory.db.p7s'):
+        if not path(relative).is_file() or not path(relative).stat().st_size:
+            raise ValueError('required management wireless firmware missing: '+relative)
     for relative, defines in [
         ('usr/share/zenova/qemu-config-host.h', ('CONFIG_VNC', 'CONFIG_XEN_BACKEND')),
         ('usr/share/zenova/qemu-i386-config-target.h', ('CONFIG_XEN',)),
@@ -448,7 +487,7 @@ def source_fingerprints():
              *(p for p in sorted((ROOT / 'platform/guests/linux').rglob('*')) if p.is_file()),
              ROOT / 'scripts/assemble-zenova-first-install.py', ROOT / 'scripts/prepare-zenova-guests.py',
              ROOT / 'platform/first-install/assemble.py', ROOT / 'platform/first-install/artifact_io.py',
-             ROOT / 'platform/first-install/completed_artifacts.py', ROOT / 'scripts/publish-zenova-platform.py',
+             ROOT / 'platform/first-install/completed_artifacts.py', ROOT / 'scripts/publish-zenova-platform.py', ROOT / 'scripts/publish-zenova-template-catalog.py',
              ROOT / 'platform/first-install/first_install_contract.py',
              *sorted(p for p in FILES.iterdir() if p.is_file()),
              ROOT / 'scripts/verify-zenova-runtime-artifacts.py', ROOT / 'scripts/package-zenova-firmware.py',
@@ -537,6 +576,7 @@ def assemble(config, image, record, planned):
                                      'retained_root': planned['capacity']['template_policy'] == 'full'})
         firmware_records = copy_rtos_templates(data, planned.get('rtos_templates', []))
         firmware_instances = copy_rtos_seeds(data, planned.get('rtos_templates', []))
+        copy_management_catalog(data)
         factory = {'schema': 1, 'features': FEATURES, 'factory_id': str(uuid.uuid4()), 'instances': bundles,
                    'templates': template_records, 'rtos_templates': firmware_records, 'firmware_instances': firmware_instances,
                    'template_policy': planned['capacity']['template_policy']}

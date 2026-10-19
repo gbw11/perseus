@@ -9,6 +9,7 @@ import subprocess
 import time
 
 from first_install_contract import uuid4
+from artifact_io import publish
 from prepare_rootfs import prepare_instance, prepare_deployment_seed, inside
 
 
@@ -32,8 +33,8 @@ def require_new_output(path):
 
 class Workspace:
     """전용 임시 경로·직접 할당한 loop 장치만 사용하고 해제 실패 시 보존한다."""
-    def __init__(self, parent):
-        self.path = Path(parent) / ('.zenova-preparing-' + uuid4())
+    def __init__(self, parent, owned_path=None):
+        self.path = Path(owned_path) if owned_path is not None else Path(parent) / ('.zenova-preparing-' + uuid4())
         self.path.mkdir(mode=0o700)
         self.mounts, self.loops = [], []
 
@@ -119,7 +120,7 @@ def seed_store_check(data):
         raise ValueError('existing live storage/instances must never become factory seeds')
 
 
-def make_instance(args, *, vm, defaults_path, record_override=None):
+def make_instance(args, *, vm, defaults_path, record_override=None, identity=None, workspace_path=None, template_directory=None):
     seed = getattr(args, 'deployment_seed', False)
     # 새 출력의 부모도 같은 저장소 안의 일반 디렉터리여야 한다.
     for directory in [args.data_root, args.data_root / 'templates', args.data_root / 'instances', *([args.data_root / 'seeds'] if seed else [])]:
@@ -141,8 +142,8 @@ def make_instance(args, *, vm, defaults_path, record_override=None):
             raise ValueError('instance spec id differs from requested id')
     if not __import__('re').fullmatch(r'[a-z0-9][a-z0-9.+_-]{0,99}', record.get('template', '')):
         raise ValueError('invalid template id')
-    external = getattr(args, 'template_root', None)
-    if external is not None and not seed:
+    external = template_directory if template_directory is not None else getattr(args, 'template_root', None)
+    if external is not None and not seed and template_directory is None:
         raise ValueError('external template roots are limited to new factory seed preparation')
     template = Path(external) if external is not None else args.data_root / 'templates' / record['template']
     expected_parent = template.parent if external is not None else args.data_root / 'templates'
@@ -172,11 +173,11 @@ def make_instance(args, *, vm, defaults_path, record_override=None):
             raise ValueError('template boot asset digest mismatch')
     output = args.data_root / ('seeds' if seed else 'instances') / args.id
     require_new_output(output)
-    record.update(schema=1, guest_kind='linux', uuid='00000000-0000-4000-8000-000000000000' if seed else uuid4(), kernel_release=boot['kernel_release'])
+    record.update(schema=1, guest_kind='linux', uuid='00000000-0000-4000-8000-000000000000' if seed else (identity or uuid4()), kernel_release=boot['kernel_release'])
     if seed:
         record['identity_state'] = 'pending'
     vm.validate_identity(record)
-    work = Workspace(output.parent)
+    work = Workspace(output.parent, workspace_path)
     try:
         stage = work.path / args.id
         stage.mkdir()
@@ -198,7 +199,7 @@ def make_instance(args, *, vm, defaults_path, record_override=None):
         os.sync()
         work.close()
         work.mounts, work.loops = [], []
-        (stage / 'instance.json').write_text(json.dumps(record, indent=2) + '\n')
+        vm.atomic_write(stage / 'instance.json', json.dumps(record, indent=2) + '\n')
         vm.validate_record(record, stage, allow_seed=seed)
         # 전체 registry의 식별자·디스크 중복도 게시 전에 확인한다.
         for other in output.parent.iterdir():
@@ -213,7 +214,7 @@ def make_instance(args, *, vm, defaults_path, record_override=None):
         if digest(template / 'root.raw') != meta['root_sha256']:
             raise ValueError('immutable template changed during instance preparation')
         require_new_output(output)
-        stage.rename(output)
+        publish(stage, output)
         os.sync()
     finally:
         if work.mounts or work.loops:

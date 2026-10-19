@@ -4,5 +4,7 @@
   "growth": "actual-device-last-ext4-v1",
   "identity": "systemd-machine-id-guest-seed-v1",
   "vm_management": "linux-zephyr-persistent-v2",
-  "qemu": "xenpv-vnc-none-v1"
+  "qemu": "xenpv-vnc-none-v1",
+  "vm_contract": "uuid-operations-v1",
+  "management_wifi": "wpa2-networkd-v1"
 }

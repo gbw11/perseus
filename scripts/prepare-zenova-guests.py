@@ -192,6 +192,7 @@ def make_template(args, source):
         work.mounts, work.loops = [], []
         metadata = {'schema': 1, 'id': args.source, 'source': source,
                     'size_gib': args.size_gib, 'root_sha256': digest(raw),
+                    'schema_version': '1.0', 'template_id': {'ubuntu-24.04-20260926':'ubuntu-24.04-arm64','debian-13-20261015':'debian-13-arm64'}[args.source],
                     'version': preparation['recipe']['version'], 'platform': 'zenova',
                     'preparation': preparation,
                     'files': {name: {'sha256': digest(stage / name), 'bytes': (stage / name).stat().st_size}

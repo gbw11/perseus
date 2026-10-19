@@ -12,6 +12,7 @@ bash -n scripts/setup-yocto.sh scripts/check-xen-bringup-prereqs.sh scripts/chec
 sh -n platform/yocto/meta-zenova/recipes-core/zenova-domu-init/files/init
 sh -n platform/yocto/meta-zenova/recipes-core/zenova-domu-init/files/udhcpc.script
 sh -n platform/yocto/meta-zenova/recipes-core/zenova-bringup/files/zenova-bridge-up
+sh -n platform/yocto/meta-zenova/recipes-core/zenova-platform/files/zenova-wifi
 sh -n platform/yocto/meta-zenova/recipes-core/zenova-platform/files/zenova-vm
 sh -n platform/yocto/meta-zenova/recipes-core/zenova-platform/files/zenova-first-boot
 git diff --check

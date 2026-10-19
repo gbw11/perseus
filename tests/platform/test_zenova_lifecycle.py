@@ -164,7 +164,7 @@ class ManagementTest(unittest.TestCase):
         from argparse import Namespace
         args = Namespace(id='zephyr-two', template=self.template.name, ipv4=None, memory_mib=None,
                          vcpus=None, autostart=False, execute=True)
-        self.p.create(args, self.records)
+        zephyr.new_instance(self.base, args.id, self.template, self.records)
         created = json.loads((self.base / 'instances/zephyr-two/instance.json').read_text())
         self.assertEqual((created['vcpus'], created['memory_mib']), (1, 16))
         self.assertNotEqual(created['uuid'], self.z['uuid'])
@@ -369,10 +369,13 @@ class ManagementTest(unittest.TestCase):
         linux = self.add_linux()
         before = snapshot(self.base / 'instances/ubuntu-dev')
         self.p.start(self.z)
-        with self.assertRaisesRegex(vm.PlatformError, 'running'):
-            self.p.delete(self.z, execute=True)
+        with patch.object(vm,'storage_check'),patch('zenova_management.Manager._usage',lambda *args:None):
+            result=self.p.delete(self.z,execute=True,idempotency_key='retire-test')
+        self.assertEqual(result['error']['code'],'VM_NOT_STOPPED',result)
         self.p.stop_many([self.z], force=True)
-        self.p.delete(self.z, execute=True)
+        with patch.object(vm,'storage_check'),patch('zenova_management.Manager._usage',lambda *args:None):
+            result=self.p.delete(self.z,execute=True,idempotency_key='retire-test')
+        self.assertTrue(result['ok'],result)
         self.assertFalse(self.directory.exists())
         self.assertTrue(vm.retired_instance(self.base, self.z['id'], self.z['uuid']))
         self.assertEqual(snapshot(self.base / 'instances/ubuntu-dev'), before)
@@ -562,7 +565,9 @@ class FactoryAndPackagingTest(unittest.TestCase):
         b = self.board(); b.p.register()
         r = json.loads((b.data / 'instances/zephyr-dev/instance.json').read_text())
         p = vm.Platform(b.data, b.p.run, Xen(b.data, {r['id']: r}))
-        p.delete(r, execute=True)
+        with patch.object(vm,'storage_check'),patch('zenova_management.Manager._usage',lambda *args:None):
+            result=p.delete(r,execute=True,idempotency_key='factory-retire')
+        self.assertTrue(result['ok'],result)
         b.p.register()
         self.assertFalse((b.data / 'instances/zephyr-dev').exists())
         self.assertEqual(len(vm.load_records(b.data)), 2)

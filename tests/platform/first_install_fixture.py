@@ -157,6 +157,10 @@ def platform_root(root):
                'usr/lib/zenova/zenova_zephyr.py': FILES / 'zenova_zephyr.py',
                'etc/systemd/journald.conf.d/20-zenova.conf': FILES / 'zenova-journald.conf',
                'etc/systemd/system.conf.d/20-zenova.conf': FILES / 'zenova-system.conf'}
+    for name in ('zenova_management.py','zenova_management_cli.py','zenova_catalog.py','zenova_wifi.py'):
+        mapping['usr/lib/zenova/'+name] = FILES/name
+    mapping['usr/lib/zenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
+    mapping['usr/sbin/zenova-wifi'] = FILES/'zenova-wifi'
     mapping['usr/lib/zenova/update_guest_ssh.py'] = ROOT / 'scripts/update-zenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         mapping['usr/lib/zenova/' + name] = ROOT / 'platform/guests/common' / name
@@ -183,9 +187,14 @@ def platform_root(root):
         (wants / name).symlink_to('/usr/lib/systemd/system/' + name)
     tools = root / 'usr/bin'
     tools.mkdir(parents=True)
-    for name in ('sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl', 'qemu-system-i386'):
+    for name in ('sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl', 'qemu-system-i386', 'wpa_supplicant', 'wpa_cli', 'iw', 'networkctl'):
         (tools / name).write_text('fixture: not executed')
         (tools / name).chmod(0o755)
+    for relative in ('brcm/brcmfmac43455-sdio.bin','brcm/brcmfmac43455-sdio.clm_blob',
+                     'brcm/brcmfmac43455-sdio.raspberrypi,4-model-b.txt','regulatory.db','regulatory.db.p7s'):
+        target=root/'usr/lib/firmware'/relative
+        target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_bytes(b'fixture: not real firmware')
     for name, text in [('qemu-config-host.h', '#define CONFIG_VNC 1\n#define CONFIG_XEN_BACKEND 1\n'),
                        ('qemu-i386-config-target.h', '#define CONFIG_XEN 1\n')]:
         (root / 'usr/share/zenova' / name).write_text(text)

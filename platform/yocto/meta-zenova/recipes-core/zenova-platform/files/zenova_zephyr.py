@@ -9,6 +9,7 @@ import shutil
 import struct
 
 from first_install_contract import uuid4
+from artifact_io import publish
 from zenova_runtime import PlatformError, atomic_write, sync_directory
 
 PAYLOADS = {'zephyr.bin', 'zephyr.elf', 'zephyr.config', 'zephyr.dts', 'xen.cfg.in', 'LICENSE'}
@@ -194,12 +195,12 @@ def copy_revision(source, parent, expected):
             os.fsync(stream.fileno())
     bundle_info(stage, expected)
     sync_directory(stage)
-    stage.rename(target)
+    publish(stage, target)
     sync_directory(parent)
     return info
 
 
-def new_instance(data, key, template, records, *, autostart=False, board_shutdown_policy='refuse', registry='instances', seed=False):
+def new_instance(data, key, template, records, *, autostart=False, board_shutdown_policy='refuse', registry='instances', seed=False, identity=None, workspace_path=None, metadata=None):
     """신규 인스턴스만 생성한다. seed는 새 조립 저장소에서만 호출한다."""
     if board_shutdown_policy not in ('refuse', 'force-allowed'):
         raise PlatformError('invalid Zephyr board shutdown policy')
@@ -214,7 +215,7 @@ def new_instance(data, key, template, records, *, autostart=False, board_shutdow
     meta = json.loads(asset(template, info['manifest']).read_text())
     if meta.get('kind') != 'zephyr-xen-firmware' or not TOKEN.fullmatch(meta.get('id', '')):
         raise PlatformError('create requires an immutable catalog template')
-    identity = uuid4()
+    identity = identity or uuid4()
     if any(r['uuid'] == identity or r['name'] == key for r in records.values()):
         raise PlatformError('new instance UUID/name conflicts with registry')
     record = {'schema': 2, 'guest_kind': 'zephyr', 'id': key, 'name': key, 'uuid': identity,
@@ -223,9 +224,11 @@ def new_instance(data, key, template, records, *, autostart=False, board_shutdow
               'shutdown_policy': 'explicit-force', 'board_shutdown_policy': board_shutdown_policy,
               'creation_origin': {'template': meta['id'], 'manifest_sha256': info['revision'], 'source': info['source']},
               'active_firmware': {k: info[k] for k in ('manifest', 'revision', 'version', 'sha256')}}
+    if metadata:
+        record.update(metadata)
     if seed:
         record.update(uuid='00000000-0000-4000-8000-000000000000', identity_state='pending')
-    staging = data / registry / ('.preparing-' + uuid4())
+    staging = Path(workspace_path) if workspace_path is not None else data / registry / ('.preparing-' + uuid4())
     staging.mkdir(mode=0o700)
     stage = staging / key
     stage.mkdir()
@@ -233,7 +236,7 @@ def new_instance(data, key, template, records, *, autostart=False, board_shutdow
     atomic_write(stage / 'instance.json', json.dumps(record, indent=2) + '\n')
     validate_instance(record, stage)
     sync_directory(stage)
-    stage.rename(output)
+    publish(stage, output)
     sync_directory(output.parent)
     return record
 
