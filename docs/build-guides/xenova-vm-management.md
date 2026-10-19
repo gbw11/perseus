@@ -241,3 +241,12 @@ Spring VmControlPort에는 retire/restore/purge의 작업 키·세대 전달 경
 구현 시 operation_id/원래 재시도 키를 보존해야 하며 현재 세대로 매번 새 작업을 만들지 않는다.
 Spring command-timeout=35초와 플랫폼 stop 최대 90초는 아직 다르다.
 이번 변경은 이 타임아웃·동기 stop·인증/원격 배포를 재설계하지 않는다.
+
+## factory 자체 IP 예약
+
+기본 .10/.20의 자동 할당 제외는 계속 유지한다. 기본 VM 복원 시에는
+.first-install-state.json의 완료된 UUID·실제 MAC 계획, storage UUID,
+.xenova-install.json의 factory ID·원래 주소를 실제 등록/보관 레코드와 대조한다.
+defaults.json의 예시 MAC으로 보드별 MAC을 되돌리거나 예시 MAC 일치를 요구하지 않는다.
+자체 기본 예약을 제외한 뒤에도 다른 UUID의 소유권과 다른 MAC의 DHCP 예약/lease는
+계속 충돌로 처리한다. 소유권을 확인할 기록이 없으면 자체 예약으로 추정하지 않는다.

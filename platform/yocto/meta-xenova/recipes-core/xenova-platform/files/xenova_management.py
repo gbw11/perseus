@@ -467,6 +467,39 @@ class Manager:
     def _valid_ip(value):
         return isinstance(value, str) and re.fullmatch(r'192\.168\.77\.(?:[2-9]|[1-9][0-9])', value) is not None
 
+    def _factory_owned_ip(self, record, defaults):
+        """예시 MAC 대신 완료된 factory 신원 계획과 실제 등록 신원으로 자체 예약을 확인한다."""
+        if record is None or vm.guest_kind(record) != 'linux':
+            return set()
+        candidates = [row for row in defaults if row.get('id') == record['id']
+                      and row.get('name') == record['name'] and row['ipv4'] == record['ipv4']]
+        if not candidates:
+            return set()
+        state_path = self.data / '.first-install-state.json'
+        factory_path = self.data / '.xenova-install.json'
+        if any(not path.exists() and not path.is_symlink() for path in (state_path, factory_path)):
+            return set()
+        state, factory = self._read(state_path), self._read(factory_path)
+        marker = self._read(self.data / '.xenova-storage.json')
+        if (state.get('schema') != 1 or state.get('phase') != 'complete'
+                or factory.get('schema') != 1 or not isinstance(state.get('factory_id'), str) or not state['factory_id']
+                or state['factory_id'] != factory.get('factory_id')
+                or marker.get('schema') != 1 or not isinstance(state.get('storage_uuid'), str)
+                or not vm.UUID.fullmatch(state['storage_uuid']) or state['storage_uuid'] != marker.get('uuid')
+                or not isinstance(state.get('identities'), dict)
+                or not isinstance(state.get('registered'), list)
+                or not isinstance(factory.get('instances'), list)):
+            fail('RECOVERY_REQUIRED', 'cannot verify factory reservation ownership')
+        planned = state['identities'].get(record['id'])
+        if (not isinstance(planned, dict) or record['id'] not in state['registered']
+                or any(planned.get(key) != record[key] for key in ('uuid', 'mac'))):
+            return set()
+        sources = [item.get('record') for item in factory['instances'] if isinstance(item, dict)
+                   and isinstance(item.get('record'), dict) and item['record'].get('id') == record['id']]
+        if len(sources) != 1 or any(sources[0].get(key) != record[key] for key in ('id', 'name', 'ipv4')):
+            return set()
+        return {record['ipv4']}
+
     def _ip_inventory(self, records, *, excluding=None):
         """현재 소유권만 예약으로 읽는다. 성공한 과거 create 이력은 주소를 점유하지 않는다."""
         settings = self._read(self.defaults_path)
@@ -486,14 +519,14 @@ class Manager:
             fail('ARTIFACT_INVALID', 'invalid configured internal IP pool/reservations')
         held = set(reserved)
         own_records = list(records.values()) + [t['record'] for t in self._tombs().values()]
-        own_mac = next((r.get('mac') for r in own_records if r['uuid'] == excluding), None)
+        own_record = next((r for r in own_records if r['uuid'] == excluding), None)
+        own_mac = own_record.get('mac') if own_record else None
         if own_mac is None:
             own_mac = next((o.get('assigned', {}).get('mac') for o in self._operations()
                             if o['action'] == 'create' and o['vm_id'] == excluding), None)
         held.update(r['ipv4'] for r in settings['instances'] if r.get('guest_kind', 'linux') == 'linux')
         if excluding:
-            # 보드별 factory UUID는 defaults에 없다. MAC도 일치할 때만 자체 기본 예약을 제외한다.
-            held -= {r['ipv4'] for r in settings['instances'] if own_mac and r.get('mac') == own_mac}
+            held -= self._factory_owned_ip(own_record, factory)
         owned = list(records.values()) + self._legacy_records()
         owned += [t['record'] for t in self._tombs().values() if t['lifecycle'] != 'PURGED']
         held.update(r['ipv4'] for r in owned if r['uuid'] != excluding and vm.guest_kind(r) == 'linux')
