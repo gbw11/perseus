@@ -1,0 +1,16 @@
+#!/bin/sh
+# Bound to the known /24 isolated Perseus test bridge; no gateway or DNS added.
+set -u
+case "${1:-}" in
+    deconfig)
+        ip address flush dev "$interface" 2>/dev/null || :
+        ip link set "$interface" up
+        ;;
+    bound|renew)
+        ip address flush dev "$interface" 2>/dev/null || :
+        ip address add "$ip/24" dev "$interface" || exit 1
+        ip link set "$interface" up
+        printf '[perseus-domu] DHCP bound %s=%s/24 (MAC: %s)\n' \
+            "$interface" "$ip" "$(cat "/sys/class/net/$interface/address")"
+        ;;
+esac

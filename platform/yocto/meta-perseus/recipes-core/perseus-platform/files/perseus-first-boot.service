@@ -1,0 +1,15 @@
+[Unit]
+Description=Verify/resume factory registration before any Perseus VM starts
+Requires=srv-perseus.mount
+After=srv-perseus.mount
+Before=perseus-vm-shutdown.service perseus-vms.service
+RequiresMountsFor=/srv/perseus
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/perseus-first-boot register
+RemainAfterExit=yes
+TimeoutStartSec=300s
+
+[Install]
+WantedBy=multi-user.target

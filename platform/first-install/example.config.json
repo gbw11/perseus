@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "template_policy": "full",
+  "operating_reserve_bytes": 2147483648,
+  "platform": {
+    "image": "/absolute/completed-platform/perseus-xen-bringup-image-raspberrypi4-64.rootfs-TIMESTAMP.wic.bz2",
+    "sha256": "REPLACE_WITH_ACTUAL_IMAGE_SHA256",
+    "build_record": "/absolute/completed-platform/BUILD-RESULT.json",
+    "build_record_sha256": "REPLACE_WITH_ACTUAL_RECORD_SHA256",
+    "release_manifest": "/absolute/completed-platform/platform-release.json",
+    "release_manifest_sha256": "REPLACE_WITH_ACTUAL_RELEASE_MANIFEST_SHA256"
+  },
+  "guests": [
+    {
+      "id": "ubuntu-dev",
+      "template_dir": "/absolute/verified-templates/ubuntu-24.04-20260926",
+      "template_manifest_sha256": "REPLACE_WITH_ACTUAL_TEMPLATE_JSON_SHA256"
+    },
+    {
+      "id": "debian-dev",
+      "template_dir": "/absolute/verified-templates/debian-13-20261015",
+      "template_manifest_sha256": "REPLACE_WITH_ACTUAL_TEMPLATE_JSON_SHA256"
+    }
+  ],
+  "rtos_templates": [
+    {
+      "template_dir": "/absolute/verified-templates/perseus-zephyr-starter-1.0.0",
+      "template_manifest_sha256": "REPLACE_WITH_ACTUAL_TEMPLATE_JSON_SHA256"
+    }
+  ]
+}

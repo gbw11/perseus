@@ -1,0 +1,9 @@
+# 독립 이름·UUID·펌웨어 경로를 지정한 사본만 xl create에 사용한다.
+name = "@NAME@"
+uuid = "@UUID@"
+kernel = "@KERNEL@"
+vcpus = 1
+memory = 16
+gic_version = "v2"
+on_crash = "preserve"
+# PV net/block 미지원: vif/disk/initrd 및 Linux root 인자는 지정하지 않는다.
