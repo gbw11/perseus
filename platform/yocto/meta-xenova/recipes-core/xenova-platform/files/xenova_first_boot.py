@@ -209,21 +209,36 @@ class FirstBoot:
         if factory.get('features') not in (FEATURES, LEGACY_FEATURES) or factory.get('schema') != 1:
             raise ValueError('unsupported factory manifest/capabilities')
         specs = factory['instances']
-        if len(specs) != 2 or {s['record']['id'] for s in specs} != {'ubuntu-dev', 'debian-dev'}:
-            raise ValueError('factory must contain the two default development instances')
         firmware_specs = factory.get('firmware_instances', [])
-        if (not isinstance(firmware_specs, list) or len(firmware_specs) > 1
-                or any(s.get('record', {}).get('id') != 'zephyr-dev'
-                       or guest_kind(s['record']) != 'zephyr' for s in firmware_specs)):
-            raise ValueError('invalid factory Zephyr instance specification')
-        if factory['features'] == FEATURES and len(firmware_specs) != 1:
-            raise ValueError('new factory contract requires zephyr-dev firmware seed')
-        linux_specs = specs
+        if not isinstance(specs, list) or not isinstance(firmware_specs, list):
+            raise ValueError('invalid factory instance specification')
+        linux_ids = [s.get('record', {}).get('id') for s in specs]
+        firmware_ids = [s.get('record', {}).get('id') for s in firmware_specs]
+        current = (linux_ids == ['debian-dev'] and len(firmware_ids) == 2
+                   and set(firmware_ids) == {'zephyr-drive-a', 'zephyr-drive-b'})
+        legacy = (len(linux_ids) == 2 and set(linux_ids) == {'ubuntu-dev', 'debian-dev'}
+                  and len(firmware_ids) <= 1 and set(firmware_ids).issubset({'zephyr-dev'}))
+        if (not (current or legacy) or any(guest_kind(s['record']) != 'linux' for s in specs)
+                or any(guest_kind(s['record']) != 'zephyr' for s in firmware_specs)):
+            raise ValueError('invalid factory deployment: expected Debian and two independent Zephyr seeds')
+        if factory['features'] == FEATURES and not firmware_specs:
+            raise ValueError('factory contract requires Zephyr firmware seeds')
+        if current and (specs[0]['record'].get('template') != 'debian-13-20261015'
+                        or specs[0]['record'].get('template_id') != 'debian-13-arm64'
+                        or any(s['record'].get('template_id') != 'zephyr-xenvm-starter-arm64' for s in firmware_specs)):
+            raise ValueError('current factory must use Debian Interaction and Zephyr Starter templates')
+        if current and len({(s['record'].get('template'), s['record'].get('template_id'),
+                             s['record'].get('template_version'), s['record'].get('creation_origin', {}).get('manifest_sha256'))
+                            for s in firmware_specs}) != 1:
+            raise ValueError('drive A/B must originate from the same firmware template')
         specs = specs + firmware_specs
         for directory in ('instances', 'seeds', 'templates'):
             plain(self.data / directory)
         templates = factory.get('templates', [])
-        if len(templates) != 2 or {t['id'] for t in templates} != {s['record']['template'] for s in linux_specs}:
+        required_templates = {s['record']['template'] for s in factory['instances']}
+        if current:
+            required_templates.add('ubuntu-24.04-20260926')
+        if len(templates) != 2 or {t['id'] for t in templates} != required_templates:
             raise ValueError('both immutable local templates must be retained')
         for item in templates:
             if not re.fullmatch('[a-z0-9][a-z0-9.+_-]{0,99}', item['id']):
