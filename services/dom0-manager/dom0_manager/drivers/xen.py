@@ -33,7 +33,7 @@ class XenDriver(Driver):
         domains: list[Domain] = []
         for row in rows:
             if row.domid == DOM0_ID or row.name == DOM0_NAME:
-                continue  # 계약: Domain-0 은 관리 대상이 아니다 (완전한 가드는 S15P31E110-206)
+                continue  # Domain-0 은 관리 대상이 아니다. domid 0 또는 이름 Domain-0 둘 중 하나만 맞아도 뺀다
             entry = long_by_domid.get(row.domid)
             uuid_text = ((entry or {}).get("config") or {}).get("c_info", {}).get("uuid")
             if not uuid_text:
