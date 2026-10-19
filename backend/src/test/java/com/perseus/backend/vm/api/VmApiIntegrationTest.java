@@ -80,11 +80,29 @@ class VmApiIntegrationTest {
                 .andExpect(jsonPath("$.memory_mib").value(1024));
     }
 
+    @Test
+    void createAcceptsKoreanNamesWithSpaces() throws Exception {
+        createVm("주행 컨트롤러 A", 1, 256)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.name").value("주행 컨트롤러 A"));
+    }
+
+    @Test
+    void createRejectsControlCharactersInTheName() throws Exception {
+        // The JSON escapes \t and \n arrive as a real tab and line feed in the name.
+        createVm("debian\\t01", 1, 256)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.errors[0].field").value("name"));
+        createVm("debian\\n01", 1, 256)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.errors[0].field").value("name"));
+    }
+
     @ParameterizedTest
     @CsvSource({
-            "Debian-01, 1, 256, name",
-            "debian_01, 1, 256, name",
             "'', 1, 256, name",
+            "' 앞공백', 1, 256, name",
+            "'뒤공백 ', 1, 256, name",
             "debian-01, 0, 256, vcpus",
             "debian-01, 5, 256, vcpus",
             "debian-01, 1, 127, memory_mib",
@@ -180,21 +198,21 @@ class VmApiIntegrationTest {
         mockMvc.perform(get("/api/v1/templates")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].template_id").value("debian"))
-                .andExpect(jsonPath("$[0].version").value("12"))
+                .andExpect(jsonPath("$[0].template_id").value("debian-13-arm64"))
+                .andExpect(jsonPath("$[0].version").value("1.0.0"))
                 .andExpect(jsonPath("$[0].display_name").value("Debian 12"))
                 .andExpect(jsonPath("$[0].guest_kind").value("linux"))
                 .andExpect(jsonPath("$[1].min_memory_mib").value(512))
-                .andExpect(jsonPath("$[2].template_id").value("zephyr"))
+                .andExpect(jsonPath("$[2].template_id").value("zephyr-xenvm-starter-arm64"))
                 .andExpect(jsonPath("$[2].guest_kind").value("zephyr"));
     }
 
     @Test
     void vmsCarryTheGuestKindOfTheirTemplate() throws Exception {
-        createVm("zephyr-01", "zephyr", "starter-1.0.0", 1, 128)
+        createVm("zephyr-01", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 128)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.guest_kind").value("zephyr"));
-        createVm("debian-02", "debian", "12", 1, 256)
+        createVm("debian-02", "debian-13-arm64", "1.0.0", 1, 256)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.guest_kind").value("linux"));
 
@@ -207,7 +225,7 @@ class VmApiIntegrationTest {
 
     @Test
     void createRejectsUnknownTemplate() throws Exception {
-        createVm("debian-01", "debian", "11", 1, 256)
+        createVm("debian-01", "debian-13-arm64", "0.9.0", 1, 256)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("TEMPLATE_NOT_FOUND"));
 
@@ -216,7 +234,7 @@ class VmApiIntegrationTest {
 
     @Test
     void createRejectsMemoryBelowTemplateMinimum() throws Exception {
-        createVm("ubuntu-01", "ubuntu", "24.04", 1, 511)
+        createVm("ubuntu-01", "ubuntu-24.04-arm64", "1.0.0", 1, 511)
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
 
@@ -225,7 +243,7 @@ class VmApiIntegrationTest {
 
     private org.springframework.test.web.servlet.ResultActions createVm(String name, int vcpus, int memoryMib)
             throws Exception {
-        return createVm(name, "debian", "12", vcpus, memoryMib);
+        return createVm(name, "debian-13-arm64", "1.0.0", vcpus, memoryMib);
     }
 
     private org.springframework.test.web.servlet.ResultActions createVm(

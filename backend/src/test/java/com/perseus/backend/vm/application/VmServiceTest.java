@@ -138,7 +138,7 @@ class VmServiceTest {
         when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.empty());
         when(vmRecordRepository.save(any(VmRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(vmControlPort.launch(anyString(), any())).thenThrow(
-                new ApiException(HttpStatus.CONFLICT, "INSUFFICIENT_RESOURCES", "메모리 부족"));
+                new ApiException(HttpStatus.INSUFFICIENT_STORAGE, "INSUFFICIENT_RESOURCES", "메모리 부족"));
 
         assertThatThrownBy(() -> service.create(ALPINE)).isInstanceOf(ApiException.class);
         verify(vmRecordRepository).delete(any(VmRecord.class));
