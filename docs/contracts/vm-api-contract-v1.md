@@ -135,7 +135,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 
 `------`는 스케줄링 순간에 아무 플래그도 서지 않은 정상 도메인입니다. dom0-manager 골격이 이 규칙으로 구현돼 있어 계약에 추가했습니다.
 
-`crashed`가 남아 있는 이유는 플랫폼 도메인 설정이 `on_crash = 'preserve'`이기 때문입니다(`perseus_vm.py`). 정리(stop 또는 DELETE)하기 전까지 이 상태로 남습니다.
+`crashed`가 남아 있는 이유는 플랫폼 도메인 설정이 `on_crash = 'preserve'`이기 때문입니다(`xenova_vm.py`). 정리(stop 또는 DELETE)하기 전까지 이 상태로 남습니다.
 
 ### 3.3 Spring 공개 state
 
@@ -400,7 +400,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | OS별 `min_memory_mib` | 제어 계층 | 이미지 빌드 시 실측 |
 | `DriverError`의 세부 분류 | 제어 계층 | 알려진 입력·없음·충돌·자원·시간 초과·일시 장애는 각각 400·404·409·507·504·503으로 분리하고, 분류되지 않은 실패만 500 사용 |
 | 서비스 토큰 배포·회전 | 공통 | Spring과 dom0-manager에 같은 Bearer 서비스 토큰을 안전하게 배포하고 회전하는 운영 절차 |
-| 템플릿 이름 변환 | 제어 계층 | Spring `template_id`+`version`(예: `ubuntu` + `24.04-20260926`)을 플랫폼 템플릿 이름(`ubuntu-24.04-20260926`, `perseus-zephyr-starter-1.0.0`)으로 바꾸는 규칙 |
+| 템플릿 이름 변환 | 제어 계층 | Spring `template_id`+`version`(예: `ubuntu` + `24.04-20260926`)을 플랫폼 템플릿 이름(`ubuntu-24.04-20260926`, `xenova-zephyr-starter-1.0.0`)으로 바꾸는 규칙 |
 | 자동 복구 주체 | 공통 | 보드(Xen `on_crash`·dom0 감시) 또는 Spring. 결정 전까지 Spring은 복구를 수행하지 않음 |
 
 dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포함한 내부 API에서 Bearer 서비스 토큰을 검사합니다. Spring은 `DOM0_MANAGER_BASE_URL`에 Tailscale 주소를 설정하고 `DOM0_MANAGER_SERVICE_TOKEN`을 `Authorization: Bearer`로 전송합니다. 연결 실패는 `503 VM_CONTROL_UNAVAILABLE`로 변환합니다.

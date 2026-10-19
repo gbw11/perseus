@@ -19,7 +19,7 @@ public class OpenApiConfig {
     OpenAPI perseusOpenApi() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("Perseus Backend API")
+                        .title("Xenova Backend API")
                         .description("Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼 백엔드 API")
                         .version("v1"))
                 .components(new Components().addSecuritySchemes(BEARER_AUTH, new SecurityScheme()

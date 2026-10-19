@@ -14,8 +14,8 @@
     <groupId>com.perseus</groupId>
     <artifactId>backend</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>perseus-backend</name>
-    <description>Perseus VM management server</description>
+    <name>xenova-backend</name>
+    <description>Xenova VM management server</description>
 
     <properties>
         <java.version>21</java.version>

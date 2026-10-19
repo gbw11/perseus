@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dom0-manager"
 version = "0.1.0"
-description = "Perseus dom0 control service: Spring 관리 서버와 Xen(xl) 사이의 내부 HTTP API"
+description = "Xenova dom0 control service: Spring 관리 서버와 Xen(xl) 사이의 내부 HTTP API"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
