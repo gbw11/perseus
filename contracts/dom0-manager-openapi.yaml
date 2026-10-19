@@ -126,7 +126,7 @@ paths:
       summary: dom0-manager 와 Xen 응답 여부
       description: >-
         dom0-manager 프로세스는 살아 있지만 Xen(xl) 이 응답하지 않는 상황을 구분한다.
-        2차 RecoveryService 가 사용한다.
+        Spring 이 dom0-manager 접속 상태를 판단할 때 쓴다 (자동 복구 주체는 계약 13장 미확정).
       x-driver-timeout-seconds: 5
       responses:
         '200':
@@ -154,7 +154,7 @@ components:
       required: true
       description: >-
         Spring 이 생성하는 불변 UUID. Xen 도메인에서 역조회할 수 있어야 한다
-        (저장 방식은 계약 문서 13장 미확정 항목).
+        (도메인 설정의 uuid 에 기록하고 xl list -l 의 config.c_info.uuid 로 역조회. 계약 13장).
       schema:
         type: string
         format: uuid
@@ -199,7 +199,7 @@ components:
         template_id:
           type: string
           minLength: 1
-          description: 예 debian, ubuntu, alpine
+          description: 예 ubuntu, debian, zephyr
         template_version:
           type: string
           minLength: 1
@@ -232,7 +232,8 @@ components:
         code:
           type: string
           description: >-
-            InvalidState 는 예비 값이다. pause/unpause 엔드포인트가 생기기 전까지 현재 구현은 반환하지 않는다.
+            InvalidState 는 실행 중인 VM 을 DELETE 할 때 반환한다 (409, 계약 4.4).
+            분류되지 않은 실패의 500 DriverError 는 아직 이 목록에 없다 (계약 8.1·13장).
           enum:
             - InvalidArgument
             - VMNotFound
