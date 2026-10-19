@@ -4,7 +4,7 @@
 - 장애 주입: inject_crash(상태 crashed), inject_hang(정상 종료 무시 → 강제 전환 경로),
   inject_next_create("timeout"|"insufficient"), set_healthy(False) → /healthz 503.
 - 가짜 메트릭: get_stats 가 누적 CPU 시간을 돌려주고 inject_load 로 부하를 올린다.
-- seed_samples(): 배포판 3종 샘플 VM. vm_id 는 고정(uuid5)이라 수환·송하가 그대로 쓸 수 있다.
+- seed_samples(): 배포판 3종 샘플 VM. vm_id 는 고정(uuid5)이라 백엔드·프론트엔드가 그대로 쓸 수 있다.
 """
 
 from __future__ import annotations
@@ -50,7 +50,9 @@ class MockProvisioner(Provisioner):
     def __init__(self) -> None:
         self._instances: dict[UUID, tuple[str, str]] = {}
 
-    def ensure_instance(self, vm_id: UUID, template_id: str, template_version: str) -> InstancePaths:
+    def ensure_instance(
+        self, vm_id: UUID, template_id: str, template_version: str, *, vcpus: int, memory_mib: int
+    ) -> InstancePaths:
         self._instances.setdefault(vm_id, (template_id, template_version))
         root = Path("/mock/instances") / str(vm_id)
         return InstancePaths(vm_id=vm_id, root=root, kernel=root / "Image", ramdisk=root / "initrd", disk=root / "root.raw")

@@ -92,7 +92,8 @@ class Driver(ABC):
 
     @abstractmethod
     def shutdown(self, vm_id: UUID, *, grace_s: float) -> None:
-        """정상 종료 요청 후 grace_s 안에 소멸하지 않으면 강제 종료로 전환한다. 디스크 보존. 멱등."""
+        """정상 종료를 요청하고 grace_s 까지 소멸을 기다린다. 시간이 지나도 자동 강제 종료하지 않고 DriverTimeout 을 낸다(계약 v1.1).
+        디스크 보존. 없는 VM 은 그냥 성공(멱등)."""
 
     @abstractmethod
     def destroy(self, vm_id: UUID) -> None:
@@ -128,11 +129,13 @@ class Driver(ABC):
 
 
 class Provisioner(ABC):
-    """템플릿 → 인스턴스(디스크·커널·initrd) 준비. 실제 구현은 P2 플랫폼 도구와 연결한다."""
+    """템플릿 → 인스턴스(디스크·커널·initrd) 준비. 실제 구현은 플랫폼 관리 계층(xenova_management)과 연결한다."""
 
     @abstractmethod
-    def ensure_instance(self, vm_id: UUID, template_id: str, template_version: str) -> InstancePaths:
-        """디스크가 있으면 재사용하고 없으면 템플릿에서 만든다(계약 4.2)."""
+    def ensure_instance(
+        self, vm_id: UUID, template_id: str, template_version: str, *, vcpus: int, memory_mib: int
+    ) -> InstancePaths:
+        """등록(디스크)이 있으면 재사용하고 없으면 템플릿에서 만든다(계약 4.2). 생성 명세는 registry 에 기록된다."""
 
     @abstractmethod
     def instance_exists(self, vm_id: UUID) -> bool: ...
