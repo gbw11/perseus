@@ -242,10 +242,34 @@ def test_ip_pool_exhausted_is_507():
     assert denied.status_code == 507 and denied.json()["resource"]["name"] == "ipv4"
 
 
-def test_zephyr_template_gets_no_ip(client, manager):
-    created = client.post("/api/v1/vms", json=create_body(VM_A, template_id=ZEPHYR["template_id"], template_version="1.0.0", memory_mib=128))
+def test_zephyr_template_gets_no_ip_and_16mib(client, manager):
+    created = client.post("/api/v1/vms", json=create_body(VM_A, template_id=ZEPHYR["template_id"], template_version="1.0.0", memory_mib=16))
     assert created.status_code == 201
-    assert "ipv4" not in next(c for c in manager.calls if c[0] == "create")[1]
+    create_call = next(c for c in manager.calls if c[0] == "create")[1]
+    assert "ipv4" not in create_call and create_call["memory_mib"] == 16
+
+
+def test_restart_with_different_spec_is_409(client, manager):
+    """계약 4.2 Spring 불변조건: 같은 vm_id 에 다른 생성 명세 → 409."""
+    view = manager.register(VM_A, name="web", vcpus=1, memory_mib=256)
+    view["initial_spec"] = {"template_id": TEMPLATE["template_id"], "template_version": "1.0.0", "vcpus": 1, "memory_mib": 256}
+    same = client.post("/api/v1/vms", json=create_body(VM_A, template_id=TEMPLATE["template_id"], template_version="1.0.0"))
+    assert same.status_code == 201
+    client.post(f"/api/v1/vms/{VM_A}/stop")
+    for change in ({"memory_mib": 512}, {"vcpus": 2}, {"template_version": "1.1.0"}, {"template_id": ZEPHYR["template_id"], "memory_mib": 16}):
+        body = create_body(VM_A, template_id=TEMPLATE["template_id"], template_version="1.0.0") | change
+        different = client.post("/api/v1/vms", json=body)
+        assert different.status_code == 409, change
+        assert different.json()["code"] == "VMExists"
+
+
+def test_error_bodies_carry_distinct_codes(client, manager):
+    manager.register(VM_A, running=True, xen_state="hang")
+    timed_out = client.post(f"/api/v1/vms/{VM_A}/stop")
+    assert (timed_out.status_code, timed_out.json()["code"]) == (504, "DriverTimeout")
+    manager.fail_next = {"code": "STORAGE_UNAVAILABLE", "message": "x"}
+    unavailable = client.get("/api/v1/vms")
+    assert (unavailable.status_code, unavailable.json()["code"]) == (503, "PlatformUnavailable")
 
 
 def test_unknown_template_is_400(client):

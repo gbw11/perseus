@@ -70,15 +70,18 @@ class DriverTimeout(DriverError):
     """xl·플랫폼 호출이 시한을 넘김 (504). 서비스 전체가 멈추지 않도록 호출 단위로 끊는다."""
 
     status_code = 504
+    code = "DriverTimeout"
 
 
 class PlatformUnavailable(DriverError):
     """registry·저장소·Xen 이 일시적으로 응답하지 않음 (503). 재시도 가능."""
 
     status_code = 503
+    code = "PlatformUnavailable"
 
 
 class NotSupportedByPlatform(DriverError):
     """플랫폼 관리 계층이 아직 제공하지 않는 동작 (501). 예: create 의 호출자 지정 vm_id."""
 
     status_code = 501
+    code = "NotSupported"
