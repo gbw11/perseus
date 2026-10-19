@@ -100,7 +100,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 
 플랫폼 기본 Ubuntu·Debian·Zephyr 템플릿 카탈로그에 맞춘 값입니다. `template_id`는 OS 검증 리포트가 에이전트의 os-release ID와 비교하므로 OS ID로 두고, `version`은 플랫폼 카탈로그 버전을 사용합니다.
 
-1차 데이터는 Spring 설정 파일(`application.yml`의 `perseus.template-catalog.templates`)에 고정하며, OS(Alpine·Debian·Ubuntu)마다 버전 하나를 고정합니다. 버전과 최소 메모리 값은 P2 실측 전 임시값입니다(13장).
+1차 데이터는 Spring 설정 파일(`application.yml`의 `perseus.template-catalog.templates`)에 고정하며, OS(Ubuntu·Debian·Zephyr)마다 버전 하나를 고정합니다. 버전과 최소 메모리 값은 P2 실측 전 임시값입니다(13장).
 
 ---
 
@@ -171,7 +171,7 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 
 - 해당 `vm_id`의 디스크가 존재하면 **재사용**하고, 존재하지 않으면 `template_id`·`template_version`으로 새로 생성한다.
 - 디스크 경로는 `vm_id`에서 파생한다.
-- 동일 `vm_id`·동일 명세 재요청은 기존 생성 결과를 반환하고, 동일 `vm_id`·다른 명세는 `409 VMExists`로 거부한다.
+- Xen에 같은 `vm_id`의 도메인이 이미 있으면 명세와 관계없이 `409 VMExists`로 거부한다. dom0-manager는 명세를 비교하지 않으며, 동일 명세 재요청을 성공으로 바꾸는 것은 Spring이다(10.1절).
 - Linux IP는 Spring이 전달하지 않는다. 플랫폼이 전역 잠금 안에서 IP 풀과 registry를 확인해 빈 주소를 자동 할당한다.
 
 **Spring 불변조건** — 동일한 `vm_id`에는 항상 동일한 생성 명세를 전송한다. 플랫폼은 registry의 기존 생성 명세와 비교해 위반을 거부한다.
@@ -240,7 +240,7 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 
 | 현재 상태 | `POST /vms` | `POST /stop` | `DELETE` |
 |---|---|---|---|
-| 도메인 없음 + 등록 디스크 있음 | 기존 결과 반환 또는 재시작 | `204` | `204` — retire |
+| 도메인 없음 + 등록 디스크 있음 | `201` — 보존된 디스크로 재시작 | `204` | `204` — retire |
 | 도메인 없음 + 디스크 없음 | `201` — 템플릿에서 생성 | `204` | `404` |
 | `running` | `409 VMExists` | `204` — 정상 종료, 디스크 보존 | `409` — 먼저 정지 필요 |
 | `stopping` | `409 VMExists` | 소멸까지 동기 대기 | `409` |
@@ -262,7 +262,7 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 | `409` | `VMExists` | `vm_id` 충돌 (단일 의미) |
 | `507` | `InsufficientResources` | 가용 메모리 부족 |
 | `500` | `DriverError` | `xl` 실행 실패·타임아웃, 모르는 상태 문자. **임시 정의** — OpenAPI yaml의 오류 코드 목록에는 아직 없음(13장) |
-| — | `InvalidState` | **현재 구현에서는 반환하지 않음.** 예비로 유지하며, pause/unpause 엔드포인트가 추가되면 생산자가 생긴다 |
+| `409` | `InvalidState` | 실행 중인 VM을 `DELETE` (4.4절). 먼저 정지해야 한다 |
 
 오류 본문:
 
@@ -416,3 +416,4 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1 | 2026-10-16 | 계약 확정안 v1.0, 리뷰 v1.1, 백엔드 VM API 규약 v1, 리뷰 v1.2의 확정 사항 통합 |
 | v1.1 | 2026-10-19 | 구현에 맞춰 보완: 공개 VM 객체에 `agent_status`, Spring 공개 state `stopped`(3.3), 템플릿 응답 필드 `version`, `xl` 플래그 없음(`------`) 매핑, `DriverError` 500/501, `/healthz` 본문, Spring 오류 변환표(8.2), 공개 API 응답 형식(5장), `vm_id` 저장 1안 확정, 배포 분리·복구 주체 미확정 항목 추가. Spring 시작은 실행 중이 아닌 도메인을 `409 INVALID_VM_STATE`로 거부, 정지는 이전 상태를 조회해 이벤트 `from`에 기록. Spring이 VM 상태를 주기 조회해 `cause: detected` 이벤트 기록. 템플릿을 플랫폼 기본값(Ubuntu·Debian·Zephyr)으로 교체하고 템플릿·공개 VM 객체에 `guest_kind` 추가 |
 | v1.2 | 2026-10-19 | Spring 선발급 `vm_id`를 유일한 영구 식별자·생성 멱등성 키로 확정. 플랫폼 자동 IP 할당, 동기 stop 90초와 Spring 100초 제한, retire/restore/purge 생명주기, Spring `RETIRED` 명세 보존, Tailscale+Bearer 내부 연결을 반영 |
+| v1.3 | 2026-10-19 | API 문서 통일(S15P31E110-230): `docs/dom0-backend-http-contract-v1.md`(v1.0 폐기본)와 `docs/backend-vm-api-rules-v1.md`(백엔드 VM API 규약)를 삭제하고 이 문서로 일원화. 코드 기준으로 정정 — dom0-manager는 기존 도메인에 명세와 관계없이 `409 VMExists`(4.2·7장), `InvalidState`는 실행 중 VM 삭제에 반환(8.1절), 템플릿 OS는 Ubuntu·Debian·Zephyr(2.3절) |
