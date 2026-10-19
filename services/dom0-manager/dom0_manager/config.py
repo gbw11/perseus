@@ -6,7 +6,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-DRIVERS = ("mock", "xen")
+DRIVERS = ("mock", "xen", "platform")
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,12 @@ class Settings:
     service_token: str = ""
     # RPi4 물리 코어 수. vcpus 상한 검사에 쓴다. xl info 의 nr_cpus 를 읽을 수 있으면 그 값을 우선한다.
     host_cpus: int = 4
-    instance_root: str = "/srv/perseus/instances"
+    instance_root: str = "/srv/xenova/instances"
+    # platform 드라이버: xenova_management 모듈 경로. 보드는 /usr/lib/xenova. 여러 개면 os.pathsep 로 구분
+    platform_lib: str = "/usr/lib/xenova"
+    # Linux VM 에 줄 IP 풀 (플랫폼이 자동 배정하기 전까지 dom0-manager 가 고른다). 192.168.77.<start>..<end>
+    ip_pool_start: int = 2
+    ip_pool_end: int = 99
     mock_samples: bool = False
     log_level: str = "INFO"
 
@@ -53,6 +58,9 @@ class Settings:
             service_token=read("PERSEUS_SERVICE_TOKEN", cls.service_token, str),
             host_cpus=read("PERSEUS_HOST_CPUS", cls.host_cpus, int),
             instance_root=read("PERSEUS_INSTANCE_ROOT", cls.instance_root, str),
+            platform_lib=read("PERSEUS_PLATFORM_LIB", cls.platform_lib, str),
+            ip_pool_start=read("PERSEUS_IP_POOL_START", cls.ip_pool_start, int),
+            ip_pool_end=read("PERSEUS_IP_POOL_END", cls.ip_pool_end, int),
             mock_samples=read("PERSEUS_MOCK_SAMPLES", cls.mock_samples, as_bool),
             log_level=read("PERSEUS_LOG_LEVEL", cls.log_level, str).upper(),
         )

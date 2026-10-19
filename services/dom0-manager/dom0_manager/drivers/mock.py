@@ -50,7 +50,9 @@ class MockProvisioner(Provisioner):
     def __init__(self) -> None:
         self._instances: dict[UUID, tuple[str, str]] = {}
 
-    def ensure_instance(self, vm_id: UUID, template_id: str, template_version: str) -> InstancePaths:
+    def ensure_instance(
+        self, vm_id: UUID, template_id: str, template_version: str, *, vcpus: int, memory_mib: int
+    ) -> InstancePaths:
         self._instances.setdefault(vm_id, (template_id, template_version))
         root = Path("/mock/instances") / str(vm_id)
         return InstancePaths(vm_id=vm_id, root=root, kernel=root / "Image", ramdisk=root / "initrd", disk=root / "root.raw")

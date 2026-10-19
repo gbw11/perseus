@@ -31,7 +31,7 @@ def create_app(
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     driver = driver or build_driver(settings)
-    provisioner = provisioner or build_provisioner(settings)
+    provisioner = provisioner or build_provisioner(settings, driver)
 
     app = FastAPI(title="Perseus dom0 manager API", version="1.0.0", description=DESCRIPTION)
     app.state.settings = settings

@@ -60,11 +60,25 @@ class InsufficientResources(Dom0ManagerError):
 
 
 class DriverError(Dom0ManagerError):
-    """xl 실행 실패 등 드라이버 수준 오류. 계약 미확정이라 500."""
+    """xl·플랫폼 실행 실패 등 드라이버 수준 오류. 계약 미확정이라 코드는 DriverError 로 두고 상태만 구분한다."""
 
     status_code = 500
     code = "DriverError"
 
 
 class DriverTimeout(DriverError):
-    """xl 호출이 타임아웃을 넘김. 서비스 전체가 멈추지 않도록 호출 단위로 끊는다."""
+    """xl·플랫폼 호출이 시한을 넘김 (504). 서비스 전체가 멈추지 않도록 호출 단위로 끊는다."""
+
+    status_code = 504
+
+
+class PlatformUnavailable(DriverError):
+    """registry·저장소·Xen 이 일시적으로 응답하지 않음 (503). 재시도 가능."""
+
+    status_code = 503
+
+
+class NotSupportedByPlatform(DriverError):
+    """플랫폼 관리 계층이 아직 제공하지 않는 동작 (501). 예: create 의 호출자 지정 vm_id."""
+
+    status_code = 501
