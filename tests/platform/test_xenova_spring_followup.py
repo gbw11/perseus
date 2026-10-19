@@ -211,3 +211,104 @@ class FactoryReservationTest(FollowupFixture):
                                idempotency_key='general-restore')
         self.assertTrue(restored['ok'], restored)
         self.assertEqual(restored['data']['ipv4'], created['data']['ipv4'])
+
+
+class LinuxDeploymentVersionTest(FollowupFixture):
+    def manifest(self, *, deployment='1.0.0', legacy='0.9.0', include_deployment=True, include_legacy=True):
+        source = self.f.data/'templates/source'
+        path = source/'template.json'
+        meta = json.loads(path.read_text())
+        if include_deployment:
+            meta['template_version'] = deployment
+        else:
+            meta.pop('template_version', None)
+        if include_legacy:
+            meta['version'] = legacy
+        else:
+            meta.pop('version', None)
+        path.chmod(0o644)
+        path.write_text(json.dumps(meta))
+        path.chmod(0o444)
+        descriptor = self.f.data/'catalog/ubuntu-24.04-arm64/1.0.0.json'
+        value = json.loads(descriptor.read_text())
+        value['manifest_sha256'] = fixtures.catalog.sha(path)
+        descriptor.write_text(json.dumps(value))
+        return source
+
+    def assert_real_create_fields(self, source):
+        before = {p.name:sha(p) for p in source.iterdir()}
+        with self.linux_boundaries() as commands:
+            result = self.m.call('create', self.spec, execute=True)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(sum(c[0]=='cp' for c in commands), 1)
+        self.assertEqual({p.name:sha(p) for p in source.iterdir()}, before)
+        record = json.loads((self.f.data/'instances'/self.f.key/'instance.json').read_text())
+        rows = [result['data'], self.m.call('get', {'vm_id':self.spec['vm_id']})['data']['vm'],
+                self.m.call('list')['data']['vms'][0]]
+        self.assertEqual(record['creation_spec']['template_version'], '1.0.0')
+        for row in [record, *rows]:
+            self.assertEqual(row['template_id'], self.spec['template_id'])
+            self.assertEqual(row['template_version'], '1.0.0')
+            self.assertEqual(row['guest_kind'], 'linux')
+        return result
+
+    def test_real_preparation_preserves_deployment_version_over_legacy_version(self):
+        self.assert_real_create_fields(self.manifest())
+
+    def test_real_preparation_supports_legacy_version_only(self):
+        self.assert_real_create_fields(self.manifest(include_deployment=False, legacy='1.0.0'))
+
+    def test_real_preparation_supports_explicit_deployment_version_only(self):
+        self.assert_real_create_fields(self.manifest(include_legacy=False))
+
+    def test_invalid_preferred_version_is_rejected_before_operation_or_workspace(self):
+        for value in (None, [], 'not-a-version'):
+            with self.subTest(value=value):
+                self.manifest(deployment=value, legacy='1.0.0')
+                with self.linux_boundaries():
+                    result = self.m.call('create', self.spec, execute=True)
+                self.error(result, 'ARTIFACT_INVALID')
+                self.assertFalse((self.f.data/'operations').exists())
+                self.assertEqual(list((self.f.data/'instances').iterdir()), [])
+
+    def test_direct_preparation_rejects_selected_version_mismatch_before_workspace(self):
+        source = self.manifest()
+        record = fixtures.record()
+        record.update(id='custom', name='custom', hostname='custom', template='source', template_id=self.spec['template_id'], template_version='2.0.0')
+        workspace = self.f.data/'instances/.selected-version-test'
+        args = Namespace(data_root=self.f.data, id='custom', deployment_seed=False, spec=None)
+        with self.linux_boundaries(), self.assertRaisesRegex(ValueError, 'selected template version'):
+            preparation.make_instance(args, vm=vm, defaults_path=FILES/'defaults.json',
+                record_override=record, identity=record['uuid'], workspace_path=workspace,
+                template_directory=source)
+        self.assertFalse(workspace.exists())
+        self.assertFalse((self.f.data/'instances/custom').exists())
+
+    def test_manager_rejects_mismatched_published_identity_fields_without_removing_disk(self):
+        for field, value in [('template_id','debian-13-arm64'), ('template_version','0.9.0'), ('guest_kind','zephyr'), ('guest_kind',None)]:
+            with self.subTest(field=field):
+                # Each corruption case has its own real source/registry/operation.
+                f = fixtures.ManagementTest()
+                f.setUp()
+                previous = self.f, self.p, self.m, self.spec
+                self.f, self.p, self.m = f, f.p, f.m
+                self.spec = {k:v for k,v in f.spec.items() if k!='ipv4'}
+                try:
+                    with self.linux_boundaries():
+                        real_prepare = self.m.preparer
+                        def corrupt(op):
+                            real_prepare(op)
+                            path = f.data/'instances'/f.key/'instance.json'
+                            record = json.loads(path.read_text())
+                            if value is None:
+                                record.pop(field)
+                            else:
+                                record[field] = value
+                            path.write_text(json.dumps(record))
+                        self.m.preparer = corrupt
+                        result = self.m.call('create', self.spec, execute=True)
+                    self.error(result, 'RECOVERY_REQUIRED')
+                    self.assertTrue((f.data/'instances'/f.key/'root.raw').exists())
+                finally:
+                    f.doCleanups()
+                    self.f, self.p, self.m, self.spec = previous

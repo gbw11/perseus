@@ -671,7 +671,8 @@ class Manager:
         record = self._read(target / 'instance.json')
         if (record['uuid'] != op['vm_id'] or record.get('creation_operation_id') != op['operation_id']
                 or record.get('creation_spec') != op['initial_spec']
-                or record.get('template_manifest_sha256') != op['template']['manifest_sha256']):
+                or record.get('template_manifest_sha256') != op['template']['manifest_sha256']
+                or any(record.get(key) != op['template'][key] for key in ('template_id', 'template_version', 'guest_kind'))):
             fail('RECOVERY_REQUIRED', 'published instance does not match recorded creation identity')
         vm.validate_record(record, target)
         tomb = {'schema_version':'1.0','vm_id':record['uuid'],'name':record['name'],'generation':0,

@@ -65,7 +65,7 @@ class ManagementTest(unittest.TestCase):
     def prepare(self,op):
         self.copies+=1
         spec=op['initial_spec'];r=record();name=op['assigned']['internal_name']
-        r.update(id=name,name=name,hostname=name,display_name=spec['name'],uuid=op['vm_id'],
+        r.update(guest_kind='linux',id=name,name=name,hostname=name,display_name=spec['name'],uuid=op['vm_id'],
                  mac=op['assigned']['mac'],ipv4=op['assigned']['ipv4'],memory_mib=spec['memory_mib'],vcpus=spec['vcpus'],
                  autostart=False,creation_spec=spec,creation_operation_id=op['operation_id'],
                  template_manifest_sha256=op['template']['manifest_sha256'],

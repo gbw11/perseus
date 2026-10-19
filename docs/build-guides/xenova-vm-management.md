@@ -242,7 +242,7 @@ Spring VmControlPort에는 retire/restore/purge의 작업 키·세대 전달 경
 Spring command-timeout=35초와 플랫폼 stop 최대 90초는 아직 다르다.
 이번 변경은 이 타임아웃·동기 stop·인증/원격 배포를 재설계하지 않는다.
 
-## factory 자체 IP 예약
+## factory 자체 IP와 Linux 공개 배포 버전
 
 기본 .10/.20의 자동 할당 제외는 계속 유지한다. 기본 VM 복원 시에는
 .first-install-state.json의 완료된 UUID·실제 MAC 계획, storage UUID,
@@ -250,3 +250,11 @@ Spring command-timeout=35초와 플랫폼 stop 최대 90초는 아직 다르다.
 defaults.json의 예시 MAC으로 보드별 MAC을 되돌리거나 예시 MAC 일치를 요구하지 않는다.
 자체 기본 예약을 제외한 뒤에도 다른 UUID의 소유권과 다른 MAC의 DHCP 예약/lease는
 계속 충돌로 처리한다. 소유권을 확인할 기록이 없으면 자체 예약으로 추정하지 않는다.
+
+공개 배포 버전은 manifest.template_version을 우선하고 이 필드가 없을 때만
+legacy manifest.version을 사용한다. 두 값이 다르더라도 명시적 template_version이
+정확한 카탈로그 버전이면 이를 보존하며 원본 legacy 필드나 자산을 덮어쓰지 않는다.
+명시적 필드가 null/잘못된 형식이면 legacy 값으로 우회하지 않고 준비 전에 거부한다.
+Linux make_instance도 같은 판정 함수를 사용하며 이미 선택한 버전과 다르면
+workspace/디스크 준비 전에 거부한다. 게시 후 Manager는 선택 ID·버전·kind 일치를
+다시 검사하고 불일치 자산을 성공으로 반환하지 않는다. 게시된 디스크는 자동 삭제하지 않는다.
