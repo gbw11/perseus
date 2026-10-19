@@ -64,7 +64,7 @@ class ErrorCode(str, Enum):
     VMNotFound = "VMNotFound"
     VMExists = "VMExists"
     InsufficientResources = "InsufficientResources"
-    InvalidState = "InvalidState"  # 예비. pause/unpause 엔드포인트가 생기기 전까지 반환하지 않는다
+    InvalidState = "InvalidState"  # 현재 생명주기에서 수행할 수 없음 (실행 중 VM 의 DELETE, 플랫폼 VM_NOT_STOPPED 등)
     # 드라이버·플랫폼 실패. HTTP 상태와 1:1 로 둔다 (Spring 이 code 로 매핑하므로 상태만으로 구분하지 않는다)
     DriverError = "DriverError"  # 500 그 외 실행 오류
     DriverTimeout = "DriverTimeout"  # 504 xl·플랫폼 시한 초과

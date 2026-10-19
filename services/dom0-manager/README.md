@@ -130,7 +130,9 @@ PERSEUS_DRIVER=platform PERSEUS_PLATFORM_LIB=/usr/lib/xenova PERSEUS_SERVICE_TOK
 
 플랫폼 `xen_state` → 계약 상태: `running`·`blocked`·`unknown`(플래그 없음) → running, `paused` → paused, `shutdown`·`dying` → stopping, `crashed` → crashed, `stopped` → 도메인 없음.
 
-**막힌 것**: 플랫폼 `create`가 아직 `spec['vm_id']`를 받지 않고 보드에서 UUID를 발급합니다. 팀 결정(Spring 발급)과 달라서, 새 VM 생성은 플랫폼이 `vm_id`를 받을 때까지 501을 냅니다. 조회·시작·정지·보관은 영향 없습니다.
+`load_manager`는 `Manager`를 `SerializedManager`로 감싸 프로세스 안에서 `call`을 직렬화합니다. 플랫폼 `Manager`가 요청별 상태(`current_operation`·`replayed`)를 인스턴스 변수에 두어 FastAPI 스레드가 동시에 부르면 섞이기 때문입니다.
+
+**막힌 것**: 플랫폼 `create`가 아직 `spec['vm_id']`를 받지 않고 보드에서 UUID를 발급합니다. 팀 결정(Spring 발급)과 달라서, 새 VM 생성은 플랫폼이 `vm_id`를 받을 때까지 501을 냅니다. 조회·시작·정지·보관은 영향 없습니다. 통합 테스트는 계획 모드(`execute=False`) `create`로 지원 여부를 확인해, 아직이면 501을 검증하고 xfail로 표시합니다. 이 항목이 풀리기 전에는 S15P31E110-115를 완료 처리하지 않습니다.
 
 테스트: `tests/test_platform_driver.py`는 봉투를 흉내 내는 FakeManager, `tests/test_platform_integration.py`는 저장소의 실제 `xenova_management`를 플랫폼 파트 픽스처(FakeXen·임시 registry)로 돌립니다.
 
@@ -147,7 +149,7 @@ python -m pytest
 
 ## 오류 코드와 HTTP 상태
 
-드라이버·플랫폼 실패는 code와 HTTP 상태가 1:1입니다. Spring은 code를 보고 같은 상태로 전달합니다.
+드라이버·플랫폼 실패는 code와 HTTP 상태가 1:1이고, 모든 엔드포인트의 OpenAPI 응답 목록에 500·503·504(명령은 501도)가 들어 있습니다. Spring은 code를 보고 같은 상태로 전달해야 합니다. 백엔드가 `NotSupported`·`PlatformUnavailable`·`DriverTimeout` 변환을 반영하기 전까지는 모르는 code로 취급돼 502 `VM_CONTROL_BAD_RESPONSE`가 나갑니다.
 
 | code | HTTP | 언제 |
 | --- | --- | --- |
