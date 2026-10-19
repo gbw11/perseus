@@ -269,3 +269,9 @@ workspace/디스크 준비 전에 거부한다. 게시 후 Manager는 선택 ID�
 다시 검사하고 불일치 자산을 성공으로 반환하지 않는다. 게시된 디스크는 자동 삭제하지 않는다.
 
 새 최초 설치의 기본 배치는 `debian-dev`(표시: Debian Interaction), `zephyr-drive-a`, `zephyr-drive-b`입니다. 세 VM 모두 자동 시작하며 두 Zephyr는 동일 Starter 1.0.0에서 독립 자산과 보드별 UUID로 준비합니다. A/B는 구분용 이름이며 ACTIVE/STANDBY 제어권을 의미하지 않습니다. 기존 설치의 신원·정책은 이 설정으로 이동하거나 변경하지 않습니다.
+
+## 실행 의도와 조건부 복구
+
+기존 VM·자산 수명주기를 유지하면서 get/list에 실행 의도·host/실행 문맥을 추가한다.
+공통 start/stop과 일회성 복구·snapshot·승인 대기 부팅 정책은
+[xenova-recovery-foundation.md](xenova-recovery-foundation.md)를 따른다.

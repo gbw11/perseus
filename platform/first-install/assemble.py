@@ -308,16 +308,19 @@ def platform_root_ok(root):
                 'usr/lib/xenova/xenova_zephyr.py': FILES / 'xenova_zephyr.py',
                 'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                 'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
-    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py'):
+    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
+                 'xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
         expected['usr/lib/xenova/'+name] = FILES/name
     expected['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
     expected['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
+    expected['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
+    expected['etc/xenova/execution-policy.json'] = FILES/'execution-policy.json'
     expected['usr/lib/systemd/system/xenova-wifi@.service'] = FILES/'xenova-wifi@.service'
     expected['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         expected['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
     units = ['xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
-             'xenova-vms.service', 'xenova-vm-shutdown.service', 'xenova-xen-ready.service']
+             'xenova-vms.service', 'xenova-vm-shutdown.service', 'xenova-xen-ready.service', 'xenova-host-admission.service']
     expected.update({'usr/lib/systemd/system/' + u: FILES / u for u in units})
     for relative, source in expected.items():
         if not path(relative).is_file() or path(relative).read_bytes() != source.read_bytes():
@@ -341,6 +344,8 @@ def platform_root_ok(root):
             raise ValueError('platform lacks built QEMU VNC/Xen configuration: ' + relative)
     if not path('usr/bin/qemu-system-i386').is_file() or not path('usr/bin/qemu-system-i386').stat().st_mode & 0o111:
         raise ValueError('required dom0 qemu-system-i386 missing')
+    if not path('usr/lib/libxenmanage.so.1').is_file():
+        raise ValueError('read-only Xen incarnation library missing')
     if path('etc/machine-id').read_text() != 'uninitialized\n':
         raise ValueError('common dom0 machine-id must be uninitialized for PID1')
     if any(path('etc/ssh').glob('ssh_host_*_key')):
@@ -369,7 +374,7 @@ def platform_root_ok(root):
     preset = path('usr/lib/systemd/system-preset/98-openssh-sshd.preset').read_text()
     if 'enable sshd.service' not in preset.splitlines() or 'enable sshd.socket' in preset.splitlines():
         raise ValueError('dom0 SSH preset selects wrong activation mode')
-    enabled = ['xenova-first-boot.service', 'xenova-vms.service', 'xenova-vm-shutdown.service', 'srv-xenova.mount']
+    enabled = ['xenova-host-admission.service', 'xenova-first-boot.service', 'xenova-vms.service', 'xenova-vm-shutdown.service', 'srv-xenova.mount']
     for unit in enabled:
         link = root / 'etc/systemd/system/multi-user.target.wants' / unit
         if not link.is_symlink() or path('etc/systemd/system/multi-user.target.wants/' + unit).read_bytes() != (FILES / unit).read_bytes():

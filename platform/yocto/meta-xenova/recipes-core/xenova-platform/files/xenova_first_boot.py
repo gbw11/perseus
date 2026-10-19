@@ -351,6 +351,12 @@ class FirstBoot:
             self.save(marker, desired)
         # 완료 표식보다 먼저 전체 registry의 중복/boot 계약을 확인한다.
         load_records(self.data, validate_assets=not completed)
+        if not completed:
+            from xenova_vm import Platform
+            execution = Platform(self.data, self.run).execution()
+            for spec in specs:
+                current = read_json(self.data/'instances'/spec['record']['id']/'instance.json')
+                execution.initialize(current, 'running', 'factory')
         state['phase'] = 'complete'
         self.save(state_path, state)
         self.save(self.run / 'install-ready.json', {'factory_id': factory['factory_id'], 'dom0_machine_id': mid,

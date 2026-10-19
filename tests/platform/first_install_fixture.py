@@ -157,10 +157,13 @@ def platform_root(root):
                'usr/lib/xenova/xenova_zephyr.py': FILES / 'xenova_zephyr.py',
                'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
-    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py'):
+    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
+                 'xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
         mapping['usr/lib/xenova/'+name] = FILES/name
     mapping['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
     mapping['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
+    mapping['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
+    mapping['etc/xenova/execution-policy.json'] = FILES/'execution-policy.json'
     mapping['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         mapping['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
@@ -170,6 +173,9 @@ def platform_root(root):
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
+    library = root/'usr/lib/libxenmanage.so.1'
+    library.parent.mkdir(parents=True, exist_ok=True)
+    library.write_text('packaging fixture: not a target binary')
     cap = root / 'usr/share/xenova/first-install-capabilities.json'
     cap.parent.mkdir(parents=True)
     cap.write_text(json.dumps(contract.FEATURES))
@@ -183,7 +189,7 @@ def platform_root(root):
     checker.parent.mkdir(parents=True); checker.write_text('packaging fixture: not executed')
     wants = root / 'etc/systemd/system/multi-user.target.wants'
     wants.mkdir(exist_ok=True)
-    for name in ('xenova-first-boot.service', 'srv-xenova.mount', 'xenova-vms.service', 'xenova-vm-shutdown.service'):
+    for name in ('xenova-host-admission.service', 'xenova-first-boot.service', 'srv-xenova.mount', 'xenova-vms.service', 'xenova-vm-shutdown.service'):
         (wants / name).symlink_to('/usr/lib/systemd/system/' + name)
     tools = root / 'usr/bin'
     tools.mkdir(parents=True)
