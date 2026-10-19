@@ -8,6 +8,7 @@ import com.perseus.backend.template.domain.VmTemplate;
 import com.perseus.backend.vm.domain.CreateVmCommand;
 import com.perseus.backend.vm.domain.Vm;
 import com.perseus.backend.vm.domain.VmControlPort;
+import com.perseus.backend.vm.domain.VmLifecycle;
 import com.perseus.backend.vm.domain.VmRecord;
 import com.perseus.backend.vm.domain.VmRecordRepository;
 import com.perseus.backend.vm.domain.VmRuntime;
@@ -23,8 +24,8 @@ import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-// Spring owns VM records (name, template); dom0-manager only reports domains that exist in Xen
-// (vm-api-contract-v1 1.2). A recorded VM without a domain is reported as stopped.
+// Spring owns the public VM specification and issues the permanent vm_id. The platform owns the registry,
+// disk lifecycle, and Xen runtime. A registered VM without a Xen domain is reported as stopped.
 @Service
 public class VmService {
 
@@ -58,7 +59,7 @@ public class VmService {
     public List<Vm> list() {
         Map<String, VmRuntime> runtimes = vmControlPort.list().stream()
                 .collect(Collectors.toMap(VmRuntime::vmId, Function.identity(), (first, second) -> first));
-        return vmRecordRepository.findAllByOrderByCreatedAtAsc().stream()
+        return vmRecordRepository.findAllByLifecycleOrLifecycleIsNullOrderByCreatedAtAsc(VmLifecycle.REGISTERED).stream()
                 .map(record -> Vm.of(record, runtimes.get(record.getVmId())))
                 .toList();
     }
@@ -82,6 +83,9 @@ public class VmService {
 
         VmRecord existing = vmRecordRepository.findByName(command.name()).orElse(null);
         if (existing != null) {
+            if (!existing.isRegistered()) {
+                throw new ApiException(HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "보관 중인 VM이 사용하는 이름입니다.");
+            }
             if (!existing.hasSameSpec(command)) {
                 throw new ApiException(HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "이미 사용 중인 VM 이름입니다.");
             }
@@ -142,16 +146,18 @@ public class VmService {
         });
     }
 
-    // dom0-manager deletes the disk as well, so the VM cannot be started again and its record is removed.
+    // The platform retires the disk instead of deleting it. Keep the specification and vm_id for a future restore,
+    // but hide the retired VM from the current v1 list/get/start/stop surface.
     public void destroy(String vmId) {
-        String name = vmRecordRepository.findById(vmId).map(VmRecord::getName).orElse(null);
+        VmRecord record = findRecord(vmId);
         underOperation(vmId, () -> {
             vmControlPort.destroy(vmId);
-            vmRecordRepository.deleteById(vmId);
+            record.retire();
+            vmRecordRepository.save(record);
             stateTracker.forget(vmId);
             return null;
         });
-        eventRecorder.vmDeleted(vmId, name);
+        eventRecorder.vmDeleted(vmId, record.getName());
     }
 
     // Marks the VM busy so the periodic state check does not report this operation's
@@ -203,6 +209,7 @@ public class VmService {
 
     private VmRecord findRecord(String vmId) {
         return vmRecordRepository.findById(vmId)
+                .filter(VmRecord::isRegistered)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "VM_NOT_FOUND", "존재하지 않는 VM입니다."));
     }
 

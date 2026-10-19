@@ -8,5 +8,5 @@ public interface VmRecordRepository extends JpaRepository<VmRecord, String> {
 
     Optional<VmRecord> findByName(String name);
 
-    List<VmRecord> findAllByOrderByCreatedAtAsc();
+    List<VmRecord> findAllByLifecycleOrLifecycleIsNullOrderByCreatedAtAsc(VmLifecycle lifecycle);
 }

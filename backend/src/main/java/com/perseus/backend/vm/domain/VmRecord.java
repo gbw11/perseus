@@ -9,8 +9,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 
-// The VM specification Spring owns. dom0-manager does not keep name or template, so this is the source of truth
-// for both the full VM list (including VMs that are off) and for restarting a VM with the same template.
+// The public VM specification Spring owns. Retired rows remain here so a future restore can reuse the same
+// permanent vm_id; the platform registry remains the source of truth for disk/runtime lifecycle.
 @Entity
 @Table(name = "vms")
 public class VmRecord {
@@ -37,6 +37,10 @@ public class VmRecord {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 16)
+    private VmLifecycle lifecycle;
+
     // Copied from the template at creation, so a later template config change does not reclassify the VM.
     // Rows created before this column existed are null and read as linux.
     @Enumerated(EnumType.STRING)
@@ -59,10 +63,23 @@ public class VmRecord {
         this.memoryMib = command.memoryMib();
         this.guestKind = guestKind;
         this.createdAt = createdAt;
+        this.lifecycle = VmLifecycle.REGISTERED;
     }
 
     public GuestKind getGuestKind() {
         return guestKind == null ? GuestKind.LINUX : guestKind;
+    }
+
+    public VmLifecycle getLifecycle() {
+        return lifecycle == null ? VmLifecycle.REGISTERED : lifecycle;
+    }
+
+    public boolean isRegistered() {
+        return getLifecycle() == VmLifecycle.REGISTERED;
+    }
+
+    public void retire() {
+        lifecycle = VmLifecycle.RETIRED;
     }
 
     public boolean hasSameSpec(CreateVmCommand command) {

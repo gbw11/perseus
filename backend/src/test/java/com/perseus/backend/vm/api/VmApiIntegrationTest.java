@@ -6,12 +6,14 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.perseus.backend.vm.domain.VmControlPort;
+import com.perseus.backend.vm.domain.VmLifecycle;
 import com.perseus.backend.vm.domain.VmLaunchSpec;
 import com.perseus.backend.vm.domain.VmRecordRepository;
 import com.perseus.backend.vm.domain.VmRuntime;
@@ -139,6 +141,31 @@ class VmApiIntegrationTest {
                 .andExpect(jsonPath("$.state").value("running"));
         verify(vmControlPort, org.mockito.Mockito.times(2))
                 .launch(org.mockito.ArgumentMatchers.eq(vmId), any(VmLaunchSpec.class));
+    }
+
+    @Test
+    void deleteRetiresAndHidesVmWithoutDiscardingItsIdentity() throws Exception {
+        String vmId = objectMapper.readTree(createVm("archive-01", 1, 256)
+                        .andExpect(status().isCreated())
+                        .andReturn().getResponse().getContentAsString())
+                .get("vm_id").asText();
+
+        mockMvc.perform(delete("/api/v1/vms/" + vmId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/api/v1/vms/" + vmId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/vms")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isEmpty());
+
+        var retired = vmRecordRepository.findById(vmId).orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(retired.getLifecycle()).isEqualTo(VmLifecycle.RETIRED);
+        org.assertj.core.api.Assertions.assertThat(retired.getName()).isEqualTo("archive-01");
+        verify(vmControlPort).destroy(vmId);
     }
 
     @Test
