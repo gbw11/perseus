@@ -21,7 +21,8 @@ Spring이 생성 전에 발급한 UUID 형식의 `vm_id`가 시스템 전체의 
 | 책임 | 담당 |
 |---|---|
 | VM 명세 보유 (`name`, `template_id`, `template_version`) | Spring |
-| `vm_id` 발급 및 생성 멱등성 | Spring (`vm_id` 자체가 idempotency key) |
+| `vm_id` 발급 및 외부 생성 재요청 | Spring (같은 요청에 같은 `vm_id` 재사용) |
+| 전달된 UUID의 최초 명세 검증·생성 작업 기록·IP 예약 | 플랫폼 공통 Manager |
 | 종료된 VM을 포함한 전체 목록 구성 | Spring |
 | 표시 이름 중복 검사 | Spring |
 | Xen 런타임 상태 조회·변경 | dom0-manager |
@@ -32,6 +33,35 @@ Spring이 생성 전에 발급한 UUID 형식의 `vm_id`가 시스템 전체의 
 ### 1.3 계층별 계약 분리
 
 이 문서의 모든 응답 규약은 **어느 계층의 계약인지 명시**합니다. 두 계층의 상태 코드와 오류 명명이 다르므로 한 표에 섞지 않습니다.
+
+### 1.4 플랫폼 공통 Manager와 HTTP 어댑터의 경계
+
+플랫폼 함수·JSON CLI의 원본 계약은 [VM 관리 가이드](../build-guides/xenova-vm-management.md)입니다.
+이 문서의 내부 HTTP 계약과 공통 Manager의 입출력은 서로 다른 인터페이스입니다.
+
+| 항목 | 공통 Manager / CLI | dom0-manager HTTP |
+|---|---|---|
+| 생성 입력 | `vm_id`, `name`, 정확한 템플릿 ID·버전, vCPU·메모리. Linux IP는 플랫폼이 예약 | 4.2절의 5개 필드. 사용자 표시 이름은 Spring 보유 |
+| 생성과 시작 | `create`는 정지 인스턴스 등록, `start`는 별도 동작 | POST가 자산 준비·재사용과 도메인 시작을 연결하는 계약 |
+| 목록·상세 | 정지한 등록 VM도 조회. 템플릿·현재 설정·수명주기와 Xen 관측을 구분 | Xen 도메인만 반환. Spring이 자기 레코드와 조합 |
+| `ipv4` | 예약한 내부 주소. 부팅·DHCP 획득 증거가 아님 | HTTP VM 객체에는 없음. Spring 공개 `ipv4`는 에이전트 보고 값 |
+| 생성 재시도 | 같은 UUID·최초 명세는 같은 작업. 다른 최초 명세는 충돌. RETIRED/PURGED를 create로 되살리지 않음 | 실행 도메인이 있으면 `409 VMExists`; Spring의 성공 변환과 별개 |
+| 보관·복원·삭제 | `retire` / `restore` / `purge`와 작업 키·세대 보호 | DELETE는 보관. restore/purge의 HTTP 전달 규약은 별도 연결 필요 |
+
+현재 HTTP 서비스의 Xen 조회 드라이버와 공통 Manager를 호출하는 명령 어댑터는 구분합니다.
+`XenDriver.create/shutdown/destroy`와 `UnavailableProvisioner`의 변경 연산은
+`NotImplementedError`로 남아 있습니다. HTTP 경로·mock 시험을 실제 플랫폼 명령 연동으로
+해석하지 않습니다.
+
+연결 시에는 HTTP 요청에 없는 필수 `name`의 공급 방식, HTTP 재시작을 위한 공통 `start` 호출,
+수명주기 작업의 원래 키·operation_id·대상 세대를 명시해야 합니다.
+플랫폼의 필수 입력을 생략하거나 재시도마다 다른 키·신원·주소를 만드는 방식으로 연결하지 않습니다.
+생성 응답·Xen 도메인 존재는 앱 준비 완료를 뜻하지 않으며 플랫폼의 `app_readiness=unknown`을 유지합니다.
+
+영구 UUID는 신원 대조에 사용하고 실제 Xen 제어에는 재확인한 현재 domid를 사용합니다.
+기존 factory 기본 VM 3개의 보드별 UUID 발급·고유화는 일반 Spring create와 구분한 예외로 유지합니다.
+템플릿 불변성, 독립 디스크·펌웨어, restore/purge 세대 보호와 factory 예약·배포 버전의
+검증 규칙은 공통 Manager 계약을 따릅니다.
 
 ---
 
@@ -187,7 +217,8 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 - 성공 응답은 `204 No Content`. 종료 후에는 Xen에 도메인이 없으므로 반환할 VM 객체가 존재하지 않는다.
 - **없는 VM에 stop을 호출하면 `204`.** 멱등성은 목표 상태 기준이므로 이미 실행 중이 아닌 VM의 stop은 목표가 달성된 상태다.
 - 호출은 동기 방식이며 플랫폼은 기본 최대 90초까지 도메인 소멸을 기다린다. 일반 stop은 시간 초과 시 자동으로 강제 종료하지 않는다.
-- 강제 종료는 명시적인 force 요청에서만 수행한다. Zephyr는 `board_shutdown_policy`가 `force-allowed`가 아니면 `409`로 거부한다.
+- 플랫폼의 Zephyr 개별 stop/reboot는 명시적 force가 필요하다. `board_shutdown_policy=force-allowed`는 **보드 전체 종료용 승인**이며 개별 stop의 강제 종료 승인으로 사용하지 않는다.
+- 현재 HTTP stop에는 force 입력이 없다. Zephyr 개별 종료를 자동 강제로 연결하지 않으며 전달 규약은 13장의 연동 항목으로 둔다.
 
 ### 4.4 `DELETE /api/v1/vms/{vm_id}`
 
@@ -341,7 +372,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | `vcpus` | 1~4 | Spring, dom0-manager |
 | `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16) | 템플릿별 하한은 Spring, 공통 범위는 dom0-manager |
 | 배수 제약 | 없음. 화면 입력만 64 단위 | — |
-| `template_id` | 템플릿 목록에 존재해야 함 | Spring |
+| `template_id` | 공개 카탈로그 ID·버전을 그대로 전달 | Spring 목록 검사 + 플랫폼의 정확한 ID·버전·해시 검사 |
 
 `name`은 dom0-manager로 전달되지 않으므로 제어 계층의 관심사가 아닙니다.
 
@@ -410,6 +441,10 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | OS별 `min_memory_mib` | 제어 계층 | 이미지 빌드 시 실측 |
 | 서비스 토큰 배포·회전 | 공통 | Spring과 dom0-manager에 같은 Bearer 서비스 토큰을 안전하게 배포하고 회전하는 운영 절차 |
 | 자동 복구 주체 | 공통 | 보드(Xen `on_crash`·dom0 감시) 또는 Spring. 결정 전까지 Spring은 복구를 수행하지 않음 |
+| HTTP → 공통 Manager 입력 | 제어 계층 + 플랫폼 | HTTP 5개 필드와 Manager의 필수 `name`·최초 명세를 연결하는 규칙. 임의 기본값이나 Spring 입력 필드 추가로 우회하지 않음 |
+| Zephyr 자원 범위 | 제어 계층 + 플랫폼 | 공통 Manager는 고정 1 vCPU/16MiB이고 Spring은 공통 하한 16, Zephyr 템플릿 하한 16으로 맞춤(v1.6). 이 브랜치의 dom0-manager HTTP 모델(`contracts/dom0-manager-openapi.yaml`)은 아직 최소 128MiB라, 16MiB로 바꾸는 플랫폼 드라이버 브랜치(S15P31E110-115)가 병합되기 전에는 Zephyr 16MiB 생성이 `400 InvalidArgument`로 거부될 수 있음. Spring은 Zephyr에도 vCPU 1~4를 받으므로 템플릿별 vCPU 상한은 추후 결정 |
+| 수명주기·강제 종료 전달 | 제어 계층 + 플랫폼 | retire/restore/purge의 작업 키·operation_id·대상 세대와 개별 force 전달. 보드 종료 정책을 개별 강제 종료 승인으로 사용하지 않음 |
+| IP 고갈 오류 스키마 | 제어 계층 + 백엔드 | 플랫폼 IP_POOL_EXHAUSTED와 HTTP 507의 연결, resource.name=ipv4 표현. 현재 HTTP ResourceName은 vcpus/memory_mib만 지원 |
 
 dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포함한 내부 API에서 Bearer 서비스 토큰을 검사합니다. Spring은 `DOM0_MANAGER_BASE_URL`에 Tailscale 주소를 설정하고 `DOM0_MANAGER_SERVICE_TOKEN`을 `Authorization: Bearer`로 전송합니다. 연결 실패는 `503 VM_CONTROL_UNAVAILABLE`로 변환합니다.
 
@@ -426,4 +461,5 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1.2 | 2026-10-19 | Spring 선발급 `vm_id`를 유일한 영구 식별자·생성 멱등성 키로 확정. 플랫폼 자동 IP 할당, 동기 stop 90초와 Spring 100초 제한, retire/restore/purge 생명주기, Spring `RETIRED` 명세 보존, Tailscale+Bearer 내부 연결을 반영. Spring이 플랫폼 공개 템플릿 ID·버전을 그대로 전달하고 제어 계층 변환을 제거 |
 | v1.3 | 2026-10-19 | API 문서 통일(S15P31E110-230): `docs/dom0-backend-http-contract-v1.md`(v1.0 폐기본)와 `docs/backend-vm-api-rules-v1.md`(백엔드 VM API 규약)를 삭제하고 이 문서로 일원화. 코드 기준으로 정정 — dom0-manager는 기존 도메인에 명세와 관계없이 `409 VMExists`(4.2·7장), `InvalidState`는 실행 중 VM 삭제에 반환(8.1절), 템플릿 OS는 Ubuntu·Debian·Zephyr(2.3절) |
 | v1.4 | 2026-10-19 | Spring 공개 API 보완: VM 이름에 한글·공백 허용(제어문자·앞뒤 공백 금지, 9장), 공개 VM 객체에 `ipv4` 추가(에이전트 보고 기준, Zephyr는 `null`, 2.2절), dom0-manager `507 InsufficientResources`를 공개 API에서도 `507`로 전달하고 IP 풀 고갈(`ipv4`) 메시지 추가(8.1·8.2절) |
-| v1.5 | 2026-10-19 | dom0-manager 오류 code 분리(플랫폼 드라이버 S15P31E110-115 계약) 반영: `401 Unauthorized`, `501 NotSupported`, `503 PlatformUnavailable`, `504 DriverTimeout`과 Spring 변환(8.1·8.2절). 요청 메모리 공통 하한 128 → 16, Zephyr starter `min_memory_mib` 16(2.3절·9장) |
+| v1.5 | 2026-10-19 | 공통 Manager와 HTTP 계약을 분리하고 생성/시작·등록 목록·예약 IP·수명주기 세대·Zephyr 종료/메모리의 연결 경계를 명시. Spring의 현재 DTO·설정과 플랫폼 구현은 유지 |
+| v1.6 | 2026-10-19 | dom0-manager 오류 code 분리(플랫폼 드라이버 S15P31E110-115 계약) 반영: `401 Unauthorized`, `501 NotSupported`, `503 PlatformUnavailable`, `504 DriverTimeout`과 Spring 변환(8.1·8.2절). 요청 메모리 공통 하한 128 → 16, Zephyr starter `min_memory_mib` 16(2.3절·9장) |
