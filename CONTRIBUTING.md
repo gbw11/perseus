@@ -12,7 +12,8 @@ master                ← 통합 데모·발표용 안정 버전
 └── develop           ← 전 파트 통합 브랜치 (기본 브랜치)
     ├── backend       ← 기능별 develop 브랜치
     │   ├── feat/backend/vm-lifecycle-api
-    │   └── feat/ctrl/xen-driver
+    │   ├── feat/ctrl/xen-driver
+    │   └── chore/deploy/gitlab-ci-pytest
     ├── frontend
     │   └── feat/frontend/vm-list-card
     ├── platform
@@ -26,7 +27,7 @@ master                ← 통합 데모·발표용 안정 버전
 | 브랜치 | 역할 | 규칙 |
 | --- | --- | --- |
 | `master` | 통합 데모·발표 기준 버전 | develop에서만 MR로 머지, 통합 데모 직전에만 반영 |
-| `develop` | 모든 파트의 작업이 합쳐지는 통합 브랜치 | 기능별 develop 브랜치(또는 `common`·`deploy` 작업 브랜치)에서 MR로만 머지 |
+| `develop` | 모든 파트의 작업이 합쳐지는 통합 브랜치 | 기능별 develop 브랜치(또는 `common` 작업 브랜치)에서 MR로만 머지 |
 | `backend` `frontend` `platform` `vehicle` | 기능별 develop 브랜치 | 작업 브랜치에서 MR로만 머지, 동작하는 단위로 develop에 MR |
 | `{type}/{part}/*` | 개인 작업용 단기 브랜치 | 자기 기능별 develop 브랜치에서 생성, 1~3일 내 머지, 머지 후 삭제 |
 
@@ -34,11 +35,11 @@ master                ← 통합 데모·발표용 안정 버전
 
 | 기능별 develop 브랜치 | part |
 | --- | --- |
-| `backend` | `backend`, `ctrl` |
+| `backend` | `backend`, `ctrl`, `deploy` |
 | `frontend` | `frontend` |
 | `platform` | `platform`, `agent`, `display` |
 | `vehicle` | `app` |
-| `develop` (직접) | `common`, `deploy` |
+| `develop` (직접) | `common` |
 
 - `master`, `develop`, 기능별 develop 브랜치는 직접 push하지 않습니다. 반드시 MR로 머지합니다.
 - `feat`처럼 type 이름만으로 된 브랜치나, `backend/...`처럼 기능별 develop 브랜치 이름 아래의 브랜치는 만들지 마세요. Git 구조상 같은 이름이 브랜치와 폴더를 겸할 수 없습니다.
@@ -109,7 +110,7 @@ docs/common/openapi-v1
 ## 4. 작업 흐름
 
 ```bash
-# 1) 자기 기능별 develop 브랜치 최신화 (1장 표 참고, common·deploy 는 develop)
+# 1) 자기 기능별 develop 브랜치 최신화 (1장 표 참고, common 은 develop)
 git switch backend
 git pull origin backend
 
@@ -215,7 +216,7 @@ git config commit.template .gitmessage
 
 ## 6. Merge Request
 
-- target: 작업 브랜치는 **자기 기능별 develop 브랜치**(1장 표), `common`·`deploy` 작업 브랜치와 기능별 develop 브랜치는 `develop` (통합 데모 반영 시에만 `develop → master`)
+- target: 작업 브랜치는 **자기 기능별 develop 브랜치**(1장 표), `common` 작업 브랜치와 기능별 develop 브랜치는 `develop` (통합 데모 반영 시에만 `develop → master`)
 - 최소 **1명 리뷰 승인** + **CI 통과** 후 머지
 - 하루~이틀 분량으로 작게 올립니다. 기능 여러 개를 한 MR에 넣지 않습니다
 - 작업 브랜치 MR은 **Squash merge**를 기본으로 합니다. MR 제목이 커밋 메시지가 되므로 커밋 규칙과 같은 형식으로 씁니다
@@ -233,7 +234,7 @@ GitLab–Jira 연동은 **develop(기본 브랜치)에 머지될 때만** 이슈
 | --- | --- |
 | 작업 브랜치 → 기능별 develop 브랜치 | 이슈 키만 (`S15P31E110-56`) — Jira에 MR 링크가 남습니다 |
 | 기능별 develop 브랜치 → develop | 이번에 끝난 이슈마다 `Closes {Jira키}` |
-| `common`·`deploy` 작업 브랜치 → develop | `Closes {Jira키}` |
+| `common` 작업 브랜치 → develop | `Closes {Jira키}` |
 
 ```text
 Closes S15P31E110-56
