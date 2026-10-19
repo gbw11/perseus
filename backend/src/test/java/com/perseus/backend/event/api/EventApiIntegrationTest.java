@@ -116,7 +116,7 @@ class EventApiIntegrationTest {
         assertThat(items.get(2).path("payload").path("cause").asText()).isEqualTo("user_stop");
         assertThat(items.get(2).path("payload").path("from").asText()).isEqualTo("running");
         assertThat(items.get(3).path("payload").path("name").asText()).isEqualTo("event-web-01");
-        assertThat(items.get(3).path("payload").path("template_id").asText()).isEqualTo("debian");
+        assertThat(items.get(3).path("payload").path("template_id").asText()).isEqualTo("debian-13-arm64");
         assertThat(items.get(0).path("payload").path("name").asText()).isEqualTo("event-web-01");
         assertThat(items.get(0).has("event_id")).isTrue();
         assertThat(items.get(0).has("recorded_at")).isTrue();
@@ -197,7 +197,7 @@ class EventApiIntegrationTest {
 
     private String createVm(String name) throws Exception {
         String body = """
-                {"name":"%s","template_id":"debian","template_version":"12","vcpus":1,"memory_mib":256}
+                {"name":"%s","template_id":"debian-13-arm64","template_version":"1.0.0","vcpus":1,"memory_mib":256}
                 """.formatted(name);
         String response = mockMvc.perform(authorized(post("/api/v1/vms"))
                         .contentType(MediaType.APPLICATION_JSON)

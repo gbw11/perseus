@@ -26,16 +26,16 @@ perseus:
     login-attempt-window: 5m
   template-catalog:
     templates:
-      - template-id: debian
-        version: "12"
+      - template-id: debian-13-arm64
+        version: "1.0.0"
         display-name: Debian 12
         min-memory-mib: 128
-      - template-id: ubuntu
-        version: "24.04"
+      - template-id: ubuntu-24.04-arm64
+        version: "1.0.0"
         display-name: Ubuntu 24.04
         min-memory-mib: 512
-      - template-id: zephyr
-        version: "starter-1.0.0"
+      - template-id: zephyr-xenvm-starter-arm64
+        version: "1.0.0"
         display-name: Zephyr Starter 1.0.0
         min-memory-mib: 128
         guest-kind: zephyr
