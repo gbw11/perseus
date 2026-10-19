@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -108,11 +109,31 @@ class CommandLogTest(unittest.TestCase):
     def run_failure(self, timeout):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);script=root/"peer.py"
-            script.write_text("import sys,time\nprint('STDOUT-MARKER',flush=True)\n"
+            ready=root/"ready"
+            script.write_text("import sys,time,pathlib\nprint('STDOUT-MARKER',flush=True)\n"
                               "sys.stderr.write('E'*6000+'STDERR-END');sys.stderr.flush()\n"+
-                              ("time.sleep(10)\n" if timeout else "sys.exit(7)\n"))
-            argv=[__import__("sys").executable,"-u",str(script)]
-            with self.assertRaises(RuntimeError) as caught:
+                              ("pathlib.Path(sys.argv[1]).write_text('ready')\ntime.sleep(10)\n"
+                               if timeout else "sys.exit(7)\n"))
+            argv=[__import__("sys").executable,"-u",str(script),str(ready)]
+            # Process startup is outside this log-preservation boundary. Trigger the real
+            # TimeoutExpired only after both output streams have been flushed.
+            def ready_then_timeout(args, **kwargs):
+                with subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE) as child:
+                    deadline=time.monotonic()+5
+                    while not ready.exists() and child.poll() is None and time.monotonic()<deadline:
+                        time.sleep(.005)
+                    if not ready.exists():
+                        child.kill();child.communicate()
+                        self.fail("marker peer did not become ready")
+                    try:
+                        child.communicate(timeout=kwargs["timeout"])
+                    except subprocess.TimeoutExpired as error:
+                        child.kill()
+                        error.output,error.stderr=child.communicate()
+                        raise
+                    self.fail("timeout peer unexpectedly exited")
+            boundary=patch.object(lab.subprocess,"run",side_effect=ready_then_timeout) if timeout else contextlib.nullcontext()
+            with boundary, self.assertRaises(RuntimeError) as caught:
                 lab.run(argv,timeout=0.3 if timeout else 5,log_directory=root/"logs")
             records=list((root/"logs").iterdir());self.assertEqual(len(records),1)
             record=records[0]
