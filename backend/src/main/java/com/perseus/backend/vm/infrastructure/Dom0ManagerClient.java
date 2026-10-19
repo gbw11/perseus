@@ -160,8 +160,9 @@ public class Dom0ManagerClient implements VmControlPort {
             case "VMExists" -> new ApiException(HttpStatus.CONFLICT, "VM_ALREADY_EXISTS", message);
             case "InvalidState" -> new ApiException(HttpStatus.CONFLICT, "INVALID_VM_STATE", message);
             case "InvalidArgument" -> new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", message);
-            case "InsufficientResources" ->
-                    new ApiException(HttpStatus.CONFLICT, "INSUFFICIENT_RESOURCES", message);
+            // Passed on as 507 like dom0-manager: retrying the same request cannot succeed until resources free up.
+            case "InsufficientResources" -> new ApiException(
+                    HttpStatus.INSUFFICIENT_STORAGE, "INSUFFICIENT_RESOURCES", insufficientResourceMessage(error));
             case "DriverError" -> new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "VM_DRIVER_ERROR", message);
             default -> {
                 log.warn("Unknown dom0-manager error code={}, status={}", error.code(), upstreamStatus);
@@ -170,6 +171,20 @@ public class Dom0ManagerClient implements VmControlPort {
                         "VM_CONTROL_BAD_RESPONSE",
                         "VM 제어 서비스가 알 수 없는 오류를 반환했습니다.");
             }
+        };
+    }
+
+    // dom0-manager's message is English and names internal fields, so the user sees which resource ran out instead.
+    private static String insufficientResourceMessage(Dom0ErrorResponse error) {
+        String name = error.resource() == null ? null : error.resource().name();
+        if (name == null) {
+            return "보드의 자원이 부족합니다.";
+        }
+        return switch (name) {
+            case "memory_mib" -> "보드에 남은 메모리가 부족합니다.";
+            case "vcpus" -> "보드에 남은 CPU가 부족합니다.";
+            case "ipv4" -> "VM에 할당할 수 있는 IP 주소가 없습니다.";
+            default -> "보드의 자원이 부족합니다.";
         };
     }
 
