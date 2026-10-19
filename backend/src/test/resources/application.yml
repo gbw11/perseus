@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:perseus-test;DB_CLOSE_DELAY=-1
+    url: jdbc:h2:mem:xenova-test;DB_CLOSE_DELAY=-1
     username: sa
     password:
   jpa:
@@ -16,9 +16,9 @@ management:
       exposure:
         include: health,info
 
-perseus:
+xenova:
   auth:
-    jwt-secret: perseus-test-secret-with-at-least-thirty-two-bytes
+    jwt-secret: xenova-test-secret-with-at-least-thirty-two-bytes
     access-token-ttl: 15m
     refresh-token-ttl: 7d
     refresh-cookie-secure: false
@@ -37,7 +37,7 @@ perseus:
       - template-id: zephyr-xenvm-starter-arm64
         version: "1.0.0"
         display-name: Zephyr Starter 1.0.0
-        min-memory-mib: 128
+        min-memory-mib: 16
         guest-kind: zephyr
   agent:
     stale-after: 15s
@@ -56,7 +56,7 @@ perseus:
   mqtt:
     enabled: false
     broker-url: tcp://127.0.0.1:1883
-    client-id: perseus-backend-test
+    client-id: xenova-backend-test
     reconnect-interval: 1s
   dom0-manager:
     base-url: http://127.0.0.1:18081

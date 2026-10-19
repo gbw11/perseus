@@ -21,7 +21,8 @@ Spring이 생성 전에 발급한 UUID 형식의 `vm_id`가 시스템 전체의 
 | 책임 | 담당 |
 |---|---|
 | VM 명세 보유 (`name`, `template_id`, `template_version`) | Spring |
-| `vm_id` 발급 및 생성 멱등성 | Spring (`vm_id` 자체가 idempotency key) |
+| `vm_id` 발급 및 외부 생성 재요청 | Spring (같은 요청에 같은 `vm_id` 재사용) |
+| 전달된 UUID의 최초 명세 검증·생성 작업 기록·IP 예약 | 플랫폼 공통 Manager |
 | 종료된 VM을 포함한 전체 목록 구성 | Spring |
 | 표시 이름 중복 검사 | Spring |
 | Xen 런타임 상태 조회·변경 | dom0-manager |
@@ -32,6 +33,35 @@ Spring이 생성 전에 발급한 UUID 형식의 `vm_id`가 시스템 전체의 
 ### 1.3 계층별 계약 분리
 
 이 문서의 모든 응답 규약은 **어느 계층의 계약인지 명시**합니다. 두 계층의 상태 코드와 오류 명명이 다르므로 한 표에 섞지 않습니다.
+
+### 1.4 플랫폼 공통 Manager와 HTTP 어댑터의 경계
+
+플랫폼 함수·JSON CLI의 원본 계약은 [VM 관리 가이드](../build-guides/xenova-vm-management.md)입니다.
+이 문서의 내부 HTTP 계약과 공통 Manager의 입출력은 서로 다른 인터페이스입니다.
+
+| 항목 | 공통 Manager / CLI | dom0-manager HTTP |
+|---|---|---|
+| 생성 입력 | `vm_id`, `name`, 정확한 템플릿 ID·버전, vCPU·메모리. Linux IP는 플랫폼이 예약 | 4.2절의 5개 필드. 사용자 표시 이름은 Spring 보유 |
+| 생성과 시작 | `create`는 정지 인스턴스 등록, `start`는 별도 동작 | POST가 자산 준비·재사용과 도메인 시작을 연결하는 계약 |
+| 목록·상세 | 정지한 등록 VM도 조회. 템플릿·현재 설정·수명주기와 Xen 관측을 구분 | Xen 도메인만 반환. Spring이 자기 레코드와 조합 |
+| `ipv4` | 예약한 내부 주소. 부팅·DHCP 획득 증거가 아님 | HTTP VM 객체에는 없음. Spring 공개 `ipv4`는 에이전트 보고 값 |
+| 생성 재시도 | 같은 UUID·최초 명세는 같은 작업. 다른 최초 명세는 충돌. RETIRED/PURGED를 create로 되살리지 않음 | 실행 도메인이 있으면 `409 VMExists`; Spring의 성공 변환과 별개 |
+| 보관·복원·삭제 | `retire` / `restore` / `purge`와 작업 키·세대 보호 | DELETE는 보관. restore/purge의 HTTP 전달 규약은 별도 연결 필요 |
+
+현재 HTTP 서비스의 Xen 조회 드라이버와 공통 Manager를 호출하는 명령 어댑터는 구분합니다.
+`XenDriver.create/shutdown/destroy`와 `UnavailableProvisioner`의 변경 연산은
+`NotImplementedError`로 남아 있습니다. HTTP 경로·mock 시험을 실제 플랫폼 명령 연동으로
+해석하지 않습니다.
+
+연결 시에는 HTTP 요청에 없는 필수 `name`의 공급 방식, HTTP 재시작을 위한 공통 `start` 호출,
+수명주기 작업의 원래 키·operation_id·대상 세대를 명시해야 합니다.
+플랫폼의 필수 입력을 생략하거나 재시도마다 다른 키·신원·주소를 만드는 방식으로 연결하지 않습니다.
+생성 응답·Xen 도메인 존재는 앱 준비 완료를 뜻하지 않으며 플랫폼의 `app_readiness=unknown`을 유지합니다.
+
+영구 UUID는 신원 대조에 사용하고 실제 Xen 제어에는 재확인한 현재 domid를 사용합니다.
+기존 factory 기본 VM 3개의 보드별 UUID 발급·고유화는 일반 Spring create와 구분한 예외로 유지합니다.
+템플릿 불변성, 독립 디스크·펌웨어, restore/purge 세대 보호와 factory 예약·배포 버전의
+검증 규칙은 공통 Manager 계약을 따릅니다.
 
 ---
 
@@ -61,6 +91,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
   "guest_kind": "linux",
   "state": "running",
   "agent_status": "ONLINE",
+  "ipv4": "192.168.77.20",
   "template_id": "debian-13-arm64",
   "template_version": "1.0.0",
   "vcpus": 1,
@@ -75,6 +106,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 | `guest_kind` | VM 종류 `linux` / `zephyr`. 생성 때 템플릿에서 복사해 Spring 레코드에 저장. **Spring만 쓰는 값이며 dom0-manager 계약에는 없음.** `zephyr`는 에이전트·네트워크·정상 종료가 없는 콘솔 전용 펌웨어라 `agent_status`가 항상 `UNKNOWN` |
 | `state` | Xen 기준 실행 상태 (3.3절). 도메인이 없으면 `stopped` |
 | `agent_status` | heartbeat 기준 에이전트 상태 `UNKNOWN`/`ONLINE`/`STALE`/`OFFLINE`. **목록·단건 조회에만** 있고 생성·시작·정지 응답에는 없음 |
+| `ipv4` | 에이전트가 마지막으로 보고한 IPv4 (eth0 우선, loopback 제외). 꺼져 있어도 마지막 값을 유지. 보고가 없으면 `null`, `zephyr`는 항상 `null`. **목록·단건 조회에만** 있음. dom0-manager VM 객체에는 IP가 없어 에이전트 보고를 씀 |
 | `template_id`, `template_version` | 생성에 쓴 템플릿. Spring 레코드 |
 | `vcpus`, `memory_mib` | 실행 중이면 dom0-manager가 관측한 값, 꺼져 있으면 Spring 레코드의 값 |
 
@@ -100,7 +132,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 
 플랫폼 기본 Ubuntu·Debian·Zephyr 공개 카탈로그의 ID와 버전을 그대로 사용합니다. dom0-manager는 템플릿 값을 변환하지 않습니다. OS 검증에서는 카탈로그 ID를 게스트의 `os-release` ID(`ubuntu`, `debian`)와 별도로 대응시킵니다.
 
-1차 데이터는 Spring 설정 파일(`application.yml`의 `perseus.template-catalog.templates`)에 고정하며, Ubuntu·Debian·Zephyr마다 플랫폼이 공개한 버전 하나를 사용합니다. 최소 메모리 값은 실측에 따라 조정할 수 있습니다.
+1차 데이터는 Spring 설정 파일(`application.yml`의 `xenova.template-catalog.templates`)에 고정하며, Ubuntu·Debian·Zephyr마다 플랫폼이 공개한 버전 하나를 사용합니다. 최소 메모리 값은 실측에 따라 조정할 수 있습니다.
 
 ---
 
@@ -135,7 +167,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 
 `------`는 스케줄링 순간에 아무 플래그도 서지 않은 정상 도메인입니다. dom0-manager 골격이 이 규칙으로 구현돼 있어 계약에 추가했습니다.
 
-`crashed`가 남아 있는 이유는 플랫폼 도메인 설정이 `on_crash = 'preserve'`이기 때문입니다(`perseus_vm.py`). 정리(stop 또는 DELETE)하기 전까지 이 상태로 남습니다.
+`crashed`가 남아 있는 이유는 플랫폼 도메인 설정이 `on_crash = 'preserve'`이기 때문입니다(`xenova_vm.py`). 정리(stop 또는 DELETE)하기 전까지 이 상태로 남습니다.
 
 ### 3.3 Spring 공개 state
 
@@ -152,14 +184,14 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 
 | 메서드 | 경로 | 성공 응답 | 오류 |
 |---|---|---|---|
-| `GET` | `/api/v1/vms` | `200` VM 배열 | `500`, `503`, `504` |
-| `POST` | `/api/v1/vms` | `201` VM | `400`, `409`, `507`, `500`, `501`, `503`, `504` |
-| `GET` | `/api/v1/vms/{vm_id}` | `200` VM | `404`, `500`, `503`, `504` |
-| `POST` | `/api/v1/vms/{vm_id}/stop` | `204` | `500`, `501`, `503`, `504` |
-| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `404`, `409`, `500`, `501`, `503`, `504` |
-| `GET` | `/healthz` | `200` | `503` |
+| `GET` | `/api/v1/vms` | `200` VM 배열 | `401`, `500`, `503`, `504` |
+| `POST` | `/api/v1/vms` | `201` VM | `400`, `401`, `409`, `507`, `500`, `501`, `503`, `504` |
+| `GET` | `/api/v1/vms/{vm_id}` | `200` VM | `401`, `404`, `500`, `503`, `504` |
+| `POST` | `/api/v1/vms/{vm_id}/stop` | `204` | `401`, `500`, `501`, `503`, `504` |
+| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `401`, `404`, `409`, `500`, `501`, `503`, `504` |
+| `GET` | `/healthz` | `200` | `401`, `503` |
 
-드라이버·플랫폼 실패는 모든 엔드포인트에서 날 수 있으며 code와 HTTP 상태가 1:1입니다(8.1절). `500 DriverError`는 분류되지 않은 실행 실패, `503 PlatformUnavailable`은 registry·저장소·Xen 일시 장애(재시도 가능), `504 DriverTimeout`은 호출 시한 초과입니다. 명령 엔드포인트(생성·정지·보관)는 드라이버나 플랫폼이 그 동작을 제공하지 않을 때 `501 NotSupported`를 더 냅니다. `PERSEUS_SERVICE_TOKEN`이 설정된 배포에서는 `/healthz`를 포함한 모든 엔드포인트가 토큰이 없거나 틀리면 `401 Unauthorized`를 냅니다. OpenAPI는 `ServiceToken` bearer 보안 스킴을 전역 security로 선언하고 각 엔드포인트에 `401`을 명시합니다.
+드라이버·플랫폼 실패는 모든 엔드포인트에서 날 수 있으며 code와 HTTP 상태가 1:1입니다(8.1절). `500 DriverError`는 분류되지 않은 실행 실패, `503 PlatformUnavailable`은 일시 장애(재시도 가능), `504 DriverTimeout`은 호출 시한 초과, `501 NotSupported`는 드라이버·플랫폼이 제공하지 않는 동작입니다. 서비스 토큰이 설정된 배포에서는 토큰이 없거나 틀리면 `401 Unauthorized`입니다. `XENOVA_SERVICE_TOKEN`이 설정된 배포에서는 `/healthz`를 포함한 모든 엔드포인트가 토큰이 없거나 틀리면 `401 Unauthorized`를 냅니다. OpenAPI는 `ServiceToken` bearer 보안 스킴을 전역 security로 선언하고 각 엔드포인트에 `401`을 명시합니다.
 
 ### 4.1 `GET /api/v1/vms`
 
@@ -171,10 +203,12 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 
 - 해당 `vm_id`의 디스크가 존재하면 **재사용**하고, 존재하지 않으면 `template_id`·`template_version`으로 새로 생성한다.
 - 디스크 경로는 `vm_id`에서 파생한다.
-- 동일 `vm_id`·동일 명세 재요청은 기존 생성 결과를 반환하고, 동일 `vm_id`·다른 명세는 `409 VMExists`로 거부한다.
+- Xen에 같은 `vm_id`의 도메인이 이미 있으면 명세와 관계없이 `409 VMExists`로 거부한다. dom0-manager는 명세를 비교하지 않으며, 동일 명세 재요청을 성공으로 바꾸는 것은 Spring이다(10.1절).
 - Linux IP는 Spring이 전달하지 않는다. 플랫폼이 전역 잠금 안에서 IP 풀과 registry를 확인해 빈 주소를 자동 할당한다.
 
 **Spring 불변조건** — 동일한 `vm_id`에는 항상 동일한 생성 명세를 전송한다. 플랫폼은 registry의 기존 생성 명세와 비교해 위반을 거부한다.
+
+- 도메인이 없고 등록된 디스크만 있을 때(재시작)는 요청 명세가 기록된 최초 명세와 다르면 `409 VMExists`로 거부한다(1.4절 "다른 최초 명세는 충돌"). 같은 명세면 `201`로 재시작한다.
 
 `start` 엔드포인트는 두지 않습니다. 꺼진 VM의 재시작은 같은 `vm_id`로 이 엔드포인트를 재호출하는 방식이며, 디스크가 보존되어 있으므로 데이터는 유지됩니다.
 
@@ -185,7 +219,8 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 - 성공 응답은 `204 No Content`. 종료 후에는 Xen에 도메인이 없으므로 반환할 VM 객체가 존재하지 않는다.
 - **없는 VM에 stop을 호출하면 `204`.** 멱등성은 목표 상태 기준이므로 이미 실행 중이 아닌 VM의 stop은 목표가 달성된 상태다.
 - 호출은 동기 방식이며 플랫폼은 기본 최대 90초까지 도메인 소멸을 기다린다. 일반 stop은 시간 초과 시 자동으로 강제 종료하지 않는다.
-- 강제 종료는 명시적인 force 요청에서만 수행한다. Zephyr는 `board_shutdown_policy`가 `force-allowed`가 아니면 `409`로 거부한다.
+- 플랫폼의 Zephyr 개별 stop/reboot는 명시적 force가 필요하다. `board_shutdown_policy=force-allowed`는 **보드 전체 종료용 승인**이며 개별 stop의 강제 종료 승인으로 사용하지 않는다.
+- 현재 HTTP stop에는 force 입력이 없다. Zephyr 개별 종료를 자동 강제로 연결하지 않으며 전달 규약은 13장의 연동 항목으로 둔다.
 
 ### 4.4 `DELETE /api/v1/vms/{vm_id}`
 
@@ -240,7 +275,7 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 
 | 현재 상태 | `POST /vms` | `POST /stop` | `DELETE` |
 |---|---|---|---|
-| 도메인 없음 + 등록 디스크 있음 | 기존 결과 반환 또는 재시작 | `204` | `204` — retire |
+| 도메인 없음 + 등록 디스크 있음 | `201` — 보존된 디스크로 재시작 | `204` | `204` — retire |
 | 도메인 없음 + 디스크 없음 | `201` — 템플릿에서 생성 | `204` | `404` |
 | `running` | `409 VMExists` | `204` — 정상 종료, 디스크 보존 | `409` — 먼저 정지 필요 |
 | `stopping` | `409 VMExists` | 소멸까지 동기 대기 | `409` |
@@ -257,16 +292,16 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 
 | 코드 | 명명 | 조건 |
 |---|---|---|
-| `401` | `Unauthorized` | Bearer 서비스 토큰 없음·불일치. `/healthz` 포함, 미들웨어가 낸다 |
 | `400` | `InvalidArgument` | 형식 또는 범위 오류 |
 | `404` | `VMNotFound` | `GET` 대상 도메인 부재 |
 | `409` | `VMExists` | `vm_id` 충돌 (단일 의미) |
-| `507` | `InsufficientResources` | 가용 자원 부족. `resource.name`은 `vcpus`·`memory_mib`·`ipv4`(Linux IP 풀 고갈) |
-| `409` | `InvalidState` | 현재 생명주기에서 수행할 수 없음. 실행 중 VM 삭제, 플랫폼 `VM_NOT_STOPPED`·`OPERATION_IN_PROGRESS` 등 |
-| `501` | `NotSupported` | 드라이버·플랫폼이 제공하지 않는 동작. xen 모드의 명령, 플랫폼이 아직 받지 않는 호출자 지정 `vm_id` |
-| `503` | `PlatformUnavailable` | registry·저장소·Xen 일시 장애, 또는 다른 플랫폼 작업이 잠금을 쥐고 있어 대기 시간(기본 5초, `PERSEUS_PLATFORM_BUSY_TIMEOUT`) 안에 차례가 오지 않음(플랫폼 `OPERATION_IN_PROGRESS`). 재시도 가능 |
-| `504` | `DriverTimeout` | `xl`·플랫폼 호출 시한 초과(정지 90초 대기 포함) |
+| `507` | `InsufficientResources` | 가용 자원 부족. `resource.name`: `memory_mib`, `vcpus`, `ipv4`(Linux VM IP 풀 고갈 — 플랫폼 드라이버 브랜치 S15P31E110-115) |
+| `401` | `Unauthorized` | Bearer 서비스 토큰 없음·불일치 (`/healthz` 포함) |
+| `501` | `NotSupported` | 드라이버·플랫폼이 제공하지 않는 동작. xen 모드의 명령, 플랫폼이 아직 받지 않는 호출자 지정 `vm_id` (P2 지원 전까지 신규 생성은 이 오류) |
+| `503` | `PlatformUnavailable` | registry·저장소·Xen 일시 장애, 또는 다른 플랫폼 작업이 잠금을 쥐고 있어 대기 한도(`XENOVA_PLATFORM_BUSY_TIMEOUT`, 기본 5초) 안에 차례가 오지 않음(플랫폼 `OPERATION_IN_PROGRESS`). 재시도 가능. `/healthz`는 바쁜 상태를 장애로 보지 않는다 |
+| `504` | `DriverTimeout` | `xl`·플랫폼 호출 시한 초과 (정지 90초 대기 포함) |
 | `500` | `DriverError` | 그 밖의 실행 실패, 모르는 상태 문자 |
+| `409` | `InvalidState` | 실행 중인 VM을 `DELETE` (4.4절). 먼저 정지해야 한다 |
 
 오류 본문:
 
@@ -288,7 +323,7 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 
 FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환하므로 `400 InvalidArgument`로 정규화합니다. 예외 핸들러 교체만으로는 부족하며, **생성 스키마에서 422 응답 정의와 `HTTPValidationError` 모델까지 제거**해야 OpenAPI 차이 검사가 통과합니다.
 
-`VMExists`는 `vm_id` 충돌 단일 의미입니다. 같은 `vm_id`에 다른 생성 명세가 와도 `409 VMExists`입니다(4.2절). dom0-manager는 표시 이름을 모르므로 이름 중복은 Spring이 판정합니다.
+`VMExists`는 `vm_id` 충돌 단일 의미입니다. 정지된 등록 VM에 다른 생성 명세가 와도 `409 VMExists`입니다(4.2절). dom0-manager는 표시 이름을 모르므로 이름 중복은 Spring이 판정합니다.
 
 ### 8.2 Spring
 
@@ -313,12 +348,12 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | `409 VMExists` | 생성·시작에서는 성공으로 처리(10.1절). 그 밖에는 `409 VM_ALREADY_EXISTS` |
 | `409 InvalidState` | `409 INVALID_VM_STATE` |
 | `400 InvalidArgument` | `400 INVALID_ARGUMENT` |
-| `507 InsufficientResources` | **`409 INSUFFICIENT_RESOURCES`** (공개 API에서는 507 대신 409를 씀) |
+| `507 InsufficientResources` | `507 INSUFFICIENT_RESOURCES`. message는 `resource.name`에 따라 메모리·CPU 부족 또는 "VM에 할당할 수 있는 IP 주소가 없습니다."(`ipv4`, Linux VM IP 풀 고갈) |
 | `500 DriverError` | `500 VM_DRIVER_ERROR` |
-| `501 NotSupported` | `501 VM_CONTROL_NOT_SUPPORTED` — **백엔드 반영 전.** 반영 전까지는 모르는 code로 `502 VM_CONTROL_BAD_RESPONSE` |
-| `503 PlatformUnavailable` | `503 VM_CONTROL_UNAVAILABLE` (전송 실패와 같은 코드, 재시도 가능) — **백엔드 반영 전** |
-| `504 DriverTimeout` | `504 VM_CONTROL_TIMEOUT` (응답 타임아웃과 같은 코드) — **백엔드 반영 전** |
-| `401 Unauthorized` | 서비스 토큰 설정 불일치. 사용자 오류가 아니므로 `502 VM_CONTROL_BAD_RESPONSE`로 두고 로그에 경고 — **백엔드 반영 전** |
+| `501 NotSupported` | `501 VM_CONTROL_NOT_SUPPORTED` ("보드가 아직 지원하지 않는 작업입니다."). 생성에서 받으면 dom0가 거부한 것이므로 Spring 기록을 지움 |
+| `503 PlatformUnavailable` | `503 VM_CONTROL_UNAVAILABLE` (전송 실패와 같은 코드, 잠시 후 재시도 가능). 생성에서 받아도 기록은 유지 |
+| `504 DriverTimeout` | `504 VM_CONTROL_TIMEOUT` (응답 타임아웃과 같은 코드) |
+| `401 Unauthorized` (또는 본문과 관계없이 401) | 서비스 토큰 설정 불일치. 사용자 로그인 문제가 아니므로 `502 VM_CONTROL_BAD_RESPONSE`로 전달하고 로그에 경고 |
 | 해석할 수 없는 본문, 모르는 `code`, 본문이 필요한데 없음 | `502 VM_CONTROL_BAD_RESPONSE` |
 
 **전송 실패**
@@ -335,15 +370,15 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 
 | 항목 | 규칙 | 검증 계층 |
 |---|---|---|
-| `name` | 1~63자, 소문자·숫자·하이픈(`-`) | Spring 단독 |
+| `name` | 1~63자, 한글·공백 허용. 제어문자·줄 구분 문자와 앞뒤 공백 금지 | Spring 단독 |
 | `vcpus` | 1~4 | Spring, dom0-manager |
-| `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16) | 템플릿별 범위는 Spring과 플랫폼 카탈로그(`resource_limits`), 공통 범위는 dom0-manager |
+| `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16) | 템플릿별 하한은 Spring, 템플릿별 범위(`resource_limits`)는 플랫폼 카탈로그가 create 때 검사(벗어나면 `400 InvalidArgument`), 공통 범위는 dom0-manager |
 | 배수 제약 | 없음. 화면 입력만 64 단위 | — |
-| `template_id` | 템플릿 목록에 존재해야 함 | Spring |
+| `template_id` | 공개 카탈로그 ID·버전을 그대로 전달 | Spring 목록 검사 + 플랫폼의 정확한 ID·버전·해시 검사 |
 
 `name`은 dom0-manager로 전달되지 않으므로 제어 계층의 관심사가 아닙니다.
 
-공통 하한 16MiB는 지금 게시된 Zephyr starter 템플릿 1.0.0의 고정 프로필(16MiB, 1 vCPU)을 통과시키기 위한 느슨한 안전망입니다. 템플릿별 실제 범위는 플랫폼 카탈로그가 버전마다 `resource_limits`로 가지며(Linux 128~8192, Zephyr starter 1.0.0은 16 고정) create 때 범위를 벗어나면 `400 InvalidArgument`로 거부합니다. Zephyr 펌웨어는 메모리 크기가 빌드 때 링크되므로 버전마다 값이 다르고, 주행 앱을 얹은 펌웨어는 더 커집니다. Linux는 128MiB 미만에서 커널 부팅이 불안정하므로 템플릿 `min_memory_mib`가 그 이상입니다.
+공통 하한 16MiB는 게시된 Zephyr starter 템플릿 1.0.0의 고정 프로필(1 vCPU / 16MiB)을 통과시키기 위한 느슨한 안전망입니다. 실제 하한은 템플릿별 `min_memory_mib`이며 Linux 템플릿은 Ubuntu 512, Debian 256을 유지합니다.
 
 ---
 
@@ -406,9 +441,10 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 오류 코드 명명 규칙 | 백엔드 | `VALIDATION_ERROR` / `InvalidArgument` 중 한쪽으로 통일 권고 |
 | OS별 실제 버전 값 | 제어 계층 | 이미지 빌드 시 실측 |
 | 템플릿별 `min_memory_mib` | 플랫폼·백엔드 | 플랫폼 카탈로그 `resource_limits`를 버전별 descriptor로 옮기고(Zephyr는 min=max) Spring 설정이 그 값을 따른다. Zephyr starter 1.0.0은 16 |
-| 새 오류 code의 Spring 변환 | 백엔드 | `NotSupported`·`PlatformUnavailable`·`DriverTimeout`를 8.2절 표대로 변환하고 요청 검증 하한을 16으로 맞춤. 반영 전까지는 `502 VM_CONTROL_BAD_RESPONSE` |
 | 서비스 토큰 배포·회전 | 공통 | Spring과 dom0-manager에 같은 Bearer 서비스 토큰을 안전하게 배포하고 회전하는 운영 절차 |
 | 자동 복구 주체 | 공통 | 보드(Xen `on_crash`·dom0 감시) 또는 Spring. 결정 전까지 Spring은 복구를 수행하지 않음 |
+| HTTP → 공통 Manager 입력 | 제어 계층 + 플랫폼 | HTTP 5개 필드와 Manager의 필수 `name`·최초 명세를 연결하는 규칙. 임의 기본값이나 Spring 입력 필드 추가로 우회하지 않음 |
+| 수명주기·강제 종료 전달 | 제어 계층 + 플랫폼 | retire/restore/purge의 작업 키·operation_id·대상 세대와 개별 force 전달. 보드 종료 정책을 개별 강제 종료 승인으로 사용하지 않음 |
 
 dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포함한 내부 API에서 Bearer 서비스 토큰을 검사합니다. Spring은 `DOM0_MANAGER_BASE_URL`에 Tailscale 주소를 설정하고 `DOM0_MANAGER_SERVICE_TOKEN`을 `Authorization: Bearer`로 전송합니다. 연결 실패는 `503 VM_CONTROL_UNAVAILABLE`로 변환합니다.
 
@@ -423,4 +459,8 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1 | 2026-10-16 | 계약 확정안 v1.0, 리뷰 v1.1, 백엔드 VM API 규약 v1, 리뷰 v1.2의 확정 사항 통합 |
 | v1.1 | 2026-10-19 | 구현에 맞춰 보완: 공개 VM 객체에 `agent_status`, Spring 공개 state `stopped`(3.3), 템플릿 응답 필드 `version`, `xl` 플래그 없음(`------`) 매핑, `DriverError` 500/501, `/healthz` 본문, Spring 오류 변환표(8.2), 공개 API 응답 형식(5장), `vm_id` 저장 1안 확정, 배포 분리·복구 주체 미확정 항목 추가. Spring 시작은 실행 중이 아닌 도메인을 `409 INVALID_VM_STATE`로 거부, 정지는 이전 상태를 조회해 이벤트 `from`에 기록. Spring이 VM 상태를 주기 조회해 `cause: detected` 이벤트 기록. 템플릿을 플랫폼 기본값(Ubuntu·Debian·Zephyr)으로 교체하고 템플릿·공개 VM 객체에 `guest_kind` 추가 |
 | v1.2 | 2026-10-19 | Spring 선발급 `vm_id`를 유일한 영구 식별자·생성 멱등성 키로 확정. 플랫폼 자동 IP 할당, 동기 stop 90초와 Spring 100초 제한, retire/restore/purge 생명주기, Spring `RETIRED` 명세 보존, Tailscale+Bearer 내부 연결을 반영. Spring이 플랫폼 공개 템플릿 ID·버전을 그대로 전달하고 제어 계층 변환을 제거 |
-| v1.3 | 2026-10-19 | 오류 code를 HTTP 상태와 1:1로 분리(`NotSupported` 501, `PlatformUnavailable` 503, `DriverTimeout` 504, `DriverError` 500)하고 모든 엔드포인트 응답 목록에 반영. `InvalidState`는 실행 중 VM 삭제 등에서 실제 반환. `memory_mib` 공통 하한 128 → 16(Zephyr starter 1.0.0 고정 프로필), `ResourceError.name`에 `ipv4` 추가. 같은 `vm_id`에 다른 생성 명세는 `409 VMExists`. Spring 변환표에 새 code 추가(백엔드 반영 전). `401 Unauthorized` 명시와 OpenAPI `ServiceToken` 보안 스킴 선언. 플랫폼 Manager 잠금 대기 제한(기본 5초)을 넘기면 `503`(`OPERATION_IN_PROGRESS`, 재시도 가능)이며 health는 바쁜 상태를 장애로 보지 않음 |
+| v1.3 | 2026-10-19 | API 문서 통일(S15P31E110-230): `docs/dom0-backend-http-contract-v1.md`(v1.0 폐기본)와 `docs/backend-vm-api-rules-v1.md`(백엔드 VM API 규약)를 삭제하고 이 문서로 일원화. 코드 기준으로 정정 — dom0-manager는 기존 도메인에 명세와 관계없이 `409 VMExists`(4.2·7장), `InvalidState`는 실행 중 VM 삭제에 반환(8.1절), 템플릿 OS는 Ubuntu·Debian·Zephyr(2.3절) |
+| v1.4 | 2026-10-19 | Spring 공개 API 보완: VM 이름에 한글·공백 허용(제어문자·앞뒤 공백 금지, 9장), 공개 VM 객체에 `ipv4` 추가(에이전트 보고 기준, Zephyr는 `null`, 2.2절), dom0-manager `507 InsufficientResources`를 공개 API에서도 `507`로 전달하고 IP 풀 고갈(`ipv4`) 메시지 추가(8.1·8.2절) |
+| v1.5 | 2026-10-19 | 공통 Manager와 HTTP 계약을 분리하고 생성/시작·등록 목록·예약 IP·수명주기 세대·Zephyr 종료/메모리의 연결 경계를 명시. Spring의 현재 DTO·설정과 플랫폼 구현은 유지 |
+| v1.6 | 2026-10-19 | dom0-manager 오류 code 분리(플랫폼 드라이버 S15P31E110-115 계약) 반영: `401 Unauthorized`, `501 NotSupported`, `503 PlatformUnavailable`, `504 DriverTimeout`과 Spring 변환(8.1·8.2절). 요청 메모리 공통 하한 128 → 16, Zephyr starter `min_memory_mib` 16(2.3절·9장) |
+| v1.7 | 2026-10-19 | 플랫폼 드라이버(S15P31E110-115) 반영: 모든 엔드포인트 응답 목록에 `401`·`500`·`501`·`503`·`504` 명시(4장), OpenAPI에 `ServiceToken` bearer 보안 스킴·전역 security 선언, HTTP 모델의 `ResourceError.name`에 `ipv4`와 `memory_mib` 하한 16, 정지된 등록 VM에 다른 생성 명세는 `409 VMExists`(4.2절), 플랫폼 Manager 잠금 대기 한도(`XENOVA_PLATFORM_BUSY_TIMEOUT`, 기본 5초) 초과 시 `503`(재시도 가능)이며 `/healthz`는 바쁜 상태를 장애로 보지 않음(8.1절). 13장에서 해결된 Zephyr 자원 범위·IP 고갈 스키마 항목 정리 |

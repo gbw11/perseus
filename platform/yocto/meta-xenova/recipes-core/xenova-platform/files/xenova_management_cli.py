@@ -3,7 +3,7 @@ import argparse
 import json
 import sys
 from first_install_contract import uuid4
-from xenova_management import Manager, ManagementError, exit_code
+from xenova_management import Manager, ManagementError, exit_code, normalize_uuid
 import xenova_vm as vm
 
 
@@ -27,7 +27,9 @@ def main(argv=None, manager=None):
     parser.add_argument('--template-version')
     parser.add_argument('--vcpus',type=int)
     parser.add_argument('--memory-mib',type=int)
-    parser.add_argument('--ipv4')
+    ip = parser.add_mutually_exclusive_group()
+    ip.add_argument('--ipv4')
+    ip.add_argument('--auto-ip', action='store_true', help='Linux IP is selected and durably reserved by Xenova')
     parser.add_argument('--idempotency-key')
     parser.add_argument('--operation-id')
     parser.add_argument('--confirm-vm-id')
@@ -39,18 +41,21 @@ def main(argv=None, manager=None):
         action=args.action
         spec={}
         if action=='create':
-            spec={'name':args.name or args.id,'template_id':args.template_id,
+            spec={'vm_id':args.vm_id, 'name':args.name or args.id,'template_id':args.template_id,
                   'template_version':args.template_version,'vcpus':args.vcpus,'memory_mib':args.memory_mib}
             if args.ipv4 is not None:
                 spec['ipv4']=args.ipv4
         elif action in ('get','retire','restore','purge','delete','start','stop','reboot','autostart-set','board-shutdown-set','config'):
             identity=args.vm_id or args.id
-            if identity and not vm.UUID.fullmatch(identity):
-                # 이름 기반 기존 명령도 조회 뒤 동일 UUID 계약을 호출한다.
-                records=service.p.records(validate_assets=False)
-                if identity not in records:
-                    raise ManagementError('VM_NOT_FOUND','registered name not found; archived targets require UUID')
-                identity=records[identity]['uuid']
+            if identity:
+                try:
+                    identity = normalize_uuid(identity)
+                except ManagementError:
+                    # 사람이 쓰는 기존 안전한 내부 이름은 계속 조회할 수 있다.
+                    records=service.p.records(validate_assets=False)
+                    if identity not in records:
+                        raise ManagementError('VM_NOT_FOUND','registered internal name not found; use UUID for archived VMs')
+                    identity=records[identity]['uuid']
             spec={'vm_id':identity}
             if action in ('stop','reboot'):
                 spec['force']=args.force

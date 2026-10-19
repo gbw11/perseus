@@ -116,7 +116,7 @@ def _busy_envelope(action: str, waited_s: float, request_id: Any) -> dict[str, A
 
 
 def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0) -> ManagerLike:
-    """PERSEUS_PLATFORM_LIB 의 디렉터리들을 sys.path 에 넣고 xenova_management.Manager() 를 만든다."""
+    """XENOVA_PLATFORM_LIB 의 디렉터리들을 sys.path 에 넣고 xenova_management.Manager() 를 만든다."""
     for entry in [p for p in platform_lib.split(os.pathsep) if p]:
         if entry not in sys.path:
             sys.path.insert(0, entry)
@@ -124,7 +124,7 @@ def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0) -> ManagerLi
         module = importlib.import_module("xenova_management")
     except ImportError as exc:
         raise PlatformUnavailable(
-            "xenova_management not importable; set PERSEUS_PLATFORM_LIB (board: /usr/lib/xenova)", detail=str(exc)
+            "xenova_management not importable; set XENOVA_PLATFORM_LIB (board: /usr/lib/xenova)", detail=str(exc)
         ) from exc
     return SerializedManager(module.Manager(), busy_timeout_s=busy_timeout_s)
 

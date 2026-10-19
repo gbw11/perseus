@@ -1,4 +1,4 @@
-// Perseus CI: GitLab push/MR → 백엔드 테스트 → GitLab 커밋 상태 + Mattermost 알림
+// Xenova CI: GitLab push/MR → 백엔드 테스트 → GitLab 커밋 상태 + Mattermost 알림
 //
 // 필요한 Jenkins 플러그인: GitLab, Mattermost Notification, JUnit
 // 에이전트 요구 사항: Java 21 (Maven은 mvnw가 고정된 버전을 자동으로 내려받는다), python3 + pip (dom0-manager 테스트)

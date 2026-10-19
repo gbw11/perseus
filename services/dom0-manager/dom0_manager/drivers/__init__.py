@@ -1,4 +1,4 @@
-"""드라이버 선택. PERSEUS_DRIVER=mock|xen|platform (S15P31E110-31).
+"""드라이버 선택. XENOVA_DRIVER=mock|xen|platform (S15P31E110-31).
 
 - mock: 인메모리. 보드·Xen 없이 개발
 - xen: xl 직접 조회(읽기 전용). 명령은 501

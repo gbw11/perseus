@@ -37,5 +37,15 @@
       "template_id": "zephyr-xenvm-starter-arm64",
       "template_version": "1.0.0"
     }
-  ]
+  ],
+  "network": {
+    "ipv4_pool": [
+      "192.168.77.2",
+      "192.168.77.99"
+    ],
+    "reserved_ipv4": [
+      "192.168.77.10",
+      "192.168.77.20"
+    ]
+  }
 }

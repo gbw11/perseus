@@ -33,7 +33,7 @@ def create_app(
     driver = driver or build_driver(settings)
     provisioner = provisioner or build_provisioner(settings, driver)
 
-    app = FastAPI(title="Perseus dom0 manager API", version="1.0.0", description=DESCRIPTION)
+    app = FastAPI(title="Xenova dom0 manager API", version="1.0.0", description=DESCRIPTION)
     app.state.settings = settings
     app.state.driver = driver
     app.state.service = VmService(driver, provisioner, settings)
