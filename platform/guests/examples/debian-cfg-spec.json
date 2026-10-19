@@ -1,0 +1,19 @@
+{
+  "instance_root": "/srv/xenova/instances",
+  "instance": {
+    "schema": 1,
+    "id": "debian-dev",
+    "name": "debian-dev",
+    "uuid": "550e8400-e29b-41d4-a716-446655440001",
+    "hostname": "debian-dev",
+    "template": "debian-13-20261015",
+    "template_id": "debian-13-arm64",
+    "template_version": "1.0.0",
+    "vcpus": 1,
+    "memory_mib": 512,
+    "mac": "02:16:3e:77:00:20",
+    "ipv4": "192.168.77.20",
+    "autostart": true,
+    "kernel_release": "6.12.111+deb13-arm64"
+  }
+}

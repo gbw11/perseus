@@ -21,9 +21,9 @@
     },
     {
       "guest_kind": "zephyr",
-      "id": "zenova-zephyr-starter-1.0.0",
+      "id": "xenova-zephyr-starter-1.0.0",
       "version": "1.0.0",
-      "directory": "zephyr/zenova-zephyr-starter-1.0.0",
+      "directory": "zephyr/xenova-zephyr-starter-1.0.0",
       "manifest_sha256": "2f6d1c26b4deb4daf2e8f8e031ff8e0c76497d625ce5813f0b45ac626f662821",
       "template_id": "zephyr-xenvm-starter-arm64",
       "vm_name": "zephyr-dev"

@@ -1,6 +1,0 @@
-# 생성·고정 IPv4는 zenova-bridge-up 소유이며 networkd는 관여하지 않는다.
-[Match]
-Name=xenbr0
-
-[Link]
-Unmanaged=yes
