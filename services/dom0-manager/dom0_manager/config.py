@@ -47,24 +47,24 @@ class Settings:
         def as_bool(raw: str) -> bool:
             return raw.strip().lower() in ("1", "true", "yes", "on")
 
-        driver = read("PERSEUS_DRIVER", cls.driver, str).strip().lower()
+        driver = read("XENOVA_DRIVER", cls.driver, str).strip().lower()
         if driver not in DRIVERS:
-            raise ValueError(f"PERSEUS_DRIVER must be one of {DRIVERS}, got {driver!r}")
+            raise ValueError(f"XENOVA_DRIVER must be one of {DRIVERS}, got {driver!r}")
 
         return cls(
             driver=driver,
-            host=read("PERSEUS_HOST", cls.host, str),
-            port=read("PERSEUS_PORT", cls.port, int),
-            xl_query_timeout_s=read("PERSEUS_XL_QUERY_TIMEOUT", cls.xl_query_timeout_s, float),
-            xl_command_timeout_s=read("PERSEUS_XL_COMMAND_TIMEOUT", cls.xl_command_timeout_s, float),
-            shutdown_grace_s=read("PERSEUS_SHUTDOWN_GRACE", cls.shutdown_grace_s, float),
-            service_token=read("PERSEUS_SERVICE_TOKEN", cls.service_token, str),
-            host_cpus=read("PERSEUS_HOST_CPUS", cls.host_cpus, int),
-            instance_root=read("PERSEUS_INSTANCE_ROOT", cls.instance_root, str),
-            platform_lib=read("PERSEUS_PLATFORM_LIB", cls.platform_lib, str),
-            ip_pool_start=read("PERSEUS_IP_POOL_START", cls.ip_pool_start, int),
-            ip_pool_end=read("PERSEUS_IP_POOL_END", cls.ip_pool_end, int),
-            platform_busy_timeout_s=read("PERSEUS_PLATFORM_BUSY_TIMEOUT", cls.platform_busy_timeout_s, float),
-            mock_samples=read("PERSEUS_MOCK_SAMPLES", cls.mock_samples, as_bool),
-            log_level=read("PERSEUS_LOG_LEVEL", cls.log_level, str).upper(),
+            host=read("XENOVA_HOST", cls.host, str),
+            port=read("XENOVA_PORT", cls.port, int),
+            xl_query_timeout_s=read("XENOVA_XL_QUERY_TIMEOUT", cls.xl_query_timeout_s, float),
+            xl_command_timeout_s=read("XENOVA_XL_COMMAND_TIMEOUT", cls.xl_command_timeout_s, float),
+            shutdown_grace_s=read("XENOVA_SHUTDOWN_GRACE", cls.shutdown_grace_s, float),
+            service_token=read("XENOVA_SERVICE_TOKEN", cls.service_token, str),
+            host_cpus=read("XENOVA_HOST_CPUS", cls.host_cpus, int),
+            instance_root=read("XENOVA_INSTANCE_ROOT", cls.instance_root, str),
+            platform_lib=read("XENOVA_PLATFORM_LIB", cls.platform_lib, str),
+            ip_pool_start=read("XENOVA_IP_POOL_START", cls.ip_pool_start, int),
+            ip_pool_end=read("XENOVA_IP_POOL_END", cls.ip_pool_end, int),
+            platform_busy_timeout_s=read("XENOVA_PLATFORM_BUSY_TIMEOUT", cls.platform_busy_timeout_s, float),
+            mock_samples=read("XENOVA_MOCK_SAMPLES", cls.mock_samples, as_bool),
+            log_level=read("XENOVA_LOG_LEVEL", cls.log_level, str).upper(),
         )

@@ -18,7 +18,7 @@ dom0에서 도는 Python 제어 서비스입니다. Spring 관리 서버가 호�
 ```bash
 cd services/dom0-manager
 python -m pip install -e .[test]
-PERSEUS_DRIVER=mock PERSEUS_MOCK_SAMPLES=1 python -m dom0_manager
+XENOVA_DRIVER=mock XENOVA_MOCK_SAMPLES=1 python -m dom0_manager
 # → http://127.0.0.1:8081/docs 에서 내부 API 문서 확인
 ```
 
@@ -29,30 +29,30 @@ curl -s -X POST localhost:8081/api/v1/vms -H 'content-type: application/json' \
 curl -i -X POST localhost:8081/api/v1/vms/11111111-1111-4111-8111-111111111111/stop   # 204
 ```
 
-`PERSEUS_MOCK_SAMPLES=1`이면 배포판 3종 샘플 VM이 미리 떠 있습니다. vm_id는 고정(uuid5)이라 그대로 써도 됩니다.
+`XENOVA_MOCK_SAMPLES=1`이면 배포판 3종 샘플 VM이 미리 떠 있습니다. vm_id는 고정(uuid5)이라 그대로 써도 됩니다.
 
 | 이름 | vm_id | vcpus / memory_mib |
 | --- | --- | --- |
-| alpine-drive | `59b3e0d6-499d-517e-ab0a-27e3a4d56e89` | 1 / 256 |
-| debian-safety | `c552c812-a816-534f-932b-fd4023d352b7` | 1 / 512 |
-| ubuntu-infotainment | `d97823ca-68a2-5c6a-8e4e-f353071064bd` | 2 / 512 |
+| alpine-drive | `fe629065-6ee9-5f0f-ab42-38eb60186d85` | 1 / 256 |
+| debian-safety | `b926423f-e3e9-5e1e-95f8-6caf6d91a63e` | 1 / 512 |
+| ubuntu-infotainment | `96d76964-4eaa-5700-a642-747aa91f0cc0` | 2 / 512 |
 
-값은 `uuid5(NAMESPACE_URL, "perseus/mock/<이름>")`이며 `dom0_manager.drivers.mock.SAMPLE_VMS`에 있습니다.
+값은 `uuid5(NAMESPACE_URL, "xenova/mock/<이름>")`이며 `dom0_manager.drivers.mock.SAMPLE_VMS`에 있습니다.
 
 ## 설정 (환경변수)
 
 | 변수 | 기본값 | 의미 |
 | --- | --- | --- |
-| `PERSEUS_DRIVER` | `mock` | `mock` / `xen` / `platform` |
-| `PERSEUS_HOST` / `PERSEUS_PORT` | `127.0.0.1` / `8081` | 바인드 주소. dom0 밖으로 열지 않습니다 |
-| `PERSEUS_XL_QUERY_TIMEOUT` | `5` | 조회용 xl 호출 한도(초). Spring 조회 대기 6초 안 |
-| `PERSEUS_XL_COMMAND_TIMEOUT` | `95` | 명령용 xl 호출 한도(초) |
-| `PERSEUS_SHUTDOWN_GRACE` | `90` | 정상 종료 대기(초). 계약 v1.1: 시간이 지나도 자동 강제 종료하지 않고 실패로 보고 |
-| `PERSEUS_SERVICE_TOKEN` | (없음) | 설정하면 `/healthz`를 포함한 모든 요청에 `Authorization: Bearer <토큰>`을 요구(401). Tailscale 바인드 배포에서는 필수 |
-| `PERSEUS_HOST_CPUS` | `4` | vcpus 상한 기본값. `xl info`의 nr_cpus가 있으면 그 값 우선 |
-| `PERSEUS_INSTANCE_ROOT` | `/srv/xenova/instances` | 인스턴스 루트 (xen 모드의 등록 확인용. platform 모드는 Manager의 data 경로를 씀) |
-| `PERSEUS_MOCK_SAMPLES` | `0` | Mock 샘플 VM 3종 미리 생성 |
-| `PERSEUS_LOG_LEVEL` | `INFO` | |
+| `XENOVA_DRIVER` | `mock` | `mock` / `xen` / `platform` |
+| `XENOVA_HOST` / `XENOVA_PORT` | `127.0.0.1` / `8081` | 바인드 주소. dom0 밖으로 열지 않습니다 |
+| `XENOVA_XL_QUERY_TIMEOUT` | `5` | 조회용 xl 호출 한도(초). Spring 조회 대기 6초 안 |
+| `XENOVA_XL_COMMAND_TIMEOUT` | `95` | 명령용 xl 호출 한도(초) |
+| `XENOVA_SHUTDOWN_GRACE` | `90` | 정상 종료 대기(초). 계약 v1.1: 시간이 지나도 자동 강제 종료하지 않고 실패로 보고 |
+| `XENOVA_SERVICE_TOKEN` | (없음) | 설정하면 `/healthz`를 포함한 모든 요청에 `Authorization: Bearer <토큰>`을 요구(401). Tailscale 바인드 배포에서는 필수 |
+| `XENOVA_HOST_CPUS` | `4` | vcpus 상한 기본값. `xl info`의 nr_cpus가 있으면 그 값 우선 |
+| `XENOVA_INSTANCE_ROOT` | `/srv/xenova/instances` | 인스턴스 루트 (xen 모드의 등록 확인용. platform 모드는 Manager의 data 경로를 씀) |
+| `XENOVA_MOCK_SAMPLES` | `0` | Mock 샘플 VM 3종 미리 생성 |
+| `XENOVA_LOG_LEVEL` | `INFO` | |
 
 ## 구조
 
@@ -105,18 +105,18 @@ tests/
 
 ## platform 모드 (보드 실제 연동, S15P31E110-115)
 
-`PERSEUS_DRIVER=platform`은 플랫폼 파트의 관리 라이브러리 `xenova_management.Manager`를 직접 import해서 registry(`/srv/xenova/instances`)와 Xen을 함께 다룹니다. xl 명령을 직접 부르지 않습니다(`xl info`만 자원 조회용).
+`XENOVA_DRIVER=platform`은 플랫폼 파트의 관리 라이브러리 `xenova_management.Manager`를 직접 import해서 registry(`/srv/xenova/instances`)와 Xen을 함께 다룹니다. xl 명령을 직접 부르지 않습니다(`xl info`만 자원 조회용).
 
 ```bash
 # 보드(dom0)에서
-PERSEUS_DRIVER=platform PERSEUS_PLATFORM_LIB=/usr/lib/xenova PERSEUS_SERVICE_TOKEN=<토큰> python -m dom0_manager
+XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=<토큰> python -m dom0_manager
 ```
 
 | 변수 | 기본값 | 의미 |
 | --- | --- | --- |
-| `PERSEUS_PLATFORM_LIB` | `/usr/lib/xenova` | `xenova_management` 등 플랫폼 모듈 경로. 여러 개면 OS 경로 구분자로 |
-| `PERSEUS_IP_POOL_START` / `END` | `2` / `99` | Linux VM에 줄 `192.168.77.x` 풀. 플랫폼이 자동 배정하기 전까지 dom0-manager가 빈 주소를 고르고 `IP_CONFLICT`면 다음 주소로 재시도 |
-| `PERSEUS_PLATFORM_BUSY_TIMEOUT` | `5` | 다른 요청이 플랫폼 `Manager`를 쓰는 동안 기다릴 최대 초. 넘으면 503 `PlatformUnavailable`(재시도 가능). 정지가 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다 |
+| `XENOVA_PLATFORM_LIB` | `/usr/lib/xenova` | `xenova_management` 등 플랫폼 모듈 경로. 여러 개면 OS 경로 구분자로 |
+| `XENOVA_IP_POOL_START` / `END` | `2` / `99` | Linux VM에 줄 `192.168.77.x` 풀. 플랫폼이 자동 배정하기 전까지 dom0-manager가 빈 주소를 고르고 `IP_CONFLICT`면 다음 주소로 재시도 |
+| `XENOVA_PLATFORM_BUSY_TIMEOUT` | `5` | 다른 요청이 플랫폼 `Manager`를 쓰는 동안 기다릴 최대 초. 넘으면 503 `PlatformUnavailable`(재시도 가능). 정지가 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다 |
 
 동작 대응:
 
@@ -131,7 +131,7 @@ PERSEUS_DRIVER=platform PERSEUS_PLATFORM_LIB=/usr/lib/xenova PERSEUS_SERVICE_TOK
 
 플랫폼 `xen_state` → 계약 상태: `running`·`blocked`·`unknown`(플래그 없음) → running, `paused` → paused, `shutdown`·`dying` → stopping, `crashed` → crashed, `stopped` → 도메인 없음.
 
-`load_manager`는 `Manager`를 `SerializedManager`로 감싸 프로세스 안에서 `call`을 직렬화합니다. 플랫폼 `Manager`가 요청별 상태(`current_operation`·`replayed`)를 인스턴스 변수에 두어 FastAPI 스레드가 동시에 부르면 섞이기 때문입니다. 차례를 기다리는 시간은 `PERSEUS_PLATFORM_BUSY_TIMEOUT`(기본 5초)으로 제한하고, 넘으면 플랫폼의 잠금 충돌과 같은 `OPERATION_IN_PROGRESS` 봉투를 돌려 503으로 냅니다. 정지가 90초 동안 잠금을 쥐어도 조회·health가 스레드풀에 쌓이지 않고, health는 바쁜 상태를 장애로 보지 않습니다.
+`load_manager`는 `Manager`를 `SerializedManager`로 감싸 프로세스 안에서 `call`을 직렬화합니다. 플랫폼 `Manager`가 요청별 상태(`current_operation`·`replayed`)를 인스턴스 변수에 두어 FastAPI 스레드가 동시에 부르면 섞이기 때문입니다. 차례를 기다리는 시간은 `XENOVA_PLATFORM_BUSY_TIMEOUT`(기본 5초)으로 제한하고, 넘으면 플랫폼의 잠금 충돌과 같은 `OPERATION_IN_PROGRESS` 봉투를 돌려 503으로 냅니다. 정지가 90초 동안 잠금을 쥐어도 조회·health가 스레드풀에 쌓이지 않고, health는 바쁜 상태를 장애로 보지 않습니다.
 
 **막힌 것**: 플랫폼 `create`가 아직 `spec['vm_id']`를 받지 않고 보드에서 UUID를 발급합니다. 팀 결정(Spring 발급)과 달라서, 새 VM 생성은 플랫폼이 `vm_id`를 받을 때까지 501을 냅니다. 조회·시작·정지·보관은 영향 없습니다. 통합 테스트는 계획 모드(`execute=False`) `create`로 지원 여부를 확인해, 아직이면 501을 검증하고 xfail로 표시합니다. 이 항목이 풀리기 전에는 S15P31E110-115를 완료 처리하지 않습니다.
 
@@ -139,7 +139,7 @@ PERSEUS_DRIVER=platform PERSEUS_PLATFORM_LIB=/usr/lib/xenova PERSEUS_SERVICE_TOK
 
 ## Xen 모드 현황
 
-`PERSEUS_DRIVER=xen`에서 지금 되는 것은 `GET /healthz`, `GET /api/v1/vms`, `GET /api/v1/vms/{vm_id}`입니다. `xl list`로 상태를, `xl list -l`의 `config.c_info.uuid`로 vm_id를 읽습니다(플랫폼 도구와 같은 방식). 생성·정지·삭제는 501을 내며 S15P31E110-115에서 구현합니다.
+`XENOVA_DRIVER=xen`에서 지금 되는 것은 `GET /healthz`, `GET /api/v1/vms`, `GET /api/v1/vms/{vm_id}`입니다. `xl list`로 상태를, `xl list -l`의 `config.c_info.uuid`로 vm_id를 읽습니다(플랫폼 도구와 같은 방식). 생성·정지·삭제는 501을 내며 S15P31E110-115에서 구현합니다.
 
 ## 테스트
 

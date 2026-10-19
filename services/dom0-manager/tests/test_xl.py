@@ -33,7 +33,7 @@ XL_LIST_LONG = json.dumps(
 )
 
 XL_INFO = """\
-host                   : perseus
+host                   : xenova
 release                : 6.6.0
 nr_cpus                : 4
 total_memory           : 7936
