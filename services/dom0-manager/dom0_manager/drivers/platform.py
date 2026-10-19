@@ -84,7 +84,7 @@ def load_manager(platform_lib: str) -> ManagerLike:
 # 플랫폼 봉투 → 계약 오류
 # ---------------------------------------------------------------------------
 
-# 플랫폼 오류 코드 → (예외 클래스). 수환과 합의한 HTTP 매핑: 400 / 404 / 409 / 507 / 503 / 504
+# 플랫폼 오류 코드 → (예외 클래스). 백엔드 파트와 합의한 HTTP 매핑: 400 / 404 / 409 / 507 / 503 / 504
 _CODE_MAP: dict[str, type[Dom0ManagerError]] = {
     "INVALID_SPEC": InvalidArgument,
     "TEMPLATE_NOT_FOUND": InvalidArgument,

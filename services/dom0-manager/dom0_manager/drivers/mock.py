@@ -4,7 +4,7 @@
 - 장애 주입: inject_crash(상태 crashed), inject_hang(정상 종료 무시 → 강제 전환 경로),
   inject_next_create("timeout"|"insufficient"), set_healthy(False) → /healthz 503.
 - 가짜 메트릭: get_stats 가 누적 CPU 시간을 돌려주고 inject_load 로 부하를 올린다.
-- seed_samples(): 배포판 3종 샘플 VM. vm_id 는 고정(uuid5)이라 수환·송하가 그대로 쓸 수 있다.
+- seed_samples(): 배포판 3종 샘플 VM. vm_id 는 고정(uuid5)이라 백엔드·프론트엔드가 그대로 쓸 수 있다.
 """
 
 from __future__ import annotations
