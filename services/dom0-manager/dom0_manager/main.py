@@ -41,10 +41,33 @@ def create_app(
     app.include_router(health.router)
     app.include_router(vms.router, prefix="/api/v1")
     install_error_handlers(app)
+    if settings.service_token:
+        _install_bearer_auth(app, settings.service_token)
     app.openapi = _contract_openapi(app)  # type: ignore[method-assign]
 
     logging.getLogger(__name__).info("dom0-manager %s driver=%s", __version__, driver.name)
     return app
+
+
+_PUBLIC_PATHS = ("/docs", "/redoc", "/openapi.json")
+
+
+def _install_bearer_auth(app: FastAPI, token: str) -> None:
+    """계약 v1.1: /healthz 를 포함한 모든 내부 API 에서 Bearer 서비스 토큰을 검사한다. 토큰 값은 로그에 남기지 않는다."""
+    import hmac
+
+    from fastapi.responses import JSONResponse
+
+    expected = f"Bearer {token}"
+
+    @app.middleware("http")
+    async def require_service_token(request, call_next):
+        if request.url.path in _PUBLIC_PATHS:
+            return await call_next(request)
+        supplied = request.headers.get("authorization", "")
+        if not hmac.compare_digest(supplied.encode(), expected.encode()):
+            return JSONResponse(status_code=401, content={"code": "Unauthorized", "message": "missing or invalid service token"})
+        return await call_next(request)
 
 
 def _contract_openapi(app: FastAPI):

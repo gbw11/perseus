@@ -38,9 +38,10 @@ def get_vm(vm_id: UUID, service: VmService = Depends(get_service)) -> Vm:
 @router.delete(
     "/vms/{vm_id}",
     operation_id="deleteVm",
-    summary="강제 종료 후 디스크 삭제",
+    summary="정지된 VM 숨김 보관",
     status_code=204,
     response_class=Response,
+    responses={404: _ERR, 409: _ERR},
 )
 def delete_vm(vm_id: UUID, service: VmService = Depends(get_service)) -> Response:
     service.delete(vm_id)

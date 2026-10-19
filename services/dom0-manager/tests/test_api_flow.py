@@ -38,12 +38,22 @@ def test_stop_is_idempotent_and_restart_reuses_instance(client, driver, provisio
     assert [e[0] for e in driver.events] == ["create", "shutdown", "create"]
 
 
-def test_delete_removes_instance_and_is_idempotent(client, provisioner):
+def test_delete_requires_stopped_vm_and_retires_instance(client, provisioner):
+    """계약 v1.1: 실행 중 409, 정지 후 204(숨김 보관), 등록 없음 404."""
     client.post("/api/v1/vms", json=create_body())
+    running = client.delete(f"/api/v1/vms/{VM_A}")
+    assert running.status_code == 409
+    assert running.json()["code"] == "InvalidState"
+    assert provisioner.instance_exists(VM_A)
+
+    assert client.post(f"/api/v1/vms/{VM_A}/stop").status_code == 204
     assert client.delete(f"/api/v1/vms/{VM_A}").status_code == 204
     assert not provisioner.instance_exists(VM_A)
     assert client.get(f"/api/v1/vms/{VM_A}").status_code == 404
-    assert client.delete(f"/api/v1/vms/{VM_A}").status_code == 204
+
+    gone = client.delete(f"/api/v1/vms/{VM_A}")
+    assert gone.status_code == 404
+    assert gone.json()["code"] == "VMNotFound"
 
 
 def test_insufficient_memory_is_507_with_resource(client):
@@ -60,14 +70,18 @@ def test_crashed_domain_is_reported_and_stop_forces(client, driver):
     driver.inject_crash(VM_A)
     assert client.get(f"/api/v1/vms/{VM_A}").json()["state"] == "crashed"
     assert client.post(f"/api/v1/vms/{VM_A}/stop").status_code == 204
-    assert driver.events[-1] == ("shutdown", VM_A, {"forced": True, "grace_s": 25.0})
+    assert driver.events[-1] == ("shutdown", VM_A, {"forced": True, "grace_s": 90.0})
 
 
-def test_hanging_domain_is_forced_after_grace(client, driver):
+def test_hanging_domain_is_not_forced(client, driver):
+    """계약 v1.1: grace(90초) 안에 안 꺼져도 자동 강제 종료하지 않는다. 도메인은 남고 호출은 실패한다."""
     client.post("/api/v1/vms", json=create_body())
     driver.inject_hang(VM_A)
-    assert client.post(f"/api/v1/vms/{VM_A}/stop").status_code == 204
-    assert driver.events[-1][2]["forced"] is True
+    failed = client.post(f"/api/v1/vms/{VM_A}/stop")
+    assert failed.status_code == 500
+    assert failed.json()["code"] == "DriverError"
+    assert driver.events[-1][2] == {"forced": False, "grace_s": 90.0, "timed_out": True}
+    assert client.get(f"/api/v1/vms/{VM_A}").json()["state"] == "running"
 
 
 def test_driver_timeout_does_not_take_service_down(client, driver):
