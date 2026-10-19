@@ -1,4 +1,4 @@
-"""드라이버 선택. PERSEUS_DRIVER=mock|xen (S15P31E110-31)."""
+"""드라이버 선택. XENOVA_DRIVER=mock|xen (S15P31E110-31)."""
 
 from __future__ import annotations
 
