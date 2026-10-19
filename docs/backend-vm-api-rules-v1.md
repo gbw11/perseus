@@ -55,23 +55,22 @@ Spring 백엔드의 VM API에 적용하는 규약입니다. 아래 세 가지를
 
 | 필드 | 의미 |
 | --- | --- |
-| `template_id` | 템플릿 ID (예: `debian`) |
+| `template_id` | 플랫폼 공개 카탈로그 ID (예: `debian-13-arm64`) |
 | `version` | 템플릿 버전 |
 | `display_name` | 드롭다운에 표시할 이름 (예: `Debian 12`) |
 | `min_memory_mib` | 이 템플릿으로 만들 때의 최소 메모리 |
 | `guest_kind` | VM 종류 `linux` / `zephyr` (Zephyr는 에이전트·네트워크·정상 종료가 없는 콘솔 전용 펌웨어) |
 
-응답 예시 (버전과 메모리 값은 예시이며 P2 확인 후 확정):
+응답 예시 (ID와 버전은 플랫폼 공개 카탈로그 기준이며 메모리 값은 실측에 따라 조정 가능):
 
 ```json
 [
-  { "template_id": "ubuntu", "version": "24.04-20260926", "display_name": "Ubuntu 24.04", "min_memory_mib": 512, "guest_kind": "linux" },
-  { "template_id": "debian", "version": "13-20261015", "display_name": "Debian 13", "min_memory_mib": 256, "guest_kind": "linux" },
-  { "template_id": "zephyr", "version": "starter-1.0.0", "display_name": "Zephyr Starter 1.0.0", "min_memory_mib": 128, "guest_kind": "zephyr" }
+  { "template_id": "ubuntu-24.04-arm64", "version": "1.0.0", "display_name": "Ubuntu 24.04", "min_memory_mib": 512, "guest_kind": "linux" },
+  { "template_id": "debian-13-arm64", "version": "1.0.0", "display_name": "Debian 13", "min_memory_mib": 256, "guest_kind": "linux" },
+  { "template_id": "zephyr-xenvm-starter-arm64", "version": "1.0.0", "display_name": "Zephyr Starter 1.0.0", "min_memory_mib": 128, "guest_kind": "zephyr" }
 ]
 ```
 
 ## 확정 전 확인 사항
 
-- [ ] P2: OS별 실제 버전 값
 - [ ] P2: OS별 `min_memory_mib` 값

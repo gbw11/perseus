@@ -100,7 +100,7 @@ public class OsEvidenceService {
                 inventory == null ? null : inventory.getBootId(),
                 vm.state(),
                 agentStatus,
-                new ExpectedOs(vm.templateId(), vm.templateVersion()),
+                new ExpectedOs(expectedOsId(vm), vm.templateVersion()),
                 observedOs,
                 inventory == null ? null : inventory.getHostname(),
                 inventory == null ? List.of() : inventory.getInterfaces(),
@@ -122,7 +122,18 @@ public class OsEvidenceService {
                 && !Objects.equals(heartbeat.getBootId(), inventory.getBootId())) {
             return Match.UNKNOWN;
         }
-        return inventory.getOsId().equals(vm.templateId()) ? Match.MATCH : Match.MISMATCH;
+        return inventory.getOsId().equals(expectedOsId(vm)) ? Match.MATCH : Match.MISMATCH;
+    }
+
+    // The platform catalog ID selects an image; the agent reports the shorter /etc/os-release ID.
+    private static String expectedOsId(Vm vm) {
+        if (vm.templateId().startsWith("ubuntu-")) {
+            return "ubuntu";
+        }
+        if (vm.templateId().startsWith("debian-")) {
+            return "debian";
+        }
+        return vm.templateId();
     }
 
     private Verdict judge(String osId, List<Evidence> entries, List<String> reasons) {
