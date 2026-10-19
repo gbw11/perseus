@@ -116,9 +116,9 @@ def check_ssh_service(root):
         raise ValueError('custom 00-socket.conf link requires manual review')
     old_gates = []
     for name in ('ssh.socket', 'sshd.socket'):
-        dropin = inside(root, 'etc/systemd/system/' + name + '.d/10-zenova-identity.conf', follow_final=False, create_parents=False)
+        dropin = inside(root, 'etc/systemd/system/' + name + '.d/10-xenova-identity.conf', follow_final=False, create_parents=False)
         if dropin.is_symlink() or dropin.exists():
-            if dropin.is_symlink() or dropin.read_text() != '[Unit]\nRequires=zenova-guest-identity.service\nAfter=zenova-guest-identity.service\n':
+            if dropin.is_symlink() or dropin.read_text() != '[Unit]\nRequires=xenova-guest-identity.service\nAfter=xenova-guest-identity.service\n':
                 raise ValueError('unexpected socket identity drop-in; manual review required')
             old_gates.append(dropin)
     # 알려지지 않은 필수 socket 의존성은 mask로 숨기지 않고 변경 전에 거부한다.
@@ -168,13 +168,13 @@ def configure_ssh_service(root):
         if inside(root, 'usr/lib/systemd/system-generators/' + name, create_parents=False).is_file():
             replace_link(root, 'etc/systemd/system-generators/' + name, '/dev/null')
     enable(root, 'ssh.service')
-    write(root, 'etc/zenova/ssh-service-policy.json', json.dumps({'schema': 1, 'mode': 'service', 'identity_gate':
-          inside(root, 'etc/zenova/deployment-seed.json').is_file()}) + '\n')
+    write(root, 'etc/xenova/ssh-service-policy.json', json.dumps({'schema': 1, 'mode': 'service', 'identity_gate':
+          inside(root, 'etc/xenova/deployment-seed.json').is_file()}) + '\n')
 
 
 def install_identity_gate(root):
     """기존 identity 검증 코드를 서비스 단계의 모든 SSH 실행 앞에 설치한다."""
-    write(root, 'usr/lib/zenova/guest_identity.py', Path(__file__).with_name('guest_identity.py').read_text())
+    write(root, 'usr/lib/xenova/guest_identity.py', Path(__file__).with_name('guest_identity.py').read_text())
     unit = """[Unit]
 Description=Establish factory guest identity before any SSH listener
 After=systemd-remount-fs.service
@@ -182,18 +182,18 @@ Before=ssh.service sshd.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 /usr/lib/zenova/guest_identity.py
+ExecStart=/usr/bin/python3 /usr/lib/xenova/guest_identity.py
 RemainAfterExit=yes
 TimeoutStartSec=240s
 
 [Install]
 WantedBy=multi-user.target
 """
-    write(root, 'usr/lib/systemd/system/zenova-guest-identity.service', unit)
-    enable(root, 'zenova-guest-identity.service')
+    write(root, 'usr/lib/systemd/system/xenova-guest-identity.service', unit)
+    enable(root, 'xenova-guest-identity.service')
     for name in ('ssh.service', 'sshd.service', 'sshd@.service'):
-        write(root, 'etc/systemd/system/' + name + '.d/10-zenova-identity.conf',
-              '[Unit]\nRequires=zenova-guest-identity.service\nAfter=zenova-guest-identity.service\n')
+        write(root, 'etc/systemd/system/' + name + '.d/10-xenova-identity.conf',
+              '[Unit]\nRequires=xenova-guest-identity.service\nAfter=xenova-guest-identity.service\n')
 
 
 def prepare_template(root):
@@ -201,8 +201,8 @@ def prepare_template(root):
     os_release = inside(root, 'etc/os-release', create_parents=False)
     if os_release.is_file() and 'ID=alpine' in os_release.read_text().replace(chr(34), '').splitlines():
         raise ValueError('unsupported Linux rootfs adapter; RTOS firmware is not a Linux rootfs')
-    marker = inside(root, 'etc/zenova/template-prepared')
-    if marker.exists() or inside(root, 'etc/zenova/instance-id').exists():
+    marker = inside(root, 'etc/xenova/template-prepared')
+    if marker.exists() or inside(root, 'etc/xenova/instance-id').exists():
         raise ValueError('refusing to initialize an already prepared/instantiated rootfs')
     shadow = inside(root, 'etc/shadow')
     lines = shadow.read_text().splitlines()
@@ -217,13 +217,13 @@ def prepare_template(root):
         raise ValueError('root account absent')
     shadow.write_text('\n'.join(lines) + '\n')
     shadow.chmod(0o640)
-    write(root, 'etc/ssh/zenova-auth.conf', AUTH)
+    write(root, 'etc/ssh/xenova-auth.conf', AUTH)
     config = inside(root, 'etc/ssh/sshd_config')
-    config.write_text('Include /etc/ssh/zenova-auth.conf\n' + config.read_text())
+    config.write_text('Include /etc/ssh/xenova-auth.conf\n' + config.read_text())
     write(root, 'etc/cloud/cloud-init.disabled', '')
     # Xen direct boot의 루트는 파티션 없는 ext4 xvda다. 펌웨어/EFI 마운트가 필요 없다.
     write(root, 'etc/fstab', '/dev/xvda / ext4 defaults 0 1\n')
-    write(root, 'etc/systemd/network/05-zenova.network', '''[Match]
+    write(root, 'etc/systemd/network/05-xenova.network', '''[Match]
 Name=eth0
 
 [Network]
@@ -245,14 +245,14 @@ UseRoutes=no
     replace_link(root, 'var/lib/dbus/machine-id', '/etc/machine-id')
     for p in inside(root, 'etc/ssh').glob('ssh_host_*'):
         p.unlink()
-    write(root, 'etc/zenova/template-prepared', '1\n')
+    write(root, 'etc/xenova/template-prepared', '1\n')
 
 
 def prepare_instance(root, record, command=subprocess.run):
     root = Path(root)
-    if not inside(root, 'etc/zenova/template-prepared').exists():
+    if not inside(root, 'etc/xenova/template-prepared').exists():
         raise ValueError('template preparation marker absent')
-    marker = inside(root, 'etc/zenova/instance-id')
+    marker = inside(root, 'etc/xenova/instance-id')
     if marker.exists():
         raise ValueError('existing instance: initialization is forbidden')
     write(root, 'etc/hostname', record['hostname'] + '\n')
@@ -264,16 +264,16 @@ def prepare_instance(root, record, command=subprocess.run):
         if target.is_symlink() or target.exists():
             raise ValueError('template unexpectedly contains SSH host keys')
         command(['ssh-keygen', '-q', '-t', kind, '-N', '', '-f', str(target)], check=True)
-    write(root, 'etc/zenova/instance-id', record['uuid'] + '\n', 0o600)
+    write(root, 'etc/xenova/instance-id', record['uuid'] + '\n', 0o600)
     configure_ssh_service(root)
 
 
 def prepare_deployment_seed(root, record):
     """새 공통 이미지 전용 인스턴스 사본. 식별자는 systemd/guest SSH gate까지 비운다."""
     root = Path(root)
-    if not inside(root, 'etc/zenova/template-prepared').is_file():
+    if not inside(root, 'etc/xenova/template-prepared').is_file():
         raise ValueError('template preparation marker absent')
-    if inside(root, 'etc/zenova/instance-id').exists() or inside(root, 'etc/zenova/deployment-seed.json').exists():
+    if inside(root, 'etc/xenova/instance-id').exists() or inside(root, 'etc/xenova/deployment-seed.json').exists():
         raise ValueError('existing instance/seed must never be initialized again')
     if not inside(root, 'usr/bin/python3').is_file():
         raise ValueError('factory guest identity gate requires the cloud image Python 3')
@@ -283,7 +283,7 @@ def prepare_deployment_seed(root, record):
     write(root, 'etc/hosts', '127.0.0.1 localhost\n127.0.1.1 ' + record['hostname'] + '\n')
     write(root, 'etc/machine-id', 'uninitialized\n')
     replace_link(root, 'var/lib/dbus/machine-id', '/etc/machine-id')
-    write(root, 'usr/lib/zenova/guest_identity.py', (Path(__file__).with_name('guest_identity.py')).read_text())
-    write(root, 'etc/zenova/deployment-seed.json', json.dumps({'schema': 1, 'id': record['id'], 'init': 'systemd'}) + '\n')
+    write(root, 'usr/lib/xenova/guest_identity.py', (Path(__file__).with_name('guest_identity.py')).read_text())
+    write(root, 'etc/xenova/deployment-seed.json', json.dumps({'schema': 1, 'id': record['id'], 'init': 'systemd'}) + '\n')
     install_identity_gate(root)
     configure_ssh_service(root)

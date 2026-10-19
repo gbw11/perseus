@@ -1,0 +1,16 @@
+[Unit]
+Description=Stop registered guests by per-VM board shutdown policy before storage/toolstack stop
+Requires=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service
+After=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenstored.service xenconsoled.service xen-init-dom0.service
+Before=xenova-vms.service
+RequiresMountsFor=/srv/xenova
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/sbin/xenova-vm shutdown-all
+TimeoutStopSec=110s
+
+[Install]
+WantedBy=multi-user.target
