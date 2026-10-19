@@ -23,9 +23,9 @@ from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provision
 
 SAMPLE_VMS: dict[str, tuple[UUID, int, int]] = {
     # name: (vm_id, vcpus, memory_mib)
-    "alpine-drive": (uuid5(NAMESPACE_URL, "perseus/mock/alpine-drive"), 1, 256),
-    "debian-safety": (uuid5(NAMESPACE_URL, "perseus/mock/debian-safety"), 1, 512),
-    "ubuntu-infotainment": (uuid5(NAMESPACE_URL, "perseus/mock/ubuntu-infotainment"), 2, 512),
+    "alpine-drive": (uuid5(NAMESPACE_URL, "xenova/mock/alpine-drive"), 1, 256),
+    "debian-safety": (uuid5(NAMESPACE_URL, "xenova/mock/debian-safety"), 1, 512),
+    "ubuntu-infotainment": (uuid5(NAMESPACE_URL, "xenova/mock/ubuntu-infotainment"), 2, 512),
 }
 
 

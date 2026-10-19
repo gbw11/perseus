@@ -132,7 +132,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 
 플랫폼 기본 Ubuntu·Debian·Zephyr 공개 카탈로그의 ID와 버전을 그대로 사용합니다. dom0-manager는 템플릿 값을 변환하지 않습니다. OS 검증에서는 카탈로그 ID를 게스트의 `os-release` ID(`ubuntu`, `debian`)와 별도로 대응시킵니다.
 
-1차 데이터는 Spring 설정 파일(`application.yml`의 `perseus.template-catalog.templates`)에 고정하며, Ubuntu·Debian·Zephyr마다 플랫폼이 공개한 버전 하나를 사용합니다. 최소 메모리 값은 실측에 따라 조정할 수 있습니다.
+1차 데이터는 Spring 설정 파일(`application.yml`의 `xenova.template-catalog.templates`)에 고정하며, Ubuntu·Debian·Zephyr마다 플랫폼이 공개한 버전 하나를 사용합니다. 최소 메모리 값은 실측에 따라 조정할 수 있습니다.
 
 ---
 
@@ -167,7 +167,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 
 `------`는 스케줄링 순간에 아무 플래그도 서지 않은 정상 도메인입니다. dom0-manager 골격이 이 규칙으로 구현돼 있어 계약에 추가했습니다.
 
-`crashed`가 남아 있는 이유는 플랫폼 도메인 설정이 `on_crash = 'preserve'`이기 때문입니다(`perseus_vm.py`). 정리(stop 또는 DELETE)하기 전까지 이 상태로 남습니다.
+`crashed`가 남아 있는 이유는 플랫폼 도메인 설정이 `on_crash = 'preserve'`이기 때문입니다(`xenova_vm.py`). 정리(stop 또는 DELETE)하기 전까지 이 상태로 남습니다.
 
 ### 3.3 Spring 공개 state
 

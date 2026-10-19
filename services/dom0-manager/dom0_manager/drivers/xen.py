@@ -2,7 +2,7 @@
 
 이번 단계는 읽기 전용이다: list/get/host_info/health. create/shutdown/destroy 는 S15P31E110-115 에서 구현한다.
 
-vm_id ↔ Xen 도메인 매핑: 플랫폼 도구(perseus_vm.py)가 xl 설정에 `uuid = <vm_id>` 를 기록하고 `xl shutdown <uuid>` 로
+vm_id ↔ Xen 도메인 매핑: 플랫폼 도구(xenova_vm.py)가 xl 설정에 `uuid = <vm_id>` 를 기록하고 `xl shutdown <uuid>` 로
 도메인을 지정하므로, 여기서도 `xl list -l` 의 config.c_info.uuid 를 vm_id 로 쓴다(계약 13장 1안).
 """
 
