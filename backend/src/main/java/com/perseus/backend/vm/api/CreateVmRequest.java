@@ -27,8 +27,10 @@ public record CreateVmRequest(
         @Max(value = 4, message = "vcpus는 1~4여야 합니다.")
         Integer vcpus,
         @NotNull(message = "memory_mib는 필수입니다.")
-        @Min(value = 128, message = "memory_mib는 128~1024여야 합니다.")
-        @Max(value = 1024, message = "memory_mib는 128~1024여야 합니다.")
+        // 16 is only a loose common floor for the fixed 16MiB Zephyr starter profile; each template's
+        // min_memory_mib is the real lower bound (Linux templates stay at 256/512).
+        @Min(value = 16, message = "memory_mib는 16~1024여야 합니다.")
+        @Max(value = 1024, message = "memory_mib는 16~1024여야 합니다.")
         Integer memoryMib) {
 
     CreateVmCommand toCommand() {

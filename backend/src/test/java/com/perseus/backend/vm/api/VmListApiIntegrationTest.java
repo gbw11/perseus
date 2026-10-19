@@ -82,11 +82,11 @@ class VmListApiIntegrationTest {
         vmRecordRepository.save(new VmRecord("vm-linux",
                 new CreateVmCommand("debian-a", "debian-13-arm64", "1.0.0", 1, 256), GuestKind.LINUX, now));
         vmRecordRepository.save(new VmRecord("vm-zephyr",
-                new CreateVmCommand("zephyr-a", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 128),
+                new CreateVmCommand("zephyr-a", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 16),
                 GuestKind.ZEPHYR, now.plusSeconds(1)));
         when(vmControlPort.list()).thenReturn(List.of(
                 new VmRuntime("vm-linux", VmState.RUNNING, 1, 256),
-                new VmRuntime("vm-zephyr", VmState.RUNNING, 1, 128)));
+                new VmRuntime("vm-zephyr", VmState.RUNNING, 1, 16)));
         // Loopback and IPv6 are skipped; eth0 is preferred over other interfaces.
         agentDataService.recordInventory("vm-linux", new InventoryReport(
                 "boot-1", "debian", "13", "Debian GNU/Linux 13 (trixie)", "6.12.48+deb13-arm64", "debian-a",

@@ -37,7 +37,7 @@ perseus:
       - template-id: zephyr-xenvm-starter-arm64
         version: "1.0.0"
         display-name: Zephyr Starter 1.0.0
-        min-memory-mib: 128
+        min-memory-mib: 16
         guest-kind: zephyr
   agent:
     stale-after: 15s
