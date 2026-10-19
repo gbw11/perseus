@@ -44,4 +44,4 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(NotImplementedError)
     async def on_not_implemented(_: Request, exc: NotImplementedError) -> JSONResponse:
-        return JSONResponse(status_code=501, content={"code": "DriverError", "message": f"not implemented: {exc}"})
+        return JSONResponse(status_code=501, content={"code": "NotSupported", "message": f"not implemented: {exc}"})
