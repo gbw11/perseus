@@ -193,7 +193,7 @@ public class Dom0ManagerClient implements VmControlPort {
 
     private static ApiException serviceTokenRejected(int upstreamStatus) {
         log.warn("dom0-manager rejected the service token (status={}); check DOM0_MANAGER_SERVICE_TOKEN "
-                + "against PERSEUS_SERVICE_TOKEN on the board", upstreamStatus);
+                + "against XENOVA_SERVICE_TOKEN on the board", upstreamStatus);
         return new ApiException(
                 HttpStatus.BAD_GATEWAY,
                 "VM_CONTROL_BAD_RESPONSE",
