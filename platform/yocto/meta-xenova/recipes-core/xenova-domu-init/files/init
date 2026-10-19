@@ -1,0 +1,58 @@
+#!/bin/sh
+# PID 1 inside the intentionally ephemeral Xen test guest.
+# This is NOT a full Debian/Ubuntu/Alpine domU.
+set -u
+
+# 최소 rootfs에는 마운트 대상 디렉터리가 없을 수 있다.
+# 실패를 숨기면 sysfs 기반 NIC 대기까지 잘못되므로 진단 셸에 원인을 남긴다.
+mkdir -p /proc /sys /dev /run /tmp
+virtual_fs_ready=1
+mount_virtual_fs() {
+    if ! /bin/mount -t "$1" "$1" "$2"; then
+        echo "[xenova-domu] ERROR: cannot mount $1 on $2; skipping DHCP."
+        virtual_fs_ready=0
+    fi
+}
+mount_virtual_fs proc /proc
+mount_virtual_fs sysfs /sys
+mount_virtual_fs devtmpfs /dev
+mkdir -p /dev/pts
+/bin/mount -t devpts devpts /dev/pts || \
+    echo '[xenova-domu] WARNING: devpts mount failed.'
+
+if [ -e /dev/hvc0 ]; then
+    exec </dev/hvc0 >/dev/hvc0 2>&1
+fi
+
+echo '[xenova-domu] /init reached. Xen guest started.'
+uname -a
+ip link set lo up 2>/dev/null || :
+
+# sysfs 준비 후 Xenbus/netfront 등록을 최대 20초 기다린다.
+if [ "$virtual_fs_ready" -eq 1 ]; then
+    i=0
+    while [ ! -d /sys/class/net/eth0 ] && [ "$i" -lt 20 ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+
+    if [ ! -d /sys/class/net/eth0 ]; then
+        echo '[xenova-domu] WARNING: eth0 absent after 20s; verify netfront/netback.'
+    elif ip link set eth0 up; then
+        echo '[xenova-domu] guest eth0 detected; requesting DHCP address'
+        # Discover는 최대 5회, 간격 2초. 실패 시 백그라운드 재시도 없이 셸로 진행한다.
+        udhcpc -f -i eth0 -n -q -t 5 -T 2 -s /etc/xenova/udhcpc.script || \
+            echo '[xenova-domu] DHCP did not succeed. Use ip link/ip addr to diagnose.'
+    else
+        echo '[xenova-domu] ERROR: could not bring eth0 up; skipping DHCP.'
+    fi
+fi
+
+ip -br address 2>/dev/null || ip address
+printf '\n[xenova-domu] Minimal guest shell (PID 1). Check: ping -c 2 192.168.77.1\n'
+printf '[xenova-domu] Use xl shutdown/destroy from dom0 to stop this disposable guest.\n\n'
+while true; do
+    /bin/sh -i
+    echo '[xenova-domu] shell exited; restarting for diagnostics'
+    sleep 1
+done

@@ -1,19 +1,19 @@
-# Zenova - Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼
+# Xenova - Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼
 
-## 현재 Zenova 플랫폼
+## 현재 Xenova 플랫폼
 
-현재 CLI는 `zenova-vm`, 영구 저장소는 `/srv/zenova`, 데이터 LABEL은
-`zenova-data`입니다. 이미지 타깃은 `zenova-xen-bringup-image`입니다.
+현재 CLI는 `xenova-vm`, 영구 저장소는 `/srv/xenova`, 데이터 LABEL은
+`xenova-data`입니다. 이미지 타깃은 `xenova-xen-bringup-image`입니다.
 
-- [Zenova 실행·빌드·최초 설치 가이드](docs/build-guides/zenova-platform.md)
-- [기본 템플릿 커스터마이징·버전 게시](docs/build-guides/zenova-template-workflow.md)
-- [리브랜딩 범위와 후속 검증](docs/build-guides/zenova-rebranding.md)
+- [Xenova 실행·빌드·최초 설치 가이드](docs/build-guides/xenova-platform.md)
+- [기본 템플릿 커스터마이징·버전 게시](docs/build-guides/xenova-template-workflow.md)
+- [리브랜딩 범위와 후속 검증](docs/build-guides/xenova-rebranding.md)
 - [Zephyr Starter App](platform/guests/zephyr/starter-app/README.md)
 - 외부 Layer·버전은 `platform/yocto/layers.lock`을 따릅니다.
 
 `docs/build-guides/perseus-*` 및 이전 `yocto-rpi4-xen-*` 문서는 당시
 Perseus 소스·이미지·실보드의 역사적 기록입니다. 기존 로그·경로·해시는 유지하며
-현재 Zenova 명령은 위 가이드를 따릅니다. 기존 이미지·SD를 실시간 변환하지 않습니다.
+현재 Xenova 명령은 위 가이드를 따릅니다. 기존 이미지·SD를 실시간 변환하지 않습니다.
 
 ## 프로젝트 구조(기존 구성안)
 
@@ -145,5 +145,5 @@ Perseus 소스·이미지·실보드의 역사적 기록입니다. 기존 로그
     └── validate-release.sh
 ```
 
-- [VM 관리 계약·작업 기록·보관/복원/삭제](docs/build-guides/zenova-vm-management.md)
-- [dom0 Wi-Fi 관리 접속](docs/build-guides/zenova-wifi-access.md)
+- [VM 관리 계약·작업 기록·보관/복원/삭제](docs/build-guides/xenova-vm-management.md)
+- [dom0 Wi-Fi 관리 접속](docs/build-guides/xenova-wifi-access.md)
