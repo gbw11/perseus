@@ -32,7 +32,11 @@ def build_driver(settings: Settings) -> Driver:
         return XenDriver(_xl(settings))
     from .platform import PlatformDriver, load_manager
 
-    return PlatformDriver(load_manager(settings.platform_lib, busy_timeout_s=settings.platform_busy_timeout_s), _xl(settings))
+    return PlatformDriver(
+        load_manager(settings.platform_lib, busy_timeout_s=settings.platform_busy_timeout_s),
+        _xl(settings),
+        health_budget_s=settings.xl_query_timeout_s,
+    )
 
 
 def build_provisioner(settings: Settings, driver: Driver | None = None) -> Provisioner:
@@ -47,7 +51,7 @@ def build_provisioner(settings: Settings, driver: Driver | None = None) -> Provi
         if isinstance(driver, PlatformDriver)
         else load_manager(settings.platform_lib, busy_timeout_s=settings.platform_busy_timeout_s)
     )
-    return PlatformProvisioner(manager, ip_pool=range(settings.ip_pool_start, settings.ip_pool_end + 1))
+    return PlatformProvisioner(manager)
 
 
 __all__ = [

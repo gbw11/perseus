@@ -31,13 +31,17 @@ def _err(code, message="", retryable=False):
 
 
 class FakeManager:
-    """xenova_management.Manager.call 의 봉투·동작을 최소로 흉내 낸다. accept_vm_id=False 면 지금의 플랫폼처럼 create 가 vm_id 를 거부한다."""
+    """xenova_management.Manager.call 의 봉투·동작을 최소로 흉내 낸다.
+
+    실제 플랫폼처럼 create 는 vm_id 를 필수로 받고, 내부 실행 이름(vm-<hex>)과 Linux IP(192.168.77.2..pool_end) 를 스스로 고르며,
+    IP 가 바닥나면 IP_POOL_EXHAUSTED 를 낸다. fail_create 는 다음 create 한 번만 그 오류로 실패시킨다."""
 
     data = Path("/srv/xenova")
 
-    def __init__(self, *, accept_vm_id=True, templates=(TEMPLATE, ZEPHYR)):
-        self.accept_vm_id = accept_vm_id
+    def __init__(self, *, templates=(TEMPLATE, ZEPHYR), pool_end=99):
         self.templates = list(templates)
+        self.pool_end = pool_end
+        self.fail_create: dict | None = None
         self.registry: dict[str, dict] = {}  # vm_id -> view
         self.calls: list[tuple] = []
         self.fail_next: dict | None = None
@@ -45,7 +49,8 @@ class FakeManager:
 
     def register(self, vm_id, *, name="vm", vcpus=1, memory_mib=512, ipv4="192.168.77.30", guest_kind="linux", running=False, xen_state=None, lifecycle="REGISTERED"):
         view = {"vm_id": str(vm_id), "name": name, "lifecycle": lifecycle, "generation": 0, "registered": lifecycle == "REGISTERED",
-                "configuration": {"vcpus": vcpus, "memory_mib": memory_mib, "ipv4": ipv4, "guest_kind": guest_kind},
+                "configuration": {"id": f"vm-{UUID(str(vm_id)).hex}", "vcpus": vcpus, "memory_mib": memory_mib, "ipv4": ipv4,
+                                  "guest_kind": guest_kind},
                 "xen_state": xen_state or ("running" if running else "stopped"), "domid": None, "app_readiness": "unknown"}
         if running or (xen_state and xen_state != "stopped"):
             view["domid"] = self.next_domid
@@ -69,18 +74,33 @@ class FakeManager:
             view = self.registry.get(spec.get("vm_id"))
             return _ok({"vm": view}) if view else _err("VM_NOT_FOUND", "registered VM not found")
         if action in ("create", "retire", "restore", "purge"):
-            # 실제 Manager._mutate 순서: 명세 정규화(모르는 키 거부) → idempotency_key 검사 → 계획/실행
-            if action == "create" and "vm_id" in spec and not self.accept_vm_id:
-                return _err("INVALID_SPEC", "name, template_id, template_version, vcpus and memory_mib required")
+            # 실제 Manager._mutate 순서: 명세 정규화(필수 키·모르는 키) → idempotency_key 검사 → 계획/실행
+            required = {"vm_id", "name", "template_id", "template_version", "vcpus", "memory_mib"}
+            if action == "create" and (set(spec) - (required | {"ipv4"}) or not required <= set(spec)):
+                return _err("INVALID_SPEC", "vm_id, name, exact template ID/version and resources required")
             if not isinstance(idempotency_key, str) or not 1 <= len(idempotency_key.encode("utf-8")) <= 200:
                 return _err("INVALID_SPEC", "idempotency_key of 1..200 UTF-8 bytes required")
         if action == "create":
+            if self.fail_create:
+                failure, self.fail_create = self.fail_create, None
+                return _err(**failure)
+            template = next((e for e in self.templates if e["template_id"] == spec["template_id"]
+                             and str(e["template_version"]) == str(spec["template_version"])), None)
+            if template is None:
+                return _err("TEMPLATE_NOT_FOUND", "normalized template ID not published")
+            linux = template.get("guest_kind", "linux") == "linux"
+            if not linux and "ipv4" in spec:
+                return _err("INVALID_SPEC", "Zephyr has no IP field")
             if not execute:
                 return _ok({"plan": True, "action": action, "spec": spec})
-            if any(v["configuration"].get("ipv4") == spec.get("ipv4") for v in self.registry.values() if spec.get("ipv4")):
-                return _err("IP_CONFLICT", "address already registered")
-            vm_id = spec.get("vm_id") or "99999999-9999-4999-8999-999999999999"
-            view = self.register(vm_id, name=spec["name"], vcpus=spec["vcpus"], memory_mib=spec["memory_mib"], ipv4=spec.get("ipv4"))
+            ipv4 = spec.get("ipv4")
+            if linux and ipv4 is None:  # 플랫폼이 전역 잠금 안에서 빈 내부 주소를 고른다
+                used = {v["configuration"].get("ipv4") for v in self.registry.values()}
+                ipv4 = next((f"192.168.77.{h}" for h in range(2, self.pool_end + 1) if f"192.168.77.{h}" not in used), None)
+                if ipv4 is None:
+                    return _err("IP_POOL_EXHAUSTED", "no unreserved internal Linux address remains")
+            view = self.register(spec["vm_id"], name=spec["name"], vcpus=spec["vcpus"], memory_mib=spec["memory_mib"], ipv4=ipv4,
+                                 guest_kind=template.get("guest_kind", "linux"))
             return _ok({"vm": view}, operation_id="op-1")
         if action in ("start", "stop"):
             view = self.registry.get(spec.get("vm_id"))
@@ -213,7 +233,8 @@ def test_create_registers_then_starts(client, manager):
     actions = [c[0] for c in manager.calls]
     assert actions.index("create") < actions.index("start")
     create_call = next(c for c in manager.calls if c[0] == "create")
-    assert create_call[1]["vm_id"] == str(VM_A) and create_call[1]["ipv4"] == "192.168.77.2"
+    assert create_call[1]["vm_id"] == str(VM_A) and "ipv4" not in create_call[1]  # IP 는 플랫폼이 고른다
+    assert manager.registry[str(VM_A)]["configuration"]["ipv4"] == "192.168.77.2"
     assert create_call[1]["name"] == "ubuntu-24-04-arm64-111111111111"
     assert create_call[2] is True and create_call[3] == f"create-{VM_A}"
 
@@ -230,22 +251,25 @@ def test_create_running_vm_is_409(client, manager):
     assert client.post("/api/v1/vms", json=create_body(VM_A, template_id=TEMPLATE["template_id"], template_version="1.0.0")).status_code == 409
 
 
-def test_ip_allocation_skips_used_and_retries_on_conflict(client, manager):
+def test_platform_assigns_ip_without_dom0_manager_hint(client, manager):
+    """리뷰 반영: IP 정책은 플랫폼이 단독 소유한다. dom0-manager 는 ipv4 를 보내지 않고 플랫폼이 쓰이지 않은 주소를 고른다."""
     manager.register(VM_B, ipv4="192.168.77.2")
-    manager.fail_next = None
     created = client.post("/api/v1/vms", json=create_body(VM_A, template_id=TEMPLATE["template_id"], template_version="1.0.0"))
     assert created.status_code == 201
-    assert next(c for c in manager.calls if c[0] == "create")[1]["ipv4"] == "192.168.77.3"
+    assert "ipv4" not in next(c for c in manager.calls if c[0] == "create")[1]
+    assert manager.registry[str(VM_A)]["configuration"]["ipv4"] == "192.168.77.3"
 
 
-def test_ip_pool_exhausted_is_507():
-    manager = FakeManager()
+def test_platform_ip_pool_exhausted_is_507_ipv4():
+    """플랫폼 IP_POOL_EXHAUSTED → 507 InsufficientResources(resource.name=ipv4)."""
+    manager = FakeManager(pool_end=4)
     for host in range(2, 5):
         manager.register(UUID(int=host), ipv4=f"192.168.77.{host}")
     app = create_app(Settings(driver="platform"), driver=PlatformDriver(manager, Xl(FakeRunner({("xl", "info"): XL_INFO}))),
-                     provisioner=PlatformProvisioner(manager, ip_pool=range(2, 5)))
+                     provisioner=PlatformProvisioner(manager))
     denied = TestClient(app).post("/api/v1/vms", json=create_body(VM_A, template_id=TEMPLATE["template_id"], template_version="1.0.0"))
-    assert denied.status_code == 507 and denied.json()["resource"]["name"] == "ipv4"
+    assert denied.status_code == 507, denied.text
+    assert denied.json()["resource"] == {"name": "ipv4", "requested": 1, "available": 0}
 
 
 def test_zephyr_template_gets_no_ip_and_16mib(client, manager):
@@ -282,13 +306,56 @@ def test_unknown_template_is_400(client):
     assert client.post("/api/v1/vms", json=create_body(VM_A, template_id="nope", template_version="9")).status_code == 400
 
 
-def test_platform_without_vm_id_support_is_501():
-    manager = FakeManager(accept_vm_id=False)
-    app = create_app(Settings(driver="platform"), driver=PlatformDriver(manager, Xl(FakeRunner({("xl", "info"): XL_INFO}))),
-                     provisioner=PlatformProvisioner(manager))
-    blocked = TestClient(app).post("/api/v1/vms", json=create_body(VM_A, template_id=TEMPLATE["template_id"], template_version="1.0.0"))
-    assert blocked.status_code == 501
-    assert "vm_id" in blocked.json()["message"]
+def test_platform_invalid_spec_is_400(client, manager):
+    """리뷰 반영: 플랫폼의 INVALID_SPEC 은 501 로 바꾸지 않고 400 InvalidArgument 그대로다 (플랫폼은 vm_id 를 필수로 받는다)."""
+    manager.fail_create = {"code": "INVALID_SPEC", "message": "invalid VM name"}
+    rejected = client.post("/api/v1/vms", json=create_body(VM_A, template_id=TEMPLATE["template_id"], template_version="1.0.0"))
+    assert rejected.status_code == 400, rejected.text
+    assert rejected.json()["code"] == "InvalidArgument" and "invalid VM name" in rejected.json()["message"]
+
+
+def test_instance_paths_use_platform_internal_name(manager):
+    """디렉터리는 configuration.id(vm-<hex>)다. 표시 이름(view['name'])으로 경로를 만들지 않고, id 가 없으면 플랫폼 응답 오류다."""
+    manager.register(VM_A, name="web", vcpus=1, memory_mib=256)
+    provisioner = PlatformProvisioner(manager)
+    paths = provisioner.ensure_instance(VM_A, TEMPLATE["template_id"], "1.0.0", vcpus=1, memory_mib=256)
+    assert paths.root == Path("/srv/xenova") / "instances" / f"vm-{VM_A.hex}"
+    del manager.registry[str(VM_A)]["configuration"]["id"]
+    with pytest.raises(DriverError):
+        provisioner.ensure_instance(VM_A, TEMPLATE["template_id"], "1.0.0", vcpus=1, memory_mib=256)
+
+
+def test_health_stays_within_query_budget_while_platform_is_busy():
+    """리뷰 반영: xl info 5초 + Manager 대기 5초 = 10초는 Spring 의 6초 대기를 넘긴다. health 는 전체 예산 안에서 끝낸다."""
+    import threading
+    import time
+
+    from dom0_manager.drivers.platform import SerializedManager
+
+    inner = FakeManager()
+    inner.register(VM_A, running=True)
+    entered, release = threading.Event(), threading.Event()
+    original = inner.call
+
+    def slow_call(action, spec=None, **kwargs):
+        if action == "stop":
+            entered.set()
+            release.wait(5)
+        return original(action, spec, **kwargs)
+
+    inner.call = slow_call
+    wrapped = SerializedManager(inner, busy_timeout_s=5.0)  # 일반 호출은 5초까지 기다리지만 health 는 예산 0.3초
+    driver = PlatformDriver(wrapped, Xl(FakeRunner({("xl", "info"): XL_INFO})), health_budget_s=0.3)
+    holder = threading.Thread(target=wrapped.call, args=("stop", {"vm_id": str(VM_A), "force": False}), kwargs={"execute": True})
+    holder.start()
+    try:
+        assert entered.wait(2)
+        started = time.monotonic()
+        assert driver.health() is True  # 바쁨은 장애가 아니다
+        assert time.monotonic() - started < 1.0
+    finally:
+        release.set()
+        holder.join(5)
 
 
 def test_delete_requires_stopped_and_retires(client, manager):
@@ -366,6 +433,7 @@ def test_build_driver_wraps_manager_and_provisioner_reuses_it(monkeypatch):
     assert isinstance(driver.manager, SerializedManager)
     assert provisioner.manager is driver.manager
     assert driver.manager.busy_timeout_s == 0.5
+    assert driver.health_budget_s == settings.xl_query_timeout_s
 
 
 def test_serialized_manager_busy_timeout_is_retryable_503():

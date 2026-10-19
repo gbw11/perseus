@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 REPO = Path(__file__).resolve().parents[3]
 PLATFORM_TESTS = REPO / "tests" / "platform"
 PLATFORM_FILES = REPO / "platform" / "yocto" / "meta-xenova" / "recipes-core" / "xenova-platform" / "files"
+DEFAULTS = PLATFORM_FILES / "defaults.json"  # 공장 VM 예약 IP·내부 IP 풀. 플랫폼이 create 때 IP 를 고르는 근거
 
 if not (PLATFORM_TESTS / "test_xenova_platform.py").is_file() or not (PLATFORM_FILES / "xenova_management.py").is_file():
     pytest.skip("platform sources are not part of this checkout", allow_module_level=True)
@@ -94,24 +95,27 @@ class Board:
         fixture(self.data, debian)
         self.xen.rows.append(domain(ubuntu, ubuntu_dir / "root.raw", 1))
         _publish_template(self.data)
-        self.platform = vm.Platform(self.data, self.run, command=self.xen)
-        self.manager = management.Manager(self.platform, preparer=self._prepare, usage_check=lambda *a: None)
+        self.platform = vm.Platform(self.data, self.run, command=self.xen, defaults_path=DEFAULTS)
+        self.manager = management.Manager(self.platform, preparer=self._prepare, usage_check=lambda *a: None, defaults_path=DEFAULTS)
 
     def _prepare(self, op):
-        """플랫폼 파트 테스트의 prepare() 와 같은 대역: 디스크 복사 대신 작은 픽스처 파일을 만든다."""
+        """플랫폼 파트 테스트의 prepare() 와 같은 대역: 디스크 복사 대신 작은 픽스처 파일을 만든다.
+        내부 실행 이름·MAC·IP 는 플랫폼이 op['assigned'] 로 넘겨준 값을 그대로 쓴다."""
         spec = op["initial_spec"]
+        name = op["assigned"]["internal_name"]
         r = record()
-        r.update(id=spec["name"], name=spec["name"], hostname=spec["name"], uuid=op["vm_id"], mac=op["assigned"]["mac"],
-                 ipv4=spec["ipv4"], memory_mib=spec["memory_mib"], vcpus=spec["vcpus"], autostart=False,
-                 creation_spec=spec, creation_operation_id=op["operation_id"],
-                 template_manifest_sha256=op["template"]["manifest_sha256"])
+        r.update(guest_kind="linux", id=name, name=name, hostname=name, display_name=spec["name"], uuid=op["vm_id"],
+                 mac=op["assigned"]["mac"], ipv4=op["assigned"]["ipv4"], memory_mib=spec["memory_mib"], vcpus=spec["vcpus"],
+                 autostart=False, creation_spec=spec, creation_operation_id=op["operation_id"],
+                 template_manifest_sha256=op["template"]["manifest_sha256"],
+                 template_id=spec["template_id"], template_version=spec["template_version"])
         directory = fixture(self.data, r)
         with (directory / "root.raw").open("wb") as stream:
             stream.write(b"\0" * 2048)
             stream.seek(1080)
             stream.write(b"\x53\xef")
         self.records[r["id"]] = r
-        return directory
+        return r
 
     def close(self) -> None:
         self.tmp.cleanup()
@@ -119,7 +123,7 @@ class Board:
 
 @pytest.fixture
 def board():
-    with patch.object(vm, "storage_check"):
+    with patch.object(vm, "storage_check"), patch.object(vm.Platform, "check_network"):
         b = Board()
         try:
             yield b
@@ -163,30 +167,19 @@ def test_real_manager_restart_registered_vm(client, board):
     assert any(call[:2] == ["xl", "create"] for call in board.xen.calls)
 
 
-def _platform_accepts_vm_id(manager) -> bool:
-    """create 를 계획 모드(execute=False)로 불러 spec['vm_id'] 를 받는지 본다. 작업 기록·디스크를 만들지 않는다.
-    변경 동작은 실행 여부와 무관하게 idempotency_key 를 검사하므로 유효한 키를 준다. 키가 없으면 지원 여부와 상관없이
-    INVALID_SPEC 이 나와 판정이 틀어진다."""
-    spec = {"vm_id": str(NEW_VM), "name": "probe", "template_id": TEMPLATE_ID, "template_version": TEMPLATE_VERSION,
-            "vcpus": 1, "memory_mib": 512, "ipv4": "192.168.77.90"}
-    probe = manager.call("create", spec, execute=False, idempotency_key=f"probe-vm-id-{NEW_VM}")
-    error = probe.get("error") or {}
-    assert probe.get("ok") or error.get("code") == "INVALID_SPEC", probe  # 그 밖의 실패는 픽스처 문제다
-    return bool(probe.get("ok"))
-
-
 def test_real_manager_create_with_spring_issued_vm_id(client, board):
-    """팀 결정: Spring 발급 vm_id 가 registry·Xen UUID 가 된다. 플랫폼 create 가 spec['vm_id'] 를 받기 전까지는 501 이고
-    그 상태를 xfail 로 드러낸다. 플랫폼이 지원하면 201 과 UUID 일치를 요구한다."""
+    """팀 결정: Spring 발급 vm_id 가 registry·Xen UUID 가 된다. 플랫폼 create 는 vm_id 를 필수로 받고 내부 실행 이름·MAC·IP 를
+    스스로 발급한다. 지원 여부 probe 나 조건부 건너뜀 없이 항상 201 과 UUID 일치를 요구한다 (회귀를 숨기지 않는다)."""
     body = {"vm_id": str(NEW_VM), "template_id": TEMPLATE_ID, "template_version": TEMPLATE_VERSION, "vcpus": 1, "memory_mib": 512}
-    if not _platform_accepts_vm_id(board.manager):
-        blocked = client.post("/api/v1/vms", json=body)
-        assert blocked.status_code == 501, blocked.text
-        assert blocked.json()["code"] == "NotSupported"
-        pytest.xfail("platform create does not accept a caller-supplied vm_id yet (request sent to platform part)")
     created = client.post("/api/v1/vms", json=body)
     assert created.status_code == 201, created.text
     assert created.json()["vm_id"] == str(NEW_VM)
+    assert any(c[:2] == ["xl", "create"] for c in board.xen.calls), board.xen.calls
     registered = board.manager.call("get", {"vm_id": str(NEW_VM)})
-    assert registered["ok"] and registered["data"]["vm"]["vm_id"] == str(NEW_VM)
-    assert registered["data"]["vm"]["configuration"]["uuid"] == str(NEW_VM)
+    assert registered["ok"], registered
+    view = registered["data"]["vm"]
+    assert view["vm_id"] == str(NEW_VM) and view["configuration"]["uuid"] == str(NEW_VM)
+    assert view["configuration"]["id"] == management.internal_name(str(NEW_VM))  # 디렉터리 = 플랫폼 내부 실행 이름
+    assert view["configuration"]["ipv4"] not in (None, "192.168.77.10", "192.168.77.20")  # 플랫폼이 공장 예약을 피해 할당
+    assert any(row["config"]["c_info"]["uuid"] == str(NEW_VM) for row in board.xen.rows)  # Xen 도메인 UUID 도 요청 UUID
+    assert client.get(f"/api/v1/vms/{NEW_VM}").json()["vm_id"] == str(NEW_VM)

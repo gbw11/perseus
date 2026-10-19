@@ -81,7 +81,7 @@ class PlatformUnavailable(DriverError):
 
 
 class NotSupportedByPlatform(DriverError):
-    """플랫폼 관리 계층이 아직 제공하지 않는 동작 (501). 예: create 의 호출자 지정 vm_id."""
+    """드라이버·플랫폼이 제공하지 않는 동작 (501). 예: xen 모드(조회 전용)의 생성·정지·삭제 명령."""
 
     status_code = 501
     code = "NotSupported"
