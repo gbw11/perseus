@@ -25,11 +25,14 @@ systemctl --failed=0만으로 SSH를 통과시키지 않는다. 실제 PC 로그
     xenova-vm templates --json
     xenova-vm list --json
 
-사용할 template_id/version/manifest 해시를 기록한다. 아래 IP .30은 예시이며 먼저 충돌을 확인한다.
-다른 팀원이 쓰는 주소를 바꾸거나 자동 배정한다고 가정하지 않는다.
-name=team-check는 기존 예약/삭제 이력이 없는 이름으로 선택한다.
+사용할 template_id/version/manifest 해시와 Spring에 먼저 저장한 UUID를 기록한다.
+Linux IP는 플랫폼이 .2..99에서 선택하며 기본 .10/.20과 사용/보관/예약 주소를 제외한다.
+표시 이름은 한글·공백을 사용할 수 있고 내부 경로·Xen 이름은 UUID에서 유도된다.
 
-    xenova-vm create team-check --template-id ubuntu-24.04-arm64 --template-version 1.0.0 --vcpus 1 --memory-mib 512 --ipv4 192.168.77.30 --idempotency-key board-create-1 --json
+    vm_id="<Spring에 먼저 저장한 UUID>"
+    xenova-vm create --vm-id "$vm_id" --name "팀 시험 Ubuntu" \
+        --template-id ubuntu-24.04-arm64 --template-version 1.0.0 \
+        --vcpus 1 --memory-mib 512 --auto-ip --json
     echo $?
 
 계획 후 instances/operations에 새 자산·예약이 생기지 않는지 확인한다.
@@ -41,8 +44,12 @@ name=team-check는 기존 예약/삭제 이력이 없는 이름으로 선택한�
     mv create.tmp.json create.json
 
 data.vm_id와 operation_id를 기록한다. 생성 직후 정지/등록 상태를 확인한다.
-동일 키·명세를 재호출해 vm_id/operation_id와 디스크 inode가 같고 replayed=true인지 확인한다.
-같은 키·다른 memory_mib는 IDEMPOTENCY_CONFLICT, 다른 키·같은 이름은 VM_NAME_CONFLICT여야 한다.
+동일 UUID·명세를 재호출해 vm_id/operation_id/IP와 디스크 inode가 같고 replayed=true인지 확인한다.
+같은 UUID·다른 memory_mib는 IDEMPOTENCY_CONFLICT여야 한다.
+다른 UUID·같은 표시 이름은 독립 VM으로 등록되어야 한다. 폐기 가능한 두 번째 UUID로만 시험한다.
+create/list/get의 template_id/template_version/guest_kind와 배정 IP를 서로 대조한다.
+Zephyr의 별도 생성은 1 vCPU/16MiB, ipv4=null이고 disk/VIF가 없어야 한다.
+이 검사는 실제 펌웨어 앱 실행/인터럽트 호환성 시험과 구분한다.
 create가 반환됐다는 사실과 실제 guest OS/SSH 준비는 구분한다.
 
 ## 3. 실행·보존·보관·복원
@@ -57,6 +64,7 @@ create가 반환됐다는 사실과 실제 guest OS/SSH 준비는 구분한다.
     xenova-vm list --lifecycle RETIRED --json
     xenova-vm restore <UUID> --idempotency-key board-restore-1 --execute --json
 
+보관 중 같은 UUID의 create는 TARGET_CHANGED여야 하고 IP는 다른 VM에 재배정되지 않아야 한다.
 복원 직후에는 실행되지 않아야 한다. UUID/MAC/IP/디스크/키/파일/자동 시작 정책을 대조한다.
 다시 시작해 실제 SSH와 파일 보존을 확인한다.
 과거 retire key를 재전송해 복원된 VM이 다시 보관되지 않는지 확인한다.
@@ -72,6 +80,8 @@ create가 반환됐다는 사실과 실제 guest OS/SSH 준비는 구분한다.
 
 논리 bytes/실제 할당 bytes/free_bytes_delta와 실제 df 여유 변화를 함께 기록한다.
 tombstone과 작업 결과가 남아야 한다. 오래된 create를 재전송해 VM_PURGED이며 재생성되지 않아야 한다.
+purge 이후 새 UUID의 생성에서 이전 IP는 현재 lease/다른 소유권이 없을 때만 다시 선택 가능하다.
+오래된 성공 작업의 IP 기록만으로 영구 점유하지 않아야 한다.
 다른 VM·원본 템플릿의 해시/파일은 변하지 않아야 한다.
 실행 중 삭제, Xen 디스크 참조, 마운트/loop 사용 상태에서는 거부되어야 한다.
 
