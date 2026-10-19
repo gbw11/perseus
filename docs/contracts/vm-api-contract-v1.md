@@ -4,33 +4,30 @@
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼
 **구성 계층** 프론트 ↔ Spring (공개 API) ↔ dom0-manager (FastAPI) ↔ Xen `xl`
 
-이 문서는 계약 확정안 v1.0, 리뷰 v1.1, 백엔드 VM API 규약 v1, 리뷰 v1.2에서 확정된 내용을 하나로 합친 것입니다. 구현의 기준 문서이며, 실측으로 수치가 바뀌면 이 문서를 갱신합니다. v1.1에서 dom0-manager 골격(`services/dom0-manager`)과 Spring 클라이언트의 실제 동작에 맞춰 보완했습니다(14장).
+이 문서는 계약 확정안과 플랫폼·Spring 구현 검토 결과를 합친 구현 기준 문서입니다. 실측이나 생명주기 정책이 바뀌면 이 문서를 함께 갱신합니다.
 
 ---
 
 ## 1. 계층 책임
 
-### 1.1 무상태 원칙
+### 1.1 영구 식별자와 플랫폼 registry
 
-dom0-manager는 **무상태**입니다.
+Spring이 생성 전에 발급한 UUID 형식의 `vm_id`가 시스템 전체의 유일한 영구 VM 식별자입니다. 보드는 별도 UUID나 `instance_id`를 만들지 않으며, 전달받은 `vm_id`를 registry와 Xen UUID에 그대로 사용합니다.
 
-- 파일시스템이나 DB에 VM 레코드를 두지 않는다.
-- 모든 조회 응답은 `xl` 질의 결과에서 파생한다.
-- **Xen에 존재하지 않는 도메인은 dom0-manager가 알 수 없다.**
-
-Xen의 `xl` 툴스택에는 libvirt나 Docker와 달리 "정의된 채 꺼져 있는" 도메인 개념이 없습니다. 도메인은 실행 중일 때만 존재하며 `xl shutdown`과 `xl destroy`는 모두 도메인을 완전히 소멸시킵니다.
+플랫폼 registry는 등록·보관·복구 생명주기의 원본입니다. dom0-manager는 플랫폼 관리 계층을 통해 registry와 Xen 실행 상태를 함께 조회합니다. `domid`는 재실행마다 바뀔 수 있으므로 영구 식별자로 사용하지 않습니다.
 
 ### 1.2 책임 분담
 
 | 책임 | 담당 |
 |---|---|
 | VM 명세 보유 (`name`, `template_id`, `template_version`) | Spring |
-| 멱등성 판정 | Spring |
+| `vm_id` 발급 및 생성 멱등성 | Spring (`vm_id` 자체가 idempotency key) |
 | 종료된 VM을 포함한 전체 목록 구성 | Spring |
 | 표시 이름 중복 검사 | Spring |
 | Xen 런타임 상태 조회·변경 | dom0-manager |
 | 디스크 수명주기 집행 | dom0-manager |
 | 자원 가용 판정 | dom0-manager |
+| IP 자동 할당과 중복 방지 | 플랫폼 전역 잠금 내부 |
 
 ### 1.3 계층별 계약 분리
 
@@ -101,7 +98,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 ]
 ```
 
-플랫폼 기본 템플릿(`defaults.json`의 `ubuntu-24.04-20260926`, `debian-13-20261015`, `perseus-zephyr-starter-1.0.0`)에 맞춘 값입니다. `template_id`는 OS 검증 리포트가 에이전트의 os-release ID와 비교하므로 OS ID로 두고, `version`은 플랫폼 템플릿 이름에서 OS ID를 뺀 부분으로 둡니다. dom0-manager가 이 둘을 플랫폼 템플릿 이름으로 바꾸는 규칙은 미확정입니다(13장).
+플랫폼 기본 Ubuntu·Debian·Zephyr 템플릿 카탈로그에 맞춘 값입니다. `template_id`는 OS 검증 리포트가 에이전트의 os-release ID와 비교하므로 OS ID로 두고, `version`은 플랫폼 카탈로그 버전을 사용합니다.
 
 1차 데이터는 Spring 설정 파일(`application.yml`의 `perseus.template-catalog.templates`)에 고정하며, OS(Alpine·Debian·Ubuntu)마다 버전 하나를 고정합니다. 버전과 최소 메모리 값은 P2 실측 전 임시값입니다(13장).
 
@@ -159,10 +156,10 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 | `POST` | `/api/v1/vms` | `201` VM | `400`, `409`, `507`, `500` |
 | `GET` | `/api/v1/vms/{vm_id}` | `200` VM | `404`, `500` |
 | `POST` | `/api/v1/vms/{vm_id}/stop` | `204` | `500` |
-| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `500` |
+| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `404`, `409`, `500` |
 | `GET` | `/healthz` | `200` | `503` |
 
-`500 DriverError`는 `xl` 실행 실패·타임아웃이며 모든 엔드포인트에서 날 수 있습니다(8.1절). 현재 골격의 Xen 모드는 생성·정지·삭제가 아직 구현되지 않아 `501`(code `DriverError`)을 반환합니다(S15P31E110-115).
+`500 DriverError`는 분류되지 않은 플랫폼 실행 실패이며 모든 엔드포인트에서 날 수 있습니다(8.1절). `501`은 계약에서 사용하지 않습니다.
 
 ### 4.1 `GET /api/v1/vms`
 
@@ -174,9 +171,10 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 
 - 해당 `vm_id`의 디스크가 존재하면 **재사용**하고, 존재하지 않으면 `template_id`·`template_version`으로 새로 생성한다.
 - 디스크 경로는 `vm_id`에서 파생한다.
-- 성공은 `201`, `vm_id` 충돌은 `409 VMExists`만 반환한다. **"동일 재시도 200"은 Spring 계층의 동작**이며 이 계약에 포함되지 않는다.
+- 동일 `vm_id`·동일 명세 재요청은 기존 생성 결과를 반환하고, 동일 `vm_id`·다른 명세는 `409 VMExists`로 거부한다.
+- Linux IP는 Spring이 전달하지 않는다. 플랫폼이 전역 잠금 안에서 IP 풀과 registry를 확인해 빈 주소를 자동 할당한다.
 
-**Spring 불변조건** — 동일한 `vm_id`에는 항상 동일한 `template_id`·`template_version`을 전송한다. 무상태 dom0-manager는 보존된 디스크가 어떤 템플릿으로 생성되었는지 알 수 없으며 위반을 탐지할 수 없다.
+**Spring 불변조건** — 동일한 `vm_id`에는 항상 동일한 생성 명세를 전송한다. 플랫폼은 registry의 기존 생성 명세와 비교해 위반을 거부한다.
 
 `start` 엔드포인트는 두지 않습니다. 꺼진 VM의 재시작은 같은 `vm_id`로 이 엔드포인트를 재호출하는 방식이며, 디스크가 보존되어 있으므로 데이터는 유지됩니다.
 
@@ -186,11 +184,12 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 
 - 성공 응답은 `204 No Content`. 종료 후에는 Xen에 도메인이 없으므로 반환할 VM 객체가 존재하지 않는다.
 - **없는 VM에 stop을 호출하면 `204`.** 멱등성은 목표 상태 기준이므로 이미 실행 중이 아닌 VM의 stop은 목표가 달성된 상태다.
-- **강제 전환** — `xl shutdown` 요청 후 25초까지 도메인이 소멸하지 않으면 `xl destroy`로 전환한다. 강제 전환을 포함한 드라이버 전체 응답은 30초를 넘지 않는다. 이 경우 디스크는 unclean 상태로 남을 수 있다.
+- 호출은 동기 방식이며 플랫폼은 기본 최대 90초까지 도메인 소멸을 기다린다. 일반 stop은 시간 초과 시 자동으로 강제 종료하지 않는다.
+- 강제 종료는 명시적인 force 요청에서만 수행한다. Zephyr는 `board_shutdown_policy`가 `force-allowed`가 아니면 `409`로 거부한다.
 
 ### 4.4 `DELETE /api/v1/vms/{vm_id}`
 
-강제 종료 후 **디스크를 삭제**합니다. 성공 응답은 `204`이며, 없는 VM에 대한 호출도 `204`입니다.
+실행 중인 VM은 `409`로 거부합니다. 정지된 VM은 디스크를 즉시 지우지 않고 플랫폼의 retire 생명주기로 숨김 보관하며 tombstone과 generation을 유지합니다. 동일 디스크를 restore할 때는 기존 `vm_id`를 유지하고, purge 또는 복제로 새 VM을 만들 때는 Spring이 새 `vm_id`를 발급합니다.
 
 ### 4.5 `GET /healthz`
 
@@ -216,7 +215,7 @@ Spring의 시스템 상태 점검(REST-28)에서 Xen 상태를 판단할 때 사
 | `GET` | `/api/v1/vms/{vm_id}` | `200` VM | — |
 | `POST` | `/api/v1/vms/{vm_id}/start` | `200` VM | dom0 단건 조회 후 도메인이 없을 때만 create 재호출. 이미 `running`이면 그대로 반환. `crashed`·`paused`·`stopping`이면 `409 INVALID_VM_STATE`로 거부(정지 후 다시 시작). 플랫폼 CLI와 같은 동작이며 자동 복구는 하지 않음 |
 | `POST` | `/api/v1/vms/{vm_id}/stop` | `200` VM (`state: stopped`) | dom0 단건 조회로 정지 전 상태를 읽은 뒤 stop 호출. 이미 꺼져 있으면 dom0를 호출하지 않고 이벤트도 남기지 않음. dom0는 `204`지만 Spring은 레코드로 VM 객체를 만들어 반환 |
-| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | dom0 삭제 성공 뒤 Spring 레코드 삭제. 없는 VM도 `204` |
+| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | dom0 retire 성공 뒤 Spring 레코드를 `RETIRED`로 보존하고 v1 목록·단건 조회에서는 숨김 |
 | `GET` | `/api/v1/templates` | `200` 템플릿 배열 | 설정 파일 고정 데이터 (2.3절) |
 
 모든 공개 API는 `Authorization: Bearer {access_token}`이 필요합니다. 생성·시작·정지·삭제가 성공하면 이벤트(`vm.created`, `vm.state.changed`, `vm.deleted`)가 기록됩니다.
@@ -230,9 +229,10 @@ Xen은 VM 상태 변화를 누구에게도 알리지 않으므로, Spring이 dom
 | 연산 | 종료 방식 | 디스크 | 재시작 |
 |---|---|---|---|
 | `stop` | 게스트에 정상 종료 요청 | 보존 | 가능 |
-| `DELETE` | 강제 종료 | 삭제 | 불가 |
+| `DELETE` | 정지 상태에서만 허용 | 숨김 보관(retire) | restore로 가능 |
+| `purge` | 해당 없음 | 영구 삭제 | 불가 |
 
-두 연산이 모두 디스크를 보존하면 자원 회수 경로가 사라지고, 개발 중 생성·삭제를 반복할 때 SD카드에 디스크 이미지가 누적됩니다.
+retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 회수는 별도 purge 생명주기에서 수행합니다.
 
 ---
 
@@ -240,12 +240,12 @@ Xen은 VM 상태 변화를 누구에게도 알리지 않으므로, Spring이 dom
 
 | 현재 상태 | `POST /vms` | `POST /stop` | `DELETE` |
 |---|---|---|---|
-| 도메인 없음 + 디스크 있음 | `201` — 기존 디스크 재사용 | `204` | `204` — 디스크 삭제 |
-| 도메인 없음 + 디스크 없음 | `201` — 템플릿에서 생성 | `204` | `204` |
-| `running` | `409 VMExists` | `204` — 정상 종료, 디스크 보존 | `204` — 강제 종료, 디스크 삭제 |
-| `stopping` | `409 VMExists` | `204` — 소멸까지 대기 | `204` |
-| `paused` | `409 VMExists` | `204` — unpause 후 정상 종료 | `204` |
-| `crashed` | `409 VMExists` | `204` — destroy로 처리 | `204` |
+| 도메인 없음 + 등록 디스크 있음 | 기존 결과 반환 또는 재시작 | `204` | `204` — retire |
+| 도메인 없음 + 디스크 없음 | `201` — 템플릿에서 생성 | `204` | `404` |
+| `running` | `409 VMExists` | `204` — 정상 종료, 디스크 보존 | `409` — 먼저 정지 필요 |
+| `stopping` | `409 VMExists` | 소멸까지 동기 대기 | `409` |
+| `paused` | `409 VMExists` | 플랫폼 정책에 따라 정상 종료 | `409` |
+| `crashed` | `409 VMExists` | 명시적 force 정책 적용 | `409` |
 
 `crashed` 도메인은 종료 요청에 응답할 수 없으므로 `stop`은 `destroy`로 목표 상태를 달성합니다. 이 경우 디스크는 보존되지만 unclean 상태일 수 있습니다.
 
@@ -262,7 +262,6 @@ Xen은 VM 상태 변화를 누구에게도 알리지 않으므로, Spring이 dom
 | `409` | `VMExists` | `vm_id` 충돌 (단일 의미) |
 | `507` | `InsufficientResources` | 가용 메모리 부족 |
 | `500` | `DriverError` | `xl` 실행 실패·타임아웃, 모르는 상태 문자. **임시 정의** — OpenAPI yaml의 오류 코드 목록에는 아직 없음(13장) |
-| `501` | `DriverError` | 아직 구현하지 않은 드라이버 기능 (현재 Xen 모드의 생성·정지·삭제) |
 | — | `InvalidState` | **현재 구현에서는 반환하지 않음.** 예비로 유지하며, pause/unpause 엔드포인트가 추가되면 생산자가 생긴다 |
 
 오류 본문:
@@ -311,7 +310,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | `409 InvalidState` | `409 INVALID_VM_STATE` |
 | `400 InvalidArgument` | `400 INVALID_ARGUMENT` |
 | `507 InsufficientResources` | **`409 INSUFFICIENT_RESOURCES`** (공개 API에서는 507 대신 409를 씀) |
-| `500`/`501 DriverError` | `500 VM_DRIVER_ERROR` |
+| `500 DriverError` | `500 VM_DRIVER_ERROR` |
 | 해석할 수 없는 본문, 모르는 `code`, 본문이 필요한데 없음 | `502 VM_CONTROL_BAD_RESPONSE` |
 
 **전송 실패**
@@ -342,7 +341,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 
 ## 10. 타임아웃 · 재시도
 
-**45초는 공개 요청 하나의 전체 예산**이며 시도당 시간이 아닙니다.
+명령은 동기 처리합니다. 특히 graceful stop은 플랫폼에서 최대 90초까지 기다릴 수 있으므로 외부 계층의 제한 시간이 더 길어야 합니다.
 
 | 요청 | 연결 실패 (2초) | 응답 타임아웃 |
 |---|---|---|
@@ -354,10 +353,10 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 연결 타임아웃 | 2초 |
 | 재시도 간격 | 0.5초 |
 | 응답 대기 — 조회 | 6초 |
-| 응답 대기 — 명령 | 35초 (드라이버 30초 + 여유 5초) |
-| 드라이버 응답 한도 — 명령 | 30초 (`shutdown` 대기 25초 + 강제 전환) |
+| 응답 대기 — 명령 | 100초 |
+| 플랫폼 stop 응답 한도 | 90초 |
 | 전체 예산 — 조회 | 약 15초 |
-| 전체 예산 — 명령 | 약 40초 |
+| 전체 예산 — 명령 | 약 103초 |
 
 명령의 응답 타임아웃에서 재시도하지 않는 이유는 두 가지입니다. 연결이 성립했으므로 dom0-manager가 요청을 이미 받아 처리 중일 수 있고, `xl` 호출은 블로킹 subprocess이며 uvicorn 워커가 1개이므로 재전송한 요청은 처리 중인 요청 뒤에서 대기할 뿐입니다.
 
@@ -399,12 +398,14 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 오류 코드 명명 규칙 | 백엔드 | `VALIDATION_ERROR` / `InvalidArgument` 중 한쪽으로 통일 권고 |
 | OS별 실제 버전 값 | 제어 계층 | 이미지 빌드 시 실측 |
 | OS별 `min_memory_mib` | 제어 계층 | 이미지 빌드 시 실측 |
-| `DriverError`의 HTTP 코드 | 제어 계층 | 현재 `500`(구현 안 된 기능은 `501`)으로 임시 운영. OpenAPI yaml의 `ErrorCode`에 추가할지 결정 |
-| 배포 분리 시 접속 방식 | 공통 | Spring은 EC2, dom0-manager는 보드에서 실행(Tailscale 연결 예정). dom0-manager는 지금 `127.0.0.1`에만 바인딩하고 인증이 없음. 바인드 주소와 서비스 인증(Spring은 `DOM0_MANAGER_SERVICE_TOKEN`이 설정되면 `Authorization: Bearer`를 보냄)을 정해야 함 |
+| `DriverError`의 세부 분류 | 제어 계층 | 알려진 입력·없음·충돌·자원·시간 초과·일시 장애는 각각 400·404·409·507·504·503으로 분리하고, 분류되지 않은 실패만 500 사용 |
+| 서비스 토큰 배포·회전 | 공통 | Spring과 dom0-manager에 같은 Bearer 서비스 토큰을 안전하게 배포하고 회전하는 운영 절차 |
 | 템플릿 이름 변환 | 제어 계층 | Spring `template_id`+`version`(예: `ubuntu` + `24.04-20260926`)을 플랫폼 템플릿 이름(`ubuntu-24.04-20260926`, `perseus-zephyr-starter-1.0.0`)으로 바꾸는 규칙 |
 | 자동 복구 주체 | 공통 | 보드(Xen `on_crash`·dom0 감시) 또는 Spring. 결정 전까지 Spring은 복구를 수행하지 않음 |
 
-`vm_id` 저장 방식은 **1안으로 확정**했습니다. 도메인 설정의 `uuid`에 `vm_id`를 넣고 `xl list -l`의 `config.c_info.uuid`로 역조회합니다. 플랫폼 도구(`perseus_vm.py`)와 dom0-manager XenDriver가 같은 방식을 씁니다.
+dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포함한 내부 API에서 Bearer 서비스 토큰을 검사합니다. Spring은 `DOM0_MANAGER_BASE_URL`에 Tailscale 주소를 설정하고 `DOM0_MANAGER_SERVICE_TOKEN`을 `Authorization: Bearer`로 전송합니다. 연결 실패는 `503 VM_CONTROL_UNAVAILABLE`로 변환합니다.
+
+`vm_id`는 도메인 설정의 `uuid`에 기록하고 `xl list -l`의 `config.c_info.uuid`로 역조회합니다. 동일 VM의 stop/start 및 retire/restore는 같은 UUID를 유지하며, 템플릿 생성·복제·purge 이후 신규 생성은 새 UUID를 사용합니다.
 
 ---
 
@@ -414,3 +415,4 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 |---|---|---|
 | v1 | 2026-10-16 | 계약 확정안 v1.0, 리뷰 v1.1, 백엔드 VM API 규약 v1, 리뷰 v1.2의 확정 사항 통합 |
 | v1.1 | 2026-10-19 | 구현에 맞춰 보완: 공개 VM 객체에 `agent_status`, Spring 공개 state `stopped`(3.3), 템플릿 응답 필드 `version`, `xl` 플래그 없음(`------`) 매핑, `DriverError` 500/501, `/healthz` 본문, Spring 오류 변환표(8.2), 공개 API 응답 형식(5장), `vm_id` 저장 1안 확정, 배포 분리·복구 주체 미확정 항목 추가. Spring 시작은 실행 중이 아닌 도메인을 `409 INVALID_VM_STATE`로 거부, 정지는 이전 상태를 조회해 이벤트 `from`에 기록. Spring이 VM 상태를 주기 조회해 `cause: detected` 이벤트 기록. 템플릿을 플랫폼 기본값(Ubuntu·Debian·Zephyr)으로 교체하고 템플릿·공개 VM 객체에 `guest_kind` 추가 |
+| v1.2 | 2026-10-19 | Spring 선발급 `vm_id`를 유일한 영구 식별자·생성 멱등성 키로 확정. 플랫폼 자동 IP 할당, 동기 stop 90초와 Spring 100초 제한, retire/restore/purge 생명주기, Spring `RETIRED` 명세 보존, Tailscale+Bearer 내부 연결을 반영 |

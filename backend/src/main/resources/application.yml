@@ -91,5 +91,6 @@ perseus:
     service-token: ${DOM0_MANAGER_SERVICE_TOKEN:}
     connect-timeout: ${DOM0_MANAGER_CONNECT_TIMEOUT:2s}
     query-timeout: ${DOM0_MANAGER_QUERY_TIMEOUT:6s}
-    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:35s}
+    # Platform graceful stop can wait up to 90s; keep the outer HTTP budget longer.
+    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:100s}
     retry-backoff: ${DOM0_MANAGER_RETRY_BACKOFF:500ms}

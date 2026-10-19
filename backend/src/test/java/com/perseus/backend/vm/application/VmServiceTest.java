@@ -21,6 +21,7 @@ import com.perseus.backend.vm.domain.CreateVmCommand;
 import com.perseus.backend.vm.domain.Vm;
 import com.perseus.backend.vm.domain.VmControlPort;
 import com.perseus.backend.vm.domain.VmLaunchSpec;
+import com.perseus.backend.vm.domain.VmLifecycle;
 import com.perseus.backend.vm.domain.VmRecord;
 import com.perseus.backend.vm.domain.VmRecordRepository;
 import com.perseus.backend.vm.domain.VmRuntime;
@@ -73,7 +74,8 @@ class VmServiceTest {
     void listCombinesRecordsWithXenStateAndReportsAbsentDomainsAsStopped() {
         VmRecord running = record("vm-1", "alpine-1");
         VmRecord stopped = record("vm-2", "alpine-2");
-        when(vmRecordRepository.findAllByOrderByCreatedAtAsc()).thenReturn(List.of(running, stopped));
+        when(vmRecordRepository.findAllByLifecycleOrLifecycleIsNullOrderByCreatedAtAsc(VmLifecycle.REGISTERED))
+                .thenReturn(List.of(running, stopped));
         when(vmControlPort.list()).thenReturn(List.of(
                 new VmRuntime("vm-1", VmState.RUNNING, 1, 256),
                 new VmRuntime("unknown-domain", VmState.RUNNING, 1, 128)));
@@ -232,15 +234,33 @@ class VmServiceTest {
     }
 
     @Test
-    void destroyDeletesDomainDiskAndRecord() {
-        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+    void destroyRetiresDomainAndKeepsTheRecordForRestore() {
+        VmRecord record = record("vm-1", "alpine-1");
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record));
 
         service.destroy("vm-1");
 
         verify(vmControlPort).destroy("vm-1");
-        verify(vmRecordRepository).deleteById("vm-1");
+        verify(vmRecordRepository).save(record);
+        assertThat(record.getLifecycle()).isEqualTo(VmLifecycle.RETIRED);
         verify(eventRecorder).vmDeleted("vm-1", "alpine-1");
         verify(stateTracker).forget("vm-1");
+    }
+
+    @Test
+    void retiredVmIsHiddenAndItsNameRemainsReserved() {
+        VmRecord retired = record("vm-1", "alpine-sensor");
+        retired.retire();
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(retired));
+        when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.of(retired));
+
+        assertThatThrownBy(() -> service.get("vm-1"))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo("VM_NOT_FOUND"));
+        assertThatThrownBy(() -> service.create(ALPINE))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo("VM_NAME_CONFLICT"));
+        verify(vmControlPort, never()).launch(anyString(), any());
     }
 
     @Test
