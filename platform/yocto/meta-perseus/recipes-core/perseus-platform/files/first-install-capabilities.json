@@ -1,6 +1,0 @@
-{
-  "schema": 1,
-  "layout": "dos-boot1-root2-data3-v1",
-  "growth": "actual-device-last-ext4-v1",
-  "identity": "systemd-machine-id-guest-seed-v1"
-}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Xenova persistent VM data (verified boot-disk ext4, never formatted here)
+Requires=xenova-data-prepare.service
+After=xenova-data-prepare.service
+JobTimeoutSec=330s
+
+[Mount]
+What=/run/xenova/data-device
+Where=/srv/xenova
+Type=ext4
+Options=nodev,nosuid,noexec
+TimeoutSec=15s
+
+[Install]
+WantedBy=multi-user.target

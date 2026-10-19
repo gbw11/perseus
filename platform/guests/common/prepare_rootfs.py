@@ -6,6 +6,7 @@
 from pathlib import Path
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -77,13 +78,131 @@ def enable(root, unit):
                  '/usr/lib/systemd/system/' + unit)
 
 
+def check_ssh_service(root):
+    """쓰기 없이 SSH 정책 충돌과 경로를 검사하고 제거할 최종 링크만 반환한다.
+
+    .wants/.requires 부모 링크도 guest namespace로 해석한다. 절대 링크는 guest
+    root에 고정하며, root 밖 상대 링크는 쓰기 전에 거부한다.
+    알려진 socket 설정만 전환하며 사용자 의존성 충돌은 모든 적용 전에 거부한다.
+    """
+    root = Path(root).resolve(strict=True)
+    removals = []
+    for base in ('etc/systemd/system', 'usr/lib/systemd/system', 'run/systemd/system'):
+        directory = inside(root, base, create_parents=False)
+        if not directory.is_dir():
+            continue
+        for suffix in ('*.wants', '*.requires'):
+            for entry in directory.glob(suffix):
+                parent = inside(root, str(entry.relative_to(root)), create_parents=False)
+                if not parent.is_dir():
+                    if parent.exists():
+                        raise ValueError('invalid SSH dependency directory requires manual review: ' + str(entry))
+                    continue
+                for name in ('ssh.socket', 'sshd.socket'):
+                    link = inside(root, str((parent / name).relative_to(root)),
+                                  follow_final=False, create_parents=False)
+                    if link.is_symlink():
+                        removals.append(link)
+                    elif link.exists():
+                        raise ValueError('unexpected non-link SSH dependency: ' + str(link))
+    old = inside(root, 'etc/systemd/system/ssh.service.d/00-socket.conf', follow_final=False, create_parents=False)
+    if old.exists() and not old.is_symlink():
+        # 배포판의 알려진 socket-only drop-in만 제거한다. 팀원의 추가 설정은 검토를 요구한다.
+        rows = [re.sub(r'[ \t]*=[ \t]*', '=', s.strip()) for s in old.read_text().splitlines()
+                if s.strip() and not s.lstrip().startswith(('#', ';'))]
+        if any(s not in ('[Unit]', 'Requires=ssh.socket', 'Wants=ssh.socket', 'After=ssh.socket') for s in rows):
+            raise ValueError('custom 00-socket.conf requires manual review')
+    if old.is_symlink() and old.readlink() != Path('/dev/null'):
+        raise ValueError('custom 00-socket.conf link requires manual review')
+    old_gates = []
+    for name in ('ssh.socket', 'sshd.socket'):
+        dropin = inside(root, 'etc/systemd/system/' + name + '.d/10-xenova-identity.conf', follow_final=False, create_parents=False)
+        if dropin.is_symlink() or dropin.exists():
+            if dropin.is_symlink() or dropin.read_text() != '[Unit]\nRequires=xenova-guest-identity.service\nAfter=xenova-guest-identity.service\n':
+                raise ValueError('unexpected socket identity drop-in; manual review required')
+            old_gates.append(dropin)
+    # 알려지지 않은 필수 socket 의존성은 mask로 숨기지 않고 변경 전에 거부한다.
+    for base in ('etc/systemd/system', 'usr/lib/systemd/system', 'run/systemd/system'):
+        directory = inside(root, base, create_parents=False)
+        for name in ('ssh.service', 'sshd.service'):
+            dropins = inside(root, base + '/' + name + '.d', create_parents=False)
+            candidates = [directory / name] + list(dropins.glob('*.conf'))
+            for candidate in candidates:
+                if candidate.name == '00-socket.conf':
+                    continue
+                value = inside(root, str(candidate.relative_to(root)), create_parents=False)
+                if not value.is_file():
+                    continue
+                content = value.read_text().replace('\\\n', ' ')
+                section = None
+                for line in content.splitlines():
+                    row = line.strip()
+                    if row.startswith(('#', ';')):
+                        continue
+                    if row.startswith('[') and row.endswith(']'):
+                        section = row[1:-1]
+                    key, separator, requirement = row.partition('=')
+                    if (section == 'Unit' and separator and key.strip() in
+                            ('Requires', 'Wants', 'BindsTo', 'Requisite') and
+                            set(requirement.split()) & {'ssh.socket', 'sshd.socket'}):
+                        raise ValueError('custom SSH socket dependency requires manual review: ' + str(candidate))
+    if not inside(root, 'usr/lib/systemd/system/ssh.service', create_parents=False).is_file():
+        raise ValueError('required guest systemd unit missing: ssh.service')
+    return list(dict.fromkeys(removals + old_gates))
+
+
+def configure_ssh_service(root):
+    """검사를 모두 마친 뒤 일반 ssh.service 정책을 적용한다. identity 파일은 유지한다.
+
+    Ubuntu RequiredBy enable 링크, 이전 socket gate와 SSH generator를 정리한다.
+    외부에서 동시에 수정하지 않는 오프라인 사본/명시적 기존 VM 갱신 전용이다.
+    """
+    root = Path(root)
+    removals = check_ssh_service(root)
+    for link in removals:
+        link.unlink()
+    replace_link(root, 'etc/systemd/system/ssh.service.d/00-socket.conf', '/dev/null')
+    for name in ('ssh.socket', 'sshd.socket'):
+        replace_link(root, 'etc/systemd/system/' + name, '/dev/null')
+    for name in ('sshd-socket-generator', 'systemd-ssh-generator'):
+        if inside(root, 'usr/lib/systemd/system-generators/' + name, create_parents=False).is_file():
+            replace_link(root, 'etc/systemd/system-generators/' + name, '/dev/null')
+    enable(root, 'ssh.service')
+    write(root, 'etc/xenova/ssh-service-policy.json', json.dumps({'schema': 1, 'mode': 'service', 'identity_gate':
+          inside(root, 'etc/xenova/deployment-seed.json').is_file()}) + '\n')
+
+
+def install_identity_gate(root):
+    """기존 identity 검증 코드를 서비스 단계의 모든 SSH 실행 앞에 설치한다."""
+    write(root, 'usr/lib/xenova/guest_identity.py', Path(__file__).with_name('guest_identity.py').read_text())
+    unit = """[Unit]
+Description=Establish factory guest identity before any SSH listener
+After=systemd-remount-fs.service
+Before=ssh.service sshd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/lib/xenova/guest_identity.py
+RemainAfterExit=yes
+TimeoutStartSec=240s
+
+[Install]
+WantedBy=multi-user.target
+"""
+    write(root, 'usr/lib/systemd/system/xenova-guest-identity.service', unit)
+    enable(root, 'xenova-guest-identity.service')
+    for name in ('ssh.service', 'sshd.service', 'sshd@.service'):
+        write(root, 'etc/systemd/system/' + name + '.d/10-xenova-identity.conf',
+              '[Unit]\nRequires=xenova-guest-identity.service\nAfter=xenova-guest-identity.service\n')
+
+
 def prepare_template(root):
     root = Path(root)
     os_release = inside(root, 'etc/os-release', create_parents=False)
     if os_release.is_file() and 'ID=alpine' in os_release.read_text().replace(chr(34), '').splitlines():
         raise ValueError('unsupported Linux rootfs adapter; RTOS firmware is not a Linux rootfs')
-    marker = inside(root, 'etc/perseus/template-prepared')
-    if marker.exists() or inside(root, 'etc/perseus/instance-id').exists():
+    marker = inside(root, 'etc/xenova/template-prepared')
+    if marker.exists() or inside(root, 'etc/xenova/instance-id').exists():
         raise ValueError('refusing to initialize an already prepared/instantiated rootfs')
     shadow = inside(root, 'etc/shadow')
     lines = shadow.read_text().splitlines()
@@ -98,13 +217,13 @@ def prepare_template(root):
         raise ValueError('root account absent')
     shadow.write_text('\n'.join(lines) + '\n')
     shadow.chmod(0o640)
-    write(root, 'etc/ssh/perseus-auth.conf', AUTH)
+    write(root, 'etc/ssh/xenova-auth.conf', AUTH)
     config = inside(root, 'etc/ssh/sshd_config')
-    config.write_text('Include /etc/ssh/perseus-auth.conf\n' + config.read_text())
+    config.write_text('Include /etc/ssh/xenova-auth.conf\n' + config.read_text())
     write(root, 'etc/cloud/cloud-init.disabled', '')
     # Xen direct boot의 루트는 파티션 없는 ext4 xvda다. 펌웨어/EFI 마운트가 필요 없다.
     write(root, 'etc/fstab', '/dev/xvda / ext4 defaults 0 1\n')
-    write(root, 'etc/systemd/network/05-perseus.network', '''[Match]
+    write(root, 'etc/systemd/network/05-xenova.network', '''[Match]
 Name=eth0
 
 [Network]
@@ -119,21 +238,21 @@ UseRoutes=no
     for unit in ('networking.service', 'systemd-networkd-wait-online.service', 'NetworkManager-wait-online.service'):
         replace_link(root, 'etc/systemd/system/' + unit, '/dev/null')
     enable(root, 'systemd-networkd.service')
-    enable(root, 'ssh.service')
+    configure_ssh_service(root)
     replace_link(root, 'etc/systemd/system/getty.target.wants/serial-getty@hvc0.service',
                  '/usr/lib/systemd/system/serial-getty@.service')
     write(root, 'etc/machine-id', '')
     replace_link(root, 'var/lib/dbus/machine-id', '/etc/machine-id')
     for p in inside(root, 'etc/ssh').glob('ssh_host_*'):
         p.unlink()
-    write(root, 'etc/perseus/template-prepared', '1\n')
+    write(root, 'etc/xenova/template-prepared', '1\n')
 
 
 def prepare_instance(root, record, command=subprocess.run):
     root = Path(root)
-    if not inside(root, 'etc/perseus/template-prepared').exists():
+    if not inside(root, 'etc/xenova/template-prepared').exists():
         raise ValueError('template preparation marker absent')
-    marker = inside(root, 'etc/perseus/instance-id')
+    marker = inside(root, 'etc/xenova/instance-id')
     if marker.exists():
         raise ValueError('existing instance: initialization is forbidden')
     write(root, 'etc/hostname', record['hostname'] + '\n')
@@ -145,15 +264,16 @@ def prepare_instance(root, record, command=subprocess.run):
         if target.is_symlink() or target.exists():
             raise ValueError('template unexpectedly contains SSH host keys')
         command(['ssh-keygen', '-q', '-t', kind, '-N', '', '-f', str(target)], check=True)
-    write(root, 'etc/perseus/instance-id', record['uuid'] + '\n', 0o600)
+    write(root, 'etc/xenova/instance-id', record['uuid'] + '\n', 0o600)
+    configure_ssh_service(root)
 
 
 def prepare_deployment_seed(root, record):
     """새 공통 이미지 전용 인스턴스 사본. 식별자는 systemd/guest SSH gate까지 비운다."""
     root = Path(root)
-    if not inside(root, 'etc/perseus/template-prepared').is_file():
+    if not inside(root, 'etc/xenova/template-prepared').is_file():
         raise ValueError('template preparation marker absent')
-    if inside(root, 'etc/perseus/instance-id').exists() or inside(root, 'etc/perseus/deployment-seed.json').exists():
+    if inside(root, 'etc/xenova/instance-id').exists() or inside(root, 'etc/xenova/deployment-seed.json').exists():
         raise ValueError('existing instance/seed must never be initialized again')
     if not inside(root, 'usr/bin/python3').is_file():
         raise ValueError('factory guest identity gate requires the cloud image Python 3')
@@ -163,24 +283,7 @@ def prepare_deployment_seed(root, record):
     write(root, 'etc/hosts', '127.0.0.1 localhost\n127.0.1.1 ' + record['hostname'] + '\n')
     write(root, 'etc/machine-id', 'uninitialized\n')
     replace_link(root, 'var/lib/dbus/machine-id', '/etc/machine-id')
-    write(root, 'usr/lib/perseus/guest_identity.py', (Path(__file__).with_name('guest_identity.py')).read_text())
-    write(root, 'etc/perseus/deployment-seed.json', json.dumps({'schema': 1, 'id': record['id'], 'init': 'systemd'}) + '\n')
-    unit = """[Unit]
-Description=Establish factory guest identity before any SSH listener
-After=systemd-remount-fs.service
-Before=ssh.service ssh.socket sshd.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 /usr/lib/perseus/guest_identity.py
-RemainAfterExit=yes
-TimeoutStartSec=240s
-
-[Install]
-WantedBy=multi-user.target
-"""
-    write(root, 'usr/lib/systemd/system/perseus-guest-identity.service', unit)
-    enable(root, 'perseus-guest-identity.service')
-    for name in ('ssh.service', 'ssh.socket', 'sshd.service'):
-        write(root, 'etc/systemd/system/' + name + '.d/10-perseus-identity.conf',
-              '[Unit]\nRequires=perseus-guest-identity.service\nAfter=perseus-guest-identity.service\n')
+    write(root, 'usr/lib/xenova/guest_identity.py', (Path(__file__).with_name('guest_identity.py')).read_text())
+    write(root, 'etc/xenova/deployment-seed.json', json.dumps({'schema': 1, 'id': record['id'], 'init': 'systemd'}) + '\n')
+    install_identity_gate(root)
+    configure_ssh_service(root)

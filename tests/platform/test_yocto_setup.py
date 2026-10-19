@@ -18,13 +18,13 @@ REPOSITORIES = (
 
 class SetupSafetyTest(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="perseus-yocto-test-")
+        self.temp = tempfile.TemporaryDirectory(prefix="xenova-yocto-test-")
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
         self.project = self.base / "project"
         self.workspace = self.base / "workspace"
         (self.project / "scripts").mkdir(parents=True)
-        layer = self.project / "platform/yocto/meta-perseus/conf"
+        layer = self.project / "platform/yocto/meta-xenova/conf"
         layer.mkdir(parents=True)
         (layer / "layer.conf").write_text("# fixture\n")
         config = self.project / "platform/yocto/config"
