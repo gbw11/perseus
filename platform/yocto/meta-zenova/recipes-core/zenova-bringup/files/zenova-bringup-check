@@ -1,0 +1,26 @@
+#!/bin/sh
+# A human-readable report; commands fail independently and no state is changed.
+set +e
+printf '\n### Xen / dom0 ###\n'
+uname -a
+cat /proc/cmdline
+printf '\n### Hardware / FS ###\n'
+free -h
+lsblk
+printf '\n### Xen capability ###\n'
+cat /proc/xen/capabilities
+printf '\n### Toolstack ###\n'
+command -v xl
+xl info | head -n 32
+xl list
+printf '\n### Xen messages (tail) ###\n'
+xl dmesg | tail -n 25
+printf '\n### Systemd failed units ###\n'
+systemctl --failed --no-pager
+printf '\n### Interfaces, bridge, services ###\n'
+ip -br link
+ip -br addr
+systemctl is-active zenova-bridge.service zenova-dhcp.service
+printf '\n### Guest assets ###\n'
+ls -lh /opt/zenova/bringup/Image /opt/zenova/bringup/domU-initramfs.cpio.gz /etc/xen/zenova-domu.cfg
+printf '\n### Never mistake this report for automatic PASS: inspect results above. ###\n'

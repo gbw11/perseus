@@ -1,3 +1,5 @@
+> **리브랜딩 이전 보존 문서입니다.** 아래 본문은 당시 Perseus 소스·산출물·검증 기록이며, 현재 명령과 경로는 [Zenova 플랫폼 가이드](zenova-platform.md)를 따릅니다.
+
 # Raspberry Pi 4 + Xen — 커널·이미지·실보드 bring-up 검증
 
 이 문서는 추가 커널 진단, 생성 이미지의 정적 검사, 실보드 Xen/dom0·최소 domU·격리 Bridge/DHCP 검증 절차를 다룬다. 환경 설치·Clone·업데이트·커널 설정 생성·필수 옵션 검사·이미지 빌드·domU 통합 계약은 [재구성 및 인계](yocto-rpi4-xen-reproduce.md)를 따른다.

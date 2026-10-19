@@ -29,7 +29,7 @@ def validate_keys(keys, command):
 
 def ensure(root=Path('/'), command=subprocess.run):
     root = Path(root)
-    directory = root / 'etc/perseus'
+    directory = root / 'etc/zenova'
     if not (directory / 'deployment-seed.json').is_file():
         raise ValueError('this is not a factory deployment seed')
     marker = directory / 'identity-complete.json'

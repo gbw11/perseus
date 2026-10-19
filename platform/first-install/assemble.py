@@ -23,17 +23,17 @@ from artifact_io import sha, regular, checked, new_path, publish
 from completed_artifacts import completed_input
 
 ROOT = Path(__file__).resolve().parents[2]
-FILES = ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/files'
+FILES = ROOT / 'platform/yocto/meta-zenova/recipes-core/zenova-platform/files'
 sys.path.insert(0, str(ROOT / 'platform/guests/common'))
 from prepare_rootfs import inside
 sys.path.insert(0, str(FILES))
-import perseus_zephyr as zephyr
+import zenova_zephyr as zephyr
 
-spec = importlib.util.spec_from_file_location('perseus_prepare_existing', ROOT / 'scripts/prepare-perseus-guests.py')
+spec = importlib.util.spec_from_file_location('zenova_prepare_existing', ROOT / 'scripts/prepare-zenova-guests.py')
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
 
-rtos_spec = importlib.util.spec_from_file_location('perseus_rtos_template', ROOT / 'platform/guests/zephyr/template.py')
+rtos_spec = importlib.util.spec_from_file_location('zenova_rtos_template', ROOT / 'platform/guests/zephyr/template.py')
 rtos = importlib.util.module_from_spec(rtos_spec)
 rtos_spec.loader.exec_module(rtos)
 
@@ -74,6 +74,23 @@ def template_info(directory, source_id, expected):
     for name, field in [('Image', 'kernel_sha256'), ('initrd', 'initrd_sha256'), ('kernel.config', 'config_sha256')]:
         path = checked(directory / name, boot[field])
         boot_bytes += path.stat().st_size
+    if meta.get('platform') == 'zenova':
+        import template_recipe
+        preparation = dict(meta.get('preparation', {}))
+        expected_source = preparation.pop('source_sha256', None)
+        if (not isinstance(meta.get('version'), str) or not template_recipe.VERSION.fullmatch(meta['version'])
+                or preparation.get('platform') != 'zenova'
+                or preparation.get('recipe', {}).get('version') != meta['version']
+                or preparation.get('recipe', {}).get('source_id') != source_id
+                or expected_source != hashlib.sha256(json.dumps(preparation, sort_keys=True, separators=(',', ':')).encode()).hexdigest()):
+            raise ValueError('Zenova template preparation provenance/version mismatch')
+        names = {'root.raw', 'Image', 'initrd', 'kernel.config', 'boot.json'}
+        if set(meta.get('files', {})) != names:
+            raise ValueError('Zenova template payload manifest incomplete')
+        for name in names:
+            asset = checked(directory / name, meta['files'][name]['sha256'])
+            if asset.stat().st_size != meta['files'][name]['bytes'] or asset.stat().st_mode & 0o222:
+                raise ValueError('Zenova template payload size/immutability mismatch')
     return {'logical_bytes': root.stat().st_size, 'allocated_bytes': root.stat().st_blocks * SECTOR,
             'boot_bytes': boot_bytes + 64 * 1024, 'preparation_scratch_bytes': 0,
             'source_id': source_id, 'template': str(directory), 'template_manifest_sha256': expected, 'root_sha256': meta['root_sha256'], 'boot': boot}
@@ -164,6 +181,34 @@ def copy_rtos_templates(data, entries):
     return records
 
 
+def copy_management_catalog(data):
+    """새 조립 저장소에만 factory public ID/version 카탈로그를 준비한다."""
+    from zenova_catalog import describe
+    from artifact_io import publish
+    factory=json.loads((FILES/'defaults.json').read_text())
+    selected={e['template']:e for e in factory['instances']+factory['firmware_instances']}
+    for kind, folder in [('linux','templates'),('zephyr','rtos-templates')]:
+        parent = data / folder
+        if not parent.exists():
+            continue
+        for directory in parent.iterdir():
+            if directory.name.startswith('.') or directory.name not in selected:
+                continue
+            manifest = directory / ('firmware.json' if (directory / 'firmware.json').exists() else 'template.json')
+            meta = json.loads(manifest.read_text())
+            descriptor = {'schema_version':'1.0','template_id':selected[directory.name]['template_id'],
+                          'template_version':selected[directory.name]['template_version'],'guest_kind':kind,
+                          'asset_directory':str(directory.relative_to(data)),
+                          'manifest_sha256':sha(manifest),'source_template_id':meta['id']}
+            describe(data, descriptor, full=True)
+            output = data / 'catalog' / descriptor['template_id']
+            output.mkdir(parents=True, exist_ok=True)
+            temp = output / '.descriptor'
+            temp.write_text(json.dumps(descriptor, indent=2) + '\n')
+            temp.chmod(0o444)
+            publish(temp, output / (meta['version'] + '.json'))
+
+
 def copy_rtos_seeds(data, entries):
     """새 조립 저장소에만 기본 Zephyr 독립 자산을 준비한다. 기존 저장소는 대상이 아니다."""
     if len(entries) != 1:
@@ -175,7 +220,7 @@ def copy_rtos_seeds(data, entries):
     elif entries[0]['id'] != default['template']:
         raise ValueError('default Zephyr template mismatch')
     record = zephyr.new_instance(data, default['id'], data / 'rtos-templates' / default['template'],
-                                 {}, autostart=default['autostart'], board_shutdown_policy=default['board_shutdown_policy'], registry='seeds', seed=True)
+                                 {}, autostart=default['autostart'], board_shutdown_policy=default['board_shutdown_policy'], registry='seeds', seed=True, metadata={k:default[k] for k in ('template_id','template_version') if k in default})
     return [{'record': record}]
 
 
@@ -228,36 +273,47 @@ def platform_root_ok(root):
     """마커만 믿지 않고 실제 모듈·unit·enable/drop-in·확장 도구·클론 ID 정책을 검사한다."""
     def path(name):
         return inside(root, name, create_parents=False)
-    capability = path('usr/share/perseus/first-install-capabilities.json')
+    capability = path('usr/share/zenova/first-install-capabilities.json')
     if not capability.is_file() or json.loads(capability.read_text()) != FEATURES:
         raise ValueError('platform lacks first-install capabilities; rebuild dom0 from the new Yocto source, no rootfs injection allowed')
-    expected = {'usr/lib/perseus/perseus_vm.py': FILES / 'perseus_vm.py',
-                'etc/perseus/defaults.json': FILES / 'defaults.json',
-                'usr/lib/perseus/perseus_first_boot.py': FILES / 'perseus_first_boot.py',
-                'usr/lib/perseus/first_install_contract.py': ROOT / 'platform/first-install/first_install_contract.py',
-                'usr/sbin/perseus-first-boot': FILES / 'perseus-first-boot',
-                'usr/sbin/perseus-vm': FILES / 'perseus-vm',
-                'usr/sbin/perseus-verify-artifacts': ROOT / 'scripts/verify-perseus-runtime-artifacts.py',
-                'usr/lib/perseus/perseus_runtime.py': FILES / 'perseus_runtime.py',
-                'usr/lib/perseus/perseus_zephyr.py': FILES / 'perseus_zephyr.py',
-                'etc/systemd/journald.conf.d/20-perseus.conf': FILES / 'perseus-journald.conf',
-                'etc/systemd/system.conf.d/20-perseus.conf': FILES / 'perseus-system.conf'}
-    expected['usr/lib/perseus/update_guest_ssh.py'] = ROOT / 'scripts/update-perseus-guest-ssh.py'
+    expected = {'usr/lib/zenova/zenova_vm.py': FILES / 'zenova_vm.py',
+                'etc/zenova/defaults.json': FILES / 'defaults.json',
+                'usr/lib/zenova/zenova_first_boot.py': FILES / 'zenova_first_boot.py',
+                'usr/lib/zenova/first_install_contract.py': ROOT / 'platform/first-install/first_install_contract.py',
+                'usr/sbin/zenova-first-boot': FILES / 'zenova-first-boot',
+                'usr/sbin/zenova-vm': FILES / 'zenova-vm',
+                'usr/sbin/zenova-verify-artifacts': ROOT / 'scripts/verify-zenova-runtime-artifacts.py',
+                'usr/lib/zenova/zenova_runtime.py': FILES / 'zenova_runtime.py',
+                'usr/lib/zenova/zenova_zephyr.py': FILES / 'zenova_zephyr.py',
+                'etc/systemd/journald.conf.d/20-zenova.conf': FILES / 'zenova-journald.conf',
+                'etc/systemd/system.conf.d/20-zenova.conf': FILES / 'zenova-system.conf'}
+    for name in ('zenova_management.py','zenova_management_cli.py','zenova_catalog.py','zenova_wifi.py'):
+        expected['usr/lib/zenova/'+name] = FILES/name
+    expected['usr/lib/zenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
+    expected['usr/sbin/zenova-wifi'] = FILES/'zenova-wifi'
+    expected['usr/lib/systemd/system/zenova-wifi@.service'] = FILES/'zenova-wifi@.service'
+    expected['usr/lib/zenova/update_guest_ssh.py'] = ROOT / 'scripts/update-zenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
-        expected['usr/lib/perseus/' + name] = ROOT / 'platform/guests/common' / name
-    units = ['perseus-data-prepare.service', 'perseus-first-boot.service', 'srv-perseus.mount',
-             'perseus-vms.service', 'perseus-vm-shutdown.service', 'perseus-xen-ready.service']
+        expected['usr/lib/zenova/' + name] = ROOT / 'platform/guests/common' / name
+    units = ['zenova-data-prepare.service', 'zenova-first-boot.service', 'srv-zenova.mount',
+             'zenova-vms.service', 'zenova-vm-shutdown.service', 'zenova-xen-ready.service']
     expected.update({'usr/lib/systemd/system/' + u: FILES / u for u in units})
     for relative, source in expected.items():
         if not path(relative).is_file() or path(relative).read_bytes() != source.read_bytes():
             raise ValueError('platform source/installed contract mismatch: ' + relative)
-    for name in ['sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl']:
+    for name in ['sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl', 'wpa_supplicant', 'wpa_cli', 'iw', 'networkctl']:
         if not any(path(prefix + name).is_file() and path(prefix + name).stat().st_mode & 0o111
                    for prefix in ('usr/sbin/', 'usr/bin/', 'sbin/', 'bin/')):
             raise ValueError('required platform growth tool missing: ' + name)
+    for relative in ('usr/lib/firmware/brcm/brcmfmac43455-sdio.bin',
+                     'usr/lib/firmware/brcm/brcmfmac43455-sdio.clm_blob',
+                     'usr/lib/firmware/brcm/brcmfmac43455-sdio.raspberrypi,4-model-b.txt',
+                     'usr/lib/firmware/regulatory.db','usr/lib/firmware/regulatory.db.p7s'):
+        if not path(relative).is_file() or not path(relative).stat().st_size:
+            raise ValueError('required management wireless firmware missing: '+relative)
     for relative, defines in [
-        ('usr/share/perseus/qemu-config-host.h', ('CONFIG_VNC', 'CONFIG_XEN_BACKEND')),
-        ('usr/share/perseus/qemu-i386-config-target.h', ('CONFIG_XEN',)),
+        ('usr/share/zenova/qemu-config-host.h', ('CONFIG_VNC', 'CONFIG_XEN_BACKEND')),
+        ('usr/share/zenova/qemu-i386-config-target.h', ('CONFIG_XEN',)),
     ]:
         header = path(relative)
         if not header.is_file() or any(not re.search(r'^#define ' + symbol + r'(?:\s+1)?\s*$', header.read_text(), re.M) for symbol in defines):
@@ -268,11 +324,31 @@ def platform_root_ok(root):
         raise ValueError('common dom0 machine-id must be uninitialized for PID1')
     if any(path('etc/ssh').glob('ssh_host_*_key')):
         raise ValueError('common dom0 must not contain shared SSH host keys')
-    for name in ('sshd.service', 'sshd@.service', 'sshd.socket'):
-        dropin = path('etc/systemd/system/' + name + '.d/10-perseus-keys.conf')
-        if dropin.read_bytes() != (FILES / 'perseus-sshd-keys.conf').read_bytes():
-            raise ValueError('SSH host-key gate missing')
-    enabled = ['perseus-first-boot.service', 'perseus-vms.service', 'perseus-vm-shutdown.service', 'srv-perseus.mount']
+    dropin = path('etc/systemd/system/sshd.service.d/10-zenova-keys.conf')
+    if dropin.read_bytes() != (FILES / 'zenova-sshd-keys.conf').read_bytes():
+        raise ValueError('SSH host-key gate missing')
+    service = path('usr/lib/systemd/system/sshd.service')
+    keys = path('usr/lib/systemd/system/sshdgenkeys.service')
+    if not service.is_file() or not keys.is_file() or not path('usr/libexec/openssh/sshd_check_keys').is_file():
+        raise ValueError('dom0 SSH service/key preparation package missing')
+    if any(path('usr/lib/systemd/system/' + name).exists() for name in ('sshd.socket', 'sshd@.service')):
+        raise ValueError('dom0 SSH socket mode must be replaced by service mode')
+    link = root / 'etc/systemd/system/multi-user.target.wants/sshd.service'
+    if not link.is_symlink() or path('etc/systemd/system/multi-user.target.wants/sshd.service').read_bytes() != service.read_bytes():
+        raise ValueError('dom0 SSH service not enabled')
+    for directory in ('etc/systemd/system', 'usr/lib/systemd/system'):
+        base = path(directory)
+        for suffix in ('wants', 'requires'):
+            parents = [path(str(parent.relative_to(root))) for parent in base.glob('*.' + suffix)]
+            if any(p.name in ('sshd.socket', 'sshd@.service') for parent in parents for p in parent.iterdir()):
+                raise ValueError('dom0 SSH socket dependency remains')
+    generator = root / 'etc/systemd/system-generators/systemd-ssh-generator'
+    if not generator.is_symlink() or generator.readlink() != Path('/dev/null'):
+        raise ValueError('dom0 SSH generator must be disabled for the single service path')
+    preset = path('usr/lib/systemd/system-preset/98-openssh-sshd.preset').read_text()
+    if 'enable sshd.service' not in preset.splitlines() or 'enable sshd.socket' in preset.splitlines():
+        raise ValueError('dom0 SSH preset selects wrong activation mode')
+    enabled = ['zenova-first-boot.service', 'zenova-vms.service', 'zenova-vm-shutdown.service', 'srv-zenova.mount']
     for unit in enabled:
         link = root / 'etc/systemd/system/multi-user.target.wants' / unit
         if not link.is_symlink() or path('etc/systemd/system/multi-user.target.wants/' + unit).read_bytes() != (FILES / unit).read_bytes():
@@ -320,7 +396,7 @@ def platform_boot_ok(image, table, output):
     script = boot[72:72 + length].decode()
     for marker in ('part uuid mmc ${devnum}:2', 'fatload mmc ${devnum}:1 ${xen_loadaddr} xen',
                    'fdt move ${fdtcontroladdr} ${fdt_addr_r}', 'booti ${xen_loadaddr} - ${fdt_addr_r}',
-                   'perseus_debug', 'loglevel=4', 'systemd.show_status=error'):
+                   'zenova_debug', 'loglevel=4', 'systemd.show_status=error'):
         if marker not in script:
             raise ValueError('platform lacks validated Xen boot/PARTUUID contract: ' + marker)
     return result
@@ -403,19 +479,25 @@ def download_source(guest):
 
 
 def source_fingerprints():
-    paths = [ROOT / 'scripts/assemble-perseus-first-install.py', ROOT / 'scripts/prepare-perseus-guests.py',
+    paths = [
+             ROOT / 'platform/guests/common/template_recipe.py',
+             ROOT / 'scripts/build-zenova-starter.py', ROOT / 'scripts/resolve-zenova-templates.py',
+             ROOT / 'scripts/verify-zenova-template.py', ROOT / 'scripts/refresh-zenova-starter-lock.py',
+             ROOT / 'platform/guests/default-templates.lock.json',
+             *(p for p in sorted((ROOT / 'platform/guests/linux').rglob('*')) if p.is_file()),
+             ROOT / 'scripts/assemble-zenova-first-install.py', ROOT / 'scripts/prepare-zenova-guests.py',
              ROOT / 'platform/first-install/assemble.py', ROOT / 'platform/first-install/artifact_io.py',
-             ROOT / 'platform/first-install/completed_artifacts.py', ROOT / 'scripts/publish-perseus-platform.py',
+             ROOT / 'platform/first-install/completed_artifacts.py', ROOT / 'scripts/publish-zenova-platform.py', ROOT / 'scripts/publish-zenova-template-catalog.py',
              ROOT / 'platform/first-install/first_install_contract.py',
              *sorted(p for p in FILES.iterdir() if p.is_file()),
-             ROOT / 'scripts/verify-perseus-runtime-artifacts.py', ROOT / 'scripts/package-perseus-firmware.py',
-             ROOT / 'scripts/update-perseus-guest-ssh.py', ROOT / 'scripts/collect-perseus-guest-evidence.py',
+             ROOT / 'scripts/verify-zenova-runtime-artifacts.py', ROOT / 'scripts/package-zenova-firmware.py',
+             ROOT / 'scripts/update-zenova-guest-ssh.py', ROOT / 'scripts/collect-zenova-guest-evidence.py',
              *sorted((ROOT / 'platform/guests/zephyr/starter-app').rglob('*.*')),
-             ROOT / 'platform/yocto/meta-perseus/recipes-extended/xen/xen_4.21.bbappend',
-             ROOT / 'platform/yocto/meta-perseus/recipes-extended/xen/files/0001-arm-rpi4-find-bcm2711-power-management-watchdog.patch',
-             ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/perseus-platform_1.0.bb',
-             ROOT / 'platform/yocto/meta-perseus/recipes-devtools/qemu/qemu_10.2.0.bbappend',
-             ROOT / 'platform/yocto/meta-perseus/recipes-bsp/xen-rpi-u-boot-scr/files/boot.cmd.xen.in',
+             ROOT / 'platform/yocto/meta-zenova/recipes-extended/xen/xen_4.21.bbappend',
+             ROOT / 'platform/yocto/meta-zenova/recipes-extended/xen/files/0001-arm-rpi4-find-bcm2711-power-management-watchdog.patch',
+             ROOT / 'platform/yocto/meta-zenova/recipes-core/zenova-platform/zenova-platform_1.0.bb',
+             ROOT / 'platform/yocto/meta-zenova/recipes-devtools/qemu/qemu_10.2.0.bbappend',
+             ROOT / 'platform/yocto/meta-zenova/recipes-bsp/xen-rpi-u-boot-scr/files/boot.cmd.xen.in',
              ROOT / 'platform/guests/sources.lock.json', *sorted((ROOT / 'platform/guests/common').glob('*.py')),
              *(p for p in sorted((ROOT / 'platform/guests/zephyr').glob('*')) if p.is_file())]
     return {str(p.relative_to(ROOT)): sha(p) for p in paths}
@@ -465,7 +547,7 @@ def assemble(config, image, record, planned):
         datafile = work.path / 'data.ext4'
         with datafile.open('xb') as stream:
             stream.truncate(planned['capacity']['data_bytes'])
-        prepare.command(['mkfs.ext4', '-F', '-m', '0', '-L', 'perseus-data', datafile])
+        prepare.command(['mkfs.ext4', '-F', '-m', '0', '-L', 'zenova-data', datafile])
         data = work.path / 'data'
         work.mount(work.loop(datafile), data)
         prepare.initialize_storage(data, seed=True)
@@ -494,10 +576,11 @@ def assemble(config, image, record, planned):
                                      'retained_root': planned['capacity']['template_policy'] == 'full'})
         firmware_records = copy_rtos_templates(data, planned.get('rtos_templates', []))
         firmware_instances = copy_rtos_seeds(data, planned.get('rtos_templates', []))
+        copy_management_catalog(data)
         factory = {'schema': 1, 'features': FEATURES, 'factory_id': str(uuid.uuid4()), 'instances': bundles,
                    'templates': template_records, 'rtos_templates': firmware_records, 'firmware_instances': firmware_instances,
                    'template_policy': planned['capacity']['template_policy']}
-        (data / '.perseus-install.json').write_text(json.dumps(factory, indent=2) + '\n')
+        (data / '.zenova-install.json').write_text(json.dumps(factory, indent=2) + '\n')
         stats = os.statvfs(data)
         actual_free = stats.f_bavail * stats.f_frsize
         vm_holes = sum(max(0, (data / 'seeds' / b['record']['id'] / 'root.raw').stat().st_size
@@ -515,7 +598,7 @@ def assemble(config, image, record, planned):
             template_info(template, guest['source_id'], verified_templates[guest['id']])
         for entry in planned.get('rtos_templates', []):
             rtos.info(entry['template'], entry['template_manifest_sha256'])
-        final = stage / 'perseus-first-install.img'
+        final = stage / 'zenova-first-install.img'
         shutil.copyfile(base, final)
         with final.open('r+b') as stream:
             stream.truncate(planned['capacity']['image_bytes'])
@@ -544,7 +627,7 @@ def assemble(config, image, record, planned):
                     'verified_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                     'unperformed': ['64GB/128GB device boot/growth', 'Xen/guest boot', 'console/SSH', 'persistence', 'SD recording']}
         verify(final, manifest)
-        target_manifest = stage / 'perseus-first-install.manifest.json'
+        target_manifest = stage / 'zenova-first-install.manifest.json'
         target_manifest.write_text(json.dumps(manifest, indent=2) + '\n')
         (stage / 'SHA256SUMS').write_text(f"{manifest['image_sha256']}  {final.name}\n{sha(target_manifest)}  {target_manifest.name}\n")
         os.sync()
@@ -574,7 +657,7 @@ def main(argv=None):
         checksums = (args.manifest.parent / 'SHA256SUMS').read_text().splitlines()
         if f'{sha(args.manifest)}  {args.manifest.name}' not in checksums:
             raise ValueError('verification manifest digest mismatch')
-        print(json.dumps(verify(args.manifest.parent / 'perseus-first-install.img', manifest), indent=2))
+        print(json.dumps(verify(args.manifest.parent / 'zenova-first-install.img', manifest), indent=2))
         return
     if not all((args.config, args.output_dir, args.work_dir, args.card_bytes)):
         raise ValueError('--config, --output-dir, --work-dir and measured --card-bytes are required')

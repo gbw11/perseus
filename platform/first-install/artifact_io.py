@@ -29,10 +29,10 @@ def checked(path, expected):
     return path
 
 
-def new_path(path):
+def new_path(path, *, allow_hidden=False):
     if not path.is_absolute() or path.is_symlink() or path.exists():
         raise ValueError("output must be a new absolute path")
-    if path.name.startswith(".") or not path.parent.is_dir():
+    if (path.name.startswith(".") and not allow_hidden) or not path.parent.is_dir():
         raise ValueError("output requires an existing parent and a non-hidden name")
     if str(path.resolve()).startswith(("/dev/", "/proc/", "/sys/")):
         raise ValueError("output cannot be a device or virtual filesystem")
@@ -40,9 +40,9 @@ def new_path(path):
         raise ValueError('output/work parent must not contain symlinks')
 
 
-def publish(source, target):
+def publish(source, target, *, allow_hidden=False):
     """같은 파일시스템의 renameat2(NOREPLACE)로 게시해 경합 시에도 기존 출력을 보존한다."""
-    new_path(target)
+    new_path(target, allow_hidden=allow_hidden)
     libc = ctypes.CDLL(None, use_errno=True)
     rename = getattr(libc, 'renameat2', None)
     if rename is None:

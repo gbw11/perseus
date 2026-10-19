@@ -1,3 +1,5 @@
+> **리브랜딩 이전 보존 문서입니다.** 아래 본문은 당시 Perseus 소스·산출물·검증 기록이며, 현재 명령과 경로는 [Zenova 플랫폼 가이드](zenova-platform.md)를 따릅니다.
+
 # Perseus 영구 Xen 플랫폼 계약과 후속 수락 시험
 
 공통 SD 설치·64/128GB 확장·Pi 단독 최초 생성의 최신 계약은 [공통 최초 설치 이미지](perseus-first-install.md)를 따른다. 아래 문서의 초기 수동 저장소 준비 절차와 Alpine 계획은 당시 구현 기록이며, Linux 활성 템플릿은 Ubuntu·Debian이며, Alpine 확장 지점은 별도 Zephyr Xen 펌웨어 템플릿으로 교체했다. 2026-10-17부터 Zephyr도 공통 영구 관리 CLI에 포함한다. SSH·DHCP·게스트 쓰기 저장소·협조형 종료는 미지원이다. 현행 변경은 [2026-10-18 실보드 수락 보완](perseus-acceptance-20261018.md)을 우선한다.

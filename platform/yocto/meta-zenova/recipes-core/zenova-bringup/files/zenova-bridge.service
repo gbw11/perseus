@@ -1,0 +1,11 @@
+[Unit]
+Description=Zenova isolated internal xenbr0 bridge (no physical NIC attached)
+After=systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=@SBINDIR@/zenova-bridge-up
+
+[Install]
+WantedBy=multi-user.target

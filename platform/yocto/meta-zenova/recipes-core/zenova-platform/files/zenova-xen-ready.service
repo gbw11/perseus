@@ -1,0 +1,10 @@
+[Unit]
+Description=Verify Xen dom0 control interface and xl toolstack
+Requires=xenstored.service xenconsoled.service xen-init-dom0.service
+After=xenstored.service xenconsoled.service xen-init-dom0.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/zenova-vm check-xen
+RemainAfterExit=yes
+TimeoutStartSec=30s

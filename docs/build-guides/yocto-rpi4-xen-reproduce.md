@@ -1,3 +1,5 @@
+> **리브랜딩 이전 보존 문서입니다.** 아래 본문은 당시 Perseus 소스·산출물·검증 기록이며, 현재 명령과 경로는 [Zenova 플랫폼 가이드](zenova-platform.md)를 따릅니다.
+
 # Raspberry Pi 4 Yocto/Xen 환경 재구성 및 domU 인계
 
 **이 문서가 팀원의 환경 준비 시작점이다.** GitLab에서 Clone한 최신 프로젝트와 그 안의 `platform/yocto/layers.lock`을 출발점으로 **새 Linux 작업 경로**에 환경을 준비한다. 문서화된 호스트 패키지·GitLab 인증·외부 소스 다운로드를 위한 네트워크는 필요하다. 기존 서버의 `conf`, 외부 레이어 복사본, 개인 스크립트나 ZIP은 필요하지 않다.
