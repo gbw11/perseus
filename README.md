@@ -1,149 +1,50 @@
-# Xenova - Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼
+# Xenova — Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼
 
-## 현재 Xenova 플랫폼
+Raspberry Pi 4 + Xen 기반의 멀티 OS 관리 프로젝트입니다.
+차량 기능의 격리·장애 전환·복구를 검증하는 것을 목표로 합니다.
 
-현재 CLI는 `xenova-vm`, 영구 저장소는 `/srv/xenova`, 데이터 LABEL은
-`xenova-data`입니다. 이미지 타깃은 `xenova-xen-bringup-image`입니다.
-
-- [Xenova 실행·빌드·최초 설치 가이드](docs/build-guides/xenova-platform.md)
-- [기본 템플릿 커스터마이징·버전 게시](docs/build-guides/xenova-template-workflow.md)
-- [리브랜딩 범위와 후속 검증](docs/build-guides/xenova-rebranding.md)
-- [Zephyr Starter App](platform/guests/zephyr/starter-app/README.md)
-- 외부 Layer·버전은 `platform/yocto/layers.lock`을 따릅니다.
-
-`docs/build-guides/perseus-*` 및 이전 `yocto-rpi4-xen-*` 문서는 당시
-Perseus 소스·이미지·실보드의 역사적 기록입니다. 기존 로그·경로·해시는 유지하며
-현재 Xenova 명령은 위 가이드를 따릅니다. 기존 이미지·SD를 실시간 변환하지 않습니다.
-
-## 프로젝트 구조(기존 구성안)
-
-아래 구성안에는 아직 구현하지 않은 항목이 포함됩니다. 현재 Yocto 빌드에 사용하는 파일 목록은 [빌드 버전 기록](docs/build-guides/yocto-rpi4-xen-build-versions.md)을 참고합니다.
+## 프로젝트 구조
 
 ```text
-├── docs/                     # 문서
-
-│
-
-├── contracts/                     # VM 간 메시징 계약, Agent 통신 계약, 관리 API 계약 등
-
-│
-
-├── platform/
-
-│   │
-
-│   ├── yocto/                       # Yocto-Xen 설정 및 패키지
-
-│   │
-
-│   ├── boot/
-
-│   │   ├── rpi4/                    # 실보드 부팅 환경
-
-│   │   └── qemu/                    # QEMU 부팅 환경
-
-│   │
-
-│   ├── guests/
-
-│   │   ├── common/                  # 공통 초기화·설치
-
-│   │   ├── debian/                  # Debian 템플릿 제작
-
-│   │   ├── ubuntu/                  # Ubuntu 템플릿 제작
-
-│   │   └── zephyr/                  # Zephyr Xen 펌웨어 템플릿
-
-│   │
-
-│   └── network/                     # Bridge·DHCP 설정
-
-│
-
-├── services/
-
-│   ├── dom0-manager/
-
-│   │   └── app/
-
-│   │         ├── api/
-
-│   │         ├── drivers/
-
-│   │         ├── metrics/
-
-│   │         ├── recovery/
-
-│   │         └── console/
-
-│   │
-
-│   ├── vm-agent/
-
-│   │   ├── src/
-
-│   │   ├── config/
-
-│   │   └── deploy/
-
-│   │
-
-│   └── display/
-
-│       ├── router/
-
-│       └── kiosk/
-
-│
-
-├── apps/
-
-│   ├── alpine-app/
-
-│   ├── debian-app/
-
-│   └── ubuntu-app/
-
-│
-
-├── frontend/
-
-│   └── admin-console/               # React 관리 콘솔
-
-│
-
-├── backend/                          # Spring Boot
-
-│
-
-├── deploy/                          # 환경별 배포 설정
-
-│
-
-├── tests/
-
-│   ├── integration/
-
-│   ├── qemu/
-
-│   ├── hardware/
-
-│   └── fixtures/
-
-│
-
-└── scripts/
-
-    ├── build-all.sh
-
-    ├── build-dom0.sh
-
-    ├── build-guests.sh
-
-    ├── deploy-dev.sh
-
-    └── validate-release.sh
+├── platform/    # Yocto·Xen 빌드, 부팅 환경, 게스트 템플릿
+├── backend/     # Spring Boot VM 관리 서버
+├── services/    # dom0 제어, VM 에이전트, 표시 서비스
+├── frontend/    # 관리 콘솔용 예약 폴더
+├── apps/        # VM 애플리케이션용 예약 폴더
+├── contracts/   # 서비스 간 계약
+├── deploy/      # 배포 설정용 예약 폴더
+├── scripts/     # 빌드·설치·검증 실행 스크립트
+├── tests/       # 자동화 테스트와 검증 자료
+└── docs/        # 아키텍처·설계·계약·개발 가이드
 ```
 
-- [VM 관리 계약·작업 기록·보관/복원/삭제](docs/build-guides/xenova-vm-management.md)
-- [dom0 Wi-Fi 관리 접속](docs/build-guides/xenova-wifi-access.md)
+## 문서 안내
+
+| 목적 | 문서 |
+| --- | --- |
+| 시스템 구성과 장애 대응 | [아키텍처 설계서](docs/architecture.md) |
+| 플랫폼 폴더별 역할 | [플랫폼 구조](platform/README.md) |
+| 실행·빌드·최초 설치 | [플랫폼 가이드](docs/build-guides/xenova-platform.md) |
+| VM 관리·작업 보존·삭제 | [VM 관리 가이드](docs/build-guides/xenova-vm-management.md) |
+| 템플릿 수정과 버전 게시 | [템플릿 개발 가이드](docs/build-guides/xenova-template-workflow.md) |
+| Linux 게스트 Xen 설정 | [게스트 템플릿 안내](platform/guests/README.md) |
+| WiFi 관리 접속 | [WiFi 접속 가이드](docs/build-guides/xenova-wifi-access.md) |
+| Zephyr 앱 개발 | [Zephyr Starter App](platform/guests/zephyr/starter-app/README.md) |
+| dom0 제어 서비스 실행 | [dom0-manager README](services/dom0-manager/README.md) |
+| 백엔드 실행 | [백엔드 README](backend/README.md) |
+| MQTT 토픽·메시지 | [MQTT 계약](docs/contracts/mqtt-contract-v1.md) |
+| 브랜치·커밋·MR 규칙 | [기여 가이드](CONTRIBUTING.md) |
+
+## 플랫폼 기준
+
+| 항목 | 현재 값 |
+| --- | --- |
+| 관리 CLI | `xenova-vm` |
+| 이미지 타깃 | `xenova-xen-bringup-image` |
+| 영구 저장소 | `/srv/xenova` |
+| 데이터 LABEL | `xenova-data` |
+| 외부 레이어·버전 | `platform/yocto/layers.lock` |
+
+이전 `perseus-*`, `yocto-rpi4-xen-*` 문서는 당시의 기록으로 보존합니다.
+현재 명령은 플랫폼 가이드를 따르며, 기존 이미지·SD는 자동 변환되지 않습니다.
+명칭 변경 범위는 [리브랜딩 기록](docs/build-guides/xenova-rebranding.md)을 참고합니다.
