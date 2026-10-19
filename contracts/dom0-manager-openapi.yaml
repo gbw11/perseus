@@ -273,7 +273,7 @@ components:
         name:
           type: string
           enum: [vcpus, memory_mib, ipv4]
-          description: ipv4 는 Linux VM IP 풀(192.168.77.2..99) 고갈
+          description: ipv4 는 플랫폼의 Linux 내부 IP 풀 고갈 (플랫폼 IP_POOL_EXHAUSTED). dom0-manager 는 IP 를 고르지 않는다
         requested:
           type: integer
         available:
@@ -357,7 +357,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     NotSupported:
-      description: 드라이버·플랫폼이 제공하지 않는 동작 (code NotSupported). xen 모드의 명령, 플랫폼이 아직 받지 않는 호출자 지정 vm_id
+      description: 드라이버·플랫폼이 제공하지 않는 동작 (code NotSupported). xen 모드의 생성·정지·삭제 명령
       content:
         application/json:
           schema:

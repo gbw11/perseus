@@ -9,8 +9,8 @@
 - 생성은 registry 등록(create) + 시작(start) 두 단계다. 여기서는 Provisioner 가 create, Driver 가 start 를 맡는다.
 - stop 은 플랫폼이 최대 90초 동기 대기하고 자동 강제 종료하지 않는다. force 는 명시적일 때만.
 
-호출자 지정 vm_id: 팀 결정은 "Spring 이 vm_id 를 발급"이다. 플랫폼 create 가 spec['vm_id'] 를 받도록 바뀌기 전까지는
-새 VM 생성이 NotSupportedByPlatform(501) 로 끝난다. 조회·시작·정지·보관은 그 변경과 무관하게 동작한다.
+- create 는 Spring 이 발급한 vm_id 를 필수로 받아 registry·Xen UUID 로 쓰고, 내부 실행 이름(vm-<hex>)·MAC·Linux IP 는
+  플랫폼이 전역 잠금 안에서 발급한다. dom0-manager 는 ipv4 를 보내지 않고 IP_POOL_EXHAUSTED 를 507 로 옮긴다.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import os
 import re
 import sys
 import threading
-from collections.abc import Iterable
+import time
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
@@ -33,7 +33,6 @@ from ..errors import (
     InsufficientResources,
     InvalidArgument,
     InvalidState,
-    NotSupportedByPlatform,
     PlatformUnavailable,
     VMExists,
     VMNotFound,
@@ -44,7 +43,6 @@ from .xl import Xl
 
 log = logging.getLogger(__name__)
 
-IP_PREFIX = "192.168.77."
 _ID_RE = re.compile(r"[a-z][a-z0-9-]{0,39}\Z")
 
 
@@ -89,8 +87,12 @@ class SerializedManager:
         return self._inner.data
 
     def call(self, action: str, spec: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
-        if not self._lock.acquire(timeout=self.busy_timeout_s):
-            return _busy_envelope(action, self.busy_timeout_s, kwargs.get("request_id"))
+        return self.call_within(action, spec, timeout_s=self.busy_timeout_s, **kwargs)
+
+    def call_within(self, action: str, spec: dict[str, Any] | None = None, *, timeout_s: float, **kwargs: Any) -> dict[str, Any]:
+        """잠금 대기를 timeout_s 로 제한한 call. health 처럼 전체 시간 예산이 정해진 호출에 쓴다."""
+        if not self._lock.acquire(timeout=timeout_s):
+            return _busy_envelope(action, timeout_s, kwargs.get("request_id"))
         try:
             return self._inner.call(action, spec, **kwargs)
         finally:
@@ -167,6 +169,8 @@ def raise_for_envelope(envelope: dict[str, Any], *, context: str) -> dict[str, A
         raise DriverTimeout(f"{context}: platform operation deadline exceeded", detail=detail)
     if code == "INSUFFICIENT_STORAGE":
         raise _insufficient_storage(message, detail)
+    if code == "IP_POOL_EXHAUSTED":  # 플랫폼이 전역 잠금 안에서 고른 Linux 내부 IP 가 바닥남
+        raise InsufficientResources("ipv4", 1, 0)
     cls = _CODE_MAP.get(code)
     if cls is None:  # ARTIFACT_INVALID 등 실행 오류
         raise DriverError(f"{context}: {message}", detail=detail)
@@ -250,9 +254,11 @@ def instance_name(template_id: str, vm_id: UUID) -> str:
 class PlatformDriver(Driver):
     name = "platform"
 
-    def __init__(self, manager: ManagerLike, xl: Xl | None = None) -> None:
+    def __init__(self, manager: ManagerLike, xl: Xl | None = None, *, health_budget_s: float = 5.0) -> None:
         self.manager = manager
         self._xl = xl
+        # /healthz 전체 예산. 조회 드라이버 한도(5초)와 같게 두어 Spring 의 6초 대기를 넘기지 않는다
+        self.health_budget_s = health_budget_s
 
     # ---- 조회 ----
 
@@ -322,12 +328,18 @@ class PlatformDriver(Driver):
         return self._xl.info()
 
     def health(self) -> bool:
+        """xl 과 registry 응답 여부. xl info 가 쓴 시간을 빼고 남은 예산만 Manager 잠금을 기다려 전체가 health_budget_s 안에 끝난다."""
+        started = time.monotonic()
         if self._xl is not None:
             try:
                 self._xl.info()
             except DriverError:
                 return False
-        envelope = self.manager.call("list", {"lifecycle": "REGISTERED"})
+        remaining = max(0.1, self.health_budget_s - (time.monotonic() - started))
+        if isinstance(self.manager, SerializedManager):
+            envelope = self.manager.call_within("list", {"lifecycle": "REGISTERED"}, timeout_s=remaining)
+        else:
+            envelope = self.manager.call("list", {"lifecycle": "REGISTERED"})
         if envelope.get("ok"):
             return True
         # 다른 플랫폼 작업(최대 90초 정지 등)이 잠금을 쥔 것은 장애가 아니다. registry·저장소 장애만 false
@@ -342,10 +354,8 @@ class PlatformDriver(Driver):
 class PlatformProvisioner(Provisioner):
     """플랫폼 create/retire 로 registry 를 만들고 보관한다. 디스크·설정 파일은 전부 플랫폼이 만든다."""
 
-    def __init__(self, manager: ManagerLike, *, ip_pool: Iterable[int] = range(2, 100), max_ip_retries: int = 5) -> None:
+    def __init__(self, manager: ManagerLike) -> None:
         self.manager = manager
-        self._ip_pool = list(ip_pool)
-        self._max_ip_retries = max_ip_retries
 
     # ---- 조회 ----
 
@@ -359,37 +369,17 @@ class PlatformProvisioner(Provisioner):
         return view if view and view.get("lifecycle") == "REGISTERED" else None
 
     def _paths(self, view: dict[str, Any]) -> InstancePaths:
-        root = Path(self.manager.data) / "instances" / str(view["name"])
+        # 디렉터리는 플랫폼 내부 실행 이름(configuration.id = vm-<hex>)이다. view["name"] 은 표시 이름이라 경로가 아니다
+        internal = (view.get("configuration") or {}).get("id")
+        if not internal:
+            raise DriverError("platform view lacks configuration.id (internal instance name)", detail=f"vm_id={view.get('vm_id')}")
+        root = Path(self.manager.data) / "instances" / str(internal)
         return InstancePaths(
             vm_id=UUID(str(view["vm_id"])), root=root, kernel=root / "Image", ramdisk=root / "initrd", disk=root / "root.raw"
         )
 
     def instance_exists(self, vm_id: UUID) -> bool:
         return self._registration(vm_id) is not None
-
-    def _guest_kind(self, template_id: str, template_version: str) -> str:
-        data = raise_for_envelope(self.manager.call("templates"), context="templates")
-        for entry in data.get("templates") or []:
-            if entry.get("template_id") == template_id and str(entry.get("template_version")) == str(template_version):
-                return str(entry.get("guest_kind", "linux"))
-        raise InvalidArgument(f"template {template_id} {template_version} is not in the board catalog")
-
-    def _used_ips(self) -> set[str]:
-        data = raise_for_envelope(self.manager.call("list", {"lifecycle": "all"}), context="list all")
-        used = set()
-        for view in data.get("vms") or []:
-            ip = (view.get("configuration") or {}).get("ipv4")
-            if ip:
-                used.add(str(ip))
-        return used
-
-    def _free_ip(self, exclude: set[str]) -> str:
-        used = self._used_ips() | exclude
-        for host in self._ip_pool:
-            candidate = f"{IP_PREFIX}{host}"
-            if candidate not in used:
-                return candidate
-        raise InsufficientResources("ipv4", 1, 0)
 
     # ---- 생성·보관 ----
 
@@ -420,7 +410,7 @@ class PlatformProvisioner(Provisioner):
                 )
             return self._paths(existing)
 
-        name = instance_name(template_id, vm_id)
+        name = instance_name(template_id, vm_id)  # 표시 이름. 내부 실행 이름(vm-<hex>)·MAC·IP 는 플랫폼이 발급한다
         spec: dict[str, Any] = {
             "vm_id": str(vm_id),  # 팀 결정: Spring 발급 UUID 를 registry·Xen UUID 로 그대로 쓴다
             "name": name,
@@ -429,34 +419,19 @@ class PlatformProvisioner(Provisioner):
             "vcpus": vcpus,
             "memory_mib": memory_mib,
         }
-        needs_ip = self._guest_kind(template_id, template_version) == "linux"
-        tried: set[str] = set()
-        for _ in range(self._max_ip_retries if needs_ip else 1):
-            if needs_ip:
-                spec["ipv4"] = self._free_ip(tried)
-            envelope = self.manager.call("create", spec, execute=True, idempotency_key=f"create-{vm_id}")
-            error = envelope.get("error") or {}
-            if not envelope.get("ok") and error.get("code") == "INVALID_SPEC":
-                # 이름·템플릿·정수 범위는 위에서 먼저 검증했으므로, 남는 INVALID_SPEC 원인은 플랫폼이 아직 모르는 vm_id 키다.
-                # (현재 플랫폼 메시지: "name, template_id, template_version, vcpus and memory_mib required")
-                raise NotSupportedByPlatform(
-                    "platform create does not accept a caller-supplied vm_id yet (xenova_management spec['vm_id'])",
-                    detail=str(error.get("message")),
-                )
-            if not envelope.get("ok") and error.get("code") == "IP_CONFLICT" and needs_ip:
-                tried.add(spec["ipv4"])
-                continue
-            data = raise_for_envelope(envelope, context=f"create {name}")
-            view = (data.get("vm") or data.get("current") or data.get("original_result") or {}) if isinstance(data, dict) else {}
-            if not view:
-                view = self._registration(vm_id) or {"vm_id": str(vm_id), "name": name}
-            if str(view.get("vm_id")) != str(vm_id):
-                raise DriverError(
-                    "platform registered a different vm_id than requested; Spring-issued vm_id must be honoured",
-                    detail=f"requested={vm_id} registered={view.get('vm_id')}",
-                )
-            return self._paths(view)
-        raise InvalidState(f"could not allocate a free IP for {name} after {self._max_ip_retries} attempts")
+        # ipv4 는 보내지 않는다. 플랫폼이 registry·tombstone·진행 중 작업·공장 예약·DHCP lease 를 전역 잠금 안에서 보고 고르며,
+        # 바닥나면 IP_POOL_EXHAUSTED → 507 InsufficientResources(ipv4). 명세 오류(INVALID_SPEC·템플릿 없음)는 400 이다.
+        envelope = self.manager.call("create", spec, execute=True, idempotency_key=f"create-{vm_id}")
+        data = raise_for_envelope(envelope, context=f"create {name}")
+        view = (data.get("vm") or data.get("current") or data.get("original_result") or {}) if isinstance(data, dict) else {}
+        if not (view.get("configuration") or {}).get("id"):
+            view = self._registration(vm_id) or {}
+        if str(view.get("vm_id")) != str(vm_id):
+            raise DriverError(
+                "platform registered a different vm_id than requested; Spring-issued vm_id must be honoured",
+                detail=f"requested={vm_id} registered={view.get('vm_id')}",
+            )
+        return self._paths(view)
 
     def delete_instance(self, vm_id: UUID) -> None:
         envelope = self.manager.call("retire", {"vm_id": str(vm_id)}, execute=True, idempotency_key=f"retire-{vm_id}")
