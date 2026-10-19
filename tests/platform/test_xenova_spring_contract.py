@@ -199,7 +199,7 @@ class SpringContractTest(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), value)
         self.assertEqual(value['data']['vm_id'], FIRST)
 
-    def test_actual_spring_dto_fixture_fields_and_python_boundary(self):
+    def test_current_spring_http_fields_and_manager_bridge_are_distinct(self):
         import importlib.util
         import re
         path = ROOT/'tests/contracts/spring_manager_bridge.py'
@@ -207,11 +207,15 @@ class SpringContractTest(unittest.TestCase):
         bridge = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(bridge)
         request = json.loads((ROOT/'tests/contracts/spring-create-request.json').read_text())
-        source = (ROOT/'backend/src/main/java/com/perseus/backend/vm/infrastructure/Dom0CreateVmRequest.java').read_text()
-        fields = re.search(r'record Dom0CreateVmRequest\((.*?)\)', source, re.S).group(1)
+        source = (ROOT/'backend/src/main/java/com/perseus/backend/vm/infrastructure/Dom0LaunchRequest.java').read_text()
+        fields = re.search(r'record Dom0LaunchRequest\((.*?)\)', source, re.S).group(1)
         names = re.findall(r'(?:String|int)\s+(\w+)', fields)
         names = {re.sub(r'([A-Z])', lambda m:'_'+m[1].lower(), name) for name in names}
-        self.assertEqual(set(request), names)
+        self.assertEqual(names, {'vm_id','template_id','template_version','vcpus','memory_mib'})
+        self.assertEqual(set(request) - names, {'name'})
+        http_request = {key:request[key] for key in names}
+        self.error(self.f.m.call('create', http_request, execute=True), 'INVALID_SPEC')
+        self.assertFalse((self.f.data/'operations').exists())
         calls = [
             {'spec':request}, {'spec':request},
             {'spec':{**request,'memory_mib':768}},

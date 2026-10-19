@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""시험 전용 Spring JSON ↔ Manager 연결. HTTP 서버·인증·배포 어댑터가 아니다.
+"""공통 Manager 명세의 시험 연결부. HTTP 서버·배포 어댑터·Spring 응답 직렬화기가 아니다.
 
 실제 파일/registry/journal/IP 예약/공통 응답을 사용하며 mount, Xen, OS 복사만 대역이다.
 stdin: [{action, spec, execute?, idempotency_key?}, ...], stdout: 완전한 JSON 배열 한 개.
@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT/'tests/platform'))
 import test_xenova_management as fixtures
 import xenova_management as management
 
-# 실제 Dom0ManagerClient의 오류 DTO에 대한 시험 경계. 배포 어댑터는 아직 별도 구현 대상이다.
+# Manager 오류를 HTTP 모양으로 표현하는 시험 경계. 배포 어댑터의 스키마·상태 매핑과 구분한다.
 ERRORS = {
     'INVALID_SPEC': (400, 'InvalidArgument'), 'RESOURCE_UNSUPPORTED': (400, 'InvalidArgument'),
     'TEMPLATE_NOT_FOUND': (400, 'InvalidArgument'), 'TEMPLATE_VERSION_NOT_FOUND': (400, 'InvalidArgument'),

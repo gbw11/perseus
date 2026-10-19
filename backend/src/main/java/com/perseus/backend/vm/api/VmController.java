@@ -1,7 +1,10 @@
 package com.perseus.backend.vm.api;
 
 import com.perseus.backend.agent.application.AgentDataService;
+import com.perseus.backend.agent.domain.AgentInventory;
+import com.perseus.backend.agent.domain.AgentStatus;
 import com.perseus.backend.vm.application.VmService;
+import com.perseus.backend.vm.application.VmService.CreateResult;
 import com.perseus.backend.vm.domain.Vm;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -36,10 +39,14 @@ public class VmController {
         return new VmListResponse(vmService.list().stream().map(vm -> withAgentStatus(vm, now)).toList(), now);
     }
 
+    // 201 for a new VM, 200 when the same name and spec were already created (retry).
     @PostMapping
     public ResponseEntity<Vm> create(@Valid @RequestBody CreateVmRequest request) {
-        Vm vm = vmService.create(request.toCommand());
-        return ResponseEntity.created(URI.create("/api/v1/vms/" + vm.vmId())).body(vm);
+        CreateResult result = vmService.create(request.toCommand());
+        if (!result.created()) {
+            return ResponseEntity.ok(result.vm());
+        }
+        return ResponseEntity.created(URI.create("/api/v1/vms/" + result.vm().vmId())).body(result.vm());
     }
 
     @GetMapping("/{vmId}")
@@ -64,6 +71,8 @@ public class VmController {
     }
 
     private VmResponse withAgentStatus(Vm vm, Instant now) {
-        return VmResponse.of(vm, agentDataService.statusOf(agentDataService.findHeartbeat(vm.vmId()).orElse(null), now));
+        AgentStatus agentStatus = agentDataService.statusOf(agentDataService.findHeartbeat(vm.vmId()).orElse(null), now);
+        String ipv4 = agentDataService.findInventory(vm.vmId()).flatMap(AgentInventory::primaryIpv4).orElse(null);
+        return VmResponse.of(vm, agentStatus, ipv4);
     }
 }

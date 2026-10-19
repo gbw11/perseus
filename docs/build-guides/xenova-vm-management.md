@@ -222,25 +222,34 @@ factory 신규 등록은 defaults의 공개 ID/버전을 보존한다.
 
 ## Spring 연결 검사와 후속 연동 경계
 
-tests/contracts/spring-create-request.json은 실제 Dom0CreateVmRequest의 여섯 필드 fixture다.
-tests/contracts/spring_manager_bridge.py는 시험 전용 연결부이며 배포 서버가 아니다.
-실제 파일/registry/journal/예약은 공통 Manager가 처리하고 Xen·mount·OS 복사만 대역이다.
-backend의 SpringXenovaContractTest는 실제 DTO 직렬화와 Vm 역직렬화를 연결한다.
+공통 HTTP 계약은 [VM API 통합 문서](../contracts/vm-api-contract-v1.md)와
+[OpenAPI](../../contracts/dom0-manager-openapi.yaml)를 따른다.
+HTTP와 이 가이드의 Manager/CLI는 별도 인터페이스다.
+
+Spring의 Dom0LaunchRequest는 vm_id·template_id·template_version·vcpus·memory_mib의
+5개 필드를 전송한다. 이 가이드의 Manager.create는 name을 포함한 6개 필드가 필수다.
+tests/contracts/spring-create-request.json은 Manager용 6개 필드 시험 명세이며,
+실제 Spring HTTP 요청의 직렬화 결과로 사용하지 않는다.
+tests/contracts/spring_manager_bridge.py는 이 명세로 실제 파일/registry/journal/IP 예약을
+검사하는 시험 연결부다. Xen·mount·OS 복사만 대역이며 배포 HTTP 어댑터나 Spring 응답 직렬화기가 아니다.
 
     python3 -B -m unittest discover -s tests/platform -p 'test_xenova_spring_contract.py' -v
-    cd backend
-    ./mvnw test -Dtest=SpringXenovaContractTest,Dom0ManagerClientTest,VmServiceTest,VmApiIntegrationTest
 
-실행에는 기존 프로젝트의 Java 21/Maven 환경이 필요하다. Python fixture 대조 통과는
-Java 실행·HTTP 배포·실보드 검증을 대신하지 않는다.
-현재 services/dom0-manager는 .gitkeep만 있고 배포 어댑터는 구현되어 있지 않다.
-실제 Spring VmService는 UUID를 발급하지만 요청 UUID의 영구 저장/응답 유실 복구는
-아직 없다. Spring 외부 POST를 다시 호출하면 새 UUID가 생기므로 Spring이 같은 UUID를
-저장·재사용하는 후속 처리가 필요하다. 플랫폼 자체는 전달된 UUID로 멱등성을 보장한다.
-Spring VmControlPort에는 retire/restore/purge의 작업 키·세대 전달 경계가 없다.
-구현 시 operation_id/원래 재시도 키를 보존해야 하며 현재 세대로 매번 새 작업을 만들지 않는다.
-Spring command-timeout=35초와 플랫폼 stop 최대 90초는 아직 다르다.
-이번 변경은 이 타임아웃·동기 stop·인증/원격 배포를 재설계하지 않는다.
+검사는 현재 Spring DTO의 5개 필드와 Manager 필수 name의 차이를 명시적으로 대조한다.
+Python 소스 대조는 Java 실행·HTTP 배포·실보드 검증을 대신하지 않는다.
+services/dom0-manager에는 HTTP 서비스·Xen 조회 드라이버와 명령/Provisioner 인터페이스가 있다.
+XenDriver의 create/shutdown/destroy와 UnavailableProvisioner의 변경 연산은 아직
+NotImplementedError이므로 이들 명령을 공통 Manager로 연결해야 한다.
+
+Spring VmService는 VmRecord에 UUID·명세를 저장하고 같은 이름·명세의 재요청에서 재사용한다.
+Spring command-timeout은 기본 100초이고 플랫폼 stop 마감은 최대 90초다.
+현재 HTTP create는 name을 받지 않고 생성·시작을 묶는 계약이므로, Manager의 필수 name 공급과
+별도 start 호출을 연결해야 한다. 이 가이드는 HTTP 스키마나 플랫폼 입력을 임의 변경하지 않는다.
+retire/restore/purge의 operation_id·원래 재시도 키·대상 세대 전달도 필요하며,
+새 재시도마다 현재 세대의 작업을 새로 만드는 방식으로 연결하지 않는다.
+플랫폼의 배정 ipv4와 Spring 공개 응답의 에이전트 보고 ipv4는 서로 다른 관측값이다.
+Zephyr의 고정 1 vCPU/16MiB와 현재 HTTP/Spring 최소 메모리 128MiB 차이는
+공통 계약의 연동 항목이며, 큰 메모리를 임의로 전달해 프로필 검사를 우회하지 않는다.
 
 ## factory 자체 IP와 Linux 공개 배포 버전
 
