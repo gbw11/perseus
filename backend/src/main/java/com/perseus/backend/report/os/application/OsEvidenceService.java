@@ -12,8 +12,9 @@ import com.perseus.backend.report.os.application.OsEvidenceReport.ObservationWin
 import com.perseus.backend.report.os.application.OsEvidenceReport.ObservedOs;
 import com.perseus.backend.report.os.application.OsEvidenceReport.Verdict;
 import com.perseus.backend.report.os.infrastructure.OsEvidenceProperties;
+import com.perseus.backend.template.domain.GuestKind;
 import com.perseus.backend.vm.domain.Vm;
-import com.perseus.backend.vm.domain.VmControlPort;
+import com.perseus.backend.vm.application.VmService;
 import com.perseus.backend.vm.domain.VmState;
 import java.time.Clock;
 import java.time.Duration;
@@ -25,22 +26,22 @@ import java.util.UUID;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 
-// Judged on request from the latest stored agent reports and the live dom0 VM list.
+// Judged on request from the latest stored agent reports and the VM list (Spring records + live Xen state).
 @Service
 @EnableConfigurationProperties(OsEvidenceProperties.class)
 public class OsEvidenceService {
 
-    private final VmControlPort vmControlPort;
+    private final VmService vmService;
     private final AgentDataService agentDataService;
     private final OsEvidenceProperties properties;
     private final Clock clock;
 
     public OsEvidenceService(
-            VmControlPort vmControlPort,
+            VmService vmService,
             AgentDataService agentDataService,
             OsEvidenceProperties properties,
             Clock clock) {
-        this.vmControlPort = vmControlPort;
+        this.vmService = vmService;
         this.agentDataService = agentDataService;
         this.properties = properties;
         this.clock = clock;
@@ -53,7 +54,7 @@ public class OsEvidenceService {
 
         List<Vm> vms;
         try {
-            vms = vmControlPort.list();
+            vms = vmService.list();
         } catch (ApiException exception) {
             reasons.add("VM 제어 서비스에서 VM 목록을 가져오지 못했습니다: " + exception.getMessage());
             return report(now, window, Verdict.BLOCKED, reasons, List.of());
@@ -94,6 +95,7 @@ public class OsEvidenceService {
 
         return new Evidence(
                 vm.vmId(),
+                vm.guestKind(),
                 null,
                 inventory == null ? null : inventory.getBootId(),
                 vm.state(),
@@ -110,6 +112,9 @@ public class OsEvidenceService {
 
     // An OS report from a previous boot says nothing about what is running now.
     private Match matchOf(Vm vm, AgentInventory inventory, AgentHeartbeat heartbeat) {
+        if (vm.guestKind() == GuestKind.ZEPHYR) {
+            return Match.NOT_APPLICABLE;
+        }
         if (inventory == null || inventory.getOsId() == null) {
             return Match.UNKNOWN;
         }

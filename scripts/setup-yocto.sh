@@ -18,7 +18,7 @@ Usage: bash scripts/setup-yocto.sh [--check|--verify]
 
 Optional environment variables (absolute Linux paths without whitespace):
   YOCTO_WORKSPACE   default: $HOME/yocto-workspace
-  YOCTO_BUILD_DIR   default: $YOCTO_WORKSPACE/build-rpi4-xen-repro
+  YOCTO_BUILD_DIR   default: $YOCTO_WORKSPACE/build-rpi4-xenova
 
 --check: read-only check of existing external URLs, commits and working trees.
 --verify: configure a new/owned build directory, show layers and parse all images.
@@ -33,12 +33,12 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 LOCK_FILE="$PROJECT_ROOT/platform/yocto/layers.lock"
 FRAGMENT="$PROJECT_ROOT/platform/yocto/config/local.conf.fragment"
-CUSTOM_LAYER="$PROJECT_ROOT/platform/yocto/meta-perseus"
+CUSTOM_LAYER="$PROJECT_ROOT/platform/yocto/meta-xenova"
 WORKSPACE="${YOCTO_WORKSPACE:-$HOME/yocto-workspace}"
-BUILD_DIR="${YOCTO_BUILD_DIR:-$WORKSPACE/build-rpi4-xen-repro}"
+BUILD_DIR="${YOCTO_BUILD_DIR:-$WORKSPACE/build-rpi4-xenova}"
 
 [[ -f "$LOCK_FILE" && -f "$FRAGMENT" ]] || die 'Missing lockfile or config fragment'
-[[ -f "$CUSTOM_LAYER/conf/layer.conf" ]] || die 'Missing meta-perseus'
+[[ -f "$CUSTOM_LAYER/conf/layer.conf" ]] || die 'Missing meta-xenova'
 command -v git >/dev/null || die 'git is not installed'
 command -v python3 >/dev/null || die 'python3 is not installed'
 [[ "$(uname -s)" == Linux ]] || die 'Run in Linux or WSL, on a Linux filesystem'
@@ -78,8 +78,8 @@ LAYERS_DIR="$WORKSPACE/layers"
 if [[ "$check" -eq 0 && -e "$BUILD_DIR" ]]; then
   [[ -d "$BUILD_DIR" ]] || die "Not a directory: $BUILD_DIR"
   if [[ -n "$(find "$BUILD_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-    grep -Fq '# >>> PERSEUS MANAGED SETTINGS (setup-yocto.sh) >>>' "$BUILD_DIR/conf/local.conf" 2>/dev/null &&
-      grep -Fq '# >>> PERSEUS MANAGED LAYERS (setup-yocto.sh) >>>' "$BUILD_DIR/conf/bblayers.conf" 2>/dev/null ||
+    grep -Fq '# >>> XENOVA MANAGED SETTINGS (setup-yocto.sh) >>>' "$BUILD_DIR/conf/local.conf" 2>/dev/null &&
+      grep -Fq '# >>> XENOVA MANAGED LAYERS (setup-yocto.sh) >>>' "$BUILD_DIR/conf/bblayers.conf" 2>/dev/null ||
       die "Existing build is not owned by this setup version; use a new build directory: $BUILD_DIR"
   fi
 fi
@@ -146,10 +146,10 @@ import sys
 
 conf = Path(sys.argv[1])
 fragment = Path(sys.argv[2]).read_text().rstrip("\n")
-local_begin = "# >>> PERSEUS MANAGED SETTINGS (setup-yocto.sh) >>>"
-local_end = "# <<< PERSEUS MANAGED SETTINGS <<<"
-layers_begin = "# >>> PERSEUS MANAGED LAYERS (setup-yocto.sh) >>>"
-layers_end = "# <<< PERSEUS MANAGED LAYERS <<<"
+local_begin = "# >>> XENOVA MANAGED SETTINGS (setup-yocto.sh) >>>"
+local_end = "# <<< XENOVA MANAGED SETTINGS <<<"
+layers_begin = "# >>> XENOVA MANAGED LAYERS (setup-yocto.sh) >>>"
+layers_end = "# <<< XENOVA MANAGED LAYERS <<<"
 layer_setting = 'BBLAYERS = " \\\n' + "".join(f"  {p} \\\n" for p in sys.argv[3:]) + '  "'
 keys = ("MACHINE", "DISTRO", "INIT_MANAGER", "DISTRO_FEATURES:append",
         "PREFERRED_PROVIDER_virtual/kernel", "RPI_DOM0_MEM", "BB_NUMBER_THREADS", "PARALLEL_MAKE")
@@ -199,7 +199,7 @@ if not values.get("S") or values.get("S") != values.get("UNPACKDIR"):
 for key, value in values.items():
     print(f"{key}={value}")
 '
-    for target in xen-image-minimal perseus-xen-bringup-image perseus-domu-initramfs; do
+    for target in xen-image-minimal xenova-xen-bringup-image xenova-domu-initramfs; do
       bitbake -e "$target" | python3 -c '
 import re, sys
 values = dict(re.findall(r"^([A-Za-z0-9_:/.-]+)=\"(.*)\"$", sys.stdin.read(), re.M))
@@ -219,6 +219,6 @@ for key in (*expected, "IMAGE_FSTYPES", "DEPLOY_DIR_IMAGE"):
 log 'Setup complete (no image build or boot test performed)'
 printf 'Enter this build environment:\n  source "%s" "%s"\n' "$OE_INIT" "$BUILD_DIR"
 printf 'Baseline dom0: bitbake xen-image-minimal\n'
-printf 'Bring-up dom0 + embedded test domU: bitbake perseus-xen-bringup-image\n'
-printf 'Test domU only: bitbake perseus-domu-initramfs\n'
+printf 'Bring-up dom0 + embedded test domU: bitbake xenova-xen-bringup-image\n'
+printf 'Test domU only: bitbake xenova-domu-initramfs\n'
 printf 'Artifacts: %s/tmp/deploy/images/raspberrypi4-64/\n' "$BUILD_DIR"

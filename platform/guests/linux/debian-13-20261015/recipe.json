@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "source_id": "debian-13-20261015",
+  "version": "1.0.0",
+  "files": [
+    {
+      "source": "files/motd",
+      "target": "etc/motd",
+      "mode": 420
+    }
+  ]
+}

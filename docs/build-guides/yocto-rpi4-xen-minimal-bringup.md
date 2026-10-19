@@ -1,3 +1,5 @@
+> **리브랜딩 이전 보존 문서입니다.** 아래 본문은 당시 Perseus 소스·산출물·검증 기록이며, 현재 명령과 경로는 [Xenova 플랫폼 가이드](xenova-platform.md)를 따릅니다.
+
 # Raspberry Pi 4 + Xen — 커널·이미지·실보드 bring-up 검증
 
 이 문서는 추가 커널 진단, 생성 이미지의 정적 검사, 실보드 Xen/dom0·최소 domU·격리 Bridge/DHCP 검증 절차를 다룬다. 환경 설치·Clone·업데이트·커널 설정 생성·필수 옵션 검사·이미지 빌드·domU 통합 계약은 [재구성 및 인계](yocto-rpi4-xen-reproduce.md)를 따른다.
@@ -173,7 +175,7 @@ perseus-bringup-check
 systemctl start perseus-bridge.service
 systemctl start perseus-dhcp.service
 ip -br address show xenbr0
-bridge link
+ls -l /sys/class/net/xenbr0/brif/
 networkctl status eth0 xenbr0
 # eth0에 master xenbr0가 없어야 한다. xenbr0는 unmanaged여야 한다.
 systemctl --no-pager status perseus-bridge.service perseus-dhcp.service
@@ -199,7 +201,7 @@ ping -c 2 192.168.77.1
 - domU MAC `02:16:3e:20:00:01` (설정 파일에 지정한 **고정 MAC**)
 - domU IPv4 `192.168.77.100~150` 중 하나 (dom0의 **dnsmasq DHCP**)
 - domU ↔ dom0 `192.168.77.1` Ping 성공
-- dom0의 `ip link`, `bridge link`, `xl network-list perseus-test`에서 VIF/브릿지 연결 확인. domid는 실행 시마다 달라질 수 있다.
+- dom0의 `ip link`, `ls -l /sys/class/net/xenbr0/brif/`, `xl network-list perseus-test`에서 VIF/브릿지 연결 확인. domid는 실행 시마다 달라질 수 있다.
 - `networkctl status xenbr0 vif<domid>.0`에서 unmanaged 확인. networkd 재시작 후에도 `eth0` 분리·브릿지 고정 IP·VIF 부착 유지 확인
 - dom0에서 `ping -c 2 <실제 domU DHCP 주소>`도 성공해야 양방향 Ping 합격이다.
 - 게스트 `/proc/mounts`·`/sys/class/net/eth0/address` 접근, 수동 DHCP 없이 주소 획득 확인. NIC가 없으면 최대 20초 대기 후 진단 셸로 진행한다.

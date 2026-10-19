@@ -14,7 +14,7 @@ from artifact_io import checked, new_path, publish, regular, sha
 
 MANIFEST = 'platform-release.json'
 RECORD = 'BUILD-RESULT.json'
-KIND = 'perseus-completed-platform'
+KIND = 'xenova-completed-platform'
 
 
 def build_record(path, expected):
@@ -136,7 +136,7 @@ def publish_completed(record_path, record_sha256, kind, output):
         if image.stat().st_size != entry['bytes']:
             raise ValueError('source image size differs from completed build record')
         before = signature(image)
-        stage = Path(tempfile.mkdtemp(prefix='.perseus-publishing-', dir=output.parent))
+        stage = Path(tempfile.mkdtemp(prefix='.xenova-publishing-', dir=output.parent))
         copied = stage / image.name
         try:
             with image.open('rb') as inp, copied.open('xb') as out:
@@ -187,7 +187,7 @@ def completed_input(config):
     """게시 완료 사본만 읽는다. 원래 빌드 경로/bitbake.lock에는 접근하거나 쓰지 않는다."""
     platform = config['platform']
     if not platform.get('release_manifest') or not platform.get('release_manifest_sha256'):
-        raise ValueError('published completed platform required; use publish-perseus-platform.py before assembly')
+        raise ValueError('published completed platform required; use publish-xenova-platform.py before assembly')
     manifest_path = checked(platform['release_manifest'], platform['release_manifest_sha256'])
     directory = manifest_path.parent
     if directory.is_symlink() or directory.resolve() != directory or directory.stat().st_mode & 0o222:
