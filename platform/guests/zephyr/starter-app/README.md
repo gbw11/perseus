@@ -1,4 +1,4 @@
-# Perseus Zephyr Starter App 1.0.0
+# Zenova Zephyr Starter App 1.0.0
 
 Zephyr 4.4.0 / xenvm / SDK 1.0.0의 기존 고정 소스와 도구체인을 사용한다.
 RAM 0x40000000부터 16MiB, 1 vCPU, GICv2 프로필은 변경하지 않는다.
@@ -17,7 +17,7 @@ export ZEPHYR_TOOLCHAIN_VARIANT=cross-compile
 export CROSS_COMPILE=/absolute/sdk/aarch64-zephyr-elf/bin/aarch64-zephyr-elf-
 export PYTHONPATH=/absolute/python-tools
 export PATH=/absolute/python-tools/bin:$PATH
-cmake -S /absolute/Perseus/platform/guests/zephyr/starter-app \
+cmake -S /absolute/Zenova/platform/guests/zephyr/starter-app \
   -B /absolute/new-app-build -GNinja -DBOARD=xenvm \
   -DPython3_EXECUTABLE=/usr/bin/python3 -DWEST=/absolute/python-tools/bin/west
 cmake --build /absolute/new-app-build -j 4
@@ -26,7 +26,7 @@ cmake --build /absolute/new-app-build -j 4
 ## 불변 번들과 명시적 교체
 
 ```bash
-python3 -B scripts/package-perseus-firmware.py \
+python3 -B scripts/package-zenova-firmware.py \
   --build-dir /absolute/new-app-build/zephyr --license "$ZEPHYR_BASE/LICENSE" \
   --version my-app-1 --app my-app --source-revision YOUR_SOURCE_REVISION \
   --build-id YOUR_BUILD_ID --app-source /absolute/your-app \
@@ -39,13 +39,23 @@ sha256sum /absolute/new-bundle/firmware.json
 교체가 바꾸지 않는다. 기존 활성 펌웨어와 원본 템플릿은 보존한다.
 
 ```bash
-perseus-vm stop zephyr-dev --force
-perseus-vm firmware-replace zephyr-dev --bundle /absolute/new-bundle --sha256 ACTUAL_HASH
-perseus-vm firmware-replace zephyr-dev --bundle /absolute/new-bundle --sha256 ACTUAL_HASH --execute
-perseus-vm start zephyr-dev
-perseus-vm console zephyr-dev
+zenova-vm stop zephyr-dev --force
+zenova-vm firmware-replace zephyr-dev --bundle /absolute/new-bundle --sha256 ACTUAL_HASH
+zenova-vm firmware-replace zephyr-dev --bundle /absolute/new-bundle --sha256 ACTUAL_HASH --execute
+zenova-vm start zephyr-dev
+zenova-vm console zephyr-dev
 ```
 
 팀원 앱의 강제 종료 안전성은 별도로 판단한다. 자동 시작을 켜는 것은 보드 종료
 강제 제거 승인이 아니다. 기본 Starter의 `force-allowed`는 새 배포 인스턴스에만
 설정하며 기존 인스턴스는 명시적인 정책 변경 전까지 보존한다.
+
+## Zenova 소스와 기존 번들
+
+현재 카탈로그 ID는 `zenova-zephyr-starter-1.0.0`이다. Zephyr/SDK/앱 버전은
+유지하고 이름·안내문·소스 해시만 변경한다. 이전 Perseus 성공 번들의 manifest나
+펌웨어를 덮어쓰거나 새 이름으로 재표시하지 않는다. 현재 lock과 일치하는 새 빌드를
+별도 경로에 만든 뒤 `--template-id zenova-zephyr-starter-1.0.0`과
+`--app zenova-starter --version 1.0.0`으로 게시해야 한다.
+`--source-revision`은 `starter.lock.json`의 실제 `app_source_sha256`에
+`sha256:` 접두사를 붙인다. 이 소스 변경 단계에서는 펌웨어를 다시 빌드하지 않는다.

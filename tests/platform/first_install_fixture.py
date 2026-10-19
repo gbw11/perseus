@@ -9,14 +9,14 @@ import struct
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-FILES = ROOT / 'platform/yocto/meta-perseus/recipes-core/perseus-platform/files'
+FILES = ROOT / 'platform/yocto/meta-zenova/recipes-core/zenova-platform/files'
 sys.path.insert(0, str(ROOT / 'platform/first-install'))
 sys.path.insert(0, str(FILES))
 sys.path.insert(0, str(ROOT / 'platform/guests/common'))
 import assemble
 import first_install_contract as contract
-import perseus_first_boot as boot
-import perseus_vm as vm
+import zenova_first_boot as boot
+import zenova_vm as vm
 import guest_identity
 import prepare_rootfs
 
@@ -36,7 +36,7 @@ class Board:
         self.root, self.card_bytes = Path(root), card_bytes
         self.calls, self.failure, self.mounted = [], None, False
         self.kernel_bytes, self.fs_size = 4 * contract.GIB, 4 * contract.GIB
-        for name in ('proc/self', 'dev', 'sys/dev/block', 'sys/class/block', 'sys/devices/mock/block/sdz', 'etc', 'srv/perseus', 'run/perseus'):
+        for name in ('proc/self', 'dev', 'sys/dev/block', 'sys/class/block', 'sys/devices/mock/block/sdz', 'etc', 'srv/zenova', 'run/zenova'):
             (self.root / name).mkdir(parents=True, exist_ok=True)
         self.disk = self.root / 'dev/sdz'
         self.disk.write_bytes(mbr(self.kernel_bytes // 512))
@@ -55,13 +55,13 @@ class Board:
 
     @property
     def data(self):
-        return self.root / 'srv/perseus'
+        return self.root / 'srv/zenova'
 
     def set_mount(self, mounted):
         self.mounted = mounted
         text = '1 0 8:2 / / rw - ext4 /dev/sdz2 rw\n'
         if mounted:
-            text += '2 1 8:3 / /srv/perseus rw - ext4 /dev/sdz3 rw\n'
+            text += '2 1 8:3 / /srv/zenova rw - ext4 /dev/sdz3 rw\n'
         (self.root / 'proc/self/mountinfo').write_text(text)
 
     def table_bytes(self):
@@ -78,7 +78,7 @@ class Board:
         if tool == 'blkid':
             if 'PARTUUID' in args:
                 return '1234abcd-02\n'
-            return 'TYPE=ext4\nLABEL=perseus-data\nUUID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\n'
+            return 'TYPE=ext4\nLABEL=zenova-data\nUUID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\n'
         if tool == 'dumpe2fs':
             return f'Block count: {self.fs_size // 4096}\nBlock size: 4096\n'
         if tool == 'sfdisk':
@@ -139,54 +139,65 @@ class Board:
             (template / 'template.json').write_text(json.dumps(meta))
             templates.append({'id': r['template'], 'metadata': meta, 'root_bytes': (template / 'root.raw').stat().st_size})
         factory = {'schema': 1, 'features': contract.LEGACY_FEATURES, 'factory_id': 'fixture-common-factory', 'instances': bundles, 'templates': templates}
-        (self.data / '.perseus-install.json').write_text(json.dumps(factory))
+        (self.data / '.zenova-install.json').write_text(json.dumps(factory))
         return factory
 
 
 def platform_root(root):
     """새 Yocto 출력의 파일 계약만 모의한다. 도구 파일은 실행하지 않는 텍스트 fixture다."""
     root = Path(root)
-    mapping = {'usr/lib/perseus/perseus_vm.py': FILES / 'perseus_vm.py',
-               'etc/perseus/defaults.json': FILES / 'defaults.json',
-               'usr/lib/perseus/perseus_first_boot.py': FILES / 'perseus_first_boot.py',
-               'usr/lib/perseus/first_install_contract.py': ROOT / 'platform/first-install/first_install_contract.py',
-               'usr/sbin/perseus-first-boot': FILES / 'perseus-first-boot',
-               'usr/sbin/perseus-vm': FILES / 'perseus-vm',
-               'usr/sbin/perseus-verify-artifacts': ROOT / 'scripts/verify-perseus-runtime-artifacts.py',
-               'usr/lib/perseus/perseus_runtime.py': FILES / 'perseus_runtime.py',
-               'usr/lib/perseus/perseus_zephyr.py': FILES / 'perseus_zephyr.py',
-               'etc/systemd/journald.conf.d/20-perseus.conf': FILES / 'perseus-journald.conf',
-               'etc/systemd/system.conf.d/20-perseus.conf': FILES / 'perseus-system.conf'}
-    mapping['usr/lib/perseus/update_guest_ssh.py'] = ROOT / 'scripts/update-perseus-guest-ssh.py'
+    mapping = {'usr/lib/zenova/zenova_vm.py': FILES / 'zenova_vm.py',
+               'etc/zenova/defaults.json': FILES / 'defaults.json',
+               'usr/lib/zenova/zenova_first_boot.py': FILES / 'zenova_first_boot.py',
+               'usr/lib/zenova/first_install_contract.py': ROOT / 'platform/first-install/first_install_contract.py',
+               'usr/sbin/zenova-first-boot': FILES / 'zenova-first-boot',
+               'usr/sbin/zenova-vm': FILES / 'zenova-vm',
+               'usr/sbin/zenova-verify-artifacts': ROOT / 'scripts/verify-zenova-runtime-artifacts.py',
+               'usr/lib/zenova/zenova_runtime.py': FILES / 'zenova_runtime.py',
+               'usr/lib/zenova/zenova_zephyr.py': FILES / 'zenova_zephyr.py',
+               'etc/systemd/journald.conf.d/20-zenova.conf': FILES / 'zenova-journald.conf',
+               'etc/systemd/system.conf.d/20-zenova.conf': FILES / 'zenova-system.conf'}
+    for name in ('zenova_management.py','zenova_management_cli.py','zenova_catalog.py','zenova_wifi.py'):
+        mapping['usr/lib/zenova/'+name] = FILES/name
+    mapping['usr/lib/zenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
+    mapping['usr/sbin/zenova-wifi'] = FILES/'zenova-wifi'
+    mapping['usr/lib/zenova/update_guest_ssh.py'] = ROOT / 'scripts/update-zenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
-        mapping['usr/lib/perseus/' + name] = ROOT / 'platform/guests/common' / name
+        mapping['usr/lib/zenova/' + name] = ROOT / 'platform/guests/common' / name
     for path in [*FILES.glob('*.service'), *FILES.glob('*.mount')]:
         mapping['usr/lib/systemd/system/' + path.name] = path
     for relative, source in mapping.items():
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
-    cap = root / 'usr/share/perseus/first-install-capabilities.json'
+    cap = root / 'usr/share/zenova/first-install-capabilities.json'
     cap.parent.mkdir(parents=True)
     cap.write_text(json.dumps(contract.FEATURES))
     (root / 'etc/machine-id').write_text('uninitialized\n')
     (root / 'etc/ssh').mkdir()
-    for name in ('sshd.service', 'sshd@.service', 'sshd.socket'):
-        drop = root / 'etc/systemd/system' / (name + '.d/10-perseus-keys.conf')
-        drop.parent.mkdir(parents=True)
-        drop.write_bytes((FILES / 'perseus-sshd-keys.conf').read_bytes())
+    from dom0_ssh_fixture import install_policy
+    install_policy(root)
+    keys = root / 'usr/lib/systemd/system/sshdgenkeys.service'
+    keys.write_text('[Service]\\nExecStart=/usr/libexec/openssh/sshd_check_keys\\n')
+    checker = root / 'usr/libexec/openssh/sshd_check_keys'
+    checker.parent.mkdir(parents=True); checker.write_text('packaging fixture: not executed')
     wants = root / 'etc/systemd/system/multi-user.target.wants'
-    wants.mkdir()
-    for name in ('perseus-first-boot.service', 'srv-perseus.mount', 'perseus-vms.service', 'perseus-vm-shutdown.service'):
+    wants.mkdir(exist_ok=True)
+    for name in ('zenova-first-boot.service', 'srv-zenova.mount', 'zenova-vms.service', 'zenova-vm-shutdown.service'):
         (wants / name).symlink_to('/usr/lib/systemd/system/' + name)
     tools = root / 'usr/bin'
     tools.mkdir(parents=True)
-    for name in ('sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl', 'qemu-system-i386'):
+    for name in ('sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl', 'qemu-system-i386', 'wpa_supplicant', 'wpa_cli', 'iw', 'networkctl'):
         (tools / name).write_text('fixture: not executed')
         (tools / name).chmod(0o755)
+    for relative in ('brcm/brcmfmac43455-sdio.bin','brcm/brcmfmac43455-sdio.clm_blob',
+                     'brcm/brcmfmac43455-sdio.raspberrypi,4-model-b.txt','regulatory.db','regulatory.db.p7s'):
+        target=root/'usr/lib/firmware'/relative
+        target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_bytes(b'fixture: not real firmware')
     for name, text in [('qemu-config-host.h', '#define CONFIG_VNC 1\n#define CONFIG_XEN_BACKEND 1\n'),
                        ('qemu-i386-config-target.h', '#define CONFIG_XEN 1\n')]:
-        (root / 'usr/share/perseus' / name).write_text(text)
+        (root / 'usr/share/zenova' / name).write_text(text)
     return root
 
 

@@ -12,11 +12,11 @@
 
 공식 [xenvm 문서](https://github.com/zephyrproject-rtos/zephyr/blob/v4.4.0/boards/xen/xenvm/doc/index.rst)에 따르면 PV 콘솔·event channel·grant table을 지원하며 XenBus/PV 네트워크·블록 드라이버는 지원하지 않는다. 이 번들은 콘솔용이며 DHCP·SSH·root/1234·앱 설치용 영구 루트 디스크를 제공하지 않는다. Linux dom0/Ubuntu/Debian의 인증·작업 보존 계약은 유지한다.
 
-공통 SD에는 `/srv/perseus/rtos-templates/zephyr-4.4.0-xenvm/`으로 보관한다. Linux의 `/srv/perseus/templates/`와 인스턴스 레지스트리를 오인하게 하지 않는다. 조립 설정에 `rtos_templates`를 명시하면 조립기가 검증·용량 계산·복사·최종 입력 재검사를 수행한다. 공통 영구 레지스트리·생명주기·단일 자동 시작 서비스를 사용한다. 새 Starter 최초 설치의 `zephyr-dev`는 자동 시작 on·보드 종료 force-allowed이며 기존 설치/진단 seed의 정책은 보존한다.
+공통 SD에는 `/srv/zenova/rtos-templates/zephyr-4.4.0-xenvm/`으로 보관한다. Linux의 `/srv/zenova/templates/`와 인스턴스 레지스트리를 오인하게 하지 않는다. 조립 설정에 `rtos_templates`를 명시하면 조립기가 검증·용량 계산·복사·최종 입력 재검사를 수행한다. 공통 영구 레지스트리·생명주기·단일 자동 시작 서비스를 사용한다. 새 Starter 최초 설치의 `zephyr-dev`는 자동 시작 on·보드 종료 force-allowed이며 기존 설치/진단 seed의 정책은 보존한다.
 
-Pi에서는 `perseus-vm create <id> --template zephyr-4.4.0-xenvm --execute`로 독립 사본을 만든다. 공통 start/status/console/autostart-set을 사용하고, stop/reboot는 게스트 협조형 종료가 없어 명시적 --force만 허용한다. 펌웨어 교체는 정지 상태의 firmware-replace 경로다. IP·root.raw·SSH 고유화는 요구하지 않는다. dom0에 보관한 파일은 게스트 앱의 쓰기 가능한 영구 저장소가 아니다.
+Pi에서는 `zenova-vm create <name> --template-id zephyr-xenvm-starter-arm64 --template-version 1.0.0 --vcpus 1 --memory-mib 16 --idempotency-key <key> --execute --json`로 독립 사본을 만든다. 공통 start/status/console/autostart-set을 사용하고, stop/reboot는 게스트 협조형 종료가 없어 명시적 --force만 허용한다. 펌웨어 교체는 정지 상태의 firmware-replace 경로다. IP·root.raw·SSH 고유화는 요구하지 않는다. dom0에 보관한 파일은 게스트 앱의 쓰기 가능한 영구 저장소가 아니다.
 
-현재 프로필은 정적 펌웨어 검사 결과이며 실보드 검증은 아니다. Zephyr IRQ flags 2는 LEVEL, 4는 EDGE다. Xen 표준 DT의 flags와 인코딩이 다르며, event channel의 edge 대 Xen 소스 level-low 차이는 실보드 DTB/드라이버 대조가 남아 있다. 원본 펌웨어를 임의 수정하지 않았다. [공통 CLI·번들 배포·실제 DTB 수집 절차](../../../docs/build-guides/perseus-persistent-platform.md#2026-10-17-공통-관리펌웨어-배포-계약)를 따른다.
+현재 프로필은 정적 펌웨어 검사 결과이며 실보드 검증은 아니다. Zephyr IRQ flags 2는 LEVEL, 4는 EDGE다. Xen 표준 DT의 flags와 인코딩이 다르며, event channel의 edge 대 Xen 소스 level-low 차이는 실보드 DTB/드라이버 대조가 남아 있다. 원본 펌웨어를 임의 수정하지 않았다. [공통 CLI·번들 배포·실제 DTB 수집 절차](../../../docs/build-guides/zenova-persistent-platform.md#2026-10-17-공통-관리펌웨어-배포-계약)를 따른다.
 
 ## 진단용 synchronization 번들의 재현 가능한 준비
 
@@ -36,7 +36,7 @@ cmake -S "$ZEPHYR_BASE/samples/synchronization" \
 cmake --build /absolute/work/build-xenvm -j 4
 
 # 기본은 읽기 전용 검사/계획이다. --execute가 새 번들 게시만 허용한다.
-python3 -B scripts/prepare-perseus-zephyr.py \
+python3 -B scripts/prepare-zenova-zephyr.py \
   --source /absolute/work/source/zephyr --build-dir /absolute/work/build-xenvm \
   --spdx /absolute/work/downloads/zephyr-v4.4.0.spdx \
   --toolchain-archive /absolute/work/downloads/toolchain_gnu_linux-x86_64_aarch64-zephyr-elf.tar.xz \
@@ -48,7 +48,7 @@ python3 -B scripts/prepare-perseus-zephyr.py \
 ```json
 "rtos_templates": [
   {
-    "template_dir": "/absolute/verified-templates/perseus-zephyr-starter-1.0.0",
+    "template_dir": "/absolute/verified-templates/zenova-zephyr-starter-1.0.0",
     "template_manifest_sha256": "REPLACE_WITH_ACTUAL_TEMPLATE_JSON_SHA256"
   }
 ]
@@ -58,4 +58,7 @@ python3 -B scripts/prepare-perseus-zephyr.py \
 
 현재 dom0 완료 WIC는 이전 소스 기준이므로 source-byte gate에 맞는 후속 재빌드가 필요하다. Linux seed SSH 옵션과 전용 chroot 런타임 보완은 공유 소스에 반영했으며 회귀/실제 guest sshd 검사를 통과했다. 이를 포함한 새 dom0 재빌드가 필요하다. 이번 단계에서 dom0 재빌드·최종 조립·SD 기록은 실행하지 않는다.
 
-Starter의 앱 출처·버전·소스 해시는 `starter.lock.json`과 새 `firmware.json`에 별도로 기록한다. 진단용 `source.lock.json`이나 이전 template.json을 재사용/수정하지 않는다. 펌웨어 교체는 자동 시작·UUID·보드 종료 정책을 바꾸지 않는다. 후속 운영과 실제 검증 한계는 [2026-10-18 수락 절차](../../../docs/build-guides/perseus-acceptance-20261018.md)를 따른다.
+Starter의 앱 출처·버전·소스 해시는 `starter.lock.json`과 새 `firmware.json`에 별도로 기록한다. 진단용 `source.lock.json`이나 이전 template.json을 재사용/수정하지 않는다. 펌웨어 교체는 자동 시작·UUID·보드 종료 정책을 바꾸지 않는다. 후속 운영과 실제 검증 한계는 [2026-10-18 수락 절차](../../../docs/build-guides/zenova-acceptance-20261018.md)를 따른다.
+
+생성 결과의 vm_id는 영구 UUID다. 기본 Starter는 정규화 카탈로그 게시 후 생성한다.
+기존 synchronization 번들의 출처는 보존하며 Starter ID로 바꾸어 게시하지 않는다.
