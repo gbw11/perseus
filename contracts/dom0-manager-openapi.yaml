@@ -1,10 +1,12 @@
 openapi: 3.1.0
 info:
-  title: Perseus dom0 manager API
+  title: Xenova dom0 manager API
   version: 1.0.0
   description: >-
     Spring Boot 관리 서버와 Python dom0-manager 사이의 내부 계약.
-    기준 문서는 docs/contracts/vm-api-contract-v1.md 이며, 이 파일은 그 문서의 기계 판독용 원본이다.
+    기준 문서는 docs/contracts/vm-api-contract-v1.md 이며, 이 파일은 HTTP 계약의 기계 판독용 원본이다.
+    플랫폼 공통 Manager/CLI의 JSON envelope와 동일한 스키마가 아니다.
+    생성·시작·등록 목록·예약 IP·수명주기 전달의 계층 경계는 기준 문서 1.4절과 13장을 따른다.
     서비스는 보드의 Tailscale 주소에 바인딩하고 모든 엔드포인트에서 Bearer 서비스 토큰을 검사한다.
     Spring 이 발급한 vm_id 를 플랫폼 registry 와 Xen UUID의 영구 식별자로 사용한다.
     FastAPI 기본 422(HTTPValidationError)는 400 InvalidArgument 로 정규화하고, 생성 스키마에서
@@ -48,7 +50,8 @@ paths:
         디스크 경로는 vm_id 에서 파생한다. 꺼진 VM 의 재시작은 같은 vm_id 로 이 엔드포인트를
         다시 호출하는 것이며 별도 start 엔드포인트는 없다.
         Spring 불변조건: 같은 vm_id 에는 항상 같은 생성 명세를 보낸다.
-        동일 vm_id/명세 재요청은 기존 결과를 반환하고 다른 명세는 409 로 거부한다.
+        실행 도메인이 있으면 명세 비교 없이 409 VMExists 를 반환하며 Spring 이 자기 명세와 대조한다.
+        플랫폼 공통 create 는 정지 등록이므로 실제 도메인 시작은 별도 start 연결이 필요하다.
         Linux IP 는 플랫폼 전역 잠금 안에서 자동 할당한다.
       x-driver-timeout-seconds: 30
       requestBody:
@@ -199,7 +202,7 @@ components:
         template_id:
           type: string
           minLength: 1
-          description: 예 ubuntu, debian, zephyr
+          description: ubuntu-24.04-arm64 / debian-13-arm64 / zephyr-xenvm-starter-arm64
         template_version:
           type: string
           minLength: 1

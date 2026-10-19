@@ -10,6 +10,7 @@ import time
 
 from first_install_contract import uuid4
 from artifact_io import publish
+from xenova_catalog import deployment_version
 from prepare_rootfs import prepare_instance, prepare_deployment_seed, inside
 
 
@@ -152,11 +153,19 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
     for filename in ('root.raw', 'template.json', 'boot.json', 'Image', 'initrd', 'kernel.config'):
         vm.regular_asset(template, filename)
     meta = json.loads((template / 'template.json').read_text())
-    if meta.get('version') is not None:
-        if not isinstance(meta['version'], str) or not __import__('re').fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?', meta['version']):
+    version = deployment_version(meta)
+    if 'template_version' in meta or 'version' in meta:
+        if not isinstance(version, str) or not __import__('re').fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?', version):
             raise ValueError('invalid template version')
-        record['template_version'] = meta['version']
+        if 'template_version' in record and record['template_version'] != version:
+            raise ValueError('selected template version differs from bundle deployment version')
+        record['template_version'] = version
         record['template_manifest_sha256'] = digest(template / 'template.json')
+    if record.get('guest_kind', 'linux') != 'linux':
+        raise ValueError('Linux preparation cannot replace the selected guest kind')
+    if (meta.get('template_id') is not None and record.get('template_id') is not None
+            and meta['template_id'] != record['template_id']):
+        raise ValueError('selected template ID differs from bundle')
     if meta.get('id') != record['template']:
         raise ValueError('template bundle id differs from selected template')
     if (template / 'root.raw').stat().st_mode & 0o222:
