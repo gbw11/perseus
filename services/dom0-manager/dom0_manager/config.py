@@ -14,10 +14,12 @@ class Settings:
     driver: str = "mock"
     host: str = "127.0.0.1"
     port: int = 8081
-    # 계약 10장: 조회 드라이버 한도 5초(Spring 대기 6초 안), 명령 드라이버 한도 30초(shutdown 25초 + 강제 전환)
+    # 계약 v1.1: 조회 드라이버 한도 5초(Spring 대기 6초 안), 정지는 플랫폼이 최대 90초 동기 대기하고 자동 강제 종료 없음
     xl_query_timeout_s: float = 5.0
-    xl_command_timeout_s: float = 30.0
-    shutdown_grace_s: float = 25.0
+    xl_command_timeout_s: float = 95.0
+    shutdown_grace_s: float = 90.0
+    # Bearer 서비스 토큰. 비어 있으면 검사하지 않는다(로컬 Mock 개발). Tailscale 바인드 배포에서는 반드시 설정
+    service_token: str = ""
     # RPi4 물리 코어 수. vcpus 상한 검사에 쓴다. xl info 의 nr_cpus 를 읽을 수 있으면 그 값을 우선한다.
     host_cpus: int = 4
     instance_root: str = "/srv/perseus/instances"
@@ -48,6 +50,7 @@ class Settings:
             xl_query_timeout_s=read("PERSEUS_XL_QUERY_TIMEOUT", cls.xl_query_timeout_s, float),
             xl_command_timeout_s=read("PERSEUS_XL_COMMAND_TIMEOUT", cls.xl_command_timeout_s, float),
             shutdown_grace_s=read("PERSEUS_SHUTDOWN_GRACE", cls.shutdown_grace_s, float),
+            service_token=read("PERSEUS_SERVICE_TOKEN", cls.service_token, str),
             host_cpus=read("PERSEUS_HOST_CPUS", cls.host_cpus, int),
             instance_root=read("PERSEUS_INSTANCE_ROOT", cls.instance_root, str),
             mock_samples=read("PERSEUS_MOCK_SAMPLES", cls.mock_samples, as_bool),

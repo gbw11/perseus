@@ -121,7 +121,11 @@ class MockDriver(Driver):
             domain = self._domains.get(vm_id)
             if domain is None:
                 return
-            forced = domain.hang or domain.state == VmState.crashed
+            if domain.hang:
+                # 계약 v1.1: 정상 종료가 grace 안에 끝나지 않아도 자동 강제 종료하지 않는다. 도메인은 그대로 남는다.
+                self.events.append(("shutdown", vm_id, {"forced": False, "grace_s": grace_s, "timed_out": True}))
+                raise DriverTimeout(f"domain {vm_id} did not shut down within {grace_s:g}s; no automatic force")
+            forced = domain.state == VmState.crashed  # crashed 는 종료 요청에 응답할 수 없어 destroy 로 처리
             del self._domains[vm_id]
             self.events.append(("shutdown", vm_id, {"forced": forced, "grace_s": grace_s}))
 

@@ -45,8 +45,9 @@ curl -i -X POST localhost:8081/api/v1/vms/11111111-1111-4111-8111-111111111111/s
 | `PERSEUS_DRIVER` | `mock` | `mock` 또는 `xen` |
 | `PERSEUS_HOST` / `PERSEUS_PORT` | `127.0.0.1` / `8081` | 바인드 주소. dom0 밖으로 열지 않습니다 |
 | `PERSEUS_XL_QUERY_TIMEOUT` | `5` | 조회용 xl 호출 한도(초). Spring 조회 대기 6초 안 |
-| `PERSEUS_XL_COMMAND_TIMEOUT` | `30` | 명령용 xl 호출 한도(초) |
-| `PERSEUS_SHUTDOWN_GRACE` | `25` | 정상 종료 대기 후 강제 전환까지(초) |
+| `PERSEUS_XL_COMMAND_TIMEOUT` | `95` | 명령용 xl 호출 한도(초) |
+| `PERSEUS_SHUTDOWN_GRACE` | `90` | 정상 종료 대기(초). 계약 v1.1: 시간이 지나도 자동 강제 종료하지 않고 실패로 보고 |
+| `PERSEUS_SERVICE_TOKEN` | (없음) | 설정하면 `/healthz`를 포함한 모든 요청에 `Authorization: Bearer <토큰>`을 요구(401). Tailscale 바인드 배포에서는 필수 |
 | `PERSEUS_HOST_CPUS` | `4` | vcpus 상한 기본값. `xl info`의 nr_cpus가 있으면 그 값 우선 |
 | `PERSEUS_INSTANCE_ROOT` | `/srv/perseus/instances` | 인스턴스 루트 (플랫폼 도구와 동일) |
 | `PERSEUS_MOCK_SAMPLES` | `0` | Mock 샘플 VM 3종 미리 생성 |
@@ -83,8 +84,10 @@ tests/
 | `list_domains()` | O | Xen에 존재하는 도메인. Domain-0 제외 |
 | `get_domain(vm_id)` / `has_domain(vm_id)` | O | 단건 조회. 없으면 `VMNotFound` |
 | `create(spec)` | O | Provisioner가 준 경로로 도메인 생성. 이미 있으면 `VMExists` |
-| `shutdown(vm_id, grace_s)` | O | 정상 종료 요청 → grace 초과 시 강제. 디스크 보존. 멱등 |
+| `shutdown(vm_id, grace_s)` | O | 정상 종료 요청 후 grace까지 대기. 시간 초과 시 자동 강제 종료 없이 실패(v1.1). 디스크 보존. 멱등 |
 | `destroy(vm_id)` | O | 강제 종료. 디스크는 Provisioner가. 멱등 |
+
+`DELETE /api/v1/vms/{vm_id}`는 v1.1 의미입니다. 실행 중이면 409 `InvalidState`, 등록이 없으면 404, 정지된 VM은 숨김 보관(retire)으로 204. 강제 종료는 하지 않습니다.
 | `host_info()` | O | free_memory, total_memory, nr_cpus (`xl info`) |
 | `health()` | O | 하이퍼바이저 응답 여부 → `/healthz` 503 판정 |
 | `reboot`, `set_vcpus`, `set_memory`, `pin_vcpu`, `set_sched_weight`, `get_stats` | v2 | 208·101·112에서. 기본 구현은 `NotImplementedError` |
