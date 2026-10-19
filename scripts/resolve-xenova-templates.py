@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""현재 기본 카탈로그 3개만 검증해 조립 config의 guest 참조를 출력한다. 복사·조립은 하지 않는다."""
+"""템플릿 카탈로그를 검증해 보관 입력을 출력한다. 기본 VM의 수와 독립적이며 복사·조립은 하지 않는다."""
 import argparse
 import importlib.util
 import json
@@ -17,40 +17,39 @@ def resolve(release_root, catalog):
     root = Path(release_root)
     if not root.is_absolute() or root.resolve() != root or root.is_symlink():
         raise ValueError('canonical release root required')
-    entries = [{**e, 'vm_id':e.get('vm_name',e.get('vm_id'))} for e in catalog.get('templates', [])]
-    if catalog.get('schema') != 1 or len(entries) != 3 or {e['vm_id'] for e in entries} != {'ubuntu-dev', 'debian-dev', 'zephyr-dev'}:
-        raise ValueError('one current default per VM required; no legacy compatibility catalog')
-    defaults = json.loads((assembly.FILES / 'defaults.json').read_text())
-    selected = {e['id']: e['template'] for e in defaults['instances'] + defaults['firmware_instances']}
-    result = {'guests': [], 'rtos_templates': []}
+    from xenova_catalog import DEFAULT_IDS
+    entries = catalog.get('templates', [])
+    if (catalog.get('schema') != 1 or len(entries) != 3
+            or {e.get('template_id') for e in entries} != set(DEFAULT_IDS.values())):
+        raise ValueError('one current default per template ID required; no duplicate catalog')
+    result = {'linux_templates': [], 'rtos_templates': []}
     for entry in entries:
         relative = Path(entry['directory'])
         if relative.is_absolute() or '..' in relative.parts:
             raise ValueError('template path escapes release root')
-        if entry.get('template_id') is not None:
-            public_ids={e['id']:e['template_id'] for e in defaults['instances']+defaults['firmware_instances']}
-            if entry['template_id'] != public_ids.get(entry['vm_id']):
-                raise ValueError('normalized default template identity mismatch')
-        if entry.get('id') != selected[entry['vm_id']] or entry.get('guest_kind') != ('zephyr' if entry['vm_id']=='zephyr-dev' else 'linux'):
-            raise ValueError('default template/VM pairing differs from deployment defaults')
+        if DEFAULT_IDS.get(entry.get('id')) != entry['template_id']:
+            raise ValueError('normalized default template identity mismatch')
+        kind = 'zephyr' if entry['template_id'] == 'zephyr-xenvm-starter-arm64' else 'linux'
+        if entry.get('guest_kind') != kind:
+            raise ValueError('default template kind mismatch')
         directory = root / relative
         if directory.resolve() != directory or directory.is_symlink():
             raise ValueError('template path contains links')
-        if entry['guest_kind'] == 'linux':
-            info = assembly.template_info(directory, entry['id'], entry['manifest_sha256'])
+        if kind == 'linux':
+            assembly.template_info(directory, entry['id'], entry['manifest_sha256'])
             meta = json.loads((directory / 'template.json').read_text())
-            if meta.get('platform') != 'xenova' or meta.get('version') != entry['version']:
+            from xenova_catalog import deployment_version
+            if meta.get('platform') != 'xenova' or deployment_version(meta) != entry['version']:
                 raise ValueError('default Linux template must use the selected Xenova preparation/version')
-            result['guests'].append({'id': entry['vm_id'], 'template_dir': str(directory),
-                                    'template_manifest_sha256': entry['manifest_sha256']})
-        elif entry['guest_kind'] == 'zephyr':
+            result['linux_templates'].append({'template_id': entry['template_id'], 'template_version': entry['version'],
+                                              'template_dir': str(directory),
+                                              'template_manifest_sha256': entry['manifest_sha256']})
+        else:
             info = assembly.rtos.info(directory, entry['manifest_sha256'])
             if info['id'] != entry['id'] or info['metadata'].get('template_version',info['metadata'].get('version')) != entry['version']:
                 raise ValueError('default Starter identity/version mismatch')
             result['rtos_templates'].append({'template_dir': str(directory),
-                                            'template_manifest_sha256': entry['manifest_sha256']})
-        else:
-            raise ValueError('unsupported default template kind')
+                                             'template_manifest_sha256': entry['manifest_sha256']})
     return result
 
 

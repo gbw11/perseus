@@ -35,7 +35,7 @@ prepare = load('prepare_guests_test', ROOT / 'scripts/prepare-xenova-guests.py')
 
 
 def record(key='ubuntu-dev'):
-    rows = json.loads((FILES / 'defaults.json').read_text())['instances']
+    rows = json.loads((ROOT / 'tests/platform/fixtures/legacy-defaults.json').read_text())['instances']
     r = next(copy.deepcopy(row) for row in rows if row['id'] == key)
     r.update(schema=1, uuid='aaaa0000-1111-4222-8333-123456789abc', kernel_release='6.8.0-test')
     if key == 'debian-dev':
@@ -383,12 +383,12 @@ class GuestPreparationTest(unittest.TestCase):
         self.assertIn('ln -snf /dev/null', image)
         self.assertIn('xendomains.service', image)
 
-    def test_default_registry_excludes_busybox_and_enables_two_distros(self):
+    def test_default_linux_registry_is_debian_and_keeps_unique_network_identity(self):
         defaults = json.loads((FILES / 'defaults.json').read_text())['instances']
-        self.assertEqual({r['id'] for r in defaults}, {'ubuntu-dev', 'debian-dev'})
+        self.assertEqual({r['id'] for r in defaults}, {'debian-dev'})
         self.assertTrue(all(r['autostart'] for r in defaults))
-        self.assertEqual(len({r['mac'] for r in defaults}), 2)
-        self.assertEqual(len({r['ipv4'] for r in defaults}), 2)
+        self.assertEqual(len({r['mac'] for r in defaults}), 1)
+        self.assertEqual(len({r['ipv4'] for r in defaults}), 1)
 
 
 if __name__ == '__main__':

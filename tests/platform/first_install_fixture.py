@@ -114,7 +114,7 @@ class Board:
     def factory(self):
         for name in ('seeds', 'instances', 'templates'):
             (self.data / name).mkdir()
-        records = json.loads((FILES / 'defaults.json').read_text())['instances']
+        records = json.loads((ROOT / 'tests/platform/fixtures/legacy-defaults.json').read_text())['instances']
         bundles, templates = [], []
         for record in records:
             r = copy.deepcopy(record)
@@ -219,3 +219,19 @@ def profile_dts():
  hvc { compatible = "xen,hvc-uart"; };
 };
 '''
+
+def starter_bundle(target):
+    """현재 Starter 출처 계약을 만족하는 작은 시험용 펌웨어 번들."""
+    from test_xenova_lifecycle import application_bundle, bundle
+    target = Path(target)
+    source = application_bundle(bundle(target.parent / (target.name + '-diagnostic')), target)
+    manifest = source / 'firmware.json'
+    meta = json.loads(manifest.read_text())
+    lock = json.loads((ROOT / 'platform/guests/zephyr/starter.lock.json').read_text())
+    meta.update(id=lock['id'], kind='zephyr-xen-firmware', version=lock['version'])
+    meta['source'].update({k: lock[k] for k in ('app','app_files','app_source_sha256','zephyr_commit','sdk_version')})
+    meta['source']['source_revision'] = 'sha256:' + lock['app_source_sha256']
+    manifest.chmod(0o644)
+    manifest.write_text(json.dumps(meta))
+    manifest.chmod(0o444)
+    return source

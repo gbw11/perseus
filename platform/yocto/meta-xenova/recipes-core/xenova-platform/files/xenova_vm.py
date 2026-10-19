@@ -902,8 +902,9 @@ def main(argv=None):
             print(json.dumps(p.status(records), indent=2))
         elif args.action == 'autostart':
             p.check_xen()
-            defaults = json.loads(Path('/etc/xenova/defaults.json').read_text())['instances']
-            p.autostart(records, [r['id'] for r in defaults if not retired_instance(p.data, r['id'])])
+            defaults = json.loads(p.defaults_path.read_text())
+            required = defaults['instances'] + defaults.get('firmware_instances', [])
+            p.autostart(records, [r['id'] for r in required if not retired_instance(p.data, r['id'])])
         elif args.action in ('shutdown-all', 'poweroff', 'reboot-board'):
             if args.action == 'shutdown-all':
                 p.stop_many(list(records.values()), force=args.force, board=True)
