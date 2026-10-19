@@ -63,9 +63,21 @@ class FakeXen:
         self.base, self.records, self.rows, self.calls = base, records, [], []
         self.hang_shutdown = False
         self.fail_create = False
+        self.incarnations = {}
+        self.next_incarnation = 1
 
     def __call__(self, args, **kwargs):
         self.calls.append(args)
+        if args[:2] == ['xenova-domain-identity', '--domid']:
+            domid = int(args[2])
+            rows = [row for row in self.rows if row['domid'] == domid]
+            if len(rows) != 1:
+                raise vm.PlatformError('domain incarnation is unavailable')
+            previous = self.incarnations.get(domid)
+            if previous is None or previous[0] is not rows[0]:
+                self.incarnations[domid] = (rows[0], self.next_incarnation)
+                self.next_incarnation += 1
+            return json.dumps({'domid':domid, 'xen_unique_id':str(self.incarnations[domid][1]), 'state_bits':1})
         if args == ['xl', 'list', '-l']:
             return json.dumps(self.rows)
         if args == ['xl', 'list', '-v']:
