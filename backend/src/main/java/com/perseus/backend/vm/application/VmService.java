@@ -30,7 +30,9 @@ import org.springframework.stereotype.Service;
 public class VmService {
 
     // dom0-manager rejected the request itself, so no domain or disk was created for this vm_id.
-    private static final Set<String> REJECTED_BY_DOM0 = Set.of("INVALID_ARGUMENT", "INSUFFICIENT_RESOURCES");
+    // NOT_SUPPORTED: until the platform accepts a caller-chosen vm_id, every new create is refused this way.
+    private static final Set<String> REJECTED_BY_DOM0 =
+            Set.of("INVALID_ARGUMENT", "INSUFFICIENT_RESOURCES", "VM_CONTROL_NOT_SUPPORTED");
     private static final String DOMAIN_EXISTS = "VM_ALREADY_EXISTS";
 
     private final VmControlPort vmControlPort;

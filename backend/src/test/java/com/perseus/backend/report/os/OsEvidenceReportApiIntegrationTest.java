@@ -46,7 +46,7 @@ class OsEvidenceReportApiIntegrationTest {
     private static final List<CreateVmCommand> VMS = List.of(
             new CreateVmCommand("debian-01", "debian-13-arm64", "1.0.0", 1, 256),
             new CreateVmCommand("ubuntu-01", "ubuntu-24.04-arm64", "1.0.0", 1, 512),
-            new CreateVmCommand("zephyr-01", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 128));
+            new CreateVmCommand("zephyr-01", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 16));
 
     @Autowired
     private MockMvc mockMvc;

@@ -145,6 +145,17 @@ class VmServiceTest {
     }
 
     @Test
+    void createRefusedAsNotSupportedRemovesTheRecord() {
+        when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.empty());
+        when(vmRecordRepository.save(any(VmRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(vmControlPort.launch(anyString(), any())).thenThrow(
+                new ApiException(HttpStatus.NOT_IMPLEMENTED, "VM_CONTROL_NOT_SUPPORTED", "지원하지 않음"));
+
+        assertThatThrownBy(() -> service.create(ALPINE)).isInstanceOf(ApiException.class);
+        verify(vmRecordRepository).delete(any(VmRecord.class));
+    }
+
+    @Test
     void createThatTimedOutKeepsTheRecordForARetry() {
         when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.empty());
         when(vmRecordRepository.save(any(VmRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));

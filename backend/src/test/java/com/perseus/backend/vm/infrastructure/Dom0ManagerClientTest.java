@@ -153,6 +153,65 @@ class Dom0ManagerClientTest {
     }
 
     @Test
+    void notSupportedIsMappedTo501() {
+        assertLaunchFailsWith(501, """
+                {"code":"NotSupported","message":"caller-chosen vm_id is not supported by the platform yet"}
+                """, HttpStatus.NOT_IMPLEMENTED, "VM_CONTROL_NOT_SUPPORTED");
+    }
+
+    @Test
+    void platformUnavailableIsMappedTo503() {
+        assertLaunchFailsWith(503, """
+                {"code":"PlatformUnavailable","message":"platform operation in progress"}
+                """, HttpStatus.SERVICE_UNAVAILABLE, "VM_CONTROL_UNAVAILABLE");
+    }
+
+    @Test
+    void driverTimeoutIsMappedTo504() {
+        assertLaunchFailsWith(504, """
+                {"code":"DriverTimeout","message":"xl create timed out"}
+                """, HttpStatus.GATEWAY_TIMEOUT, "VM_CONTROL_TIMEOUT");
+    }
+
+    @Test
+    void rejectedServiceTokenIsNotPassedOnAsAUserAuthError() {
+        assertLaunchFailsWith(401, """
+                {"code":"Unauthorized","message":"invalid service token"}
+                """, HttpStatus.BAD_GATEWAY, "VM_CONTROL_BAD_RESPONSE");
+    }
+
+    @Test
+    void a401WithAnUnexpectedBodyIsStillTreatedAsATokenProblem() {
+        assertLaunchFailsWith(401, """
+                {"code":"SomethingElse","message":"nope"}
+                """, HttpStatus.BAD_GATEWAY, "VM_CONTROL_BAD_RESPONSE");
+    }
+
+    @Test
+    void driverErrorsAreNotRetried() {
+        AtomicInteger requests = new AtomicInteger();
+        server.createContext("/api/v1/vms", exchange -> {
+            requests.incrementAndGet();
+            respond(exchange, 503, """
+                    {"code":"PlatformUnavailable","message":"busy"}
+                    """);
+        });
+
+        assertThatThrownBy(() -> client.launch(VM_ID, SPEC)).isInstanceOf(ApiException.class);
+        assertThat(requests).hasValue(1);
+    }
+
+    private void assertLaunchFailsWith(int dom0Status, String body, HttpStatus status, String code) {
+        server.createContext("/api/v1/vms", exchange -> respond(exchange, dom0Status, body));
+
+        assertThatThrownBy(() -> client.launch(VM_ID, SPEC))
+                .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(status);
+                    assertThat(exception.getCode()).isEqualTo(code);
+                });
+    }
+
+    @Test
     void queryTimeoutIsRetriedOnceThenReportedAsTimeout() {
         AtomicInteger requests = new AtomicInteger();
         server.createContext("/api/v1/vms", exchange -> {

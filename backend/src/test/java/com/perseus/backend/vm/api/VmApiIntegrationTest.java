@@ -81,6 +81,26 @@ class VmApiIntegrationTest {
     }
 
     @Test
+    void zephyrAcceptsItsFixed16MibProfileButNot15() throws Exception {
+        createVm("zephyr-16", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 16)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.memory_mib").value(16));
+        createVm("zephyr-15", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 15)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.errors[0].field").value("memory_mib"));
+    }
+
+    @Test
+    void linuxTemplatesKeepTheirOwnMinimumBelowTheCommonFloor() throws Exception {
+        createVm("debian-16", "debian-13-arm64", "1.0.0", 1, 16)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        verify(vmControlPort, never()).launch(anyString(), any(VmLaunchSpec.class));
+    }
+
+    @Test
     void createAcceptsKoreanNamesWithSpaces() throws Exception {
         createVm("주행 컨트롤러 A", 1, 256)
                 .andExpect(status().isCreated())
@@ -105,7 +125,7 @@ class VmApiIntegrationTest {
             "'뒤공백 ', 1, 256, name",
             "debian-01, 0, 256, vcpus",
             "debian-01, 5, 256, vcpus",
-            "debian-01, 1, 127, memory_mib",
+            "debian-01, 1, 15, memory_mib",
             "debian-01, 1, 1025, memory_mib"
     })
     void createRejectsOutOfRangeValues(String name, int vcpus, int memoryMib, String field) throws Exception {
@@ -209,7 +229,7 @@ class VmApiIntegrationTest {
 
     @Test
     void vmsCarryTheGuestKindOfTheirTemplate() throws Exception {
-        createVm("zephyr-01", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 128)
+        createVm("zephyr-01", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 16)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.guest_kind").value("zephyr"));
         createVm("debian-02", "debian-13-arm64", "1.0.0", 1, 256)

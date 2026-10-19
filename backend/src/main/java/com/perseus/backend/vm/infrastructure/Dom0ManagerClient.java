@@ -164,7 +164,24 @@ public class Dom0ManagerClient implements VmControlPort {
             case "InsufficientResources" -> new ApiException(
                     HttpStatus.INSUFFICIENT_STORAGE, "INSUFFICIENT_RESOURCES", insufficientResourceMessage(error));
             case "DriverError" -> new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "VM_DRIVER_ERROR", message);
+            // The driver or platform does not offer this operation yet (e.g. caller-chosen vm_id before P2 supports it).
+            case "NotSupported" -> new ApiException(
+                    HttpStatus.NOT_IMPLEMENTED, "VM_CONTROL_NOT_SUPPORTED", "보드가 아직 지원하지 않는 작업입니다.");
+            // Temporary registry/storage/Xen trouble or a platform lock held by another operation: retrying later can work,
+            // so it uses the same public code as a connection failure.
+            case "PlatformUnavailable" -> new ApiException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "VM_CONTROL_UNAVAILABLE",
+                    "VM 제어 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.");
+            // dom0-manager ran out of time itself (xl or platform call, including the 90s stop wait).
+            case "DriverTimeout" -> new ApiException(
+                    HttpStatus.GATEWAY_TIMEOUT, "VM_CONTROL_TIMEOUT", "VM 제어 서비스의 응답 시간이 초과되었습니다.");
+            // The service token does not match: a deployment setting, not the user's login, so it is not passed on as 401.
+            case "Unauthorized" -> serviceTokenRejected(upstreamStatus);
             default -> {
+                if (upstreamStatus == HttpStatus.UNAUTHORIZED.value()) {
+                    yield serviceTokenRejected(upstreamStatus);
+                }
                 log.warn("Unknown dom0-manager error code={}, status={}", error.code(), upstreamStatus);
                 yield new ApiException(
                         HttpStatus.BAD_GATEWAY,
@@ -172,6 +189,15 @@ public class Dom0ManagerClient implements VmControlPort {
                         "VM 제어 서비스가 알 수 없는 오류를 반환했습니다.");
             }
         };
+    }
+
+    private static ApiException serviceTokenRejected(int upstreamStatus) {
+        log.warn("dom0-manager rejected the service token (status={}); check DOM0_MANAGER_SERVICE_TOKEN "
+                + "against PERSEUS_SERVICE_TOKEN on the board", upstreamStatus);
+        return new ApiException(
+                HttpStatus.BAD_GATEWAY,
+                "VM_CONTROL_BAD_RESPONSE",
+                "VM 제어 서비스와의 연결 설정이 올바르지 않습니다.");
     }
 
     // dom0-manager's message is English and names internal fields, so the user sees which resource ran out instead.
