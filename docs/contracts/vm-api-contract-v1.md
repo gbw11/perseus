@@ -126,7 +126,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 [
   { "template_id": "ubuntu-24.04-arm64", "version": "1.0.0", "display_name": "Ubuntu 24.04", "min_memory_mib": 512, "guest_kind": "linux" },
   { "template_id": "debian-13-arm64", "version": "1.0.0", "display_name": "Debian 13", "min_memory_mib": 256, "guest_kind": "linux" },
-  { "template_id": "zephyr-xenvm-starter-arm64", "version": "1.0.0", "display_name": "Zephyr Starter 1.0.0", "min_memory_mib": 128, "guest_kind": "zephyr" }
+  { "template_id": "zephyr-xenvm-starter-arm64", "version": "1.0.0", "display_name": "Zephyr Starter 1.0.0", "min_memory_mib": 16, "guest_kind": "zephyr" }
 ]
 ```
 
@@ -191,7 +191,7 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 | `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `404`, `409`, `500` |
 | `GET` | `/healthz` | `200` | `503` |
 
-`500 DriverError`는 분류되지 않은 플랫폼 실행 실패이며 모든 엔드포인트에서 날 수 있습니다(8.1절). `501`은 계약에서 사용하지 않습니다.
+드라이버·플랫폼 실패는 모든 엔드포인트에서 날 수 있으며 code와 HTTP 상태가 1:1입니다(8.1절). `500 DriverError`는 분류되지 않은 실행 실패, `503 PlatformUnavailable`은 일시 장애(재시도 가능), `504 DriverTimeout`은 호출 시한 초과, `501 NotSupported`는 드라이버·플랫폼이 제공하지 않는 동작입니다. 서비스 토큰이 설정된 배포에서는 토큰이 없거나 틀리면 `401 Unauthorized`입니다.
 
 ### 4.1 `GET /api/v1/vms`
 
@@ -294,7 +294,11 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 | `404` | `VMNotFound` | `GET` 대상 도메인 부재 |
 | `409` | `VMExists` | `vm_id` 충돌 (단일 의미) |
 | `507` | `InsufficientResources` | 가용 자원 부족. `resource.name`: `memory_mib`, `vcpus`, `ipv4`(Linux VM IP 풀 고갈 — 플랫폼 드라이버 브랜치 S15P31E110-115) |
-| `500` | `DriverError` | `xl` 실행 실패·타임아웃, 모르는 상태 문자. **임시 정의** — OpenAPI yaml의 오류 코드 목록에는 아직 없음(13장) |
+| `401` | `Unauthorized` | Bearer 서비스 토큰 없음·불일치 (`/healthz` 포함) |
+| `501` | `NotSupported` | 드라이버·플랫폼이 제공하지 않는 동작. xen 모드의 명령, 플랫폼이 아직 받지 않는 호출자 지정 `vm_id` (P2 지원 전까지 신규 생성은 이 오류) |
+| `503` | `PlatformUnavailable` | registry·저장소·Xen 일시 장애, 또는 다른 플랫폼 작업이 잠금을 쥐고 있음. 재시도 가능 |
+| `504` | `DriverTimeout` | `xl`·플랫폼 호출 시한 초과 (정지 90초 대기 포함) |
+| `500` | `DriverError` | 그 밖의 실행 실패, 모르는 상태 문자 |
 | `409` | `InvalidState` | 실행 중인 VM을 `DELETE` (4.4절). 먼저 정지해야 한다 |
 
 오류 본문:
@@ -344,6 +348,10 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | `400 InvalidArgument` | `400 INVALID_ARGUMENT` |
 | `507 InsufficientResources` | `507 INSUFFICIENT_RESOURCES`. message는 `resource.name`에 따라 메모리·CPU 부족 또는 "VM에 할당할 수 있는 IP 주소가 없습니다."(`ipv4`, Linux VM IP 풀 고갈) |
 | `500 DriverError` | `500 VM_DRIVER_ERROR` |
+| `501 NotSupported` | `501 VM_CONTROL_NOT_SUPPORTED` ("보드가 아직 지원하지 않는 작업입니다."). 생성에서 받으면 dom0가 거부한 것이므로 Spring 기록을 지움 |
+| `503 PlatformUnavailable` | `503 VM_CONTROL_UNAVAILABLE` (전송 실패와 같은 코드, 잠시 후 재시도 가능). 생성에서 받아도 기록은 유지 |
+| `504 DriverTimeout` | `504 VM_CONTROL_TIMEOUT` (응답 타임아웃과 같은 코드) |
+| `401 Unauthorized` (또는 본문과 관계없이 401) | 서비스 토큰 설정 불일치. 사용자 로그인 문제가 아니므로 `502 VM_CONTROL_BAD_RESPONSE`로 전달하고 로그에 경고 |
 | 해석할 수 없는 본문, 모르는 `code`, 본문이 필요한데 없음 | `502 VM_CONTROL_BAD_RESPONSE` |
 
 **전송 실패**
@@ -362,13 +370,13 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 |---|---|---|
 | `name` | 1~63자, 한글·공백 허용. 제어문자·줄 구분 문자와 앞뒤 공백 금지 | Spring 단독 |
 | `vcpus` | 1~4 | Spring, dom0-manager |
-| `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 128) | 템플릿별 하한은 Spring, 공통 범위는 dom0-manager |
+| `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16) | 템플릿별 하한은 Spring, 공통 범위는 dom0-manager |
 | 배수 제약 | 없음. 화면 입력만 64 단위 | — |
 | `template_id` | 공개 카탈로그 ID·버전을 그대로 전달 | Spring 목록 검사 + 플랫폼의 정확한 ID·버전·해시 검사 |
 
 `name`은 dom0-manager로 전달되지 않으므로 제어 계층의 관심사가 아닙니다.
 
-공통 하한이 128MiB인 것은 Xen domU에서 100MiB로는 커널 부팅이 불안정할 수 있고, 가장 가벼운 Alpine 기준으로도 128MiB가 현실적인 하한이기 때문입니다.
+공통 하한 16MiB는 게시된 Zephyr starter 템플릿 1.0.0의 고정 프로필(1 vCPU / 16MiB)을 통과시키기 위한 느슨한 안전망입니다. 실제 하한은 템플릿별 `min_memory_mib`이며 Linux 템플릿은 Ubuntu 512, Debian 256을 유지합니다.
 
 ---
 
@@ -431,11 +439,10 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 오류 코드 명명 규칙 | 백엔드 | `VALIDATION_ERROR` / `InvalidArgument` 중 한쪽으로 통일 권고 |
 | OS별 실제 버전 값 | 제어 계층 | 이미지 빌드 시 실측 |
 | OS별 `min_memory_mib` | 제어 계층 | 이미지 빌드 시 실측 |
-| `DriverError`의 세부 분류 | 제어 계층 | 알려진 입력·없음·충돌·자원·시간 초과·일시 장애는 각각 400·404·409·507·504·503으로 분리하고, 분류되지 않은 실패만 500 사용 |
 | 서비스 토큰 배포·회전 | 공통 | Spring과 dom0-manager에 같은 Bearer 서비스 토큰을 안전하게 배포하고 회전하는 운영 절차 |
 | 자동 복구 주체 | 공통 | 보드(Xen `on_crash`·dom0 감시) 또는 Spring. 결정 전까지 Spring은 복구를 수행하지 않음 |
 | HTTP → 공통 Manager 입력 | 제어 계층 + 플랫폼 | HTTP 5개 필드와 Manager의 필수 `name`·최초 명세를 연결하는 규칙. 임의 기본값이나 Spring 입력 필드 추가로 우회하지 않음 |
-| Zephyr 자원 범위 | 제어 계층 + 백엔드 + 플랫폼 | 공통 Manager의 고정 1 vCPU/16MiB와 HTTP 모델의 최소 128MiB·Spring 설정 하한 128MiB가 다름. 2.3절 예시의 128MiB는 현재 Spring 검증 설정이며 펌웨어 프로필 변경 승인이 아님 |
+| Zephyr 자원 범위 | 제어 계층 + 플랫폼 | 공통 Manager는 고정 1 vCPU/16MiB이고 Spring은 공통 하한 16, Zephyr 템플릿 하한 16으로 맞춤(v1.6). 이 브랜치의 dom0-manager HTTP 모델(`contracts/dom0-manager-openapi.yaml`)은 아직 최소 128MiB라, 16MiB로 바꾸는 플랫폼 드라이버 브랜치(S15P31E110-115)가 병합되기 전에는 Zephyr 16MiB 생성이 `400 InvalidArgument`로 거부될 수 있음. Spring은 Zephyr에도 vCPU 1~4를 받으므로 템플릿별 vCPU 상한은 추후 결정 |
 | 수명주기·강제 종료 전달 | 제어 계층 + 플랫폼 | retire/restore/purge의 작업 키·operation_id·대상 세대와 개별 force 전달. 보드 종료 정책을 개별 강제 종료 승인으로 사용하지 않음 |
 | IP 고갈 오류 스키마 | 제어 계층 + 백엔드 | 플랫폼 IP_POOL_EXHAUSTED와 HTTP 507의 연결, resource.name=ipv4 표현. 현재 HTTP ResourceName은 vcpus/memory_mib만 지원 |
 
@@ -455,3 +462,4 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1.3 | 2026-10-19 | API 문서 통일(S15P31E110-230): `docs/dom0-backend-http-contract-v1.md`(v1.0 폐기본)와 `docs/backend-vm-api-rules-v1.md`(백엔드 VM API 규약)를 삭제하고 이 문서로 일원화. 코드 기준으로 정정 — dom0-manager는 기존 도메인에 명세와 관계없이 `409 VMExists`(4.2·7장), `InvalidState`는 실행 중 VM 삭제에 반환(8.1절), 템플릿 OS는 Ubuntu·Debian·Zephyr(2.3절) |
 | v1.4 | 2026-10-19 | Spring 공개 API 보완: VM 이름에 한글·공백 허용(제어문자·앞뒤 공백 금지, 9장), 공개 VM 객체에 `ipv4` 추가(에이전트 보고 기준, Zephyr는 `null`, 2.2절), dom0-manager `507 InsufficientResources`를 공개 API에서도 `507`로 전달하고 IP 풀 고갈(`ipv4`) 메시지 추가(8.1·8.2절) |
 | v1.5 | 2026-10-19 | 공통 Manager와 HTTP 계약을 분리하고 생성/시작·등록 목록·예약 IP·수명주기 세대·Zephyr 종료/메모리의 연결 경계를 명시. Spring의 현재 DTO·설정과 플랫폼 구현은 유지 |
+| v1.6 | 2026-10-19 | dom0-manager 오류 code 분리(플랫폼 드라이버 S15P31E110-115 계약) 반영: `401 Unauthorized`, `501 NotSupported`, `503 PlatformUnavailable`, `504 DriverTimeout`과 Spring 변환(8.1·8.2절). 요청 메모리 공통 하한 128 → 16, Zephyr starter `min_memory_mib` 16(2.3절·9장) |

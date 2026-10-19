@@ -56,7 +56,8 @@ perseus:
       - template-id: zephyr-xenvm-starter-arm64
         version: "1.0.0"
         display-name: Zephyr Starter 1.0.0
-        min-memory-mib: 128
+        # 플랫폼 starter 1.0.0은 1 vCPU / 16MiB 고정 프로필이다.
+        min-memory-mib: 16
         guest-kind: zephyr
   agent:
     stale-after: ${AGENT_STALE_AFTER:15s}
