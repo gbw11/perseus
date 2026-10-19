@@ -2,7 +2,8 @@
 <!-- 이 MR에서 무엇을 했는지 한두 줄로 -->
 
 ## Jira
-<!-- 이 MR로 끝나는 이슈는 "Closes 키" — develop 머지 시 Jira가 자동으로 '완료' 처리됩니다 -->
+<!-- develop 으로 가는 MR: 이 MR로 끝나는 이슈마다 "Closes 키" — develop 머지 시 Jira가 자동으로 '완료' 처리됩니다 -->
+<!-- 기능별 develop 브랜치(backend·frontend·platform·vehicle)로 가는 MR: Closes 없이 키만 적습니다 -->
 <!-- 아직 끝나지 않은 이슈는 키만 적습니다 -->
 Closes S15P31E110-
 
@@ -13,7 +14,7 @@ Closes S15P31E110-
 <!-- 리뷰어가 확인할 수 있는 방법 (명령어, 화면, 목 드라이버/QEMU/실보드 중 어디서 확인했는지) -->
 
 ## 체크리스트
-- [ ] develop 최신 내용으로 rebase 했습니다
+- [ ] MR target 브랜치(기능별 develop 또는 develop)의 최신 내용을 반영했습니다
 - [ ] CI가 통과했습니다
 - [ ] 브랜치·커밋·MR 제목이 컨벤션을 따릅니다
 - [ ] `docs/`의 공통 계약(API·스키마·프로토콜)을 바꿨다면 관련 파트 리뷰어를 지정했습니다
