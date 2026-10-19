@@ -20,11 +20,24 @@ console은 PV 바이트 스트림으로 기존 별도 명령이며 --json 관리
 실행·저장소·복구 오류 4. HTTP 매핑은 호출자 책임이다.
 작업 조회 ok=true는 조회 자체의 성공이다. operation.status와 recovery_required를 따로 확인한다.
 운영 오류 코드는 소스의 VALIDATION, CONFLICTS와 ManagementError를 따른다.
+실행 대상의 UUID/name/domid 불일치는 DomainIdentityError를 통해 TARGET_CHANGED로
+반환한다. 종료 결과를 집계할 때도 이 유형을 보존한다.
+Xen 조회 명령 실패·잘못된 자산을 문자열 패턴만으로 신원 변경으로 분류하지 않는다.
 INVALID_SPEC / VM_NOT_FOUND / VM_NAME_CONFLICT / TEMPLATE_NOT_FOUND /
 TEMPLATE_VERSION_NOT_FOUND / ARTIFACT_INVALID / STORAGE_UNAVAILABLE /
 INSUFFICIENT_STORAGE / IP_CONFLICT / RESOURCE_UNSUPPORTED / IDEMPOTENCY_CONFLICT /
 OPERATION_IN_PROGRESS / VM_NOT_STOPPED / TARGET_CHANGED / ASSET_IN_USE /
 RESTORE_CONFLICT / VM_PURGED / CLEANUP_INCOMPLETE / RECOVERY_REQUIRED를 구분한다.
+
+## 공통 입력 검사
+
+spec은 JSON 객체(dict)이며 동작별 허용 필드만 받는다. get은 정규 UUID인 vm_id,
+list는 lifecycle만 받는다. templates는 빈 객체만 받는다.
+operation은 operation_id(UUID) 또는 idempotency_key 중 정확히 하나를 지정한다.
+CLI가 선택하지 않은 selector를 null로 전달하는 것은 허용한다.
+request_id와 재시도 키는 제어문자가 없는 1..200 UTF-8 bytes 문자열이다.
+잘못된 타입·필드·selector는 INVALID_SPEC envelope와 CLI 종료 코드 2를 반환한다.
+내부 AttributeError를 입력 오류로 포괄 변환하지 않는다.
 
 ## 템플릿과 생성
 
@@ -83,6 +96,15 @@ retire는 정지한 VM을 숨김 archive로 옮긴다. 공간 회수가 아니�
 restore는 같은 자산/UUID를 검증해 재등록하며 즉시 시작하지 않는다. 이름/UUID/MAC/IP가
 충돌하면 거부한다. 쓰기 디스크는 최초 템플릿 해시와 대조하지 않고 존재·ext4 구조·소유권을 검사한다.
 복원 시 사용 여부를 확인한 뒤 읽기 전용 e2fsck -fn도 통과해야 한다.
+restore의 계획·실행·중단 재시도는 복원 후 전체 등록 집합을 기준으로 기존 용량 정책을 적용한다.
+필요 여유는 추가 복사량 + 등록 예정 Linux 디스크의 미할당 증가분 + 미완료 생성의
+남은 약정량 + 2GiB다. restore의 추가 복사량은 0이며 보관 디스크의 이미 할당된 블록은
+현재 free에 반영되어 있으므로 다시 더하지 않는다.
+기록만 남은 생성은 준비할 payload를 예약하고, 복사된 payload는 파일별 실제 할당량만
+차감한다. 이미 게시되어 등록 집합에 포함된 생성은 중복 예약하지 않는다.
+공간 부족은 INSUFFICIENT_STORAGE이며 디스크·UUID·정책을 변경하지 않는다.
+이동 후 중단은 게시 자산을 되돌리거나 삭제하지 않고 같은 작업으로 재확인한다.
+완료된 작업의 부작용 없는 재전달은 현재 여유 공간 때문에 다시 실행하거나 차단하지 않는다.
 커널/initrd와 활성 불변 펌웨어는 해당 해시를 검사한다. 누락 디스크를 새로 만들지 않는다.
 
 purge는 RETIRED만 받으며 UUID 재확인과 --execute가 필요하다.
@@ -119,6 +141,17 @@ RECOVERY_REQUIRED로 표시하며 자동 초기화/일괄 삭제하지 않는다
 작업 기록/tombstone은 purge와 독립적으로 남고 TTL로 삭제하지 않는다.
 복구 시 운영자는 작업 JSON의 소유 경로·mount/loop·inode를 대조해야 한다.
 외부 root 프로세스의 xl/파일 변경까지 완전히 원자적으로 차단하지는 않는다.
+
+shutdown-requested가 있으면 새 변경 작업, 중단 작업의 실제 재개,
+JSON autostart-set/board-shutdown-set/config 쓰기를 거부한다.
+조회·계획·완료 결과의 부작용 없는 재전달은 허용한다. 거부된 재개 요청이
+기존 작업 JSON을 오류 상태로 덮어쓰지 않는다. 종료/정리 자체의 제어 경로는 유지한다.
+Manager의 operation_id/replayed/오류 기록 대상은 호출별 지역 문맥이며,
+같은 객체의 다른 호출이 잠금 충돌로 거부돼도 진행 중 응답을 바꾸지 않는다.
+
+관리 조회·retired_instance·first-boot·autostart는 같은 정식 tombstone 판독을 쓴다.
+UUID.json.tmp-<PID>-<12자리 hex>의 잔여 일반 파일은 JSON으로 채택하지 않고 보존한다.
+정식 UUID.json의 손상·신원 불일치, 알려지지 않은 파일명·링크는 계속 거부한다.
 
 ## 다음 자산 준비·게시
 

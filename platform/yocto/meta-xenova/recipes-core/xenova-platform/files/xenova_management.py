@@ -70,8 +70,6 @@ class Manager:
         self.preparer = preparer or self._prepare
         self.usage_check = usage_check or self._usage
         self.checkpoint = checkpoint or (lambda phase, operation: None)
-        self.current_operation = None
-        self.replayed = False
 
     def _plain_dir(self, path, *, create=False):
         if create and not path.exists() and not path.is_symlink():
@@ -132,27 +130,79 @@ class Manager:
         self.checkpoint(op['phase'], op)
 
     def _tombs(self):
-        root = self.data / 'tombstones'
-        if not root.exists() and not root.is_symlink():
-            return {}
-        self._plain_dir(root)
-        result = {}
-        for path in sorted(root.iterdir()):
-            if re.fullmatch(r'[0-9a-f-]{36}\.json\.tmp-[0-9]+-[0-9a-f]{12}',path.name):
-                catalog.plain(path)
-                continue
-            if not path.name.endswith('.json') or not vm.UUID.fullmatch(path.stem):
-                fail('RECOVERY_REQUIRED', 'invalid tombstone path')
-            tomb = self._read(path)
-            record = tomb.get('record', {})
-            vm.validate_identity(record)
-            if (tomb.get('schema_version') != '1.0' or tomb.get('vm_id') != path.stem
-                    or record['uuid'] != path.stem or record['name'] != tomb.get('name')
-                    or type(tomb.get('generation')) is not int or tomb['generation'] < 0
-                    or tomb.get('lifecycle') not in ('REGISTERED','RETIRED','PURGING','PURGED')):
-                fail('RECOVERY_REQUIRED', 'invalid tombstone identity/lifecycle')
-            result[path.stem] = tomb
-        return result
+        try:
+            return vm.read_tombstones(self.data)
+        except PlatformError as exc:
+            fail('RECOVERY_REQUIRED', str(exc))
+
+    def _writable(self):
+        """종료 gate는 조회/완료 재전달과 실제 쓰기를 구분한다. 공통 잠금 안에서 호출한다."""
+        marker = self.p.runtime / 'shutdown-requested'
+        if marker.exists() or marker.is_symlink():
+            fail('OPERATION_IN_PROGRESS', 'board shutdown is in progress', retryable=True)
+
+    @staticmethod
+    def _text_token(value):
+        if not isinstance(value, str) or any(ord(c) < 32 for c in value):
+            return False
+        try:
+            return 1 <= len(value.encode('utf-8')) <= 200
+        except UnicodeError:
+            return False
+
+    def _validate_call(self, action, spec, execute, key, request_id):
+        """외부 호출의 타입/허용 필드를 읽기 전에 검사한다. 내부 예외는 입력 오류로 덮지 않는다."""
+        actions = MUTATIONS | {'templates', 'list', 'get', 'operation', 'start', 'stop',
+                               'reboot', 'autostart-set', 'board-shutdown-set', 'config'}
+        if not isinstance(action, str) or action not in actions:
+            fail('INVALID_SPEC', 'unsupported management action')
+        if type(execute) is not bool:
+            fail('INVALID_SPEC', 'execute must be a boolean')
+        if request_id is not None and not self._text_token(request_id):
+            fail('INVALID_SPEC', 'request_id must be 1..200 UTF-8 bytes without control characters')
+        if key is not None and not self._text_token(key):
+            fail('INVALID_SPEC', 'invalid idempotency_key')
+        if spec is None and action not in MUTATIONS:
+            spec = {}
+        if not isinstance(spec, dict):
+            fail('INVALID_SPEC', 'request must be an object')
+        if action in MUTATIONS:
+            if not self._text_token(key):
+                fail('INVALID_SPEC', 'idempotency_key of 1..200 UTF-8 bytes required')
+            return self._normalize(action, spec)
+        if action == 'templates':
+            allowed = set()
+        elif action == 'list':
+            allowed = {'lifecycle'}
+        elif action == 'operation':
+            allowed = {'operation_id', 'idempotency_key'}
+        else:
+            allowed = {'vm_id'} | ({'force'} if action in ('stop', 'reboot')
+                                  else {'value'} if action.endswith('-set') else set())
+        if set(spec) - allowed:
+            fail('INVALID_SPEC', 'unexpected specification fields')
+        if action == 'list':
+            if spec.get('lifecycle', 'REGISTERED') not in ('REGISTERED', 'RETIRED', 'PURGING', 'PURGED', 'all'):
+                fail('INVALID_SPEC', 'invalid lifecycle filter')
+        elif action == 'operation':
+            selected = [name for name in allowed if spec.get(name) is not None]
+            if len(selected) != 1:
+                fail('INVALID_SPEC', 'exactly one operation_id or idempotency_key selector required')
+            name = selected[0]
+            value = spec[name]
+            if (name == 'operation_id' and (not isinstance(value, str) or not vm.UUID.fullmatch(value))
+                    or name == 'idempotency_key' and not self._text_token(value)):
+                fail('INVALID_SPEC', 'invalid operation selector')
+        elif action != 'templates':
+            if not isinstance(spec.get('vm_id'), str) or not vm.UUID.fullmatch(spec['vm_id']):
+                fail('INVALID_SPEC', 'vm_id must be the existing permanent UUID')
+            if 'force' in spec and type(spec['force']) is not bool:
+                fail('INVALID_SPEC', 'force must be a boolean')
+            if action == 'autostart-set' and spec.get('value') not in ('on', 'off'):
+                fail('INVALID_SPEC', 'autostart-set requires on or off')
+            if action == 'board-shutdown-set' and spec.get('value') not in ('graceful', 'refuse', 'force-allowed'):
+                fail('INVALID_SPEC', 'invalid board shutdown policy')
+        return spec
 
     def _state(self, identity, records):
         if not isinstance(identity, str) or not vm.UUID.fullmatch(identity):
@@ -319,6 +369,46 @@ class Manager:
             fail('INVALID_SPEC', 'purge requires matching confirm_vm_id')
         return spec
 
+    def _reserve_space(self, additional_bytes, records, *, restored=None):
+        """기존 정책으로 복원 후 등록 집합과 미완료 생성의 남은 약정량을 함께 검사한다."""
+        future = dict(records)
+        disk_paths = {}
+        if restored is not None:
+            record, directory = restored
+            self._plain_dir(directory)
+            future[record['id']] = record
+            if vm.guest_kind(record) == 'linux':
+                disk_paths[record['id']] = catalog.plain(directory / 'root.raw')
+        active = {record['uuid'] for record in future.values()}
+        for op in self._operations():
+            if op['action'] != 'create' or op['status'] == 'SUCCEEDED' or op['vm_id'] in active:
+                continue
+            selected = catalog.describe(self.data, {key: op['template'][key] for key in (
+                'schema_version', 'template_id', 'template_version', 'guest_kind',
+                'asset_directory', 'manifest_sha256', 'source_template_id')})
+            name = op['initial_spec'].get('name')
+            if not isinstance(name, str) or not vm.ID.fullmatch(name):
+                fail('RECOVERY_REQUIRED', 'invalid pending creation name')
+            workspace = self.data / op['owned_workspace']
+            stage = workspace / name
+            for directory in (workspace, stage):
+                if directory.exists() or directory.is_symlink():
+                    self._plain_dir(directory)
+            if selected['guest_kind'] == 'zephyr':
+                stage = stage / 'firmware' / selected['manifest_sha256']
+            for source in Path(selected['directory']).iterdir():
+                catalog.plain(source)
+                copied = stage / source.name
+                allocated = 0
+                if copied.exists() or copied.is_symlink():
+                    allocated = catalog.plain(copied).stat().st_blocks * 512
+                # 다른 임시 파일의 블록으로 미복사 payload의 약정 공간을 상쇄하지 않는다.
+                additional_bytes += max(0, source.stat().st_size - allocated)
+        try:
+            return self.p.reserve_space(additional_bytes, future, disk_paths=disk_paths)
+        except PlatformError:
+            fail('INSUFFICIENT_STORAGE', 'insufficient capacity including registered and pending VM growth reserve')
+
     def _selection(self, spec):
         all_entries = catalog.entries(self.data)
         matches = [e for e in all_entries if e['template_id'] == spec['template_id']]
@@ -435,6 +525,10 @@ class Manager:
         desired = 'RETIRED' if action=='retire' else 'REGISTERED' if action=='restore' else 'PURGED'
         if tomb.get('last_operation_id') == op['operation_id']:
             if tomb['lifecycle'] == desired:
+                if action == 'restore':
+                    directory = self.data / op['target']
+                    self._record_at(tomb['record'], directory)
+                    self._reserve_space(0, records, restored=(tomb['record'], directory))
                 return self._finish(op, tomb)
         if tomb['generation'] != expected:
             fail('TARGET_CHANGED', 'lifecycle generation changed; stale operation cannot mutate assets')
@@ -449,6 +543,10 @@ class Manager:
         target = self.data / op['target'] if action!='purge' else None
         if action == 'purge':
             return self._purge(op, tomb)
+        if action == 'restore':
+            directory = source if source.exists() or source.is_symlink() else target
+            self._record_at(record, directory)
+            self._reserve_space(0, records, restored=(record, directory))
         if source.exists() or source.is_symlink():
             if target.exists() or target.is_symlink():
                 fail('RECOVERY_REQUIRED', 'both lifecycle source and destination exist')
@@ -529,16 +627,13 @@ class Manager:
         self._save_op(op)
         return result
 
-    def _mutate(self, action, spec, execute, key, records):
-        spec = self._normalize(action,spec)
-        if not isinstance(key,str) or not 1<=len(key.encode('utf-8'))<=200 or any(ord(c)<32 for c in key):
-            fail('INVALID_SPEC','idempotency_key of 1..200 UTF-8 bytes required')
+    def _mutate(self, action, spec, execute, key, records, context):
         previous = next((o for o in self._operations() if o['idempotency_key']==key),None)
         if previous:
-            self.current_operation=previous['operation_id']
+            context['operation_id']=previous['operation_id']
             if previous['action']!=action or previous['request']!=spec:
                 fail('IDEMPOTENCY_CONFLICT','same key has a different action or request')
-            self.replayed=True
+            context['replayed']=True
             tomb = self._tombs().get(previous['vm_id'])
             if previous['status']=='SUCCEEDED':
                 if action=='create' and tomb and tomb['lifecycle']=='PURGED':
@@ -546,7 +641,20 @@ class Manager:
                 return {**previous['result'],'operation':previous,'original_result':previous['result'],
                         'current':self._view(self._state(previous['vm_id'],records),observe=True) if tomb else None}
             if not execute:
+                if action == 'restore':
+                    if tomb and tomb['generation'] == previous['expected_generation'] and tomb['lifecycle'] == 'RETIRED':
+                        directory = self.data / previous['source']
+                        if not directory.exists() and not directory.is_symlink():
+                            directory = self.data / previous['target']
+                    elif tomb and tomb.get('last_operation_id') == previous['operation_id'] and tomb['lifecycle'] == 'REGISTERED':
+                        directory = self.data / previous['target']
+                    else:
+                        fail('TARGET_CHANGED', 'restore has a newer lifecycle')
+                    self._record_at(previous['snapshot']['record'], directory)
+                    self._reserve_space(0, records, restored=(previous['snapshot']['record'], directory))
                 return {'plan':True,'operation':previous}
+            self._writable()
+            context['write_operation'] = True
             # 잠금을 획득했으므로 이전 동기 실행자는 없다. PID만으로 작업 소유권을 추정하지 않는다.
             if action=='create':
                 if tomb and tomb['lifecycle']!='REGISTERED':
@@ -556,10 +664,7 @@ class Manager:
         if action=='create':
             self._conflicts(spec,records)
             selected=self._selection(spec)
-            try:
-                self.p.reserve_space(sum(p.stat().st_size for p in Path(selected['directory']).iterdir()),records)
-            except PlatformError:
-                fail('INSUFFICIENT_STORAGE','insufficient capacity including existing disk growth reserve')
+            self._reserve_space(sum(p.stat().st_size for p in Path(selected['directory']).iterdir()), records)
             tomb=None
         else:
             tomb=self._state(spec['vm_id'],records)
@@ -582,11 +687,11 @@ class Manager:
                 for other in records.values():
                     if any(other.get(k)==tomb['record'].get(k) for k in vm.identity_fields(tomb['record'])):
                         fail('RESTORE_CONFLICT','identity/name/MAC/IP already registered')
+                self._reserve_space(0, records, restored=(tomb['record'], directory))
         if not execute:
             return {'plan':True,'action':action,'spec':spec,'starts_guest':False,
                     'assets_deleted':False}
-        if (self.p.runtime/'shutdown-requested').exists():
-            fail('OPERATION_IN_PROGRESS','board shutdown is in progress',retryable=True)
+        self._writable()
         opid=uuid4();identity=uuid4() if action=='create' else spec['vm_id']
         operation_path=self.data/'operations'/(opid+'.json')
         if operation_path.exists() or operation_path.is_symlink():
@@ -613,36 +718,33 @@ class Manager:
             op['source']=str((self.data/'instances'/tomb['name'] if action=='retire' else self._archive(tomb)).relative_to(self.data))
             op['target']=f"instances/.retired-{tomb['name']}-{identity}-g{tomb['generation']+1}" if action=='retire' else 'instances/'+tomb['name']
             op['snapshot']=tomb
-        self.current_operation=opid
+        context['operation_id']=opid
+        context['write_operation'] = True
         self._save_op(op)
         return self._create(op) if action=='create' else self._transition(op,records)
 
     def call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None):
         """HTTP를 가정하지 않는다. 모든 응답은 동일 JSON envelope이고 stdout을 쓰지 않는다."""
-        self.current_operation=None;self.replayed=False
-        response={'schema_version':'1.0','ok':False,'request_id':request_id or uuid4(),
+        context = {'operation_id': None, 'replayed': False, 'write_operation': False}
+        response={'schema_version':'1.0','ok':False,'request_id':request_id if self._text_token(request_id) else uuid4(),
                   'operation_id':None,'replayed':False,'data':None,'error':None}
         try:
-            if type(execute) is not bool:
-                fail('INVALID_SPEC','execute must be a boolean')
+            spec = self._validate_call(action, spec, execute, idempotency_key, request_id)
             with operation_lock(self.p.runtime):
                 try:
                     records=self.p.records(validate_assets=False)
                 except (PlatformError,OSError,ValueError):
                     fail('STORAGE_UNAVAILABLE','persistent storage or registry unavailable')
                 if action in MUTATIONS:
-                    result=self._mutate(action,spec,execute,idempotency_key,records)
+                    result=self._mutate(action,spec,execute,idempotency_key,records,context)
                 elif action=='templates':
                     result={'templates':catalog.entries(self.data)}
                 elif action in ('list','get'):
-                    spec=spec or {}
                     states=[self._state(r['uuid'],records) for r in records.values()]
                     if action=='get':
                         states=[self._state(spec.get('vm_id'),records)]
                     else:
                         lifecycle=spec.get('lifecycle','REGISTERED')
-                        if lifecycle not in ('REGISTERED','RETIRED','PURGING','PURGED','all'):
-                            fail('INVALID_SPEC','invalid lifecycle filter')
                         if lifecycle in ('RETIRED','all'):
                             for path in (self.data/'instances').glob('.deleted-*'):
                                 rec=self._read(path/'instance.json')
@@ -652,14 +754,12 @@ class Manager:
                         states=[s for s in states if lifecycle=='all' or s['lifecycle']==lifecycle]
                     result={'vm':self._view(states[0],observe=True)} if action=='get' else {'vms':[self._view(s,observe=True) for s in states]}
                 elif action in ('start','stop','reboot','autostart-set','board-shutdown-set','config'):
-                    spec=spec or {}
-                    allowed={'vm_id'} | ({'force'} if action in ('stop','reboot') else {'value'} if action.endswith('-set') else set())
-                    if not isinstance(spec,dict) or set(spec)-allowed or ('force' in spec and type(spec['force']) is not bool):
-                        fail('INVALID_SPEC','invalid control specification; force must be a boolean')
                     tomb=self._state(spec.get('vm_id'),records)
                     if tomb['lifecycle']!='REGISTERED':
                         fail('VM_PURGED' if tomb['lifecycle']=='PURGED' else 'INVALID_SPEC','VM is not registered')
                     record=tomb['record']
+                    if action in ('autostart-set', 'board-shutdown-set', 'config'):
+                        self._writable()
                     with tool_output():
                         if action=='start':
                             self.p.check_xen()
@@ -677,8 +777,6 @@ class Manager:
                         else:
                             updated=dict(record)
                             if action=='autostart-set':
-                                if spec.get('value') not in ('on','off'):
-                                    fail('INVALID_SPEC','autostart-set requires on or off')
                                 updated['autostart']=spec['value']=='on'
                             else:
                                 updated['board_shutdown_policy']=spec.get('value')
@@ -687,7 +785,6 @@ class Manager:
                             tomb={**tomb,'record':updated}
                     result={'vm':self._view(tomb,observe=True)}
                 elif action=='operation':
-                    spec=spec or {}
                     found=[o for o in self._operations() if
                            (spec.get('operation_id') is not None and o['operation_id']==spec['operation_id']) or
                            (spec.get('idempotency_key') is not None and o['idempotency_key']==spec['idempotency_key'])]
@@ -695,29 +792,33 @@ class Manager:
                         fail('VM_NOT_FOUND','operation not found')
                     result={'operation':found[0], 'recovery_required':found[0]['status']!='SUCCEEDED',
                             'effective_status':'SUCCEEDED' if found[0]['status']=='SUCCEEDED' else 'RECOVERY_REQUIRED'}
-                    self.current_operation=found[0]['operation_id']
+                    context['operation_id']=found[0]['operation_id']
                 else:
                     fail('INVALID_SPEC','unsupported management action')
                 response.update(ok=True,data=result)
         except ManagementError as exc:
             response['error']=exc.error
+        except vm.DomainIdentityError as exc:
+            response['error']={'code':'TARGET_CHANGED', 'message':str(exc),
+                               'retryable':False, 'details':{}}
         except PlatformError as exc:
             busy='operation is in progress' in str(exc)
             response['error']={'code':'OPERATION_IN_PROGRESS' if busy else 'ARTIFACT_INVALID',
                                'message':'another platform operation is in progress' if busy else str(exc),
                                'retryable':busy,'details':{}}
         except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
-            cleanup = action=='purge' and self.current_operation is not None
-            response['error']={'code':'CLEANUP_INCOMPLETE' if cleanup else 'RECOVERY_REQUIRED' if self.current_operation else 'ARTIFACT_INVALID',
+            cleanup = action=='purge' and context['operation_id'] is not None
+            response['error']={'code':'CLEANUP_INCOMPLETE' if cleanup else 'RECOVERY_REQUIRED' if context['operation_id'] else 'ARTIFACT_INVALID',
                                'message':type(exc).__name__+': management operation could not be completed',
-                               'retryable':cleanup,'details':{'operation_id':self.current_operation} if cleanup else {}}
-        response.update(operation_id=self.current_operation,replayed=self.replayed)
-        if (not response['ok'] and self.current_operation and execute
+                               'retryable':cleanup,'details':{'operation_id':context['operation_id']} if cleanup else {}}
+        response.update(operation_id=context['operation_id'],replayed=context['replayed'])
+        if (not response['ok'] and context['write_operation'] and execute
                 and response['error']['code'] not in ('IDEMPOTENCY_CONFLICT','TARGET_CHANGED','VM_PURGED')):
             # 이전 성공 기록은 오래된 요청의 오류로 덮어쓰지 않는다.
             try:
-                path=self.data/'operations'/(self.current_operation+'.json')
+                path=self.data/'operations'/(context['operation_id']+'.json')
                 with operation_lock(self.p.runtime):
+                    self._writable()
                     op=self._read(path)
                     if op['status']!='SUCCEEDED':
                         op.update(status='RECOVERY_REQUIRED',error=response['error'])

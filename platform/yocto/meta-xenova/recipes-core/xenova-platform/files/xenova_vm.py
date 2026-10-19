@@ -196,6 +196,10 @@ def xen_state(flags):
     return 'unknown'
 
 
+class DomainIdentityError(PlatformError):
+    """검증한 실행 대상의 UUID/name/domid가 달라 TARGET_CHANGED로 분류할 오류."""
+
+
 class DomainStateError(PlatformError):
     """도메인은 존재하지만 start 성공으로 인정할 수 없는 관측 상태."""
     def __init__(self, record, row):
@@ -265,14 +269,16 @@ class Platform:
         return Manager(self).call('create',spec,execute=getattr(args,'execute',False),
                                   idempotency_key=getattr(args,'idempotency_key',None))
 
-    def reserve_space(self, additional_bytes, records):
+    def reserve_space(self, additional_bytes, records, *, disk_paths=None):
+        """전체 등록 예정 집합의 미할당 증가분과 2GiB 여유를 확인한다. 복원은 복사량 0이다."""
         stats = os.statvfs(self.data)
         free = stats.f_bavail * stats.f_frsize
         growth = 0
         for key, r in records.items():
             if guest_kind(r) == 'linux':
-                disk = self.data / 'instances' / key / 'root.raw'
-                growth += max(0, disk.stat().st_size - disk.stat().st_blocks * 512)
+                disk = (disk_paths or {}).get(key, self.data / 'instances' / key / 'root.raw')
+                info = disk.stat()
+                growth += max(0, info.st_size - info.st_blocks * 512)
         required = additional_bytes + growth + 2 * 1024 ** 3
         if free < required:
             raise PlatformError(f'insufficient storage: need {required} free bytes including existing VM growth and reserve, have {free}')
@@ -377,9 +383,9 @@ class Platform:
                     continue
                 if any(row['domid'] == old[0] or row['uuid'] == old[1] or row['name'] == old[2]
                        for old in expected):
-                    raise PlatformError('replacement domain appeared during shutdown; no command sent to replacement')
+                    raise DomainIdentityError('replacement domain appeared during shutdown; no command sent to replacement')
                 if board:
-                    raise PlatformError('unexpected domain appeared during shutdown; board shutdown refused')
+                    raise DomainIdentityError('unexpected domain appeared during shutdown; board shutdown refused')
             snapshots.append(rows)
         return snapshots
 
@@ -446,12 +452,12 @@ class Platform:
             info = d['config']['c_info']
             if info.get('uuid') == record['uuid']:
                 if info.get('name') != record['name']:
-                    raise PlatformError('live UUID has different name')
+                    raise DomainIdentityError('live UUID has different name')
                 matching.append(d)
             elif info.get('name') == record['name']:
-                raise PlatformError('live name has different UUID')
+                raise DomainIdentityError('live name has different UUID')
         if len(matching) > 1:
-            raise PlatformError('duplicate live UUID')
+            raise DomainIdentityError('duplicate live UUID')
         return matching
 
     def resolve_domain(self, record, *, expected=None, deadline=None):
@@ -462,10 +468,10 @@ class Platform:
         """
         rows = self.matching(record, self.domains(deadline=deadline))
         if not rows:
-            raise PlatformError(f"{record['id']}: domain disappeared or instance is stopped")
+            raise DomainIdentityError(f"{record['id']}: domain disappeared or instance is stopped")
         row = rows[0]
         if expected is not None and row['domid'] != expected['domid']:
-            raise PlatformError(f"{record['id']}: domid changed before operation; refusing replacement domain")
+            raise DomainIdentityError(f"{record['id']}: domid changed before operation; refusing replacement domain")
         return row
 
     def control(self, record, action, expected, *, deadline=None):
@@ -578,6 +584,7 @@ class Platform:
             save()
             raise
         pending = []
+        identity_error = None
         for record, row, strategy in planned:
             key = record['id']
             result['instances'][key] = {'result': 'pending', 'method': strategy, 'domid': row['domid'],
@@ -586,6 +593,8 @@ class Platform:
             try:
                 self.control(record, 'destroy' if strategy == 'forced' else 'shutdown', row, deadline=deadline)
             except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
+                if isinstance(exc, DomainIdentityError):
+                    identity_error = exc
                 result['instances'][key].update(result='failed', error=str(exc))
             else:
                 result['instances'][key]['stage'] = 'request-accepted'
@@ -602,6 +611,8 @@ class Platform:
             try:
                 before, after = self.removal_observation(expected, deadline, board=board)
             except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
+                if isinstance(exc, DomainIdentityError):
+                    identity_error = exc
                 for record, row, strategy in pending:
                     result['instances'][record['id']].update(result='failed', error=str(exc), stage='removal-query-failed')
                 break
@@ -630,6 +641,8 @@ class Platform:
             try:
                 self.confirm_board_empty(deadline)
             except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
+                if isinstance(exc, DomainIdentityError):
+                    identity_error = exc
                 result['final_check_error'] = str(exc)
         os.sync()
         save()
@@ -639,6 +652,8 @@ class Platform:
         if result.get('final_check_error'):
             failures.append(result['final_check_error'])
         if failures:
+            if identity_error is not None:
+                raise DomainIdentityError('; '.join(failures)) from identity_error
             raise PlatformError('; '.join(failures))
         return result
 
@@ -745,16 +760,39 @@ class Platform:
                                   idempotency_key=idempotency_key)
 
 
+def read_tombstones(data):
+    """정식 UUID.json만 읽는다. atomic_write 잔여 파일은 검증 후 보존하고 채택하지 않는다."""
+    from xenova_catalog import plain
+    root = data / 'tombstones'
+    if not root.exists() and not root.is_symlink():
+        return {}
+    plain(root, directory=True)
+    result = {}
+    for path in sorted(root.iterdir()):
+        suffix = re.fullmatch(r'(.+\.json)\.tmp-[0-9]+-[0-9a-f]{12}', path.name)
+        if suffix and UUID.fullmatch(suffix[1][:-5]):
+            plain(path)
+            continue
+        if path.suffix != '.json' or not UUID.fullmatch(path.stem):
+            raise PlatformError('invalid tombstone path')
+        tomb = json.loads(plain(path).read_text())
+        if not isinstance(tomb, dict) or not isinstance(tomb.get('record'), dict):
+            raise PlatformError('tombstone and record must be objects')
+        record = tomb['record']
+        validate_identity(record)
+        if (tomb.get('schema_version') != '1.0' or tomb.get('vm_id') != path.stem
+                or record['uuid'] != path.stem or record['name'] != tomb.get('name')
+                or type(tomb.get('generation')) is not int or tomb['generation'] < 0
+                or tomb.get('lifecycle') not in ('REGISTERED', 'RETIRED', 'PURGING', 'PURGED')):
+            raise PlatformError('invalid tombstone identity/lifecycle')
+        result[path.stem] = tomb
+    return result
+
+
 def retired_instance(data, key, identity=None):
-    tombs = data / 'tombstones'
-    if tombs.exists() or tombs.is_symlink():
-        if tombs.is_symlink() or tombs.resolve() != tombs or not tombs.is_dir():
-            raise PlatformError('invalid tombstone storage')
-        for path in tombs.iterdir():
-            regular_asset(tombs, path.name)
-            tomb = json.loads(path.read_text())
-            if tomb.get('name') == key and (identity is None or tomb.get('vm_id') == identity):
-                return tomb.get('lifecycle') != 'REGISTERED'
+    for tomb in read_tombstones(data).values():
+        if tomb['name'] == key and (identity is None or tomb['vm_id'] == identity):
+            return tomb['lifecycle'] != 'REGISTERED'
     for path in (data / 'instances').glob('.deleted-' + key + '-*'):
         if path.is_symlink() or not path.is_dir():
             raise PlatformError('invalid retired instance path')
