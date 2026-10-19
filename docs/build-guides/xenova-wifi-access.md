@@ -27,8 +27,21 @@ SSID는 1..32 UTF-8 bytes로 검사하고 hex로 인코딩하므로 설정 문�
     networkctl status wlan0 --no-pager
     ip -4 address show dev wlan0
 
-설정은 dom0 시스템 영역에 남는다. activate는 해당 템플릿 서비스 하나만 enable/start하고
-networkd를 reload/reconfigure한다. wpa_supplicant를 수동으로 중복 실행하지 않는다.
+설정은 dom0 시스템 영역에 남는다. 비밀 없는 25-xenova-wifi.network는 0644로
+networkd가 읽을 수 있게 하고 PSK 파일 0600/부모 0700은 유지한다.
+activate는 공통 Wi-Fi 잠금 안에서 소유한 xenova-wifi@<인터페이스>.service 상태를 읽는다.
+inactive/failed면 enable 후 start, active면 enable 후 restart하여 새 SSID/PSK를 읽힌다.
+activating/deactivating 또는 잘못된 상태는 중복 기동하지 않고 거부한다.
+설정 적용 시 현재 Wi-Fi SSH 연결이 끊길 수 있으므로 UART 등 복구 경로를 준비한다.
+이후 networkd reload와 해당 무선 인터페이스 reconfigure만 요청한다.
+내부 DHCP·브릿지·VM 서비스를 재시작하지 않으며 wpa_supplicant를 수동 중복 실행하지 않는다.
+
+activate JSON의 activation.action은 start/restart, result는 requested/failed다.
+requested는 서비스·주소 설정 요청이 반환됐다는 뜻이며 AP 인증이나 IP·SSH 성공이 아니다.
+실패하면 result=failed와 state-query/service-state/enable/supplicant/network-reload/
+network-reconfigure 중 실패 단계를 반환하고 종료 코드 1을 사용한다.
+저장된 자격증명은 유지하며 실패한 단계 이후의 명령이나 자동 재시도는 실행하지 않는다.
+하위 도구의 원문 오류와 자격증명은 이 응답에 포함하지 않는다.
 기존 배포판의 wpa_supplicant 범용 D-Bus 서비스는 기본 enable하지 않는다.
 Wi-Fi service는 장치 대기 제한이 20초이며 VM 서비스에 Requires/After를 추가하지 않는다.
 Wi-Fi 미설정/AP 부재/인증 실패/IP 미획득은 내부 VM 자동 시작을 막지 않는다.

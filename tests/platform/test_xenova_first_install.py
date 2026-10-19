@@ -533,7 +533,7 @@ class NativeCreateTest(unittest.TestCase):
         return case
 
     def arguments(self,case,execute):
-        return argparse.Namespace(id='custom',template=case.spec['template_id'],template_version='1.0.0',
+        return argparse.Namespace(id='custom',vm_id=case.spec['vm_id'],template=case.spec['template_id'],template_version='1.0.0',
                                   ipv4=case.spec['ipv4'],memory_mib=512,vcpus=1,execute=execute,idempotency_key='facade')
 
     def test_missing_local_template_and_capacity_failure_do_not_create(self):
@@ -563,7 +563,7 @@ class NativeCreateTest(unittest.TestCase):
         with patch.object(vm.os,'statvfs',return_value=SimpleNamespace(f_bavail=9*contract.GIB,f_frsize=1)),patch.object(Path,'stat',diskstat):
             result=case.p.create(self.arguments(case,True),{})
         self.assertEqual(result['error']['code'],'INSUFFICIENT_STORAGE',result)
-        self.assertFalse((case.data/'instances/custom').exists())
+        self.assertFalse((case.data/('instances/'+case.key)).exists())
 
     def test_native_execute_delegates_once_to_shared_creator_without_starting_guest(self):
         case=self.scenario()
@@ -596,10 +596,12 @@ class NativeCreateTest(unittest.TestCase):
     def test_existing_id_is_not_reinitialized(self):
         case=self.scenario()
         case.create()
-        before=(case.data/'instances/custom/instance.json').read_bytes()
+        before=(case.data/f'instances/{case.key}/instance.json').read_bytes()
         result=case.p.create(self.arguments(case,True),{})
-        self.assertEqual(result['error']['code'],'VM_NAME_CONFLICT',result)
-        self.assertEqual((case.data/'instances/custom/instance.json').read_bytes(),before)
+        self.assertTrue(result['ok'],result)
+        self.assertTrue(result['replayed'],result)
+        self.assertEqual(case.copies,1)
+        self.assertEqual((case.data/f'instances/{case.key}/instance.json').read_bytes(),before)
 
 
 if __name__ == '__main__':
