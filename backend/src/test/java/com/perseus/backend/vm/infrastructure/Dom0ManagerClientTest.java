@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 
 // Stub dom0-manager responses follow contracts/dom0-manager-openapi.yaml.
 class Dom0ManagerClientTest {
@@ -131,8 +132,23 @@ class Dom0ManagerClientTest {
 
         assertThatThrownBy(() -> client.launch(VM_ID, SPEC))
                 .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.INSUFFICIENT_STORAGE);
                     assertThat(exception.getCode()).isEqualTo("INSUFFICIENT_RESOURCES");
-                    assertThat(exception.getMessage()).isEqualTo("메모리가 부족합니다.");
+                    assertThat(exception.getMessage()).isEqualTo("보드에 남은 메모리가 부족합니다.");
+                });
+    }
+
+    @Test
+    void exhaustedIpPoolIsReportedAsInsufficientResources() {
+        server.createContext("/api/v1/vms", exchange -> respond(exchange, 507, """
+                {"code":"InsufficientResources","message":"insufficient ipv4: requested 1, available 0",
+                 "resource":{"name":"ipv4","requested":1,"available":0}}
+                """));
+
+        assertThatThrownBy(() -> client.launch(VM_ID, SPEC))
+                .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.INSUFFICIENT_STORAGE);
+                    assertThat(exception.getMessage()).isEqualTo("VM에 할당할 수 있는 IP 주소가 없습니다.");
                 });
     }
 

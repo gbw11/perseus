@@ -1,6 +1,8 @@
 package com.perseus.backend.vm.api;
 
 import com.perseus.backend.agent.application.AgentDataService;
+import com.perseus.backend.agent.domain.AgentInventory;
+import com.perseus.backend.agent.domain.AgentStatus;
 import com.perseus.backend.vm.application.VmService;
 import com.perseus.backend.vm.application.VmService.CreateResult;
 import com.perseus.backend.vm.domain.Vm;
@@ -69,6 +71,8 @@ public class VmController {
     }
 
     private VmResponse withAgentStatus(Vm vm, Instant now) {
-        return VmResponse.of(vm, agentDataService.statusOf(agentDataService.findHeartbeat(vm.vmId()).orElse(null), now));
+        AgentStatus agentStatus = agentDataService.statusOf(agentDataService.findHeartbeat(vm.vmId()).orElse(null), now);
+        String ipv4 = agentDataService.findInventory(vm.vmId()).flatMap(AgentInventory::primaryIpv4).orElse(null);
+        return VmResponse.of(vm, agentStatus, ipv4);
     }
 }

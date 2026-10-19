@@ -80,11 +80,29 @@ class VmApiIntegrationTest {
                 .andExpect(jsonPath("$.memory_mib").value(1024));
     }
 
+    @Test
+    void createAcceptsKoreanNamesWithSpaces() throws Exception {
+        createVm("주행 컨트롤러 A", 1, 256)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.name").value("주행 컨트롤러 A"));
+    }
+
+    @Test
+    void createRejectsControlCharactersInTheName() throws Exception {
+        // The JSON escapes \t and \n arrive as a real tab and line feed in the name.
+        createVm("debian\\t01", 1, 256)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.errors[0].field").value("name"));
+        createVm("debian\\n01", 1, 256)
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.errors[0].field").value("name"));
+    }
+
     @ParameterizedTest
     @CsvSource({
-            "Debian-01, 1, 256, name",
-            "debian_01, 1, 256, name",
             "'', 1, 256, name",
+            "' 앞공백', 1, 256, name",
+            "'뒤공백 ', 1, 256, name",
             "debian-01, 0, 256, vcpus",
             "debian-01, 5, 256, vcpus",
             "debian-01, 1, 127, memory_mib",
