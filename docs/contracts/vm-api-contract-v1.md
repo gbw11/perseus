@@ -61,6 +61,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 {
   "vm_id": "550e8400-e29b-41d4-a716-446655440000",
   "name": "web-01",
+  "guest_kind": "linux",
   "state": "running",
   "agent_status": "ONLINE",
   "template_id": "debian",
@@ -74,6 +75,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 |---|---|
 | `vm_id` | VM 고유 ID. Spring이 생성 |
 | `name` | 표시 이름. Spring 레코드 |
+| `guest_kind` | VM 종류 `linux` / `zephyr`. 생성 때 템플릿에서 복사해 Spring 레코드에 저장. **Spring만 쓰는 값이며 dom0-manager 계약에는 없음.** `zephyr`는 에이전트·네트워크·정상 종료가 없는 콘솔 전용 펌웨어라 `agent_status`가 항상 `UNKNOWN` |
 | `state` | Xen 기준 실행 상태 (3.3절). 도메인이 없으면 `stopped` |
 | `agent_status` | heartbeat 기준 에이전트 상태 `UNKNOWN`/`ONLINE`/`STALE`/`OFFLINE`. **목록·단건 조회에만** 있고 생성·시작·정지 응답에는 없음 |
 | `template_id`, `template_version` | 생성에 쓴 템플릿. Spring 레코드 |
@@ -89,14 +91,17 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 | `version` | 템플릿 버전. VM 생성 요청에서는 이 값을 `template_version`으로 보냄 |
 | `display_name` | 드롭다운 표시 이름 (예: `Debian 12`) |
 | `min_memory_mib` | 이 템플릿의 최소 메모리 |
+| `guest_kind` | 이 템플릿으로 만든 VM의 종류 `linux` / `zephyr` |
 
 ```json
 [
-  { "template_id": "alpine", "version": "1.2.0", "display_name": "Alpine 1.2.0", "min_memory_mib": 128 },
-  { "template_id": "debian", "version": "12", "display_name": "Debian 12", "min_memory_mib": 256 },
-  { "template_id": "ubuntu", "version": "24.04", "display_name": "Ubuntu 24.04", "min_memory_mib": 512 }
+  { "template_id": "ubuntu", "version": "24.04-20260926", "display_name": "Ubuntu 24.04", "min_memory_mib": 512, "guest_kind": "linux" },
+  { "template_id": "debian", "version": "13-20261015", "display_name": "Debian 13", "min_memory_mib": 256, "guest_kind": "linux" },
+  { "template_id": "zephyr", "version": "starter-1.0.0", "display_name": "Zephyr Starter 1.0.0", "min_memory_mib": 128, "guest_kind": "zephyr" }
 ]
 ```
+
+플랫폼 기본 템플릿(`defaults.json`의 `ubuntu-24.04-20260926`, `debian-13-20261015`, `perseus-zephyr-starter-1.0.0`)에 맞춘 값입니다. `template_id`는 OS 검증 리포트가 에이전트의 os-release ID와 비교하므로 OS ID로 두고, `version`은 플랫폼 템플릿 이름에서 OS ID를 뺀 부분으로 둡니다. dom0-manager가 이 둘을 플랫폼 템플릿 이름으로 바꾸는 규칙은 미확정입니다(13장).
 
 1차 데이터는 Spring 설정 파일(`application.yml`의 `perseus.template-catalog.templates`)에 고정하며, OS(Alpine·Debian·Ubuntu)마다 버전 하나를 고정합니다. 버전과 최소 메모리 값은 P2 실측 전 임시값입니다(13장).
 
@@ -215,6 +220,8 @@ Spring의 시스템 상태 점검(REST-28)에서 Xen 상태를 판단할 때 사
 | `GET` | `/api/v1/templates` | `200` 템플릿 배열 | 설정 파일 고정 데이터 (2.3절) |
 
 모든 공개 API는 `Authorization: Bearer {access_token}`이 필요합니다. 생성·시작·정지·삭제가 성공하면 이벤트(`vm.created`, `vm.state.changed`, `vm.deleted`)가 기록됩니다.
+
+Xen은 VM 상태 변화를 누구에게도 알리지 않으므로, Spring이 dom0-manager `GET /api/v1/vms`를 주기적으로(기본 5초, `EVENT_VM_STATE_CHECK_INTERVAL_MS`) 조회해 사용자 조작 없이 바뀐 상태(크래시, 스스로 종료 등)를 `vm.state.changed`(`cause: detected`)로 기록합니다. 조작 중인 VM은 건너뛰고, dom0-manager에 닿지 않으면 그 회차는 아무것도 기록하지 않으며, 서버가 처음 보는 VM은 기준값만 저장합니다.
 
 ---
 
@@ -394,6 +401,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | OS별 `min_memory_mib` | 제어 계층 | 이미지 빌드 시 실측 |
 | `DriverError`의 HTTP 코드 | 제어 계층 | 현재 `500`(구현 안 된 기능은 `501`)으로 임시 운영. OpenAPI yaml의 `ErrorCode`에 추가할지 결정 |
 | 배포 분리 시 접속 방식 | 공통 | Spring은 EC2, dom0-manager는 보드에서 실행(Tailscale 연결 예정). dom0-manager는 지금 `127.0.0.1`에만 바인딩하고 인증이 없음. 바인드 주소와 서비스 인증(Spring은 `DOM0_MANAGER_SERVICE_TOKEN`이 설정되면 `Authorization: Bearer`를 보냄)을 정해야 함 |
+| 템플릿 이름 변환 | 제어 계층 | Spring `template_id`+`version`(예: `ubuntu` + `24.04-20260926`)을 플랫폼 템플릿 이름(`ubuntu-24.04-20260926`, `perseus-zephyr-starter-1.0.0`)으로 바꾸는 규칙 |
 | 자동 복구 주체 | 공통 | 보드(Xen `on_crash`·dom0 감시) 또는 Spring. 결정 전까지 Spring은 복구를 수행하지 않음 |
 
 `vm_id` 저장 방식은 **1안으로 확정**했습니다. 도메인 설정의 `uuid`에 `vm_id`를 넣고 `xl list -l`의 `config.c_info.uuid`로 역조회합니다. 플랫폼 도구(`perseus_vm.py`)와 dom0-manager XenDriver가 같은 방식을 씁니다.
@@ -405,4 +413,4 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 버전 | 일자 | 내용 |
 |---|---|---|
 | v1 | 2026-10-16 | 계약 확정안 v1.0, 리뷰 v1.1, 백엔드 VM API 규약 v1, 리뷰 v1.2의 확정 사항 통합 |
-| v1.1 | 2026-10-19 | 구현에 맞춰 보완: 공개 VM 객체에 `agent_status`, Spring 공개 state `stopped`(3.3), 템플릿 응답 필드 `version`, `xl` 플래그 없음(`------`) 매핑, `DriverError` 500/501, `/healthz` 본문, Spring 오류 변환표(8.2), 공개 API 응답 형식(5장), `vm_id` 저장 1안 확정, 배포 분리·복구 주체 미확정 항목 추가. Spring 시작은 실행 중이 아닌 도메인을 `409 INVALID_VM_STATE`로 거부, 정지는 이전 상태를 조회해 이벤트 `from`에 기록 |
+| v1.1 | 2026-10-19 | 구현에 맞춰 보완: 공개 VM 객체에 `agent_status`, Spring 공개 state `stopped`(3.3), 템플릿 응답 필드 `version`, `xl` 플래그 없음(`------`) 매핑, `DriverError` 500/501, `/healthz` 본문, Spring 오류 변환표(8.2), 공개 API 응답 형식(5장), `vm_id` 저장 1안 확정, 배포 분리·복구 주체 미확정 항목 추가. Spring 시작은 실행 중이 아닌 도메인을 `409 INVALID_VM_STATE`로 거부, 정지는 이전 상태를 조회해 이벤트 `from`에 기록. Spring이 VM 상태를 주기 조회해 `cause: detected` 이벤트 기록. 템플릿을 플랫폼 기본값(Ubuntu·Debian·Zephyr)으로 교체하고 템플릿·공개 VM 객체에 `guest_kind` 추가 |

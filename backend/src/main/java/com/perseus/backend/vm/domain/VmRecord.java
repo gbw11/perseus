@@ -1,7 +1,10 @@
 package com.perseus.backend.vm.domain;
 
+import com.perseus.backend.template.domain.GuestKind;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
@@ -34,17 +37,32 @@ public class VmRecord {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    // Copied from the template at creation, so a later template config change does not reclassify the VM.
+    // Rows created before this column existed are null and read as linux.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "guest_kind", length = 10)
+    private GuestKind guestKind;
+
     protected VmRecord() {
     }
 
     public VmRecord(String vmId, CreateVmCommand command, Instant createdAt) {
+        this(vmId, command, GuestKind.LINUX, createdAt);
+    }
+
+    public VmRecord(String vmId, CreateVmCommand command, GuestKind guestKind, Instant createdAt) {
         this.vmId = vmId;
         this.name = command.name();
         this.templateId = command.templateId();
         this.templateVersion = command.templateVersion();
         this.vcpus = command.vcpus();
         this.memoryMib = command.memoryMib();
+        this.guestKind = guestKind;
         this.createdAt = createdAt;
+    }
+
+    public GuestKind getGuestKind() {
+        return guestKind == null ? GuestKind.LINUX : guestKind;
     }
 
     public boolean hasSameSpec(CreateVmCommand command) {

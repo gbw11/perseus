@@ -12,6 +12,7 @@ import com.perseus.backend.report.os.application.OsEvidenceReport.ObservationWin
 import com.perseus.backend.report.os.application.OsEvidenceReport.ObservedOs;
 import com.perseus.backend.report.os.application.OsEvidenceReport.Verdict;
 import com.perseus.backend.report.os.infrastructure.OsEvidenceProperties;
+import com.perseus.backend.template.domain.GuestKind;
 import com.perseus.backend.vm.domain.Vm;
 import com.perseus.backend.vm.application.VmService;
 import com.perseus.backend.vm.domain.VmState;
@@ -94,6 +95,7 @@ public class OsEvidenceService {
 
         return new Evidence(
                 vm.vmId(),
+                vm.guestKind(),
                 null,
                 inventory == null ? null : inventory.getBootId(),
                 vm.state(),
@@ -110,6 +112,9 @@ public class OsEvidenceService {
 
     // An OS report from a previous boot says nothing about what is running now.
     private Match matchOf(Vm vm, AgentInventory inventory, AgentHeartbeat heartbeat) {
+        if (vm.guestKind() == GuestKind.ZEPHYR) {
+            return Match.NOT_APPLICABLE;
+        }
         if (inventory == null || inventory.getOsId() == null) {
             return Match.UNKNOWN;
         }
