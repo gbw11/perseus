@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "xen": {
+    "repository": "https://xenbits.xen.org/git-http/xen.git",
+    "revision": "1c72306b1f0b4dc533954f678361044f8083dccc",
+    "version": "4.21.0+stable",
+    "abi_license": "MIT",
+    "abi_files": {
+      "xs_wire.h": {
+        "source": "xen/include/public/io/xs_wire.h",
+        "sha256": "d2bd676f7c1512596f0589189773dcdf5e7c1160ac18bd244be320a567ca1d1e"
+      },
+      "xenbus.h": {
+        "source": "xen/include/public/io/xenbus.h",
+        "sha256": "52603e558cec542a31624a11466786de8c52a3f375bf0e906c810fd6ea6de209"
+      }
+    },
+    "reference_files": {
+      "tools/libs/light/libxl_create.c": {
+        "sha256": "41c916efa4275d2853985503c278b8327c3fa6e43c5fe7b2316464dda7371e32",
+        "license": "GPL-2.0-or-later",
+        "use": "source inspection only; implementation not copied"
+      },
+      "xen/common/event_2l.c": {
+        "sha256": "bbc4eb2df8a55f1c9d82be35c72dd931b4301b08b7b9dc76dd87a5c2be063b39",
+        "license": "GPL-2.0-or-later",
+        "use": "source inspection only; implementation not copied"
+      }
+    }
+  },
+  "zephyr": {
+    "repository": "https://github.com/zephyrproject-rtos/zephyr.git",
+    "revision": "684c9e8f32e4373a21098559f748f06915f950c9",
+    "version": "4.4.0",
+    "license": "Apache-2.0",
+    "api_files": {
+      "include/zephyr/xen/hvm.h": "280d14fc3dd03e6b28d2955dc41fb8c3392ea0a30dfced798e7f21da78843a36",
+      "include/zephyr/xen/events.h": "768b04236f097ad9d875e249c4bb0ef7163b383d81e505ce2e66f071699f4ff6",
+      "drivers/xen/events.c": "406376aa7fc2fb9d0769b44a789634ac64d03f088b2ca5b6a9277acc0ff6cb1d",
+      "drivers/xen/hvm.c": "6fd79b14ec7fe2656c323647dd10c93176b450807447ff80147ed6116c1a6dd1",
+      "drivers/serial/uart_hvc_xen.c": "01f493f1dbb3da1325f4803305dd50a9b5b8e1d7f78a3030460e576802d56983",
+      "include/zephyr/kernel/internal/mm.h": "d3938d0b869dc74893625f16984044cc21f94069a83661187f7b56b0274917f7",
+      "arch/arm64/core/xen/enlighten.c": "23f697b83c4f5357995250319081ffbabc5095be319fc0d77612f91c0bb64de2",
+      "boards/xen/xenvm/xenvm.dts": "9e4efe4198f9d322bd156b09056adfec7cfca923a9fbc223048cf8a7ce395d99",
+      "include/zephyr/arch/arm64/hypercall.h": "1c519abed36ec5fd196ce088dbfbc6193cbac4e5d849014551a652d7f5f07d24",
+      "include/zephyr/xen/public/event_channel.h": "ab1538f3b214df48b3af002a7d1611dd9f04b44a5307b46d8259e127aa9fc62e"
+    }
+  },
+  "sdk": {
+    "version": "1.0.0",
+    "source_lock": "../source.lock.json"
+  }
+}
