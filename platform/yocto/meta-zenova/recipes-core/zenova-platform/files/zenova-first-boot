@@ -1,2 +1,0 @@
-#!/bin/sh
-exec /usr/bin/python3 /usr/lib/zenova/zenova_first_boot.py "$@"

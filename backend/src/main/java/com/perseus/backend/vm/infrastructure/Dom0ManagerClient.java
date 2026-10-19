@@ -2,9 +2,9 @@ package com.perseus.backend.vm.infrastructure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.perseus.backend.common.error.ApiException;
-import com.perseus.backend.vm.domain.CreateVmCommand;
-import com.perseus.backend.vm.domain.Vm;
 import com.perseus.backend.vm.domain.VmControlPort;
+import com.perseus.backend.vm.domain.VmLaunchSpec;
+import com.perseus.backend.vm.domain.VmRuntime;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
@@ -14,12 +14,14 @@ import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.http.converter.json.AbstractJackson2HttpMessageConverter;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -47,50 +49,52 @@ public class Dom0ManagerClient implements VmControlPort {
     }
 
     @Override
-    public List<Vm> list() {
-        Vm[] response = executeQuery(() -> queryClient.get()
+    public List<VmRuntime> list() {
+        VmRuntime[] response = executeQuery(() -> queryClient.get()
                 .uri("/api/v1/vms")
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
-                .body(Vm[].class));
+                .body(VmRuntime[].class));
         return response == null ? List.of() : Arrays.asList(response);
     }
 
+    // 404 VMNotFound means the domain is absent in Xen, which is how a stopped VM looks to dom0-manager.
     @Override
-    public Vm get(String vmId) {
-        return requireBody(executeQuery(() -> queryClient.get()
-                .uri("/api/v1/vms/{vmId}", vmId)
-                .retrieve()
-                .onStatus(status -> status.isError(), this::handleError)
-                .body(Vm.class)));
+    public Optional<VmRuntime> find(String vmId) {
+        try {
+            return Optional.of(requireBody(executeQuery(() -> queryClient.get()
+                    .uri("/api/v1/vms/{vmId}", vmId)
+                    .retrieve()
+                    .onStatus(status -> status.isError(), this::handleError)
+                    .body(VmRuntime.class))));
+        } catch (ApiException exception) {
+            if ("VM_NOT_FOUND".equals(exception.getCode())) {
+                return Optional.empty();
+            }
+            throw exception;
+        }
     }
 
     @Override
-    public Vm create(String vmId, CreateVmCommand command) {
+    public VmRuntime launch(String vmId, VmLaunchSpec spec) {
         return requireBody(executeCommand(() -> commandClient.post()
                 .uri("/api/v1/vms")
-                .body(Dom0CreateVmRequest.of(vmId, command))
+                .body(Dom0LaunchRequest.of(vmId, spec))
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
-                .body(Vm.class)));
+                .body(VmRuntime.class)));
     }
 
     @Override
-    public Vm start(String vmId) {
-        return requireBody(executeCommand(() -> commandClient.post()
-                .uri("/api/v1/vms/{vmId}/start", vmId)
-                .retrieve()
-                .onStatus(status -> status.isError(), this::handleError)
-                .body(Vm.class)));
-    }
-
-    @Override
-    public Vm stop(String vmId) {
-        return requireBody(executeCommand(() -> commandClient.post()
-                .uri("/api/v1/vms/{vmId}/stop", vmId)
-                .retrieve()
-                .onStatus(status -> status.isError(), this::handleError)
-                .body(Vm.class)));
+    public void stop(String vmId) {
+        executeCommand(() -> {
+            commandClient.post()
+                    .uri("/api/v1/vms/{vmId}/stop", vmId)
+                    .retrieve()
+                    .onStatus(status -> status.isError(), this::handleError)
+                    .toBodilessEntity();
+            return null;
+        });
     }
 
     @Override
@@ -115,9 +119,11 @@ public class Dom0ManagerClient implements VmControlPort {
         RestClient.Builder builder = RestClient.builder()
                 .baseUrl(properties.baseUrl())
                 .requestFactory(requestFactory)
+                // dom0-manager only speaks snake_case JSON. Without this, other Jackson converters on the
+                // classpath (e.g. YAML from springdoc) are picked first and the body is not JSON at all.
                 .messageConverters(converters -> {
-                    converters.removeIf(MappingJackson2HttpMessageConverter.class::isInstance);
-                    converters.add(new MappingJackson2HttpMessageConverter(objectMapper));
+                    converters.removeIf(AbstractJackson2HttpMessageConverter.class::isInstance);
+                    converters.add(0, new MappingJackson2HttpMessageConverter(objectMapper));
                 })
                 .defaultHeader(HttpHeaders.ACCEPT, "application/json");
         if (StringUtils.hasText(properties.serviceToken())) {
@@ -226,14 +232,14 @@ public class Dom0ManagerClient implements VmControlPort {
         }
     }
 
-    private Vm requireBody(Vm vm) {
-        if (vm == null) {
+    private <T> T requireBody(T body) {
+        if (body == null) {
             throw new ApiException(
                     HttpStatus.BAD_GATEWAY,
                     "VM_CONTROL_BAD_RESPONSE",
                     "VM 제어 서비스가 응답 본문을 반환하지 않았습니다.");
         }
-        return vm;
+        return body;
     }
 
     private enum TransportFailure {

@@ -1,4 +1,4 @@
-> **리브랜딩 이전 보존 문서입니다.** 아래 본문은 당시 Perseus 소스·산출물·검증 기록이며, 현재 명령과 경로는 [Zenova 플랫폼 가이드](zenova-platform.md)를 따릅니다.
+> **리브랜딩 이전 보존 문서입니다.** 아래 본문은 당시 Perseus 소스·산출물·검증 기록이며, 현재 명령과 경로는 [Xenova 플랫폼 가이드](xenova-platform.md)를 따릅니다.
 
 # Raspberry Pi 4 Yocto/Xen 환경 재구성 및 domU 인계
 
