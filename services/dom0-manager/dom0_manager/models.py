@@ -70,6 +70,7 @@ class ErrorCode(str, Enum):
     DriverTimeout = "DriverTimeout"  # 504 xl·플랫폼 시한 초과
     PlatformUnavailable = "PlatformUnavailable"  # 503 registry·저장소·Xen 일시 장애
     NotSupported = "NotSupported"  # 501 플랫폼이 아직 제공하지 않는 동작
+    Unauthorized = "Unauthorized"  # 401 Bearer 서비스 토큰 없음·불일치. 미들웨어가 내며 /healthz 포함
 
 
 class Error(BaseModel):

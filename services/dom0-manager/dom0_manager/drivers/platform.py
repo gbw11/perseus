@@ -68,27 +68,54 @@ class ManagerLike(Protocol):
 
 
 class SerializedManager:
-    """Manager.call 을 프로세스 안에서 직렬화한다.
+    """Manager.call 을 프로세스 안에서 직렬화하되, 차례를 기다리는 시간은 busy_timeout_s 로 제한한다.
 
     현재 Manager 는 요청별 상태(current_operation, replayed)를 인스턴스 변수에 두므로 FastAPI 스레드 여러 개가
     같은 객체를 동시에 부르면 operation_id·복구 기록이 섞일 수 있다. 플랫폼의 파일 잠금(/run/xenova)은 임계 구간만
     보호하고 그 앞뒤의 인스턴스 변수는 보호하지 않는다. 플랫폼이 요청별 context 로 바뀌어도 이 직렬화는 해가 없다.
+
+    정지는 최대 90초 동안 잠금을 쥔다. 그동안 조회·생성·health 가 무한정 줄을 서면 FastAPI 스레드풀이 잠금 대기로
+    가득 차 서비스 전체가 멈춘 것처럼 보인다. 그래서 대기 시간을 넘기면 플랫폼의 파일 잠금 충돌과 같은 모양의
+    OPERATION_IN_PROGRESS(retryable) 봉투를 돌려주고, 호출자는 그것을 503 PlatformUnavailable 로 낸다.
     """
 
-    def __init__(self, inner: ManagerLike) -> None:
+    def __init__(self, inner: ManagerLike, *, busy_timeout_s: float = 5.0) -> None:
         self._inner = inner
         self._lock = threading.Lock()
+        self.busy_timeout_s = busy_timeout_s
 
     @property
     def data(self) -> Path:
         return self._inner.data
 
     def call(self, action: str, spec: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
-        with self._lock:
+        if not self._lock.acquire(timeout=self.busy_timeout_s):
+            return _busy_envelope(action, self.busy_timeout_s, kwargs.get("request_id"))
+        try:
             return self._inner.call(action, spec, **kwargs)
+        finally:
+            self._lock.release()
 
 
-def load_manager(platform_lib: str) -> ManagerLike:
+def _busy_envelope(action: str, waited_s: float, request_id: Any) -> dict[str, Any]:
+    """플랫폼이 파일 잠금 충돌 때 내는 봉투와 같은 모양 (xenova_management.Manager.call 의 PlatformError 분기)."""
+    return {
+        "schema_version": "1.0",
+        "ok": False,
+        "request_id": request_id,
+        "operation_id": None,
+        "replayed": False,
+        "data": None,
+        "error": {
+            "code": "OPERATION_IN_PROGRESS",
+            "message": f"another platform operation is in progress; {action} waited {waited_s:g}s for the manager",
+            "retryable": True,
+            "details": {"busy_timeout_s": waited_s},
+        },
+    }
+
+
+def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0) -> ManagerLike:
     """PERSEUS_PLATFORM_LIB 의 디렉터리들을 sys.path 에 넣고 xenova_management.Manager() 를 만든다."""
     for entry in [p for p in platform_lib.split(os.pathsep) if p]:
         if entry not in sys.path:
@@ -99,7 +126,7 @@ def load_manager(platform_lib: str) -> ManagerLike:
         raise PlatformUnavailable(
             "xenova_management not importable; set PERSEUS_PLATFORM_LIB (board: /usr/lib/xenova)", detail=str(exc)
         ) from exc
-    return SerializedManager(module.Manager())
+    return SerializedManager(module.Manager(), busy_timeout_s=busy_timeout_s)
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +143,7 @@ _CODE_MAP: dict[str, type[Dom0ManagerError]] = {
     "VM_NAME_CONFLICT": VMExists,
     "IDEMPOTENCY_CONFLICT": VMExists,
     "IP_CONFLICT": InvalidState,
-    "OPERATION_IN_PROGRESS": InvalidState,
+    "OPERATION_IN_PROGRESS": PlatformUnavailable,  # 다른 플랫폼 작업이 잠금 보유(재시도 가능). 프로세스 안 직렬화 대기 초과도 같은 코드
     "VM_NOT_STOPPED": InvalidState,
     "TARGET_CHANGED": InvalidState,
     "ASSET_IN_USE": InvalidState,
@@ -300,7 +327,11 @@ class PlatformDriver(Driver):
                 self._xl.info()
             except DriverError:
                 return False
-        return bool(self.manager.call("list", {"lifecycle": "REGISTERED"}).get("ok"))
+        envelope = self.manager.call("list", {"lifecycle": "REGISTERED"})
+        if envelope.get("ok"):
+            return True
+        # 다른 플랫폼 작업(최대 90초 정지 등)이 잠금을 쥔 것은 장애가 아니다. registry·저장소 장애만 false
+        return (envelope.get("error") or {}).get("code") == "OPERATION_IN_PROGRESS"
 
 
 # ---------------------------------------------------------------------------

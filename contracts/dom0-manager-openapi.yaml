@@ -31,6 +31,8 @@ paths:
         Spring 이 자기 레코드와 조합해 만든다.
       x-driver-timeout-seconds: 5
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: VM 배열
           content:
@@ -64,6 +66,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateVmRequest'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '201':
           description: 도메인 생성됨 (state 는 running)
           content:
@@ -93,6 +97,8 @@ paths:
       summary: VM 단건 조회
       x-driver-timeout-seconds: 5
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: VM
           content:
@@ -116,6 +122,8 @@ paths:
         tombstone 과 generation 을 유지한다. 같은 디스크를 restore 하면 기존 vm_id 를 유지한다.
       x-driver-timeout-seconds: 90
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '204':
           description: VM 이 숨김 보관됨
         '404':
@@ -145,6 +153,8 @@ paths:
         자동으로 강제 종료하지 않는다. 강제 종료는 명시적인 force 정책에서만 수행한다.
       x-driver-timeout-seconds: 90
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '204':
           description: 도메인이 없는 상태 (디스크 보존)
         '500':
@@ -165,6 +175,8 @@ paths:
         2차 RecoveryService 가 사용한다.
       x-driver-timeout-seconds: 5
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: dom0-manager 와 Xen 모두 응답
           content:
@@ -274,6 +286,7 @@ components:
             InvalidState 는 현재 생명주기에서 수행할 수 없는 요청이다 (실행 중 VM 의 DELETE, 플랫폼 VM_NOT_STOPPED 등).
             드라이버·플랫폼 실패는 HTTP 상태와 1:1 이다: DriverError 500 / DriverTimeout 504 / PlatformUnavailable 503 /
             NotSupported 501. Spring 은 이 code 를 같은 상태로 전달해야 한다 (vm-api-contract-v1.md 8.2 변환표).
+            Unauthorized 401 은 Bearer 서비스 토큰 없음·불일치이며 /healthz 를 포함한 모든 엔드포인트에서 난다.
           enum:
             - InvalidArgument
             - VMNotFound
@@ -284,6 +297,7 @@ components:
             - DriverTimeout
             - PlatformUnavailable
             - NotSupported
+            - Unauthorized
         message:
           type: string
         detail:
@@ -346,13 +360,21 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     PlatformUnavailable:
-      description: registry·저장소·Xen 일시 장애 (code PlatformUnavailable). 재시도 가능
+      description: >-
+        registry·저장소·Xen 일시 장애, 또는 다른 플랫폼 작업이 잠금을 쥐고 있어 대기 시간(기본 5초) 안에 차례가
+        오지 않음 (code PlatformUnavailable, 플랫폼 OPERATION_IN_PROGRESS). 재시도 가능
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
     DriverTimeout:
       description: xl·플랫폼 호출 시한 초과 (code DriverTimeout). 정지 90초 대기 초과 포함
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Bearer 서비스 토큰 없음·불일치 (code Unauthorized). PERSEUS_SERVICE_TOKEN 이 설정된 배포에서 /healthz 포함 모든 엔드포인트
       content:
         application/json:
           schema:

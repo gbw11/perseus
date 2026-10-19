@@ -11,8 +11,9 @@ from . import get_service
 router = APIRouter(tags=["VMs"])
 
 _ERR = {"model": Error}
-# 드라이버·플랫폼 실패는 모든 엔드포인트에서 날 수 있다 (code 와 HTTP 상태 1:1, README "오류 코드와 HTTP 상태")
+# 401 과 드라이버·플랫폼 실패는 모든 엔드포인트에서 날 수 있다 (code 와 HTTP 상태 1:1, README "오류 코드와 HTTP 상태")
 _DRIVER_ERRS = {
+    401: {"model": Error, "description": "Unauthorized: Bearer 서비스 토큰 없음·불일치 (미들웨어)"},
     500: {"model": Error, "description": "DriverError: 분류되지 않은 실행 오류"},
     503: {"model": Error, "description": "PlatformUnavailable: registry·저장소·Xen 일시 장애 (재시도 가능)"},
     504: {"model": Error, "description": "DriverTimeout: xl·플랫폼 호출 시한 초과"},

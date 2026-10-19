@@ -28,6 +28,9 @@ class Settings:
     # Linux VM 에 줄 IP 풀 (플랫폼이 자동 배정하기 전까지 dom0-manager 가 고른다). 192.168.77.<start>..<end>
     ip_pool_start: int = 2
     ip_pool_end: int = 99
+    # platform 드라이버: 다른 요청이 Manager 를 쓰는 동안 기다릴 최대 초. 넘으면 503 PlatformUnavailable(재시도 가능).
+    # 정지가 최대 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다. 조회 드라이버 한도 5초와 맞춘다
+    platform_busy_timeout_s: float = 5.0
     mock_samples: bool = False
     log_level: str = "INFO"
 
@@ -61,6 +64,7 @@ class Settings:
             platform_lib=read("PERSEUS_PLATFORM_LIB", cls.platform_lib, str),
             ip_pool_start=read("PERSEUS_IP_POOL_START", cls.ip_pool_start, int),
             ip_pool_end=read("PERSEUS_IP_POOL_END", cls.ip_pool_end, int),
+            platform_busy_timeout_s=read("PERSEUS_PLATFORM_BUSY_TIMEOUT", cls.platform_busy_timeout_s, float),
             mock_samples=read("PERSEUS_MOCK_SAMPLES", cls.mock_samples, as_bool),
             log_level=read("PERSEUS_LOG_LEVEL", cls.log_level, str).upper(),
         )
