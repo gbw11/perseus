@@ -188,13 +188,15 @@ def test_health_requires_xl_and_registry(driver, manager):
     assert driver.health() is True
     manager.fail_next = {"code": "STORAGE_UNAVAILABLE", "message": "registry unavailable"}
     assert driver.health() is False
+    manager.fail_next = {"code": "OPERATION_IN_PROGRESS", "message": "another platform operation is in progress"}
+    assert driver.health() is True  # 다른 작업이 잠금을 쥔 것은 장애가 아니다
     broken = PlatformDriver(manager, Xl(FakeRunner({})))
     assert broken.health() is False
 
 
 def test_platform_error_codes_map_to_http(client, manager):
     manager.register(VM_A, running=True)
-    for code, status in [("STORAGE_UNAVAILABLE", 503), ("OPERATION_IN_PROGRESS", 409), ("INVALID_SPEC", 400), ("ARTIFACT_INVALID", 500)]:
+    for code, status in [("STORAGE_UNAVAILABLE", 503), ("OPERATION_IN_PROGRESS", 503), ("INVALID_SPEC", 400), ("ARTIFACT_INVALID", 500)]:
         manager.fail_next = {"code": code, "message": "x"}
         assert client.get("/api/v1/vms").status_code == status, code
     manager.fail_next = {"code": "ARTIFACT_INVALID", "message": "guest operation deadline exceeded"}
@@ -358,8 +360,46 @@ def test_build_driver_wraps_manager_and_provisioner_reuses_it(monkeypatch):
     fake_module.Manager = FakeManager
     monkeypatch.setitem(sys.modules, "xenova_management", fake_module)
 
-    settings = Settings(driver="platform", platform_lib="")
+    settings = Settings(driver="platform", platform_lib="", platform_busy_timeout_s=0.5)
     driver = build_driver(settings)
     provisioner = build_provisioner(settings, driver)
     assert isinstance(driver.manager, SerializedManager)
     assert provisioner.manager is driver.manager
+    assert driver.manager.busy_timeout_s == 0.5
+
+
+def test_serialized_manager_busy_timeout_is_retryable_503():
+    """리뷰 반영: 정지가 최대 90초 잠금을 쥐는 동안 다른 요청이 무한정 줄을 서면 안 된다. 대기 한도를 넘기면 플랫폼 잠금
+    충돌과 같은 OPERATION_IN_PROGRESS 봉투 → 503 PlatformUnavailable(재시도 가능). health 는 바쁜 것을 장애로 보지 않는다."""
+    import threading
+
+    from dom0_manager.drivers.platform import SerializedManager
+
+    inner = FakeManager()
+    inner.register(VM_A, running=True)
+    entered, release = threading.Event(), threading.Event()
+    original = inner.call
+
+    def slow_call(action, spec=None, **kwargs):
+        if action == "stop":
+            entered.set()
+            release.wait(5)
+        return original(action, spec, **kwargs)
+
+    inner.call = slow_call
+    wrapped = SerializedManager(inner, busy_timeout_s=0.05)
+    app = create_app(Settings(driver="platform", log_level="WARNING"),
+                     driver=PlatformDriver(wrapped, Xl(FakeRunner({("xl", "info"): XL_INFO}))), provisioner=PlatformProvisioner(wrapped))
+    client = TestClient(app)
+    holder = threading.Thread(target=wrapped.call, args=("stop", {"vm_id": str(VM_A), "force": False}), kwargs={"execute": True})
+    holder.start()
+    try:
+        assert entered.wait(2)
+        busy = client.get("/api/v1/vms")
+        assert (busy.status_code, busy.json()["code"]) == (503, "PlatformUnavailable")
+        assert "in progress" in busy.json()["message"]
+        assert client.get("/healthz").status_code == 200  # xl 은 응답하고 플랫폼은 바쁠 뿐이다
+    finally:
+        release.set()
+        holder.join(5)
+    assert client.get("/api/v1/vms").status_code == 200  # 잠금이 풀리면 정상

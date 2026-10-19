@@ -159,7 +159,7 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 | `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `404`, `409`, `500`, `501`, `503`, `504` |
 | `GET` | `/healthz` | `200` | `503` |
 
-드라이버·플랫폼 실패는 모든 엔드포인트에서 날 수 있으며 code와 HTTP 상태가 1:1입니다(8.1절). `500 DriverError`는 분류되지 않은 실행 실패, `503 PlatformUnavailable`은 registry·저장소·Xen 일시 장애(재시도 가능), `504 DriverTimeout`은 호출 시한 초과입니다. 명령 엔드포인트(생성·정지·보관)는 드라이버나 플랫폼이 그 동작을 제공하지 않을 때 `501 NotSupported`를 더 냅니다.
+드라이버·플랫폼 실패는 모든 엔드포인트에서 날 수 있으며 code와 HTTP 상태가 1:1입니다(8.1절). `500 DriverError`는 분류되지 않은 실행 실패, `503 PlatformUnavailable`은 registry·저장소·Xen 일시 장애(재시도 가능), `504 DriverTimeout`은 호출 시한 초과입니다. 명령 엔드포인트(생성·정지·보관)는 드라이버나 플랫폼이 그 동작을 제공하지 않을 때 `501 NotSupported`를 더 냅니다. `PERSEUS_SERVICE_TOKEN`이 설정된 배포에서는 `/healthz`를 포함한 모든 엔드포인트가 토큰이 없거나 틀리면 `401 Unauthorized`를 냅니다. OpenAPI는 `ServiceToken` bearer 보안 스킴을 전역 security로 선언하고 각 엔드포인트에 `401`을 명시합니다.
 
 ### 4.1 `GET /api/v1/vms`
 
@@ -257,13 +257,14 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 
 | 코드 | 명명 | 조건 |
 |---|---|---|
+| `401` | `Unauthorized` | Bearer 서비스 토큰 없음·불일치. `/healthz` 포함, 미들웨어가 낸다 |
 | `400` | `InvalidArgument` | 형식 또는 범위 오류 |
 | `404` | `VMNotFound` | `GET` 대상 도메인 부재 |
 | `409` | `VMExists` | `vm_id` 충돌 (단일 의미) |
 | `507` | `InsufficientResources` | 가용 자원 부족. `resource.name`은 `vcpus`·`memory_mib`·`ipv4`(Linux IP 풀 고갈) |
 | `409` | `InvalidState` | 현재 생명주기에서 수행할 수 없음. 실행 중 VM 삭제, 플랫폼 `VM_NOT_STOPPED`·`OPERATION_IN_PROGRESS` 등 |
 | `501` | `NotSupported` | 드라이버·플랫폼이 제공하지 않는 동작. xen 모드의 명령, 플랫폼이 아직 받지 않는 호출자 지정 `vm_id` |
-| `503` | `PlatformUnavailable` | registry·저장소·Xen 일시 장애. 재시도 가능 |
+| `503` | `PlatformUnavailable` | registry·저장소·Xen 일시 장애, 또는 다른 플랫폼 작업이 잠금을 쥐고 있어 대기 시간(기본 5초, `PERSEUS_PLATFORM_BUSY_TIMEOUT`) 안에 차례가 오지 않음(플랫폼 `OPERATION_IN_PROGRESS`). 재시도 가능 |
 | `504` | `DriverTimeout` | `xl`·플랫폼 호출 시한 초과(정지 90초 대기 포함) |
 | `500` | `DriverError` | 그 밖의 실행 실패, 모르는 상태 문자 |
 
@@ -317,6 +318,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | `501 NotSupported` | `501 VM_CONTROL_NOT_SUPPORTED` — **백엔드 반영 전.** 반영 전까지는 모르는 code로 `502 VM_CONTROL_BAD_RESPONSE` |
 | `503 PlatformUnavailable` | `503 VM_CONTROL_UNAVAILABLE` (전송 실패와 같은 코드, 재시도 가능) — **백엔드 반영 전** |
 | `504 DriverTimeout` | `504 VM_CONTROL_TIMEOUT` (응답 타임아웃과 같은 코드) — **백엔드 반영 전** |
+| `401 Unauthorized` | 서비스 토큰 설정 불일치. 사용자 오류가 아니므로 `502 VM_CONTROL_BAD_RESPONSE`로 두고 로그에 경고 — **백엔드 반영 전** |
 | 해석할 수 없는 본문, 모르는 `code`, 본문이 필요한데 없음 | `502 VM_CONTROL_BAD_RESPONSE` |
 
 **전송 실패**
@@ -421,4 +423,4 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1 | 2026-10-16 | 계약 확정안 v1.0, 리뷰 v1.1, 백엔드 VM API 규약 v1, 리뷰 v1.2의 확정 사항 통합 |
 | v1.1 | 2026-10-19 | 구현에 맞춰 보완: 공개 VM 객체에 `agent_status`, Spring 공개 state `stopped`(3.3), 템플릿 응답 필드 `version`, `xl` 플래그 없음(`------`) 매핑, `DriverError` 500/501, `/healthz` 본문, Spring 오류 변환표(8.2), 공개 API 응답 형식(5장), `vm_id` 저장 1안 확정, 배포 분리·복구 주체 미확정 항목 추가. Spring 시작은 실행 중이 아닌 도메인을 `409 INVALID_VM_STATE`로 거부, 정지는 이전 상태를 조회해 이벤트 `from`에 기록. Spring이 VM 상태를 주기 조회해 `cause: detected` 이벤트 기록. 템플릿을 플랫폼 기본값(Ubuntu·Debian·Zephyr)으로 교체하고 템플릿·공개 VM 객체에 `guest_kind` 추가 |
 | v1.2 | 2026-10-19 | Spring 선발급 `vm_id`를 유일한 영구 식별자·생성 멱등성 키로 확정. 플랫폼 자동 IP 할당, 동기 stop 90초와 Spring 100초 제한, retire/restore/purge 생명주기, Spring `RETIRED` 명세 보존, Tailscale+Bearer 내부 연결을 반영. Spring이 플랫폼 공개 템플릿 ID·버전을 그대로 전달하고 제어 계층 변환을 제거 |
-| v1.3 | 2026-10-19 | 오류 code를 HTTP 상태와 1:1로 분리(`NotSupported` 501, `PlatformUnavailable` 503, `DriverTimeout` 504, `DriverError` 500)하고 모든 엔드포인트 응답 목록에 반영. `InvalidState`는 실행 중 VM 삭제 등에서 실제 반환. `memory_mib` 공통 하한 128 → 16(Zephyr starter 1.0.0 고정 프로필), `ResourceError.name`에 `ipv4` 추가. 같은 `vm_id`에 다른 생성 명세는 `409 VMExists`. Spring 변환표에 새 code 추가(백엔드 반영 전) |
+| v1.3 | 2026-10-19 | 오류 code를 HTTP 상태와 1:1로 분리(`NotSupported` 501, `PlatformUnavailable` 503, `DriverTimeout` 504, `DriverError` 500)하고 모든 엔드포인트 응답 목록에 반영. `InvalidState`는 실행 중 VM 삭제 등에서 실제 반환. `memory_mib` 공통 하한 128 → 16(Zephyr starter 1.0.0 고정 프로필), `ResourceError.name`에 `ipv4` 추가. 같은 `vm_id`에 다른 생성 명세는 `409 VMExists`. Spring 변환표에 새 code 추가(백엔드 반영 전). `401 Unauthorized` 명시와 OpenAPI `ServiceToken` 보안 스킴 선언. 플랫폼 Manager 잠금 대기 제한(기본 5초)을 넘기면 `503`(`OPERATION_IN_PROGRESS`, 재시도 가능)이며 health는 바쁜 상태를 장애로 보지 않음 |

@@ -116,6 +116,7 @@ PERSEUS_DRIVER=platform PERSEUS_PLATFORM_LIB=/usr/lib/xenova PERSEUS_SERVICE_TOK
 | --- | --- | --- |
 | `PERSEUS_PLATFORM_LIB` | `/usr/lib/xenova` | `xenova_management` 등 플랫폼 모듈 경로. 여러 개면 OS 경로 구분자로 |
 | `PERSEUS_IP_POOL_START` / `END` | `2` / `99` | Linux VM에 줄 `192.168.77.x` 풀. 플랫폼이 자동 배정하기 전까지 dom0-manager가 빈 주소를 고르고 `IP_CONFLICT`면 다음 주소로 재시도 |
+| `PERSEUS_PLATFORM_BUSY_TIMEOUT` | `5` | 다른 요청이 플랫폼 `Manager`를 쓰는 동안 기다릴 최대 초. 넘으면 503 `PlatformUnavailable`(재시도 가능). 정지가 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다 |
 
 동작 대응:
 
@@ -126,11 +127,11 @@ PERSEUS_DRIVER=platform PERSEUS_PLATFORM_LIB=/usr/lib/xenova PERSEUS_SERVICE_TOK
 | `POST /vms/{id}/stop` | `stop` (`force=false`, 플랫폼이 최대 90초 대기). 시한 초과는 504 |
 | `DELETE /vms/{id}` | 실행 중 409 → 정지 후 `retire`(숨김 보관) |
 
-플랫폼 오류 코드 → HTTP: `INVALID_SPEC`·템플릿 없음 400 / `VM_NOT_FOUND` 404 / 이름·IP·멱등성 충돌과 `VM_NOT_STOPPED`·`OPERATION_IN_PROGRESS` 등 409 / `INSUFFICIENT_STORAGE` 507 / `STORAGE_UNAVAILABLE`·`RECOVERY_REQUIRED`·`CLEANUP_INCOMPLETE` 503 / 시한 초과 504 / 그 외 500.
+플랫폼 오류 코드 → HTTP: `INVALID_SPEC`·템플릿 없음 400 / `VM_NOT_FOUND` 404 / 이름·IP·멱등성 충돌과 `VM_NOT_STOPPED` 등 409 / `INSUFFICIENT_STORAGE` 507 / `STORAGE_UNAVAILABLE`·`RECOVERY_REQUIRED`·`CLEANUP_INCOMPLETE`·`OPERATION_IN_PROGRESS`(잠금 보유, 재시도 가능) 503 / 시한 초과 504 / 그 외 500.
 
 플랫폼 `xen_state` → 계약 상태: `running`·`blocked`·`unknown`(플래그 없음) → running, `paused` → paused, `shutdown`·`dying` → stopping, `crashed` → crashed, `stopped` → 도메인 없음.
 
-`load_manager`는 `Manager`를 `SerializedManager`로 감싸 프로세스 안에서 `call`을 직렬화합니다. 플랫폼 `Manager`가 요청별 상태(`current_operation`·`replayed`)를 인스턴스 변수에 두어 FastAPI 스레드가 동시에 부르면 섞이기 때문입니다.
+`load_manager`는 `Manager`를 `SerializedManager`로 감싸 프로세스 안에서 `call`을 직렬화합니다. 플랫폼 `Manager`가 요청별 상태(`current_operation`·`replayed`)를 인스턴스 변수에 두어 FastAPI 스레드가 동시에 부르면 섞이기 때문입니다. 차례를 기다리는 시간은 `PERSEUS_PLATFORM_BUSY_TIMEOUT`(기본 5초)으로 제한하고, 넘으면 플랫폼의 잠금 충돌과 같은 `OPERATION_IN_PROGRESS` 봉투를 돌려 503으로 냅니다. 정지가 90초 동안 잠금을 쥐어도 조회·health가 스레드풀에 쌓이지 않고, health는 바쁜 상태를 장애로 보지 않습니다.
 
 **막힌 것**: 플랫폼 `create`가 아직 `spec['vm_id']`를 받지 않고 보드에서 UUID를 발급합니다. 팀 결정(Spring 발급)과 달라서, 새 VM 생성은 플랫폼이 `vm_id`를 받을 때까지 501을 냅니다. 조회·시작·정지·보관은 영향 없습니다. 통합 테스트는 계획 모드(`execute=False`) `create`로 지원 여부를 확인해, 아직이면 501을 검증하고 xfail로 표시합니다. 이 항목이 풀리기 전에는 S15P31E110-115를 완료 처리하지 않습니다.
 
@@ -153,13 +154,14 @@ python -m pytest
 
 | code | HTTP | 언제 |
 | --- | --- | --- |
+| `Unauthorized` | 401 | Bearer 서비스 토큰 없음·불일치. 미들웨어가 내며 `/healthz` 포함 |
 | `InvalidArgument` | 400 | 입력 검증, 플랫폼 `INVALID_SPEC`·템플릿 없음 |
 | `VMNotFound` | 404 | 도메인 없음(단건), 등록 없음(삭제) |
 | `VMExists` | 409 | 같은 vm_id가 떠 있음, 다른 명세로 재생성, 이름·멱등성 충돌 |
-| `InvalidState` | 409 | 실행 중 삭제, `VM_NOT_STOPPED`·`OPERATION_IN_PROGRESS`·IP 충돌 등 |
+| `InvalidState` | 409 | 실행 중 삭제, `VM_NOT_STOPPED`·IP 충돌 등 |
 | `InsufficientResources` | 507 | vcpus·memory_mib·ipv4 풀 부족, 보드 저장소 부족 |
 | `NotSupported` | 501 | 플랫폼이 아직 제공하지 않는 동작(예: create의 호출자 지정 vm_id), xen 모드의 명령 |
-| `PlatformUnavailable` | 503 | registry·저장소·Xen 일시 장애 (`STORAGE_UNAVAILABLE`·`RECOVERY_REQUIRED`·`CLEANUP_INCOMPLETE`) |
+| `PlatformUnavailable` | 503 | registry·저장소·Xen 일시 장애 (`STORAGE_UNAVAILABLE`·`RECOVERY_REQUIRED`·`CLEANUP_INCOMPLETE`), 다른 플랫폼 작업이 잠금 보유(`OPERATION_IN_PROGRESS`, 대기 한도 초과 포함, 재시도 가능) |
 | `DriverTimeout` | 504 | xl·플랫폼 호출 시한 초과(정지 90초 포함) |
 | `DriverError` | 500 | 그 외 실행 오류 |
 
