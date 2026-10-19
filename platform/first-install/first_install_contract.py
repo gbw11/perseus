@@ -10,7 +10,7 @@ LEGACY_FEATURES = {'schema': SCHEMA, 'layout': 'dos-boot1-root2-data3-v1',
             'growth': 'actual-device-last-ext4-v1', 'identity': 'systemd-machine-id-guest-seed-v1'}
 
 FEATURES = {**LEGACY_FEATURES, 'vm_management': 'linux-zephyr-persistent-v2', 'qemu': 'xenpv-vnc-none-v1',
-            'vm_contract': 'uuid-operations-v1', 'management_wifi': 'wpa2-networkd-v1'}
+            'vm_contract': 'spring-uuid-auto-ip-v1', 'management_wifi': 'wpa2-networkd-v1'}
 
 
 def align(value, unit=4 * MIB):

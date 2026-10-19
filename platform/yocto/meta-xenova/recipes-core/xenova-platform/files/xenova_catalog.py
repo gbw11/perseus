@@ -41,6 +41,11 @@ def identity(template_id, version):
         raise PlatformError('explicit semantic template version required')
 
 
+def deployment_version(meta):
+    """공개 배포 버전은 명시적 template_version 우선, 없을 때만 legacy version을 사용한다."""
+    return meta.get('template_version', meta.get('version'))
+
+
 def describe(data, descriptor, *, full=False):
     required = {'schema_version', 'template_id', 'template_version', 'guest_kind',
                 'asset_directory', 'manifest_sha256', 'source_template_id'}
@@ -62,7 +67,7 @@ def describe(data, descriptor, *, full=False):
     meta = json.loads(path.read_text())
     if not isinstance(meta,dict) or not isinstance(meta.get('source'),dict):
         raise PlatformError('template metadata/source must be objects')
-    if meta.get('id') != descriptor['source_template_id'] or meta.get('template_version',meta.get('version')) != descriptor['template_version']:
+    if meta.get('id') != descriptor['source_template_id'] or deployment_version(meta) != descriptor['template_version']:
         raise PlatformError('catalog deployment identity differs from source manifest')
     declared = meta.get('template_id',DEFAULT_IDS.get(descriptor['source_template_id']))
     if declared is not None and declared != descriptor['template_id']:
