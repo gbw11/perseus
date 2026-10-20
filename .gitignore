@@ -1,5 +1,5 @@
 # ============================================================
-# Perseus - Xen multi-OS platform
+# Xenova - Xen multi-OS platform
 # Ignore generated/local files; keep source, recipes and configs.
 # ============================================================
 
@@ -76,7 +76,7 @@ build/
 !/tests/fixtures/**/*.log
 
 # Yocto / BitBake: generated trees only
-# Keep platform/yocto/meta-perseus/, kas manifests, .bb/.bbappend,
+# Keep platform/yocto/meta-xenova/, kas manifests, .bb/.bbappend,
 # .conf, patches, .wks, and other build definitions in Git.
 /platform/yocto/build-*/
 /platform/yocto/build_*/
@@ -101,6 +101,7 @@ build/
 *.squashfs
 
 # Runtime-generated databases and state
+/backend/data/
 *.db
 *.db-*
 *.sqlite
@@ -109,3 +110,16 @@ build/
 *.sqlite3-*
 *.pid
 *.sock
+
+# Additional Yocto workspaces, caches and image artifacts
+*.pyc
+/yocto-workspace/
+/platform/yocto/build*/
+tmp/
+downloads/
+sstate-cache/
+*.rootfs.*
+*.rpi-sdimg
+*.ext2
+*.cpio
+*.cpio.gz

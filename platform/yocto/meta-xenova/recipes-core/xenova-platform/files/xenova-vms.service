@@ -1,0 +1,15 @@
+[Unit]
+Description=Start registered Xenova VMs once (OS/app readiness is separate)
+Requires=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenova-vm-shutdown.service
+After=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenova-vm-shutdown.service
+RequiresMountsFor=/srv/xenova
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/xenova-vm autostart
+TimeoutStartSec=150s
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
