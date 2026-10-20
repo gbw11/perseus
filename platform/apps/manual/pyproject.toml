@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xenova-manual"
+version = "0.1.0"
+description = "Xenova 수동주행 VM 앱: drive.input → drive.command 50 Hz (S15P31E110-155)"
+requires-python = ">=3.11"
+# xenova_mqtt 는 같은 저장소의 platform/services/vm-agent/mqtt-client 라 여기 선언하지 않는다 (에이전트와 같은 방식).
+# 개발 PC 에서는 pytest 의 pythonpath 가, 게스트에서는 PYTHONPATH 가 두 패키지를 묶는다
+dependencies = [
+    "paho-mqtt>=1.6,<3",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+]
+
+[tool.setuptools.packages.find]
+include = ["xenova_manual*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "../../services/vm-agent/mqtt-client"]
+addopts = "-q"
