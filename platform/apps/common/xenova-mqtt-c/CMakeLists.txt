@@ -22,7 +22,7 @@ option(XM_SANITIZE "AddressSanitizer·UBSan 으로 시험" ON)
 if(XM_SANITIZE)
   target_compile_options(xenova_mqtt_core PRIVATE -fsanitize=address,undefined)
 endif()
-target_link_libraries(xenova_mqtt_core PUBLIC m)
+
 
 enable_testing()
 add_executable(test_xm tests/test_xm.c)
