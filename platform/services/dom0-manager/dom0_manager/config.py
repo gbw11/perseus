@@ -18,6 +18,8 @@ class Settings:
     # 계약 v1.1: 조회 드라이버 한도 5초(Spring 대기 6초 안), 정지는 플랫폼이 최대 90초 동기 대기하고 자동 강제 종료 없음
     xl_query_timeout_s: float = 5.0
     xl_command_timeout_s: float = 95.0
+    # 비어 있지 않으면 xl 을 로컬 대신 SSH 로 부른다 (예: root@100.64.0.1). 개발 PC 에서 실보드 조회를 대조할 때만 쓴다
+    xl_ssh_target: str = ""
     shutdown_grace_s: float = 90.0
     # Bearer 서비스 토큰. 비어 있으면 검사하지 않는다(로컬 Mock 개발). Tailscale 바인드 배포에서는 반드시 설정
     service_token: str = ""
@@ -62,6 +64,7 @@ class Settings:
             port=read("XENOVA_PORT", cls.port, int),
             xl_query_timeout_s=read("XENOVA_XL_QUERY_TIMEOUT", cls.xl_query_timeout_s, float),
             xl_command_timeout_s=read("XENOVA_XL_COMMAND_TIMEOUT", cls.xl_command_timeout_s, float),
+            xl_ssh_target=read("XENOVA_XL_SSH", cls.xl_ssh_target, str).strip(),
             shutdown_grace_s=read("XENOVA_SHUTDOWN_GRACE", cls.shutdown_grace_s, float),
             service_token=read("XENOVA_SERVICE_TOKEN", cls.service_token, str),
             host_cpus=read("XENOVA_HOST_CPUS", cls.host_cpus, int),
