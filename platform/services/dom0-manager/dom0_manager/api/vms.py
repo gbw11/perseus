@@ -39,7 +39,7 @@ def create_vm(request: CreateVmRequest, service: VmService = Depends(get_service
     return service.create(request).to_vm()
 
 
-@router.get("/vms/{vm_id}", operation_id="getVm", summary="VM 단건 조회", response_model=Vm, responses={404: _ERR, **_DRIVER_ERRS})
+@router.get("/vms/{vm_id}", operation_id="getVm", summary="VM 단건 조회", response_model=Vm, responses={400: _ERR, 404: _ERR, **_DRIVER_ERRS})
 def get_vm(vm_id: UUID, service: VmService = Depends(get_service)) -> Vm:
     return service.get(vm_id).to_vm()
 
@@ -50,7 +50,7 @@ def get_vm(vm_id: UUID, service: VmService = Depends(get_service)) -> Vm:
     summary="정지된 VM 숨김 보관",
     status_code=204,
     response_class=Response,
-    responses={404: _ERR, 409: _ERR, **_COMMAND_ERRS},
+    responses={400: _ERR, 404: _ERR, 409: _ERR, **_COMMAND_ERRS},
 )
 def delete_vm(vm_id: UUID, service: VmService = Depends(get_service)) -> Response:
     service.delete(vm_id)
@@ -63,7 +63,7 @@ def delete_vm(vm_id: UUID, service: VmService = Depends(get_service)) -> Respons
     summary="정상 종료 (디스크 보존)",
     status_code=204,
     response_class=Response,
-    responses=_COMMAND_ERRS,
+    responses={400: _ERR, **_COMMAND_ERRS},
 )
 def stop_vm(vm_id: UUID, service: VmService = Depends(get_service)) -> Response:
     service.stop(vm_id)
