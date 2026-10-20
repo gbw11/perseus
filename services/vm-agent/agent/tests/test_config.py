@@ -31,14 +31,31 @@ def test_missing_vm_id_is_a_startup_error(tmp_path):
 
 @pytest.mark.parametrize("env", [
     {"XENOVA_AGENT_VM_ID": "not-a-uuid"},
+    {"XENOVA_AGENT_VM_ID": "00000000-0000-0000-0000-000000000000"},  # nil UUID 는 Domain-0 몫
     {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "0"},
+    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "0.5"},  # 환경변수는 1..10초만
+    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "60"},
     {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "nan"},
     {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "inf"},
     {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_BROKER_PORT": "70000"},
+    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_LOG_LEVEL": "verbose"},
 ])
 def test_invalid_values_are_rejected(env, tmp_path):
     with pytest.raises(ValueError):
         AgentSettings.from_env(env, instance_id_path=tmp_path / "missing")
+
+
+@pytest.mark.parametrize("raw", [VM_ID.upper(), "{" + VM_ID + "}", VM_ID.replace("-", ""), " " + VM_ID + "\n"])
+def test_vm_id_is_normalised_to_canonical_lowercase(raw, tmp_path):
+    """토픽과 봉투의 vm_id 는 Spring·registry 의 문자열과 글자까지 같아야 한다."""
+    assert AgentSettings.from_env({"XENOVA_AGENT_VM_ID": raw}, instance_id_path=tmp_path / "missing").vm_id == VM_ID
+    assert AgentSettings(vm_id=raw).vm_id == VM_ID
+
+
+def test_constructor_allows_short_interval_for_tests_only():
+    assert AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.05).heartbeat_interval_s == 0.05
+    with pytest.raises(ValueError):
+        AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0)
 
 
 def test_blank_env_value_means_default(tmp_path):
