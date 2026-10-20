@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from conftest import VM_A, VM_B, create_body
 from dom0_manager.config import Settings
-from dom0_manager.drivers.platform import PlatformDriver, PlatformProvisioner, instance_name, map_platform_state, view_to_domain
+from dom0_manager.drivers.platform import PlatformDriver, PlatformProvisioner, map_platform_state, view_to_domain
 from dom0_manager.drivers.xl import Xl
 from dom0_manager.errors import DriverError, DriverTimeout, InvalidArgument, PlatformUnavailable, VMNotFound
 from dom0_manager.main import create_app
@@ -172,18 +172,6 @@ def test_view_without_domid_is_not_a_domain(manager):
     assert (d.vm_id, d.state, d.vcpus, d.memory_mib, d.domid, d.name) == (VM_B, VmState.running, 2, 256, 1, "x")
 
 
-@pytest.mark.parametrize("template,expected", [
-    ("ubuntu-24.04-arm64", "ubuntu-24-04-arm64-111111111111"),
-    ("zephyr-xenvm-starter-arm64", "zephyr-xenvm-starter-arm64-111111111111"),
-    ("UBUNTU", "ubuntu-111111111111"),
-    ("24.04", "vm-24-04-111111111111"),
-    ("a" * 60, "a" * 27 + "-111111111111"),
-])
-def test_instance_name_follows_registry_rule(template, expected):
-    name = instance_name(template, VM_A)
-    assert name == expected and len(name) <= 40
-
-
 # ---- Driver 조회·명령 ----
 
 
@@ -240,7 +228,7 @@ def test_create_registers_then_starts(client, manager):
     create_call = next(c for c in manager.calls if c[0] == "create")
     assert create_call[1]["vm_id"] == str(VM_A) and "ipv4" not in create_call[1]  # IP 는 플랫폼이 고른다
     assert manager.registry[str(VM_A)]["configuration"]["ipv4"] == "192.168.77.2"
-    assert create_call[1]["name"] == "ubuntu-24-04-arm64-111111111111"
+    assert create_call[1]["name"] == "개발용 VM"
     assert create_call[2] is True and create_call[3] == f"create-{VM_A}"
 
 
@@ -323,11 +311,11 @@ def test_instance_paths_use_platform_internal_name(manager):
     """디렉터리는 configuration.id(vm-<hex>)다. 표시 이름(view['name'])으로 경로를 만들지 않고, id 가 없으면 플랫폼 응답 오류다."""
     manager.register(VM_A, name="web", vcpus=1, memory_mib=256)
     provisioner = PlatformProvisioner(manager)
-    paths = provisioner.ensure_instance(VM_A, TEMPLATE["template_id"], "1.0.0", vcpus=1, memory_mib=256)
+    paths = provisioner.ensure_instance(VM_A, TEMPLATE["template_id"], "1.0.0", name="전달한 표시 이름", vcpus=1, memory_mib=256)
     assert paths.root == Path(manager.data) / "instances" / f"vm-{VM_A.hex}"
     del manager.registry[str(VM_A)]["configuration"]["id"]
     with pytest.raises(DriverError):
-        provisioner.ensure_instance(VM_A, TEMPLATE["template_id"], "1.0.0", vcpus=1, memory_mib=256)
+        provisioner.ensure_instance(VM_A, TEMPLATE["template_id"], "1.0.0", name="전달한 표시 이름", vcpus=1, memory_mib=256)
 
 
 def test_health_does_not_wait_for_manager_or_slow_list():
@@ -383,9 +371,12 @@ def test_stop_missing_registration_is_204(client):
     assert client.post(f"/api/v1/vms/{VM_B}/stop").status_code == 204
 
 
-def test_load_manager_without_module_is_503():
+def test_load_manager_without_module_is_503(monkeypatch):
     from dom0_manager.drivers.platform import load_manager
 
+    def missing_module(name):
+        raise ImportError(name)
+    monkeypatch.setattr("dom0_manager.drivers.platform.importlib.import_module", missing_module)
     with pytest.raises(PlatformUnavailable):
         load_manager("Z:/definitely/not/here")
 

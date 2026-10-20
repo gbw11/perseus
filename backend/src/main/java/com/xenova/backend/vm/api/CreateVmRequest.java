@@ -8,7 +8,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-// name is a display name only: it is never sent to dom0-manager, so Korean and spaces are allowed.
+// name은 표시 이름이며 dom0-manager를 거쳐 플랫폼 create에 전달한다. 실행 이름·경로는 UUID로 결정한다.
 // Control and line-separator characters and leading/trailing whitespace are refused so the name stays one clean line.
 public record CreateVmRequest(
         @NotBlank(message = "name은 필수입니다.")

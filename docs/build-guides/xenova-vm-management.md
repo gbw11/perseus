@@ -227,7 +227,7 @@ factory 신규 등록은 defaults의 공개 ID/버전을 보존한다.
 HTTP와 이 가이드의 Manager/CLI는 별도 인터페이스다.
 
 Spring의 Dom0LaunchRequest는 vm_id·template_id·template_version·vcpus·memory_mib의
-5개 필드를 전송한다. 이 가이드의 Manager.create는 name을 포함한 6개 필드가 필수다.
+name을 포함한 6개 필드를 전송한다. PlatformProvisioner는 Spring의 name을 기존 Manager.create 입력으로 전달한다.
 tests/contracts/spring-create-request.json은 Manager용 6개 필드 시험 명세이며,
 실제 Spring HTTP 요청의 직렬화 결과로 사용하지 않는다.
 tests/contracts/spring_manager_bridge.py는 이 명세로 실제 파일/registry/journal/IP 예약을
@@ -235,7 +235,7 @@ tests/contracts/spring_manager_bridge.py는 이 명세로 실제 파일/registry
 
     python3 -B -m unittest discover -s tests/platform -p 'test_xenova_spring_contract.py' -v
 
-검사는 현재 Spring DTO의 5개 필드와 Manager 필수 name의 차이를 명시적으로 대조한다.
+검사는 현재 Spring DTO의 name을 포함한 6개 필드와 실제 Manager의 display_name 저장·조회 경로를 대조한다.
 Python 소스 대조는 Java 실행·HTTP 배포·실보드 검증을 대신하지 않는다.
 services/dom0-manager에는 HTTP 서비스·Xen 조회 드라이버와 명령/Provisioner 인터페이스가 있다.
 XenDriver의 create/shutdown/destroy와 UnavailableProvisioner의 변경 연산은 아직
@@ -267,3 +267,11 @@ legacy manifest.version을 사용한다. 두 값이 다르더라도 명시적 te
 Linux make_instance도 같은 판정 함수를 사용하며 이미 선택한 버전과 다르면
 workspace/디스크 준비 전에 거부한다. 게시 후 Manager는 선택 ID·버전·kind 일치를
 다시 검사하고 불일치 자산을 성공으로 반환하지 않는다. 게시된 디스크는 자동 삭제하지 않는다.
+
+새 최초 설치의 기본 배치는 `debian-dev`(표시: Debian Interaction), `zephyr-drive-a`, `zephyr-drive-b`입니다. 세 VM 모두 자동 시작하며 두 Zephyr는 동일 Starter 1.0.0에서 독립 자산과 보드별 UUID로 준비합니다. A/B는 구분용 이름이며 ACTIVE/STANDBY 제어권을 의미하지 않습니다. 기존 설치의 신원·정책은 이 설정으로 이동하거나 변경하지 않습니다.
+
+## 실행 의도와 조건부 복구
+
+기존 VM·자산 수명주기를 유지하면서 get/list에 실행 의도·host/실행 문맥을 추가한다.
+공통 start/stop과 일회성 복구·snapshot·승인 대기 부팅 정책은
+[xenova-recovery-foundation.md](xenova-recovery-foundation.md)를 따른다.

@@ -65,12 +65,14 @@ class TemplateRecipeTest(unittest.TestCase):
     def test_default_catalog_rejects_legacy_duplicate_or_escaping_selection(self):
         with self.assertRaises(ValueError):
             resolver.resolve(self.base, {'schema': 1, 'templates': []})
-        entries = [{'vm_id': vm, 'directory': '../old'} for vm in ('ubuntu-dev','debian-dev','zephyr-dev')]
+        entries = json.loads((ROOT / 'platform/guests/default-templates.lock.json').read_text())['templates']
+        entries[0]['directory'] = '../old'
         with self.assertRaisesRegex(ValueError, 'escapes'):
             resolver.resolve(self.base, {'schema': 1, 'templates': entries})
-        entries[2]['vm_id'] = 'ubuntu-dev'
+        entries[2]['template_id'] = entries[0]['template_id']
         with self.assertRaisesRegex(ValueError, 'one current default'):
             resolver.resolve(self.base, {'schema': 1, 'templates': entries})
+
 
 
 class StarterPublicationTest(unittest.TestCase):

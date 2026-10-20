@@ -468,7 +468,9 @@ class FactoryAndPackagingTest(unittest.TestCase):
             template = bundle(self.base / 'source-template')
             entry = assemble.rtos.info(template, assemble.sha(template / 'template.json'))
             factory['rtos_templates'] = assemble.copy_rtos_templates(b.data, [entry])
-            factory['firmware_instances'] = assemble.copy_rtos_seeds(b.data, [entry])
+            seed = zephyr.new_instance(b.data, 'zephyr-dev', b.data / 'rtos-templates' / entry['id'], {},
+                                       registry='seeds', seed=True, autostart=False, board_shutdown_policy='refuse')
+            factory['firmware_instances'] = [{'record': seed}]
             (b.data / '.xenova-install.json').write_text(json.dumps(factory))
         return b
 
@@ -530,7 +532,7 @@ class FactoryAndPackagingTest(unittest.TestCase):
         path = b.data / '.xenova-install.json'
         factory = json.loads(path.read_text()); factory['features'] = contract.FEATURES
         path.write_text(json.dumps(factory))
-        with self.assertRaisesRegex(ValueError, 'requires zephyr-dev'):
+        with self.assertRaisesRegex(ValueError, 'requires Zephyr firmware seeds'):
             b.p.register()
         self.assertFalse((b.data / '.first-install-state.json').exists())
 

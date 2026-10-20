@@ -14,6 +14,7 @@ VM_B = UUID("22222222-2222-4222-8222-222222222222")
 def create_body(vm_id: UUID = VM_A, **overrides):
     body = {
         "vm_id": str(vm_id),
+        "name": "개발용 VM",
         "template_id": "alpine",
         "template_version": "3.20",
         "vcpus": 1,
