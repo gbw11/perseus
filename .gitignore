@@ -123,3 +123,7 @@ sstate-cache/
 *.ext2
 *.cpio
 *.cpio.gz
+
+# Mosquitto 계정 파일 (platform/deploy/mosquitto/scripts/make-passwd.sh 가 만든다)
+/platform/deploy/mosquitto/local/passwd
+*.credentials

@@ -16,7 +16,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버, 젯슨, ESP32가 주고받는 MQTT �
 
 | 항목 | 규칙 |
 | --- | --- |
-| 토픽 접두사 | `xenova/v1/`. 10/20 이름 통일로 접두사도 바꿨다. 이전 `xenova/v1/`는 어디에도 배포된 적이 없어 호환 처리는 없다 |
+| 토픽 접두사 | `xenova/v1/`. 10/20 이름 통일로 접두사도 바꿨다. 이전 `perseus/v1/`는 어디에도 배포된 적이 없어 호환 처리는 없다 |
 | 인코딩 | UTF-8 JSON, 필드 이름은 snake_case |
 | 시각 | `sent_at`은 ISO-8601 UTC. **보드 간 시각 비교로 판정하지 않는다.** 신선도는 받는 쪽이 수신 시각으로 잰다 |
 | 단위 | 속도 `m/s`, 조향 `rad`, 시간 `ms`, 메트릭 `percent`·`bytes` |
@@ -223,7 +223,11 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/vms/{vm_id}/command` |
 | 각 VM 측정 클라이언트·응답기 | `xenova/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
 
-브로커 계정·ACL 파일은 브로커 구성(`platform/deploy/`)에서 관리한다.
+브로커 계정·ACL 파일은 [브로커 구성](../../platform/deploy/mosquitto/README.md)(`platform/deploy/mosquitto/etc/acl`)에서 관리한다.
+
+- 계정 이름 = 토픽 안의 id: 에이전트는 `vm_id`, 앱 VM 은 `app_id`, 젯슨은 `perception`, 그 외 `gateway`·`esp32`·`backend`. ACL 이 `%u` 패턴으로 "자기 토픽에만 발행" 을 건다.
+- 구독(read)은 개발 단계에서 모든 계정에 `xenova/v1/#` 를 연다. 계정별 구독 제한은 v1.1 에서 정한다.
+- `probes/#` 의 "자기 vm_id 만" 조건은 payload 기준이라 브로커가 거르지 못한다. 받는 쪽이 검사한다.
 
 ## 10. 미확정
 
