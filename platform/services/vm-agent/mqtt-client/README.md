@@ -80,7 +80,7 @@ client.subscribe(topics.app_events("vehicle"), on_mode)
 ## 하지 않는 것
 
 - Zephyr 수동 VM, ESP32: 펌웨어라 이 패키지를 쓰지 않는다. 같은 봉투 규칙을 펌웨어에서 구현한다.
-- 브로커 계정·ACL: 브로커 구성(`platform/deploy/`)에서 관리한다. 계정이 생기면 `username`, `password` 인자로 넘긴다.
+- 브로커 계정·ACL: [브로커 구성](../../../deploy/mosquitto/README.md)에서 관리한다. 계정 이름은 토픽 안의 id(에이전트는 `vm_id`, 앱은 `app_id`)이고 `username`, `password` 인자로 넘긴다.
 - heartbeat 주기, 메트릭 수집, 서비스 등록: 에이전트 본체가 정한다.
 
 ## 테스트
@@ -94,3 +94,5 @@ XENOVA_MQTT_TEST_BROKER=127.0.0.1:18830 XENOVA_MQTT_TEST_CONTAINER=xenova-mq-tes
 
 Git Bash에서는 `/mosquitto-no-auth.conf`가 Windows 경로로 바뀌므로 `MSYS_NO_PATHCONV=1`을 앞에 붙입니다.
 `XENOVA_MQTT_TEST_CONTAINER`를 주면 브로커를 재시작해 재연결·재구독까지 확인합니다.
+
+계정·ACL 이 걸린 브로커로 개발할 때는 [로컬 브로커](../../../deploy/mosquitto/README.md)(`docker compose`, 1883·9001)를 씁니다. 위 브로커 테스트는 계정 없이 도는 무인증 브로커 기준입니다.
