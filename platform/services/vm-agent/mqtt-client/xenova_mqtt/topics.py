@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-PREFIX = "perseus/v1"
+PREFIX = "xenova/v1"
 
 VM_KINDS = ("heartbeat", "inventory", "metrics", "command", "command-result")
 
@@ -20,7 +20,7 @@ def _segment(name: str, value: str) -> str:
 
 
 def vm(vm_id: str, kind: str) -> str:
-    """에이전트 토픽 `perseus/v1/vms/{vm_id}/{kind}` (MQTT-01~05)."""
+    """에이전트 토픽 `xenova/v1/vms/{vm_id}/{kind}` (MQTT-01~05)."""
     if kind not in VM_KINDS:
         raise ValueError(f"알 수 없는 에이전트 토픽 종류: {kind}")
     return f"{PREFIX}/vms/{_segment('vm_id', vm_id)}/{kind}"
@@ -47,7 +47,7 @@ def command_result(vm_id: str) -> str:
 
 
 def app_events(app_id: str) -> str:
-    """앱 이벤트 `perseus/v1/apps/{app_id}/events` (MQTT-06)."""
+    """앱 이벤트 `xenova/v1/apps/{app_id}/events` (MQTT-06)."""
     return f"{PREFIX}/apps/{_segment('app_id', app_id)}/events"
 
 

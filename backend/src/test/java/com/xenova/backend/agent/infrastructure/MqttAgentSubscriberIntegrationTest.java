@@ -59,7 +59,7 @@ class MqttAgentSubscriberIntegrationTest {
             while (heartbeatRepository.findById(VM).isEmpty() && Instant.now().isBefore(deadline)) {
                 MqttMessage message = new MqttMessage(heartbeat.getBytes(StandardCharsets.UTF_8));
                 message.setQos(1);
-                agent.publish("perseus/v1/vms/" + VM + "/heartbeat", message);
+                agent.publish("xenova/v1/vms/" + VM + "/heartbeat", message);
                 Thread.sleep(200);
             }
             agent.disconnect();
