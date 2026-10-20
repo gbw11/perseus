@@ -154,7 +154,7 @@ python -m pytest
 | code | HTTP | 언제 |
 | --- | --- | --- |
 | `Unauthorized` | 401 | Bearer 서비스 토큰 없음·불일치. 미들웨어가 내며 `/healthz` 포함 |
-| `InvalidArgument` | 400 | 입력 검증, 플랫폼 `INVALID_SPEC`·템플릿 없음 |
+| `InvalidArgument` | 400 | 입력 검증, nil UUID(Domain-0) 대상 호출, 플랫폼 `INVALID_SPEC`·템플릿 없음 |
 | `VMNotFound` | 404 | 도메인 없음(단건), 등록 없음(삭제) |
 | `VMExists` | 409 | 같은 vm_id가 떠 있음, 다른 명세로 재생성, 이름·멱등성 충돌 |
 | `InvalidState` | 409 | 실행 중 삭제, `VM_NOT_STOPPED`·IP 충돌 등 |
