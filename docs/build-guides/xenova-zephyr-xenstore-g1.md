@@ -20,7 +20,7 @@ ZEPHYR_SOURCE=/absolute/existing/source/zephyr
 TOOLS=/absolute/existing/host-tools
 DOWNLOADS=/absolute/existing/downloads
 G1_OUTPUT=/absolute/new/g1-build
-python3 -B scripts/build-xenova-xenstore-g1.py \
+python3 -B platform/scripts/build-xenova-xenstore-g1.py \
   --zephyr-source "$ZEPHYR_SOURCE" --tools "$TOOLS" \
   --spdx "$DOWNLOADS/zephyr-v4.4.0.spdx" \
   --toolchain-archive "$DOWNLOADS/toolchain_gnu_linux-x86_64_aarch64-zephyr-elf.tar.xz" \
@@ -35,7 +35,7 @@ rc=$?; echo "build rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 일반 Starter의 firmware.json·카탈로그·검증기를 사용하거나 완화하지 않는다.
 
 ```sh
-python3 -B -m unittest discover -s tests/platform \
+python3 -B -m unittest discover -s platform/tests \
   -p test_xenova_xenstore_g1.py -v
 rc=$?; echo "local rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 ```

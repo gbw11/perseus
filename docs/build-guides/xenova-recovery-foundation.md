@@ -219,7 +219,7 @@ Linux payload·Starter 펌웨어·기존 seed 내부 내용은 변경하지 않�
 - Spring/FastAPI 운영 코드·G1 모듈/앱/lock·주행/Agent/Recovery Worker는 이 패치에서 수정하지 않는다.
 
 실환경 절차는 xenova-recovery-foundation-board.md, 자동 시험은
-tests/platform/test_xenova_recovery_foundation.py와 기존 전체 플랫폼 회귀를 사용한다.
+platform/tests/test_xenova_recovery_foundation.py와 기존 전체 플랫폼 회귀를 사용한다.
 
 
 ## 중단·진단·잠금 경계
