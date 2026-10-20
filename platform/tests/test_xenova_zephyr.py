@@ -12,7 +12,7 @@ from unittest.mock import patch
 from first_install_fixture import ROOT, assemble, contract, profile_dts
 
 rtos = assemble.rtos
-spec = importlib.util.spec_from_file_location('prepare_zephyr', ROOT/'scripts/prepare-xenova-zephyr.py')
+spec = importlib.util.spec_from_file_location('prepare_zephyr', ROOT/'platform/scripts/prepare-xenova-zephyr.py')
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
 

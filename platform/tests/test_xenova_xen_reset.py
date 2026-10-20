@@ -9,7 +9,7 @@ from first_install_fixture import ROOT
 class XenResetTest(unittest.TestCase):
     def test_pinned_source_patch_preserves_legacy_and_accepts_deployed_bcm2711_node(self):
         patch = ROOT / 'platform/yocto/meta-xenova/recipes-extended/xen/files/0001-arm-rpi4-find-bcm2711-power-management-watchdog.patch'
-        fixture = ROOT / 'tests/platform/fixtures/xen-4.21/brcm-raspberry-pi.c'
+        fixture = ROOT / 'platform/tests/fixtures/xen-4.21/brcm-raspberry-pi.c'
         with tempfile.TemporaryDirectory(prefix='xenova-reset-source-') as directory:
             root = Path(directory)
             target = root / 'xen/arch/arm/platforms/brcm-raspberry-pi.c'

@@ -15,9 +15,9 @@ from unittest.mock import patch
 from first_install_fixture import ROOT, prepare_rootfs as guest
 from test_xenova_platform import record, load
 
-FIXTURES = ROOT / 'tests/platform/fixtures/guest-systemd'
+FIXTURES = ROOT / 'platform/tests/fixtures/guest-systemd'
 PROVENANCE = json.loads((FIXTURES / 'provenance.json').read_text())
-update = load('xenova_guest_ssh_update_test', ROOT / 'scripts/update-xenova-guest-ssh.py')
+update = load('xenova_guest_ssh_update_test', ROOT / 'platform/scripts/update-xenova-guest-ssh.py')
 
 
 def extract(root, distribution):
@@ -257,7 +257,7 @@ class GuestSSHGraphTest(unittest.TestCase):
                     guest.write(root, 'etc/systemd/system/ssh.service.d/custom.conf',
                                 '[Unit]\n' + (' Requires = ssh.socket\n' if spaced else 'Requires=ssh.socket\n'))
                     before = self.snapshot(root)
-                    result = subprocess.run([sys.executable, '-B', str(ROOT / 'scripts/update-xenova-guest-ssh.py'),
+                    result = subprocess.run([sys.executable, '-B', str(ROOT / 'platform/scripts/update-xenova-guest-ssh.py'),
                                              '--root', str(root)] + (['--execute'] if execute else []),
                                             text=True, capture_output=True)
                     self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -283,7 +283,7 @@ class GuestSSHGraphTest(unittest.TestCase):
             return original_import(name, *args, **kwargs)
 
         with patch('builtins.__import__', side_effect=without_uuid), patch('sys.stdout', new=io.StringIO()):
-            minimal = load('xenova_ssh_update_minimal_image', ROOT / 'scripts/update-xenova-guest-ssh.py')
+            minimal = load('xenova_ssh_update_minimal_image', ROOT / 'platform/scripts/update-xenova-guest-ssh.py')
             with self.assertRaises(SystemExit) as result:
                 minimal.main(['--help'])
         self.assertEqual(result.exception.code, 0)

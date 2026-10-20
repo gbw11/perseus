@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-ROOT=Path(__file__).resolve().parents[1]
+ROOT=Path(__file__).resolve().parents[2]
 sys.path[:0]=[str(ROOT/'platform/first-install'),
               str(ROOT/'platform/yocto/meta-xenova/recipes-core/xenova-platform/files')]
 from artifact_io import publish

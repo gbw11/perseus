@@ -14,7 +14,7 @@ case "${1:-}" in
   --check) check=1 ;;
   --help|-h)
     cat <<'HELP'
-Usage: bash scripts/setup-yocto.sh [--check|--verify]
+Usage: bash platform/scripts/setup-yocto.sh [--check|--verify]
 
 Optional environment variables (absolute Linux paths without whitespace):
   YOCTO_WORKSPACE   default: $HOME/yocto-workspace
@@ -30,7 +30,7 @@ HELP
 esac
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
+PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 LOCK_FILE="$PROJECT_ROOT/platform/yocto/layers.lock"
 FRAGMENT="$PROJECT_ROOT/platform/yocto/config/local.conf.fragment"
 CUSTOM_LAYER="$PROJECT_ROOT/platform/yocto/meta-xenova"

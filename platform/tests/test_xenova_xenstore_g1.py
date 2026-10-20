@@ -24,8 +24,8 @@ def load(name, path):
     return module
 
 
-lab = load("g1_lab", ROOT/"scripts/xenova-xenstore-g1-lab.py")
-builder = load("g1_builder", ROOT/"scripts/build-xenova-xenstore-g1.py")
+lab = load("g1_lab", ROOT/"platform/scripts/xenova-xenstore-g1-lab.py")
+builder = load("g1_builder", ROOT/"platform/scripts/build-xenova-xenstore-g1.py")
 FILES = ROOT/"platform/yocto/meta-xenova/recipes-core/xenova-platform/files"
 lab.platform(FILES)
 from xenova_vm import Platform
@@ -241,7 +241,7 @@ class LabTest(unittest.TestCase):
         for name in ("first_install_contract.py","artifact_io.py"):
             shutil.copyfile(ROOT/"platform/first-install"/name,runtime/name)
         script=self.root/"standalone.py"
-        shutil.copyfile(ROOT/"scripts/xenova-xenstore-g1-lab.py",script)
+        shutil.copyfile(ROOT/"platform/scripts/xenova-xenstore-g1-lab.py",script)
         code=("import importlib.util;from pathlib import Path;"
               f"s=importlib.util.spec_from_file_location('lab',{str(script)!r});"
               "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"

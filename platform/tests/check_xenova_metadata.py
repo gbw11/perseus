@@ -87,7 +87,7 @@ assert 'i386-softmmu' in qemu['EXTRA_OECONF']
 assert {'python3-crypt', 'iproute2-ss', 'util-linux-lsblk'} <= set(platform['RDEPENDS:xenova-platform'].split())
 for module in ('xenova_runtime.py', 'xenova_zephyr.py'):
     assert selected(platform, module) == LAYER / 'recipes-core/xenova-platform/files' / module
-assert selected(platform, 'verify-xenova-runtime-artifacts.py').resolve() == ROOT / 'scripts/verify-xenova-runtime-artifacts.py'
+assert selected(platform, 'verify-xenova-runtime-artifacts.py').resolve() == ROOT / 'platform/scripts/verify-xenova-runtime-artifacts.py'
 for header in ('qemu-config-host.h', 'qemu-i386-config-target.h'):
     assert header in (LAYER / 'recipes-devtools/qemu/qemu_10.2.0.bbappend').read_text()
 print('PASS frozen QEMU target: VNC/pixman/Xen enabled, i386 target retained, no listener configured')

@@ -17,7 +17,7 @@ from .service import VmService
 
 DESCRIPTION = (
     "Spring Boot 관리 서버와 Python dom0-manager 사이의 내부 계약. "
-    "기준 문서는 docs/contracts/vm-api-contract-v1.md, 기계 판독 원본은 contracts/dom0-manager-openapi.yaml."
+    "기준 문서는 docs/contracts/vm-api-contract-v1.md, 기계 판독 원본은 docs/contracts/dom0-manager-openapi.yaml."
 )
 
 

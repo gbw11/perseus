@@ -17,7 +17,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = ROOT / 'platform/yocto/meta-xenova/recipes-core/xenova-platform/files'
-FIXTURE = ROOT / 'tests/platform/fixtures/dom0-systemd'
+FIXTURE = ROOT / 'platform/tests/fixtures/dom0-systemd'
 PROVENANCE = json.loads((FIXTURE / 'provenance.json').read_text())
 
 
@@ -141,7 +141,7 @@ def install_policy(root, *, replay_recipe=False):
         body = recipe.read_text().split('do_install() {\n', 1)[1].split('\n}\n', 1)[0]
         with tempfile.TemporaryDirectory(prefix='xenova-dom0-recipe-source-') as tmp:
             source = Path(tmp)
-            for directory in (FILES, ROOT / 'scripts', ROOT / 'platform/guests/common', ROOT / 'platform/first-install'):
+            for directory in (FILES, ROOT / 'platform/scripts', ROOT / 'platform/guests/common', ROOT / 'platform/first-install'):
                 for path in directory.iterdir():
                     if path.is_file():
                         (source / path.name).write_bytes(path.read_bytes())

@@ -29,7 +29,7 @@ from prepare_rootfs import inside
 sys.path.insert(0, str(FILES))
 import xenova_zephyr as zephyr
 
-spec = importlib.util.spec_from_file_location('xenova_prepare_existing', ROOT / 'scripts/prepare-xenova-guests.py')
+spec = importlib.util.spec_from_file_location('xenova_prepare_existing', ROOT / 'platform/scripts/prepare-xenova-guests.py')
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
 
@@ -303,7 +303,7 @@ def platform_root_ok(root):
                 'usr/lib/xenova/first_install_contract.py': ROOT / 'platform/first-install/first_install_contract.py',
                 'usr/sbin/xenova-first-boot': FILES / 'xenova-first-boot',
                 'usr/sbin/xenova-vm': FILES / 'xenova-vm',
-                'usr/sbin/xenova-verify-artifacts': ROOT / 'scripts/verify-xenova-runtime-artifacts.py',
+                'usr/sbin/xenova-verify-artifacts': ROOT / 'platform/scripts/verify-xenova-runtime-artifacts.py',
                 'usr/lib/xenova/xenova_runtime.py': FILES / 'xenova_runtime.py',
                 'usr/lib/xenova/xenova_zephyr.py': FILES / 'xenova_zephyr.py',
                 'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
@@ -316,7 +316,7 @@ def platform_root_ok(root):
     expected['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
     expected['etc/xenova/execution-policy.json'] = FILES/'execution-policy.json'
     expected['usr/lib/systemd/system/xenova-wifi@.service'] = FILES/'xenova-wifi@.service'
-    expected['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'scripts/update-xenova-guest-ssh.py'
+    expected['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'platform/scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         expected['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
     units = ['xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
@@ -507,17 +507,17 @@ def download_source(guest):
 def source_fingerprints():
     paths = [
              ROOT / 'platform/guests/common/template_recipe.py',
-             ROOT / 'scripts/build-xenova-starter.py', ROOT / 'scripts/resolve-xenova-templates.py',
-             ROOT / 'scripts/verify-xenova-template.py', ROOT / 'scripts/refresh-xenova-starter-lock.py',
+             ROOT / 'platform/scripts/build-xenova-starter.py', ROOT / 'platform/scripts/resolve-xenova-templates.py',
+             ROOT / 'platform/scripts/verify-xenova-template.py', ROOT / 'platform/scripts/refresh-xenova-starter-lock.py',
              ROOT / 'platform/guests/default-templates.lock.json',
              *(p for p in sorted((ROOT / 'platform/guests/linux').rglob('*')) if p.is_file()),
-             ROOT / 'scripts/assemble-xenova-first-install.py', ROOT / 'scripts/prepare-xenova-guests.py',
+             ROOT / 'platform/scripts/assemble-xenova-first-install.py', ROOT / 'platform/scripts/prepare-xenova-guests.py',
              ROOT / 'platform/first-install/assemble.py', ROOT / 'platform/first-install/artifact_io.py',
-             ROOT / 'platform/first-install/completed_artifacts.py', ROOT / 'scripts/publish-xenova-platform.py', ROOT / 'scripts/publish-xenova-template-catalog.py',
+             ROOT / 'platform/first-install/completed_artifacts.py', ROOT / 'platform/scripts/publish-xenova-platform.py', ROOT / 'platform/scripts/publish-xenova-template-catalog.py',
              ROOT / 'platform/first-install/first_install_contract.py',
              *sorted(p for p in FILES.iterdir() if p.is_file()),
-             ROOT / 'scripts/verify-xenova-runtime-artifacts.py', ROOT / 'scripts/package-xenova-firmware.py',
-             ROOT / 'scripts/update-xenova-guest-ssh.py', ROOT / 'scripts/collect-xenova-guest-evidence.py',
+             ROOT / 'platform/scripts/verify-xenova-runtime-artifacts.py', ROOT / 'platform/scripts/package-xenova-firmware.py',
+             ROOT / 'platform/scripts/update-xenova-guest-ssh.py', ROOT / 'platform/scripts/collect-xenova-guest-evidence.py',
              *sorted((ROOT / 'platform/guests/zephyr/starter-app').rglob('*.*')),
              ROOT / 'platform/yocto/meta-xenova/recipes-extended/xen/xen_4.21.bbappend',
              ROOT / 'platform/yocto/meta-xenova/recipes-extended/xen/files/0001-arm-rpi4-find-bcm2711-power-management-watchdog.patch',

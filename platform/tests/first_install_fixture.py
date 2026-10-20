@@ -114,7 +114,7 @@ class Board:
     def factory(self):
         for name in ('seeds', 'instances', 'templates'):
             (self.data / name).mkdir()
-        records = json.loads((ROOT / 'tests/platform/fixtures/legacy-defaults.json').read_text())['instances']
+        records = json.loads((ROOT / 'platform/tests/fixtures/legacy-defaults.json').read_text())['instances']
         bundles, templates = [], []
         for record in records:
             r = copy.deepcopy(record)
@@ -152,7 +152,7 @@ def platform_root(root):
                'usr/lib/xenova/first_install_contract.py': ROOT / 'platform/first-install/first_install_contract.py',
                'usr/sbin/xenova-first-boot': FILES / 'xenova-first-boot',
                'usr/sbin/xenova-vm': FILES / 'xenova-vm',
-               'usr/sbin/xenova-verify-artifacts': ROOT / 'scripts/verify-xenova-runtime-artifacts.py',
+               'usr/sbin/xenova-verify-artifacts': ROOT / 'platform/scripts/verify-xenova-runtime-artifacts.py',
                'usr/lib/xenova/xenova_runtime.py': FILES / 'xenova_runtime.py',
                'usr/lib/xenova/xenova_zephyr.py': FILES / 'xenova_zephyr.py',
                'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
@@ -164,7 +164,7 @@ def platform_root(root):
     mapping['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
     mapping['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
     mapping['etc/xenova/execution-policy.json'] = FILES/'execution-policy.json'
-    mapping['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'scripts/update-xenova-guest-ssh.py'
+    mapping['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'platform/scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         mapping['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
     for path in [*FILES.glob('*.service'), *FILES.glob('*.mount')]:

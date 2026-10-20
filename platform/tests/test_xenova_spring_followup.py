@@ -77,13 +77,13 @@ class FactoryReservationTest(FollowupFixture):
         self.board.p.register()
         self.xen = fixtures.FakeXen(self.board.data, {})
         self.p = vm.Platform(self.board.data, self.board.root/'run/xenova',
-                             command=self.xen, defaults_path=ROOT/'tests/platform/fixtures/legacy-defaults.json')
+                             command=self.xen, defaults_path=ROOT/'platform/tests/fixtures/legacy-defaults.json')
         network = patch.object(self.p, 'check_network')
         network.start()
         self.addCleanup(network.stop)
-        self.m = management.Manager(self.p, usage_check=lambda *a:None, defaults_path=ROOT/'tests/platform/fixtures/legacy-defaults.json')
+        self.m = management.Manager(self.p, usage_check=lambda *a:None, defaults_path=ROOT/'platform/tests/fixtures/legacy-defaults.json')
         self.records = self.p.records(validate_assets=False)
-        defaults = json.loads((ROOT/'tests/platform/fixtures/legacy-defaults.json').read_text())['instances']
+        defaults = json.loads((ROOT/'platform/tests/fixtures/legacy-defaults.json').read_text())['instances']
         for record in self.records.values():
             example = next(r for r in defaults if r['id'] == record['id'])
             self.assertNotEqual(record['mac'], example['mac'])

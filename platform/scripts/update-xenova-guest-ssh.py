@@ -9,7 +9,7 @@ import shutil
 import sys
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE.parent / 'platform/guests/common'), str(HERE)]
+sys.path[:0] = [str(HERE.parent / 'guests/common'), str(HERE)]
 from prepare_rootfs import check_ssh_service, configure_ssh_service, install_identity_gate, inside
 
 

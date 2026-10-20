@@ -1,4 +1,4 @@
-"""내부 API 요청·응답 모델. contracts/dom0-manager-openapi.yaml 의 components.schemas 와 1:1 로 맞춘다.
+"""내부 API 요청·응답 모델. docs/contracts/dom0-manager-openapi.yaml 의 components.schemas 와 1:1 로 맞춘다.
 
 계약 테스트(tests/test_contract.py)가 생성된 OpenAPI 와 yaml 을 비교하므로, 여기를 바꾸면 yaml 도 같이 바꾼다.
 """

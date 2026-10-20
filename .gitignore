@@ -72,8 +72,8 @@ build/
 *.log
 *.log.*
 # Small, curated test logs are allowed as fixtures.
-!/tests/fixtures/*.log
-!/tests/fixtures/**/*.log
+!/platform/tests/fixtures/*.log
+!/platform/tests/fixtures/**/*.log
 
 # Yocto / BitBake: generated trees only
 # Keep platform/yocto/meta-xenova/, kas manifests, .bb/.bbappend,
