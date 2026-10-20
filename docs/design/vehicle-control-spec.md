@@ -467,6 +467,8 @@ vehicle_status 수신 (5.2 조립기가 완성한 스냅샷):
 
 ## 5. 메시지 계약 (초안)
 
+> **MQTT는 [MQTT 메시지 계약 v1](../contracts/mqtt-contract-v1.md)이 기준이다 (2026-10-19 RC카 시나리오 확정, S15P31E110-230 문서 통일).** VM·젯슨·게이트웨이·ESP32가 주고받는 MQTT 토픽, 공통 봉투, `drive.command`·`vehicle.control`·`vehicle.status` 필드, ACL은 그 문서를 따른다. 아래 5.1의 메시지 표는 옛 핫 스탠바이 설계의 초안이며, 게이트웨이 ↔ ESP32를 시리얼·CAN으로 연결할 경우의 프레임(5.2 CAN·시리얼)의 근거로만 남긴다. 계약은 현재 ESP32 MQTT 직결이고, 시리얼·CAN 유지 여부는 제어 계층 의견을 받아 정한다.
+
 정식 계약은 `contracts/`에서 관리한다. 전송 매체와 무관한 **공통 봉투**를 먼저 정하고, MQTT·CAN·시리얼 매핑은 별도 계약으로 둔다. 구현 시작 전 확정해야 할 최소 항목은 5.3이다.
 
 ### 5.1 공통 봉투와 메시지
@@ -491,17 +493,7 @@ vehicle_status 수신 (5.2 조립기가 완성한 스냅샷):
 
 ### 5.2 매체별 매핑
 
-**MQTT (dom0 제어용 브로커).**
-
-| 항목 | 정책 |
-| --- | --- |
-| 토픽 | `vehicle/cmd/<vm>`, `vehicle/state/<vm>`, `vehicle/perception`, `vehicle/status`, `vehicle/role`, `vehicle/failover_event`, `vm/<id>/health`, `manager/health/request` |
-| 인증·ACL | VM별 계정. `vehicle/cmd/<vm>`, `vehicle/state/<vm>`는 해당 VM만 publish 가능. Jetson 계정은 `vehicle/perception`만. 게이트웨이 계정만 `vehicle/role`, `vehicle/failover_event`, `manager/health/request` publish 가능. 매니저 계정만 `vm/<id>/health` publish 가능 |
-| QoS | 제어 토픽 전부 QoS 0 |
-| retain | 제어 토픽(`cmd`, `state`, `perception`, `status`) 금지. 스냅샷 토픽(`role`, `vm/<id>/health`)은 retain. `role`은 `gateway_session_id`를 포함하고, 게이트웨이는 시작 즉시 `active: null, standby: null`을 retained로 발행해 이전 게이트웨이의 잔상을 덮는다 |
-| 세션 | clean session. 오프라인 큐 없음 |
-| 큐 정책 | 게이트웨이는 토픽별 최신 1개만 유지(latest-only) |
-| 크기 상한 | 메시지 1 KB |
+**MQTT.** 토픽·ACL·QoS·retain·latest-only·크기 상한은 [MQTT 메시지 계약 v1](../contracts/mqtt-contract-v1.md) 1·5·9장을 따른다 (이 문서의 옛 토픽 `vehicle/cmd/<vm>` 등은 폐기).
 
 **공통 봉투의 축약.** CAN·시리얼에는 봉투 필드를 그대로 싣지 못한다. 축약 규칙은 다음과 같다.
 
@@ -544,7 +536,7 @@ vehicle_status 수신 (5.2 조립기가 완성한 스냅샷):
 
 ### 5.3 구현 전 확정 항목
 
-- MQTT 인증·ACL, retain 정책, latest-only 정책
+- ~~MQTT 인증·ACL, retain 정책, latest-only 정책~~ → MQTT 메시지 계약 v1에서 확정
 - CAN ID 소유권, 프레임 배치, 스케일, `sample` 조립 규칙
 - 시리얼 CRC 검증 벡터를 양쪽 구현의 단위 테스트에 포함
 - `schema_version` 운용 규칙(hello/ack 합의, 불일치 시 거부)

@@ -1,0 +1,411 @@
+"""Xenova 플랫폼 관리 라이브러리(xenova_management.Manager) 기반 드라이버·프로비저너 (S15P31E110-115).
+
+플랫폼 계약(docs/build-guides/xenova-vm-management.md):
+- Manager.call(action, spec, execute=, idempotency_key=) 는 HTTP 를 모르고 항상 같은 JSON 봉투를 돌려준다.
+  {schema_version, ok, request_id, operation_id, replayed, data, error{code, message, retryable, details}}
+- registry(/srv/xenova/instances) 가 등록의 원본, Xen 이 실행 상태의 원본이다. dom0-manager 는 둘을 읽기만 한다.
+- list/get 의 각 항목: vm_id, name, lifecycle, configuration(vcpus, memory_mib, guest_kind, ipv4 ...), xen_state, domid.
+  domid 가 None 이면 Xen 에 도메인이 없다. 계약 v1.1 에서 그 VM 은 dom0-manager 목록에 나오지 않고 단건은 404 다.
+- 생성은 registry 등록(create) + 시작(start) 두 단계다. 여기서는 Provisioner 가 create, Driver 가 start 를 맡는다.
+- stop 은 플랫폼이 최대 90초 동기 대기하고 자동 강제 종료하지 않는다. force 는 명시적일 때만.
+
+- create 는 Spring 이 발급한 vm_id 를 필수로 받아 registry·Xen UUID 로 쓰고, 내부 실행 이름(vm-<hex>)·MAC·Linux IP 는
+  플랫폼이 전역 잠금 안에서 발급한다. dom0-manager 는 ipv4 를 보내지 않고 IP_POOL_EXHAUSTED 를 507 로 옮긴다.
+"""
+
+from __future__ import annotations
+
+import importlib
+import logging
+import os
+import sys
+import threading
+from pathlib import Path
+from typing import Any, Protocol
+from uuid import UUID
+
+from ..errors import (
+    Dom0ManagerError,
+    DriverError,
+    DriverTimeout,
+    InsufficientResources,
+    InvalidArgument,
+    InvalidState,
+    PlatformUnavailable,
+    VMExists,
+    VMNotFound,
+)
+from ..models import VmState
+from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner
+from .xl import Xl
+
+log = logging.getLogger(__name__)
+
+
+class ManagerLike(Protocol):
+    data: Path
+
+    def call(
+        self,
+        action: str,
+        spec: dict[str, Any] | None = None,
+        *,
+        execute: bool = False,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]: ...
+
+
+# ---------------------------------------------------------------------------
+# 모듈 로딩
+# ---------------------------------------------------------------------------
+
+
+class SerializedManager:
+    """Manager.call 을 프로세스 안에서 직렬화하되, 차례를 기다리는 시간은 busy_timeout_s 로 제한한다.
+
+    현재 Manager 는 요청별 상태(current_operation, replayed)를 인스턴스 변수에 두므로 FastAPI 스레드 여러 개가
+    같은 객체를 동시에 부르면 operation_id·복구 기록이 섞일 수 있다. 플랫폼의 파일 잠금(/run/xenova)은 임계 구간만
+    보호하고 그 앞뒤의 인스턴스 변수는 보호하지 않는다. 플랫폼이 요청별 context 로 바뀌어도 이 직렬화는 해가 없다.
+
+    정지는 최대 90초 동안 잠금을 쥔다. 그동안 조회·생성·health 가 무한정 줄을 서면 FastAPI 스레드풀이 잠금 대기로
+    가득 차 서비스 전체가 멈춘 것처럼 보인다. 그래서 대기 시간을 넘기면 플랫폼의 파일 잠금 충돌과 같은 모양의
+    OPERATION_IN_PROGRESS(retryable) 봉투를 돌려주고, 호출자는 그것을 503 PlatformUnavailable 로 낸다.
+    """
+
+    def __init__(self, inner: ManagerLike, *, busy_timeout_s: float = 5.0) -> None:
+        self._inner = inner
+        self._lock = threading.Lock()
+        self.busy_timeout_s = busy_timeout_s
+
+    @property
+    def data(self) -> Path:
+        return self._inner.data
+
+    def call(self, action: str, spec: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+        if not self._lock.acquire(timeout=self.busy_timeout_s):
+            return _busy_envelope(action, self.busy_timeout_s, kwargs.get("request_id"))
+        try:
+            return self._inner.call(action, spec, **kwargs)
+        finally:
+            self._lock.release()
+
+
+def _busy_envelope(action: str, waited_s: float, request_id: Any) -> dict[str, Any]:
+    """플랫폼이 파일 잠금 충돌 때 내는 봉투와 같은 모양 (xenova_management.Manager.call 의 PlatformError 분기)."""
+    return {
+        "schema_version": "1.0",
+        "ok": False,
+        "request_id": request_id,
+        "operation_id": None,
+        "replayed": False,
+        "data": None,
+        "error": {
+            "code": "OPERATION_IN_PROGRESS",
+            "message": f"another platform operation is in progress; {action} waited {waited_s:g}s for the manager",
+            "retryable": True,
+            "details": {"busy_timeout_s": waited_s},
+        },
+    }
+
+
+def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0) -> ManagerLike:
+    """XENOVA_PLATFORM_LIB 의 디렉터리들을 sys.path 에 넣고 xenova_management.Manager() 를 만든다."""
+    for entry in [p for p in platform_lib.split(os.pathsep) if p]:
+        if entry not in sys.path:
+            sys.path.insert(0, entry)
+    try:
+        module = importlib.import_module("xenova_management")
+    except ImportError as exc:
+        raise PlatformUnavailable(
+            "xenova_management not importable; set XENOVA_PLATFORM_LIB (board: /usr/lib/xenova)", detail=str(exc)
+        ) from exc
+    return SerializedManager(module.Manager(), busy_timeout_s=busy_timeout_s)
+
+
+# ---------------------------------------------------------------------------
+# 플랫폼 봉투 → 계약 오류
+# ---------------------------------------------------------------------------
+
+# 플랫폼 오류 코드 → (예외 클래스). 백엔드 파트와 합의한 HTTP 매핑: 400 / 404 / 409 / 507 / 503 / 504
+_CODE_MAP: dict[str, type[Dom0ManagerError]] = {
+    "INVALID_SPEC": InvalidArgument,
+    "TEMPLATE_NOT_FOUND": InvalidArgument,
+    "TEMPLATE_VERSION_NOT_FOUND": InvalidArgument,
+    "RESOURCE_UNSUPPORTED": InvalidArgument,
+    "VM_NOT_FOUND": VMNotFound,
+    "VM_NAME_CONFLICT": VMExists,
+    "IDEMPOTENCY_CONFLICT": VMExists,
+    "IP_CONFLICT": InvalidState,
+    "OPERATION_IN_PROGRESS": PlatformUnavailable,  # 다른 플랫폼 작업이 잠금 보유(재시도 가능). 프로세스 안 직렬화 대기 초과도 같은 코드
+    "VM_NOT_STOPPED": InvalidState,
+    "TARGET_CHANGED": InvalidState,
+    "ASSET_IN_USE": InvalidState,
+    "RESTORE_CONFLICT": InvalidState,
+    "VM_PURGED": InvalidState,
+    "STORAGE_UNAVAILABLE": PlatformUnavailable,
+    "RECOVERY_REQUIRED": PlatformUnavailable,
+    "CLEANUP_INCOMPLETE": PlatformUnavailable,
+}
+
+
+def raise_for_envelope(envelope: dict[str, Any], *, context: str) -> dict[str, Any]:
+    """ok 면 data 를 돌려주고, 아니면 계약 예외로 바꾼다."""
+    if envelope.get("ok"):
+        return envelope.get("data") or {}
+    error = envelope.get("error") or {}
+    code = str(error.get("code", "UNKNOWN"))
+    message = str(error.get("message", "platform error"))
+    detail = f"{code}: {message}"
+    if "deadline" in message:
+        raise DriverTimeout(f"{context}: platform operation deadline exceeded", detail=detail)
+    if code == "INSUFFICIENT_STORAGE":
+        raise _insufficient_storage(message, detail)
+    if code == "IP_POOL_EXHAUSTED":  # 플랫폼이 전역 잠금 안에서 고른 Linux 내부 IP 가 바닥남
+        raise InsufficientResources("ipv4", 1, 0)
+    cls = _CODE_MAP.get(code)
+    if cls is None:  # ARTIFACT_INVALID 등 실행 오류
+        raise DriverError(f"{context}: {message}", detail=detail)
+    raise cls(f"{context}: {message}", detail=detail)
+
+
+def _insufficient_storage(message: str, detail: str) -> Dom0ManagerError:
+    # 계약 ResourceError.name 은 vcpus|memory_mib 뿐이라 resource 없이 507 만 낸다 (v2 에서 storage 추가 제안)
+    err = Dom0ManagerError(f"insufficient storage on board: {message}", detail=detail)
+    err.status_code = 507
+    err.code = "InsufficientResources"
+    return err
+
+
+# ---------------------------------------------------------------------------
+# 상태 변환
+# ---------------------------------------------------------------------------
+
+# 플랫폼 xen_state(xenova_vm.xen_state) → 계약 3.1 상태. 'stopped' 는 도메인 부재라 None.
+_STATE_MAP: dict[str, VmState | None] = {
+    "running": VmState.running,
+    "blocked": VmState.running,  # I/O 대기 중인 정상 상태
+    "unknown": VmState.running,  # '------': 실행 가능·미스케줄 (libxl 규칙)
+    "paused": VmState.paused,
+    "shutdown": VmState.stopping,
+    "dying": VmState.stopping,
+    "crashed": VmState.crashed,
+    "stopped": None,
+}
+
+
+def map_platform_state(xen_state: str | None) -> VmState | None:
+    if xen_state is None:
+        return None
+    try:
+        return _STATE_MAP[xen_state]
+    except KeyError as exc:
+        raise DriverError(f"unknown platform xen_state {xen_state!r}") from exc
+
+
+def view_to_domain(view: dict[str, Any]) -> Domain | None:
+    """플랫폼 list/get 항목 → Domain. Xen 에 없으면 None."""
+    if view.get("domid") is None:
+        return None
+    state = map_platform_state(view.get("xen_state"))
+    if state is None:
+        return None
+    configuration = view.get("configuration") or {}
+    try:
+        return Domain(
+            vm_id=UUID(str(view["vm_id"])),
+            state=state,
+            vcpus=int(configuration["vcpus"]),
+            memory_mib=int(configuration["memory_mib"]),
+            domid=int(view["domid"]),
+            name=view.get("name"),
+        )
+    except (KeyError, ValueError, TypeError) as exc:
+        raise DriverError("platform view is missing vm_id/vcpus/memory_mib", detail=str(view)[:200]) from exc
+
+
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
+
+
+class PlatformDriver(Driver):
+    name = "platform"
+
+    def __init__(self, manager: ManagerLike, xl: Xl | None = None) -> None:
+        self.manager = manager
+        self._xl = xl
+
+    # ---- 조회 ----
+
+    def _views(self, lifecycle: str = "REGISTERED") -> list[dict[str, Any]]:
+        data = raise_for_envelope(self.manager.call("list", {"lifecycle": lifecycle}), context="list")
+        return list(data.get("vms") or [])
+
+    def _view(self, vm_id: UUID) -> dict[str, Any]:
+        data = raise_for_envelope(self.manager.call("get", {"vm_id": str(vm_id)}), context=f"get {vm_id}")
+        view = data.get("vm")
+        if not view:
+            raise VMNotFound(f"vm {vm_id} not registered")
+        return view
+
+    def list_domains(self) -> list[Domain]:
+        domains = [view_to_domain(v) for v in self._views()]
+        return [d for d in domains if d is not None]
+
+    def get_domain(self, vm_id: UUID) -> Domain:
+        domain = view_to_domain(self._view(vm_id))
+        if domain is None:
+            raise VMNotFound(f"domain {vm_id} is not running")
+        return domain
+
+    def has_domain(self, vm_id: UUID) -> bool:
+        try:
+            self.get_domain(vm_id)
+        except VMNotFound:
+            return False
+        return True
+
+    def registration(self, vm_id: UUID) -> dict[str, Any] | None:
+        """등록 정보(view). 미등록이면 None. Provisioner 가 쓴다."""
+        try:
+            return self._view(vm_id)
+        except VMNotFound:
+            return None
+
+    # ---- 명령 ----
+
+    def create(self, spec: CreateSpec) -> Domain:
+        """registry 에 등록된 VM 을 시작한다. 등록은 Provisioner.ensure_instance 가 먼저 한다."""
+        data = raise_for_envelope(self.manager.call("start", {"vm_id": str(spec.vm_id)}), context=f"start {spec.vm_id}")
+        domain = view_to_domain(data.get("vm") or {})
+        if domain is None:
+            # start 가 돌아왔는데 도메인이 안 보이면 플랫폼이 거부한 것(예: unknown 상태). 그대로 실패로 올린다
+            raise DriverError(f"start {spec.vm_id}: platform returned without a live domain")
+        return domain
+
+    def shutdown(self, vm_id: UUID, *, grace_s: float) -> None:
+        self._stop(vm_id, force=False)
+
+    def destroy(self, vm_id: UUID) -> None:
+        self._stop(vm_id, force=True)
+
+    def _stop(self, vm_id: UUID, *, force: bool) -> None:
+        envelope = self.manager.call("stop", {"vm_id": str(vm_id), "force": force})
+        if not envelope.get("ok") and (envelope.get("error") or {}).get("code") == "VM_NOT_FOUND":
+            return  # 멱등: 등록 자체가 없어도 목표 상태(도메인 부재)는 달성
+        raise_for_envelope(envelope, context=f"stop {vm_id}")
+
+    # ---- 호스트 ----
+
+    def host_info(self) -> HostInfo:
+        if self._xl is None:
+            raise PlatformUnavailable("xl is not configured for host_info")
+        return self._xl.info()
+
+    def health(self) -> bool:
+        """xl 응답과 registry 저장소 존재만 본다. Manager 를 거치지 않는다.
+
+        Manager.call("list") 는 잠금 대기에 더해 잠금을 얻은 뒤 xl list 를 두 번(각각 최대 15초) 실행할 수 있어 조회 한도 5초
+        (Spring 대기 6초) 안에 끝난다고 보장할 수 없다. 그래서 /healthz 는 xl info(xl_query_timeout_s 한도)와 registry 디렉터리
+        존재만 확인한다. registry 내용 오류(STORAGE_UNAVAILABLE)는 목록·생성 호출이 503 으로 알린다.
+        """
+        if self._xl is not None:
+            try:
+                self._xl.info()
+            except DriverError:
+                return False
+        return (Path(self.manager.data) / "instances").is_dir()
+
+
+# ---------------------------------------------------------------------------
+# Provisioner
+# ---------------------------------------------------------------------------
+
+
+class PlatformProvisioner(Provisioner):
+    """플랫폼 create/retire 로 registry 를 만들고 보관한다. 디스크·설정 파일은 전부 플랫폼이 만든다."""
+
+    def __init__(self, manager: ManagerLike) -> None:
+        self.manager = manager
+
+    # ---- 조회 ----
+
+    def _registration(self, vm_id: UUID) -> dict[str, Any] | None:
+        envelope = self.manager.call("get", {"vm_id": str(vm_id)})
+        if not envelope.get("ok"):
+            if (envelope.get("error") or {}).get("code") == "VM_NOT_FOUND":
+                return None
+            raise_for_envelope(envelope, context=f"get {vm_id}")
+        view = (envelope.get("data") or {}).get("vm")
+        return view if view and view.get("lifecycle") == "REGISTERED" else None
+
+    def _paths(self, view: dict[str, Any]) -> InstancePaths:
+        # 디렉터리는 플랫폼 내부 실행 이름(configuration.id = vm-<hex>)이다. view["name"] 은 표시 이름이라 경로가 아니다
+        internal = (view.get("configuration") or {}).get("id")
+        if not internal:
+            raise DriverError("platform view lacks configuration.id (internal instance name)", detail=f"vm_id={view.get('vm_id')}")
+        root = Path(self.manager.data) / "instances" / str(internal)
+        return InstancePaths(
+            vm_id=UUID(str(view["vm_id"])), root=root, kernel=root / "Image", ramdisk=root / "initrd", disk=root / "root.raw"
+        )
+
+    def instance_exists(self, vm_id: UUID) -> bool:
+        return self._registration(vm_id) is not None
+
+    # ---- 생성·보관 ----
+
+    @staticmethod
+    def _spec_mismatch(existing: dict[str, Any], template_id: str, template_version: str, vcpus: int, memory_mib: int) -> list[str]:
+        """계약 4.2 Spring 불변조건: 같은 vm_id 에는 같은 생성 명세. 기록된 값과 다른 항목을 돌려준다."""
+        initial = existing.get("initial_spec") or {}
+        configuration = existing.get("configuration") or {}
+        recorded = {
+            "template_id": initial.get("template_id"),
+            "template_version": initial.get("template_version"),
+            "vcpus": initial.get("vcpus", configuration.get("vcpus")),
+            "memory_mib": initial.get("memory_mib", configuration.get("memory_mib")),
+        }
+        requested = {"template_id": template_id, "template_version": template_version, "vcpus": vcpus, "memory_mib": memory_mib}
+        # 공장 기본 VM 처럼 initial_spec 이 없는 옛 등록은 템플릿을 비교할 수 없어 자원만 비교한다
+        return [k for k, v in recorded.items() if v is not None and str(v) != str(requested[k])]
+
+    def ensure_instance(
+        self, vm_id: UUID, template_id: str, template_version: str, *, name: str, vcpus: int, memory_mib: int
+    ) -> InstancePaths:
+        existing = self._registration(vm_id)
+        if existing is not None:
+            mismatch = self._spec_mismatch(existing, template_id, template_version, vcpus, memory_mib)
+            if mismatch:
+                raise VMExists(
+                    f"vm {vm_id} is registered with a different spec ({', '.join(mismatch)}); same vm_id must keep the same spec"
+                )
+            return self._paths(existing)
+
+        spec: dict[str, Any] = {
+            "vm_id": str(vm_id),  # 팀 결정: Spring 발급 UUID 를 registry·Xen UUID 로 그대로 쓴다
+            "name": name,
+            "template_id": template_id,
+            "template_version": template_version,
+            "vcpus": vcpus,
+            "memory_mib": memory_mib,
+        }
+        # ipv4 는 보내지 않는다. 플랫폼이 registry·tombstone·진행 중 작업·공장 예약·DHCP lease 를 전역 잠금 안에서 보고 고르며,
+        # 바닥나면 IP_POOL_EXHAUSTED → 507 InsufficientResources(ipv4). 명세 오류(INVALID_SPEC·템플릿 없음)는 400 이다.
+        envelope = self.manager.call("create", spec, execute=True, idempotency_key=f"create-{vm_id}")
+        data = raise_for_envelope(envelope, context=f"create {name}")
+        view = (data.get("vm") or data.get("current") or data.get("original_result") or {}) if isinstance(data, dict) else {}
+        if not (view.get("configuration") or {}).get("id"):
+            view = self._registration(vm_id) or {}
+        if str(view.get("vm_id")) != str(vm_id):
+            raise DriverError(
+                "platform registered a different vm_id than requested; Spring-issued vm_id must be honoured",
+                detail=f"requested={vm_id} registered={view.get('vm_id')}",
+            )
+        return self._paths(view)
+
+    def delete_instance(self, vm_id: UUID) -> None:
+        envelope = self.manager.call("retire", {"vm_id": str(vm_id)}, execute=True, idempotency_key=f"retire-{vm_id}")
+        if not envelope.get("ok") and (envelope.get("error") or {}).get("code") == "VM_NOT_FOUND":
+            raise VMNotFound(f"instance {vm_id} not registered")
+        raise_for_envelope(envelope, context=f"retire {vm_id}")

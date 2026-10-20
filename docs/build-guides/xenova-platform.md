@@ -20,7 +20,7 @@
 | VM 자동 시작·종료 | `xenova-vms.service` · `xenova-vm-shutdown.service` |
 | 새 Starter ID | `xenova-zephyr-starter-1.0.0` |
 
-기본 VM ID는 `ubuntu-dev`·`debian-dev`·`zephyr-dev`다. UUID/MAC 생성·검증,
+새 최초 설치의 기본 VM ID는 `debian-dev`(Debian Interaction)·`zephyr-drive-a`·`zephyr-drive-b`다. 세 VM 모두 자동 시작하며 Zephyr A/B 표시는 제어권을 부여하지 않는다. UUID/MAC 생성·검증,
 Linux 독립 디스크·machine-id·SSH 키 보존, 정적 Zephyr 하드웨어 프로필은 유지한다.
 등록 정보는 `/srv/xenova/instances/<id>/instance.json`, 불변 템플릿은
 `templates/`·`rtos-templates/`에 둔다. 펌웨어 revision은 실제 manifest 해시다.
@@ -118,3 +118,5 @@ SSH 자동 준비를 각각 판정한다. 일시적 조회 변화는 단일 mono
 직접 systemctl reboot/poweroff는 CLI 사전 검사 밖이며 ExecStop 실패로 OS 종료가
 취소된다고 가정하지 않는다. 실제 xl parser·하드웨어 reset·네트워크·SSH·앱 동작은
 소스 검사나 모의 Xen 성공과 구분한다.
+
+새 조립 config는 `linux_templates`에 Ubuntu·Debian의 정확한 ID·버전·경로·manifest 해시를 모두 지정한다. 기존 `guests` 입력은 사용하지 않는다. 두 Linux 템플릿은 보관하지만 기본 Linux seed는 Debian 1개만 생성한다. 같은 Starter 템플릿에서 Zephyr seed 2개를 만들며, 최초 부팅이 각 VM의 보드별 UUID를 확정한다. 기존 이미지·설치 저장소를 자동 변경하지 않는다.

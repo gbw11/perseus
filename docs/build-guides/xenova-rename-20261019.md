@@ -40,3 +40,26 @@
 
 기존 빌드 문서의 과거 수치는 이번 변경의 빌드·부팅 증거가 아니다.
 이번 변경의 검증 범위는 위 목록이다.
+
+## 2차: 백엔드·dom0-manager·계약 — 2026-10-19 (S15P31E110-231)
+
+플랫폼 밖 모듈에 현재 명칭으로 남아 있던 Perseus 표기를 Xenova로 통일했다.
+작업 브랜치는 `refactor/common/S15P31E110-231-perseus-to-xenova`이며 `develop` 기준이다.
+
+- backend: Java 패키지 `com.perseus.backend` → `com.xenova.backend`(파일 127개 이동),
+  설정 접두사 `perseus.*` → `xenova.*`, Maven groupId `com.xenova`·name `xenova-backend`,
+  `application.yml`(앱 이름, H2 파일 `./data/xenova`, JWT 기본 secret, MQTT client-id),
+  refresh 쿠키 `xenova_refresh`, JWT issuer `xenova-backend`, OpenAPI 제목, README.
+- services/dom0-manager: 환경변수 `PERSEUS_*` → `XENOVA_*`, 인스턴스 루트 `/srv/xenova/instances`,
+  제목·설명, Mock 샘플의 uuid5 네임스페이스 `xenova/mock/<이름>`(샘플 vm_id 3개가 바뀜).
+- `contracts/dom0-manager-openapi.yaml` 제목, `docs/contracts/vm-api-contract-v1.md`의 설정 접두사·`xenova_vm.py`,
+  `Jenkinsfile` 주석.
+
+검증: 백엔드 `mvnw test` 96개 통과(실패 0, 오류 0, 건너뜀 0), dom0-manager pytest 46개 통과.
+
+유지한 것: MQTT 토픽 접두사 `perseus/v1`은 [MQTT 계약 v1](../contracts/mqtt-contract-v1.md)이 유지로 명시해 바꾸지 않았다.
+바꾸려면 agent·gateway·ESP32 계약을 함께 바꿔야 한다. [리브랜딩 범위](xenova-rebranding.md)의 보존 목록
+(역사 기록 문서, 결과 JSON, fixture provenance, 이전 명칭 부재를 검증하는 테스트, 패치 From, crypt salt)도 그대로다.
+
+운영 영향: 배포 환경의 Spring 설정 `perseus.*`와 dom0-manager 환경변수 `PERSEUS_*`를 새 이름으로 바꿔야 한다.
+기존 refresh 쿠키와 JWT(issuer)는 무효가 되어 다시 로그인해야 한다. 개발용 H2 파일은 `./data/xenova`로 새로 만들어진다.

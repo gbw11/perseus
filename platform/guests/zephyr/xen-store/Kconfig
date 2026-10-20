@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+config XENOVA_XENSTORE
+	bool "Xenova XenStore client"
+	depends on XEN && XEN_EVENTS && ARM64 && MMU && !SMP
+	help
+	  Bounded XenStore wire client and read-only XenBus VIF observation.
+	  The caller owns one client and serializes lifecycle operations.

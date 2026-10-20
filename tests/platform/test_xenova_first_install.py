@@ -188,11 +188,12 @@ class AssemblyPipelineTest(unittest.TestCase):
         board.factory()
         defaults = json.loads((FILES / 'defaults.json').read_text())['instances']
         guests = [{'id': r['id'], 'source_id': r['template'], 'template': str(board.data / 'templates' / r['template'])} for r in defaults]
-        from test_xenova_zephyr import bundle
-        firmware = bundle(base / 'zephyr-template')
-        firmware_entry = assemble.rtos.info(firmware, assemble.sha(firmware / 'template.json'))
+        from first_install_fixture import starter_bundle
+        firmware = starter_bundle(base / 'zephyr-template')
+        firmware_entry = assemble.rtos.info(firmware, assemble.sha(firmware / 'firmware.json'))
         workdir, output = base / 'scratch', base / 'release'
-        planned = {'rtos_templates': [firmware_entry], 'guests': guests, 'output_directory': str(output), 'work_directory': str(workdir),
+        templates = [{'source_id': p.name, 'template': str(p)} for p in sorted((board.data / 'templates').iterdir())]
+        planned = {'rtos_templates': [firmware_entry], 'guests': guests, 'linux_templates': templates, 'output_directory': str(output), 'work_directory': str(workdir),
                    'layout': contract.layout(content[:512], len(content)), 'features_required': contract.FEATURES,
                    'capacity': {'wsl_scratch_upper_bound_bytes': 0, 'data_bytes': 4096, 'image_bytes': 8192,
                                 'data_start_bytes': 4096, 'template_policy': 'full', 'operating_reserve_bytes': 0}}
@@ -242,8 +243,9 @@ class AssemblyPipelineTest(unittest.TestCase):
         self.assertEqual(data[494:2048],content[494:2048])
         self.assertTrue(assemble.verify(final,manifest)['verified'])
         self.assertEqual(manifest['layout']['disk_id'],'1234abcd')
-        self.assertEqual(manifest['factory']['firmware_instances'][0]['record']['id'], 'zephyr-dev')
-        self.assertFalse(manifest['factory']['firmware_instances'][0]['record']['autostart'])
+        self.assertEqual({s['record']['id'] for s in manifest['factory']['firmware_instances']}, {'zephyr-drive-a','zephyr-drive-b'})
+        self.assertTrue(all(s['record']['autostart'] for s in manifest['factory']['firmware_instances']))
+        self.assertEqual([s['record']['id'] for s in manifest['factory']['instances']], ['debian-dev'])
         self.assertEqual([t['retained_root'] for t in manifest['factory']['templates']], [True,True])
         with final.open('r+b') as stream:
             stream.seek(1024); stream.write(b'corruption')
@@ -533,7 +535,7 @@ class NativeCreateTest(unittest.TestCase):
         return case
 
     def arguments(self,case,execute):
-        return argparse.Namespace(id='custom',template=case.spec['template_id'],template_version='1.0.0',
+        return argparse.Namespace(id='custom',vm_id=case.spec['vm_id'],template=case.spec['template_id'],template_version='1.0.0',
                                   ipv4=case.spec['ipv4'],memory_mib=512,vcpus=1,execute=execute,idempotency_key='facade')
 
     def test_missing_local_template_and_capacity_failure_do_not_create(self):
@@ -563,7 +565,7 @@ class NativeCreateTest(unittest.TestCase):
         with patch.object(vm.os,'statvfs',return_value=SimpleNamespace(f_bavail=9*contract.GIB,f_frsize=1)),patch.object(Path,'stat',diskstat):
             result=case.p.create(self.arguments(case,True),{})
         self.assertEqual(result['error']['code'],'INSUFFICIENT_STORAGE',result)
-        self.assertFalse((case.data/'instances/custom').exists())
+        self.assertFalse((case.data/('instances/'+case.key)).exists())
 
     def test_native_execute_delegates_once_to_shared_creator_without_starting_guest(self):
         case=self.scenario()
@@ -596,10 +598,12 @@ class NativeCreateTest(unittest.TestCase):
     def test_existing_id_is_not_reinitialized(self):
         case=self.scenario()
         case.create()
-        before=(case.data/'instances/custom/instance.json').read_bytes()
+        before=(case.data/f'instances/{case.key}/instance.json').read_bytes()
         result=case.p.create(self.arguments(case,True),{})
-        self.assertEqual(result['error']['code'],'VM_NAME_CONFLICT',result)
-        self.assertEqual((case.data/'instances/custom/instance.json').read_bytes(),before)
+        self.assertTrue(result['ok'],result)
+        self.assertTrue(result['replayed'],result)
+        self.assertEqual(case.copies,1)
+        self.assertEqual((case.data/f'instances/{case.key}/instance.json').read_bytes(),before)
 
 
 if __name__ == '__main__':

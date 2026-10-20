@@ -1,8 +1,8 @@
 spring:
   application:
-    name: perseus-backend
+    name: xenova-backend
   datasource:
-    url: ${DB_URL:jdbc:h2:file:./data/perseus;AUTO_SERVER=TRUE}
+    url: ${DB_URL:jdbc:h2:file:./data/xenova;AUTO_SERVER=TRUE}
     username: ${DB_USERNAME:sa}
     password: ${DB_PASSWORD:}
   jpa:
@@ -31,44 +31,54 @@ management:
     health:
       show-details: never
 
-perseus:
+xenova:
   auth:
-    jwt-secret: ${JWT_SECRET:perseus-local-development-secret-change-before-production}
+    jwt-secret: ${JWT_SECRET:xenova-local-development-secret-change-before-production}
     access-token-ttl: ${ACCESS_TOKEN_TTL:15m}
     refresh-token-ttl: ${REFRESH_TOKEN_TTL:7d}
     refresh-cookie-secure: ${AUTH_COOKIE_SECURE:false}
     max-login-attempts: ${MAX_LOGIN_ATTEMPTS:5}
     login-attempt-window: ${LOGIN_ATTEMPT_WINDOW:5m}
-  # 1차 템플릿 목록. 버전과 최소 메모리는 P2 확인 전 임시값이다.
+  # 플랫폼 공개 카탈로그 키를 그대로 사용한다. dom0-manager는 ID나 버전을 변환하지 않는다.
+  # - guest-kind가 zephyr인 템플릿은 에이전트·네트워크·정상 종료가 없는 콘솔 전용 펌웨어다.
   template-catalog:
     templates:
-      - template-id: alpine
-        version: "1.2.0"
-        display-name: Alpine 1.2.0
-        min-memory-mib: 128
-      - template-id: debian
-        version: "12"
-        display-name: Debian 12
-        min-memory-mib: 256
-      - template-id: ubuntu
-        version: "24.04"
+      - template-id: ubuntu-24.04-arm64
+        version: "1.0.0"
         display-name: Ubuntu 24.04
         min-memory-mib: 512
+        guest-kind: linux
+      - template-id: debian-13-arm64
+        version: "1.0.0"
+        display-name: Debian 13
+        min-memory-mib: 256
+        guest-kind: linux
+      - template-id: zephyr-xenvm-starter-arm64
+        version: "1.0.0"
+        display-name: Zephyr Starter 1.0.0
+        # 플랫폼 starter 1.0.0은 1 vCPU / 16MiB 고정 프로필이다.
+        min-memory-mib: 16
+        guest-kind: zephyr
   agent:
     stale-after: ${AGENT_STALE_AFTER:15s}
     offline-after: ${AGENT_OFFLINE_AFTER:30s}
+  # 에이전트 상태(ONLINE/STALE/OFFLINE) 변화를 이벤트로 남기기 위해 확인하는 주기
+  event:
+    agent-status-check-interval-ms: ${EVENT_AGENT_STATUS_CHECK_INTERVAL_MS:5000}
+    # 사용자 조작 없이 바뀐 VM 상태(크래시 등)를 찾으려고 dom0-manager 목록을 조회하는 주기
+    vm-state-check-interval-ms: ${EVENT_VM_STATE_CHECK_INTERVAL_MS:5000}
   report:
     os-evidence:
+      # 에이전트 보고로 증명할 수 있는 Linux만 필수로 둔다. Zephyr는 에이전트가 없어 판정 방법 미정이다.
       required-os-ids:
         - debian
         - ubuntu
-        - alpine
       observation-window: ${OS_EVIDENCE_WINDOW:30s}
       build-id: ${BUILD_ID:}
   mqtt:
     enabled: ${MQTT_ENABLED:true}
     broker-url: ${MQTT_BROKER_URL:tcp://127.0.0.1:1883}
-    client-id: ${MQTT_CLIENT_ID:perseus-backend}
+    client-id: ${MQTT_CLIENT_ID:xenova-backend}
     username: ${MQTT_USERNAME:}
     password: ${MQTT_PASSWORD:}
     reconnect-interval: ${MQTT_RECONNECT_INTERVAL:5s}
@@ -79,5 +89,6 @@ perseus:
     service-token: ${DOM0_MANAGER_SERVICE_TOKEN:}
     connect-timeout: ${DOM0_MANAGER_CONNECT_TIMEOUT:2s}
     query-timeout: ${DOM0_MANAGER_QUERY_TIMEOUT:6s}
-    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:35s}
+    # Platform graceful stop can wait up to 90s; keep the outer HTTP budget longer.
+    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:100s}
     retry-backoff: ${DOM0_MANAGER_RETRY_BACKOFF:500ms}

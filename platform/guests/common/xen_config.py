@@ -9,7 +9,6 @@ from pathlib import Path, PurePosixPath
 import re
 from string import Template
 import sys
-from uuid import UUID
 
 
 MODULE_DIR = Path(__file__).resolve().parent
@@ -56,7 +55,7 @@ def render_config(record, *, instance_root):
 
     The caller resolves catalog/version and checks actual boot assets. Resource
     bounds preserve the internal platform's 128..8192 MiB range, independently
-    of the HTTP contract's 1024 MiB cap. No file existence is asserted here.
+    of catalog selection. No file existence is asserted here.
     """
     if not isinstance(record, dict):
         raise ConfigError('instance must be an object')
@@ -66,11 +65,8 @@ def render_config(record, *, instance_root):
         if not isinstance(record.get(field), str) or not ID.fullmatch(record[field]):
             raise ConfigError(f'invalid instance {field}')
     identity = record.get('uuid')
-    try:
-        canonical = str(UUID(identity)) if isinstance(identity, str) else None
-    except ValueError as exc:
-        raise ConfigError('uuid must be a canonical lowercase UUID') from exc
-    if canonical is None or canonical != identity:
+    if (not isinstance(identity, str)
+            or not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', identity)):
         raise ConfigError('uuid must be a canonical lowercase UUID')
     if not isinstance(record.get('mac'), str) or not MAC.fullmatch(record['mac']):
         raise ConfigError('mac must match the platform 02:xx:xx:xx:xx:xx format')
