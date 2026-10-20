@@ -45,6 +45,8 @@ Perseus 소스·이미지·실보드의 역사적 기록입니다. 기존 로그
 │   ├── scripts/                     # 빌드·검증 스크립트
 │   └── tests/                       # 플랫폼 테스트·픽스처
 │
+├── vehicle/                         # 젯슨(차량 쪽, Jetson Nano ADAS ECU) 코드
+│
 └── docs/                            # 설계·가이드 문서
     └── contracts/                   # VM 간 메시징·에이전트·관리 API 계약 (OpenAPI 포함)
 ```
