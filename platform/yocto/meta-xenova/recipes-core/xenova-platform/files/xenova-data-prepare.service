@@ -1,0 +1,13 @@
+[Unit]
+Description=Verify boot medium and grow only the last Xenova ext4 data partition
+DefaultDependencies=no
+Requires=systemd-remount-fs.service
+After=systemd-remount-fs.service systemd-udev-trigger.service
+Before=srv-xenova.mount local-fs.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/xenova-first-boot grow
+RemainAfterExit=yes
+TimeoutStartSec=300s
