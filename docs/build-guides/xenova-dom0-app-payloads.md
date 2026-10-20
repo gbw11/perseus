@@ -1,7 +1,7 @@
 # dom0 API·MQTT 배포 계약
 
 이미지 타깃 xenova-xen-bringup-image는 xenova-dom0-manager와 xenova-mqtt-client를 설치한다.
-전자는 기존 services/dom0-manager를 FastAPI/Uvicorn과 함께 설치하고 systemd 일반 서비스로 시작한다.
+전자는 기존 platform/services/dom0-manager를 FastAPI/Uvicorn과 함께 설치하고 systemd 일반 서비스로 시작한다.
 후자는 기존 Python 공통 MQTT 라이브러리와 Paho를 설치한다. 새 Agent·브로커·Worker는 만들지 않는다.
 
 ## 실행·설정
@@ -16,7 +16,7 @@ systemctl status xenova-dom0-manager.service --no-pager와 실제 인증된 요�
 기존 shutdown gate를 재사용하며 새 복구 루프는 없다.
 
 ## MQTT와 템플릿
-기존 계약의 perseus_mqtt 모듈과 perseus/v1 토픽을 유지한다.
+현재 공통 계약의 xenova_mqtt 모듈과 xenova/v1 토픽을 사용한다. 소스는 platform/services/vm-agent/mqtt-client에 있다.
 Ubuntu/Debian 게스트에서 사용할 때는 Linux 템플릿 준비 단계에도 동일 소스·Paho 설치·검증이 필요하다.
 현재 게스트 준비 경로에는 Agent 설치 호출이 연결돼 있지 않으며, 최종 조립이 이를 자동 설치하지 않는다.
 factory seed 전용 identity 서비스와 일반 VM의 오프라인 신원 준비를 구분해 Agent unit 의존성을 검증해야 한다.

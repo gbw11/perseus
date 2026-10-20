@@ -20,129 +20,35 @@ Perseus 소스·이미지·실보드의 역사적 기록입니다. 기존 로그
 아래 구성안에는 아직 구현하지 않은 항목이 포함됩니다. 현재 Yocto 빌드에 사용하는 파일 목록은 [빌드 버전 기록](docs/build-guides/yocto-rpi4-xen-build-versions.md)을 참고합니다.
 
 ```text
-├── docs/                     # 문서
-
+├── backend/                         # Spring Boot 관리 서버 (테스트: src/test/)
 │
-
-├── contracts/                     # VM 간 메시징 계약, Agent 통신 계약, 관리 API 계약 등
-
+├── frontend/                        # React 관리 콘솔 (테스트: frontend/ 안)
 │
-
-├── platform/
-
-│   │
-
+├── platform/                        # 보드(dom0·domU) 위에서 돌거나 보드 이미지를 만드는 것
 │   ├── yocto/                       # Yocto-Xen 설정 및 패키지
-
-│   │
-
 │   ├── boot/
-
 │   │   ├── rpi4/                    # 실보드 부팅 환경
-
 │   │   └── qemu/                    # QEMU 부팅 환경
-
-│   │
-
+│   ├── first-install/               # 최초 설치 이미지 조립
 │   ├── guests/
-
 │   │   ├── common/                  # 공통 초기화·설치
-
 │   │   ├── debian/                  # Debian 템플릿 제작
-
 │   │   ├── ubuntu/                  # Ubuntu 템플릿 제작
-
 │   │   └── zephyr/                  # Zephyr Xen 펌웨어 템플릿
-
-│   │
-
-│   └── network/                     # Bridge·DHCP 설정
-
+│   ├── network/                     # Bridge·DHCP 설정
+│   ├── services/
+│   │   ├── dom0-manager/            # Python 제어 계층 (테스트: tests/)
+│   │   ├── vm-agent/                # VM 에이전트
+│   │   └── display/                 # 화면 라우터·키오스크
+│   ├── apps/                        # VM 애플리케이션 (RC카 시나리오 앱)
+│   ├── deploy/                      # dom0 서비스 등록·환경별 배포 설정
+│   ├── scripts/                     # 빌드·검증 스크립트
+│   └── tests/                       # 플랫폼 테스트·픽스처
 │
-
-├── services/
-
-│   ├── dom0-manager/
-
-│   │   └── app/
-
-│   │         ├── api/
-
-│   │         ├── drivers/
-
-│   │         ├── metrics/
-
-│   │         ├── recovery/
-
-│   │         └── console/
-
-│   │
-
-│   ├── vm-agent/
-
-│   │   ├── src/
-
-│   │   ├── config/
-
-│   │   └── deploy/
-
-│   │
-
-│   └── display/
-
-│       ├── router/
-
-│       └── kiosk/
-
+├── vehicle/                         # 젯슨(차량 쪽, Jetson Nano ADAS ECU) 코드
 │
-
-├── apps/
-
-│   ├── alpine-app/
-
-│   ├── debian-app/
-
-│   └── ubuntu-app/
-
-│
-
-├── frontend/
-
-│   └── admin-console/               # React 관리 콘솔
-
-│
-
-├── backend/                          # Spring Boot
-
-│
-
-├── deploy/                          # 환경별 배포 설정
-
-│
-
-├── tests/
-
-│   ├── integration/
-
-│   ├── qemu/
-
-│   ├── hardware/
-
-│   └── fixtures/
-
-│
-
-└── scripts/
-
-    ├── build-all.sh
-
-    ├── build-dom0.sh
-
-    ├── build-guests.sh
-
-    ├── deploy-dev.sh
-
-    └── validate-release.sh
+└── docs/                            # 설계·가이드 문서
+    └── contracts/                   # VM 간 메시징·에이전트·관리 API 계약 (OpenAPI 포함)
 ```
 
 - [VM 관리 계약·작업 기록·보관/복원/삭제](docs/build-guides/xenova-vm-management.md)

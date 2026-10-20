@@ -5,14 +5,16 @@ from prepare_rootfs import inside
 
 ROOT = Path(__file__).resolve().parents[2]
 RECIPES = ROOT / "platform/yocto/meta-xenova/recipes-core"
-API = ROOT / "services/dom0-manager"
-MQTT = ROOT / "services/vm-agent/mqtt-client"
+API = ROOT / "platform/services/dom0-manager"
+MQTT = ROOT / "platform/services/vm-agent/mqtt-client"
 
 
 def source_files(site_packages):
     """배포 대상 소스와 rootfs 경로를 연결한다. 실행·파일 변경은 하지 않는다."""
     result = {}
-    for project, package in ((API, "dom0_manager"), (MQTT, "perseus_mqtt")):
+    for project, package in ((API, "dom0_manager"), (MQTT, "xenova_mqtt")):
+        if not (project/package/"__init__.py").is_file():
+            raise ValueError("required deployment source package missing: " + package)
         for source in sorted((project/package).rglob("*.py")):
             result[str(Path(site_packages)/package/source.relative_to(project/package))] = source
     result.update({
@@ -32,7 +34,7 @@ def installed_sources(root):
     sites = []
     for candidate in path("usr/lib").glob("python3*/site-packages"):
         relative = str(candidate.relative_to(root))
-        if path(relative+"/dom0_manager/__init__.py").is_file() and path(relative+"/perseus_mqtt/__init__.py").is_file():
+        if path(relative+"/dom0_manager/__init__.py").is_file() and path(relative+"/xenova_mqtt/__init__.py").is_file():
             sites.append(relative)
     if len(sites) != 1:
         raise ValueError("required dom0 API/MQTT payload missing or ambiguous; rebuild dom0")

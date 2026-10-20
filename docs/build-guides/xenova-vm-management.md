@@ -176,7 +176,7 @@ UUID.json.tmp-<PID>-<12자리 hex>의 잔여 일반 파일은 JSON으로 채택�
 ## 다음 자산 준비·게시
 
 기존 1.0.0 게시본은 수정하지 않고 새 descriptor로 공개 ID를 연결할 수 있다.
-scripts/publish-xenova-template-catalog.py --data-root <DATA_ROOT> --descriptor <JSON> [--execute]
+platform/scripts/publish-xenova-template-catalog.py --data-root <DATA_ROOT> --descriptor <JSON> [--execute]
 는 검증된 templates/ 또는 rtos-templates/ 내부 자산만 참조하고 payload는 쓰지 않는다.
 계획도 실제 해시를 확인하며 같은 ID/버전의 다른 내용은 거부한다.
 새 Linux 준비 코드/overlay로 내용이 달라지면 recipe의 새 버전(예:1.1.0)을 정하고
@@ -223,21 +223,21 @@ factory 신규 등록은 defaults의 공개 ID/버전을 보존한다.
 ## Spring 연결 검사와 후속 연동 경계
 
 공통 HTTP 계약은 [VM API 통합 문서](../contracts/vm-api-contract-v1.md)와
-[OpenAPI](../../contracts/dom0-manager-openapi.yaml)를 따른다.
+[OpenAPI](../contracts/dom0-manager-openapi.yaml)를 따른다.
 HTTP와 이 가이드의 Manager/CLI는 별도 인터페이스다.
 
 Spring의 Dom0LaunchRequest는 vm_id·template_id·template_version·vcpus·memory_mib의
 name을 포함한 6개 필드를 전송한다. PlatformProvisioner는 Spring의 name을 기존 Manager.create 입력으로 전달한다.
-tests/contracts/spring-create-request.json은 Manager용 6개 필드 시험 명세이며,
+platform/tests/contracts/spring-create-request.json은 Manager용 6개 필드 시험 명세이며,
 실제 Spring HTTP 요청의 직렬화 결과로 사용하지 않는다.
-tests/contracts/spring_manager_bridge.py는 이 명세로 실제 파일/registry/journal/IP 예약을
+platform/tests/contracts/spring_manager_bridge.py는 이 명세로 실제 파일/registry/journal/IP 예약을
 검사하는 시험 연결부다. Xen·mount·OS 복사만 대역이며 배포 HTTP 어댑터나 Spring 응답 직렬화기가 아니다.
 
-    python3 -B -m unittest discover -s tests/platform -p 'test_xenova_spring_contract.py' -v
+    python3 -B -m unittest discover -s platform/tests -p 'test_xenova_spring_contract.py' -v
 
 검사는 현재 Spring DTO의 name을 포함한 6개 필드와 실제 Manager의 display_name 저장·조회 경로를 대조한다.
 Python 소스 대조는 Java 실행·HTTP 배포·실보드 검증을 대신하지 않는다.
-services/dom0-manager에는 HTTP 서비스·Xen 조회 드라이버와 명령/Provisioner 인터페이스가 있다.
+platform/services/dom0-manager에는 HTTP 서비스·Xen 조회 드라이버와 명령/Provisioner 인터페이스가 있다.
 XenDriver의 create/shutdown/destroy와 UnavailableProvisioner의 변경 연산은 아직
 NotImplementedError이므로 이들 명령을 공통 Manager로 연결해야 한다.
 

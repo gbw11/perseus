@@ -1,6 +1,6 @@
 SUMMARY = "Xenova platform-backed dom0 HTTP management service"
 LICENSE = "CLOSED"
-FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../../services/dom0-manager:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../services/dom0-manager:"
 SRC_URI = "file://dom0_manager file://pyproject.toml file://xenova-dom0-manager.service file://dom0-manager.env"
 S = "${UNPACKDIR}"
 
