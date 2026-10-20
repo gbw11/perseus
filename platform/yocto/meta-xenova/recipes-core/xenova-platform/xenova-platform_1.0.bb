@@ -7,7 +7,7 @@ SRC_URI = "file://xenova_execution.py file://xenova_recovery.py file://xenova_do
            file://xenova-auth.conf file://xenova-first-boot file://xenova_first_boot.py \
            file://first_install_contract.py file://xenova-data-prepare.service \
            file://xenova-first-boot.service file://first-install-capabilities.json file://xenova-sshd-keys.conf file://prepare_instance.py file://prepare_rootfs.py file://guest_identity.py file://update-xenova-guest-ssh.py file://xen_config.py file://ubuntu file://debian"
-FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../../scripts:${THISDIR}/../../../../first-install:${THISDIR}/../../../../guests/common:${THISDIR}/../../../../guests:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../scripts:${THISDIR}/../../../../first-install:${THISDIR}/../../../../guests/common:${THISDIR}/../../../../guests:"
 S = "${UNPACKDIR}"
 inherit systemd
 

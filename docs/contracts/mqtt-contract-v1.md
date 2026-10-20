@@ -16,7 +16,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버, 젯슨, ESP32가 주고받는 MQTT �
 
 | 항목 | 규칙 |
 | --- | --- |
-| 토픽 접두사 | `perseus/v1/`. 플랫폼 표시명이 Xenova로 바뀌었어도 토픽 접두사는 유지한다 |
+| 토픽 접두사 | `xenova/v1/`. 10/20 이름 통일로 접두사도 바꿨다. 이전 `xenova/v1/`는 어디에도 배포된 적이 없어 호환 처리는 없다 |
 | 인코딩 | UTF-8 JSON, 필드 이름은 snake_case |
 | 시각 | `sent_at`은 ISO-8601 UTC. **보드 간 시각 비교로 판정하지 않는다.** 신선도는 받는 쪽이 수신 시각으로 잰다 |
 | 단위 | 속도 `m/s`, 조향 `rad`, 시간 `ms`, 메트릭 `percent`·`bytes` |
@@ -68,11 +68,11 @@ VM 에이전트, RC카 앱 VM, dom0 서버, 젯슨, ESP32가 주고받는 MQTT �
 
 | ID | 토픽 | `type` | 방향 | QoS | retain | payload |
 | --- | --- | --- | --- | --- | --- | --- |
-| MQTT-01 | `perseus/v1/vms/{vm_id}/heartbeat` | `agent.heartbeat` | 에이전트 → 백엔드 | 1 | X | `{}` (봉투만) |
-| MQTT-02 | `perseus/v1/vms/{vm_id}/inventory` | `agent.inventory` | 에이전트 → 백엔드 | 1 | **O** | `os{id, version_id, pretty_name}`, `kernel_release`, `hostname`, `interfaces[{name, mac, addresses[{address, family}]}]`, `agent_version`, `capabilities{commands[], metrics[]}` |
-| MQTT-03 | `perseus/v1/vms/{vm_id}/metrics` | `agent.metrics` | 에이전트 → 백엔드 | 0 | X | `window_ms`, `values[{name, unit, ...}]`, `processes[]` |
-| MQTT-04 | `perseus/v1/vms/{vm_id}/command` | `agent.command` | 백엔드 → 에이전트 | 1 | X | `command_id`, `operation_id`, `expected_boot_id`, `expires_at`, `action`(`stress`/`agent_exit`), `parameters` |
-| MQTT-05 | `perseus/v1/vms/{vm_id}/command-result` | `agent.command_result` | 에이전트 → 백엔드 | 1 | X | `command_id`, `operation_id`, `status`(`ACCEPTED`/`RUNNING`/`SUCCEEDED`/`FAILED`/`REJECTED`), `started_at`, `finished_at`, `duration_ms`, `result`, `error` |
+| MQTT-01 | `xenova/v1/vms/{vm_id}/heartbeat` | `agent.heartbeat` | 에이전트 → 백엔드 | 1 | X | `{}` (봉투만) |
+| MQTT-02 | `xenova/v1/vms/{vm_id}/inventory` | `agent.inventory` | 에이전트 → 백엔드 | 1 | **O** | `os{id, version_id, pretty_name}`, `kernel_release`, `hostname`, `interfaces[{name, mac, addresses[{address, family}]}]`, `agent_version`, `capabilities{commands[], metrics[]}` |
+| MQTT-03 | `xenova/v1/vms/{vm_id}/metrics` | `agent.metrics` | 에이전트 → 백엔드 | 0 | X | `window_ms`, `values[{name, unit, ...}]`, `processes[]` |
+| MQTT-04 | `xenova/v1/vms/{vm_id}/command` | `agent.command` | 백엔드 → 에이전트 | 1 | X | `command_id`, `operation_id`, `expected_boot_id`, `expires_at`, `action`(`stress`/`agent_exit`), `parameters` |
+| MQTT-05 | `xenova/v1/vms/{vm_id}/command-result` | `agent.command_result` | 에이전트 → 백엔드 | 1 | X | `command_id`, `operation_id`, `status`(`ACCEPTED`/`RUNNING`/`SUCCEEDED`/`FAILED`/`REJECTED`), `started_at`, `finished_at`, `duration_ms`, `result`, `error` |
 
 - inventory는 retained다. 최초 기동과 OS·네트워크 정보가 바뀔 때 전체를 다시 보낸다. retained 메시지는 마지막 보고일 뿐 지금 `ONLINE`이라는 증거가 아니다. VM을 삭제하면 백엔드가 그 VM의 retained inventory를 지운다.
 - inventory 필수값은 `os.id`, `kernel_release`, `hostname`. os-release가 없는 Zephyr는 `os.id = "zephyr"`, `kernel_release = "<Zephyr 버전>"`으로 보낸다.
@@ -121,11 +121,11 @@ VM 에이전트, RC카 앱 VM, dom0 서버, 젯슨, ESP32가 주고받는 MQTT �
 
 | ID | 토픽 | `type` | 발행 → 구독 | 주기 | QoS | retain |
 | --- | --- | --- | --- | --- | --- | --- |
-| MQTT-06 | `perseus/v1/apps/autonomous/events` | `drive.command` | 자율 VM → ESP32, 게이트웨이 | 50 Hz | 0 | X |
-| MQTT-06 | `perseus/v1/apps/manual/events` | `drive.command` | 수동 VM → ESP32, 게이트웨이 | 50 Hz | 0 | X |
-| MQTT-06 | `perseus/v1/apps/perception/events` | `perception.result` | 젯슨 → 자율 VM | 15 Hz | 0 | X |
-| MQTT-09 | `perseus/v1/vehicle/control` | `vehicle.control` | 게이트웨이 → ESP32, 앱 전체 | 변경 시 | 1 | **O** |
-| MQTT-10 | `perseus/v1/vehicle/status` | `vehicle.status` | ESP32 → 게이트웨이, 앱 전체 | 20 Hz | 0 | X |
+| MQTT-06 | `xenova/v1/apps/autonomous/events` | `drive.command` | 자율 VM → ESP32, 게이트웨이 | 50 Hz | 0 | X |
+| MQTT-06 | `xenova/v1/apps/manual/events` | `drive.command` | 수동 VM → ESP32, 게이트웨이 | 50 Hz | 0 | X |
+| MQTT-06 | `xenova/v1/apps/perception/events` | `perception.result` | 젯슨 → 자율 VM | 15 Hz | 0 | X |
+| MQTT-09 | `xenova/v1/vehicle/control` | `vehicle.control` | 게이트웨이 → ESP32, 앱 전체 | 변경 시 | 1 | **O** |
+| MQTT-10 | `xenova/v1/vehicle/status` | `vehicle.status` | ESP32 → 게이트웨이, 앱 전체 | 20 Hz | 0 | X |
 
 - 주행 토픽은 QoS 0, 받는 쪽은 토픽별 최신 1개만 유지한다 (latest-only). 50 Hz라 재전송보다 다음 명령이 빠르다.
 - `vehicle/control`은 retained라 ESP32가 재부팅해도 현재 활성 앱과 세대를 바로 받는다.
@@ -180,11 +180,11 @@ VM 에이전트, RC카 앱 VM, dom0 서버, 젯슨, ESP32가 주고받는 MQTT �
 
 | ID | 토픽 | `type` | 발행 → 구독 | QoS | 주요 payload |
 | --- | --- | --- | --- | --- | --- |
-| MQTT-06 | `perseus/v1/apps/autonomous/events` | `perception.event` | 자율 VM → 메시지 보드 | 1 | `kind`(obstacle 등), `detail` |
-| MQTT-06 | `perseus/v1/apps/message-board/events` | `message.posted` | 메시지 보드 → 주행 화면 | 1 | `text`, `level` |
-| MQTT-06 | `perseus/v1/apps/message-board/events` | `drive.resume.requested` | 메시지 보드 → 게이트웨이 | 1 | `requested_by` |
-| MQTT-06 | `perseus/v1/apps/vehicle/events` | `drive.mode.changed` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `from`, `to`, `generation`, `reason` |
-| MQTT-06 | `perseus/v1/apps/vehicle/events` | `drive.fault.detected` | 게이트웨이 → 메시지 보드, 백엔드 | 1 | `app_id`, `vm_id`, `reason`, `detected_at` |
+| MQTT-06 | `xenova/v1/apps/autonomous/events` | `perception.event` | 자율 VM → 메시지 보드 | 1 | `kind`(obstacle 등), `detail` |
+| MQTT-06 | `xenova/v1/apps/message-board/events` | `message.posted` | 메시지 보드 → 주행 화면 | 1 | `text`, `level` |
+| MQTT-06 | `xenova/v1/apps/message-board/events` | `drive.resume.requested` | 메시지 보드 → 게이트웨이 | 1 | `requested_by` |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `from`, `to`, `generation`, `reason` |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.fault.detected` | 게이트웨이 → 메시지 보드, 백엔드 | 1 | `app_id`, `vm_id`, `reason`, `detected_at` |
 
 - `drive.resume.requested`는 `AUTO_READY`일 때만 받아들인다. 다른 모드에서는 무시하고 `drive.mode.changed`를 내지 않는다.
 - 백엔드는 `drive.mode.changed`, `drive.fault.detected`를 콘솔 이벤트 로그(REST-18, `/ws/v1/events`)에 남긴다. 심각도는 모드 전환 `INFO`, `SAFE_STOP` 진입·장애 `WARNING`.
@@ -196,7 +196,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버, 젯슨, ESP32가 주고받는 MQTT �
 | 구간 | 규칙 |
 | --- | --- |
 | 콘솔 → 백엔드 | 입력 전용 WebSocket `/ws/v1/drive`. 기존 로그인(JWT)을 쓴다. 기존 `/ws/v1/metrics`, `/ws/v1/events`는 서버 → 콘솔 단방향이라 따로 둔다 |
-| 백엔드 → 수동 VM | MQTT-11 `perseus/v1/apps/manual/input`, `type: drive.input`, QoS 0, payload `keys`(눌린 키 목록) |
+| 백엔드 → 수동 VM | MQTT-11 `xenova/v1/apps/manual/input`, `type: drive.input`, QoS 0, payload `keys`(눌린 키 목록) |
 | 차단 | 백엔드는 모드가 `MANUAL`이 아니면 입력을 버린다 |
 
 ## 8. 메시지 지연 측정
@@ -205,8 +205,8 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 
 | ID | 토픽 | `type` | 방향 | QoS | retain | payload |
 | --- | --- | --- | --- | --- | --- | --- |
-| MQTT-07 | `perseus/v1/probes/{target_vm_id}/request` | `probe.ping` | 송신 VM → 대상 VM | 1 | X | `trial_id`, `target_vm_id`, `nonce`, `payload`(64~4096 bytes 문자열) |
-| MQTT-08 | `perseus/v1/probes/{source_vm_id}/reply` | `probe.pong` | 대상 VM → 송신 VM | 1 | X | `trial_id`, `request_message_id`, `nonce`, `payload` |
+| MQTT-07 | `xenova/v1/probes/{target_vm_id}/request` | `probe.ping` | 송신 VM → 대상 VM | 1 | X | `trial_id`, `target_vm_id`, `nonce`, `payload`(64~4096 bytes 문자열) |
+| MQTT-08 | `xenova/v1/probes/{source_vm_id}/reply` | `probe.pong` | 대상 VM → 송신 VM | 1 | X | `trial_id`, `request_message_id`, `nonce`, `payload` |
 
 - 송신 측은 발행 직전의 단조 시계로 시작 시각을 잡고, 같은 시계로 응답 수신 시각을 잰다. 송신·대상은 서로 다른 VM이어야 하며 dom0 측정 코드로 대신하지 않는다.
 - 시간 초과는 실패로 기록한다. 0 ms 성공으로 채우지 않는다.
@@ -215,15 +215,15 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 
 | 계정 | publish 허용 |
 | --- | --- |
-| 각 VM 에이전트 | `perseus/v1/vms/{자기 vm_id}/heartbeat·inventory·metrics·command-result` |
-| 앱 VM | `perseus/v1/apps/{자기 app_id}/events` |
-| 젯슨 | `perseus/v1/apps/perception/events` |
-| 게이트웨이 | `perseus/v1/vehicle/control`, `perseus/v1/apps/vehicle/events` |
-| ESP32 | `perseus/v1/vehicle/status` |
-| 백엔드 | `perseus/v1/apps/manual/input`, `perseus/v1/vms/{vm_id}/command` |
-| 각 VM 측정 클라이언트·응답기 | `perseus/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
+| 각 VM 에이전트 | `xenova/v1/vms/{자기 vm_id}/heartbeat·inventory·metrics·command-result` |
+| 앱 VM | `xenova/v1/apps/{자기 app_id}/events` |
+| 젯슨 | `xenova/v1/apps/perception/events` |
+| 게이트웨이 | `xenova/v1/vehicle/control`, `xenova/v1/apps/vehicle/events` |
+| ESP32 | `xenova/v1/vehicle/status` |
+| 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/vms/{vm_id}/command` |
+| 각 VM 측정 클라이언트·응답기 | `xenova/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
 
-브로커 계정·ACL 파일은 브로커 구성(`deploy/`)에서 관리한다.
+브로커 계정·ACL 파일은 브로커 구성(`platform/deploy/`)에서 관리한다.
 
 ## 10. 미확정
 

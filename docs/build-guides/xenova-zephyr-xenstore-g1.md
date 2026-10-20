@@ -22,7 +22,7 @@ ZEPHYR_SOURCE=/absolute/existing/source/zephyr
 TOOLS=/absolute/existing/host-tools
 DOWNLOADS=/absolute/existing/downloads
 G1_OUTPUT=/absolute/new/g1-build
-python3 -B scripts/build-xenova-xenstore-g1.py \
+python3 -B platform/scripts/build-xenova-xenstore-g1.py \
   --zephyr-source "$ZEPHYR_SOURCE" --tools "$TOOLS" \
   --spdx "$DOWNLOADS/zephyr-v4.4.0.spdx" \
   --toolchain-archive "$DOWNLOADS/toolchain_gnu_linux-x86_64_aarch64-zephyr-elf.tar.xz" \
@@ -37,7 +37,7 @@ rc=$?; echo "build rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 일반 Starter의 firmware.json·카탈로그·검증기를 사용하거나 완화하지 않는다.
 
 ```sh
-python3 -B -m unittest discover -s tests/platform \
+python3 -B -m unittest discover -s platform/tests \
   -p test_xenova_xenstore_g1.py -v
 rc=$?; echo "local rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 ```
@@ -57,10 +57,10 @@ adapter host 검사는 kernel/hypercall 선언 대역과 2-level pending 전이 
 ```sh
 G1_FIRMWARE=/absolute/verified/g1-build/firmware
 G1_HANDOFF=/absolute/new/g1-handoff
-python3 -B scripts/package-xenova-xenstore-g1-handoff.py package \
+python3 -B platform/scripts/package-xenova-xenstore-g1-handoff.py package \
   --firmware "$G1_FIRMWARE" --output "$G1_HANDOFF" --execute
 rc=$?; echo "package rc=$rc"; [ "$rc" -eq 0 ] || exit 1
-python3 -B scripts/package-xenova-xenstore-g1-handoff.py verify --directory "$G1_HANDOFF"
+python3 -B platform/scripts/package-xenova-xenstore-g1-handoff.py verify --directory "$G1_HANDOFF"
 rc=$?; echo "verify rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 (cd "$G1_HANDOFF" && sha256sum -c SHA256SUMS)
 rc=$?; echo "hash rc=$rc"; [ "$rc" -eq 0 ] || exit 1

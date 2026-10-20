@@ -82,14 +82,15 @@ Raspberry Pi 4 + Xen 멀티 OS 플랫폼을 자율주행 RC카에 올린다. 세
 
 | 구성요소 | 위치 |
 | --- | --- |
-| VM 매니저, 복구 서비스 | `services/dom0-manager/` |
-| 차량 게이트웨이 | `services/vehicle-gateway/` (신설 제안) |
-| VM 에이전트 | `services/vm-agent/` |
-| 주행 컨트롤러, 레코더, 콕핏 앱 | `apps/` |
-| 표시 서비스 | `services/display/` |
+| VM 매니저, 복구 서비스 | `platform/services/dom0-manager/` |
+| 차량 게이트웨이 | `platform/services/vehicle-gateway/` (신설 제안) |
+| VM 에이전트 | `platform/services/vm-agent/` |
+| 주행 컨트롤러, 레코더, 콕핏 앱 | `platform/apps/` |
+| 표시 서비스 | `platform/services/display/` |
 | 관리 서버, 콘솔 | `backend/`, `frontend/` |
-| 인지(Jetson), 섀시 펌웨어(ESP32) | 미정. `perception/`, `firmware/chassis-ecu/` 제안 |
-| 메시지·CAN·시리얼 계약 | `contracts/` (3일차 확정 시 이동) |
+| 인지(Jetson) | `vehicle/` |
+| 섀시 펌웨어(ESP32) | 미정. `platform/firmware/chassis-ecu/` 제안 |
+| 메시지·CAN·시리얼 계약 | `docs/contracts/` |
 
 ## 7. 결정 필요
 

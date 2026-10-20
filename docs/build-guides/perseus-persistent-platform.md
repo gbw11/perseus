@@ -66,7 +66,7 @@ root는 파티션 없는 `/dev/xvda`다. 새 영구 게스트는 `net.ifnames=0`
 
 ## 생성·게시 경계와 호스트 도구
 
-`scripts/prepare-perseus-guests.py`는 기본이 **PLAN ONLY**다. `--execute`가 없으면 다운로드·마운트·이미지 생성·초기화 작업을 하지 않는다. 실제 실행은 별도 승인 후 **보드가 꺼져 있고 해당 데이터를 다른 호스트/VM이 사용하지 않는 상태**에서 수행한다. 동시 프로비저닝은 호스트 파일 잠금으로 막는다.
+`platform/scripts/prepare-perseus-guests.py`는 기본이 **PLAN ONLY**다. `--execute`가 없으면 다운로드·마운트·이미지 생성·초기화 작업을 하지 않는다. 실제 실행은 별도 승인 후 **보드가 꺼져 있고 해당 데이터를 다른 호스트/VM이 사용하지 않는 상태**에서 수행한다. 동시 프로비저닝은 호스트 파일 잠금으로 막는다.
 
 필요한 호스트 도구는 템플릿 준비용 `qemu-img`, `losetup`, `mount/umount`, `blkid`, `mkfs.ext4`, `cp`, `chroot`; 인스턴스 준비용 `tune2fs`, `ssh-keygen`, 최종 SSH 검사용 ARM64 chroot 등이다. 이번 WSL에서는 mount/losetup/mkfs.ext4/OpenSSL 등은 확인했지만 `qemu-img`와 `qemu-aarch64-static`은 PATH에 없었다. 설치하지 않았다. ARM64 네이티브 호스트 또는 ARM64 chroot를 실행할 QEMU/binfmt 환경이 필요하며, 없으면 생성 도구가 실패한다. 필요하면 생성 단계 전에 호스트 개발 도구 설치를 별도 승인받는다. zstd 압축 커널이면 `zstd`도 필요하다. dom0 런타임에는 이 생성 도구를 설치하지 않는다.
 
@@ -75,17 +75,17 @@ root는 파티션 없는 `/dev/xvda`다. 새 영구 게스트는 `net.ifnames=0`
 아래는 **계획 출력 예시**다. 실제 실행 명령은 이번에 실행하지 않았다.
 
 ```bash
-python3 -B scripts/prepare-perseus-guests.py template \
+python3 -B platform/scripts/prepare-perseus-guests.py template \
   --source ubuntu-24.04-20260926 --input /absolute/downloads/ubuntu-arm64.img \
   --output /absolute/staging/templates/ubuntu-24.04-20260926
 
-python3 -B scripts/prepare-perseus-guests.py template \
+python3 -B platform/scripts/prepare-perseus-guests.py template \
   --source debian-13-20261015 --input /absolute/downloads/debian-arm64.qcow2 \
   --output /absolute/staging/templates/debian-13-20261015
 
-python3 -B scripts/prepare-perseus-guests.py storage-init --data-root /mnt/perseus-data
-python3 -B scripts/prepare-perseus-guests.py instance --data-root /mnt/perseus-data --id ubuntu-dev
-python3 -B scripts/prepare-perseus-guests.py instance --data-root /mnt/perseus-data --id debian-dev
+python3 -B platform/scripts/prepare-perseus-guests.py storage-init --data-root /mnt/perseus-data
+python3 -B platform/scripts/prepare-perseus-guests.py instance --data-root /mnt/perseus-data --id ubuntu-dev
+python3 -B platform/scripts/prepare-perseus-guests.py instance --data-root /mnt/perseus-data --id debian-dev
 ```
 
 실제 게시 위치는 승인 후 마운트한 데이터 영역의 `templates/<id>`다. 템플릿 명령의 `--output`을 그 **새 경로**로 지정하면 생성·검증·게시가 이어진다. `storage-init`은 이미 마운트한 빈 ext4에 등록 표식과 디렉터리만 만들며 포맷·파티션·마운트는 수행하지 않는다. label 지정과 데이터 매체 준비는 별도 승인 작업이다. SD 남는 영역을 이번 소스 작업에서 자동 사용하지 않는다.
@@ -140,8 +140,8 @@ perseus-vm poweroff
 
 ```bash
 cd ~/S15P31E110
-bash scripts/check-perseus-platform.sh
-bash scripts/check-perseus-platform.sh --metadata
+bash platform/scripts/check-perseus-platform.sh
+bash platform/scripts/check-perseus-platform.sh --metadata
 ```
 
 기본 명령은 일반 파일 fixture와 명령 대역으로 생명주기·보존·격리·최초 설정 계약, 기존 bring-up 회귀, 셸 문법을 검사한다. `--metadata`는 `/tmp/perseus-platform-static.*`에 설정/파싱 상태를 격리하고 `bitbake -p`, `bitbake -e`만 수행한다. 이미지/태스크·다운로드를 실행하지 않으며 기존 빌드·캐시에 쓰지 않는다. 이 절차는 저장소에 남고 `/tmp` 결과에 의존하지 않는다.
@@ -234,7 +234,7 @@ create에는 IP가 필요 없으며 자원은 1 vCPU·16MiB로 고정한다. del
 
 ```bash
 # PC 저장소에서: 완료된 build/zephyr와 라이선스·출처를 명시한다.
-python3 -B scripts/package-perseus-firmware.py \
+python3 -B platform/scripts/package-perseus-firmware.py \
   --build-dir /absolute/app-build/zephyr --license /absolute/app/LICENSE \
   --version app-20261017 --app team-app --source-revision <app-commit> \
   --build-id <build-id> --output /absolute/new-app-bundle

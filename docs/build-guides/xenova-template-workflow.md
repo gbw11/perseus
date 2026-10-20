@@ -30,14 +30,14 @@ overlay는 새 OS 작업 사본에만 적용한다. guest 신원·SSH·systemd·
 
 ```bash
 # 이미 검증한 캐시 OS 입력을 사용한다. 출력 부모를 먼저 새로 준비한다.
-python3 -B scripts/prepare-xenova-guests.py \
+python3 -B platform/scripts/prepare-xenova-guests.py \
   --execute template \
   --source ubuntu-24.04-20260926 --input /absolute/cache/ubuntu-arm64.img \
   --recipe /absolute/repo/platform/guests/linux/ubuntu-24.04-20260926/recipe.json \
   --output /absolute/releases/linux/ubuntu-24.04-20260926/1.0.1
 rc=$?; echo "prepare rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 sha256sum /absolute/releases/linux/ubuntu-24.04-20260926/1.0.1/template.json
-python3 -B scripts/verify-xenova-template.py \
+python3 -B platform/scripts/verify-xenova-template.py \
   --template /absolute/releases/linux/ubuntu-24.04-20260926/1.0.1 --sha256 ACTUAL_MANIFEST_SHA256
 rc=$?; echo "verify rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 ```
@@ -58,10 +58,10 @@ lock에서 갱신한다. lock과 실제 소스가 다르면 빌드 도구는 거
 원본 commit·SDK archive digest는 변경하지 않는다.
 
 ```bash
-python3 -B scripts/refresh-xenova-starter-lock.py \
+python3 -B platform/scripts/refresh-xenova-starter-lock.py \
   --version 1.1.0
 # 계획을 확인한 뒤 --execute를 추가한다. 소스만 변경하고 버전이 같으면 거부한다.
-python3 -B scripts/refresh-xenova-starter-lock.py \
+python3 -B platform/scripts/refresh-xenova-starter-lock.py \
   --version 1.1.0 \
   --execute
 ```
@@ -72,14 +72,14 @@ python3 -B scripts/refresh-xenova-starter-lock.py \
 
 
 ```bash
-python3 -B scripts/build-xenova-starter.py \
+python3 -B platform/scripts/build-xenova-starter.py \
   --zephyr-source /absolute/pinned/zephyr \
   --toolchain-prefix /absolute/sdk/bin/aarch64-zephyr-elf- \
   --toolchain-archive /absolute/cache/fixed-toolchain.tar.xz \
   --python-tools /absolute/existing/python-tools \
   --build-dir /absolute/new-starter-build --execute
 rc=$?; echo "build rc=$rc"; [ "$rc" -eq 0 ] || exit 1
-python3 -B scripts/package-xenova-firmware.py \
+python3 -B platform/scripts/package-xenova-firmware.py \
   --build-dir /absolute/new-starter-build/zephyr --license /absolute/pinned/zephyr/LICENSE \
   --app xenova-starter --version 1.0.0 --template-id xenova-zephyr-starter-1.0.0 \
   --template-version 1.0.1 \
@@ -97,7 +97,7 @@ payload 해시와 Xenova 안내문을 확인한다. 이전 Perseus 바이너리�
 ## 기본 선택과 다음 이미지
 
 ```bash
-python3 -B scripts/resolve-xenova-templates.py \
+python3 -B platform/scripts/resolve-xenova-templates.py \
   --release-root /absolute/releases > references.tmp
 rc=$?; echo "catalog rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 mv references.tmp references.json
