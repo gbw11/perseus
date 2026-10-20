@@ -1,0 +1,32 @@
+.stack {
+  position: fixed;
+  right: var(--x-space-5);
+  bottom: var(--x-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--x-space-2);
+  z-index: 1000;
+}
+.toast {
+  min-width: 240px;
+  max-width: 420px;
+  padding: var(--x-space-3) var(--x-space-4);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface);
+  color: var(--x-text);
+  border-left: 4px solid var(--x-primary);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 20%);
+  font-size: var(--x-text-sm);
+}
+.ok {
+  border-left-color: var(--x-ok);
+}
+.fault {
+  border-left-color: var(--x-fault);
+}
+.recovering {
+  border-left-color: var(--x-recovering);
+}
+.stopped {
+  border-left-color: var(--x-stopped);
+}
