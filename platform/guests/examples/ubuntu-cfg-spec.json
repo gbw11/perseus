@@ -1,0 +1,19 @@
+{
+  "instance_root": "/srv/xenova/instances",
+  "instance": {
+    "schema": 1,
+    "id": "ubuntu-dev",
+    "name": "ubuntu-dev",
+    "uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "hostname": "ubuntu-dev",
+    "template": "ubuntu-24.04-20260926",
+    "template_id": "ubuntu-24.04-arm64",
+    "template_version": "1.0.0",
+    "vcpus": 1,
+    "memory_mib": 768,
+    "mac": "02:16:3e:77:00:10",
+    "ipv4": "192.168.77.10",
+    "autostart": true,
+    "kernel_release": "6.8.0-142-generic"
+  }
+}

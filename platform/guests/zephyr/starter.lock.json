@@ -1,0 +1,26 @@
+{
+  "id": "xenova-zephyr-starter-1.0.0",
+  "app": "xenova-starter",
+  "version": "1.0.0",
+  "zephyr_commit": "684c9e8f32e4373a21098559f748f06915f950c9",
+  "sdk_version": "1.0.0",
+  "app_source_sha256": "e6d7ef3e1410bcf3bbdffc668ba71a9b2e89cef700adc9a1b58766534462eae4",
+  "app_files": {
+    "CMakeLists.txt": {
+      "sha256": "8ea6a231ad3d11b7f790f38dfbc11f03bf668fbeff48c89bd483307969b23825",
+      "bytes": 194
+    },
+    "prj.conf": {
+      "sha256": "d6468f5d946ec86a885b60b35b3f63dd5d78de90ece8b4a013b27bee27e699e1",
+      "bytes": 100
+    },
+    "README.md": {
+      "sha256": "34063efd1b5db6b68c6f7963f8d26ff148ffab4f5261d711e6a73fda0bd94d0b",
+      "bytes": 3162
+    },
+    "src/main.c": {
+      "sha256": "635a13aea4145ce27178b581e7476c1e87de62880d47b181830c66342fc02b1f",
+      "bytes": 465
+    }
+  }
+}

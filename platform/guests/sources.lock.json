@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "ubuntu-24.04-20260926": {
+    "distribution": "ubuntu",
+    "release": "24.04",
+    "architecture": "arm64",
+    "url": "https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-arm64.img",
+    "checksum_url": "https://cloud-images.ubuntu.com/releases/noble/release-20260926/SHA256SUMS",
+    "hash_algorithm": "sha256",
+    "digest": "1d6bffe64b848468ac97f821d369a4846d983de1800ccf6b5ec8853e85cefc55",
+    "format": "qcow2",
+    "kernel_release": "6.8.0-142-generic",
+    "kernel_package": "linux-image-6.8.0-142-generic",
+    "kernel_package_version": "6.8.0-142.142",
+    "kernel_metapackage": "linux-image-virtual"
+  },
+  "debian-13-20261015": {
+    "distribution": "debian",
+    "release": "13",
+    "architecture": "arm64",
+    "url": "https://cloud.debian.org/images/cloud/trixie/20261015-2632/debian-13-generic-arm64-20261015-2632.qcow2",
+    "checksum_url": "https://cloud.debian.org/images/cloud/trixie/20261015-2632/SHA512SUMS",
+    "hash_algorithm": "sha512",
+    "digest": "a34e1c1eea1fbb9ad31ebdfc6c776d1d579ce9e3d740ab10549ebcdca6fe1a46c28e0a42cbcdf1eb561795776733c178f6e816fe1a2cb60d26ffc56c07f915c4",
+    "format": "qcow2",
+    "kernel_release": "6.12.111+deb13-arm64",
+    "kernel_package": "linux-image-6.12.111+deb13-arm64",
+    "kernel_package_version": "6.12.111-1",
+    "kernel_metapackage": "linux-image-arm64"
+  }
+}

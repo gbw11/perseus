@@ -1,0 +1,14 @@
+# Ubuntu ARM64 direct-kernel boot. Runtime verification is required.
+name = '${xen_name}'
+uuid = '${vm_id}'
+type = 'pvh'
+memory = ${memory_mib}
+vcpus = ${vcpus}
+kernel = '${kernel_path}'
+ramdisk = '${initrd_path}'
+extra = 'console=hvc0 root=/dev/xvda rw rootwait net.ifnames=0'
+disk = [ 'format=raw,vdev=xvda,access=rw,backendtype=qdisk,target=${disk_path}' ]
+vif = [ 'mac=${mac},bridge=${bridge_name},script=vif-bridge' ]
+on_poweroff = 'destroy'
+on_reboot = 'restart'
+on_crash = 'preserve'

@@ -1,0 +1,15 @@
+[Unit]
+Description=Verify/resume factory registration before any Xenova VM starts
+Requires=srv-xenova.mount
+After=srv-xenova.mount
+Before=xenova-vm-shutdown.service xenova-vms.service
+RequiresMountsFor=/srv/xenova
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/xenova-first-boot register
+RemainAfterExit=yes
+TimeoutStartSec=300s
+
+[Install]
+WantedBy=multi-user.target

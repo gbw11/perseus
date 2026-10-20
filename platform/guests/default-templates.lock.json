@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "templates": [
+    {
+      "guest_kind": "linux",
+      "id": "ubuntu-24.04-20260926",
+      "version": "1.0.0",
+      "directory": "linux/ubuntu-24.04-20260926/1.0.0",
+      "manifest_sha256": "6140f84f3ea885f637fa01b7e0f5858b2f8ac4264f89ab0b1754b932e39d9efe",
+      "template_id": "ubuntu-24.04-arm64"
+    },
+    {
+      "guest_kind": "linux",
+      "id": "debian-13-20261015",
+      "version": "1.0.0",
+      "directory": "linux/debian-13-20261015/1.0.0",
+      "manifest_sha256": "e9803876eb7b15e88a8b50374c268cfd07bb17fe5f9175d59679f58569d14f36",
+      "template_id": "debian-13-arm64"
+    },
+    {
+      "guest_kind": "zephyr",
+      "id": "xenova-zephyr-starter-1.0.0",
+      "version": "1.0.0",
+      "directory": "zephyr/xenova-zephyr-starter-1.0.0",
+      "manifest_sha256": "2f6d1c26b4deb4daf2e8f8e031ff8e0c76497d625ce5813f0b45ac626f662821",
+      "template_id": "zephyr-xenvm-starter-arm64"
+    }
+  ]
+}
