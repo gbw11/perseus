@@ -20,7 +20,7 @@ config XENOVA_MANUAL_BROKER_PASSWORD
 	default ""
 
 config XENOVA_MANUAL_VM_ID
-	string "vm_id used until it is read from XenStore (design D5)"
+	string "vm_id fallback when XenStore cannot be read (design D5)"
 	default "00000000-0000-4000-8000-000000000000"
 
 source "Kconfig.zephyr"

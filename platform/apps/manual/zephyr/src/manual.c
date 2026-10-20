@@ -1,4 +1,5 @@
 /* 수동주행 앱 로직 — Python xenova_manual/keymap.py·app.py 와 같은 규칙 (tests/test_manual.c 로 대조) */
+#include <errno.h>
 #include <string.h>
 
 #include "manual.h"
@@ -45,4 +46,32 @@ void manual_step(const struct manual_cfg *cfg, const struct manual_inputs *in, s
 		out->generation = 0; /* ESP32 는 세대가 다르면 버리므로 차는 움직이지 않는다 */
 		*state = "idle";
 	}
+}
+
+int manual_vm_id_from_xenstore(const char *path, char out[XM_UUID_LEN + 1])
+{
+	static const char prefix[] = "/vm/";
+
+	if (path == NULL || strncmp(path, prefix, sizeof(prefix) - 1) != 0) {
+		return -EINVAL;
+	}
+	const char *uuid = path + sizeof(prefix) - 1;
+
+	if (strlen(uuid) != XM_UUID_LEN) {
+		return -EINVAL;
+	}
+	for (int i = 0; i < XM_UUID_LEN; i++) {
+		char c = uuid[i];
+		bool dash = i == 8 || i == 13 || i == 18 || i == 23;
+
+		if (dash ? c != '-' : !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+			return -EINVAL;
+		}
+		out[i] = (c >= 'A' && c <= 'F') ? (char)(c - 'A' + 'a') : c;
+	}
+	out[XM_UUID_LEN] = '\0';
+	if (strcmp(out, "00000000-0000-0000-0000-000000000000") == 0) {
+		return -EINVAL; /* nil UUID 는 Domain-0 몫 (에이전트와 같은 규칙) */
+	}
+	return 0;
 }
