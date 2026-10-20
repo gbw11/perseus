@@ -108,6 +108,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Vm'
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
         '404':
           $ref: '#/components/responses/VMNotFound'
         '500':
@@ -131,6 +133,8 @@ paths:
           description: VM 이 숨김 보관됨
         '404':
           $ref: '#/components/responses/VMNotFound'
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
         '409':
           $ref: '#/components/responses/InvalidState'
         '500':
@@ -160,6 +164,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '204':
           description: 도메인이 없는 상태 (디스크 보존)
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
         '500':
           $ref: '#/components/responses/DriverError'
         '501':
@@ -328,7 +334,7 @@ components:
           enum: [ok, xen_unavailable]
   responses:
     InvalidArgument:
-      description: 형식 또는 범위 오류 (FastAPI 422 를 400 으로 정규화)
+      description: 형식 또는 범위 오류 (FastAPI 422 를 400 으로 정규화). 경로의 vm_id 가 UUID 가 아니거나 nil UUID(Domain-0)인 경우 포함
       content:
         application/json:
           schema:
