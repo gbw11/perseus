@@ -1,7 +1,7 @@
 """실제 Mosquitto 로 도는 통합 테스트. 브로커가 없으면 건너뛴다.
 
-    docker run --rm -d --name perseus-mq-test -p 18830:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
-    PERSEUS_MQTT_TEST_BROKER=127.0.0.1:18830 PERSEUS_MQTT_TEST_CONTAINER=perseus-mq-test python -m pytest
+    docker run --rm -d --name xenova-mq-test -p 18830:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
+    XENOVA_MQTT_TEST_BROKER=127.0.0.1:18830 XENOVA_MQTT_TEST_CONTAINER=xenova-mq-test python -m pytest
 """
 
 from __future__ import annotations
@@ -15,18 +15,18 @@ import uuid
 
 import pytest
 
-from perseus_mqtt import Identity, PerseusClient, topics
-from perseus_mqtt import envelope as env
+from xenova_mqtt import Identity, XenovaClient, topics
+from xenova_mqtt import envelope as env
 
-BROKER = os.environ.get("PERSEUS_MQTT_TEST_BROKER", "")
-CONTAINER = os.environ.get("PERSEUS_MQTT_TEST_CONTAINER", "")
+BROKER = os.environ.get("XENOVA_MQTT_TEST_BROKER", "")
+CONTAINER = os.environ.get("XENOVA_MQTT_TEST_CONTAINER", "")
 
-pytestmark = pytest.mark.skipif(not BROKER, reason="PERSEUS_MQTT_TEST_BROKER 미설정")
+pytestmark = pytest.mark.skipif(not BROKER, reason="XENOVA_MQTT_TEST_BROKER 미설정")
 
 
-def _client(**identity) -> PerseusClient:
+def _client(**identity) -> XenovaClient:
     host, port = BROKER.rsplit(":", 1)
-    client = PerseusClient(Identity(**identity), host, int(port))
+    client = XenovaClient(Identity(**identity), host, int(port))
     assert client.start(wait_s=5), "브로커 연결 실패"
     return client
 
@@ -39,9 +39,9 @@ def vm_id():
 
 @pytest.fixture
 def clients():
-    created: list[PerseusClient] = []
+    created: list[XenovaClient] = []
 
-    def make(**identity) -> PerseusClient:
+    def make(**identity) -> XenovaClient:
         client = _client(**identity)
         created.append(client)
         return client
@@ -51,7 +51,7 @@ def clients():
         client.stop()
 
 
-def _subscribe(client: PerseusClient, topic: str) -> queue.Queue:
+def _subscribe(client: XenovaClient, topic: str) -> queue.Queue:
     received: queue.Queue = queue.Queue()
     client.subscribe(topic, received.put)
     time.sleep(0.3)  # SUBACK 대기
@@ -60,7 +60,7 @@ def _subscribe(client: PerseusClient, topic: str) -> queue.Queue:
 
 def test_publish_subscribe_roundtrip(clients, vm_id):
     receiver = clients(source_id="test-receiver")
-    received = _subscribe(receiver, "perseus/v1/vms/+/heartbeat")
+    received = _subscribe(receiver, "xenova/v1/vms/+/heartbeat")
     sender = clients(vm_id=vm_id)
 
     sent = sender.publish(topics.heartbeat(vm_id), "agent.heartbeat", {})
@@ -104,7 +104,7 @@ def test_inventory_is_retained_for_late_subscriber(clients, vm_id):
     sender.clear_retained(topics.inventory(vm_id))
 
 
-@pytest.mark.skipif(not CONTAINER, reason="PERSEUS_MQTT_TEST_CONTAINER 미설정 (브로커 재시작 테스트)")
+@pytest.mark.skipif(not CONTAINER, reason="XENOVA_MQTT_TEST_CONTAINER 미설정 (브로커 재시작 테스트)")
 def test_reconnects_and_resubscribes_after_broker_restart(clients, vm_id):
     receiver = clients(source_id="test-receiver")
     received = _subscribe(receiver, topics.heartbeat(vm_id))
