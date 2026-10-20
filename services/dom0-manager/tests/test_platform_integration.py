@@ -92,7 +92,11 @@ class Board:
         self.records = {ubuntu["id"]: ubuntu, debian["id"]: debian}
         self.xen = FakeXen(self.data, self.records)
         ubuntu_dir = fixture(self.data, ubuntu)
-        fixture(self.data, debian)
+        debian_dir = fixture(self.data, debian)
+        for directory in (ubuntu_dir, debian_dir):
+            with (directory / "root.raw").open("r+b") as stream:
+                stream.seek(1080)
+                stream.write(b"\x53\xef")
         self.xen.rows.append(domain(ubuntu, ubuntu_dir / "root.raw", 1))
         _publish_template(self.data)
         self.platform = vm.Platform(self.data, self.run, command=self.xen, defaults_path=DEFAULTS)
@@ -123,7 +127,7 @@ class Board:
 
 @pytest.fixture
 def board():
-    with patch.object(vm, "storage_check"), patch.object(vm.Platform, "check_network"):
+    with patch.object(vm, "storage_check"), patch.object(vm.Platform, "check_network"), patch.object(vm.Platform, "check_xen"):
         b = Board()
         try:
             yield b
@@ -158,7 +162,7 @@ def test_real_manager_stop_then_delete(client, board):
 
 def test_real_manager_restart_registered_vm(client, board):
     """등록만 된 VM 에 POST /vms 가 오면 create 없이 start 만 한다 (디스크 재사용)."""
-    body = {"vm_id": str(DEBIAN), "template_id": TEMPLATE_ID, "template_version": TEMPLATE_VERSION, "vcpus": 1, "memory_mib": 512}
+    body = {"vm_id": str(DEBIAN), "name": "다시 요청한 표시 이름", "template_id": TEMPLATE_ID, "template_version": TEMPLATE_VERSION, "vcpus": 1, "memory_mib": 512}
     debian = board.records["debian-dev"]
     body.update(vcpus=debian["vcpus"], memory_mib=debian["memory_mib"])
     restarted = client.post("/api/v1/vms", json=body)
@@ -167,10 +171,11 @@ def test_real_manager_restart_registered_vm(client, board):
     assert any(call[:2] == ["xl", "create"] for call in board.xen.calls)
 
 
-def test_real_manager_create_with_spring_issued_vm_id(client, board):
+@pytest.mark.parametrize('display_name', ['주행 실험용 Ubuntu', '../경로가 아닌 표시 이름'])
+def test_real_manager_create_with_spring_issued_vm_id(client, board, display_name):
     """팀 결정: Spring 발급 vm_id 가 registry·Xen UUID 가 된다. 플랫폼 create 는 vm_id 를 필수로 받고 내부 실행 이름·MAC·IP 를
     스스로 발급한다. 지원 여부 probe 나 조건부 건너뜀 없이 항상 201 과 UUID 일치를 요구한다 (회귀를 숨기지 않는다)."""
-    body = {"vm_id": str(NEW_VM), "template_id": TEMPLATE_ID, "template_version": TEMPLATE_VERSION, "vcpus": 1, "memory_mib": 512}
+    body = {"vm_id": str(NEW_VM), "name": display_name, "template_id": TEMPLATE_ID, "template_version": TEMPLATE_VERSION, "vcpus": 1, "memory_mib": 512}
     created = client.post("/api/v1/vms", json=body)
     assert created.status_code == 201, created.text
     assert created.json()["vm_id"] == str(NEW_VM)
@@ -179,7 +184,59 @@ def test_real_manager_create_with_spring_issued_vm_id(client, board):
     assert registered["ok"], registered
     view = registered["data"]["vm"]
     assert view["vm_id"] == str(NEW_VM) and view["configuration"]["uuid"] == str(NEW_VM)
+    assert view["name"] == body["name"]
+    assert view["configuration"]["display_name"] == body["name"]
     assert view["configuration"]["id"] == management.internal_name(str(NEW_VM))  # 디렉터리 = 플랫폼 내부 실행 이름
     assert view["configuration"]["ipv4"] not in (None, "192.168.77.10", "192.168.77.20")  # 플랫폼이 공장 예약을 피해 할당
     assert any(row["config"]["c_info"]["uuid"] == str(NEW_VM) for row in board.xen.rows)  # Xen 도메인 UUID 도 요청 UUID
     assert client.get(f"/api/v1/vms/{NEW_VM}").json()["vm_id"] == str(NEW_VM)
+
+def test_create_retransmission_does_not_rename_existing_instance(client, board):
+    body = {"vm_id": str(NEW_VM), "name": "최초 표시 이름", "template_id": TEMPLATE_ID,
+            "template_version": TEMPLATE_VERSION, "vcpus": 1, "memory_mib": 512}
+    assert client.post("/api/v1/vms", json=body).status_code == 201
+    saved = board.manager.call("get", {"vm_id": str(NEW_VM)})["data"]["vm"]
+    directory = board.data / "instances" / saved["configuration"]["id"]
+    disk_inode = (directory / "root.raw").stat().st_ino
+    initial = saved["initial_spec"].copy()
+    assert client.post(f"/api/v1/vms/{NEW_VM}/stop").status_code == 204
+    assert client.post("/api/v1/vms", json={**body, "name": "변경을 요청하지 않는 재전달"}).status_code == 201
+    current = board.manager.call("get", {"vm_id": str(NEW_VM)})["data"]["vm"]
+    assert current["name"] == body["name"]
+    assert current["configuration"]["display_name"] == body["name"]
+    assert current["initial_spec"] == initial
+    assert (directory / "root.raw").stat().st_ino == disk_inode
+
+@pytest.mark.parametrize("name", ["개발용 Ubuntu", "\u00a0VM", "VM\u3000", "\u2003주행 A VM\u202f"])
+def test_spring_dto_name_uses_actual_manager_metadata_preparer(client, board, name):
+    """DTO 필드·실제 HTTP·Manager 메타데이터를 연결하고 Linux 디스크 복사 경계만 대체한다."""
+    import re
+    import prepare_instance
+    source = (REPO / "backend/src/main/java/com/xenova/backend/vm/infrastructure/Dom0LaunchRequest.java").read_text()
+    record_fields = re.search(r"record Dom0LaunchRequest\((.*?)\)", source, re.S).group(1)
+    names = {re.sub(r"([A-Z])", lambda m: "_" + m[1].lower(), name)
+             for name in re.findall(r"(?:String|int)\s+(\w+)", record_fields)}
+    body = json.loads((REPO / "tests/contracts/spring-create-request.json").read_text())
+    body["vm_id"] = str(NEW_VM)
+    body["name"] = name
+    assert set(body) == names
+    board.manager.preparer = board.manager._prepare
+    def copy_disk_boundary(args, **kwargs):
+        record = kwargs["record_override"]
+        assert record["display_name"] == body["name"]
+        directory = fixture(board.data, record)
+        with (directory / "root.raw").open("r+b") as stream:
+            stream.seek(1080)
+            stream.write(b"\x53\xef")
+        board.records[record["id"]] = record
+    with patch.object(prepare_instance, "make_instance", side_effect=copy_disk_boundary) as copy:
+        response = client.post("/api/v1/vms", json=body)
+    assert response.status_code == 201, response.text
+    assert copy.call_count == 1
+    directory = board.data / "instances" / management.internal_name(str(NEW_VM))
+    persisted = json.loads((directory / "instance.json").read_text())
+    assert persisted["display_name"] == body["name"]
+    assert persisted["name"] == persisted["id"] == "vm-" + NEW_VM.hex
+    assert persisted["uuid"] == body["vm_id"]
+    view = board.manager.call("get", {"vm_id": body["vm_id"]})["data"]["vm"]
+    assert view["name"] == view["configuration"]["display_name"] == body["name"]

@@ -147,3 +147,5 @@ Perseus 소스·이미지·실보드의 역사적 기록입니다. 기존 로그
 
 - [VM 관리 계약·작업 기록·보관/복원/삭제](docs/build-guides/xenova-vm-management.md)
 - [dom0 Wi-Fi 관리 접속](docs/build-guides/xenova-wifi-access.md)
+
+- [플랫폼 실행 의도·조건부 복구·종료 조율](docs/build-guides/xenova-recovery-foundation.md)

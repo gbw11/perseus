@@ -12,7 +12,7 @@ Xenova 준비본을 두 개의 현행 기본 카탈로그로 유지하지 않는
 | 수정 가능한 Starter 원본 | `platform/guests/zephyr/starter-app/`와 의도한 앱 버전·해시의 `starter.lock.json` |
 | 준비/빌드 작업 자산 | 새 전용 workspace. 중단 시 기존 게시본을 덮어쓰지 않고 조사용 작업 경로를 남김 |
 | 버전별 게시본 | Linux `linux/<source-id>/<version>/`, Starter `zephyr/xenova-zephyr-starter-<version>/`. 파일 0444, 동일 출력 덮어쓰기 거부 |
-| 현행 기본 선택 | `platform/guests/default-templates.lock.json`. VM별 한 버전·실제 manifest SHA를 선택 |
+| 현행 기본 선택 | `platform/guests/default-templates.lock.json`. 템플릿 ID별 한 버전·실제 manifest SHA를 선택 |
 | VM 생성 | 선택된 게시본을 공통 instances 경로로 독립 복사. 기존 VM에 자동 적용하지 않음 |
 
 Linux `source_id`는 OS 원본의 고정 출처이며 `version`은 프로젝트 준비 버전이다.
@@ -102,7 +102,7 @@ rc=$?; echo "catalog rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 mv references.tmp references.json
 ```
 
-이 명령은 current lock의 3종을 모두 실제 검증한 뒤 조립 config의 guests/rtos_templates
+이 명령은 current lock의 3종을 모두 실제 검증한 뒤 조립 config의 linux_templates/rtos_templates
 부분을 출력한다. 이전 이름의 중복 엔트리·경로 이탈·manifest 불일치는 거부한다.
 선택 버전만 새 이미지의 templates/rtos-templates에 포함한다. 버전 이력 전체를 싣지 않는다.
 새 Linux VM에는 선택한 template_version/template_manifest_sha256도 생성 출처로 남긴다.
@@ -122,3 +122,5 @@ VM API는 ubuntu-24.04-arm64, debian-13-arm64, zephyr-xenvm-starter-arm64와 명
 기존 root.raw/firmware bytes나 manifest를 바꾸어 새 ID로 가장하지 않는다.
 새 게시 내용이 달라지면 새 배포 버전과 실제 해시를 선택한다.
 관리 카탈로그 게시와 최초 설치 연결은 xenova-vm-management.md의 절차를 따른다.
+
+최초 설치 배치와 템플릿 카탈로그는 별개다. `resolve-xenova-templates.py`는 Linux 2종을 `linux_templates`, Starter 1종을 `rtos_templates`로 반환한다. 이를 새 조립 config에 넣으면 Ubuntu는 불변 템플릿만 보관하고 Debian Interaction seed 1개와 독립된 Zephyr A/B seed 2개를 준비한다. 기존 템플릿 버전·payload·manifest 해시는 변경하지 않는다.
