@@ -80,7 +80,7 @@ client.subscribe(topics.app_events("vehicle"), on_mode)
 ## 하지 않는 것
 
 - Zephyr 수동 VM, ESP32: 펌웨어라 이 패키지를 쓰지 않는다. 같은 봉투 규칙을 펌웨어에서 구현한다.
-- 브로커 계정·ACL: 브로커 구성(`deploy/`)에서 관리한다. 계정이 생기면 `username`, `password` 인자로 넘긴다.
+- 브로커 계정·ACL: 브로커 구성(`platform/deploy/`)에서 관리한다. 계정이 생기면 `username`, `password` 인자로 넘긴다.
 - heartbeat 주기, 메트릭 수집, 서비스 등록: 에이전트 본체가 정한다.
 
 ## 테스트

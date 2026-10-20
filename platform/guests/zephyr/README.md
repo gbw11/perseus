@@ -36,7 +36,7 @@ cmake -S "$ZEPHYR_BASE/samples/synchronization" \
 cmake --build /absolute/work/build-xenvm -j 4
 
 # 기본은 읽기 전용 검사/계획이다. --execute가 새 번들 게시만 허용한다.
-python3 -B scripts/prepare-xenova-zephyr.py \
+python3 -B platform/scripts/prepare-xenova-zephyr.py \
   --source /absolute/work/source/zephyr --build-dir /absolute/work/build-xenvm \
   --spdx /absolute/work/downloads/zephyr-v4.4.0.spdx \
   --toolchain-archive /absolute/work/downloads/toolchain_gnu_linux-x86_64_aarch64-zephyr-elf.tar.xz \

@@ -30,7 +30,7 @@ dom0 SSH의 hard key gate·일반 서비스·generator mask도 유지했다.
 
 ## 회귀 결과와 한계
 
-- `bash scripts/check-xenova-platform.sh --metadata`: exit 0.
+- `bash platform/scripts/check-xenova-platform.sh --metadata`: exit 0.
 - Python 280개(기존 플랫폼 267 + setup 8 + 새 리브랜딩 5), 부팅/init/network 17개 통과.
 - 실제 systemd 259.5 로더와 전체 원본 fixture: SSH 순환/job 삭제 음성 대조,
   수정 후 정상과 재주입 순환 검출 통과. 기본 의존성은 평가하며 generator는 실행하지 않는다.
@@ -51,8 +51,8 @@ dom0 SSH의 hard key gate·일반 서비스·generator mask도 유지했다.
 | 위치 | 유지 이유 |
 | --- | --- |
 | `docs/build-guides/perseus-*`, 이전 `yocto-rpi4-xen-*` | 당시의 소스·실보드·산출물 기록. 주요 비날짜 문서에는 현재 가이드 안내만 추가하고 원문은 유지 |
-| `tests/platform/results/*20261016.json` | 과거 결과 JSON을 재작성하지 않음 |
-| `tests/platform/fixtures/**`의 원본 archive/provenance/README | 실제 WIC/게스트에서 추출된 출처·바이트·해시 보존 |
+| `platform/tests/results/*20261016.json` | 과거 결과 JSON을 재작성하지 않음 |
+| `platform/tests/fixtures/**`의 원본 archive/provenance/README | 실제 WIC/게스트에서 추출된 출처·바이트·해시 보존 |
 | dom0 fixture helper·브랜딩 음성 테스트·metadata의 이전 collection 부재 assertion | 과거 fixture를 새 시험 root로 명시적으로 투영하거나 이전 인터페이스가 없음을 검증 |
 | Xen reset patch의 From/이메일 | 원래 패치 작성 출처이며 패치 전체 바이트를 유지 |
 | 기존 crypt hash의 `perseus-dev` salt와 이를 확인하는 테스트 | 인증 해시의 일부이며 런타임 명칭/호환 별칭이 아님. 기본 비밀번호 계약 유지 |
