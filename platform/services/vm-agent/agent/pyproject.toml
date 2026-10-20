@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xenova-agent"
+version = "0.1.0"
+description = "Xenova VM 에이전트: MQTT 계약 v1 heartbeat 송신 (S15P31E110-117)"
+requires-python = ">=3.11"
+# xenova_mqtt 는 같은 저장소의 ../mqtt-client 라 여기 선언하지 않는다. 게스트에는 deploy/install_into_rootfs.py 가 두 패키지를
+# 함께 복사하고 유닛이 PYTHONPATH 로 묶는다. 개발 PC 에서는 pytest 의 pythonpath 설정이 같은 역할을 한다
+dependencies = [
+    "paho-mqtt>=1.6,<3",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+]
+
+[tool.setuptools.packages.find]
+include = ["xenova_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "../mqtt-client"]
+addopts = "-q"

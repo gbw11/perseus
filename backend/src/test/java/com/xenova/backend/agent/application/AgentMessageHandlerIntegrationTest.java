@@ -117,9 +117,9 @@ class AgentMessageHandlerIntegrationTest {
         assertThat(handle("metrics", envelope("agent.metrics", "m-4", 1, "2026-10-16T03:00:00Z", badUnit)))
                 .isEqualTo(Result.REJECTED);
 
-        assertThat(handler.handle("perseus/v1/vms/" + VM + "/heartbeat", "not json".getBytes(StandardCharsets.UTF_8),
+        assertThat(handler.handle("xenova/v1/vms/" + VM + "/heartbeat", "not json".getBytes(StandardCharsets.UTF_8),
                 RECEIVED)).isEqualTo(Result.REJECTED);
-        assertThat(handler.handle("perseus/v1/vms/" + VM + "/heartbeat",
+        assertThat(handler.handle("xenova/v1/vms/" + VM + "/heartbeat",
                 new byte[AgentMessageHandler.MAX_PAYLOAD_BYTES + 1], RECEIVED)).isEqualTo(Result.REJECTED);
 
         assertThat(heartbeatRepository.count()).isZero();
@@ -131,7 +131,7 @@ class AgentMessageHandlerIntegrationTest {
     }
 
     private Result handle(String kind, byte[] json) {
-        return handler.handle("perseus/v1/vms/" + VM + "/" + kind, json, RECEIVED);
+        return handler.handle("xenova/v1/vms/" + VM + "/" + kind, json, RECEIVED);
     }
 
     private String heartbeat(String messageId, long seq, String sentAt) {
