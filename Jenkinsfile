@@ -22,10 +22,10 @@ pipeline {
             }
         }
         stage('dom0-manager Test') {
-            // Python 제어 서비스(services/dom0-manager). 에이전트에 python3 가 없으면 이 단계만 실패로 표시하고
+            // Python 제어 서비스(platform/services/dom0-manager). 에이전트에 python3 가 없으면 이 단계만 실패로 표시하고
             // 빌드는 UNSTABLE 로 둔다. 에이전트에 python3 + pip 가 준비되면 catchError 를 걷어낸다.
             steps {
-                dir('services/dom0-manager') {
+                dir('platform/services/dom0-manager') {
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh 'python3 -m pip install -q --user -e .[test] && python3 -m pytest -q --junitxml=target/pytest.xml'
                     }
@@ -36,7 +36,7 @@ pipeline {
 
     post {
         always {
-            junit testResults: 'backend/target/surefire-reports/*.xml,services/dom0-manager/target/pytest.xml', allowEmptyResults: true
+            junit testResults: 'backend/target/surefire-reports/*.xml,platform/services/dom0-manager/target/pytest.xml', allowEmptyResults: true
         }
         success {
             updateGitlabCommitStatus name: 'jenkins', state: 'success'

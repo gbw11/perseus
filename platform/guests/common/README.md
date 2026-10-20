@@ -38,16 +38,16 @@ Ubuntu는 Linux 공통 코드 적용 대상이지만, 아래 QEMU 검증은 Debi
 
 ## QEMU 검증
 
-검증 도구: `tests/platform/qemu_first_boot_probe.py`.
+검증 도구: `platform/tests/qemu_first_boot_probe.py`.
 기존 QEMU lab(`/home/ssafy/xenova-qemu-28`)과 SSH 설정을 재사용한다. 일반 PC나 실보드에서 실행하는 설치 스크립트가 아니다.
 
 ```bash
 # 기본 실행은 계획 출력만 한다.
-python3 tests/platform/qemu_first_boot_probe.py
+python3 platform/tests/qemu_first_boot_probe.py
 # WSL의 기존 QEMU lab에서 명시적으로 실행한다.
-python3 tests/platform/qemu_first_boot_probe.py --execute
+python3 platform/tests/qemu_first_boot_probe.py --execute
 # 다른 미사용 DHCP 주소를 선택할 수도 있다.
-python3 tests/platform/qemu_first_boot_probe.py --execute --address 192.168.77.31
+python3 platform/tests/qemu_first_boot_probe.py --execute --address 192.168.77.31
 ```
 
 실행 시 문서화된 개발용 게스트 암호를 터미널에서 입력한다. 파일에 저장하지 않는다.
