@@ -88,7 +88,8 @@ Raspberry Pi 4 + Xen 멀티 OS 플랫폼을 자율주행 RC카에 올린다. 세
 | 주행 컨트롤러, 레코더, 콕핏 앱 | `platform/apps/` |
 | 표시 서비스 | `platform/services/display/` |
 | 관리 서버, 콘솔 | `backend/`, `frontend/` |
-| 인지(Jetson), 섀시 펌웨어(ESP32) | 미정. `platform/perception/`, `platform/firmware/chassis-ecu/` 제안 |
+| 인지(Jetson) | `vehicle/` |
+| 섀시 펌웨어(ESP32) | 미정. `platform/firmware/chassis-ecu/` 제안 |
 | 메시지·CAN·시리얼 계약 | `docs/contracts/` |
 
 ## 7. 결정 필요
