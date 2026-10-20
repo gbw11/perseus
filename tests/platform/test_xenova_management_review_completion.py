@@ -97,7 +97,8 @@ class TargetIdentityCodeTest(ReviewFixture):
             return self.f.xen(args, **kwargs)
         self.f.p.command = command
         result = self.f.m.call('stop', {'vm_id': self.identity})
-        self.assert_error(result, 'ARTIFACT_INVALID')
+        self.assert_error(result, 'OBSERVATION_UNAVAILABLE')
+        self.assertIsNone(result['data'])
         self.assertEqual(self.controls(), [])
 
     def test_all_common_actions_reject_non_object_input_before_external_work(self):

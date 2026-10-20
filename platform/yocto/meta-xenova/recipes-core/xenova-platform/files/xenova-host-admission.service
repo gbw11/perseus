@@ -1,0 +1,14 @@
+[Unit]
+Description=Coordinate Xenova host admission before guest shutdown
+Wants=xenova-vms.service
+After=xenova-vms.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/xenova-vm host-init
+ExecStop=/usr/sbin/xenova-vm host-quiesce
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=multi-user.target

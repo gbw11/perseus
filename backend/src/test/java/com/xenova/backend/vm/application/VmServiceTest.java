@@ -47,7 +47,7 @@ class VmServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-10-18T03:00:00Z");
     private static final CreateVmCommand ALPINE = new CreateVmCommand("alpine-sensor", "alpine", "1.2.0", 1, 256);
-    private static final VmLaunchSpec ALPINE_SPEC = new VmLaunchSpec("alpine", "1.2.0", 1, 256);
+    private static final VmLaunchSpec ALPINE_SPEC = new VmLaunchSpec("alpine-sensor", "alpine", "1.2.0", 1, 256);
 
     @Mock
     private VmControlPort vmControlPort;
@@ -90,7 +90,7 @@ class VmServiceTest {
     }
 
     @Test
-    void createSavesRecordAndLaunchesWithoutName() {
+    void createSavesRecordAndLaunchesWithStoredName() {
         when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.empty());
         when(vmRecordRepository.save(any(VmRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(vmControlPort.launch(anyString(), eq(ALPINE_SPEC))).thenAnswer(invocation ->

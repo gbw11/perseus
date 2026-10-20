@@ -114,7 +114,7 @@ class Board:
     def factory(self):
         for name in ('seeds', 'instances', 'templates'):
             (self.data / name).mkdir()
-        records = json.loads((FILES / 'defaults.json').read_text())['instances']
+        records = json.loads((ROOT / 'tests/platform/fixtures/legacy-defaults.json').read_text())['instances']
         bundles, templates = [], []
         for record in records:
             r = copy.deepcopy(record)
@@ -157,10 +157,13 @@ def platform_root(root):
                'usr/lib/xenova/xenova_zephyr.py': FILES / 'xenova_zephyr.py',
                'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
-    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py'):
+    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
+                 'xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
         mapping['usr/lib/xenova/'+name] = FILES/name
     mapping['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
     mapping['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
+    mapping['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
+    mapping['etc/xenova/execution-policy.json'] = FILES/'execution-policy.json'
     mapping['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         mapping['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
@@ -170,6 +173,9 @@ def platform_root(root):
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
+    library = root/'usr/lib/libxenmanage.so.1'
+    library.parent.mkdir(parents=True, exist_ok=True)
+    library.write_text('packaging fixture: not a target binary')
     cap = root / 'usr/share/xenova/first-install-capabilities.json'
     cap.parent.mkdir(parents=True)
     cap.write_text(json.dumps(contract.FEATURES))
@@ -183,7 +189,7 @@ def platform_root(root):
     checker.parent.mkdir(parents=True); checker.write_text('packaging fixture: not executed')
     wants = root / 'etc/systemd/system/multi-user.target.wants'
     wants.mkdir(exist_ok=True)
-    for name in ('xenova-first-boot.service', 'srv-xenova.mount', 'xenova-vms.service', 'xenova-vm-shutdown.service'):
+    for name in ('xenova-host-admission.service', 'xenova-first-boot.service', 'srv-xenova.mount', 'xenova-vms.service', 'xenova-vm-shutdown.service'):
         (wants / name).symlink_to('/usr/lib/systemd/system/' + name)
     tools = root / 'usr/bin'
     tools.mkdir(parents=True)
@@ -219,3 +225,19 @@ def profile_dts():
  hvc { compatible = "xen,hvc-uart"; };
 };
 '''
+
+def starter_bundle(target):
+    """현재 Starter 출처 계약을 만족하는 작은 시험용 펌웨어 번들."""
+    from test_xenova_lifecycle import application_bundle, bundle
+    target = Path(target)
+    source = application_bundle(bundle(target.parent / (target.name + '-diagnostic')), target)
+    manifest = source / 'firmware.json'
+    meta = json.loads(manifest.read_text())
+    lock = json.loads((ROOT / 'platform/guests/zephyr/starter.lock.json').read_text())
+    meta.update(id=lock['id'], kind='zephyr-xen-firmware', version=lock['version'])
+    meta['source'].update({k: lock[k] for k in ('app','app_files','app_source_sha256','zephyr_commit','sdk_version')})
+    meta['source']['source_revision'] = 'sha256:' + lock['app_source_sha256']
+    manifest.chmod(0o644)
+    manifest.write_text(json.dumps(meta))
+    manifest.chmod(0o444)
+    return source

@@ -37,7 +37,7 @@ def verify(root, *, cycle=False):
         raise RuntimeError('systemd-analyze required for the unit dependency check')
     units = fixture(root, cycle=cycle)
     result = subprocess.run(['systemd-analyze', 'verify', '--man=no', '--generators=no', '--root=' + str(root),
-                             str(units / 'xenova-vms.service'), str(units / 'srv-xenova.mount')],
+                             str(units / 'xenova-vms.service'), str(units / 'xenova-host-admission.service'), str(units / 'srv-xenova.mount')],
                             text=True, capture_output=True, check=False)
     return result
 

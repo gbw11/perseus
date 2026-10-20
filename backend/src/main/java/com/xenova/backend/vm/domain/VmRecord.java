@@ -91,7 +91,7 @@ public class VmRecord {
 
     // The same vm_id must always be launched with the same template (contract 4.2).
     public VmLaunchSpec launchSpec() {
-        return new VmLaunchSpec(templateId, templateVersion, vcpus, memoryMib);
+        return new VmLaunchSpec(name, templateId, templateVersion, vcpus, memoryMib);
     }
 
     public String getVmId() {
