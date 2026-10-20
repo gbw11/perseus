@@ -32,11 +32,8 @@ def test_missing_vm_id_is_a_startup_error(tmp_path):
 @pytest.mark.parametrize("env", [
     {"XENOVA_AGENT_VM_ID": "not-a-uuid"},
     {"XENOVA_AGENT_VM_ID": "00000000-0000-0000-0000-000000000000"},  # nil UUID 는 Domain-0 몫
-    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "0"},
-    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "0.5"},  # 환경변수는 1..10초만
+    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "5"},  # 주기는 계약값이라 환경변수로 바꿀 수 없다
     {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "60"},
-    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "nan"},
-    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "inf"},
     {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_BROKER_PORT": "70000"},
     {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_LOG_LEVEL": "verbose"},
 ])
@@ -52,10 +49,12 @@ def test_vm_id_is_normalised_to_canonical_lowercase(raw, tmp_path):
     assert AgentSettings(vm_id=raw).vm_id == VM_ID
 
 
-def test_constructor_allows_short_interval_for_tests_only():
+def test_interval_is_the_contract_value_and_only_tests_override_it(tmp_path):
+    assert AgentSettings.from_env({"XENOVA_AGENT_VM_ID": VM_ID}, instance_id_path=tmp_path / "missing").heartbeat_interval_s == 5.0
     assert AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.05).heartbeat_interval_s == 0.05
-    with pytest.raises(ValueError):
-        AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0)
+    for bad in (0, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            AgentSettings(vm_id=VM_ID, heartbeat_interval_s=bad)
 
 
 def test_blank_env_value_means_default(tmp_path):

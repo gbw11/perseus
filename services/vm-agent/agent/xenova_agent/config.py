@@ -13,9 +13,9 @@ from pathlib import Path
 INSTANCE_ID_PATH = Path("/etc/xenova/instance-id")
 # dom0 의 xenbr0 주소. 브로커는 dom0 Mosquitto 다 (MQTT 계약 v1 1장)
 DEFAULT_BROKER_HOST = "192.168.77.1"
-# MQTT 계약 v1 3장: heartbeat 주기 5초. 받는 쪽은 15초 STALE, 30초 OFFLINE 으로 판정하므로 환경변수로는 1..10초만 허용한다
+# MQTT 계약 v1 3장: heartbeat 주기 5초 고정. 받는 쪽이 15초 STALE, 30초 OFFLINE 으로 판정하므로 운영 설정으로 바꾸지 않는다.
+# 시험용 짧은 주기는 생성자 인자로만 준다
 DEFAULT_HEARTBEAT_INTERVAL_S = 5.0
-ENV_HEARTBEAT_INTERVAL_RANGE_S = (1.0, 10.0)
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 NIL_UUID = str(uuid.UUID(int=0))
 
@@ -70,17 +70,14 @@ class AgentSettings:
                 vm_id = instance_id_path.read_text(encoding="ascii").strip()
             except OSError as exc:
                 raise ValueError(f"vm_id is not set: XENOVA_AGENT_VM_ID is empty and {instance_id_path} is unreadable ({exc})") from exc
-        interval = read("XENOVA_AGENT_HEARTBEAT_INTERVAL", cls.heartbeat_interval_s, float)
-        low, high = ENV_HEARTBEAT_INTERVAL_RANGE_S
-        if not (math.isfinite(interval) and low <= interval <= high):
-            # 계약값은 5초. 너무 짧으면 브로커 부하, 15초를 넘으면 정상 에이전트가 STALE 로 보인다. 시험용 짧은 값은 생성자로 직접 준다
-            raise ValueError(f"XENOVA_AGENT_HEARTBEAT_INTERVAL must be {low:g}..{high:g} seconds (contract: 5), got {interval!r}")
+        if read("XENOVA_AGENT_HEARTBEAT_INTERVAL", "", str):
+            # 주기는 계약값이라 운영 설정으로 바꿀 수 없다. 조용히 무시하면 팀원이 실제 동작을 오해하므로 시작을 거부한다
+            raise ValueError("XENOVA_AGENT_HEARTBEAT_INTERVAL is not configurable: the heartbeat period is fixed at 5s by the MQTT contract")
         return cls(
             vm_id=vm_id,
             broker_host=read("XENOVA_AGENT_BROKER_HOST", cls.broker_host, str),
             broker_port=read("XENOVA_AGENT_BROKER_PORT", cls.broker_port, int),
             username=read("XENOVA_AGENT_BROKER_USERNAME", None, str),
             password=read("XENOVA_AGENT_BROKER_PASSWORD", None, str),
-            heartbeat_interval_s=interval,
             log_level=read("XENOVA_AGENT_LOG_LEVEL", cls.log_level, str).upper(),
         )
