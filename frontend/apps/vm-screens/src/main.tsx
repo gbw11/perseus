@@ -5,14 +5,16 @@ import { createBrowserRouter, Navigate, Outlet, RouterProvider } from 'react-rou
 import { DevControls } from './components/DevControls';
 import { DetailPage } from './pages/DetailPage';
 import { SplitPage } from './pages/SplitPage';
-import { MockTelemetryProvider } from './telemetry/TelemetryProvider';
+import { LiveTelemetryProvider, MockTelemetryProvider } from './telemetry/TelemetryProvider';
 
 function Root() {
+  // VITE_TELEMETRY=live 면 백엔드에 붙는다 (.env.example)
+  const Provider = import.meta.env.VITE_TELEMETRY === 'live' ? LiveTelemetryProvider : MockTelemetryProvider;
   return (
-    <MockTelemetryProvider>
+    <Provider>
       <Outlet />
       <DevControls />
-    </MockTelemetryProvider>
+    </Provider>
   );
 }
 

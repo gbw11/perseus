@@ -7,6 +7,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from 'react-router';
 import { ApiError } from './api/client';
 import { RequireAuth } from './auth';
 import { ConsoleLayout } from './layout/ConsoleLayout';
+import { DemoPage } from './pages/DemoPage';
 import { LoginPage } from './pages/LoginPage';
 import { ScreensPage } from './pages/ScreensPage';
 import { ShowcasePage } from './pages/ShowcasePage';
@@ -35,6 +36,7 @@ const router = createBrowserRouter([
       { path: '/', element: <Navigate to="/vms" replace /> },
       { path: '/vms', element: <VmListPage /> },
       { path: '/vms/:vmId', element: <VmDetailPage /> },
+      { path: '/demo', element: <DemoPage /> },
       { path: '/screens', element: <ScreensPage /> },
       { path: '/components', element: <ShowcasePage /> },
     ],

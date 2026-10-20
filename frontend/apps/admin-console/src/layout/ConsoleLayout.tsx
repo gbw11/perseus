@@ -13,6 +13,7 @@ export function ConsoleLayout() {
       nav={
         <>
           <NavLink to="/vms">VM</NavLink>
+          <NavLink to="/demo">시연 제어</NavLink>
           <NavLink to="/screens">모니터 화면</NavLink>
           <NavLink to="/components">컴포넌트</NavLink>
         </>

@@ -78,7 +78,8 @@ function DriveSummary({ id }: { id: 'autonomous' | 'manual' }) {
         <>
           <dt>인지 (젯슨)</dt>
           <dd className={styles.mono}>
-            차선 {t.perception.lane_offset_m.toFixed(2)} m · 장애물 {t.perception.obstacles.length}
+            차선 {t.perception.lane_offset_m.toFixed(2)} m · 장애물{' '}
+            {t.obstacleCount ?? t.perception.obstacles.length}
           </dd>
         </>
       ) : (
