@@ -41,7 +41,7 @@ WSL Ubuntu에서 저장소 루트와 이미 준비된 분석기를 사용한다.
 cd ~/S15P31E110
 export XENOVA_DOM0_SYSTEMD_ANALYZE='["/absolute/systemd-analyze-259"]'
 export XENOVA_SYSTEMD_ANALYZE='["/absolute/systemd-analyze-257-or-later"]'
-bash scripts/check-xenova-platform.sh
+bash platform/scripts/check-xenova-platform.sh
 rc=$?; echo "regression rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 ```
 
@@ -60,7 +60,7 @@ rc=$?; echo "regression rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 cd ~/S15P31E110
 export YOCTO_WORKSPACE="$HOME/yocto-workspace"
 export YOCTO_BUILD_DIR="$YOCTO_WORKSPACE/build-rpi4-xenova"
-bash scripts/setup-yocto.sh --verify
+bash platform/scripts/setup-yocto.sh --verify
 rc=$?; echo "setup rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 source "$YOCTO_WORKSPACE/layers/openembedded-core/oe-init-build-env" "$YOCTO_BUILD_DIR"
 bitbake xenova-xen-bringup-image > xenova-build.log 2>&1
@@ -89,11 +89,11 @@ SDK 1.0.0, 앱 1.0.0, 1 vCPU/16MiB/GICv2는 유지한다. 이전 펌웨어/manif
 
 커스터마이징·준비 버전·검증·현재 기본 참조는 [템플릿 워크플로](xenova-template-workflow.md)를 따른다.
 
-새 dom0 게시 도구는 `scripts/publish-xenova-platform.py`,
-Linux 준비 도구는 `scripts/prepare-xenova-guests.py`,
-펌웨어 게시 도구는 `scripts/package-xenova-firmware.py`다.
+새 dom0 게시 도구는 `platform/scripts/publish-xenova-platform.py`,
+Linux 준비 도구는 `platform/scripts/prepare-xenova-guests.py`,
+펌웨어 게시 도구는 `platform/scripts/package-xenova-firmware.py`다.
 `platform/first-install/example.config.json`에는 새 dom0·준비 템플릿·Starter의
-**실제 경로·해시**를 입력한다. 조립기 `scripts/assemble-xenova-first-install.py`는
+**실제 경로·해시**를 입력한다. 조립기 `platform/scripts/assemble-xenova-first-install.py`는
 `plan`·`assemble --execute`·`verify`를 제공하고 출력은
 `xenova-first-install.img`·`xenova-first-install.manifest.json`이다.
 이전 dom0는 소스 일치 gate에서 거부하며 검사 조건을 완화하지 않는다.
