@@ -43,7 +43,7 @@ set +u
 source "$WORKSPACE/layers/openembedded-core/oe-init-build-env" "$CHECK_DIR/build" > "$CHECK_DIR/logs/environment.log"
 set -u
 bitbake -p > "$CHECK_DIR/logs/parse.log" 2>&1
-for recipe in qemu xen-rpi-u-boot-scr xen-tools openssh xenova-domu-init xenova-domu-initramfs xenova-bringup xenova-platform xenova-xen-bringup-image; do
+for recipe in qemu xen-rpi-u-boot-scr xen-tools openssh xenova-domu-init xenova-domu-initramfs xenova-bringup xenova-platform xenova-dom0-manager xenova-mqtt-client xenova-xen-bringup-image; do
     bitbake -e "$recipe" > "$CHECK_DIR/logs/$recipe.env" 2> "$CHECK_DIR/logs/$recipe.err"
 done
 bitbake-getvar -r xenova-xen-bringup-image --value -f depends do_image_wic > "$CHECK_DIR/logs/wic-depends.txt" 2> "$CHECK_DIR/logs/wic-depends.err"
