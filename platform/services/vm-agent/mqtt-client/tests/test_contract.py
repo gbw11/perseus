@@ -6,13 +6,13 @@ import re
 
 import pytest
 
-from perseus_mqtt import EnvelopeError, Identity, SeqTracker, policy, topics, validate
-from perseus_mqtt import envelope as env
+from xenova_mqtt import EnvelopeError, Identity, SeqTracker, policy, topics, validate
+from xenova_mqtt import envelope as env
 
 VM_ID = "1b4e28ba-2fa1-11d2-883f-0016d3cca427"
 
 # 백엔드 MqttAgentSubscriber 가 구독하는 형식
-BACKEND_TOPIC = re.compile(r"^perseus/v1/vms/([^/]+)/(heartbeat|inventory|metrics)$")
+BACKEND_TOPIC = re.compile(r"^xenova/v1/vms/([^/]+)/(heartbeat|inventory|metrics)$")
 
 
 def test_agent_topics_match_backend_subscription():
@@ -21,13 +21,13 @@ def test_agent_topics_match_backend_subscription():
 
 
 def test_contract_topics():
-    assert topics.command_result(VM_ID) == f"perseus/v1/vms/{VM_ID}/command-result"
-    assert topics.app_events("autonomous") == "perseus/v1/apps/autonomous/events"
-    assert topics.manual_input() == "perseus/v1/apps/manual/input"
-    assert topics.vehicle_control() == "perseus/v1/vehicle/control"
-    assert topics.vehicle_status() == "perseus/v1/vehicle/status"
-    assert topics.probe_request("b") == "perseus/v1/probes/b/request"
-    assert topics.probe_reply("a") == "perseus/v1/probes/a/reply"
+    assert topics.command_result(VM_ID) == f"xenova/v1/vms/{VM_ID}/command-result"
+    assert topics.app_events("autonomous") == "xenova/v1/apps/autonomous/events"
+    assert topics.manual_input() == "xenova/v1/apps/manual/input"
+    assert topics.vehicle_control() == "xenova/v1/vehicle/control"
+    assert topics.vehicle_status() == "xenova/v1/vehicle/status"
+    assert topics.probe_request("b") == "xenova/v1/probes/b/request"
+    assert topics.probe_reply("a") == "xenova/v1/probes/a/reply"
 
 
 @pytest.mark.parametrize("bad", ["", "a/b", "+", "#", "a b"])
@@ -46,11 +46,11 @@ def test_parse():
 @pytest.mark.parametrize(
     "subscription, topic, expected",
     [
-        ("perseus/v1/vms/+/heartbeat", f"perseus/v1/vms/{VM_ID}/heartbeat", True),
-        ("perseus/v1/vms/+/heartbeat", f"perseus/v1/vms/{VM_ID}/metrics", False),
-        ("perseus/#", "perseus/v1/vehicle/status", True),
-        ("perseus/v1/vehicle/control", "perseus/v1/vehicle/control", True),
-        ("perseus/v1/vehicle/+", "perseus/v1/vehicle", False),
+        ("xenova/v1/vms/+/heartbeat", f"xenova/v1/vms/{VM_ID}/heartbeat", True),
+        ("xenova/v1/vms/+/heartbeat", f"xenova/v1/vms/{VM_ID}/metrics", False),
+        ("xenova/#", "xenova/v1/vehicle/status", True),
+        ("xenova/v1/vehicle/control", "xenova/v1/vehicle/control", True),
+        ("xenova/v1/vehicle/+", "xenova/v1/vehicle", False),
     ],
 )
 def test_wildcard_match(subscription, topic, expected):
