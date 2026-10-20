@@ -40,6 +40,19 @@ API 타입(`src/api/types.ts`)은 팀 문서를 그대로 옮겼습니다. 문�
 - VM·템플릿·오류: [VM 관리 API 계약 v1](../docs/contracts/vm-api-contract-v1.md) §2.2·§2.3·§3.3·§5·§8.2·§9
 - 인증: 노션 API 명세 "로그인"·"토큰 재발급" — Access Token 은 메모리에만, 401 이면 refresh 쿠키로 한 번 재발급 후 재시도
 
+### 백엔드 없이 돌리기 (MSW mock)
+
+```bash
+VITE_MOCK=true npm run dev:console    # 또는 .env.local 에 VITE_MOCK=true
+```
+
+- 로그인: 아이디 `admin`, 비밀번호 `mock-password` (mock 전용 값, `src/mocks/data.ts`)
+- VM 3대(autonomous·manual 은 Zephyr, interaction 은 Debian)와 템플릿 3개가 들어 있습니다. 시작·정지·생성·삭제가 메모리에서 동작하고, 새로고침하면 처음 상태로 돌아갑니다.
+- 상태 코드·오류 코드는 실제 API 와 같습니다 — 401 `INVALID_CREDENTIALS`·`INVALID_TOKEN`, 404 `VM_NOT_FOUND`, 409 `INVALID_VM_STATE`·`VM_NAME_CONFLICT`, 422 `VALIDATION_ERROR`(§9 입력값).
+- mock 에 없는 요청(`/ws/...` 등)은 그대로 백엔드로 갑니다.
+- 핸들러는 `src/mocks/handlers.ts`. API 가 바뀌면 `api/types.ts` 와 같이 고치고, `handlers.test.ts` 가 실제 클라이언트(`api/client.ts`)로 로그인 → 목록 → 상세 흐름을 확인합니다.
+- `public/mockServiceWorker.js` 는 `npx msw init public` 이 만든 파일이라 손대지 않습니다 (msw 를 올리면 다시 생성).
+
 ## 모니터 화면
 
 | 경로                                            | 화면                              |
