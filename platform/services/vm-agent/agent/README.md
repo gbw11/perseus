@@ -1,6 +1,6 @@
 # xenova-agent — VM 에이전트 (heartbeat)
 
-Linux 게스트 안에서 돌며 [MQTT 계약 v1](../../../docs/contracts/mqtt-contract-v1.md)의 heartbeat(MQTT-01)를 dom0 Mosquitto 로 보냅니다.
+Linux 게스트 안에서 돌며 [MQTT 계약 v1](../../../../docs/contracts/mqtt-contract-v1.md)의 heartbeat(MQTT-01)를 dom0 Mosquitto 로 보냅니다.
 봉투·토픽·QoS·자동 재연결은 [mqtt-client](../mqtt-client/README.md)의 `perseus_mqtt`가 맡고, 이 패키지는 주기와 수명만 정합니다.
 
 | 항목 | 값 |
@@ -31,11 +31,11 @@ heartbeat 주기는 계약값 5초로 고정이며 환경변수로 바꿀 수 �
 
 ```bash
 # 개발 PC (브로커 없이도 시작되고 연결을 재시도한다)
-cd services/vm-agent/agent
+cd platform/services/vm-agent/agent
 PYTHONPATH=.:../mqtt-client XENOVA_AGENT_VM_ID=11111111-1111-4111-8111-111111111111 XENOVA_AGENT_BROKER_HOST=127.0.0.1 python -m xenova_agent
 
 # 게스트 rootfs 에 설치 (템플릿 준비 단계에서 플랫폼 파트가 부른다)
-python3 services/vm-agent/agent/deploy/install_into_rootfs.py <rootfs>
+python3 platform/services/vm-agent/agent/deploy/install_into_rootfs.py <rootfs>
 ```
 
 SIGTERM·SIGINT 를 받으면 현재 대기를 끊고 클라이언트를 닫은 뒤 종료합니다.
@@ -55,7 +55,7 @@ VM 생성 경로가 둘이라 신원 유닛 의존은 drop-in 으로 나눕니�
 ## 테스트
 
 ```bash
-cd services/vm-agent/agent
+cd platform/services/vm-agent/agent
 python -m pytest
 ```
 
