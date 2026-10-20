@@ -1,6 +1,6 @@
 # MQTT 메시지 계약 v1
 
-**최종 갱신** 2026-10-19
+**최종 갱신** 2026-10-20 (7장 `drive.input` 키·반복·끊김 규칙)
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼, RC카 시나리오
 **브로커** dom0 Mosquitto
 
@@ -16,7 +16,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버, 젯슨, ESP32가 주고받는 MQTT �
 
 | 항목 | 규칙 |
 | --- | --- |
-| 토픽 접두사 | `xenova/v1/`. 10/20 이름 통일로 접두사도 바꿨다. 이전 `xenova/v1/`는 어디에도 배포된 적이 없어 호환 처리는 없다 |
+| 토픽 접두사 | `xenova/v1/`. 10/20 이름 통일로 접두사도 바꿨다. 이전 `perseus/v1/`는 어디에도 배포된 적이 없어 호환 처리는 없다 |
 | 인코딩 | UTF-8 JSON, 필드 이름은 snake_case |
 | 시각 | `sent_at`은 ISO-8601 UTC. **보드 간 시각 비교로 판정하지 않는다.** 신선도는 받는 쪽이 수신 시각으로 잰다 |
 | 단위 | 속도 `m/s`, 조향 `rad`, 시간 `ms`, 메트릭 `percent`·`bytes` |
@@ -198,6 +198,16 @@ VM 에이전트, RC카 앱 VM, dom0 서버, 젯슨, ESP32가 주고받는 MQTT �
 | 콘솔 → 백엔드 | 입력 전용 WebSocket `/ws/v1/drive`. 기존 로그인(JWT)을 쓴다. 기존 `/ws/v1/metrics`, `/ws/v1/events`는 서버 → 콘솔 단방향이라 따로 둔다 |
 | 백엔드 → 수동 VM | MQTT-11 `xenova/v1/apps/manual/input`, `type: drive.input`, QoS 0, payload `keys`(눌린 키 목록) |
 | 차단 | 백엔드는 모드가 `MANUAL`이 아니면 입력을 버린다 |
+| 반복 | 백엔드는 키가 하나라도 눌려 있는 동안 마지막 `keys`를 50 ms마다(20 Hz) 다시 보낸다. 모두 떼면 `keys: []`를 한 번 보낸다 |
+| 끊김 | 수동 VM은 마지막 `drive.input`을 받은 지 200 ms가 지나면 키를 모두 뗀 것으로 보고 `v_mps = 0`을 보낸다 |
+
+**`drive.input`** payload
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `keys` | string[] | 눌린 키. `up` `down` `left` `right` `brake`만 쓴다. 브라우저 키 이름(`ArrowUp`, `w` 등)은 콘솔이 바꿔서 보낸다. 모르는 키는 무시한다 |
+
+- 수동 VM의 변환: `up` 전진, `down` 후진, `left` 왼쪽(`steer_rad` +), `right` 오른쪽(`steer_rad` −). 반대 키가 같이 눌리면 그 축은 0, `brake`가 있으면 속도 0. 최대 속도·조향각은 수동 VM 설정이다.
 
 ## 8. 메시지 지연 측정
 
