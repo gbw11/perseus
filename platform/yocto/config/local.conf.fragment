@@ -1,5 +1,5 @@
 # Raspberry Pi 4 / Xen 이미지 빌드에 적용할 프로젝트 설정 조각.
-# 빌드 환경의 conf/local.conf에 수동으로 반영한다.
+# scripts/setup-yocto.sh가 새 빌드의 conf/local.conf 관리 블록에 적용한다.
 
 MACHINE = "raspberrypi4-64"
 DISTRO = "poky"
