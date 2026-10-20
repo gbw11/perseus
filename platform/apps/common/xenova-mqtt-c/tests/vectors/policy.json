@@ -1,0 +1,116 @@
+[
+ {
+  "type": "agent.heartbeat",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "agent.inventory",
+  "qos": 1,
+  "retain": true,
+  "max_bytes": 65536
+ },
+ {
+  "type": "agent.metrics",
+  "qos": 0,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "agent.command",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "agent.command_result",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "drive.command",
+  "qos": 0,
+  "retain": false,
+  "max_bytes": 1024
+ },
+ {
+  "type": "perception.result",
+  "qos": 0,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "vehicle.control",
+  "qos": 1,
+  "retain": true,
+  "max_bytes": 1024
+ },
+ {
+  "type": "vehicle.status",
+  "qos": 0,
+  "retain": false,
+  "max_bytes": 1024
+ },
+ {
+  "type": "perception.event",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "message.posted",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "drive.resume.requested",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "drive.mode.changed",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "drive.fault.detected",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "app.heartbeat",
+  "qos": 0,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "drive.input",
+  "qos": 0,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "probe.ping",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "probe.pong",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
+  "type": "unknown.type",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ }
+]
