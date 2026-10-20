@@ -96,15 +96,21 @@ def template_info(directory, source_id, expected):
             'source_id': source_id, 'template': str(directory), 'template_manifest_sha256': expected, 'root_sha256': meta['root_sha256'], 'boot': boot}
 
 
-def guest_info(config):
-    defaults = json.loads((FILES / 'defaults.json').read_text())['instances']
-    guests = config['guests']
-    if len(guests) != 2 or {r['id'] for r in guests} != {'ubuntu-dev', 'debian-dev'}:
-        raise ValueError('exactly ubuntu-dev and debian-dev must be configured')
+def linux_template_info(config):
+    """보관할 Linux 템플릿 두 종은 기본 인스턴스 목록과 독립적으로 검증한다."""
+    defaults = [e for e in json.loads((ROOT / 'platform/guests/default-templates.lock.json').read_text())['templates']
+                if e['guest_kind'] == 'linux']
+    guests = config['linux_templates']
+    if (not isinstance(guests, list) or len(guests) != len(defaults)
+            or any(not isinstance(entry, dict) for entry in guests)
+            or {r.get('template_id') for r in guests} != {r['template_id'] for r in defaults}):
+        raise ValueError('both Ubuntu and Debian template inputs are required')
     result = []
     for guest in guests:
-        default = next(d for d in defaults if d['id'] == guest['id'])
-        source_id = default['template']
+        default = next(d for d in defaults if d['template_id'] == guest['template_id'])
+        if guest.get('template_version') != default['version']:
+            raise ValueError('template input differs from selected catalog version')
+        source_id = default['id']
         if guest.get('template_dir'):
             info = template_info(guest['template_dir'], source_id, guest['template_manifest_sha256'])
         else:
@@ -140,10 +146,18 @@ def guest_info(config):
             info = {'source_id': source_id, 'logical_bytes': size, 'allocated_bytes': size,
                     'boot_bytes': 512 * MIB, 'preparation_scratch_bytes': virtual + downloaded + 2 * size,
                     'input': str(input_path), 'source': source, 'allow_download': download}
-        info['id'], info['default'] = guest['id'], default
+        info['template_id'], info['template_version'] = default['template_id'], default['version']
         result.append(info)
     return result
 
+
+
+def guest_info(config, templates=None):
+    """기본 Linux seed만 선택한다. 보관된 Ubuntu 템플릿으로 seed를 만들지 않는다."""
+    templates = linux_template_info(config) if templates is None else templates
+    by_source = {entry['source_id']: entry for entry in templates}
+    defaults = json.loads((FILES / 'defaults.json').read_text())['instances']
+    return [{**by_source[d['template']], 'id': d['id'], 'default': d} for d in defaults]
 
 
 def rtos_info(config):
@@ -185,8 +199,8 @@ def copy_management_catalog(data):
     """새 조립 저장소에만 factory public ID/version 카탈로그를 준비한다."""
     from xenova_catalog import describe
     from artifact_io import publish
-    factory=json.loads((FILES/'defaults.json').read_text())
-    selected={e['template']:e for e in factory['instances']+factory['firmware_instances']}
+    locked=json.loads((ROOT/'platform/guests/default-templates.lock.json').read_text())['templates']
+    selected={e['id']:e for e in locked}
     for kind, folder in [('linux','templates'),('zephyr','rtos-templates')]:
         parent = data / folder
         if not parent.exists():
@@ -197,7 +211,7 @@ def copy_management_catalog(data):
             manifest = directory / ('firmware.json' if (directory / 'firmware.json').exists() else 'template.json')
             meta = json.loads(manifest.read_text())
             descriptor = {'schema_version':'1.0','template_id':selected[directory.name]['template_id'],
-                          'template_version':selected[directory.name]['template_version'],'guest_kind':kind,
+                          'template_version':selected[directory.name]['version'],'guest_kind':kind,
                           'asset_directory':str(directory.relative_to(data)),
                           'manifest_sha256':sha(manifest),'source_template_id':meta['id']}
             describe(data, descriptor, full=True)
@@ -206,28 +220,31 @@ def copy_management_catalog(data):
             temp = output / '.descriptor'
             temp.write_text(json.dumps(descriptor, indent=2) + '\n')
             temp.chmod(0o444)
-            publish(temp, output / (meta['version'] + '.json'))
+            publish(temp, output / (descriptor['template_version'] + '.json'))
 
 
 def copy_rtos_seeds(data, entries):
     """새 조립 저장소에만 기본 Zephyr 독립 자산을 준비한다. 기존 저장소는 대상이 아니다."""
     if len(entries) != 1:
         raise ValueError('new first-install images require one verified Zephyr template')
-    default = json.loads((FILES / 'defaults.json').read_text())['firmware_instances'][0]
-    if entries[0]['id'] == rtos.source_lock()['id']:
-        # 명시적으로 선택한 이전 진단 펌웨어는 기존 안전 정책을 유지한다.
-        default = {'id': 'zephyr-dev', 'template': entries[0]['id'], 'autostart': False, 'board_shutdown_policy': 'refuse'}
-    elif entries[0]['id'] != default['template']:
-        raise ValueError('default Zephyr template mismatch')
-    record = zephyr.new_instance(data, default['id'], data / 'rtos-templates' / default['template'],
-                                 {}, autostart=default['autostart'], board_shutdown_policy=default['board_shutdown_policy'], registry='seeds', seed=True, metadata={k:default[k] for k in ('template_id','template_version') if k in default})
-    return [{'record': record}]
+    defaults = json.loads((FILES / 'defaults.json').read_text())['firmware_instances']
+    if any(entry['template'] != entries[0]['id'] for entry in defaults):
+        raise ValueError('default Zephyr Starter template mismatch')
+    records = []
+    for default in defaults:
+        record = zephyr.new_instance(data, default['id'], data / 'rtos-templates' / default['template'],
+                                     {}, autostart=default['autostart'],
+                                     board_shutdown_policy=default['board_shutdown_policy'],
+                                     registry='seeds', seed=True,
+                                     metadata={k:default[k] for k in ('template_id','template_version','display_name') if k in default})
+        records.append({'record': record})
+    return records
 
 
 def plan(config, image, record, output, work, card_bytes):
     if config.get('schema') != 1:
         raise ValueError('unsupported assembly config schema')
-    if set(config) - {'schema','platform','guests','template_policy','operating_reserve_bytes','rtos_templates'}:
+    if set(config) - {'schema','platform','linux_templates','template_policy','operating_reserve_bytes','rtos_templates'}:
         raise ValueError('unknown deployment configuration fields')
     for path in (output, work):
         new_path(path)
@@ -238,7 +255,8 @@ def plan(config, image, record, output, work, card_bytes):
     if output == work or output.is_relative_to(work) or work.is_relative_to(output):
         raise ValueError('output/work paths must be separate dedicated directories')
     mbr, platform_bytes, table = read_layout(image)
-    guests = guest_info(config)
+    templates = linux_template_info(config)
+    guests = guest_info(config, templates)
     firmware_templates = rtos_info(config)
     if len(firmware_templates) != 1:
         raise ValueError('new first-install images require the verified Zephyr template; existing stores use create')
@@ -246,7 +264,7 @@ def plan(config, image, record, output, work, card_bytes):
         for path in (output, work):
             if path.is_relative_to(Path(entry['template'])):
                 raise ValueError('output/work cannot be inside an RTOS input template')
-    for guest in guests:
+    for guest in templates:
         if guest.get('template'):
             for path in (output, work):
                 if path.is_relative_to(Path(guest['template'])):
@@ -254,13 +272,16 @@ def plan(config, image, record, output, work, card_bytes):
     reserve = config.get('operating_reserve_bytes', 2 * GIB)
     if type(reserve) is not int or reserve < 2 * GIB:
         raise ValueError('at least 2 GiB operating reserve is required')
+    firmware_count = len(json.loads((FILES / 'defaults.json').read_text())['firmware_instances'])
     totals = capacity(platform_bytes, guests, template_policy=config.get('template_policy', 'full'),
                       card_bytes=card_bytes, reserve_bytes=reserve,
-                      retained_firmware_bytes=sum(item['logical_bytes'] * 2 + 64 * 1024 for item in firmware_templates))
+                      retained_templates=templates,
+                      retained_firmware_bytes=sum(item['logical_bytes'] * (1 + firmware_count)
+                                                  + 64 * 1024 * firmware_count for item in firmware_templates))
     if totals['image_bytes'] > 2 ** 32 * SECTOR:
         raise ValueError('DOS image exceeds 2 TiB')
     return {'schema': 1, 'action': 'plan', 'platform': config['platform'], 'platform_source_commit': record['source_commit'],
-            'layout': table, 'guests': guests, 'rtos_templates': firmware_templates, 'capacity': totals, 'features_required': FEATURES,
+            'layout': table, 'guests': guests, 'linux_templates': templates, 'rtos_templates': firmware_templates, 'capacity': totals, 'features_required': FEATURES,
             'platform_features_verified': False,
             'execution_gate': 'RO-mount and verify actual platform rootfs capabilities before any guest preparation; old images are rejected',
             'output_directory': str(output), 'work_directory': str(work),
@@ -287,16 +308,19 @@ def platform_root_ok(root):
                 'usr/lib/xenova/xenova_zephyr.py': FILES / 'xenova_zephyr.py',
                 'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                 'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
-    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py'):
+    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
+                 'xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
         expected['usr/lib/xenova/'+name] = FILES/name
     expected['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
     expected['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
+    expected['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
+    expected['etc/xenova/execution-policy.json'] = FILES/'execution-policy.json'
     expected['usr/lib/systemd/system/xenova-wifi@.service'] = FILES/'xenova-wifi@.service'
     expected['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         expected['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
     units = ['xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
-             'xenova-vms.service', 'xenova-vm-shutdown.service', 'xenova-xen-ready.service']
+             'xenova-vms.service', 'xenova-vm-shutdown.service', 'xenova-xen-ready.service', 'xenova-host-admission.service']
     expected.update({'usr/lib/systemd/system/' + u: FILES / u for u in units})
     for relative, source in expected.items():
         if not path(relative).is_file() or path(relative).read_bytes() != source.read_bytes():
@@ -320,6 +344,8 @@ def platform_root_ok(root):
             raise ValueError('platform lacks built QEMU VNC/Xen configuration: ' + relative)
     if not path('usr/bin/qemu-system-i386').is_file() or not path('usr/bin/qemu-system-i386').stat().st_mode & 0o111:
         raise ValueError('required dom0 qemu-system-i386 missing')
+    if not path('usr/lib/libxenmanage.so.1').is_file():
+        raise ValueError('read-only Xen incarnation library missing')
     if path('etc/machine-id').read_text() != 'uninitialized\n':
         raise ValueError('common dom0 machine-id must be uninitialized for PID1')
     if any(path('etc/ssh').glob('ssh_host_*_key')):
@@ -348,7 +374,7 @@ def platform_root_ok(root):
     preset = path('usr/lib/systemd/system-preset/98-openssh-sshd.preset').read_text()
     if 'enable sshd.service' not in preset.splitlines() or 'enable sshd.socket' in preset.splitlines():
         raise ValueError('dom0 SSH preset selects wrong activation mode')
-    enabled = ['xenova-first-boot.service', 'xenova-vms.service', 'xenova-vm-shutdown.service', 'srv-xenova.mount']
+    enabled = ['xenova-host-admission.service', 'xenova-first-boot.service', 'xenova-vms.service', 'xenova-vm-shutdown.service', 'srv-xenova.mount']
     for unit in enabled:
         link = root / 'etc/systemd/system/multi-user.target.wants' / unit
         if not link.is_symlink() or path('etc/systemd/system/multi-user.target.wants/' + unit).read_bytes() != (FILES / unit).read_bytes():
@@ -529,9 +555,9 @@ def assemble(config, image, record, planned):
         platform_checks = platform_root_ok(root)  # 게스트/디스크 준비보다 먼저 검사하며 입력 rootfs에 파일을 추가하지 않는다.
         work.close()
         templates, verified_templates = {}, {}
-        for guest in planned['guests']:
+        for guest in planned['linux_templates']:
             if guest.get('template'):
-                templates[guest['id']] = Path(guest['template'])
+                templates[guest['source_id']] = Path(guest['template'])
             else:
                 if not Path(guest['input']).exists():
                     if not guest.get('allow_download'):
@@ -542,8 +568,8 @@ def assemble(config, image, record, planned):
                 args = argparse.Namespace(input=Path(guest['input']), output=template_dir, size_gib=guest['logical_bytes'] // GIB, source=guest['source_id'])
                 prepare.make_template(args, source)
                 template_info(template_dir, guest['source_id'], sha(template_dir / 'template.json'))
-                templates[guest['id']] = template_dir
-            verified_templates[guest['id']] = guest.get('template_manifest_sha256') or sha(templates[guest['id']] / 'template.json')
+                templates[guest['source_id']] = template_dir
+            verified_templates[guest['source_id']] = guest.get('template_manifest_sha256') or sha(templates[guest['source_id']] / 'template.json')
         datafile = work.path / 'data.ext4'
         with datafile.open('xb') as stream:
             stream.truncate(planned['capacity']['data_bytes'])
@@ -552,8 +578,8 @@ def assemble(config, image, record, planned):
         work.mount(work.loop(datafile), data)
         prepare.initialize_storage(data, seed=True)
         bundles, template_records = [], []
-        for guest in planned['guests']:
-            template = templates[guest['id']]
+        for guest in planned['linux_templates']:
+            template = templates[guest['source_id']]
             tmeta = json.loads((template / 'template.json').read_text())
             catalog = data / 'templates' / guest['source_id']
             catalog.mkdir()
@@ -566,12 +592,14 @@ def assemble(config, image, record, planned):
                 else:
                     shutil.copyfile(source, catalog / source.name)
                 (catalog / source.name).chmod(0o444)
-            prepare.make_instance(argparse.Namespace(data_root=data, id=guest['id'], spec=None, deployment_seed=True, template_root=template))
-            seed = data / 'seeds' / guest['id']
-            r = json.loads((seed / 'instance.json').read_text())
-            boot = json.loads((seed / 'boot.json').read_text())
-            bundles.append({'record': r, 'root_bytes': (seed / 'root.raw').stat().st_size,
-                            'seed_root_sha256': sha(seed / 'root.raw'), 'boot': boot})
+            default = next((d for d in planned['guests'] if d['source_id'] == guest['source_id']), None)
+            if default is not None:
+                prepare.make_instance(argparse.Namespace(data_root=data, id=default['id'], spec=None, deployment_seed=True, template_root=template))
+                seed = data / 'seeds' / default['id']
+                r = json.loads((seed / 'instance.json').read_text())
+                boot = json.loads((seed / 'boot.json').read_text())
+                bundles.append({'record': r, 'root_bytes': (seed / 'root.raw').stat().st_size,
+                                'seed_root_sha256': sha(seed / 'root.raw'), 'boot': boot})
             template_records.append({'id': guest['source_id'], 'metadata': tmeta, 'root_bytes': (template / 'root.raw').stat().st_size, 'template_manifest_sha256': sha(template / 'template.json'),
                                      'retained_root': planned['capacity']['template_policy'] == 'full'})
         firmware_records = copy_rtos_templates(data, planned.get('rtos_templates', []))
@@ -593,9 +621,9 @@ def assemble(config, image, record, planned):
         work.close()
         # 출판 전 원래 입력을 재검증한다. 게스트 자산 원본도 해시 계약으로 재확인한다.
         checked(image, config['platform']['sha256'])
-        for guest in planned['guests']:
-            template = templates[guest['id']]
-            template_info(template, guest['source_id'], verified_templates[guest['id']])
+        for guest in planned['linux_templates']:
+            template = templates[guest['source_id']]
+            template_info(template, guest['source_id'], verified_templates[guest['source_id']])
         for entry in planned.get('rtos_templates', []):
             rtos.info(entry['template'], entry['template_manifest_sha256'])
         final = stage / 'xenova-first-install.img'

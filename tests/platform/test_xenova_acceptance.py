@@ -181,10 +181,13 @@ class AcceptanceTest(unittest.TestCase):
 
     def test_starter_defaults_and_diagnostic_template_have_separate_policies(self):
         defaults = json.loads((FILES / 'defaults.json').read_text())
-        z = defaults['firmware_instances'][0]
-        self.assertEqual(z, {'id': 'zephyr-dev', 'template': 'xenova-zephyr-starter-1.0.0',
-                             'autostart': True, 'board_shutdown_policy': 'force-allowed',
-                             'template_id':'zephyr-xenvm-starter-arm64','template_version':'1.0.0'})
+        self.assertEqual({z['id'] for z in defaults['firmware_instances']}, {'zephyr-drive-a','zephyr-drive-b'})
+        for z in defaults['firmware_instances']:
+            self.assertTrue(z['autostart'])
+            self.assertEqual(z['template'], 'xenova-zephyr-starter-1.0.0')
+            self.assertEqual(z['board_shutdown_policy'], 'force-allowed')
+            self.assertEqual(z['template_id'], 'zephyr-xenvm-starter-arm64')
+            self.assertEqual(z['template_version'], '1.0.0')
         self.assertTrue(all(row['autostart'] for row in defaults['instances']))
         self.assertFalse(zephyr.CAPABILITIES['graceful_shutdown'])
         old = self.add_zephyr()

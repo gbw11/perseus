@@ -3,7 +3,7 @@
 Xen 드라이버와 Mock 드라이버가 같은 인터페이스를 구현하고, 상위 계층(VmService, API)은 드라이버 종류를 모른다.
 
 설계 원칙
-- 드라이버는 "지금 Xen 에 무엇이 떠 있나"만 다룬다. VM 명세(name·template)는 Spring 이 보유한다(계약 1.2).
+- 드라이버는 "지금 Xen 에 무엇이 떠 있나"만 다룬다. VM 명세는 Spring이 공급하고 Provisioner가 표시 이름·템플릿을 플랫폼 create에 전달한다.
 - 디스크·부팅 파일 배치는 Provisioner 가 맡는다. 드라이버는 Provisioner 가 준 경로로 도메인을 만들 뿐이다.
   실제 디스크 생성은 P2(플랫폼) 쪽 인스턴스 생성 기능을 연결할 때 구현한다. 여기서는 인터페이스만 둔다.
 - 모든 메서드는 동기(blocking)다. xl 은 subprocess 이므로 API 계층이 스레드풀에서 호출한다(계약 11장).
@@ -133,7 +133,7 @@ class Provisioner(ABC):
 
     @abstractmethod
     def ensure_instance(
-        self, vm_id: UUID, template_id: str, template_version: str, *, vcpus: int, memory_mib: int
+        self, vm_id: UUID, template_id: str, template_version: str, *, name: str, vcpus: int, memory_mib: int
     ) -> InstancePaths:
         """등록(디스크)이 있으면 재사용하고 없으면 템플릿에서 만든다(계약 4.2). 생성 명세는 registry 에 기록된다."""
 

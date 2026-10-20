@@ -41,7 +41,7 @@ Spring이 생성 전에 발급한 UUID 형식의 `vm_id`가 시스템 전체의 
 
 | 항목 | 공통 Manager / CLI | dom0-manager HTTP |
 |---|---|---|
-| 생성 입력 | `vm_id`, `name`, 정확한 템플릿 ID·버전, vCPU·메모리. Linux IP는 플랫폼이 예약 | 4.2절의 5개 필드. 사용자 표시 이름은 Spring 보유 |
+| 생성 입력 | `vm_id`, `name`, 정확한 템플릿 ID·버전, vCPU·메모리. Linux IP는 플랫폼이 예약 | 4.2절의 6개 필드. Spring의 표시 이름을 플랫폼 create에 전달 |
 | 생성과 시작 | `create`는 정지 인스턴스 등록, `start`는 별도 동작 | POST가 자산 준비·재사용과 도메인 시작을 연결하는 계약 |
 | 목록·상세 | 정지한 등록 VM도 조회. 템플릿·현재 설정·수명주기와 Xen 관측을 구분 | Xen 도메인만 반환. Spring이 자기 레코드와 조합 |
 | `ipv4` | 예약한 내부 주소. 부팅·DHCP 획득 증거가 아님 | HTTP VM 객체에는 없음. Spring 공개 `ipv4`는 에이전트 보고 값 |
@@ -53,8 +53,8 @@ Spring이 생성 전에 발급한 UUID 형식의 `vm_id`가 시스템 전체의 
 `NotImplementedError`로 남아 있습니다. HTTP 경로·mock 시험을 실제 플랫폼 명령 연동으로
 해석하지 않습니다.
 
-연결 시에는 HTTP 요청에 없는 필수 `name`의 공급 방식, HTTP 재시작을 위한 공통 `start` 호출,
-수명주기 작업의 원래 키·operation_id·대상 세대를 명시해야 합니다.
+platform 모드는 Spring `name`을 `VmLaunchSpec` → `Dom0LaunchRequest` → FastAPI 요청 → Provisioner → 플랫폼 create의 기존 `spec["name"]`으로 전달합니다. 등록 후 Driver의 기존 `start`를 호출합니다.
+수명주기 연동에서는 작업의 원래 키·operation_id·대상 세대를 명시해야 합니다.
 플랫폼의 필수 입력을 생략하거나 재시도마다 다른 키·신원·주소를 만드는 방식으로 연결하지 않습니다.
 생성 응답·Xen 도메인 존재는 앱 준비 완료를 뜻하지 않으며 플랫폼의 `app_readiness=unknown`을 유지합니다.
 
@@ -199,7 +199,7 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 
 ### 4.2 `POST /api/v1/vms` — 생성 및 재시작
 
-요청 본문: `vm_id`, `template_id`, `template_version`, `vcpus`, `memory_mib`
+요청 본문: `vm_id`, `name`, `template_id`, `template_version`, `vcpus`, `memory_mib`
 
 - 해당 `vm_id`의 디스크가 존재하면 **재사용**하고, 존재하지 않으면 `template_id`·`template_version`으로 새로 생성한다.
 - 디스크 경로는 `vm_id`에서 파생한다.
@@ -371,14 +371,14 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 
 | 항목 | 규칙 | 검증 계층 |
 |---|---|---|
-| `name` | 1~63자, 한글·공백 허용. 제어문자·줄 구분 문자와 앞뒤 공백 금지 | Spring 단독 |
+| `name` | 1~63자, 한글·공백 허용. 제어문자·줄 구분 문자와 앞뒤 공백 금지 | Spring 소유, create 전달 경로에서 동일 규칙 검증 |
 | `vm_id` | UUID. nil UUID(`00000000-…`)는 Domain-0이므로 모든 엔드포인트에서 `400 InvalidArgument` | dom0-manager (백엔드가 막는 것과 별개로 거부) |
 | `vcpus` | 1~4 | Spring, dom0-manager |
 | `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16) | 템플릿별 하한은 Spring, 템플릿별 범위(`resource_limits`)는 플랫폼 카탈로그가 create 때 검사(벗어나면 `400 InvalidArgument`), 공통 범위는 dom0-manager |
 | 배수 제약 | 없음. 화면 입력만 64 단위 | — |
 | `template_id` | 공개 카탈로그 ID·버전을 그대로 전달 | Spring 목록 검사 + 플랫폼의 정확한 ID·버전·해시 검사 |
 
-`name`은 dom0-manager로 전달되지 않으므로 제어 계층의 관심사가 아닙니다.
+`name`은 create에 그대로 전달해 플랫폼의 기존 `display_name`에 저장합니다. UUID 기반 신원·내부 실행 이름·경로와 구분하며 재시작 요청을 rename으로 해석하지 않습니다.
 
 공통 하한 16MiB는 게시된 Zephyr starter 템플릿 1.0.0의 고정 프로필(1 vCPU / 16MiB)을 통과시키기 위한 느슨한 안전망입니다. 실제 하한은 템플릿별 `min_memory_mib`이며 Linux 템플릿은 Ubuntu 512, Debian 256을 유지합니다.
 
