@@ -63,7 +63,7 @@ borrowed XenStore connection을 임의로 reset해 요청 ID를 재사용하지 
 저장소 루트에서:
 
 ```sh
-python3 -B -m unittest discover -s tests/platform -p test_xenova_xenstore_g1.py -v
+python3 -B -m unittest discover -s platform/tests -p test_xenova_xenstore_g1.py -v
 ```
 
 host 검사는 production main.c와 adapter도 직접 컴파일한다. tests/host의 Zephyr 선언·함수

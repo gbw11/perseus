@@ -34,19 +34,19 @@
 
 ## 입력과 계획
 
-진입점은 `scripts/assemble-perseus-first-install.py`다. `plan`이 기본 동작이며 읽기만 한다. 명시적인 `assemble --execute`만 생성 경계를 넘는다. 실행 환경은 승인된 Linux root 준비 호스트이며, ARM64 게스트 chroot를 실행할 native ARM64 또는 QEMU/binfmt 환경이 필요하다. 필요한 도구가 없으면 실패하며 설치하지 않는다.
+진입점은 `platform/scripts/assemble-perseus-first-install.py`다. `plan`이 기본 동작이며 읽기만 한다. 명시적인 `assemble --execute`만 생성 경계를 넘는다. 실행 환경은 승인된 Linux root 준비 호스트이며, ARM64 게스트 chroot를 실행할 native ARM64 또는 QEMU/binfmt 환경이 필요하다. 필요한 도구가 없으면 실패하며 설치하지 않는다.
 
 `platform/first-install/example.config.json`을 저장소 밖의 실제 설정으로 복사하고 모든 placeholder를 실제 값으로 바꾼다. 입력은 시각이 포함된 일반 파일의 절대 경로와 해시로 선택한다. latest 및 다른 symlink 경로는 받지 않는다.
 
 플랫폼 입력은 **빌드 경로 밖에 원자적으로 게시한 완료 사본**이어야 한다. `platform-release.json`/해시와 같은 디렉터리의 이미지/해시·`BUILD-RESULT.json`/해시를 명시한다. 조립기 plan/assemble 모두 원래 빌드 경로와 `bitbake.lock`에 접근하지 않는다. 게시된 디렉터리와 파일은 읽기 전용이며 hardlink가 아닌 독립 일반 파일이어야 한다. 체크섬·출처·완료 상태가 다르거나 임시 게시 경로이면 거부한다.
 
-게시 도구 `scripts/publish-perseus-platform.py`는 기존 완료 이미지의 복사만 담당하며 BitBake/게스트 준비/최종 SD 조립을 실행하지 않는다. 기본은 완료 기록과 예상 복사량을 읽는 계획이며 원본 이미지 bytes나 잠금은 열지 않는다. `--execute`에서만 BitBake 호환 exclusive flock을 잡고, 필요하면 실제 잠금 파일을 생성한다. 획득 inode가 현재 경로와 같은지 확인하고 원본 해시→독립 복사→사본 해시→읽기 전용 manifest/체크섬→덮어쓰기 없는 원자적 게시까지 잠금을 유지한다. 기존 잠금 파일은 보존하고 직접 생성한 동일 inode만 잠근 상태에서 정리한다. 잠금을 만들기 위한 수동 touch나 단순 파일 부재 무시는 사용하지 않는다.
+게시 도구 `platform/scripts/publish-perseus-platform.py`는 기존 완료 이미지의 복사만 담당하며 BitBake/게스트 준비/최종 SD 조립을 실행하지 않는다. 기본은 완료 기록과 예상 복사량을 읽는 계획이며 원본 이미지 bytes나 잠금은 열지 않는다. `--execute`에서만 BitBake 호환 exclusive flock을 잡고, 필요하면 실제 잠금 파일을 생성한다. 획득 inode가 현재 경로와 같은지 확인하고 원본 해시→독립 복사→사본 해시→읽기 전용 manifest/체크섬→덮어쓰기 없는 원자적 게시까지 잠금을 유지한다. 기존 잠금 파일은 보존하고 직접 생성한 동일 inode만 잠근 상태에서 정리한다. 잠금을 만들기 위한 수동 touch나 단순 파일 부재 무시는 사용하지 않는다.
 
 원본 `BUILD-RESULT.json`에는 `build_exit_code: 0`, `finished_at`, `build_directory`, 40자리 `source_commit`, 선택 이미지의 `path`/`bytes`/`sha256` 객체(`wic` 또는 `rpi_sdimg`)가 있어야 한다. 원본 기록은 내용 변경 없이 복사한다. 실패/미완료 기록, 해시 불일치, 실행 중 빌드, 기존 출력은 거부한다. 중단된 전용 staging은 조사용으로 남지만 조립 입력으로 받지 않는다.
 
 ```bash
 # 게시 계획만. 출력 디렉터리는 아직 없어야 하며 부모는 존재해야 한다.
-python3 -B scripts/publish-perseus-platform.py \
+python3 -B platform/scripts/publish-perseus-platform.py \
   --build-record /absolute/build-logs/BUILD-RESULT.json \
   --build-record-sha256 <기록의_SHA256> \
   --image-kind wic --output-dir /absolute/completed-platform
@@ -57,11 +57,11 @@ python3 -B scripts/publish-perseus-platform.py \
 
 각 게스트에는 검증된 `template_dir`과 `template.json`의 SHA-256을 지정할 수 있다. 조립기는 root/boot/config 해시·논리 크기·읽기 전용 속성·고정 `sources.lock.json`의 출처 일치를 검사한다. 이미 사용한 VM 디스크는 템플릿으로 받지 않는다.
 
-새 템플릿 준비도 기존 `scripts/prepare-perseus-guests.py`를 호출한다. 이 경우 `template_dir` 대신 `input`, `size_gib: 8`, 선택적으로 `source_virtual_limit_bytes`(최대 64GiB)를 설정한다. input은 고정 QCOW2 원본이며 공식 해시와 비교한다. 원본이 없을 때는 `download: true`와 별도 승인된 `assemble --execute`가 모두 있어야만 고정 URL로 다운로드한다. 계획은 다운로드하지 않고 보수적 상한을 계산한다. 원본·기존 템플릿은 수정하지 않는다.
+새 템플릿 준비도 기존 `platform/scripts/prepare-perseus-guests.py`를 호출한다. 이 경우 `template_dir` 대신 `input`, `size_gib: 8`, 선택적으로 `source_virtual_limit_bytes`(최대 64GiB)를 설정한다. input은 고정 QCOW2 원본이며 공식 해시와 비교한다. 원본이 없을 때는 `download: true`와 별도 승인된 `assemble --execute`가 모두 있어야만 고정 URL로 다운로드한다. 계획은 다운로드하지 않고 보수적 상한을 계산한다. 원본·기존 템플릿은 수정하지 않는다.
 
 ```bash
 # 계획만 출력. 측정값은 모의 예시가 아닌 실제 대상 카드 용량으로 입력한다.
-python3 -B scripts/assemble-perseus-first-install.py plan \
+python3 -B platform/scripts/assemble-perseus-first-install.py plan \
   --config /absolute/deployment.json \
   --output-dir /absolute/new-release \
   --work-dir /absolute/new-scratch \
@@ -96,7 +96,7 @@ new-release/
 manifest에는 선택 입력·고정 버전/해시·템플릿·seed root 해시·소스/배포 설정·파티션 레이아웃·최소 용량·실제 여유 공간·자동 시작 정책·수행 검증과 미수행 하드웨어 시험을 기록한다. 미커밋 소스 사용 여부와 조립기/준비 도구 소스 파일 해시도 기록하고, 준비 중 소스가 바뀌면 게시하지 않는다. 결과 재검사는 일반 파일만 읽는다.
 
 ```bash
-python3 -B scripts/assemble-perseus-first-install.py verify \
+python3 -B platform/scripts/assemble-perseus-first-install.py verify \
   --manifest /absolute/new-release/perseus-first-install.manifest.json
 ```
 
@@ -135,8 +135,8 @@ perseus-vm start ubuntu-team2
 ## 재실행 검사와 별도 승인 단계
 
 ```bash
-bash scripts/check-perseus-platform.sh
-bash scripts/check-perseus-platform.sh --metadata
+bash platform/scripts/check-perseus-platform.sh
+bash platform/scripts/check-perseus-platform.sh --metadata
 ```
 
 첫 명령은 일반 파일/명령 대역·8KiB 비 OS 조립 fixture와 실제 systemd loader의 순환 검사를 실행한다. 두 번째는 별도 `/tmp` 빌드 경로의 파싱/환경 조회만 추가한다. 실제 BitBake 빌드 태스크·다운로드·mount·SD·VM은 실행하지 않는다.
