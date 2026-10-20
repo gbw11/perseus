@@ -61,6 +61,7 @@ class WifiReapplyTest(unittest.TestCase):
         code, result = self.activate_cli(model)
         self.assertNotEqual(model.loaded, before)
         self.assertEqual(model.loaded, (self.root / 'etc/xenova/wifi/wlan0.conf').read_bytes())
+        self.assertIn(b'\ndisable_scan_offload=1\n',model.loaded)
         self.assertEqual(code, 0)
         self.assertEqual(result['activation']['action'], 'restart')
         self.assertEqual(result['activation']['result'], 'requested')

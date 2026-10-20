@@ -48,6 +48,9 @@ for unit in installed_units:
 assert 'xenova-xen-ready.service' not in platform['SYSTEMD_SERVICE:xenova-platform'].split()
 assert 'xenova-data-prepare.service' not in platform['SYSTEMD_SERVICE:xenova-platform'].split()
 assert selected(platform, 'first_install_contract.py').resolve() == ROOT / 'platform/first-install/first_install_contract.py'
+assert selected(platform, 'xenova-wifi-modprobe.conf') == LAYER / 'recipes-core/xenova-platform/files/xenova-wifi-modprobe.conf'
+assert '/etc/modprobe.d/xenova-wifi.conf' in platform['FILES:xenova-platform'].split()
+assert '/etc/modprobe.d/xenova-wifi.conf' in platform['CONFFILES:xenova-platform'].split()
 for module in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
     assert selected(platform, module).resolve() == ROOT / 'platform/guests/common' / module
 assert 'installed-vs-shipped' in platform['ERROR_QA'].split()
@@ -55,7 +58,7 @@ for name, value in platform.items():
     if name == 'INSANE_SKIP' or name.startswith('INSANE_SKIP:'):
         assert 'installed-vs-shipped' not in value.split(), f'QA disabled: {name}'
 print('PASS unit ownership: ' + ', '.join(installed_units) + '; static unit not enabled; installed-vs-shipped QA retained')
-required = {'python3-core', 'python3-json', 'python3-ctypes', 'xen-tools-libxenmanage', 'iproute2', 'xen-tools-xl', 'openssh-sshd',
+required = {'kernel-module-brcmfmac', 'kernel-module-brcmfmac-cyw', 'python3-core', 'python3-json', 'python3-ctypes', 'xen-tools-libxenmanage', 'iproute2', 'xen-tools-xl', 'openssh-sshd',
             'util-linux-sfdisk', 'util-linux-partx', 'util-linux-blockdev', 'util-linux-blkid',
             'util-linux-losetup', 'util-linux-mount', 'util-linux-umount', 'util-linux-findmnt',
             'e2fsprogs-e2fsck', 'e2fsprogs-resize2fs', 'e2fsprogs-dumpe2fs', 'e2fsprogs-tune2fs', 'coreutils'}
