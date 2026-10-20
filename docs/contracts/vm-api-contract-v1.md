@@ -186,9 +186,9 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 |---|---|---|---|
 | `GET` | `/api/v1/vms` | `200` VM 배열 | `401`, `500`, `503`, `504` |
 | `POST` | `/api/v1/vms` | `201` VM | `400`, `401`, `409`, `507`, `500`, `501`, `503`, `504` |
-| `GET` | `/api/v1/vms/{vm_id}` | `200` VM | `401`, `404`, `500`, `503`, `504` |
-| `POST` | `/api/v1/vms/{vm_id}/stop` | `204` | `401`, `500`, `501`, `503`, `504` |
-| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `401`, `404`, `409`, `500`, `501`, `503`, `504` |
+| `GET` | `/api/v1/vms/{vm_id}` | `200` VM | `400`, `401`, `404`, `500`, `503`, `504` |
+| `POST` | `/api/v1/vms/{vm_id}/stop` | `204` | `400`, `401`, `500`, `501`, `503`, `504` |
+| `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `400`, `401`, `404`, `409`, `500`, `501`, `503`, `504` |
 | `GET` | `/healthz` | `200` | `401`, `503` |
 
 드라이버·플랫폼 실패는 모든 엔드포인트에서 날 수 있으며 code와 HTTP 상태가 1:1입니다(8.1절). `500 DriverError`는 분류되지 않은 실행 실패, `503 PlatformUnavailable`은 일시 장애(재시도 가능), `504 DriverTimeout`은 호출 시한 초과, `501 NotSupported`는 드라이버·플랫폼이 제공하지 않는 동작입니다. 서비스 토큰이 설정된 배포에서는 토큰이 없거나 틀리면 `401 Unauthorized`입니다. `XENOVA_SERVICE_TOKEN`이 설정된 배포에서는 `/healthz`를 포함한 모든 엔드포인트가 토큰이 없거나 틀리면 `401 Unauthorized`를 냅니다. OpenAPI는 `ServiceToken` bearer 보안 스킴을 전역 security로 선언하고 각 엔드포인트에 `401`을 명시합니다.
@@ -372,6 +372,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 항목 | 규칙 | 검증 계층 |
 |---|---|---|
 | `name` | 1~63자, 한글·공백 허용. 제어문자·줄 구분 문자와 앞뒤 공백 금지 | Spring 소유, create 전달 경로에서 동일 규칙 검증 |
+| `vm_id` | UUID. nil UUID(`00000000-…`)는 Domain-0이므로 모든 엔드포인트에서 `400 InvalidArgument` | dom0-manager (백엔드가 막는 것과 별개로 거부) |
 | `vcpus` | 1~4 | Spring, dom0-manager |
 | `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16) | 템플릿별 하한은 Spring, 템플릿별 범위(`resource_limits`)는 플랫폼 카탈로그가 create 때 검사(벗어나면 `400 InvalidArgument`), 공통 범위는 dom0-manager |
 | 배수 제약 | 없음. 화면 입력만 64 단위 | — |
@@ -465,3 +466,4 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1.6 | 2026-10-19 | dom0-manager 오류 code 분리(플랫폼 드라이버 S15P31E110-115 계약) 반영: `401 Unauthorized`, `501 NotSupported`, `503 PlatformUnavailable`, `504 DriverTimeout`과 Spring 변환(8.1·8.2절). 요청 메모리 공통 하한 128 → 16, Zephyr starter `min_memory_mib` 16(2.3절·9장) |
 | v1.7 | 2026-10-19 | 플랫폼 드라이버(S15P31E110-115) 반영: 모든 엔드포인트 응답 목록에 `401`·`500`·`501`·`503`·`504` 명시(4장), OpenAPI에 `ServiceToken` bearer 보안 스킴·전역 security 선언, HTTP 모델의 `ResourceError.name`에 `ipv4`와 `memory_mib` 하한 16, 정지된 등록 VM에 다른 생성 명세는 `409 VMExists`(4.2절), 플랫폼 Manager 잠금 대기 한도(`XENOVA_PLATFORM_BUSY_TIMEOUT`, 기본 5초) 초과 시 `503`(재시도 가능)이며 `/healthz`는 바쁜 상태를 장애로 보지 않음(8.1절). 13장에서 해결된 Zephyr 자원 범위·IP 고갈 스키마 항목 정리 |
 | v1.8 | 2026-10-19 | 플랫폼이 `create`에 `vm_id`를 필수로 받고 내부 실행 이름·MAC·Linux IP를 발급하게 되어 dom0-manager의 IP 풀 선택·재시도와 `INVALID_SPEC`→501 임시 처리를 제거. 플랫폼 `IP_POOL_EXHAUSTED`→`507 ipv4`, 인스턴스 디렉터리는 `configuration.id`, `/healthz`는 Manager를 거치지 않고 `xl info`(조회 한도)와 registry 저장소 존재만 확인해 조회 한도 안에서 끝남. 13장 HTTP→Manager 입력 항목 해결 |
+| v1.9 | 2026-10-19 | Domain-0 보호(S15P31E110-206): nil UUID 대상 호출은 모든 엔드포인트에서 `400 InvalidArgument`, 목록은 domid 0 또는 이름 Domain-0 을 제외(9장) |
