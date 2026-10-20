@@ -60,7 +60,42 @@ def test_install_copies_packages_and_unit(tmp_path):
 def test_install_is_idempotent(tmp_path):
     root = _rootfs(tmp_path)
     enable = _symlinks_supported(tmp_path)
-    assert installer.install(root, SOURCE, enable=enable) == installer.install(root, SOURCE, enable=enable)
+    first = installer.install(root, SOURCE, enable=enable)
+    second = installer.install(root, SOURCE, enable=enable)  # 자기가 만든 enable 링크를 위험한 링크로 보지 않는다
+    assert first == second
+    if enable:
+        assert os.readlink(root / LINK) == "/usr/lib/systemd/system/xenova-agent.service"
+
+
+def test_existing_correct_enable_link_is_kept(tmp_path):
+    if not _symlinks_supported(tmp_path):
+        pytest.skip("symlinks unavailable on this host")
+    root = _rootfs(tmp_path)
+    (root / LINK).parent.mkdir(parents=True)
+    (root / LINK).symlink_to("/usr/lib/systemd/system/xenova-agent.service")
+    installed = installer.install(root, SOURCE, enable=True)
+    assert root / LINK in installed and os.readlink(root / LINK) == "/usr/lib/systemd/system/xenova-agent.service"
+
+
+def test_enable_link_to_a_different_target_is_rejected_before_install(tmp_path):
+    if not _symlinks_supported(tmp_path):
+        pytest.skip("symlinks unavailable on this host")
+    root = _rootfs(tmp_path)
+    (root / LINK).parent.mkdir(parents=True)
+    (root / LINK).symlink_to("/etc/passwd")
+    with pytest.raises(ValueError, match="unexpected enable link target"):
+        installer.install(root, SOURCE, enable=True)
+    assert not (root / "opt").exists() and not (root / UNIT).exists()
+
+
+def test_regular_file_at_enable_link_is_rejected_before_install(tmp_path):
+    root = _rootfs(tmp_path)
+    (root / LINK).parent.mkdir(parents=True)
+    (root / LINK).write_text("not a link\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="regular file"):
+        installer.install(root, SOURCE, enable=True)
+    assert not (root / "opt").exists() and not (root / UNIT).exists()
+    assert (root / LINK).read_text(encoding="utf-8") == "not a link\n"
 
 
 def test_missing_paho_installs_nothing(tmp_path):
