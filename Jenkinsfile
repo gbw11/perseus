@@ -1,7 +1,7 @@
 // Xenova CI: GitLab push/MR → 백엔드 테스트 → GitLab 커밋 상태 + Mattermost 알림
 //
 // 필요한 Jenkins 플러그인: GitLab, Mattermost Notification, JUnit
-// 에이전트 요구 사항: Java 21 (Maven은 mvnw가 고정된 버전을 자동으로 내려받는다), python3 + pip (dom0-manager 테스트)
+// 에이전트 요구 사항: Java 21 (Maven은 mvnw가 고정된 버전을 자동으로 내려받는다), python3 + pip (dom0-manager·vm-agent 테스트)
 
 pipeline {
     agent any
@@ -32,11 +32,26 @@ pipeline {
                 }
             }
         }
+        stage('vm-agent Test') {
+            // MQTT 클라이언트(platform/services/vm-agent/mqtt-client)와 VM 에이전트(platform/services/vm-agent/agent).
+            // 브로커 통합 테스트는 XENOVA_MQTT_TEST_BROKER 가 없으면 건너뛴다. rootfs 설치 스크립트의 심볼릭 링크 테스트는
+            // Windows 에서 건너뛰므로 Linux 인 여기서 실제로 검증된다. python3 가 없으면 dom0-manager 단계와 같이 UNSTABLE 로 둔다.
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    dir('platform/services/vm-agent/mqtt-client') {
+                        sh 'python3 -m pip install -q --user "paho-mqtt>=1.6,<3" "pytest>=7" && python3 -m pytest -q --junitxml=target/pytest.xml'
+                    }
+                    dir('platform/services/vm-agent/agent') {
+                        sh 'python3 -m pytest -q --junitxml=target/pytest.xml'
+                    }
+                }
+            }
+        }
     }
 
     post {
         always {
-            junit testResults: 'backend/target/surefire-reports/*.xml,platform/services/dom0-manager/target/pytest.xml', allowEmptyResults: true
+            junit testResults: 'backend/target/surefire-reports/*.xml,platform/services/dom0-manager/target/pytest.xml,platform/services/vm-agent/mqtt-client/target/pytest.xml,platform/services/vm-agent/agent/target/pytest.xml', allowEmptyResults: true
         }
         success {
             updateGitlabCommitStatus name: 'jenkins', state: 'success'
