@@ -78,6 +78,7 @@ class VmService:
                     request.vm_id,
                     request.template_id,
                     request.template_version,
+                    name=request.name,
                     vcpus=request.vcpus,
                     memory_mib=request.memory_mib,
                 )

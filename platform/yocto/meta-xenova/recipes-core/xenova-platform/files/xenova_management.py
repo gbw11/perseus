@@ -20,12 +20,14 @@ import xenova_catalog as catalog
 from xenova_runtime import PlatformError, atomic_write, operation_lock, sync_directory
 import xenova_vm as vm
 import xenova_zephyr as zephyr
+from xenova_execution import ExecutionError
 
 MUTATIONS = {'create', 'retire', 'restore', 'purge'}
 EXIT_CODES = {'success': 0, 'validation': 2, 'conflict': 3, 'execution': 4}
 CONFLICTS = {'VM_NAME_CONFLICT', 'IP_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'OPERATION_IN_PROGRESS',
-             'VM_NOT_STOPPED', 'TARGET_CHANGED', 'ASSET_IN_USE', 'RESTORE_CONFLICT', 'VM_PURGED'}
-VALIDATION = {'INVALID_SPEC', 'VM_NOT_FOUND', 'TEMPLATE_NOT_FOUND', 'TEMPLATE_VERSION_NOT_FOUND', 'RESOURCE_UNSUPPORTED'}
+             'VM_NOT_STOPPED', 'TARGET_CHANGED', 'ASSET_IN_USE', 'RESTORE_CONFLICT', 'VM_PURGED',
+             'HOST_QUIESCING', 'BOOT_ADMISSION_REQUIRED', 'INTENT_MISMATCH'}
+VALIDATION = {'INVALID_SPEC', 'VM_NOT_FOUND', 'TEMPLATE_NOT_FOUND', 'TEMPLATE_VERSION_NOT_FOUND', 'RESOURCE_UNSUPPORTED', 'RECOVERY_MODE_UNSUPPORTED'}
 
 
 class ManagementError(PlatformError):
@@ -167,6 +169,7 @@ class Manager:
         marker = self.p.runtime / 'shutdown-requested'
         if marker.exists() or marker.is_symlink():
             fail('OPERATION_IN_PROGRESS', 'board shutdown is in progress', retryable=True)
+        self.p.execution().gate()
 
     @staticmethod
     def _text_token(value):
@@ -180,7 +183,9 @@ class Manager:
     def _validate_call(self, action, spec, execute, key, request_id):
         """외부 호출의 타입/허용 필드를 읽기 전에 검사한다. 내부 예외는 입력 오류로 덮지 않는다."""
         actions = MUTATIONS | {'templates', 'list', 'get', 'operation', 'start', 'stop',
-                               'reboot', 'autostart-set', 'board-shutdown-set', 'config'}
+                               'reboot', 'destroy', 'autostart-set', 'board-shutdown-set', 'config',
+                               'recover_once', 'recovery-operation', 'control-operation', 'snapshot', 'probe',
+                               'execution-context', 'host-resume'}
         if not isinstance(action, str) or action not in actions:
             fail('INVALID_SPEC', 'unsupported management action')
         if type(execute) is not bool:
@@ -197,15 +202,29 @@ class Manager:
             if action != 'create' and not self._text_token(key):
                 fail('INVALID_SPEC', 'idempotency_key of 1..200 UTF-8 bytes required')
             return self._normalize(action, spec)
+        if action == 'recover_once':
+            from xenova_recovery import validate_request
+            return validate_request(spec)
         if action == 'templates':
             allowed = set()
+        elif action == 'host-resume':
+            if set(spec) != {'barrier_id'} or not isinstance(spec['barrier_id'], str) or not vm.UUID.fullmatch(spec['barrier_id']):
+                fail('INVALID_SPEC', 'host-resume requires the current barrier_id')
+            return spec
+        elif action in ('control-operation', 'recovery-operation'):
+            field = 'operation_id' if action == 'control-operation' else 'recovery_attempt_id'
+            if set(spec) != {field} or not isinstance(spec[field], str) or not vm.UUID.fullmatch(spec[field]):
+                fail('INVALID_SPEC', 'canonical operation selector required')
+            return spec
         elif action == 'list':
             allowed = {'lifecycle'}
         elif action == 'operation':
             allowed = {'operation_id', 'idempotency_key'}
         else:
-            allowed = {'vm_id'} | ({'force'} if action in ('stop', 'reboot')
+            allowed = {'vm_id'} | ({'force'} if action in ('stop', 'reboot', 'destroy')
                                   else {'value'} if action.endswith('-set') else set())
+        if action in ('snapshot', 'probe'):
+            allowed |= {'max_age_ms'} if action == 'snapshot' else {'timeout_ms'}
         if set(spec) - allowed:
             fail('INVALID_SPEC', 'unexpected specification fields')
         if action == 'list':
@@ -222,6 +241,13 @@ class Manager:
                 fail('INVALID_SPEC', 'invalid operation selector')
         elif action != 'templates':
             spec = {**spec, 'vm_id': normalize_uuid(spec.get('vm_id'))}
+            if action in ('snapshot', 'probe'):
+                field = 'max_age_ms' if action == 'snapshot' else 'timeout_ms'
+                value = spec.get(field)
+                if type(value) is not int or not 0 < value <= (120000 if field == 'max_age_ms' else 15000):
+                    fail('INVALID_SPEC', field+' is outside the supported range')
+            if action == 'destroy' and spec.get('force') is not True:
+                fail('INVALID_SPEC', 'destroy requires explicit force')
             if 'force' in spec and type(spec['force']) is not bool:
                 fail('INVALID_SPEC', 'force must be a boolean')
             if action == 'autostart-set' and spec.get('value') not in ('on', 'off'):
@@ -631,12 +657,16 @@ class Manager:
                   'initial_spec':record.get('creation_spec'), 'configuration':record,
                   'xen_state':None,'domid':None,'app_readiness':'unknown'}
         if observe:
-            rows = self.p.matching(record, self.p.domains())
-            result.update(xen_state=rows[0]['xen_state'] if rows else 'stopped',
-                          domid=rows[0]['domid'] if rows else None)
+            observation = self.p.execution().observe(record, self.p.clock()+15)
+            result.update(xen_state=observation['xen_state'], domid=observation['domid'])
+        else:
+            observation = None
+        result.update(self.p.execution().describe(record, tomb['generation'], tomb['lifecycle'], observation))
         return result
 
     def _finish(self, op, tomb):
+        if op['action'] == 'create':
+            self.p.execution().initialize(tomb['record'], 'stopped', 'create', op['operation_id'])
         result = self._view(tomb)
         op.update(status='SUCCEEDED',result=result,error=None)
         self._save_op(op, 'complete')
@@ -907,6 +937,9 @@ class Manager:
                   'operation_id':None,'replayed':False,'data':None,'error':None}
         try:
             spec = self._validate_call(action, spec, execute, idempotency_key, request_id)
+            if action == 'snapshot':
+                response.update(ok=True, data={'snapshot':self.p.execution().snapshot(spec['vm_id'], spec['max_age_ms'])})
+                return response
             with operation_lock(self.p.runtime):
                 try:
                     records=self.p.records(validate_assets=False)
@@ -932,7 +965,31 @@ class Manager:
                         states += [t for t in self._tombs().values() if t['vm_id'] not in {s['vm_id'] for s in states}]
                         states=[s for s in states if lifecycle=='all' or s['lifecycle']==lifecycle]
                     result={'vm':self._view(states[0],observe=True)} if action=='get' else {'vms':[self._view(s,observe=True) for s in states]}
-                elif action in ('start','stop','reboot','autostart-set','board-shutdown-set','config'):
+                elif action in ('recover_once', 'recovery-operation'):
+                    from xenova_recovery import Recovery
+                    recovery = Recovery(self)
+                    if action == 'recovery-operation':
+                        result = {'attempt':recovery.read_attempt(spec['recovery_attempt_id'])}
+                        context['operation_id'] = result['attempt']['operation_id']
+                    else:
+                        with tool_output():
+                            result = recovery.once(spec, execute=execute, context=context)
+                elif action == 'control-operation':
+                    found = [q for q in self.p.execution().requests() if q['operation_id'] == spec['operation_id']]
+                    if len(found) != 1:
+                        fail('VM_NOT_FOUND', 'control operation not found')
+                    result = {'operation':found[0]}
+                    context['operation_id'] = found[0]['operation_id']
+                elif action == 'host-resume':
+                    result = {'host_admission':self.p.execution().resume_host(spec['barrier_id'])}
+                elif action in ('probe', 'execution-context'):
+                    tomb = self._state(spec['vm_id'], records)
+                    if action == 'probe':
+                        observation = self.p.execution().observe(tomb['record'], self.p.clock()+spec['timeout_ms']/1000)
+                        result = {'observation':observation}
+                    else:
+                        result = {'vm':self._view(tomb, observe=True)}
+                elif action in ('start','stop','reboot','destroy','autostart-set','board-shutdown-set','config'):
                     tomb=self._state(spec.get('vm_id'),records)
                     if tomb['lifecycle']!='REGISTERED':
                         fail('VM_PURGED' if tomb['lifecycle']=='PURGED' else 'INVALID_SPEC','VM is not registered')
@@ -940,15 +997,12 @@ class Manager:
                     if action in ('autostart-set', 'board-shutdown-set', 'config'):
                         self._writable()
                     with tool_output():
-                        if action=='start':
-                            self.p.check_xen()
-                            if vm.guest_kind(record)=='linux':
-                                self.p.prepare_dhcp(records)
-                            self.p.start(record)
-                        elif action=='stop':
-                            self.p.stop_many([record],force=bool(spec.get('force',False)))
-                        elif action=='reboot':
-                            self.p.reboot(record,force=bool(spec.get('force',False)))
+                        if action in ('start', 'stop', 'reboot', 'destroy'):
+                            control_result = self.p.request_control(action, record, force=bool(spec.get('force',False)),
+                                                                    idempotency_key=idempotency_key)
+                            context['operation_id'] = control_result['operation_id']
+                            context['replayed'] = control_result['replayed']
+                            context['diagnostic_warnings'] = control_result.get('diagnostic_warnings', [])
                         elif action=='config':
                             vm.validate_record(record,self.data/'instances'/record['id'])
                             vm.ensure_runtime(self.p.runtime)
@@ -977,6 +1031,11 @@ class Manager:
                 response.update(ok=True,data=result)
         except ManagementError as exc:
             response['error']=exc.error
+        except ExecutionError as exc:
+            response['error'] = exc.error
+            context['observation_error_handled'] = getattr(exc, 'observation_error_handled', False)
+            context['operation_id'] = exc.error['details'].get('operation_id', context['operation_id'])
+            context['replayed'] = exc.error['details'].get('replayed', context['replayed'])
         except vm.DomainIdentityError as exc:
             response['error']={'code':'TARGET_CHANGED', 'message':str(exc),
                                'retryable':False, 'details':{}}
@@ -990,6 +1049,27 @@ class Manager:
             response['error']={'code':'CLEANUP_INCOMPLETE' if cleanup else 'RECOVERY_REQUIRED' if context['operation_id'] else 'ARTIFACT_INVALID',
                                'message':type(exc).__name__+': management operation could not be completed',
                                'retryable':cleanup,'details':{'operation_id':context['operation_id']} if cleanup else {}}
+        if (action == 'probe' and not response['ok'] and not context.get('observation_error_handled')
+                and isinstance(spec, dict) and isinstance(spec.get('vm_id'), str) and vm.UUID.fullmatch(spec['vm_id'])):
+            try:
+                self.p.execution().note_probe_error(spec['vm_id'], response['error'])
+            except (PlatformError, OSError, ValueError) as diagnostic:
+                response['error']['details'].setdefault('diagnostic_warnings', []).append(
+                    {'code':'DIAGNOSTIC_UNAVAILABLE', 'sink':'observations', 'cause_type':type(diagnostic).__name__})
+        if not response['ok'] and action in ('start', 'stop', 'reboot', 'destroy', 'recover_once') and isinstance(spec, dict):
+            identity = spec.get('vm_id')
+            if isinstance(identity, str) and vm.UUID.fullmatch(identity):
+                try:
+                    warning = self.p.execution().event('request-rejected', {'uuid':identity}, context['operation_id'],
+                                             {'action':action, 'error_code':response['error']['code'],
+                                              'recovery_attempt_id':spec.get('recovery_attempt_id'),
+                                              'replayed':context['replayed']})
+                    if warning:
+                        response['error']['details'].setdefault('diagnostic_warnings', []).append(warning)
+                except (OSError, PlatformError):
+                    response['error']['details']['diagnostic_recording'] = 'unavailable'
+        if response['ok'] and context.get('diagnostic_warnings'):
+            response['data']['diagnostic_warnings'] = context['diagnostic_warnings']
         response.update(operation_id=context['operation_id'],replayed=context['replayed'])
         if (not response['ok'] and context['write_operation'] and execute
                 and response['error']['code'] not in ('IDEMPOTENCY_CONFLICT','TARGET_CHANGED','VM_PURGED')):

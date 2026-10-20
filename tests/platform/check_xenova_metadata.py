@@ -14,8 +14,9 @@ def load(target):
     return text, dict(re.findall(r'^(?:export )?([A-Za-z0-9_:/.-]+)="(.*)"$', text, re.M))
 
 
-def selected(values, name):
-    return next(Path(p) / name for p in values['FILESPATH'].split(':') if (Path(p) / name).is_file())
+def selected(values, name, *, directory=False):
+    return next(Path(p) / name for p in values['FILESPATH'].split(':')
+                if ((Path(p) / name).is_dir() if directory else (Path(p) / name).is_file()))
 
 
 _, boot = load('xen-rpi-u-boot-scr')
@@ -32,7 +33,7 @@ assert bringup['SYSTEMD_AUTO_ENABLE:xenova-bringup'] == 'enable'
 assert "sed -e 's|@BINDIR@|/usr/bin|g'" in text
 platform_text, platform = load('xenova-platform')
 assert platform['SYSTEMD_AUTO_ENABLE:xenova-platform'] == 'enable'
-assert set(platform['SYSTEMD_SERVICE:xenova-platform'].split()) == {'srv-xenova.mount', 'xenova-vm-shutdown.service', 'xenova-vms.service', 'xenova-first-boot.service'}
+assert set(platform['SYSTEMD_SERVICE:xenova-platform'].split()) == {'srv-xenova.mount', 'xenova-vm-shutdown.service', 'xenova-vms.service', 'xenova-first-boot.service', 'xenova-host-admission.service'}
 # package task는 실행하지 않는다. 실제 해석된 install 목록과 모든 패키지의 FILES를 대조한다.
 installed_units = re.search(r'for unit in ([^;]+); do', platform_text).group(1).split()
 for unit in installed_units:
@@ -54,10 +55,12 @@ for name, value in platform.items():
     if name == 'INSANE_SKIP' or name.startswith('INSANE_SKIP:'):
         assert 'installed-vs-shipped' not in value.split(), f'QA disabled: {name}'
 print('PASS unit ownership: ' + ', '.join(installed_units) + '; static unit not enabled; installed-vs-shipped QA retained')
-required = {'python3-core', 'python3-json', 'iproute2', 'xen-tools-xl', 'openssh-sshd',
+required = {'python3-core', 'python3-json', 'python3-ctypes', 'xen-tools-libxenmanage', 'iproute2', 'xen-tools-xl', 'openssh-sshd',
             'util-linux-sfdisk', 'util-linux-partx', 'util-linux-blockdev', 'util-linux-blkid',
             'util-linux-losetup', 'util-linux-mount', 'util-linux-umount', 'util-linux-findmnt',
             'e2fsprogs-e2fsck', 'e2fsprogs-resize2fs', 'e2fsprogs-dumpe2fs', 'e2fsprogs-tune2fs', 'coreutils'}
+assert 'xen-tools-libxenmanage' in xen['PACKAGES'].split()
+assert xen['FILES:xen-tools-libxenmanage'] == '/usr/lib/libxenmanage.so.*'
 missing = required - set(platform['RDEPENDS:xenova-platform'].split())
 assert not missing, f'Required runtime packages are undeclared: {sorted(missing)}'
 text, image = load('xenova-xen-bringup-image')
@@ -99,7 +102,12 @@ for target in ('xenova-bringup', 'xenova-platform', 'xenova-domu-init', 'xenova-
     for entry in values.get('SRC_URI', '').split():
         if entry.startswith('file://'):
             name = entry[7:].split(';', 1)[0]
-            assert selected(values, name).is_file(), (target, name)
+            if target == 'xenova-platform' and name in ('ubuntu', 'debian'):
+                source = selected(values, name, directory=True)
+                assert source.resolve() == ROOT / 'platform/guests' / name
+                assert not source.is_symlink() and (source / 'xen.cfg.in').is_file()
+            else:
+                assert selected(values, name).is_file(), (target, name)
 _, init = load('xenova-domu-initramfs')
 assert 'xenova-domu-init' in init['PACKAGE_INSTALL'].split()
 assert 'xenova-domu-initramfs:do_image_complete' in text

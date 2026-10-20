@@ -9,7 +9,7 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import test_xenova_management as fixtures
-from first_install_fixture import Board, FILES
+from first_install_fixture import ROOT, Board, FILES
 import xenova_management as management
 import xenova_management_cli as cli
 import xenova_vm as vm
@@ -304,11 +304,11 @@ class TombstoneBootConsumerTest(unittest.TestCase):
 
     def test_autostart_main_records_and_retired_filter_ignore_temp(self):
         xen = fixtures.FakeXen(self.b.data, {})
-        platform = vm.Platform(self.b.data, Path(self.tmp.name) / 'autostart-run', command=xen)
-        original_path = Path
-        def mapped(path):
-            return FILES / 'defaults.json' if str(path) == '/etc/xenova/defaults.json' else original_path(path)
-        with patch.object(vm, 'Platform', return_value=platform), patch.object(vm, 'Path', side_effect=mapped), \
+        defaults = json.loads((ROOT / 'tests/platform/fixtures/legacy-defaults.json').read_text())
+        legacy = Path(self.tmp.name) / 'legacy-boot-defaults.json'
+        legacy.write_text(json.dumps({'instances': defaults['instances']}))
+        platform = vm.Platform(self.b.data, Path(self.tmp.name) / 'autostart-run', command=xen, defaults_path=legacy)
+        with patch.object(vm, 'Platform', return_value=platform), \
              patch.object(platform, 'check_xen'), patch.object(platform, 'check_network'), \
              patch.object(vm, 'storage_check'), redirect_stdout(io.StringIO()):
             xen.records = platform.records(validate_assets=False)
