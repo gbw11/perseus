@@ -1,0 +1,95 @@
+[
+ {
+  "name": "dedupe_and_restart",
+  "steps": [
+   {
+    "topic": "t1",
+    "publisher": "p1",
+    "boot_id": "b1",
+    "instance_id": "i1",
+    "seq": 1,
+    "accept": true
+   },
+   {
+    "topic": "t1",
+    "publisher": "p1",
+    "boot_id": "b1",
+    "instance_id": "i1",
+    "seq": 1,
+    "accept": false
+   },
+   {
+    "topic": "t1",
+    "publisher": "p1",
+    "boot_id": "b1",
+    "instance_id": "i1",
+    "seq": 2,
+    "accept": true
+   },
+   {
+    "topic": "t1",
+    "publisher": "p1",
+    "boot_id": "b1",
+    "instance_id": "i1",
+    "seq": 1,
+    "accept": false
+   },
+   {
+    "topic": "t1",
+    "publisher": "p1",
+    "boot_id": "b1",
+    "instance_id": "i2",
+    "seq": 1,
+    "accept": true
+   },
+   {
+    "topic": "t1",
+    "publisher": "p1",
+    "boot_id": "b2",
+    "instance_id": "i2",
+    "seq": 1,
+    "accept": true
+   },
+   {
+    "topic": "t1",
+    "publisher": "p2",
+    "boot_id": "b2",
+    "instance_id": "i2",
+    "seq": 1,
+    "accept": true
+   },
+   {
+    "topic": "t2",
+    "publisher": "p1",
+    "boot_id": "b2",
+    "instance_id": "i2",
+    "seq": 1,
+    "accept": true
+   },
+   {
+    "topic": "t1",
+    "publisher": "p1",
+    "boot_id": "b2",
+    "instance_id": "i2",
+    "seq": 1,
+    "accept": false
+   },
+   {
+    "topic": "t1",
+    "publisher": "p1",
+    "boot_id": "b2",
+    "instance_id": "i2",
+    "seq": null,
+    "accept": true
+   },
+   {
+    "topic": "t1",
+    "publisher": "p1",
+    "boot_id": "b2",
+    "instance_id": "i2",
+    "seq": null,
+    "accept": true
+   }
+  ]
+ }
+]
