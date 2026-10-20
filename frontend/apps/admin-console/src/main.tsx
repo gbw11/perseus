@@ -45,7 +45,11 @@ const router = createBrowserRouter([
 ]);
 
 async function start() {
-  // S15P31E110-52: VITE_MOCK=true 면 여기서 MSW 를 켠다
+  // VITE_MOCK=true 면 MSW 가 /api 를 대신 답한다 (src/mocks, 사용법은 frontend/README.md)
+  if (import.meta.env.VITE_MOCK === 'true') {
+    const { startMock } = await import('./mocks/browser');
+    await startMock();
+  }
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>

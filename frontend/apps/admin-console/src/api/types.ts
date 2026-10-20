@@ -12,7 +12,7 @@ export interface LoginRequest {
   password: string;
 }
 
-/** 로그인·재발급 응답. refresh 토큰은 HttpOnly 쿠키(perseus_refresh)라 본문에 없다 */
+/** 로그인·재발급 응답. refresh 토큰은 HttpOnly 쿠키(xenova_refresh)라 본문에 없다 */
 export interface TokenResponse {
   access_token: string;
   token_type: 'Bearer';
