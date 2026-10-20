@@ -1,0 +1,48 @@
+"""설정: 환경변수 우선, 없으면 /etc/xenova/instance-id. 잘못된 값은 시작 시점 오류."""
+
+from __future__ import annotations
+
+import pytest
+
+from xenova_agent.config import DEFAULT_BROKER_HOST, AgentSettings
+
+VM_ID = "11111111-1111-4111-8111-111111111111"
+
+
+def test_env_overrides_and_defaults(tmp_path):
+    s = AgentSettings.from_env(
+        {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_BROKER_PORT": "18830", "XENOVA_AGENT_LOG_LEVEL": "debug"},
+        instance_id_path=tmp_path / "missing",
+    )
+    assert (s.vm_id, s.broker_host, s.broker_port, s.heartbeat_interval_s, s.log_level) == (VM_ID, DEFAULT_BROKER_HOST, 18830, 5.0, "DEBUG")
+    assert s.username is None and s.password is None
+
+
+def test_vm_id_falls_back_to_instance_id_file(tmp_path):
+    path = tmp_path / "instance-id"
+    path.write_text(VM_ID + "\n", encoding="ascii")
+    assert AgentSettings.from_env({}, instance_id_path=path).vm_id == VM_ID
+
+
+def test_missing_vm_id_is_a_startup_error(tmp_path):
+    with pytest.raises(ValueError, match="vm_id is not set"):
+        AgentSettings.from_env({}, instance_id_path=tmp_path / "missing")
+
+
+@pytest.mark.parametrize("env", [
+    {"XENOVA_AGENT_VM_ID": "not-a-uuid"},
+    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "0"},
+    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "nan"},
+    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_HEARTBEAT_INTERVAL": "inf"},
+    {"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_BROKER_PORT": "70000"},
+])
+def test_invalid_values_are_rejected(env, tmp_path):
+    with pytest.raises(ValueError):
+        AgentSettings.from_env(env, instance_id_path=tmp_path / "missing")
+
+
+def test_blank_env_value_means_default(tmp_path):
+    s = AgentSettings.from_env({"XENOVA_AGENT_VM_ID": VM_ID, "XENOVA_AGENT_BROKER_HOST": "  "}, instance_id_path=tmp_path / "missing")
+    assert s.broker_host == DEFAULT_BROKER_HOST
+    with pytest.raises(ValueError):
+        AgentSettings(vm_id=VM_ID, broker_host="")
