@@ -136,7 +136,7 @@ git status --short --branch
 
 for file in \
   docs/build-guides/yocto-rpi4-xen-reproduce.md \
-  scripts/setup-yocto.sh \
+  platform/scripts/setup-yocto.sh \
   platform/yocto/layers.lock \
   platform/yocto/config/local.conf.fragment \
   platform/yocto/meta-perseus/recipes-core/images/perseus-xen-bringup-image.bb \
@@ -209,7 +209,7 @@ git pull --ff-only
 
 export YOCTO_WORKSPACE="$HOME/perseus-repro/workspace"
 export YOCTO_BUILD_DIR="$YOCTO_WORKSPACE/build-rpi4-xen"
-bash scripts/setup-yocto.sh --verify
+bash platform/scripts/setup-yocto.sh --verify
 ```
 
 GitLab 기본 브랜치가 변경되어도 기존 Clone의 현재 브랜치는 자동 전환되지 않는다. 팀에서 통합 대상을 바꾸면 각자 작업 상태를 확인하고 사용할 추적 브랜치를 선택한다. 설정 도구는 프로젝트 브랜치를 전환하거나 프로젝트 커밋을 checkout하지 않는다.
@@ -232,7 +232,7 @@ fi
 
 ## 2. 설정 도구의 계약
 
-`scripts/setup-yocto.sh`는 이미 존재한다. `platform/yocto/` 아래에 동일한 도구를 새로 만들지 않는다.
+`platform/scripts/setup-yocto.sh`는 이미 존재한다. `platform/yocto/` 아래에 동일한 도구를 새로 만들지 않는다.
 
 - `layers.lock`의 저장소 이름 6개, 공개 HTTPS URL, 40자리 SHA와 중복을 먼저 검사한다.
 - 소스는 `workspace/layers/<repository>`에 Clone하고 정확한 SHA로 detached checkout한다. `wrynose`/`2.18`은 이력을 받는 브랜치이며 **버전 기준은 잠금 SHA**다.
@@ -243,9 +243,9 @@ fi
 - 기본 실행도 `--verify`도 이미지를 빌드하지 않는다. `--check`는 **기존 외부 소스만 검사**하며 Clone이나 설정 생성을 하지 않는다.
 
 ```bash
-bash scripts/setup-yocto.sh --help
-bash scripts/setup-yocto.sh --check
-python3 -m unittest discover -s tests/platform -v
+bash platform/scripts/setup-yocto.sh --help
+bash platform/scripts/setup-yocto.sh --check
+python3 -m unittest discover -s platform/tests -v
 ```
 
 재실행 시 관리 블록은 일치해야 한다. 기존 수동 빌드나 이전 도구 버전의 설정은 자동 전환하지 않는다. `not owned` 또는 `managed settings differ`이면 기존 디렉터리를 보존하고 새 빌드 디렉터리를 선택한다. fragment를 바꿀 때에도 기존 설정을 자동 덮어쓰지 않는다.
@@ -334,7 +334,7 @@ SD 이미지, 설치 패키지 manifest, 최소 domU ramdisk가 모두 있어야
 
 영구 Ubuntu·Debian VM, 자동 네트워크·시작/종료, 초기 인증과 데이터 영역의 현재 계약은 [영구 플랫폼 가이드](perseus-persistent-platform.md)를 우선 따른다. 이 문서의 BusyBox는 회귀 시험용이다.
 
-프로젝트 공통 정책은 `platform/yocto/config/local.conf.fragment`, 외부 레이어 버전은 `platform/yocto/layers.lock`, Xen·Linux·U-Boot의 소스 선택은 그 고정 레이어의 레시피가 기준이다. 레이어 등록과 설정 생성은 `scripts/setup-yocto.sh`가 담당한다. 문서에서 SHA나 공통 설정 전체를 복사해 별도로 유지하지 않는다. 과거에 확인한 구체적인 버전과 원본 로그는 감사 기록을 참고한다.
+프로젝트 공통 정책은 `platform/yocto/config/local.conf.fragment`, 외부 레이어 버전은 `platform/yocto/layers.lock`, Xen·Linux·U-Boot의 소스 선택은 그 고정 레이어의 레시피가 기준이다. 레이어 등록과 설정 생성은 `platform/scripts/setup-yocto.sh`가 담당한다. 문서에서 SHA나 공통 설정 전체를 복사해 별도로 유지하지 않는다. 과거에 확인한 구체적인 버전과 원본 로그는 감사 기록을 참고한다.
 
 Pi 펌웨어 → U-Boot → `boot.scr` → Xen → dom0 순서다. 외부 meta-virtualization의 Raspberry Pi 동적 레이어가 Xen 부트 스크립트를 제공한다. 프로젝트 bbappend는 unpack 경로 호환성을 보완하고 자체 `boot.cmd.xen.in`을 선택한다. 현재 U-Boot 2026.01의 `bootflow scan`이 전달하는 `devtype/devnum`으로 MMC를 선택하며, 수동 `source`에서 변수가 없을 때만 `mmc 0`을 기본값으로 쓴다. Control FDT를 `${fdt_addr_r}`에 복사한 뒤 그 복사본만 수정한다. 생성된 `boot.scr`는 FAT에서 `xen`·`Image`를 적재하며 dom0 rootfs는 두 번째 SD 파티션의 PARTUUID로 찾는다. Xen dom0 메모리는 `RPI_DOM0_MEM = "1024M"`, 콘솔은 `hvc0`다.
 
@@ -397,7 +397,7 @@ SSTATE_MIRRORS = "file://.* file:///absolute/existing-build/sstate-cache/PATH"
 | WSL 오류 `0x80370102` / 가상 머신 시작 불가 | BIOS/UEFI의 가상화와 Windows Virtual Machine Platform 조건을 [WSL 설치 문제 해결](https://learn.microsoft.com/en-us/windows/wsl/troubleshooting#installation-issues)에서 확인한다. Ubuntu가 실행되기 전에는 Linux 명령을 진행하지 않는다. |
 | Ubuntu 경로가 `/mnt/c/windows/system32` | Ubuntu Bash에서 `cd "$HOME"` 후 `pwd`가 `/home/<사용자>`인지 확인한다. |
 | GitLab 인증 실패 / 필요한 프로젝트 파일 없음 | 본인 접근 권한과 현재 통합 상태를 확인한다. 파일을 다른 버전에서 개별 복사하지 않는다. |
-| `Permission denied`로 setup 실행 불가 | `bash scripts/setup-yocto.sh --verify`로 실행한다. |
+| `Permission denied`로 setup 실행 불가 | `bash platform/scripts/setup-yocto.sh --verify`로 실행한다. |
 | origin·HEAD 불일치 / `local changes` | 현재 `layers.lock`과 외부 checkout을 대조한다. 로컬 변경을 보존하고 필요하면 1절의 새 작업 공간을 사용한다. |
 | `not owned` / `managed settings differ` | 기존 수동 conf를 덮어쓰지 않는다. 새 빌드 경로 또는 새 작업 공간에서 구성한다. |
 | systemd 요구 / 커널 제공자 오류 | 현재 fragment·레이어가 적용됐는지 확인한다. 임시 설정을 local.conf에 중복 추가하지 않는다. |

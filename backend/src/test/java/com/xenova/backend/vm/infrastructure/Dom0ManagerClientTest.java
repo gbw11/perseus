@@ -26,7 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
-// Stub dom0-manager responses follow contracts/dom0-manager-openapi.yaml.
+// Stub dom0-manager responses follow docs/contracts/dom0-manager-openapi.yaml.
 class Dom0ManagerClientTest {
 
     private static final Duration RETRY_BACKOFF = Duration.ofMillis(200);

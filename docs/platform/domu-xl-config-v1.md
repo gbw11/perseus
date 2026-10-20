@@ -35,7 +35,7 @@ Linux 템플릿이 없거나 변수 치환에 실패하면 `PlatformError`로 �
 | platform/guests/debian/xen.cfg.in | Debian Xen 설정 양식 |
 | platform/guests/common/xen_config.py | 검증된 내부 정보를 설정 문자열로 변환 |
 | platform/guests/examples/*-cfg-spec.json | 기존 등록 구조에 맞춘 예제 입력 |
-| tests/platform/test_xen_config.py | 문자열 계약, 기존 시작 흐름, 패키지 설치 연결 검증 |
+| platform/tests/test_xen_config.py | 문자열 계약, 기존 시작 흐름, 패키지 설치 연결 검증 |
 
 ## 변수 명세와 책임
 
@@ -114,7 +114,7 @@ Python 표준 `string.Template`용 `python3-stringold` 런타임 의존성을 �
 ```sh
 python3 -B platform/guests/common/xen_config.py platform/guests/examples/ubuntu-cfg-spec.json
 python3 -B platform/guests/common/xen_config.py platform/guests/examples/debian-cfg-spec.json
-python3 -B -m unittest discover -s tests/platform -p test_xen_config.py -v
+python3 -B -m unittest discover -s platform/tests -p test_xen_config.py -v
 ```
 
 CLI JSON의 최상위 키는 `instance`, `instance_root`다. HTTP 요청 스키마가 아니다.
