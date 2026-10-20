@@ -1,4 +1,9 @@
-# xenova-manual — 수동주행 VM 앱
+# xenova-manual — 수동주행 앱 (Python 참조 구현)
+
+> **배포하지 않는 참조 구현입니다.** 수동주행 VM은 Zephyr로 정해졌고([RC카 시나리오](../../../docs/scenario-rc-car.md) §2),
+> 실제 앱은 Zephyr C 판으로 만듭니다 (C MQTT 라이브러리 S15P31E110-236 위에서). 이 Python 판은
+> 동작 기준(키 변환·200 ms 정지·세대·대기 중 발행·heartbeat)과 Zephyr 판의 교차 시험 상대로 남기고,
+> `tools/`의 게이트웨이·입력 목과 브라우저 테스트 화면은 Zephyr 판 시험에도 그대로 씁니다.
 
 콘솔 키 입력(`drive.input`)을 주행 명령(`drive.command`)으로 바꿔 50 Hz로 발행합니다.
 규칙은 [MQTT 메시지 계약 v1](../../../docs/contracts/mqtt-contract-v1.md) 5·7장을 따릅니다.
@@ -81,3 +86,6 @@ XENOVA_MQTT_TEST_BROKER=127.0.0.1:18830 XENOVA_MQTT_TEST_CONTAINER=xenova-mq-tes
 
 브로커 테스트는 50 Hz 발행, 세대 반영, 키 입력·해제 후 정지(≤ 270 ms), 브로커 재시작 후 재개를 확인합니다.
 
+## 다른 파트에 요청한 것
+
+Zephyr 주행 VM의 MQTT 경로(박신영·주소정), 게이트웨이 판정 신호(제다빈), CI 단계(정수환)는 [docs/requests](../../../docs/requests/README.md)에 정리했습니다.
