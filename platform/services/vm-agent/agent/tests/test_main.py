@@ -40,7 +40,7 @@ def test_run_sends_heartbeat_and_closes_client_on_stop():
     settings = AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.05)
     assert run(settings, client_factory=lambda s: client, stop=stop, install_signals=False) == 0
     assert client.started_with == [0.05]  # 첫 heartbeat 전에 한 주기만큼 연결을 기다린다
-    assert client.published == [(f"perseus/v1/vms/{VM_ID}/heartbeat", "agent.heartbeat", {})]
+    assert client.published == [(f"xenova/v1/vms/{VM_ID}/heartbeat", "agent.heartbeat", {})]
     assert client.stopped is True
 
 

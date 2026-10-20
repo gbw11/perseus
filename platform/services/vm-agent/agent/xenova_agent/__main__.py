@@ -16,10 +16,10 @@ log = logging.getLogger("xenova_agent")
 
 
 def build_client(settings: AgentSettings) -> Any:
-    """perseus_mqtt.PerseusClient 를 만든다. paho 는 여기서만 필요하므로 늦게 import 한다."""
-    from perseus_mqtt import Identity, PerseusClient
+    """xenova_mqtt.XenovaClient 를 만든다. paho 는 여기서만 필요하므로 늦게 import 한다."""
+    from xenova_mqtt import Identity, XenovaClient
 
-    return PerseusClient(
+    return XenovaClient(
         Identity(vm_id=settings.vm_id),
         host=settings.broker_host,
         port=settings.broker_port,

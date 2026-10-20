@@ -39,7 +39,7 @@ def test_install_copies_packages_and_unit(tmp_path):
     enable = _symlinks_supported(tmp_path)
     installed = installer.install(root, SOURCE, enable=enable)
 
-    assert (root / "opt/xenova/mqtt-client/perseus_mqtt/__init__.py").is_file()
+    assert (root / "opt/xenova/mqtt-client/xenova_mqtt/__init__.py").is_file()
     assert (root / "opt/xenova/agent/xenova_agent/heartbeat.py").is_file()
     assert not (root / "opt/xenova/agent/xenova_agent/tests").exists()
     assert not list(root.glob("opt/xenova/**/__pycache__"))
