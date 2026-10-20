@@ -304,7 +304,7 @@ class TombstoneBootConsumerTest(unittest.TestCase):
 
     def test_autostart_main_records_and_retired_filter_ignore_temp(self):
         xen = fixtures.FakeXen(self.b.data, {})
-        defaults = json.loads((ROOT / 'tests/platform/fixtures/legacy-defaults.json').read_text())
+        defaults = json.loads((ROOT / 'platform/tests/fixtures/legacy-defaults.json').read_text())
         legacy = Path(self.tmp.name) / 'legacy-boot-defaults.json'
         legacy.write_text(json.dumps({'instances': defaults['instances']}))
         platform = vm.Platform(self.b.data, Path(self.tmp.name) / 'autostart-run', command=xen, defaults_path=legacy)

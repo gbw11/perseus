@@ -23,15 +23,15 @@ class SetupSafetyTest(unittest.TestCase):
         self.base = Path(self.temp.name)
         self.project = self.base / "project"
         self.workspace = self.base / "workspace"
-        (self.project / "scripts").mkdir(parents=True)
+        (self.project / "platform/scripts").mkdir(parents=True)
         layer = self.project / "platform/yocto/meta-xenova/conf"
         layer.mkdir(parents=True)
         (layer / "layer.conf").write_text("# fixture\n")
         config = self.project / "platform/yocto/config"
         config.mkdir()
         (config / "local.conf.fragment").write_text("# fixture\n")
-        self.script = self.project / "scripts/setup-yocto.sh"
-        shutil.copy2(ROOT / "scripts/setup-yocto.sh", self.script)
+        self.script = self.project / "platform/scripts/setup-yocto.sh"
+        shutil.copy2(ROOT / "platform/scripts/setup-yocto.sh", self.script)
         prototype = self.base / "prototype"
         self.git("init", "-q", str(prototype))
         self.git("-C", str(prototype), "-c", "user.name=Fixture",

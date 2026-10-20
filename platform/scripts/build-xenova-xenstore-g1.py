@@ -11,7 +11,7 @@ import struct
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / "platform/guests/zephyr"
 sys.path.insert(0, str(ROOT / "platform/first-install"))
 from artifact_io import new_path, sha
@@ -65,7 +65,7 @@ def main(argv=None):
     for path in (ROOT, args.zephyr_source, args.tools):
         if args.output.is_relative_to(path):
             raise ValueError("output must be outside repository/source/tools")
-    spec = importlib.util.spec_from_file_location("g1_source_verify", ROOT/"scripts/prepare-xenova-zephyr.py")
+    spec = importlib.util.spec_from_file_location("g1_source_verify", ROOT/"platform/scripts/prepare-xenova-zephyr.py")
     verify = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(verify)
     count = verify.verify_source(args.zephyr_source, args.spdx, args.toolchain_archive)

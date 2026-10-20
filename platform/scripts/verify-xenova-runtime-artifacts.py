@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 FILES = ROOT / 'platform/yocto/meta-xenova/recipes-core/xenova-platform/files'
 sys.path[:0] = [str(FILES), str(ROOT / 'platform/first-install'), '/usr/lib/xenova']
 from xenova_vm import PlatformError, guest_kind, run

@@ -9,8 +9,8 @@ from pathlib import Path
 import sys
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT/'tests/platform'))
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT/'platform/tests'))
 import test_xenova_management as fixtures
 import xenova_management as management
 

@@ -13,7 +13,7 @@ import subprocess
 import sys
 import uuid
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'platform/first-install'))
 from artifact_io import checked, new_path, publish, regular, sha
 spec = importlib.util.spec_from_file_location('xenova_zephyr_template', ROOT / 'platform/guests/zephyr/template.py')

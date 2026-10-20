@@ -614,8 +614,8 @@ class FirmwareToolsTest(unittest.TestCase):
             result = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(result)
             return result
-        self.package = module('package_firmware_test', ROOT / 'scripts/package-xenova-firmware.py')
-        self.verify = module('verify_runtime_test', ROOT / 'scripts/verify-xenova-runtime-artifacts.py')
+        self.package = module('package_firmware_test', ROOT / 'platform/scripts/package-xenova-firmware.py')
+        self.verify = module('verify_runtime_test', ROOT / 'platform/scripts/verify-xenova-runtime-artifacts.py')
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)

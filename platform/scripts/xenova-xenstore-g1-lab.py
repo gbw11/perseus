@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 NAME = re.compile(r"xg1-[a-z0-9-]{1,32}")
 MAC = re.compile(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}")

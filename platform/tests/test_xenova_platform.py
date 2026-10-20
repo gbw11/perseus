@@ -31,11 +31,11 @@ def load(name, path):
 vm = load('xenova_vm_test', FILES / 'xenova_vm.py')
 sys.path.insert(0, str(ROOT / 'platform/guests/common'))
 guest = load('prepare_rootfs_test', ROOT / 'platform/guests/common/prepare_rootfs.py')
-prepare = load('prepare_guests_test', ROOT / 'scripts/prepare-xenova-guests.py')
+prepare = load('prepare_guests_test', ROOT / 'platform/scripts/prepare-xenova-guests.py')
 
 
 def record(key='ubuntu-dev'):
-    rows = json.loads((ROOT / 'tests/platform/fixtures/legacy-defaults.json').read_text())['instances']
+    rows = json.loads((ROOT / 'platform/tests/fixtures/legacy-defaults.json').read_text())['instances']
     r = next(copy.deepcopy(row) for row in rows if row['id'] == key)
     r.update(schema=1, uuid='aaaa0000-1111-4222-8333-123456789abc', kernel_release='6.8.0-test')
     if key == 'debian-dev':

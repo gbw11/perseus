@@ -1,4 +1,4 @@
-"""서비스가 내는 OpenAPI 가 contracts/dom0-manager-openapi.yaml 과 같은 경로·메서드·응답 코드·operationId 를 갖는지 확인한다.
+"""서비스가 내는 OpenAPI 가 docs/contracts/dom0-manager-openapi.yaml 과 같은 경로·메서드·응답 코드·operationId 를 갖는지 확인한다.
 
 yaml 이 기계 판독 기준이므로(계약 1장) 둘 중 하나를 바꾸면 이 테스트가 먼저 깨진다.
 """
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-CONTRACT = Path(__file__).resolve().parents[3] / "contracts" / "dom0-manager-openapi.yaml"
+CONTRACT = Path(__file__).resolve().parents[4] / "docs" / "contracts" / "dom0-manager-openapi.yaml"
 METHODS = ("get", "post", "put", "patch", "delete")
 
 

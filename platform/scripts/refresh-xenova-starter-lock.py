@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 import re
 
-ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('xenova_starter_source_tools', ROOT / 'scripts/build-xenova-starter.py')
+ROOT = Path(__file__).resolve().parents[2]
+spec = importlib.util.spec_from_file_location('xenova_starter_source_tools', ROOT / 'platform/scripts/build-xenova-starter.py')
 builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder)
 
 

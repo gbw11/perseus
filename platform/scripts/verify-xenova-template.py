@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'platform/first-install'))
 spec = importlib.util.spec_from_file_location('xenova_linux_template_verify', ROOT / 'platform/first-install/assemble.py')
 assembly = importlib.util.module_from_spec(spec); spec.loader.exec_module(assembly)

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from test_xenova_platform import ROOT, load
 
-evidence = load('xenova_guest_evidence_test', ROOT / 'scripts/collect-xenova-guest-evidence.py')
+evidence = load('xenova_guest_evidence_test', ROOT / 'platform/scripts/collect-xenova-guest-evidence.py')
 
 
 class EvidenceTest(unittest.TestCase):

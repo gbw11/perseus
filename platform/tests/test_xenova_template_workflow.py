@@ -14,7 +14,7 @@ from test_xenova_platform import load
 from test_xenova_lifecycle import FirmwareToolsTest
 
 recipe = load('xenova_template_recipe_test', ROOT / 'platform/guests/common/template_recipe.py')
-resolver = load('xenova_default_template_resolver_test', ROOT / 'scripts/resolve-xenova-templates.py')
+resolver = load('xenova_default_template_resolver_test', ROOT / 'platform/scripts/resolve-xenova-templates.py')
 
 
 class TemplateRecipeTest(unittest.TestCase):
@@ -128,7 +128,7 @@ class StarterLockRefreshTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.app = Path(self.tmp.name) / 'starter-app'; self.app.mkdir()
         (self.app / 'main.c').write_text('initial application')
-        self.tool = load('xenova_source_lock_refresh_test', ROOT / 'scripts/refresh-xenova-starter-lock.py')
+        self.tool = load('xenova_source_lock_refresh_test', ROOT / 'platform/scripts/refresh-xenova-starter-lock.py')
         self.old = json.loads((ROOT / 'platform/guests/zephyr/starter.lock.json').read_text())
         self.old['app_files'] = self.tool.builder.fingerprint(self.app)
         self.path = self.app.parent / 'starter.lock.json'

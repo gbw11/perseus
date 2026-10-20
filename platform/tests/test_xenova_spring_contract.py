@@ -136,7 +136,7 @@ class SpringContractTest(unittest.TestCase):
         exhausted = self.f.m.call('create', self.spec, execute=True)
         self.error(exhausted, 'IP_POOL_EXHAUSTED')
         import runpy
-        transport = runpy.run_path(str(ROOT/'tests/contracts/spring_manager_bridge.py'))['transport']
+        transport = runpy.run_path(str(ROOT/'platform/tests/contracts/spring_manager_bridge.py'))['transport']
         self.assertEqual(transport(exhausted)['status'], 507)
         self.assertEqual(transport(exhausted)['body']['code'], 'InsufficientResources')
         self.error(self.f.m.call('create', {**self.spec,'template_id':'unknown'}, execute=True), 'TEMPLATE_NOT_FOUND')
@@ -202,11 +202,11 @@ class SpringContractTest(unittest.TestCase):
     def test_current_spring_http_fields_and_manager_bridge_are_distinct(self):
         import importlib.util
         import re
-        path = ROOT/'tests/contracts/spring_manager_bridge.py'
+        path = ROOT/'platform/tests/contracts/spring_manager_bridge.py'
         spec = importlib.util.spec_from_file_location('spring_bridge', path)
         bridge = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(bridge)
-        request = json.loads((ROOT/'tests/contracts/spring-create-request.json').read_text())
+        request = json.loads((ROOT/'platform/tests/contracts/spring-create-request.json').read_text())
         source = (ROOT/'backend/src/main/java/com/xenova/backend/vm/infrastructure/Dom0LaunchRequest.java').read_text()
         fields = re.search(r'record Dom0LaunchRequest\((.*?)\)', source, re.S).group(1)
         names = re.findall(r'(?:String|int)\s+(\w+)', fields)
@@ -318,7 +318,7 @@ class SpringContractTest(unittest.TestCase):
         self.assertTrue(result['ok'], result)
         rows = result['data']['vms']
         self.assertEqual({row['name'] for row in rows}, {'ubuntu-dev','debian-dev'})
-        defaults = json.loads((ROOT/'tests/platform/fixtures/legacy-defaults.json').read_text())
+        defaults = json.loads((ROOT/'platform/tests/fixtures/legacy-defaults.json').read_text())
         for row in rows:
             original = next(d for d in defaults['instances'] if d['id']==row['name'])
             self.assertEqual(row['template_id'], original['template_id'])

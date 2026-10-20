@@ -1,6 +1,6 @@
 """플랫폼 파트의 실제 xenova_management.Manager 를 가짜 Xen(FakeXen)·임시 registry·임시 카탈로그로 돌려 PlatformDriver 를 검증한다.
 
-저장소(모노레포) 안의 platform/… 모듈과 tests/platform 픽스처를 그대로 빌린다. 보드가 없어도 registry 읽기·조회·시작·정지·보관·생성
+저장소(모노레포) 안의 platform/… 모듈과 platform/tests 픽스처를 그대로 빌린다. 보드가 없어도 registry 읽기·조회·시작·정지·보관·생성
 경로가 실제 플랫폼 코드와 맞물리는지 확인하는 것이 목적이다.
 
 건너뛰는 경우는 플랫폼 소스 디렉터리가 없을 때(배포 패키지 단독 테스트)와 fcntl 이 없는 비 POSIX 환경뿐이다.
@@ -20,8 +20,8 @@ from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
 
-REPO = Path(__file__).resolve().parents[3]
-PLATFORM_TESTS = REPO / "tests" / "platform"
+REPO = Path(__file__).resolve().parents[4]
+PLATFORM_TESTS = REPO / "platform" / "tests"
 PLATFORM_FILES = REPO / "platform" / "yocto" / "meta-xenova" / "recipes-core" / "xenova-platform" / "files"
 DEFAULTS = PLATFORM_FILES / "defaults.json"  # 공장 VM 예약 IP·내부 IP 풀. 플랫폼이 create 때 IP 를 고르는 근거
 
@@ -216,7 +216,7 @@ def test_spring_dto_name_uses_actual_manager_metadata_preparer(client, board, na
     record_fields = re.search(r"record Dom0LaunchRequest\((.*?)\)", source, re.S).group(1)
     names = {re.sub(r"([A-Z])", lambda m: "_" + m[1].lower(), name)
              for name in re.findall(r"(?:String|int)\s+(\w+)", record_fields)}
-    body = json.loads((REPO / "tests/contracts/spring-create-request.json").read_text())
+    body = json.loads((REPO / "platform/tests/contracts/spring-create-request.json").read_text())
     body["vm_id"] = str(NEW_VM)
     body["name"] = name
     assert set(body) == names

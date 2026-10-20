@@ -19,7 +19,7 @@ import tempfile
 import time
 import uuid
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'platform/guests/common'))
 sys.path.insert(0, str(ROOT / 'platform/first-install'))
 sys.path.insert(0, str(ROOT / 'platform/yocto/meta-xenova/recipes-core/xenova-platform/files'))

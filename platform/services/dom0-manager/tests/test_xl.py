@@ -92,7 +92,7 @@ def test_unknown_state_flag_is_not_silently_running(flags):
 
 
 def test_board_fixture_xen_4_21_diskless_list():
-    """tests/platform/fixtures/xen-4.21/diskless-list.txt (플랫폼 파트 실보드 Xen 4.21 출력) 그대로."""
+    """platform/tests/fixtures/xen-4.21/diskless-list.txt (플랫폼 파트 실보드 Xen 4.21 출력) 그대로."""
     rows = parse_xl_list("Name ID Mem VCPUs State Time(s)\nDomain-0 0 1024 4 r----- 0\nzephyr-dev 1 16 1 -b---- 0\n")
     assert [(r.name, r.domid, r.mem_mib, r.vcpus, map_state(r.flags)) for r in rows] == [
         ("Domain-0", 0, 1024, 4, VmState.running),

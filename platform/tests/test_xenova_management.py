@@ -364,7 +364,7 @@ class ManagementTest(unittest.TestCase):
 
     def test_same_version_different_manifest_is_rejected_without_overwriting_catalog(self):
         from test_xenova_platform import load
-        tool=load('xenova_catalog_publish_test',ROOT/'scripts/publish-xenova-template-catalog.py')
+        tool=load('xenova_catalog_publish_test',ROOT/'platform/scripts/publish-xenova-template-catalog.py')
         original=(self.data/'catalog/ubuntu-24.04-arm64/1.0.0.json').read_bytes()
         result=tool.register(self.data,self.descriptor,execute=True,runtime=self.run)
         self.assertTrue(result['replayed'])
