@@ -20,11 +20,11 @@ import org.springframework.stereotype.Component;
 @Component
 public class AgentMessageHandler {
 
-    public static final String TOPIC_PREFIX = "perseus/v1/vms/";
+    public static final String TOPIC_PREFIX = "xenova/v1/vms/";
 
     static final int MAX_PAYLOAD_BYTES = 64 * 1024;
     static final String SUPPORTED_SCHEMA_VERSION = "1.0";
-    private static final Pattern TOPIC = Pattern.compile("^perseus/v1/vms/([^/]+)/(heartbeat|inventory|metrics)$");
+    private static final Pattern TOPIC = Pattern.compile("^xenova/v1/vms/([^/]+)/(heartbeat|inventory|metrics)$");
     private static final Set<String> METRIC_UNITS = Set.of("percent", "bytes");
     private static final String GUEST_AGENT_SOURCE = "guest_agent";
 

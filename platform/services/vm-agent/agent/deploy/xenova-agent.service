@@ -1,0 +1,38 @@
+[Unit]
+Description=Xenova VM agent (MQTT heartbeat)
+# instance-id 는 플랫폼 게스트 준비(prepare_instance·deployment seed 양쪽)가 기록한다. 없으면 어떤 VM 인지 알 수 없으므로 시작하지 않는다
+ConditionPathExists=/etc/xenova/instance-id
+# 신원 확립 유닛(xenova-guest-identity)은 deployment seed 경로에만 설치된다. 그 경로에서는 install_into_rootfs 가 drop-in 으로
+# Requires= 를 붙이고(xenova-agent-identity.conf), 일반 생성 VM 에는 그 유닛이 없으므로 여기서는 순서만 맞춘다
+After=network-online.target xenova-guest-identity.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 선택: XENOVA_AGENT_BROKER_HOST, XENOVA_AGENT_BROKER_USERNAME/PASSWORD, XENOVA_AGENT_HEARTBEAT_INTERVAL, XENOVA_AGENT_LOG_LEVEL
+EnvironmentFile=-/etc/xenova/agent.env
+# 설치 경로는 install_into_rootfs.py 와 같다. xenova_mqtt(mqtt-client)와 xenova_agent 두 패키지가 보여야 한다
+Environment=PYTHONPATH=/opt/xenova/mqtt-client:/opt/xenova/agent
+ExecStart=/usr/bin/python3 -m xenova_agent
+Restart=always
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=10
+# heartbeat 송신에는 권한이 필요 없다. /etc/xenova/instance-id 가 root 0600 이라 uid 는 root 로 두되 capability 를 전부 떼고 쓰기를 막는다.
+# 전용 사용자로 바꾸려면 플랫폼이 instance-id 소유권·그룹을 같이 정해야 한다
+CapabilityBoundingSet=
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
