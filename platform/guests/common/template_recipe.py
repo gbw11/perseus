@@ -47,7 +47,7 @@ def source_info(recipe, source_id):
             raise ValueError('template overlay source must be regular without parent links')
         targets.add(str(dst))
         sources[str(src)] = {'sha256': sha(asset), 'bytes': asset.stat().st_size}
-    common = [ROOT / 'scripts/prepare-xenova-guests.py',
+    common = [ROOT / 'platform/scripts/prepare-xenova-guests.py',
               ROOT / 'platform/guests/common/prepare_rootfs.py',
               ROOT / 'platform/guests/common/guest_identity.py',
               ROOT / 'platform/guests/common/prepare_instance.py', Path(__file__).resolve()]

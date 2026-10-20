@@ -95,12 +95,12 @@ CAN 노드는 ESP32(내장 TWAI + SN65HVD230)와 RPi4 dom0(USB-CAN 어댑터) �
 
 | 구성요소 | 위치 | 설명 |
 | --- | --- | --- |
-| VM 매니저 | `services/dom0-manager/` | 하이퍼바이저 추상화, 에이전트 heartbeat, **복구 서비스(VM 재시작의 단일 소유자)**, 메트릭, 웹 콘솔 프록시 |
-| **차량 게이트웨이** | `services/vehicle-gateway/` **[제안, 신설]** | 별도 프로세스·별도 systemd unit. 명령 중재, 승격·정지, CAN/시리얼 송수신, 전환 시간 기록 |
-| VM 에이전트 | `services/vm-agent/` | OS 정보·메트릭·heartbeat, 데모 명령(부하·강제 종료) |
-| 주행 컨트롤러 | `apps/` (VM-A, VM-B 공통 코드) | perception → 속도·조향 명령 |
-| 레코더, 콕핏 앱 | `apps/` | VM-B, VM-C |
-| 표시 서비스 | `services/display/` | HDMI 0/1 라우팅, 키오스크 |
+| VM 매니저 | `platform/services/dom0-manager/` | 하이퍼바이저 추상화, 에이전트 heartbeat, **복구 서비스(VM 재시작의 단일 소유자)**, 메트릭, 웹 콘솔 프록시 |
+| **차량 게이트웨이** | `platform/services/vehicle-gateway/` **[제안, 신설]** | 별도 프로세스·별도 systemd unit. 명령 중재, 승격·정지, CAN/시리얼 송수신, 전환 시간 기록 |
+| VM 에이전트 | `platform/services/vm-agent/` | OS 정보·메트릭·heartbeat, 데모 명령(부하·강제 종료) |
+| 주행 컨트롤러 | `platform/apps/` (VM-A, VM-B 공통 코드) | perception → 속도·조향 명령 |
+| 레코더, 콕핏 앱 | `platform/apps/` | VM-B, VM-C |
+| 표시 서비스 | `platform/services/display/` | HDMI 0/1 라우팅, 키오스크 |
 | 관리 서버·콘솔 | `backend/`, `frontend/` | REST/WebSocket, 대시보드, 이벤트 타임라인 |
 | 인지 (Jetson) | 위치 미정 (`perception/` 제안) | D435f 처리, perception 발행 |
 | 섀시 펌웨어 (ESP32) | 위치 미정 (`firmware/chassis-ecu/` 제안) | 모터·서보·엔코더·워치독·CAN |
@@ -469,7 +469,7 @@ vehicle_status 수신 (5.2 조립기가 완성한 스냅샷):
 
 > **MQTT는 [MQTT 메시지 계약 v1](../contracts/mqtt-contract-v1.md)이 기준이다 (2026-10-19 RC카 시나리오 확정, S15P31E110-230 문서 통일).** VM·젯슨·게이트웨이·ESP32가 주고받는 MQTT 토픽, 공통 봉투, `drive.command`·`vehicle.control`·`vehicle.status` 필드, ACL은 그 문서를 따른다. 아래 5.1의 메시지 표는 옛 핫 스탠바이 설계의 초안이며, 게이트웨이 ↔ ESP32를 시리얼·CAN으로 연결할 경우의 프레임(5.2 CAN·시리얼)의 근거로만 남긴다. 계약은 현재 ESP32 MQTT 직결이고, 시리얼·CAN 유지 여부는 제어 계층 의견을 받아 정한다.
 
-정식 계약은 `contracts/`에서 관리한다. 전송 매체와 무관한 **공통 봉투**를 먼저 정하고, MQTT·CAN·시리얼 매핑은 별도 계약으로 둔다. 구현 시작 전 확정해야 할 최소 항목은 5.3이다.
+정식 계약은 `docs/contracts/`에서 관리한다. 전송 매체와 무관한 **공통 봉투**를 먼저 정하고, MQTT·CAN·시리얼 매핑은 별도 계약으로 둔다. 구현 시작 전 확정해야 할 최소 항목은 5.3이다.
 
 ### 5.1 공통 봉투와 메시지
 
@@ -526,7 +526,7 @@ vehicle_status 수신 (5.2 조립기가 완성한 스냅샷):
   - 네 ID가 다 모이면 `vehicle_status` 하나로 발행하고 `committed_sample = pending.sample`로 갱신한다. 50 ms 안에 다 모이지 않으면 `pending`을 버린다. `committed_sample`은 완성된 스냅샷에서만 갱신되므로, 같은 `sample`의 나머지 프레임이 중복으로 거부되지 않는다.
   - 게이트웨이가 `DISARMED`일 때는 원시 상태 프레임을 조립기에 넣지 않는다. 정상 `ack`를 받는 시점에 조립기를 비운다. 핸드셰이크 대기 중 들어온 옛 세션 프레임이 `committed_sample`을 움직여 새 세션의 첫 `sample`을 거부하는 일을 막는다.
 - `counter`(게이트웨이 → ESP32)의 창 규칙은 4.2와 같다. `sample`의 창 규칙은 위와 같이 `committed_sample` 기준이다.
-- `reason:u8`, `flags:u8`의 값 배정과 예약 비트는 `contracts/`의 계약 문서에서 관리한다. 이 문서의 비트 배정은 초안이다.
+- `reason:u8`, `flags:u8`의 값 배정과 예약 비트는 `docs/contracts/`의 계약 문서에서 관리한다. 이 문서의 비트 배정은 초안이다.
 - `i24`는 부호 있는 24비트 리틀엔디언(±8,388 m).
 
 **USB 시리얼 (1단계).** 프레임 본문은 `[id:u16 LE][len:u8][payload ≤ 8][crc:u16 LE]`이고, 전체를 COBS로 인코딩한 뒤 `0x00`으로 끝낸다. `payload`는 위 CAN 배치와 동일하다. 수신 측은 CRC 실패 프레임을 버리고 다음 `0x00`까지 재동기화한다.
@@ -604,7 +604,7 @@ vehicle_status 수신 (5.2 조립기가 완성한 스냅샷):
 | VM → 게이트웨이 전송 | MQTT(dom0 브로커, ACL) / UDP(vif별 고정 IP + ebtables) | 지연 측정 후 결정. 신원 검증 방식이 달라짐 |
 | 마지막 구간 매체 | 1단계 USB 시리얼 → 2단계 CAN | CAN은 ESP32 트랜시버 + dom0용 USB-CAN 1개 필요 |
 | 대기 컨트롤러 위치 | VM-B(Ubuntu, 이종 이중화) / 4번째 Debian VM(동종 미러) | 4번째 VM은 전용 코어가 없어 측정 전 보류 |
-| 게이트웨이 폴더와 part | `services/vehicle-gateway/` 신설 시 CONTRIBUTING part 표 추가 | 인지·펌웨어 폴더(`perception/`, `firmware/chassis-ecu/`)도 같이 |
+| 게이트웨이 폴더와 part | `platform/services/vehicle-gateway/` 신설 시 CONTRIBUTING part 표 추가 | 인지·펌웨어 폴더(`perception/`, `firmware/chassis-ecu/`)도 같이 |
 | 컨트롤러 알고리즘 | pure pursuit(무상태) / PI 포함 | 상태가 늘수록 동기화 부담 증가 |
 | 게이트웨이 전환 판정 시간 | 100 ms 초과 감지 기준, 실측 후 조정 | Xen 스케줄링 지터 측정 선행. 감지 상한 110 ms는 주기 검사 포함값 |
 
@@ -612,4 +612,4 @@ vehicle_status 수신 (5.2 조립기가 완성한 스냅샷):
 
 | 결정 | 내용 | 비고 |
 | --- | --- | --- |
-| 문서 분리 | 설계서(`architecture.md`)와 이 구현 계약으로 분리 | safety·contracts·power로 더 나누는 것은 구현 파일이 생긴 뒤 검토. 3일차 인터페이스 확정 시 메시지 계약은 `contracts/`로 이동 |
+| 문서 분리 | 설계서(`architecture.md`)와 이 구현 계약으로 분리 | safety·contracts·power로 더 나누는 것은 구현 파일이 생긴 뒤 검토. 3일차 인터페이스 확정 시 메시지 계약은 `docs/contracts/`로 이동 |

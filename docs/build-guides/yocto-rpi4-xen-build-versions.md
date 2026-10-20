@@ -82,10 +82,10 @@ platform/yocto/
     │           ├── init
     │           └── udhcpc.script
     └── recipes-support/dnsmasq/dnsmasq_%.bbappend
-scripts/
+platform/scripts/
 ├── setup-yocto.sh
 └── check-xen-bringup-prereqs.sh
-tests/platform/test_yocto_setup.py
+platform/tests/test_yocto_setup.py
 ```
 
 기본 이미지 `xen-image-minimal.bb`와 Xen 부트 템플릿 `boot.cmd.xen.in`은 외부 `meta-virtualization`에서 제공한다. 커널·U-Boot·펌웨어 원본과 기본 설정도 고정 외부 레시피·소스에서 받으며, 프로젝트 변경은 위 자체 레이어와 fragment로 적용한다.
