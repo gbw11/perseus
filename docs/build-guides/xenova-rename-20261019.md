@@ -63,3 +63,14 @@
 
 운영 영향: 배포 환경의 Spring 설정 `perseus.*`와 dom0-manager 환경변수 `PERSEUS_*`를 새 이름으로 바꿔야 한다.
 기존 refresh 쿠키와 JWT(issuer)는 무효가 되어 다시 로그인해야 한다. 개발용 H2 파일은 `./data/xenova`로 새로 만들어진다.
+
+## 3차: MQTT 클라이언트·토픽 접두사 — 2026-10-20 (S15P31E110-234)
+
+2차에서 남겨 두었던 MQTT 토픽 접두사와 클라이언트 라이브러리 이름을 통일했다. 당시 MQTT 계약 v1이 접두사 유지를 명시했지만,
+토픽을 쓰는 코드가 백엔드 수신부와 라이브러리뿐이고 어디에도 배포되지 않아 지금 바꾸는 쪽이 싸다고 팀이 합의했다.
+작업 브랜치는 `refactor/common/S15P31E110-234-mqtt-xenova`이며 `develop` 기준이다.
+
+- `platform/services/vm-agent/mqtt-client`: 패키지 `perseus_mqtt` → `xenova_mqtt`, 배포명 `xenova-mqtt`, `PerseusClient` → `XenovaClient`,
+  로거 이름, 테스트 환경변수 `XENOVA_MQTT_TEST_BROKER`·`XENOVA_MQTT_TEST_CONTAINER`, README.
+- 토픽 접두사 `perseus/v1/` → `xenova/v1/`: 라이브러리 `topics.py`, 백엔드 `AgentMessageHandler`와 테스트, MQTT 계약서(1장 표의 유지 문장 포함).
+- 보존 목록(`xenova-rebranding.md`)은 그대로다.
