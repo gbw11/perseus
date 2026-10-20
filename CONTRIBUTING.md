@@ -50,22 +50,26 @@ master                ← 통합 데모·발표용 안정 버전
 
 ```text
 S15P31E110/
-├── platform/                 # Yocto·Xen·U-Boot 빌드, 부팅 환경, domU 템플릿, 네트워크
-├── services/
-│   ├── dom0-manager/         # Python 제어 계층 (하이퍼바이저 추상화·복구 엔진)
-│   ├── vm-agent/             # VM 에이전트
-│   └── display/              # dom0 표시 서비스 (화면 라우터 수신측·키오스크)
-├── backend/                  # Spring Boot VM 관리 서버
-├── frontend/                 # React 웹 관리 콘솔, VM별 화면(OS face)
-├── apps/                     # VM 애플리케이션 (RC카 시나리오 앱)
-├── contracts/                # VM 간 메시징·에이전트·관리 API 계약
-├── deploy/                   # 배포·실행 스크립트, 환경 설정
-├── scripts/                  # 빌드 스크립트
+├── backend/                  # Spring Boot VM 관리 서버 (테스트: src/test/)
+├── frontend/                 # React 웹 관리 콘솔, VM별 화면(OS face) (테스트: frontend/ 안)
+├── platform/                 # 보드(dom0·domU) 위에서 돌거나 보드 이미지를 만드는 것
+│   ├── yocto/ boot/ first-install/ guests/ network/   # Yocto·Xen·U-Boot, 부팅 환경, domU 템플릿, 네트워크
+│   ├── services/
+│   │   ├── dom0-manager/     # Python 제어 계층 (하이퍼바이저 추상화·복구 엔진)
+│   │   ├── vm-agent/         # VM 에이전트
+│   │   └── display/          # dom0 표시 서비스 (화면 라우터 수신측·키오스크)
+│   ├── apps/                 # VM 애플리케이션 (RC카 시나리오 앱)
+│   ├── deploy/               # dom0 서비스 등록·배포 설정
+│   ├── scripts/              # 빌드·검증 스크립트
+│   └── tests/                # 플랫폼 테스트·픽스처
 ├── docs/                     # 설계·가이드 문서
-└── .gitlab-ci.yml
+│   └── contracts/            # VM 간 메시징·에이전트·관리 API 계약 (OpenAPI 포함)
+└── Jenkinsfile
 ```
 
-CI 설정(`.gitlab-ci.yml`)은 모든 브랜치에서 동작해야 하므로 루트에 둡니다.
+최상위 폴더는 `backend/`, `frontend/`, `platform/`, `docs/` 네 개만 둡니다. 새 폴더는 이 넷 중 하나 아래에 만듭니다.
+테스트는 루트에 모으지 않고 각 폴더가 자기 테스트를 가집니다.
+CI 설정(`Jenkinsfile`)은 모든 브랜치에서 동작해야 하므로 루트에 둡니다.
 
 ---
 
@@ -80,15 +84,15 @@ CI 설정(`.gitlab-ci.yml`)은 모든 브랜치에서 동작해야 하므로 루
 
 | part | 대상 폴더 |
 | --- | --- |
-| `platform` | `platform/`, `scripts/` |
-| `ctrl` | `services/dom0-manager/` |
-| `agent` | `services/vm-agent/` |
-| `display` | `services/display/` |
+| `platform` | `platform/` (아래 services·apps·deploy 제외), `platform/scripts/`, `platform/tests/` |
+| `ctrl` | `platform/services/dom0-manager/` |
+| `agent` | `platform/services/vm-agent/` |
+| `display` | `platform/services/display/` |
 | `backend` | `backend/` |
 | `frontend` | `frontend/` |
-| `app` | `apps/` |
-| `deploy` | `deploy/`, `.gitlab-ci.yml` |
-| `common` | `docs/`, `contracts/`, 루트 설정 등 여러 파트에 걸친 변경 |
+| `app` | `platform/apps/` |
+| `deploy` | `platform/deploy/`, `Jenkinsfile` |
+| `common` | `docs/`, `docs/contracts/`, 루트 설정 등 여러 파트에 걸친 변경 |
 
 **type**: `feat`, `fix`, `refactor`, `test`, `docs`, `chore` (커밋 타입과 동일)
 
