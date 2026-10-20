@@ -32,6 +32,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DEFAULT_SOURCE = HERE.parent.parent  # services/vm-agent
 UNIT_NAME = "xenova-agent.service"
+ENABLE_WANTS_DIR = "etc/systemd/system/multi-user.target.wants"
+ENABLE_TARGET = "/usr/lib/systemd/system/" + UNIT_NAME
 IDENTITY_UNIT = "usr/lib/systemd/system/xenova-guest-identity.service"
 IDENTITY_DROPIN = "etc/systemd/system/xenova-agent.service.d/10-xenova-identity.conf"
 IDENTITY_DROPIN_SRC = HERE / "xenova-agent-identity.conf"
@@ -50,6 +52,23 @@ def _inside(root: Path, relative: str) -> Path:
     if root not in resolved.parents:
         raise ValueError(f"path escapes rootfs: {relative}")
     return resolved
+
+
+def _enable_link(root: Path) -> tuple[Path, bool]:
+    """enable 링크 자리를 검사한다. (경로, 이미 정상 링크인지).
+
+    이 링크는 설치 스크립트 자신이 만드는 심볼릭 링크라 _inside 의 링크 거부를 그대로 적용하면 두 번째 설치가 실패한다.
+    기대한 대상(/usr/lib/systemd/system/xenova-agent.service)을 가리키면 정상으로 두고, 다른 대상을 가리키는 링크나 일반 파일이면 거부한다.
+    """
+    link = _inside(root, ENABLE_WANTS_DIR) / UNIT_NAME  # wants 디렉터리 자체가 링크면 여기서 거부된다
+    if link.is_symlink():
+        target = os.readlink(link)
+        if target == ENABLE_TARGET:
+            return link, True
+        raise ValueError(f"unexpected enable link target at {ENABLE_WANTS_DIR}/{UNIT_NAME}: {target!r}")
+    if link.exists():
+        raise ValueError(f"refusing to replace a regular file at {ENABLE_WANTS_DIR}/{UNIT_NAME}")
+    return link, False
 
 
 def paho_installed(root: Path) -> bool:
@@ -90,7 +109,7 @@ def install(root: Path, source: Path = DEFAULT_SOURCE, *, enable: bool = True, r
     package_targets = [(source / project / package, _inside(root, f"{destination}/{package}")) for project, package, destination in PACKAGES]
     unit_dst = _inside(root, f"usr/lib/systemd/system/{UNIT_NAME}")
     dropin_dst = _inside(root, IDENTITY_DROPIN) if _identity_unit_present(root) else None
-    link = _inside(root, f"etc/systemd/system/multi-user.target.wants/{UNIT_NAME}") if enable else None
+    link, link_ok = _enable_link(root) if enable else (None, True)
 
     installed: list[Path] = []
     for src, dst in package_targets:
@@ -105,10 +124,9 @@ def install(root: Path, source: Path = DEFAULT_SOURCE, *, enable: bool = True, r
     if dropin_dst is not None:
         installed.append(_write_dropin(dropin_dst))
     if link is not None:
-        link.parent.mkdir(parents=True, exist_ok=True)
-        if link.exists():
-            link.unlink()
-        link.symlink_to("/usr/lib/systemd/system/" + UNIT_NAME)
+        if not link_ok:
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.symlink_to(ENABLE_TARGET)
         installed.append(link)
     return installed
 
