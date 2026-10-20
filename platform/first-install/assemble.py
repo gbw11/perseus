@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / 'platform/guests/common'))
 from prepare_rootfs import inside
 sys.path.insert(0, str(FILES))
 import xenova_zephyr as zephyr
+import deployment_payloads
 
 spec = importlib.util.spec_from_file_location('xenova_prepare_existing', ROOT / 'scripts/prepare-xenova-guests.py')
 prepare = importlib.util.module_from_spec(spec)
@@ -322,6 +323,7 @@ def platform_root_ok(root):
     units = ['xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
              'xenova-vms.service', 'xenova-vm-shutdown.service', 'xenova-xen-ready.service', 'xenova-host-admission.service']
     expected.update({'usr/lib/systemd/system/' + u: FILES / u for u in units})
+    expected.update(deployment_payloads.installed_sources(root))
     for relative, source in expected.items():
         if not path(relative).is_file() or path(relative).read_bytes() != source.read_bytes():
             raise ValueError('platform source/installed contract mismatch: ' + relative)
@@ -515,6 +517,10 @@ def source_fingerprints():
              ROOT / 'platform/first-install/assemble.py', ROOT / 'platform/first-install/artifact_io.py',
              ROOT / 'platform/first-install/completed_artifacts.py', ROOT / 'scripts/publish-xenova-platform.py', ROOT / 'scripts/publish-xenova-template-catalog.py',
              ROOT / 'platform/first-install/first_install_contract.py',
+             ROOT / 'platform/first-install/deployment_payloads.py',
+             *deployment_payloads.source_files('usr/lib/python3/site-packages').values(),
+             *(p for name in ('xenova-dom0-manager', 'xenova-mqtt-client')
+               for p in sorted((ROOT/'platform/yocto/meta-xenova/recipes-core'/name).rglob('*')) if p.is_file()),
              *sorted(p for p in FILES.iterdir() if p.is_file()),
              ROOT / 'scripts/verify-xenova-runtime-artifacts.py', ROOT / 'scripts/package-xenova-firmware.py',
              ROOT / 'scripts/update-xenova-guest-ssh.py', ROOT / 'scripts/collect-xenova-guest-evidence.py',
