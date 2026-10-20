@@ -1,4 +1,5 @@
 /* 수동주행 로직 호스트 시험 — Python tests/test_keymap.py·test_app.py 와 같은 표 */
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -100,10 +101,27 @@ static void test_step(void)
 	}
 }
 
+static void test_vm_id(void)
+{
+	char out[XM_UUID_LEN + 1];
+
+	CHECK(manual_vm_id_from_xenstore("/vm/1B4E28BA-2FA1-11D2-883F-0016D3CCA427", out) == 0 &&
+		      !strcmp(out, "1b4e28ba-2fa1-11d2-883f-0016d3cca427"),
+	      "vm path → lower uuid (%s)", out);
+	const char *bad[] = {NULL, "", "1b4e28ba-2fa1-11d2-883f-0016d3cca427", "/vm/1b4e28ba-2fa1-11d2-883f-0016d3cca42",
+			     "/vm/1b4e28ba-2fa1-11d2-883f-0016d3cca4277", "/vm/1b4e28ba_2fa1-11d2-883f-0016d3cca427",
+			     "/vm/zb4e28ba-2fa1-11d2-883f-0016d3cca427", "/vm/00000000-0000-0000-0000-000000000000",
+			     "/local/domain/3/vm"};
+	for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+		CHECK(manual_vm_id_from_xenstore(bad[i], out) == -EINVAL, "bad vm path %s", bad[i] ? bad[i] : "(null)");
+	}
+}
+
 int main(void)
 {
 	test_keymap();
 	test_step();
+	test_vm_id();
 	printf("%d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;
 }

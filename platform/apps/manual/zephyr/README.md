@@ -14,7 +14,8 @@
 | --- | --- |
 | `src/manual.c` | 키 변환·입력 끊김·세대·상태 (OS 무관, `tests/`에서 gcc로 시험) |
 | `src/main.c` | 한 스레드가 클라이언트를 소유: 20 ms마다 계산·발행, 남는 시간에 수신·keepalive·재연결 |
-| `Kconfig` | 브로커 주소(기본 dom0 `192.168.77.1`)·계정(`manual`)·vm_id |
+| `Kconfig` | 브로커 주소(기본 dom0 `192.168.77.1`)·계정(`manual`)·vm_id 대체값 |
+| vm_id | xenvm: XenStore 자기 도메인 `vm`(= `/vm/<uuid>`, xen.cfg 의 uuid = 플랫폼 vm_id)에서 읽고, 못 읽으면 Kconfig 값. native_sim: Kconfig 값 |
 | `boards/native_sim_native_64.conf` | PC 시험: 호스트 소켓(NSOS)으로 `127.0.0.1` 브로커 |
 | `boards/xenvm.conf` | Xen 게스트 펌웨어 |
 
@@ -22,12 +23,12 @@
 
 | 확인 | 결과 |
 | --- | --- |
-| 로직 호스트 시험 (`tests/`) | 25 통과 (Python `test_keymap`·`test_app` 과 같은 표) |
+| 로직 호스트 시험 (`tests/`) | 35 통과 (Python `test_keymap`·`test_app` 과 같은 표 + XenStore vm 경로 해석) |
 | `native_sim` + Mosquitto | 4초 199건(50 Hz), heartbeat, retained 세대 5 → 50 ms 안 `active`, 키 입력 다음 명령(≤ 20 ms)에 반영, 입력 끊기면 정지. 낸 봉투 304건 모두 Python `envelope.validate` 통과, seq 역전 0 |
-| `xenvm` 빌드 (Zephyr 4.4.0 `684c9e8`, SDK 1.0.0 aarch64) | `zephyr.bin` 171 KB, RAM 464 KB / 16 MB |
+| `xenvm` 빌드 (Zephyr 4.4.0 `684c9e8`, SDK 1.0.0 aarch64) | `zephyr.bin` 179 KB (XenStore 포함), RAM 476 KB / 16 MB |
 | **실보드** | ❌ Zephyr 템플릿에 PV 네트워크가 없어 아직 브로커에 닿지 못함 — 경로 결정 대기 ([요청](../../../../docs/requests/2026-10-20-zephyr-drive-network-platform.md)) |
 
-아직 없는 것: vm_id를 XenStore에서 읽기(지금은 Kconfig 값, 설계 D5), 브로커 비밀번호 주입, 펌웨어 번들 게시·VM 자동 시작(S15P31E110-238).
+아직 없는 것: XenStore vm_id 읽기의 실보드 확인, 브로커 비밀번호 주입, 펌웨어 번들 게시·VM 자동 시작(S15P31E110-238).
 
 ## 빌드·실행
 

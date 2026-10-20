@@ -39,6 +39,11 @@ struct manual_command {
 };
 
 void manual_cfg_default(struct manual_cfg *cfg);
+/*
+ * Xen 이 자기 도메인의 XenStore "vm" 에 적어 둔 "/vm/<uuid>" 에서 vm_id 를 꺼낸다 (설계 §6 D5).
+ * xen.cfg 의 uuid 가 플랫폼 vm_id 라 에이전트의 /etc/xenova/instance-id 와 같은 값이다. 소문자 표준형으로 낸다.
+ */
+int manual_vm_id_from_xenstore(const char *path, char out[XM_UUID_LEN + 1]);
 void manual_target(const struct manual_cfg *cfg, uint32_t keys, float *v_mps, float *steer_rad);
 /* 한 주기 계산. *state 에 heartbeat state 문자열 */
 void manual_step(const struct manual_cfg *cfg, const struct manual_inputs *in, struct manual_command *out,

@@ -6,13 +6,41 @@
  */
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <string.h>
 
 #include "manual.h"
 #include "xm_zclient.h"
 
+#if defined(CONFIG_XENOVA_XENSTORE)
+#include <xenova/xenstore_zephyr.h>
+#endif
+
 LOG_MODULE_REGISTER(xenova_manual, LOG_LEVEL_INF);
 
 static struct xm_zclient client;
+static char vm_id[XM_UUID_LEN + 1] = CONFIG_XENOVA_MANUAL_VM_ID;
+
+/* xenvm: XenStore 의 자기 도메인 "vm" (= "/vm/<uuid>") 에서 vm_id. 못 읽으면 Kconfig 값 (설계 §6 D5) */
+static void resolve_vm_id(void)
+{
+#if defined(CONFIG_XENOVA_XENSTORE)
+	static struct xs_zephyr store;
+	char path[64];
+	int rc = xs_zephyr_open(&store);
+
+	if (rc == 0) {
+		rc = xs_read_text(&store.link.client, 0, "vm", path, sizeof(path), 3000);
+		if (rc == 0) {
+			rc = manual_vm_id_from_xenstore(path, vm_id);
+		}
+		xs_zephyr_close(&store, 3000);
+	}
+	if (rc != 0) {
+		LOG_WRN("XenStore vm_id 읽기 실패 %d, Kconfig 값 사용", rc);
+		strcpy(vm_id, CONFIG_XENOVA_MANUAL_VM_ID);
+	}
+#endif
+}
 
 static void latest_payload(const char *topic, const char *type, struct xm_span *payload, int64_t *age_ms)
 {
@@ -43,7 +71,8 @@ int main(void)
 	xm_topic_vehicle_control(control, sizeof(control));
 	xm_topic_manual_input(input, sizeof(input));
 
-	int rc = xm_zclient_init(&client, CONFIG_XENOVA_MANUAL_VM_ID, NULL, MANUAL_APP_ID, &zcfg);
+	resolve_vm_id();
+	int rc = xm_zclient_init(&client, vm_id, NULL, MANUAL_APP_ID, &zcfg);
 
 	if (rc) {
 		LOG_ERR("클라이언트 초기화 실패 %d", rc);
@@ -52,7 +81,7 @@ int main(void)
 	/* 핸들러 없이 latest-only. vehicle/control 은 retained 라 연결 직후 현재 세대가 온다 */
 	xm_zclient_subscribe(&client, control, 1);
 	xm_zclient_subscribe(&client, input, 0);
-	LOG_INF("xenova-manual 시작 vm_id=%s broker=%s:%d rate=50Hz", CONFIG_XENOVA_MANUAL_VM_ID, zcfg.host,
+	LOG_INF("xenova-manual 시작 vm_id=%s broker=%s:%d rate=50Hz", vm_id, zcfg.host,
 		zcfg.port);
 
 	int64_t start = k_uptime_get();
