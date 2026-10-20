@@ -1,6 +1,5 @@
 /* jsmn 토큰 위의 작은 JSON 도우미와 출력 버퍼 쓰기 */
 #include <errno.h>
-#include <math.h>
 #include <string.h>
 
 /* jsmn 구현은 이 파일 하나에만 넣는다 */
@@ -206,14 +205,21 @@ int xm_put_fixed(char *out, size_t n, size_t *pos, double value, int decimals)
 	size_t start = *pos;
 	uint64_t scale = 1;
 
-	if (!isfinite(value)) {
-		value = 0.0; /* JSON 에 NaN·Inf 는 없다. 주행 값이면 정지 쪽 */
+	/* libm 없이 (Zephyr minimal libc). NaN·Inf 는 JSON 에 없으므로 0, 너무 큰 값은 자른다. 주행 값이면 정지 쪽 */
+	if (value != value || value - value != 0.0) {
+		value = 0.0;
+	}
+	if (value > 1e12) {
+		value = 1e12;
+	} else if (value < -1e12) {
+		value = -1e12;
 	}
 	for (int d = 0; d < decimals; d++) {
 		scale *= 10;
 	}
 	bool neg = value < 0;
-	uint64_t scaled = (uint64_t)llround(fabs(value) * (double)scale);
+	double magnitude = neg ? -value : value;
+	uint64_t scaled = (uint64_t)(magnitude * (double)scale + 0.5);
 	uint64_t ip = scaled / scale, fp = scaled % scale;
 	int rc = 0;
 

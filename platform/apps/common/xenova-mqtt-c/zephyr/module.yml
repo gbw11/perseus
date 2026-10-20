@@ -1,0 +1,4 @@
+name: xenova_mqtt_c
+build:
+  cmake: zephyr
+  kconfig: zephyr/Kconfig

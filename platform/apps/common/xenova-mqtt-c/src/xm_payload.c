@@ -12,9 +12,9 @@ int xm_drive_command_json(char *out, size_t n, uint32_t generation, float v_mps,
 	rc |= xm_put(out, n, &pos, "{\"generation\":");
 	rc |= xm_put_uint(out, n, &pos, generation);
 	rc |= xm_put(out, n, &pos, ",\"v_mps\":");
-	rc |= xm_put_fixed(out, n, &pos, v_mps, 4);
+	rc |= xm_put_fixed(out, n, &pos, (double)v_mps, 4);
 	rc |= xm_put(out, n, &pos, ",\"steer_rad\":");
-	rc |= xm_put_fixed(out, n, &pos, steer_rad, 4);
+	rc |= xm_put_fixed(out, n, &pos, (double)steer_rad, 4);
 	rc |= xm_put(out, n, &pos, "}");
 	return rc ? -ENOSPC : (int)pos;
 }

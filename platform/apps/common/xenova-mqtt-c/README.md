@@ -4,7 +4,7 @@ Zephyr 자율·수동주행 앱이 쓰는 C판 `xenova_mqtt`입니다. Python [`
 **같은 토픽·정책·봉투·검사·seq 규칙**을 따르고, 두 구현이 같은지는 공통 시험 벡터(`tests/vectors/`)로 확인합니다.
 설계: [docs/design/mqtt-c-client.md](../../../../docs/design/mqtt-c-client.md) · 계약: [MQTT 메시지 계약 v1](../../../../docs/contracts/mqtt-contract-v1.md)
 
-## 지금 들어 있는 것 (설계 S1)
+## 지금 들어 있는 것 (설계 S1 + S3 zephyr 포트)
 
 | 파일 | 내용 | Python 대응 |
 | --- | --- | --- |
@@ -14,10 +14,13 @@ Zephyr 자율·수동주행 앱이 쓰는 C판 `xenova_mqtt`입니다. Python [`
 | `src/xm_seq.c` | (토픽, 발행자)별 seq 중복·역전 버림, 재시작 시 기준 재설정. 고정 8슬롯 LRU | `SeqTracker` |
 | `src/xm_payload.c` | `drive.command`·`app.heartbeat` 인코드, `vehicle.control`·`drive.input` 디코드 | 수동 앱 |
 | `third_party/jsmn/jsmn.h` | JSON 토크나이저 jsmn v1.1.0 (MIT, sha256 `1ed6154d…c13b`) | `json` |
+| `ports/zephyr/xm_zclient.c` | Zephyr `net/mqtt` 클라이언트: clean session·3.1.1, 재연결 1→10초, 연결마다 재구독, 수신 검사→seq→latest, QoS 1 PUBACK | `client.py` |
+| `zephyr/` | Zephyr 모듈 (`ZEPHYR_EXTRA_MODULES` 에 이 디렉터리, `CONFIG_XENOVA_MQTT=y`) | — |
 
 - 동적 메모리를 쓰지 않습니다. 실수는 고정소수점으로 씁니다 (Zephyr printf 실수 미지원 대비, 설계 §6 D6).
 - 디코드 결과는 받은 버퍼를 가리키는 span입니다. 함수 안의 파서 상태가 정적이라 **한 스레드에서만** 부릅니다 (설계 §5).
-- 아직 없는 것: 연결·재연결·재구독을 맡는 `xm_client`와 전송 포트(zephyr·posix·vchan) — 설계 S2·S3.
+- libm 을 쓰지 않습니다 (Zephyr minimal libc).
+- 아직 없는 것: posix 포트(libmosquitto, 설계 S2)와 vchan 포트. zephyr 포트는 `native_sim`(호스트 소켓)에서 브로커 접속·발행·구독을 확인했고([수동주행 Zephyr 앱](../../manual/zephyr/README.md)), `xenvm` 은 빌드까지 확인했습니다.
 
 ## 시험
 
