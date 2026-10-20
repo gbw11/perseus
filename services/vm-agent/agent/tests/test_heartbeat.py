@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from xenova_agent.heartbeat import HeartbeatSender
+from xenova_agent.heartbeat import HeartbeatFailed, HeartbeatSender
 
 VM_ID = "11111111-1111-4111-8111-111111111111"
 TOPIC = f"perseus/v1/vms/{VM_ID}/heartbeat"
@@ -87,14 +87,26 @@ def test_ticks_are_skipped_while_disconnected_and_resume_after_reconnect():
     assert [c[0] for c in client.calls] == [100.0, 115.0, 120.0]
 
 
-def test_publish_error_does_not_stop_the_loop():
+def test_single_publish_error_does_not_stop_the_loop():
     clock = FakeClock(100.0)
     client = FakeClient(clock)
     client.fail_at = {2}
     sender = HeartbeatSender(client, VM_ID, interval_s=5.0, clock=clock)
     sent = sender.run(FakeStop(clock, stop_at=100.0 + 15.5))
-    assert sent == 3 and sender.failed == 1
+    assert sent == 3 and sender.failed == 1 and sender.consecutive_failures == 0
     assert [c[0] for c in client.calls] == [100.0, 110.0, 115.0]
+
+
+def test_consecutive_publish_errors_fail_the_agent():
+    """고정된 오류(봉투·토픽·라이브러리 사용)는 서비스를 active 로 두지 않고 실패로 올린다. 성공이 끼면 연속 횟수는 리셋된다."""
+    clock = FakeClock(100.0)
+    client = FakeClient(clock)
+    client.fail_at = {2, 4, 5, 6}  # 2 실패 → 3 성공(리셋) → 4·5·6 연속 실패
+    sender = HeartbeatSender(client, VM_ID, interval_s=5.0, clock=clock, max_consecutive_failures=3)
+    with pytest.raises(HeartbeatFailed, match="3 times in a row"):
+        sender.run(FakeStop(clock, stop_at=100.0 + 60.0))
+    assert sender.sent == 2 and sender.failed == 4
+    assert [c[0] for c in client.calls] == [100.0, 110.0]
 
 
 def test_long_stall_rebases_schedule_instead_of_bursting():

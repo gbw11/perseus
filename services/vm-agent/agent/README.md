@@ -9,7 +9,9 @@ Linux 게스트 안에서 돌며 [MQTT 계약 v1](../../../docs/contracts/mqtt-c
 | payload | `{}`. 봉투의 `seq`·`boot_id`·`agent_instance_id`·`sent_at`만 의미가 있음 |
 | 주기 | 5초. 시작 직후 1회, 이후 단조 시계 기준 `start + n*5s` (발행 지연이 누적되지 않음) |
 | 끊김 | 브로커와 끊긴 틱은 보내지 않고 건너뜀. 재연결은 클라이언트가 하고 연결되면 다음 틱부터 재개 |
+| 발행 예외 | 봉투·토픽·라이브러리 사용 오류처럼 고정된 문제라 보고, 연속 3번이면 종료 코드 1로 끝남. systemd 가 로그에 남기고 2초 뒤 다시 띄움 |
 | 상태 | 에이전트는 상태를 선언하지 않음. 살아 있는지는 받는 쪽이 수신 시각으로 판정 |
+| 권한 | root uid 지만 capability 전부 제거, `ProtectSystem=strict`·`PrivateTmp` 등으로 쓰기·권한 상승 차단. 전용 사용자는 instance-id(root 0600) 소유권을 플랫폼과 정한 뒤 |
 
 앱·프로세스 상태는 heartbeat에 싣지 않고 metrics(MQTT-03)의 `processes[]`로 보냅니다(S15P31E110-122). Zephyr 는 에이전트·네트워크가 없어 대상이 아닙니다.
 
