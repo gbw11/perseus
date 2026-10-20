@@ -102,6 +102,8 @@ export interface Telemetry {
   apps: Record<AppId, AppStatus>;
   commands: Record<'autonomous' | 'manual', DriveCommand | null>;
   perception: PerceptionResult;
+  /** 장애물 수. 실제 연결은 위치 없이 수만 준다 (없으면 perception.obstacles.length) */
+  obstacleCount?: number;
   vehicle: VehicleStatus;
   manualKeys: string[];
   /** 자율 VM 명령이 연속으로 신선했던 시작 시각 (AUTO_READY 판정) */

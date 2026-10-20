@@ -103,3 +103,29 @@
   padding-left: var(--x-space-5);
   line-height: 2;
 }
+.pad {
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  gap: var(--x-space-2);
+  margin: var(--x-space-4) 0;
+}
+.key {
+  height: 56px;
+  min-width: 64px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  background: var(--x-surface-2);
+  color: var(--x-text);
+  font-size: var(--x-text-lg);
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+.key:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.keyOn {
+  background: var(--x-app-manual);
+  color: var(--x-primary-text);
+}

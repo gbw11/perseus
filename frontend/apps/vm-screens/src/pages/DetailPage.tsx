@@ -4,8 +4,10 @@ import { Navigate, useParams } from 'react-router';
 import { ModeBar } from '../components/ModeBar';
 import { mps, rad, seconds } from '../components/format';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
-import { APPS, APP_IDS, type AppId } from '../telemetry/types';
+import { APPS, APP_IDS, type AppId, type Telemetry } from '../telemetry/types';
 import styles from '../components/screens.module.css';
+
+const obstacles = (t: Telemetry) => t.obstacleCount ?? t.perception.obstacles.length;
 
 /** 모니터 2: 관리자가 고른 1개를 크게 (RC카 시나리오 §5) */
 export function DetailPage() {
@@ -122,7 +124,7 @@ function AutonomousDetail() {
           <dt>방향 오차</dt>
           <dd className={styles.mono}>{t.perception.heading_err_rad.toFixed(3)} rad</dd>
           <dt>장애물</dt>
-          <dd>{t.perception.obstacles.length ? `${t.perception.obstacles.length}개 — 감속` : '없음'}</dd>
+          <dd>{obstacles(t) ? `${obstacles(t)}개 — 감속` : '없음'}</dd>
         </dl>
       </section>
     </>
@@ -141,11 +143,14 @@ const KEY_OF: Record<string, string> = {
 };
 
 function ManualDetail() {
-  const { telemetry: t, setManualKeys } = useTelemetry();
+  const { telemetry: t, setManualKeys, source } = useTelemetry();
   const active = t.activeApp === 'manual';
+  // 실제 연결에서는 입력을 웹 시연 제어(W-07)가 보낸다. 모니터는 터치·키보드가 없다
+  const local = source === 'mock';
 
   // 키보드 화살표·WASD → drive.input 흉내 (MQTT 계약 §7: 실제로는 콘솔 → 백엔드 → MQTT)
   useEffect(() => {
+    if (!local) return;
     const pressed = new Set<string>();
     const sync = () => setManualKeys([...pressed]);
     const down = (event: KeyboardEvent) => {
@@ -166,7 +171,7 @@ function ManualDetail() {
       window.removeEventListener('keyup', up);
       setManualKeys([]);
     };
-  }, [setManualKeys]);
+  }, [local, setManualKeys]);
 
   const release = (key: string) => setManualKeys(t.manualKeys.filter((k) => k !== key));
   const pad = (key: string, text: string) => (
@@ -193,7 +198,11 @@ function ManualDetail() {
           {pad('down', '▼')}
           {pad('right', '▶')}
         </div>
-        <p className={styles.dim}>화살표·WASD 또는 버튼. 입력이 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.</p>
+        <p className={styles.dim}>
+          {local
+            ? '화살표·WASD 또는 버튼. 입력이 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'
+            : '입력은 웹 시연 제어 화면에서 보낸다. 입력이 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'}
+        </p>
       </section>
       <section className={styles.detailSide}>
         <h2>주행 명령</h2>
@@ -225,7 +234,7 @@ function ManualDetail() {
 }
 
 function InteractionDetail() {
-  const { telemetry: t, resume } = useTelemetry();
+  const { telemetry: t, resume, source } = useTelemetry();
   const down = t.apps.interaction.domain !== 'running' || t.apps.interaction.health === 'fault';
   const buttonText =
     t.mode === 'AUTO_READY' ? '자율주행 재개' : t.mode === 'AUTO' ? '자율주행 중' : '재개 대기';
@@ -252,7 +261,7 @@ function InteractionDetail() {
         <p className={styles.dim}>
           복구된 자율주행 VM 의 명령이 3초 연속 신선하면 AUTO_READY. 그때만 재개를 받는다.
         </p>
-        <Button size="lg" onClick={resume} disabled={down || t.mode !== 'AUTO_READY'}>
+        <Button size="lg" onClick={resume} disabled={down || source !== 'mock' || t.mode !== 'AUTO_READY'}>
           {buttonText}
         </Button>
       </section>
