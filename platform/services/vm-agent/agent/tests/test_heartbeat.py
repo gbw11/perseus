@@ -7,7 +7,7 @@ import pytest
 from xenova_agent.heartbeat import HeartbeatFailed, HeartbeatSender
 
 VM_ID = "11111111-1111-4111-8111-111111111111"
-TOPIC = f"perseus/v1/vms/{VM_ID}/heartbeat"
+TOPIC = f"xenova/v1/vms/{VM_ID}/heartbeat"
 
 
 class FakeClock:

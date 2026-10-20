@@ -17,13 +17,13 @@ import time
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from perseus_mqtt import topics
+from xenova_mqtt import topics
 
 log = logging.getLogger("xenova_agent.heartbeat")
 
 
 class Publisher(Protocol):
-    """perseus_mqtt.PerseusClient 의 쓰는 부분."""
+    """xenova_mqtt.XenovaClient 의 쓰는 부분."""
 
     @property
     def connected(self) -> bool: ...

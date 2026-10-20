@@ -1,11 +1,11 @@
 # xenova-agent — VM 에이전트 (heartbeat)
 
 Linux 게스트 안에서 돌며 [MQTT 계약 v1](../../../../docs/contracts/mqtt-contract-v1.md)의 heartbeat(MQTT-01)를 dom0 Mosquitto 로 보냅니다.
-봉투·토픽·QoS·자동 재연결은 [mqtt-client](../mqtt-client/README.md)의 `perseus_mqtt`가 맡고, 이 패키지는 주기와 수명만 정합니다.
+봉투·토픽·QoS·자동 재연결은 [mqtt-client](../mqtt-client/README.md)의 `xenova_mqtt`가 맡고, 이 패키지는 주기와 수명만 정합니다.
 
 | 항목 | 값 |
 | --- | --- |
-| 토픽 | `perseus/v1/vms/{vm_id}/heartbeat`, `type: agent.heartbeat`, QoS 1 |
+| 토픽 | `xenova/v1/vms/{vm_id}/heartbeat`, `type: agent.heartbeat`, QoS 1 |
 | payload | `{}`. 봉투의 `seq`·`boot_id`·`agent_instance_id`·`sent_at`만 의미가 있음 |
 | 주기 | 5초. 시작 직후 1회, 이후 단조 시계 기준 `start + n*5s` (발행 지연이 누적되지 않음) |
 | 끊김 | 브로커와 끊긴 틱은 보내지 않고 건너뜀. 재연결은 클라이언트가 하고 연결되면 다음 틱부터 재개 |
@@ -59,4 +59,4 @@ cd platform/services/vm-agent/agent
 python -m pytest
 ```
 
-가짜 시계와 가짜 클라이언트로 주기·지연 보정·끊김 건너뜀·발행 실패·정지를 확인합니다. 실제 브로커 시험은 mqtt-client 의 `PERSEUS_MQTT_TEST_BROKER` 방식을 따릅니다.
+가짜 시계와 가짜 클라이언트로 주기·지연 보정·끊김 건너뜀·발행 실패·정지를 확인합니다. 실제 브로커 시험은 mqtt-client 의 `XENOVA_MQTT_TEST_BROKER` 방식을 따릅니다.

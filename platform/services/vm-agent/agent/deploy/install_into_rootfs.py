@@ -7,7 +7,7 @@ rootfs 에 있는지 확인하고, 없으면 아무것도 설치하지 않는다
     python3 platform/services/vm-agent/agent/deploy/install_into_rootfs.py <rootfs> [--source platform/services/vm-agent]
 
 설치 결과:
-    /opt/xenova/mqtt-client/perseus_mqtt/        MQTT 계약 v1 클라이언트
+    /opt/xenova/mqtt-client/xenova_mqtt/        MQTT 계약 v1 클라이언트
     /opt/xenova/agent/xenova_agent/              에이전트 본체
     /usr/lib/systemd/system/xenova-agent.service
     /etc/systemd/system/multi-user.target.wants/xenova-agent.service -> /usr/lib/systemd/system/xenova-agent.service
@@ -37,7 +37,7 @@ ENABLE_TARGET = "/usr/lib/systemd/system/" + UNIT_NAME
 IDENTITY_UNIT = "usr/lib/systemd/system/xenova-guest-identity.service"
 IDENTITY_DROPIN = "etc/systemd/system/xenova-agent.service.d/10-xenova-identity.conf"
 IDENTITY_DROPIN_SRC = HERE / "xenova-agent-identity.conf"
-PACKAGES = (("mqtt-client", "perseus_mqtt", "opt/xenova/mqtt-client"), ("agent", "xenova_agent", "opt/xenova/agent"))
+PACKAGES = (("mqtt-client", "xenova_mqtt", "opt/xenova/mqtt-client"), ("agent", "xenova_agent", "opt/xenova/agent"))
 IGNORE = shutil.ignore_patterns("tests", "__pycache__", "*.pyc", "*.egg-info")
 PAHO_CLIENT_GLOBS = ("usr/lib/python3*/*-packages/paho/mqtt/client.py", "usr/local/lib/python3*/*-packages/paho/mqtt/client.py")
 

@@ -11,7 +11,7 @@ Wants=network-online.target
 Type=simple
 # 선택: XENOVA_AGENT_BROKER_HOST, XENOVA_AGENT_BROKER_USERNAME/PASSWORD, XENOVA_AGENT_HEARTBEAT_INTERVAL, XENOVA_AGENT_LOG_LEVEL
 EnvironmentFile=-/etc/xenova/agent.env
-# 설치 경로는 install_into_rootfs.py 와 같다. perseus_mqtt(mqtt-client)와 xenova_agent 두 패키지가 보여야 한다
+# 설치 경로는 install_into_rootfs.py 와 같다. xenova_mqtt(mqtt-client)와 xenova_agent 두 패키지가 보여야 한다
 Environment=PYTHONPATH=/opt/xenova/mqtt-client:/opt/xenova/agent
 ExecStart=/usr/bin/python3 -m xenova_agent
 Restart=always
