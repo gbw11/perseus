@@ -47,6 +47,7 @@ curl -i -X POST localhost:8081/api/v1/vms/11111111-1111-4111-8111-111111111111/s
 | `XENOVA_HOST` / `XENOVA_PORT` | `127.0.0.1` / `8081` | 바인드 주소. dom0 밖으로 열지 않습니다 |
 | `XENOVA_XL_QUERY_TIMEOUT` | `5` | 조회용 xl 호출 한도(초). Spring 조회 대기 6초 안 |
 | `XENOVA_XL_COMMAND_TIMEOUT` | `95` | 명령용 xl 호출 한도(초) |
+| `XENOVA_XL_SSH` | (없음) | 설정하면 xl 을 로컬 대신 `ssh -o BatchMode=yes <값> -- xl …`로 부른다(예: `root@100.64.0.1`). 개발 PC에서 xen 조회 모드로 실보드 출력을 계약과 대조할 때만 쓴다. 키 인증 필수 |
 | `XENOVA_SHUTDOWN_GRACE` | `90` | 정상 종료 대기(초). 계약 v1.1: 시간이 지나도 자동 강제 종료하지 않고 실패로 보고 |
 | `XENOVA_SERVICE_TOKEN` | (없음) | 설정하면 `/healthz`를 포함한 모든 요청에 `Authorization: Bearer <토큰>`을 요구(401). Tailscale 바인드 배포에서는 필수 |
 | `XENOVA_HOST_CPUS` | `4` | vcpus 상한 기본값. `xl info`의 nr_cpus가 있으면 그 값 우선 |
@@ -138,7 +139,13 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 
 ## Xen 모드 현황
 
-`XENOVA_DRIVER=xen`에서 지금 되는 것은 `GET /healthz`, `GET /api/v1/vms`, `GET /api/v1/vms/{vm_id}`입니다. `xl list`로 상태를, `xl list -l`의 `config.c_info.uuid`로 vm_id를 읽습니다(플랫폼 도구와 같은 방식). 생성·정지·삭제는 501을 내며 S15P31E110-115에서 구현합니다.
+`XENOVA_DRIVER=xen`에서 지금 되는 것은 `GET /healthz`, `GET /api/v1/vms`, `GET /api/v1/vms/{vm_id}`입니다. `xl list`로 상태를, `xl list -l`의 `config.c_info.uuid`로 vm_id를 읽습니다(플랫폼 도구와 같은 방식). 생성·정지·삭제는 501이며 `XENOVA_DRIVER=platform`에서 지원합니다.
+
+실보드 대조는 보드에 아무것도 설치하지 않고 개발 PC에서 합니다. 보드 dom0에 PC 공개키를 넣은 뒤
+`XENOVA_DRIVER=xen XENOVA_XL_SSH=root@<dom0 주소> python -m dom0_manager`로 띄우면 세 조회 엔드포인트가 실제 `xl` 출력으로 동작합니다.
+2026-10-20 RPi4(rev 1.4, Xen 4.21.1-pre, 게스트 3개)에서 `/healthz` 200, 목록·단건 200, 미등록 404, nil UUID 400, stop 501을 확인했고,
+그때의 `xl` 출력은 `tests/fixtures/rpi4-xen-4.21/`에 있어 `tests/test_xl.py`가 그대로 대조합니다. xl 호출마다 ssh 세션을 새로 열어
+목록 한 번에 약 0.8초가 걸립니다(조회 한도 5초 안).
 
 ## 테스트
 
@@ -167,7 +174,6 @@ python -m pytest
 ## 아직 정하지 않은 것
 
 - `/healthz` 본문은 `{"status": "ok" | "xen_unavailable"}`로 임시 정의.
-- `xl list`의 `------`(플래그 없음)는 libxl 소스상 "실행 가능·미스케줄"이라 running으로 봅니다. 실보드에서 나타나는 조건을 확인한 뒤 계약 3.2장에 반영합니다(S15P31E110-36).
 - desired_state 저장은 플랫폼 파트에 요청 중입니다. (IP 자동 배정은 들어와서 dom0-manager의 IP 풀 선택을 제거했습니다.)
 - 템플릿 ID 명명이 Spring 설정과 플랫폼 카탈로그에서 다릅니다. 변환 규칙은 세 파트가 함께 정합니다.
 
