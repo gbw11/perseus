@@ -1,0 +1,14 @@
+# 수동주행 로직 호스트 시험 (Zephyr 없이 gcc)
+#   cmake -S tests -B build-host && cmake --build build-host && ctest --test-dir build-host --output-on-failure
+cmake_minimum_required(VERSION 3.20)
+project(xenova_manual_host_tests C)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../common/xenova-mqtt-c xenova-mqtt-c)
+
+enable_testing()
+add_executable(test_manual test_manual.c ../src/manual.c)
+target_include_directories(test_manual PRIVATE ../src)
+target_compile_options(test_manual PRIVATE -Wall -Wextra -Werror -fsanitize=address,undefined)
+target_link_options(test_manual PRIVATE -fsanitize=address,undefined)
+target_link_libraries(test_manual PRIVATE xenova_mqtt_core m)
+add_test(NAME manual COMMAND test_manual)
