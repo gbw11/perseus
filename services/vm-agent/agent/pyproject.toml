@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xenova-agent"
+version = "0.1.0"
+description = "Xenova VM 에이전트: MQTT 계약 v1 heartbeat 송신 (S15P31E110-117)"
+requires-python = ">=3.11"
+# perseus_mqtt 는 같은 저장소의 ../mqtt-client 다. 게스트에서는 PYTHONPATH 로 두 경로를 함께 둔다 (deploy/xenova-agent.service)
+dependencies = [
+    "paho-mqtt>=1.6,<3",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+]
+
+[tool.setuptools.packages.find]
+include = ["xenova_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "../mqtt-client"]
+addopts = "-q"
