@@ -8,10 +8,12 @@
 | 구독 | `xenova/v1/apps/manual/input` | `drive.input` | 백엔드가 키를 누르는 동안 20 Hz로 보냄 |
 | 구독 | `xenova/v1/vehicle/control` | `vehicle.control` | 게이트웨이, retained. `generation`만 쓴다 |
 | 발행 | `xenova/v1/apps/manual/events` | `drive.command` | 50 Hz, QoS 0. `{generation, v_mps, steer_rad}` |
+| 발행 | `xenova/v1/apps/manual/events` | `app.heartbeat` | 1초, QoS 0. `{state, uptime_s}` — 앱 프로세스 생존·상태 (계약 6.1) |
 
 - 활성이든 대기든 계속 발행합니다. 게이트웨이가 대기 앱 명령의 신선도로 승격을 정합니다 (계약 5.2).
 - 입력이 200 ms 동안 없으면 `v_mps = 0`을 보냅니다. 최종 정지는 ESP32 와치독(300 ms)이 맡습니다.
 - `vehicle/control`을 아직 못 받았으면 `generation 0`으로 보냅니다. ESP32는 세대가 다르면 버리므로 차는 움직이지 않습니다.
+- `app.heartbeat`의 `state`는 `vehicle/control` 기준 `active`(활성 앱이 manual) / `standby` / `idle`(아직 못 받음)입니다. 제어권 전환 판정에는 쓰지 않습니다.
 - 봉투·QoS·재연결은 [xenova_mqtt](../../services/vm-agent/mqtt-client/README.md)가 맡습니다.
 
 ## 실행

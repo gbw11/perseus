@@ -1,6 +1,6 @@
 # MQTT 메시지 계약 v1
 
-**최종 갱신** 2026-10-20 (7장 `drive.input` 키·반복·끊김 규칙)
+**최종 갱신** 2026-10-20 (6.1 `app.heartbeat`, 7장 `drive.input` 키·반복·끊김 규칙)
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼, RC카 시나리오
 **브로커** dom0 Mosquitto
 
@@ -188,6 +188,21 @@ VM 에이전트, RC카 앱 VM, dom0 서버, 젯슨, ESP32가 주고받는 MQTT �
 
 - `drive.resume.requested`는 `AUTO_READY`일 때만 받아들인다. 다른 모드에서는 무시하고 `drive.mode.changed`를 내지 않는다.
 - 백엔드는 `drive.mode.changed`, `drive.fault.detected`를 콘솔 이벤트 로그(REST-18, `/ws/v1/events`)에 남긴다. 심각도는 모드 전환 `INFO`, `SAFE_STOP` 진입·장애 `WARNING`.
+
+### 6.1 앱 생존 신호 `app.heartbeat`
+
+| ID | 토픽 | `type` | 발행 → 구독 | 주기 | QoS | 주요 payload |
+| --- | --- | --- | --- | --- | --- | --- |
+| MQTT-06 | `xenova/v1/apps/{app_id}/events` | `app.heartbeat` | 앱 VM → 백엔드, 메시지 보드, 주행 화면 | 1초 | 0 | `state`, `uptime_s` |
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `state` | string | `active`(활성 앱) / `standby`(대기, 주행 명령은 계속 발행) / `idle`(`vehicle/control`을 아직 못 받음, 주행과 무관한 앱의 평상시) / `error` |
+| `uptime_s` | float | 앱 프로세스 시작 후 경과 초 |
+
+- 앱 **프로세스**가 살아 있는지와 상태를 알린다. VM 생존은 `agent.heartbeat`(3장), 제어권 전환은 `drive.command` 끊김 100 ms(5장)로 판정하며 이 신호를 쓰지 않는다.
+- 주행 루프와 같은 스레드에서 보낸다. 루프가 멈추면 heartbeat도 멈춰야 "프로세스는 있는데 일을 안 한다"를 잡는다.
+- 받는 쪽은 3초 동안 못 받으면 그 앱을 끊김으로 표시한다.
 
 ## 7. 수동주행 입력
 
