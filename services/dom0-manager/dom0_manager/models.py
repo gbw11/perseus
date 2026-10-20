@@ -8,7 +8,7 @@ from __future__ import annotations
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class VmState(str, Enum):
@@ -21,7 +21,7 @@ class VmState(str, Enum):
 
 
 class Vm(BaseModel):
-    """dom0-manager 가 Xen 에서 직접 읽는 필드만. name·template 은 Spring 이 보유한다."""
+    """HTTP VM 응답은 Xen 관측 필드만 담는다. create의 name 전달과 응답 필드는 별개다."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -35,6 +35,7 @@ class CreateVmRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     vm_id: UUID = Field(description="Spring 이 한 번 생성해 재시도에도 재사용한다")
+    name: str = Field(min_length=1, max_length=63, description="Spring의 표시 이름. 실행 이름·경로로 사용하지 않는다")
     template_id: str = Field(min_length=1, description="예 debian, ubuntu, alpine")
     template_version: str = Field(min_length=1)
     vcpus: int = Field(ge=1, le=4)
@@ -43,6 +44,15 @@ class CreateVmRequest(BaseModel):
         le=1024,
         description="공통 하한 16(Zephyr 고정 프로필). 템플릿별 하한·상한은 플랫폼 템플릿 resource_limits 와 Spring 설정이 검사한다",
     )
+
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        # Java Pattern의 기본 \s는 ASCII 공백만 검사한다. 입력 이름은 변경하지 않는다.
+        if value != value.strip(" \t\n\r\f\v") or any(ord(char) < 32 or 0x7f <= ord(char) <= 0x9f or char in ("\u2028", "\u2029") for char in value):
+            raise ValueError("name must be one line without control characters or surrounding whitespace")
+        return value
 
 
 class ResourceName(str, Enum):

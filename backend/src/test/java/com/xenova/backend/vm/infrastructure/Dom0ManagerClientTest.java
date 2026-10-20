@@ -31,7 +31,7 @@ class Dom0ManagerClientTest {
 
     private static final Duration RETRY_BACKOFF = Duration.ofMillis(200);
     private static final String VM_ID = "550e8400-e29b-41d4-a716-446655440000";
-    private static final VmLaunchSpec SPEC = new VmLaunchSpec("alpine", "1.2.0", 1, 256);
+    private static final VmLaunchSpec SPEC = new VmLaunchSpec("주행 A 개발 VM", "alpine", "1.2.0", 1, 256);
 
     private final ObjectMapper objectMapper = new ObjectMapper()
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
@@ -88,7 +88,7 @@ class Dom0ManagerClientTest {
     }
 
     @Test
-    void launchPostsTheOpenApiBodyWithoutName() throws IOException {
+    void launchPostsTheOpenApiBodyWithSpringName() throws IOException {
         AtomicReference<String> body = new AtomicReference<>();
         AtomicReference<String> contentType = new AtomicReference<>();
         server.createContext("/api/v1/vms", exchange -> {
@@ -105,7 +105,8 @@ class Dom0ManagerClientTest {
         assertThat(contentType.get()).startsWith("application/json");
         JsonNode sent = objectMapper.readTree(body.get());
         assertThat(sent.fieldNames()).toIterable()
-                .containsExactlyInAnyOrder("vm_id", "template_id", "template_version", "vcpus", "memory_mib");
+                .containsExactlyInAnyOrder("vm_id", "name", "template_id", "template_version", "vcpus", "memory_mib");
+        assertThat(sent.path("name").asText()).isEqualTo(SPEC.name());
         assertThat(sent.path("vm_id").asText()).isEqualTo(VM_ID);
     }
 

@@ -1,0 +1,390 @@
+{
+  "scope": "generic ARM QEMU; normal instance offline provisioning + DHCP + reboot",
+  "name": "firstboot-b868826f61",
+  "address": "192.168.77.31",
+  "created_at_unix": 1792399595.7813385,
+  "agent": "NOT_TESTED",
+  "factory_seed_first_boot": "NOT_TESTED",
+  "passed": false,
+  "baseline_guest": {
+    "hostname": "debian-dev",
+    "instance_id": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+    "machine_id": "e26304137a6f8450587dcad574d0d412",
+    "boot_id": "482579bb-f010-4361-8e0c-68c319deffb6",
+    "ssh_key": "067187164e20ed14f94f3e4f25a1c72c3632ad1a6a75145735beed475d7e30e5",
+    "addresses": [
+      {
+        "ifindex": 1,
+        "ifname": "lo",
+        "flags": [
+          "LOOPBACK",
+          "UP",
+          "LOWER_UP"
+        ],
+        "mtu": 65536,
+        "qdisc": "noqueue",
+        "operstate": "UNKNOWN",
+        "group": "default",
+        "txqlen": 1000,
+        "addr_info": [
+          {
+            "family": "inet",
+            "local": "127.0.0.1",
+            "prefixlen": 8,
+            "scope": "host",
+            "label": "lo",
+            "valid_life_time": 4294967295,
+            "preferred_life_time": 4294967295
+          }
+        ]
+      },
+      {
+        "ifindex": 2,
+        "ifname": "eth0",
+        "flags": [
+          "BROADCAST",
+          "MULTICAST",
+          "UP",
+          "LOWER_UP"
+        ],
+        "mtu": 1500,
+        "qdisc": "fq_codel",
+        "operstate": "UP",
+        "group": "default",
+        "txqlen": 1000,
+        "altnames": [
+          "enX0",
+          "enx02163e770020"
+        ],
+        "addr_info": [
+          {
+            "family": "inet",
+            "local": "192.168.77.20",
+            "prefixlen": 24,
+            "metric": 1024,
+            "broadcast": "192.168.77.255",
+            "scope": "global",
+            "label": "eth0",
+            "valid_life_time": 4294967295,
+            "preferred_life_time": 4294967295
+          }
+        ]
+      }
+    ],
+    "ssh": "active",
+    "identity_complete_exists": false,
+    "deployment_seed_exists": false,
+    "marker": null
+  },
+  "record": {
+    "schema": 1,
+    "guest_kind": "linux",
+    "id": "firstboot-b868826f61",
+    "name": "firstboot-b868826f61",
+    "hostname": "firstboot-b868826f61",
+    "uuid": "def09f37-686d-4315-9432-85ffad71f8d4",
+    "mac": "02:f9:11:d6:6d:3a",
+    "ipv4": "192.168.77.31",
+    "vcpus": 1,
+    "memory_mib": 512,
+    "autostart": false,
+    "board_shutdown_policy": "graceful",
+    "template": "debian-13-20261015",
+    "kernel_release": "6.12.111+deb13-arm64",
+    "creation_spec": {
+      "ipv4": "192.168.77.31",
+      "memory_mib": 512,
+      "name": "firstboot-b868826f61",
+      "template_id": "debian-13-arm64",
+      "template_version": "1.0.0",
+      "vcpus": 1,
+      "guest_kind": "linux",
+      "autostart": false,
+      "board_shutdown_policy": "graceful"
+    },
+    "creation_operation_id": "881aaa23-006c-4bc2-a435-db0fe9b8743b",
+    "template_id": "debian-13-arm64",
+    "template_version": "1.0.0",
+    "template_manifest_sha256": "14dacfc351e8998b88cfd9d64cdd898aa769220b1bae9f7ff60f1c7a3eec155c"
+  },
+  "source_evidence": "/home/ssafy/xenova-qemu-28/logs/jira27-b868826f61-resume-f03e4e.json",
+  "control_plane_reboot_error": "RuntimeError: {\"schema_version\": \"1.0\", \"ok\": false, \"request_id\": \"db619651-95d7-4ed4-980c-8b7b6d5d0012\", \"operation_id\": null, \"replayed\": false, \"data\": null, \"error\": {\"code\": \"ARTIFACT_INVALID\", \"message\": \"xl omitted live domain configuration; writable-disk safety cannot be checked\", \"retryable\": false, \"details\": {}}}",
+  "first": {
+    "hostname": "firstboot-b868826f61",
+    "instance_id": "def09f37-686d-4315-9432-85ffad71f8d4",
+    "machine_id": "aecdf561f1d62f89f7cfb6d336f5ba54",
+    "boot_id": "850baa30-7904-4729-af49-76828d24c09f",
+    "ssh_key": "95d6ed6d49b355aa4f2bc509196eb9cee42dac8cce6ebe1fd8629c435f5e2bfc",
+    "addresses": [
+      {
+        "ifindex": 1,
+        "ifname": "lo",
+        "flags": [
+          "LOOPBACK",
+          "UP",
+          "LOWER_UP"
+        ],
+        "mtu": 65536,
+        "qdisc": "noqueue",
+        "operstate": "UNKNOWN",
+        "group": "default",
+        "txqlen": 1000,
+        "addr_info": [
+          {
+            "family": "inet",
+            "local": "127.0.0.1",
+            "prefixlen": 8,
+            "scope": "host",
+            "label": "lo",
+            "valid_life_time": 4294967295,
+            "preferred_life_time": 4294967295
+          }
+        ]
+      },
+      {
+        "ifindex": 2,
+        "ifname": "eth0",
+        "flags": [
+          "BROADCAST",
+          "MULTICAST",
+          "UP",
+          "LOWER_UP"
+        ],
+        "mtu": 1500,
+        "qdisc": "fq_codel",
+        "operstate": "UP",
+        "group": "default",
+        "txqlen": 1000,
+        "altnames": [
+          "enX0",
+          "enx02f911d66d3a"
+        ],
+        "addr_info": [
+          {
+            "family": "inet",
+            "local": "192.168.77.31",
+            "prefixlen": 24,
+            "metric": 1024,
+            "broadcast": "192.168.77.255",
+            "scope": "global",
+            "label": "eth0",
+            "valid_life_time": 4294967295,
+            "preferred_life_time": 4294967295
+          }
+        ]
+      }
+    ],
+    "ssh": "active",
+    "identity_complete_exists": false,
+    "deployment_seed_exists": false,
+    "marker": "preserve across reboot\n"
+  },
+  "after_reboot": {
+    "hostname": "firstboot-b868826f61",
+    "instance_id": "def09f37-686d-4315-9432-85ffad71f8d4",
+    "machine_id": "aecdf561f1d62f89f7cfb6d336f5ba54",
+    "boot_id": "d7d14bc1-adff-44f5-a1fb-e81fc0b08711",
+    "ssh_key": "95d6ed6d49b355aa4f2bc509196eb9cee42dac8cce6ebe1fd8629c435f5e2bfc",
+    "addresses": [
+      {
+        "ifindex": 1,
+        "ifname": "lo",
+        "flags": [
+          "LOOPBACK",
+          "UP",
+          "LOWER_UP"
+        ],
+        "mtu": 65536,
+        "qdisc": "noqueue",
+        "operstate": "UNKNOWN",
+        "group": "default",
+        "txqlen": 1000,
+        "addr_info": [
+          {
+            "family": "inet",
+            "local": "127.0.0.1",
+            "prefixlen": 8,
+            "scope": "host",
+            "label": "lo",
+            "valid_life_time": 4294967295,
+            "preferred_life_time": 4294967295
+          }
+        ]
+      },
+      {
+        "ifindex": 2,
+        "ifname": "eth0",
+        "flags": [
+          "BROADCAST",
+          "MULTICAST",
+          "UP",
+          "LOWER_UP"
+        ],
+        "mtu": 1500,
+        "qdisc": "fq_codel",
+        "operstate": "UP",
+        "group": "default",
+        "txqlen": 1000,
+        "altnames": [
+          "enX0",
+          "enx02f911d66d3a"
+        ],
+        "addr_info": [
+          {
+            "family": "inet",
+            "local": "192.168.77.31",
+            "prefixlen": 24,
+            "metric": 1024,
+            "broadcast": "192.168.77.255",
+            "scope": "global",
+            "label": "eth0",
+            "valid_life_time": 4294967295,
+            "preferred_life_time": 4294967295
+          }
+        ]
+      }
+    ],
+    "ssh": "active",
+    "identity_complete_exists": false,
+    "deployment_seed_exists": false,
+    "marker": "preserve across reboot\n"
+  },
+  "checks": {
+    "hostname": true,
+    "vm_uuid": true,
+    "dhcp": true,
+    "reboot_observed": true,
+    "persistent_user_file": true,
+    "ssh_active": true,
+    "preserve_machine_id": true,
+    "independent_machine_id": true,
+    "preserve_instance_id": true,
+    "independent_instance_id": true,
+    "preserve_ssh_key": true,
+    "independent_ssh_key": true
+  },
+  "provisioning_checks_passed": true,
+  "stop": {
+    "schema_version": "1.0",
+    "ok": true,
+    "request_id": "370639f0-84a7-4140-bed2-9f599ed1cd90",
+    "operation_id": null,
+    "replayed": false,
+    "data": {
+      "vm": {
+        "vm_id": "def09f37-686d-4315-9432-85ffad71f8d4",
+        "name": "firstboot-b868826f61",
+        "lifecycle": "REGISTERED",
+        "generation": 0,
+        "registered": true,
+        "initial_spec": {
+          "ipv4": "192.168.77.31",
+          "memory_mib": 512,
+          "name": "firstboot-b868826f61",
+          "template_id": "debian-13-arm64",
+          "template_version": "1.0.0",
+          "vcpus": 1,
+          "guest_kind": "linux",
+          "autostart": false,
+          "board_shutdown_policy": "graceful"
+        },
+        "configuration": {
+          "schema": 1,
+          "guest_kind": "linux",
+          "id": "firstboot-b868826f61",
+          "name": "firstboot-b868826f61",
+          "hostname": "firstboot-b868826f61",
+          "uuid": "def09f37-686d-4315-9432-85ffad71f8d4",
+          "mac": "02:f9:11:d6:6d:3a",
+          "ipv4": "192.168.77.31",
+          "vcpus": 1,
+          "memory_mib": 512,
+          "autostart": false,
+          "board_shutdown_policy": "graceful",
+          "template": "debian-13-20261015",
+          "kernel_release": "6.12.111+deb13-arm64",
+          "creation_spec": {
+            "ipv4": "192.168.77.31",
+            "memory_mib": 512,
+            "name": "firstboot-b868826f61",
+            "template_id": "debian-13-arm64",
+            "template_version": "1.0.0",
+            "vcpus": 1,
+            "guest_kind": "linux",
+            "autostart": false,
+            "board_shutdown_policy": "graceful"
+          },
+          "creation_operation_id": "881aaa23-006c-4bc2-a435-db0fe9b8743b",
+          "template_id": "debian-13-arm64",
+          "template_version": "1.0.0",
+          "template_manifest_sha256": "14dacfc351e8998b88cfd9d64cdd898aa769220b1bae9f7ff60f1c7a3eec155c"
+        },
+        "xen_state": "stopped",
+        "domid": null,
+        "app_readiness": "unknown"
+      }
+    },
+    "error": null
+  },
+  "retire": {
+    "schema_version": "1.0",
+    "ok": true,
+    "request_id": "2533d09b-17af-466b-b70a-eb301653ea18",
+    "operation_id": "423d7f8a-1aaf-4123-85d8-ce5150b17683",
+    "replayed": false,
+    "data": {
+      "vm_id": "def09f37-686d-4315-9432-85ffad71f8d4",
+      "name": "firstboot-b868826f61",
+      "lifecycle": "RETIRED",
+      "generation": 1,
+      "registered": false,
+      "initial_spec": {
+        "ipv4": "192.168.77.31",
+        "memory_mib": 512,
+        "name": "firstboot-b868826f61",
+        "template_id": "debian-13-arm64",
+        "template_version": "1.0.0",
+        "vcpus": 1,
+        "guest_kind": "linux",
+        "autostart": false,
+        "board_shutdown_policy": "graceful"
+      },
+      "configuration": {
+        "schema": 1,
+        "guest_kind": "linux",
+        "id": "firstboot-b868826f61",
+        "name": "firstboot-b868826f61",
+        "hostname": "firstboot-b868826f61",
+        "uuid": "def09f37-686d-4315-9432-85ffad71f8d4",
+        "mac": "02:f9:11:d6:6d:3a",
+        "ipv4": "192.168.77.31",
+        "vcpus": 1,
+        "memory_mib": 512,
+        "autostart": false,
+        "board_shutdown_policy": "graceful",
+        "template": "debian-13-20261015",
+        "kernel_release": "6.12.111+deb13-arm64",
+        "creation_spec": {
+          "ipv4": "192.168.77.31",
+          "memory_mib": 512,
+          "name": "firstboot-b868826f61",
+          "template_id": "debian-13-arm64",
+          "template_version": "1.0.0",
+          "vcpus": 1,
+          "guest_kind": "linux",
+          "autostart": false,
+          "board_shutdown_policy": "graceful"
+        },
+        "creation_operation_id": "881aaa23-006c-4bc2-a435-db0fe9b8743b",
+        "template_id": "debian-13-arm64",
+        "template_version": "1.0.0",
+        "template_manifest_sha256": "14dacfc351e8998b88cfd9d64cdd898aa769220b1bae9f7ff60f1c7a3eec155c"
+      },
+      "xen_state": null,
+      "domid": null,
+      "app_readiness": "unknown"
+    },
+    "error": null
+  },
+  "original_records_unchanged": true
+}

@@ -207,15 +207,17 @@ class SpringContractTest(unittest.TestCase):
         bridge = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(bridge)
         request = json.loads((ROOT/'tests/contracts/spring-create-request.json').read_text())
-        source = (ROOT/'backend/src/main/java/com/perseus/backend/vm/infrastructure/Dom0LaunchRequest.java').read_text()
+        source = (ROOT/'backend/src/main/java/com/xenova/backend/vm/infrastructure/Dom0LaunchRequest.java').read_text()
         fields = re.search(r'record Dom0LaunchRequest\((.*?)\)', source, re.S).group(1)
         names = re.findall(r'(?:String|int)\s+(\w+)', fields)
         names = {re.sub(r'([A-Z])', lambda m:'_'+m[1].lower(), name) for name in names}
-        self.assertEqual(names, {'vm_id','template_id','template_version','vcpus','memory_mib'})
-        self.assertEqual(set(request) - names, {'name'})
+        self.assertEqual(names, {'vm_id','name','template_id','template_version','vcpus','memory_mib'})
+        self.assertEqual(set(request), names)
         http_request = {key:request[key] for key in names}
-        self.error(self.f.m.call('create', http_request, execute=True), 'INVALID_SPEC')
-        self.assertFalse((self.f.data/'operations').exists())
+        created = self.f.m.call('create', http_request, execute=True)
+        self.assertTrue(created['ok'], created)
+        view = self.f.m.call('get', {'vm_id':http_request['vm_id']})['data']['vm']
+        self.assertEqual(view['configuration']['display_name'], request['name'])
         calls = [
             {'spec':request}, {'spec':request},
             {'spec':{**request,'memory_mib':768}},
@@ -316,7 +318,7 @@ class SpringContractTest(unittest.TestCase):
         self.assertTrue(result['ok'], result)
         rows = result['data']['vms']
         self.assertEqual({row['name'] for row in rows}, {'ubuntu-dev','debian-dev'})
-        defaults = json.loads((FILES/'defaults.json').read_text())
+        defaults = json.loads((ROOT/'tests/platform/fixtures/legacy-defaults.json').read_text())
         for row in rows:
             original = next(d for d in defaults['instances'] if d['id']==row['name'])
             self.assertEqual(row['template_id'], original['template_id'])
