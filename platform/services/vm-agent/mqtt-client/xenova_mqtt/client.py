@@ -17,7 +17,7 @@ import paho.mqtt.client as mqtt
 from . import envelope as env
 from . import policy, topics
 
-log = logging.getLogger("perseus_mqtt")
+log = logging.getLogger("xenova_mqtt")
 
 
 @dataclass(frozen=True)
@@ -56,10 +56,10 @@ def _failed(reason_code: Any) -> bool:
     return bool(getattr(reason_code, "is_failure", reason_code != 0))
 
 
-class PerseusClient:
+class XenovaClient:
     """계약 v1 MQTT 클라이언트.
 
-    >>> client = PerseusClient(Identity(vm_id="..."), host="10.0.0.1")
+    >>> client = XenovaClient(Identity(vm_id="..."), host="10.0.0.1")
     >>> client.start()
     >>> client.publish(topics.heartbeat(vm_id), "agent.heartbeat", {})
     """
