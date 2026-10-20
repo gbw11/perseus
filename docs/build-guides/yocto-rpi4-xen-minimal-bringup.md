@@ -112,7 +112,7 @@ mtype -i "${SD_IMG}@@${BOOT_OFFSET}" ::cmdline.txt
 `rpi-sdimg`의 부트 파일 설정은 WIC에 자동 적용되지 않는다. 프로젝트 이미지 레시피는 WIC의 `IMAGE_BOOT_FILES`에도 `xen-${MACHINE};xen`을 지정하고 `xen:do_deploy`를 선행 조건으로 둔다. WIC를 배포하려면 해당 파일 자체를 검사한다.
 
 ```bash
-python3 -B scripts/check-perseus-wic.py \
+python3 -B platform/scripts/check-perseus-wic.py \
   --deploy-dir "$IMG_DIR" \
   --output "$HOME/perseus-wic-inspection-$(date +%Y%m%d-%H%M%S)"
 ```

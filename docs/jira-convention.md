@@ -89,7 +89,7 @@ dom0에 Linux Bridge와 DHCP를 구성해 VM마다 고유한 MAC/IP를 부여한
 | 접두어 | 대상 | 브랜치 part |
 | --- | --- | --- |
 | `[PLATFORM]` | Yocto·Xen·부트·템플릿·네트워크 | `platform` |
-| `[CTRL]` | Python 제어 계층 (`services/dom0-manager`) | `ctrl` |
+| `[CTRL]` | Python 제어 계층 (`platform/services/dom0-manager`) | `ctrl` |
 | `[AGENT]` | VM 에이전트 | `agent` |
 | `[DISPLAY]` | dom0 표시 서비스·키오스크 | `display` |
 | `[BE]` | Spring Boot 관리 서버 | `backend` |
