@@ -35,7 +35,7 @@ prepare = load('prepare_guests_test', ROOT / 'scripts/prepare-xenova-guests.py')
 
 
 def record(key='ubuntu-dev'):
-    rows = json.loads((FILES / 'defaults.json').read_text())['instances']
+    rows = json.loads((ROOT / 'tests/platform/fixtures/legacy-defaults.json').read_text())['instances']
     r = next(copy.deepcopy(row) for row in rows if row['id'] == key)
     r.update(schema=1, uuid='aaaa0000-1111-4222-8333-123456789abc', kernel_release='6.8.0-test')
     if key == 'debian-dev':
@@ -63,9 +63,21 @@ class FakeXen:
         self.base, self.records, self.rows, self.calls = base, records, [], []
         self.hang_shutdown = False
         self.fail_create = False
+        self.incarnations = {}
+        self.next_incarnation = 1
 
     def __call__(self, args, **kwargs):
         self.calls.append(args)
+        if args[:2] == ['xenova-domain-identity', '--domid']:
+            domid = int(args[2])
+            rows = [row for row in self.rows if row['domid'] == domid]
+            if len(rows) != 1:
+                raise vm.PlatformError('domain incarnation is unavailable')
+            previous = self.incarnations.get(domid)
+            if previous is None or previous[0] is not rows[0]:
+                self.incarnations[domid] = (rows[0], self.next_incarnation)
+                self.next_incarnation += 1
+            return json.dumps({'domid':domid, 'xen_unique_id':str(self.incarnations[domid][1]), 'state_bits':1})
         if args == ['xl', 'list', '-l']:
             return json.dumps(self.rows)
         if args == ['xl', 'list', '-v']:
@@ -383,12 +395,12 @@ class GuestPreparationTest(unittest.TestCase):
         self.assertIn('ln -snf /dev/null', image)
         self.assertIn('xendomains.service', image)
 
-    def test_default_registry_excludes_busybox_and_enables_two_distros(self):
+    def test_default_linux_registry_is_debian_and_keeps_unique_network_identity(self):
         defaults = json.loads((FILES / 'defaults.json').read_text())['instances']
-        self.assertEqual({r['id'] for r in defaults}, {'ubuntu-dev', 'debian-dev'})
+        self.assertEqual({r['id'] for r in defaults}, {'debian-dev'})
         self.assertTrue(all(r['autostart'] for r in defaults))
-        self.assertEqual(len({r['mac'] for r in defaults}), 2)
-        self.assertEqual(len({r['ipv4'] for r in defaults}), 2)
+        self.assertEqual(len({r['mac'] for r in defaults}), 1)
+        self.assertEqual(len({r['ipv4'] for r in defaults}), 1)
 
 
 if __name__ == '__main__':

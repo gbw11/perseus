@@ -1,18 +1,24 @@
 openapi: 3.1.0
 info:
-  title: Perseus dom0 manager API
+  title: Xenova dom0 manager API
   version: 1.0.0
   description: >-
     Spring Boot 관리 서버와 Python dom0-manager 사이의 내부 계약.
-    기준 문서는 docs/contracts/vm-api-contract-v1.md 이며, 이 파일은 그 문서의 기계 판독용 원본이다.
-    서비스는 127.0.0.1:8081 에만 바인딩하고 dom0 밖으로 노출하지 않는다.
-    dom0-manager 는 무상태다. 모든 조회는 xl 질의 결과에서 파생하며, Xen 에 없는 도메인은
-    목록에서 빠지고 단건 조회는 404 다. "꺼짐"은 state 값이 아니라 도메인의 부재로 표현한다.
+    기준 문서는 docs/contracts/vm-api-contract-v1.md 이며, 이 파일은 HTTP 계약의 기계 판독용 원본이다.
+    플랫폼 공통 Manager/CLI의 JSON envelope와 동일한 스키마가 아니다.
+    생성·시작·등록 목록·예약 IP·수명주기 전달의 계층 경계는 기준 문서 1.4절과 13장을 따른다.
+    서비스는 보드의 Tailscale 주소에 바인딩하고 모든 엔드포인트에서 Bearer 서비스 토큰을 검사한다.
+    Spring 이 발급한 vm_id 를 플랫폼 registry 와 Xen UUID의 영구 식별자로 사용한다.
     FastAPI 기본 422(HTTPValidationError)는 400 InvalidArgument 로 정규화하고, 생성 스키마에서
     422 응답과 HTTPValidationError 모델을 제거해야 이 파일과의 차이 검사가 통과한다.
 servers:
-  - url: http://127.0.0.1:8081
-    description: dom0 localhost
+  - url: http://{tailscale_address}:8081
+    description: dom0 Tailscale address
+    variables:
+      tailscale_address:
+        default: 100.64.0.1
+security:
+  - ServiceToken: []
 tags:
   - name: VMs
   - name: Health
@@ -27,6 +33,8 @@ paths:
         Spring 이 자기 레코드와 조합해 만든다.
       x-driver-timeout-seconds: 5
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: VM 배열
           content:
@@ -35,6 +43,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Vm'
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
     post:
       tags: [VMs]
       operationId: createVm
@@ -43,9 +57,10 @@ paths:
         vm_id 의 디스크가 있으면 재사용하고 없으면 template_id/template_version 으로 새로 만든다.
         디스크 경로는 vm_id 에서 파생한다. 꺼진 VM 의 재시작은 같은 vm_id 로 이 엔드포인트를
         다시 호출하는 것이며 별도 start 엔드포인트는 없다.
-        Spring 불변조건: 같은 vm_id 에는 항상 같은 template_id/template_version 을 보낸다.
-        무상태 dom0-manager 는 위반을 탐지할 수 없다.
-        "동일 요청 재시도 200"은 Spring 계층의 동작이며 이 계약에 없다. 충돌은 409 VMExists 뿐이다.
+        Spring 불변조건: 같은 vm_id 에는 항상 같은 생성 명세를 보낸다.
+        실행 도메인이 있으면 명세 비교 없이 409 VMExists 를 반환하며 Spring 이 자기 명세와 대조한다.
+        플랫폼 공통 create 는 정지 등록이므로 실제 도메인 시작은 별도 start 연결이 필요하다.
+        Linux IP 는 플랫폼 전역 잠금 안에서 자동 할당한다.
       x-driver-timeout-seconds: 30
       requestBody:
         required: true
@@ -54,6 +69,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateVmRequest'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '201':
           description: 도메인 생성됨 (state 는 running)
           content:
@@ -66,6 +83,14 @@ paths:
           $ref: '#/components/responses/VMExists'
         '507':
           $ref: '#/components/responses/InsufficientResources'
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '501':
+          $ref: '#/components/responses/NotSupported'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
   /api/v1/vms/{vm_id}:
     parameters:
       - $ref: '#/components/parameters/VmId'
@@ -75,6 +100,8 @@ paths:
       summary: VM 단건 조회
       x-driver-timeout-seconds: 5
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: VM
           content:
@@ -83,17 +110,37 @@ paths:
                 $ref: '#/components/schemas/Vm'
         '404':
           $ref: '#/components/responses/VMNotFound'
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
     delete:
       tags: [VMs]
       operationId: deleteVm
-      summary: 강제 종료 후 디스크 삭제
+      summary: 정지된 VM 숨김 보관
       description: >-
-        xl destroy 로 강제 종료하고 디스크를 삭제한다. 멱등이며 없는 VM 에 대한 호출도 204 다.
-        삭제 후에는 재시작할 수 없다.
-      x-driver-timeout-seconds: 30
+        실행 중인 VM 은 409 로 거부한다. 정지된 VM 은 retire 생명주기로 숨김 보관하며
+        tombstone 과 generation 을 유지한다. 같은 디스크를 restore 하면 기존 vm_id 를 유지한다.
+      x-driver-timeout-seconds: 90
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '204':
-          description: 도메인과 디스크가 모두 없는 상태
+          description: VM 이 숨김 보관됨
+        '404':
+          $ref: '#/components/responses/VMNotFound'
+        '409':
+          $ref: '#/components/responses/InvalidState'
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '501':
+          $ref: '#/components/responses/NotSupported'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
   /api/v1/vms/{vm_id}/stop:
     parameters:
       - $ref: '#/components/parameters/VmId'
@@ -105,22 +152,35 @@ paths:
         xl shutdown 으로 graceful shutdown 을 요청하고 도메인이 소멸할 때까지 기다린다.
         디스크는 보존되므로 같은 vm_id 로 POST /api/v1/vms 를 호출하면 재시작된다.
         멱등성은 목표 상태 기준이다. 없는 VM 에 대한 호출도 204 다.
-        25초 안에 소멸하지 않으면 xl destroy 로 전환하며 전체 응답은 30초를 넘지 않는다.
-        이 경우 디스크는 unclean 상태일 수 있다. paused 는 unpause 후 종료하고 crashed 는 destroy 로 처리한다.
-      x-driver-timeout-seconds: 30
+        호출은 동기 방식이며 최대 90초까지 소멸을 기다린다. 일반 stop 은 시간 초과 시
+        자동으로 강제 종료하지 않는다. 강제 종료는 명시적인 force 정책에서만 수행한다.
+      x-driver-timeout-seconds: 90
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '204':
           description: 도메인이 없는 상태 (디스크 보존)
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '501':
+          $ref: '#/components/responses/NotSupported'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
   /healthz:
     get:
       tags: [Health]
       operationId: healthz
       summary: dom0-manager 와 Xen 응답 여부
       description: >-
-        dom0-manager 프로세스는 살아 있지만 Xen(xl) 이 응답하지 않는 상황을 구분한다.
-        2차 RecoveryService 가 사용한다.
+        dom0-manager 프로세스는 살아 있지만 Xen(xl) 이 응답하지 않거나 registry 저장소가 없는 상황을 구분한다.
+        플랫폼 Manager 를 거치지 않으므로(잠금·xl list 실행 시간) 조회 한도 안에 응답한다.
+        Spring 이 dom0-manager 접속 상태를 판단할 때 쓴다 (자동 복구 주체는 계약 13장 미확정).
       x-driver-timeout-seconds: 5
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: dom0-manager 와 Xen 모두 응답
           content:
@@ -134,6 +194,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/Health'
 components:
+  securitySchemes:
+    ServiceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque service token
   parameters:
     VmId:
       name: vm_id
@@ -141,7 +206,7 @@ components:
       required: true
       description: >-
         Spring 이 생성하는 불변 UUID. Xen 도메인에서 역조회할 수 있어야 한다
-        (저장 방식은 계약 문서 13장 미확정 항목).
+        (도메인 설정의 uuid 에 기록하고 xl list -l 의 config.c_info.uuid 로 역조회. 계약 13장).
       schema:
         type: string
         format: uuid
@@ -174,19 +239,24 @@ components:
     CreateVmRequest:
       type: object
       description: >-
-        name 은 Spring 이 단독으로 검증·보유하므로 보내지 않는다. 템플릿별 min_memory_mib 하한은
+        name은 Spring의 표시 이름을 플랫폼 create에 그대로 전달한다. 템플릿별 min_memory_mib 하한은
         Spring 이 검사하고, dom0-manager 는 공통 범위만 검사한다.
       additionalProperties: false
-      required: [vm_id, template_id, template_version, vcpus, memory_mib]
+      required: [vm_id, name, template_id, template_version, vcpus, memory_mib]
       properties:
         vm_id:
           type: string
           format: uuid
           description: Spring 이 한 번 생성해 재시도에도 재사용한다
+        name:
+          type: string
+          minLength: 1
+          maxLength: 63
+          description: Spring 표시 이름. 한글·공백 허용, 제어·줄 구분 문자와 앞뒤 공백 금지
         template_id:
           type: string
           minLength: 1
-          description: 예 debian, ubuntu, alpine
+          description: ubuntu-24.04-arm64 / debian-13-arm64 / zephyr-xenvm-starter-arm64
         template_version:
           type: string
           minLength: 1
@@ -196,9 +266,11 @@ components:
           maximum: 4
         memory_mib:
           type: integer
-          minimum: 128
+          minimum: 16
           maximum: 1024
-          description: 배수 제약 없음. 64 단위는 화면 입력 규칙일 뿐이다
+          description: >-
+            공통 하한 16 (Zephyr 는 16 고정 프로필). 템플릿별 하한·상한은 플랫폼 템플릿 resource_limits 와
+            Spring 템플릿 설정이 검사한다. 배수 제약 없음. 64 단위는 화면 입력 규칙일 뿐이다
     ResourceError:
       type: object
       additionalProperties: false
@@ -206,7 +278,8 @@ components:
       properties:
         name:
           type: string
-          enum: [vcpus, memory_mib]
+          enum: [vcpus, memory_mib, ipv4]
+          description: ipv4 는 플랫폼의 Linux 내부 IP 풀 고갈 (플랫폼 IP_POOL_EXHAUSTED). dom0-manager 는 IP 를 고르지 않는다
         requested:
           type: integer
         available:
@@ -219,13 +292,21 @@ components:
         code:
           type: string
           description: >-
-            InvalidState 는 예비 값이다. pause/unpause 엔드포인트가 생기기 전까지 현재 구현은 반환하지 않는다.
+            InvalidState 는 현재 생명주기에서 수행할 수 없는 요청이다 (실행 중 VM 의 DELETE, 플랫폼 VM_NOT_STOPPED 등).
+            드라이버·플랫폼 실패는 HTTP 상태와 1:1 이다: DriverError 500 / DriverTimeout 504 / PlatformUnavailable 503 /
+            NotSupported 501. Spring 은 이 code 를 같은 상태로 전달해야 한다 (vm-api-contract-v1.md 8.2 변환표).
+            Unauthorized 401 은 Bearer 서비스 토큰 없음·불일치이며 /healthz 를 포함한 모든 엔드포인트에서 난다.
           enum:
             - InvalidArgument
             - VMNotFound
             - VMExists
             - InsufficientResources
             - InvalidState
+            - DriverError
+            - DriverTimeout
+            - PlatformUnavailable
+            - NotSupported
+            - Unauthorized
         message:
           type: string
         detail:
@@ -263,8 +344,46 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    InvalidState:
+      description: 현재 VM 생명주기에서 요청을 수행할 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     InsufficientResources:
       description: xl info 의 free_memory 기준 가용 자원 부족. resource 에 name/requested/available
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DriverError:
+      description: 분류되지 않은 드라이버·플랫폼 실행 오류 (code DriverError). 모든 엔드포인트
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotSupported:
+      description: 드라이버·플랫폼이 제공하지 않는 동작 (code NotSupported). xen 모드의 생성·정지·삭제 명령
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PlatformUnavailable:
+      description: >-
+        registry·저장소·Xen 일시 장애, 또는 다른 플랫폼 작업이 잠금을 쥐고 있어 대기 시간(기본 5초) 안에 차례가
+        오지 않음 (code PlatformUnavailable, 플랫폼 OPERATION_IN_PROGRESS). 재시도 가능
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DriverTimeout:
+      description: xl·플랫폼 호출 시한 초과 (code DriverTimeout). 정지 90초 대기 초과 포함
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Bearer 서비스 토큰 없음·불일치 (code Unauthorized). XENOVA_SERVICE_TOKEN 이 설정된 배포에서 /healthz 포함 모든 엔드포인트
       content:
         application/json:
           schema:

@@ -1,9 +1,10 @@
 """공통 관리 결과를 단일 JSON 또는 사람용 JSON으로 출력하는 CLI 어댑터."""
 import argparse
 import json
+from pathlib import Path
 import sys
 from first_install_contract import uuid4
-from xenova_management import Manager, ManagementError, exit_code
+from xenova_management import Manager, ManagementError, exit_code, normalize_uuid
 import xenova_vm as vm
 
 
@@ -27,32 +28,56 @@ def main(argv=None, manager=None):
     parser.add_argument('--template-version')
     parser.add_argument('--vcpus',type=int)
     parser.add_argument('--memory-mib',type=int)
-    parser.add_argument('--ipv4')
+    ip = parser.add_mutually_exclusive_group()
+    ip.add_argument('--ipv4')
+    ip.add_argument('--auto-ip', action='store_true', help='Linux IP is selected and durably reserved by Xenova')
     parser.add_argument('--idempotency-key')
     parser.add_argument('--operation-id')
     parser.add_argument('--confirm-vm-id')
     parser.add_argument('--lifecycle',default='REGISTERED')
     parser.add_argument('--execute',action='store_true')
     parser.add_argument('--force',action='store_true')
+    parser.add_argument('--spec-file', type=Path)
+    parser.add_argument('--recovery-attempt-id')
+    parser.add_argument('--barrier-id')
+    parser.add_argument('--max-age-ms', type=int)
+    parser.add_argument('--timeout-ms', type=int, default=15000)
     try:
         args=parser.parse_args(args_list)
-        action=args.action
+        action='recover_once' if args.action == 'recover-once' else args.action
         spec={}
-        if action=='create':
-            spec={'name':args.name or args.id,'template_id':args.template_id,
+        if action == 'recover_once':
+            if args.spec_file is None:
+                raise ManagementError('INVALID_SPEC', 'recover-once requires --spec-file')
+            spec = json.loads(args.spec_file.read_text())
+        elif action == 'host-resume':
+            spec = {'barrier_id':args.barrier_id}
+        elif action == 'control-operation':
+            spec = {'operation_id':args.operation_id}
+        elif action == 'recovery-operation':
+            spec = {'recovery_attempt_id':args.recovery_attempt_id}
+        elif action=='create':
+            spec={'vm_id':args.vm_id, 'name':args.name or args.id,'template_id':args.template_id,
                   'template_version':args.template_version,'vcpus':args.vcpus,'memory_mib':args.memory_mib}
             if args.ipv4 is not None:
                 spec['ipv4']=args.ipv4
-        elif action in ('get','retire','restore','purge','delete','start','stop','reboot','autostart-set','board-shutdown-set','config'):
+        elif action in ('get','retire','restore','purge','delete','start','stop','reboot','autostart-set','board-shutdown-set','config','destroy','snapshot','probe','execution-context'):
             identity=args.vm_id or args.id
-            if identity and not vm.UUID.fullmatch(identity):
-                # 이름 기반 기존 명령도 조회 뒤 동일 UUID 계약을 호출한다.
-                records=service.p.records(validate_assets=False)
-                if identity not in records:
-                    raise ManagementError('VM_NOT_FOUND','registered name not found; archived targets require UUID')
-                identity=records[identity]['uuid']
+            if identity:
+                try:
+                    identity = normalize_uuid(identity)
+                except ManagementError:
+                    # 사람이 쓰는 기존 안전한 내부 이름은 계속 조회할 수 있다.
+                    records=service.p.records(validate_assets=False)
+                    if identity not in records:
+                        raise ManagementError('VM_NOT_FOUND','registered internal name not found; use UUID for archived VMs')
+                    identity=records[identity]['uuid']
             spec={'vm_id':identity}
-            if action in ('stop','reboot'):
+            if action == 'snapshot':
+                spec['max_age_ms']=args.max_age_ms
+            if action == 'probe':
+                spec['timeout_ms']=args.timeout_ms
+            if action in ('stop','reboot','destroy'):
                 spec['force']=args.force
             if action in ('autostart-set','board-shutdown-set'):
                 spec['value']=args.value

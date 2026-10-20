@@ -10,7 +10,7 @@ LEGACY_FEATURES = {'schema': SCHEMA, 'layout': 'dos-boot1-root2-data3-v1',
             'growth': 'actual-device-last-ext4-v1', 'identity': 'systemd-machine-id-guest-seed-v1'}
 
 FEATURES = {**LEGACY_FEATURES, 'vm_management': 'linux-zephyr-persistent-v2', 'qemu': 'xenpv-vnc-none-v1',
-            'vm_contract': 'uuid-operations-v1', 'management_wifi': 'wpa2-networkd-v1'}
+            'vm_contract': 'spring-uuid-auto-ip-v1', 'management_wifi': 'wpa2-networkd-v1'}
 
 
 def align(value, unit=4 * MIB):
@@ -66,25 +66,28 @@ def growth(current, device_bytes):
             'filesystem_max_bytes': size * SECTOR}
 
 
-def capacity(platform_bytes, guests, *, template_policy='full', card_bytes=None, reserve_bytes=2 * GIB, retained_firmware_bytes=0):
+def capacity(platform_bytes, guests, *, template_policy='full', card_bytes=None, reserve_bytes=2 * GIB, retained_firmware_bytes=0, retained_templates=None):
     """희소 파일 점유량 대신 VM의 최대 논리 용량을 모두 예약한다. MiB/GiB는 2진 단위다."""
     if template_policy != 'full' or not guests:
         raise ValueError('invalid template policy or missing guests')
-    for g in guests:
+    templates = guests if retained_templates is None else retained_templates
+    if not templates:
+        raise ValueError('retained Linux templates required')
+    for g in [*guests, *templates]:
         if not 4 * GIB <= g['logical_bytes'] <= 32 * GIB or not 0 <= g['allocated_bytes'] <= g['logical_bytes']:
             raise ValueError('invalid guest disk accounting')
     if type(retained_firmware_bytes) is not int or not 0 <= retained_firmware_bytes <= GIB:
         raise ValueError('invalid retained RTOS firmware accounting')
     vm_bytes = sum(g['logical_bytes'] for g in guests)
-    template_bytes = vm_bytes if template_policy == 'full' else 0
-    boot_catalog = sum(g['boot_bytes'] for g in guests) * 2
+    template_bytes = sum(g['logical_bytes'] for g in templates)
+    boot_catalog = sum(g['boot_bytes'] for g in guests) + sum(g['boot_bytes'] for g in templates)
     payload = vm_bytes + template_bytes + boot_catalog + retained_firmware_bytes
     metadata = align((payload + 19) // 20 + 256 * MIB)  # 실측치가 아닌 보수적 5% + 고정 메타데이터 여유.
     data_bytes = align(payload + metadata + reserve_bytes)
     start = align(platform_bytes)
     image_bytes = start + data_bytes
     # source.raw·데이터 영역·게스트 준비 사본·최종 출력이 동시에 존재하는 상한.
-    scratch_bytes = sum(g.get('preparation_scratch_bytes', 0) for g in guests)
+    scratch_bytes = sum(g.get('preparation_scratch_bytes', 0) for g in templates)
     result = {'template_policy': template_policy, 'platform_bytes': platform_bytes,
               'data_start_bytes': start, 'data_bytes': data_bytes, 'image_bytes': image_bytes,
               'minimum_card_bytes': image_bytes, 'vm_max_bytes': vm_bytes, 'retained_template_root_bytes': template_bytes,

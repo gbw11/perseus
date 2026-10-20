@@ -1,0 +1,4 @@
+name: xenova_xenstore
+build:
+  cmake: .
+  kconfig: Kconfig
