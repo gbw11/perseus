@@ -62,3 +62,5 @@ Starter의 앱 출처·버전·소스 해시는 `starter.lock.json`과 새 `firm
 
 생성 결과의 vm_id는 영구 UUID다. 기본 Starter는 정규화 카탈로그 게시 후 생성한다.
 기존 synchronization 번들의 출처는 보존하며 Starter ID로 바꾸어 게시하지 않는다.
+
+Starter 앱 디렉터리의 README도 starter.lock.json의 고정 소스에 포함된다. 기존 게시본의 출처를 유지하기 위해 앱 소스와 README는 그대로 보존한다. 현재 저장소 구조에서의 빌드·게시 명령은 [템플릿 워크플로](../../../docs/build-guides/xenova-template-workflow.md)의 platform/scripts/ 경로를 따른다.

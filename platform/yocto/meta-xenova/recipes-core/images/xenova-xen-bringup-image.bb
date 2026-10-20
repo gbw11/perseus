@@ -4,7 +4,7 @@ require recipes-extended/images/xen-image-minimal.bb
 SUMMARY = "Xenova Raspberry Pi 4 Xen minimal bring-up image"
 DESCRIPTION = "xen-image-minimal plus diagnostic tools, isolated bridge/DHCP and a small preloaded Arm64 domU"
 
-IMAGE_INSTALL:append = " xenova-platform xenova-bringup iproute2 bridge-utils dnsmasq kmod iputils-ping"
+IMAGE_INSTALL:append = " xenova-platform xenova-bringup xenova-dom0-manager xenova-mqtt-client iproute2 bridge-utils dnsmasq kmod iputils-ping"
 
 # BSP의 DEPLOYPAYLOAD는 rpi-sdimg 전용이다. WIC에도 boot.scr이 읽는 xen을 넣는다.
 IMAGE_BOOT_FILES:append = " xen-${MACHINE};xen"
