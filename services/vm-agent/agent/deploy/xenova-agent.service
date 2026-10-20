@@ -2,6 +2,8 @@
 Description=Xenova VM agent (MQTT heartbeat)
 # instance-id 는 플랫폼 게스트 준비가 기록한다. 없으면 어떤 VM 인지 알 수 없으므로 시작하지 않는다
 ConditionPathExists=/etc/xenova/instance-id
+# 신원 확립(xenova-guest-identity)이 실패한 VM 은 heartbeat 도 보내지 않는다. ssh.service 와 같은 결합
+Requires=xenova-guest-identity.service
 After=network-online.target xenova-guest-identity.service
 Wants=network-online.target
 

@@ -20,10 +20,10 @@ Linux 게스트 안에서 돌며 [MQTT 계약 v1](../../../docs/contracts/mqtt-c
 | `XENOVA_AGENT_VM_ID` | `/etc/xenova/instance-id` 내용 | 이 VM의 UUID. 플랫폼이 게스트 준비 때 파일로 기록한다 |
 | `XENOVA_AGENT_BROKER_HOST` / `PORT` | `192.168.77.1` / `1883` | dom0 xenbr0 의 Mosquitto |
 | `XENOVA_AGENT_BROKER_USERNAME` / `PASSWORD` | (없음) | 브로커 계정이 생기면 설정 (`deploy/`의 ACL) |
-| `XENOVA_AGENT_HEARTBEAT_INTERVAL` | `5` | 초. 계약값이므로 시험 외에는 바꾸지 않는다 |
-| `XENOVA_AGENT_LOG_LEVEL` | `INFO` | |
+| `XENOVA_AGENT_HEARTBEAT_INTERVAL` | `5` | 초. 계약값은 5이고 환경변수로는 1~10만 받는다 (받는 쪽이 15초에 STALE, 30초에 OFFLINE 판정) |
+| `XENOVA_AGENT_LOG_LEVEL` | `INFO` | DEBUG/INFO/WARNING/ERROR/CRITICAL |
 
-vm_id 가 UUID 가 아니거나, 주기가 유한한 양수가 아니거나, 포트가 범위 밖이면 시작하지 않고 종료 코드 2 로 끝납니다.
+vm_id 는 소문자·하이픈 표준형으로 정규화해 토픽과 봉투에 씁니다(Spring·registry 문자열과 글자까지 같아야 함). UUID 가 아니거나 nil UUID(Domain-0)이거나, 주기·포트·로그 레벨이 범위 밖이면 시작하지 않고 종료 코드 2 로 끝납니다.
 
 ## 실행
 
@@ -32,12 +32,21 @@ vm_id 가 UUID 가 아니거나, 주기가 유한한 양수가 아니거나, 포
 cd services/vm-agent/agent
 PYTHONPATH=.:../mqtt-client XENOVA_AGENT_VM_ID=11111111-1111-4111-8111-111111111111 XENOVA_AGENT_BROKER_HOST=127.0.0.1 python -m xenova_agent
 
-# 게스트 (systemd)
-# deploy/xenova-agent.service 를 /usr/lib/systemd/system/ 에 두고, perseus_mqtt 와 xenova_agent 를 PYTHONPATH 경로에 설치한다.
-# 설치 경로와 템플릿 반영은 플랫폼 파트와 정한다.
+# 게스트 rootfs 에 설치 (템플릿 준비 단계에서 플랫폼 파트가 부른다)
+python3 services/vm-agent/agent/deploy/install_into_rootfs.py <rootfs>
 ```
 
 SIGTERM·SIGINT 를 받으면 현재 대기를 끊고 클라이언트를 닫은 뒤 종료합니다.
+
+## 게스트 배포
+
+`deploy/install_into_rootfs.py <rootfs>`가 두 패키지를 `/opt/xenova/mqtt-client`·`/opt/xenova/agent`에 복사하고 `xenova-agent.service`를 설치해 enable 합니다. 템플릿 준비(플랫폼 파트, `prepare_rootfs.py`)에서 해야 할 일은 세 가지입니다.
+
+1. `apt install python3-paho-mqtt` (Ubuntu 24.04 1.6.1, Debian 13 2.1.0). 스크립트는 rootfs 에 paho 가 없으면 경고하고 종료 코드 1 을 냅니다
+2. 위 스크립트 호출
+3. 브로커 계정이 생기면 `/etc/xenova/agent.env`에 `XENOVA_AGENT_BROKER_USERNAME/PASSWORD` 기록 (없으면 생략)
+
+유닛은 `Requires=xenova-guest-identity.service`라 신원 확립에 실패한 VM 은 heartbeat 를 보내지 않고, `/etc/xenova/instance-id`가 없으면 시작하지 않습니다. Zephyr 템플릿에는 설치하지 않습니다.
 
 ## 테스트
 

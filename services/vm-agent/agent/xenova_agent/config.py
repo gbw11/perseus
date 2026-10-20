@@ -13,8 +13,23 @@ from pathlib import Path
 INSTANCE_ID_PATH = Path("/etc/xenova/instance-id")
 # dom0 의 xenbr0 주소. 브로커는 dom0 Mosquitto 다 (MQTT 계약 v1 1장)
 DEFAULT_BROKER_HOST = "192.168.77.1"
-# MQTT 계약 v1 3장: heartbeat 주기 5초
+# MQTT 계약 v1 3장: heartbeat 주기 5초. 받는 쪽은 15초 STALE, 30초 OFFLINE 으로 판정하므로 환경변수로는 1..10초만 허용한다
 DEFAULT_HEARTBEAT_INTERVAL_S = 5.0
+ENV_HEARTBEAT_INTERVAL_RANGE_S = (1.0, 10.0)
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+NIL_UUID = str(uuid.UUID(int=0))
+
+
+def canonical_vm_id(value: str) -> str:
+    """소문자·하이픈 표준형으로 정규화한다. 토픽과 봉투의 vm_id 가 Spring·registry 의 UUID 문자열과 글자까지 같아야 한다."""
+    try:
+        parsed = uuid.UUID(str(value).strip())
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError(f"vm_id must be a UUID, got {value!r}") from exc
+    canonical = str(parsed)
+    if canonical == NIL_UUID:
+        raise ValueError("vm_id must not be the nil UUID (reserved for Domain-0)")
+    return canonical
 
 
 @dataclass(frozen=True)
@@ -28,16 +43,15 @@ class AgentSettings:
     log_level: str = "INFO"
 
     def __post_init__(self) -> None:
-        try:
-            uuid.UUID(self.vm_id)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"vm_id must be a UUID, got {self.vm_id!r}") from exc
+        object.__setattr__(self, "vm_id", canonical_vm_id(self.vm_id))
         if not (math.isfinite(self.heartbeat_interval_s) and self.heartbeat_interval_s > 0):
             raise ValueError(f"heartbeat_interval_s must be a finite positive number, got {self.heartbeat_interval_s!r}")
         if not 1 <= self.broker_port <= 65535:
             raise ValueError(f"broker_port must be 1..65535, got {self.broker_port!r}")
         if not self.broker_host:
             raise ValueError("broker_host must not be empty")
+        if self.log_level not in LOG_LEVELS:
+            raise ValueError(f"log_level must be one of {LOG_LEVELS}, got {self.log_level!r}")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None, *, instance_id_path: Path = INSTANCE_ID_PATH) -> "AgentSettings":
@@ -56,12 +70,17 @@ class AgentSettings:
                 vm_id = instance_id_path.read_text(encoding="ascii").strip()
             except OSError as exc:
                 raise ValueError(f"vm_id is not set: XENOVA_AGENT_VM_ID is empty and {instance_id_path} is unreadable ({exc})") from exc
+        interval = read("XENOVA_AGENT_HEARTBEAT_INTERVAL", cls.heartbeat_interval_s, float)
+        low, high = ENV_HEARTBEAT_INTERVAL_RANGE_S
+        if not (math.isfinite(interval) and low <= interval <= high):
+            # 계약값은 5초. 너무 짧으면 브로커 부하, 15초를 넘으면 정상 에이전트가 STALE 로 보인다. 시험용 짧은 값은 생성자로 직접 준다
+            raise ValueError(f"XENOVA_AGENT_HEARTBEAT_INTERVAL must be {low:g}..{high:g} seconds (contract: 5), got {interval!r}")
         return cls(
             vm_id=vm_id,
             broker_host=read("XENOVA_AGENT_BROKER_HOST", cls.broker_host, str),
             broker_port=read("XENOVA_AGENT_BROKER_PORT", cls.broker_port, int),
             username=read("XENOVA_AGENT_BROKER_USERNAME", None, str),
             password=read("XENOVA_AGENT_BROKER_PASSWORD", None, str),
-            heartbeat_interval_s=read("XENOVA_AGENT_HEARTBEAT_INTERVAL", cls.heartbeat_interval_s, float),
+            heartbeat_interval_s=interval,
             log_level=read("XENOVA_AGENT_LOG_LEVEL", cls.log_level, str).upper(),
         )
