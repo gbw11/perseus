@@ -1,6 +1,5 @@
 """보드별 WPA2-Personal 설정과 비밀을 제외한 상태 조회. VM 내부망/NAT는 변경하지 않는다."""
 import argparse
-import getpass
 import hashlib
 import ipaddress
 import json
@@ -34,7 +33,7 @@ def settings(ssid, password, country):
     else:
         raise PlatformError('WPA2 PSK must be 8..63 printable ASCII characters or 64 hex digits')
     return ('ctrl_interface=/run/wpa_supplicant\nupdate_config=0\ncountry='+country+
-            '\nnetwork={\n    ssid='+ssid.encode('utf-8').hex()+
+            '\ndisable_scan_offload=1\nnetwork={\n    ssid='+ssid.encode('utf-8').hex()+
             '\n    psk='+psk+'\n    key_mgmt=WPA-PSK\n    proto=RSN\n}\n')
 
 
@@ -158,8 +157,8 @@ def main(argv=None):
     if args.action=='configure':
         if not sys.stdin.isatty():
             raise PlatformError('configure requires an interactive terminal; no password arguments accepted')
-        ssid=getpass.getpass('Wi-Fi SSID (hidden): ')
-        password=getpass.getpass('Wi-Fi PSK (hidden): ')
+        ssid=input('Wi-Fi SSID: ')
+        password=input('Wi-Fi PSK: ')
         result=wifi.configure(args.interface,ssid,password,args.country)
     elif args.action=='activate':
         try:
