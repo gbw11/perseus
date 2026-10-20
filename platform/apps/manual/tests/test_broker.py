@@ -119,6 +119,18 @@ def test_e4_e5_e6_drive_then_stop_after_release(stack):
     assert stopped - released <= 0.22 + 0.05, stopped - released
 
 
+def test_heartbeat_1hz_state_follows_control(stack):
+    settings, gateway, _, recorder = stack
+    beats = recorder.window(2.2, "app.heartbeat")
+    assert 2 <= len(beats) <= 3, len(beats)
+    assert all(e["app_id"] == "manual" and e["vm_id"] == settings.vm_id for _, e in beats)
+    assert all(e["payload"]["state"] == "idle" for _, e in beats)
+    gateway.publish(topics.vehicle_control(), "vehicle.control",
+                    {"generation": 2, "mode": "MANUAL", "active_app": "manual", "active_vm_id": None, "reason": "test"})
+    beats = recorder.window(1.2, "app.heartbeat")
+    assert beats and beats[-1][1]["payload"]["state"] == "active"
+
+
 @pytest.mark.skipif(not CONTAINER, reason="XENOVA_MQTT_TEST_CONTAINER 미설정")
 def test_e7_survives_broker_restart(stack):
     _, _, _, recorder = stack

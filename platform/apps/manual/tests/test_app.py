@@ -109,4 +109,41 @@ def test_run_rate_is_about_50hz(client):
     assert not thread.is_alive()
     # CI 부하를 감안한 폭. 정밀한 주기는 브로커 테스트(2초 90~110건)가 본다
     assert 40 <= len(client.of_type("drive.command")) <= 60
+    assert 1 <= len(client.of_type("app.heartbeat")) <= 2
 
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_heartbeat_every_second_on_same_topic(client):
+    clock = FakeClock()
+    app = ManualDriveApp(client, ManualSettings(vm_id=VM_ID), clock=clock)
+    for i in range(120):  # 50 Hz 로 2.4초. 누적 덧셈 오차를 피하려고 곱으로 시각을 정한다
+        clock.now = 100.0 + i * 0.02
+        app.tick()
+    beats = [(topic, payload) for topic, t, payload in client.published if t == "app.heartbeat"]
+    assert len(beats) == 3  # 0초, 1초, 2초
+    assert all(topic == COMMAND_TOPIC for topic, _ in beats)
+    assert [p["uptime_s"] for _, p in beats] == pytest.approx([0.0, 1.0, 2.0], abs=0.03)
+
+
+@pytest.mark.parametrize(
+    ("control", "state"),
+    [
+        (None, "idle"),
+        ({"generation": 3, "mode": "MANUAL", "active_app": "manual"}, "active"),
+        ({"generation": 3, "mode": "AUTO_READY", "active_app": "manual"}, "active"),
+        ({"generation": 3, "mode": "AUTO", "active_app": "autonomous"}, "standby"),
+        ({"generation": 3, "mode": "SAFE_STOP", "active_app": None}, "standby"),
+        ({"generation": "bad"}, "idle"),
+    ],
+)
+def test_heartbeat_state_follows_vehicle_control(app, client, control, state):
+    if control is not None:
+        client.put(topics.vehicle_control(), "vehicle.control", control)
+    assert app.heartbeat()["state"] == state

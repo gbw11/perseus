@@ -65,6 +65,7 @@ pre { font: 12px/1.4 var(--mono); background: var(--bg); border: 1px solid var(-
   <button id="connect" class="primary">연결</button>
   <span id="conn" class="pill"><span class="dot"></span><span>연결 안 됨</span></span>
   <span id="cmdState" class="pill"><span class="dot"></span><span>drive.command 없음</span></span>
+  <span id="hbState" class="pill" title="app.heartbeat (1초, 3초 못 받으면 끊김)"><span class="dot"></span><span>앱 생존 신호 없음</span></span>
 </header>
 
 <main>
@@ -201,6 +202,7 @@ $("clearCtrl").onclick = () => { if (client) client.publish(T.control, "", { qos
 
 // --- 앱 출력 ---------------------------------------------------------------
 let last = null, lastAt = 0;
+let heartbeat = null, heartbeatAt = 0;
 const arrivals = [];
 const history = [];
 function onMessage(topic, buf) {
@@ -212,6 +214,7 @@ function onMessage(topic, buf) {
     return;
   }
   let env; try { env = JSON.parse(text); } catch { return; }
+  if (env.type === "app.heartbeat") { heartbeat = env.payload; heartbeatAt = performance.now(); return; }
   if (env.type !== "drive.command") return;
   const now = performance.now();
   last = env; lastAt = now;
@@ -228,6 +231,11 @@ function render() {
   else if (age > 100) setPill($("cmdState"), "bad", `끊김 ${Math.round(age)} ms`);
   else setPill($("cmdState"), "ok", "수신 중");
   $("hz").innerHTML = `${arrivals.length} <small>Hz</small>`;
+  // 계약 6.1: 앱 생존 신호는 1초 주기, 3초 못 받으면 끊김
+  const hbAge = heartbeat ? now - heartbeatAt : Infinity;
+  if (!heartbeat) setPill($("hbState"), "", "앱 생존 신호 없음");
+  else if (hbAge > 3000) setPill($("hbState"), "bad", `앱 끊김 ${(hbAge / 1000).toFixed(1)}초`);
+  else setPill($("hbState"), heartbeat.state === "error" ? "bad" : "ok", `앱 ${heartbeat.state} · 가동 ${Math.floor(heartbeat.uptime_s)}초`);
   if (last) {
     const p = last.payload;
     $("v").textContent = p.v_mps.toFixed(2);

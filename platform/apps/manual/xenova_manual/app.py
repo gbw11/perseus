@@ -3,6 +3,7 @@
 - 활성이든 대기든 계속 발행한다. 게이트웨이가 대기 앱 명령의 신선도로 승격 여부를 정한다 (5.2).
 - 입력이 input_timeout_ms 동안 없으면 키를 뗀 것으로 보고 정지 명령을 낸다.
 - vehicle/control 을 아직 못 받았으면 generation 0 으로 낸다. ESP32 는 세대가 다르면 버리므로 차는 움직이지 않는다.
+- 1초마다 app.heartbeat 로 프로세스 생존과 상태를 알린다 (6.1). 주행 루프 안에서 보내므로 루프가 멈추면 같이 멈춘다.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ from .keymap import STOP, Target, to_target
 log = logging.getLogger("xenova_manual")
 
 COMMAND_TOPIC = topics.app_events(APP_ID)
+# MQTT 계약 v1 6.1: 1초 주기, 받는 쪽은 3초 못 받으면 끊김
+HEARTBEAT_PERIOD_S = 1.0
 
 
 def _generation(control: Any) -> int | None:
@@ -39,6 +42,8 @@ class ManualDriveApp:
         self._clock = clock
         self._warned_no_control = False
         self._last_mode: tuple[Any, Any] | None = None
+        self._started = clock()
+        self._last_heartbeat: float | None = None
         self.sent = 0
 
     def subscribe(self) -> None:
@@ -70,11 +75,28 @@ class ManualDriveApp:
             self._last_mode = mode
         return generation
 
+    def state(self) -> str:
+        """app.heartbeat 의 state. 활성 여부는 게이트웨이가 정한 vehicle/control 의 active_app 으로만 판단한다."""
+        control = self._client.latest(topics.vehicle_control())
+        if _generation(control) is None:
+            return "idle"
+        return "active" if control.payload.get("active_app") == APP_ID else "standby"
+
+    def heartbeat(self) -> dict[str, Any] | None:
+        now = self._clock()
+        if self._last_heartbeat is not None and now - self._last_heartbeat < HEARTBEAT_PERIOD_S:
+            return None
+        self._last_heartbeat = now
+        payload = {"state": self.state(), "uptime_s": round(now - self._started, 3)}
+        self._client.publish(COMMAND_TOPIC, "app.heartbeat", payload)
+        return payload
+
     def tick(self) -> dict[str, Any]:
         target = self.target()
         payload = {"generation": self.generation(), "v_mps": target.v_mps, "steer_rad": target.steer_rad}
         self._client.publish(COMMAND_TOPIC, "drive.command", payload)
         self.sent += 1
+        self.heartbeat()
         return payload
 
     def run(self, stop: threading.Event) -> None:
