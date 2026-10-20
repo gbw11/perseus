@@ -24,6 +24,7 @@
 | 확인 | 결과 |
 | --- | --- |
 | 로직 호스트 시험 (`tests/`) | 35 통과 (Python `test_keymap`·`test_app` 과 같은 표 + XenStore vm 경로 해석) |
+| Python ↔ C 교차 (`tests/cross_check.py`) | 5/5: Python `vehicle.control`·`drive.input` → C 반영(세대·active/standby·키·끊김 정지), C `drive.command` 50.4 Hz → Python `XenovaClient` 봉투·seq 검사 통과 |
 | `native_sim` + Mosquitto | 4초 199건(50 Hz), heartbeat, retained 세대 5 → 50 ms 안 `active`, 키 입력 다음 명령(≤ 20 ms)에 반영, 입력 끊기면 정지. 낸 봉투 304건 모두 Python `envelope.validate` 통과, seq 역전 0 |
 | `xenvm` 빌드 (Zephyr 4.4.0 `684c9e8`, SDK 1.0.0 aarch64) | `zephyr.bin` 179 KB (XenStore 포함), RAM 476 KB / 16 MB |
 | **실보드** | ❌ Zephyr 템플릿에 PV 네트워크가 없어 아직 브로커에 닿지 못함 — 경로 결정 대기 ([요청](../../../../docs/requests/2026-10-20-zephyr-drive-network-platform.md)) |
@@ -43,6 +44,9 @@ export ZEPHYR_BASE=/path/to/zephyr        # v4.4.0 (684c9e8f32e4373a21098559f748
 # Xen 게스트 펌웨어 (platform/guests/zephyr/README.md 와 같은 도구체인)
 ZEPHYR_TOOLCHAIN_VARIANT=cross-compile CROSS_COMPILE=/path/aarch64-zephyr-elf/bin/aarch64-zephyr-elf- \
   cmake -S . -B build-xenvm -GNinja -DBOARD=xenvm && ninja -C build-xenvm
+
+# Python XenovaClient ↔ Zephyr 앱 양방향 교차 확인 (zephyr.exe 를 먼저 띄운 상태, 같은 브로커)
+python3 tests/cross_check.py ../../../services/vm-agent/mqtt-client
 
 # 로직 시험 (Zephyr 없이 gcc)
 cmake -S tests -B build-host && cmake --build build-host && ctest --test-dir build-host
