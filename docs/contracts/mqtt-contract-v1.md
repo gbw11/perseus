@@ -1,6 +1,6 @@
 # MQTT 메시지 계약 v1
 
-**최종 갱신** 2026-10-20 (6.1 `app.heartbeat`, 7장 `drive.input` 키·반복·끊김 규칙)
+**최종 갱신** 2026-10-20 (4장 주행 VM Zephyr, 6.1 `app.heartbeat`, 7장 `drive.input` 키·반복·끊김 규칙)
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼, RC카 시나리오
 **브로커** dom0 Mosquitto
 
@@ -84,13 +84,14 @@ VM 에이전트, RC카 앱 VM, dom0 서버, 젯슨, ESP32가 주고받는 MQTT �
 
 | app_id | 발행자 | `guest_kind` | 역할 |
 | --- | --- | --- | --- |
-| `autonomous` | 자율주행 VM | `linux` | 젯슨 인식 결과로 판단·경로 생성, 평소 주행 명령 |
-| `manual` | 수동주행 VM | `linux` → `zephyr` | 대기, 인계 시 콘솔 키 입력을 주행 명령으로 변환 |
+| `autonomous` | 자율주행 VM | `zephyr` | 젯슨 인식 결과로 판단·경로 생성, 평소 주행 명령 |
+| `manual` | 수동주행 VM | `zephyr` | 대기, 인계 시 콘솔 키 입력을 주행 명령으로 변환 |
 | `message-board` | 메시지 보드 VM | `linux` | 관제 메시지, 모드·장애 알림 표시, 자율주행 재개 요청 |
 | `perception` | 젯슨 (`source_id: jetson`) | — | 객체인식 결과. 외부 발행자이며 앱 3종에 포함하지 않는다 |
 | `vehicle` | dom0 서버·게이트웨이 | — | 모드 전환·장애 알림 |
 
 - `guest_kind` 값은 `linux`, `zephyr` 두 가지다 (VM 관리 API 계약과 같다).
+- 자율·수동주행 VM은 Zephyr다 (2026-10-20 [RC카 시나리오](../scenario-rc-car.md) §2). Zephyr에는 VM 에이전트가 없어 `agent.*` 토픽을 내지 않는다. 앱 프로세스 생존은 `app.heartbeat`(6.1)로 알린다.
 
 ## 5. 주행 제어
 
@@ -203,6 +204,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버, 젯슨, ESP32가 주고받는 MQTT �
 - 앱 **프로세스**가 살아 있는지와 상태를 알린다. VM 생존은 `agent.heartbeat`(3장), 제어권 전환은 `drive.command` 끊김 100 ms(5장)로 판정하며 이 신호를 쓰지 않는다.
 - 주행 루프와 같은 스레드에서 보낸다. 루프가 멈추면 heartbeat도 멈춰야 "프로세스는 있는데 일을 안 한다"를 잡는다.
 - 받는 쪽은 3초 동안 못 받으면 그 앱을 끊김으로 표시한다.
+- 에이전트가 없는 Zephyr 주행 VM에서는 이 신호가 앱 쪽 생존 정보다. 복구 서비스의 VM 생존 판정(도메인 상태 + 명령 신선도)과 §5.2 `AUTO_READY`의 "에이전트 `ONLINE`" 조건을 무엇으로 바꿀지는 시나리오 §8 D8에서 정한다.
 
 ## 7. 수동주행 입력
 
@@ -253,7 +255,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 ## 10. 미확정
 
 - 명령 만료 판정에 쓰는 시각 오차 허용 범위와 동기화 방식 (MQTT-04 `CLOCK_UNTRUSTED`)
-- Zephyr 수동 VM의 네트워크. 현재 Zephyr 템플릿은 PV 네트워크를 지원하지 않는다 (`platform/guests/zephyr/xen.cfg.in`). 안 되면 vchan + dom0 중계로 대체
+- Zephyr 주행 VM(자율·수동)의 네트워크. 현재 Zephyr 템플릿은 PV 네트워크를 지원하지 않는다 (`platform/guests/zephyr/xen.cfg.in`). 안 되면 vchan + dom0 중계로 대체
 - 와치독 300 ms, 전환 100 ms, `AUTO_READY` 3초는 실보드 측정 후 확정
 
 ## 관련 문서
