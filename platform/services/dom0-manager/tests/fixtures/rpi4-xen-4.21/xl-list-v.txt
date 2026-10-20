@@ -1,0 +1,5 @@
+Name                                        ID   Mem VCPUs	State	Time(s)   UUID                            Reason-Code	Security Label
+Domain-0                                     0  1024     4     r-----      30.6 00000000-0000-0000-0000-000000000000        -                -
+debian-dev                                   1   512     1     -b----      11.5 4be41d5f-b8ef-408b-9709-7fe5ac11231f        -                -
+zephyr-drive-a                               2    16     1     -b----       0.0 0d950ea2-cc99-49df-9b60-a4ddf2c8e137        -                -
+zephyr-drive-b                               3    16     1     -b----       0.0 cd35a7fc-5f14-456a-a129-f0afc7d91d97        -                -
