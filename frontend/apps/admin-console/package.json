@@ -11,5 +11,13 @@
   },
   "dependencies": {
     "@xenova/ui": "0.1.0"
+  },
+  "devDependencies": {
+    "msw": "^3.0.3"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
   }
 }
