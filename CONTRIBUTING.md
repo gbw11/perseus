@@ -62,12 +62,13 @@ S15P31E110/
 │   ├── deploy/               # dom0 서비스 등록·배포 설정
 │   ├── scripts/              # 빌드·검증 스크립트
 │   └── tests/                # 플랫폼 테스트·픽스처
+├── vehicle/                  # 젯슨(차량 쪽, Jetson Nano ADAS ECU) 코드
 ├── docs/                     # 설계·가이드 문서
 │   └── contracts/            # VM 간 메시징·에이전트·관리 API 계약 (OpenAPI 포함)
 └── Jenkinsfile
 ```
 
-최상위 폴더는 `backend/`, `frontend/`, `platform/`, `docs/` 네 개만 둡니다. 새 폴더는 이 넷 중 하나 아래에 만듭니다.
+최상위 폴더는 `backend/`, `frontend/`, `platform/`, `vehicle/`, `docs/` 다섯 개만 둡니다. 새 폴더는 이 중 하나 아래에 만듭니다.
 테스트는 루트에 모으지 않고 각 폴더가 자기 테스트를 가집니다.
 CI 설정(`Jenkinsfile`)은 모든 브랜치에서 동작해야 하므로 루트에 둡니다.
 
@@ -90,7 +91,7 @@ CI 설정(`Jenkinsfile`)은 모든 브랜치에서 동작해야 하므로 루트
 | `display` | `platform/services/display/` |
 | `backend` | `backend/` |
 | `frontend` | `frontend/` |
-| `app` | `platform/apps/` |
+| `app` | `platform/apps/`, `vehicle/` |
 | `deploy` | `platform/deploy/`, `Jenkinsfile` |
 | `common` | `docs/`, `docs/contracts/`, 루트 설정 등 여러 파트에 걸친 변경 |
 
