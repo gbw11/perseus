@@ -34,13 +34,31 @@ def test_install_copies_packages_and_unit(tmp_path):
     assert not list(root.glob("opt/xenova/**/__pycache__"))
     unit = root / "usr/lib/systemd/system/xenova-agent.service"
     text = unit.read_text(encoding="utf-8")
-    assert "Requires=xenova-guest-identity.service" in text and "After=network-online.target xenova-guest-identity.service" in text
+    # 일반 생성 VM(prepare_instance)에는 신원 유닛이 없으므로 기본 유닛은 순서만 두고 Requires= 는 두지 않는다
+    directives = [line for line in text.splitlines() if line and not line.startswith("#")]
+    assert not any(line.startswith("Requires=") for line in directives)
+    assert "After=network-online.target xenova-guest-identity.service" in directives
+    assert "ConditionPathExists=/etc/xenova/instance-id" in text
     assert "ExecStart=/usr/bin/python3 -m xenova_agent" in text
     assert "PYTHONPATH=/opt/xenova/mqtt-client:/opt/xenova/agent" in text
     assert unit in installed
+    assert not (root / "etc/systemd/system/xenova-agent.service.d").exists()
     if enable:
         link = root / "etc/systemd/system/multi-user.target.wants/xenova-agent.service"
         assert link.is_symlink() and os.readlink(link) == "/usr/lib/systemd/system/xenova-agent.service"
+
+
+def test_identity_dropin_only_where_identity_unit_exists(tmp_path):
+    """deployment seed 경로(신원 유닛 있음)에서만 Requires=xenova-guest-identity.service 를 drop-in 으로 붙인다."""
+    root = tmp_path / "rootfs"
+    (root / "usr/lib/systemd/system").mkdir(parents=True)
+    assert installer.install_identity_dropin(root) is None
+    (root / "usr/lib/systemd/system/xenova-guest-identity.service").write_text("[Unit]\n", encoding="utf-8")
+    dropin = installer.install_identity_dropin(root)
+    assert dropin == root / "etc/systemd/system/xenova-agent.service.d/10-xenova-identity.conf"
+    assert dropin.read_text(encoding="utf-8") == "[Unit]\nRequires=xenova-guest-identity.service\nAfter=xenova-guest-identity.service\n"
+    installed = installer.install(root, SOURCE, enable=False)
+    assert dropin in installed  # 신원 유닛이 있는 rootfs 에 전체 설치를 돌려도 같은 drop-in 이 들어간다
 
 
 def test_install_is_idempotent(tmp_path):
