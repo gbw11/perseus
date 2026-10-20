@@ -58,16 +58,22 @@ def paho_installed(root: Path) -> bool:
     return any(path.is_file() for pattern in PAHO_CLIENT_GLOBS for path in root.glob(pattern))
 
 
-def install_identity_dropin(root: Path, *, force: bool = False) -> Path | None:
-    """신원 유닛이 있는 rootfs 에만 Requires=xenova-guest-identity.service drop-in 을 둔다. 없으면 None."""
-    root = Path(root)
-    if not force and not (root / IDENTITY_UNIT).is_file():
-        return None
-    dropin = _inside(root, IDENTITY_DROPIN)
+def _identity_unit_present(root: Path) -> bool:
+    return (Path(root) / IDENTITY_UNIT).is_file()
+
+
+def _write_dropin(dropin: Path) -> Path:
     dropin.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(IDENTITY_DROPIN_SRC, dropin)
     os.chmod(dropin, 0o644)
     return dropin
+
+
+def install_identity_dropin(root: Path, *, force: bool = False) -> Path | None:
+    """신원 유닛이 있는 rootfs 에만 Requires=xenova-guest-identity.service drop-in 을 둔다. 없으면 None."""
+    if not force and not _identity_unit_present(root):
+        return None
+    return _write_dropin(_inside(root, IDENTITY_DROPIN))
 
 
 def install(root: Path, source: Path = DEFAULT_SOURCE, *, enable: bool = True, require_paho: bool = True) -> list[Path]:
@@ -80,9 +86,10 @@ def install(root: Path, source: Path = DEFAULT_SOURCE, *, enable: bool = True, r
             raise ValueError(f"package source missing: {source / project / package}")
     if require_paho and not paho_installed(root):
         raise ValueError("python3-paho-mqtt is not installed in the rootfs; apt install it before the agent (nothing was installed)")
-    # 쓰기 대상을 먼저 전부 검사한다. 하나라도 거부되면 아무것도 바꾸지 않는다
+    # 쓰기 대상(패키지·유닛·drop-in·enable 링크)을 먼저 전부 검사한다. 하나라도 거부되면 아무것도 바꾸지 않는다
     package_targets = [(source / project / package, _inside(root, f"{destination}/{package}")) for project, package, destination in PACKAGES]
     unit_dst = _inside(root, f"usr/lib/systemd/system/{UNIT_NAME}")
+    dropin_dst = _inside(root, IDENTITY_DROPIN) if _identity_unit_present(root) else None
     link = _inside(root, f"etc/systemd/system/multi-user.target.wants/{UNIT_NAME}") if enable else None
 
     installed: list[Path] = []
@@ -95,9 +102,8 @@ def install(root: Path, source: Path = DEFAULT_SOURCE, *, enable: bool = True, r
     shutil.copyfile(HERE / UNIT_NAME, unit_dst)
     os.chmod(unit_dst, 0o644)
     installed.append(unit_dst)
-    dropin = install_identity_dropin(root)
-    if dropin is not None:
-        installed.append(dropin)
+    if dropin_dst is not None:
+        installed.append(_write_dropin(dropin_dst))
     if link is not None:
         link.parent.mkdir(parents=True, exist_ok=True)
         if link.exists():

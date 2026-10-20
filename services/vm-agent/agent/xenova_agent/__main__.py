@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .config import AgentSettings
-from .heartbeat import HeartbeatSender
+from .heartbeat import HeartbeatFailed, HeartbeatSender
 
 log = logging.getLogger("xenova_agent")
 
@@ -51,6 +51,10 @@ def run(
     sender = HeartbeatSender(client, settings.vm_id, interval_s=settings.heartbeat_interval_s)
     try:
         sender.run(stop)
+    except HeartbeatFailed as exc:
+        # 고정된 오류다. 서비스를 active 로 두지 않고 실패로 끝내 systemd 가 로그에 남기고 Restart= 정책대로 다시 띄운다
+        log.error("xenova-agent 실패: %s (보냄 %d, 건너뜀 %d)", exc, sender.sent, sender.skipped)
+        return 1
     finally:
         client.stop()
     log.info("xenova-agent 종료: 보냄 %d, 연결 없어 건너뜀 %d, 실패 %d", sender.sent, sender.skipped, sender.failed)

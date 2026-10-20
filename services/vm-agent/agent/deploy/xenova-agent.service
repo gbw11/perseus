@@ -18,6 +18,21 @@ Restart=always
 RestartSec=2
 KillSignal=SIGTERM
 TimeoutStopSec=10
+# heartbeat 송신에는 권한이 필요 없다. /etc/xenova/instance-id 가 root 0600 이라 uid 는 root 로 두되 capability 를 전부 떼고 쓰기를 막는다.
+# 전용 사용자로 바꾸려면 플랫폼이 instance-id 소유권·그룹을 같이 정해야 한다
+CapabilityBoundingSet=
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+LockPersonality=true
+MemoryDenyWriteExecute=true
 
 [Install]
 WantedBy=multi-user.target

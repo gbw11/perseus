@@ -108,6 +108,31 @@ def test_refuses_to_write_through_symlink(tmp_path):
     assert not (root / "opt").exists()
 
 
+def test_dropin_symlink_is_checked_before_anything_is_installed(tmp_path):
+    """신원 유닛이 있는 rootfs 에서 drop-in 자리가 링크면, 패키지·유닛을 쓰기 전에 거부한다 (부분 설치 없음)."""
+    if not _symlinks_supported(tmp_path):
+        pytest.skip("symlinks unavailable on this host")
+    root = _rootfs(tmp_path)
+    (root / "usr/lib/systemd/system").mkdir(parents=True)
+    (root / "usr/lib/systemd/system/xenova-guest-identity.service").write_text("[Unit]\n", encoding="utf-8")
+    outside = tmp_path / "host-dropin"
+    outside.write_text("host\n", encoding="utf-8")
+    (root / "etc/systemd/system/xenova-agent.service.d").mkdir(parents=True)
+    (root / "etc/systemd/system/xenova-agent.service.d/10-xenova-identity.conf").symlink_to(outside)
+    with pytest.raises(ValueError, match="symlink"):
+        installer.install(root, SOURCE, enable=False)
+    assert outside.read_text(encoding="utf-8") == "host\n"
+    assert not (root / "opt").exists() and not (root / UNIT).exists()
+
+
+def test_unit_runs_without_privileges(tmp_path):
+    root = _rootfs(tmp_path)
+    installer.install(root, SOURCE, enable=False)
+    directives = [line for line in (root / UNIT).read_text(encoding="utf-8").splitlines() if line and not line.startswith("#")]
+    for expected in ("CapabilityBoundingSet=", "NoNewPrivileges=true", "ProtectSystem=strict", "PrivateTmp=true"):
+        assert expected in directives
+
+
 def test_cli_exit_codes(tmp_path, capsys):
     root = _rootfs(tmp_path, paho=False)
     assert installer.main([str(root), "--source", str(SOURCE), "--no-enable"]) == 1  # paho 없음: 설치 안 함
