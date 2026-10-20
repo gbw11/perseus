@@ -223,7 +223,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | 백엔드 | `perseus/v1/apps/manual/input`, `perseus/v1/vms/{vm_id}/command` |
 | 각 VM 측정 클라이언트·응답기 | `perseus/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
 
-브로커 계정·ACL 파일은 브로커 구성(`deploy/`)에서 관리한다.
+브로커 계정·ACL 파일은 브로커 구성(`platform/deploy/`)에서 관리한다.
 
 ## 10. 미확정
 

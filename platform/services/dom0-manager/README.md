@@ -8,15 +8,15 @@ dom0에서 도는 Python 제어 서비스입니다. Spring 관리 서버가 호�
                                      (platform create/retire)  └─ mock: 인메모리
 ```
 
-- 계약 문서: [docs/contracts/vm-api-contract-v1.md](../../docs/contracts/vm-api-contract-v1.md)
-- OpenAPI 원본: [contracts/dom0-manager-openapi.yaml](../../contracts/dom0-manager-openapi.yaml). `tests/test_contract.py`가 서비스가 내는 스키마와 비교합니다.
+- 계약 문서: [docs/contracts/vm-api-contract-v1.md](../../../docs/contracts/vm-api-contract-v1.md)
+- OpenAPI 원본: [docs/contracts/dom0-manager-openapi.yaml](../../../docs/contracts/dom0-manager-openapi.yaml). `tests/test_contract.py`가 서비스가 내는 스키마와 비교합니다.
 
 ## 실행 (Mock 모드)
 
 보드·Xen 없이 바로 띄울 수 있습니다. 백엔드·프론트엔드 연동용입니다.
 
 ```bash
-cd services/dom0-manager
+cd platform/services/dom0-manager
 python -m pip install -e .[test]
 XENOVA_DRIVER=mock XENOVA_MOCK_SAMPLES=1 python -m dom0_manager
 # → http://127.0.0.1:8081/docs 에서 내부 API 문서 확인
@@ -143,7 +143,7 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 ## 테스트
 
 ```bash
-cd services/dom0-manager
+cd platform/services/dom0-manager
 python -m pytest
 ```
 
