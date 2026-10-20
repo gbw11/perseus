@@ -4,7 +4,7 @@
 systemd 유닛을 넣어 enable 한다. python3 와 python3-paho-mqtt 는 템플릿 준비가 apt 로 먼저 설치한다. 여기서는 설치 전에 paho 가
 rootfs 에 있는지 확인하고, 없으면 아무것도 설치하지 않는다 (실행 못 하는 서비스를 enable 해 두지 않는다).
 
-    python3 services/vm-agent/agent/deploy/install_into_rootfs.py <rootfs> [--source services/vm-agent]
+    python3 platform/services/vm-agent/agent/deploy/install_into_rootfs.py <rootfs> [--source platform/services/vm-agent]
 
 설치 결과:
     /opt/xenova/mqtt-client/perseus_mqtt/        MQTT 계약 v1 클라이언트
@@ -134,7 +134,7 @@ def install(root: Path, source: Path = DEFAULT_SOURCE, *, enable: bool = True, r
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("rootfs", type=Path)
-    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE, help="services/vm-agent 경로")
+    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE, help="platform/services/vm-agent 경로")
     parser.add_argument("--no-enable", action="store_true", help="multi-user.target.wants 링크를 만들지 않는다")
     parser.add_argument("--allow-missing-paho", action="store_true", help="paho 가 없어도 설치한다 (뒤에 따로 설치할 때만)")
     args = parser.parse_args(argv)
