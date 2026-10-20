@@ -46,7 +46,7 @@ SIGTERM·SIGINT 를 받으면 현재 대기를 끊고 클라이언트를 닫은 
 2. 위 스크립트 호출
 3. 브로커 계정이 생기면 `/etc/xenova/agent.env`에 `XENOVA_AGENT_BROKER_USERNAME/PASSWORD` 기록 (없으면 생략)
 
-유닛은 `Requires=xenova-guest-identity.service`라 신원 확립에 실패한 VM 은 heartbeat 를 보내지 않고, `/etc/xenova/instance-id`가 없으면 시작하지 않습니다. Zephyr 템플릿에는 설치하지 않습니다.
+VM 생성 경로가 둘이라 신원 유닛 의존은 drop-in 으로 나눕니다. 일반 생성 VM(`prepare_instance`)에는 `/etc/xenova/instance-id`만 있고 `xenova-guest-identity.service`가 없으므로 기본 유닛은 순서(`After=`)만 둡니다. deployment seed 경로(`prepare_deployment_seed`)처럼 신원 유닛이 있는 rootfs 에는 설치 스크립트가 `xenova-agent.service.d/10-xenova-identity.conf`로 `Requires=`를 붙여, 신원 확립에 실패한 VM 은 heartbeat 를 보내지 않습니다. seed 준비가 템플릿 설치 뒤에 신원 유닛을 넣는 순서라면 그 시점에 `install_identity_dropin(rootfs)`를 한 번 더 부릅니다. `/etc/xenova/instance-id`가 없으면 어느 경로든 시작하지 않습니다. Zephyr 템플릿에는 설치하지 않습니다.
 
 ## 테스트
 
