@@ -1,0 +1,15 @@
+[Unit]
+Description=Xenova dom0 management API
+After=network.target srv-xenova.mount xenova-host-admission.service xenova-xen-ready.service xenova-vm-shutdown.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/xenova/dom0-manager.env
+ExecStart=/usr/bin/python3 -m dom0_manager
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=100
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
