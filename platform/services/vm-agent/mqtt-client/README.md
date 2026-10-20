@@ -1,7 +1,7 @@
 # xenova-mqtt — MQTT 계약 v1 클라이언트
 
 VM 에이전트와 RC카 앱 VM(자율주행·수동주행·메시지 보드)이 같이 쓰는 Python MQTT 클라이언트입니다.
-[MQTT 메시지 계약 v1](../../../docs/contracts/mqtt-contract-v1.md)의 봉투·토픽·QoS를 이 패키지가 맞춰 주므로, 쓰는 쪽은 `type`과 `payload`만 정하면 됩니다.
+[MQTT 메시지 계약 v1](../../../../docs/contracts/mqtt-contract-v1.md)의 봉투·토픽·QoS를 이 패키지가 맞춰 주므로, 쓰는 쪽은 `type`과 `payload`만 정하면 됩니다.
 
 | 계약 | 패키지가 하는 일 |
 | --- | --- |
@@ -24,7 +24,7 @@ sudo apt install python3-paho-mqtt
 # 패키지 경로를 PYTHONPATH에 두거나
 export PYTHONPATH=/opt/xenova/mqtt-client
 # pip를 쓸 수 있으면
-pip install ./services/vm-agent/mqtt-client
+pip install ./platform/services/vm-agent/mqtt-client
 ```
 
 ## 사용
