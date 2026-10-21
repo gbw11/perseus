@@ -11,12 +11,13 @@ from ..config import Settings
 from .base import Driver, Provisioner
 from .mock import MockDriver, MockProvisioner
 from .xen import UnavailableProvisioner, XenDriver
-from .xl import SubprocessRunner, Xl
+from .xl import SshRunner, SubprocessRunner, Xl
 
 
 def _xl(settings: Settings) -> Xl:
+    runner = SshRunner(settings.xl_ssh_target) if settings.xl_ssh_target else SubprocessRunner()
     return Xl(
-        SubprocessRunner(),
+        runner,
         query_timeout_s=settings.xl_query_timeout_s,
         command_timeout_s=settings.xl_command_timeout_s,
     )
