@@ -1,12 +1,25 @@
 /** TanStack Query 훅. 경로·응답은 VM 관리 API 계약 §5, 인증은 노션 API 명세 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { request, setSession } from './client';
-import type { CreateVmRequest, LoginRequest, Template, TokenResponse, Vm, VmListResponse } from './types';
+import type {
+  CreateVmRequest,
+  EventListResponse,
+  LoginRequest,
+  MetricHistoryResponse,
+  ProcessesResponse,
+  Template,
+  TokenResponse,
+  Vm,
+  VmListResponse,
+} from './types';
 
 export const keys = {
   vms: ['vms'] as const,
   vm: (id: string) => ['vms', id] as const,
   templates: ['templates'] as const,
+  events: (query: string) => ['events', query] as const,
+  metrics: (id: string) => ['vms', id, 'metrics'] as const,
+  processes: (id: string) => ['vms', id, 'processes'] as const,
 };
 
 /** 백엔드가 5초마다 Xen 상태를 확인하므로(계약 §5 끝) 화면도 같은 주기로 다시 읽는다 */
@@ -33,6 +46,45 @@ export function useTemplates() {
     queryKey: keys.templates,
     queryFn: ({ signal }) => request<Template[]>('/api/v1/templates', { signal }),
     staleTime: Infinity, // 설정 파일 고정 데이터 (계약 §2.3)
+  });
+}
+
+/** 이벤트 목록. 실시간 추가는 WS /ws/v1/events 대신 짧은 주기 재조회로 한다 (초안) */
+export function useEvents(params: { vm_id?: string; type?: string; severity?: string; limit?: number } = {}) {
+  const query = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v != null && v !== '') as [string, string][],
+  ).toString();
+  return useQuery({
+    queryKey: keys.events(query),
+    queryFn: ({ signal }) =>
+      request<EventListResponse>(`/api/v1/events${query ? `?${query}` : ''}`, { signal }),
+    refetchInterval: 3000,
+  });
+}
+
+/** 최근 n 분 메트릭 (Linux VM 만, 에이전트 MQTT-03) */
+export function useMetrics(vmId: string, enabled: boolean, minutes = 5) {
+  return useQuery({
+    queryKey: keys.metrics(vmId),
+    queryFn: ({ signal }) => {
+      const from = new Date(Date.now() - minutes * 60_000).toISOString();
+      return request<MetricHistoryResponse>(
+        `/api/v1/vms/${encodeURIComponent(vmId)}/metrics?from=${encodeURIComponent(from)}`,
+        { signal },
+      );
+    },
+    enabled,
+    refetchInterval: POLL_MS,
+  });
+}
+
+export function useProcesses(vmId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.processes(vmId),
+    queryFn: ({ signal }) =>
+      request<ProcessesResponse>(`/api/v1/vms/${encodeURIComponent(vmId)}/processes`, { signal }),
+    enabled,
+    refetchInterval: POLL_MS,
   });
 }
 

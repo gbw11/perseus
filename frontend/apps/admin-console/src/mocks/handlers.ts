@@ -8,7 +8,8 @@
  */
 import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import type { CreateVmRequest, LoginRequest, TokenResponse, Vm } from '../api/types';
-import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES } from './data';
+import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
+import { scenarioEvents, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
 const TOKEN_TTL_S = 900;
@@ -55,7 +56,12 @@ function authorized(request: Request): boolean {
 }
 
 const unauthorized = () => error(401, 'INVALID_TOKEN', '인증이 필요합니다.');
-const find = (id: string) => vms.find((vm) => vm.vm_id === id);
+/** 자율주행 VM 은 시연 시나리오(강제 종료 → 재시작)를 따른다 */
+const live = (vm: Vm): Vm => ({ ...vm, state: vmStateOf(vm.vm_id) ?? vm.state });
+const find = (id: string) => {
+  const vm = vms.find((v) => v.vm_id === id);
+  return vm && live(vm);
+};
 const vmNotFound = () => error(404, 'VM_NOT_FOUND', 'VM을 찾을 수 없습니다.');
 
 function validate(body: Partial<CreateVmRequest>): { field: string; reason: string }[] {
@@ -120,7 +126,7 @@ export const handlers = [
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
     return HttpResponse.json({
-      items: vms,
+      items: vms.map(live),
       observed_at: new Date().toISOString(),
     } as unknown as JsonBodyType);
   }),
@@ -181,5 +187,84 @@ export const handlers = [
     if (!find(String(params.vmId))) return vmNotFound();
     vms = vms.filter((vm) => vm.vm_id !== params.vmId);
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  // ---- 이벤트·메트릭 (노션 API 명세 REST-18, 메트릭 조회) ----
+  http.get('*/api/v1/events', async ({ request }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const url = new URL(request.url);
+    const vmId = url.searchParams.get('vm_id');
+    const type = url.searchParams.get('type');
+    const severity = url.searchParams.get('severity');
+    const items = scenarioEvents().filter(
+      (e) =>
+        (!vmId || e.vm_id === vmId) && (!type || e.type === type) && (!severity || e.severity === severity),
+    );
+    return HttpResponse.json({ items } as unknown as JsonBodyType);
+  }),
+
+  http.get('*/api/v1/vms/:vmId/metrics', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    if (params.vmId !== VM_IDS.interaction) return HttpResponse.json({ items: [] });
+    const now = Date.now();
+    const items = Array.from({ length: 30 }, (_, i) => {
+      const t = now - (29 - i) * 10_000;
+      const wave = Math.sin(t / 40_000);
+      return {
+        sample_id: `m-${t}`,
+        vm_id: VM_IDS.interaction,
+        source: 'agent',
+        observed_at: new Date(t).toISOString(),
+        values: [
+          {
+            name: 'cpu_percent',
+            value: Math.round((8 + 4 * wave) * 10) / 10,
+            unit: '%',
+            labels: null,
+            unavailable_reason: null,
+          },
+          {
+            name: 'memory_used_bytes',
+            value: (142 + 10 * wave) * 1024 * 1024,
+            unit: 'bytes',
+            labels: null,
+            unavailable_reason: null,
+          },
+          {
+            name: 'net_rx_bytes_total',
+            value: 1_200_000 + i * 8_000,
+            unit: 'bytes',
+            labels: null,
+            unavailable_reason: null,
+          },
+        ],
+      };
+    });
+    return HttpResponse.json({ items } as unknown as JsonBodyType);
+  }),
+
+  http.get('*/api/v1/vms/:vmId/processes', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    if (params.vmId !== VM_IDS.interaction) {
+      return HttpResponse.json({
+        vm_id: params.vmId,
+        observed_at: null,
+        stale: true,
+        items: [],
+      } as unknown as JsonBodyType);
+    }
+    return HttpResponse.json({
+      vm_id: VM_IDS.interaction,
+      observed_at: new Date().toISOString(),
+      stale: false,
+      items: [
+        { pid: 412, name: 'message-board', cpu_percent: 4.2, rss_bytes: 48_234_496 },
+        { pid: 388, name: 'xenova-agent', cpu_percent: 1.1, rss_bytes: 21_495_808 },
+        { pid: 1, name: 'systemd', cpu_percent: 0.2, rss_bytes: 11_010_048 },
+      ],
+    } as unknown as JsonBodyType);
   }),
 ];

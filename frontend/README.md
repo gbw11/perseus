@@ -5,7 +5,7 @@
 ```text
 frontend/
 ├── packages/ui/          # 디자인 시스템: 토큰(tokens.css) + Button·Card·StatusBadge·Modal·Toast·AppShell
-├── apps/admin-console/   # 관리 콘솔 (노트북 브라우저, 밝은 테마)        :5173
+├── apps/admin-console/   # 관리 콘솔 (노트북 브라우저, 어두운 테마)      :5173
 └── apps/vm-screens/      # 모니터 화면 — 3분할·상세 (dom0 키오스크, 어두운 테마) :5174
 ```
 
@@ -28,12 +28,20 @@ npm run lint && npm test && npm run build
 
 ## 관리 콘솔
 
-| 경로                 | 내용                            | 비고                                |
-| -------------------- | ------------------------------- | ----------------------------------- |
-| `/login`             | 로그인 기본형                   | 화면 완성은 S15P31E110-53           |
-| `/vms`, `/vms/:vmId` | VM 목록·상세 기본형 (시작·정지) | 카드 화면은 -55, 상세는 정수환 작업 |
-| `/screens`           | 모니터 화면 바로가기            | 화면 라우터 제어는 -129·-130        |
-| `/components`        | 공통 컴포넌트 예시              | 새 컴포넌트는 여기에 같이 올린다    |
+화면은 [화면 정의서](../docs/design/screen-spec.md) W-01~W-08 의 초안입니다 (Stitch 시안 색·배치). 위쪽 메뉴 아래 **주행 모드 띠**가 모든 화면에 고정됩니다.
+
+| 경로                      | 화면                                | 데이터                                   | 이어받을 작업            |
+| ------------------------- | ----------------------------------- | ---------------------------------------- | ------------------------ |
+| `/login`                  | W-01 로그인                         | auth                                     | -53                      |
+| `/`                       | W-02 대시보드 (주행 통합)           | `/ws/v1/drive/state`, vms, events        | 공병우 (정의서 Q2)       |
+| `/vms`, `/vms/new`        | W-03 목록 · W-05 생성               | vms, templates                           | -55 · -159               |
+| `/vms/:vmId`              | W-04 상세 (개요·차트·프로세스·콘솔) | vms, metrics, processes. 콘솔 WS-03 없음 | 정수환                   |
+| `/resources`              | W-06 자원 제어                      | 없음 (-107) — 화면 안 미리보기           | 정수환 -113·-114         |
+| `/demo`                   | W-07 시연 제어                      | drive state·input. 배치·격리·재개 없음   | -129·-135, 재개 API 계약 |
+| `/events`                 | W-08 이벤트 타임라인                | events (3초 재조회)                      | -160                     |
+| `/screens`, `/components` | 모니터 바로가기, 컴포넌트           | —                                        |                          |
+
+VM 은 "VM 1·2·3" 이 아니라 역할 이름(자율주행·수동주행·인터랙션)으로 부릅니다 (`src/domain/roles.ts`). 이벤트 분류·문구는 `src/domain/events.ts`.
 
 API 타입(`src/api/types.ts`)은 팀 문서를 그대로 옮겼습니다. 문서가 바뀌면 타입도 같이 고칩니다.
 
@@ -47,7 +55,8 @@ VITE_MOCK=true npm run dev:console    # 또는 .env.local 에 VITE_MOCK=true
 ```
 
 - 로그인: 아이디 `admin`, 비밀번호 `mock-password` (mock 전용 값, `src/mocks/data.ts`)
-- VM 3대(autonomous·manual 은 Zephyr, interaction 은 Debian)와 템플릿 3개가 들어 있습니다. 시작·정지·생성·삭제가 메모리에서 동작하고, 새로고침하면 처음 상태로 돌아갑니다.
+- VM 3대(autonomous·manual 은 Zephyr 16 MiB, interaction 은 Debian 13)와 템플릿 3개(Ubuntu 24.04·Debian 13·Zephyr)가 들어 있습니다. 시작·정지·생성·삭제가 메모리에서 동작하고, 새로고침하면 처음 상태로 돌아갑니다.
+- 주행 상태·키 입력은 WS 대신 **표본 시연 시나리오**(`src/mocks/scenario.ts`)로 돕니다: 시연 제어에서 [강제 종료] → MANUAL 인계 → 복구 → AUTO_READY → [자율주행 재개] → AUTO. [인지 끊김 (D5)] 은 모드를 바꾸지 않고 정지 명령만 냅니다. 이벤트·메트릭·프로세스도 mock 이 답합니다.
 - 상태 코드·오류 코드는 실제 API 와 같습니다 — 401 `INVALID_CREDENTIALS`·`INVALID_TOKEN`, 404 `VM_NOT_FOUND`, 409 `INVALID_VM_STATE`·`VM_NAME_CONFLICT`, 422 `VALIDATION_ERROR`(§9 입력값).
 - mock 에 없는 요청(`/ws/...` 등)은 그대로 백엔드로 갑니다.
 - 핸들러는 `src/mocks/handlers.ts`. API 가 바뀌면 `api/types.ts` 와 같이 고치고, `handlers.test.ts` 가 실제 클라이언트(`api/client.ts`)로 로그인 → 목록 → 상세 흐름을 확인합니다.
