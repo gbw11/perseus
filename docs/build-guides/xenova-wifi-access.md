@@ -128,3 +128,14 @@ OpenSSH는 먼저 읽은 설정을 사용하므로 기존 Xenova auth include를
 레시피 해석이나 upstream 파일 목록 확인은 타깃 파일 실물·RF 연결 검증을 대신하지 않는다.
 
 regulatory.db/p7s의 실제 소유 패키지는 wireless-regdb-static이며 이 패키지를 설치한다.
+
+## 표시 시간대와 자동 NTP
+
+이미지는 `tzdata-asia`와 `Asia/Seoul` 표시 시간대를 설치한다. UTC 시각 자체에 9시간을 더하지 않는다.
+`configure`가 생성/재작성하는 network 파일은 `RequiredForOnline=routable`을 사용한다.
+DHCP IPv4·route metric 600·비밀 파일 0600은 유지하며 VM/최초 등록을 외부망이나 NTP 대기에 묶지 않는다.
+기존 설치의 network 파일은 소스 변경만으로 갱신되지 않는다. 관리 연결을 재설정하는 작업은 UART 복구 조건을 갖춰 따로 수행한다.
+
+NTP 성공은 `NTPSynchronized=yes`, 실제 선택 서버와 수신 패킷으로 확인한다.
+Wi-Fi 인증/IP·외부 ping·runtime 서버 임시 지정만으로 다음 부팅의 자동 동기화를 판정하지 않는다.
+내부 online 진단은 다른 링크 때문에 `partial`일 수 있다. 잘못된 절대 시각에서 DNSSEC 오류가 나도 전역 검증을 끄지 않는다.

@@ -87,7 +87,7 @@ class Wifi:
             if [p for p in directory.glob('*.conf') if p.name!=target.name]:
                 raise PlatformError('another wireless interface is configured; explicit removal required')
             atomic_write(target,content,0o600)
-            atomic_write(path,'[Match]\nName='+name+'\nType=wlan\n\n[Link]\nRequiredForOnline=no\n\n[Network]\nDHCP=ipv4\nIPv6AcceptRA=no\n\n[DHCPv4]\nRouteMetric=600\n', 0o644)
+            atomic_write(path,'[Match]\nName='+name+'\nType=wlan\n\n[Link]\nRequiredForOnline=routable\n\n[Network]\nDHCP=ipv4\nIPv6AcceptRA=no\n\n[DHCPv4]\nRouteMetric=600\n', 0o644)
             # root 셸의 umask가 0077이어도 비밀 없는 networkd 입력은 읽을 수 있어야 한다.
             path.chmod(0o644)
         return {'configured':True,'interface':name,'credentials':'stored root-only','activation_required':True}
