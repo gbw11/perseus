@@ -42,6 +42,8 @@ POLICIES: dict[str, Policy] = {
     "drive.resume.requested": Policy(qos=1),
     "drive.mode.changed": Policy(qos=1),
     "drive.fault.detected": Policy(qos=1),
+    # 6.1 앱 생존 신호: 1초마다 다시 오므로 유실돼도 다음 것으로 충분하다
+    "app.heartbeat": Policy(qos=0),
     # 7장 수동 입력
     "drive.input": Policy(qos=0),
     # 8장 지연 측정

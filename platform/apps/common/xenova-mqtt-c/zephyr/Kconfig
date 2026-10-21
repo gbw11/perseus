@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+config XENOVA_MQTT
+	bool "Xenova MQTT contract v1 client (xenova_mqtt C)"
+	depends on NETWORKING && NET_SOCKETS && MQTT_LIB
+	help
+	  Topic, policy, envelope and seq rules of docs/contracts/mqtt-contract-v1.md
+	  over Zephyr net/mqtt. No dynamic memory. One thread owns a client.
+
+if XENOVA_MQTT
+
+config XENOVA_MQTT_RX_BUF
+	int "MQTT receive buffer bytes"
+	default 1280
+	help
+	  Must hold the largest subscribed message (driving topics are 1 KB).
+
+config XENOVA_MQTT_TX_BUF
+	int "MQTT transmit buffer bytes"
+	default 1280
+
+config XENOVA_MQTT_MAX_SUBS
+	int "Subscriptions per client"
+	default 4
+
+config XENOVA_MQTT_LATEST_SLOTS
+	int "Latest-only message slots per client"
+	default 4
+
+config XENOVA_MQTT_PUB_TOPICS
+	int "Published topics with their own seq counter"
+	default 4
+
+endif

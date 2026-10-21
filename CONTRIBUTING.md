@@ -51,14 +51,19 @@ master                ← 통합 데모·발표용 안정 버전
 ```text
 S15P31E110/
 ├── backend/                  # Spring Boot VM 관리 서버 (테스트: src/test/)
-├── frontend/                 # React 웹 관리 콘솔, VM별 화면(OS face) (테스트: frontend/ 안)
+├── frontend/                 # React (npm workspaces, 테스트: frontend/ 안)
+│   ├── apps/                 # admin-console(웹 관리 콘솔), vm-screens(모니터 화면)
+│   └── packages/ui/          # 공통 컴포넌트·디자인 토큰
 ├── platform/                 # 보드(dom0·domU) 위에서 돌거나 보드 이미지를 만드는 것
 │   ├── yocto/ boot/ first-install/ guests/ network/   # Yocto·Xen·U-Boot, 부팅 환경, domU 템플릿, 네트워크
 │   ├── services/
 │   │   ├── dom0-manager/     # Python 제어 계층 (하이퍼바이저 추상화·복구 엔진)
 │   │   ├── vm-agent/         # VM 에이전트
 │   │   └── display/          # dom0 표시 서비스 (화면 라우터 수신측·키오스크)
-│   ├── apps/                 # VM 애플리케이션 (RC카 시나리오 앱)
+│   ├── apps/                 # VM 애플리케이션 (RC카 시나리오 앱, 폴더 이름 = MQTT app_id)
+│   │   ├── autonomous/       # 자율주행 VM
+│   │   ├── manual/           # 수동주행 VM
+│   │   └── message-board/    # 메시지 보드 VM
 │   ├── deploy/               # dom0 서비스 등록·배포 설정
 │   ├── scripts/              # 빌드·검증 스크립트
 │   └── tests/                # 플랫폼 테스트·픽스처
