@@ -38,10 +38,22 @@ export interface CameraViewProps {
  * (주소·형식은 계약 미정). 그 VM 이 죽으면 영상도 멈춘다 — 주행은 그대로 (격리 시연).
  * mock 이면 차량 움직임을 따라 흐르는 도로와 감지 박스를 캔버스로 그린다.
  */
+const RETRY_MS = 3000;
+
 export function CameraView({ streamUrl, mock, down, motion, stats = [], alert, compact }: CameraViewProps) {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const source = down ? 'down' : streamUrl ? (failed ? 'error' : 'stream') : mock ? 'mock' : 'none';
+
+  // 영상이 끊기면 3초마다 다시 연결한다 (카메라 계약 camera-stream-v1)
+  useEffect(() => {
+    if (source !== 'error') return;
+    const timer = window.setTimeout(() => {
+      setFailed(false);
+      setAttempt((n) => n + 1);
+    }, RETRY_MS);
+    return () => window.clearTimeout(timer);
+  }, [source, attempt]);
 
   return (
     <div className={[styles.frame, compact ? styles.compact : ''].join(' ')}>
@@ -61,7 +73,7 @@ export function CameraView({ streamUrl, mock, down, motion, stats = [], alert, c
             {source === 'down'
               ? down
               : source === 'error'
-                ? '영상을 받지 못했다'
+                ? '영상 없음 — 3초 뒤 다시 연결'
                 : '영상 주소가 없다 (VITE_CAMERA_URL)'}
           </p>
           {source === 'error' && (
