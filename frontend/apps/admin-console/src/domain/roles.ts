@@ -113,3 +113,31 @@ export function osLabel(vm: Pick<Vm, 'guest_kind' | 'template_id'>): string {
   const [distro = vm.template_id, version] = vm.template_id.split('-');
   return `${distro.charAt(0).toUpperCase()}${distro.slice(1)}${version ? ` ${version}` : ''}`;
 }
+
+/**
+ * 차량 안전 플래그 (MQTT 계약 §5.4 vehicle.status.flags, ESP32 가 재서 게이트웨이가 낸다).
+ * 화면에는 짧은 코드 대신 무슨 뜻인지 풀어 쓴다.
+ */
+export const SAFETY = [
+  {
+    key: 'estop',
+    label: '비상정지 버튼',
+    on: '눌림',
+    off: '안 눌림',
+    hint: '차에 달린 하드웨어 비상정지 버튼. 눌리면 모터 전원이 끊기고 소프트웨어로는 풀 수 없다',
+  },
+  {
+    key: 'watchdog',
+    label: '명령 끊김 정지 (300 ms)',
+    on: '작동',
+    off: '아님',
+    hint: 'ESP32 가 게이트웨이 명령을 300 ms 동안 못 받으면 스스로 차를 세운다 — VM·dom0 가 모두 죽어도 서는 마지막 안전장치',
+  },
+  {
+    key: 'obstacle',
+    label: '근거리 장애물',
+    on: '감지',
+    off: '없음',
+    hint: 'ESP32 근거리 센서가 전방 장애물을 감지하면 전진을 막는다 (후진은 된다)',
+  },
+] as const;

@@ -16,6 +16,7 @@ import {
   ROLE_ORDER,
   ROLES,
   roleOf,
+  SAFETY,
   signed,
   vmOf,
   type AppId,
@@ -62,9 +63,16 @@ export function DashboardPage() {
         </div>
         <span className={styles.grow} />
         <div className={styles.chips}>
-          <span className={styles.chip}>E-stop {flags?.estop ? '켜짐' : '해제'}</span>
-          <span className={styles.chip}>와치독 {flags?.watchdog ? '켜짐' : '정상'}</span>
-          <span className={styles.chip}>장애물 {flags?.obstacle ? '감지' : '없음'}</span>
+          {SAFETY.map((f) => (
+            <span
+              key={f.key}
+              className={styles.chip}
+              title={f.hint}
+              style={flags?.[f.key] ? { borderColor: 'var(--x-fault)', color: 'var(--x-fault)' } : undefined}
+            >
+              {f.label}: {flags ? (flags[f.key] ? f.on : f.off) : '—'}
+            </span>
+          ))}
         </div>
       </section>
 
@@ -93,18 +101,22 @@ export function DashboardPage() {
               <span className={styles.big}>{signed(vehicle?.steer_rad)}</span>
               <span className={styles.unit}>rad</span>
             </div>
-            <div className={styles.tile}>
-              <small>배터리</small>
-              <span className={styles.big}>{plain(vehicle?.batt_v)}</span>
-              <span className={styles.unit}>V (2S)</span>
-            </div>
           </div>
           <div className={styles.rows}>
             <div>
               <span>적용된 세대</span>
               <span>{vehicle?.applied_generation ?? '—'}</span>
             </div>
+            {SAFETY.map((f) => (
+              <div key={f.key} title={f.hint}>
+                <span>{f.label}</span>
+                <span style={flags?.[f.key] ? { color: 'var(--x-fault)' } : undefined}>
+                  {flags ? (flags[f.key] ? f.on : f.off) : '—'}
+                </span>
+              </div>
+            ))}
           </div>
+          <p className={styles.dim}>항목에 마우스를 올리면 뜻이 나온다. 셋 중 하나라도 켜지면 차는 선다.</p>
         </Card>
         <Card
           title="인지 (젯슨)"
@@ -225,16 +237,18 @@ function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: Dr
       ) : (
         <div className={styles.rows}>
           <div>
-            <span>에이전트</span>
-            <span>{vm?.agent_status === 'ONLINE' ? '연결됨 (5초 주기)' : (vm?.agent_status ?? '—')}</span>
-          </div>
-          <div>
             <span>app.heartbeat</span>
             <span>{ago(state?.heartbeat_ago_ms)}</span>
           </div>
           <div>
-            <span>IP</span>
-            <span>{vm?.ipv4 ?? '—'}</span>
+            <span>자율주행 재개</span>
+            <span>
+              {drive?.control?.mode === 'AUTO_READY'
+                ? '가능 — 시연 제어에서'
+                : drive?.control?.mode === 'AUTO'
+                  ? '자율주행 중'
+                  : '대기'}
+            </span>
           </div>
         </div>
       )}

@@ -93,9 +93,9 @@ export function EventsPage() {
           <span className={styles.unit}>목표 ≤150 ms</span>
         </div>
         <div className={styles.tile}>
-          <small>배터리</small>
-          <span className={styles.big}>{plain(drive?.vehicle?.batt_v)}</span>
-          <span className={styles.unit}>V (2S)</span>
+          <small>차량</small>
+          <span className={styles.big}>{plain(drive?.vehicle?.v_mps)}</span>
+          <span className={styles.unit}>m/s</span>
         </div>
       </div>
 

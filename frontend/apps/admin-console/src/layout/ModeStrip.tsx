@@ -15,7 +15,11 @@ export function ModeStrip() {
   const control = drive?.control;
   const flags = drive?.vehicle?.flags;
   const raised = flags
-    ? [flags.estop && 'E-stop', flags.watchdog && '와치독', flags.obstacle && '장애물'].filter(Boolean)
+    ? [
+        flags.estop && '비상정지 버튼',
+        flags.watchdog && '명령 끊김 정지',
+        flags.obstacle && '근거리 장애물',
+      ].filter(Boolean)
     : [];
   const manual = drive?.apps.manual;
   const active = control?.active_app ? ROLES[control.active_app] : null;

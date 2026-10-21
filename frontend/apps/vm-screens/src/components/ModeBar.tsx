@@ -6,7 +6,8 @@ import styles from './ModeBar.module.css';
 const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 8);
 
 /**
- * 두 모니터 위쪽 공통 띠 (화면 정의서 M-01): 주행 모드·세대, 활성 앱, 안전 플래그, 차량 속도·조향·배터리.
+ * 두 모니터 위쪽 공통 띠 (화면 정의서 M-01): 주행 모드·세대, 활성 앱, 안전 플래그, 차량 속도·조향·장애물.
+ * 배터리 전압은 계약에서 선택 필드라(ESP32 에 측정 회로가 있을 때만) 보이지 않는다.
  * 값은 MQTT 계약 v1.1 §5.2·§5.4 (vehicle.status 는 게이트웨이가 낸다).
  */
 export function ModeBar() {
@@ -32,8 +33,8 @@ export function ModeBar() {
             <b style={{ color: 'var(--x-fault)' }}>없음</b>
           )}
         </span>
-        {flag(flags.estop, flags.estop ? 'E-stop 켜짐' : 'E-stop 해제')}
-        {flag(flags.watchdog, flags.watchdog ? '와치독 정지' : '와치독 정상')}
+        {flag(flags.estop, flags.estop ? '비상정지 버튼 눌림' : '비상정지 버튼 안 눌림')}
+        {flag(flags.watchdog, flags.watchdog ? '명령 끊김 정지 작동' : '명령 끊김 정지 아님')}
       </div>
       <dl className={styles.stats}>
         <div>
@@ -43,10 +44,6 @@ export function ModeBar() {
         <div>
           <dt>조향</dt>
           <dd>{rad(t.vehicle.steer_rad)}</dd>
-        </div>
-        <div>
-          <dt>배터리</dt>
-          <dd>{t.vehicle.batt_v.toFixed(2)} V</dd>
         </div>
         <div>
           <dt>장애물</dt>
