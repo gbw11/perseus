@@ -50,6 +50,38 @@ class SubprocessRunner:
         return CommandResult(proc.returncode, proc.stdout, proc.stderr)
 
 
+SSH_EXIT_CONNECTION_FAILED = 255  # OpenSSH: 연결·인증 실패는 원격 명령의 종료 코드가 아니라 255 다
+
+
+class SshRunner:
+    """보드 밖(개발 PC)에서 dom0 의 xl 을 SSH 로 부른다. 조회 전용 xen 드라이버를 보드에 설치하지 않고 실보드 출력에 대조할 때 쓴다.
+
+    XENOVA_XL_SSH=root@<dom0 주소> 로 켠다. BatchMode 라 키 인증만 되고 비밀번호 프롬프트로 멈추지 않는다.
+    원격 명령은 인자 리스트 그대로 넘기고(`--` 뒤), 타임아웃은 ssh 프로세스 전체에 건다.
+    """
+
+    def __init__(self, target: str, *, ssh: Sequence[str] = ("ssh",), connect_timeout_s: int = 5,
+                 runner: CommandRunner | None = None) -> None:
+        if not target or any(c.isspace() for c in target):
+            raise ValueError(f"XENOVA_XL_SSH must be like root@host, got {target!r}")
+        self.target = target
+        self._prefix = [*ssh, "-o", "BatchMode=yes", "-o", f"ConnectTimeout={connect_timeout_s}", target, "--"]
+        self._runner = runner or SubprocessRunner()
+
+    def run(self, args: Sequence[str], *, timeout_s: float) -> CommandResult:
+        remote = [str(a) for a in args]
+        try:
+            result = self._runner.run([*self._prefix, *remote], timeout_s=timeout_s)
+        except DriverTimeout as exc:
+            raise DriverTimeout(f"{' '.join(remote[:2])} over ssh to {self.target} timed out after {timeout_s:g}s") from exc
+        if result.returncode == SSH_EXIT_CONNECTION_FAILED:
+            raise DriverError(
+                f"ssh to {self.target} failed (connection or key authentication)",
+                detail=result.stderr.strip()[:STDERR_DETAIL_LIMIT] or None,
+            )
+        return result
+
+
 @dataclass(frozen=True)
 class XlRow:
     """`xl list` 한 줄: Name ID Mem VCPUs State Time(s)."""

@@ -1,0 +1,339 @@
+[
+ {
+  "name": "ok_vm_heartbeat",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": null
+ },
+ {
+  "name": "ok_app_drive_command",
+  "topic": "xenova/v1/apps/manual/events",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "drive.command",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {
+    "generation": 3,
+    "v_mps": 0.5,
+    "steer_rad": -0.1
+   },
+   "app_id": "manual"
+  },
+  "error": null
+ },
+ {
+  "name": "ok_source_id_vehicle_control",
+  "topic": "xenova/v1/vehicle/control",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "vehicle.control",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {},
+   "source_id": "dom0-gateway"
+  },
+  "error": null
+ },
+ {
+  "name": "ok_agent_command_without_seq",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/command",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "type": "agent.command",
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": null
+ },
+ {
+  "name": "not_object",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": [],
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "schema_2",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "2.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "SCHEMA_VERSION_UNSUPPORTED"
+ },
+ {
+  "name": "schema_missing",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "SCHEMA_VERSION_UNSUPPORTED"
+ },
+ {
+  "name": "schema_number",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": 1.0,
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "SCHEMA_VERSION_UNSUPPORTED"
+ },
+ {
+  "name": "seq_zero",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": 0,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "seq_bool",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": true,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "seq_float",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": 1.0,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "seq_string",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": "1",
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "seq_missing",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "message_id_missing",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "type_blank",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "   ",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "boot_id_number",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": 5,
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "payload_array",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": []
+  },
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "no_publisher",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "vm_id_mismatch",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "22222222-2222-4222-8222-222222222222",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "agent.heartbeat",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "VM_ID_MISMATCH"
+ },
+ {
+  "name": "app_id_mismatch",
+  "topic": "xenova/v1/apps/manual/events",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "drive.command",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {},
+   "app_id": "autonomous"
+  },
+  "error": "APP_ID_MISMATCH"
+ },
+ {
+  "name": "app_id_missing",
+  "topic": "xenova/v1/apps/manual/events",
+  "envelope": {
+   "schema_version": "1.0",
+   "message_id": "m-1",
+   "vm_id": "11111111-1111-4111-8111-111111111111",
+   "boot_id": "b-1",
+   "agent_instance_id": "i-1",
+   "type": "drive.command",
+   "seq": 1,
+   "sent_at": "2026-10-20T00:00:00.000Z",
+   "payload": {}
+  },
+  "error": "APP_ID_MISMATCH"
+ },
+ {
+  "name": "not_json",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "raw": "{\"schema_version\":",
+  "error": "PAYLOAD_INVALID"
+ },
+ {
+  "name": "trailing_garbage",
+  "topic": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat",
+  "raw": "{\"schema_version\": \"1.0\", \"message_id\": \"m-1\", \"vm_id\": \"11111111-1111-4111-8111-111111111111\", \"boot_id\": \"b-1\", \"agent_instance_id\": \"i-1\", \"type\": \"agent.heartbeat\", \"seq\": 1, \"sent_at\": \"2026-10-20T00:00:00.000Z\", \"payload\": {}} x",
+  "error": "PAYLOAD_INVALID"
+ }
+]
