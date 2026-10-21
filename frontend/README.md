@@ -72,7 +72,9 @@ VITE_MOCK=true npm run dev:console    # 또는 .env.local 에 VITE_MOCK=true
 - 지금은 **가짜 시나리오**(`src/telemetry/scenario.ts`)로 움직입니다. 규칙은 [MQTT 계약](../docs/contracts/mqtt-contract-v1.md) §5 와 [RC카 시나리오](../docs/scenario-rc-car.md) §4 를 흉내 냅니다 — 즉시 인계(100 ms), 복구, AUTO_READY(3초), 재개, SAFE_STOP, 격리.
 - 아래 조작 바로 장애를 넣습니다. 키오스크에서는 `?kiosk=1` 로 숨깁니다.
 - 화면 이동은 조작 바의 링크로 합니다 (주소창으로 이동하면 가짜 상태가 처음부터 다시 시작).
-- 실제 데이터 경로(브로커 WebSocket 직결 / 백엔드 중계)는 RC카 시나리오 §8 D2 결정 뒤 `TelemetryProvider` 와 같은 모양으로 붙입니다.
+- 실제 데이터는 백엔드 중계(`/ws/v1/drive/state`, `/ws/v1/events`, 시나리오 D2)로 받습니다 — `VITE_TELEMETRY=live` (`.env.example`).
+- 모니터는 보여 주기만 합니다 (화면 정의서 §1): 화면 안에 버튼이 없고, 수동주행 키·자율주행 재개는 관리 콘솔 시연 제어에서 합니다. 수동주행 상세의 키 표시는 웹에서 들어온 입력을 보여 줄 뿐입니다.
+- 색·배치는 Stitch 시안(a_1·b_vm_1·interaction 계열)을 따릅니다. 1920×1080 기준.
 
 ## 규칙
 

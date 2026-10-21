@@ -1,10 +1,20 @@
 import { useTelemetry } from '../telemetry/TelemetryProvider';
+import { APPS } from '../telemetry/types';
 import { MODE_LABEL, mps, rad } from './format';
 import styles from './ModeBar.module.css';
 
-/** 두 모니터 위쪽 공통 띠: 주행 모드·세대·차량 상태 (MQTT 계약 §5.2, §5.4) */
+const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 8);
+
+/**
+ * 두 모니터 위쪽 공통 띠 (화면 정의서 M-01): 주행 모드·세대, 활성 앱, 안전 플래그, 차량 속도·조향·배터리.
+ * 값은 MQTT 계약 v1.1 §5.2·§5.4 (vehicle.status 는 게이트웨이가 낸다).
+ */
 export function ModeBar() {
   const { telemetry: t } = useTelemetry();
+  const flags = t.vehicle.flags;
+  const flag = (on: boolean, text: string) => (
+    <span className={[styles.flag, on ? styles.flagOn : ''].join(' ')}>{text}</span>
+  );
   return (
     <header className={[styles.bar, styles[t.mode]].join(' ')}>
       <div className={styles.mode}>
@@ -12,6 +22,18 @@ export function ModeBar() {
         <span className={styles.modeCode}>
           {t.mode} · gen {t.generation}
         </span>
+      </div>
+      <div className={styles.center}>
+        <span>
+          활성:{' '}
+          {t.activeApp ? (
+            <b style={{ color: `var(--x-app-${t.activeApp})` }}>{APPS[t.activeApp].title}</b>
+          ) : (
+            <b style={{ color: 'var(--x-fault)' }}>없음</b>
+          )}
+        </span>
+        {flag(flags.estop, flags.estop ? 'E-stop 켜짐' : 'E-stop 해제')}
+        {flag(flags.watchdog, flags.watchdog ? '와치독 정지' : '와치독 정상')}
       </div>
       <dl className={styles.stats}>
         <div>
@@ -28,7 +50,13 @@ export function ModeBar() {
         </div>
         <div>
           <dt>장애물</dt>
-          <dd>{t.vehicle.flags.obstacle ? '감지' : '없음'}</dd>
+          <dd style={flags.obstacle ? { color: 'var(--x-fault)' } : undefined}>
+            {flags.obstacle ? '감지' : '없음'}
+          </dd>
+        </div>
+        <div>
+          <dt>시각</dt>
+          <dd className={styles.clock}>{clock(t.now)}</dd>
         </div>
       </dl>
     </header>

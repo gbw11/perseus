@@ -1,4 +1,4 @@
-import { Button, StatusBadge } from '@xenova/ui';
+import { StatusBadge } from '@xenova/ui';
 import { useEffect } from 'react';
 import { Navigate, useParams } from 'react-router';
 import { ModeBar } from '../components/ModeBar';
@@ -35,7 +35,7 @@ function DetailHeader({ id }: { id: AppId }) {
     <div className={styles.detailHead} style={{ ['--accent' as string]: `var(--x-app-${id})` }}>
       <h1>{meta.title}</h1>
       <span className={styles.guest}>
-        {meta.guest === 'zephyr' ? 'Zephyr' : 'Debian'} · {meta.topicAppId} · {meta.role}
+        {meta.guest === 'zephyr' ? 'Zephyr' : 'Debian 13'} · {meta.topicAppId} · {meta.role}
       </span>
       <StatusBadge
         health={status.health}
@@ -106,7 +106,7 @@ function AutonomousDetail() {
           title="목표 속도"
           value={alive ? (command?.v_mps ?? 0) : 0}
           min={0}
-          max={0.5}
+          max={1}
           text={alive && command ? mps(command.v_mps) : '—'}
         />
         <Gauge
@@ -140,6 +140,7 @@ const KEY_OF: Record<string, string> = {
   a: 'left',
   ArrowRight: 'right',
   d: 'right',
+  ' ': 'brake',
 };
 
 function ManualDetail() {
@@ -173,35 +174,28 @@ function ManualDetail() {
     };
   }, [local, setManualKeys]);
 
-  const release = (key: string) => setManualKeys(t.manualKeys.filter((k) => k !== key));
-  const pad = (key: string, text: string) => (
-    <button
-      type="button"
-      className={[styles.key, t.manualKeys.includes(key) ? styles.keyOn : ''].join(' ')}
-      onPointerDown={() => setManualKeys([...new Set([...t.manualKeys, key])])}
-      onPointerUp={() => release(key)}
-      onPointerLeave={() => release(key)}
-    >
+  // 모니터는 보여 주기만 한다 (화면 정의서 §1) — 눌린 키만 밝게. mock 에서는 이 화면에서 키보드로 흉내 낼 수 있다
+  const cap = (key: string, text: string) => (
+    <span className={[styles.keyCap, t.manualKeys.includes(key) ? styles.keyCapOn : ''].join(' ')}>
       {text}
-    </button>
+    </span>
   );
 
   return (
     <>
       <section className={styles.detailMain}>
         <h2>{active ? '운영자 운전 중' : '대기 중 — 자율주행에 문제가 생기면 바로 이어받는다'}</h2>
-        <div className={styles.pad}>
-          <span />
-          {pad('up', '▲')}
-          <span />
-          {pad('left', '◀')}
-          {pad('down', '▼')}
-          {pad('right', '▶')}
+        <div className={styles.keys} style={{ ['--accent' as string]: 'var(--x-app-manual)' }}>
+          {cap('left', '◀')}
+          {cap('up', '▲')}
+          {cap('down', '▼')}
+          {cap('right', '▶')}
+          {cap('brake', '브레이크')}
         </div>
         <p className={styles.dim}>
           {local
-            ? '화살표·WASD 또는 버튼. 입력이 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'
-            : '입력은 웹 시연 제어 화면에서 보낸다. 입력이 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'}
+            ? 'mock: 이 화면에서 화살표·WASD 로 흉내 낸다. 입력이 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'
+            : '입력은 관리 콘솔 시연 제어에서 들어온다. 200 ms 동안 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'}
         </p>
       </section>
       <section className={styles.detailSide}>
@@ -234,10 +228,8 @@ function ManualDetail() {
 }
 
 function InteractionDetail() {
-  const { telemetry: t, resume, source } = useTelemetry();
+  const { telemetry: t } = useTelemetry();
   const down = t.apps.interaction.domain !== 'running' || t.apps.interaction.health === 'fault';
-  const buttonText =
-    t.mode === 'AUTO_READY' ? '자율주행 재개' : t.mode === 'AUTO' ? '자율주행 중' : '재개 대기';
   return (
     <>
       <section className={styles.detailMain}>
@@ -257,13 +249,14 @@ function InteractionDetail() {
         )}
       </section>
       <section className={styles.detailSide}>
-        <h2>자율주행 재개</h2>
+        <h2>자율주행 재개 상태</h2>
+        <div className={[styles.resumeState, t.mode === 'AUTO_READY' ? styles.resumeReady : ''].join(' ')}>
+          {t.mode === 'AUTO_READY' ? '재개 가능' : t.mode === 'AUTO' ? '자율주행 중' : '재개 대기'}
+        </div>
         <p className={styles.dim}>
-          복구된 자율주행 VM 의 명령이 3초 연속 신선하면 AUTO_READY. 그때만 재개를 받는다.
+          복구된 자율주행 VM 이 3초 연속 정상(도메인 실행 · app.heartbeat · 명령 신선)이면 AUTO_READY. 재개는
+          운영자가 관리 콘솔 시연 제어에서 누른다 — 모니터에는 버튼이 없다.
         </p>
-        <Button size="lg" onClick={resume} disabled={down || source !== 'mock' || t.mode !== 'AUTO_READY'}>
-          {buttonText}
-        </Button>
       </section>
     </>
   );

@@ -51,3 +51,28 @@
   font-size: var(--x-text-lg);
   font-weight: 700;
 }
+.center {
+  display: flex;
+  flex: 1;
+  gap: var(--x-space-3);
+  align-items: center;
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-md);
+}
+.flag {
+  padding: 2px 10px;
+  border: 1px solid var(--x-border);
+  border-radius: 4px;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.flagOn {
+  border-color: var(--x-fault);
+  background: var(--x-fault-soft);
+  color: var(--x-fault);
+}
+.clock {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+  color: var(--x-text-muted);
+}

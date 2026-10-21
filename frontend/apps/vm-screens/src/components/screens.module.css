@@ -284,3 +284,73 @@
 .devNav a {
   color: var(--x-text-muted);
 }
+
+/* ---- Stitch 시안(a_1·b_vm_1) 큰 숫자 타일 — 멀리서 읽히게 ---- */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--x-space-3);
+}
+.tile {
+  padding: var(--x-space-3) var(--x-space-4);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+}
+.tile small {
+  display: block;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.tileValue {
+  font-family: var(--x-font-mono);
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+.tileUnit {
+  margin-left: 6px;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-md);
+}
+.standbyTag {
+  align-self: flex-start;
+  padding: 4px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-weight: 800;
+}
+.keys {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--x-space-2);
+}
+.keyCap {
+  display: grid;
+  place-items: center;
+  height: 56px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  color: var(--x-text-muted);
+  font-size: var(--x-text-lg);
+  font-weight: 800;
+}
+.keyCapOn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--x-bg);
+}
+.resumeState {
+  padding: var(--x-space-5);
+  border: 2px solid var(--x-border);
+  border-radius: var(--x-radius);
+  font-size: var(--x-text-xl);
+  font-weight: 800;
+  text-align: center;
+}
+.resumeReady {
+  border-color: var(--x-recovering);
+  color: var(--x-recovering);
+}
