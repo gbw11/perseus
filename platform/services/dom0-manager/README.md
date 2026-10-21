@@ -46,9 +46,9 @@ curl -i -X POST localhost:8081/api/v1/vms/11111111-1111-4111-8111-111111111111/s
 | `XENOVA_DRIVER` | `mock` | `mock` / `xen` / `platform` |
 | `XENOVA_HOST` / `XENOVA_PORT` | `127.0.0.1` / `8081` | 바인드 주소. dom0 밖으로 열지 않습니다 |
 | `XENOVA_XL_QUERY_TIMEOUT` | `5` | 조회용 xl 호출 한도(초). Spring 조회 대기 6초 안 |
-| `XENOVA_XL_COMMAND_TIMEOUT` | `95` | 명령용 xl 호출 한도(초) |
+| `XENOVA_XL_COMMAND_TIMEOUT` | `95` | 명령용 xl 서브프로세스 호출 한도(초). platform 모드의 Manager 호출에는 걸리지 않는다 |
 | `XENOVA_XL_SSH` | (없음) | 설정하면 xl 을 로컬 대신 `ssh -o BatchMode=yes <값> -- xl …`로 부른다(예: `root@100.64.0.1`). 개발 PC에서 xen 조회 모드로 실보드 출력을 계약과 대조할 때만 쓴다. 키 인증 필수 |
-| `XENOVA_SHUTDOWN_GRACE` | `90` | 정상 종료 대기(초). 계약 v1.1: 시간이 지나도 자동 강제 종료하지 않고 실패로 보고 |
+| `XENOVA_SHUTDOWN_GRACE` | `90` | 정상 종료 대기(초). 계약 v1.1: 시간이 지나도 자동 강제 종료하지 않고 실패로 보고. platform 모드는 플랫폼 고정 대기 90 만 허용(다른 값은 시작 거부) |
 | `XENOVA_SERVICE_TOKEN` | (없음) | 설정하면 `/healthz`를 포함한 모든 요청에 `Authorization: Bearer <토큰>`을 요구(401). Tailscale 바인드 배포에서는 필수 |
 | `XENOVA_HOST_CPUS` | `4` | vcpus 상한 기본값. `xl info`의 nr_cpus가 있으면 그 값 우선 |
 | `XENOVA_INSTANCE_ROOT` | `/srv/xenova/instances` | 인스턴스 루트 (xen 모드의 등록 확인용. platform 모드는 Manager의 data 경로를 씀) |
@@ -170,6 +170,10 @@ python -m pytest
 | `PlatformUnavailable` | 503 | registry·저장소·Xen 일시 장애 (`STORAGE_UNAVAILABLE`·`RECOVERY_REQUIRED`·`CLEANUP_INCOMPLETE`), 다른 플랫폼 작업이 잠금 보유(`OPERATION_IN_PROGRESS`, 대기 한도 초과 포함, 재시도 가능) |
 | `DriverTimeout` | 504 | xl·플랫폼 호출 시한 초과(정지 90초 포함) |
 | `DriverError` | 500 | 그 외 실행 오류 |
+
+플랫폼 오류에는 본문에 `platform_code`(Manager 원본 코드)가 같이 나갑니다. 복구 기반 코드는 `HOST_QUIESCING`·`BOOT_ADMISSION_REQUIRED`·`INTENT_MISMATCH` → 409 `InvalidState`, `RECOVERY_MODE_UNSUPPORTED` → 501, `DEADLINE_EXCEEDED` → 504, `OBSERVATION_UNAVAILABLE`·`RECONCILE_REQUIRED`·`INTENT_RECONCILIATION_REQUIRED` → 503, `XEN_EXECUTION_FAILED` → 500 이고, 모르는 코드는 500 이되 `platform_code`는 보존합니다(계약 8.1 표). 코드로 분기할 때는 `detail`의 `"CODE: message"` 문자열이 아니라 `platform_code`를 씁니다. 정지 대기 만료는 플랫폼에 전용 코드가 아직 없어 `XEN_EXECUTION_FAILED`·`ARTIFACT_INVALID`의 메시지(`deadline`, `timed out`)로만 504 를 가립니다.
+
+플랫폼 stop 은 대기 시간을 입력받지 않고 90초 고정이라 `shutdown_grace_s`는 전달되지 않습니다. platform 모드는 `XENOVA_SHUTDOWN_GRACE`를 90으로만 허용하며 다른 값은 시작 시 거부합니다. `XENOVA_XL_COMMAND_TIMEOUT`은 xl 서브프로세스에만 걸리고 Manager 호출(정지는 약 90초)을 제한하지 않습니다.
 
 ## 아직 정하지 않은 것
 

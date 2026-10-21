@@ -90,6 +90,10 @@ class Error(BaseModel):
     message: str
     detail: str | None = Field(default=None, description="백엔드 로그용 Xen 상세. 프론트에 노출하지 않는다")
     resource: ResourceError | None = Field(default=None, description="InsufficientResources 에만 있다")
+    platform_code: str | None = Field(
+        default=None,
+        description="플랫폼 Manager 가 준 원본 오류 코드(HOST_QUIESCING 등). 플랫폼 오류에만 있다. 분기는 detail 문자열이 아니라 이 값으로 한다",
+    )
 
 
 class HealthStatus(str, Enum):

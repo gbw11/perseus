@@ -28,6 +28,7 @@ Spring이 생성 전에 발급한 UUID 형식의 `vm_id`가 시스템 전체의 
 | Xen 런타임 상태 조회·변경 | dom0-manager |
 | 디스크 수명주기 집행 | dom0-manager |
 | 자원 가용 판정 | dom0-manager |
+| 자동 복구: heartbeat·Xen 상태·desired_state 검사, 재시도·backoff, 플랫폼 `recover_once` 호출 | dom0 Recovery Worker (제어 계층, 2026-10-20 확정, `docs/build-guides/xenova-recovery-foundation.md`). Spring은 관측 상태와 복구 이벤트를 받을 뿐 재시작 명령을 내리지 않음 |
 | IP 자동 할당과 중복 방지 | 플랫폼 전역 잠금 내부 |
 
 ### 1.3 계층별 계약 분리
@@ -240,7 +241,7 @@ dom0-manager는 정상이지만 Xen이 응답하지 않는 상황을 구분하�
 | `200` | `{"status": "ok"}` | dom0-manager와 Xen 모두 응답 |
 | `503` | `{"status": "xen_unavailable"}` | dom0-manager는 살아 있지만 Xen(`xl`)이 응답하지 않음 |
 
-Spring의 시스템 상태 점검(REST-28)에서 Xen 상태를 판단할 때 사용합니다. 자동 복구의 주체(보드 또는 Spring)는 아직 정하지 않았으며(13장), 정해지면 이 엔드포인트의 사용처를 갱신합니다.
+Spring의 시스템 상태 점검(REST-28)에서 Xen 상태를 판단할 때 사용합니다. 자동 복구는 dom0의 Recovery Worker가 담당하므로(1.2절) Spring은 이 응답으로 복구를 시작하지 않습니다.
 
 ---
 
@@ -326,6 +327,23 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 | `message` | 사람이 읽는 설명 |
 | `detail` | 선택. Xen 원문 등 상세. **Spring 로그 전용**이며 프론트에 노출하지 않음 |
 | `resource` | 선택. `InsufficientResources`일 때만 `{name, requested, available}` |
+| `platform_code` | 선택. 플랫폼 Manager가 준 원본 오류 코드(`HOST_QUIESCING` 등). 플랫폼 오류에만 있고 xl·검증·인증 오류에는 없다. 모르는 플랫폼 코드는 `500 DriverError`로 내되 이 값은 보존한다. **코드로 분기할 때는 `detail` 문자열이 아니라 이 값을 쓴다** |
+
+**플랫폼 오류 코드 → dom0-manager 응답** (플랫폼 복구 기반, `docs/build-guides/xenova-recovery-foundation.md` "오류와 관측")
+
+| `platform_code` | HTTP / `code` | 의미 |
+|---|---|---|
+| `HOST_QUIESCING`, `BOOT_ADMISSION_REQUIRED`, `INTENT_MISMATCH` | `409 InvalidState` | host가 새 시작·복구를 닫음 / 현재 host의 실행 정책 미확정·거절 / running 의도·revision 불일치. 재전송으로 풀리지 않는 충돌 |
+| `TARGET_CHANGED` | `409 InvalidState` | 이전 host·lifecycle·실행 관측이 더 이상 대상이 아님 |
+| `RECOVERY_MODE_UNSUPPORTED` | `501 NotSupported` | graceful 미지원(Zephyr) 또는 per-VM force 승인 없음 |
+| `DEADLINE_EXCEEDED` | `504 DriverTimeout` | 같은 host의 최초 deadline 만료·범위 초과 |
+| `OBSERVATION_UNAVAILABLE`, `RECONCILE_REQUIRED`, `INTENT_RECONCILIATION_REQUIRED` | `503 PlatformUnavailable` | Xen 관측 실패(부재가 아님) / 실행·기록 결과를 확정하지 못해 운영자 재판정 필요 / 의도 원본과 journal 불일치. 재시도 가능하지만 자동 반복 대상은 아님 |
+| `XEN_EXECUTION_FAILED` | `500 DriverError` | 수락 후 물리 제어 실패. 플랫폼은 accepted 의도를 유지 |
+| `OPERATION_IN_PROGRESS`, `STORAGE_UNAVAILABLE`, `RECOVERY_REQUIRED`, `CLEANUP_INCOMPLETE` | `503 PlatformUnavailable` | 기존 매핑 |
+| `INSUFFICIENT_STORAGE`, `IP_POOL_EXHAUSTED` | `507 InsufficientResources` | 기존 매핑 (`ipv4`는 `resource.name`) |
+| 그 밖의 코드 | `500 DriverError` | `platform_code` 보존 |
+
+정지 대기 만료는 플랫폼에 아직 전용 코드가 없어 `XEN_EXECUTION_FAILED`(복구 기반 제어 경로) 또는 `ARTIFACT_INVALID`(일반 오류 포장)에 메시지(`deadline`, `timed out`)로만 실린다. dom0-manager는 이 두 코드에 한해 메시지로 시한 초과를 가려 `504 DriverTimeout`으로 내며, 플랫폼이 `DEADLINE_EXCEEDED`를 내면 이 예외는 제거한다(플랫폼 파트에 요청).
 
 FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환하므로 `400 InvalidArgument`로 정규화합니다. 예외 핸들러 교체만으로는 부족하며, **생성 스키마에서 422 응답 정의와 `HTTPValidationError` 모델까지 제거**해야 OpenAPI 차이 검사가 통과합니다.
 
@@ -405,9 +423,11 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 재시도 간격 | 0.5초 |
 | 응답 대기 — 조회 | 6초 |
 | 응답 대기 — 명령 | 100초 |
-| 플랫폼 stop 응답 한도 | 90초 |
+| 플랫폼 stop 응답 한도 | 90초 (플랫폼 고정. Manager stop은 대기 시간을 입력받지 않는다) |
 | 전체 예산 — 조회 | 약 15초 |
 | 전체 예산 — 명령 | 약 103초 |
+
+플랫폼 stop은 대기 시간을 입력받지 않고(Manager stop 명세는 `vm_id`·`force`뿐) 90초 deadline 하나를 제거 관측까지 공유하므로 Manager 호출은 약 90초 안에 끝납니다. platform 모드의 dom0-manager는 `XENOVA_SHUTDOWN_GRACE`를 90으로만 허용하며 다른 값은 시작 시 설정 오류입니다. `XENOVA_XL_COMMAND_TIMEOUT`은 xl 서브프로세스에만 걸리고 Manager 호출을 제한하지 않습니다. Spring의 명령 응답 대기 100초가 그 위에 있습니다.
 
 명령의 응답 타임아웃에서 재시도하지 않는 이유는 두 가지입니다. 연결이 성립했으므로 dom0-manager가 요청을 이미 받아 처리 중일 수 있고, `xl` 호출은 블로킹 subprocess이며 uvicorn 워커가 1개이므로 재전송한 요청은 처리 중인 요청 뒤에서 대기할 뿐입니다.
 
@@ -450,7 +470,6 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | OS별 실제 버전 값 | 제어 계층 | 이미지 빌드 시 실측 |
 | 템플릿별 `min_memory_mib` | 플랫폼·백엔드 | 플랫폼 카탈로그 `resource_limits`를 버전별 descriptor로 옮기고(Zephyr는 min=max) Spring 설정이 그 값을 따른다. Zephyr starter 1.0.0은 16 |
 | 서비스 토큰 배포·회전 | 공통 | Spring과 dom0-manager에 같은 Bearer 서비스 토큰을 안전하게 배포하고 회전하는 운영 절차 |
-| 자동 복구 주체 | 공통 | 보드(Xen `on_crash`·dom0 감시) 또는 Spring. 결정 전까지 Spring은 복구를 수행하지 않음 |
 | 수명주기·강제 종료 전달 | 제어 계층 + 플랫폼 | retire/restore/purge의 작업 키·operation_id·대상 세대와 개별 force 전달. 보드 종료 정책을 개별 강제 종료 승인으로 사용하지 않음 |
 
 dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포함한 내부 API에서 Bearer 서비스 토큰을 검사합니다. Spring은 `DOM0_MANAGER_BASE_URL`에 Tailscale 주소를 설정하고 `DOM0_MANAGER_SERVICE_TOKEN`을 `Authorization: Bearer`로 전송합니다. 연결 실패는 `503 VM_CONTROL_UNAVAILABLE`로 변환합니다.
@@ -475,3 +494,4 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1.9 | 2026-10-19 | Domain-0 보호(S15P31E110-206): nil UUID 대상 호출은 모든 엔드포인트에서 `400 InvalidArgument`, 목록은 domid 0 또는 이름 Domain-0 을 제외(9장) |
 | v1.10 | 2026-10-20 | 실보드 `xl` 출력 확인(S15P31E110-36): 3.2절에 `-bp---`(blocked+paused 동시) 관측과 `------` 미관측, Domain-0의 `c_info.uuid` 부재를 기록. 매핑 변경 없음 |
 | v1.11 | 2026-10-21 | 공개 VM 객체에 `role`(MQTT `app_id`: `autonomous`·`manual`·`message-board`, 없으면 `null`) 추가, 생성 요청에 선택 필드 `role`, 역할 변경 `PATCH /api/v1/vms/{vm_id}` 추가(2.2·5·9장). Spring 레코드에만 저장하며 dom0-manager 계약은 바뀌지 않음 (S15P31E110-55) |
+| v1.12 | 2026-10-21 | 플랫폼 복구 기반(67b0e26) 반영(S15P31E110-245): 오류 본문에 선택 필드 `platform_code` 추가, 복구 기반 오류 코드의 HTTP 매핑표(8.1), 정지 대기 만료의 임시 메시지 판별 명시, stop 대기는 플랫폼 90초 고정이라 platform 모드는 `XENOVA_SHUTDOWN_GRACE=90`만 허용하고 `XENOVA_XL_COMMAND_TIMEOUT`은 Manager 호출을 제한하지 않음을 명시(10장). 자동 복구 주체를 dom0 Recovery Worker로 확정하고 13장 미확정 항목에서 제거(1.2·4.5) |

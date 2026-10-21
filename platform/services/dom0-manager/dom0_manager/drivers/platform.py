@@ -31,6 +31,7 @@ from ..errors import (
     InsufficientResources,
     InvalidArgument,
     InvalidState,
+    NotSupportedByPlatform,
     PlatformUnavailable,
     VMExists,
     VMNotFound,
@@ -146,7 +147,22 @@ _CODE_MAP: dict[str, type[Dom0ManagerError]] = {
     "STORAGE_UNAVAILABLE": PlatformUnavailable,
     "RECOVERY_REQUIRED": PlatformUnavailable,
     "CLEANUP_INCOMPLETE": PlatformUnavailable,
+    # 복구 기반(xenova-recovery-foundation.md "오류와 관측"). 충돌(CLI exit 3)은 409, 실행/불확실(exit 4)은 503·500
+    "HOST_QUIESCING": InvalidState,  # host 가 새 시작·복구 수락을 닫음 (종료 barrier)
+    "BOOT_ADMISSION_REQUIRED": InvalidState,  # 현재 host 의 실행 정책이 미평가·미확정·거절
+    "INTENT_MISMATCH": InvalidState,  # 적용 가능한 running 의도 또는 revision 불일치
+    "RECOVERY_MODE_UNSUPPORTED": NotSupportedByPlatform,  # graceful 미지원(Zephyr) 또는 per-VM force 승인 없음
+    "DEADLINE_EXCEEDED": DriverTimeout,  # 같은 host 의 최초 deadline 만료·범위 초과
+    "OBSERVATION_UNAVAILABLE": PlatformUnavailable,  # Xen 접근·출력·incarnation 을 확인하지 못함. 부재가 아님
+    "RECONCILE_REQUIRED": PlatformUnavailable,  # 실행·영구 기록의 결과를 안전하게 확정하지 못함. 운영자 재판정 전까지 재시도
+    "INTENT_RECONCILIATION_REQUIRED": PlatformUnavailable,  # 의도 원본과 journal 불일치로 start 보류
+    "XEN_EXECUTION_FAILED": DriverError,  # 수락 후 물리 제어 실패. accepted 의도는 유지
 }
+
+# 정지 대기 만료는 아직 전용 코드 없이 XEN_EXECUTION_FAILED(복구 기반 control 경로)나 ARTIFACT_INVALID(일반 PlatformError 포장)에
+# 메시지로만 실린다. 플랫폼이 DEADLINE_EXCEEDED 를 내기 전까지 이 두 코드에 한해 메시지로 시한 초과를 가려 504 로 낸다
+_TIMEOUT_MESSAGE_CODES = frozenset({"XEN_EXECUTION_FAILED", "ARTIFACT_INVALID"})
+_TIMEOUT_MESSAGE_MARKERS = ("deadline", "timed out")
 
 
 def raise_for_envelope(envelope: dict[str, Any], *, context: str) -> dict[str, Any]:
@@ -156,22 +172,20 @@ def raise_for_envelope(envelope: dict[str, Any], *, context: str) -> dict[str, A
     error = envelope.get("error") or {}
     code = str(error.get("code", "UNKNOWN"))
     message = str(error.get("message", "platform error"))
-    detail = f"{code}: {message}"
-    if "deadline" in message:
-        raise DriverTimeout(f"{context}: platform operation deadline exceeded", detail=detail)
+    detail = f"{code}: {message}"  # 사람용. 분기는 platform_code 로 한다
     if code == "INSUFFICIENT_STORAGE":
-        raise _insufficient_storage(message, detail)
+        raise _insufficient_storage(message, detail, platform_code=code)
     if code == "IP_POOL_EXHAUSTED":  # 플랫폼이 전역 잠금 안에서 고른 Linux 내부 IP 가 바닥남
-        raise InsufficientResources("ipv4", 1, 0)
-    cls = _CODE_MAP.get(code)
-    if cls is None:  # ARTIFACT_INVALID 등 실행 오류
-        raise DriverError(f"{context}: {message}", detail=detail)
-    raise cls(f"{context}: {message}", detail=detail)
+        raise InsufficientResources("ipv4", 1, 0, platform_code=code)
+    if code in _TIMEOUT_MESSAGE_CODES and any(marker in message for marker in _TIMEOUT_MESSAGE_MARKERS):
+        raise DriverTimeout(f"{context}: platform operation deadline exceeded", detail=detail, platform_code=code)
+    cls = _CODE_MAP.get(code, DriverError)  # 모르는 코드(ARTIFACT_INVALID 등)는 500 이지만 원본 코드는 보존한다
+    raise cls(f"{context}: {message}", detail=detail, platform_code=code)
 
 
-def _insufficient_storage(message: str, detail: str) -> Dom0ManagerError:
+def _insufficient_storage(message: str, detail: str, *, platform_code: str) -> Dom0ManagerError:
     # 계약 ResourceError.name 은 vcpus|memory_mib 뿐이라 resource 없이 507 만 낸다 (v2 에서 storage 추가 제안)
-    err = Dom0ManagerError(f"insufficient storage on board: {message}", detail=detail)
+    err = Dom0ManagerError(f"insufficient storage on board: {message}", detail=detail, platform_code=platform_code)
     err.status_code = 507
     err.code = "InsufficientResources"
     return err
@@ -285,6 +299,8 @@ class PlatformDriver(Driver):
         return domain
 
     def shutdown(self, vm_id: UUID, *, grace_s: float) -> None:
+        # Manager stop 에는 대기 시간 입력이 없다(vm_id·force 뿐). 실제 대기는 config.PLATFORM_STOP_WAIT_S 고정이고 Settings 가
+        # platform 모드에서 shutdown_grace_s 를 그 값으로 강제하므로 grace_s 는 여기서 쓰지 않는다
         self._stop(vm_id, force=False)
 
     def destroy(self, vm_id: UUID) -> None:

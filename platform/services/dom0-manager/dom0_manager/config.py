@@ -8,6 +8,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 DRIVERS = ("mock", "xen", "platform")
+# 플랫폼 stop 은 대기 시간을 입력받지 않고(Manager stop 명세는 vm_id·force 뿐) 이 시간을 기다린다. xenova_vm.stop_many 의
+# timeout=90 이며 제거 관측도 같은 deadline 을 공유하므로 Manager 호출은 이 시간 안팎에서 끝난다. platform 모드의 shutdown_grace_s 는
+# 이 값과 같아야 한다. xl_command_timeout_s 는 xl 서브프로세스에만 걸리고 Manager 호출을 제한하지 않는다
+PLATFORM_STOP_WAIT_S = 90.0
 
 
 @dataclass(frozen=True)
@@ -15,7 +19,8 @@ class Settings:
     driver: str = "mock"
     host: str = "127.0.0.1"
     port: int = 8081
-    # 계약 v1.1: 조회 드라이버 한도 5초(Spring 대기 6초 안), 정지는 플랫폼이 최대 90초 동기 대기하고 자동 강제 종료 없음
+    # 계약 v1.1: 조회 드라이버 한도 5초(Spring 대기 6초 안), 정지는 플랫폼이 최대 90초 동기 대기하고 자동 강제 종료 없음.
+    # xl_command_timeout_s 는 xl 서브프로세스(create/shutdown/destroy)에만 걸린다. platform 모드의 정지 대기는 PLATFORM_STOP_WAIT_S 고정
     xl_query_timeout_s: float = 5.0
     xl_command_timeout_s: float = 95.0
     # 비어 있지 않으면 xl 을 로컬 대신 SSH 로 부른다 (예: root@100.64.0.1). 개발 PC 에서 실보드 조회를 대조할 때만 쓴다
@@ -40,6 +45,12 @@ class Settings:
             value = getattr(self, name)
             if not (math.isfinite(value) and value > 0):
                 raise ValueError(f"{name} must be a finite positive number of seconds, got {value!r}")
+        if self.driver == "platform" and self.shutdown_grace_s != PLATFORM_STOP_WAIT_S:
+            # 플랫폼은 설정과 무관하게 90초를 기다린다. 다른 값은 운영자가 짧은 정지를 기대하게 만들므로 시작 시점에 거부한다
+            raise ValueError(
+                f"platform stop waits a fixed {PLATFORM_STOP_WAIT_S:g}s and takes no grace input; "
+                f"XENOVA_SHUTDOWN_GRACE must be {PLATFORM_STOP_WAIT_S:g} (or unset) in platform mode, got {self.shutdown_grace_s!r}"
+            )
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
