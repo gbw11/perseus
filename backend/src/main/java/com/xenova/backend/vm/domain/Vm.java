@@ -11,14 +11,22 @@ public record Vm(
         String templateId,
         String templateVersion,
         int vcpus,
-        int memoryMib) {
+        int memoryMib,
+        VmRole role) {
+
+    public Vm(String vmId, String name, GuestKind guestKind, VmState state, String templateId, String templateVersion,
+            int vcpus, int memoryMib) {
+        this(vmId, name, guestKind, state, templateId, templateVersion, vcpus, memoryMib, null);
+    }
 
     public static Vm of(VmRecord record, VmRuntime runtime) {
         if (runtime == null) {
             return new Vm(record.getVmId(), record.getName(), record.getGuestKind(), VmState.STOPPED,
-                    record.getTemplateId(), record.getTemplateVersion(), record.getVcpus(), record.getMemoryMib());
+                    record.getTemplateId(), record.getTemplateVersion(), record.getVcpus(), record.getMemoryMib(),
+                    record.getRole());
         }
         return new Vm(record.getVmId(), record.getName(), record.getGuestKind(), runtime.state(),
-                record.getTemplateId(), record.getTemplateVersion(), runtime.vcpus(), runtime.memoryMib());
+                record.getTemplateId(), record.getTemplateVersion(), runtime.vcpus(), runtime.memoryMib(),
+                record.getRole());
     }
 }
