@@ -1,6 +1,6 @@
 # MQTT 메시지 계약 v1
 
-**최종 갱신** 2026-10-21 v1.1 (ESP32는 게이트웨이 시리얼 뒤로, Zephyr는 vchan 중계, `AUTO_READY`는 `app.heartbeat` 기준 — 변경 이력)
+**최종 갱신** 2026-10-21 v1.1.1 (게이트웨이 구현의 전환 표·사유 값, `perception.result` 좌표계 — 변경 이력)
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼, RC카 시나리오
 **브로커** dom0 Mosquitto
 
@@ -129,9 +129,24 @@ Zephyr 주행 VM은 PV 네트워크 대신 Xen vchan으로 dom0 중계에 붙고
 | 모드 | 활성 앱 | 들어가는 조건 |
 | --- | --- | --- |
 | `AUTO` | autonomous | 시작, 또는 `AUTO_READY`에서 자율주행 재개 요청 |
-| `MANUAL` | manual | `AUTO`에서 자율 명령이 100 ms 끊기고 수동 명령이 신선할 때, 또는 `SAFE_STOP`에서 수동 명령이 신선해졌을 때 |
+| `MANUAL` | manual | `AUTO`에서 자율 명령이 100 ms 끊기고 수동 명령이 신선할 때, `SAFE_STOP`에서 수동 명령이 신선해졌을 때, 또는 `AUTO_READY` 조건이 깨졌을 때 |
 | `SAFE_STOP` | 없음 | 활성 앱 명령이 끊겼는데 넘길 앱이 없을 때 |
 | `AUTO_READY` | manual | `MANUAL` 중 복구된 자율 VM이 3초 연속 아래를 모두 만족할 때: Xen 도메인 실행 중, `app.heartbeat` 신선(`state`가 `error` 아님), `drive.command` 신선 |
+
+전환 표 (게이트웨이 구현 `platform/services/gateway` 와 같다):
+
+| 지금 | 조건 | 다음 | `reason` |
+| --- | --- | --- | --- |
+| (시작) | — | `AUTO` | `start` (`drive.mode.changed`의 `from`은 null) |
+| `AUTO` | 자율 명령 100 ms 끊김 + 수동 명령 신선 | `MANUAL` | `command_timeout` |
+| `AUTO` | 자율 명령 100 ms 끊김 + 수동도 신선하지 않음 | `SAFE_STOP` | `no_fresh_standby` |
+| `MANUAL` | 위 `AUTO_READY` 조건 3초 충족 | `AUTO_READY` | `autonomous_ready` |
+| `MANUAL`·`AUTO_READY` | 수동 명령 100 ms 끊김 (자율이 신선해도) | `SAFE_STOP` | `no_fresh_standby` |
+| `AUTO_READY` | `AUTO_READY` 조건이 깨짐 | `MANUAL` | `autonomous_lost` |
+| `AUTO_READY` | `drive.resume.requested` | `AUTO` | `resume_requested` |
+| `SAFE_STOP` | 수동 명령 신선 | `MANUAL` | `manual_fresh` |
+
+- `AUTO`에는 시작과 재개로만 들어간다. `SAFE_STOP`에서 자율 명령이 신선해져도 `AUTO`로 가지 않는다 (사람이 확인한 뒤 수동 → 재개).
 
 - 대기 중인 앱도 `drive.command`를 계속 발행한다. 게이트웨이는 활성 앱 명령만 유효로 보고, 대기 앱 명령은 신선도 확인에만 쓴다. 수동 VM은 키 입력이 없으면 `v_mps = 0`을 보낸다.
 - 모드가 바뀌거나 활성 앱이 바뀔 때마다 게이트웨이는 `generation`을 1 올린다.
@@ -169,7 +184,7 @@ Zephyr 주행 VM은 PV 네트워크 대신 Xen vchan으로 dom0 중계에 붙고
 | `mode` | string | `AUTO` / `MANUAL` / `AUTO_READY` / `SAFE_STOP` |
 | `active_app` | string \| null | `autonomous` / `manual` / null (`SAFE_STOP`) |
 | `active_vm_id` | string \| null | 활성 앱의 VM |
-| `reason` | string | 전환 사유 (`start`, `command_timeout`, `resume_requested`, `no_fresh_standby`) |
+| `reason` | string | 전환 사유 (`start`, `command_timeout`, `no_fresh_standby`, `autonomous_ready`, `autonomous_lost`, `resume_requested`, `manual_fresh` — 5.2 전환 표) |
 
 **`vehicle.status`** (게이트웨이, `source_id: dom0-gateway`)
 
@@ -182,14 +197,18 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 | `flags` | object | `estop`, `watchdog`, `obstacle` (bool) |
 | `batt_v` | float | 배터리 전압 |
 
-**`perception.result`** (젯슨)
+**`perception.result`** (젯슨, `source_id: jetson`)
+
+좌표는 차량 기준 지면 좌표다. 원점 = 카메라 바로 아래 지면, x = 전방(m), y = 왼쪽이 +(m). (PC 대역 구현 `platform/apps/perception` 과 같다)
 
 | 필드 | 타입 | 설명 |
 | --- | --- | --- |
-| `lane_offset_m` | float | 차선 중심 대비 |
-| `heading_err_rad` | float | 진행 방향 오차 |
-| `obstacles` | array | `[{x, y, w}]` |
-| `stop` | bool | 정지 필요 |
+| `lane_offset_m` | float | 차선 중심 대비 차의 위치. + 이면 차가 중심보다 왼쪽. 차선을 못 찾으면 0 |
+| `heading_err_rad` | float | 진행 방향 오차. + 이면 차선이 왼쪽으로 돈다 (`steer_rad` + 와 같은 쪽). 차선을 못 찾으면 0 |
+| `obstacles` | array | `[{x, y, w}]` — 장애물 아랫변 가운데의 위치(m)와 아랫변 폭(m). 가까운 순, 최대 8개 |
+| `stop` | bool | 정지 필요 (전방 정지 영역 안에 장애물) |
+
+- 새 인식 결과가 0.5초 넘게 없으면 발행을 멈춘다 (오래된 결과를 반복하지 않는다 — 젯슨 끊김이 받는 쪽에서 보이게).
 
 ### 5.5 게이트웨이 수용 규칙
 
@@ -211,9 +230,11 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 | MQTT-06 | `xenova/v1/apps/message-board/events` | `message.posted` | 메시지 보드 → 주행 화면 | 1 | `text`, `level` |
 | MQTT-06 | `xenova/v1/apps/message-board/events` | `drive.resume.requested` | 메시지 보드 → 게이트웨이 | 1 | `requested_by` |
 | MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `from`, `to`, `generation`, `reason` |
-| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.fault.detected` | 게이트웨이 → 메시지 보드, 백엔드 | 1 | `app_id`, `vm_id`, `reason`, `detected_at` |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.fault.detected` | 게이트웨이 → 메시지 보드, 백엔드 | 1 | `app_id`, `vm_id`, `reason`(`command_timeout`), `detected_at` |
 
-- `drive.resume.requested`는 `AUTO_READY`일 때만 받아들인다. 다른 모드에서는 무시하고 `drive.mode.changed`를 내지 않는다.
+- `drive.resume.requested`는 `AUTO_READY`일 때만 받아들인다. 다른 모드에서는 무시하고 `drive.mode.changed`를 내지 않는다. 수락·거절 응답 이벤트는 없다 — 재개 성공은 `drive.mode.changed`(`to: AUTO`, `reason: resume_requested`)로 안다.
+- `drive.fault.detected`는 한 번이라도 명령을 낸 주행 앱(활성·대기 모두)의 `drive.command`가 100 ms 끊기면 한 번 낸다. 명령이 다시 오면 다시 낼 수 있다.
+- 재개 요청을 내는 쪽은 메시지 보드 VM 뿐이다. 관리 콘솔(백엔드)에서 재개를 보내는 경로는 아직 없다 (9장 ACL).
 - 백엔드는 `drive.mode.changed`, `drive.fault.detected`를 콘솔 이벤트 로그(REST-18, `/ws/v1/events`)에 남긴다. 심각도는 모드 전환 `INFO`, `SAFE_STOP` 진입·장애 `WARNING`.
 
 ### 6.1 앱 생존 신호 `app.heartbeat`
@@ -301,3 +322,4 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | v1 | 2026-10-19 | 최초. 에이전트 토픽(구현과 같음), RC카 주행 제어·앱 이벤트·지연 측정·ACL |
 | v1 (보완) | 2026-10-20 | 접두사 `xenova/v1/`, 주행 VM Zephyr(4장), `app.heartbeat`(6.1), 수동주행 입력(7장) |
 | v1.1 | 2026-10-21 | 시나리오 D1·D3·D8 반영 (S15P31E110-242). ESP32를 MQTT 참여자에서 빼고 게이트웨이 시리얼 뒤로(4장, 5.3, 9장 계정 삭제), `vehicle.status` 발행 = 게이트웨이 `source_id: dom0-gateway`(5.4), 5.5 ESP32 수용 규칙 → 게이트웨이 수용 규칙, Zephyr vchan + dom0 중계(4.1, 10장에서 삭제), `AUTO_READY`·VM 재시작 근거에서 에이전트 대신 도메인 상태 + `app.heartbeat`(5.1·5.2·6.1). 토픽 이름·payload 필드는 그대로 |
+| v1.1.1 | 2026-10-21 | 구현 기준 정합 (S15P31E110-249). 5.2 전환 표와 사유 `autonomous_ready`·`autonomous_lost`·`manual_fresh` (게이트웨이 -98 구현), `MANUAL` 중 수동 끊김은 자율이 신선해도 `SAFE_STOP`, `perception.result` 좌표계·부호·최대 개수·발행 중단 (젯슨 대역 -156 구현), 6장 재개 응답 이벤트 없음·`drive.fault.detected` 조건. 토픽·필드 이름 그대로 |
