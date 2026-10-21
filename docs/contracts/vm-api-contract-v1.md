@@ -28,6 +28,7 @@ Spring이 생성 전에 발급한 UUID 형식의 `vm_id`가 시스템 전체의 
 | Xen 런타임 상태 조회·변경 | dom0-manager |
 | 디스크 수명주기 집행 | dom0-manager |
 | 자원 가용 판정 | dom0-manager |
+| 자동 복구: heartbeat·Xen 상태·desired_state 검사, 재시도·backoff, 플랫폼 `recover_once` 호출 | dom0 Recovery Worker (제어 계층, 2026-10-20 확정, `docs/build-guides/xenova-recovery-foundation.md`). Spring은 관측 상태와 복구 이벤트를 받을 뿐 재시작 명령을 내리지 않음 |
 | IP 자동 할당과 중복 방지 | 플랫폼 전역 잠금 내부 |
 
 ### 1.3 계층별 계약 분리
@@ -138,13 +139,13 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 
 ### 2.4 통계 객체 — dom0-manager (xentop 원시값)
 
-dom0-manager가 `xentop -b -i 1 -n -x -f` 한 번의 출력에서 만드는 VM별 원시값입니다. 누적 카운터와 현재값만 싣고 **사용률(CPU %, bytes/s)은 싣지 않습니다.** 사용률은 Spring이 연속 표본의 차이로 계산합니다(5장). 에이전트가 MQTT-03으로 보고하는 게스트 내부 메트릭과는 `source`로 구분합니다.
+dom0-manager가 `xentop -b -i 1 -n -x -f` 한 번의 출력에서 만드는 VM별 원시값입니다. 누적 카운터와 현재값만 싣고 **사용률(CPU %, bytes/s)은 싣지 않습니다.** 사용률은 Spring이 연속 표본의 차이로 계산합니다(5장). 에이전트가 MQTT-03으로 보고하는 게스트 내부 메트릭(`source = guest_agent`)과는 `source = xen`으로 구분합니다.
 
 ```json
 {
   "vm_id": "550e8400-e29b-41d4-a716-446655440000",
   "domid": 3,
-  "source": "xentop",
+  "source": "xen",
   "sampled_at": "2026-10-21T01:23:45.120Z",
   "state": "running",
   "vcpus": 1,
@@ -163,7 +164,7 @@ dom0-manager가 `xentop -b -i 1 -n -x -f` 한 번의 출력에서 만드는 VM�
 |---|---|---|
 | `vm_id` | `NAME` ↔ `xl list -l`의 `config.c_info.uuid` | 같은 호출 안에서 이름으로 대조. `-f`가 없으면 이름이 10자로 잘려 대조가 깨지므로 항상 `-f` |
 | `domid` | `NAME` ↔ `xl list` | 재실행마다 바뀐다. Spring이 누적값 초기화(재시작) 판정에 쓴다 |
-| `source` | 상수 `xentop` | 에이전트 보고(`guest_agent`)와 구분 |
+| `source` | 상수 `xen` | 에이전트 보고(`guest_agent`)와 구분. Spring 메트릭 조회(REST-12·WS-01)의 `source` 필터 허용값(`xen`, `guest_agent`)과 같은 문자열 |
 | `sampled_at` | dom0 시각, xentop 종료 시점 | 표본 시각. 단조 시계 간격은 Spring이 수신 시각으로 잰다 |
 | `state` | `STATE` 열 | 3.1절 상태로 변환. xentop의 글자 순서는 `d s b c p r`(dying, shutdown, blocked, crashed, paused, running)로 **`xl list`(`r b p s <reason> d`)와 다르다**. `c`가 있으면 `crashed`, `s`·`d`는 `stopping`, `p`는 `paused`, 그 외 `running` |
 | `vcpus` | `VCPUS` | |
@@ -185,13 +186,15 @@ dom0-manager가 `xentop -b -i 1 -n -x -f` 한 번의 출력에서 만드는 VM�
   "event_id": "9b2e3b7c-6b1f-4f1e-9d33-0b1c2a3d4e5f",
   "type": "recovery.completed",
   "vm_id": "550e8400-e29b-41d4-a716-446655440000",
+  "recovery_id": "4a0e8400-e29b-41d4-a716-446655440000",
   "recovery_attempt_id": "650e8400-e29b-41d4-a716-446655440000",
   "attempt": 1,
   "reason": "HEARTBEAT_LOST",
   "mode": "graceful-restart",
   "detected_at": "2026-10-21T01:23:40.000Z",
   "occurred_at": "2026-10-21T01:23:48.420Z",
-  "duration_ms": 8420,
+  "attempt_duration_ms": 6120,
+  "recovery_duration_ms": 8420,
   "execution_id": "850e8400-e29b-41d4-a716-446655440000",
   "final": false,
   "next_retry_at": null,
@@ -203,19 +206,21 @@ dom0-manager가 `xentop -b -i 1 -n -x -f` 한 번의 출력에서 만드는 VM�
 |---|---|
 | `event_id` | UUID. Spring이 중복 수신을 거르는 키 |
 | `type` | `recovery.started` / `recovery.completed` / `recovery.failed`. Spring `EventType`의 문자열과 같다 |
-| `recovery_attempt_id` | Worker가 시도마다 발급. 플랫폼 journal 키이며 Spring 이벤트의 `operation_id`로 기록 |
-| `attempt` | 같은 장애에 대한 연속 시도 번호(1부터). 초기화 규칙은 복구 정책(S15P31E110-125) |
+| `recovery_id` | 장애 한 건의 ID. 최초 판정(`detected_at`)부터 최종 성공 또는 포기(`final`)까지 같은 값. Worker가 재시작해도 dom0에 저장된 미완료 `recovery_id`를 이어 간다 |
+| `recovery_attempt_id` | `recover_once` 호출마다 새 UUID. 플랫폼 journal 키이며 Spring 이벤트의 `operation_id`로 기록 |
+| `attempt` | 같은 `recovery_id` 안의 시도 번호(1부터). 새 `recovery_id`에서 1로 돌아간다. 재시도 한도·대기는 복구 정책(S15P31E110-125) |
 | `reason` | 판정 근거. `HEARTBEAT_LOST`(Linux VM, heartbeat 30초 무수신) / `DOMAIN_ABSENT`(의도 running인데 도메인 없음) / `DOMAIN_CRASHED`(`crashed`) |
 | `mode` | 플랫폼 `recover_once`의 `mode`: `start-if-absent` / `graceful-restart` / `force-restart` |
 | `detected_at` | 장애 판정 시각 (dom0) |
 | `occurred_at` | 이 이벤트의 시각 (dom0) |
-| `duration_ms` | `completed`·`failed`에만. `detected_at`부터 새 실행 관측(`observed`) 또는 실패 확정까지. Spring 성능 지표 `vm_recovery_ms`의 원천 |
+| `attempt_duration_ms` | `completed`·`failed`에만. 이 시도의 `started`부터 결과 확정까지 |
+| `recovery_duration_ms` | `completed`, 그리고 `failed`이면서 `final`일 때만. `detected_at`부터 새 실행 관측(`observed`) 또는 포기까지, 장애 한 건 전체. Spring 성능 지표 `vm_recovery_ms`의 원천(성공한 경우만) |
 | `execution_id` | `completed`에만. 플랫폼이 결합한 새 실행 ID |
 | `final` | `failed`에만. 재시도 한도 도달·정책상 중단이면 `true`(더 시도하지 않음) |
 | `next_retry_at` | `failed`이고 `final`이 아닐 때 다음 시도 예정 시각 |
 | `error` | `failed`에만. `{platform_code, message}` (8.1절 `platform_code`) |
 
-한 시도는 `started` 뒤 `completed` 또는 `failed` 하나로 끝납니다. 재시작 성공은 Xen 실행이 다시 관측됐다는 뜻이며 앱 준비·주행 권한 회복이 아닙니다(플랫폼 `app_readiness: unknown`). 차량 제어권 전환(활성→대기 승격)은 주행 게이트웨이가 `drive.mode.changed`(MQTT 계약 6장, MQTT-06)와 주행 명세의 `failover_event`로 알리며 **VM 복구 이벤트가 아닙니다.**
+한 시도는 `started` 뒤 `completed` 또는 `failed` 하나로 끝나고, 장애 한 건(`recovery_id`)은 `completed` 하나 또는 `final: true`인 `failed` 하나로 끝납니다. 같은 `recovery_id`의 이벤트를 묶으면 시도 횟수·최종 성공 여부·장애당 복구 시간이 나옵니다. 재시작 성공은 Xen 실행이 다시 관측됐다는 뜻이며 앱 준비·주행 권한 회복이 아닙니다(플랫폼 `app_readiness: unknown`). 차량 제어권 전환(활성→대기 승격)은 주행 게이트웨이가 `drive.mode.changed`(MQTT 계약 6장, MQTT-06)와 주행 명세의 `failover_event`로 알리며 **VM 복구 이벤트가 아닙니다.**
 
 ## 3. 상태 모델
 
@@ -319,7 +324,7 @@ dom0-manager는 정상이지만 Xen이 응답하지 않는 상황을 구분하�
 | `200` | `{"status": "ok"}` | dom0-manager와 Xen 모두 응답 |
 | `503` | `{"status": "xen_unavailable"}` | dom0-manager는 살아 있지만 Xen(`xl`)이 응답하지 않음 |
 
-Spring의 시스템 상태 점검(REST-28)에서 Xen 상태를 판단할 때 사용합니다. 자동 복구의 주체(보드 또는 Spring)는 아직 정하지 않았으며(13장), 정해지면 이 엔드포인트의 사용처를 갱신합니다.
+Spring의 시스템 상태 점검(REST-28)에서 Xen 상태를 판단할 때 사용합니다. 자동 복구는 dom0의 Recovery Worker가 담당하므로(1.2절) Spring은 이 응답으로 복구를 시작하지 않습니다.
 
 ### 4.6 `GET /api/v1/stats`
 
@@ -340,15 +345,16 @@ Recovery Worker가 dom0에 남긴 복구 이벤트(2.5절)를 오래된 순으�
 
 | 질의 | 의미 |
 |---|---|
-| `after_event_id` | 이 이벤트 다음부터. 생략하면 보관된 가장 오래된 것부터 |
-| `limit` | 기본 200, 최대 1000 |
+| `after_event_id` | 이 이벤트 다음부터(UUID). 생략하면 보관된 가장 오래된 것부터 |
+| `limit` | 기본 200, 최대 1000. 범위 밖이면 `400 InvalidArgument` |
 
 | 응답 | 본문 |
 |---|---|
-| `200` | `{"events": [복구 이벤트 객체], "next_after_event_id": "..." \| null}` |
-| `404 VMNotFound` | 없음. 모르는 `after_event_id`는 빈 배열과 `null` 커서 |
+| `200` | `{"events": [복구 이벤트 객체], "next_after_event_id": "..." \| null, "oldest_event_id": "..." \| null, "gap": false}` |
+| `200` + `gap: true` | `after_event_id`가 보관 범위 밖(만료·삭제)이라 **그 이후 이력을 잃었을 수 있음**. `events`는 보관된 가장 오래된 것부터이고 `oldest_event_id`가 그 첫 이벤트. 빈 배열 + `gap: false`는 "새 이벤트 없음"이며 이와 구분된다 |
+| `400 InvalidArgument` | `after_event_id`가 UUID 형식이 아니거나 `limit` 범위 밖 |
 
-dom0는 최근 2,000건을 보관합니다(한도는 복구 정책 S15P31E110-125에서 조정). OpenAPI yaml(`dom0-manager-openapi.yaml`)에는 4.6은 xentop 수집(S15P31E110-112), 4.7은 복구 정책 엔진(S15P31E110-125) 구현 MR에서 추가합니다. 계약 테스트가 yaml과 실제 OpenAPI를 대조하므로 구현 전에 yaml만 앞서 바꾸지 않습니다.
+Spring은 `gap: true`를 받으면 경고(`WARN`)로 `recovery.failed` 유실 가능성을 이벤트 로그에 남기고 `oldest_event_id`부터 이어서 받습니다. dom0는 최근 2,000건을 보관합니다(한도는 복구 정책 S15P31E110-125에서 조정). OpenAPI yaml(`dom0-manager-openapi.yaml`)에는 4.6은 xentop 수집(S15P31E110-112), 4.7은 복구 정책 엔진(S15P31E110-125) 구현 MR에서 추가합니다. 계약 테스트가 yaml과 실제 OpenAPI를 대조하므로 구현 전에 yaml만 앞서 바꾸지 않습니다.
 
 ---
 
@@ -370,7 +376,7 @@ dom0는 최근 2,000건을 보관합니다(한도는 복구 정책 S15P31E110-12
 
 Xen은 VM 상태 변화를 누구에게도 알리지 않으므로, Spring이 dom0-manager `GET /api/v1/vms`를 주기적으로(기본 5초, `EVENT_VM_STATE_CHECK_INTERVAL_MS`) 조회해 사용자 조작 없이 바뀐 상태(크래시, 스스로 종료 등)를 `vm.state.changed`(`cause: detected`)로 기록합니다. 조작 중인 VM은 건너뛰고, dom0-manager에 닿지 않으면 그 회차는 아무것도 기록하지 않으며, 서버가 처음 보는 VM은 기준값만 저장합니다.
 
-**xentop 통계의 저장과 사용률 계산.** Spring은 4.6절 응답의 VM마다 `MetricSample(source = "xentop", boot_id = null, window_ms = null, observed_at = sampled_at)`을 저장합니다. 값 이름과 단위는 다음과 같고, `unavailable`에 있는 필드는 값 `null`에 `unavailableReason`을 그대로 둡니다.
+**xentop 통계의 저장과 사용률 계산.** Spring은 4.6절 응답의 VM마다 `MetricSample(source = "xen", boot_id = null, window_ms = null, observed_at = sampled_at)`을 저장합니다. 값 이름과 단위는 다음과 같고, `unavailable`에 있는 필드는 값 `null`에 `unavailableReason`을 그대로 둡니다.
 
 | 통계 객체 필드 | `MetricValue.name` | `unit` |
 |---|---|---|
@@ -382,7 +388,7 @@ Xen은 VM 상태 변화를 누구에게도 알리지 않으므로, Spring이 dom
 
 사용률은 같은 `vm_id`의 연속 두 표본으로 Spring이 계산합니다. `cpu_percent = 100 × Δcpu_time_s ÷ Δt초 ÷ vcpus`(0~100), 전송률은 `Δbytes ÷ Δt초`. `domid`가 바뀌었거나 누적값이 줄었으면 재시작으로 보고 그 구간의 사용률은 계산하지 않습니다. 에이전트 메트릭(MQTT-03)은 `source = "guest_agent"`로 따로 저장하며 두 계열을 섞어 계산하지 않습니다.
 
-**복구 이벤트의 기록.** Spring은 MQTT-12로 받은 복구 이벤트(2.5절)를 `EventType` `recovery.started` / `recovery.completed` / `recovery.failed`로 기록합니다. `operation_id = recovery_attempt_id`, `occurred_at`은 객체의 값, `payload`는 객체 전체이고, `event_id`가 같은 이벤트는 한 번만 기록합니다. 심각도는 `started`·`completed` `INFO`, `failed` `WARN`, `failed`이면서 `final`이면 `ERROR`입니다. `recovery.completed`의 `duration_ms`를 성능 지표 `vm_recovery_ms`로 기록합니다. 복구로 바뀐 Xen 상태는 기존 주기 조회가 `vm.state.changed`(`cause: detected`)로 따로 기록하며, `cause`에 복구나 페일오버 값을 추가하지 않습니다. 제어권 전환은 주행 이벤트(`drive.mode.changed`, MQTT 계약 5·6장)로만 남깁니다. Spring은 복구 이벤트를 받아 표시할 뿐 재시작 명령을 내리지 않습니다(1.2절). 재시작 뒤 빠진 구간은 4.7절로 채웁니다.
+**복구 이벤트의 기록.** Spring은 MQTT-12로 받은 복구 이벤트(2.5절)를 `EventType` `recovery.started` / `recovery.completed` / `recovery.failed`로 기록합니다. `operation_id = recovery_attempt_id`, `occurred_at`은 객체의 값, `payload`는 객체 전체이고, `event_id`가 같은 이벤트는 한 번만 기록합니다. 심각도는 `started`·`completed` `INFO`, `failed` `WARN`, `failed`이면서 `final`이면 `ERROR`입니다. `recovery.completed`의 `recovery_duration_ms`를 성능 지표 `vm_recovery_ms`로 기록하고, 같은 `recovery_id`로 시도들을 묶어 표시합니다. 복구로 바뀐 Xen 상태는 기존 주기 조회가 `vm.state.changed`(`cause: detected`)로 따로 기록하며, `cause`에 복구나 페일오버 값을 추가하지 않습니다. 제어권 전환은 주행 이벤트(`drive.mode.changed`, MQTT 계약 5·6장)로만 남깁니다. Spring은 복구 이벤트를 받아 표시할 뿐 재시작 명령을 내리지 않습니다(1.2절). 재시작 뒤 빠진 구간은 4.7절로 채웁니다.
 
 ---
 
@@ -447,6 +453,23 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 | `message` | 사람이 읽는 설명 |
 | `detail` | 선택. Xen 원문 등 상세. **Spring 로그 전용**이며 프론트에 노출하지 않음 |
 | `resource` | 선택. `InsufficientResources`일 때만 `{name, requested, available}` |
+| `platform_code` | 선택. 플랫폼 Manager가 준 원본 오류 코드(`HOST_QUIESCING` 등). 플랫폼 오류에만 있고 xl·검증·인증 오류에는 없다. 모르는 플랫폼 코드는 `500 DriverError`로 내되 이 값은 보존한다. **코드로 분기할 때는 `detail` 문자열이 아니라 이 값을 쓴다** |
+
+**플랫폼 오류 코드 → dom0-manager 응답** (플랫폼 복구 기반, `docs/build-guides/xenova-recovery-foundation.md` "오류와 관측")
+
+| `platform_code` | HTTP / `code` | 의미 |
+|---|---|---|
+| `HOST_QUIESCING`, `BOOT_ADMISSION_REQUIRED`, `INTENT_MISMATCH` | `409 InvalidState` | host가 새 시작·복구를 닫음 / 현재 host의 실행 정책 미확정·거절 / running 의도·revision 불일치. 재전송으로 풀리지 않는 충돌 |
+| `TARGET_CHANGED` | `409 InvalidState` | 이전 host·lifecycle·실행 관측이 더 이상 대상이 아님 |
+| `RECOVERY_MODE_UNSUPPORTED` | `501 NotSupported` | graceful 미지원(Zephyr) 또는 per-VM force 승인 없음 |
+| `DEADLINE_EXCEEDED` | `504 DriverTimeout` | 같은 host의 최초 deadline 만료·범위 초과 |
+| `OBSERVATION_UNAVAILABLE`, `RECONCILE_REQUIRED`, `INTENT_RECONCILIATION_REQUIRED` | `503 PlatformUnavailable` | Xen 관측 실패(부재가 아님) / 실행·기록 결과를 확정하지 못해 운영자 재판정 필요 / 의도 원본과 journal 불일치. 재시도 가능하지만 자동 반복 대상은 아님 |
+| `XEN_EXECUTION_FAILED` | `500 DriverError` | 수락 후 물리 제어 실패. 플랫폼은 accepted 의도를 유지 |
+| `OPERATION_IN_PROGRESS`, `STORAGE_UNAVAILABLE`, `RECOVERY_REQUIRED`, `CLEANUP_INCOMPLETE` | `503 PlatformUnavailable` | 기존 매핑 |
+| `INSUFFICIENT_STORAGE`, `IP_POOL_EXHAUSTED` | `507 InsufficientResources` | 기존 매핑 (`ipv4`는 `resource.name`) |
+| 그 밖의 코드 | `500 DriverError` | `platform_code` 보존 |
+
+정지 대기 만료는 플랫폼에 아직 전용 코드가 없어 `XEN_EXECUTION_FAILED`(복구 기반 제어 경로) 또는 `ARTIFACT_INVALID`(일반 오류 포장)에 메시지(`deadline`, `timed out`)로만 실린다. dom0-manager는 이 두 코드에 한해 메시지로 시한 초과를 가려 `504 DriverTimeout`으로 내며, 플랫폼이 `DEADLINE_EXCEEDED`를 내면 이 예외는 제거한다(플랫폼 파트에 요청).
 
 FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환하므로 `400 InvalidArgument`로 정규화합니다. 예외 핸들러 교체만으로는 부족하며, **생성 스키마에서 422 응답 정의와 `HTTPValidationError` 모델까지 제거**해야 OpenAPI 차이 검사가 통과합니다.
 
@@ -525,9 +548,11 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 재시도 간격 | 0.5초 |
 | 응답 대기 — 조회 | 6초 |
 | 응답 대기 — 명령 | 100초 |
-| 플랫폼 stop 응답 한도 | 90초 |
+| 플랫폼 stop 응답 한도 | 90초 (플랫폼 고정. Manager stop은 대기 시간을 입력받지 않는다) |
 | 전체 예산 — 조회 | 약 15초 |
 | 전체 예산 — 명령 | 약 103초 |
+
+플랫폼 stop은 대기 시간을 입력받지 않고(Manager stop 명세는 `vm_id`·`force`뿐) 90초 deadline 하나를 제거 관측까지 공유하므로 Manager 호출은 약 90초 안에 끝납니다. platform 모드의 dom0-manager는 `XENOVA_SHUTDOWN_GRACE`를 90으로만 허용하며 다른 값은 시작 시 설정 오류입니다. `XENOVA_XL_COMMAND_TIMEOUT`은 xl 서브프로세스에만 걸리고 Manager 호출을 제한하지 않습니다. Spring의 명령 응답 대기 100초가 그 위에 있습니다.
 
 명령의 응답 타임아웃에서 재시도하지 않는 이유는 두 가지입니다. 연결이 성립했으므로 dom0-manager가 요청을 이미 받아 처리 중일 수 있고, `xl` 호출은 블로킹 subprocess이며 uvicorn 워커가 1개이므로 재전송한 요청은 처리 중인 요청 뒤에서 대기할 뿐입니다.
 
@@ -570,7 +595,6 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | OS별 실제 버전 값 | 제어 계층 | 이미지 빌드 시 실측 |
 | 템플릿별 `min_memory_mib` | 플랫폼·백엔드 | 플랫폼 카탈로그 `resource_limits`를 버전별 descriptor로 옮기고(Zephyr는 min=max) Spring 설정이 그 값을 따른다. Zephyr starter 1.0.0은 16 |
 | 서비스 토큰 배포·회전 | 공통 | Spring과 dom0-manager에 같은 Bearer 서비스 토큰을 안전하게 배포하고 회전하는 운영 절차 |
-| 자동 복구 주체 | 공통 | 보드(Xen `on_crash`·dom0 감시) 또는 Spring. 결정 전까지 Spring은 복구를 수행하지 않음 |
 | 수명주기·강제 종료 전달 | 제어 계층 + 플랫폼 | retire/restore/purge의 작업 키·operation_id·대상 세대와 개별 force 전달. 보드 종료 정책을 개별 강제 종료 승인으로 사용하지 않음 |
 
 dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포함한 내부 API에서 Bearer 서비스 토큰을 검사합니다. Spring은 `DOM0_MANAGER_BASE_URL`에 Tailscale 주소를 설정하고 `DOM0_MANAGER_SERVICE_TOKEN`을 `Authorization: Bearer`로 전송합니다. 연결 실패는 `503 VM_CONTROL_UNAVAILABLE`로 변환합니다.
@@ -594,4 +618,5 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1.8 | 2026-10-19 | 플랫폼이 `create`에 `vm_id`를 필수로 받고 내부 실행 이름·MAC·Linux IP를 발급하게 되어 dom0-manager의 IP 풀 선택·재시도와 `INVALID_SPEC`→501 임시 처리를 제거. 플랫폼 `IP_POOL_EXHAUSTED`→`507 ipv4`, 인스턴스 디렉터리는 `configuration.id`, `/healthz`는 Manager를 거치지 않고 `xl info`(조회 한도)와 registry 저장소 존재만 확인해 조회 한도 안에서 끝남. 13장 HTTP→Manager 입력 항목 해결 |
 | v1.9 | 2026-10-19 | Domain-0 보호(S15P31E110-206): nil UUID 대상 호출은 모든 엔드포인트에서 `400 InvalidArgument`, 목록은 domid 0 또는 이름 Domain-0 을 제외(9장) |
 | v1.10 | 2026-10-20 | 실보드 `xl` 출력 확인(S15P31E110-36): 3.2절에 `-bp---`(blocked+paused 동시) 관측과 `------` 미관측, Domain-0의 `c_info.uuid` 부재를 기록. 매핑 변경 없음 |
-| v1.12 | 2026-10-21 | 메트릭·복구 이벤트 스키마(S15P31E110-33): xentop 원시값 통계 객체(2.4)와 `GET /api/v1/stats`(4.6), 복구 이벤트 객체(2.5)와 MQTT-12·`GET /api/v1/recovery/events`(4.7), Spring의 저장·사용률 계산·복구 이벤트 기록 규칙(5장). 사용률은 Spring 계산, 측정 실패는 `unavailable`, FAILOVER는 VM 이벤트가 아님 |
+| v1.11 | 2026-10-21 | 플랫폼 복구 기반(67b0e26) 반영(S15P31E110-245): 오류 본문에 선택 필드 `platform_code` 추가, 복구 기반 오류 코드의 HTTP 매핑표(8.1), 정지 대기 만료의 임시 메시지 판별 명시, stop 대기는 플랫폼 90초 고정이라 platform 모드는 `XENOVA_SHUTDOWN_GRACE=90`만 허용하고 `XENOVA_XL_COMMAND_TIMEOUT`은 Manager 호출을 제한하지 않음을 명시(10장). 자동 복구 주체를 dom0 Recovery Worker로 확정하고 13장 미확정 항목에서 제거(1.2·4.5) |
+| v1.12 | 2026-10-21 | 메트릭·복구 이벤트 스키마(S15P31E110-33): xentop 원시값 통계 객체(2.4)와 `GET /api/v1/stats`(4.6), 복구 이벤트 객체(2.5)와 MQTT-12·`GET /api/v1/recovery/events`(4.7), Spring의 저장·사용률 계산·복구 이벤트 기록 규칙(5장). 사용률은 Spring 계산, 측정 실패는 `unavailable`, `source`는 Spring 필터 허용값 `xen`, 장애 단위 `recovery_id`와 `attempt_duration_ms`·`recovery_duration_ms` 분리, 재보충 커서 만료는 `gap: true`로 구분, FAILOVER는 VM 이벤트가 아님 |
