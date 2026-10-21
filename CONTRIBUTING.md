@@ -64,6 +64,7 @@ S15P31E110/
 │   │   ├── autonomous/       # 자율주행 VM
 │   │   ├── manual/           # 수동주행 VM
 │   │   ├── message-board/    # 메시지 보드 VM
+│   │   ├── perception/       # 젯슨 대역 인식 (PC 웹캠·영상·합성, 젯슨 전 시연·시험용)
 │   │   └── simulator/        # 가상 RC카 (실차 전 시연·시험용, app_id 아님)
 │   ├── deploy/               # dom0 서비스 등록·배포 설정
 │   ├── scripts/              # 빌드·검증 스크립트
