@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import logging
 import os
 from contextlib import contextmanager
@@ -70,6 +71,12 @@ async def relay(websocket: WebSocket, session, service, vm_id: UUID, domid: int)
                 text = message.get('text')
                 if text is None:
                     raise EndRelay(1003, "binary or UTF-8 text required")
+                try:
+                    if json.loads(text) == {'type': 'disconnect'}:
+                        # Close is sent only after the session and flock are released.
+                        return
+                except (ValueError, TypeError):
+                    pass
                 data = text.encode('utf-8')
             if len(data) > MAX_INPUT:
                 raise EndRelay(1009, "console input exceeds 65536 bytes")

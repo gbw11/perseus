@@ -31,6 +31,9 @@ Authorization: Bearer <service-token>
 | 서버 → 클라이언트 | binary | PTY 원시 출력, 프레임당 최대 65536바이트 |
 
 - JSON 래퍼나 명령 실행 RPC가 아니다. ANSI escape와 제어 문자를 그대로 전달한다.
+- text `{"type":"disconnect"}`는 연결 정리 제어 프레임으로 예약한다. 이를 수신하면
+  PTY와 UUID 락을 먼저 해제한 뒤 정상 종료 프레임을 보낸다. 같은 문자열을 터미널에
+  입력하려면 binary 프레임을 사용한다. 일반 text 입력은 기존처럼 UTF-8로 전달한다.
 - 입력 한 메시지는 UTF-8 인코딩 후 최대 65536바이트다. 초과하면 1009로 종료한다.
   `python -m dom0_manager`는 Uvicorn 수신 상한도 65536바이트, 대기 큐도 4로 설정한다.
   별도 Uvicorn CLI로 기동한다면 `--ws-max-size 65536 --ws-max-queue 4`를 지정한다.

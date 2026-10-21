@@ -101,6 +101,26 @@ describe('console transport', () => {
     transport.dispose();
   });
 
+  it('reconnect waits for upstream cleanup acknowledgement, including cancellation during setup', async () => {
+    const { transport, callbacks } = setup();
+    await transport.connect();
+    const ws = FakeSocket.instances[0]!;
+    transport.disconnect();
+    expect(callbacks.state).toHaveBeenLastCalledWith('closing', expect.any(String));
+    ws.onopen?.();
+    expect(ws.sent.map((frame) => JSON.parse(frame as string).type)).toEqual(['auth', 'disconnect']);
+    ws.ready(); // A connected frame already in flight must not re-enable terminal input.
+    expect(transport.send('do not send')).toBe(false);
+    await transport.connect();
+    expect(FakeSocket.instances).toHaveLength(1);
+    expect(ws.close).not.toHaveBeenCalled();
+    ws.onclose?.({ code: 1000 }); // Server closes only after releasing PTY and VM lease.
+    expect(callbacks.state).toHaveBeenLastCalledWith('disconnected', expect.any(String));
+    await transport.connect();
+    expect(FakeSocket.instances).toHaveLength(2);
+    transport.dispose();
+  });
+
   it('disposing releases callbacks and closes the socket; stale frames cannot update UI', async () => {
     const { transport, callbacks } = setup();
     await transport.connect();
