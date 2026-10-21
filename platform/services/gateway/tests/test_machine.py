@@ -236,18 +236,110 @@ def test_auto_ready_falls_back_to_manual_when_autonomous_lost():
     assert of(out, PublishControl)[0].payload["reason"] == "autonomous_lost"
 
 
-def test_resume_in_auto_ready_goes_auto():
+def auto_ready() -> Harness:
     h = failed_over()
     h.run(3.1, heartbeat=(AUTONOMOUS,))
+    assert h.m.mode is Mode.AUTO_READY
+    return h
+
+
+def test_resume_in_auto_ready_counts_down_3s_then_goes_auto():
+    h = auto_ready()
     gen = h.m.generation
-    h.m.on_resume(h.now)
-    out = h.run(PERIOD)
-    assert h.m.mode is Mode.AUTO and h.m.generation == gen + 1
+    h.m.on_resume(h.now, "operator")
+    out = h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    accepted_t = h.now
+    # 바로 바꾸지 않고 accepted 만 낸다 (계약 v1.2 6장)
+    assert events(out, "drive.resume.accepted") == [{"switch_in_ms": 3000, "generation": gen, "requested_by": "operator"}]
+    assert not events(out, "drive.mode.changed") and not of(out, PublishControl)
+    assert h.m.mode is Mode.AUTO_READY and h.m.counting_down
+    # 3초 동안은 수동이 계속 제어한다
+    out = h.run(2.98, heartbeat=(AUTONOMOUS,))   # 수락 + 2.98 s 까지
+    assert h.m.mode is Mode.AUTO_READY and h.m.generation == gen
+    assert {f.app_id for f in of(out, ForwardDrive)} == {"manual"}
+    assert not events(out, "drive.mode.changed")
+    # 수락 + 3.0 s 가 되는 step 에서 AUTO
+    out = h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    assert h.now == pytest.approx(accepted_t + 3.0)
+    assert h.m.mode is Mode.AUTO and h.m.generation == gen + 1 and not h.m.counting_down
     assert of(out, PublishControl)[0].payload["active_app"] == "autonomous"
     assert events(out, "drive.mode.changed") == [{"from": "AUTO_READY", "to": "AUTO", "generation": gen + 1, "reason": "resume_requested"}]
+    assert not events(out, "drive.resume.cancelled")
     # 다음 자율 명령(새 세대)이 전달된다
     out = h.run(PERIOD)
     assert [f.app_id for f in of(out, ForwardDrive)] == ["autonomous"]
+
+
+def test_resume_countdown_cancelled_when_autonomous_lost():
+    h = auto_ready()
+    gen = h.m.generation
+    h.m.on_resume(h.now, "operator")
+    h.run(1.0, heartbeat=(AUTONOMOUS,))
+    out = h.run(0.12, apps=(MANUAL_APP,))   # 카운트다운 중 자율 끊김
+    assert h.m.mode is Mode.MANUAL and h.m.generation == gen + 1 and not h.m.counting_down
+    assert events(out, "drive.resume.cancelled") == [{"reason": "autonomous_lost", "generation": gen}]
+    assert events(out, "drive.mode.changed") == [{"from": "AUTO_READY", "to": "MANUAL", "generation": gen + 1, "reason": "autonomous_lost"}]
+    # cancelled 가 모드 전환 알림보다 먼저
+    types = [a.type for a in of(out, PublishEvent) if a.type != "drive.fault.detected"]
+    assert types == ["drive.resume.cancelled", "drive.mode.changed"]
+    # 3초가 지나도 AUTO 로 가지 않는다
+    out = h.run(3.0)
+    assert h.m.mode is not Mode.AUTO
+    assert not events(out, "drive.resume.cancelled")
+
+
+def test_resume_countdown_cancelled_when_manual_lost_goes_safe_stop():
+    h = auto_ready()
+    gen = h.m.generation
+    h.m.on_resume(h.now)
+    h.run(0.5, heartbeat=(AUTONOMOUS,))
+    out = h.run(0.12, apps=(AUTONOMOUS,))   # 수동 끊김 → SAFE_STOP
+    assert h.m.mode is Mode.SAFE_STOP
+    assert events(out, "drive.resume.cancelled") == [{"reason": "no_fresh_standby", "generation": gen}]
+    # 정지 프레임이 cancelled 보다 먼저
+    cancelled = next(a for a in of(out, PublishEvent) if a.type == "drive.resume.cancelled")
+    assert out.index(of(out, ForwardStop)[0]) < out.index(cancelled) < out.index(of(out, PublishControl)[0])
+
+
+def test_resume_during_countdown_is_ignored():
+    h = auto_ready()
+    gen = h.m.generation
+    h.m.on_resume(h.now, "operator")
+    out = h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    accepted_t = h.now
+    assert len(events(out, "drive.resume.accepted")) == 1
+    h.run(1.5, heartbeat=(AUTONOMOUS,))
+    h.m.on_resume(h.now, "message-board")
+    out = h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    assert not events(out, "drive.resume.accepted")
+    assert [a for a in of(out, Measure) if a.event == "resume_ignored"]
+    # 첫 수락 기준 3초에 바뀐다 (재요청이 카운트다운을 늘리지 않는다)
+    h.run(round(accepted_t + 3.0 - h.now - PERIOD, 9), heartbeat=(AUTONOMOUS,))
+    assert h.m.mode is Mode.AUTO_READY
+    h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    assert h.m.mode is Mode.AUTO and h.m.generation == gen + 1
+
+
+def test_two_resumes_in_one_step_accept_first_only():
+    h = auto_ready()
+    h.m.on_resume(h.now, "first")
+    h.m.on_resume(h.now, "second")
+    out = h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    assert [e["requested_by"] for e in events(out, "drive.resume.accepted")] == ["first"]
+
+
+def test_resume_accepted_again_after_cancel_and_new_auto_ready():
+    h = auto_ready()
+    h.m.on_resume(h.now)
+    h.run(0.5, heartbeat=(AUTONOMOUS,))
+    h.run(0.12, apps=(MANUAL_APP,))
+    assert h.m.mode is Mode.MANUAL
+    h.run(3.1, heartbeat=(AUTONOMOUS,))
+    assert h.m.mode is Mode.AUTO_READY
+    gen = h.m.generation
+    h.m.on_resume(h.now, "operator")
+    out = h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    assert events(out, "drive.resume.accepted") == [{"switch_in_ms": 3000, "generation": gen, "requested_by": "operator"}]
 
 
 def test_resume_ignored_outside_auto_ready():
@@ -257,6 +349,11 @@ def test_resume_ignored_outside_auto_ready():
     out = h.run(PERIOD)
     assert h.m.mode is Mode.MANUAL and h.m.generation == gen
     assert not events(out, "drive.mode.changed")
+    assert not events(out, "drive.resume.accepted") and not h.m.counting_down
+    # 무시된 요청은 남지 않는다: 뒤에 AUTO_READY 가 돼도 저절로 수락되지 않는다
+    out = h.run(3.1, heartbeat=(AUTONOMOUS,))
+    assert h.m.mode is Mode.AUTO_READY
+    assert not events(out, "drive.resume.accepted")
 
 
 def test_stale_generation_and_standby_commands_are_not_forwarded():
