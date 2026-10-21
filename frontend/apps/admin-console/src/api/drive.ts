@@ -6,7 +6,7 @@
  * 첫 프레임은 {"type":"auth","access_token"}. 4401 로 닫히면 토큰을 재발급해 다시 붙는다.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getSession, refreshSession } from './client';
+import { getSession, refreshSession, request } from './client';
 
 /** VITE_MOCK 이면 WS 대신 표본 시나리오(src/mocks/scenario.ts)를 쓴다 */
 const MOCK = import.meta.env.VITE_MOCK === 'true';
@@ -56,6 +56,13 @@ export interface DriveState {
     heading_err_rad: number | null;
     obstacle_count: number;
     stop: boolean;
+  } | null;
+  /** 받아들여진 재개 카운트다운 (MQTT 계약 v1.2 §6 drive.resume.accepted). 없으면 null */
+  resume?: {
+    generation: number | null;
+    switch_in_ms: number;
+    accepted_ago_ms: number;
+    remaining_ms: number;
   } | null;
 }
 
@@ -156,12 +163,24 @@ function useMockDriveState() {
   return { drive, socket: (drive ? 'open' : 'connecting') as SocketState };
 }
 
-/** 시연 동작 (mock 에서만 동작 — 실제 API 는 격리 시연 -135·재개는 미정) */
+/**
+ * 자율주행 재개 요청 (POST /api/v1/drive/resume → MQTT-12). 202 는 "보냈다" 일 뿐 — 게이트웨이가 받아들이면
+ * DriveState.resume 에 3초 카운트다운이 생기고, 거절·취소는 drive.resume.cancelled 로 온다 (계약 v1.2 §6).
+ */
+export async function requestResume(): Promise<void> {
+  if (MOCK) {
+    const s = await loadScenario();
+    if (!s.resume()) throw new Error('지금은 재개할 수 없습니다 (AUTO_READY 아님 또는 카운트다운 중)');
+    return;
+  }
+  await request('/api/v1/drive/resume', { method: 'POST' });
+}
+
+/** 시연 동작 (mock 에서만 동작 — 실제 API 는 격리 시연 -135 가 정한다) */
 export const mockDemo = MOCK
   ? {
       forceKill: (target: 'autonomous' | 'manual' | 'message-board') =>
         void loadScenario().then((s) => s.forceKill(target)),
-      resume: () => void loadScenario().then((s) => s.resume()),
       togglePerception: () => void loadScenario().then((s) => s.togglePerception()),
     }
   : null;

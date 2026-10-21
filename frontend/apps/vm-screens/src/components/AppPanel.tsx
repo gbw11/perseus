@@ -2,6 +2,7 @@ import { StatusBadge } from '@xenova/ui';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { APPS, type AppId } from '../telemetry/types';
 import { seconds } from './format';
+import { TrackMap } from './TrackMap';
 import styles from './screens.module.css';
 
 const ACCENT: Record<AppId, string> = {
@@ -136,17 +137,37 @@ function InteractionSummary() {
   }
   return (
     <>
-      <div className={[styles.resumeState, t.mode === 'AUTO_READY' ? styles.resumeReady : ''].join(' ')}>
-        {t.mode === 'AUTO_READY' ? '자율주행 재개 가능' : t.mode === 'AUTO' ? '자율주행 중' : '재개 대기'}
-      </div>
+      <TrackMap />
+      <ResumeState />
       <h3 className={styles.dim}>최근 알림</h3>
       <ul className={styles.feed}>
-        {t.events.slice(0, 5).map((event) => (
+        {t.events.slice(0, 3).map((event) => (
           <li key={event.id} className={styles[`ev_${event.level}`]}>
             {event.text}
           </li>
         ))}
       </ul>
     </>
+  );
+}
+
+/** 재개 상태 한 줄 — 카운트다운 중이면 남은 초 */
+export function ResumeState() {
+  const { telemetry: t } = useTelemetry();
+  const counting = t.resumeAt != null && t.resumeAt > t.now;
+  return (
+    <div
+      className={[styles.resumeState, counting || t.mode === 'AUTO_READY' ? styles.resumeReady : ''].join(
+        ' ',
+      )}
+    >
+      {counting
+        ? `${Math.ceil((t.resumeAt! - t.now) / 1000)}초 뒤 자율주행으로 전환`
+        : t.mode === 'AUTO_READY'
+          ? '자율주행 재개 가능'
+          : t.mode === 'AUTO'
+            ? '자율주행 중'
+            : '재개 대기'}
+    </div>
   );
 }

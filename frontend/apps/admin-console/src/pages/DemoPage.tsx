@@ -1,22 +1,52 @@
 import { Button, Card, Modal, StatusBadge, useToast } from '@xenova/ui';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { KEY_OF, mockDemo, pressKey, useManualInput, type DriveKey, type InputResult } from '../api/drive';
-import { useVms } from '../api/queries';
-import { appHealth, plain, ROLE_ORDER, ROLES, signed, vmOf, type AppId } from '../domain/roles';
+import { ApiError } from '../api/client';
+import {
+  KEY_OF,
+  mockDemo,
+  pressKey,
+  requestResume,
+  useManualInput,
+  type DriveKey,
+  type InputResult,
+} from '../api/drive';
+import { useDisplays, useRouteDisplay, useVms } from '../api/queries';
+import type { Display, DisplayStatus, DisplayView } from '../api/types';
+import { appHealth, osLabel, plain, ROLE_ORDER, ROLES, signed, vmOf, type AppId } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
 
 /**
  * W-07 시연 제어 (화면 정의서 W-07, UI-08·DS-01) — 공병우 -128·-130, 격리 시연 API 는 정송하 -135.
- * 세 영역: 화면 배치 / 격리 시연 / 수동주행 입력 + 자율주행 재개. 참고 시안: stitch_untitled_project_init (루트).
- * 화면 배치(-129)·격리 시연(-135)·재개 API 는 아직 없다 → mock 에서만 동작하고 live 에서는 비활성.
+ * 위: 격리 시연 — 세 VM 을 나란히 두고 각자 [강제 종료]. 다른 둘이 계속 도는 것을 같은 줄에서 본다.
+ * 아래: 화면 배치(REST-23·24, -129) / 수동주행 입력 + 자율주행 재개(POST /api/v1/drive/resume, 3·2·1).
+ * 강제 종료 API(-135)는 아직 없다 → mock 에서만 동작.
  */
 export function DemoPage() {
+  const { drive } = useDrive();
   return (
     <div className={styles.page}>
+      <section className={styles.pageHead}>
+        <div>
+          <div className={styles.eyebrow}>시연 제어</div>
+          <h1>격리 시연</h1>
+        </div>
+        <span className={styles.grow} />
+        {mockDemo ? (
+          <Button variant="ghost" onClick={mockDemo.togglePerception}>
+            {drive?.perception?.valid === false ? '인지 복구' : '인지 끊김 (D5)'}
+          </Button>
+        ) : (
+          <span className={styles.draft}>강제 종료 API(-135) 미구현 — mock 모드에서만 동작</span>
+        )}
+      </section>
       <div className={styles.cols3}>
+        {ROLE_ORDER.map((app) => (
+          <IsolationCard key={app} app={app} />
+        ))}
+      </div>
+      <div className={styles.cols2}>
         <ScreenRouting />
-        <Isolation />
         <Card title="수동주행 입력">
           <ManualInput />
           <Resume />
@@ -26,163 +56,74 @@ export function DemoPage() {
   );
 }
 
-// ---- 화면 배치 (DS-01, REST-24 -129 미구현) ----
-
-const MONITOR2: { app: AppId; label: string }[] = [
-  { app: 'autonomous', label: '자율주행 상세' },
-  { app: 'manual', label: '수동주행 상세' },
-  { app: 'message-board', label: '인터랙션 상세' },
-];
-
-function ScreenRouting() {
-  const toast = useToast();
-  const [monitor1, setMonitor1] = useState('split');
-  const [monitor2, setMonitor2] = useState<AppId>('autonomous');
-  const [rev, setRev] = useState(7);
-  const [dirty, setDirty] = useState(false);
-  return (
-    <Card
-      title="화면 배치"
-      actions={<span className={styles.chip}>{dirty ? '미적용' : `적용됨 (rev ${rev})`}</span>}
-    >
-      <p className={styles.draft}>화면 배치 API(REST-24, -129) 미구현 — 미리보기</p>
-      <div className={styles.form}>
-        <label>
-          모니터 1
-          <select
-            className={styles.select}
-            value={monitor1}
-            onChange={(e) => {
-              setMonitor1(e.target.value);
-              setDirty(true);
-            }}
-          >
-            <option value="split">3분할</option>
-          </select>
-        </label>
-        <div className={styles.cols3} style={{ gap: 'var(--x-space-1)' }}>
-          {ROLE_ORDER.map((app) => (
-            <div key={app} className={styles.tile} style={{ borderTop: `3px solid ${ROLES[app].color}` }}>
-              <small>{ROLES[app].short}</small>
-            </div>
-          ))}
-        </div>
-        <label>
-          모니터 2
-          <div className={styles.chips}>
-            {MONITOR2.map((m) => (
-              <button
-                key={m.app}
-                type="button"
-                className={[styles.chip, monitor2 === m.app ? styles.chipOn : ''].join(' ')}
-                onClick={() => {
-                  setMonitor2(m.app);
-                  setDirty(true);
-                }}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </label>
-      </div>
-      <Button
-        style={{ marginTop: 'var(--x-space-4)', width: '100%' }}
-        disabled={!dirty}
-        onClick={() => {
-          setRev(rev + 1);
-          setDirty(false);
-          toast.show('화면 배치 API 가 없어 실제 모니터에는 보내지 않았다', 'fault', 3000);
-        }}
-      >
-        배치 적용
-      </Button>
-    </Card>
-  );
-}
-
 // ---- 격리 시연 (UI-08, -135 미구현) ----
 
-function Isolation() {
+const KILL_EFFECT: Record<AppId, string> = {
+  autonomous: '명령이 끊겨 게이트웨이가 수동주행으로 넘긴다 (MANUAL, gen +1). 복구되면 AUTO_READY.',
+  manual: '수동주행이 제어 중이면 SAFE_STOP, 아니면 예비만 사라진다.',
+  'message-board': '주행과 무관 — 차는 그대로 달린다 (격리).',
+};
+
+function IsolationCard({ app }: { app: AppId }) {
   const { drive } = useDrive();
   const vms = useVms();
-  const [target, setTarget] = useState<AppId>('autonomous');
+  const toast = useToast();
   const [confirm, setConfirm] = useState(false);
-  const targetVm = vmOf(target, vms.data?.items, drive);
-  const linux = targetVm?.guest_kind === 'linux';
+  const role = ROLES[app];
+  const vm = vmOf(app, vms.data?.items, drive);
+  const state = drive?.apps[app];
+  const health = appHealth(role, vm, state);
+  const linux = vm?.guest_kind === 'linux';
+  const down = vm?.state !== 'running' || health === 'recovering' || health === 'fault';
+  const active = drive?.control?.active_app === app;
   return (
-    <Card title="격리 시연">
-      {!mockDemo && <p className={styles.draft}>격리 시연 API(-135) 미구현 — mock 모드에서만 동작</p>}
-      <div className={styles.form}>
-        <label>
-          대상 VM
-          <select
-            className={styles.select}
-            value={target}
-            onChange={(e) => setTarget(e.target.value as AppId)}
+    <Card>
+      <div className={styles.appCard} style={{ borderTop: `3px solid ${role.color}` }}>
+        <div className={styles.row}>
+          <b style={{ color: role.color, fontSize: 'var(--x-text-lg)' }}>{role.title}</b>
+          <span className={styles.grow} />
+          <StatusBadge health={health} size="sm" />
+        </div>
+        <div className={styles.eyebrow}>
+          {vm ? `${vm.name} · ${osLabel(vm)}` : app}
+          {active ? ' · 제어 중' : ''}
+        </div>
+        <div className={styles.rows}>
+          <div>
+            <span>{role.driving ? '명령' : '생존 신호'}</span>
+            <span className={styles.mono}>
+              {role.driving
+                ? state?.command_fresh
+                  ? `${state.command_hz} Hz`
+                  : '없음'
+                : state?.heartbeat_ago_ms != null
+                  ? `${(state.heartbeat_ago_ms / 1000).toFixed(1)}초 전`
+                  : '없음'}
+            </span>
+          </div>
+        </div>
+        <p className={styles.dim}>강제 종료 시: {KILL_EFFECT[app]}</p>
+        <div className={styles.row}>
+          <Button
+            variant="danger"
+            style={{ flex: 1 }}
+            disabled={!mockDemo || down}
+            title={down ? '이미 꺼져 있거나 복구 중' : undefined}
+            onClick={() => setConfirm(true)}
           >
-            {ROLE_ORDER.map((app) => (
-              <option key={app} value={app}>
-                {ROLES[app].title} ({app})
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div className={styles.row} style={{ marginTop: 'var(--x-space-3)' }}>
-        <Button
-          variant="secondary"
-          disabled
-          title={linux ? '에이전트 부하 명령(-123) 미구현' : 'Linux VM 만 가능'}
-        >
-          CPU 부하
-        </Button>
-        <Button variant="danger" disabled={!mockDemo} onClick={() => setConfirm(true)}>
-          강제 종료
-        </Button>
-        {mockDemo && (
-          <Button variant="ghost" onClick={mockDemo.togglePerception}>
-            {drive?.perception?.valid === false ? '인지 복구' : '인지 끊김 (D5)'}
+            강제 종료
           </Button>
-        )}
+          <Button
+            variant="secondary"
+            disabled
+            title={
+              linux ? '에이전트 부하 명령(-123) 미구현' : 'Zephyr VM 은 에이전트가 없어 부하를 줄 수 없다'
+            }
+          >
+            CPU 부하
+          </Button>
+        </div>
       </div>
-      <p className={styles.dim}>
-        {linux
-          ? 'CPU 부하는 에이전트 명령(stress)이라 Linux VM 만 된다.'
-          : 'Zephyr VM 은 에이전트가 없어 CPU 부하를 줄 수 없다.'}
-      </p>
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th>VM</th>
-            <th>상태</th>
-            <th>명령 주기</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ROLE_ORDER.map((app) => {
-            const role = ROLES[app];
-            const state = drive?.apps[app];
-            return (
-              <tr key={app}>
-                <td>
-                  <b style={{ color: role.color }}>{target === app ? '대상' : '비대상'}</b> · {role.short}
-                </td>
-                <td>
-                  <StatusBadge health={appHealth(role, vmOf(app, vms.data?.items, drive), state)} size="sm" />
-                </td>
-                <td className={styles.mono}>
-                  {role.driving
-                    ? state?.command_fresh
-                      ? `${state.command_hz} Hz`
-                      : '명령 없음'
-                    : '에이전트'}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
       <Modal
         open={confirm}
         title="강제 종료"
@@ -195,8 +136,9 @@ function Isolation() {
             <Button
               variant="danger"
               onClick={() => {
-                mockDemo?.forceKill(target);
+                mockDemo?.forceKill(app);
                 setConfirm(false);
+                toast.show(`${role.title} 강제 종료 — 복구 서비스가 다시 시작한다`, 'fault', 3000);
               }}
             >
               강제 종료
@@ -205,11 +147,122 @@ function Isolation() {
         }
       >
         <p>
-          <b style={{ color: ROLES[target].color }}>{ROLES[target].title}</b> 도메인을 강제 종료한다. 디스크는
-          지우지 않고 복구 서비스가 다시 시작한다.
+          <b style={{ color: role.color }}>{role.title}</b> 도메인을 강제 종료한다. 디스크는 지우지 않고 복구
+          서비스가 다시 시작한다.
         </p>
+        <p className={styles.dim}>{KILL_EFFECT[app]}</p>
       </Modal>
     </Card>
+  );
+}
+
+// ---- 화면 배치 (DS-01, REST-23·REST-24 -129) ----
+
+const STATUS_LABEL: Record<DisplayStatus, string> = {
+  DISCONNECTED: '모니터 꺼짐',
+  IDLE: '대기',
+  SWITCHING: '바꾸는 중',
+  ACTIVE: '적용됨',
+  ERROR: '오류',
+};
+const STATUS_HEALTH = {
+  DISCONNECTED: 'stopped',
+  IDLE: 'stopped',
+  SWITCHING: 'recovering',
+  ACTIVE: 'ok',
+  ERROR: 'fault',
+} as const;
+
+interface Choice {
+  key: string;
+  label: string;
+  view: DisplayView;
+  app: AppId | null;
+}
+const CHOICES: Choice[] = [
+  { key: 'split', label: '3분할', view: 'split', app: null },
+  ...ROLE_ORDER.map((app) => ({
+    key: app,
+    label: `${ROLES[app].short} 상세`,
+    view: 'os-face' as const,
+    app,
+  })),
+];
+
+/** 모니터마다 무엇을 띄울지. 고르면 바로 PUT — 모니터가 route.applied 로 답하면 "적용됨" */
+function ScreenRouting() {
+  const displays = useDisplays();
+  return (
+    <Card title="화면 배치">
+      {displays.error && (
+        <p className={styles.error} role="alert">
+          {displays.error instanceof ApiError ? displays.error.message : String(displays.error)}
+        </p>
+      )}
+      {displays.isPending && <p className={styles.dim}>불러오는 중…</p>}
+      <div className={styles.form}>
+        {displays.data?.items.map((d) => (
+          <DisplayRow key={d.display_id} display={d} />
+        ))}
+      </div>
+      <p className={styles.dim}>
+        모니터는 <code>/monitor/?display=display-0</code> 처럼 자기 번호로 열어 두면 여기서 고른 화면으로
+        바뀐다.
+      </p>
+    </Card>
+  );
+}
+
+function DisplayRow({ display }: { display: Display }) {
+  const { drive } = useDrive();
+  const vms = useVms();
+  const route = useRouteDisplay();
+  const toast = useToast();
+  const vmIdOf = (app: AppId | null) => (app ? (vmOf(app, vms.data?.items, drive)?.vm_id ?? null) : null);
+  const current = CHOICES.find(
+    (c) => c.view === display.desired_route.view && vmIdOf(c.app) === display.desired_route.vm_id,
+  );
+  const pick = (choice: Choice) => {
+    const vmId = vmIdOf(choice.app);
+    if (choice.app && !vmId) return toast.show(`${ROLES[choice.app].title} VM 을 찾지 못했다`, 'fault', 3000);
+    route.mutate(
+      {
+        displayId: display.display_id,
+        body: { vm_id: vmId, view: choice.view, expected_revision: display.revision },
+      },
+      {
+        onError: (error) =>
+          toast.show(error instanceof ApiError ? error.message : String(error), 'fault', 5000),
+      },
+    );
+  };
+  return (
+    <div className={styles.form}>
+      <span className={styles.row}>
+        <b>{display.label}</b>
+        <span className={styles.eyebrow}>{display.display_id}</span>
+        <span className={styles.grow} />
+        <StatusBadge
+          health={STATUS_HEALTH[display.status]}
+          label={`${STATUS_LABEL[display.status]} · rev ${display.revision}`}
+          size="sm"
+        />
+      </span>
+      <span className={styles.chips}>
+        {CHOICES.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            className={[styles.chip, current?.key === c.key ? styles.chipOn : ''].join(' ')}
+            disabled={route.isPending || display.status === 'SWITCHING'}
+            onClick={() => current?.key !== c.key && pick(c)}
+          >
+            {c.label}
+          </button>
+        ))}
+      </span>
+      {display.last_error && <span className={styles.error}>{display.last_error}</span>}
+    </div>
   );
 }
 
@@ -327,21 +380,43 @@ function ManualInput() {
   );
 }
 
-/** [자율주행 재개] — AUTO_READY 에서만 활성 (MQTT 계약 §6 drive.resume.requested). 웹 → 백엔드 경로는 계약 미정 */
+/**
+ * [자율주행 재개] — AUTO_READY 에서만 활성. 누르면 POST /api/v1/drive/resume (MQTT-12).
+ * 바로 바뀌지 않는다: 게이트웨이가 받아들이면 3·2·1 카운트다운 뒤 AUTO (계약 v1.2 §6, 화면 위 알림).
+ */
 function Resume() {
   const { drive } = useDrive();
+  const toast = useToast();
+  const [sending, setSending] = useState(false);
   const ready = drive?.control?.mode === 'AUTO_READY';
+  const counting = drive?.resume ?? null;
+  const send = async () => {
+    setSending(true);
+    try {
+      await requestResume();
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : String(error), 'fault', 5000);
+    } finally {
+      setSending(false);
+    }
+  };
   return (
     <div style={{ marginTop: 'var(--x-space-4)' }}>
-      <Button style={{ width: '100%' }} disabled={!ready || !mockDemo} onClick={() => mockDemo?.resume()}>
-        ▶ 자율주행 재개
+      <Button
+        style={{ width: '100%' }}
+        disabled={!ready || !!counting || sending}
+        onClick={() => void send()}
+      >
+        {counting
+          ? `▶ ${Math.max(1, Math.ceil(counting.remaining_ms / 1000))}초 뒤 자율주행`
+          : '▶ 자율주행 재개'}
       </Button>
       <p className={styles.dim}>
-        {ready
-          ? mockDemo
-            ? '자율주행이 3초 연속 정상 — 누르면 AUTO 로 돌아간다.'
-            : '재개 API 가 아직 없다 (웹 → 백엔드 → drive.resume.requested 경로 계약 추가 필요).'
-          : 'AUTO_READY 에서만 활성. 자율주행 복귀는 자동이 아니라 운영자가 누른다.'}
+        {counting
+          ? '카운트다운 중 — 그 사이 자율주행이 다시 끊기면 취소되고 수동주행이 유지된다.'
+          : ready
+            ? '자율주행이 3초 연속 정상. 누르면 3·2·1 을 센 뒤 AUTO 로 돌아간다.'
+            : 'AUTO_READY 에서만 활성. 자율주행 복귀는 자동이 아니라 운영자가 누른다.'}
       </p>
     </div>
   );

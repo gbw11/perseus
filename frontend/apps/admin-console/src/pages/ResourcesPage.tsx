@@ -1,147 +1,66 @@
-import { Button, Card, useToast } from '@xenova/ui';
-import { useState, type CSSProperties } from 'react';
-import { ROLES } from '../domain/roles';
+import { Card } from '@xenova/ui';
+import type { CSSProperties } from 'react';
+import { useVms } from '../api/queries';
+import { ROLES, vmOf, type AppId } from '../domain/roles';
+import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
 
 /**
- * W-06 자원 제어 (화면 정의서 W-06, UI-06) — 초안. 자원 제어 API(S15P31E110-107, 제어 계층 -101)가 아직 없어
- * 화면 안에서만 바뀌는 미리보기다. 화면 완성은 정수환 담당(-113 핀닝 UI, -114 가중치·메모리 UI)이 이어받는다.
- * 코어 배치 표본은 RC카 시나리오 §2 (자율·수동 전용 1코어씩, 인터랙션은 dom0 와 공유 가능). 참고 시안: init/vcpu.
+ * W-06 자원 (화면 정의서 W-06, UI-06) — 초안, 보기 전용. 자원은 VM 을 만들 때 정해지고 도중에 바꾸지 않는다:
+ * 핀닝·스케줄러·메모리는 "지금 이렇게 나뉘어 있다" 를 보여 주는 용도다 (편집·적용 없음).
+ * vCPU 수·메모리는 VM 목록(GET /api/v1/vms), 코어 배치·credit2 값은 RC카 시나리오 §2 표본 —
+ * 실제 값 조회 API(-107)가 생기면 그 값으로 바꾼다. 화면 완성은 정수환 담당(-113·-114). 참고 시안: init/vcpu.
  */
 
-type Domain = 'dom0' | 'autonomous' | 'manual' | 'message-board';
-interface Config {
-  pins: Record<Domain, number[]>;
-  weight: Record<Domain, number>;
-  cap: Record<Domain, number>;
-  memory: Record<Domain, number>;
-}
+type Domain = 'dom0' | AppId;
 
-const DOMAINS: {
-  id: Domain;
-  title: string;
-  sub: string;
-  color: string;
-  dedicated: boolean;
-  fixedMemory: boolean;
-}[] = [
-  {
-    id: 'dom0',
-    title: 'dom0',
-    sub: 'Yocto · 관리 도메인',
-    color: 'var(--x-stopped)',
-    dedicated: false,
-    fixedMemory: true,
-  },
+const DOMAINS: { id: Domain; title: string; sub: string; color: string; dedicated: boolean }[] = [
+  { id: 'dom0', title: 'dom0', sub: 'Yocto · 관리 도메인', color: 'var(--x-stopped)', dedicated: false },
   {
     id: 'autonomous',
     title: ROLES.autonomous.title,
-    sub: 'Zephyr · autonomous',
+    sub: 'Zephyr',
     color: ROLES.autonomous.color,
     dedicated: true,
-    fixedMemory: true,
   },
-  {
-    id: 'manual',
-    title: ROLES.manual.title,
-    sub: 'Zephyr · manual',
-    color: ROLES.manual.color,
-    dedicated: true,
-    fixedMemory: true,
-  },
+  { id: 'manual', title: ROLES.manual.title, sub: 'Zephyr', color: ROLES.manual.color, dedicated: true },
   {
     id: 'message-board',
     title: ROLES['message-board'].title,
-    sub: 'Debian 13 · message-board',
+    sub: 'Debian 13',
     color: ROLES['message-board'].color,
     dedicated: false,
-    fixedMemory: false,
   },
 ];
 const CORES = [0, 1, 2, 3];
 
-const INITIAL: Config = {
-  pins: { dom0: [0], autonomous: [1], manual: [2], 'message-board': [3] },
-  weight: { dom0: 512, autonomous: 512, manual: 512, 'message-board': 256 },
-  cap: { dom0: 0, autonomous: 0, manual: 0, 'message-board': 0 },
-  memory: { dom0: 1024, autonomous: 16, manual: 16, 'message-board': 512 },
-};
-
-const copy = (c: Config): Config => JSON.parse(JSON.stringify(c)) as Config;
+/** RC카 시나리오 §2: 자율·수동은 전용 1코어씩, 인터랙션은 남은 코어 */
+const PINS: Record<Domain, number[]> = { dom0: [0], autonomous: [1], manual: [2], 'message-board': [3] };
+const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512, 'message-board': 256 };
+const DOM0_MEMORY_MIB = 1024;
 
 export function ResourcesPage() {
-  const toast = useToast();
-  const [staged, setStaged] = useState<Config>(() => copy(INITIAL));
-
-  /** 전용 코어(자율·수동)는 다른 도메인과 나누지 않는다 */
-  const owner = (core: number) => DOMAINS.find((d) => d.dedicated && staged.pins[d.id].includes(core));
-
-  const toggle = (domain: Domain, core: number) => {
-    const pins = staged.pins[domain];
-    const on = pins.includes(core);
-    const holder = owner(core);
-    if (!on && holder && holder.id !== domain) {
-      toast.show(`코어 ${core} 는 ${holder.title} 전용이라 나눌 수 없다`, 'fault', 4000);
-      return;
-    }
-    if (on && pins.length === 1) {
-      toast.show('도메인마다 코어가 하나는 있어야 한다', 'fault', 3000);
-      return;
-    }
-    const next = copy(staged);
-    next.pins[domain] = on ? pins.filter((c) => c !== core) : [...pins, core].sort();
-    setStaged(next);
-  };
-
-  const set = (key: 'weight' | 'cap' | 'memory', domain: Domain, value: number) => {
-    const next = copy(staged);
-    next[key][domain] = value;
-    setStaged(next);
-  };
-
-  const diff = DOMAINS.flatMap((d) => {
-    const rows: { domain: string; item: string; before: string; after: string }[] = [];
-    const pinText = (c: Config) => `코어 ${c.pins[d.id].join(', ')}`;
-    if (pinText(INITIAL) !== pinText(staged))
-      rows.push({ domain: d.title, item: 'vCPU 핀닝', before: pinText(INITIAL), after: pinText(staged) });
-    for (const key of ['weight', 'cap', 'memory'] as const) {
-      if (INITIAL[key][d.id] !== staged[key][d.id]) {
-        const unit = key === 'memory' ? ' MiB' : key === 'cap' ? '%' : '';
-        rows.push({
-          domain: d.title,
-          item: key,
-          before: `${INITIAL[key][d.id]}${unit}`,
-          after: `${staged[key][d.id]}${unit}`,
-        });
-      }
-    }
-    return rows;
-  });
+  const vms = useVms();
+  const { drive } = useDrive();
+  const vmFor = (d: Domain) => (d === 'dom0' ? undefined : vmOf(d, vms.data?.items, drive));
+  const memory = (d: Domain) => (d === 'dom0' ? DOM0_MEMORY_MIB : (vmFor(d)?.memory_mib ?? 0));
+  const vcpus = (d: Domain) => (d === 'dom0' ? 1 : (vmFor(d)?.vcpus ?? 0));
+  const totalMemory = DOMAINS.reduce((sum, d) => sum + memory(d.id), 0);
+  const guests = DOMAINS.filter((d) => d.id !== 'dom0');
+  const totalWeight = guests.reduce((sum, d) => sum + WEIGHT[d.id], 0);
 
   return (
     <div className={styles.page}>
       <section className={styles.pageHead}>
         <div>
-          <div className={styles.eyebrow}>자원 제어 · Cortex-A72 4코어 · Xen credit2</div>
+          <div className={styles.eyebrow}>자원 · Cortex-A72 4코어 · Xen credit2</div>
           <h1>vCPU·스케줄러·메모리</h1>
         </div>
-        <span className={styles.draft}>자원 제어 API(-107) 미구현 — 화면 안 미리보기</span>
         <span className={styles.grow} />
-        <Button variant="secondary" onClick={() => setStaged(copy(INITIAL))}>
-          초기화
-        </Button>
-        <Button
-          disabled={diff.length === 0}
-          onClick={() => toast.show('자원 제어 API(-107)가 아직 없어 적용하지 않았다', 'fault', 4000)}
-        >
-          설정 적용
-        </Button>
+        <span className={styles.chip}>보기 전용 — VM 을 만들 때 정해진 값</span>
       </section>
 
-      <Card
-        title="vCPU 핀닝 매트릭스"
-        actions={<span className={styles.dim}>칸을 눌러 고정·해제 (xl vcpu-pin)</span>}
-      >
+      <Card title="코어 배치 (vCPU 핀닝)" actions={<span className={styles.dim}>RC카 시나리오 §2 표본</span>}>
         <table className={styles.matrix}>
           <thead>
             <tr>
@@ -149,6 +68,7 @@ export function ResourcesPage() {
               {CORES.map((c) => (
                 <th key={c}>CORE {c}</th>
               ))}
+              <th>vCPU</th>
             </tr>
           </thead>
           <tbody>
@@ -159,121 +79,75 @@ export function ResourcesPage() {
                   <div className={styles.eyebrow}>{d.sub}</div>
                 </td>
                 {CORES.map((core) => {
-                  const on = staged.pins[d.id].includes(core);
+                  const on = PINS[d.id].includes(core);
                   return (
                     <td key={core}>
-                      <button
-                        type="button"
+                      <div
                         className={[styles.cell, on ? styles.cellPinned : ''].join(' ')}
-                        style={{ '--accent': d.color } as CSSProperties}
-                        onClick={() => toggle(d.id, core)}
-                        aria-pressed={on}
+                        style={
+                          { '--accent': d.color, display: 'grid', placeItems: 'center' } as CSSProperties
+                        }
                       >
-                        {on ? (d.dedicated ? '전용 고정' : '고정') : '—'}
-                      </button>
+                        {on ? (d.dedicated ? '전용' : '고정') : '—'}
+                      </div>
                     </td>
                   );
                 })}
+                <td className={styles.mono}>{vcpus(d.id) || '—'}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        <p className={styles.dim}>
+          자율주행·수동주행은 코어를 혼자 쓴다 — 인터랙션이 바빠져도 주행 명령 주기(50 Hz)가 흔들리지 않게.
+        </p>
       </Card>
 
       <div className={styles.cols2}>
-        <Card title="스케줄러 (credit2)">
-          {DOMAINS.filter((d) => d.id !== 'dom0').map((d) => (
-            <div
-              key={d.id}
-              style={{ '--accent': d.color, marginBottom: 'var(--x-space-4)' } as CSSProperties}
-            >
-              <div className={styles.row} style={{ justifyContent: 'space-between', marginBottom: 4 }}>
-                <b style={{ color: d.color }}>{d.title}</b>
-                <span className={styles.mono}>
-                  weight {staged.weight[d.id]} · cap{' '}
-                  {staged.cap[d.id] === 0 ? '제한 없음' : `${staged.cap[d.id]}%`}
-                </span>
+        <Card title="스케줄러 (credit2 weight)">
+          <p className={styles.dim}>
+            코어가 겹칠 때 CPU 시간을 나누는 비율. 지금은 코어가 겹치지 않아 참고값이다.
+          </p>
+          {guests.map((d) => {
+            const share = WEIGHT[d.id] / totalWeight;
+            return (
+              <div key={d.id} style={{ marginBottom: 'var(--x-space-3)' }}>
+                <div className={styles.row} style={{ justifyContent: 'space-between', marginBottom: 4 }}>
+                  <b style={{ color: d.color }}>{d.title}</b>
+                  <span className={styles.mono}>
+                    weight {WEIGHT[d.id]} · {Math.round(share * 100)}% · cap 없음
+                  </span>
+                </div>
+                <div className={styles.bar}>
+                  <i style={{ width: `${share * 100}%`, background: d.color }} />
+                </div>
               </div>
-              <input
-                className={styles.slider}
-                type="range"
-                min={1}
-                max={1024}
-                value={staged.weight[d.id]}
-                onChange={(e) => set('weight', d.id, Number(e.target.value))}
-                aria-label={`${d.title} weight`}
-              />
-              <input
-                className={styles.slider}
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={staged.cap[d.id]}
-                onChange={(e) => set('cap', d.id, Number(e.target.value))}
-                aria-label={`${d.title} cap`}
-              />
-            </div>
-          ))}
+            );
+          })}
         </Card>
-        <Card title="메모리">
+        <Card title="메모리" actions={<span className={styles.mono}>합계 {totalMemory} MiB</span>}>
+          <div className={styles.stack}>
+            {DOMAINS.map((d) => (
+              <i
+                key={d.id}
+                title={`${d.title} ${memory(d.id)} MiB`}
+                style={{ flexGrow: memory(d.id), background: d.color }}
+              />
+            ))}
+          </div>
           <div className={styles.rows}>
-            {DOMAINS.filter((d) => d.id !== 'dom0').map((d) => (
+            {DOMAINS.map((d) => (
               <div key={d.id}>
                 <span style={{ color: d.color }}>{d.title}</span>
-                <span>
-                  {d.fixedMemory ? (
-                    `${staged.memory[d.id]} MiB 고정 (Zephyr 프로필)`
-                  ) : (
-                    <input
-                      className={styles.select}
-                      type="number"
-                      min={256}
-                      max={1024}
-                      step={64}
-                      value={staged.memory[d.id]}
-                      onChange={(e) => set('memory', d.id, Number(e.target.value))}
-                      style={{ width: 110 }}
-                    />
-                  )}
+                <span className={styles.mono}>
+                  {memory(d.id) ? `${memory(d.id)} MiB` : '—'}
+                  {d.id === 'dom0' ? ' (부팅 인자)' : d.sub === 'Zephyr' ? ' (Zephyr 프로필 고정)' : ''}
                 </span>
               </div>
             ))}
           </div>
         </Card>
       </div>
-
-      <Card title="변경 전 → 변경 후 → 실제 적용">
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>도메인</th>
-              <th>항목</th>
-              <th>변경 전</th>
-              <th>변경 후</th>
-              <th>실제 적용</th>
-            </tr>
-          </thead>
-          <tbody>
-            {diff.map((r) => (
-              <tr key={`${r.domain}-${r.item}`}>
-                <td>{r.domain}</td>
-                <td className={styles.mono}>{r.item}</td>
-                <td className={styles.mono}>{r.before}</td>
-                <td className={styles.mono}>{r.after}</td>
-                <td className={styles.dim}>미적용 (API 없음)</td>
-              </tr>
-            ))}
-            {diff.length === 0 && (
-              <tr>
-                <td colSpan={5} className={styles.dim}>
-                  바뀐 값이 없다
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </Card>
     </div>
   );
 }

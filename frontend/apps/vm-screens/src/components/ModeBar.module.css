@@ -76,3 +76,9 @@
   font-size: var(--x-text-lg);
   color: var(--x-text-muted);
 }
+
+.mark {
+  height: 36px;
+  width: auto;
+  flex: none;
+}

@@ -1,8 +1,10 @@
 import '@xenova/ui/tokens.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createBrowserRouter, Navigate, Outlet, RouterProvider } from 'react-router';
+import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } from 'react-router';
 import { DevControls } from './components/DevControls';
+import { DisplayFollower } from './components/DisplayFollower';
+import { ResumeOverlay } from './components/ResumeOverlay';
 import { DetailPage } from './pages/DetailPage';
 import { SplitPage } from './pages/SplitPage';
 import {
@@ -19,10 +21,18 @@ function Root() {
   const Provider = (mode && PROVIDERS[mode]) || ConsoleBusTelemetryProvider;
   return (
     <Provider>
+      <DisplayFollower />
       <Outlet />
+      <ResumeOverlay />
       <DevControls />
     </Provider>
   );
+}
+
+/** / → /split. ?display=·?kiosk= 는 남긴다 (모니터 번호를 잃으면 화면 배치를 못 따라간다) */
+function ToSplit() {
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: '/split', search }} replace />;
 }
 
 const router = createBrowserRouter(
@@ -30,7 +40,7 @@ const router = createBrowserRouter(
     {
       element: <Root />,
       children: [
-        { path: '/', element: <Navigate to="/split" replace /> },
+        { path: '/', element: <ToSplit /> },
         { path: '/split', element: <SplitPage /> },
         { path: '/detail/:app', element: <DetailPage /> },
       ],

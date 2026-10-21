@@ -41,6 +41,13 @@ export interface DriveStateDto {
     obstacle_count: number;
     stop: boolean;
   } | null;
+  /** 받아들여진 재개 카운트다운 (계약 v1.2 §6). 없으면 null */
+  resume?: {
+    generation: number | null;
+    switch_in_ms: number;
+    accepted_ago_ms: number;
+    remaining_ms: number;
+  } | null;
 }
 
 export interface DriveAppDto {
@@ -131,6 +138,19 @@ export function emptyTelemetry(now: number): Telemetry {
   };
 }
 
+/** 상태 프레임 사이가 이보다 길면(끊김) 적분하지 않는다 */
+const MAX_ODOMETER_STEP_MS = 1000;
+
+/** 속도를 적분해 주행 거리를 추정한다 (뒤로 가도 거리는 늘어난다) */
+export function advanceOdometer(t: Telemetry, v: number, now: number): NonNullable<Telemetry['odometer']> {
+  const previous = t.odometer;
+  if (!previous) return { distanceM: 0, at: now };
+  const dt = now - previous.at;
+  if (dt <= 0) return previous;
+  const step = dt > MAX_ODOMETER_STEP_MS ? 0 : (Math.abs(v) * dt) / 1000;
+  return { distanceM: previous.distanceM + step, at: now };
+}
+
 export function applyDriveState(t: Telemetry, state: DriveStateDto, now: number): Telemetry {
   const apps = {} as Telemetry['apps'];
   const appVmIds: Partial<Record<AppId, string>> = { ...t.appVmIds };
@@ -178,6 +198,8 @@ export function applyDriveState(t: Telemetry, state: DriveStateDto, now: number)
       batt_v: vehicle?.batt_v ?? 0,
     },
     autonomousFreshSince: autonomousFresh ? (t.autonomousFreshSince ?? now) : null,
+    resumeAt: state.resume ? now + state.resume.remaining_ms : null,
+    odometer: advanceOdometer(t, vehicle?.v_mps ?? 0, now),
   };
 }
 
@@ -195,6 +217,11 @@ function text(event: EventDto): string {
     return `모드 ${String(p.from ?? '?')} → ${String(p.to ?? '?')}${p.reason ? ` (${String(p.reason)})` : ''}`;
   }
   if (event.type === 'recovery.started') return 'VM 재시작 (복구 서비스)';
+  if (event.type === 'drive.resume.accepted') {
+    return `자율주행 재개 승인 — ${Number(p.switch_in_ms ?? 3000) / 1000}초 뒤 전환`;
+  }
+  if (event.type === 'drive.resume.cancelled')
+    return `자율주행 재개 취소${p.reason ? ` (${String(p.reason)})` : ''}`;
   if (event.type === 'recovery.completed') return 'VM 복구 완료';
   if (event.type === 'drive.fault.detected') {
     const title = APP_TITLE[String(p.app_id)] ?? String(p.app_id ?? '앱');
@@ -208,7 +235,8 @@ export function applyEvent(t: Telemetry, event: EventDto, now: number, wallNow =
   const id = hash(event.event_id);
   if (t.events.some((e) => e.id === id)) return t;
   const ageMs = Math.max(0, wallNow - Date.parse(event.occurred_at));
-  const level: TimelineEvent['level'] = event.severity === 'INFO' ? 'info' : 'warning';
+  const level: TimelineEvent['level'] =
+    event.type === 'drive.resume.accepted' ? 'ok' : event.severity === 'INFO' ? 'info' : 'warning';
   const entry: TimelineEvent = { id, at: now - ageMs, type: event.type, level, text: text(event) };
   const next = { ...t, events: [entry, ...t.events].slice(0, MAX_EVENTS) };
   if (event.type === 'recovery.started' && event.vm_id) {

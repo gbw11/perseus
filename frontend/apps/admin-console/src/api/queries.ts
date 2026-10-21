@@ -3,10 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { request, setSession } from './client';
 import type {
   CreateVmRequest,
+  Display,
+  DisplayListResponse,
   EventListResponse,
   LoginRequest,
   MetricHistoryResponse,
   ProcessesResponse,
+  RouteRequest,
   Template,
   TokenResponse,
   Vm,
@@ -20,6 +23,7 @@ export const keys = {
   events: (query: string) => ['events', query] as const,
   metrics: (id: string) => ['vms', id, 'metrics'] as const,
   processes: (id: string) => ['vms', id, 'processes'] as const,
+  displays: ['displays'] as const,
 };
 
 /** 백엔드가 5초마다 Xen 상태를 확인하므로(계약 §5 끝) 화면도 같은 주기로 다시 읽는다 */
@@ -85,6 +89,28 @@ export function useProcesses(vmId: string, enabled: boolean) {
       request<ProcessesResponse>(`/api/v1/vms/${encodeURIComponent(vmId)}/processes`, { signal }),
     enabled,
     refetchInterval: POLL_MS,
+  });
+}
+
+/**
+ * 화면 배치 (REST-23). 모니터가 바꾼 결과(SWITCHING → ACTIVE)를 빨리 보이게 짧게 다시 읽는다.
+ * 실시간 WS /ws/v1/displays 는 모니터 브라우저용이라 콘솔은 조회로 충분하다.
+ */
+export function useDisplays() {
+  return useQuery({
+    queryKey: keys.displays,
+    queryFn: ({ signal }) => request<DisplayListResponse>('/api/v1/displays', { signal }),
+    refetchInterval: 1000,
+  });
+}
+
+/** 화면 배치 바꾸기 (REST-24). 202 — 모니터가 route.applied 로 답해야 ACTIVE. 409 면 다른 사람이 먼저 바꿈 */
+export function useRouteDisplay() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ displayId, body }: { displayId: string; body: RouteRequest }) =>
+      request<Display>(`/api/v1/displays/${encodeURIComponent(displayId)}/route`, { method: 'PUT', body }),
+    onSettled: () => client.invalidateQueries({ queryKey: keys.displays }),
   });
 }
 

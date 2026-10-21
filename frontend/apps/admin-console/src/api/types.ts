@@ -120,7 +120,9 @@ export type EventType =
   | 'demo.command.completed'
   | 'demo.command.failed'
   | 'drive.mode.changed'
-  | 'drive.fault.detected';
+  | 'drive.fault.detected'
+  | 'drive.resume.accepted'
+  | 'drive.resume.cancelled';
 
 export type EventSeverity = 'INFO' | 'WARNING' | 'ERROR';
 
@@ -175,4 +177,44 @@ export interface ProcessesResponse {
   observed_at: string | null;
   stale: boolean;
   items: ProcessInfo[];
+}
+
+// ---- 화면 배치 (노션 API 명세 REST-23·REST-24, 백엔드 -129) ----
+
+export type DisplayView = 'split' | 'os-face';
+export type DisplayStatus = 'DISCONNECTED' | 'IDLE' | 'SWITCHING' | 'ACTIVE' | 'ERROR';
+
+export interface DisplayRoute {
+  /** split 이면 null */
+  vm_id: string | null;
+  view: DisplayView;
+  request_id: string;
+  /** observed_route 에만 있다 */
+  applied_at: string | null;
+  verification_level: string | null;
+}
+
+export interface Display {
+  display_id: string;
+  label: string;
+  /** 모니터 브라우저가 WS /ws/v1/displays 로 붙어 있는지 */
+  connected: boolean;
+  status: DisplayStatus;
+  supported_views: DisplayView[];
+  revision: number;
+  desired_route: DisplayRoute;
+  observed_route: DisplayRoute | null;
+  last_error: string | null;
+}
+
+export interface DisplayListResponse {
+  items: Display[];
+  observed_at: string;
+  stale: boolean;
+}
+
+export interface RouteRequest {
+  vm_id: string | null;
+  view: DisplayView;
+  expected_revision: number;
 }

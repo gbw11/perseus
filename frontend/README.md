@@ -84,7 +84,8 @@ cd apps/admin-console && VITE_MOCK=true npx vite --port 5173            # VITE_M
 ```
 
 - 콘솔: `http://localhost:5173/demo` (admin / 1234) — 여기서 [강제 종료] → 인계 → 복구 → AUTO_READY → [자율주행 재개]
-- 모니터: `http://localhost:5173/monitor/split?kiosk=1`, 상세는 `/monitor/detail/autonomous` 등. 콘솔 탭이 열려 있는 동안 따라갑니다.
+- 콘솔: `http://localhost:5173/demo` 의 세 VM 카드마다 [강제 종료]. 재개는 바로 바뀌지 않고 3·2·1 을 센 뒤 AUTO (MQTT 계약 v1.2 §6)
+- 모니터: `http://localhost:5173/monitor/?display=display-0&kiosk=1` (모니터 2 는 `display-1`). 콘솔 [화면 배치] 에서 고른 화면으로 바뀌고 `route.applied` 로 답합니다 (REST-23·24, WS `/ws/v1/displays`). `display` 없이 열면 `/monitor/split`·`/monitor/detail/<앱>` 을 손으로 고릅니다. 콘솔 탭이 열려 있는 동안 따라갑니다.
 
 ## 규칙
 

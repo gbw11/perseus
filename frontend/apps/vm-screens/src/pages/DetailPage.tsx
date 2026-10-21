@@ -1,6 +1,8 @@
 import { StatusBadge } from '@xenova/ui';
 import { Navigate, useParams } from 'react-router';
+import { ResumeState } from '../components/AppPanel';
 import { ModeBar } from '../components/ModeBar';
+import { TrackMap } from '../components/TrackMap';
 import { mps, rad, seconds } from '../components/format';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { APPS, APP_IDS, type AppId, type Telemetry } from '../telemetry/types';
@@ -191,9 +193,23 @@ function InteractionDetail() {
   return (
     <>
       <section className={styles.detailMain}>
-        <h2>알림 타임라인 (drive.mode.changed · drive.fault.detected · message.posted)</h2>
+        <h2>내비게이션 — 트랙 지도 · 추정 위치</h2>
         {down ? (
           <p className={styles.dim}>인터랙션 VM 이 내려가 있다. 주행은 영향 없이 계속된다 (격리).</p>
+        ) : (
+          <TrackMap large />
+        )}
+      </section>
+      <section className={styles.detailSide}>
+        <h2>자율주행 재개 상태</h2>
+        <ResumeState />
+        <p className={styles.dim}>
+          복구된 자율주행 VM 이 3초 연속 정상이면 AUTO_READY. 운영자가 관리 콘솔에서 재개를 누르면 3·2·1 을 센
+          뒤 바뀐다 — 모니터에는 버튼이 없다.
+        </p>
+        <h2>알림</h2>
+        {down ? (
+          <p className={styles.dim}>—</p>
         ) : (
           <ul className={styles.timeline}>
             {t.events.map((event) => (
@@ -205,16 +221,6 @@ function InteractionDetail() {
             ))}
           </ul>
         )}
-      </section>
-      <section className={styles.detailSide}>
-        <h2>자율주행 재개 상태</h2>
-        <div className={[styles.resumeState, t.mode === 'AUTO_READY' ? styles.resumeReady : ''].join(' ')}>
-          {t.mode === 'AUTO_READY' ? '재개 가능' : t.mode === 'AUTO' ? '자율주행 중' : '재개 대기'}
-        </div>
-        <p className={styles.dim}>
-          복구된 자율주행 VM 이 3초 연속 정상(도메인 실행 · app.heartbeat · 명령 신선)이면 AUTO_READY. 재개는
-          운영자가 관리 콘솔 시연 제어에서 누른다 — 모니터에는 버튼이 없다.
-        </p>
       </section>
     </>
   );

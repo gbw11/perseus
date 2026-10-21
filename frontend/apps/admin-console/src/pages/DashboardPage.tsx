@@ -243,11 +243,13 @@ function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: Dr
           <div>
             <span>자율주행 재개</span>
             <span>
-              {drive?.control?.mode === 'AUTO_READY'
-                ? '가능 — 시연 제어에서'
-                : drive?.control?.mode === 'AUTO'
-                  ? '자율주행 중'
-                  : '대기'}
+              {drive?.resume
+                ? `${Math.max(1, Math.ceil(drive.resume.remaining_ms / 1000))}초 뒤 자율주행으로 전환`
+                : drive?.control?.mode === 'AUTO_READY'
+                  ? '가능 — 시연 제어에서'
+                  : drive?.control?.mode === 'AUTO'
+                    ? '자율주행 중'
+                    : '대기'}
             </span>
           </div>
         </div>

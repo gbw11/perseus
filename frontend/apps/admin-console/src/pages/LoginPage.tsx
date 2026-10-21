@@ -1,3 +1,4 @@
+import logo from '@xenova/ui/assets/xenova-logo.png';
 import { Button } from '@xenova/ui';
 import { useState, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router';
@@ -38,9 +39,7 @@ export function LoginPage() {
         style={{ width: 420, flexDirection: 'column', alignItems: 'stretch', padding: 40 }}
       >
         <div style={{ textAlign: 'center' }}>
-          <div className={styles.big} style={{ color: 'var(--x-primary)' }}>
-            XENOVA
-          </div>
+          <img src={logo} alt="Xenova" style={{ height: 44, width: 'auto', margin: '0 auto 12px' }} />
           <h1 style={{ fontSize: 'var(--x-text-lg)' }}>관리 콘솔 로그인</h1>
         </div>
         <form className={styles.form} onSubmit={submit}>

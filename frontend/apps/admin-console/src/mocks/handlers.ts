@@ -9,7 +9,7 @@
 import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import type { CreateVmRequest, LoginRequest, TokenResponse, Vm } from '../api/types';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
-import { scenarioEvents, vmStateOf } from './scenario';
+import { getDisplays, RouteError, scenarioEvents, setRoute, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
 const TOKEN_TTL_S = 900;
@@ -187,6 +187,39 @@ export const handlers = [
     if (!find(String(params.vmId))) return vmNotFound();
     vms = vms.filter((vm) => vm.vm_id !== params.vmId);
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  // ---- 화면 배치 (REST-23·REST-24, 백엔드 -129) ----
+  http.get('*/api/v1/displays', async ({ request }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    return HttpResponse.json({
+      items: getDisplays(),
+      observed_at: new Date().toISOString(),
+      stale: false,
+    } as unknown as JsonBodyType);
+  }),
+
+  http.put('*/api/v1/displays/:displayId/route', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const body = (await request.json()) as {
+      vm_id?: string | null;
+      view?: string;
+      expected_revision?: number;
+    };
+    try {
+      return HttpResponse.json(setRoute(String(params.displayId), body) as unknown as JsonBodyType, {
+        status: 202,
+      });
+    } catch (e) {
+      if (!(e instanceof RouteError)) throw e;
+      const message =
+        e.code === 'DISPLAY_REVISION_CONFLICT'
+          ? '다른 사람이 먼저 배치를 바꿨습니다. 새로 읽고 다시 하세요.'
+          : e.code;
+      return error(e.status, e.code, message);
+    }
   }),
 
   // ---- 이벤트·메트릭 (노션 API 명세 REST-18, 메트릭 조회) ----

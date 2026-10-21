@@ -354,3 +354,103 @@
   border-color: var(--x-recovering);
   color: var(--x-recovering);
 }
+
+/* 재개 3·2·1 (계약 v1.2 §6) — 두 모니터 가운데 */
+.resumeOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--x-space-3);
+  background: rgb(9 14 22 / 0.72);
+  pointer-events: none;
+}
+.resumeOverlayLabel {
+  font-size: 40px;
+  font-weight: 800;
+  color: var(--x-app-autonomous);
+}
+.resumeOverlayCount {
+  font-family: var(--x-font-mono);
+  font-size: 240px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--x-app-autonomous);
+  animation: countTick 0.4s ease-out;
+}
+.resumeOverlayHint {
+  font-size: var(--x-text-xl);
+  color: var(--x-text-muted);
+}
+@keyframes countTick {
+  from {
+    transform: scale(1.4);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+/* 인터랙션 내비게이션 — 트랙 지도 + 추정 위치 */
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--x-space-2);
+  margin-bottom: var(--x-space-3);
+}
+.navMap {
+  width: 100%;
+  max-height: 150px;
+  padding: var(--x-space-2);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-sunken);
+}
+.navLarge .navMap {
+  max-height: 520px;
+}
+.navTrack {
+  fill: none;
+  stroke: var(--x-surface-3);
+  stroke-width: 26;
+}
+.navLine {
+  fill: none;
+  stroke: var(--x-border);
+  stroke-width: 2;
+  stroke-dasharray: 8 8;
+}
+.navStart {
+  stroke: var(--x-text);
+  stroke-width: 4;
+}
+.navHalo {
+  fill: var(--x-app-interaction);
+  opacity: 0.2;
+}
+.navCar {
+  fill: var(--x-app-interaction);
+}
+.navStats {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: var(--x-space-2) var(--x-space-4);
+  margin: 0;
+}
+.navStats div {
+  display: flex;
+  flex-direction: column;
+}
+.navStats dt {
+  font-size: var(--x-text-xs);
+  color: var(--x-text-muted);
+}
+.navStats dd {
+  margin: 0;
+  font-weight: 700;
+}
+.navLarge .navStats {
+  font-size: var(--x-text-lg);
+}

@@ -113,4 +113,8 @@ export interface Telemetry {
   appVmIds?: Partial<Record<AppId, string>>;
   /** live·콘솔 mock: 복구 서비스가 재시작한 앱 — 명령(생존 신호)이 다시 신선해질 때까지 '복구 중' */
   recoveringApps?: Partial<Record<AppId, true>>;
+  /** 받아들여진 자율주행 재개가 AUTO 로 바뀔 예상 시각 (화면 시계, MQTT 계약 v1.2 §6). 없으면 null */
+  resumeAt?: number | null;
+  /** 추정 주행 거리 — 차량 속도(vehicle.status v_mps)를 화면에서 적분한 값. 위치 센서가 아니다 */
+  odometer?: { distanceM: number; at: number };
 }

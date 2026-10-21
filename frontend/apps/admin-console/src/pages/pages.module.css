@@ -431,3 +431,14 @@
   border-color: var(--x-primary);
   box-shadow: 0 0 0 1px var(--x-primary);
 }
+.stack {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+  margin-bottom: var(--x-space-3);
+  overflow: hidden;
+  border-radius: var(--x-radius-sm);
+}
+.stack > i {
+  min-width: 4px;
+}

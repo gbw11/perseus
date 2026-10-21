@@ -16,6 +16,8 @@ export const CATEGORY_LABEL: Record<EventCategory, string> = {
 const CATEGORY: Record<EventType, EventCategory> = {
   'drive.mode.changed': 'mode',
   'drive.fault.detected': 'fault',
+  'drive.resume.accepted': 'mode',
+  'drive.resume.cancelled': 'mode',
   'recovery.failed': 'fault',
   'vm.created': 'lifecycle',
   'vm.deleted': 'lifecycle',
@@ -36,6 +38,9 @@ const REASON: Record<string, string> = {
   resume_requested: '재개 요청',
   no_fresh_standby: '넘길 앱 없음',
   autonomous_recovered: '자율주행 3초 연속 정상',
+  autonomous_lost: '자율주행이 다시 끊김',
+  manual_lost: '수동주행 끊김',
+  not_auto_ready: 'AUTO_READY 아님',
 };
 
 const str = (value: unknown) => (value == null ? '' : String(value));
@@ -63,6 +68,18 @@ export function describe(
         title: `${vmName(str(p.vm_id) || event.vm_id)} 장애 감지`,
         detail: REASON[str(p.reason)] ?? str(p.reason),
       };
+    case 'drive.resume.accepted':
+      return {
+        title: `재개 승인 — ${Number(p.switch_in_ms ?? 3000) / 1000}초 뒤 AUTO`,
+        detail: [
+          p.requested_by && `요청 ${str(p.requested_by)}`,
+          p.generation != null && `gen ${str(p.generation)}`,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      };
+    case 'drive.resume.cancelled':
+      return { title: '재개 취소', detail: REASON[str(p.reason)] ?? str(p.reason) };
     case 'vm.state.changed':
       return { title: `${vmName(event.vm_id)} ${str(p.from)} → ${str(p.to)}`, detail: '도메인 상태' };
     case 'recovery.started':

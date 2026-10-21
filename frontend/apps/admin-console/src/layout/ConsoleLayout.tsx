@@ -1,9 +1,11 @@
 import { AppShell, Button } from '@xenova/ui';
+import logo from '@xenova/ui/assets/xenova-logo.png';
 import { NavLink, Outlet, useNavigate } from 'react-router';
 import { useLogout } from '../api/queries';
 import { useSession } from '../auth';
 import { DriveProvider } from './DriveContext';
 import { ModeStrip } from './ModeStrip';
+import { ResumeNotice } from './ResumeNotice';
 import styles from './layout.module.css';
 
 /** 웹 공통 틀 (화면 정의서 §2): 위쪽 메뉴 [대시보드 · VM · 자원 · 시연 제어 · 이벤트] + 주행 모드 띠 */
@@ -17,13 +19,8 @@ export function ConsoleLayout() {
       <AppShell
         brand={
           <>
-            <span className={styles.logo} aria-hidden="true">
-              X
-            </span>
-            <span className={styles.brandText}>
-              XENOVA
-              <small>관리 콘솔</small>
-            </span>
+            <img src={logo} alt="Xenova" className={styles.logo} />
+            <small className={styles.brandText}>관리 콘솔</small>
           </>
         }
         nav={
@@ -60,6 +57,7 @@ export function ConsoleLayout() {
         }
         strip={<ModeStrip />}
       >
+        <ResumeNotice />
         <Outlet />
       </AppShell>
     </DriveProvider>

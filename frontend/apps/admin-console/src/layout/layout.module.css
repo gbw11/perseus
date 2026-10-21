@@ -1,21 +1,9 @@
 .logo {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius-sm);
-  background: var(--x-surface-2);
-  color: var(--x-primary);
-  font-family: var(--x-font-mono);
-  font-size: var(--x-text-sm);
+  display: block;
+  height: 24px;
+  width: auto;
 }
 .brandText {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.1;
-}
-.brandText small {
   font-family: var(--x-font-mono);
   font-size: 10px;
   font-weight: 500;
@@ -68,4 +56,48 @@
 }
 .fault {
   color: var(--x-fault);
+}
+.countdown {
+  position: fixed;
+  top: 128px;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-4);
+  padding: var(--x-space-3) var(--x-space-5);
+  transform: translateX(-50%);
+  border: 1px solid var(--x-app-autonomous);
+  border-radius: var(--x-radius);
+  background: var(--x-surface-3);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 0.45);
+}
+.countdownLabel {
+  font-size: var(--x-text-lg);
+  font-weight: 700;
+}
+.countdownNumber {
+  min-width: 1.2em;
+  font-family: var(--x-font-mono);
+  font-size: 48px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  color: var(--x-app-autonomous);
+  animation: tick 1s ease-out;
+}
+.countdownHint {
+  max-width: 14em;
+  font-size: var(--x-text-xs);
+  color: var(--x-text-muted);
+}
+@keyframes tick {
+  from {
+    transform: scale(1.6);
+    opacity: 0.3;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }

@@ -1,6 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { accessToken, openSocket, type Connection } from './backend';
-import { applyDriveState, applyEvent, emptyTelemetry, type DriveStateDto, type EventDto } from './live';
+import {
+  advanceOdometer,
+  applyDriveState,
+  applyEvent,
+  emptyTelemetry,
+  type DriveStateDto,
+  type EventDto,
+} from './live';
 import { crash, initialTelemetry, resume, setManualKeys, step, toggleStress } from './scenario';
 import type { AppId, Telemetry } from './types';
 
@@ -29,7 +36,15 @@ export function MockTelemetryProvider({ children }: { children: ReactNode }) {
   const [telemetry, setTelemetry] = useState(() => initialTelemetry(performance.now()));
 
   useEffect(() => {
-    const id = window.setInterval(() => setTelemetry((t) => step(t, performance.now())), TICK_MS);
+    const id = window.setInterval(
+      () =>
+        setTelemetry((t) => {
+          const now = performance.now();
+          const next = step(t, now);
+          return { ...next, odometer: advanceOdometer(next, next.vehicle.v_mps, now) };
+        }),
+      TICK_MS,
+    );
     return () => window.clearInterval(id);
   }, []);
 
@@ -56,7 +71,14 @@ export function MockTelemetryProvider({ children }: { children: ReactNode }) {
 const noop = () => {};
 /** 화면의 경과 시간 표시(복구 중 n초 등)가 멈추지 않게 now 만 따로 흘린다 */
 const CLOCK_MS = 200;
-const DRIVE_EVENTS = ['drive.mode.changed', 'drive.fault.detected', 'recovery.started', 'recovery.completed'];
+const DRIVE_EVENTS = [
+  'drive.mode.changed',
+  'drive.fault.detected',
+  'drive.resume.accepted',
+  'drive.resume.cancelled',
+  'recovery.started',
+  'recovery.completed',
+];
 
 export function LiveTelemetryProvider({ children }: { children: ReactNode }) {
   const [telemetry, setTelemetry] = useState(() => emptyTelemetry(performance.now()));
@@ -110,7 +132,7 @@ export function LiveTelemetryProvider({ children }: { children: ReactNode }) {
 }
 
 /** 관리 콘솔 mock 시나리오 채널 이름 (admin-console src/mocks/scenario.ts MOCK_BUS) */
-const MOCK_BUS = 'xenova-mock-bus';
+export const MOCK_BUS = 'xenova-mock-bus';
 
 /**
  * 관리 콘솔 mock 을 따라간다 (기본값). 콘솔 시연 제어에서 강제 종료·재개를 하면 모니터가 그 결과를 그린다 —

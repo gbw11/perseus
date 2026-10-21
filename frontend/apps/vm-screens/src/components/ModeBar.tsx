@@ -1,3 +1,4 @@
+import mark from '@xenova/ui/assets/xenova-mark.png';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { APPS } from '../telemetry/types';
 import { MODE_LABEL, mps, rad } from './format';
@@ -18,6 +19,7 @@ export function ModeBar() {
   );
   return (
     <header className={[styles.bar, styles[t.mode]].join(' ')}>
+      <img src={mark} alt="Xenova" className={styles.mark} />
       <div className={styles.mode}>
         <span className={styles.modeLabel}>{MODE_LABEL[t.mode]}</span>
         <span className={styles.modeCode}>
