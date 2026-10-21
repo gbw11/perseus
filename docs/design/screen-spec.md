@@ -160,12 +160,13 @@ Zephyr 선택 시 자원 단계는 고정 프로필(1 vCPU / 16 MiB)만 보여 �
 
 | 영역 | 동작 | 데이터 |
 | --- | --- | --- |
-| 화면 배치 | 모니터 1·2 에 띄울 화면 선택·교체(`split` 3분할 / `os-face` VM 1개), 적용 상태 표시 | `GET /api/v1/displays`, `PUT /api/v1/displays/{display-0\|display-1}/route` `{vm_id, view, expected_revision}` → 202 (REST-23·24, 백엔드 -129 구현 중). 백엔드가 `WS /ws/v1/display-service` 로 dom0 표시 서비스(박신영)에 `route.set` → 표시 서비스가 키오스크 주소를 바꾸고 `route.applied` 로 답한다. 규격: 화면 배치 계약 `display-route-v1` (작성 중, !118 브랜치) |
+| 화면 배치 | 모니터 1·2 에 띄울 화면 선택·교체(`split` 3분할 / `os-face` VM 1개), 적용 상태 표시 | `GET /api/v1/displays`, `PUT /api/v1/displays/{display-0\|display-1}/route` `{vm_id, view, expected_revision}` → 202 (REST-23·24, 백엔드 -129 구현 중). 백엔드가 `WS /ws/v1/display-service` 로 dom0 표시 서비스(박신영)에 `route.set` → 표시 서비스가 키오스크 주소를 바꾸고 `route.applied` 로 답한다. 규격: [화면 배치 계약 display-route-v1](../contracts/display-route-v1.md) (Draft !118) |
 | 격리 시연 | 대상 VM 에 부하·종료 주입, 대상과 비대상의 상태·명령 주기·복구 시간 비교 | 격리 시연 API (-135, 에이전트 `agent.command`), 메트릭 |
 | 수동주행 입력 | 키 입력 → 수동주행 VM. **MANUAL 이 아니면 백엔드가 버린다** | `WS /ws/v1/drive` → MQTT-11 (MQTT 계약 §7, 구현 -154) |
 | 자율주행 재개 | AUTO_READY 에서만 활성. 누르면 3·2·1 카운트다운 뒤 AUTO | `POST /api/v1/drive/resume` → 백엔드가 MQTT-13 `xenova/v1/console/resume` 에 `drive.resume.requested` 발행. 게이트웨이가 받아들이면 `drive.resume.accepted`(`switch_in_ms: 3000`) → 3초 뒤 `drive.mode.changed`(AUTO), 그 사이 조건이 깨지면 `drive.resume.cancelled` ([MQTT 계약](../contracts/mqtt-contract-v1.md) v1.2 (Draft !118), 백엔드·게이트웨이 구현 중) |
 
 - 모니터는 터치가 없으므로 **수동주행 입력과 재개는 여기서** 한다. 재개 요청 경로는 둘이다: 이 화면(MQTT-13)과 메시지 보드 VM(MQTT-06). 카운트다운 3초 동안은 수동주행이 계속 제어한다(모드 AUTO_READY 유지). 콘솔 W-07 과 모니터 모두 `drive.resume.accepted` 를 받으면 3·2·1 을 띄우고, `drive.resume.cancelled` 면 취소 사유를 보인다.
+- 화면 배치 칸은 디스플레이마다 상태 5종을 보인다: `DISCONNECTED`(표시 서비스·모니터 연결 없음) · `IDLE` · `SWITCHING`(적용 기다림) · `ACTIVE`(키오스크가 띄움) · `ERROR`(`last_error` 표시). 오류 안내: 409 `DISPLAY_REVISION_CONFLICT`(다른 사람이 먼저 바꿈 — 다시 읽고 고르기), 422 `VM_ROLE_UNKNOWN`(그 VM 에 역할(role)이 없음 — VM 역할부터 지정). 실시간 갱신은 `WS /ws/v1/displays`(`display.snapshot`).
 - 모니터 브라우저는 스스로 배치를 따라가지 않는다. 표시 서비스가 키오스크에 띄울 주소(`/split`, `/detail/{autonomous|manual|interaction}`)를 바꾼다 (2026-10-21 결정).
 
 ### W-08 이벤트 타임라인 (UI-07)
@@ -183,8 +184,9 @@ Zephyr 선택 시 자원 단계는 고정 프로필(1 vCPU / 16 MiB)만 보여 �
 | 흐름 | 젯슨 카메라 원본 MJPEG(`http://<jetson>:8090/raw.mjpg`) → 세 번째 VM(Debian, `message-board`) 앱이 AI 로 장애물 감지 → 감지 박스를 그린 MJPEG(`http://<vm>:8081/stream.mjpg`) → dom0 웹 프록시 → 브라우저는 같은 origin 의 `/camera/stream.mjpg` |
 | 보이는 곳 | 대시보드(W-02) 세 번째 VM 카드, 모니터 M-01 세 번째 칸, M-04 상세 |
 | 감지 결과 | MQTT-14 `xenova/v1/apps/message-board/vision`, `vision.result`, QoS 0, ≤10 Hz, `{frame_id, fps, objects:[{label, score, bbox}]}` — **화면·기록용, 주행 판단에 쓰지 않는다** (주행은 젯슨 `perception.result`) |
+| 끊겼을 때 | 영상이 끊기면 영상 자리에 **"영상 없음"** 을 띄우고 3초마다 다시 연결한다. 감지 결과(MQTT-14)가 1초 넘게 없으면 **"감지 멈춤"** 을 띄운다 |
 | 격리 | 세 번째 VM 이 죽으면 영상·감지 화면만 멈추고 주행은 그대로 |
-| 규격 | 카메라 영상 계약 `camera-stream-v1` (작성 중, !118 브랜치). 구현 전 — 영상을 내는 VM 앱은 아직 없다 |
+| 규격 | [카메라·AI 감지 계약 camera-stream-v1](../contracts/camera-stream-v1.md) (Draft !118). 구현 전 — 영상을 내는 VM 앱은 아직 없다 |
 
 ## 5. 모니터 화면
 
