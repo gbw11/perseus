@@ -1,5 +1,5 @@
 import { Button, Card, StatusBadge, useToast } from '@xenova/ui';
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useMetrics, useProcesses, useVm, useVmAction, type VmAction } from '../api/queries';
@@ -8,6 +8,11 @@ import { AGENT_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
 import { ago, osLabel, roleOf } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
+
+/** xterm 이 무거워서 웹 콘솔 탭을 열 때만 불러온다 (platform -248 구현) */
+const ConsolePanel = lazy(() =>
+  import('../console/ConsolePanel').then((module) => ({ default: module.ConsolePanel })),
+);
 
 type Tab = 'overview' | 'charts' | 'processes' | 'console';
 const TABS: [Tab, string][] = [
@@ -19,7 +24,8 @@ const TABS: [Tab, string][] = [
 
 /**
  * W-04 VM 상세 (화면 정의서 W-04, UI-04·UI-05) — 초안. 화면 완성은 정수환 담당 작업이 이어받는다.
- * Zephyr 는 에이전트가 없어 차트·프로세스 대신 안내를 보인다. 웹 콘솔(WS-03)은 아직 없다.
+ * Zephyr 는 에이전트가 없어 차트·프로세스 대신 안내를 보인다. 웹 콘솔은 실제 게스트 터미널
+ * (WS /ws/v1/vms/{id}/console, 웹 터미널 계약 browser-console-v1 — 정수환 platform -248). mock 에서는 가짜 셸.
  * 참고 시안: stitch_untitled_project/ui_04_vm, ui_05.
  */
 export function VmDetailPage() {
@@ -78,7 +84,11 @@ export function VmDetailPage() {
             {tab === 'overview' && <Overview vm={vm.data} />}
             {tab === 'charts' && linux && <Charts vmId={vm.data.vm_id} />}
             {tab === 'processes' && linux && <Processes vmId={vm.data.vm_id} />}
-            {tab === 'console' && <Console vm={vm.data} />}
+            {tab === 'console' && (
+              <Suspense fallback={<p className={styles.dim}>콘솔 준비 중…</p>}>
+                <ConsolePanel key={vm.data.vm_id} vm={vm.data} />
+              </Suspense>
+            )}
           </div>
         </Card>
       )}
@@ -278,23 +288,6 @@ function Processes({ vmId }: { vmId: string }) {
           )}
         </tbody>
       </table>
-    </>
-  );
-}
-
-const CONSOLE_PATH = '/ws/v1/vms/{id}/console';
-
-function Console({ vm }: { vm: Vm }) {
-  const banner =
-    vm.guest_kind === 'zephyr'
-      ? `*** Booting Zephyr OS ***\n[xenova] ${vm.name} PV 콘솔\n(연결되면 앱 상태 화면이 여기 나온다)`
-      : `${osLabel(vm)} ${vm.name} hvc0\n\n${vm.name} login: _`;
-  return (
-    <>
-      <p className={styles.draft}>
-        웹 콘솔({CONSOLE_PATH}, WS-03)은 아직 없다 — 화면 자리만. VM 당 쓰기 세션 1개, 사용 중이면 읽기 전용.
-      </p>
-      <div className={styles.terminal}>{banner}</div>
     </>
   );
 }
