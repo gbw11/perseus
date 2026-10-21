@@ -335,6 +335,34 @@ class LabTest(unittest.TestCase):
         self.assertEqual(command.call_args_list[1].args[0],
                          ["xenstore-write","/local/domain/42/data/xenova-g1-ab/control","dom0-1"])
 
+    def test_signal_succeeds_when_guest_removes_node_immediately_after_write(self):
+        self.prepare();self.running()
+        present = True
+        def peer(argv, **kwargs):
+            nonlocal present
+            if argv[0] == "xenstore-read":
+                if not present:
+                    raise RuntimeError("guest already completed and removed its test node")
+                return "guest-initial"
+            self.assertEqual(argv, ["xenstore-write", "/local/domain/42/data/xenova-g1-ab/control", "dom0-1"])
+            present = False
+            return ""
+        with patch.object(lab, "run", side_effect=peer):
+            output = self.invoke("signal", "--directory", str(self.args.directory), "--execute",
+                                 "--path", "/local/domain/42/data/xenova-g1-ab/control", "--value", "dom0-1")
+        self.assertIn("written=dom0-1", output)
+        self.assertFalse(present)
+
+    def test_signal_write_failure_remains_an_error(self):
+        self.prepare();self.running()
+        def peer(argv, **kwargs):
+            if argv[0] == "xenstore-read":
+                return "guest-initial"
+            raise RuntimeError("XenStore write failed")
+        with patch.object(lab, "run", side_effect=peer), self.assertRaisesRegex(RuntimeError, "write failed"):
+            self.invoke("signal", "--directory", str(self.args.directory), "--execute",
+                        "--path", "/local/domain/42/data/xenova-g1-ab/control", "--value", "dom0-1")
+
     def test_cleanup_confirms_uuid_and_preserves_firmware(self):
         self.prepare();self.running()
         before={p.name:p.read_bytes() for p in self.firmware.iterdir()}
