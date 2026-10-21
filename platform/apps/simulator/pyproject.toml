@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xenova-simulator"
+version = "0.1.0"
+description = "Xenova 가상 RC카: 활성 앱 drive.command → vehicle.status 20 Hz (S15P31E110-47)"
+requires-python = ">=3.11"
+# xenova_mqtt 는 같은 저장소의 platform/services/vm-agent/mqtt-client 라 여기 선언하지 않는다 (수동 앱과 같은 방식)
+dependencies = [
+    "paho-mqtt>=1.6,<3",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+]
+
+[tool.setuptools.packages.find]
+include = ["xenova_simulator*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "../../services/vm-agent/mqtt-client"]
+addopts = "-q"
