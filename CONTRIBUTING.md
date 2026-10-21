@@ -51,7 +51,9 @@ master                ← 통합 데모·발표용 안정 버전
 ```text
 S15P31E110/
 ├── backend/                  # Spring Boot VM 관리 서버 (테스트: src/test/)
-├── frontend/                 # React 웹 관리 콘솔, VM별 화면(OS face) (테스트: frontend/ 안)
+├── frontend/                 # React (npm workspaces, 테스트: frontend/ 안)
+│   ├── apps/                 # admin-console(웹 관리 콘솔), vm-screens(모니터 화면)
+│   └── packages/ui/          # 공통 컴포넌트·디자인 토큰
 ├── platform/                 # 보드(dom0·domU) 위에서 돌거나 보드 이미지를 만드는 것
 │   ├── yocto/ boot/ first-install/ guests/ network/   # Yocto·Xen·U-Boot, 부팅 환경, domU 템플릿, 네트워크
 │   ├── services/
