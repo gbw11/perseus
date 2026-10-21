@@ -58,6 +58,8 @@ xenova:
     broker-url: tcp://127.0.0.1:1883
     client-id: xenova-backend-test
     reconnect-interval: 1s
+  display:
+    service-token: test-display-service-token
   dom0-manager:
     base-url: http://127.0.0.1:18081
     service-token: test-service-token
