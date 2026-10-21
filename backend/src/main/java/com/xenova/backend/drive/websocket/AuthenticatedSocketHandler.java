@@ -22,11 +22,11 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
-// Same handshake as WS-01/WS-02: the first frame is {"type":"auth","access_token":...}; anything else, or
+// Shared by the drive and display sockets. Same handshake as WS-01/WS-02: the first frame is {"type":"auth","access_token":...}; anything else, or
 // nothing within 10 s, closes with 4401. After that the subclass handles frames; "ping" answers "pong".
-abstract class AuthenticatedSocketHandler extends TextWebSocketHandler {
+public abstract class AuthenticatedSocketHandler extends TextWebSocketHandler {
 
-    static final CloseStatus UNAUTHORIZED = new CloseStatus(4401, "unauthorized");
+    public static final CloseStatus UNAUTHORIZED = new CloseStatus(4401, "unauthorized");
     static final int MAX_FRAME_BYTES = 16 * 1024;
     private static final Duration AUTH_TIMEOUT = Duration.ofSeconds(10);
     private static final Logger log = LoggerFactory.getLogger(AuthenticatedSocketHandler.class);
@@ -37,7 +37,7 @@ abstract class AuthenticatedSocketHandler extends TextWebSocketHandler {
     protected final Map<String, Client> clients = new ConcurrentHashMap<>();
     private final ScheduledExecutorService authTimeouts;
 
-    AuthenticatedSocketHandler(ObjectMapper objectMapper, AccessTokenVerifier verifier, Clock clock, String name) {
+    protected AuthenticatedSocketHandler(ObjectMapper objectMapper, AccessTokenVerifier verifier, Clock clock, String name) {
         this.objectMapper = objectMapper;
         this.verifier = verifier;
         this.clock = clock;
@@ -148,7 +148,7 @@ abstract class AuthenticatedSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    static final class Client {
+    public static final class Client {
         final WebSocketSession session;
         volatile boolean authenticated;
         volatile Instant expiresAt;
@@ -157,6 +157,14 @@ abstract class AuthenticatedSocketHandler extends TextWebSocketHandler {
 
         Client(WebSocketSession session) {
             this.session = session;
+        }
+
+        public String id() {
+            return session.getId();
+        }
+
+        public boolean isAuthenticated() {
+            return authenticated;
         }
     }
 }

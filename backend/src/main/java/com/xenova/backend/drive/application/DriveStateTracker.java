@@ -37,6 +37,10 @@ public class DriveStateTracker {
     static final long RATE_WINDOW_MS = 1000;
     static final int MAX_PAYLOAD_BYTES = 64 * 1024;
     static final String SCHEMA_VERSION = "1.0";
+    /** Default countdown when drive.resume.accepted carries no switch_in_ms. */
+    static final long RESUME_SWITCH_MS = 3000;
+    /** A countdown the gateway never finished (no mode change arrived) disappears this long after its end. */
+    static final long RESUME_GRACE_MS = 2000;
 
     private static final Pattern APP_EVENTS = Pattern.compile("^xenova/v1/apps/([^/+#\\s]+)/events$");
     private static final Logger log = LoggerFactory.getLogger(DriveStateTracker.class);
@@ -49,6 +53,7 @@ public class DriveStateTracker {
     private Stamped control;
     private Stamped vehicle;
     private Stamped perception;
+    private Stamped resume;
     private final Deque<Long> perceptionTimes = new ArrayDeque<>();
     private final Map<String, AppTrack> apps = new TreeMap<>();
     private final Map<String, Counter> stats = new TreeMap<>();
@@ -68,7 +73,7 @@ public class DriveStateTracker {
 
     // ---- intake -------------------------------------------------------------------------------------
 
-    /** Returns a notice to record when the message is a drive.mode.changed / drive.fault.detected event. */
+    /** Returns a notice to record for drive.mode.changed / drive.fault.detected / drive.resume.* events. */
     public synchronized Optional<DriveNotice> accept(String topic, byte[] payload) {
         long now = monotonicMillis.getAsLong();
         try {
@@ -104,6 +109,9 @@ public class DriveStateTracker {
 
         if (CONTROL_TOPIC.equals(topic)) {
             control = new Stamped(body, now, publisher);
+            if (!"AUTO_READY".equals(text(body, "mode"))) {
+                resume = null;
+            }
         } else if (STATUS_TOPIC.equals(topic)) {
             vehicle = new Stamped(body, now, publisher);
         } else {
@@ -130,7 +138,17 @@ public class DriveStateTracker {
                 perception = new Stamped(body, now, publisher);
                 window(perceptionTimes, now).addLast(now);
             }
-            case "drive.mode.changed", "drive.fault.detected" -> {
+            case "drive.resume.accepted" -> {
+                resume = new Stamped(body, now, publisher);
+                version++;
+                return Optional.of(new DriveNotice(type, publisher, body));
+            }
+            case "drive.resume.cancelled", "drive.mode.changed" -> {
+                resume = null;
+                version++;
+                return Optional.of(new DriveNotice(type, publisher, body));
+            }
+            case "drive.fault.detected" -> {
                 version++;
                 return Optional.of(new DriveNotice(type, publisher, body));
             }
@@ -195,7 +213,8 @@ public class DriveStateTracker {
         Map<String, DriveState.App> appViews = new LinkedHashMap<>();
         apps.forEach((appId, app) -> appViews.put(appId, appView(app, now)));
         return new DriveState(
-                version, clock.instant(), controlView(now), vehicleView(now), appViews, perceptionView(now));
+                version, clock.instant(), controlView(now), vehicleView(now), appViews, perceptionView(now),
+                resumeView(now));
     }
 
     public synchronized MessagingStats stats() {
@@ -258,6 +277,19 @@ public class DriveStateTracker {
                 ago <= PERCEPTION_VALID_MS, ago, window(perceptionTimes, now).size(),
                 doubleOrNull(p, "lane_offset_m"), doubleOrNull(p, "heading_err_rad"),
                 p.path("obstacles").isArray() ? p.path("obstacles").size() : 0, p.path("stop").asBoolean(false));
+    }
+
+    private DriveState.Resume resumeView(long now) {
+        if (resume == null) {
+            return null;
+        }
+        Long switchIn = longOrNull(resume.body, "switch_in_ms");
+        long total = switchIn == null || switchIn < 0 ? RESUME_SWITCH_MS : switchIn;
+        long ago = now - resume.at;
+        if (ago > total + RESUME_GRACE_MS) {
+            return null;
+        }
+        return new DriveState.Resume(longOrNull(resume.body, "generation"), total, ago, Math.max(0, total - ago));
     }
 
     // ---- helpers ------------------------------------------------------------------------------------
