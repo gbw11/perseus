@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
 import type { DriveState } from '../api/drive';
 import { useEvents, useVms } from '../api/queries';
+import { CameraFeed } from '../camera/CameraFeed';
 import type { Vm } from '../api/types';
 import { clock, describe } from '../domain/events';
 import {
@@ -88,36 +89,8 @@ export function DashboardPage() {
         ))}
       </div>
 
-      <div className={styles.cols2}>
-        <Card title="차량 상태" actions={<span className={styles.dim}>{ago(vehicle?.received_ago_ms)}</span>}>
-          <div className={styles.tiles}>
-            <div className={styles.tile}>
-              <small>속도</small>
-              <span className={styles.big}>{plain(vehicle?.v_mps)}</span>
-              <span className={styles.unit}>m/s</span>
-            </div>
-            <div className={styles.tile}>
-              <small>조향</small>
-              <span className={styles.big}>{signed(vehicle?.steer_rad)}</span>
-              <span className={styles.unit}>rad</span>
-            </div>
-          </div>
-          <div className={styles.rows}>
-            <div>
-              <span>적용된 세대</span>
-              <span>{vehicle?.applied_generation ?? '—'}</span>
-            </div>
-            {SAFETY.map((f) => (
-              <div key={f.key} title={f.hint}>
-                <span>{f.label}</span>
-                <span style={flags?.[f.key] ? { color: 'var(--x-fault)' } : undefined}>
-                  {flags ? (flags[f.key] ? f.on : f.off) : '—'}
-                </span>
-              </div>
-            ))}
-          </div>
-          <p className={styles.dim}>항목에 마우스를 올리면 뜻이 나온다. 셋 중 하나라도 켜지면 차는 선다.</p>
-        </Card>
+      <div className={styles.cols32}>
+        <CameraFeed drive={drive} />
         <Card
           title="인지 (젯슨)"
           actions={
@@ -160,27 +133,60 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      <Card title="최근 이벤트" actions={<Link to="/events">이벤트 화면 →</Link>}>
-        {(events.data?.items ?? []).slice(0, 5).map((event) => {
-          const { title, detail } = describe(event, vmName);
-          return (
-            <div key={event.event_id} className={styles.rows}>
-              <div>
-                <span className={styles.mono}>
-                  {clock(event.occurred_at)}{' '}
-                  <span className={`${styles.sev} ${styles[`sev${event.severity}`]}`}>{event.severity}</span>
-                </span>
-                <span>
-                  {title}
-                  {detail && <span className={styles.dim}> · {detail}</span>}
+      <div className={styles.cols2}>
+        <Card title="차량 상태" actions={<span className={styles.dim}>{ago(vehicle?.received_ago_ms)}</span>}>
+          <div className={styles.tiles}>
+            <div className={styles.tile}>
+              <small>속도</small>
+              <span className={styles.big}>{plain(vehicle?.v_mps)}</span>
+              <span className={styles.unit}>m/s</span>
+            </div>
+            <div className={styles.tile}>
+              <small>조향</small>
+              <span className={styles.big}>{signed(vehicle?.steer_rad)}</span>
+              <span className={styles.unit}>rad</span>
+            </div>
+          </div>
+          <div className={styles.rows}>
+            <div>
+              <span>적용된 세대</span>
+              <span>{vehicle?.applied_generation ?? '—'}</span>
+            </div>
+            {SAFETY.map((f) => (
+              <div key={f.key} title={f.hint}>
+                <span>{f.label}</span>
+                <span style={flags?.[f.key] ? { color: 'var(--x-fault)' } : undefined}>
+                  {flags ? (flags[f.key] ? f.on : f.off) : '—'}
                 </span>
               </div>
-            </div>
-          );
-        })}
-        {events.data?.items.length === 0 && <p className={styles.dim}>이벤트 없음</p>}
-        {events.error && <p className={styles.dim}>이벤트를 불러오지 못했다</p>}
-      </Card>
+            ))}
+          </div>
+          <p className={styles.dim}>항목에 마우스를 올리면 뜻이 나온다. 셋 중 하나라도 켜지면 차는 선다.</p>
+        </Card>
+        <Card title="최근 이벤트" actions={<Link to="/events">이벤트 화면 →</Link>}>
+          {(events.data?.items ?? []).slice(0, 5).map((event) => {
+            const { title, detail } = describe(event, vmName);
+            return (
+              <div key={event.event_id} className={styles.rows}>
+                <div>
+                  <span className={styles.mono}>
+                    {clock(event.occurred_at)}{' '}
+                    <span className={`${styles.sev} ${styles[`sev${event.severity}`]}`}>
+                      {event.severity}
+                    </span>
+                  </span>
+                  <span>
+                    {title}
+                    {detail && <span className={styles.dim}> · {detail}</span>}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          {events.data?.items.length === 0 && <p className={styles.dim}>이벤트 없음</p>}
+          {events.error && <p className={styles.dim}>이벤트를 불러오지 못했다</p>}
+        </Card>
+      </div>
     </div>
   );
 }
