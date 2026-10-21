@@ -381,7 +381,7 @@ function ManualInput() {
 }
 
 /**
- * [자율주행 재개] — AUTO_READY 에서만 활성. 누르면 POST /api/v1/drive/resume (MQTT-12).
+ * [자율주행 재개] — AUTO_READY 에서만 활성. 누르면 POST /api/v1/drive/resume (MQTT-13).
  * 바로 바뀌지 않는다: 게이트웨이가 받아들이면 3·2·1 카운트다운 뒤 AUTO (계약 v1.2 §6, 화면 위 알림).
  */
 function Resume() {

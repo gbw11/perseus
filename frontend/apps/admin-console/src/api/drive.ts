@@ -164,7 +164,7 @@ function useMockDriveState() {
 }
 
 /**
- * 자율주행 재개 요청 (POST /api/v1/drive/resume → MQTT-12). 202 는 "보냈다" 일 뿐 — 게이트웨이가 받아들이면
+ * 자율주행 재개 요청 (POST /api/v1/drive/resume → MQTT-13). 202 는 "보냈다" 일 뿐 — 게이트웨이가 받아들이면
  * DriveState.resume 에 3초 카운트다운이 생기고, 거절·취소는 drive.resume.cancelled 로 온다 (계약 v1.2 §6).
  */
 export async function requestResume(): Promise<void> {
