@@ -1,0 +1,31 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  background: var(--x-surface);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  box-shadow: var(--x-shadow);
+  min-width: 0;
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--x-space-3);
+  padding: var(--x-space-3) var(--x-space-4);
+  border-bottom: 1px solid var(--x-border);
+}
+.title {
+  margin: 0;
+  font-size: var(--x-text-md);
+  font-weight: 700;
+}
+.actions {
+  display: flex;
+  gap: var(--x-space-2);
+}
+.body {
+  padding: var(--x-space-4);
+  flex: 1;
+  min-height: 0;
+}
