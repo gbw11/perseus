@@ -1,4 +1,6 @@
-# Zephyr 주행 VM의 MQTT 경로 결정 — 박신영·주소정(platform) 요청
+# Zephyr 주행 VM의 vchan 연결 — 박신영·주소정(platform) 요청
+
+> **2026-10-20 갱신: 경로는 vchan + dom0 중계로 결정됨 (시나리오 D3, 공병우).** 아래 §2 는 결정 전 비교로 남긴다. 요청은 §0 표와 §2-1.
 
 > 작성: 공병우, 2026-10-20 · 관련: S15P31E110-155·236·238, [RC카 시나리오](../scenario-rc-car.md) §2·§8 D3, MQTT 계약 v1 §10
 
@@ -6,7 +8,7 @@
 
 | 대상 | 해야 할 것 | 막혀 있나 |
 | --- | --- | --- |
-| 박신영·주소정 (platform, `platform/guests/zephyr/`) | Zephyr 주행 VM이 dom0 Mosquitto에 닿는 경로를 정한다: **PV 네트워크** 또는 **vchan + dom0 중계** | 🟡 곧 드러남 — 앱·라이브러리는 보드 없이(`native_sim`) 먼저 만들지만, 실보드 RC카 시연(자율·수동 VM이 실제로 명령을 냄)은 이 결정 없이 불가 |
+| 박신영·주소정 (platform, `platform/guests/zephyr/`) | Zephyr 게스트에서 dom0 와 vchan(grant 공유 링 + event channel) 을 맺을 수 있게 한다: xen.cfg·XenStore 경로·권한, Zephyr 쪽 연결 API (xen-store 모듈처럼) | 🟡 곧 드러남 — 앱·라이브러리는 보드 없이(`native_sim`) 먼저 만들지만, 실보드 RC카 시연(자율·수동 VM이 실제로 명령을 냄)은 이 결정 없이 불가 |
 
 ## 1. 확정된 사실
 
@@ -25,6 +27,14 @@
 | B. vchan + dom0 중계 | 앱은 vchan 프레임으로 봉투를 보내고 dom0 중계 프로세스가 대신 MQTT 발행·구독 | C 라이브러리에 vchan 포트 추가 (설계 [mqtt-c-client.md](../design/mqtt-c-client.md) §4에 자리만 있음) | Zephyr vchan(grant/event channel) 연결, dom0 중계 프로세스와 그 계정·ACL(앱별 username 대행) |
 
 같이 정해 주면 좋은 것: 앱이 자기 `vm_id`를 XenStore에서 읽을 경로 (C 라이브러리 설계 §6 D5).
+
+## 2-1. 결정 뒤 나눈 일
+
+| 일 | 담당 |
+| --- | --- |
+| Zephyr 게스트의 vchan 연결(grant 링·event channel·XenStore 협상), xen.cfg 설정 | 박신영·주소정 (요청) |
+| C 라이브러리 vchan 포트 (`xenova-mqtt-c/ports/vchan`) | 공병우 |
+| dom0 vchan ↔ MQTT 중계 프로세스 (앱별 계정·ACL 대행) | 공병우 (게이트웨이와 같은 dom0) |
 
 ## 3. 내가 이미 해 둔 것 / 할 것
 
