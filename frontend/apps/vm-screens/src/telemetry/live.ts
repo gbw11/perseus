@@ -86,11 +86,19 @@ function healthOf(id: AppId, dto: DriveAppDto | undefined): Health {
   return dto.command_fresh ? 'ok' : 'fault';
 }
 
-function appStatus(id: AppId, dto: DriveAppDto | undefined, previous: AppStatus, now: number): AppStatus {
-  const health = healthOf(id, dto);
+function appStatus(
+  id: AppId,
+  dto: DriveAppDto | undefined,
+  previous: AppStatus,
+  now: number,
+  recovering: boolean,
+): AppStatus {
+  const raw = healthOf(id, dto);
+  // 복구 서비스가 재시작한 앱은 다시 정상이 될 때까지 장애가 아니라 복구 중 (RC카 시나리오 §4.3 빨강 → 노랑 → 초록)
+  const health = recovering && raw === 'fault' ? 'recovering' : raw;
   const alive = !!dto && (!!dto.command_fresh || heartbeatFresh(dto));
   return {
-    domain: alive ? 'running' : 'stopped',
+    domain: alive ? 'running' : recovering ? 'booting' : 'stopped',
     health,
     healthSince: health === previous.health ? previous.healthSince : now,
     lastCommandAt: dto?.command_ago_ms != null ? now - dto.command_ago_ms : null,
@@ -125,8 +133,13 @@ export function emptyTelemetry(now: number): Telemetry {
 
 export function applyDriveState(t: Telemetry, state: DriveStateDto, now: number): Telemetry {
   const apps = {} as Telemetry['apps'];
+  const appVmIds: Partial<Record<AppId, string>> = { ...t.appVmIds };
+  const recoveringApps = { ...t.recoveringApps };
   for (const id of ['autonomous', 'manual', 'interaction'] as const) {
-    apps[id] = appStatus(id, state.apps[TOPIC_APP_ID[id]], t.apps[id], now);
+    const dto = state.apps[TOPIC_APP_ID[id]];
+    if (dto?.vm_id) appVmIds[id] = dto.vm_id;
+    apps[id] = appStatus(id, dto, t.apps[id], now, !!recoveringApps[id]);
+    if (apps[id].health === 'ok') delete recoveringApps[id];
   }
   const command = (id: 'autonomous' | 'manual') => {
     const last = state.apps[id]?.last_command;
@@ -146,6 +159,8 @@ export function applyDriveState(t: Telemetry, state: DriveStateDto, now: number)
     activeApp: control?.active_app ?? null,
     generation: control?.generation ?? 0,
     apps,
+    appVmIds,
+    recoveringApps,
     commands: { autonomous: command('autonomous'), manual: command('manual') },
     perception: {
       lane_offset_m: perception?.lane_offset_m ?? 0,
@@ -167,14 +182,23 @@ export function applyDriveState(t: Telemetry, state: DriveStateDto, now: number)
 }
 
 const MAX_EVENTS = 40;
+/** MQTT 계약 app_id → 화면 이름 */
+const APP_TITLE: Record<string, string> = {
+  autonomous: '자율주행',
+  manual: '수동주행',
+  'message-board': '인터랙션',
+};
 
 function text(event: EventDto): string {
   const p = event.payload ?? {};
   if (event.type === 'drive.mode.changed') {
     return `모드 ${String(p.from ?? '?')} → ${String(p.to ?? '?')}${p.reason ? ` (${String(p.reason)})` : ''}`;
   }
+  if (event.type === 'recovery.started') return 'VM 재시작 (복구 서비스)';
+  if (event.type === 'recovery.completed') return 'VM 복구 완료';
   if (event.type === 'drive.fault.detected') {
-    return `${String(p.app_id ?? '앱')} 장애${p.reason ? ` (${String(p.reason)})` : ''}`;
+    const title = APP_TITLE[String(p.app_id)] ?? String(p.app_id ?? '앱');
+    return `${title} 장애${p.reason ? ` (${String(p.reason)})` : ''}`;
   }
   return event.type;
 }
@@ -186,7 +210,15 @@ export function applyEvent(t: Telemetry, event: EventDto, now: number, wallNow =
   const ageMs = Math.max(0, wallNow - Date.parse(event.occurred_at));
   const level: TimelineEvent['level'] = event.severity === 'INFO' ? 'info' : 'warning';
   const entry: TimelineEvent = { id, at: now - ageMs, type: event.type, level, text: text(event) };
-  return { ...t, events: [entry, ...t.events].slice(0, MAX_EVENTS) };
+  const next = { ...t, events: [entry, ...t.events].slice(0, MAX_EVENTS) };
+  if (event.type === 'recovery.started' && event.vm_id) {
+    const app = (Object.keys(t.appVmIds ?? {}) as AppId[]).find((id) => t.appVmIds?.[id] === event.vm_id);
+    if (app) {
+      next.recoveringApps = { ...t.recoveringApps, [app]: true };
+      next.apps = { ...t.apps, [app]: { ...t.apps[app], health: 'recovering', healthSince: now } };
+    }
+  }
+  return next;
 }
 
 /** TimelineEvent.id 는 숫자라서 event_id 문자열을 32비트 해시로 바꾼다 */

@@ -240,9 +240,31 @@ export function snapshot(): DriveState {
   };
 }
 
+/**
+ * 모니터 화면(vm-screens)이 이 시나리오를 따라가게 같은 origin 의 브라우저 채널로 내보낸다.
+ * 프레임 모양은 백엔드 WS 와 같다 — /ws/v1/drive/state 의 drive.state, /ws/v1/events 의 event.
+ * 콘솔 개발 서버가 /monitor/ 를 모니터 앱으로 넘기므로 (vite.config.ts) 두 화면이 같은 origin 이다.
+ */
+export const MOCK_BUS = 'xenova-mock-bus';
+const bus = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(MOCK_BUS);
+const sentEvents = new Set<string>();
+/** 늦게 열린 모니터가 hello 를 보내면 지난 이벤트를 다음 주기에 다시 보낸다 */
+if (bus) {
+  bus.onmessage = (message: MessageEvent<{ type?: string }>) => {
+    if (message.data?.type === 'hello') sentEvents.clear();
+  };
+}
+
 function emit() {
   const state = snapshot();
   listeners.forEach((listener) => listener(state));
+  if (!bus) return;
+  bus.postMessage({ type: 'drive.state', state });
+  for (const e of [...store.events].reverse()) {
+    if (sentEvents.has(e.event_id)) continue;
+    sentEvents.add(e.event_id);
+    bus.postMessage({ type: 'event', payload: e });
+  }
 }
 
 export function subscribe(listener: Listener): () => void {

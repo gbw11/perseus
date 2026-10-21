@@ -124,6 +124,42 @@ describe('applyEvent', () => {
       },
       0,
     );
-    expect(t.events[0]?.text).toBe('autonomous 장애 (command_timeout)');
+    expect(t.events[0]?.text).toBe('자율주행 장애 (command_timeout)');
+  });
+});
+
+describe('복구 중 표시 (RC카 시나리오 §4.3)', () => {
+  const dead = app({
+    vm_id: 'vm-a',
+    command_fresh: false,
+    command_ago_ms: null,
+    command_hz: 0,
+    heartbeat_ago_ms: null,
+  });
+  const s = (autonomous: DriveAppDto) => state({ apps: { ...state().apps, autonomous } });
+
+  it('recovery.started 를 받으면 명령이 다시 신선해질 때까지 장애가 아니라 복구 중', () => {
+    let t = applyDriveState(emptyTelemetry(0), s(dead), 0);
+    expect(t.apps.autonomous.health).toBe('fault');
+    t = applyEvent(
+      t,
+      {
+        event_id: 'r1',
+        type: 'recovery.started',
+        severity: 'INFO',
+        vm_id: 'vm-a',
+        occurred_at: '2026-10-20T00:00:00Z',
+        payload: {},
+      },
+      100,
+      Date.parse('2026-10-20T00:00:00Z'),
+    );
+    expect(t.apps.autonomous.health).toBe('recovering');
+    t = applyDriveState(t, s(dead), 200);
+    expect(t.apps.autonomous.health).toBe('recovering');
+    t = applyDriveState(t, s(app({ vm_id: 'vm-a' })), 300);
+    expect(t.apps.autonomous.health).toBe('ok');
+    t = applyDriveState(t, s(dead), 400);
+    expect(t.apps.autonomous.health).toBe('fault'); // 복구가 끝났으니 다시 끊기면 장애
   });
 });

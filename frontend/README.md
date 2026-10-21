@@ -69,12 +69,22 @@ VITE_MOCK=true npm run dev:console    # 또는 .env.local 에 VITE_MOCK=true
 | `/split`                                        | 모니터 1 — VM 3개 3분할           |
 | `/detail/autonomous` · `manual` · `interaction` | 모니터 2 — 관리자가 고른 1개 상세 |
 
-- 지금은 **가짜 시나리오**(`src/telemetry/scenario.ts`)로 움직입니다. 규칙은 [MQTT 계약](../docs/contracts/mqtt-contract-v1.md) §5 와 [RC카 시나리오](../docs/scenario-rc-car.md) §4 를 흉내 냅니다 — 즉시 인계(100 ms), 복구, AUTO_READY(3초), 재개, SAFE_STOP, 격리.
-- 아래 조작 바로 장애를 넣습니다. 키오스크에서는 `?kiosk=1` 로 숨깁니다.
-- 화면 이동은 조작 바의 링크로 합니다 (주소창으로 이동하면 가짜 상태가 처음부터 다시 시작).
-- 실제 데이터는 백엔드 중계(`/ws/v1/drive/state`, `/ws/v1/events`, 시나리오 D2)로 받습니다 — `VITE_TELEMETRY=live` (`.env.example`).
-- 모니터는 보여 주기만 합니다 (화면 정의서 §1): 화면 안에 버튼이 없고, 수동주행 키·자율주행 재개는 관리 콘솔 시연 제어에서 합니다. 수동주행 상세의 키 표시는 웹에서 들어온 입력을 보여 줄 뿐입니다.
+- **모니터는 보여 주기만 합니다** (화면 정의서 §1). 버튼·키 입력이 없고, 강제 종료·부하·재개·수동 키는 모두 관리 콘솔 **시연 제어**에서 합니다. 아래 띠는 데이터 출처·연결 상태와 화면 링크뿐이고 키오스크(`?kiosk=1`)에서는 숨깁니다.
+- 데이터 출처 (`VITE_TELEMETRY`): 비움 = 관리 콘솔 mock 시나리오를 따라감 · `live` = 백엔드 중계(`/ws/v1/drive/state`, `/ws/v1/events`, 시나리오 D2) · `scenario` = 이 앱 혼자 도는 가짜 시나리오.
+- 복구 서비스의 `recovery.started` 를 받으면 그 앱 칸은 명령이 다시 신선해질 때까지 '복구 중'(노랑)으로 표시합니다.
 - 색·배치는 Stitch 시안(a_1·b_vm_1·interaction 계열)을 따릅니다. 1920×1080 기준.
+
+### 모니터를 콘솔과 같이 보기 (mock)
+
+콘솔 mock 시나리오는 브라우저 채널(BroadcastChannel)로 상태를 내보내므로 두 화면이 **같은 origin** 이어야 합니다. 콘솔 개발 서버가 `/monitor/` 를 모니터 개발 서버로 넘깁니다.
+
+```bash
+cd apps/vm-screens    && VITE_BASE=/monitor/ npx vite --port 5174       # Git Bash 는 앞에 MSYS_NO_PATHCONV=1
+cd apps/admin-console && VITE_MOCK=true npx vite --port 5173            # VITE_MONITOR_ORIGIN 기본 http://localhost:5174
+```
+
+- 콘솔: `http://localhost:5173/demo` (admin / 1234) — 여기서 [강제 종료] → 인계 → 복구 → AUTO_READY → [자율주행 재개]
+- 모니터: `http://localhost:5173/monitor/split?kiosk=1`, 상세는 `/monitor/detail/autonomous` 등. 콘솔 탭이 열려 있는 동안 따라갑니다.
 
 ## 규칙
 

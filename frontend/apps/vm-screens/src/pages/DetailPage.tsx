@@ -1,5 +1,4 @@
 import { StatusBadge } from '@xenova/ui';
-import { useEffect } from 'react';
 import { Navigate, useParams } from 'react-router';
 import { ModeBar } from '../components/ModeBar';
 import { mps, rad, seconds } from '../components/format';
@@ -131,50 +130,11 @@ function AutonomousDetail() {
   );
 }
 
-const KEY_OF: Record<string, string> = {
-  ArrowUp: 'up',
-  w: 'up',
-  ArrowDown: 'down',
-  s: 'down',
-  ArrowLeft: 'left',
-  a: 'left',
-  ArrowRight: 'right',
-  d: 'right',
-  ' ': 'brake',
-};
-
 function ManualDetail() {
-  const { telemetry: t, setManualKeys, source } = useTelemetry();
+  const { telemetry: t } = useTelemetry();
   const active = t.activeApp === 'manual';
-  // 실제 연결에서는 입력을 웹 시연 제어(W-07)가 보낸다. 모니터는 터치·키보드가 없다
-  const local = source === 'mock';
 
-  // 키보드 화살표·WASD → drive.input 흉내 (MQTT 계약 §7: 실제로는 콘솔 → 백엔드 → MQTT)
-  useEffect(() => {
-    if (!local) return;
-    const pressed = new Set<string>();
-    const sync = () => setManualKeys([...pressed]);
-    const down = (event: KeyboardEvent) => {
-      const key = KEY_OF[event.key];
-      if (key && !pressed.has(key)) {
-        pressed.add(key);
-        sync();
-      }
-    };
-    const up = (event: KeyboardEvent) => {
-      const key = KEY_OF[event.key];
-      if (key && pressed.delete(key)) sync();
-    };
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-    return () => {
-      window.removeEventListener('keydown', down);
-      window.removeEventListener('keyup', up);
-      setManualKeys([]);
-    };
-  }, [local, setManualKeys]);
-
-  // 모니터는 보여 주기만 한다 (화면 정의서 §1) — 눌린 키만 밝게. mock 에서는 이 화면에서 키보드로 흉내 낼 수 있다
+  // 모니터는 보여 주기만 한다 (화면 정의서 §1) — 웹에서 들어온 눌린 키만 밝게
   const cap = (key: string, text: string) => (
     <span className={[styles.keyCap, t.manualKeys.includes(key) ? styles.keyCapOn : ''].join(' ')}>
       {text}
@@ -193,9 +153,7 @@ function ManualDetail() {
           {cap('brake', '브레이크')}
         </div>
         <p className={styles.dim}>
-          {local
-            ? 'mock: 이 화면에서 화살표·WASD 로 흉내 낸다. 입력이 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'
-            : '입력은 관리 콘솔 시연 제어에서 들어온다. 200 ms 동안 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'}
+          입력은 관리 콘솔 시연 제어에서 들어온다. 200 ms 동안 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.
         </p>
       </section>
       <section className={styles.detailSide}>

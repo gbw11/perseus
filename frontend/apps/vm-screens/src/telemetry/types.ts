@@ -109,4 +109,8 @@ export interface Telemetry {
   /** 자율 VM 명령이 연속으로 신선했던 시작 시각 (AUTO_READY 판정) */
   autonomousFreshSince: number | null;
   events: TimelineEvent[];
+  /** live·콘솔 mock: 앱별 vm_id (복구 이벤트를 앱에 붙이려고) */
+  appVmIds?: Partial<Record<AppId, string>>;
+  /** live·콘솔 mock: 복구 서비스가 재시작한 앱 — 명령(생존 신호)이 다시 신선해질 때까지 '복구 중' */
+  recoveringApps?: Partial<Record<AppId, true>>;
 }
