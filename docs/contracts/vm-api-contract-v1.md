@@ -207,8 +207,8 @@ dom0-manager가 `xentop -b -i 1 -n -x -f` 한 번의 출력에서 만드는 VM�
 | `event_id` | UUID. Spring이 중복 수신을 거르는 키 |
 | `type` | `recovery.started` / `recovery.completed` / `recovery.failed`. Spring `EventType`의 문자열과 같다 |
 | `recovery_id` | 장애 한 건의 ID. 최초 판정(`detected_at`)부터 최종 성공 또는 포기(`final`)까지 같은 값. Worker가 재시작해도 dom0에 저장된 미완료 `recovery_id`를 이어 간다 |
-| `recovery_attempt_id` | `recover_once` 호출마다 새 UUID. 플랫폼 journal 키이며 Spring 이벤트의 `operation_id`로 기록 |
-| `attempt` | 같은 `recovery_id` 안의 시도 번호(1부터). 새 `recovery_id`에서 1로 돌아간다. 재시도 한도·대기는 복구 정책(S15P31E110-125) |
+| `recovery_attempt_id` | 논리적 복구 시도마다 발급하는 UUID이자 플랫폼 `recover_once` journal 키. **같은 시도의 재전달(응답 유실·Worker 재시작 뒤 재확인)과 결과 조회(`recovery-operation`)에는 반드시 같은 값을 재사용한다.** 이전 시도가 `failed`로 확정되고 backoff 뒤 다음 시도를 시작할 때만 새 UUID를 발급한다. Spring 이벤트의 `operation_id`로 기록 |
+| `attempt` | 같은 `recovery_id` 안의 시도 번호(1부터). 새 `recovery_attempt_id`를 발급할 때만 1씩 증가하고 재전달·재확인에서는 그대로다. 새 `recovery_id`에서 1로 돌아간다. 재시도 한도·대기는 복구 정책(S15P31E110-125) |
 | `reason` | 판정 근거. `HEARTBEAT_LOST`(Linux VM, heartbeat 30초 무수신) / `DOMAIN_ABSENT`(의도 running인데 도메인 없음) / `DOMAIN_CRASHED`(`crashed`) |
 | `mode` | 플랫폼 `recover_once`의 `mode`: `start-if-absent` / `graceful-restart` / `force-restart` |
 | `detected_at` | 장애 판정 시각 (dom0) |
@@ -306,7 +306,7 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 `xl shutdown`을 사용하는 graceful shutdown이며 도메인은 소멸합니다. 디스크는 **보존**됩니다.
 
 - 성공 응답은 `204 No Content`. 종료 후에는 Xen에 도메인이 없으므로 반환할 VM 객체가 존재하지 않는다.
-- **없는 VM에 stop을 호출하면 `204`.** 멱등성은 목표 상태 기준이므로 이미 실행 중이 아닌 VM의 stop은 목표가 달성된 상태다.
+- **없는 VM에 stop을 호출하면 `204`.** 멱등성은 목표 상태 기준이므로 이미 실행 중이 아닌 VM의 stop은 목표가 달성된 상태다. 다만 **등록된 VM이면 도메인이 없어도 플랫폼 stop을 호출**해 `desired_state: stopped` 의도를 기록한다(플랫폼은 이미 꺼진 유효한 stop도 기록한다). 등록 자체가 없을 때만 플랫폼을 부르지 않는다. 그래서 Spring도 runtime 유무와 관계없이 stop을 전달한다(5장).
 - 호출은 동기 방식이며 플랫폼은 기본 최대 90초까지 도메인 소멸을 기다린다. 일반 stop은 시간 초과 시 자동으로 강제 종료하지 않는다.
 - 플랫폼의 Zephyr 개별 stop/reboot는 명시적 force가 필요하다. `board_shutdown_policy=force-allowed`는 **보드 전체 종료용 승인**이며 개별 stop의 강제 종료 승인으로 사용하지 않는다.
 - 현재 HTTP stop에는 force 입력이 없다. Zephyr 개별 종료를 자동 강제로 연결하지 않으며 전달 규약은 13장의 연동 항목으로 둔다.
@@ -350,11 +350,11 @@ Recovery Worker가 dom0에 남긴 복구 이벤트(2.5절)를 오래된 순으�
 
 | 응답 | 본문 |
 |---|---|
-| `200` | `{"events": [복구 이벤트 객체], "next_after_event_id": "..." \| null, "oldest_event_id": "..." \| null, "gap": false}` |
+| `200` | `{"events": [복구 이벤트 객체], "next_after_event_id": "..." \| null, "oldest_event_id": "..." \| null, "gap": false}`. `next_after_event_id`는 돌려준 마지막 이벤트의 `event_id`(비어 있으면 `null`), `oldest_event_id`는 dom0가 보관 중인 가장 오래된 이벤트 |
 | `200` + `gap: true` | `after_event_id`가 보관 범위 밖(만료·삭제)이라 **그 이후 이력을 잃었을 수 있음**. `events`는 보관된 가장 오래된 것부터이고 `oldest_event_id`가 그 첫 이벤트. 빈 배열 + `gap: false`는 "새 이벤트 없음"이며 이와 구분된다 |
 | `400 InvalidArgument` | `after_event_id`가 UUID 형식이 아니거나 `limit` 범위 밖 |
 
-Spring은 `gap: true`를 받으면 경고(`WARN`)로 `recovery.failed` 유실 가능성을 이벤트 로그에 남기고 `oldest_event_id`부터 이어서 받습니다. dom0는 최근 2,000건을 보관합니다(한도는 복구 정책 S15P31E110-125에서 조정). OpenAPI yaml(`dom0-manager-openapi.yaml`)에는 4.6은 xentop 수집(S15P31E110-112), 4.7은 복구 정책 엔진(S15P31E110-125) 구현 MR에서 추가합니다. 계약 테스트가 yaml과 실제 OpenAPI를 대조하므로 구현 전에 yaml만 앞서 바꾸지 않습니다.
+Spring의 페이지 규칙: (1) `gap: true`면 경고(`WARN`)로 `recovery.failed` 유실 가능성을 이벤트 로그에 남기고, (2) 그 응답의 `events`를 정상 처리한 뒤, (3) 다음 요청에는 `oldest_event_id`가 아니라 `next_after_event_id`를 보내며, (4) `events`가 비거나 `next_after_event_id`가 `null`이면 조회를 끝낸다. `oldest_event_id`는 유실 구간 진단용 정보일 뿐 커서로 쓰지 않는다(`after_event_id`는 "그 다음부터"라 다시 보내면 첫 이벤트 이후를 중복 조회한다). dom0는 최근 2,000건을 보관합니다(한도는 복구 정책 S15P31E110-125에서 조정).
 
 ---
 
@@ -368,7 +368,7 @@ Spring은 `gap: true`를 받으면 경고(`WARN`)로 `recovery.failed` 유실 �
 | `POST` | `/api/v1/vms` | 신규 `201` VM, 동일 명세 재시도 `200` VM | 같은 이름에 다른 명세면 `409 VM_NAME_CONFLICT` |
 | `GET` | `/api/v1/vms/{vm_id}` | `200` VM | — |
 | `POST` | `/api/v1/vms/{vm_id}/start` | `200` VM | dom0 단건 조회 후 도메인이 없을 때만 create 재호출. 이미 `running`이면 그대로 반환. `crashed`·`paused`·`stopping`이면 `409 INVALID_VM_STATE`로 거부(정지 후 다시 시작). 플랫폼 CLI와 같은 동작이며 자동 복구는 하지 않음 |
-| `POST` | `/api/v1/vms/{vm_id}/stop` | `200` VM (`state: stopped`) | dom0 단건 조회로 정지 전 상태를 읽은 뒤 stop 호출. 이미 꺼져 있으면 dom0를 호출하지 않고 이벤트도 남기지 않음. dom0는 `204`지만 Spring은 레코드로 VM 객체를 만들어 반환 |
+| `POST` | `/api/v1/vms/{vm_id}/stop` | `200` VM (`state: stopped`) | dom0 단건 조회로 정지 전 상태를 읽은 뒤 **runtime 유무와 관계없이** dom0 stop을 호출. 플랫폼이 `desired_state: stopped` 의도를 기록해야 Recovery Worker가 사용자가 끈 VM을 다시 켜지 않는다(1.2절). 이미 꺼져 있었으면 `vm.state.changed` 이벤트만 남기지 않음. dom0는 `204`지만 Spring은 레코드로 VM 객체를 만들어 반환 |
 | `DELETE` | `/api/v1/vms/{vm_id}` | `204` | dom0 retire 성공 뒤 Spring 레코드를 `RETIRED`로 보존하고 v1 목록·단건 조회에서는 숨김 |
 | `GET` | `/api/v1/templates` | `200` 템플릿 배열 | 설정 파일 고정 데이터 (2.3절) |
 
@@ -619,4 +619,4 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1.9 | 2026-10-19 | Domain-0 보호(S15P31E110-206): nil UUID 대상 호출은 모든 엔드포인트에서 `400 InvalidArgument`, 목록은 domid 0 또는 이름 Domain-0 을 제외(9장) |
 | v1.10 | 2026-10-20 | 실보드 `xl` 출력 확인(S15P31E110-36): 3.2절에 `-bp---`(blocked+paused 동시) 관측과 `------` 미관측, Domain-0의 `c_info.uuid` 부재를 기록. 매핑 변경 없음 |
 | v1.11 | 2026-10-21 | 플랫폼 복구 기반(67b0e26) 반영(S15P31E110-245): 오류 본문에 선택 필드 `platform_code` 추가, 복구 기반 오류 코드의 HTTP 매핑표(8.1), 정지 대기 만료의 임시 메시지 판별 명시, stop 대기는 플랫폼 90초 고정이라 platform 모드는 `XENOVA_SHUTDOWN_GRACE=90`만 허용하고 `XENOVA_XL_COMMAND_TIMEOUT`은 Manager 호출을 제한하지 않음을 명시(10장). 자동 복구 주체를 dom0 Recovery Worker로 확정하고 13장 미확정 항목에서 제거(1.2·4.5) |
-| v1.12 | 2026-10-21 | 메트릭·복구 이벤트 스키마(S15P31E110-33): xentop 원시값 통계 객체(2.4)와 `GET /api/v1/stats`(4.6), 복구 이벤트 객체(2.5)와 MQTT-12·`GET /api/v1/recovery/events`(4.7), Spring의 저장·사용률 계산·복구 이벤트 기록 규칙(5장). 사용률은 Spring 계산, 측정 실패는 `unavailable`, `source`는 Spring 필터 허용값 `xen`, 장애 단위 `recovery_id`와 `attempt_duration_ms`·`recovery_duration_ms` 분리, 재보충 커서 만료는 `gap: true`로 구분, FAILOVER는 VM 이벤트가 아님 |
+| v1.12 | 2026-10-21 | 메트릭·복구 이벤트 스키마(S15P31E110-33): xentop 원시값 통계 객체(2.4)와 `GET /api/v1/stats`(4.6), 복구 이벤트 객체(2.5)와 MQTT-12·`GET /api/v1/recovery/events`(4.7), Spring의 저장·사용률 계산·복구 이벤트 기록 규칙(5장). 사용률은 Spring 계산, 측정 실패는 `unavailable`, `source`는 Spring 필터 허용값 `xen`, 장애 단위 `recovery_id`와 `attempt_duration_ms`·`recovery_duration_ms` 분리, 재보충 커서 만료는 `gap: true`로 구분하고 페이지는 `next_after_event_id`로만 진행, `recovery_attempt_id`는 논리적 시도 단위(재전달 재사용), Spring stop은 runtime 유무와 관계없이 전달해 stopped 의도를 기록(4.3·5장), FAILOVER는 VM 이벤트가 아님 |
