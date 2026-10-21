@@ -23,6 +23,9 @@ class Settings:
     shutdown_grace_s: float = 90.0
     # Bearer 서비스 토큰. 비어 있으면 검사하지 않는다(로컬 Mock 개발). Tailscale 바인드 배포에서는 반드시 설정
     service_token: str = ""
+    # 내부 게이트웨이용 WebSocket. 명시적으로 활성화하고 서비스 토큰을 설정해야 한다.
+    console_enabled: bool = False
+    console_lock_dir: str = "/run/xenova/console-locks"
     # RPi4 물리 코어 수. vcpus 상한 검사에 쓴다. xl info 의 nr_cpus 를 읽을 수 있으면 그 값을 우선한다.
     host_cpus: int = 4
     instance_root: str = "/srv/xenova/instances"
@@ -35,6 +38,10 @@ class Settings:
     log_level: str = "INFO"
 
     def __post_init__(self) -> None:
+        if self.console_enabled and not self.service_token:
+            raise ValueError("console requires XENOVA_SERVICE_TOKEN")
+        if self.console_enabled and self.xl_ssh_target:
+            raise ValueError("console must run on local dom0, not XENOVA_XL_SSH")
         # 시간 값은 유한한 양수여야 한다. 음수·NaN·inf 는 Lock.acquire/타임아웃에서 예외나 무한 대기가 되므로 시작 시점에 거부한다
         for name in ("xl_query_timeout_s", "xl_command_timeout_s", "shutdown_grace_s", "platform_busy_timeout_s"):
             value = getattr(self, name)
@@ -67,6 +74,8 @@ class Settings:
             xl_ssh_target=read("XENOVA_XL_SSH", cls.xl_ssh_target, str).strip(),
             shutdown_grace_s=read("XENOVA_SHUTDOWN_GRACE", cls.shutdown_grace_s, float),
             service_token=read("XENOVA_SERVICE_TOKEN", cls.service_token, str),
+            console_enabled=read("XENOVA_CONSOLE_ENABLED", cls.console_enabled, as_bool),
+            console_lock_dir=read("XENOVA_CONSOLE_LOCK_DIR", cls.console_lock_dir, str),
             host_cpus=read("XENOVA_HOST_CPUS", cls.host_cpus, int),
             instance_root=read("XENOVA_INSTANCE_ROOT", cls.instance_root, str),
             platform_lib=read("XENOVA_PLATFORM_LIB", cls.platform_lib, str),
