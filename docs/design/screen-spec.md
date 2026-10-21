@@ -38,7 +38,7 @@
 | W-01 | 웹 | 로그인 | `/login` | UI-01 | 정송하 -53 | ✅ auth |
 | W-02 | 웹 | 대시보드 (주행 통합 상태) | `/` | UI-09 | 미배정 → §7 Q2 | ✅ `/ws/v1/drive/state` (-154) |
 | W-03 | 웹 | VM 목록 | `/vms` | UI-02 | 정송하 -55 | ✅ |
-| W-04 | 웹 | VM 상세 (+ 웹 콘솔 탭) | `/vms/:id` | UI-04, UI-05 | 정수환 | ✅ 조회·제어 / 차트 ⏳ -148 / 콘솔 WS-03 ⏳ |
+| W-04 | 웹 | VM 상세 (+ 웹 콘솔 탭) | `/vms/:id` | UI-04, UI-05 | 정수환 | ✅ 조회·제어 / 차트 ⏳ -148 / 콘솔 ✅ -248 (`platform` 브랜치) |
 | W-05 | 웹 | VM 생성 위저드 | `/vms/new` | UI-03 | 정송하 -159 | ✅ |
 | W-06 | 웹 | 자원 제어 | `/resources` | UI-06 | 정수환 | ⏳ -107 |
 | W-07 | 웹 | 시연 제어 (격리 시연 + 화면 배치 + 수동주행) | `/demo` | UI-08, DS-01 | 공병우 -130·-128, 정송하 -135 | ✅ `/ws/v1/drive`·`/ws/v1/drive/state` (-154) / ⏳ -135, -129 |
@@ -116,7 +116,7 @@
 | 개요 | 상태, 템플릿, 자원, IP, 에이전트, 생명주기 버튼 | `GET /api/v1/vms/{id}` |
 | 실시간 차트 | CPU·메모리·네트워크 (최근 n 분) | `GET /api/v1/vms/{id}/metrics`, `WS /ws/v1/metrics` |
 | 프로세스 | 상위 프로세스 | `GET /api/v1/vms/{id}/processes` |
-| 웹 콘솔 | xterm.js 터미널. VM 당 쓰기 세션 1개, 사용 중이면 안내 | `WS /ws/v1/vms/{id}/console` (WS-03, 미구현) |
+| 웹 콘솔 | xterm.js 터미널. 연결 버튼으로 접속, VM 당 세션 1개(사용 중이면 4409 안내), 자동 재접속 없음. 실행 중·paused VM 만 | `WS /ws/v1/vms/{id}/console` — 첫 프레임 `auth`, 이후 binary ([웹 터미널 계약 browser-console-v1](../contracts/browser-console-v1.md), 구현 -248 `platform` 브랜치) |
 
 Zephyr VM 은 에이전트가 없어 차트·프로세스 대신 "Zephyr — 에이전트 없음, 콘솔로 확인" 을 표시한다.
 
