@@ -105,6 +105,31 @@ class NativeCoreTest(unittest.TestCase):
                 builder.verify_elf(file)
 
 
+    def test_generated_dts_requires_g1_level_event_ppi(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)/"zephyr.dts"
+            def dts(cells):
+                return ('/dts-v1/; / { hypervisor: hypervisor@38000000 { '
+                        'compatible = "xen,xen"; interrupts = < '+cells+' >; }; };')
+            path.write_text(dts("0x1 0xf 0x2 0xa0"))
+            builder.verify_event_irq(path)
+            for cells in ("1 15 4 160", "1 15 8 160", "1 14 2 160", "1 15 invalid 160"):
+                with self.subTest(cells=cells):
+                    path.write_text(dts(cells))
+                    with self.assertRaisesRegex(ValueError, "G1 event PPI31"):
+                        builder.verify_event_irq(path)
+            path.write_text('/ { /* hypervisor@38000000 { interrupts = <1 15 2 160>; }; */ };')
+            with self.assertRaisesRegex(ValueError, "Xen hypervisor node"):
+                builder.verify_event_irq(path)
+
+    def test_app_overlay_is_in_builder_input_identity(self):
+        relative = "xenstore-test-app/app.overlay"
+        info = builder.inputs()[relative]
+        self.assertEqual(info["sha256"], hashlib.sha256((builder.BASE/relative).read_bytes()).hexdigest())
+        self.assertIn(b"IRQ_TYPE_LEVEL", (builder.BASE/relative).read_bytes())
+
+
+
 class CommandLogTest(unittest.TestCase):
     def run_failure(self, timeout):
         with tempfile.TemporaryDirectory() as temp:
