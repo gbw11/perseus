@@ -61,7 +61,7 @@ public class DriveEventLogger {
         eventRecorder.record(EventType.DRIVE_FAULT_DETECTED, EventSeverity.WARNING, text(body, "vm_id"), null, payload);
     }
 
-    // Resume countdown start / cancel (MQTT-12 follow-up): INFO, payload as the gateway sent it.
+    // Resume countdown start / cancel (MQTT-13 follow-up): INFO, payload as the gateway sent it.
     private void resume(DriveNotice notice, EventType type) {
         @SuppressWarnings("unchecked")
         Map<String, Object> payload = objectMapper.convertValue(notice.payload(), LinkedHashMap.class);

@@ -15,7 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-// POST /api/v1/drive/resume → MQTT-12 drive.resume.requested on xenova/v1/console/resume (QoS 1).
+// POST /api/v1/drive/resume → MQTT-13 drive.resume.requested on xenova/v1/console/resume (QoS 1).
 // The gateway only accepts it in AUTO_READY (contract §6), so the backend refuses other modes up front and the
 // operator sees why; the gateway still has the final say and answers with drive.resume.accepted / cancelled.
 @Service

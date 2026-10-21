@@ -37,7 +37,7 @@ public class DriveController {
         return tracker.stats();
     }
 
-    // Web "resume autonomous driving" (MQTT-12). 202: the gateway decides; the countdown arrives as
+    // Web "resume autonomous driving" (MQTT-13). 202: the gateway decides; the countdown arrives as
     // drive.resume.accepted (event + DriveState.resume), a refusal as drive.resume.cancelled.
     @PostMapping("/api/v1/drive/resume")
     public ResponseEntity<Map<String, Object>> resume(Authentication authentication) {

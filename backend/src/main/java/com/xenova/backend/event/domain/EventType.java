@@ -19,7 +19,7 @@ public enum EventType {
     // MQTT contract §6: recorded by the drive relay (S15P31E110-154) from the gateway's app events.
     DRIVE_MODE_CHANGED("drive.mode.changed"),
     DRIVE_FAULT_DETECTED("drive.fault.detected"),
-    // The gateway accepted / cancelled a web resume request (MQTT-12, S15P31E110-154).
+    // The gateway accepted / cancelled a web resume request (MQTT-13, S15P31E110-154).
     DRIVE_RESUME_ACCEPTED("drive.resume.accepted"),
     DRIVE_RESUME_CANCELLED("drive.resume.cancelled"),
     // A console changed what a monitor should show (REST-24, S15P31E110-129).
