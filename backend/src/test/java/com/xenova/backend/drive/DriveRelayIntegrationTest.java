@@ -75,6 +75,7 @@ class DriveRelayIntegrationTest {
 
     private MqttClient fake;
     private final BlockingQueue<JsonNode> inputs = new LinkedBlockingQueue<>();
+    private final BlockingQueue<JsonNode> resumes = new LinkedBlockingQueue<>();
 
     @DynamicPropertySource
     static void mqttProperties(DynamicPropertyRegistry registry) {
@@ -89,6 +90,8 @@ class DriveRelayIntegrationTest {
         fake.connect();
         fake.subscribe(DriveStateTracker.PREFIX + "apps/manual/input", 0, (topic, message) ->
                 inputs.add(objectMapper.readTree(message.getPayload())));
+        fake.subscribe("xenova/v1/console/resume", 1, (topic, message) ->
+                resumes.add(objectMapper.readTree(message.getPayload())));
     }
 
     @AfterEach
@@ -198,6 +201,58 @@ class DriveRelayIntegrationTest {
         Thread.sleep(200);
         assertThat(inputs).isEmpty();
         input.session.close();
+    }
+
+    @Test
+    void resumeIsPublishedOnlyInAutoReadyAndTheCountdownIsRelayed() throws Exception {
+        String token = login();
+        await(() -> {
+            publish(DriveStateTracker.CONTROL_TOPIC, "dom0-gateway", null, "vehicle.control",
+                    "{\"mode\":\"MANUAL\",\"generation\":30,\"active_app\":\"manual\"}", 1, true);
+            var control = tracker.snapshot().control();
+            return control != null && control.generation() != null && control.generation() == 30;
+        });
+        ResponseEntity<String> refused = restTemplate.exchange(
+                "/api/v1/drive/resume", HttpMethod.POST, new HttpEntity<>(bearer(token)), String.class);
+        assertThat(refused.getStatusCode().value()).isEqualTo(409);
+        assertThat(objectMapper.readTree(refused.getBody()).path("code").asText()).isEqualTo("NOT_AUTO_READY");
+        assertThat(restTemplate.postForEntity("/api/v1/drive/resume", null, String.class).getStatusCode().value())
+                .isEqualTo(401);
+
+        await(() -> {
+            publish(DriveStateTracker.CONTROL_TOPIC, "dom0-gateway", null, "vehicle.control",
+                    "{\"mode\":\"AUTO_READY\",\"generation\":31,\"active_app\":null}", 1, true);
+            var control = tracker.snapshot().control();
+            return control != null && "AUTO_READY".equals(control.mode());
+        });
+        ResponseEntity<String> accepted = restTemplate.exchange(
+                "/api/v1/drive/resume", HttpMethod.POST, new HttpEntity<>(bearer(token)), String.class);
+        assertThat(accepted.getStatusCode().value()).isEqualTo(202);
+        assertThat(objectMapper.readTree(accepted.getBody()).path("accepted").asBoolean()).isTrue();
+        JsonNode request = resumes.poll(5, TimeUnit.SECONDS);
+        assertThat(request).isNotNull();
+        assertThat(request.path("type").asText()).isEqualTo("drive.resume.requested");
+        assertThat(request.path("source_id").asText()).isEqualTo("dom0-server");
+        assertThat(request.path("payload").path("requested_by").asText()).isEqualTo("drive-relay-user");
+
+        // The gateway answers with a countdown: event log + drive state.
+        await(() -> {
+            publish("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle", "drive.resume.accepted",
+                    "{\"switch_in_ms\":3000,\"generation\":31}", 1, false);
+            return !events(EventType.DRIVE_RESUME_ACCEPTED).isEmpty();
+        });
+        JsonNode state = objectMapper.readTree(restTemplate.exchange(
+                "/api/v1/drive/state", HttpMethod.GET, new HttpEntity<>(bearer(token)), String.class).getBody());
+        assertThat(state.path("resume").path("switch_in_ms").asLong()).isEqualTo(3000);
+        assertThat(state.path("resume").has("remaining_ms")).isTrue();
+        assertThat(events(EventType.DRIVE_RESUME_ACCEPTED).get(0).getSeverity()).isEqualTo(EventSeverity.INFO);
+
+        await(() -> {
+            publish("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle", "drive.resume.cancelled",
+                    "{\"reason\":\"mode_changed\"}", 1, false);
+            return !events(EventType.DRIVE_RESUME_CANCELLED).isEmpty();
+        });
+        assertThat(tracker.snapshot().resume()).isNull();
     }
 
     // ---- helpers ------------------------------------------------------------------------------------
