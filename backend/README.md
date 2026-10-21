@@ -37,6 +37,14 @@ GET http://localhost:8080/actuator/health
 
 ## 인증 API
 
+### VM 웹 콘솔 중계
+
+`/ws/v1/vms/{vm_id}/console`은 첫 메시지의 사용자 JWT로 인증한 뒤 등록된 실행 VM의
+dom0 콘솔로 연결합니다. `DOM0_MANAGER_BASE_URL`과 `DOM0_MANAGER_SERVICE_TOKEN`을
+서버에 설정하고, dom0-manager의 `XENOVA_CONSOLE_ENABLED=1` 및 같은 서비스 토큰을 준비합니다.
+프론트엔드에 서비스 토큰을 전달하지 않습니다. 데이터·종료 규격은
+[웹 터미널 계약](../docs/contracts/browser-console-v1.md)을 참고하세요.
+
 ```text
 POST /api/v1/auth/signup
 POST /api/v1/auth/login
