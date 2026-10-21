@@ -38,12 +38,12 @@
 | W-01 | 웹 | 로그인 | `/login` | UI-01 | 정송하 -53 | ✅ auth |
 | W-02 | 웹 | 대시보드 (주행 통합 상태) | `/` | UI-09 | 미배정 → §7 Q2 | ✅ `/ws/v1/drive/state` (-154) |
 | W-03 | 웹 | VM 목록 | `/vms` | UI-02 | 정송하 -55 | ✅ |
-| W-04 | 웹 | VM 상세 (+ 웹 콘솔 탭) | `/vms/:id` | UI-04, UI-05 | 정수환 | ✅ 조회·제어 / 차트 ⏳ -148 / 콘솔 ✅ -248 (`platform` 브랜치) |
+| W-04 | 웹 | VM 상세 | `/vms/:id` | UI-04, UI-05 | 정수환 | ✅ 조회·제어 / 차트 ⏳ -148 |
 | W-05 | 웹 | VM 생성 위저드 | `/vms/new` | UI-03 | 정송하 -159 | ✅ |
 | W-06 | 웹 | 자원 제어 | `/resources` | UI-06 | 정수환 | ⏳ -107 |
 | W-07 | 웹 | 시연 제어 (격리 시연 + 화면 배치 + 수동주행) | `/demo` | UI-08, DS-01 | 공병우 -130·-128, 정송하 -135 | ✅ `/ws/v1/drive`·`/ws/v1/drive/state` (-154) / ⏳ -135, -129 |
 | W-08 | 웹 | 이벤트 타임라인 | `/events` | UI-07 | 정송하 -160 | ✅ 조회 · 차량 이벤트 (-154) |
-| W-09 | 웹 | 웹 콘솔 (VM 3개 중 골라 바로 터미널) | `/console?vm=` | UI-05 | 공병우 (console-draft) | ✅ W-04 웹 콘솔 탭과 같은 패널 (-248) |
+| W-09 | 웹 | 웹 콘솔 (VM 3개 중 골라 바로 터미널) | `/console?vm=` | UI-05 | 공병우 (console-draft) | ✅ -248 (`platform` 브랜치). 웹 콘솔은 이 화면에서만 연다 (VM 상세 탭 없음) |
 | M-01 | 모니터 1 | 3분할 | `/split` | DS-02 | 공병우 -128 | ✅ 백엔드 중계 (-154) |
 | M-02 | 모니터 2 | 상세 — 자율주행 | `/detail/autonomous` | DS-02 | 공병우 -128 | 〃 |
 | M-03 | 모니터 2 | 상세 — 수동주행 | `/detail/manual` | DS-02 | 공병우 -128 | 〃 |
@@ -117,9 +117,10 @@
 | 개요 | 상태, 템플릿, 자원, IP, 에이전트, 생명주기 버튼 | `GET /api/v1/vms/{id}` |
 | 실시간 차트 | CPU·메모리·네트워크 (최근 n 분) | `GET /api/v1/vms/{id}/metrics`, `WS /ws/v1/metrics` |
 | 프로세스 | 상위 프로세스 | `GET /api/v1/vms/{id}/processes` |
-| 웹 콘솔 | xterm.js 터미널. 연결 버튼으로 접속, VM 당 세션 1개(사용 중이면 4409 안내), 자동 재접속 없음. 실행 중·paused VM 만 | `WS /ws/v1/vms/{id}/console` — 첫 프레임 `auth`, 이후 binary ([웹 터미널 계약 browser-console-v1](../contracts/browser-console-v1.md), 구현 -248 `platform` 브랜치) |
 
 Zephyr VM 은 에이전트가 없어 차트·프로세스 대신 "Zephyr — 에이전트 없음, 콘솔로 확인" 을 표시한다.
+
+웹 콘솔은 W-09 [웹 콘솔] 메뉴에서 VM 을 골라 연다: `WS /ws/v1/vms/{id}/console` — 첫 프레임 `auth`, 이후 binary, VM 당 세션 1개(점유 중 4409). 규격은 [웹 터미널 계약 browser-console-v1](../contracts/browser-console-v1.md) (구현 -248 `platform` 브랜치).
 
 ### W-05 VM 생성 위저드 (UI-03)
 
