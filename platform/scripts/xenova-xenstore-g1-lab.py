@@ -293,7 +293,8 @@ def main(argv=None):
         print("before="+run(["xenstore-read",args.path]))
         target(p,lab)
         run(["xenstore-write",args.path,args.value])
-        print("after="+run(["xenstore-read",args.path]))
+        # The guest may remove this node immediately after consuming the notification.
+        print("written="+args.value+"; verify guest watch-reread and exercise-result")
     elif args.action == "cleanup":
         if args.confirm_uuid != lab["uuid"]:
             raise ValueError("explicit UUID confirmation mismatch")

@@ -12,6 +12,8 @@ def main() -> None:
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level.lower(),
+        ws_max_size=65536,
+        ws_max_queue=4,
     )
 
 
