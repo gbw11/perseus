@@ -270,6 +270,15 @@ REST 응답과 WS `display.snapshot` 의 `items` 가 같은 모양을 쓴다. �
 - 다시 붙으면 auth → `service.hello` 부터 다시 한다. 백엔드는 hello 직후 디스플레이마다 지금 desired_route 로 `route.set` 을 다시 보낸다. 서비스는 이미 그 화면이 떠 있어도 `route.applied` 로 답한다.
 - 백엔드가 재시작하면 배치가 `split` 으로 돌아가므로 (1장) 재연결 뒤 두 모니터 모두 3분할이 된다.
 
+### 5.5.1 세부 규칙 (백엔드 -129 구현과 같다)
+
+- `service.hello` 전에 온 `display.status`·`route.applied`·`route.failed` 는 `VALIDATION_ERROR` 로 답하고 무시한다.
+- `service.hello` 목록에 없는 `display_id` 는 무시하고, 목록에서 빠진 디스플레이는 연결 안 됨(`DISCONNECTED`)으로 본다.
+- `route.applied`·`route.failed` 에 `request_id` 가 없으면 `revision` 만으로 판단한다. 있는데 지금 것과 다르면 `VALIDATION_ERROR`.
+- 같은 `revision` 에 결과가 두 번 오면 나중 것을 따른다 (`route.failed` 뒤 `route.applied` 면 `ACTIVE`, `last_error` 지움).
+- 모니터가 빠졌다 다시 꽂히면(`display.status` connected false → true) 백엔드는 `route.set` 을 다시 보내지 않는다.
+  표시 서비스가 마지막으로 받은 `route.set` 을 스스로 다시 띄우고 `route.applied` 를 보낸다 — 그 전까지 상태는 `SWITCHING`.
+
 ### 5.6 `screen_path` 만들기
 
 백엔드가 `route.set` 에 넣는다. 표시 서비스는 자기 키오스크 기준 주소 앞에 붙여 그대로 연다 (예 기준 주소 `http://127.0.0.1:8080/monitor` + `/detail/autonomous`).
