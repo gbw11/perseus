@@ -271,3 +271,16 @@ xl list
 결과표에는 local / target build / real Xen 실행 / Store / VIF / backend 변화 /
 transaction / watch / timeout / cleanup / 기존 VM 기준선을 별도로 기록한다.
 bridge·DHCP 재시작, 운영 도메인 중단, registry 수정, SD·이미지 교체는 수행하지 않는다.
+
+## G1 전용 event IRQ와 산출물 갱신
+
+`xenstore-test-app/app.overlay`는 event PPI31을 Zephyr `IRQ_TYPE_LEVEL=2`로 지정한다.
+실제 Xen standard DT의 level-low flags `0xf08`과 숫자 encoding이 다르다.
+고정 xenvm/Starter A/B의 공통 board DTS와 source lock은 변경하지 않는다.
+빌더는 생성 DTS의 PPI·trigger·priority를 확인하고 overlay를 source manifest에 포함한다.
+펌웨어·ELF/map/config/DTS·build manifest와 최신 lab/runtime 인계·SHA는 같은 입력으로 갱신한다.
+overlay나 빌더가 변경됐으면 기존 펌웨어의 manifest만 고쳐 재사용하지 않는다.
+
+별도 level 후보의 실보드 Store/watch·자기 VIF backend 변화·회수는 확인했다.
+정밀 masked-pending IRQ 경쟁의 실물 유발이나 G2 Ethernet/IP 수락을 뜻하지 않는다.
+새 정식 입력의 펌웨어 재빌드·실보드 수락은 별도 단계다.

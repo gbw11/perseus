@@ -94,6 +94,19 @@ class HandoffTest(unittest.TestCase):
         self.assertEqual((self.firmware/"g1-build.json").read_bytes(), before)
         self.assertFalse(self.output.exists())
 
+    def test_missing_overlay_in_old_firmware_source_manifest_is_rejected(self):
+        relative = "xenstore-test-app/app.overlay"
+        self.assertEqual(self.manifest["source_files"][relative],
+                         handoff.file_info(ROOT/"platform/guests/zephyr"/relative))
+        del self.manifest["source_files"][relative]
+        self.manifest["source_sha256"] = hashlib.sha256(
+            json.dumps(self.manifest["source_files"], sort_keys=True,
+                       separators=(",", ":")).encode()).hexdigest()
+        self.save_manifest()
+        with self.assertRaisesRegex(ValueError, "different app/module"):
+            self.package()
+        self.assertFalse(self.output.exists())
+
     def test_stale_build_script_rejected(self):
         self.manifest["build_script_sha256"] = "0"*64
         self.save_manifest()
