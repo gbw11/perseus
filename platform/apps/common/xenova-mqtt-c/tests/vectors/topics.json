@@ -1,0 +1,171 @@
+{
+ "build": [
+  {
+   "fn": "vm",
+   "args": [
+    "11111111-1111-4111-8111-111111111111",
+    "heartbeat"
+   ],
+   "out": "xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat"
+  },
+  {
+   "fn": "vm",
+   "args": [
+    "vm-1",
+    "command-result"
+   ],
+   "out": "xenova/v1/vms/vm-1/command-result"
+  },
+  {
+   "fn": "app_events",
+   "args": [
+    "manual"
+   ],
+   "out": "xenova/v1/apps/manual/events"
+  },
+  {
+   "fn": "manual_input",
+   "args": [],
+   "out": "xenova/v1/apps/manual/input"
+  },
+  {
+   "fn": "vehicle_control",
+   "args": [],
+   "out": "xenova/v1/vehicle/control"
+  },
+  {
+   "fn": "vehicle_status",
+   "args": [],
+   "out": "xenova/v1/vehicle/status"
+  },
+  {
+   "fn": "probe_request",
+   "args": [
+    "vm-2"
+   ],
+   "out": "xenova/v1/probes/vm-2/request"
+  },
+  {
+   "fn": "probe_reply",
+   "args": [
+    "vm-1"
+   ],
+   "out": "xenova/v1/probes/vm-1/reply"
+  }
+ ],
+ "invalid": [
+  {
+   "fn": "vm",
+   "args": [
+    "vm-1",
+    "unknown"
+   ]
+  },
+  {
+   "fn": "vm",
+   "args": [
+    "a/b",
+    "heartbeat"
+   ]
+  },
+  {
+   "fn": "app_events",
+   "args": [
+    "+"
+   ]
+  },
+  {
+   "fn": "app_events",
+   "args": [
+    "a#"
+   ]
+  },
+  {
+   "fn": "app_events",
+   "args": [
+    "has space"
+   ]
+  },
+  {
+   "fn": "app_events",
+   "args": [
+    ""
+   ]
+  },
+  {
+   "fn": "probe_request",
+   "args": [
+    "x/y"
+   ]
+  }
+ ],
+ "parse": [
+  {
+   "topic": "xenova/v1/vms/vm-1/heartbeat",
+   "vm_id": "vm-1",
+   "app_id": null
+  },
+  {
+   "topic": "xenova/v1/apps/manual/events",
+   "vm_id": null,
+   "app_id": "manual"
+  },
+  {
+   "topic": "xenova/v1/apps/manual/input",
+   "vm_id": null,
+   "app_id": null
+  },
+  {
+   "topic": "xenova/v1/vehicle/control",
+   "vm_id": null,
+   "app_id": null
+  },
+  {
+   "topic": "perseus/v1/vms/vm-1/heartbeat",
+   "vm_id": null,
+   "app_id": null
+  },
+  {
+   "topic": "xenova/v1/vms/vm-1/heartbeat/extra",
+   "vm_id": null,
+   "app_id": null
+  }
+ ],
+ "matches": [
+  [
+   "xenova/v1/vms/+/heartbeat",
+   "xenova/v1/vms/vm-1/heartbeat",
+   true
+  ],
+  [
+   "xenova/v1/vms/+/heartbeat",
+   "xenova/v1/vms/vm-1/metrics",
+   false
+  ],
+  [
+   "xenova/v1/#",
+   "xenova/v1/apps/manual/events",
+   true
+  ],
+  [
+   "xenova/v1/apps/+/events",
+   "xenova/v1/apps/manual/input",
+   false
+  ],
+  [
+   "xenova/v1/vehicle/control",
+   "xenova/v1/vehicle/control",
+   true
+  ],
+  [
+   "xenova/v1/vehicle",
+   "xenova/v1/vehicle/control",
+   false
+  ],
+  [
+   "xenova/v1/vehicle/control/x",
+   "xenova/v1/vehicle/control",
+   false
+  ]
+ ]
+}

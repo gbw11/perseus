@@ -22,7 +22,10 @@ Perseus 소스·이미지·실보드의 역사적 기록입니다. 기존 로그
 ```text
 ├── backend/                         # Spring Boot 관리 서버 (테스트: src/test/)
 │
-├── frontend/                        # React 관리 콘솔 (테스트: frontend/ 안)
+├── frontend/                        # React (npm workspaces, 테스트: frontend/ 안)
+│   ├── apps/admin-console/          # 웹 관리 콘솔
+│   ├── apps/vm-screens/             # 모니터 화면 (3분할·상세)
+│   └── packages/ui/                 # 공통 컴포넌트·디자인 토큰
 │
 ├── platform/                        # 보드(dom0·domU) 위에서 돌거나 보드 이미지를 만드는 것
 │   ├── yocto/                       # Yocto-Xen 설정 및 패키지
