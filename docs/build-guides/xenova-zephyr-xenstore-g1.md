@@ -5,7 +5,9 @@ packet TX/RX·IP·DHCP·ping은 이번 시험의 판정 항목이 아니다.
 
 ## 입력과 빌드
 
-- 기준 HEAD: `e1dc62d`. 기존 기본 배치와 Spring name 전달은 유지한다.
+- 펌웨어 빌드 기준은 firmware/g1-build.json의 원본 HEAD·입력 해시를 따른다.
+  통합 런타임은 handoff-manifest.json의 source 경로·파일 해시로 별도 추적한다.
+  런타임만 갱신해도 원본 펌웨어 빌드 HEAD나 해시를 고쳐 쓰지 않는다.
 - Zephyr 4.4.0: `684c9e8f32e4373a21098559f748f06915f950c9`
 - SDK 1.0.0: `platform/guests/zephyr/source.lock.json`의 archive SHA-256
 - Xen 4.21.0+stable: `1c72306b1f0b4dc533954f678361044f8083dccc`
@@ -45,12 +47,43 @@ native/ASan·UBSan은 동일 production C를 컴파일한다. 대역은 XenStore
 adapter host 검사는 kernel/hypercall 선언 대역과 2-level pending 전이 모델을 사용한다.
 이것은 물리 IRQ 시험이 아니다. 실제 xenvm 빌드는 고정 Zephyr 헤더만 사용하며 host 대역을 쓰지 않는다.
 
+## 검증된 펌웨어로 인계물 게시
+
+검증한 G1 firmware 디렉터리와 현재 소스로 새 인계물을 만든다. 기존 경로는 덮어쓰지 않는다.
+도구는 펌웨어의 모든 앱·모듈 입력과 빌드 스크립트·reference lock을 현재 소스와 비교한다.
+달라졌으면 재포장을 거부하므로 새 타깃 빌드가 먼저 필요하다.
+동일하면 bin/ELF/map/config/DTS와 원본 g1-build.json을 바꾸지 않고 재사용한다.
+
+```sh
+G1_FIRMWARE=/absolute/verified/g1-build/firmware
+G1_HANDOFF=/absolute/new/g1-handoff
+python3 -B platform/scripts/package-xenova-xenstore-g1-handoff.py package \
+  --firmware "$G1_FIRMWARE" --output "$G1_HANDOFF" --execute
+rc=$?; echo "package rc=$rc"; [ "$rc" -eq 0 ] || exit 1
+python3 -B platform/scripts/package-xenova-xenstore-g1-handoff.py verify --directory "$G1_HANDOFF"
+rc=$?; echo "verify rc=$rc"; [ "$rc" -eq 0 ] || exit 1
+(cd "$G1_HANDOFF" && sha256sum -c SHA256SUMS)
+rc=$?; echo "hash rc=$rc"; [ "$rc" -eq 0 ] || exit 1
+```
+
+`--execute`를 생략하면 출력·staging을 만들지 않는 계획 검사다.
+runtime/은 실제 /usr/lib/xenova 레이아웃의 Python 모듈 18개와 Ubuntu/Debian cfg 2개를 포함한다.
+지연 import까지 검사하며 복구 모듈을 뺀 구형 다섯 파일 묶음으로 대체하지 않는다.
+handoff-manifest.json은 원소스 경로·파일 SHA, 보존한 펌웨어 출처와 전체 인계 파일을 기록한다.
+manifest와 SHA256SUMS의 전체 파일 목록·해시가 일치해야 하며 추가 파일·symlink도 거부한다.
+
+인계물 갱신 자체는 운영 /usr/lib 설치나 펌웨어 교체가 아니다.
+보드에서 사용할 runtime의 해시가 인계 manifest와 다르면 별도 시험 경로로만 사용하고,
+운영 /usr/lib/xenova를 인계 파일로 덮어쓰지 않는다.
+
 ## 사전 점검 — 읽기 전용
 
 전송 대상은 새 `firmware/`, lab 스크립트와 현재 플랫폼 runtime 소스다.
 보드에 동일 runtime이 있으면 `--platform-dir /usr/lib/xenova`를 사용할 수 있다.
 없으면 인계 묶음의 runtime/을 별도 시험 경로에 두고 지정한다.
-이 디렉터리는 xenova_vm/runtime/zephyr와 first_install_contract/artifact_io의 같은 시점 사본을 포함한다.
+이 디렉터리는 공통 관리·복구·신원·cfg 모듈을 포함한 위의 전체 런타임 사본을 포함한다.
+게시한 인계 경로를 기준으로 LAB_TOOL="$G1_HANDOFF/scripts/xenova-xenstore-g1-lab.py",
+PLATFORM_DIR="$G1_HANDOFF/runtime"을 지정한다. 실제 Xen 라이브러리·도구는 dom0 설치본을 사용한다.
 전체 저장소 소스로 실행할 때는 lab loader가 platform/first-install 의존 경로도 읽는다.
 운영 /usr/lib는 덮어쓰지 않는다.
 

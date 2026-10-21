@@ -1,6 +1,7 @@
 """xl 출력 파싱과 XenDriver 조회 경로를 FakeRunner 로 검증한다. 실제 xl 은 호출하지 않는다."""
 
 import json
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -9,7 +10,15 @@ from fastapi.testclient import TestClient
 from dom0_manager.config import Settings
 from dom0_manager.drivers.mock import MockProvisioner
 from dom0_manager.drivers.xen import XenDriver
-from dom0_manager.drivers.xl import CommandResult, Xl, map_state, parse_xl_info, parse_xl_list
+from dom0_manager.drivers.xl import (
+    CommandResult,
+    SshRunner,
+    Xl,
+    map_state,
+    parse_xl_info,
+    parse_xl_list,
+    parse_xl_list_long,
+)
 from dom0_manager.errors import DriverError, DriverTimeout
 from dom0_manager.main import create_app
 from dom0_manager.models import VmState
@@ -72,6 +81,7 @@ def _healthy_runner(fail: dict[tuple[str, ...], Exception] | None = None):
         ("-b----", VmState.running),
         ("------", VmState.running),
         ("--p---", VmState.paused),
+        ("-bp---", VmState.paused),  # 실보드: xl pause 한 유휴 도메인은 b 와 p 가 같이 선다
         ("---s--", VmState.stopping),
         ("---sr-", VmState.stopping),  # shutdown reason: reboot
         ("---sw-", VmState.stopping),  # shutdown reason: watchdog
@@ -159,3 +169,120 @@ def test_xl_failure_is_driver_error_with_trimmed_detail():
         xl.list()
     assert "exit 1" in exc.value.message
     assert exc.value.detail.startswith("fake: no output")
+
+
+# ---- SSH 러너: 개발 PC 에서 보드의 xl 을 부른다 ----
+
+
+class RecordingRunner:
+    def __init__(self, result: CommandResult) -> None:
+        self.result = result
+        self.calls: list[tuple[list[str], float]] = []
+
+    def run(self, args, *, timeout_s):
+        self.calls.append(([str(a) for a in args], timeout_s))
+        return self.result
+
+
+def test_ssh_runner_wraps_xl_command_in_batch_mode_ssh():
+    inner = RecordingRunner(CommandResult(0, XL_LIST, ""))
+    runner = SshRunner("root@100.64.0.1", runner=inner)
+    xl = Xl(runner, query_timeout_s=5)
+    assert [r.name for r in xl.list()] == ["Domain-0", "alpine-drive", "debian-safety"]
+    argv, timeout = inner.calls[0]
+    assert argv == ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "root@100.64.0.1", "--", "xl", "list"]
+    assert timeout == 5
+
+
+def test_ssh_runner_connection_failure_is_driver_error_not_xl_error():
+    inner = RecordingRunner(CommandResult(255, "", "Permission denied (publickey)."))
+    xl = Xl(SshRunner("root@100.64.0.1", runner=inner))
+    with pytest.raises(DriverError, match="ssh to root@100.64.0.1 failed"):
+        xl.info()
+    assert XenDriver(xl).health() is False
+
+
+def test_ssh_runner_timeout_names_the_remote_command():
+    class Hanging:
+        def run(self, args, *, timeout_s):
+            raise DriverTimeout("ssh -o timed out after 3s")
+
+    xl = Xl(SshRunner("root@100.64.0.1", runner=Hanging()), query_timeout_s=3)
+    with pytest.raises(DriverTimeout, match="xl info over ssh to root@100.64.0.1 timed out after 3s"):
+        xl.info()
+
+
+def test_ssh_runner_rejects_bad_target():
+    with pytest.raises(ValueError):
+        SshRunner("")
+    with pytest.raises(ValueError):
+        SshRunner("root@host extra")
+
+
+def test_build_driver_uses_ssh_runner_when_configured():
+    from dom0_manager.drivers import build_driver
+
+    local = build_driver(Settings(driver="xen"))
+    remote = build_driver(Settings(driver="xen", xl_ssh_target="root@100.64.0.1"))
+    assert type(local._xl._runner).__name__ == "SubprocessRunner"
+    assert isinstance(remote._xl._runner, SshRunner) and remote._xl._runner.target == "root@100.64.0.1"
+    assert Settings.from_env({"XENOVA_DRIVER": "xen", "XENOVA_XL_SSH": " root@100.64.0.1 "}).xl_ssh_target == "root@100.64.0.1"
+
+
+# ---- 실보드 픽스처: RPi4 rev 1.4, Xen 4.21.1-pre, dom0 Linux 6.18 (tests/fixtures/rpi4-xen-4.21, 2026-10-20 수집) ----
+
+BOARD = Path(__file__).parent / "fixtures" / "rpi4-xen-4.21"
+DEBIAN_DEV = UUID("4be41d5f-b8ef-408b-9709-7fe5ac11231f")
+ZEPHYR_A = UUID("0d950ea2-cc99-49df-9b60-a4ddf2c8e137")
+ZEPHYR_B = UUID("cd35a7fc-5f14-456a-a129-f0afc7d91d97")
+
+
+def _board_text(name: str) -> str:
+    return (BOARD / name).read_text(encoding="utf-8")
+
+
+def _board_runner(list_file: str = "xl-list.txt") -> FakeRunner:
+    return FakeRunner(
+        {
+            ("xl", "list"): _board_text(list_file),
+            ("xl", "list", "-l"): _board_text("xl-list-l.json"),
+            ("xl", "info"): _board_text("xl-info.txt"),
+        }
+    )
+
+
+def test_board_xen_driver_lists_guests_and_skips_dom0_without_uuid():
+    """실보드의 `xl list -l` 에서 Domain-0 은 c_info 에 uuid 가 없다. 목록은 그래도 게스트 셋만 UUID 로 낸다."""
+    driver = XenDriver(Xl(_board_runner()))
+    assert [(d.name, d.domid, d.vm_id, d.state, d.vcpus, d.memory_mib) for d in driver.list_domains()] == [
+        ("debian-dev", 1, DEBIAN_DEV, VmState.running, 1, 512),
+        ("zephyr-drive-a", 2, ZEPHYR_A, VmState.running, 1, 16),
+        ("zephyr-drive-b", 3, ZEPHYR_B, VmState.running, 1, 16),
+    ]
+    info = driver.host_info()
+    assert (info.total_memory_mib, info.free_memory_mib, info.nr_cpus) == (8052, 6347, 4)
+
+
+def test_board_xl_list_v_uuid_column_matches_list_l():
+    """`xl list -v` 의 UUID 열과 `xl list -l` 의 c_info.uuid 는 같다. 헤더에 탭·공백이 섞여도 split 으로 읽힌다."""
+    lines = _board_text("xl-list-v.txt").splitlines()[1:]
+    verbose = {int(parts[1]): parts[6] for parts in (line.split() for line in lines)}
+    assert verbose[0] == "00000000-0000-0000-0000-000000000000"
+    for entry in parse_xl_list_long(_board_text("xl-list-l.json")):
+        c_info = entry["config"]["c_info"]
+        if entry["domid"] == 0:
+            assert "uuid" not in c_info
+        else:
+            assert c_info["uuid"] == verbose[entry["domid"]]
+    assert [r.flags for r in parse_xl_list(_board_text("xl-list-v.txt"))] == ["r-----", "-b----", "-b----", "-b----"]
+
+
+def test_board_paused_guest_is_paused_over_http():
+    """`xl pause` 한 유휴 게스트는 `-bp---` 다. b 가 같이 서도 paused 로 내고 나머지는 running 그대로다."""
+    driver = XenDriver(Xl(_board_runner("xl-list-paused.txt")))
+    client = TestClient(create_app(Settings(driver="xen"), driver=driver, provisioner=MockProvisioner()))
+    assert {vm["vm_id"]: vm["state"] for vm in client.get("/api/v1/vms").json()} == {
+        str(DEBIAN_DEV): "running",
+        str(ZEPHYR_A): "running",
+        str(ZEPHYR_B): "paused",
+    }
