@@ -41,6 +41,9 @@ TICK_S = 0.005
 # 기본 시계. 단조 증가하고 해상도가 높다 (Linux CLOCK_MONOTONIC). Windows 의 time.monotonic 은 15.6 ms 단위라 쓰지 않는다
 QUEUE_MAX = 1024
 MESSAGE_BOARD = "message-board"
+# MQTT-13 운영자 콘솔 재개 (백엔드가 POST /api/v1/drive/resume 을 받아 발행, 계약 v1.2). xenova_mqtt.topics 에 아직 빌더가 없다
+CONSOLE_RESUME = f"{topics.PREFIX}/console/resume"
+RESUME_REQUESTED = "drive.resume.requested"
 
 
 def _generation(payload: Any) -> int | None:
@@ -79,6 +82,7 @@ class GatewayRunner:
         for app in DRIVE_APPS:
             self._client.subscribe(topics.app_events(app), self._enqueue, qos=0)
         self._client.subscribe(topics.app_events(MESSAGE_BOARD), self._enqueue, qos=1)
+        self._client.subscribe(CONSOLE_RESUME, self._enqueue, qos=1)
         self._client.subscribe(topics.vehicle_control(), qos=1)
 
     def _enqueue(self, message: Any) -> None:
@@ -100,9 +104,12 @@ class GatewayRunner:
                     log.warning("버림 %s drive.command: payload 형식 %s", app_id, message.payload)
             elif message.type == "app.heartbeat":
                 machine.on_heartbeat(app_id, vm_id, message.payload, t)
-        elif app_id == MESSAGE_BOARD and message.type == "drive.resume.requested":
-            log.info("재개 요청 수신 requested_by=%s", message.payload.get("requested_by"))
-            machine.on_resume(t)
+        elif message.type == RESUME_REQUESTED and (app_id == MESSAGE_BOARD or message.topic == CONSOLE_RESUME):
+            # 메시지 보드(MQTT-06)와 운영자 콘솔(MQTT-13) 어느 쪽에서 와도 같다
+            requested_by = message.payload.get("requested_by")
+            requested_by = requested_by if isinstance(requested_by, str) else None
+            log.info("재개 요청 수신 %s requested_by=%s", message.topic, requested_by)
+            machine.on_resume(t, requested_by)
 
     def _drain(self, first: tuple[float, Any] | None = None) -> None:
         item = first
