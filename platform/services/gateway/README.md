@@ -2,12 +2,12 @@
 
 dom0에서 도는 별도 프로세스입니다. 주행 앱의 `drive.command` 신선도로 제어권(AUTO·MANUAL·AUTO_READY·SAFE_STOP)을 판정하고,
 **활성 앱의 현재 세대 명령만** ESP32로 보냅니다 (S15P31E110-98).
-규칙은 [MQTT 메시지 계약 v1](../../../docs/contracts/mqtt-contract-v1.md) 5·6장과 [RC카 시나리오](../../../docs/scenario-rc-car.md) 4장·§8 결정(D1·D5·D8)을 따릅니다.
+규칙은 [MQTT 메시지 계약 v1](../../../docs/contracts/mqtt-contract-v1.md) v1.2 5·6장과 [RC카 시나리오](../../../docs/scenario-rc-car.md) 4장·§8 결정(D1·D5·D8)을 따릅니다.
 
 | 하는 것 | 하지 않는 것 |
 | --- | --- |
 | 활성 앱 명령 100 ms 끊김 → 전환, `generation` 지정 | VM 재시작 (복구 서비스) |
-| `vehicle/control`(retained), `drive.mode.changed`, `drive.fault.detected` 발행 | 인지 끊김 시 정지 (자율주행 앱, D5) |
+| `vehicle/control`(retained), `drive.mode.changed`, `drive.fault.detected`, `drive.resume.accepted`·`cancelled` 발행 | 인지 끊김 시 정지 (자율주행 앱, D5) |
 | 계약 5.5 수용 규칙 적용 후 시리얼 프레임 전달, `SAFE_STOP` 중 정지 프레임 | 최종 정지 (ESP32 와치독 300 ms) |
 
 ## 토픽
@@ -16,10 +16,11 @@ dom0에서 도는 별도 프로세스입니다. 주행 앱의 `drive.command` �
 | --- | --- | --- | --- |
 | 구독 | `xenova/v1/apps/{autonomous,manual}/events` | `drive.command` | 신선도 판정, 활성 앱이면 전달 |
 | 구독 | `xenova/v1/apps/{autonomous,manual}/events` | `app.heartbeat` | `AUTO_READY` 조건 (D8). 전환 판정에는 쓰지 않는다 |
-| 구독 | `xenova/v1/apps/message-board/events` | `drive.resume.requested` | `AUTO_READY` → `AUTO` |
+| 구독 | `xenova/v1/apps/message-board/events` | `drive.resume.requested` | 재개 요청 (메시지 보드 VM, MQTT-06). QoS 1 |
+| 구독 | `xenova/v1/console/resume` | `drive.resume.requested` | 재개 요청 (운영자 콘솔 → 백엔드 발행, MQTT-13). QoS 1. 위와 똑같이 처리 |
 | 구독 | `xenova/v1/vehicle/control` | `vehicle.control` | 시작할 때 이전 세대 읽기만 (재시작해도 세대를 되돌리지 않는다) |
 | 발행 | `xenova/v1/vehicle/control` | `vehicle.control` | QoS 1 retained. 시작·전환마다 |
-| 발행 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed`, `drive.fault.detected` | QoS 1 |
+| 발행 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed`, `drive.fault.detected`, `drive.resume.accepted`, `drive.resume.cancelled` | QoS 1 |
 
 봉투·QoS·재연결은 [xenova_mqtt](../vm-agent/mqtt-client/README.md)가 맡습니다. 발행자는 `source_id: dom0-gateway`, 브로커 계정은 `gateway`입니다.
 
@@ -33,7 +34,7 @@ dom0에서 도는 별도 프로세스입니다. 주행 앱의 `drive.command` �
 | `MANUAL` | 자율 명령 3 s 연속 신선 + 자율 `app.heartbeat` 3 s 안 + `state != error` | `AUTO_READY` | `autonomous_ready` * |
 | `MANUAL`·`AUTO_READY` | 수동 명령 100 ms 끊김 | `SAFE_STOP` | `no_fresh_standby` |
 | `AUTO_READY` | 위 `AUTO_READY` 조건이 깨짐 | `MANUAL` | `autonomous_lost` * |
-| `AUTO_READY` | `drive.resume.requested` | `AUTO` | `resume_requested` |
+| `AUTO_READY` | `drive.resume.requested` 수락 후 3초, 그때도 `AUTO_READY` 조건 충족 | `AUTO` | `resume_requested` |
 | `SAFE_STOP` | 수동 명령 신선 | `MANUAL` | `manual_fresh` * |
 
 \* 계약 5.4의 `reason` 목록에 없어 새로 둔 값입니다 (계약 v1.1 반영 요청).
@@ -46,6 +47,21 @@ dom0에서 도는 별도 프로세스입니다. 주행 앱의 `drive.command` �
 - `AUTO`는 시작이나 재개로만 들어갑니다. `MANUAL`이 끊기면 자율이 신선해도 `SAFE_STOP`입니다.
 - `drive.fault.detected`는 한 번이라도 명령을 낸 주행 앱이 끊길 때(활성·대기 모두) 한 번 냅니다. 명령이 다시 오면 다시 낼 수 있습니다.
 - `drive.resume.requested`는 `AUTO_READY`에서만 받고, 다른 모드에서는 이벤트 없이 무시합니다.
+
+### 재개 3초 카운트다운 (계약 v1.2 6장)
+
+```text
+AUTO_READY ──재개 요청──▶ drive.resume.accepted {switch_in_ms: 3000, generation, requested_by}
+              │            (모드 AUTO_READY 유지, 수동이 계속 제어. 화면이 3·2·1 을 센다)
+              ├─ 3초 뒤 조건 여전히 충족 ─▶ AUTO, 세대 +1, drive.mode.changed reason resume_requested
+              └─ 그 사이 AUTO_READY 를 벗어남 ─▶ drive.resume.cancelled {reason, generation} → MANUAL 또는 SAFE_STOP
+```
+
+- 받는 조건: 모드 `AUTO_READY` 이고 카운트다운 중이 아님. 카운트다운 중 재요청, 같은 판정 주기의 두 번째 요청은 무시합니다 (이벤트 없음, `MEASURE event=resume_ignored`).
+- 3초는 수락한 판정 시각(게이트웨이 단조 시계)부터 셉니다. 3초째 판정 주기에서 전환하므로 늦어도 판정 주기(5 ms) 안팎입니다.
+- `cancelled.reason`은 그 전환의 `reason` 그대로입니다. 자율 명령·heartbeat 가 끊기면 `autonomous_lost` (→ `MANUAL`), 수동 명령이 끊기면 `no_fresh_standby` (→ `SAFE_STOP`).
+- `accepted`·`cancelled`의 `generation`은 수락 때의 세대(`AUTO_READY` 세대)입니다. `cancelled`는 그 전환의 `vehicle/control`·`drive.mode.changed`보다 먼저 냅니다 (`SAFE_STOP`이면 정지 프레임이 맨 앞).
+- `requested_by`는 요청 payload 의 문자열 그대로, 없으면 `null`.
 
 ## 실행
 
@@ -68,7 +84,7 @@ python3 -m xenova_gateway --sink serial --serial-port /dev/ttyUSB0
 | `--retained-wait-s` | `XENOVA_GATEWAY_RETAINED_WAIT_S` | `1.0` | 시작 시 이전 `vehicle/control` 을 기다리는 시간 |
 | `--log-level` | `XENOVA_GATEWAY_LOG_LEVEL` | `INFO` | |
 
-판정 시간(100 ms·3 s·3 s·20 ms)은 계약값이라 인자로 바꾸지 않습니다 (`xenova_gateway/machine.py` `Timing`).
+판정 시간(100 ms·3 s·3 s·20 ms, 재개 카운트다운 3 s)은 계약값이라 인자로 바꾸지 않습니다 (`xenova_gateway/machine.py` `Timing`).
 
 ### 측정 로그
 
@@ -120,18 +136,18 @@ python tools/measure_failover.py --port 18832 --runs 10
 | 도구 | 하는 일 |
 | --- | --- |
 | `tools/mock_drive_app.py` | 주행 앱 목. `vehicle/control` 세대로 `drive.command` 50 Hz + `app.heartbeat` 1초 |
-| `tools/send_resume.py` | 메시지 보드 목. `drive.resume.requested` 한 번 |
-| `tools/measure_failover.py` | 위 둘과 게이트웨이·수동 앱을 띄워 AUTO→MANUAL→AUTO_READY→AUTO 를 N회, 끝에 SAFE_STOP 을 잰다 |
+| `tools/send_resume.py` | 재개 요청 목. `drive.resume.requested` 한 번. 기본은 메시지 보드 경로, `--console` 이면 `xenova/v1/console/resume` (계정 `backend`, `source_id: dom0-server`) |
+| `tools/measure_failover.py` | 위 둘과 게이트웨이·수동 앱을 띄워 AUTO→MANUAL→AUTO_READY→(재개 3초)→AUTO 를 N회, 끝에 SAFE_STOP 을 잰다 |
 
 ## 검증 현황 (2026-10-21, 개발 PC Windows + Docker mosquitto 2.0.21, 목 싱크)
 
 | 항목 | 결과 |
 | --- | --- |
-| 단위 시험 | 44개 통과 |
+| 단위 시험 | 53개 통과 (v1.2 재개 카운트다운 포함) |
 | AUTO→MANUAL 판정 (마지막 자율 명령 → 판정), 10회 | p50 105.2 ms, max 111.0 ms |
 | 마지막 자율 명령 → 첫 수동 프레임 전달, 10회 | p50 129.1 ms, max 135.2 ms (브로커 `set_tcp_nodelay true`) |
 | 같은 측정, 브로커 기본 설정 | p50 150.8 ms, max 161.4 ms — 아래 참고 |
-| 자율 첫 명령 → AUTO_READY, 10회 | 3.001~3.002 s, 재개 후 AUTO 세대 +1 |
+| 자율 첫 명령 → AUTO_READY, 10회 | 3.001~3.002 s, 재개 후 AUTO 세대 +1 (v1.2 카운트다운 이전 측정) |
 | 두 앱 종료 → SAFE_STOP | 판정 109.4 ms, 정지 프레임 49 Hz |
 
 - **브로커 `set_tcp_nodelay true`가 필요합니다.** 기본값(Nagle 켜짐)이면 브로커 → 게이트웨이 소켓에서 작은 메시지가 ACK를 기다리며 묶여, 전환 뒤 첫 수동 명령이 약 40 ms 늦게 옵니다 (브로커 단방향 지연 자체는 1.3 ms). dom0 브로커 설정(`platform/deploy/mosquitto/etc/mosquitto.conf`)에 넣어야 합니다.
