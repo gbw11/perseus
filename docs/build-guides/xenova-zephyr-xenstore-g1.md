@@ -222,6 +222,8 @@ python3 -B "$LAB_TOOL" --platform-dir "$PLATFORM_DIR" --log-directory "$G1_LOGS"
 rc=$?; echo "signal rc=$rc"; [ "$rc" -eq 0 ] || exit 1
 ```
 
+signal의 written 출력은 dom0 쓰기 요청의 성공이다. guest가 알림을 처리한 직후
+전용 노드를 지울 수 있으므로 쓰기 뒤 그 노드를 다시 읽어 성공 여부를 판정하지 않는다.
 guest watch-reread에서 실제 알림 수와 value=dom0-1을 확인한다.
 변경하지 않는 별도 실행에서는 60초 timeout이 나야 한다. 초기 이벤트만으로 변경 성공을
 판정하지 않는다. 등록과 초기 조회 사이 변화는 초기 재읽기로 포착한다.
