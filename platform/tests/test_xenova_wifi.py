@@ -31,6 +31,7 @@ class WifiTest(unittest.TestCase):
         self.assertEqual(path.read_text(),wifi.settings('Synthetic " lab','fixture-password','KR'))
         self.assertIn('\ndisable_scan_offload=1\n',path.read_text())
         self.assertIn('Type=wlan',(self.root/'etc/systemd/network/25-xenova-wifi.network').read_text())
+        self.assertIn('RequiredForOnline=routable',(self.root/'etc/systemd/network/25-xenova-wifi.network').read_text())
         self.assertNotIn('xenbr0',(self.root/'etc/systemd/network/25-xenova-wifi.network').read_text())
 
     def test_invalid_input_rejected_before_existing_configuration_changes(self):
