@@ -15,7 +15,10 @@ public enum EventType {
     RECOVERY_FAILED("recovery.failed"),
     DEMO_COMMAND_SENT("demo.command.sent"),
     DEMO_COMMAND_COMPLETED("demo.command.completed"),
-    DEMO_COMMAND_FAILED("demo.command.failed");
+    DEMO_COMMAND_FAILED("demo.command.failed"),
+    // MQTT contract §6: recorded by the drive relay (S15P31E110-154) from the gateway's app events.
+    DRIVE_MODE_CHANGED("drive.mode.changed"),
+    DRIVE_FAULT_DETECTED("drive.fault.detected");
 
     private final String value;
 

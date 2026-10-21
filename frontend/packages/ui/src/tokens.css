@@ -1,0 +1,83 @@
+/* Xenova 디자인 토큰. 관리 콘솔(밝은 테마)과 모니터 화면(어두운 테마)이 같은 이름을 쓴다. */
+:root {
+  --x-font: 'Pretendard', 'Noto Sans KR', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --x-font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+  --x-space-1: 4px;
+  --x-space-2: 8px;
+  --x-space-3: 12px;
+  --x-space-4: 16px;
+  --x-space-5: 24px;
+  --x-space-6: 32px;
+  --x-radius: 10px;
+  --x-radius-sm: 6px;
+
+  --x-text-xs: 12px;
+  --x-text-sm: 14px;
+  --x-text-md: 16px;
+  --x-text-lg: 20px;
+  --x-text-xl: 28px;
+  --x-text-2xl: 40px;
+
+  /* 밝은 테마 (관리 콘솔) */
+  --x-bg: #f5f6f8;
+  --x-surface: #ffffff;
+  --x-surface-2: #eef0f3;
+  --x-border: #dde1e6;
+  --x-text: #17191c;
+  --x-text-muted: #5d6570;
+  --x-primary: #2f6fed;
+  --x-primary-text: #ffffff;
+  --x-shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 12px rgb(0 0 0 / 6%);
+
+  /* 상태 (RC카 시나리오 §4.3: 정상·장애·복구 중·정지) */
+  --x-ok: #1f9d55;
+  --x-fault: #d64545;
+  --x-recovering: #d99a1e;
+  --x-stopped: #8a929c;
+  --x-ok-soft: #e3f6ea;
+  --x-fault-soft: #fde8e8;
+  --x-recovering-soft: #fdf3dc;
+  --x-stopped-soft: #eef0f2;
+
+  /* 앱 역할 (MQTT 계약 §4 app_id) */
+  --x-app-autonomous: #2f6fed;
+  --x-app-manual: #8a4ddb;
+  --x-app-interaction: #0e9f9a;
+
+  /* 게스트 (VM 관리 API 계약 §2.3 템플릿) */
+  --x-guest-debian: #c7254e;
+  --x-guest-ubuntu: #e95420;
+  --x-guest-zephyr: #6e4bc2;
+}
+
+/* 어두운 테마 (모니터 화면·키오스크) */
+[data-theme='dark'] {
+  --x-bg: #0e1116;
+  --x-surface: #171b22;
+  --x-surface-2: #1f252e;
+  --x-border: #2b333e;
+  --x-text: #e9edf2;
+  --x-text-muted: #9aa5b1;
+  --x-primary: #5b8cff;
+  --x-shadow: 0 1px 2px rgb(0 0 0 / 40%);
+  --x-ok-soft: #12321f;
+  --x-fault-soft: #3a1717;
+  --x-recovering-soft: #3a2c0f;
+  --x-stopped-soft: #23282f;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--x-bg);
+  color: var(--x-text);
+  font-family: var(--x-font);
+  font-size: var(--x-text-md);
+  -webkit-font-smoothing: antialiased;
+}

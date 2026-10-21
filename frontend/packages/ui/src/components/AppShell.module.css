@@ -1,0 +1,39 @@
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-5);
+  padding: 0 var(--x-space-5);
+  height: 56px;
+  background: var(--x-surface);
+  border-bottom: 1px solid var(--x-border);
+}
+.brand {
+  font-weight: 800;
+  font-size: var(--x-text-lg);
+}
+.nav {
+  display: flex;
+  gap: var(--x-space-4);
+  flex: 1;
+}
+.nav a {
+  color: var(--x-text-muted);
+  text-decoration: none;
+  font-weight: 600;
+}
+.nav a[aria-current='page'] {
+  color: var(--x-primary);
+}
+.actions {
+  display: flex;
+  gap: var(--x-space-2);
+}
+.main {
+  flex: 1;
+  padding: var(--x-space-5);
+}

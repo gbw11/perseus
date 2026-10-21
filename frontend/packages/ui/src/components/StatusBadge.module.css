@@ -1,0 +1,63 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sm {
+  padding: 2px 8px;
+  font-size: var(--x-text-xs);
+}
+.md {
+  padding: 4px 10px;
+  font-size: var(--x-text-sm);
+}
+.lg {
+  padding: 6px 14px;
+  font-size: var(--x-text-lg);
+}
+.dot {
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: currentColor;
+}
+.ok {
+  color: var(--x-ok);
+  background: var(--x-ok-soft);
+}
+.fault {
+  color: var(--x-fault);
+  background: var(--x-fault-soft);
+}
+.fault .dot {
+  animation: blink 0.8s steps(2, start) infinite;
+}
+.recovering {
+  color: var(--x-recovering);
+  background: var(--x-recovering-soft);
+}
+.recovering .dot {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.stopped {
+  color: var(--x-stopped);
+  background: var(--x-stopped-soft);
+}
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none !important;
+  }
+}
