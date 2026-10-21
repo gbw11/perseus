@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConsoleTransport, consoleCloseMessage } from './console';
+import { ConsoleTransport, consoleCloseMessage, NO_RETRY_CODES } from './console';
 
 const auth = vi.hoisted(() => ({ getSession: vi.fn(), refreshSession: vi.fn() }));
 vi.mock('./client', () => auth);
@@ -95,7 +95,8 @@ describe('console transport', () => {
     await transport.connect();
     const ws = FakeSocket.instances[0]!;
     ws.onclose?.({ code: 4409 });
-    expect(callbacks.state).toHaveBeenLastCalledWith('error', consoleCloseMessage(4409));
+    expect(callbacks.state).toHaveBeenLastCalledWith('error', consoleCloseMessage(4409), 4409);
+    expect(NO_RETRY_CODES).toContain(4409); // 화면도 다시 붙지 않는다
     expect(transport.send('old input')).toBe(false);
     expect(FakeSocket.instances).toHaveLength(1);
     transport.dispose();
@@ -115,7 +116,7 @@ describe('console transport', () => {
     expect(FakeSocket.instances).toHaveLength(1);
     expect(ws.close).not.toHaveBeenCalled();
     ws.onclose?.({ code: 1000 }); // Server closes only after releasing PTY and VM lease.
-    expect(callbacks.state).toHaveBeenLastCalledWith('disconnected', expect.any(String));
+    expect(callbacks.state).toHaveBeenLastCalledWith('disconnected', expect.any(String), 1000);
     await transport.connect();
     expect(FakeSocket.instances).toHaveLength(2);
     transport.dispose();

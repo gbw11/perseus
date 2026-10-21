@@ -3,13 +3,15 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { Button, Card } from '@xenova/ui';
 import { useEffect, useRef, useState } from 'react';
-import { ConsoleTransport, type ConsoleState } from '../api/console';
+import { ConsoleTransport, NO_RETRY_CODES, type ConsoleState } from '../api/console';
 import type { Vm } from '../api/types';
 import styles from './ConsolePanel.module.css';
 
 /** 끊기면 다시 붙는 간격. 연속으로 실패하면 늘린다 (입력은 다시 보내지 않는다) */
 const RETRY_MS = 2000;
 const MAX_RETRY_MS = 10000;
+/** 연속 실패가 이만큼이면 멈추고 [다시 연결] 을 보인다 */
+const MAX_RETRIES = 5;
 
 const LABEL: Record<ConsoleState, string> = {
   idle: '연결 대기',
@@ -21,13 +23,16 @@ const LABEL: Record<ConsoleState, string> = {
 };
 
 /**
- * 화면을 열면 바로 연결하고, 끊기면 2초 뒤(실패가 이어지면 최대 10초) 저절로 다시 붙는다.
- * 끊긴 동안 친 키는 버린다 — 다시 붙어도 명령을 재전송하지 않는다. VM 이 꺼져 있으면 기다렸다가 켜지면 붙는다.
+ * 화면을 열면 바로 연결하고, 네트워크·서버 문제로 끊기면 2초 뒤(이어지면 최대 10초, 5번까지) 저절로 다시 붙는다.
+ * 다른 사람이 쓰는 중(4409)·인증 만료(4401)·VM 없음(4404) 등 다시 붙어도 같은 결과면 멈추고 안내 + [다시 연결].
+ * 화면을 떠나거나 VM 을 바꾸거나 탭을 숨기면 disconnect 를 보내 점유(VM 당 세션 1개)를 바로 푼다.
+ * 끊긴 동안 친 키는 버린다 — 다시 붙어도 명령을 재전송하지 않는다.
  */
 export function ConsolePanel({ vm }: { vm: Vm }) {
   const host = useRef<HTMLDivElement>(null);
   const transport = useRef<ConsoleTransport | null>(null);
   const terminal = useRef<Terminal | null>(null);
+  const [gaveUp, setGaveUp] = useState(false);
   const [status, setStatus] = useState<{ state: ConsoleState; message: string }>({
     state: 'connecting',
     message: '콘솔에 연결하는 중…',
@@ -65,19 +70,32 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
     let disposed = false;
     let retry: number | undefined;
     let delay = RETRY_MS;
+    let failures = 0;
+    /** 우리가 끊은 것(탭 숨김) — 서버가 정리를 끝내고 닫으면(disconnected) 다시 보일 때 붙는다 */
+    let paused = false;
     const connection = new ConsoleTransport(vm.vm_id, {
-      state: (state, message) => {
+      state: (state, message, code) => {
         if (disposed) return;
         term.options.disableStdin = state !== 'connected';
-        if ((state === 'disconnected' || state === 'error') && availableRef.current) {
+        const ended = state === 'disconnected' || state === 'error';
+        if (ended && paused) {
+          setStatus({ state, message: '탭이 숨겨져 연결을 쉬는 중입니다. 다시 보이면 연결합니다.' });
+          return;
+        }
+        const retryable = code === undefined || !NO_RETRY_CODES.includes(code);
+        if (ended && availableRef.current && retryable && failures < MAX_RETRIES) {
           window.clearTimeout(retry);
           retry = window.setTimeout(() => void connection.connect(), delay);
           setStatus({ state, message: `${message} ${delay / 1000}초 뒤 다시 연결합니다.` });
+          failures += 1;
           delay = Math.min(delay * 2, MAX_RETRY_MS);
           return;
         }
+        if (ended && availableRef.current) setGaveUp(true);
         setStatus({ state, message });
         if (state === 'connected') {
+          failures = 0;
+          setGaveUp(false);
           delay = RETRY_MS;
           term.focus();
           if (vm.guest_kind === 'linux') connection.send('\r');
@@ -102,6 +120,20 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
     });
     transport.current = connection;
     if (availableRef.current) void connection.connect();
+    // 탭을 숨기면 점유를 풀고, 다시 보이면 붙는다
+    const onVisibility = () => {
+      if (document.hidden) {
+        paused = true;
+        window.clearTimeout(retry);
+        connection.disconnect();
+      } else if (paused) {
+        paused = false;
+        failures = 0;
+        delay = RETRY_MS;
+        if (availableRef.current) void connection.connect();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     const input = term.onData((data) => connection.send(data));
     const binary = term.onBinary((data) =>
       connection.sendBytes(Uint8Array.from(data, (char) => char.charCodeAt(0) & 255)),
@@ -115,6 +147,8 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
     return () => {
       disposed = true;
       window.clearTimeout(retry);
+      document.removeEventListener('visibilitychange', onVisibility);
+      connection.disconnect(); // 화면을 떠나거나 VM 을 바꾸면 disconnect 프레임으로 점유를 바로 푼다
       connection.dispose();
       observer.disconnect();
       input.dispose();
@@ -142,6 +176,17 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
             </span>
           </div>
           <div className={styles.actions}>
+            {gaveUp && available && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setGaveUp(false);
+                  void transport.current?.connect();
+                }}
+              >
+                다시 연결
+              </Button>
+            )}
             <Button size="sm" variant="ghost" onClick={() => terminal.current?.clear()}>
               화면 지우기
             </Button>
