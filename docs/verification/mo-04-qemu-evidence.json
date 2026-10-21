@@ -1,0 +1,630 @@
+{
+  "verified_date": "2026-10-21",
+  "scope": "isolated QEMU; Spring public WS -> real Xen guest",
+  "status": "PASS",
+  "acceptance": {
+    "scope": "isolated QEMU; Spring public WS -> real Xen guest",
+    "started_unix": 1792552449.7070506,
+    "cases": [
+      {
+        "name": "AUTH-01 invalid / missing / silent authentication",
+        "status": "PASS",
+        "evidence": {
+          "invalid-token": 4401,
+          "binary-before-auth": 4401,
+          "silent-auth-timeout": 4401,
+          "cleanup": {
+            "cleanup_seconds": 1.615,
+            "snapshot": {
+              "guests": {
+                "Domain-0": {
+                  "domid": 0,
+                  "uuid": null
+                },
+                "zephyr-dev": {
+                  "domid": 7,
+                  "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+                },
+                "zephyr-backup": {
+                  "domid": 8,
+                  "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+                },
+                "debian-dev": {
+                  "domid": 12,
+                  "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+                }
+              },
+              "console_processes": [],
+              "servers": [
+                {
+                  "pid": 12345,
+                  "fd_count": 9
+                }
+              ]
+            }
+          }
+        },
+        "seconds": 11.718
+      },
+      {
+        "name": "AUTH-02 invalid / dom0 / unknown VM target",
+        "status": "PASS",
+        "evidence": {
+          "not-a-uuid": 4400,
+          "00000000-0000-0000-0000-000000000000": 4400,
+          "00000000-0000-4000-8000-000000000042": 4404,
+          "cleanup": {
+            "cleanup_seconds": 1.733,
+            "snapshot": {
+              "guests": {
+                "Domain-0": {
+                  "domid": 0,
+                  "uuid": null
+                },
+                "zephyr-dev": {
+                  "domid": 7,
+                  "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+                },
+                "zephyr-backup": {
+                  "domid": 8,
+                  "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+                },
+                "debian-dev": {
+                  "domid": 12,
+                  "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+                }
+              },
+              "console_processes": [],
+              "servers": [
+                {
+                  "pid": 12345,
+                  "fd_count": 9
+                }
+              ]
+            }
+          }
+        },
+        "seconds": 1.866
+      },
+      {
+        "name": "IO-01 Debian IO + three VM separation + duplicate rejection",
+        "status": "PASS",
+        "evidence": {
+          "native_console_processes": [
+            {
+              "pid": 12430,
+              "argv": [
+                "/usr/lib/xen-4.20/bin/xenconsole",
+                "12",
+                "--num",
+                "0",
+                "--type",
+                "pv"
+              ]
+            },
+            {
+              "pid": 12446,
+              "argv": [
+                "/usr/lib/xen-4.20/bin/xenconsole",
+                "7",
+                "--num",
+                "0",
+                "--type",
+                "pv"
+              ]
+            },
+            {
+              "pid": 12453,
+              "argv": [
+                "/usr/lib/xen-4.20/bin/xenconsole",
+                "8",
+                "--num",
+                "0",
+                "--type",
+                "pv"
+              ]
+            }
+          ],
+          "debian_output": "printf '%s_%s\\n' MO04 ISOLATION_6dff9b8e8bd3; hostname; tty\r\n\u001b[?2004l\rMO04_ISOLATION_6dff9b8e8bd3\r\ndebian-dev\r\n/dev/hvc0\r\n\u001b[?2004hroot@debian-dev:~# ",
+          "zephyr_input": "NOT_VERIFIED: starter has no input handler",
+          "cleanup": {
+            "cleanup_seconds": 1.721,
+            "snapshot": {
+              "guests": {
+                "Domain-0": {
+                  "domid": 0,
+                  "uuid": null
+                },
+                "zephyr-dev": {
+                  "domid": 7,
+                  "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+                },
+                "zephyr-backup": {
+                  "domid": 8,
+                  "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+                },
+                "debian-dev": {
+                  "domid": 12,
+                  "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+                }
+              },
+              "console_processes": [],
+              "servers": [
+                {
+                  "pid": 12345,
+                  "fd_count": 10
+                }
+              ]
+            }
+          }
+        },
+        "seconds": 14.092
+      },
+      {
+        "name": "AUTH-03 revoked JWT input and reconnect denial",
+        "status": "PASS",
+        "evidence": {
+          "revoked_input_close": 4401,
+          "reconnect_with_revoked_token": "denied",
+          "cleanup": {
+            "cleanup_seconds": 1.71,
+            "snapshot": {
+              "guests": {
+                "Domain-0": {
+                  "domid": 0,
+                  "uuid": null
+                },
+                "zephyr-dev": {
+                  "domid": 7,
+                  "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+                },
+                "zephyr-backup": {
+                  "domid": 8,
+                  "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+                },
+                "debian-dev": {
+                  "domid": 12,
+                  "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+                }
+              },
+              "console_processes": [],
+              "servers": [
+                {
+                  "pid": 12345,
+                  "fd_count": 9
+                }
+              ]
+            }
+          }
+        },
+        "seconds": 3.365
+      },
+      {
+        "name": "AUTH-04 real signed short-lived JWT idle expiry",
+        "status": "PASS",
+        "evidence": {
+          "idle_expiry_close": 4401,
+          "elapsed_seconds": 4.609,
+          "cleanup": {
+            "cleanup_seconds": 1.653,
+            "snapshot": {
+              "guests": {
+                "Domain-0": {
+                  "domid": 0,
+                  "uuid": null
+                },
+                "zephyr-dev": {
+                  "domid": 7,
+                  "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+                },
+                "zephyr-backup": {
+                  "domid": 8,
+                  "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+                },
+                "debian-dev": {
+                  "domid": 12,
+                  "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+                }
+              },
+              "console_processes": [],
+              "servers": [
+                {
+                  "pid": 12345,
+                  "fd_count": 9
+                }
+              ]
+            }
+          }
+        },
+        "seconds": 6.325
+      },
+      {
+        "name": "LIFE-01 abrupt TCP client disconnect",
+        "status": "PASS",
+        "evidence": {
+          "after_tcp_abort": {
+            "cleanup_seconds": 1.608,
+            "snapshot": {
+              "guests": {
+                "Domain-0": {
+                  "domid": 0,
+                  "uuid": null
+                },
+                "zephyr-dev": {
+                  "domid": 7,
+                  "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+                },
+                "zephyr-backup": {
+                  "domid": 8,
+                  "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+                },
+                "debian-dev": {
+                  "domid": 12,
+                  "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+                }
+              },
+              "console_processes": [],
+              "servers": [
+                {
+                  "pid": 12345,
+                  "fd_count": 9
+                }
+              ]
+            }
+          },
+          "reconnect": "PASS",
+          "final_cleanup": {
+            "cleanup_seconds": 1.564,
+            "snapshot": {
+              "guests": {
+                "Domain-0": {
+                  "domid": 0,
+                  "uuid": null
+                },
+                "zephyr-dev": {
+                  "domid": 7,
+                  "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+                },
+                "zephyr-backup": {
+                  "domid": 8,
+                  "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+                },
+                "debian-dev": {
+                  "domid": 12,
+                  "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+                }
+              },
+              "console_processes": [],
+              "servers": [
+                {
+                  "pid": 12345,
+                  "fd_count": 10
+                }
+              ]
+            }
+          }
+        },
+        "seconds": 6.373
+      },
+      {
+        "name": "LIFE-02 repeated attach/detach resource cleanup",
+        "status": "PASS",
+        "evidence": {
+          "cycles": 12,
+          "server_fds_before": 10,
+          "server_fds_after": 11,
+          "native_console_processes_after": []
+        },
+        "seconds": 42.778
+      },
+      {
+        "name": "LIFE-03 immediate reconnect after acknowledged detach",
+        "status": "PASS",
+        "evidence": {
+          "cycles": 12,
+          "between_connections": "server close acknowledgement only",
+          "cleanup": {
+            "cleanup_seconds": 1.644,
+            "snapshot": {
+              "guests": {
+                "Domain-0": {
+                  "domid": 0,
+                  "uuid": null
+                },
+                "zephyr-dev": {
+                  "domid": 7,
+                  "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+                },
+                "zephyr-backup": {
+                  "domid": 8,
+                  "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+                },
+                "debian-dev": {
+                  "domid": 12,
+                  "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+                }
+              },
+              "console_processes": [],
+              "servers": [
+                {
+                  "pid": 12345,
+                  "fd_count": 10
+                }
+              ]
+            }
+          }
+        },
+        "seconds": 19.967
+      },
+      {
+        "name": "FAULT-01 FastAPI SIGKILL and recovery",
+        "status": "PASS",
+        "evidence": {
+          "close_code": 1011,
+          "cleanup_after_SIGKILL": {
+            "cleanup_seconds": 1.744,
+            "snapshot": {
+              "guests": {
+                "Domain-0": {
+                  "domid": 0,
+                  "uuid": null
+                },
+                "zephyr-dev": {
+                  "domid": 7,
+                  "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+                },
+                "zephyr-backup": {
+                  "domid": 8,
+                  "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+                },
+                "debian-dev": {
+                  "domid": 12,
+                  "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+                }
+              },
+              "console_processes": [],
+              "servers": []
+            }
+          },
+          "restored": "PASS",
+          "guests_unchanged": true
+        },
+        "seconds": 20.446
+      },
+      {
+        "name": "FAULT-02 Spring SIGKILL and recovery",
+        "status": "PASS",
+        "evidence": {
+          "close_code": 1006,
+          "cleanup_after_SIGKILL": {
+            "cleanup_seconds": 1.621,
+            "snapshot": {
+              "guests": {
+                "Domain-0": {
+                  "domid": 0,
+                  "uuid": null
+                },
+                "zephyr-dev": {
+                  "domid": 7,
+                  "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+                },
+                "zephyr-backup": {
+                  "domid": 8,
+                  "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+                },
+                "debian-dev": {
+                  "domid": 12,
+                  "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+                }
+              },
+              "console_processes": [],
+              "servers": [
+                {
+                  "pid": 12982,
+                  "fd_count": 8
+                }
+              ]
+            }
+          },
+          "restored": "PASS",
+          "guests_unchanged": true
+        },
+        "seconds": 20.764
+      },
+      {
+        "name": "FAULT-03 Debian graceful stop + new domid + recovery",
+        "status": "PASS",
+        "evidence": {
+          "old_close_code": 1000,
+          "before": {
+            "Domain-0": {
+              "domid": 0,
+              "uuid": null
+            },
+            "zephyr-dev": {
+              "domid": 7,
+              "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+            },
+            "zephyr-backup": {
+              "domid": 8,
+              "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+            },
+            "debian-dev": {
+              "domid": 12,
+              "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+            }
+          },
+          "after": {
+            "Domain-0": {
+              "domid": 0,
+              "uuid": null
+            },
+            "zephyr-dev": {
+              "domid": 7,
+              "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+            },
+            "zephyr-backup": {
+              "domid": 8,
+              "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+            },
+            "debian-dev": {
+              "domid": 13,
+              "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+            }
+          },
+          "restored_console_output": "printf 'MO04_%s\\n' RESTORED_AFTER_RESTART; hostname; tty\r\n\u001b[?2004l\rMO04_RESTORED_AFTER_RESTART\r\ndebian-dev\r\n/dev/hvc0\r\n\u001b[?2004hroot@debian-dev:~# ",
+          "cleanup": {
+            "cleanup_seconds": 1.823,
+            "snapshot": {
+              "guests": {
+                "Domain-0": {
+                  "domid": 0,
+                  "uuid": null
+                },
+                "zephyr-dev": {
+                  "domid": 7,
+                  "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+                },
+                "zephyr-backup": {
+                  "domid": 8,
+                  "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+                },
+                "debian-dev": {
+                  "domid": 13,
+                  "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+                }
+              },
+              "console_processes": [],
+              "servers": [
+                {
+                  "pid": 12982,
+                  "fd_count": 11
+                }
+              ]
+            }
+          }
+        },
+        "seconds": 76.774
+      }
+    ],
+    "before": {
+      "guests": {
+        "Domain-0": {
+          "domid": 0,
+          "uuid": null
+        },
+        "zephyr-dev": {
+          "domid": 7,
+          "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+        },
+        "zephyr-backup": {
+          "domid": 8,
+          "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+        },
+        "debian-dev": {
+          "domid": 12,
+          "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+        }
+      },
+      "console_processes": [],
+      "servers": [
+        {
+          "pid": 12345,
+          "fd_count": 9
+        }
+      ]
+    },
+    "after": {
+      "guests": {
+        "Domain-0": {
+          "domid": 0,
+          "uuid": null
+        },
+        "zephyr-dev": {
+          "domid": 7,
+          "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+        },
+        "zephyr-backup": {
+          "domid": 8,
+          "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+        },
+        "debian-dev": {
+          "domid": 13,
+          "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+        }
+      },
+      "console_processes": [],
+      "servers": [
+        {
+          "pid": 12982,
+          "fd_count": 9
+        }
+      ]
+    },
+    "status": "PASS"
+  },
+  "browser": {
+    "status": "PASS",
+    "checks": {
+      "FastAPI SIGKILL": "PASS: visible error, no automatic reconnect, explicit reconnect succeeds",
+      "Spring SIGKILL": "PASS: visible error, no automatic reconnect, explicit reconnect succeeds",
+      "final_real_guest_io": "PASS after server failures and guest restart",
+      "spa_navigation": "PASS: release and reconnect",
+      "logout": "PASS: active console unmounted",
+      "login_again": "PASS: reconnect after logout",
+      "page_errors": []
+    }
+  },
+  "after_browser": {
+    "guests": {
+      "Domain-0": {
+        "domid": 0,
+        "uuid": null
+      },
+      "zephyr-dev": {
+        "domid": 7,
+        "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2"
+      },
+      "zephyr-backup": {
+        "domid": 8,
+        "uuid": "820a0522-243f-42f1-90e9-9b74e1522965"
+      },
+      "debian-dev": {
+        "domid": 13,
+        "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6"
+      }
+    },
+    "console_processes": [],
+    "servers": [
+      {
+        "pid": 13616,
+        "fd_count": 9
+      }
+    ]
+  },
+  "regression": {
+    "dom0_manager": {
+      "passed": 156
+    },
+    "frontend": {
+      "passed": 40
+    },
+    "spring_console_integration": {
+      "passed": 8
+    },
+    "admin_console_typecheck_build_and_changed_file_eslint": "PASS",
+    "spring_package": "PASS",
+    "prior_full_spring_run": {
+      "passed": 133,
+      "failed": 2,
+      "total": 135,
+      "note": "Existing VmServiceTest Mockito stubbing failures reproduced at a29618b; full suite not re-run in step 5."
+    }
+  },
+  "not_verified": [
+    "Raspberry Pi hardware",
+    "production HTTPS/WSS",
+    "Zephyr bidirectional shell/input",
+    "driving, mirroring, failover and Jetson mode switching"
+  ]
+}

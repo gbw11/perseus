@@ -1,5 +1,80 @@
 # dom0-manager
 
+## MO-04 단계 3: 내부 WebSocket 프록시
+
+`/api/v1/vms/{vm_id}/console`에서 `ConsoleSession`의 입출력을 WebSocket과 연결합니다.
+인증·메시지·종료 코드·시험 방법은
+[콘솔 WebSocket 계약](../../../docs/contracts/console-websocket-v1.md)에 정의합니다.
+
+- 기본 비활성. Linux dom0에서 `XENOVA_CONSOLE_ENABLED=1`과 `XENOVA_SERVICE_TOKEN`을 설정합니다.
+- `Authorization: Bearer <service-token>`으로 접속하는 내부 게이트웨이용입니다.
+  브라우저 로그인/사용자별 VM 권한 및 xterm.js 연결은 다음 단계에서 구성합니다.
+- UUID → 현재 domid 확인, VM당 한 접속, 양방향 전달, 단절/VM 소멸 시 정리를 구현했습니다.
+- `XENOVA_CONSOLE_LOCK_DIR`은 여러 worker가 공유할 로컬 경로입니다(기본 `/run/xenova/console-locks`).
+- `websockets` 런타임 의존성을 추가했습니다. 기존 HTTP 경로·응답 계약은 동일합니다.
+
+## MO-04 단계 2: Python PV 콘솔 모듈
+
+`dom0_manager/console.py`의 `ConsoleSession`은 Linux dom0에서 PTY를 열고
+`xl console -t pv <guest>`를 실행합니다. 추가 Python 패키지는 필요하지 않습니다.
+단계 3의 WebSocket 라우터에서 이 모듈을 사용합니다.
+
+```python
+from dom0_manager.console import ConsoleSession, ConsoleExited
+
+async def stream_console(verified_domid):
+    async with ConsoleSession(verified_domid) as console:
+        # 실제 게스트 로그인은 사용자 입력으로 진행합니다.
+        await console.write(b"\r")
+        try:
+            while True:
+                data = await console.read(timeout=30)
+                # 다음 단계에서 이 바이트를 WebSocket으로 전달합니다.
+                print(repr(data))
+        except TimeoutError:
+            pass  # 출력이 없는 것만으로 VM 장애를 판정하지 않습니다.
+        except ConsoleExited as exc:
+            print("console ended:", exc.returncode)
+```
+
+- `open()`은 프로세스 생성만 확인합니다. 대상 VM 없음 등의 접속 오류는
+  터미널 출력과 `read()`의 `ConsoleExited.returncode`로 확인합니다.
+- `read()`는 최대 64KiB의 원시 바이트 조각, `write()`는 최대 64KiB의 입력을
+  처리합니다. UTF-8/ANSI 경계가 조각 중간에 올 수 있으므로 조각별로 디코딩하지 않습니다.
+- PTY 로컬 echo/라인 처리를 끄며, 입출력 준비를 이벤트 루프로 기다립니다.
+  읽기 대기 취소와 쓰기 timeout을 지원합니다.
+- `close()`는 Ctrl+]로 접속을 해제합니다. 응답하지 않는 콘솔 프로세스는
+  제한 시간 후 TERM/KILL로 정리하며 VM 종료 명령은 실행하지 않습니다.
+- 같은 세션은 다시 열 수 없습니다. 각 연결에 새 세션을 생성합니다.
+- 인증, VM UUID → 현재 게스트 domid 확인, VM별 접속 충돌 정책은
+  다음 API 연결 단계의 책임입니다. 임의의 클라이언트 문자열을 실행 명령으로 받지 않습니다.
+  `xl_command`는 서버의 신뢰된 실행 파일 인자이며 공개 요청에 노출하면 안 됩니다.
+- dom0 콘솔 접속은 거부합니다. 게스트 로그인 암호는 모듈에 저장하지 않습니다.
+- Linux dom0용입니다. Windows에서는 WSL을 이용해 테스트합니다.
+
+Linux 단위 검증 (저장소의 `platform/services/dom0-manager`에서 실행):
+
+```sh
+python3 -B -m unittest discover -s tests -p test_console.py -v
+```
+
+실제 Xen 검증은 `tests/probe_console_live.py`와 `dom0_manager/console.py`를
+dom0의 같은 임시 디렉터리에 복사한 뒤 실행합니다. 이 검증은 Debian 개발용
+root 콘솔과 `zephyr-dev` / `zephyr-backup` 구성을 전제로 합니다.
+게스트를 재시작하거나 설정을 바꾸지 않습니다.
+
+```sh
+python3 -B probe_console_live.py --execute --domain debian-dev
+```
+
+2026-10-21 QEMU ARM64 Xen에서 Debian `/dev/hvc0` 명령 왕복과 정상 detach,
+없는 게스트의 실패 감지, Zephyr 두 대의 attach/detach를 확인했습니다.
+검증 전후 세 게스트의 domid와 UUID가 동일했습니다.
+Zephyr Starter는 출력 후 대기하며 입력 처리기가 없어 양방향 입출력은 미검증입니다.
+라즈베리파이 실보드 검증은 별도입니다.
+
+## 서비스 개요
+
 dom0에서 도는 Python 제어 서비스입니다. Spring 관리 서버가 호출하는 내부 HTTP API(기본 `127.0.0.1:8081`, 배포는 Tailscale 주소 + Bearer 토큰)를 열고, 드라이버를 통해 VM을 조회·제어합니다. 드라이버는 세 가지입니다: `mock`(인메모리), `xen`(xl 직접 조회, 읽기 전용), `platform`(플랫폼 파트의 관리 라이브러리로 registry + Xen 생명주기).
 
 ```text
