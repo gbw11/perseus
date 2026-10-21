@@ -48,6 +48,9 @@ for unit in installed_units:
 assert 'xenova-xen-ready.service' not in platform['SYSTEMD_SERVICE:xenova-platform'].split()
 assert 'xenova-data-prepare.service' not in platform['SYSTEMD_SERVICE:xenova-platform'].split()
 assert selected(platform, 'first_install_contract.py').resolve() == ROOT / 'platform/first-install/first_install_contract.py'
+assert selected(platform, 'xenova-wifi-modprobe.conf') == LAYER / 'recipes-core/xenova-platform/files/xenova-wifi-modprobe.conf'
+assert '/etc/modprobe.d/xenova-wifi.conf' in platform['FILES:xenova-platform'].split()
+assert '/etc/modprobe.d/xenova-wifi.conf' in platform['CONFFILES:xenova-platform'].split()
 for module in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
     assert selected(platform, module).resolve() == ROOT / 'platform/guests/common' / module
 assert 'installed-vs-shipped' in platform['ERROR_QA'].split()
@@ -55,7 +58,7 @@ for name, value in platform.items():
     if name == 'INSANE_SKIP' or name.startswith('INSANE_SKIP:'):
         assert 'installed-vs-shipped' not in value.split(), f'QA disabled: {name}'
 print('PASS unit ownership: ' + ', '.join(installed_units) + '; static unit not enabled; installed-vs-shipped QA retained')
-required = {'python3-core', 'python3-json', 'python3-ctypes', 'xen-tools-libxenmanage', 'iproute2', 'xen-tools-xl', 'openssh-sshd',
+required = {'kernel-module-brcmfmac', 'kernel-module-brcmfmac-cyw', 'python3-core', 'python3-json', 'python3-ctypes', 'xen-tools-libxenmanage', 'iproute2', 'xen-tools-xl', 'openssh-sshd',
             'util-linux-sfdisk', 'util-linux-partx', 'util-linux-blockdev', 'util-linux-blkid',
             'util-linux-losetup', 'util-linux-mount', 'util-linux-umount', 'util-linux-findmnt',
             'e2fsprogs-e2fsck', 'e2fsprogs-resize2fs', 'e2fsprogs-dumpe2fs', 'e2fsprogs-tune2fs', 'coreutils'}
@@ -71,6 +74,14 @@ assert not {'empty-root-password', 'allow-empty-password', 'debug-tweaks', 'seri
 assert 'usermod -p' in image['EXTRA_USERS_PARAMS'] and 'perseus-dev' in image['EXTRA_USERS_PARAMS']
 assert 'xenova_platform_policy' in image['ROOTFS_POSTPROCESS_COMMAND']
 assert 'xenova-platform' in image['IMAGE_INSTALL'].split()
+assert 'tzdata-asia' in image['IMAGE_INSTALL'].split()
+assert 'xenova_set_timezone' in image['ROOTFS_POSTPROCESS_COMMAND']
+assert re.search(r'^xenova_set_timezone\s*\(\)\s*\{', text, re.M)
+for module in ('xenova_vm.py', 'xenova_runtime.py', 'xenova_wifi.py',
+               'xenova_execution.py', 'xenova_recovery.py', 'xenova_domain_identity.py'):
+    assert 'file://' + module in platform['SRC_URI'].split(), module
+    assert selected(platform, module) == LAYER / 'recipes-core/xenova-platform/files' / module
+print('PASS reviewed runtime source selection and Asia/Seoul image postprocess dependency')
 assert "printf 'uninitialized\\n'" in text and 'ln -snf /etc/machine-id' in text
 assert 'ln -snf /dev/null' in text and 'xendomains.service' in text
 assert 'Include /etc/ssh/xenova-auth.conf' in text

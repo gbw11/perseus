@@ -100,6 +100,8 @@ def inspect(deploy, image, output):
         (output / 'boot.cmd.extracted').write_text(script)
         for marker in ['setenv devnum 0', 'fdt move ${fdtcontroladdr} ${fdt_addr_r}',
                        'fatload mmc ${devnum}:1 ${xen_loadaddr} xen',
+                       'fdt rm /soc/mmcnr@7e300000 dmas || exit 1',
+                       'fdt rm /soc/mmcnr@7e300000 dma-names || exit 1',
                        '0x00200000', '0x00400000', 'booti ${xen_loadaddr} - ${fdt_addr_r}']:
             check(marker in script, 'WIC boot script contains ' + marker)
         check('@@' not in script and 'mmc 1:' not in script, 'WIC boot substitutions are complete')

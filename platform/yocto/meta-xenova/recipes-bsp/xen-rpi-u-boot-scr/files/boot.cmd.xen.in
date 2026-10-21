@@ -21,6 +21,11 @@ fdt move ${fdtcontroladdr} ${fdt_addr_r} || exit 1
 fdt addr ${fdt_addr_r} || exit 1
 fdt resize 0x1000 || exit 1
 
+# Pi 4 Xen dom0의 무선 SDIO DMA 전송 실패를 피해 이 호스트만 PIO로 사용한다.
+# SD 카드 호스트와 DMA 컨트롤러, Control FDT는 그대로 유지한다.
+fdt rm /soc/mmcnr@7e300000 dmas || exit 1
+fdt rm /soc/mmcnr@7e300000 dma-names || exit 1
+
 # Set module load addresses (실보드 검증값 유지).
 setenv xen_loadaddr     "0x00200000"
 setenv kernel_loadaddr  "0x00400000"

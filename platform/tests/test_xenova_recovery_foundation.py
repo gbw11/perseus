@@ -816,7 +816,8 @@ class PackagingAndUnitsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
             self.installed(root)
-            for name in ("xenova_execution.py","xenova_recovery.py","xenova_domain_identity.py"):
+            for name in ("xenova_vm.py","xenova_runtime.py","xenova_wifi.py",
+                         "xenova_execution.py","xenova_recovery.py","xenova_domain_identity.py"):
                 file=root/"usr/lib/xenova"/name
                 self.assertEqual(file.read_bytes(),(FILES/name).read_bytes())
                 self.assertEqual(file.stat().st_mode & 0o777,0o644)
