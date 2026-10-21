@@ -250,3 +250,15 @@ short_lock의 기본은 nonblocking이다. 충돌하면 OPERATION_IN_PROGRESS이
 operation → short lock 순서는 유지한다. 파일 fsync/커널 호출의 hard real-time 보장은 아니다.
 host-init/quiesce/resume의 잠금 경합도 실패로 반환하므로 barrier 게시 여부를 확인하고 재시도한다.
 진행 중 systemctl 종료를 ExecStop 실패로 취소할 수 있다는 뜻은 아니다.
+
+## Xen 종료·정상 reboot의 비원자 관측
+
+종료 중 XenStore 이름이나 libxl 상세 설정이 실제 도메인보다 먼저 사라질 수 있다.
+같은 domid/UUID의 종료 `(null)` 행은 제거 대기이며, 실제 부재 확인을 대신하지 않는다.
+정상 reboot 요청 뒤 이전 domid/UUID의 `(null)`은 이전 상태 flags와 무관하게 기한 안에서 기다린다.
+새 도메인이 실행 가능한 상태가 된 뒤 기존 이름·UUID·디스크·Xen unique_id 검사를 거쳐 execution을 결합한다.
+다른 UUID/예상 밖 이름/깨진 관측은 거절하며 timeout을 force나 성공으로 바꾸지 않는다.
+
+DHCP 예약 파일은 제한적인 호출자 umask에서도 요청한 0644로 원자 게시한다.
+비밀 control/journal 등의 기본 0600은 유지하고, 권한 설정 실패 시 기존 파일을 보존한다.
+실패한 과거 journal이나 uncertain launch는 새 관측 보완을 이유로 삭제·자동 채택하지 않는다.
