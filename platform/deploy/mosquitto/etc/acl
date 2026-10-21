@@ -1,0 +1,32 @@
+# Xenova MQTT ACL — docs/contracts/mqtt-contract-v1.md §9 를 옮긴 것. 계약이 바뀌면 같이 고친다.
+#
+# 계정 이름 규칙: username = 토픽 안의 id
+#   VM 에이전트 = vm_id, 앱 VM = app_id(autonomous·manual·message-board), 젯슨 = perception
+# pattern 줄은 모든 계정에 적용되고 %u 는 접속한 username 으로 바뀐다.
+# user 아래 topic 줄은 그 계정에만 적용된다.
+
+# 읽기: 개발 단계는 계약 토픽 전체를 모든 계정에 연다. 계정별 구독 제한은 계약 v1.1 에서 정한다.
+pattern read xenova/v1/#
+
+# VM 에이전트 (username = vm_id): 자기 vm_id 토픽에만 보고
+pattern write xenova/v1/vms/%u/heartbeat
+pattern write xenova/v1/vms/%u/inventory
+pattern write xenova/v1/vms/%u/metrics
+pattern write xenova/v1/vms/%u/command-result
+
+# 앱 VM·젯슨 (username = app_id): 자기 앱 이벤트 토픽에만
+pattern write xenova/v1/apps/%u/events
+
+# 지연 측정 probe. 계약은 "자기 vm_id 가 source/target 인 것만" 이지만 payload 조건이라 브로커가 거르지 못한다.
+pattern write xenova/v1/probes/#
+
+user backend
+topic write xenova/v1/apps/manual/input
+topic write xenova/v1/vms/+/command
+
+user gateway
+topic write xenova/v1/vehicle/control
+topic write xenova/v1/apps/vehicle/events
+
+user esp32
+topic write xenova/v1/vehicle/status

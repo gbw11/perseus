@@ -119,3 +119,15 @@ assert 'systemd-ssh-generator' in platform_text
 assert 'sshd.service.d/10-xenova-keys.conf' in platform_text
 assert '/srv/xenova' in platform['FILES:xenova-platform'].split()
 print('PASS Xenova PN/SRC_URI/image dependencies, single SSH service mode and new storage ownership')
+
+# Installed applications must be real fixed-layer packages, not WIC injections.
+_, api = load('xenova-dom0-manager')
+_, mqtt = load('xenova-mqtt-client')
+assert {'xenova-dom0-manager', 'xenova-mqtt-client'} <= set(image['IMAGE_INSTALL'].split())
+assert {'python3-fastapi', 'python3-uvicorn', 'python3-netclient', 'python3-shell', 'xenova-platform'} <= set(api['RDEPENDS:xenova-dom0-manager'].split())
+assert 'python3-paho-mqtt' in mqtt['RDEPENDS:xenova-mqtt-client'].split()
+assert api['SYSTEMD_SERVICE:xenova-dom0-manager'] == 'xenova-dom0-manager.service'
+assert api['SYSTEMD_AUTO_ENABLE:xenova-dom0-manager'] == 'enable'
+assert selected(api, 'dom0_manager', directory=True).resolve() == ROOT/'platform/services/dom0-manager/dom0_manager'
+assert selected(mqtt, 'xenova_mqtt', directory=True).resolve() == ROOT/'platform/services/vm-agent/mqtt-client/xenova_mqtt'
+print('PASS FastAPI/uvicorn/platform driver and MQTT recipe/source/runtime connection')
