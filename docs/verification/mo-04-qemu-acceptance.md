@@ -107,6 +107,7 @@ supervisor는 `step5-lab-command.json`의 `op`, `request_id`를 읽고
   `VmServiceTest`의 기존 Mockito stubbing 오류 2개를 기준 커밋 `a29618b`의
   격리 복사본에서도 재현했다. 이번 콘솔 수정과 무관하며 전체 테스트 통과로 표기하지 않는다.
 
-라즈베리파이 실보드, 운영 배포의 HTTPS/WSS, Zephyr 양방향 명령 처리는 아직 검증하지 않았다.
+이 인수 시험에는 라즈베리파이 실보드, 운영 배포의 HTTPS/WSS, Zephyr 양방향 명령 처리를 포함하지 않았다.
+후속으로 별도 시험 앱을 사용한 [Zephyr 양방향 콘솔 QEMU 검증](mo-04-zephyr-console.md)을 완료했다.
 VM1/VM2 주행 제어·미러링·자동 failover, Jetson 인식 장애에 따른 수동 전환은
 MO-04 콘솔 경로의 검증 범위에 포함하지 않는다.
