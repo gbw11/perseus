@@ -1,8 +1,8 @@
 import { CameraView } from '@xenova/ui';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 
-/** 네비게이션 VM 이 내는 카메라 AI 감지 영상 (MJPEG). 주소·형식은 계약 미정 */
-const CAMERA_URL: string = import.meta.env.VITE_CAMERA_URL ?? '';
+/** 세 번째 VM 이 낸 AI 감지 영상 (MJPEG) — dom0 웹 프록시가 같은 origin 으로 넘긴다 (카메라 계약 camera-stream-v1) */
+const CAMERA_URL: string = import.meta.env.VITE_CAMERA_URL || '/camera/stream.mjpg';
 
 /**
  * 네비게이션 VM 의 카메라 + AI 장애물 감지 화면. 이 VM 이 영상을 받아 감지 박스를 그려 내므로,
@@ -22,7 +22,7 @@ export function NavCamera({ compact = false }: { compact?: boolean }) {
     <CameraView
       compact={compact}
       mock={source !== 'live'}
-      streamUrl={CAMERA_URL || undefined}
+      streamUrl={source === 'live' ? CAMERA_URL : undefined}
       down={down}
       motion={{
         v: t.vehicle.v_mps,

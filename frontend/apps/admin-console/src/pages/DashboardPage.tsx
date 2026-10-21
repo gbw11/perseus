@@ -25,8 +25,8 @@ import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
 
 const MOCK = import.meta.env.VITE_MOCK === 'true';
-/** 네비게이션 VM 이 내는 카메라 AI 감지 영상 (MJPEG). 주소·형식은 계약 미정 */
-const CAMERA_URL: string = import.meta.env.VITE_CAMERA_URL ?? '';
+/** 세 번째 VM 이 낸 AI 감지 영상 (MJPEG) — dom0 웹 프록시가 같은 origin 으로 넘긴다 (카메라 계약 camera-stream-v1) */
+const CAMERA_URL: string = import.meta.env.VITE_CAMERA_URL || '/camera/stream.mjpg';
 
 /**
  * W-02 대시보드 — 주행 통합 상태 (화면 정의서 W-02, UI-09). 데모 내내 띄워 두는 화면.
@@ -241,7 +241,7 @@ function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: Dr
           <CameraView
             compact
             mock={MOCK}
-            streamUrl={CAMERA_URL || undefined}
+            streamUrl={MOCK ? undefined : CAMERA_URL}
             down={
               vm && vm.state !== 'running'
                 ? 'VM 중지 — 영상 없음 (주행은 그대로)'

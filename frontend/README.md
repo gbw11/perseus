@@ -86,9 +86,9 @@ cd apps/admin-console && VITE_MOCK=true npx vite --port 5173            # VITE_M
 
 - 콘솔: `http://localhost:5173/demo` (admin / 1234) — 여기서 [강제 종료] → 인계 → 복구 → AUTO_READY → [자율주행 재개]
 - 콘솔: `http://localhost:5173/demo` 의 세 VM 카드마다 [강제 종료]. 재개는 바로 바뀌지 않고 3·2·1 을 센 뒤 AUTO (MQTT 계약 v1.2 §6)
-- 카메라: 세 번째 VM(네비게이션)이 카메라 영상을 받아 AI 로 장애물을 감지하고, 감지 박스를 그린 영상을 낸다 — 대시보드 네비게이션 카드와 모니터 네비게이션 칸·상세에 보인다. 실제는 `VITE_CAMERA_URL`(이 VM 의 MJPEG, 주소·형식 계약 미정), mock 은 차량 움직임을 따라가는 시험 영상. 이 VM 을 강제 종료하면 영상이 멈추고 주행은 그대로다
-- 웹 콘솔: 위쪽 메뉴 [웹 콘솔] 에서 VM 을 골라 [연결] (VM 상세의 [웹 콘솔] 탭도 같은 패널). 실제로는 `WS /ws/v1/vms/{id}/console` 로 게스트 터미널에 붙고(웹 터미널 계약 `browser-console-v1`, platform -248), mock 에서는 가짜 셸(Debian: `help`·`uname -a`·`ps` 등, Zephyr: 부팅 로그만)
-- 모니터: `http://localhost:5173/monitor/?display=display-0&kiosk=1` (모니터 2 는 `display-1`). 콘솔 [화면 배치] 에서 고른 화면으로 바뀌고 `route.applied` 로 답합니다 (REST-23·24, WS `/ws/v1/displays`). `display` 없이 열면 `/monitor/split`·`/monitor/detail/<앱>` 을 손으로 고릅니다. 콘솔 탭이 열려 있는 동안 따라갑니다.
+- 카메라: 세 번째 VM 이 젯슨 카메라 영상을 받아 AI 로 장애물을 감지하고, 감지 박스를 그린 영상을 낸다 — 대시보드 세 번째 VM 카드와 모니터 그 칸·상세에 보인다. 실제는 `/camera/stream.mjpg`(dom0 웹 프록시 → 세 번째 VM, 카메라 계약 `docs/contracts/camera-stream-v1.md`, `VITE_CAMERA_URL` 로 바꿀 수 있음), mock 은 차량 움직임을 따라가는 시험 영상. 감지 결과는 화면용이고 주행 판단에 쓰지 않는다 — 이 VM 을 강제 종료하면 영상만 멈추고 주행은 그대로다
+- 웹 콘솔: 위쪽 메뉴 [웹 콘솔] 에서 VM 을 골라 [연결]. 웹 터미널 계약 `browser-console-v1` 그대로 — 자동 접속·재접속 없음, [연결 해제] 로 점유를 푼다(platform -248). mock 에서는 가짜 셸(Debian: `help`·`uname -a`·`ps` 등, Zephyr: 부팅 로그만)
+- 모니터: `http://localhost:5173/monitor/split?kiosk=1`, 상세는 `/monitor/detail/<앱>`. 실제로는 dom0 표시 서비스가 콘솔 [화면 배치] 에 따라 키오스크 주소를 바꾼다(화면 배치 계약 `docs/contracts/display-route-v1.md`). mock 에서는 `?display=display-0` 으로 열면 모니터가 표시 서비스 대신 콘솔 mock 배치를 따라간다. 콘솔 탭이 열려 있는 동안 따라갑니다.
 
 ## 규칙
 

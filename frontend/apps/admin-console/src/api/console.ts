@@ -2,8 +2,7 @@ import { getSession, refreshSession } from './client';
 
 export type ConsoleState = 'idle' | 'connecting' | 'connected' | 'closing' | 'disconnected' | 'error';
 export interface ConsoleCallbacks {
-  /** code: 끊긴 이유(WebSocket 종료 코드). 다시 붙어도 소용없는 코드인지 가르는 데 쓴다 */
-  state: (state: ConsoleState, message: string, code?: number) => void;
+  state: (state: ConsoleState, message: string) => void;
   data: (bytes: Uint8Array) => void;
 }
 
@@ -19,12 +18,6 @@ export function consoleUrl(vmId: string): string {
   base.hash = '';
   return base.toString();
 }
-
-/**
- * 다시 붙어도 같은 결과인 종료 코드 — 자동 재연결하지 않고 안내만 한다 (웹 터미널 계약 browser-console-v1).
- * 4400 접속 불가 VM · 4401 인증 · 4404 VM 없음 · 4409 다른 콘솔 사용 중 · 1003·1009·4009 프레임·크기 위반
- */
-export const NO_RETRY_CODES: readonly number[] = [4400, 4401, 4404, 4409, 1003, 1009, 4009];
 
 export function consoleCloseMessage(code: number): string {
   switch (code) {
@@ -72,7 +65,7 @@ export class ConsoleTransport {
     }
     if (generation !== this.generation) return;
     if (!session) {
-      this.callbacks.state('error', consoleCloseMessage(4401), 4401);
+      this.callbacks.state('error', consoleCloseMessage(4401));
       return;
     }
     const token = session.access_token;
@@ -121,7 +114,6 @@ export class ConsoleTransport {
       this.callbacks.state(
         event.code === 1000 || event.code === 1001 ? 'disconnected' : 'error',
         consoleCloseMessage(event.code),
-        event.code,
       );
     };
   }

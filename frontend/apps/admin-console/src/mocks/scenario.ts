@@ -425,7 +425,8 @@ export function scenarioEvents(): VmEvent[] {
   return store.events;
 }
 
-// ---- 화면 배치 (REST-23·REST-24 mock, 백엔드 -129 와 같은 모양) ----
+// ---- 화면 배치 (REST-23·REST-24 mock, 화면 배치 계약 display-route-v1) ----
+// 표시 서비스 흉내: ?display= 로 연 mock 모니터가 route.applied 를 채널로 보낸다. 없으면 1.5초 뒤 적용된 것으로 본다.
 
 export interface MockRoute {
   vm_id: string | null;
@@ -453,7 +454,7 @@ function display(id: string, label: string, view: 'split' | 'os-face', vmId: str
     view,
     request_id: `${id}-1`,
     applied_at: new Date().toISOString(),
-    verification_level: 'browser_ready',
+    verification_level: 'kiosk_loaded',
   };
   return {
     display_id: id,
@@ -533,7 +534,7 @@ function applied(id: string, revision: number) {
           observed_route: {
             ...d.desired_route,
             applied_at: new Date().toISOString(),
-            verification_level: 'browser_ready',
+            verification_level: 'kiosk_loaded',
           },
         }
       : d,

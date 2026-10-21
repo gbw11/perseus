@@ -189,7 +189,7 @@ const CHOICES: Choice[] = [
   })),
 ];
 
-/** 모니터마다 무엇을 띄울지. 고르면 바로 PUT — 모니터가 route.applied 로 답하면 "적용됨" */
+/** 모니터마다 무엇을 띄울지. 고르면 바로 PUT — 표시 서비스가 route.applied 로 답하면 "적용됨" */
 function ScreenRouting() {
   const displays = useDisplays();
   return (
@@ -206,8 +206,9 @@ function ScreenRouting() {
         ))}
       </div>
       <p className={styles.dim}>
-        모니터는 <code>/monitor/?display=display-0</code> 처럼 자기 번호로 열어 두면 여기서 고른 화면으로
-        바뀐다.
+        고르면 백엔드가 dom0 표시 서비스에 전달하고, 키오스크가 화면을 다 띄우면 "적용됨" 이 된다 (화면 배치
+        계약 display-route-v1). mock 에서는 <code>/monitor/?display=display-0</code> 으로 연 모니터가 표시
+        서비스 대신 따라간다.
       </p>
     </Card>
   );
