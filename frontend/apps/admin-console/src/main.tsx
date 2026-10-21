@@ -7,10 +7,15 @@ import { createBrowserRouter, Navigate, RouterProvider } from 'react-router';
 import { ApiError } from './api/client';
 import { RequireAuth } from './auth';
 import { ConsoleLayout } from './layout/ConsoleLayout';
+import { ConsolePage } from './pages/ConsolePage';
+import { DashboardPage } from './pages/DashboardPage';
 import { DemoPage } from './pages/DemoPage';
+import { EventsPage } from './pages/EventsPage';
 import { LoginPage } from './pages/LoginPage';
+import { ResourcesPage } from './pages/ResourcesPage';
 import { ScreensPage } from './pages/ScreensPage';
 import { ShowcasePage } from './pages/ShowcasePage';
+import { VmCreatePage } from './pages/VmCreatePage';
 import { VmDetailPage } from './pages/VmDetailPage';
 import { VmListPage } from './pages/VmListPage';
 
@@ -33,10 +38,14 @@ const router = createBrowserRouter([
       </RequireAuth>
     ),
     children: [
-      { path: '/', element: <Navigate to="/vms" replace /> },
+      { path: '/', element: <DashboardPage /> },
       { path: '/vms', element: <VmListPage /> },
+      { path: '/vms/new', element: <VmCreatePage /> },
       { path: '/vms/:vmId', element: <VmDetailPage /> },
+      { path: '/resources', element: <ResourcesPage /> },
       { path: '/demo', element: <DemoPage /> },
+      { path: '/console', element: <ConsolePage /> },
+      { path: '/events', element: <EventsPage /> },
       { path: '/screens', element: <ScreensPage /> },
       { path: '/components', element: <ShowcasePage /> },
     ],

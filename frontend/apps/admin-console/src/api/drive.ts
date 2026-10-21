@@ -6,7 +6,13 @@
  * 첫 프레임은 {"type":"auth","access_token"}. 4401 로 닫히면 토큰을 재발급해 다시 붙는다.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getSession, refreshSession } from './client';
+import { getSession, refreshSession, request } from './client';
+
+/** VITE_MOCK 이면 WS 대신 표본 시나리오(src/mocks/scenario.ts)를 쓴다 */
+const MOCK = import.meta.env.VITE_MOCK === 'true';
+type Scenario = typeof import('../mocks/scenario');
+let scenario: Promise<Scenario> | null = null;
+const loadScenario = () => (scenario ??= import('../mocks/scenario'));
 
 /** MQTT 계약 §5.2 */
 export type DriveMode = 'AUTO' | 'MANUAL' | 'AUTO_READY' | 'SAFE_STOP';
@@ -50,6 +56,13 @@ export interface DriveState {
     heading_err_rad: number | null;
     obstacle_count: number;
     stop: boolean;
+  } | null;
+  /** 받아들여진 재개 카운트다운 (MQTT 계약 v1.2 §6 drive.resume.accepted). 없으면 null */
+  resume?: {
+    generation: number | null;
+    switch_in_ms: number;
+    accepted_ago_ms: number;
+    remaining_ms: number;
   } | null;
 }
 
@@ -124,7 +137,9 @@ function useAuthedSocket(path: string, onFrame: (frame: Frame) => void) {
 }
 
 /** 주행 통합 상태 (최대 10 Hz, 변화 없으면 1초마다) */
-export function useDriveState() {
+export const useDriveState = MOCK ? useMockDriveState : useLiveDriveState;
+
+function useLiveDriveState() {
   const [drive, setDrive] = useState<DriveState | null>(null);
   const { state } = useAuthedSocket('/ws/v1/drive/state', (frame) => {
     if (frame.type === 'drive.state') setDrive(frame.state as DriveState);
@@ -132,11 +147,60 @@ export function useDriveState() {
   return { drive, socket: state };
 }
 
+function useMockDriveState() {
+  const [drive, setDrive] = useState<DriveState | null>(null);
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let stopped = false;
+    void loadScenario().then((s) => {
+      if (!stopped) off = s.subscribe(setDrive);
+    });
+    return () => {
+      stopped = true;
+      off?.();
+    };
+  }, []);
+  return { drive, socket: (drive ? 'open' : 'connecting') as SocketState };
+}
+
+/**
+ * 자율주행 재개 요청 (POST /api/v1/drive/resume → MQTT-13). 202 는 "보냈다" 일 뿐 — 게이트웨이가 받아들이면
+ * DriveState.resume 에 3초 카운트다운이 생기고, 거절·취소는 drive.resume.cancelled 로 온다 (계약 v1.2 §6).
+ */
+export async function requestResume(): Promise<void> {
+  if (MOCK) {
+    const s = await loadScenario();
+    if (!s.resume()) throw new Error('지금은 재개할 수 없습니다 (AUTO_READY 아님 또는 카운트다운 중)');
+    return;
+  }
+  await request('/api/v1/drive/resume', { method: 'POST' });
+}
+
+/** 시연 동작 (mock 에서만 동작 — 실제 API 는 격리 시연 -135 가 정한다) */
+export const mockDemo = MOCK
+  ? {
+      forceKill: (target: 'autonomous' | 'manual' | 'message-board') =>
+        void loadScenario().then((s) => s.forceKill(target)),
+      togglePerception: () => void loadScenario().then((s) => s.togglePerception()),
+    }
+  : null;
+
 /**
  * 수동주행 입력. 눌린 키 집합이 바뀔 때만 보낸다 — 누르고 있는 동안의 20 Hz 반복은 백엔드가 한다 (계약 §7).
  * 화면을 떠나면 빈 keys 를 보내 놓는다 (백엔드도 소켓이 닫히면 놓는다).
  */
-export function useManualInput() {
+export const useManualInput = MOCK ? useMockManualInput : useLiveManualInput;
+
+function useMockManualInput() {
+  const [result, setResult] = useState<InputResult | null>(null);
+  const sendKeys = useCallback((keys: DriveKey[]) => {
+    void loadScenario().then((s) => setResult(s.setKeys(keys)));
+    return true;
+  }, []);
+  return { socket: 'open' as SocketState, result, sendKeys };
+}
+
+function useLiveManualInput() {
   const [result, setResult] = useState<InputResult | null>(null);
   const { state, send } = useAuthedSocket('/ws/v1/drive', (frame) => {
     if (frame.type === 'input.ack') setResult(frame.result as InputResult);

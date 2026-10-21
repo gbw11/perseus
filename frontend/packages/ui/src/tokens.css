@@ -23,6 +23,8 @@
   --x-bg: #f5f6f8;
   --x-surface: #ffffff;
   --x-surface-2: #eef0f3;
+  --x-surface-3: #e4e7ec;
+  --x-surface-sunken: #e9ecf0;
   --x-border: #dde1e6;
   --x-text: #17191c;
   --x-text-muted: #5d6570;
@@ -43,7 +45,7 @@
   /* 앱 역할 (MQTT 계약 §4 app_id) */
   --x-app-autonomous: #2f6fed;
   --x-app-manual: #8a4ddb;
-  --x-app-interaction: #0e9f9a;
+  --x-app-interaction: #db2777;
 
   /* 게스트 (VM 관리 API 계약 §2.3 템플릿) */
   --x-guest-debian: #c7254e;
@@ -51,20 +53,35 @@
   --x-guest-zephyr: #6e4bc2;
 }
 
-/* 어두운 테마 (모니터 화면·키오스크) */
+/*
+ * 어두운 테마 (관리 콘솔·모니터 화면). 색은 Stitch 시안(stitch_untitled_project_init, "Autonomous Hypervisor
+ * Dark Engineering")을 따른다. 상태 4색·앱 역할 3색 이름은 밝은 테마와 같다.
+ */
 [data-theme='dark'] {
-  --x-bg: #0e1116;
-  --x-surface: #171b22;
-  --x-surface-2: #1f252e;
-  --x-border: #2b333e;
-  --x-text: #e9edf2;
-  --x-text-muted: #9aa5b1;
-  --x-primary: #5b8cff;
+  --x-bg: #0f141b;
+  --x-surface: #171c24;
+  --x-surface-2: #1b2027;
+  --x-surface-3: #252a33;
+  --x-surface-sunken: #090e16;
+  --x-border: #30353d;
+  --x-text: #dee2ed;
+  --x-text-muted: #8b919d;
+  --x-primary: #4edea3;
+  --x-primary-text: #003824;
   --x-shadow: 0 1px 2px rgb(0 0 0 / 40%);
-  --x-ok-soft: #12321f;
-  --x-fault-soft: #3a1717;
-  --x-recovering-soft: #3a2c0f;
+
+  --x-ok: #10b981;
+  --x-fault: #ef4444;
+  --x-recovering: #f59e0b;
+  --x-stopped: #6b7280;
+  --x-ok-soft: #0f3a2b;
+  --x-fault-soft: #3f1517;
+  --x-recovering-soft: #3d2c0b;
   --x-stopped-soft: #23282f;
+
+  --x-app-autonomous: #38bdf8;
+  --x-app-manual: #a78bfa;
+  --x-app-interaction: #f472b6;
 }
 
 *,
@@ -80,4 +97,8 @@ body {
   font-family: var(--x-font);
   font-size: var(--x-text-md);
   -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--x-primary);
 }

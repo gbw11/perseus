@@ -129,3 +129,381 @@
   background: var(--x-app-manual);
   color: var(--x-primary-text);
 }
+
+/* ---- 콘솔 초안 공통 (Stitch init 시안 레이아웃) ---- */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--x-space-4);
+}
+.pageHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--x-space-4);
+  padding: var(--x-space-4) var(--x-space-5);
+  background: var(--x-surface);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+}
+.pageHead h1 {
+  margin: 0;
+  font-size: var(--x-text-xl);
+}
+.eyebrow {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  letter-spacing: 0.08em;
+  color: var(--x-text-muted);
+}
+.grow {
+  flex: 1;
+}
+.cols3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--x-space-4);
+}
+.cols2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--x-space-4);
+}
+.cols32 {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--x-space-4);
+}
+@media (max-width: 1100px) {
+  .cols3,
+  .cols2,
+  .cols32 {
+    grid-template-columns: 1fr;
+  }
+}
+.appCard {
+  border-top: 3px solid var(--accent, var(--x-border));
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--x-space-2);
+}
+.tile {
+  padding: var(--x-space-3);
+  background: var(--x-surface-2);
+  border-radius: var(--x-radius-sm);
+}
+.tile small {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.big {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xl);
+  font-weight: 700;
+}
+.huge {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-2xl);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.unit {
+  margin-left: 4px;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+}
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--x-space-2) 0;
+}
+.rows > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--x-space-3);
+  padding: 6px var(--x-space-3);
+  background: var(--x-surface-2);
+  border-radius: 4px;
+  font-size: var(--x-text-sm);
+}
+.rows > div > span:first-child {
+  color: var(--x-text-muted);
+}
+.rows > div > span:last-child {
+  font-family: var(--x-font-mono);
+  text-align: right;
+}
+.controlBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--x-space-2);
+  padding: 8px var(--x-space-3);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-sunken);
+  font-weight: 700;
+}
+.controlOn {
+  background: color-mix(in srgb, var(--accent) 18%, var(--x-surface-sunken));
+  color: var(--accent);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--x-border);
+  border-radius: 4px;
+  background: var(--x-surface-2);
+  color: var(--x-text);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  white-space: nowrap;
+}
+button.chip {
+  cursor: pointer;
+}
+button.chip:hover:not(.chipOn) {
+  border-color: var(--x-primary);
+  color: var(--x-primary);
+}
+.chipOn {
+  border-color: var(--x-primary);
+  background: var(--x-primary);
+  color: var(--x-primary-text);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--x-space-2);
+  align-items: center;
+}
+.draft {
+  padding: 6px var(--x-space-3);
+  border: 1px dashed var(--x-recovering);
+  border-radius: var(--x-radius-sm);
+  color: var(--x-recovering);
+  font-size: var(--x-text-xs);
+}
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--x-surface-3);
+  overflow: hidden;
+}
+.bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent, var(--x-primary));
+}
+.eventRow {
+  display: grid;
+  grid-template-columns: 110px 90px 110px 130px 1fr;
+  gap: var(--x-space-3);
+  align-items: start;
+  padding: var(--x-space-3);
+  border-bottom: 1px solid var(--x-border);
+  font-size: var(--x-text-sm);
+}
+.eventRow:hover {
+  background: var(--x-surface-2);
+}
+.sev {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+}
+.sevINFO {
+  background: var(--x-ok-soft);
+  color: var(--x-ok);
+}
+.sevWARNING {
+  background: var(--x-recovering-soft);
+  color: var(--x-recovering);
+}
+.sevERROR {
+  background: var(--x-fault-soft);
+  color: var(--x-fault);
+}
+.terminal {
+  min-height: 320px;
+  padding: var(--x-space-4);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-sunken);
+  color: var(--x-text);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-sm);
+  white-space: pre-wrap;
+}
+.tabs {
+  display: flex;
+  gap: var(--x-space-1);
+  border-bottom: 1px solid var(--x-border);
+}
+.tab {
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--x-text-muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.tab[aria-selected='true'] {
+  color: var(--x-primary);
+  border-bottom-color: var(--x-primary);
+}
+.tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.matrix {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 4px;
+}
+.matrix th {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  color: var(--x-text-muted);
+  text-align: center;
+}
+.matrix th:first-child {
+  text-align: left;
+}
+.cell {
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--x-border);
+  border-radius: 4px;
+  background: var(--x-surface-2);
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  cursor: pointer;
+}
+.cellPinned {
+  background: color-mix(in srgb, var(--accent) 22%, var(--x-surface-2));
+  border-color: var(--accent);
+  color: var(--x-text);
+}
+.slider {
+  width: 100%;
+  accent-color: var(--accent, var(--x-primary));
+}
+.select {
+  padding: 8px 10px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  color: var(--x-text);
+  font: inherit;
+}
+.steps {
+  display: flex;
+  gap: var(--x-space-2);
+}
+.step {
+  flex: 1;
+  padding: 8px;
+  border-bottom: 3px solid var(--x-border);
+  color: var(--x-text-muted);
+  font-weight: 700;
+  font-size: var(--x-text-sm);
+}
+.stepOn {
+  border-bottom-color: var(--x-primary);
+  color: var(--x-text);
+}
+.pick {
+  padding: var(--x-space-4);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  background: var(--x-surface-2);
+  color: var(--x-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pickOn {
+  border-color: var(--x-primary);
+  box-shadow: 0 0 0 1px var(--x-primary);
+}
+.stack {
+  display: flex;
+  gap: 3px;
+  height: 28px;
+  margin-bottom: var(--x-space-3);
+  overflow: hidden;
+  border-radius: var(--x-radius-sm);
+}
+.stack > i {
+  display: grid;
+  place-items: center;
+  min-width: 10px;
+  overflow: hidden;
+  font-size: var(--x-text-xs);
+  font-style: normal;
+  font-weight: 800;
+  color: #0b1220;
+  white-space: nowrap;
+}
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--x-space-2);
+  color: var(--x-text);
+}
+.legend > i {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+.picks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--x-space-3);
+}
+.picks > .pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--x-space-1);
+  border-top-width: 3px;
+}
+.clickCard {
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    transform 0.15s;
+}
+.clickCard:hover,
+.clickCard:focus-visible {
+  border-color: var(--x-primary);
+  transform: translateY(-2px);
+}
+.tick {
+  display: inline-block;
+  font-family: var(--x-font-mono);
+  color: var(--x-text);
+  animation: tickFlash 0.6s ease-out;
+}
+@keyframes tickFlash {
+  from {
+    color: var(--x-primary);
+    transform: scale(1.08);
+  }
+  to {
+    color: var(--x-text);
+    transform: scale(1);
+  }
+}

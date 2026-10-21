@@ -1,7 +1,9 @@
-import { Button, StatusBadge } from '@xenova/ui';
-import { useEffect } from 'react';
+import { StatusBadge } from '@xenova/ui';
 import { Navigate, useParams } from 'react-router';
+import { ResumeState } from '../components/AppPanel';
 import { ModeBar } from '../components/ModeBar';
+import { NavCamera } from '../components/NavCamera';
+import { TrackMap } from '../components/TrackMap';
 import { mps, rad, seconds } from '../components/format';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { APPS, APP_IDS, type AppId, type Telemetry } from '../telemetry/types';
@@ -35,7 +37,7 @@ function DetailHeader({ id }: { id: AppId }) {
     <div className={styles.detailHead} style={{ ['--accent' as string]: `var(--x-app-${id})` }}>
       <h1>{meta.title}</h1>
       <span className={styles.guest}>
-        {meta.guest === 'zephyr' ? 'Zephyr' : 'Debian'} · {meta.topicAppId} · {meta.role}
+        {meta.guest === 'zephyr' ? 'Zephyr' : 'Debian 13'} · {meta.role}
       </span>
       <StatusBadge
         health={status.health}
@@ -106,7 +108,7 @@ function AutonomousDetail() {
           title="목표 속도"
           value={alive ? (command?.v_mps ?? 0) : 0}
           min={0}
-          max={0.5}
+          max={1}
           text={alive && command ? mps(command.v_mps) : '—'}
         />
         <Gauge
@@ -131,77 +133,30 @@ function AutonomousDetail() {
   );
 }
 
-const KEY_OF: Record<string, string> = {
-  ArrowUp: 'up',
-  w: 'up',
-  ArrowDown: 'down',
-  s: 'down',
-  ArrowLeft: 'left',
-  a: 'left',
-  ArrowRight: 'right',
-  d: 'right',
-};
-
 function ManualDetail() {
-  const { telemetry: t, setManualKeys, source } = useTelemetry();
+  const { telemetry: t } = useTelemetry();
   const active = t.activeApp === 'manual';
-  // 실제 연결에서는 입력을 웹 시연 제어(W-07)가 보낸다. 모니터는 터치·키보드가 없다
-  const local = source === 'mock';
 
-  // 키보드 화살표·WASD → drive.input 흉내 (MQTT 계약 §7: 실제로는 콘솔 → 백엔드 → MQTT)
-  useEffect(() => {
-    if (!local) return;
-    const pressed = new Set<string>();
-    const sync = () => setManualKeys([...pressed]);
-    const down = (event: KeyboardEvent) => {
-      const key = KEY_OF[event.key];
-      if (key && !pressed.has(key)) {
-        pressed.add(key);
-        sync();
-      }
-    };
-    const up = (event: KeyboardEvent) => {
-      const key = KEY_OF[event.key];
-      if (key && pressed.delete(key)) sync();
-    };
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-    return () => {
-      window.removeEventListener('keydown', down);
-      window.removeEventListener('keyup', up);
-      setManualKeys([]);
-    };
-  }, [local, setManualKeys]);
-
-  const release = (key: string) => setManualKeys(t.manualKeys.filter((k) => k !== key));
-  const pad = (key: string, text: string) => (
-    <button
-      type="button"
-      className={[styles.key, t.manualKeys.includes(key) ? styles.keyOn : ''].join(' ')}
-      onPointerDown={() => setManualKeys([...new Set([...t.manualKeys, key])])}
-      onPointerUp={() => release(key)}
-      onPointerLeave={() => release(key)}
-    >
+  // 모니터는 보여 주기만 한다 (화면 정의서 §1) — 웹에서 들어온 눌린 키만 밝게
+  const cap = (key: string, text: string) => (
+    <span className={[styles.keyCap, t.manualKeys.includes(key) ? styles.keyCapOn : ''].join(' ')}>
       {text}
-    </button>
+    </span>
   );
 
   return (
     <>
       <section className={styles.detailMain}>
         <h2>{active ? '운영자 운전 중' : '대기 중 — 자율주행에 문제가 생기면 바로 이어받는다'}</h2>
-        <div className={styles.pad}>
-          <span />
-          {pad('up', '▲')}
-          <span />
-          {pad('left', '◀')}
-          {pad('down', '▼')}
-          {pad('right', '▶')}
+        <div className={styles.keys} style={{ ['--accent' as string]: 'var(--x-app-manual)' }}>
+          {cap('left', '◀')}
+          {cap('up', '▲')}
+          {cap('down', '▼')}
+          {cap('right', '▶')}
+          {cap('brake', '브레이크')}
         </div>
         <p className={styles.dim}>
-          {local
-            ? '화살표·WASD 또는 버튼. 입력이 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'
-            : '입력은 웹 시연 제어 화면에서 보낸다. 입력이 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'}
+          입력은 관리 콘솔 시연 제어에서 들어온다. 200 ms 동안 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.
         </p>
       </section>
       <section className={styles.detailSide}>
@@ -234,16 +189,26 @@ function ManualDetail() {
 }
 
 function InteractionDetail() {
-  const { telemetry: t, resume, source } = useTelemetry();
+  const { telemetry: t } = useTelemetry();
   const down = t.apps.interaction.domain !== 'running' || t.apps.interaction.health === 'fault';
-  const buttonText =
-    t.mode === 'AUTO_READY' ? '자율주행 재개' : t.mode === 'AUTO' ? '자율주행 중' : '재개 대기';
   return (
     <>
       <section className={styles.detailMain}>
-        <h2>알림 타임라인 (drive.mode.changed · drive.fault.detected · message.posted)</h2>
+        <h2>카메라 · AI 장애물 감지</h2>
+        <NavCamera />
+      </section>
+      <section className={styles.detailSide}>
+        <h2>트랙 지도 · 추정 위치</h2>
+        {down ? <p className={styles.dim}>VM 이 내려가 있다 — 주행은 그대로 (격리).</p> : <TrackMap />}
+        <h2>자율주행 재개 상태</h2>
+        <ResumeState />
+        <p className={styles.dim}>
+          복구된 자율주행 VM 이 3초 연속 정상이면 AUTO_READY. 운영자가 관리 콘솔에서 재개를 누르면 3·2·1 을 센
+          뒤 바뀐다 — 모니터에는 버튼이 없다.
+        </p>
+        <h2>알림</h2>
         {down ? (
-          <p className={styles.dim}>인터랙션 VM 이 내려가 있다. 주행은 영향 없이 계속된다 (격리).</p>
+          <p className={styles.dim}>—</p>
         ) : (
           <ul className={styles.timeline}>
             {t.events.map((event) => (
@@ -255,15 +220,6 @@ function InteractionDetail() {
             ))}
           </ul>
         )}
-      </section>
-      <section className={styles.detailSide}>
-        <h2>자율주행 재개</h2>
-        <p className={styles.dim}>
-          복구된 자율주행 VM 의 명령이 3초 연속 신선하면 AUTO_READY. 그때만 재개를 받는다.
-        </p>
-        <Button size="lg" onClick={resume} disabled={down || source !== 'mock' || t.mode !== 'AUTO_READY'}>
-          {buttonText}
-        </Button>
       </section>
     </>
   );

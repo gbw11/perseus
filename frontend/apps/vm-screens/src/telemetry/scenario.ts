@@ -172,7 +172,7 @@ function recovery(t: Telemetry): Telemetry {
       next = { ...next, apps: { ...next.apps, [id]: { ...a, domain: 'running' } } };
       if (id === 'interaction') {
         next = setHealth(next, id, 'ok');
-        next = pushEvent(next, 'vm.recovered', 'ok', '인터랙션 VM 복구 완료');
+        next = pushEvent(next, 'vm.recovered', 'ok', '네비게이션 VM 복구 완료');
       } else if (id === 'manual') {
         next = setHealth(next, id, 'ok');
         next = pushEvent(next, 'vm.recovered', 'ok', '수동주행 VM 복구 완료 (대기)');
@@ -213,7 +213,7 @@ export function step(t: Telemetry, now: number): Telemetry {
 }
 
 export function label(id: AppId): string {
-  return id === 'autonomous' ? '자율주행' : id === 'manual' ? '수동주행' : '인터랙션';
+  return id === 'autonomous' ? '자율주행' : id === 'manual' ? '수동주행' : '네비게이션';
 }
 
 // ---- 조작 (관리 콘솔·개발 조작 바에서 부른다) -------------------------------------------
@@ -232,10 +232,10 @@ export function toggleStress(t: Telemetry, id: AppId): Telemetry {
   return pushEvent(next, 'agent.command', 'info', `${label(id)} CPU 부하 ${a.cpuStress ? '해제' : '시작'}`);
 }
 
-/** 인터랙션에서 자율주행 재개 요청 — AUTO_READY 에서만 받는다 (계약 §6) */
+/** 네비게이션에서 자율주행 재개 요청 — AUTO_READY 에서만 받는다 (계약 §6) */
 export function resume(t: Telemetry): Telemetry {
   if (t.mode !== 'AUTO_READY') return t;
-  const next = pushEvent(t, 'drive.resume.requested', 'info', '인터랙션: 자율주행 재개 요청');
+  const next = pushEvent(t, 'drive.resume.requested', 'info', '네비게이션: 자율주행 재개 요청');
   return changeMode(next, 'AUTO', 'resume_requested', '자율주행 복귀');
 }
 

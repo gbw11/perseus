@@ -19,7 +19,7 @@ export interface AppMeta {
   id: AppId;
   /** 화면 이름 */
   title: string;
-  /** MQTT 계약의 app_id (인터랙션 VM 은 message-board) */
+  /** MQTT 계약의 app_id (네비게이션 VM 은 message-board) */
   topicAppId: 'autonomous' | 'manual' | 'message-board';
   guest: 'zephyr' | 'debian';
   role: string;
@@ -42,10 +42,10 @@ export const APPS: Record<AppId, AppMeta> = {
   },
   interaction: {
     id: 'interaction',
-    title: '인터랙션',
+    title: '네비게이션',
     topicAppId: 'message-board',
     guest: 'debian',
-    role: '알림·관제 메시지·재개 요청',
+    role: '카메라 AI 장애물 감지·트랙 지도·알림',
   },
 };
 
@@ -109,4 +109,12 @@ export interface Telemetry {
   /** 자율 VM 명령이 연속으로 신선했던 시작 시각 (AUTO_READY 판정) */
   autonomousFreshSince: number | null;
   events: TimelineEvent[];
+  /** live·콘솔 mock: 앱별 vm_id (복구 이벤트를 앱에 붙이려고) */
+  appVmIds?: Partial<Record<AppId, string>>;
+  /** live·콘솔 mock: 복구 서비스가 재시작한 앱 — 명령(생존 신호)이 다시 신선해질 때까지 '복구 중' */
+  recoveringApps?: Partial<Record<AppId, true>>;
+  /** 받아들여진 자율주행 재개가 AUTO 로 바뀔 예상 시각 (화면 시계, MQTT 계약 v1.2 §6). 없으면 null */
+  resumeAt?: number | null;
+  /** 추정 주행 거리 — 차량 속도(vehicle.status v_mps)를 화면에서 적분한 값. 위치 센서가 아니다 */
+  odometer?: { distanceM: number; at: number };
 }
