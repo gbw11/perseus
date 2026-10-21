@@ -1,0 +1,64 @@
+"""게이트웨이 설정. 명령행 인자가 환경변수 XENOVA_GATEWAY_* 보다 우선한다. 비밀번호는 저장소에 두지 않는다."""
+
+from __future__ import annotations
+
+import argparse
+import os
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+
+from .machine import Mode
+
+# 게이트웨이는 dom0 에서 브로커와 같이 돈다
+DEFAULT_BROKER_HOST = "127.0.0.1"
+# 브로커 ACL: user gateway → vehicle/control, apps/vehicle/events 쓰기 (MQTT 계약 v1 9장)
+DEFAULT_USERNAME = "gateway"
+SOURCE_ID = "dom0-gateway"
+EVENT_APP_ID = "vehicle"
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
+
+@dataclass(frozen=True)
+class GatewaySettings:
+    broker_host: str = DEFAULT_BROKER_HOST
+    broker_port: int = 1883
+    username: str | None = DEFAULT_USERNAME
+    password: str | None = None
+    sink: str = "mock"                  # mock | serial
+    serial_port: str = "/dev/ttyUSB0"
+    serial_baud: int = 115200
+    frame_log: str | None = None        # 목 싱크 기록 파일. "-" 는 표준출력, 없으면 메모리에만
+    start_mode: Mode = Mode.AUTO
+    retained_wait_s: float = 1.0        # 시작 시 이전 vehicle/control(retained) 을 기다리는 시간
+    log_level: str = "INFO"
+
+
+def _env(env: Mapping[str, str], name: str) -> str | None:
+    value = env.get(f"XENOVA_GATEWAY_{name}", "").strip()
+    return value or None
+
+
+def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None) -> GatewaySettings:
+    env = os.environ if env is None else env
+    d = GatewaySettings()
+    p = argparse.ArgumentParser(prog="xenova_gateway", description="dom0 게이트웨이: 제어권 판정·ESP32 전달")
+    p.add_argument("--host", default=_env(env, "BROKER_HOST") or d.broker_host)
+    p.add_argument("--port", type=int, default=int(_env(env, "BROKER_PORT") or d.broker_port))
+    p.add_argument("--username", default=_env(env, "BROKER_USERNAME") or d.username)
+    p.add_argument("--password", default=_env(env, "BROKER_PASSWORD"),
+                   help="가능하면 환경변수 XENOVA_GATEWAY_BROKER_PASSWORD 로 준다 (ps 에 보이지 않게)")
+    p.add_argument("--sink", choices=("mock", "serial"), default=_env(env, "SINK") or d.sink)
+    p.add_argument("--serial-port", default=_env(env, "SERIAL_PORT") or d.serial_port)
+    p.add_argument("--serial-baud", type=int, default=int(_env(env, "SERIAL_BAUD") or d.serial_baud))
+    p.add_argument("--frame-log", default=_env(env, "FRAME_LOG"))
+    p.add_argument("--start-mode", choices=("AUTO", "SAFE_STOP"), default=_env(env, "START_MODE") or d.start_mode.value)
+    p.add_argument("--retained-wait-s", type=float, default=float(_env(env, "RETAINED_WAIT_S") or d.retained_wait_s))
+    p.add_argument("--log-level", choices=LOG_LEVELS, default=(_env(env, "LOG_LEVEL") or d.log_level).upper())
+    a = p.parse_args(argv)
+    if not 1 <= a.port <= 65535:
+        p.error(f"--port 범위 밖: {a.port}")
+    return GatewaySettings(
+        broker_host=a.host, broker_port=a.port, username=a.username or None, password=a.password,
+        sink=a.sink, serial_port=a.serial_port, serial_baud=a.serial_baud, frame_log=a.frame_log,
+        start_mode=Mode(a.start_mode), retained_wait_s=max(0.0, a.retained_wait_s), log_level=a.log_level,
+    )
