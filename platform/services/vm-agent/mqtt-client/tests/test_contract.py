@@ -67,6 +67,8 @@ def test_policy_follows_contract_tables():
     assert policy.for_type("drive.command").max_bytes == 1024
     # 같은 토픽의 다른 type: apps/autonomous/events 의 perception.event 는 QoS 1
     assert policy.for_type("perception.event").qos == 1
+    # 6.1 앱 생존 신호는 같은 앱 토픽이지만 QoS 0
+    assert policy.for_type("app.heartbeat") == policy.Policy(qos=0)
     assert policy.for_type("agent.metrics").max_bytes == 64 * 1024
     assert policy.for_type("unknown.type") == policy.DEFAULT
 
