@@ -74,6 +74,14 @@ assert not {'empty-root-password', 'allow-empty-password', 'debug-tweaks', 'seri
 assert 'usermod -p' in image['EXTRA_USERS_PARAMS'] and 'perseus-dev' in image['EXTRA_USERS_PARAMS']
 assert 'xenova_platform_policy' in image['ROOTFS_POSTPROCESS_COMMAND']
 assert 'xenova-platform' in image['IMAGE_INSTALL'].split()
+assert 'tzdata-asia' in image['IMAGE_INSTALL'].split()
+assert 'xenova_set_timezone' in image['ROOTFS_POSTPROCESS_COMMAND']
+assert re.search(r'^xenova_set_timezone\s*\(\)\s*\{', text, re.M)
+for module in ('xenova_vm.py', 'xenova_runtime.py', 'xenova_wifi.py',
+               'xenova_execution.py', 'xenova_recovery.py', 'xenova_domain_identity.py'):
+    assert 'file://' + module in platform['SRC_URI'].split(), module
+    assert selected(platform, module) == LAYER / 'recipes-core/xenova-platform/files' / module
+print('PASS reviewed runtime source selection and Asia/Seoul image postprocess dependency')
 assert "printf 'uninitialized\\n'" in text and 'ln -snf /etc/machine-id' in text
 assert 'ln -snf /dev/null' in text and 'xendomains.service' in text
 assert 'Include /etc/ssh/xenova-auth.conf' in text
