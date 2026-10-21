@@ -314,6 +314,7 @@ def platform_root_ok(root):
         expected['usr/lib/xenova/'+name] = FILES/name
     expected['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
     expected['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
+    expected['etc/modprobe.d/xenova-wifi.conf'] = FILES/'xenova-wifi-modprobe.conf'
     expected['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
     expected['etc/xenova/execution-policy.json'] = FILES/'execution-policy.json'
     expected['usr/lib/systemd/system/xenova-wifi@.service'] = FILES/'xenova-wifi@.service'
@@ -337,6 +338,19 @@ def platform_root_ok(root):
                      'usr/lib/firmware/regulatory.db','usr/lib/firmware/regulatory.db.p7s'):
         if not path(relative).is_file() or not path(relative).stat().st_size:
             raise ValueError('required management wireless firmware missing: '+relative)
+    # 파일 존재 검사만으로 부트 Image와의 ABI 일치까지 보장하지는 않는다.
+    module_tree = path('usr/lib/modules')
+    releases = [p for p in module_tree.iterdir() if p.is_dir()] if module_tree.is_dir() else []
+    if not releases:
+        raise ValueError('required management wireless kernel modules missing')
+    for release in releases:
+        directory = path(str(release.relative_to(root)) + '/kernel/drivers/net/wireless/broadcom/brcm80211/brcmfmac')
+        for name in ('brcmfmac', 'brcmfmac-cyw'):
+            suffixes = {name + suffix for suffix in ('.ko', '.ko.xz', '.ko.gz', '.ko.zst')}
+            candidates = [path(str(p.relative_to(root))) for p in directory.rglob(name + '.ko*')
+                          if p.name in suffixes]
+            if not any(p.is_file() and p.stat().st_size for p in candidates):
+                raise ValueError('required management wireless kernel module missing: ' + name)
     for relative, defines in [
         ('usr/share/xenova/qemu-config-host.h', ('CONFIG_VNC', 'CONFIG_XEN_BACKEND')),
         ('usr/share/xenova/qemu-i386-config-target.h', ('CONFIG_XEN',)),
@@ -424,6 +438,8 @@ def platform_boot_ok(image, table, output):
     script = boot[72:72 + length].decode()
     for marker in ('part uuid mmc ${devnum}:2', 'fatload mmc ${devnum}:1 ${xen_loadaddr} xen',
                    'fdt move ${fdtcontroladdr} ${fdt_addr_r}', 'booti ${xen_loadaddr} - ${fdt_addr_r}',
+                   'fdt rm /soc/mmcnr@7e300000 dmas || exit 1',
+                   'fdt rm /soc/mmcnr@7e300000 dma-names || exit 1',
                    'xenova_debug', 'loglevel=4', 'systemd.show_status=error'):
         if marker not in script:
             raise ValueError('platform lacks validated Xen boot/PARTUUID contract: ' + marker)
