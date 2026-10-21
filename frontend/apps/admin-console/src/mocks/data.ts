@@ -6,7 +6,7 @@ import type { Template, Vm } from '../api/types';
 
 export const MOCK_USER = { user_id: '00000000-0000-4000-8000-000000000001', username: 'admin' };
 /** 로그인 mock 비밀번호. 실제 계정이 아니다 */
-export const MOCK_PASSWORD = 'mock-password';
+export const MOCK_PASSWORD = '1234';
 
 // VM 관리 API 계약 v1 §2.3 예시와 같은 템플릿 3종 (Ubuntu 24.04 · Debian 13 · Zephyr)
 export const TEMPLATES: Template[] = [

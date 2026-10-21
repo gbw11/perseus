@@ -54,7 +54,7 @@ API 타입(`src/api/types.ts`)은 팀 문서를 그대로 옮겼습니다. 문�
 VITE_MOCK=true npm run dev:console    # 또는 .env.local 에 VITE_MOCK=true
 ```
 
-- 로그인: 아이디 `admin`, 비밀번호 `mock-password` (mock 전용 값, `src/mocks/data.ts`)
+- 로그인: 아이디 `admin`, 비밀번호 `1234` (mock 전용 값, `src/mocks/data.ts`)
 - VM 3대(autonomous·manual 은 Zephyr 16 MiB, interaction 은 Debian 13)와 템플릿 3개(Ubuntu 24.04·Debian 13·Zephyr)가 들어 있습니다. 시작·정지·생성·삭제가 메모리에서 동작하고, 새로고침하면 처음 상태로 돌아갑니다.
 - 주행 상태·키 입력은 WS 대신 **표본 시연 시나리오**(`src/mocks/scenario.ts`)로 돕니다: 시연 제어에서 [강제 종료] → MANUAL 인계 → 복구 → AUTO_READY → [자율주행 재개] → AUTO. [인지 끊김 (D5)] 은 모드를 바꾸지 않고 정지 명령만 냅니다. 이벤트·메트릭·프로세스도 mock 이 답합니다.
 - 상태 코드·오류 코드는 실제 API 와 같습니다 — 401 `INVALID_CREDENTIALS`·`INVALID_TOKEN`, 404 `VM_NOT_FOUND`, 409 `INVALID_VM_STATE`·`VM_NAME_CONFLICT`, 422 `VALIDATION_ERROR`(§9 입력값).
