@@ -1,6 +1,6 @@
 # Mosquitto 브로커
 
-VM 에이전트·앱·젯슨·게이트웨이·ESP32·백엔드가 메시지를 주고받는 MQTT 브로커 설정입니다.
+VM 에이전트·앱·젯슨·게이트웨이·백엔드가 메시지를 주고받는 MQTT 브로커 설정입니다. ESP32 는 브로커에 붙지 않고 게이트웨이 시리얼 뒤에 있습니다 (계약 v1.1).
 토픽·계정 권한은 [MQTT 메시지 계약 v1](../../../docs/contracts/mqtt-contract-v1.md) §1·§9 를 따릅니다.
 
 **로컬 Docker 와 dom0 가 같은 설정 파일을 씁니다.** 둘의 차이는 리스너 파일 하나(`listeners/`)뿐입니다.
@@ -49,8 +49,9 @@ bash scripts/check.sh                      # 결과: 통과 15, 실패 0
 | VM 에이전트 | `127.0.0.1:1883` | 그 VM 의 `vm_id` | `XENOVA_AGENT_BROKER_HOST/PORT/USERNAME/PASSWORD` |
 | 앱 (`xenova_mqtt`) | `127.0.0.1:1883` | `autonomous` · `manual` · `message-board` | `XenovaClient(..., username=, password=)` |
 | 젯슨 | `127.0.0.1:1883` | `perception` | |
-| 게이트웨이 · ESP32 | `127.0.0.1:1883` | `gateway` · `esp32` | |
-| 브라우저 | `ws://127.0.0.1:9001` | (계약 v1.1 에서 결정) | |
+| Zephyr 앱 (dom0 vchan 중계가 대신 접속) | `127.0.0.1:1883` | 그 앱의 `app_id` | 계약 4.1 |
+| 게이트웨이 | `127.0.0.1:1883` | `gateway` | |
+| 브라우저 | 직접 붙지 않음 — 백엔드 중계 (시나리오 D2). `ws://127.0.0.1:9001` 은 개발 확인용 | | |
 | 확인·모니터링 | `127.0.0.1:1883` | `observer` (읽기 전용) | |
 
 ## 권한 (acl)
@@ -62,11 +63,10 @@ bash scripts/check.sh                      # 결과: 통과 15, 실패 0
 | VM 에이전트 (`vm_id`) | `xenova/v1/vms/{자기 vm_id}/heartbeat·inventory·metrics·command-result` |
 | 앱·젯슨 (`app_id`) | `xenova/v1/apps/{자기 app_id}/events` |
 | `backend` | `xenova/v1/apps/manual/input`, `xenova/v1/vms/+/command` |
-| `gateway` | `xenova/v1/vehicle/control`, `xenova/v1/apps/vehicle/events` |
-| `esp32` | `xenova/v1/vehicle/status` |
+| `gateway` | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/apps/vehicle/events` |
 | 모든 계정 | `xenova/v1/probes/#` (지연 측정. 계약의 "자기 vm_id 만" 은 payload 조건이라 브로커가 못 거름) |
 
-- 읽기는 개발 단계라 모든 계정이 `xenova/v1/#` 를 읽을 수 있습니다. 계정별 구독 제한은 계약 v1.1 에서 정합니다.
+- 읽기는 개발 단계라 모든 계정이 `xenova/v1/#` 를 읽을 수 있습니다. 계정별 구독 제한은 계약 다음 개정(v1.2)에서 정합니다.
 - 권한 없는 발행은 브로커가 조용히 버립니다 (MQTT 3.1.1 은 발행자에게 오류를 돌려주지 않음). `check.sh` 는 구독 쪽에서 안 오는 것으로 확인합니다.
 
 ## dom0 로 옮길 때 (S15P31E110-152, 인프라 담당)
