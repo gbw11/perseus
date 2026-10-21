@@ -1,5 +1,5 @@
 /**
- * mock 데이터. RC카 시나리오의 VM 3대(자율주행·수동주행 Zephyr, 인터랙션 Debian) + 템플릿.
+ * mock 데이터. RC카 시나리오의 VM 3대(자율주행·수동주행 Zephyr, 네비게이션 Debian) + 템플릿.
  * 모양은 api/types.ts (VM 관리 API 계약 v1 §2.2 §2.3 §3.3) 그대로.
  */
 import type { Template, Vm } from '../api/types';

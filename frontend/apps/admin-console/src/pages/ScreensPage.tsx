@@ -13,7 +13,7 @@ export function ScreensPage() {
     ['모니터 1 — 3분할', '/split'],
     ['모니터 2 — 자율주행 상세', '/detail/autonomous'],
     ['모니터 2 — 수동주행 상세', '/detail/manual'],
-    ['모니터 2 — 인터랙션 상세', '/detail/interaction'],
+    ['모니터 2 — 네비게이션 상세', '/detail/interaction'],
   ] as const;
   return (
     <Card title="모니터 화면 (RC카 시나리오 §5)">

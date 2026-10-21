@@ -2,7 +2,7 @@ import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { LAP_M, poseAt, RADIUS_M, SEGMENTS, STRAIGHT_M } from './track';
 import styles from './screens.module.css';
 
-/** 인터랙션 내비게이션 그림 — 트랙 모양·위치 계산은 ./track */
+/** 네비게이션 그림 — 트랙 모양·위치 계산은 ./track */
 const SCALE = 60;
 const PAD = 30;
 const sx = (x: number) => PAD + (x + RADIUS_M) * SCALE;

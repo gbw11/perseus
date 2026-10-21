@@ -195,7 +195,7 @@ function InteractionDetail() {
       <section className={styles.detailMain}>
         <h2>내비게이션 — 트랙 지도 · 추정 위치</h2>
         {down ? (
-          <p className={styles.dim}>인터랙션 VM 이 내려가 있다. 주행은 영향 없이 계속된다 (격리).</p>
+          <p className={styles.dim}>네비게이션 VM 이 내려가 있다. 주행은 영향 없이 계속된다 (격리).</p>
         ) : (
           <TrackMap large />
         )}

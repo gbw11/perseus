@@ -394,7 +394,7 @@
   }
 }
 
-/* 인터랙션 내비게이션 — 트랙 지도 + 추정 위치 */
+/* 네비게이션 — 트랙 지도 + 추정 위치 */
 .nav {
   display: flex;
   flex-direction: column;

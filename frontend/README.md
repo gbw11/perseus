@@ -42,7 +42,7 @@ npm run lint && npm test && npm run build
 | `/events`                 | W-08 이벤트 타임라인                | events (3초 재조회)                      | -160                     |
 | `/screens`, `/components` | 모니터 바로가기, 컴포넌트           | —                                        |                          |
 
-VM 은 "VM 1·2·3" 이 아니라 역할 이름(자율주행·수동주행·인터랙션)으로 부릅니다 (`src/domain/roles.ts`). 이벤트 분류·문구는 `src/domain/events.ts`.
+VM 은 "VM 1·2·3" 이 아니라 역할 이름(자율주행·수동주행·네비게이션)으로 부릅니다 (`src/domain/roles.ts`). 이벤트 분류·문구는 `src/domain/events.ts`.
 
 API 타입(`src/api/types.ts`)은 팀 문서를 그대로 옮겼습니다. 문서가 바뀌면 타입도 같이 고칩니다.
 

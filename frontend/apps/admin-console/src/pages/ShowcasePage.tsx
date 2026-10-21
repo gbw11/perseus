@@ -42,7 +42,7 @@ export function ShowcasePage() {
         actions={<Button size="sm">동작</Button>}
       >
         accent 로 왼쪽 테두리 색을 준다. 자율주행 <code>--x-app-autonomous</code>, 수동주행{' '}
-        <code>--x-app-manual</code>, 인터랙션 <code>--x-app-interaction</code>.
+        <code>--x-app-manual</code>, 네비게이션 <code>--x-app-interaction</code>.
       </Card>
 
       <Card title="색 토큰">

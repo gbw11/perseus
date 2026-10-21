@@ -73,7 +73,7 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
     expect(last.control?.mode).toBe('MANUAL');
   });
 
-  it('인터랙션을 죽여도 주행은 그대로 (격리), 수동주행이 제어 중에 죽으면 SAFE_STOP', () => {
+  it('네비게이션을 죽여도 주행은 그대로 (격리), 수동주행이 제어 중에 죽으면 SAFE_STOP', () => {
     forceKill('message-board');
     expect(last.control).toMatchObject({ mode: 'AUTO', generation: 4 });
     expect(last.apps['message-board']?.heartbeat_ago_ms).toBeNull();

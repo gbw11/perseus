@@ -35,8 +35,8 @@ export const ROLES: Record<AppId, Role> = {
   },
   'message-board': {
     app: 'message-board',
-    title: '인터랙션 VM',
-    short: '인터랙션',
+    title: '네비게이션 VM',
+    short: '네비게이션',
     color: 'var(--x-app-interaction)',
     driving: false,
   },
@@ -77,7 +77,7 @@ export const MODE_HEALTH: Record<DriveMode, Health> = {
 
 /**
  * 앱 칸 상태 배지 (화면 정의서 §3 배지 4종).
- * VM 이 crashed 면 장애, 실행 중인데 명령(주행 앱)·생존 신호(인터랙션)가 없으면 복구 중, 운영자가 끈 VM 은 정지.
+ * VM 이 crashed 면 장애, 실행 중인데 명령(주행 앱)·생존 신호(네비게이션)가 없으면 복구 중, 운영자가 끈 VM 은 정지.
  */
 export function appHealth(role: Role, vm: Vm | undefined, app: DriveApp | undefined): Health {
   if (vm && vm.state !== 'running') return STATE_HEALTH[vm.state];

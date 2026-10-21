@@ -67,7 +67,7 @@ describe('applyDriveState', () => {
     expect(t.commands.manual).toEqual({ generation: 2, v_mps: 0.4, steer_rad: 0.1 });
   });
 
-  it('주행 앱은 명령 신선도, 인터랙션 앱은 생존 신호로 상태를 정한다', () => {
+  it('주행 앱은 명령 신선도, 네비게이션 앱은 생존 신호로 상태를 정한다', () => {
     const t = applyDriveState(emptyTelemetry(0), state(), 1000);
     expect(t.apps.manual.health).toBe('ok');
     expect(t.apps.autonomous.health).toBe('fault');

@@ -3,7 +3,7 @@
  * 규칙은 MQTT 계약 v1.2 §5.2·§6, RC카 시나리오 §4 (시간만 줄임):
  *   - 자율주행 강제 종료 → 명령 끊김 → MANUAL(인계) → 재시작(복구 중) → 3초 연속 정상 → AUTO_READY
  *   - [재개] → drive.resume.accepted(3초 카운트다운) → AUTO, 그 사이 자율주행이 다시 죽으면 drive.resume.cancelled
- *   - 수동주행이 제어 중 죽으면 SAFE_STOP, 돌아오면 MANUAL. 인터랙션이 죽어도 주행은 그대로 (격리)
+ *   - 수동주행이 제어 중 죽으면 SAFE_STOP, 돌아오면 MANUAL. 네비게이션이 죽어도 주행은 그대로 (격리)
  *   - 인지 끊김(D5)은 모드를 바꾸지 않는다: 자율주행이 정지 명령(v=0)을 낸다
  */
 import type { DriveApp, DriveKey, DriveMode, DriveState, InputResult } from '../api/drive';
@@ -55,7 +55,7 @@ const vmOf = (target: Target) =>
 const NAME: Record<Target, string> = {
   autonomous: '자율주행',
   manual: '수동주행',
-  'message-board': '인터랙션',
+  'message-board': '네비게이션',
 };
 
 let seq = 0;

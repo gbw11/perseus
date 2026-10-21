@@ -19,7 +19,7 @@ export interface AppMeta {
   id: AppId;
   /** 화면 이름 */
   title: string;
-  /** MQTT 계약의 app_id (인터랙션 VM 은 message-board) */
+  /** MQTT 계약의 app_id (네비게이션 VM 은 message-board) */
   topicAppId: 'autonomous' | 'manual' | 'message-board';
   guest: 'zephyr' | 'debian';
   role: string;
@@ -42,10 +42,10 @@ export const APPS: Record<AppId, AppMeta> = {
   },
   interaction: {
     id: 'interaction',
-    title: '인터랙션',
+    title: '네비게이션',
     topicAppId: 'message-board',
     guest: 'debian',
-    role: '알림·관제 메시지·재개 요청',
+    role: '트랙 지도·추정 위치·알림',
   },
 };
 

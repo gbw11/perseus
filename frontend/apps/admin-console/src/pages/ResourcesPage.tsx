@@ -34,7 +34,7 @@ const DOMAINS: { id: Domain; title: string; sub: string; color: string; dedicate
 ];
 const CORES = [0, 1, 2, 3];
 
-/** RC카 시나리오 §2: 자율·수동은 전용 1코어씩, 인터랙션은 남은 코어 */
+/** RC카 시나리오 §2: 자율·수동은 전용 1코어씩, 네비게이션은 남은 코어 */
 const PINS: Record<Domain, number[]> = { dom0: [0], autonomous: [1], manual: [2], 'message-board': [3] };
 const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512, 'message-board': 256 };
 const DOM0_MEMORY_MIB = 1024;
@@ -99,7 +99,7 @@ export function ResourcesPage() {
           </tbody>
         </table>
         <p className={styles.dim}>
-          자율주행·수동주행은 코어를 혼자 쓴다 — 인터랙션이 바빠져도 주행 명령 주기(50 Hz)가 흔들리지 않게.
+          자율주행·수동주행은 코어를 혼자 쓴다 — 네비게이션이 바빠져도 주행 명령 주기(50 Hz)가 흔들리지 않게.
         </p>
       </Card>
 

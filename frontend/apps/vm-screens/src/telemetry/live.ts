@@ -30,7 +30,7 @@ export interface DriveStateDto {
     flags: { estop: boolean; watchdog: boolean; obstacle: boolean } | null;
     received_ago_ms: number;
   } | null;
-  /** app_id 별. 인터랙션 VM 은 message-board */
+  /** app_id 별. 네비게이션 VM 은 message-board */
   apps: Record<string, DriveAppDto>;
   perception: {
     valid: boolean;
@@ -85,7 +85,7 @@ function heartbeatFresh(dto: DriveAppDto): boolean {
   return dto.heartbeat_ago_ms !== null && dto.heartbeat_ago_ms <= HEARTBEAT_STALE_MS;
 }
 
-/** 주행 앱은 명령 신선도(100 ms, 백엔드가 판정), 인터랙션 앱은 생존 신호로 상태를 정한다 */
+/** 주행 앱은 명령 신선도(100 ms, 백엔드가 판정), 네비게이션 앱은 생존 신호로 상태를 정한다 */
 function healthOf(id: AppId, dto: DriveAppDto | undefined): Health {
   if (!dto) return 'stopped';
   if (dto.heartbeat_state === 'error' && heartbeatFresh(dto)) return 'fault';
@@ -208,7 +208,7 @@ const MAX_EVENTS = 40;
 const APP_TITLE: Record<string, string> = {
   autonomous: '자율주행',
   manual: '수동주행',
-  'message-board': '인터랙션',
+  'message-board': '네비게이션',
 };
 
 function text(event: EventDto): string {

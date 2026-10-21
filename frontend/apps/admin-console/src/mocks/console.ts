@@ -50,7 +50,7 @@ function shellReply(name: string, line: string, startedAt: number): string {
       ].join('\n');
     case 'systemctl':
       return [
-        '● message-board.service - Xenova 인터랙션 앱',
+        '● message-board.service - Xenova 네비게이션 앱',
         '     Loaded: loaded (/etc/systemd/system/message-board.service; enabled)',
         '     Active: active (running)',
         '',
