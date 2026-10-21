@@ -1,9 +1,8 @@
-import { Card, StatusBadge } from '@xenova/ui';
+import { CameraView, Card, StatusBadge } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
 import type { DriveState } from '../api/drive';
 import { useEvents, useVms } from '../api/queries';
-import { CameraFeed } from '../camera/CameraFeed';
 import type { Vm } from '../api/types';
 import { clock, describe } from '../domain/events';
 import {
@@ -24,6 +23,10 @@ import {
 } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
+
+const MOCK = import.meta.env.VITE_MOCK === 'true';
+/** 네비게이션 VM 이 내는 카메라 AI 감지 영상 (MJPEG). 주소·형식은 계약 미정 */
+const CAMERA_URL: string = import.meta.env.VITE_CAMERA_URL ?? '';
 
 /**
  * W-02 대시보드 — 주행 통합 상태 (화면 정의서 W-02, UI-09). 데모 내내 띄워 두는 화면.
@@ -89,8 +92,36 @@ export function DashboardPage() {
         ))}
       </div>
 
-      <div className={styles.cols32}>
-        <CameraFeed drive={drive} />
+      <div className={styles.cols2}>
+        <Card title="차량 상태" actions={<span className={styles.dim}>{ago(vehicle?.received_ago_ms)}</span>}>
+          <div className={styles.tiles}>
+            <div className={styles.tile}>
+              <small>속도</small>
+              <span className={styles.big}>{plain(vehicle?.v_mps)}</span>
+              <span className={styles.unit}>m/s</span>
+            </div>
+            <div className={styles.tile}>
+              <small>조향</small>
+              <span className={styles.big}>{signed(vehicle?.steer_rad)}</span>
+              <span className={styles.unit}>rad</span>
+            </div>
+          </div>
+          <div className={styles.rows}>
+            <div>
+              <span>적용된 세대</span>
+              <span>{vehicle?.applied_generation ?? '—'}</span>
+            </div>
+            {SAFETY.map((f) => (
+              <div key={f.key} title={f.hint}>
+                <span>{f.label}</span>
+                <span style={flags?.[f.key] ? { color: 'var(--x-fault)' } : undefined}>
+                  {flags ? (flags[f.key] ? f.on : f.off) : '—'}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className={styles.dim}>항목에 마우스를 올리면 뜻이 나온다. 셋 중 하나라도 켜지면 차는 선다.</p>
+        </Card>
         <Card
           title="인지 (젯슨)"
           actions={
@@ -133,60 +164,27 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      <div className={styles.cols2}>
-        <Card title="차량 상태" actions={<span className={styles.dim}>{ago(vehicle?.received_ago_ms)}</span>}>
-          <div className={styles.tiles}>
-            <div className={styles.tile}>
-              <small>속도</small>
-              <span className={styles.big}>{plain(vehicle?.v_mps)}</span>
-              <span className={styles.unit}>m/s</span>
-            </div>
-            <div className={styles.tile}>
-              <small>조향</small>
-              <span className={styles.big}>{signed(vehicle?.steer_rad)}</span>
-              <span className={styles.unit}>rad</span>
-            </div>
-          </div>
-          <div className={styles.rows}>
-            <div>
-              <span>적용된 세대</span>
-              <span>{vehicle?.applied_generation ?? '—'}</span>
-            </div>
-            {SAFETY.map((f) => (
-              <div key={f.key} title={f.hint}>
-                <span>{f.label}</span>
-                <span style={flags?.[f.key] ? { color: 'var(--x-fault)' } : undefined}>
-                  {flags ? (flags[f.key] ? f.on : f.off) : '—'}
+      <Card title="최근 이벤트" actions={<Link to="/events">이벤트 화면 →</Link>}>
+        {(events.data?.items ?? []).slice(0, 5).map((event) => {
+          const { title, detail } = describe(event, vmName);
+          return (
+            <div key={event.event_id} className={styles.rows}>
+              <div>
+                <span className={styles.mono}>
+                  {clock(event.occurred_at)}{' '}
+                  <span className={`${styles.sev} ${styles[`sev${event.severity}`]}`}>{event.severity}</span>
+                </span>
+                <span>
+                  {title}
+                  {detail && <span className={styles.dim}> · {detail}</span>}
                 </span>
               </div>
-            ))}
-          </div>
-          <p className={styles.dim}>항목에 마우스를 올리면 뜻이 나온다. 셋 중 하나라도 켜지면 차는 선다.</p>
-        </Card>
-        <Card title="최근 이벤트" actions={<Link to="/events">이벤트 화면 →</Link>}>
-          {(events.data?.items ?? []).slice(0, 5).map((event) => {
-            const { title, detail } = describe(event, vmName);
-            return (
-              <div key={event.event_id} className={styles.rows}>
-                <div>
-                  <span className={styles.mono}>
-                    {clock(event.occurred_at)}{' '}
-                    <span className={`${styles.sev} ${styles[`sev${event.severity}`]}`}>
-                      {event.severity}
-                    </span>
-                  </span>
-                  <span>
-                    {title}
-                    {detail && <span className={styles.dim}> · {detail}</span>}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-          {events.data?.items.length === 0 && <p className={styles.dim}>이벤트 없음</p>}
-          {events.error && <p className={styles.dim}>이벤트를 불러오지 못했다</p>}
-        </Card>
-      </div>
+            </div>
+          );
+        })}
+        {events.data?.items.length === 0 && <p className={styles.dim}>이벤트 없음</p>}
+        {events.error && <p className={styles.dim}>이벤트를 불러오지 못했다</p>}
+      </Card>
     </div>
   );
 }
@@ -241,24 +239,56 @@ function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: Dr
           </div>
         </div>
       ) : (
-        <div className={styles.rows}>
-          <div>
-            <span>app.heartbeat</span>
-            <span>{ago(state?.heartbeat_ago_ms)}</span>
+        <>
+          <CameraView
+            compact
+            mock={MOCK}
+            streamUrl={CAMERA_URL || undefined}
+            down={
+              vm && vm.state !== 'running'
+                ? 'VM 중지 — 영상 없음 (주행은 그대로)'
+                : health === 'fault' || health === 'recovering'
+                  ? '앱 응답 없음 — 영상 없음 (주행은 그대로)'
+                  : null
+            }
+            motion={{
+              v: drive?.vehicle?.v_mps ?? 0,
+              steer: drive?.vehicle?.steer_rad ?? 0,
+              laneOffset: drive?.perception?.valid ? (drive.perception.lane_offset_m ?? 0) : 0,
+              obstacle: !!drive?.vehicle?.flags?.obstacle || (drive?.perception?.obstacle_count ?? 0) > 0,
+            }}
+            stats={[
+              {
+                label: '장애물',
+                value: String(drive?.perception?.obstacle_count ?? '—'),
+                warn: !!drive?.perception?.obstacle_count,
+              },
+              {
+                label: '정지',
+                value: drive?.perception?.stop ? '예' : '아니오',
+                warn: !!drive?.perception?.stop,
+              },
+            ]}
+          />
+          <div className={styles.rows}>
+            <div>
+              <span>app.heartbeat</span>
+              <span>{ago(state?.heartbeat_ago_ms)}</span>
+            </div>
+            <div>
+              <span>자율주행 재개</span>
+              <span>
+                {drive?.resume
+                  ? `${Math.max(1, Math.ceil(drive.resume.remaining_ms / 1000))}초 뒤 자율주행으로 전환`
+                  : drive?.control?.mode === 'AUTO_READY'
+                    ? '가능 — 시연 제어에서'
+                    : drive?.control?.mode === 'AUTO'
+                      ? '자율주행 중'
+                      : '대기'}
+              </span>
+            </div>
           </div>
-          <div>
-            <span>자율주행 재개</span>
-            <span>
-              {drive?.resume
-                ? `${Math.max(1, Math.ceil(drive.resume.remaining_ms / 1000))}초 뒤 자율주행으로 전환`
-                : drive?.control?.mode === 'AUTO_READY'
-                  ? '가능 — 시연 제어에서'
-                  : drive?.control?.mode === 'AUTO'
-                    ? '자율주행 중'
-                    : '대기'}
-            </span>
-          </div>
-        </div>
+        </>
       )}
     </Card>
   );

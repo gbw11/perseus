@@ -2,7 +2,7 @@ import { StatusBadge } from '@xenova/ui';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { APPS, type AppId } from '../telemetry/types';
 import { seconds } from './format';
-import { TrackMap } from './TrackMap';
+import { NavCamera } from './NavCamera';
 import styles from './screens.module.css';
 
 const ACCENT: Record<AppId, string> = {
@@ -127,26 +127,22 @@ function DriveSummary({ id }: { id: 'autonomous' | 'manual' }) {
 
 function InteractionSummary() {
   const { telemetry: t } = useTelemetry();
-  if (t.apps.interaction.health === 'fault' || t.apps.interaction.domain !== 'running') {
-    return (
-      <p className={styles.dim}>
-        화면 없음 — VM {t.apps.interaction.domain === 'booting' ? '재시작 중' : '중지됨'}. 주행은 영향 없이
-        계속된다.
-      </p>
-    );
-  }
+  const down = t.apps.interaction.health === 'fault' || t.apps.interaction.domain !== 'running';
   return (
     <>
-      <TrackMap />
-      <ResumeState />
-      <h3 className={styles.dim}>최근 알림</h3>
-      <ul className={styles.feed}>
-        {t.events.slice(0, 3).map((event) => (
-          <li key={event.id} className={styles[`ev_${event.level}`]}>
-            {event.text}
-          </li>
-        ))}
-      </ul>
+      <NavCamera compact />
+      {!down && (
+        <>
+          <ResumeState />
+          <ul className={styles.feed}>
+            {t.events.slice(0, 2).map((event) => (
+              <li key={event.id} className={styles[`ev_${event.level}`]}>
+                {event.text}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </>
   );
 }

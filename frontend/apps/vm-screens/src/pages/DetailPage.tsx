@@ -2,6 +2,7 @@ import { StatusBadge } from '@xenova/ui';
 import { Navigate, useParams } from 'react-router';
 import { ResumeState } from '../components/AppPanel';
 import { ModeBar } from '../components/ModeBar';
+import { NavCamera } from '../components/NavCamera';
 import { TrackMap } from '../components/TrackMap';
 import { mps, rad, seconds } from '../components/format';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
@@ -193,14 +194,12 @@ function InteractionDetail() {
   return (
     <>
       <section className={styles.detailMain}>
-        <h2>내비게이션 — 트랙 지도 · 추정 위치</h2>
-        {down ? (
-          <p className={styles.dim}>네비게이션 VM 이 내려가 있다. 주행은 영향 없이 계속된다 (격리).</p>
-        ) : (
-          <TrackMap large />
-        )}
+        <h2>카메라 · AI 장애물 감지</h2>
+        <NavCamera />
       </section>
       <section className={styles.detailSide}>
+        <h2>트랙 지도 · 추정 위치</h2>
+        {down ? <p className={styles.dim}>VM 이 내려가 있다 — 주행은 그대로 (격리).</p> : <TrackMap />}
         <h2>자율주행 재개 상태</h2>
         <ResumeState />
         <p className={styles.dim}>

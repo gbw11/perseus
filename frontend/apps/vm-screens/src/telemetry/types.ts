@@ -45,7 +45,7 @@ export const APPS: Record<AppId, AppMeta> = {
     title: '네비게이션',
     topicAppId: 'message-board',
     guest: 'debian',
-    role: '트랙 지도·추정 위치·알림',
+    role: '카메라 AI 장애물 감지·트랙 지도·알림',
   },
 };
 

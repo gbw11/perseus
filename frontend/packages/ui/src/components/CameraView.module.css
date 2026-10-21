@@ -45,7 +45,7 @@
   border-radius: 50%;
   background: var(--x-fault);
 }
-.lost {
+.alert {
   position: absolute;
   top: var(--x-space-3);
   right: var(--x-space-3);
@@ -84,8 +84,19 @@
 .warn {
   color: var(--x-fault);
 }
-.hint {
-  margin: var(--x-space-2) 0 0;
+.retry {
+  padding: 4px 12px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  color: var(--x-text);
+  font: inherit;
+  cursor: pointer;
+}
+.compact .overlay {
+  gap: var(--x-space-2);
   font-size: var(--x-text-xs);
-  color: var(--x-text-muted);
+}
+.compact .alert {
+  font-size: var(--x-text-xs);
 }
