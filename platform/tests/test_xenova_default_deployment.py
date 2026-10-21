@@ -29,6 +29,17 @@ class DefaultDeploymentTest(unittest.TestCase):
         self.assertTrue(defaults["instances"][0]["autostart"])
         self.assertEqual(defaults["instances"][0]["ipv4"], "192.168.77.20")
 
+    def test_factory_versions_match_selected_catalog_and_linux_recipes(self):
+        selected = json.loads((ROOT / "platform/guests/default-templates.lock.json").read_text())["templates"]
+        defaults = json.loads((FILES / "defaults.json").read_text())
+        by_id = {e["template_id"]: e for e in selected}
+        for record in defaults["instances"] + defaults["firmware_instances"]:
+            self.assertEqual(record["template_version"], by_id[record["template_id"]]["version"])
+        for entry in selected:
+            if entry["guest_kind"] == "linux":
+                recipe = ROOT / "platform/guests/linux" / entry["id"] / "recipe.json"
+                self.assertEqual(json.loads(recipe.read_text())["version"], entry["version"])
+
     def test_capacity_separates_retained_ubuntu_from_default_disks(self):
         templates = [{"logical_bytes": 8 * contract.GIB, "allocated_bytes": 1024, "boot_bytes": 4096}] * 2
         result = contract.capacity(4 * contract.GIB, [templates[1]], retained_templates=templates,
@@ -51,7 +62,7 @@ class DefaultDeploymentTest(unittest.TestCase):
         manifest = source / "firmware.json"
         meta = json.loads(manifest.read_text())
         lock = json.loads((ROOT / "platform/guests/zephyr/starter.lock.json").read_text())
-        meta.update(id=lock["id"], kind="zephyr-xen-firmware", version=lock["version"])
+        meta.update(id=lock["id"], kind="zephyr-xen-firmware", version=lock["version"], template_version="1.0.1")
         meta["source"].update({k: lock[k] for k in ("app", "app_files", "app_source_sha256", "zephyr_commit", "sdk_version")})
         meta["source"]["source_revision"] = "sha256:" + lock["app_source_sha256"]
         manifest.chmod(0o644)
@@ -164,7 +175,7 @@ class DefaultDeploymentTest(unittest.TestCase):
             boot_path.write_text(json.dumps(boot))
             boot_path.chmod(0o444)
             names = ("root.raw", "Image", "initrd", "kernel.config", "boot.json")
-            meta.update(version="1.0.0", files={n: {"sha256": assemble.sha(directory / n),
+            meta.update(version="1.0.1", files={n: {"sha256": assemble.sha(directory / n),
                         "bytes": (directory / n).stat().st_size} for n in names})
             path = directory / "template.json"
             path.write_text(json.dumps(meta))
@@ -173,5 +184,5 @@ class DefaultDeploymentTest(unittest.TestCase):
         rows = catalog.entries(board.data)
         self.assertEqual({e["template_id"] for e in rows},
                          {"ubuntu-24.04-arm64", "debian-13-arm64", "zephyr-xenvm-starter-arm64"})
-        self.assertTrue(all(e["template_version"] == "1.0.0" for e in rows))
+        self.assertTrue(all(e["template_version"] == "1.0.1" for e in rows))
         self.assertFalse((board.data / "seeds/ubuntu-dev").exists())

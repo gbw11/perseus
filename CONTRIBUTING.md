@@ -60,7 +60,10 @@ S15P31E110/
 │   │   ├── dom0-manager/     # Python 제어 계층 (하이퍼바이저 추상화·복구 엔진)
 │   │   ├── vm-agent/         # VM 에이전트
 │   │   └── display/          # dom0 표시 서비스 (화면 라우터 수신측·키오스크)
-│   ├── apps/                 # VM 애플리케이션 (RC카 시나리오 앱)
+│   ├── apps/                 # VM 애플리케이션 (RC카 시나리오 앱, 폴더 이름 = MQTT app_id)
+│   │   ├── autonomous/       # 자율주행 VM
+│   │   ├── manual/           # 수동주행 VM
+│   │   └── message-board/    # 메시지 보드 VM
 │   ├── deploy/               # dom0 서비스 등록·배포 설정
 │   ├── scripts/              # 빌드·검증 스크립트
 │   └── tests/                # 플랫폼 테스트·픽스처

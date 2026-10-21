@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>수동주행 테스트 화면</title>
+<!-- 개발용 화면: 브라우저가 MQTT over WebSocket 으로 브로커에 직접 붙어 백엔드(drive.input)·게이트웨이(vehicle.control)를 흉내 내고
+     수동주행 앱의 drive.command 를 보여 준다. 계약: docs/contracts/mqtt-contract-v1.md 2·5·7장 -->
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --line: #dfe2e7; --text: #1b1f24; --muted: #66707c;
+  --accent: #2f6fde; --ok: #1f9d55; --warn: #c27c0e; --bad: #d64545; --key: #eef1f5; --key-on: #2f6fde;
+  --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418; --panel: #1a1e24; --line: #2b313a; --text: #e6e9ee; --muted: #8b95a3;
+    --accent: #5b8ff0; --ok: #3ccf7a; --warn: #e3a33a; --bad: #ef6b6b; --key: #242a33; --key-on: #5b8ff0;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, "Malgun Gothic", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 16px; margin: 0 8px 0 0; }
+header input { font: 13px var(--mono); padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); width: 220px; }
+button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--key); color: var(--text); cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.ok .dot { background: var(--ok); } .warn .dot { background: var(--warn); } .bad .dot { background: var(--bad); }
+main { display: grid; gap: 16px; padding: 16px; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); max-width: 1280px; margin: 0 auto; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+@media (max-width: 520px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stat { border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.stat .k { font-size: 12px; color: var(--muted); }
+.stat .v { font: 600 22px var(--mono); margin-top: 2px; white-space: nowrap; }
+.stat .v small { font-size: 12px; color: var(--muted); font-weight: 400; }
+.viz { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 14px; align-items: center; }
+@media (max-width: 520px) { .viz { grid-template-columns: 1fr; } }
+svg.car { width: 100%; max-width: 200px; height: auto; display: block; margin: 0 auto; }
+canvas { width: 100%; height: 150px; display: block; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.legend i { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 5px; }
+.pad { display: grid; grid-template-columns: repeat(3, 64px); grid-template-rows: repeat(2, 56px); gap: 8px; justify-content: center; margin: 6px 0 12px; user-select: none; touch-action: none; }
+.pad button { font-size: 20px; padding: 0; }
+.pad button.on, .brake.on { background: var(--key-on); border-color: var(--key-on); color: #fff; }
+.brake { width: 100%; margin-bottom: 8px; }
+.hint { color: var(--muted); font-size: 12px; }
+.modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.modes button.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+pre { font: 12px/1.4 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 0; overflow: auto; max-height: 260px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.full { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>수동주행 앱 테스트</h1>
+  <input id="url" value="ws://localhost:9001" aria-label="브로커 WebSocket 주소">
+  <button id="connect" class="primary">연결</button>
+  <span id="conn" class="pill"><span class="dot"></span><span>연결 안 됨</span></span>
+  <span id="cmdState" class="pill"><span class="dot"></span><span>drive.command 없음</span></span>
+  <span id="hbState" class="pill" title="app.heartbeat (1초, 3초 못 받으면 끊김)"><span class="dot"></span><span>앱 생존 신호 없음</span></span>
+</header>
+
+<main>
+  <section>
+    <h2>앱 출력 · xenova/v1/apps/manual/events</h2>
+    <div class="stats">
+      <div class="stat"><div class="k">v_mps</div><div class="v" id="v">–</div></div>
+      <div class="stat"><div class="k">steer_rad</div><div class="v" id="steer">–</div></div>
+      <div class="stat"><div class="k">generation</div><div class="v" id="gen">–</div></div>
+      <div class="stat"><div class="k">수신 주기</div><div class="v" id="hz">– <small>Hz</small></div></div>
+    </div>
+    <div class="viz">
+      <svg class="car" viewBox="-100 -130 200 260" aria-label="차량 조향·속도">
+        <line id="arrow" x1="0" y1="-70" x2="0" y2="-70" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/>
+        <rect x="-45" y="-90" width="90" height="180" rx="18" fill="var(--key)" stroke="var(--line)" stroke-width="2"/>
+        <g id="wheelL" transform="translate(-52,-55)"><rect x="-9" y="-20" width="18" height="40" rx="4" fill="var(--text)"/></g>
+        <g id="wheelR" transform="translate(52,-55)"><rect x="-9" y="-20" width="18" height="40" rx="4" fill="var(--text)"/></g>
+        <rect x="-61" y="35" width="18" height="40" rx="4" fill="var(--text)"/>
+        <rect x="43" y="35" width="18" height="40" rx="4" fill="var(--text)"/>
+        <text id="carLabel" x="0" y="8" text-anchor="middle" font-size="16" fill="var(--muted)">정지</text>
+      </svg>
+      <div>
+        <canvas id="chart" width="600" height="150"></canvas>
+        <div class="legend"><span><i style="background:var(--accent)"></i>v_mps</span><span><i style="background:var(--warn)"></i>steer_rad</span><span>최근 10초</span></div>
+      </div>
+    </div>
+    <div class="row hint" id="genWarn"></div>
+  </section>
+
+  <section>
+    <h2>입력 · 백엔드 목 (drive.input 20 Hz)</h2>
+    <div class="pad" id="pad">
+      <span></span><button data-key="up" aria-label="전진">▲</button><span></span>
+      <button data-key="left" aria-label="왼쪽">◀</button><button data-key="down" aria-label="후진">▼</button><button data-key="right" aria-label="오른쪽">▶</button>
+    </div>
+    <button class="brake" data-key="brake">브레이크 (Space)</button>
+    <div class="hint">방향키·WASD·Space 를 누르고 있는 동안 보냅니다. 떼면 <code>keys: []</code> 한 번.</div>
+    <div class="row"><span class="hint">보내는 키</span><code id="keys">[]</code></div>
+
+    <h2 style="margin-top:20px">게이트웨이 목 (vehicle.control, retained)</h2>
+    <div class="modes" id="modes">
+      <button data-mode="MANUAL">MANUAL</button>
+      <button data-mode="AUTO">AUTO</button>
+      <button data-mode="AUTO_READY">AUTO_READY</button>
+      <button data-mode="SAFE_STOP">SAFE_STOP</button>
+    </div>
+    <div class="row"><span class="hint">현재 세대</span><code id="ctrlGen">없음</code><button id="clearCtrl">retained 지우기</button></div>
+  </section>
+
+  <section class="full">
+    <h2>마지막 drive.command 봉투</h2>
+    <pre id="raw">–</pre>
+  </section>
+</main>
+
+<script>
+const PREFIX = "xenova/v1";
+const T = {
+  command: `${PREFIX}/apps/manual/events`,
+  input: `${PREFIX}/apps/manual/input`,
+  control: `${PREFIX}/vehicle/control`,
+};
+const ACTIVE_APP = { AUTO: "autonomous", MANUAL: "manual", AUTO_READY: "manual", SAFE_STOP: null };
+const KEYMAP = { ArrowUp: "up", w: "up", W: "up", ArrowDown: "down", s: "down", S: "down",
+  ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right", " ": "brake" };
+const $ = (id) => document.getElementById(id);
+
+// 계약 2장 봉투. 발행자마다 boot_id·agent_instance_id 를 페이지 로드마다 새로 만들고 seq 는 토픽별로 센다
+function publisher(sourceId) {
+  const run = { boot_id: crypto.randomUUID(), agent_instance_id: crypto.randomUUID() };
+  const seq = {};
+  return (topic, type, payload) => {
+    seq[topic] = (seq[topic] || 0) + 1;
+    return { schema_version: "1.0", message_id: crypto.randomUUID(), source_id: sourceId, ...run,
+      type, seq: seq[topic], sent_at: new Date().toISOString(), payload };
+  };
+}
+const backendEnvelope = publisher("dom0-server");
+const gatewayEnvelope = publisher("dom0-gateway");
+
+let client = null;
+function setPill(el, cls, text) { el.className = `pill ${cls}`; el.lastElementChild.textContent = text; }
+
+$("connect").onclick = () => {
+  if (client) { client.end(true); client = null; }
+  client = mqtt.connect($("url").value, { clean: true, reconnectPeriod: 1000, clientId: `test-ui-${crypto.randomUUID().slice(0, 8)}` });
+  setPill($("conn"), "warn", "연결 중");
+  client.on("connect", () => {
+    setPill($("conn"), "ok", "연결됨");
+    client.subscribe([T.command, T.control], { qos: 0 });
+  });
+  client.on("reconnect", () => setPill($("conn"), "warn", "재연결 중"));
+  client.on("close", () => setPill($("conn"), "bad", "연결 끊김"));
+  client.on("error", (e) => setPill($("conn"), "bad", `오류: ${e.message}`));
+  client.on("message", onMessage);
+};
+
+function publish(topic, envelope, opts) {
+  if (client && client.connected) client.publish(topic, JSON.stringify(envelope), opts);
+}
+
+// --- 입력 (백엔드 목) ------------------------------------------------------
+const held = new Set();
+let inputTimer = null;
+function keysNow() { return ["up", "down", "left", "right", "brake"].filter((k) => held.has(k)); }
+function sendInput() { publish(T.input, backendEnvelope(T.input, "drive.input", { keys: keysNow() }), { qos: 0 }); }
+function refreshKeys() {
+  const keys = keysNow();
+  $("keys").textContent = JSON.stringify(keys);
+  document.querySelectorAll("[data-key]").forEach((b) => b.classList.toggle("on", held.has(b.dataset.key)));
+  if (keys.length && !inputTimer) { sendInput(); inputTimer = setInterval(sendInput, 50); }
+  if (!keys.length && inputTimer) { clearInterval(inputTimer); inputTimer = null; sendInput(); }
+}
+function press(key, on) { if (on) held.add(key); else held.delete(key); refreshKeys(); }
+
+addEventListener("keydown", (e) => { const k = KEYMAP[e.key]; if (k && e.target.tagName !== "INPUT") { e.preventDefault(); if (!held.has(k)) press(k, true); } });
+addEventListener("keyup", (e) => { const k = KEYMAP[e.key]; if (k) press(k, false); });
+addEventListener("blur", () => { held.clear(); refreshKeys(); });
+document.querySelectorAll("[data-key]").forEach((b) => {
+  b.addEventListener("pointerdown", (e) => { b.setPointerCapture(e.pointerId); press(b.dataset.key, true); });
+  b.addEventListener("pointerup", () => press(b.dataset.key, false));
+  b.addEventListener("pointercancel", () => press(b.dataset.key, false));
+});
+
+// --- 게이트웨이 목 ---------------------------------------------------------
+let control = null;
+document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => {
+  const mode = b.dataset.mode;
+  const generation = (control ? control.generation : 0) + 1;
+  publish(T.control, gatewayEnvelope(T.control, "vehicle.control",
+    { generation, mode, active_app: ACTIVE_APP[mode], active_vm_id: null, reason: "test_ui" }), { qos: 1, retain: true });
+});
+$("clearCtrl").onclick = () => { if (client) client.publish(T.control, "", { qos: 1, retain: true }); };
+
+// --- 앱 출력 ---------------------------------------------------------------
+let last = null, lastAt = 0;
+let heartbeat = null, heartbeatAt = 0;
+const arrivals = [];
+const history = [];
+function onMessage(topic, buf) {
+  const text = buf.toString();
+  if (topic === T.control) {
+    control = text ? JSON.parse(text).payload : null;
+    $("ctrlGen").textContent = control ? `${control.generation} · ${control.mode}` : "없음";
+    document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("active", control && b.dataset.mode === control.mode));
+    return;
+  }
+  let env; try { env = JSON.parse(text); } catch { return; }
+  if (env.type === "app.heartbeat") { heartbeat = env.payload; heartbeatAt = performance.now(); return; }
+  if (env.type !== "drive.command") return;
+  const now = performance.now();
+  last = env; lastAt = now;
+  arrivals.push(now);
+  history.push([now, env.payload.v_mps, env.payload.steer_rad]);
+}
+
+function render() {
+  const now = performance.now();
+  while (arrivals.length && now - arrivals[0] > 1000) arrivals.shift();
+  while (history.length && now - history[0][0] > 10000) history.shift();
+  const age = last ? now - lastAt : Infinity;
+  if (!last) setPill($("cmdState"), "", "drive.command 없음");
+  else if (age > 100) setPill($("cmdState"), "bad", `끊김 ${Math.round(age)} ms`);
+  else setPill($("cmdState"), "ok", "수신 중");
+  $("hz").innerHTML = `${arrivals.length} <small>Hz</small>`;
+  // 계약 6.1: 앱 생존 신호는 1초 주기, 3초 못 받으면 끊김
+  const hbAge = heartbeat ? now - heartbeatAt : Infinity;
+  if (!heartbeat) setPill($("hbState"), "", "앱 생존 신호 없음");
+  else if (hbAge > 3000) setPill($("hbState"), "bad", `앱 끊김 ${(hbAge / 1000).toFixed(1)}초`);
+  else setPill($("hbState"), heartbeat.state === "error" ? "bad" : "ok", `앱 ${heartbeat.state} · 가동 ${Math.floor(heartbeat.uptime_s)}초`);
+  if (last) {
+    const p = last.payload;
+    $("v").textContent = p.v_mps.toFixed(2);
+    $("steer").textContent = p.steer_rad.toFixed(2);
+    $("gen").textContent = p.generation;
+    $("raw").textContent = JSON.stringify(last, null, 2);
+    // 앞바퀴: 왼쪽 조향(+)이면 화면에서 반시계
+    const deg = -p.steer_rad * 180 / Math.PI;
+    $("wheelL").setAttribute("transform", `translate(-52,-55) rotate(${deg})`);
+    $("wheelR").setAttribute("transform", `translate(52,-55) rotate(${deg})`);
+    // 진행 방향 화살표: 길이 = |속도|, 기울기 = 조향 (왼쪽 + 는 화면 왼쪽)
+    const len = Math.min(1.5, Math.abs(p.v_mps)) * 35;
+    const dir = p.v_mps >= 0 ? -1 : 1;
+    const arrow = $("arrow");
+    arrow.setAttribute("x1", 0); arrow.setAttribute("y1", dir * 92);
+    arrow.setAttribute("x2", -Math.sin(p.steer_rad) * len);
+    arrow.setAttribute("y2", dir * (92 + Math.cos(p.steer_rad) * len));
+    $("carLabel").textContent = p.v_mps > 0 ? "전진" : p.v_mps < 0 ? "후진" : "정지";
+    const warn = control && p.generation !== control.generation
+      ? `⚠ 명령 세대 ${p.generation} ≠ 게이트웨이 세대 ${control.generation} — ESP32 가 버림` : "";
+    $("genWarn").textContent = warn || (control ? "" : "게이트웨이 세대 없음 → generation 0 으로 발행 중 (정상 동작)");
+  }
+  drawChart(now);
+  requestAnimationFrame(render);
+}
+
+function drawChart(now) {
+  const c = $("chart"), ctx = c.getContext("2d");
+  const w = c.clientWidth, h = c.clientHeight, dpr = devicePixelRatio || 1;
+  if (c.width !== w * dpr) { c.width = w * dpr; c.height = h * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const css = getComputedStyle(document.documentElement);
+  const y = (val) => h / 2 - (val / 1.2) * (h / 2 - 6);
+  ctx.strokeStyle = css.getPropertyValue("--line"); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+  for (const [i, color] of [[1, "--accent"], [2, "--warn"]]) {
+    ctx.strokeStyle = css.getPropertyValue(color); ctx.lineWidth = 2; ctx.beginPath();
+    history.forEach((row, n) => { const x = w - (now - row[0]) / 10000 * w; n ? ctx.lineTo(x, y(row[i])) : ctx.moveTo(x, y(row[i])); });
+    ctx.stroke();
+  }
+}
+
+// ?broker=ws://host:port 로 주소를 바꿀 수 있다
+const brokerParam = new URLSearchParams(location.search).get("broker");
+if (brokerParam) $("url").value = brokerParam;
+requestAnimationFrame(render);
+$("connect").click();
+</script>
+</body>
+</html>
