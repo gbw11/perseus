@@ -62,7 +62,7 @@ bash scripts/check.sh                      # 결과: 통과 15, 실패 0
 | --- | --- |
 | VM 에이전트 (`vm_id`) | `xenova/v1/vms/{자기 vm_id}/heartbeat·inventory·metrics·command-result` |
 | 앱·젯슨 (`app_id`) | `xenova/v1/apps/{자기 app_id}/events` |
-| `backend` | `xenova/v1/apps/manual/input`, `xenova/v1/vms/+/command` |
+| `backend` | `xenova/v1/apps/manual/input`, `xenova/v1/console/resume`, `xenova/v1/vms/+/command` |
 | `gateway` | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/apps/vehicle/events` |
 | 모든 계정 | `xenova/v1/probes/#` (지연 측정. 계약의 "자기 vm_id 만" 은 payload 조건이라 브로커가 못 거름) |
 

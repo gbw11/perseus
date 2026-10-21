@@ -68,6 +68,8 @@ delivered backend "$P/vms/$VM_B/heartbeat" "$VM_A" && bad "에이전트가 남�
 # 4. 백엔드·차량 쪽
 delivered "$VM_A" "$P/vms/$VM_A/command" backend && ok "백엔드 → 에이전트 command" || bad "백엔드 → 에이전트 command"
 delivered manual "$P/apps/manual/input" backend && ok "백엔드 → 수동 입력" || bad "백엔드 → 수동 입력"
+delivered gateway "$P/console/resume" backend && ok "백엔드 → 콘솔 재개 (MQTT-13)" || bad "백엔드 → 콘솔 재개 (MQTT-13)"
+delivered gateway "$P/console/resume" message-board && bad "앱이 콘솔 재개에 발행됨" || ok "앱 → 콘솔 재개 차단"
 # ESP32 는 MQTT 에 없다 (계약 v1.1). vehicle/status 도 게이트웨이가 낸다.
 delivered backend "$P/vehicle/status" gateway && ok "게이트웨이 → vehicle/status" || bad "게이트웨이 → vehicle/status"
 delivered backend "$P/vehicle/status" manual && bad "앱이 vehicle/status 에 발행됨" || ok "앱 → vehicle/status 차단"

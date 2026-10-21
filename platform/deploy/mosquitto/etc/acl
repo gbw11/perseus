@@ -23,6 +23,7 @@ pattern write xenova/v1/probes/#
 
 user backend
 topic write xenova/v1/apps/manual/input
+topic write xenova/v1/console/resume
 topic write xenova/v1/vms/+/command
 
 # 게이트웨이: ESP32 는 MQTT 에 붙지 않고 게이트웨이 시리얼 뒤에 있다 (계약 v1.1). vehicle/status 도 게이트웨이가 낸다.

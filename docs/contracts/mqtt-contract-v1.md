@@ -1,6 +1,6 @@
 # MQTT 메시지 계약 v1
 
-**최종 갱신** 2026-10-21 v1.1.1 (게이트웨이 구현의 전환 표·사유 값, `perception.result` 좌표계 — 변경 이력)
+**최종 갱신** 2026-10-21 v1.2 (v1.1.1 위에 재개 3초 카운트다운·콘솔 재개 MQTT-13 — 변경 이력)
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼, RC카 시나리오
 **브로커** dom0 Mosquitto
 
@@ -231,11 +231,15 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 | MQTT-06 | `xenova/v1/apps/message-board/events` | `drive.resume.requested` | 메시지 보드 → 게이트웨이 | 1 | `requested_by` |
 | MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `from`, `to`, `generation`, `reason` |
 | MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.fault.detected` | 게이트웨이 → 메시지 보드, 백엔드 | 1 | `app_id`, `vm_id`, `reason`(`command_timeout`), `detected_at` |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.resume.accepted` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `switch_in_ms`(3000), `generation`(지금 세대), `requested_by` |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.resume.cancelled` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `reason`(`autonomous_lost` 등), `generation` |
+| MQTT-13 | `xenova/v1/console/resume` | `drive.resume.requested` | 백엔드(운영자 콘솔) → 게이트웨이 | 1 | `requested_by` |
 
-- `drive.resume.requested`는 `AUTO_READY`일 때만 받아들인다. 다른 모드에서는 무시하고 `drive.mode.changed`를 내지 않는다. 수락·거절 응답 이벤트는 없다 — 재개 성공은 `drive.mode.changed`(`to: AUTO`, `reason: resume_requested`)로 안다.
+- `drive.resume.requested`는 `AUTO_READY`일 때만 받아들인다. 다른 모드에서는 무시하고 `drive.mode.changed`를 내지 않는다. 메시지 보드(MQTT-06)와 운영자 콘솔(MQTT-13, 백엔드가 `POST /api/v1/drive/resume`을 받아 발행) 어느 쪽에서 와도 같다.
+- 재개 요청을 내는 쪽은 메시지 보드 VM(MQTT-06)과 운영자 콘솔(MQTT-13, 백엔드) 둘이다 (9장 ACL).
 - `drive.fault.detected`는 한 번이라도 명령을 낸 주행 앱(활성·대기 모두)의 `drive.command`가 100 ms 끊기면 한 번 낸다. 명령이 다시 오면 다시 낼 수 있다.
-- 재개 요청을 내는 쪽은 메시지 보드 VM 뿐이다. 관리 콘솔(백엔드)에서 재개를 보내는 경로는 아직 없다 (9장 ACL).
-- 백엔드는 `drive.mode.changed`, `drive.fault.detected`를 콘솔 이벤트 로그(REST-18, `/ws/v1/events`)에 남긴다. 심각도는 모드 전환 `INFO`, `SAFE_STOP` 진입·장애 `WARNING`.
+- **재개는 바로 바꾸지 않는다 (3·2·1).** 받아들이면 게이트웨이가 먼저 `drive.resume.accepted`(`switch_in_ms: 3000`)를 내고, 3초 동안 수동주행이 계속 제어한다. 화면은 이 이벤트로 "3, 2, 1" 을 센다. 3초 뒤 `AUTO_READY` 조건(5.2)이 여전히 맞으면 `AUTO`로 바꾸고 `drive.mode.changed`(`reason: resume_requested`)를 낸다. 그 사이 조건이 깨지면 바꾸지 않고 `drive.resume.cancelled`를 낸다. 카운트다운 중 들어온 재개 요청은 무시한다.
+- 백엔드는 `drive.mode.changed`, `drive.fault.detected`, `drive.resume.accepted`, `drive.resume.cancelled`를 콘솔 이벤트 로그(REST-18, `/ws/v1/events`)에 남긴다. 심각도는 모드 전환 `INFO`, `SAFE_STOP` 진입·장애 `WARNING`.
 
 ### 6.1 앱 생존 신호 `app.heartbeat`
 
@@ -294,7 +298,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | 젯슨 | `xenova/v1/apps/perception/events` |
 | 게이트웨이 | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/apps/vehicle/events` |
 | dom0 vchan 중계 | 계정이 따로 없다. Zephyr VM마다 그 VM의 `app_id` 계정으로 접속한다 (4.1) |
-| 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/vms/{vm_id}/command` |
+| 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/console/resume`, `xenova/v1/vms/{vm_id}/command` |
 | 각 VM 측정 클라이언트·응답기 | `xenova/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
 
 브로커 계정·ACL 파일은 [브로커 구성](../../platform/deploy/mosquitto/README.md)(`platform/deploy/mosquitto/etc/acl`)에서 관리한다.
@@ -323,3 +327,4 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | v1 (보완) | 2026-10-20 | 접두사 `xenova/v1/`, 주행 VM Zephyr(4장), `app.heartbeat`(6.1), 수동주행 입력(7장) |
 | v1.1 | 2026-10-21 | 시나리오 D1·D3·D8 반영 (S15P31E110-242). ESP32를 MQTT 참여자에서 빼고 게이트웨이 시리얼 뒤로(4장, 5.3, 9장 계정 삭제), `vehicle.status` 발행 = 게이트웨이 `source_id: dom0-gateway`(5.4), 5.5 ESP32 수용 규칙 → 게이트웨이 수용 규칙, Zephyr vchan + dom0 중계(4.1, 10장에서 삭제), `AUTO_READY`·VM 재시작 근거에서 에이전트 대신 도메인 상태 + `app.heartbeat`(5.1·5.2·6.1). `vehicle.status.batt_v` 를 선택 필드로(5.4, 측정 회로 없음). 토픽 이름은 그대로 |
 | v1.1.1 | 2026-10-21 | 구현 기준 정합 (S15P31E110-249). 5.2 전환 표와 사유 `autonomous_ready`·`autonomous_lost`·`manual_fresh` (게이트웨이 -98 구현), `MANUAL` 중 수동 끊김은 자율이 신선해도 `SAFE_STOP`, `perception.result` 좌표계·부호·최대 개수·발행 중단 (젯슨 대역 -156 구현), 6장 재개 응답 이벤트 없음·`drive.fault.detected` 조건. 토픽·필드 이름 그대로 |
+| v1.2 | 2026-10-21 | 재개를 바로 바꾸지 않고 `drive.resume.accepted`(3초 뒤 전환) → `AUTO` 또는 `drive.resume.cancelled`(6장). 운영자 콘솔 재개 경로 MQTT-13 `xenova/v1/console/resume`(백엔드 발행, 9장 ACL) (S15P31E110-98) |
