@@ -100,6 +100,7 @@
 | 안전·구동 허용 | E-stop, 와치독, 장애물 플래그 | `vehicle.status.flags` (MQTT-10) |
 | 인지 유효성 | 젯슨 결과 수신 주기·마지막 수신 | `perception.result` (MQTT-06) |
 | VM 상태 | 도메인 상태, 에이전트(Linux) | `GET /api/v1/vms` |
+| 카메라 (세 번째 VM 카드 안) | 세 번째 VM 이 AI 로 장애물을 찾아 감지 박스를 그린 영상 | 아래 "카메라 영상" |
 
 ### W-03 VM 목록 (UI-02)
 
@@ -159,13 +160,13 @@ Zephyr 선택 시 자원 단계는 고정 프로필(1 vCPU / 16 MiB)만 보여 �
 
 | 영역 | 동작 | 데이터 |
 | --- | --- | --- |
-| 화면 배치 | 모니터 1·2 에 띄울 화면 선택·교체, 적용 상태 표시 | `PUT /api/v1/displays/{display-0\|display-1}/route` (REST-24, 미구현 -129) |
+| 화면 배치 | 모니터 1·2 에 띄울 화면 선택·교체(`split` 3분할 / `os-face` VM 1개), 적용 상태 표시 | `GET /api/v1/displays`, `PUT /api/v1/displays/{display-0\|display-1}/route` `{vm_id, view, expected_revision}` → 202 (REST-23·24, 백엔드 -129 구현 중). 백엔드가 `WS /ws/v1/display-service` 로 dom0 표시 서비스(박신영)에 `route.set` → 표시 서비스가 키오스크 주소를 바꾸고 `route.applied` 로 답한다. 규격: 화면 배치 계약 `display-route-v1` (작성 중, !118 브랜치) |
 | 격리 시연 | 대상 VM 에 부하·종료 주입, 대상과 비대상의 상태·명령 주기·복구 시간 비교 | 격리 시연 API (-135, 에이전트 `agent.command`), 메트릭 |
 | 수동주행 입력 | 키 입력 → 수동주행 VM. **MANUAL 이 아니면 백엔드가 버린다** | `WS /ws/v1/drive` → MQTT-11 (MQTT 계약 §7, 구현 -154) |
-| 자율주행 재개 | AUTO_READY 에서만 활성 | `drive.resume.requested` (MQTT 계약 §6). **콘솔(백엔드)에서 보내는 경로는 미구현** — 계약상 재개 요청은 메시지 보드 VM 만 낸다 (§6·§9). 콘솔 경로가 생기기 전까지 버튼은 비활성·안내만 |
+| 자율주행 재개 | AUTO_READY 에서만 활성. 누르면 3·2·1 카운트다운 뒤 AUTO | `POST /api/v1/drive/resume` → 백엔드가 MQTT-13 `xenova/v1/console/resume` 에 `drive.resume.requested` 발행. 게이트웨이가 받아들이면 `drive.resume.accepted`(`switch_in_ms: 3000`) → 3초 뒤 `drive.mode.changed`(AUTO), 그 사이 조건이 깨지면 `drive.resume.cancelled` ([MQTT 계약](../contracts/mqtt-contract-v1.md) v1.2 (Draft !118), 백엔드·게이트웨이 구현 중) |
 
-- 모니터는 터치가 없으므로 **수동주행 입력은 여기서** 한다. 재개는 지금 메시지 보드 VM 이 내는 `drive.resume.requested` 로만 된다. 재개 성공은 `drive.mode.changed`(`to: AUTO`, `reason: resume_requested`)로 확인한다 — 수락·거절 응답 이벤트는 없다.
-- 화면 배치 API 의 `view` 값은 지금 `os-face` 하나다. 모니터 1 의 3분할을 위해 `split` 같은 값이 더 필요하다 (§7 Q3).
+- 모니터는 터치가 없으므로 **수동주행 입력과 재개는 여기서** 한다. 재개 요청 경로는 둘이다: 이 화면(MQTT-13)과 메시지 보드 VM(MQTT-06). 카운트다운 3초 동안은 수동주행이 계속 제어한다(모드 AUTO_READY 유지). 콘솔 W-07 과 모니터 모두 `drive.resume.accepted` 를 받으면 3·2·1 을 띄우고, `drive.resume.cancelled` 면 취소 사유를 보인다.
+- 모니터 브라우저는 스스로 배치를 따라가지 않는다. 표시 서비스가 키오스크에 띄울 주소(`/split`, `/detail/{autonomous|manual|interaction}`)를 바꾼다 (2026-10-21 결정).
 
 ### W-08 이벤트 타임라인 (UI-07)
 
@@ -173,7 +174,17 @@ Zephyr 선택 시 자원 단계는 고정 프로필(1 vCPU / 16 MiB)만 보여 �
 | --- | --- |
 | 보여 줄 것 | 시간순 이벤트. 종류별 구분: 모드 전환(`drive.mode.changed`, 사유 5.2 전환 표) / 주행 앱 장애(`drive.fault.detected`) / VM 생성·삭제·상태 변화(`vm.*`) / 에이전트 상태 / 복구(`recovery.*`, 복구 서비스 구현 후) / 시연 명령(`demo.command.*`). 자율주행 **자동 복귀는 없다** — 복구 뒤 `AUTO_READY`(재개 가능)까지만 가고 재개는 사람이 한다 (시나리오 §4.2) |
 | 동작 | 종류·VM·심각도 필터, 실시간 추가 |
-| 데이터 | `GET /api/v1/events`, `WS /ws/v1/events`. 차량 이벤트(`drive.mode.changed`, `drive.fault.detected`)는 백엔드가 MQTT 에서 받아 저장 (-154). 종류 필터 값은 백엔드 `EventType` 12종뿐이며, 모르는 값을 보내면 REST 는 422, WS 구독은 `EVENT_TYPE_UNSUPPORTED` 로 구독 전체가 거부된다 |
+| 데이터 | `GET /api/v1/events`, `WS /ws/v1/events`. 차량 이벤트(`drive.mode.changed`, `drive.fault.detected`)는 백엔드가 MQTT 에서 받아 저장 (-154). 종류 필터 값은 백엔드 `EventType` 12종뿐이며, 모르는 값을 보내면 REST 는 422, WS 구독은 `EVENT_TYPE_UNSUPPORTED` 로 구독 전체가 거부된다. 2026-10-21 결정으로 `drive.resume.accepted`·`drive.resume.cancelled`(MQTT v1.2)·`display.route.changed`(화면 배치)가 추가될 예정이며, **백엔드 `EventType` 에 들어간 뒤에** 구독 목록에 넣는다 |
+
+### 카메라 영상 (세 번째 VM, 2026-10-21 결정)
+
+| 항목 | 내용 |
+| --- | --- |
+| 흐름 | 젯슨 카메라 원본 MJPEG(`http://<jetson>:8090/raw.mjpg`) → 세 번째 VM(Debian, `message-board`) 앱이 AI 로 장애물 감지 → 감지 박스를 그린 MJPEG(`http://<vm>:8081/stream.mjpg`) → dom0 웹 프록시 → 브라우저는 같은 origin 의 `/camera/stream.mjpg` |
+| 보이는 곳 | 대시보드(W-02) 세 번째 VM 카드, 모니터 M-01 세 번째 칸, M-04 상세 |
+| 감지 결과 | MQTT-14 `xenova/v1/apps/message-board/vision`, `vision.result`, QoS 0, ≤10 Hz, `{frame_id, fps, objects:[{label, score, bbox}]}` — **화면·기록용, 주행 판단에 쓰지 않는다** (주행은 젯슨 `perception.result`) |
+| 격리 | 세 번째 VM 이 죽으면 영상·감지 화면만 멈추고 주행은 그대로 |
+| 규격 | 카메라 영상 계약 `camera-stream-v1` (작성 중, !118 브랜치). 구현 전 — 영상을 내는 VM 앱은 아직 없다 |
 
 ## 5. 모니터 화면
 
@@ -198,7 +209,7 @@ Zephyr 선택 시 자원 단계는 고정 프로필(1 vCPU / 16 MiB)만 보여 �
 | 각 칸 공통 | VM 이름(역할), OS·app_id, 상태 배지(복구 중이면 경과 시간), 차량 제어 중 표시 |
 | 자율주행 | 명령 주기, 마지막 명령, 인지 요약 |
 | 수동주행 | 예비 준비 / 운영자 운전 중, 키 입력 |
-| 인터랙션 | 최근 알림 (모드 전환·장애·복구) |
+| 인터랙션 | 카메라 AI 장애물 감지 영상(감지 박스), 최근 알림 (모드 전환·장애·복구), 재개 3·2·1 |
 
 장애가 나면 **그 칸만** 빨강 → 노랑(복구 중) → 초록으로 바뀌어 격리가 눈에 보이게 한다.
 
@@ -208,7 +219,7 @@ Zephyr 선택 시 자원 단계는 고정 프로필(1 vCPU / 16 MiB)만 보여 �
 | --- | --- | --- |
 | M-02 자율주행 | 인지 결과 그림 (차선·장애물·차 위치, 15 Hz). 백엔드 중계(`/ws/v1/drive/state`)는 인지 결과를 차선 오프셋·방향 오차·**장애물 개수**·`stop` 으로만 준다 → 장애물 위치는 그릴 수 없다 | 목표 속도·조향 게이지, 명령 주기, 차선 오프셋·방향 오차 |
 | M-03 수동주행 | 대기 / 운영자 운전 중, 수동 앱의 마지막 명령(목표 속도·조향). 눌린 키는 백엔드 중계에 없어 표시하지 않는다 | 목표 속도·조향, 활성 여부 |
-| M-04 인터랙션 | 알림 타임라인 (`drive.mode.changed` · `drive.fault.detected`). `message.posted` 는 백엔드가 저장·중계하지 않아(개수만 셈) 지금은 표시하지 않는다 | 자율주행 재개 상태 (AUTO_READY 여부) |
+| M-04 인터랙션 | 카메라 AI 장애물 감지 영상, 알림 타임라인 (`drive.mode.changed` · `drive.fault.detected` · `drive.resume.accepted/cancelled`). `message.posted` 는 백엔드가 저장·중계하지 않아(개수만 셈) 지금은 표시하지 않는다 | 자율주행 재개 상태 (AUTO_READY 여부, 3·2·1) |
 
 데이터는 MQTT 주행·앱 토픽 (MQTT 계약 §5·§6)을 **백엔드가 중계**한 것이다: `WS /ws/v1/drive/state`(주행 통합 상태)와 `WS /ws/v1/events`(이벤트) — §7 Q5 결정. 화면에 쓸 수 있는 값은 백엔드 `DriveState`(모드·세대·활성 앱·사유, 차량 속도·조향·플래그, 앱별 명령 신선도·주기·마지막 명령·heartbeat, 인지 요약)에 있는 것뿐이다.
 가짜 시나리오로 먼저 돌려 볼 수 있다 (`frontend/apps/vm-screens`).
@@ -221,7 +232,7 @@ Zephyr 선택 시 자원 단계는 고정 프로필(1 vCPU / 16 MiB)만 보여 �
 | 장애 주입 | [강제 종료] 자율주행 | 자율주행 칸 빨강, 수동주행 "차량 제어 중" | 명령 없음 표시 |
 | 인계 직후 | 키보드로 운전 (W-07 수동주행 입력) | 인터랙션 칸에 "즉시 인계" 알림 | (운영자가 모니터 2 를 수동주행으로 바꿀 수 있음) |
 | 복구 중 | 대시보드에서 복구 경과 확인 | 자율주행 칸 노랑 "복구 중 n초" | 〃 |
-| 재개 가능 | 대시보드에 AUTO_READY 표시. 재개는 메시지 보드 VM 의 재개 요청 (콘솔 버튼은 미구현) | 모드 띠 AUTO 복귀 | 인지 그림 재개 |
+| 재개 가능 | [자율주행 재개] 활성 → 누름 → 3·2·1 | 3·2·1 표시 → 모드 띠 AUTO 복귀 | 인지 그림 재개 |
 
 ## 7. 열린 질문
 
@@ -229,7 +240,7 @@ Zephyr 선택 시 자원 단계는 고정 프로필(1 vCPU / 16 MiB)만 보여 �
 | --- | --- | --- | --- |
 | Q1 | 27인치(터치 없음)를 모니터 1·2 중 어디에 | 모니터 1 (3분할 — 정보가 가장 많음) | 박신영 (표시 서비스) |
 | Q2 | 대시보드(W-02, UI-09) 담당 | 주행 상태라 공병우가 -128 과 함께 | 팀 |
-| Q3 | 화면 배치 API `view` 에 3분할 추가 | `view=split` (모니터 전체), `os-face` (VM 1개) | 정수환·박신영 (REST-24·WS-04) |
+| Q3 | ~~화면 배치 API `view` 에 3분할 추가~~ | **결정 (2026-10-21):** `view` = `split`(모니터 전체) · `os-face`(VM 1개), 표시 서비스 방식 (W-07) | — |
 | Q4 | ~~`/ws/v1/drive` (수동주행 입력) 구현 담당~~ | **결정:** -154 에서 공병우가 구현 (2026-10-20 backend 머지) | — |
 | Q5 | ~~모니터 화면 데이터 경로~~ | **결정:** 백엔드 중계 WebSocket (`/ws/v1/drive/state`, `/ws/v1/events`). 브라우저는 브로커에 직접 붙지 않는다 | — |
 | Q6 | 모니터(키오스크) 인증 | 지금은 같은 브라우저의 콘솔 로그인(refresh 쿠키) 또는 개발용 계정. 실제는 장치 계정·읽기 전용 토큰 중 결정 | 정수환 (auth) |
