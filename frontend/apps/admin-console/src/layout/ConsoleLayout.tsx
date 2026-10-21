@@ -8,7 +8,7 @@ import { ModeStrip } from './ModeStrip';
 import { ResumeNotice } from './ResumeNotice';
 import styles from './layout.module.css';
 
-/** 웹 공통 틀 (화면 정의서 §2): 위쪽 메뉴 [대시보드 · VM · 자원 · 시연 제어 · 이벤트] + 주행 모드 띠 */
+/** 웹 공통 틀 (화면 정의서 §2): 위쪽 메뉴 [대시보드 · VM · 자원 · 시연 제어 · 웹 콘솔 · 이벤트] + 주행 모드 띠 */
 export function ConsoleLayout() {
   const session = useSession();
   const logout = useLogout();
@@ -31,6 +31,7 @@ export function ConsoleLayout() {
             <NavLink to="/vms">VM</NavLink>
             <NavLink to="/resources">자원</NavLink>
             <NavLink to="/demo">시연 제어</NavLink>
+            <NavLink to="/console">웹 콘솔</NavLink>
             <NavLink to="/events">이벤트</NavLink>
           </>
         }

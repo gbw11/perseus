@@ -38,6 +38,7 @@ npm run lint && npm test && npm run build
 | `/vms/:vmId`              | W-04 상세 (개요·차트·프로세스·콘솔) | vms, metrics, processes. 콘솔 WS-03 없음 | 정수환                   |
 | `/resources`              | W-06 자원 제어                      | 없음 (-107) — 화면 안 미리보기           | 정수환 -113·-114         |
 | `/demo`                   | W-07 시연 제어                      | drive state·input. 배치·격리·재개 없음   | -129·-135, 재개 API 계약 |
+| `/console`                | 웹 콘솔 (UI-05·MO-04)               | WS `/ws/v1/vms/{id}/console`             | platform -248            |
 | `/events`                 | W-08 이벤트 타임라인                | events (3초 재조회)                      | -160                     |
 | `/screens`, `/components` | 모니터 바로가기, 컴포넌트           | —                                        |                          |
 
@@ -85,7 +86,7 @@ cd apps/admin-console && VITE_MOCK=true npx vite --port 5173            # VITE_M
 
 - 콘솔: `http://localhost:5173/demo` (admin / 1234) — 여기서 [강제 종료] → 인계 → 복구 → AUTO_READY → [자율주행 재개]
 - 콘솔: `http://localhost:5173/demo` 의 세 VM 카드마다 [강제 종료]. 재개는 바로 바뀌지 않고 3·2·1 을 센 뒤 AUTO (MQTT 계약 v1.2 §6)
-- 웹 콘솔: VM 상세 → [웹 콘솔] → [연결]. 실제로는 `WS /ws/v1/vms/{id}/console` 로 게스트 터미널에 붙고(웹 터미널 계약 `browser-console-v1`, platform -248), mock 에서는 가짜 셸(Debian: `help`·`uname -a`·`ps` 등, Zephyr: 부팅 로그만)
+- 웹 콘솔: 위쪽 메뉴 [웹 콘솔] 에서 VM 을 골라 [연결] (VM 상세의 [웹 콘솔] 탭도 같은 패널). 실제로는 `WS /ws/v1/vms/{id}/console` 로 게스트 터미널에 붙고(웹 터미널 계약 `browser-console-v1`, platform -248), mock 에서는 가짜 셸(Debian: `help`·`uname -a`·`ps` 등, Zephyr: 부팅 로그만)
 - 모니터: `http://localhost:5173/monitor/?display=display-0&kiosk=1` (모니터 2 는 `display-1`). 콘솔 [화면 배치] 에서 고른 화면으로 바뀌고 `route.applied` 로 답합니다 (REST-23·24, WS `/ws/v1/displays`). `display` 없이 열면 `/monitor/split`·`/monitor/detail/<앱>` 을 손으로 고릅니다. 콘솔 탭이 열려 있는 동안 따라갑니다.
 
 ## 규칙

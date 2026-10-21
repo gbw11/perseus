@@ -442,3 +442,14 @@
 .stack > i {
   min-width: 4px;
 }
+.picks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--x-space-3);
+}
+.picks > .pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--x-space-1);
+  border-top-width: 3px;
+}
