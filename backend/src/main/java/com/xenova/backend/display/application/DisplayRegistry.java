@@ -4,11 +4,14 @@ import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.event.application.EventRecorder;
 import com.xenova.backend.event.domain.EventSeverity;
 import com.xenova.backend.event.domain.EventType;
+import com.xenova.backend.vm.domain.VmRecord;
 import com.xenova.backend.vm.domain.VmRecordRepository;
+import com.xenova.backend.vm.domain.VmRole;
 import java.time.Clock;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,16 +19,19 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-// Screen routing for the two monitors (REST-23·24, S15P31E110-129). There is no dom0 display service yet, so the
-// monitor browser (kiosk) itself connects to WS /ws/v1/displays, follows desired_route and confirms with
-// route.applied. State lives in memory only: a restart puts both monitors back on the split view.
+// Screen routing for the two monitors (REST-23·24, S15P31E110-129). The dom0 display service connects to
+// WS /ws/v1/display-service, receives route.set for every desired_route and answers route.applied / route.failed.
+// Monitor browsers do not talk to the backend. State lives in memory only: a restart puts both monitors back on
+// the split view.
 @Service
 public class DisplayRegistry {
 
     public static final String SPLIT = "split";
     public static final String OS_FACE = "os-face";
     public static final List<String> SUPPORTED_VIEWS = List.of(SPLIT, OS_FACE);
-    static final String BROWSER_READY = "browser_ready";
+    static final String KIOSK_LOADED = "kiosk_loaded";
+    // request_id of the start-up split route (contract display-route-v1 §2).
+    static final String INITIAL_REQUEST = "initial";
 
     private static final Logger log = LoggerFactory.getLogger(DisplayRegistry.class);
 
@@ -34,6 +40,8 @@ public class DisplayRegistry {
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
     private final Map<String, Slot> slots = new LinkedHashMap<>();
+    // True between service.hello and the service socket closing.
+    private boolean serviceConnected;
 
     public DisplayRegistry(
             VmRecordRepository vmRecordRepository, EventRecorder eventRecorder,
@@ -60,15 +68,25 @@ public class DisplayRegistry {
         }
     }
 
+    /** One display in service.hello. */
+    public record DisplayLink(String displayId, boolean connected) {
+    }
+
+    /** What route.set carries. vm_id and app_id are null for split. */
+    public record RouteSet(
+            String displayId, long revision, String requestId, String view, String vmId, String appId,
+            String screenPath) {
+    }
+
     public synchronized List<Display> list() {
-        return slots.values().stream().map(Slot::view).toList();
+        return slots.values().stream().map(slot -> slot.view(serviceConnected)).toList();
     }
 
-    public synchronized boolean exists(String displayId) {
-        return displayId != null && slots.containsKey(displayId);
+    public synchronized List<String> displayIds() {
+        return List.copyOf(slots.keySet());
     }
 
-    // PUT /api/v1/displays/{id}/route. Order of checks: display, view and vm_id shape, VM, revision.
+    // PUT /api/v1/displays/{id}/route. Order of checks: display, view and vm_id shape, VM, VM role, revision.
     public Display changeRoute(String displayId, String vmId, String view, Long expectedRevision, String requestedBy) {
         Display changed;
         synchronized (this) {
@@ -93,8 +111,15 @@ public class DisplayRegistry {
                 throw new ApiException(
                         HttpStatus.UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", "os-face 화면에는 vm_id 가 필요합니다.");
             }
-            if (target != null && vmRecordRepository.findById(target).filter(record -> record.isRegistered()).isEmpty()) {
-                throw new ApiException(HttpStatus.NOT_FOUND, "VM_NOT_FOUND", "존재하지 않는 VM입니다.");
+            VmRole role = null;
+            if (target != null) {
+                VmRecord record = vmRecordRepository.findById(target).filter(VmRecord::isRegistered)
+                        .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "VM_NOT_FOUND", "존재하지 않는 VM입니다."));
+                role = record.getRole();
+                if (role == null) {
+                    throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "VM_ROLE_UNKNOWN",
+                            "VM 역할(role)이 없어 전용 화면을 정할 수 없습니다.");
+                }
             }
             if (expectedRevision != slot.revision) {
                 throw new ApiException(HttpStatus.CONFLICT, "DISPLAY_REVISION_CONFLICT",
@@ -102,55 +127,140 @@ public class DisplayRegistry {
             }
             slot.revision++;
             slot.desired = new Display.Route(target, view, UUID.randomUUID().toString(), null, null);
-            changed = slot.view();
+            slot.role = role;
+            changed = slot.view(serviceConnected);
         }
         recordChange(changed, requestedBy);
         changed();
+        eventPublisher.publishEvent(new RouteChanged(displayId));
         return changed;
     }
 
-    // route.applied from the monitor. An older revision is ignored (the console moved on meanwhile).
-    public void applied(String displayId, Long revision) {
+    // service.hello: displays not listed count as unplugged. Nothing is known to be on screen yet, so every
+    // connected display is IDLE until its route.set goes out.
+    public void serviceConnected(List<DisplayLink> displays) {
+        synchronized (this) {
+            serviceConnected = true;
+            for (Slot slot : slots.values()) {
+                slot.reset();
+            }
+            for (DisplayLink link : displays) {
+                Slot slot = slots.get(link.displayId());
+                if (slot != null) {
+                    slot.connected = link.connected();
+                }
+            }
+        }
+        changed();
+    }
+
+    // The service socket closed (or was replaced): every display is DISCONNECTED until the next hello.
+    public void serviceDisconnected() {
+        synchronized (this) {
+            if (!serviceConnected) {
+                return;
+            }
+            serviceConnected = false;
+            for (Slot slot : slots.values()) {
+                slot.reset();
+            }
+        }
+        changed();
+    }
+
+    // display.status: the monitor or its kiosk browser came or went. desired_route and revision stay; the service
+    // already holds the latest route.set and answers route.applied once the kiosk shows it again.
+    public void displayStatus(String displayId, boolean connected) {
+        synchronized (this) {
+            Slot slot = known(displayId);
+            if (slot.connected == connected) {
+                return;
+            }
+            slot.connected = connected;
+            if (!connected) {
+                // Whatever the kiosk showed is gone with the monitor; route.applied has to confirm it again.
+                slot.observed = null;
+                slot.observedRevision = -1;
+                slot.failedRevision = -1;
+                slot.lastError = null;
+            }
+        }
+        changed();
+    }
+
+    /** The command for the current desired_route, or empty while no service has said hello. */
+    public synchronized Optional<RouteSet> routeSet(String displayId) {
+        Slot slot = slots.get(displayId);
+        if (slot == null || !serviceConnected) {
+            return Optional.empty();
+        }
+        return Optional.of(slot.routeSet());
+    }
+
+    // Called once route.set for that revision is on the wire (IDLE → SWITCHING).
+    public void routeSent(String displayId, long revision) {
         synchronized (this) {
             Slot slot = slots.get(displayId);
+            if (slot == null || !serviceConnected || revision <= slot.sentRevision) {
+                return;
+            }
+            slot.sentRevision = revision;
+        }
+        changed();
+    }
+
+    // route.applied: the kiosk finished loading that screen. An older revision is ignored (the console moved on).
+    public void applied(String displayId, Long revision, String requestId) {
+        synchronized (this) {
+            Slot slot = current(displayId, revision, requestId);
             if (slot == null) {
-                throw new RouteRejected("DISPLAY_NOT_FOUND", "존재하지 않는 디스플레이입니다.");
-            }
-            if (revision == null || revision > slot.revision) {
-                throw new RouteRejected("VALIDATION_ERROR", "revision 이 올바르지 않습니다.");
-            }
-            if (revision < slot.revision) {
-                throw new RouteRejected("DISPLAY_REVISION_CONFLICT", "이미 새 배치가 있습니다. revision: " + slot.revision);
+                return;
             }
             Display.Route desired = slot.desired;
             slot.observed = new Display.Route(
-                    desired.vmId(), desired.view(), desired.requestId(), clock.instant(), BROWSER_READY);
+                    desired.vmId(), desired.view(), desired.requestId(), clock.instant(), KIOSK_LOADED);
             slot.observedRevision = revision;
+            slot.failedRevision = -1;
+            slot.lastError = null;
         }
         changed();
     }
 
-    public void connected(String displayId) {
+    // route.failed: the kiosk could not show the current revision. observed_route keeps the last good screen.
+    public void failed(String displayId, Long revision, String requestId, String reason) {
         synchronized (this) {
-            slot(displayId).connections++;
-        }
-        changed();
-    }
-
-    // When the last monitor socket closes nobody knows what is on screen, so observed_route is cleared.
-    public void disconnected(String displayId) {
-        synchronized (this) {
-            Slot slot = slots.get(displayId);
-            if (slot == null || slot.connections == 0) {
+            Slot slot = current(displayId, revision, requestId);
+            if (slot == null) {
                 return;
             }
-            slot.connections--;
-            if (slot.connections == 0) {
-                slot.observed = null;
-                slot.observedRevision = -1;
-            }
+            slot.failedRevision = revision;
+            slot.lastError = reason == null || reason.isBlank() ? "unknown" : reason;
         }
         changed();
+    }
+
+    // The slot a route result is about, or null for an older revision (dropped without an answer). A future
+    // revision or another request_id is an error. A missing request_id is accepted (revision alone decides).
+    private Slot current(String displayId, Long revision, String requestId) {
+        Slot slot = known(displayId);
+        if (revision == null || revision > slot.revision) {
+            throw new RouteRejected("VALIDATION_ERROR", "revision 이 올바르지 않습니다. 현재 revision: " + slot.revision);
+        }
+        if (revision < slot.revision) {
+            return null;
+        }
+        if (requestId != null && !requestId.equals(slot.desired.requestId())) {
+            throw new RouteRejected("VALIDATION_ERROR", "request_id 가 현재 배치와 다릅니다.");
+        }
+        return slot;
+    }
+
+    private Slot known(String displayId) {
+        Slot slot = displayId == null ? null : slots.get(displayId);
+        if (slot == null) {
+            throw new RouteRejected("DISPLAY_NOT_FOUND", "존재하지 않는 디스플레이입니다.");
+        }
+        return slot;
     }
 
     private Slot slot(String displayId) {
@@ -181,29 +291,79 @@ public class DisplayRegistry {
         }
     }
 
+    // Kiosk path the service appends to its own base URL. os-face uses the screen id of the VM role
+    // (message-board is the interaction screen).
+    static String screenPath(String view, VmRole role) {
+        if (!OS_FACE.equals(view) || role == null) {
+            return "/split";
+        }
+        return switch (role) {
+            case AUTONOMOUS -> "/detail/autonomous";
+            case MANUAL -> "/detail/manual";
+            case MESSAGE_BOARD -> "/detail/interaction";
+        };
+    }
+
     private static final class Slot {
         private final String displayId;
         private final String label;
         private long revision = 1;
-        private Display.Route desired = new Display.Route(null, SPLIT, "initial", null, null);
+        private Display.Route desired = new Display.Route(null, SPLIT, INITIAL_REQUEST, null, null);
+        // Role of desired.vmId at PUT time; decides app_id and screen_path of route.set.
+        private VmRole role;
         private Display.Route observed;
         private long observedRevision = -1;
-        private int connections;
+        private long failedRevision = -1;
+        private long sentRevision = -1;
+        private String lastError;
+        // HDMI and kiosk browser up, as the service last reported.
+        private boolean connected;
 
         private Slot(String displayId, String label) {
             this.displayId = displayId;
             this.label = label;
         }
 
-        private Display view() {
-            DisplayStatus status = connections == 0 ? DisplayStatus.DISCONNECTED
-                    : observedRevision == revision ? DisplayStatus.ACTIVE : DisplayStatus.SWITCHING;
-            return new Display(displayId, label, connections > 0, status, SUPPORTED_VIEWS, revision, desired,
-                    observed, null);
+        // Forget everything the service told us; desired_route and revision stay.
+        private void reset() {
+            connected = false;
+            observed = null;
+            observedRevision = -1;
+            failedRevision = -1;
+            sentRevision = -1;
+            lastError = null;
+        }
+
+        private RouteSet routeSet() {
+            return new RouteSet(displayId, revision, desired.requestId(), desired.view(), desired.vmId(),
+                    role == null ? null : role.value(), screenPath(desired.view(), role));
+        }
+
+        // Contract display-route-v1 §5.4: the first matching row wins.
+        private Display view(boolean serviceConnected) {
+            boolean up = serviceConnected && connected;
+            DisplayStatus status;
+            if (!up) {
+                status = DisplayStatus.DISCONNECTED;
+            } else if (sentRevision < revision) {
+                status = DisplayStatus.IDLE;
+            } else if (failedRevision == revision) {
+                status = DisplayStatus.ERROR;
+            } else if (observedRevision == revision) {
+                status = DisplayStatus.ACTIVE;
+            } else {
+                status = DisplayStatus.SWITCHING;
+            }
+            return new Display(displayId, label, up, status, SUPPORTED_VIEWS, revision, desired,
+                    up ? observed : null, status == DisplayStatus.ERROR ? lastError : null);
         }
     }
 
-    // Published after every change; the display socket pushes a snapshot to all subscribers.
+    // Published after every change; the console socket pushes a snapshot to all subscribers.
     public record DisplaysChanged(List<Display> items) {
+    }
+
+    // Published after a PUT; the service socket sends route.set for the display's current desired_route.
+    public record RouteChanged(String displayId) {
     }
 }

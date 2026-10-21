@@ -18,7 +18,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
-// REST-23 / REST-24 (S15P31E110-129). Live updates of the same list go out on WS /ws/v1/displays.
+// REST-23 / REST-24 (S15P31E110-129). Live updates of the same list go out on WS /ws/v1/displays; the route
+// itself goes to the dom0 display service on WS /ws/v1/display-service.
 @RestController
 public class DisplayController {
 
@@ -35,7 +36,7 @@ public class DisplayController {
         return new DisplayListResponse(registry.list(), clock.instant(), false);
     }
 
-    // 202: the monitor still has to move; status stays SWITCHING until it answers route.applied.
+    // 202: the display service still has to move the kiosk; status stays SWITCHING until it answers route.applied.
     @PutMapping("/api/v1/displays/{displayId}/route")
     public ResponseEntity<Display> changeRoute(
             @PathVariable String displayId, @RequestBody(required = false) JsonNode body,

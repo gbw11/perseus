@@ -4,7 +4,8 @@ import java.time.Instant;
 import java.util.List;
 
 // One monitor as REST-23 / WS /ws/v1/displays show it (S15P31E110-129). desired_route is what the console asked
-// for; observed_route is what the monitor browser last confirmed with route.applied (null until then).
+// for; observed_route is what the dom0 display service last confirmed with route.applied (null until then).
+// connected is true only while the service is up and reports HDMI and kiosk browser up for this display.
 public record Display(
         String displayId,
         String label,
