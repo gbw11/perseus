@@ -11,6 +11,7 @@ const LABEL: Record<ConsoleState, string> = {
   idle: '연결 대기',
   connecting: '연결 중',
   connected: '연결됨',
+  closing: '연결 정리 중',
   disconnected: '연결 해제',
   error: '연결 오류',
 };
@@ -105,6 +106,7 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
   }, [available]);
 
   const active = status.state === 'connected' || status.state === 'connecting';
+  const closing = status.state === 'closing';
   return (
     <Card title="웹 콘솔">
       <section aria-label={`${vm.name} 콘솔`} className={styles.panel}>
@@ -118,7 +120,7 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
           <div className={styles.actions}>
             <Button
               size="sm"
-              disabled={!available || active}
+              disabled={!available || active || closing}
               onClick={() => void transport.current?.connect()}
             >
               연결

@@ -170,6 +170,17 @@ def test_distinct_vm_streams_do_not_mix(setup):
             assert second.receive_bytes() == b'B'
 
 
+def test_disconnect_control_acknowledges_cleanup_before_immediate_reconnect(setup):
+    client, _, sessions = setup
+    for _ in range(5):
+        with client.websocket_connect(path(), headers=AUTH) as ws:
+            ws.receive_bytes()
+            ws.send_text('{"type":"disconnect"}')
+            closed(ws, 1000)
+            assert sessions[-1].closed.is_set()
+            assert not sessions[-1].written
+
+
 @pytest.mark.parametrize('command,code', [(b'EXIT', 1000), (b'FAIL', 1011), (b'STALL', 1011)])
 def test_console_exit_or_write_timeout_closes_peer(setup, command, code):
     client, _, sessions = setup

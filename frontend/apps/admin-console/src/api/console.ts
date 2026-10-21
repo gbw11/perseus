@@ -1,6 +1,6 @@
 import { getSession, refreshSession } from './client';
 
-export type ConsoleState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
+export type ConsoleState = 'idle' | 'connecting' | 'connected' | 'closing' | 'disconnected' | 'error';
 export interface ConsoleCallbacks {
   state: (state: ConsoleState, message: string) => void;
   data: (bytes: Uint8Array) => void;
@@ -45,6 +45,8 @@ export class ConsoleTransport {
   private socket: WebSocket | null = null;
   private generation = 0;
   private ready = false;
+  private closing = false;
+  private authenticated = false;
 
   constructor(
     private readonly vmId: string,
@@ -52,6 +54,7 @@ export class ConsoleTransport {
   ) {}
 
   async connect(): Promise<void> {
+    if (this.closing) return;
     const generation = ++this.generation;
     this.stopSocket();
     this.callbacks.state('connecting', '콘솔에 연결하는 중…');
@@ -78,9 +81,12 @@ export class ConsoleTransport {
     ws.onopen = () => {
       if (generation !== this.generation) return;
       ws.send(JSON.stringify({ type: 'auth', access_token: token }));
+      this.authenticated = true;
+      if (this.closing) ws.send(JSON.stringify({ type: 'disconnect' }));
     };
     ws.onmessage = (event: MessageEvent<unknown>) => {
       if (generation !== this.generation) return;
+      if (this.closing) return;
       if (event.data instanceof ArrayBuffer && this.ready) {
         this.callbacks.data(new Uint8Array(event.data));
         return;
@@ -103,6 +109,8 @@ export class ConsoleTransport {
       if (generation !== this.generation) return;
       this.socket = null;
       this.ready = false;
+      this.closing = false;
+      this.authenticated = false;
       this.callbacks.state(
         event.code === 1000 || event.code === 1001 ? 'disconnected' : 'error',
         consoleCloseMessage(event.code),
@@ -128,8 +136,18 @@ export class ConsoleTransport {
   }
 
   disconnect(): void {
-    this.dispose();
-    this.callbacks.state('disconnected', '콘솔 연결을 해제했습니다.');
+    if (this.closing) return;
+    if (!this.socket) {
+      this.dispose();
+      this.callbacks.state('disconnected', '콘솔 연결을 해제했습니다.');
+      return;
+    }
+    this.ready = false;
+    this.closing = true;
+    this.callbacks.state('closing', '콘솔 연결을 정리하는 중…');
+    if (this.authenticated && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({ type: 'disconnect' }));
+    }
   }
 
   dispose(): void {
@@ -139,6 +157,8 @@ export class ConsoleTransport {
 
   private stopSocket(): void {
     this.ready = false;
+    this.closing = false;
+    this.authenticated = false;
     const ws = this.socket;
     this.socket = null;
     if (ws) {

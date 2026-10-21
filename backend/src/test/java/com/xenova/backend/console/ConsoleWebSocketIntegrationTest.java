@@ -101,6 +101,19 @@ class ConsoleWebSocketIntegrationTest {
     }
 
     @Test
+    void explicitDisconnectWaitsForUpstreamCleanupAcknowledgement() throws Exception {
+        try (Client client = connect()) {
+            client.auth(login());
+            client.next();
+            client.session.sendMessage(new TextMessage("{\"type\":\"disconnect\"}"));
+            assertThat(echo.detachReceived.poll(5, TimeUnit.SECONDS)).isNotNull();
+            assertThat(client.closed.isDone()).isFalse();
+            echo.detachReceivedSession.close(CloseStatus.NORMAL);
+            assertThat(client.closed.get(5, TimeUnit.SECONDS).getCode()).isEqualTo(1000);
+        }
+    }
+
+    @Test
     void registeredVmAndStateAreCheckedBeforeUpstreamConnection() throws Exception {
         when(vms.get(VM_ID)).thenReturn(vm(VmState.STOPPED));
         try (Client client = connect()) {
@@ -178,6 +191,14 @@ class ConsoleWebSocketIntegrationTest {
 
     static class Echo extends AbstractWebSocketHandler {
         final List<String> credentials = new CopyOnWriteArrayList<>();
+        final BlockingQueue<Boolean> detachReceived = new LinkedBlockingQueue<>();
+        volatile WebSocketSession detachReceivedSession;
+        @Override protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+            if (message.getPayload().equals("{\"type\":\"disconnect\"}")) {
+                detachReceivedSession = session;
+                detachReceived.add(true);
+            }
+        }
         @Override public void afterConnectionEstablished(WebSocketSession session) {
             credentials.add(session.getHandshakeHeaders().getFirst("Authorization"));
         }

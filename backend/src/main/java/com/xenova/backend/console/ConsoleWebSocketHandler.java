@@ -83,8 +83,17 @@ public class ConsoleWebSocketHandler extends AbstractWebSocketHandler {
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
         Connection c = connections.get(session.getId());
         if (c == null) return;
-        // Only the first text frame is a control message. Terminal input is binary.
         if (!c.started.compareAndSet(false, true)) {
+            try {
+                JsonNode frame = json.readTree(message.getPayload());
+                if (frame != null && frame.size() == 1 && "disconnect".equals(frame.path("type").asText())) {
+                    c.detaching.set(true);
+                    requestDetach(c);
+                    return;
+                }
+            } catch (IOException ignored) {
+                // Other text is never terminal input on the public socket.
+            }
             finish(c, new CloseStatus(1003, "terminal input must be binary"));
             return;
         }
@@ -100,6 +109,16 @@ public class ConsoleWebSocketHandler extends AbstractWebSocketHandler {
         } catch (IOException exception) {
             finish(c, UNAUTHORIZED);
         }
+    }
+
+    private void requestDetach(Connection c) {
+        WebSocket upstream = c.upstream;
+        if (upstream == null || !c.detachSent.compareAndSet(false, true)) return;
+        // The upstream closes after PTY cleanup and lease release. Keep the browser
+        // open until that acknowledgement, so immediate reconnect cannot race it.
+        c.detachDeadline = timers.schedule(() -> finish(c, UNAVAILABLE), 8, TimeUnit.SECONDS);
+        upstream.sendText("{\"type\":\"disconnect\"}", true)
+                .whenComplete((ignored, error) -> { if (error != null) finish(c, UNAVAILABLE); });
     }
 
     private void authenticateAndConnect(Connection c, URI requestUri, String token) {
@@ -163,6 +182,7 @@ public class ConsoleWebSocketHandler extends AbstractWebSocketHandler {
     protected void handleBinaryMessage(WebSocketSession session, BinaryMessage message) {
         Connection c = connections.get(session.getId());
         if (c == null) return;
+        if (c.detaching.get()) return;
         if (!c.ready || c.upstream == null) {
             finish(c, c.authenticated ? new CloseStatus(4409, "console is connecting") : UNAUTHORIZED);
             return;
@@ -198,6 +218,7 @@ public class ConsoleWebSocketHandler extends AbstractWebSocketHandler {
         connections.remove(c.browser.getId(), c);
         if (c.deadline != null) c.deadline.cancel(false);
         if (c.expiry != null) c.expiry.cancel(false);
+        if (c.detachDeadline != null) c.detachDeadline.cancel(false);
         c.token = null;
         WebSocket upstream = c.upstream;
         if (upstream != null) {
@@ -229,7 +250,8 @@ public class ConsoleWebSocketHandler extends AbstractWebSocketHandler {
             }
             try {
                 c.ready = true;
-                c.browser.sendMessage(new TextMessage(json.writeValueAsString(
+                if (c.detaching.get()) requestDetach(c);
+                else c.browser.sendMessage(new TextMessage(json.writeValueAsString(
                         Map.of("type", "connected", "vm_id", vmId))));
                 upstream.request(1);
             } catch (IOException | RuntimeException exception) {
@@ -283,12 +305,15 @@ public class ConsoleWebSocketHandler extends AbstractWebSocketHandler {
         final WebSocketSession browser;
         final AtomicBoolean started = new AtomicBoolean();
         final AtomicBoolean closed = new AtomicBoolean();
+        final AtomicBoolean detaching = new AtomicBoolean();
+        final AtomicBoolean detachSent = new AtomicBoolean();
         volatile boolean authenticated;
         volatile boolean ready;
         volatile String token;
         volatile WebSocket upstream;
         volatile ScheduledFuture<?> deadline;
         volatile ScheduledFuture<?> expiry;
+        volatile ScheduledFuture<?> detachDeadline;
 
         Connection(WebSocketSession browser) { this.browser = browser; }
     }
