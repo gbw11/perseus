@@ -377,11 +377,15 @@ class Platform:
                     or not UUID.fullmatch(fields[6])):
                 raise PlatformError('invalid xl list -v identity/state; removal not confirmed')
             name, domid, uuid = fields[0], int(fields[1]), fields[6]
-            if domid in ids or name in names or uuid in uuids:
+            state = xen_state(fields[4])
+            unavailable_name = name == '(null)' and state in ('shutdown', 'dying')
+            if domid in ids or (not unavailable_name and name in names) or uuid in uuids:
                 raise PlatformError('duplicate xl list -v identity; removal not confirmed')
-            ids.add(domid); names.add(name); uuids.add(uuid)
+            ids.add(domid); uuids.add(uuid)
+            if not unavailable_name:
+                names.add(name)
             rows[domid] = {'domid': domid, 'name': name, 'uuid': uuid,
-                           'xen_state': xen_state(fields[4]), 'xen_state_flags': fields[4]}
+                           'xen_state': state, 'xen_state_flags': fields[4]}
         if 0 not in rows or rows[0]['name'] != 'Domain-0':
             raise PlatformError('Domain-0 missing from xl list -v; removal not confirmed')
         return {key: row for key, row in rows.items() if key != 0}
@@ -394,6 +398,11 @@ class Platform:
             for row in rows.values():
                 identity = (row['domid'], row['uuid'], row['name'])
                 if identity in expected:
+                    continue
+                # libxl의 XenStore 이름 정리가 실제 도메인 제거보다 먼저 끝날 수 있다.
+                # 같은 domid/UUID의 종료 행은 계속 pending이며 부재로 바꾸지 않는다.
+                if (row['name'] == '(null)' and row['xen_state'] in ('shutdown', 'dying')
+                        and any((row['domid'], row['uuid']) == old[:2] for old in expected)):
                     continue
                 if any(row['domid'] == old[0] or row['uuid'] == old[1] or row['name'] == old[2]
                        for old in expected):
@@ -785,8 +794,25 @@ class Platform:
         self.control(record, 'reboot', rows[0])
         deadline = self.clock() + timeout
         while self.clock() < deadline:
-            rows = self.matching(record, self.domains())
-            if rows and rows[0]['domid'] != previous:
+            # 종료 중 상세 설정은 먼저 사라질 수 있다. 새 실행이 관측된 뒤
+            # 기존의 상세 신원·디스크 검사와 launch 결합을 다시 수행한다.
+            snapshot = self.removal_snapshot(deadline)
+            old = snapshot.get(previous)
+            # xl은 상태 목록 뒤 XenStore 이름을 따로 읽는다. 옛 domid/UUID의
+            # (null)은 상태와 무관하게 제거 대기이며 부재나 새 실행으로 인정하지 않는다.
+            if old and (old['uuid'] != record['uuid'] or
+                        old['name'] not in (record['name'], '(null)')):
+                raise DomainIdentityError('replacement domain appeared during reboot')
+            candidates = [row for row in snapshot.values()
+                          if row['uuid'] == record['uuid'] or row['name'] == record['name']]
+            if any(row['uuid'] != record['uuid'] or row['name'] != record['name']
+                   for row in candidates if row['domid'] != previous):
+                raise DomainIdentityError('replacement domain appeared during reboot')
+            fresh = [row for row in candidates if row['domid'] != previous]
+            if not old and fresh and fresh[0]['xen_state'] in ('running', 'blocked'):
+                rows = self.matching(record, self.domains(deadline=deadline))
+                if not rows or rows[0]['domid'] != fresh[0]['domid']:
+                    raise DomainIdentityError('reboot target changed before launch binding')
                 started_state(record, rows[0])
                 execution.bind_launch(record, launch, rows[0], deadline)
                 print('guest domain restarted with same UUID/disk; OS readiness not asserted')
