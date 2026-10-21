@@ -31,7 +31,7 @@ cd platform/deploy/mosquitto
 cp local/.env.example local/.env           # XENOVA_MQTT_DEV_PASSWORD 를 바꾼다
 bash scripts/make-passwd.sh                # local/passwd 생성 (compose 보다 먼저)
 docker compose -f local/docker-compose.yml --env-file local/.env up -d
-bash scripts/check.sh                      # 결과: 통과 15, 실패 0
+bash scripts/check.sh                      # 결과: 통과 20, 실패 0 (paho-mqtt 없으면 19 + SKIP 1)
 ```
 
 - `local/passwd` 를 만들기 전에 compose 를 올리면 Docker 가 빈 디렉터리를 만들어 브로커가 뜨지 않습니다. 그때는 `local/passwd` 디렉터리를 지우고 `make-passwd.sh` 부터 다시 합니다.
@@ -62,7 +62,8 @@ bash scripts/check.sh                      # 결과: 통과 15, 실패 0
 | --- | --- |
 | VM 에이전트 (`vm_id`) | `xenova/v1/vms/{자기 vm_id}/heartbeat·inventory·metrics·command-result` |
 | 앱·젯슨 (`app_id`) | `xenova/v1/apps/{자기 app_id}/events` |
-| `backend` | `xenova/v1/apps/manual/input`, `xenova/v1/vms/+/command` |
+| `message-board` | 위에 더해 `xenova/v1/apps/message-board/vision` (MQTT-14 카메라 감지 결과, backend 가 읽음) |
+| `backend` | `xenova/v1/apps/manual/input`, `xenova/v1/console/resume`, `xenova/v1/vms/+/command` |
 | `gateway` | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/apps/vehicle/events` |
 | 모든 계정 | `xenova/v1/probes/#` (지연 측정. 계약의 "자기 vm_id 만" 은 payload 조건이라 브로커가 못 거름) |
 
