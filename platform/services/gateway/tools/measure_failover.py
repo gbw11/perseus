@@ -1,6 +1,6 @@
 """게이트웨이 전환 측정 (로컬 브로커). 게이트웨이·수동주행 앱·자율주행 목을 띄우고 장애를 넣어 시간을 잰다.
 
-한 회차: AUTO → 자율 목 강제 종료 → MANUAL → 자율 목 재시작 → AUTO_READY → 재개 → AUTO.
+한 회차: AUTO → 자율 목 강제 종료 → MANUAL → 자율 목 재시작 → AUTO_READY → 재개 → (3초) → AUTO.
 마지막: MANUAL 중 재개 요청(무시 확인), 두 앱 모두 종료 → SAFE_STOP → 수동 앱 재시작 → MANUAL.
 
     python tools/measure_failover.py --port 18832 --runs 10
@@ -182,7 +182,7 @@ def main() -> int:
             ready_s.append(ready[0] - first)
             ready_gen = ready[1]["generation"]
             resume()
-            auto = obs.wait_mode("AUTO", 2.0, after=ready[0])
+            auto = obs.wait_mode("AUTO", 5.0, after=ready[0])   # 계약 v1.2: 수락 후 3초 카운트다운
             if not auto or auto[1]["generation"] != ready_gen + 1:
                 failures.append(f"run {run}: 재개 후 AUTO gen 불일치 {auto}")
                 break

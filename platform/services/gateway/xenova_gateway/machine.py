@@ -1,4 +1,4 @@
-"""제어권 판정 상태 기계 (MQTT 계약 v1 5·6장, RC카 시나리오 4장).
+"""제어권 판정 상태 기계 (MQTT 계약 v1.2 5·6장, RC카 시나리오 4장).
 
 입출력이 없는 순수 객체다. 시각은 호출하는 쪽이 넘긴다(단조 시계, 초). 단위 시험은 시각과 메시지를 직접 넣는다.
 
@@ -6,6 +6,8 @@
 - 앱이 살아 있는지는 세대와 상관없이 유효한 `drive.command` 수신으로 본다. 전환 직후 새 활성 앱은 잠깐 옛 세대로 보내기 때문이다.
 - ESP32 로 전달하는 것은 활성 앱의, 현재 세대와 같은 명령뿐이다 (계약 5.5 1·2).
 - step 한 번에 모드 전환은 최대 한 번이다. 다음 조건은 다음 step 에서 본다.
+- 재개는 바로 바꾸지 않는다 (계약 v1.2 6장). 받아들이면 `drive.resume.accepted` 를 내고 3초 뒤 step 에서 `AUTO` 로 바꾼다.
+  그 사이 `AUTO_READY` 를 벗어나면 `drive.resume.cancelled` 를 낸다.
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ class Timing:
     ready_hold_s: float = 3.0          # 복구된 자율 명령이 이만큼 연속 신선 → AUTO_READY
     heartbeat_timeout_s: float = 3.0   # app.heartbeat 를 이만큼 못 받으면 끊김 (6.1)
     stop_resend_s: float = 0.020       # SAFE_STOP 동안 정지 프레임 반복 주기 (명령 주기와 같게)
+    resume_countdown_s: float = 3.0    # 재개 수락 → AUTO 전환 (계약 v1.2 6장 switch_in_ms)
 
 
 # --- 출력 -----------------------------------------------------------------------
@@ -126,6 +129,15 @@ def valid_command(payload: Any) -> tuple[int, float, float] | None:
     return generation, float(v), float(steer)
 
 
+@dataclass(frozen=True)
+class _Countdown:
+    """받아들인 재개 요청. AUTO_READY 에서만 있다."""
+
+    start_t: float
+    generation: int
+    requested_by: str | None
+
+
 @dataclass
 class _Pending:
     """전환 뒤 새 세대 첫 출력까지 재기 위한 기록."""
@@ -149,7 +161,8 @@ class ControlMachine:
         self.mode = start_mode
         self.generation = generation
         self.apps = {app: AppTrack(app, vm_id=(vm_ids or {}).get(app)) for app in DRIVE_APPS}
-        self._resume_requested: list[float] = []
+        self._resume_requested: list[tuple[float, str | None]] = []
+        self._countdown: _Countdown | None = None
         self._last_stop_t: float | None = None
         self._measure: _Pending | None = None
         self._started = False
@@ -185,8 +198,12 @@ class ControlMachine:
         state = payload.get("state") if isinstance(payload, dict) else None
         app.heartbeat_state = state if isinstance(state, str) else None
 
-    def on_resume(self, t: float) -> None:
-        self._resume_requested.append(t)
+    def on_resume(self, t: float, requested_by: str | None = None) -> None:
+        self._resume_requested.append((t, requested_by))
+
+    @property
+    def counting_down(self) -> bool:
+        return self._countdown is not None
 
     # --- 판정 -----------------------------------------------------------------
 
@@ -276,22 +293,56 @@ class ControlMachine:
             return Mode.AUTO_READY, REASON_AUTONOMOUS_READY
         if self.mode is Mode.AUTO_READY and not self.ready(AUTONOMOUS, now):
             return Mode.MANUAL, REASON_AUTONOMOUS_LOST
+        # 여기까지 왔으면 AUTO_READY 조건이 아직 맞다
+        countdown = self._countdown
+        if countdown is not None and now - countdown.start_t >= self.timing.resume_countdown_s:
+            return Mode.AUTO, REASON_RESUME
         return None
 
     def _resume(self, now: float) -> list[Action]:
-        """drive.resume.requested 는 AUTO_READY 에서만 받는다. 다른 모드에서는 무시하고 이벤트도 내지 않는다 (계약 6장)."""
+        """drive.resume.requested 는 AUTO_READY 이고 카운트다운 중이 아닐 때만 받는다 (계약 v1.2 6장).
+
+        다른 모드·카운트다운 중에는 무시하고 이벤트도 내지 않는다. 받으면 accepted 를 내고 now 부터 센다.
+        같은 step 에 여러 건이면 첫 건만 받고 나머지는 카운트다운 중 재요청으로 본다.
+        """
         if not self._resume_requested:
             return []
+        _, requested_by = self._resume_requested[0]
         self._resume_requested.clear()
-        if self.mode is not Mode.AUTO_READY:
-            log.info("재개 요청 무시: 모드 %s", self.mode.value)
-            return [Measure("resume_ignored", {"mode": self.mode.value, "t": now})]
-        return self._transition(Mode.AUTO, REASON_RESUME, now)
+        if self.mode is not Mode.AUTO_READY or self._countdown is not None:
+            why = "countdown" if self._countdown is not None else self.mode.value
+            log.info("재개 요청 무시: %s", why)
+            return [Measure("resume_ignored", {"mode": self.mode.value, "countdown": self._countdown is not None, "t": now})]
+        self._countdown = _Countdown(now, self.generation, requested_by)
+        switch_in_ms = round(self.timing.resume_countdown_s * 1000)
+        log.info("재개 수락 gen=%d requested_by=%s, %d ms 뒤 AUTO", self.generation, requested_by, switch_in_ms)
+        return [
+            PublishEvent("drive.resume.accepted", {
+                "switch_in_ms": switch_in_ms, "generation": self.generation, "requested_by": requested_by,
+            }),
+            Measure("resume_accepted", {"gen": self.generation, "t": now}),
+        ]
+
+    def _cancel_countdown(self, reason: str, now: float) -> list[Action]:
+        """카운트다운 중 AUTO_READY 를 AUTO 가 아닌 곳으로 벗어나면 cancelled. reason 은 그 전환의 reason."""
+        countdown = self._countdown
+        if countdown is None:
+            return []
+        self._countdown = None
+        log.info("재개 취소 gen=%d reason=%s", countdown.generation, reason)
+        return [
+            PublishEvent("drive.resume.cancelled", {"reason": reason, "generation": countdown.generation}),
+            Measure("resume_cancelled", {"gen": countdown.generation, "reason": reason,
+                                         "since_accept_ms": round((now - countdown.start_t) * 1000, 3)}),
+        ]
 
     def _transition(self, to: Mode, reason: str, now: float) -> list[Action]:
         previous_mode = self.mode
         previous_active = self.active_app
         last_active_t = self.apps[previous_active].last_command_t if previous_active else None
+        # 세대를 올리기 전에: cancelled 의 generation 은 accepted 와 같은 세대
+        cancelled = self._cancel_countdown(reason, now) if to is not Mode.AUTO else []
+        self._countdown = None
         self.mode = to
         self.generation += 1
         self.transitions += 1
@@ -303,8 +354,9 @@ class ControlMachine:
         log.info("모드 %s → %s gen=%d reason=%s", previous_mode.value, to.value, self.generation, reason)
         self._measure = _Pending(self.generation, reason, last_active_t, now)
         stop = self._stop(now) if to is Mode.SAFE_STOP else []
-        # 정지 프레임이 control·이벤트보다 먼저. 측정 기록(first_output)은 맨 뒤
+        # 정지 프레임이 cancelled·control·이벤트보다 먼저. 측정 기록(first_output)은 맨 뒤
         actions: list[Action] = stop[:1]
+        actions += cancelled
         actions += [
             PublishControl(self.control_payload(reason)),
             PublishEvent("drive.mode.changed", {
