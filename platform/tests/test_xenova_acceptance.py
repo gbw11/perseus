@@ -187,7 +187,7 @@ class AcceptanceTest(unittest.TestCase):
             self.assertEqual(z['template'], 'xenova-zephyr-starter-1.0.0')
             self.assertEqual(z['board_shutdown_policy'], 'force-allowed')
             self.assertEqual(z['template_id'], 'zephyr-xenvm-starter-arm64')
-            self.assertEqual(z['template_version'], '1.0.0')
+            self.assertEqual(z['template_version'], '1.0.1')
         self.assertTrue(all(row['autostart'] for row in defaults['instances']))
         self.assertFalse(zephyr.CAPABILITIES['graceful_shutdown'])
         old = self.add_zephyr()

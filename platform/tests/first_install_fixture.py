@@ -169,15 +169,21 @@ def platform_root(root):
         mapping['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
     for path in [*FILES.glob('*.service'), *FILES.glob('*.mount')]:
         mapping['usr/lib/systemd/system/' + path.name] = path
+    mapping.update(assemble.deployment_payloads.source_files('usr/lib/python3.14/site-packages'))
     for relative, source in mapping.items():
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
+    for dependency in ('fastapi/__init__.py', 'uvicorn/__init__.py', 'paho/mqtt/client.py',
+                       'pydantic/__init__.py', 'starlette/__init__.py', 'anyio/__init__.py'):
+        target=root/'usr/lib/python3.14/site-packages'/dependency
+        target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_text('# packaging fixture; not a dependency implementation\n')
     library = root/'usr/lib/libxenmanage.so.1'
     library.parent.mkdir(parents=True, exist_ok=True)
     library.write_text('packaging fixture: not a target binary')
     cap = root / 'usr/share/xenova/first-install-capabilities.json'
-    cap.parent.mkdir(parents=True)
+    cap.parent.mkdir(parents=True, exist_ok=True)
     cap.write_text(json.dumps(contract.FEATURES))
     (root / 'etc/machine-id').write_text('uninitialized\n')
     (root / 'etc/ssh').mkdir()
@@ -189,11 +195,11 @@ def platform_root(root):
     checker.parent.mkdir(parents=True); checker.write_text('packaging fixture: not executed')
     wants = root / 'etc/systemd/system/multi-user.target.wants'
     wants.mkdir(exist_ok=True)
-    for name in ('xenova-host-admission.service', 'xenova-first-boot.service', 'srv-xenova.mount', 'xenova-vms.service', 'xenova-vm-shutdown.service'):
+    for name in ('xenova-dom0-manager.service', 'xenova-host-admission.service', 'xenova-first-boot.service', 'srv-xenova.mount', 'xenova-vms.service', 'xenova-vm-shutdown.service'):
         (wants / name).symlink_to('/usr/lib/systemd/system/' + name)
     tools = root / 'usr/bin'
     tools.mkdir(parents=True)
-    for name in ('sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl', 'qemu-system-i386', 'wpa_supplicant', 'wpa_cli', 'iw', 'networkctl'):
+    for name in ('sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl', 'qemu-system-i386', 'wpa_supplicant', 'wpa_cli', 'iw', 'networkctl', 'python3'):
         (tools / name).write_text('fixture: not executed')
         (tools / name).chmod(0o755)
     for relative in ('brcm/brcmfmac43455-sdio.bin','brcm/brcmfmac43455-sdio.clm_blob',
