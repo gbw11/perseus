@@ -8,7 +8,7 @@ const SOCKET_LABEL = { connecting: '연결 중', open: '실시간', closed: '끊
 
 /**
  * 주행 모드 띠 — 모든 웹 화면 위에 고정 (화면 정의서 §2).
- * "모드 · gen | 활성 | 예비 | 안전" 순서. 값은 WS /ws/v1/drive/state.
+ * "모드 · gen | 활성 | 수동주행 | 안전" 순서. 값은 WS /ws/v1/drive/state.
  */
 export function ModeStrip() {
   const { drive, socket } = useDrive();
@@ -46,11 +46,11 @@ export function ModeStrip() {
       </span>
       <span className={styles.sep}>|</span>
       <span>
-        예비:{' '}
+        수동주행:{' '}
         {control?.active_app === 'manual' ? (
-          <b className={styles.dim}>— (수동주행이 제어 중)</b>
+          <b style={{ color: ROLES.manual.color }}>제어 중</b>
         ) : manual?.command_fresh ? (
-          <b style={{ color: ROLES.manual.color }}>준비됨</b>
+          <b style={{ color: ROLES.manual.color }}>대기 중</b>
         ) : (
           <b className={styles.warn}>명령 없음</b>
         )}

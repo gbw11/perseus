@@ -1,31 +1,24 @@
 import { Button, Card, StatusBadge, useToast } from '@xenova/ui';
-import { lazy, Suspense, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useMetrics, useProcesses, useVm, useVmAction, type VmAction } from '../api/queries';
 import type { MetricSample, Vm } from '../api/types';
-import { AGENT_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
+import { STATE_HEALTH, STATE_LABEL } from '../format';
 import { ago, osLabel, roleOf } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
 
-/** xterm 이 무거워서 웹 콘솔 탭을 열 때만 불러온다 (platform -248 구현) */
-const ConsolePanel = lazy(() =>
-  import('../console/ConsolePanel').then((module) => ({ default: module.ConsolePanel })),
-);
-
-type Tab = 'overview' | 'charts' | 'processes' | 'console';
+type Tab = 'overview' | 'charts' | 'processes';
 const TABS: [Tab, string][] = [
   ['overview', '개요'],
   ['charts', '실시간 차트'],
   ['processes', '프로세스'],
-  ['console', '웹 콘솔'],
 ];
 
 /**
  * W-04 VM 상세 (화면 정의서 W-04, UI-04·UI-05) — 초안. 화면 완성은 정수환 담당 작업이 이어받는다.
- * Zephyr 는 에이전트가 없어 차트·프로세스 대신 안내를 보인다. 웹 콘솔은 실제 게스트 터미널
- * (WS /ws/v1/vms/{id}/console, 웹 터미널 계약 browser-console-v1 — 정수환 platform -248). mock 에서는 가짜 셸.
+ * Zephyr 는 에이전트가 없어 차트·프로세스 대신 안내를 보인다. 웹 콘솔은 위쪽 메뉴 [웹 콘솔](/console)에만 둔다.
  * 참고 시안: stitch_untitled_project/ui_04_vm, ui_05.
  */
 export function VmDetailPage() {
@@ -79,16 +72,13 @@ export function VmDetailPage() {
           </div>
           <div style={{ paddingTop: 'var(--x-space-4)' }}>
             {!linux && tab === 'overview' && (
-              <p className={styles.draft}>Zephyr — 에이전트 없음. 차트·프로세스 대신 콘솔로 확인한다.</p>
+              <p className={styles.draft}>
+                Zephyr VM 은 차트·프로세스를 보내지 않는다. 출력은 위쪽 메뉴 [웹 콘솔]에서 본다.
+              </p>
             )}
             {tab === 'overview' && <Overview vm={vm.data} />}
             {tab === 'charts' && linux && <Charts vmId={vm.data.vm_id} />}
             {tab === 'processes' && linux && <Processes vmId={vm.data.vm_id} />}
-            {tab === 'console' && (
-              <Suspense fallback={<p className={styles.dim}>콘솔 준비 중…</p>}>
-                <ConsolePanel key={vm.data.vm_id} vm={vm.data} />
-              </Suspense>
-            )}
           </div>
         </Card>
       )}
@@ -141,7 +131,7 @@ function Overview({ vm }: { vm: Vm }) {
         <div>
           <span>자원</span>
           <span>
-            {vm.vcpus} vCPU / {vm.memory_mib} MiB{zephyr ? ' (고정 프로필)' : ''}
+            {vm.vcpus} vCPU / {vm.memory_mib} MiB
           </span>
         </div>
         <div>
@@ -150,12 +140,6 @@ function Overview({ vm }: { vm: Vm }) {
         </div>
       </div>
       <div className={styles.rows}>
-        <div>
-          <span>에이전트</span>
-          <span>
-            {zephyr ? '없음' : vm.agent_status ? `${AGENT_LABEL[vm.agent_status]} · heartbeat 5초` : '—'}
-          </span>
-        </div>
         {role && (
           <>
             <div>

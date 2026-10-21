@@ -37,7 +37,7 @@ function DetailHeader({ id }: { id: AppId }) {
     <div className={styles.detailHead} style={{ ['--accent' as string]: `var(--x-app-${id})` }}>
       <h1>{meta.title}</h1>
       <span className={styles.guest}>
-        {meta.guest === 'zephyr' ? 'Zephyr' : 'Debian 13'} · {meta.topicAppId} · {meta.role}
+        {meta.guest === 'zephyr' ? 'Zephyr' : 'Debian 13'} · {meta.role}
       </span>
       <StatusBadge
         health={status.health}

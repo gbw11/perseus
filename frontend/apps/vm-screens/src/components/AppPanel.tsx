@@ -39,18 +39,14 @@ export function AppPanel({ id, onSelect }: { id: AppId; onSelect?: (id: AppId) =
       <header className={styles.panelHead}>
         <div>
           <h2 className={styles.panelTitle}>{meta.title}</h2>
-          <span className={styles.guest}>
-            {meta.guest === 'zephyr' ? 'Zephyr' : 'Debian 13'} · {meta.topicAppId}
-          </span>
+          <span className={styles.guest}>{meta.guest === 'zephyr' ? 'Zephyr' : 'Debian 13'}</span>
         </div>
         <StatusBadge health={status.health} label={badgeLabel} size="lg" />
       </header>
 
       <div className={styles.panelRole}>{meta.role}</div>
       {active && <div className={styles.activeTag}>▶ 차량 제어 중</div>}
-      {!active && id === 'manual' && status.commandHz > 0 && (
-        <div className={styles.standbyTag}>예비 — 준비됨</div>
-      )}
+      {!active && id === 'manual' && status.commandHz > 0 && <div className={styles.standbyTag}>대기 중</div>}
 
       <div className={styles.panelBody}>
         {id === 'interaction' ? <InteractionSummary /> : <DriveSummary id={id} />}

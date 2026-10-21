@@ -7,24 +7,36 @@ import { ConsoleTransport, type ConsoleState } from '../api/console';
 import type { Vm } from '../api/types';
 import styles from './ConsolePanel.module.css';
 
+/** 끊기면 다시 붙는 간격. 연속으로 실패하면 늘린다 (입력은 다시 보내지 않는다) */
+const RETRY_MS = 2000;
+const MAX_RETRY_MS = 10000;
+
 const LABEL: Record<ConsoleState, string> = {
   idle: '연결 대기',
   connecting: '연결 중',
   connected: '연결됨',
   closing: '연결 정리 중',
-  disconnected: '연결 해제',
+  disconnected: '끊김',
   error: '연결 오류',
 };
 
+/**
+ * 화면을 열면 바로 연결하고, 끊기면 2초 뒤(실패가 이어지면 최대 10초) 저절로 다시 붙는다.
+ * 끊긴 동안 친 키는 버린다 — 다시 붙어도 명령을 재전송하지 않는다. VM 이 꺼져 있으면 기다렸다가 켜지면 붙는다.
+ */
 export function ConsolePanel({ vm }: { vm: Vm }) {
   const host = useRef<HTMLDivElement>(null);
   const transport = useRef<ConsoleTransport | null>(null);
   const terminal = useRef<Terminal | null>(null);
   const [status, setStatus] = useState<{ state: ConsoleState; message: string }>({
-    state: 'idle',
-    message: '연결 버튼을 눌러 이 VM의 콘솔을 여세요.',
+    state: 'connecting',
+    message: '콘솔에 연결하는 중…',
   });
   const available = vm.state === 'running' || vm.state === 'paused';
+  const availableRef = useRef(available);
+  useEffect(() => {
+    availableRef.current = available;
+  });
 
   useEffect(() => {
     if (!host.current) return;
@@ -51,12 +63,22 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
     terminal.current = term;
     let pendingOutput = 0;
     let disposed = false;
+    let retry: number | undefined;
+    let delay = RETRY_MS;
     const connection = new ConsoleTransport(vm.vm_id, {
       state: (state, message) => {
         if (disposed) return;
         term.options.disableStdin = state !== 'connected';
+        if ((state === 'disconnected' || state === 'error') && availableRef.current) {
+          window.clearTimeout(retry);
+          retry = window.setTimeout(() => void connection.connect(), delay);
+          setStatus({ state, message: `${message} ${delay / 1000}초 뒤 다시 연결합니다.` });
+          delay = Math.min(delay * 2, MAX_RETRY_MS);
+          return;
+        }
         setStatus({ state, message });
         if (state === 'connected') {
+          delay = RETRY_MS;
           term.focus();
           if (vm.guest_kind === 'linux') connection.send('\r');
         }
@@ -79,6 +101,7 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
       },
     });
     transport.current = connection;
+    if (availableRef.current) void connection.connect();
     const input = term.onData((data) => connection.send(data));
     const binary = term.onBinary((data) =>
       connection.sendBytes(Uint8Array.from(data, (char) => char.charCodeAt(0) & 255)),
@@ -91,6 +114,7 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
     resize();
     return () => {
       disposed = true;
+      window.clearTimeout(retry);
       connection.dispose();
       observer.disconnect();
       input.dispose();
@@ -101,12 +125,12 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
     };
   }, [vm.vm_id, vm.name, vm.guest_kind]);
 
+  // VM 이 꺼지면 끊고, 다시 켜지면 붙는다
+  const idle = status.state === 'disconnected' || status.state === 'error' || status.state === 'idle';
   useEffect(() => {
     if (!available) transport.current?.disconnect();
-  }, [available]);
-
-  const active = status.state === 'connected' || status.state === 'connecting';
-  const closing = status.state === 'closing';
+    else if (idle) void transport.current?.connect();
+  }, [available]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <Card title="웹 콘솔">
       <section aria-label={`${vm.name} 콘솔`} className={styles.panel}>
@@ -118,28 +142,13 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
             </span>
           </div>
           <div className={styles.actions}>
-            <Button
-              size="sm"
-              disabled={!available || active || closing}
-              onClick={() => void transport.current?.connect()}
-            >
-              연결
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={!active}
-              onClick={() => transport.current?.disconnect()}
-            >
-              연결 해제
-            </Button>
             <Button size="sm" variant="ghost" onClick={() => terminal.current?.clear()}>
               화면 지우기
             </Button>
           </div>
         </div>
         <p className={status.state === 'error' ? styles.error : styles.hint} role="status">
-          {available ? status.message : 'VM을 실행한 뒤 콘솔에 연결할 수 있습니다.'}
+          {available ? status.message : 'VM 이 꺼져 있습니다. 켜지면 저절로 연결합니다.'}
         </p>
         {vm.guest_kind === 'zephyr' && (
           <p className={styles.hint}>
@@ -150,7 +159,10 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
         <div data-theme="dark" className={styles.screen}>
           <div ref={host} className={styles.terminal} />
         </div>
-        <p className={styles.hint}>로그인은 게스트 계정을 사용합니다. 연결 해제는 VM을 종료하지 않습니다.</p>
+        <p className={styles.hint}>
+          로그인은 게스트 계정을 사용합니다. 끊기면 저절로 다시 연결하며, 끊긴 동안 입력한 키는 보내지
+          않습니다.
+        </p>
       </section>
     </Card>
   );

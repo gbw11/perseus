@@ -1,10 +1,10 @@
 import { Button, Card, Modal, StatusBadge, useToast } from '@xenova/ui';
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVmAction, useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
-import { AGENT_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
+import { STATE_HEALTH, STATE_LABEL } from '../format';
 import { osLabel, roleOf } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
@@ -15,7 +15,7 @@ import styles from './pages.module.css';
  * Xen VM 관리(상태·OS·자원·에이전트·생명주기)만 3분할 카드로 보인다.
  */
 export function VmListPage() {
-  const vms = useVms();
+  const vms = useVms(1000);
   const { drive } = useDrive();
   const action = useVmAction();
   const toast = useToast();
@@ -55,11 +55,7 @@ export function VmListPage() {
           <span className={styles.chip}>메모리 {memory} MiB</span>
         </div>
         <span className={styles.grow} />
-        {vms.data && (
-          <span className={styles.dim}>
-            관측 {new Date(vms.data.observed_at).toLocaleTimeString()} (5초마다)
-          </span>
-        )}
+        {vms.data && <ObservedClock at={vms.dataUpdatedAt} />}
         <Button onClick={() => navigate('/vms/new')}>+ VM 만들기</Button>
       </section>
 
@@ -76,25 +72,27 @@ export function VmListPage() {
           const role = roleOf(vm, drive);
           const zephyr = vm.guest_kind === 'zephyr';
           return (
-            <Card key={vm.vm_id}>
+            <Card
+              key={vm.vm_id}
+              className={styles.clickCard}
+              role="link"
+              tabIndex={0}
+              aria-label={`${role?.title ?? vm.name} 상세`}
+              onClick={() => navigate(`/vms/${vm.vm_id}`)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.target === e.currentTarget) navigate(`/vms/${vm.vm_id}`);
+              }}
+            >
               <div
                 className={styles.appCard}
                 style={{ borderTop: `3px solid ${role?.color ?? 'var(--x-border)'}` }}
               >
                 <div className={styles.row}>
-                  <Link
-                    to={`/vms/${vm.vm_id}`}
-                    style={{ color: role?.color, fontWeight: 700, fontSize: 'var(--x-text-lg)' }}
-                  >
-                    {role?.title ?? vm.name}
-                  </Link>
+                  <b style={{ color: role?.color, fontSize: 'var(--x-text-lg)' }}>{role?.title ?? vm.name}</b>
                   <span className={styles.grow} />
                   <StatusBadge health={STATE_HEALTH[vm.state]} label={STATE_LABEL[vm.state]} size="sm" />
                 </div>
-                <div className={styles.eyebrow}>
-                  {vm.name}
-                  {role ? ` · ${role.app}` : ''}
-                </div>
+                <div className={styles.eyebrow}>{vm.name}</div>
                 <dl className={styles.kv}>
                   <dt>OS</dt>
                   <dd>{osLabel(vm)}</dd>
@@ -105,15 +103,17 @@ export function VmListPage() {
                   <dt>vCPU</dt>
                   <dd className={styles.mono}>{vm.vcpus}</dd>
                   <dt>메모리</dt>
-                  <dd className={styles.mono}>
-                    {vm.memory_mib} MiB{zephyr ? ' (고정)' : ''}
-                  </dd>
+                  <dd className={styles.mono}>{vm.memory_mib} MiB</dd>
                   <dt>통신</dt>
                   <dd className={styles.mono}>{zephyr ? 'vchan → dom0 중계' : (vm.ipv4 ?? '—')}</dd>
-                  <dt>에이전트</dt>
-                  <dd>{zephyr ? '없음 (Zephyr)' : vm.agent_status ? AGENT_LABEL[vm.agent_status] : '—'}</dd>
                 </dl>
-                <div className={styles.rowActions} style={{ marginTop: 'var(--x-space-3)' }}>
+                {/* 버튼을 눌러도 상세로 넘어가지 않게 */}
+                <div
+                  className={styles.rowActions}
+                  style={{ marginTop: 'var(--x-space-3)' }}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
                   <Button size="sm" onClick={() => run(vm, 'start')} disabled={vm.state === 'running'}>
                     시작
                   </Button>
@@ -126,9 +126,6 @@ export function VmListPage() {
                     정지
                   </Button>
                   <span className={styles.grow} />
-                  <Button size="sm" variant="ghost" onClick={() => navigate(`/vms/${vm.vm_id}`)}>
-                    상세
-                  </Button>
                   <Button size="sm" variant="danger" onClick={() => setDeleting(vm)}>
                     삭제
                   </Button>
@@ -171,5 +168,18 @@ export function VmListPage() {
         )}
       </Modal>
     </div>
+  );
+}
+
+/** 마지막으로 받은 시각 — 1초마다 다시 읽어 초 단위로 바뀌고, 바뀔 때 잠깐 반짝인다 */
+function ObservedClock({ at }: { at: number }) {
+  const time = new Date(at).toTimeString().slice(0, 8);
+  return (
+    <span className={styles.dim}>
+      관측{' '}
+      <b key={time} className={styles.tick}>
+        {time}
+      </b>
+    </span>
   );
 }

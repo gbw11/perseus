@@ -112,7 +112,7 @@ export const consoleHandlers = [
           out('\n');
           if (command.trim() === 'exit') {
             out('logout\n');
-            client.close(1000, 'exit');
+            setTimeout(() => client.close(1000, 'exit'), 100); // 마지막 출력이 먼저 닿게
             return;
           }
           out(shellReply(name, command, startedAt) + prompt);

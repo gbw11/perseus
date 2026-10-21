@@ -15,7 +15,7 @@ import styles from './pages.module.css';
 type Domain = 'dom0' | AppId;
 
 const DOMAINS: { id: Domain; title: string; sub: string; color: string; dedicated: boolean }[] = [
-  { id: 'dom0', title: 'dom0', sub: 'Yocto · 관리 도메인', color: 'var(--x-stopped)', dedicated: false },
+  { id: 'dom0', title: 'dom0', sub: 'Yocto · 관리 도메인', color: 'var(--x-text-muted)', dedicated: false },
   {
     id: 'autonomous',
     title: ROLES.autonomous.title,
@@ -57,7 +57,6 @@ export function ResourcesPage() {
           <h1>vCPU·스케줄러·메모리</h1>
         </div>
         <span className={styles.grow} />
-        <span className={styles.chip}>보기 전용 — VM 을 만들 때 정해진 값</span>
       </section>
 
       <Card title="코어 배치 (vCPU 핀닝)" actions={<span className={styles.dim}>RC카 시나리오 §2 표본</span>}>
@@ -127,21 +126,31 @@ export function ResourcesPage() {
         </Card>
         <Card title="메모리" actions={<span className={styles.mono}>합계 {totalMemory} MiB</span>}>
           <div className={styles.stack}>
-            {DOMAINS.map((d) => (
-              <i
-                key={d.id}
-                title={`${d.title} ${memory(d.id)} MiB`}
-                style={{ flexGrow: memory(d.id), background: d.color }}
-              />
-            ))}
+            {DOMAINS.map((d) => {
+              const share = totalMemory ? memory(d.id) / totalMemory : 0;
+              return (
+                <i
+                  key={d.id}
+                  title={`${d.title} ${memory(d.id)} MiB`}
+                  style={{ flexGrow: memory(d.id), background: d.color }}
+                >
+                  {share > 0.15 ? d.title : ''}
+                </i>
+              );
+            })}
           </div>
           <div className={styles.rows}>
             {DOMAINS.map((d) => (
               <div key={d.id}>
-                <span style={{ color: d.color }}>{d.title}</span>
+                <span className={styles.legend}>
+                  <i style={{ background: d.color }} />
+                  {d.title}
+                </span>
                 <span className={styles.mono}>
                   {memory(d.id) ? `${memory(d.id)} MiB` : '—'}
-                  {d.id === 'dom0' ? ' (부팅 인자)' : d.sub === 'Zephyr' ? ' (Zephyr 프로필 고정)' : ''}
+                  {totalMemory && memory(d.id)
+                    ? ` · ${((memory(d.id) / totalMemory) * 100).toFixed(1)}%`
+                    : ''}
                 </span>
               </div>
             ))}

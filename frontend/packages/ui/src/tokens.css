@@ -45,7 +45,7 @@
   /* 앱 역할 (MQTT 계약 §4 app_id) */
   --x-app-autonomous: #2f6fed;
   --x-app-manual: #8a4ddb;
-  --x-app-interaction: #0e9f9a;
+  --x-app-interaction: #db2777;
 
   /* 게스트 (VM 관리 API 계약 §2.3 템플릿) */
   --x-guest-debian: #c7254e;
@@ -81,7 +81,7 @@
 
   --x-app-autonomous: #38bdf8;
   --x-app-manual: #a78bfa;
-  --x-app-interaction: #06b6d4;
+  --x-app-interaction: #f472b6;
 }
 
 *,

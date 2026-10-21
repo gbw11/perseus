@@ -29,11 +29,12 @@ export const keys = {
 /** 백엔드가 5초마다 Xen 상태를 확인하므로(계약 §5 끝) 화면도 같은 주기로 다시 읽는다 */
 const POLL_MS = 5000;
 
-export function useVms() {
+/** pollMs: VM 화면은 1초 (관측 시각이 초 단위로 바뀌게), 나머지는 5초 */
+export function useVms(pollMs = POLL_MS) {
   return useQuery({
     queryKey: keys.vms,
     queryFn: ({ signal }) => request<VmListResponse>('/api/v1/vms', { signal }),
-    refetchInterval: POLL_MS,
+    refetchInterval: pollMs,
   });
 }
 

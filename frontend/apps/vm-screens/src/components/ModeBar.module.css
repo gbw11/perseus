@@ -60,16 +60,28 @@
   font-size: var(--x-text-md);
 }
 .flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 2px 10px;
-  border: 1px solid var(--x-border);
-  border-radius: 4px;
-  color: var(--x-text-muted);
+  border: 1px solid var(--x-ok);
+  border-radius: 999px;
+  background: var(--x-ok-soft);
+  color: var(--x-ok);
   font-size: var(--x-text-sm);
+  font-weight: 700;
+}
+.flag::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
 }
 .flagOn {
   border-color: var(--x-fault);
-  background: var(--x-fault-soft);
-  color: var(--x-fault);
+  background: var(--x-fault);
+  color: #fff;
 }
 .clock {
   font-family: var(--x-font-mono);

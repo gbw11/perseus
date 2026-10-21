@@ -37,6 +37,7 @@ export function ModeBar() {
         </span>
         {flag(flags.estop, flags.estop ? '비상정지 버튼 눌림' : '비상정지 버튼 안 눌림')}
         {flag(flags.watchdog, flags.watchdog ? '명령 끊김 정지 작동' : '명령 끊김 정지 아님')}
+        {flag(flags.obstacle, flags.obstacle ? '근거리 장애물 감지' : '근거리 장애물 없음')}
       </div>
       <dl className={styles.stats}>
         <div>

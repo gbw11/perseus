@@ -261,9 +261,17 @@
   border: 1px solid var(--x-border);
   border-radius: 4px;
   background: var(--x-surface-2);
+  color: var(--x-text);
   font-family: var(--x-font-mono);
   font-size: var(--x-text-xs);
   white-space: nowrap;
+}
+button.chip {
+  cursor: pointer;
+}
+button.chip:hover:not(.chipOn) {
+  border-color: var(--x-primary);
+  color: var(--x-primary);
 }
 .chipOn {
   border-color: var(--x-primary);
@@ -433,14 +441,33 @@
 }
 .stack {
   display: flex;
-  gap: 2px;
-  height: 14px;
+  gap: 3px;
+  height: 28px;
   margin-bottom: var(--x-space-3);
   overflow: hidden;
   border-radius: var(--x-radius-sm);
 }
 .stack > i {
-  min-width: 4px;
+  display: grid;
+  place-items: center;
+  min-width: 10px;
+  overflow: hidden;
+  font-size: var(--x-text-xs);
+  font-style: normal;
+  font-weight: 800;
+  color: #0b1220;
+  white-space: nowrap;
+}
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--x-space-2);
+  color: var(--x-text);
+}
+.legend > i {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
 }
 .picks {
   display: grid;
@@ -452,4 +479,31 @@
   flex-direction: column;
   gap: var(--x-space-1);
   border-top-width: 3px;
+}
+.clickCard {
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    transform 0.15s;
+}
+.clickCard:hover,
+.clickCard:focus-visible {
+  border-color: var(--x-primary);
+  transform: translateY(-2px);
+}
+.tick {
+  display: inline-block;
+  font-family: var(--x-font-mono);
+  color: var(--x-text);
+  animation: tickFlash 0.6s ease-out;
+}
+@keyframes tickFlash {
+  from {
+    color: var(--x-primary);
+    transform: scale(1.08);
+  }
+  to {
+    color: var(--x-text);
+    transform: scale(1);
+  }
 }

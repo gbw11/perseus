@@ -16,7 +16,7 @@ const ConsolePanel = lazy(() =>
 /**
  * 웹 콘솔 — VM 을 골라 바로 게스트 터미널에 입력한다 (UI-05·MO-04). VM 상세의 [웹 콘솔] 탭과 같은 패널.
  * WS /ws/v1/vms/{id}/console (웹 터미널 계약 browser-console-v1). 고른 VM 은 주소(?vm=)에 남는다.
- * VM 을 바꾸면 이전 연결은 끊긴다 — VM 은 종료하지 않는다.
+ * 열면 바로 연결하고 끊기면 저절로 다시 붙는다. VM 을 바꾸면 이전 연결은 끊긴다 — VM 은 종료하지 않는다.
  */
 export function ConsolePage() {
   const vms = useVms();
@@ -33,7 +33,7 @@ export function ConsolePage() {
           <h1>VM 을 골라 바로 입력</h1>
         </div>
         <span className={styles.grow} />
-        <span className={styles.dim}>VM 당 쓰기 세션 1개 · 연결 해제는 VM 을 끄지 않는다</span>
+        <span className={styles.dim}>열면 바로 연결 · 끊기면 저절로 다시 연결 · VM 당 쓰기 세션 1개</span>
       </section>
 
       {vms.error && (

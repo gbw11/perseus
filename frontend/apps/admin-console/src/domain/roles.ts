@@ -93,7 +93,7 @@ export function controlLabel(role: Role, drive: DriveState | null): string | nul
   if (control.active_app === role.app)
     return role.app === 'manual' ? '▶ 차량 제어 중 · 운영자 운전' : '▶ 차량 제어 중';
   const app = drive.apps[role.app];
-  if (role.app === 'manual') return app?.command_fresh ? '예비 — 준비됨' : '예비 — 명령 없음';
+  if (role.app === 'manual') return app?.command_fresh ? '대기 중' : '대기 중 — 명령 없음';
   return app?.command_fresh ? '대기 — 명령 신선' : '명령 끊김';
 }
 

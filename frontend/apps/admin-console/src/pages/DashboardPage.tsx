@@ -68,13 +68,11 @@ export function DashboardPage() {
         <span className={styles.grow} />
         <div className={styles.chips}>
           {SAFETY.map((f) => (
-            <span
-              key={f.key}
-              className={styles.chip}
-              title={f.hint}
-              style={flags?.[f.key] ? { borderColor: 'var(--x-fault)', color: 'var(--x-fault)' } : undefined}
-            >
-              {f.label}: {flags ? (flags[f.key] ? f.on : f.off) : '—'}
+            <span key={f.key} title={f.hint}>
+              <StatusBadge
+                health={!flags ? 'stopped' : flags[f.key] ? 'fault' : 'ok'}
+                label={`${f.label}: ${flags ? (flags[f.key] ? f.on : f.off) : '—'}`}
+              />
             </span>
           ))}
         </div>
@@ -114,9 +112,11 @@ export function DashboardPage() {
             {SAFETY.map((f) => (
               <div key={f.key} title={f.hint}>
                 <span>{f.label}</span>
-                <span style={flags?.[f.key] ? { color: 'var(--x-fault)' } : undefined}>
-                  {flags ? (flags[f.key] ? f.on : f.off) : '—'}
-                </span>
+                <StatusBadge
+                  health={!flags ? 'stopped' : flags[f.key] ? 'fault' : 'ok'}
+                  label={flags ? (flags[f.key] ? f.on : f.off) : '—'}
+                  size="sm"
+                />
               </div>
             ))}
           </div>
@@ -205,10 +205,8 @@ function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: Dr
     >
       <div className={styles.rows}>
         <div>
-          <span>OS · app_id</span>
-          <span>
-            {vm ? osLabel(vm) : '—'} · {app}
-          </span>
+          <span>OS</span>
+          <span>{vm ? osLabel(vm) : '—'}</span>
         </div>
       </div>
       {control && (
