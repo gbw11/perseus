@@ -29,7 +29,7 @@ class DefaultDeploymentTest(unittest.TestCase):
         self.assertTrue(defaults["instances"][0]["autostart"])
         self.assertEqual(defaults["instances"][0]["ipv4"], "192.168.77.20")
 
-    def test_factory_versions_match_selected_catalog_and_linux_recipes(self):
+    def test_factory_versions_match_selected_catalog_and_editable_recipes_do_not_regress(self):
         selected = json.loads((ROOT / "platform/guests/default-templates.lock.json").read_text())["templates"]
         defaults = json.loads((FILES / "defaults.json").read_text())
         by_id = {e["template_id"]: e for e in selected}
@@ -38,7 +38,11 @@ class DefaultDeploymentTest(unittest.TestCase):
         for entry in selected:
             if entry["guest_kind"] == "linux":
                 recipe = ROOT / "platform/guests/linux" / entry["id"] / "recipe.json"
-                self.assertEqual(json.loads(recipe.read_text())["version"], entry["version"])
+                # recipe는 다음 게시본의 입력이다. 편집만으로 기존 선택 lock/영수증을 바꾸지 않는다.
+                current = json.loads(recipe.read_text())["version"]
+                version = lambda v: tuple(int(n) for n in v.split("-")[0].split("+")[0].split("."))
+                self.assertGreaterEqual(version(current), version(entry["version"]))
+                self.assertRegex(entry["manifest_sha256"], r"^[0-9a-f]{64}$")
 
     def test_capacity_separates_retained_ubuntu_from_default_disks(self):
         templates = [{"logical_bytes": 8 * contract.GIB, "allocated_bytes": 1024, "boot_bytes": 4096}] * 2

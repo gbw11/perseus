@@ -11,7 +11,7 @@ import time
 from first_install_contract import uuid4
 from artifact_io import publish
 from xenova_catalog import deployment_version
-from prepare_rootfs import prepare_instance, prepare_deployment_seed, inside
+from prepare_rootfs import prepare_instance, prepare_deployment_seed, inside, verify_guest_agent
 
 
 def command(args, **kwargs):
@@ -205,6 +205,7 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
             prepare_instance(root, record, command=command)
         with guest_runtime(work, root):
             verify_guest_ssh(root, seed=seed)
+            verify_guest_agent(root, seed=seed)
         os.sync()
         work.close()
         work.mounts, work.loops = [], []
