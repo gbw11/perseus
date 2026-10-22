@@ -13,6 +13,7 @@ seed 생성, 최종 이미지 조립·검증과 인계까지의 정규 절차입
 
 ## 주요 문서
 
+- [Xenova CLI·Manager 기능 명세서](docs/platform/cli-manager-spec.md)
 - [Linux 자원·부팅 정책·Zephyr 네트워크/종료](platform/docs/resource-boot-zephyr.md)
 - [domU xl 설정 계약](docs/platform/domu-xl-config-v1.md)
 - [VM 관리 API 계약](docs/contracts/vm-api-contract-v1.md)
