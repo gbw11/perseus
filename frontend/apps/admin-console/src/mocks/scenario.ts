@@ -467,12 +467,22 @@ export function simRestart() {
 /** 운영자가 VM 을 강제 종료 (도메인만, 디스크는 그대로). 복구 서비스가 다시 띄운다 */
 export function forceKill(target: Target) {
   push(event('demo.command.sent', 'INFO', vmOf(target), { command: 'force_kill', requested_by: 'operator' }));
+  takeDown(target, 'crashed');
+}
+
+/**
+ * VM 이 내려갔을 때 (강제 종료 = crashed → 복구 서비스가 다시 띄움, VM 화면 [정지] = stopped → 운영자가 [시작]할 때까지).
+ * 주행 앱이면 명령이 끊겨 게이트웨이 판정대로 넘긴다 (계약 §5.2).
+ */
+function takeDown(target: Target, vmState: 'crashed' | 'stopped') {
   const a = store.apps[target];
   if (!a.alive || a.vmState !== 'running') return emit();
   a.alive = false;
   a.aliveSince = null;
   a.downAt = Date.now();
-  a.vmState = 'crashed';
+  a.vmState = vmState;
+  if (vmState === 'stopped')
+    push(event('vm.state.changed', 'INFO', vmOf(target), { from: 'running', to: 'stopped' }));
   if (target === 'message-board') return emit(); // 주행과 무관 — 격리
   push(
     event('drive.fault.detected', 'WARNING', vmOf(target), {
@@ -489,6 +499,25 @@ export function forceKill(target: Target) {
     cancelResume('manual_lost');
     setMode('SAFE_STOP', 'no_fresh_standby', 'WARNING');
   }
+  emit();
+}
+
+const targetOf = (vmId: string) => TARGETS.find((t) => vmOf(t) === vmId);
+
+/** VM 화면 [정지] (REST VM 동작 stop) — 주행 앱이면 강제 종료처럼 인계되지만 복구 서비스가 다시 띄우지 않는다 */
+export function stopVm(vmId: string) {
+  const target = targetOf(vmId);
+  if (target) takeDown(target, 'stopped');
+}
+
+/** VM 화면 [시작] — 부팅이 끝나면 앱이 다시 명령·생존 신호를 낸다 (자율이면 3초 뒤 AUTO_READY) */
+export function startVm(vmId: string) {
+  const target = targetOf(vmId);
+  const a = target && store.apps[target];
+  if (!a || a.vmState !== 'stopped') return;
+  a.vmState = 'running';
+  a.downAt = Date.now() - RESTART_AFTER_MS; // 복구 서비스 재시작과 같은 부팅 시간 (BOOT_MS) 뒤 살아난다
+  push(event('vm.state.changed', 'INFO', vmOf(target), { from: 'stopped', to: 'running' }));
   emit();
 }
 

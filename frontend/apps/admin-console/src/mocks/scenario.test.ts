@@ -11,6 +11,8 @@ import {
   setKeys,
   setRoute,
   snapshot,
+  startVm,
+  stopVm,
   subscribe,
   togglePerception,
   vmStateOf,
@@ -112,6 +114,17 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
       status: 'ACTIVE',
       observed_route: { vm_id: VM_IDS.manual, view: 'os-face' },
     });
+  });
+
+  it('VM 화면 [정지]로 자율주행 VM 을 멈춰도 바로 MANUAL 로 인계, [시작]하면 다시 AUTO_READY', () => {
+    stopVm(VM_IDS.autonomous);
+    expect(last.control).toMatchObject({ mode: 'MANUAL', active_app: 'manual' });
+    expect(vmStateOf(VM_IDS.autonomous)).toBe('stopped');
+    vi.advanceTimersByTime(20_000);
+    expect(last.control?.mode).toBe('MANUAL'); // 운영자가 멈춘 VM 은 복구 서비스가 다시 띄우지 않는다
+    startVm(VM_IDS.autonomous);
+    vi.advanceTimersByTime(5_000 + 3_000 + 500);
+    expect(last.control?.mode).toBe('AUTO_READY');
   });
 
   it('MANUAL 이 아니면 키 입력을 버린다 (계약 §7)', () => {
