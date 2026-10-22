@@ -22,10 +22,15 @@ def main(argv=None, manager=None):
     parser.add_argument('id',nargs='?')
     parser.add_argument('value',nargs='?')
     parser.add_argument('--json',action='store_true')
+    parser.add_argument('--bundle',type=Path)
+    parser.add_argument('--sha256')
+    parser.add_argument('--board-shutdown-policy')
     parser.add_argument('--name')
     parser.add_argument('--vm-id')
     parser.add_argument('--template-id','--template',dest='template_id')
     parser.add_argument('--template-version')
+    parser.add_argument('--expected-lifecycle-generation',type=int)
+    parser.add_argument('--expected-configuration-sha256')
     parser.add_argument('--vcpus',type=int)
     parser.add_argument('--memory-mib',type=int)
     ip = parser.add_mutually_exclusive_group()
@@ -61,7 +66,7 @@ def main(argv=None, manager=None):
                   'template_version':args.template_version,'vcpus':args.vcpus,'memory_mib':args.memory_mib}
             if args.ipv4 is not None:
                 spec['ipv4']=args.ipv4
-        elif action in ('get','retire','restore','purge','delete','start','stop','reboot','autostart-set','board-shutdown-set','config','destroy','snapshot','probe','execution-context'):
+        elif action in ('firmware-transition','update-resources','get','retire','restore','purge','delete','start','stop','reboot','autostart-set','board-shutdown-set','config','destroy','snapshot','probe','execution-context'):
             identity=args.vm_id or args.id
             if identity:
                 try:
@@ -73,6 +78,15 @@ def main(argv=None, manager=None):
                         raise ManagementError('VM_NOT_FOUND','registered internal name not found; use UUID for archived VMs')
                     identity=records[identity]['uuid']
             spec={'vm_id':identity}
+            if action == 'firmware-transition':
+                spec.update(bundle=str(args.bundle) if args.bundle else None,manifest_sha256=args.sha256,
+                            expected_lifecycle_generation=args.expected_lifecycle_generation,
+                            expected_configuration_sha256=args.expected_configuration_sha256,
+                            board_shutdown_policy=args.board_shutdown_policy)
+            if action == 'update-resources':
+                spec.update(vcpus=args.vcpus,memory_mib=args.memory_mib,
+                            expected_lifecycle_generation=args.expected_lifecycle_generation,
+                            expected_configuration_sha256=args.expected_configuration_sha256)
             if action == 'snapshot':
                 spec['max_age_ms']=args.max_age_ms
             if action == 'probe':

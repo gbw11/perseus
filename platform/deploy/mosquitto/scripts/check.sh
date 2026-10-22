@@ -68,9 +68,11 @@ delivered backend "$P/vms/$VM_B/heartbeat" "$VM_A" && bad "에이전트가 남�
 # 4. 백엔드·차량 쪽
 delivered "$VM_A" "$P/vms/$VM_A/command" backend && ok "백엔드 → 에이전트 command" || bad "백엔드 → 에이전트 command"
 delivered manual "$P/apps/manual/input" backend && ok "백엔드 → 수동 입력" || bad "백엔드 → 수동 입력"
-delivered gateway "$P/vehicle/status" esp32 && ok "ESP32 → vehicle/status" || bad "ESP32 → vehicle/status"
-delivered esp32 "$P/vehicle/control" esp32 && bad "ESP32 가 vehicle/control 에 발행됨" || ok "ESP32 → vehicle/control 차단"
-delivered esp32 "$P/vehicle/control" gateway && ok "게이트웨이 → vehicle/control" || bad "게이트웨이 → vehicle/control"
+# ESP32 는 MQTT 에 없다 (계약 v1.1). vehicle/status 도 게이트웨이가 낸다.
+delivered backend "$P/vehicle/status" gateway && ok "게이트웨이 → vehicle/status" || bad "게이트웨이 → vehicle/status"
+delivered backend "$P/vehicle/status" manual && bad "앱이 vehicle/status 에 발행됨" || ok "앱 → vehicle/status 차단"
+delivered manual "$P/vehicle/control" autonomous && bad "앱이 vehicle/control 에 발행됨" || ok "앱 → vehicle/control 차단"
+delivered manual "$P/vehicle/control" gateway && ok "게이트웨이 → vehicle/control" || bad "게이트웨이 → vehicle/control"
 delivered gateway "$P/vehicle/control" observer && bad "observer 가 발행됨" || ok "observer 발행 차단 (읽기 전용)"
 
 # 5. 계약 §1 크기 상한 (64 KB 초과는 전달되지 않아야 한다)

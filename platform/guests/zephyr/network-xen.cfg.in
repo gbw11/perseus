@@ -1,0 +1,11 @@
+# Network Starter: substitute immutable UUID/name/MAC and active firmware path.
+name = "@NAME@"
+uuid = "@UUID@"
+kernel = "@KERNEL@"
+vcpus = 1
+memory = 16
+gic_version = "v2"
+on_poweroff = "destroy"
+on_reboot = "destroy"
+on_crash = "preserve"
+vif = [ 'mac=@MAC@,bridge=xenbr0,script=vif-bridge' ]

@@ -73,15 +73,23 @@ def guest_kind(record):
     return kind
 
 
+def has_network(record):
+    return guest_kind(record) == 'linux' or zephyr.networked(record)
+
+
+def cooperative(record):
+    return guest_kind(record) == 'linux' or zephyr.networked(record)
+
+
 def identity_fields(record):
-    return ('id', 'name', 'uuid') + (('hostname', 'mac', 'ipv4') if guest_kind(record) == 'linux' else ())
+    return ('id', 'name', 'uuid') + (('hostname', 'mac', 'ipv4') if has_network(record) else (('mac','ipv4') if record.get('ipv4') else ()))
 
 
 def board_shutdown_policy(record):
     """기존 등록은 Linux=graceful, Zephyr=refuse. 자동 시작은 종료 승인이 아니다."""
     linux = guest_kind(record) == 'linux'
     policy = record.get('board_shutdown_policy', 'graceful' if linux else 'refuse')
-    if policy not in (('graceful',) if linux else ('refuse', 'force-allowed')):
+    if policy not in (('graceful',) if linux else (('graceful','refuse','force-allowed') if zephyr.networked(record) else ('refuse','force-allowed'))):
         raise PlatformError('invalid board shutdown policy for guest kind')
     return policy
 
@@ -97,6 +105,15 @@ def validate_identity(record):
     if kind == 'zephyr':
         if record.get('schema') != 2:
             raise PlatformError('Zephyr instance requires schema 2')
+        if not record.get('ipv4'):
+            if zephyr.networked(record):
+                raise PlatformError('network Zephyr profile requires reserved MAC/IP/hostname')
+            return
+        if not MAC.fullmatch(record.get('mac','')) or not ID.fullmatch(record.get('hostname','')):
+            raise PlatformError('invalid retained network reservation')
+        ip=record['ipv4']
+        if not re.fullmatch(r'192\.168\.77\.(?:[2-9]|[1-9][0-9])',ip):
+            raise PlatformError('invalid retained network reservation IP')
         return
     if record.get('schema') != 1:
         raise PlatformError('instance schema/id mismatch')
@@ -268,8 +285,8 @@ class Platform:
                 if meta.get('kind') != 'zephyr-xen-firmware' or meta.get('id') != item.name:
                     raise PlatformError('invalid Zephyr template catalog entry')
                 result.append({'id': item.name, 'guest_kind': 'zephyr', 'version': info['version'],
-                               'manifest_sha256': info['revision'], 'capabilities': zephyr.CAPABILITIES,
-                               'hardware_profile': zephyr.PROFILE, 'logical_bytes': info['logical_bytes']})
+                               'manifest_sha256': info['revision'], 'capabilities': info.get('capabilities', zephyr.CAPABILITIES),
+                               'hardware_profile': info.get('hardware_profile', zephyr.PROFILE), 'logical_bytes': info['logical_bytes']})
         return result
 
     def create(self, args, records=None):
@@ -377,11 +394,15 @@ class Platform:
                     or not UUID.fullmatch(fields[6])):
                 raise PlatformError('invalid xl list -v identity/state; removal not confirmed')
             name, domid, uuid = fields[0], int(fields[1]), fields[6]
-            if domid in ids or name in names or uuid in uuids:
+            state = xen_state(fields[4])
+            unavailable_name = name == '(null)' and state in ('shutdown', 'dying')
+            if domid in ids or (not unavailable_name and name in names) or uuid in uuids:
                 raise PlatformError('duplicate xl list -v identity; removal not confirmed')
-            ids.add(domid); names.add(name); uuids.add(uuid)
+            ids.add(domid); uuids.add(uuid)
+            if not unavailable_name:
+                names.add(name)
             rows[domid] = {'domid': domid, 'name': name, 'uuid': uuid,
-                           'xen_state': xen_state(fields[4]), 'xen_state_flags': fields[4]}
+                           'xen_state': state, 'xen_state_flags': fields[4]}
         if 0 not in rows or rows[0]['name'] != 'Domain-0':
             raise PlatformError('Domain-0 missing from xl list -v; removal not confirmed')
         return {key: row for key, row in rows.items() if key != 0}
@@ -394,6 +415,11 @@ class Platform:
             for row in rows.values():
                 identity = (row['domid'], row['uuid'], row['name'])
                 if identity in expected:
+                    continue
+                # libxl의 XenStore 이름 정리가 실제 도메인 제거보다 먼저 끝날 수 있다.
+                # 같은 domid/UUID의 종료 행은 계속 pending이며 부재로 바꾸지 않는다.
+                if (row['name'] == '(null)' and row['xen_state'] in ('shutdown', 'dying')
+                        and any((row['domid'], row['uuid']) == old[:2] for old in expected)):
                     continue
                 if any(row['domid'] == old[0] or row['uuid'] == old[1] or row['name'] == old[2]
                        for old in expected):
@@ -416,7 +442,7 @@ class Platform:
         if not any(line.split()[1] == '0' for line in self.command(['xl', 'list']).splitlines()[1:] if line.strip()):
             raise PlatformError('Domain-0 missing; VM start refused')
 
-    def check_network(self, sysnet=Path('/sys/class/net')):
+    def check_network(self, sysnet=Path('/sys/class/net'), *, deadline=None):
         bridge = sysnet / 'xenbr0'
         if not (bridge / 'bridge').is_dir():
             raise PlatformError('xenbr0 is not a Linux bridge')
@@ -432,7 +458,7 @@ class Platform:
                 netback = False
             if not netback:
                 raise PlatformError(f'non-Xen/physical NIC {port.name} attached to xenbr0; DHCP refused')
-        links = json.loads(self.command(['ip', '-j', '-4', 'address', 'show', 'dev', 'xenbr0']))
+        links = json.loads(self.timed_command(['ip', '-j', '-4', 'address', 'show', 'dev', 'xenbr0'], deadline))
         if not any(a.get('local') == '192.168.77.1' and a.get('prefixlen') == 24
                    for link in links for a in link.get('addr_info', [])):
             raise PlatformError('xenbr0 must have 192.168.77.1/24')
@@ -444,7 +470,10 @@ class Platform:
                 raise PlatformError('guest operation deadline exceeded')
             return self.command(args, timeout=remaining)
         command(['systemctl', 'start', 'xenova-dhcp.service'], timeout=30)
-        self.check_network()
+        if deadline is None:
+            self.check_network()
+        else:
+            self.check_network(deadline=deadline)
         command(['systemctl', 'is-active', '--quiet', 'xenova-dhcp.service'])
         ensure_runtime(self.runtime)
         known = {r.get('mac') for r in records.values()}
@@ -466,7 +495,7 @@ class Platform:
                     preserved.append(row + '\n')
         hosts = ''.join(preserved) + ''.join(
             f"{r['mac']},{r['ipv4']},{r['hostname']},infinite\n"
-            for r in records.values() if guest_kind(r) == 'linux')
+            for r in records.values() if has_network(r))
         atomic_write(self.runtime / 'dhcp-hosts', hosts, 0o644)
         command(['systemctl', 'reload', 'xenova-dhcp.service'])
 
@@ -514,6 +543,61 @@ class Platform:
             if self.execution().unique(row, deadline) != expected["xen_unique_id"]:
                 raise DomainIdentityError("domain incarnation changed before operation")
         return row
+
+    def require_cooperative(self, record, row, action, deadline):
+        """Active bundle and per-incarnation handler feature must both support the operation."""
+        if guest_kind(record) == 'linux':
+            return
+        from xenova_execution import refuse
+        validate_record(record,self.data/'instances'/record['id'])
+        if not cooperative(record):
+            refuse('RECOVERY_MODE_UNSUPPORTED','active firmware has no cooperative handler')
+        current=self.resolve_domain(record,expected=row,deadline=deadline)
+        incarnation=self.execution().unique(current,deadline)
+        # This validated profile supports both operations. Requiring the pair also
+        # prevents accepting a new action during feature publication/withdrawal.
+        for feature in ('poweroff','reboot'):
+            try:
+                ready=self.timed_command(['xenstore-read',f"/local/domain/{current['domid']}/control/feature-{feature}"],deadline)
+            except PlatformError:
+                refuse('OBSERVATION_UNAVAILABLE','cooperative handler readiness could not be observed')
+            self.resolve_domain(record,expected={**current,'xen_unique_id':incarnation},deadline=deadline)
+            if ready.strip()!='1':
+                refuse('RECOVERY_MODE_UNSUPPORTED','cooperative handler is not ready in this execution')
+
+    def wait_reboot_removed(self,record,old,deadline):
+        """Two trusted snapshots plus incarnation checks; (null) is never absence."""
+        previous=old['domid']
+        def pair():
+            snapshots=[self.removal_snapshot(deadline),self.removal_snapshot(deadline)]
+            for snapshot in snapshots:
+                for row in snapshot.values():
+                    if row['domid']==previous:
+                        if row['uuid']!=record['uuid'] or row['name'] not in (record['name'],'(null)'):
+                            raise DomainIdentityError('old reboot domain was replaced')
+                    elif row['uuid']==record['uuid'] or row['name']==record['name']:
+                        raise DomainIdentityError('unexpected replacement during cooperative reboot')
+            return snapshots
+        def absent(snapshots):
+            return all(previous not in snapshot for snapshot in snapshots)
+        while self.clock()<deadline:
+            snapshots=pair()
+            if absent(snapshots):
+                return
+            try:
+                incarnations=[self.execution().unique(snapshot[previous],deadline)
+                              for snapshot in snapshots if previous in snapshot]
+            except PlatformError:
+                # A cooperative guest may disappear after list and before libxenmanage.
+                # Only two NEW successful observations establish removal; lookup failure
+                # alone, a still-present domain, or an unreadable list remains an error.
+                if absent(pair()):
+                    return
+                raise
+            if any(value!=old['xen_unique_id'] for value in incarnations):
+                raise DomainIdentityError('old reboot incarnation was replaced')
+            self.sleep(min(0.1,max(0,deadline-self.clock())))
+        raise PlatformError('cooperative reboot removal deadline exceeded; no force')
 
     def control(self, record, action, expected, *, deadline=None):
         row = self.resolve_domain(record, expected=expected, deadline=deadline)
@@ -581,7 +665,7 @@ class Platform:
             results[key] = {'result': 'starting'}
             save_results()
             try:
-                if guest_kind(record) == 'linux':
+                if has_network(record):
                     self.prepare_dhcp(records)
                 state = self.start(record)
                 results[key] = {'result': state, 'xen_state': state, 'app_readiness': 'unknown',
@@ -639,10 +723,12 @@ class Platform:
                 row = rows[0]
                 known.add(row['domid'])
                 strategy = 'forced' if force else 'graceful'
-                if guest_kind(record) == 'zephyr':
+                if guest_kind(record) == 'zephyr' and not cooperative(record):
                     if not force and not (board and board_shutdown_policy(record) == 'force-allowed'):
                         raise PlatformError('Zephyr graceful shutdown unsupported; explicit --force or board force-allowed policy required: ' + record['id'])
                     strategy = 'forced'
+                if strategy == 'graceful' and guest_kind(record) == 'zephyr':
+                    self.require_cooperative(record,row,'shutdown',deadline)
                 if _expected_runs and record['uuid'] in _expected_runs:
                     row = {**row, 'xen_unique_id': _expected_runs[record['uuid']]}
                     self.resolve_domain(record, expected=row, deadline=deadline)
@@ -785,8 +871,25 @@ class Platform:
         self.control(record, 'reboot', rows[0])
         deadline = self.clock() + timeout
         while self.clock() < deadline:
-            rows = self.matching(record, self.domains())
-            if rows and rows[0]['domid'] != previous:
+            # 종료 중 상세 설정은 먼저 사라질 수 있다. 새 실행이 관측된 뒤
+            # 기존의 상세 신원·디스크 검사와 launch 결합을 다시 수행한다.
+            snapshot = self.removal_snapshot(deadline)
+            old = snapshot.get(previous)
+            # xl은 상태 목록 뒤 XenStore 이름을 따로 읽는다. 옛 domid/UUID의
+            # (null)은 상태와 무관하게 제거 대기이며 부재나 새 실행으로 인정하지 않는다.
+            if old and (old['uuid'] != record['uuid'] or
+                        old['name'] not in (record['name'], '(null)')):
+                raise DomainIdentityError('replacement domain appeared during reboot')
+            candidates = [row for row in snapshot.values()
+                          if row['uuid'] == record['uuid'] or row['name'] == record['name']]
+            if any(row['uuid'] != record['uuid'] or row['name'] != record['name']
+                   for row in candidates if row['domid'] != previous):
+                raise DomainIdentityError('replacement domain appeared during reboot')
+            fresh = [row for row in candidates if row['domid'] != previous]
+            if not old and fresh and fresh[0]['xen_state'] in ('running', 'blocked'):
+                rows = self.matching(record, self.domains(deadline=deadline))
+                if not rows or rows[0]['domid'] != fresh[0]['domid']:
+                    raise DomainIdentityError('reboot target changed before launch binding')
                 started_state(record, rows[0])
                 execution.bind_launch(record, launch, rows[0], deadline)
                 print('guest domain restarted with same UUID/disk; OS readiness not asserted')
@@ -812,7 +915,7 @@ class Platform:
                            'xen_state': observation['xen_state'],
                            'xen_state_flags': observation['xen_state_flags'],
                            'domid': observation['domid'], 'app_readiness': 'unknown',
-                           'graceful_shutdown_supported': guest_kind(r) == 'linux',
+                           'graceful_shutdown_supported': cooperative(r),
                            'effective_board_shutdown_policy': board_shutdown_policy(r)})
         return {'instances': result, 'domains': domains, 'time': self.time_status()}
 
@@ -911,7 +1014,7 @@ def dhcp_ready(pid, timeout=5):
 
 def main(argv=None):
     raw = list(sys.argv[1:] if argv is None else argv)
-    managed = {'list','get','retire','restore','purge','operation','create','delete','templates',
+    managed = {'firmware-transition','update-resources','list','get','retire','restore','purge','operation','create','delete','templates',
                'recover-once','recover_once','snapshot','probe','execution-context','control-operation','recovery-operation','host-resume'}
     if '--json' in raw or (raw and raw[0] in managed):
         from xenova_management_cli import main as management_main

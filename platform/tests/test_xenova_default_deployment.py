@@ -25,7 +25,7 @@ class DefaultDeploymentTest(unittest.TestCase):
         firmware = defaults["firmware_instances"]
         self.assertEqual({r["id"] for r in firmware}, DRIVE_IDS)
         self.assertEqual(len({r["template"] for r in firmware}), 1)
-        self.assertTrue(all(r["autostart"] and r["board_shutdown_policy"] == "force-allowed" for r in firmware))
+        self.assertTrue(all(r["autostart"] and r["board_shutdown_policy"] == "graceful" for r in firmware))
         self.assertTrue(defaults["instances"][0]["autostart"])
         self.assertEqual(defaults["instances"][0]["ipv4"], "192.168.77.20")
 
@@ -49,7 +49,7 @@ class DefaultDeploymentTest(unittest.TestCase):
         self.assertEqual(result["boot_catalog_bytes"], 3 * 4096)
         self.assertEqual(result["retained_firmware_bytes"], 3 * contract.MIB)
 
-    def current_board(self):
+    def current_board(self, *, network=False):
         board = Board(self.base / "board")
         board.grow_mount()
         factory = board.factory()
@@ -58,11 +58,15 @@ class DefaultDeploymentTest(unittest.TestCase):
         record = factory["instances"][0]["record"]
         record["display_name"] = "Debian Interaction"
         (board.data / "seeds/debian-dev/instance.json").write_text(json.dumps(record))
-        source = application_bundle(bundle(self.base / "diagnostic"), self.base / "starter")
+        if network:
+            from test_xenova_network_zephyr import network_bundle
+            source = network_bundle(bundle(self.base / "diagnostic"), self.base / "starter")
+        else:
+            source = application_bundle(bundle(self.base / "diagnostic"), self.base / "starter")
         manifest = source / "firmware.json"
         meta = json.loads(manifest.read_text())
-        lock = json.loads((ROOT / "platform/guests/zephyr/starter.lock.json").read_text())
-        meta.update(id=lock["id"], kind="zephyr-xen-firmware", version=lock["version"], template_version="1.0.1")
+        lock = json.loads((ROOT / ("platform/guests/zephyr/network-starter.lock.json" if network else "platform/guests/zephyr/starter.lock.json")).read_text())
+        meta.update(id=lock["id"], kind="zephyr-xen-firmware", version=lock["version"], template_version="1.1.0" if network else "1.0.1")
         meta["source"].update({k: lock[k] for k in ("app", "app_files", "app_source_sha256", "zephyr_commit", "sdk_version")})
         meta["source"]["source_revision"] = "sha256:" + lock["app_source_sha256"]
         manifest.chmod(0o644)
@@ -165,7 +169,7 @@ class DefaultDeploymentTest(unittest.TestCase):
 
     def test_catalog_keeps_ubuntu_without_an_ubuntu_seed(self):
         import xenova_catalog as catalog
-        board, _ = self.current_board()
+        board, _ = self.current_board(network=True)
         for directory in (board.data / "templates").iterdir():
             meta = json.loads((directory / "template.json").read_text())
             boot_path = directory / "boot.json"
@@ -184,5 +188,5 @@ class DefaultDeploymentTest(unittest.TestCase):
         rows = catalog.entries(board.data)
         self.assertEqual({e["template_id"] for e in rows},
                          {"ubuntu-24.04-arm64", "debian-13-arm64", "zephyr-xenvm-starter-arm64"})
-        self.assertTrue(all(e["template_version"] == "1.0.1" for e in rows))
+        self.assertTrue(all(e["template_version"] == ("1.1.0" if e["guest_kind"] == "zephyr" else "1.0.1") for e in rows))
         self.assertFalse((board.data / "seeds/ubuntu-dev").exists())
