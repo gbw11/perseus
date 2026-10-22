@@ -1,6 +1,14 @@
 # Display pipeline v1 — 제안 계약
 
-2026-10-22 · S15P31E110-250 · 1단계 설계 + 2단계 상태 피드 + 3단계 로컬 화면 정책/렌더러 구현. 물리 HDMI 적용·영상 전송 계약은 후속 구현을 위한 초안이다.
+2026-10-22 · S15P31E110-250 · 1단계 설계 + 2단계 상태 피드 + 3단계 로컬 화면 정책/렌더러 + 4단계 X11 실행기/원격 전송 구현. 실보드 HDMI 검증은 남아 있다.
+
+## 4단계 구현 현황
+
+X11 connector/EDID/좌표 매핑과 두 Chromium 창의 실행·세션 갱신을 추가했다. 출력 상태는 수집기 API와 별도인 runtime JSON 파일로 전달한다. 실제 x11 backend에서 native 창 위치·매핑과 DOM ACK가 확인되면 runtime 파일의 applied_revision을 채운다. 가상 시험은 physical_verified=false, applied_revision=null을 유지한다. 이것은 실모니터 육안 검증 결과가 아니다.
+
+별도 송신기는 동일 X11 root 픽셀을 FFmpeg로 JPEG 인코딩해 `/streams/{output_id}.mjpeg`로 전송한다. 시연용 인증은 feed 키와 구별된 접속 키/쿠키이며, 원격 뷰어는 두 스트림을 실제로 디코딩한다. 상태/프레임 API·시연 PC 연결은 [4단계 실행 규격](../../platform/services/display/router/README.md#4단계-x11-실행과-원격-시연), 결과는 [검증 기록](../verification/display-step4.md)을 참고한다.
+
+현재 capture_epoch/frame_sequence는 실제 인코더의 세대/프레임 식별자다. 특정 encoded frame과 DOM revision의 정확한 결합은 미검증이므로 render_revision=null, render_correlation=unverified로 전달한다. 스트림 전송과 물리 HDMI 준비 상태를 동일시하지 않는다.
 
 ## 3단계 구현 현황
 
