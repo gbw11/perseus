@@ -58,7 +58,7 @@ for name, value in platform.items():
     if name == 'INSANE_SKIP' or name.startswith('INSANE_SKIP:'):
         assert 'installed-vs-shipped' not in value.split(), f'QA disabled: {name}'
 print('PASS unit ownership: ' + ', '.join(installed_units) + '; static unit not enabled; installed-vs-shipped QA retained')
-required = {'kernel-module-brcmfmac', 'kernel-module-brcmfmac-cyw', 'python3-core', 'python3-json', 'python3-ctypes', 'xen-tools-libxenmanage', 'iproute2', 'xen-tools-xl', 'openssh-sshd',
+required = {'kernel-module-brcmfmac', 'kernel-module-brcmfmac-cyw', 'python3-core', 'python3-json', 'python3-ctypes', 'xen-tools-libxenmanage', 'iproute2', 'xen-tools-xl', 'xen-tools-xenstore', 'openssh-sshd',
             'util-linux-sfdisk', 'util-linux-partx', 'util-linux-blockdev', 'util-linux-blkid',
             'util-linux-losetup', 'util-linux-mount', 'util-linux-umount', 'util-linux-findmnt',
             'e2fsprogs-e2fsck', 'e2fsprogs-resize2fs', 'e2fsprogs-dumpe2fs', 'e2fsprogs-tune2fs', 'coreutils'}
@@ -78,6 +78,7 @@ assert 'tzdata-asia' in image['IMAGE_INSTALL'].split()
 assert 'xenova_set_timezone' in image['ROOTFS_POSTPROCESS_COMMAND']
 assert re.search(r'^xenova_set_timezone\s*\(\)\s*\{', text, re.M)
 for module in ('xenova_vm.py', 'xenova_runtime.py', 'xenova_wifi.py',
+               'xenova_resources.py', 'xenova_zephyr_transition.py', 'xenova_zephyr_control.py',
                'xenova_execution.py', 'xenova_recovery.py', 'xenova_domain_identity.py'):
     assert 'file://' + module in platform['SRC_URI'].split(), module
     assert selected(platform, module) == LAYER / 'recipes-core/xenova-platform/files' / module

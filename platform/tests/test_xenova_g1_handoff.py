@@ -51,11 +51,11 @@ class HandoffTest(unittest.TestCase):
         self.package()
         manifest = handoff.verify(self.output)
         mapping = handoff.runtime_sources()
-        self.assertEqual(len(mapping), 20)
+        self.assertEqual(len(mapping), 23)
         for target, source in mapping.items():
             with self.subTest(target=target):
                 self.assertEqual((self.output/"runtime"/target).read_bytes(), (ROOT/source).read_bytes())
-        for name in ("xenova_execution", "xenova_recovery", "xenova_management", "xenova_domain_identity", "xen_config"):
+        for name in ("xenova_execution", "xenova_recovery", "xenova_management", "xenova_domain_identity", "xenova_resources", "xenova_zephyr_control", "xenova_zephyr_transition", "xen_config"):
             self.assertTrue((self.output/"runtime"/(name+".py")).is_file())
         self.assertEqual(manifest["firmware_build_head"], "fixture-build-head")
         self.assertEqual((self.output/"firmware/g1-build.json").read_bytes(), (self.firmware/"g1-build.json").read_bytes())
