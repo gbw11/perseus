@@ -275,7 +275,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | dom0 vchan 중계 | 계정이 따로 없다. Zephyr VM마다 그 VM의 `app_id` 계정으로 접속한다 (4.1) |
 | 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/vms/{vm_id}/command` |
 | 각 VM 측정 클라이언트·응답기 | `xenova/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
-| dom0 Recovery Worker (`dom0-server`) | `xenova/v1/recovery/events` (11장). `xenova/v1/vms/+/heartbeat` 구독은 개발 단계의 전체 읽기 허용에 포함되며 v1.1 구독 제한에서도 유지한다. 계정 `dom0-server`와 이 두 행의 실제 반영(`platform/deploy/mosquitto/etc/accounts`·`acl`)은 heartbeat 감시기(S15P31E110-124)의 완료 조건이다 |
+| dom0 Recovery Worker (`dom0-server`) | `xenova/v1/recovery/events`·`xenova/v1/recovery/health/{vm_id}` (11장, ACL 은 `xenova/v1/recovery/#`). 구독(read)은 `xenova/v1/vms/+/heartbeat`와 `xenova/v1/apps/+/events`(Zephyr `app.heartbeat`, 6.1). 개발 단계의 전체 읽기 허용에 포함되며 계정별 구독 제한(다음 개정)에서도 유지한다. 계정 `dom0-server`와 이 행의 실제 반영(`platform/deploy/mosquitto/etc/accounts`·`acl`)은 heartbeat 감시기(S15P31E110-124)의 완료 조건이다. Worker 는 필터별 구독 승인(SUBACK)을 보고, 거부된 신호의 손실은 판정하지 않는다 |
 
 브로커 계정·ACL 파일은 [브로커 구성](../../platform/deploy/mosquitto/README.md)(`platform/deploy/mosquitto/etc/acl`)에서 관리한다.
 
@@ -290,17 +290,51 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 
 ## 11. 복구 이벤트 (dom0 → 백엔드)
 
-자동 복구는 dom0의 Recovery Worker가 수행한다(VM API 계약 1.2절). Worker는 `xenova/v1/vms/+/heartbeat`를 직접 구독해 장애를 판정하고, 시도마다 아래 토픽으로 이벤트를 낸다. 객체 정의는 VM API 계약 2.5절이다.
+자동 복구는 dom0의 Recovery Worker가 수행한다(VM API 계약 1.2절). Worker는 `xenova/v1/vms/+/heartbeat`(Linux, `agent.heartbeat`)와 `xenova/v1/apps/+/events`의 `app.heartbeat`(Zephyr, 6.1·시나리오 D8)를 직접 구독해 Xen 도메인 상태와 함께 장애를 판정하고, 시도마다 아래 토픽으로 이벤트를 낸다. 객체 정의는 VM API 계약 2.5절이다. VM 마다의 현재 건강은 11.1 의 retained 스냅샷이다.
 
 | ID | 토픽 | `type` | 방향 | QoS | retain | payload |
 | --- | --- | --- | --- | --- | --- | --- |
 | MQTT-12 | `xenova/v1/recovery/events` | `recovery.started` / `recovery.completed` / `recovery.failed` | dom0 Recovery Worker → 백엔드 | 1 | X | VM API 계약 2.5절 복구 이벤트 객체 |
+| MQTT-13 | `xenova/v1/recovery/health/{vm_id}` | `vm.health` | dom0 Recovery Worker → 게이트웨이·백엔드 | 1 | O | 11.1 건강 스냅샷 |
 
 - 봉투의 발행자는 `source_id = "dom0-server"`다(2장). `vm_id`는 payload 안에 있다(토픽에 `{vm_id}`가 없다).
 - 백엔드는 `event_id`로 중복을 거르고 `EventType` `recovery.*`로 기록한다(VM API 계약 5장). 백엔드가 재시작해 빠진 구간은 `GET /api/v1/recovery/events?after_event_id=`(VM API 계약 4.7절)로 채운다.
 - Worker가 Spring 연결이나 브로커 없이도 복구를 수행하는 것이 전제이므로, 이 토픽은 알림일 뿐 복구 실행의 조건이 아니다.
 - 브로커 계정 `dom0-server`(publish `xenova/v1/recovery/events`, read `xenova/v1/vms/+/heartbeat`)는 아직 `platform/deploy/mosquitto/etc/accounts`·`acl`에 없다. heartbeat 감시기(S15P31E110-124) 구현과 함께 넣는다.
 - 제어권 전환은 게이트웨이의 `drive.mode.changed`(6장, MQTT-06)로 알리며 이 토픽에 싣지 않는다.
+- `vms/{vm_id}/` 아래 토픽은 봉투 `vm_id`와 토픽이 같아야 하므로(2장) VM 이 아닌 발행자는 쓸 수 없다. 그래서 VM 별 건강도 `recovery/` 가지에 둔다.
+
+### 11.1 건강 스냅샷 `vm.health`
+
+Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트웨이 입력 `ok`·`desired_state`·`manager_seq`). retained 라 새 구독자는 마지막 값을 바로 받고, 내용이 바뀔 때만 다시 낸다. 복구 판정 유예와 "건강하다"를 분리하기 위해 `ok` 는 `state` 가 `HEALTHY` 일 때만 `true` 다.
+
+```json
+{
+  "vm_id": "550e8400-e29b-41d4-a716-446655440000",
+  "ok": false,
+  "state": "STARTING",
+  "desired_state": "running",
+  "xen_state": "running",
+  "heartbeat_age_s": null,
+  "reason": null,
+  "manager_seq": 3
+}
+```
+
+| 필드 | 의미 |
+| --- | --- |
+| `vm_id` | 토픽의 `{vm_id}` 와 같다 |
+| `ok` | `state == HEALTHY` 일 때만 `true` |
+| `state` | `HEALTHY`(실행 중이고 생존 신호가 신선함. 신호가 없는 종류는 Xen 실행만 근거) / `STARTING`(실행 중이지만 이번 부팅의 생존 신호 전, 유예 중) / `UNHEALTHY`(판정 사유가 있거나 `paused`·`stopping`, 신호 끊김) / `STOPPED`(도메인이 없고 의도가 `running` 이 아님) / `OBSERVATION_UNAVAILABLE`(생존 신호를 관측할 수 없음: 구독 미승인, 또는 Worker 의 Zephyr 대상 기록 손상. **장애가 아니다**) |
+| `desired_state` | 플랫폼 registry 의도 `running` / `stopped` / `unknown` |
+| `xen_state` | VM API 계약 3.2 의 Xen 상태, 도메인이 없으면 `null` |
+| `heartbeat_age_s` | 이번 부팅에서 마지막 생존 신호(Linux `agent.heartbeat`, Zephyr `app.heartbeat`)를 받은 뒤 지난 초. 없으면 `null` |
+| `reason` | 복구 판정이 내려진 상태면 VM API 계약 2.5 의 `reason`, 아니면 `null` |
+| `manager_seq` | 같은 VM 에서 내용이 바뀔 때만 1 증가. 받는 쪽이 재시작 뒤 retained 값과 새 값을 구별한다 |
+
+- 봉투의 발행자는 `source_id = "dom0-server"` 다. 받는 쪽은 토픽의 `{vm_id}` 와 payload `vm_id` 가 같은 것만 쓴다.
+- Linux VM 의 `HEARTBEAT_LOST` 판정은 30초, Zephyr VM 의 `APP_HEARTBEAT_LOST` 는 15초 무수신이다(VM API 계약 2.5). 게이트웨이의 제어권 전환은 이 스냅샷이 아니라 `drive.command` 신선도(5장)로 한다.
+- VM 이 등록에서 사라지면(삭제·보관) Worker 가 빈 payload 로 retained 를 지운다.
 
 ## 관련 문서
 
@@ -316,3 +350,4 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | v1 | 2026-10-19 | 최초. 에이전트 토픽(구현과 같음), RC카 주행 제어·앱 이벤트·지연 측정·ACL |
 | v1 (보완) | 2026-10-20 | 접두사 `xenova/v1/`, 주행 VM Zephyr(4장), `app.heartbeat`(6.1), 수동주행 입력(7장) |
 | v1.1 | 2026-10-21 | 시나리오 D1·D3·D8 반영 (S15P31E110-242). ESP32를 MQTT 참여자에서 빼고 게이트웨이 시리얼 뒤로(4장, 5.3, 9장 계정 삭제), `vehicle.status` 발행 = 게이트웨이 `source_id: dom0-gateway`(5.4), 5.5 ESP32 수용 규칙 → 게이트웨이 수용 규칙, Zephyr vchan + dom0 중계(4.1, 10장에서 삭제), `AUTO_READY`·VM 재시작 근거에서 에이전트 대신 도메인 상태 + `app.heartbeat`(5.1·5.2·6.1). 토픽 이름·payload 필드는 그대로 |
+| v1.2 | 2026-10-22 | 복구 Worker 건강 스냅샷(S15P31E110-124): MQTT-13 `vm.health`(11.1), 계정 `dom0-server` 의 구독에 `apps/+/events`·publish 에 `recovery/health/{vm_id}` 추가(9장), 11장 판정 입력에 Zephyr `app.heartbeat` 명시. 기존 토픽·payload 는 그대로 |
