@@ -5,6 +5,16 @@ spring:
     url: ${DB_URL:jdbc:h2:file:./data/xenova;AUTO_SERVER=TRUE}
     username: ${DB_USERNAME:sa}
     password: ${DB_PASSWORD:}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      repositories:
+        enabled: false
+      ssl:
+        enabled: ${REDIS_SSL:false}
+      timeout: ${REDIS_TIMEOUT:2s}
   jpa:
     hibernate:
       ddl-auto: update
@@ -30,9 +40,13 @@ management:
   endpoint:
     health:
       show-details: never
+  health:
+    redis:
+      enabled: ${REDIS_HEALTH_ENABLED:false}
 
 xenova:
   auth:
+    state-store: ${AUTH_STATE_STORE:redis}
     jwt-secret: ${JWT_SECRET:xenova-local-development-secret-change-before-production}
     access-token-ttl: ${ACCESS_TOKEN_TTL:15m}
     refresh-token-ttl: ${REFRESH_TOKEN_TTL:7d}

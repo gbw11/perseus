@@ -9,6 +9,38 @@
 - [기본 템플릿 커스터마이징·버전 게시](docs/build-guides/xenova-template-workflow.md)
 - [리브랜딩 범위와 후속 검증](docs/build-guides/xenova-rebranding.md)
 - [Zephyr Starter App](platform/guests/zephyr/starter-app/README.md)
+
+## 로컬 컨테이너 스택
+
+루트 `compose.yaml`은 Nginx, MySQL 8.4, Redis 7, Backend, 관리 콘솔, VM 모니터 화면을 함께
+실행합니다. 비밀값을 저장소에 넣지 말고 `.env.example`을 복사한 로컬 `.env`에서 반드시
+교체한 뒤 실행합니다.
+
+```bash
+cp .env.example .env
+# .env의 change-me 값을 모두 교체
+docker compose config
+docker compose up -d --build
+docker compose ps
+```
+
+Nginx는 `/`를 관리 콘솔로, `/screens/`를 VM 모니터로, `/api/`·`/ws/`·`/actuator/`를
+Backend로 전달합니다. MySQL, Redis, Backend와 두 정적 웹 컨테이너는 호스트에 포트를 직접
+공개하지 않습니다.
+
+### Jenkins EC2 배포
+
+Jenkins는 테스트와 이미지 빌드를 통과한 `master` push만 EC2에 배포하고, 배포 후 Nginx·두 프론트·Backend의 HTTP 응답을 확인합니다. Merge Request와 다른 브랜치는 배포하지 않습니다.
+
+Jenkins Credentials에 다음 항목을 등록해야 합니다.
+
+| ID | 종류 | 내용 |
+|---|---|---|
+| `xenova-ec2-ssh-key` | SSH Username with private key | 사용자 `ubuntu`와 EC2 PEM 개인키 |
+| `xenova-ec2-known-hosts` | Secret file | 검증한 EC2 SSH 호스트 공개키 한 줄 |
+| `xenova-production-env` | Secret file | `.env.example`을 기반으로 작성한 운영 `.env` |
+
+서버에는 Docker Engine과 Docker Compose v2가 설치되어 있어야 하며, `ubuntu` 사용자가 승인 요청 없이 Docker를 실행할 수 있어야 합니다. 초기 배포 전 UFW에서 HTTP 80 포트를 허용해야 합니다. 운영 비밀값과 PEM 키는 Git 저장소에 커밋하지 않습니다.
 - 외부 Layer·버전은 `platform/yocto/layers.lock`을 따릅니다.
 
 `docs/build-guides/perseus-*` 및 이전 `yocto-rpi4-xen-*` 문서는 당시

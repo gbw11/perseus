@@ -18,16 +18,19 @@ function Root() {
   );
 }
 
-const router = createBrowserRouter([
-  {
-    element: <Root />,
-    children: [
-      { path: '/', element: <Navigate to="/split" replace /> },
-      { path: '/split', element: <SplitPage /> },
-      { path: '/detail/:app', element: <DetailPage /> },
-    ],
-  },
-]);
+const router = createBrowserRouter(
+  [
+    {
+      element: <Root />,
+      children: [
+        { path: '/', element: <Navigate to="/split" replace /> },
+        { path: '/split', element: <SplitPage /> },
+        { path: '/detail/:app', element: <DetailPage /> },
+      ],
+    },
+  ],
+  { basename: import.meta.env.BASE_URL },
+);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

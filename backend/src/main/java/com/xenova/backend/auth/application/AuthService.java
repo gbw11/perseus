@@ -2,10 +2,9 @@ package com.xenova.backend.auth.application;
 
 import com.xenova.backend.auth.api.LoginResponse;
 import com.xenova.backend.auth.api.SignupResponse;
-import com.xenova.backend.auth.domain.RefreshToken;
-import com.xenova.backend.auth.domain.RefreshTokenRepository;
-import com.xenova.backend.auth.domain.RevokedAccessToken;
-import com.xenova.backend.auth.domain.RevokedAccessTokenRepository;
+import com.xenova.backend.auth.domain.AccessTokenRevocationStore;
+import com.xenova.backend.auth.domain.RefreshTokenStore;
+import com.xenova.backend.auth.domain.RefreshTokenStore.UseResult;
 import com.xenova.backend.auth.domain.User;
 import com.xenova.backend.auth.domain.UserRepository;
 import com.xenova.backend.auth.infrastructure.AuthProperties;
@@ -29,8 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuthService {
 
     private final UserRepository userRepository;
-    private final RefreshTokenRepository refreshTokenRepository;
-    private final RevokedAccessTokenRepository revokedAccessTokenRepository;
+    private final RefreshTokenStore refreshTokenStore;
+    private final AccessTokenRevocationStore accessTokenRevocationStore;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenService jwtTokenService;
     private final LoginRateLimiter loginRateLimiter;
@@ -40,16 +39,16 @@ public class AuthService {
 
     public AuthService(
             UserRepository userRepository,
-            RefreshTokenRepository refreshTokenRepository,
-            RevokedAccessTokenRepository revokedAccessTokenRepository,
+            RefreshTokenStore refreshTokenStore,
+            AccessTokenRevocationStore accessTokenRevocationStore,
             PasswordEncoder passwordEncoder,
             JwtTokenService jwtTokenService,
             LoginRateLimiter loginRateLimiter,
             AuthProperties properties,
             Clock clock) {
         this.userRepository = userRepository;
-        this.refreshTokenRepository = refreshTokenRepository;
-        this.revokedAccessTokenRepository = revokedAccessTokenRepository;
+        this.refreshTokenStore = refreshTokenStore;
+        this.accessTokenRevocationStore = accessTokenRevocationStore;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenService = jwtTokenService;
         this.loginRateLimiter = loginRateLimiter;
@@ -96,23 +95,12 @@ public class AuthService {
         }
 
         Instant now = clock.instant();
-        RefreshToken current = refreshTokenRepository
-                .findByTokenHashForUpdate(jwtTokenService.hash(refreshTokenValue))
-                .orElseThrow(this::invalidRefreshToken);
-
-        if (current.isRevoked()) {
-            // A revoked token presented again may have been stolen, so end every session of the user.
-            refreshTokenRepository.findAllByUserIdAndRevokedAtIsNull(current.getUserId())
-                    .forEach(token -> token.revoke(now));
+        UseResult useResult = refreshTokenStore.use(jwtTokenService.hash(refreshTokenValue), now);
+        if (useResult.status() != RefreshTokenStore.Status.VALID) {
             throw invalidRefreshToken();
         }
-        if (!current.isActive(now)) {
-            throw invalidRefreshToken();
-        }
-
-        User user = userRepository.findById(current.getUserId())
+        User user = userRepository.findById(useResult.userId())
                 .orElseThrow(this::invalidRefreshToken);
-        current.revoke(now);
         return issueTokens(user, now);
     }
 
@@ -124,8 +112,7 @@ public class AuthService {
             try {
                 Jwt jwt = jwtTokenService.decode(bearerToken);
                 if (jwt.getId() != null && jwt.getExpiresAt() != null) {
-                    revokedAccessTokenRepository.save(new RevokedAccessToken(
-                            jwt.getId(), jwt.getSubject(), jwt.getExpiresAt()));
+                    accessTokenRevocationStore.revoke(jwt.getId(), jwt.getSubject(), jwt.getExpiresAt());
                 }
             } catch (JwtException ignored) {
                 // Invalid or expired access tokens need no additional revocation record.
@@ -133,21 +120,18 @@ public class AuthService {
         }
 
         if (refreshTokenValue != null && !refreshTokenValue.isBlank()) {
-            refreshTokenRepository.findByTokenHash(jwtTokenService.hash(refreshTokenValue))
-                    .filter(token -> token.isActive(now))
-                    .ifPresent(token -> token.revoke(now));
+            refreshTokenStore.revokeIfActive(jwtTokenService.hash(refreshTokenValue), now);
         }
     }
 
     private LoginResult issueTokens(User user, Instant now) {
         IssuedAccessToken accessToken = jwtTokenService.issueAccessToken(user);
         String refreshTokenValue = createRefreshTokenValue();
-        refreshTokenRepository.save(new RefreshToken(
-                UUID.randomUUID().toString(),
+        refreshTokenStore.save(
                 user.getId(),
                 jwtTokenService.hash(refreshTokenValue),
                 now.plus(properties.refreshTokenTtl()),
-                now));
+                now);
 
         LoginResponse response = new LoginResponse(
                 accessToken.value(),
