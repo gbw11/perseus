@@ -46,6 +46,11 @@ public class VmRecord {
     @Enumerated(EnumType.STRING)
     @Column(name = "guest_kind", length = 10)
     private GuestKind guestKind;
+    // Console-only label (VmRole). Not part of the launch spec, so a retried create ignores it.
+    // Rows created before this column existed are null (no role).
+    @Enumerated(EnumType.STRING)
+    @Column(length = 16)
+    private VmRole role;
 
     protected VmRecord() {
     }
@@ -62,6 +67,7 @@ public class VmRecord {
         this.vcpus = command.vcpus();
         this.memoryMib = command.memoryMib();
         this.guestKind = guestKind;
+        this.role = command.role();
         this.createdAt = createdAt;
         this.lifecycle = VmLifecycle.REGISTERED;
     }
@@ -76,6 +82,14 @@ public class VmRecord {
 
     public boolean isRegistered() {
         return getLifecycle() == VmLifecycle.REGISTERED;
+    }
+
+    public VmRole getRole() {
+        return role;
+    }
+
+    public void changeRole(VmRole role) {
+        this.role = role;
     }
 
     public void retire() {
