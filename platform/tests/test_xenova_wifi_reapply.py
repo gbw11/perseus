@@ -61,6 +61,7 @@ class WifiReapplyTest(unittest.TestCase):
         code, result = self.activate_cli(model)
         self.assertNotEqual(model.loaded, before)
         self.assertEqual(model.loaded, (self.root / 'etc/xenova/wifi/wlan0.conf').read_bytes())
+        self.assertIn(b'\ndisable_scan_offload=1\n',model.loaded)
         self.assertEqual(code, 0)
         self.assertEqual(result['activation']['action'], 'restart')
         self.assertEqual(result['activation']['result'], 'requested')
@@ -141,6 +142,10 @@ class WifiReapplyTest(unittest.TestCase):
         self.assertEqual(network.stat().st_mode & 0o777, 0o644)
         self.assertEqual(credentials.stat().st_mode & 0o777, 0o600)
         self.assertEqual(credentials.parent.stat().st_mode & 0o777, 0o700)
+        settings = network.read_text()
+        for expected in ('RequiredForOnline=routable', 'DHCP=ipv4',
+                         'IPv6AcceptRA=no', 'RouteMetric=600'):
+            self.assertIn(expected, settings)
 
     def configure_with_private_umask(self):
         previous = os.umask(0o077)

@@ -12,8 +12,8 @@
   },
   "rtos_templates": [
     {
-      "template_dir": "/absolute/xenova-template-releases/zephyr/xenova-zephyr-starter-1.0.0/1.0.1",
-      "template_manifest_sha256": "REPLACE_WITH_ACTUAL_TEMPLATE_JSON_SHA256"
+      "template_dir": "/absolute/xenova-template-releases/zephyr/xenova-zephyr-network-starter-1.1.0/1.1.0",
+      "template_manifest_sha256": "REPLACE_WITH_NETWORK_STARTER_FIRMWARE_JSON_SHA256"
     }
   ],
   "linux_templates": [

@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+config XENOVA_RUNTIME
+ bool "Xenova shared XenStore and cooperative shutdown"
+ depends on XENOVA_XENSTORE
+
+config XENOVA_NETFRONT
+ bool "Xenova single-VIF RX-copy Ethernet"
+ depends on XENOVA_RUNTIME && !XEN_GRANT_TABLE && NETWORKING && NET_L2_ETHERNET && NET_IPV4
+
+if XENOVA_RUNTIME
+config XENOVA_SHUTDOWN_BUDGET_MS
+ int "Bounded application quiesce and transport cleanup budget (ms)"
+ range 100 120000
+ default 15000
+ help
+   Local transport resource budget, not a vehicle safety timeout or readiness SLA.
+   Applications must validate it within the caller Manager's original deadline.
+
+config XENOVA_SHUTDOWN_THREAD_PRIORITY
+ int "Shutdown service ordinary preemptive thread priority"
+ range 0 14
+ default 6
+ help
+   Provisional application scheduling choice; no CPU pinning or RT guarantee.
+
+config XENOVA_NETFRONT_THREAD_PRIORITY
+ int "Netfront ordinary preemptive worker priority"
+ depends on XENOVA_NETFRONT
+ range 0 14
+ default 7
+ help
+   Provisional application scheduling choice; measure with the actual workload.
+endif

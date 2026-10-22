@@ -7,8 +7,11 @@ RequiresMountsFor=/srv/xenova
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# libxl monitors and qdisk backends inherit this cgroup; remove guests before service cleanup.
 ExecStart=/usr/sbin/xenova-vm autostart
+ExecStop=/usr/sbin/xenova-vm shutdown-all
 TimeoutStartSec=150s
+TimeoutStopSec=110s
 Restart=no
 
 [Install]

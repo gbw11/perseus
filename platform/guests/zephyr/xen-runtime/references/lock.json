@@ -1,0 +1,14 @@
+{
+  "netif.h": {
+    "url": "https://raw.githubusercontent.com/xen-project/xen/1c72306b1f0b4dc533954f678361044f8083dccc/xen/include/public/io/netif.h",
+    "sha256": "3c6ddff7ff7b7bb5bb8ab1c7775a9fbfb67d2bc6808dd31e6a92d992ab5399c7"
+  },
+  "ring.h": {
+    "url": "https://raw.githubusercontent.com/xen-project/xen/1c72306b1f0b4dc533954f678361044f8083dccc/xen/include/public/io/ring.h",
+    "sha256": "499db7cb9735822faa7dd44e3f684e5e8f5e12c968d1fc0d316438c5194119eb"
+  },
+  "grant_table.h": {
+    "url": "https://raw.githubusercontent.com/xen-project/xen/1c72306b1f0b4dc533954f678361044f8083dccc/xen/include/public/grant_table.h",
+    "sha256": "0ca2a97f28bcaf11271820c15dbeb4fc39134b64541988a6b022d775a3c10871"
+  }
+}

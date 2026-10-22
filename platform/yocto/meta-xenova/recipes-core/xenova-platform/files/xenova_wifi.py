@@ -1,6 +1,5 @@
 """보드별 WPA2-Personal 설정과 비밀을 제외한 상태 조회. VM 내부망/NAT는 변경하지 않는다."""
 import argparse
-import getpass
 import hashlib
 import ipaddress
 import json
@@ -34,7 +33,7 @@ def settings(ssid, password, country):
     else:
         raise PlatformError('WPA2 PSK must be 8..63 printable ASCII characters or 64 hex digits')
     return ('ctrl_interface=/run/wpa_supplicant\nupdate_config=0\ncountry='+country+
-            '\nnetwork={\n    ssid='+ssid.encode('utf-8').hex()+
+            '\ndisable_scan_offload=1\nnetwork={\n    ssid='+ssid.encode('utf-8').hex()+
             '\n    psk='+psk+'\n    key_mgmt=WPA-PSK\n    proto=RSN\n}\n')
 
 
@@ -88,7 +87,7 @@ class Wifi:
             if [p for p in directory.glob('*.conf') if p.name!=target.name]:
                 raise PlatformError('another wireless interface is configured; explicit removal required')
             atomic_write(target,content,0o600)
-            atomic_write(path,'[Match]\nName='+name+'\nType=wlan\n\n[Link]\nRequiredForOnline=no\n\n[Network]\nDHCP=ipv4\nIPv6AcceptRA=no\n\n[DHCPv4]\nRouteMetric=600\n', 0o644)
+            atomic_write(path,'[Match]\nName='+name+'\nType=wlan\n\n[Link]\nRequiredForOnline=routable\n\n[Network]\nDHCP=ipv4\nIPv6AcceptRA=no\n\n[DHCPv4]\nRouteMetric=600\n', 0o644)
             # root 셸의 umask가 0077이어도 비밀 없는 networkd 입력은 읽을 수 있어야 한다.
             path.chmod(0o644)
         return {'configured':True,'interface':name,'credentials':'stored root-only','activation_required':True}
@@ -158,8 +157,8 @@ def main(argv=None):
     if args.action=='configure':
         if not sys.stdin.isatty():
             raise PlatformError('configure requires an interactive terminal; no password arguments accepted')
-        ssid=getpass.getpass('Wi-Fi SSID (hidden): ')
-        password=getpass.getpass('Wi-Fi PSK (hidden): ')
+        ssid=input('Wi-Fi SSID: ')
+        password=input('Wi-Fi PSK: ')
         result=wifi.configure(args.interface,ssid,password,args.country)
     elif args.action=='activate':
         try:

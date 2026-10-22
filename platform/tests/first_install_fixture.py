@@ -158,10 +158,12 @@ def platform_root(root):
                'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
     for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
-                 'xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
+                 'xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py',
+                 'xenova_resources.py','xenova_zephyr_transition.py','xenova_zephyr_control.py'):
         mapping['usr/lib/xenova/'+name] = FILES/name
     mapping['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
     mapping['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
+    mapping['etc/modprobe.d/xenova-wifi.conf'] = FILES/'xenova-wifi-modprobe.conf'
     mapping['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
     mapping['etc/xenova/execution-policy.json'] = FILES/'execution-policy.json'
     mapping['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'platform/scripts/update-xenova-guest-ssh.py'
@@ -207,6 +209,10 @@ def platform_root(root):
         target=root/'usr/lib/firmware'/relative
         target.parent.mkdir(parents=True,exist_ok=True)
         target.write_bytes(b'fixture: not real firmware')
+    for relative in ('brcmfmac.ko.xz', 'cyw/brcmfmac-cyw.ko.xz'):
+        target = root/'usr/lib/modules/6.18.33-v8/kernel/drivers/net/wireless/broadcom/brcm80211/brcmfmac'/relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b'packaging fixture: not a kernel module')
     for name, text in [('qemu-config-host.h', '#define CONFIG_VNC 1\n#define CONFIG_XEN_BACKEND 1\n'),
                        ('qemu-i386-config-target.h', '#define CONFIG_XEN 1\n')]:
         (root / 'usr/share/xenova' / name).write_text(text)
