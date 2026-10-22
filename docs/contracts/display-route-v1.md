@@ -33,7 +33,7 @@
 | 용어 | 뜻 |
 | --- | --- |
 | 디스플레이 | 모니터 한 대. `display-0`(모니터 1), `display-1`(모니터 2) 두 개로 고정 |
-| view | 화면 종류. `split`(3분할, 모니터 전체) / `os-face`(VM 1개의 상세 화면) / `sim`(시뮬레이터 화면, Plan B — [시뮬레이터 시연 시나리오](../scenario-simulator.md)) |
+| view | 화면 종류. `split`(3분할, 모니터 전체) / `os-face`(VM 1개의 상세 화면) / `sim`(시뮬레이터 화면 — [시뮬레이터 시연 시나리오](../scenario-simulator.md)) |
 | desired_route | 콘솔이 마지막으로 요청한 배치 |
 | observed_route | 표시 서비스가 `route.applied` 로 "다 띄웠다" 고 확인한 배치 |
 | revision | 디스플레이마다 배치가 바뀔 때 1씩 오르는 번호. 시작값 1 |
@@ -293,7 +293,7 @@ REST 응답과 WS `display.snapshot` 의 `items` 가 같은 모양을 쓴다. �
 | `sim` | — | null | `/sim` |
 
 - 화면 경로 id 는 [MQTT 계약](mqtt-contract-v1.md) 4장의 `app_id` 와 같고, 메시지 보드만 `interaction` 이다.
-- `/split` 의 세 번째 칸은 화면 앱이 스스로 정한다: 시뮬레이터 위치(MQTT-15 `sim.pose`, 백엔드 중계 WS-06)가 1초 안에 왔으면 **시뮬레이터**, 아니면 **인터랙션**. 배치 API 는 바꾸지 않는다 — 실차(Plan A)에서는 저절로 인터랙션 칸이 된다 (2026-10-22 결정).
+- `/split` 의 세 번째 칸은 화면 앱이 스스로 정한다: 시뮬레이터 위치(MQTT-15 `sim.pose`, 백엔드 중계 WS-06)가 1초 안에 왔으면 **시뮬레이터**, 아니면 **인터랙션**. 배치 API 는 바꾸지 않는다 — 실차 구성(시뮬레이터 없음)에서는 저절로 인터랙션 칸이 된다 (2026-10-22 결정).
 - 기준 주소·키오스크 실행 방식(브라우저 종류, 로드 완료 판단)은 표시 서비스 구현이 정한다.
 
 ## 6. 이벤트 `display.route.changed`
@@ -342,4 +342,4 @@ PUT 이 성공할 때마다 백엔드가 콘솔 이벤트 로그(REST-18, `/ws/v
 | 버전 | 날짜 | 내용 |
 | --- | --- | --- |
 | v1 (초안) | 2026-10-21 | 최초. dom0 표시 서비스 방식 (2026-10-21 결정): 콘솔 REST-23·24, 읽기 전용 `WS /ws/v1/displays`, 표시 서비스 소켓 `WS /ws/v1/display-service`(WS-04, 서비스 토큰·연결 1개), status 판정, 재연결, `screen_path`, 이벤트 `display.route.changed`. 모니터 브라우저가 `/ws/v1/displays` 에 `display.hello`·`route.applied` 를 보내던 백엔드 초안 방식은 쓰지 않는다 (S15P31E110-129) |
-| v1.1 (초안) | 2026-10-22 | view `sim`(시뮬레이터 화면, `screen_path` `/sim`, `vm_id` null) 추가. `/split` 세 번째 칸은 시뮬레이터 위치가 신선하면 시뮬레이터로 자동 전환 (Plan B, S15P31E110-262·-265) |
+| v1.1 (초안) | 2026-10-22 | view `sim`(시뮬레이터 화면, `screen_path` `/sim`, `vm_id` null) 추가. `/split` 세 번째 칸은 시뮬레이터 위치가 신선하면 시뮬레이터로 자동 전환 (시뮬레이터 구성, S15P31E110-262·-265) |
