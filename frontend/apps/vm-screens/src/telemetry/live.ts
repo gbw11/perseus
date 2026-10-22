@@ -47,6 +47,7 @@ export interface DriveStateDto {
     switch_in_ms: number;
     accepted_ago_ms: number;
     remaining_ms: number;
+    requested_by?: string;
   } | null;
 }
 
@@ -199,6 +200,7 @@ export function applyDriveState(t: Telemetry, state: DriveStateDto, now: number)
     },
     autonomousFreshSince: autonomousFresh ? (t.autonomousFreshSince ?? now) : null,
     resumeAt: state.resume ? now + state.resume.remaining_ms : null,
+    resumeAuto: state.resume?.requested_by === 'auto',
     odometer: advanceOdometer(t, vehicle?.v_mps ?? 0, now),
   };
 }
@@ -218,10 +220,12 @@ function text(event: EventDto): string {
   }
   if (event.type === 'recovery.started') return 'VM 재시작 (복구 서비스)';
   if (event.type === 'drive.resume.accepted') {
-    return `자율주행 재개 승인 — ${Number(p.switch_in_ms ?? 3000) / 1000}초 뒤 전환`;
+    return `${p.requested_by === 'auto' ? '자율주행 자동 복귀' : '자율주행 재개 승인'} — ${Number(p.switch_in_ms ?? 3000) / 1000}초 뒤 전환`;
   }
   if (event.type === 'drive.resume.cancelled')
-    return `자율주행 재개 취소${p.reason ? ` (${String(p.reason)})` : ''}`;
+    return p.reason === 'operator_cancelled'
+      ? '자율주행 복귀 취소 (운영자) — 수동주행 유지'
+      : `자율주행 재개 취소${p.reason ? ` (${String(p.reason)})` : ''}`;
   if (event.type === 'recovery.completed') return 'VM 복구 완료';
   if (event.type === 'drive.fault.detected') {
     const title = APP_TITLE[String(p.app_id)] ?? String(p.app_id ?? '앱');

@@ -164,9 +164,9 @@ export function ResumeState() {
       )}
     >
       {counting
-        ? `${Math.ceil((t.resumeAt! - t.now) / 1000)}초 뒤 자율주행으로 전환`
+        ? `${Math.ceil((t.resumeAt! - t.now) / 1000)}초 뒤 자율주행으로 전환${t.resumeAuto ? ' (자동 복귀)' : ''}`
         : t.mode === 'AUTO_READY'
-          ? '자율주행 재개 가능'
+          ? '자율주행 재개 가능 — 콘솔 [재개]'
           : t.mode === 'AUTO'
             ? '자율주행 중'
             : '재개 대기'}

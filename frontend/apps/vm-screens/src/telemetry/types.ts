@@ -115,6 +115,8 @@ export interface Telemetry {
   recoveringApps?: Partial<Record<AppId, true>>;
   /** 받아들여진 자율주행 재개가 AUTO 로 바뀔 예상 시각 (화면 시계, MQTT 계약 v1.2 §6). 없으면 null */
   resumeAt?: number | null;
+  /** 카운트다운이 자동 복귀인가 (계약 v1.5 requested_by auto) */
+  resumeAuto?: boolean;
   /** 추정 주행 거리 — 차량 속도(vehicle.status v_mps)를 화면에서 적분한 값. 위치 센서가 아니다 */
   odometer?: { distanceM: number; at: number };
   /** 시뮬레이터 구성일 때만 (MQTT 계약 v1.3 §11, WS-06 sim.snapshot). 실차 구성에는 없다 */

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DriveState } from '../api/drive';
 import { VM_IDS } from './data';
 import {
+  cancelResumeCountdown,
   forceKill,
   getDisplays,
   resetScenario,
@@ -10,7 +11,6 @@ import {
   scenarioEvents,
   setKeys,
   setRoute,
-  snapshot,
   startVm,
   stopVm,
   subscribe,
@@ -38,7 +38,7 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
     expect(last.apps.manual?.command_fresh).toBe(true);
   });
 
-  it('강제 종료 → MANUAL 인계 → 복구 → AUTO_READY → 재개 3·2·1 → AUTO, 매번 gen +1', () => {
+  it('강제 종료 → MANUAL 인계 → 복구 → AUTO_READY → 자동 3·2·1 → AUTO, 매번 gen +1 (계약 v1.5)', () => {
     expect(resume()).toBe(false); // AUTO_READY 가 아니면 무시
     forceKill('autonomous');
     expect(last.control).toMatchObject({ mode: 'MANUAL', generation: 5, active_app: 'manual' });
@@ -46,28 +46,48 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
     vi.advanceTimersByTime(3200);
     expect(vmStateOf(VM_IDS.autonomous)).toBe('running');
     expect(last.apps.autonomous?.command_fresh).toBe(false); // 재시작 중
-    vi.advanceTimersByTime(5000 + 3200);
+    vi.advanceTimersByTime(5000 + 3100);
+    // AUTO_READY 가 되자마자 운영자 조작 없이 자동 복귀 카운트다운
     expect(last.control).toMatchObject({ mode: 'AUTO_READY', generation: 6 });
-    expect(resume()).toBe(true);
-    expect(resume()).toBe(false); // 카운트다운 중 재요청은 무시
-    expect(scenarioEvents()[0]).toMatchObject({
-      type: 'drive.resume.accepted',
-      payload: { switch_in_ms: 3000 },
+    expect(last.resume?.requested_by).toBe('auto');
+    expect(last.resume?.remaining_ms).toBeLessThanOrEqual(3000);
+    expect(scenarioEvents().find((e) => e.type === 'drive.resume.accepted')).toMatchObject({
+      payload: { switch_in_ms: 3000, requested_by: 'auto' },
     });
-    expect(snapshot().control?.mode).toBe('AUTO_READY'); // 바로 바뀌지 않는다
-    expect(snapshot().resume?.remaining_ms).toBe(3000);
-    vi.advanceTimersByTime(2000);
-    expect(last.resume?.remaining_ms).toBeLessThanOrEqual(1000);
-    vi.advanceTimersByTime(1100);
-    expect(last.control).toMatchObject({ mode: 'AUTO', generation: 7, active_app: 'autonomous' });
+    expect(resume()).toBe(false); // 카운트다운 중 재요청은 무시
+    vi.advanceTimersByTime(3100);
+    expect(last.control).toMatchObject({
+      mode: 'AUTO',
+      generation: 7,
+      active_app: 'autonomous',
+      reason: 'auto_resumed',
+    });
     expect(last.resume).toBeNull();
   });
 
-  it('카운트다운 중 자율주행이 다시 죽으면 재개 취소, 수동주행 유지', () => {
+  it('자동 복귀를 취소하면 수동주행 유지, 그 뒤에는 [재개]로만 돌아간다', () => {
     forceKill('autonomous');
-    vi.advanceTimersByTime(3000 + 5000 + 3200);
+    vi.advanceTimersByTime(3000 + 5000 + 3100);
+    expect(last.resume?.requested_by).toBe('auto');
+    expect(cancelResumeCountdown()).toBe(true);
+    expect(scenarioEvents()[0]).toMatchObject({
+      type: 'drive.resume.cancelled',
+      payload: { reason: 'operator_cancelled' },
+    });
+    expect(last.resume).toBeNull();
+    vi.advanceTimersByTime(10_000);
+    expect(last.control?.mode).toBe('AUTO_READY'); // 다시 자동으로 돌아가지 않는다
+    expect(cancelResumeCountdown()).toBe(false);
     expect(resume()).toBe(true);
-    vi.advanceTimersByTime(1000);
+    expect(last.resume?.requested_by).toBe('admin');
+    vi.advanceTimersByTime(3100);
+    expect(last.control).toMatchObject({ mode: 'AUTO', reason: 'resume_requested' });
+  });
+
+  it('카운트다운 중 자율주행이 다시 죽으면 복귀 취소, 수동주행 유지', () => {
+    forceKill('autonomous');
+    vi.advanceTimersByTime(3000 + 5000 + 3100);
+    expect(last.resume).not.toBeNull();
     forceKill('autonomous');
     expect(scenarioEvents().some((e) => e.type === 'drive.resume.cancelled')).toBe(true);
     expect(last.resume).toBeNull();

@@ -63,6 +63,8 @@ export interface DriveState {
     switch_in_ms: number;
     accepted_ago_ms: number;
     remaining_ms: number;
+    /** 자동 복귀면 auto (계약 v1.5) */
+    requested_by?: string;
   } | null;
 }
 
@@ -175,6 +177,19 @@ export async function requestResume(): Promise<void> {
     return;
   }
   await request('/api/v1/drive/resume', { method: 'POST' });
+}
+
+/**
+ * 재개 카운트다운 취소 (DELETE /api/v1/drive/resume → MQTT-13 drive.resume.cancel_requested, 계약 v1.5).
+ * 자동 복귀를 막고 수동주행을 유지한다. 그 뒤에는 [자율주행 재개]로만 돌아간다.
+ */
+export async function cancelResume(): Promise<void> {
+  if (MOCK) {
+    const s = await loadScenario();
+    if (!s.cancelResumeCountdown()) throw new Error('취소할 카운트다운이 없습니다');
+    return;
+  }
+  await request('/api/v1/drive/resume', { method: 'DELETE' });
 }
 
 /** 시연 동작 (mock 에서만 동작 — 실제 API 는 격리 시연 -135 가 정한다) */

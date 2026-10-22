@@ -85,7 +85,10 @@ export function DashboardPage() {
 
       {control?.mode === 'AUTO_READY' && (
         <div className={styles.draft}>
-          자율주행 재개 가능 — <Link to="/demo">시연 제어</Link>에서 [자율주행 재개]
+          {drive?.resume
+            ? `자율주행 ${drive.resume.requested_by === 'auto' ? '자동 복귀' : '재개'} — ${Math.max(1, Math.ceil(drive.resume.remaining_ms / 1000))}초 뒤 전환`
+            : '자율주행 재개 가능 (자동 복귀 취소됨)'}{' '}
+          — <Link to="/demo">시연 제어</Link>에서 {drive?.resume ? '[취소]' : '[자율주행 재개]'}
         </div>
       )}
 
