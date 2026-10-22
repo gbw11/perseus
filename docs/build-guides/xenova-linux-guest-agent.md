@@ -3,8 +3,8 @@
 ## 적용 경계
 
 dom0의 Yocto Paho 패키지는 domU에 설치되지 않는다.
-새 Ubuntu·Debian 템플릿의 recipe 버전은 1.0.2이며 Agent 패키지 정책을 포함한다.
-기존 1.0.1 게시본·선택 lock·기본 Debian·Zephyr A/B·개인 Wi-Fi 설정은 변경하지 않는다.
+새 Ubuntu·Debian 템플릿의 recipe와 기본 선택 게시 버전은 1.0.2이며 Agent 패키지 정책을 포함한다.
+새 factory Debian도 1.0.2를 사용한다. 기존 1.0.1 게시본·설치된 VM·Zephyr A/B·개인 Wi-Fi 설정은 변경하지 않는다.
 편집 중 recipe가 선택된 게시 버전보다 앞설 수 있으며, factory 버전은 선택 lock과 계속 일치해야 한다.
 새 게시본의 검증과 manifest가 생기기 전에는 default-templates.lock.json의 해시를 추정해서 갱신하지 않는다.
 
