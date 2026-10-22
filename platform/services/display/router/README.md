@@ -1,6 +1,6 @@
-# dom0 표시 상태 수집기·화면 정책 (2·3단계)
+# dom0 표시 파이프라인 (2·3·4단계)
 
-HDMI 렌더러와 외부 웹이 함께 사용할 읽기 전용 상태 피드와 로컬 화면 선택 정책이다. 3단계에서 전체/상세 웹 렌더러를 추가했다. 물리 HDMI 연결·출력 실행과 영상 캡처는 후속 단계이며, 기존 MO-04 터미널을 열거나 콘솔 출력을 상태 분석용으로 가로채지 않는다.
+HDMI 렌더러와 외부 웹이 함께 사용할 읽기 전용 상태 피드와 로컬 화면 선택 정책이다. 3단계 전체/상세 웹 렌더러에 이어 4단계에서 X11 실행기·실제 픽셀 캡처·원격 시연 전송을 추가했다. 실보드 HDMI 검증과 이미지 준비는 남아 있다. 기존 MO-04 터미널을 열거나 콘솔 출력을 상태 분석용으로 가로채지 않는다.
 
 ```text
 Xen xl 조회 ───────────────┐
@@ -83,6 +83,49 @@ presentation의 `revision`은 선택 설정 버전, `render_revision`은 실행 
 개발 Vite 프록시는 `VITE_DISPLAY_FEED_ORIGIN`(기본 127.0.0.1:8082)으로 `/api/v1/display`만 직접 연결한다. 새 HDMI 화면은 기존 refresh 로그인·개발용 VITE_SCREEN_PASSWORD나 Spring 서버에 의존하지 않는다.
 
 검증: `tests/probe_browser.cjs`는 Windows Chrome/Playwright + 기존 WSL/QEMU를 사용하는 별도 시험 도구다. 실제 Xen 조회와 합성 장애/주행 사례를 구분한다. 테스트 서버의 `/test/scenario` 경로는 `tests/preview_server.py`에만 존재하며 제품 앱에는 포함되지 않는다. [3단계 검증 기록](../../../../docs/verification/display-step3.md)을 참고한다.
+
+## 4단계 X11 실행과 원격 시연
+
+현재 구현 백엔드는 **X11/XRandR + Chromium + FFmpeg x11grab/MJPEG**다. Wayland/Weston에서는 이 실행기를 그대로 사용할 수 없다. 실제 dom0에 Xorg 세션·창 관리자와 GPU 드라이버, `xrandr`, Chromium, FFmpeg의 x11grab 및 MJPEG 인코더, 한글 글꼴이 있어야 한다. Python 설치에는 `python -m pip install './platform/services/display/router[display]'`로 Playwright를 추가하고 타깃용 Chromium 경로를 지정한다. 실제 Yocto 이미지에 이 구성이 설치돼 있다고 가정하지 않는다.
+
+1. `python -m xenova_display.outputs --display :0`으로 실제 connector·지원 모드·EDID hash를 읽는다.
+2. [설정 예제](examples/x11-runtime.json)의 connector/EDID/해상도/좌표를 실제 설치에 맞게 작성해 `/etc/xenova/display-runtime.json` 등으로 저장한다. 예제의 0으로 채운 hash는 교체 전 실제 장치와 매칭되지 않는다.
+3. 수집기의 `XENOVA_DISPLAY_WEB_ROOT`를 3단계 빌드로 설정한다. 전용 그래픽 사용자에게 기존 `XENOVA_DISPLAY_TOKEN`과 X11 인증 환경을 제공한다.
+4. 같은 그래픽 사용자 세션에서 키오스크를 시작한다.
+
+```sh
+python -m xenova_display.kiosk --config /etc/xenova/display-runtime.json \
+  --status "$XDG_RUNTIME_DIR/xenova/display-runtime.json" --chromium /usr/bin/chromium
+```
+
+시작 시 매핑이 확인된 출력만 모드/좌표를 적용한다. 잘못된 EDID/지원하지 않는 모드로 다른 화면을 추정하지 않는다. 별도 브라우저 프로필로 두 창을 띄우고 native window bounds를 검사한다. 한쪽 분리/브라우저 종료는 해당 출력의 창만 정리·재시도하며, feed 접속 실패는 기존 창을 유지해 수신 중단 UI를 표시한다. 1시간마다 화면 쿠키를 갱신하고 feed 재시작의 401도 다시 인증한다. 브라우저의 자동 번역 팝업은 전용 임시 프로필에서 비활성화한다. 기존 개인 브라우저 프로필은 사용하지 않는다.
+
+원자적으로 쓰는 runtime JSON에는 layout_epoch, 갱신 단조 시각, connector·좌표·renderer_alive·DOM revision을 기록한다. `applied_revision`은 실제 x11 backend에서 매핑과 창 위치, 신선한 DOM ACK가 함께 확인됐을 때만 설정한다. 이는 **X11 설정/DOM 확인 값이며 실모니터 육안 검증 완료를 의미하지 않는다**. 가상 backend는 항상 physical_verified=false, applied_revision=null이다.
+
+송신기는 별도 실행한다. feed 서비스 키와 구별되는 **원격 시연 전용 접속 키**를 `XENOVA_STREAM_TOKEN`으로 주입하고 아래 환경을 준비한다.
+
+```sh
+export XENOVA_DISPLAY_RUNTIME_CONFIG=/etc/xenova/display-runtime.json
+export XENOVA_DISPLAY_RUNTIME_STATUS="$XDG_RUNTIME_DIR/xenova/display-runtime.json"
+python -m xenova_display.stream --host 127.0.0.1 --port 8083
+```
+
+송신기는 runtime 상태가 6초 이상 지연되거나 매핑/renderer가 유효하지 않으면 해당 프레임을 제공하지 않는다. FFmpeg는 출력별 실제 X11 root 사각형을 읽으며 웹 URL/별도 headless 페이지를 캡처하지 않는다. JPEG는 출력별 최대 2MiB·최신 1장만 보관하며 느린 수신자를 위해 과거 프레임 큐를 쌓지 않는다. 인코더가 종료되면 해당 인코더만 재시도한다. 키오스크와 송신기 사이에는 프로세스 종료 의존성이 없다.
+
+시연 PC에서는 SSH 포워딩 등 프로젝트의 신뢰된 연결로 8083에 접근하고 `http://127.0.0.1:8083/demo`를 연다. 예를 들어 `ssh -N -L 8083:127.0.0.1:8083 <dom0 사용자>@<dom0 주소>`로 접속할 수 있다. 뷰어에서 시연 접속 키를 입력하면 1시간짜리 HttpOnly/SameSite=Strict 쿠키를 발급한다. HTTPS에서는 Secure다. 접속 키는 URL·번들·캡처 프레임에 넣지 않는다. 뷰어는 수신 JPEG만 canvas에 디코딩하며 VM 상태 JSON으로 화면을 재구성하지 않는다. 실제 디코드가 3초 이상 중단되거나 상태 조회가 실패하면 마지막 프레임임을 표시한다.
+
+| 송신기 경로 | 역할 |
+| --- | --- |
+| `GET /demo` | 접속 키 입력·두 캡처 화면 수신 |
+| `POST /auth` | 시연 키 확인/쿠키 발급 |
+| `GET /api/v1/streams` | 출력·캡처 세대·프레임 번호/나이·연결 상태 |
+| `GET /streams/{output_id}.mjpeg` | 해당 출력의 JPEG multipart 스트림 |
+
+스트림 상태/프레임은 쿠키 또는 별도 시연 Bearer 키가 필요하다. query token은 지원하지 않는다. 스트림 도중에도 쿠키 만료를 확인한다. 프레임과 DOM revision의 정확한 대응은 아직 미검증이므로 metadata의 render_revision=null, render_correlation=unverified다.
+
+사용자 systemd 템플릿은 [키오스크](deploy/xenova-display-kiosk.service), [송신기](deploy/xenova-display-stream.service)에 있다. 둘 다 같은 그래픽 사용자로 실행하고 환경 파일 권한을 0600으로 관리한다. `%h/.config/xenova/display.env`는 feed 키/XAUTHORITY, `stream.env`는 별도의 시연 키/XAUTHORITY를 제공한다. Python 가상환경·Chromium 경로는 실제 설치 경로로 맞춰야 한다. 이 템플릿은 실제 보드에 설치/활성화하지 않았다.
+
+시험 전용 `backend=virtual_x11`은 `--allow-virtual` 또는 `XENOVA_STREAM_ALLOW_VIRTUAL=1`을 명시해야 한다. `--test-no-sandbox`는 virtual backend에서만 허용한다. 이는 실제 HDMI 성공으로 기록되지 않는다. `tests/probe_display_runtime.py --execute --output <디렉터리>`로 기존 WSL/QEMU 환경에서 가상 두 화면 → 실제 캡처 → 원격 디코드 시험을 재현할 수 있다. [4단계 검증 기록](../../../../docs/verification/display-step4.md)을 참고한다.
 
 ## 관측의 한계
 
