@@ -3,6 +3,7 @@ package com.xenova.backend.vm.api;
 import com.xenova.backend.agent.domain.AgentStatus;
 import com.xenova.backend.template.domain.GuestKind;
 import com.xenova.backend.vm.domain.Vm;
+import com.xenova.backend.vm.domain.VmRole;
 import com.xenova.backend.vm.domain.VmState;
 
 // agent_status is separate from state: a VM can be running while its agent is OFFLINE.
@@ -18,7 +19,8 @@ public record VmResponse(
         String templateId,
         String templateVersion,
         int vcpus,
-        int memoryMib) {
+        int memoryMib,
+        VmRole role) {
 
     static VmResponse of(Vm vm, AgentStatus agentStatus, String ipv4) {
         return new VmResponse(
@@ -31,6 +33,7 @@ public record VmResponse(
                 vm.templateId(),
                 vm.templateVersion(),
                 vm.vcpus(),
-                vm.memoryMib());
+                vm.memoryMib(),
+                vm.role());
     }
 }

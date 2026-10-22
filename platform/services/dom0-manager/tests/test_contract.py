@@ -53,6 +53,18 @@ def test_error_codes_and_states_match(client):
     assert set(actual["Vm"]["required"]) == set(contract["Vm"]["required"])
 
 
+def test_error_body_fields_match(client):
+    """오류 본문 필드(platform_code 포함)와 필수 필드가 yaml 과 같다. 한쪽에서만 빠지거나 타입이 바뀌면 여기서 깨진다."""
+    contract = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["components"]["schemas"]["Error"]
+    actual = client.app.openapi()["components"]["schemas"]["Error"]
+    assert set(actual["properties"]) == set(contract["properties"]) == {"code", "message", "detail", "resource", "platform_code"}
+    assert set(actual["required"]) == set(contract["required"]) == {"code", "message"}
+    assert contract["properties"]["platform_code"]["type"] == ["string", "null"]
+    live = actual["properties"]["platform_code"]
+    assert live.get("anyOf") == [{"type": "string"}, {"type": "null"}] or live.get("type") == ["string", "null"]
+    assert actual["additionalProperties"] is False and contract["additionalProperties"] is False
+
+
 def test_security_scheme_and_401_are_declared(client):
     """인증은 미들웨어라 라우트에 안 보인다. 라이브 OpenAPI 도 yaml 처럼 ServiceToken 을 전역 security 로 선언하고 모든
     엔드포인트가 401 을 명시해야 한다."""

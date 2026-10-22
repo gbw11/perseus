@@ -2,6 +2,9 @@
 
 계약 8.1 장(v1.3): 400 InvalidArgument / 404 VMNotFound / 409 VMExists·InvalidState / 507 InsufficientResources /
 501 NotSupported / 503 PlatformUnavailable / 504 DriverTimeout / 500 DriverError. 401 Unauthorized 는 미들웨어가 낸다.
+
+platform_code 는 플랫폼 Manager 가 준 원본 코드(HOST_QUIESCING 등)다. 플랫폼 오류에만 붙고 응답 본문에 그대로 나간다.
+detail 의 "CODE: message" 문자열은 사람용이며, 호출자의 분기는 platform_code 로 한다.
 """
 
 from __future__ import annotations
@@ -13,11 +16,19 @@ class Dom0ManagerError(Exception):
     status_code: int = 500
     code: str = "DriverError"
 
-    def __init__(self, message: str, *, detail: str | None = None, resource: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        detail: str | None = None,
+        resource: dict[str, Any] | None = None,
+        platform_code: str | None = None,
+    ):
         super().__init__(message)
         self.message = message
         self.detail = detail
         self.resource = resource
+        self.platform_code = platform_code
 
     def body(self) -> dict[str, Any]:
         out: dict[str, Any] = {"code": self.code, "message": self.message}
@@ -25,6 +36,8 @@ class Dom0ManagerError(Exception):
             out["detail"] = self.detail
         if self.resource is not None:
             out["resource"] = self.resource
+        if self.platform_code is not None:
+            out["platform_code"] = self.platform_code
         return out
 
 
@@ -52,10 +65,11 @@ class InsufficientResources(Dom0ManagerError):
     status_code = 507
     code = "InsufficientResources"
 
-    def __init__(self, name: str, requested: int, available: int):
+    def __init__(self, name: str, requested: int, available: int, *, platform_code: str | None = None):
         super().__init__(
             f"insufficient {name}: requested {requested}, available {available}",
             resource={"name": name, "requested": requested, "available": available},
+            platform_code=platform_code,
         )
 
 

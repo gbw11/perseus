@@ -20,6 +20,8 @@ import logging
 import os
 import sys
 import threading
+import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
@@ -31,12 +33,14 @@ from ..errors import (
     InsufficientResources,
     InvalidArgument,
     InvalidState,
+    NotSupportedByPlatform,
     PlatformUnavailable,
     VMExists,
     VMNotFound,
 )
 from ..models import VmState
-from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner
+from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner, StatsSample
+from .xentop import Xentop, collect_stats
 from .xl import Xl
 
 log = logging.getLogger(__name__)
@@ -123,6 +127,31 @@ def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0) -> ManagerLi
     return SerializedManager(module.Manager(), busy_timeout_s=busy_timeout_s)
 
 
+RecordsLoader = Callable[[], Mapping[str, Mapping[str, Any]]]
+
+
+def load_records_loader(platform_lib: str, manager: ManagerLike) -> RecordsLoader:
+    """플랫폼 라이브러리의 읽기 전용 registry 검증 `xenova_vm.load_records(data, validate_assets=False)` 를 부르는 함수를 만든다.
+
+    잠금·Xen 호출 없이 활성 레코드(instances/<id>/instance.json)만 읽으며, 플랫폼과 같은 규칙으로 심볼릭 링크·비정규 경로·
+    id 와 디렉터리 이름 불일치·중복 신원·누락 레코드를 거부한다(PlatformError). 부팅 자산 검사는 하지 않는다.
+    xenova_management 가 모듈 로딩 때 xenova_vm 을 import 하므로 실제 조립(build_driver)에서는 두 모듈이 함께 있거나 함께 없고,
+    없으면 load_manager 에서 서비스 시작이 실패한다. 여기서 import 를 호출 시점으로 미루는 것은 드라이버를 직접 조립하는 테스트 때문이다.
+    """
+    for entry in [p for p in platform_lib.split(os.pathsep) if p]:
+        if entry not in sys.path:
+            sys.path.insert(0, entry)
+
+    def load() -> Mapping[str, Mapping[str, Any]]:
+        try:
+            module = importlib.import_module("xenova_vm")
+        except ImportError as exc:
+            raise PlatformUnavailable("xenova_vm not importable; set XENOVA_PLATFORM_LIB (board: /usr/lib/xenova)", detail=str(exc)) from exc
+        return module.load_records(Path(manager.data), validate_assets=False)
+
+    return load
+
+
 # ---------------------------------------------------------------------------
 # 플랫폼 봉투 → 계약 오류
 # ---------------------------------------------------------------------------
@@ -146,7 +175,22 @@ _CODE_MAP: dict[str, type[Dom0ManagerError]] = {
     "STORAGE_UNAVAILABLE": PlatformUnavailable,
     "RECOVERY_REQUIRED": PlatformUnavailable,
     "CLEANUP_INCOMPLETE": PlatformUnavailable,
+    # 복구 기반(xenova-recovery-foundation.md "오류와 관측"). 충돌(CLI exit 3)은 409, 실행/불확실(exit 4)은 503·500
+    "HOST_QUIESCING": InvalidState,  # host 가 새 시작·복구 수락을 닫음 (종료 barrier)
+    "BOOT_ADMISSION_REQUIRED": InvalidState,  # 현재 host 의 실행 정책이 미평가·미확정·거절
+    "INTENT_MISMATCH": InvalidState,  # 적용 가능한 running 의도 또는 revision 불일치
+    "RECOVERY_MODE_UNSUPPORTED": NotSupportedByPlatform,  # graceful 미지원(Zephyr) 또는 per-VM force 승인 없음
+    "DEADLINE_EXCEEDED": DriverTimeout,  # 같은 host 의 최초 deadline 만료·범위 초과
+    "OBSERVATION_UNAVAILABLE": PlatformUnavailable,  # Xen 접근·출력·incarnation 을 확인하지 못함. 부재가 아님
+    "RECONCILE_REQUIRED": PlatformUnavailable,  # 실행·영구 기록의 결과를 안전하게 확정하지 못함. 운영자 재판정 전까지 재시도
+    "INTENT_RECONCILIATION_REQUIRED": PlatformUnavailable,  # 의도 원본과 journal 불일치로 start 보류
+    "XEN_EXECUTION_FAILED": DriverError,  # 수락 후 물리 제어 실패. accepted 의도는 유지
 }
+
+# 정지 대기 만료는 아직 전용 코드 없이 XEN_EXECUTION_FAILED(복구 기반 control 경로)나 ARTIFACT_INVALID(일반 PlatformError 포장)에
+# 메시지로만 실린다. 플랫폼이 DEADLINE_EXCEEDED 를 내기 전까지 이 두 코드에 한해 메시지로 시한 초과를 가려 504 로 낸다
+_TIMEOUT_MESSAGE_CODES = frozenset({"XEN_EXECUTION_FAILED", "ARTIFACT_INVALID"})
+_TIMEOUT_MESSAGE_MARKERS = ("deadline", "timed out")
 
 
 def raise_for_envelope(envelope: dict[str, Any], *, context: str) -> dict[str, Any]:
@@ -156,22 +200,20 @@ def raise_for_envelope(envelope: dict[str, Any], *, context: str) -> dict[str, A
     error = envelope.get("error") or {}
     code = str(error.get("code", "UNKNOWN"))
     message = str(error.get("message", "platform error"))
-    detail = f"{code}: {message}"
-    if "deadline" in message:
-        raise DriverTimeout(f"{context}: platform operation deadline exceeded", detail=detail)
+    detail = f"{code}: {message}"  # 사람용. 분기는 platform_code 로 한다
     if code == "INSUFFICIENT_STORAGE":
-        raise _insufficient_storage(message, detail)
+        raise _insufficient_storage(message, detail, platform_code=code)
     if code == "IP_POOL_EXHAUSTED":  # 플랫폼이 전역 잠금 안에서 고른 Linux 내부 IP 가 바닥남
-        raise InsufficientResources("ipv4", 1, 0)
-    cls = _CODE_MAP.get(code)
-    if cls is None:  # ARTIFACT_INVALID 등 실행 오류
-        raise DriverError(f"{context}: {message}", detail=detail)
-    raise cls(f"{context}: {message}", detail=detail)
+        raise InsufficientResources("ipv4", 1, 0, platform_code=code)
+    if code in _TIMEOUT_MESSAGE_CODES and any(marker in message for marker in _TIMEOUT_MESSAGE_MARKERS):
+        raise DriverTimeout(f"{context}: platform operation deadline exceeded", detail=detail, platform_code=code)
+    cls = _CODE_MAP.get(code, DriverError)  # 모르는 코드(ARTIFACT_INVALID 등)는 500 이지만 원본 코드는 보존한다
+    raise cls(f"{context}: {message}", detail=detail, platform_code=code)
 
 
-def _insufficient_storage(message: str, detail: str) -> Dom0ManagerError:
+def _insufficient_storage(message: str, detail: str, *, platform_code: str) -> Dom0ManagerError:
     # 계약 ResourceError.name 은 vcpus|memory_mib 뿐이라 resource 없이 507 만 낸다 (v2 에서 storage 추가 제안)
-    err = Dom0ManagerError(f"insufficient storage on board: {message}", detail=detail)
+    err = Dom0ManagerError(f"insufficient storage on board: {message}", detail=detail, platform_code=platform_code)
     err.status_code = 507
     err.code = "InsufficientResources"
     return err
@@ -232,9 +274,20 @@ def view_to_domain(view: dict[str, Any]) -> Domain | None:
 class PlatformDriver(Driver):
     name = "platform"
 
-    def __init__(self, manager: ManagerLike, xl: Xl | None = None) -> None:
+    def __init__(
+        self,
+        manager: ManagerLike,
+        xl: Xl | None = None,
+        xentop: Xentop | None = None,
+        *,
+        records_loader: RecordsLoader | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.manager = manager
         self._xl = xl
+        self._xentop = xentop
+        self._records_loader = records_loader
+        self._monotonic = monotonic
 
     # ---- 조회 ----
 
@@ -285,6 +338,8 @@ class PlatformDriver(Driver):
         return domain
 
     def shutdown(self, vm_id: UUID, *, grace_s: float) -> None:
+        # Manager stop 에는 대기 시간 입력이 없다(vm_id·force 뿐). 실제 대기는 config.PLATFORM_STOP_WAIT_S 고정이고 Settings 가
+        # platform 모드에서 shutdown_grace_s 를 그 값으로 강제하므로 grace_s 는 여기서 쓰지 않는다
         self._stop(vm_id, force=False)
 
     def destroy(self, vm_id: UUID) -> None:
@@ -302,6 +357,49 @@ class PlatformDriver(Driver):
         if self._xl is None:
             raise PlatformUnavailable("xl is not configured for host_info")
         return self._xl.info()
+
+    def collect_stats(self) -> StatsSample:
+        """xentop 은 Manager 를 거치지 않는다(잠금·xl list 실행 시간을 피해 조회 한도 안에 끝낸다).
+
+        관리 대상 판별은 uuid 유무가 아니라 플랫폼 registry 등록 여부다. Xen 은 설정에 uuid 가 없어도 새로 만들어 주므로
+        xl 로 직접 띄운 도메인도 uuid 를 가진다. registry 는 플랫폼 라이브러리의 읽기 전용 검증(load_records_loader)으로 읽는다.
+        """
+        if self._xl is None or self._xentop is None:
+            raise PlatformUnavailable("xl/xentop are not configured for stats")
+        # 조회 한도는 요청 전체다. registry 조회(SD 카드)가 쓴 시간도 뺀다
+        budget = self._xentop.timeout_s
+        started = self._monotonic()
+        registered = self.registered_vm_ids()
+        remaining = budget - (self._monotonic() - started)
+        if remaining <= 0:
+            raise DriverTimeout(f"stats deadline of {budget:g}s exhausted by registry scan")
+        return collect_stats(
+            self._xentop, self._xl, allowed=registered.__contains__, budget_s=remaining, monotonic=self._monotonic
+        )
+
+    def registered_vm_ids(self) -> set[UUID]:
+        """registry 에 등록된(REGISTERED) VM 의 uuid. 플랫폼 `xenova_vm.load_records(validate_assets=False)` 의 결과다.
+
+        플랫폼이 거부하는 상태(심볼릭 링크, id/디렉터리 불일치, 중복 신원, 레코드 누락·손상)는 RECOVERY_REQUIRED 에 해당하므로
+        그 VM 만 빼고 200 을 내지 않고 503 이다. 점으로 시작하는 보관본·작업 공간 디렉터리는 플랫폼이 건너뛴다.
+        """
+        if self._records_loader is None:
+            raise PlatformUnavailable("platform record loader is not configured for stats")
+        try:
+            records = self._records_loader()
+        except Dom0ManagerError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 플랫폼 PlatformError 는 정적으로 import 할 수 없다. 읽기 전용 검증 실패는 전부 복구 필요 상태다
+            raise PlatformUnavailable(
+                "registry is invalid; platform recovery required", detail=f"{type(exc).__name__}: {exc}"[:200]
+            ) from exc
+        found: set[UUID] = set()
+        for name, record in records.items():
+            try:
+                found.add(UUID(str(record["uuid"])))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise PlatformUnavailable(f"registry record {name} has no valid uuid; platform recovery required") from exc
+        return found
 
     def health(self) -> bool:
         """xl 응답과 registry 저장소 존재만 본다. Manager 를 거치지 않는다.

@@ -6,6 +6,7 @@ import com.xenova.backend.agent.domain.AgentStatus;
 import com.xenova.backend.vm.application.VmService;
 import com.xenova.backend.vm.application.VmService.CreateResult;
 import com.xenova.backend.vm.domain.Vm;
+import com.xenova.backend.vm.domain.VmRole;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.time.Clock;
@@ -13,6 +14,7 @@ import java.time.Instant;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -52,6 +54,11 @@ public class VmController {
     @GetMapping("/{vmId}")
     public VmResponse get(@PathVariable String vmId) {
         return withAgentStatus(vmService.get(vmId), clock.instant());
+    }
+
+    @PatchMapping("/{vmId}")
+    public VmResponse update(@PathVariable String vmId, @Valid @RequestBody UpdateVmRequest request) {
+        return withAgentStatus(vmService.updateRole(vmId, VmRole.fromValue(request.role())), clock.instant());
     }
 
     @PostMapping("/{vmId}/start")
