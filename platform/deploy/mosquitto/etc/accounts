@@ -6,6 +6,8 @@ perception
 autonomous
 manual
 message-board
+# 시뮬레이터 구성 (계약 11장)
+simulator
 # 읽기 전용 확인용 (도구·모니터링)
 observer
 # VM 에이전트: username = vm_id. 아래 둘은 로컬 개발용 예시이고, dom0 에서는 실제 vm_id 로 바꾼다.

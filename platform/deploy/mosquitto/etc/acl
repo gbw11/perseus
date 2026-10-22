@@ -29,6 +29,12 @@ user backend
 topic write xenova/v1/apps/manual/input
 topic write xenova/v1/console/resume
 topic write xenova/v1/vms/+/command
+topic write xenova/v1/sim/command
+
+# 시뮬레이터 (계약 11장, 실차에는 없음): 차 위치·트랙. 조작 명령(sim/command)은 backend 가 낸다
+user simulator
+topic write xenova/v1/sim/pose
+topic write xenova/v1/sim/world
 
 # 게이트웨이: ESP32 는 MQTT 에 붙지 않고 게이트웨이 시리얼 뒤에 있다 (계약 v1.1). vehicle/status 도 게이트웨이가 낸다.
 user gateway

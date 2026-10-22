@@ -1,4 +1,4 @@
-"""MQTT 계약 v1 토픽 빌더와 파서 (docs/contracts/mqtt-contract-v1.md 3·5·6·7·8장)."""
+"""MQTT 계약 v1 토픽 빌더와 파서 (docs/contracts/mqtt-contract-v1.md 3·5·6·7·8·11장)."""
 
 from __future__ import annotations
 
@@ -62,6 +62,21 @@ def vehicle_control() -> str:
 
 def vehicle_status() -> str:
     return f"{PREFIX}/vehicle/status"
+
+
+def sim_pose() -> str:
+    """시뮬레이터 차 위치 (MQTT-15, 실차에는 없음)."""
+    return f"{PREFIX}/sim/pose"
+
+
+def sim_world() -> str:
+    """시뮬레이터 트랙·장애물·E-stop, retained (MQTT-16)."""
+    return f"{PREFIX}/sim/world"
+
+
+def sim_command() -> str:
+    """백엔드 → 시뮬레이터 조작 명령 (MQTT-17)."""
+    return f"{PREFIX}/sim/command"
 
 
 def probe_request(target_vm_id: str) -> str:
