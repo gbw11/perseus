@@ -1,6 +1,6 @@
 # 화면 배치 계약 v1
 
-**최종 갱신** 2026-10-21 v1 초안
+**최종 갱신** 2026-10-22 v1.1 초안 (view `sim` 추가 — 변경 이력)
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼, RC카 시나리오
 **구성 계층** 관리 콘솔 ↔ Spring 백엔드 ↔ dom0 표시 서비스 ↔ 키오스크 브라우저 (모니터 2대)
 
@@ -33,7 +33,7 @@
 | 용어 | 뜻 |
 | --- | --- |
 | 디스플레이 | 모니터 한 대. `display-0`(모니터 1), `display-1`(모니터 2) 두 개로 고정 |
-| view | 화면 종류. `split`(3분할, 모니터 전체) / `os-face`(VM 1개의 상세 화면) |
+| view | 화면 종류. `split`(3분할, 모니터 전체) / `os-face`(VM 1개의 상세 화면) / `sim`(시뮬레이터 화면, Plan B — [시뮬레이터 시연 시나리오](../scenario-simulator.md)) |
 | desired_route | 콘솔이 마지막으로 요청한 배치 |
 | observed_route | 표시 서비스가 `route.applied` 로 "다 띄웠다" 고 확인한 배치 |
 | revision | 디스플레이마다 배치가 바뀔 때 1씩 오르는 번호. 시작값 1 |
@@ -50,7 +50,7 @@ REST 응답과 WS `display.snapshot` 의 `items` 가 같은 모양을 쓴다. �
   "label": "모니터 1",
   "connected": true,
   "status": "ACTIVE",
-  "supported_views": ["split", "os-face"],
+  "supported_views": ["split", "os-face", "sim"],
   "revision": 3,
   "desired_route": {
     "vm_id": "1b4e28ba-2fa1-11d2-883f-0016d3cca427",
@@ -76,7 +76,7 @@ REST 응답과 WS `display.snapshot` 의 `items` 가 같은 모양을 쓴다. �
 | `label` | string | 화면에 보일 이름 (`모니터 1`, `모니터 2`) |
 | `connected` | bool | 표시 서비스가 붙어 있고, 그 디스플레이의 HDMI·키오스크 브라우저가 떠 있음 |
 | `status` | string | `DISCONNECTED` / `IDLE` / `SWITCHING` / `ACTIVE` / `ERROR` (5.4) |
-| `supported_views` | string[] | `["split", "os-face"]` |
+| `supported_views` | string[] | `["split", "os-face", "sim"]` |
 | `revision` | int | 지금 desired_route 의 번호 |
 | `desired_route` | Route | 콘솔이 마지막으로 요청한 배치. 처음에는 `{vm_id: null, view: "split", request_id: "initial"}` |
 | `observed_route` | Route \| null | 표시 서비스가 확인한 배치. 확인 전·연결이 끊긴 뒤에는 null |
@@ -86,8 +86,8 @@ REST 응답과 WS `display.snapshot` 의 `items` 가 같은 모양을 쓴다. �
 
 | 필드 | 타입 | 설명 |
 | --- | --- | --- |
-| `vm_id` | string \| null | `os-face` 일 때 그 VM. `split` 이면 null |
-| `view` | string | `split` / `os-face` |
+| `vm_id` | string \| null | `os-face` 일 때 그 VM. `split`·`sim` 이면 null |
+| `view` | string | `split` / `os-face` / `sim` |
 | `request_id` | string | PUT 마다 백엔드가 만드는 UUID. `route.set`·`route.applied` 가 같은 값을 쓴다 |
 | `applied_at` | string \| null | ISO-8601 UTC. observed_route 에만 들어간다 (백엔드가 `route.applied` 를 받은 시각) |
 | `verification_level` | string \| null | observed_route 에만 들어간다. v1 은 `kiosk_loaded`(키오스크가 그 주소를 다 불러옴) 하나 |
@@ -131,8 +131,8 @@ REST 응답과 WS `display.snapshot` 의 `items` 가 같은 모양을 쓴다. �
 
 | 필드 | 필수 | 규칙 |
 | --- | --- | --- |
-| `view` | O | `split` / `os-face` |
-| `vm_id` | `os-face` 일 때 | `os-face` 이면 필수, `split` 이면 null 이거나 생략 |
+| `view` | O | `split` / `os-face` / `sim` |
+| `vm_id` | `os-face` 일 때 | `os-face` 이면 필수, `split`·`sim` 이면 null 이거나 생략 |
 | `expected_revision` | O | 콘솔이 마지막으로 본 `revision`. 지금 값과 다르면 409 (다른 사람이 먼저 바꿈) |
 
 응답 `202 Accepted` — 바뀐 Display (2장). `revision` 이 1 오르고 `desired_route` 가 새 값, `status` 는 `SWITCHING`. 모니터가 실제로 바뀐 것은 아직 아니다. 결과는 WS `display.snapshot` 이나 GET 으로 본다 (`ACTIVE` 또는 `ERROR`).
@@ -148,8 +148,8 @@ REST 응답과 WS `display.snapshot` 의 `items` 가 같은 모양을 쓴다. �
 | --- | --- | --- |
 | 401 | `UNAUTHORIZED` / `INVALID_TOKEN` | JWT 없음 / 틀림·만료 (다른 콘솔 API 와 같음) |
 | 404 | `DISPLAY_NOT_FOUND` | `display_id` 가 `display-0`·`display-1` 이 아님 |
-| 422 | `VALIDATION_ERROR` | `view` 없음, `expected_revision` 없음·정수 아님, 필드 타입 오류, `split` 인데 `vm_id` 있음, `os-face` 인데 `vm_id` 없음 |
-| 422 | `UNSUPPORTED_VIEW` | `view` 가 `split`·`os-face` 가 아님 |
+| 422 | `VALIDATION_ERROR` | `view` 없음, `expected_revision` 없음·정수 아님, 필드 타입 오류, `split`·`sim` 인데 `vm_id` 있음, `os-face` 인데 `vm_id` 없음 |
+| 422 | `UNSUPPORTED_VIEW` | `view` 가 `split`·`os-face`·`sim` 이 아님 |
 | 404 | `VM_NOT_FOUND` | `vm_id` 가 등록된 VM 이 아님 |
 | 422 | `VM_ROLE_UNKNOWN` | `os-face` 인데 그 VM 에 화면 역할(role)이 없음 — `screen_path` 를 만들 수 없다 (5.6) |
 | 409 | `DISPLAY_REVISION_CONFLICT` | `expected_revision` 이 지금 `revision` 과 다름. `message` 에 지금 revision 을 적는다 |
@@ -290,8 +290,10 @@ REST 응답과 WS `display.snapshot` 의 `items` 가 같은 모양을 쓴다. �
 | `os-face` | `manual` | `manual` | `/detail/manual` |
 | `os-face` | `message-board` | `message-board` | `/detail/interaction` |
 | `os-face` | 없음 | — | PUT 단계에서 422 `VM_ROLE_UNKNOWN` (보내지 않음) |
+| `sim` | — | null | `/sim` |
 
 - 화면 경로 id 는 [MQTT 계약](mqtt-contract-v1.md) 4장의 `app_id` 와 같고, 메시지 보드만 `interaction` 이다.
+- `/split` 의 세 번째 칸은 화면 앱이 스스로 정한다: 시뮬레이터 위치(MQTT-15 `sim.pose`, 백엔드 중계 WS-06)가 1초 안에 왔으면 **시뮬레이터**, 아니면 **인터랙션**. 배치 API 는 바꾸지 않는다 — 실차(Plan A)에서는 저절로 인터랙션 칸이 된다 (2026-10-22 결정).
 - 기준 주소·키오스크 실행 방식(브라우저 종류, 로드 완료 판단)은 표시 서비스 구현이 정한다.
 
 ## 6. 이벤트 `display.route.changed`
@@ -302,7 +304,7 @@ PUT 이 성공할 때마다 백엔드가 콘솔 이벤트 로그(REST-18, `/ws/v
 | --- | --- |
 | type | `display.route.changed` |
 | 심각도 | `INFO` |
-| 대상 VM | `vm_id` (`split` 이면 없음) |
+| 대상 VM | `vm_id` (`split`·`sim` 이면 없음) |
 | payload | `{display_id, view, vm_id, revision, request_id, requested_by}` |
 
 ```json
@@ -340,3 +342,4 @@ PUT 이 성공할 때마다 백엔드가 콘솔 이벤트 로그(REST-18, `/ws/v
 | 버전 | 날짜 | 내용 |
 | --- | --- | --- |
 | v1 (초안) | 2026-10-21 | 최초. dom0 표시 서비스 방식 (2026-10-21 결정): 콘솔 REST-23·24, 읽기 전용 `WS /ws/v1/displays`, 표시 서비스 소켓 `WS /ws/v1/display-service`(WS-04, 서비스 토큰·연결 1개), status 판정, 재연결, `screen_path`, 이벤트 `display.route.changed`. 모니터 브라우저가 `/ws/v1/displays` 에 `display.hello`·`route.applied` 를 보내던 백엔드 초안 방식은 쓰지 않는다 (S15P31E110-129) |
+| v1.1 (초안) | 2026-10-22 | view `sim`(시뮬레이터 화면, `screen_path` `/sim`, `vm_id` null) 추가. `/split` 세 번째 칸은 시뮬레이터 위치가 신선하면 시뮬레이터로 자동 전환 (Plan B, S15P31E110-262·-265) |
