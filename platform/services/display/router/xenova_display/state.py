@@ -25,6 +25,9 @@ class StateStore:
         self.sequence = 0
         self.xen = None
         self.mqtt_connected = False
+        # None is reserved for injected sources/tests that do not use the MQTT adapter.
+        self.subscriptions = None
+        self.mqtt_generation = 0
         self.guests = {str(b.vm_id): {
             "binding": b, "domid": None, "xen_state": None, "run_id": None,
             "boot_id": None, "retired_boots": set(), "channels": {}, "retired_epochs": set(),
@@ -41,8 +44,29 @@ class StateStore:
         if observation is None:
             return {"status": "unknown", "age_ms": None}
         age = max(0, int((self.clock() - observation["received_mono"]) * 1000))
-        return {**{k: v for k, v in observation.items() if k not in {"value", "received_mono"}},
+        return {**{k: v for k, v in observation.items() if k not in {"value", "received_mono", "_mqtt_generation"}},
                 "age_ms": age, "status": "disconnected" if not connected else "stale" if age >= ttl * 1000 else "fresh"}
+
+    def mqtt_connection(self, connected, topics=()):
+        with self.lock:
+            self.mqtt_connected = connected
+            self.mqtt_generation += 1
+            self.subscriptions = {topic: "pending" if connected else "unavailable" for topic in topics}
+
+    def subscription(self, topic, status):
+        with self.lock:
+            if self.mqtt_connected and self.subscriptions is not None and topic in self.subscriptions:
+                self.subscriptions[topic] = status
+
+    def topic_available(self, topic):
+        return self.mqtt_connected and (self.subscriptions is None or self.subscriptions.get(topic) == "granted")
+
+    def mqtt_source(self, observation, ttl, topic, *, supported=True):
+        subscription = ("unsupported" if not supported else "untracked" if self.subscriptions is None
+                        else self.subscriptions.get(topic, "unavailable"))
+        current = observation is None or observation.get("_mqtt_generation") == self.mqtt_generation
+        return {**self.source(observation, ttl, connected=supported and self.topic_available(topic) and current),
+                "subscription_status": subscription}
 
     def poll_success(self, domains):
         with self.lock:
@@ -74,10 +98,12 @@ class StateStore:
             if not isinstance(env.get(field), str) or not 1 <= len(env[field]) <= 256:
                 return False
         with self.lock:
+            if not self.topic_available(topic):
+                return False
             if topic == DISPLAY_DRIVE_TOPIC:
                 return self._control(env, retained)
             vm_id = env.get("vm_id")
-            if not isinstance(vm_id, str):
+            if not isinstance(vm_id, str) or env.get("source_id") is not None:
                 return False
             g = self.guests.get(vm_id)
             if g is None or g["domid"] is None or g["xen_state"] != "running":
@@ -123,7 +149,8 @@ class StateStore:
                         return False
                     g["retired_epochs"].add((key, tuple(previous["source_epoch"])))
             g["channels"][key] = self.observation(env["payload"], observed_at=env["sent_at"],
-                source_id=topic, source_epoch=list(epoch), sequence=env["seq"], retained=retained)
+                source_id=topic, source_epoch=list(epoch), sequence=env["seq"], retained=retained,
+                _mqtt_generation=self.mqtt_generation)
             return True
 
     def _control(self, env, retained):
@@ -152,7 +179,7 @@ class StateStore:
         self.control_epoch = epoch
         self.control = self.observation({"active_vm_id": active, "mode": p["mode"]},
             observed_at=env["sent_at"], source_id=self.settings.control_source,
-            source_epoch=list(epoch), sequence=env["seq"])
+            source_epoch=list(epoch), sequence=env["seq"], _mqtt_generation=self.mqtt_generation)
         return True
 
     def snapshot(self):
@@ -164,7 +191,7 @@ class StateStore:
                 b = g["binding"]
                 channels = g["channels"]
                 app = channels.get("app.heartbeat")
-                app_source = self.source(app, 3, connected=self.mqtt_connected)
+                app_source = self.mqtt_source(app, 3, f"xenova/v1/apps/{b.app_id}/events")
                 inv = channels.get("agent.inventory")
                 observed_os = inv["value"]["os"]["id"] if inv else None
                 app_state = "unknown"
@@ -180,13 +207,16 @@ class StateStore:
                     "app_state": app_state, "reported_app_state": app["value"].get("state") if app else None,
                     "agent_supported": b.agent_supported,
                     "sources": {"xen": xen_source, "app": app_source,
-                        "agent": self.source(channels.get("agent.heartbeat"), 15, connected=self.mqtt_connected),
-                        "inventory": self.source(inv, 30, connected=self.mqtt_connected)},
+                        "agent": self.mqtt_source(channels.get("agent.heartbeat"), 15,
+                            f"xenova/v1/vms/{vm_id}/heartbeat", supported=b.agent_supported),
+                        "inventory": self.mqtt_source(inv, 30,
+                            f"xenova/v1/vms/{vm_id}/inventory", supported=b.agent_supported)},
                     "screen_source": {"kind": "status", "handle": None}})
-            control_source = self.source(self.control, 3, connected=self.mqtt_connected)
+            control_source = self.mqtt_source(self.control, 3, DISPLAY_DRIVE_TOPIC)
             drive = {"active_vm_id": None, "mode": "unknown", "ai_status": "unknown", "source": control_source}
             if control_source["status"] == "fresh":
                 drive.update(self.control["value"])
             return {"schema_version": 1, "type": "display.state", "source_epoch": self.epoch,
                     "sequence": self.sequence, "generated_at": utc_now(),
-                    "mqtt_connected": self.mqtt_connected, "vms": guests, "drive": drive}
+                    "mqtt_connected": self.mqtt_connected, "binding_scope": self.settings.binding_scope,
+                    "mqtt_subscriptions": dict(self.subscriptions or {}), "vms": guests, "drive": drive}
