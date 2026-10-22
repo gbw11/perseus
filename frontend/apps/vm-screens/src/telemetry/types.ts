@@ -140,6 +140,13 @@ export function simLive(t: Telemetry): boolean {
   return !!t.sim?.available && !!t.sim.pose && t.now - t.sim.receivedAt <= SIM_STALE_MS;
 }
 
+/** 시뮬레이터를 다시 켜거나 차를 옮기면 위치가 튄다 — 그때는 지나온 길을 새로 그린다 (선이 트랙을 가로지르지 않게) */
+export const TRAIL_JUMP_M = 0.6;
+function jumped(trail: [number, number][], pose: { x: number; y: number }): boolean {
+  const last = trail[trail.length - 1];
+  return !!last && Math.hypot(pose.x - last[0], pose.y - last[1]) > TRAIL_JUMP_M;
+}
+
 /** WS-06 sim.snapshot 프레임을 화면 상태로 */
 export function applySimSnapshot(
   t: Telemetry,
@@ -147,9 +154,10 @@ export function applySimSnapshot(
   now: number,
 ): Telemetry {
   const pose = frame.pose ?? null;
+  const prev = t.sim?.trail ?? [];
   const trail = pose
-    ? [...(t.sim?.trail ?? []), [pose.x, pose.y] as [number, number]].slice(-TRAIL_POINTS)
-    : (t.sim?.trail ?? []);
+    ? [...(jumped(prev, pose) ? [] : prev), [pose.x, pose.y] as [number, number]].slice(-TRAIL_POINTS)
+    : prev;
   return {
     ...t,
     sim: {

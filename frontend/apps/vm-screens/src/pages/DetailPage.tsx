@@ -3,10 +3,11 @@ import { Navigate, useParams } from 'react-router';
 import { ResumeState } from '../components/AppPanel';
 import { ModeBar } from '../components/ModeBar';
 import { NavCamera } from '../components/NavCamera';
+import { SimDriverView } from '../components/SimPanel';
 import { TrackMap } from '../components/TrackMap';
-import { mps, rad, seconds } from '../components/format';
+import { mps, rad, seconds, shownKeys } from '../components/format';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
-import { APPS, APP_IDS, type AppId, type Telemetry } from '../telemetry/types';
+import { APPS, APP_IDS, simLive, type AppId, type Telemetry } from '../telemetry/types';
 import styles from '../components/screens.module.css';
 
 const obstacles = (t: Telemetry) => t.obstacleCount ?? t.perception.obstacles.length;
@@ -81,26 +82,35 @@ function AutonomousDetail() {
   return (
     <>
       <section className={styles.detailMain}>
-        <h2>인지 결과 (젯슨 perception.result 15 Hz)</h2>
-        <svg viewBox="0 0 400 400" className={styles.road} role="img" aria-label="차선과 장애물">
-          <rect x="50" y="0" width="300" height="400" className={styles.roadBg} />
-          <line x1="50" y1="0" x2="50" y2="400" className={styles.lane} />
-          <line x1="350" y1="0" x2="350" y2="400" className={styles.lane} />
-          <line x1="200" y1="0" x2="200" y2="400" className={styles.center} />
-          {t.perception.obstacles.map((o, i) => (
-            <rect
-              key={i}
-              x={x(o.x - o.w / 2)}
-              y={y(o.y) - 20}
-              width={o.w * 300}
-              height="40"
-              className={styles.obstacle}
-            />
-          ))}
-          <g transform={`translate(${x(t.perception.lane_offset_m)} 340) rotate(${steerDeg})`}>
-            <rect x="-22" y="-36" width="44" height="64" rx="8" className={styles.car} />
-          </g>
-        </svg>
+        {simLive(t) ? (
+          <>
+            <h2>시뮬레이터 1인칭 시점 — 자율주행</h2>
+            <SimDriverView id="autonomous" large />
+          </>
+        ) : (
+          <>
+            <h2>인지 결과 (젯슨 perception.result 15 Hz)</h2>
+            <svg viewBox="0 0 400 400" className={styles.road} role="img" aria-label="차선과 장애물">
+              <rect x="50" y="0" width="300" height="400" className={styles.roadBg} />
+              <line x1="50" y1="0" x2="50" y2="400" className={styles.lane} />
+              <line x1="350" y1="0" x2="350" y2="400" className={styles.lane} />
+              <line x1="200" y1="0" x2="200" y2="400" className={styles.center} />
+              {t.perception.obstacles.map((o, i) => (
+                <rect
+                  key={i}
+                  x={x(o.x - o.w / 2)}
+                  y={y(o.y) - 20}
+                  width={o.w * 300}
+                  height="40"
+                  className={styles.obstacle}
+                />
+              ))}
+              <g transform={`translate(${x(t.perception.lane_offset_m)} 340) rotate(${steerDeg})`}>
+                <rect x="-22" y="-36" width="44" height="64" rx="8" className={styles.car} />
+              </g>
+            </svg>
+          </>
+        )}
       </section>
       <section className={styles.detailSide}>
         <h2>주행 명령 (drive.command 50 Hz)</h2>
@@ -139,7 +149,7 @@ function ManualDetail() {
 
   // 모니터는 보여 주기만 한다 (화면 정의서 §1) — 웹에서 들어온 눌린 키만 밝게
   const cap = (key: string, text: string) => (
-    <span className={[styles.keyCap, t.manualKeys.includes(key) ? styles.keyCapOn : ''].join(' ')}>
+    <span className={[styles.keyCap, shownKeys(t).includes(key) ? styles.keyCapOn : ''].join(' ')}>
       {text}
     </span>
   );
@@ -148,6 +158,7 @@ function ManualDetail() {
     <>
       <section className={styles.detailMain}>
         <h2>{active ? '운영자 운전 중' : '대기 중 — 자율주행에 문제가 생기면 바로 이어받는다'}</h2>
+        {simLive(t) && <SimDriverView id="manual" large />}
         <div className={styles.keys} style={{ ['--accent' as string]: 'var(--x-app-manual)' }}>
           {cap('left', '◀')}
           {cap('up', '▲')}

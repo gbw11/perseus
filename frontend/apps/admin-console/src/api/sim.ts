@@ -32,8 +32,11 @@ interface Frame {
 /** 받은 프레임을 화면 상태로. 위치가 오면 꼬리에 붙인다 */
 export function applySimFrame(view: SimView, frame: Frame): SimView {
   const pose = frame.pose ?? null;
+  const last = view.trail[view.trail.length - 1];
+  // 시뮬레이터를 다시 켜거나 차를 옮겨 위치가 튀면 지나온 길을 새로 그린다
+  const jumped = !!pose && !!last && Math.hypot(pose.x - last[0], pose.y - last[1]) > 0.6;
   const trail: [number, number][] = pose
-    ? [...view.trail, [pose.x, pose.y] as [number, number]].slice(-TRAIL_POINTS)
+    ? [...(jumped ? [] : view.trail), [pose.x, pose.y] as [number, number]].slice(-TRAIL_POINTS)
     : view.trail;
   return { available: !!frame.available && !!pose, pose, world: frame.world ?? view.world, trail };
 }

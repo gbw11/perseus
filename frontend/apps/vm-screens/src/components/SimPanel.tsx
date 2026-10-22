@@ -1,6 +1,6 @@
-import { StatusBadge, TrackView } from '@xenova/ui';
+import { DriverView, StatusBadge, TrackView } from '@xenova/ui';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
-import { carColor, mps, rad, seconds } from './format';
+import { carColor, mps, rad, seconds, shownKeys } from './format';
 import styles from './screens.module.css';
 
 /** 시뮬레이터 칸·화면의 상태 배지 */
@@ -23,6 +23,70 @@ export function SimBadge({ size = 'lg' }: { size?: 'sm' | 'lg' }) {
                 : '정지'
       }
       size={size}
+    />
+  );
+}
+
+const KEYS = [
+  ['left', '◀'],
+  ['up', '▲'],
+  ['down', '▼'],
+  ['right', '▶'],
+  ['brake', '정지'],
+] as const;
+
+/** 조작 키 — 웹(관리 콘솔 시연 제어)에서 들어온 눌린 키만 밝게. 모니터는 보여 주기만 한다 */
+export function KeyCaps({ mini }: { mini?: boolean }) {
+  const { telemetry: t } = useTelemetry();
+  const keys = shownKeys(t);
+  return (
+    <div
+      className={mini ? styles.keysMini : styles.keys}
+      style={{ ['--accent' as string]: 'var(--x-app-manual)' }}
+    >
+      {KEYS.map(([key, text]) => (
+        <span key={key} className={[styles.keyCap, keys.includes(key) ? styles.keyCapOn : ''].join(' ')}>
+          {text}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 자율·수동 칸의 시뮬레이터 1인칭 시점. 차는 한 대라 두 칸의 시야는 같고, 지금 운전하는 쪽만 또렷하다.
+ * 자율 칸은 인지 값, 수동 칸은 조작 키를 겹친다.
+ */
+export function SimDriverView({ id, large }: { id: 'autonomous' | 'manual'; large?: boolean }) {
+  const { telemetry: t } = useTelemetry();
+  const driving = t.activeApp === id;
+  const obstacles = t.obstacleCount ?? t.perception.obstacles.length;
+  return (
+    <DriverView
+      pose={t.sim?.pose ?? null}
+      world={t.sim?.world ?? null}
+      sensing={t.vehicle.flags.obstacle}
+      dimmed={!driving}
+      label={`${id === 'autonomous' ? '자율주행' : '수동주행'} 시점 — 시뮬레이터 1인칭`}
+      overlay={
+        <>
+          <div className={styles.povTop} style={{ ['--accent' as string]: `var(--x-app-${id})` }}>
+            <span className={styles.povTag}>{driving ? '▶ 운전 중' : '대기'}</span>
+            <span className={styles.povHud}>{mps(t.vehicle.v_mps)}</span>
+          </div>
+          {id === 'autonomous' ? (
+            <div className={styles.povBottom}>
+              <span className={styles.povHud}>
+                차선 {t.perception.lane_offset_m >= 0 ? '+' : ''}
+                {t.perception.lane_offset_m.toFixed(2)} m · 장애물 {obstacles || '없음'}
+                {t.vehicle.flags.obstacle ? ' · 정지' : ''}
+              </span>
+            </div>
+          ) : (
+            <KeyCaps mini={!large} />
+          )}
+        </>
+      }
     />
   );
 }

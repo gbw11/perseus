@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { emptyTelemetry } from './live';
+import { shownKeys } from '../components/format';
 import { SIM_STALE_MS, applySimSnapshot, simLive } from './types';
 
 const pose = { x: 3, y: 0, yaw: 1.57, v_mps: 0.5, steer_rad: 0, world_revision: 1 };
@@ -38,5 +39,37 @@ describe('세 번째 칸 자동 전환 (화면 배치 계약 v1.1 §5.6)', () =>
       [3, 0.1],
     ]);
     expect(t.sim?.world?.revision).toBe(1);
+  });
+
+  it('위치가 크게 튀면(시뮬레이터 재시작) 지나온 길을 새로 시작한다', () => {
+    let t = applySimSnapshot(emptyTelemetry(0), { available: true, pose, world }, 0);
+    t = applySimSnapshot(t, { available: true, pose: { ...pose, x: -3 } }, 50);
+    expect(t.sim?.trail).toEqual([[-3, 0]]);
+  });
+});
+
+describe('조작 키 표시 (shownKeys)', () => {
+  const base = { manualKeys: [] as string[], activeApp: 'manual' as const };
+  it('웹 입력이 있으면 그대로', () => {
+    expect(shownKeys({ ...base, manualKeys: ['brake'], commands: { manual: null } })).toEqual(['brake']);
+  });
+  it('없으면 수동 명령을 거꾸로 읽는다 (계약 §7)', () => {
+    expect(shownKeys({ ...base, commands: { manual: { v_mps: 0.45, steer_rad: 0.3 } } })).toEqual([
+      'up',
+      'left',
+    ]);
+    expect(shownKeys({ ...base, commands: { manual: { v_mps: -0.3, steer_rad: -0.3 } } })).toEqual([
+      'down',
+      'right',
+    ]);
+  });
+  it('수동이 운전하지 않으면 켜지 않는다', () => {
+    expect(
+      shownKeys({
+        manualKeys: [],
+        activeApp: 'autonomous',
+        commands: { manual: { v_mps: 0.4, steer_rad: 0 } },
+      }),
+    ).toEqual([]);
   });
 });

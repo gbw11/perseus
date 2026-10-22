@@ -1,8 +1,9 @@
 import { StatusBadge } from '@xenova/ui';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
-import { APPS, type AppId } from '../telemetry/types';
-import { seconds } from './format';
+import { APPS, simLive, type AppId } from '../telemetry/types';
+import { seconds, shownKeys } from './format';
 import { NavCamera } from './NavCamera';
+import { SimDriverView } from './SimPanel';
 import styles from './screens.module.css';
 
 const ACCENT: Record<AppId, string> = {
@@ -80,6 +81,8 @@ function DriveSummary({ id }: { id: 'autonomous' | 'manual' }) {
 
   return (
     <>
+      {/* 시뮬레이터 구성이면 칸 위쪽에 1인칭 시점 — 자율은 자율이 모는 모습, 수동은 키 입력과 함께 */}
+      {simLive(t) && <SimDriverView id={id} />}
       <div className={styles.tiles}>
         <div className={styles.tile}>
           <small>목표 속도</small>
@@ -113,7 +116,7 @@ function DriveSummary({ id }: { id: 'autonomous' | 'manual' }) {
         ) : (
           <>
             <dt>키 입력</dt>
-            <dd className={styles.mono}>{t.manualKeys.length ? t.manualKeys.join(' + ') : '없음'}</dd>
+            <dd className={styles.mono}>{shownKeys(t).length ? shownKeys(t).join(' + ') : '없음'}</dd>
           </>
         )}
       </dl>

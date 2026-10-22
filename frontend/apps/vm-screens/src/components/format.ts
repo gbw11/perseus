@@ -15,3 +15,24 @@ export const seconds = (ms: number) => `${Math.max(0, Math.floor(ms / 1000))}초
 export function carColor(t: { activeApp: 'autonomous' | 'manual' | null }): string {
   return t.activeApp ? `var(--x-app-${t.activeApp})` : 'var(--x-fault)';
 }
+
+/**
+ * 모니터에 켤 조작 키. 웹 입력(manualKeys)이 있으면 그것, 없으면 수동주행이 운전 중일 때 그 명령을 거꾸로 읽는다 —
+ * 주행 상태(/ws/v1/drive/state)에는 눌린 키가 없고, 수동 앱은 키를 그대로 속도·조향으로 바꾸기 때문이다
+ * (MQTT 계약 §7: up 전진, down 후진, left 조향 +, right 조향 −). brake 는 '입력 없음' 과 구분되지 않는다.
+ */
+export function shownKeys(t: {
+  manualKeys: string[];
+  activeApp: 'autonomous' | 'manual' | null;
+  commands: { manual: { v_mps: number; steer_rad: number } | null };
+}): string[] {
+  if (t.manualKeys.length) return t.manualKeys;
+  const c = t.commands.manual;
+  if (t.activeApp !== 'manual' || !c) return [];
+  const keys: string[] = [];
+  if (c.v_mps > 0.01) keys.push('up');
+  if (c.v_mps < -0.01) keys.push('down');
+  if (c.steer_rad > 0.01) keys.push('left');
+  if (c.steer_rad < -0.01) keys.push('right');
+  return keys;
+}

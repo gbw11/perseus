@@ -492,3 +492,48 @@
   height: calc(100vh - 260px);
   min-height: 220px;
 }
+
+/* 시뮬레이터 1인칭 시점 위 겹침 (자율·수동 칸) */
+.povTop,
+.povBottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--x-space-2);
+}
+.povBottom {
+  justify-content: center;
+}
+.povTag {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--x-bg);
+  font-size: var(--x-text-sm);
+  font-weight: 700;
+}
+.povHud {
+  padding: 2px 8px;
+  border-radius: var(--x-radius-sm);
+  background: color-mix(in srgb, var(--x-surface-sunken) 75%, transparent);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.keysMini {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--x-space-1);
+  width: min(100%, 300px);
+  margin: 0 auto;
+}
+.keysMini .keyCap {
+  height: 30px;
+  font-size: var(--x-text-sm);
+  background: color-mix(in srgb, var(--x-surface-2) 85%, transparent);
+}
+.keysMini .keyCapOn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--x-bg);
+}
