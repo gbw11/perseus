@@ -234,6 +234,44 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 - 관리 대상 판별: platform 모드는 플랫폼 라이브러리의 읽기 전용 검증 `xenova_vm.load_records(validate_assets=False)`가 돌려준 등록 VM 만 냅니다(잠금·Xen 호출 없음). 플랫폼이 거부하는 상태(심볼릭 링크, id·디렉터리 불일치, 중복 신원, 레코드 누락)는 불완전한 200 대신 503 입니다. Xen 은 설정에 uuid 가 없어도 자동 발급하므로 xl 로 직접 띄운 도메인도 uuid 가 있고, 그런 도메인은 registry 에 없어 빠집니다. xen 모드는 진단용이라 uuid 가 있는 도메인을 전부 냅니다. Domain-0 은 어느 모드에서도 없습니다.
 - 조회 한도 5초는 요청 전체입니다. registry 조회와 xentop 이 쓴 시간을 뺀 나머지만 다음 명령에 주고, 다 쓰면 Xen 명령 없이 504 입니다. xentop 을 실행할 수 없으면 503, 출력 해석 실패 500 입니다.
 
+## Recovery Worker (heartbeat 감시기)
+
+자동 복구 주체는 제어 계층입니다(VM API 계약 1.2절). `python -m dom0_manager.recovery`는 dom0-manager HTTP 와 **별도 프로세스·별도 systemd 유닛**(`deploy/xenova-recovery-worker.service`, `After=xenova-vms.service mosquitto.service`, `Before=xenova-host-admission.service`, PartOf 없음)으로 돌며 **VM 재시작이 필요한지**만 판정합니다. 재시작 실행·재시도·backoff 는 복구 정책 엔진(S15P31E110-125)이 판정 큐를 소비해 수행합니다. 차량 제어권 전환은 게이트웨이의 일이며 여기서 보지 않습니다.
+
+입력 세 가지와 읽는 방법:
+
+| 입력 | 어디서 | 얼마나 자주 |
+| --- | --- | --- |
+| 의도 (`desired_state`, `intent_applicable`, `intent_revision`, `lifecycle`, `guest_kind`) | 플랫폼 `Manager.list` | `XENOVA_RECOVERY_INTENT_REFRESH`(기본 60초)마다 캐시. `list`·`get`은 플랫폼 잠금을 쥐고 VM 마다 Xen 을 관측하므로 5초마다 부르지 않습니다. **판정 직전에는 그 VM 만 `get`으로 재확인**하므로 캐시가 오래돼도 사용자가 끈 VM 을 재시작하지 않습니다 |
+| Xen 실행 상태 (도메인 유무·상태·domid) | `xl list` / `xl list -l` (잠금 없음) | 매 주기(5초) |
+| 생존 신호 | dom0 Mosquitto `xenova/v1/vms/+/heartbeat`(agent.heartbeat, Linux)와 `xenova/v1/apps/+/events` 중 `app.heartbeat`(Zephyr 주행 VM, 시나리오 D8) | 구독. 수신 단조 시각만 쓰고 `sent_at` 은 쓰지 않음. retain 플래그가 켜진 수신(구독 직후 브로커가 주는 옛 값)은 무시. agent.heartbeat 는 type·빈 payload·토픽-봉투 vm_id 일치, app.heartbeat 는 type·`state` 허용값·`uptime_s`(0 이상 유한)·app_id 일치를 검사해 맞는 것만 기록 |
+| Zephyr 앱 대상 여부 | 템플릿 카탈로그 capability `app_heartbeat`(Manager `templates`, 의도와 같이 캐시). `true` 앱 펌웨어, `false` starter(Xen 상태만). JSON boolean 만 믿고, 문자열 `"false"` 같은 값이면 그 템플릿의 VM 은 대상 여부 불명(OBSERVATION_UNAVAILABLE) | 선언이 없는 템플릿은 신호를 한 번 받은 뒤 armed 로 다루고, armed 는 `XENOVA_RECOVERY_STATE_DIR/armed.json`(`{"version":1,"armed":{vm_id: app_id},"history_lost":bool}`) 에 남겨 Worker 재시작 뒤에도 유지. **지금 플랫폼 카탈로그에는 이 capability 가 없습니다.** 선언되기 전에는 앱이 첫 기동부터 실패한 Zephyr VM(신호를 한 번도 보내지 못한 VM)을 감지하지 못하므로, capability 선언이 D8 의 기능 완료 조건입니다(플랫폼 요청) |
+
+판정 규칙 (`recovery/watcher.py`, 전부 단조 시계). VM 마다 OK / UNKNOWN / FAILED 셋 중 하나이고 FAILED 일 때만 사유가 있습니다.
+
+| 판정 | 조건 |
+| --- | --- |
+| 대상 | lifecycle `REGISTERED` 이고 적용 가능한 의도가 `running` 인 VM 만. 사용자가 끈 VM(`stopped`)·의도 `unknown`·보관본은 절대 대상이 아님(OK) |
+| `DOMAIN_CRASHED` | xl 상태 `crashed` 면 즉시 (Zephyr 포함) |
+| `DOMAIN_ABSENT` | 도메인이 없는 채로 `XENOVA_RECOVERY_ABSENT_GRACE`(기본 60초) 경과. 그 전은 UNKNOWN(플랫폼 start·복구 진행 중일 수 있음) |
+| `HEARTBEAT_LOST` | Linux VM 이 `running` 인데 agent.heartbeat 가 `XENOVA_RECOVERY_HEARTBEAT_LOST`(기본 30초, 백엔드 OFFLINE 과 같음, 하한 15초) 동안 없음 |
+| `APP_HEARTBEAT_LOST` | Zephyr VM 이 `running` 인데 app.heartbeat 가 `XENOVA_RECOVERY_APP_HEARTBEAT_LOST`(기본 15초, 하한 3초) 동안 없음. 대상은 템플릿 capability `app_heartbeat` 로 선언된 VM 또는 신호를 한 번이라도 받아 armed 된 VM(영속). 둘 다 아닌 Zephyr(앱 없는 starter 펌웨어)는 Xen 상태로만 봅니다 |
+| 부팅 유예 | 도메인이 새로 보인 뒤(새 domid) 첫 신호를 받기 전까지 `XENOVA_RECOVERY_BOOT_GRACE`(Linux 90초)·`XENOVA_RECOVERY_ZEPHYR_BOOT_GRACE`(30초) 동안 UNKNOWN. 이전 부팅의 신호는 세지 않음. 첫 신호 뒤에는 유예 없이 창으로만 판정 |
+| 관측 경로 | 필터별 **구독 승인(SUBACK)** 을 봅니다. 연결(CONNACK)만으로는 부족합니다. 계정은 붙었는데 ACL 이 heartbeat 구독을 거부하면 메시지가 하나도 안 오기 때문입니다. 승인되지 않았거나 승인된 지 한 창(window)이 안 됐으면 그 신호의 손실 판정은 UNKNOWN(건강 OBSERVATION_UNAVAILABLE). agent 와 app 경로를 따로 봅니다. **브로커·ACL 문제는 VM 장애가 아닙니다.** crashed·absent 는 Xen 관측이라 계속 판정하고, 신호가 신선하면 경로 상태와 무관하게 OK |
+| 대상 불명 | capability 값이 boolean 이 아닌 템플릿의 Zephyr VM 은 앱 펌웨어인지 starter 인지 알 수 없으므로 UNKNOWN(건강 OBSERVATION_UNAVAILABLE). 신호를 받아 armed 되면 보통대로 |
+| armed 기록 손상 | `armed.json` 이 깨졌으면 `armed.json.corrupt` 로 옮겨 보존하고 빈 기록으로 시작하되 `history_lost` 를 파일에 남깁니다. 그동안 capability 선언도 armed 기록도 없는 Zephyr VM 은 앱 펌웨어인지 starter 인지 알 수 없으므로 UNKNOWN(건강 OBSERVATION_UNAVAILABLE)이고 HEALTHY 로 꾸미지 않습니다. 신호를 받으면 armed 되어 보통대로 판정합니다. Worker 재시작으로는 풀리지 않고 운영자가 파일을 지워야 풀립니다 |
+| 장애 아님 | `paused`·`stopping` 은 UNKNOWN(사용자 조작·종료 진행) |
+
+판정을 내기 직전에는 그 VM 만 플랫폼 `get` 으로 의도와 실행 상태를 다시 읽고 **그 관측으로 다시 판정**합니다. 관측 사이에 VM 이 시작·복구됐거나 사용자가 껐으면 판정하지 않고, 건강 스냅샷도 재확인한 관측으로 냅니다. 재확인이 잠금 충돌이면 그 주기는 보류합니다.
+
+장애 한 건(episode)에 판정(`Judgment`)은 하나입니다(계약 2.5 의 `recovery_id`). 사유가 바뀌어도(HEARTBEAT_LOST → DOMAIN_ABSENT) 다시 내지 않고 건강 스냅샷에만 반영합니다. UNKNOWN 동안은 episode 가 유지되므로 복구 재시작(도메인 사라짐 → 새 domid → 첫 신호) 중에도 같은 episode 입니다. OK 가 되면(신호 재개, 의도 변경) 닫히고 다음 장애는 새 `recovery_id` 입니다. 복구 정책(125)은 episode 가 닫힐 때까지 같은 `recovery_id` 로 재시도하고 현재 상태는 `Watcher.health()`·`open_recovery()` 로 봅니다. 관측에 실패한 주기(플랫폼 잠금 충돌 503, xl 오류)는 판정하지 않고 건너뜁니다.
+
+건강 스냅샷은 VM 마다 `xenova/v1/recovery/health/{vm_id}`(type `vm.health`, QoS 1, retained)에 `{vm_id, ok, state, desired_state, xen_state, heartbeat_age_s, reason, manager_seq}` 로 내용이 바뀔 때만 냅니다. `state` 는 `HEALTHY`(신호 신선, `ok: true` 는 이때만) / `STARTING`(실행 중이지만 이번 부팅의 신호 전, 유예 중이라도 건강하다고 하지 않음) / `UNHEALTHY`(사유 있음, paused·stopping, 신호 끊김) / `STOPPED`(도메인 없고 의도가 running 아님) / `OBSERVATION_UNAVAILABLE`(구독 미승인, armed 기록 손상·capability 값 오류로 대상 여부 불명, Worker 종료) 입니다. 내용이 같아도 `XENOVA_RECOVERY_HEALTH_REFRESH`(기본 15초)마다 다시 내고 payload 의 `lease_s`(3주기, 기본 45초)를 함께 보냅니다. **받는 쪽은 마지막 수신 뒤 `lease_s` 가 지나면 관측 불가로 봅니다.** retained 만 믿으면 Worker 가 죽어도 며칠 전 HEALTHY 가 현재로 읽히기 때문입니다. 구독 직후 브로커가 주는 retained 값(retain 플래그, 공용 클라이언트 `Message.retained`)은 임시값이라 `ok` 를 믿지 않고, Worker 가 다시 낸 실시간 값을 받은 뒤 확정합니다. 브로커는 retained 가 저장된 지 얼마나 됐는지 알려주지 않기 때문입니다. 끊긴 동안은 발행하지 않고(큐에 쌓지 않음), paho 가 반환값으로 알리는 실패도 실패로 다룹니다. `manager_seq` 는 내용이 바뀔 때만 오르고 재발행에서는 `heartbeat_age_s` 만 갱신됩니다. VM 이 등록에서 사라지면 빈 payload 로 retained 를 지우고(PUBACK 확인, 실패하면 플랫폼 관측 실패와 무관하게 다음 주기 재시도), Worker 가 정상 종료할 때는 남은 VM 전부를 `OBSERVATION_UNAVAILABLE` 로 바꿔 두며 PUBACK 까지 확인합니다(전체 5초 한도, 못 받으면 경고). `vms/{vm_id}/` 아래 토픽은 봉투 `vm_id` 와 토픽이 같아야 해서(MQTT 계약 2장) VM 이 아닌 발행자는 쓸 수 없어 복구 이벤트(MQTT-12)와 같은 `recovery/` 가지를 씁니다(MQTT-13, 계약 11.1).
+
+설정은 `XENOVA_RECOVERY_INTERVAL`(5), `XENOVA_RECOVERY_STATE_DIR`(/run/xenova/recovery), `XENOVA_RECOVERY_INTENT_REFRESH`(60), `XENOVA_RECOVERY_HEALTH_REFRESH`(15), `XENOVA_RECOVERY_HEARTBEAT_LOST`(30), `XENOVA_RECOVERY_APP_HEARTBEAT_LOST`(15), `XENOVA_RECOVERY_BOOT_GRACE`(90), `XENOVA_RECOVERY_ZEPHYR_BOOT_GRACE`(30), `XENOVA_RECOVERY_ABSENT_GRACE`(60), `XENOVA_RECOVERY_BROKER_HOST/PORT/USERNAME/PASSWORD`(127.0.0.1:1883, 계정 `dom0-server`), `XENOVA_RECOVERY_LOG_LEVEL` 이며, 플랫폼·xl 은 dom0-manager 와 같은 `XENOVA_*`(`XENOVA_DRIVER=platform` 필수)입니다.
+
+배포 전제(아직 없음): 플랫폼 패키징의 유닛 설치·enable 과 PYTHONPATH(`/opt/xenova/dom0-manager`, `/opt/xenova/mqtt-client`, paho), Mosquitto 계정 `dom0-server` 와 ACL(publish `xenova/v1/recovery/#`, read `xenova/v1/vms/+/heartbeat`·`xenova/v1/apps/+/events`), MQTT 계약의 `vm.health` 토픽과 VM API 계약 2.5 의 `APP_HEARTBEAT_LOST`(docs 브랜치로 별도 반영), 템플릿 capability `app_heartbeat`(앱 펌웨어 `true`, starter `false`). **유닛 enable 은 계약·ACL·capability 가 반영된 뒤에** 합니다. 그 전에는 코드가 머지돼도 기능이 완료된 것이 아닙니다. 플랫폼에 "Xen 을 관측하지 않는 list" 또는 잠금 없는 의도 조회가 생기면 60초 캐시 없이 그것을 씁니다(외부 의존. 지금은 60초마다의 `list` 한 번도 VM 수 × 최대 15초 동안 플랫폼 잠금을 쥘 수 있습니다). 열린 episode·판정 큐·recovery_id 는 아직 프로세스 메모리에만 있어 Worker 재시작이면 잃습니다. 복구 정책(125)이 미완료 복구를 dom0 에 저장하고 시작 시 복원하는 것이 125 의 선행 조건입니다.
+
 ## 테스트
 
 ```bash
