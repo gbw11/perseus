@@ -99,6 +99,7 @@ XENOVA_DRIVER=mock XENOVA_MOCK_SAMPLES=1 python -m dom0_manager
 
 ```bash
 curl -s localhost:8081/api/v1/vms | python -m json.tool
+curl -s localhost:8081/api/v1/stats | python -m json.tool   # xentop 원시값 (mock 은 가짜 누적값)
 curl -s -X POST localhost:8081/api/v1/vms -H 'content-type: application/json' \
   -d '{"vm_id":"11111111-1111-4111-8111-111111111111","name":"개발용 VM","template_id":"alpine","template_version":"3.20","vcpus":1,"memory_mib":256}'
 curl -i -X POST localhost:8081/api/v1/vms/11111111-1111-4111-8111-111111111111/stop   # 204
@@ -214,13 +215,24 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 
 ## Xen 모드 현황
 
-`XENOVA_DRIVER=xen`에서 지금 되는 것은 `GET /healthz`, `GET /api/v1/vms`, `GET /api/v1/vms/{vm_id}`입니다. `xl list`로 상태를, `xl list -l`의 `config.c_info.uuid`로 vm_id를 읽습니다(플랫폼 도구와 같은 방식). 생성·정지·삭제는 501이며 `XENOVA_DRIVER=platform`에서 지원합니다.
+`XENOVA_DRIVER=xen`에서 지금 되는 것은 `GET /healthz`, `GET /api/v1/vms`, `GET /api/v1/vms/{vm_id}`, `GET /api/v1/stats`입니다. `xl list`로 상태를, `xl list -l`의 `config.c_info.uuid`로 vm_id를 읽습니다(플랫폼 도구와 같은 방식). 생성·정지·삭제는 501이며 `XENOVA_DRIVER=platform`에서 지원합니다.
 
 실보드 대조는 보드에 아무것도 설치하지 않고 개발 PC에서 합니다. 보드 dom0에 PC 공개키를 넣은 뒤
 `XENOVA_DRIVER=xen XENOVA_XL_SSH=root@<dom0 주소> python -m dom0_manager`로 띄우면 세 조회 엔드포인트가 실제 `xl` 출력으로 동작합니다.
 2026-10-20 RPi4(rev 1.4, Xen 4.21.1-pre, 게스트 3개)에서 `/healthz` 200, 목록·단건 200, 미등록 404, nil UUID 400, stop 501을 확인했고,
 그때의 `xl` 출력은 `tests/fixtures/rpi4-xen-4.21/`에 있어 `tests/test_xl.py`가 그대로 대조합니다. xl 호출마다 ssh 세션을 새로 열어
 목록 한 번에 약 0.8초가 걸립니다(조회 한도 5초 안).
+
+## 통계 (xentop)
+
+`GET /api/v1/stats`는 `xentop -b -i 1 -n -x -f` 한 번의 출력으로 실행 중 도메인 전부의 누적 카운터·현재값을 돌려줍니다(계약 2.4·4.6, S15P31E110-112). xen·platform 모드 모두 xl 과 같은 실행기(로컬 또는 `XENOVA_XL_SSH`)로 xentop 을 부르고, 이름을 `xl list -l`의 `c_info.uuid`와 대조해 `vm_id`를 붙입니다. 플랫폼 Manager 를 거치지 않아 잠금의 영향을 받지 않습니다.
+
+- 사용률(CPU %, bytes/s)은 싣지 않습니다. Spring 이 연속 표본의 차이로 계산하고, `domid`가 바뀌거나 누적값이 줄면 재시작으로 봅니다.
+- 측정하지 못한 필드는 0 이 아니라 `null`이고 `unavailable`에 사유가 있습니다. `NO_DEVICE`(NETS·VBDS 0, Zephyr), `DEVICE_ERROR`(xentop 이 `-`), `NOT_REPORTED`(`no limit`·`n/a`).
+- 네트워크 바이트는 `-n` 장치 줄의 값(정확)을 쓰고, 장치 줄이 없으면 KiB 열 × 1024 로 대신합니다. 디스크는 `VBD_RSECT`·`VBD_WSECT` × 512 입니다.
+- xentop 의 STATE 글자 순서는 `d s b c p r`로 `xl list`와 다릅니다. 파서가 따로 있고 xl 순서의 문자열은 거부합니다.
+- 관리 대상 판별: platform 모드는 플랫폼 라이브러리의 읽기 전용 검증 `xenova_vm.load_records(validate_assets=False)`가 돌려준 등록 VM 만 냅니다(잠금·Xen 호출 없음). 플랫폼이 거부하는 상태(심볼릭 링크, id·디렉터리 불일치, 중복 신원, 레코드 누락)는 불완전한 200 대신 503 입니다. Xen 은 설정에 uuid 가 없어도 자동 발급하므로 xl 로 직접 띄운 도메인도 uuid 가 있고, 그런 도메인은 registry 에 없어 빠집니다. xen 모드는 진단용이라 uuid 가 있는 도메인을 전부 냅니다. Domain-0 은 어느 모드에서도 없습니다.
+- 조회 한도 5초는 요청 전체입니다. registry 조회와 xentop 이 쓴 시간을 뺀 나머지만 다음 명령에 주고, 다 쓰면 Xen 명령 없이 504 입니다. xentop 을 실행할 수 없으면 503, 출력 해석 실패 500 입니다.
 
 ## 테스트
 
