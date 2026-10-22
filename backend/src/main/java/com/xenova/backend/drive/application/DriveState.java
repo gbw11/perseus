@@ -12,7 +12,8 @@ public record DriveState(
         Control control,
         Vehicle vehicle,
         Map<String, App> apps,
-        Perception perception) {
+        Perception perception,
+        Resume resume) {
 
     // vehicle.control (MQTT-09) from the dom0 gateway.
     public record Control(
@@ -60,5 +61,15 @@ public record DriveState(
             Double headingErrRad,
             int obstacleCount,
             boolean stop) {
+    }
+
+    // A resume countdown the gateway accepted (drive.resume.accepted) and that has not ended yet: the switch to
+    // AUTO is expected remaining_ms from now. Null when there is none, after drive.resume.cancelled, after any
+    // drive.mode.changed, or once vehicle.control leaves AUTO_READY.
+    public record Resume(
+            Long generation,
+            long switchInMs,
+            long acceptedAgoMs,
+            long remainingMs) {
     }
 }

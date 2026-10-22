@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
@@ -90,6 +91,10 @@ class Error(BaseModel):
     message: str
     detail: str | None = Field(default=None, description="백엔드 로그용 Xen 상세. 프론트에 노출하지 않는다")
     resource: ResourceError | None = Field(default=None, description="InsufficientResources 에만 있다")
+    platform_code: str | None = Field(
+        default=None,
+        description="플랫폼 Manager 가 준 원본 오류 코드(HOST_QUIESCING 등). 플랫폼 오류에만 있다. 분기는 detail 문자열이 아니라 이 값으로 한다",
+    )
 
 
 class HealthStatus(str, Enum):
@@ -101,3 +106,45 @@ class Health(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: HealthStatus
+
+
+class StatsSource(str, Enum):
+    """Spring 메트릭 필터의 허용값과 같은 문자열. 에이전트 보고(guest_agent)와 구분한다."""
+
+    xen = "xen"
+
+
+class UnavailableReason(str, Enum):
+    NO_DEVICE = "NO_DEVICE"  # NETS·VBDS 가 0 (Zephyr 등)
+    DEVICE_ERROR = "DEVICE_ERROR"  # xentop 이 '-' 로 표시
+    NOT_REPORTED = "NOT_REPORTED"  # n/a, no limit
+    PARSE_ERROR = "PARSE_ERROR"
+
+
+class VmStats(BaseModel):
+    """계약 2.4 통계 객체. xentop 누적 카운터·현재값만 담고 사용률은 Spring 이 연속 표본으로 계산한다.
+    측정하지 못한 필드는 0 이 아니라 null 이며 unavailable 에 사유가 있다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vm_id: UUID
+    domid: int = Field(ge=1, description="재실행마다 바뀐다. 누적값 초기화(재시작) 판정에 쓴다")
+    source: StatsSource = StatsSource.xen
+    sampled_at: datetime
+    state: VmState
+    vcpus: int = Field(ge=1)
+    cpu_time_s: int = Field(ge=0, description="도메인 시작 후 누적 CPU 시간(초)")
+    memory_mib: int = Field(ge=0)
+    max_memory_mib: int | None = Field(description="상한이 없으면 null (NOT_REPORTED)")
+    net_rx_bytes: int | None = Field(description="도메인 시작 후 누적. 장치가 없으면 null (NO_DEVICE)")
+    net_tx_bytes: int | None
+    disk_rd_bytes: int | None = Field(description="섹터 × 512 누적. 장치가 없으면 null (NO_DEVICE), xentop 오류면 null (DEVICE_ERROR)")
+    disk_wr_bytes: int | None
+    unavailable: dict[str, UnavailableReason] = Field(default_factory=dict, description="측정하지 못한 필드 → 사유")
+
+
+class StatsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sampled_at: datetime
+    vms: list[VmStats]

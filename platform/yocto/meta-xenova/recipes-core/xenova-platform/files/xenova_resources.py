@@ -79,6 +79,9 @@ def mutate(manager, spec, execute, key, records, context, fail):
     if current not in (fingerprint(before), fingerprint(after)):
         fail("TARGET_CHANGED", "configuration changed outside this operation")
     vm.validate_identity(after)
+    cpu_context = manager.p.cpu().context(after)
+    if previous and previous.get('cpu_policy', {'configured':False}) != cpu_context:
+        fail('TARGET_CHANGED', 'accepted resource update CPU policy changed')
     # instance.json is authoritative. If publication already happened, only close the journal;
     # a newer intent/start does not cause a second metadata write.
     published = previous and current == fingerprint(after) and before != after
@@ -89,7 +92,7 @@ def mutate(manager, spec, execute, key, records, context, fail):
                 "configuration_sha256":fingerprint(after), "starts_guest":False}
     manager._writable()
     if previous is None:
-        previous = {"schema_version":"1.0", "operation_id":uuid4(), "vm_id":spec["vm_id"],
+        previous = {"cpu_policy":cpu_context, "schema_version":"1.0", "operation_id":uuid4(), "vm_id":spec["vm_id"],
                     "idempotency_key":key, "action":ACTION, "request":spec, "initial_spec":spec,
                     "spec_hash":fingerprint(spec), "expected_generation":tomb["generation"],
                     "snapshot":tomb, "updated_record":after, "status":"RUNNING",
