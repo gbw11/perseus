@@ -19,7 +19,7 @@
 
 ## 2. 부탁하는 것
 
-1. **템플릿 capability `app_heartbeat`** — `templates` 응답의 `capabilities` 에 앱 펌웨어(자율·수동주행) 템플릿은 `true`, starter(`zephyr-xenvm-starter`) 는 `false`. Worker 는 `true` 면 신호가 오기 전에도 감시 대상(STARTING → 30초 유예 뒤 `APP_HEARTBEAT_LOST`), `false` 면 Xen 상태만 봅니다. 키가 없으면 신호를 한 번 받은 뒤에야 대상으로 다루므로, **키가 없는 동안은 앱이 첫 기동부터 실패한 VM 을 감지하지 못합니다.** 지금처럼 전역 상수면 템플릿 종류별로 값을 갈라 주세요.
+1. **템플릿 capability `app_heartbeat`** — `templates` 응답의 `capabilities` 에 앱 펌웨어(자율·수동주행) 템플릿은 `true`, starter(`zephyr-xenvm-starter`) 는 `false`. Worker 는 `true` 면 신호가 오기 전에도 감시 대상(STARTING → 30초 유예 뒤 `APP_HEARTBEAT_LOST`), `false` 면 Xen 상태만 봅니다. 키가 없으면 신호를 한 번 받은 뒤에야 대상으로 다루므로, **키가 없는 동안은 앱이 첫 기동부터 실패한 VM 을 감지하지 못합니다.** 지금처럼 전역 상수면 템플릿 종류별로 값을 갈라 주세요. 값은 JSON boolean(`true`/`false`)만 받습니다. 문자열 `"false"` 같은 값이면 그 템플릿의 VM 은 대상 여부를 알 수 없어 `OBSERVATION_UNAVAILABLE` 로 보고합니다.
 2. **Xen 을 관측하지 않는 의도 조회** — `list(observe=False)` 같은 옵션 또는 `intents` 액션(`vm_id`, `desired_state`, `intent_revision`, `intent_applicable`, `lifecycle`, `template`, `guest_kind` 만). 지금 `list`·`get` 은 플랫폼 잠금을 쥐고 VM 마다 Xen 을 관측(최대 15초)해서 Worker 가 60초 캐시로 호출을 줄이고 있습니다. 가벼운 조회가 생기면 캐시 없이 매 주기 읽습니다.
 3. **패키징** — `platform/services/dom0-manager/deploy/xenova-recovery-worker.service` 설치·enable, `PYTHONPATH` 에 `/opt/xenova/dom0-manager`·`/opt/xenova/mqtt-client`·paho, 상태 디렉터리 `/run/xenova/recovery`. **enable 은 MQTT 계약 11.1·ACL(계정 `dom0-server`)·①이 반영된 뒤에** 합니다.
 4. (선택) stop 대기 만료를 `DEADLINE_EXCEEDED` 코드로 내주면 dom0-manager 가 메시지 문자열(`deadline`/`timed out`) 판별 없이 504 로 매핑합니다(VM API 계약 8.1).
