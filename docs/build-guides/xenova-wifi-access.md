@@ -4,10 +4,37 @@ WPA2-Personal(PSK), nl80211, systemd-networkd IPv4 DHCP를 지원하는 구성�
 802.1X, 캡티브 포털, AP 모드, NAT, 포트 포워딩 규칙, Zephyr 네트워크는 제공하지 않는다.
 무선 링크를 xenbr0에 연결하지 않는다. 내부 DHCP/주소 정책은 192.168.77.0/24 그대로다.
 
+## Raspberry Pi 4 Xen 부팅 설정
+
+프로젝트의 boot.cmd.xen.in은 Control FDT의 복사본에서
+/soc/mmcnr@7e300000의 dmas·dma-names만 제거한다.
+고정 BSP에서 무선 SDIO의 DMA 펌웨어 전송이 시간 초과한 경로 대신
+커널의 기존 PIO 경로를 사용한다. SD 카드 호스트·DMA 컨트롤러는 변경하지 않는다.
+DMA 실패의 내부 원인까지 확정한 수정은 아니다.
+
+xenova-platform은 기존 커널의 kernel-module-brcmfmac-cyw를 함께 설치한다.
+brcmfmac이 CYW vendor 모듈을 요청할 때 사용할 수 있어야 한다.
+/etc/modprobe.d/xenova-wifi.conf의 feature_disable=0x2000은
+펌웨어 인증 오프로딩(FWSUP)을 끄며 WPA2 키 교환은 wpa_supplicant가 처리한다.
+configure가 저장하는 disable_scan_offload=1은 예약 스캔 오프로딩을 끈다.
+커널·펌웨어·SDK 버전과 암호화 방식은 변경하지 않는다.
+
+이 조합으로 한 부팅에서 AP 인증·DHCP·PC SSH가 확인됐다.
+인증 옵션과 AP 선택을 독립적으로 비교한 결과는 아니므로 오프로딩만을 단독 원인으로
+단정하지 않는다. WRONG_KEY도 초기 키 교환 중 단절을 근거로 한 추정 진단이다.
+
+새 이미지에서 보드별 configure·activate를 한 번 실행하면 자격증명과
+서비스 enable 링크가 영구 저장된다. 이후 부팅에서는 SDIO 장치 인식 → 모듈 로드 →
+설정된 supplicant 시작 → networkd DHCP 순서로 연결한다.
+공통 이미지에는 실제 SSID·PSK나 특정 AP의 주소를 포함하지 않는다.
+수정 소스를 빌드한 이미지의 반복 재부팅·자동 연결은 후속 실보드 수락 항목이다.
+
 ## 보드별 설정
 
 새 dom0에 실제 드라이버/펌웨어/도구가 포함된 뒤 UART의 root 셸에서 실행한다.
-SSID와 PSK는 숨김 터미널 입력이며 명령행/셸 이력/stdout에 넣지 않는다.
+SSID와 PSK는 대화형 터미널에서 입력한 문자가 화면에 표시된다.
+PSK도 UART 화면·터미널 녹화본에 남을 수 있으므로 입력 구간을 공유하지 않는다.
+자격증명을 명령행 인자로 받지 않으며 결과 JSON과 상태·오류 출력에는 포함하지 않는다.
 설정 파일은 /etc/xenova/wifi/<인터페이스>.conf, 디렉터리 0700/파일 0600이다.
 PSK의 파생값도 접속 자격증명이므로 파일 내용·백업을 공유 로그나 검토 묶음에 넣지 않는다.
 국가 코드는 실제 사용하는 국가로 지정한다. 인터페이스는 실제 무선 장치여야 한다.
@@ -73,12 +100,15 @@ OpenSSH는 먼저 읽은 설정을 사용하므로 기존 Xenova auth include를
 ## 후속 타깃 검증
 
 새 dom0 빌드/조립 승인 후 실제 WIC에서 다음을 확인한다.
-1. brcmfmac/cfg80211/SDIO 드라이버, Pi4 DTB의 무선 노드, board NVRAM/clm_blob/regdb와 서명.
+1. brcmfmac·brcmfmac-cyw/cfg80211/SDIO 모듈과 Image의 kernel release/vermagic 일치,
+   boot.scr의 무선 SDIO PIO 설정, modprobe.d 정책, board NVRAM/clm_blob/regdb와 서명.
 2. wpa_supplicant/wpa_cli/iw/networkctl, Python ctypes/crypt/unixadmin와 모듈 import.
 3. 설정 파일이 공통 이미지에는 없고 보드 입력 후 root 전용으로 영구 보존되는지.
 4. AP 연결→IPv4→dom0 SSH 리스너→PC 로그인→ProxyJump 순서대로 확인한다.
 5. Wi-Fi 미설정/AP 부재/인증 실패 상태에서도 세 VM 자동 시작이 진행되는지.
 6. xenbr0/brif에 물리 무선 NIC가 없고 내부 DHCP만 동작하는지.
+   configure/activate 이후 일반 재부팅과 전원 재인가에서 수동 모듈 재적재·스캔 명령 없이
+   COMPLETED·DHCP·PC SSH가 준비되는지 반복 확인한다. 관리 주소는 DHCP로 달라질 수 있다.
 7. key/machine-id/파일 보존과 혼합 종료·소프트웨어 재부팅을 반복하고 결과를 기록한다.
 
 수집 명령의 종료 코드가 0일 때만 비교 파일을 확정한다.
@@ -98,3 +128,14 @@ OpenSSH는 먼저 읽은 설정을 사용하므로 기존 Xenova auth include를
 레시피 해석이나 upstream 파일 목록 확인은 타깃 파일 실물·RF 연결 검증을 대신하지 않는다.
 
 regulatory.db/p7s의 실제 소유 패키지는 wireless-regdb-static이며 이 패키지를 설치한다.
+
+## 표시 시간대와 자동 NTP
+
+이미지는 `tzdata-asia`와 `Asia/Seoul` 표시 시간대를 설치한다. UTC 시각 자체에 9시간을 더하지 않는다.
+`configure`가 생성/재작성하는 network 파일은 `RequiredForOnline=routable`을 사용한다.
+DHCP IPv4·route metric 600·비밀 파일 0600은 유지하며 VM/최초 등록을 외부망이나 NTP 대기에 묶지 않는다.
+기존 설치의 network 파일은 소스 변경만으로 갱신되지 않는다. 관리 연결을 재설정하는 작업은 UART 복구 조건을 갖춰 따로 수행한다.
+
+NTP 성공은 `NTPSynchronized=yes`, 실제 선택 서버와 수신 패킷으로 확인한다.
+Wi-Fi 인증/IP·외부 ping·runtime 서버 임시 지정만으로 다음 부팅의 자동 동기화를 판정하지 않는다.
+내부 online 진단은 다른 링크 때문에 `partial`일 수 있다. 잘못된 절대 시각에서 DNSSEC 오류가 나도 전역 검증을 끄지 않는다.

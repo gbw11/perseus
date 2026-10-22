@@ -387,6 +387,12 @@ class GuestPreparationTest(unittest.TestCase):
         startup = (FILES / 'xenova-vms.service').read_text()
         shutdown = (FILES / 'xenova-vm-shutdown.service').read_text()
         self.assertIn('Restart=no', startup)
+        self.assertIn('ExecStop=/usr/sbin/xenova-vm shutdown-all', startup)
+        self.assertIn('TimeoutStopSec=110s', startup)
+        # Startup owns the libxl/qdisk cgroup; its ExecStop precedes systemd cleanup.
+        self.assertNotIn('KillMode=none', startup)
+        after=next(line for line in shutdown.splitlines() if line.startswith('After='))
+        self.assertIn('xen-qemu-dom0-disk-backend.service',after.split())
         self.assertIn('xenova-vm-shutdown.service', startup)
         self.assertIn('ExecStart=/bin/true', shutdown)
         self.assertIn('ExecStop=/usr/sbin/xenova-vm shutdown-all', shutdown)

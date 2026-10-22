@@ -1,7 +1,7 @@
 [Unit]
 Description=Stop registered guests by per-VM board shutdown policy before storage/toolstack stop
 Requires=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service
-After=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenstored.service xenconsoled.service xen-init-dom0.service
+After=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenstored.service xenconsoled.service xen-init-dom0.service xen-qemu-dom0-disk-backend.service
 Before=xenova-vms.service
 RequiresMountsFor=/srv/xenova
 

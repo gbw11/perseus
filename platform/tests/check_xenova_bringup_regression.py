@@ -15,7 +15,7 @@ boot = boot.replace('<${kernel_loadaddr} ${kernel_size}>', '"<${kernel_loadaddr}
 boot = boot.replace('@@RPI_DOM0_MEM@@', '1024M').replace('@@RPI_DEBUG_XEN_ARGS@@', 'sync_console bootscrub=0')
 boot_mocks = r'''
 setenv() { key=$1; shift; export "$key=$*"; }
-fdt() { echo "FDT $*"; [ "${FAIL:-}" != "fdt-$1" ]; }
+fdt() { echo "FDT $*"; [ "${FAIL:-}" != "fdt-$1" ] && [ "${FAIL:-}" != "fdt-$1-${3:-}" ]; }
 part() { echo "PART $*"; [ "${FAIL:-}" != part ] || return 1; rootfs_partuuid=test-root; }
 fatload() { echo "LOAD $*"; [ "${FAIL:-}" != "$4" ] || return 1; filesize=1234; }
 booti() { echo "BOOT $*"; }
@@ -27,6 +27,8 @@ for name, values, failure in [
     ('manual-mmc0-fallback', {}, False),
     ('reject-usb', {'devtype': 'usb', 'devnum': '0'}, True),
     ('stop-on-fdt-copy-failure', {'FAIL': 'fdt-move'}, True),
+    ('stop-on-sdio-dmas-removal-failure', {'FAIL': 'fdt-rm-dmas'}, True),
+    ('stop-on-sdio-dma-names-removal-failure', {'FAIL': 'fdt-rm-dma-names'}, True),
     ('stop-on-partuuid-failure', {'FAIL': 'part'}, True),
     ('stop-on-xen-load-failure', {'FAIL': 'xen'}, True),
     ('stop-on-kernel-load-failure', {'FAIL': 'Image'}, True),
@@ -43,6 +45,11 @@ for name, values, failure in [
         assert f'LOAD mmc {devnum}:1 0x00400000 Image' in result.stdout
         assert 'BOOT 0x00200000 - 0x05600000' in result.stdout
         assert result.stdout.index('FDT move 0x3aff0000 0x05600000') < result.stdout.index('FDT set ')
+        assert result.stdout.index('FDT move ') < result.stdout.index('FDT rm /soc/mmcnr@7e300000 dmas')
+        assert result.stdout.index('FDT rm /soc/mmcnr@7e300000 dmas') < result.stdout.index('FDT rm /soc/mmcnr@7e300000 dma-names')
+        assert result.stdout.index('FDT rm /soc/mmcnr@7e300000 dma-names') < result.stdout.index('LOAD ')
+        assert 'FDT rm /soc/mmc@7e340000' not in result.stdout
+        assert 'FDT rm /soc/dma' not in result.stdout
     print('PASS', name)
 
 init = (ROOT / 'recipes-core/xenova-domu-init/files/init').read_text().split('\nwhile true; do', 1)[0]
@@ -103,4 +110,4 @@ assert not any(fnmatch.fnmatchcase('eth0', pattern) for pattern in rules)
 assert any(fnmatch.fnmatchcase('vif1.0', pattern) for pattern in rules)
 assert any(fnmatch.fnmatchcase('xenbr0', pattern) for pattern in rules)
 print('PASS network-rules-match-only-vif-and-xenbr0')
-print('PASS 17 boot/init/network regression cases (hardware not exercised)')
+print('PASS 19 boot/init/network regression cases (hardware not exercised)')

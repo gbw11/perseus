@@ -19,10 +19,10 @@
     },
     {
       "guest_kind": "zephyr",
-      "id": "xenova-zephyr-starter-1.0.0",
-      "version": "1.0.1",
-      "directory": "zephyr/xenova-zephyr-starter-1.0.0/1.0.1",
-      "manifest_sha256": "cb30a060ef8f26f7ad5ffa6b779a8d9cd14ff349c7a33f191e098097d3f8890e",
+      "id": "xenova-zephyr-network-starter-1.1.0",
+      "version": "1.1.0",
+      "directory": "zephyr/xenova-zephyr-network-starter-1.1.0/1.1.0",
+      "manifest_sha256": "b540e67932762992a990cb6109aca1d1c36ea60116676d6a98ac1ffc82a9dedb",
       "template_id": "zephyr-xenvm-starter-arm64"
     }
   ]

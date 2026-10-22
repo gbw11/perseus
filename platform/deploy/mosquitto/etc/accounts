@@ -2,7 +2,6 @@
 # 이름 규칙은 acl 머리말 참고: username = 토픽 안의 id.
 backend
 gateway
-esp32
 perception
 autonomous
 manual
