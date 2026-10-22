@@ -364,6 +364,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | `track` | object | 지금 트랙. 아래 표 (v1.4 에서 타원을 실제 서킷 중심선으로 바꿈) |
 | `tracks` | array | 고를 수 있는 트랙 `[{id, name, real_m}]` (v1.4). 기본 `spielberg`(레드불링 4315 m)·`monza`(몬차 5790 m) |
 | `car` | object | `{length_m, width_m}` 판정에 쓰는 차 몸 크기. 기본 `0.42`·`0.20` (v1.4) |
+| `time_scale` | float | 시뮬레이터 시간 배율 (1 = 실제 시간, 기본 1). 화면이 10 Hz 위치 사이를 이어 그릴 때 곱한다 (v1.4). 시연에서 보기 좋은 빠르기로 3 을 쓸 수 있다 — 와치독·명령 주기는 실제 시간 그대로 |
 | `obstacles` | array | `[{id, kind, x, y, w}]` — 종류·가운데 위치(m)·폭(m). 최대 8개. `kind` 는 v1.4 |
 | `estop` | bool | 시연용 E-stop 이 걸려 있음 (`vehicle.status.flags.estop` 도 같이 true) |
 
@@ -461,4 +462,4 @@ MQTT 가 아니다. 게이트웨이가 시리얼 대신 TCP 로 같은 프레임
 | v1.1.1 | 2026-10-21 | 구현 기준 정합 (S15P31E110-249). 5.2 전환 표와 사유 `autonomous_ready`·`autonomous_lost`·`manual_fresh` (게이트웨이 -98 구현), `MANUAL` 중 수동 끊김은 자율이 신선해도 `SAFE_STOP`, `perception.result` 좌표계·부호·최대 개수·발행 중단 (젯슨 대역 -156 구현), 6장 재개 응답 이벤트 없음·`drive.fault.detected` 조건. 토픽·필드 이름 그대로 |
 | v1.2 | 2026-10-21 | 재개를 바로 바꾸지 않고 `drive.resume.accepted`(3초 뒤 전환) → `AUTO` 또는 `drive.resume.cancelled`(6장). 운영자 콘솔 재개 경로 MQTT-13 `xenova/v1/console/resume`(백엔드 발행, 9장 ACL) (S15P31E110-98). 카메라 감지 결과 MQTT-14 `xenova/v1/apps/message-board/vision` `vision.result`(6장, 주행 판단 미사용·≤10 Hz·QoS 0, 9장 ACL message-board 발행) (S15P31E110-128) |
 | v1.3 (초안) | 2026-10-22 | 시뮬레이터 전용 11장 (데모 기본 구성): MQTT-15 `sim.pose`·MQTT-16 `sim.world`(retained)·MQTT-17 `sim.command`, 콘솔 REST-30~35·WS-06 `/ws/v1/sim`, 게이트웨이 TCP 출력. 9장 ACL `simulator` 계정·백엔드 `sim/command`. 6장 `perception.event` `kind` 값 (자율주행 앱 -259 구현) (S15P31E110-261·-265) |
-| v1.4 (초안) | 2026-10-22 | 11장 트랙을 타원 → 실제 서킷 중심선 (`track.centerline`·구간별 벽 `wall_left_m`·`wall_right_m`·`real_m`·`start_index`, 트랙 목록 `tracks`), `sim.pose` `surface`·`race`(F1 출발 신호·랩), 장애물 `kind`, `sim.world.car`, `sim.command` `track.select`·`race.start`, 배치 검사와 결과 MQTT-18 `xenova/v1/sim/result` `sim.command.result`, REST-31 `kind`·REST-36 트랙 바꾸기·REST-37 다시 출발, WS-06 결과 전달. 9장 ACL 시뮬레이터 `sim/result`. 화면 표시 단위 = 실제 서킷 비율 (S15P31E110-262·-265) |
+| v1.4 (초안) | 2026-10-22 | 11장 트랙을 타원 → 실제 서킷 중심선 (`track.centerline`·구간별 벽 `wall_left_m`·`wall_right_m`·`real_m`·`start_index`, 트랙 목록 `tracks`), `sim.pose` `surface`·`race`(F1 출발 신호·랩), 장애물 `kind`, `sim.world.car`·`time_scale`, `sim.command` `track.select`·`race.start`, 배치 검사와 결과 MQTT-18 `xenova/v1/sim/result` `sim.command.result`, REST-31 `kind`·REST-36 트랙 바꾸기·REST-37 다시 출발, WS-06 결과 전달. 9장 ACL 시뮬레이터 `sim/result`. 화면 표시 단위 = 실제 서킷 비율 (S15P31E110-262·-265) |
