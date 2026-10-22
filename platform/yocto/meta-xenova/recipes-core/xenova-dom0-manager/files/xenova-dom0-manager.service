@@ -4,7 +4,9 @@ After=network.target srv-xenova.mount xenova-host-admission.service xenova-xen-r
 
 [Service]
 Type=simple
+EnvironmentFile=-/etc/xenova/dom0-manager-token.env
 EnvironmentFile=/etc/xenova/dom0-manager.env
+ExecStartPre=/usr/bin/python3 -m dom0_manager.service_token
 ExecStart=/usr/bin/python3 -m dom0_manager
 Restart=on-failure
 RestartSec=5

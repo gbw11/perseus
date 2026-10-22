@@ -79,7 +79,7 @@ assert 'xenova_set_timezone' in image['ROOTFS_POSTPROCESS_COMMAND']
 assert re.search(r'^xenova_set_timezone\s*\(\)\s*\{', text, re.M)
 for module in ('xenova_vm.py', 'xenova_runtime.py', 'xenova_wifi.py',
                'xenova_resources.py', 'xenova_zephyr_transition.py', 'xenova_zephyr_control.py',
-               'xenova_execution.py', 'xenova_recovery.py', 'xenova_domain_identity.py'):
+               'xenova_cpu.py', 'xenova_execution.py', 'xenova_recovery.py', 'xenova_domain_identity.py'):
     assert 'file://' + module in platform['SRC_URI'].split(), module
     assert selected(platform, module) == LAYER / 'recipes-core/xenova-platform/files' / module
 print('PASS reviewed runtime source selection and Asia/Seoul image postprocess dependency')
@@ -138,7 +138,8 @@ _, mqtt = load('xenova-mqtt-client')
 assert {'xenova-dom0-manager', 'xenova-mqtt-client'} <= set(image['IMAGE_INSTALL'].split())
 assert {'python3-fastapi', 'python3-uvicorn', 'python3-websockets', 'python3-terminal', 'python3-netclient', 'python3-shell', 'python3-datetime', 'xenova-platform', 'xen-tools-xenstat', 'xenova-mqtt-client'} <= set(api['RDEPENDS:xenova-dom0-manager'].split())
 assert 'python3-paho-mqtt' in mqtt['RDEPENDS:xenova-mqtt-client'].split()
-assert api['SYSTEMD_SERVICE:xenova-dom0-manager'] == 'xenova-dom0-manager.service'
+assert set(api['SYSTEMD_SERVICE:xenova-dom0-manager'].split()) == {'xenova-dom0-manager.service', 'xenova-recovery-worker.service'}
+assert selected(api, 'xenova-recovery-worker.service').resolve() == ROOT/'platform/services/dom0-manager/deploy/xenova-recovery-worker.service'
 assert api['SYSTEMD_AUTO_ENABLE:xenova-dom0-manager'] == 'enable'
 assert selected(api, 'dom0_manager', directory=True).resolve() == ROOT/'platform/services/dom0-manager/dom0_manager'
 assert selected(mqtt, 'xenova_mqtt', directory=True).resolve() == ROOT/'platform/services/vm-agent/mqtt-client/xenova_mqtt'
@@ -154,3 +155,11 @@ assert broker['SYSTEMD_SERVICE:mosquitto'] == 'mosquitto.service'
 assert broker['SYSTEMD_AUTO_ENABLE:mosquitto'] == 'disable'
 assert {'/usr/bin/mosquitto_pub', '/usr/bin/mosquitto_sub', '/usr/bin/mosquitto_rr'} <= set(broker['FILES:mosquitto-clients'].split())
 print('PASS xentop/MQTT runtime packages and broker tools; broker activation remains explicit')
+
+# CPU preparation is static and pulled before guests, not a second autostart owner.
+assert 'file://cpu-policy-preset.json' in platform['SRC_URI'].split()
+assert selected(platform, 'cpu-policy-preset.json') == LAYER/'recipes-core/xenova-platform/files/cpu-policy-preset.json'
+assert '/usr/lib/systemd/system/xenova-cpu-prepare.service' in platform['FILES:xenova-platform'].split()
+assert 'xenova-cpu-prepare.service' not in platform['SYSTEMD_SERVICE:xenova-platform'].split()
+assert '/etc/xenova/cpu-policy-preset.json' in platform['CONFFILES:xenova-platform'].split()
+print('PASS CPU module, factory preset and static prepare unit package ownership')

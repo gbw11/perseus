@@ -107,6 +107,9 @@ def describe(data, descriptor, *, full=False):
         defaults = {'vcpus': 1, 'memory_mib': 16}
         limits = {'vcpus': [1, 1], 'memory_mib': [16, 16]}
         capabilities = dict(zephyr.NET_CAPABILITIES if meta.get("hardware_profile")==zephyr.NET_PROFILE else zephyr.CAPABILITIES)
+        # 기존 불변 firmware manifest는 유지하고 확인된 Starter의 관측 계약만 보완한다.
+        if meta["source"].get("app") in ("xenova-starter", "xenova-network-starter"):
+            capabilities["app_heartbeat"] = False
     return {**descriptor, 'default_resources': defaults, 'resource_limits': limits,
             'capabilities': capabilities, 'source': meta['source'], 'directory': str(directory)}
 

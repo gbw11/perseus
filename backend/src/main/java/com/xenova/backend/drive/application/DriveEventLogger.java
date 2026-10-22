@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 // Stores the gateway's mode changes and faults in the event log so they reach the timeline (REST-18, WS-02).
 // Severity follows MQTT contract §6: a mode change is INFO, entering SAFE_STOP and any fault are WARNING.
+// Resume accepted / cancelled are INFO.
 @Service
 public class DriveEventLogger {
 
@@ -31,6 +32,8 @@ public class DriveEventLogger {
             switch (notice.type()) {
                 case "drive.mode.changed" -> modeChanged(notice);
                 case "drive.fault.detected" -> faultDetected(notice);
+                case "drive.resume.accepted" -> resume(notice, EventType.DRIVE_RESUME_ACCEPTED);
+                case "drive.resume.cancelled" -> resume(notice, EventType.DRIVE_RESUME_CANCELLED);
                 default -> log.debug("Ignoring drive notice {}", notice.type());
             }
         } catch (RuntimeException exception) {
@@ -56,6 +59,14 @@ public class DriveEventLogger {
         Map<String, Object> payload = objectMapper.convertValue(body, LinkedHashMap.class);
         payload.put("source", notice.publisher());
         eventRecorder.record(EventType.DRIVE_FAULT_DETECTED, EventSeverity.WARNING, text(body, "vm_id"), null, payload);
+    }
+
+    // Resume countdown start / cancel (MQTT-13 follow-up): INFO, payload as the gateway sent it.
+    private void resume(DriveNotice notice, EventType type) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = objectMapper.convertValue(notice.payload(), LinkedHashMap.class);
+        payload.put("source", notice.publisher());
+        eventRecorder.record(type, EventSeverity.INFO, null, null, payload);
     }
 
     private static String text(JsonNode node, String field) {

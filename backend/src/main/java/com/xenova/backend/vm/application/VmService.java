@@ -11,6 +11,7 @@ import com.xenova.backend.vm.domain.VmControlPort;
 import com.xenova.backend.vm.domain.VmLifecycle;
 import com.xenova.backend.vm.domain.VmRecord;
 import com.xenova.backend.vm.domain.VmRecordRepository;
+import com.xenova.backend.vm.domain.VmRole;
 import com.xenova.backend.vm.domain.VmRuntime;
 import com.xenova.backend.vm.domain.VmState;
 import java.time.Clock;
@@ -68,6 +69,14 @@ public class VmService {
 
     public Vm get(String vmId) {
         VmRecord record = findRecord(vmId);
+        return Vm.of(record, vmControlPort.find(vmId).orElse(null));
+    }
+
+    // The role is a console label only: no dom0-manager call, no event, and the VM keeps running as it is.
+    public Vm updateRole(String vmId, VmRole role) {
+        VmRecord record = findRecord(vmId);
+        record.changeRole(role);
+        vmRecordRepository.save(record);
         return Vm.of(record, vmControlPort.find(vmId).orElse(null));
     }
 

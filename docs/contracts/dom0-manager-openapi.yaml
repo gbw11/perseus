@@ -174,6 +174,31 @@ paths:
           $ref: '#/components/responses/PlatformUnavailable'
         '504':
           $ref: '#/components/responses/DriverTimeout'
+  /api/v1/stats:
+    get:
+      tags: [Stats]
+      operationId: getStats
+      summary: 실행 중인 VM 의 xentop 원시값
+      description: >-
+        xentop -b -i 1 -n -x -f 한 번의 출력으로 실행 중 도메인 전부의 누적 카운터·현재값을 돌려준다(계약 2.4·4.6).
+        Domain-0 은 없고 꺼진 VM 은 표본이 없다. 사용률(CPU %, bytes/s)은 싣지 않으며 Spring 이 연속 표본으로 계산한다.
+        측정하지 못한 필드는 0 이 아니라 null 이고 unavailable 에 사유가 있다. 플랫폼 Manager 를 거치지 않는다.
+      x-driver-timeout-seconds: 5
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: 표본 시각과 VM 별 통계 객체
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsResponse'
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
   /healthz:
     get:
       tags: [Health]
@@ -324,6 +349,80 @@ components:
             - $ref: '#/components/schemas/ResourceError'
             - type: 'null'
           description: InsufficientResources 에만 있다
+        platform_code:
+          type: [string, 'null']
+          description: 플랫폼 Manager 가 준 원본 오류 코드(HOST_QUIESCING 등). 플랫폼 오류에만 있다. 분기는 detail 문자열이 아니라 이 값으로 한다
+    StatsSource:
+      type: string
+      description: Spring 메트릭 필터의 허용값과 같은 문자열. 에이전트 보고는 guest_agent 다
+      enum: [xen]
+    UnavailableReason:
+      type: string
+      description: >-
+        NO_DEVICE: NETS·VBDS 가 0 (Zephyr 등) / DEVICE_ERROR: xentop 이 '-' 로 표시 / NOT_REPORTED: n/a, no limit / PARSE_ERROR
+      enum: [NO_DEVICE, DEVICE_ERROR, NOT_REPORTED, PARSE_ERROR]
+    VmStats:
+      type: object
+      description: >-
+        계약 2.4 통계 객체. xentop 누적 카운터·현재값만 담고 사용률은 Spring 이 연속 표본으로 계산한다.
+        측정하지 못한 필드는 0 이 아니라 null 이며 unavailable 에 사유가 있다.
+      additionalProperties: false
+      required: [vm_id, domid, sampled_at, state, vcpus, cpu_time_s, memory_mib, max_memory_mib, net_rx_bytes, net_tx_bytes, disk_rd_bytes, disk_wr_bytes]
+      properties:
+        vm_id:
+          type: string
+          format: uuid
+        domid:
+          type: integer
+          minimum: 1
+          description: 재실행마다 바뀐다. 누적값 초기화(재시작) 판정에 쓴다
+        source:
+          $ref: '#/components/schemas/StatsSource'
+        sampled_at:
+          type: string
+          format: date-time
+        state:
+          $ref: '#/components/schemas/VmState'
+        vcpus:
+          type: integer
+          minimum: 1
+        cpu_time_s:
+          type: integer
+          minimum: 0
+          description: 도메인 시작 후 누적 CPU 시간(초)
+        memory_mib:
+          type: integer
+          minimum: 0
+        max_memory_mib:
+          type: [integer, 'null']
+          description: 상한이 없으면 null (NOT_REPORTED)
+        net_rx_bytes:
+          type: [integer, 'null']
+          description: 도메인 시작 후 누적. 장치가 없으면 null (NO_DEVICE)
+        net_tx_bytes:
+          type: [integer, 'null']
+        disk_rd_bytes:
+          type: [integer, 'null']
+          description: 섹터 × 512 누적. 장치가 없으면 null (NO_DEVICE), xentop 오류면 null (DEVICE_ERROR)
+        disk_wr_bytes:
+          type: [integer, 'null']
+        unavailable:
+          type: object
+          description: 측정하지 못한 필드 → 사유
+          additionalProperties:
+            $ref: '#/components/schemas/UnavailableReason'
+    StatsResponse:
+      type: object
+      additionalProperties: false
+      required: [sampled_at, vms]
+      properties:
+        sampled_at:
+          type: string
+          format: date-time
+        vms:
+          type: array
+          items:
+            $ref: '#/components/schemas/VmStats'
     Health:
       type: object
       additionalProperties: false
