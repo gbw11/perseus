@@ -362,7 +362,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | --- | --- | --- |
 | `revision` | uint32 | 트랙·장애물·E-stop 이 바뀔 때마다 1 오른다. 시작 1 |
 | `track` | object | 지금 트랙. 아래 표 (v1.4 에서 타원을 실제 서킷 중심선으로 바꿈) |
-| `tracks` | array | 고를 수 있는 트랙 `[{id, name, real_m}]` (v1.4). 기본 `spielberg`(레드불링 4315 m)·`monza`(몬차 5790 m) |
+| `tracks` | array | 고를 수 있는 트랙 `[{id, name, real_m}]` (v1.4). 10개: `spielberg`(레드불링 4315 m)·`monza`(몬차 5790 m)·`silverstone`·`spa`·`melbourne`·`hungaroring`·`catalunya`·`mexico`·`bahrain`·`interlagos`. 시작은 `spielberg` |
 | `car` | object | `{length_m, width_m}` 판정에 쓰는 차 몸 크기. 기본 `0.42`·`0.20` (v1.4) |
 | `time_scale` | float | 시뮬레이터 시간 배율 (1 = 실제 시간, 기본 1). 화면이 10 Hz 위치 사이를 이어 그릴 때 곱한다 (v1.4). 시연에서 보기 좋은 빠르기로 3 을 쓸 수 있다 — 와치독·명령 주기는 실제 시간 그대로 |
 | `obstacles` | array | `[{id, kind, x, y, w}]` — 종류·가운데 위치(m)·폭(m). 최대 8개. `kind` 는 v1.4 |
@@ -375,12 +375,13 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | `id`, `name` | string | 트랙 id·화면 이름 |
 | `real_m` | uint32 | 실제 서킷 한 바퀴 길이 (m). 화면 단위 변환에 쓴다 |
 | `lane_width_m`, `curb_m` | float | 차선 폭 `0.6`, 연석 폭 `0.06`. 연석 끝까지 아스팔트 |
-| `centerline` | array | `[[x, y], …]` 차선 중심선, 약 0.2 m 간격, 닫힌 고리 (진행 방향 순서). 레드불링 422점·몬차 576점 |
+| `centerline` | array | `[[x, y], …]` 차선 중심선, 약 0.2 m 간격, 닫힌 고리 (진행 방향 순서). 트랙마다 약 410 ~ 680점 |
 | `wall_left_m`, `wall_right_m` | array | 점마다 중심선에서 왼쪽·오른쪽 벽까지 거리 (m). 연석 밖 ~ 벽 = 잔디·흙 (지나갈 수 있지만 느리다). 출발 직선은 잔디 없이 바로 벽, 코너 근처는 보통의 두 배 |
 | `start_index` | uint32 | 출발선이 있는 `centerline` 점 |
 
 - 트랙 모양 출처: TUM racetrack-database (LGPL-3.0, © OpenStreetMap contributors) 중심선을 1/50 로 줄이고 반경 0.8 m 미만 코너만 다듬었다. 벽 거리는 시뮬레이터가 계산해 넣는다 — 받는 쪽은 그대로 쓴다.
-- `sim.world` 는 몬차 기준 약 25 KB (1장 64 KB 이하).
+- `sim.world` 는 가장 긴 스파(681점) 기준 약 30 KB (1장 64 KB 이하).
+- 10개를 고른 기준: 1/50 로 줄였을 때 원본과 차이 1 m 이하, 다른 구간과 1.2 m 넘게 떨어짐. 스즈카처럼 구간이 겹쳐 지나가는 트랙은 2차원 트랙 좌표로 나타낼 수 없어 뺐다.
 
 **`sim.command`**
 
