@@ -1,0 +1,30 @@
+{
+  "scope": "real existing QEMU boot and read-only dom0/Debian inspection; no heartbeat reception acceptance",
+  "date": "2026-10-22",
+  "runtime": "/home/ssafy/xenova-qemu-28/display253-20261022T062037Z",
+  "boot_authorized": true,
+  "installation_performed": false,
+  "firmware_changed": false,
+  "console_attached": false,
+  "domains": [
+    {"name": "zephyr-dev", "domid": 3, "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2", "nics_configured": false},
+    {"name": "zephyr-backup", "domid": 2, "uuid": "820a0522-243f-42f1-90e9-9b74e1522965", "nics_configured": false},
+    {"name": "debian-dev", "domid": 1, "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6", "guest_instance_id_matches": true}
+  ],
+  "dom0": {
+    "bridge_up": true,
+    "bridge_ipv4": "192.168.77.1/24",
+    "mqtt_listener_observed": false,
+    "mosquitto_active": false,
+    "default_python_modules_available": {"paho": false, "fastapi": false, "xenova_display": false, "xenova_mqtt": false}
+  },
+  "debian": {
+    "ipv4": "192.168.77.20/24",
+    "agent_service_present": false,
+    "standard_agent_paths_present": false,
+    "paho_available": false,
+    "broker_tcp_reachable": false
+  },
+  "actual_guest_heartbeat_received": false,
+  "stage3_complete": false
+}

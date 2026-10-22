@@ -34,14 +34,14 @@ Agent 배포 변경의 [실제 안내](https://lab.ssafy.com/s15-final/S15P31E11
 | 우선순위 | 필요한 것 | 완료 근거/담당에게 받을 내용 |
 | --- | --- | --- |
 | 필수 | 실제 VM UUID와 app_id 매핑 | 등록 목록·현재 펌웨어/앱의 실제 app_id. VM1→autonomous/VM2→manual은 시험용 후보이며 생산 주·백업 구성을 뜻하지 않음 |
-| 필수 | Zephyr Ethernet → MQTT 앱 결합 | 현재 Starter의 TCP=n을 그대로 MQTT 가능으로 간주하지 않음. TCP/소켓/MQTT 설정, netfront·기존 C 포트 결합, 자원/Store 세션 소유권, 재연결을 통신/앱 담당과 확인 |
-| 필수 | 실제 Xen에서의 보고 도착 | 실제 대상 domU가 낸 고유 heartbeat가 dom0 브로커에 도달한 증거. native_sim·host 합성 시험은 별도 |
-| 필수 | Debian Agent 설치·실행·신원 | 사용할 새 템플릿/기존 설치본 구분, Paho·Agent 패키지, instance-id, unit enable/active, 실제 5초 수신. Agent 설치 코드가 있다고 현재 VM에 설치돼 있다고 추정하지 않음 |
+| 시험 검증·운영 통합 필요 | Zephyr Ethernet → MQTT 앱 결합 | 3단계 VM2 시험에서 TCP/소켓/MQTT, 기존 netfront·manual heartbeat 결합과 공유 XenStore 신원 조회가 실제 통과. 주행 발행은 시험 사본에서 차단했고 원본 복원. 운영 펌웨어·인증·재연결/부하·VM1 앱 배치는 담당과 확인 |
+| 대표 경로 검증·VM1 남음 | 실제 Xen에서의 보고 도착 | 실제 Debian 기존 Agent와 VM2 Zephyr의 heartbeat-only 시험 이미지→dom0 임시 브로커/수집기 통과. [실제 보고 기록](../verification/display-253-step3.md). VM2는 원본 복원했고 VM1 송신은 미검증. native_sim·host 합성 시험은 별도 |
+| 임시 실행 검증·상시 배포 필요 | Debian Agent 설치·실행·신원 | 실제 QEMU 게스트에는 기존 설치본/unit이 없었음. 사용자 허용 임시 배치에서 실제 instance-id·boot_id 및 5초 보고 3건 수신 확인 후 정리. 새 템플릿/상시 설치·unit enable/active·운영 브로커 연결은 완료 아님 |
 | 필수 | 브로커 주소·계정·ACL | VM/app별 실제 계정과 허용 토픽, domU→dom0 경로. 비밀번호를 문서/로그에 기록하지 않음. 네트워크 연결/구독 거부는 VM 장애가 아님 |
 | 구현·실환경 확인 필요 | 구독 경로 관측 | 1단계 기준 CONNACK만 추적하던 표시 어댑터를 2단계에서 토픽별 SUBACK 추적으로 보완. pending/denied/error와 실제 앱 미수신을 구분하고 재접속 후 새 보고를 요구. 단위·loopback 시험은 통과했으며 운영 브로커 ACL/계정은 별도 확인. 124번 브랜치는 병합하지 않음 |
 | 필수 | Xen 상태 + 앱 생존/오류 → 화면 정책 | running/paused/stopping/crashed/absent·관측 단절과 앱 정상/error/미수신/복귀를 교차 시험. 앱 정상 보고가 VM 정지/장애 화면을 덮지 않게 함 |
 | 필수 | 실행·발행 세대 구분 | domid 재사용·앱 재시작·늦은 seq/boot를 혼합하지 않음. C boot_id는 클라이언트 생성 값이므로 검증된 실제 OS 부팅 ID로 꾸미지 않음. 플랫폼 execution_id를 연결하려면 read-only 근거/대응 계약 필요 |
-| 보류 | 실제 게스트 재시작·펌웨어 교체·설치 | 사용자가 VM 변경은 나중에 결정함. 현재 QEMU SSH 경로도 접속 거절. 2단계 정적 설정/단위 시험과 실제 VM 변경 시험을 구분 |
+| 범위별 허용·완료 | 실제 게스트 재시작·펌웨어 교체·설치 | 초기에는 보류. 이후 사용자가 QEMU 부팅, Debian/dom0 임시 배치, VM2 전용 NIC·시험 펌웨어·재시작을 각각 허용해 실행·복원 완료. VM1 변경·시스템 설치·상시 배포를 허용받았다는 뜻은 아님 |
 | 후속 | 실제 OS inventory | 사용자는 heartbeat만 우선. expected_os와 observed 근거 미수신을 구분하며 Agent heartbeat나 템플릿 이름으로 관측 OS를 채우지 않음 |
 | 후속 | 실제 주행 준비·미러링·승계 | 이번 범위는 앱 생존·오류 수신. 기존 autonomous/manual은 현재 최신 사용자 주·백업 모델과 의미가 다르므로 최종 앱 배치·제어 계약은 해당 담당이 확정 |
 | 후속 | Debian 앱 heartbeat·그래픽 | vehicle에도 message-board는 .gitkeep만 확인. 앱 보고가 없으면 unknown. 현재 범위는 상태 패널과 기존 콘솔 연결 정보이며 그래픽 어댑터는 추가하지 않음 |
