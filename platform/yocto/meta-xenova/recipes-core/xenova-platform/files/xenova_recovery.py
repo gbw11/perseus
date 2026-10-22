@@ -106,7 +106,7 @@ class Recovery:
         return record, records, observation
 
     def mode_allowed(self, spec, record):
-        if spec["mode"] == "graceful-restart" and vm.guest_kind(record) != "linux":
+        if spec["mode"] == "graceful-restart" and not vm.cooperative(record):
             refuse("RECOVERY_MODE_UNSUPPORTED", "this guest has no cooperative shutdown")
         if spec["mode"] == "force-restart" and record["uuid"] not in self.e.policy()["force_restart_vm_ids"]:
             refuse("RECOVERY_MODE_UNSUPPORTED", "force recovery has no per-VM administrator approval")
@@ -264,7 +264,7 @@ class Recovery:
             record, records, absent = self.conditions(spec, deadline, target=False)
             if absent["presence"] != "absent":
                 refuse("TARGET_CHANGED", "a domain appeared before recovery launch")
-            if vm.guest_kind(record) == "linux":
+            if vm.has_network(record):
                 self.p.prepare_dhcp(records, deadline=deadline)
             self.save(op, "launching")
             owner = {"kind":"recovery", "recovery_attempt_id":identity}

@@ -62,6 +62,15 @@ class TemplateRecipeTest(unittest.TestCase):
             recipe.apply(self.root, self.path, self.meta['source_id'])
         self.assertEqual(outside.read_text(), 'external unchanged')
 
+    def test_current_default_selection_has_three_unique_ids_and_network_starter(self):
+        entries = json.loads((ROOT / 'platform/guests/default-templates.lock.json').read_text())['templates']
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(len({e['template_id'] for e in entries}), 3)
+        selected = next(e for e in entries if e['guest_kind'] == 'zephyr')
+        self.assertEqual(selected['id'], 'xenova-zephyr-network-starter-1.1.0')
+        self.assertEqual(selected['version'], '1.1.0')
+        self.assertTrue((ROOT / 'platform/guests/zephyr/starter.lock.json').is_file())
+
     def test_default_catalog_rejects_legacy_duplicate_or_escaping_selection(self):
         with self.assertRaises(ValueError):
             resolver.resolve(self.base, {'schema': 1, 'templates': []})

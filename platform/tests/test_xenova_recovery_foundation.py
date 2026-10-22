@@ -391,10 +391,9 @@ class FoundationTest(unittest.TestCase):
         with self.assertRaises(Interrupted):
             self.call("retire", key="retire-cut")
         self.m.checkpoint = lambda *args:None
-        # Same applicable intent is re-established; the unresolved asset journal still owns it.
-        self.start()
-        spec = self.spec()
-        self.fails(self.recover(spec), "OPERATION_IN_PROGRESS")
+        # The interrupted asset owner now also blocks direct start, before intent changes.
+        self.fails(self.call("start"), "OPERATION_IN_PROGRESS")
+        self.fails(self.recover(spec), "INTENT_MISMATCH")
 
     def test_P18_snapshot_does_not_take_operation_lock_or_invoke_xen(self):
         self.start()
@@ -420,6 +419,9 @@ class FoundationTest(unittest.TestCase):
         self.assertIsNone(state["intent_revision"])
 
     def test_P21_unapproved_conflicts_keep_legacy_boot_action_but_deny_recovery(self):
+        policy=Path(self.f.tmp.name)/"unapproved-policy.json"
+        policy.write_text(json.dumps({"schema_version":"1.0","autostart_stopped":None,"manual_running":None,"force_restart_vm_ids":[]}))
+        self.p.execution_policy_path=policy
         self.r["autostart"] = True
         decision = self.p.execution().boot_decision(self.r)
         self.assertTrue(decision["start"])
@@ -825,8 +827,8 @@ class PackagingAndUnitsTest(unittest.TestCase):
             self.assertEqual(entry.read_bytes(),(FILES/"xenova-domain-identity").read_bytes())
             self.assertEqual(entry.stat().st_mode & 0o777,0o755)
             policy=json.loads((root/"etc/xenova/execution-policy.json").read_text())
-            self.assertIsNone(policy["autostart_stopped"])
-            self.assertIsNone(policy["manual_running"])
+            self.assertEqual(policy["autostart_stopped"],"keep-stopped")
+            self.assertEqual(policy["manual_running"],"keep-stopped")
             self.assertEqual(policy["force_restart_vm_ids"],[])
             recipe=(FILES.parent/"xenova-platform_1.0.bb").read_text()
             self.assertIn("xen-tools-libxenmanage",recipe)

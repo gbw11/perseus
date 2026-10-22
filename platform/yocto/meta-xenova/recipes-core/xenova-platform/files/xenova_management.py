@@ -22,7 +22,7 @@ import xenova_vm as vm
 import xenova_zephyr as zephyr
 from xenova_execution import ExecutionError
 
-MUTATIONS = {'create', 'retire', 'restore', 'purge'}
+MUTATIONS = {'create', 'retire', 'restore', 'purge', 'update-resources', 'firmware-transition'}
 EXIT_CODES = {'success': 0, 'validation': 2, 'conflict': 3, 'execution': 4}
 CONFLICTS = {'VM_NAME_CONFLICT', 'IP_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'OPERATION_IN_PROGRESS',
              'VM_NOT_STOPPED', 'TARGET_CHANGED', 'ASSET_IN_USE', 'RESTORE_CONFLICT', 'VM_PURGED',
@@ -140,6 +140,30 @@ class Manager:
                     fail('RECOVERY_REQUIRED', 'invalid legacy creation path')
                 if op.get('owned_workspace')!='instances/.operation-'+op['operation_id']:
                     fail('RECOVERY_REQUIRED','invalid owned workspace')
+            elif op['action'] in ('update-resources','firmware-transition'):
+                snap=op.get('snapshot',{})
+                before=snap.get('record',{})
+                after=op.get('updated_record',{})
+                vm.validate_identity(before)
+                vm.validate_identity(after)
+                allowed=('vcpus','memory_mib') if op['action']=='update-resources' else (
+                    'active_firmware','hardware_profile','capabilities','shutdown_policy',
+                    'board_shutdown_policy','mac','ipv4','hostname')
+                if (snap.get('vm_id')!=op['vm_id'] or snap.get('generation')!=op.get('expected_generation')
+                        or before['uuid']!=op['vm_id']
+                        or {**before,**{k:after[k] for k in allowed if k in after}}!=after
+                        or digest(before)!=op['request'].get('expected_configuration_sha256')):
+                    fail('RECOVERY_REQUIRED','invalid configuration operation snapshot')
+                if (op['request']!=op['initial_spec'] or
+                        op['expected_generation']!=op['request'].get('expected_lifecycle_generation')):
+                    fail('RECOVERY_REQUIRED','configuration operation request/context mismatch')
+                if op['action']=='update-resources':
+                    if (vm.guest_kind(before)!='linux' or
+                            any(after[k]!=op['request'].get(k) for k in ('vcpus','memory_mib'))):
+                        fail('RECOVERY_REQUIRED','resource journal differs from its request')
+                elif (vm.guest_kind(before)!='zephyr' or
+                        op.get('assigned')!={k:after[k] for k in ('mac','ipv4','hostname') if k in after}):
+                    fail('RECOVERY_REQUIRED','firmware transition reservation differs from metadata')
             else:
                 snap=op.get('snapshot',{})
                 vm.validate_identity(snap.get('record',{}))
@@ -401,6 +425,12 @@ class Manager:
     def _normalize(self, action, spec):
         if not isinstance(spec, dict):
             fail('INVALID_SPEC', 'request must be an object')
+        if action == 'firmware-transition':
+            from xenova_zephyr_transition import validate
+            return validate(spec, normalize_uuid, fail)
+        if action == 'update-resources':
+            from xenova_resources import validate
+            return validate(spec, normalize_uuid, fail)
         if action == 'create':
             required = {'vm_id','name','template_id','template_version','vcpus','memory_mib'}
             if set(spec) - (required | {'ipv4'}) or not required <= set(spec):
@@ -478,7 +508,7 @@ class Manager:
             lo,hi = selected['resource_limits'][k]
             if not lo <= spec[k] <= hi:
                 fail('RESOURCE_UNSUPPORTED', 'requested resources exceed template/platform limits')
-        if selected['guest_kind'] == 'zephyr':
+        if selected['guest_kind'] == 'zephyr' and not selected['capabilities'].get('dhcp'):
             if 'ipv4' in spec:
                 fail('INVALID_SPEC', 'Zephyr has no IP field')
         else:
@@ -549,15 +579,15 @@ class Manager:
         own_mac = own_record.get('mac') if own_record else None
         if own_mac is None:
             own_mac = next((o.get('assigned', {}).get('mac') for o in self._operations()
-                            if o['action'] == 'create' and o['vm_id'] == excluding), None)
+                            if o['action'] in ('create','firmware-transition') and o['vm_id'] == excluding), None)
         held.update(r['ipv4'] for r in settings['instances'] if r.get('guest_kind', 'linux') == 'linux')
         if excluding:
             held -= self._factory_owned_ip(own_record, factory)
         owned = list(records.values()) + self._legacy_records()
         owned += [t['record'] for t in self._tombs().values() if t['lifecycle'] != 'PURGED']
-        held.update(r['ipv4'] for r in owned if r['uuid'] != excluding and vm.guest_kind(r) == 'linux')
+        held.update(r['ipv4'] for r in owned if r['uuid'] != excluding and r.get('ipv4'))
         for op in self._operations():
-            if op['action'] == 'create' and op['status'] != 'SUCCEEDED' and op['vm_id'] != excluding:
+            if op['action'] in ('create','firmware-transition') and op['status'] != 'SUCCEEDED' and op['vm_id'] != excluding:
                 ip = op.get('assigned', {}).get('ipv4', op['initial_spec'].get('ipv4'))
                 if ip is not None:
                     if not self._valid_ip(ip):
@@ -584,13 +614,13 @@ class Manager:
         return [f'192.168.77.{i}' for i in range(int(pool[0].split('.')[-1]), int(pool[1].split('.')[-1])+1)], held
 
     def _restore_ip(self, record, records):
-        if vm.guest_kind(record) == 'linux':
+        if record.get('ipv4'):
             _, held = self._ip_inventory(records, excluding=record['uuid'])
             if record['ipv4'] in held:
                 fail('RESTORE_CONFLICT', 'retained IP conflicts with another current reservation/lease')
 
     def _apply_dhcp(self, op):
-        if vm.guest_kind(op['snapshot']['record']) == 'linux':
+        if vm.has_network(op['snapshot']['record']):
             self._save_op(op, 'dhcp-pending')
             with tool_output():
                 self.p.prepare_dhcp(self.p.records(validate_assets=False))
@@ -633,6 +663,8 @@ class Manager:
         records = self.p.records(validate_assets=False)
         workspace = self.data / op['owned_workspace']
         if selected['guest_kind'] == 'zephyr':
+            if selected['capabilities'].get('dhcp'):
+                metadata.update(mac=op['assigned']['mac'],ipv4=op['assigned']['ipv4'],hostname=name)
             zephyr.new_instance(self.data, name, Path(selected['directory']), records,
                                 identity=op['vm_id'], workspace_path=workspace, metadata=metadata,
                                 autostart=spec['autostart'], board_shutdown_policy=spec['board_shutdown_policy'])
@@ -655,6 +687,7 @@ class Manager:
                   'ipv4':record.get('ipv4'), 'lifecycle':tomb['lifecycle'],
                   'generation':tomb['generation'],'registered':tomb['lifecycle']=='REGISTERED',
                   'initial_spec':record.get('creation_spec'), 'configuration':record,
+                  'configuration_sha256':digest(record),
                   'xen_state':None,'domid':None,'app_readiness':'unknown'}
         if observe:
             observation = self.p.execution().observe(record, self.p.clock()+15)
@@ -680,7 +713,7 @@ class Manager:
         return updated
 
     def _create(self, op):
-        if op['initial_spec']['guest_kind'] == 'linux':
+        if op.get('assigned',{}).get('ipv4'):
             records = self.p.records(validate_assets=False)
             _, held = self._ip_inventory(records, excluding=op['vm_id'])
             assigned_ip = op['assigned'].get('ipv4', op['initial_spec'].get('ipv4'))
@@ -708,7 +741,7 @@ class Manager:
         tomb = {'schema_version':'1.0','vm_id':record['uuid'],'name':record['name'],'generation':0,
                 'lifecycle':'REGISTERED','record':record,'history':[]}
         tomb = self._save_tomb(tomb, op, 'REGISTERED', 0)
-        if vm.guest_kind(record) == 'linux':
+        if vm.has_network(record):
             self._save_op(op, 'dhcp-pending')
             with tool_output():
                 self.p.prepare_dhcp(self.p.records(validate_assets=False))
@@ -830,6 +863,12 @@ class Manager:
         return result
 
     def _mutate(self, action, spec, execute, key, records, context):
+        if action == 'firmware-transition':
+            from xenova_zephyr_transition import mutate
+            return mutate(self,spec,execute,key,records,context,fail)
+        if action == 'update-resources':
+            from xenova_resources import mutate
+            return mutate(self,spec,execute,key,records,context,fail)
         previous = next((o for o in self._operations() if o['idempotency_key']==key),None)
         if previous:
             context['operation_id']=previous['operation_id']
@@ -869,7 +908,7 @@ class Manager:
         if action=='create':
             self._conflicts(spec,records)
             selected=self._selection(spec)
-            assigned_ip = self._allocate_ip(spec, records) if selected['guest_kind']=='linux' else None
+            assigned_ip = self._allocate_ip(spec, records) if selected['capabilities'].get('dhcp') else None
             self._reserve_space(sum(p.stat().st_size for p in Path(selected['directory']).iterdir()), records)
             tomb=None
         else:
@@ -911,14 +950,14 @@ class Manager:
             'status':'RUNNING','phase':'recorded','result':None,'error':None}
         if action=='create':
             effective={**spec,'guest_kind':selected['guest_kind'],'autostart':False,
-                       'board_shutdown_policy':'graceful' if selected['guest_kind']=='linux' else 'refuse'}
+                       'board_shutdown_policy':'graceful' if selected['capabilities'].get('graceful_shutdown') else 'refuse'}
             op.update(initial_spec=effective,spec_hash=digest(effective))
             assigned_mac='02:'+':'.join(f'{b:02x}' for b in os.urandom(5))
             reserved_records=list(records.values())+[t['record'] for t in self._tombs().values()]+self._legacy_records()
             if any(r['uuid']==identity or r.get('mac')==assigned_mac for r in reserved_records) or any(
                     o.get('assigned',{}).get('mac')==assigned_mac for o in self._operations()):
                 fail('VM_NAME_CONFLICT','allocated identity collides; no assets created')
-            op.update(template=selected,assigned={'internal_name':internal_name(identity), **({'mac':assigned_mac, 'ipv4':assigned_ip} if selected['guest_kind']=='linux' else {})},
+            op.update(template=selected,assigned={'internal_name':internal_name(identity), **({'mac':assigned_mac, 'ipv4':assigned_ip} if selected['capabilities'].get('dhcp') else {})},
                       owned_workspace='instances/.operation-'+opid)
         else:
             op['expected_generation']=tomb['generation']
