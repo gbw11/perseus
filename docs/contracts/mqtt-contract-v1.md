@@ -1,6 +1,6 @@
 # MQTT 메시지 계약 v1
 
-**최종 갱신** 2026-10-22 v1.4 초안 (v1.3 위에 11장 실제 서킷 트랙·출발 신호·장애물 종류·배치 검사 결과 MQTT-18·REST-36~37 — 변경 이력)
+**최종 갱신** 2026-10-22 v1.5 초안 (v1.4 위에 자율주행 자동 복귀 3·2·1 + 취소 — 5.2·6장) · v1.4 초안 (v1.3 위에 11장 실제 서킷 트랙·출발 신호·장애물 종류·배치 검사 결과 MQTT-18·REST-36~37 — 변경 이력)
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼, RC카 시나리오
 **브로커** dom0 Mosquitto
 
@@ -128,7 +128,7 @@ Zephyr 주행 VM은 PV 네트워크 대신 Xen vchan으로 dom0 중계에 붙고
 
 | 모드 | 활성 앱 | 들어가는 조건 |
 | --- | --- | --- |
-| `AUTO` | autonomous | 시작, 또는 `AUTO_READY`에서 자율주행 재개 요청 |
+| `AUTO` | autonomous | 시작, `AUTO_READY`에서 자동 복귀 카운트다운이 끝났을 때 (v1.5), 또는 자율주행 재개 요청 |
 | `MANUAL` | manual | `AUTO`에서 자율 명령이 100 ms 끊기고 수동 명령이 신선할 때, `SAFE_STOP`에서 수동 명령이 신선해졌을 때, 또는 `AUTO_READY` 조건이 깨졌을 때 |
 | `SAFE_STOP` | 없음 | 활성 앱 명령이 끊겼는데 넘길 앱이 없을 때 |
 | `AUTO_READY` | manual | `MANUAL` 중 복구된 자율 VM이 3초 연속 아래를 모두 만족할 때: Xen 도메인 실행 중, `app.heartbeat` 신선(`state`가 `error` 아님), `drive.command` 신선 |
@@ -143,10 +143,12 @@ Zephyr 주행 VM은 PV 네트워크 대신 Xen vchan으로 dom0 중계에 붙고
 | `MANUAL` | 위 `AUTO_READY` 조건 3초 충족 | `AUTO_READY` | `autonomous_ready` |
 | `MANUAL`·`AUTO_READY` | 수동 명령 100 ms 끊김 (자율이 신선해도) | `SAFE_STOP` | `no_fresh_standby` |
 | `AUTO_READY` | `AUTO_READY` 조건이 깨짐 | `MANUAL` | `autonomous_lost` |
-| `AUTO_READY` | `drive.resume.requested` | `AUTO` | `resume_requested` |
+| `AUTO_READY` | 들어간 뒤 자동 복귀 3초(`drive.resume.accepted`, `requested_by: auto`)가 끝나고 조건이 그대로 (v1.5) | `AUTO` | `auto_resumed` |
+| `AUTO_READY` | `drive.resume.requested` (자동 복귀를 취소했거나 카운트다운 밖) | `AUTO` | `resume_requested` |
 | `SAFE_STOP` | 수동 명령 신선 | `MANUAL` | `manual_fresh` |
 
-- `AUTO`에는 시작과 재개로만 들어간다. `SAFE_STOP`에서 자율 명령이 신선해져도 `AUTO`로 가지 않는다 (사람이 확인한 뒤 수동 → 재개).
+- `AUTO`에는 시작, 자동 복귀, 재개로만 들어간다. `SAFE_STOP`에서 자율 명령이 신선해져도 `AUTO`로 가지 않는다 (사람이 확인한 뒤 수동 → 재개).
+- **자동 복귀 (v1.5, 2026-10-22 결정)**: `AUTO_READY`에 들어가면 게이트웨이가 운영자 조작 없이 바로 `drive.resume.accepted`(`requested_by: auto`, `switch_in_ms: 3000`)를 내고 3·2·1 을 센다. 끝날 때 조건이 그대로면 `AUTO`(`auto_resumed`). 카운트다운 중 **취소 요청**(6장 `drive.resume.cancel_requested`)이 오면 바꾸지 않고 `drive.resume.cancelled`(`reason: operator_cancelled`)를 낸 뒤 수동이 계속 몬다. 취소한 뒤에는 이번 `AUTO_READY` 동안 다시 자동 복귀하지 않는다 — 운영자 재개 요청으로만 `AUTO`. `AUTO_READY`를 벗어났다가 다시 들어오면 자동 복귀를 다시 한다.
 
 - 대기 중인 앱도 `drive.command`를 계속 발행한다. 게이트웨이는 활성 앱 명령만 유효로 보고, 대기 앱 명령은 신선도 확인에만 쓴다. 수동 VM은 키 입력이 없으면 `v_mps = 0`을 보낸다.
 - 모드가 바뀌거나 활성 앱이 바뀔 때마다 게이트웨이는 `generation`을 1 올린다.
@@ -229,17 +231,20 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 | MQTT-06 | `xenova/v1/apps/autonomous/events` | `perception.event` | 자율 VM → 메시지 보드 | 1 | `kind`(`obstacle`·`obstacle_cleared`·`perception_lost`·`perception_restored`), `detail`(예 `stop 80 cm`) — 활성일 때 판단이 바뀌면 |
 | MQTT-06 | `xenova/v1/apps/message-board/events` | `message.posted` | 메시지 보드 → 주행 화면 | 1 | `text`, `level` |
 | MQTT-06 | `xenova/v1/apps/message-board/events` | `drive.resume.requested` | 메시지 보드 → 게이트웨이 | 1 | `requested_by` |
+| MQTT-06 | `xenova/v1/apps/message-board/events` | `drive.resume.cancel_requested` | 메시지 보드 → 게이트웨이 | 1 | `requested_by` (v1.5) |
 | MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `from`, `to`, `generation`, `reason` |
 | MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.fault.detected` | 게이트웨이 → 메시지 보드, 백엔드 | 1 | `app_id`, `vm_id`, `reason`(`command_timeout`), `detected_at` |
-| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.resume.accepted` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `switch_in_ms`(3000), `generation`(지금 세대), `requested_by` |
-| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.resume.cancelled` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `reason`(`autonomous_lost` 등), `generation` |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.resume.accepted` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `switch_in_ms`(3000), `generation`(지금 세대), `requested_by` (자동 복귀면 `auto`, v1.5) |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.resume.cancelled` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `reason`(`autonomous_lost`, `operator_cancelled`(v1.5) 등), `generation` |
 | MQTT-13 | `xenova/v1/console/resume` | `drive.resume.requested` | 백엔드(운영자 콘솔) → 게이트웨이 | 1 | `requested_by` |
+| MQTT-13 | `xenova/v1/console/resume` | `drive.resume.cancel_requested` | 백엔드(운영자 콘솔) → 게이트웨이 | 1 | `requested_by` (v1.5, 백엔드가 `DELETE /api/v1/drive/resume`을 받아 발행) |
 | MQTT-14 | `xenova/v1/apps/message-board/vision` | `vision.result` | 메시지 보드 → 백엔드 (화면·기록) | 0 | `frame_id`, `fps`, `objects[{label, score, bbox[x,y,w,h]}]` (bbox 는 0~1 정규화) |
 
 - `drive.resume.requested`는 `AUTO_READY`일 때만 받아들인다. 다른 모드에서는 무시하고 `drive.mode.changed`를 내지 않는다. 메시지 보드(MQTT-06)와 운영자 콘솔(MQTT-13, 백엔드가 `POST /api/v1/drive/resume`을 받아 발행) 어느 쪽에서 와도 같다.
 - 재개 요청을 내는 쪽은 메시지 보드 VM(MQTT-06)과 운영자 콘솔(MQTT-13, 백엔드) 둘이다 (9장 ACL).
 - `drive.fault.detected`는 한 번이라도 명령을 낸 주행 앱(활성·대기 모두)의 `drive.command`가 100 ms 끊기면 한 번 낸다. 명령이 다시 오면 다시 낼 수 있다.
-- **재개는 바로 바꾸지 않는다 (3·2·1).** 받아들이면 게이트웨이가 먼저 `drive.resume.accepted`(`switch_in_ms: 3000`)를 내고, 3초 동안 수동주행이 계속 제어한다. 화면은 이 이벤트로 "3, 2, 1" 을 센다. 3초 뒤 `AUTO_READY` 조건(5.2)이 여전히 맞으면 `AUTO`로 바꾸고 `drive.mode.changed`(`reason: resume_requested`)를 낸다. 그 사이 조건이 깨지면 바꾸지 않고 `drive.resume.cancelled`를 낸다. 카운트다운 중 들어온 재개 요청은 무시한다.
+- **재개는 바로 바꾸지 않는다 (3·2·1).** 받아들이면 게이트웨이가 먼저 `drive.resume.accepted`(`switch_in_ms: 3000`)를 내고, 3초 동안 수동주행이 계속 제어한다. 화면은 이 이벤트로 "3, 2, 1" 을 센다. 3초 뒤 `AUTO_READY` 조건(5.2)이 여전히 맞으면 `AUTO`로 바꾸고 `drive.mode.changed`(`reason: resume_requested`)를 낸다. 그 사이 조건이 깨지면 바꾸지 않고 `drive.resume.cancelled`를 낸다. 카운트다운 중 들어온 재개 요청은 무시한다. 자동 복귀(v1.5)도 같은 3·2·1 이고, `requested_by`만 `auto`다.
+- **재개 취소 (v1.5)**: `drive.resume.cancel_requested`는 카운트다운 중일 때만 받아들이고 `drive.resume.cancelled`(`operator_cancelled`)로 답한다. 카운트다운이 없으면 무시한다. 콘솔은 `DELETE /api/v1/drive/resume`(202) → 백엔드가 MQTT-13 에 발행.
 - **`vision.result`(MQTT-14)는 주행 판단에 쓰지 않는다.** 메시지 보드 VM 이 카메라 영상을 AI 로 본 결과로, 화면·기록용이다. 게이트웨이·자율주행·수동주행 VM 은 구독하지 않는다 — 주행 판단은 `perception.result`(5.4) 하나. 그래서 메시지 보드 VM 이 죽어도 주행은 그대로다 (격리). 10 Hz 이하, QoS 0, latest-only, 새 결과가 없으면 내지 않는다. 필드·영상 경로는 [카메라·AI 감지 계약](camera-stream-v1.md).
 - 백엔드는 `drive.mode.changed`, `drive.fault.detected`, `drive.resume.accepted`, `drive.resume.cancelled`를 콘솔 이벤트 로그(REST-18, `/ws/v1/events`)에 남긴다. 심각도는 모드 전환 `INFO`, `SAFE_STOP` 진입·장애 `WARNING`.
 
@@ -463,4 +468,5 @@ MQTT 가 아니다. 게이트웨이가 시리얼 대신 TCP 로 같은 프레임
 | v1.1.1 | 2026-10-21 | 구현 기준 정합 (S15P31E110-249). 5.2 전환 표와 사유 `autonomous_ready`·`autonomous_lost`·`manual_fresh` (게이트웨이 -98 구현), `MANUAL` 중 수동 끊김은 자율이 신선해도 `SAFE_STOP`, `perception.result` 좌표계·부호·최대 개수·발행 중단 (젯슨 대역 -156 구현), 6장 재개 응답 이벤트 없음·`drive.fault.detected` 조건. 토픽·필드 이름 그대로 |
 | v1.2 | 2026-10-21 | 재개를 바로 바꾸지 않고 `drive.resume.accepted`(3초 뒤 전환) → `AUTO` 또는 `drive.resume.cancelled`(6장). 운영자 콘솔 재개 경로 MQTT-13 `xenova/v1/console/resume`(백엔드 발행, 9장 ACL) (S15P31E110-98). 카메라 감지 결과 MQTT-14 `xenova/v1/apps/message-board/vision` `vision.result`(6장, 주행 판단 미사용·≤10 Hz·QoS 0, 9장 ACL message-board 발행) (S15P31E110-128) |
 | v1.3 (초안) | 2026-10-22 | 시뮬레이터 전용 11장 (데모 기본 구성): MQTT-15 `sim.pose`·MQTT-16 `sim.world`(retained)·MQTT-17 `sim.command`, 콘솔 REST-30~35·WS-06 `/ws/v1/sim`, 게이트웨이 TCP 출력. 9장 ACL `simulator` 계정·백엔드 `sim/command`. 6장 `perception.event` `kind` 값 (자율주행 앱 -259 구현) (S15P31E110-261·-265) |
+| v1.5 (초안) | 2026-10-22 | 자율주행 자동 복귀: `AUTO_READY`에 들어가면 게이트웨이가 바로 3·2·1(`drive.resume.accepted`, `requested_by: auto`) 뒤 `AUTO`(`auto_resumed`). 카운트다운 중 취소 `drive.resume.cancel_requested`(MQTT-06 메시지 보드·MQTT-13 콘솔, `DELETE /api/v1/drive/resume`) → `drive.resume.cancelled`(`operator_cancelled`), 그 `AUTO_READY` 동안은 운영자 재개로만 (5.2·6장, 게이트웨이 -98) |
 | v1.4 (초안) | 2026-10-22 | 11장 트랙을 타원 → 실제 서킷 중심선 (`track.centerline`·구간별 벽 `wall_left_m`·`wall_right_m`·`real_m`·`start_index`, 트랙 목록 `tracks`), `sim.pose` `surface`·`race`(F1 출발 신호·랩), 장애물 `kind`, `sim.world.car`·`time_scale`, `sim.command` `track.select`·`race.start`, 배치 검사와 결과 MQTT-18 `xenova/v1/sim/result` `sim.command.result`, REST-31 `kind`·REST-36 트랙 바꾸기·REST-37 다시 출발, WS-06 결과 전달. 9장 ACL 시뮬레이터 `sim/result`. 화면 표시 단위 = 실제 서킷 비율 (S15P31E110-262·-265) |
