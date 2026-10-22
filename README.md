@@ -41,6 +41,33 @@ Jenkins Credentials에 다음 항목을 등록해야 합니다.
 | `xenova-production-env` | Secret file | `.env.example`을 기반으로 작성한 운영 `.env` |
 
 서버에는 Docker Engine과 Docker Compose v2가 설치되어 있어야 하며, `ubuntu` 사용자가 승인 요청 없이 Docker를 실행할 수 있어야 합니다. 초기 배포 전 UFW에서 HTTP 80 포트를 허용해야 합니다. 운영 비밀값과 PEM 키는 Git 저장소에 커밋하지 않습니다.
+
+### Jenkins 컨테이너
+
+Jenkins는 운영 서비스와 별도인 `compose.jenkins.yaml`로 실행합니다. 전용 이미지에는 Java 21, Node.js 22, Python 3, Git, SSH, Docker CLI·Buildx·Compose와 파이프라인 플러그인이 포함됩니다. Jenkins 웹 포트는 `127.0.0.1`에만 바인딩하므로 인터넷에서 직접 접근할 수 없습니다.
+
+```bash
+cd /opt/xenova
+cp deploy/jenkins/.env.example deploy/jenkins/.env
+sed -i "s/^DOCKER_GID=.*/DOCKER_GID=$(getent group docker | cut -d: -f3)/" deploy/jenkins/.env
+docker compose --env-file deploy/jenkins/.env -f compose.jenkins.yaml config --quiet
+docker compose --env-file deploy/jenkins/.env -f compose.jenkins.yaml up -d --build
+```
+
+로컬 PC에서 SSH 터널을 연 뒤 `http://127.0.0.1:8080`으로 접속합니다.
+
+```bash
+ssh -i K15e110T.pem -L 8080:127.0.0.1:8080 ubuntu@k15e110.p.ssafy.io
+```
+
+초기 관리자 비밀번호는 EC2에서 아래 명령으로 한 번만 확인합니다.
+
+```bash
+docker compose --env-file deploy/jenkins/.env -f compose.jenkins.yaml exec jenkins \
+  cat /var/jenkins_home/secrets/initialAdminPassword
+```
+
+`/var/run/docker.sock` 연결은 Jenkins 파이프라인에 호스트의 root에 준하는 권한을 부여합니다. 관리자 이외 사용자가 임의의 Jenkinsfile을 실행할 수 없도록 Jenkins와 GitLab 권한을 제한해야 합니다.
 - 외부 Layer·버전은 `platform/yocto/layers.lock`을 따릅니다.
 
 `docs/build-guides/perseus-*` 및 이전 `yocto-rpi4-xen-*` 문서는 당시
