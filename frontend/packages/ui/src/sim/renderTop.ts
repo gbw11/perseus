@@ -11,6 +11,7 @@ export interface TopView {
 export interface TopScene {
   pose: SimPose | null;
   obstacles: SimObstacle[];
+  /** 지나온 길 — 실제 서킷 탑뷰에서는 그리지 않는다 (받기만 함) */
   trail: [number, number][];
   carColor: string;
   /** 차 몸 크기 (sim.world.car) */
@@ -234,21 +235,8 @@ function background(g: Circuit, W: number, H: number, v: TopView): HTMLCanvasEle
 export function drawTop(ctx: CanvasRenderingContext2D, W: number, H: number, g: Circuit, scene: TopScene) {
   const v = fitTop(g, W, H);
   ctx.drawImage(background(g, W, H, v), 0, 0);
-  const { pose, obstacles, trail, carColor, car } = scene;
-  if (trail.length > 1) {
-    ctx.beginPath();
-    trail.forEach(([x, y], k) => {
-      const [u, vv] = w2s(v, x, y);
-      if (k) ctx.lineTo(u, vv);
-      else ctx.moveTo(u, vv);
-    });
-    ctx.strokeStyle = carColor;
-    ctx.globalAlpha = 0.6;
-    ctx.lineWidth = Math.max(2.5, 0.035 * v.s);
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
+  const { pose, obstacles, carColor, car } = scene;
+  // 지나온 길 선은 그리지 않는다 (2026-10-22 요청 — 실제 서킷 탑뷰에서는 차 위치만)
   for (const o of obstacles) {
     const [u, vv] = w2s(v, o.x, o.y);
     const r = Math.max(4, (o.w * v.s) / 2);
@@ -314,4 +302,38 @@ function nearestIdx(g: Circuit, x: number, y: number) {
     }
   }
   return best;
+}
+
+/**
+ * 장애물 하나를 위에서 본 모양 (탑뷰와 같은 그림) — 지도 밖에서 끌 때 커서에 붙는 그림.
+ * px = 지도 축척으로 잰 장애물 폭 (CSS px). 진행 방향은 오른쪽.
+ */
+export function obstacleTopImage(kind: 'cone' | 'box' | 'tires', px: number): HTMLCanvasElement {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const r = Math.max(4, px / 2);
+  const size = Math.ceil(r * 2.4);
+  const c = document.createElement('canvas');
+  c.width = size * dpr;
+  c.height = size * dpr;
+  c.style.width = `${size}px`;
+  c.style.height = `${size}px`;
+  const g = c.getContext('2d');
+  if (!g) return c;
+  g.scale(dpr, dpr);
+  g.translate(size / 2, size / 2);
+  if (kind === 'cone') {
+    g.fillStyle = SCENE.cone;
+    g.beginPath();
+    g.moveTo(r, 0);
+    g.lineTo(-r * 0.8, r * 0.9);
+    g.lineTo(-r * 0.8, -r * 0.9);
+    g.closePath();
+    g.fill();
+  } else if (kind === 'box') {
+    g.fillStyle = SCENE.box;
+    g.fillRect(-r * 0.8, -r, r * 1.6, r * 2);
+    g.strokeStyle = '#dee2ed';
+    g.strokeRect(-r * 0.8, -r, r * 1.6, r * 2);
+  } else for (const dy of [-0.5, 0.5]) tireTop(g, 0, dy * r, r * 0.55);
+  return c;
 }

@@ -6,6 +6,7 @@ import {
   isCircuit,
   kmh,
   obstaclesAhead,
+  obstacleTopImage,
   realM,
   StatusBadge,
   TrackView,
@@ -57,6 +58,8 @@ export function SimTrackControl() {
   const [dragKind, setDragKind] = useState<ObstacleKind | null>(null);
   const [preview, setPreview] = useState<{ x: number; y: number; w: number } | null>(null);
   const drag = useRef<{ id: string; moved: boolean; lastAt: number; warnAt: number } | null>(null);
+  /** 지도 상자 — 끌 때 그림 크기를 지도 축척에 맞추려고 */
+  const mapBox = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!reject) return;
     const id = window.setTimeout(() => setReject(null), 1400);
@@ -157,6 +160,16 @@ export function SimTrackControl() {
                 onDragStart={(e) => {
                   e.dataTransfer.setData('text/plain', k.kind);
                   e.dataTransfer.effectAllowed = 'copy';
+                  // 끄는 동안 커서에 붙는 그림 = 지도 축척에 맞춘 실제 크기의 위에서 본 모양
+                  const w = mapBox.current?.getBoundingClientRect().width ?? 0;
+                  if (w > 0) {
+                    const img = obstacleTopImage(k.kind, (k.w * w) / (g.box.x1 - g.box.x0));
+                    img.style.position = 'fixed';
+                    img.style.left = '-1000px';
+                    document.body.append(img); // 그림이 문서에 있어야 끌기 그림으로 쓰인다
+                    e.dataTransfer.setDragImage(img, img.offsetWidth / 2, img.offsetHeight / 2);
+                    window.setTimeout(() => img.remove(), 0);
+                  }
                   setDragKind(k.kind);
                   setKind(k.kind);
                 }}
@@ -172,18 +185,20 @@ export function SimTrackControl() {
               </button>
             ))}
           </div>
-          <TrackView
-            pose={pose}
-            world={world}
-            trail={sim.trail}
-            carColor={carColor}
-            onPointer={onPointer}
-            selectedId={selected}
-            rejectAt={reject}
-            onDragTrack={onDragTrack}
-            preview={preview}
-            label="트랙 조작 지도 — 장애물 그림을 끌어다 놓기, 끌어서 옮기기, 두 번 눌러 치우기"
-          />
+          <div ref={mapBox}>
+            <TrackView
+              pose={pose}
+              world={world}
+              trail={sim.trail}
+              carColor={carColor}
+              onPointer={onPointer}
+              selectedId={selected}
+              rejectAt={reject}
+              onDragTrack={onDragTrack}
+              preview={preview}
+              label="트랙 조작 지도 — 장애물 그림을 끌어다 놓기, 끌어서 옮기기, 두 번 눌러 치우기"
+            />
+          </div>
           <p className={styles.dim}>
             위 그림을 끌어다 트랙에 놓는다 (그림을 고른 뒤 지도를 눌러도 된다). 지도 위 장애물은 끌면 옮겨지고
             두 번 누르면 치워진다. 차(폭 {realM(g, 0.2).toFixed(1)} m)가 지나갈 틈({realM(g, 0.26).toFixed(1)}{' '}

@@ -25,6 +25,7 @@ export {
   type Circuit,
 } from './sim/circuit';
 export { type TrackPointer } from './sim/SimCanvas';
+export { obstacleTopImage } from './sim/renderTop';
 export { Modal, type ModalProps } from './components/Modal';
 export { HEALTH_LABEL, StatusBadge, type Health, type StatusBadgeProps } from './components/StatusBadge';
 export { ToastProvider, useToast } from './components/Toast';
