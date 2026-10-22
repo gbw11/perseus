@@ -454,3 +454,41 @@
 .navLarge .navStats {
   font-size: var(--x-text-lg);
 }
+
+/* 시뮬레이터 칸 아래 네비게이션 알림 띠 (시뮬레이터 시연 시나리오 §4, D8 격리가 보이게) */
+.strip {
+  display: flex;
+  gap: var(--x-space-2);
+  align-items: baseline;
+  padding: var(--x-space-2) var(--x-space-3);
+  border: 1px solid var(--x-border);
+  border-left: 3px solid var(--x-app-interaction);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  font-size: var(--x-text-sm);
+  min-width: 0;
+}
+.strip > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stripDown {
+  border-left-color: var(--x-fault);
+  color: var(--x-fault);
+}
+.stripLabel {
+  flex: none;
+  font-weight: 600;
+  color: var(--x-app-interaction);
+}
+.stripDown .stripLabel {
+  color: var(--x-fault);
+}
+
+/* 모니터 2 시뮬레이터: 트랙을 화면 높이에 맞춘다 (위 모드 띠·머리·제목 몫을 뺀 만큼) */
+.detailMain .simTrack {
+  height: calc(100vh - 260px);
+  min-height: 220px;
+}

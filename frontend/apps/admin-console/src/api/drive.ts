@@ -81,8 +81,8 @@ function wsUrl(path: string): string {
 
 type Frame = { type: string } & Record<string, unknown>;
 
-/** 인증 소켓 하나를 열고, 끊기면 다시 붙는다. 4401 이면 refresh 후 재시도 */
-function useAuthedSocket(path: string, onFrame: (frame: Frame) => void) {
+/** 인증 소켓 하나를 열고, 끊기면 다시 붙는다. 4401 이면 refresh 후 재시도. path 가 비면 열지 않는다 */
+export function useAuthedSocket(path: string, onFrame: (frame: Frame) => void) {
   const [state, setState] = useState<SocketState>('connecting');
   const socketRef = useRef<WebSocket | null>(null);
   const frameRef = useRef(onFrame);
@@ -91,6 +91,7 @@ function useAuthedSocket(path: string, onFrame: (frame: Frame) => void) {
   });
 
   useEffect(() => {
+    if (!path) return; // 빈 주소 = 연결하지 않는다 (mock)
     let stopped = false;
     let timer: number | undefined;
 

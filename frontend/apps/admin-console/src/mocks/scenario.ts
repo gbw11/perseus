@@ -9,6 +9,7 @@
 import type { DriveApp, DriveKey, DriveMode, DriveState, InputResult } from '../api/drive';
 import type { EventSeverity, EventType, VmEvent, VmState } from '../api/types';
 import { VM_IDS } from './data';
+import { advance, initialSim, obstaclesAhead, sensing, setEstop, snapshotOf, type SimSnapshot } from './sim';
 
 const TICK_MS = 100;
 /** 강제 종료 후 복구 서비스가 재시작하기까지 */
@@ -112,6 +113,10 @@ function initial(): Store {
 
 let store = initial();
 const listeners = new Set<Listener>();
+/** 시뮬레이터 구성(데모 기본)이면 켠다. VITE_MOCK_SIM=false 면 실차 구성처럼 sim 토픽이 없다 (세 번째 칸 = 네비게이션) */
+export const SIM_ON = import.meta.env.VITE_MOCK_SIM !== 'false';
+let sim = initialSim(Date.now());
+const simListeners = new Set<(snapshot: SimSnapshot) => void>();
 let timer: ReturnType<typeof setInterval> | undefined;
 
 function push(e: VmEvent) {
@@ -187,6 +192,8 @@ function step() {
       setMode('AUTO', 'resume_requested');
     }
   }
+  // 시뮬레이터 근거리 감지 (지난 tick 위치 기준) → vehicle.status flags.obstacle
+  if (SIM_ON) store.obstacle = sensing(sim);
   // 차량은 활성 앱 명령을 따라간다 (시뮬레이터와 같은 규칙: 비상정지·장애물이면 전진 0)
   const active = activeApp();
   let target = 0;
@@ -202,6 +209,7 @@ function step() {
   if (store.estop || (store.obstacle && target > 0)) target = 0;
   store.v += Math.max(-0.04, Math.min(0.04, target - store.v));
   store.steer = steer;
+  if (SIM_ON) sim = advance(setEstop(sim, store.estop), t, TICK_MS / 1000, store.v, store.steer, active);
   emit();
 }
 
@@ -292,10 +300,11 @@ export function snapshot(): DriveState {
           valid: true,
           received_ago_ms: now % 67,
           hz: 15,
-          lane_offset_m: 0.05,
+          // 시뮬레이터 구성이면 인지 대역이 시뮬레이터 위치로 계산한 값 흉내 (-268)
+          lane_offset_m: SIM_ON ? Math.round(sim.lateral * 1000) / 1000 : 0.05,
           heading_err_rad: -0.02,
-          obstacle_count: store.obstacle ? 1 : 0,
-          stop: false,
+          obstacle_count: SIM_ON ? obstaclesAhead(sim) : store.obstacle ? 1 : 0,
+          stop: SIM_ON ? store.obstacle : false,
         },
     resume:
       store.resumeAt == null
@@ -331,13 +340,28 @@ if (bus) {
 function emit() {
   const state = snapshot();
   listeners.forEach((listener) => listener(state));
+  const simSnapshot = SIM_ON ? snapshotOf(sim, store.v, store.steer) : null;
+  if (simSnapshot) simListeners.forEach((listener) => listener(simSnapshot));
   if (!bus) return;
   bus.postMessage({ type: 'drive.state', state });
+  // WS /ws/v1/sim(WS-06) 의 sim.snapshot 과 같은 모양 (MQTT 계약 v1.3 §11.2)
+  if (simSnapshot) bus.postMessage({ type: 'sim.snapshot', ...simSnapshot });
   for (const e of [...store.events].reverse()) {
     if (sentEvents.has(e.event_id)) continue;
     sentEvents.add(e.event_id);
     bus.postMessage({ type: 'event', payload: e });
   }
+}
+
+/** 시뮬레이터 상태 (WS-06 흉내). SIM_ON 이 아니면 아무것도 오지 않는다 */
+export function subscribeSim(listener: (snapshot: SimSnapshot) => void): () => void {
+  simListeners.add(listener);
+  const off = subscribe(() => {}); // tick 을 돌린다
+  if (SIM_ON) listener(snapshotOf(sim, store.v, store.steer));
+  return () => {
+    simListeners.delete(listener);
+    off();
+  };
 }
 
 export function subscribe(listener: Listener): () => void {
@@ -544,6 +568,7 @@ function applied(id: string, revision: number) {
 
 export function resetScenario() {
   store = initial();
+  sim = initialSim(Date.now());
   displays = [
     display('display-0', '모니터 1', 'split', null),
     display('display-1', '모니터 2', 'os-face', VM_IDS.autonomous),

@@ -46,6 +46,11 @@
   --x-app-autonomous: #2f6fed;
   --x-app-manual: #8a4ddb;
   --x-app-interaction: #db2777;
+  /* 시뮬레이터 화면 (시뮬레이터 시연 시나리오 §4): 칸 색, 트랙 노면·가장자리·중앙선 */
+  --x-app-simulator: #0f8f7e;
+  --x-track-road: #c9ced6;
+  --x-track-edge: #ffffff;
+  --x-track-lane: #d9a21b;
 
   /* 게스트 (VM 관리 API 계약 §2.3 템플릿) */
   --x-guest-debian: #c7254e;
@@ -82,6 +87,10 @@
   --x-app-autonomous: #38bdf8;
   --x-app-manual: #a78bfa;
   --x-app-interaction: #f472b6;
+  --x-app-simulator: #2dd4bf;
+  --x-track-road: #2b313b;
+  --x-track-edge: #59606b;
+  --x-track-lane: #e8b23a;
 }
 
 *,

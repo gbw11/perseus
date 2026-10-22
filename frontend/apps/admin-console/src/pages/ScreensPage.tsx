@@ -14,6 +14,7 @@ export function ScreensPage() {
     ['모니터 2 — 자율주행 상세', '/detail/autonomous'],
     ['모니터 2 — 수동주행 상세', '/detail/manual'],
     ['모니터 2 — 네비게이션 상세', '/detail/interaction'],
+    ['모니터 2 — 시뮬레이터 (시뮬레이터 구성)', '/sim'],
   ] as const;
   return (
     <Card title="모니터 화면 (RC카 시나리오 §5)">

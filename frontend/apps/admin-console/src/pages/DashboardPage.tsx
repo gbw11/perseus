@@ -1,8 +1,9 @@
-import { CameraView, Card, StatusBadge } from '@xenova/ui';
+import { CameraView, Card, StatusBadge, TrackView } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
 import type { DriveState } from '../api/drive';
 import { useEvents, useVms } from '../api/queries';
+import { useSimState, type SimView } from '../api/sim';
 import type { Vm } from '../api/types';
 import { clock, describe } from '../domain/events';
 import {
@@ -36,6 +37,7 @@ export function DashboardPage() {
   const { drive } = useDrive();
   const vms = useVms();
   const events = useEvents({ limit: 5 });
+  const sim = useSimState();
   const control = drive?.control;
   const vehicle = drive?.vehicle;
   const flags = vehicle?.flags;
@@ -85,9 +87,14 @@ export function DashboardPage() {
       )}
 
       <div className={styles.cols3}>
-        {ROLE_ORDER.map((app) => (
-          <AppCard key={app} app={app} vm={vmOf(app, vms.data?.items, drive)} drive={drive} />
-        ))}
+        {ROLE_ORDER.map((app) =>
+          // 시뮬레이터 구성이면 세 번째 칸이 시뮬레이터로 바뀐다 (위치가 1초 안에 오면, 화면 배치 계약 v1.1 §5.6)
+          app === 'message-board' && sim.available ? (
+            <SimCard key="simulator" sim={sim} drive={drive} board={vmOf(app, vms.data?.items, drive)} />
+          ) : (
+            <AppCard key={app} app={app} vm={vmOf(app, vms.data?.items, drive)} drive={drive} />
+          ),
+        )}
       </div>
 
       <div className={styles.cols2}>
@@ -288,6 +295,81 @@ function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: Dr
           </div>
         </>
       )}
+    </Card>
+  );
+}
+
+const CAR_COLOR = {
+  autonomous: 'var(--x-app-autonomous)',
+  manual: 'var(--x-app-manual)',
+} as const;
+
+/**
+ * 세 번째 칸 — 시뮬레이터 (시뮬레이터 시연 시나리오 §4). 실차 대신 화면 속 차가 트랙을 도는 모습.
+ * 네비게이션 VM 은 그대로 돌고 있으므로 그 상태 한 줄을 남긴다 (그 VM 을 죽여도 차는 계속 달린다 — D8 격리).
+ */
+function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null; board: Vm | undefined }) {
+  const active = drive?.control?.active_app ?? null;
+  const boardState = drive?.apps['message-board'];
+  const boardHealth = appHealth(ROLES['message-board'], board, boardState);
+  const pose = sim.pose;
+  const flags = drive?.vehicle?.flags;
+  return (
+    <Card
+      className={styles.appCard}
+      style={{ '--accent': 'var(--x-app-simulator)' } as CSSProperties}
+      title={<span style={{ color: 'var(--x-app-simulator)' }}>시뮬레이터</span>}
+      actions={
+        <StatusBadge
+          health={flags?.estop || flags?.obstacle ? 'fault' : (pose?.v_mps ?? 0) > 0.02 ? 'ok' : 'stopped'}
+          label={
+            flags?.estop
+              ? 'E-stop'
+              : flags?.obstacle
+                ? '장애물 정지'
+                : (pose?.v_mps ?? 0) > 0.02
+                  ? '주행 중'
+                  : '정지'
+          }
+          size="sm"
+        />
+      }
+    >
+      <TrackView
+        compact
+        pose={pose}
+        world={sim.world}
+        trail={sim.trail}
+        carColor={active ? CAR_COLOR[active] : 'var(--x-fault)'}
+        sensing={!!flags?.obstacle}
+        label="시뮬레이터 트랙 — 차 위치와 장애물"
+      />
+      <div className={styles.rows}>
+        <div>
+          <span>위치 x, y</span>
+          <span className={styles.mono}>{pose ? `${pose.x.toFixed(2)}, ${pose.y.toFixed(2)} m` : '—'}</span>
+        </div>
+        <div>
+          <span>속도 · 조향</span>
+          <span className={styles.mono}>
+            {pose ? `${plain(pose.v_mps)} m/s · ${signed(pose.steer_rad)} rad` : '—'}
+          </span>
+        </div>
+        <div>
+          <span>장애물 · 트랙 rev</span>
+          <span className={styles.mono}>
+            {sim.world ? `${sim.world.obstacles.length}개 · ${sim.world.revision}` : '—'}
+          </span>
+        </div>
+        <div>
+          <span>네비게이션 VM</span>
+          <StatusBadge
+            health={boardHealth}
+            label={boardHealth === 'ok' ? '정상 — 알림·재개 요청' : '응답 없음 — 주행은 그대로'}
+            size="sm"
+          />
+        </div>
+      </div>
     </Card>
   );
 }
