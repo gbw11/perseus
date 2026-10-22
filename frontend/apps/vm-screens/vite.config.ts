@@ -6,6 +6,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
   const backend = env.VITE_BACKEND_ORIGIN || 'http://localhost:8080';
   return {
+    base: env.VITE_BASE_PATH || '/',
     plugins: [react()],
     server: {
       proxy: {
