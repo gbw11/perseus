@@ -20,6 +20,8 @@ import logging
 import os
 import sys
 import threading
+import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
@@ -37,7 +39,8 @@ from ..errors import (
     VMNotFound,
 )
 from ..models import VmState
-from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner
+from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner, StatsSample
+from .xentop import Xentop, collect_stats
 from .xl import Xl
 
 log = logging.getLogger(__name__)
@@ -122,6 +125,31 @@ def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0) -> ManagerLi
             "xenova_management not importable; set XENOVA_PLATFORM_LIB (board: /usr/lib/xenova)", detail=str(exc)
         ) from exc
     return SerializedManager(module.Manager(), busy_timeout_s=busy_timeout_s)
+
+
+RecordsLoader = Callable[[], Mapping[str, Mapping[str, Any]]]
+
+
+def load_records_loader(platform_lib: str, manager: ManagerLike) -> RecordsLoader:
+    """플랫폼 라이브러리의 읽기 전용 registry 검증 `xenova_vm.load_records(data, validate_assets=False)` 를 부르는 함수를 만든다.
+
+    잠금·Xen 호출 없이 활성 레코드(instances/<id>/instance.json)만 읽으며, 플랫폼과 같은 규칙으로 심볼릭 링크·비정규 경로·
+    id 와 디렉터리 이름 불일치·중복 신원·누락 레코드를 거부한다(PlatformError). 부팅 자산 검사는 하지 않는다.
+    xenova_management 가 모듈 로딩 때 xenova_vm 을 import 하므로 실제 조립(build_driver)에서는 두 모듈이 함께 있거나 함께 없고,
+    없으면 load_manager 에서 서비스 시작이 실패한다. 여기서 import 를 호출 시점으로 미루는 것은 드라이버를 직접 조립하는 테스트 때문이다.
+    """
+    for entry in [p for p in platform_lib.split(os.pathsep) if p]:
+        if entry not in sys.path:
+            sys.path.insert(0, entry)
+
+    def load() -> Mapping[str, Mapping[str, Any]]:
+        try:
+            module = importlib.import_module("xenova_vm")
+        except ImportError as exc:
+            raise PlatformUnavailable("xenova_vm not importable; set XENOVA_PLATFORM_LIB (board: /usr/lib/xenova)", detail=str(exc)) from exc
+        return module.load_records(Path(manager.data), validate_assets=False)
+
+    return load
 
 
 # ---------------------------------------------------------------------------
@@ -246,9 +274,20 @@ def view_to_domain(view: dict[str, Any]) -> Domain | None:
 class PlatformDriver(Driver):
     name = "platform"
 
-    def __init__(self, manager: ManagerLike, xl: Xl | None = None) -> None:
+    def __init__(
+        self,
+        manager: ManagerLike,
+        xl: Xl | None = None,
+        xentop: Xentop | None = None,
+        *,
+        records_loader: RecordsLoader | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.manager = manager
         self._xl = xl
+        self._xentop = xentop
+        self._records_loader = records_loader
+        self._monotonic = monotonic
 
     # ---- 조회 ----
 
@@ -318,6 +357,49 @@ class PlatformDriver(Driver):
         if self._xl is None:
             raise PlatformUnavailable("xl is not configured for host_info")
         return self._xl.info()
+
+    def collect_stats(self) -> StatsSample:
+        """xentop 은 Manager 를 거치지 않는다(잠금·xl list 실행 시간을 피해 조회 한도 안에 끝낸다).
+
+        관리 대상 판별은 uuid 유무가 아니라 플랫폼 registry 등록 여부다. Xen 은 설정에 uuid 가 없어도 새로 만들어 주므로
+        xl 로 직접 띄운 도메인도 uuid 를 가진다. registry 는 플랫폼 라이브러리의 읽기 전용 검증(load_records_loader)으로 읽는다.
+        """
+        if self._xl is None or self._xentop is None:
+            raise PlatformUnavailable("xl/xentop are not configured for stats")
+        # 조회 한도는 요청 전체다. registry 조회(SD 카드)가 쓴 시간도 뺀다
+        budget = self._xentop.timeout_s
+        started = self._monotonic()
+        registered = self.registered_vm_ids()
+        remaining = budget - (self._monotonic() - started)
+        if remaining <= 0:
+            raise DriverTimeout(f"stats deadline of {budget:g}s exhausted by registry scan")
+        return collect_stats(
+            self._xentop, self._xl, allowed=registered.__contains__, budget_s=remaining, monotonic=self._monotonic
+        )
+
+    def registered_vm_ids(self) -> set[UUID]:
+        """registry 에 등록된(REGISTERED) VM 의 uuid. 플랫폼 `xenova_vm.load_records(validate_assets=False)` 의 결과다.
+
+        플랫폼이 거부하는 상태(심볼릭 링크, id/디렉터리 불일치, 중복 신원, 레코드 누락·손상)는 RECOVERY_REQUIRED 에 해당하므로
+        그 VM 만 빼고 200 을 내지 않고 503 이다. 점으로 시작하는 보관본·작업 공간 디렉터리는 플랫폼이 건너뛴다.
+        """
+        if self._records_loader is None:
+            raise PlatformUnavailable("platform record loader is not configured for stats")
+        try:
+            records = self._records_loader()
+        except Dom0ManagerError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 플랫폼 PlatformError 는 정적으로 import 할 수 없다. 읽기 전용 검증 실패는 전부 복구 필요 상태다
+            raise PlatformUnavailable(
+                "registry is invalid; platform recovery required", detail=f"{type(exc).__name__}: {exc}"[:200]
+            ) from exc
+        found: set[UUID] = set()
+        for name, record in records.items():
+            try:
+                found.add(UUID(str(record["uuid"])))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise PlatformUnavailable(f"registry record {name} has no valid uuid; platform recovery required") from exc
+        return found
 
     def health(self) -> bool:
         """xl 응답과 registry 저장소 존재만 본다. Manager 를 거치지 않는다.
