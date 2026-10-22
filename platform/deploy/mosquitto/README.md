@@ -31,7 +31,7 @@ cd platform/deploy/mosquitto
 cp local/.env.example local/.env           # XENOVA_MQTT_DEV_PASSWORD 를 바꾼다
 bash scripts/make-passwd.sh                # local/passwd 생성 (compose 보다 먼저)
 docker compose -f local/docker-compose.yml --env-file local/.env up -d
-bash scripts/check.sh                      # 결과: 통과 20, 실패 0 (paho-mqtt 없으면 19 + SKIP 1)
+bash scripts/check.sh                      # 결과: 통과 25, 실패 0 (paho-mqtt 없으면 24 + SKIP 1)
 ```
 
 - `local/passwd` 를 만들기 전에 compose 를 올리면 Docker 가 빈 디렉터리를 만들어 브로커가 뜨지 않습니다. 그때는 `local/passwd` 디렉터리를 지우고 `make-passwd.sh` 부터 다시 합니다.

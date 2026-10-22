@@ -78,6 +78,12 @@ delivered backend "$P/vehicle/status" gateway && ok "게이트웨이 → vehicle
 delivered backend "$P/vehicle/status" manual && bad "앱이 vehicle/status 에 발행됨" || ok "앱 → vehicle/status 차단"
 delivered manual "$P/vehicle/control" autonomous && bad "앱이 vehicle/control 에 발행됨" || ok "앱 → vehicle/control 차단"
 delivered manual "$P/vehicle/control" gateway && ok "게이트웨이 → vehicle/control" || bad "게이트웨이 → vehicle/control"
+# 시뮬레이터 전용 (계약 11장): 위치·트랙은 simulator, 조작은 backend
+delivered backend "$P/sim/pose" simulator && ok "시뮬레이터 → sim/pose (MQTT-15)" || bad "시뮬레이터 → sim/pose (MQTT-15)"
+delivered perception "$P/sim/world" simulator && ok "시뮬레이터 → sim/world (MQTT-16)" || bad "시뮬레이터 → sim/world (MQTT-16)"
+delivered simulator "$P/sim/command" backend && ok "백엔드 → sim/command (MQTT-17)" || bad "백엔드 → sim/command (MQTT-17)"
+delivered simulator "$P/sim/command" autonomous && bad "앱이 sim/command 에 발행됨" || ok "앱 → sim/command 차단"
+delivered backend "$P/sim/pose" gateway && bad "게이트웨이가 sim/pose 에 발행됨" || ok "게이트웨이 → sim/pose 차단"
 delivered gateway "$P/vehicle/control" observer && bad "observer 가 발행됨" || ok "observer 발행 차단 (읽기 전용)"
 
 # 5. 계약 §1 크기 상한 (64 KB 초과는 전달되지 않아야 한다)

@@ -27,6 +27,10 @@ static const struct xm_policy POLICIES[] = {
 	/* 8장 지연 측정 */
 	{"probe.ping", 1, false, false},
 	{"probe.pong", 1, false, false},
+	/* 11장 시뮬레이터 전용 */
+	{"sim.pose", 0, false, true},
+	{"sim.world", 1, true, false},
+	{"sim.command", 1, false, false},
 };
 
 /* 계약 표에 없는 type. 유실보다 중복이 낫다고 보고 QoS 1 */

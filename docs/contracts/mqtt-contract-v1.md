@@ -365,7 +365,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 
 | 필드 | 타입 | 설명 |
 | --- | --- | --- |
-| `revision` | uint32 | 트랙·장애물·E-stop 이 바뀔 때마다 1 오른다. 시작 1 |
+| `revision` | uint32 | 트랙·장애물·E-stop 이 바뀔 때마다 1 오른다. 시작 1. 시뮬레이터가 다시 시작하면 1 부터 다시 세므로, 받는 쪽은 revision 이 줄어도 새 실행으로 보고 받는다. 시뮬레이터는 정상 종료할 때 retained 를 지운다 |
 | `track` | object | 지금 트랙. 아래 표 (v1.4 에서 타원을 실제 서킷 중심선으로 바꿈) |
 | `tracks` | array | 고를 수 있는 트랙 `[{id, name, real_m}]` (v1.4). 10개: `spielberg`(레드불링 4315 m)·`monza`(몬차 5790 m)·`silverstone`·`spa`·`melbourne`·`hungaroring`·`catalunya`·`mexico`·`bahrain`·`interlagos`. 시작은 `spielberg` |
 | `car` | object | `{length_m, width_m}` 판정에 쓰는 차 몸 크기. 기본 `0.42`·`0.20` (v1.4) |

@@ -108,6 +108,24 @@
   "max_bytes": 65536
  },
  {
+  "type": "sim.pose",
+  "qos": 0,
+  "retain": false,
+  "max_bytes": 1024
+ },
+ {
+  "type": "sim.world",
+  "qos": 1,
+  "retain": true,
+  "max_bytes": 65536
+ },
+ {
+  "type": "sim.command",
+  "qos": 1,
+  "retain": false,
+  "max_bytes": 65536
+ },
+ {
   "type": "unknown.type",
   "qos": 1,
   "retain": false,
