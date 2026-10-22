@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / 'platform/yocto/meta-xenova/recipes-core/xenova-pl
 from xenova_runtime import operation_lock
 from prepare_rootfs import prepare_template, inside
 import template_recipe
+import guest_agent_template
 from prepare_instance import Workspace, make_instance as shared_make_instance
 
 
@@ -134,7 +135,7 @@ def boot_assets(root, output, source):
     modules = inside(root, 'etc/initramfs-tools/modules')
     with modules.open('a') as f:
         f.write('\n# Xenova Xen root disk / network and ext4\nxen-blkfront\nxen-netfront\next4\n')
-    # 네이티브 ARM64 또는 등록된 binfmt 환경이 필요하다. 패키지 설치·apt 실행은 하지 않는다.
+    # 네이티브 ARM64 또는 등록된 binfmt가 필요하다. apt 설치는 앞선 Agent 준비 단계만 수행한다.
     command(['chroot', root, '/bin/true'])
     command(['chroot', root, 'update-initramfs', '-u', '-k', release])
     initrd = inside(root, 'boot/initrd.img-' + release, create_parents=False)
@@ -186,6 +187,9 @@ def make_template(args, source):
             target.mkdir(exist_ok=True)
             command(['mount', '-t', fs, fs, target])
             work.mounts.append(target)
+        agent = None
+        if 'guest_agent' in preparation['recipe']:
+            agent = guest_agent_template.prepare(root, preparation['recipe']['guest_agent'])
         boot_assets(root, stage, source)
         os.sync()
         work.close()
@@ -194,7 +198,7 @@ def make_template(args, source):
                     'size_gib': args.size_gib, 'root_sha256': digest(raw),
                     'schema_version': '1.0', 'template_id': {'ubuntu-24.04-20260926':'ubuntu-24.04-arm64','debian-13-20261015':'debian-13-arm64'}[args.source],
                     'version': preparation['recipe']['version'], 'platform': 'xenova',
-                    'preparation': preparation,
+                    'preparation': preparation, 'guest_agent': agent,
                     'files': {name: {'sha256': digest(stage / name), 'bytes': (stage / name).stat().st_size}
                               for name in ('root.raw', 'Image', 'initrd', 'kernel.config', 'boot.json')}}
         if template_recipe.source_info(recipe, args.source) != preparation:

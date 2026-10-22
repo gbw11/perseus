@@ -1,0 +1,46 @@
+{
+  "passed": true,
+  "cases": [
+    "real_qemu_xen_three_vm_overview_and_default_primary_detail",
+    "both_dom_render_acknowledgements_and_read_only_session",
+    "fixture_manual_mode_keeps_primary_active",
+    "fixture_crash_does_not_invent_failover",
+    "fixture_stale_xen_hides_normal_status",
+    "fixture_confirmed_backup_switch_only_in_follow_mode",
+    "explicit_debian_selection_renders_debian_face",
+    "browser_feed_failure_marks_last_values_and_removes_live_claims",
+    "browser_reconnect_recovers_snapshot",
+    "720p_both_outputs_fit_without_scroll",
+    "no_vm_domain_changes_and_no_browser_errors"
+  ],
+  "before": [
+    [
+      "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+      13
+    ],
+    [
+      "820a0522-243f-42f1-90e9-9b74e1522965",
+      17
+    ],
+    [
+      "dd33284f-baf2-417f-93b2-a1af3c3f1ea2",
+      18
+    ]
+  ],
+  "after": [
+    [
+      "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+      13
+    ],
+    [
+      "820a0522-243f-42f1-90e9-9b74e1522965",
+      17
+    ],
+    [
+      "dd33284f-baf2-417f-93b2-a1af3c3f1ea2",
+      18
+    ]
+  ],
+  "scope": "real QEMU Xen observed via SSH; drive/fault transitions are synthetic feed fixtures; no physical HDMI",
+  "completed_at": "2026-10-22T01:09:27.116Z"
+}
