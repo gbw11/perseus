@@ -9,7 +9,20 @@
 import type { DriveApp, DriveKey, DriveMode, DriveState, InputResult } from '../api/drive';
 import type { EventSeverity, EventType, VmEvent, VmState } from '../api/types';
 import { VM_IDS } from './data';
-import { advance, initialSim, obstaclesAhead, sensing, setEstop, snapshotOf, type SimSnapshot } from './sim';
+import {
+  advance,
+  initialSim,
+  obstaclesAhead,
+  place,
+  restartRace,
+  selectTrack,
+  sensing,
+  setEstop,
+  snapshotOf,
+  type SimCommandResult,
+  type SimSnapshot,
+} from './sim';
+import type { Kind } from './simEngine';
 
 const TICK_MS = 100;
 /** 강제 종료 후 복구 서비스가 재시작하기까지 */
@@ -196,6 +209,20 @@ function step() {
   if (SIM_ON) store.obstacle = sensing(sim);
   // 차량은 활성 앱 명령을 따라간다 (시뮬레이터와 같은 규칙: 비상정지·장애물이면 전진 0)
   const active = activeApp();
+  if (SIM_ON) {
+    // 시뮬레이터 구성: 차 움직임은 시뮬레이터 mock 이 (자율주행 규칙·수동 키·출발 신호, 시나리오 §4-2)
+    const driver =
+      active === 'autonomous' && auto.alive && !store.perceptionLost
+        ? 'autonomous'
+        : active === 'manual' && manual.alive
+          ? 'manual'
+          : null;
+    sim = advance(setEstop(sim, store.estop), t, TICK_MS / 1000, driver, store.keys);
+    store.v = sim.car.v;
+    store.steer = sim.car.steer;
+    emit();
+    return;
+  }
   let target = 0;
   let steer = 0;
   if (active === 'autonomous' && auto.alive && !store.perceptionLost) {
@@ -209,7 +236,6 @@ function step() {
   if (store.estop || (store.obstacle && target > 0)) target = 0;
   store.v += Math.max(-0.04, Math.min(0.04, target - store.v));
   store.steer = steer;
-  if (SIM_ON) sim = advance(setEstop(sim, store.estop), t, TICK_MS / 1000, store.v, store.steer, active);
   emit();
 }
 
@@ -272,8 +298,9 @@ export function snapshot(): DriveState {
         'autonomous',
         auto,
         now,
-        lost ? 0 : 0.5,
-        lost ? 0 : 0.07,
+        // 시뮬레이터 구성이면 자율주행 규칙이 낸 명령 (속도 계획·회피 조향)
+        lost ? 0 : SIM_ON ? store.v : 0.5,
+        lost ? 0 : SIM_ON ? store.steer : 0.07,
         active === 'autonomous' ? 'active' : 'standby',
       ),
       manual: app(
@@ -340,7 +367,7 @@ if (bus) {
 function emit() {
   const state = snapshot();
   listeners.forEach((listener) => listener(state));
-  const simSnapshot = SIM_ON ? snapshotOf(sim, store.v, store.steer) : null;
+  const simSnapshot = SIM_ON ? snapshotOf(sim) : null;
   if (simSnapshot) simListeners.forEach((listener) => listener(simSnapshot));
   if (!bus) return;
   bus.postMessage({ type: 'drive.state', state });
@@ -357,7 +384,7 @@ function emit() {
 export function subscribeSim(listener: (snapshot: SimSnapshot) => void): () => void {
   simListeners.add(listener);
   const off = subscribe(() => {}); // tick 을 돌린다
-  if (SIM_ON) listener(snapshotOf(sim, store.v, store.steer));
+  if (SIM_ON) listener(snapshotOf(sim));
   return () => {
     simListeners.delete(listener);
     off();
@@ -375,6 +402,25 @@ export function subscribe(listener: Listener): () => void {
       timer = undefined;
     }
   };
+}
+
+// ---- 시뮬레이터 조작 (계약 v1.4 MQTT-17 → MQTT-18 흉내) ----
+
+/** 장애물 놓기 (REST-31). 못 지나가는 자리면 거부 사유가 온다 */
+export function simPlace(kind: Kind, x: number, y: number): SimCommandResult {
+  const r = place(sim, kind, x, y);
+  emit();
+  return r;
+}
+/** 트랙 바꾸기 (REST-36) */
+export function simSelectTrack(trackId: string) {
+  sim = selectTrack(sim, trackId, Date.now());
+  emit();
+}
+/** 다시 출발 — 출발 신호 처음부터 (REST-37) */
+export function simRestart() {
+  sim = restartRace(sim, Date.now());
+  emit();
 }
 
 // ---- 시연 동작 (W-07) ----

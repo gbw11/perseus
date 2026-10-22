@@ -1,11 +1,12 @@
 /**
- * 시뮬레이터 상태 구독 (시뮬레이터 구성, MQTT 계약 v1.3 §11.2).
+ * 시뮬레이터 상태 구독 (시뮬레이터 구성, MQTT 계약 v1.4 §11.2).
  *   WS /ws/v1/sim (WS-06) → {"type":"sim.snapshot","available","pose","world"} 10 Hz + 트랙이 바뀔 때
  * 시뮬레이터가 없으면(실차 구성) available=false 이고 화면은 원래 네비게이션 칸을 그린다.
  * 백엔드가 아직 WS-06 을 열지 않았으면(S15P31E110-270 전) 연결이 실패해 계속 available=false 다.
  */
 import { useEffect, useRef, useState } from 'react';
 import type { SimPose, SimWorld } from '@xenova/ui';
+import { request } from './client';
 import { useAuthedSocket } from './drive';
 
 const MOCK = import.meta.env.VITE_MOCK === 'true';
@@ -88,4 +89,22 @@ function useLiveSim(onFrame: ((frame: Frame) => void) | null) {
   useAuthedSocket(onFrame ? '/ws/v1/sim' : '', (frame) => {
     if (onFrame && frame.type === 'sim.snapshot') onFrame(frame as Frame);
   });
+}
+
+/** 트랙 바꾸기 (REST-36 → MQTT-17 track.select, 계약 v1.4). 장애물을 새로 놓고 출발 신호가 처음부터 */
+export async function selectSimTrack(trackId: string): Promise<void> {
+  if (MOCK) {
+    (await import('../mocks/scenario')).simSelectTrack(trackId);
+    return;
+  }
+  await request('/api/v1/sim/track', { method: 'POST', body: { track_id: trackId } });
+}
+
+/** 다시 출발 — 차를 출발선에 세우고 출발 신호를 처음부터 (REST-37 → MQTT-17 race.start, 계약 v1.4) */
+export async function restartSimRace(): Promise<void> {
+  if (MOCK) {
+    (await import('../mocks/scenario')).simRestart();
+    return;
+  }
+  await request('/api/v1/sim/race/start', { method: 'POST' });
 }

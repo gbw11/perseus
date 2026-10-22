@@ -1,23 +1,10 @@
 import type { CSSProperties } from 'react';
+import { CircuitTop } from '../sim/SimCanvas';
+import { isCircuit, type CircuitTrack, type EllipseTrack, type SimPose, type SimWorld } from '../sim/types';
 import styles from './TrackView.module.css';
 
-/** MQTT 계약 v1.3 §11 sim.pose — 트랙 고정 좌표 (원점 = 타원 중심, x 오른쪽, y 위쪽, yaw 반시계) */
-export interface SimPose {
-  x: number;
-  y: number;
-  yaw: number;
-  v_mps: number;
-  steer_rad: number;
-  world_revision: number;
-}
-
-/** MQTT 계약 v1.3 §11 sim.world */
-export interface SimWorld {
-  revision: number;
-  track: { shape: 'ellipse'; a_m: number; b_m: number; lane_width_m: number };
-  obstacles: { id: string; x: number; y: number; w: number }[];
-  estop: boolean;
-}
+/** MQTT 계약 §11 sim.pose·sim.world — v1.4 부터 실제 서킷 트랙 (../sim/types) */
+export type { SimPose, SimWorld };
 
 export interface TrackViewProps {
   pose: SimPose | null;
@@ -36,7 +23,7 @@ export interface TrackViewProps {
   className?: string;
 }
 
-const DEFAULT_TRACK: SimWorld['track'] = { shape: 'ellipse', a_m: 3, b_m: 1.5, lane_width_m: 0.4 };
+const DEFAULT_TRACK: EllipseTrack = { shape: 'ellipse', a_m: 3, b_m: 1.5, lane_width_m: 0.4 };
 /** 시뮬레이터 감지 범위 (xenova_simulator SimSettings: 0.5 m, ±30°) */
 const SENSE_M = 0.5;
 const SENSE_HALF = Math.PI / 6;
@@ -55,7 +42,19 @@ export function TrackView({
   label,
   className,
 }: TrackViewProps) {
-  const track = world?.track ?? DEFAULT_TRACK;
+  // v1.4 실제 서킷이면 캔버스 탑뷰 (잔디·벽·관중석·나무, 실제 크기 차)
+  if (world && isCircuit(world.track))
+    return (
+      <CircuitTop
+        pose={pose}
+        world={world as SimWorld & { track: CircuitTrack }}
+        trail={trail}
+        carColor={carColor ?? '#2dd4bf'}
+        label={label}
+        className={className}
+      />
+    );
+  const track = (world?.track as EllipseTrack | undefined) ?? DEFAULT_TRACK;
   const { a_m: a, b_m: b, lane_width_m: lw } = track;
   const margin = lw / 2 + 0.5;
   const w = 2 * (a + margin);

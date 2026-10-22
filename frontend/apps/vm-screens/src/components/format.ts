@@ -1,4 +1,5 @@
-import type { DriveMode } from '../telemetry/types';
+import { circuitOf, isCircuit, kmh, realM } from '@xenova/ui';
+import type { DriveMode, Telemetry } from '../telemetry/types';
 
 export const MODE_LABEL: Record<DriveMode, string> = {
   AUTO: '자율주행',
@@ -8,6 +9,21 @@ export const MODE_LABEL: Record<DriveMode, string> = {
 };
 
 export const mps = (v: number) => `${v.toFixed(2)} m/s`;
+/** 시뮬레이터 구성(계약 v1.4 실제 서킷)이면 실제 단위 km/h, 아니면 m/s */
+export function speedText(t: Telemetry, v: number): string {
+  const track = t.sim?.world?.track;
+  return isCircuit(track) ? `${Math.abs(kmh(circuitOf(track), v)).toFixed(0)} km/h` : mps(v);
+}
+/** 속도 타일용 [값, 단위] — 시뮬레이터 구성(실제 서킷)이면 km/h */
+export function speedParts(t: Telemetry, v: number): [string, string] {
+  const track = t.sim?.world?.track;
+  return isCircuit(track) ? [Math.abs(kmh(circuitOf(track), v)).toFixed(0), 'km/h'] : [v.toFixed(2), 'm/s'];
+}
+/** 시뮬레이터 구성이면 실제 단위 m (모의 m × 트랙 비율) */
+export function distText(t: Telemetry, m: number, digits = 1): string {
+  const track = t.sim?.world?.track;
+  return isCircuit(track) ? `${realM(circuitOf(track), m).toFixed(digits)} m` : `${m.toFixed(2)} m`;
+}
 export const rad = (r: number) => `${r >= 0 ? '+' : ''}${r.toFixed(2)} rad`;
 export const seconds = (ms: number) => `${Math.max(0, Math.floor(ms / 1000))}초`;
 

@@ -11,7 +11,8 @@
   width: 100%;
   height: 100%;
 }
-.dimmed .canvas {
+.dimmed .canvas,
+.dimmed canvas {
   opacity: 0.45;
 }
 .empty {

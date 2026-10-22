@@ -118,7 +118,7 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
     expect(setKeys(['up'])).toBe('NOT_MANUAL');
     forceKill('autonomous');
     expect(setKeys(['up'])).toBe('SENT');
-    vi.advanceTimersByTime(2000);
+    vi.advanceTimersByTime(1000); // 전진 키를 누르는 동안 서서히 빨라진다 (2초면 첫 장애물에 닿는다)
     expect(last.vehicle?.v_mps).toBeGreaterThan(0.3);
     expect(setKeys([])).toBe('RELEASED');
   });

@@ -5,7 +5,7 @@ import { ModeBar } from '../components/ModeBar';
 import { NavCamera } from '../components/NavCamera';
 import { SimDriverView } from '../components/SimPanel';
 import { TrackMap } from '../components/TrackMap';
-import { mps, rad, seconds, shownKeys } from '../components/format';
+import { rad, seconds, shownKeys, speedText } from '../components/format';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { APPS, APP_IDS, simLive, type AppId, type Telemetry } from '../telemetry/types';
 import styles from '../components/screens.module.css';
@@ -119,7 +119,7 @@ function AutonomousDetail() {
           value={alive ? (command?.v_mps ?? 0) : 0}
           min={0}
           max={1}
-          text={alive && command ? mps(command.v_mps) : '—'}
+          text={alive && command ? speedText(t, command.v_mps) : '—'}
         />
         <Gauge
           title="목표 조향"
@@ -177,7 +177,7 @@ function ManualDetail() {
           value={t.commands.manual?.v_mps ?? 0}
           min={-0.15}
           max={0.3}
-          text={t.commands.manual ? mps(t.commands.manual.v_mps) : '—'}
+          text={t.commands.manual ? speedText(t, t.commands.manual.v_mps) : '—'}
         />
         <Gauge
           title="목표 조향"

@@ -1,9 +1,20 @@
-import { CameraView, Card, StatusBadge, TrackView } from '@xenova/ui';
+import {
+  Button,
+  CameraView,
+  Card,
+  fmtLap,
+  isCircuit,
+  kmh,
+  circuitOf,
+  StatusBadge,
+  TrackView,
+  useToast,
+} from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
 import type { DriveState } from '../api/drive';
 import { useEvents, useVms } from '../api/queries';
-import { useSimState, type SimView } from '../api/sim';
+import { restartSimRace, selectSimTrack, useSimState, type SimView } from '../api/sim';
 import type { Vm } from '../api/types';
 import { clock, describe } from '../domain/events';
 import {
@@ -314,6 +325,12 @@ function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null
   const boardHealth = appHealth(ROLES['message-board'], board, boardState);
   const pose = sim.pose;
   const flags = drive?.vehicle?.flags;
+  const toast = useToast();
+  // v1.4 실제 서킷: 속도는 실제 단위(km/h), 트랙 바꾸기·다시 출발 (REST-36·37)
+  const circuit = sim.world && isCircuit(sim.world.track) ? circuitOf(sim.world.track) : null;
+  const race = pose?.race;
+  const act = (job: Promise<void>) =>
+    job.catch((e: unknown) => toast.show(e instanceof Error ? e.message : String(e), 'fault'));
   return (
     <Card
       className={styles.appCard}
@@ -345,16 +362,57 @@ function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null
         label="시뮬레이터 트랙 — 차 위치와 장애물"
       />
       <div className={styles.rows}>
-        <div>
-          <span>위치 x, y</span>
-          <span className={styles.mono}>{pose ? `${pose.x.toFixed(2)}, ${pose.y.toFixed(2)} m` : '—'}</span>
-        </div>
-        <div>
-          <span>속도 · 조향</span>
-          <span className={styles.mono}>
-            {pose ? `${plain(pose.v_mps)} m/s · ${signed(pose.steer_rad)} rad` : '—'}
-          </span>
-        </div>
+        {circuit && sim.world ? (
+          <>
+            <div>
+              <span>트랙</span>
+              <span className={styles.simTracks}>
+                {(sim.world.tracks ?? []).map((tr) => (
+                  <Button
+                    key={tr.id}
+                    size="sm"
+                    variant={tr.id === circuit.track.id ? 'primary' : 'secondary'}
+                    onClick={() => void act(selectSimTrack(tr.id))}
+                  >
+                    {tr.name.split(' ')[0]} {(tr.real_m / 1000).toFixed(3)} km
+                  </Button>
+                ))}
+              </span>
+            </div>
+            <div>
+              <span>속도 · 랩</span>
+              <span className={styles.mono}>
+                {pose ? `${Math.abs(kmh(circuit, pose.v_mps)).toFixed(0)} km/h` : '—'}
+                {race
+                  ? race.phase === 'lights'
+                    ? ` · 출발 신호 ${race.lights_on}/5`
+                    : ` · ${race.lap + 1}랩 ${fmtLap(race.lap_ms)} · 최고 ${fmtLap(race.best_lap_ms)}`
+                  : ''}
+              </span>
+            </div>
+            <div>
+              <span>출발</span>
+              <Button size="sm" variant="secondary" onClick={() => void act(restartSimRace())}>
+                다시 출발 (출발 신호)
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <span>위치 x, y</span>
+              <span className={styles.mono}>
+                {pose ? `${pose.x.toFixed(2)}, ${pose.y.toFixed(2)} m` : '—'}
+              </span>
+            </div>
+            <div>
+              <span>속도 · 조향</span>
+              <span className={styles.mono}>
+                {pose ? `${plain(pose.v_mps)} m/s · ${signed(pose.steer_rad)} rad` : '—'}
+              </span>
+            </div>
+          </>
+        )}
         <div>
           <span>장애물 · 트랙 rev</span>
           <span className={styles.mono}>

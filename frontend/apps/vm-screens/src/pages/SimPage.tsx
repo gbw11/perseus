@@ -1,7 +1,7 @@
-import { TrackView } from '@xenova/ui';
+import { fmtLap, isCircuit, TrackView } from '@xenova/ui';
 import { InteractionStrip, SimBadge } from '../components/SimPanel';
 import { ModeBar } from '../components/ModeBar';
-import { carColor, mps, rad } from '../components/format';
+import { carColor, distText, rad, speedText } from '../components/format';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { simLive } from '../telemetry/types';
 import styles from '../components/screens.module.css';
@@ -15,12 +15,17 @@ export function SimPage() {
   const sim = t.sim;
   const pose = sim?.pose ?? null;
   const live = simLive(t);
+  const track = sim?.world?.track;
+  const race = pose?.race;
   return (
     <div className={styles.screen}>
       <ModeBar />
       <div className={styles.detailHead} style={{ ['--accent' as string]: 'var(--x-app-simulator)' }}>
         <h1>시뮬레이터</h1>
-        <span className={styles.guest}>노트북 · 게이트웨이 시리얼 뒤 (ESP32 자리) · 트랙 6 × 3 m</span>
+        <span className={styles.guest}>
+          노트북 · 게이트웨이 시리얼 뒤 (ESP32 자리) ·{' '}
+          {isCircuit(track) ? `${track.name} ${(track.real_m / 1000).toFixed(3)} km (1/50)` : '트랙 6 × 3 m'}
+        </span>
         <SimBadge />
         {t.activeApp && (
           <span className={styles.activeTag} style={{ ['--accent' as string]: carColor(t) }}>
@@ -53,7 +58,27 @@ export function SimPage() {
             <dt>방향</dt>
             <dd className={styles.mono}>{pose ? `${Math.round((pose.yaw * 180) / Math.PI)}°` : '—'}</dd>
             <dt>속도 · 조향</dt>
-            <dd className={styles.mono}>{pose ? `${mps(pose.v_mps)} · ${rad(pose.steer_rad)}` : '—'}</dd>
+            <dd className={styles.mono}>
+              {pose ? `${speedText(t, pose.v_mps)} · ${rad(pose.steer_rad)}` : '—'}
+            </dd>
+            {race && (
+              <>
+                <dt>출발 · 랩</dt>
+                <dd className={styles.mono}>
+                  {race.phase === 'lights'
+                    ? `출발 신호 ${race.lights_on}/5 — 모두 꺼지면 출발`
+                    : `${race.lap + 1}랩 ${fmtLap(race.lap_ms)} · 지난 ${fmtLap(race.last_lap_ms)} · 최고 ${fmtLap(race.best_lap_ms)}${race.jump_start ? ' · 부정 출발 +5초' : ''}`}
+                </dd>
+                <dt>노면</dt>
+                <dd>
+                  {pose?.surface === 'grass'
+                    ? '잔디 (감속)'
+                    : pose?.surface === 'dirt'
+                      ? '흙·자갈 (감속)'
+                      : '아스팔트'}
+                </dd>
+              </>
+            )}
           </dl>
           <h2>트랙 (sim.world)</h2>
           <dl className={styles.kv}>
@@ -62,7 +87,7 @@ export function SimPage() {
             <dt>장애물</dt>
             <dd>
               {sim?.world?.obstacles.length
-                ? sim.world.obstacles.map((o) => `${o.id} (${o.x.toFixed(1)}, ${o.y.toFixed(1)})`).join(', ')
+                ? sim.world.obstacles.map((o) => `${o.kind ?? o.id}`).join(', ')
                 : '없음'}
             </dd>
             <dt>E-stop</dt>
@@ -71,7 +96,7 @@ export function SimPage() {
           <h2>자율주행 판단 (인지 대역)</h2>
           <dl className={styles.kv}>
             <dt>차선 오프셋</dt>
-            <dd className={styles.mono}>{t.perception.lane_offset_m.toFixed(3)} m</dd>
+            <dd className={styles.mono}>{distText(t, t.perception.lane_offset_m)}</dd>
             <dt>앞 장애물</dt>
             <dd>{(t.obstacleCount ?? t.perception.obstacles.length) || '없음'}</dd>
           </dl>

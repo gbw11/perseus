@@ -1,7 +1,7 @@
 import { StatusBadge } from '@xenova/ui';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { APPS, simLive, type AppId } from '../telemetry/types';
-import { seconds, shownKeys } from './format';
+import { seconds, shownKeys, speedParts } from './format';
 import { NavCamera } from './NavCamera';
 import { SimDriverView } from './SimPanel';
 import styles from './screens.module.css';
@@ -86,8 +86,10 @@ function DriveSummary({ id }: { id: 'autonomous' | 'manual' }) {
       <div className={styles.tiles}>
         <div className={styles.tile}>
           <small>목표 속도</small>
-          <span className={styles.tileValue}>{sending && command ? command.v_mps.toFixed(2) : '—'}</span>
-          <span className={styles.tileUnit}>m/s</span>
+          <span className={styles.tileValue}>
+            {sending && command ? speedParts(t, command.v_mps)[0] : '—'}
+          </span>
+          <span className={styles.tileUnit}>{speedParts(t, 0)[1]}</span>
         </div>
         <div className={styles.tile}>
           <small>목표 조향</small>

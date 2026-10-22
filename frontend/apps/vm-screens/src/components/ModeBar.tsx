@@ -1,7 +1,7 @@
 import mark from '@xenova/ui/assets/xenova-mark.png';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { APPS } from '../telemetry/types';
-import { MODE_LABEL, mps, rad } from './format';
+import { MODE_LABEL, rad, speedText } from './format';
 import styles from './ModeBar.module.css';
 
 const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 8);
@@ -42,7 +42,7 @@ export function ModeBar() {
       <dl className={styles.stats}>
         <div>
           <dt>속도</dt>
-          <dd>{mps(t.vehicle.v_mps)}</dd>
+          <dd>{speedText(t, t.vehicle.v_mps)}</dd>
         </div>
         <div>
           <dt>조향</dt>

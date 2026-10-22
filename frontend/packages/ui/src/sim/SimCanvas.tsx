@@ -1,0 +1,108 @@
+import { circuitOf, fmtLap } from './circuit';
+import { drawPov } from './renderPov';
+import { drawTop } from './renderTop';
+import type { CircuitTrack, SimPose, SimWorld } from './types';
+import { extrapolate, useCanvasLoop, usePoseClock } from './useCanvasLoop';
+import styles from './SimCanvas.module.css';
+
+const DEFAULT_CAR = { length_m: 0.42, width_m: 0.2 };
+
+export interface CircuitTopProps {
+  pose: SimPose | null;
+  world: SimWorld & { track: CircuitTrack };
+  trail: [number, number][];
+  carColor: string;
+  label?: string;
+  className?: string;
+  fps?: number;
+}
+
+/** 실제 서킷 탑뷰 (계약 v1.4) — 잔디·흙·벽·관중석·나무, 장애물, 지나온 길, 실제 크기 차 */
+export function CircuitTop({ pose, world, trail, carColor, label, className, fps = 30 }: CircuitTopProps) {
+  const clock = usePoseClock(pose);
+  const ref = useCanvasLoop((ctx, W, H, now) => {
+    const g = circuitOf(world.track);
+    const p = clock.current.pose;
+    // 캔버스는 CSS 변수(var(--x-app-…))를 못 읽는다 → 실제 색으로
+    const m = /^var\((--[\w-]+)\)$/.exec(carColor.trim());
+    const color = m ? getComputedStyle(ctx.canvas).getPropertyValue(m[1]!).trim() || '#2dd4bf' : carColor;
+    drawTop(ctx, W, H, g, {
+      pose: p ? extrapolate(p, now - clock.current.at, world.time_scale) : null,
+      obstacles: world.obstacles,
+      trail,
+      carColor: color,
+      car: world.car ?? DEFAULT_CAR,
+    });
+  }, fps);
+  const g = circuitOf(world.track);
+  const aspect = (g.box.x1 - g.box.x0) / (g.box.y1 - g.box.y0);
+  return (
+    <div className={[styles.top, className ?? ''].join(' ')} style={{ aspectRatio: String(aspect) }}>
+      <canvas
+        ref={ref}
+        className={styles.canvas}
+        role="img"
+        aria-label={label ?? `${world.track.name} 탑뷰`}
+      />
+      {world.estop && <div className={styles.estop}>E-STOP</div>}
+      {!pose && <div className={styles.empty}>시뮬레이터 위치 없음</div>}
+    </div>
+  );
+}
+
+export interface CircuitPovProps {
+  pose: SimPose;
+  world: SimWorld & { track: CircuitTrack };
+  /** 장애물 인식 박스 (자율주행 칸) */
+  boxes?: boolean;
+  quality?: 'high' | 'low';
+  fps?: number;
+}
+
+/** 실제 서킷 1인칭 (계약 v1.4) — 하늘·나무·관중석·출발 신호, 인식 박스. 출발 신호·랩 시간은 위에 겹친다 */
+export function CircuitPov({ pose, world, boxes = false, quality = 'high', fps = 30 }: CircuitPovProps) {
+  const clock = usePoseClock(pose);
+  const race = pose.race;
+  const ref = useCanvasLoop((ctx, W, H, now) => {
+    const p = clock.current.pose ?? pose;
+    drawPov(ctx, W, H, circuitOf(world.track), {
+      pose: extrapolate(p, now - clock.current.at, world.time_scale),
+      obstacles: world.obstacles,
+      lightsOn: p.race?.phase === 'lights' ? p.race.lights_on : 0,
+      boxes,
+      quality,
+    });
+  }, fps);
+  const ts = world.time_scale ?? 1;
+  const waiting = race?.phase === 'lights';
+  const justGo = race?.phase === 'go' && race.lap === 0 && race.lap_ms < 1500 * ts;
+  return (
+    <>
+      <canvas ref={ref} className={styles.canvas} />
+      {race && (
+        <>
+          <span className={styles.lap}>
+            {race.lap + 1}랩 {fmtLap(race.lap_ms)}
+          </span>
+          {(waiting || justGo) && (
+            <div className={styles.lights} aria-label={`출발 신호 ${race.lights_on}/5`}>
+              {[0, 1, 2, 3, 4].map((k) => (
+                <span key={k} className={waiting && k < race.lights_on ? styles.on : ''}>
+                  <i />
+                  <i />
+                </span>
+              ))}
+            </div>
+          )}
+          {race.jump_start && (waiting || justGo) ? (
+            <div className={[styles.go, styles.jump].join(' ')}>부정 출발!</div>
+          ) : waiting ? (
+            <div className={styles.wait}>모두 꺼지면 출발</div>
+          ) : justGo ? (
+            <div className={styles.go}>출발!</div>
+          ) : null}
+        </>
+      )}
+    </>
+  );
+}

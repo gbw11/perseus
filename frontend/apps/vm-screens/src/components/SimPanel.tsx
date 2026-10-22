@@ -1,6 +1,6 @@
-import { DriverView, StatusBadge, TrackView } from '@xenova/ui';
+import { DriverView, fmtLap, isCircuit, StatusBadge, TrackView } from '@xenova/ui';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
-import { carColor, mps, rad, seconds, shownKeys } from './format';
+import { carColor, distText, rad, seconds, shownKeys, speedText } from './format';
 import styles from './screens.module.css';
 
 /** 시뮬레이터 칸·화면의 상태 배지 */
@@ -67,18 +67,19 @@ export function SimDriverView({ id, large }: { id: 'autonomous' | 'manual'; larg
       world={t.sim?.world ?? null}
       sensing={t.vehicle.flags.obstacle}
       dimmed={!driving}
+      boxes={id === 'autonomous'}
       label={`${id === 'autonomous' ? '자율주행' : '수동주행'} 시점 — 시뮬레이터 1인칭`}
       overlay={
         <>
           <div className={styles.povTop} style={{ ['--accent' as string]: `var(--x-app-${id})` }}>
             <span className={styles.povTag}>{driving ? '▶ 운전 중' : '대기'}</span>
-            <span className={styles.povHud}>{mps(t.vehicle.v_mps)}</span>
+            <span className={styles.povHud}>{speedText(t, t.vehicle.v_mps)}</span>
           </div>
           {id === 'autonomous' ? (
             <div className={styles.povBottom}>
               <span className={styles.povHud}>
                 차선 {t.perception.lane_offset_m >= 0 ? '+' : ''}
-                {t.perception.lane_offset_m.toFixed(2)} m · 장애물 {obstacles || '없음'}
+                {distText(t, t.perception.lane_offset_m)} · 장애물 {obstacles || '없음'}
                 {t.vehicle.flags.obstacle ? ' · 정지' : ''}
               </span>
             </div>
@@ -120,6 +121,8 @@ export function SimPanel({ onSelect }: { onSelect?: () => void }) {
   const { telemetry: t } = useTelemetry();
   const sim = t.sim;
   const pose = sim?.pose ?? null;
+  const track = sim?.world?.track;
+  const race = pose?.race;
   return (
     <section
       className={[styles.panel, styles.health_ok].join(' ')}
@@ -133,7 +136,9 @@ export function SimPanel({ onSelect }: { onSelect?: () => void }) {
         </div>
         <SimBadge />
       </header>
-      <div className={styles.panelRole}>트랙 탑뷰 — 실차 대신 화면 속 차</div>
+      <div className={styles.panelRole}>
+        {isCircuit(track) ? `${track.name} 탑뷰 — 실차 대신 화면 속 차` : '트랙 탑뷰 — 실차 대신 화면 속 차'}
+      </div>
       <div className={styles.panelBody}>
         <TrackView
           compact
@@ -145,7 +150,19 @@ export function SimPanel({ onSelect }: { onSelect?: () => void }) {
         />
         <dl className={styles.kv}>
           <dt>속도 · 조향</dt>
-          <dd className={styles.mono}>{pose ? `${mps(pose.v_mps)} · ${rad(pose.steer_rad)}` : '—'}</dd>
+          <dd className={styles.mono}>
+            {pose ? `${speedText(t, pose.v_mps)} · ${rad(pose.steer_rad)}` : '—'}
+          </dd>
+          {race && (
+            <>
+              <dt>랩</dt>
+              <dd className={styles.mono}>
+                {race.phase === 'lights'
+                  ? `출발 신호 ${race.lights_on}/5`
+                  : `${race.lap + 1}랩 ${fmtLap(race.lap_ms)} · 최고 ${fmtLap(race.best_lap_ms)}`}
+              </dd>
+            </>
+          )}
           <dt>장애물</dt>
           <dd>{sim?.world?.obstacles.length ? `${sim.world.obstacles.length}개 — 트랙 위` : '없음'}</dd>
         </dl>

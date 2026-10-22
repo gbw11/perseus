@@ -507,3 +507,9 @@ button.chip:hover:not(.chipOn) {
     transform: scale(1);
   }
 }
+/* 시뮬레이터 카드: 트랙 고르기 버튼 (계약 v1.4 REST-36) */
+.simTracks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--x-space-1);
+}

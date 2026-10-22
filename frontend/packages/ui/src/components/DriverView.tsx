@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import type { SimPose, SimWorld } from './TrackView';
+import { CircuitPov } from '../sim/SimCanvas';
+import { isCircuit, type CircuitTrack, type EllipseTrack, type SimPose, type SimWorld } from '../sim/types';
 import styles from './DriverView.module.css';
 
 export interface DriverViewProps {
@@ -12,9 +13,13 @@ export interface DriverViewProps {
   /** 시점이 흐리게 (이 앱이 운전하지 않을 때) */
   dimmed?: boolean;
   label?: string;
+  /** v1.4 실제 서킷: 장애물 인식 박스 (자율주행 칸) */
+  boxes?: boolean;
+  /** v1.4 실제 서킷: 'low' 면 나무·관중·구름을 뺀다 (보드 브라우저가 느릴 때) */
+  quality?: 'high' | 'low';
 }
 
-const DEFAULT_TRACK: SimWorld['track'] = { shape: 'ellipse', a_m: 3, b_m: 1.5, lane_width_m: 0.4 };
+const DEFAULT_TRACK: EllipseTrack = { shape: 'ellipse', a_m: 3, b_m: 1.5, lane_width_m: 0.4 };
 /** 카메라: 1/10 RC카 앞범퍼 위 0.22 m, 아래로 9°, 수평 화각 75° */
 const CAM_H = 0.22;
 const CAM_PITCH = (9 * Math.PI) / 180;
@@ -30,7 +35,16 @@ type Pt = { u: number; v: number; z: number };
  * 시뮬레이터 차의 1인칭 시점 — 운전석에서 앞을 본 그림 (시뮬레이터 시연 시나리오 §4).
  * 시뮬레이터 위치(sim.pose)와 트랙·장애물(sim.world)로 지면을 원근 투영해 캔버스에 그린다. 실제 카메라 영상이 아니다.
  */
-export function DriverView({ pose, world, sensing, overlay, dimmed, label }: DriverViewProps) {
+export function DriverView({
+  pose,
+  world,
+  sensing,
+  overlay,
+  dimmed,
+  label,
+  boxes,
+  quality,
+}: DriverViewProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -50,13 +64,30 @@ export function DriverView({ pose, world, sensing, overlay, dimmed, label }: Dri
       W,
       H,
       pose,
-      world?.track ?? DEFAULT_TRACK,
+      (world?.track as EllipseTrack | undefined) ?? DEFAULT_TRACK,
       world?.obstacles ?? [],
       !!sensing,
       getComputedStyle(el),
     );
   }, [pose, world, sensing]);
 
+  // v1.4 실제 서킷이면 하늘·나무·출발 신호까지 그리는 1인칭
+  if (pose && world && isCircuit(world.track))
+    return (
+      <div
+        className={[styles.frame, dimmed ? styles.dimmed : ''].join(' ')}
+        role="img"
+        aria-label={label ?? '시뮬레이터 1인칭 시점'}
+      >
+        <CircuitPov
+          pose={pose}
+          world={world as SimWorld & { track: CircuitTrack }}
+          boxes={boxes}
+          quality={quality}
+        />
+        {overlay && <div className={styles.overlay}>{overlay}</div>}
+      </div>
+    );
   return (
     <div className={[styles.frame, dimmed ? styles.dimmed : ''].join(' ')}>
       <canvas
@@ -76,7 +107,7 @@ function draw(
   W: number,
   H: number,
   pose: SimPose | null,
-  track: SimWorld['track'],
+  track: EllipseTrack,
   obstacles: SimWorld['obstacles'],
   sensing: boolean,
   css: CSSStyleDeclaration,
