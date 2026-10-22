@@ -499,15 +499,19 @@ class Platform:
         atomic_write(self.runtime / 'dhcp-hosts', hosts, 0o644)
         command(['systemctl', 'reload', 'xenova-dhcp.service'])
 
+    def cpu(self):
+        from xenova_cpu import CPU
+        return CPU(self)
+
     def config(self, record):
         base = self.data / 'instances' / record['id']
         if guest_kind(record) == 'zephyr':
-            return zephyr.config(record, base)
+            return zephyr.config(record, base, cpu_context=self.cpu().context(record))
         # Linux 설정은 P2의 설치된 OS별 템플릿에서 생성한다.
         # id/name/uuid와 자원 범위는 기존 등록 정보를 그대로 사용한다.
         from xen_config import ConfigError, render_config
         try:
-            return render_config(record, instance_root=self.data / 'instances')
+            return render_config(record, instance_root=self.data / 'instances', cpu_context=self.cpu().context(record))
         except ConfigError as exc:
             raise PlatformError(str(exc)) from exc
 
@@ -611,10 +615,12 @@ class Platform:
         self.timed_command(['systemctl', 'is-active', '--quiet', 'xenova-vm-shutdown.service'], deadline)
         directory = self.data / 'instances' / record['id']
         validate_record(record, directory)
+        cpu_context = self.cpu().require(record, deadline or self.clock()+15)
         text = self.config(record)
         domains = self.domains(deadline=deadline)
         existing = self.matching(record, domains)
         if existing:
+            self.cpu().require(record, deadline or self.clock()+15, expected=cpu_context, present=True)
             state = started_state(record, existing[0])
             if _accept:
                 _accept()
@@ -630,7 +636,7 @@ class Platform:
         owner = _accept() if _accept else _owner
         execution.gate()
         ensure_runtime(self.runtime)
-        launch = execution.prepare_launch(record, owner)
+        launch = execution.prepare_launch(record, owner, deadline=deadline, expected_cpu=cpu_context)
         config = self.runtime / (record['id'] + '.cfg')
         atomic_write(config, text)
         remaining = 45 if deadline is None else min(45, deadline-self.clock())
@@ -858,6 +864,7 @@ class Platform:
         if guest_kind(record) == 'zephyr' and not force:
             raise PlatformError('Zephyr graceful reboot unsupported; use reboot --force')
         self.execution().require_launch_available(record)
+        self.cpu().require(record, self.clock()+15, present=True)
         owner = _accept() if _accept else None
         if guest_kind(record) == 'zephyr' or force:
             self.stop_many([record], timeout=timeout, force=True, _observed={record['uuid']:_observed} if _observed else None)
@@ -1015,7 +1022,7 @@ def dhcp_ready(pid, timeout=5):
 def main(argv=None):
     raw = list(sys.argv[1:] if argv is None else argv)
     managed = {'firmware-transition','update-resources','list','get','retire','restore','purge','operation','create','delete','templates',
-               'recover-once','recover_once','snapshot','probe','execution-context','control-operation','recovery-operation','host-resume'}
+               'recover-once','recover_once','snapshot','probe','execution-context','control-operation','recovery-operation','host-resume','cpu-layout','cpu-policy-set','cpu-host-prepare'}
     if '--json' in raw or (raw and raw[0] in managed):
         from xenova_management_cli import main as management_main
         return management_main(raw)

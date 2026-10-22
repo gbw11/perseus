@@ -3,10 +3,12 @@ package com.xenova.backend.vm.api;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -259,6 +261,90 @@ class VmApiIntegrationTest {
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
 
         verify(vmControlPort, never()).launch(anyString(), any(VmLaunchSpec.class));
+    }
+
+    @Test
+    void createStoresTheRoleAndListsIt() throws Exception {
+        String vmId = vmIdOf(createVm("auto-01", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 16, "\"autonomous\"")
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.role").value("autonomous")));
+
+        mockMvc.perform(get("/api/v1/vms/" + vmId).header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("autonomous"));
+        mockMvc.perform(get("/api/v1/vms").header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(jsonPath("$.items[?(@.name == 'auto-01')].role").value("autonomous"));
+    }
+
+    @Test
+    void roleIsNullWhenOmitted() throws Exception {
+        createVm("debian-01", 1, 256)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.role").isEmpty());
+    }
+
+    @Test
+    void patchChangesAndClearsTheRoleWithoutTouchingTheVm() throws Exception {
+        String vmId = vmIdOf(createVm("board-01", 1, 256).andExpect(status().isCreated()));
+
+        patchRole(vmId, "\"message-board\"")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("message-board"))
+                .andExpect(jsonPath("$.name").value("board-01"))
+                .andExpect(jsonPath("$.agent_status").exists());
+        mockMvc.perform(get("/api/v1/vms/" + vmId).header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(jsonPath("$.role").value("message-board"));
+
+        patchRole(vmId, "null")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").isEmpty());
+
+        verify(vmControlPort, times(1)).launch(anyString(), any(VmLaunchSpec.class)); // only the create
+    }
+
+    @Test
+    void unknownRoleIsAValidationError() throws Exception {
+        createVm("pilot-01", "debian-13-arm64", "1.0.0", 1, 256, "\"pilot\"")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.errors[0].field").value("role"));
+        verify(vmControlPort, never()).launch(anyString(), any(VmLaunchSpec.class));
+
+        String vmId = vmIdOf(createVm("debian-01", 1, 256).andExpect(status().isCreated()));
+        patchRole(vmId, "\"Manual\"")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.errors[0].field").value("role"));
+    }
+
+    @Test
+    void patchOnAnUnknownVmIsNotFound() throws Exception {
+        patchRole("550e8400-e29b-41d4-a716-446655440000", "\"manual\"")
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("VM_NOT_FOUND"));
+    }
+
+    private String vmIdOf(org.springframework.test.web.servlet.ResultActions created) throws Exception {
+        return objectMapper.readTree(created.andReturn().getResponse().getContentAsString()).get("vm_id").asText();
+    }
+
+    private org.springframework.test.web.servlet.ResultActions patchRole(String vmId, String roleJson)
+            throws Exception {
+        return mockMvc.perform(patch("/api/v1/vms/" + vmId)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"role\":" + roleJson + "}"));
+    }
+
+    private org.springframework.test.web.servlet.ResultActions createVm(
+            String name, String templateId, String templateVersion, int vcpus, int memoryMib, String roleJson)
+            throws Exception {
+        String body = """
+                {"name":"%s","template_id":"%s","template_version":"%s","vcpus":%d,"memory_mib":%d,"role":%s}
+                """.formatted(name, templateId, templateVersion, vcpus, memoryMib, roleJson);
+        return mockMvc.perform(post("/api/v1/vms")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body));
     }
 
     private org.springframework.test.web.servlet.ResultActions createVm(String name, int vcpus, int memoryMib)

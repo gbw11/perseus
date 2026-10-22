@@ -1,0 +1,7 @@
+{
+  "shared_pcpus": [0, 3],
+  "exclusive_instances": [
+    {"instance_id": "zephyr-drive-a", "pcpu": 1},
+    {"instance_id": "zephyr-drive-b", "pcpu": 2}
+  ]
+}
