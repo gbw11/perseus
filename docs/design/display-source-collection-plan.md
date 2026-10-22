@@ -81,7 +81,7 @@ VM1은 Zephyr 주 구동, VM2는 같은 Zephyr의 백업·미러링, VM3는 Debi
 | --- | --- | --- |
 | 1 | 기존 코드·경로·식별/주기 차이 조사, 사용자 선택/미결정 목록 | 이 문서와 [조사 기록](../verification/display-253-step1.md). 조사 완료와 결정 대기를 구분 |
 | 2 | 환경별 VM UUID·실제 app_id 매핑, 발행자/수신 규격 보완 | 구현 및 합성 시험 완료. [2단계 결과](../verification/display-253-step2.md). 후보/실제 배치 분리, 잘못된 VM·토픽·세대 거부 및 SUBACK·재접속 시험. 실제 UUID 배치는 미확정 |
-| 3 | 선택된 경로로 실제 게스트 보고 연결 | 실제 domU에서 생성된 고유 보고가 dom0 수신 지점에 도달한 원본. host 합성/native_sim은 따로 표시 |
+| 3 | 선택된 경로로 실제 게스트 보고 연결 | 대표 경로 검증 완료: 실제 Debian 기존 Agent 및 VM2 Zephyr heartbeat-only 시험 이미지→dom0 브로커/수집기. [실행 기록](../verification/display-253-step3.md). VM1 송신·상시 배포·실보드 검증은 포함하지 않음 |
 | 4 | 미수신·중복/역순·재접속·재시작·콘솔 비점유 검증 | 허용된 시험 환경의 장애/복귀·세대별 기록. 오래된 값 정상화 금지 |
 | 5 | 외부 REST/WS와 HDMI presentation 양쪽 소비 확인 | 같은 UUID·소스·보고 내용이 양쪽에 전달되는 증거와 미지원/미검증 목록 |
 
