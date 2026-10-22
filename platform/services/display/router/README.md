@@ -1,4 +1,4 @@
-# dom0 표시 파이프라인 (2·3·4단계)
+# dom0 표시 파이프라인 (2~5단계)
 
 HDMI 렌더러와 외부 웹이 함께 사용할 읽기 전용 상태 피드와 로컬 화면 선택 정책이다. 3단계 전체/상세 웹 렌더러에 이어 4단계에서 X11 실행기·실제 픽셀 캡처·원격 시연 전송을 추가했다. 실보드 HDMI 검증과 이미지 준비는 남아 있다. 기존 MO-04 터미널을 열거나 콘솔 출력을 상태 분석용으로 가로채지 않는다.
 
@@ -126,6 +126,22 @@ python -m xenova_display.stream --host 127.0.0.1 --port 8083
 사용자 systemd 템플릿은 [키오스크](deploy/xenova-display-kiosk.service), [송신기](deploy/xenova-display-stream.service)에 있다. 둘 다 같은 그래픽 사용자로 실행하고 환경 파일 권한을 0600으로 관리한다. `%h/.config/xenova/display.env`는 feed 키/XAUTHORITY, `stream.env`는 별도의 시연 키/XAUTHORITY를 제공한다. Python 가상환경·Chromium 경로는 실제 설치 경로로 맞춰야 한다. 이 템플릿은 실제 보드에 설치/활성화하지 않았다.
 
 시험 전용 `backend=virtual_x11`은 `--allow-virtual` 또는 `XENOVA_STREAM_ALLOW_VIRTUAL=1`을 명시해야 한다. `--test-no-sandbox`는 virtual backend에서만 허용한다. 이는 실제 HDMI 성공으로 기록되지 않는다. `tests/probe_display_runtime.py --execute --output <디렉터리>`로 기존 WSL/QEMU 환경에서 가상 두 화면 → 실제 캡처 → 원격 디코드 시험을 재현할 수 있다. [4단계 검증 기록](../../../../docs/verification/display-step4.md)을 참고한다.
+
+## 5단계 통합·연속 동작 검증
+
+기존 WSL/QEMU 실험실에서 아래 명령으로 4단계 수락 시험에 장애 복구와 10분 연속 관측을 추가한다. 테스트용 `psutil`도 필요하다. 제품 의존성에는 추가하지 않는다. 실행 디렉터리는 이 router 디렉터리이며 QEMU SSH 설정은 시험 도구의 기존 실험실 경로를 사용한다.
+
+```sh
+PYTHONPATH=.:../../dom0-manager:../../vm-agent/mqtt-client \
+python -B tests/probe_display_runtime.py --execute --soak-seconds 600 \
+  --output /tmp/display-step5-evidence
+```
+
+독립 Xvfb·키오스크·인코더·수신 브라우저를 만들고 실제 QEMU Xen을 읽는다. query adapter 예외, 로컬 상태 HTTP 차단, 한쪽 native 브라우저 컨텍스트 종료, 원격 브라우저 offline/online을 시험한다. 실제 guest 정지/장애 명령이나 기존 X 디스플레이 변경은 수행하지 않는다. 마지막에 시험용 프로세스를 정리한다.
+
+`evidence.json`은 수락 결과/복구 시간/측정 요약, `soak-samples.jsonl`은 5초 간격 원본이다. 연속 시험의 live는 창·HTTP 상태 채널·프레임 생성·원격 수신 상태이며 모든 VM/앱이 정상이라는 뜻이 아니다. 전체 시험 프로세스 트리 CPU/RSS에 수신 Chromium도 포함되고, RSS 합계에는 공유 페이지 중복이 있다. 색상 변화 지연은 동일 호스트에서 200ms 간격으로 확인한 값으로 실보드/원격망 성능을 대체하지 않는다.
+
+[5단계 결과](../../../../docs/verification/display-step5.md)와 [실보드 수락 절차](../../../../docs/verification/display-hardware-acceptance.md)에 가상 검증과 남은 물리 시험을 구분한다. systemd 프로세스 단위 재시작과 실제 HDMI 분리/재연결은 실보드 절차에서 확인한다.
 
 ## 관측의 한계
 
