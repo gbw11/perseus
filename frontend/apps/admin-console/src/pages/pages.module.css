@@ -598,3 +598,43 @@ button.chip:hover:not(.chipOn) {
   font: inherit;
   font-size: var(--x-text-sm);
 }
+/* 트랙 조작: 지도 밖 장애물 그림 (끌어다 놓기) */
+.palette {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--x-space-2);
+}
+.paletteHint {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+  font-weight: 600;
+  margin-right: var(--x-space-2);
+}
+.paletteItem {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 92px;
+  padding: 6px 10px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  color: var(--x-text);
+  font: inherit;
+  font-size: var(--x-text-sm);
+  font-weight: 600;
+  cursor: grab;
+}
+.paletteItem small {
+  color: var(--x-text-muted);
+  font-weight: 400;
+  font-family: var(--x-font-mono);
+}
+.paletteItem:active {
+  cursor: grabbing;
+}
+.paletteOn {
+  border-color: var(--x-app-simulator);
+  box-shadow: 0 0 0 1px var(--x-app-simulator);
+}

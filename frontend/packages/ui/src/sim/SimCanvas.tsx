@@ -1,4 +1,4 @@
-import { useRef, type MouseEvent, type PointerEvent } from 'react';
+import { useRef, type DragEvent, type MouseEvent, type PointerEvent } from 'react';
 import { circuitOf, fmtLap } from './circuit';
 import { drawPov } from './renderPov';
 import { drawTop, fitTop } from './renderTop';
@@ -31,6 +31,10 @@ export interface CircuitTopProps {
   selectedId?: string | null;
   /** 못 놓은 자리 표시 (빨간 X) */
   rejectAt?: { x: number; y: number } | null;
+  /** 지도 밖에서 끌어 온 것 (HTML 끌어 놓기) — 위에 있는 동안 트랙 좌표, 놓으면 트랙 좌표 */
+  onDragTrack?: (e: { type: 'over' | 'leave' | 'drop'; x: number; y: number }) => void;
+  /** 끌어 오는 동안 놓일 자리 미리 보기 (폭 m) */
+  preview?: { x: number; y: number; w: number } | null;
 }
 
 /** 실제 서킷 탑뷰 (계약 v1.4) — 잔디·흙·벽·관중석·나무, 장애물, 지나온 길, 실제 크기 차 */
@@ -45,6 +49,8 @@ export function CircuitTop({
   onPointer,
   selectedId,
   rejectAt,
+  onDragTrack,
+  preview,
 }: CircuitTopProps) {
   const clock = usePoseClock(pose);
   const ref = useCanvasLoop((ctx, W, H, now) => {
@@ -60,7 +66,7 @@ export function CircuitTop({
       carColor: color,
       car: world.car ?? DEFAULT_CAR,
     });
-    if (!selectedId && !rejectAt) return;
+    if (!selectedId && !rejectAt && !preview) return;
     const v = fitTop(g, W, H);
     const px = (x: number, y: number) => [v.ox + x * v.s, v.oy - y * v.s] as const;
     const sel = world.obstacles.find((o) => o.id === selectedId);
@@ -71,6 +77,16 @@ export function CircuitTop({
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
       ctx.stroke();
+    }
+    if (preview) {
+      const [u, vv] = px(preview.x, preview.y);
+      ctx.beginPath();
+      ctx.arc(u, vv, Math.max(8, (preview.w / 2) * v.s + 4), 0, Math.PI * 2);
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
     if (rejectAt) {
       const [u, vv] = px(rejectAt.x, rejectAt.y);
@@ -91,7 +107,11 @@ export function CircuitTop({
   const g = circuitOf(world.track);
   const pressed = useRef(false);
   /** 화면 좌표 → 트랙 좌표 (캔버스 크기에 맞춘 배율로) */
-  const toTrack = (e: { clientX: number; clientY: number; currentTarget: HTMLCanvasElement }) => {
+  const toTrack = (e: {
+    clientX: number;
+    clientY: number;
+    currentTarget: EventTarget & HTMLCanvasElement;
+  }) => {
     const el = e.currentTarget;
     const r = el.getBoundingClientRect();
     const k = el.width / Math.max(1, r.width);
@@ -119,12 +139,27 @@ export function CircuitTop({
           onPointer({ type: 'double', pressed: false, ...toTrack(e) }),
       }
     : {};
+  const drop = onDragTrack
+    ? {
+        onDragOver: (e: DragEvent<HTMLCanvasElement>) => {
+          e.preventDefault(); // 놓을 수 있다고 알린다
+          e.dataTransfer.dropEffect = 'copy';
+          onDragTrack({ type: 'over', ...toTrack(e) });
+        },
+        onDragLeave: (e: DragEvent<HTMLCanvasElement>) => onDragTrack({ type: 'leave', ...toTrack(e) }),
+        onDrop: (e: DragEvent<HTMLCanvasElement>) => {
+          e.preventDefault();
+          onDragTrack({ type: 'drop', ...toTrack(e) });
+        },
+      }
+    : {};
   const aspect = (g.box.x1 - g.box.x0) / (g.box.y1 - g.box.y0);
   return (
     <div className={[styles.top, className ?? ''].join(' ')} style={{ aspectRatio: String(aspect) }}>
       <canvas
         ref={ref}
         {...pointer}
+        {...drop}
         className={[styles.canvas, onPointer ? styles.editable : ''].join(' ')}
         role="img"
         aria-label={label ?? `${world.track.name} 탑뷰`}

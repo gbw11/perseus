@@ -41,7 +41,8 @@ const CAR_COLOR = { autonomous: 'var(--x-app-autonomous)', manual: 'var(--x-app-
 const PUSH_M = 0.3;
 
 /**
- * 관리자 트랙 조작 (시뮬레이터 구성, -267) — 지도를 눌러 장애물 놓기, 끌어서 옮기기, 두 번 눌러 치우기.
+ * 관리자 트랙 조작 (시뮬레이터 구성, -267) — 지도 밖 장애물 그림을 끌어다 지도에 놓기(또는 지도 누르기),
+ * 지도 위 장애물을 끌어서 옮기기, 두 번 눌러 치우기.
  * 이 차가 지나가지 못하는 자리는 시뮬레이터가 거부하고 이유를 준다 (MQTT 계약 v1.4 배치 검사, MQTT-18).
  * 트랙 바꾸기·다시 출발·E-stop·차 밀기 (REST-31~37 → MQTT-17).
  */
@@ -52,6 +53,9 @@ export function SimTrackControl() {
   const [kind, setKind] = useState<ObstacleKind>('cone');
   const [selected, setSelected] = useState<string | null>(null);
   const [reject, setReject] = useState<{ x: number; y: number } | null>(null);
+  /** 지도 밖 그림을 끌어 오는 중인 종류와, 놓일 자리 미리 보기 */
+  const [dragKind, setDragKind] = useState<ObstacleKind | null>(null);
+  const [preview, setPreview] = useState<{ x: number; y: number; w: number } | null>(null);
   const drag = useRef<{ id: string; moved: boolean; lastAt: number; warnAt: number } | null>(null);
   useEffect(() => {
     if (!reject) return;
@@ -112,6 +116,21 @@ export function SimTrackControl() {
     }
   };
 
+  // 지도 밖 그림을 끌어다 놓기 (HTML 끌어 놓기)
+  const onDragTrack = (e: { type: 'over' | 'leave' | 'drop'; x: number; y: number }) => {
+    const k = KINDS.find((q) => q.kind === dragKind);
+    if (!k) return;
+    if (e.type === 'over') setPreview({ x: e.x, y: e.y, w: k.w });
+    else if (e.type === 'leave') setPreview(null);
+    else {
+      setPreview(null);
+      setDragKind(null);
+      void placeSimObstacle(k.kind, e.x, e.y)
+        .then((r) => shown(r, e))
+        .catch(fail);
+    }
+  };
+
   return (
     <Card
       title={<span style={{ color: 'var(--x-app-simulator)' }}>트랙 조작 — 시뮬레이터</span>}
@@ -125,6 +144,34 @@ export function SimTrackControl() {
     >
       <div className={styles.simControl}>
         <div className={styles.simMap}>
+          {/* 지도 밖 장애물 그림 — 끌어다 지도에 놓는다. 누르면 "지도 누르기"로 놓을 종류로 고른다 */}
+          <div className={styles.palette} aria-label="장애물 — 끌어다 트랙에 놓기">
+            <span className={styles.paletteHint}>끌어다 트랙에 놓기</span>
+            {KINDS.map((k) => (
+              <button
+                key={k.kind}
+                type="button"
+                draggable
+                className={[styles.paletteItem, kind === k.kind ? styles.paletteOn : ''].join(' ')}
+                onClick={() => setKind(k.kind)}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/plain', k.kind);
+                  e.dataTransfer.effectAllowed = 'copy';
+                  setDragKind(k.kind);
+                  setKind(k.kind);
+                }}
+                onDragEnd={() => {
+                  setDragKind(null);
+                  setPreview(null);
+                }}
+                title={`${k.name} — 끌어다 트랙에 놓기`}
+              >
+                <ObstacleIcon kind={k.kind} />
+                <span>{k.name}</span>
+                <small>폭 {realM(g, k.w).toFixed(1)} m</small>
+              </button>
+            ))}
+          </div>
           <TrackView
             pose={pose}
             world={world}
@@ -133,29 +180,19 @@ export function SimTrackControl() {
             onPointer={onPointer}
             selectedId={selected}
             rejectAt={reject}
-            label="트랙 조작 지도 — 눌러서 장애물 놓기, 끌어서 옮기기, 두 번 눌러 치우기"
+            onDragTrack={onDragTrack}
+            preview={preview}
+            label="트랙 조작 지도 — 장애물 그림을 끌어다 놓기, 끌어서 옮기기, 두 번 눌러 치우기"
           />
           <p className={styles.dim}>
-            지도를 누르면 고른 장애물을 놓고, 장애물을 끌면 옮기고, 두 번 누르면 치운다. 차(폭{' '}
-            {realM(g, 0.2).toFixed(1)} m)가 지나갈 틈({realM(g, 0.26).toFixed(1)} m)이 없거나 너무 촘촘하면
-            놓이지 않고 이유가 뜬다.
+            위 그림을 끌어다 트랙에 놓는다 (그림을 고른 뒤 지도를 눌러도 된다). 지도 위 장애물은 끌면 옮겨지고
+            두 번 누르면 치워진다. 차(폭 {realM(g, 0.2).toFixed(1)} m)가 지나갈 틈({realM(g, 0.26).toFixed(1)}{' '}
+            m)이 없거나 너무 촘촘하면 놓이지 않고 이유가 뜬다.
           </p>
         </div>
         <div className={styles.simSide}>
           <div className={styles.simGroup}>
-            <small>놓을 장애물</small>
-            <span className={styles.simTracks}>
-              {KINDS.map((k) => (
-                <Button
-                  key={k.kind}
-                  size="sm"
-                  variant={kind === k.kind ? 'primary' : 'secondary'}
-                  onClick={() => setKind(k.kind)}
-                >
-                  {k.name} {realM(g, k.w).toFixed(1)} m
-                </Button>
-              ))}
-            </span>
+            <small>장애물 한꺼번에</small>
             <span className={styles.simTracks}>
               <Button size="sm" variant="secondary" onClick={() => void randomSimObstacles().catch(fail)}>
                 무작위 3개
@@ -253,5 +290,37 @@ export function SimTrackControl() {
         </div>
       </div>
     </Card>
+  );
+}
+
+/** 장애물 그림 (지도 밖 고르기 판) — 콘·박스·타이어 */
+function ObstacleIcon({ kind }: { kind: ObstacleKind }) {
+  if (kind === 'cone')
+    return (
+      <svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true">
+        <rect x="8" y="38" width="32" height="5" rx="1.5" fill="#d97706" />
+        <path d="M24 5 L37 38 H11 Z" fill="#f59e0b" />
+        <path d="M18.6 19 H29.4 L31.4 24 H16.6 Z" fill="#f8fafc" />
+        <path d="M15.4 28 H32.6 L34.2 32 H13.8 Z" fill="#f8fafc" />
+      </svg>
+    );
+  if (kind === 'box')
+    return (
+      <svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true">
+        <path d="M8 16 L24 8 L40 16 L24 24 Z" fill="#c9ced6" />
+        <path d="M8 16 V34 L24 42 V24 Z" fill="#8b919d" />
+        <path d="M40 16 V34 L24 42 V24 Z" fill="#6b7280" />
+        <path d="M8 24 L24 32 L40 24" stroke="#dee2ed" strokeWidth="2" fill="none" />
+      </svg>
+    );
+  return (
+    <svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true">
+      {[34, 25, 16].map((y) => (
+        <g key={y}>
+          <ellipse cx="24" cy={y} rx="17" ry="6.5" fill="#0b0d10" stroke="#3a3f46" strokeWidth="1.5" />
+          <ellipse cx="24" cy={y - 1} rx="7" ry="2.4" fill="#1f242b" />
+        </g>
+      ))}
+    </svg>
   );
 }

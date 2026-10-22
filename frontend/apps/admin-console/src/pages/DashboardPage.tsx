@@ -80,17 +80,7 @@ export function DashboardPage() {
         >
           {control?.active_app ? `▶ ${ROLES[control.active_app].title} 차량 제어 중` : '차량 제어 앱 없음'}
         </div>
-        <span className={styles.grow} />
-        <div className={styles.chips}>
-          {SAFETY.map((f) => (
-            <span key={f.key} title={f.hint}>
-              <StatusBadge
-                health={!flags ? 'stopped' : flags[f.key] ? 'fault' : 'ok'}
-                label={`${f.label}: ${flags ? (flags[f.key] ? f.on : f.off) : '—'}`}
-              />
-            </span>
-          ))}
-        </div>
+        {/* 안전 플래그 셋은 위쪽에서 뺐다 (2026-10-22 요청) — 아래 "차량 상태" 카드에 그대로 있다 */}
       </section>
 
       {control?.mode === 'AUTO_READY' && (

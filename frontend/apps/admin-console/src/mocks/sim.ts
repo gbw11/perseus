@@ -79,6 +79,8 @@ export interface SimState {
   nextDemoAt: number;
   /** 차선 오프셋 (m, + 왼쪽) — 인지 대역 lane_offset_m 흉내 */
   lateral: number;
+  /** 수동 키를 마지막으로 누른 시각 (화면 시계 ms) */
+  lastKeyAt?: number;
 }
 
 /** 시뮬레이터 시간 배율 — 화면에서 보기 좋은 빠르기 (시안의 ×1). sim.world.time_scale 로 알린다 */
@@ -299,6 +301,7 @@ export function advance(
     s.nextDemoAt = now + DEMO_EVERY_MS;
     if (race.phase === 'go') reshuffle(s);
   }
+  if (driver === 'manual' && keys.length) s.lastKeyAt = now;
   const total = dt * SIM_TIME_SCALE;
   for (let t = 0; t < total - 1e-9; t += SUBSTEP) {
     const h = Math.min(SUBSTEP, total - t);
@@ -321,7 +324,8 @@ export function advance(
         tv = car.v < -0.02 ? 0 : MAX_V; // 꾹 누르면 최고 속도까지 서서히
       else if (down)
         tv = car.v > 0.02 ? 0 : -REV_V; // 달리는 중이면 브레이크, 서 있으면 후진
-      else decel = COAST; // 놓으면 천천히
+      // 놓으면 천천히 — 다만 한동안 아무 키도 안 눌렀으면(인계 직후) 수동 앱의 정지 명령(v=0)대로 선다
+      else decel = now - (s.lastKeyAt ?? -1e9) < 2000 ? COAST : BRAKE;
       const steerMax = 0.21 * (1 - 0.45 * Math.min(1, Math.abs(car.v) / MAX_V));
       ts = (keys.includes('left') ? steerMax : 0) - (keys.includes('right') ? steerMax : 0);
       if (tv > 0 && esp32Blocks(p)) tv = 0; // ESP32 근거리 감지 — 바로 앞 장애물이면 전진 차단

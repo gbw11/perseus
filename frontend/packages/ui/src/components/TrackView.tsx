@@ -27,6 +27,10 @@ export interface TrackViewProps {
   selectedId?: string | null;
   /** 못 놓은 자리 (빨간 X) */
   rejectAt?: { x: number; y: number } | null;
+  /** 지도 밖에서 끌어 온 것 (위에 있는 동안·놓을 때 트랙 좌표) */
+  onDragTrack?: (e: { type: 'over' | 'leave' | 'drop'; x: number; y: number }) => void;
+  /** 끌어 오는 동안 놓일 자리 미리 보기 */
+  preview?: { x: number; y: number; w: number } | null;
 }
 
 const DEFAULT_TRACK: EllipseTrack = { shape: 'ellipse', a_m: 3, b_m: 1.5, lane_width_m: 0.4 };
@@ -50,6 +54,8 @@ export function TrackView({
   onPointer,
   selectedId,
   rejectAt,
+  onDragTrack,
+  preview,
 }: TrackViewProps) {
   // v1.4 실제 서킷이면 캔버스 탑뷰 (잔디·벽·관중석·나무, 실제 크기 차)
   if (world && isCircuit(world.track))
@@ -64,6 +70,8 @@ export function TrackView({
         onPointer={onPointer}
         selectedId={selectedId}
         rejectAt={rejectAt}
+        onDragTrack={onDragTrack}
+        preview={preview}
       />
     );
   const track = (world?.track as EllipseTrack | undefined) ?? DEFAULT_TRACK;

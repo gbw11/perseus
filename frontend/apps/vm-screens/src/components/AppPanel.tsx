@@ -42,12 +42,17 @@ export function AppPanel({ id, onSelect }: { id: AppId; onSelect?: (id: AppId) =
           <h2 className={styles.panelTitle}>{meta.title}</h2>
           <span className={styles.guest}>{meta.guest === 'zephyr' ? 'Zephyr' : 'Debian 13'}</span>
         </div>
-        <StatusBadge health={status.health} label={badgeLabel} size="lg" />
+        {/* 제어 중·대기 표시는 상태 배지 옆에 한 줄로 */}
+        <div className={styles.headRight}>
+          {active && <span className={styles.activeTag}>▶ 차량 제어 중</span>}
+          {!active && id === 'manual' && status.commandHz > 0 && (
+            <span className={styles.standbyTag}>대기 중</span>
+          )}
+          <StatusBadge health={status.health} label={badgeLabel} size="lg" />
+        </div>
       </header>
 
       <div className={styles.panelRole}>{meta.role}</div>
-      {active && <div className={styles.activeTag}>▶ 차량 제어 중</div>}
-      {!active && id === 'manual' && status.commandHz > 0 && <div className={styles.standbyTag}>대기 중</div>}
 
       <div className={styles.panelBody}>
         {id === 'interaction' ? <InteractionSummary /> : <DriveSummary id={id} />}

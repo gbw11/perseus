@@ -571,3 +571,16 @@
   color: var(--x-warning, #f59e0b);
   font-weight: 600;
 }
+/* 앱 칸 머리 오른쪽: 제어 중·대기 표시와 상태 배지를 한 줄로 */
+.headRight {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.headRight .activeTag,
+.headRight .standbyTag,
+.detailHead .activeTag {
+  align-self: center;
+}
