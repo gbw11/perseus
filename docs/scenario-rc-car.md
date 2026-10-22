@@ -167,7 +167,7 @@ VM 역할, 정상 흐름, 장애·복구 흐름, 화면, 데모 순서와 측정
 | VM 간 메시지 왕복 | MQTT-07/08 probe RTT | 측정 후 확정 | 지연 측정 (-131) |
 | 명령 주기 | `drive.command` 수신 간격 p50·p99 | 20 ms ± | 게이트웨이 |
 
-수치는 실보드 측정 전 제안값이다. 보드가 오기 전에는 시뮬레이터(-47)와 QEMU 로 흐름을 먼저 맞춘다.
+수치는 실보드 측정 전 제안값이다. 보드가 오기 전에는 시뮬레이터(-47)와 QEMU 로 흐름을 먼저 맞춘다. 실차가 데모까지 준비되지 않으면 [시뮬레이터 시연 시나리오(Plan B)](scenario-simulator.md)로 시연한다.
 
 ## 7. 하드웨어 연결 (후보)
 
@@ -202,6 +202,7 @@ VM 역할, 정상 흐름, 장애·복구 흐름, 화면, 데모 순서와 측정
 
 ## 관련 문서
 
+- [시뮬레이터 시연 시나리오 (Plan B)](scenario-simulator.md) — 실차 대신 시뮬레이터로 시연할 때의 구성·화면·전환 기준
 - [MQTT 메시지 계약 v1](contracts/mqtt-contract-v1.md) — 토픽·봉투·주행 모드·ACL
 - [아키텍처 설계서](architecture.md), [차량 제어 상세 명세](design/vehicle-control-spec.md) — 게이트웨이·ESP32 안전 규칙 상세 (VM 구성은 이 문서로 대체)
 - [VM 관리 API 계약 v1](contracts/vm-api-contract-v1.md) — VM 상태·재시작
