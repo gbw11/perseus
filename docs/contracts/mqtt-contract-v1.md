@@ -302,7 +302,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | 게이트웨이 | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/apps/vehicle/events` |
 | dom0 vchan 중계 | 계정이 따로 없다. Zephyr VM마다 그 VM의 `app_id` 계정으로 접속한다 (4.1) |
 | 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/console/resume`, `xenova/v1/vms/{vm_id}/command`, `xenova/v1/sim/command` (11장) |
-| 시뮬레이터 (`simulator`, Plan B) | `xenova/v1/sim/pose`, `xenova/v1/sim/world` (11장) |
+| 시뮬레이터 (`simulator`, 시뮬레이터 구성) | `xenova/v1/sim/pose`, `xenova/v1/sim/world` (11장) |
 | 각 VM 측정 클라이언트·응답기 | `xenova/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
 
 브로커 계정·ACL 파일은 [브로커 구성](../../platform/deploy/mosquitto/README.md)(`platform/deploy/mosquitto/etc/acl`)에서 관리한다.
@@ -317,9 +317,9 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 - 명령 만료 판정에 쓰는 시각 오차 허용 범위와 동기화 방식 (MQTT-04 `CLOCK_UNTRUSTED`)
 - 와치독 300 ms, 전환 100 ms, `AUTO_READY` 3초는 실보드 측정 후 확정
 
-## 11. 시뮬레이터 전용 (Plan B, 실차 없음)
+## 11. 시뮬레이터 전용 (실차에는 없음)
 
-실차 대신 시뮬레이터로 시연할 때만 쓰는 메시지·API 다 ([시뮬레이터 시연 시나리오](../scenario-simulator.md)). 실차(Plan A)에는 이 토픽이 없고, 받는 쪽은 없어도 동작해야 한다. 시뮬레이터는 ESP32 자리(게이트웨이 시리얼 뒤)에 있으므로 `vehicle.status` 는 그대로 게이트웨이가 낸다 — 아래는 **실차에 없는 값**(위치·트랙)과 **시연 조작**만이다.
+차·카메라를 시뮬레이터로 둔 구성(데모 기본, [시뮬레이터 시연 시나리오](../scenario-simulator.md))에서만 쓰는 메시지·API 다. 실차 구성에는 이 토픽이 없고, 받는 쪽은 없어도 동작해야 한다. 시뮬레이터는 ESP32 자리(게이트웨이 시리얼 뒤)에 있으므로 `vehicle.status` 는 그대로 게이트웨이가 낸다 — 아래는 **실차에 없는 값**(위치·트랙)과 **시연 조작**만이다.
 
 ### 11.1 토픽
 
@@ -394,7 +394,7 @@ MQTT 가 아니다. 게이트웨이가 시리얼 대신 TCP 로 같은 프레임
 - [차량 제어 상세 명세](../design/vehicle-control-spec.md)
 - [RC카 시나리오](../scenario-rc-car.md) §8 — D1·D3·D8 결정
 - [카메라·AI 감지 계약 v1](camera-stream-v1.md) — MQTT-14 `vision.result` 와 영상 경로
-- [시뮬레이터 시연 시나리오 (Plan B)](../scenario-simulator.md) — 11장을 쓰는 구성·화면
+- [시뮬레이터 시연 시나리오 (기본 시연)](../scenario-simulator.md) — 11장을 쓰는 구성·화면
 
 ## 변경 이력
 
@@ -405,4 +405,4 @@ MQTT 가 아니다. 게이트웨이가 시리얼 대신 TCP 로 같은 프레임
 | v1.1 | 2026-10-21 | 시나리오 D1·D3·D8 반영 (S15P31E110-242). ESP32를 MQTT 참여자에서 빼고 게이트웨이 시리얼 뒤로(4장, 5.3, 9장 계정 삭제), `vehicle.status` 발행 = 게이트웨이 `source_id: dom0-gateway`(5.4), 5.5 ESP32 수용 규칙 → 게이트웨이 수용 규칙, Zephyr vchan + dom0 중계(4.1, 10장에서 삭제), `AUTO_READY`·VM 재시작 근거에서 에이전트 대신 도메인 상태 + `app.heartbeat`(5.1·5.2·6.1). `vehicle.status.batt_v` 를 선택 필드로(5.4, 측정 회로 없음). 토픽 이름은 그대로 |
 | v1.1.1 | 2026-10-21 | 구현 기준 정합 (S15P31E110-249). 5.2 전환 표와 사유 `autonomous_ready`·`autonomous_lost`·`manual_fresh` (게이트웨이 -98 구현), `MANUAL` 중 수동 끊김은 자율이 신선해도 `SAFE_STOP`, `perception.result` 좌표계·부호·최대 개수·발행 중단 (젯슨 대역 -156 구현), 6장 재개 응답 이벤트 없음·`drive.fault.detected` 조건. 토픽·필드 이름 그대로 |
 | v1.2 | 2026-10-21 | 재개를 바로 바꾸지 않고 `drive.resume.accepted`(3초 뒤 전환) → `AUTO` 또는 `drive.resume.cancelled`(6장). 운영자 콘솔 재개 경로 MQTT-13 `xenova/v1/console/resume`(백엔드 발행, 9장 ACL) (S15P31E110-98). 카메라 감지 결과 MQTT-14 `xenova/v1/apps/message-board/vision` `vision.result`(6장, 주행 판단 미사용·≤10 Hz·QoS 0, 9장 ACL message-board 발행) (S15P31E110-128) |
-| v1.3 (초안) | 2026-10-22 | 시뮬레이터 전용 11장 (Plan B): MQTT-15 `sim.pose`·MQTT-16 `sim.world`(retained)·MQTT-17 `sim.command`, 콘솔 REST-30~35·WS-06 `/ws/v1/sim`, 게이트웨이 TCP 출력. 9장 ACL `simulator` 계정·백엔드 `sim/command`. 6장 `perception.event` `kind` 값 (자율주행 앱 -259 구현) (S15P31E110-261·-265) |
+| v1.3 (초안) | 2026-10-22 | 시뮬레이터 전용 11장 (데모 기본 구성): MQTT-15 `sim.pose`·MQTT-16 `sim.world`(retained)·MQTT-17 `sim.command`, 콘솔 REST-30~35·WS-06 `/ws/v1/sim`, 게이트웨이 TCP 출력. 9장 ACL `simulator` 계정·백엔드 `sim/command`. 6장 `perception.event` `kind` 값 (자율주행 앱 -259 구현) (S15P31E110-261·-265) |
