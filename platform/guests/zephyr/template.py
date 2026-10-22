@@ -43,7 +43,8 @@ def info(directory, expected_manifest):
         import xenova_zephyr as zephyr
         info = zephyr.bundle_info(directory, expected_manifest)
         meta = json.loads((directory / 'firmware.json').read_text())
-        lock = json.loads((HERE / 'starter.lock.json').read_text())
+        lock_file = 'network-starter.lock.json' if meta.get('hardware_profile') == zephyr.NET_PROFILE else 'starter.lock.json'
+        lock = json.loads((HERE / lock_file).read_text())
         if (meta.get('id') != lock['id'] or meta.get('kind') != 'zephyr-xen-firmware'
                 or meta.get('version') != lock['version']
                 or any(meta['source'].get(k) != lock[k] for k in ('app', 'app_files', 'app_source_sha256', 'zephyr_commit', 'sdk_version'))
