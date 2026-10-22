@@ -6,7 +6,9 @@ S = "${UNPACKDIR}"
 
 inherit allarch python3-dir systemd
 
-RDEPENDS:${PN} = "python3-core python3-fastapi python3-uvicorn python3-json python3-logging python3-threading python3-netclient python3-shell python3-crypt python3-math xenova-platform"
+# PTY 콘솔의 tty/termios와 pyproject에 선언된 WebSocket 전송을 설치한다.
+RDEPENDS:${PN} = "python3-core python3-fastapi python3-uvicorn python3-websockets python3-terminal python3-json python3-logging python3-threading python3-netclient python3-shell python3-crypt python3-math python3-datetime xenova-platform xen-tools-xenstat xenova-mqtt-client"
+# 통계/감시기 시험 소스를 옮겨도 xentop·공용 MQTT runtime을 다시 설치하지 않게 한다.
 SYSTEMD_SERVICE:${PN} = "xenova-dom0-manager.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
