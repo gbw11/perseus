@@ -136,7 +136,7 @@ print('PASS Xenova PN/SRC_URI/image dependencies, single SSH service mode and ne
 _, api = load('xenova-dom0-manager')
 _, mqtt = load('xenova-mqtt-client')
 assert {'xenova-dom0-manager', 'xenova-mqtt-client'} <= set(image['IMAGE_INSTALL'].split())
-assert {'python3-fastapi', 'python3-uvicorn', 'python3-netclient', 'python3-shell', 'xenova-platform'} <= set(api['RDEPENDS:xenova-dom0-manager'].split())
+assert {'python3-fastapi', 'python3-uvicorn', 'python3-websockets', 'python3-terminal', 'python3-netclient', 'python3-shell', 'xenova-platform'} <= set(api['RDEPENDS:xenova-dom0-manager'].split())
 assert 'python3-paho-mqtt' in mqtt['RDEPENDS:xenova-mqtt-client'].split()
 assert api['SYSTEMD_SERVICE:xenova-dom0-manager'] == 'xenova-dom0-manager.service'
 assert api['SYSTEMD_AUTO_ENABLE:xenova-dom0-manager'] == 'enable'

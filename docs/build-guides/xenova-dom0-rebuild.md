@@ -31,7 +31,8 @@ QEMU 개발 probe/lab은 운영 설치·자동 실행에 넣지 않으며 Xen ba
 새 WIC에서는 실제 설치된 Manager/CLI·resources/transition/control/신원/복구 모듈,
 정책·unit·libxenmanage, Linux cfg와 Wi-Fi PIO/CYW/scan 설정을 검사한다.
 `xenova-vms.service`의 ExecStop과 공용 QEMU backend/guard 종료 순서를 실제 unit으로 확인한다.
-FastAPI·MQTT 설치와 소스 일치도 확인한다. 없는 Worker/Agent/Gateway를 구현 완료로 표시하지 않는다.
+FastAPI·MQTT 설치와 소스 일치도 확인한다. 새 웹 콘솔의 tty/termios 및 websockets도 실제 ARM64 Python에서 import한다.
+없는 Worker/Agent/Gateway를 구현 완료로 표시하지 않는다.
 
 최종 조립은 별도 실행 단계다. 기존 Ubuntu/Debian 템플릿을 보존하고 새 network Starter
 1.1.0의 ELF/DTS/config/manifest·source lock을 검사해 별도 release로 게시한다.
