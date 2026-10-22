@@ -2,6 +2,8 @@
 
 환경 준비 → Linux·Zephyr 템플릿 준비·게시 → 기본 선택 확정 → 회귀·입력 고정 → dom0 빌드·검증·게시 → seed·최종 이미지 조립·검증 → PC 인계 순서로 진행한다. 빌드 절차와 명령이 바뀌면 이 문서를 갱신한다.
 
+소스 대조 기준: [하위 플랫폼·backend 통합 입력 `347d935`](https://lab.ssafy.com/s15-final/S15P31E110/-/tree/347d935cb7ef09e07f3082a13af1733bb6acd2cb). 빌드할 때는 팀에서 승인한 통합 커밋을 선택하고, 아래 입력 고정 단계에서 실제 HEAD·파일·설정 해시를 기록한다.
+
 ## 1. 빌드 구성과 경로
 
 | 항목 | 기준 |
@@ -9,7 +11,8 @@
 | 호스트 | Windows 11 + WSL2 Ubuntu 24.04, x86_64 |
 | 타깃 | Raspberry Pi 4, `raspberrypi4-64` |
 | dom0 | `xenova-xen-bringup-image` |
-| dom0 설치 | Manager·CLI·복구/신원, FastAPI/Uvicorn, Paho·공용 MQTT 클라이언트, xentop·Mosquitto 도구 |
+| dom0 설치 | Manager·CLI·복구/신원·CPU 정책, FastAPI/Uvicorn·통계·heartbeat worker, Paho·공용 MQTT 클라이언트, xentop·Mosquitto |
+| 기본 CPU 배치 | Zephyr A→pCPU 1, B→2, dom0·일반 VM의 모든 vCPU→{0,3}. Credit2·기존 vCPU 수 유지 |
 | 외부 레이어 | [layers.lock](../../platform/yocto/layers.lock)의 6개 URL·commit |
 | Linux 원본 | [sources.lock.json](../../platform/guests/sources.lock.json)의 Ubuntu·Debian cloud image |
 | 기본 선택 | [default-templates.lock.json](../../platform/guests/default-templates.lock.json): Ubuntu·Debian 1.0.2, Network Starter 1.1.0 |
@@ -42,9 +45,10 @@ sudo locale-gen en_US.UTF-8
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
 
-git clone --branch develop https://lab.ssafy.com/s15-final/S15P31E110.git \
-  "$HOME/S15P31E110"
+git clone https://lab.ssafy.com/s15-final/S15P31E110.git "$HOME/S15P31E110"
 cd "$HOME/S15P31E110"
+read -r -p "빌드할 통합 커밋 SHA: " SOURCE_REV
+git switch --detach "$SOURCE_REV"
 ```
 
 GitLab HTTPS 인증에는 팀 저장소 접근 권한이 있는 계정을 사용한다. 기존 clone에서는 작업 변경을 확인한 뒤 팀에서 정한 통합 소스를 선택한다.
@@ -410,6 +414,10 @@ else:
 print("INPUTS OK", len(files), "files", len(layers), "layers")
 PY
 
+# 선택한 입력에 CPU·worker·토큰 준비 구현이 포함됐는지 먼저 확인한다.
+test -f platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_cpu.py
+test -f platform/services/dom0-manager/dom0_manager/service_token.py
+test -f platform/services/dom0-manager/deploy/xenova-recovery-worker.service
 run freeze-inputs python3 -B "$RUN/tools/inputs.py" record
 run regression bash "$REPO/platform/scripts/check-xenova-platform.sh" --metadata
 run check-after-regression python3 -B "$RUN/tools/inputs.py" check
@@ -514,9 +522,22 @@ try:
         "import fastapi,uvicorn,pydantic,pydantic_core,paho.mqtt.client;"
         "import tty,termios,fcntl,websockets,dom0_manager,xenova_mqtt;"
         "import sys;sys.path.insert(0,'/usr/lib/xenova');"
-        "import xenova_management,xenova_execution,xenova_recovery"])
+        "import xenova_management,xenova_execution,xenova_recovery,xenova_cpu;"
+        "import dom0_manager.drivers.xentop,dom0_manager.recovery,dom0_manager.service_token"])
     graph(root, ["multi-user.target", "sshd.service", "xenova-vms.service",
-                 "xenova-dom0-manager.service", "xenova-host-admission.service"])
+                 "xenova-dom0-manager.service", "xenova-recovery-worker.service",
+                 "xenova-cpu-prepare.service", "xenova-host-admission.service"])
+    for service in ("xenova-dom0-manager.service", "xenova-recovery-worker.service"):
+        check((root/"etc/systemd/system/multi-user.target.wants"/service).is_symlink(),
+              "enabled "+service)
+    preset = json.loads((root/"etc/xenova/cpu-policy-preset.json").read_text())
+    check(preset == json.loads((repo/"platform/yocto/meta-xenova/recipes-core/"
+          "xenova-platform/files/cpu-policy-preset.json").read_text()), "CPU preset source match")
+    check(not (root/"etc/xenova/dom0-manager-token.env").exists(),
+          "service token generated per board")
+    env = (root/"etc/xenova/dom0-manager.env").read_text().splitlines()
+    check(not any(line.startswith("XENOVA_SERVICE_TOKEN=") and line.split("=",1)[1].strip()
+                  for line in env), "no shared HTTP token")
     check((root/"etc/machine-id").read_text() == "uninitialized\n",
           "per-board dom0 machine-id")
     check(not list((root/"etc/ssh").glob("ssh_host_*_key")), "per-board SSH keys")
@@ -688,7 +709,7 @@ PY
 
 ## 8. seed 생성과 최종 조립·검증
 
-조립 실행 안에서 Debian seed와 Zephyr A/B의 독립 firmware 자산, 카탈로그, factory metadata가 준비된다. Debian seed의 machine-id·SSH 키와 각 VM의 UUID/MAC는 최초 보드 부팅에서 확정한다.
+조립 실행 안에서 Debian seed와 Zephyr A/B의 독립 firmware 자산, 카탈로그, factory metadata가 준비된다. Debian seed의 machine-id·SSH 키와 각 VM의 UUID/MAC는 최초 보드 부팅에서 확정한다. CPU 프리셋은 공통 이미지에 보드 UUID를 넣지 않고, 첫 identity plan에서 확정한 A/B UUID에 연결한다. 기존 identity plan·CPU 정책을 새 기본값으로 덮어쓰지 않는다.
 
 ```bash
 run check-before-assembly python3 -B "$RUN/tools/inputs.py" check
@@ -797,4 +818,21 @@ sha256sum "$EXPORT/xenova-first-install.img.zst" \
 - `*.command.json`·`logs/`·검사 `RESULT.json`: 단계별 종료 코드·전체 출력·검사 결과
 - PC 전달 폴더의 `xenova-first-install.img.zst`·`SHA256SUMS`: 압축 이미지와 전달물 해시
 
-이미지 인계 이후의 보드 수락에서는 최초 부팅·세 기본 VM 자동 실행·Wi-Fi/SSH·게스트 신원·A/B 통신·협조형 종료를 같은 이미지 해시 기준으로 확인한다.
+이미지 인계 이후에는 같은 이미지 해시 기준으로 다음을 확인한다. 자세한 명령·반환값은 [CLI·Manager 명세](cli-manager-spec.md)를 따른다.
+
+| 확인 대상 | 수락 근거 |
+|---|---|
+| 최초 등록·신원 | 기본 세 VM의 UUID/MAC, Linux machine-id·SSH 공개키, seed 등록 완료 |
+| CPU 준비·자동 시작 | first-boot·Xen ready → CPU prepare → VM autostart → host admission 순서. `cpu-layout --json`의 host.ready와 실제 모든 vCPU hard mask |
+| 재부팅·복구 | A/B 협조형 reboot·Linux 일반 reboot·recover_once·host 재부팅 뒤 같은 정책 revision과 실제 배치, 새로운 실행 신원 |
+| 서비스 | dom0-manager·recovery worker enable/active, xentop 통계 조회, broker 인증·구독·건강 상태 게시 |
+| 보드별 비밀 | 최초 API 서비스 시작에서 root 전용 HTTP 토큰 생성, 기존 토큰 보존. MQTT 계정과 별도로 취급 |
+| 접속·게스트 | Wi-Fi 자동 재연결·SSH, Paho/Agent import·enable, 실제 broker 종단 연결, A/B Ethernet·협조형 종료 |
+
+CPU 정책이 없는 기존 설치의 활성화는 모든 관리 게스트가 정지한 유지보수 창에서 `cpu-policy-set` 계획·실행 → 내부 `cpu-host-prepare` → 실제 배치 조회 순서로 진행한다. 정책 저장과 현재 host 적용은 서로 다른 단계다.
+
+일반 UART 콘솔의 커널 출력은 `loglevel=3`이며 연결 중 채널 진단도 `dmesg`·journal에서 조회한다. 진단용 부팅의 상세 로그 설정은 별도로 유지한다. Wi-Fi 연결 요청 응답과 실제 인증·DHCP 완료는 구분한다.
+
+공통 이미지에는 HTTP 토큰·MQTT 암호·개인 Wi-Fi 설정을 넣지 않는다. 설치 후 `xenova-dom0-manager.service`가 `dom0_manager.service_token`을 실행해 `/etc/xenova/dom0-manager-token.env`를 0600으로 준비한다. `/etc/xenova/dom0-manager.env`의 기존 서비스 토큰은 우선하며 자동 회전하지 않는다. worker는 `/etc/xenova/recovery-worker.env`의 `XENOVA_RECOVERY_*` 설정을 읽고, broker 연결 문제로 VM 자동 시작이나 host admission을 외부 online 대기에 묶지 않는다.
+
+pinning 기능 수락과 성능 효과는 나누어 기록한다. 동일 펌웨어·입력·broker 설정에서 pinning 전/후 × Debian 부하 유무를 비교하고, guest 계산 주기와 Gateway 지연 각각의 p95/p99·관측 최대·deadline miss·오류/손실을 보관한다. 실제 주행 앱이 없는 경우 타이밍 harness 결과로 범위를 명시한다.
