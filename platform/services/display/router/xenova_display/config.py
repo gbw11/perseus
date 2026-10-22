@@ -8,6 +8,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+DISPLAY_DRIVE_TOPIC = "xenova/v1/display/drive-state"
+DISPLAY_DRIVE_TYPE = "display.drive_state"
+
 
 class Binding(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)

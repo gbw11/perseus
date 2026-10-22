@@ -3,6 +3,7 @@ import json
 import logging
 
 import paho.mqtt.client as mqtt
+from .config import DISPLAY_DRIVE_TOPIC
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class MqttSource:
                 client.subscribe(f"xenova/v1/vms/{b.vm_id}/heartbeat", qos=1)
                 client.subscribe(f"xenova/v1/vms/{b.vm_id}/inventory", qos=1)
             client.subscribe(f"xenova/v1/apps/{b.app_id}/events", qos=1)
-        client.subscribe("xenova/v1/vehicle/control", qos=1)
+        client.subscribe(DISPLAY_DRIVE_TOPIC, qos=1)
 
     def on_disconnect(self, client, userdata, flags, reason_code, properties):
         with self.store.lock:

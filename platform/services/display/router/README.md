@@ -32,7 +32,11 @@ python -m uvicorn xenova_display.main:create_app --factory --host 127.0.0.1 --po
 | `XENOVA_DISPLAY_MQTT_USERNAME` / `PASSWORD` | 기존 브로커의 구독 계정 |
 | `XENOVA_DISPLAY_CONTROL_SOURCE` | `dom0-gateway`: 제어 상태 발행 source_id |
 
-MQTT는 기본적으로 dom0 loopback 브로커를 사용한다. 게스트별 토픽 발행권과 control 발행권은 기존 브로커 계정/ACL로 제한한다. 봉투의 `source_id` 검사만으로 발행자 인증을 대신하지 않는다. 이 단계에서 브로커 ACL이나 기존 메시지 계약은 변경하지 않는다.
+MQTT는 기본적으로 dom0 loopback 브로커를 사용한다. 게스트별 토픽 발행권과 control 발행권은 브로커 계정/ACL로 제한해야 한다. 봉투의 `source_id` 검사만으로 발행자 인증을 대신하지 않는다. 실제 브로커 ACL이나 기존 메시지 계약은 변경하지 않는다.
+
+사용자 선택에 따라 표시용 주행 상태는 **`xenova/v1/display/drive-state` / `type=display.drive_state` / 1초 주기 / QoS 1 / retain=false**로 분리했다. 수신 코드는 준비됐지만 실제 권위 발행자와 제어 담당의 발행/ACL 연결 합의는 남아 있다. 현재 브로커 `gateway` 계정에는 새 토픽 쓰기 권한이 없으므로 권한 반영 전 발행 가능하다고 가정하지 않는다. 기존 `xenova/v1/vehicle/control`은 구독/해석하지 않는다. [제어 담당 연결 규격](../../../../docs/contracts/display-drive-state-v1.md)을 따른다.
+
+사용자 확정 1차 영상 목표는 출력별 1280×720·5 FPS, 지연 p95 ≤500ms, JPEG 두 출력 합계 ≤8Mbps, 송신기+인코더 CPU 평균 ≤1코어다. 실보드 달성 여부는 미검증이며 10 FPS는 후속 개선이다. [목표 및 미결정 항목](../../../../docs/contracts/display-250-decisions.md)을 참고한다.
 
 ## 인터페이스
 
@@ -85,6 +89,8 @@ presentation의 `revision`은 선택 설정 버전, `render_revision`은 실행 
 검증: `tests/probe_browser.cjs`는 Windows Chrome/Playwright + 기존 WSL/QEMU를 사용하는 별도 시험 도구다. 실제 Xen 조회와 합성 장애/주행 사례를 구분한다. 테스트 서버의 `/test/scenario` 경로는 `tests/preview_server.py`에만 존재하며 제품 앱에는 포함되지 않는다. [3단계 검증 기록](../../../../docs/verification/display-step3.md)을 참고한다.
 
 ## 4단계 X11 실행과 원격 시연
+
+실보드 환경 확인은 `python3 tools/probe_board_environment.py`로 JSON을 수집할 수 있다. 기존 X11 세션을 알고 있으면 `--display :0`처럼 지정한다. 이 도구는 패키지 설치·모드 변경·서비스/VM 조작·GUI 실행을 하지 않으며, 수집 성공을 물리 HDMI 통과로 보고하지 않는다. [250 결정 기록](../../../../docs/contracts/display-250-decisions.md)에 제어 발행자·보고 주기·보드 환경·성능 목표의 확정 상태를 기록한다.
 
 현재 구현 백엔드는 **X11/XRandR + Chromium + FFmpeg x11grab/MJPEG**다. Wayland/Weston에서는 이 실행기를 그대로 사용할 수 없다. 실제 dom0에 Xorg 세션·창 관리자와 GPU 드라이버, `xrandr`, Chromium, FFmpeg의 x11grab 및 MJPEG 인코더, 한글 글꼴이 있어야 한다. Python 설치에는 `python -m pip install './platform/services/display/router[display]'`로 Playwright를 추가하고 타깃용 Chromium 경로를 지정한다. 실제 Yocto 이미지에 이 구성이 설치돼 있다고 가정하지 않는다.
 
@@ -151,10 +157,12 @@ python -B tests/probe_display_runtime.py --execute --soak-seconds 600 \
 - `run_id`는 수집기 epoch와 관측 domid를 묶은 관측 식별자다. 빠른 재부팅/동일 domid 재사용을 전부 증명하는 Xen 시작 세대 API는 아직 없다. `guest_boot_id`는 게스트 보고값이며 OS의 `current_run_verified`는 항상 false다. 부팅 전후를 놓치면 현재 실행과 OS 근거가 확실히 결합됐다고 표시하지 않는다.
 - 프로세스 수명 내 소스별 retired epoch는 128개까지만 추적한다. 한도 이후 새로운 세대는 수락하지 않고 운영 재시작/점검이 필요하다. 임의 발행자 수를 누적하지 않도록 등록된 세 VM·앱·지정된 control만 구독한다.
 - Zephyr Starter는 현재 앱 heartbeat를 보내지 않는다. 이때 앱/관측 OS는 unknown이고 기대 OS와 실제 Xen 실행 상태만 표시한다. 모터/미러링/승계 기능이 구현됐다고 표시하지 않는다.
-- `vehicle.control`의 명시적 `active_vm_id`와 `mode`를 따로 전달한다. `active_app`만 있는 구형 보고로 VM을 추측하지 않는다. retained control은 현재 상태로 수락하지 않으며 수신 지연 시 mode=unknown이다. AI 상태는 아직 unknown이다.
+- `display.drive_state`의 명시적 `active_vm_id`와 `mode`를 따로 전달한다. `active_app`이나 구형 `vehicle.control`로 VM을 추측하지 않는다. retained 재생 보고는 현재 상태로 수락하지 않으며 3초 수신 지연 시 mode=unknown이다. AI 상태는 아직 unknown이다.
 
 ## 검증
 
 수집기 디렉터리에서 `python -m pytest`를 실행한다. Spring은 `backend`에서 `./mvnw -Dtest=DisplayIntegrationTest,ConsoleWebSocketIntegrationTest test`로 검증한다.
+
+`tests/probe_display_control.py --execute --output <결과.json>`은 loopback 브로커를 띄워 별도 표시 상태 보고 → 실제 MQTT 수신 → REST/WS·상세 정책 연결을 시험한다. 기존 테스트 런타임의 amqtt/paho/httpx/websockets가 필요하며 PYTHONPATH는 위 runtime probe와 같다. 제어 엔진/Xen 관측은 합성이고 운영 ACL·실보드 검증이 아니다. [250 후속 검증 결과](../../../../docs/verification/display-250-followup.md)를 참고한다.
 
 `tests/probe_qemu.py`는 기존 격리 실험실 전용이며 일반 테스트에서 자동 실행되지 않는다. `--execute --output <증거 파일>`이 필요하다. 시험 호스트에 amqtt 0.11.3/pexpect, 기존 ARM64 휠과 Java 21/Spring 컴파일 결과가 있어야 한다. 실제 dom0의 임시 디렉터리에 수집기를 올리고 실제 Debian은 메모리에서만 임시 보고기를 실행한다. 테스트 브로커는 호스트 loopback에 있고 SSH 포워딩을 사용하므로 제품 배포의 로컬 Mosquitto 토폴로지와 구별한다. 기존 VM/이미지/서비스·실행 도메인 ID를 바꾸지 않는다. 결과는 [검증 기록](../../../../docs/verification/display-step2.md)을 참고한다.

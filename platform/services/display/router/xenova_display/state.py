@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from xenova_mqtt.envelope import EnvelopeError, validate
 
-from .config import FeedSettings
+from .config import DISPLAY_DRIVE_TOPIC, DISPLAY_DRIVE_TYPE, FeedSettings
 
 
 def utc_now():
@@ -74,7 +74,7 @@ class StateStore:
             if not isinstance(env.get(field), str) or not 1 <= len(env[field]) <= 256:
                 return False
         with self.lock:
-            if topic == "xenova/v1/vehicle/control":
+            if topic == DISPLAY_DRIVE_TOPIC:
                 return self._control(env, retained)
             vm_id = env.get("vm_id")
             if not isinstance(vm_id, str):
@@ -129,11 +129,14 @@ class StateStore:
     def _control(self, env, retained):
         p = env["payload"]
         # Old active_app semantics must not be used to infer a VM or a driving mode.
-        if retained or env.get("source_id") != self.settings.control_source or env["type"] != "vehicle.control":
+        if (retained or env.get("source_id") != self.settings.control_source
+                or env.get("vm_id") is not None or env["type"] != DISPLAY_DRIVE_TYPE):
             return False
         if p.get("mode") not in ("AUTO", "MANUAL", "SAFE_STOP", "AUTO_READY"):
             return False
-        active = p.get("active_vm_id")
+        if "active_vm_id" not in p:
+            return False
+        active = p["active_vm_id"]
         if active is not None and (not isinstance(active, str) or active not in self.guests or self.guests[active]["binding"].role == "interaction"):
             return False
         epoch = (env["boot_id"], env["agent_instance_id"])
