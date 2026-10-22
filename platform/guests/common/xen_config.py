@@ -50,7 +50,7 @@ def _os(record):
     return selected
 
 
-def render_config(record, *, instance_root):
+def _render_config(record, *, cpu_context=None, instance_root):
     """Return cfg using the existing id/name/uuid and per-instance boot paths.
 
     The caller resolves catalog/version and checks actual boot assets. Resource
@@ -108,3 +108,12 @@ def main(argv=None):
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
+
+def render_config(record, *, instance_root, cpu_context=None):
+    """Render the immutable guest inputs and the resolved host CPU policy."""
+    text = _render_config(record, instance_root=instance_root)
+    if cpu_context is not None:
+        from xenova_cpu import affinity_text
+        text += "\n"+affinity_text(cpu_context)
+    return text
