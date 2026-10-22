@@ -1,6 +1,6 @@
 # MQTT 메시지 계약 v1
 
-**최종 갱신** 2026-10-22 v1.3 초안 (v1.2 위에 시뮬레이터 전용 11장 MQTT-15~17·REST-30~35·WS-06, `perception.event` kind — 변경 이력)
+**최종 갱신** 2026-10-22 v1.4 초안 (v1.3 위에 11장 실제 서킷 트랙·출발 신호·장애물 종류·배치 검사 결과 MQTT-18·REST-36~37 — 변경 이력)
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼, RC카 시나리오
 **브로커** dom0 Mosquitto
 
@@ -302,7 +302,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | 게이트웨이 | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/apps/vehicle/events` |
 | dom0 vchan 중계 | 계정이 따로 없다. Zephyr VM마다 그 VM의 `app_id` 계정으로 접속한다 (4.1) |
 | 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/console/resume`, `xenova/v1/vms/{vm_id}/command`, `xenova/v1/sim/command` (11장) |
-| 시뮬레이터 (`simulator`, 시뮬레이터 구성) | `xenova/v1/sim/pose`, `xenova/v1/sim/world` (11장) |
+| 시뮬레이터 (`simulator`, 시뮬레이터 구성) | `xenova/v1/sim/pose`, `xenova/v1/sim/world`, `xenova/v1/sim/result` (11장) |
 | 각 VM 측정 클라이언트·응답기 | `xenova/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
 
 브로커 계정·ACL 파일은 [브로커 구성](../../platform/deploy/mosquitto/README.md)(`platform/deploy/mosquitto/etc/acl`)에서 관리한다.
@@ -328,9 +328,11 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | MQTT-15 | `xenova/v1/sim/pose` | `sim.pose` | 시뮬레이터 → 백엔드, 인지 대역 | 20 Hz | 0 | X |
 | MQTT-16 | `xenova/v1/sim/world` | `sim.world` | 시뮬레이터 → 백엔드, 인지 대역 | 바뀔 때 + 시작 | 1 | O |
 | MQTT-17 | `xenova/v1/sim/command` | `sim.command` | 백엔드(운영자 콘솔) → 시뮬레이터 | 조작할 때 | 1 | X |
+| MQTT-18 | `xenova/v1/sim/result` | `sim.command.result` | 시뮬레이터 → 백엔드 | 명령마다 1번 | 1 | X |
 
 - 발행자 `source_id`: 시뮬레이터 `simulator`, 백엔드 `backend`. 봉투·seq 규칙은 2장과 같다.
 - 좌표는 **트랙 고정 좌표**다 (5.4 `perception.result` 의 차량 기준 좌표와 다르다). 원점 = 트랙 중심, x = 오른쪽, y = 위쪽(m), `yaw` = +x 에서 반시계 rad. 인지 대역이 이 값으로 차량 기준 `perception.result` 를 계산한다 (S15P31E110-268).
+- 값은 모두 **모의 단위**(m, m/s)다. 화면은 트랙의 `real_m` ÷ 중심선 길이(약 51)를 곱해 **실제 서킷 단위**(km, km/h, m)로 보인다 (v1.4). 계약 값은 바꾸지 않는다 — 실차 확장에서는 같은 값이 실제 RC카 단위다.
 
 **`sim.pose`**
 
@@ -338,30 +340,79 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | --- | --- | --- |
 | `x`, `y` | float | 차 뒷바퀴 축 가운데 위치 (m) |
 | `yaw` | float | 진행 방향 (rad, −π ~ π) |
-| `v_mps`, `steer_rad` | float | 지금 속도·조향 (모델 값) |
+| `v_mps`, `steer_rad` | float | 지금 속도·조향 (모델 값). 후진이면 `v_mps` < 0 |
 | `world_revision` | uint32 | 이 위치를 계산할 때의 `sim.world.revision` |
+| `surface` | string | 차 중심이 있는 노면 `road` · `grass` · `dirt` (v1.4). 잔디·흙이면 최고 속도가 줄어든다 |
+| `race` | object | 출발 신호·랩 (v1.4). 아래 표 |
+
+`race` (v1.4)
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `phase` | string | `lights`(출발 신호 중, 차는 출발선) · `go`(출발 뒤) |
+| `lights_on` | uint8 | 켜진 빨간 불 수 0~5. F1 방식: 1초마다 하나씩 켜지고, 다섯 개가 켜진 뒤 0.2~3초(무작위) 지나 **모두 꺼지면** `go` |
+| `lap` | uint32 | 끝낸 바퀴 수 (출발 뒤 0) |
+| `lap_ms` | uint32 | 지금 바퀴 경과 시간 (`go` 전에는 0) |
+| `last_lap_ms`, `best_lap_ms` | uint32 \| null | 지난 바퀴·가장 빠른 바퀴 |
+| `jump_start` | bool | 불이 꺼지기 전에 차가 움직였다. 첫 바퀴에 5000 ms 를 더한다 |
 
 **`sim.world`**
 
 | 필드 | 타입 | 설명 |
 | --- | --- | --- |
 | `revision` | uint32 | 트랙·장애물·E-stop 이 바뀔 때마다 1 오른다. 시작 1 |
-| `track` | object | `{shape: "ellipse", a_m, b_m, lane_width_m}` — 차선 중심선 타원의 반지름 a(가로)·b(세로). 기본 `3.0`·`1.5`·`0.4` (6 m × 3 m) |
-| `obstacles` | array | `[{id, x, y, w}]` — 장애물 가운데 위치(m)와 폭(m). 최대 8개 |
+| `track` | object | 지금 트랙. 아래 표 (v1.4 에서 타원을 실제 서킷 중심선으로 바꿈) |
+| `tracks` | array | 고를 수 있는 트랙 `[{id, name, real_m}]` (v1.4). 기본 `spielberg`(레드불링 4315 m)·`monza`(몬차 5790 m) |
+| `car` | object | `{length_m, width_m}` 판정에 쓰는 차 몸 크기. 기본 `0.42`·`0.20` (v1.4) |
+| `obstacles` | array | `[{id, kind, x, y, w}]` — 종류·가운데 위치(m)·폭(m). 최대 8개. `kind` 는 v1.4 |
 | `estop` | bool | 시연용 E-stop 이 걸려 있음 (`vehicle.status.flags.estop` 도 같이 true) |
+
+`track` (v1.4)
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `id`, `name` | string | 트랙 id·화면 이름 |
+| `real_m` | uint32 | 실제 서킷 한 바퀴 길이 (m). 화면 단위 변환에 쓴다 |
+| `lane_width_m`, `curb_m` | float | 차선 폭 `0.6`, 연석 폭 `0.06`. 연석 끝까지 아스팔트 |
+| `centerline` | array | `[[x, y], …]` 차선 중심선, 약 0.2 m 간격, 닫힌 고리 (진행 방향 순서). 레드불링 422점·몬차 576점 |
+| `wall_left_m`, `wall_right_m` | array | 점마다 중심선에서 왼쪽·오른쪽 벽까지 거리 (m). 연석 밖 ~ 벽 = 잔디·흙 (지나갈 수 있지만 느리다). 출발 직선은 잔디 없이 바로 벽, 코너 근처는 보통의 두 배 |
+| `start_index` | uint32 | 출발선이 있는 `centerline` 점 |
+
+- 트랙 모양 출처: TUM racetrack-database (LGPL-3.0, © OpenStreetMap contributors) 중심선을 1/50 로 줄이고 반경 0.8 m 미만 코너만 다듬었다. 벽 거리는 시뮬레이터가 계산해 넣는다 — 받는 쪽은 그대로 쓴다.
+- `sim.world` 는 몬차 기준 약 25 KB (1장 64 KB 이하).
 
 **`sim.command`**
 
 | `op` | 인자 | 동작 |
 | --- | --- | --- |
-| `obstacle.add` | `obstacle_id`, `x`, `y`, `w` | 장애물 놓기. `obstacle_id` 는 백엔드가 만든다. 이미 있으면 무시 |
+| `obstacle.add` | `obstacle_id`, `kind`, `x`, `y` | 장애물 놓기. `kind` = `cone`(폭 0.18) · `box`(0.30) · `tires`(0.26) — 폭은 종류로 정한다 (v1.4, v1.3 의 `w` 는 받기만 하고 무시). `obstacle_id` 는 백엔드가 만든다. 이미 있으면 무시 |
 | `obstacle.move` | `obstacle_id`, `x`, `y` | 옮기기 |
 | `obstacle.remove` | `obstacle_id` | 치우기 |
 | `estop` | `engaged` (bool) | E-stop 걸기·풀기 |
 | `push` | `dy_m` | 차를 진행 방향 기준 옆으로 옮긴다 (+ 왼쪽, \|dy_m\| ≤ 0.5). 자율주행이 차선으로 돌아오는지 보이는 시연용 |
+| `track.select` | `track_id` | 트랙 바꾸기 (v1.4). 장애물을 모두 치우고 차를 출발선에 세운 뒤 출발 신호를 처음부터 |
+| `race.start` | — | 다시 출발 (v1.4). 차를 출발선에 세우고 출발 신호를 처음부터 |
 
-- 모든 명령에 `request_id`(string)를 넣는다. 응답 토픽은 없다. 적용되면 시뮬레이터가 `sim.world`(revision +1)를 다시 낸다 — `push` 는 `sim.pose` 에만 보인다.
-- 모르는 `op`·범위 밖 값은 시뮬레이터가 버리고 로그만 남긴다 (트랙 밖 좌표, 9번째 장애물, \|dy_m\| > 0.5).
+- 모든 명령에 `request_id`(string)를 넣는다. 시뮬레이터는 명령마다 MQTT-18 `sim.command.result` 를 한 번 낸다 (v1.4). 적용되면 `sim.world`(revision +1)도 다시 낸다 — `push`·`race.start` 는 `sim.pose` 에만 보인다.
+- 모르는 `op`·범위 밖 값은 시뮬레이터가 버리고 로그를 남기며 `ok: false`, `code: INVALID` 로 답한다 (9번째 장애물, \|dy_m\| > 0.5, 없는 `track_id`).
+
+**배치 검사 (v1.4)** — `obstacle.add`·`obstacle.move` 는 **이 차가 실제로 지나갈 수 있을 때만** 적용한다. 못 지나가는 자리는 놓지 않고 거부한다.
+
+1. 틈: 그 장애물 앞뒤로 차 길이 안에서, 장애물·벽 사이 가장 넓은 틈이 차 폭 + 양옆 여유(0.03 m) = **0.26 m** 보다 좁으면 `NO_GAP`
+2. 실제 주행: 그 장애물과 이어진 장애물 묶음을 자율주행 규칙으로 미리 돌려 보아, 서거나 닿으면 `TOO_DENSE`
+3. 차가 바로 앞(4.8 m 안)에서 달리는 중이면 지금 위치·속도로도 돌려 보아, 못 피하면 `TOO_CLOSE`
+4. 차 몸과 겹치면 `ON_CAR`, 벽 밖이면 `OUT_OF_TRACK`
+
+**`sim.command.result`** (MQTT-18, v1.4)
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `request_id` | string | 받은 명령의 `request_id` |
+| `op` | string | 받은 명령의 `op` |
+| `ok` | bool | 적용했나 |
+| `code` | string \| null | 거부 사유 `NO_GAP` · `TOO_DENSE` · `TOO_CLOSE` · `ON_CAR` · `OUT_OF_TRACK` · `INVALID` (`ok` 이면 null) |
+| `message` | string \| null | 화면에 그대로 띄울 한 줄. 거리는 실제 단위 (예: "차가 지나갈 틈이 없어요 — 가장 넓은 틈 11.2 m < 필요 13.3 m") |
+| `gap_m`, `need_m` | float \| null | `NO_GAP` 일 때 모의 단위 틈·필요 폭 |
 
 ### 11.2 콘솔 API (백엔드)
 
@@ -370,17 +421,21 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | ID | 메서드 | 경로 | 요청 | 성공 | 오류 |
 | --- | --- | --- | --- | --- | --- |
 | REST-30 | GET | `/api/v1/sim/state` | — | 200 `{available, pose, world, pose_age_ms}` | 401 |
-| REST-31 | POST | `/api/v1/sim/obstacles` | `{x, y, w?}` (w 기본 0.15) | 202 `{obstacle_id, request_id}` | 401, 409, 422 |
+| REST-31 | POST | `/api/v1/sim/obstacles` | `{kind, x, y}` (`kind` 기본 `cone`, v1.4. v1.3 의 `w` 는 무시) | 202 `{obstacle_id, request_id}` | 401, 409, 422 |
 | REST-32 | PUT | `/api/v1/sim/obstacles/{obstacle_id}` | `{x, y}` | 202 `{request_id}` | 401, 404, 409, 422 |
 | REST-33 | DELETE | `/api/v1/sim/obstacles/{obstacle_id}` | — | 202 `{request_id}` | 401, 404, 409 |
 | REST-34 | POST | `/api/v1/sim/estop` | `{engaged}` | 202 `{request_id}` | 401, 409, 422 |
 | REST-35 | POST | `/api/v1/sim/push` | `{dy_m}` | 202 `{request_id}` | 401, 409, 422 |
+| REST-36 | POST | `/api/v1/sim/track` | `{track_id}` (v1.4) | 202 `{request_id}` | 401, 409, 422 |
+| REST-37 | POST | `/api/v1/sim/race/start` | — (v1.4) | 202 `{request_id}` | 401, 409 |
 | WS-06 | WS | `/ws/v1/sim` | 첫 프레임 `{type:"auth", access_token}` | `sim.snapshot` 푸시 | 인증 실패 시 닫음 |
 
 - `available` = 마지막 `sim.pose` 가 1초 안. `pose`·`world` 는 마지막으로 받은 payload 그대로 (없으면 null).
 - 409 `SIM_UNAVAILABLE`: 시뮬레이터가 없음(`available` false). 404 `OBSTACLE_NOT_FOUND`: 백엔드가 아는 마지막 `sim.world` 에 그 id 가 없음. 422 `VALIDATION_ERROR`: 필드 타입·범위 (\|dy_m\| > 0.5, w ≤ 0, 장애물 8개 초과).
-- 202 는 "명령을 보냈다" 이다. 적용 여부는 다음 `sim.world`(WS-06)로 본다.
-- WS-06 은 서버 → 콘솔 단방향. `{type:"sim.snapshot", available, pose, world}` 를 10 Hz(위치는 최신 것만)로, `sim.world` 가 바뀌면 바로 한 번 더 보낸다.
+- 202 는 "명령을 보냈다" 이다. 적용 여부는 WS-06 의 `sim.command.result`(같은 `request_id`)로 본다. 콘솔은 `ok: false` 면 `message` 를 띄운다 (v1.4). 3초 안에 결과가 없으면 "시뮬레이터 응답 없음" 으로 본다.
+- 422 `VALIDATION_ERROR` 에 v1.4 추가: 모르는 `kind`, 비어 있는 `track_id`. 없는 트랙 id 는 시뮬레이터가 `INVALID` 로 거부한다.
+- WS-06 은 서버 → 콘솔 단방향. `{type:"sim.snapshot", available, pose, world}` 를 10 Hz(위치는 최신 것만)로, `sim.world` 가 바뀌면 바로 한 번 더 보낸다. MQTT-18 을 받으면 `{type:"sim.command.result", …payload}` 를 바로 보낸다 (v1.4).
+- 모니터 화면의 출발 신호·랩 시간·km/h 는 `pose.race`·`world.track.real_m` 으로 그린다. 화면이 따로 계산하지 않는다 (v1.4).
 - 백엔드는 REST-31 ~ 35 성공을 콘솔 이벤트 로그(REST-18, `/ws/v1/events`)에 `sim.command`(`INFO`, payload = 보낸 명령)로 남긴다.
 
 ### 11.3 게이트웨이 ↔ 시뮬레이터
@@ -406,3 +461,4 @@ MQTT 가 아니다. 게이트웨이가 시리얼 대신 TCP 로 같은 프레임
 | v1.1.1 | 2026-10-21 | 구현 기준 정합 (S15P31E110-249). 5.2 전환 표와 사유 `autonomous_ready`·`autonomous_lost`·`manual_fresh` (게이트웨이 -98 구현), `MANUAL` 중 수동 끊김은 자율이 신선해도 `SAFE_STOP`, `perception.result` 좌표계·부호·최대 개수·발행 중단 (젯슨 대역 -156 구현), 6장 재개 응답 이벤트 없음·`drive.fault.detected` 조건. 토픽·필드 이름 그대로 |
 | v1.2 | 2026-10-21 | 재개를 바로 바꾸지 않고 `drive.resume.accepted`(3초 뒤 전환) → `AUTO` 또는 `drive.resume.cancelled`(6장). 운영자 콘솔 재개 경로 MQTT-13 `xenova/v1/console/resume`(백엔드 발행, 9장 ACL) (S15P31E110-98). 카메라 감지 결과 MQTT-14 `xenova/v1/apps/message-board/vision` `vision.result`(6장, 주행 판단 미사용·≤10 Hz·QoS 0, 9장 ACL message-board 발행) (S15P31E110-128) |
 | v1.3 (초안) | 2026-10-22 | 시뮬레이터 전용 11장 (데모 기본 구성): MQTT-15 `sim.pose`·MQTT-16 `sim.world`(retained)·MQTT-17 `sim.command`, 콘솔 REST-30~35·WS-06 `/ws/v1/sim`, 게이트웨이 TCP 출력. 9장 ACL `simulator` 계정·백엔드 `sim/command`. 6장 `perception.event` `kind` 값 (자율주행 앱 -259 구현) (S15P31E110-261·-265) |
+| v1.4 (초안) | 2026-10-22 | 11장 트랙을 타원 → 실제 서킷 중심선 (`track.centerline`·구간별 벽 `wall_left_m`·`wall_right_m`·`real_m`·`start_index`, 트랙 목록 `tracks`), `sim.pose` `surface`·`race`(F1 출발 신호·랩), 장애물 `kind`, `sim.world.car`, `sim.command` `track.select`·`race.start`, 배치 검사와 결과 MQTT-18 `xenova/v1/sim/result` `sim.command.result`, REST-31 `kind`·REST-36 트랙 바꾸기·REST-37 다시 출발, WS-06 결과 전달. 9장 ACL 시뮬레이터 `sim/result`. 화면 표시 단위 = 실제 서킷 비율 (S15P31E110-262·-265) |
