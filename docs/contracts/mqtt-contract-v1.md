@@ -1,6 +1,6 @@
 # MQTT 메시지 계약 v1
 
-**최종 갱신** 2026-10-21 v1.2 (v1.1.1 위에 재개 3초 카운트다운·콘솔 재개 MQTT-13·카메라 감지 결과 MQTT-14 — 변경 이력)
+**최종 갱신** 2026-10-22 v1.3 초안 (v1.2 위에 시뮬레이터 전용 11장 MQTT-15~17·REST-30~35·WS-06, `perception.event` kind — 변경 이력)
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼, RC카 시나리오
 **브로커** dom0 Mosquitto
 
@@ -226,7 +226,7 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 
 | ID | 토픽 | `type` | 발행 → 구독 | QoS | 주요 payload |
 | --- | --- | --- | --- | --- | --- |
-| MQTT-06 | `xenova/v1/apps/autonomous/events` | `perception.event` | 자율 VM → 메시지 보드 | 1 | `kind`(obstacle 등), `detail` |
+| MQTT-06 | `xenova/v1/apps/autonomous/events` | `perception.event` | 자율 VM → 메시지 보드 | 1 | `kind`(`obstacle`·`obstacle_cleared`·`perception_lost`·`perception_restored`), `detail`(예 `stop 80 cm`) — 활성일 때 판단이 바뀌면 |
 | MQTT-06 | `xenova/v1/apps/message-board/events` | `message.posted` | 메시지 보드 → 주행 화면 | 1 | `text`, `level` |
 | MQTT-06 | `xenova/v1/apps/message-board/events` | `drive.resume.requested` | 메시지 보드 → 게이트웨이 | 1 | `requested_by` |
 | MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `from`, `to`, `generation`, `reason` |
@@ -301,7 +301,8 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | 젯슨 | `xenova/v1/apps/perception/events` |
 | 게이트웨이 | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/apps/vehicle/events` |
 | dom0 vchan 중계 | 계정이 따로 없다. Zephyr VM마다 그 VM의 `app_id` 계정으로 접속한다 (4.1) |
-| 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/console/resume`, `xenova/v1/vms/{vm_id}/command` |
+| 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/console/resume`, `xenova/v1/vms/{vm_id}/command`, `xenova/v1/sim/command` (11장) |
+| 시뮬레이터 (`simulator`, Plan B) | `xenova/v1/sim/pose`, `xenova/v1/sim/world` (11장) |
 | 각 VM 측정 클라이언트·응답기 | `xenova/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
 
 브로커 계정·ACL 파일은 [브로커 구성](../../platform/deploy/mosquitto/README.md)(`platform/deploy/mosquitto/etc/acl`)에서 관리한다.
@@ -316,6 +317,76 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 - 명령 만료 판정에 쓰는 시각 오차 허용 범위와 동기화 방식 (MQTT-04 `CLOCK_UNTRUSTED`)
 - 와치독 300 ms, 전환 100 ms, `AUTO_READY` 3초는 실보드 측정 후 확정
 
+## 11. 시뮬레이터 전용 (Plan B, 실차 없음)
+
+실차 대신 시뮬레이터로 시연할 때만 쓰는 메시지·API 다 ([시뮬레이터 시연 시나리오](../scenario-simulator.md)). 실차(Plan A)에는 이 토픽이 없고, 받는 쪽은 없어도 동작해야 한다. 시뮬레이터는 ESP32 자리(게이트웨이 시리얼 뒤)에 있으므로 `vehicle.status` 는 그대로 게이트웨이가 낸다 — 아래는 **실차에 없는 값**(위치·트랙)과 **시연 조작**만이다.
+
+### 11.1 토픽
+
+| ID | 토픽 | `type` | 발행 → 구독 | 주기 | QoS | retain |
+| --- | --- | --- | --- | --- | --- | --- |
+| MQTT-15 | `xenova/v1/sim/pose` | `sim.pose` | 시뮬레이터 → 백엔드, 인지 대역 | 20 Hz | 0 | X |
+| MQTT-16 | `xenova/v1/sim/world` | `sim.world` | 시뮬레이터 → 백엔드, 인지 대역 | 바뀔 때 + 시작 | 1 | O |
+| MQTT-17 | `xenova/v1/sim/command` | `sim.command` | 백엔드(운영자 콘솔) → 시뮬레이터 | 조작할 때 | 1 | X |
+
+- 발행자 `source_id`: 시뮬레이터 `simulator`, 백엔드 `backend`. 봉투·seq 규칙은 2장과 같다.
+- 좌표는 **트랙 고정 좌표**다 (5.4 `perception.result` 의 차량 기준 좌표와 다르다). 원점 = 트랙 중심, x = 오른쪽, y = 위쪽(m), `yaw` = +x 에서 반시계 rad. 인지 대역이 이 값으로 차량 기준 `perception.result` 를 계산한다 (S15P31E110-268).
+
+**`sim.pose`**
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `x`, `y` | float | 차 뒷바퀴 축 가운데 위치 (m) |
+| `yaw` | float | 진행 방향 (rad, −π ~ π) |
+| `v_mps`, `steer_rad` | float | 지금 속도·조향 (모델 값) |
+| `world_revision` | uint32 | 이 위치를 계산할 때의 `sim.world.revision` |
+
+**`sim.world`**
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `revision` | uint32 | 트랙·장애물·E-stop 이 바뀔 때마다 1 오른다. 시작 1 |
+| `track` | object | `{shape: "ellipse", a_m, b_m, lane_width_m}` — 차선 중심선 타원의 반지름 a(가로)·b(세로). 기본 `3.0`·`1.5`·`0.4` (6 m × 3 m) |
+| `obstacles` | array | `[{id, x, y, w}]` — 장애물 가운데 위치(m)와 폭(m). 최대 8개 |
+| `estop` | bool | 시연용 E-stop 이 걸려 있음 (`vehicle.status.flags.estop` 도 같이 true) |
+
+**`sim.command`**
+
+| `op` | 인자 | 동작 |
+| --- | --- | --- |
+| `obstacle.add` | `obstacle_id`, `x`, `y`, `w` | 장애물 놓기. `obstacle_id` 는 백엔드가 만든다. 이미 있으면 무시 |
+| `obstacle.move` | `obstacle_id`, `x`, `y` | 옮기기 |
+| `obstacle.remove` | `obstacle_id` | 치우기 |
+| `estop` | `engaged` (bool) | E-stop 걸기·풀기 |
+| `push` | `dy_m` | 차를 진행 방향 기준 옆으로 옮긴다 (+ 왼쪽, \|dy_m\| ≤ 0.5). 자율주행이 차선으로 돌아오는지 보이는 시연용 |
+
+- 모든 명령에 `request_id`(string)를 넣는다. 응답 토픽은 없다. 적용되면 시뮬레이터가 `sim.world`(revision +1)를 다시 낸다 — `push` 는 `sim.pose` 에만 보인다.
+- 모르는 `op`·범위 밖 값은 시뮬레이터가 버리고 로그만 남긴다 (트랙 밖 좌표, 9번째 장애물, \|dy_m\| > 0.5).
+
+### 11.2 콘솔 API (백엔드)
+
+인증은 다른 콘솔 API 와 같은 사용자 JWT, 오류 본문은 [VM 관리 API 계약](vm-api-contract-v1.md) 8.2 `{code, message}`.
+
+| ID | 메서드 | 경로 | 요청 | 성공 | 오류 |
+| --- | --- | --- | --- | --- | --- |
+| REST-30 | GET | `/api/v1/sim/state` | — | 200 `{available, pose, world, pose_age_ms}` | 401 |
+| REST-31 | POST | `/api/v1/sim/obstacles` | `{x, y, w?}` (w 기본 0.15) | 202 `{obstacle_id, request_id}` | 401, 409, 422 |
+| REST-32 | PUT | `/api/v1/sim/obstacles/{obstacle_id}` | `{x, y}` | 202 `{request_id}` | 401, 404, 409, 422 |
+| REST-33 | DELETE | `/api/v1/sim/obstacles/{obstacle_id}` | — | 202 `{request_id}` | 401, 404, 409 |
+| REST-34 | POST | `/api/v1/sim/estop` | `{engaged}` | 202 `{request_id}` | 401, 409, 422 |
+| REST-35 | POST | `/api/v1/sim/push` | `{dy_m}` | 202 `{request_id}` | 401, 409, 422 |
+| WS-06 | WS | `/ws/v1/sim` | 첫 프레임 `{type:"auth", access_token}` | `sim.snapshot` 푸시 | 인증 실패 시 닫음 |
+
+- `available` = 마지막 `sim.pose` 가 1초 안. `pose`·`world` 는 마지막으로 받은 payload 그대로 (없으면 null).
+- 409 `SIM_UNAVAILABLE`: 시뮬레이터가 없음(`available` false). 404 `OBSTACLE_NOT_FOUND`: 백엔드가 아는 마지막 `sim.world` 에 그 id 가 없음. 422 `VALIDATION_ERROR`: 필드 타입·범위 (\|dy_m\| > 0.5, w ≤ 0, 장애물 8개 초과).
+- 202 는 "명령을 보냈다" 이다. 적용 여부는 다음 `sim.world`(WS-06)로 본다.
+- WS-06 은 서버 → 콘솔 단방향. `{type:"sim.snapshot", available, pose, world}` 를 10 Hz(위치는 최신 것만)로, `sim.world` 가 바뀌면 바로 한 번 더 보낸다.
+- 백엔드는 REST-31 ~ 35 성공을 콘솔 이벤트 로그(REST-18, `/ws/v1/events`)에 `sim.command`(`INFO`, payload = 보낸 명령)로 남긴다.
+
+### 11.3 게이트웨이 ↔ 시뮬레이터
+
+MQTT 가 아니다. 게이트웨이가 시리얼 대신 TCP 로 같은 프레임(COBS + CRC, S15P31E110-241)을 보낸다 (`--sink tcp`, 시뮬레이터가 서버, 기본 포트 7600). 끊기면 게이트웨이는 1초마다 다시 붙고, 그동안 프레임이 없으므로 시뮬레이터 와치독(300 ms)이 차를 세운다 — 실차와 같다 (S15P31E110-260, 게이트웨이 쪽 작업은 별도 이슈).
+
 ## 관련 문서
 
 - [VM 관리 API 계약 v1](vm-api-contract-v1.md) — `vm_id`, `guest_kind`
@@ -323,6 +394,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 - [차량 제어 상세 명세](../design/vehicle-control-spec.md)
 - [RC카 시나리오](../scenario-rc-car.md) §8 — D1·D3·D8 결정
 - [카메라·AI 감지 계약 v1](camera-stream-v1.md) — MQTT-14 `vision.result` 와 영상 경로
+- [시뮬레이터 시연 시나리오 (Plan B)](../scenario-simulator.md) — 11장을 쓰는 구성·화면
 
 ## 변경 이력
 
@@ -333,3 +405,4 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | v1.1 | 2026-10-21 | 시나리오 D1·D3·D8 반영 (S15P31E110-242). ESP32를 MQTT 참여자에서 빼고 게이트웨이 시리얼 뒤로(4장, 5.3, 9장 계정 삭제), `vehicle.status` 발행 = 게이트웨이 `source_id: dom0-gateway`(5.4), 5.5 ESP32 수용 규칙 → 게이트웨이 수용 규칙, Zephyr vchan + dom0 중계(4.1, 10장에서 삭제), `AUTO_READY`·VM 재시작 근거에서 에이전트 대신 도메인 상태 + `app.heartbeat`(5.1·5.2·6.1). `vehicle.status.batt_v` 를 선택 필드로(5.4, 측정 회로 없음). 토픽 이름은 그대로 |
 | v1.1.1 | 2026-10-21 | 구현 기준 정합 (S15P31E110-249). 5.2 전환 표와 사유 `autonomous_ready`·`autonomous_lost`·`manual_fresh` (게이트웨이 -98 구현), `MANUAL` 중 수동 끊김은 자율이 신선해도 `SAFE_STOP`, `perception.result` 좌표계·부호·최대 개수·발행 중단 (젯슨 대역 -156 구현), 6장 재개 응답 이벤트 없음·`drive.fault.detected` 조건. 토픽·필드 이름 그대로 |
 | v1.2 | 2026-10-21 | 재개를 바로 바꾸지 않고 `drive.resume.accepted`(3초 뒤 전환) → `AUTO` 또는 `drive.resume.cancelled`(6장). 운영자 콘솔 재개 경로 MQTT-13 `xenova/v1/console/resume`(백엔드 발행, 9장 ACL) (S15P31E110-98). 카메라 감지 결과 MQTT-14 `xenova/v1/apps/message-board/vision` `vision.result`(6장, 주행 판단 미사용·≤10 Hz·QoS 0, 9장 ACL message-board 발행) (S15P31E110-128) |
+| v1.3 (초안) | 2026-10-22 | 시뮬레이터 전용 11장 (Plan B): MQTT-15 `sim.pose`·MQTT-16 `sim.world`(retained)·MQTT-17 `sim.command`, 콘솔 REST-30~35·WS-06 `/ws/v1/sim`, 게이트웨이 TCP 출력. 9장 ACL `simulator` 계정·백엔드 `sim/command`. 6장 `perception.event` `kind` 값 (자율주행 앱 -259 구현) (S15P31E110-261·-265) |
