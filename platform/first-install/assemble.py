@@ -229,16 +229,31 @@ def copy_rtos_seeds(data, entries):
     if len(entries) != 1:
         raise ValueError('new first-install images require one verified Zephyr template')
     defaults = json.loads((FILES / 'defaults.json').read_text())['firmware_instances']
-    if any(entry['template'] != entries[0]['id'] for entry in defaults):
-        raise ValueError('default Zephyr Starter template mismatch')
-    records = []
+    template=entries[0]['id']
+    import xenova_catalog
+    network=entries[0]['metadata'].get('hardware_profile') == zephyr.NET_PROFILE
+    # Current config selects the new immutable template. Legacy input bundles remain
+    # readable for rerunning old receipts; no existing store is migrated here.
+    allowed={'xenova-zephyr-network-starter-1.1.0','xenova-zephyr-starter-1.0.0',
+             'zephyr-4.4.0-xenvm'}
+    if template not in allowed:
+        raise ValueError('unknown immutable Zephyr factory template')
+    records=[];reservations={}
+    from xenova_management import Manager
+    from xenova_vm import Platform
+    manager=Manager(Platform(data,data/'.assembly-runtime',defaults_path=FILES/'defaults.json'))
     for default in defaults:
-        record = zephyr.new_instance(data, default['id'], data / 'rtos-templates' / default['template'],
-                                     {}, autostart=default['autostart'],
-                                     board_shutdown_policy=default['board_shutdown_policy'],
-                                     registry='seeds', seed=True,
-                                     metadata={k:default[k] for k in ('template_id','template_version','display_name') if k in default})
-        records.append({'record': record})
+        metadata={k:default[k] for k in ('template_id','template_version','display_name') if k in default}
+        metadata['template_version']=xenova_catalog.deployment_version(entries[0]['metadata'])
+        if network:
+            metadata.update(mac='02:00:00:00:00:00',ipv4=manager._allocate_ip({},reservations),
+                            hostname=default['id'])
+        record=zephyr.new_instance(data,default['id'],data/'rtos-templates'/template,
+                                  {},autostart=default['autostart'],
+                                  board_shutdown_policy='graceful' if network else 'force-allowed',
+                                  registry='seeds',seed=True,metadata=metadata)
+        reservations[record['id']]=record
+        records.append({'record':record})
     return records
 
 
@@ -307,6 +322,7 @@ def platform_root_ok(root):
                 'usr/sbin/xenova-verify-artifacts': ROOT / 'platform/scripts/verify-xenova-runtime-artifacts.py',
                 'usr/lib/xenova/xenova_runtime.py': FILES / 'xenova_runtime.py',
                 'usr/lib/xenova/xenova_zephyr.py': FILES / 'xenova_zephyr.py',
+                **{'usr/lib/xenova/'+n:FILES/n for n in ('xenova_resources.py','xenova_zephyr_transition.py','xenova_zephyr_control.py')},
                 'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                 'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
     for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',

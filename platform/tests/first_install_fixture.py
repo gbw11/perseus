@@ -158,7 +158,8 @@ def platform_root(root):
                'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
     for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
-                 'xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
+                 'xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py',
+                 'xenova_resources.py','xenova_zephyr_transition.py','xenova_zephyr_control.py'):
         mapping['usr/lib/xenova/'+name] = FILES/name
     mapping['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
     mapping['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'

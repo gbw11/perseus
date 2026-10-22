@@ -228,7 +228,7 @@ class Execution:
         return value
 
     def boot_decision(self, record):
-        """미승인 조합은 기존 autostart 실행을 유지하되 복구 admission은 주지 않는다."""
+        """현재 intent와 이번 host admission을 대조하고 승인된 boot policy를 적용한다."""
         intent = self.intent(record)
         lifecycle, generation = self.lifecycle(record)
         applicable = intent is not None and intent["lifecycle_generation"] == generation and lifecycle == "REGISTERED"
@@ -528,6 +528,13 @@ class Execution:
                 diagnostics.append(warning)
         if action not in ("start", "stop", "reboot", "destroy"):
             refuse("INVALID_SPEC", "invalid control action")
+        from xenova_management import Manager
+        if any(q["vm_id"] == record["uuid"] and q["status"] != "SUCCEEDED"
+               for q in Manager(self.p)._operations()):
+            refuse("OPERATION_IN_PROGRESS", "an incomplete asset operation owns this VM", retryable=True)
+        if action == "reboot" and vm.guest_kind(record) == "zephyr" and vm.cooperative(record) and not force:
+            from xenova_zephyr_control import reboot
+            return reboot(self,record,key)
         request = {"vm_id":record["uuid"], "action":action, "force":force}
         previous = next((q for q in self.requests() if key is not None and q["idempotency_key"] == key), None)
         if previous and previous["request"] != request:
@@ -574,7 +581,7 @@ class Execution:
             accepted = self.accept(record, request, key, previous=previous, receipt=receipt)
             self.save_request(accepted, "executing")
             event("xen-action-requested", record, accepted["operation_id"], {"action":action})
-            if action == "start" and vm.guest_kind(record) == "linux":
+            if action == "start" and vm.has_network(record):
                 self.p.prepare_dhcp(records)
             return {"kind":"user", "operation_id":accepted["operation_id"]}
 
@@ -582,7 +589,7 @@ class Execution:
             if action == "start":
                 self.p.check_xen()
                 records = self.p.records(validate_assets=False)
-                if vm.guest_kind(record) == "linux":
+                if vm.has_network(record):
                     self.p.check_network()
                 physical = self.p.start(record, _accept=admit)
             elif action in ("stop", "destroy"):
