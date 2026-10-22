@@ -1,0 +1,19 @@
+[Unit]
+Description=Perseus remote demo JPEG screen relay
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/xenova/stream.env
+Environment=XENOVA_DISPLAY_RUNTIME_CONFIG=/etc/xenova/display-runtime.json
+Environment=XENOVA_DISPLAY_RUNTIME_STATUS=%t/xenova/display-runtime.json
+ExecStart=/opt/xenova-display/bin/python -m xenova_display.stream --host 127.0.0.1 --port 8083
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target
