@@ -1,5 +1,6 @@
-import { fmtLap, isCircuit, TrackView } from '@xenova/ui';
+import { DriverView, fmtLap, isCircuit, TrackView } from '@xenova/ui';
 import { InteractionStrip, SimBadge } from '../components/SimPanel';
+import { SimObstacles } from '../components/SimDetail';
 import { ModeBar } from '../components/ModeBar';
 import { carColor, distText, rad, speedText } from '../components/format';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
@@ -51,6 +52,18 @@ export function SimPage() {
           )}
         </section>
         <section className={styles.detailSide}>
+          {isCircuit(track) && live && pose && (
+            <>
+              <h2>차 1인칭</h2>
+              <DriverView
+                pose={pose}
+                world={sim?.world ?? null}
+                boxes
+                quality="low"
+                label="시뮬레이터 차 1인칭"
+              />
+            </>
+          )}
           <h2>차 (시뮬레이터)</h2>
           <dl className={styles.kv}>
             <dt>위치 x, y</dt>
@@ -93,6 +106,7 @@ export function SimPage() {
             <dt>E-stop</dt>
             <dd>{sim?.world?.estop ? '걸림' : '풀림'}</dd>
           </dl>
+          {isCircuit(track) && <SimObstacles />}
           <h2>자율주행 판단 (인지 대역)</h2>
           <dl className={styles.kv}>
             <dt>차선 오프셋</dt>

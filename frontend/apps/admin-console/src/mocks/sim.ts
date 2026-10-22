@@ -150,9 +150,18 @@ export function place(
   y: number,
   requestId = `mock-${s.seq + 1}`,
 ): SimCommandResult {
+  // 계약 v1.4: 9번째 장애물은 INVALID
+  if (s.obstacles.length >= 8)
+    return {
+      request_id: requestId,
+      op: 'obstacle.add',
+      ok: false,
+      code: 'INVALID',
+      message: '장애물은 8개까지 놓을 수 있어요',
+    };
   const f = trackFrame(s.T, x, y);
   const o: Obstacle = { id: `ob-${s.seq + 1}`, kind, x, y, i: f.i, off: f.off, s: f.s };
-  const list = [...s.obstacles.slice(s.obstacles.length >= 8 ? 1 : 0), o];
+  const list = [...s.obstacles, o];
   const why = checkPlacement(s.T, list, o, s.car, s.race.phase === 'go', scaleOf(s.T));
   if (why)
     return { request_id: requestId, op: 'obstacle.add', ok: false, code: why.code, message: why.message };
@@ -162,12 +171,74 @@ export function place(
   return { request_id: requestId, op: 'obstacle.add', ok: true, code: null, message: null };
 }
 
+/** 장애물 옮기기 (계약 v1.4 obstacle.move) — 놓기와 같은 배치 검사 */
+export function moveObstacle(
+  s: SimState,
+  id: string,
+  x: number,
+  y: number,
+  requestId = `mock-move`,
+): SimCommandResult {
+  const old = s.obstacles.find((o) => o.id === id);
+  if (!old)
+    return {
+      request_id: requestId,
+      op: 'obstacle.move',
+      ok: false,
+      code: 'INVALID',
+      message: '없는 장애물이에요',
+    };
+  const f = trackFrame(s.T, x, y);
+  const moved: Obstacle = { ...old, x, y, i: f.i, off: f.off, s: f.s };
+  const list = s.obstacles.map((o) => (o === old ? moved : o));
+  const why = checkPlacement(s.T, list, moved, s.car, s.race.phase === 'go', scaleOf(s.T));
+  if (why)
+    return { request_id: requestId, op: 'obstacle.move', ok: false, code: why.code, message: why.message };
+  s.obstacles = list;
+  s.revision++;
+  return { request_id: requestId, op: 'obstacle.move', ok: true, code: null, message: null };
+}
+
+/** 장애물 치우기 (obstacle.remove). id 가 없으면 모두 */
+export function removeObstacle(s: SimState, id?: string): SimState {
+  const next = id ? s.obstacles.filter((o) => o.id !== id) : [];
+  if (next.length === s.obstacles.length) return s;
+  return { ...s, obstacles: next, revision: s.revision + 1 };
+}
+
+/** 차 밀기 (push) — 진행 방향 기준 옆으로 dy m (+ 왼쪽, |dy| ≤ 0.5) */
+export function pushCar(s: SimState, dy: number): SimState {
+  const d = Math.max(-0.5, Math.min(0.5, dy));
+  return {
+    ...s,
+    car: { ...s.car, x: s.car.x - d * Math.sin(s.car.yaw), y: s.car.y + d * Math.cos(s.car.yaw) },
+  };
+}
+
+/** 무작위 3개 — 차 앞쪽(6 m 넘게)에 지나갈 수 있는 자리로 */
+export function randomObstacles(s: SimState): SimState {
+  const next: SimState = { ...s, obstacles: [] };
+  const kinds: Kind[] = ['cone', 'box', 'tires'];
+  for (let n = 0; n < 3; n++)
+    for (let t = 0; t < 30; t++) {
+      const i =
+        (s.car.idx + 30 + Math.floor(Math.random() * s.T.N * 0.25) + n * Math.floor(s.T.N * 0.1)) % s.T.N;
+      if (
+        place(next, kinds[Math.floor(Math.random() * 3)]!, ...atT(s.T, i, (Math.random() * 2 - 1) * 0.25)).ok
+      )
+        break;
+    }
+  next.revision = s.revision + 1;
+  return next;
+}
+
 /** 트랙 바꾸기 (계약 v1.4 track.select) — 장애물을 새로 놓고 출발선에서 출발 신호를 처음부터 */
 export function selectTrack(s: SimState, trackId: string, now: number): SimState {
   if (!TRACKS.some((t) => t.id === trackId)) return s;
   const next = initialSim(now, trackId);
   next.revision = s.revision + 1;
   next.estop = s.estop;
+  if (s.nextDemoAt === Infinity) next.nextDemoAt = Infinity; // 운영자가 조작 중이면 자동 재배치는 계속 멈춤
   return next;
 }
 

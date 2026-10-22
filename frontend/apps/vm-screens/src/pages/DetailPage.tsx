@@ -1,16 +1,21 @@
-import { StatusBadge } from '@xenova/ui';
+import { isCircuit, StatusBadge } from '@xenova/ui';
 import { Navigate, useParams } from 'react-router';
 import { ResumeState } from '../components/AppPanel';
 import { ModeBar } from '../components/ModeBar';
 import { NavCamera } from '../components/NavCamera';
 import { SimDriverView } from '../components/SimPanel';
+import { SimJudgement, SimMiniMap, SimObstacles, SimRace } from '../components/SimDetail';
 import { TrackMap } from '../components/TrackMap';
-import { rad, seconds, shownKeys, speedText } from '../components/format';
+import { distText, rad, seconds, shownKeys, speedText } from '../components/format';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { APPS, APP_IDS, simLive, type AppId, type Telemetry } from '../telemetry/types';
 import styles from '../components/screens.module.css';
 
 const obstacles = (t: Telemetry) => t.obstacleCount ?? t.perception.obstacles.length;
+/** 시뮬레이터 구성(계약 v1.4 실제 서킷)이고 위치가 1초 안에 왔나 */
+const onCircuit = (t: Telemetry) => simLive(t) && isCircuit(t.sim?.world?.track);
+/** 최고 속도 (모의 m/s) — 게이지 끝 */
+const MAX_V = 1.0;
 
 /** 모니터 2: 관리자가 고른 1개를 크게 (RC카 시나리오 §5) */
 export function DetailPage() {
@@ -112,33 +117,64 @@ function AutonomousDetail() {
           </>
         )}
       </section>
-      <section className={styles.detailSide}>
-        <h2>주행 명령 (drive.command 50 Hz)</h2>
-        <Gauge
-          title="목표 속도"
-          value={alive ? (command?.v_mps ?? 0) : 0}
-          min={0}
-          max={1}
-          text={alive && command ? speedText(t, command.v_mps) : '—'}
-        />
-        <Gauge
-          title="목표 조향"
-          value={alive ? (command?.steer_rad ?? 0) : 0}
-          min={-0.5}
-          max={0.5}
-          text={alive && command ? rad(command.steer_rad) : '—'}
-        />
-        <dl className={styles.kv}>
-          <dt>명령 주기</dt>
-          <dd className={styles.mono}>{alive ? `${t.apps.autonomous.commandHz} Hz` : '명령 없음'}</dd>
-          <dt>차선 오프셋</dt>
-          <dd className={styles.mono}>{t.perception.lane_offset_m.toFixed(3)} m</dd>
-          <dt>방향 오차</dt>
-          <dd className={styles.mono}>{t.perception.heading_err_rad.toFixed(3)} rad</dd>
-          <dt>장애물</dt>
-          <dd>{obstacles(t) ? `${obstacles(t)}개 — 감속` : '없음'}</dd>
-        </dl>
-      </section>
+      {onCircuit(t) ? (
+        <section className={styles.detailSide}>
+          <SimJudgement />
+          <h2>주행 명령 (drive.command 50 Hz)</h2>
+          <Gauge
+            title="목표 속도"
+            value={alive ? (command?.v_mps ?? 0) : 0}
+            min={0}
+            max={MAX_V}
+            text={alive && command ? speedText(t, command.v_mps) : '—'}
+          />
+          <Gauge
+            title="목표 조향"
+            value={alive ? (command?.steer_rad ?? 0) : 0}
+            min={-0.5}
+            max={0.5}
+            text={alive && command ? rad(command.steer_rad) : '—'}
+          />
+          <dl className={styles.kv}>
+            <dt>명령 주기</dt>
+            <dd className={styles.mono}>{alive ? `${t.apps.autonomous.commandHz} Hz` : '명령 없음'}</dd>
+            <dt>차선 오프셋</dt>
+            <dd className={styles.mono}>{distText(t, t.perception.lane_offset_m)}</dd>
+          </dl>
+          <SimObstacles />
+          <h2>출발 · 랩 · 노면</h2>
+          <SimRace />
+          <SimMiniMap />
+        </section>
+      ) : (
+        <section className={styles.detailSide}>
+          <h2>주행 명령 (drive.command 50 Hz)</h2>
+          <Gauge
+            title="목표 속도"
+            value={alive ? (command?.v_mps ?? 0) : 0}
+            min={0}
+            max={1}
+            text={alive && command ? speedText(t, command.v_mps) : '—'}
+          />
+          <Gauge
+            title="목표 조향"
+            value={alive ? (command?.steer_rad ?? 0) : 0}
+            min={-0.5}
+            max={0.5}
+            text={alive && command ? rad(command.steer_rad) : '—'}
+          />
+          <dl className={styles.kv}>
+            <dt>명령 주기</dt>
+            <dd className={styles.mono}>{alive ? `${t.apps.autonomous.commandHz} Hz` : '명령 없음'}</dd>
+            <dt>차선 오프셋</dt>
+            <dd className={styles.mono}>{t.perception.lane_offset_m.toFixed(3)} m</dd>
+            <dt>방향 오차</dt>
+            <dd className={styles.mono}>{t.perception.heading_err_rad.toFixed(3)} rad</dd>
+            <dt>장애물</dt>
+            <dd>{obstacles(t) ? `${obstacles(t)}개 — 감속` : '없음'}</dd>
+          </dl>
+        </section>
+      )}
     </>
   );
 }
@@ -175,8 +211,8 @@ function ManualDetail() {
         <Gauge
           title="목표 속도"
           value={t.commands.manual?.v_mps ?? 0}
-          min={-0.15}
-          max={0.3}
+          min={onCircuit(t) ? -0.2 : -0.15}
+          max={onCircuit(t) ? MAX_V : 0.3}
           text={t.commands.manual ? speedText(t, t.commands.manual.v_mps) : '—'}
         />
         <Gauge
@@ -194,6 +230,17 @@ function ManualDetail() {
             {t.apps.manual.commandHz ? `${t.apps.manual.commandHz} Hz` : '명령 없음'}
           </dd>
         </dl>
+        {onCircuit(t) && (
+          <>
+            <p className={styles.dim}>
+              ▲ 를 꾹 누르면 최고 속도까지 서서히 붙고, 놓으면 천천히 준다. ▼ 는 브레이크, 서 있으면 후진.
+              빠를수록 덜 꺾인다.
+            </p>
+            <h2>출발 · 랩 · 노면</h2>
+            <SimRace />
+            <SimMiniMap />
+          </>
+        )}
       </section>
     </>
   );

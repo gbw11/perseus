@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { CircuitTop } from '../sim/SimCanvas';
+import { CircuitTop, type TrackPointer } from '../sim/SimCanvas';
 import { isCircuit, type CircuitTrack, type EllipseTrack, type SimPose, type SimWorld } from '../sim/types';
 import styles from './TrackView.module.css';
 
@@ -21,6 +21,12 @@ export interface TrackViewProps {
   label?: string;
   /** 크기를 바깥에서 정할 때 (예: 화면 높이에 맞추기). 그림은 비율을 지키며 가운데 맞춘다 */
   className?: string;
+  /** v1.4 실제 서킷 관리자 조작: 누르기·끌기·두 번 누르기 (트랙 좌표) */
+  onPointer?: (e: TrackPointer) => void;
+  /** 강조할 장애물 id */
+  selectedId?: string | null;
+  /** 못 놓은 자리 (빨간 X) */
+  rejectAt?: { x: number; y: number } | null;
 }
 
 const DEFAULT_TRACK: EllipseTrack = { shape: 'ellipse', a_m: 3, b_m: 1.5, lane_width_m: 0.4 };
@@ -41,6 +47,9 @@ export function TrackView({
   compact,
   label,
   className,
+  onPointer,
+  selectedId,
+  rejectAt,
 }: TrackViewProps) {
   // v1.4 실제 서킷이면 캔버스 탑뷰 (잔디·벽·관중석·나무, 실제 크기 차)
   if (world && isCircuit(world.track))
@@ -52,6 +61,9 @@ export function TrackView({
         carColor={carColor ?? '#2dd4bf'}
         label={label}
         className={className}
+        onPointer={onPointer}
+        selectedId={selectedId}
+        rejectAt={rejectAt}
       />
     );
   const track = (world?.track as EllipseTrack | undefined) ?? DEFAULT_TRACK;

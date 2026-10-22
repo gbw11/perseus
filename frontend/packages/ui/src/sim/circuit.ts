@@ -220,3 +220,41 @@ export const kmh = (g: Circuit, v: number) => v * g.scale * 3.6;
 export const realM = (g: Circuit, m: number) => m * g.scale;
 export const fmtLap = (ms: number | null | undefined) =>
   ms == null ? '—' : `${Math.floor(ms / 60000)}:${((ms % 60000) / 1000).toFixed(3).padStart(6, '0')}`;
+
+/** 트랙을 따라 잰 거리 차이 (-한 바퀴/2 ~ +한 바퀴/2) */
+export const wrapS = (g: Circuit, d: number) => (((d % g.lap) + g.lap * 1.5) % g.lap) - g.lap / 2;
+/** 트랙 좌표: 가장 가까운 중심선 점, 옆 오프셋(+ 왼쪽), 트랙을 따라 잰 거리 */
+export function frameOf(g: Circuit, x: number, y: number, hint?: number) {
+  const i = nearest(g, x, y, hint);
+  const dx = x - g.C[i]![0];
+  const dy = y - g.C[i]![1];
+  return {
+    i,
+    off: dx * g.nor[i]![0] + dy * g.nor[i]![1],
+    s: g.SL[i]! + dx * g.tan[i]![0] + dy * g.tan[i]![1],
+  };
+}
+
+export interface AheadObstacle<O> {
+  o: O;
+  /** 트랙을 따라 차 앞 거리 (모의 m) */
+  ahead: number;
+  /** 장애물 옆 위치 − 차 옆 위치 (모의 m, + 왼쪽) */
+  side: number;
+}
+/** 차 앞 look m 안의 장애물 — 인지 대역이 시뮬레이터 위치로 계산하는 값과 같은 방식 (시나리오 §2, -268) */
+export function obstaclesAhead<O extends { x: number; y: number }>(
+  g: Circuit,
+  pose: { x: number; y: number },
+  obstacles: O[],
+  look = 4,
+): AheadObstacle<O>[] {
+  const car = frameOf(g, pose.x, pose.y);
+  return obstacles
+    .map((o) => {
+      const f = frameOf(g, o.x, o.y);
+      return { o, ahead: wrapS(g, f.s - car.s), side: f.off - car.off };
+    })
+    .filter((a) => a.ahead > -0.3 && a.ahead < look)
+    .sort((a, b) => a.ahead - b.ahead);
+}

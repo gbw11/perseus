@@ -513,3 +513,55 @@ button.chip:hover:not(.chipOn) {
   flex-wrap: wrap;
   gap: var(--x-space-1);
 }
+/* 트랙 조작 (시뮬레이터, -267): 왼쪽 큰 지도, 오른쪽 조작 묶음 */
+.simControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: var(--x-space-4);
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .simControl {
+    grid-template-columns: 1fr;
+  }
+}
+.simMap {
+  display: grid;
+  gap: var(--x-space-2);
+  min-width: 0;
+}
+.simSide {
+  display: grid;
+  gap: var(--x-space-3);
+  min-width: 0;
+}
+.simGroup {
+  display: grid;
+  gap: var(--x-space-2);
+  padding: var(--x-space-3);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+}
+.simGroup > small {
+  color: var(--x-text-muted);
+  font-weight: 600;
+}
+.simGroup .rows {
+  margin: 0;
+}
+.simList {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.simList li {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-2);
+}
+.simList li > span:nth-child(2) {
+  flex: 1;
+}

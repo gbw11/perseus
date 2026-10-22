@@ -537,3 +537,37 @@
   background: var(--accent);
   color: var(--x-bg);
 }
+/* 모니터 2 시뮬레이터 상세 (계약 v1.4 실제 서킷) */
+.simTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--x-text-base);
+}
+.simTable th,
+.simTable td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--x-border);
+  text-align: left;
+}
+.simTable th {
+  color: var(--x-text-muted);
+  font-weight: 600;
+}
+.simJudge {
+  display: grid;
+  gap: 4px;
+  padding: var(--x-space-3) var(--x-space-4);
+  border-left: 6px solid var(--x-app-autonomous);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+}
+.simJudge small {
+  color: var(--x-text-muted);
+}
+.simJudge strong {
+  font-size: var(--x-text-xl);
+}
+.warnText {
+  color: var(--x-warning, #f59e0b);
+  font-weight: 600;
+}

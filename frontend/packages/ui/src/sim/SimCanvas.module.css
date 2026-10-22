@@ -93,3 +93,7 @@
   background: rgb(9 14 22 / 70%);
   font: 700 0.95rem var(--x-font);
 }
+.editable {
+  cursor: crosshair;
+  touch-action: none;
+}

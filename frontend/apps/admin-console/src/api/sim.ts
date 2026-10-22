@@ -108,3 +108,62 @@ export async function restartSimRace(): Promise<void> {
   }
   await request('/api/v1/sim/race/start', { method: 'POST' });
 }
+
+/** MQTT-18 sim.command.result (계약 v1.4). 실제 연결에서는 WS-06 으로 따로 오므로 여기서는 null */
+export interface SimCommandResult {
+  request_id: string;
+  op: string;
+  ok: boolean;
+  code: string | null;
+  message: string | null;
+}
+export type ObstacleKind = 'cone' | 'box' | 'tires';
+const scenario = () => import('../mocks/scenario');
+
+/** 장애물 놓기 (REST-31). mock 은 배치 검사 결과를 바로 돌려준다 */
+export async function placeSimObstacle(
+  kind: ObstacleKind,
+  x: number,
+  y: number,
+): Promise<SimCommandResult | null> {
+  if (MOCK) return (await scenario()).simPlace(kind, x, y);
+  await request('/api/v1/sim/obstacles', { method: 'POST', body: { kind, x, y } });
+  return null;
+}
+
+/** 장애물 옮기기 (REST-32) */
+export async function moveSimObstacle(id: string, x: number, y: number): Promise<SimCommandResult | null> {
+  if (MOCK) return (await scenario()).simMove(id, x, y);
+  await request(`/api/v1/sim/obstacles/${encodeURIComponent(id)}`, { method: 'PUT', body: { x, y } });
+  return null;
+}
+
+/** 장애물 치우기 (REST-33). ids 를 하나씩 */
+export async function removeSimObstacles(ids: string[]): Promise<void> {
+  if (MOCK) {
+    const s = await scenario();
+    if (ids.length > 1) s.simRemove();
+    else if (ids[0]) s.simRemove(ids[0]);
+    return;
+  }
+  for (const id of ids)
+    await request(`/api/v1/sim/obstacles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** 무작위 3개 — mock 만 (실제 연결은 2단계에서 REST-31 세 번으로) */
+export async function randomSimObstacles(): Promise<void> {
+  if (!MOCK) throw new Error('무작위 놓기는 아직 mock 에서만 동작합니다');
+  (await scenario()).simRandom();
+}
+
+/** E-stop 걸기·풀기 (REST-34) */
+export async function setSimEstop(engaged: boolean): Promise<void> {
+  if (MOCK) return (await scenario()).simEstop(engaged);
+  await request('/api/v1/sim/estop', { method: 'POST', body: { engaged } });
+}
+
+/** 차 밀기 (REST-35) — 진행 방향 기준 옆으로 (+ 왼쪽, 모의 m, |dy| ≤ 0.5) */
+export async function pushSimCar(dy_m: number): Promise<void> {
+  if (MOCK) return (await scenario()).simPush(dy_m);
+  await request('/api/v1/sim/push', { method: 'POST', body: { dy_m } });
+}

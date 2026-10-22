@@ -14,6 +14,7 @@ import { useDisplays, useRouteDisplay, useVms } from '../api/queries';
 import type { Display, DisplayStatus, DisplayView } from '../api/types';
 import { appHealth, osLabel, plain, ROLE_ORDER, ROLES, signed, vmOf, type AppId } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
+import { SimTrackControl } from './SimTrackControl';
 import styles from './pages.module.css';
 
 /**
@@ -45,6 +46,8 @@ export function DemoPage() {
           <IsolationCard key={app} app={app} />
         ))}
       </div>
+      {/* 시뮬레이터 구성일 때만 (실차 구성에는 없다) */}
+      <SimTrackControl />
       <div className={styles.cols2}>
         <ScreenRouting />
         <Card title="수동주행 입력">

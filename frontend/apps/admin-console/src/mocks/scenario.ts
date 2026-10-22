@@ -12,8 +12,12 @@ import { VM_IDS } from './data';
 import {
   advance,
   initialSim,
+  moveObstacle,
   obstaclesAhead,
   place,
+  pushCar,
+  randomObstacles,
+  removeObstacle,
   restartRace,
   selectTrack,
   sensing,
@@ -407,10 +411,45 @@ export function subscribe(listener: Listener): () => void {
 // ---- 시뮬레이터 조작 (계약 v1.4 MQTT-17 → MQTT-18 흉내) ----
 
 /** 장애물 놓기 (REST-31). 못 지나가는 자리면 거부 사유가 온다 */
+/** 운영자가 트랙을 한 번이라도 조작하면 시연용 자동 재배치(30초마다)를 멈춘다 */
+function operated() {
+  sim = { ...sim, nextDemoAt: Infinity };
+}
+
 export function simPlace(kind: Kind, x: number, y: number): SimCommandResult {
+  operated();
   const r = place(sim, kind, x, y);
   emit();
   return r;
+}
+/** 장애물 옮기기 (REST-32). 못 지나가는 자리면 거부 */
+export function simMove(id: string, x: number, y: number): SimCommandResult {
+  operated();
+  const r = moveObstacle(sim, id, x, y);
+  emit();
+  return r;
+}
+/** 장애물 치우기 (REST-33). id 가 없으면 모두 */
+export function simRemove(id?: string) {
+  operated();
+  sim = removeObstacle(sim, id);
+  emit();
+}
+/** 무작위 3개 (콘솔 편의 — 실제로는 REST-31 을 세 번) */
+export function simRandom() {
+  operated();
+  sim = randomObstacles(sim);
+  emit();
+}
+/** 차 밀기 (REST-35) */
+export function simPush(dy: number) {
+  sim = pushCar(sim, dy);
+  emit();
+}
+/** E-stop 걸기·풀기 (REST-34) */
+export function simEstop(engaged: boolean) {
+  store.estop = engaged;
+  emit();
 }
 /** 트랙 바꾸기 (REST-36) */
 export function simSelectTrack(trackId: string) {
