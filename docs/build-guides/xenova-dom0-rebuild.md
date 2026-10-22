@@ -42,3 +42,28 @@ per-card UUID·MAC·예약 IP·키 초기화·용량과 비밀 없는 공통 이
 새 SD의 최초 설치·부팅 정책·Wi-Fi 자동 연결·A/B 통신·mixed 종료는 실제 보드에서 수락한다.
 기존 이미지에 부분 적용한 시험 결과로 새 이미지 수락을 대신하지 않는다.
 [구현 계약과 실보드 확인 범위](../../platform/docs/resource-boot-zephyr.md)를 함께 본다.
+
+
+## 통계·heartbeat 감시기 개발용 의존성
+
+`112-xentop-stats`의 `xentop -b -i 1 -n -x -f`는 고정 Xen recipe의
+`xen-tools-xenstat`가 제공한다. `124-heartbeat-watcher`의 공용 클라이언트는
+`xenova-mqtt-client`와 그 `python3-paho-mqtt` 의존성이 제공한다.
+Manager recipe에서 둘을 직접 요구하며 datetime·queue·signal 등은 기존 Python split 패키지로 충족한다.
+
+이미지에는 `mosquitto`와 `mosquitto-clients`도 설치하지만 broker는 자동 기동하지 않는다.
+담당자가 `platform/deploy/mosquitto/README.md`의 계정·ACL·리스너 배치를 완료한 뒤
+기존 `mosquitto.service`를 활성화한다. 공통 이미지에 계정 비밀번호나 개인 접속점을 넣지 않는다.
+Worker 코드·unit을 대신 설치하거나 enable하지 않는다.
+
+의존성 준비는 기능 브랜치 병합과 별개다. 검토한 기준은
+112 `1f9a9bb8ee6016863e61b0dbff69eba8f3af66d3`,
+124 `3d532f4103567cce71a7ed2b926c46b8c349e786`이다.
+124는 `XenovaClient.subscribed()`와 early SUBACK 처리를 사용하므로 현재 공용 클라이언트만으로
+감시기 동작을 보장하지 않는다. 시험 소스를 옮길 때 해당 브랜치의
+`platform/services/vm-agent/mqtt-client/xenova_mqtt`도 같은 revision으로 가져와야 한다.
+단순 `paho-mqtt` 추가 설치로 이 API 차이를 해결할 수 없다.
+
+새 WIC에서는 xentop·broker·pub/sub/rr/passwd 실행 파일과 동적 라이브러리,
+Python `queue`·`signal`·`datetime`·Paho·공용 클라이언트를 실제 ARM64로 확인한다.
+WSL의 broker 왕복 시험은 임시 loopback listener만 사용하며 실보드 Xen 통계·운영 MQTT ACL 수락과 구분한다.
