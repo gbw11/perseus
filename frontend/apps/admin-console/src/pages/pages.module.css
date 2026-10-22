@@ -507,3 +507,134 @@ button.chip:hover:not(.chipOn) {
     transform: scale(1);
   }
 }
+/* 시뮬레이터 카드: 트랙 고르기 버튼 (계약 v1.4 REST-36) */
+.simTracks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--x-space-1);
+}
+/* 트랙 조작 (시뮬레이터, -267): 왼쪽 큰 지도, 오른쪽 조작 묶음 */
+.simControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: var(--x-space-4);
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .simControl {
+    grid-template-columns: 1fr;
+  }
+}
+.simMap {
+  display: grid;
+  gap: var(--x-space-2);
+  min-width: 0;
+}
+.simSide {
+  display: grid;
+  gap: var(--x-space-3);
+  min-width: 0;
+}
+.simGroup {
+  display: grid;
+  gap: var(--x-space-2);
+  padding: var(--x-space-3);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+}
+.simGroup > small {
+  color: var(--x-text-muted);
+  font-weight: 600;
+}
+.simGroup .rows {
+  margin: 0;
+}
+.simList {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.simList li {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-2);
+}
+.simList li > span:nth-child(2) {
+  flex: 1;
+}
+/* 대시보드 자율·수동 카드의 1인칭 (시뮬레이터 구성) 위 글자 */
+.povTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.povTag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--x-bg, #0f141b);
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+}
+.povHud {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgb(9 14 22 / 70%);
+  color: #dee2ed;
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+}
+/* 트랙 고르기 상자 (시뮬레이터, 트랙 10개) */
+.trackSelect {
+  max-width: 78%;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  color: var(--x-text);
+  font: inherit;
+  font-size: var(--x-text-sm);
+}
+/* 트랙 조작: 지도 밖 장애물 그림 (끌어다 놓기) */
+.palette {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--x-space-2);
+}
+.paletteHint {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+  font-weight: 600;
+  margin-right: var(--x-space-2);
+}
+.paletteItem {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 92px;
+  padding: 6px 10px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  color: var(--x-text);
+  font: inherit;
+  font-size: var(--x-text-sm);
+  font-weight: 600;
+  cursor: grab;
+}
+.paletteItem small {
+  color: var(--x-text-muted);
+  font-weight: 400;
+  font-family: var(--x-font-mono);
+}
+.paletteItem:active {
+  cursor: grabbing;
+}
+.paletteOn {
+  border-color: var(--x-app-simulator);
+  box-shadow: 0 0 0 1px var(--x-app-simulator);
+}

@@ -9,7 +9,7 @@
 import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import type { CreateVmRequest, LoginRequest, TokenResponse, Vm } from '../api/types';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
-import { getDisplays, RouteError, scenarioEvents, setRoute, vmStateOf } from './scenario';
+import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
 const TOKEN_TTL_S = 900;
@@ -174,10 +174,13 @@ export const handlers = [
     const action = String(params.action);
     if (action !== 'start' && action !== 'stop') return error(404, 'NOT_FOUND', '없는 동작입니다.');
     const wanted = action === 'start' ? 'stopped' : 'running';
-    if (vm.state !== wanted)
+    if (live(vm).state !== wanted)
       return error(409, 'INVALID_VM_STATE', `지금 상태(${vm.state})에서는 할 수 없습니다.`);
     const next: Vm = { ...vm, state: action === 'start' ? 'running' : 'stopped' };
     vms = vms.map((v) => (v.vm_id === vm.vm_id ? next : v));
+    // 주행 시나리오에도 알린다 — 자율주행 VM 을 멈추면 수동주행이 바로 이어받는다 (계약 §5.2)
+    if (action === 'stop') stopVm(vm.vm_id);
+    else startVm(vm.vm_id);
     return HttpResponse.json(next as unknown as JsonBodyType);
   }),
 

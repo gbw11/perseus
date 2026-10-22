@@ -6,6 +6,7 @@ import { DevControls } from './components/DevControls';
 import { DisplayFollower } from './components/DisplayFollower';
 import { ResumeOverlay } from './components/ResumeOverlay';
 import { DetailPage } from './pages/DetailPage';
+import { SimPage } from './pages/SimPage';
 import { SplitPage } from './pages/SplitPage';
 import {
   ConsoleBusTelemetryProvider,
@@ -43,6 +44,8 @@ const router = createBrowserRouter(
         { path: '/', element: <ToSplit /> },
         { path: '/split', element: <SplitPage /> },
         { path: '/detail/:app', element: <DetailPage /> },
+        // 화면 배치 view sim (screen_path /sim, 화면 배치 계약 v1.1)
+        { path: '/sim', element: <SimPage /> },
       ],
     },
   ],

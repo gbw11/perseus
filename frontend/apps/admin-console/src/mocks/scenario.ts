@@ -9,6 +9,24 @@
 import type { DriveApp, DriveKey, DriveMode, DriveState, InputResult } from '../api/drive';
 import type { EventSeverity, EventType, VmEvent, VmState } from '../api/types';
 import { VM_IDS } from './data';
+import {
+  advance,
+  initialSim,
+  moveObstacle,
+  obstaclesAhead,
+  place,
+  pushCar,
+  randomObstacles,
+  removeObstacle,
+  restartRace,
+  selectTrack,
+  sensing,
+  setEstop,
+  snapshotOf,
+  type SimCommandResult,
+  type SimSnapshot,
+} from './sim';
+import type { Kind } from './simEngine';
 
 const TICK_MS = 100;
 /** 강제 종료 후 복구 서비스가 재시작하기까지 */
@@ -41,6 +59,10 @@ interface Store {
   reason: string;
   apps: Record<Target, AppLife>;
   resumeAt: number | null;
+  /** 카운트다운을 시작한 쪽 — 자동 복귀(auto) 또는 운영자 재개(admin) (계약 v1.5) */
+  resumeBy: 'auto' | 'admin' | null;
+  /** 운영자가 자동 복귀를 취소했다 — 이번 AUTO_READY 동안은 [재개]로만 */
+  autoBlocked: boolean;
   perceptionLost: boolean;
   keys: DriveKey[];
   v: number;
@@ -91,6 +113,8 @@ function initial(): Store {
     reason: 'start',
     apps: { autonomous: life(130), manual: life(570), 'message-board': life(820) },
     resumeAt: null,
+    resumeBy: null,
+    autoBlocked: false,
     perceptionLost: false,
     keys: [],
     v: 0.5,
@@ -112,6 +136,10 @@ function initial(): Store {
 
 let store = initial();
 const listeners = new Set<Listener>();
+/** 시뮬레이터 구성(데모 기본)이면 켠다. VITE_MOCK_SIM=false 면 실차 구성처럼 sim 토픽이 없다 (세 번째 칸 = 네비게이션) */
+export const SIM_ON = import.meta.env.VITE_MOCK_SIM !== 'false';
+let sim = initialSim(Date.now());
+const simListeners = new Set<(snapshot: SimSnapshot) => void>();
 let timer: ReturnType<typeof setInterval> | undefined;
 
 function push(e: VmEvent) {
@@ -123,6 +151,7 @@ function setMode(to: DriveMode, reason: string, severity: EventSeverity = 'INFO'
   store.mode = to;
   store.generation += 1;
   store.reason = reason;
+  if (to !== 'AUTO_READY') store.autoBlocked = false; // AUTO_READY 를 벗어나면 다음에 다시 자동 복귀
   push(
     event('drive.mode.changed', severity, null, {
       from,
@@ -140,9 +169,23 @@ function activeApp(): 'autonomous' | 'manual' | null {
   return null;
 }
 
+/** 3·2·1 시작 — 자동 복귀(계약 v1.5)든 운영자 재개든 같은 카운트다운 */
+function startCountdown(by: 'auto' | 'admin') {
+  store.resumeAt = Date.now() + RESUME_COUNTDOWN_MS;
+  store.resumeBy = by;
+  push(
+    event('drive.resume.accepted', 'INFO', null, {
+      switch_in_ms: RESUME_COUNTDOWN_MS,
+      generation: store.generation,
+      requested_by: by,
+    }),
+  );
+}
+
 function cancelResume(reason: string) {
   if (store.resumeAt == null) return;
   store.resumeAt = null;
+  store.resumeBy = null;
   push(event('drive.resume.cancelled', 'WARNING', null, { reason, generation: store.generation }));
 }
 
@@ -175,6 +218,8 @@ function step() {
     t - auto.aliveSince >= READY_FRESH_MS
   ) {
     setMode('AUTO_READY', 'autonomous_recovered');
+    // 자동 복귀 (계약 v1.5): 운영자 조작 없이 바로 3·2·1 — 콘솔 [취소]로 막을 수 있다
+    if (!store.autoBlocked) startCountdown('auto');
   }
   if (store.mode === 'AUTO_READY' && !auto.alive) {
     cancelResume('autonomous_lost');
@@ -183,12 +228,30 @@ function step() {
   if (store.resumeAt != null) {
     if (!auto.alive || store.mode !== 'AUTO_READY') cancelResume('autonomous_lost');
     else if (t >= store.resumeAt) {
+      const by = store.resumeBy;
       store.resumeAt = null;
-      setMode('AUTO', 'resume_requested');
+      store.resumeBy = null;
+      setMode('AUTO', by === 'auto' ? 'auto_resumed' : 'resume_requested');
     }
   }
+  // 시뮬레이터 근거리 감지 (지난 tick 위치 기준) → vehicle.status flags.obstacle
+  if (SIM_ON) store.obstacle = sensing(sim);
   // 차량은 활성 앱 명령을 따라간다 (시뮬레이터와 같은 규칙: 비상정지·장애물이면 전진 0)
   const active = activeApp();
+  if (SIM_ON) {
+    // 시뮬레이터 구성: 차 움직임은 시뮬레이터 mock 이 (자율주행 규칙·수동 키·출발 신호, 시나리오 §4-2)
+    const driver =
+      active === 'autonomous' && auto.alive && !store.perceptionLost
+        ? 'autonomous'
+        : active === 'manual' && manual.alive
+          ? 'manual'
+          : null;
+    sim = advance(setEstop(sim, store.estop), t, TICK_MS / 1000, driver, store.keys);
+    store.v = sim.car.v;
+    store.steer = sim.car.steer;
+    emit();
+    return;
+  }
   let target = 0;
   let steer = 0;
   if (active === 'autonomous' && auto.alive && !store.perceptionLost) {
@@ -264,8 +327,9 @@ export function snapshot(): DriveState {
         'autonomous',
         auto,
         now,
-        lost ? 0 : 0.5,
-        lost ? 0 : 0.07,
+        // 시뮬레이터 구성이면 자율주행 규칙이 낸 명령 (속도 계획·회피 조향)
+        lost ? 0 : SIM_ON ? store.v : 0.5,
+        lost ? 0 : SIM_ON ? store.steer : 0.07,
         active === 'autonomous' ? 'active' : 'standby',
       ),
       manual: app(
@@ -292,10 +356,11 @@ export function snapshot(): DriveState {
           valid: true,
           received_ago_ms: now % 67,
           hz: 15,
-          lane_offset_m: 0.05,
+          // 시뮬레이터 구성이면 인지 대역이 시뮬레이터 위치로 계산한 값 흉내 (-268)
+          lane_offset_m: SIM_ON ? Math.round(sim.lateral * 1000) / 1000 : 0.05,
           heading_err_rad: -0.02,
-          obstacle_count: store.obstacle ? 1 : 0,
-          stop: false,
+          obstacle_count: SIM_ON ? obstaclesAhead(sim) : store.obstacle ? 1 : 0,
+          stop: SIM_ON ? store.obstacle : false,
         },
     resume:
       store.resumeAt == null
@@ -305,6 +370,7 @@ export function snapshot(): DriveState {
             switch_in_ms: RESUME_COUNTDOWN_MS,
             accepted_ago_ms: RESUME_COUNTDOWN_MS - Math.max(0, store.resumeAt - now),
             remaining_ms: Math.max(0, store.resumeAt - now),
+            requested_by: store.resumeBy ?? 'admin',
           },
   };
 }
@@ -331,13 +397,28 @@ if (bus) {
 function emit() {
   const state = snapshot();
   listeners.forEach((listener) => listener(state));
+  const simSnapshot = SIM_ON ? snapshotOf(sim) : null;
+  if (simSnapshot) simListeners.forEach((listener) => listener(simSnapshot));
   if (!bus) return;
   bus.postMessage({ type: 'drive.state', state });
+  // WS /ws/v1/sim(WS-06) 의 sim.snapshot 과 같은 모양 (MQTT 계약 v1.3 §11.2)
+  if (simSnapshot) bus.postMessage({ type: 'sim.snapshot', ...simSnapshot });
   for (const e of [...store.events].reverse()) {
     if (sentEvents.has(e.event_id)) continue;
     sentEvents.add(e.event_id);
     bus.postMessage({ type: 'event', payload: e });
   }
+}
+
+/** 시뮬레이터 상태 (WS-06 흉내). SIM_ON 이 아니면 아무것도 오지 않는다 */
+export function subscribeSim(listener: (snapshot: SimSnapshot) => void): () => void {
+  simListeners.add(listener);
+  const off = subscribe(() => {}); // tick 을 돌린다
+  if (SIM_ON) listener(snapshotOf(sim));
+  return () => {
+    simListeners.delete(listener);
+    off();
+  };
 }
 
 export function subscribe(listener: Listener): () => void {
@@ -353,17 +434,81 @@ export function subscribe(listener: Listener): () => void {
   };
 }
 
+// ---- 시뮬레이터 조작 (계약 v1.4 MQTT-17 → MQTT-18 흉내) ----
+
+/** 장애물 놓기 (REST-31). 못 지나가는 자리면 거부 사유가 온다 */
+/** 운영자가 트랙을 한 번이라도 조작하면 시연용 자동 재배치(30초마다)를 멈춘다 */
+function operated() {
+  sim = { ...sim, nextDemoAt: Infinity };
+}
+
+export function simPlace(kind: Kind, x: number, y: number): SimCommandResult {
+  operated();
+  const r = place(sim, kind, x, y);
+  emit();
+  return r;
+}
+/** 장애물 옮기기 (REST-32). 못 지나가는 자리면 거부 */
+export function simMove(id: string, x: number, y: number): SimCommandResult {
+  operated();
+  const r = moveObstacle(sim, id, x, y);
+  emit();
+  return r;
+}
+/** 장애물 치우기 (REST-33). id 가 없으면 모두 */
+export function simRemove(id?: string) {
+  operated();
+  sim = removeObstacle(sim, id);
+  emit();
+}
+/** 무작위 3개 (콘솔 편의 — 실제로는 REST-31 을 세 번) */
+export function simRandom() {
+  operated();
+  sim = randomObstacles(sim);
+  emit();
+}
+/** 차 밀기 (REST-35) */
+export function simPush(dy: number) {
+  sim = pushCar(sim, dy);
+  emit();
+}
+/** E-stop 걸기·풀기 (REST-34) */
+export function simEstop(engaged: boolean) {
+  store.estop = engaged;
+  emit();
+}
+/** 트랙 바꾸기 (REST-36) */
+export function simSelectTrack(trackId: string) {
+  sim = selectTrack(sim, trackId, Date.now());
+  emit();
+}
+/** 다시 출발 — 출발 신호 처음부터 (REST-37) */
+export function simRestart() {
+  sim = restartRace(sim, Date.now());
+  emit();
+}
+
 // ---- 시연 동작 (W-07) ----
 
 /** 운영자가 VM 을 강제 종료 (도메인만, 디스크는 그대로). 복구 서비스가 다시 띄운다 */
 export function forceKill(target: Target) {
   push(event('demo.command.sent', 'INFO', vmOf(target), { command: 'force_kill', requested_by: 'operator' }));
+  takeDown(target, 'crashed');
+}
+
+/**
+ * VM 이 내려갔을 때 (강제 종료 = crashed → 복구 서비스가 다시 띄움, VM 화면 [정지] = stopped → 운영자가 [시작]할 때까지).
+ * 주행 앱이면 명령이 끊겨 게이트웨이 판정대로 넘긴다 (계약 §5.2).
+ */
+function takeDown(target: Target, vmState: 'crashed' | 'stopped') {
   const a = store.apps[target];
   if (!a.alive || a.vmState !== 'running') return emit();
   a.alive = false;
   a.aliveSince = null;
   a.downAt = Date.now();
-  a.vmState = 'crashed';
+  a.vmState = vmState;
+  if (vmState === 'stopped')
+    push(event('vm.state.changed', 'INFO', vmOf(target), { from: 'running', to: 'stopped' }));
   if (target === 'message-board') return emit(); // 주행과 무관 — 격리
   push(
     event('drive.fault.detected', 'WARNING', vmOf(target), {
@@ -383,17 +528,38 @@ export function forceKill(target: Target) {
   emit();
 }
 
+const targetOf = (vmId: string) => TARGETS.find((t) => vmOf(t) === vmId);
+
+/** VM 화면 [정지] (REST VM 동작 stop) — 주행 앱이면 강제 종료처럼 인계되지만 복구 서비스가 다시 띄우지 않는다 */
+export function stopVm(vmId: string) {
+  const target = targetOf(vmId);
+  if (target) takeDown(target, 'stopped');
+}
+
+/** VM 화면 [시작] — 부팅이 끝나면 앱이 다시 명령·생존 신호를 낸다 (자율이면 3초 뒤 AUTO_READY) */
+export function startVm(vmId: string) {
+  const target = targetOf(vmId);
+  const a = target && store.apps[target];
+  if (!a || a.vmState !== 'stopped') return;
+  a.vmState = 'running';
+  a.downAt = Date.now() - RESTART_AFTER_MS; // 복구 서비스 재시작과 같은 부팅 시간 (BOOT_MS) 뒤 살아난다
+  push(event('vm.state.changed', 'INFO', vmOf(target), { from: 'stopped', to: 'running' }));
+  emit();
+}
+
 /** AUTO_READY 에서만 받는다. 바로 바꾸지 않고 3초 카운트다운 (MQTT 계약 v1.2 §6) */
 export function resume(): boolean {
   if (store.mode !== 'AUTO_READY' || store.resumeAt != null) return false;
-  store.resumeAt = Date.now() + RESUME_COUNTDOWN_MS;
-  push(
-    event('drive.resume.accepted', 'INFO', null, {
-      switch_in_ms: RESUME_COUNTDOWN_MS,
-      generation: store.generation,
-      requested_by: 'admin',
-    }),
-  );
+  startCountdown('admin');
+  emit();
+  return true;
+}
+
+/** 카운트다운 취소 (계약 v1.5 drive.resume.cancel_requested) — 수동이 계속 몰고, 이번 AUTO_READY 동안은 [재개]로만 */
+export function cancelResumeCountdown(): boolean {
+  if (store.resumeAt == null) return false;
+  cancelResume('operator_cancelled');
+  store.autoBlocked = true;
   emit();
   return true;
 }
@@ -544,6 +710,7 @@ function applied(id: string, revision: number) {
 
 export function resetScenario() {
   store = initial();
+  sim = initialSim(Date.now());
   displays = [
     display('display-0', '모니터 1', 'split', null),
     display('display-1', '모니터 2', 'os-face', VM_IDS.autonomous),

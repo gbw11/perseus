@@ -1,8 +1,21 @@
-import { CameraView, Card, StatusBadge } from '@xenova/ui';
+import {
+  Button,
+  CameraView,
+  Card,
+  circuitOf,
+  DriverView,
+  fmtLap,
+  isCircuit,
+  kmh,
+  StatusBadge,
+  TrackView,
+  useToast,
+} from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
 import type { DriveState } from '../api/drive';
 import { useEvents, useVms } from '../api/queries';
+import { restartSimRace, selectSimTrack, useSimState, type SimView } from '../api/sim';
 import type { Vm } from '../api/types';
 import { clock, describe } from '../domain/events';
 import {
@@ -22,6 +35,7 @@ import {
   type AppId,
 } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
+import { SimTrackSelect } from './SimTrackSelect';
 import styles from './pages.module.css';
 
 const MOCK = import.meta.env.VITE_MOCK === 'true';
@@ -36,6 +50,7 @@ export function DashboardPage() {
   const { drive } = useDrive();
   const vms = useVms();
   const events = useEvents({ limit: 5 });
+  const sim = useSimState();
   const control = drive?.control;
   const vehicle = drive?.vehicle;
   const flags = vehicle?.flags;
@@ -65,29 +80,27 @@ export function DashboardPage() {
         >
           {control?.active_app ? `▶ ${ROLES[control.active_app].title} 차량 제어 중` : '차량 제어 앱 없음'}
         </div>
-        <span className={styles.grow} />
-        <div className={styles.chips}>
-          {SAFETY.map((f) => (
-            <span key={f.key} title={f.hint}>
-              <StatusBadge
-                health={!flags ? 'stopped' : flags[f.key] ? 'fault' : 'ok'}
-                label={`${f.label}: ${flags ? (flags[f.key] ? f.on : f.off) : '—'}`}
-              />
-            </span>
-          ))}
-        </div>
+        {/* 안전 플래그 셋은 위쪽에서 뺐다 (2026-10-22 요청) — 아래 "차량 상태" 카드에 그대로 있다 */}
       </section>
 
       {control?.mode === 'AUTO_READY' && (
         <div className={styles.draft}>
-          자율주행 재개 가능 — <Link to="/demo">시연 제어</Link>에서 [자율주행 재개]
+          {drive?.resume
+            ? `자율주행 ${drive.resume.requested_by === 'auto' ? '자동 복귀' : '재개'} — ${Math.max(1, Math.ceil(drive.resume.remaining_ms / 1000))}초 뒤 전환`
+            : '자율주행 재개 가능 (자동 복귀 취소됨)'}{' '}
+          — <Link to="/demo">시연 제어</Link>에서 {drive?.resume ? '[취소]' : '[자율주행 재개]'}
         </div>
       )}
 
       <div className={styles.cols3}>
-        {ROLE_ORDER.map((app) => (
-          <AppCard key={app} app={app} vm={vmOf(app, vms.data?.items, drive)} drive={drive} />
-        ))}
+        {ROLE_ORDER.map((app) =>
+          // 시뮬레이터 구성이면 세 번째 칸이 시뮬레이터로 바뀐다 (위치가 1초 안에 오면, 화면 배치 계약 v1.1 §5.6)
+          app === 'message-board' && sim.available ? (
+            <SimCard key="simulator" sim={sim} drive={drive} board={vmOf(app, vms.data?.items, drive)} />
+          ) : (
+            <AppCard key={app} app={app} vm={vmOf(app, vms.data?.items, drive)} drive={drive} sim={sim} />
+          ),
+        )}
       </div>
 
       <div className={styles.cols2}>
@@ -189,13 +202,29 @@ export function DashboardPage() {
   );
 }
 
-function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: DriveState | null }) {
+function AppCard({
+  app,
+  vm,
+  drive,
+  sim,
+}: {
+  app: AppId;
+  vm: Vm | undefined;
+  drive: DriveState | null;
+  sim: SimView;
+}) {
   const role = ROLES[app];
   const state = drive?.apps[app];
   const health = appHealth(role, vm, state);
   const control = controlLabel(role, drive);
   const active = drive?.control?.active_app === app;
   const command = state?.last_command;
+  // 시뮬레이터 구성(계약 v1.4 실제 서킷)이면 모니터와 같은 차 1인칭을 카드에도 (자율 = 인식 박스)
+  const circuit =
+    sim.available && sim.world && isCircuit(sim.world.track) ? circuitOf(sim.world.track) : null;
+  const pov = circuit && sim.pose && sim.world && (app === 'autonomous' || app === 'manual');
+  const speed = (v: number | null) =>
+    circuit ? `${Math.abs(kmh(circuit, v ?? 0)).toFixed(0)} km/h` : `${plain(v)} m/s`;
   return (
     <Card
       className={styles.appCard}
@@ -212,6 +241,24 @@ function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: Dr
       {control && (
         <div className={[styles.controlBar, active ? styles.controlOn : ''].join(' ')}>{control}</div>
       )}
+      {pov && (
+        <DriverView
+          pose={sim.pose}
+          world={sim.world}
+          boxes={app === 'autonomous'}
+          dimmed={!active}
+          quality="low"
+          label={`${role.title} — 시뮬레이터 1인칭`}
+          overlay={
+            <div className={styles.povTop}>
+              <span className={styles.povTag} style={{ background: role.color }}>
+                {active ? '▶ 운전 중' : '대기'}
+              </span>
+              <span className={styles.povHud}>{speed(sim.pose?.v_mps ?? 0)}</span>
+            </div>
+          }
+        />
+      )}
       {role.driving ? (
         <div className={styles.rows}>
           <div>
@@ -223,7 +270,7 @@ function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: Dr
           </div>
           <div>
             <span>마지막 명령</span>
-            <span>{command ? `${plain(command.v_mps)} m/s · ${signed(command.steer_rad)} rad` : '—'}</span>
+            <span>{command ? `${speed(command.v_mps)} · ${signed(command.steer_rad)} rad` : '—'}</span>
           </div>
           <div>
             <span>app.heartbeat</span>
@@ -288,6 +335,121 @@ function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: Dr
           </div>
         </>
       )}
+    </Card>
+  );
+}
+
+const CAR_COLOR = {
+  autonomous: 'var(--x-app-autonomous)',
+  manual: 'var(--x-app-manual)',
+} as const;
+
+/**
+ * 세 번째 칸 — 시뮬레이터 (시뮬레이터 시연 시나리오 §4). 실차 대신 화면 속 차가 트랙을 도는 모습.
+ * 네비게이션 VM 은 그대로 돌고 있으므로 그 상태 한 줄을 남긴다 (그 VM 을 죽여도 차는 계속 달린다 — D8 격리).
+ */
+function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null; board: Vm | undefined }) {
+  const active = drive?.control?.active_app ?? null;
+  const boardState = drive?.apps['message-board'];
+  const boardHealth = appHealth(ROLES['message-board'], board, boardState);
+  const pose = sim.pose;
+  const flags = drive?.vehicle?.flags;
+  const toast = useToast();
+  // v1.4 실제 서킷: 속도는 실제 단위(km/h), 트랙 바꾸기·다시 출발 (REST-36·37)
+  const circuit = sim.world && isCircuit(sim.world.track) ? circuitOf(sim.world.track) : null;
+  const race = pose?.race;
+  const act = (job: Promise<void>) =>
+    job.catch((e: unknown) => toast.show(e instanceof Error ? e.message : String(e), 'fault'));
+  return (
+    <Card
+      className={styles.appCard}
+      style={{ '--accent': 'var(--x-app-simulator)' } as CSSProperties}
+      title={<span style={{ color: 'var(--x-app-simulator)' }}>시뮬레이터</span>}
+      actions={
+        <StatusBadge
+          health={flags?.estop || flags?.obstacle ? 'fault' : (pose?.v_mps ?? 0) > 0.02 ? 'ok' : 'stopped'}
+          label={
+            flags?.estop
+              ? 'E-stop'
+              : flags?.obstacle
+                ? '장애물 정지'
+                : (pose?.v_mps ?? 0) > 0.02
+                  ? '주행 중'
+                  : '정지'
+          }
+          size="sm"
+        />
+      }
+    >
+      <TrackView
+        compact
+        pose={pose}
+        world={sim.world}
+        trail={sim.trail}
+        carColor={active ? CAR_COLOR[active] : 'var(--x-fault)'}
+        sensing={!!flags?.obstacle}
+        label="시뮬레이터 트랙 — 차 위치와 장애물"
+      />
+      <div className={styles.rows}>
+        {circuit && sim.world ? (
+          <>
+            <div>
+              <span>트랙</span>
+              <SimTrackSelect
+                tracks={sim.world.tracks ?? []}
+                current={circuit.track.id}
+                onPick={(id) => void act(selectSimTrack(id))}
+              />
+            </div>
+            <div>
+              <span>속도 · 랩</span>
+              <span className={styles.mono}>
+                {pose ? `${Math.abs(kmh(circuit, pose.v_mps)).toFixed(0)} km/h` : '—'}
+                {race
+                  ? race.phase === 'lights'
+                    ? ` · 출발 신호 ${race.lights_on}/5`
+                    : ` · ${race.lap + 1}랩 ${fmtLap(race.lap_ms)} · 최고 ${fmtLap(race.best_lap_ms)}`
+                  : ''}
+              </span>
+            </div>
+            <div>
+              <span>출발</span>
+              <Button size="sm" variant="secondary" onClick={() => void act(restartSimRace())}>
+                다시 출발 (출발 신호)
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <span>위치 x, y</span>
+              <span className={styles.mono}>
+                {pose ? `${pose.x.toFixed(2)}, ${pose.y.toFixed(2)} m` : '—'}
+              </span>
+            </div>
+            <div>
+              <span>속도 · 조향</span>
+              <span className={styles.mono}>
+                {pose ? `${plain(pose.v_mps)} m/s · ${signed(pose.steer_rad)} rad` : '—'}
+              </span>
+            </div>
+          </>
+        )}
+        <div>
+          <span>장애물 · 트랙 rev</span>
+          <span className={styles.mono}>
+            {sim.world ? `${sim.world.obstacles.length}개 · ${sim.world.revision}` : '—'}
+          </span>
+        </div>
+        <div>
+          <span>네비게이션 VM</span>
+          <StatusBadge
+            health={boardHealth}
+            label={boardHealth === 'ok' ? '정상 — 알림·재개 요청' : '응답 없음 — 주행은 그대로'}
+            size="sm"
+          />
+        </div>
+      </div>
     </Card>
   );
 }

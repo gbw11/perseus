@@ -9,7 +9,7 @@ import {
   type EventDto,
 } from './live';
 import { crash, initialTelemetry, resume, setManualKeys, step, toggleStress } from './scenario';
-import type { AppId, Telemetry } from './types';
+import { applySimSnapshot, type AppId, type Telemetry } from './types';
 
 /**
  * 화면이 쓰는 데이터 출처. 모두 같은 모양(TelemetryApi)이라 화면은 출처를 모른다.
@@ -109,10 +109,23 @@ export function LiveTelemetryProvider({ children }: { children: ReactNode }) {
         }
       },
     });
+    // 시뮬레이터 구성일 때만 오는 WS-06. 백엔드가 아직 열지 않았거나 실차 구성이면 실패해도 그만이다
+    const closeSim = openSocket({
+      path: '/ws/v1/sim',
+      getToken: accessToken,
+      onConnection: noop,
+      onFrame: (frame) => {
+        if (frame.type === 'sim.snapshot') {
+          const snapshot = frame as Parameters<typeof applySimSnapshot>[1];
+          setTelemetry((t) => applySimSnapshot(t, snapshot, performance.now()));
+        }
+      },
+    });
     return () => {
       window.clearInterval(clock);
       closeState();
       closeEvents();
+      closeSim();
     };
   }, []);
 
@@ -162,6 +175,10 @@ export function ConsoleBusTelemetryProvider({ children }: { children: ReactNode 
       } else if (frame?.type === 'event') {
         const event = frame.payload as EventDto;
         if (DRIVE_EVENTS.includes(event.type)) setTelemetry((t) => applyEvent(t, event, performance.now()));
+      } else if (frame?.type === 'sim.snapshot') {
+        setTelemetry((t) =>
+          applySimSnapshot(t, frame as Parameters<typeof applySimSnapshot>[1], performance.now()),
+        );
       }
     };
     bus.postMessage({ type: 'hello' }); // 콘솔이 먼저 열려 있었으면 지난 이벤트를 다시 받는다

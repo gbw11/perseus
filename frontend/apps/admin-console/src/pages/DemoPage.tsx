@@ -4,6 +4,7 @@ import { ApiError } from '../api/client';
 import {
   KEY_OF,
   mockDemo,
+  cancelResume,
   pressKey,
   requestResume,
   useManualInput,
@@ -14,6 +15,7 @@ import { useDisplays, useRouteDisplay, useVms } from '../api/queries';
 import type { Display, DisplayStatus, DisplayView } from '../api/types';
 import { appHealth, osLabel, plain, ROLE_ORDER, ROLES, signed, vmOf, type AppId } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
+import { SimTrackControl } from './SimTrackControl';
 import styles from './pages.module.css';
 
 /**
@@ -45,6 +47,8 @@ export function DemoPage() {
           <IsolationCard key={app} app={app} />
         ))}
       </div>
+      {/* 시뮬레이터 구성일 때만 (실차 구성에는 없다) */}
+      <SimTrackControl />
       <div className={styles.cols2}>
         <ScreenRouting />
         <Card title="수동주행 입력">
@@ -391,10 +395,11 @@ function Resume() {
   const [sending, setSending] = useState(false);
   const ready = drive?.control?.mode === 'AUTO_READY';
   const counting = drive?.resume ?? null;
-  const send = async () => {
+  const auto = counting?.requested_by === 'auto';
+  const send = async (job: () => Promise<void> = requestResume) => {
     setSending(true);
     try {
-      await requestResume();
+      await job();
     } catch (error) {
       toast.show(error instanceof Error ? error.message : String(error), 'fault', 5000);
     } finally {
@@ -409,15 +414,27 @@ function Resume() {
         onClick={() => void send()}
       >
         {counting
-          ? `▶ ${Math.max(1, Math.ceil(counting.remaining_ms / 1000))}초 뒤 자율주행`
+          ? `▶ ${Math.max(1, Math.ceil(counting.remaining_ms / 1000))}초 뒤 자율주행${auto ? ' (자동 복귀)' : ''}`
           : '▶ 자율주행 재개'}
       </Button>
+      {counting && (
+        <Button
+          variant="danger"
+          style={{ width: '100%', marginTop: 'var(--x-space-2)' }}
+          disabled={sending}
+          onClick={() => void send(cancelResume)}
+        >
+          취소 — 수동주행 유지
+        </Button>
+      )}
       <p className={styles.dim}>
         {counting
-          ? '카운트다운 중 — 그 사이 자율주행이 다시 끊기면 취소되고 수동주행이 유지된다.'
+          ? auto
+            ? '자율주행이 복구돼 자동으로 돌아가는 중 — [취소]하면 수동주행이 계속 몰고, 그 뒤에는 [재개]로만 돌아간다.'
+            : '카운트다운 중 — 그 사이 자율주행이 다시 끊기면 취소되고 수동주행이 유지된다.'
           : ready
-            ? '자율주행이 3초 연속 정상. 누르면 3·2·1 을 센 뒤 AUTO 로 돌아간다.'
-            : 'AUTO_READY 에서만 활성. 자율주행 복귀는 자동이 아니라 운영자가 누른다.'}
+            ? '자동 복귀를 취소했다. 누르면 3·2·1 을 센 뒤 AUTO 로 돌아간다.'
+            : '자율주행이 복구돼 3초 연속 정상이면(AUTO_READY) 자동으로 3·2·1 뒤 돌아간다.'}
       </p>
     </div>
   );

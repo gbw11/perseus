@@ -63,6 +63,8 @@ export interface DriveState {
     switch_in_ms: number;
     accepted_ago_ms: number;
     remaining_ms: number;
+    /** 자동 복귀면 auto (계약 v1.5) */
+    requested_by?: string;
   } | null;
 }
 
@@ -81,8 +83,8 @@ function wsUrl(path: string): string {
 
 type Frame = { type: string } & Record<string, unknown>;
 
-/** 인증 소켓 하나를 열고, 끊기면 다시 붙는다. 4401 이면 refresh 후 재시도 */
-function useAuthedSocket(path: string, onFrame: (frame: Frame) => void) {
+/** 인증 소켓 하나를 열고, 끊기면 다시 붙는다. 4401 이면 refresh 후 재시도. path 가 비면 열지 않는다 */
+export function useAuthedSocket(path: string, onFrame: (frame: Frame) => void) {
   const [state, setState] = useState<SocketState>('connecting');
   const socketRef = useRef<WebSocket | null>(null);
   const frameRef = useRef(onFrame);
@@ -91,6 +93,7 @@ function useAuthedSocket(path: string, onFrame: (frame: Frame) => void) {
   });
 
   useEffect(() => {
+    if (!path) return; // 빈 주소 = 연결하지 않는다 (mock)
     let stopped = false;
     let timer: number | undefined;
 
@@ -174,6 +177,19 @@ export async function requestResume(): Promise<void> {
     return;
   }
   await request('/api/v1/drive/resume', { method: 'POST' });
+}
+
+/**
+ * 재개 카운트다운 취소 (DELETE /api/v1/drive/resume → MQTT-13 drive.resume.cancel_requested, 계약 v1.5).
+ * 자동 복귀를 막고 수동주행을 유지한다. 그 뒤에는 [자율주행 재개]로만 돌아간다.
+ */
+export async function cancelResume(): Promise<void> {
+  if (MOCK) {
+    const s = await loadScenario();
+    if (!s.cancelResumeCountdown()) throw new Error('취소할 카운트다운이 없습니다');
+    return;
+  }
+  await request('/api/v1/drive/resume', { method: 'DELETE' });
 }
 
 /** 시연 동작 (mock 에서만 동작 — 실제 API 는 격리 시연 -135 가 정한다) */

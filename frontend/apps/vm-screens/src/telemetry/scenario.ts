@@ -68,7 +68,9 @@ function fresh(t: Telemetry, id: 'autonomous' | 'manual'): boolean {
 
 function changeMode(t: Telemetry, mode: DriveMode, reason: string, text: string): Telemetry {
   const activeApp = mode === 'AUTO' ? 'autonomous' : mode === 'SAFE_STOP' ? null : 'manual';
-  const next = { ...t, mode, activeApp, generation: t.generation + 1 } as Telemetry;
+  // AUTO_READY 를 벗어나면 카운트다운도 끝 (계약 v1.5)
+  const resume = mode === 'AUTO_READY' ? {} : { resumeAt: null, resumeAuto: false };
+  const next = { ...t, mode, activeApp, generation: t.generation + 1, ...resume } as Telemetry;
   return pushEvent(
     next,
     'drive.mode.changed',
@@ -154,6 +156,13 @@ function gateway(t: Telemetry): Telemetry {
   next = { ...next, autonomousFreshSince: freshSince };
   if (next.mode === 'MANUAL' && freshSince !== null && next.now - freshSince >= AUTO_READY_FRESH_MS) {
     next = changeMode(next, 'AUTO_READY', 'resume_ready', '자율주행 재개 가능');
+    // 자동 복귀 (계약 v1.5): 바로 3·2·1
+    next = pushEvent(
+      { ...next, resumeAt: next.now + 3000, resumeAuto: true },
+      'drive.resume.accepted',
+      'ok',
+      '자율주행 자동 복귀 — 3초 뒤 전환',
+    );
     next = setHealth(next, 'autonomous', 'ok');
   }
   return next;
@@ -208,6 +217,8 @@ export function step(t: Telemetry, now: number): Telemetry {
   next = recovery(next);
   next = emitCommands(next, dt);
   next = gateway(next);
+  if (next.mode === 'AUTO_READY' && next.resumeAt != null && now >= next.resumeAt)
+    next = changeMode(next, 'AUTO', next.resumeAuto ? 'auto_resumed' : 'resume_requested', '자율주행 복귀');
   next = vehicle(next);
   return next;
 }

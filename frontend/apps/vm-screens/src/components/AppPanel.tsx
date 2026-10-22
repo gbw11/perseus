@@ -1,8 +1,9 @@
 import { StatusBadge } from '@xenova/ui';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
-import { APPS, type AppId } from '../telemetry/types';
-import { seconds } from './format';
+import { APPS, simLive, type AppId } from '../telemetry/types';
+import { seconds, shownKeys, speedParts } from './format';
 import { NavCamera } from './NavCamera';
+import { SimDriverView } from './SimPanel';
 import styles from './screens.module.css';
 
 const ACCENT: Record<AppId, string> = {
@@ -41,12 +42,17 @@ export function AppPanel({ id, onSelect }: { id: AppId; onSelect?: (id: AppId) =
           <h2 className={styles.panelTitle}>{meta.title}</h2>
           <span className={styles.guest}>{meta.guest === 'zephyr' ? 'Zephyr' : 'Debian 13'}</span>
         </div>
-        <StatusBadge health={status.health} label={badgeLabel} size="lg" />
+        {/* 제어 중·대기 표시는 상태 배지 옆에 한 줄로 */}
+        <div className={styles.headRight}>
+          {active && <span className={styles.activeTag}>▶ 차량 제어 중</span>}
+          {!active && id === 'manual' && status.commandHz > 0 && (
+            <span className={styles.standbyTag}>대기 중</span>
+          )}
+          <StatusBadge health={status.health} label={badgeLabel} size="lg" />
+        </div>
       </header>
 
       <div className={styles.panelRole}>{meta.role}</div>
-      {active && <div className={styles.activeTag}>▶ 차량 제어 중</div>}
-      {!active && id === 'manual' && status.commandHz > 0 && <div className={styles.standbyTag}>대기 중</div>}
 
       <div className={styles.panelBody}>
         {id === 'interaction' ? <InteractionSummary /> : <DriveSummary id={id} />}
@@ -80,11 +86,15 @@ function DriveSummary({ id }: { id: 'autonomous' | 'manual' }) {
 
   return (
     <>
+      {/* 시뮬레이터 구성이면 칸 위쪽에 1인칭 시점 — 자율은 자율이 모는 모습, 수동은 키 입력과 함께 */}
+      {simLive(t) && <SimDriverView id={id} />}
       <div className={styles.tiles}>
         <div className={styles.tile}>
           <small>목표 속도</small>
-          <span className={styles.tileValue}>{sending && command ? command.v_mps.toFixed(2) : '—'}</span>
-          <span className={styles.tileUnit}>m/s</span>
+          <span className={styles.tileValue}>
+            {sending && command ? speedParts(t, command.v_mps)[0] : '—'}
+          </span>
+          <span className={styles.tileUnit}>{speedParts(t, 0)[1]}</span>
         </div>
         <div className={styles.tile}>
           <small>목표 조향</small>
@@ -113,7 +123,7 @@ function DriveSummary({ id }: { id: 'autonomous' | 'manual' }) {
         ) : (
           <>
             <dt>키 입력</dt>
-            <dd className={styles.mono}>{t.manualKeys.length ? t.manualKeys.join(' + ') : '없음'}</dd>
+            <dd className={styles.mono}>{shownKeys(t).length ? shownKeys(t).join(' + ') : '없음'}</dd>
           </>
         )}
       </dl>
@@ -154,9 +164,9 @@ export function ResumeState() {
       )}
     >
       {counting
-        ? `${Math.ceil((t.resumeAt! - t.now) / 1000)}초 뒤 자율주행으로 전환`
+        ? `${Math.ceil((t.resumeAt! - t.now) / 1000)}초 뒤 자율주행으로 전환${t.resumeAuto ? ' (자동 복귀)' : ''}`
         : t.mode === 'AUTO_READY'
-          ? '자율주행 재개 가능'
+          ? '자율주행 재개 가능 — 콘솔 [재개]'
           : t.mode === 'AUTO'
             ? '자율주행 중'
             : '재개 대기'}

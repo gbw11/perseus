@@ -454,3 +454,133 @@
 .navLarge .navStats {
   font-size: var(--x-text-lg);
 }
+
+/* 시뮬레이터 칸 아래 네비게이션 알림 띠 (시뮬레이터 시연 시나리오 §4, D8 격리가 보이게) */
+.strip {
+  display: flex;
+  gap: var(--x-space-2);
+  align-items: baseline;
+  padding: var(--x-space-2) var(--x-space-3);
+  border: 1px solid var(--x-border);
+  border-left: 3px solid var(--x-app-interaction);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  font-size: var(--x-text-sm);
+  min-width: 0;
+}
+.strip > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stripDown {
+  border-left-color: var(--x-fault);
+  color: var(--x-fault);
+}
+.stripLabel {
+  flex: none;
+  font-weight: 600;
+  color: var(--x-app-interaction);
+}
+.stripDown .stripLabel {
+  color: var(--x-fault);
+}
+
+/* 모니터 2 시뮬레이터: 트랙을 화면 높이에 맞춘다 (위 모드 띠·머리·제목 몫을 뺀 만큼) */
+.detailMain .simTrack {
+  height: calc(100vh - 260px);
+  min-height: 220px;
+}
+
+/* 시뮬레이터 1인칭 시점 위 겹침 (자율·수동 칸) */
+.povTop,
+.povBottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--x-space-2);
+}
+.povBottom {
+  justify-content: center;
+}
+.povTag {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--x-bg);
+  font-size: var(--x-text-sm);
+  font-weight: 700;
+}
+.povHud {
+  padding: 2px 8px;
+  border-radius: var(--x-radius-sm);
+  background: color-mix(in srgb, var(--x-surface-sunken) 75%, transparent);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.keysMini {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--x-space-1);
+  width: min(100%, 300px);
+  margin: 0 auto;
+}
+.keysMini .keyCap {
+  height: 30px;
+  font-size: var(--x-text-sm);
+  background: color-mix(in srgb, var(--x-surface-2) 85%, transparent);
+}
+.keysMini .keyCapOn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--x-bg);
+}
+/* 모니터 2 시뮬레이터 상세 (계약 v1.4 실제 서킷) */
+.simTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--x-text-base);
+}
+.simTable th,
+.simTable td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--x-border);
+  text-align: left;
+}
+.simTable th {
+  color: var(--x-text-muted);
+  font-weight: 600;
+}
+.simJudge {
+  display: grid;
+  gap: 4px;
+  padding: var(--x-space-3) var(--x-space-4);
+  border-left: 6px solid var(--x-app-autonomous);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+}
+.simJudge small {
+  color: var(--x-text-muted);
+}
+.simJudge strong {
+  font-size: var(--x-text-xl);
+}
+.warnText {
+  color: var(--x-warning, #f59e0b);
+  font-weight: 600;
+}
+/* 앱 칸 머리 오른쪽: 제어 중·대기 표시와 상태 배지를 한 줄로 */
+.headRight {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.headRight .activeTag,
+.headRight .standbyTag,
+.detailHead .activeTag {
+  align-self: center;
+}
