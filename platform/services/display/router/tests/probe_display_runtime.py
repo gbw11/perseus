@@ -86,7 +86,13 @@ async def run(args):
                 def __init__(self,s): pass
                 def start(self): pass
                 def stop(self): pass
-            driver=XenDriver(Xl(SshRunner("xenova-qemu-dom0",ssh=tuple(SSH[:3]))))
+            real_driver=XenDriver(Xl(SshRunner("xenova-qemu-dom0",ssh=tuple(SSH[:3]))))
+            class FaultDriver:
+                unavailable = False
+                def list_domains(self):
+                    if self.unavailable: raise ConnectionError("injected display query failure")
+                    return real_driver.list_domains()
+            driver=FaultDriver()
             feed=create_app(settings,driver=driver,mqtt_factory=NoMqtt,web_root=ROOT/"frontend/apps/vm-screens/dist")
             feed_server,feed_task,feed_port=await serve(feed)
             config=RuntimeConfig.model_validate({"backend":"virtual_x11","display":display,"feed_origin":f"http://127.0.0.1:{feed_port}",
@@ -166,6 +172,12 @@ async def run(args):
                 duration=time.monotonic()-started
                 evidence["virtual_measurement"]={k:{"fps":round((c.sequence-initial[k][0])/duration,2),
                     "mbps":round((c.bytes_total-initial[k][1])*8/duration/1e6,3)} for k,c in captures.items()}
+                if args.soak_seconds:
+                    from probe_display_resilience import exercise
+                    await exercise(kiosk, viewer, context, captures, driver, feed, args, evidence, wait)
+                    # A failed local window is replaced during the resilience checks.
+                    page1,page2=kiosk.pages["monitor-1"],kiosk.pages["monitor-2"]
+                    original_contexts={key:id(value) for key,value in kiosk.contexts.items()}
                 await stop(stream_server,stream_task);stream_server=None
                 await viewer.get_by_text("연결 끊김 · 아래는 마지막 수신 화면입니다.",exact=True).wait_for(timeout=10000)
                 assert original_contexts=={key:id(value) for key,value in kiosk.contexts.items()}
@@ -200,6 +212,9 @@ if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute",action="store_true")
     parser.add_argument("--output",type=Path,required=True)
+    parser.add_argument("--soak-seconds",type=int,default=0,
+                        help="Opt in to extended faults and continuous two-screen sampling (600 for acceptance)")
     args=parser.parse_args()
     if not args.execute: parser.error("--execute required; virtual lab only")
+    if args.soak_seconds < 0: parser.error("--soak-seconds must be nonnegative")
     asyncio.run(run(args))

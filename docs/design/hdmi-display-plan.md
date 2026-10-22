@@ -81,6 +81,6 @@ dom0 상태 정규화 ─ 표시 정책 ─ 렌더러/출력 실행기 ─ HDMI 
 
 1단계에서 문서 초안과 QEMU 환경 확인을 수행했고, 두 모니터의 기본 구성은 사용자 확인으로 확정했다. 이후 2단계에서 dom0 상태 수집기와 외부 REST/WS 중계를 구현했다([검증 결과](../verification/display-step2.md)). 제어 상태 발행 계약의 담당자 합의, 실보드 출력 스택과 전송 방식/성능 목표 확정은 남아 있다. 사용자 요청에 따라 2단계에서는 Jira를 변경하지 않았다.
 
-2026-10-22 3단계에서 로컬 표시 정책과 전체/상세 화면 렌더러를 구현했다([검증](../verification/display-step3.md)). 4단계에서는 X11 두 출력 실행기와 실제 픽셀 캡처·원격 수신을 구현하고 가상 화면에서 검증했다([검증](../verification/display-step4.md)). 실제 HDMI 두 모니터·실보드 이미지와 장시간 성능/복구 검증은 남아 있다.
+2026-10-22 3단계에서 로컬 표시 정책과 전체/상세 화면 렌더러를 구현했다([검증](../verification/display-step3.md)). 4단계에서는 X11 두 출력 실행기와 실제 픽셀 캡처·원격 수신을 구현하고 가상 화면에서 검증했다([검증](../verification/display-step4.md)). 5단계에서는 실제 QEMU 조회와 가상 X11 두 화면으로 장애 복구·600초 연속 전송·원격 디코드를 시험했다([결과](../verification/display-step5.md)). 통합 수락 15개, Python 44개와 프론트 표시/텔레메트리 22개 테스트를 통과했다. 실제 HDMI 두 모니터·실보드 이미지·별도 시연 PC/망·systemd 프로세스 재시작과 Pi 성능은 [실보드 수락 절차](../verification/display-hardware-acceptance.md)로 확인해야 한다.
 
 관련 문서: [데이터·전환 계약](../contracts/display-pipeline-v1.md), [환경 확인과 검증 계획](../verification/display-step1-environment.md). 기존 [화면 정의서](screen-spec.md)의 레이아웃은 참고하되 담당 경계와 VM 역할은 본 문서를 적용한다.
