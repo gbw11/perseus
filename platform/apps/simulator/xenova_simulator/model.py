@@ -8,10 +8,14 @@ from dataclasses import dataclass, field
 from .config import SimSettings
 
 
-@dataclass
+@dataclass(frozen=True)
 class Obstacle:
+    """장애물 가운데 위치(m)와 폭(m). id 는 sim.world·sim.command 에서 쓰는 이름 (계약 11장)."""
+
     x: float
     y: float
+    w: float = 0.2
+    id: str = ""
 
 
 @dataclass
@@ -27,18 +31,27 @@ class Vehicle:
     def reset(self) -> None:
         self.x = self.y = self.heading_rad = self.v_mps = self.steer_rad = 0.0
 
-    def place_obstacle_ahead(self, distance_m: float) -> Obstacle:
+    def place_obstacle_ahead(self, distance_m: float, obstacle_id: str = "") -> Obstacle:
         """현재 진행 방향으로 distance_m 앞에 장애물을 놓는다 (시연 명령 'o')."""
-        obstacle = Obstacle(self.x + distance_m * math.cos(self.heading_rad), self.y + distance_m * math.sin(self.heading_rad))
-        self.obstacles.append(obstacle)
+        obstacle = Obstacle(
+            self.x + distance_m * math.cos(self.heading_rad), self.y + distance_m * math.sin(self.heading_rad),
+            self.settings.obstacle_width_m, obstacle_id,
+        )
+        # 목록은 통째로 바꿔 끼운다: 물리 스레드가 도는 중에도 옛 목록을 끝까지 읽을 수 있다
+        self.obstacles = [*self.obstacles, obstacle]
         return obstacle
+
+    def push(self, dy_m: float) -> None:
+        """진행 방향 기준 옆으로 dy_m 옮긴다 (+ 왼쪽). 시연용 '차 밀기' (계약 11장 sim.command push)."""
+        self.x -= dy_m * math.sin(self.heading_rad)
+        self.y += dy_m * math.cos(self.heading_rad)
 
     def obstacle_ahead(self) -> bool:
         """전방 감지 범위 안에 장애물 가장자리가 들어왔는가."""
         s = self.settings
         for o in self.obstacles:
             dx, dy = o.x - self.x, o.y - self.y
-            gap = math.hypot(dx, dy) - s.obstacle_radius_m
+            gap = math.hypot(dx, dy) - o.w / 2
             if gap > s.sense_range_m:
                 continue
             bearing = math.atan2(dy, dx) - self.heading_rad

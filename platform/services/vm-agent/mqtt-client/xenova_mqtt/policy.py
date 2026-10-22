@@ -1,4 +1,4 @@
-"""메시지 type 별 QoS·retain·크기 기본값 (계약 1·3·5·6·7·8장 표).
+"""메시지 type 별 QoS·retain·크기 기본값 (계약 1·3·5·6·7·8·11장 표).
 
 같은 토픽에 QoS 가 다른 type 이 섞이므로(예: apps/autonomous/events 의 drive.command 0, perception.event 1)
 토픽이 아니라 type 으로 정한다.
@@ -49,6 +49,10 @@ POLICIES: dict[str, Policy] = {
     # 8장 지연 측정
     "probe.ping": Policy(qos=1),
     "probe.pong": Policy(qos=1),
+    # 11장 시뮬레이터 전용 (실차에는 없음)
+    "sim.pose": Policy(qos=0, driving=True),
+    "sim.world": Policy(qos=1, retain=True),
+    "sim.command": Policy(qos=1),
 }
 
 # 계약 표에 없는 type. 유실보다 중복이 낫다고 보고 QoS 1 로 둔다.
