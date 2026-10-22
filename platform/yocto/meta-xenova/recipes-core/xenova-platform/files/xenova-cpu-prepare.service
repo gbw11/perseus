@@ -1,0 +1,12 @@
+[Unit]
+Description=Prepare and verify Xenova dom0 hard CPU affinity for this boot
+Wants=xenova-first-boot.service xenova-xen-ready.service
+After=srv-xenova.mount xenova-first-boot.service xenova-xen-ready.service
+Before=xenova-vms.service
+RequiresMountsFor=/srv/xenova
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/xenova-vm cpu-host-prepare --execute --json
+TimeoutStartSec=30s
