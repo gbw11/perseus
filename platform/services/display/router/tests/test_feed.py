@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
-from xenova_display.config import Binding, FeedSettings
+from xenova_display.config import Binding, DISPLAY_DRIVE_TOPIC, DISPLAY_DRIVE_TYPE, FeedSettings
 from xenova_display.main import create_app
 from xenova_display.state import StateStore
 
@@ -120,10 +120,10 @@ def test_mqtt_disconnect_does_not_change_xen_state(store):
 
 
 def test_mode_and_active_vm_are_independent_and_retained_control_is_not_live(store):
-    control = message(kind="vehicle.control", mode="MANUAL", active_vm_id=VM1)
+    control = message(kind=DISPLAY_DRIVE_TYPE, mode="MANUAL", active_vm_id=VM1)
     control.pop("vm_id")
     control["source_id"] = "dom0-gateway"
-    topic = "xenova/v1/vehicle/control"
+    topic = DISPLAY_DRIVE_TOPIC
     assert not store.ingest(topic, control, retained=True)
     assert store.ingest(topic, control)
     assert store.snapshot()["drive"]["active_vm_id"] == VM1
@@ -175,6 +175,7 @@ def test_malformed_and_unregistered_sources_do_not_change_state(store):
     assert not store.ingest(f"xenova/v1/vms/{VM1}/command", command)
     env = message(state=["active"])
     assert not store.ingest("xenova/v1/apps/primary-drive/events", env)
-    env = message(kind="vehicle.control", mode=["AUTO"])
-    assert not store.ingest("xenova/v1/vehicle/control", env)
+    env = message(kind=DISPLAY_DRIVE_TYPE, mode=["AUTO"])
+    env.pop("vm_id"); env["source_id"]="dom0-gateway"
+    assert not store.ingest(DISPLAY_DRIVE_TOPIC, env)
     assert store.snapshot()["vms"][0]["app_state"] == "unknown"

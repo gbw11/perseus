@@ -1,6 +1,12 @@
 # Display pipeline v1 — 제안 계약
 
-2026-10-22 · S15P31E110-250 · 1단계 설계 + 2단계 상태 피드 + 3단계 로컬 화면 정책/렌더러 + 4단계 X11 실행기/원격 전송 구현. 실보드 HDMI 검증은 남아 있다.
+2026-10-22 · S15P31E110-250 · 1~4단계 구현 및 5단계 가상 통합 검증. 실보드 HDMI 검증은 남아 있다.
+
+## 계약 확정 상태
+
+현재 구현·검증 사실과 팀/사용자가 확정할 항목을 [250 결정 기록](display-250-decisions.md)에 구분한다. 가상 시험은 [5단계 결과](../verification/display-step5.md)를 따른다. 아래 단계별 설명은 해당 단계의 이력이며 최신 출력 실행 구현은 4단계 설명을 우선한다.
+
+사용자 선택으로 기존 `vehicle/control`의 변경 시 발행/retain 규칙과 표시 상태 보고를 분리했다. 표시기는 `xenova/v1/display/drive-state`, `type=display.drive_state`의 1초 주기 비-retained 보고만 받으며 기존 차량 제어 메시지를 구독하지 않는다. [연결 규격](display-drive-state-v1.md)에 수신 구현과 팀원 합의 대기를 구분한다. 기존 제어 발행자·주행 명령·공용 MQTT 계약·실제 브로커 ACL은 변경하지 않았다.
 
 ## 4단계 구현 현황
 
@@ -14,7 +20,7 @@ X11 connector/EDID/좌표 매핑과 두 Chromium 창의 실행·세션 갱신을
 
 별도 dom0 표시 수집기에 presentation/selection 및 화면 세션·DOM ACK API를 추가했다. 화면은 `/display/monitor-1`, `/display/monitor-2`이며 외부 대시보드 라우팅과 무관하다. 로컬 화면은 수집기에 직접 연결한다. [실제 API·인증 규격](../../platform/services/display/router/README.md#3단계-로컬-화면-렌더링)과 [검증 기록](../verification/display-step3.md)을 참고한다.
 
-현재 선택 API는 고정된 전체/상세 구성에서 모니터 2의 pinned/follow_active를 변경한다. 아래 `display.desired` JSON 메시지 전체를 입력받는 범용 배치 API는 아직 아니다. `renderer_ack.stage=dom_rendered`는 현재 내용의 DOM 렌더 확인이며 3초간 갱신이 없으면 만료된다. 물리 `applied_revision`과 커넥터 `ready/disconnected` 보고는 아직 구현하지 않았다.
+현재 선택 API는 고정된 전체/상세 구성에서 모니터 2의 pinned/follow_active를 변경한다. 아래 `display.desired` JSON 메시지 전체를 입력받는 범용 배치 API는 아직 아니다. `renderer_ack.stage=dom_rendered`는 현재 내용의 DOM 렌더 확인이며 3초간 갱신이 없으면 만료된다. 3단계 당시 없던 출력 실행 관측은 4단계에서 별도 runtime JSON으로 추가했다.
 
 ## 2단계 구현 현황
 
@@ -43,15 +49,15 @@ X11 connector/EDID/좌표 매핑과 두 Chromium 창의 실행·세션 갱신을
 | --- | --- |
 | `schema_version` | `1`. 지원하지 않는 버전은 적용하지 않고 오류 기록 |
 | `vm_id`, `role` | 등록된 UUID, `primary_drive` / `backup_drive` / `interaction`. domain ID는 영구 식별자로 사용하지 않음 |
-| `run_id` | 수집기가 Xen 실행 세대를 식별한 값. 재부팅/재생성 시 변경, 확인 전 `null` |
+| `run_id` | 현행 구현은 수집기 epoch + 관측 domid. 미실행은 `null`. 빠른 재부팅/동일 domid 재사용까지 구분하는 완전한 부팅 세대 증명은 아님 |
 | `source_id`, `source_epoch`, `sequence` | 발행자·재시작 세대·세대 내 증가 번호. 소스별 중복/역순 폐기. 다른 소스 sequence를 비교하지 않음 |
 | `xen_state` | 기존 값 `running`, `stopping`, `paused`, `crashed`, `stopped`, 미확인 시 `null` |
 | `operation` | 시작/복구 등의 별도 작업 ID·상태, 없으면 `null`. Xen 상태 enum과 혼합하지 않음 |
 | `os` | 기대 OS, 관측 OS, 근거 종류/시각, 일치 여부. 설정상의 기대 OS를 검증 완료로 표시하지 않음 |
-| `app_state` | `unknown`, `starting`, `ready`, `failed`. 관측 근거 필요 |
+| `app_state` | 현재 구현은 `unknown`, `ready`, `failed`. `starting`은 확장안이며 아직 반환하지 않음. 관측 근거 필요 |
 | `sources` | 소스별 `observed_at`, dom0 `received_at`, 경과 시간, `fresh/stale/disconnected/unknown` |
 | `screen_source` | `none/status/graphics`, 사용 가능한 렌더/캡처 핸들. 임의 URL/셸 명령을 실행하지 않음 |
-| `drive` | 별도 권위 소스의 `active_vm_id`, `mode(AUTO/MANUAL/unknown)`, `ai_status`. 각 값에 freshness 포함 |
+| `drive` | 별도 권위 소스의 `active_vm_id`, `mode(AUTO/MANUAL/SAFE_STOP/AUTO_READY/unknown)`, `ai_status`. `source`의 freshness로 확인된 값만 노출. AI 보고 연결 전 `ai_status=unknown` |
 
 Xen 상태, Agent 상태, 앱 상태, 주행 상태의 freshness는 독립적이다. Agent 미구현인 Zephyr를 heartbeat 부재만으로 장애로 단정하지 않는다. 기존 OS evidence 보고 API의 출처·관측/수신 시각을 재사용할 수 있으나 구형 3종 Linux 구성을 강요하지 않는다.
 
@@ -59,9 +65,11 @@ Xen 상태, Agent 상태, 앱 상태, 주행 상태의 freshness는 독립적이
 
 ## 두 출력의 선택과 적용 확인
 
-설치 매핑은 논리 `output_id` (`monitor-1`, `monitor-2`)와 실제 DRM connector·EDID 식별 정보·모드를 연결한다. 실제 번호는 보드 확인 후 기록한다. 장치 재연결 시 검증된 매핑을 재사용하고 모호하면 수동 재매핑한다.
+현행 X11 설치 매핑은 논리 `output_id` (`monitor-1`, `monitor-2`)와 XRandR connector 이름·EDID SHA256·해상도·좌표를 연결한다. DRM sysfs 이름은 보조 근거이며 XRandR 이름과 같다고 가정하지 않는다. 실제 번호는 보드 확인 후 기록한다. 장치 재연결 시 검증된 매핑을 재사용하고 모호하면 수동 재매핑한다.
 
-정책 요청 예:
+아래는 범용 배치의 확장안이며 현행 API 요청 본문이 아니다. 현행 `POST /api/v1/display/selection`은 `policy_epoch`, `revision`, `selection`, 선택적인 `vm_id`만 받는다. 실제 호출 규격은 README를 따른다.
+
+확장안 정책 요청 예:
 
 ```json
 {
