@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xenova-perception"
+version = "0.1.0"
+description = "Xenova 젯슨 대역 인식: 웹캠·영상·합성 시나리오 → perception.result 15 Hz (S15P31E110-156)"
+requires-python = ">=3.11"
+# xenova_mqtt 는 같은 저장소의 platform/services/vm-agent/mqtt-client 라 여기 선언하지 않는다 (수동 앱·시뮬레이터와 같은 방식)
+dependencies = [
+    "paho-mqtt>=1.6,<3",
+]
+
+[project.optional-dependencies]
+# webcam·video 입력과 --show 에만 필요하다. synthetic 과 테스트는 OpenCV 없이 돈다
+camera = [
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+]
+test = [
+    "pytest>=7",
+]
+
+[tool.setuptools.packages.find]
+include = ["xenova_perception*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "../../services/vm-agent/mqtt-client"]
+addopts = "-q"

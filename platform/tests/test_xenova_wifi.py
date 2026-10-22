@@ -1,6 +1,7 @@
 """Wi-Fi 비밀 입력·영구 설정·주소 진단·실제 systemd 그래프 회귀. 무선 연결 성공 증거는 아니다."""
 import io
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -28,7 +29,9 @@ class WifiTest(unittest.TestCase):
         self.assertNotIn('Synthetic',path.read_text())
         self.assertNotIn('fixture-password',json.dumps(result))
         self.assertEqual(path.read_text(),wifi.settings('Synthetic " lab','fixture-password','KR'))
+        self.assertIn('\ndisable_scan_offload=1\n',path.read_text())
         self.assertIn('Type=wlan',(self.root/'etc/systemd/network/25-xenova-wifi.network').read_text())
+        self.assertIn('RequiredForOnline=routable',(self.root/'etc/systemd/network/25-xenova-wifi.network').read_text())
         self.assertNotIn('xenbr0',(self.root/'etc/systemd/network/25-xenova-wifi.network').read_text())
 
     def test_invalid_input_rejected_before_existing_configuration_changes(self):
@@ -75,6 +78,12 @@ class WifiTest(unittest.TestCase):
     def test_real_dom0_units_keep_ssh_key_order_and_vm_boot_independent_of_wifi(self):
         root=self.root/'graph';root.mkdir();extract(root);install_policy(root,replay_recipe=True)
         executable=root/'usr/sbin/wpa_supplicant';executable.write_text('#!/bin/sh\nexit 0\n');executable.chmod(0o755)
+        enabled=subprocess.run(['systemctl','--root='+str(root),'enable','xenova-wifi@wlan0.service'],
+                               capture_output=True,text=True)
+        self.assertEqual(enabled.returncode,0,enabled.stderr)
+        link=root/'etc/systemd/system/multi-user.target.wants/xenova-wifi@wlan0.service'
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.readlink().name,'xenova-wifi@.service')
         result=verify(root,'sshd.service','xenova-vms.service','xenova-wifi@wlan0.service')
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertNotRegex(result.stderr,r'(?i)ordering cycle|job .*deleted|skipping .*cycle')
@@ -89,9 +98,34 @@ class WifiTest(unittest.TestCase):
             self.assertTrue((root/'usr/lib/xenova'/(module+'.py')).is_file())
         self.assertTrue((root/'usr/sbin/xenova-wifi').stat().st_mode&0o111)
         self.assertTrue((root/'usr/lib/systemd/system/xenova-wifi@.service').is_file())
+        policy=root/'etc/modprobe.d/xenova-wifi.conf'
+        self.assertEqual(policy.read_bytes(),(FILES/'xenova-wifi-modprobe.conf').read_bytes())
+        self.assertEqual(policy.stat().st_mode&0o777,0o644)
+        self.assertIn('options brcmfmac feature_disable=0x2000',policy.read_text().splitlines())
         recipe=(FILES.parent/'xenova-platform_1.0.bb').read_text()
-        for package in ('python3-ctypes','python3-unixadmin','wpa-supplicant-cli','wireless-regdb-static','linux-firmware-bcm43455'):
+        for package in ('python3-ctypes','python3-unixadmin','wpa-supplicant-cli','wireless-regdb-static','linux-firmware-bcm43455','kernel-module-brcmfmac-cyw'):
             self.assertIn(package,recipe)
+
+    def test_image_missing_base_or_vendor_module_is_rejected_by_assembler(self):
+        for name in ('brcmfmac.ko.xz','cyw/brcmfmac-cyw.ko.xz'):
+            with self.subTest(module=name):
+                root=platform_root(self.root/name.replace('/','-'))
+                module=root/'usr/lib/modules/6.18.33-v8/kernel/drivers/net/wireless/broadcom/brcm80211/brcmfmac'/name
+                module.unlink()
+                with self.assertRaisesRegex(ValueError,'required management wireless kernel module missing'):
+                    assemble.platform_root_ok(root)
+
+    def test_missing_or_changed_driver_policy_is_rejected_by_assembler(self):
+        for changed in (False,True):
+            with self.subTest(changed=changed):
+                root=platform_root(self.root/str(changed))
+                policy=root/'etc/modprobe.d/xenova-wifi.conf'
+                if changed:
+                    policy.write_text('options brcmfmac feature_disable=0\n')
+                else:
+                    policy.unlink()
+                with self.assertRaisesRegex(ValueError,'source/installed contract mismatch'):
+                    assemble.platform_root_ok(root)
 
     def test_old_image_missing_management_code_is_rejected_by_assembler(self):
         root=platform_root(self.root/'platform')

@@ -2,10 +2,11 @@
 #
 # 계정 이름 규칙: username = 토픽 안의 id
 #   VM 에이전트 = vm_id, 앱 VM = app_id(autonomous·manual·message-board), 젯슨 = perception
+#   Zephyr 앱은 dom0 vchan 중계가 그 앱의 app_id 계정으로 대신 접속한다 (계약 4.1)
 # pattern 줄은 모든 계정에 적용되고 %u 는 접속한 username 으로 바뀐다.
 # user 아래 topic 줄은 그 계정에만 적용된다.
 
-# 읽기: 개발 단계는 계약 토픽 전체를 모든 계정에 연다. 계정별 구독 제한은 계약 v1.1 에서 정한다.
+# 읽기: 개발 단계는 계약 토픽 전체를 모든 계정에 연다. 계정별 구독 제한은 계약 다음 개정(v1.2)에서 정한다.
 pattern read xenova/v1/#
 
 # VM 에이전트 (username = vm_id): 자기 vm_id 토픽에만 보고
@@ -24,9 +25,8 @@ user backend
 topic write xenova/v1/apps/manual/input
 topic write xenova/v1/vms/+/command
 
+# 게이트웨이: ESP32 는 MQTT 에 붙지 않고 게이트웨이 시리얼 뒤에 있다 (계약 v1.1). vehicle/status 도 게이트웨이가 낸다.
 user gateway
 topic write xenova/v1/vehicle/control
-topic write xenova/v1/apps/vehicle/events
-
-user esp32
 topic write xenova/v1/vehicle/status
+topic write xenova/v1/apps/vehicle/events

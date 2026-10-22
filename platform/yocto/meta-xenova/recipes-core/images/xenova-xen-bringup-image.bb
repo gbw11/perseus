@@ -4,7 +4,7 @@ require recipes-extended/images/xen-image-minimal.bb
 SUMMARY = "Xenova Raspberry Pi 4 Xen minimal bring-up image"
 DESCRIPTION = "xen-image-minimal plus diagnostic tools, isolated bridge/DHCP and a small preloaded Arm64 domU"
 
-IMAGE_INSTALL:append = " xenova-platform xenova-bringup xenova-dom0-manager xenova-mqtt-client iproute2 bridge-utils dnsmasq kmod iputils-ping"
+IMAGE_INSTALL:append = " xenova-platform xenova-bringup xenova-dom0-manager xenova-mqtt-client iproute2 bridge-utils dnsmasq kmod iputils-ping tzdata-asia"
 
 # BSP의 DEPLOYPAYLOAD는 rpi-sdimg 전용이다. WIC에도 boot.scr이 읽는 xen을 넣는다.
 IMAGE_BOOT_FILES:append = " xen-${MACHINE};xen"
@@ -60,4 +60,14 @@ xenova_install_guest_test_assets() {
     else
         bbwarn "systemd serial-getty@.service was not installed; hvc0 login still needs checking"
     fi
+}
+
+# 표시 시간대만 설정한다. UTC 시각 보정은 timesyncd가 별도로 수행한다.
+ROOTFS_POSTPROCESS_COMMAND:append = " xenova_set_timezone; "
+xenova_set_timezone() {
+    zone="${IMAGE_ROOTFS}${datadir}/zoneinfo/Asia/Seoul"
+    [ -f "$zone" ] || bbfatal "Missing Asia/Seoul timezone data"
+    install -d "${IMAGE_ROOTFS}${sysconfdir}"
+    ln -snf "${datadir}/zoneinfo/Asia/Seoul" "${IMAGE_ROOTFS}${sysconfdir}/localtime"
+    printf 'Asia/Seoul\n' > "${IMAGE_ROOTFS}${sysconfdir}/timezone"
 }

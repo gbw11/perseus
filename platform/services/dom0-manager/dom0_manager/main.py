@@ -8,9 +8,10 @@ from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 from . import __version__
-from .api import health, vms
+from .api import console, health, vms
 from .api.errors import install_error_handlers
 from .config import Settings
+from .console import ConsoleSession
 from .drivers import build_driver, build_provisioner
 from .drivers.base import Driver, Provisioner
 from .service import VmService
@@ -37,9 +38,11 @@ def create_app(
     app.state.settings = settings
     app.state.driver = driver
     app.state.service = VmService(driver, provisioner, settings)
+    app.state.console_factory = ConsoleSession
 
     app.include_router(health.router)
     app.include_router(vms.router, prefix="/api/v1")
+    app.include_router(console.router, prefix="/api/v1")
     install_error_handlers(app)
     if settings.service_token:
         _install_bearer_auth(app, settings.service_token)
