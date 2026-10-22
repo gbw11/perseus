@@ -4,17 +4,17 @@
     {
       "guest_kind": "linux",
       "id": "ubuntu-24.04-20260926",
-      "version": "1.0.1",
-      "directory": "linux/ubuntu-24.04-20260926/1.0.1",
-      "manifest_sha256": "54db741c83c0e01abdacc5308cef2c4ad0d150d8a402bb0968012d908fec938e",
+      "version": "1.0.2",
+      "directory": "linux/ubuntu-24.04-20260926/1.0.2",
+      "manifest_sha256": "ea568bb4ca659bf25c5e7dd493e77840916f595fe63710b4046bd63906b2b3c8",
       "template_id": "ubuntu-24.04-arm64"
     },
     {
       "guest_kind": "linux",
       "id": "debian-13-20261015",
-      "version": "1.0.1",
-      "directory": "linux/debian-13-20261015/1.0.1",
-      "manifest_sha256": "81539dfee4d9ddd16e433912e35d95689a6816f9d6db16b2f1c1456c45152352",
+      "version": "1.0.2",
+      "directory": "linux/debian-13-20261015/1.0.2",
+      "manifest_sha256": "efe60d0d9961c5bb15182fbe22e99d8631f23c570de13ae418adb79d68adccb3",
       "template_id": "debian-13-arm64"
     },
     {

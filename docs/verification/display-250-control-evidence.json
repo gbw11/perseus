@@ -1,0 +1,13 @@
+{
+  "scope": "real loopback broker and HTTP/WS; synthetic controller/Xen; not physical board or production ACL",
+  "cases": [
+    "retained_bootstrap_is_not_live",
+    "legacy_vehicle_control_is_ignored",
+    "one_second_unchanged_reports_keep_rest_live_with_increasing_seq",
+    "same_confirmed_drive_state_reaches_authenticated_websocket",
+    "duplicate_does_not_refresh_and_three_second_silence_expires",
+    "fresh_backup_report_changes_detail_only_after_explicit_follow_active"
+  ],
+  "passed": true,
+  "completed_at": "2026-10-22T02:55:48.829503+00:00"
+}

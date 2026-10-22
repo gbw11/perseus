@@ -1,6 +1,6 @@
 """게스트 rootfs 에 에이전트를 설치한다.
 
-플랫폼의 Linux 템플릿 준비(platform/guests/common/prepare_rootfs.py)에서 부르거나 손으로 쓴다. 이 저장소의 두 패키지를 복사하고
+플랫폼의 Linux 템플릿 준비(platform/guests/common/guest_agent_template.py)에서 부르거나 손으로 쓴다. 이 저장소의 두 패키지를 복사하고
 systemd 유닛을 넣어 enable 한다. python3 와 python3-paho-mqtt 는 템플릿 준비가 apt 로 먼저 설치한다. 여기서는 설치 전에 paho 가
 rootfs 에 있는지 확인하고, 없으면 아무것도 설치하지 않는다 (실행 못 하는 서비스를 enable 해 두지 않는다).
 
