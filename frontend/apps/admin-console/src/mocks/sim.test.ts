@@ -11,6 +11,7 @@ import {
   type SimState,
 } from './sim';
 import { atT } from './simEngine';
+import { TRACKS } from './tracks';
 
 /** 출발 신호가 다 꺼질 때까지 (최대 0.7 + 4 + 3 초) 기다린 뒤 시각 */
 const GO_AT = 8000;
@@ -56,6 +57,15 @@ describe('시뮬레이터 mock (계약 v1.4 §11)', () => {
   it('장애물을 피해 한 바퀴를 닿지 않고 돈다', () => {
     let { s, t } = run(initialSim(0), 0, GO_AT, 'autonomous');
     for (; s.race.lap < 1 && t < 120_000; t += 100) s = advance(s, t, 0.1, 'autonomous');
+    expect(s.race.lap).toBe(1);
+    expect(s.car.touchAt).toBe(-9);
+    expect(s.car.wallAt).toBe(-9);
+  });
+
+  it.each(TRACKS.map((t) => [t.id]))('%s: 처음 장애물을 두고 한 바퀴를 벽·장애물에 닿지 않고 돈다', (id) => {
+    let { s, t } = run(initialSim(0, id), 0, GO_AT, 'autonomous');
+    expect(s.obstacles.length).toBeGreaterThan(0);
+    for (; s.race.lap < 1 && t < 200_000; t += 100) s = advance(s, t, 0.1, 'autonomous');
     expect(s.race.lap).toBe(1);
     expect(s.car.touchAt).toBe(-9);
     expect(s.car.wallAt).toBe(-9);

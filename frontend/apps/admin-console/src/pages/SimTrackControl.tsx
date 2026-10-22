@@ -27,6 +27,7 @@ import {
   type SimCommandResult,
 } from '../api/sim';
 import { useDrive } from '../layout/DriveContext';
+import { SimTrackSelect } from './SimTrackSelect';
 import styles from './pages.module.css';
 
 const KINDS: { kind: ObstacleKind; name: string; w: number }[] = [
@@ -115,18 +116,11 @@ export function SimTrackControl() {
     <Card
       title={<span style={{ color: 'var(--x-app-simulator)' }}>트랙 조작 — 시뮬레이터</span>}
       actions={
-        <span className={styles.simTracks}>
-          {(world.tracks ?? []).map((tr) => (
-            <Button
-              key={tr.id}
-              size="sm"
-              variant={tr.id === g.track.id ? 'primary' : 'secondary'}
-              onClick={() => void selectSimTrack(tr.id).catch(fail)}
-            >
-              {tr.name.split(' ')[0]} {(tr.real_m / 1000).toFixed(3)} km
-            </Button>
-          ))}
-        </span>
+        <SimTrackSelect
+          tracks={world.tracks ?? []}
+          current={g.track.id}
+          onPick={(id) => void selectSimTrack(id).catch(fail)}
+        />
       }
     >
       <div className={styles.simControl}>

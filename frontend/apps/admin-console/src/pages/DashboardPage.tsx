@@ -2,10 +2,11 @@ import {
   Button,
   CameraView,
   Card,
+  circuitOf,
+  DriverView,
   fmtLap,
   isCircuit,
   kmh,
-  circuitOf,
   StatusBadge,
   TrackView,
   useToast,
@@ -34,6 +35,7 @@ import {
   type AppId,
 } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
+import { SimTrackSelect } from './SimTrackSelect';
 import styles from './pages.module.css';
 
 const MOCK = import.meta.env.VITE_MOCK === 'true';
@@ -103,7 +105,7 @@ export function DashboardPage() {
           app === 'message-board' && sim.available ? (
             <SimCard key="simulator" sim={sim} drive={drive} board={vmOf(app, vms.data?.items, drive)} />
           ) : (
-            <AppCard key={app} app={app} vm={vmOf(app, vms.data?.items, drive)} drive={drive} />
+            <AppCard key={app} app={app} vm={vmOf(app, vms.data?.items, drive)} drive={drive} sim={sim} />
           ),
         )}
       </div>
@@ -207,13 +209,29 @@ export function DashboardPage() {
   );
 }
 
-function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: DriveState | null }) {
+function AppCard({
+  app,
+  vm,
+  drive,
+  sim,
+}: {
+  app: AppId;
+  vm: Vm | undefined;
+  drive: DriveState | null;
+  sim: SimView;
+}) {
   const role = ROLES[app];
   const state = drive?.apps[app];
   const health = appHealth(role, vm, state);
   const control = controlLabel(role, drive);
   const active = drive?.control?.active_app === app;
   const command = state?.last_command;
+  // 시뮬레이터 구성(계약 v1.4 실제 서킷)이면 모니터와 같은 차 1인칭을 카드에도 (자율 = 인식 박스)
+  const circuit =
+    sim.available && sim.world && isCircuit(sim.world.track) ? circuitOf(sim.world.track) : null;
+  const pov = circuit && sim.pose && sim.world && (app === 'autonomous' || app === 'manual');
+  const speed = (v: number | null) =>
+    circuit ? `${Math.abs(kmh(circuit, v ?? 0)).toFixed(0)} km/h` : `${plain(v)} m/s`;
   return (
     <Card
       className={styles.appCard}
@@ -230,6 +248,24 @@ function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: Dr
       {control && (
         <div className={[styles.controlBar, active ? styles.controlOn : ''].join(' ')}>{control}</div>
       )}
+      {pov && (
+        <DriverView
+          pose={sim.pose}
+          world={sim.world}
+          boxes={app === 'autonomous'}
+          dimmed={!active}
+          quality="low"
+          label={`${role.title} — 시뮬레이터 1인칭`}
+          overlay={
+            <div className={styles.povTop}>
+              <span className={styles.povTag} style={{ background: role.color }}>
+                {active ? '▶ 운전 중' : '대기'}
+              </span>
+              <span className={styles.povHud}>{speed(sim.pose?.v_mps ?? 0)}</span>
+            </div>
+          }
+        />
+      )}
       {role.driving ? (
         <div className={styles.rows}>
           <div>
@@ -241,7 +277,7 @@ function AppCard({ app, vm, drive }: { app: AppId; vm: Vm | undefined; drive: Dr
           </div>
           <div>
             <span>마지막 명령</span>
-            <span>{command ? `${plain(command.v_mps)} m/s · ${signed(command.steer_rad)} rad` : '—'}</span>
+            <span>{command ? `${speed(command.v_mps)} · ${signed(command.steer_rad)} rad` : '—'}</span>
           </div>
           <div>
             <span>app.heartbeat</span>
@@ -366,18 +402,11 @@ function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null
           <>
             <div>
               <span>트랙</span>
-              <span className={styles.simTracks}>
-                {(sim.world.tracks ?? []).map((tr) => (
-                  <Button
-                    key={tr.id}
-                    size="sm"
-                    variant={tr.id === circuit.track.id ? 'primary' : 'secondary'}
-                    onClick={() => void act(selectSimTrack(tr.id))}
-                  >
-                    {tr.name.split(' ')[0]} {(tr.real_m / 1000).toFixed(3)} km
-                  </Button>
-                ))}
-              </span>
+              <SimTrackSelect
+                tracks={sim.world.tracks ?? []}
+                current={circuit.track.id}
+                onPick={(id) => void act(selectSimTrack(id))}
+              />
             </div>
             <div>
               <span>속도 · 랩</span>

@@ -565,3 +565,36 @@ button.chip:hover:not(.chipOn) {
 .simList li > span:nth-child(2) {
   flex: 1;
 }
+/* 대시보드 자율·수동 카드의 1인칭 (시뮬레이터 구성) 위 글자 */
+.povTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.povTag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--x-bg, #0f141b);
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+}
+.povHud {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgb(9 14 22 / 70%);
+  color: #dee2ed;
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+}
+/* 트랙 고르기 상자 (시뮬레이터, 트랙 10개) */
+.trackSelect {
+  max-width: 78%;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  color: var(--x-text);
+  font: inherit;
+  font-size: var(--x-text-sm);
+}
