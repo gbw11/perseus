@@ -84,6 +84,10 @@ xenova:
     reconnect-interval: ${MQTT_RECONNECT_INTERVAL:5s}
   websocket:
     allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS:*}
+  display:
+    enabled: ${DISPLAY_FEED_ENABLED:false}
+    base-url: ${DISPLAY_FEED_BASE_URL:http://127.0.0.1:8082}
+    service-token: ${DISPLAY_FEED_SERVICE_TOKEN:}
   dom0-manager:
     base-url: ${DOM0_MANAGER_BASE_URL:http://127.0.0.1:8081}
     service-token: ${DOM0_MANAGER_SERVICE_TOKEN:}

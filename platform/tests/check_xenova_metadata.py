@@ -136,10 +136,21 @@ print('PASS Xenova PN/SRC_URI/image dependencies, single SSH service mode and ne
 _, api = load('xenova-dom0-manager')
 _, mqtt = load('xenova-mqtt-client')
 assert {'xenova-dom0-manager', 'xenova-mqtt-client'} <= set(image['IMAGE_INSTALL'].split())
-assert {'python3-fastapi', 'python3-uvicorn', 'python3-netclient', 'python3-shell', 'xenova-platform'} <= set(api['RDEPENDS:xenova-dom0-manager'].split())
+assert {'python3-fastapi', 'python3-uvicorn', 'python3-websockets', 'python3-terminal', 'python3-netclient', 'python3-shell', 'python3-datetime', 'xenova-platform', 'xen-tools-xenstat', 'xenova-mqtt-client'} <= set(api['RDEPENDS:xenova-dom0-manager'].split())
 assert 'python3-paho-mqtt' in mqtt['RDEPENDS:xenova-mqtt-client'].split()
 assert api['SYSTEMD_SERVICE:xenova-dom0-manager'] == 'xenova-dom0-manager.service'
 assert api['SYSTEMD_AUTO_ENABLE:xenova-dom0-manager'] == 'enable'
 assert selected(api, 'dom0_manager', directory=True).resolve() == ROOT/'platform/services/dom0-manager/dom0_manager'
 assert selected(mqtt, 'xenova_mqtt', directory=True).resolve() == ROOT/'platform/services/vm-agent/mqtt-client/xenova_mqtt'
 print('PASS FastAPI/uvicorn/platform driver and MQTT recipe/source/runtime connection')
+
+
+# SSH로 통계/감시기 시험 소스를 옮길 때 필요한 runtime과 broker 도구를 미리 설치한다.
+assert 'xen-tools-xenstat' in xen['PACKAGES'].split()
+assert '/usr/sbin/xentop' in xen['FILES:xen-tools-xenstat'].split()
+_, broker = load('mosquitto')
+assert {'mosquitto', 'mosquitto-clients'} <= set(image['IMAGE_INSTALL'].split())
+assert broker['SYSTEMD_SERVICE:mosquitto'] == 'mosquitto.service'
+assert broker['SYSTEMD_AUTO_ENABLE:mosquitto'] == 'disable'
+assert {'/usr/bin/mosquitto_pub', '/usr/bin/mosquitto_sub', '/usr/bin/mosquitto_rr'} <= set(broker['FILES:mosquitto-clients'].split())
+print('PASS xentop/MQTT runtime packages and broker tools; broker activation remains explicit')

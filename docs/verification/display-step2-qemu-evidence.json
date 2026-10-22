@@ -1,0 +1,190 @@
+{
+  "scope": "real QEMU domU -> MQTT/SSH test transport -> real dom0 feed -> Spring REST/WS; no HDMI",
+  "before": {
+    "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6": 13,
+    "820a0522-243f-42f1-90e9-9b74e1522965": 17,
+    "dd33284f-baf2-417f-93b2-a1af3c3f1ea2": 18
+  },
+  "cases": [
+    "real_xen_three_domains_running",
+    "no_invented_guest_readiness_or_os_evidence",
+    "real_debian_guest_heartbeat_and_os_inventory_over_mqtt",
+    "spring_jwt_rest_real_dom0_snapshot_and_credential_separation",
+    "spring_jwt_websocket_real_dom0_snapshot",
+    "mqtt_disconnect_preserves_local_xen_state_with_explicit_source_failure",
+    "all_vm_domain_ids_unchanged"
+  ],
+  "guest_app_telemetry": "not implemented in Zephyr Starter",
+  "snapshot": {
+    "schema_version": 1,
+    "type": "display.state",
+    "source_epoch": "b149c7b8-1fb0-4582-87ed-d2d93ce08f21",
+    "sequence": 7,
+    "generated_at": "2026-10-20T01:53:55.135+00:00",
+    "mqtt_connected": true,
+    "vms": [
+      {
+        "vm_id": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2",
+        "role": "primary_drive",
+        "app_id": "primary-drive",
+        "run_id": "b149c7b8-1fb0-4582-87ed-d2d93ce08f21:18",
+        "guest_boot_id": null,
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "zephyr",
+          "observed": null,
+          "match": null,
+          "evidence": null,
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": false,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-20T01:53:54.133+00:00",
+            "observed_at": null,
+            "age_ms": 995,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null
+          },
+          "agent": {
+            "status": "unknown",
+            "age_ms": null
+          },
+          "inventory": {
+            "status": "unknown",
+            "age_ms": null
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      },
+      {
+        "vm_id": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "role": "backup_drive",
+        "app_id": "backup-drive",
+        "run_id": "b149c7b8-1fb0-4582-87ed-d2d93ce08f21:17",
+        "guest_boot_id": null,
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "zephyr",
+          "observed": null,
+          "match": null,
+          "evidence": null,
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": false,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-20T01:53:54.133+00:00",
+            "observed_at": null,
+            "age_ms": 995,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null
+          },
+          "agent": {
+            "status": "unknown",
+            "age_ms": null
+          },
+          "inventory": {
+            "status": "unknown",
+            "age_ms": null
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      },
+      {
+        "vm_id": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+        "role": "interaction",
+        "app_id": "message-board",
+        "run_id": "b149c7b8-1fb0-4582-87ed-d2d93ce08f21:13",
+        "guest_boot_id": "41f5e025-8471-46d0-9289-fdfa20155c2e",
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "debian",
+          "observed": "debian",
+          "match": true,
+          "evidence": "agent.inventory",
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": true,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-20T01:53:54.133+00:00",
+            "observed_at": null,
+            "age_ms": 995,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null
+          },
+          "agent": {
+            "received_at": "2026-10-20T01:53:55.070+00:00",
+            "observed_at": "2026-10-20T01:53:45.427032+00:00",
+            "source_id": "xenova/v1/vms/33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6/heartbeat",
+            "source_epoch": [
+              "41f5e025-8471-46d0-9289-fdfa20155c2e",
+              "190075c2-7d7c-45e5-888f-c31f10c7aeaa"
+            ],
+            "sequence": 1,
+            "retained": false,
+            "age_ms": 63,
+            "status": "fresh"
+          },
+          "inventory": {
+            "received_at": "2026-10-20T01:53:55.112+00:00",
+            "observed_at": "2026-10-20T01:53:45.435851+00:00",
+            "source_id": "xenova/v1/vms/33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6/inventory",
+            "source_epoch": [
+              "41f5e025-8471-46d0-9289-fdfa20155c2e",
+              "190075c2-7d7c-45e5-888f-c31f10c7aeaa"
+            ],
+            "sequence": 1,
+            "retained": false,
+            "age_ms": 22,
+            "status": "fresh"
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      }
+    ],
+    "drive": {
+      "active_vm_id": null,
+      "mode": "unknown",
+      "ai_status": "unknown",
+      "source": {
+        "status": "unknown",
+        "age_ms": null
+      }
+    }
+  },
+  "after": {
+    "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6": 13,
+    "820a0522-243f-42f1-90e9-9b74e1522965": 17,
+    "dd33284f-baf2-417f-93b2-a1af3c3f1ea2": 18
+  },
+  "passed": true
+}
