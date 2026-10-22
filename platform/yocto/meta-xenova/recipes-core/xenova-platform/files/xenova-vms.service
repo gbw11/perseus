@@ -1,7 +1,8 @@
 [Unit]
+Wants=xenova-cpu-prepare.service
 Description=Start registered Xenova VMs once (OS/app readiness is separate)
 Requires=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenova-vm-shutdown.service
-After=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenova-vm-shutdown.service
+After=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenova-vm-shutdown.service xenova-cpu-prepare.service
 RequiresMountsFor=/srv/xenova
 
 [Service]

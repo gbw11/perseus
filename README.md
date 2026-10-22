@@ -59,3 +59,5 @@ Perseus 소스·이미지·실보드의 역사적 기록입니다. 기존 로그
 
 - [플랫폼 실행 의도·조건부 복구·종료 조율](docs/build-guides/xenova-recovery-foundation.md)
 - [Linux 자원·부팅 정책·Zephyr 네트워크/종료](platform/docs/resource-boot-zephyr.md)
+
+- [정적 CPU 배치·CLI/Manager 연동 계약](docs/platform/cpu-layout.md)

@@ -62,6 +62,25 @@ class ManagementTest(unittest.TestCase):
 
         self.key=management.internal_name(self.spec['vm_id'])
 
+    def test_starter_heartbeat_capability_does_not_rewrite_firmware_manifest(self):
+        source=application_bundle(bundle(self.data/"legacy"),self.data/"rtos-templates"/"capability-fixture")
+        manifest=source/"firmware.json"
+        meta=json.loads(manifest.read_text())
+        meta.update(id="capability-fixture",kind="zephyr-xen-firmware",template_version="1.0.0")
+        descriptor={"schema_version":"1.0","template_id":"capability-fixture",
+                    "template_version":catalog.deployment_version(meta),"guest_kind":"zephyr",
+                    "asset_directory":"rtos-templates/capability-fixture",
+                    "source_template_id":meta["id"],"manifest_sha256":""}
+        for app,expected in (("xenova-starter",False),("xenova-network-starter",False),("custom-app",None)):
+            with self.subTest(app=app):
+                meta["source"]["app"]=app
+                manifest.chmod(0o644);manifest.write_text(json.dumps(meta));manifest.chmod(0o444)
+                descriptor["manifest_sha256"]=catalog.sha(manifest)
+                original=manifest.read_bytes()
+                view=catalog.describe(self.data,descriptor)
+                self.assertIs(view["capabilities"].get("app_heartbeat"),expected)
+                self.assertEqual(manifest.read_bytes(),original)
+
     def prepare(self,op):
         self.copies+=1
         spec=op['initial_spec'];r=record();name=op['assigned']['internal_name']

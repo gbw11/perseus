@@ -287,9 +287,15 @@ def replace_firmware(directory, record, source, expected):
     return updated
 
 
-def config(record, directory):
+def _config(record, directory):
     kernel = active_directory(directory, record) / 'zephyr.bin'
     return '\n'.join([f"name = '{record['name']}'", f"uuid = '{record['uuid']}'",
                       f"kernel = '{kernel}'", 'vcpus = 1', 'memory = 16', "gic_version = 'v2'",
                       "on_poweroff = 'destroy'", "on_reboot = 'destroy'", "on_crash = 'preserve'",
                       *([f"vif = [ 'mac={record['mac']},bridge=xenbr0,script=vif-bridge' ]"] if networked(record) else []), ''])
+
+
+def config(record, directory, *, cpu_context=None):
+    """CPU placement is separate from the unchanged RAM/GIC/firmware profile."""
+    from xenova_cpu import affinity_text
+    return _config(record, directory)+"\n"+affinity_text(cpu_context)

@@ -11,8 +11,12 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 class ManualInputRelayTest {
 
@@ -113,5 +117,67 @@ class ManualInputRelayTest {
         mode("MANUAL");
         connected = false;
         assertThat(relay.update(List.of("up"))).isEqualTo(Result.NOT_CONNECTED);
+    }
+
+    @Test
+    void repeatKeepsItsPaceWhileTheSharedSchedulerIsBlocked() throws InterruptedException {
+        // Spring's default @Scheduled pool has one thread; VmStateWatcher blocks it during a slow dom0-manager call.
+        ThreadPoolTaskScheduler shared = new ThreadPoolTaskScheduler();
+        shared.setPoolSize(1);
+        shared.initialize();
+        CountDownLatch blocked = new CountDownLatch(1);
+        shared.execute(() -> {
+            blocked.countDown();
+            sleep(600);
+        });
+        List<Long> sentAt = new CopyOnWriteArrayList<>();
+        ManualInputRelay timed = new ManualInputRelay(tracker, () -> (topic, payload, qos) -> sentAt.add(System.nanoTime()),
+                objectMapper, Clock.systemUTC());
+        mode("MANUAL");
+        timed.start();
+        try {
+            assertThat(blocked.await(1, TimeUnit.SECONDS)).isTrue();
+            timed.update(List.of("up"));
+            sleep(500);
+        } finally {
+            timed.stop();
+            shared.shutdown();
+        }
+        assertThat(sentAt).hasSizeGreaterThanOrEqualTo(8); // 1 press + ~9 repeats at 20 Hz
+        long maxGapMs = 0;
+        for (int i = 1; i < sentAt.size(); i++) {
+            maxGapMs = Math.max(maxGapMs, TimeUnit.NANOSECONDS.toMillis(sentAt.get(i) - sentAt.get(i - 1)));
+        }
+        assertThat(maxGapMs).isLessThanOrEqualTo(100);
+    }
+
+    @Test
+    void aFailedPublishDoesNotEndTheRepeat() {
+        AtomicLong calls = new AtomicLong();
+        List<Long> sentAt = new CopyOnWriteArrayList<>();
+        ManualInputRelay flaky = new ManualInputRelay(tracker, () -> (topic, payload, qos) -> {
+            if (calls.incrementAndGet() == 2) {
+                throw new IllegalStateException("broker hiccup"); // the first repeat fails
+            }
+            return sentAt.add(System.nanoTime());
+        }, objectMapper, Clock.systemUTC());
+        mode("MANUAL");
+        flaky.start();
+        try {
+            flaky.update(List.of("up"));
+            sleep(300);
+        } finally {
+            flaky.stop();
+        }
+        assertThat(calls.get()).isGreaterThanOrEqualTo(4); // repeats continued after the failure
+        assertThat(sentAt).hasSizeGreaterThanOrEqualTo(3);
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
