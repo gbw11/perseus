@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from uuid import UUID
 
 from .config import Settings
-from .drivers.base import CreateSpec, Domain, Driver, Provisioner
+from .drivers.base import CreateSpec, Domain, Driver, Provisioner, StatsSample
 from .errors import InsufficientResources, InvalidArgument, InvalidState, VMExists, VMNotFound
 from .models import CreateVmRequest
 
@@ -60,6 +60,10 @@ class VmService:
 
     def health(self) -> bool:
         return self._driver.health()
+
+    def stats(self) -> StatsSample:
+        """xentop 원시값(계약 2.4). 생명주기 락과 무관한 조회다."""
+        return self._driver.collect_stats()
 
     # ---- 명령 ----
 

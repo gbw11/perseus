@@ -10,6 +10,10 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       proxy: {
+        '/api/v1/display': {
+          target: env.VITE_DISPLAY_FEED_ORIGIN || 'http://127.0.0.1:8082',
+          changeOrigin: true,
+        },
         '/api': { target: backend, changeOrigin: true },
         '/ws': { target: backend.replace(/^http/, 'ws'), ws: true },
       },

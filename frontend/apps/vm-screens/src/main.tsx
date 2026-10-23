@@ -6,6 +6,7 @@ import { DevControls } from './components/DevControls';
 import { DetailPage } from './pages/DetailPage';
 import { SplitPage } from './pages/SplitPage';
 import { LiveTelemetryProvider, MockTelemetryProvider } from './telemetry/TelemetryProvider';
+import { MonitorPage } from './display/MonitorPage';
 
 function Root() {
   // VITE_TELEMETRY=live 면 백엔드에 붙는다 (.env.example)
@@ -20,10 +21,11 @@ function Root() {
 
 const router = createBrowserRouter(
   [
+    { path: '/', element: <Navigate to="/display/monitor-1" replace /> },
+    { path: '/display/:outputId', element: <MonitorPage /> },
     {
       element: <Root />,
       children: [
-        { path: '/', element: <Navigate to="/split" replace /> },
         { path: '/split', element: <SplitPage /> },
         { path: '/detail/:app', element: <DetailPage /> },
       ],
