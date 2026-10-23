@@ -127,15 +127,34 @@ pipeline {
         }
         success {
             updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'success'
+            notifyMattermost('good', '✅ CI 성공')
         }
         unstable {
             updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'failed'
+            notifyMattermost('warning', '⚠️ CI 불안정')
         }
         failure {
             updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'failed'
+            notifyMattermost('danger', '❌ CI 실패')
         }
         aborted {
             updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'canceled'
+            notifyMattermost('warning', '⚠️ CI 중단')
         }
     }
+}
+
+// Mattermost 웹훅 URL과 채널은 Jenkins 시스템 설정(Global Mattermost Notifier Settings)에 둔다.
+def notifyMattermost(String color, String title) {
+    def sourceBranch = env.gitlabSourceBranch ?: '-'
+    def targetBranch = env.gitlabTargetBranch ?: '-'
+    def author = env.gitlabUserName ?: '-'
+    def duration = currentBuild.durationString.replace(' and counting', '')
+
+    mattermostSend color: color, message: """#### ${title}
+- Source: `${sourceBranch}`
+- Target: `${targetBranch}`
+- Author: ${author}
+- Duration: ${duration}
+- Build: [${env.JOB_NAME} #${env.BUILD_NUMBER}](${env.BUILD_URL})"""
 }
