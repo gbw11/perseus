@@ -54,7 +54,9 @@ class ClientLike(Protocol):
 @dataclass(frozen=True)
 class LinkState:
     """관측 경로가 열려 있는가. 연결(CONNACK)이 아니라 필터별 구독 승인(SUBACK)이다.
-    계정은 붙었는데 ACL 이 heartbeat 구독을 거부하면 메시지가 하나도 안 오므로, 그 상태에서 "안 온다"를 판정하면 안 된다."""
+    계정은 붙었는데 ACL 이 heartbeat 구독을 거부하면 메시지가 하나도 안 오므로, 그 상태에서 "안 온다"를 판정하면 안 된다.
+    승인만으로는 모자란다: Mosquitto 는 읽기 ACL 에 막힌 구독도 SUBACK 성공으로 답하고 전달만 거른다(실보드 10/23 확인).
+    그래서 감시기는 승인 뒤 그 채널에서 메시지를 실제로 받은 뒤에야 손실을 판정한다(Watcher._link_ready)."""
 
     agent: bool  # xenova/v1/vms/+/heartbeat 구독 승인
     app: bool  # xenova/v1/apps/+/events 구독 승인

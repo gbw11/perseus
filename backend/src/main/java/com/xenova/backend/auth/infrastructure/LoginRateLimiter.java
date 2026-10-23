@@ -1,53 +1,44 @@
 package com.xenova.backend.auth.infrastructure;
 
-import java.time.Clock;
-import java.time.Instant;
-import java.util.concurrent.ConcurrentHashMap;
+import com.xenova.backend.auth.domain.LoginAttemptStore;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.Locale;
 import org.springframework.stereotype.Component;
 
 @Component
 public class LoginRateLimiter {
 
     private final AuthProperties properties;
-    private final Clock clock;
-    private final ConcurrentHashMap<String, Attempt> attempts = new ConcurrentHashMap<>();
+    private final LoginAttemptStore store;
 
-    public LoginRateLimiter(AuthProperties properties, Clock clock) {
+    public LoginRateLimiter(AuthProperties properties, LoginAttemptStore store) {
         this.properties = properties;
-        this.clock = clock;
+        this.store = store;
     }
 
     public boolean isBlocked(String username) {
-        Attempt attempt = attempts.get(normalize(username));
-        if (attempt == null) {
-            return false;
-        }
-        if (attempt.windowStartedAt().plus(properties.loginAttemptWindow()).isBefore(clock.instant())) {
-            attempts.remove(normalize(username), attempt);
-            return false;
-        }
-        return attempt.count() >= properties.maxLoginAttempts();
+        return store.isBlocked(subjectHash(username), properties.maxLoginAttempts());
     }
 
     public void recordFailure(String username) {
-        String key = normalize(username);
-        Instant now = clock.instant();
-        attempts.compute(key, (ignored, attempt) -> {
-            if (attempt == null || attempt.windowStartedAt().plus(properties.loginAttemptWindow()).isBefore(now)) {
-                return new Attempt(1, now);
-            }
-            return new Attempt(attempt.count() + 1, attempt.windowStartedAt());
-        });
+        store.recordFailure(subjectHash(username), properties.loginAttemptWindow());
     }
 
     public void reset(String username) {
-        attempts.remove(normalize(username));
+        store.reset(subjectHash(username));
     }
 
-    private String normalize(String username) {
-        return username == null ? "" : username.toLowerCase();
-    }
-
-    private record Attempt(int count, Instant windowStartedAt) {
+    private String subjectHash(String username) {
+        String normalized = username == null ? "" : username.toLowerCase(Locale.ROOT);
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(normalized.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is not available", exception);
+        }
     }
 }

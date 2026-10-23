@@ -21,6 +21,16 @@ Linux/macOS:
 ./mvnw spring-boot:run
 ```
 
+### Docker 이미지
+
+```bash
+docker build -t xenova-backend ./backend
+docker run --rm -p 8080:8080 --env-file .env xenova-backend
+```
+
+이미지는 Java 21로 빌드한 뒤 JRE 런타임에 JAR만 복사하며, 일반 사용자 `xenova`로 실행합니다.
+`/actuator/health`가 정상 응답하는지 컨테이너 헬스체크가 확인합니다.
+
 기본 포트는 `8080`이며 `SERVER_PORT` 환경 변수로 변경할 수 있습니다.
 
 ## 확인
@@ -62,11 +72,26 @@ Refresh Token은 폐기합니다. 이미 폐기된 Refresh Token이 다시 사�
 
 ```text
 JWT_SECRET=<32바이트 이상의 임의 비밀값>
-DB_URL=<운영 DB JDBC URL>
+DB_URL=jdbc:mysql://mysql:3306/xenova?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8
 DB_USERNAME=<DB 사용자>
 DB_PASSWORD=<DB 비밀번호>
+AUTH_STATE_STORE=redis
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=<Redis 비밀번호>
+REDIS_SSL=false
+REDIS_TIMEOUT=2s
+REDIS_HEALTH_ENABLED=true
 AUTH_COOKIE_SECURE=true
 ```
+
+MySQL은 사용자·VM 등 영구 데이터를 저장합니다. Redis 7은 Refresh Token, 로그아웃된 Access
+Token의 JTI, 로그인 실패 횟수를 TTL과 함께 저장합니다. Refresh Token 회전 및 재사용 감지와
+로그인 실패 횟수 증가는 Redis Lua 스크립트로 원자적으로 처리하므로 백엔드를 여러 대 실행해도
+인증 상태가 공유됩니다. 사용자 이름은 로그인 제한 키에 원문 대신 SHA-256 해시로 저장됩니다.
+자동 테스트는 `AUTH_STATE_STORE=jpa`와 H2를 사용해 Redis 없이 실행되며, 운영 기본값은 `redis`입니다.
+Redis 헬스체크는 Redis가 함께 배포되는 운영 환경에서만 `REDIS_HEALTH_ENABLED=true`로
+활성화합니다.
 
 ## 화면 배치
 
