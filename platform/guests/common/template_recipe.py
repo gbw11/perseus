@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 
 from prepare_rootfs import inside
+import guest_agent_template
 
 ROOT = Path(__file__).resolve().parents[3]
 VERSION = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?')
@@ -27,10 +28,13 @@ def source_info(recipe, source_id):
     if not recipe.is_absolute() or recipe.resolve() != recipe or recipe.is_symlink():
         raise ValueError('template recipe requires a canonical regular path')
     meta = json.loads(recipe.read_text())
-    if (set(meta) != {'schema', 'source_id', 'version', 'files'} or meta['schema'] != 1
+    if (set(meta) not in ({'schema', 'source_id', 'version', 'files'},
+                             {'schema', 'source_id', 'version', 'files', 'guest_agent'}) or meta['schema'] != 1
             or meta['source_id'] != source_id or not isinstance(meta['version'], str) or not VERSION.fullmatch(meta['version'])
             or not isinstance(meta['files'], list)):
         raise ValueError('invalid template recipe/source/version')
+    if 'guest_agent' in meta and meta['guest_agent'] != {'packages': guest_agent_template.PACKAGES}:
+        raise ValueError('unsupported Linux guest Agent package policy')
     sources = {'recipe.json': {'sha256': sha(recipe), 'bytes': recipe.stat().st_size}}
     targets = set()
     for entry in meta['files']:
@@ -51,6 +55,8 @@ def source_info(recipe, source_id):
               ROOT / 'platform/guests/common/prepare_rootfs.py',
               ROOT / 'platform/guests/common/guest_identity.py',
               ROOT / 'platform/guests/common/prepare_instance.py', Path(__file__).resolve()]
+    if 'guest_agent' in meta:
+        common += [Path(guest_agent_template.__file__).resolve(), *guest_agent_template.source_files()]
     preparation = {'platform': 'xenova', 'recipe': meta, 'recipe_files': sources,
                    'preparer_files': {str(p.relative_to(ROOT)): sha(p) for p in common}}
     preparation['source_sha256'] = hashlib.sha256(

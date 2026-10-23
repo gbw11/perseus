@@ -209,7 +209,7 @@ class Manager:
         actions = MUTATIONS | {'templates', 'list', 'get', 'operation', 'start', 'stop',
                                'reboot', 'destroy', 'autostart-set', 'board-shutdown-set', 'config',
                                'recover_once', 'recovery-operation', 'control-operation', 'snapshot', 'probe',
-                               'execution-context', 'host-resume'}
+                               'execution-context', 'host-resume', 'cpu-layout', 'cpu-policy-set', 'cpu-host-prepare'}
         if not isinstance(action, str) or action not in actions:
             fail('INVALID_SPEC', 'unsupported management action')
         if type(execute) is not bool:
@@ -226,6 +226,21 @@ class Manager:
             if action != 'create' and not self._text_token(key):
                 fail('INVALID_SPEC', 'idempotency_key of 1..200 UTF-8 bytes required')
             return self._normalize(action, spec)
+        if action == 'cpu-policy-set':
+            from xenova_cpu import validate_spec
+            if not self._text_token(key):
+                fail('INVALID_SPEC', 'cpu-policy-set requires idempotency_key')
+            return validate_spec(spec)
+        if action in ('cpu-layout', 'cpu-host-prepare'):
+            allowed = {'vm_id', 'timeout_ms'} if action == 'cpu-layout' else {'timeout_ms', 'restore'}
+            if set(spec)-allowed or ('restore' in spec and type(spec['restore']) is not bool):
+                fail('INVALID_SPEC', 'unexpected CPU specification fields')
+            if 'vm_id' in spec:
+                spec = {**spec, 'vm_id':normalize_uuid(spec['vm_id'])}
+            value = spec.get('timeout_ms', 15000)
+            if type(value) is not int or not 0 < value <= 15000:
+                fail('INVALID_SPEC', 'timeout_ms must be 1..15000')
+            return {**spec, 'timeout_ms':value}
         if action == 'recover_once':
             from xenova_recovery import validate_request
             return validate_request(spec)
@@ -979,12 +994,22 @@ class Manager:
             if action == 'snapshot':
                 response.update(ok=True, data={'snapshot':self.p.execution().snapshot(spec['vm_id'], spec['max_age_ms'])})
                 return response
+            cpu_deadline = self.p.clock()+spec.get('timeout_ms',15000)/1000
             with operation_lock(self.p.runtime):
                 try:
                     records=self.p.records(validate_assets=False)
                 except (PlatformError,OSError,ValueError):
                     fail('STORAGE_UNAVAILABLE','persistent storage or registry unavailable')
-                if action in MUTATIONS:
+                if action == 'cpu-layout':
+                    result = self.p.cpu().layout(records, cpu_deadline, spec.get('vm_id'))
+                elif action == 'cpu-policy-set':
+                    self._writable()
+                    result = self.p.cpu().set_policy(spec, records, execute=execute, key=idempotency_key, context=context)
+                elif action == 'cpu-host-prepare':
+                    if execute:
+                        self._writable()
+                    result = self.p.cpu().prepare(records, cpu_deadline, execute=execute, restore=spec.get('restore',False), context=context)
+                elif action in MUTATIONS:
                     result=self._mutate(action,spec,execute,
                                         'create:'+spec['vm_id'] if action=='create' else idempotency_key,
                                         records,context)

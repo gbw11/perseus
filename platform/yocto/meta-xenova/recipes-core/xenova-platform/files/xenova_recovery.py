@@ -112,6 +112,8 @@ class Recovery:
             refuse("RECOVERY_MODE_UNSUPPORTED", "force recovery has no per-VM administrator approval")
 
     def complete(self, op, observation):
+        record = self.m._state(op['request']['vm_id'], self.p.records(validate_assets=False))['record']
+        self.p.cpu().require(record, self.p.clock()+15, expected=op.get('cpu_policy', {'configured':False}), present=True)
         run = self.e.run_record({"uuid":op["request"]["vm_id"]})
         if (observation["execution_status"] != "managed" or not run or
                 run.get("owner") != {"kind":"recovery", "recovery_attempt_id":op["recovery_attempt_id"]}):
@@ -223,6 +225,7 @@ class Recovery:
         resume_removed = op is not None and op["phase"] in ("stopping", "removed")
         record, records, observation = self.conditions(spec, deadline, target=not resume_removed)
         self.mode_allowed(spec, record)
+        cpu_context = self.p.cpu().require(record, deadline, expected=op.get('cpu_policy', {'configured':False}) if op else None)
         if resume_removed and observation["presence"] != "absent":
             refuse("RECONCILE_REQUIRED", "old shutdown result is uncertain; request is not repeated",
                    details={"operation_id":op["operation_id"], "replayed":True})
@@ -245,7 +248,7 @@ class Recovery:
         if not execute:
             return {"plan":True, "request":spec, "current_observation":observation}
         if op is None:
-            op = {"schema_version":"1.0", "operation_id":uuid4(), "recovery_attempt_id":identity,
+            op = {"cpu_policy":cpu_context, "schema_version":"1.0", "operation_id":uuid4(), "recovery_attempt_id":identity,
                   "request":spec, "request_hash":fingerprint(spec), "host_boot_id":self.e.host,
                   "accepted_monotonic_ms":int(self.p.clock()*1000), "result":None, "error":None, "events":[]}
             context["operation_id"] = op["operation_id"]
@@ -266,6 +269,7 @@ class Recovery:
                 refuse("TARGET_CHANGED", "a domain appeared before recovery launch")
             if vm.has_network(record):
                 self.p.prepare_dhcp(records, deadline=deadline)
+            self.p.cpu().require(record, deadline, expected=op.get('cpu_policy', {'configured':False}))
             self.save(op, "launching")
             owner = {"kind":"recovery", "recovery_attempt_id":identity}
             self.p.start(record, _owner=owner, deadline=deadline)
@@ -278,7 +282,8 @@ class Recovery:
             uncertain = op["phase"] in ("launching", "observed")
             op["error"] = {"code":"RECONCILE_REQUIRED" if uncertain else code, "message":str(error),
                            "retryable":False, "details":{"operation_id":op["operation_id"],
-                           "recovery_attempt_id":identity, "accepted":True}}
+                           "recovery_attempt_id":identity, "accepted":True,
+                           **({'cause':error.error} if isinstance(error, ExecutionError) else {})}}
             try:
                 self.save(op, "uncertain" if uncertain else "failed")
             except OSError:

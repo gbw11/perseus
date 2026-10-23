@@ -1,0 +1,62 @@
+{
+  "scope": "virtual X11 root with real QEMU Xen data; actual JPEG screen capture and HTTP decode; not physical HDMI",
+  "before": [
+    [
+      "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+      13
+    ],
+    [
+      "820a0522-243f-42f1-90e9-9b74e1522965",
+      17
+    ],
+    [
+      "dd33284f-baf2-417f-93b2-a1af3c3f1ea2",
+      18
+    ]
+  ],
+  "cases": [
+    "two_native_x11_browser_windows_at_explicit_nonoverlapping_rectangles",
+    "real_qemu_state_renders_overview_and_detail",
+    "both_ffmpeg_x11_root_mjpeg_encoders_produce_real_pixel_frames",
+    "remote_viewer_authenticates_and_decodes_two_streams_without_feed_credentials",
+    "unique_native_window_color_markers_arrive_in_corresponding_remote_canvas_only",
+    "one_encoder_restart_does_not_restart_either_local_renderer_or_other_encoder",
+    "stream_service_shutdown_leaves_two_local_windows_running_and_remote_stale_banner",
+    "no_remote_browser_runtime_errors",
+    "qemu_vm_ids_unchanged_no_vm_restart"
+  ],
+  "virtual_measurement": {
+    "monitor-1": {
+      "fps": 5.0,
+      "mbps": 3.016
+    },
+    "monitor-2": {
+      "fps": 5.0,
+      "mbps": 2.86
+    }
+  },
+  "after": [
+    [
+      "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+      13
+    ],
+    [
+      "820a0522-243f-42f1-90e9-9b74e1522965",
+      17
+    ],
+    [
+      "dd33284f-baf2-417f-93b2-a1af3c3f1ea2",
+      18
+    ]
+  ],
+  "passed": true,
+  "completed_at": "2026-10-22T01:52:21.349472+00:00",
+  "capture_configuration": {
+    "resolution_per_output": [
+      1280,
+      720
+    ],
+    "fps": 5,
+    "jpeg_quality": 7
+  }
+}

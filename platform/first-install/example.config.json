@@ -18,16 +18,16 @@
   ],
   "linux_templates": [
     {
-      "template_dir": "/absolute/xenova-template-releases/linux/ubuntu-24.04-20260926/1.0.1",
+      "template_dir": "/absolute/xenova-template-releases/linux/ubuntu-24.04-20260926/1.0.2",
       "template_manifest_sha256": "REPLACE_WITH_SELECTED_TEMPLATE_JSON_SHA256",
       "template_id": "ubuntu-24.04-arm64",
-      "template_version": "1.0.1"
+      "template_version": "1.0.2"
     },
     {
-      "template_dir": "/absolute/xenova-template-releases/linux/debian-13-20261015/1.0.1",
+      "template_dir": "/absolute/xenova-template-releases/linux/debian-13-20261015/1.0.2",
       "template_manifest_sha256": "REPLACE_WITH_SELECTED_TEMPLATE_JSON_SHA256",
       "template_id": "debian-13-arm64",
-      "template_version": "1.0.1"
+      "template_version": "1.0.2"
     }
   ]
 }
