@@ -11,6 +11,7 @@ from collections.abc import Callable
 from ..errors import Dom0ManagerError
 from .config import RecoverySettings
 from .model import Judgment, VmObservation
+from .engine import RecoveryEngine
 from .mqtt import HealthPublisher, LinkState
 from .watcher import Watcher
 
@@ -29,6 +30,7 @@ class RecoveryWorker:
         link: Callable[[], LinkState],
         judgments: "queue.Queue[Judgment] | None" = None,
         health_publisher: HealthPublisher | None = None,
+        engine: RecoveryEngine | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings = settings
@@ -37,6 +39,7 @@ class RecoveryWorker:
         self._link = link
         self.judgments: queue.Queue[Judgment] = judgments or queue.Queue()
         self._health = health_publisher
+        self._engine = engine
         self._clock = clock
         self.ticks = 0
         self.skipped = 0
@@ -50,6 +53,8 @@ class RecoveryWorker:
         except Dom0ManagerError as exc:
             self.skipped += 1
             log.warning("observation skipped: %s %s", exc.code, exc.message)
+            if self._engine is not None:
+                self._engine.collect(self._clock())  # 판정은 못 해도 끝난 복구 시도의 결과는 회수한다
             return []
         self.ticks += 1
         now = self._clock()
@@ -62,15 +67,21 @@ class RecoveryWorker:
                 None if judgment.heartbeat_age_s is None else round(judgment.heartbeat_age_s, 1), judgment.recovery_id,
             )
             self.judgments.put(judgment)
+            if self._engine is not None:
+                self._engine.on_judgment(judgment, now)
         if self._health is not None:
             for vm_id in self._watcher.removed_vm_ids():
                 self._health.clear(vm_id)
             for health in self._watcher.healths():
                 self._health.publish(health, now)
+        if self._engine is not None:
+            self._engine.tick(now)  # 건강 스냅샷이 갱신된 뒤 복구 상태를 전진시킨다. 플랫폼 호출은 엔진의 실행 스레드에서
         return judgments
 
     def shutdown(self) -> None:
         """멈추기 전에 남은 retained 건강 스냅샷을 관측 불가로 바꾼다. 비정상 종료면 받는 쪽의 lease 만료가 같은 일을 한다."""
+        if self._engine is not None:
+            self._engine.shutdown()
         if self._health is not None:
             healths = self._watcher.healths()
             count = self._health.publish_unavailable(healths, self._clock())
