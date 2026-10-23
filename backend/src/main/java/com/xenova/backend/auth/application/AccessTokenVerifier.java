@@ -1,6 +1,6 @@
 package com.xenova.backend.auth.application;
 
-import com.xenova.backend.auth.domain.RevokedAccessTokenRepository;
+import com.xenova.backend.auth.domain.AccessTokenRevocationStore;
 import com.xenova.backend.auth.infrastructure.JwtTokenService;
 import java.time.Instant;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -12,12 +12,12 @@ import org.springframework.stereotype.Component;
 public class AccessTokenVerifier {
 
     private final JwtTokenService jwtTokenService;
-    private final RevokedAccessTokenRepository revokedAccessTokenRepository;
+    private final AccessTokenRevocationStore accessTokenRevocationStore;
 
     public AccessTokenVerifier(
-            JwtTokenService jwtTokenService, RevokedAccessTokenRepository revokedAccessTokenRepository) {
+            JwtTokenService jwtTokenService, AccessTokenRevocationStore accessTokenRevocationStore) {
         this.jwtTokenService = jwtTokenService;
-        this.revokedAccessTokenRepository = revokedAccessTokenRepository;
+        this.accessTokenRevocationStore = accessTokenRevocationStore;
     }
 
     public VerifiedToken verify(String token) {
@@ -30,7 +30,7 @@ public class AccessTokenVerifier {
         } catch (JwtException exception) {
             throw new InvalidAccessTokenException("유효하지 않거나 만료된 토큰입니다.");
         }
-        if (jwt.getId() == null || revokedAccessTokenRepository.existsById(jwt.getId())) {
+        if (jwt.getId() == null || accessTokenRevocationStore.isRevoked(jwt.getId())) {
             throw new InvalidAccessTokenException("폐기된 토큰입니다.");
         }
         return new VerifiedToken(jwt.getSubject(), jwt.getExpiresAt());
