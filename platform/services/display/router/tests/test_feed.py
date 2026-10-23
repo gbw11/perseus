@@ -159,6 +159,11 @@ def test_real_http_and_ws_auth_full_snapshots_and_read_only(settings, store):
         assert client.get("/api/v1/display/state").status_code == 401
         headers = {"Authorization": "Bearer test-only-token"}
         assert client.get("/api/v1/display/state", headers=headers).json()["vms"][0]["vm_id"] == VM1
+        # Fault controls belong only to the opt-in lab runner, even for a service-token caller.
+        for path in ("/test/replay", "/test/mqtt/stop", "/test/mqtt/start", "/test/xen/fail",
+                     "/test/scenario/healthy", "/test/browser/status"):
+            assert client.post(path, headers=headers, json={}).status_code == 404
+        assert client.get("/test/mqtt/observations", headers=headers).status_code == 404
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect("/ws/v1/display/state"): pass
         with client.websocket_connect("/ws/v1/display/state", headers=headers) as ws:

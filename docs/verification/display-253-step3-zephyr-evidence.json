@@ -1,0 +1,130 @@
+{
+  "scope": "real QEMU VM2 manual heartbeat-only trial over Ethernet; no driving input/command or graphics",
+  "cases": [
+    "original_vm2_config_and_firmware_saved_before_trial",
+    "only_vm2_restarted_with_trial_firmware_and_one_vif",
+    "real_zephyr_manual_heartbeats_reach_dom0_with_uuid_and_increasing_sequence",
+    "no_drive_commands_or_input_subscriptions_in_trial_build",
+    "rest_app_liveness_fresh_without_invented_os_driving_mode_or_active_vm",
+    "authenticated_dom0_websocket_has_same_real_vm2_app_source",
+    "hdmi_presentation_uses_vm2_status_panel_without_graphics_claim"
+  ],
+  "build_source": {
+    "scope": "QEMU VM2 candidate only; manual heartbeat/Ethernet; no drive commands or subscriptions",
+    "manual_main_sha256": "84586e3916f03b2cf8f25fd42a2c7541ca9b0ae178e03b23a220bef04ec91ec7",
+    "adapted_main_sha256": "d7ce772452be72ba8271c9253ceca124abe17ce0789c6a5bbb9c12f7ad45b3d5",
+    "mqtt_original_sha256": "e3ec1682ea3d6ff40e9827846ff39a68b8df586ab5f84f45e5d42cd297afef04",
+    "mqtt_diagnostic_sha256": "a97437e54d2ac535f1488db2b64b505adb5bf709cb4cc7b2a283c6f3ff91b044",
+    "broker_port": 51883,
+    "source_root": "/mnt/c/Users/SSAFY/Desktop/자율프로젝트/S15P31E110"
+  },
+  "firmware_sha256": "a6790352d9a0df2c5e0d0e5502366ba14685d0d47ebb540a96920073b8c81c2f",
+  "zephyr_boot_id_is_os_verified": false,
+  "test_password_hash_rounds": 5000,
+  "restored": true,
+  "original": {
+    "backup_path": "/var/tmp/display253-vm2-ceWlgSI0",
+    "original_kernel": "/srv/xenova/instances/zephyr-backup/firmware/fac5771450f9bbc9260c5e27ac5b05bb90cccaf00446664be6f538c825dea1c1/zephyr.bin",
+    "original_sha256": "1b9264b36e321aa183e3f74568e59354c24c14c3bcbe3c226fd5ac9b6f699dba",
+    "record_sha256": "36660439ad357ea3532de9fff19ecf5febf369e55ff197e60cc3deef2fff8971",
+    "cfg_sha256": "a3c0286645aa485c6d5537bf72500520874853561ea990c8b74fae6493aea9bc"
+  },
+  "trial_domid": 11,
+  "reports": [
+    {
+      "topic": "xenova/v1/apps/manual/events",
+      "retained": false,
+      "envelope": {
+        "schema_version": "1.0",
+        "message_id": "1",
+        "vm_id": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "app_id": "manual",
+        "boot_id": "e1e9b15f-a866-438a-9925-9a8b3a160667",
+        "agent_instance_id": "c36be07d-9773-4f3a-9d26-040dff2ac1c3",
+        "type": "app.heartbeat",
+        "seq": 1,
+        "sent_at": "1970-01-01T00:00:01.345Z",
+        "payload": {
+          "state": "idle",
+          "uptime_s": 1.0
+        }
+      }
+    },
+    {
+      "topic": "xenova/v1/apps/manual/events",
+      "retained": false,
+      "envelope": {
+        "schema_version": "1.0",
+        "message_id": "2",
+        "vm_id": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "app_id": "manual",
+        "boot_id": "e1e9b15f-a866-438a-9925-9a8b3a160667",
+        "agent_instance_id": "c36be07d-9773-4f3a-9d26-040dff2ac1c3",
+        "type": "app.heartbeat",
+        "seq": 2,
+        "sent_at": "1970-01-01T00:00:02.345Z",
+        "payload": {
+          "state": "idle",
+          "uptime_s": 2.001
+        }
+      }
+    },
+    {
+      "topic": "xenova/v1/apps/manual/events",
+      "retained": false,
+      "envelope": {
+        "schema_version": "1.0",
+        "message_id": "3",
+        "vm_id": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "app_id": "manual",
+        "boot_id": "e1e9b15f-a866-438a-9925-9a8b3a160667",
+        "agent_instance_id": "c36be07d-9773-4f3a-9d26-040dff2ac1c3",
+        "type": "app.heartbeat",
+        "seq": 3,
+        "sent_at": "1970-01-01T00:00:03.344Z",
+        "payload": {
+          "state": "idle",
+          "uptime_s": 3.0
+        }
+      }
+    },
+    {
+      "topic": "xenova/v1/apps/manual/events",
+      "retained": false,
+      "envelope": {
+        "schema_version": "1.0",
+        "message_id": "4",
+        "vm_id": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "app_id": "manual",
+        "boot_id": "e1e9b15f-a866-438a-9925-9a8b3a160667",
+        "agent_instance_id": "c36be07d-9773-4f3a-9d26-040dff2ac1c3",
+        "type": "app.heartbeat",
+        "seq": 4,
+        "sent_at": "1970-01-01T00:00:04.344Z",
+        "payload": {
+          "state": "idle",
+          "uptime_s": 4.0
+        }
+      }
+    }
+  ],
+  "app_source": {
+    "received_at": "2026-10-22T07:02:48.147+00:00",
+    "observed_at": "1970-01-01T00:00:04.344Z",
+    "source_id": "xenova/v1/apps/manual/events",
+    "source_epoch": [
+      "e1e9b15f-a866-438a-9925-9a8b3a160667",
+      "c36be07d-9773-4f3a-9d26-040dff2ac1c3"
+    ],
+    "sequence": 4,
+    "retained": false,
+    "age_ms": 226,
+    "status": "fresh",
+    "subscription_status": "granted"
+  },
+  "presentation_kind": "status",
+  "passed": true,
+  "other_domain_ids_unchanged": true,
+  "temporary_broker_stopped": true,
+  "completed_at": "2026-10-22T07:03:03.725377+00:00"
+}
