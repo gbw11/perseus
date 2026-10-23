@@ -42,6 +42,8 @@ Jenkins Credentials에 다음 항목을 등록해야 합니다.
 
 서버에는 Docker Engine과 Docker Compose v2가 설치되어 있어야 하며, `ubuntu` 사용자가 승인 요청 없이 Docker를 실행할 수 있어야 합니다. 초기 배포 전 UFW에서 HTTP 80과 HTTPS 443 포트를 허용해야 합니다. 운영 비밀값과 PEM 키는 Git 저장소에 커밋하지 않습니다.
 
+Standalone 방식으로 발급한 Let's Encrypt 인증서는 `deploy/certbot/renewal-hooks`의 pre/post hook으로 Nginx의 80번 포트를 잠시 비운 뒤 자동 갱신합니다. 두 스크립트를 `/etc/letsencrypt/renewal-hooks`의 동일한 하위 폴더에 설치하고 실행 권한을 부여한 뒤 `sudo certbot renew --dry-run`으로 검증합니다.
+
 ### Jenkins 컨테이너
 
 Jenkins는 운영 서비스와 별도인 `compose.jenkins.yaml`로 실행합니다. 전용 이미지에는 Java 21, Node.js 22, Python 3, Git, SSH, Docker CLI·Buildx·Compose와 파이프라인 플러그인이 포함됩니다. Jenkins 웹 포트는 `127.0.0.1`에만 바인딩하고, 운영 Nginx와는 공유 `xenova_app` 네트워크를 통해 `/jenkins/` 경로로 연결합니다.
