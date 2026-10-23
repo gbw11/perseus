@@ -50,6 +50,7 @@ Xenova는 Raspberry Pi 4의 Xen dom0에서 VM 등록·실행·관측·복구·�
 | 인터페이스 | 출력·주의점 |
 |---|---|
 | `xenova-vm … --json` | stdout에 Manager envelope 하나. 하위 도구 출력은 stderr |
+| `xenova-vm list --short` | 표시 이름·내부 이름·UUID·관측 상태·IP의 다섯 열 표. `--json`과 함께 사용하지 않음 |
 | Manager 전용 명령 | `--json` 없이도 Manager로 호출하며 JSON을 들여써 출력 |
 | 운영 CLI 전용 명령 | 자체 JSON·문자열·도구 로그·대화형 콘솔. **`--json`을 붙이지 않음** |
 | `xenova-wifi` | 자체 JSON/오류·종료 코드. `--json` 옵션 없음 |
@@ -196,7 +197,9 @@ xenova-vm templates --json
 
 **인자**
 
-선택: `--lifecycle REGISTERED|RETIRED|PURGING|PURGED|all`, 기본 `REGISTERED`. `--json`.
+선택: `--lifecycle REGISTERED|RETIRED|PURGING|PURGED|all`, 기본 `REGISTERED`.
+`--short`는 요약표, `--json`은 단일 JSON을 선택하며 둘은 함께 사용할 수 없다.
+둘 다 생략하면 기존 들여쓴 JSON을 출력한다. `--short`는 `list`에만 허용한다.
 
 **사용 조건**
 
@@ -205,6 +208,8 @@ xenova-vm templates --json
 **실행 예시**
 
 ```bash
+xenova-vm list --short
+xenova-vm list --short --lifecycle all
 xenova-vm list --lifecycle all --json
 ```
 
@@ -212,9 +217,24 @@ xenova-vm list --lifecycle all --json
 
 `data` 예: `{"vms":[{"vm_id":"22222222-2222-4222-8222-222222222222","name":"시험 Debian","lifecycle":"REGISTERED","domid":null}]}`.
 
+`--short` 출력 예:
+
+```text
+NAME | INTERNAL_NAME | UUID | STATE | IP
+Debian Interaction | debian-dev | 22222222-2222-4222-8222-222222222222 | blocked | 192.168.77.20
+시험 Zephyr | zephyr-drive-a | 33333333-3333-4333-8333-333333333333 | stopped | -
+```
+
+열은 각각 `name`, `configuration.id`, `vm_id`, `xen_state`, `ipv4`다.
+내부 이름은 등록된 CLI 대상 이름이며 표시 이름에서 추측하지 않는다.
+`blocked`를 포함한 `xen_state`를 그대로 표시하며 실행 의도·자산 상태와 구분한다.
+null 또는 없는 필드는 `-`, 빈 목록은 헤더 한 줄만 출력한다. UUID·IP는 줄이지 않는다.
+
 **오류 응답**
 
 잘못된 lifecycle은 `INVALID_SPEC`, 종료 `2`. 공통 작업 경합은 `OPERATION_IN_PROGRESS`, 종료 `3`.
+`--short`와 `--json`의 동시 지정도 `INVALID_SPEC`, 종료 `2`다.
+요약표 조회가 실패하면 기존 JSON 오류 응답과 실패 종료 코드를 그대로 출력한다.
 
 **확인 방법**
 
