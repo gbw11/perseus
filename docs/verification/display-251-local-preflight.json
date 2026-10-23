@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-23",
+  "scope": "read-only board preflight; attempted PC loopback SSH tunnel",
+  "board": "192.168.30.96",
+  "public_schema_status": 200,
+  "unauthenticated_vm_api_status": 401,
+  "xen_domains": [
+    {
+      "domid": 1,
+      "uuid": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+      "name": "debian-dev"
+    },
+    {
+      "domid": 2,
+      "uuid": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+      "name": "zephyr-drive-a"
+    },
+    {
+      "domid": 3,
+      "uuid": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+      "name": "zephyr-drive-b"
+    }
+  ],
+  "board_ports": {
+    "8081": true,
+    "8082": false,
+    "1883": false
+  },
+  "tunnel_verified": false,
+  "tunnel_error": "SSH direct-tcpip Administratively prohibited",
+  "temporary_tunnel_stopped": true,
+  "authenticated_api_verified": false,
+  "ssh_policy": {
+    "file": "/etc/ssh/xenova-auth.conf",
+    "allow_tcp_forwarding": "local",
+    "gateway_ports": "no",
+    "permitopen_targets_count": 98,
+    "dom0_api_8081_allowed": false,
+    "dom0_api_8082_allowed": false
+  },
+  "proposed_change": "Preserve existing PermitOpen targets and add only 127.0.0.1:8081 and 127.0.0.1:8082; not applied",
+  "board_modified": false
+}

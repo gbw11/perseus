@@ -1,0 +1,17 @@
+{
+  "unit": "sshd.service",
+  "targets_added": [
+    "127.0.0.1:8081",
+    "127.0.0.1:8082"
+  ],
+  "guest_targets_preserved": true,
+  "vm_restarted": false,
+  "api_service_restarted": false,
+  "changed": true,
+  "backup": "/etc/ssh/xenova-auth.conf.display251-20261023T010315650715Z.bak",
+  "syntax_valid": true,
+  "effective_api_targets_allowed": true,
+  "ssh_reloaded": true,
+  "sha256_before": "7123dfbeb5efb88f25cb7efcbc4ff89ba121761b7702cce3626ae2e7cf66cb65",
+  "sha256_after": "892c57f43f40be891bf7ac5ed3f50f91f725d29aedd6d58def3b78eb9a9564f3"
+}

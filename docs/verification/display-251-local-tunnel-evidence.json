@@ -1,0 +1,35 @@
+{
+  "local_origin": "http://127.0.0.1:18081",
+  "board_target": "127.0.0.1:8081",
+  "authenticated_api_verified": false,
+  "tunnel_verified": true,
+  "/openapi.json": {
+    "status": 200,
+    "title": "Xenova dom0 manager API",
+    "version": "1.0.0"
+  },
+  "/healthz": {
+    "status": 401
+  },
+  "/api/v1/vms": {
+    "status": 401
+  },
+  "vm_execution_ids_unchanged": true,
+  "xen_domains": [
+    {
+      "domid": 1,
+      "uuid": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+      "name": "debian-dev"
+    },
+    {
+      "domid": 2,
+      "uuid": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+      "name": "zephyr-drive-a"
+    },
+    {
+      "domid": 3,
+      "uuid": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+      "name": "zephyr-drive-b"
+    }
+  ]
+}
