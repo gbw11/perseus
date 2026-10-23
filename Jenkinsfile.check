@@ -1,0 +1,111 @@
+// Xenova Merge Check
+// GitLab MR의 소스 브랜치를 검사한다. 배포와 운영 Health Check는 수행하지 않는다.
+
+pipeline {
+    agent any
+
+    options {
+        gitLabConnection('gitlab')
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        disableConcurrentBuilds(abortPrevious: true)
+    }
+
+    stages {
+        stage('Backend Test') {
+            steps {
+                updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'running'
+                dir('backend') {
+                    sh './mvnw -B -ntp test'
+                }
+            }
+        }
+
+        stage('Frontend Quality') {
+            steps {
+                dir('frontend') {
+                    sh 'npm ci'
+                    sh 'npm run lint'
+                    sh 'npm run typecheck'
+                    sh 'mkdir -p target && npm test -- --reporter=junit --outputFile=target/vitest.xml'
+                    withEnv([
+                        'VITE_BASE_PATH=/screens/',
+                        'VITE_SCREENS_ORIGIN=/screens',
+                        'VITE_TELEMETRY=live'
+                    ]) {
+                        sh 'npm run build'
+                    }
+                }
+            }
+        }
+
+        stage('Compose Validate') {
+            environment {
+                MYSQL_PASSWORD = 'ci-compose-validation-only'
+                MYSQL_ROOT_PASSWORD = 'ci-compose-validation-root-only'
+                REDIS_PASSWORD = 'ci-compose-validation-only'
+                JWT_SECRET = 'ci-compose-validation-secret-at-least-32-bytes'
+            }
+            steps {
+                sh 'docker compose -f compose.yaml config --quiet'
+            }
+        }
+
+        stage('Docker Image Build') {
+            steps {
+                sh 'docker build --target runtime -t xenova-backend:check-${BUILD_NUMBER} backend'
+                sh 'docker build --target admin-console -t xenova-admin-console:check-${BUILD_NUMBER} frontend'
+                sh 'docker build --target vm-screens -t xenova-vm-screens:check-${BUILD_NUMBER} frontend'
+            }
+        }
+
+        stage('dom0-manager Test') {
+            steps {
+                dir('platform/services/dom0-manager') {
+                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                        sh 'python3 -m pip install -q --user -e .[test] && python3 -m pytest -q --junitxml=target/pytest.xml'
+                    }
+                }
+            }
+        }
+
+        stage('vm-agent Test') {
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    dir('platform/services/vm-agent/mqtt-client') {
+                        sh 'python3 -m pip install -q --user "paho-mqtt>=1.6,<3" "pytest>=7" && python3 -m pytest -q --junitxml=target/pytest.xml'
+                    }
+                    dir('platform/services/vm-agent/agent') {
+                        sh 'python3 -m pytest -q --junitxml=target/pytest.xml'
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            junit testResults: 'backend/target/surefire-reports/*.xml,frontend/target/vitest.xml,platform/services/dom0-manager/target/pytest.xml,platform/services/vm-agent/mqtt-client/target/pytest.xml,platform/services/vm-agent/agent/target/pytest.xml', allowEmptyResults: true
+            sh '''
+                if command -v docker >/dev/null 2>&1; then
+                    docker image rm \
+                      xenova-backend:check-${BUILD_NUMBER} \
+                      xenova-admin-console:check-${BUILD_NUMBER} \
+                      xenova-vm-screens:check-${BUILD_NUMBER} >/dev/null 2>&1 || true
+                fi
+            '''
+        }
+        success {
+            updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'success'
+        }
+        unstable {
+            updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'failed'
+        }
+        failure {
+            updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'failed'
+        }
+        aborted {
+            updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'canceled'
+        }
+    }
+}
