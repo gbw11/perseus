@@ -72,7 +72,7 @@ server {
     location /jenkins/ {
         set $jenkins_upstream http://jenkins:8080;
         proxy_pass $jenkins_upstream;
-        proxy_redirect default;
+        proxy_redirect off;
         proxy_http_version 1.1;
         proxy_set_header Connection $connection_upgrade;
         proxy_set_header Upgrade $http_upgrade;
