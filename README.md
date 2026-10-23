@@ -40,7 +40,7 @@ Jenkins Credentials에 다음 항목을 등록해야 합니다.
 | `xenova-ec2-known-hosts` | Secret file | 검증한 EC2 SSH 호스트 공개키 한 줄 |
 | `xenova-production-env` | Secret file | `.env.example`을 기반으로 작성한 운영 `.env` |
 
-서버에는 Docker Engine과 Docker Compose v2가 설치되어 있어야 하며, `ubuntu` 사용자가 승인 요청 없이 Docker를 실행할 수 있어야 합니다. 초기 배포 전 UFW에서 HTTP 80 포트를 허용해야 합니다. 운영 비밀값과 PEM 키는 Git 저장소에 커밋하지 않습니다.
+서버에는 Docker Engine과 Docker Compose v2가 설치되어 있어야 하며, `ubuntu` 사용자가 승인 요청 없이 Docker를 실행할 수 있어야 합니다. 초기 배포 전 UFW에서 HTTP 80과 HTTPS 443 포트를 허용해야 합니다. 운영 비밀값과 PEM 키는 Git 저장소에 커밋하지 않습니다.
 
 ### Jenkins 컨테이너
 
