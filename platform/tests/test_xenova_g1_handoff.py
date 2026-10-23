@@ -90,7 +90,8 @@ class HandoffTest(unittest.TestCase):
             with self.subTest(document=name):
                 self.assertEqual((self.output/name).read_bytes(), (ROOT/name).read_bytes())
                 self.assertEqual(manifest["files"][name], handoff.file_info(ROOT/name))
-        for name in ("RUNBOOK.md", "docs/platform/build-guide.md"):
+        for name in ("RUNBOOK.md", "docs/platform/build-guide.md",
+                     "platform/guests/zephyr/telemetry/README.md"):
             document = self.output/name
             for link in re.findall(r"\]\(([^)]+)\)", document.read_text()):
                 if "://" in link or link.startswith("#"):

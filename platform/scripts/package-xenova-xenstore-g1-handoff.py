@@ -21,7 +21,14 @@ ARTIFACTS = {"zephyr.bin", "zephyr.elf", "zephyr.map", "zephyr.config", "zephyr.
 DOCUMENTATION = (
     "docs/platform/build-guide.md", "docs/platform/cli-manager-spec.md",
     "platform/yocto/layers.lock", "platform/guests/sources.lock.json",
-    "platform/guests/default-templates.lock.json", "platform/guests/zephyr/source.lock.json")
+    "platform/guests/default-templates.lock.json", "platform/guests/zephyr/source.lock.json",
+    # The shared build guide links to these current Telemetry references.
+    "platform/guests/zephyr/telemetry/README.md",
+    "platform/guests/zephyr/telemetry/contract/CONTRACT.md",
+    "platform/guests/zephyr/telemetry/contract/schemas/message.schema.json",
+    "platform/guests/zephyr/telemetry/contract/schemas/metric-catalog.json",
+    "platform/guests/zephyr/telemetry/contract/docs/CONSUMER_HANDOFF.md",
+    "platform/scripts/provision-xenova-telemetry.py")
 RUNBOOK = """# XenStore G1 인계물
 
 G1 빌드·패키징과 시험 도구 사용은
