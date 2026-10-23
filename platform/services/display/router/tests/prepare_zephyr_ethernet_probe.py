@@ -17,7 +17,8 @@ def replace_once(text, old, new):
     return text.replace(old,new,1)
 
 
-def prepare(output, port, password):
+def prepare(output, port, password, main_priority=0):
+    if main_priority not in (0,10):raise ValueError('only recorded lab comparison profiles are supported')
     manual=ROOT/'platform/apps/manual/zephyr'
     original=(manual/'src/main.c').read_text()
     text=original
@@ -107,6 +108,9 @@ static int probe_quiesce(const char *request,int64_t deadline,void *context) {
     network=ROOT/'platform/guests/zephyr/network-starter-app'
     config=(network/'prj.conf').read_text().replace('CONFIG_NET_TCP=n','CONFIG_NET_TCP=y')
     config+='\nCONFIG_NET_SOCKETS=y\nCONFIG_NET_SOCKETS_POLL_MAX=4\nCONFIG_MQTT_LIB=y\nCONFIG_XENOVA_MQTT=y\n'
+    # Optional lab comparison only; lowering main priority did not establish live recovery.
+    # Keep the previous default; this is not a vehicle scheduling decision.
+    config+=f'CONFIG_MAIN_THREAD_PRIORITY={main_priority}\n'
     config+=f'CONFIG_XENOVA_MANUAL_BROKER_HOST="192.168.77.1"\nCONFIG_XENOVA_MANUAL_BROKER_PORT={port}\nCONFIG_XENOVA_MANUAL_BROKER_USERNAME="manual"\nCONFIG_XENOVA_MANUAL_BROKER_PASSWORD="{password}"\n'
     (output/'prj.conf').write_text(config);(output/'prj.conf').chmod(0o600)
     (output/'app.overlay').write_text((network/'app.overlay').read_text())
@@ -115,6 +119,7 @@ static int probe_quiesce(const char *request,int64_t deadline,void *context) {
              'adapted_main_sha256':hashlib.sha256(text.encode()).hexdigest(),
              'mqtt_original_sha256':hashlib.sha256(mqtt_original.encode()).hexdigest(),
              'mqtt_diagnostic_sha256':hashlib.sha256(mqtt_diagnostic.encode()).hexdigest(),
+             'lab_main_thread_priority':main_priority,
              'broker_port':port,'source_root':str(ROOT)}
     (output/'source-receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
     print(json.dumps(receipt))
@@ -125,7 +130,8 @@ if __name__=='__main__':
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--port',type=int,required=True)
     parser.add_argument('--credential-file',type=Path,required=True)
+    parser.add_argument('--main-priority',type=int,choices=(0,10),default=0,help='lab comparison profile; neither proves VIF live recovery')
     args=parser.parse_args()
     credential=json.loads(args.credential_file.read_text())['manual']
     if not 1024<=args.port<=65535 or not credential.isalnum():parser.error('invalid test port or credential')
-    prepare(args.output,args.port,credential)
+    prepare(args.output,args.port,credential,args.main_priority)
