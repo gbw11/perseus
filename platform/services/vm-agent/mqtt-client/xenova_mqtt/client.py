@@ -28,6 +28,9 @@ class Message:
     envelope: dict[str, Any]
     # 받는 쪽 단조 시계. 신선도는 보드 간 시각(sent_at)이 아니라 이 값으로 잰다 (계약 1장)
     received_monotonic: float = field(default_factory=time.monotonic)
+    # 브로커가 구독 직후 준 마지막 값(MQTT retain 플래그). 실시간 수신이 아니고 저장된 지 얼마나 됐는지도 알 수 없으므로
+    # 신선도·생존의 근거로 쓰지 않는다. 받는 쪽은 실시간 값(retained=False)을 받은 뒤 확정한다 (계약 11.1)
+    retained: bool = False
 
     @property
     def type(self) -> str:
@@ -54,6 +57,28 @@ def _new_paho(client_id: str) -> mqtt.Client:
 def _failed(reason_code: Any) -> bool:
     # paho 2.x 는 ReasonCode, 1.6 은 int
     return bool(getattr(reason_code, "is_failure", reason_code != 0))
+
+
+def _suback_failed(code: Any) -> bool:
+    """SUBACK 한 항목. paho 1.6 은 granted_qos 정수(0x80 이면 거부), 2.x 는 ReasonCode."""
+    failed = getattr(code, "is_failure", None)
+    if failed is not None:
+        return bool(failed)
+    try:
+        return int(code) >= 0x80
+    except (TypeError, ValueError):
+        return True
+
+
+SUB_PENDING = "pending"  # 요청했고 SUBACK 대기
+SUB_GRANTED = "granted"
+SUB_DENIED = "denied"  # 브로커(ACL)가 거부
+EARLY_SUBACK_LIMIT = 32  # mid 를 등록하기 전에 도착한 SUBACK 을 잠시 들고 있는 한도
+PENDING_PUBLISH_LIMIT = 256  # PUBACK 을 기다리는 발행을 기억하는 한도. stop() 이 끊기 전에 기다린다
+
+
+class PublishError(RuntimeError):
+    """발행이 브로커에 전달되지 않았다(paho rc 실패 또는 PUBACK 대기 초과). wait_s 를 준 호출에서만 난다."""
 
 
 class XenovaClient:
@@ -83,6 +108,17 @@ class XenovaClient:
         self._keepalive = keepalive
         self._seq: dict[str, int] = {}
         self._subscriptions: dict[str, tuple[int, list[Handler]]] = {}
+        # 구독 승인 상태. 연결(CONNACK)과 구독 승인(SUBACK)은 다르다: 계정은 붙었는데 ACL 이 필터를 거부하면 메시지가 하나도 안 온다.
+        # 받는 쪽이 "안 온다"를 판정하려면 connected 가 아니라 subscribed(filter) 를 봐야 한다
+        self._sub_state: dict[str, str] = {}
+        self._pending_mids: dict[int, str] = {}
+        # subscribe() 가 mid 를 돌려주기 전에 네트워크 스레드가 SUBACK 을 먼저 처리할 수 있다. 그 SUBACK 은 mid 로 잠시 보관했다가
+        # 요청한 쪽이 mid 를 알게 되면 가져간다. paho 의 subscribe() 를 우리 잠금 안에서 부르면 SUBACK 콜백(paho 콜백 잠금을 쥔 채
+        # 우리 잠금을 기다림)과 맞물릴 수 있어 잠금을 걸쳐 두지 않는다
+        self._early_subacks: dict[int, Any] = {}
+        self._generation = 0  # 연결 세대. 끊길 때마다 +1. 끊기기 전에 보낸 요청의 mid 는 등록하지 않는다 (재연결 때 다시 요청)
+        self._inflight = 0  # 이 세대에서 subscribe() 가 진행 중인 요청 수. 0 이면 모르는 mid 의 SUBACK 은 보관하지 않고 버린다
+        self._pending_infos: list[Any] = []  # PUBACK 을 아직 받지 못한 QoS>0 발행. stop() 이 끊기 전에 기다린다
         self._latest: dict[str, Message] = {}
         self._tracker = env.SeqTracker()
         self._lock = threading.Lock()
@@ -95,6 +131,7 @@ class XenovaClient:
         self._paho.reconnect_delay_set(min_delay=reconnect_min_s, max_delay=reconnect_max_s)
         self._paho.on_connect = self._on_connect
         self._paho.on_disconnect = self._on_disconnect
+        self._paho.on_subscribe = self._on_subscribe
         self._paho.on_message = self._on_message
 
     # --- 연결 ---------------------------------------------------------------
@@ -109,7 +146,16 @@ class XenovaClient:
         self._paho.loop_start()
         return self.wait_connected(wait_s) if wait_s is not None else self.connected
 
-    def stop(self) -> None:
+    def stop(self, flush_s: float = 1.0) -> None:
+        """끊고 루프를 멈춘다. PUBACK 을 받지 못한 QoS 1 발행이나 소켓에 쓰지 못한 패킷이 있으면 flush_s 까지 기다린다."""
+        deadline = time.monotonic() + flush_s
+        while self._connected.is_set() and time.monotonic() < deadline:
+            with self._lock:
+                self._pending_infos = [info for info in self._pending_infos if not info.is_published()]
+                pending = len(self._pending_infos)
+            if pending == 0 and not self._paho.want_write():
+                break
+            time.sleep(0.02)
         self._stopping = True
         self._paho.disconnect()
         self._paho.loop_stop()
@@ -132,13 +178,85 @@ class XenovaClient:
         with self._lock:
             subscriptions = [(topic_filter, qos) for topic_filter, (qos, _) in self._subscriptions.items()]
         for topic_filter, qos in subscriptions:
-            client.subscribe(topic_filter, qos)
+            self._request_subscribe(client, topic_filter, qos)
         log.info("MQTT 연결 %s:%s (구독 %d개 복구)", self._host, self._port, len(subscriptions))
 
     def _on_disconnect(self, client: mqtt.Client, userdata: Any, *args: Any) -> None:
         self._connected.clear()
+        with self._lock:  # 재연결하면 구독을 다시 요청하고 SUBACK 을 다시 받아야 한다
+            self._sub_state = {topic_filter: SUB_PENDING for topic_filter in self._subscriptions}
+            self._pending_mids.clear()
+            self._early_subacks.clear()
+            self._inflight = 0
+            self._generation += 1
         if not self._stopping:
             log.warning("MQTT 연결 끊김, 재연결 대기")
+
+    def _request_subscribe(self, client: mqtt.Client, topic_filter: str, qos: int) -> None:
+        with self._lock:
+            self._sub_state[topic_filter] = SUB_PENDING
+            generation = self._generation
+            self._inflight += 1
+        try:
+            result = client.subscribe(topic_filter, qos)
+        except Exception:
+            with self._lock:
+                if generation == self._generation:
+                    self._inflight -= 1
+                    if self._inflight == 0:
+                        self._early_subacks.clear()  # 정상 경로와 같다. 실패한 요청 중에 보관한 SUBACK 을 다음 요청이 쓰면 안 된다
+            raise
+        mid = result[1] if isinstance(result, tuple) and len(result) > 1 else getattr(result, "mid", None)
+        with self._lock:
+            if generation != self._generation:
+                return  # 그 사이 끊겼다(inflight 는 _on_disconnect 가 비웠다). 재연결하면 _on_connect 가 다시 요청한다
+            self._inflight -= 1
+            codes = None if mid is None else self._early_subacks.pop(int(mid), None)
+            if self._inflight == 0:
+                self._early_subacks.clear()  # 남은 것은 어느 요청의 응답도 아니다. 다음 요청이 같은 mid 를 받아도 쓰지 않는다
+            if mid is None:
+                return
+            if codes is None:
+                self._pending_mids[int(mid)] = topic_filter
+                return
+            denied, items = self._apply_suback(topic_filter, codes)  # SUBACK 이 먼저 와 있었다
+        self._log_suback(topic_filter, denied, items)
+
+    def _on_subscribe(self, client: mqtt.Client, userdata: Any, mid: int, codes: Any, *_: Any) -> None:
+        """SUBACK. paho 1.6: (mid, granted_qos), 2.x: (mid, reason_codes, properties)."""
+        with self._lock:
+            topic_filter = self._pending_mids.pop(int(mid), None)
+            if topic_filter is None:
+                if self._inflight > 0:  # 요청한 쪽이 아직 mid 를 등록하지 못했을 수 있다. 등록할 때 가져가도록 보관한다
+                    self._early_subacks[int(mid)] = codes
+                    while len(self._early_subacks) > EARLY_SUBACK_LIMIT:
+                        del self._early_subacks[next(iter(self._early_subacks))]
+                return  # 진행 중인 요청이 없으면 모르는 mid 다(이전 연결의 늦은 응답 등). 버린다
+            denied, items = self._apply_suback(topic_filter, codes)
+        self._log_suback(topic_filter, denied, items)
+
+    def _apply_suback(self, topic_filter: str, codes: Any) -> tuple[bool, list[Any]]:
+        """잠금 안에서 부른다. 승인·거부를 기록하고 (거부 여부, SUBACK 항목) 을 돌려준다."""
+        items = list(codes) if isinstance(codes, (list, tuple)) else [codes]
+        denied = any(_suback_failed(code) for code in items) or not items
+        self._sub_state[topic_filter] = SUB_DENIED if denied else SUB_GRANTED
+        return denied, items
+
+    @staticmethod
+    def _log_suback(topic_filter: str, denied: bool, items: list[Any]) -> None:
+        if denied:
+            log.error("MQTT 구독 거부 %s: %s (계정·ACL 확인)", topic_filter, items)
+        else:
+            log.info("MQTT 구독 승인 %s", topic_filter)
+
+    def subscription_state(self, topic_filter: str) -> str | None:
+        """pending / granted / denied, 구독한 적 없으면 None."""
+        with self._lock:
+            return self._sub_state.get(topic_filter)
+
+    def subscribed(self, topic_filter: str) -> bool:
+        """연결돼 있고 브로커가 이 필터의 구독을 승인했다. 생존 신호가 "안 온다"를 판정하는 쪽은 connected 가 아니라 이것을 본다."""
+        return self.connected and self.subscription_state(topic_filter) == SUB_GRANTED
 
     # --- 발행 ---------------------------------------------------------------
 
@@ -153,10 +271,14 @@ class XenovaClient:
         app_id: str | None = None,
         correlation_id: str | None = None,
         causation_id: str | None = None,
+        wait_s: float | None = None,
     ) -> dict[str, Any]:
         """봉투를 씌워 발행하고 보낸 봉투를 돌려준다. QoS·retain 은 생략하면 type 별 계약값.
 
         연결이 끊긴 동안 QoS 0 메시지는 버려지고, QoS 1 은 paho 가 들고 있다가 재연결 후 보낸다.
+        paho 는 실패를 예외가 아니라 반환값(rc)으로 알린다. wait_s 가 None 이면 그 실패는 경고만 남긴다(기존 호출자 호환).
+        wait_s 를 주면 rc 실패를 PublishError 로 올리고, 0 보다 크면 그 시간까지 PUBACK(QoS 1)을 기다려 못 받아도 PublishError 다.
+        전달이 중요한 발행(retained 삭제, 종료 전 상태)에 쓴다.
         """
         rule = policy.for_type(message_type)
         app = app_id or topics.parse(topic).app_id
@@ -170,16 +292,41 @@ class XenovaClient:
         data = json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         if len(data) > rule.max_bytes:
             raise ValueError(f"{message_type} 메시지 {len(data)} bytes > 한도 {rule.max_bytes}")
-        self._paho.publish(
+        info = self._paho.publish(
             topic, data,
             qos=rule.qos if qos is None else qos,
             retain=rule.retain if retain is None else retain,
         )
+        self._track_publish(info, topic, wait_s)
         return envelope
 
-    def clear_retained(self, topic: str) -> None:
-        """retained 메시지를 지운다 (빈 payload + retain). 예: VM 삭제 시 inventory."""
-        self._paho.publish(topic, b"", qos=1, retain=True)
+    def clear_retained(self, topic: str, *, wait_s: float | None = None) -> None:
+        """retained 메시지를 지운다 (빈 payload + retain). 예: VM 삭제 시 inventory. wait_s 는 publish() 와 같다."""
+        info = self._paho.publish(topic, b"", qos=1, retain=True)
+        self._track_publish(info, topic, wait_s)
+
+    def _track_publish(self, info: Any, topic: str, wait_s: float | None) -> None:
+        """paho 의 MQTTMessageInfo 를 본다. 끊긴 동안 QoS 1 은 rc=NO_CONN 이지만 큐에 남아 재연결 뒤 나간다."""
+        rc = getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS)
+        if rc != mqtt.MQTT_ERR_SUCCESS:
+            if wait_s is not None:
+                raise PublishError(f"{topic}: rc={rc} ({mqtt.error_string(rc)})")
+            log.warning("발행 %s: rc=%s (%s)", topic, rc, mqtt.error_string(rc))
+            return
+        if not hasattr(info, "is_published"):
+            return
+        if wait_s is not None and wait_s > 0:
+            try:
+                info.wait_for_publish(timeout=wait_s)
+            except Exception as exc:  # noqa: BLE001 - paho 는 큐 초과·연결 종료를 여기서 예외로 올린다
+                raise PublishError(f"{topic}: {exc}") from exc
+            if not info.is_published():
+                raise PublishError(f"{topic}: no PUBACK within {wait_s:g}s")
+            return
+        with self._lock:
+            self._pending_infos = [i for i in self._pending_infos if not i.is_published()][-PENDING_PUBLISH_LIMIT:]
+            if not info.is_published():
+                self._pending_infos.append(info)
 
     # --- 구독 ---------------------------------------------------------------
 
@@ -193,8 +340,9 @@ class XenovaClient:
             if handler is not None:
                 handlers.append(handler)
             self._subscriptions[topic_filter] = (qos, handlers)
+            self._sub_state.setdefault(topic_filter, SUB_PENDING)
         if self.connected:
-            self._paho.subscribe(topic_filter, qos)
+            self._request_subscribe(self._paho, topic_filter, qos)
 
     def latest(self, topic: str) -> Message | None:
         """토픽별 마지막으로 받은 메시지. 신선도는 Message.age_ms() 로 판정한다."""
@@ -223,7 +371,7 @@ class XenovaClient:
             log.debug("버림 %s: seq %s 중복·역전", msg.topic, envelope.get("seq"))
             return
 
-        message = Message(msg.topic, envelope)
+        message = Message(msg.topic, envelope, retained=bool(getattr(msg, "retain", False)))
         with self._lock:
             self._latest[msg.topic] = message
             handlers = [

@@ -266,6 +266,7 @@ def prepare_instance(root, record, command=subprocess.run):
         command(['ssh-keygen', '-q', '-t', kind, '-N', '', '-f', str(target)], check=True)
     write(root, 'etc/xenova/instance-id', record['uuid'] + '\n', 0o600)
     configure_ssh_service(root)
+    configure_agent_identity(root, seed=False)
 
 
 def prepare_deployment_seed(root, record):
@@ -287,3 +288,70 @@ def prepare_deployment_seed(root, record):
     write(root, 'etc/xenova/deployment-seed.json', json.dumps({'schema': 1, 'id': record['id'], 'init': 'systemd'}) + '\n')
     install_identity_gate(root)
     configure_ssh_service(root)
+    configure_agent_identity(root, seed=True)
+
+
+# Agent는 템플릿에서 설치한다. 이 두 경로에서는 신원 gate만 연결하고 실행하지 않는다.
+def configure_agent_identity(root, *, seed):
+    """Agent가 있는 신규 rootfs의 일반/seed 신원 의존성을 연결한다. 구형 템플릿은 유지한다."""
+    unit = inside(root, 'usr/lib/systemd/system/xenova-agent.service', create_parents=False)
+    if not unit.is_file():
+        return
+    identity = inside(root, 'usr/lib/systemd/system/xenova-guest-identity.service',
+                      create_parents=False)
+    dropin = inside(root, 'etc/systemd/system/xenova-agent.service.d/10-xenova-identity.conf',
+                    follow_final=False, create_parents=False)
+    if seed:
+        if not identity.is_file():
+            raise ValueError('seed Agent requires the guest identity unit')
+        if dropin.is_symlink():
+            raise ValueError('Agent identity drop-in must not be a symlink')
+        write(root, 'etc/systemd/system/xenova-agent.service.d/10-xenova-identity.conf',
+              '[Unit]\nRequires=xenova-guest-identity.service\nAfter=xenova-guest-identity.service\n')
+    elif identity.exists() or dropin.exists() or dropin.is_symlink():
+        raise ValueError('ordinary instance must not inherit a seed Agent identity gate')
+
+
+def verify_guest_agent(root, *, seed=False, required=False):
+    """오프라인 rootfs의 실제 Python import·enable·신원 계약을 확인한다. Broker에는 접속하지 않는다."""
+    root = Path(root)
+    unit = inside(root, 'usr/lib/systemd/system/xenova-agent.service', create_parents=False)
+    if not unit.is_file():
+        if required or inside(root, 'opt/xenova/agent/xenova_agent', create_parents=False).exists():
+            raise ValueError('guest Agent installation is incomplete')
+        return {'installed': False, 'reason': 'legacy-template'}
+    directives = [line.strip() for line in unit.read_text().splitlines()
+                  if line.strip() and not line.lstrip().startswith('#')]
+    if ('ConditionPathExists=/etc/xenova/instance-id' not in directives
+            or any(line.startswith('Requires=') and 'xenova-guest-identity.service' in line
+                   for line in directives)):
+        raise ValueError('Agent base unit must support ordinary instances')
+    dropin = inside(root, 'etc/systemd/system/xenova-agent.service.d/10-xenova-identity.conf',
+                    create_parents=False)
+    identity = inside(root, 'usr/lib/systemd/system/xenova-guest-identity.service',
+                      create_parents=False)
+    expected = '[Unit]\nRequires=xenova-guest-identity.service\nAfter=xenova-guest-identity.service\n'
+    if seed:
+        if not identity.is_file() or not dropin.is_file() or dropin.read_text() != expected:
+            raise ValueError('seed Agent identity dependency absent')
+    elif identity.exists() or dropin.exists():
+        raise ValueError('ordinary Agent has a seed identity dependency')
+    enabled = subprocess.check_output(['systemctl', '--root=' + str(root), 'is-enabled',
+                                       'xenova-agent.service'], text=True, timeout=60).strip()
+    if enabled != 'enabled':
+        raise ValueError('guest Agent is not enabled')
+    script = (
+        'import importlib.metadata,json,sys;'
+        'sys.path[:0]=["/opt/xenova/agent","/opt/xenova/mqtt-client"];'
+        'import paho.mqtt.client,xenova_mqtt,xenova_agent,xenova_agent.heartbeat,xenova_agent.__main__;'
+        'v=importlib.metadata.version("paho-mqtt");'
+        'assert sys.version_info>=(3,11);'
+        'parts=tuple(int(p) for p in v.split(".")[:2]);assert (1,6)<=parts<(3,0);'
+        'print(json.dumps({"python":sys.version.split()[0],"paho_mqtt":v,'
+        '"imports":["paho.mqtt.client","xenova_mqtt","xenova_agent.heartbeat","xenova_agent.__main__"]}))'
+    )
+    result = json.loads(subprocess.check_output(
+        ['chroot', str(root), '/usr/bin/python3', '-B', '-c', script],
+        text=True, timeout=60))
+    return {**result, 'installed': True, 'enabled': True, 'identity_gate': seed,
+            'broker_connection': 'not-tested'}

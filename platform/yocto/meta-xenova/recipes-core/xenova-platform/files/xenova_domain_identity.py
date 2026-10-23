@@ -10,8 +10,8 @@ import os
 import sys
 
 
-def identity(domid, library=None):
-    if type(domid) is not int or not 0 < domid < 0x7ff0:
+def identity(domid, library=None, *, allow_dom0=False):
+    if type(domid) is not int or not (0 < domid < 0x7ff0 or allow_dom0 is True and domid == 0):
         raise ValueError("valid guest domid required")
     lib = library if library is not None else ctypes.CDLL("libxenmanage.so.1", use_errno=True)
     lib.xenmanage_open.argtypes = [ctypes.c_void_p, ctypes.c_uint]
@@ -43,8 +43,9 @@ def identity(domid, library=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--domid", required=True, type=int)
+    parser.add_argument("--allow-dom0", action="store_true", help="read-only host CPU verification")
     args = parser.parse_args(argv)
-    print(json.dumps(identity(args.domid)))
+    print(json.dumps(identity(args.domid, allow_dom0=args.allow_dom0)))
 
 
 if __name__ == "__main__":
