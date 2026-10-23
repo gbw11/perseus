@@ -1,0 +1,47 @@
+{
+  "name": "03_reboot_requires_binding",
+  "purpose_ko": "새 세션 도착만으로 current binding을 바꾸지 않음",
+  "test_scope": "reference receiver oracle only; no actual broker or control execution",
+  "steps": [
+    {
+      "op": "bind",
+      "vm_id": "11111111-1111-4111-8111-111111111111",
+      "boot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "publisher_instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "received_ms": 0,
+      "retained_delivery": false,
+      "expected": "CURRENT_OBSERVATION"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/19_new_guest_boot.json",
+      "received_ms": 100,
+      "retained_delivery": false,
+      "expected": "UNBOUND_OR_RETIRED"
+    },
+    {
+      "op": "bind",
+      "vm_id": "11111111-1111-4111-8111-111111111111",
+      "boot_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "publisher_instance_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/19_new_guest_boot.json",
+      "received_ms": 200,
+      "retained_delivery": false,
+      "expected": "CURRENT_OBSERVATION"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/06_network_raw32.json",
+      "received_ms": 300,
+      "retained_delivery": false,
+      "expected": "UNBOUND_OR_RETIRED"
+    }
+  ]
+}

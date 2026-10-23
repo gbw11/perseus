@@ -18,6 +18,32 @@ PLATFORM = "platform/yocto/meta-xenova/recipes-core/xenova-platform/files"
 MANIFEST = "handoff-manifest.json"
 ARTIFACTS = {"zephyr.bin", "zephyr.elf", "zephyr.map", "zephyr.config", "zephyr.dts",
              "ZEPHYR-LICENSE", "XEN-ABI-LICENSE"}
+DOCUMENTATION = (
+    "docs/platform/build-guide.md", "docs/platform/cli-manager-spec.md",
+    "platform/yocto/layers.lock", "platform/guests/sources.lock.json",
+    "platform/guests/default-templates.lock.json", "platform/guests/zephyr/source.lock.json",
+    # The shared build guide links to these current Telemetry references.
+    "platform/guests/zephyr/telemetry/README.md",
+    "platform/guests/zephyr/telemetry/contract/CONTRACT.md",
+    "platform/guests/zephyr/telemetry/contract/schemas/message.schema.json",
+    "platform/guests/zephyr/telemetry/contract/schemas/metric-catalog.json",
+    "platform/guests/zephyr/telemetry/contract/docs/CONSUMER_HANDOFF.md",
+    "platform/scripts/provision-xenova-telemetry.py")
+RUNBOOK = """# XenStore G1 인계물
+
+G1 빌드·패키징과 시험 도구 사용은
+[Xenova 빌드 가이드의 G1 절](docs/platform/build-guide.md#10-xenstore-g1-시험-인계물)을 따른다.
+공통 VM 제어·신원·복구 계약은 [CLI·Manager 명세](docs/platform/cli-manager-spec.md)에 있다.
+두 문서는 원래 저장소 경로로 동봉하며 빌드 가이드가 참조하는 고정 입력도 함께 보존한다.
+
+- `firmware/`: 검증된 G1 펌웨어와 빌드 영수증
+- `runtime/`: 같은 소스 기준의 독립 시험용 플랫폼 라이브러리
+- `scripts/xenova-xenstore-g1-lab.py`: 소유 시험 도메인의 준비·관측·회수 도구
+- `handoff-manifest.json`, `SHA256SUMS`: 문서를 포함한 전체 인계 파일의 해시
+
+G1은 XenStore·VIF 관측 시험이며 Ethernet packet 송수신·DHCP·앱 준비의 통과를 뜻하지 않는다.
+인계물 검증·복사만으로 보드 설치 경로나 기본 VM을 변경하지 않는다.
+"""
 
 
 def runtime_sources():
@@ -150,14 +176,16 @@ def package(source, firmware, output, *, execute=False):
     origins = {"runtime/"+target: source/origin for target, origin in mapping.items()}
     origins.update({"firmware/"+name: firmware/name for name in ARTIFACTS | {"g1-build.json"}})
     origins["scripts/xenova-xenstore-g1-lab.py"] = source/"platform/scripts/xenova-xenstore-g1-lab.py"
-    origins["RUNBOOK.md"] = source/"docs/build-guides/xenova-zephyr-xenstore-g1.md"
+    origins.update({name: source/name for name in DOCUMENTATION})
     files = {name: file_info(path) for name, path in origins.items()}
     lab_text = origins["scripts/xenova-xenstore-g1-lab.py"].read_text()
     tree = ast.parse(lab_text)
     cfg = next(ast.literal_eval(n.value) for n in tree.body
                if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "CFG" for t in n.targets))
     cfg = cfg.encode()
-    files["test.cfg.in"] = {"sha256": hashlib.sha256(cfg).hexdigest(), "bytes": len(cfg)}
+    generated = {"test.cfg.in": cfg, "RUNBOOK.md": RUNBOOK.encode()}
+    files.update({name: {"sha256": hashlib.sha256(content).hexdigest(), "bytes": len(content)}
+                  for name, content in generated.items()})
     if not execute:
         return {"action": "plan", "output": str(output), "files": len(files),
                 "g1_source_sha256": g1["source_sha256"]}
@@ -171,8 +199,9 @@ def package(source, firmware, output, *, execute=False):
             target.chmod(0o444)
             if file_info(target) != files[name]:
                 raise ValueError("input changed while copying: " + str(origin))
-        (stage/"test.cfg.in").write_bytes(cfg)
-        (stage/"test.cfg.in").chmod(0o444)
+        for name, content in generated.items():
+            (stage/name).write_bytes(content)
+            (stage/name).chmod(0o444)
         if any(file_info(path) != files[name] for name, path in origins.items()):
             raise ValueError("handoff input changed before publication")
         validate_firmware(source, firmware)

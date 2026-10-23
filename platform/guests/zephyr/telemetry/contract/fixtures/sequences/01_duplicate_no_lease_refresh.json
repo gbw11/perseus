@@ -1,0 +1,33 @@
+{
+  "name": "01_duplicate_no_lease_refresh",
+  "purpose_ko": "중복 수신이 lease를 연장해서는 안 됨",
+  "test_scope": "reference receiver oracle only; no actual broker or control execution",
+  "steps": [
+    {
+      "op": "bind",
+      "vm_id": "11111111-1111-4111-8111-111111111111",
+      "boot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "publisher_instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "received_ms": 0,
+      "retained_delivery": false,
+      "expected": "CURRENT_OBSERVATION"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "received_ms": 5000,
+      "retained_delivery": false,
+      "expected": "DUPLICATE"
+    },
+    {
+      "op": "freshness",
+      "file": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "now_ms": 7000,
+      "expected": "STALE"
+    }
+  ]
+}

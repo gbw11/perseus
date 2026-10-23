@@ -1,0 +1,39 @@
+{
+  "name": "09_other_metrics_not_refresh",
+  "purpose_ko": "network 갱신이 오래된 heap 값을 정상으로 갱신하면 안 됨",
+  "test_scope": "reference receiver oracle only; no actual broker or control execution",
+  "steps": [
+    {
+      "op": "bind",
+      "vm_id": "11111111-1111-4111-8111-111111111111",
+      "boot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "publisher_instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "received_ms": 0,
+      "retained_delivery": false,
+      "expected": "CURRENT_OBSERVATION"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/06_network_raw32.json",
+      "received_ms": 2000,
+      "retained_delivery": false,
+      "expected": "CURRENT_OBSERVATION"
+    },
+    {
+      "op": "freshness",
+      "file": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "now_ms": 6500,
+      "expected": "STALE"
+    },
+    {
+      "op": "freshness",
+      "file": "fixtures/valid/06_network_raw32.json",
+      "now_ms": 6500,
+      "expected": "RECEIPT_LEASE_VALID"
+    }
+  ]
+}

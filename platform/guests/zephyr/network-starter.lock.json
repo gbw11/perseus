@@ -4,27 +4,47 @@
   "version": "1.1.0",
   "zephyr_commit": "684c9e8f32e4373a21098559f748f06915f950c9",
   "sdk_version": "1.0.0",
-  "app_source_sha256": "6859b6b066c00c53071a0c22dd5482763ba34d26dfe6eabcab419191568d04ec",
+  "app_source_sha256": "4396ebb2c207822c4f599d89cddb1fff4bf8c7d105275d43ee95aab044e4ac0b",
   "app_files": {
     "CMakeLists.txt": {
-      "sha256": "8c4eeee8d533202e1dce9b3474c79a21f37c77100de7d4dac807042cdfbcec24",
-      "bytes": 320
+      "sha256": "2692a4ff5c3255724c383aa443bd6b638112a2373a12a393aacdfdc11af362aa",
+      "bytes": 640
+    },
+    "Kconfig": {
+      "sha256": "6904621496baf7ef059dbf087fc515c5daf542aaaaf2c76b5e16a83d783d9887",
+      "bytes": 398
     },
     "README.md": {
-      "sha256": "05a9ba8aab1b57254ff73457d874f6a8d07c21462125019715f00657e7509e5a",
-      "bytes": 998
+      "sha256": "cf84ef97babc2b37c61cb1935469712b60dd6f332c3593170939e832cf7faa80",
+      "bytes": 2492
     },
     "app.overlay": {
       "sha256": "d6bea9d071f32fadb8b3bcc1850efedc1c1b0f966a5d8787c1d21d456700c3eb",
       "bytes": 308
     },
     "prj.conf": {
-      "sha256": "fface19b1f614ae451ba6c0f4d28fcd1506d5865fd16128a8f711d6718b52077",
-      "bytes": 1037
+      "sha256": "3ee0ec932e22fff36d6acbc8468d27bbaf2bfd1143837ecf9e0dcca0e759ebc0",
+      "bytes": 1179
+    },
+    "src/diagnostics.c": {
+      "sha256": "2e810eee0f42dbc11e4f5666a307bf8f75813dffd98c5144d4054d63af33c855",
+      "bytes": 1153
+    },
+    "src/diagnostics_app.h": {
+      "sha256": "a5de4cf6054a6ac1e0ef22d25221b85230a3d2cb79b8d83f886550fb76090c7e",
+      "bytes": 846
+    },
+    "src/exercise.c": {
+      "sha256": "7041b49d6ebf36bd91f0296d8895c445c2faf415f493895cc98195c549c69795",
+      "bytes": 4531
     },
     "src/main.c": {
-      "sha256": "035f8f3643c81f93f39bee7752b1f6f29af4a40e12693793c9c015561b674c21",
-      "bytes": 1972
+      "sha256": "aa53f8ad91b3721097b9df58638c8963f6ec7d5a3e6e039d4b08de91ff5e94ed",
+      "bytes": 3012
+    },
+    "src/telemetry.c": {
+      "sha256": "0087cecdc088abcc25556363b6d6a082c55b5af31d72e7b986cf0ae1dc0be7b5",
+      "bytes": 2534
     }
   }
 }

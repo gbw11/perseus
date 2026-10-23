@@ -1,0 +1,20 @@
+{
+  "name": "08_truncated_not_complete_source",
+  "purpose_ko": "모든 page 수신과 원본 전부 관측은 다른 것",
+  "test_scope": "reference receiver oracle only; no actual broker or control execution",
+  "steps": [
+    {
+      "op": "bind",
+      "vm_id": "11111111-1111-4111-8111-111111111111",
+      "boot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "publisher_instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/16_threads_truncated.json",
+      "received_ms": 0,
+      "retained_delivery": false,
+      "expected": "SNAPSHOT_SOURCE_TRUNCATED"
+    }
+  ]
+}
