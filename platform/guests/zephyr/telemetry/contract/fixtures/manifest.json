@@ -1,0 +1,531 @@
+{
+  "contract": "2.0",
+  "fixtures_are": "synthetic normative examples, not device logs",
+  "valid": [
+    {
+      "name": "01_inventory_unsynced",
+      "file": "fixtures/valid/01_inventory_unsynced.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/inventory",
+      "qos": 1,
+      "retain": true,
+      "description_ko": "실제 wall clock이 없다는 사실을 null로 전달하는 구성 예시; frequency 등 값은 합성"
+    },
+    {
+      "name": "02_inventory_bound_time",
+      "file": "fixtures/valid/02_inventory_bound_time.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/inventory",
+      "qos": 1,
+      "retain": true,
+      "description_ko": "host-provisioned 문맥과 UTC 품질 예시; 수신자는 receipt를 별도로 확인해야 함"
+    },
+    {
+      "name": "03_publisher_heartbeat",
+      "file": "fixtures/valid/03_publisher_heartbeat.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/heartbeat",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "Publisher 생존일 뿐 앱 정상 선언이 아님"
+    },
+    {
+      "name": "04_heap_and_unsupported_cpu",
+      "file": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "kernel heap 범위와 미지원 CPU 사용률을 구분"
+    },
+    {
+      "name": "05_collection_error",
+      "file": "fixtures/valid/05_collection_error.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "수집 실패를 0으로 위장하지 않음"
+    },
+    {
+      "name": "06_network_raw32",
+      "file": "fixtures/valid/06_network_raw32.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "원본 netfront 32비트 카운터와 링크 상태; IP/앱 준비 주장 없음"
+    },
+    {
+      "name": "07_loop_progress",
+      "file": "fixtures/valid/07_loop_progress.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "루프 완료 수·부호 있는 지터·경과를 분리"
+    },
+    {
+      "name": "08_loop_stalled",
+      "file": "fixtures/valid/08_loop_stalled.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "heartbeat가 나와도 loop 완료 수는 그대로이고 완료 age는 증가; 자동 정상 판정 없음"
+    },
+    {
+      "name": "09_first_completion_missing",
+      "file": "fixtures/valid/09_first_completion_missing.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "완료 전 age는 null이며 0이 아님"
+    },
+    {
+      "name": "10_timing_histogram",
+      "file": "fixtures/valid/10_timing_histogram.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "p99=255는 버킷 상한, 실제 최대는200; 합성 표본100개"
+    },
+    {
+      "name": "11_no_timing_samples",
+      "file": "fixtures/valid/11_no_timing_samples.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "표본0일 때 요약값 모두 null"
+    },
+    {
+      "name": "12_open_histogram_bucket",
+      "file": "fixtures/valid/12_open_histogram_bucket.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "열린 마지막 버킷이면 유한 분위수 상한을 만들지 않음"
+    },
+    {
+      "name": "13_boot_event",
+      "file": "fixtures/valid/13_boot_event.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/events",
+      "qos": 1,
+      "retain": false,
+      "description_ko": "사건 발생 uptime과 보고 uptime을 구별; 역사 자료"
+    },
+    {
+      "name": "14_error_event",
+      "file": "fixtures/valid/14_error_event.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/events",
+      "qos": 1,
+      "retain": false,
+      "description_ko": "오류 원코드를 보존; EIO는 합성 사례"
+    },
+    {
+      "name": "15_threads_with_scan_limit",
+      "file": "fixtures/valid/15_threads_with_scan_limit.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "description_ko": "스레드 row 자체는 유효하지만 특정 스택 스캔은 제한에 걸림"
+    },
+    {
+      "name": "16_threads_truncated",
+      "file": "fixtures/valid/16_threads_truncated.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "description_ko": "Core row 한도 초과, 반환행2개 유효하고 전체12개였음을 밝힘"
+    },
+    {
+      "name": "17_history_loss",
+      "file": "fixtures/valid/17_history_loss.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "description_ko": "관측 전에 덮인 이력과 전송 큐 유실을 숨기지 않음"
+    },
+    {
+      "name": "18_second_vm",
+      "file": "fixtures/valid/18_second_vm.json",
+      "topic": "xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "같은 metric seq라도 VM이 다르면 별개 메시지"
+    },
+    {
+      "name": "19_new_guest_boot",
+      "file": "fixtures/valid/19_new_guest_boot.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "guest reboot로 boot/publisher ID 교체, seq 재시작"
+    },
+    {
+      "name": "20_publisher_restart_only",
+      "file": "fixtures/valid/20_publisher_restart_only.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "guest 부팅은 그대로, 발행자 재시작만 분리"
+    },
+    {
+      "name": "21_uint64_precision",
+      "file": "fixtures/valid/21_uint64_precision.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "JS 안전정수 한계를 넘는 counter를 십진 문자열로 보존"
+    },
+    {
+      "name": "22_publisher_degraded",
+      "file": "fixtures/valid/22_publisher_degraded.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/heartbeat",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "발행자가 살아 있으나 collector 성공 이력이 없음"
+    },
+    {
+      "name": "23_threads_part0",
+      "file": "fixtures/valid/23_threads_part0.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "description_ko": "한 번 수집한 snapshot을 전송 페이지만 분할, 완전성은 모든 part 수신 후 판정"
+    },
+    {
+      "name": "24_threads_part1",
+      "file": "fixtures/valid/24_threads_part1.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "description_ko": "한 번 수집한 snapshot을 전송 페이지만 분할, 완전성은 모든 part 수신 후 판정"
+    },
+    {
+      "name": "25_loop_not_registered",
+      "file": "fixtures/valid/25_loop_not_registered.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "진단 코어만 존재할 때 실제 앱 루프가 있는 척하지 않음"
+    },
+    {
+      "name": "26_raw_counter_before_wrap",
+      "file": "fixtures/valid/26_raw_counter_before_wrap.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "32비트 원본 counter 상한"
+    },
+    {
+      "name": "27_raw_counter_after_wrap",
+      "file": "fixtures/valid/27_raw_counter_after_wrap.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "wrap 이후 원본값. 확대 누적값으로 위장하지 않음"
+    },
+    {
+      "name": "28_saturated_summary",
+      "file": "fixtures/valid/28_saturated_summary.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "description_ko": "포화 시 합계·분위수 보장하지 않고 null 처리"
+    },
+    {
+      "name": "29_thread_scan_not_requested",
+      "file": "fixtures/valid/29_thread_scan_not_requested.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "description_ko": "비싼 스캔 미요청: 전체 스레드 수를0으로 만들지 않음"
+    },
+    {
+      "name": "30_history_collection_failed",
+      "file": "fixtures/valid/30_history_collection_failed.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "description_ko": "수집 실패: 과거 오류가0개였다고 주장하지 않음"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "01_v1_schema",
+      "file": "fixtures/invalid/01_v1_schema.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/inventory",
+      "qos": 1,
+      "retain": true,
+      "expected_error": "SCHEMA_INVALID",
+      "description_ko": "v1 위장 금지"
+    },
+    {
+      "name": "02_topic_wrong_vm",
+      "file": "fixtures/invalid/02_topic_wrong_vm.json",
+      "topic": "xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "TOPIC_MISMATCH",
+      "description_ko": "타 VM 토픽"
+    },
+    {
+      "name": "03_message_id_counter_only",
+      "file": "fixtures/invalid/03_message_id_counter_only.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "MESSAGE_ID",
+      "description_ko": "전역 충돌하는 정수ID"
+    },
+    {
+      "name": "04_numeric_seq",
+      "file": "fixtures/invalid/04_numeric_seq.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "description_ko": "64비트 seq는 문자열"
+    },
+    {
+      "name": "05_u64_overflow",
+      "file": "fixtures/invalid/05_u64_overflow.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "INTEGER_RANGE",
+      "description_ko": "u64 범위 초과"
+    },
+    {
+      "name": "06_failure_zero",
+      "file": "fixtures/invalid/06_failure_zero.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "MEASUREMENT_STATUS",
+      "description_ko": "실패를0으로 표시"
+    },
+    {
+      "name": "07_unavailable_fake_utc",
+      "file": "fixtures/invalid/07_unavailable_fake_utc.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/inventory",
+      "qos": 1,
+      "retain": true,
+      "expected_error": "CLOCK_QUALITY",
+      "description_ko": "가짜1970 UTC"
+    },
+    {
+      "name": "08_synced_without_source",
+      "file": "fixtures/invalid/08_synced_without_source.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/inventory",
+      "qos": 1,
+      "retain": true,
+      "expected_error": "CLOCK_QUALITY",
+      "description_ko": "출처 없는 동기화 선언"
+    },
+    {
+      "name": "09_unbound_with_execution",
+      "file": "fixtures/invalid/09_unbound_with_execution.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/inventory",
+      "qos": 1,
+      "retain": true,
+      "expected_error": "CONTEXT_BINDING",
+      "description_ko": "미결합인데 임의execution 주장"
+    },
+    {
+      "name": "10_collection_after_send",
+      "file": "fixtures/invalid/10_collection_after_send.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "CLOCK_ORDER",
+      "description_ko": "발행 후에 수집 완료"
+    },
+    {
+      "name": "11_wrong_unit",
+      "file": "fixtures/invalid/11_wrong_unit.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "METRIC_CONTRACT",
+      "description_ko": "heap을count로 위장"
+    },
+    {
+      "name": "12_counter_double",
+      "file": "fixtures/invalid/12_counter_double.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "MEASUREMENT_TYPE",
+      "description_ko": "counter를double로 강제변환"
+    },
+    {
+      "name": "13_exact_p99_mislabel",
+      "file": "fixtures/invalid/13_exact_p99_mislabel.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "HISTOGRAM_QUANTILE",
+      "description_ko": "정확한p99인척 200 전달"
+    },
+    {
+      "name": "14_hist_count_mismatch",
+      "file": "fixtures/invalid/14_hist_count_mismatch.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "HISTOGRAM_COUNT",
+      "description_ko": "버킷 합과count 불일치"
+    },
+    {
+      "name": "15_no_samples_zero_summary",
+      "file": "fixtures/invalid/15_no_samples_zero_summary.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "HISTOGRAM_EMPTY",
+      "description_ko": "표본없음을0으로 위장"
+    },
+    {
+      "name": "16_open_bucket_finite_p99",
+      "file": "fixtures/invalid/16_open_bucket_finite_p99.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "HISTOGRAM_QUANTILE",
+      "description_ko": "열린 버킷에 유한 상한"
+    },
+    {
+      "name": "17_metrics_retained",
+      "file": "fixtures/invalid/17_metrics_retained.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": true,
+      "expected_error": "RETAIN_POLICY",
+      "description_ko": "주기값을retained로 발행"
+    },
+    {
+      "name": "18_heartbeat_qos1",
+      "file": "fixtures/invalid/18_heartbeat_qos1.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/heartbeat",
+      "qos": 1,
+      "retain": false,
+      "expected_error": "QOS_POLICY",
+      "description_ko": "오래된 생존 재전송 방지 정책 위반"
+    },
+    {
+      "name": "19_app_health_from_reporter",
+      "file": "fixtures/invalid/19_app_health_from_reporter.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/heartbeat",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "description_ko": "통신 생존을앱정상으로 선언"
+    },
+    {
+      "name": "20_stack_bad_unused",
+      "file": "fixtures/invalid/20_stack_bad_unused.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "expected_error": "STACK_RANGE",
+      "description_ko": "unused가size보다 큼"
+    },
+    {
+      "name": "21_truncation_silent",
+      "file": "fixtures/invalid/21_truncation_silent.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "expected_error": "SNAPSHOT_COMPLETENESS",
+      "description_ko": "truncated를ok로 숨김"
+    },
+    {
+      "name": "22_bad_part_index",
+      "file": "fixtures/invalid/22_bad_part_index.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "expected_error": "SNAPSHOT_PART",
+      "description_ko": "index가count이상"
+    },
+    {
+      "name": "23_raw_counter_widened",
+      "file": "fixtures/invalid/23_raw_counter_widened.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "RAW_COUNTER_RANGE",
+      "description_ko": "32비트원본을의미없이확대"
+    },
+    {
+      "name": "24_stage_multibyte_limit",
+      "file": "fixtures/invalid/24_stage_multibyte_limit.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/events",
+      "qos": 1,
+      "retain": false,
+      "expected_error": "STAGE_BYTES",
+      "description_ko": "stage31byte한도,글자수가아님"
+    },
+    {
+      "name": "25_packet_oversize",
+      "file": "fixtures/invalid/25_packet_oversize.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/inventory",
+      "qos": 1,
+      "retain": true,
+      "expected_error": "PAYLOAD_TOO_LARGE",
+      "description_ko": "wire4096byte한도"
+    },
+    {
+      "name": "26_unknown_metric",
+      "file": "fixtures/invalid/26_unknown_metric.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "METRIC_CONTRACT",
+      "description_ko": "정의없이새수치의미추가"
+    },
+    {
+      "name": "27_metrics_missing_labels",
+      "file": "fixtures/invalid/27_metrics_missing_labels.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "METRIC_LABELS",
+      "description_ko": "task문맥누락"
+    },
+    {
+      "name": "28_history_cannot_claim_lossless",
+      "file": "fixtures/invalid/28_history_cannot_claim_lossless.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "expected_error": "HISTORY_COVERAGE",
+      "description_ko": "원본보다더많은보존수"
+    },
+    {
+      "name": "29_unrequested_zero_count",
+      "file": "fixtures/invalid/29_unrequested_zero_count.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "expected_error": "SNAPSHOT_COMPLETENESS",
+      "description_ko": "전체수미관측을0으로위장"
+    },
+    {
+      "name": "30_failed_history_zeroed",
+      "file": "fixtures/invalid/30_failed_history_zeroed.json",
+      "topic": "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "expected_error": "HISTORY_COVERAGE",
+      "description_ko": "조회실패를빈정상이력으로위장"
+    }
+  ],
+  "sequences": [
+    "fixtures/sequences/01_duplicate_no_lease_refresh.json",
+    "fixtures/sequences/02_vm_independence.json",
+    "fixtures/sequences/03_reboot_requires_binding.json",
+    "fixtures/sequences/04_publisher_restart.json",
+    "fixtures/sequences/05_retained_not_liveness.json",
+    "fixtures/sequences/06_stream_ordering.json",
+    "fixtures/sequences/07_snapshot_out_of_order.json",
+    "fixtures/sequences/08_truncated_not_complete_source.json",
+    "fixtures/sequences/09_other_metrics_not_refresh.json",
+    "fixtures/sequences/10_heartbeat_not_loop_progress.json",
+    "fixtures/sequences/11_unavailable_snapshot.json"
+  ]
+}

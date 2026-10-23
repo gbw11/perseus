@@ -52,6 +52,9 @@ C 소비자는 `xdiag_snapshot_get(&snapshot, include_threads)`를 호출한다.
   reboot 뒤에는 남지 않는다. U-Boot·Xen·Zephyr 초기 kernel 로그와 fatal/panic은
   기존 UART/PV 콘솔 및 dom0/PC 수집 경로로 확보한다. fatal handler를 교체하거나
   기록된 오류가 없다는 이유로 crash가 없었다고 판단하지 않는다.
+  각 원 사건에는 발생 시점의 guest-boot-local `event_seq`를 부여한다. 실패한 boot 사건이
+  두 ring에 들어가도 같은 ID이며, `history.event_sequence`는 중복 없는 원 발생 수다.
+  sequence 소진은 -ERANGE로 거절하며 ID를 wrap하지 않는다.
 - 시각: `uptime_ms`는 Zephyr uptime이다. 타이밍 API는 64비트 하드웨어 사이클을
   런타임 주파수로 변환한 local microsecond clock이며 epoch는 uptime/UTC와 다르다.
   `frequency_hz`는 `sys_clock_hw_cycles_per_sec()`의 실제 값이다.
@@ -130,6 +133,9 @@ if (rc == 0) {
 합계 포화 시 평균도 null이다. 1초 50개 표본의 p99를 장기 통계처럼 해석하거나,
 구간별 p99를 평균해 전체 p99로 사용하지 않는다.
 
+metric의 `count_saturated`, `sum_saturated`, `histogram_saturated`는 포화 원인을 구분한다.
+기존 `saturated`는 그 합성 flag로 유지한다. 초기 origin은 `timing.origin_us`로 보존한다.
+
 순수 C core는 allocation·I/O·로그·Zephyr 의존성이 없다. Zephyr hook은 짧은
 spinlock으로 timestamp와 누적값을 보호한다. 스레드·heap·네트워크 수집과
 문자열 직렬화는 이 hook에서 실행하지 않는다.
@@ -187,6 +193,7 @@ Debian 유휴/부하 네 조건을 비교한다. 실제 Xen hard affinity 관측
 기능 수락과 주기·통신 성능 수락은 별개다. 이 모듈 도입만으로 실제 주행 성능,
 MQTT 수신 지연, IRQ·메모리 격리 또는 실시간 기한 보장을 주장하지 않는다.
 
-후속 MQTT 연결은 별도 변경이다. 이 로컬 JSON을 기존 inventory·metrics 계약으로
-간주하지 않는다. `agent.heartbeat`, `app.heartbeat`, 루프 완료는 각각 다른 근거이며
+[Telemetry Publisher 2.0](../telemetry/README.md)는 이 Core를 사용하는 별도 adapter다.
+Core에 MQTT 의존성을 넣거나 이 로컬 JSON을 wire 계약으로 간주하지 않는다.
+`agent.heartbeat`, `app.heartbeat`, 루프 완료는 각각 다른 근거이며
 통신 스레드만 살아 있다고 멈춘 계산을 정상 진행으로 보고해서는 안 된다.

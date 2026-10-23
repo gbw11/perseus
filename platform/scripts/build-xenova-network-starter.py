@@ -19,7 +19,7 @@ from artifact_io import new_path, sha
 
 
 def inputs():
-    paths=[p for directory in ("xen-store","xen-runtime","diagnostics","network-starter-app")
+    paths=[p for directory in ("xen-store","xen-runtime","diagnostics","telemetry","network-starter-app")
            for p in sorted((BASE/directory).rglob("*")) if p.is_file()]
     paths += [BASE/"network-xen.cfg.in",BASE/"network-starter.lock.json"]
     return {str(p.relative_to(BASE)):{"sha256":sha(p),"bytes":p.stat().st_size} for p in paths}
@@ -77,9 +77,14 @@ def main(argv=None):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--diagnostics", choices=("on", "off"), default="on")
+    parser.add_argument("--telemetry", choices=("on", "off"),
+                        help="v2 Publisher; defaults to on with diagnostics, off without it")
     parser.add_argument("--timing-exercise", action="store_true",
                         help="enable the optional periodic arithmetic exercise; no driving output")
     args = parser.parse_args(argv)
+    args.telemetry = args.telemetry or ("on" if args.diagnostics == "on" else "off")
+    if args.telemetry == "on" and args.diagnostics == "off":
+        raise ValueError("Telemetry requires Diagnostics Core")
     for path in (args.zephyr_source, args.tools, args.spdx, args.toolchain_archive):
         if not path.is_absolute() or path.resolve() != path or path.is_symlink():
             raise ValueError("canonical absolute input paths required")
@@ -115,13 +120,14 @@ def main(argv=None):
         raise ValueError("existing CMake and frozen AArch64 SDK required")
     print(json.dumps({"action": "build-network-starter" if args.execute else "plan", "output": str(args.output),
                       "source_sha256": source_hash, "zephyr_source_files_verified": count,
-                      "diagnostics": args.diagnostics, "timing_exercise": args.timing_exercise}, indent=2))
+                      "diagnostics": args.diagnostics, "telemetry": args.telemetry,
+                      "timing_exercise": args.timing_exercise}, indent=2))
     if not args.execute:
         return
     args.output.mkdir(mode=0o755)
     snapshot = args.output/"input"
     snapshot.mkdir()
-    for directory in ("xen-store", "xen-runtime", "diagnostics", "network-starter-app"):
+    for directory in ("xen-store", "xen-runtime", "diagnostics", "telemetry", "network-starter-app"):
         shutil.copytree(BASE/directory, snapshot/directory)
     for name in ("network-xen.cfg.in","network-starter.lock.json"):
         shutil.copyfile(BASE/name,snapshot/name)
@@ -139,6 +145,7 @@ def main(argv=None):
     build = args.output/"build"
     variant = args.output/"variant.conf"
     variant.write_text("CONFIG_XENOVA_DIAGNOSTICS=" + ("y" if args.diagnostics == "on" else "n") +
+                       "\nCONFIG_XENOVA_TELEMETRY=" + ("y" if args.telemetry == "on" else "n") +
                        "\nCONFIG_XENOVA_DIAGNOSTICS_EXERCISE=" + ("y" if args.timing_exercise else "n") + "\n")
     run([str(cmake), "-S", str(snapshot/"network-starter-app"), "-B", str(build), "-GNinja",
          "-DBOARD=xenvm", "-DUSER_CACHE_DIR="+str(args.output/"cache"),
@@ -157,6 +164,11 @@ def main(argv=None):
         raise ValueError("network Starter build differs from frozen xenvm/Store profile")
     if ("CONFIG_XENOVA_DIAGNOSTICS=y" in config) != (args.diagnostics == "on"):
         raise ValueError("diagnostics variant mismatch")
+    if ("CONFIG_XENOVA_TELEMETRY=y" in config) != (args.telemetry == "on"):
+        raise ValueError("Telemetry variant mismatch")
+    if args.telemetry == "on" and any(line not in config for line in
+            ("CONFIG_NET_TCP=y", "CONFIG_MQTT_LIB=y", "CONFIG_MQTT_LIB_CUSTOM_TRANSPORT=y")):
+        raise ValueError("Telemetry requires the real TCP/MQTT transport")
     if ("CONFIG_XENOVA_DIAGNOSTICS_EXERCISE=y" in config) != args.timing_exercise:
         raise ValueError("periodic exercise variant mismatch")
     if args.diagnostics == "on" and "CONFIG_XENOVA_DIAGNOSTICS_TIMING=y" not in config:
@@ -180,7 +192,8 @@ def main(argv=None):
         "repository_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "source_sha256": source_hash, "source_files": source_inputs,
         "build_script_sha256": sha(Path(__file__)), "references": reference,
-        "diagnostics": args.diagnostics, "timing_exercise": args.timing_exercise,
+        "diagnostics": args.diagnostics, "telemetry": args.telemetry,
+        "timing_exercise": args.timing_exercise,
         "variant_config_sha256": sha(variant),
         "toolchain_archive_sha256": sha(args.toolchain_archive),
         "compiler_sha256": sha(gcc), "elf_load_segments": loads,
