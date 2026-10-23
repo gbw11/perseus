@@ -1,0 +1,14 @@
+#!/bin/sh
+# Safe for repeat invocation; NEVER enslaves physical eth0 or wlan0.
+set -eu
+modprobe bridge 2>/dev/null || :
+modprobe xen-netback 2>/dev/null || :
+
+if ! ip link show xenbr0 >/dev/null 2>&1; then
+    ip link add name xenbr0 type bridge
+fi
+if ! ip -4 address show dev xenbr0 | grep -q '192\.168\.77\.1/24'; then
+    ip address add 192.168.77.1/24 dev xenbr0
+fi
+ip link set dev xenbr0 up
+ip -br address show dev xenbr0

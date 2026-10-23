@@ -1,7 +1,7 @@
 # {type}({part}): {제목}  — 50자 이내, 마침표 없이
 #
 # type : feat | fix | refactor | test | docs | chore
-# part : platform | agent | backend | frontend | display | deploy | common
+# part : platform | ctrl | agent | display | backend | frontend | app | deploy | common
 # 예)   feat(backend): VM 시작·정지·재부팅 API 구현
 
 # 본문 (선택) — 무엇을, 왜 바꿨는지

@@ -1,0 +1,27 @@
+# 로컬 개발용 Mosquitto. 설정 파일은 dom0 와 같은 경로(/etc/mosquitto)에 붙인다.
+# 먼저 ../scripts/make-passwd.sh 로 passwd 를 만든다 (없으면 Docker 가 빈 디렉터리를 만들어 브로커가 뜨지 않는다).
+name: xenova-mqtt
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0.21
+    container_name: xenova-mosquitto
+    command: ["mosquitto", "-c", "/etc/mosquitto/mosquitto.conf"]
+    ports:
+      - "${XENOVA_MQTT_PORT:-1883}:1883"
+      - "${XENOVA_MQTT_WS_PORT:-9001}:9001"
+    volumes:
+      - ../etc/mosquitto.conf:/etc/mosquitto/mosquitto.conf:ro
+      - ../etc/acl:/etc/mosquitto/acl:ro
+      - ../listeners/local.conf:/etc/mosquitto/conf.d/listeners.conf:ro
+      - ./passwd:/etc/mosquitto/passwd:ro
+    environment:
+      XENOVA_MQTT_DEV_PASSWORD: ${XENOVA_MQTT_DEV_PASSWORD:?local/.env 에 XENOVA_MQTT_DEV_PASSWORD 를 넣으세요}
+    healthcheck:
+      # observer 계정으로 접속·구독이 되면 정상 (-E: 구독 확인 후 바로 종료)
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1883 -u observer -P \"$$XENOVA_MQTT_DEV_PASSWORD\" -t xenova/v1/health -E"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 3s
+    restart: unless-stopped

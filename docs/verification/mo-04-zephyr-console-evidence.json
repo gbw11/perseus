@@ -1,0 +1,245 @@
+{
+  "verified_date": "2026-10-21",
+  "status": "PASS",
+  "scope": "isolated QEMU only; temporary firmware swap then restore",
+  "build": {
+    "source_commit": "684c9e8f32e4373a21098559f748f06915f950c9",
+    "sdk_archive_sha256": "4015c637d21348db36bb31e849a00bcbccc02304feef519b897d0b83ce759760",
+    "app_files": {
+      "CMakeLists.txt": "d04f7e89753bd8f6aa850dc02746d3c1d4a377d0ed68c3659096a00f5f25476e",
+      "README.md": "49b321a26d0effd89c8e19e82dcac5a5f948eddf0395d579e2987dea0fbf9606",
+      "prj.conf": "d6468f5d946ec86a885b60b35b3f63dd5d78de90ece8b4a013b27bee27e699e1",
+      "src/main.c": "ffb3cea48320678184a69fc9c5ef91cb4edec83e10be90d53d919e76d778c500"
+    },
+    "commands": [
+      [
+        "/home/ssafy/xenova-qemu-28/python-tools/bin/cmake",
+        "-S",
+        "/mnt/c/Users/SSAFY/Desktop/자율프로젝트/S15P31E110/platform/guests/zephyr/console-test-app",
+        "-B",
+        "/home/ssafy/xenova-qemu-28/mo04-console-build-sef6a_qb",
+        "-GNinja",
+        "-DBOARD=xenvm",
+        "-DPython3_EXECUTABLE=/usr/bin/python3",
+        "-DWEST=/home/ssafy/xenova-qemu-28/python-tools/bin/west"
+      ],
+      [
+        "/home/ssafy/xenova-qemu-28/python-tools/bin/cmake",
+        "--build",
+        "/home/ssafy/xenova-qemu-28/mo04-console-build-sef6a_qb",
+        "-j",
+        "4"
+      ]
+    ],
+    "build_directory": "/home/ssafy/xenova-qemu-28/mo04-console-build-sef6a_qb",
+    "bundle": "/home/ssafy/xenova-qemu-28/mo04-console-build-sef6a_qb/console-test-bundle",
+    "manifest_sha256": "ca6b09ad897a12a4c6ddfacda5f4386b339364d62e3a691db3929e17a1448336",
+    "binary_sha256": "52a9df737fb582c5e5cbc28070c6e800a090c98bfc333ed8742e62d742fad5e6"
+  },
+  "public_ws": {
+    "scope": "QEMU; public Spring WS -> FastAPI -> PTY -> Xen PV -> real Zephyr firmware",
+    "vms": {
+      "dd33284f-baf2-417f-93b2-a1af3c3f1ea2": {
+        "checks": {
+          "ping": "^C\r\nmo04> \r\nMO04_CONSOLE_TEST 1.0.0; Xen PV; test firmware only\r\nmo04> \r\npong 386a282f6252\r\nmo04> ",
+          "fragmented_utf8": "\r\necho: 한글-UTF8-386a282f6252\r\nmo04> ",
+          "backspace": "\r\npong 386a282f6252\r\nmo04> ",
+          "crlf_and_lf": "\r\npong CRLF-386a282f6252\r\nmo04> \r\npong LF-386a282f6252\r\nmo04> ",
+          "cancel": "^C\r\nmo04> \r\npong CANCEL-386a282f6252\r\nmo04> ",
+          "unknown": "\r\nERR unknown-command\r\nmo04> ",
+          "max_line_127_bytes": "\r\necho: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nmo04> ",
+          "overflow_and_recovery": "\r\nERR line-too-long\r\nmo04> \r\npong RECOVER-386a282f6252\r\nmo04> "
+        },
+        "status": "PASS",
+        "reconnect": "\r\npong RECONNECT-2fdbcc07486f\r\nmo04> "
+      },
+      "820a0522-243f-42f1-90e9-9b74e1522965": {
+        "checks": {
+          "ping": "^C\r\nmo04> \r\nMO04_CONSOLE_TEST 1.0.0; Xen PV; test firmware only\r\nmo04> \r\npong df9cb9eb794a\r\nmo04> ",
+          "fragmented_utf8": "\r\necho: 한글-UTF8-df9cb9eb794a\r\nmo04> ",
+          "backspace": "\r\npong df9cb9eb794a\r\nmo04> ",
+          "crlf_and_lf": "\r\npong CRLF-df9cb9eb794a\r\nmo04> \r\npong LF-df9cb9eb794a\r\nmo04> ",
+          "cancel": "^C\r\nmo04> \r\npong CANCEL-df9cb9eb794a\r\nmo04> ",
+          "unknown": "\r\nERR unknown-command\r\nmo04> ",
+          "max_line_127_bytes": "\r\necho: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nmo04> ",
+          "overflow_and_recovery": "\r\nERR line-too-long\r\nmo04> \r\npong RECOVER-df9cb9eb794a\r\nmo04> "
+        },
+        "status": "PASS",
+        "reconnect": "\r\npong RECONNECT-bec327c0e820\r\nmo04> "
+      }
+    },
+    "isolation": {
+      "dd33284f-baf2-417f-93b2-a1af3c3f1ea2": "PASS: response only on selected VM",
+      "820a0522-243f-42f1-90e9-9b74e1522965": "PASS: response only on selected VM"
+    },
+    "status": "PASS"
+  },
+  "browser": {
+    "status": "PASS",
+    "checks": {
+      "zephyr-dev": {
+        "status": "PASS",
+        "response": "pong WEB-e4af0ccc29fa",
+        "browser_echo": "echo: BROWSER_INPUT_OK"
+      },
+      "zephyr-backup": {
+        "status": "PASS",
+        "response": "pong WEB-55e1307a7905",
+        "browser_echo": "echo: BROWSER_INPUT_OK"
+      }
+    },
+    "page_errors": []
+  },
+  "before": {
+    "vms": {
+      "debian-dev": {
+        "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+        "domid": 13,
+        "guest_kind": "linux",
+        "autostart": true,
+        "active_firmware": null,
+        "board_shutdown_policy": null
+      },
+      "zephyr-backup": {
+        "uuid": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "domid": 8,
+        "guest_kind": "zephyr",
+        "autostart": true,
+        "active_firmware": {
+          "manifest": "firmware.json",
+          "revision": "fac5771450f9bbc9260c5e27ac5b05bb90cccaf00446664be6f538c825dea1c1",
+          "version": "1.0.0",
+          "sha256": "1b9264b36e321aa183e3f74568e59354c24c14c3bcbe3c226fd5ac9b6f699dba"
+        },
+        "board_shutdown_policy": "refuse"
+      },
+      "zephyr-dev": {
+        "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2",
+        "domid": 14,
+        "guest_kind": "zephyr",
+        "autostart": true,
+        "active_firmware": {
+          "manifest": "firmware.json",
+          "revision": "fac5771450f9bbc9260c5e27ac5b05bb90cccaf00446664be6f538c825dea1c1",
+          "version": "1.0.0",
+          "sha256": "1b9264b36e321aa183e3f74568e59354c24c14c3bcbe3c226fd5ac9b6f699dba"
+        },
+        "board_shutdown_policy": "refuse"
+      }
+    },
+    "console_processes": []
+  },
+  "during": {
+    "vms": {
+      "debian-dev": {
+        "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+        "domid": 13,
+        "guest_kind": "linux",
+        "autostart": true,
+        "active_firmware": null,
+        "board_shutdown_policy": null
+      },
+      "zephyr-backup": {
+        "uuid": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "domid": 16,
+        "guest_kind": "zephyr",
+        "autostart": true,
+        "active_firmware": {
+          "manifest": "firmware.json",
+          "revision": "ca6b09ad897a12a4c6ddfacda5f4386b339364d62e3a691db3929e17a1448336",
+          "version": "mo04-console-test-1.0.0",
+          "sha256": "52a9df737fb582c5e5cbc28070c6e800a090c98bfc333ed8742e62d742fad5e6"
+        },
+        "board_shutdown_policy": "refuse"
+      },
+      "zephyr-dev": {
+        "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2",
+        "domid": 15,
+        "guest_kind": "zephyr",
+        "autostart": true,
+        "active_firmware": {
+          "manifest": "firmware.json",
+          "revision": "ca6b09ad897a12a4c6ddfacda5f4386b339364d62e3a691db3929e17a1448336",
+          "version": "mo04-console-test-1.0.0",
+          "sha256": "52a9df737fb582c5e5cbc28070c6e800a090c98bfc333ed8742e62d742fad5e6"
+        },
+        "board_shutdown_policy": "refuse"
+      }
+    },
+    "console_processes": []
+  },
+  "after": {
+    "vms": {
+      "debian-dev": {
+        "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+        "domid": 13,
+        "guest_kind": "linux",
+        "autostart": true,
+        "active_firmware": null,
+        "board_shutdown_policy": null
+      },
+      "zephyr-backup": {
+        "uuid": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "domid": 17,
+        "guest_kind": "zephyr",
+        "autostart": true,
+        "active_firmware": {
+          "manifest": "firmware.json",
+          "revision": "fac5771450f9bbc9260c5e27ac5b05bb90cccaf00446664be6f538c825dea1c1",
+          "version": "1.0.0",
+          "sha256": "1b9264b36e321aa183e3f74568e59354c24c14c3bcbe3c226fd5ac9b6f699dba"
+        },
+        "board_shutdown_policy": "refuse"
+      },
+      "zephyr-dev": {
+        "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2",
+        "domid": 18,
+        "guest_kind": "zephyr",
+        "autostart": true,
+        "active_firmware": {
+          "manifest": "firmware.json",
+          "revision": "fac5771450f9bbc9260c5e27ac5b05bb90cccaf00446664be6f538c825dea1c1",
+          "version": "1.0.0",
+          "sha256": "1b9264b36e321aa183e3f74568e59354c24c14c3bcbe3c226fd5ac9b6f699dba"
+        },
+        "board_shutdown_policy": "refuse"
+      }
+    },
+    "console_processes": []
+  },
+  "restoration": {
+    "zephyr-backup": "PASS",
+    "zephyr-dev": "PASS"
+  },
+  "original_records_fully_restored": true,
+  "debian_domain_unchanged": true,
+  "stop_observations": [
+    {
+      "name": "zephyr-dev",
+      "cli_returncode": 1,
+      "outcome": "UUID/name absent from Xen before firmware mutation"
+    },
+    {
+      "name": "zephyr-backup",
+      "cli_returncode": 1,
+      "outcome": "UUID/name absent from Xen before firmware mutation"
+    },
+    {
+      "name": "zephyr-backup",
+      "cli_returncode": 1,
+      "outcome": "UUID/name absent from Xen before firmware mutation"
+    },
+    {
+      "name": "zephyr-dev",
+      "cli_returncode": 1,
+      "outcome": "UUID/name absent from Xen before firmware mutation"
+    }
+  ],
+  "known_issue": "Existing stop --force can return nonzero after removing a domain; UUID/name absence was independently verified before firmware mutation.",
+  "not_verified": [
+    "Raspberry Pi hardware",
+    "vehicle control",
+    "mirroring/failover",
+    "Jetson automatic/manual switching"
+  ]
+}

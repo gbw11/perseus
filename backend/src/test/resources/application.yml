@@ -1,0 +1,77 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:xenova-test;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  data:
+    redis:
+      repositories:
+        enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  health:
+    redis:
+      enabled: false
+
+xenova:
+  auth:
+    state-store: jpa
+    jwt-secret: xenova-test-secret-with-at-least-thirty-two-bytes
+    access-token-ttl: 15m
+    refresh-token-ttl: 7d
+    refresh-cookie-secure: false
+    max-login-attempts: 5
+    login-attempt-window: 5m
+  template-catalog:
+    templates:
+      - template-id: debian-13-arm64
+        version: "1.0.0"
+        display-name: Debian 12
+        min-memory-mib: 128
+      - template-id: ubuntu-24.04-arm64
+        version: "1.0.0"
+        display-name: Ubuntu 24.04
+        min-memory-mib: 512
+      - template-id: zephyr-xenvm-starter-arm64
+        version: "1.0.0"
+        display-name: Zephyr Starter 1.0.0
+        min-memory-mib: 16
+        guest-kind: zephyr
+  agent:
+    stale-after: 15s
+    offline-after: 30s
+  event:
+    # Tests call AgentStatusWatcher.check() and VmStateWatcher.check() themselves.
+    agent-status-check-interval-ms: 3600000
+    vm-state-check-interval-ms: 3600000
+  report:
+    os-evidence:
+      required-os-ids:
+        - debian
+        - ubuntu
+      observation-window: 30s
+      build-id: test-build
+  mqtt:
+    enabled: false
+    broker-url: tcp://127.0.0.1:1883
+    client-id: xenova-backend-test
+    reconnect-interval: 1s
+  display:
+    service-token: test-display-service-token
+  dom0-manager:
+    base-url: http://127.0.0.1:18081
+    service-token: test-service-token
+    connect-timeout: 1s
+    query-timeout: 2s
+    command-timeout: 3s
+    retry-backoff: 10ms

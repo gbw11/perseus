@@ -1,0 +1,11 @@
+[
+  {
+    "domid": 1,
+    "config": {
+      "c_info": {
+        "uuid": "cccc0000-1111-4222-8333-123456789abc",
+        "name": "zephyr-dev"
+      }
+    }
+  }
+]

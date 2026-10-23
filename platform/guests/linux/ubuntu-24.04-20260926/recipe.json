@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_id": "ubuntu-24.04-20260926",
+  "version": "1.0.2",
+  "files": [
+    {
+      "source": "files/motd",
+      "target": "etc/motd",
+      "mode": 420
+    }
+  ],
+  "guest_agent": {
+    "packages": [
+      "python3-paho-mqtt"
+    ]
+  }
+}
