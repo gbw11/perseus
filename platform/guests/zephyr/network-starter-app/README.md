@@ -25,3 +25,8 @@ board-accepted release before actual A/B tests.
 기본 빌드는 주기 시험 스레드를 생성하지 않는다.
 공통 API·수집 범위·오류/null 의미·계측 on/off 비교는
 [Diagnostics Core](../diagnostics/README.md)를 따른다.
+
+PV console uses the interrupt-driven serial API. The frozen Xen HVC polling
+TX path discards a character when its output ring is full; FIFO TX retries
+with a hypervisor yield. Keep a console reader attached while requesting
+large diagnostic JSON. Console output is intrusive and is outside loop hooks.

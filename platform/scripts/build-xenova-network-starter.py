@@ -151,6 +151,7 @@ def main(argv=None):
     required = ("CONFIG_ARM64=y", "CONFIG_XEN=y", "CONFIG_XEN_EVENTS=y", "CONFIG_MMU=y",
                 "CONFIG_XENOVA_XENSTORE=y", "CONFIG_XENOVA_NETFRONT=y", "CONFIG_NET_DHCPV4=y", "CONFIG_NET_ARP=y", "CONFIG_GIC_V2=y", "CONFIG_UART_XEN_HVC=y",
                 "CONFIG_TIMER_READS_ITS_FREQUENCY_AT_RUNTIME=y",
+                "CONFIG_SHELL_BACKEND_SERIAL_API_INTERRUPT_DRIVEN=y",
                 "CONFIG_SRAM_BASE_ADDRESS=0x40000000", "CONFIG_SRAM_SIZE=16384")
     if any(line not in config for line in required) or "CONFIG_NET_L2_ETHERNET=y" not in config:
         raise ValueError("network Starter build differs from frozen xenvm/Store profile")
