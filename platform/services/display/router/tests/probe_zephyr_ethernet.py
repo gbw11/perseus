@@ -86,6 +86,11 @@ async def run(args):
     evidence={'scope':'real QEMU VM2 manual heartbeat-only trial over Ethernet; no driving input/command or graphics',
               'cases':[],'build_source':source,'firmware_sha256':hashlib.sha256(firmware.read_bytes()).hexdigest(),
               'zephyr_boot_id_is_os_verified':False,'test_password_hash_rounds':5000,'restored':False}
+    priority_keys=('CONFIG_MAIN_THREAD_PRIORITY','CONFIG_XENOVA_NETFRONT_THREAD_PRIORITY','CONFIG_XENOVA_SHUTDOWN_THREAD_PRIORITY')
+    evidence['compiled_thread_priorities']={line.split('=',1)[0]:int(line.split('=',1)[1])
+        for line in (args.build/'build/zephyr/.config').read_text().splitlines()
+        if any(line.startswith(key+'=') for key in priority_keys)}
+    resilience=getattr(args,'resilience',False)
     trial_dir=None;server_dir=None;server=None;tunnel=None;changed=False
     args.output.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='display253-zephyr-control-') as scratch:
@@ -98,17 +103,20 @@ async def run(args):
             command(DOM0,'cat > '+trial_dir+'/trial.bin',data=firmware.read_bytes())
             server_dir=command(DOM0,'mktemp -d /tmp/display253-XXXXXXXX').stdout.decode().strip()
             assert re.fullmatch(r'/tmp/display253-[A-Za-z0-9]+',server_dir)
-            payload=archive(args.wheels,[ROOT/'platform/services/dom0-manager/dom0_manager',
-                ROOT/'platform/services/vm-agent/mqtt-client/xenova_mqtt',Path(__file__).parents[1]/'xenova_display'],SERVER)
+            sources=[ROOT/'platform/services/dom0-manager/dom0_manager',
+                ROOT/'platform/services/vm-agent/mqtt-client/xenova_mqtt',Path(__file__).parents[1]/'xenova_display']
+            if resilience:sources.append(Path(__file__).with_name('guest_resilience.py'))
+            payload=archive(args.wheels,sources,SERVER)
             command(DOM0,'tar -xz -C '+server_dir,data=payload)
             passwords={'manual':manual_password,'feed':secrets.token_urlsafe(32),'observer':secrets.token_urlsafe(32)}
+            if resilience:passwords['replay']=secrets.token_urlsafe(32)
             token=secrets.token_urlsafe(32)
             bindings=json.loads((Path(__file__).parents[1]/'examples/qemu-bindings.json').read_text())
             bindings[0]['app_id']='autonomous';bindings[1]['app_id']='manual'
             server=subprocess.Popen(SSH+['-o','BatchMode=yes',DOM0,'python3 -u -B '+server_dir+'/runner.py'],
                 stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=log,text=True)
             server.stdin.write(json.dumps({'vm_id':VM,'bindings':bindings,'token':token,'broker_port':51883,
-                'observation_topic':TOPIC,'publisher_user':'manual','passwords':passwords,
+                'observation_topic':TOPIC,'publisher_user':'manual','passwords':passwords,'resilience':resilience,
                 # Lab-only high-entropy temporary credentials. Default passlib rounds take
                 # ~7s under TCG, exceeding the existing sender's 5s CONNACK deadline.
                 # This changes no production broker/account policy or sender timeout.
@@ -175,7 +183,11 @@ async def run(args):
                 assert p['decisions'][VM]['kind']=='status'
                 evidence['presentation_kind']=p['decisions'][VM]['kind']
                 evidence['cases'].append('hdmi_presentation_uses_vm2_status_panel_without_graphics_claim')
-                evidence['passed']=True
+                if resilience:
+                    from guest_resilience import run_checks
+                    evidence['resilience']=await run_checks(client,VM,TOPIC,trial_dir+'/trial.cfg',control_trial,domains,evidence)
+                evidence['verification_completed']=True
+                evidence['passed']=not resilience or evidence['resilience']['passed']
         except BaseException as error:
             evidence['failure_type']=type(error).__name__
             if changed:
@@ -185,7 +197,10 @@ async def run(args):
             try:
                 if changed:
                     if VM in domains():
-                        control_trial('shutdown')
+                        try:control_trial('shutdown')
+                        except subprocess.CalledProcessError:
+                            # Explicitly authorized lab-only VM2 cleanup, not product recovery escalation.
+                            if VM in domains():control_trial('destroy')
                         async def stopped():return VM not in domains()
                         try:await until(stopped,25)
                         except TimeoutError:control_trial('destroy')
@@ -212,14 +227,19 @@ async def run(args):
                 log.close()
         assert evidence['restored'] and evidence['other_domain_ids_unchanged']
         print(json.dumps({k:evidence[k] for k in ('passed','cases','restored','other_domain_ids_unchanged','temporary_broker_stopped')}))
+        if resilience:print(json.dumps({k:evidence['resilience'].get(k) for k in
+            ('passed','display_safety_checks_passed','live_vif_recovery_passed','cases','limitations')}))
+        return evidence
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--execute',action='store_true')
+    parser.add_argument('--resilience',action='store_true',help='authorized VM2 VIF loss, pause, restart and test-only replay controls')
     parser.add_argument('--build',type=Path,required=True)
     parser.add_argument('--wheels',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     if not args.execute:parser.error('--execute and prior VM2-only modification authorization required')
-    asyncio.run(run(args))
+    result=asyncio.run(run(args))
+    if not result['passed']:raise SystemExit(1)

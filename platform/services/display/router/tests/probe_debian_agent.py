@@ -55,9 +55,14 @@ passwords.chmod(0o600)
 port_socket=socket.socket();port_socket.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
 port_socket.bind(('192.168.77.1',config.get('broker_port',0)))
 port=port_socket.getsockname()[1];port_socket.close()
+driver=build_driver(Settings(driver='xen'));options={}
+if config.get('resilience'):
+ from guest_resilience import FaultDriver,MqttControl,attach_controls
+ driver=FaultDriver(driver);control=MqttControl();options['mqtt_factory']=control.factory
 app=create_app(FeedSettings(bindings,config['token'],mqtt_host='192.168.77.1',mqtt_port=port,
     mqtt_username='feed',mqtt_password=config['passwords']['feed'],binding_scope='candidate'),
-    driver=build_driver(Settings(driver='xen')))
+    driver=driver,**options)
+if config.get('resilience'):attach_controls(app,driver,control,config,port,topic)
 lock=threading.Lock();received=[]
 observer=mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,client_id='display253-observer')
 observer.username_pw_set('observer',config['passwords']['observer'])
@@ -76,7 +81,8 @@ async def main():
  broker=Broker({'listeners':{'default':{'type':'tcp','bind':f'192.168.77.1:{port}'}},
   'plugins':{'amqtt.plugins.authentication.FileAuthPlugin':{'password_file':str(passwords)},
    'amqtt.plugins.topic_checking.TopicAccessControlListPlugin':{
-    'acl':{'feed':topics,'observer':[topic]},'publish_acl':{config.get('publisher_user','agent'):[topic]}}}})
+    'acl':{'feed':topics,'observer':[topic]},'publish_acl':{
+      config.get('publisher_user','agent'):[topic],**({'replay':[topic]} if config.get('resilience') else {})}}}})
  server=None
  try:
   await broker.start()
@@ -156,7 +162,11 @@ def archive(wheels, sources, runner, only_paho=False):
             if only_paho and not wheel.name.startswith('paho_mqtt-'):continue
             with zipfile.ZipFile(wheel) as package:package.extractall(stage/'deps')
         for source in sources:
-            shutil.copytree(source,stage/'source'/source.name,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+            if source.is_dir():
+                shutil.copytree(source,stage/'source'/source.name,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+            else:
+                (stage/'source').mkdir(exist_ok=True)
+                shutil.copy2(source,stage/'source'/source.name)
         (stage/'runner.py').write_text(runner)
         out=io.BytesIO()
         with tarfile.open(fileobj=out,mode='w:gz') as tar:
