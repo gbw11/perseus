@@ -122,7 +122,7 @@ pipeline {
                 expression { isMasterPush() }
             }
             steps {
-                sh 'bash ./deploy/scripts/health-check.sh "http://${DEPLOY_HOST}"'
+                sh 'bash ./deploy/scripts/health-check.sh "https://${DEPLOY_HOST}"'
             }
         }
     }
