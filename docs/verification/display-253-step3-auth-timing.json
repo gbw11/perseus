@@ -1,0 +1,10 @@
+{
+  "scope": "temporary QEMU TCG dom0 Python passlib verification benchmark; public test string only; not production security or latency acceptance",
+  "date": "2026-10-22",
+  "algorithm": "sha512_crypt",
+  "verification_wall_seconds": {"5000": 0.04706462400008604, "656000": 6.98744449600008},
+  "existing_c_client_connack_deadline_ms": 5000,
+  "trial_only_rounds": 5000,
+  "production_broker_policy_changed": false,
+  "sender_timeout_changed": false
+}
