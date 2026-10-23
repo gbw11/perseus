@@ -332,6 +332,10 @@ xenova-vm status --json
 
 카탈로그·저장 용량·UUID/이름/MAC/IP 소유권 검사를 통과해야 한다. [생성·주소 계약](#creation-contract)을 따른다.
 
+새 Linux VM의 대화형 Bash에는 `[표시 이름] 사용자@vm-UUID앞8자리:경로` 형식의
+프롬프트를 준비한다. 실제 hostname·Xen 내부 이름·신원은 유지하며 Zephyr에는 적용하지 않는다.
+이름 변경·실행 중 게스트로의 동기화 기능은 추가하지 않는다.
+
 **실행 예시**
 
 ```bash
