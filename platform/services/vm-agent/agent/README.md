@@ -42,15 +42,28 @@ SIGTERM·SIGINT 를 받으면 현재 대기를 끊고 클라이언트를 닫은 
 
 ## 게스트 배포
 
-`deploy/install_into_rootfs.py <rootfs>`가 두 패키지를 `/opt/xenova/mqtt-client`·`/opt/xenova/agent`에 복사하고 `xenova-agent.service`를 설치해 enable 합니다. 템플릿 준비(플랫폼 파트, `prepare_rootfs.py`)에서 해야 할 일은 세 가지입니다.
+새 Linux 템플릿은 플랫폼의 `platform/scripts/prepare-xenova-guests.py`에서
+`guest_agent_template.prepare()`를 호출합니다. Ubuntu·Debian recipe의
+`guest_agent.packages = ["python3-paho-mqtt"]`를 검사한 뒤 새 작업 rootfs 안에서만
+apt update/install을 수행하고, `deploy/install_into_rootfs.py`로 두 패키지와 unit을 설치·enable합니다.
+일반 VM 생성과 factory seed 생성에서는 apt를 실행하지 않습니다.
 
-1. `apt install python3-paho-mqtt` (Ubuntu 24.04 1.6.1, Debian 13 2.1.0). 스크립트는 설치 전에 rootfs 의 `paho/mqtt/client.py`를 확인하고, 없으면 아무것도 설치하지 않고 종료 코드 1 을 냅니다
-2. 위 스크립트 호출. 종료 코드가 0 이 아니면 템플릿 생성을 중단합니다
-3. 브로커 계정이 생기면 `/etc/xenova/agent.env`에 `XENOVA_AGENT_BROKER_USERNAME/PASSWORD` 기록 (없으면 생략)
+설치 결과는 `/etc/xenova/agent-install.json`과 템플릿 manifest에 기록합니다.
+Python ≥3.11, Paho ≥1.6,<3, 두 패키지 import와 unit enable 검사가 실패하면 새 템플릿을 게시하지 않습니다.
+이 영수증은 신원을 넣기 전 템플릿 설치 기록이며 Broker 연결 성공을 뜻하지 않습니다.
+패키지 버전·다운로드된 deb 해시는 기록하지만 배포판 저장소의 미래 가용성을 보장하지 않습니다.
 
-최종 이미지 검사는 chroot 안에서 `python3 -c "import paho.mqtt.client"`와 `systemctl is-enabled xenova-agent.service`로 합니다. 스크립트는 rootfs 를 신뢰하지 않아, 쓰려는 자리의 마지막 요소가 심볼릭 링크면(호스트 파일로 이어질 수 있음) 아무것도 쓰지 않고 거부합니다.
+일반 VM은 생성 시 기록한 `/etc/xenova/instance-id`를 사용합니다.
+기본 Agent unit에는 identity service의 무조건적인 `Requires=`가 없습니다.
+Factory seed는 `prepare_deployment_seed()`가 identity service를 설치한 다음,
+Agent가 있는 rootfs에만 `10-xenova-identity.conf`를 연결합니다.
+공통 VM 생성 경로는 두 경우 모두 실제 import·enable·의존성을 검사하고 실패하면 게시를 중단합니다.
+Agent가 없는 기존 게시 템플릿은 읽기/생성 호환을 유지하며 자동 업데이트하지 않습니다.
+Zephyr에는 Python Agent를 설치하지 않습니다.
 
-VM 생성 경로가 둘이라 신원 유닛 의존은 drop-in 으로 나눕니다. 일반 생성 VM(`prepare_instance`)에는 `/etc/xenova/instance-id`만 있고 `xenova-guest-identity.service`가 없으므로 기본 유닛은 순서(`After=`)만 둡니다. deployment seed 경로(`prepare_deployment_seed`)처럼 신원 유닛이 있는 rootfs 에는 설치 스크립트가 `xenova-agent.service.d/10-xenova-identity.conf`로 `Requires=`를 붙여, 신원 확립에 실패한 VM 은 heartbeat 를 보내지 않습니다. seed 준비가 템플릿 설치 뒤에 신원 유닛을 넣는 순서라면 그 시점에 `install_identity_dropin(rootfs)`를 한 번 더 부릅니다. `/etc/xenova/instance-id`가 없으면 어느 경로든 시작하지 않습니다. Zephyr 템플릿에는 설치하지 않습니다.
+Broker 주소·인증정보·ACL과 종단 통신 수락은 별도 인계입니다. 실제 비밀은 소스·manifest·시험 로그에 넣지 않습니다.
+실행 위치별 명령과 잔여 실보드 검증은
+[Linux 게스트 Agent 패키징 가이드](../../../../docs/build-guides/xenova-linux-guest-agent.md)를 참고하세요.
 
 ## 테스트
 

@@ -52,7 +52,8 @@ echo Add boot arguments for dom0
 if test "${xenova_debug}" = "1"; then
     setenv xenova_logargs "earlycon=xenboot debug loglevel=7 systemd.log_level=debug systemd.log_target=console systemd.show_status=yes"
 else
-    setenv xenova_logargs "loglevel=4 systemd.log_level=info systemd.log_target=journal-or-kmsg systemd.show_status=error"
+    # 일반 UART에서는 반복 ERR 출력을 줄이고 전체 커널 기록은 dmesg/journal에 남긴다.
+    setenv xenova_logargs "loglevel=3 systemd.log_level=info systemd.log_target=journal-or-kmsg systemd.show_status=error"
 fi
 setenv dom0_bootargs "console=hvc0 ${xenova_logargs} root=PARTUUID=${rootfs_partuuid} rootwait"
 fdt set /chosen xen,dom0-bootargs "${dom0_bootargs}" || exit 1

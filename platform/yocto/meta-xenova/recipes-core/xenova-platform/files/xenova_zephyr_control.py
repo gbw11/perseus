@@ -31,6 +31,7 @@ def reboot(e,record,key):
 
     def conditions(*,check_deadline=True):
         e.gate()
+        p.cpu().require(record, min(end,p.clock()+15) if check_deadline else p.clock()+15, expected=op.get('cpu_policy', {'configured':False}))
         lifecycle,generation=e.lifecycle(record)
         intent=e.intent(record)
         from xenova_management import Manager
@@ -59,6 +60,7 @@ def reboot(e,record,key):
             rows=p.observed_target(record,rows,observed,end)
             if not rows:refuse("TARGET_CHANGED","reboot target disappeared")
             p.require_cooperative(record,rows[0],"reboot",end)
+            p.cpu().require(record,min(end,p.clock()+15),present=True)
             op=e.accept(record,request,key,previous=op,receipt=receipt)
             op.update(configuration_sha256=fingerprint(record),deadline_monotonic_ms=int(end*1000),
                       old_execution=observed,old_domain=rows[0])
@@ -82,6 +84,7 @@ def reboot(e,record,key):
             owner={"kind":"user","operation_id":op["operation_id"]}
             if observation["execution_status"]!="managed" or not run or run.get("owner")!=owner:
                 refuse("RECONCILE_REQUIRED","new launch may exist; no stop/create repeated")
+            p.cpu().require(record,p.clock()+15,expected=op.get('cpu_policy', {'configured':False}),present=True)
             stage="new-observed"
         elif stage in ("request-accepted","shutdown-requested","old-removed"):
             # An expired submitted request may still be closed after confirmed removal.
@@ -141,7 +144,8 @@ def reboot(e,record,key):
         op["error"]={"code":"RECONCILE_REQUIRED" if uncertain else code,
                      "message":str(error),"retryable":False,
                      "details":{"operation_id":op["operation_id"],"intent_revision":op["intent_revision"],
-                                "accepted":True,"reboot_stage":stage,"replayed":replay}}
+                                "accepted":True,"reboot_stage":stage,"replayed":replay,
+                                **({'cause':error.error} if isinstance(error,ExecutionError) else {})}}
         try:e.save_request(op,"uncertain" if uncertain else "failed")
         except OSError:
             refuse("RECONCILE_REQUIRED","accepted reboot journal could not be finalized",

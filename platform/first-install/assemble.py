@@ -326,18 +326,19 @@ def platform_root_ok(root):
                 'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                 'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
     for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
-                 'xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
+                 'xenova_cpu.py','xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
         expected['usr/lib/xenova/'+name] = FILES/name
     expected['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
     expected['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
     expected['etc/modprobe.d/xenova-wifi.conf'] = FILES/'xenova-wifi-modprobe.conf'
     expected['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
+    expected['etc/xenova/cpu-policy-preset.json'] = FILES/'cpu-policy-preset.json'
     expected['etc/xenova/execution-policy.json'] = FILES/'execution-policy.json'
     expected['usr/lib/systemd/system/xenova-wifi@.service'] = FILES/'xenova-wifi@.service'
     expected['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'platform/scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         expected['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
-    units = ['xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
+    units = ['xenova-cpu-prepare.service', 'xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
              'xenova-vms.service', 'xenova-vm-shutdown.service', 'xenova-xen-ready.service', 'xenova-host-admission.service']
     expected.update({'usr/lib/systemd/system/' + u: FILES / u for u in units})
     expected.update(deployment_payloads.installed_sources(root))
@@ -456,7 +457,7 @@ def platform_boot_ok(image, table, output):
                    'fdt move ${fdtcontroladdr} ${fdt_addr_r}', 'booti ${xen_loadaddr} - ${fdt_addr_r}',
                    'fdt rm /soc/mmcnr@7e300000 dmas || exit 1',
                    'fdt rm /soc/mmcnr@7e300000 dma-names || exit 1',
-                   'xenova_debug', 'loglevel=4', 'systemd.show_status=error'):
+                   'xenova_debug', 'setenv xenova_logargs "loglevel=3 ', 'systemd.show_status=error'):
         if marker not in script:
             raise ValueError('platform lacks validated Xen boot/PARTUUID contract: ' + marker)
     return result
