@@ -96,6 +96,10 @@ class Watcher:
         self._tracks: dict[UUID, _Track] = {}
         self._link = LinkState.down()
         self._link_since: dict[str, float | None] = {AGENT: None, APP: None}
+        # 승인 뒤 그 채널에서 메시지를 하나라도 받았는가. Mosquitto 는 읽기 ACL 에 막힌 구독도 SUBACK 성공으로 답하므로
+        # 승인만 믿고 "안 온다"를 판정하면 ACL 오설정이 그대로 VM 재시작으로 이어진다. 실제 수신이 경로의 증거다
+        self._link_proven: dict[str, bool] = {AGENT: False, APP: False}
+        self._link_warned: dict[str, bool] = {AGENT: False, APP: False}
         self._removed: list[UUID] = []  # 지난 removed_vm_ids() 이후 등록에서 사라진 VM
         if self._armed:
             log.info("restored %d armed Zephyr VM(s) from %s", len(self._armed), arming.path if arming else "-")
@@ -177,16 +181,46 @@ class Watcher:
         for channel, up, was in ((AGENT, link.agent, self._link.agent), (APP, link.app, self._link.app)):
             if up and not was:
                 self._link_since[channel] = now
-                log.info("%s liveness path granted; loss judgments resume after one signal window", channel)
+                self._link_proven[channel] = False
+                self._link_warned[channel] = False
+                log.info("%s liveness path granted; loss judgments resume after the first message and one signal window", channel)
             elif not up and was:
                 self._link_since[channel] = None
+                self._link_proven[channel] = False
                 log.warning("%s liveness path lost (not connected or subscription not granted); loss judgments suspended", channel)
         self._link = link
+        for channel in (AGENT, APP):  # 수신 증거는 매 주기 확인해 첫 수신 때 바로 남긴다 (VM 이 조용할 때만 보면 로그가 늦다)
+            if self._link_since[channel] is not None and not self._link_proven[channel]:
+                self._check_delivery(channel)
+
+    def _check_delivery(self, channel: str) -> bool:
+        """승인 뒤 그 채널로 메시지를 받았으면 경로가 증명된 것이다."""
+        since = self._link_since[channel]
+        if since is None:
+            return False
+        if not self._link_proven[channel]:
+            table = self._heartbeats if channel == AGENT else self._app_heartbeats
+            last = table.last_received_monotonic()
+            if last is not None and last >= since:
+                self._link_proven[channel] = True
+                log.info("%s liveness path delivering: first message received since grant", channel)
+        return self._link_proven[channel]
 
     def _link_ready(self, channel: str, now: float, window_s: float) -> bool:
-        """경로가 열린 뒤 한 창(window) 만큼 지나야 '안 온다'를 믿을 수 있다."""
+        """'안 온다'를 믿을 조건: 구독이 승인됐고, 승인 뒤 그 채널에서 메시지를 실제로 받은 적이 있고, 승인 뒤 한 창(window) 이 지났다.
+        승인만으로는 브로커가 전달하는지 알 수 없다(Mosquitto 는 읽기 ACL 거부를 SUBACK 로 알리지 않는다)."""
         since = self._link_since[channel]
-        return since is not None and now - since >= window_s
+        if since is None:
+            return False
+        if not self._check_delivery(channel):
+            if now - since >= window_s and not self._link_warned[channel]:
+                self._link_warned[channel] = True
+                log.warning(
+                    "%s liveness path granted but nothing received for %.0fs; the broker may be filtering deliveries "
+                    "(Mosquitto does not refuse SUBACK for ACL-denied reads). Loss judgments stay suspended", channel, now - since,
+                )
+            return False
+        return now - since >= window_s
 
     def _track_domain(self, track: _Track, obs: VmObservation, now: float) -> None:
         if obs.present:
