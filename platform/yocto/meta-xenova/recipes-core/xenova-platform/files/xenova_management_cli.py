@@ -42,6 +42,7 @@ def main(argv=None, manager=None):
     parser.add_argument('--lifecycle',default='REGISTERED')
     parser.add_argument('--execute',action='store_true')
     parser.add_argument('--force',action='store_true')
+    parser.add_argument('--restore',action='store_true',help='internal CPU host preparation rollback')
     parser.add_argument('--spec-file', type=Path)
     parser.add_argument('--recovery-attempt-id')
     parser.add_argument('--barrier-id')
@@ -51,10 +52,16 @@ def main(argv=None, manager=None):
         args=parser.parse_args(args_list)
         action='recover_once' if args.action == 'recover-once' else args.action
         spec={}
-        if action == 'recover_once':
+        if action in ('recover_once', 'cpu-policy-set'):
             if args.spec_file is None:
                 raise ManagementError('INVALID_SPEC', 'recover-once requires --spec-file')
             spec = json.loads(args.spec_file.read_text())
+        elif action == 'cpu-layout':
+            spec = {'timeout_ms':args.timeout_ms}
+            if args.vm_id or args.id:
+                spec['vm_id'] = args.vm_id or args.id
+        elif action == 'cpu-host-prepare':
+            spec = {'timeout_ms':args.timeout_ms, 'restore':args.restore}
         elif action == 'host-resume':
             spec = {'barrier_id':args.barrier_id}
         elif action == 'control-operation':

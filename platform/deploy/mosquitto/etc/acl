@@ -21,6 +21,10 @@ pattern write xenova/v1/apps/%u/events
 # 지연 측정 probe. 계약은 "자기 vm_id 가 source/target 인 것만" 이지만 payload 조건이라 브로커가 거르지 못한다.
 pattern write xenova/v1/probes/#
 
+# Recovery Worker: 건강 스냅샷·복구 이벤트만 발행한다 (계약 9·11장).
+user dom0-server
+topic write xenova/v1/recovery/#
+
 user backend
 topic write xenova/v1/apps/manual/input
 topic write xenova/v1/vms/+/command

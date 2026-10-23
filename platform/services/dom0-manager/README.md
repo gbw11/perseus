@@ -245,7 +245,7 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 | 의도 (`desired_state`, `intent_applicable`, `intent_revision`, `lifecycle`, `guest_kind`) | 플랫폼 `Manager.list` | `XENOVA_RECOVERY_INTENT_REFRESH`(기본 60초)마다 캐시. `list`·`get`은 플랫폼 잠금을 쥐고 VM 마다 Xen 을 관측하므로 5초마다 부르지 않습니다. **판정 직전에는 그 VM 만 `get`으로 재확인**하므로 캐시가 오래돼도 사용자가 끈 VM 을 재시작하지 않습니다 |
 | Xen 실행 상태 (도메인 유무·상태·domid) | `xl list` / `xl list -l` (잠금 없음) | 매 주기(5초) |
 | 생존 신호 | dom0 Mosquitto `xenova/v1/vms/+/heartbeat`(agent.heartbeat, Linux)와 `xenova/v1/apps/+/events` 중 `app.heartbeat`(Zephyr 주행 VM, 시나리오 D8) | 구독. 수신 단조 시각만 쓰고 `sent_at` 은 쓰지 않음. retain 플래그가 켜진 수신(구독 직후 브로커가 주는 옛 값)은 무시. agent.heartbeat 는 type·빈 payload·토픽-봉투 vm_id 일치, app.heartbeat 는 type·`state` 허용값·`uptime_s`(0 이상 유한)·app_id 일치를 검사해 맞는 것만 기록 |
-| Zephyr 앱 대상 여부 | 템플릿 카탈로그 capability `app_heartbeat`(Manager `templates`, 의도와 같이 캐시). `true` 앱 펌웨어, `false` starter(Xen 상태만). JSON boolean 만 믿고, 문자열 `"false"` 같은 값이면 그 템플릿의 VM 은 대상 여부 불명(OBSERVATION_UNAVAILABLE) | 선언이 없는 템플릿은 신호를 한 번 받은 뒤 armed 로 다루고, armed 는 `XENOVA_RECOVERY_STATE_DIR/armed.json`(`{"version":1,"armed":{vm_id: app_id},"history_lost":bool}`) 에 남겨 Worker 재시작 뒤에도 유지. **지금 플랫폼 카탈로그에는 이 capability 가 없습니다.** 선언되기 전에는 앱이 첫 기동부터 실패한 Zephyr VM(신호를 한 번도 보내지 못한 VM)을 감지하지 못하므로, capability 선언이 D8 의 기능 완료 조건입니다(플랫폼 요청) |
+| Zephyr 앱 대상 여부 | 템플릿 카탈로그 capability `app_heartbeat`(Manager `templates`, 의도와 같이 캐시). `true` 앱 펌웨어, `false` starter(Xen 상태만). JSON boolean 만 믿고, 문자열 `"false"` 같은 값이면 그 템플릿의 VM 은 대상 여부 불명(OBSERVATION_UNAVAILABLE) | 선언이 없는 템플릿은 신호를 한 번 받은 뒤 armed 로 다루고, armed 는 `XENOVA_RECOVERY_STATE_DIR/armed.json`(`{"version":1,"armed":{vm_id: app_id},"history_lost":bool}`) 에 남겨 Worker 재시작 뒤에도 유지. 플랫폼 카탈로그는 기존·네트워크 Starter에 `false`를 노출합니다. 앱 펌웨어는 자체 템플릿에서 `true`를 선언해야 첫 heartbeat 전 기동 실패까지 감지할 수 있습니다 |
 
 판정 규칙 (`recovery/watcher.py`, 전부 단조 시계). VM 마다 OK / UNKNOWN / FAILED 셋 중 하나이고 FAILED 일 때만 사유가 있습니다.
 
@@ -270,7 +270,25 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 
 설정은 `XENOVA_RECOVERY_INTERVAL`(5), `XENOVA_RECOVERY_STATE_DIR`(/run/xenova/recovery), `XENOVA_RECOVERY_INTENT_REFRESH`(60), `XENOVA_RECOVERY_HEALTH_REFRESH`(15), `XENOVA_RECOVERY_HEARTBEAT_LOST`(30), `XENOVA_RECOVERY_APP_HEARTBEAT_LOST`(15), `XENOVA_RECOVERY_BOOT_GRACE`(90), `XENOVA_RECOVERY_ZEPHYR_BOOT_GRACE`(30), `XENOVA_RECOVERY_ABSENT_GRACE`(60), `XENOVA_RECOVERY_BROKER_HOST/PORT/USERNAME/PASSWORD`(127.0.0.1:1883, 계정 `dom0-server`), `XENOVA_RECOVERY_LOG_LEVEL` 이며, 플랫폼·xl 은 dom0-manager 와 같은 `XENOVA_*`(`XENOVA_DRIVER=platform` 필수)입니다.
 
-배포 전제(아직 없음): 플랫폼 패키징의 유닛 설치·enable 과 PYTHONPATH(`/opt/xenova/dom0-manager`, `/opt/xenova/mqtt-client`, paho), Mosquitto 계정 `dom0-server` 와 ACL(publish `xenova/v1/recovery/#`, read `xenova/v1/vms/+/heartbeat`·`xenova/v1/apps/+/events`), MQTT 계약의 `vm.health` 토픽과 VM API 계약 2.5 의 `APP_HEARTBEAT_LOST`(docs 브랜치로 별도 반영), 템플릿 capability `app_heartbeat`(앱 펌웨어 `true`, starter `false`). **유닛 enable 은 계약·ACL·capability 가 반영된 뒤에** 합니다. 그 전에는 코드가 머지돼도 기능이 완료된 것이 아닙니다. 플랫폼에 "Xen 을 관측하지 않는 list" 또는 잠금 없는 의도 조회가 생기면 60초 캐시 없이 그것을 씁니다(외부 의존. 지금은 60초마다의 `list` 한 번도 VM 수 × 최대 15초 동안 플랫폼 잠금을 쥘 수 있습니다). 열린 episode·판정 큐·recovery_id 는 아직 프로세스 메모리에만 있어 Worker 재시작이면 잃습니다. 복구 정책(125)이 미완료 복구를 dom0 에 저장하고 시작 시 복원하는 것이 125 의 선행 조건입니다.
+Yocto의 `xenova-dom0-manager` 패키지는 HTTP 서비스와 Recovery Worker unit을 함께 설치·enable합니다.
+Manager·공용 `xenova_mqtt`·Paho는 Python site-packages에서 로드하며 `/opt` 사본을 사용하지 않습니다.
+Worker는 `/etc/xenova/recovery-worker.env`(root 소유, 0600)에서 broker 설정을 읽습니다.
+broker의 계정 목록·ACL에는 `dom0-server`가 포함되며, 계정 비밀번호를 발급한 뒤
+`XENOVA_RECOVERY_BROKER_USERNAME=dom0-server`와 `XENOVA_RECOVERY_BROKER_PASSWORD`를 해당 파일에 설정합니다.
+broker 연결·필터별 SUBACK가 없으면 heartbeat 손실을 장애로 판정하지 않습니다.
+
+HTTP 서비스의 첫 시작 전 `python3 -m dom0_manager.service_token`이 보드별 256bit 토큰을
+`/etc/xenova/dom0-manager-token.env`(0600)에 생성합니다. 재시작·업데이트는 기존 토큰을 재사용하며
+명시적인 `dom0-manager.env`의 `XENOVA_SERVICE_TOKEN`이 우선합니다. 토큰 값은 출력하지 않습니다.
+공통 이미지에는 이 파일을 넣지 않습니다. Spring의 `DOM0_MANAGER_SERVICE_TOKEN`에는
+보드 토큰과 같은 값을 비밀 설정으로 전달합니다. 토큰·broker 비밀번호를 Git이나 명령행에 넣지 않습니다.
+
+확인 명령은 `systemctl is-enabled xenova-dom0-manager xenova-recovery-worker`,
+`systemctl status xenova-recovery-worker --no-pager`입니다. HTTP `/healthz`와 `/api/v1/stats`는
+Bearer 인증을 사용하며, 토큰이 없거나 다르면 401을 반환합니다.
+
+Xen을 관측하지 않는 의도 조회가 생기기 전까지 Worker는 60초 캐시를 사용합니다.
+열린 episode·판정 큐·recovery_id는 프로세스 메모리에 있으며 재시작 실행·복원은 복구 정책 엔진(125)의 책임입니다.
 
 ## 테스트
 
