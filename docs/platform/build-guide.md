@@ -836,3 +836,86 @@ CPU 정책이 없는 기존 설치의 활성화는 모든 관리 게스트가 �
 공통 이미지에는 HTTP 토큰·MQTT 암호·개인 Wi-Fi 설정을 넣지 않는다. 설치 후 `xenova-dom0-manager.service`가 `dom0_manager.service_token`을 실행해 `/etc/xenova/dom0-manager-token.env`를 0600으로 준비한다. `/etc/xenova/dom0-manager.env`의 기존 서비스 토큰은 우선하며 자동 회전하지 않는다. worker는 `/etc/xenova/recovery-worker.env`의 `XENOVA_RECOVERY_*` 설정을 읽고, broker 연결 문제로 VM 자동 시작이나 host admission을 외부 online 대기에 묶지 않는다.
 
 pinning 기능 수락과 성능 효과는 나누어 기록한다. 동일 펌웨어·입력·broker 설정에서 pinning 전/후 × Debian 부하 유무를 비교하고, guest 계산 주기와 Gateway 지연 각각의 p95/p99·관측 최대·deadline miss·오류/손실을 보관한다. 실제 주행 앱이 없는 경우 타이밍 harness 결과로 범위를 명시한다.
+
+## 10. XenStore G1 시험 인계물
+
+G1은 기본 A/B와 분리한 XenStore·VIF 관측 시험이다. 별도 펌웨어와 같은 소스 기준의
+플랫폼 런타임을 하나의 인계물로 준비한다. 1·2절에서 정한 `REPO`, `RUN`,
+고정 Zephyr·SDK·SPDX 입력과 기록 도구를 사용한다.
+
+**WSL 빌드 PC:**
+
+```bash
+run g1-build python3 -B "$REPO/platform/scripts/build-xenova-xenstore-g1.py" \
+  --zephyr-source "$ZEPHYR_SOURCE" --tools "$ZEPHYR_TOOLS" \
+  --spdx "$SPDX" --toolchain-archive "$SDK_ARCHIVE" \
+  --output "$RUN/g1-build" --execute
+
+run g1-handoff-plan python3 -B \
+  "$REPO/platform/scripts/package-xenova-xenstore-g1-handoff.py" package \
+  --source-root "$REPO" --firmware "$RUN/g1-build/firmware" \
+  --output "$RUN/g1-handoff"
+
+run g1-handoff-package python3 -B \
+  "$REPO/platform/scripts/package-xenova-xenstore-g1-handoff.py" package \
+  --source-root "$REPO" --firmware "$RUN/g1-build/firmware" \
+  --output "$RUN/g1-handoff" --execute
+
+run g1-handoff-verify python3 -B \
+  "$REPO/platform/scripts/package-xenova-xenstore-g1-handoff.py" verify \
+  --directory "$RUN/g1-handoff"
+
+(cd "$RUN/g1-handoff" && sha256sum -c SHA256SUMS)
+```
+
+`package` 기본은 계획 모드이며 출력·staging을 만들지 않는다. `--execute`는 새 인계
+디렉터리에만 게시한다. 펌웨어의 앱/모듈·빌드 스크립트·reference lock이 현재 소스와
+일치해야 하므로 문서가 들어 있는 소스 디렉터리의 변경도 빌드 입력으로 기록한다.
+기존 G1 빌드 영수증이나 게시 파일은 수정하지 않고 새 실행 경로로 준비한다.
+
+인계물은 다음 구조를 유지한다.
+
+| 경로 | 내용 |
+|---|---|
+| `RUNBOOK.md` | 이 절과 CLI 명세를 연결하는 시작 문서 |
+| `docs/platform/build-guide.md` | 현재 빌드·G1 인계 절차의 원문 |
+| `docs/platform/cli-manager-spec.md` | 공통 VM 제어·신원·복구 계약의 원문 |
+| `platform/`의 lock 파일 | 문서에서 참조하는 고정 빌드·템플릿 입력 |
+| `firmware/` | 실제 G1 ELF/bin/map/config/DTS·라이선스·`g1-build.json` |
+| `runtime/` | 지연 import까지 포함한 독립 시험용 플랫폼 라이브러리 |
+| `scripts/xenova-xenstore-g1-lab.py`, `test.cfg.in` | 소유 시험 도메인 제어 도구·설정 원형 |
+| `handoff-manifest.json`, `SHA256SUMS` | 문서를 포함한 파일 목록·크기·해시 |
+
+**dom0에서의 인계 확인:** 빌드 PC가 검증한 전체 인계 디렉터리를 새 경로에 전달하고
+`HANDOFF`를 보드의 실제 절대 경로로 지정한다. 독립 런타임은 `--platform-dir`로 선택한다.
+
+```bash
+test -n "$HANDOFF"
+(cd "$HANDOFF" && sha256sum -c SHA256SUMS)
+python3 -B "$HANDOFF/scripts/xenova-xenstore-g1-lab.py" \
+  --platform-dir "$HANDOFF/runtime" --help
+```
+
+실보드 시험에서는 아래 도구의 각 하위 명령을 사용한다. 모든 명령의
+`--platform-dir`, `--log-directory`는 하위 명령 앞에 둔다.
+
+| 하위 명령 | 입력·동작 |
+|---|---|
+| `preflight` | 도구·Xen·브리지·현재 도메인을 읽어 기준선 기록 |
+| `prepare` | `--firmware`, 새 `--directory`, `xg1-*` `--name`, 새 `--uuid`·`--mac`으로 중복 검사 후 시험 설정 생성 |
+| `launch --execute` | `--directory`의 소유 도메인을 paused 상태로 생성 |
+| `inspect` | `--directory`의 UUID/name/domid·VIF frontend/backend/MAC 대조 |
+| `resume --execute` | `--directory`의 같은 도메인을 unpause |
+| `signal --execute` | `--directory`와 게스트가 출력한 `--path`, 시험용 `--value`로 해당 control 노드만 변경 |
+| `cleanup --execute` | `--directory`, `--confirm-uuid`로 같은 시험 도메인 회수. `--remove-config`는 소유 설정 두 파일도 정리 |
+
+실보드 실행은 승인된 시험 범위에서 수행하고 기본 VM·등록 자산과 구분한다.
+게스트의 `watch-ready path=...`가 출력되면 60초 예산 안에 그 경로로 `signal`을 보낸다.
+`watch-reread`의 변경 값과 단계별 rc, `exercise-result`, `test-node-cleanup`,
+`store-cleanup` 및 도메인 회수 증거를 함께 보관한다. 알림 수신 뒤에도 값을 다시 읽는다.
+신호를 보내지 않는 별도 시험에서는 `watch-timeout`과 자원 회수를 확인한다.
+부모 `/local/domain/<self>/data`가 없거나 권한이 거절되면 해당 오류를 기록하고 중단한다.
+Connected·ring-ref·도메인 루트 권한을 대신 써 넣어 통과시키지 않는다.
+
+G1은 Store·권한·transaction·watch·회수를 검증한다. Ethernet packet 송수신·DHCP·
+MQTT·앱 준비는 Network Starter와 해당 앱의 별도 수락 근거로 기록한다.
