@@ -11,10 +11,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 // Web keys → MQTT-11 drive.input for the manual VM (MQTT contract §7).
@@ -22,6 +28,8 @@ import org.springframework.stereotype.Service;
 //  - While any key is held, the last keys are re-sent every 50 ms (20 Hz). Releasing all keys sends `keys: []`
 //    once. The manual VM treats 200 ms without input as "released", so a lost release is harmless.
 // There is one operator at a time (2026-10-20 decision), so a single shared key state is enough.
+// The repeat runs on its own thread, not Spring's shared @Scheduled thread: a slow dom0-manager call there
+// (VmStateWatcher) stalled the repeat for ~0.5 s and the manual VM stopped the car mid-drive.
 @Service
 public class ManualInputRelay {
 
@@ -31,6 +39,8 @@ public class ManualInputRelay {
     /** Contract §2: non-VM publishers use source_id. The backend is the dom0-server source. */
     static final String SOURCE_ID = "dom0-server";
 
+    private static final Logger log = LoggerFactory.getLogger(ManualInputRelay.class);
+
     private final DriveStateTracker tracker;
     // Absent when MQTT is disabled (xenova.mqtt.enabled=false); input is then reported as not connected.
     private final Supplier<DriveInputPublisher> publisher;
@@ -38,6 +48,11 @@ public class ManualInputRelay {
     private final Clock clock;
     private final String bootId = UUID.randomUUID().toString();
     private final String instanceId = UUID.randomUUID().toString();
+    private final ScheduledExecutorService repeater = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "manual-input-repeat");
+        thread.setDaemon(true);
+        return thread;
+    });
     private long seq;
     private List<String> held = List.of();
 
@@ -86,7 +101,23 @@ public class ManualInputRelay {
         update(List.of());
     }
 
-    @Scheduled(fixedRate = REPEAT_MS)
+    @PostConstruct
+    void start() {
+        // A task that throws is never run again by the executor, so one bad publish must not end the repeat.
+        repeater.scheduleAtFixedRate(() -> {
+            try {
+                repeat();
+            } catch (RuntimeException exception) {
+                log.warn("Manual input repeat failed: {}", exception.getMessage());
+            }
+        }, REPEAT_MS, REPEAT_MS, TimeUnit.MILLISECONDS);
+    }
+
+    @PreDestroy
+    void stop() {
+        repeater.shutdownNow();
+    }
+
     public synchronized void repeat() {
         if (held.isEmpty()) {
             return;

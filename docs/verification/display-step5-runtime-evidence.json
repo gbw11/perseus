@@ -1,0 +1,124 @@
+{
+  "scope": "virtual X11 root with real QEMU Xen data; actual JPEG screen capture and HTTP decode; not physical HDMI",
+  "before": [
+    [
+      "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+      13
+    ],
+    [
+      "820a0522-243f-42f1-90e9-9b74e1522965",
+      17
+    ],
+    [
+      "dd33284f-baf2-417f-93b2-a1af3c3f1ea2",
+      18
+    ]
+  ],
+  "cases": [
+    "two_native_x11_browser_windows_at_explicit_nonoverlapping_rectangles",
+    "real_qemu_state_renders_overview_and_detail",
+    "both_ffmpeg_x11_root_mjpeg_encoders_produce_real_pixel_frames",
+    "remote_viewer_authenticates_and_decodes_two_streams_without_feed_credentials",
+    "unique_native_window_color_markers_arrive_in_corresponding_remote_canvas_only",
+    "one_encoder_restart_does_not_restart_either_local_renderer_or_other_encoder",
+    "query_transport_failure_marks_all_xen_sources_stale_and_recovers_without_guest_commands",
+    "local_http_interruption_preserves_windows_marks_last_data_and_reconnects",
+    "native_browser_context_exit_restarts_only_affected_output_and_capture_recovers",
+    "remote_offline_stales_viewer_while_local_windows_and_encoders_continue_then_auto_recovers",
+    "twenty_local_visible_changes_are_observed_as_decoded_remote_pixels",
+    "continuous_two_screen_soak_with_live_local_and_remote_resource_samples",
+    "stream_service_shutdown_leaves_two_local_windows_running_and_remote_stale_banner",
+    "no_remote_browser_runtime_errors",
+    "qemu_vm_ids_unchanged_no_vm_restart"
+  ],
+  "virtual_measurement": {
+    "monitor-1": {
+      "fps": 5.0,
+      "mbps": 3.016
+    },
+    "monitor-2": {
+      "fps": 5.0,
+      "mbps": 2.86
+    }
+  },
+  "visual_change_latency": {
+    "clock": "same-host monotonic; 200ms polling quantization; 20 alternating-output changes",
+    "samples_ms": [
+      223.4,
+      220.3,
+      219.0,
+      218.2,
+      219.6,
+      427.9,
+      222.5,
+      217.6,
+      217.5,
+      424.3,
+      423.5,
+      220.9,
+      216.4,
+      216.8,
+      219.3,
+      221.5,
+      218.2,
+      215.6,
+      216.2,
+      216.9
+    ],
+    "p95_ms": 424.3,
+    "max_ms": 427.9
+  },
+  "soak": {
+    "duration_seconds": 600.0,
+    "sample_count": 120,
+    "interval_seconds": 5,
+    "all_samples_live": true,
+    "local_contexts_unchanged": true,
+    "process_scope": "entire virtual lab tree including receiving Chromium; summed RSS includes shared pages",
+    "cpu_percent_one_core_mean": 24.33,
+    "cpu_percent_one_core_max": 28.28,
+    "rss_mib_first": 2875.59,
+    "rss_mib_last": 2917.15,
+    "rss_mib_max": 2944.81,
+    "streams": {
+      "monitor-1": {
+        "fps": 5.0,
+        "jpeg_payload_mbps": 3.017
+      },
+      "monitor-2": {
+        "fps": 5.0,
+        "jpeg_payload_mbps": 2.86
+      }
+    }
+  },
+  "recovery_observations": {
+    "xen_query_seconds": 3.418,
+    "local_http_seconds": 1.038,
+    "native_window_seconds": 1.028,
+    "remote_network_seconds": 1.037
+  },
+  "after": [
+    [
+      "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+      13
+    ],
+    [
+      "820a0522-243f-42f1-90e9-9b74e1522965",
+      17
+    ],
+    [
+      "dd33284f-baf2-417f-93b2-a1af3c3f1ea2",
+      18
+    ]
+  ],
+  "passed": true,
+  "completed_at": "2026-10-22T02:20:14.710720+00:00",
+  "capture_configuration": {
+    "resolution_per_output": [
+      1280,
+      720
+    ],
+    "fps": 5,
+    "jpeg_quality": 7
+  }
+}

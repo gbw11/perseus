@@ -5,6 +5,16 @@ spring:
     url: ${DB_URL:jdbc:h2:file:./data/xenova;AUTO_SERVER=TRUE}
     username: ${DB_USERNAME:sa}
     password: ${DB_PASSWORD:}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      repositories:
+        enabled: false
+      ssl:
+        enabled: ${REDIS_SSL:false}
+      timeout: ${REDIS_TIMEOUT:2s}
   jpa:
     hibernate:
       ddl-auto: update
@@ -30,9 +40,13 @@ management:
   endpoint:
     health:
       show-details: never
+  health:
+    redis:
+      enabled: ${REDIS_HEALTH_ENABLED:false}
 
 xenova:
   auth:
+    state-store: ${AUTH_STATE_STORE:redis}
     jwt-secret: ${JWT_SECRET:xenova-local-development-secret-change-before-production}
     access-token-ttl: ${ACCESS_TOKEN_TTL:15m}
     refresh-token-ttl: ${REFRESH_TOKEN_TTL:7d}
@@ -84,6 +98,12 @@ xenova:
     reconnect-interval: ${MQTT_RECONNECT_INTERVAL:5s}
   websocket:
     allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS:*}
+  # dom0 표시 서비스가 WS /ws/v1/display-service 첫 프레임으로 보내는 공유 비밀. 비어 있으면 연결을 모두 거부(4401)한다.
+  display:
+    enabled: ${DISPLAY_FEED_ENABLED:false}
+    base-url: ${DISPLAY_FEED_BASE_URL:http://127.0.0.1:8082}
+    # WS 표시 서비스와 기존 feed 클라이언트가 같은 토큰을 사용한다. 기존 환경변수도 유지한다.
+    service-token: ${XENOVA_DISPLAY_SERVICE_TOKEN:${DISPLAY_FEED_SERVICE_TOKEN:}}
   dom0-manager:
     base-url: ${DOM0_MANAGER_BASE_URL:http://127.0.0.1:8081}
     service-token: ${DOM0_MANAGER_SERVICE_TOKEN:}

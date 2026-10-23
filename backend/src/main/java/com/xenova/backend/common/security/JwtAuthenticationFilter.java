@@ -1,7 +1,7 @@
 package com.xenova.backend.common.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.xenova.backend.auth.domain.RevokedAccessTokenRepository;
+import com.xenova.backend.auth.domain.AccessTokenRevocationStore;
 import com.xenova.backend.auth.infrastructure.JwtTokenService;
 import com.xenova.backend.common.error.ErrorResponse;
 import jakarta.servlet.FilterChain;
@@ -23,15 +23,15 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenService jwtTokenService;
-    private final RevokedAccessTokenRepository revokedAccessTokenRepository;
+    private final AccessTokenRevocationStore accessTokenRevocationStore;
     private final ObjectMapper objectMapper;
 
     public JwtAuthenticationFilter(
             JwtTokenService jwtTokenService,
-            RevokedAccessTokenRepository revokedAccessTokenRepository,
+            AccessTokenRevocationStore accessTokenRevocationStore,
             ObjectMapper objectMapper) {
         this.jwtTokenService = jwtTokenService;
-        this.revokedAccessTokenRepository = revokedAccessTokenRepository;
+        this.accessTokenRevocationStore = accessTokenRevocationStore;
         this.objectMapper = objectMapper;
     }
 
@@ -48,7 +48,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         try {
             Jwt jwt = jwtTokenService.decode(token);
-            if (jwt.getId() == null || revokedAccessTokenRepository.existsById(jwt.getId())) {
+            if (jwt.getId() == null || accessTokenRevocationStore.isRevoked(jwt.getId())) {
                 writeUnauthorized(response, "TOKEN_REVOKED", "폐기된 토큰입니다.");
                 return;
             }

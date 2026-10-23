@@ -8,6 +8,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 DRIVERS = ("mock", "xen", "platform")
+# 플랫폼 stop 은 대기 시간을 입력받지 않고(Manager stop 명세는 vm_id·force 뿐) 이 시간을 기다린다. xenova_vm.stop_many 의
+# timeout=90 이며 제거 관측도 같은 deadline 을 공유하므로 Manager 호출은 이 시간 안팎에서 끝난다. platform 모드의 shutdown_grace_s 는
+# 이 값과 같아야 한다. xl_command_timeout_s 는 xl 서브프로세스에만 걸리고 Manager 호출을 제한하지 않는다
+PLATFORM_STOP_WAIT_S = 90.0
 
 
 @dataclass(frozen=True)
@@ -15,7 +19,8 @@ class Settings:
     driver: str = "mock"
     host: str = "127.0.0.1"
     port: int = 8081
-    # 계약 v1.1: 조회 드라이버 한도 5초(Spring 대기 6초 안), 정지는 플랫폼이 최대 90초 동기 대기하고 자동 강제 종료 없음
+    # 계약 v1.1: 조회 드라이버 한도 5초(Spring 대기 6초 안), 정지는 플랫폼이 최대 90초 동기 대기하고 자동 강제 종료 없음.
+    # xl_command_timeout_s 는 xl 서브프로세스(create/shutdown/destroy)에만 걸린다. platform 모드의 정지 대기는 PLATFORM_STOP_WAIT_S 고정
     xl_query_timeout_s: float = 5.0
     xl_command_timeout_s: float = 95.0
     # 비어 있지 않으면 xl 을 로컬 대신 SSH 로 부른다 (예: root@100.64.0.1). 개발 PC 에서 실보드 조회를 대조할 때만 쓴다
@@ -23,6 +28,9 @@ class Settings:
     shutdown_grace_s: float = 90.0
     # Bearer 서비스 토큰. 비어 있으면 검사하지 않는다(로컬 Mock 개발). Tailscale 바인드 배포에서는 반드시 설정
     service_token: str = ""
+    # 내부 게이트웨이용 WebSocket. 명시적으로 활성화하고 서비스 토큰을 설정해야 한다.
+    console_enabled: bool = False
+    console_lock_dir: str = "/run/xenova/console-locks"
     # RPi4 물리 코어 수. vcpus 상한 검사에 쓴다. xl info 의 nr_cpus 를 읽을 수 있으면 그 값을 우선한다.
     host_cpus: int = 4
     instance_root: str = "/srv/xenova/instances"
@@ -35,11 +43,21 @@ class Settings:
     log_level: str = "INFO"
 
     def __post_init__(self) -> None:
+        if self.console_enabled and not self.service_token:
+            raise ValueError("console requires XENOVA_SERVICE_TOKEN")
+        if self.console_enabled and self.xl_ssh_target:
+            raise ValueError("console must run on local dom0, not XENOVA_XL_SSH")
         # 시간 값은 유한한 양수여야 한다. 음수·NaN·inf 는 Lock.acquire/타임아웃에서 예외나 무한 대기가 되므로 시작 시점에 거부한다
         for name in ("xl_query_timeout_s", "xl_command_timeout_s", "shutdown_grace_s", "platform_busy_timeout_s"):
             value = getattr(self, name)
             if not (math.isfinite(value) and value > 0):
                 raise ValueError(f"{name} must be a finite positive number of seconds, got {value!r}")
+        if self.driver == "platform" and self.shutdown_grace_s != PLATFORM_STOP_WAIT_S:
+            # 플랫폼은 설정과 무관하게 90초를 기다린다. 다른 값은 운영자가 짧은 정지를 기대하게 만들므로 시작 시점에 거부한다
+            raise ValueError(
+                f"platform stop waits a fixed {PLATFORM_STOP_WAIT_S:g}s and takes no grace input; "
+                f"XENOVA_SHUTDOWN_GRACE must be {PLATFORM_STOP_WAIT_S:g} (or unset) in platform mode, got {self.shutdown_grace_s!r}"
+            )
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -67,6 +85,8 @@ class Settings:
             xl_ssh_target=read("XENOVA_XL_SSH", cls.xl_ssh_target, str).strip(),
             shutdown_grace_s=read("XENOVA_SHUTDOWN_GRACE", cls.shutdown_grace_s, float),
             service_token=read("XENOVA_SERVICE_TOKEN", cls.service_token, str),
+            console_enabled=read("XENOVA_CONSOLE_ENABLED", cls.console_enabled, as_bool),
+            console_lock_dir=read("XENOVA_CONSOLE_LOCK_DIR", cls.console_lock_dir, str),
             host_cpus=read("XENOVA_HOST_CPUS", cls.host_cpus, int),
             instance_root=read("XENOVA_INSTANCE_ROOT", cls.instance_root, str),
             platform_lib=read("XENOVA_PLATFORM_LIB", cls.platform_lib, str),

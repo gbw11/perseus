@@ -7,10 +7,14 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
   const backend = env.VITE_BACKEND_ORIGIN || 'http://localhost:8080';
   return {
-    base: env.VITE_BASE || '/',
+    base: env.VITE_BASE || env.VITE_BASE_PATH || '/',
     plugins: [react()],
     server: {
       proxy: {
+        '/api/v1/display': {
+          target: env.VITE_DISPLAY_FEED_ORIGIN || 'http://127.0.0.1:8082',
+          changeOrigin: true,
+        },
         '/api': { target: backend, changeOrigin: true },
         '/ws': { target: backend.replace(/^http/, 'ws'), ws: true },
       },

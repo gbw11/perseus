@@ -16,6 +16,7 @@ import {
 
 /** VITE_TELEMETRY: live(백엔드) / scenario(혼자 도는 가짜) / 그 밖(기본) = 관리 콘솔 mock 을 따라감 (.env.example) */
 const PROVIDERS = { live: LiveTelemetryProvider, scenario: MockTelemetryProvider };
+import { MonitorPage } from './display/MonitorPage';
 
 function Root() {
   const mode = import.meta.env.VITE_TELEMETRY as keyof typeof PROVIDERS | undefined;
@@ -38,6 +39,8 @@ function ToSplit() {
 
 const router = createBrowserRouter(
   [
+    // dom0 표시 수집기 kiosk 화면 (S15P31E110-250, display-pipeline 계약)
+    { path: '/display/:outputId', element: <MonitorPage /> },
     {
       element: <Root />,
       children: [

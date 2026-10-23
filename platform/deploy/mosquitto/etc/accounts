@@ -1,8 +1,8 @@
 # 브로커 계정 목록 — 비밀번호는 여기 넣지 않는다 (scripts/make-passwd.sh 가 passwd 를 만든다).
 # 이름 규칙은 acl 머리말 참고: username = 토픽 안의 id.
 backend
+dom0-server
 gateway
-esp32
 perception
 autonomous
 manual

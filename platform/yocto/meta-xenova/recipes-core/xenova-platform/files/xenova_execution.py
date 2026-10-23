@@ -228,7 +228,7 @@ class Execution:
         return value
 
     def boot_decision(self, record):
-        """미승인 조합은 기존 autostart 실행을 유지하되 복구 admission은 주지 않는다."""
+        """현재 intent와 이번 host admission을 대조하고 승인된 boot policy를 적용한다."""
         intent = self.intent(record)
         lifecycle, generation = self.lifecycle(record)
         applicable = intent is not None and intent["lifecycle_generation"] == generation and lifecycle == "REGISTERED"
@@ -284,8 +284,8 @@ class Execution:
             refuse("RECONCILE_REQUIRED", "invalid execution identity")
         return value if value and value.get("host_boot_id") == self.host else None
 
-    def unique(self, row, deadline):
-        output = self.p.timed_command(["xenova-domain-identity", "--domid", str(row["domid"])], deadline)
+    def unique(self, row, deadline, *, allow_dom0=False):
+        output = self.p.timed_command(["xenova-domain-identity", "--domid", str(row["domid"])]+(["--allow-dom0"] if allow_dom0 else []), deadline)
         try:
             value = json.loads(output)
         except ValueError:
@@ -302,11 +302,21 @@ class Execution:
         if previous and previous.get("phase") in ("launching", "uncertain"):
             refuse("RECONCILE_REQUIRED", "an earlier launch may still exist; administrator reconciliation required")
 
-    def prepare_launch(self, record, owner=None):
+    def prepare_launch(self, record, owner=None, *, deadline=None, expected_cpu=None):
         self.require_launch_available(record)
         _, generation = self.lifecycle(record)
         intent = self.intent(record)
-        value = {"schema_version":"1.0", "vm_id":record["uuid"], "host_boot_id":self.host,
+        if owner:
+            if owner.get('kind') == 'user':
+                accepted = self.read(self._path(self.data, 'control-requests', owner['operation_id']))
+            elif owner.get('kind') == 'recovery':
+                accepted = self.read(self._path(self.data, 'recovery-attempts', owner['recovery_attempt_id']))
+            else:
+                accepted = None
+            if accepted:
+                expected_cpu = accepted.get('cpu_policy', {'configured':False})
+        cpu_context = self.p.cpu().require(record, deadline or self.p.clock()+15, expected=expected_cpu)
+        value = {"cpu_policy":cpu_context, "schema_version":"1.0", "vm_id":record["uuid"], "host_boot_id":self.host,
                  "execution_id":uuid4(), "lifecycle_generation":generation,
                  "intent_revision":intent["intent_revision"] if intent else None,
                  "phase":"launching", "owner":owner, "prepared_monotonic_ms":int(self.p.clock()*1000),
@@ -325,6 +335,15 @@ class Execution:
                  "observed_monotonic_ms":int(self.p.clock()*1000)}
         self.write(self._path(self.runtime, "executions", record["uuid"]), value)
         self.checkpoint("launch-observed", value)
+        try:
+            self.p.cpu().require(record, deadline, expected=value.get('cpu_policy', {'configured':False}), present=True, expected_identity=value)
+            value['cpu_verification'] = 'complete'
+        except ExecutionError as error:
+            value.update(cpu_verification='incomplete', cpu_error=error.error)
+            self.write(self._path(self.runtime, 'executions', record['uuid']), value)
+            raise ExecutionError('CPU_APPLY_INCOMPLETE', 'domain exists; CPU verification incomplete; no automatic repeat',
+                                 details={'cause':error.error, 'domid':value['domid'], 'execution_id':value['execution_id']}) from error
+        self.write(self._path(self.runtime, 'executions', record['uuid']), value)
         return value
 
     def end_run(self, record):
@@ -486,7 +505,10 @@ class Execution:
             refuse("TARGET_CHANGED", "control target is no longer registered")
         old = self.intent(record)
         base = old["intent_revision"] if old else 0
-        op = previous or {"schema_version":"1.0", "operation_id":uuid4(), "vm_id":record["uuid"],
+        cpu_context = self.p.cpu().context(record) if request['action'] in ('start', 'reboot') else None
+        if previous and cpu_context is not None and previous.get('cpu_policy', {'configured':False}) != cpu_context:
+            refuse('TARGET_CHANGED', 'accepted CPU policy changed before intent acceptance')
+        op = previous or {"cpu_policy":cpu_context, "schema_version":"1.0", "operation_id":uuid4(), "vm_id":record["uuid"],
                           "request":request, "request_hash":fingerprint(request), "idempotency_key":key,
                           "host_boot_id":self.host, "lifecycle_generation":generation, "base_revision":base,
                           "intent_revision":base+1, "desired_state":"stopped" if request["action"] in ("stop", "destroy") else "running",
@@ -528,6 +550,13 @@ class Execution:
                 diagnostics.append(warning)
         if action not in ("start", "stop", "reboot", "destroy"):
             refuse("INVALID_SPEC", "invalid control action")
+        from xenova_management import Manager
+        if any(q["vm_id"] == record["uuid"] and q["status"] != "SUCCEEDED"
+               for q in Manager(self.p)._operations()):
+            refuse("OPERATION_IN_PROGRESS", "an incomplete asset operation owns this VM", retryable=True)
+        if action == "reboot" and vm.guest_kind(record) == "zephyr" and vm.cooperative(record) and not force:
+            from xenova_zephyr_control import reboot
+            return reboot(self,record,key)
         request = {"vm_id":record["uuid"], "action":action, "force":force}
         previous = next((q for q in self.requests() if key is not None and q["idempotency_key"] == key), None)
         if previous and previous["request"] != request:
@@ -556,6 +585,8 @@ class Execution:
             if not confirmed:
                 refuse("RECONCILE_REQUIRED", "physical control result is uncertain; command not repeated",
                        details={"operation_id":previous["operation_id"], "replayed":True})
+            if action in ('start', 'reboot'):
+                self.p.cpu().require(record, self.p.clock()+15, expected=previous.get('cpu_policy', {'configured':False}), present=True)
             if action in ("stop", "destroy"):
                 self.end_run(record)
             previous["result"] = {"accepted":True, "observation":observation, "intent_revision":previous["intent_revision"]}
@@ -572,9 +603,12 @@ class Execution:
         def admit():
             nonlocal accepted
             accepted = self.accept(record, request, key, previous=previous, receipt=receipt)
+            if action in ('start', 'reboot'):
+                accepted['cpu_policy'] = self.p.cpu().require(record, self.p.clock()+15)
+                self.save_request(accepted, 'accepted')
             self.save_request(accepted, "executing")
             event("xen-action-requested", record, accepted["operation_id"], {"action":action})
-            if action == "start" and vm.guest_kind(record) == "linux":
+            if action == "start" and vm.has_network(record):
                 self.p.prepare_dhcp(records)
             return {"kind":"user", "operation_id":accepted["operation_id"]}
 
@@ -582,7 +616,7 @@ class Execution:
             if action == "start":
                 self.p.check_xen()
                 records = self.p.records(validate_assets=False)
-                if vm.guest_kind(record) == "linux":
+                if vm.has_network(record):
                     self.p.check_network()
                 physical = self.p.start(record, _accept=admit)
             elif action in ("stop", "destroy"):
@@ -615,7 +649,8 @@ class Execution:
             code = error.error["code"] if isinstance(error, ExecutionError) else "XEN_EXECUTION_FAILED"
             accepted["error"] = {"code":code, "message":str(error), "retryable":False,
                                  "details":{"accepted":True, "intent_revision":accepted["intent_revision"],
-                                            "operation_id":accepted["operation_id"]}}
+                                            "operation_id":accepted["operation_id"],
+                                            **({'cause':error.error} if isinstance(error, ExecutionError) else {})}}
             try:
                 self.save_request(accepted, "uncertain" if code == "RECONCILE_REQUIRED" and accepted.get("result") else "failed")
             except OSError as journal_error:

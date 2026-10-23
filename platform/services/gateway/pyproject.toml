@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xenova-gateway"
+version = "0.1.0"
+description = "Xenova dom0 게이트웨이: 제어권 전환 판정·ESP32 시리얼 전달 (S15P31E110-98)"
+requires-python = ">=3.11"
+# xenova_mqtt 는 같은 저장소의 platform/services/vm-agent/mqtt-client 라 여기 선언하지 않는다 (수동주행 앱과 같은 방식).
+# 개발 PC 에서는 pytest 의 pythonpath 가, dom0 에서는 PYTHONPATH 가 두 패키지를 묶는다
+dependencies = [
+    "paho-mqtt>=1.6,<3",
+]
+
+[project.optional-dependencies]
+serial = [
+    "pyserial>=3.5",
+]
+test = [
+    "pytest>=7",
+]
+
+[tool.setuptools.packages.find]
+include = ["xenova_gateway*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "../vm-agent/mqtt-client"]
+addopts = "-q"

@@ -23,6 +23,22 @@ npm run dev:screens      # http://localhost:5174/split
 npm run lint && npm test && npm run build
 ```
 
+## Docker 이미지
+
+하나의 Dockerfile에서 관리 콘솔과 모니터 화면을 서로 독립된 이미지로 빌드합니다.
+
+```bash
+docker build --target admin-console -t xenova-admin-console ./frontend
+docker build --target vm-screens -t xenova-vm-screens ./frontend
+
+docker run --rm -p 8080:8080 xenova-admin-console
+docker run --rm -p 8081:8080 xenova-vm-screens
+```
+
+두 이미지는 Nginx에서 SPA 경로 새로고침을 지원하고 `/healthz`로 상태를 확인합니다. 관리 콘솔의
+모니터 링크 주소는 이미지 빌드 시 `--build-arg VITE_SCREENS_ORIGIN=...`으로 지정할 수 있습니다.
+API·WebSocket 프록시와 운영 도메인은 배포 Nginx 설정에서 연결합니다.
+
 - 콘솔 환경변수는 `apps/admin-console/.env.example` 을 `.env.local` 로 복사해 바꿉니다 (`VITE_BACKEND_ORIGIN`, `VITE_API_BASE_URL`, `VITE_MOCK`).
 - 디자인 확인만 할 때는 로그인 없이 `http://localhost:5173/components-public`.
 
@@ -30,19 +46,31 @@ npm run lint && npm test && npm run build
 
 화면은 [화면 정의서](../docs/design/screen-spec.md) W-01~W-08 의 초안입니다 (Stitch 시안 색·배치). 위쪽 메뉴 아래 **주행 모드 띠**가 모든 화면에 고정됩니다.
 
-| 경로                      | 화면                                | 데이터                                   | 이어받을 작업            |
-| ------------------------- | ----------------------------------- | ---------------------------------------- | ------------------------ |
-| `/login`                  | W-01 로그인                         | auth                                     | -53                      |
-| `/`                       | W-02 대시보드 (주행 통합)           | `/ws/v1/drive/state`, vms, events        | 공병우 (정의서 Q2)       |
-| `/vms`, `/vms/new`        | W-03 목록 · W-05 생성               | vms, templates                           | -55 · -159               |
-| `/vms/:vmId`              | W-04 상세 (개요·차트·프로세스·콘솔) | vms, metrics, processes. 콘솔 WS-03 없음 | 정수환                   |
-| `/resources`              | W-06 자원 제어                      | 없음 (-107) — 화면 안 미리보기           | 정수환 -113·-114         |
-| `/demo`                   | W-07 시연 제어                      | drive state·input. 배치·격리·재개 없음   | -129·-135, 재개 API 계약 |
-| `/console`                | 웹 콘솔 (UI-05·MO-04)               | WS `/ws/v1/vms/{id}/console`             | platform -248            |
-| `/events`                 | W-08 이벤트 타임라인                | events (3초 재조회)                      | -160                     |
-| `/screens`, `/components` | 모니터 바로가기, 컴포넌트           | —                                        |                          |
+| 경로                      | 화면                                | 데이터                                 | 이어받을 작업            |
+| ------------------------- | ----------------------------------- | -------------------------------------- | ------------------------ |
+| `/login`                  | W-01 로그인                         | auth                                   | -53                      |
+| `/`                       | W-02 대시보드 (주행 통합)           | `/ws/v1/drive/state`, vms, events      | 공병우 (정의서 Q2)       |
+| `/vms`, `/vms/new`        | W-03 목록 · W-05 생성               | vms, templates                         | -55 · -159               |
+| `/vms/:vmId`              | W-04 상세 (개요·차트·프로세스·콘솔) | vms, metrics, processes, 콘솔 WS-03    | 정수환                   |
+| `/resources`              | W-06 자원 제어                      | 없음 (-107) — 화면 안 미리보기         | 정수환 -113·-114         |
+| `/demo`                   | W-07 시연 제어                      | drive state·input. 배치·격리·재개 없음 | -129·-135, 재개 API 계약 |
+| `/console`                | 웹 콘솔 (UI-05·MO-04)               | WS `/ws/v1/vms/{id}/console`           | platform -248            |
+| `/events`                 | W-08 이벤트 타임라인                | events (3초 재조회)                    | -160                     |
+| `/screens`, `/components` | 모니터 바로가기, 컴포넌트           | —                                      |                          |
 
 VM 은 "VM 1·2·3" 이 아니라 역할 이름(자율주행·수동주행·네비게이션)으로 부릅니다 (`src/domain/roles.ts`). 이벤트 분류·문구는 `src/domain/events.ts`.
+
+### 웹 콘솔 (UI-05 / MO-04)
+
+VM 상세 화면의 **웹 콘솔 → 연결**에서 실제 게스트 터미널에 접속합니다.
+기존 웹 로그인 뒤 게스트 로그인은 해당 OS 계정으로 별도 진행합니다.
+연결 해제·페이지 이동은 VM을 종료하지 않습니다. Zephyr Starter는 셸이 없어 현재 로그 확인 범위입니다.
+중복 접속·VM 종료·인증 만료를 안내하고 자동으로 명령을 재전송하거나 재접속하지 않습니다.
+
+`@xterm/xterm`과 `@xterm/addon-fit`을 사용하며, Spring이 내부 dom0 서비스 토큰을 대신 처리합니다.
+프론트 설정에 서비스 토큰을 넣지 않습니다. 연결 경로·메시지는
+[웹 터미널 계약](../docs/contracts/browser-console-v1.md)에 정의합니다.
+상세 화면 카드 아래와 위쪽 메뉴 `/console` 두 곳에서 열 수 있습니다.
 
 API 타입(`src/api/types.ts`)은 팀 문서를 그대로 옮겼습니다. 문서가 바뀌면 타입도 같이 고칩니다.
 

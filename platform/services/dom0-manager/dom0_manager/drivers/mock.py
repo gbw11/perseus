@@ -3,7 +3,7 @@
 - 인메모리 도메인 저장소. 생성하면 running, shutdown/destroy 하면 목록에서 사라진다(도메인 부재 = 꺼짐).
 - 장애 주입: inject_crash(상태 crashed), inject_hang(정상 종료 무시 → 강제 전환 경로),
   inject_next_create("timeout"|"insufficient"), set_healthy(False) → /healthz 503.
-- 가짜 메트릭: get_stats 가 누적 CPU 시간을 돌려주고 inject_load 로 부하를 올린다.
+- 가짜 메트릭: collect_stats 가 계약 2.4 통계 객체를, get_stats 가 요약 dict 를 돌려주고 inject_load 로 부하를 올린다.
 - seed_samples(): 배포판 3종 샘플 VM. vm_id 는 고정(uuid5)이라 백엔드·프론트엔드가 그대로 쓸 수 있다.
 """
 
@@ -13,13 +13,14 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from ..errors import DriverTimeout, InsufficientResources, VMExists, VMNotFound
 from ..models import VmState
-from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner
+from .base import CreateSpec, Domain, DomainStats, Driver, HostInfo, InstancePaths, Provisioner, StatsSample
 
 SAMPLE_VMS: dict[str, tuple[UUID, int, int]] = {
     # name: (vm_id, vcpus, memory_mib)
@@ -195,6 +196,33 @@ class MockDriver(Driver):
                 "net_tx_bytes": domain.net_tx_bytes,
                 "sampled_at": now,
             }
+
+    def collect_stats(self) -> StatsSample:
+        """xentop 과 같은 모양의 누적값. CPU 시간은 경과 × load × vcpus, 디스크·네트워크는 load 에 비례해 자란다."""
+        with self._lock:
+            now = self._clock()
+            sampled_at = datetime.now(timezone.utc)
+            domains: list[DomainStats] = []
+            for d in sorted(self._domains.values(), key=lambda d: d.domid):
+                elapsed = max(0.0, now - d.started_at)
+                domains.append(
+                    DomainStats(
+                        vm_id=d.vm_id,
+                        domid=d.domid,
+                        name=d.name,
+                        sampled_at=sampled_at,
+                        state=d.state,
+                        vcpus=d.vcpus,
+                        cpu_time_s=int(elapsed * d.load * d.vcpus),
+                        memory_mib=d.memory_mib,
+                        max_memory_mib=d.memory_mib,
+                        net_rx_bytes=d.net_rx_bytes + int(elapsed * 4096 * d.load),
+                        net_tx_bytes=d.net_tx_bytes + int(elapsed * 2048 * d.load),
+                        disk_rd_bytes=int(elapsed * 65536 * d.load),
+                        disk_wr_bytes=int(elapsed * 32768 * d.load),
+                    )
+                )
+            return StatsSample(sampled_at=sampled_at, domains=domains)
 
     # ---- 장애·부하 주입 ----
 

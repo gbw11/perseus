@@ -11,16 +11,25 @@ from ..config import Settings
 from .base import Driver, Provisioner
 from .mock import MockDriver, MockProvisioner
 from .xen import UnavailableProvisioner, XenDriver
-from .xl import SshRunner, SubprocessRunner, Xl
+from .xentop import Xentop
+from .xl import CommandRunner, SshRunner, SubprocessRunner, Xl
 
 
-def _xl(settings: Settings) -> Xl:
-    runner = SshRunner(settings.xl_ssh_target) if settings.xl_ssh_target else SubprocessRunner()
+def _runner(settings: Settings) -> CommandRunner:
+    return SshRunner(settings.xl_ssh_target) if settings.xl_ssh_target else SubprocessRunner()
+
+
+def _xl(settings: Settings, runner: CommandRunner | None = None) -> Xl:
     return Xl(
-        runner,
+        runner or _runner(settings),
         query_timeout_s=settings.xl_query_timeout_s,
         command_timeout_s=settings.xl_command_timeout_s,
     )
+
+
+def _xentop(settings: Settings, runner: CommandRunner | None = None) -> Xentop:
+    # xentop -b -i 1 은 즉시 끝난다. 조회 한도(5초)를 그대로 쓴다
+    return Xentop(runner or _runner(settings), timeout_s=settings.xl_query_timeout_s)
 
 
 def build_driver(settings: Settings) -> Driver:
@@ -29,11 +38,18 @@ def build_driver(settings: Settings) -> Driver:
         if settings.mock_samples:
             driver.seed_samples()
         return driver
+    runner = _runner(settings)
     if settings.driver == "xen":
-        return XenDriver(_xl(settings))
-    from .platform import PlatformDriver, load_manager
+        return XenDriver(_xl(settings, runner), xentop=_xentop(settings, runner))
+    from .platform import PlatformDriver, load_manager, load_records_loader
 
-    return PlatformDriver(load_manager(settings.platform_lib, busy_timeout_s=settings.platform_busy_timeout_s), _xl(settings))
+    manager = load_manager(settings.platform_lib, busy_timeout_s=settings.platform_busy_timeout_s)
+    return PlatformDriver(
+        manager,
+        _xl(settings, runner),
+        xentop=_xentop(settings, runner),
+        records_loader=load_records_loader(settings.platform_lib, manager),
+    )
 
 
 def build_provisioner(settings: Settings, driver: Driver | None = None) -> Provisioner:

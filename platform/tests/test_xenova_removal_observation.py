@@ -58,6 +58,82 @@ class RemovalObservationTest(unittest.TestCase):
         self.assertEqual(self.controls(), [['xl', 'shutdown', '7']])
         self.assertEqual(self.xen.calls[-1], ['systemctl', 'reboot'])
 
+    def closing_name_sequence(self, *, flags='--ps--', persistent=False, changed_uuid=False):
+        self.live(self.linux, 7); self.xen.hang_shutdown = True
+        accepted, samples = False, []
+        def command(args, **kwargs):
+            nonlocal accepted
+            if accepted and args == ['xl', 'list', '-v']:
+                samples.append(1)
+                if len(samples) > 1 and not persistent:
+                    self.xen.rows = []
+                output = self.xen(args, **kwargs)
+                lines = output.splitlines()
+                for index, line in enumerate(lines[1:], 1):
+                    fields = line.split()
+                    if fields[1] == '7':
+                        fields[0], fields[4] = '(null)', flags
+                        if changed_uuid:
+                            fields[6] = record('debian-dev')['uuid']
+                        lines[index] = ' '.join(fields)
+                return '\n'.join(lines) + '\n'
+            output = self.xen(args, **kwargs)
+            if args == ['xl', 'shutdown', '7']:
+                accepted = True
+            return output
+        self.p.command = command
+        self.fake_time()
+        return samples
+
+    def test_xen_shutdown_loses_store_name_before_domain_removal(self):
+        samples = self.closing_name_sequence()
+        self.cli('stop', self.linux['id'])
+        self.assertEqual(self.result()['observation']['samples'], 4)
+        self.assertGreaterEqual(len(samples), 4)
+        self.assertEqual(self.result()['instances'][self.linux['id']]['stage'], 'domain-removed')
+        self.assertEqual(self.controls(), [['xl', 'shutdown', '7']])
+
+    def test_null_shutdown_name_is_not_domain_absence_and_must_time_out(self):
+        self.closing_name_sequence(persistent=True)
+        with self.assertRaisesRegex(vm.PlatformError, 'graceful shutdown timed out'):
+            self.p.stop_many([self.linux], timeout=3)
+        self.assertEqual(self.result()['instances'][self.linux['id']]['stage'], 'removal-timeout')
+        self.assertEqual(self.controls(), [['xl', 'shutdown', '7']])
+
+    def test_null_name_cannot_hide_uuid_reuse_or_a_running_domain(self):
+        for options in ({'changed_uuid':True}, {'flags':'-b----'}):
+            with self.subTest(options=options):
+                self.xen.rows = []; self.xen.calls = []
+                self.closing_name_sequence(**options)
+                with self.assertRaisesRegex(vm.PlatformError, 'replacement'):
+                    self.p.stop_many([self.linux], timeout=3)
+                self.assertEqual(self.controls(), [['xl', 'shutdown', '7']])
+
+    def test_two_shutting_down_domains_can_both_have_unavailable_store_names(self):
+        other, _ = self.add_linux()
+        self.live(self.linux, 7); self.live(other, 8); self.xen.hang_shutdown = True
+        count = 0
+        def command(args, **kwargs):
+            nonlocal count
+            if args == ['xl', 'list', '-v']:
+                count += 1
+                if count > 1:
+                    self.xen.rows = []
+                output = self.xen(args, **kwargs)
+                lines = output.splitlines()
+                for index, line in enumerate(lines[1:], 1):
+                    fields = line.split()
+                    if fields[1] in ('7', '8'):
+                        fields[0], fields[4] = '(null)', '--ps--'
+                        lines[index] = ' '.join(fields)
+                return '\n'.join(lines) + '\n'
+            return self.xen(args, **kwargs)
+        self.p.command = command; self.fake_time()
+        with redirect_stdout(io.StringIO()):
+            result = self.p.stop_many([self.linux, other], timeout=3)
+        self.assertEqual(set(result['stopped']), {self.linux['id'], other['id']})
+        self.assertEqual(count, 4)
+
     def test_persistent_live_identity_and_missing_details_timeout_without_false_success(self):
         self.live(self.linux, 7); self.xen.hang_shutdown = True
         accepted = False

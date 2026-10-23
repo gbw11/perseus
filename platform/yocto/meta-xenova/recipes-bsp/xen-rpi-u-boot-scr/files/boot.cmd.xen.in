@@ -21,6 +21,11 @@ fdt move ${fdtcontroladdr} ${fdt_addr_r} || exit 1
 fdt addr ${fdt_addr_r} || exit 1
 fdt resize 0x1000 || exit 1
 
+# Pi 4 Xen dom0의 무선 SDIO DMA 전송 실패를 피해 이 호스트만 PIO로 사용한다.
+# SD 카드 호스트와 DMA 컨트롤러, Control FDT는 그대로 유지한다.
+fdt rm /soc/mmcnr@7e300000 dmas || exit 1
+fdt rm /soc/mmcnr@7e300000 dma-names || exit 1
+
 # Set module load addresses (실보드 검증값 유지).
 setenv xen_loadaddr     "0x00200000"
 setenv kernel_loadaddr  "0x00400000"
@@ -47,7 +52,8 @@ echo Add boot arguments for dom0
 if test "${xenova_debug}" = "1"; then
     setenv xenova_logargs "earlycon=xenboot debug loglevel=7 systemd.log_level=debug systemd.log_target=console systemd.show_status=yes"
 else
-    setenv xenova_logargs "loglevel=4 systemd.log_level=info systemd.log_target=journal-or-kmsg systemd.show_status=error"
+    # 일반 UART에서는 반복 ERR 출력을 줄이고 전체 커널 기록은 dmesg/journal에 남긴다.
+    setenv xenova_logargs "loglevel=3 systemd.log_level=info systemd.log_target=journal-or-kmsg systemd.show_status=error"
 fi
 setenv dom0_bootargs "console=hvc0 ${xenova_logargs} root=PARTUUID=${rootfs_partuuid} rootwait"
 fdt set /chosen xen,dom0-bootargs "${dom0_bootargs}" || exit 1

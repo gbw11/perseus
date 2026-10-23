@@ -164,4 +164,45 @@ class DriveStateTrackerTest {
         control("AUTO", 1, "autonomous");
         assertThat(tracker.version()).isGreaterThan(before);
     }
+
+    @Test
+    void resumeAcceptedStartsACountdownUntilModeChanges() {
+        control("AUTO_READY", 4, null);
+        Optional<DriveNotice> notice = send("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle",
+                "drive.resume.accepted", "{\"switch_in_ms\":3000,\"generation\":4}");
+        assertThat(notice).map(DriveNotice::type).contains("drive.resume.accepted");
+        now.addAndGet(1200);
+        DriveState.Resume resume = tracker.snapshot().resume();
+        assertThat(resume.switchInMs()).isEqualTo(3000);
+        assertThat(resume.acceptedAgoMs()).isEqualTo(1200);
+        assertThat(resume.remainingMs()).isEqualTo(1800);
+        assertThat(resume.generation()).isEqualTo(4);
+
+        send("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle", "drive.mode.changed",
+                "{\"from\":\"AUTO_READY\",\"to\":\"AUTO\",\"generation\":5,\"reason\":\"resume\"}");
+        assertThat(tracker.snapshot().resume()).isNull();
+    }
+
+    @Test
+    void resumeCancelledOrLeavingAutoReadyClearsTheCountdown() {
+        control("AUTO_READY", 4, null);
+        send("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle", "drive.resume.accepted",
+                "{\"switch_in_ms\":3000,\"generation\":4}");
+        Optional<DriveNotice> cancelled = send("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle",
+                "drive.resume.cancelled", "{\"reason\":\"obstacle\"}");
+        assertThat(cancelled).map(DriveNotice::type).contains("drive.resume.cancelled");
+        assertThat(tracker.snapshot().resume()).isNull();
+
+        send("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle", "drive.resume.accepted",
+                "{\"switch_in_ms\":3000,\"generation\":4}");
+        control("SAFE_STOP", 6, null);
+        assertThat(tracker.snapshot().resume()).isNull();
+
+        // A countdown nobody finished disappears shortly after its end.
+        control("AUTO_READY", 7, null);
+        send("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle", "drive.resume.accepted",
+                "{\"switch_in_ms\":3000,\"generation\":7}");
+        now.addAndGet(3000 + DriveStateTracker.RESUME_GRACE_MS + 1);
+        assertThat(tracker.snapshot().resume()).isNull();
+    }
 }
