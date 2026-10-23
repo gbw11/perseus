@@ -23,6 +23,22 @@ npm run dev:screens      # http://localhost:5174/split
 npm run lint && npm test && npm run build
 ```
 
+## Docker 이미지
+
+하나의 Dockerfile에서 관리 콘솔과 모니터 화면을 서로 독립된 이미지로 빌드합니다.
+
+```bash
+docker build --target admin-console -t xenova-admin-console ./frontend
+docker build --target vm-screens -t xenova-vm-screens ./frontend
+
+docker run --rm -p 8080:8080 xenova-admin-console
+docker run --rm -p 8081:8080 xenova-vm-screens
+```
+
+두 이미지는 Nginx에서 SPA 경로 새로고침을 지원하고 `/healthz`로 상태를 확인합니다. 관리 콘솔의
+모니터 링크 주소는 이미지 빌드 시 `--build-arg VITE_SCREENS_ORIGIN=...`으로 지정할 수 있습니다.
+API·WebSocket 프록시와 운영 도메인은 배포 Nginx 설정에서 연결합니다.
+
 - 콘솔 환경변수는 `apps/admin-console/.env.example` 을 `.env.local` 로 복사해 바꿉니다 (`VITE_BACKEND_ORIGIN`, `VITE_API_BASE_URL`, `VITE_MOCK`).
 - 디자인 확인만 할 때는 로그인 없이 `http://localhost:5173/components-public`.
 
