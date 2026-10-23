@@ -276,6 +276,10 @@ class FirstBoot:
                     identities[key]['mac'] = mac
             state = {'schema': 1, 'phase': 'identities-planned', 'factory_id': factory['factory_id'],
                      'dom0_machine_id': mid, 'storage_uuid': uuid4(), 'identities': identities, 'registered': []}
+            from xenova_cpu import factory_activation
+            activation = factory_activation(identities, self.root/'etc/xenova/cpu-policy-preset.json')
+            if activation:
+                state['cpu_policy_activation'] = activation
             self.save(state_path, state)
         if set(state.get('identities', {})) != {s['record']['id'] for s in specs}:
             raise ValueError('progress has an incomplete identity plan')
