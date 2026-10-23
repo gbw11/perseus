@@ -66,6 +66,13 @@ class World:
     def health(self, vm_id=VM):
         return self.watcher.health(vm_id)
 
+    def prove(self, channel="agent"):
+        """경로 증거: 다른 VM 의 신호가 이 채널로 하나 온다 (브로커가 실제로 전달한다는 뜻)."""
+        if channel == "agent":
+            self.table.record(UUID(int=77), "boot-x", 1, self.clock.now)
+        else:
+            self.apps.record(UUID(int=78), "autonomous", "active", "fw-x", 1, self.clock.now)
+
 
 @pytest.fixture
 def world():
@@ -76,6 +83,7 @@ def world():
 
 
 def test_heartbeat_loss_is_judged_once_after_boot_grace(world):
+    world.prove()
     assert world.tick(obs()) == []  # 도메인 처음 봄: boot_grace 시작
     assert world.run(obs(), 85) == []  # 유예 안: heartbeat 가 없어도 판정 없음
     assert world.health().state == HealthState.STARTING  # 유예 중이라도 신호가 없으면 건강하다고 하지 않는다
@@ -102,6 +110,7 @@ def test_fresh_heartbeats_prevent_judgment_and_loss_is_measured_from_last_beat(w
 
 
 def test_heartbeat_resume_clears_episode_and_next_failure_gets_new_recovery_id(world):
+    world.prove()
     world.tick(obs())
     world.clock.now += 90
     first = world.tick(obs())
@@ -167,6 +176,7 @@ def test_zephyr_restart_waits_for_app_within_zephyr_grace(world):
 
 def test_declared_app_firmware_is_judged_without_any_prior_signal(world):
     """템플릿 capability 가 app.heartbeat 를 선언하면 신호를 받은 적 없어도 유예 뒤 판정한다. Worker 재시작 직후 앱이 이미 죽어 있어도 놓치지 않는다."""
+    world.prove("app")
     z = obs(ZEPHYR, kind="zephyr", expected=True)
     world.tick(z)
     assert world.health(ZEPHYR).state == HealthState.STARTING
@@ -185,6 +195,7 @@ def test_arming_persists_across_watcher_restart(tmp_path):
     assert json.loads((tmp_path / "recovery" / "armed.json").read_text()) == {"version": 1, "armed": {str(ZEPHYR): "manual"}, "history_lost": False}
 
     second = World(arming=store)  # Worker 재시작: 앱은 이미 죽어 신호가 없다
+    second.prove("app")
     assert second.watcher.armed() == {ZEPHYR: "manual"}
     second.tick(z)
     assert second.health(ZEPHYR).state == HealthState.STARTING  # 선언·armed 된 VM 은 신호 전에 건강하다고 하지 않는다
@@ -291,6 +302,7 @@ def test_no_liveness_judgment_before_path_granted_and_health_says_unobservable(w
     assert world.run(obs(), 300) == []  # 구독 승인 없이는 heartbeat 손실을 절대 판정하지 않는다
     assert world.health().state == HealthState.OBSERVATION_UNAVAILABLE and world.health().ok is False
     world.link = LinkState.up()
+    world.prove()
     assert world.tick(obs()) == []  # 승인 직후: 한 창(30초)을 기다린다
     assert world.run(obs(), 25) == []
     world.clock.now += 5
@@ -301,6 +313,7 @@ def test_agent_path_denied_suspends_linux_only_and_app_path_denied_suspends_zeph
     z = obs(ZEPHYR, kind="zephyr", expected=True, domid=2)
     world = World()
     world.link = LinkState(agent=False, app=True)  # ACL 이 heartbeat 구독만 거부
+    world.prove("app")
     judged = []
     for _ in range(21):  # 105초, 두 VM 을 매 주기 함께 관측
         judged += world.tick(obs(), z)
@@ -310,6 +323,7 @@ def test_agent_path_denied_suspends_linux_only_and_app_path_denied_suspends_zeph
 
     world2 = World()
     world2.link = LinkState(agent=True, app=False)  # 앱 이벤트 구독만 거부
+    world2.prove("agent")
     judged = []
     for _ in range(21):
         judged += world2.tick(obs(), z)
@@ -372,6 +386,7 @@ def test_paused_or_stopping_is_not_a_failure(world):
 
 
 def test_reason_change_within_episode_does_not_emit_again(world):
+    world.prove()
     world.tick(obs())
     world.clock.now += 90
     first = world.tick(obs())
@@ -510,3 +525,12 @@ def test_settings_validation_and_env():
     ):
         with pytest.raises(ValueError):
             RecoverySettings.from_env(bad)
+
+
+def test_granted_path_without_any_delivery_never_judges_loss(world):
+    """Mosquitto 는 읽기 ACL 에 막힌 구독도 SUBACK 성공으로 답한다. 승인만 보고 '안 온다'를 판정하면 ACL 오설정이 재시작으로 이어진다."""
+    world.tick(obs())
+    assert world.run(obs(), 200) == []  # 승인은 됐지만 이 채널로 아무것도 안 옴: 에이전트 미기동과 구별 불가 → 판정하지 않는다
+    assert world.health().state == HealthState.OBSERVATION_UNAVAILABLE
+    world.prove()  # 다른 VM 의 heartbeat 가 오면 경로가 증명된다
+    assert [j.reason for j in world.tick(obs())] == [FailureReason.HEARTBEAT_LOST]
