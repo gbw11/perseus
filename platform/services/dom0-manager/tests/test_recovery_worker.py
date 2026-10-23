@@ -414,15 +414,19 @@ def test_worker_passes_subscription_state_to_watcher():
     clock = [1000.0]
     client = FakeClient(granted=set())  # 연결은 됐지만 ACL 이 구독을 거부
     running = [_obs()]
-    worker = RecoveryWorker(SETTINGS, lambda: running, Watcher(SETTINGS, HeartbeatTable(), AppHeartbeatTable(), clock=lambda: clock[0]),
+    table = HeartbeatTable()
+    worker = RecoveryWorker(SETTINGS, lambda: running, Watcher(SETTINGS, table, AppHeartbeatTable(), clock=lambda: clock[0]),
                             link=lambda: link_state(client), health_publisher=HealthPublisher(client), clock=lambda: clock[0])
     for _ in range(40):  # 200초, heartbeat 구독 승인 없음
         clock[0] += 5
         assert worker.run_once() == []
     assert client.published[-1][2]["state"] == HealthState.OBSERVATION_UNAVAILABLE.value
     client.granted.add(HEARTBEAT_FILTER)  # SUBACK 승인
+    clock[0] += 5
+    assert worker.run_once() == []  # 승인은 봤지만 아직 아무것도 안 옴
+    table.record(UUID(int=77), "boot-x", 1, clock[0])  # 다른 VM 의 heartbeat: 브로커가 실제로 전달함을 증명
     judged = []
-    for _ in range(7):  # 승인을 처음 본 주기부터 30초 창
+    for _ in range(7):  # 증명 뒤 30초 창
         clock[0] += 5
         judged += worker.run_once()
     assert [j.reason for j in judged] == [FailureReason.HEARTBEAT_LOST]

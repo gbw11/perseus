@@ -17,11 +17,19 @@ class LastSeenTable(Generic[T]):
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._last: dict[UUID, T] = {}
+        self._last_received: float | None = None  # 어느 VM 이든 이 채널에서 마지막으로 받은 시각. 관측 경로가 실제로 전달한다는 증거
 
     def put(self, beat: T) -> T:
         with self._lock:
             self._last[beat.vm_id] = beat
+            if self._last_received is None or beat.received_monotonic > self._last_received:
+                self._last_received = beat.received_monotonic
         return beat
+
+    def last_received_monotonic(self) -> float | None:
+        """이 채널(토픽 필터)에서 마지막으로 유효한 메시지를 받은 단조 시각. VM 과 무관하다."""
+        with self._lock:
+            return self._last_received
 
     def last(self, vm_id: UUID) -> T | None:
         with self._lock:

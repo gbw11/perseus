@@ -45,6 +45,8 @@ def decide_vm(vm):
         return {"kind": "os_mismatch", "label": "OS 보고 불일치 확인 필요", "tone": "warning"}
     if vm["app_state"] == "failed":
         return {"kind": "app_error", "label": "앱 오류 · VM 실행 중", "tone": "danger"}
+    if vm["sources"]["app"].get("subscription_status") in {"pending", "denied", "error", "unavailable"}:
+        return {"kind": "app_source_unavailable", "label": "VM 실행 중 · 앱 보고 수신 경로 미확인", "tone": "warning"}
     if vm["app_state"] != "ready" or vm["sources"]["app"]["status"] != "fresh":
         return {"kind": "app_waiting", "label": "VM 실행 중 · 앱 상태 미확인", "tone": "warning"}
     # Graphics handles are not playable URLs. A capture adapter is a later stage.
