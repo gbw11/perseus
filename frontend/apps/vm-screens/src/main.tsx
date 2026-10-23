@@ -19,17 +19,20 @@ function Root() {
   );
 }
 
-const router = createBrowserRouter([
-  { path: '/', element: <Navigate to="/display/monitor-1" replace /> },
-  { path: '/display/:outputId', element: <MonitorPage /> },
-  {
-    element: <Root />,
-    children: [
-      { path: '/split', element: <SplitPage /> },
-      { path: '/detail/:app', element: <DetailPage /> },
-    ],
-  },
-]);
+const router = createBrowserRouter(
+  [
+    { path: '/', element: <Navigate to="/display/monitor-1" replace /> },
+    { path: '/display/:outputId', element: <MonitorPage /> },
+    {
+      element: <Root />,
+      children: [
+        { path: '/split', element: <SplitPage /> },
+        { path: '/detail/:app', element: <DetailPage /> },
+      ],
+    },
+  ],
+  { basename: import.meta.env.BASE_URL },
+);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
