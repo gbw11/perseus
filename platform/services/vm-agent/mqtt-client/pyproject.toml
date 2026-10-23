@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xenova-mqtt"
+version = "0.1.0"
+description = "Xenova MQTT 계약 v1 클라이언트: VM 에이전트·RC카 앱 공통"
+requires-python = ">=3.11"
+# Ubuntu 24.04 apt python3-paho-mqtt 1.6.1, Debian 13 은 2.1.0
+dependencies = [
+    "paho-mqtt>=1.6,<3",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+]
+
+[tool.setuptools.packages.find]
+include = ["xenova_mqtt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

@@ -1,0 +1,18 @@
+          NAME  STATE   CPU(sec) CPU(%)     MEM(k) MEM(%)  MAXMEM(k) MAXMEM(%) VCPUS NETS NETTX(k) NETRX(k) VBDS   VBD_OO   VBD_RD   VBD_WR  VBD_RSECT  VBD_WSECT SSID
+    debian-dev --b---         14    0.0     524304    6.4     525312       6.4     1    1       10        7    1        0     3218      759     146058      14712    0
+Net0 RX:     7964bytes      145pkts        0err        0drop  TX:    10644bytes      167pkts        0err        0drop
+VBD Unidentified 51712 [ca: 0]  OO:        0   RD:     3218   WR:      759   RSECT:     146058   WSECT:      14712
+      Domain-0 -----r        208    0.0    1048576   12.7    1048576      12.7     4    0        0        0    0        0        0        0          0          0    0
+zephyr-drive-a --b---          7    0.0      16400    0.2      17408       0.2     1    1        4        0    0        0        0        0          0          0    0
+Net0 RX:      589bytes        3pkts        0err        0drop  TX:     4447bytes       39pkts        0err        0drop
+zephyr-drive-b --b---          7    0.0      16400    0.2      17408       0.2     1    1        4        0    0        0        0        0          0          0    0
+Net0 RX:      589bytes        3pkts        0err        0drop  TX:     4211bytes       37pkts        0err        0drop
+          NAME  STATE   CPU(sec) CPU(%)     MEM(k) MEM(%)  MAXMEM(k) MAXMEM(%) VCPUS NETS NETTX(k) NETRX(k) VBDS   VBD_OO   VBD_RD   VBD_WR  VBD_RSECT  VBD_WSECT SSID
+    debian-dev --b---         14    0.2     524304    6.4     525312       6.4     1    1       10        7    1        0     3218      759     146058      14712    0
+Net0 RX:     8024bytes      146pkts        0err        0drop  TX:    10698bytes      168pkts        0err        0drop
+VBD Unidentified 51712 [ca: 0]  OO:        0   RD:     3218   WR:      759   RSECT:     146058   WSECT:      14712
+      Domain-0 -----r        208   12.3    1048576   12.7    1048576      12.7     4    0        0        0    0        0        0        0          0          0    0
+zephyr-drive-a --b---          7    0.7      16400    0.2      17408       0.2     1    1        4        0    0        0        0        0          0          0    0
+Net0 RX:      589bytes        3pkts        0err        0drop  TX:     4447bytes       39pkts        0err        0drop
+zephyr-drive-b --b---          7    0.7      16400    0.2      17408       0.2     1    1        4        0    0        0        0        0          0          0    0
+Net0 RX:      589bytes        3pkts        0err        0drop  TX:     4211bytes       37pkts        0err        0drop

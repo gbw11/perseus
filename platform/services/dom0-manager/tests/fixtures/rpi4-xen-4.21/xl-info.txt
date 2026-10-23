@@ -1,0 +1,35 @@
+host                   : raspberrypi4-64
+release                : 6.18.33-v8
+version                : #1 SMP PREEMPT Thu May 28 02:31:14 UTC 2026
+machine                : aarch64
+nr_cpus                : 4
+max_cpu_id             : 3
+nr_nodes               : 1
+cores_per_socket       : 4
+threads_per_core       : 1
+cpu_mhz                : 54.000
+hw_caps                : 00000000:00000000:00000000:00000000:00000000:00000000:00000000:00000000
+virt_caps              : hvm hap vpmu gnttab-v1
+arm_sve_vector_length  : 0
+total_memory           : 8052
+free_memory            : 6347
+sharing_freed_memory   : 0
+sharing_used_memory    : 0
+outstanding_claims     : 0
+free_cpus              : 0
+xen_major              : 4
+xen_minor              : 21
+xen_extra              : .1-pre
+xen_version            : 4.21.1-pre
+xen_caps               : xen-3.0-aarch64 xen-3.0-armv7l 
+xen_scheduler          : credit2
+xen_pagesize           : 4096
+platform_params        : virt_start=0x0
+xen_changeset          : Tue Mar 10 14:37:45 2026 +0100 git:1c72306b1f-dirty
+xen_commandline        : console=dtuart dtuart=/soc/serial@7e215040 dom0_mem=1024M sync_console bootscrub=0
+cc_compiler            : aarch64-poky-linux-gcc (GCC) 15.3.0
+cc_compile_by          : ssafy
+cc_compile_domain      : localdomain
+cc_compile_date        : 2026-03-10
+build_id               : f23f539a3c5e94d6402a8af72e61414add93043e
+xend_config_format     : 4

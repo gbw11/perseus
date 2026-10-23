@@ -1,0 +1,36 @@
+{
+  "preserved_original_backups": [
+    "/var/tmp/display253-vm2-CrW8l0rK",
+    "/var/tmp/display253-vm2-EshNvSDX",
+    "/var/tmp/display253-vm2-SDcbCdFx",
+    "/var/tmp/display253-vm2-NMZYGPZD",
+    "/var/tmp/display253-vm2-Va8S8NrJ",
+    "/var/tmp/display253-vm2-qzd2EmuM",
+    "/var/tmp/display253-vm2-zYRN7Z9F",
+    "/var/tmp/display253-vm2-ceWlgSI0",
+    "/var/tmp/display253-vm2-N4xYaZK0",
+    "/var/tmp/display253-vm2-PCWLjowp"
+  ],
+  "temporary_runners": [],
+  "listeners": "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\nLISTEN 0      128          0.0.0.0:22        0.0.0.0:*   \nLISTEN 0      128             [::]:22           [::]:*   \n",
+  "domains": [
+    {
+      "uuid": "33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6",
+      "name": "debian-dev",
+      "domid": 1,
+      "vif_count": 1
+    },
+    {
+      "uuid": "dd33284f-baf2-417f-93b2-a1af3c3f1ea2",
+      "name": "zephyr-dev",
+      "domid": 3,
+      "vif_count": 0
+    },
+    {
+      "uuid": "820a0522-243f-42f1-90e9-9b74e1522965",
+      "name": "zephyr-backup",
+      "domid": 24,
+      "vif_count": 0
+    }
+  ]
+}

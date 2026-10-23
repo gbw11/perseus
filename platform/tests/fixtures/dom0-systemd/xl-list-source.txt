@@ -1,0 +1,138 @@
+static void list_domains(bool verbose, bool context, bool claim, bool numa,
+                         bool cpupool, const libxl_dominfo *info, int nb_domain)
+{
+    int i;
+    static const char shutdown_reason_letters[]= "-rscwS";
+    libxl_bitmap nodemap;
+    libxl_physinfo physinfo;
+
+    libxl_bitmap_init(&nodemap);
+    libxl_physinfo_init(&physinfo);
+
+    printf("Name                                        ID   Mem VCPUs\tState\tTime(s)");
+    if (verbose) printf("   UUID                            Reason-Code\tSecurity Label");
+    if (context && !verbose) printf("   Security Label");
+    if (claim) printf("  Claimed");
+    if (cpupool) printf("         Cpupool");
+    if (numa) {
+        if (libxl_node_bitmap_alloc(ctx, &nodemap, 0)) {
+            fprintf(stderr, "libxl_node_bitmap_alloc_failed.\n");
+            exit(EXIT_FAILURE);
+        }
+        if (libxl_get_physinfo(ctx, &physinfo) != 0) {
+            fprintf(stderr, "libxl_physinfo failed.\n");
+            libxl_bitmap_dispose(&nodemap);
+            exit(EXIT_FAILURE);
+        }
+
+        printf(" NODE Affinity");
+    }
+    printf("\n");
+    for (i = 0; i < nb_domain; i++) {
+        char *domname;
+        libxl_shutdown_reason shutdown_reason;
+        domname = libxl_domid_to_name(ctx, info[i].domid);
+        shutdown_reason = info[i].shutdown ? info[i].shutdown_reason : 0;
+        printf("%-40s %5d %5lu %5d     %c%c%c%c%c%c  %8.1f",
+                domname,
+                info[i].domid,
+                (unsigned long) ((info[i].current_memkb +
+                    info[i].outstanding_memkb)/ 1024),
+                info[i].vcpu_online,
+                info[i].running ? 'r' : '-',
+                info[i].blocked ? 'b' : '-',
+                info[i].paused ? 'p' : '-',
+                info[i].shutdown ? 's' : '-',
+                (shutdown_reason >= 0 &&
+                 shutdown_reason < sizeof(shutdown_reason_letters)-1
+                 ? shutdown_reason_letters[shutdown_reason] : '?'),
+                info[i].dying ? 'd' : '-',
+                ((float)info[i].cpu_time / 1e9));
+        free(domname);
+        if (verbose) {
+            printf(" " LIBXL_UUID_FMT, LIBXL_UUID_BYTES(info[i].uuid));
+            if (info[i].shutdown) printf(" %8x", shutdown_reason);
+            else printf(" %8s", "-");
+        }
+        if (claim)
+            printf(" %5lu", (unsigned long)info[i].outstanding_memkb / 1024);
+        if (verbose || context)
+            printf(" %16s", info[i].ssid_label ? : "-");
+        if (cpupool) {
+            char *poolname = libxl_cpupoolid_to_name(ctx, info[i].cpupool);
+            printf("%16s", poolname);
+            free(poolname);
+        }
+        if (numa) {
+int main_list(int argc, char **argv)
+{
+    int opt;
+    bool verbose = false;
+    bool context = false;
+    bool details = false;
+    bool cpupool = false;
+    bool numa = false;
+    static struct option opts[] = {
+        {"long", 0, 0, 'l'},
+        {"verbose", 0, 0, 'v'},
+        {"context", 0, 0, 'Z'},
+        {"cpupool", 0, 0, 'c'},
+        {"numa", 0, 0, 'n'},
+        COMMON_LONG_OPTS
+    };
+
+    libxl_dominfo info_buf;
+    libxl_dominfo *info, *info_free=0;
+    int nb_domain, rc;
+
+    SWITCH_FOREACH_OPT(opt, "lvhZcn", opts, "list", 0) {
+    case 'l':
+        details = true;
+        break;
+    case 'v':
+        verbose = true;
+        break;
+    case 'Z':
+        context = true;
+        break;
+    case 'c':
+        cpupool = true;
+        break;
+    case 'n':
+        numa = true;
+        break;
+    }
+
+    libxl_dominfo_init(&info_buf);
+
+    if (optind >= argc) {
+        info = libxl_list_domain(ctx, &nb_domain);
+        if (!info) {
+            fprintf(stderr, "libxl_list_domain failed.\n");
+            return EXIT_FAILURE;
+        }
+        info_free = info;
+    } else if (optind == argc-1) {
+        uint32_t domid = find_domain(argv[optind]);
+        rc = libxl_domain_info(ctx, &info_buf, domid);
+        if (rc == ERROR_DOMAIN_NOTFOUND) {
+            fprintf(stderr, "Error: Domain \'%s\' does not exist.\n",
+                argv[optind]);
+            return EXIT_FAILURE;
+        }
+        if (rc) {
+            fprintf(stderr, "libxl_domain_info failed (code %d).\n", rc);
+            return EXIT_FAILURE;
+        }
+        info = &info_buf;
+        nb_domain = 1;
+    } else {
+        help("list");
+        return EXIT_FAILURE;
+    }
+
+    if (details)
+        list_domains_details(info, nb_domain);
+    else
+        list_domains(verbose, context, false /* claim */, numa, cpupool,
+                     info, nb_domain);

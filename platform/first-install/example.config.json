@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "template_policy": "full",
+  "operating_reserve_bytes": 2147483648,
+  "platform": {
+    "image": "/absolute/completed-platform/xenova-xen-bringup-image-raspberrypi4-64.rootfs-TIMESTAMP.wic.bz2",
+    "sha256": "REPLACE_WITH_ACTUAL_IMAGE_SHA256",
+    "build_record": "/absolute/completed-platform/BUILD-RESULT.json",
+    "build_record_sha256": "REPLACE_WITH_ACTUAL_RECORD_SHA256",
+    "release_manifest": "/absolute/completed-platform/platform-release.json",
+    "release_manifest_sha256": "REPLACE_WITH_ACTUAL_RELEASE_MANIFEST_SHA256"
+  },
+  "rtos_templates": [
+    {
+      "template_dir": "/absolute/xenova-template-releases/zephyr/xenova-zephyr-network-starter-1.1.0/1.1.0",
+      "template_manifest_sha256": "REPLACE_WITH_NETWORK_STARTER_FIRMWARE_JSON_SHA256"
+    }
+  ],
+  "linux_templates": [
+    {
+      "template_dir": "/absolute/xenova-template-releases/linux/ubuntu-24.04-20260926/1.0.2",
+      "template_manifest_sha256": "REPLACE_WITH_SELECTED_TEMPLATE_JSON_SHA256",
+      "template_id": "ubuntu-24.04-arm64",
+      "template_version": "1.0.2"
+    },
+    {
+      "template_dir": "/absolute/xenova-template-releases/linux/debian-13-20261015/1.0.2",
+      "template_manifest_sha256": "REPLACE_WITH_SELECTED_TEMPLATE_JSON_SHA256",
+      "template_id": "debian-13-arm64",
+      "template_version": "1.0.2"
+    }
+  ]
+}
