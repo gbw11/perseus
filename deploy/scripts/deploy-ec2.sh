@@ -17,28 +17,45 @@ ssh_options=(
   -o "UserKnownHostsFile=${DEPLOY_KNOWN_HOSTS}"
 )
 remote="${DEPLOY_USER}@${DEPLOY_HOST}"
+next_dir="${DEPLOY_DIR}.next"
+previous_dir="${DEPLOY_DIR}.previous"
 
-# Git 이력, 로컬 산출물, 비밀 파일은 보내지 않고 배포에 필요한 소스만 전달한다.
-ssh "${ssh_options[@]}" "${remote}" "sudo install -d -o '${DEPLOY_USER}' -g '${DEPLOY_USER}' '${DEPLOY_DIR}'"
+# 기존 디렉터리에 덮어쓰면 Git에서 삭제되거나 이름이 바뀐 파일이 서버에 남는다.
+# 매 배포마다 빈 준비 디렉터리를 만들고 소스를 교체해 서버 파일을 정확히 동기화한다.
+ssh "${ssh_options[@]}" "${remote}" \
+  "sudo rm -rf '${next_dir}' && sudo install -d -o '${DEPLOY_USER}' -g '${DEPLOY_USER}' '${next_dir}'"
 tar \
   --exclude='.git' \
   --exclude='.env' \
   --exclude='node_modules' \
   --exclude='target' \
   --exclude='dist' \
-  -czf - . | ssh "${ssh_options[@]}" "${remote}" "tar -xzf - -C '${DEPLOY_DIR}'"
+  -czf - . | ssh "${ssh_options[@]}" "${remote}" "tar -xzf - -C '${next_dir}'"
 
-scp "${ssh_options[@]}" "${DEPLOY_ENV_FILE}" "${remote}:${DEPLOY_DIR}/.env.next"
+scp "${ssh_options[@]}" "${DEPLOY_ENV_FILE}" "${remote}:${next_dir}/.env"
 
 ssh "${ssh_options[@]}" "${remote}" \
-  "DEPLOY_DIR='${DEPLOY_DIR}' IMAGE_TAG='${BUILD_NUMBER}' bash -s" <<'REMOTE'
+  "DEPLOY_DIR='${DEPLOY_DIR}' NEXT_DIR='${next_dir}' PREVIOUS_DIR='${previous_dir}' IMAGE_TAG='${BUILD_NUMBER}' bash -s" <<'REMOTE'
 set -Eeuo pipefail
+
+# Jenkins 전용 환경 파일은 저장소에 포함되지 않으므로 기존 서버 파일을 보존한다.
+if [[ -f "${DEPLOY_DIR}/deploy/jenkins/.env" ]]; then
+  install -D -m 600 \
+    "${DEPLOY_DIR}/deploy/jenkins/.env" \
+    "${NEXT_DIR}/deploy/jenkins/.env"
+fi
+
+chmod 600 "${NEXT_DIR}/.env"
+cd "${NEXT_DIR}"
+docker compose --env-file .env config --quiet
+
+sudo rm -rf "${PREVIOUS_DIR}"
+if [[ -d "${DEPLOY_DIR}" ]]; then
+  sudo mv "${DEPLOY_DIR}" "${PREVIOUS_DIR}"
+fi
+sudo mv "${NEXT_DIR}" "${DEPLOY_DIR}"
 cd "${DEPLOY_DIR}"
 
-chmod 600 .env.next
-mv .env.next .env
-
-docker compose --env-file .env config --quiet
 IMAGE_TAG="${IMAGE_TAG}" docker compose --env-file .env build
 IMAGE_TAG="${IMAGE_TAG}" docker compose --env-file .env up -d --remove-orphans
 
