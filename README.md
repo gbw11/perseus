@@ -44,7 +44,7 @@ Jenkins Credentials에 다음 항목을 등록해야 합니다.
 
 ### Jenkins 컨테이너
 
-Jenkins는 운영 서비스와 별도인 `compose.jenkins.yaml`로 실행합니다. 전용 이미지에는 Java 21, Node.js 22, Python 3, Git, SSH, Docker CLI·Buildx·Compose와 파이프라인 플러그인이 포함됩니다. Jenkins 웹 포트는 `127.0.0.1`에만 바인딩하므로 인터넷에서 직접 접근할 수 없습니다.
+Jenkins는 운영 서비스와 별도인 `compose.jenkins.yaml`로 실행합니다. 전용 이미지에는 Java 21, Node.js 22, Python 3, Git, SSH, Docker CLI·Buildx·Compose와 파이프라인 플러그인이 포함됩니다. Jenkins 웹 포트는 `127.0.0.1`에만 바인딩하고, 운영 Nginx와는 공유 `xenova_app` 네트워크를 통해 `/jenkins/` 경로로 연결합니다.
 
 ```bash
 cd /opt/xenova
@@ -54,7 +54,7 @@ docker compose --env-file deploy/jenkins/.env -f compose.jenkins.yaml config --q
 docker compose --env-file deploy/jenkins/.env -f compose.jenkins.yaml up -d --build
 ```
 
-로컬 PC에서 SSH 터널을 연 뒤 `http://127.0.0.1:8080`으로 접속합니다.
+공개 HTTPS를 적용하기 전에는 로컬 PC에서 SSH 터널을 연 뒤 `http://127.0.0.1:8080/jenkins/`로 접속합니다.
 
 ```bash
 ssh -i K15e110T.pem -L 8080:127.0.0.1:8080 ubuntu@k15e110.p.ssafy.io
