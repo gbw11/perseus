@@ -14,7 +14,7 @@ authentication, secret, cryptographic identity or vehicle authority source.
 Applications needing cryptography must supply a reviewed entropy source.
 
 Partial target build/native tests are separate from actual board acceptance.
-See platform/docs/resource-boot-zephyr.md. Do not publish this candidate as a
+See [the build guide](../../../../docs/platform/build-guide.md). Do not publish this candidate as a
 board-accepted release before actual A/B tests.
 
 ## 공통 진단 연동
@@ -30,3 +30,12 @@ PV console uses the interrupt-driven serial API. The frozen Xen HVC polling
 TX path discards a character when its output ring is full; FIFO TX retries
 with a hypervisor yield. Keep a console reader attached while requesting
 large diagnostic JSON. Console output is intrusive and is outside loop hooks.
+
+## Telemetry Publisher 2.0
+
+TCP와 별도의 worker-owned MQTT client를 연결한다. 인스턴스별 XenStore bootstrap이
+확인된 뒤 자기 v2 telemetry 토픽으로만 발행하며, 미설정이면 로컬 Core와 네트워크는 계속 동작한다.
+timer test RNG·공유 firmware의 고정 UUID·익명 인증은 사용하지 않는다.
+`xenova telemetry`는 상태, `xenova telemetry history|threads`는 명시적 상세 발행 요청이다.
+원천/시간/손실 매핑·bootstrap·격리 수신 검증은 [공통 Publisher](../telemetry/README.md)를 따른다.
+기존 diag/stats/hook과 협조 종료를 보존하며, quiesce에서 Publisher를 먼저 중지한 뒤 netfront를 닫는다.

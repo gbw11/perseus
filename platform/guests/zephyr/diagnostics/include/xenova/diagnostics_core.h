@@ -11,12 +11,15 @@
 #define XDIAG_HIST_BUCKETS 32
 
 struct xdiag_event {
+	uint64_t event_seq;
 	uint64_t uptime_ms;
 	int code;
+	bool boot_event;
 	char stage[XDIAG_STAGE_BYTES];
 };
 
 struct xdiag_history {
+	uint64_t event_sequence;
 	uint64_t boot_events, error_count;
 	size_t boot_count, error_entries;
 	struct xdiag_event boot[XDIAG_RECORDS], errors[XDIAG_RECORDS];
@@ -27,9 +30,11 @@ struct xdiag_metric {
 	uint64_t count, last, min, max, sum;
 	uint64_t histogram[XDIAG_HIST_BUCKETS];
 	bool saturated;
+	bool count_saturated, sum_saturated, histogram_saturated;
 };
 
 struct xdiag_timing {
+	uint64_t origin_us;
 	uint64_t period_us, deadline_us, next_release_us;
 	uint64_t release_us, start_us, previous_start_us, last_completion_us;
 	uint64_t loop_seq, deadline_miss_count, skipped_release_count;

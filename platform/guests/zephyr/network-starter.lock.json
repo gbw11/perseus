@@ -4,27 +4,27 @@
   "version": "1.1.0",
   "zephyr_commit": "684c9e8f32e4373a21098559f748f06915f950c9",
   "sdk_version": "1.0.0",
-  "app_source_sha256": "d92cdcd789ebe1c48ca20fe57156e52ef82a2a3ca7087708d25138cf96635eeb",
+  "app_source_sha256": "4396ebb2c207822c4f599d89cddb1fff4bf8c7d105275d43ee95aab044e4ac0b",
   "app_files": {
     "CMakeLists.txt": {
-      "sha256": "980f47ba1d6e63a853dbdb72936d3dbde47098222c19f35f97d5d6b4702ef9fa",
-      "bytes": 525
+      "sha256": "2692a4ff5c3255724c383aa443bd6b638112a2373a12a393aacdfdc11af362aa",
+      "bytes": 640
     },
     "Kconfig": {
       "sha256": "6904621496baf7ef059dbf087fc515c5daf542aaaaf2c76b5e16a83d783d9887",
       "bytes": 398
     },
     "README.md": {
-      "sha256": "e37f5b3539c2d3dc0f4622155836338c758c14f4cd249ede5ebff58c32dfb05e",
-      "bytes": 1768
+      "sha256": "cf84ef97babc2b37c61cb1935469712b60dd6f332c3593170939e832cf7faa80",
+      "bytes": 2492
     },
     "app.overlay": {
       "sha256": "d6bea9d071f32fadb8b3bcc1850efedc1c1b0f966a5d8787c1d21d456700c3eb",
       "bytes": 308
     },
     "prj.conf": {
-      "sha256": "1ce40ae971170797091708833bd52ffd8eb708c56a0f77e23e89f35952a9f989",
-      "bytes": 1153
+      "sha256": "3ee0ec932e22fff36d6acbc8468d27bbaf2bfd1143837ecf9e0dcca0e759ebc0",
+      "bytes": 1179
     },
     "src/diagnostics.c": {
       "sha256": "2e810eee0f42dbc11e4f5666a307bf8f75813dffd98c5144d4054d63af33c855",
@@ -39,8 +39,12 @@
       "bytes": 4531
     },
     "src/main.c": {
-      "sha256": "a18e804a67bfac387bb8024ebaf7c2ff086364cbd92a3b16a6f3dc032ebb146c",
-      "bytes": 2558
+      "sha256": "aa53f8ad91b3721097b9df58638c8963f6ec7d5a3e6e039d4b08de91ff5e94ed",
+      "bytes": 3012
+    },
+    "src/telemetry.c": {
+      "sha256": "0087cecdc088abcc25556363b6d6a082c55b5af31d72e7b986cf0ae1dc0be7b5",
+      "bytes": 2534
     }
   }
 }

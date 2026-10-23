@@ -36,7 +36,10 @@ int xdiag_history_record(struct xdiag_history *h, const char *stage, int code,
 	if (len >= XDIAG_STAGE_BYTES) {
 		return -ENAMETOOLONG;
 	}
-	struct xdiag_event event = {.uptime_ms = uptime_ms, .code = code};
+	if (!boot_event && !code) { return 0; }
+	if (h->event_sequence == UINT64_MAX) { return -ERANGE; }
+	struct xdiag_event event = {.event_seq = ++h->event_sequence,
+		.uptime_ms = uptime_ms, .code = code, .boot_event = boot_event};
 	memcpy(event.stage, stage, len + 1);
 	if (boot_event) {
 		if (h->boot_events < UINT64_MAX) { ++h->boot_events; }
@@ -58,9 +61,10 @@ static void metric(struct xdiag_metric *m, uint64_t value)
 	if (!m->count || value < m->min) { m->min = value; }
 	if (!m->count || value > m->max) { m->max = value; }
 	m->last = value;
-	m->sum = add(m->sum, value, &m->saturated);
-	m->count = add(m->count, 1, &m->saturated);
-	m->histogram[bucket] = add(m->histogram[bucket], 1, &m->saturated);
+	m->sum = add(m->sum, value, &m->sum_saturated);
+	m->count = add(m->count, 1, &m->count_saturated);
+	m->histogram[bucket] = add(m->histogram[bucket], 1, &m->histogram_saturated);
+	m->saturated = m->count_saturated || m->sum_saturated || m->histogram_saturated;
 }
 
 int xdiag_timing_init(struct xdiag_timing *t, uint64_t period,
@@ -72,6 +76,7 @@ int xdiag_timing_init(struct xdiag_timing *t, uint64_t period,
 		return -EINVAL;
 	}
 	memset(t, 0, sizeof(*t));
+	t->origin_us = origin;
 	t->period_us = period;
 	t->deadline_us = deadline;
 	t->next_release_us = origin;

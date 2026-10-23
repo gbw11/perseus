@@ -1,0 +1,2 @@
+# Development host only. No Python/JSON Schema runtime is added to Zephyr.
+jsonschema>=4,<5

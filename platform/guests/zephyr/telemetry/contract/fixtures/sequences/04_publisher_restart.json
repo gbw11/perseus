@@ -1,0 +1,33 @@
+{
+  "name": "04_publisher_restart",
+  "purpose_ko": "guest 부팅은 같아도 publisher 세션 변경을 따로 검증",
+  "test_scope": "reference receiver oracle only; no actual broker or control execution",
+  "steps": [
+    {
+      "op": "bind",
+      "vm_id": "11111111-1111-4111-8111-111111111111",
+      "boot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "publisher_instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/20_publisher_restart_only.json",
+      "received_ms": 0,
+      "retained_delivery": false,
+      "expected": "UNBOUND_OR_RETIRED"
+    },
+    {
+      "op": "bind",
+      "vm_id": "11111111-1111-4111-8111-111111111111",
+      "boot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "publisher_instance_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/20_publisher_restart_only.json",
+      "received_ms": 50,
+      "retained_delivery": false,
+      "expected": "CURRENT_OBSERVATION"
+    }
+  ]
+}

@@ -9,6 +9,10 @@
 #include <string.h>
 #include <stdatomic.h>
 #include "diagnostics_app.h"
+#if defined(CONFIG_XENOVA_TELEMETRY)
+#include <xenova/telemetry.h>
+int starter_telemetry_start(void);
+#endif
 #if defined(CONFIG_XENOVA_DIAGNOSTICS)
 #include <xenova/diagnostics.h>
 #endif
@@ -21,6 +25,9 @@ static int quiesce(const char *request,int64_t end,void *context) {
  if(mode==3){while(k_uptime_get()<end)k_sleep(K_MSEC(10));return -ETIMEDOUT;}
  if(k_uptime_get()>=end)return -ETIMEDOUT;
  int rc=starter_exercise_stop(end);if(rc)return rc;
+#if defined(CONFIG_XENOVA_TELEMETRY)
+ rc=xt_stop(end);if(rc)return rc;
+#endif
  printk("XENOVA demo quiesce %s: no vehicle output or driving state; hook completed\n",request);
  return 0;
 }
@@ -33,6 +40,10 @@ int main(void) {
  starter_diag_network_result(rc);
  printk("XENOVA Ethernet startup rc=%d; DHCP/app readiness independent\n",rc);
  starter_exercise_start();
+#if defined(CONFIG_XENOVA_TELEMETRY)
+ rc=starter_telemetry_start();
+ starter_diag_boot("telemetry-start",rc);
+#endif
  return 0;
 }
 
@@ -51,6 +62,9 @@ static int hook_cmd(const struct shell *sh,size_t argc,char **argv) {
  return 0;
 }
 SHELL_STATIC_SUBCMD_SET_CREATE(xenova_commands,
+#if defined(CONFIG_XENOVA_TELEMETRY)
+ SHELL_CMD(telemetry,NULL,"Publisher status; threads/history request an explicit snapshot",xt_shell_cmd),
+#endif
 #if defined(CONFIG_XENOVA_DIAGNOSTICS)
  SHELL_CMD(diag,NULL,"Local snapshot; add threads for intrusive stack analysis",xdiag_shell_cmd),
 #endif

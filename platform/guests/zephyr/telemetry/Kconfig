@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+menuconfig XENOVA_TELEMETRY
+	bool "Xenova Telemetry Publisher 2.0"
+	depends on XENOVA_DIAGNOSTICS && NETWORKING && NET_IPV4 && NET_TCP
+	select MQTT_LIB
+	select MQTT_LIB_CUSTOM_TRANSPORT
+	select MQTT_CLEAN_SESSION
+	select JSON_LIBRARY
+	help
+	  Separate worker-owned MQTT client. No fixed identity, anonymous fallback,
+	  v1 changes, automatic stack scanning or app-health inference.
+
+if XENOVA_TELEMETRY
+config XENOVA_TELEMETRY_STACK_SIZE
+	int "Publisher worker stack bytes"
+	range 8192 32768
+	default 12288
+config XENOVA_TELEMETRY_PRIORITY
+	int "Publisher preemptible thread priority"
+	range 9 14
+	default 10
+config XENOVA_TELEMETRY_TEST_OBSERVER
+	bool "Native integration test source observer (not production output)"
+	depends on ARCH_POSIX
+	default n
+endif
