@@ -40,6 +40,8 @@ MQTT는 기본적으로 dom0 loopback 브로커를 사용한다. 게스트별 �
 
 ## 인터페이스
 
+253번 2단계에서 [UUID·앱 매핑 및 구독 수신 규칙](../../../../docs/contracts/display-source-bindings-v1.md)을 보완했다. [후보 설정](examples/integration-candidate-bindings.json)은 합성 UUID를 쓰며 기본 거부한다. 시험 시에만 `XENOVA_DISPLAY_ALLOW_CANDIDATE_BINDINGS=1`로 명시한다. 실제 배치 설정을 자동 교체하지 않는다. 토픽별 SUBACK/재접속 이후 새 보고를 확인하고, 구독 실패와 VM/앱 장애를 구분한다. [검증 결과](../../../../docs/verification/display-253-step2.md)는 실제 domU 연결 시험과 구분한다.
+
 | 구간 | 엔드포인트 | 인증/데이터 |
 | --- | --- | --- |
 | dom0 내부 조회 | `GET /api/v1/display/state` | `Authorization: Bearer <서비스 토큰>` |
