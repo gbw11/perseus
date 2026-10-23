@@ -4,6 +4,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -42,6 +43,32 @@ class Binding(BaseModel):
         return value
 
 
+class BindingProfile(BaseModel):
+    """Explicit candidate/deployment provenance; not proof of a real registry match."""
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1]
+    scope: Literal["candidate", "deployment"]
+    bindings: list[Binding] = Field(min_length=3, max_length=3)
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def schema_integer(cls, value):
+        if type(value) is not int:
+            raise ValueError("schema_version must be integer 1")
+        return value
+
+
+def load_bindings(path, *, allow_candidate=False):
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    if isinstance(raw, list):
+        # Existing configurations remain supported, but are not called registry-verified.
+        return tuple(Binding.model_validate(row) for row in raw), "legacy"
+    profile = BindingProfile.model_validate(raw)
+    if profile.scope == "candidate" and not allow_candidate:
+        raise ValueError("candidate bindings require XENOVA_DISPLAY_ALLOW_CANDIDATE_BINDINGS=1")
+    return tuple(profile.bindings), profile.scope
+
+
 @dataclass(frozen=True)
 class FeedSettings:
     bindings: tuple[Binding, ...]
@@ -51,6 +78,7 @@ class FeedSettings:
     mqtt_username: str | None = None
     mqtt_password: str | None = None
     control_source: str = "dom0-gateway"
+    binding_scope: Literal["legacy", "candidate", "deployment", "configured"] = "configured"
 
     def __post_init__(self):
         if not self.token.strip():
@@ -67,13 +95,15 @@ class FeedSettings:
 
     @classmethod
     def from_env(cls):
-        bindings = json.loads(Path(os.environ["XENOVA_DISPLAY_BINDINGS"]).read_text(encoding="utf-8"))
+        bindings, scope = load_bindings(os.environ["XENOVA_DISPLAY_BINDINGS"],
+            allow_candidate=os.environ.get("XENOVA_DISPLAY_ALLOW_CANDIDATE_BINDINGS") == "1")
         return cls(
-            bindings=tuple(Binding.model_validate(b) for b in bindings),
+            bindings=bindings,
             token=os.environ.get("XENOVA_DISPLAY_TOKEN", ""),
             mqtt_host=os.environ.get("XENOVA_DISPLAY_MQTT_HOST", "127.0.0.1"),
             mqtt_port=int(os.environ.get("XENOVA_DISPLAY_MQTT_PORT", "1883")),
             mqtt_username=os.environ.get("XENOVA_DISPLAY_MQTT_USERNAME"),
             mqtt_password=os.environ.get("XENOVA_DISPLAY_MQTT_PASSWORD"),
             control_source=os.environ.get("XENOVA_DISPLAY_CONTROL_SOURCE", "dom0-gateway"),
+            binding_scope=scope,
         )

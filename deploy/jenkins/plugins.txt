@@ -1,0 +1,8 @@
+credentials-binding
+git
+gitlab-plugin
+junit
+mattermost
+pipeline-stage-view
+ssh-credentials
+workflow-aggregator
