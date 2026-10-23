@@ -17,7 +17,10 @@ def report(**kwargs):
 def test_only_display_topic_is_subscribed_and_vehicle_commands_are_ignored(store):
     calls=[]
     source=MqttSource(store)
-    source.on_connect(SimpleNamespace(subscribe=lambda topic,**kw:calls.append((topic,kw))),None,None,
+    def subscribe(topic,**kwargs):
+        calls.append((topic,kwargs))
+        return 0,len(calls)
+    source.on_connect(SimpleNamespace(subscribe=subscribe),None,None,
                       SimpleNamespace(is_failure=False),None)
     assert (DISPLAY_DRIVE_TOPIC,{"qos":1}) in calls
     assert not any(topic=="xenova/v1/vehicle/control" for topic,_ in calls)

@@ -1,0 +1,1883 @@
+[
+  {
+    "kind": "status",
+    "render_revision": "4874b9012e4e808dc52e",
+    "vm_id": "22222222-2222-4222-8222-222222222222",
+    "dom_rendered": [
+      "monitor-1",
+      "monitor-2"
+    ],
+    "browser_errors": [],
+    "physical_hdmi_verified": false,
+    "layouts": [
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 720
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 723
+      }
+    ],
+    "state": {
+      "schema_version": 1,
+      "type": "display.state",
+      "source_epoch": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2",
+      "sequence": 14,
+      "generated_at": "2026-10-22T08:20:58.728+00:00",
+      "mqtt_connected": true,
+      "binding_scope": "candidate",
+      "mqtt_subscriptions": {
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat": "granted",
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/inventory": "granted",
+        "xenova/v1/apps/autonomous/events": "granted",
+        "xenova/v1/apps/manual/events": "granted",
+        "xenova/v1/apps/message-board/events": "granted",
+        "xenova/v1/display/drive-state": "granted"
+      },
+      "vms": [
+        {
+          "vm_id": "11111111-1111-4111-8111-111111111111",
+          "role": "primary_drive",
+          "app_id": "autonomous",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:1",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:20:57.988+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "22222222-2222-4222-8222-222222222222",
+          "role": "backup_drive",
+          "app_id": "manual",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:2",
+          "guest_boot_id": "synthetic-fe4f9f543f6b7bf1d239a633d6bed290",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "ready",
+          "reported_app_state": "standby",
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:20:57.988+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "received_at": "2026-10-22T08:20:55.542+00:00",
+              "observed_at": "2026-10-22T08:20:55.540Z",
+              "source_id": "xenova/v1/apps/manual/events",
+              "source_epoch": [
+                "synthetic-fe4f9f543f6b7bf1d239a633d6bed290",
+                "826c3783-284f-489d-b730-36ae589e08c4"
+              ],
+              "sequence": 1,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "33333333-3333-4333-8333-333333333333",
+          "role": "interaction",
+          "app_id": "message-board",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:3",
+          "guest_boot_id": "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:20:57.988+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-22T08:20:55.595+00:00",
+              "observed_at": "2026-10-22T08:20:55.593Z",
+              "source_id": "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat",
+              "source_epoch": [
+                "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+                "0dafdd8b-d09f-45c4-92c3-383da8315160"
+              ],
+              "sequence": 2,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      ],
+      "drive": {
+        "active_vm_id": null,
+        "mode": "unknown",
+        "ai_status": "unknown",
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        }
+      }
+    },
+    "fits_720p": false
+  },
+  {
+    "kind": "app_error",
+    "render_revision": "b66dc2fc27f4d414ef20",
+    "vm_id": "22222222-2222-4222-8222-222222222222",
+    "dom_rendered": [
+      "monitor-1",
+      "monitor-2"
+    ],
+    "browser_errors": [],
+    "physical_hdmi_verified": false,
+    "layouts": [
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 720
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 723
+      }
+    ],
+    "state": {
+      "schema_version": 1,
+      "type": "display.state",
+      "source_epoch": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2",
+      "sequence": 26,
+      "generated_at": "2026-10-22T08:21:00.193+00:00",
+      "mqtt_connected": true,
+      "binding_scope": "candidate",
+      "mqtt_subscriptions": {
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat": "granted",
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/inventory": "granted",
+        "xenova/v1/apps/autonomous/events": "granted",
+        "xenova/v1/apps/manual/events": "granted",
+        "xenova/v1/apps/message-board/events": "granted",
+        "xenova/v1/display/drive-state": "granted"
+      },
+      "vms": [
+        {
+          "vm_id": "11111111-1111-4111-8111-111111111111",
+          "role": "primary_drive",
+          "app_id": "autonomous",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:1",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:20:59.992+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "22222222-2222-4222-8222-222222222222",
+          "role": "backup_drive",
+          "app_id": "manual",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:2",
+          "guest_boot_id": "synthetic-fe4f9f543f6b7bf1d239a633d6bed290",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "failed",
+          "reported_app_state": "error",
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:20:59.992+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "received_at": "2026-10-22T08:20:58.907+00:00",
+              "observed_at": "2026-10-22T08:20:58.905Z",
+              "source_id": "xenova/v1/apps/manual/events",
+              "source_epoch": [
+                "synthetic-fe4f9f543f6b7bf1d239a633d6bed290",
+                "826c3783-284f-489d-b730-36ae589e08c4"
+              ],
+              "sequence": 3,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "33333333-3333-4333-8333-333333333333",
+          "role": "interaction",
+          "app_id": "message-board",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:3",
+          "guest_boot_id": "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:20:59.992+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-22T08:20:58.961+00:00",
+              "observed_at": "2026-10-22T08:20:58.958Z",
+              "source_id": "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat",
+              "source_epoch": [
+                "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+                "0dafdd8b-d09f-45c4-92c3-383da8315160"
+              ],
+              "sequence": 4,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      ],
+      "drive": {
+        "active_vm_id": null,
+        "mode": "unknown",
+        "ai_status": "unknown",
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        }
+      }
+    },
+    "fits_720p": false
+  },
+  {
+    "kind": "app_waiting",
+    "render_revision": "9b2cbb0ff8aa30507900",
+    "vm_id": "22222222-2222-4222-8222-222222222222",
+    "dom_rendered": [
+      "monitor-1",
+      "monitor-2"
+    ],
+    "browser_errors": [],
+    "physical_hdmi_verified": false,
+    "layouts": [
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 720
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 723
+      }
+    ],
+    "state": {
+      "schema_version": 1,
+      "type": "display.state",
+      "source_epoch": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2",
+      "sequence": 34,
+      "generated_at": "2026-10-22T08:21:01.067+00:00",
+      "mqtt_connected": true,
+      "binding_scope": "candidate",
+      "mqtt_subscriptions": {
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat": "granted",
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/inventory": "granted",
+        "xenova/v1/apps/autonomous/events": "granted",
+        "xenova/v1/apps/manual/events": "granted",
+        "xenova/v1/apps/message-board/events": "granted",
+        "xenova/v1/display/drive-state": "granted"
+      },
+      "vms": [
+        {
+          "vm_id": "11111111-1111-4111-8111-111111111111",
+          "role": "primary_drive",
+          "app_id": "autonomous",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:1",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:00.999+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "22222222-2222-4222-8222-222222222222",
+          "role": "backup_drive",
+          "app_id": "manual",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:2",
+          "guest_boot_id": "synthetic-fe4f9f543f6b7bf1d239a633d6bed290",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": "error",
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:00.999+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "received_at": "2026-10-22T08:20:58.907+00:00",
+              "observed_at": "2026-10-22T08:20:58.905Z",
+              "source_id": "xenova/v1/apps/manual/events",
+              "source_epoch": [
+                "synthetic-fe4f9f543f6b7bf1d239a633d6bed290",
+                "826c3783-284f-489d-b730-36ae589e08c4"
+              ],
+              "sequence": 3,
+              "retained": false,
+              "age_ms": 4000,
+              "status": "stale",
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "33333333-3333-4333-8333-333333333333",
+          "role": "interaction",
+          "app_id": "message-board",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:3",
+          "guest_boot_id": "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:00.999+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-22T08:20:58.961+00:00",
+              "observed_at": "2026-10-22T08:20:58.958Z",
+              "source_id": "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat",
+              "source_epoch": [
+                "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+                "0dafdd8b-d09f-45c4-92c3-383da8315160"
+              ],
+              "sequence": 4,
+              "retained": false,
+              "age_ms": 4000,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      ],
+      "drive": {
+        "active_vm_id": null,
+        "mode": "unknown",
+        "ai_status": "unknown",
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        }
+      }
+    },
+    "fits_720p": false
+  },
+  {
+    "kind": "status",
+    "render_revision": "05d4acf6cecad144983a",
+    "vm_id": "22222222-2222-4222-8222-222222222222",
+    "dom_rendered": [
+      "monitor-1",
+      "monitor-2"
+    ],
+    "browser_errors": [],
+    "physical_hdmi_verified": false,
+    "layouts": [
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 720
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 723
+      }
+    ],
+    "state": {
+      "schema_version": 1,
+      "type": "display.state",
+      "source_epoch": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2",
+      "sequence": 45,
+      "generated_at": "2026-10-22T08:21:02.199+00:00",
+      "mqtt_connected": true,
+      "binding_scope": "candidate",
+      "mqtt_subscriptions": {
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat": "granted",
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/inventory": "granted",
+        "xenova/v1/apps/autonomous/events": "granted",
+        "xenova/v1/apps/manual/events": "granted",
+        "xenova/v1/apps/message-board/events": "granted",
+        "xenova/v1/display/drive-state": "granted"
+      },
+      "vms": [
+        {
+          "vm_id": "11111111-1111-4111-8111-111111111111",
+          "role": "primary_drive",
+          "app_id": "autonomous",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:1",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:02.010+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "22222222-2222-4222-8222-222222222222",
+          "role": "backup_drive",
+          "app_id": "manual",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:2",
+          "guest_boot_id": "synthetic-fe4f9f543f6b7bf1d239a633d6bed290",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "ready",
+          "reported_app_state": "standby",
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:02.010+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "received_at": "2026-10-22T08:21:01.247+00:00",
+              "observed_at": "2026-10-22T08:21:01.245Z",
+              "source_id": "xenova/v1/apps/manual/events",
+              "source_epoch": [
+                "synthetic-fe4f9f543f6b7bf1d239a633d6bed290",
+                "826c3783-284f-489d-b730-36ae589e08c4"
+              ],
+              "sequence": 5,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "33333333-3333-4333-8333-333333333333",
+          "role": "interaction",
+          "app_id": "message-board",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:3",
+          "guest_boot_id": "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:02.010+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-22T08:21:01.249+00:00",
+              "observed_at": "2026-10-22T08:21:01.247Z",
+              "source_id": "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat",
+              "source_epoch": [
+                "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+                "0dafdd8b-d09f-45c4-92c3-383da8315160"
+              ],
+              "sequence": 6,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      ],
+      "drive": {
+        "active_vm_id": null,
+        "mode": "unknown",
+        "ai_status": "unknown",
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        }
+      }
+    },
+    "fits_720p": false
+  },
+  {
+    "kind": "paused",
+    "render_revision": "e69c7f1e89d16569f048",
+    "vm_id": "22222222-2222-4222-8222-222222222222",
+    "dom_rendered": [
+      "monitor-1",
+      "monitor-2"
+    ],
+    "browser_errors": [],
+    "physical_hdmi_verified": false,
+    "layouts": [
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 720
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 723
+      }
+    ],
+    "state": {
+      "schema_version": 1,
+      "type": "display.state",
+      "source_epoch": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2",
+      "sequence": 53,
+      "generated_at": "2026-10-22T08:21:03.111+00:00",
+      "mqtt_connected": true,
+      "binding_scope": "candidate",
+      "mqtt_subscriptions": {
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat": "granted",
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/inventory": "granted",
+        "xenova/v1/apps/autonomous/events": "granted",
+        "xenova/v1/apps/manual/events": "granted",
+        "xenova/v1/apps/message-board/events": "granted",
+        "xenova/v1/display/drive-state": "granted"
+      },
+      "vms": [
+        {
+          "vm_id": "11111111-1111-4111-8111-111111111111",
+          "role": "primary_drive",
+          "app_id": "autonomous",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:1",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:03.011+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "22222222-2222-4222-8222-222222222222",
+          "role": "backup_drive",
+          "app_id": "manual",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:2",
+          "guest_boot_id": "synthetic-fe4f9f543f6b7bf1d239a633d6bed290",
+          "xen_state": "paused",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": "standby",
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:03.011+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "received_at": "2026-10-22T08:21:01.247+00:00",
+              "observed_at": "2026-10-22T08:21:01.245Z",
+              "source_id": "xenova/v1/apps/manual/events",
+              "source_epoch": [
+                "synthetic-fe4f9f543f6b7bf1d239a633d6bed290",
+                "826c3783-284f-489d-b730-36ae589e08c4"
+              ],
+              "sequence": 5,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "33333333-3333-4333-8333-333333333333",
+          "role": "interaction",
+          "app_id": "message-board",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:3",
+          "guest_boot_id": "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:03.011+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-22T08:21:01.249+00:00",
+              "observed_at": "2026-10-22T08:21:01.247Z",
+              "source_id": "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat",
+              "source_epoch": [
+                "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+                "0dafdd8b-d09f-45c4-92c3-383da8315160"
+              ],
+              "sequence": 6,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      ],
+      "drive": {
+        "active_vm_id": null,
+        "mode": "unknown",
+        "ai_status": "unknown",
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        }
+      }
+    },
+    "fits_720p": false
+  },
+  {
+    "kind": "stopped",
+    "render_revision": "8d45fadb7e46a636c7d6",
+    "vm_id": "22222222-2222-4222-8222-222222222222",
+    "dom_rendered": [
+      "monitor-1",
+      "monitor-2"
+    ],
+    "browser_errors": [],
+    "physical_hdmi_verified": false,
+    "layouts": [
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 720
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 726
+      }
+    ],
+    "state": {
+      "schema_version": 1,
+      "type": "display.state",
+      "source_epoch": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2",
+      "sequence": 61,
+      "generated_at": "2026-10-22T08:21:04.229+00:00",
+      "mqtt_connected": true,
+      "binding_scope": "candidate",
+      "mqtt_subscriptions": {
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat": "granted",
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/inventory": "granted",
+        "xenova/v1/apps/autonomous/events": "granted",
+        "xenova/v1/apps/manual/events": "granted",
+        "xenova/v1/apps/message-board/events": "granted",
+        "xenova/v1/display/drive-state": "granted"
+      },
+      "vms": [
+        {
+          "vm_id": "11111111-1111-4111-8111-111111111111",
+          "role": "primary_drive",
+          "app_id": "autonomous",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:1",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:04.026+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "22222222-2222-4222-8222-222222222222",
+          "role": "backup_drive",
+          "app_id": "manual",
+          "run_id": null,
+          "guest_boot_id": null,
+          "xen_state": "stopped",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:04.026+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "33333333-3333-4333-8333-333333333333",
+          "role": "interaction",
+          "app_id": "message-board",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:3",
+          "guest_boot_id": "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:04.026+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-22T08:21:01.249+00:00",
+              "observed_at": "2026-10-22T08:21:01.247Z",
+              "source_id": "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat",
+              "source_epoch": [
+                "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+                "0dafdd8b-d09f-45c4-92c3-383da8315160"
+              ],
+              "sequence": 6,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      ],
+      "drive": {
+        "active_vm_id": null,
+        "mode": "unknown",
+        "ai_status": "unknown",
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        }
+      }
+    },
+    "fits_720p": false
+  },
+  {
+    "kind": "stale",
+    "render_revision": "5c3afbd12aa0e0e76d76",
+    "vm_id": "22222222-2222-4222-8222-222222222222",
+    "dom_rendered": [
+      "monitor-1",
+      "monitor-2"
+    ],
+    "browser_errors": [],
+    "physical_hdmi_verified": false,
+    "layouts": [
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 720
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 726
+      }
+    ],
+    "state": {
+      "schema_version": 1,
+      "type": "display.state",
+      "source_epoch": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2",
+      "sequence": 74,
+      "generated_at": "2026-10-22T08:21:06.015+00:00",
+      "mqtt_connected": true,
+      "binding_scope": "candidate",
+      "mqtt_subscriptions": {
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat": "granted",
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/inventory": "granted",
+        "xenova/v1/apps/autonomous/events": "granted",
+        "xenova/v1/apps/manual/events": "granted",
+        "xenova/v1/apps/message-board/events": "granted",
+        "xenova/v1/display/drive-state": "granted"
+      },
+      "vms": [
+        {
+          "vm_id": "11111111-1111-4111-8111-111111111111",
+          "role": "primary_drive",
+          "app_id": "autonomous",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:1",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:04.026+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "disconnected"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "22222222-2222-4222-8222-222222222222",
+          "role": "backup_drive",
+          "app_id": "manual",
+          "run_id": null,
+          "guest_boot_id": null,
+          "xen_state": "stopped",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:04.026+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "disconnected"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "33333333-3333-4333-8333-333333333333",
+          "role": "interaction",
+          "app_id": "message-board",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:3",
+          "guest_boot_id": "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:04.026+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "disconnected"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-22T08:21:01.249+00:00",
+              "observed_at": "2026-10-22T08:21:01.247Z",
+              "source_id": "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat",
+              "source_epoch": [
+                "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+                "0dafdd8b-d09f-45c4-92c3-383da8315160"
+              ],
+              "sequence": 6,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      ],
+      "drive": {
+        "active_vm_id": null,
+        "mode": "unknown",
+        "ai_status": "unknown",
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        }
+      }
+    },
+    "fits_720p": false
+  },
+  {
+    "kind": "status",
+    "render_revision": "f4a8b0e669fd5220340f",
+    "vm_id": "22222222-2222-4222-8222-222222222222",
+    "dom_rendered": [
+      "monitor-1",
+      "monitor-2"
+    ],
+    "browser_errors": [],
+    "physical_hdmi_verified": false,
+    "layouts": [
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 720
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 723
+      }
+    ],
+    "state": {
+      "schema_version": 1,
+      "type": "display.state",
+      "source_epoch": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2",
+      "sequence": 85,
+      "generated_at": "2026-10-22T08:21:07.175+00:00",
+      "mqtt_connected": true,
+      "binding_scope": "candidate",
+      "mqtt_subscriptions": {
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat": "granted",
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/inventory": "granted",
+        "xenova/v1/apps/autonomous/events": "granted",
+        "xenova/v1/apps/manual/events": "granted",
+        "xenova/v1/apps/message-board/events": "granted",
+        "xenova/v1/display/drive-state": "granted"
+      },
+      "vms": [
+        {
+          "vm_id": "11111111-1111-4111-8111-111111111111",
+          "role": "primary_drive",
+          "app_id": "autonomous",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:1",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:07.036+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "22222222-2222-4222-8222-222222222222",
+          "role": "backup_drive",
+          "app_id": "manual",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:2",
+          "guest_boot_id": "synthetic-dd18bd10a0791b10469aee7cf62b0136",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "ready",
+          "reported_app_state": "standby",
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:07.036+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "received_at": "2026-10-22T08:21:06.193+00:00",
+              "observed_at": "2026-10-22T08:21:06.191Z",
+              "source_id": "xenova/v1/apps/manual/events",
+              "source_epoch": [
+                "synthetic-dd18bd10a0791b10469aee7cf62b0136",
+                "c4166b6e-06c3-41c1-91cb-adde1040fc5a"
+              ],
+              "sequence": 7,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "33333333-3333-4333-8333-333333333333",
+          "role": "interaction",
+          "app_id": "message-board",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:3",
+          "guest_boot_id": "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:07.036+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-22T08:21:06.196+00:00",
+              "observed_at": "2026-10-22T08:21:06.194Z",
+              "source_id": "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat",
+              "source_epoch": [
+                "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+                "0dafdd8b-d09f-45c4-92c3-383da8315160"
+              ],
+              "sequence": 8,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      ],
+      "drive": {
+        "active_vm_id": null,
+        "mode": "unknown",
+        "ai_status": "unknown",
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        }
+      }
+    },
+    "fits_720p": false
+  },
+  {
+    "kind": "status",
+    "render_revision": "f4a8b0e669fd5220340f",
+    "vm_id": "22222222-2222-4222-8222-222222222222",
+    "dom_rendered": [
+      "monitor-1",
+      "monitor-2"
+    ],
+    "browser_errors": [],
+    "physical_hdmi_verified": false,
+    "layouts": [
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 720
+      },
+      {
+        "width": 1280,
+        "height": 720,
+        "scroll_width": 1280,
+        "scroll_height": 723
+      }
+    ],
+    "state": {
+      "schema_version": 1,
+      "type": "display.state",
+      "source_epoch": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2",
+      "sequence": 90,
+      "generated_at": "2026-10-22T08:21:08.176+00:00",
+      "mqtt_connected": true,
+      "binding_scope": "candidate",
+      "mqtt_subscriptions": {
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat": "granted",
+        "xenova/v1/vms/33333333-3333-4333-8333-333333333333/inventory": "granted",
+        "xenova/v1/apps/autonomous/events": "granted",
+        "xenova/v1/apps/manual/events": "granted",
+        "xenova/v1/apps/message-board/events": "granted",
+        "xenova/v1/display/drive-state": "granted"
+      },
+      "vms": [
+        {
+          "vm_id": "11111111-1111-4111-8111-111111111111",
+          "role": "primary_drive",
+          "app_id": "autonomous",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:1",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:08.047+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "22222222-2222-4222-8222-222222222222",
+          "role": "backup_drive",
+          "app_id": "manual",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:2",
+          "guest_boot_id": "synthetic-dd18bd10a0791b10469aee7cf62b0136",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "ready",
+          "reported_app_state": "standby",
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:08.047+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "received_at": "2026-10-22T08:21:06.193+00:00",
+              "observed_at": "2026-10-22T08:21:06.191Z",
+              "source_id": "xenova/v1/apps/manual/events",
+              "source_epoch": [
+                "synthetic-dd18bd10a0791b10469aee7cf62b0136",
+                "c4166b6e-06c3-41c1-91cb-adde1040fc5a"
+              ],
+              "sequence": 7,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "33333333-3333-4333-8333-333333333333",
+          "role": "interaction",
+          "app_id": "message-board",
+          "run_id": "b0cc9e74-fd79-43a8-a52c-ea5659a9f9d2:3",
+          "guest_boot_id": "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-22T08:21:08.047+00:00",
+              "observed_at": null,
+              "age_ms": 0,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-22T08:21:06.196+00:00",
+              "observed_at": "2026-10-22T08:21:06.194Z",
+              "source_id": "xenova/v1/vms/33333333-3333-4333-8333-333333333333/heartbeat",
+              "source_epoch": [
+                "cce0d175-59df-4a92-be50-7d93b5fe7f2b",
+                "0dafdd8b-d09f-45c4-92c3-383da8315160"
+              ],
+              "sequence": 8,
+              "retained": false,
+              "age_ms": 0,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      ],
+      "drive": {
+        "active_vm_id": null,
+        "mode": "unknown",
+        "ai_status": "unknown",
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        }
+      }
+    },
+    "fits_720p": false
+  }
+]

@@ -275,7 +275,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | dom0 vchan 중계 | 계정이 따로 없다. Zephyr VM마다 그 VM의 `app_id` 계정으로 접속한다 (4.1) |
 | 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/vms/{vm_id}/command` |
 | 각 VM 측정 클라이언트·응답기 | `xenova/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
-| dom0 Recovery Worker (`dom0-server`) | `xenova/v1/recovery/events`·`xenova/v1/recovery/health/{vm_id}` (11장, ACL 은 `xenova/v1/recovery/#`). 구독(read)은 `xenova/v1/vms/+/heartbeat`와 `xenova/v1/apps/+/events`(Zephyr `app.heartbeat`, 6.1). 개발 단계의 전체 읽기 허용에 포함되며 계정별 구독 제한(다음 개정)에서도 유지한다. 계정 `dom0-server`와 이 발행·구독 규칙은 `platform/deploy/mosquitto/etc/accounts`·`acl`에서 함께 관리한다. Worker 는 필터별 구독 승인(SUBACK)을 보고, 거부된 신호의 손실은 판정하지 않는다 |
+| dom0 Recovery Worker (`dom0-server`) | `xenova/v1/recovery/events`·`xenova/v1/recovery/health/{vm_id}` (11장, ACL 은 `xenova/v1/recovery/#`). 구독(read)은 `xenova/v1/vms/+/heartbeat`와 `xenova/v1/apps/+/events`(Zephyr `app.heartbeat`, 6.1). 개발 단계의 전체 읽기 허용에 포함되며 계정별 구독 제한(다음 개정)에서도 유지한다. 계정 `dom0-server`와 이 발행·구독 규칙은 `platform/deploy/mosquitto/etc/accounts`·`acl`에서 함께 관리한다. Worker 는 필터별 구독 승인(SUBACK)에 더해 승인 뒤 실제 수신을 경로의 증거로 삼는다. Mosquitto 는 읽기 ACL 에 막힌 구독도 SUBACK 성공으로 답하고 전달만 거르므로(실보드 확인), 승인만으로는 경로를 믿지 않고 그 경로로 메시지를 받기 전에는 손실을 판정하지 않는다 |
 
 브로커 계정·ACL 파일은 [브로커 구성](../../platform/deploy/mosquitto/README.md)(`platform/deploy/mosquitto/etc/acl`)에서 관리한다.
 
@@ -326,7 +326,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | --- | --- |
 | `vm_id` | 토픽의 `{vm_id}` 와 같다 |
 | `ok` | `state == HEALTHY` 일 때만 `true` |
-| `state` | `HEALTHY`(실행 중이고 생존 신호가 신선함. 신호가 없는 종류는 Xen 실행만 근거) / `STARTING`(실행 중이지만 이번 부팅의 생존 신호 전, 유예 중) / `UNHEALTHY`(판정 사유가 있거나 `paused`·`stopping`, 신호 끊김) / `STOPPED`(도메인이 없고 의도가 `running` 이 아님) / `OBSERVATION_UNAVAILABLE`(생존 신호를 관측할 수 없음: 구독 미승인, 또는 Worker 의 Zephyr 대상 기록 손상. **장애가 아니다**) |
+| `state` | `HEALTHY`(실행 중이고 생존 신호가 신선함. 신호가 없는 종류는 Xen 실행만 근거) / `STARTING`(실행 중이지만 이번 부팅의 생존 신호 전, 유예 중) / `UNHEALTHY`(판정 사유가 있거나 `paused`·`stopping`, 신호 끊김) / `STOPPED`(도메인이 없고 의도가 `running` 이 아님) / `OBSERVATION_UNAVAILABLE`(생존 신호를 관측할 수 없음: 구독 미승인, 승인 뒤 그 경로로 아무것도 받지 못함, 또는 Worker 의 Zephyr 대상 기록 손상. **장애가 아니다**) |
 | `desired_state` | 플랫폼 registry 의도 `running` / `stopped` / `unknown` |
 | `xen_state` | VM API 계약 3.2 의 Xen 상태, 도메인이 없으면 `null` |
 | `heartbeat_age_s` | 이번 부팅에서 마지막 생존 신호(Linux `agent.heartbeat`, Zephyr `app.heartbeat`)를 받은 뒤 지난 초. 없으면 `null` |

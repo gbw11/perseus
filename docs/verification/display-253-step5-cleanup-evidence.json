@@ -1,0 +1,7 @@
+{
+  "feed_task_finished": true,
+  "browser_closed": true,
+  "mqtt_publisher_stopped": true,
+  "broker_shutdown_completed": true,
+  "guest_accessed": false
+}
