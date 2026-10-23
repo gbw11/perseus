@@ -9,9 +9,39 @@ pipeline {
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '30'))
         disableConcurrentBuilds(abortPrevious: true)
+        skipDefaultCheckout(true)
     }
 
     stages {
+        stage('Checkout Merge Request') {
+            steps {
+                script {
+                    if (!env.gitlabSourceBranch || !env.gitlabTargetBranch) {
+                        error('This job must be started by a GitLab Merge Request webhook.')
+                    }
+
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "origin/${env.gitlabSourceBranch}"]],
+                        extensions: [[
+                            $class: 'PreBuildMerge',
+                            options: [
+                                fastForwardMode: 'FF',
+                                mergeRemote: 'origin',
+                                mergeStrategy: 'DEFAULT',
+                                mergeTarget: env.gitlabTargetBranch
+                            ]
+                        ]],
+                        userRemoteConfigs: [[
+                            credentialsId: 'xenova-gitlab-checkout',
+                            name: 'origin',
+                            url: 'https://lab.ssafy.com/s15-final/S15P31E110.git'
+                        ]]
+                    ])
+                }
+            }
+        }
+
         stage('Backend Test') {
             steps {
                 updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'running'
