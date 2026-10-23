@@ -9,13 +9,13 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 // sockets (@EnableWebSocket is on the metrics WebSocketConfig). Both stay open in Spring Security under /ws/**
 // and authenticate with their first frame.
 @Configuration
-public class DisplayWebSocketConfig implements WebSocketConfigurer {
+public class DisplayRouteWebSocketConfig implements WebSocketConfigurer {
 
     private final DisplayWebSocketHandler consoleHandler;
     private final DisplayServiceWebSocketHandler serviceHandler;
     private final String[] allowedOrigins;
 
-    public DisplayWebSocketConfig(
+    public DisplayRouteWebSocketConfig(
             DisplayWebSocketHandler consoleHandler, DisplayServiceWebSocketHandler serviceHandler,
             @Value("${xenova.websocket.allowed-origins:*}") String[] allowedOrigins) {
         this.consoleHandler = consoleHandler;
