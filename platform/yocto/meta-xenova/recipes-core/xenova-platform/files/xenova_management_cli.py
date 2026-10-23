@@ -1,4 +1,4 @@
-"""공통 관리 결과를 단일 JSON 또는 사람용 JSON으로 출력하는 CLI 어댑터."""
+"""공통 관리 결과를 JSON 또는 VM 목록 요약표로 출력하는 CLI 어댑터."""
 import argparse
 import json
 from pathlib import Path
@@ -13,6 +13,17 @@ class Parser(argparse.ArgumentParser):
         raise ManagementError('INVALID_SPEC', message)
 
 
+def _short_list(vms):
+    """목록 응답의 다섯 필드만 줄임 없이 표시한다. Manager 응답은 변경하지 않는다."""
+    rows=['NAME | INTERNAL_NAME | UUID | STATE | IP']
+    for item in vms:
+        configuration=item.get('configuration') or {}
+        values=(item.get('name'),configuration.get('id'),item.get('vm_id'),
+                item.get('xen_state'),item.get('ipv4'))
+        rows.append(' | '.join('-' if value is None else str(value) for value in values))
+    return '\n'.join(rows)
+
+
 def main(argv=None, manager=None):
     args_list=list(sys.argv[1:] if argv is None else argv)
     request_id=uuid4()
@@ -21,7 +32,9 @@ def main(argv=None, manager=None):
     parser.add_argument('action')
     parser.add_argument('id',nargs='?')
     parser.add_argument('value',nargs='?')
-    parser.add_argument('--json',action='store_true')
+    output=parser.add_mutually_exclusive_group()
+    output.add_argument('--json',action='store_true')
+    output.add_argument('--short',action='store_true',help='list only: show NAME, INTERNAL_NAME, UUID, STATE and IP')
     parser.add_argument('--bundle',type=Path)
     parser.add_argument('--sha256')
     parser.add_argument('--board-shutdown-policy')
@@ -48,8 +61,12 @@ def main(argv=None, manager=None):
     parser.add_argument('--barrier-id')
     parser.add_argument('--max-age-ms', type=int)
     parser.add_argument('--timeout-ms', type=int, default=15000)
+    short=False
     try:
         args=parser.parse_args(args_list)
+        if args.short and args.action != 'list':
+            raise ManagementError('INVALID_SPEC', '--short is only supported for list')
+        short=args.short
         action='recover_once' if args.action == 'recover-once' else args.action
         spec={}
         if action in ('recover_once', 'cpu-policy-set'):
@@ -120,7 +137,10 @@ def main(argv=None, manager=None):
         result={'schema_version':'1.0','ok':False,'request_id':request_id,'operation_id':None,
                 'replayed':False,'data':None,'error':{'code':'STORAGE_UNAVAILABLE',
                 'message':'cannot resolve persistent VM identity','retryable':False,'details':{}}}
-    print(json.dumps(result,ensure_ascii=False,indent=None if '--json' in args_list else 2))
+    if short and result['ok']:
+        print(_short_list(result['data']['vms']))
+    else:
+        print(json.dumps(result,ensure_ascii=False,indent=None if '--json' in args_list else 2))
     code=exit_code(result)
     if code:
         raise SystemExit(code)

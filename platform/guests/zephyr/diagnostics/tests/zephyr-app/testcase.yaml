@@ -1,0 +1,17 @@
+tests:
+  xenova.diagnostics.default:
+    platform_allow: native_sim/native/64
+    tags: xenova diagnostics
+  xenova.diagnostics.unavailable:
+    platform_allow: native_sim/native/64
+    tags: xenova diagnostics
+    extra_configs:
+      - CONFIG_XENOVA_DIAGNOSTICS_THREADS=n
+      - CONFIG_XENOVA_DIAGNOSTICS_HEAP=n
+      - CONFIG_XENOVA_DIAGNOSTICS_TIMING=n
+  xenova.diagnostics.truncated:
+    platform_allow: native_sim/native/64
+    tags: xenova diagnostics
+    extra_configs:
+      - CONFIG_XENOVA_DIAGNOSTICS_MAX_THREADS=1
+      - CONFIG_XENOVA_DIAGNOSTICS_STACK_SCAN_LIMIT=256

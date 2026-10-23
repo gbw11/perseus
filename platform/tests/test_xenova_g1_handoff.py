@@ -3,10 +3,12 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("g1_handoff", ROOT/"platform/scripts/package-xenova-xenstore-g1-handoff.py")
@@ -79,6 +81,35 @@ class HandoffTest(unittest.TestCase):
                            cwd=self.root, capture_output=True, text=True, timeout=30)
         self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
         self.assertIn("isolated complete G1 runtime PASS", p.stdout)
+
+    def test_current_documents_and_their_local_links_are_bundled(self):
+        self.package()
+        manifest = handoff.verify(self.output)
+        self.assertEqual((self.output/"RUNBOOK.md").read_text(), handoff.RUNBOOK)
+        for name in handoff.DOCUMENTATION:
+            with self.subTest(document=name):
+                self.assertEqual((self.output/name).read_bytes(), (ROOT/name).read_bytes())
+                self.assertEqual(manifest["files"][name], handoff.file_info(ROOT/name))
+        for name in ("RUNBOOK.md", "docs/platform/build-guide.md",
+                     "platform/guests/zephyr/telemetry/README.md"):
+            document = self.output/name
+            for link in re.findall(r"\]\(([^)]+)\)", document.read_text()):
+                if "://" in link or link.startswith("#"):
+                    continue
+                target = (document.parent/unquote(link.split("#", 1)[0])).resolve()
+                self.assertTrue(target.is_relative_to(self.output))
+                self.assertTrue(target.is_file(), (name, link))
+        guide = (self.output/"docs/platform/build-guide.md").read_text()
+        self.assertIn("## 10. XenStore G1 시험 인계물", guide)
+        self.assertNotIn("docs/build-guides/xenova-zephyr-xenstore-g1.md", guide)
+
+    def test_modified_document_is_rejected_by_handoff_verification(self):
+        self.package()
+        guide = self.output/"docs/platform/build-guide.md"
+        guide.chmod(0o644)
+        guide.write_text("# changed after packaging\n")
+        with self.assertRaisesRegex(ValueError, "handoff hash/size"):
+            handoff.verify(self.output)
 
     def test_changed_firmware_rejected_before_any_output(self):
         (self.firmware/"zephyr.bin").write_bytes(b"changed")

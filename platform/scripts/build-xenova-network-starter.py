@@ -19,7 +19,7 @@ from artifact_io import new_path, sha
 
 
 def inputs():
-    paths=[p for directory in ("xen-store","xen-runtime","network-starter-app")
+    paths=[p for directory in ("xen-store","xen-runtime","diagnostics","telemetry","network-starter-app")
            for p in sorted((BASE/directory).rglob("*")) if p.is_file()]
     paths += [BASE/"network-xen.cfg.in",BASE/"network-starter.lock.json"]
     return {str(p.relative_to(BASE)):{"sha256":sha(p),"bytes":p.stat().st_size} for p in paths}
@@ -76,7 +76,15 @@ def main(argv=None):
     for name in ("zephyr-source", "tools", "spdx", "toolchain-archive", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--diagnostics", choices=("on", "off"), default="on")
+    parser.add_argument("--telemetry", choices=("on", "off"),
+                        help="v2 Publisher; defaults to on with diagnostics, off without it")
+    parser.add_argument("--timing-exercise", action="store_true",
+                        help="enable the optional periodic arithmetic exercise; no driving output")
     args = parser.parse_args(argv)
+    args.telemetry = args.telemetry or ("on" if args.diagnostics == "on" else "off")
+    if args.telemetry == "on" and args.diagnostics == "off":
+        raise ValueError("Telemetry requires Diagnostics Core")
     for path in (args.zephyr_source, args.tools, args.spdx, args.toolchain_archive):
         if not path.is_absolute() or path.resolve() != path or path.is_symlink():
             raise ValueError("canonical absolute input paths required")
@@ -111,13 +119,15 @@ def main(argv=None):
     if not cmake.is_file() or not gcc.is_file():
         raise ValueError("existing CMake and frozen AArch64 SDK required")
     print(json.dumps({"action": "build-network-starter" if args.execute else "plan", "output": str(args.output),
-                      "source_sha256": source_hash, "zephyr_source_files_verified": count}, indent=2))
+                      "source_sha256": source_hash, "zephyr_source_files_verified": count,
+                      "diagnostics": args.diagnostics, "telemetry": args.telemetry,
+                      "timing_exercise": args.timing_exercise}, indent=2))
     if not args.execute:
         return
     args.output.mkdir(mode=0o755)
     snapshot = args.output/"input"
     snapshot.mkdir()
-    for directory in ("xen-store", "xen-runtime", "network-starter-app"):
+    for directory in ("xen-store", "xen-runtime", "diagnostics", "telemetry", "network-starter-app"):
         shutil.copytree(BASE/directory, snapshot/directory)
     for name in ("network-xen.cfg.in","network-starter.lock.json"):
         shutil.copyfile(BASE/name,snapshot/name)
@@ -133,8 +143,13 @@ def main(argv=None):
                XDG_CACHE_HOME=str(args.output/"cache"))
     env["PATH"] = str(args.tools/"python/bin")+os.pathsep+env["PATH"]
     build = args.output/"build"
+    variant = args.output/"variant.conf"
+    variant.write_text("CONFIG_XENOVA_DIAGNOSTICS=" + ("y" if args.diagnostics == "on" else "n") +
+                       "\nCONFIG_XENOVA_TELEMETRY=" + ("y" if args.telemetry == "on" else "n") +
+                       "\nCONFIG_XENOVA_DIAGNOSTICS_EXERCISE=" + ("y" if args.timing_exercise else "n") + "\n")
     run([str(cmake), "-S", str(snapshot/"network-starter-app"), "-B", str(build), "-GNinja",
          "-DBOARD=xenvm", "-DUSER_CACHE_DIR="+str(args.output/"cache"),
+         "-DEXTRA_CONF_FILE="+str(variant),
          "-DPython3_EXECUTABLE="+sys.executable,
          "-DWEST="+str(args.tools/"python/bin/west")], ROOT, env, args.output, "configure")
     run([str(cmake), "--build", str(build), "-j", "4"], ROOT, env, args.output, "compile")
@@ -143,9 +158,21 @@ def main(argv=None):
     required = ("CONFIG_ARM64=y", "CONFIG_XEN=y", "CONFIG_XEN_EVENTS=y", "CONFIG_MMU=y",
                 "CONFIG_XENOVA_XENSTORE=y", "CONFIG_XENOVA_NETFRONT=y", "CONFIG_NET_DHCPV4=y", "CONFIG_NET_ARP=y", "CONFIG_GIC_V2=y", "CONFIG_UART_XEN_HVC=y",
                 "CONFIG_TIMER_READS_ITS_FREQUENCY_AT_RUNTIME=y",
+                "CONFIG_SHELL_BACKEND_SERIAL_API_INTERRUPT_DRIVEN=y",
                 "CONFIG_SRAM_BASE_ADDRESS=0x40000000", "CONFIG_SRAM_SIZE=16384")
     if any(line not in config for line in required) or "CONFIG_NET_L2_ETHERNET=y" not in config:
         raise ValueError("network Starter build differs from frozen xenvm/Store profile")
+    if ("CONFIG_XENOVA_DIAGNOSTICS=y" in config) != (args.diagnostics == "on"):
+        raise ValueError("diagnostics variant mismatch")
+    if ("CONFIG_XENOVA_TELEMETRY=y" in config) != (args.telemetry == "on"):
+        raise ValueError("Telemetry variant mismatch")
+    if args.telemetry == "on" and any(line not in config for line in
+            ("CONFIG_NET_TCP=y", "CONFIG_MQTT_LIB=y", "CONFIG_MQTT_LIB_CUSTOM_TRANSPORT=y")):
+        raise ValueError("Telemetry requires the real TCP/MQTT transport")
+    if ("CONFIG_XENOVA_DIAGNOSTICS_EXERCISE=y" in config) != args.timing_exercise:
+        raise ValueError("periodic exercise variant mismatch")
+    if args.diagnostics == "on" and "CONFIG_XENOVA_DIAGNOSTICS_TIMING=y" not in config:
+        raise ValueError("xenvm diagnostics requires the actual 64-bit cycle counter")
     verify_event_irq(artifacts/"zephyr.dts")
     binary = (artifacts/"zephyr.bin").read_bytes()
     if binary[56:60] != b"ARM\x64":
@@ -165,6 +192,9 @@ def main(argv=None):
         "repository_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "source_sha256": source_hash, "source_files": source_inputs,
         "build_script_sha256": sha(Path(__file__)), "references": reference,
+        "diagnostics": args.diagnostics, "telemetry": args.telemetry,
+        "timing_exercise": args.timing_exercise,
+        "variant_config_sha256": sha(variant),
         "toolchain_archive_sha256": sha(args.toolchain_archive),
         "compiler_sha256": sha(gcc), "elf_load_segments": loads,
         "files": {p.name: {"sha256": sha(p), "bytes": p.stat().st_size}
