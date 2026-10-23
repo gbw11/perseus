@@ -17,6 +17,34 @@
 seed의 해당 표식은 **식별자·SSH 키 준비 완료**만 뜻한다. 네트워크 연결이나 에이전트 준비 완료를 뜻하지 않는다.
 `xenova_first_boot.py`는 dom0의 공통 SD 최초 등록 처리이며, domU 에이전트 설치기가 아니다.
 
+## Linux Bash 프롬프트
+
+새 Linux VM의 준비 레코드에 있는 `display_name`을 게스트의
+`/etc/xenova/display-name`에 데이터로 전달한다. 값이 없는 구형 레코드는 기존
+`name`을 사용한다. 일반 VM과 factory seed 모두 같은 Bash 초기화 코드를 설치한다.
+
+```text
+[주행 제어 A] root@vm-a13f0b2c:~#
+```
+
+`vm-a13f0b2c`는 **VM UUID 앞 8자리를 보여주는 프롬프트용 표기**다.
+실제 `/etc/hostname`, Xen 도메인 이름, UUID·MAC·IP·SSH 키는 변경하지 않는다.
+일반 VM의 `/etc/xenova/prompt-uuid`에는 이미 할당된 UUID를 기록하고,
+factory seed는 부팅 후 읽을 수 있는 Xen UUID 또는 기존 `instance-id`를 사용한다.
+seed의 임시 UUID를 표시하거나 표시를 위해 새 UUID를 만들지 않는다.
+유효한 UUID를 읽지 못하면 기존 프롬프트를 유지한다.
+
+`/etc/profile.d/xenova-prompt.sh`와 시스템 `bash.bashrc`의 source 연결로
+로그인·비로그인 대화형 Bash의 기본 `promptvars` 설정에서 적용한다.
+기존 `PROMPT_COMMAND`를 보존하고,
+사용자 rc 파일의 기본 PS1 설정 뒤에 표시한다. 이름은 쉘 코드로 source하지 않으며
+PS1의 고정 변수 참조를 통해 표시해 `$()`·백틱·따옴표·역슬래시를 실행하지 않는다.
+비대화형 명령과 Bash 이외의 셸, Zephyr에는 적용하지 않는다.
+
+이 설정은 새 인스턴스/seed 사본을 준비할 때 설치한다. 기존 VM에 준비 함수를
+다시 실행해 적용하지 않는다. 현재 이름 변경 API나 실행 중인 게스트로의 이름
+동기화 기능은 없으며, 향후 이름 변경 기능에서 반영 시점을 별도로 정한다.
+
 ## 현재 입력과 역할 분담
 
 | 항목 | 현재 구현 | 후속 작업 |

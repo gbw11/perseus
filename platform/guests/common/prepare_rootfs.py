@@ -13,6 +13,46 @@ import time
 
 ROOT_HASH = '$6$perseus-dev$uqz/PNLD2CDIZm1VIVOFPkMANu8CHr2KHPKO3th9aIL6nu6f.aLwxZ8oHjw3haeQHSsLzWokvwcuaAcMVpy800'
 AUTH = 'PermitRootLogin yes\nPasswordAuthentication yes\nPermitEmptyPasswords no\nAuthenticationMethods any\n'
+PROMPT_SCRIPT = r'''# Xenova Linux VM prompt. Names are data, never shell source or prompt code.
+[ -n "${BASH_VERSION-}" ] || return 0
+case $- in *i*) ;; *) return 0 ;; esac
+shopt -q promptvars || return 0
+[ "${_XENOVA_PROMPT_READY-}" != 1 ] || return 0
+[ -r /etc/xenova/display-name ] || return 0
+IFS= read -r _XENOVA_PROMPT_NAME < /etc/xenova/display-name || return 0
+
+# Ordinary instances have a prepared public UUID; seeds resolve it after boot.
+_XENOVA_PROMPT_UUID_SHORT=
+for _xenova_uuid_path in /etc/xenova/prompt-uuid /sys/hypervisor/uuid /etc/xenova/instance-id; do
+    [ -r "$_xenova_uuid_path" ] || continue
+    IFS= read -r _xenova_uuid < "$_xenova_uuid_path" || continue
+    case $_xenova_uuid in
+        ????????-????-????-????-????????????)
+            case ${_xenova_uuid//-/} in *[!0-9a-fA-F]*) continue ;; esac ;;
+        *) continue ;;
+    esac
+    _XENOVA_PROMPT_UUID_SHORT=${_xenova_uuid%%-*}
+    break
+done
+unset _xenova_uuid_path _xenova_uuid
+[ -n "$_XENOVA_PROMPT_UUID_SHORT" ] || return 0
+
+_xenova_prompt() {
+    local status=$?
+    # Expanding a variable in PS1 does not reparse its value as shell commands.
+    PS1='[${_XENOVA_PROMPT_NAME}] \u@vm-${_XENOVA_PROMPT_UUID_SHORT}:\w\$ '
+    return "$status"
+}
+# Run after user rc files set PS1; preserve existing scalar/array prompt hooks.
+PROMPT_COMMAND=("${PROMPT_COMMAND[@]}" _xenova_prompt)
+_XENOVA_PROMPT_READY=1
+'''
+PROMPT_LOADER = '''
+# Xenova Linux VM prompt (display only).
+if [ -r /etc/profile.d/xenova-prompt.sh ]; then
+    . /etc/profile.d/xenova-prompt.sh
+fi
+'''
 
 
 def inside(root, relative, *, follow_final=True, create_parents=True):
@@ -255,6 +295,7 @@ def prepare_instance(root, record, command=subprocess.run):
     marker = inside(root, 'etc/xenova/instance-id')
     if marker.exists():
         raise ValueError('existing instance: initialization is forbidden')
+    configure_prompt(root, record)
     write(root, 'etc/hostname', record['hostname'] + '\n')
     write(root, 'etc/hosts', '127.0.0.1 localhost\n127.0.1.1 ' + record['hostname'] + '\n')
     write(root, 'etc/machine-id', os.urandom(16).hex() + '\n')
@@ -280,6 +321,7 @@ def prepare_deployment_seed(root, record):
         raise ValueError('factory guest identity gate requires the cloud image Python 3')
     if any(inside(root, 'etc/ssh').glob('ssh_host_*_key')):
         raise ValueError('factory seed must not contain shared SSH host keys')
+    configure_prompt(root, record, seed=True)
     write(root, 'etc/hostname', record['hostname'] + '\n')
     write(root, 'etc/hosts', '127.0.0.1 localhost\n127.0.1.1 ' + record['hostname'] + '\n')
     write(root, 'etc/machine-id', 'uninitialized\n')
@@ -289,6 +331,34 @@ def prepare_deployment_seed(root, record):
     install_identity_gate(root)
     configure_ssh_service(root)
     configure_agent_identity(root, seed=True)
+
+
+def configure_prompt(root, record, *, seed=False):
+    """새 Linux 사본에 Bash 표시만 준비한다. hostname·UUID·신원 gate는 변경하지 않는다."""
+    name = record.get('display_name', record['name'])
+    if (record.get('guest_kind', 'linux') != 'linux'
+            or not isinstance(name, str) or not name.strip() or len(name) > 63
+            or any(ord(c) < 32 or 0x7f <= ord(c) <= 0x9f or 0xd800 <= ord(c) <= 0xdfff for c in name)):
+        raise ValueError('Linux prompt requires a display name without controls')
+    if not seed and not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', record['uuid']):
+        raise ValueError('Linux prompt requires the assigned VM UUID')
+    paths = ('etc/xenova/display-name', 'etc/xenova/prompt-uuid',
+             'etc/profile.d/xenova-prompt.sh', 'etc/bash.bashrc')
+    for relative in paths:
+        path = inside(root, relative, follow_final=False, create_parents=False)
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise ValueError('linked/non-regular guest prompt path: ' + relative)
+    if seed and inside(root, 'etc/xenova/prompt-uuid', create_parents=False).exists():
+        raise ValueError('factory seed must not contain an assigned prompt UUID')
+    write(root, 'etc/xenova/display-name', name + '\n')
+    if not seed:
+        write(root, 'etc/xenova/prompt-uuid', record['uuid'] + '\n')
+    write(root, 'etc/profile.d/xenova-prompt.sh', PROMPT_SCRIPT)
+    bashrc = inside(root, 'etc/bash.bashrc')
+    existing = bashrc.read_text() if bashrc.exists() else ''
+    mode = bashrc.stat().st_mode & 0o777 if bashrc.exists() else 0o644
+    if PROMPT_LOADER not in existing:
+        write(root, 'etc/bash.bashrc', existing + PROMPT_LOADER, mode)
 
 
 # Agent는 템플릿에서 설치한다. 이 두 경로에서는 신원 gate만 연결하고 실행하지 않는다.
