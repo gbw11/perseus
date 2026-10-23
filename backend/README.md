@@ -21,6 +21,16 @@ Linux/macOS:
 ./mvnw spring-boot:run
 ```
 
+### Docker 이미지
+
+```bash
+docker build -t xenova-backend ./backend
+docker run --rm -p 8080:8080 --env-file .env xenova-backend
+```
+
+이미지는 Java 21로 빌드한 뒤 JRE 런타임에 JAR만 복사하며, 일반 사용자 `xenova`로 실행합니다.
+`/actuator/health`가 정상 응답하는지 컨테이너 헬스체크가 확인합니다.
+
 기본 포트는 `8080`이며 `SERVER_PORT` 환경 변수로 변경할 수 있습니다.
 
 ## 확인
@@ -36,6 +46,14 @@ GET http://localhost:8080/actuator/health
 ```
 
 ## 인증 API
+
+### VM 웹 콘솔 중계
+
+`/ws/v1/vms/{vm_id}/console`은 첫 메시지의 사용자 JWT로 인증한 뒤 등록된 실행 VM의
+dom0 콘솔로 연결합니다. `DOM0_MANAGER_BASE_URL`과 `DOM0_MANAGER_SERVICE_TOKEN`을
+서버에 설정하고, dom0-manager의 `XENOVA_CONSOLE_ENABLED=1` 및 같은 서비스 토큰을 준비합니다.
+프론트엔드에 서비스 토큰을 전달하지 않습니다. 데이터·종료 규격은
+[웹 터미널 계약](../docs/contracts/browser-console-v1.md)을 참고하세요.
 
 ```text
 POST /api/v1/auth/signup
@@ -54,11 +72,47 @@ Refresh Token은 폐기합니다. 이미 폐기된 Refresh Token이 다시 사�
 
 ```text
 JWT_SECRET=<32바이트 이상의 임의 비밀값>
-DB_URL=<운영 DB JDBC URL>
+DB_URL=jdbc:mysql://mysql:3306/xenova?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8
 DB_USERNAME=<DB 사용자>
 DB_PASSWORD=<DB 비밀번호>
+AUTH_STATE_STORE=redis
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=<Redis 비밀번호>
+REDIS_SSL=false
+REDIS_TIMEOUT=2s
+REDIS_HEALTH_ENABLED=true
 AUTH_COOKIE_SECURE=true
 ```
+
+MySQL은 사용자·VM 등 영구 데이터를 저장합니다. Redis 7은 Refresh Token, 로그아웃된 Access
+Token의 JTI, 로그인 실패 횟수를 TTL과 함께 저장합니다. Refresh Token 회전 및 재사용 감지와
+로그인 실패 횟수 증가는 Redis Lua 스크립트로 원자적으로 처리하므로 백엔드를 여러 대 실행해도
+인증 상태가 공유됩니다. 사용자 이름은 로그인 제한 키에 원문 대신 SHA-256 해시로 저장됩니다.
+자동 테스트는 `AUTH_STATE_STORE=jpa`와 H2를 사용해 Redis 없이 실행되며, 운영 기본값은 `redis`입니다.
+Redis 헬스체크는 Redis가 함께 배포되는 운영 환경에서만 `REDIS_HEALTH_ENABLED=true`로
+활성화합니다.
+
+## 화면 배치
+
+모니터 2대(`display-0`, `display-1`)에 띄울 화면은 백엔드가 정하고, dom0 표시 서비스가 백엔드에서
+명령을 받아 키오스크 브라우저를 옮깁니다. 모니터 브라우저는 백엔드에 붙지 않습니다.
+기준 문서는 `docs/contracts/display-route-v1.md` 입니다.
+
+```text
+GET  /api/v1/displays                       콘솔: 배치 목록 (사용자 JWT)
+PUT  /api/v1/displays/{display_id}/route    콘솔: 배치 변경 → 202 (사용자 JWT)
+WS   /ws/v1/displays                        콘솔: display.snapshot 수신 전용 (첫 프레임 사용자 JWT)
+WS   /ws/v1/display-service                 dom0 표시 서비스 전용 (첫 프레임 서비스 토큰)
+```
+
+- 표시 서비스는 첫 프레임 `{"type":"auth","service_token":"..."}` 로 인증하고 `service.hello` 를 보냅니다.
+  백엔드는 디스플레이마다 지금 배치를 `route.set` 으로 보내고, 이후 PUT 마다 다시 보냅니다.
+  서비스는 `route.applied` / `route.failed` 로 결과를, `display.status` 로 모니터 연결 변화를 알립니다.
+- 동시에 붙을 수 있는 표시 서비스는 1개입니다. 새 연결이 인증하면 이전 연결은 4409 로 닫힙니다.
+- 서비스 토큰은 `XENOVA_DISPLAY_SERVICE_TOKEN` 환경변수(`xenova.display.service-token`)로 줍니다.
+  비어 있으면 표시 서비스 연결을 모두 4401 로 거부합니다. 표시 서비스에도 같은 값을 설정합니다.
+- 배치 상태는 메모리에만 있어 백엔드가 재시작하면 두 모니터 모두 `split` 으로 돌아갑니다.
 
 ## 테스트
 

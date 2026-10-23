@@ -3,6 +3,11 @@
   display: grid;
   place-items: center;
 }
+.detail {
+  display: grid;
+  gap: var(--x-space-4);
+  min-width: 0;
+}
 .form {
   display: flex;
   flex-direction: column;

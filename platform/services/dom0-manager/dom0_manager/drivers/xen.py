@@ -12,7 +12,8 @@ from pathlib import Path
 from uuid import UUID
 
 from ..errors import DriverError, DriverTimeout
-from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner
+from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner, StatsSample
+from .xentop import Xentop, collect_stats
 from .xl import Xl, map_state
 
 DOM0_ID = 0
@@ -22,8 +23,9 @@ DOM0_NAME = "Domain-0"
 class XenDriver(Driver):
     name = "xen"
 
-    def __init__(self, xl: Xl) -> None:
+    def __init__(self, xl: Xl, xentop: Xentop | None = None) -> None:
         self._xl = xl
+        self._xentop = xentop
 
     # ---- 조회 ----
 
@@ -63,6 +65,13 @@ class XenDriver(Driver):
         except (DriverTimeout, DriverError):
             return False
         return True
+
+    # ---- 통계 (S15P31E110-112) ----
+
+    def collect_stats(self) -> StatsSample:
+        if self._xentop is None:
+            raise NotImplementedError("collect_stats: xentop runner not configured")
+        return collect_stats(self._xentop, self._xl)
 
     # ---- 명령: S15P31E110-115 ----
 

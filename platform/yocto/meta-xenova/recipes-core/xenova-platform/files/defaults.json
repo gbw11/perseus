@@ -12,27 +12,27 @@
       "vcpus": 1,
       "autostart": true,
       "template_id": "debian-13-arm64",
-      "template_version": "1.0.1",
+      "template_version": "1.0.2",
       "display_name": "Debian Interaction"
     }
   ],
   "firmware_instances": [
     {
       "id": "zephyr-drive-a",
-      "template": "xenova-zephyr-starter-1.0.0",
+      "template": "xenova-zephyr-network-starter-1.1.0",
       "autostart": true,
-      "board_shutdown_policy": "force-allowed",
+      "board_shutdown_policy": "graceful",
       "template_id": "zephyr-xenvm-starter-arm64",
-      "template_version": "1.0.1",
+      "template_version": "1.1.0",
       "display_name": "Zephyr 주행 A"
     },
     {
       "id": "zephyr-drive-b",
-      "template": "xenova-zephyr-starter-1.0.0",
+      "template": "xenova-zephyr-network-starter-1.1.0",
       "autostart": true,
-      "board_shutdown_policy": "force-allowed",
+      "board_shutdown_policy": "graceful",
       "template_id": "zephyr-xenvm-starter-arm64",
-      "template_version": "1.0.1",
+      "template_version": "1.1.0",
       "display_name": "Zephyr 주행 B"
     }
   ],

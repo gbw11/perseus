@@ -23,8 +23,9 @@ ARTIFACTS = {"zephyr.bin", "zephyr.elf", "zephyr.map", "zephyr.config", "zephyr.
 def runtime_sources():
     """실제 /usr/lib/xenova 설치 레이아웃을 유지하며 지연 import 의존성도 포함한다."""
     result = {name + ".py": f"{PLATFORM}/{name}.py" for name in (
-        "xenova_vm", "xenova_runtime", "xenova_zephyr", "xenova_execution",
-        "xenova_recovery", "xenova_domain_identity", "xenova_catalog",
+        "xenova_cpu", "xenova_vm", "xenova_runtime", "xenova_zephyr", "xenova_execution",
+        "xenova_recovery", "xenova_resources", "xenova_zephyr_control",
+        "xenova_zephyr_transition", "xenova_domain_identity", "xenova_catalog",
         "xenova_management", "xenova_management_cli", "xenova_first_boot", "xenova_wifi")}
     result.update({name + ".py": f"platform/first-install/{name}.py"
                    for name in ("artifact_io", "first_install_contract")})

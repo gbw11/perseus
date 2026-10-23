@@ -12,7 +12,7 @@ import time
 
 from first_install_contract import FEATURES, LEGACY_FEATURES, SECTOR, growth, layout, uuid4
 from xenova_vm import (PlatformError, atomic_write, load_records, validate_identity, validate_record,
-                        guest_kind, identity_fields, retired_instance)
+                        guest_kind, has_network, identity_fields, retired_instance)
 from xenova_runtime import operation_lock
 import xenova_zephyr as zephyr
 
@@ -268,7 +268,7 @@ class FirstBoot:
             for spec in specs:
                 key = spec['record']['id']
                 identities[key] = {'uuid': uuid4()}
-                if guest_kind(spec['record']) == 'linux':
+                if has_network(spec['record']):
                     mac = new_mac()
                     while mac in seen:
                         mac = new_mac()
@@ -276,6 +276,10 @@ class FirstBoot:
                     identities[key]['mac'] = mac
             state = {'schema': 1, 'phase': 'identities-planned', 'factory_id': factory['factory_id'],
                      'dom0_machine_id': mid, 'storage_uuid': uuid4(), 'identities': identities, 'registered': []}
+            from xenova_cpu import factory_activation
+            activation = factory_activation(identities, self.root/'etc/xenova/cpu-policy-preset.json')
+            if activation:
+                state['cpu_policy_activation'] = activation
             self.save(state_path, state)
         if set(state.get('identities', {})) != {s['record']['id'] for s in specs}:
             raise ValueError('progress has an incomplete identity plan')
@@ -308,7 +312,7 @@ class FirstBoot:
                 if seed.exists() or seed.is_symlink():
                     raise ValueError('both seed and live instance exist; refusing ambiguous recovery')
                 current = read_json(target / 'instance.json')
-                fields = (('id', 'uuid', 'name', 'template', 'creation_origin') if guest_kind(expected) == 'zephyr'
+                fields = (('id', 'uuid', 'name', 'template', 'creation_origin') + (('mac','ipv4','hostname') if has_network(expected) else ()) if guest_kind(expected) == 'zephyr'
                           else ('id', 'uuid', 'mac', 'name', 'hostname', 'ipv4', 'template', 'kernel_release'))
                 if any(current.get(k) != expected[k] for k in fields):
                     raise ValueError('live identity differs from planned identity; no reset')

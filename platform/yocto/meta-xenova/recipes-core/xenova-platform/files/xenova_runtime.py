@@ -67,6 +67,7 @@ def atomic_write(path, content, mode=0o600):
         with os.fdopen(fd, 'w') as stream:
             stream.write(content)
             stream.flush()
+            os.fchmod(stream.fileno(), mode)
             os.fsync(stream.fileno())
         os.replace(temp, path)
         sync_directory(path.parent)

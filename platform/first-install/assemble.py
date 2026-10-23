@@ -229,16 +229,31 @@ def copy_rtos_seeds(data, entries):
     if len(entries) != 1:
         raise ValueError('new first-install images require one verified Zephyr template')
     defaults = json.loads((FILES / 'defaults.json').read_text())['firmware_instances']
-    if any(entry['template'] != entries[0]['id'] for entry in defaults):
-        raise ValueError('default Zephyr Starter template mismatch')
-    records = []
+    template=entries[0]['id']
+    import xenova_catalog
+    network=entries[0]['metadata'].get('hardware_profile') == zephyr.NET_PROFILE
+    # Current config selects the new immutable template. Legacy input bundles remain
+    # readable for rerunning old receipts; no existing store is migrated here.
+    allowed={'xenova-zephyr-network-starter-1.1.0','xenova-zephyr-starter-1.0.0',
+             'zephyr-4.4.0-xenvm'}
+    if template not in allowed:
+        raise ValueError('unknown immutable Zephyr factory template')
+    records=[];reservations={}
+    from xenova_management import Manager
+    from xenova_vm import Platform
+    manager=Manager(Platform(data,data/'.assembly-runtime',defaults_path=FILES/'defaults.json'))
     for default in defaults:
-        record = zephyr.new_instance(data, default['id'], data / 'rtos-templates' / default['template'],
-                                     {}, autostart=default['autostart'],
-                                     board_shutdown_policy=default['board_shutdown_policy'],
-                                     registry='seeds', seed=True,
-                                     metadata={k:default[k] for k in ('template_id','template_version','display_name') if k in default})
-        records.append({'record': record})
+        metadata={k:default[k] for k in ('template_id','template_version','display_name') if k in default}
+        metadata['template_version']=xenova_catalog.deployment_version(entries[0]['metadata'])
+        if network:
+            metadata.update(mac='02:00:00:00:00:00',ipv4=manager._allocate_ip({},reservations),
+                            hostname=default['id'])
+        record=zephyr.new_instance(data,default['id'],data/'rtos-templates'/template,
+                                  {},autostart=default['autostart'],
+                                  board_shutdown_policy='graceful' if network else 'force-allowed',
+                                  registry='seeds',seed=True,metadata=metadata)
+        reservations[record['id']]=record
+        records.append({'record':record})
     return records
 
 
@@ -307,20 +322,23 @@ def platform_root_ok(root):
                 'usr/sbin/xenova-verify-artifacts': ROOT / 'platform/scripts/verify-xenova-runtime-artifacts.py',
                 'usr/lib/xenova/xenova_runtime.py': FILES / 'xenova_runtime.py',
                 'usr/lib/xenova/xenova_zephyr.py': FILES / 'xenova_zephyr.py',
+                **{'usr/lib/xenova/'+n:FILES/n for n in ('xenova_resources.py','xenova_zephyr_transition.py','xenova_zephyr_control.py')},
                 'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                 'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
     for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
-                 'xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
+                 'xenova_cpu.py','xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
         expected['usr/lib/xenova/'+name] = FILES/name
     expected['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
     expected['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
+    expected['etc/modprobe.d/xenova-wifi.conf'] = FILES/'xenova-wifi-modprobe.conf'
     expected['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
+    expected['etc/xenova/cpu-policy-preset.json'] = FILES/'cpu-policy-preset.json'
     expected['etc/xenova/execution-policy.json'] = FILES/'execution-policy.json'
     expected['usr/lib/systemd/system/xenova-wifi@.service'] = FILES/'xenova-wifi@.service'
     expected['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'platform/scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         expected['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
-    units = ['xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
+    units = ['xenova-cpu-prepare.service', 'xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
              'xenova-vms.service', 'xenova-vm-shutdown.service', 'xenova-xen-ready.service', 'xenova-host-admission.service']
     expected.update({'usr/lib/systemd/system/' + u: FILES / u for u in units})
     expected.update(deployment_payloads.installed_sources(root))
@@ -337,6 +355,19 @@ def platform_root_ok(root):
                      'usr/lib/firmware/regulatory.db','usr/lib/firmware/regulatory.db.p7s'):
         if not path(relative).is_file() or not path(relative).stat().st_size:
             raise ValueError('required management wireless firmware missing: '+relative)
+    # 파일 존재 검사만으로 부트 Image와의 ABI 일치까지 보장하지는 않는다.
+    module_tree = path('usr/lib/modules')
+    releases = [p for p in module_tree.iterdir() if p.is_dir()] if module_tree.is_dir() else []
+    if not releases:
+        raise ValueError('required management wireless kernel modules missing')
+    for release in releases:
+        directory = path(str(release.relative_to(root)) + '/kernel/drivers/net/wireless/broadcom/brcm80211/brcmfmac')
+        for name in ('brcmfmac', 'brcmfmac-cyw'):
+            suffixes = {name + suffix for suffix in ('.ko', '.ko.xz', '.ko.gz', '.ko.zst')}
+            candidates = [path(str(p.relative_to(root))) for p in directory.rglob(name + '.ko*')
+                          if p.name in suffixes]
+            if not any(p.is_file() and p.stat().st_size for p in candidates):
+                raise ValueError('required management wireless kernel module missing: ' + name)
     for relative, defines in [
         ('usr/share/xenova/qemu-config-host.h', ('CONFIG_VNC', 'CONFIG_XEN_BACKEND')),
         ('usr/share/xenova/qemu-i386-config-target.h', ('CONFIG_XEN',)),
@@ -424,7 +455,9 @@ def platform_boot_ok(image, table, output):
     script = boot[72:72 + length].decode()
     for marker in ('part uuid mmc ${devnum}:2', 'fatload mmc ${devnum}:1 ${xen_loadaddr} xen',
                    'fdt move ${fdtcontroladdr} ${fdt_addr_r}', 'booti ${xen_loadaddr} - ${fdt_addr_r}',
-                   'xenova_debug', 'loglevel=4', 'systemd.show_status=error'):
+                   'fdt rm /soc/mmcnr@7e300000 dmas || exit 1',
+                   'fdt rm /soc/mmcnr@7e300000 dma-names || exit 1',
+                   'xenova_debug', 'setenv xenova_logargs "loglevel=3 ', 'systemd.show_status=error'):
         if marker not in script:
             raise ValueError('platform lacks validated Xen boot/PARTUUID contract: ' + marker)
     return result
