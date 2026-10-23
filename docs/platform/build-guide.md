@@ -298,6 +298,16 @@ PY
 
 빌드 영수증의 ELF·DTS·config·앱/런타임 해시와 고정 Zephyr 원본을 함께 보관한다.
 
+Network Starter의 공통 Diagnostics와 Telemetry Publisher는 `--diagnostics on|off`,
+`--telemetry on|off`로 선택한다. 기본은 둘 다 on이며 Diagnostics off의 기본 Publisher는 off다.
+Publisher는 TCP/MQTT를 사용하고 인스턴스별 private XenStore bootstrap이 있어야 송신한다.
+broker 주소·password·VM UUID를 공유 firmware에 넣지 않는다.
+`--timing-exercise`는 20ms 산술 시험 작업을 추가하며 주행 앱으로 표시하지 않는다.
+각 비교는 별도의 새 `--output` 경로에서 빌드하고 옵션·실제 config·RAM·수신 결과를 분리해 기록한다.
+주입 계약, 실제 Core 매핑, native_sim의 격리 broker·독립 수신 시험은
+[Telemetry Publisher](../../platform/guests/zephyr/telemetry/README.md)를 따른다.
+기본 firmware/불변 게시본 전환과 실보드 수락은 해당 실행의 승인 범위에서 수행한다.
+
 ### 실제 manifest로 기본 선택 확정
 
 새 게시본을 준비한 실행에서는 실제 manifest와 배포 버전을 읽어 기본 lock·factory 버전을 맞춘다.
