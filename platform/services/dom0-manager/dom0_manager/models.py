@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class VmState(str, Enum):
@@ -148,3 +148,91 @@ class StatsResponse(BaseModel):
 
     sampled_at: datetime
     vms: list[VmStats]
+
+
+class RecoveryEventType(str, Enum):
+    """계약 2.5. Spring EventType 의 문자열과 같다."""
+
+    started = "recovery.started"
+    completed = "recovery.completed"  # Worker 의 시도로 새 Xen 실행이 관측됨
+    recovered = "recovery.recovered"  # 시도가 완료되기 전에 다른 경로(사용자 조작·플랫폼 쪽 재시작·신호 복귀)로 건강해짐
+    cancelled = "recovery.cancelled"  # 사용자 stop·삭제·의도 변경으로 대상이 아니게 됨
+    failed = "recovery.failed"  # 실제 복구 실패(final 이면 더 시도하지 않음)
+
+
+class RecoveryEventError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str | None = Field(default=None, description="Worker 의 결과 코드. 플랫폼 응답이면 platform_code 와 같고, 그 밖에 TARGET_NOT_ELIGIBLE(cancelled)·REOBSERVE_TIMEOUT·RECONCILE_REQUIRED·INTERNAL_ERROR")
+    platform_code: str | None = Field(default=None, description="플랫폼 원본 코드(8.1절)만. Worker 가 스스로 끝낸 경우 null")
+    message: str | None = None
+
+
+class RecoveryEvent(BaseModel):
+    """계약 2.5 복구 이벤트 객체. Recovery Worker(125) 가 시도마다 남긴다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: UUID
+    type: RecoveryEventType
+    vm_id: UUID
+    recovery_id: UUID = Field(description="장애 한 건. 최초 판정부터 최종 성공·포기까지 같은 값")
+    recovery_attempt_id: UUID | None = Field(default=None, description="논리적 시도. 재전달·결과 조회는 같은 값 재사용")
+    attempt: int = Field(ge=0)
+    reason: str
+    mode: str | None = None
+    detected_at: datetime
+    occurred_at: datetime
+    attempt_duration_ms: int | None = None
+    recovery_duration_ms: int | None = None
+    execution_id: str | None = None
+    final: bool | None = None
+    next_retry_at: datetime | None = None
+    error: RecoveryEventError | None = None
+
+    @model_validator(mode="after")
+    def _type_rules(self) -> "RecoveryEvent":
+        """계약 2.5 의 유형별 필드 규칙. 타입은 맞지만 의미가 어긋난 이벤트(손상된 상태 파일 등)를 내보내지 않는다."""
+        if self.attempt < 1 or not self.mode:
+            raise ValueError("recovery event requires attempt >= 1 and mode")
+        if self.recovery_attempt_id is None:
+            # 끝난 시도 뒤(backoff 중)의 recovered·cancelled 만 장애 단위로 시도 ID 가 없다
+            if self.type not in (RecoveryEventType.recovered, RecoveryEventType.cancelled) or self.attempt_duration_ms is not None:
+                raise ValueError("only a recovery-level recovered/cancelled may omit recovery_attempt_id, and then attempt_duration_ms is null")
+        if self.type == RecoveryEventType.started:
+            extra = [n for n in ("attempt_duration_ms", "recovery_duration_ms", "execution_id", "final", "next_retry_at", "error") if getattr(self, n) is not None]
+            if extra:
+                raise ValueError(f"recovery.started must not carry {extra}")
+        elif self.type == RecoveryEventType.completed:
+            if not self.execution_id or self.recovery_duration_ms is None:
+                raise ValueError("recovery.completed requires execution_id and recovery_duration_ms")
+            if self.final is not None or self.next_retry_at is not None or self.error is not None:
+                raise ValueError("recovery.completed must not carry final, next_retry_at or error")
+        elif self.type in (RecoveryEventType.recovered, RecoveryEventType.cancelled):
+            if self.recovery_duration_ms is None:
+                raise ValueError(f"{self.type.value} requires recovery_duration_ms")
+            if self.execution_id is not None or self.final is not None or self.next_retry_at is not None:
+                raise ValueError(f"{self.type.value} must not carry execution_id, final or next_retry_at")
+            if self.type == RecoveryEventType.recovered and self.error is not None:
+                raise ValueError("recovery.recovered must not carry error")
+            if self.type == RecoveryEventType.cancelled and self.error is None:
+                raise ValueError("recovery.cancelled requires error (the cancel cause)")
+        else:
+            if self.final is None or self.error is None or self.execution_id is not None:
+                raise ValueError("recovery.failed requires final and error and no execution_id")
+            if self.final and (self.recovery_duration_ms is None or self.next_retry_at is not None):
+                raise ValueError("final recovery.failed requires recovery_duration_ms and no next_retry_at")
+            if not self.final and (self.next_retry_at is None or self.recovery_duration_ms is not None):
+                raise ValueError("non-final recovery.failed requires next_retry_at and no recovery_duration_ms")
+        return self
+
+
+class RecoveryEventsResponse(BaseModel):
+    """계약 4.7."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    events: list[RecoveryEvent]
+    next_after_event_id: UUID | None = Field(default=None, description="돌려준 마지막 이벤트의 event_id. events 가 비어 있으면 null")
+    oldest_event_id: UUID | None = Field(default=None, description="보관된 가장 오래된 이벤트(진단용)")
+    gap: bool = Field(description="after_event_id 가 보관 범위 밖이거나 커서 뒤의 보관 줄이 손상돼 그 이후 이력을 잃었을 수 있음")
