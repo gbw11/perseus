@@ -122,6 +122,80 @@ int xm_json_int(const struct xm_json *j, int i, int64_t *out)
 	return 0;
 }
 
+int xm_json_number(const struct xm_json *j, int i, double *out)
+{
+	if (i < 0 || j->tok[i].type != JSMN_PRIMITIVE) {
+		return -EINVAL;
+	}
+	const char *p = j->js + j->tok[i].start, *end = j->js + j->tok[i].end;
+	double v = 0.0, scale = 1.0;
+	int exp = 0, digits = 0;
+	bool neg = false;
+
+	/* strtod 대신 직접 읽는다: 토큰 밖을 읽지 않고, Zephyr libc 설정에 기대지 않는다 */
+	if (p < end && *p == '-') {
+		neg = true;
+		p++;
+	}
+	for (; p < end && *p >= '0' && *p <= '9'; p++, digits++) {
+		v = v * 10.0 + (*p - '0');
+	}
+	if (p < end && *p == '.') {
+		for (p++; p < end && *p >= '0' && *p <= '9'; p++, digits++) {
+			scale /= 10.0;
+			v += (*p - '0') * scale;
+		}
+	}
+	if (digits == 0) {
+		return -EINVAL; /* true/false/null */
+	}
+	if (p < end && (*p == 'e' || *p == 'E')) {
+		bool eneg = false;
+		int edigits = 0;
+
+		p++;
+		if (p < end && (*p == '+' || *p == '-')) {
+			eneg = *p == '-';
+			p++;
+		}
+		for (; p < end && *p >= '0' && *p <= '9'; p++, edigits++) {
+			if (exp < 400) {
+				exp = exp * 10 + (*p - '0');
+			}
+		}
+		if (edigits == 0) {
+			return -EINVAL;
+		}
+		for (int k = 0; k < exp && v != 0.0; k++) {
+			v = eneg ? v / 10.0 : v * 10.0;
+		}
+	}
+	if (p != end) {
+		return -EINVAL;
+	}
+	*out = neg ? -v : v;
+	return 0;
+}
+
+int xm_json_is_bool(const struct xm_json *j, int i, bool *out)
+{
+	if (i < 0 || j->tok[i].type != JSMN_PRIMITIVE) {
+		return 0;
+	}
+	const char *p = j->js + j->tok[i].start;
+	int len = j->tok[i].end - j->tok[i].start;
+
+	if (len == 4 && memcmp(p, "true", 4) == 0) {
+		*out = true;
+		return 1;
+	}
+	if (len == 5 && memcmp(p, "false", 5) == 0) {
+		*out = false;
+		return 1;
+	}
+	return 0;
+}
+
 bool xm_span_eq(struct xm_span s, const char *text)
 {
 	size_t n = strlen(text);

@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+mainmenu "Xenova autonomous drive app"
+
+# Identity and separate app/Telemetry credentials are provisioned per execution.
+source "Kconfig.zephyr"

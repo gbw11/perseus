@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+config XENOVA_DRIVE_RUNTIME
+	bool "Existing drive apps: common diagnostics and transport lifecycle"
+	depends on XENOVA_DIAGNOSTICS && XENOVA_TELEMETRY && XENOVA_MQTT
+	select XENOVA_MQTT_BOUNDED_IO
+
+if XENOVA_DRIVE_RUNTIME
+config XENOVA_DRIVE_CAPTURE_ROWS
+	int "Bounded source measurement rows (never overwrite)"
+	range 128 16384
+	default 12288
+	help
+	  Local experimental observer, not a new MQTT metric or driving algorithm.
+	  At 50Hz this holds a 180s window; overflow is explicit, never hidden.
+
+config XENOVA_DRIVE_NATIVE_TEST
+	bool "Runtime-file bootstrap and bounded native test exit"
+	depends on ARCH_POSIX
+	default n
+endif
