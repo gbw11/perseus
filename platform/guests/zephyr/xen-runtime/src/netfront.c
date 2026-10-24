@@ -108,14 +108,18 @@ static void iface_init(struct net_if *i) {
 }
 static int init(const struct device *dev) { ARG_UNUSED(dev);return 0; }
 static enum ethernet_hw_caps caps(const struct device *dev) { ARG_UNUSED(dev);return 0; }
+/* Ethernet send also runs on Zephyr's 1 KiB TCP workqueue. An MTU-sized
+ * automatic buffer overflows that caller's stack; reuse packet_lock instead. */
+static uint8_t tx_frame[XNF_FRAME_MAX];
 static int send(const struct device *dev,struct net_pkt *pkt) {
  ARG_UNUSED(dev);
  if(!connected||closing)return -ENETDOWN;
- uint8_t frame[XNF_FRAME_MAX];size_t len=net_pkt_get_len(pkt);
- if(len>sizeof(frame)||len<14)return -EMSGSIZE;
- int rc=net_pkt_read(pkt,frame,len);if(rc)return rc;
+ size_t len=net_pkt_get_len(pkt);
+ if(len>sizeof(tx_frame)||len<14)return -EMSGSIZE;
  if(k_mutex_lock(&packet_lock,K_MSEC(20)))return -ETIMEDOUT;
- rc=xnf_send(&n,frame,len);k_mutex_unlock(&packet_lock);k_sem_give(&net_wake);return rc;
+ int rc=net_pkt_read(pkt,tx_frame,len);
+ if(rc){k_mutex_unlock(&packet_lock);return rc;}
+ rc=xnf_send(&n,tx_frame,len);k_mutex_unlock(&packet_lock);k_sem_give(&net_wake);return rc;
 }
 static const struct ethernet_api api={.iface_api.init=iface_init,.get_capabilities=caps,.send=send};
 ETH_NET_DEVICE_INIT(xenova_netfront,"xenova-netfront",init,NULL,NULL,NULL,80,&api,1500);
