@@ -11,6 +11,9 @@
 #include <zephyr/net/socket.h>
 
 #include "xenova/mqtt/xm.h"
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+#include <xenova/mqtt_socket.h>
+#endif
 
 struct xm_zlatest {
 	char topic[XM_TOPIC_MAX];
@@ -31,6 +34,10 @@ struct xm_zpub {
 
 struct xm_zclient {
 	struct mqtt_client mqtt;
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	struct xt_socket socket_io;
+#endif
+	int payload_rc;
 	struct sockaddr_storage broker;
 	struct mqtt_utf8 client_id, username, password;
 	char client_id_buf[XM_ID_MAX + 16];
@@ -55,6 +62,8 @@ struct xm_zclient {
 
 	/* 통계 */
 	uint32_t published, dropped, received;
+	uint32_t connection_attempts;
+	int last_io_rc;
 };
 
 struct xm_zconfig {
@@ -63,6 +72,9 @@ struct xm_zconfig {
 	const char *username;  /* NULL 이면 익명 */
 	const char *password;
 	uint16_t keepalive_s;
+	/* Optional trusted execution/session UUIDs, both or neither. Defaults keep
+	 * legacy random sessions; no v1 envelope fields or time semantics change. */
+	const char *boot_id, *instance_id;
 };
 
 /* vm_id 또는 source_id 정확히 하나. boot_id·agent_instance_id 는 sys_rand 로 만든다 (설계 §6 D4) */
@@ -75,6 +87,8 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms);
 /* 봉투를 씌워 발행. 끊겨 있으면 -ENOTCONN (QoS 0 는 버린다, Python 과 같다) */
 int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type, const char *payload_json);
 /* topic 의 마지막 메시지와 나이(ms). 없으면 -ENOENT. env 의 span 은 다음 poll 전까지 유효 */
+/* Single owner only. Abort pending I/O; no offline flush or publish retry. */
+void xm_zclient_close(struct xm_zclient *c);
 int xm_zclient_latest(struct xm_zclient *c, const char *topic, struct xm_envelope *env, int64_t *age_ms);
 
 #endif /* XENOVA_MQTT_XM_ZCLIENT_H_ */
