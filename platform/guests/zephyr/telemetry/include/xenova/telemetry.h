@@ -17,6 +17,10 @@ typedef int (*xt_bootstrap_loader)(struct xt_bootstrap *, int64_t deadline_ms, v
 /* Mutable JSON is parsed in place. own_vm_id must come from an independent,
  * verified own-domain source. No credentials may be logged on failure. */
 int xt_bootstrap_decode(char *json,size_t bytes,const char *own_vm_id,struct xt_bootstrap *);
+/* Runtime-owned Store session; NULL selects xenova-telemetry. xenova-drive is
+ * a separately provisioned v1 app channel, with separate broker credentials.
+ * Never opens another Store receiver or accepts an unbound Xen execution. */
+int xt_xen_bootstrap_load(struct xt_bootstrap *, int64_t deadline_ms, void *channel);
 struct xt_status {
 	struct xt_identity identity;
 	bool running, identified, connected;

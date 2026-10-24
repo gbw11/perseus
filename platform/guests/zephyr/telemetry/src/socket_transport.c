@@ -66,10 +66,14 @@ int mqtt_client_custom_transport_write_msg(struct mqtt_client *m,const struct ne
 int mqtt_client_custom_transport_read(struct mqtt_client *m,uint8_t *data,uint32_t length,bool block)
 {
 	struct xt_socket *s=m->transport.custom_transport_data;
-	/* No inbound application subscriptions; ACK decoding is incremental. */
-	ARG_UNUSED(block);
-	int rc=zsock_recv(s->fd,data,length,ZSOCK_MSG_DONTWAIT);
-	return rc<0 ? -errno : rc;
+	/* v2 ACK decoding stays incremental. v1 payload reads may wait, but share
+	 * the enclosing poll/publish deadline instead of an unbounded recv. */
+	for (;;) {
+		int rc=zsock_recv(s->fd,data,length,ZSOCK_MSG_DONTWAIT);
+		if (rc>=0) { return rc; }
+		if (!block || (errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR)) { return -errno; }
+		rc=ready(s,ZSOCK_POLLIN);if (rc) { return rc; }
+	}
 }
 
 int mqtt_client_custom_transport_disconnect(struct mqtt_client *m)
