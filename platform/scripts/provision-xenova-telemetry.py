@@ -19,6 +19,7 @@ from pathlib import Path
 import stat
 import subprocess
 import sys
+import time
 import uuid
 
 
@@ -58,7 +59,17 @@ def credentials(path, vm_id):
 
 def current(vm_id):
     from xenova_management import Manager
-    result = Manager().call("execution-context", {"vm_id": vm_id})
+    manager = Manager()
+    for attempt in range(151):
+        result = manager.call("execution-context", {"vm_id": vm_id})
+        error = result.get("error") or {}
+        if (result["ok"] or error.get("code") != "OPERATION_IN_PROGRESS"
+                or not error.get("retryable") or result.get("operation_id") is not None
+                or error.get("details", {}).get("accepted") or attempt == 150):
+            break
+        # Only an unaccepted read is retried. Store writes/uncertain receipts
+        # retain their existing refusal and execution identity checks.
+        time.sleep(0.2)
     if not result["ok"]:
         raise ValueError("execution context unavailable")
     view = result["data"]["vm"]
@@ -81,7 +92,10 @@ class Permission(C.Structure):
 
 class XenStore:
     """Small binding to the already installed Xen libxenstore; no new runtime dep."""
-    def __init__(self):
+    def __init__(self, channel="telemetry"):
+        if channel not in ("telemetry", "drive"):
+            raise ValueError("unsupported bootstrap channel")
+        self.channel = channel
         library = ctypes.util.find_library("xenstore")
         if not library:
             raise ValueError("installed libxenstore unavailable")
@@ -133,7 +147,7 @@ class XenStore:
 
     def apply(self, context, bootstrap, previous=None):
         domid = context["domid"]
-        parent = f"/local/domain/{domid}/data/xenova-telemetry"
+        parent = f"/local/domain/{domid}/data/xenova-{self.channel}"
         target = parent + "/bootstrap"
         wanted = [(0, 0), (domid, 1)]  # dom0 owns; only this guest can read.
         wire = json.dumps(bootstrap, separators=(",", ":")).encode()
@@ -193,21 +207,37 @@ def save_receipt(path, value, create=False):
         os.replace(temp, path)
 
 
-def provision(context, credential, source_identity, receipt_path, previous_path=None, store=None, observe=None):
+def provision(context, credential, source_identity, receipt_path, previous_path=None, store=None, observe=None,
+              channel="telemetry", guest_boot_receipt=None):
+    if channel not in ("telemetry", "drive") or getattr(store, "channel", "telemetry") != channel:
+        raise ValueError("bootstrap channel/store mismatch")
+    shared_boot = None
+    if channel == "drive":
+        if guest_boot_receipt is None:
+            raise ValueError("drive channel requires this execution's applied telemetry boot receipt")
+        authority, _ = private_json(guest_boot_receipt)
+        if (authority.get("channel", "telemetry") != "telemetry" or authority["context"] != context
+                or authority["phase"] != "applied"):
+            raise ValueError("guest boot receipt belongs to another execution/channel")
+        shared_boot = canonical(authority["boot_id"])
+    elif guest_boot_receipt is not None:
+        raise ValueError("telemetry channel establishes its own guest boot receipt")
     previous = None
     if previous_path:
         previous, _ = private_json(previous_path)
-        if previous["context"] != context or previous["phase"] != "applied":
+        if previous.get("channel", "telemetry") != channel or previous["context"] != context or previous["phase"] != "applied":
             raise ValueError("previous session is not this execution")
     if receipt_path.exists():
         receipt, _ = private_json(receipt_path)
-        if receipt["context"] != context or receipt["credential_source"] != source_identity:
+        if receipt.get("channel", "telemetry") != channel or receipt["context"] != context or receipt["credential_source"] != source_identity:
             raise ValueError("receipt context/input changed")
         if receipt["phase"] not in ("prepared", "applied"):
             raise ValueError("uncertain receipt requires inspection")
+        if shared_boot and receipt["boot_id"] != shared_boot:
+            raise ValueError("guest boot authority changed")
     else:
-        receipt = {"schema_version": "2.0-bootstrap", "context": context, "credential_source": source_identity,
-                   "boot_id": previous["boot_id"] if previous else str(uuid.uuid4()),
+        receipt = {"schema_version": "2.0-bootstrap", "channel": channel, "context": context, "credential_source": source_identity,
+                   "boot_id": shared_boot or (previous["boot_id"] if previous else str(uuid.uuid4())),
                    "publisher_id": str(uuid.uuid4()), "receipt_id": str(uuid.uuid4()), "phase": "prepared"}
         save_receipt(receipt_path, receipt, True)
     bootstrap = {**credential, "boot_id": receipt["boot_id"], "publisher_id": receipt["publisher_id"],
@@ -233,10 +263,14 @@ def provision(context, credential, source_identity, receipt_path, previous_path=
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--channel", choices=("telemetry", "drive"), default="telemetry",
+                        help="separate Store node, account/listener and receipt for v1 app or v2 Publisher")
     parser.add_argument("--vm-id", required=True, type=canonical)
     parser.add_argument("--credentials-file", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--previous-receipt", type=Path)
+    parser.add_argument("--guest-boot-receipt", type=Path,
+                        help="drive only: applied telemetry receipt of the same guest execution")
     parser.add_argument("--expected-host-boot-id", type=canonical, required=True)
     parser.add_argument("--expected-execution-id", type=canonical, required=True)
     parser.add_argument("--execute", action="store_true")
@@ -251,7 +285,7 @@ def main(argv=None):
         raise ValueError("expected execution changed")
     credential, identity = credentials(args.credentials_file, args.vm_id)
     if not args.execute:
-        return {"action": "plan", "context": context, "receipt": str(args.receipt),
+        return {"action": "plan", "channel": args.channel, "context": context, "receipt": str(args.receipt),
                 "mutation": "own-domain read-only bootstrap; broker/services/VM lifecycle unchanged"}
     lock_fd = os.open(str(args.receipt) + ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     store = None
@@ -260,9 +294,10 @@ def main(argv=None):
         if lock_stat.st_uid != os.geteuid() or lock_stat.st_mode & 0o077 or not stat.S_ISREG(lock_stat.st_mode):
             raise ValueError("private receipt lock ownership/mode invalid")
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        store = XenStore()
+        store = XenStore(args.channel)
         return provision(context, credential, identity, args.receipt, args.previous_receipt,
-                         store=store, observe=lambda: current(args.vm_id))
+                         store=store, observe=lambda: current(args.vm_id), channel=args.channel,
+                         guest_boot_receipt=args.guest_boot_receipt)
     finally:
         if store:
             store.close()
