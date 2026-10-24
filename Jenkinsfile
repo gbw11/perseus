@@ -14,7 +14,7 @@ pipeline {
         gitLabConnection('gitlab')    // Jenkins 시스템 설정의 GitLab connection 이름과 같아야 한다
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '30'))
-        disableConcurrentBuilds(abortPrevious: true)
+        disableConcurrentBuilds()
     }
 
     environment {
@@ -29,7 +29,7 @@ pipeline {
     stages {
         stage('Backend Test') {
             steps {
-                updateGitlabCommitStatus name: 'jenkins', state: 'running'
+                updateGitlabCommitStatus name: 'jenkins-deploy', state: 'running'
                 dir('backend') {
                     sh './mvnw -B -ntp test'
                 }
@@ -77,6 +77,7 @@ pipeline {
             steps {
                 dir('platform/services/dom0-manager') {
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                        sh 'mkdir -p target'
                         sh 'python3 -m pip install -q --user -e .[test] && python3 -m pytest -q --junitxml=target/pytest.xml'
                     }
                 }
@@ -89,9 +90,11 @@ pipeline {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     dir('platform/services/vm-agent/mqtt-client') {
+                        sh 'mkdir -p target'
                         sh 'python3 -m pip install -q --user "paho-mqtt>=1.6,<3" "pytest>=7" && python3 -m pytest -q --junitxml=target/pytest.xml'
                     }
                     dir('platform/services/vm-agent/agent') {
+                        sh 'mkdir -p target'
                         sh 'python3 -m pytest -q --junitxml=target/pytest.xml'
                     }
                 }
@@ -140,16 +143,16 @@ pipeline {
             '''
         }
         success {
-            updateGitlabCommitStatus name: 'jenkins', state: 'success'
-            notifyMattermost('good', '✅ 빌드 성공')
+            updateGitlabCommitStatus name: 'jenkins-deploy', state: 'success'
+            notifyMattermost('good', '✅ 운영 배포 성공')
         }
         failure {
-            updateGitlabCommitStatus name: 'jenkins', state: 'failed'
-            notifyMattermost('danger', '❌ 빌드 실패')
+            updateGitlabCommitStatus name: 'jenkins-deploy', state: 'failed'
+            notifyMattermost('danger', '❌ 운영 배포 실패')
         }
         aborted {
-            updateGitlabCommitStatus name: 'jenkins', state: 'canceled'
-            notifyMattermost('warning', '⚠️ 빌드 중단')
+            updateGitlabCommitStatus name: 'jenkins-deploy', state: 'canceled'
+            notifyMattermost('warning', '⚠️ 운영 배포 중단')
         }
     }
 }
