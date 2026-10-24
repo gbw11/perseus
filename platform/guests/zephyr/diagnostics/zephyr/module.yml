@@ -1,0 +1,4 @@
+name: xenova_diagnostics
+build:
+  cmake: .
+  kconfig: Kconfig

@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+mainmenu "Xenova Network Starter"
+
+config XENOVA_DIAGNOSTICS_EXERCISE
+	bool "Optional 20ms periodic diagnostic exercise (no driving output)"
+	default n
+	depends on TIMER_HAS_64BIT_CYCLE_COUNTER
+	help
+	  Same fixed arithmetic workload with diagnostics on/off. Not a driving app.
+	  Default firmware creates no periodic exercise thread.
+
+source "Kconfig.zephyr"

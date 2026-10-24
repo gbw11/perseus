@@ -1,0 +1,33 @@
+{
+  "name": "05_retained_not_liveness",
+  "purpose_ko": "retained inventory 수신은 current 생존 증거 아님",
+  "test_scope": "reference receiver oracle only; no actual broker or control execution",
+  "steps": [
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/01_inventory_unsynced.json",
+      "received_ms": 0,
+      "retained_delivery": true,
+      "expected": "HISTORICAL_ONLY"
+    },
+    {
+      "op": "bind",
+      "vm_id": "11111111-1111-4111-8111-111111111111",
+      "boot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "publisher_instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/03_publisher_heartbeat.json",
+      "received_ms": 10,
+      "retained_delivery": false,
+      "expected": "CURRENT_OBSERVATION"
+    },
+    {
+      "op": "freshness",
+      "file": "fixtures/valid/03_publisher_heartbeat.json",
+      "now_ms": 7000,
+      "expected": "STALE"
+    }
+  ]
+}

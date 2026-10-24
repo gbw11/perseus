@@ -70,4 +70,5 @@ host 검사는 production main.c와 adapter도 직접 컴파일한다. tests/hos
 대역은 kernel/hypercall 경계만 제공하며 xenvm 빌드에는 포함하지 않는다. adapter 시험은
 고정 Xen의 2-level pending/mask/selector와 Zephyr ISR 순서를 모델링하며 물리 IRQ 시험은 아니다.
 
-실제 xenvm 빌드·실환경 절차는 `docs/build-guides/xenova-zephyr-xenstore-g1.md`를 따른다.
+실제 xenvm 빌드·인계물 준비와 시험 도구 사용은
+[Xenova 빌드 가이드의 G1 절](../../../../docs/platform/build-guide.md#10-xenstore-g1-시험-인계물)을 따른다.

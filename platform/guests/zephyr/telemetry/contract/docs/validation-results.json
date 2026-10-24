@@ -1,0 +1,373 @@
+{
+  "contract_version": "2.0",
+  "fixtures_only": true,
+  "production_code_or_hardware_tested": false,
+  "valid": [
+    {
+      "name": "01_inventory_unsynced",
+      "status": "PASS",
+      "wire_payload_bytes": 1974
+    },
+    {
+      "name": "02_inventory_bound_time",
+      "status": "PASS",
+      "wire_payload_bytes": 2108
+    },
+    {
+      "name": "03_publisher_heartbeat",
+      "status": "PASS",
+      "wire_payload_bytes": 969
+    },
+    {
+      "name": "04_heap_and_unsupported_cpu",
+      "status": "PASS",
+      "wire_payload_bytes": 1473
+    },
+    {
+      "name": "05_collection_error",
+      "status": "PASS",
+      "wire_payload_bytes": 963
+    },
+    {
+      "name": "06_network_raw32",
+      "status": "PASS",
+      "wire_payload_bytes": 1655
+    },
+    {
+      "name": "07_loop_progress",
+      "status": "PASS",
+      "wire_payload_bytes": 2344
+    },
+    {
+      "name": "08_loop_stalled",
+      "status": "PASS",
+      "wire_payload_bytes": 2347
+    },
+    {
+      "name": "09_first_completion_missing",
+      "status": "PASS",
+      "wire_payload_bytes": 1255
+    },
+    {
+      "name": "10_timing_histogram",
+      "status": "PASS",
+      "wire_payload_bytes": 1285
+    },
+    {
+      "name": "11_no_timing_samples",
+      "status": "PASS",
+      "wire_payload_bytes": 1282
+    },
+    {
+      "name": "12_open_histogram_bucket",
+      "status": "PASS",
+      "wire_payload_bytes": 1299
+    },
+    {
+      "name": "13_boot_event",
+      "status": "PASS",
+      "wire_payload_bytes": 1165
+    },
+    {
+      "name": "14_error_event",
+      "status": "PASS",
+      "wire_payload_bytes": 1160
+    },
+    {
+      "name": "15_threads_with_scan_limit",
+      "status": "PASS",
+      "wire_payload_bytes": 1353
+    },
+    {
+      "name": "16_threads_truncated",
+      "status": "PASS",
+      "wire_payload_bytes": 1363
+    },
+    {
+      "name": "17_history_loss",
+      "status": "PASS",
+      "wire_payload_bytes": 1311
+    },
+    {
+      "name": "18_second_vm",
+      "status": "PASS",
+      "wire_payload_bytes": 1473
+    },
+    {
+      "name": "19_new_guest_boot",
+      "status": "PASS",
+      "wire_payload_bytes": 1468
+    },
+    {
+      "name": "20_publisher_restart_only",
+      "status": "PASS",
+      "wire_payload_bytes": 1473
+    },
+    {
+      "name": "21_uint64_precision",
+      "status": "PASS",
+      "wire_payload_bytes": 953
+    },
+    {
+      "name": "22_publisher_degraded",
+      "status": "PASS",
+      "wire_payload_bytes": 967
+    },
+    {
+      "name": "23_threads_part0",
+      "status": "PASS",
+      "wire_payload_bytes": 1743
+    },
+    {
+      "name": "24_threads_part1",
+      "status": "PASS",
+      "wire_payload_bytes": 1152
+    },
+    {
+      "name": "25_loop_not_registered",
+      "status": "PASS",
+      "wire_payload_bytes": 1038
+    },
+    {
+      "name": "26_raw_counter_before_wrap",
+      "status": "PASS",
+      "wire_payload_bytes": 1664
+    },
+    {
+      "name": "27_raw_counter_after_wrap",
+      "status": "PASS",
+      "wire_payload_bytes": 1655
+    },
+    {
+      "name": "28_saturated_summary",
+      "status": "PASS",
+      "wire_payload_bytes": 1288
+    },
+    {
+      "name": "29_thread_scan_not_requested",
+      "status": "PASS",
+      "wire_payload_bytes": 972
+    },
+    {
+      "name": "30_history_collection_failed",
+      "status": "PASS",
+      "wire_payload_bytes": 933
+    }
+  ],
+  "invalid": [
+    {
+      "name": "01_v1_schema",
+      "status": "EXPECTED_REJECTION",
+      "error": "SCHEMA_INVALID"
+    },
+    {
+      "name": "02_topic_wrong_vm",
+      "status": "EXPECTED_REJECTION",
+      "error": "TOPIC_MISMATCH"
+    },
+    {
+      "name": "03_message_id_counter_only",
+      "status": "EXPECTED_REJECTION",
+      "error": "MESSAGE_ID"
+    },
+    {
+      "name": "04_numeric_seq",
+      "status": "EXPECTED_REJECTION",
+      "error": "SCHEMA_INVALID"
+    },
+    {
+      "name": "05_u64_overflow",
+      "status": "EXPECTED_REJECTION",
+      "error": "INTEGER_RANGE"
+    },
+    {
+      "name": "06_failure_zero",
+      "status": "EXPECTED_REJECTION",
+      "error": "MEASUREMENT_STATUS"
+    },
+    {
+      "name": "07_unavailable_fake_utc",
+      "status": "EXPECTED_REJECTION",
+      "error": "CLOCK_QUALITY"
+    },
+    {
+      "name": "08_synced_without_source",
+      "status": "EXPECTED_REJECTION",
+      "error": "CLOCK_QUALITY"
+    },
+    {
+      "name": "09_unbound_with_execution",
+      "status": "EXPECTED_REJECTION",
+      "error": "CONTEXT_BINDING"
+    },
+    {
+      "name": "10_collection_after_send",
+      "status": "EXPECTED_REJECTION",
+      "error": "CLOCK_ORDER"
+    },
+    {
+      "name": "11_wrong_unit",
+      "status": "EXPECTED_REJECTION",
+      "error": "METRIC_CONTRACT"
+    },
+    {
+      "name": "12_counter_double",
+      "status": "EXPECTED_REJECTION",
+      "error": "MEASUREMENT_TYPE"
+    },
+    {
+      "name": "13_exact_p99_mislabel",
+      "status": "EXPECTED_REJECTION",
+      "error": "HISTOGRAM_QUANTILE"
+    },
+    {
+      "name": "14_hist_count_mismatch",
+      "status": "EXPECTED_REJECTION",
+      "error": "HISTOGRAM_COUNT"
+    },
+    {
+      "name": "15_no_samples_zero_summary",
+      "status": "EXPECTED_REJECTION",
+      "error": "HISTOGRAM_EMPTY"
+    },
+    {
+      "name": "16_open_bucket_finite_p99",
+      "status": "EXPECTED_REJECTION",
+      "error": "HISTOGRAM_QUANTILE"
+    },
+    {
+      "name": "17_metrics_retained",
+      "status": "EXPECTED_REJECTION",
+      "error": "RETAIN_POLICY"
+    },
+    {
+      "name": "18_heartbeat_qos1",
+      "status": "EXPECTED_REJECTION",
+      "error": "QOS_POLICY"
+    },
+    {
+      "name": "19_app_health_from_reporter",
+      "status": "EXPECTED_REJECTION",
+      "error": "SCHEMA_INVALID"
+    },
+    {
+      "name": "20_stack_bad_unused",
+      "status": "EXPECTED_REJECTION",
+      "error": "STACK_RANGE"
+    },
+    {
+      "name": "21_truncation_silent",
+      "status": "EXPECTED_REJECTION",
+      "error": "SNAPSHOT_COMPLETENESS"
+    },
+    {
+      "name": "22_bad_part_index",
+      "status": "EXPECTED_REJECTION",
+      "error": "SNAPSHOT_PART"
+    },
+    {
+      "name": "23_raw_counter_widened",
+      "status": "EXPECTED_REJECTION",
+      "error": "RAW_COUNTER_RANGE"
+    },
+    {
+      "name": "24_stage_multibyte_limit",
+      "status": "EXPECTED_REJECTION",
+      "error": "STAGE_BYTES"
+    },
+    {
+      "name": "25_packet_oversize",
+      "status": "EXPECTED_REJECTION",
+      "error": "PAYLOAD_TOO_LARGE"
+    },
+    {
+      "name": "26_unknown_metric",
+      "status": "EXPECTED_REJECTION",
+      "error": "METRIC_CONTRACT"
+    },
+    {
+      "name": "27_metrics_missing_labels",
+      "status": "EXPECTED_REJECTION",
+      "error": "METRIC_LABELS"
+    },
+    {
+      "name": "28_history_cannot_claim_lossless",
+      "status": "EXPECTED_REJECTION",
+      "error": "HISTORY_COVERAGE"
+    },
+    {
+      "name": "29_unrequested_zero_count",
+      "status": "EXPECTED_REJECTION",
+      "error": "SNAPSHOT_COMPLETENESS"
+    },
+    {
+      "name": "30_failed_history_zeroed",
+      "status": "EXPECTED_REJECTION",
+      "error": "HISTORY_COVERAGE"
+    }
+  ],
+  "sequences": [
+    {
+      "name": "01_duplicate_no_lease_refresh",
+      "assertions": 3,
+      "status": "PASS"
+    },
+    {
+      "name": "02_vm_independence",
+      "assertions": 2,
+      "status": "PASS"
+    },
+    {
+      "name": "03_reboot_requires_binding",
+      "assertions": 4,
+      "status": "PASS"
+    },
+    {
+      "name": "04_publisher_restart",
+      "assertions": 2,
+      "status": "PASS"
+    },
+    {
+      "name": "05_retained_not_liveness",
+      "assertions": 3,
+      "status": "PASS"
+    },
+    {
+      "name": "06_stream_ordering",
+      "assertions": 2,
+      "status": "PASS"
+    },
+    {
+      "name": "07_snapshot_out_of_order",
+      "assertions": 2,
+      "status": "PASS"
+    },
+    {
+      "name": "08_truncated_not_complete_source",
+      "assertions": 1,
+      "status": "PASS"
+    },
+    {
+      "name": "09_other_metrics_not_refresh",
+      "assertions": 4,
+      "status": "PASS"
+    },
+    {
+      "name": "10_heartbeat_not_loop_progress",
+      "assertions": 3,
+      "status": "PASS"
+    },
+    {
+      "name": "11_unavailable_snapshot",
+      "assertions": 2,
+      "status": "PASS"
+    }
+  ],
+  "summary": {
+    "valid_pass": 30,
+    "invalid_rejected": 30,
+    "sequence_pass": 11,
+    "sequence_assertions": 28,
+    "max_valid_payload_bytes": 2347
+  }
+}
