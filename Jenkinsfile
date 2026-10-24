@@ -14,7 +14,7 @@ pipeline {
         gitLabConnection('gitlab')    // Jenkins 시스템 설정의 GitLab connection 이름과 같아야 한다
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '30'))
-        disableConcurrentBuilds(abortPrevious: true)
+        disableConcurrentBuilds()
     }
 
     environment {
