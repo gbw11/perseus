@@ -139,9 +139,19 @@ class FoundationTest(unittest.TestCase):
         self.start()
         before = self.state()["intent_revision"]
         self.xen.hang_shutdown = True
-        result = self.call("stop")
-        self.fails(result, "XEN_EXECUTION_FAILED")
+        result = self.call("stop", key="accepted-stop-timeout")
+        self.fails(result, "RECONCILE_REQUIRED")
+        self.assertEqual(result["error"]["details"]["cause"]["code"], "XEN_EXECUTION_FAILED")
         self.assertTrue(result["error"]["details"]["accepted"])
+        operation = next(q for q in self.p.execution().requests() if q["operation_id"] == result["operation_id"])
+        self.assertEqual(operation["phase"], "uncertain")
+        self.assertIsNone(operation["result"])
+        deadline = operation["deadline_monotonic_ms"]
+        before_commands = len(self.physical("shutdown"))
+        replay = self.call("stop", key="accepted-stop-timeout")
+        self.fails(replay, "RECONCILE_REQUIRED")
+        self.assertEqual(len(self.physical("shutdown")), before_commands)
+        self.assertEqual(next(q for q in self.p.execution().requests() if q["operation_id"] == result["operation_id"])["deadline_monotonic_ms"], deadline)
         self.assertEqual(self.state()["desired_state"], "stopped")
         self.assertEqual(self.state()["intent_revision"], before+1)
         self.assertEqual(self.physical("destroy"), [])

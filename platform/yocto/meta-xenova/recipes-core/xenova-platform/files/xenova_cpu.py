@@ -12,7 +12,22 @@ import xenova_catalog as catalog
 from first_install_contract import uuid4
 from xenova_execution import ExecutionError, fingerprint, refuse
 from xenova_runtime import PlatformError
+from xenova_trace import event, traced
 import xenova_vm as vm
+
+
+class _ValidationEvidence:
+    """한 호출 단계의 완전한 검증만 전달한다. 직렬화·다른 요청의 캐시는 아니다."""
+    def __init__(self, cpu, record, deadline, context, layout):
+        self.platform = cpu.p
+        self.host = cpu.e.host
+        self.record = fingerprint(record)
+        self.lifecycle = cpu.e.lifecycle(record)
+        self.intent = fingerprint(cpu.e.intent(record))
+        self.deadline = deadline
+        self.context = context
+        self.layout = layout
+        self.consumed = False
 
 
 def cpus(value):
@@ -202,6 +217,7 @@ class CPU:
         # proves the single pool covers every online CPU; Linux CPU IDs are unused.
         return {'online_pcpus':online, 'max_cpu_id':maximum, 'pool_name':name, 'scheduler':scheduler}
 
+    @traced('cpu.sample')
     def sample(self, deadline):
         hardware = self.hardware(deadline)
         listing = self.command(['xl', 'list', '-c'], deadline).splitlines()
@@ -253,7 +269,10 @@ class CPU:
                 raise ValueError('missing, offline or duplicate vCPU observation')
         return {'hardware':hardware, 'domains':rows}
 
+    @traced('cpu.observe')
     def observe(self, deadline):
+        if self.p.boot_id_reader() != self.e.host:
+            refuse('TARGET_CHANGED', 'CPU observation belongs to a previous host boot')
         try:
             first = self.sample(deadline)
             second = self.sample(deadline)
@@ -268,10 +287,13 @@ class CPU:
                    details={'cause_type':type(error).__name__})
         if first != second:
             refuse('TARGET_CHANGED', 'domain incarnation, set, topology or affinity changed during observation')
+        if self.p.boot_id_reader() != self.e.host:
+            refuse('TARGET_CHANGED', 'host boot changed during CPU observation')
         if self.p.clock() >= deadline:
             refuse('DEADLINE_EXCEEDED', 'CPU observation completed after deadline')
         return first
 
+    @traced('cpu.layout')
     def layout(self, records, deadline, vm_id=None):
         policy = self.policy()
         if vm_id and not any(r['uuid'] == vm_id for r in records.values()):
@@ -340,11 +362,17 @@ class CPU:
                 'reservations':policy['exclusive'] if policy else [],
                 'vms':[v for v in vms if vm_id is None or v['vm_id'] == vm_id], 'issues':all_issues}
 
-    def require(self, record, deadline, *, expected=None, present=False, expected_identity=None):
+    @traced('cpu.require')
+    def require(self, record, deadline, *, expected=None, present=False, expected_identity=None, capture=None):
+        """전체 두 표본 검증. capture는 바로 중첩된 내부 호출에만 근거를 전달한다."""
+        if self.p.clock() >= deadline:
+            refuse('DEADLINE_EXCEEDED', 'CPU validation deadline expired')
         context = self.context(record)
         if expected is not None and expected != context:
             refuse('TARGET_CHANGED', 'accepted CPU policy context changed')
         if not context['configured']:
+            if capture is not None:
+                capture['evidence'] = _ValidationEvidence(self, record, deadline, context, None)
             return context
         if any(v['phase'] != 'completed' for v in self.operations()):
             refuse('RECONCILE_REQUIRED', 'CPU policy publication is pending; finish the original operation')
@@ -358,6 +386,26 @@ class CPU:
         if layout['issues'] or (present and target['observed']['presence'] != 'present'):
             refuse('CPU_APPLY_INCOMPLETE', 'observed CPU layout does not comply; no automatic repinning',
                    details={'issues':layout['issues'], 'vm':target})
+        if capture is not None:
+            capture['evidence'] = _ValidationEvidence(self, record, deadline, context, layout)
+            event('evidence.created', phase='cpu.require', policy_revision=context['policy_revision'])
+        return context
+
+    def consume(self, record, deadline, evidence, *, expected=None):
+        """동일 단계의 일회성 근거를 소비한다. 정책/의도/구성 변경은 즉시 거절한다."""
+        if (not isinstance(evidence, _ValidationEvidence) or evidence.consumed or
+                evidence.platform is not self.p or evidence.host != self.e.host or
+                self.p.boot_id_reader() != evidence.host or evidence.deadline != deadline or
+                evidence.record != fingerprint(record) or evidence.lifecycle != self.e.lifecycle(record) or
+                evidence.intent != fingerprint(self.e.intent(record))):
+            refuse('TARGET_CHANGED', 'CPU evidence does not belong to this unchanged launch phase')
+        evidence.consumed = True
+        if self.p.clock() >= deadline:
+            refuse('DEADLINE_EXCEEDED', 'CPU evidence expired with the operation deadline')
+        context = self.context(record)
+        if context != evidence.context or (expected is not None and expected != context):
+            refuse('TARGET_CHANGED', 'CPU policy changed after complete validation')
+        event('evidence.reused', phase='launch.prepare', policy_revision=context.get('policy_revision'))
         return context
 
     def guard_stopped(self, records, sample, *, policy_operation=None):

@@ -64,7 +64,7 @@ def mutate(manager, spec, execute, key, records, context, fail):
     tomb = manager._state(spec["vm_id"], records)
     if previous and previous["status"] == "SUCCEEDED":
         return {"operation":previous, "original_result":previous["result"],
-                "current":manager._view(tomb, observe=True)}
+                "current":manager._observe_view(tomb)}
     if tomb["lifecycle"] != "REGISTERED" or tomb["generation"] != spec["expected_lifecycle_generation"]:
         fail("TARGET_CHANGED", "resource target lifecycle changed")
     record = tomb["record"]
@@ -112,4 +112,4 @@ def mutate(manager, spec, execute, key, records, context, fail):
     previous.update(status="SUCCEEDED", result=result, error=None)
     manager._save_op(previous, "complete")
     return {"operation":previous, "original_result":result,
-            "current":manager._view({**tomb, "record":after}, observe=True)}
+            "current":manager._observe_view({**tomb, "record":after})}

@@ -2,11 +2,13 @@
 from xenova_execution import ExecutionError, fingerprint, refuse
 from xenova_runtime import PlatformError
 import xenova_vm as vm
+from xenova_trace import traced
 
 PHASES={"request-accepted","shutdown-requested","old-removed","new-launching","new-observed"}
 
 
-def reboot(e,record,key):
+@traced('zephyr.reboot')
+def reboot(e,record,key,*,deadline=None):
     p=e.p
     request={"vm_id":record["uuid"],"action":"reboot","force":False}
     op=next((q for q in e.requests() if key is not None and q["idempotency_key"]==key),None)
@@ -23,15 +25,24 @@ def reboot(e,record,key):
         return result()
     if op and op["host_boot_id"]!=e.host:
         refuse("TARGET_CHANGED","unfinished reboot belongs to a previous host boot")
-    end=op.get("deadline_monotonic_ms",int((p.clock()+90)*1000))/1000 if op else p.clock()+90
+    if op and type(op.get('deadline_monotonic_ms')) is not int:
+        refuse('RECONCILE_REQUIRED','legacy unfinished reboot has no physical execution deadline',
+               details={'operation_id':op['operation_id'],'replayed':True})
+    end=min(op['deadline_monotonic_ms']/1000, deadline if deadline is not None else float('inf')) if op else (
+        min(p.clock()+90,deadline) if deadline is not None else p.clock()+90)
 
     def save(phase):
         op["reboot_stage"]=phase
         e.save_request(op,phase)
 
-    def conditions(*,check_deadline=True):
+    def conditions(*,check_deadline=True,verify_cpu=False,observation_end=None):
         e.gate()
-        p.cpu().require(record, min(end,p.clock()+15) if check_deadline else p.clock()+15, expected=op.get('cpu_policy', {'configured':False}))
+        cpu_context=p.cpu().context(record)
+        if cpu_context!=op.get('cpu_policy',{'configured':False}):
+            refuse('TARGET_CHANGED','accepted reboot CPU policy changed')
+        if verify_cpu:
+            p.cpu().require(record, observation_end if observation_end is not None else end,
+                            expected=cpu_context,present=True,expected_identity=op['old_execution'])
         lifecycle,generation=e.lifecycle(record)
         intent=e.intent(record)
         from xenova_management import Manager
@@ -61,12 +72,13 @@ def reboot(e,record,key):
             if not rows:refuse("TARGET_CHANGED","reboot target disappeared")
             p.require_cooperative(record,rows[0],"reboot",end)
             p.cpu().require(record,min(end,p.clock()+15),present=True)
-            op=e.accept(record,request,key,previous=op,receipt=receipt)
+            op=e.accept(record,request,key,previous=op,receipt=receipt,deadline=end)
             op.update(configuration_sha256=fingerprint(record),deadline_monotonic_ms=int(end*1000),
                       old_execution=observed,old_domain=rows[0])
             save("request-accepted")
         stage=op.get("reboot_stage",op["phase"])
-        if stage=="new-observed" and op.get("new_execution_owner")=={"kind":"user","operation_id":op["operation_id"]}:
+        if (stage=="new-observed" and op.get('new_cpu_verification')=='complete' and
+                op.get("new_execution_owner")=={"kind":"user","operation_id":op["operation_id"]}):
             # A durable observed boundary is a historical execution result. A later
             # user stop must not turn it into a failed reboot or repeat the command.
             observation=op["new_execution"]
@@ -78,18 +90,28 @@ def reboot(e,record,key):
                     observation.get("host_boot_id")!=e.host):
                 refuse("RECONCILE_REQUIRED","durable observed reboot context is invalid")
         elif stage in ("new-launching","new-observed"):
+            readonly_end=p.clock()+15
             conditions(check_deadline=False)
-            observation=e.observe(record,p.clock()+15)
+            observation=e.observe(record,readonly_end)
             run=e.run_record(record)
             owner={"kind":"user","operation_id":op["operation_id"]}
             if observation["execution_status"]!="managed" or not run or run.get("owner")!=owner:
                 refuse("RECONCILE_REQUIRED","new launch may exist; no stop/create repeated")
-            p.cpu().require(record,p.clock()+15,expected=op.get('cpu_policy', {'configured':False}),present=True)
+            p.cpu().require(record,readonly_end,expected=op.get('cpu_policy', {'configured':False}),
+                            present=True,expected_identity=observation)
+            if run.get('cpu_verification')!='complete':
+                run={**run,'cpu_verification':'complete'}
+                run.pop('cpu_error',None)
+                e.write(e._path(e.runtime,'executions',record['uuid']),run)
+            op['new_execution']=observation
+            op['new_execution_owner']=owner
+            op['new_cpu_verification']='complete'
+            save('new-observed')
             stage="new-observed"
         elif stage in ("request-accepted","shutdown-requested","old-removed"):
             # An expired submitted request may still be closed after confirmed removal.
             # This bounded read does not extend its permission to launch a replacement.
-            conditions(check_deadline=stage!="shutdown-requested")
+            conditions(check_deadline=stage!="shutdown-requested",verify_cpu=stage=='request-accepted')
             if stage=="request-accepted":
                 save("shutdown-requested")
                 p.control(record,"reboot",op["old_domain"],deadline=end)
@@ -98,7 +120,10 @@ def reboot(e,record,key):
                 stage="shutdown-requested"
             if stage=="shutdown-requested":
                 # Journal precedes command submission; replay ONLY observes, never re-sends.
-                p.wait_reboot_removed(record,op["old_domain"],max(end,p.clock()+15))
+                # On replay after expiry this budget permits removal observation only.
+                # It is never passed to p.start or a physical control command.
+                removal_end=end if p.clock()<end else p.clock()+15
+                p.wait_reboot_removed(record,op["old_domain"],removal_end)
                 e.end_run(record)
                 save("old-removed")
             conditions()
@@ -110,14 +135,17 @@ def reboot(e,record,key):
             # Durable phase is written BEFORE launch preparation/create. Absence after a
             # crash in this phase is not evidence that an xl child cannot still create.
             save("new-launching")
-            p.start(record,_owner={"kind":"user","operation_id":op["operation_id"]},deadline=end)
-            observation=e.observe(record,end)
+            confirmed={}
+            p.start(record,_owner={"kind":"user","operation_id":op["operation_id"]},deadline=end,_result=confirmed)
+            observation=confirmed.get('observation')
             run=e.run_record(record)
-            if (observation["execution_status"]!="managed" or not run or
+            if (not observation or observation["execution_status"]!="managed" or not run or
+                    run.get('cpu_verification')!='complete' or
                     run.get("owner")!={"kind":"user","operation_id":op["operation_id"]}):
                 refuse("RECONCILE_REQUIRED","new execution did not bind to reboot owner")
             op["new_execution"]=observation
             op["new_execution_owner"]=run["owner"]
+            op['new_cpu_verification']='complete'
             save("new-observed")
         else:
             refuse("RECONCILE_REQUIRED","unsupported reboot journal boundary")

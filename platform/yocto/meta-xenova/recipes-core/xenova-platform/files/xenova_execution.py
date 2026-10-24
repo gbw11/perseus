@@ -16,6 +16,7 @@ from first_install_contract import uuid4
 from xenova_runtime import PlatformError, atomic_write, ensure_runtime, sync_directory
 import xenova_catalog as catalog
 import xenova_vm as vm
+from xenova_trace import bind as trace_bind, event as trace_event, traced
 
 
 class ExecutionError(PlatformError):
@@ -302,7 +303,8 @@ class Execution:
         if previous and previous.get("phase") in ("launching", "uncertain"):
             refuse("RECONCILE_REQUIRED", "an earlier launch may still exist; administrator reconciliation required")
 
-    def prepare_launch(self, record, owner=None, *, deadline=None, expected_cpu=None):
+    @traced('execution.prepare_launch')
+    def prepare_launch(self, record, owner=None, *, deadline=None, expected_cpu=None, cpu_evidence=None):
         self.require_launch_available(record)
         _, generation = self.lifecycle(record)
         intent = self.intent(record)
@@ -315,36 +317,82 @@ class Execution:
                 accepted = None
             if accepted:
                 expected_cpu = accepted.get('cpu_policy', {'configured':False})
-        cpu_context = self.p.cpu().require(record, deadline or self.p.clock()+15, expected=expected_cpu)
+        end = deadline if deadline is not None else self.p.clock()+15
+        cpu = self.p.cpu()
+        cpu_context = (cpu.consume(record, end, cpu_evidence, expected=expected_cpu) if cpu_evidence is not None
+                       else cpu.require(record, end, expected=expected_cpu))
         value = {"cpu_policy":cpu_context, "schema_version":"1.0", "vm_id":record["uuid"], "host_boot_id":self.host,
                  "execution_id":uuid4(), "lifecycle_generation":generation,
                  "intent_revision":intent["intent_revision"] if intent else None,
+                 'intent_sha256':fingerprint(intent), 'record_sha256':fingerprint(record),
                  "phase":"launching", "owner":owner, "prepared_monotonic_ms":int(self.p.clock()*1000),
                  "configuration_sha256":fingerprint(self.p.config(record)), "domid":None, "xen_unique_id":None}
+        trace_bind(vm_id=record['uuid'], host_boot_id=self.host, execution_id=value['execution_id'],
+                   intent_revision=value['intent_revision'], lifecycle_generation=generation,
+                   configuration_sha256=value['configuration_sha256'],
+                   policy_revision=cpu_context.get('policy_revision'))
         self.write(self._path(self.runtime, "executions", record["uuid"]), value)
         self.checkpoint("launch-prepared", value)
         return value
 
+    @traced('execution.guard_launch')
+    def guard_launch(self, record, value, deadline):
+        """직전 조치 guard. 관측 근거와 별개로 현재 의도·구성·정책을 재확인한다."""
+        if self.p.clock() >= deadline:
+            refuse('DEADLINE_EXCEEDED', 'launch permission expired before physical submission')
+        if self.p.boot_id_reader() != self.host or value.get('host_boot_id') != self.host:
+            refuse('TARGET_CHANGED', 'launch host changed')
+        self.gate()
+        records = self.p.records(validate_assets=False)
+        current = records.get(record['id'])
+        lifecycle, generation = self.lifecycle(record)
+        intent = self.intent(record)
+        owner = value.get('owner') or {}
+        if owner.get('kind') == 'user' and (not intent or intent['accepted_operation_id'] != owner.get('operation_id')):
+            refuse('INTENT_MISMATCH', 'launch owner no longer owns the accepted intent')
+        if (current != record or lifecycle != 'REGISTERED' or generation != value['lifecycle_generation'] or
+                (intent['intent_revision'] if intent else None) != value['intent_revision'] or
+                ('intent_sha256' in value and fingerprint(intent) != value['intent_sha256']) or
+                ('record_sha256' in value and fingerprint(record) != value['record_sha256']) or
+                (owner and intent is not None and intent['desired_state'] != 'running') or self.run_record(record) != value):
+            refuse('TARGET_CHANGED', 'launch record, lifecycle, intent or owner changed')
+        if fingerprint(self.p.config(record)) != value['configuration_sha256']:
+            refuse('TARGET_CHANGED', 'launch configuration changed')
+        if self.p.cpu().context(record) != value.get('cpu_policy', {'configured':False}):
+            refuse('TARGET_CHANGED', 'launch CPU policy changed')
+
+    @traced('execution.bind_launch')
     def bind_launch(self, record, value, row, deadline):
         if value["host_boot_id"] != self.host:
             refuse("TARGET_CHANGED", "launch belongs to a previous host boot")
         current = self.p.resolve_domain(record, expected=row, deadline=deadline)
         unique = self.unique(current, deadline)
-        self.p.resolve_domain(record, expected=row, deadline=deadline)
+        self.p.resolve_domain(record, expected={**row, 'xen_unique_id':unique}, deadline=deadline)
         value = {**value, "phase":"observed", "domid":current["domid"], "xen_unique_id":unique,
                  "observed_monotonic_ms":int(self.p.clock()*1000)}
         self.write(self._path(self.runtime, "executions", record["uuid"]), value)
         self.checkpoint("launch-observed", value)
         try:
+            self.guard_launch(record, value, deadline)
             self.p.cpu().require(record, deadline, expected=value.get('cpu_policy', {'configured':False}), present=True, expected_identity=value)
+            self.guard_launch(record, value, deadline)
+            # A complete CPU observation checks incarnation too, but an unconfigured
+            # policy deliberately does not query Xen. Keep this target guard in both
+            # modes before publishing the execution as the final operation evidence.
+            current = self.p.resolve_domain(record, expected={**current, 'xen_unique_id':unique}, deadline=deadline)
             value['cpu_verification'] = 'complete'
-        except ExecutionError as error:
-            value.update(cpu_verification='incomplete', cpu_error=error.error)
+        except (ExecutionError, vm.DomainIdentityError) as error:
+            cause = getattr(error, 'error', {'code':'TARGET_CHANGED', 'message':str(error),
+                                             'retryable':False, 'details':{}})
+            value.update(cpu_verification='incomplete', cpu_error=cause)
             self.write(self._path(self.runtime, 'executions', record['uuid']), value)
             raise ExecutionError('CPU_APPLY_INCOMPLETE', 'domain exists; CPU verification incomplete; no automatic repeat',
-                                 details={'cause':error.error, 'domid':value['domid'], 'execution_id':value['execution_id']}) from error
+                                 details={'cause':cause, 'domid':value['domid'], 'execution_id':value['execution_id']}) from error
         self.write(self._path(self.runtime, 'executions', record['uuid']), value)
-        return value
+        # The owner consumes this phase's mandatory identity/CPU observation. Building
+        # its response must not start another complete Xen observation after binding.
+        observation = self.publish_observation(record, current, unique, deadline)
+        return {**value, 'observation':observation}
 
     def end_run(self, record):
         value = self.run_record(record)
@@ -362,6 +410,7 @@ class Execution:
             error["details"].setdefault("diagnostic_warnings", []).append(
                 {"code":"DIAGNOSTIC_UNAVAILABLE", "sink":"observations", "cause_type":type(diagnostic).__name__})
 
+    @traced('execution.observe')
     def observe(self, record, deadline):
         """실패를 보존하고 두 목록/unique_id를 대조한다. 실패는 부재가 아니다."""
         try:
@@ -378,22 +427,61 @@ class Execution:
         raise failure
 
     def _observe(self, record, deadline):
+        return self._observe_many([record], deadline)[record['uuid']]
+
+    @traced('execution.observe_many')
+    def observe_many(self, records, deadline):
+        """명시 목록 조회의 전체 예산과 두 목록을 공유한다. 부분 성공은 반환하지 않는다."""
+        records = list(records)
+        try:
+            return self._observe_many(records, deadline)
+        except ExecutionError as error:
+            failure = error
+        except vm.DomainIdentityError as error:
+            failure = ExecutionError('TARGET_CHANGED', str(error))
+        except (PlatformError, OSError, ValueError) as error:
+            failure = ExecutionError('OBSERVATION_UNAVAILABLE', 'Xen list observation could not be verified',
+                                     details={'cause_type':type(error).__name__})
+        for record in records:
+            self.note_probe_error(record['uuid'], failure.error)
+        failure.observation_error_handled = True
+        raise failure
+
+    def _observe_many(self, records, deadline):
+        if not records:
+            return {}
+        if self.p.boot_id_reader() != self.host:
+            refuse('TARGET_CHANGED', 'observation belongs to a previous host boot')
         before = self.p.removal_snapshot(deadline)
-        rows = self.p.matching(record, self.p.domains(deadline=deadline))
-        row = rows[0] if rows else None
-        unique = self.unique(row, deadline) if row else None
+        domains = self.p.domains(deadline=deadline)
+        targets = []
+        for record in records:
+            rows = self.p.matching(record, domains)
+            row = rows[0] if rows else None
+            targets.append((record, row, self.unique(row, deadline) if row else None))
         after = self.p.removal_snapshot(deadline)
-        expected = (row["domid"], record["uuid"], record["name"]) if row else None
-        for snapshot in (before, after):
-            candidates = [item for item in snapshot.values() if item["uuid"] == record["uuid"] or item["name"] == record["name"]]
-            actual = (candidates[0]["domid"], candidates[0]["uuid"], candidates[0]["name"]) if len(candidates) == 1 else None
-            if len(candidates) > 1 or actual != expected:
-                refuse("TARGET_CHANGED", "domain changed during observation")
-        if row and self.unique(row, deadline) != unique:
-            refuse("TARGET_CHANGED", "domain incarnation changed during observation")
-        if row:
-            row = {**row, "xen_state":after[row["domid"]]["xen_state"],
-                   "xen_state_flags":after[row["domid"]]["xen_state_flags"]}
+        verified = []
+        for record, row, unique in targets:
+            expected = (row['domid'], record['uuid'], record['name']) if row else None
+            for snapshot in (before, after):
+                candidates = [item for item in snapshot.values() if item['uuid'] == record['uuid'] or item['name'] == record['name']]
+                actual = (candidates[0]['domid'], candidates[0]['uuid'], candidates[0]['name']) if len(candidates) == 1 else None
+                if len(candidates) > 1 or actual != expected:
+                    refuse('TARGET_CHANGED', 'domain changed during observation')
+            if row and self.unique(row, deadline) != unique:
+                refuse('TARGET_CHANGED', 'domain incarnation changed during observation')
+            if row:
+                row = {**row, 'xen_state':after[row['domid']]['xen_state'],
+                       'xen_state_flags':after[row['domid']]['xen_state_flags']}
+            verified.append((record, row, unique))
+        if self.p.boot_id_reader() != self.host:
+            refuse('TARGET_CHANGED', 'host boot changed during observation')
+        return {record['uuid']:self.publish_observation(record, row, unique, deadline)
+                for record, row, unique in verified}
+
+    @traced('execution.publish_observation')
+    def publish_observation(self, record, row, unique, deadline):
+        """확인된 한 단계의 사실을 게시한다. 이 함수는 Xen을 조회하지 않는다."""
         lifecycle, generation = self.lifecycle(record)
         run = self.run_record(record)
         managed = bool(row and run and run.get("phase") == "observed" and
@@ -427,8 +515,17 @@ class Execution:
             self.write(path, value)
         if self.p.clock() >= deadline:
             refuse("DEADLINE_EXCEEDED", "observation completed after deadline")
+        description = {"desired_state":intent['desired_state'] if intent else 'unknown',
+                       'intent_revision':intent['intent_revision'] if intent else None,
+                       'intent_applicable':observation['intent_applicable'],
+                       'intent_lifecycle_generation':intent['lifecycle_generation'] if intent else None,
+                       'host_boot_id':self.host, 'boot_admission':admission,
+                       'host_admission':self.barrier(),
+                       'shutdown_requested':(self.runtime/'shutdown-requested').exists(),
+                       'execution_id':observation['execution_id'],
+                       'execution_context':run if managed else None, 'observation_revision':revision}
         return {**observation, "observation_revision":revision, "host_boot_id":self.host,
-                "observed_monotonic_ms":value["last_success"]["monotonic_ms"]}
+                "observed_monotonic_ms":value["last_success"]["monotonic_ms"], '_description':description}
 
     def probe_error(self, identity, code):
         path = self._path(self.runtime, "observations", identity)
@@ -492,14 +589,25 @@ class Execution:
             result.append(value)
         return result
 
+    @traced('execution.save_request')
     def save_request(self, op, phase):
+        trace_bind(operation_id=op['operation_id'], vm_id=op['vm_id'], host_boot_id=self.host,
+                   phase=phase, deadline_monotonic_ms=op.get('deadline_monotonic_ms'),
+                   intent_revision=op.get('intent_revision'), lifecycle_generation=op.get('lifecycle_generation'),
+                   policy_revision=(op.get('cpu_policy') or {}).get('policy_revision'))
+        trace_event('operation.phase', phase=phase, operation_id=op['operation_id'],
+                    remaining_seconds=(op['deadline_monotonic_ms']/1000-self.p.clock())
+                    if type(op.get('deadline_monotonic_ms')) is int else None)
         op["phase"] = phase
         op.setdefault("events", []).append({"phase":phase, "host_boot_id":self.host,
                                           "monotonic_ms":int(self.p.clock()*1000)})
         self.write(self._path(self.data, "control-requests", op["operation_id"]), op)
         self.checkpoint("intent-"+phase, op)
 
-    def accept(self, record, request, key=None, *, source="user", previous=None, receipt=None):
+    @traced('execution.accept')
+    def accept(self, record, request, key=None, *, source="user", previous=None, receipt=None, deadline=None):
+        if deadline is not None and self.p.clock() >= deadline:
+            refuse('DEADLINE_EXCEEDED', 'control deadline expired before intent acceptance')
         lifecycle, generation = self.lifecycle(record)
         if lifecycle != "REGISTERED":
             refuse("TARGET_CHANGED", "control target is no longer registered")
@@ -513,11 +621,15 @@ class Execution:
                           "host_boot_id":self.host, "lifecycle_generation":generation, "base_revision":base,
                           "intent_revision":base+1, "desired_state":"stopped" if request["action"] in ("stop", "destroy") else "running",
                           "source":source, "result":None, "error":None, "events":[]}
+        if previous is None and deadline is not None:
+            op['deadline_monotonic_ms'] = int(deadline*1000)
         if op["lifecycle_generation"] != generation:
             refuse("TARGET_CHANGED", "prepared control belongs to a previous lifecycle")
         if receipt is not None:
             receipt["operation"] = op
-        with short_lock(self.runtime, "admission"):
+        with short_lock(self.runtime, 'admission'):
+            if deadline is not None and self.p.clock() >= deadline:
+                refuse('DEADLINE_EXCEEDED', 'control deadline expired before intent publication')
             if request["action"] not in ("stop", "destroy"):
                 self.gate()
             elif (self.runtime/"shutdown-requested").exists():
@@ -542,7 +654,9 @@ class Execution:
                                "EXPLICIT_INTENT" if source == "user" else "APPROVED_BOOT_POLICY")
         return op
 
-    def control(self, action, record, *, force=False, key=None):
+    @traced('execution.control')
+    def control(self, action, record, *, force=False, key=None, deadline=None):
+        end = deadline if deadline is not None else self.p.clock()+90
         diagnostics = []
         def event(*args, **kwargs):
             warning = self.event(*args, **kwargs)
@@ -556,12 +670,12 @@ class Execution:
             refuse("OPERATION_IN_PROGRESS", "an incomplete asset operation owns this VM", retryable=True)
         if action == "reboot" and vm.guest_kind(record) == "zephyr" and vm.cooperative(record) and not force:
             from xenova_zephyr_control import reboot
-            return reboot(self,record,key)
+            return reboot(self,record,key,deadline=end)
         request = {"vm_id":record["uuid"], "action":action, "force":force}
         previous = next((q for q in self.requests() if key is not None and q["idempotency_key"] == key), None)
         if previous and previous["request"] != request:
             refuse("IDEMPOTENCY_CONFLICT", "control key has a different request")
-        reconciliable = previous and previous["phase"] == "uncertain" and previous.get("result") is not None
+        reconciliable = previous and previous['phase'] == 'uncertain'
         if previous and previous["phase"] in ("completed", "failed", "uncertain") and not reconciliable:
             event("control-replayed", record, previous["operation_id"])
             if previous["error"]:
@@ -571,22 +685,41 @@ class Execution:
             return {"operation_id":previous["operation_id"], "replayed":True, "original_result":previous["result"], "diagnostic_warnings":diagnostics}
         if previous and previous["host_boot_id"] != self.host:
             refuse("TARGET_CHANGED", "unfinished control request belongs to a previous host boot")
+        if previous:
+            stored = previous.get('deadline_monotonic_ms')
+            if type(stored) is not int and previous['phase'] not in ('executing', 'uncertain'):
+                refuse('RECONCILE_REQUIRED', 'legacy unfinished control has no physical execution deadline',
+                       details={'operation_id':previous['operation_id'], 'replayed':True})
+            if type(stored) is int:
+                end = min(end, stored/1000)
         if previous and (previous["phase"] == "executing" or reconciliable):
             if self.lifecycle(record) != ("REGISTERED", previous["lifecycle_generation"]):
                 refuse("TARGET_CHANGED", "control lifecycle changed")
             intent = self.intent(record)
             if not intent or intent["accepted_operation_id"] != previous["operation_id"]:
                 refuse("TARGET_CHANGED", "control request intent was superseded")
-            observation = self.observe(record, self.p.clock()+15)
+            readonly_end = self.p.clock()+15
+            observation = self.observe(record, readonly_end)
             run = self.run_record(record)
             confirmed = action in ("stop", "destroy") and observation["presence"] == "absent"
-            confirmed |= action == "start" and observation["execution_status"] == "managed"
+            start_owner = bool(run and run.get('owner') == {'kind':'user', 'operation_id':previous['operation_id']})
+            prior_observation = (previous.get('result') or {}).get('observation')
+            historical_noop = bool(prior_observation and
+                                   prior_observation.get('execution_id') == observation.get('execution_id'))
+            confirmed |= action == 'start' and observation['execution_status'] == 'managed' and (start_owner or historical_noop)
             confirmed |= bool(action == "reboot" and run and run.get("owner") == {"kind":"user", "operation_id":previous["operation_id"]} and observation["execution_status"] == "managed")
             if not confirmed:
                 refuse("RECONCILE_REQUIRED", "physical control result is uncertain; command not repeated",
                        details={"operation_id":previous["operation_id"], "replayed":True})
             if action in ('start', 'reboot'):
-                self.p.cpu().require(record, self.p.clock()+15, expected=previous.get('cpu_policy', {'configured':False}), present=True)
+                self.p.cpu().require(record, readonly_end, expected=previous.get('cpu_policy', {'configured':False}),
+                                     present=True, expected_identity=observation)
+                if run.get('cpu_verification') != 'complete':
+                    run = {**run, 'cpu_verification':'complete'}
+                    run.pop('cpu_error', None)
+                    self.write(self._path(self.runtime, 'executions', record['uuid']), run)
+                    row = {k:observation[k] for k in ('domid', 'xen_state', 'xen_state_flags')}
+                    observation = self.publish_observation(record, row, observation['xen_unique_id'], readonly_end)
             if action in ("stop", "destroy"):
                 self.end_run(record)
             previous["result"] = {"accepted":True, "observation":observation, "intent_revision":previous["intent_revision"]}
@@ -602,31 +735,36 @@ class Execution:
 
         def admit():
             nonlocal accepted
-            accepted = self.accept(record, request, key, previous=previous, receipt=receipt)
+            accepted = self.accept(record, request, key, previous=previous, receipt=receipt, deadline=end)
             if action in ('start', 'reboot'):
-                accepted['cpu_policy'] = self.p.cpu().require(record, self.p.clock()+15)
-                self.save_request(accepted, 'accepted')
+                # Actual layout is checked by the launch primitive immediately before
+                # preparation; acceptance only binds the durable policy context.
+                accepted['cpu_policy'] = self.p.cpu().context(record)
             self.save_request(accepted, "executing")
             event("xen-action-requested", record, accepted["operation_id"], {"action":action})
             if action == "start" and vm.has_network(record):
-                self.p.prepare_dhcp(records)
+                self.p.prepare_dhcp(records, deadline=end)
             return {"kind":"user", "operation_id":accepted["operation_id"]}
 
         try:
+            if self.p.clock() >= end:
+                refuse('DEADLINE_EXCEEDED', 'original control execution deadline expired')
+            confirmed = {}
             if action == "start":
-                self.p.check_xen()
+                self.p.check_xen(deadline=end)
                 records = self.p.records(validate_assets=False)
                 if vm.has_network(record):
-                    self.p.check_network()
-                physical = self.p.start(record, _accept=admit)
+                    self.p.check_network(deadline=end)
+                physical = self.p.start(record, _accept=admit, deadline=end, _result=confirmed)
             elif action in ("stop", "destroy"):
-                observed = self.observe(record, self.p.clock()+15)
+                observed = self.observe(record, end)
                 physical = self.p.stop_many([record], force=force or action == "destroy", _accept=admit,
-                                            _observed={record["uuid"]:observed})
+                                            _observed={record["uuid"]:observed}, deadline=end, _result=confirmed)
             else:
-                observed = self.observe(record, self.p.clock()+15)
-                physical = self.p.reboot(record, force=force, _accept=admit, _observed=observed)
-            observation = self.observe(record, self.p.clock()+15)
+                observed = self.observe(record, end)
+                physical = self.p.reboot(record, force=force, _accept=admit, _observed=observed,
+                                         deadline=end, _result=confirmed)
+            observation = confirmed.get('observation') or self.observe(record, end)
             if action in ("stop", "destroy") and observation["presence"] == "absent":
                 self.end_run(record)
             result = {"accepted":True, "physical_result":physical, "observation":observation,
@@ -651,8 +789,19 @@ class Execution:
                                  "details":{"accepted":True, "intent_revision":accepted["intent_revision"],
                                             "operation_id":accepted["operation_id"],
                                             **({'cause':error.error} if isinstance(error, ExecutionError) else {})}}
+            run = self.run_record(record) if action in ('start', 'reboot') else None
+            owned_launch = bool(run and run.get('owner') == {'kind':'user', 'operation_id':accepted['operation_id']}
+                                and run.get('phase') in ('launching', 'uncertain', 'observed'))
+            # A timed-out child may still have delivered its command to Xen. Preserve
+            # ownership even when no physical result was returned; replay cannot issue
+            # another command merely because result is null.
+            uncertain = bool(confirmed.get('physical_submitted') or owned_launch or accepted.get('result'))
+            if uncertain and code in ('XEN_EXECUTION_FAILED', 'DEADLINE_EXCEEDED'):
+                accepted['error']['code'] = 'RECONCILE_REQUIRED'
+                accepted['error']['details'].setdefault('cause', {'code':code, 'message':str(error),
+                                                               'retryable':False, 'details':{}})
             try:
-                self.save_request(accepted, "uncertain" if code == "RECONCILE_REQUIRED" and accepted.get("result") else "failed")
+                self.save_request(accepted, 'uncertain' if uncertain else 'failed')
             except OSError as journal_error:
                 refuse("RECONCILE_REQUIRED", "accepted control journal could not be finalized",
                        details={"operation_id":accepted["operation_id"], "accepted":True,
