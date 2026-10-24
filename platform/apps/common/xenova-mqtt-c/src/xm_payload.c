@@ -1,4 +1,4 @@
-/* 주행 payload 인코드·디코드 (계약 5.4 drive.command·vehicle.control, 6.1 app.heartbeat, 7 drive.input) */
+/* 주행 payload 인코드·디코드 (계약 5.4 drive.command·vehicle.control·perception.result, 6 perception.event, 6.1 app.heartbeat, 7 drive.input) */
 #include <errno.h>
 #include <string.h>
 
@@ -105,4 +105,66 @@ int xm_drive_input_parse(struct xm_span payload, uint32_t *keys)
 		i = xm_json_skip(&j, i); /* 숫자·객체 등 모르는 원소는 무시 */
 	}
 	return 0;
+}
+
+static int finite_float(const struct xm_json *j, int i, float *out)
+{
+	double v;
+
+	/* isfinite 대신 범위로 (minimal libc). 1e30 넘는 값은 주행 값으로 의미가 없다 */
+	if (xm_json_number(j, i, &v) != 0 || !(v > -1e30 && v < 1e30)) {
+		return -EINVAL;
+	}
+	*out = (float)v;
+	return 0;
+}
+
+int xm_perception_result_parse(struct xm_span payload, struct xm_perception_result *out)
+{
+	static struct xm_json j;
+
+	memset(out, 0, sizeof(*out));
+	if (parse_object(&j, payload) != 0 ||
+	    finite_float(&j, xm_json_get(&j, 0, "lane_offset_m"), &out->lane_offset_m) != 0 ||
+	    finite_float(&j, xm_json_get(&j, 0, "heading_err_rad"), &out->heading_err_rad) != 0 ||
+	    !xm_json_is_bool(&j, xm_json_get(&j, 0, "stop"), &out->stop)) {
+		memset(out, 0, sizeof(*out));
+		return -EINVAL;
+	}
+	int arr = xm_json_get(&j, 0, "obstacles");
+
+	if (arr < 0 || j.tok[arr].type != JSMN_ARRAY) {
+		memset(out, 0, sizeof(*out));
+		return -EINVAL;
+	}
+	int i = arr + 1;
+
+	for (int e = 0; e < j.tok[arr].size && i < j.count; e++) {
+		struct xm_obstacle o;
+
+		if (out->n_obstacles < XM_PERCEPTION_MAX_OBSTACLES && xm_json_is_object(&j, i) &&
+		    finite_float(&j, xm_json_get(&j, i, "x"), &o.x) == 0 &&
+		    finite_float(&j, xm_json_get(&j, i, "y"), &o.y) == 0 &&
+		    finite_float(&j, xm_json_get(&j, i, "w"), &o.w) == 0 && o.w >= 0.0f) {
+			out->obstacles[out->n_obstacles++] = o;
+		}
+		i = xm_json_skip(&j, i);
+	}
+	return 0;
+}
+
+int xm_perception_event_json(char *out, size_t n, const char *kind, const char *detail)
+{
+	size_t pos = 0;
+	int rc = 0;
+
+	if (kind == NULL || detail == NULL) {
+		return -EINVAL;
+	}
+	rc |= xm_put(out, n, &pos, "{\"kind\":");
+	rc |= xm_put_json_string(out, n, &pos, kind);
+	rc |= xm_put(out, n, &pos, ",\"detail\":");
+	rc |= xm_put_json_string(out, n, &pos, detail);
+	rc |= xm_put(out, n, &pos, "}");
+	return rc ? -ENOSPC : (int)pos;
 }

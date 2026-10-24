@@ -90,6 +90,50 @@ class TelemetryBootstrapTest(unittest.TestCase):
                                      self.directory / path, self.directory / previous if previous else None,
                                      store=self.store, observe=observe or (lambda: dict(self.context)))
 
+    def test_execution_context_retries_only_unaccepted_busy_reads(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        busy = {"ok": False, "operation_id": None, "error": {
+            "code": "OPERATION_IN_PROGRESS", "retryable": True, "details": {}}}
+        view = {"guest_kind": "zephyr", "shutdown_requested": False,
+                "domid": self.context["domid"], "execution_context": {**self.context, "phase": "observed"}}
+        manager = Mock()
+        manager.call.side_effect = [busy, {"ok": True, "data": {"vm": view}}]
+        identity = {"domid": self.context["domid"], "xen_unique_id": self.context["xen_unique_id"]}
+        with patch.dict("sys.modules", {"xenova_management": SimpleNamespace(Manager=lambda: manager)}), \
+                patch.object(self.module.Path, "read_text", return_value=self.context["host_boot_id"]), \
+                patch.object(self.module.subprocess, "check_output", return_value=json.dumps(identity)), \
+                patch.object(self.module.time, "sleep") as wait:
+            self.assertEqual(self.module.current(self.context["vm_id"]), self.context)
+        self.assertEqual(manager.call.call_count, 2)
+        wait.assert_called_once_with(0.2)
+
+    def test_execution_context_busy_retry_is_bounded(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        manager = Mock()
+        manager.call.return_value = {"ok": False, "operation_id": None, "error": {
+            "code": "OPERATION_IN_PROGRESS", "retryable": True, "details": {}}}
+        with patch.dict("sys.modules", {"xenova_management": SimpleNamespace(Manager=lambda: manager)}), \
+                patch.object(self.module.time, "sleep") as wait:
+            with self.assertRaises(ValueError):
+                self.module.current(self.context["vm_id"])
+        self.assertEqual(manager.call.call_count, 151)
+        self.assertEqual(wait.call_count, 150)
+
+    def test_execution_context_identity_failure_is_not_retried(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        manager = Mock()
+        manager.call.return_value = {"ok": False, "operation_id": None, "error": {
+            "code": "TARGET_CHANGED", "retryable": False, "details": {}}}
+        with patch.dict("sys.modules", {"xenova_management": SimpleNamespace(Manager=lambda: manager)}), \
+                patch.object(self.module.time, "sleep") as wait:
+            with self.assertRaises(ValueError):
+                self.module.current(self.context["vm_id"])
+        manager.call.assert_called_once()
+        wait.assert_not_called()
+
     def test_private_receipt_idempotency_and_no_secret(self):
         first = self.apply("first.json")
         second = self.apply("first.json")
@@ -98,6 +142,33 @@ class TelemetryBootstrapTest(unittest.TestCase):
         receipt = (self.directory / "first.json").read_text()
         self.assertNotIn(self.credential["password"], receipt + json.dumps(first))
         self.assertEqual((self.directory / "first.json").stat().st_mode & 0o777, 0o600)
+
+    def test_drive_channel_shares_guest_boot_but_not_publisher_or_receipt(self):
+        telemetry = self.apply("telemetry.json")
+        self.store.channel = "drive"
+        def drive(name, authority="telemetry.json"):
+            return self.module.provision(self.context, self.credential, self.source, self.directory / name,
+                                         store=self.store, observe=lambda: dict(self.context), channel="drive",
+                                         guest_boot_receipt=self.directory / authority)
+        first = drive("drive.json")
+        self.assertEqual(first["boot_id"], telemetry["boot_id"])
+        self.assertNotEqual(first["publisher_instance_id"], telemetry["publisher_instance_id"])
+        self.assertNotEqual(first["receipt_id"], telemetry["receipt_id"])
+        self.assertEqual(first, drive("drive.json"))
+        with self.assertRaises(ValueError):
+            drive("invalid.json", "drive.json")
+        self.context["execution_id"] = str(uuid.uuid4())
+        with self.assertRaises(ValueError):
+            drive("stale.json")
+
+    def test_receipts_cannot_cross_channels_or_omit_boot_authority(self):
+        self.apply("telemetry.json")
+        self.store.channel = "drive"
+        for receipt, authority in (("drive.json", None), ("telemetry.json", "telemetry.json")):
+            with self.assertRaises(ValueError):
+                self.module.provision(self.context, self.credential, self.source, self.directory / receipt,
+                                      store=self.store, observe=lambda: self.context, channel="drive",
+                                      guest_boot_receipt=self.directory / authority if authority else None)
 
     def test_publisher_restart_preserves_boot_and_execution(self):
         first = self.apply("first.json")

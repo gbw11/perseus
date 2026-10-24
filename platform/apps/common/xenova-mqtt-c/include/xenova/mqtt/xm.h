@@ -1,7 +1,7 @@
 /*
  * xenova_mqtt C판 — MQTT 계약 v1 (docs/contracts/mqtt-contract-v1.md) 코어.
  * Python xenova_mqtt(platform/services/vm-agent/mqtt-client)와 같은 토픽·정책·봉투·검사·seq 규칙.
- * 설계: docs/design/mqtt-c-client.md. 동적 메모리를 쓰지 않는다. 함수는 재진입 가능하지만 객체는 한 스레드가 소유한다.
+ * 설계: docs/design/mqtt-c-client.md. 동적 메모리를 쓰지 않는다. decoder/payload parser의 정적 scratch는 한 스레드가 소유한다.
  *
  * 반환값: 0 이상 성공(문자열 함수는 길이), 음수 errno (-EINVAL, -ENOSPC, -EMSGSIZE).
  */
@@ -148,6 +148,23 @@ enum xm_key {
 };
 /* keys 배열을 비트마스크로. 모르는 키는 무시. keys 가 배열이 아니면 -EINVAL */
 int xm_drive_input_parse(struct xm_span payload, uint32_t *keys);
+
+/* perception.result (계약 5.4). 좌표는 차량 기준 지면: x 전방, y 왼쪽 + (m) */
+#define XM_PERCEPTION_MAX_OBSTACLES 8
+struct xm_obstacle {
+	float x, y, w;
+};
+struct xm_perception_result {
+	float lane_offset_m;   /* + = 차가 차선 중심보다 왼쪽 */
+	float heading_err_rad; /* + = 차선이 왼쪽으로 돈다 */
+	bool stop;
+	int n_obstacles;       /* 가까운 순. 형식이 틀린 원소는 건너뛴다 */
+	struct xm_obstacle obstacles[XM_PERCEPTION_MAX_OBSTACLES];
+};
+/* lane_offset_m·heading_err_rad(유한 숫자)·stop(bool)·obstacles(배열) 중 하나라도 틀리면 -EINVAL */
+int xm_perception_result_parse(struct xm_span payload, struct xm_perception_result *out);
+/* perception.event (계약 6장) {"kind":..,"detail":..} */
+int xm_perception_event_json(char *out, size_t n, const char *kind, const char *detail);
 
 #ifdef __cplusplus
 }
