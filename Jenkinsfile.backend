@@ -1,0 +1,82 @@
+// Backend-only merge request validation. Configure this Job for MR target branch: backend.
+pipeline {
+    agent any
+
+    options {
+        gitLabConnection('gitlab')
+        timeout(time: 20, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        disableConcurrentBuilds(abortPrevious: true)
+        skipDefaultCheckout(true)
+    }
+
+    stages {
+        stage('Checkout Merge Result') {
+            steps {
+                script { checkoutMergeResult() }
+            }
+        }
+        stage('Backend Test') {
+            steps {
+                updateGitlabCommitStatus name: 'jenkins-backend-check', state: 'running'
+                dir('backend') {
+                    sh './mvnw -B -ntp test'
+                }
+            }
+        }
+        stage('Backend Image Build') {
+            steps {
+                sh 'docker build --target runtime -t xenova-backend:backend-check-${BUILD_NUMBER} backend'
+            }
+        }
+    }
+
+    post {
+        always {
+            junit testResults: 'backend/target/surefire-reports/*.xml', allowEmptyResults: true
+            sh 'docker image rm xenova-backend:backend-check-${BUILD_NUMBER} >/dev/null 2>&1 || true'
+        }
+        success {
+            updateGitlabCommitStatus name: 'jenkins-backend-check', state: 'success'
+            notifyMattermost('good', '✅ Backend CI 성공')
+        }
+        failure {
+            updateGitlabCommitStatus name: 'jenkins-backend-check', state: 'failed'
+            notifyMattermost('danger', '❌ Backend CI 실패')
+        }
+        aborted {
+            updateGitlabCommitStatus name: 'jenkins-backend-check', state: 'canceled'
+            notifyMattermost('warning', '⚠️ Backend CI 중단')
+        }
+    }
+}
+
+def checkoutMergeResult() {
+    requireMergeRequest()
+    checkout([
+        $class: 'GitSCM',
+        branches: [[name: "origin/${env.gitlabTargetBranch}"]],
+        userRemoteConfigs: [[
+            credentialsId: 'xenova-gitlab-checkout',
+            name: 'origin',
+            refspec: '+refs/heads/*:refs/remotes/origin/*',
+            url: 'https://lab.ssafy.com/s15-final/S15P31E110.git'
+        ]]
+    ])
+    withEnv(["MR_SOURCE_REF=origin/${env.gitlabSourceBranch}"]) {
+        sh '''git -c user.name='Xenova Jenkins' -c user.email='jenkins@k15e110.p.ssafy.io' merge --no-edit "$MR_SOURCE_REF"'''
+    }
+}
+
+def requireMergeRequest() {
+    if (!env.gitlabSourceBranch || !env.gitlabTargetBranch) {
+        error('This job must be started by a GitLab Merge Request webhook.')
+    }
+}
+
+def notifyMattermost(String color, String title) {
+    mattermostSend color: color, message: """#### ${title}
+- Source: `${env.gitlabSourceBranch ?: '-'}`
+- Target: `${env.gitlabTargetBranch ?: '-'}`
+- Build: [${env.JOB_NAME} #${env.BUILD_NUMBER}](${env.BUILD_URL})"""
+}
