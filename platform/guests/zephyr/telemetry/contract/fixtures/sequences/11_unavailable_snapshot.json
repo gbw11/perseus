@@ -1,0 +1,27 @@
+{
+  "name": "11_unavailable_snapshot",
+  "purpose_ko": "실패한조회완료는원본관측완료가아님",
+  "test_scope": "reference receiver oracle only; no actual broker or control execution",
+  "steps": [
+    {
+      "op": "bind",
+      "vm_id": "11111111-1111-4111-8111-111111111111",
+      "boot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "publisher_instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/29_thread_scan_not_requested.json",
+      "received_ms": 0,
+      "retained_delivery": false,
+      "expected": "SNAPSHOT_UNAVAILABLE"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/30_history_collection_failed.json",
+      "received_ms": 100,
+      "retained_delivery": false,
+      "expected": "SNAPSHOT_UNAVAILABLE"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+menuconfig XENOVA_DIAGNOSTICS
+	bool "Xenova local diagnostics"
+	help
+	  Bounded, transport-independent boot/error snapshots and timing hooks.
+	  No MQTT, automatic thread scans, fatal-handler override or VM control.
+
+if XENOVA_DIAGNOSTICS
+config XENOVA_DIAGNOSTICS_TIMING
+	bool "64-bit cycle clock and periodic work measurements"
+	depends on TIMER_HAS_64BIT_CYCLE_COUNTER
+	default y
+
+config XENOVA_DIAGNOSTICS_THREADS
+	bool "On-demand thread/stack snapshots"
+	default y
+	select THREAD_MONITOR
+	select THREAD_NAME
+	select THREAD_STACK_INFO
+	select INIT_STACKS
+	help
+	  Uses the same stack-space API as Thread Analyzer but preserves errors.
+	  Scanning is intrusive; do not request it during jitter measurements.
+
+config XENOVA_DIAGNOSTICS_MAX_THREADS
+	int "Maximum thread rows in a snapshot"
+	range 1 32
+	default 16
+
+config XENOVA_DIAGNOSTICS_STACK_SCAN_LIMIT
+	int "Maximum stack bytes scanned per thread"
+	range 256 65536
+	default 16384
+
+config XENOVA_DIAGNOSTICS_HEAP
+	bool "Kernel system heap statistics (frozen Zephyr 4.4 adapter)"
+	depends on HEAP_MEM_POOL_SIZE > 0
+	select SYS_HEAP_RUNTIME_STATS
+	default y
+endif

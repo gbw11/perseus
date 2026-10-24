@@ -608,6 +608,24 @@ class Platform:
         self.timed_command(['xl', action, str(row['domid'])], deadline)
         return row
 
+    def _settle_created_domain(self, record, row, deadline):
+        """생성 직후의 빈 xl 상태만 기존 기한 안에서 재관측한다.
+
+        unknown을 running으로 바꾸지 않는다. 같은 incarnation의 실제
+        running/blocked 관측이 필요하며 기존 도메인 시작에는 적용하지 않는다.
+        """
+        if row['xen_state'] != 'unknown':
+            return row
+        deadline = deadline if deadline is not None else self.clock()+15
+        expected = {**row, 'xen_unique_id':self.execution().unique(row, deadline)}
+        while row['xen_state'] == 'unknown':
+            remaining = deadline-self.clock()
+            if remaining <= 0:
+                raise DomainStateError(record, row)
+            self.sleep(min(0.1, remaining))
+            row = self.resolve_domain(record, expected=expected, deadline=deadline)
+        return row
+
     def start(self, record, *, _accept=None, _owner=None, deadline=None):
         """Validated launch primitive; user intent enters through request_control."""
         execution = self.execution()
@@ -646,8 +664,9 @@ class Platform:
         created = self.matching(record, self.domains(deadline=deadline))
         if not created:
             raise PlatformError(f"{record['id']}: xl create returned without a live domain")
-        state = started_state(record, created[0])
-        execution.bind_launch(record, launch, created[0], deadline or self.clock()+15)
+        current = self._settle_created_domain(record, created[0], deadline)
+        state = started_state(record, current)
+        execution.bind_launch(record, launch, current, deadline or self.clock()+15)
         print(f"{record['id']}: Xen domain created ({state}); guest OS/app readiness is not asserted")
         return state
 
@@ -897,8 +916,9 @@ class Platform:
                 rows = self.matching(record, self.domains(deadline=deadline))
                 if not rows or rows[0]['domid'] != fresh[0]['domid']:
                     raise DomainIdentityError('reboot target changed before launch binding')
-                started_state(record, rows[0])
-                execution.bind_launch(record, launch, rows[0], deadline)
+                current = self._settle_created_domain(record, rows[0], deadline)
+                started_state(record, current)
+                execution.bind_launch(record, launch, current, deadline)
                 print('guest domain restarted with same UUID/disk; OS readiness not asserted')
                 return
             self.sleep(1)
