@@ -49,7 +49,7 @@ G1은 XenStore·VIF 관측 시험이며 Ethernet packet 송수신·DHCP·앱 준
 def runtime_sources():
     """실제 /usr/lib/xenova 설치 레이아웃을 유지하며 지연 import 의존성도 포함한다."""
     result = {name + ".py": f"{PLATFORM}/{name}.py" for name in (
-        "xenova_cpu", "xenova_vm", "xenova_runtime", "xenova_zephyr", "xenova_execution",
+        "xenova_cpu", "xenova_vm", "xenova_runtime", "xenova_trace", "xenova_zephyr", "xenova_execution",
         "xenova_recovery", "xenova_resources", "xenova_zephyr_control",
         "xenova_zephyr_transition", "xenova_domain_identity", "xenova_catalog",
         "xenova_management", "xenova_management_cli", "xenova_first_boot", "xenova_wifi")}

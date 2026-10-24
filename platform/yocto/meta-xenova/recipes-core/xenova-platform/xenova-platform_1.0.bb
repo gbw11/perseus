@@ -1,7 +1,7 @@
 SUMMARY = "Persistent Xenova Xen VM lifecycle and boot readiness"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
-SRC_URI = "file://xenova_cpu.py file://cpu-policy-preset.json file://xenova-cpu-prepare.service file://xenova_zephyr_control.py file://xenova_zephyr_transition.py file://xenova_resources.py file://xenova_execution.py file://xenova_recovery.py file://xenova_domain_identity.py file://xenova-domain-identity file://execution-policy.json file://xenova-host-admission.service file://verify-xenova-runtime-artifacts.py file://xenova_management.py file://xenova_management_cli.py file://xenova_catalog.py file://xenova_wifi.py file://artifact_io.py file://xenova-wifi file://xenova-wifi@.service file://xenova-wifi-modprobe.conf file://xenova_vm.py file://xenova_runtime.py file://xenova_zephyr.py file://xenova-vm file://defaults.json file://xenova-journald.conf file://xenova-system.conf \
+SRC_URI = "file://xenova_cpu.py file://cpu-policy-preset.json file://xenova-cpu-prepare.service file://xenova_zephyr_control.py file://xenova_zephyr_transition.py file://xenova_resources.py file://xenova_execution.py file://xenova_recovery.py file://xenova_domain_identity.py file://xenova-domain-identity file://execution-policy.json file://xenova-host-admission.service file://verify-xenova-runtime-artifacts.py file://xenova_management.py file://xenova_management_cli.py file://xenova_catalog.py file://xenova_wifi.py file://artifact_io.py file://xenova-wifi file://xenova-wifi@.service file://xenova-wifi-modprobe.conf file://xenova_vm.py file://xenova_runtime.py file://xenova_trace.py file://xenova_zephyr.py file://xenova-vm file://defaults.json file://xenova-journald.conf file://xenova-system.conf \
            file://srv-xenova.mount file://xenova-xen-ready.service \
            file://xenova-vm-shutdown.service file://xenova-vms.service \
            file://xenova-auth.conf file://xenova-first-boot file://xenova_first_boot.py \
@@ -30,7 +30,7 @@ do_install() {
     install -m 0755 "${S}/xenova-wifi" "${D}${sbindir}/xenova-wifi"
     install -d "${D}${sysconfdir}/modprobe.d"
     install -m 0644 "${S}/xenova-wifi-modprobe.conf" "${D}${sysconfdir}/modprobe.d/xenova-wifi.conf"
-    for module in xenova_cpu.py xenova_zephyr_control.py xenova_zephyr_transition.py xenova_resources.py xenova_execution.py xenova_recovery.py xenova_domain_identity.py xenova_vm.py xenova_runtime.py xenova_zephyr.py xenova_management.py xenova_management_cli.py xenova_catalog.py xenova_wifi.py artifact_io.py; do
+    for module in xenova_cpu.py xenova_zephyr_control.py xenova_zephyr_transition.py xenova_resources.py xenova_execution.py xenova_recovery.py xenova_domain_identity.py xenova_vm.py xenova_runtime.py xenova_trace.py xenova_zephyr.py xenova_management.py xenova_management_cli.py xenova_catalog.py xenova_wifi.py artifact_io.py; do
         install -m 0644 "${S}/$module" "${D}${libdir}/xenova/$module"
     done
     install -d "${D}${sysconfdir}/systemd/journald.conf.d" "${D}${sysconfdir}/systemd/system.conf.d"
