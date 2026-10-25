@@ -8,7 +8,8 @@ RequiresMountsFor=/srv/xenova
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# libxl monitors and qdisk backends inherit this cgroup; remove guests before service cleanup.
+# Persistent libxl/qdisk processes belong to per-execution scopes, not this batch.
+# The independent shutdown guard also covers a failed batch (whose ExecStop is skipped).
 ExecStart=/usr/sbin/xenova-vm autostart
 ExecStop=/usr/sbin/xenova-vm shutdown-all
 TimeoutStartSec=150s

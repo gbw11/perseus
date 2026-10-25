@@ -68,6 +68,8 @@ docker compose --env-file deploy/jenkins/.env -f compose.jenkins.yaml exec jenki
 
 ## 주요 문서
 
+- [하위 플랫폼 구성과 문서 안내](docs/platform/README.md)
+
 - [Xenova CLI·Manager 기능 명세서](docs/platform/cli-manager-spec.md)
 - [Linux 자원·부팅 정책·Zephyr 네트워크/종료](platform/docs/resource-boot-zephyr.md)
 - [domU xl 설정 계약](docs/platform/domu-xl-config-v1.md)

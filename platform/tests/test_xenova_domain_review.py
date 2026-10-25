@@ -361,7 +361,9 @@ class DomainReviewTest(unittest.TestCase):
         now = [0.0]
         self.p.clock = lambda: now[0]
         self.p.sleep = lambda seconds: now.__setitem__(0, now[0]+seconds)
-        with self.assertRaisesRegex(vm.PlatformError, 'unknown|deadline'):
+        real_storage_check = vm.storage_check
+        with patch.object(vm, 'storage_check', side_effect=lambda data: real_storage_check(data, self.mountinfo)), \
+                self.assertRaisesRegex(vm.PlatformError, 'unknown|deadline'):
             with redirect_stdout(self.output):
                 self.p.start(self.linux, deadline=0.3)
         self.assertLessEqual(now[0], 0.3)
@@ -380,10 +382,14 @@ class DomainReviewTest(unittest.TestCase):
         self.p.sleep = replace
         with self.assertRaisesRegex(vm.PlatformError, 'incarnation') as failure:
             self.cli('start', self.linux['id'])
-        # 기존 control 계약은 수락 후 PlatformError를 실행 실패로 보존한다.
-        self.assertEqual(failure.exception.error['code'], 'XEN_EXECUTION_FAILED')
+        # create 제출 뒤의 실패는 물리 효과를 취소한 것이 아니다. 원인과 소유
+        # journal을 보존하고 같은 요청의 무조건 create 재전송을 막는다.
+        self.assertEqual(failure.exception.error['code'], 'RECONCILE_REQUIRED')
+        self.assertEqual(failure.exception.error['details']['cause']['code'], 'XEN_EXECUTION_FAILED')
         self.assertTrue(failure.exception.error['details']['accepted'])
         self.assertEqual(self.p.execution().run_record(self.linux)['phase'], 'launching')
+        self.assertEqual(self.p.execution().requests()[-1]['phase'], 'uncertain')
+        self.assertEqual(len([c for c in self.xen.calls if c[:2] == ['xl', 'create']]), 1)
 
     def test_created_unknown_becoming_crashed_is_not_accepted(self):
         self.xen.states[1] = '------'
@@ -395,8 +401,11 @@ class DomainReviewTest(unittest.TestCase):
         self.p.sleep = crash
         with self.assertRaisesRegex(vm.PlatformError, 'crashed') as failure:
             self.cli('start', self.linux['id'])
-        self.assertEqual(failure.exception.error['code'], 'XEN_EXECUTION_FAILED')
+        self.assertEqual(failure.exception.error['code'], 'RECONCILE_REQUIRED')
+        self.assertEqual(failure.exception.error['details']['cause']['code'], 'XEN_EXECUTION_FAILED')
         self.assertEqual(self.p.execution().run_record(self.linux)['phase'], 'launching')
+        self.assertEqual(self.p.execution().requests()[-1]['phase'], 'uncertain')
+        self.assertEqual(len([c for c in self.xen.calls if c[:2] == ['xl', 'create']]), 1)
 
 
 if __name__ == '__main__':

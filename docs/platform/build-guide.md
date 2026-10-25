@@ -2,7 +2,7 @@
 
 환경 준비 → Linux·Zephyr 템플릿 준비·게시 → 기본 선택 확정 → 회귀·입력 고정 → dom0 빌드·검증·게시 → seed·최종 이미지 조립·검증 → PC 인계 순서로 진행한다. 빌드 절차와 명령이 바뀌면 이 문서를 갱신한다.
 
-소스 대조 기준: [하위 플랫폼·backend 통합 입력 `347d935`](https://lab.ssafy.com/s15-final/S15P31E110/-/tree/347d935cb7ef09e07f3082a13af1733bb6acd2cb). 빌드할 때는 팀에서 승인한 통합 커밋을 선택하고, 아래 입력 고정 단계에서 실제 HEAD·파일·설정 해시를 기록한다.
+빌드할 소스 커밋을 선택하고 아래 입력 고정 단계에서 실제 HEAD·파일·설정 해시를 기록한다. 플랫폼 구조와 문서의 역할은 [플랫폼 안내](README.md)를 참고한다.
 
 ## 1. 빌드 구성과 경로
 
@@ -306,7 +306,7 @@ broker 주소·password·VM UUID를 공유 firmware에 넣지 않는다.
 각 비교는 별도의 새 `--output` 경로에서 빌드하고 옵션·실제 config·RAM·수신 결과를 분리해 기록한다.
 주입 계약, 실제 Core 매핑, native_sim의 격리 broker·독립 수신 시험은
 [Telemetry Publisher](../../platform/guests/zephyr/telemetry/README.md)를 따른다.
-기본 firmware/불변 게시본 전환과 실보드 수락은 해당 실행의 승인 범위에서 수행한다.
+게시한 firmware는 불변 입력으로 보존한다. 실제 보드 적용·전환은 대상 UUID와 자산 백업·복원 절차를 확인한 유지보수 단계에서 수행한다.
 
 ### 실제 manifest로 기본 선택 확정
 
@@ -890,6 +890,8 @@ run g1-handoff-verify python3 -B \
 | `RUNBOOK.md` | 이 절과 CLI 명세를 연결하는 시작 문서 |
 | `docs/platform/build-guide.md` | 현재 빌드·G1 인계 절차의 원문 |
 | `docs/platform/cli-manager-spec.md` | 공통 VM 제어·신원·복구 계약의 원문 |
+| `docs/platform/README.md`, 관리·부팅·CPU 문서 | 구성 요소 안내와 기능별 운영 절차 |
+| `docs/verification/platform-management-boundaries-history.md` | 현재 사용법과 구분한 구현·검증 이력 |
 | `platform/`의 lock 파일 | 문서에서 참조하는 고정 빌드·템플릿 입력 |
 | `firmware/` | 실제 G1 ELF/bin/map/config/DTS·라이선스·`g1-build.json` |
 | `runtime/` | 지연 import까지 포함한 독립 시험용 플랫폼 라이브러리 |
@@ -919,7 +921,7 @@ python3 -B "$HANDOFF/scripts/xenova-xenstore-g1-lab.py" \
 | `signal --execute` | `--directory`와 게스트가 출력한 `--path`, 시험용 `--value`로 해당 control 노드만 변경 |
 | `cleanup --execute` | `--directory`, `--confirm-uuid`로 같은 시험 도메인 회수. `--remove-config`는 소유 설정 두 파일도 정리 |
 
-실보드 실행은 승인된 시험 범위에서 수행하고 기본 VM·등록 자산과 구분한다.
+실보드 시험은 별도 소유 VM과 경로를 사용하고 기본 VM·등록 자산을 보존한다.
 게스트의 `watch-ready path=...`가 출력되면 60초 예산 안에 그 경로로 `signal`을 보낸다.
 `watch-reread`의 변경 값과 단계별 rc, `exercise-result`, `test-node-cleanup`,
 `store-cleanup` 및 도메인 회수 증거를 함께 보관한다. 알림 수신 뒤에도 값을 다시 읽는다.
