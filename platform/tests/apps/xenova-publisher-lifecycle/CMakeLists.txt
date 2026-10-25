@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20.5)
+set(BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../../guests/zephyr)
+list(APPEND ZEPHYR_EXTRA_MODULES ${BASE}/diagnostics ${BASE}/telemetry)
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(xenova_publisher_lifecycle)
+target_sources(app PRIVATE src/main.c)

@@ -20,8 +20,14 @@ K_THREAD_STACK_DEFINE(xt_worker_stack,CONFIG_XENOVA_TELEMETRY_STACK_SIZE);
 static struct k_thread worker_thread;
 K_MUTEX_DEFINE(api_lock);
 K_MUTEX_DEFINE(status_lock);
-K_SEM_DEFINE(worker_done,0,1);
 static atomic_t stopping, snapshot_requested;
+static struct k_spinlock admission_lock;
+static bool admit(void)
+{
+	k_spinlock_key_t key=k_spin_lock(&admission_lock);
+	bool allowed=!atomic_get(&stopping);
+	k_spin_unlock(&admission_lock,key);return allowed;
+}
 static bool launched;
 static xt_bootstrap_loader load_bootstrap;
 static void *loader_context;
@@ -95,7 +101,7 @@ static void close_connection(int rc)
 	socket_io.deadline_ms=k_uptime_get()+IO_MS;
 	(void)mqtt_abort(&client);
 	/* mqtt_connect can fail before the library owns the socket. */
-	if (socket_io.fd>=0) { (void)zsock_close(socket_io.fd);socket_io.fd=-1; }
+	int close_rc=xt_socket_close(&socket_io);if (close_rc) { rc=close_rc;atomic_set(&stopping,1); }
 	connected=false;connecting=false;pending=false;acked=false;protocol_error=false;
 	if (snapshot_active) { ++publisher.counters.snapshots_expired;snapshot_active=false; }
 	retry_time=k_uptime_get()+backoff_ms;
@@ -106,6 +112,7 @@ static void close_connection(int rc)
 
 static int connect_broker(void)
 {
+	if (!admit()) { return -ESHUTDOWN; }
 	mqtt_client_init(&client);
 	broker=(struct net_sockaddr_in){.sin_family=NET_AF_INET,.sin_port=net_htons(bootstrap.port)};
 	if (zsock_inet_pton(NET_AF_INET,bootstrap.broker_ipv4,&broker.sin_addr)!=1) { return -EINVAL; }
@@ -135,6 +142,7 @@ static bool budget(size_t bytes)
 
 static int submit(struct xt_message *message,bool duplicate,uint16_t id)
 {
+	if (!admit()) { return -ESHUTDOWN; }
 	struct mqtt_publish_param param={0};
 	param.message.topic.topic.utf8=(const uint8_t *)message->topic;
 	param.message.topic.topic.size=strlen(message->topic);param.message.topic.qos=message->qos;
@@ -152,6 +160,7 @@ static int submit(struct xt_message *message,bool duplicate,uint16_t id)
 static int send_observation(enum xt_kind kind,const struct xt_observation *source,
 	const char *sample,const char *snapshot,unsigned part)
 {
+	if (atomic_get(&stopping)) { return -ESHUTDOWN; }
 	bool qos1=kind==XT_INVENTORY || kind>=XT_EVENT;
 	if (qos1 && pending) { return -EBUSY; }
 	/* Reserve the maximum packet size before encoding. No live packet waits
@@ -207,6 +216,7 @@ static void network_inventory(void)
 
 static void freeze_request(void)
 {
+	if (atomic_get(&stopping)) { return; }
 	int request=atomic_get(&snapshot_requested);
 	if (!request || snapshot_active || pending) { return; }
 	(void)xt_observe(&frozen,request==2);
@@ -242,6 +252,7 @@ static void work(void *a,void *b,void *c)
 			if (now<retry_time) { k_sleep(K_MSEC(20));continue; }
 			memset(&bootstrap,0,sizeof(bootstrap));
 			int rc=load_bootstrap(&bootstrap,now+500,loader_context);
+			if (atomic_get(&stopping)) { break; }
 			if (!rc && (!bootstrap.port || !bootstrap.password[0] ||
 				strcmp(bootstrap.username,bootstrap.identity.vm_id))) { rc=-EACCES; }
 			if (!rc && !bootstrap.trusted_internal_plaintext) { rc=-ENOTSUP; }
@@ -249,6 +260,7 @@ static void work(void *a,void *b,void *c)
 			if (!rc && !strcmp(previous_publisher_id,bootstrap.identity.publisher_id)) { rc=-EALREADY; }
 			if (!rc) { rc=xt_init(&publisher,&bootstrap.identity,&inventory); }
 			if (rc) {
+				connection_error=rc;
 				if (rc!=previous_error) { (void)xdiag_error("telemetry-bootstrap",rc);previous_error=rc; }
 				publish_status(rc);retry_time=now+1000;k_sleep(K_MSEC(20));continue;
 			}
@@ -260,10 +272,10 @@ static void work(void *a,void *b,void *c)
 			if (collect_current()) { connection_error=-ERANGE;publish_status(connection_error);break; }
 			next_capture=now+200;
 		}
-		if (!connected && !connecting && now>=retry_time) {
+		if (!atomic_get(&stopping) && !connected && !connecting && now>=retry_time) {
 			int rc=connect_broker();if (rc) { close_connection(rc); }
 		}
-		if (connecting || connected) {
+		if (!atomic_get(&stopping) && (connecting || connected)) {
 			socket_io.deadline_ms=k_uptime_get()+IO_MS;
 			int rc=mqtt_input(&client);
 			if (rc && rc!=-EAGAIN && rc!=-EWOULDBLOCK) { close_connection(rc); }
@@ -273,12 +285,12 @@ static void work(void *a,void *b,void *c)
 		acknowledge();
 		if (pending && k_uptime_get()>=ack_deadline) { ++publisher.counters.puback_timeouts;close_connection(-ETIMEDOUT); }
 		if (snapshot_active && k_uptime_get()>=snapshot_deadline) { ++publisher.counters.snapshots_expired;snapshot_active=false; }
-		if (connected) {
+		if (!atomic_get(&stopping) && connected) {
 			connection_error=0;
 			socket_io.deadline_ms=k_uptime_get()+IO_MS;
 			int rc=mqtt_live(&client);if (rc && rc!=-EAGAIN) { close_connection(rc); }
 		}
-		if (connected) {
+		if (!atomic_get(&stopping) && connected) {
 			if (inventory_pending && !pending) {
 				/* Inventory is recollected after CONNACK, including current addresses.
 				 * Its wider collection interval must not alter other families' sample. */
@@ -305,20 +317,26 @@ static void work(void *a,void *b,void *c)
 	publisher.counters.events_dropped+=publisher.event_count;publisher.event_count=0;
 	if (snapshot_active) { ++publisher.counters.snapshots_expired;snapshot_active=false; }
 	if (socket_io.fd>=0) { socket_io.deadline_ms=k_uptime_get()+IO_MS;(void)mqtt_abort(&client); }
+	int close_rc=xt_socket_close(&socket_io);if (close_rc) { connection_error=close_rc; }
 	memset(bootstrap.password,0,sizeof(bootstrap.password));
 	memset(tx,0,sizeof(tx));memset(rx,0,sizeof(rx));
-	connected=false;publish_status(0);
+	connected=false;publish_status(connection_error);
 	if (!k_mutex_lock(&status_lock,K_MSEC(20))) { status_view.running=false;k_mutex_unlock(&status_lock); }
-	k_sem_give(&worker_done);
 }
 
 int xt_start(xt_bootstrap_loader loader,void *context,const struct xt_inventory *info)
 {
 	if (!loader || !info || k_is_in_isr()) { return -EINVAL; }
 	if (k_mutex_lock(&api_lock,K_MSEC(20))) { return -EBUSY; }
+	if (socket_io.close_error) { k_mutex_unlock(&api_lock);return socket_io.close_error; }
 	if (launched && k_thread_join(&worker_thread,K_NO_WAIT)) { k_mutex_unlock(&api_lock);return -EALREADY; }
+	if (k_mutex_lock(&status_lock,K_MSEC(20))) { k_mutex_unlock(&api_lock);return -EBUSY; }
+	/* A bootstrap-blocked new worker is not absent and must not expose the
+	 * previous session's identity/completion view. Authentication stays pending. */
+	status_view=(struct xt_status){.running=true,.last_rc=-EAGAIN,.observed_uptime_ms=k_uptime_get()};
+	k_mutex_unlock(&status_lock);
 	load_bootstrap=loader;loader_context=context;inventory=*info;
-	atomic_set(&stopping,0);atomic_set(&snapshot_requested,0);k_sem_reset(&worker_done);
+	atomic_set(&stopping,0);atomic_set(&snapshot_requested,0);
 	launched=true;
 	k_thread_create(&worker_thread,xt_worker_stack,K_THREAD_STACK_SIZEOF(xt_worker_stack),work,NULL,NULL,NULL,CONFIG_XENOVA_TELEMETRY_PRIORITY,0,K_NO_WAIT);
 	(void)k_thread_name_set(&worker_thread,"telemetry-v2");k_mutex_unlock(&api_lock);return 0;
@@ -326,11 +344,20 @@ int xt_start(xt_bootstrap_loader loader,void *context,const struct xt_inventory 
 
 int xt_stop(int64_t deadline)
 {
-	if (k_mutex_lock(&api_lock,K_MSEC(20))) { return -EBUSY; }
-	if (!launched) { k_mutex_unlock(&api_lock);return 0; }
-	atomic_set(&stopping,1);k_mutex_unlock(&api_lock);
-	int64_t left=deadline-k_uptime_get();if (left<=0) { return -ETIMEDOUT; }
-	return k_thread_join(&worker_thread,K_MSEC(left)) ? -ETIMEDOUT : 0;
+	if (k_current_get()==&worker_thread) { return -EDEADLK; }
+	int64_t left=deadline-k_uptime_get();
+	if (left<=0) { return -ETIMEDOUT; }
+	if (k_mutex_lock(&api_lock,K_MSEC(MIN(20,left)))) { return -EBUSY; }
+	if (!launched) { k_mutex_unlock(&api_lock);return socket_io.close_error; }
+	k_spinlock_key_t key=k_spin_lock(&admission_lock);
+	atomic_set(&stopping,1);
+	k_spin_unlock(&admission_lock,key);
+	/* Worker never takes api_lock. Hold it through join so a concurrent start
+	 * cannot recycle this TCB/stack while an earlier stop still joins it. */
+	left=deadline-k_uptime_get();
+	int rc=k_thread_join(&worker_thread,left>0?K_MSEC(left):K_NO_WAIT);
+	if (!rc) { launched=false; }
+	k_mutex_unlock(&api_lock);return rc?-ETIMEDOUT:socket_io.close_error;
 }
 
 int xt_snapshot_request(bool threads)

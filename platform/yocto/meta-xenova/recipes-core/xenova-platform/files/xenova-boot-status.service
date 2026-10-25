@@ -1,0 +1,21 @@
+[Unit]
+Description=Summarize Xenova boot facts through the existing agetty login banner
+# Do not depend on the storage/registration/VM operations being observed.
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=/usr/sbin/agetty
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/xenova-boot-status --watch
+TimeoutStopSec=3s
+RuntimeMaxSec=610s
+Restart=no
+UMask=0022
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=sysinit.target

@@ -325,10 +325,11 @@ def platform_root_ok(root):
                 **{'usr/lib/xenova/'+n:FILES/n for n in ('xenova_resources.py','xenova_zephyr_transition.py','xenova_zephyr_control.py')},
                 'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                 'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
-    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
+    for name in ('xenova_boot_status.py','xenova_boot_progress.py','xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
                  'xenova_cpu.py','xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
         expected['usr/lib/xenova/'+name] = FILES/name
     expected['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
+    expected['usr/sbin/xenova-boot-status'] = FILES/'xenova-boot-status'
     expected['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
     expected['etc/modprobe.d/xenova-wifi.conf'] = FILES/'xenova-wifi-modprobe.conf'
     expected['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
@@ -338,7 +339,7 @@ def platform_root_ok(root):
     expected['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'platform/scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         expected['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
-    units = ['xenova-cpu-prepare.service', 'xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
+    units = ['xenova-boot-status.service', 'xenova-cpu-prepare.service', 'xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
              'xenova-vms.service', 'xenova-vm-shutdown.service', 'xenova-xen-ready.service', 'xenova-host-admission.service']
     expected.update({'usr/lib/systemd/system/' + u: FILES / u for u in units})
     expected.update(deployment_payloads.installed_sources(root))
@@ -412,6 +413,9 @@ def platform_root_ok(root):
         link = root / 'etc/systemd/system/multi-user.target.wants' / unit
         if not link.is_symlink() or path('etc/systemd/system/multi-user.target.wants/' + unit).read_bytes() != (FILES / unit).read_bytes():
             raise ValueError('required platform unit not enabled: ' + unit)
+    indicator = 'etc/systemd/system/sysinit.target.wants/xenova-boot-status.service'
+    if not (root/indicator).is_symlink() or path(indicator).read_bytes() != (FILES/'xenova-boot-status.service').read_bytes():
+        raise ValueError('boot display unit not enabled under sysinit.target')
     return {relative: sha(path(relative)) for relative in expected}
 
 

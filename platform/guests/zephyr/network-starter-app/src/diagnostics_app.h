@@ -12,11 +12,11 @@ static inline void starter_diag_boot(const char *stage, int rc) { (void)stage; (
 #endif
 #if defined(CONFIG_XENOVA_DIAGNOSTICS_EXERCISE)
 struct shell;
-void starter_exercise_start(void);
+int starter_exercise_start(void);
 int starter_exercise_stop(int64_t deadline_ms);
 int starter_exercise_cmd(const struct shell *, size_t argc, char **argv);
 #else
-static inline void starter_exercise_start(void) { }
+static inline int starter_exercise_start(void) { return 0; }
 static inline int starter_exercise_stop(int64_t deadline_ms) { (void)deadline_ms; return 0; }
 #endif
 #endif

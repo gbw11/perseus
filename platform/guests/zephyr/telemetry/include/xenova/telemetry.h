@@ -23,6 +23,8 @@ int xt_bootstrap_decode(char *json,size_t bytes,const char *own_vm_id,struct xt_
 int xt_xen_bootstrap_load(struct xt_bootstrap *, int64_t deadline_ms, void *channel);
 struct xt_status {
 	struct xt_identity identity;
+	/* running includes bootstrap-pending worker admission; it is not a join
+	 * receipt. identified/connected remain false and last_rc=-EAGAIN initially. */
 	bool running, identified, connected;
 	int last_rc;
 	uint64_t observed_uptime_ms;
@@ -33,7 +35,10 @@ struct xt_status {
  * verify own VM identity; it must not print secrets. Missing credentials defer
  * publishing while local Core and application work continue. */
 int xt_start(xt_bootstrap_loader, void *context, const struct xt_inventory *);
-/* Called by existing quiesce before netfront closes. No unbounded flush. */
+/* Called by the coordinator before netfront closes; worker closes its own I/O.
+ * 0 confirms thread termination, not delivery/vehicle stop. -ETIMEDOUT retains
+ * a live/unknown worker; -EBUSY retains API ownership; -EDEADLK rejects self join.
+ * Ambiguous socket-close errno is preserved and blocks restart. No flush wait. */
 int xt_stop(int64_t deadline_ms);
 /* Freeze once in worker; threads=true is an explicit intrusive local request. */
 int xt_snapshot_request(bool threads);

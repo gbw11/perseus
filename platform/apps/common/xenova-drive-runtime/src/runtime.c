@@ -23,13 +23,31 @@ static struct xt_bootstrap app_bootstrap;
 static struct xt_inventory inventory;
 static atomic_t stopping, app_quiesced;
 static atomic_t clock_rc, task_rc;
+static atomic_t app_close_error;
 K_SEM_DEFINE(app_done, 0, 1);
 static const char *app;
 static bool client_ready;
+static bool app_running, start_attempted;
+K_MUTEX_DEFINE(xd_lifecycle_lock);
+static struct k_spinlock admission_lock;
+static bool admit(void)
+{
+	k_spinlock_key_t key = k_spin_lock(&admission_lock);
+	bool allowed = !atomic_get(&stopping);
+	k_spin_unlock(&admission_lock, key);
+	return allowed;
+}
+static void stop_request(void)
+{
+	k_spinlock_key_t key = k_spin_lock(&admission_lock);
+	atomic_set(&stopping, 1);
+	k_spin_unlock(&admission_lock, key);
+}
 static struct xm_zclient *app_client;
 static int64_t retry_at;
 static uint64_t app_start_ms;
 #if defined(CONFIG_XENOVA_RUNTIME)
+static int64_t cleanup_deadline;
 static int network_rc = -EAGAIN;
 #endif
 
@@ -100,9 +118,20 @@ static int network(struct xdiag_network *out, void *context)
 static int quiesce(const char *request, int64_t end, void *context)
 {
 	ARG_UNUSED(request); ARG_UNUSED(context);
-	atomic_set(&stopping, 1);
+	stop_request();
+#if defined(CONFIG_XENOVA_NETFRONT)
+	xnet_stop_request();
+#endif
 	int64_t left = end - k_uptime_get();
-	if (left <= 0 || k_sem_take(&app_done, K_MSEC(left))) { return -ETIMEDOUT; }
+	if (left <= 0 || k_mutex_lock(&xd_lifecycle_lock, K_MSEC(left))) { return -ETIMEDOUT; }
+	bool wait_app = app_running;
+	k_mutex_unlock(&xd_lifecycle_lock);
+	/* Initialization failure never admitted the app loop. Only a running app's
+	 * owner may certify that v1 use has ended; do not synthesize app_done. */
+	left = end - k_uptime_get();
+	if (wait_app && !atomic_get(&app_quiesced) &&
+	    (left <= 0 || k_sem_take(&app_done, K_MSEC(left)))) { return -ETIMEDOUT; }
+	if (atomic_get(&app_close_error)) { return atomic_get(&app_close_error); }
 	/* App owner has aborted v1 before Publisher stops. Runtime closes netfront. */
 	return xt_stop(end);
 }
@@ -110,31 +139,42 @@ static int quiesce(const char *request, int64_t end, void *context)
 
 int xd_start(const char *app_id, uint32_t period_ms)
 {
+	if (k_mutex_lock(&xd_lifecycle_lock, K_MSEC(1000))) { return -ETIMEDOUT; }
+	if (start_attempted || atomic_get(&stopping)) { k_mutex_unlock(&xd_lifecycle_lock); return -EALREADY; }
+	start_attempted = true;
+	int result = 0;
 	app = app_id; app_start_ms = k_uptime_get();
 	(void)xdiag_boot("drive-main", 0);
 #if defined(CONFIG_XENOVA_RUNTIME)
 	int rc = xshutdown_start(quiesce, NULL);
-	(void)xdiag_boot("shutdown-handler", rc); if (rc) { return rc; }
+	(void)xdiag_boot("shutdown-handler", rc); if (rc) { result = rc; goto finished; }
+	if (atomic_get(&stopping)) { result = -ECANCELED; goto finished; }
 	network_rc = xnet_start();
 	(void)xdiag_network_register(network, NULL);
 	(void)xdiag_boot("ethernet-start", network_rc);
-	if (network_rc) { return network_rc; }
+	if (network_rc) { result = network_rc; goto finished; }
 #endif
+	if (atomic_get(&stopping)) { result = -ECANCELED; goto finished; }
 	inventory = (struct xt_inventory){.os_version = KERNEL_VERSION_STRING,
 		.build_id = "drive-diagnostics-telemetry-2.0", .profile = "driving_app",
 		.task_id = app, .interface_name = "netfront", .diagnostics = true,
 		.publisher = true, .timing = true,
 		.threads = IS_ENABLED(CONFIG_XENOVA_DIAGNOSTICS_THREADS),
 		.heap = IS_ENABLED(CONFIG_XENOVA_DIAGNOSTICS_HEAP)};
-	int result = xdiag_loop_init(&loop, period_ms * 1000U, period_ms * 1000U);
+	result = xdiag_loop_init(&loop, period_ms * 1000U, period_ms * 1000U);
 	if (!result) { result = xdiag_loop_watch(&loop); }
-	if (!result) { result = xt_start(bootstrap_load, NULL, &inventory); }
+	if (!result && admit()) { result = xt_start(bootstrap_load, NULL, &inventory); }
+	if (!result && atomic_get(&stopping)) { result = -ECANCELED; }
 	(void)xdiag_boot("drive-ready", result);
 #if defined(CONFIG_XENOVA_DRIVE_NATIVE_TEST)
 	k_spinlock_key_t key = k_spin_lock(&capture_lock);
 	capture_start = now_us(); capture_end = UINT64_MAX;
 	k_spin_unlock(&capture_lock, key);
 #endif
+finished:
+	app_running = !result;
+	if (result) { atomic_set(&stopping, 1); (void)xdiag_error("drive-init", result); }
+	k_mutex_unlock(&xd_lifecycle_lock);
 	return result;
 }
 
@@ -155,11 +195,13 @@ bool xd_stopping(void)
 
 int xd_client_prepare(struct xm_zclient *client, const char *control, const char *input)
 {
+	if (!admit()) { return -ESHUTDOWN; }
 	if (client_ready) { return 0; }
 	if (k_uptime_get() < retry_at) { return -EAGAIN; }
 	retry_at = k_uptime_get() + 1000;
 	int rc = bootstrap_load(&app_bootstrap, k_uptime_get() + 500, "xenova-drive");
 	if (rc) { return rc; }
+	if (!admit()) { return -ESHUTDOWN; }
 	struct xm_zconfig config = {.host = app_bootstrap.broker_ipv4, .port = app_bootstrap.port,
 		.username = app_bootstrap.username, .password = app_bootstrap.password, .keepalive_s = 30,
 		.boot_id = app_bootstrap.identity.boot_id, .instance_id = app_bootstrap.identity.publisher_id};
@@ -176,6 +218,16 @@ int xd_client_prepare(struct xm_zclient *client, const char *control, const char
 			app_bootstrap.identity.execution_id);
 	}
 	return rc;
+}
+int xd_publish(struct xm_zclient *client,const char *topic,const char *type,const char *payload)
+{
+	/* A reservation before stop may finish; quiesce waits the app owner before
+	 * touching v1 resources. No new publish/poll reservation follows stop. */
+	return admit() ? xm_zclient_publish(client,topic,type,payload) : -ESHUTDOWN;
+}
+int xd_poll(struct xm_zclient *client,int32_t timeout_ms)
+{
+	return admit() ? xm_zclient_poll(client,timeout_ms) : -ESHUTDOWN;
 }
 
 int xd_iteration_begin(void)
@@ -226,7 +278,7 @@ void xd_command(struct xm_zclient *client, const char *topic, const char *json, 
 	uint32_t before = client->message_counter;
 	if (encoded >= 0 && !xd_stopping() && client_ready) {
 		current.attempted = true;
-		current.rc = xm_zclient_publish(client, topic, "drive.command", json);
+		current.rc = xd_publish(client, topic, "drive.command", json);
 	} else if (encoded >= 0 && !xd_stopping()) {
 		current.rc = -ENOTCONN;
 	}
@@ -353,11 +405,39 @@ static int drive_cmd(const struct shell *sh, size_t argc, char **argv)
 	return rc;
 }
 
-void xd_client_stopped(struct xm_zclient *client)
+int xd_finish(struct xm_zclient *client, int app_result)
 {
-	if (client_ready) { xm_zclient_close(client); }
-	atomic_set(&app_quiesced, 1);
-	k_sem_give(&app_done);
+	stop_request();
+	if (!app_result) { app_result = atomic_get(&task_rc); }
+	if (!app_result) { app_result = atomic_get(&clock_rc); }
+	if (app_result) { atomic_set(&task_rc, app_result); (void)xdiag_error("drive-exit", app_result); }
+	/* Runs only in the app owner, after its final I/O returned. */
+	if (client_ready) { xm_zclient_close(client); client_ready = false; }
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	if (client && client->socket_io.close_error) { atomic_set(&app_close_error, client->socket_io.close_error); }
+#endif
+	if (app_running) {
+		atomic_set(&app_quiesced, 1);
+		k_sem_give(&app_done);
+	}
+	int cleanup = atomic_get(&app_close_error);
+#if defined(CONFIG_XENOVA_RUNTIME)
+	if (!cleanup_deadline) { cleanup_deadline = k_uptime_get() + CONFIG_XENOVA_SHUTDOWN_BUDGET_MS; }
+	int64_t end = cleanup_deadline;
+	int monitor = xshutdown_stop(end);
+	if (monitor == -EBUSY) {
+		/* A valid external request owns the shared teardown. app_done above
+		 * releases its quiesce; joining that handler here would deadlock. */
+		return app_result ? app_result : atomic_get(&app_close_error);
+	}
+	if (monitor && !cleanup) { cleanup = monitor; }
+	int rc = xt_stop(end); if (rc && !cleanup) { cleanup = rc; }
+	if (!rc && !atomic_get(&app_close_error)) {
+		rc = xnet_close(end); if (rc && !cleanup) { cleanup = rc; }
+		if (!rc && !cleanup) { cleanup = xsr_close(end); }
+	}
+	(void)xdiag_boot("drive-cleanup", cleanup);
+#endif
 #if defined(CONFIG_XENOVA_DRIVE_NATIVE_TEST)
 	k_spinlock_key_t key = k_spin_lock(&capture_lock);
 	capture_end = now_us(); capture_complete = true;
@@ -374,9 +454,11 @@ void xd_client_stopped(struct xm_zclient *client)
 	char *argv[] = {"drive", "records"};
 	(void)drive_cmd(NULL, 2, argv);
 	fflush(stdout);
-	exit(rc || status_rc || state.running ? 1 : 0);
+	exit(app_result || cleanup || rc || status_rc || state.running ? 1 : 0);
 #endif
+	return app_result ? app_result : cleanup;
 }
+void xd_client_stopped(struct xm_zclient *client) { (void)xd_finish(client, 0); }
 
 SHELL_STATIC_SUBCMD_SET_CREATE(xenova_commands,
 	SHELL_CMD(diag, NULL, "Local Core snapshot; threads is intrusive", xdiag_shell_cmd),

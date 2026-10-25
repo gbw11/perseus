@@ -12,9 +12,10 @@ static struct xdiag_loop measured;
 
 K_THREAD_STACK_DEFINE(exercise_stack, 2048);
 static struct k_thread exercise_thread;
-static atomic_bool stopping, done;
+static atomic_bool stopping;
 static volatile uint32_t checksum;
 static bool started;
+K_MUTEX_DEFINE(exercise_lock);
 /* Same outside-hook observer in both variants, solely for on/off comparison.
  * Aggregate only; its own cost remains present in both measured binaries. */
 static struct k_spinlock observer_lock;
@@ -48,7 +49,7 @@ static void exercise(void *a, void *b, void *c)
 #if defined(CONFIG_XENOVA_DIAGNOSTICS)
 	int rc = xdiag_loop_init(&measured, period, period);
 	if (!rc) { rc = xdiag_loop_watch(&measured); }
-	if (rc) { (void)xdiag_error("exercise-init", rc); atomic_store(&done, true); return; }
+	if (rc) { (void)xdiag_error("exercise-init", rc); return; }
 	next = measured.timing.next_release_us;
 #endif
 	while (!atomic_load(&stopping)) {
@@ -71,26 +72,32 @@ static void exercise(void *a, void *b, void *c)
 		next += period;
 		if (end > next) { next += ((end - next - 1) / period + 1) * period; }
 	}
-	atomic_store(&done, true);
 }
 
-void starter_exercise_start(void)
+int starter_exercise_start(void)
 {
+	if (k_mutex_lock(&exercise_lock, K_NO_WAIT)) { return -EBUSY; }
+	if (started || atomic_load(&stopping)) { k_mutex_unlock(&exercise_lock); return -EALREADY; }
 	started = true;
 	k_thread_create(&exercise_thread, exercise_stack, K_THREAD_STACK_SIZEOF(exercise_stack),
 			exercise, NULL, NULL, NULL, 8, 0, K_NO_WAIT);
 	(void)k_thread_name_set(&exercise_thread, "diag-exercise");
+	k_mutex_unlock(&exercise_lock);
+	return 0;
 }
 
 int starter_exercise_stop(int64_t deadline)
 {
-	if (!started) { return 0; }
+	if (k_current_get()==&exercise_thread) { return -EDEADLK; }
 	atomic_store(&stopping, true);
-	while (!atomic_load(&done)) {
-		if (k_uptime_get() >= deadline) { return -ETIMEDOUT; }
-		k_sleep(K_MSEC(1));
-	}
-	return 0;
+	int64_t left = deadline - k_uptime_get();
+	if (left <= 0 || k_mutex_lock(&exercise_lock, K_MSEC(left))) { return -ETIMEDOUT; }
+	/* Join confirms the kernel no longer references this TCB/stack, including
+	 * natural initialization failure. A final user signal alone cannot do so. */
+	left = deadline - k_uptime_get();
+	int rc = !started ? 0 : k_thread_join(&exercise_thread, left > 0 ? K_MSEC(left) : K_NO_WAIT);
+	k_mutex_unlock(&exercise_lock);
+	return rc ? -ETIMEDOUT : 0;
 }
 
 int starter_exercise_cmd(const struct shell *sh, size_t argc, char **argv)

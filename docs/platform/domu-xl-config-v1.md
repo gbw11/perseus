@@ -1,5 +1,8 @@
 # Jira 28: Linux domU xl 템플릿 인계
 
+이 문서는 아래 기준 커밋의 구현 이력이다. 현재 실행·CPU 정책·재전달 계약은
+[CLI·Manager 명세](cli-manager-spec.md)와 [관리 구조](management-boundaries.md)를 따른다.
+
 ## 상태
 
 기준은 2026-10-19에 기능 브랜치로 병합한 `origin/platform`의 `77b6c39`다.
@@ -161,6 +164,7 @@ API 계약의 단순 OS ID와 현재 카탈로그 ID 사이의 변환도 P3와 �
 추가로 부팅·init·네트워크 회귀 17개, 실제 systemd 259.5 의존성 그래프와
 셸 문법 검사를 통과했다. 신규 cfg 통합 테스트 13개는 전체 검사에 포함되어 통과했다.
 
-명칭 변경의 산출물 해시와 재빌드 경계는
-[명칭 통일 기록](../build-guides/xenova-rename-20261019.md)에 정리했다.
+명칭 변경의 산출물 해시와 재빌드 경계를 기록한 당시 문서 경로는
+`docs/build-guides/xenova-rename-20261019.md`였다. 현재 빌드 절차는
+[빌드 가이드](build-guide.md)를 따른다.
 이번 결과는 새 이미지·템플릿·펌웨어 또는 실제 Xen에서의 부팅 검증을 대신하지 않는다.
