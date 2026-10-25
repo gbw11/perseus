@@ -147,6 +147,7 @@ Manager 전용 명령은 `templates, list, get, create, retire, delete, restore,
 | [`xenova-vm console`](#cmd-console) | Xen PV 콘솔 접속 |
 | [`xenova-vm check-xen`](#cmd-check-xen) | dom0 Xen 제어 기반 확인 |
 | [`xenova-vm check-network`](#cmd-check-network) | 격리된 내부 브리지 검사 |
+| [`xenova-boot-status`](#cmd-boot-status) | 부팅 진행·지연·실패 요약과 상세 조회 |
 | [`xenova-vm diagnose`](#cmd-diagnose) | 부팅 인자·가동 시간·시각 진단 |
 | [`xenova-domain-identity`](#cmd-domain-identity) | libxenmanage로 incarnation 조회 |
 | [`xenova-verify-artifacts`](#cmd-verify-artifacts) | 생성 cfg·Xen/QEMU 설치 내용 검사 |
@@ -2080,6 +2081,79 @@ bridge 주소·VM의 등록 IP·MAC/lease를 각각 비교한다. 생성한 host
 **Manager 매핑:** 운영 CLI 전용.
 
 [명령어 색인으로](#command-index)
+
+<a id="cmd-boot-status"></a>
+### `xenova-boot-status` — 부팅 진행·지연·실패 조회
+
+**기본 사용**
+
+`xenova-boot-status`
+
+인자 없이 현재 systemd 상태와 이번 unit 실행의 부가 진행 사실을 평문으로 읽는다.
+VM 제어나 Manager 전체 조회를 수행하지 않는다.
+
+**인자**
+
+모두 선택: `--details`는 unit·전체 VM UUID·상세 조회 명령을 추가하고, `--ascii`는
+표시 이름을 ASCII로 치환한다. `--json`은 같은 표시 snapshot을 JSON으로 출력한다.
+`--watch`는 설치 서비스용 내부 모드이며 안내 파일을 갱신한다. 일반 조회에는 쓰지 않는다.
+`--json`과 `--details`를 같이 주면 JSON이 우선한다. `--ascii`는 평문에만 적용된다.
+
+**사용 조건**
+
+dom0의 systemd와 `/proc`·`/run/xenova`를 읽을 수 있어야 한다. systemctl 조회는
+고정 unit/속성의 한 호출에 최대 2초, 수신 크기 128KiB를 적용한다. 공통 플랫폼 잠금을
+얻지 않는다. 원 기록이 없거나 오래됐으면 정보를 만들지 않는다.
+
+**실행 예시**
+
+```bash
+xenova-boot-status
+xenova-boot-status --details
+xenova-boot-status --json
+```
+
+**정상 응답**
+
+기본 평문은 `Xenova startup`으로 시작하며 완료된 서비스는 `[ OK ]` 한 줄,
+진행 중인 서비스는 `[START]`, 아직 미시작인 서비스는 `[WAIT; reason unconfirmed]`로 묶어 표시한다.
+`--details`의 `COMPLETE/PROGRESS/WAITING/DELAYED/DEFERRED/FAILED/UNKNOWN/UNAVAILABLE`은
+같은 snapshot의 표시 상태다. 지연·실패·미확정은 기본 출력에도 남는다.
+VM별 `verified`는 공통 start의 실행 검증과 필수 결과 저장까지 확인한
+부팅 사실이며, 현재 OS·앱 정상 여부는 아니다. 표시 이름·원 unit·전체 UUID와
+읽기 전용 상세 명령을 함께 확인한다. 선택 전에는 분모를 미확정으로 표시한다.
+
+JSON은 **Manager envelope가 아닌 표시 snapshot**이다.
+
+| 필드 | 의미 |
+|---|---|
+| host_boot_id / observed_monotonic_ms | 이번 관측 host / 해당 host의 단조 ms. UTC 아님 |
+| stages[] | key·label·unit·invocation_id·state·reason. 알 수 있는 경우 elapsed_ms·phase·last_change_ms_ago·batch_id·mode·exit 정보를 포함 |
+| stages[].progress_issue | missing·unreadable-or-incomplete·stale-host-or-invocation·stale-batch 등 부가 기록의 한계. null이면 대조 통과 |
+| vms[] | vm_id·name·internal_name·state·selected·code·os_readiness·app_readiness. selected는 실제 선택 여부 또는 아직 미확정이면 null |
+| vm_counts | 현재 invocation의 verified·excluded·failed·not-started·uncertain 수와 selected 수. 정책 선택이 미완료면 selected=null, 기록 자체가 없으면 vm_counts=null |
+| issues[] | systemd-query-timeout/unavailable/failed/empty/too-large/partial 등 전체 관측 오류 |
+| failure_history[] | 표시기가 같은 boot에서 관측한 최대 16개 unit 실패. 현재 회복과 다르며 영구 journal이 아님 |
+
+**오류 응답**
+
+정상 관측으로 부팅 실패를 발견한 경우 평문/JSON에 실패를 표시하고 종료 0이다.
+systemd 전체 조회 자체가 실패하면 `issues`와 unknown 행을 반환하며 종료 1이다.
+치명적 읽기·표시 오류는 stderr의 짧은 오류와 종료 1, parser 입력 오류는 종료 2다.
+없는 진행 기록을 빈 성공 목록으로 대신하지 않는다. 서비스 모드 오류도 VM 제어에
+전파되지 않는다.
+
+**확인 방법**
+
+표시한 `journalctl -b -u UNIT`로 Result와 상세 로그를 확인한다. 결과가 미확정인 VM은
+원 UUID·operation·실행 신원을 확인한 후 기존 제어 계약을 따른다. 이 명령이 재시도나
+복구를 대신하지 않는다. 실제 HDMI·UART 경로와 복구 방법은
+[부팅 표시](management-boot-boundaries.md#부팅-진행지연실패-표시)에 있다.
+
+**Manager 매핑:** 별도 표시 CLI. Manager action·VMView·HTTP 계약을 추가하지 않는다.
+
+[명령어 색인으로](#command-index)
+
 
 <a id="cmd-diagnose"></a>
 ### `xenova-vm diagnose` — 부팅 인자·가동 시간·시각 진단

@@ -49,7 +49,7 @@ for name, values, failure in [
                          if line.startswith('FDT set /chosen xen,dom0-bootargs '))
         debug = values.get('xenova_debug') == '1'
         assert [arg for arg in dom0_args if arg.startswith('loglevel=')] == [
-            'loglevel=7' if debug else 'loglevel=3'], (name, dom0_args)
+            'loglevel=7' if debug else 'loglevel=4'], (name, dom0_args)
         assert ('systemd.log_target=console' if debug else
                 'systemd.log_target=journal-or-kmsg') in dom0_args, (name, dom0_args)
         assert ('earlycon=xenboot' in dom0_args) == debug, (name, dom0_args)
