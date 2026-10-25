@@ -44,7 +44,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 class DisplayRouteIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"display-user","password":"password123!"}
+            {"username":"display-user","nickname":"디스플레이 테스트","password":"password123!"}
             """;
     private static final String SERVICE_TOKEN = "test-display-service-token";
     private static final String CONSOLE_PATH = "/ws/v1/displays";

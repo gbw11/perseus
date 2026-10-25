@@ -27,7 +27,7 @@ import org.springframework.test.web.servlet.ResultActions;
 class PerformanceReportApiIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"report-perf-user","password":"password123!"}
+            {"username":"report-perf-user","nickname":"성능 리포트 테스트","password":"password123!"}
             """;
     private static final Instant BASE = Instant.parse("2026-10-16T03:00:00Z");
 

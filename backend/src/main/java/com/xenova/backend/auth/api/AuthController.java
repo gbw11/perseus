@@ -33,7 +33,7 @@ public class AuthController {
 
     @PostMapping("/signup")
     ResponseEntity<SignupResponse> signup(@Valid @RequestBody SignupRequest request) {
-        SignupResponse response = authService.signup(request.username(), request.password());
+        SignupResponse response = authService.signup(request.username(), request.nickname(), request.password());
         return ResponseEntity.status(201)
                 .header(HttpHeaders.LOCATION, "/api/v1/users/" + response.userId())
                 .body(response);

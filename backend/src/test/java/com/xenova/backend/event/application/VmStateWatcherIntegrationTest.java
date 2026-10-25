@@ -37,7 +37,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 class VmStateWatcherIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"vm-state-watcher-user","password":"password123!"}
+            {"username":"vm-state-watcher-user","nickname":"VM 상태 테스트","password":"password123!"}
             """;
 
     @Autowired

@@ -34,7 +34,7 @@ class AuthApiIntegrationTest {
     void signupLoginAndLogoutFlow() throws Exception {
         String username = "auth-flow-user";
         String signupBody = """
-                {"username":"%s","password":"password123!"}
+                {"username":"%s","nickname":"테스트 사용자","password":"password123!"}
                 """.formatted(username);
 
         mockMvc.perform(post("/api/v1/auth/signup")
@@ -43,6 +43,7 @@ class AuthApiIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(header().string(HttpHeaders.LOCATION, org.hamcrest.Matchers.startsWith("/api/v1/users/")))
                 .andExpect(jsonPath("$.username").value(username))
+                .andExpect(jsonPath("$.nickname").value("테스트 사용자"))
                 .andExpect(jsonPath("$.user_id").isNotEmpty());
 
         mockMvc.perform(post("/api/v1/auth/login")
@@ -61,6 +62,7 @@ class AuthApiIntegrationTest {
                 .andExpect(cookie().httpOnly("xenova_refresh", true))
                 .andExpect(jsonPath("$.token_type").value("Bearer"))
                 .andExpect(jsonPath("$.expires_in").value(900))
+                .andExpect(jsonPath("$.user.nickname").value("테스트 사용자"))
                 .andReturn();
 
         JsonNode loginJson = objectMapper.readTree(loginResult.getResponse().getContentAsString());
@@ -86,7 +88,7 @@ class AuthApiIntegrationTest {
     @Test
     void refreshRotatesTokensAndRevokesAllOnReuse() throws Exception {
         String credentials = """
-                {"username":"refresh-flow-user","password":"password123!"}
+                {"username":"refresh-flow-user","nickname":"갱신 사용자","password":"password123!"}
                 """;
         mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -157,7 +159,7 @@ class AuthApiIntegrationTest {
         mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"username":"a","password":"short"}
+                                {"username":"a","nickname":"","password":"short"}
                                 """))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
