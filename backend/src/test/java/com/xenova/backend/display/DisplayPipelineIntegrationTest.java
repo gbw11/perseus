@@ -91,7 +91,7 @@ class DisplayPipelineIntegrationTest {
         var cases = new ArrayList<Map<String, Object>>();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        String credentials = "{\"username\":\"pipeline-user\",\"password\":\"password123!\"}";
+        String credentials = "{\"username\":\"pipeline-user\",\"nickname\":\"파이프라인 테스트\",\"password\":\"password123!\"}";
         rest.postForEntity("/api/v1/auth/signup", new HttpEntity<>(credentials, headers), String.class);
         String token = JSON.readTree(rest.postForEntity("/api/v1/auth/login",
                 new HttpEntity<>(credentials, headers), String.class).getBody()).path("access_token").asText();

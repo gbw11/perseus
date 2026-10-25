@@ -43,7 +43,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 class EventApiIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"event-api-user","password":"password123!"}
+            {"username":"event-api-user","nickname":"이벤트 API 테스트","password":"password123!"}
             """;
 
     @Autowired
