@@ -53,8 +53,10 @@ class HandoffTest(unittest.TestCase):
         self.package()
         manifest = handoff.verify(self.output)
         mapping = handoff.runtime_sources()
-        self.assertEqual(len(mapping), 24)
+        self.assertEqual(len(mapping), 26)
         self.assertIn("xenova_cpu.py",mapping)
+        self.assertIn("xenova_trace.py",mapping)
+        self.assertIn("xenova_guest_process.py",mapping)
         for target, source in mapping.items():
             with self.subTest(target=target):
                 self.assertEqual((self.output/"runtime"/target).read_bytes(), (ROOT/source).read_bytes())
@@ -102,6 +104,9 @@ class HandoffTest(unittest.TestCase):
         guide = (self.output/"docs/platform/build-guide.md").read_text()
         self.assertIn("## 10. XenStore G1 시험 인계물", guide)
         self.assertNotIn("docs/build-guides/xenova-zephyr-xenstore-g1.md", guide)
+        for name in ("README.md", "management-boundaries.md", "management-boot-boundaries.md", "cpu-layout.md"):
+            self.assertTrue((self.output/"docs/platform"/name).is_file())
+        self.assertTrue((self.output/"docs/verification/platform-management-boundaries-history.md").is_file())
 
     def test_modified_document_is_rejected_by_handoff_verification(self):
         self.package()

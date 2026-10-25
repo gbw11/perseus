@@ -70,8 +70,18 @@ class ResourcesTest(unittest.TestCase):
 
     def test_present_domain_with_stopped_intent_is_not_removed(self):
         self.start();self.xen.hang_shutdown=True
-        self.fails(self.call("stop"),"XEN_EXECUTION_FAILED")
-        self.fails(self.update(),"VM_NOT_STOPPED")
+        result=self.call("stop",key="resource-stop-timeout")
+        self.fails(result,"RECONCILE_REQUIRED")
+        self.assertEqual(result["error"]["details"]["cause"]["code"],"XEN_EXECUTION_FAILED")
+        operation=next(q for q in self.p.execution().requests() if q["operation_id"]==result["operation_id"])
+        self.assertEqual(operation["phase"],"uncertain")
+        self.assertEqual(len(self.physical("shutdown")),1)
+        before=json.loads((self.directory/"instance.json").read_text())
+        blocked=self.update()
+        self.fails(blocked,"RECONCILE_REQUIRED")
+        self.assertIn("unresolved control request",blocked["error"]["message"])
+        self.assertEqual(json.loads((self.directory/"instance.json").read_text()),before)
+        self.assertEqual(len(self.xen.rows),1)
         self.assertEqual(self.physical("destroy"),[])
 
     def test_absent_observation_failure_never_changes_resources(self):

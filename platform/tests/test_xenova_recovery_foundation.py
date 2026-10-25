@@ -139,9 +139,19 @@ class FoundationTest(unittest.TestCase):
         self.start()
         before = self.state()["intent_revision"]
         self.xen.hang_shutdown = True
-        result = self.call("stop")
-        self.fails(result, "XEN_EXECUTION_FAILED")
+        result = self.call("stop", key="accepted-stop-timeout")
+        self.fails(result, "RECONCILE_REQUIRED")
+        self.assertEqual(result["error"]["details"]["cause"]["code"], "XEN_EXECUTION_FAILED")
         self.assertTrue(result["error"]["details"]["accepted"])
+        operation = next(q for q in self.p.execution().requests() if q["operation_id"] == result["operation_id"])
+        self.assertEqual(operation["phase"], "uncertain")
+        self.assertIsNone(operation["result"])
+        deadline = operation["deadline_monotonic_ms"]
+        before_commands = len(self.physical("shutdown"))
+        replay = self.call("stop", key="accepted-stop-timeout")
+        self.fails(replay, "RECONCILE_REQUIRED")
+        self.assertEqual(len(self.physical("shutdown")), before_commands)
+        self.assertEqual(next(q for q in self.p.execution().requests() if q["operation_id"] == result["operation_id"])["deadline_monotonic_ms"], deadline)
         self.assertEqual(self.state()["desired_state"], "stopped")
         self.assertEqual(self.state()["intent_revision"], before+1)
         self.assertEqual(self.physical("destroy"), [])
@@ -344,8 +354,12 @@ class FoundationTest(unittest.TestCase):
         self.p.command = lambda args, **kw: "[]" if args == ["xl","list","-l"] else "" if args[:2] == ["xl","list"] else original(args,**kw)
         self.fails(self.call("probe",{"vm_id":self.vm_id,"timeout_ms":1000}),"OBSERVATION_UNAVAILABLE")
         before=self.p.execution().intent(self.r)
-        self.assertFalse(self.call("stop")["ok"])
-        self.assertEqual(self.p.execution().intent(self.r),before)
+        result=self.call("stop")
+        self.assertFalse(result["ok"])
+        self.assertTrue(result['error']['details']['accepted'])
+        self.assertEqual(self.p.execution().intent(self.r)['intent_revision'],before['intent_revision']+1)
+        self.assertEqual(self.p.execution().intent(self.r)['desired_state'],'stopped')
+        self.assertEqual(self.physical('shutdown'),[])
 
     def test_P15_barrier_blocks_start_and_recovery_but_not_completed_replay(self):
         self.start("done")
@@ -786,9 +800,6 @@ class FactoryIntentTest(unittest.TestCase):
             started = m.call("start",{"vm_id":target["uuid"]})
             self.assertTrue(started["ok"],started)
             state=started["data"]["vm"]
-            refused=m.call("stop",{"vm_id":target["uuid"]})
-            self.assertFalse(refused["ok"])
-            self.assertEqual(p.execution().intent(target)["intent_revision"],state["intent_revision"])
             spec={"vm_id":target["uuid"],"recovery_attempt_id":uuid4(),"expected_host_boot_id":p.boot_id_reader(),
                   "expected_lifecycle_generation":0,"expected_intent_revision":state["intent_revision"],
                   "expected_execution":{"execution_id":state["execution_id"]},"mode":"force-restart",
@@ -798,6 +809,11 @@ class FactoryIntentTest(unittest.TestCase):
             spec["mode"]="graceful-restart"
             denied=m.call("recover_once",spec,execute=True)
             self.assertEqual(denied["error"]["code"],"RECOVERY_MODE_UNSUPPORTED",denied)
+            refused=m.call("stop",{"vm_id":target["uuid"]})
+            self.assertFalse(refused["ok"])
+            self.assertTrue(refused['error']['details']['accepted'])
+            self.assertEqual(p.execution().intent(target)["intent_revision"],state["intent_revision"]+1)
+            self.assertEqual(p.execution().intent(target)['desired_state'],'stopped')
             with patch.object(vm.os,"sync"):
                 stopped=m.call("stop",{"vm_id":target["uuid"],"force":True})
             self.assertTrue(stopped["ok"],stopped)

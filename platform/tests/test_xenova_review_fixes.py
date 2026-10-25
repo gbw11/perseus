@@ -77,6 +77,14 @@ class NetworkLifecycleRegressionTest(unittest.TestCase):
         self.records = {r['id']: r for r in [record(), record('debian-dev')]}
         for r in self.records.values():
             fixture(self.base, r)
+        (self.base / '.xenova-storage.json').write_text(json.dumps(
+            {'schema':1, 'uuid':'12345678-1234-4234-8234-123456789abc'}))
+        mountinfo = self.base / 'mountinfo'
+        mountinfo.write_text(f'1 0 8:3 / {self.base} rw - ext4 /dev/fixture rw\n')
+        real_storage_check = vm.storage_check
+        storage = patch.object(vm, 'storage_check', side_effect=lambda data: real_storage_check(data, mountinfo))
+        storage.start()
+        self.addCleanup(storage.stop)
         self.xen = FakeXen(self.base, self.records)
         self.p = vm.Platform(self.base, self.base / 'run', self.command)
         check = self.p.check_network

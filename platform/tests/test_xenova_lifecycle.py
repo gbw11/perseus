@@ -128,6 +128,15 @@ class ManagementTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
+        (self.base / '.xenova-storage.json').write_text(json.dumps(
+            {'schema':1, 'uuid':'12345678-1234-4234-8234-123456789abc'}))
+        mountinfo = self.base / 'mountinfo'
+        mountinfo.write_text(f'1 0 8:3 / {self.base} rw - ext4 /dev/fixture rw\n')
+        # 조치 직전 실제 registry를 재확인한다. mount 증거만 제공하고 저장 검증은 유지한다.
+        real_storage_check = vm.storage_check
+        storage = patch.object(vm, 'storage_check', side_effect=lambda data: real_storage_check(data, mountinfo))
+        storage.start()
+        self.addCleanup(storage.stop)
         for name in ('instances', 'templates', 'rtos-templates'):
             (self.base / name).mkdir()
         self.template = bundle(self.base / 'rtos-templates/zephyr-4.4.0-xenvm')
@@ -279,6 +288,7 @@ class ManagementTest(unittest.TestCase):
     def test_autostart_partial_failure_does_not_block_zephyr_or_hide_linux_failure(self):
         linux = self.add_linux()
         self.z['autostart'] = True
+        (self.directory / 'instance.json').write_text(json.dumps(self.z))
         with patch.object(self.p, 'prepare_dhcp', side_effect=vm.PlatformError('DHCP unavailable')):
             with self.assertRaisesRegex(vm.PlatformError, 'ubuntu-dev.*DHCP unavailable'):
                 self.p.autostart(self.records, [])
@@ -390,7 +400,7 @@ class ManagementTest(unittest.TestCase):
     def test_autostart_interruption_preserves_previously_completed_result(self):
         linux = self.add_linux()
         self.z['autostart'] = True
-        def start(r):
+        def start(r, **kwargs):
             if r['id'] == 'ubuntu-dev':
                 raise KeyboardInterrupt('injected service interruption')
             return 'running'
@@ -446,6 +456,7 @@ class ManagementTest(unittest.TestCase):
 
     def test_missing_default_is_reported_without_preventing_other_guests(self):
         self.z['autostart'] = True
+        (self.directory / 'instance.json').write_text(json.dumps(self.z))
         with self.assertRaisesRegex(vm.PlatformError, 'not provisioned'):
             self.p.autostart(self.records, ['zephyr-dev', 'missing'])
         results = json.loads((self.p.runtime / 'autostart-results.json').read_text())
