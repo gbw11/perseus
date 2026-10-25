@@ -6,6 +6,9 @@ DESCRIPTION = "xen-image-minimal plus diagnostic tools, isolated bridge/DHCP and
 
 IMAGE_INSTALL:append = " xenova-platform xenova-bringup xenova-dom0-manager xenova-mqtt-client mosquitto mosquitto-clients iproute2 bridge-utils dnsmasq kmod iputils-ping tzdata-asia"
 
+# External management is optional at runtime; never a prerequisite of VM startup.
+IMAGE_INSTALL:append = " tailscale tailscaled kernel-module-tun kernel-module-ipv6"
+
 # BSP의 DEPLOYPAYLOAD는 rpi-sdimg 전용이다. WIC에도 boot.scr이 읽는 xen을 넣는다.
 IMAGE_BOOT_FILES:append = " xen-${MACHINE};xen"
 do_image_wic[depends] += "xen:do_deploy"
