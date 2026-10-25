@@ -1,0 +1,40 @@
+# Xenova 하위 플랫폼 안내
+
+Xenova는 Raspberry Pi 4에서 Xen으로 Linux·Zephyr VM을 실행하고 관리한다.
+개발자는 이미지를 만들거나 Manager를 연동하고, 운영자는 dom0의 CLI로 등록 자산과
+현재 실행을 조회·제어한다. 관리 접속은 SSH 또는 로컬/UART 콘솔을 사용한다.
+
+## 구성 요소
+
+| 요소 | 역할 |
+|---|---|
+| 부트로더·Xen | 보드를 시작하고 물리 CPU·메모리를 나누어 dom0와 domU를 실행 |
+| dom0 | Xen 도구, 저장소·브리지·DHCP, 플랫폼 CLI/Manager, 관리 서비스를 실행하는 Linux |
+| domU | 독립 UUID·자산을 가진 Linux 또는 Zephyr 게스트 VM |
+| 플랫폼 Manager | 등록·실행 의도·신원·작업 journal을 검증하고 실제 Xen 실행을 제어하는 Python 라이브러리 |
+| `xenova-vm`·`xenova-wifi` | dom0에서 사용하는 VM 관리·Wi-Fi CLI |
+| dom0-manager | 플랫폼 Manager를 사용하는 FastAPI 서비스. 하위 CLI와 HTTP의 지원 범위는 같지 않음 |
+| Recovery Worker | Xen·heartbeat를 관측하고 복구 판단을 큐에 넣는 별도 서비스. 현재 자동 복구 executor는 미연결 |
+| Guest Agent·Zephyr 진단/Publisher | 게스트 내부 상태·실제 앱 진행·계측값을 제공. Xen domain 존재와 앱 정상 여부는 별개 |
+
+`/srv/xenova`는 템플릿·등록 자산·의도·journal의 영구 저장소다. `/run/xenova`에는
+이번 부팅의 실행·관측·CPU 준비 기록을 둔다. IP와 domid는 영구 신원이 아니다.
+
+## 읽는 순서
+
+| 할 일 | 문서 |
+|---|---|
+| 플랫폼 구조와 요청의 수명 이해 | [관리 구조·수명주기](management-boundaries.md) |
+| VM 조회·생성·시작·정지·복구·Wi-Fi 사용 | [CLI·Manager 명세](cli-manager-spec.md) |
+| 이미지 제작·템플릿/seed·조립·검증·전달 | [빌드 가이드](build-guide.md) |
+| 부팅 서비스·자동 시작·부분 실패·종료 조사 | [부팅·종료 구조](management-boot-boundaries.md) |
+| 전용·공유 CPU 배치 운영 | [CPU 배치](cpu-layout.md) |
+
+처음 상태를 볼 때는 dom0에서 `xenova-vm list --short`를 사용한다. 전체 필드가
+필요하면 `xenova-vm list --json`, Wi-Fi 상태는 `xenova-wifi status`로 확인한다.
+변경 명령의 필수 인자와 실행 조건은 각 명령 절을 먼저 확인한다.
+
+입력·필드·오류의 정식 정의는 CLI·Manager 명세에 둔다. 다른 문서는 개념과 절차를
+설명한다. HTTP·MQTT 제품 계약은 [contracts](../contracts/)에서 확인한다.
+특정 실행의 측정값·후보 해시·실패 및 검증 범위는
+[관리 경계 검증 이력](../verification/platform-management-boundaries-history.md)에 보존한다.

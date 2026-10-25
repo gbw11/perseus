@@ -20,6 +20,10 @@ ARTIFACTS = {"zephyr.bin", "zephyr.elf", "zephyr.map", "zephyr.config", "zephyr.
              "ZEPHYR-LICENSE", "XEN-ABI-LICENSE"}
 DOCUMENTATION = (
     "docs/platform/build-guide.md", "docs/platform/cli-manager-spec.md",
+    "docs/platform/README.md", "docs/platform/management-boundaries.md",
+    "docs/platform/management-boot-boundaries.md", "docs/platform/cpu-layout.md",
+    "docs/verification/platform-management-boundaries-history.md",
+    "platform/tests/fixtures/cpu-layout-responses.json",
     "platform/yocto/layers.lock", "platform/guests/sources.lock.json",
     "platform/guests/default-templates.lock.json", "platform/guests/zephyr/source.lock.json",
     # The shared build guide links to these current Telemetry references.
@@ -34,7 +38,8 @@ RUNBOOK = """# XenStore G1 인계물
 G1 빌드·패키징과 시험 도구 사용은
 [Xenova 빌드 가이드의 G1 절](docs/platform/build-guide.md#10-xenstore-g1-시험-인계물)을 따른다.
 공통 VM 제어·신원·복구 계약은 [CLI·Manager 명세](docs/platform/cli-manager-spec.md)에 있다.
-두 문서는 원래 저장소 경로로 동봉하며 빌드 가이드가 참조하는 고정 입력도 함께 보존한다.
+플랫폼 안내·관리/부팅·CPU 문서와 검증 이력도 원래 저장소 경로로 동봉하며,
+빌드 가이드가 참조하는 고정 입력을 함께 보존한다.
 
 - `firmware/`: 검증된 G1 펌웨어와 빌드 영수증
 - `runtime/`: 같은 소스 기준의 독립 시험용 플랫폼 라이브러리

@@ -104,6 +104,9 @@ class HandoffTest(unittest.TestCase):
         guide = (self.output/"docs/platform/build-guide.md").read_text()
         self.assertIn("## 10. XenStore G1 시험 인계물", guide)
         self.assertNotIn("docs/build-guides/xenova-zephyr-xenstore-g1.md", guide)
+        for name in ("README.md", "management-boundaries.md", "management-boot-boundaries.md", "cpu-layout.md"):
+            self.assertTrue((self.output/"docs/platform"/name).is_file())
+        self.assertTrue((self.output/"docs/verification/platform-management-boundaries-history.md").is_file())
 
     def test_modified_document_is_rejected_by_handoff_verification(self):
         self.package()
