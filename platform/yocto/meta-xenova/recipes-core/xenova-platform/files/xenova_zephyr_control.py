@@ -124,6 +124,9 @@ def reboot(e,record,key,*,deadline=None):
                 # It is never passed to p.start or a physical control command.
                 removal_end=end if p.clock()<end else p.clock()+15
                 p.wait_reboot_removed(record,op["old_domain"],removal_end)
+                if p.process_isolation:
+                    from xenova_guest_process import cleanup
+                    cleanup(p,record,e.run_record(record),removal_end,observe_only=p.clock()>=end)
                 e.end_run(record)
                 save("old-removed")
             conditions()

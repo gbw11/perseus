@@ -1,7 +1,7 @@
 """플랫폼 실행 의도·수락 journal·현재 host의 실행/관측 문맥.
 
-변경 호출자는 기존 operation_lock과 검증된 데이터 mount를 사용한다. snapshot 읽기는
-그 잠금이나 Xen을 호출하지 않는다. 장애 판정·반복 복구·앱 준비·차량 권한은 제공하지 않는다.
+물리 실행·자산 변경은 operation_lock을 사용한다. 의도 수락과 최종 명령 제출은
+별도의 짧은 admission 잠금으로 순서를 정한다. snapshot 읽기는 잠금/Xen을 호출하지 않는다.
 """
 from contextlib import contextmanager
 import fcntl
@@ -130,6 +130,10 @@ class Execution:
         return value
 
     def initialize(self, record, desired, source, operation_id=None):
+        with short_lock(self.runtime, 'admission'):
+            return self._initialize_locked(record, desired, source, operation_id)
+
+    def _initialize_locked(self, record, desired, source, operation_id):
         current = self.intent(record)
         if current is not None:
             return current
@@ -304,7 +308,8 @@ class Execution:
             refuse("RECONCILE_REQUIRED", "an earlier launch may still exist; administrator reconciliation required")
 
     @traced('execution.prepare_launch')
-    def prepare_launch(self, record, owner=None, *, deadline=None, expected_cpu=None, cpu_evidence=None):
+    def prepare_launch(self, record, owner=None, *, deadline=None, expected_cpu=None, cpu_evidence=None,
+                       reuse_process_scope=False):
         self.require_launch_available(record)
         _, generation = self.lifecycle(record)
         intent = self.intent(record)
@@ -327,6 +332,13 @@ class Execution:
                  'intent_sha256':fingerprint(intent), 'record_sha256':fingerprint(record),
                  "phase":"launching", "owner":owner, "prepared_monotonic_ms":int(self.p.clock()*1000),
                  "configuration_sha256":fingerprint(self.p.config(record)), "domid":None, "xen_unique_id":None}
+        if self.p.process_isolation:
+            from xenova_guest_process import scope_name
+            previous=self.run_record(record)
+            # toolstack의 Linux reboot는 기존 monitor를 쓴다. 구형 실행에 scope가
+            # 없었다면 새 scope에 들어갔다고 기록하지 않고 다음 명시적 create까지 유지한다.
+            value['process_scope']=((previous or {}).get('process_scope') if reuse_process_scope
+                                    else scope_name(record['uuid'],value['execution_id']))
         trace_bind(vm_id=record['uuid'], host_boot_id=self.host, execution_id=value['execution_id'],
                    intent_revision=value['intent_revision'], lifecycle_generation=generation,
                    configuration_sha256=value['configuration_sha256'],
@@ -348,18 +360,24 @@ class Execution:
         lifecycle, generation = self.lifecycle(record)
         intent = self.intent(record)
         owner = value.get('owner') or {}
+        # 기존 설치의 BOOT_POLICY_PENDING 호환 실행은 유지한다. 이번 host의 사용자
+        # stop과 소유 작업의 running 조건은 별개이며, 새 revision은 아래에서 항상 거절한다.
+        running_required=bool(owner) or bool(intent and intent.get('source')=='user' and
+                                            intent.get('accepted_host_boot_id')==self.host)
         if owner.get('kind') == 'user' and (not intent or intent['accepted_operation_id'] != owner.get('operation_id')):
             refuse('INTENT_MISMATCH', 'launch owner no longer owns the accepted intent')
         if (current != record or lifecycle != 'REGISTERED' or generation != value['lifecycle_generation'] or
                 (intent['intent_revision'] if intent else None) != value['intent_revision'] or
                 ('intent_sha256' in value and fingerprint(intent) != value['intent_sha256']) or
                 ('record_sha256' in value and fingerprint(record) != value['record_sha256']) or
-                (owner and intent is not None and intent['desired_state'] != 'running') or self.run_record(record) != value):
+                (running_required and intent is not None and intent['desired_state'] != 'running') or self.run_record(record) != value):
             refuse('TARGET_CHANGED', 'launch record, lifecycle, intent or owner changed')
         if fingerprint(self.p.config(record)) != value['configuration_sha256']:
             refuse('TARGET_CHANGED', 'launch configuration changed')
         if self.p.cpu().context(record) != value.get('cpu_policy', {'configured':False}):
             refuse('TARGET_CHANGED', 'launch CPU policy changed')
+        if self.p.clock() >= deadline:
+            refuse('DEADLINE_EXCEEDED', 'launch validation exhausted the original execution deadline')
 
     @traced('execution.bind_launch')
     def bind_launch(self, record, value, row, deadline):
@@ -393,6 +411,18 @@ class Execution:
         # its response must not start another complete Xen observation after binding.
         observation = self.publish_observation(record, current, unique, deadline)
         return {**value, 'observation':observation}
+
+    def abort_unsubmitted_launch(self, record, value, deadline):
+        """실행 잠금 소유 경로에서 명령 exec 이전 거절에만 사용하는 종결 기록이다."""
+        if self.run_record(record) != value or value.get('phase') != 'launching':
+            refuse('RECONCILE_REQUIRED','unsubmitted launch owner changed')
+        # 만료 뒤에는 원 실행의 부재 확인·기록 종결만 한다. 제출 권한을 연장하지 않는다.
+        end=deadline if self.p.clock()<deadline else self.p.clock()+15
+        if self.p.matching(record,self.p.domains(deadline=end)):
+            refuse('RECONCILE_REQUIRED','domain exists after pre-submission rejection')
+        self.write(self._path(self.runtime,'executions',record['uuid']),
+                   {**value,'phase':'stopped','launch_aborted_before_submit':True,
+                    'stopped_monotonic_ms':int(self.p.clock()*1000)})
 
     def end_run(self, record):
         value = self.run_record(record)
@@ -606,6 +636,13 @@ class Execution:
 
     @traced('execution.accept')
     def accept(self, record, request, key=None, *, source="user", previous=None, receipt=None, deadline=None):
+        # operation_lock -> admission 순서만 허용한다. 짧은 수락 경로는 admission을
+        # 해제한 뒤에만 긴 실행 잠금을 시도하므로 서로 기다리는 순환을 만들지 않는다.
+        with short_lock(self.runtime, 'admission'):
+            return self._accept_locked(record, request, key, source=source, previous=previous,
+                                       receipt=receipt, deadline=deadline)
+
+    def _accept_locked(self, record, request, key=None, *, source="user", previous=None, receipt=None, deadline=None):
         if deadline is not None and self.p.clock() >= deadline:
             refuse('DEADLINE_EXCEEDED', 'control deadline expired before intent acceptance')
         lifecycle, generation = self.lifecycle(record)
@@ -627,31 +664,30 @@ class Execution:
             refuse("TARGET_CHANGED", "prepared control belongs to a previous lifecycle")
         if receipt is not None:
             receipt["operation"] = op
-        with short_lock(self.runtime, 'admission'):
-            if deadline is not None and self.p.clock() >= deadline:
-                refuse('DEADLINE_EXCEEDED', 'control deadline expired before intent publication')
-            if request["action"] not in ("stop", "destroy"):
-                self.gate()
-            elif (self.runtime/"shutdown-requested").exists():
-                refuse("HOST_QUIESCING", "storage shutdown has already been requested")
-            if previous is None:
-                self.save_request(op, "prepared")
-            committed = old and old["accepted_operation_id"] == op["operation_id"] and old["intent_revision"] == op["intent_revision"]
-            if not committed:
-                if generation != op["lifecycle_generation"] or base != op["base_revision"]:
-                    refuse("TARGET_CHANGED", "prepared intent was superseded")
-                value = {"schema_version":"1.0", "vm_id":record["uuid"], "desired_state":op["desired_state"],
-                         "intent_revision":op["intent_revision"], "lifecycle_generation":generation,
-                         "accepted_host_boot_id":self.host, "accepted_operation_id":op["operation_id"], "source":source}
-                self.write(self._path(self.data, "control", record["uuid"]), value)
-                self.checkpoint("intent-published", op)
-            else:
-                sync_directory(self.data/"control")
-            self.save_request(op, "accepted")
-            self.checkpoint("intent-admission-pending", op)
-            self.set_admission(record, op["desired_state"] == "running",
-                               "user-stop" if op["desired_state"] == "stopped" else "user-reboot" if request["action"] == "reboot" else "user-start",
-                               "EXPLICIT_INTENT" if source == "user" else "APPROVED_BOOT_POLICY")
+        if deadline is not None and self.p.clock() >= deadline:
+            refuse('DEADLINE_EXCEEDED', 'control deadline expired before intent publication')
+        if request["action"] not in ("stop", "destroy"):
+            self.gate()
+        elif (self.runtime/"shutdown-requested").exists():
+            refuse("HOST_QUIESCING", "storage shutdown has already been requested")
+        if previous is None:
+            self.save_request(op, "prepared")
+        committed = old and old["accepted_operation_id"] == op["operation_id"] and old["intent_revision"] == op["intent_revision"]
+        if not committed:
+            if generation != op["lifecycle_generation"] or base != op["base_revision"]:
+                refuse("TARGET_CHANGED", "prepared intent was superseded")
+            value = {"schema_version":"1.0", "vm_id":record["uuid"], "desired_state":op["desired_state"],
+                     "intent_revision":op["intent_revision"], "lifecycle_generation":generation,
+                     "accepted_host_boot_id":self.host, "accepted_operation_id":op["operation_id"], "source":source}
+            self.write(self._path(self.data, "control", record["uuid"]), value)
+            self.checkpoint("intent-published", op)
+        else:
+            sync_directory(self.data/"control")
+        self.save_request(op, "accepted")
+        self.checkpoint("intent-admission-pending", op)
+        self.set_admission(record, op["desired_state"] == "running",
+                           "user-stop" if op["desired_state"] == "stopped" else "user-reboot" if request["action"] == "reboot" else "user-start",
+                           "EXPLICIT_INTENT" if source == "user" else "APPROVED_BOOT_POLICY")
         return op
 
     @traced('execution.control')
@@ -721,6 +757,14 @@ class Execution:
                     row = {k:observation[k] for k in ('domid', 'xen_state', 'xen_state_flags')}
                     observation = self.publish_observation(record, row, observation['xen_unique_id'], readonly_end)
             if action in ("stop", "destroy"):
+                if self.p.process_isolation:
+                    from xenova_guest_process import cleanup
+                    try:
+                        cleanup(self.p,record,run,readonly_end,observe_only=True)
+                    except (PlatformError,OSError,ValueError):
+                        refuse('RECONCILE_REQUIRED','domain absent but owned process cleanup is unconfirmed; no signal sent',
+                               details={'operation_id':previous['operation_id'],'replayed':True,
+                                        'process_scope':(run or {}).get('process_scope')})
                 self.end_run(record)
             previous["result"] = {"accepted":True, "observation":observation, "intent_revision":previous["intent_revision"]}
             previous["error"] = None

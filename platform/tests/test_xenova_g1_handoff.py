@@ -53,9 +53,10 @@ class HandoffTest(unittest.TestCase):
         self.package()
         manifest = handoff.verify(self.output)
         mapping = handoff.runtime_sources()
-        self.assertEqual(len(mapping), 25)
+        self.assertEqual(len(mapping), 26)
         self.assertIn("xenova_cpu.py",mapping)
         self.assertIn("xenova_trace.py",mapping)
+        self.assertIn("xenova_guest_process.py",mapping)
         for target, source in mapping.items():
             with self.subTest(target=target):
                 self.assertEqual((self.output/"runtime"/target).read_bytes(), (ROOT/source).read_bytes())

@@ -240,6 +240,8 @@ class Platform:
         self.data, self.runtime = Path(data), Path(runtime)
         self.defaults_path = Path(defaults_path)
         self.command, self.sleep, self.clock = command, sleep, clock
+        # 주입 runner는 Xen/프로세스 경계를 대역한다. 실제 runner만 systemd scope로 실행한다.
+        self.process_isolation = command is run
         self.boot_id_reader = boot_id_reader or (lambda: Path("/proc/sys/kernel/random/boot_id").read_text().strip())
         self.execution_checkpoint = execution_checkpoint or (lambda phase, value: None)
         self.execution_policy_path = Path(execution_policy_path) if execution_policy_path else self.defaults_path.with_name("execution-policy.json")
@@ -618,9 +620,25 @@ class Platform:
             self.sleep(min(0.1,max(0,deadline-self.clock())))
         raise PlatformError('cooperative reboot removal deadline exceeded; no force')
 
-    def control(self, record, action, expected, *, deadline=None):
+    def control(self, record, action, expected, *, deadline=None, _launch=None):
         row = self.resolve_domain(record, expected=expected, deadline=deadline)
-        self.timed_command(['xl', action, str(row['domid'])], deadline)
+        if action=='reboot' and self.process_isolation and guest_kind(record)=='linux':
+            from xenova_guest_process import command
+            row={**row,'xen_unique_id':self.execution().unique(row,deadline)}
+            self.timed_command(command(self,record,deadline,target=row,reboot_launch=_launch),deadline)
+        elif action=='reboot':
+            # 대역 runner도 최종 의도 검사와 제출의 순서를 실제 admission 잠금으로 검증한다.
+            from xenova_execution import short_lock, refuse
+            with short_lock(self.runtime,'admission'):
+                if _launch:
+                    self.execution().guard_launch(record,_launch,deadline)
+                else:
+                    intent=self.execution().intent(record)
+                    if intent and intent['desired_state']!='running':
+                        refuse('INTENT_MISMATCH','reboot superseded by stop intent')
+                self.timed_command(['xl', action, str(row['domid'])], deadline)
+        else:
+            self.timed_command(['xl',action,str(row['domid'])],deadline)
         return row
 
     def _settle_created_domain(self, record, row, deadline):
@@ -692,15 +710,40 @@ class Platform:
                 path = item.get('pdev_path')
                 if disk is not None and path and Path(path).exists() and os.path.samefile(path, disk):
                     raise PlatformError(f'{disk} became attached before launch')
-        execution.guard_launch(record, launch, deadline)
-        remaining = min(45, deadline-self.clock())
+        try:
+            execution.guard_launch(record, launch, deadline)
+        except PlatformError:
+            # 아직 helper/명령을 만들지 않은 이 경계만 안전한 미제출 종결 근거다.
+            # 확인·저장 실패면 원 거절과 미확정 실행을 유지하며 성공으로 바꾸지 않는다.
+            try:
+                execution.abort_unsubmitted_launch(record, launch, deadline)
+            except (PlatformError, OSError, ValueError):
+                pass
+            raise
+        command_deadline=min(deadline,self.clock()+45)
+        remaining = command_deadline-self.clock()
         if remaining <= 0:
             from xenova_execution import refuse
             refuse('DEADLINE_EXCEEDED', 'guest operation deadline exceeded')
+        def submit(argv):
+            left=command_deadline-self.clock()
+            if left<=0:
+                from xenova_execution import refuse
+                refuse('DEADLINE_EXCEEDED','create submission deadline expired')
+            # create의 기존 45초 상한을 유지한다. 조회용 timed_command의 15초와 구별한다.
+            return self.command(argv,timeout=left)
         with span('external.command', command_kind='xl.create', timeout_seconds=remaining):
             if _result is not None:
                 _result['physical_submitted'] = True
-            self.command(['xl', 'create', str(config)], timeout=remaining)
+            if self.process_isolation:
+                from xenova_guest_process import command
+                argv=command(self,record,deadline,launch=launch)
+                submit(argv)
+            else:
+                from xenova_execution import short_lock
+                with short_lock(self.runtime,'admission'):
+                    execution.guard_launch(record,launch,deadline)
+                    submit(['xl','create',str(config)])
         created = self.matching(record, self.domains(deadline=deadline))
         if not created:
             raise PlatformError(f"{record['id']}: xl create returned without a live domain")
@@ -808,6 +851,9 @@ class Platform:
                 rows = self.matching(record, domains)
                 rows = self.observed_target(record, rows, (_observed or {}).get(record['uuid']), deadline)
                 if not rows:
+                    if self.process_isolation:
+                        from xenova_guest_process import cleanup
+                        cleanup(self,record,self.execution().run_record(record),deadline)
                     result['already_stopped'].append(record['id'])
                     result['instances'][record['id']] = {'result': 'already_stopped', 'stage': 'domain-absent'}
                     continue
@@ -882,6 +928,9 @@ class Platform:
             for record, row, strategy in pending:
                 key, domid = record['id'], row['domid']
                 if domid not in before and domid not in after:
+                    if self.process_isolation:
+                        from xenova_guest_process import cleanup
+                        cleanup(self,record,self.execution().run_record(record),deadline)
                     result['stopped'].append(key)
                     self.execution().end_run(record)
                     result['instances'][key].update(result=strategy, stage='domain-removed', xen_state='stopped')
@@ -968,11 +1017,11 @@ class Platform:
         captured = {}
         self.cpu().require(record, deadline, expected=cpu_context, present=True, capture=captured)
         launch = execution.prepare_launch(record, owner, deadline=deadline, expected_cpu=cpu_context,
-                                          cpu_evidence=captured.get('evidence'))
+                                          cpu_evidence=captured.get('evidence'), reuse_process_scope=True)
         execution.guard_launch(record, launch, deadline)
         if _result is not None:
             _result['physical_submitted'] = True
-        self.control(record, 'reboot', rows[0], deadline=deadline)
+        self.control(record, 'reboot', rows[0], deadline=deadline, _launch=launch)
         while self.clock() < deadline:
             # 종료 중 상세 설정은 먼저 사라질 수 있다. 새 실행이 관측된 뒤
             # 기존의 상세 신원·디스크 검사와 launch 결합을 다시 수행한다.
@@ -1146,6 +1195,22 @@ def main(argv=None):
     parser.add_argument('--autostart', action='store_true', help='persist next-boot policy; no immediate start')
     args = parser.parse_args(argv)
     p = Platform()
+    if args.action == 'stop':
+        # 내부 이름 CLI도 장기 실행 잠금 앞의 공통 의도 수락 경로를 사용한다.
+        from xenova_management import Manager
+        from xenova_execution import ExecutionError
+        records=p.records(validate_assets=False)
+        if args.id not in records:
+            raise PlatformError('unknown instance id; create it explicitly')
+        response=Manager(p).call('stop',{'vm_id':records[args.id]['uuid'],'force':args.force},
+                                 execute=True,idempotency_key=args.idempotency_key)
+        if not response['ok']:
+            print(json.dumps(response,indent=2))
+            raise ExecutionError(**response['error'])
+        physical=response['data']['original_result'].get('physical_result')
+        if physical is not None:
+            print(json.dumps(physical,indent=2))
+        return
     if args.action in ('host-init', 'host-quiesce'):
         value = p.execution().initialize_host() if args.action == 'host-init' else p.execution().quiesce('systemd-shutdown')
         print(json.dumps(value))
