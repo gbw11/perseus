@@ -36,7 +36,9 @@ def main(argv=None):
         p=BASE/name
         if sha(p)!=spec["sha256"] or p.stat().st_size!=spec["bytes"]:
             raise ValueError("firmware source differs from build: "+name)
-    lock=json.loads((BASE/"network-starter.lock.json").read_text())
+    # Older regular receipts use the source lock; new candidate receipts carry
+    # their distinct version/provenance without editing factory selection.
+    lock=receipt.get("app_lock") or json.loads((BASE/"network-starter.lock.json").read_text())
     actual={str(p.relative_to(BASE/"network-starter-app")):{"sha256":sha(p),"bytes":p.stat().st_size}
             for p in sorted((BASE/"network-starter-app").rglob("*")) if p.is_file()}
     if actual!=lock["app_files"]:

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { applyDriveState, applyEvent, emptyTelemetry, type DriveAppDto, type DriveStateDto } from './live';
+import {
+  advanceOdometer,
+  applyDriveState,
+  applyEvent,
+  emptyTelemetry,
+  type DriveAppDto,
+  type DriveStateDto,
+} from './live';
 
 const app = (patch: Partial<DriveAppDto> = {}): DriveAppDto => ({
   vm_id: 'vm',
@@ -60,7 +67,7 @@ describe('applyDriveState', () => {
     expect(t.commands.manual).toEqual({ generation: 2, v_mps: 0.4, steer_rad: 0.1 });
   });
 
-  it('주행 앱은 명령 신선도, 인터랙션 앱은 생존 신호로 상태를 정한다', () => {
+  it('주행 앱은 명령 신선도, 네비게이션 앱은 생존 신호로 상태를 정한다', () => {
     const t = applyDriveState(emptyTelemetry(0), state(), 1000);
     expect(t.apps.manual.health).toBe('ok');
     expect(t.apps.autonomous.health).toBe('fault');
@@ -124,6 +131,69 @@ describe('applyEvent', () => {
       },
       0,
     );
-    expect(t.events[0]?.text).toBe('autonomous 장애 (command_timeout)');
+    expect(t.events[0]?.text).toBe('자율주행 장애 (command_timeout)');
+  });
+});
+
+describe('복구 중 표시 (RC카 시나리오 §4.3)', () => {
+  const dead = app({
+    vm_id: 'vm-a',
+    command_fresh: false,
+    command_ago_ms: null,
+    command_hz: 0,
+    heartbeat_ago_ms: null,
+  });
+  const s = (autonomous: DriveAppDto) => state({ apps: { ...state().apps, autonomous } });
+
+  it('recovery.started 를 받으면 명령이 다시 신선해질 때까지 장애가 아니라 복구 중', () => {
+    let t = applyDriveState(emptyTelemetry(0), s(dead), 0);
+    expect(t.apps.autonomous.health).toBe('fault');
+    t = applyEvent(
+      t,
+      {
+        event_id: 'r1',
+        type: 'recovery.started',
+        severity: 'INFO',
+        vm_id: 'vm-a',
+        occurred_at: '2026-10-20T00:00:00Z',
+        payload: {},
+      },
+      100,
+      Date.parse('2026-10-20T00:00:00Z'),
+    );
+    expect(t.apps.autonomous.health).toBe('recovering');
+    t = applyDriveState(t, s(dead), 200);
+    expect(t.apps.autonomous.health).toBe('recovering');
+    t = applyDriveState(t, s(app({ vm_id: 'vm-a' })), 300);
+    expect(t.apps.autonomous.health).toBe('ok');
+    t = applyDriveState(t, s(dead), 400);
+    expect(t.apps.autonomous.health).toBe('fault'); // 복구가 끝났으니 다시 끊기면 장애
+  });
+});
+
+describe('재개 카운트다운 · 추정 거리', () => {
+  it('resume.remaining_ms 를 화면 시계의 전환 예상 시각으로 바꾼다', () => {
+    const t = emptyTelemetry(0);
+    const next = applyDriveState(
+      t,
+      {
+        ...state(),
+        resume: { generation: 6, switch_in_ms: 3000, accepted_ago_ms: 1200, remaining_ms: 1800 },
+      },
+      10_000,
+    );
+    expect(next.resumeAt).toBe(11_800);
+    expect(applyDriveState(next, state(), 10_100).resumeAt).toBeNull();
+  });
+
+  it('속도를 적분해 거리를 늘리고, 1초 넘게 끊기면 그 사이는 세지 않는다', () => {
+    let t = emptyTelemetry(0);
+    t = { ...t, odometer: advanceOdometer(t, 0.5, 0) };
+    t = { ...t, odometer: advanceOdometer(t, 0.5, 100) };
+    expect(t.odometer!.distanceM).toBeCloseTo(0.05);
+    t = { ...t, odometer: advanceOdometer(t, -0.5, 200) };
+    expect(t.odometer!.distanceM).toBeCloseTo(0.1);
+    t = { ...t, odometer: advanceOdometer(t, 0.5, 5000) };
+    expect(t.odometer!.distanceM).toBeCloseTo(0.1);
   });
 });

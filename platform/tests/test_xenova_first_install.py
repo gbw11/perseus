@@ -138,6 +138,18 @@ class InputSafetyTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'growth tool missing'):
             assemble.platform_root_ok(root)
 
+    def test_boot_display_payload_and_enablement_are_required_in_new_images(self):
+        root = platform_root(self.base / 'boot-display-root')
+        self.assertIn('usr/lib/xenova/xenova_boot_status.py',assemble.platform_root_ok(root))
+        unit = root/'etc/systemd/system/sysinit.target.wants/xenova-boot-status.service'
+        unit.unlink()
+        with self.assertRaisesRegex(ValueError,'boot display unit not enabled'):
+            assemble.platform_root_ok(root)
+        unit.symlink_to('/usr/lib/systemd/system/xenova-boot-status.service')
+        (root/'usr/lib/xenova/xenova_boot_progress.py').write_text('stale')
+        with self.assertRaisesRegex(ValueError,'source/installed contract mismatch'):
+            assemble.platform_root_ok(root)
+
     def test_assembler_rejects_old_root_before_guest_preparation_or_publication(self):
         root = self.base / 'old-root'
         root.mkdir()

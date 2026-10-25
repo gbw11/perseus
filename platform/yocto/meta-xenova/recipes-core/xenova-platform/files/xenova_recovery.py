@@ -4,6 +4,7 @@ from xenova_execution import ExecutionError, fingerprint, refuse
 from xenova_runtime import PlatformError
 import xenova_catalog as catalog
 import xenova_vm as vm
+from xenova_trace import bind as trace_bind, traced
 
 
 def validate_request(spec):
@@ -65,6 +66,12 @@ class Recovery:
         return result
 
     def save(self, op, phase):
+        trace_bind(operation_id=op['operation_id'], recovery_attempt_id=op['recovery_attempt_id'],
+                   host_boot_id=self.e.host, vm_id=op['request']['vm_id'], phase=phase,
+                   deadline_monotonic_ms=op['request']['deadline_monotonic_ms'],
+                   intent_revision=op['request']['expected_intent_revision'],
+                   lifecycle_generation=op['request']['expected_lifecycle_generation'],
+                   policy_revision=(op.get('cpu_policy') or {}).get('policy_revision'))
         op["phase"] = phase
         op.setdefault("events", []).append({"phase":phase, "host_boot_id":self.e.host,
                                           "monotonic_ms":int(self.p.clock()*1000)})
@@ -111,13 +118,22 @@ class Recovery:
         if spec["mode"] == "force-restart" and record["uuid"] not in self.e.policy()["force_restart_vm_ids"]:
             refuse("RECOVERY_MODE_UNSUPPORTED", "force recovery has no per-VM administrator approval")
 
+    @traced('recovery.complete')
     def complete(self, op, observation):
         record = self.m._state(op['request']['vm_id'], self.p.records(validate_assets=False))['record']
-        self.p.cpu().require(record, self.p.clock()+15, expected=op.get('cpu_policy', {'configured':False}), present=True)
         run = self.e.run_record({"uuid":op["request"]["vm_id"]})
+        proof = observation.get('_description', {}).get('execution_context')
         if (observation["execution_status"] != "managed" or not run or
-                run.get("owner") != {"kind":"recovery", "recovery_attempt_id":op["recovery_attempt_id"]}):
+                run.get("owner") != {"kind":"recovery", "recovery_attempt_id":op["recovery_attempt_id"]} or
+                proof != run or run.get('cpu_verification') != 'complete' or
+                observation.get('configuration_revision') != fingerprint(record) or
+                self.p.cpu().context(record) != op.get('cpu_policy', {'configured':False})):
             refuse("RECONCILE_REQUIRED", "new launch cannot be correlated to this attempt")
+        intent = self.e.intent(record)
+        if (self.e.lifecycle(record) != ('REGISTERED',op['request']['expected_lifecycle_generation']) or
+                not intent or intent['desired_state'] != 'running' or
+                intent['intent_revision'] != op['request']['expected_intent_revision']):
+            refuse('INTENT_MISMATCH', 'recovery completion intent or lifecycle changed')
         op["result"] = {"vm_id":op["request"]["vm_id"], "host_boot_id":self.e.host,
                         "lifecycle_generation":op["request"]["expected_lifecycle_generation"],
                         "intent_revision":op["request"]["expected_intent_revision"],
@@ -182,6 +198,7 @@ class Recovery:
             op["phase"] = previous_phase
             self.unresolved(op, "expiration journal could not be durably closed")
 
+    @traced('recovery.once')
     def _once(self, spec, *, execute, context):
         spec = validate_request(spec)
         identity = spec["recovery_attempt_id"]
@@ -194,9 +211,14 @@ class Recovery:
             if op["request"] != spec:
                 refuse("IDEMPOTENCY_CONFLICT", "recovery attempt ID has a different request")
             if op["phase"] in ("completed", "failed"):
-                record = self.m._state(spec["vm_id"], self.p.records(validate_assets=False))["record"]
-                current = self.e.observe(record, self.p.clock()+15)
-                self.event("recovery-replayed", record, op["operation_id"], {"recovery_attempt_id":identity})
+                current = None
+                try:
+                    record = self.m._state(spec["vm_id"], self.p.records(validate_assets=False))["record"]
+                    current = self.e.observe(record, self.p.clock()+15)
+                except (PlatformError, OSError, ValueError, KeyError, TypeError) as error:
+                    self.diagnostics.append({'code':'DIAGNOSTIC_UNAVAILABLE',
+                        'sink':'current-observation','cause_type':type(error).__name__})
+                self.event("recovery-replayed", {'uuid':spec['vm_id']}, op["operation_id"], {"recovery_attempt_id":identity})
                 if op.get("error"):
                     refuse(op["error"]["code"], op["error"]["message"],
                            details={**op["error"]["details"], "operation_id":op["operation_id"], "replayed":True,
@@ -212,10 +234,24 @@ class Recovery:
                 return {"plan":True, "attempt":op}
             # A recorded launch observed under this exact owner can be finalized without issuing Xen again.
             if op["phase"] in ("launching", "observed", "uncertain"):
-                record, _, observation = self.conditions(spec, self.p.clock()+15, target=False, gate=False)
+                # 만료 후의 15초는 기존 실행을 확인·종결하는 읽기 예산이다.
+                # 이 분기에는 start/stop/create/repin 경로가 없다.
+                reconcile_end = self.p.clock()+15
+                record, _, observation = self.conditions(spec, reconcile_end, target=False, gate=False)
                 run = self.e.run_record(record)
                 if (observation["execution_status"] == "managed" and run and
                         run.get("owner") == {"kind":"recovery", "recovery_attempt_id":identity}):
+                    self.p.cpu().require(record, reconcile_end, expected=op.get('cpu_policy', {'configured':False}),
+                                         present=True, expected_identity=run)
+                    if run.get('cpu_verification') != 'complete':
+                        # An interrupted bind may have stored identity before CPU
+                        # verification. Only this fresh, successful check can close
+                        # that gap; observed by itself is insufficient.
+                        run = {**run, 'cpu_verification':'complete'}
+                        run.pop('cpu_error', None)
+                        self.e.write(self.e._path(self.p.runtime, 'executions', record['uuid']), run)
+                        row = {k:observation[k] for k in ('domid', 'xen_state', 'xen_state_flags')}
+                        observation = self.e.publish_observation(record, row, observation['xen_unique_id'], reconcile_end)
                     result = self.complete(op, observation)
                     return {"attempt":op, "original_result":result, "current_observation":observation}
                 refuse("RECONCILE_REQUIRED", "a previous launch may still exist; no stop/create is repeated",
@@ -269,20 +305,25 @@ class Recovery:
                 refuse("TARGET_CHANGED", "a domain appeared before recovery launch")
             if vm.has_network(record):
                 self.p.prepare_dhcp(records, deadline=deadline)
-            self.p.cpu().require(record, deadline, expected=op.get('cpu_policy', {'configured':False}))
+            if self.p.cpu().context(record) != op.get('cpu_policy', {'configured':False}):
+                refuse('TARGET_CHANGED', 'accepted recovery CPU policy changed')
             self.save(op, "launching")
             owner = {"kind":"recovery", "recovery_attempt_id":identity}
-            self.p.start(record, _owner=owner, deadline=deadline)
-            observed = self.e.observe(record, deadline)
+            confirmed = {}
+            self.p.start(record, _owner=owner, deadline=deadline, _result=confirmed)
+            observed = confirmed['observation']
             self.save(op, "observed")
             result = self.complete(op, observed)
             return {"attempt":op, "original_result":result, "current_observation":observed}
         except (PlatformError, OSError, ValueError) as error:
             code = error.error["code"] if isinstance(error, ExecutionError) else "XEN_EXECUTION_FAILED"
-            uncertain = op["phase"] in ("launching", "observed")
+            # A submitted shutdown can remove the old domain before its response
+            # is lost. Keep that owner unresolved just like a submitted launch.
+            uncertain = op["phase"] in ("stopping", "launching", "observed")
             op["error"] = {"code":"RECONCILE_REQUIRED" if uncertain else code, "message":str(error),
                            "retryable":False, "details":{"operation_id":op["operation_id"],
                            "recovery_attempt_id":identity, "accepted":True,
+                           "failed_phase":op["phase"],
                            **({'cause':error.error} if isinstance(error, ExecutionError) else {})}}
             try:
                 self.save(op, "uncertain" if uncertain else "failed")

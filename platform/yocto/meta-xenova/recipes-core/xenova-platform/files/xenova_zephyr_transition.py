@@ -41,7 +41,7 @@ def mutate(m,spec,execute,key,records,context,fail):
             fail("IDEMPOTENCY_CONFLICT","same key has a different action or request")
     tomb=m._state(spec["vm_id"],records)
     if op and op["status"]=="SUCCEEDED":
-        return {"operation":op,"original_result":op["result"],"current":m._view(tomb,observe=True)}
+        return {"operation":op,"original_result":op["result"],"current":m._observe_view(tomb)}
     if tomb["lifecycle"]!="REGISTERED" or tomb["generation"]!=spec["expected_lifecycle_generation"]:
         fail("TARGET_CHANGED","firmware lifecycle changed")
     record=tomb["record"]
@@ -111,4 +111,4 @@ def mutate(m,spec,execute,key,records,context,fail):
             "configuration_sha256":fingerprint(updated),"starts_guest":False,
             "app_readiness":"unknown","retained_reservation":op["assigned"]}
     op.update(status="SUCCEEDED",result=result,error=None);m._save_op(op,"complete")
-    return {"operation":op,"original_result":result,"current":m._view({**tomb,"record":updated},observe=True)}
+    return {"operation":op,"original_result":result,"current":m._observe_view({**tomb,"record":updated})}

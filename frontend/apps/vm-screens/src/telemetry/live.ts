@@ -30,7 +30,7 @@ export interface DriveStateDto {
     flags: { estop: boolean; watchdog: boolean; obstacle: boolean } | null;
     received_ago_ms: number;
   } | null;
-  /** app_id 별. 인터랙션 VM 은 message-board */
+  /** app_id 별. 네비게이션 VM 은 message-board */
   apps: Record<string, DriveAppDto>;
   perception: {
     valid: boolean;
@@ -40,6 +40,14 @@ export interface DriveStateDto {
     heading_err_rad: number | null;
     obstacle_count: number;
     stop: boolean;
+  } | null;
+  /** 받아들여진 재개 카운트다운 (계약 v1.2 §6). 없으면 null */
+  resume?: {
+    generation: number | null;
+    switch_in_ms: number;
+    accepted_ago_ms: number;
+    remaining_ms: number;
+    requested_by?: string;
   } | null;
 }
 
@@ -78,7 +86,7 @@ function heartbeatFresh(dto: DriveAppDto): boolean {
   return dto.heartbeat_ago_ms !== null && dto.heartbeat_ago_ms <= HEARTBEAT_STALE_MS;
 }
 
-/** 주행 앱은 명령 신선도(100 ms, 백엔드가 판정), 인터랙션 앱은 생존 신호로 상태를 정한다 */
+/** 주행 앱은 명령 신선도(100 ms, 백엔드가 판정), 네비게이션 앱은 생존 신호로 상태를 정한다 */
 function healthOf(id: AppId, dto: DriveAppDto | undefined): Health {
   if (!dto) return 'stopped';
   if (dto.heartbeat_state === 'error' && heartbeatFresh(dto)) return 'fault';
@@ -86,11 +94,19 @@ function healthOf(id: AppId, dto: DriveAppDto | undefined): Health {
   return dto.command_fresh ? 'ok' : 'fault';
 }
 
-function appStatus(id: AppId, dto: DriveAppDto | undefined, previous: AppStatus, now: number): AppStatus {
-  const health = healthOf(id, dto);
+function appStatus(
+  id: AppId,
+  dto: DriveAppDto | undefined,
+  previous: AppStatus,
+  now: number,
+  recovering: boolean,
+): AppStatus {
+  const raw = healthOf(id, dto);
+  // 복구 서비스가 재시작한 앱은 다시 정상이 될 때까지 장애가 아니라 복구 중 (RC카 시나리오 §4.3 빨강 → 노랑 → 초록)
+  const health = recovering && raw === 'fault' ? 'recovering' : raw;
   const alive = !!dto && (!!dto.command_fresh || heartbeatFresh(dto));
   return {
-    domain: alive ? 'running' : 'stopped',
+    domain: alive ? 'running' : recovering ? 'booting' : 'stopped',
     health,
     healthSince: health === previous.health ? previous.healthSince : now,
     lastCommandAt: dto?.command_ago_ms != null ? now - dto.command_ago_ms : null,
@@ -123,10 +139,28 @@ export function emptyTelemetry(now: number): Telemetry {
   };
 }
 
+/** 상태 프레임 사이가 이보다 길면(끊김) 적분하지 않는다 */
+const MAX_ODOMETER_STEP_MS = 1000;
+
+/** 속도를 적분해 주행 거리를 추정한다 (뒤로 가도 거리는 늘어난다) */
+export function advanceOdometer(t: Telemetry, v: number, now: number): NonNullable<Telemetry['odometer']> {
+  const previous = t.odometer;
+  if (!previous) return { distanceM: 0, at: now };
+  const dt = now - previous.at;
+  if (dt <= 0) return previous;
+  const step = dt > MAX_ODOMETER_STEP_MS ? 0 : (Math.abs(v) * dt) / 1000;
+  return { distanceM: previous.distanceM + step, at: now };
+}
+
 export function applyDriveState(t: Telemetry, state: DriveStateDto, now: number): Telemetry {
   const apps = {} as Telemetry['apps'];
+  const appVmIds: Partial<Record<AppId, string>> = { ...t.appVmIds };
+  const recoveringApps = { ...t.recoveringApps };
   for (const id of ['autonomous', 'manual', 'interaction'] as const) {
-    apps[id] = appStatus(id, state.apps[TOPIC_APP_ID[id]], t.apps[id], now);
+    const dto = state.apps[TOPIC_APP_ID[id]];
+    if (dto?.vm_id) appVmIds[id] = dto.vm_id;
+    apps[id] = appStatus(id, dto, t.apps[id], now, !!recoveringApps[id]);
+    if (apps[id].health === 'ok') delete recoveringApps[id];
   }
   const command = (id: 'autonomous' | 'manual') => {
     const last = state.apps[id]?.last_command;
@@ -146,6 +180,8 @@ export function applyDriveState(t: Telemetry, state: DriveStateDto, now: number)
     activeApp: control?.active_app ?? null,
     generation: control?.generation ?? 0,
     apps,
+    appVmIds,
+    recoveringApps,
     commands: { autonomous: command('autonomous'), manual: command('manual') },
     perception: {
       lane_offset_m: perception?.lane_offset_m ?? 0,
@@ -163,18 +199,37 @@ export function applyDriveState(t: Telemetry, state: DriveStateDto, now: number)
       batt_v: vehicle?.batt_v ?? 0,
     },
     autonomousFreshSince: autonomousFresh ? (t.autonomousFreshSince ?? now) : null,
+    resumeAt: state.resume ? now + state.resume.remaining_ms : null,
+    resumeAuto: state.resume?.requested_by === 'auto',
+    odometer: advanceOdometer(t, vehicle?.v_mps ?? 0, now),
   };
 }
 
 const MAX_EVENTS = 40;
+/** MQTT 계약 app_id → 화면 이름 */
+const APP_TITLE: Record<string, string> = {
+  autonomous: '자율주행',
+  manual: '수동주행',
+  'message-board': '네비게이션',
+};
 
 function text(event: EventDto): string {
   const p = event.payload ?? {};
   if (event.type === 'drive.mode.changed') {
     return `모드 ${String(p.from ?? '?')} → ${String(p.to ?? '?')}${p.reason ? ` (${String(p.reason)})` : ''}`;
   }
+  if (event.type === 'recovery.started') return 'VM 재시작 (복구 서비스)';
+  if (event.type === 'drive.resume.accepted') {
+    return `${p.requested_by === 'auto' ? '자율주행 자동 복귀' : '자율주행 재개 승인'} — ${Number(p.switch_in_ms ?? 3000) / 1000}초 뒤 전환`;
+  }
+  if (event.type === 'drive.resume.cancelled')
+    return p.reason === 'operator_cancelled'
+      ? '자율주행 복귀 취소 (운영자) — 수동주행 유지'
+      : `자율주행 재개 취소${p.reason ? ` (${String(p.reason)})` : ''}`;
+  if (event.type === 'recovery.completed') return 'VM 복구 완료';
   if (event.type === 'drive.fault.detected') {
-    return `${String(p.app_id ?? '앱')} 장애${p.reason ? ` (${String(p.reason)})` : ''}`;
+    const title = APP_TITLE[String(p.app_id)] ?? String(p.app_id ?? '앱');
+    return `${title} 장애${p.reason ? ` (${String(p.reason)})` : ''}`;
   }
   return event.type;
 }
@@ -184,9 +239,18 @@ export function applyEvent(t: Telemetry, event: EventDto, now: number, wallNow =
   const id = hash(event.event_id);
   if (t.events.some((e) => e.id === id)) return t;
   const ageMs = Math.max(0, wallNow - Date.parse(event.occurred_at));
-  const level: TimelineEvent['level'] = event.severity === 'INFO' ? 'info' : 'warning';
+  const level: TimelineEvent['level'] =
+    event.type === 'drive.resume.accepted' ? 'ok' : event.severity === 'INFO' ? 'info' : 'warning';
   const entry: TimelineEvent = { id, at: now - ageMs, type: event.type, level, text: text(event) };
-  return { ...t, events: [entry, ...t.events].slice(0, MAX_EVENTS) };
+  const next = { ...t, events: [entry, ...t.events].slice(0, MAX_EVENTS) };
+  if (event.type === 'recovery.started' && event.vm_id) {
+    const app = (Object.keys(t.appVmIds ?? {}) as AppId[]).find((id) => t.appVmIds?.[id] === event.vm_id);
+    if (app) {
+      next.recoveringApps = { ...t.recoveringApps, [app]: true };
+      next.apps = { ...t.apps, [app]: { ...t.apps[app], health: 'recovering', healthSince: now } };
+    }
+  }
+  return next;
 }
 
 /** TimelineEvent.id 는 숫자라서 event_id 문자열을 32비트 해시로 바꾼다 */

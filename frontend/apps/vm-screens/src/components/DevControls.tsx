@@ -1,48 +1,32 @@
-import { Button } from '@xenova/ui';
 import { Link } from 'react-router';
 import { label } from '../telemetry/scenario';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
 import { APP_IDS } from '../telemetry/types';
 import styles from './screens.module.css';
 
+const SOURCE_LABEL = { mock: '가짜 시나리오', console: '관리 콘솔 mock', live: '백엔드' } as const;
 const CONNECTION_LABEL = {
-  mock: 'mock',
+  mock: '혼자 도는 중',
   connecting: '연결 중',
   live: '연결됨',
-  offline: '끊김 — 다시 연결 중',
+  offline: '신호 없음',
   unauthorized: '인증 필요 — 관리 콘솔 로그인 또는 .env.local 계정',
 } as const;
 
-/** 개발·데모 조작 바. 키오스크(?kiosk=1)에서는 숨긴다. 실제 장애 주입은 관리 콘솔이 맡는다. */
+/**
+ * 개발용 아래 띠: 데이터 출처·연결 상태와 화면 이동 링크만. 키오스크(?kiosk=1)에서는 숨긴다.
+ * 조작 버튼은 없다 — 모니터는 보여 주기만 하고, 장애 주입·재개는 관리 콘솔 시연 제어에서 한다 (화면 정의서 §1).
+ */
 export function DevControls() {
-  const { telemetry: t, crash, toggleStress, resume, source, connection } = useTelemetry();
+  const { source, connection } = useTelemetry();
   if (new URLSearchParams(window.location.search).has('kiosk')) return null;
   return (
     <footer className={styles.dev}>
       <span className={styles.devTitle}>
-        {source === 'mock' ? 'mock 조작' : `백엔드 연결: ${CONNECTION_LABEL[connection]}`}
+        {SOURCE_LABEL[source]}: {CONNECTION_LABEL[connection]}
       </span>
-      {source === 'mock' &&
-        APP_IDS.map((id) => (
-          <span key={id} className={styles.devGroup}>
-            {label(id)}
-            <Button
-              size="sm"
-              variant="danger"
-              onClick={() => crash(id)}
-              disabled={t.apps[id].domain !== 'running'}
-            >
-              강제 종료
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => toggleStress(id)}>
-              부하 {t.apps[id].cpuStress ? '해제' : ''}
-            </Button>
-          </span>
-        ))}
-      {source === 'mock' && (
-        <Button size="sm" onClick={resume} disabled={t.mode !== 'AUTO_READY'}>
-          자율주행 재개
-        </Button>
+      {source === 'console' && connection === 'offline' && (
+        <span className={styles.dim}>관리 콘솔(같은 주소의 /demo)을 다른 탭에 열어 두면 따라간다</span>
       )}
       <nav className={styles.devNav}>
         <Link to="/split">3분할</Link>

@@ -2,7 +2,7 @@
 
 환경 준비 → Linux·Zephyr 템플릿 준비·게시 → 기본 선택 확정 → 회귀·입력 고정 → dom0 빌드·검증·게시 → seed·최종 이미지 조립·검증 → PC 인계 순서로 진행한다. 빌드 절차와 명령이 바뀌면 이 문서를 갱신한다.
 
-소스 대조 기준: [하위 플랫폼·backend 통합 입력 `347d935`](https://lab.ssafy.com/s15-final/S15P31E110/-/tree/347d935cb7ef09e07f3082a13af1733bb6acd2cb). 빌드할 때는 팀에서 승인한 통합 커밋을 선택하고, 아래 입력 고정 단계에서 실제 HEAD·파일·설정 해시를 기록한다.
+빌드할 소스 커밋을 선택하고 아래 입력 고정 단계에서 실제 HEAD·파일·설정 해시를 기록한다. 플랫폼 구조와 문서의 역할은 [플랫폼 안내](README.md)를 참고한다.
 
 ## 1. 빌드 구성과 경로
 
@@ -298,6 +298,24 @@ PY
 
 빌드 영수증의 ELF·DTS·config·앱/런타임 해시와 고정 Zephyr 원본을 함께 보관한다.
 
+불변 게시본과 factory 선택을 유지하면서 변경한 앱 소스를 시험할 때는 빌드에
+`--candidate-version <새 SemVer>`를 추가하고 새 출력 경로를 사용한다. 예를 들어
+`--candidate-version 1.1.1-lifecycle.2`는 해당 후보 영수증의 앱 버전·실제 소스 해시만
+정하며 저장소의 `network-starter.lock.json`이나 기본 선택 lock을 바꾸지 않는다.
+기존 lock의 버전을 재사용하거나, 별도 후보 버전 없이 불일치한 소스로 빌드하면 거절한다.
+패키징은 후보 영수증의 출처를 사용한다. 후보의 게시·factory 채택과 새 이미지 수락은
+빌드·패키징 성공과 구분해 진행한다.
+
+Network Starter의 공통 Diagnostics와 Telemetry Publisher는 `--diagnostics on|off`,
+`--telemetry on|off`로 선택한다. 기본은 둘 다 on이며 Diagnostics off의 기본 Publisher는 off다.
+Publisher는 TCP/MQTT를 사용하고 인스턴스별 private XenStore bootstrap이 있어야 송신한다.
+broker 주소·password·VM UUID를 공유 firmware에 넣지 않는다.
+`--timing-exercise`는 20ms 산술 시험 작업을 추가하며 주행 앱으로 표시하지 않는다.
+각 비교는 별도의 새 `--output` 경로에서 빌드하고 옵션·실제 config·RAM·수신 결과를 분리해 기록한다.
+주입 계약, 실제 Core 매핑, native_sim의 격리 broker·독립 수신 시험은
+[Telemetry Publisher](../../platform/guests/zephyr/telemetry/README.md)를 따른다.
+게시한 firmware는 불변 입력으로 보존한다. 실제 보드 적용·전환은 대상 UUID와 자산 백업·복원 절차를 확인한 유지보수 단계에서 수행한다.
+
 ### 실제 manifest로 기본 선택 확정
 
 새 게시본을 준비한 실행에서는 실제 manifest와 배포 버전을 읽어 기본 lock·factory 버전을 맞춘다.
@@ -442,6 +460,20 @@ bzcat "$WIC" >"$RUN/dom0.wic"
 
 빌드 진행은 다른 WSL 창에서 `tail -f "$RUN/logs/dom0-build.stdout"`로 확인한다. 같은 `RUN` 경로를 지정하면 전체 로그를 이어서 볼 수 있다.
 
+부분 패키징은 같은 빌드 환경에서 `bitbake xenova-platform xen-rpi-u-boot-scr`로
+실행할 수 있다. 플랫폼 패키지의 `/usr/sbin/xenova-boot-status`, 두 표시 모듈,
+`xenova-boot-status.service`와 sysinit enablement를 확인한다. 기존 agetty의
+`/run/issue.d`·reload 기능을 사용하며 새 그래픽 런타임은 필요하지 않다.
+고정 이미지의 getty가 agetty인지도 패키지 manifest와 실제 unit에서 대조한다.
+다른 renderer를 쓰는 설치본의 화면 인계는 [부팅 표시](management-boot-boundaries.md#부팅-진행지연실패-표시)를 따른다.
+
+생성된 `boot.cmd`/`boot.scr`에서 dom0의 `console=hvc0 loglevel=4`,
+`systemd.show_status=error`와 journal target을 확인한다. Xen의 dtuart·메모리 인자는
+별도로 보존한다. `loglevel=4`는 ERR까지의 초기 필터이며 전체 디버그 출력이 아니다.
+정상 경로에는 `/chosen` 전체 덤프가 없어야 한다. 진단 경로의 `fdt print`는
+`xen,xen-bootargs`와 `xen,dom0-bootargs` 두 속성만 대상으로 한다.
+소스 템플릿 검사·부분 패키지 통과와 실제 이미지·HDMI 전원 부팅 수락은 구분한다.
+
 WIC의 실제 FAT에서 `boot.scr`·`xen`·`Image`·U-Boot와 UART/GIC·무선 SDIO PIO 설정을 확인한다. 다음 공통 검사 도구는 실제 ext4를 읽기 전용으로 열어 소스 일치, 패키지, ARM64 import와 unit graph를 확인하며 최종 이미지에서도 재사용한다.
 
 ```bash
@@ -518,6 +550,7 @@ try:
     work.mount(dev+"p2", root, readonly=True)
     installed = assemble.platform_root_ok(root)
     check(bool(installed), "actual dom0 source, units, cfg, Wi-Fi, identity")
+    check((root/"usr/bin/systemd-run").is_file(), "per-execution scope tool systemd-run")
     command(["chroot", root, "/usr/bin/python3", "-B", "-c",
         "import fastapi,uvicorn,pydantic,pydantic_core,paho.mqtt.client;"
         "import tty,termios,fcntl,websockets,dom0_manager,xenova_mqtt;"
@@ -611,7 +644,7 @@ required = {"xenova-platform", "xenova-bringup", "xenova-dom0-manager",
     "xenova-mqtt-client", "python3-fastapi", "python3-uvicorn", "python3-paho-mqtt",
     "python3-shell", "python3-terminal", "python3-websockets", "xen-tools-xl",
     "xen-tools-xenstat", "libxenmanage1", "mosquitto", "mosquitto-clients",
-    "qemu-system-i386"}
+    "qemu-system-i386", "systemd-extra-utils"}
 assert required <= names, sorted(required-names)
 assert any(n.startswith("kernel-module-brcmfmac-cyw-") for n in names)
 assert "python3-fastapi-ptest" not in names
@@ -831,8 +864,93 @@ sha256sum "$EXPORT/xenova-first-install.img.zst" \
 
 CPU 정책이 없는 기존 설치의 활성화는 모든 관리 게스트가 정지한 유지보수 창에서 `cpu-policy-set` 계획·실행 → 내부 `cpu-host-prepare` → 실제 배치 조회 순서로 진행한다. 정책 저장과 현재 host 적용은 서로 다른 단계다.
 
-일반 UART 콘솔의 커널 출력은 `loglevel=3`이며 연결 중 채널 진단도 `dmesg`·journal에서 조회한다. 진단용 부팅의 상세 로그 설정은 별도로 유지한다. Wi-Fi 연결 요청 응답과 실제 인증·DHCP 완료는 구분한다.
+일반 UART 콘솔의 초기 커널 출력은 `loglevel=4`로 KERN_ERR(3)까지 허용한다. 실행 중 필터는 `/proc/sys/kernel/printk`로 확인하고 연결 중 채널 진단은 `dmesg`·journal에서 조회한다. Xen의 직접 UART 경고에는 Linux 필터가 적용되지 않는다. 진단용 부팅의 상세 로그 설정은 별도로 유지한다. Wi-Fi 연결 요청 응답과 실제 인증·DHCP 완료는 구분한다.
 
 공통 이미지에는 HTTP 토큰·MQTT 암호·개인 Wi-Fi 설정을 넣지 않는다. 설치 후 `xenova-dom0-manager.service`가 `dom0_manager.service_token`을 실행해 `/etc/xenova/dom0-manager-token.env`를 0600으로 준비한다. `/etc/xenova/dom0-manager.env`의 기존 서비스 토큰은 우선하며 자동 회전하지 않는다. worker는 `/etc/xenova/recovery-worker.env`의 `XENOVA_RECOVERY_*` 설정을 읽고, broker 연결 문제로 VM 자동 시작이나 host admission을 외부 online 대기에 묶지 않는다.
 
 pinning 기능 수락과 성능 효과는 나누어 기록한다. 동일 펌웨어·입력·broker 설정에서 pinning 전/후 × Debian 부하 유무를 비교하고, guest 계산 주기와 Gateway 지연 각각의 p95/p99·관측 최대·deadline miss·오류/손실을 보관한다. 실제 주행 앱이 없는 경우 타이밍 harness 결과로 범위를 명시한다.
+
+## 10. XenStore G1 시험 인계물
+
+G1은 기본 A/B와 분리한 XenStore·VIF 관측 시험이다. 별도 펌웨어와 같은 소스 기준의
+플랫폼 런타임을 하나의 인계물로 준비한다. 1·2절에서 정한 `REPO`, `RUN`,
+고정 Zephyr·SDK·SPDX 입력과 기록 도구를 사용한다.
+
+**WSL 빌드 PC:**
+
+```bash
+run g1-build python3 -B "$REPO/platform/scripts/build-xenova-xenstore-g1.py" \
+  --zephyr-source "$ZEPHYR_SOURCE" --tools "$ZEPHYR_TOOLS" \
+  --spdx "$SPDX" --toolchain-archive "$SDK_ARCHIVE" \
+  --output "$RUN/g1-build" --execute
+
+run g1-handoff-plan python3 -B \
+  "$REPO/platform/scripts/package-xenova-xenstore-g1-handoff.py" package \
+  --source-root "$REPO" --firmware "$RUN/g1-build/firmware" \
+  --output "$RUN/g1-handoff"
+
+run g1-handoff-package python3 -B \
+  "$REPO/platform/scripts/package-xenova-xenstore-g1-handoff.py" package \
+  --source-root "$REPO" --firmware "$RUN/g1-build/firmware" \
+  --output "$RUN/g1-handoff" --execute
+
+run g1-handoff-verify python3 -B \
+  "$REPO/platform/scripts/package-xenova-xenstore-g1-handoff.py" verify \
+  --directory "$RUN/g1-handoff"
+
+(cd "$RUN/g1-handoff" && sha256sum -c SHA256SUMS)
+```
+
+`package` 기본은 계획 모드이며 출력·staging을 만들지 않는다. `--execute`는 새 인계
+디렉터리에만 게시한다. 펌웨어의 앱/모듈·빌드 스크립트·reference lock이 현재 소스와
+일치해야 하므로 문서가 들어 있는 소스 디렉터리의 변경도 빌드 입력으로 기록한다.
+기존 G1 빌드 영수증이나 게시 파일은 수정하지 않고 새 실행 경로로 준비한다.
+
+인계물은 다음 구조를 유지한다.
+
+| 경로 | 내용 |
+|---|---|
+| `RUNBOOK.md` | 이 절과 CLI 명세를 연결하는 시작 문서 |
+| `docs/platform/build-guide.md` | 현재 빌드·G1 인계 절차의 원문 |
+| `docs/platform/cli-manager-spec.md` | 공통 VM 제어·신원·복구 계약의 원문 |
+| `docs/platform/README.md`, 관리·부팅·CPU 문서 | 구성 요소 안내와 기능별 운영 절차 |
+| `docs/verification/platform-management-boundaries-history.md` | 현재 사용법과 구분한 구현·검증 이력 |
+| `platform/`의 lock 파일 | 문서에서 참조하는 고정 빌드·템플릿 입력 |
+| `firmware/` | 실제 G1 ELF/bin/map/config/DTS·라이선스·`g1-build.json` |
+| `runtime/` | 지연 import까지 포함한 독립 시험용 플랫폼 라이브러리 |
+| `scripts/xenova-xenstore-g1-lab.py`, `test.cfg.in` | 소유 시험 도메인 제어 도구·설정 원형 |
+| `handoff-manifest.json`, `SHA256SUMS` | 문서를 포함한 파일 목록·크기·해시 |
+
+**dom0에서의 인계 확인:** 빌드 PC가 검증한 전체 인계 디렉터리를 새 경로에 전달하고
+`HANDOFF`를 보드의 실제 절대 경로로 지정한다. 독립 런타임은 `--platform-dir`로 선택한다.
+
+```bash
+test -n "$HANDOFF"
+(cd "$HANDOFF" && sha256sum -c SHA256SUMS)
+python3 -B "$HANDOFF/scripts/xenova-xenstore-g1-lab.py" \
+  --platform-dir "$HANDOFF/runtime" --help
+```
+
+실보드 시험에서는 아래 도구의 각 하위 명령을 사용한다. 모든 명령의
+`--platform-dir`, `--log-directory`는 하위 명령 앞에 둔다.
+
+| 하위 명령 | 입력·동작 |
+|---|---|
+| `preflight` | 도구·Xen·브리지·현재 도메인을 읽어 기준선 기록 |
+| `prepare` | `--firmware`, 새 `--directory`, `xg1-*` `--name`, 새 `--uuid`·`--mac`으로 중복 검사 후 시험 설정 생성 |
+| `launch --execute` | `--directory`의 소유 도메인을 paused 상태로 생성 |
+| `inspect` | `--directory`의 UUID/name/domid·VIF frontend/backend/MAC 대조 |
+| `resume --execute` | `--directory`의 같은 도메인을 unpause |
+| `signal --execute` | `--directory`와 게스트가 출력한 `--path`, 시험용 `--value`로 해당 control 노드만 변경 |
+| `cleanup --execute` | `--directory`, `--confirm-uuid`로 같은 시험 도메인 회수. `--remove-config`는 소유 설정 두 파일도 정리 |
+
+실보드 시험은 별도 소유 VM과 경로를 사용하고 기본 VM·등록 자산을 보존한다.
+게스트의 `watch-ready path=...`가 출력되면 60초 예산 안에 그 경로로 `signal`을 보낸다.
+`watch-reread`의 변경 값과 단계별 rc, `exercise-result`, `test-node-cleanup`,
+`store-cleanup` 및 도메인 회수 증거를 함께 보관한다. 알림 수신 뒤에도 값을 다시 읽는다.
+신호를 보내지 않는 별도 시험에서는 `watch-timeout`과 자원 회수를 확인한다.
+부모 `/local/domain/<self>/data`가 없거나 권한이 거절되면 해당 오류를 기록하고 중단한다.
+Connected·ring-ref·도메인 루트 권한을 대신 써 넣어 통과시키지 않는다.
+
+G1은 Store·권한·transaction·watch·회수를 검증한다. Ethernet packet 송수신·DHCP·
+MQTT·앱 준비는 Network Starter와 해당 앱의 별도 수락 근거로 기록한다.

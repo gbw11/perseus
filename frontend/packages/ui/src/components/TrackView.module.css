@@ -1,0 +1,59 @@
+.track {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-sunken);
+  --car: var(--x-app-simulator);
+}
+.road {
+  fill: var(--x-track-road);
+}
+.infield {
+  fill: var(--x-surface-sunken);
+}
+.edge {
+  fill: none;
+  stroke: var(--x-track-edge);
+  stroke-width: 0.015;
+}
+.center {
+  fill: none;
+  stroke: var(--x-track-lane);
+  stroke-width: 0.025;
+  stroke-dasharray: 0.12 0.1;
+}
+.trail {
+  fill: none;
+  stroke: var(--car);
+  stroke-width: 0.03;
+  opacity: 0.45;
+}
+.obstacle {
+  fill: var(--x-fault);
+}
+.car {
+  fill: var(--car);
+}
+.sense {
+  fill: var(--x-fault);
+  opacity: 0.08;
+}
+.senseOn {
+  opacity: 0.4;
+}
+.tick {
+  fill: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 0.16px;
+}
+.compact .tick {
+  font-size: 0.22px;
+}
+.estop {
+  fill: var(--x-fault);
+  font-family: var(--x-font-mono);
+  font-size: 0.32px;
+  font-weight: 700;
+}

@@ -114,7 +114,7 @@ class DisplayIntegrationTest {
 
     String login() throws Exception {
         HttpHeaders headers = new HttpHeaders(); headers.setContentType(MediaType.APPLICATION_JSON);
-        String body = "{\"username\":\"display-test-user\",\"password\":\"password123!\"}";
+        String body = "{\"username\":\"display-test-user\",\"nickname\":\"디스플레이 통합 테스트\",\"password\":\"password123!\"}";
         rest.postForEntity("/api/v1/auth/signup", new HttpEntity<>(body, headers), String.class);
         String reply = rest.postForEntity("/api/v1/auth/login", new HttpEntity<>(body, headers), String.class).getBody();
         return json.readTree(reply).path("access_token").asText();

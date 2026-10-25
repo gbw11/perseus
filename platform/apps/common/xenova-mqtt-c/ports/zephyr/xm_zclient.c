@@ -20,6 +20,15 @@ static struct xm_zclient *owner(struct mqtt_client *m)
 	return CONTAINER_OF(m, struct xm_zclient, mqtt);
 }
 
+static void io_budget(struct xm_zclient *c)
+{
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	c->socket_io.deadline_ms = k_uptime_get() + CONFIG_XENOVA_MQTT_IO_MS;
+#else
+	ARG_UNUSED(c);
+#endif
+}
+
 static void utf8(struct mqtt_utf8 *u, const char *s)
 {
 	u->utf8 = (const uint8_t *)s;
@@ -54,6 +63,7 @@ static int send_subscribe(struct xm_zclient *c, int first, int count)
 		topics[i].qos = c->subs[first + i].qos;
 	}
 	list.message_id = ++c->packet_id ? c->packet_id : ++c->packet_id;
+	io_budget(c);
 	return count ? mqtt_subscribe(&c->mqtt, &list) : 0;
 }
 
@@ -85,7 +95,7 @@ static void on_publish(struct xm_zclient *c, const struct mqtt_publish_param *p)
 
 	/* 큰 메시지도 소켓에서 끝까지 읽어 내야 다음 패킷을 읽을 수 있다 */
 	if (fits) {
-		if (mqtt_readall_publish_payload(&c->mqtt, c->payload, len) < 0) {
+		if ((c->payload_rc = mqtt_readall_publish_payload(&c->mqtt, c->payload, len)) < 0) {
 			return;
 		}
 	} else {
@@ -93,6 +103,7 @@ static void on_publish(struct xm_zclient *c, const struct mqtt_publish_param *p)
 			int n = mqtt_read_publish_payload_blocking(&c->mqtt, c->payload, MIN(left, sizeof(c->payload)));
 
 			if (n <= 0) {
+				c->payload_rc = n ? n : -EIO;
 				return;
 			}
 			left -= (size_t)n;
@@ -149,6 +160,7 @@ static void on_event(struct mqtt_client *m, const struct mqtt_evt *evt)
 	switch (evt->type) {
 	case MQTT_EVT_CONNACK:
 		if (evt->result != 0) {
+			c->last_io_rc = -EACCES;
 			LOG_WRN("MQTT 연결 거부: %d", evt->result);
 			mqtt_abort(m);
 			schedule_retry(c);
@@ -182,11 +194,17 @@ int xm_zclient_init(struct xm_zclient *c, const char *vm_id, const char *source_
 	struct sockaddr_in *sin = (struct sockaddr_in *)&c->broker;
 
 	memset(c, 0, sizeof(*c));
-	sys_rand_get(r, sizeof(r));
-	xm_uuid4_format(boot, r);
-	sys_rand_get(r, sizeof(r));
-	xm_uuid4_format(inst, r);
-	int rc = xm_identity_init(&c->id, vm_id, source_id, app_id, boot, inst);
+	int rc;
+	if (cfg->boot_id || cfg->instance_id) {
+		if (!cfg->boot_id || !cfg->instance_id) { return -EINVAL; }
+		rc = xm_identity_init(&c->id, vm_id, source_id, app_id, cfg->boot_id, cfg->instance_id);
+	} else {
+		sys_rand_get(r, sizeof(r));
+		xm_uuid4_format(boot, r);
+		sys_rand_get(r, sizeof(r));
+		xm_uuid4_format(inst, r);
+		rc = xm_identity_init(&c->id, vm_id, source_id, app_id, boot, inst);
+	}
 
 	if (rc) {
 		return rc;
@@ -220,7 +238,13 @@ int xm_zclient_init(struct xm_zclient *c, const char *vm_id, const char *source_
 	c->mqtt.rx_buf_size = sizeof(c->rx_buf);
 	c->mqtt.tx_buf = c->tx_buf;
 	c->mqtt.tx_buf_size = sizeof(c->tx_buf);
+	#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	c->socket_io.fd = -1;
+	c->mqtt.transport.type = MQTT_TRANSPORT_CUSTOM;
+	c->mqtt.transport.custom_transport_data = &c->socket_io;
+#else
 	c->mqtt.transport.type = MQTT_TRANSPORT_NON_SECURE;
+#endif
 	c->backoff_ms = BACKOFF_MIN_MS;
 	return 0;
 }
@@ -238,17 +262,24 @@ int xm_zclient_subscribe(struct xm_zclient *c, const char *filter, uint8_t qos)
 
 int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 {
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	if (c->socket_io.close_error) { return c->socket_io.close_error; }
+#endif
 	int64_t now = k_uptime_get();
 
 	if (!c->socket_open) {
 		if (now >= c->retry_at_ms) {
+			++c->connection_attempts;
+			io_budget(c);
 			int rc = mqtt_connect(&c->mqtt); /* TCP 연결 + CONNECT. CONNACK 은 mqtt_input 에서 */
 
 			if (rc == 0) {
 				c->socket_open = true;
 				c->retry_at_ms = now + CONNACK_WAIT_MS;
 			} else {
+				c->last_io_rc = rc;
 				LOG_DBG("MQTT 연결 실패 %d", rc);
+				xm_zclient_close(c);
 				schedule_retry(c);
 			}
 		}
@@ -258,19 +289,29 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 		}
 	}
 	if (!c->connected && k_uptime_get() >= c->retry_at_ms) {
+		c->last_io_rc = -ETIMEDOUT;
 		LOG_WRN("CONNACK 시간 초과");
 		mqtt_abort(&c->mqtt);
 		schedule_retry(c);
 		return -ETIMEDOUT;
 	}
 
-	struct zsock_pollfd fds = {.fd = c->mqtt.transport.tcp.sock, .events = ZSOCK_POLLIN};
+	#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	int fd = c->socket_io.fd;
+#else
+	int fd = c->mqtt.transport.tcp.sock;
+#endif
+	struct zsock_pollfd fds = {.fd = fd, .events = ZSOCK_POLLIN};
 	int keep = mqtt_keepalive_time_left(&c->mqtt);
 	int rc = zsock_poll(&fds, 1, MAX(MIN(timeout_ms, keep), 0));
 
 	if (rc > 0 && (fds.revents & (ZSOCK_POLLIN | ZSOCK_POLLERR | ZSOCK_POLLHUP))) {
+		io_budget(c);
+		c->payload_rc = 0;
 		rc = mqtt_input(&c->mqtt);
+		if (c->payload_rc) { rc = c->payload_rc; }
 		if (rc < 0 && c->socket_open) {
+			c->last_io_rc = rc;
 			LOG_WRN("MQTT 수신 오류 %d", rc);
 			mqtt_abort(&c->mqtt);
 			schedule_retry(c);
@@ -278,6 +319,7 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 		}
 	}
 	if (c->socket_open) {
+		io_budget(c);
 		rc = mqtt_live(&c->mqtt);
 		if (rc < 0 && rc != -EAGAIN) {
 			mqtt_abort(&c->mqtt);
@@ -327,6 +369,7 @@ int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type
 	if (rule->qos > 0) {
 		param.message_id = ++c->packet_id ? c->packet_id : ++c->packet_id;
 	}
+	io_budget(c);
 	int rc = mqtt_publish(&c->mqtt, &param);
 
 	if (rc == 0) {
@@ -334,6 +377,18 @@ int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type
 		c->published++;
 	}
 	return rc;
+}
+
+void xm_zclient_close(struct xm_zclient *c)
+{
+	io_budget(c);
+	(void)mqtt_abort(&c->mqtt);
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	/* Connect can fail before the MQTT library takes socket ownership. */
+	(void)xt_socket_close(&c->socket_io);
+#endif
+	c->connected = false;
+	c->socket_open = false;
 }
 
 int xm_zclient_latest(struct xm_zclient *c, const char *topic, struct xm_envelope *env, int64_t *age_ms)

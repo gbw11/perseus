@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import stat
 import time
+from xenova_trace import span
 
 RUN = Path('/run/xenova')
 
@@ -37,15 +38,17 @@ def operation_lock(runtime=RUN, *, blocking=False, deadline=None, clock=time.mon
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
             raise PlatformError('platform lock must be an unshared regular file')
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking and deadline is None else fcntl.LOCK_NB))
-                break
-            except BlockingIOError as exc:
-                if deadline is None or clock() >= deadline:
-                    raise OperationBusy('another platform operation is in progress; retry after it completes') from exc
-                sleep(min(0.1, max(0, deadline-clock())))
-        yield
+        with span('lock.wait', blocking=blocking):
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking and deadline is None else fcntl.LOCK_NB))
+                    break
+                except BlockingIOError as exc:
+                    if deadline is None or clock() >= deadline:
+                        raise OperationBusy('another platform operation is in progress; retry after it completes') from exc
+                    sleep(min(0.1, max(0, deadline-clock())))
+        with span('lock.hold'):
+            yield
     finally:
         os.close(fd)
 
@@ -53,7 +56,8 @@ def operation_lock(runtime=RUN, *, blocking=False, deadline=None, clock=time.mon
 def sync_directory(path):
     fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        os.fsync(fd)
+        with span('storage.directory_fsync', required=True):
+            os.fsync(fd)
     finally:
         os.close(fd)
 
@@ -64,13 +68,34 @@ def atomic_write(path, content, mode=0o600):
     temp = path.with_name(path.name + '.tmp-' + str(os.getpid()) + '-' + os.urandom(6).hex())
     fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
     try:
-        with os.fdopen(fd, 'w') as stream:
-            stream.write(content)
-            stream.flush()
-            os.fchmod(stream.fileno(), mode)
-            os.fsync(stream.fileno())
-        os.replace(temp, path)
-        sync_directory(path.parent)
+        with span('storage.atomic_write', required=True):
+            with os.fdopen(fd, 'w') as stream:
+                with span('storage.file_write', required=True):
+                    stream.write(content)
+                    stream.flush()
+                    os.fchmod(stream.fileno(), mode)
+                with span('storage.file_fsync', required=True):
+                    os.fsync(stream.fileno())
+            with span('storage.replace', required=True):
+                os.replace(temp, path)
+            sync_directory(path.parent)
     finally:
         if temp.exists():
             temp.unlink()
+
+
+def boot_progress(kind, runtime=RUN, **context):
+    """선택적 표시 모듈의 부재·고장도 관리 작업에 전파하지 않는 생산자 경계."""
+    try:
+        from xenova_boot_progress import Progress
+        writer = Progress(kind, runtime, **context)
+    except Exception:
+        writer = None
+    def emit(phase, **facts):
+        if writer is not None:
+            try:
+                return writer.emit(phase, **facts)
+            except Exception:
+                pass
+        return False
+    return emit

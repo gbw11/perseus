@@ -164,6 +164,11 @@ class PlatformTemplateIntegrationTest(unittest.TestCase):
                 base = Path(temp)
                 r = record(os_id + '-dev')
                 directory = fixture(base, r)
+                (base / '.xenova-storage.json').write_text(json.dumps(
+                    {'schema':1, 'uuid':'12345678-1234-4234-8234-123456789abc'}))
+                mountinfo = base / 'mountinfo'
+                mountinfo.write_text(f'1 0 8:3 / {base} rw - ext4 /dev/fixture rw\n')
+                real_storage_check = vm.storage_check
                 disk = (directory / 'root.raw').read_bytes()
                 runner = FakeXen(base, {r['id']: r})
                 p = vm.Platform(base, base / 'run', runner)
@@ -171,7 +176,9 @@ class PlatformTemplateIntegrationTest(unittest.TestCase):
                 (templates / os_id).mkdir(parents=True)
                 source = (cfg.TEMPLATE_ROOT / os_id / 'xen.cfg.in').read_text()
                 (templates / os_id / 'xen.cfg.in').write_text(source + '# integration marker\n')
-                with patch.object(runtime_cfg, 'TEMPLATE_ROOT', templates), contextlib.redirect_stdout(io.StringIO()):
+                with patch.object(runtime_cfg, 'TEMPLATE_ROOT', templates), \
+                        patch.object(vm, 'storage_check', side_effect=lambda data: real_storage_check(data, mountinfo)), \
+                        contextlib.redirect_stdout(io.StringIO()):
                     p.start(r)
                 output = (base / 'run' / (r['id'] + '.cfg')).read_text()
                 self.assertIn('# integration marker', output)

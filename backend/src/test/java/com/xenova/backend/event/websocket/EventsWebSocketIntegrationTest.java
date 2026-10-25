@@ -31,7 +31,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 class EventsWebSocketIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"ws-events-user","password":"password123!"}
+            {"username":"ws-events-user","nickname":"이벤트 웹소켓 테스트","password":"password123!"}
             """;
 
     @LocalServerPort

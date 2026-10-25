@@ -290,6 +290,26 @@ Bearer 인증을 사용하며, 토큰이 없거나 다르면 401을 반환합니
 Xen을 관측하지 않는 의도 조회가 생기기 전까지 Worker는 60초 캐시를 사용합니다.
 열린 episode·판정 큐·recovery_id는 프로세스 메모리에 있으며 재시작 실행·복원은 복구 정책 엔진(125)의 책임입니다.
 
+## 복구 정책 엔진 (S15P31E110-125)
+
+감시기의 판정(`Judgment`)을 받아 **그 VM 만** 플랫폼 `recover_once` 로 재시작합니다(`recovery/engine.py`). 정책은 `restart` / `none` 둘뿐입니다. failover 는 없습니다.
+
+| 규칙 | 내용 |
+| --- | --- |
+| 하나의 복구 | VM 마다 열린 복구(`recovery_id`)는 하나. 같은 VM 의 새 판정은 열린 복구에 흡수. `recovery_id` 는 Worker 재시작 뒤에도 `XENOVA_RECOVERY_STATE_DIR/recoveries.json` 에서 이어 감 |
+| 저장 뒤 호출 | 시도(`recovery_attempt_id`·spec)를 원자적으로 저장한 뒤에만 `recover_once(execute=true)` 를 부름. 응답 유실·일시 거절(OPERATION_IN_PROGRESS·HOST_QUIESCING·BOOT_ADMISSION_REQUIRED·OBSERVATION_UNAVAILABLE)·Worker 재시작 뒤에는 `recovery-operation` 으로 같은 attempt 의 journal 을 먼저 보고, 없으면 **같은 spec 을 다시** 보냄. 새 attempt id 는 실패가 확정되고 backoff 가 끝났을 때만 |
+| mode | 도메인 없음 → `start-if-absent`(view 의 `observation_revision`). Linux 실행 중 → `graceful-restart`(정상 종료 실패 뒤 다음 시도를 `force-restart` 로 올리는 것은 `XENOVA_RECOVERY_ESCALATE_TO_FORCE=1` 일 때만. 기본은 끔: 실행 중인 VM 을 파괴하는 동작이라 운영자가 명시적으로 켠다). Zephyr·crashed → `force-restart`(플랫폼 per-VM 승인 없으면 RECOVERY_MODE_UNSUPPORTED 로 최종 실패) |
+| 시도 전 재확인 | 실행 슬롯을 얻은 **그 시점에** 플랫폼 `get` 으로 `REGISTERED`·`desired_state running`·`intent_applicable` 를 다시 읽고 `expected_*`(host_boot_id·generation·intent_revision·execution_id)와 deadline 을 채움. 큐에서 기다린 시간이 deadline 을 갉아먹지 않음. 아니면 취소 |
+| 성공 | **플랫폼이 이 시도로 새 Xen 실행을 관측하고 새 `execution_id` 와 함께 completed 를 돌려준 것**(계약 2.5). 생존 신호(heartbeat) 복귀는 감시기의 건강 스냅샷으로만 보고하고, 돌아오지 않는다고 다시 재시작하지 않음(브로커·에이전트 문제로 멀쩡한 VM 을 또 재시작하게 됨). 시도가 완료되기 전에 감시기가 `HEALTHY` 를 내면(사용자 조작·플랫폼 쪽 재시작·신호 복귀) 더 시도하지 않고 `RECOVERED` 로 닫고 `recovery.recovered` 를 냄(completed 아님). `STOPPED` 면 `recovery.cancelled`. 이미 재시도 실패를 낸 시도 뒤(backoff 중)라면 두 이벤트는 장애 단위라 `recovery_attempt_id`·`attempt_duration_ms` 가 null. completed 인데 새 `execution_id` 가 없으면 final failed(RECONCILE_REQUIRED) |
+| 결과를 모르는 시도 | 실행 중·응답 유실·일시 거절 뒤 재전달 대기·Worker 재시작 뒤 복원은 모두 EXECUTING 으로 두고 감시기의 `HEALTHY`·`STOPPED` 로 닫지 않음. 같은 attempt id 로 `recovery-operation`(journal)을 먼저 조회해 완료·실패를 받고, journal 에 없을 때만 지금 건강 상태를 본 뒤(건강하면 재시작하지 않음) 같은 spec 을 다시 보냄. 그 사이 사용자가 끄면 `cancel_requested` 로 저장해 두었다가 플랫폼이 완료했으면 완료로, 아니면 취소로 닫음 |
+| 실패·재시도 | XEN_EXECUTION_FAILED·DEADLINE_EXCEEDED 등은 시도 소비 → `XENOVA_RECOVERY_BACKOFF`(5,15,30초) 뒤 새 attempt id. `XENOVA_RECOVERY_MAX_ATTEMPTS`(3) 초과면 final failed. force 승격(켰을 때만)은 플랫폼이 "정상 종료 실패"를 명시한 코드(RECOVERY_MODE_UNSUPPORTED·DEADLINE_EXCEEDED·정지 대기 만료의 XEN_EXECUTION_FAILED)에서만. 끈 상태의 RECOVERY_MODE_UNSUPPORTED 는 final failed. TARGET_CHANGED·INTENT_MISMATCH 는 재시도하지 않고 감시기의 다음 판단(HEALTHY/STOPPED)을 `XENOVA_RECOVERY_VERIFY_TIMEOUT`(150초)까지 기다린 뒤에야 새 시도. RECONCILE_REQUIRED·IDEMPOTENCY_CONFLICT·정체 모를 예외는 운영자 몫이라 즉시 final failed(force 로 올리지 않음). VM_NOT_FOUND·사용자 stop 은 취소 |
+| 단일 실행 | 시작할 때 `XENOVA_RECOVERY_STATE_DIR/worker.lock` 에 non-blocking flock. 다른 Worker 가 쥐고 있으면 종료 코드 3 으로 끝나고 유닛의 `RestartPreventExitStatus=3` 이 재시작을 멈춤 |
+| 실행 스레드 | `recover_once` 는 플랫폼 잠금 안에서 deadline(`XENOVA_RECOVERY_ATTEMPT_DEADLINE` 110초, 상한 120)까지 막힐 수 있어 엔진의 실행 스레드(하나)에서 부름. 감시 루프·건강 발행은 막히지 않고, 관측이 실패한 주기에도 끝난 결과는 회수(`collect`) |
+| fail-safe | `recoveries.json` 은 상태별 불변조건(EXECUTING 이면 attempt id·같은 id 의 spec·mode·시작 시각 등)까지 검증. 하나라도 어긋나거나 깨졌으면 `.corrupt` 로 보존하고 **복구를 실행하지 않음**(판정·건강은 계속). `XENOVA_RECOVERY_POLICY=none` 도 같음. 닫힌 복구는 20건만 남기고 저장소에도 반영 |
+| 이벤트 | 계약 2.5 `recovery.started/completed/recovered/cancelled/failed` 는 상태 전이와 **함께 레코드에 적어 `recoveries.json` 에 저장(event_id 고정)** 한 뒤에만 outbox `XENOVA_RECOVERY_STATE_DIR/recovery-events.jsonl`(최근 2,000건)로 옮기고 MQTT-12 `xenova/v1/recovery/events` 로 발행. 상태 저장에 실패하면 이벤트를 내지 않고 다음 주기에 다시 저장. outbox 에 못 옮긴 이벤트는 레코드에 남아 Worker 재시작 뒤에도 같은 event_id 로 저장·발행되며(Spring 은 event_id 로 거름) 그동안 `recovery worker degraded` 를 ERROR 로 남김. `error`(failed 의 실패 사유, cancelled 의 취소 사유)의 `code` 는 Worker 결과 코드, `platform_code` 는 플랫폼 원본 코드만. Spring 은 단절 뒤 `GET /api/v1/recovery/events?after_event_id=&limit=`(4.7)로 채움: 읽을 때 계약 스키마로 검증하고, 커서가 보관 범위 밖이거나 커서 뒤에 손상된 줄이 있으면 `gap: true`(손상 자리는 compaction 뒤에도 tombstone 으로 남김), 빈 페이지면 `next_after_event_id: null`. HTTP 서비스는 같은 디렉터리(`XENOVA_RECOVERY_STATE_DIR`)를 읽음. `/run` 은 tmpfs 라 host 재부팅이면 비고 그때는 `gap: true` |
+
+아직 없는 것: 실보드 검증(플랫폼 `force_restart_vm_ids` 승인과 Mosquitto 배포 뒤), `probe` 로 Xen 관측 불가를 가리는 것, Worker 자체 상태(degraded)를 MQTT·HTTP 로 내보내는 것(계약 추가 필요, 지금은 로그).
+
 ## 테스트
 
 ```bash
