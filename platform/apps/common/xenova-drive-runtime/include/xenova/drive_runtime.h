@@ -5,10 +5,11 @@
 #define XENOVA_DRIVE_RUNTIME_H
 #include <xenova/diagnostics.h>
 #include "xm_zclient.h"
+#include <xenova/drive_io.h>
 
 int xd_start(const char *app_id, uint32_t period_ms);
 bool xd_stopping(void);
-/* Main thread only: defer authenticated v1 setup until its own bootstrap exists. */
+/* Nonblocking owner startup: 0 means worker admitted, not MQTT connected. */
 int xd_client_prepare(struct xm_zclient *, const char *control, const char *input);
 int xd_publish(struct xm_zclient *, const char *topic, const char *type, const char *payload);
 int xd_poll(struct xm_zclient *, int32_t timeout_ms);
@@ -22,7 +23,7 @@ int xd_step_end(void);
 /* Call for every actual command serialization result, including failures. */
 void xd_command(struct xm_zclient *, const char *topic, const char *json, int encoded,
 		uint32_t generation, float v_mps, float steer_rad, int64_t input_seq,
-		int64_t control_seq, int64_t input_age_ms);
+		int64_t control_seq, int64_t input_age_ms, uint32_t input_timeout_ms);
 void xd_iteration_end(void);
 uint64_t xd_next_release_us(void);
 void xd_latest(struct xm_zclient *, const char *topic, const char *type,

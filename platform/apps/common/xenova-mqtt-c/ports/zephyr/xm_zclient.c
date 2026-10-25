@@ -24,6 +24,7 @@ static void io_budget(struct xm_zclient *c)
 {
 #if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
 	c->socket_io.deadline_ms = k_uptime_get() + CONFIG_XENOVA_MQTT_IO_MS;
+	if (c->publish_deadline_ms) { c->socket_io.deadline_ms = MIN(c->socket_io.deadline_ms, c->publish_deadline_ms); }
 #else
 	ARG_UNUSED(c);
 #endif
@@ -375,7 +376,23 @@ int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type
 	if (rc == 0) {
 		pub->seq++;
 		c->published++;
+	} else {
+		/* A partial frame cannot be overwritten by the next candidate. Abort
+		 * this byte stream; never retry this message on the next connection. */
+		c->last_io_rc = rc;
+		xm_zclient_close(c);
+		schedule_retry(c);
 	}
+	return rc;
+}
+
+int xm_zclient_publish_until(struct xm_zclient *c,const char *topic,const char *type,
+			    const char *json,int64_t end)
+{
+	if (end <= k_uptime_get()) { return -ETIMEDOUT; }
+	c->publish_deadline_ms = end;
+	int rc = xm_zclient_publish(c,topic,type,json);
+	c->publish_deadline_ms = 0;
 	return rc;
 }
 

@@ -17,6 +17,8 @@ import struct
 FIELDS = ("begin", "step_end", "submit_begin", "submit_end", "iteration_end", "release",
           "completed", "missed", "skipped", "input_seq", "control_seq", "generation",
           "message", "topic_seq", "rc", "encoded", "v_bits", "steer_bits", "input_age_ms", "iteration_begin", "attempted")
+SEND_FIELDS = ("id", "created_us", "queued_us", "taken_us", "send_begin_us", "send_end_us",
+               "message", "topic_seq", "rc", "disposition")
 
 
 def stats(values):
@@ -43,12 +45,50 @@ def source(path):
     rows = [dict(zip(FIELDS, map(int, row))) for row in decoded]
     sessions = [json.loads(line) for line in re.findall(r"XD_SESSION (\{[^\r\n]*\})", text)]
     summaries = [json.loads(line) for line in re.findall(r"XD_SUMMARY (\{[^\r\n]*\})", text)]
+    send_rows = [json.loads(line) for line in re.findall(r"XD_SEND (\[[^\r\n]*\])", text)]
+    if any(len(row) != len(SEND_FIELDS) or any(type(v) not in (str, int) for v in row) for row in send_rows):
+        raise ValueError("transmission row version/type mismatch")
+    sends = [dict(zip(SEND_FIELDS, map(int, row))) for row in send_rows]
+    io = [json.loads(line) for line in re.findall(r"XD_IO (\{[^\r\n]*\})", text)]
     if len(sessions) != 1 or len(summaries) != 1 or not rows:
         raise ValueError("one explicit app execution/session and complete source capture required")
     if (int(summaries[0]["overflow"]) or len(rows) != summaries[0]["rows"] or
             not summaries[0].get("capture_complete") or summaries[0].get("counter_saturated") or
             summaries[0].get("clock_rc") or summaries[0].get("task_rc")):
         raise ValueError("source capture lost/saturated/truncated")
+    if summaries[0].get("schema_version") == 2:
+        if len(io) != 1 or int(io[0]["delivery_overflow"]) or len(sends) != int(io[0]["delivery_rows"]):
+            raise ValueError("one complete transmission capture required")
+        if len({v["id"] for v in sends}) != len(sends):
+            raise ValueError("duplicate candidate terminal result")
+        by_id = {v["id"]: v for v in sends}
+        if set(by_id) != {v["completed"] for v in rows if v["rc"] == 0}:
+            raise ValueError("accepted candidates and terminal results disagree")
+        for row in rows:
+            row["mailbox_rc"] = row["rc"]
+            row["mailbox_begin"] = row["submit_begin"]
+            row["mailbox_end"] = row["submit_end"]
+            row["mailbox_offered"] = row["attempted"]
+            delivery = by_id.get(row["completed"])
+            if row["mailbox_rc"] == 0 and delivery is None:
+                raise ValueError("accepted candidate has no terminal result")
+            if delivery and (delivery["created_us"] != row["step_end"] or
+                             delivery["queued_us"] != row["mailbox_end"]):
+                raise ValueError("candidate/source identity mismatch")
+            if delivery:
+                if not (delivery["disposition"] in range(6) and delivery["created_us"] <= delivery["queued_us"] <= delivery["taken_us"]):
+                    raise ValueError("invalid candidate disposition/timestamps")
+                if delivery["disposition"] in (0, 1) and not delivery["taken_us"] <= delivery["send_begin_us"] <= delivery["send_end_us"]:
+                    raise ValueError("invalid socket submission timestamps")
+            row["delivery"] = delivery
+            # Only actual socket submission participates in old receipt matching.
+            row["attempted"] = int(delivery is not None and delivery["disposition"] in (0, 1))
+            row["rc"] = delivery["rc"] if row["attempted"] else -1
+            row["message"] = delivery["message"] if delivery else 0
+            row["topic_seq"] = delivery["topic_seq"] if delivery else 0
+        summaries[0]["io"] = io[0]
+    elif summaries[0].get("schema_version", 1) != 1:
+        raise ValueError("unsupported source schema")
     return sessions[0], summaries[0], rows
 
 
@@ -136,6 +176,9 @@ def analyze(directory, lossless=False):
         if lossless and missing:
             failures.append(app + " locally accepted commands missing at receiver")
         receive_times.sort()
+        async_io = summary.get("schema_version") == 2
+        deliveries = [r["delivery"] for r in rows if async_io and r.get("delivery")]
+        actual_sends = [v for v in deliveries if v["disposition"] in (0, 1)]
         result[app] = {"session": session, "source_summary": summary, "capture_rows": len(rows),
                        "v2_streams": streams, "app_heartbeat_states": sorted(app_heartbeats[heartbeat_key]),
                        "known_input_command_checks": generated_valid, "content_errors": content_errors,
@@ -148,8 +191,11 @@ def analyze(directory, lossless=False):
                        "step_elapsed": stats([r["step_end"] - r["begin"] for r in rows]),
                        "loop_interval": stats(intervals), "absolute_jitter": stats([abs(v - 20000) for v in intervals]),
                        "schedule_lateness": stats([r["begin"] - r["release"] for r in rows]),
-                       "mqtt_submit_elapsed": stats([r["submit_end"] - r["submit_begin"] for r in rows]),
-                       "iteration_including_poll": stats([r["iteration_end"] - r["iteration_begin"] for r in rows]),
+                       "mqtt_submit_elapsed": stats([v["send_end_us"] - v["send_begin_us"] for v in actual_sends] if async_io else [r["submit_end"] - r["submit_begin"] for r in rows]),
+                       "mailbox_accept_elapsed": stats([r["mailbox_end"]-r["mailbox_begin"] for r in rows]) if async_io else None,
+                       "candidate_wait": stats([v["taken_us"]-v["queued_us"] for v in actual_sends]) if async_io else None,
+                       "candidate_dispositions": dict(collections.Counter(v["disposition"] for v in deliveries)) if async_io else None,
+                       ("iteration_including_sleep" if async_io else "iteration_including_poll"): stats([r["iteration_end"] - r["iteration_begin"] for r in rows]),
                        "receiver_interval": stats([(b - a) / 1000 for a, b in zip(receive_times, receive_times[1:])]),
                        "window_misses": sum(r["missed"] for r in rows),
                        "window_skipped": sum(r["skipped"] for r in rows)}

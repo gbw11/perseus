@@ -25,12 +25,14 @@ int xt_start(xt_bootstrap_loader loader,void *ctx,const struct xt_inventory *inf
  return !strcmp(scenario,"publisher")?-EIO:xl_real_xt_start(loader,ctx,info);
 }
 int xt_xen_bootstrap_load(struct xt_bootstrap *b,int64_t end,void *c) {
- ARG_UNUSED(b);ARG_UNUSED(end);ARG_UNUSED(c);return -EAGAIN;
+ ARG_UNUSED(b);ARG_UNUSED(end);ARG_UNUSED(c);
+ if(!strcmp(scenario,"deadline-io")){k_sem_give(&in_network);k_sleep(K_MSEC(250));}
+ return -EAGAIN;
 }
 int xshutdown_start(xshutdown_hook h,void *ctx) {
  ARG_UNUSED(ctx);hook=h;return !strcmp(scenario,"shutdown")?-EIO:0;
 }
-int xshutdown_stop(int64_t end) { assert(end>k_uptime_get());return external?-EBUSY:0; }
+int xshutdown_stop(int64_t end) { if(end<=k_uptime_get())return -ETIMEDOUT;return external?-EBUSY:0; }
 void xnet_stop_request(void) { stopped=true; }
 int xnet_start(void) {
  if(!strcmp(scenario,"race")){k_sem_give(&in_network);k_sem_take(&release_network,K_FOREVER);}
@@ -44,7 +46,8 @@ static void start(void *a,void *b,void *c) {
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);start_result=xd_start("manual",20);
 }
 static void quiesce(void *a,void *b,void *c) {
- ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);external=true;hook_result=hook("reboot",k_uptime_get()+1000,NULL);
+ ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);external=true;
+ hook_result=hook("reboot",k_uptime_get()+(!strcmp(scenario,"deadline-io")?50:1000),NULL);
 }
 int main(void) {
  scenario=getenv("XL_CASE");assert(scenario);
@@ -58,7 +61,20 @@ int main(void) {
   assert(xd_finish(&client,start_result)==start_result);
  } else {
   int rc=xd_start("manual",!strcmp(scenario,"loop")?0:20);
-  bool normal=!strcmp(scenario,"normal");assert(normal?rc==0:rc<0);
+  bool normal=!strcmp(scenario,"normal")||!strcmp(scenario,"normal-io")||!strcmp(scenario,"deadline-io");assert(normal?rc==0:rc<0);
+  if(!strcmp(scenario,"normal-io")||!strcmp(scenario,"deadline-io"))assert(!xd_client_prepare(&client,"control","input"));
+  if(!strcmp(scenario,"deadline-io")) {
+   assert(!k_sem_take(&in_network,K_SECONDS(1)));
+   k_thread_create(&handler,hook_stack,K_THREAD_STACK_SIZEOF(hook_stack),quiesce,NULL,NULL,NULL,6,0,K_NO_WAIT);
+   k_sleep(K_MSEC(1));assert(xd_stopping());int64_t began=k_uptime_get();
+   int finish=xd_finish(&client,0);int64_t elapsed=k_uptime_get()-began;
+   printf("IO_DEADLINE finish=%d elapsed_ms=%lld\n",finish,(long long)elapsed);
+   assert(finish==-ETIMEDOUT&&elapsed<=60);
+   assert(!k_thread_join(&handler,K_SECONDS(1)));assert(hook_result==-ETIMEDOUT);
+   struct xd_io_stats s;assert(!xd_io_stats_get(&s));assert(s.started&&!s.joined);
+   assert(!xd_io_join(k_uptime_get()+1000));assert(!xd_io_stats_get(&s));assert(s.joined);
+   puts("PASS shared external deadline; late owner retained and joined without replay");exit(0);
+  }
   if(!strcmp(scenario,"cleanup-error")) {
    assert(rc==-ENOMEM&&xd_finish(&client,rc)==-ENOMEM);
    static struct xdiag_snapshot snapshot;assert(!xdiag_snapshot_get(&snapshot,false));
@@ -82,6 +98,9 @@ int main(void) {
    assert(xd_publish(&client,"events","app.heartbeat","{}")==-ESHUTDOWN);
    assert(xd_poll(&client,20)==-ESHUTDOWN);
    assert(!client.connection_attempts&&!client.message_counter);
+   if(!strcmp(scenario,"normal-io")) {
+    struct xd_io_stats s;assert(!xd_io_stats_get(&s));assert(s.started&&s.joined);
+   }
   }
  }
  assert(xd_start("manual",20)==-EALREADY);
