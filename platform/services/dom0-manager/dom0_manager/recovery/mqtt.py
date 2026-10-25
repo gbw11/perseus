@@ -25,6 +25,7 @@ APP_STATES = ("active", "standby", "idle", "error")
 # 건강 스냅샷(MQTT-13, 계약 11.1). vms/{vm_id}/ 아래 토픽은 봉투 vm_id 와 토픽이 같아야 해서(계약 2장) VM 이 아닌 발행자는 쓸 수 없다.
 # 복구 이벤트(MQTT-12, xenova/v1/recovery/events)와 같은 가지에 둔다
 HEALTH_TOPIC_PREFIX = "xenova/v1/recovery/health"
+RECOVERY_EVENTS_TOPIC = "xenova/v1/recovery/events"  # MQTT-12. 복구 정책 엔진(125)의 recovery.started/completed/failed
 HEALTH_TYPE = "vm.health"
 CLEAR_WAIT_S = 2.0  # retained 삭제는 PUBACK 까지 확인한다. 못 받으면 다음 주기에 다시
 SHUTDOWN_BUDGET_S = 5.0  # 종료 전 관측 불가 발행 전체의 PUBACK 대기 한도

@@ -52,7 +52,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 class DriveRelayIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"drive-relay-user","password":"password123!"}
+            {"username":"drive-relay-user","nickname":"주행 릴레이 테스트","password":"password123!"}
             """;
     private static final int MQTT_PORT = freePort();
     private static final Server BROKER = startBroker(MQTT_PORT);

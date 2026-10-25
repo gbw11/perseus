@@ -41,7 +41,7 @@ import org.springframework.test.web.servlet.ResultActions;
 class OsEvidenceReportApiIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"report-os-user","password":"password123!"}
+            {"username":"report-os-user","nickname":"OS 리포트 테스트","password":"password123!"}
             """;
     private static final List<CreateVmCommand> VMS = List.of(
             new CreateVmCommand("debian-01", "debian-13-arm64", "1.0.0", 1, 256),

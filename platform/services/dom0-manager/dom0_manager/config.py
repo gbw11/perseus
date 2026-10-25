@@ -39,6 +39,8 @@ class Settings:
     # platform 드라이버: 다른 요청이 Manager 를 쓰는 동안 기다릴 최대 초. 넘으면 503 PlatformUnavailable(재시도 가능).
     # 정지가 최대 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다. 조회 드라이버 한도 5초와 맞춘다
     platform_busy_timeout_s: float = 5.0
+    # Recovery Worker 가 복구 상태·이벤트를 남기는 곳. GET /api/v1/recovery/events 가 같은 파일을 읽는다 (Worker 의 XENOVA_RECOVERY_STATE_DIR 와 같아야 함)
+    recovery_state_dir: str = "/run/xenova/recovery"
     mock_samples: bool = False
     log_level: str = "INFO"
 
@@ -91,6 +93,7 @@ class Settings:
             instance_root=read("XENOVA_INSTANCE_ROOT", cls.instance_root, str),
             platform_lib=read("XENOVA_PLATFORM_LIB", cls.platform_lib, str),
             platform_busy_timeout_s=read("XENOVA_PLATFORM_BUSY_TIMEOUT", cls.platform_busy_timeout_s, float),
+            recovery_state_dir=read("XENOVA_RECOVERY_STATE_DIR", cls.recovery_state_dir, str),
             mock_samples=read("XENOVA_MOCK_SAMPLES", cls.mock_samples, as_bool),
             log_level=read("XENOVA_LOG_LEVEL", cls.log_level, str).upper(),
         )

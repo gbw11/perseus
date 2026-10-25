@@ -34,7 +34,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class VmListApiIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"vm-list-user","password":"password123!"}
+            {"username":"vm-list-user","nickname":"VM 목록 테스트","password":"password123!"}
             """;
 
     @Autowired

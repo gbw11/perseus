@@ -9,6 +9,6 @@ public record LoginResponse(
         Instant expiresAt,
         UserResponse user) {
 
-    public record UserResponse(String userId, String username) {
+    public record UserResponse(String userId, String username, String nickname) {
     }
 }
