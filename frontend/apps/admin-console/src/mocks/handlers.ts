@@ -7,7 +7,7 @@
  * 메모리에만 상태를 두므로 새로고침하면 처음으로 돌아간다 (로그인 세션은 쿠키로 유지).
  */
 import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
-import type { CreateVmRequest, LoginRequest, TokenResponse, Vm } from '../api/types';
+import type { CreateVmRequest, LoginRequest, SignupRequest, TokenResponse, Vm } from '../api/types';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
@@ -21,6 +21,9 @@ let tokenSeq = 0;
 let accessToken: string | null = null;
 /** Node(시험)에는 쿠키 저장소가 없어서 로그인 상태도 같이 기억한다. 브라우저는 새로고침 뒤 쿠키로 복원 */
 let refreshGranted = false;
+let mockUsername = MOCK_USER.username;
+let mockNickname = MOCK_USER.nickname;
+let mockPassword = MOCK_PASSWORD;
 
 /** 시험용: 처음 상태로 */
 export function resetMockState(): void {
@@ -28,6 +31,9 @@ export function resetMockState(): void {
   tokenSeq = 0;
   accessToken = null;
   refreshGranted = false;
+  mockUsername = MOCK_USER.username;
+  mockNickname = MOCK_USER.nickname;
+  mockPassword = MOCK_PASSWORD;
 }
 
 const error = (status: number, code: string, message: string, errors?: { field: string; reason: string }[]) =>
@@ -41,7 +47,7 @@ function issue(): HttpResponse<JsonBodyType> {
     token_type: 'Bearer',
     expires_in: TOKEN_TTL_S,
     expires_at: new Date(Date.now() + TOKEN_TTL_S * 1000).toISOString(),
-    user: MOCK_USER,
+    user: { ...MOCK_USER, username: mockUsername, nickname: mockNickname },
   };
   return HttpResponse.json(body as unknown as JsonBodyType, {
     headers: {
@@ -90,10 +96,30 @@ function validate(body: Partial<CreateVmRequest>): { field: string; reason: stri
 
 export const handlers = [
   // ---- 인증 ----
+  http.post('*/api/v1/auth/signup', async ({ request }) => {
+    await delay(LATENCY_MS);
+    const body = (await request.json()) as Partial<SignupRequest>;
+    if (!body.username || !body.nickname || !body.password) {
+      return error(422, 'VALIDATION_ERROR', '입력값을 확인해 주세요.');
+    }
+    mockUsername = body.username;
+    mockNickname = body.nickname;
+    mockPassword = body.password;
+    return HttpResponse.json(
+      {
+        user_id: MOCK_USER.user_id,
+        username: body.username,
+        nickname: body.nickname,
+        created_at: new Date().toISOString(),
+      } as JsonBodyType,
+      { status: 201 },
+    );
+  }),
+
   http.post('*/api/v1/auth/login', async ({ request }) => {
     await delay(LATENCY_MS);
     const body = (await request.json()) as Partial<LoginRequest>;
-    if (body.username !== MOCK_USER.username || body.password !== MOCK_PASSWORD) {
+    if (body.username !== mockUsername || body.password !== mockPassword) {
       return error(401, 'INVALID_CREDENTIALS', '아이디 또는 비밀번호가 올바르지 않습니다.');
     }
     return issue();

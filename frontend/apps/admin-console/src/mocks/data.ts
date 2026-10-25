@@ -4,7 +4,11 @@
  */
 import type { Template, Vm } from '../api/types';
 
-export const MOCK_USER = { user_id: '00000000-0000-4000-8000-000000000001', username: 'admin' };
+export const MOCK_USER = {
+  user_id: '00000000-0000-4000-8000-000000000001',
+  username: 'admin',
+  nickname: '관리자',
+};
 /** 로그인 mock 비밀번호. 실제 계정이 아니다 */
 export const MOCK_PASSWORD = '1234';
 

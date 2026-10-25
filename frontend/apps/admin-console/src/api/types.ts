@@ -12,6 +12,19 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface SignupRequest {
+  username: string;
+  nickname: string;
+  password: string;
+}
+
+export interface SignupResponse {
+  user_id: string;
+  username: string;
+  nickname: string;
+  created_at: string;
+}
+
 /** 로그인·재발급 응답. refresh 토큰은 HttpOnly 쿠키(xenova_refresh)라 본문에 없다 */
 export interface TokenResponse {
   access_token: string;
@@ -20,7 +33,7 @@ export interface TokenResponse {
   expires_in: number;
   /** ISO-8601 UTC */
   expires_at: string;
-  user: { user_id: string; username: string };
+  user: { user_id: string; username: string; nickname: string };
 }
 
 // ---- VM (VM 관리 API 계약 §2.2, §3.3) ------------------------------------------------

@@ -14,6 +14,7 @@ import { EventsPage } from './pages/EventsPage';
 import { LoginPage } from './pages/LoginPage';
 import { ResourcesPage } from './pages/ResourcesPage';
 import { ScreensPage } from './pages/ScreensPage';
+import { SignupPage } from './pages/SignupPage';
 import { ShowcasePage } from './pages/ShowcasePage';
 import { VmCreatePage } from './pages/VmCreatePage';
 import { VmDetailPage } from './pages/VmDetailPage';
@@ -31,6 +32,7 @@ const queryClient = new QueryClient({
 
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+  { path: '/signup', element: <SignupPage /> },
   {
     element: (
       <RequireAuth>
