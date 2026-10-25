@@ -5,5 +5,8 @@
 struct xt_socket {
 	int fd;
 	int64_t deadline_ms;
+	/* An ambiguous close is quarantined, never retried on a recycled fd. */
+	int close_error;
 };
+int xt_socket_close(struct xt_socket *);
 #endif

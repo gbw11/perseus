@@ -23,6 +23,11 @@ Network Starter가 Xen netfront → xenbr0 → 인증된 broker로 연결하는 
 기존 Zephyr의 JSON/MQTT/socket 기능을 사용하며 외부 target runtime 의존성은 추가하지 않는다.
 공유 firmware에는 VM UUID·broker 주소·password가 들어가지 않는다.
 
+`xt_stop`은 worker의 socket을 다른 thread에서 닫지 않고 종료를 요청한 뒤 join한다.
+stop/start의 TCB 재사용을 직렬화하며, timeout이면 아직 종료를 확인하지 못한 상태다.
+불확정 socket close 오류는 보존하고 그 descriptor나 Publisher를 재사용하지 않는다.
+기한·부분 초기화·공유 전송 정리의 계약은 [Zephyr runtime](../xen-runtime/README.md)을 따른다.
+
 ## Core → wire 대응
 
 | 실제 원천 | v2 필드·의미 |

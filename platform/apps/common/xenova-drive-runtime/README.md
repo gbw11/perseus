@@ -26,6 +26,9 @@ Diagnostics Core·Telemetry 2.0·Xen netfront·협조형 종료를 연결한다.
   계속되지만 인증되지 않은 발행은 하지 않는다. Xen에 Kconfig 신원 fallback은 없다.
 
 quiesce는 새 명령·app heartbeat를 막고 main 소유자가 v1을 abort한 뒤 Publisher를 정지한다.
+main은 시작 실패를 포함한 모든 반환에서 `xd_finish`를 호출한다. 일반 발행·poll은
+`xd_publish`·`xd_poll`의 종료 admission을 거친다. 세부 소유·잔존·기한 계약은
+[Zephyr runtime](../../../guests/zephyr/xen-runtime/README.md)을 따른다.
 그 다음 기존 runtime이 netfront를 닫는다. 브로커 복귀나 offline flush를 기다리지 않는다.
 v1 TCP connect/send/read는 기존 v2 custom transport를 별도 socket 상태로 재사용하며
 I/O 한 회의 전체 예산은 250ms다. 이 값은 **20ms 계산 주기와 별개**다.
