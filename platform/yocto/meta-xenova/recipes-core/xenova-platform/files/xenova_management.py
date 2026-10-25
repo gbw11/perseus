@@ -1153,7 +1153,8 @@ class Manager:
                     result = self.p.cpu().layout(records, cpu_deadline, spec.get('vm_id'))
                 elif action == 'cpu-policy-set':
                     self._writable()
-                    result = self.p.cpu().set_policy(spec, records, execute=execute, key=idempotency_key, context=context)
+                    result = self.p.cpu().set_policy(spec, records, execute=execute, key=idempotency_key, context=context,
+                                                     deadline=deadline)
                 elif action == 'cpu-host-prepare':
                     if execute:
                         self._writable()

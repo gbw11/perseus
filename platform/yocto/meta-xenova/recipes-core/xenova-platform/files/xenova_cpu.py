@@ -428,7 +428,9 @@ class CPU:
         # Unknown domains are never silently moved. They must already respect the
         # proposed shared set; checked separately once the candidate is known.
 
-    def set_policy(self, spec, records, *, execute, key, context):
+    def set_policy(self, spec, records, *, execute, key, context, deadline=None):
+        # 등록 검증과 factory 준비도 호출자의 전체 기한을 공유한다.
+        deadline = self.p.clock()+15 if deadline is None else deadline
         spec = validate_spec(spec)
         if not isinstance(key, str) or not key or len(key.encode()) > 200:
             refuse('INVALID_SPEC', 'cpu-policy-set requires an idempotency key in plan and execute mode')
@@ -453,7 +455,6 @@ class CPU:
         receipt = self.read(self.receipt_path)
         if receipt and receipt.get('host_boot_id') == self.e.host and receipt.get('phase') in ('applying', 'failed', 'restoring'):
             refuse('RECONCILE_REQUIRED', 'finish or restore partial dom0 affinity before changing policy')
-        deadline = self.p.clock()+15
         sample = self.observe(deadline)
         self.guard_stopped(records, sample, policy_operation=op['operation_id'] if op else None)
         available = set(sample['hardware']['online_pcpus'])
@@ -469,6 +470,8 @@ class CPU:
         opid = op['operation_id'] if op else uuid4()
         candidate = {'schema_version':'1.0', 'policy_revision':(revision or 0)+1, 'operation_id':opid,
                      'pool_name':sample['hardware']['pool_name'], 'shared_pcpus':spec['shared_pcpus'], 'exclusive':spec['exclusive']}
+        if self.p.clock() >= deadline:
+            refuse('DEADLINE_EXCEEDED', 'CPU policy validation exceeded the original deadline')
         if not execute:
             return {'plan':True, 'policy':candidate, 'host_preparation_required':True}
         if op and op['candidate'] != candidate:
@@ -490,7 +493,7 @@ class CPU:
             if row['domid'] and row['vm_id'] not in managed and any(v['pcpus'] != shared for v in row['hard_affinity']):
                 refuse('CPU_APPLY_INCOMPLETE', 'unregistered domain conflicts with shared placement', details={'domain':row})
 
-    def factory(self, records):
+    def factory(self, records, deadline):
         path = self.p.data/'.first-install-state.json'
         if not path.exists():
             return
@@ -506,13 +509,13 @@ class CPU:
             self.policy()
             previous = next((v for v in self.operations() if v['idempotency_key'] == key),None)
             if previous and previous['phase'] != 'completed':
-                self.set_policy(activation, records, execute=True, key=key, context={})
+                self.set_policy(activation, records, execute=True, key=key, context={}, deadline=deadline)
             return
-        self.set_policy(activation, records, execute=True, key=key, context={})
+        self.set_policy(activation, records, execute=True, key=key, context={}, deadline=deadline)
 
     def prepare(self, records, deadline, *, execute=False, restore=False, context=None):
         if execute and not restore:
-            self.factory(records)
+            self.factory(records, deadline)
         policy = self.policy()
         if not policy:
             return {'configured':False, 'ready':False, 'legacy':True}
