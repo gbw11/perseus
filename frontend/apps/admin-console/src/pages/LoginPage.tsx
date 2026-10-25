@@ -1,7 +1,7 @@
 import logo from '@xenova/ui/assets/xenova-logo.png';
 import { Button } from '@xenova/ui';
 import { useState, type FormEvent } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
 import { useLogin } from '../api/queries';
 import { useSession } from '../auth';
@@ -72,6 +72,9 @@ export function LoginPage() {
           <Button type="submit" size="lg" disabled={login.isPending}>
             {login.isPending ? '확인 중…' : '로그인'}
           </Button>
+          <p className={styles.dim}>
+            계정이 없나요? <Link to="/signup">회원가입</Link>
+          </p>
         </form>
       </section>
     </div>

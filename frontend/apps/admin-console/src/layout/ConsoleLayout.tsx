@@ -13,7 +13,7 @@ export function ConsoleLayout() {
   const session = useSession();
   const logout = useLogout();
   const navigate = useNavigate();
-  const name = session?.user.username ?? '';
+  const name = session?.user.nickname || session?.user.username || '';
   return (
     <DriveProvider>
       <AppShell

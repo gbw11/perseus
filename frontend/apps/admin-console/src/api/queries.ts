@@ -10,6 +10,8 @@ import type {
   MetricHistoryResponse,
   ProcessesResponse,
   RouteRequest,
+  SignupRequest,
+  SignupResponse,
   Template,
   TokenResponse,
   Vm,
@@ -142,6 +144,13 @@ export function useLogin() {
     mutationFn: (body: LoginRequest) =>
       request<TokenResponse>('/api/v1/auth/login', { method: 'POST', body, auth: false }),
     onSuccess: setSession,
+  });
+}
+
+export function useSignup() {
+  return useMutation({
+    mutationFn: (body: SignupRequest) =>
+      request<SignupResponse>('/api/v1/auth/signup', { method: 'POST', body, auth: false }),
   });
 }
 

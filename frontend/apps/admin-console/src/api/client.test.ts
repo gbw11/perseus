@@ -7,7 +7,7 @@ const token = (value: string): TokenResponse => ({
   token_type: 'Bearer',
   expires_in: 900,
   expires_at: '2026-10-20T00:15:00Z',
-  user: { user_id: 'u-1', username: 'admin' },
+  user: { user_id: 'u-1', username: 'admin', nickname: '관리자' },
 });
 
 const json = (status: number, body?: unknown) =>
