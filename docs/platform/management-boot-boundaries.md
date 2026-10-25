@@ -148,6 +148,7 @@ unit 실행의 성공을 현재 것으로 사용하지 않는다. `/run/xenova/b
 | `xenova-vm-shutdown.service` | backend/toolstack·저장소가 남아 있는 동안 guest를 정리할 독립 종료 guard |
 | `xenova-vms.service` | 등록 VM들의 autostart 판정과 시작을 한 batch로 실행 |
 | `xenova-host-admission.service` | autostart 뒤 이번 host의 admission barrier 초기화. 종료 시 새 시작·복구 차단 |
+| `tailscaled.service` | 검증된 `/srv/xenova`가 마운트된 뒤 원격 관리 데몬 시작. Tailnet 인증·인터넷 연결은 VM 시작 조건이 아님 |
 
 unit의 `After/Before`는 순서를 지정하고 `Requires/Wants`는 함께 시작할 의존성을
 지정한다. ordering만으로 준비 성공을 보장하지 않는다. vms는 저장소·first-boot·Xen ready·
@@ -158,6 +159,33 @@ CPU 정책이 활성화되면 모든 수동/자동 start·reboot·recover_once�
 CPU 준비 서비스에는 VM으로 중지 전파를 일으키는 PartOf/BindsTo나 ExecStop이 없다.
 재시작이 실행 중 VM을 종료하거나 affinity를 초기화하지 않는다. 네트워크가 필요 없는
 게스트와 진단을 외부 네트워크 준비 뒤로 일괄 직렬화하지 않는다.
+
+### Tailscale의 저장소·부팅 경계
+
+Tailscale은 외부 원격 관리 경로다. `tailscaled`의 `RequiresMountsFor`·`BindsTo`·`After`는
+`srv-xenova.mount`에만 연결하며, 기존 VM·내부 bridge/DHCP·admission unit은 Tailscale을
+요구하지 않는다. `network-online.target`이나 Tailnet 로그인 완료를 기다리지 않는다.
+데이터 마운트가 중지될 때 데몬을 먼저 중지하되 기존 guest 종료 순서는 유지한다.
+
+데몬의 `--statedir`와 `--state`는 `/srv/xenova/tailscale/`을 사용한다. 시작 전 검사에서
+실제 writable ext4 mount의 장치 번호가 기존 data-prepare의 `/run/xenova/data-device`와
+같은지 확인한다. 마운트 실패·다른 장치·심볼릭 링크·중단된 복원이 있으면 시작을 거절하며
+rootfs에 대체 인증 상태를 만들지 않는다. 디렉터리는 root 0700, state 파일은 0600이다.
+기본 `/var/lib/tailscale`용 `StateDirectory`는 해제하며 daemon restart는 저장된 설정을 재사용한다.
+종료 후의 상위 `--cleanup`도 같은 저장 경로와 mount 검사를 거쳐 실행한다. 마운트가 없을 때
+cleanup이 기본 rootfs 상태 디렉터리를 새로 만드는 경로는 사용하지 않는다.
+
+미인증 데몬 실행, Tailnet 인증, 다른 장치에서의 SSH 성공은 서로 다른 확인 단계다.
+인증 URL 발급은 운영자가 `tailscale up --accept-dns=false`를 실행할 때만 요청한다.
+연결 단절 시에는 Tailscale 자체 재연결을 사용하며 별도 감시·인증 루프를 추가하지 않는다.
+기존 OpenSSH 인증을 그대로 쓰고 Tailscale SSH·subnet router·exit node·Funnel을 자동 활성화하지 않는다.
+
+VM factory UUID·실행 의도와 Tailscale 장치 키는 별개의 신원이다. 일반 재부팅·서비스
+재시작과 **데이터 파티션을 실제로 보존한** 이미지 갱신은 상태를 재사용한다.
+`xenova-first-install.img`를 SD 전체에 쓰면 데이터 파티션도 초기화되므로 보존되지 않는다.
+이 경우 같은 물리 보드의 암호화 백업을 복원하거나 재인증한다. 이미지 파티션 배치와
+factory seed·초기화/grow 정책은 이 통합으로 바꾸지 않는다.
+사용법·백업/복원과 중단 복구는 [접속 명세](cli-manager-spec.md#cmd-tailscale)를 따른다.
 
 ## 최초 등록과 매 부팅 준비
 
