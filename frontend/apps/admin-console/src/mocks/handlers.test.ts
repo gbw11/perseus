@@ -74,7 +74,7 @@ describe('MSW mock API', () => {
     await login();
     const body = {
       name: 'extra',
-      template_id: 'debian-12',
+      template_id: 'debian-13-arm64',
       template_version: '1.0.0',
       vcpus: 1,
       memory_mib: 256,

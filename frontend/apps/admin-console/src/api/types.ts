@@ -12,6 +12,19 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface SignupRequest {
+  username: string;
+  nickname: string;
+  password: string;
+}
+
+export interface SignupResponse {
+  user_id: string;
+  username: string;
+  nickname: string;
+  created_at: string;
+}
+
 /** 로그인·재발급 응답. refresh 토큰은 HttpOnly 쿠키(xenova_refresh)라 본문에 없다 */
 export interface TokenResponse {
   access_token: string;
@@ -20,7 +33,7 @@ export interface TokenResponse {
   expires_in: number;
   /** ISO-8601 UTC */
   expires_at: string;
-  user: { user_id: string; username: string };
+  user: { user_id: string; username: string; nickname: string };
 }
 
 // ---- VM (VM 관리 API 계약 §2.2, §3.3) ------------------------------------------------
@@ -105,3 +118,116 @@ export type KnownErrorCode =
   | 'VM_CONTROL_TIMEOUT'
   | 'VM_CONTROL_BAD_RESPONSE'
   | 'INTERNAL_SERVER_ERROR';
+
+// ---- 이벤트 (노션 API 명세 REST-18 "이벤트 조회", 백엔드 EventResponse) -------------------
+
+export type EventType =
+  | 'vm.created'
+  | 'vm.deleted'
+  | 'vm.state.changed'
+  | 'agent.status.changed'
+  | 'recovery.started'
+  | 'recovery.completed'
+  | 'recovery.failed'
+  | 'demo.command.sent'
+  | 'demo.command.completed'
+  | 'demo.command.failed'
+  | 'drive.mode.changed'
+  | 'drive.fault.detected'
+  | 'drive.resume.accepted'
+  | 'drive.resume.cancelled';
+
+export type EventSeverity = 'INFO' | 'WARNING' | 'ERROR';
+
+export interface VmEvent {
+  event_id: string;
+  type: EventType;
+  severity: EventSeverity;
+  vm_id: string | null;
+  operation_id: string | null;
+  /** ISO-8601 UTC */
+  occurred_at: string;
+  recorded_at: string;
+  /** drive.mode.changed: {from, to, generation, reason} · drive.fault.detected: {app_id, vm_id, reason} (MQTT 계약 §6) */
+  payload: Record<string, unknown>;
+}
+
+export interface EventListResponse {
+  items: VmEvent[];
+}
+
+// ---- 메트릭·프로세스 (노션 API 명세 "메트릭 조회", 백엔드 MetricsController) — 에이전트가 있는 Linux VM 만 ----
+
+export interface MetricValue {
+  name: string;
+  value: number | null;
+  unit: string | null;
+  labels: Record<string, string> | null;
+  unavailable_reason: string | null;
+}
+
+export interface MetricSample {
+  sample_id: string;
+  vm_id: string;
+  source: string;
+  observed_at: string;
+  values: MetricValue[];
+}
+
+export interface MetricHistoryResponse {
+  items: MetricSample[];
+}
+
+export interface ProcessInfo {
+  pid: number;
+  name: string;
+  cpu_percent: number | null;
+  rss_bytes: number | null;
+}
+
+export interface ProcessesResponse {
+  vm_id: string;
+  observed_at: string | null;
+  stale: boolean;
+  items: ProcessInfo[];
+}
+
+// ---- 화면 배치 (노션 API 명세 REST-23·REST-24, 백엔드 -129) ----
+
+export type DisplayView = 'split' | 'os-face';
+export type DisplayStatus = 'DISCONNECTED' | 'IDLE' | 'SWITCHING' | 'ACTIVE' | 'ERROR';
+
+export interface DisplayRoute {
+  /** split 이면 null */
+  vm_id: string | null;
+  view: DisplayView;
+  request_id: string;
+  /** observed_route 에만 있다 */
+  applied_at: string | null;
+  verification_level: string | null;
+}
+
+export interface Display {
+  display_id: string;
+  label: string;
+  /** 모니터 브라우저가 WS /ws/v1/displays 로 붙어 있는지 */
+  connected: boolean;
+  status: DisplayStatus;
+  supported_views: DisplayView[];
+  revision: number;
+  desired_route: DisplayRoute;
+  observed_route: DisplayRoute | null;
+  last_error: string | null;
+}
+
+export interface DisplayListResponse {
+  items: Display[];
+  observed_at: string;
+  stale: boolean;
+}
+
+export interface RouteRequest {
+  vm_id: string | null;
+  view: DisplayView;
+  expected_revision: number;
+}

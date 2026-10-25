@@ -66,7 +66,7 @@ describe('가짜 시나리오 (MQTT 계약 §5, RC카 시나리오 §4)', () => 
     expect(t.vehicle.v_mps).toBe(0);
   });
 
-  it('인터랙션 VM 장애는 주행에 영향이 없다 (격리)', () => {
+  it('네비게이션 VM 장애는 주행에 영향이 없다 (격리)', () => {
     let t = crash(start(), 'interaction');
     t = run(t, 1000);
     expect(t.mode).toBe('AUTO');
