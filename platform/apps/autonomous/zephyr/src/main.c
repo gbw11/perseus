@@ -40,7 +40,7 @@ static void announce(const char *events, enum auto_reason from, const struct aut
 		snprintf(detail, sizeof(detail), "resume");
 	}
 	if (kind != NULL && xm_perception_event_json(json, sizeof(json), kind, detail) > 0) {
-		xm_zclient_publish(&client, events, "perception.event", json);
+		xd_publish(&client, events, "perception.event", json);
 	}
 }
 
@@ -58,7 +58,7 @@ int main(void)
 	xm_topic_app_events(perception, sizeof(perception), "perception");
 
 	int rc = xd_start(AUTO_APP_ID, AUTO_PERIOD_MS);
-	if (rc) { LOG_ERR("common runtime failed %d", rc); return rc; }
+	if (rc) { LOG_ERR("common runtime failed %d", rc); return xd_finish(&client, rc); }
 
 	int64_t start = k_uptime_get();
 	int64_t next_beat = start;
@@ -67,7 +67,7 @@ int main(void)
 		bool ready = xd_client_prepare(&client, control, perception) == 0;
 		int64_t now = k_uptime_get();
 		uint64_t cycles_us;
-		if (xdiag_clock_us(&cycles_us)) { break; }
+		if ((rc = xdiag_clock_us(&cycles_us))) { break; }
 		if (cycles_us >= xd_next_release_us()) {
 			if (xd_iteration_begin()) { break; }
 			struct auto_inputs in;
@@ -85,7 +85,7 @@ int main(void)
 
 			if (ready && !xd_stopping() && now >= next_beat) {
 				xm_app_heartbeat_json(json, sizeof(json), st.state, now - start);
-				xm_zclient_publish(&client, events, "app.heartbeat", json);
+				xd_publish(&client, events, "app.heartbeat", json);
 				next_beat += AUTO_HEARTBEAT_MS;
 			}
 			if (st.reason != last_reason) {
@@ -105,14 +105,13 @@ int main(void)
 			/* Core and app share one fixed origin. Expired releases are skipped,
 			 * not resynchronized to now+period or replayed as a burst. */
 			uint64_t end_us;
-			if (xdiag_clock_us(&end_us)) { break; }
+			if ((rc = xdiag_clock_us(&end_us))) { break; }
 			int32_t wait_ms = end_us < xd_next_release_us() ?
 				(int32_t)((xd_next_release_us() - end_us + 999U) / 1000U) : 0;
-			if (!xd_stopping() && ready) { xm_zclient_poll(&client, wait_ms); }
+			if (!xd_stopping() && ready) { xd_poll(&client, wait_ms); }
 			else if (!xd_stopping()) { k_msleep(wait_ms); }
 			xd_iteration_end();
 		} else { k_sleep(K_MSEC(1)); }
 	}
-	xd_client_stopped(&client);
-	return 0;
+	return xd_finish(&client, rc);
 }

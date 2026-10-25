@@ -1,7 +1,7 @@
 SUMMARY = "Persistent Xenova Xen VM lifecycle and boot readiness"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
-SRC_URI = "file://xenova_cpu.py file://cpu-policy-preset.json file://xenova-cpu-prepare.service file://xenova_zephyr_control.py file://xenova_zephyr_transition.py file://xenova_resources.py file://xenova_execution.py file://xenova_guest_process.py file://xenova_recovery.py file://xenova_domain_identity.py file://xenova-domain-identity file://execution-policy.json file://xenova-host-admission.service file://verify-xenova-runtime-artifacts.py file://xenova_management.py file://xenova_management_cli.py file://xenova_catalog.py file://xenova_wifi.py file://artifact_io.py file://xenova-wifi file://xenova-wifi@.service file://xenova-wifi-modprobe.conf file://xenova_vm.py file://xenova_runtime.py file://xenova_trace.py file://xenova_zephyr.py file://xenova-vm file://defaults.json file://xenova-journald.conf file://xenova-system.conf \
+SRC_URI = "file://xenova_boot_progress.py file://xenova_boot_status.py file://xenova-boot-status file://xenova-boot-status.service file://xenova_cpu.py file://cpu-policy-preset.json file://xenova-cpu-prepare.service file://xenova_zephyr_control.py file://xenova_zephyr_transition.py file://xenova_resources.py file://xenova_execution.py file://xenova_guest_process.py file://xenova_recovery.py file://xenova_domain_identity.py file://xenova-domain-identity file://execution-policy.json file://xenova-host-admission.service file://verify-xenova-runtime-artifacts.py file://xenova_management.py file://xenova_management_cli.py file://xenova_catalog.py file://xenova_wifi.py file://artifact_io.py file://xenova-wifi file://xenova-wifi@.service file://xenova-wifi-modprobe.conf file://xenova_vm.py file://xenova_runtime.py file://xenova_trace.py file://xenova_zephyr.py file://xenova-vm file://defaults.json file://xenova-journald.conf file://xenova-system.conf \
            file://srv-xenova.mount file://xenova-xen-ready.service \
            file://xenova-vm-shutdown.service file://xenova-vms.service \
            file://xenova-auth.conf file://xenova-first-boot file://xenova_first_boot.py \
@@ -16,7 +16,7 @@ RDEPENDS:${PN} = "python3-core python3-json python3-stringold python3-crypt pyth
     util-linux-sfdisk util-linux-partx util-linux-blockdev util-linux-blkid \
     e2fsprogs-e2fsck e2fsprogs-resize2fs e2fsprogs-dumpe2fs \
     util-linux-losetup util-linux-mount util-linux-umount util-linux-findmnt e2fsprogs-tune2fs coreutils"
-SYSTEMD_SERVICE:${PN} = "xenova-host-admission.service xenova-first-boot.service srv-xenova.mount xenova-vm-shutdown.service xenova-vms.service"
+SYSTEMD_SERVICE:${PN} = "xenova-boot-status.service xenova-host-admission.service xenova-first-boot.service srv-xenova.mount xenova-vm-shutdown.service xenova-vms.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install() {
@@ -27,10 +27,11 @@ do_install() {
     install -m 0755 "${S}/xenova-domain-identity" "${D}${sbindir}/xenova-domain-identity"
     install -m 0644 "${S}/cpu-policy-preset.json" "${D}${sysconfdir}/xenova/cpu-policy-preset.json"
     install -m 0644 "${S}/execution-policy.json" "${D}${sysconfdir}/xenova/execution-policy.json"
+    install -m 0755 "${S}/xenova-boot-status" "${D}${sbindir}/xenova-boot-status"
     install -m 0755 "${S}/xenova-wifi" "${D}${sbindir}/xenova-wifi"
     install -d "${D}${sysconfdir}/modprobe.d"
     install -m 0644 "${S}/xenova-wifi-modprobe.conf" "${D}${sysconfdir}/modprobe.d/xenova-wifi.conf"
-    for module in xenova_cpu.py xenova_guest_process.py xenova_zephyr_control.py xenova_zephyr_transition.py xenova_resources.py xenova_execution.py xenova_recovery.py xenova_domain_identity.py xenova_vm.py xenova_runtime.py xenova_trace.py xenova_zephyr.py xenova_management.py xenova_management_cli.py xenova_catalog.py xenova_wifi.py artifact_io.py; do
+    for module in xenova_boot_progress.py xenova_boot_status.py xenova_cpu.py xenova_guest_process.py xenova_zephyr_control.py xenova_zephyr_transition.py xenova_resources.py xenova_execution.py xenova_recovery.py xenova_domain_identity.py xenova_vm.py xenova_runtime.py xenova_trace.py xenova_zephyr.py xenova_management.py xenova_management_cli.py xenova_catalog.py xenova_wifi.py artifact_io.py; do
         install -m 0644 "${S}/$module" "${D}${libdir}/xenova/$module"
     done
     install -d "${D}${sysconfdir}/systemd/journald.conf.d" "${D}${sysconfdir}/systemd/system.conf.d"
@@ -55,12 +56,12 @@ do_install() {
     install -m 0644 "${S}/xenova-sshd-keys.conf" "${D}${sysconfdir}/systemd/system/sshd.service.d/10-xenova-keys.conf"
     # systemd 259의 SSH generator가 AF_UNIX/VSOCK/추가 socket 경로를 재생성하지 않게 한다.
     ln -s /dev/null "${D}${sysconfdir}/systemd/system-generators/systemd-ssh-generator"
-    for unit in xenova-cpu-prepare.service xenova-host-admission.service xenova-wifi@.service xenova-data-prepare.service xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenova-vm-shutdown.service xenova-vms.service; do
+    for unit in xenova-boot-status.service xenova-cpu-prepare.service xenova-host-admission.service xenova-wifi@.service xenova-data-prepare.service xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenova-vm-shutdown.service xenova-vms.service; do
         install -m 0644 "${S}/$unit" "${D}${systemd_system_unitdir}/$unit"
     done
 }
 # 소유권은 enable 목록과 별개다. static readiness unit도 반드시 패키징한다.
-FILES:${PN} += "${systemd_system_unitdir}/xenova-cpu-prepare.service ${sysconfdir}/modprobe.d/xenova-wifi.conf ${systemd_system_unitdir}/xenova-host-admission.service ${libdir}/xenova ${datadir}/xenova /srv/xenova \
+FILES:${PN} += "${systemd_system_unitdir}/xenova-boot-status.service ${systemd_system_unitdir}/xenova-cpu-prepare.service ${sysconfdir}/modprobe.d/xenova-wifi.conf ${systemd_system_unitdir}/xenova-host-admission.service ${libdir}/xenova ${datadir}/xenova /srv/xenova \
     ${sysconfdir}/systemd/system/sshd.service.d/10-xenova-keys.conf \
     ${sysconfdir}/systemd/system-generators/systemd-ssh-generator \
     ${systemd_system_unitdir}/xenova-data-prepare.service \

@@ -25,6 +25,20 @@ def inputs():
     return {str(p.relative_to(BASE)):{"sha256":sha(p),"bytes":p.stat().st_size} for p in paths}
 
 
+def candidate_lock(locked, files, version=None):
+    """Keep factory selection fixed; candidate provenance is local to this build."""
+    if version is None:
+        if locked['app_files'] != files:
+            raise ValueError('network Starter app source lock mismatch; explicit candidate version required')
+        return dict(locked)
+    if (not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?', version)
+            or version == locked['version']):
+        raise ValueError('candidate requires a distinct explicit application SemVer')
+    digest = hashlib.sha256(json.dumps(files, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return {**locked, 'id': 'xenova-zephyr-network-starter-' + version, 'version': version,
+            'app_files': files, 'app_source_sha256': digest}
+
+
 
 def verify_event_irq(path):
     """생성된 Zephyr DTS의 network Starter event PPI31·level·priority를 확인한다."""
@@ -76,6 +90,7 @@ def main(argv=None):
     for name in ("zephyr-source", "tools", "spdx", "toolchain-archive", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--candidate-version", help="new standalone candidate version; never changes source/factory selection locks")
     parser.add_argument("--diagnostics", choices=("on", "off"), default="on")
     parser.add_argument("--telemetry", choices=("on", "off"),
                         help="v2 Publisher; defaults to on with diagnostics, off without it")
@@ -109,8 +124,7 @@ def main(argv=None):
     app_lock=json.loads((BASE/'network-starter.lock.json').read_text())
     app_files={str(p.relative_to(BASE/'network-starter-app')):{'sha256':sha(p),'bytes':p.stat().st_size}
                for p in sorted((BASE/'network-starter-app').rglob('*')) if p.is_file()}
-    if app_lock['app_files']!=app_files:
-        raise ValueError('network Starter app source lock mismatch')
+    app_lock = candidate_lock(app_lock, app_files, args.candidate_version)
     source_inputs = inputs()
     source_hash = hashlib.sha256(json.dumps(source_inputs, sort_keys=True,
                                           separators=(",", ":")).encode()).hexdigest()
@@ -121,7 +135,8 @@ def main(argv=None):
     print(json.dumps({"action": "build-network-starter" if args.execute else "plan", "output": str(args.output),
                       "source_sha256": source_hash, "zephyr_source_files_verified": count,
                       "diagnostics": args.diagnostics, "telemetry": args.telemetry,
-                      "timing_exercise": args.timing_exercise}, indent=2))
+                      "timing_exercise": args.timing_exercise,
+                      "candidate_id": app_lock['id']}, indent=2))
     if not args.execute:
         return
     args.output.mkdir(mode=0o755)
@@ -191,6 +206,7 @@ def main(argv=None):
         "schema_version": 1, "app": "xenova-xenstore-network-starter",
         "repository_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "source_sha256": source_hash, "source_files": source_inputs,
+        "app_lock": app_lock,
         "build_script_sha256": sha(Path(__file__)), "references": reference,
         "diagnostics": args.diagnostics, "telemetry": args.telemetry,
         "timing_exercise": args.timing_exercise,

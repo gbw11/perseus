@@ -19,10 +19,19 @@ static int ready(struct xt_socket *s, short events)
 	if (poll.revents & (ZSOCK_POLLERR|ZSOCK_POLLHUP|ZSOCK_POLLNVAL)) { return -ECONNRESET; }
 	return poll.revents & events ? 0 : -EIO;
 }
+int xt_socket_close(struct xt_socket *s)
+{
+	if (s->fd < 0) { return s->close_error; }
+	int fd=s->fd;s->fd=-1;
+	int rc=zsock_close(fd);
+	if (rc<0 && errno!=EBADF) { s->close_error=-errno; }
+	return s->close_error;
+}
 
 int mqtt_client_custom_transport_connect(struct mqtt_client *m)
 {
 	struct xt_socket *s=m->transport.custom_transport_data;
+	if (s->close_error) { return s->close_error; }
 	s->fd=zsock_socket(NET_AF_INET,NET_SOCK_STREAM,NET_IPPROTO_TCP);
 	if (s->fd<0) { return -errno; }
 	if (zsock_fcntl(s->fd,ZVFS_F_SETFL,ZVFS_O_NONBLOCK)<0) { return -errno; }
@@ -79,6 +88,5 @@ int mqtt_client_custom_transport_read(struct mqtt_client *m,uint8_t *data,uint32
 int mqtt_client_custom_transport_disconnect(struct mqtt_client *m)
 {
 	struct xt_socket *s=m->transport.custom_transport_data;
-	if (s->fd>=0) { int rc=zsock_close(s->fd);s->fd=-1;return rc<0 ? -errno : 0; }
-	return 0;
+	return xt_socket_close(s);
 }

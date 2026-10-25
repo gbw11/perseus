@@ -32,6 +32,10 @@ int xsr_close(int64_t end) {
  if(!session.link.open)opened=false;
  k_mutex_unlock(&session_lock);return rc;
 }
+int xsr_unwatch(uint32_t watch,int64_t end) {
+ struct xs_client *c=xsr_acquire(end);if(!c)return -ETIMEDOUT;
+ int rc=xs_unwatch(c,watch,MAX(0,end-k_uptime_get()));xsr_release();return rc;
+}
 int xsr_watch_next(uint32_t watch,int ms) {
  int64_t end=k_uptime_get()+ms;
  struct xs_client *c=xsr_acquire(end);if(!c)return -ETIMEDOUT;
