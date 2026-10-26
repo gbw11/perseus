@@ -82,6 +82,8 @@ export DISPLAY_FEED_BASE_URL=http://127.0.0.1:8082
 
 `pinned`는 등록 UUID가 필수다. 잘못된 UUID/조합은 400, 이전 epoch/revision은 409, 요청 형식 오류는 422다. 기본은 VM1 pinned다. follow_active에서도 신선하고 명시적인 active_vm_id만 따라가며, 확인된 새 값이 없으면 마지막 선택을 유지한다. 장애·AUTO/MANUAL 변화만으로 다른 VM을 고르지 않는다.
 
+254번 보완: `outputs[].reason`에 전체/상세 화면의 선택 이유를 제공한다. 상세 화면은 이를 표시하며, 표시 피드 자체가 끊기면 과거 선택임을 안내한다. follow_active의 대상은 등록된 주 구동·백업 VM으로 제한하며, Debian 인터랙션 VM을 활성 구동 대상으로 선택하지 않는다. Debian을 명시적으로 pinned하는 것은 가능하다. 앱 구독 경로·보고 신선도를 먼저 확인하므로 과거 `failed` 값만으로 현재 앱 오류를 표시하지 않는다. 보드 없는 상태 전이 검증과 미검증 범위는 [254 검증 기록](../../../../docs/verification/display-254-policy.md)에 정리했다.
+
 presentation의 `revision`은 선택 설정 버전, `render_revision`은 실행 ID/상태·내용의 해시다. 렌더러는 두 animation frame 이후 epoch/revision/render_revision을 ACK한다. 이전 내용의 ACK는 409이며, 출력별 ACK는 3초 동안 갱신되지 않으면 만료된다. 응답의 `renderer_ack.stage=dom_rendered`는 DOM 렌더 확인이며 물리 HDMI `ready`나 캡처 성공을 의미하지 않는다. 물리 `applied_revision`/장치 연결 상태는 4단계에서 추가한다.
 
 로컬 렌더러는 약 1초마다 same-origin presentation을 읽고 요청에 2.5초 제한을 둔다. 순차 요청으로 겹침을 막으며 중복/역순 스냅샷·퇴역한 수집기 epoch를 수락하지 않는다. 인증 실패·통신 오류·규격 오류에서는 마지막 값임을 명시하고 정상 연결/활성 주행 배지를 제거한다. 기본값은 미수신 대기 화면이다. 그래픽 소스 어댑터가 없으므로 앱 영역은 실제 상태 화면/미연결 안내를 표시한다.

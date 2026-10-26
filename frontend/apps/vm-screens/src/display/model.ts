@@ -31,6 +31,7 @@ export interface Presentation {
     view: 'overview' | 'detail';
     selection: 'pinned' | 'follow_active';
     vm_id: string | null;
+    reason?: string;
   }[];
   decisions: Record<string, Decision>;
   state: {
@@ -127,7 +128,8 @@ export function parsePresentation(v: unknown): Presentation {
       output.view !== (index === 0 ? 'overview' : 'detail') ||
       !['pinned', 'follow_active'].includes(String(output.selection)) ||
       !(output.vm_id === null || ids.has(String(output.vm_id))) ||
-      (index === 0 && output.vm_id !== null)
+      (index === 0 && output.vm_id !== null) ||
+      (output.reason !== undefined && typeof output.reason !== 'string')
     )
       throw new Error('출력 매핑이 올바르지 않습니다.');
   }

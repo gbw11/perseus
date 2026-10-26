@@ -80,4 +80,22 @@ describe('local HDMI screens', () => {
     expect(screen.getByText('VM 장애')).toBeInTheDocument();
     expect(screen.getByText('new-run-2')).toBeInTheDocument();
   });
+  it('explains why the last detail target is retained after control reports expire', () => {
+    const p = presentationFixture();
+    p.outputs[1]!.selection = 'follow_active';
+    p.outputs[1]!.vm_id = p.state.vms[1]!.vm_id;
+    p.outputs[1]!.reason = '활성 구동 VM 미확인 · 마지막 선택 유지';
+    p.state.drive.source.status = 'stale';
+    show('monitor-2', true, p);
+    expect(screen.getByTestId('card-VM2')).toBeInTheDocument();
+    expect(screen.getByText('활성 구동 VM 미확인 · 마지막 선택 유지')).toBeInTheDocument();
+    expect(screen.queryByText('활성 구동')).not.toBeInTheDocument();
+  });
+  it('does not present a previous selection reason as current after display connection loss', () => {
+    const p = presentationFixture();
+    p.outputs[1]!.reason = '제어 담당이 보고한 활성 구동 VM 따라가기';
+    show('monitor-2', false, p);
+    expect(screen.queryByText(p.outputs[1]!.reason)).not.toBeInTheDocument();
+    expect(screen.getByText('화면 연결 끊김 · 마지막 화면 선택 유지')).toBeInTheDocument();
+  });
 });

@@ -119,6 +119,7 @@ export function MonitorPage() {
             </dl>
             <h2>화면 선택</h2>
             <p>{output.selection === 'pinned' ? '선택 VM 유지' : '확인된 활성 구동 VM 따라가기'}</p>
+            {output.reason && <p>{connected ? output.reason : '화면 연결 끊김 · 마지막 화면 선택 유지'}</p>}
             <p className={styles.subtle}>
               주행 모드와 활성 구동 VM은 확인된 제어 상태를 기준으로 표시합니다.
             </p>
