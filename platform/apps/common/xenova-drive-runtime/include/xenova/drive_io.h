@@ -11,9 +11,11 @@ struct xd_received {
  int error; /* Copy/envelope availability; payload validity is parsed by main. */
 };
 struct xd_inputs {
- struct xd_received control, input;
+ struct xd_received control, input, perception;
+ char vm_id[XM_UUID_LEN + 1];
  uint64_t control_revision, connection_revision;
  bool connected; /* CONNACK observed, not SUBACK or control re-confirmation. */
+ bool dual_mode;
 };
 struct xd_candidate {
  uint64_t id, created_us, queued_us, capture_us, control_revision, connection_revision;
@@ -36,6 +38,8 @@ struct xd_io_stats {
  size_t stack_unused_bytes;
 };
 int xd_io_start(struct xm_zclient *, const char *control, const char *input);
+/* One owner/client, with both existing mode inputs. No second Store/session. */
+int xd_io_start_dual(struct xm_zclient *, const char *control, const char *input, const char *perception);
 int xd_io_snapshot(struct xd_inputs *);
 /* On acceptance, queued_us is set to the actual exchange admission time. */
 int xd_io_command(struct xd_candidate *);

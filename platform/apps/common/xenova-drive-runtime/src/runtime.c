@@ -78,6 +78,7 @@ struct row {
 };
 static struct row current, rows[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
 static struct xd_inputs cycle_inputs;
+static const struct xd_received *command_input=&cycle_inputs.input;
 static struct xd_candidate candidate;
 static struct xd_delivery deliveries[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
 static size_t delivery_count;
@@ -262,6 +263,18 @@ int xd_client_prepare(struct xm_zclient *client,const char *control,const char *
 {
 	return admit() ? xd_io_start(client,control,input) : -ESHUTDOWN;
 }
+int xd_client_prepare_dual(struct xm_zclient *client,const char *control,const char *input,const char *perception)
+{
+	return admit() ? xd_io_start_dual(client,control,input,perception) : -ESHUTDOWN;
+}
+const char *xd_vm_id(void) { return cycle_inputs.vm_id; }
+int xd_command_input(const char *type)
+{
+	if (!strcmp(type,"drive.input")) { command_input=&cycle_inputs.input; }
+	else if (!strcmp(type,"perception.result") && cycle_inputs.dual_mode) { command_input=&cycle_inputs.perception; }
+	else { return -EINVAL; }
+	return 0;
+}
 int xd_publish(struct xm_zclient *client,const char *topic,const char *type,const char *payload)
 {
 	ARG_UNUSED(client);
@@ -277,12 +290,13 @@ int xd_iteration_begin(void)
 {
 	memset(&current, 0, sizeof(current));
 	current.iteration_begin = now_us();
+ command_input=&cycle_inputs.input;
 	int rc = xd_io_snapshot(&cycle_inputs);
 	if (rc) {
 		/* Do not wait or mix generations. Missing input follows the existing
 		 * algorithm's idle/stop rules; a busy snapshot is not fresh data. */
 		memset(&cycle_inputs,0,sizeof(cycle_inputs));
-		cycle_inputs.input.error = cycle_inputs.control.error = rc;
+		cycle_inputs.perception.error = cycle_inputs.input.error = cycle_inputs.control.error = rc;
 	}
 	return current.iteration_begin == UINT64_MAX ? -EIO : 0;
 }
@@ -335,8 +349,8 @@ void xd_command(struct xm_zclient *client, const char *topic, const char *json, 
 		candidate.control_revision=cycle_inputs.control_revision;
 		candidate.connection_revision=cycle_inputs.connection_revision;
 		candidate.expires_ms=k_uptime_get()+CONFIG_XENOVA_DRIVE_COMMAND_MAX_AGE_MS;
-		if ((v_mps!=0.0f||steer_rad!=0.0f) && !cycle_inputs.input.error)
-			candidate.expires_ms=MIN(candidate.expires_ms,cycle_inputs.input.received_ms+input_timeout_ms+1);
+		if ((v_mps!=0.0f||steer_rad!=0.0f) && !command_input->error)
+			candidate.expires_ms=MIN(candidate.expires_ms,command_input->received_ms+input_timeout_ms+1);
 		if (strlen(topic)>=sizeof(candidate.topic)||strlen(json)>=sizeof(candidate.json)) current.rc=-EMSGSIZE;
 		else { strcpy(candidate.topic,topic);strcpy(candidate.json,json);current.rc=xd_io_command(&candidate); }
 	}
@@ -381,7 +395,8 @@ void xd_latest(struct xm_zclient *client, const char *topic, const char *type,
 {
 	*payload = (struct xm_span){0}; *age_ms = 0; *seq = -1;
 	ARG_UNUSED(client); ARG_UNUSED(topic);
-	const struct xd_received *r = !strcmp(type,"vehicle.control") ? &cycle_inputs.control : &cycle_inputs.input;
+	const struct xd_received *r = !strcmp(type,"vehicle.control") ? &cycle_inputs.control :
+  (cycle_inputs.dual_mode && !strcmp(type,"perception.result") ? &cycle_inputs.perception : &cycle_inputs.input);
 	if (!r->error && r->length) {
 		*payload=(struct xm_span){r->payload,r->length}; *seq=r->seq;
 		*age_ms=k_uptime_get()-r->received_ms;

@@ -136,6 +136,7 @@ struct xm_vehicle_control {
 	uint32_t generation;
 	char mode[16];
 	char active_app[XM_ID_MAX]; /* null 이면 빈 문자열 */
+	char active_vm_id[XM_UUID_LEN + 1]; /* 기존 vehicle.control 필드, null/생략이면 빈 문자열 */
 };
 int xm_vehicle_control_parse(struct xm_span payload, struct xm_vehicle_control *out);
 
