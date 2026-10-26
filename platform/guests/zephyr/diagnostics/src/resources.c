@@ -125,6 +125,7 @@ static void collect(struct k_work *work)
 #else
  result.cpu.rc=-ENOTSUP;result.threads_rc=-ENOTSUP;
  result.raw.at_ms=k_uptime_get();
+ result.cpu.start_ms=result.cpu.end_ms=result.raw.at_ms;
 #endif
 #if defined(CONFIG_XENOVA_DIAGNOSTICS_POOLS)
  STRUCT_SECTION_FOREACH(net_buf_pool,pool){

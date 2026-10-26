@@ -178,6 +178,45 @@ ZTEST(diagnostics,test_network_byte_rate_epoch_and_failure)
 }
 
 #if defined(CONFIG_XENOVA_DIAGNOSTICS_CPU)
+static struct k_thread crowded[70];
+K_THREAD_STACK_ARRAY_DEFINE(crowded_stacks,70,1024);
+static void parked(void *a,void *b,void *c)
+{ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);k_sleep(K_FOREVER);}
+ZTEST(diagnostics,test_registry_and_return_limits_are_explicit)
+{
+ for(unsigned i=0;i<ARRAY_SIZE(crowded);i++)
+  k_thread_create(&crowded[i],crowded_stacks[i],K_THREAD_STACK_SIZEOF(crowded_stacks[i]),parked,NULL,NULL,NULL,8,0,K_NO_WAIT);
+ k_sleep(K_MSEC(450));struct xdr_snapshot r;zassert_ok(xdiag_resources_get(&r));
+ zassert_equal(r.rows,XDR_THREADS);zassert_true(r.seen>64);zassert_equal(r.threads_rc,-ENOSPC);
+ for(size_t i=0;i<r.rows;i++){
+  zassert_true(r.threads[i].lifetime>0);
+  for(size_t j=0;j<i;j++)zassert_not_equal(r.threads[i].lifetime,r.threads[j].lifetime);
+ }
+ printk("RESOURCE_LIMIT rows=%zu seen=%zu rc=%d\n",r.rows,r.seen,r.threads_rc);
+ for(unsigned i=0;i<ARRAY_SIZE(crowded);i++){k_thread_abort(&crowded[i]);zassert_ok(k_thread_join(&crowded[i],K_MSEC(200)));}
+ k_sleep(K_MSEC(450));zassert_ok(xdiag_resources_get(&r));zassert_ok(r.threads_rc);zassert_true(r.seen<32);
+}
+#if defined(XDR_TEST_LONG_GAP)
+K_SEM_DEFINE(gap_started,0,1);
+K_SEM_DEFINE(gap_ended,0,1);
+static uint64_t gap_ms;
+static void block_collector(struct k_work *work)
+{ARG_UNUSED(work);k_sem_give(&gap_started);k_sleep(K_MSEC(gap_ms));k_sem_give(&gap_ended);}
+K_WORK_DEFINE(blocked_work,block_collector);
+ZTEST(diagnostics,test_long_gap_baseline_and_two_normal_windows)
+{
+ k_sleep(K_MSEC(450));struct xdr_snapshot r;zassert_ok(xdiag_resources_get(&r));zassert_ok(r.cpu.rc);
+ gap_ms=((uint64_t)UINT32_MAX*1000/sys_clock_hw_cycles_per_sec())/2+500;
+ k_work_submit(&blocked_work);zassert_ok(k_sem_take(&gap_started,K_SECONDS(1)));
+ k_sleep(K_MSEC(1100));zassert_ok(xdiag_resources_get(&r));zassert_equal(r.cpu.rc,-EOVERFLOW);
+ zassert_ok(k_sem_take(&gap_ended,K_MSEC(gap_ms)));next_resource(&r);
+ zassert_equal(r.cpu.rc,-EOVERFLOW);uint64_t anchor=r.raw.at_ms;
+ next_resource(&r);zassert_ok(r.cpu.rc);zassert_equal(r.cpu.start_ms,anchor);zassert_true(r.cpu.total_delta>0);
+ for(size_t i=0;i<r.rows;i++)zassert_ok(r.threads[i].rc);
+ anchor=r.raw.at_ms;next_resource(&r);zassert_ok(r.cpu.rc);zassert_equal(r.cpu.start_ms,anchor);
+ printk("RESOURCE_GAP recovered gap_ms=%llu sample=%llu\n",gap_ms,r.sample);
+}
+#endif
 static struct k_thread measured_thread;
 K_THREAD_STACK_DEFINE(measured_stack,2048);
 K_SEM_DEFINE(measured_done,0,1);

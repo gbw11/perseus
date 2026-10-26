@@ -75,6 +75,24 @@ class TelemetryModelTest(unittest.TestCase):
             changed=deepcopy(cpu);changed['payload']['unknown_field']=1
             with self.assertRaises(self.oracle.ContractError):
                 self.oracle.validate(changed,f"xenova/v2/vms/{changed['vm_id']}/telemetry/metrics",0,False)
+            pages=[m for m in received if m['type']=='telemetry.metrics' and m['payload'].get('family')=='cpu'
+                   and m['payload']['window']['rows_returned']==32 and m['payload']['samples'][0]['status']=='ok']
+            self.assertEqual(len(pages),8)
+            self.assertEqual(len({m['payload']['collection']['sample_id'] for m in pages}),1)
+            self.assertEqual({m['payload']['window']['threads_status'] for m in pages},{'truncated'})
+            self.assertEqual({m['payload']['window']['rows_seen'] for m in pages},{73})
+            consumer=self.oracle.ReferenceConsumer();consumer.bind(cpu['vm_id'],cpu['boot_id'],cpu['publisher_instance_id'])
+            for page in pages[:7]:self.assertEqual(consumer.ingest(page,1000),'CURRENT_OBSERVATION')
+            # A valid page is not proof of full thread coverage. Missing last
+            # page remains missing; repeated source windows cannot renew leases.
+            group=next(iter(consumer.cpu_parts.values()));self.assertEqual(len(group),7)
+            self.assertNotEqual(len(group),pages[0]['payload']['window']['part_count'])
+            self.assertEqual(consumer.freshness(pages[0],7001),'STALE')
+            self.assertEqual(consumer.ingest(pages[7],7002),'CURRENT_OBSERVATION');self.assertEqual(len(group),8)
+            changed=deepcopy(pages[7]);changed['seq']=str(int(changed['seq'])+100)
+            changed['message_id']=changed['message_id'].rsplit('/',1)[0]+'/'+changed['seq']
+            changed['payload']['window']['start_uptime_ms']='49001'
+            self.assertEqual(consumer.ingest(changed,7003),'CPU_SAMPLE_CONFLICT')
             if os.environ.get("XENOVA_TEST_LOG_DIR"):
                 out = Path(os.environ["XENOVA_TEST_LOG_DIR"])
                 out.mkdir(parents=True, exist_ok=True)

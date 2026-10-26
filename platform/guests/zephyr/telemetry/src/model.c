@@ -370,6 +370,13 @@ int xt_encode(struct xt_publisher *p,enum xt_kind kind,const struct xt_observati
 	if (!p || !s || !out || !xt_uuid_valid(sample_id) || s->start_ms>s->end_ms || s->end_ms>sent ||
     s->rows>XT_THREAD_MAX || kind<XT_INVENTORY || kind>XT_POOLS) { return -EINVAL; }
 	if ((kind==XT_HEARTBEAT || (kind>=XT_MEMORY && kind<=XT_PUBLISHER) || kind==XT_CPU || kind==XT_POOLS) && sent-s->end_ms>2000) { ++p->counters.live_discarded;return -ETIMEDOUT; }
+	/* Collection copies a cache: its new end timestamp cannot renew the source
+	 * window. Reject stale resource pages before allocating a stream sequence. */
+	if (kind==XT_CPU || kind==XT_POOLS) {
+		uint64_t source=kind==XT_CPU ? s->resources.cpu.end_ms : s->resources.raw.at_ms;
+		if (source>s->end_ms) { return -EINVAL; }
+		if (sent-source>2000) { ++p->counters.live_discarded;return -ETIMEDOUT; }
+	}
 	if (kind>=XT_INTERVAL && kind<=XT_ELAPSED && s->timing_rc) { return s->timing_rc; }
 	if (kind==XT_EVENT && !p->event_count) { return -EAGAIN; }
 	unsigned stream=kind==XT_INVENTORY ? 0 : kind==XT_HEARTBEAT ? 1 : kind==XT_EVENT ? 3 : (kind==XT_THREADS||kind==XT_HISTORY) ? 4 : 2;

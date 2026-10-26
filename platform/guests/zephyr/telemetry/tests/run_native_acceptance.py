@@ -265,6 +265,7 @@ def main():
                     source=json.loads(line[len('XT_RESOURCE '):]);key=(vm_id,boot_id,source['sample'])
                     if key in resources:assert resources[key]==source,'same cache sample changed across reads/restart'
                     resources[key]=source
+        cpu_pages={}
         for m in messages:
             if m['type']=='telemetry.inventory':
                 expected=next(b for b in bootstraps if b['vm_id']==m['vm_id'])
@@ -273,6 +274,15 @@ def main():
                 assert m['payload']['firmware']['build_id']==native_build
                 assert m['payload']['firmware']['artifact_sha256']==native_artifact
             if m['type']=='telemetry.metrics' and m['payload']['family']=='cpu':
+                p=m['payload'];w=p['window']
+                key=(m['vm_id'],m['boot_id'],m['publisher_instance_id'],w['sample_seq'])
+                group=cpu_pages.setdefault(key,{})
+                if group:
+                    first=next(iter(group.values()))
+                    assert first['collection']==p['collection'],'CPU pages changed collection/sample'
+                    assert {k:v for k,v in first['window'].items() if k!='part_index'}=={k:v for k,v in w.items() if k!='part_index'},'CPU pages changed window/coverage'
+                assert int(m['clock']['sent_uptime_ms'])-int(w['end_uptime_ms'])<=2000
+                group[w['part_index']]=p
                 raw=resources[(m['vm_id'],m['boot_id'],m['payload']['window']['sample_seq'])]
                 value=next(s for s in m['payload']['samples'] if s['name']=='cpu.system.percent')
                 if value['status']=='ok':
@@ -360,6 +370,9 @@ def main():
         result = {"actual_producer": True, "received": len(records), "source_comparisons": matched,
                   "cpu_source_comparisons":cpu_matched,"metadata_utf8_roundtrip":True,
                   "resources_enabled":not args.resources_off,
+                  "cpu_page_groups":len(cpu_pages),
+                  "cpu_page_complete":sum(len(g)==next(iter(g.values()))['window']['part_count'] for g in cpu_pages.values()),
+                  "cpu_page_partial":sum(len(g)<next(iter(g.values()))['window']['part_count'] for g in cpu_pages.values()),
                   "artifact_scope":"native_executable_only; ARM loader binding tested separately",
                   "native_default_fatal_filtered_and_archived":True,
                   "streams": 5, "vm_count": 2, "reporter_did_not_advance_stalled_loop": True,

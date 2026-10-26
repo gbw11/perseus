@@ -338,11 +338,11 @@ static void work(void *a,void *b,void *c)
 				int rc=send_observation(periodic[i],&current,current_sample,NULL,0);
 				if (rc!=-EAGAIN && rc!=-EBUSY) { due[i]=now+periods[i]; }
 			}
-			if(cpu_active&&now>=cpu_expiry){cpu_active=false;++publisher.counters.live_discarded;}
+			if(cpu_active&&k_uptime_get()>=cpu_expiry){cpu_active=false;++publisher.counters.live_discarded;}
 			if(!cpu_active&&now>=cpu_due){
 			 cpu_frozen=current;memcpy(cpu_sample,current_sample,sizeof(cpu_sample));cpu_part=0;
 			 cpu_parts=(unsigned)MAX(1,(cpu_frozen.resources.rows+3)/4);cpu_active=true;
-			 cpu_expiry=cpu_frozen.end_ms+2000;cpu_due=now+2000;
+			 cpu_expiry=cpu_frozen.resources.cpu.end_ms+2000;cpu_due=now+2000;
 			}
 			if(cpu_active){
 			 int rc=send_observation(XT_CPU,&cpu_frozen,cpu_sample,NULL,cpu_part);
