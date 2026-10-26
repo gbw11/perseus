@@ -79,7 +79,7 @@ pipeline {
             steps {
                 dir('platform/services/dom0-manager') {
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                        sh 'python3 -m pip install -q --user -e .[test] && python3 -m pytest -q --junitxml=target/pytest.xml'
+                        sh 'python3 -m pip install -q --user -e ../vm-agent/mqtt-client -e .[test] && python3 -m pytest -q --junitxml=target/pytest.xml'
                     }
                 }
             }
