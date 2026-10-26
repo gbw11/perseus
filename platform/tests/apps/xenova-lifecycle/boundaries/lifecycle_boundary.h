@@ -2,6 +2,10 @@
 #ifndef XL_BOUNDARY_H
 #define XL_BOUNDARY_H
 #include <zephyr/kernel.h>
+#include <stdatomic.h>
+extern atomic_uint xl_polls;
+extern atomic_bool xl_wait_enabled;
+extern struct k_sem xl_store_wait;
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>

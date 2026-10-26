@@ -416,6 +416,30 @@ def platform_root_ok(root):
     indicator = 'etc/systemd/system/sysinit.target.wants/xenova-boot-status.service'
     if not (root/indicator).is_symlink() or path(indicator).read_bytes() != (FILES/'xenova-boot-status.service').read_bytes():
         raise ValueError('boot display unit not enabled under sysinit.target')
+    # Content validation only: partition layout, seed identity and data initialization are unchanged.
+    tailscale = ROOT/'platform/yocto/meta-xenova/recipes-connectivity/tailscale/files'
+    for relative, source in {
+        'usr/sbin/xenova-tailscale-state': tailscale/'xenova-tailscale-state',
+        'usr/lib/systemd/system/tailscaled.service.d/20-xenova-persistence.conf': tailscale/'20-xenova-persistence.conf',
+    }.items():
+        expected[relative] = source
+        if not path(relative).is_file() or path(relative).read_bytes() != source.read_bytes():
+            raise ValueError('Tailscale persistence source/installed mismatch: '+relative)
+    for relative in ('usr/bin/tailscale', 'usr/sbin/tailscaled', 'usr/sbin/xenova-tailscale-state'):
+        if not path(relative).is_file() or not path(relative).stat().st_mode & 0o111:
+            raise ValueError('required Tailscale executable missing: '+relative)
+    service = 'usr/lib/systemd/system/tailscaled.service'
+    link = root/'etc/systemd/system/multi-user.target.wants/tailscaled.service'
+    if not path(service).is_file() or not link.is_symlink() or path(str(link.relative_to(root))).read_bytes() != path(service).read_bytes():
+        raise ValueError('Tailscale daemon unit not enabled')
+    for release in releases:
+        for relative in ('kernel/drivers/net/tun.ko', 'kernel/net/ipv6/ipv6.ko'):
+            if not any((release/(relative+suffix)).is_file() for suffix in ('', '.xz', '.gz', '.zst')):
+                raise ValueError('required Tailscale kernel module missing: '+relative)
+    for relative in ('srv/xenova/tailscale','var/lib/tailscale/tailscaled.state'):
+        candidate = inside(root, relative, create_parents=False, follow_final=False)
+        if candidate.is_symlink() or candidate.exists():
+            raise ValueError('common image must not contain Tailscale runtime state')
     return {relative: sha(path(relative)) for relative in expected}
 
 

@@ -36,5 +36,7 @@ struct xnf {
 void xnf_init(struct xnf *);
 int xnf_send(struct xnf *, const void *, size_t);
 int xnf_poll(struct xnf *);
+/* Under the ring owner's lock, after a successful bounded poll. */
+bool xnf_pending(const struct xnf *);
 bool xnf_drained(const struct xnf *);
 #endif

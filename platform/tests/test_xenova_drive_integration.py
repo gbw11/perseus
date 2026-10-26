@@ -137,6 +137,59 @@ class DriveAnalysisTest(unittest.TestCase):
         self.assertEqual(self.analyzer.stats([1, 2, 7])["p99_us"], 7)
         self.assertNotIn("p99_upper_us", self.analyzer.stats([1, 2, 7]))
 
+    def async_fixture(self, replace=False, missing=False):
+        """The capture schema changes; the v1 wire messages remain unchanged."""
+        for app in ("manual", "autonomous"):
+            path = self.root / (app + ".stdout")
+            lines = path.read_text().splitlines()
+            out, sends = [], []
+            for line in lines:
+                if line.startswith("XD_SUMMARY "):
+                    value = json.loads(line[len("XD_SUMMARY "):]); value["schema_version"] = 2
+                    out.append("XD_SUMMARY " + json.dumps(value)); continue
+                if line.startswith("XD_ROW "):
+                    row = json.loads(line[len("XD_ROW "):])
+                    disposition = 2 if replace and row[6] == 10 else 0
+                    send = [row[6], row[1], row[3], row[3] + 50, row[3] + 60,
+                            row[3] + 70, row[12], row[13], -114 if disposition else 0, disposition]
+                    if not (missing and row[6] == 10): sends.append("XD_SEND " + json.dumps(send))
+                    row[12] = row[13] = 0
+                    line = "XD_ROW " + json.dumps(row)
+                out.append(line)
+            out += sends
+            out.append("XD_IO " + json.dumps({"delivery_overflow": "0", "delivery_rows": len(sends)}))
+            path.write_text("\n".join(out))
+
+    def test_async_mailbox_acceptance_is_not_socket_send_and_replacement_is_not_loss(self):
+        self.async_fixture(replace=True)
+        result = self.analyzer.analyze(self.root, lossless=True)
+        self.assertTrue(result["accepted"], result["failures"])
+        self.assertEqual(result["apps"]["manual"]["matched_received"], 119)
+        self.assertEqual(result["apps"]["manual"]["candidate_dispositions"], {0: 119, 2: 1})
+        self.assertEqual(result["apps"]["manual"]["candidate_wait"]["max_us"], 50)
+        self.assertEqual(result["apps"]["manual"]["mqtt_submit_elapsed"]["max_us"], 10)
+
+    def test_async_accepted_without_terminal_record_cannot_pass(self):
+        self.async_fixture(missing=True)
+        with self.assertRaisesRegex(ValueError, "terminal result"):
+            self.analyzer.analyze(self.root)
+
+    def test_calculation_complete_does_not_hide_unconfirmed_transmissions(self):
+        self.async_fixture()
+        path = self.root / "manual.stdout"
+        original = path.read_text()
+        for prefix in ("XD_SUMMARY ", "XD_IO "):
+            lines = []
+            for line in original.splitlines():
+                if line.startswith(prefix):
+                    value = json.loads(line[len(prefix):])
+                    value["transmissions_complete"] = False
+                    line = prefix + json.dumps(value)
+                lines.append(line)
+            path.write_text("\n".join(lines))
+            with self.assertRaisesRegex(ValueError, "transmission"):
+                self.analyzer.analyze(self.root)
+
     def test_incomplete_window_clock_failure_and_counter_saturation_refuse(self):
         path = self.root / "manual.stdout"
         original = path.read_text()

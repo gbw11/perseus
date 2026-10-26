@@ -18,7 +18,7 @@ Xenova는 Raspberry Pi 4의 Xen dom0에서 VM 등록·실행·관측·복구·�
 - [7. 자동 시작·VM 정책·설정](#policies)
   - [CPU 정책 변경·실제 배치 조회](#cpu-contract)
 - [8. 자산 수명주기](#assets)
-- [9. Wi-Fi·콘솔·SSH](#access)
+- [9. Wi-Fi·Tailscale·콘솔·SSH](#access)
 - [10. 운영 진단·설치 도구](#diagnostics)
 - [11. host gate·보드 종료·서비스 내부 명령](#host)
 - [공통 계약 A. 응답·오류·멱등성](#contract-response)
@@ -144,6 +144,8 @@ Manager 전용 명령은 `templates, list, get, create, retire, delete, restore,
 | [`xenova-wifi configure`](#cmd-wifi-configure) | SSID·PSK와 국가 저장 |
 | [`xenova-wifi activate`](#cmd-wifi-activate) | 저장한 Wi-Fi 활성화 |
 | [`xenova-wifi status`](#cmd-wifi-status) | 인증·주소·내부망 중복 조회 |
+| [`tailscale up/status/ip`](#cmd-tailscale) | 최초 Tailnet 인증·원격 관리 주소 확인 |
+| [`xenova-tailscale-state backup/restore`](#cmd-tailscale-backup) | 같은 물리 보드의 인증 상태 백업·복원 |
 | [`xenova-vm console`](#cmd-console) | Xen PV 콘솔 접속 |
 | [`xenova-vm check-xen`](#cmd-check-xen) | dom0 Xen 제어 기반 확인 |
 | [`xenova-vm check-network`](#cmd-check-network) | 격리된 내부 브리지 검사 |
@@ -1765,9 +1767,180 @@ get의 lifecycle·generation과 operation journal을 비교한다. 완료마다 
 [명령어 색인으로](#command-index)
 
 <a id="access"></a>
-## 9. Wi-Fi·콘솔·SSH
+## 9. Wi-Fi·Tailscale·콘솔·SSH
 
 Wi-Fi 구성·활성화·조회는 각각 독립 명령이다. 관리 Wi-Fi를 재활성화하면 SSH가 끊길 수 있으므로 configure/activate는 UART 등 복귀 경로를 확보한 상태에서 실행한다. 실제 PSK를 명령행·로그·Git에 넣지 않는다.
+
+<a id="cmd-tailscale"></a>
+### Tailscale — 최초 인증·상태·원격 SSH
+
+**기본 사용 — dom0에서 root로 실행**
+
+```bash
+tailscale up --accept-dns=false
+tailscale status
+tailscale ip -4
+```
+
+이 recipe로 만든 새 이미지에는 CLI와 `tailscaled.service`가 설치·enable되어 있다.
+미인증 상태도 정상적인 최초 상태다. 첫 명령이 출력한 인증 URL을 다른 PC·스마트폰의
+브라우저에서 열고 본인의 Tailnet으로 로그인·승인한다. 인증 후 다른 Tailnet 장치에서
+확인한 Tailscale IP로 `ssh root@<Tailscale-IP>`를 실행한다. 기존 OpenSSH 계정·암호/키·
+host key 검사를 그대로 사용하며, Tailscale SSH를 켜는 절차가 아니다.
+
+**필수·선택과 기본값**
+
+`--accept-dns=false`는 이 플랫폼의 권장 최초 인증 옵션이며 기존 dom0 DNS를 유지한다.
+Tailscale 자체 `up`의 기본은 DNS 수락이므로 생략과 구분한다. Linux의 `--accept-routes`는
+기본 false다. subnet router·exit node·Tailscale SSH·Funnel은 자동 활성화하지 않는다.
+hostname 변경 등 선택 옵션은 [공식 up 명세](https://tailscale.com/docs/reference/tailscale-cli/up)를 따른다.
+공통 이미지나 부팅 명령에 `--auth-key`를 넣지 않는다. 재부팅마다 `up`을 다시 실행할 필요는 없다.
+
+**반환·확인 방법**
+
+이 명령들은 Tailscale 자체 출력·종료 코드를 사용하며 Manager envelope를 반환하지 않는다.
+`status`의 장치/연결 결과와 `ip -4`의 실제 주소를 확인한다. 서비스 active만으로 인증이나
+외부 SSH 성공을 판정하지 않는다. 인증 URL·state 파일·전체 환경은 시험 로그에 수집하지 않는다.
+
+```bash
+systemctl is-active tailscaled.service
+tailscale status
+tailscale ip -4
+journalctl -b -u tailscaled.service --no-pager -n 40
+```
+
+| 상태·증상 | 확인과 다음 행동 |
+|---|---|
+| 데몬 inactive/failed, 저장소 검사 거절 | `/srv/xenova` 마운트·검증 장치·권한·중단된 복원을 먼저 확인. rootfs에 대체 상태를 만들지 않음 |
+| 미인증/NeedsLogin | 최초 인증 또는 키 만료·로그아웃·서버 측 취소를 구분. 필요한 경우 원 상태를 보존한 채 재인증 |
+| 관리자 장치 승인 대기/NeedsMachineAuth | Tailnet 관리자의 장치 승인 여부 확인 |
+| 인증됐지만 원격 SSH 거절 | Tailnet 접근 정책·현재 경로·기존 sshd 인증/host key를 각각 확인 |
+| TUN 장치/네트워크 오류 | `test -c /dev/net/tun`, `ip link show tailscale0`, kernel module과 journal 확인. userspace 모드로 조용히 우회하지 않음 |
+| DNS·TLS·시각 오류 | 기존 resolver·이름 해석·UTC 시각/NTP를 각각 확인. 외부 IP ping이나 서비스 active를 DNS/NTP 성공으로 해석하지 않음 |
+| 인터넷 단절 뒤 복구 | 기존 네트워크를 복구한 뒤 자체 재연결 상태 확인. 반복 로그인이나 새 장치 등록으로 대신하지 않음 |
+
+**보존·만료·재인증**
+
+장치 상태와 설정은 root 전용 `/srv/xenova/tailscale/`에 있고 주 state는
+`tailscaled.state`다. 일반 재부팅·정상 서비스 재시작은 이를 재사용한다.
+데이터 파티션을 보존한 이미지 갱신도 같은 범위지만, SD 전체 기록은 데이터까지 초기화한다.
+Tailscale 상태 복원이 VM factory UUID·자산·desired_state를 복원하는 것은 아니다.
+
+키 만료는 저장소 유실과 다르다. Tailnet의 장치 키 만료·취소·승인 정책은 정상 재연결에도
+적용되므로 백업만으로 서버 측 만료를 되돌릴 수 없다. 필요한 재인증은 LAN/UART에서
+`tailscale up --force-reauth --accept-dns=false`로 진행한다. 키 만료 비활성화는 운영자가
+Tailnet 보안 정책으로 결정하며 이미지에서 자동 적용하지 않는다.
+정확한 의미는 [공식 키 만료 안내](https://tailscale.com/docs/features/access-control/key-expiry)와
+[daemon state 옵션](https://tailscale.com/docs/reference/tailscaled)을 따른다.
+
+<a id="cmd-tailscale-backup"></a>
+### Tailscale 인증 상태 — SD 재설치 전 암호화 백업·같은 보드 복원
+
+**명령과 조건**
+
+`xenova-tailscale-state backup --stdout`은 비공개 JSON 묶음을 stdout으로 보낸다.
+터미널 직접 출력은 거절한다. `restore --stdin --check`는 무변경 검사,
+`restore --stdin`은 실제 복원이다. 모두 root·검증된 ext4 데이터 마운트·중지된
+`tailscaled`와 대기 중인 서비스 job이 없는 유지보수 창이 필요하다. helper가 서비스를
+몰래 중지·시작하거나 인증하지 않는다. `prepare`·`cleanup`은 서비스 내부 저장소 검사와 종료 정리다.
+
+백업은 state 디렉터리의 일반 파일을 최대 512개·총 16MiB로 제한해 수집하며 링크·특수 파일·
+권한 소유자 이상이나 제한 초과를 거절한다. 하드웨어 serial·상대 경로·파일별 checksum을
+함께 보관한다. 복원은 같은 Raspberry Pi의 `/proc/device-tree/serial-number`를 대조하고,
+경로 이탈·변조·중복·기존 상태 덮어쓰기를 거절한다. 이 대조는 실수로 다른 보드에 복제하는
+것을 막는 장치이며 root 사용자를 상대로 한 암호학적 하드웨어 증명은 아니다.
+
+백업에는 장치 키와 인증 상태가 있으므로 **Git·공통 이미지·공개 보고서에 넣지 않는다.**
+아래 절차는 기존 LAN SSH 또는 UART로 수행한다. Tailnet IP를 통한 SSH 접속 중 데몬을
+중지하면 관리 연결이 끊긴다. 같은 상태로 두 보드를 동시에 실행하지 않는다.
+운영자가 TPM 기반 state 암호화를 별도로 켰다면 같은 TPM도 유지해야 한다. 보드 serial이
+같아도 TPM을 초기화·교체하면 백업만으로 복호화되지 않을 수 있다.
+[공식 state 보호 설명](https://tailscale.com/docs/features/secure-node-state-storage)을 참고하며,
+이 통합은 TPM 보호 설정을 자동으로 켜거나 끄지 않는다.
+
+**백업 — PC의 WSL Bash에서 실행**
+
+기존 `gpg`를 사용하며 이미지에 GPG를 추가할 필요는 없다. 암호는 GPG 입력창에서만
+입력하고 명령행·환경·기록 파일에 넣지 않는다. 암호화 백업은 보드 밖에서 보관한다.
+백업 전에 Tailnet 관리 콘솔에서 장치와 Tailscale IP를 기록해 복원 후 대조한다.
+
+```bash
+set -euo pipefail
+command -v gpg >/dev/null
+read -r -p '현재 LAN SSH 접속점(root@IP): ' SSH_DEST
+umask 077
+install -d -m 0700 "$HOME/xenova-private-backups"
+BACKUP="$HOME/xenova-private-backups/tailscale-$(date +%Y%m%d-%H%M%S).json.gpg"
+test ! -e "$BACKUP" && test ! -e "$BACKUP.partial"
+PRIVATE=$(mktemp -d /dev/shm/xenova-tailscale.XXXXXXXX)
+trap 'rm -f -- "$PRIVATE/state.json"; rmdir -- "$PRIVATE"' EXIT
+ssh "$SSH_DEST" 'systemctl stop tailscaled.service'
+ssh -T "$SSH_DEST" 'xenova-tailscale-state backup --stdout' |
+  gpg --no-symkey-cache --symmetric --cipher-algo AES256 --output "$BACKUP.partial"
+gpg --no-symkey-cache --output "$PRIVATE/state.json" --decrypt "$BACKUP.partial"
+ssh -T "$SSH_DEST" 'xenova-tailscale-state restore --stdin --check' <"$PRIVATE/state.json"
+mv -- "$BACKUP.partial" "$BACKUP"
+ssh "$SSH_DEST" 'systemctl start tailscaled.service'
+printf 'Encrypted backup: %s\n' "$BACKUP"
+```
+
+실패하면 SD 기록을 진행하지 않는다. `partial` 파일을 성공한 백업으로 사용하지 않으며,
+원 상태가 남은 보드의 daemon 재시작 여부를 LAN/UART에서 확인한다. 초기 인증·재인증 뒤
+백업을 갱신하고, 오래된 백업의 키가 아직 유효하다고 가정하지 않는다.
+
+**SD 전체 기록 후 복원 — 같은 PC의 WSL Bash에서 실행**
+
+새 이미지의 데이터 마운트가 정상인지 먼저 확인한다. LAN 주소는 바뀔 수 있고 SSH host key도
+새로 생성되므로 UART 등 신뢰한 경로에서 확인한다. host key 검사를 끄지 않는다.
+Tailscale 상태를 복원해 이전 Tailnet IP를 다시 쓰더라도 OpenSSH host key까지 복원되는 것은 아니다.
+아래는 **같은 물리 보드의 새 설치**에서 사용하는 절차다. 기존 인증 상태가 있는 설치본에
+무작정 적용하지 않는다. GPG 무결성 검사가 끝난 뒤에만 평문을 SSH로 보낸다.
+복원할 백업이 있다면 새 설치에서 `tailscale up`을 먼저 실행하지 않는다. 상태 복원·데몬
+재시작 후 기존 장치로 연결되는지 확인하고, 서버 측 만료 등으로 필요한 경우에만 재인증한다.
+
+```bash
+set -euo pipefail
+command -v gpg >/dev/null
+read -r -p '재설치한 같은 보드의 LAN SSH 접속점(root@IP): ' SSH_DEST
+read -r -p '암호화 백업의 전체 경로: ' BACKUP
+umask 077
+PRIVATE=$(mktemp -d /dev/shm/xenova-tailscale.XXXXXXXX)
+trap 'rm -f -- "$PRIVATE/state.json"; rmdir -- "$PRIVATE"' EXIT
+gpg --no-symkey-cache --output "$PRIVATE/state.json" --decrypt "$BACKUP"
+ssh "$SSH_DEST" 'systemctl stop tailscaled.service'
+ssh -T "$SSH_DEST" 'xenova-tailscale-state restore --stdin --check' <"$PRIVATE/state.json"
+# 최초 자동 시작이 만든 미인증 상태도 삭제하지 않고 같은 데이터 파티션에 보관한다.
+ssh "$SSH_DEST" 'set -eu; if test -e /srv/xenova/tailscale; then
+  saved=/srv/xenova/tailscale.before-restore-$(cat /proc/sys/kernel/random/uuid)
+  test ! -e "$saved"
+  mv -T -- /srv/xenova/tailscale "$saved"
+  printf "Preserved prior state directory: %s\n" "$saved"
+fi'
+ssh -T "$SSH_DEST" 'xenova-tailscale-state restore --stdin' <"$PRIVATE/state.json"
+ssh "$SSH_DEST" 'systemctl start tailscaled.service'
+ssh "$SSH_DEST" 'tailscale status; tailscale ip -4'
+```
+
+`--check`의 `checked=true`는 입력·같은 보드 대조 성공이며 복원·인증 완료가 아니다.
+실제 복원은 `restored=true`를 반환하고, 다른 Tailnet 장치에서 기존 장치 ID/IP·SSH와
+정상 재부팅 뒤 자동 연결을 별도로 확인한다. Tailnet에서 삭제·만료된 장치는 재인증이
+필요할 수 있다. 모든 상태 변경 오류는 종료 1, parser 오류는 2이며 Manager envelope는 없다.
+
+**중단·손상 복구**
+
+복원은 비공개 staging 디렉터리에서 검증·fsync한 뒤 게시한다. 오류를 성공으로 반환하지 않는다.
+프로세스 강제 종료·전원 상실로 `.tailscale-restore-*`가 남으면 새 상태를 생성하지 않고
+daemon 시작과 재복원을 거절한다. LAN/UART에서 데몬을 중지한 채 원 암호화 백업과 잔여 파일을
+보존·대조한 뒤, 해당 소유 staging만 root 전용 다른 경로로 옮기고 검증한 백업으로 다시 복원한다.
+광범위한 상태 삭제나 자동 새 로그인으로 해결하지 않는다. 응답 유실 뒤에는 실제 게시 여부와
+기존 상태를 먼저 확인하며, 이미 존재하는 상태를 같은 요청으로 덮어쓰지 않는다.
+
+복원 전 상태로 되돌려야 한다면 LAN/UART에서 데몬을 중지하고, 현재 `tailscale` 디렉터리를
+다른 root 전용 이름으로 보관한 뒤 위에서 출력한 `tailscale.before-restore-…` 디렉터리를
+원래 위치로 옮긴다. 잔여 staging도 따로 보존·검토한 후 서비스를 시작한다. 복원 전 상태가
+미인증이었다면 원복 결과도 미인증이며, 이를 인증 복구 성공으로 판정하지 않는다.
+
+[명령어 색인으로](#command-index)
 
 <a id="cmd-wifi-configure"></a>
 ### `xenova-wifi configure` — SSID·PSK와 국가 저장
@@ -1994,6 +2167,20 @@ instance-id·machine-id·SSH host key는 VM 신원이며 reboot/복구/자원 �
 Agent는 기본 5초 heartbeat를 `xenova/v1/vms/{vm_id}/heartbeat`로 발행하며 수신 측이 생존을 판정한다. 기본 broker는 `192.168.77.1:1883`, 선택 환경은 `/etc/xenova/agent.env`다. dom0에도 Paho·공용 MQTT 클라이언트·Mosquitto/clients가 설치되지만 broker enable·접속/ACL은 별도 운영 설정이다. 설치/import/enable 성공을 broker 종단 통신 성공으로 확대하지 않는다. 메시지는 [MQTT 계약](../contracts/mqtt-contract-v1.md)을 따른다.
 
 Zephyr Network Starter의 capability는 가상 Ethernet·IPv4·DHCP·ICMP이며 SSH/Python Agent capability는 없다.
+
+진단 runtime을 포함한 Zephyr firmware의 PV 콘솔에서는 `xenova diag`,
+`xenova telemetry`를 사용한다. Network Starter의 `xenova stats`는 패킷 누적값,
+`xenova stats waits`는 패킷/Store 대기와 backend 관측 상태를 조회한다.
+주행 앱의 `xenova drive`는 계산·출력함·실제 송신을 구별한다. 측정 창은
+`xenova drive capture 30000 180000`으로 정하고 종료 후 `records 0 4`와
+`transmissions 0 4`를 각각 `xenova drive` 뒤에 붙여 페이지를 읽는다.
+`capture_complete`는 계산 창 종료이며 `transmissions_complete`는 수락 후보의 최종 처리
+기록 확정이다. 둘 다 참이 되기 전 페이지 조회와 capture 재설정은 `-EBUSY`다.
+확정된 창의 페이지 total은 유지된다. 분석기의 기능·자료 정합성 수락과 성능 개선은 별도다.
+이들은 guest의 로컬 shell 명령이며 Manager action이나 HTTP 조회가 아니다.
+기존 불변 firmware에 새 명령이 있다고 가정하지 않는다. 반환 필드와 원자료 해석은
+[Zephyr runtime](../../platform/guests/zephyr/xen-runtime/README.md#패킷-처리와-backend-관측)과
+[주행 runtime](../../platform/apps/common/xenova-drive-runtime/README.md#실제-계산과-계측)을 따른다.
 
 <a id="diagnostics"></a>
 ## 10. 운영 진단·설치 도구

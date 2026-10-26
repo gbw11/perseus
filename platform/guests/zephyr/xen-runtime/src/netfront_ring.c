@@ -80,3 +80,7 @@ bool xnf_drained(const struct xnf *n) {
  for(unsigned i=0;i<XNF_SLOTS;i++)if(n->tx_busy[i])return false;
  return true;
 }
+bool xnf_pending(const struct xnf *n) {
+ return __atomic_load_n(&n->tx->h.rsp_prod,__ATOMIC_ACQUIRE)!=n->tx_cons ||
+        __atomic_load_n(&n->rx->h.rsp_prod,__ATOMIC_ACQUIRE)!=n->rx_cons;
+}

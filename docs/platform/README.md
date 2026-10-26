@@ -13,6 +13,7 @@ Xenova는 Raspberry Pi 4에서 Xen으로 Linux·Zephyr VM을 실행하고 관리
 | domU | 독립 UUID·자산을 가진 Linux 또는 Zephyr 게스트 VM |
 | 플랫폼 Manager | 등록·실행 의도·신원·작업 journal을 검증하고 실제 Xen 실행을 제어하는 Python 라이브러리 |
 | `xenova-vm`·`xenova-wifi` | dom0에서 사용하는 VM 관리·Wi-Fi CLI |
+| Tailscale | 선택적인 외부 원격 관리 연결. 최초 사용자 인증 뒤 데이터 파티션의 장치 상태를 재사용 |
 | dom0-manager | 플랫폼 Manager를 사용하는 FastAPI 서비스. 하위 CLI와 HTTP의 지원 범위는 같지 않음 |
 | Recovery Worker | Xen·heartbeat를 관측하고 복구 판단을 큐에 넣는 별도 서비스. 현재 자동 복구 executor는 미연결 |
 | Guest Agent·Zephyr 진단/Publisher | 게스트 내부 상태·실제 앱 진행·계측값을 제공. Xen domain 존재와 앱 정상 여부는 별개 |
@@ -26,10 +27,12 @@ Xenova는 Raspberry Pi 4에서 Xen으로 Linux·Zephyr VM을 실행하고 관리
 |---|---|
 | 플랫폼 구조와 요청의 수명 이해 | [관리 구조·수명주기](management-boundaries.md) |
 | VM 조회·생성·시작·정지·복구·Wi-Fi 사용 | [CLI·Manager 명세](cli-manager-spec.md) |
+| 외부 SSH 접속·최초 인증·SD 재설치 전 인증 상태 백업 | [Tailscale 사용법](cli-manager-spec.md#cmd-tailscale) |
 | 이미지 제작·템플릿/seed·조립·검증·전달 | [빌드 가이드](build-guide.md) |
 | 부팅 서비스·자동 시작·부분 실패·종료 조사 | [부팅·종료 구조](management-boot-boundaries.md) |
 | 전용·공유 CPU 배치 운영 | [CPU 배치](cpu-layout.md) |
 | Zephyr 초기화·부분 실패·협조 종료 조사 | [Zephyr runtime](../../platform/guests/zephyr/xen-runtime/README.md) |
+| Zephyr 계산·통신·Store 대기와 로컬 계측 이해 | [주행 공통 runtime](../../platform/apps/common/xenova-drive-runtime/README.md) |
 
 처음 상태를 볼 때는 dom0에서 `xenova-vm list --short`를 사용한다. 전체 필드가
 필요하면 `xenova-vm list --json`, Wi-Fi 상태는 `xenova-wifi status`로 확인한다.
@@ -43,3 +46,5 @@ Xenova는 Raspberry Pi 4에서 Xen으로 Linux·Zephyr VM을 실행하고 관리
 Zephyr 초기화·종료와 부팅 표시의 후보별 시험·미검증 범위는
 [Zephyr 수명주기 검증](../verification/zephyr-lifecycle-20261025.md)과
 [부팅 표시 검증](../verification/boot-status-20261025.md)에 정리한다.
+계산·통신·Store 대기 분리의 후보별 시험과 실보드 미검증 범위는
+[대기 경계 검증](../verification/zephyr-wait-separation-20261026.md)에 정리한다.
