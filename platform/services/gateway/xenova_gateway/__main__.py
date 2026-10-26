@@ -51,7 +51,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     stop = threading.Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stop.set())
-    runner = GatewayRunner(client, sink, start_mode=settings.start_mode, retained_wait_s=settings.retained_wait_s)
+    pair = (settings.vm_a, settings.vm_b) if settings.vm_a and settings.vm_b else None
+    runner = GatewayRunner(client, sink, start_mode=settings.start_mode, retained_wait_s=settings.retained_wait_s,
+                           vm_ids=pair, initial_active_vm=settings.initial_active_vm)
     log.info("xenova-gateway 시작 broker=%s:%s sink=%s", settings.broker_host, settings.broker_port, settings.sink)
     try:
         runner.run(stop)

@@ -31,6 +31,9 @@ class GatewaySettings:
     start_mode: Mode = Mode.AUTO
     retained_wait_s: float = 1.0        # 시작 시 이전 vehicle/control(retained) 을 기다리는 시간
     log_level: str = "INFO"
+    vm_a: str | None = None
+    vm_b: str | None = None
+    initial_active_vm: str | None = None
 
 
 def _env(env: Mapping[str, str], name: str) -> str | None:
@@ -54,11 +57,23 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
     p.add_argument("--start-mode", choices=("AUTO", "SAFE_STOP"), default=_env(env, "START_MODE") or d.start_mode.value)
     p.add_argument("--retained-wait-s", type=float, default=float(_env(env, "RETAINED_WAIT_S") or d.retained_wait_s))
     p.add_argument("--log-level", choices=LOG_LEVELS, default=(_env(env, "LOG_LEVEL") or d.log_level).upper())
+    p.add_argument("--vm-a", default=_env(env, "VM_A"), help="공통 펌웨어를 실행하는 VM UUID, --vm-b와 함께 지정")
+    p.add_argument("--vm-b", default=_env(env, "VM_B"))
+    p.add_argument("--initial-active-vm", default=_env(env, "INITIAL_ACTIVE_VM"), help="최초 활성 UUID, 생략하면 --vm-a")
     a = p.parse_args(argv)
+    if a.vm_a or a.vm_b or a.initial_active_vm:
+        from .redundancy import vm_uuid
+        try:
+            pair = (vm_uuid(a.vm_a), vm_uuid(a.vm_b))
+            if pair[0] == pair[1] or (a.initial_active_vm and a.initial_active_vm not in pair):
+                raise ValueError("distinct pair / initial member required")
+        except (ValueError, TypeError, AttributeError):
+            p.error("--vm-a/--vm-b는 서로 다른 표준 UUID 쌍이어야 하며 최초 활성 UUID는 그중 하나여야 합니다")
     if not 1 <= a.port <= 65535:
         p.error(f"--port 범위 밖: {a.port}")
     return GatewaySettings(
         broker_host=a.host, broker_port=a.port, username=a.username or None, password=a.password,
         sink=a.sink, serial_port=a.serial_port, serial_baud=a.serial_baud, frame_log=a.frame_log,
         start_mode=Mode(a.start_mode), retained_wait_s=max(0.0, a.retained_wait_s), log_level=a.log_level,
+        vm_a=a.vm_a, vm_b=a.vm_b, initial_active_vm=a.initial_active_vm,
     )

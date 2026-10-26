@@ -194,3 +194,39 @@ def test_resume_on_other_topic_is_not_fed():
     client.deliver(topics.app_events("manual"), "drive.resume.requested", {"requested_by": "x"}, vm_id=MANUAL_VM)
     drive(runner, client, clock, 0.02, heartbeat=True)
     assert not [m for _, m, _ in client.published if m == "drive.resume.accepted"]
+
+
+def test_paired_runner_rejects_retired_execution_and_retained_progress():
+    client, clock, sink = FakeClient(), Clock(), MockSink()
+    runner = GatewayRunner(client, sink, clock=clock, vm_ids=(AUTO_VM, MANUAL_VM))
+    runner.subscribe(); runner.begin()
+    boot = "44444444-4444-4444-8444-444444444444"
+    old = "55555555-5555-4555-8555-555555555555"
+    new = "66666666-6666-4666-8666-666666666666"
+    def deliver(instance, retained=False):
+        identity = Identity(vm_id=AUTO_VM, app_id="autonomous", boot_id=boot, agent_instance_id=instance)
+        message = Message(topics.app_events("autonomous"), env.build(identity,"drive.command",
+            {"generation":1,"v_mps":.4,"steer_rad":0},1), retained=retained)
+        runner._enqueue(message);runner.run_once(0)
+    deliver(old)
+    deliver(new)
+    assert runner.machine._sessions[AUTO_VM] == (boot,new)
+    deliver(old)
+    assert runner.machine._sessions[AUTO_VM] == (boot,new)
+    before=runner.machine.nodes[AUTO_VM]["autonomous"].last_heartbeat_t
+    message=Message(topics.app_events("autonomous"),env.build(
+        Identity(vm_id=AUTO_VM,app_id="autonomous",boot_id=boot,agent_instance_id=new),
+        "app.heartbeat",{"state":"active","uptime_s":100},2),retained=True)
+    runner._enqueue(message);runner.run_once(0)
+    assert runner.machine.nodes[AUTO_VM]["autonomous"].last_heartbeat_t==before
+
+
+def test_paired_gateway_restart_preserves_retained_mode_and_selected_vm():
+    client, clock, sink = FakeClient(), Clock(), MockSink()
+    control={"generation":42,"mode":"MANUAL","active_app":"manual","active_vm_id":MANUAL_VM}
+    client.latest=lambda _:Message(topics.vehicle_control(),{"payload":control})
+    runner=GatewayRunner(client,sink,clock=clock,vm_ids=(AUTO_VM,MANUAL_VM),initial_active_vm=AUTO_VM)
+    runner.begin()
+    assert runner.machine.mode is Mode.MANUAL and runner.machine.active_vm==MANUAL_VM
+    assert runner.machine.generation==43
+    assert not [f for _,f,_ in sink.frames if isinstance(f,DriveFrame)]
