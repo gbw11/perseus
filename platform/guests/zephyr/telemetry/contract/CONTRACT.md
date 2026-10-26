@@ -120,9 +120,46 @@ message_id = vm_id + "/" + boot_id + "/" + publisher_instance_id
 
 전송 직전 source age는 `sent_uptime_ms - collection.end_uptime_ms`로 확인할 수 있다. 기본 발행 대기 상한은 heartbeat/metrics 2초이며, 초과한 live 표본은 버리고 재수집한다. inventory는 재연결 시 다시 읽는다. event/history는 원래 발생 시각과 늦은 보고라는 사실을 그대로 보존한다.
 
+CPU는 `window.end_uptime_ms`, memory_regions는 `observed_uptime_ms`를 기준으로
+추가 확인한다. cache를 새 collection에 복사해도 원 관측의 2초 상한은 연장되지 않는다.
+
 수신 이후의 **진단 표시용** 기본 lease는 heartbeat 6초, loop progress 3초, heap/network 6초, timing/publisher 15초다. 보고 주기를 조정하면 소비자 lease도 별도 계약으로 함께 조정한다. 이는 VM 정상·안전 인계 근거가 아니다. 중복·역전·retained delivery가 lease를 갱신해서는 안 된다. **네트워크 내 지연은 송신·수신 단조 시계만으로 알 수 없다.** UTC 오차와 운송 지연 상한을 검증하지 않았다면 `receipt_lease_valid`와 `source_age_at_send`까지만 말하고, 실제 end-to-end freshness는 미확인으로 둔다. 안전 제어는 별도 계약을 따른다.
 
 처음 보는 boot/publisher ID를 도착 순서만으로 현재 실행으로 승격하지 않는다. 확인되지 않은 세션은 진단용 후보/과거 자료로 둘 수 있다. 현재 세션을 외부 실행 문맥으로 확정한 뒤, 퇴역 세션의 늦은 메시지가 현재 화면을 덮지 못하도록 한다.
+
+### 6.1 UTC 품질의 인정·갱신·만료
+
+`synchronized`는 아래 검사를 통과한 UTC 대응이 전송 시점에도 유효하다는 뜻이다.
+네트워크 연결이나 timer의 active 상태만으로 인정하지 않는다.
+
+| 단계 | 현재 조건 |
+|---|---|
+| dom0 원천 | ARM64의 `arch_sys_counter` 프로필. 읽기 전용 `adjtimex` 성공, 반환 상태가 TIME_ERROR(5)가 아니고 STA_UNSYNC·STA_CLOCKERR 비트가 없음. `maxerror` 0~10,000,000µs |
+| 실행 결합 | 기존 Store session에서 VM link와 현재 host_boot_id·execution_id·요청 nonce 대조. 다른 실행의 응답은 사용하지 않음 |
+| guest 수락 | guest 요청→수신 RTT 0~5,000ms, 원천 오차 0~10,000ms, drift 0~1,000ppm, UTC 2020~2100년, 비어 있지 않은 source(최대31 bytes) |
+| 진행 | worker가 200ms마다 최대25ms의 Store 처리 예산으로 확인. 새 요청 10초마다, 응답 대기 최대5초. 이 값은 VM 관리 deadline이 아님 |
+| 수명 | 수신 guest uptime부터 30초 미만. guest 시각 역전·잘못된 실행·Store 오류·응답 timeout·범위 오류·허용 오차 밖 시각 점프는 무효. 새 정상 대응으로 재획득 |
+
+불확실성은 다음 항목을 합산한다. 모든 올림은 음수가 아닌 값의 상향 반올림이다.
+
+```text
+host_source_error_ms = ceil(adjtimex.maxerror_us / 1000)
+                     + ceil(host 원천 읽기 전체 경과_ns / 1,000,000)
+drift_ppm = ceil(abs(adjtimex.tolerance) / 65536)
+uncertainty_ms(sent) = host_source_error_ms + guest 전체 RTT_ms + 1ms
+                     + ceil((sent - guest_response_received_ms) * drift_ppm / 1,000,000)
+```
+
+1ms는 양자화 여유다. 전체 RTT를 더하며 왕복 대칭이나 RTT/2를 가정하지 않는다.
+host·guest 단조 시계의 epoch는 직접 빼지 않는다. 고정 xenvm과 dom0의 architectural
+counter 진행률 및 kernel tolerance의 drift 상한 적용을 전제로 한 진단용 오차 예산이다.
+실제 Xen descheduling·IRQ 제외 지연·시계 보정 아래의 보장 오차는 실보드 수락 대상이다.
+
+응답 대기 중에는 기존 대응의 남은 lease를 사용하지만, 5초 응답 기한이 지나면 무효다.
+공급 단절은 lease를 연장하지 않는다. 무효 상태에서는 `sent_at=null`,
+`utc_quality=unavailable`, source·uncertainty도 null이다. 점프 거절 후 새 정상 대응을
+받으면 기준을 다시 잡는다. `sent_at`은 MQTT 전송 시점 UTC이며 사건의 원 uptime을
+덮어쓰지 않는다. UTC 공급·인터넷/NTP는 VM 시작·앱 계산·복구의 선행조건이 아니다.
 
 ## 7. 자료형·오류·미지원
 
@@ -181,18 +218,8 @@ display_name은 실행 준비 당시 플랫폼 표시명, hostname은 게스트 
 
 ### 8.2 UTC 대응의 수명
 
-기존 Store session에서 execution·nonce에 결합한 request/response를 교환한다.
-dom0의 선택적 1초 timer가 동기화된 adjtimex source를 제공한다. ARM arch_sys_counter
-프로필만 지원하며 UTC가 없거나 STA_UNSYNC/STA_CLOCKERR이면 synchronized로 표시하지 않는다.
-guest 요청→수신의 전체 RTT(최대5초), host maxerror, 1ms 양자화, 이후 kernel tolerance
-기반 drift 상한으로 uncertainty_ms를 보수적으로 계산한다. 고정 xenvm과 dom0의 architecture
-counter 진행률 조건을 전제로 하며 실제 Xen 정지/재개·시계 보정 수락은 실보드에서 확인한다.
-서로 다른 단조 시계의 epoch를 빼지 않는다.
-
-대응은 10초마다 갱신하고 30초에 만료한다. 공급 실패·역전·잘못된 execution·품질 불명·
-기존 오차 범위를 벗어난 시각 변경은 unavailable/null로 돌아간다. 새 유효 대응을 확보하면 복귀한다.
-sent_at은 해당 MQTT 전송 시점 UTC다. 원 사건 발생 uptime을 UTC로 덮어쓰지 않는다.
-이 timer·인터넷/NTP는 VM 시작·앱 계산·복구 기한의 선행조건이 아니다.
+인정 조건·오차 계산·갱신·만료·재획득은 [§6.1](#61-utc-품질의-인정갱신만료)을 따른다.
+inventory의 지원 선언과 현재 전송 봉투의 UTC 품질은 별개다.
 
 ## 9. Metrics와 타이밍 통계
 

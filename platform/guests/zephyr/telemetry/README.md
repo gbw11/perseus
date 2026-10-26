@@ -57,7 +57,7 @@ stop/start의 TCB 재사용을 직렬화하며, timeout이면 아직 종료를 �
 
 모든 u64/i64는 십진 문자열이다. raw32 wrap을 64bit 누적으로 위장하지 않는다.
 CPU와 memory region의 범위·분모·구간은 [계약 §9](contract/CONTRACT.md#93-cpu-구간과-스레드-수명)를 따른다.
-UTC는 실행별 nonce 교환·host 품질·RTT·만료를 확인한 경우만 제공한다. 공급이 없거나
+UTC의 인정·불확실성·갱신·만료·재획득은 [계약 §6.1](contract/CONTRACT.md#61-utc-품질의-인정갱신만료)에서 정의한다.
 품질을 입증하지 못하면 null이다. 없는 loop는 not_registered이며 값을 추정하지 않는다.
 
 한 Core task의 `task_epoch`는 guest boot namespace와 고정 init origin에서 정한다.
@@ -73,9 +73,17 @@ Core가 관측하는 task는 static lifetime 한 개이며, 재초기화는 writ
 첫 rate는 no_sample, epoch/reset·긴 공백·포화는 무효다. MQTT 지표는 추가하지 않는다.
 
 기존 xenconsoled 한 개가 PTY로 전달하면서 진단 사실만 별도 log로 필터링한다.
+콘솔 처리 경로는 기록 파일을 열거나 쓰지 않는다. 최대64개 기록 사본을 비대기 큐로
+넘기며 큐 잠금을 얻지 못하거나 공간이 없으면 사본만 버린다. 기존 PTY 원문은 유지한다.
+작업자 한 개가 파일 I/O를 맡고 최대32개 파일 descriptor를 보유한다. 추가 저장소나
+작업자 정체는 기록 손실을 만들 수 있지만 PTY 처리에서 복구·drain·join을 기다리지 않는다.
+daemon 종료 때 남은 큐는 저장 완료가 아니다. 각 사본은 큐 수락 시점의 실행 binding을
+보관하며 나중의 현재 실행으로 다시 귀속하지 않는다. binding 미확정 자료는 추측하지 않는다.
 일반 콘솔 문자열·비밀번호·register dump는 저장하지 않는다. 오류 숫자·원 uptime·수명
 binding 및 Zephyr 기본 fatal 경로의 fatal 번호만 보존하며 fatal handler를 교체하지 않는다.
 파일당 256KiB의 root 전용 필터 임시 log와 선택적 archive timer를 사용한다.
+임시 경로는 `/run/xenova-console-evidence/guest-domid-<DOMID>.log`다. domid는 파일
+위치일 뿐 신원이 아니며, 실행 receipt·guest boot·각 기록의 BIND가 귀속을 결정한다.
 임시 log도 한도에서 회전하며 새 세대와 현재 실행 binding을 먼저 쓴다. 수집자는 동일
 inode·offset이 재사용되더라도 세대 변경을 `rotation_gap`으로 기록한다. 회전 전에
 회수하지 못한 사건의 개수를 추측하지 않으며, PV/UART 전체 원문을 지우는 동작은 아니다.

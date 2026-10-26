@@ -1,6 +1,88 @@
 # Telemetry 실제 계측·출처·지원 계약 검증
 
-## 기준과 판정
+## 로컬 마감 보완 — 2026-10-27
+
+기준은 Telemetry 5개 커밋이 포함된 `da9221f`, 브랜치는
+`feat/platform/zephyr-telemetry-measurements`다. 아래 결과가 최종 후보에 적용된다.
+기존 결과와 실패 기록은 뒤의 초기 후보 기록 및 PC 증거에 보존했다.
+새 기능·MQTT stream·공개 지표·제품 Worker/Gateway 코드는 추가하거나 변경하지 않았다.
+
+### 확인된 결함과 최소 수정
+
+| 경계 | 확인한 사실·수정 | 실제 코드·시험 |
+|---|---|---|
+| 콘솔 부가 기록 | 기존 `buffer_append()` 안의 동기 file I/O가 같은 event loop의 PTY/다른 콘솔 처리를 지연시킬 수 있었다. 파일 open·fstat·회전·write를 작업자 하나로 분리 | `xenova_console_evidence_async.h`, Xen patch, `test_xenova_console_async.py` |
+| 생산자 대기 | 최대64개 immutable 사본, `pthread_mutex_trylock`, nonblocking eventfd. 큐 공간·작업자 복구·drain/join을 기다리지 않으며 직접 파일 기록 fallback 없음 | 실제 patch를 적용한 pinned Xen의 `buffer_append`·`handle_tty_write`를 컴파일. 외부 PV ring/event channel만 대역, 실제 openpty 사용 |
+| 원문과 귀속 | 버리는 것은 부가 사본. 두 PTY 원문 바이트는 유지. 작업자가 큐 잠금을 잡은 경우·I/O 정체·실패·종료·시작 불가 각 경우 통과. 작업자 종료 뒤에도 PTY 전달 확인 | 위 시험 5가지 조건 × queue/실제 Xen PTY 두 경로, ASan/UBSan·FORTIFY |
+| 실행 교체 | 사본이 원래 BIND를 소유. BIND가 없는 사건은 저장하지 않음. 늦게 생성된 파일은 pending cursor로 수집하되 receipt와 일치한 BIND 이후만 귀속 | `test_async_creation_and_delayed_old_binding_never_relabel_new_execution`: old/new/old/new 자료 중 새 실행 사건 2·4만 저장 |
+| 자원 신선도 | 새 collection이 오래된 CPU/pool cache의 수명을 연장할 수 있는 결함을 production C에서 재현. CPU window end·pool observed uptime에 2초 검사를 추가 | `model.c`, worker expiry, `emit.c`. 만료 거절 시 stream seq 불변. 미지원 CPU의 관측 시각도 실제 cache 시각으로 기록 |
+
+작업자 stack은64KiB, 큐64개, FD cache32개다. 파일당256KiB 회전과 기존 archive
+보존 정책을 유지한다. 큐 수락은 내구 저장이 아니며, 작업자 실패·daemon 종료·포화 때
+남은 사본의 보존을 보장하지 않는다. source loss는 기존 `not_quantified` 경계다.
+물리 PV ring 전달·PTY 성능/IRQ 지연·전원 상실 보존은 이 로컬 시험의 수락 대상이 아니다.
+
+### CPU·UTC·지원 선언 대응
+
+| 조건 | 근거와 결과 |
+|---|---|
+| 긴 CPU 공백 이후 복귀 | 실제 native Zephyr system workqueue를2,147,983ms의 가상 시간 동안 중단. cache stale → `counter_discontinuity` → 그 표본으로 기준 재확보 → 다음 두 정상 window·thread 값 복귀. `diag-net-run.log`, `test_long_gap_baseline_and_two_normal_windows` |
+| registry/반환 한계 | 실제70개 thread 추가, 전체76개 관측·반환32·`-ENOSPC`, 반환 ID 중복 없음. 종료 뒤 registry 정상 복귀. `test_registry_and_return_limits_are_explicit` |
+| CPU 페이지 | production C32행/8parts·seen73/truncated. sample·collection·window 일치, 누락 마지막 part를 완료로 보지 않음, lease 만료, 다른 window 충돌 거절. `test_xenova_telemetry.py` |
+| 실제 Publisher | 독립 broker 수신310개, source73개·CPU44개 대조. CPU 페이지25개 group 모두 같은 표본·구간으로 완전 수신. 실제 transport에서의 부분 수신은 이번 run에 없으며 누락·만료는 위 production C/consumer 시험 근거 |
+| UTC | 정식 정의는 [계약 §6.1](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md#61-utc-품질의-인정갱신만료) 한곳. 실제 clock.c의 점프 거절·만료·재획득·uncertainty 올림, host adjtimex 정상/UNSYNC/CLOCKERR/TIME_ERROR 외부 경계 시험 |
+| persistent_crash | 지원 구성 확인과 개별 저장 성공을 분리. binary profile·timer·root 전용 경로·receipt 확인, 파일 fsync 실패 시 cursor 미진행. 지원 선언을 모든 fatal 포착이나 내구 성공으로 해석하지 않음 |
+
+가상 시간은 native_sim의 고정1MHz clock 그대로 빠르게 진행했다. timer frequency를
+바꾸거나 실제 Xen 시간을 모사하지 않았다. 실제 Xen 계상과 architectural counter
+진행률·시각 공급·IRQ 제외 지연은 기존 후속 실보드 수락 범위다.
+
+### 최종 후보의 독립 회귀 근거
+
+| 실제 실행한 suite | 결과·범위 |
+|---|---|
+| production C MQTT / drive controller | ctest 각각1/2개 통과. 계산·준비 어댑터와 공용 계약 |
+| 실제 Zephyr v1 통신 owner |27조건 통과: 진행·readiness·F01 창/heartbeat·재연결·만료·in-flight·시작/종료 경합·join. `owner-*.json/log` |
+| 실제 Zephyr 수명주기 |9조건 통과: 정상, 정상 I/O, 공통 deadline, shutdown/network/loop/Publisher 실패, 정리 실패, 초기화/종료 경합. `lifecycle-*.json/log` |
+| 실제 두 Zephyr + MQTT + Gateway | 동일 native ELF로 A 시작·B 시작 각각13단계 통과. AUTO↔MANUAL, 반대 VM 승계, 새 실행 Standby 재합류, 재승계. 실제 장치 대신 mock serial이며 Recovery Engine 종단은 아래 별도 suite |
+| MQTT Python / Gateway / dom0-manager |126통과·외부 broker4 skip /84통과 /380통과. Manager suite는 실제 Engine→Manager/Execution→provision/receipt→실행 binding→준비 연결을 포함. Xen/Store와 시험 경로만 외부 경계 |
+| 전체 platform |912개, 실패0·기존 비root UID 검사 skip1,357.712초. 별도 suite 결과를 이 개수로 대체하지 않음 |
+| 부분 패키징 | `bitbake -c package_qa xenova-platform xen-tools`:3071 tasks,3055 cached, 모두 통과. 기존 경고2개. ARM64 xenconsoled 및 설치 module 바이트 일치 확인 |
+
+시험 경로 보완: Recovery fixture가 실제 `/run`을 읽던 부분을 해당 Manager의 임시
+실행 기록으로 연결했다. pair 독립 수신기가2.1을 v1 parser로 보내던 조건은 v2 토픽
+기준으로 정식 Telemetry validator에 연결했다. 제품 상위 코드는 바꾸지 않았다.
+최초 잘못된 시험 인자·fixture 실패·Xen Werror 실패 로그도 삭제하지 않았다.
+
+### ARM·패키지·봉인
+
+고정 Zephyr `684c9e8f32e4373a21098559f748f06915f950c9`, 기존 SDK/GCC14.3 입력을 유지했다.
+아래5종의 ELF/DTS·16MiB UP 프로필·bundle·전체 source receipt를 현재 소스와 대조했다.
+drive/autonomous/manual의 direct netfront frame은48bytes·stack sentinel 유지다.
+
+| 후보 | zephyr.bin SHA-256 | bytes |
+|---|---|---:|
+| drive | `45212e2af97660b4eeb9ccc9fec6bd022ab7107946fb4e77c949da03fce87845` | 404232 |
+| autonomous | `33100c7b4c676e45e8da38350805af4a457a0ae992f7e0c4957a5211ead26add` | 404240 |
+| manual | `e796827bf7904ee86ab487aa73620a447bc032ca7236e93a4e24d9bb288a41ed` | 400144 |
+| starter | `38e8e0380e0f0e10b15b09fe81b64ca9a7429ceee1a29b76fcd67310c211cc99` | 367136 |
+| starter-off | `418cfda6f5d97550abc5c15fbe29d79846a544ba6b9209ff31de9369d6932982` | 292816 |
+
+Xenconsoled ELF SHA-256은 `6de9ba98cdc47c94274c11597b8b1aaa7b81bd6e35326ae0191e60d24eced002`이다.
+`-pthread`로 DT_NEEDED에 `libpthread.so.0`이 추가되지만 기존 `glibc` package가 제공하며,
+새 runtime package/외부 layer/lock 변경은 없다. 실제 pkgdata·RDEPENDS를
+`FINAL_ARTIFACTS.json`에 기록했다. 기본 PV/PTY 소유자와 종료 unit은 유지했다.
+
+최종 PC 증거 위치는
+`C:/Users/SSAFY/Documents/Codex/2026-10-27/xenova-telemetry-closure/`다.
+`ACCEPTANCE.json`, `FINAL_ARTIFACTS.json`, `SOURCE_MANIFEST_SEALED.json`,
+`final-source-changes-sealed.zip`, `evidence-sealed.zip`이 source·산출물·개별 suite를 연결한다.
+최종 archive는 공개 로그·결과만 포함하고 broker 인증정보/Bootstrap 파일은 포함하지 않는다.
+이 변경으로 보드 접속·배포·VM/서비스 제어·이미지/SD 작업은 하지 않았다.
+
+## 초기 후보 기록
+
+### 기준과 판정
 
 기준 HEAD는 `a2e61555b5218e8e98b3a499068f36d4c31eac52`, 작업 브랜치는
 `feat/platform/drive-recovery-integration`이다. 기존 주행·준비·권한·복구 구현을 유지하고
