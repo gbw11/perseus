@@ -1,0 +1,76 @@
+{
+  "schema_version": "2.1",
+  "type": "telemetry.metrics",
+  "message_id": "f1000000-0000-4000-8000-000000000001/f2000000-0000-4000-8000-000000000001/f3000000-0000-4000-8000-000000000001/metrics/10",
+  "vm_id": "f1000000-0000-4000-8000-000000000001",
+  "boot_id": "f2000000-0000-4000-8000-000000000001",
+  "publisher_instance_id": "f3000000-0000-4000-8000-000000000001",
+  "seq": "10",
+  "context": {
+    "binding": "unbound",
+    "host_boot_id": null,
+    "execution_id": null,
+    "receipt_id": null
+  },
+  "clock": {
+    "sent_uptime_ms": "50000",
+    "sent_at": null,
+    "utc_quality": "unavailable",
+    "utc_source": null,
+    "uncertainty_ms": null
+  },
+  "payload": {
+    "collection": {
+      "sample_id": "f3000000-0000-4000-8000-00000000000e",
+      "start_uptime_ms": "49999",
+      "end_uptime_ms": "50000",
+      "elapsed_us": "700",
+      "status": "ok",
+      "source_rc": 0
+    },
+    "family": "memory_regions",
+    "source_sample_seq": "1",
+    "observed_uptime_ms": "0",
+    "samples": [
+      {
+        "name": "memory.region.used_bytes",
+        "unit": "bytes",
+        "kind": "gauge",
+        "encoding": "u64_decimal",
+        "value": "256",
+        "status": "ok",
+        "reason": null,
+        "source_rc": 0,
+        "labels": {
+          "region": "net_rx_data"
+        }
+      },
+      {
+        "name": "memory.region.free_bytes",
+        "unit": "bytes",
+        "kind": "gauge",
+        "encoding": "u64_decimal",
+        "value": "768",
+        "status": "ok",
+        "reason": null,
+        "source_rc": 0,
+        "labels": {
+          "region": "net_rx_data"
+        }
+      },
+      {
+        "name": "memory.region.capacity_bytes",
+        "unit": "bytes",
+        "kind": "gauge",
+        "encoding": "u64_decimal",
+        "value": "1024",
+        "status": "ok",
+        "reason": null,
+        "source_rc": 0,
+        "labels": {
+          "region": "net_rx_data"
+        }
+      }
+    ]
+  }
+}

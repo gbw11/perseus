@@ -1,0 +1,72 @@
+{
+  "schema_version": "2.1",
+  "type": "telemetry.metrics",
+  "message_id": "f1000000-0000-4000-8000-000000000001/f2000000-0000-4000-8000-000000000001/f3000000-0000-4000-8000-000000000001/metrics/9",
+  "vm_id": "f1000000-0000-4000-8000-000000000001",
+  "boot_id": "f2000000-0000-4000-8000-000000000001",
+  "publisher_instance_id": "f3000000-0000-4000-8000-000000000001",
+  "seq": "9",
+  "context": {
+    "binding": "unbound",
+    "host_boot_id": null,
+    "execution_id": null,
+    "receipt_id": null
+  },
+  "clock": {
+    "sent_uptime_ms": "50000",
+    "sent_at": null,
+    "utc_quality": "unavailable",
+    "utc_source": null,
+    "uncertainty_ms": null
+  },
+  "payload": {
+    "collection": {
+      "sample_id": "f3000000-0000-4000-8000-00000000000d",
+      "start_uptime_ms": "49999",
+      "end_uptime_ms": "50000",
+      "elapsed_us": "700",
+      "status": "ok",
+      "source_rc": 0
+    },
+    "family": "cpu",
+    "window": {
+      "sample_seq": "1",
+      "start_uptime_ms": "49000",
+      "end_uptime_ms": "50000",
+      "scope": "guest_accounted_up",
+      "part_index": 0,
+      "part_count": 1,
+      "threads_status": "ok",
+      "rows_seen": 1,
+      "rows_returned": 1
+    },
+    "samples": [
+      {
+        "name": "cpu.system.percent",
+        "unit": "percent",
+        "kind": "gauge",
+        "encoding": "float64",
+        "value": 25.25,
+        "status": "ok",
+        "reason": null,
+        "source_rc": 0,
+        "labels": {}
+      },
+      {
+        "name": "cpu.thread.percent",
+        "unit": "percent",
+        "kind": "gauge",
+        "encoding": "float64",
+        "value": 12.5,
+        "status": "ok",
+        "reason": null,
+        "source_rc": 0,
+        "labels": {
+          "thread_id": "18446744073709551615",
+          "thread_name": "",
+          "name_truncated": "false"
+        }
+      }
+    ]
+  }
+}

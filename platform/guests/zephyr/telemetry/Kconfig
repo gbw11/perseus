@@ -6,6 +6,8 @@ menuconfig XENOVA_TELEMETRY
 	select MQTT_LIB_CUSTOM_TRANSPORT
 	select MQTT_CLEAN_SESSION
 	select JSON_LIBRARY
+	select NET_HOSTNAME_ENABLE
+	select NET_HOSTNAME_DYNAMIC
 	help
 	  Separate worker-owned MQTT client. No fixed identity, anonymous fallback,
 	  v1 changes, automatic stack scanning or app-health inference.

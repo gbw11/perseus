@@ -37,7 +37,8 @@ class TelemetryModelTest(unittest.TestCase):
             binary = Path(directory) / "producer"
             command = [shutil.which("cc"), "-std=c11", "-Wall", "-Wextra", "-Werror", "-g",
                        "-I" + str(BASE / "include"), "-I" + str(CORE / "include"),
-                       str(CORE / "src/core.c"), str(BASE / "src/writer.c"), str(BASE / "src/model.c"),
+                       str(CORE / "src/core.c"), str(CORE / "src/resources_core.c"),
+                       str(BASE / "src/clock.c"), str(BASE / "src/writer.c"), str(BASE / "src/model.c"),
                        str(BASE / "tests/emit.c"), "-o", str(binary)]
             if sanitized:
                 command += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-no-pie"]
@@ -59,6 +60,21 @@ class TelemetryModelTest(unittest.TestCase):
             self.assertTrue(any(s["name"] == "memory.kernel_heap.used_bytes" and s["value"] == "9007199254741003" for s in samples))
             self.assertTrue(any(s["status"] == "collection_failed" for s in samples))
             self.assertTrue(any(s["status"] == "not_registered" for s in samples))
+            # Negative mutations of actual producer output exercise the closed
+            # 2.1 contract independently of the C encoder's implementation.
+            from copy import deepcopy
+            cpu=next(m for m in received if m['type']=='telemetry.metrics'
+                     and m['payload']['family']=='cpu' and m['payload']['samples'][0]['status']=='ok')
+            for invalid in ('25.25',-0.001,100.001,float('nan'),float('inf')):
+                changed=deepcopy(cpu);changed['payload']['samples'][0]['value']=invalid
+                with self.assertRaises(self.oracle.ContractError):
+                    self.oracle.validate(changed,f"xenova/v2/vms/{changed['vm_id']}/telemetry/metrics",0,False)
+            changed=deepcopy(cpu);changed['payload']['window']['part_count']+=1
+            with self.assertRaises(self.oracle.ContractError):
+                self.oracle.validate(changed,f"xenova/v2/vms/{changed['vm_id']}/telemetry/metrics",0,False)
+            changed=deepcopy(cpu);changed['payload']['unknown_field']=1
+            with self.assertRaises(self.oracle.ContractError):
+                self.oracle.validate(changed,f"xenova/v2/vms/{changed['vm_id']}/telemetry/metrics",0,False)
             if os.environ.get("XENOVA_TEST_LOG_DIR"):
                 out = Path(os.environ["XENOVA_TEST_LOG_DIR"])
                 out.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Xenova Telemetry 2.0 reference validator. Offline only; no hardware or broker access.
+"""Xenova Telemetry 2.0/2.1 reference validator. Offline only; no hardware or broker access.
 
 Requires jsonschema>=4,<5. Run `python tools/validate_contract.py --self-test`.
 This is an integration-test oracle, not a recovery controller or production subscriber.
@@ -19,6 +19,9 @@ BASE = Path(__file__).resolve().parents[1]
 SCHEMA = json.loads((BASE/'schemas/message.schema.json').read_text(encoding='utf-8'))
 CATALOG = {x['name']:x for x in json.loads((BASE/'schemas/metric-catalog.json').read_text(encoding='utf-8'))['entries']}
 VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
+OLD_SCHEMA = json.loads((BASE/'versions/2.0/schemas/message.schema.json').read_text(encoding='utf-8'))
+OLD_CATALOG = {x['name']:x for x in json.loads((BASE/'versions/2.0/schemas/metric-catalog.json').read_text(encoding='utf-8'))['entries']}
+OLD_VALIDATOR = Draft202012Validator(OLD_SCHEMA, format_checker=FormatChecker())
 U64_MAX = 2**64-1
 I64_MIN, I64_MAX = -(2**63), 2**63-1
 STREAMS = ('inventory','heartbeat','metrics','events','snapshot')
@@ -110,7 +113,10 @@ def validate(message:dict[str,Any],topic:str,qos:int,retain:bool,raw_length:int|
     try: encoded=wire_bytes(message)
     except (ValueError,TypeError) as exc:raise ContractError('NONFINITE_NUMBER',str(exc)) from exc
     require((raw_length if raw_length is not None else len(encoded))<=4096,'PAYLOAD_TOO_LARGE','UTF-8 MQTT application payload >4096 bytes')
-    errors=list(VALIDATOR.iter_errors(message))
+    current=message.get('schema_version')=='2.1'
+    validator=VALIDATOR if current else OLD_VALIDATOR
+    catalog=CATALOG if current else OLD_CATALOG
+    errors=list(validator.iter_errors(message))
     require(not errors,'SCHEMA_INVALID',str(errors[0].message) if errors else '')
     m=message; stream=m['type'].split('.')[1]
     require(topic==f"xenova/v2/vms/{m['vm_id']}/telemetry/{stream}",'TOPIC_MISMATCH','topic/VM/type mismatch')
@@ -144,12 +150,32 @@ def validate(message:dict[str,Any],topic:str,qos:int,retain:bool,raw_length:int|
     elif stream=='metrics':
         if p['family']=='loop_timing':check_distribution(p['distribution'])
         else:
+            if p['family']=='cpu':
+                w=p['window']
+                require(unsigned(w['start_uptime_ms'],'window.start')<=unsigned(w['end_uptime_ms'],'window.end')<=end,'CLOCK_ORDER','CPU window differs from collection interval')
+                require(w['part_index']<w['part_count'],'CPU_WINDOW','invalid CPU part')
+                if w['threads_status'] in ('ok','truncated'):
+                    require(w['rows_seen'] is not None and w['rows_seen']>=w['rows_returned'],'CPU_WINDOW','invalid CPU coverage')
+                else:require(w['rows_seen'] is None and w['rows_returned']==0,'CPU_WINDOW','unobserved rows are not zero source rows')
+                require(w['threads_status']!='ok' or w['rows_seen']==w['rows_returned'],'CPU_WINDOW','silent thread omission')
+                require(w['threads_status']!='truncated' or w['rows_seen']>w['rows_returned'],'CPU_WINDOW','false truncation')
+                expected_parts=max(1,(w['rows_returned']+3)//4)
+                require(w['part_count']==expected_parts,'CPU_WINDOW','part count does not match bounded rows')
+                threads=[v for v in p['samples'] if v['name']=='cpu.thread.percent']
+                require(len(threads)==min(4,max(0,w['rows_returned']-w['part_index']*4)),'CPU_WINDOW','missing/extra rows in part')
+            if p['family']=='memory_regions':
+                require(unsigned(p['observed_uptime_ms'],'pool.observed')<=end,'CLOCK_ORDER','pool observation after collection')
             seen=set()
             for v in p['samples']:
-                expected=CATALOG.get(v['name'])
+                expected=catalog.get(v['name'])
                 require(expected is not None,'METRIC_CONTRACT',v['name'])
                 require(all(v[k]==expected[k] for k in ('unit','kind','encoding')) and p['family']==expected['family'],'METRIC_CONTRACT',v['name'])
                 require(set(v['labels'])==set(expected['labels']),'METRIC_LABELS',v['name'])
+                if current and v['name']=='cpu.thread.percent':
+                    require(unsigned(v['labels']['thread_id'],'thread_id')>0,'METRIC_LABELS','thread lifetime ID')
+                    require(v['labels']['name_truncated'] in ('true','false') and len(v['labels']['thread_name'].encode('utf-8'))<=31,'METRIC_LABELS','thread name bytes/truncation')
+                if current and p['family']=='memory_regions':
+                    require(v['labels']['region'] in ('net_rx_data','net_tx_data'),'METRIC_LABELS','unknown selected memory region')
                 if 'task_epoch' in v['labels']:
                     require(re.fullmatch(SCHEMA['$defs']['uuid']['pattern'],v['labels']['task_epoch']) is not None,'METRIC_LABELS','task_epoch UUID')
                 key=(v['name'],tuple(sorted(v['labels'].items())))
@@ -205,6 +231,8 @@ class ReferenceConsumer:
         self.last:dict[tuple[str,...],int]={}
         self.received:dict[tuple[str,...],tuple[int,int]]={}
         self.parts:dict[tuple[str,...],dict[int,dict[str,Any]]]={}
+        self.source_samples:dict[tuple[str,...],int]={}
+        self.cpu_parts:dict[tuple[str,...],dict[int,dict[str,Any]]]={}
     def bind(self,vm_id:str,boot_id:str,publisher_instance_id:str)->None:
         self.trusted[vm_id]=(boot_id,publisher_instance_id)
     def ingest(self,m:dict[str,Any],received_ms:int,retained_delivery:bool=False)->str:
@@ -233,11 +261,30 @@ class ReferenceConsumer:
         seq=int(m['seq'])
         if seq<=self.last.get(key,0):return 'OUT_OF_ORDER'
         self.last[key]=seq
-        source_age=int(m['clock']['sent_uptime_ms'])-int(m['payload']['collection']['end_uptime_ms'])
+        p=m['payload'];origin=p['collection']['end_uptime_ms']
+        if stream=='metrics' and p['family']=='cpu':
+            window=p['window'];pk=(*key,window['sample_seq'])
+            parts=self.cpu_parts.setdefault(pk,{})
+            identity=lambda x:{k:v for k,v in x['window'].items() if k!='part_index'}
+            if parts and identity(next(iter(parts.values())))!=identity(p):return 'CPU_SAMPLE_CONFLICT'
+            index=window['part_index']
+            if index in parts and parts[index]!=p:return 'CPU_SAMPLE_CONFLICT'
+            parts[index]=p
+            rows=[s['labels']['thread_id'] for page in parts.values() for s in page['samples'] if s['name']=='cpu.thread.percent']
+            if len(rows)!=len(set(rows)):return 'CPU_SAMPLE_CONFLICT'
+            systems=[s for page in parts.values() for s in page['samples'] if s['name']=='cpu.system.percent']
+            if any(s!=systems[0] for s in systems):return 'CPU_SAMPLE_CONFLICT'
+        if stream=='metrics' and p['family']=='cpu':origin=p['window']['end_uptime_ms']
+        if stream=='metrics' and p['family']=='memory_regions':origin=p['observed_uptime_ms']
+        source_age=int(m['clock']['sent_uptime_ms'])-int(origin)
         max_age=2000 if stream in ('heartbeat','metrics') else None
         if max_age is not None and source_age>max_age:return 'SOURCE_STALE'
         
         for value_key in self.value_keys(m):
+            if stream=='metrics' and p['family'] in ('cpu','memory_regions'):
+                sample=int(p['window']['sample_seq'] if p['family']=='cpu' else p['source_sample_seq'])
+                if sample<=self.source_samples.get(value_key,-1):continue
+                self.source_samples[value_key]=sample
             self.received[value_key]=(received_ms,source_age)
         return 'CURRENT_OBSERVATION' if stream in ('metrics','heartbeat') else 'INVENTORY_ACCEPTED'
     @staticmethod
@@ -254,7 +301,7 @@ class ReferenceConsumer:
         key=self.value_keys(m)[0]
         if key not in self.received:return 'UNKNOWN'
         received,source_age=self.received[key]
-        ttl=6000 if stream=='heartbeat' else {'loop_progress':3000,'memory':6000,'network':6000,'publisher':15000,'loop_timing':15000}[m['payload']['family']]
+        ttl=6000 if stream=='heartbeat' else {'loop_progress':3000,'memory':6000,'cpu':6000,'memory_regions':6000,'network':6000,'publisher':15000,'loop_timing':15000}[m['payload']['family']]
         return 'STALE' if now_ms-received+source_age>ttl else 'RECEIPT_LEASE_VALID'
 
 def run_sequences()->list[dict[str,Any]]:
@@ -287,9 +334,15 @@ def self_test()->dict[str,Any]:
             report['invalid'].append({'name':item['name'],'status':'EXPECTED_REJECTION','error':exc.code})
         else:raise ContractError('INVALID_ACCEPTED',item['name'])
     report['sequences']=run_sequences()
+    current=json.loads((BASE/'fixtures-2.1/manifest.json').read_text(encoding='utf-8'))
+    report['current_valid']=[]
+    for item in current['valid']:
+        m=load_message(BASE/item['file']);validate(m,item['topic'],item['qos'],item['retain'])
+        report['current_valid'].append({'name':item['name'],'status':'PASS'})
     report['summary']={'valid_pass':len(report['valid']),'invalid_rejected':len(report['invalid']),
                        'sequence_pass':len(report['sequences']),'sequence_assertions':sum(s['assertions'] for s in report['sequences']),
-                       'max_valid_payload_bytes':max(s['wire_payload_bytes'] for s in report['valid'])}
+                       'max_valid_payload_bytes':max(s['wire_payload_bytes'] for s in report['valid']),
+                       'current_2_1_valid_pass':len(report['current_valid'])}
     return report
 
 def main()->int:
