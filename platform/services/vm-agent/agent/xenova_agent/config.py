@@ -16,6 +16,11 @@ DEFAULT_BROKER_HOST = "192.168.77.1"
 # MQTT 계약 v1 3장: heartbeat 주기 5초 고정. 받는 쪽이 15초 STALE, 30초 OFFLINE 으로 판정하므로 운영 설정으로 바꾸지 않는다.
 # 시험용 짧은 주기는 생성자 인자로만 준다
 DEFAULT_HEARTBEAT_INTERVAL_S = 5.0
+# MQTT-03 metrics 주기(S15P31E110-122). 계약은 주기를 고정하지 않으며 화면 갱신과 수집 비용 사이 기본값
+DEFAULT_METRICS_INTERVAL_S = 2.0
+DEFAULT_TOP_PROCESSES = 10  # processes[] 개수. 64KB 메시지 상한 안쪽을 지키는 기본값이며 계약상 고정값은 아니다
+DEFAULT_INVENTORY_REFRESH_S = 60.0  # inventory 를 다시 읽어 바뀌었는지 보는 간격
+MAX_TOP_PROCESSES = 50
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 NIL_UUID = str(uuid.UUID(int=0))
 
@@ -40,12 +45,21 @@ class AgentSettings:
     username: str | None = None
     password: str | None = None
     heartbeat_interval_s: float = DEFAULT_HEARTBEAT_INTERVAL_S
+    metrics_interval_s: float = DEFAULT_METRICS_INTERVAL_S
+    top_processes: int = DEFAULT_TOP_PROCESSES
+    inventory_refresh_s: float = DEFAULT_INVENTORY_REFRESH_S
     log_level: str = "INFO"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "vm_id", canonical_vm_id(self.vm_id))
         if not (math.isfinite(self.heartbeat_interval_s) and self.heartbeat_interval_s > 0):
             raise ValueError(f"heartbeat_interval_s must be a finite positive number, got {self.heartbeat_interval_s!r}")
+        for name in ("metrics_interval_s", "inventory_refresh_s"):
+            value = getattr(self, name)
+            if not (math.isfinite(value) and value > 0):
+                raise ValueError(f"{name} must be a finite positive number, got {value!r}")
+        if type(self.top_processes) is not int or not 0 <= self.top_processes <= MAX_TOP_PROCESSES:
+            raise ValueError(f"top_processes must be 0..{MAX_TOP_PROCESSES}, got {self.top_processes!r}")
         if not 1 <= self.broker_port <= 65535:
             raise ValueError(f"broker_port must be 1..65535, got {self.broker_port!r}")
         if not self.broker_host:
@@ -79,5 +93,7 @@ class AgentSettings:
             broker_port=read("XENOVA_AGENT_BROKER_PORT", cls.broker_port, int),
             username=read("XENOVA_AGENT_BROKER_USERNAME", None, str),
             password=read("XENOVA_AGENT_BROKER_PASSWORD", None, str),
+            metrics_interval_s=read("XENOVA_AGENT_METRICS_INTERVAL", cls.metrics_interval_s, float),
+            top_processes=read("XENOVA_AGENT_TOP_PROCESSES", cls.top_processes, int),
             log_level=read("XENOVA_AGENT_LOG_LEVEL", cls.log_level, str).upper(),
         )

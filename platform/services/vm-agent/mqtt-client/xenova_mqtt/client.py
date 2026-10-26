@@ -117,6 +117,7 @@ class XenovaClient:
         # 우리 잠금을 기다림)과 맞물릴 수 있어 잠금을 걸쳐 두지 않는다
         self._early_subacks: dict[int, Any] = {}
         self._generation = 0  # 연결 세대. 끊길 때마다 +1. 끊기기 전에 보낸 요청의 mid 는 등록하지 않는다 (재연결 때 다시 요청)
+        self._connections = 0  # 연결에 성공한 횟수. 두 번 확인하는 사이에 끊겼다 다시 붙어도 값이 바뀐다
         self._inflight = 0  # 이 세대에서 subscribe() 가 진행 중인 요청 수. 0 이면 모르는 mid 의 SUBACK 은 보관하지 않고 버린다
         self._pending_infos: list[Any] = []  # PUBACK 을 아직 받지 못한 QoS>0 발행. stop() 이 끊기 전에 기다린다
         self._latest: dict[str, Message] = {}
@@ -165,6 +166,12 @@ class XenovaClient:
     def connected(self) -> bool:
         return self._connected.is_set()
 
+    @property
+    def connections(self) -> int:
+        """브로커 연결에 성공한 횟수. 값이 바뀌었으면 그 사이 (재)연결이 있었다: clean session 이라 브로커가 이 연결의 상태를 모르고,
+        브로커가 재시작했다면 retained 도 잃었을 수 있다. connected 만 보면 짧은 끊김을 놓친다."""
+        return self._connections
+
     def wait_connected(self, timeout_s: float) -> bool:
         return self._connected.wait(timeout_s)
 
@@ -176,6 +183,7 @@ class XenovaClient:
         # 먼저 연결 표시를 해야 그 사이 subscribe() 로 들어온 필터도 빠지지 않는다.
         self._connected.set()
         with self._lock:
+            self._connections += 1
             subscriptions = [(topic_filter, qos) for topic_filter, (qos, _) in self._subscriptions.items()]
         for topic_filter, qos in subscriptions:
             self._request_subscribe(client, topic_filter, qos)

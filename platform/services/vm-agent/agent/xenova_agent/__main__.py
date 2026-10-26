@@ -1,4 +1,5 @@
-"""`python -m xenova_agent`: 설정을 읽고 MQTT 클라이언트를 띄운 뒤 heartbeat 루프를 돈다. SIGTERM·SIGINT 로 멈춘다."""
+"""`python -m xenova_agent`: 설정을 읽고 MQTT 클라이언트를 띄운 뒤 heartbeat 루프(메인 스레드)와 inventory·metrics 발행 루프(별도
+스레드)를 돈다. 수집이 느려도 heartbeat 가 밀리지 않게 둘을 나눈다. SIGTERM·SIGINT 로 멈춘다."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ from typing import Any
 
 from .config import AgentSettings
 from .heartbeat import HeartbeatFailed, HeartbeatSender
+from .reporter import Reporter
 
 log = logging.getLogger("xenova_agent")
 
@@ -28,10 +30,26 @@ def build_client(settings: AgentSettings) -> Any:
     )
 
 
+def build_reporter(client: Any, settings: AgentSettings) -> Reporter:
+    from . import inventory
+    from .metrics import MetricsCollector
+    from .processes import ProcessSampler
+
+    return Reporter(
+        client, settings.vm_id,
+        collect_inventory=inventory.collect,
+        collect_metrics=MetricsCollector().collect,
+        collect_processes=ProcessSampler(top_n=settings.top_processes).sample,
+        interval_s=settings.metrics_interval_s,
+        inventory_refresh_s=settings.inventory_refresh_s,
+    )
+
+
 def run(
     settings: AgentSettings,
     *,
     client_factory: Callable[[AgentSettings], Any] = build_client,
+    reporter_factory: Callable[[Any, AgentSettings], Any] | None = build_reporter,
     stop: threading.Event | None = None,
     install_signals: bool = True,
 ) -> int:
@@ -49,6 +67,9 @@ def run(
         settings.vm_id, settings.broker_host, settings.broker_port, settings.heartbeat_interval_s, client.connected,
     )
     sender = HeartbeatSender(client, settings.vm_id, interval_s=settings.heartbeat_interval_s)
+    reporter = reporter_factory(client, settings) if reporter_factory is not None else None
+    reporter_stop = threading.Event()
+    reporter_thread = reporter.start(reporter_stop) if reporter is not None else None
     try:
         sender.run(stop)
     except HeartbeatFailed as exc:
@@ -56,6 +77,9 @@ def run(
         log.error("xenova-agent 실패: %s (보냄 %d, 건너뜀 %d)", exc, sender.sent, sender.skipped)
         return 1
     finally:
+        reporter_stop.set()
+        if reporter_thread is not None:
+            reporter_thread.join(timeout=5)
         client.stop()
     log.info("xenova-agent 종료: 보냄 %d, 연결 없어 건너뜀 %d, 실패 %d", sender.sent, sender.skipped, sender.failed)
     return 0

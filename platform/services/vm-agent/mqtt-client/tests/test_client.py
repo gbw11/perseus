@@ -248,3 +248,14 @@ def test_message_exposes_retain_flag(client):
     envelope = env.build(Identity(source_id="dom0-server"), "vm.health", {"ok": True}, 2)
     client._on_message(client._fake, None, SimpleNamespace(topic=HEALTH_TOPIC, payload=json.dumps(envelope).encode(), retain=False))
     assert client.latest(HEALTH_TOPIC).retained is False
+
+
+def test_connections_counts_successful_connects_so_a_fast_reconnect_is_visible(client):
+    assert client.connections == 0
+    client._on_connect(client._fake, None, {}, 0)
+    assert client.connections == 1 and client.connected
+    client._on_disconnect(client._fake, None, 0)
+    client._on_connect(client._fake, None, {}, 0)  # 두 확인 사이에 끊겼다 다시 붙음: connected 는 그대로 True
+    assert client.connections == 2 and client.connected
+    client._on_connect(client._fake, None, {}, 135)  # 거부된 CONNACK 은 세지 않는다
+    assert client.connections == 2
