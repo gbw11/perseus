@@ -56,6 +56,23 @@ class SourcesTest(unittest.TestCase):
         self.assertEqual(support.clock_response(self.context,r,s)['unix_ms'],'1767225600001')
         r['execution_id']=str(uuid.uuid4())
         with self.assertRaises(ValueError):support.clock_response(self.context,r,s)
+    def test_host_clock_quality_gate_and_uncertainty_components(self):
+        from types import SimpleNamespace
+        def read_timex(ptr):
+            tx=ptr._obj;tx.maxerror=1201;tx.tolerance=500*65536;tx.status=status
+            return state
+        for status,state in ((0,0),(0x40,0),(0x1000,0),(0,5)):
+            with patch.object(support.os,'uname',return_value=SimpleNamespace(machine='aarch64')), \
+                 patch.object(support.Path,'read_text',return_value='arch_sys_counter\n'), \
+                 patch.object(support.C,'CDLL',return_value=SimpleNamespace(adjtimex=read_timex)), \
+                 patch.object(support.time,'monotonic_ns',side_effect=[0,1000001]), \
+                 patch.object(support.time,'time_ns',return_value=1767225600000000000):
+                if status or state:
+                    with self.assertRaises(ValueError):support.clock_sample()
+                else:
+                    sample=support.clock_sample()
+                    self.assertEqual(sample['source_error_ms'],4) # ceil(1.201ms) + ceil(1.000001ms)
+                    self.assertEqual(sample['drift_ppm'],500)
     def test_archive_binding_fatal_error_partial_and_restart_query(self):
         source=self.base/'console';source.write_bytes(b'old unknown fatal\n')
         cursor=evidence.capture(source,self.archive,self.receipt,storage_guard=lambda:None)
@@ -80,6 +97,22 @@ class SourcesTest(unittest.TestCase):
         self.assertEqual(source.read_bytes(),b'')
         self.archive.mkdir(mode=0o700,exist_ok=True);(self.archive/'partial.json').write_bytes(b'{')
         self.assertEqual(evidence.query(self.archive)[0]['status'],'incomplete')
+    def test_async_creation_and_delayed_old_binding_never_relabel_new_execution(self):
+        runs=self.base/'executions';runs.mkdir();sources=self.base/'scratch';sources.mkdir()
+        (runs/(self.context['vm_id']+'.json')).write_text(json.dumps(self.context))
+        support.register_capture(self.context,self.base/'receipt',runtime=self.base,sources=sources)
+        registration=json.loads((self.base/'telemetry-capture'/(self.context['vm_id']+'.json')).read_text())
+        self.assertTrue(registration['cursor']['pending_source'])
+        source=Path(registration['source']);self.assertFalse(source.exists())
+        old_execution=str(uuid.uuid4());old_boot=str(uuid.uuid4())
+        current=f"XDIAG_BIND {self.context['execution_id']} {self.receipt['boot_id']}\n"
+        old=f"XDIAG_BIND {old_execution} {old_boot}\n"
+        source.write_text('XDIAG_STREAM 100\n'+old+'XDIAG_FACT 1 1 -1\n'+current+
+                          'XDIAG_FACT 2 2 -2\n'+old+'XDIAG_FACT 3 3 -3\n'+current+'XDIAG_FACT 4 4 -4\n')
+        cursor=evidence.capture(source,self.archive,self.receipt,cursor=registration['cursor'],storage_guard=lambda:None)
+        records=[r['record'] for r in evidence.query(self.archive)]
+        self.assertEqual([e['event_seq'] for r in records for e in r['events']],[2,4])
+        self.assertTrue(all(r['context']==self.context for r in records));self.assertTrue(cursor['bound'])
     def test_retention_removes_old_committed_only_and_records_reason(self):
         self.archive.mkdir(mode=0o700)
         def record(name):

@@ -54,31 +54,37 @@ def capture_supported():
         needed=(b'XENOVA_CONSOLE_EVIDENCE=1',b'XENCONSOLED_TRACE=guest',
                 b'XENCONSOLED_LOG_DIR=/run/xenova-console-evidence')
         source=Path('/run/xenova-console-evidence')
-        return (all(v in env for v in needed) and b'XENOVA_CONSOLE_EVIDENCE' in Path(f'/proc/{pid}/exe').read_bytes()
+        return (all(v in env for v in needed) and b'XENOVA_CONSOLE_EVIDENCE_ASYNC_V1' in Path(f'/proc/{pid}/exe').read_bytes()
                 and not source.is_symlink() and source.stat().st_uid==0 and not source.stat().st_mode&0o077)
     except (OSError,ValueError,subprocess.SubprocessError):return False
 
-def register_capture(context, receipt_path):
+def register_capture(context, receipt_path, *, runtime=Path('/run/xenova'),
+                     sources=Path('/run/xenova-console-evidence')):
     from xenova_runtime import atomic_write
-    run=json.loads((Path('/run/xenova/executions')/(context['vm_id']+'.json')).read_text())
-    loaded=run.get('loaded_artifact') or {}
+    run=json.loads((runtime/'executions'/(context['vm_id']+'.json')).read_text())
     if run.get('execution_id')!=context['execution_id']:raise ValueError('capture execution changed')
-    name=loaded.get('internal_name','')
-    if not re.fullmatch('[a-z][a-z0-9-]{0,63}',name):raise ValueError('capture domain name invalid')
-    source=Path('/run/xenova-console-evidence')/('guest-'+name+'.log')
-    fd=os.open(source,os.O_RDONLY|os.O_NOFOLLOW)
-    with os.fdopen(fd,'rb') as stream:
-        from xenova_telemetry_evidence import stream_header
-        st=os.fstat(stream.fileno());generation,_=stream_header(stream)
-    directory=Path('/run/xenova/telemetry-capture');directory.mkdir(mode=0o700,exist_ok=True)
+    domid=context.get('domid')
+    if type(domid) is not int or domid<=0:raise ValueError('capture domain id invalid')
+    # A filename only locates the scratch stream. Receipt + per-record BIND,
+    # never a reused domid, decide execution ownership.
+    source=sources/f'guest-domid-{domid}.log'
+    cursor={'context':context,'identity':None,'stream_generation':None,'offset':0,'bound':False,'pending_source':True}
+    try:fd=os.open(source,os.O_RDONLY|os.O_NOFOLLOW)
+    except FileNotFoundError:pass # The asynchronous writer may not have opened it yet.
+    else:
+        with os.fdopen(fd,'rb') as stream:
+            from xenova_telemetry_evidence import stream_header
+            st=os.fstat(stream.fileno());generation,_=stream_header(stream)
+        cursor.update(identity=[st.st_dev,st.st_ino],stream_generation=generation,
+                      offset=st.st_size,pending_source=False)
+    directory=runtime/'telemetry-capture';directory.mkdir(mode=0o700,exist_ok=True)
     if directory.is_symlink() or directory.stat().st_mode&0o077:raise ValueError('private capture registry required')
     path=directory/(context['vm_id']+'.json')
     if path.exists():
         old=json.loads(path.read_text())
         if old['context']==context:return
     atomic_write(path,json.dumps({'context':context,'receipt':str(receipt_path.resolve()),
-        'source':str(source),'cursor':{'context':context,'identity':[st.st_dev,st.st_ino],
-        'stream_generation':generation,'offset':st.st_size,'bound':False}})+'\n',0o600)
+        'source':str(source),'cursor':cursor})+'\n',0o600)
 
 def capture_once():
     from provision_xenova_telemetry import private_json
@@ -93,7 +99,8 @@ def capture_once():
         # Historical execution files keep their original binding after a guest
         # restart. No new receipt is synthesized by this observer.
         archive=Path('/srv/xenova/diagnostics/telemetry')/config['context']['vm_id']/config['context']['execution_id']
-        updated=capture(Path(config['source']),archive,receipt,cursor=config['cursor'])
+        try:updated=capture(Path(config['source']),archive,receipt,cursor=config['cursor'])
+        except FileNotFoundError:continue # Pending worker I/O is not durable capture.
         if updated!=config['cursor']:
             config['cursor']=updated;atomic_write(path,json.dumps(config)+'\n',0o600)
         handled+=1
@@ -175,7 +182,7 @@ def main(argv=None):
         if a.action=='console-environment':
             from xenova_runtime import atomic_write
             binary=Path('/usr/sbin/xenconsoled').read_bytes()
-            mode='guest' if b'XENOVA_CONSOLE_EVIDENCE' in binary else 'none'
+            mode='guest' if b'XENOVA_CONSOLE_EVIDENCE_ASYNC_V1' in binary else 'none'
             atomic_write(Path('/run/xenova-console-evidence/enable.env'),'XENCONSOLED_TRACE='+mode+'\n',0o600)
             return 0
         storage_check()

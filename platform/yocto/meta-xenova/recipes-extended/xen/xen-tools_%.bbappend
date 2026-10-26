@@ -6,11 +6,13 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 # virt_networking.bbclass에는 networkd 비관리 규칙만 설치하도록 전달한다.
 VIRT_NETWORKING_FILES = "${UNPACKDIR}/10-ether.network ${UNPACKDIR}/10-xenbr0.network"
 SRC_URI:remove = "file://10-xenbr0.netdev"
-SRC_URI += "file://0002-console-filter-xenova-evidence.patch file://xenova_console_evidence.h file://xenova_console_evidence_file.h"
+SRC_URI += "file://0002-console-filter-xenova-evidence.patch file://xenova_console_evidence.h file://xenova_console_evidence_file.h file://xenova_console_evidence_async.h"
 python do_patch:append() {
     import shutil
     shutil.copyfile(d.getVar('UNPACKDIR') + '/xenova_console_evidence.h',
                     d.getVar('S') + '/tools/console/daemon/xenova_console_evidence.h')
     shutil.copyfile(d.getVar('UNPACKDIR') + '/xenova_console_evidence_file.h',
                     d.getVar('S') + '/tools/console/daemon/xenova_console_evidence_file.h')
+    shutil.copyfile(d.getVar('UNPACKDIR') + '/xenova_console_evidence_async.h',
+                    d.getVar('S') + '/tools/console/daemon/xenova_console_evidence_async.h')
 }

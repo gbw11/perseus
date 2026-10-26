@@ -143,7 +143,10 @@ def capture(source, archive, receipt, *, cursor=None, storage_guard=None):
         same_context=bool(cursor and cursor.get('context')==context)
         rotated=bool(same_context and generation is not None and generation!=cursor.get('stream_generation'))
         continuity=bool(same_context and cursor.get('identity')==identity and offset<=info.st_size and not rotated)
-        if not continuity:offset=header_end if rotated else info.st_size
+        # First delayed creation starts at the header, but remains unbound until
+        # this receipt's explicit execution/boot marker is read.
+        pending=bool(same_context and cursor.get('pending_source') and cursor.get('identity') is None)
+        if not continuity:offset=header_end if rotated or pending else info.st_size
         stream.seek(offset);raw=stream.read(LIMIT)
         after_generation,_=stream_header(stream)
         if after_generation!=generation or os.fstat(stream.fileno()).st_size<offset+len(raw):
