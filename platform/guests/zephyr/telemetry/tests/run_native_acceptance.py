@@ -20,14 +20,18 @@ import subprocess
 import sys
 import time
 import uuid
+import re
+import hashlib
+from decimal import Decimal,ROUND_HALF_UP
 
 BASE = Path(__file__).resolve().parents[1]
+ROOT = BASE.parents[3]
 
 
 def write_private(path, value):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as f:
-        f.write(value if isinstance(value, str) else json.dumps(value))
+        f.write(value if isinstance(value, str) else json.dumps(value,ensure_ascii=False))
 
 
 def public_binding(bootstrap):
@@ -42,6 +46,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--execute", action="store_true", required=True)
     parser.add_argument("--extended", action="store_true", help="ACL, disconnect, native boot/session replacement")
+    parser.add_argument("--resources-off",action="store_true",help="paired CPU/pool-disabled candidate; require unsupported CPU, never fake zero")
     args = parser.parse_args()
     if os.geteuid() or os.readlink("/proc/self/ns/net") == os.readlink("/proc/1/ns/net"):
         parser.error("root in a new isolated network namespace required")
@@ -97,12 +102,19 @@ def main():
             run(["ip", "link", "set", tap, "master", "xtbr"])
             run(["ip", "link", "set", tap, "up"])
         bootstraps = []
+        binary=args.binary.read_bytes()
+        build_ids=set(re.findall(rb'xenova-build:(sha256:[0-9a-f]{64})',binary))
+        assert len(build_ids)==1
+        native_build=next(iter(build_ids)).decode()
+        native_artifact=hashlib.sha256(binary).hexdigest()
         for _ in range(2):
             vm_id = str(uuid.uuid4())
             bootstraps.append({"vm_id": vm_id, "boot_id": str(uuid.uuid4()), "publisher_id": str(uuid.uuid4()),
                                "host_boot_id": "", "execution_id": "", "receipt_id": "",
                                "broker_ipv4": "192.0.2.1", "port": 18883, "username": vm_id,
-                               "password": secrets.token_urlsafe(32), "trusted_internal_plaintext": True})
+                               "password": secrets.token_urlsafe(32), "trusted_internal_plaintext": True,
+                               "hostname":"native-"+str(_),"display_name":'주행 '+str(_)+' "\\' if _==0 else '🚗'*63,
+                               "build_id":native_build,"artifact_sha256":native_artifact})
         subscriber_password = secrets.token_urlsafe(32)
         audit_password = secrets.token_urlsafe(32)
         write_private(private / "subscriber.json", {"username": "telemetry-reference-subscriber", "password": subscriber_password})
@@ -243,12 +255,47 @@ def main():
         assert {m["vm_id"] for m in messages} == {b["vm_id"] for b in bootstraps}
         assert {m["type"] for m in messages} == {"telemetry." + s for s in ("inventory", "heartbeat", "metrics", "events", "snapshot")}
         matched = 0
-        sources = {}
+        sources = {};resources={};cpu_matched=0
         for label, vm_id, boot_id in source_runs:
             for line in (args.output / (label + ".stdout")).read_text().splitlines():
                 if line.startswith("XT_SOURCE "):
                     source = json.loads(line[len("XT_SOURCE "):])
                     sources.setdefault((vm_id, boot_id, source["start_ms"], source["end_ms"]), []).append(source)
+                if line.startswith('XT_RESOURCE '):
+                    source=json.loads(line[len('XT_RESOURCE '):]);key=(vm_id,boot_id,source['sample'])
+                    if key in resources:assert resources[key]==source,'same cache sample changed across reads/restart'
+                    resources[key]=source
+        cpu_pages={}
+        for m in messages:
+            if m['type']=='telemetry.inventory':
+                expected=next(b for b in bootstraps if b['vm_id']==m['vm_id'])
+                assert m['payload']['display_name']==expected['display_name']
+                assert m['payload']['hostname']==expected['hostname']
+                assert m['payload']['firmware']['build_id']==native_build
+                assert m['payload']['firmware']['artifact_sha256']==native_artifact
+            if m['type']=='telemetry.metrics' and m['payload']['family']=='cpu':
+                p=m['payload'];w=p['window']
+                key=(m['vm_id'],m['boot_id'],m['publisher_instance_id'],w['sample_seq'])
+                group=cpu_pages.setdefault(key,{})
+                if group:
+                    first=next(iter(group.values()))
+                    assert first['collection']==p['collection'],'CPU pages changed collection/sample'
+                    assert {k:v for k,v in first['window'].items() if k!='part_index'}=={k:v for k,v in w.items() if k!='part_index'},'CPU pages changed window/coverage'
+                assert int(m['clock']['sent_uptime_ms'])-int(w['end_uptime_ms'])<=2000
+                group[w['part_index']]=p
+                raw=resources[(m['vm_id'],m['boot_id'],m['payload']['window']['sample_seq'])]
+                value=next(s for s in m['payload']['samples'] if s['name']=='cpu.system.percent')
+                if value['status']=='ok':
+                    assert raw['rc']==0 and int(raw['total_delta'])>0
+                    expected=(Decimal(raw['busy_delta'])*100/Decimal(raw['total_delta'])).quantize(Decimal('.001'),rounding=ROUND_HALF_UP)
+                    assert Decimal(str(value['value']))==expected
+                    cpu_matched+=1
+        if args.resources_off:
+            cpu_values=[s for m in messages if m['type']=='telemetry.metrics' and m['payload']['family']=='cpu'
+                        for s in m['payload']['samples']]
+            assert cpu_values and all(s['value'] is None and s['status']=='unsupported' for s in cpu_values)
+            assert cpu_matched==0
+        else:assert cpu_matched>0
         for index, bootstrap in enumerate(bootstraps):
             loops = []
             for m in messages:
@@ -287,7 +334,47 @@ def main():
             assert all(int(m["clock"]["sent_uptime_ms"]) - int(m["payload"]["collection"]["end_uptime_ms"]) <= 2000 for m in messages if m["type"] in ("telemetry.metrics", "telemetry.heartbeat"))
         retained = [json.loads(line) for line in (args.output / "retained/received.jsonl").read_text().splitlines()]
         assert len([r for r in retained if r["retained_delivery"] and r["valid"]]) == 2
+        # Real Zephyr fatal path, then the production host filter/archive. TAP
+        # console bytes model the external reader boundary; this is not Xen
+        # ring delivery or hardware power-loss acceptance.
+        fatal_boot=dict(bootstraps[1],boot_id=str(uuid.uuid4()),publisher_id=str(uuid.uuid4()),
+            host_boot_id=str(uuid.uuid4()),execution_id=str(uuid.uuid4()),receipt_id=str(uuid.uuid4()))
+        write_private(private/'B-fatal.json',fatal_boot)
+        fatal_env=dict(env,XT_TEST_BOOTSTRAP=str(private/'B-fatal.json'),
+            XT_TEST_INSTANCE_ID=fatal_boot['vm_id'],XT_TEST_FATAL_MS='3000',XT_TEST_DURATION_MS='10000')
+        fatal_guest=spawn('guest-B-fatal',[args.binary,'-rt','-no-color','-eth-if=xtapB',
+            '-mac-addr=02:00:5e:00:53:03','-ipv4-addr=192.0.2.3','-ipv4-gw=192.0.2.1',
+            '-ipv4-nm=255.255.255.0'],fatal_env)
+        fatal_guest.wait(timeout=10)
+        fatal_text=(args.output/'guest-B-fatal.stdout').read_bytes()
+        assert b'ZEPHYR FATAL ERROR' in fatal_text and b'XDIAG_BIND ' in fatal_text
+        header=ROOT/'platform/yocto/meta-xenova/recipes-extended/xen/files'
+        c=args.output/'fatal-filter.c';binary=args.output/'fatal-filter'
+        c.write_text('#include "xenova_console_evidence.h"\n'
+            'static int out(void *p,const char *s,size_t n){(void)p;return fwrite(s,1,n,stdout)==n?0:-1;}\n'
+            'int main(void){struct xdlog f={0};char s[17];size_t n;while((n=fread(s,1,17,stdin)))'
+            '{if(xdlog_feed(&f,s,n,out,NULL))return 1;}return 0;}\n')
+        subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-I'+str(header),str(c),'-o',str(binary)],check=True)
+        filtered=subprocess.check_output([str(binary)],input=fatal_text)
+        assert b'XDIAG_FATAL ' in filtered and b'pc ' not in filtered
+        from xenova_telemetry_evidence import capture,query
+        source=args.output/'fatal-filtered.log';source.write_bytes(b'');source.chmod(0o600)
+        context={k:fatal_boot[k] for k in ('vm_id','host_boot_id','execution_id')}
+        receipt={'phase':'applied','context':context,'boot_id':fatal_boot['boot_id'],
+            'metadata':{'build_id':native_build,'artifact_sha256':native_artifact}}
+        archive=args.output/'fatal-archive'
+        cursor=capture(source,archive,receipt,storage_guard=lambda:None)
+        source.write_bytes(filtered)
+        capture(source,archive,receipt,cursor=cursor,storage_guard=lambda:None)
+        assert any(e['category']=='fatal_observed' for row in query(archive) for e in row['record']['events'])
         result = {"actual_producer": True, "received": len(records), "source_comparisons": matched,
+                  "cpu_source_comparisons":cpu_matched,"metadata_utf8_roundtrip":True,
+                  "resources_enabled":not args.resources_off,
+                  "cpu_page_groups":len(cpu_pages),
+                  "cpu_page_complete":sum(len(g)==next(iter(g.values()))['window']['part_count'] for g in cpu_pages.values()),
+                  "cpu_page_partial":sum(len(g)<next(iter(g.values()))['window']['part_count'] for g in cpu_pages.values()),
+                  "artifact_scope":"native_executable_only; ARM loader binding tested separately",
+                  "native_default_fatal_filtered_and_archived":True,
                   "streams": 5, "vm_count": 2, "reporter_did_not_advance_stalled_loop": True,
                   "retained_inventory_verified": True, "backend_storage": "not exercised",
                   "environment": "native_sim real-time mode, isolated TAP/bridge, authenticated Mosquitto 2.0.18; not Xen board",

@@ -65,6 +65,12 @@ def test_engine_completion_provisions_current_execution_then_standby_readiness(f
         def apply(self,context,bootstrap,previous):applied.append((self.channel,dict(context),dict(bootstrap)))
         def close(self):pass
     monkeypatch.setattr(api,'XenStore',Store)
+    # Keep the production provenance loader; route its filesystem boundary to
+    # this actual Manager/Execution fixture, never the workstation's /run.
+    import xenova_telemetry_support as telemetry_support
+    metadata=telemetry_support.metadata
+    monkeypatch.setattr(telemetry_support,'metadata',lambda context:metadata(context,runtime=f.p.runtime,data=f.p.data))
+    monkeypatch.setattr(telemetry_support,'capture_supported',lambda:False)
     credentials={vm:{}}
     for channel in ('drive','telemetry'):
         path=tmp_path/(channel+'.json');atomic_json(path,{'vm_id':vm,'username':vm,'password':'test-only',

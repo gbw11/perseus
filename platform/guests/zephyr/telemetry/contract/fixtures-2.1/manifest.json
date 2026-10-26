@@ -1,0 +1,34 @@
+{
+  "scope": "Deterministic production-C fixture bytes; not live source, ARM or hardware acceptance",
+  "schema_version": "2.1",
+  "valid": [
+    {
+      "name": "inventory",
+      "file": "fixtures-2.1/inventory.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/inventory",
+      "qos": 1,
+      "retain": true
+    },
+    {
+      "name": "cpu",
+      "file": "fixtures-2.1/cpu.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false
+    },
+    {
+      "name": "memory_regions",
+      "file": "fixtures-2.1/memory_regions.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false
+    },
+    {
+      "name": "utc",
+      "file": "fixtures-2.1/utc.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/heartbeat",
+      "qos": 0,
+      "retain": false
+    }
+  ]
+}

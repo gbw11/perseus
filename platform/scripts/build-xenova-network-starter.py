@@ -21,7 +21,7 @@ from artifact_io import new_path, sha
 def inputs():
     paths=[p for directory in ("xen-store","xen-runtime","diagnostics","telemetry","network-starter-app")
            for p in sorted((BASE/directory).rglob("*")) if p.is_file()]
-    paths += [BASE/"network-xen.cfg.in",BASE/"network-starter.lock.json"]
+    paths += [BASE/"network-xen.cfg.in",BASE/"network-starter.lock.json",BASE/"starter.lock.json"]
     return {str(p.relative_to(BASE)):{"sha256":sha(p),"bytes":p.stat().st_size} for p in paths}
 
 
@@ -140,11 +140,13 @@ def main(argv=None):
     if not args.execute:
         return
     args.output.mkdir(mode=0o755)
-    snapshot = args.output/"input"
-    snapshot.mkdir()
+    # Keep the repository-relative module layout: build identity and app module
+    # paths must resolve entirely inside this frozen input, never a live tree.
+    snapshot = args.output/"input/platform/guests/zephyr"
+    snapshot.mkdir(parents=True)
     for directory in ("xen-store", "xen-runtime", "diagnostics", "telemetry", "network-starter-app"):
         shutil.copytree(BASE/directory, snapshot/directory)
-    for name in ("network-xen.cfg.in","network-starter.lock.json"):
+    for name in ("network-xen.cfg.in","network-starter.lock.json","starter.lock.json"):
         shutil.copyfile(BASE/name,snapshot/name)
     for name, info in source_inputs.items():
         path = snapshot/name

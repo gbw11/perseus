@@ -17,12 +17,17 @@ static void publish(struct xnf *n, struct xnf_header *h, uint32_t prod) {
  if ((uint32_t)(prod-load(&h->req_event))<(uint32_t)(prod-old)) n->notify(n->context);
 }
 static int bad(struct xnf *n) { n->failed=true; n->stats.protocol_errors++; return -EPROTO; }
+static void bytes(struct xnf *n,uint64_t *count,size_t size){
+ if(UINT64_MAX-*count<size){*count=UINT64_MAX;n->stats.bytes_saturated=true;}else *count+=size;
+}
 static void post(struct xnf *n, unsigned id) {
  n->rx_id[id]+=XNF_SLOTS;
  n->rx->ring[n->rx_prod & (XNF_RING_SIZE-1)].req=(struct xnf_rx_request){n->rx_id[id],0,n->rx_grants[id]};
  n->rx_posted[id]=true; n->rx_prod++;
 }
 void xnf_init(struct xnf *n) {
+ n->stats.tx_bytes=n->stats.rx_bytes=0;n->stats.bytes_saturated=n->stats.counter_epoch==UINT64_MAX;
+ if(!n->stats.bytes_saturated)n->stats.counter_epoch++;
  memset(n->tx,0,XNF_PAGE);memset(n->rx,0,XNF_PAGE);
  n->tx_prod=n->tx_cons=n->rx_prod=n->rx_cons=0;n->failed=false;
  for(unsigned i=0;i<XNF_SLOTS;i++){n->tx_id[i]=i;n->rx_id[i]=i;}
@@ -40,7 +45,7 @@ int xnf_send(struct xnf *n,const void *data,size_t size) {
  memcpy(n->tx_pages[id],data,size);
  n->tx_busy[id]=true;n->tx_id[id]+=XNF_SLOTS;
  n->tx->ring[n->tx_prod & (XNF_RING_SIZE-1)].req=(struct xnf_tx_request){n->tx_grants[id],0,0,n->tx_id[id],size};
- n->tx_prod++;publish(n,&n->tx->h,n->tx_prod);return 0;
+ n->tx_prod++;publish(n,&n->tx->h,n->tx_prod);bytes(n,&n->stats.tx_bytes,size);return 0;
 }
 int xnf_poll(struct xnf *n) {
  if(n->failed)return -ENETDOWN;
@@ -66,7 +71,7 @@ int xnf_poll(struct xnf *n) {
    if(v.status<0){n->stats.rx_drop++;}
    else if(v.status<14||v.status>XNF_FRAME_MAX||v.offset>XNF_PAGE-(unsigned)v.status)return bad(n);
    else if(n->deliver(n->context,n->rx_pages[id]+v.offset,(size_t)v.status))n->stats.rx_drop++;
-   else n->stats.rx++;
+   else {n->stats.rx++;bytes(n,&n->stats.rx_bytes,(size_t)v.status);}
    n->rx_cons++;budget--;post(n,id);
   }
   publish(n,&n->rx->h,n->rx_prod);

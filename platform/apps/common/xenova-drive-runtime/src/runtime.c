@@ -132,12 +132,14 @@ static int network(struct xdiag_network *out, void *context)
 	ARG_UNUSED(context);
 	if (network_rc) { return network_rc; }
 	struct xnf_stats s;
-	int rc = xnet_stats(&s); if (rc) { return rc; }
+	int rc = xnet_stats_try(&s); if (rc) { return rc; }
 	struct net_if *iface = net_if_get_default();
 	if (!iface) { return -ENODEV; }
 	*out = (struct xdiag_network){.link_up = net_if_is_up(iface) && net_if_is_carrier_ok(iface),
 		.tx = s.tx, .rx = s.rx, .tx_drop = s.tx_drop, .rx_drop = s.rx_drop,
-		.pool_busy = s.pool_busy, .protocol_errors = s.protocol_errors};
+		.pool_busy = s.pool_busy, .protocol_errors = s.protocol_errors,
+		.tx_bytes=s.tx_bytes,.rx_bytes=s.rx_bytes,.counter_epoch=s.counter_epoch,
+		.bytes_rc=s.bytes_saturated?-ERANGE:0};
 	return 0;
 }
 

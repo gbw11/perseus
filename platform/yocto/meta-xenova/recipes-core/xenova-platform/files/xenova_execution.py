@@ -332,6 +332,16 @@ class Execution:
                  'intent_sha256':fingerprint(intent), 'record_sha256':fingerprint(record),
                  "phase":"launching", "owner":owner, "prepared_monotonic_ms":int(self.p.clock()*1000),
                  "configuration_sha256":fingerprint(self.p.config(record)), "domid":None, "xen_unique_id":None}
+        if vm.guest_kind(record) == 'zephyr':
+            # Capture the verified loader input before submission, never hash the
+            # latest file later and label it as an already running execution.
+            from xenova_zephyr import active_directory, bundle_info
+            directory=self.data/'instances'/record['id']
+            info=bundle_info(active_directory(directory,record),record['active_firmware']['revision'])
+            value['loaded_artifact']={'file':'zephyr.bin','artifact_sha256':info['sha256'],
+                'manifest_sha256':info['revision'],'build_id':info['source'].get('build_id'),
+                'display_name':record.get('display_name'),'hostname':record.get('hostname'),
+                'internal_name':record['name']}
         if self.p.process_isolation:
             from xenova_guest_process import scope_name
             previous=self.run_record(record)
@@ -374,6 +384,12 @@ class Execution:
             refuse('TARGET_CHANGED', 'launch record, lifecycle, intent or owner changed')
         if fingerprint(self.p.config(record)) != value['configuration_sha256']:
             refuse('TARGET_CHANGED', 'launch configuration changed')
+        if value.get('loaded_artifact'):
+            from xenova_zephyr import active_directory,bundle_info
+            info=bundle_info(active_directory(self.data/'instances'/record['id'],record),record['active_firmware']['revision'])
+            loaded=value['loaded_artifact']
+            if info['sha256']!=loaded['artifact_sha256'] or info['revision']!=loaded['manifest_sha256']:
+                refuse('TARGET_CHANGED','verified loader artifact changed before submission/binding')
         if self.p.cpu().context(record) != value.get('cpu_policy', {'configured':False}):
             refuse('TARGET_CHANGED', 'launch CPU policy changed')
         if self.p.clock() >= deadline:

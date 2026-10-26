@@ -42,6 +42,7 @@ int xnet_start(void) {
 int xnet_close(int64_t end) { assert(end>k_uptime_get());return !strcmp(scenario,"cleanup-error")?-EIO:0; }
 int xsr_close(int64_t end) { assert(end>k_uptime_get());return 0; }
 int xnet_stats(struct xnf_stats *s) { ARG_UNUSED(s);return -EAGAIN; }
+int xnet_stats_try(struct xnf_stats *s) { return xnet_stats(s); }
 static void start(void *a,void *b,void *c) {
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);start_result=xd_start("manual",20);
 }

@@ -127,7 +127,7 @@ def main():
         def on_message(c,u,message):
             try:
                 value=json.loads(message.payload)
-                if value.get('schema_version')=='2.0':
+                if message.topic.startswith('xenova/v2/'):
                     oracle.validate(value,message.topic,message.qos,value['type']=='telemetry.inventory',len(message.payload))
                 else:validate(message.topic,value)
                 with wire_lock:records.append({'t':time.monotonic(),'topic':message.topic,'message':value})

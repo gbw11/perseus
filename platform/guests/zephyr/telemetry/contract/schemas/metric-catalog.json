@@ -1,5 +1,5 @@
 {
-  "catalog_id": "xenova-telemetry-core-2.0",
+  "catalog_id": "xenova-telemetry-core-2.1",
   "status": "new_contract",
   "entries": [
     {
@@ -37,11 +37,10 @@
       "unit": "percent",
       "kind": "gauge",
       "encoding": "float64",
-      "family": "memory",
+      "family": "cpu",
       "labels": [],
-      "source": "future capability",
-      "meaning_ko": "명시된 표본 구간·분모의 guest CPU 사용률; 현재 Diagnostics Core는 미지원",
-      "requires_extension": true
+      "source": "Zephyr UP runtime window",
+      "meaning_ko": "동일 구간의 guest non-idle accounted / total accounted; Xen pCPU 사용률이 아님"
     },
     {
       "name": "network.netfront.tx_packets",
@@ -303,6 +302,56 @@
       "source": "new telemetry publisher",
       "meaning_ko": "제한 시간 안에 PUBACK을 관측하지 못한 QoS1 메시지; 세션 중 누적, subscriber 처리 성공을 뜻하지 않음",
       "reset_scope": "publisher_instance"
+    },
+    {
+      "name": "cpu.thread.percent",
+      "unit": "percent",
+      "kind": "gauge",
+      "encoding": "float64",
+      "family": "cpu",
+      "labels": [
+        "thread_id",
+        "thread_name",
+        "name_truncated"
+      ],
+      "source": "Zephyr UP runtime window",
+      "meaning_ko": "guest boot 내 스레드 수명 ID; 같은 전체 계상 분모에 대한 구간 사용률"
+    },
+    {
+      "name": "memory.region.used_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory_regions",
+      "labels": [
+        "region"
+      ],
+      "source": "fixed net_buf data payload pool occupancy",
+      "meaning_ko": "RX/TX 데이터 block payload만 포함; descriptor·padding·전체 RAM 제외"
+    },
+    {
+      "name": "memory.region.free_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory_regions",
+      "labels": [
+        "region"
+      ],
+      "source": "fixed net_buf data payload pool occupancy",
+      "meaning_ko": "RX/TX 데이터 block payload만 포함; descriptor·padding·전체 RAM 제외"
+    },
+    {
+      "name": "memory.region.capacity_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory_regions",
+      "labels": [
+        "region"
+      ],
+      "source": "fixed net_buf data payload pool occupancy",
+      "meaning_ko": "RX/TX 데이터 block payload만 포함; descriptor·padding·전체 RAM 제외"
     }
   ]
 }

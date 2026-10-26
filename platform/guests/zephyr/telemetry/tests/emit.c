@@ -45,6 +45,63 @@ int main(void)
 	xt_capture_events(&publisher,&observation.history);
 	assert(publisher.event_count==12 && publisher.counters.source_missed==8);
 	for (enum xt_kind k=XT_INVENTORY;k<=XT_PUBLISHER;++k) { emit(k,0); }
+	struct xdr_counter before={.total=100,.busy=10,.at_ms=49000},after={.total=500,.busy=111,.at_ms=50000};
+	xdr_window(&before,&after,10000,&observation.resources.cpu);
+	assert(!observation.resources.cpu.rc&&observation.resources.cpu.percent_milli==25250);
+	observation.resources.sample=1;observation.resources.rows=observation.resources.seen=1;
+	observation.resources.raw.at_ms=50000;
+	observation.resources.threads[0]=(struct xdr_thread){.lifetime=18446744073709551615ULL,.percent_milli=12500};
+	emit(XT_CPU,0);
+	observation.resources.regions=1;
+	observation.resources.memory[0]=(struct xdr_region){.id="net_rx_data",.used=256,.free=768,.capacity=1024};
+	emit(XT_POOLS,0);
+	/* A fresh collection must not give an old resource cache a new lease. */
+	uint64_t resource_sequence=publisher.sequence[2];
+	assert(xt_encode(&publisher,XT_CPU,&observation,52001,sample_id,snapshot_id,0,&message)==-ETIMEDOUT);
+	observation.end_ms=51000;
+	assert(xt_encode(&publisher,XT_CPU,&observation,52001,sample_id,snapshot_id,0,&message)==-ETIMEDOUT);
+	assert(xt_encode(&publisher,XT_POOLS,&observation,52001,sample_id,snapshot_id,0,&message)==-ETIMEDOUT);
+	assert(publisher.sequence[2]==resource_sequence);observation.end_ms=50000;
+	observation.resources.rows=32;observation.resources.seen=73;observation.resources.threads_rc=-ENOSPC;
+	for(unsigned i=0;i<32;i++)observation.resources.threads[i]=(struct xdr_thread){.lifetime=i+1,.percent_milli=i};
+	/* All pages use one frozen observation/sample; no collector call here. */
+	assert(!xt_sample_id(&publisher,sample_id));
+	for(unsigned i=0;i<8;i++){
+	 assert(!xt_encode(&publisher,XT_CPU,&observation,50000,sample_id,snapshot_id,i,&message));
+	 printf("{\"topic\":\"%s\",\"qos\":0,\"retain\":false,\"message\":%s}\n",message.topic,message.bytes);
+	}
+	uint32_t fraction;
+	assert(!xdr_percent(UINT64_MAX/4,UINT64_MAX,&fraction)&&fraction==25000);
+	assert(xdr_percent(2,1,&fraction)==-ERANGE);
+	assert(xdr_percent(0,0,&fraction)==-ENODATA);
+	xdr_window(NULL,&after,10000,&observation.resources.cpu);assert(observation.resources.cpu.rc==-ENODATA);emit(XT_CPU,0);
+	before.at_ms=1;xdr_window(&before,&after,100,&observation.resources.cpu);assert(observation.resources.cpu.rc==-EOVERFLOW);emit(XT_CPU,0);
+	/* Discontinuity is the new baseline, never a fabricated zero-usage window. */
+	before=after;after=(struct xdr_counter){.total=600,.busy=136,.at_ms=50050};
+	xdr_window(&before,&after,100,&observation.resources.cpu);
+	assert(!observation.resources.cpu.rc&&observation.resources.cpu.percent_milli==25000);
+	before=after;after.at_ms+=50;after.total+=100;after.busy+=10;
+	xdr_window(&before,&after,100,&observation.resources.cpu);
+	assert(!observation.resources.cpu.rc&&observation.resources.cpu.percent_milli==10000);
+	assert(!xt_utc_update(&publisher.utc,49900,50000,1767225600000ULL,25,500,"dom0_adjtimex"));
+	char iso[25];uint64_t bound;
+	assert(!xt_utc_read(&publisher.utc,50000,iso,&bound));assert(!strcmp(iso,"2026-01-01T00:00:00.000Z")&&bound==126);
+	emit(XT_HEARTBEAT,0);
+	assert(xt_utc_read(&publisher.utc,80000,iso,&bound)==-ENODATA);
+	assert(xt_utc_update(&publisher.utc,50001,50000,1767225600000ULL,25,500,"dom0_adjtimex")==-ERANGE);
+	xt_collection_result(&publisher.counters,true,50000);emit(XT_HEARTBEAT,0);
+	xt_collection_result(&publisher.counters,false,50000);assert(publisher.counters.collection_failures==1);emit(XT_HEARTBEAT,0);
+	publisher.counters.stopping=true;emit(XT_HEARTBEAT,0);publisher.counters.stopping=false;
+	assert(!xt_utc_update(&publisher.utc,49900,50000,1767225600000ULL,25,500,"dom0_adjtimex"));
+	assert(xt_utc_update(&publisher.utc,50000,50100,1767225700000ULL,25,500,"dom0_adjtimex")==-EAGAIN);
+	assert(!publisher.utc.valid);
+	assert(!xt_utc_update(&publisher.utc,51000,51100,1767225700000ULL,25,500,"dom0_adjtimex"));
+	assert(!xt_utc_read(&publisher.utc,52101,iso,&bound)&&bound==127);
+	assert(xt_utc_read(&publisher.utc,81100,iso,&bound)==-ENODATA);
+	assert(!xt_utc_update(&publisher.utc,82000,82100,1767225731000ULL,25,500,"dom0_adjtimex"));
+	assert(!xt_utc_read(&publisher.utc,82100,iso,&bound)&&bound==126);
+	assert(xt_utc_update(&publisher.utc,1,5002,1767225600000ULL,25,500,"dom0_adjtimex")==-ERANGE);
+	assert(!publisher.utc.valid);
 	while (publisher.event_count) { emit(XT_EVENT,0);xt_event_acked(&publisher); }
 	observation.rows=32;observation.rows_seen=35;observation.threads_rc=-ENOSPC;
 	for (size_t i=0;i<32;++i) {

@@ -1,0 +1,10 @@
+[Unit]
+Description=Archive filtered execution evidence from xenconsoled
+RequiresMountsFor=/srv/xenova
+After=xenconsoled.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/xenova-telemetry-support capture-once
+TimeoutStartSec=5
+UMask=0077

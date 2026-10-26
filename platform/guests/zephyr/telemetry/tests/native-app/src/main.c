@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <zephyr/net/net_pkt.h>
+#include <zephyr/net/net_if.h>
 
 static struct xdiag_loop loop;
 static char instance_id[37];
@@ -32,6 +34,9 @@ static int bootstrap_load(struct xt_bootstrap *out,int64_t deadline,void *contex
 void xt_test_observation(const struct xdiag_snapshot *raw,const struct xt_observation *s)
 {
 	printf("XT_SOURCE {\"start_ms\":\"%" PRIu64 "\",\"end_ms\":\"%" PRIu64 "\",\"heap_used\":\"%" PRIu64 "\",\"heap_free\":\"%" PRIu64 "\",\"completed\":\"%" PRIu64 "\",\"in_flight\":%s,\"jitter\":\"%" PRId64 "\",\"timing_rc\":%d}\n",s->start_ms,s->end_ms,(uint64_t)raw->heap_allocated_bytes,(uint64_t)raw->heap_free_bytes,raw->timing.loop_seq,raw->timing.in_flight ? "true" : "false",raw->timing.last_jitter_us,raw->timing_rc);
+	const struct xdr_snapshot *r=&raw->resources;
+	printf("XT_RESOURCE {\"sample\":\"%llu\",\"rc\":%d,\"total\":\"%llu\",\"busy\":\"%llu\",\"total_delta\":\"%llu\",\"busy_delta\":\"%llu\"}\n",
+	 r->sample,r->cpu.rc,r->raw.total,r->raw.busy,r->cpu.total_delta,r->cpu.busy_delta);
 }
 
 static int64_t option(const char *name,int64_t fallback)
@@ -50,8 +55,10 @@ int main(void)
 	int64_t restart=option("XT_TEST_RESTART_MS",0);
 	int64_t next_report=0,next_error=0;char reported_publisher[37]={0};
 	void *allocation=k_malloc(1024);assert(allocation);
+	struct net_pkt *held=net_pkt_rx_alloc_with_buffer(net_if_get_default(),512,NET_AF_UNSPEC,0,K_NO_WAIT);assert(held);
 	while (k_uptime_get()-start<duration) {
 		int64_t age=k_uptime_get()-start;
+		if(getenv("XT_TEST_FATAL_MS")&&age>=option("XT_TEST_FATAL_MS",3000)){k_oops();}
 		if (age>=next_report) {
 			struct xt_status state;assert(!xt_status_get(&state));
 			if (state.identified && strcmp(reported_publisher,state.identity.publisher_id)) {
@@ -71,7 +78,7 @@ int main(void)
 		uint64_t now;assert(!xdiag_clock_us(&now));
 		if (!stalled && now>=loop.timing.next_release_us) {
 			assert(!xdiag_loop_begin(&loop));
-			if (age>=stall) { stalled=true;k_free(allocation);allocation=NULL; }
+			if (age>=stall) { stalled=true;k_free(allocation);allocation=NULL;net_pkt_unref(held);held=NULL; }
 			else {
 				volatile unsigned result=0;for (unsigned i=0;i<128;++i) { result=result*1664525U+i; }(void)result;
 				assert(!xdiag_loop_end(&loop));
@@ -83,8 +90,12 @@ int main(void)
 	assert(!xt_stop(k_uptime_get()+1000));
 	uint64_t after;assert(!xdiag_clock_us(&after));
 	struct xt_status state;assert(!xt_status_get(&state));
+	struct xdr_snapshot resources;assert(!xdiag_resources_get(&resources));
+	printf("XT_COST {\"resource_samples\":\"%" PRIu64 "\",\"resource_total_us\":\"%" PRIu64 "\",\"resource_max_us\":\"%" PRIu64 "\",\"publisher_collect_us\":\"%" PRIu64 "\",\"publisher_serialize_us\":\"%" PRIu64 "\",\"publisher_send_us\":\"%" PRIu64 "\"}\n",
+	 resources.sample,resources.total_collect_us,resources.max_collect_us,state.counters.collect_us,state.counters.serialized_us,state.counters.send_us);
 	printf("XT_STOP {\"elapsed_us\":\"%" PRIu64 "\",\"submitted\":\"%" PRIu64 "\",\"pubacked\":\"%" PRIu64 "\",\"live_discarded\":\"%" PRIu64 "\",\"puback_timeouts\":\"%" PRIu64 "\",\"worker_running\":%s}\n",after-before,state.counters.submitted,state.counters.pubacked,state.counters.live_discarded,state.counters.puback_timeouts,state.running ? "true" : "false");
 	if (allocation) { k_free(allocation); }
+	if(held)net_pkt_unref(held);
 	printf("PASS native actual Publisher stopped; reporter did not complete stalled work\n");
 	exit(0);
 }

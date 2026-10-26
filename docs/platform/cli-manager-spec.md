@@ -153,6 +153,7 @@ Manager 전용 명령은 `templates, list, get, create, retire, delete, restore,
 | [`xenova-vm diagnose`](#cmd-diagnose) | 부팅 인자·가동 시간·시각 진단 |
 | [`xenova-domain-identity`](#cmd-domain-identity) | libxenmanage로 incarnation 조회 |
 | [`xenova-verify-artifacts`](#cmd-verify-artifacts) | 생성 cfg·Xen/QEMU 설치 내용 검사 |
+| [`xenova-telemetry-support evidence-list`](#cmd-telemetry-evidence) | Zephyr 과거 실행의 보존 진단 자료 조회 |
 | [`update_guest_ssh.py`](#cmd-update-guest-ssh) | 정지 Linux rootfs의 SSH service 정책 갱신 |
 | [`xenova-vm cpu-host-prepare`](#cmd-cpu-host-prepare) | 설치/부팅 내부용 dom0 CPU 준비·원복 |
 | [`xenova-vm host-init`](#cmd-host-init) | 이번 부팅의 host barrier 초기화 |
@@ -2816,6 +2817,29 @@ stderr `[xenova] ERROR: …`, 종료 1. 원인별 VM method/stage/xen_state/erro
 
 [명령어 색인으로](#command-index)
 
+<a id="cmd-telemetry-evidence"></a>
+### Zephyr 실행별 진단 기록 조회
+
+dom0의 root 셸에서 해당 실행의 보존 자료를 조회한다. 이 명령은 Manager action이 아니며
+VM을 시작·정지하거나 현재 실행의 건강 상태를 판정하지 않는다.
+
+```sh
+xenova-telemetry-support evidence-list \
+  --archive /srv/xenova/diagnostics/telemetry/<VM_UUID>/<EXECUTION_UUID>
+```
+
+`evidence-list`와 `--archive`는 필수다. archive는 영구 진단 영역 안의 경로여야 한다.
+정상 출력은 기록 목록 JSON이며 종료 코드는 0이다. 저장·경로 검증 오류는 stderr의
+`{ok:false,error,errno,stage}`와 종료 코드 1, 인자 오류는 2로 구분한다. 빈 목록은
+저장된 자료가 없다는 뜻이며, 오류나 fatal이 없었다는 증거가 아니다.
+손상·미완료 파일은 `status=incomplete`로 표시한다.
+
+자료에는 원 VM·host boot·execution·guest boot, 로딩 펌웨어, 원 시계와 수집 시각,
+일반 오류·관측한 fatal 및 포착 불연속을 구분해 남긴다. 한도에서 오래된 정상 기록을
+자동 회전하며 삭제 요약은 `/srv/xenova/diagnostics/telemetry/retention.json`에 남는다.
+포착 범위·권한·한도·미포착 조건과 내부 서비스 명령은
+[Publisher의 실행별 보존](../../platform/guests/zephyr/telemetry/README.md#내부-진단과-실행별-보존)을 따른다.
+
 <a id="cmd-bridge-up"></a>
 ### `xenova-bridge-up` — 내부 bridge 생성·주소 준비
 
@@ -3234,6 +3258,13 @@ Xen 목록의 전후 비교·incarnation 확인 도중 변경되면 TARGET_CHANG
 성공 없음·이전 host·음수 age·max_age 초과면 stale이다. stale 또는 현재 오류가 있으면 unknown/current=null이다. snapshot.current는 저장된 value이므로 probe 바깥에서 붙이는 host/revision/time 필드가 없다. host/revision은 Snapshot 상위, 시각은 last_success.monotonic_ms에서 읽는다. ok=true/unknown=true는 현재 실행을 성공 관측했다는 뜻이 아니다.
 
 ### B.5 Runtime execution record
+
+Zephyr의 새 실행에는 선택 필드 `loaded_artifact`를 기록한다. 검증한 로딩 대상
+`file=zephyr.bin`, `artifact_sha256`, `manifest_sha256`, `build_id`와 실행 시점의
+`display_name`, `hostname`, `internal_name`이다. 기존 `execution_context`에도 이
+필드가 보일 수 있다. 과거 실행에는 없을 수 있으며 현재 디스크의 파일로 값을 추정하지
+않는다. 로딩 기록과 인스턴스 주입의 결합이며 암호학적 원격 증명이 아니다.
+Manager action·envelope·기존 실행 신원과 복구 완료의 의미는 유지한다.
 
 | 필드 | 타입·의미 |
 |---|---|

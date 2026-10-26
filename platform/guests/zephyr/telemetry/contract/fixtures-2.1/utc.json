@@ -1,0 +1,39 @@
+{
+  "schema_version": "2.1",
+  "type": "telemetry.heartbeat",
+  "message_id": "f1000000-0000-4000-8000-000000000001/f2000000-0000-4000-8000-000000000001/f3000000-0000-4000-8000-000000000001/heartbeat/2",
+  "vm_id": "f1000000-0000-4000-8000-000000000001",
+  "boot_id": "f2000000-0000-4000-8000-000000000001",
+  "publisher_instance_id": "f3000000-0000-4000-8000-000000000001",
+  "seq": "2",
+  "context": {
+    "binding": "unbound",
+    "host_boot_id": null,
+    "execution_id": null,
+    "receipt_id": null
+  },
+  "clock": {
+    "sent_uptime_ms": "50000",
+    "sent_at": "2026-01-01T00:00:00.000Z",
+    "utc_quality": "synchronized",
+    "utc_source": "dom0_adjtimex",
+    "uncertainty_ms": 126
+  },
+  "payload": {
+    "collection": {
+      "sample_id": "f3000000-0000-4000-8000-000000000011",
+      "start_uptime_ms": "49999",
+      "end_uptime_ms": "50000",
+      "elapsed_us": "700",
+      "status": "ok",
+      "source_rc": 0
+    },
+    "publisher_state": "running",
+    "last_collection_success_uptime_ms": null,
+    "collection_failures_total": "0",
+    "connection_attempts_total": "0",
+    "publish_submit_failures_total": "0",
+    "events_dropped_total": "0",
+    "app_health_asserted": false
+  }
+}
