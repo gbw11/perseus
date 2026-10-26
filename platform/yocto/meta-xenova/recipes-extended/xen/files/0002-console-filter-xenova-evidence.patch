@@ -1,0 +1,56 @@
+From: Xenova platform
+Subject: [PATCH] console: filter bounded structured evidence without another reader
+Upstream-Status: Inappropriate [Xenova policy]
+
+--- a/tools/console/daemon/io.c
++++ b/tools/console/daemon/io.c
+@@ -88,12 +88,15 @@
+ 	size_t max_capacity;
+ };
+ 
++#include "xenova_console_evidence_file.h"
++
+ struct console {
+ 	const char *ttyname;
+ 	int master_fd;
+ 	int master_pollfd_idx;
+ 	int slave_fd;
+ 	int log_fd;
++	struct xdlog evidence;
+ 	struct buffer buffer;
+ 	char *xspath;
+ 	const char *log_suffix;
+@@ -226,6 +229,8 @@
+ 	return ret;
+ }
+ 
++static int write_all(int fd, const char *buf, size_t len);
++
+ static void do_replace_escape(const char *src, char *dest, int len)
+ {
+ 	int i;
+@@ -344,7 +349,15 @@
+ 	 */
+ 	if (con->log_fd != -1) {
+ 		int logret;
+-		if (log_time_guest) {
++		if (getenv("XENOVA_CONSOLE_EVIDENCE")) {
++            struct xdlog_file evidence_file = {
++                .fd = con->log_fd, .filter = &con->evidence,
++                .write_all = write_all
++            };
++            logret = xdlog_feed(&con->evidence,
++                               buffer->data + buffer->size - size,
++                               size, xdlog_file_write, &evidence_file);
++        } else if (log_time_guest) {
+ 			logret = write_with_timestamp(
+ 				con->log_fd,
+ 				buffer->data + buffer->size - size,
+@@ -827,6 +840,7 @@
+ 	con->master_pollfd_idx = -1;
+ 	con->slave_fd = -1;
+ 	con->log_fd = -1;
++	memset(&con->evidence, 0, sizeof(con->evidence));
+ 	con->ring_ref = -1;
+ 	con->local_port = -1;
+ 	con->remote_port = -1;

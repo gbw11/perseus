@@ -10,6 +10,8 @@ SRC_URI = "file://xenova_boot_progress.py file://xenova_boot_status.py file://xe
 FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../scripts:${THISDIR}/../../../../first-install:${THISDIR}/../../../../guests/common:${THISDIR}/../../../../guests:"
 S = "${UNPACKDIR}"
 SRC_URI += " file://xenova_drive_binding.py file://provision-xenova-telemetry.py"
+SRC_URI += " file://xenova_telemetry_support.py file://xenova_telemetry_evidence.py file://xenova-telemetry-support file://xenova-telemetry-clock.service file://xenova-telemetry-clock.timer"
+SRC_URI += "file://xenova-console-evidence.conf file://xenova-telemetry-evidence.service file://xenova-telemetry-evidence.timer"
 inherit systemd
 
 # 기존 이미지의 Python 코어에 사용자 승인한 표준 JSON 패키지를 추가한다.
@@ -19,6 +21,8 @@ RDEPENDS:${PN} = "python3-core python3-json python3-stringold python3-crypt pyth
     util-linux-losetup util-linux-mount util-linux-umount util-linux-findmnt e2fsprogs-tune2fs coreutils"
 SYSTEMD_SERVICE:${PN} = "xenova-boot-status.service xenova-host-admission.service xenova-first-boot.service srv-xenova.mount xenova-vm-shutdown.service xenova-vms.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
+SYSTEMD_SERVICE:${PN} += "xenova-telemetry-clock.timer"
+SYSTEMD_SERVICE:${PN} += "xenova-telemetry-evidence.timer"
 
 do_install() {
     install -d "${D}${sbindir}" "${D}${libdir}/xenova" "${D}${sysconfdir}/xenova" \
@@ -45,6 +49,15 @@ do_install() {
     install -m 0644 "${S}/first_install_contract.py" "${D}${libdir}/xenova/first_install_contract.py"
     install -m 0644 "${S}/xenova_drive_binding.py" "${D}${libdir}/xenova/xenova_drive_binding.py"
     install -m 0644 "${S}/provision-xenova-telemetry.py" "${D}${libdir}/xenova/provision_xenova_telemetry.py"
+    install -m 0644 "${S}/xenova_telemetry_support.py" "${D}${libdir}/xenova/xenova_telemetry_support.py"
+    install -m 0644 "${S}/xenova_telemetry_evidence.py" "${D}${libdir}/xenova/xenova_telemetry_evidence.py"
+    install -m 0755 "${S}/xenova-telemetry-support" "${D}${sbindir}/xenova-telemetry-support"
+    install -m 0644 "${S}/xenova-telemetry-clock.service" "${D}${systemd_system_unitdir}/xenova-telemetry-clock.service"
+    install -m 0644 "${S}/xenova-telemetry-clock.timer" "${D}${systemd_system_unitdir}/xenova-telemetry-clock.timer"
+    install -m 0644 "${S}/xenova-telemetry-evidence.service" "${D}${systemd_system_unitdir}/xenova-telemetry-evidence.service"
+    install -m 0644 "${S}/xenova-telemetry-evidence.timer" "${D}${systemd_system_unitdir}/xenova-telemetry-evidence.timer"
+    install -d "${D}${sysconfdir}/systemd/system/xenconsoled.service.d"
+    install -m 0644 "${S}/xenova-console-evidence.conf" "${D}${sysconfdir}/systemd/system/xenconsoled.service.d/20-xenova-evidence.conf"
     for module in prepare_instance.py prepare_rootfs.py guest_identity.py xen_config.py; do
         install -m 0644 "${S}/$module" "${D}${libdir}/xenova/$module"
     done
@@ -73,4 +86,6 @@ FILES:${PN} += "${systemd_system_unitdir}/xenova-boot-status.service ${systemd_s
     ${systemd_system_unitdir}/xenova-xen-ready.service \
     ${systemd_system_unitdir}/xenova-vm-shutdown.service \
     ${systemd_system_unitdir}/xenova-vms.service ${systemd_system_unitdir}/xenova-wifi@.service"
+FILES:${PN} += "${systemd_system_unitdir}/xenova-telemetry-clock.service ${systemd_system_unitdir}/xenova-telemetry-clock.timer"
+FILES:${PN} += "${systemd_system_unitdir}/xenova-telemetry-evidence.service ${systemd_system_unitdir}/xenova-telemetry-evidence.timer ${sysconfdir}/systemd/system/xenconsoled.service.d/20-xenova-evidence.conf"
 CONFFILES:${PN} += "${sysconfdir}/xenova/cpu-policy-preset.json ${sysconfdir}/modprobe.d/xenova-wifi.conf ${sysconfdir}/xenova/execution-policy.json ${sysconfdir}/xenova/defaults.json ${sysconfdir}/ssh/xenova-auth.conf ${sysconfdir}/systemd/journald.conf.d/20-xenova.conf ${sysconfdir}/systemd/system.conf.d/20-xenova.conf"
