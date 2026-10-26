@@ -44,6 +44,22 @@ class Message:
         return (time.monotonic() - self.received_monotonic) * 1000.0
 
 
+@dataclass(frozen=True)
+class PublishTicket:
+    """Local submission/PUBACK observation; never an app/device acknowledgement."""
+    envelope: dict[str, Any]
+    info: Any
+    connections: int
+    disconnect_generation: int
+
+    def status(self,client: "XenovaClient") -> str:
+        if not client.connected or client.connections!=self.connections or client._generation!=self.disconnect_generation:
+            return "disconnected"
+        if self.info.rc!=mqtt.MQTT_ERR_SUCCESS:return "failed"
+        try:return "acknowledged" if self.info.is_published() else "pending"
+        except (ValueError,RuntimeError):return "failed"
+
+
 Handler = Callable[[Message], None]
 
 
@@ -312,6 +328,25 @@ class XenovaClient:
         """retained 메시지를 지운다 (빈 payload + retain). 예: VM 삭제 시 inventory. wait_s 는 publish() 와 같다."""
         info = self._paho.publish(topic, b"", qos=1, retain=True)
         self._track_publish(info, topic, wait_s)
+
+    def publish_tracked(self,topic: str,message_type: str,payload: dict[str,Any]) -> PublishTicket:
+        """Nonblocking verified-profile submission. Offline calls are refused.
+
+        A disconnect after submission is uncertain: Paho may replay a QoS1
+        frame. Consumers must validate authority/generation/application; this
+        method does not claim queued bytes were cancelled.
+        """
+        if not self.connected:raise PublishError('publisher disconnected before submission')
+        rule=policy.for_type(message_type)
+        with self._lock:
+            seq=self._seq.get(topic,0)+1;self._seq[topic]=seq
+            generation,connections=self._generation,self._connections
+        envelope=env.build(self.identity,message_type,payload,seq,app_id=topics.parse(topic).app_id)
+        data=json.dumps(envelope,ensure_ascii=False,separators=(',',':')).encode()
+        if len(data)>rule.max_bytes:raise ValueError('message exceeds policy limit')
+        info=self._paho.publish(topic,data,qos=rule.qos,retain=rule.retain)
+        self._track_publish(info,topic,0)
+        return PublishTicket(envelope,info,connections,generation)
 
     def _track_publish(self, info: Any, topic: str, wait_s: float | None) -> None:
         """paho 의 MQTTMessageInfo 를 본다. 끊긴 동안 QoS 1 은 rc=NO_CONN 이지만 큐에 남아 재연결 뒤 나간다."""
