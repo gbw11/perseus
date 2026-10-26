@@ -19,7 +19,14 @@ union xnf_tx_entry { struct xnf_tx_request req; struct xnf_tx_response rsp; };
 union xnf_rx_entry { struct xnf_rx_request req; struct xnf_rx_response rsp; };
 struct xnf_tx_ring { struct xnf_header h; union xnf_tx_entry ring[XNF_RING_SIZE]; };
 struct xnf_rx_ring { struct xnf_header h; union xnf_rx_entry ring[XNF_RING_SIZE]; };
-struct xnf_stats { uint32_t tx, rx, tx_drop, rx_drop, pool_busy, protocol_errors; };
+struct xnf_stats {
+ uint32_t tx, rx, tx_drop, rx_drop, pool_busy, protocol_errors;
+ /* True 64-bit saturating software counts, not widened raw32 counters.
+  * TX: accepted frame submitted to ring. RX: accepted by net_recv_data.
+  * Includes Ethernet header, excludes FCS/padding beyond supplied size. */
+ uint64_t tx_bytes,rx_bytes,counter_epoch;
+ bool bytes_saturated;
+};
 struct xnf {
  struct xnf_tx_ring *tx;
  struct xnf_rx_ring *rx;

@@ -6,15 +6,41 @@
 #include <zephyr/shell/shell_dummy.h>
 #include <errno.h>
 #include <string.h>
+#if defined(CONFIG_XENOVA_DIAGNOSTICS_POOLS)
+#include <zephyr/net_buf.h>
+#include <zephyr/sys/iterable_sections.h>
+static struct net_buf_pool *rx_pool(void){
+ STRUCT_SECTION_FOREACH(net_buf_pool,pool)if(pool->name&&!strcmp(pool->name,"rx_bufs"))return pool;
+ return NULL;
+}
+ZTEST(diagnostics,test_fixed_pool_actual_allocate_release)
+{
+ struct net_buf_pool *pool=rx_pool();zassert_not_null(pool);
+ k_sleep(K_MSEC(250));struct xdr_snapshot before,during,after;
+ zassert_ok(xdiag_resources_get(&before));
+ struct net_buf *held=net_buf_alloc(pool,K_NO_WAIT);zassert_not_null(held);
+ k_sleep(K_MSEC(250));zassert_ok(xdiag_resources_get(&during));
+ net_buf_unref(held);k_sleep(K_MSEC(250));zassert_ok(xdiag_resources_get(&after));
+ bool found=false;
+ for(size_t i=0;i<during.regions;i++)if(!strcmp(during.memory[i].id,"net_rx_data")){
+  zassert_ok(during.memory[i].rc);zassert_equal(during.memory[i].used,before.memory[i].used+CONFIG_NET_BUF_DATA_SIZE);
+  zassert_equal(after.memory[i].used,before.memory[i].used);
+  zassert_equal(during.memory[i].capacity,during.memory[i].used+during.memory[i].free);found=true;
+ }
+ zassert_true(found);
+}
+#endif
 
 static struct xdiag_snapshot snapshot;
 static struct xdiag_loop loop;
 static int provider_rc;
+static uint64_t byte_tx,byte_rx,byte_epoch=1;
 static int provider(struct xdiag_network *out, void *context)
 {
 	ARG_UNUSED(context);
 	out->tx = 42;
 	out->link_up = true;
+	out->tx_bytes=byte_tx;out->rx_bytes=byte_rx;out->counter_epoch=byte_epoch;
 	return provider_rc;
 }
 SHELL_CMD_REGISTER(diag, NULL, "Local diagnostics test", xdiag_shell_cmd);
@@ -107,7 +133,8 @@ ZTEST(diagnostics, test_clock_and_completed_progress)
 
 ZTEST(diagnostics, test_network_failure_and_shell_json)
 {
-	zassert_ok(xdiag_network_register(provider, NULL));
+	int registration=xdiag_network_register(provider,NULL);
+	zassert_true(registration==0||registration==-EALREADY);
 	zassert_equal(xdiag_network_register(provider, NULL), -EALREADY);
 	const struct shell *sh = shell_backend_dummy_get_ptr();
 	for (unsigned i = 0; !shell_ready(sh) && i < 100; ++i) { k_sleep(K_MSEC(1)); }
@@ -130,3 +157,68 @@ ZTEST(diagnostics, test_network_failure_and_shell_json)
 	zassert_equal(shell_execute_cmd(sh, "diag unsupported"), -EINVAL);
 }
 ZTEST_SUITE(diagnostics, NULL, NULL, NULL, NULL, NULL);
+
+static void next_resource(struct xdr_snapshot *r)
+{
+ uint64_t previous=r->sample;int64_t end=k_uptime_get()+1000;
+ do{k_sleep(K_MSEC(5));zassert_ok(xdiag_resources_get(r));}while(r->sample==previous&&k_uptime_get()<end);
+ zassert_not_equal(r->sample,previous);
+}
+ZTEST(diagnostics,test_network_byte_rate_epoch_and_failure)
+{
+ int rc=xdiag_network_register(provider,NULL);zassert_true(rc==0||rc==-EALREADY);
+ provider_rc=0;struct xdr_snapshot r;zassert_ok(xdiag_resources_get(&r));
+ next_resource(&r);next_resource(&r);
+ byte_tx+=64;byte_rx+=128;next_resource(&r);
+ zassert_ok(r.net_rate_rc);uint64_t dt=r.net_end_ms-r.net_start_ms;
+ zassert_true(dt>0);zassert_equal(r.tx_bytes_per_s,64000/dt);zassert_equal(r.rx_bytes_per_s,128000/dt);
+ byte_epoch++;byte_tx=byte_rx=0;next_resource(&r);zassert_equal(r.net_rate_rc,-EOVERFLOW);
+ provider_rc=-EIO;next_resource(&r);zassert_equal(r.net_rate_rc,-EIO);
+ provider_rc=0;next_resource(&r);zassert_equal(r.net_rate_rc,-ENODATA);
+}
+
+#if defined(CONFIG_XENOVA_DIAGNOSTICS_CPU)
+static struct k_thread measured_thread;
+K_THREAD_STACK_DEFINE(measured_stack,2048);
+K_SEM_DEFINE(measured_done,0,1);
+static void measured(void *a,void *b,void *c)
+{
+ ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
+ for(unsigned i=0;i<5;i++){k_busy_wait(20000);k_sleep(K_MSEC(50));}
+ k_sem_give(&measured_done);k_sleep(K_FOREVER);
+}
+static uint64_t measured_id(void)
+{
+ struct xdr_snapshot r;zassert_ok(xdiag_resources_get(&r));
+ for(size_t i=0;i<r.rows;i++)if(!strcmp(r.threads[i].name,"same-name"))return r.threads[i].lifetime;
+ return 0;
+}
+ZTEST(diagnostics,test_runtime_source_and_lifetime_reuse)
+{
+ k_sleep(K_MSEC(450));
+ struct xdr_snapshot a,b;zassert_ok(xdiag_resources_get(&a));
+ zassert_ok(a.cpu.rc);zassert_true(a.cpu.total_delta>0);zassert_true(a.cpu.percent_milli<=100000);
+ zassert_ok(xdiag_resources_get(&b));zassert_equal(a.sample,b.sample); /* read never changes baseline */
+ k_thread_create(&measured_thread,measured_stack,K_THREAD_STACK_SIZEOF(measured_stack),measured,NULL,NULL,NULL,5,0,K_FOREVER);
+ zassert_ok(k_thread_name_set(&measured_thread,"same-name"));k_thread_start(&measured_thread);
+ bool saw_busy=false;uint32_t peak=0;int64_t limit=k_uptime_get()+2000;
+ while(k_sem_take(&measured_done,K_NO_WAIT)){
+  zassert_true(k_uptime_get()<limit);k_sleep(K_MSEC(10));struct xdr_snapshot load;
+  zassert_ok(xdiag_resources_get(&load));
+  for(size_t i=0;i<load.rows;i++)if(!strcmp(load.threads[i].name,"same-name")&&!load.threads[i].rc){
+   peak=MAX(peak,load.threads[i].percent_milli);saw_busy|=load.threads[i].percent_milli>0;
+  }
+ }
+ zassert_true(saw_busy);zassert_true(peak<=100000);k_sleep(K_MSEC(220));
+ uint64_t first=measured_id();zassert_true(first>0);
+ k_thread_abort(&measured_thread);zassert_ok(k_thread_join(&measured_thread,K_MSEC(200)));
+ k_thread_create(&measured_thread,measured_stack,K_THREAD_STACK_SIZEOF(measured_stack),measured,NULL,NULL,NULL,5,0,K_FOREVER);
+ zassert_ok(k_thread_name_set(&measured_thread,"same-name"));k_thread_start(&measured_thread);
+ zassert_ok(k_sem_take(&measured_done,K_SECONDS(2)));k_sleep(K_MSEC(220));
+ uint64_t second=measured_id();zassert_true(second>0);zassert_not_equal(first,second);
+ k_thread_abort(&measured_thread);zassert_ok(k_thread_join(&measured_thread,K_MSEC(200)));
+ zassert_ok(xdiag_snapshot_get(&snapshot,false));zassert_equal(snapshot.threads_rc,-EAGAIN);
+ printk("RESOURCE_EVIDENCE samples=%llu total=%llu busy=%llu first=%llu reused=%llu load_peak_milli=%u\n",
+  b.sample,b.cpu.total_delta,b.cpu.busy_delta,first,second,peak);
+}
+#endif
