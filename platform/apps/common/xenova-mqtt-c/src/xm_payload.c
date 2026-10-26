@@ -43,6 +43,24 @@ static int parse_object(struct xm_json *j, struct xm_span payload)
 	return 0;
 }
 
+int xm_app_readiness_json(char *out,size_t n,uint32_t generation,uint64_t progress,
+                         const char *readiness,const char *reason)
+{
+	if (!readiness || (strcmp(readiness,"READY") && strcmp(readiness,"PREPARING") && strcmp(readiness,"NOT_READY"))) return -EINVAL;
+	if ((!strcmp(readiness,"READY")) != (reason==NULL)) return -EINVAL;
+	if (!strcmp(readiness,"READY") && (!generation || !progress)) return -EINVAL;
+	static const char *const reasons[]={"CONTROL_UNAPPLIED","INPUT_UNAVAILABLE","INPUT_STALE","INPUT_INVALID",
+		"STATE_PREPARING","CALCULATION_FAILED","OUTPUT_INVALID"};
+	if(reason){bool known=false;for(size_t i=0;i<sizeof(reasons)/sizeof(reasons[0]);i++)known|=!strcmp(reason,reasons[i]);if(!known)return -EINVAL;}
+	size_t pos=0;int rc=0;
+	rc|=xm_put(out,n,&pos,"{\"applied_generation\":");rc|=xm_put_uint(out,n,&pos,generation);
+	rc|=xm_put(out,n,&pos,",\"progress_seq\":\"");rc|=xm_put_uint(out,n,&pos,progress);
+	rc|=xm_put(out,n,&pos,"\",\"readiness\":");rc|=xm_put_json_string(out,n,&pos,readiness);
+	rc|=xm_put(out,n,&pos,",\"reason\":");
+	rc|=reason?xm_put_json_string(out,n,&pos,reason):xm_put(out,n,&pos,"null");
+	rc|=xm_put(out,n,&pos,"}");return rc?-ENOSPC:(int)pos;
+}
+
 static bool canonical_uuid(const char *value)
 {
 	if (strlen(value) != XM_UUID_LEN) { return false; }

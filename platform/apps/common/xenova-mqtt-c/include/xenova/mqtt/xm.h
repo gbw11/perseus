@@ -131,6 +131,11 @@ bool xm_seq_accept(struct xm_seq_tracker *t, const char *topic, const struct xm_
 
 int xm_drive_command_json(char *out, size_t n, uint32_t generation, float v_mps, float steer_rad);
 int xm_app_heartbeat_json(char *out, size_t n, const char *state, int64_t uptime_ms);
+/* progress is a decimal uint64 string on the wire, never a transport counter. */
+/* Completed work only; progress is a lossless uint64 decimal string.
+ * READY requires nonzero generation/progress and a null reason. */
+int xm_app_readiness_json(char *out, size_t n, uint32_t applied_generation,
+                         uint64_t progress, const char *readiness, const char *reason);
 
 struct xm_vehicle_control {
 	uint32_t generation;
