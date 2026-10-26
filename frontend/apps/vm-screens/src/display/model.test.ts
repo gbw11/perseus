@@ -29,4 +29,12 @@ describe('HDMI presentation contract', () => {
     p.state.sequence = 99;
     expect(order.accept(p)).toBe(false);
   });
+  it('accepts optional selection reasons and rejects malformed reasons', () => {
+    const p = presentationFixture();
+    p.outputs[1]!.reason = '활성 구동 VM 미확인 · 마지막 선택 유지';
+    expect(parsePresentation(p).outputs[1]!.reason).toBe(p.outputs[1]!.reason);
+    expect(() =>
+      parsePresentation({ ...p, outputs: [p.outputs[0], { ...p.outputs[1], reason: 42 }] }),
+    ).toThrow();
+  });
 });
