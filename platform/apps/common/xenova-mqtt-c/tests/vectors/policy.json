@@ -112,5 +112,11 @@
   "qos": 1,
   "retain": false,
   "max_bytes": 65536
+ },
+ {
+  "type": "app.readiness",
+  "qos": 0,
+  "retain": false,
+  "max_bytes": 1024
  }
 ]

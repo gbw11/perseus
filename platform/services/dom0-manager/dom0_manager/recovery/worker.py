@@ -32,6 +32,7 @@ class RecoveryWorker:
         health_publisher: HealthPublisher | None = None,
         engine: RecoveryEngine | None = None,
         clock: Callable[[], float] = time.monotonic,
+        rejoin=None,
     ) -> None:
         self._settings = settings
         self._observer = observer
@@ -41,6 +42,7 @@ class RecoveryWorker:
         self._health = health_publisher
         self._engine = engine
         self._clock = clock
+        self._rejoin=rejoin
         self.ticks = 0
         self.skipped = 0
 
@@ -55,6 +57,7 @@ class RecoveryWorker:
             log.warning("observation skipped: %s %s", exc.code, exc.message)
             if self._engine is not None:
                 self._engine.collect(self._clock())  # 판정은 못 해도 끝난 복구 시도의 결과는 회수한다
+                if self._rejoin is not None:self._rejoin.completed(self._engine.completed_executions())
             return []
         self.ticks += 1
         now = self._clock()
@@ -76,12 +79,15 @@ class RecoveryWorker:
                 self._health.publish(health, now)
         if self._engine is not None:
             self._engine.tick(now)  # 건강 스냅샷이 갱신된 뒤 복구 상태를 전진시킨다. 플랫폼 호출은 엔진의 실행 스레드에서
+            if self._rejoin is not None:self._rejoin.completed(self._engine.completed_executions())
         return judgments
 
     def shutdown(self) -> None:
         """멈추기 전에 남은 retained 건강 스냅샷을 관측 불가로 바꾼다. 비정상 종료면 받는 쪽의 lease 만료가 같은 일을 한다."""
         if self._engine is not None:
             self._engine.shutdown()
+        if self._rejoin is not None and not self._rejoin.stop():
+            log.warning('rejoin work still pending at shutdown; no completion assertion')
         if self._health is not None:
             healths = self._watcher.healths()
             count = self._health.publish_unavailable(healths, self._clock())
@@ -92,6 +98,7 @@ class RecoveryWorker:
 
     def run(self, stop: threading.Event) -> None:
         """단조 시계 기준 주기. 지연이 쌓이면 몰아 돌지 않고 다음 눈금으로 넘어간다."""
+        if self._rejoin is not None:self._rejoin.start()
         interval = self._settings.interval_s
         started = self._clock()
         tick = 0

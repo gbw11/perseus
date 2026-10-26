@@ -11,6 +11,11 @@ int xd_start(const char *app_id, uint32_t period_ms);
 bool xd_stopping(void);
 /* Nonblocking owner startup: 0 means worker admitted, not MQTT connected. */
 int xd_client_prepare(struct xm_zclient *, const char *control, const char *input);
+int xd_client_prepare_dual(struct xm_zclient *, const char *control, const char *input, const char *perception);
+/* Bind command expiry to the chosen immutable input snapshot for this cycle. */
+int xd_command_input(const char *message_type);
+/* Identity copied with this iteration's input snapshot; empty before bootstrap. */
+const char *xd_vm_id(void);
 int xd_publish(struct xm_zclient *, const char *topic, const char *type, const char *payload);
 int xd_poll(struct xm_zclient *, int32_t timeout_ms);
 void xd_client_stopped(struct xm_zclient *);

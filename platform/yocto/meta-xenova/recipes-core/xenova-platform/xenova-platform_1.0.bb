@@ -9,6 +9,7 @@ SRC_URI = "file://xenova_boot_progress.py file://xenova_boot_status.py file://xe
            file://xenova-first-boot.service file://first-install-capabilities.json file://xenova-sshd-keys.conf file://prepare_instance.py file://prepare_rootfs.py file://guest_identity.py file://update-xenova-guest-ssh.py file://xen_config.py file://ubuntu file://debian"
 FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../scripts:${THISDIR}/../../../../first-install:${THISDIR}/../../../../guests/common:${THISDIR}/../../../../guests:"
 S = "${UNPACKDIR}"
+SRC_URI += " file://xenova_drive_binding.py file://provision-xenova-telemetry.py"
 inherit systemd
 
 # 기존 이미지의 Python 코어에 사용자 승인한 표준 JSON 패키지를 추가한다.
@@ -42,6 +43,8 @@ do_install() {
     install -m 0755 "${S}/xenova-first-boot" "${D}${sbindir}/xenova-first-boot"
     install -m 0644 "${S}/xenova_first_boot.py" "${D}${libdir}/xenova/xenova_first_boot.py"
     install -m 0644 "${S}/first_install_contract.py" "${D}${libdir}/xenova/first_install_contract.py"
+    install -m 0644 "${S}/xenova_drive_binding.py" "${D}${libdir}/xenova/xenova_drive_binding.py"
+    install -m 0644 "${S}/provision-xenova-telemetry.py" "${D}${libdir}/xenova/provision_xenova_telemetry.py"
     for module in prepare_instance.py prepare_rootfs.py guest_identity.py xen_config.py; do
         install -m 0644 "${S}/$module" "${D}${libdir}/xenova/$module"
     done

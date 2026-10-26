@@ -6,6 +6,14 @@ Diagnostics Core·Telemetry 2.0·Xen netfront·협조형 종료를 연결한다.
 자율 앱의 최초 입력은 `origin/vehicle`의 `e0c18d125201372b07e18e71cb8e617fb62eb851`이다.
 불변 Network Starter 게시본과 기본 VM 펌웨어를 덮어쓰지 않는다.
 
+A/B가 같은 펌웨어에서 두 계산을 실행하는 구성은
+[공통 주행 펌웨어](../../drive/README.md)를 사용한다. 기존 개별 앱과 같은 runtime을
+재사용하며, `xd_client_prepare_dual()`은 세 입력을 한 owner에 연결한다.
+매 iteration의 입력 사본에는 두 계산의 입력과 로컬 VM UUID가 함께 들어간다.
+`xd_command_input()`으로 선택 모드의 원 입력을 지정해 명령 만료를 계산한다.
+v1 heartbeat는 고정된 두 앱별 칸을 사용하므로 서로 덮어쓰지 않으며,
+사건 처리 사이의 기존 제한 대기 규칙도 유지한다.
+
 ## 실행·신원 계약
 
 - 계산 main은 입력 사본·기존 payload parser·`auto_step`/`manual_step`을 소유한다.
@@ -81,6 +89,12 @@ heartbeat가 대기 중이면 사건 보고를 최대 한 개 먼저 처리한 �
 준다. 이는 기존 bounded I/O 한도 안에서의 순서 규칙이며 전달 기한 보장이 아니다.
 `heartbeat_replaced`는 새 계산 보고에 의한 교체, `heartbeat_dropped`는 수락 후 제출 실패·폐기,
 `heartbeat_expired`는 그중 기한 만료다. heartbeat 폐기를 `event_dropped`에 합산하지 않는다.
+
+공통 drive 프로필은 두 heartbeat와 별개인 두 `app.readiness` 최신 칸을 사용한다.
+네 칸을 round-robin으로 처리하고 대기 중인 보고 앞에는 사건 최대 한 개만 통과시킨다.
+준비 보고의 worker 대기 기한은 300ms이며 실제 완료 근거를 worker가 갱신하지 않는다.
+`readiness_replaced/dropped/expired`로 별도 집계한다. 원문 필드·신선도 규칙은
+[준비 계약](../../../../docs/contracts/mqtt-contract-v1.md#62-앱-준비-보고-appreadiness)을 따른다.
 
 quiesce는 새 출력 수락을 차단하고 계산 종료와 v1 worker의 실제 join을 확인한다.
 worker가 자신의 socket을 abort한 뒤 Publisher를 정지하고, 기존 coordinator가
