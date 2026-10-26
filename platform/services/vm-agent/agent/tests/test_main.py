@@ -38,7 +38,7 @@ def test_run_sends_heartbeat_and_closes_client_on_stop():
     stop = threading.Event()
     client = FakeClient(stop)
     settings = AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.05)
-    assert run(settings, client_factory=lambda s: client, stop=stop, install_signals=False) == 0
+    assert run(settings, client_factory=lambda s: client, reporter_factory=None, stop=stop, install_signals=False) == 0
     assert client.started_with == [0.05]  # 첫 heartbeat 전에 한 주기만큼 연결을 기다린다
     assert client.published == [(f"xenova/v1/vms/{VM_ID}/heartbeat", "agent.heartbeat", {})]
     assert client.stopped is True
@@ -54,5 +54,38 @@ def test_run_exits_nonzero_when_publish_keeps_failing():
 
     client.publish = broken_publish
     settings = AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.01)
-    assert run(settings, client_factory=lambda s: client, stop=stop, install_signals=False) == 1
+    assert run(settings, client_factory=lambda s: client, reporter_factory=None, stop=stop, install_signals=False) == 1
     assert client.stopped is True
+
+
+def test_slow_collection_does_not_delay_heartbeats():
+    """reporter 는 별도 스레드다. 수집이 멈춰 있어도 heartbeat 는 주기대로 나가고, 정지 때 reporter 도 멈춘다."""
+    import time
+
+    from xenova_agent.reporter import Reporter
+
+    stop = threading.Event()
+    release = threading.Event()
+    heartbeats = []
+
+    class Client(FakeClient):
+        def publish(self, topic, message_type, payload, **kwargs):
+            if message_type == "agent.heartbeat":
+                heartbeats.append(time.monotonic())
+                if len(heartbeats) == 3:
+                    stop.set()
+            return {}
+
+    def stuck_inventory():
+        release.wait(5)  # 느린 /proc·네트워크 조회 흉내
+        return {}
+
+    def factory(client, settings):
+        return Reporter(client, settings.vm_id, collect_inventory=stuck_inventory, collect_metrics=list, collect_processes=list, interval_s=0.05)
+
+    client = Client(stop)
+    settings = AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.05)
+    started = time.monotonic()
+    assert run(settings, client_factory=lambda s: client, reporter_factory=factory, stop=stop, install_signals=False) == 0
+    release.set()
+    assert len(heartbeats) == 3 and heartbeats[-1] - started < 1.0
