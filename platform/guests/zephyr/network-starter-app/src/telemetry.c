@@ -31,9 +31,11 @@ static int bootstrap_load(struct xt_bootstrap *out,int64_t end,void *context)
 	int64_t left=end-k_uptime_get();if (left<=0) { return -ETIMEDOUT; }
 	/* main's existing shutdown/runtime initialization owns opening the session.
 	 * Avoid xsr_open's independent 1s lock budget inside this 500ms loader. */
-	int rc=xsr_transaction((int)left,read_transaction,&input);if (rc) { return rc; }
-	if (strncmp(input.own_vm,"/vm/",4)) { rc=-EACCES; }
-	else { rc=xt_bootstrap_decode(input.json,strlen(input.json),input.own_vm+4,out); }
+	int rc=xsr_transaction((int)left,read_transaction,&input);
+	if (!rc) {
+		if (strncmp(input.own_vm,"/vm/",4)) { rc=-EACCES; }
+		else { rc=xt_bootstrap_decode(input.json,strlen(input.json),input.own_vm+4,out); }
+	}
 	/* Input is mutable JSON and contains credentials. Never log or shell-print it. */
 	for (volatile unsigned char *p=(volatile unsigned char *)&input;p<(volatile unsigned char *)&input+sizeof(input);++p) { *p=0; }
 	return rc;

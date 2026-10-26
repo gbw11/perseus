@@ -23,11 +23,18 @@ DOCUMENTATION = (
     "docs/platform/README.md", "docs/platform/management-boundaries.md",
     "docs/platform/management-boot-boundaries.md", "docs/platform/cpu-layout.md",
     "docs/verification/platform-management-boundaries-history.md",
+    "docs/verification/zephyr-lifecycle-20261025.md", "docs/verification/boot-status-20261025.md",
     "platform/tests/fixtures/cpu-layout-responses.json",
     "platform/yocto/layers.lock", "platform/guests/sources.lock.json",
     "platform/guests/default-templates.lock.json", "platform/guests/zephyr/source.lock.json",
     # The shared build guide links to these current Telemetry references.
     "platform/guests/zephyr/telemetry/README.md",
+    "platform/guests/zephyr/xen-runtime/README.md",
+    "platform/guests/zephyr/xen-runtime/include/xenova/runtime.h",
+    "platform/guests/zephyr/xen-runtime/include/xenova/netfront.h",
+    "platform/guests/zephyr/xen-runtime/include/xenova/shutdown.h",
+    "platform/apps/common/xenova-drive-runtime/include/xenova/drive_runtime.h",
+    "platform/guests/zephyr/telemetry/include/xenova/telemetry.h",
     "platform/guests/zephyr/telemetry/contract/CONTRACT.md",
     "platform/guests/zephyr/telemetry/contract/schemas/message.schema.json",
     "platform/guests/zephyr/telemetry/contract/schemas/metric-catalog.json",
@@ -54,7 +61,7 @@ G1은 XenStore·VIF 관측 시험이며 Ethernet packet 송수신·DHCP·앱 준
 def runtime_sources():
     """실제 /usr/lib/xenova 설치 레이아웃을 유지하며 지연 import 의존성도 포함한다."""
     result = {name + ".py": f"{PLATFORM}/{name}.py" for name in (
-        "xenova_cpu", "xenova_vm", "xenova_runtime", "xenova_trace", "xenova_guest_process", "xenova_zephyr", "xenova_execution",
+        "xenova_boot_progress", "xenova_boot_status", "xenova_cpu", "xenova_vm", "xenova_runtime", "xenova_trace", "xenova_guest_process", "xenova_zephyr", "xenova_execution",
         "xenova_recovery", "xenova_resources", "xenova_zephyr_control",
         "xenova_zephyr_transition", "xenova_domain_identity", "xenova_catalog",
         "xenova_management", "xenova_management_cli", "xenova_first_boot", "xenova_wifi")}

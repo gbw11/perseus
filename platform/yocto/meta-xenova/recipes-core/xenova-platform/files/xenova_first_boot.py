@@ -296,6 +296,9 @@ class FirstBoot:
                     raise ValueError('duplicate identity in factory progress')
                 seen_identities.add(item)
         completed = state['phase'] == 'complete'
+        if getattr(self, 'display_progress', None):
+            self.display_mode = 'existing-install-verification' if completed else 'initial-registration-resume'
+            self.display_progress('asset-verification', mode=self.display_mode)
         asset_errors = {}
         inodes = set()
         for spec in specs:
@@ -376,10 +379,16 @@ def main():
     args = parser.parse_args()
     with operation_lock():
         boot = FirstBoot()
+        from xenova_runtime import boot_progress
+        display = boot_progress('storage' if args.action == 'grow' else 'registration', boot.run)
+        boot.display_progress = display
+        display('verifying')
         if args.action == 'grow':
             boot.grow()
         else:
             boot.register()
+        # 성공 근거는 기존 필수 저장과 unit 결과다. 이 파일은 표시 보조 정보뿐이다.
+        display('complete', mode=getattr(boot, 'display_mode', 'storage-verification'))
 
 
 if __name__ == '__main__':
