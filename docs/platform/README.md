@@ -15,7 +15,7 @@ Xenova는 Raspberry Pi 4에서 Xen으로 Linux·Zephyr VM을 실행하고 관리
 | `xenova-vm`·`xenova-wifi` | dom0에서 사용하는 VM 관리·Wi-Fi CLI |
 | Tailscale | 선택적인 외부 원격 관리 연결. 최초 사용자 인증 뒤 데이터 파티션의 장치 상태를 재사용 |
 | dom0-manager | 플랫폼 Manager를 사용하는 FastAPI 서비스. 하위 CLI와 HTTP의 지원 범위는 같지 않음 |
-| Recovery Worker | Xen·heartbeat를 관측하고 복구 판단을 큐에 넣는 별도 서비스. 현재 자동 복구 executor는 미연결 |
+| Recovery Worker | Xen·heartbeat 관측과 기존 Recovery Engine 실행. 공통 주행 프로필은 복구 완료 뒤 실행별 Bootstrap·바인딩·Standby 준비를 별도로 연결 |
 | Guest Agent·Zephyr 진단/Publisher | 게스트 내부 상태·실제 앱 진행·계측값을 제공. Xen domain 존재와 앱 정상 여부는 별개 |
 
 `/srv/xenova`는 템플릿·등록 자산·의도·journal의 영구 저장소다. `/run/xenova`에는

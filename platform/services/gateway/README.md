@@ -1,21 +1,90 @@
-# xenova-gateway — dom0 게이트웨이 (제어권 전환 판정·ESP32 전달)
+# Xenova Gateway: 제어 문맥과 출력 경계
 
-dom0에서 도는 별도 프로세스입니다. 주행 앱의 `drive.command` 신선도로 제어권(AUTO·MANUAL·AUTO_READY·SAFE_STOP)을 판정하고,
-**활성 앱의 현재 세대 명령만** ESP32로 보냅니다 (S15P31E110-98).
-규칙은 [MQTT 메시지 계약 v1](../../../docs/contracts/mqtt-contract-v1.md) v1.2 5·6장과 [RC카 시나리오](../../../docs/scenario-rc-car.md) 4장·§8 결정(D1·D5·D8)을 따릅니다.
+Gateway는 모드·owner·출력 허가를 구분하고, 현재 허용된 앱 명령을 ESP32 시리얼로
+제출한다. VM 재시작은 기존 Recovery Engine, 최종 물리 정지는 장치 watchdog/E-stop의
+책임이다. PUBACK·준비 보고·시리얼 쓰기 수락은 장치의 적용 ACK가 아니다.
 
-두 VM이 같은 펌웨어에서 AUTO/MANUAL을 모두 수행하는 구성에는 `--vm-a <UUID> --vm-b <UUID>`를 지정합니다.
-이때 앱과 활성 VM을 별개로 선택하고, UUID별 실행·
-heartbeat·현재 세대 명령을 대조합니다. 복구한 VM은 준비를 다시 확인한 뒤 대기로
-재합류하며 자동으로 활성 권한을 되찾지 않습니다. 아래 기존 모드 표는 UUID 쌍을
-생략한 앱별 구성의 규칙입니다. 공통 구성의 준비·양방향 복귀·대칭 승계·ACL 조건은
-[공통 주행 펌웨어 안내](../../apps/drive/README.md)에 정리했습니다.
+## verified 프로필 운영
 
-| 하는 것 | 하지 않는 것 |
-| --- | --- |
-| 활성 앱 명령 100 ms 끊김 → 전환, `generation` 지정 | VM 재시작 (복구 서비스) |
-| `vehicle/control`(retained), `drive.mode.changed`, `drive.fault.detected`, `drive.resume.accepted`·`cancelled` 발행 | 인지 끊김 시 정지 (자율주행 앱, D5) |
-| 계약 5.5 수용 규칙 적용 후 시리얼 프레임 전달, `SAFE_STOP` 중 정지 프레임 | 최종 정지 (ESP32 와치독 300 ms) |
+기본 프로필은 공통 A/B용 `verified`다. 먼저 같은 번들·서로 다른 UUID/인증정보와
+Worker의 실행별 provisioning 및 바인딩을 준비한다. 자세한 역할과 입력 조건은
+[공통 펌웨어 안내](../../apps/drive/README.md), 메시지 정의는
+[MQTT 계약](../../../docs/contracts/mqtt-contract-v1.md#공통-ab-펌웨어-프로필)에 있다.
+
+확인한 **최초 설치**에서만 root로 아래를 한 번 실행한다. 실제 `/srv/xenova` 마운트를
+확인하고 UUID를 실제 등록 값으로 바꾼다. 이미 원본/표지가 있으면 덮어쓰지 않는다.
+
+```bash
+python3 -m xenova_gateway \
+  --vm-a aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa \
+  --vm-b bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb \
+  --initialize-control-state
+```
+
+최초 원본은 SAFE_STOP·disarmed다. `--initial-active-vm`은 이 초기화 명령에서만
+선호 UUID를 바꾸는 선택 옵션이다. 평상시에는 원본의 owner/모드를 쓴다.
+
+```bash
+python3 -m xenova_gateway --sink mock \
+  --vm-a aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa \
+  --vm-b bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+```
+
+broker 주소·계정은 기존 `--host/--port/--username`과 `XENOVA_GATEWAY_BROKER_PASSWORD`를
+사용한다. 제품 인증정보를 명령행·Git·공개 로그에 넣지 않는다. 선택 경로는
+`--authority-dir`(`/srv/xenova/drive-control`), `--binding-file`
+(`/run/xenova/drive-bindings.json`)이다. `--start-mode`는 legacy 전용이다.
+실제 출력은 검증된 장치/복구 경로를 준비한 뒤 `--sink serial --serial-port ...`로 선택한다.
+Gateway 자체의 Yocto recipe·자동 시작 연결은 아직 없으므로 파일 존재를 이미지 포함으로
+간주하지 않는다. Worker/helper/common MQTT는 각 기존 recipe에서 설치한다.
+
+정지/Standby에서도 앱 준비를 확인한다. 적합한 다른 VM이 있으면 선택할 수 있지만,
+재시작·신원 미확인·전환 중·transport 상실·시리얼 오류 때는 출력을 금지한다.
+신선한 현재 준비 3초 → 현재 control 메시지 ID에 결합한 명시적 요청 → 3초 카운트다운
+→ 새 generation의 저장/발행/적용 확인 순서로 재무장한다. AUTO_READY도 같은 조건으로
+AUTO에 복귀한다. 계산 준비 회복만으로 자동 출발하거나 선호 A로 자동 원복하지 않는다.
+
+`drive.resume.requested` payload는 `expected_generation`과 선택 `requested_by`,
+공통 envelope의 `causation_id`는 Gateway가 현재 ACK를 확인한 control의 message_id다.
+Gateway 재연결/재시작 뒤에는 새 게시 ID를 확인해야 한다. 같은 요청 ID는 원본에
+저장해 중복 승인하지 않는다. 요청 소비자가 오프라인 요청을 새 승인으로 재발행하면
+안 된다. 기존 Spring/UI의 이 계약 연결은 아직 필요하다.
+
+로컬 운영 도구는 현재 control을 읽어 요청 문맥을 붙인다. 아래는 **요청 제출**이며
+수락·카운트다운·최종 적용은 각각 확인한다. `--verified` 생략은 legacy 도구 동작이다.
+
+```bash
+# 해당 broker 계정의 암호는 XENOVA_RESUME_BROKER_PASSWORD로 별도 전달한다.
+python3 platform/services/gateway/tools/send_resume.py --console --verified --host 127.0.0.1
+```
+
+제어 전환의 고정 적용 기한 1초는 재시도·옛 명령 수신으로 갱신하지 않는다. 실패는
+CONTROL_PUBLISH_UNCONFIRMED / CONTROL_APPLY_UNCONFIRMED 등으로 남기고 STOP이다.
+현재 준비를 확인한 운영자는 새 요청으로 재무장할 수 있다. 저장 상태·retained 충돌은
+CONTROL_AUTHORITY_CONFLICT이며 원본/복원 근거를 확인해야 한다. 임의 초기화하지 않는다.
+
+## 수신·출력 진단
+
+수신 판정은 매 회 최대 64건 또는 1ms 처리 뒤 진행한다. 명령은 허용된 실행/현재
+세대/VM/앱의 최신 네 칸으로 분리한다. 큐 상한이나 tick 5ms는 전체 최악 지연 보장이 아니다.
+필수 원본 fsync·serial I/O·호스트 스케줄링 비용은 따로 측정해야 한다.
+
+control은 연결된 상태에서만 제출하고 ticket으로 PUBACK을 관측한다. 같은 제어는
+같은 generation/문맥으로 최대 세 번 제출하며 앱 준비가 적용 증거다. 연결 단절 뒤
+Paho가 이미 받은 QoS1 bytes가 취소됐다고 가정하지 않는다. 구독/현재 실행/세대/준비
+검사가 계속 적용된다. 부가 이벤트 발행 오류가 주행 판정 루프를 종료시키지 않는다.
+
+`submissions`의 제한된 기록은 원 명령의 VM·execution·boot·instance·app·message_id·seq,
+수신 단조 시각, generation, 인코딩 hex/counter, serial_result/accepted_bytes를 제공한다.
+시리얼 실패는 OUTPUT_PATH_FAILED와 출력 금지로 반영된다. 장치 적용은 미연결이므로
+`device_applied=null`이다. `vehicle.status.applied_generation`을 만들어내지 않는다.
+STOP 재전달과 기존 watchdog/E-stop은 유지한다.
+
+## Legacy 분리 앱
+
+옛 분리 앱 시험은 `--profile legacy`로 명시적으로 선택한다. 공통 A/B 옵션과 함께
+쓸 수 없고 신뢰된 실행·새 준비 수락을 대신하지 않는다. 아래 토픽·모드·시험 도구는
+이 프로필의 설명이다. dom0에서는 두 프로필 모두 같은 전역 소유 잠금을 사용한다.
 
 ## 토픽
 

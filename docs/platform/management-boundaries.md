@@ -137,10 +137,13 @@ create/reboot나 강제 종료를 제출할 수는 없다. 관측 실패는 정�
 SerializedManager를 먼저 통과하며 pending details와 원 key의 전달도 연결돼 있지 않다.
 따라서 하위의 복구 중 stop 수락을 HTTP 종단 수락으로 해석하면 안 된다.
 
-Recovery Worker는 Xen/heartbeat 관측과 판단 큐까지 제공한다. 110초 attempt executor가
-큐를 소비해 recover_once를 호출하는 경로는 현재 미연결이다. 감시 주기·장애 판정 유예는
-복구 실행 timeout이 아니다. CPU 조회도 별도 하위 기능이며 제품 Vm 응답에 자동 포함되지 않는다.
-필요한 호출 지점과 수락 조건은 [제품 연동](cli-manager-spec.md#integration)에 있다.
+Recovery Worker는 현재 Watcher 판단을 기존 Recovery Engine에 연결해, 원 attempt를
+저장한 뒤 Manager의 recover_once를 실행한다. 기본 attempt 실행 예산은 110초다.
+응답 유실은 같은 journal/기한으로 확인하며 복구 완료는 새 Xen 실행 관측이라는 뜻이다.
+선택한 공통 주행 프로필에서는 그 뒤 실행별 Bootstrap·신뢰 바인딩·Standby 준비를
+별도로 확인한다. [주행·재합류 구조](../../platform/apps/drive/README.md#실행-바인딩과-자동-복구)를 따른다.
+감시 주기·장애 판정 유예는 복구 실행 timeout이 아니다. CPU 조회와 제품 HTTP의
+복구 중 stop 수락은 별도 연결·수락 범위를 유지한다.
 
 ## 진단과 검증 근거
 

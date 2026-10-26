@@ -310,7 +310,16 @@ Xen을 관측하지 않는 의도 조회가 생기기 전까지 Worker는 60초 
 
 아직 없는 것: 실보드 검증(플랫폼 `force_restart_vm_ids` 승인과 Mosquitto 배포 뒤), `probe` 로 Xen 관측 불가를 가리는 것, Worker 자체 상태(degraded)를 MQTT·HTTP 로 내보내는 것(계약 추가 필요, 지금은 로그).
 
-## 테스트
+## 공통 주행 실행의 Standby 재합류
+
+기존 Worker/Engine 완료 뒤 `XENOVA_RECOVERY_DRIVE_CONFIG`를 지정하면 실행별
+Bootstrap 적용 receipt·현재 실행 바인딩·앱 준비를 별도로 연결한다. 예제는
+`deploy/drive-rejoin.example.json`이다. root 전용 설정과 VM별 v1/v2 인증 파일이 필요하다.
+플랫폼의 COMPLETED는 새 Xen 실행 관측이라는 뜻을 유지하며 READY나 Active를 뜻하지 않는다.
+입력 부족/준비 미완료만으로 정상 VM을 반복 재시작하지 않는다. 실행 신뢰·수명·설치와
+소비자 이행은 [공통 주행 안내](../../apps/drive/README.md#실행-바인딩과-자동-복구)를 따른다.
+
+## 테스트 실행
 
 ```bash
 cd platform/services/dom0-manager
@@ -341,7 +350,7 @@ python -m pytest
 ## 아직 정하지 않은 것
 
 - `/healthz` 본문은 `{"status": "ok" | "xen_unavailable"}`로 임시 정의.
-- desired_state 저장은 플랫폼 파트에 요청 중입니다. (IP 자동 배정은 들어와서 dom0-manager의 IP 풀 선택을 제거했습니다.)
+- desired_state의 원본은 하위 플랫폼이다. 복구 중 stop의 하위 durable pending 수락과 제품 HTTP의 mutex/응답 전달은 별도 연동·수락 범위다.
 - 템플릿 ID 명명이 Spring 설정과 플랫폼 카탈로그에서 다릅니다. 변환 규칙은 세 파트가 함께 정합니다.
 
 create의 `name`은 Spring에서 받은 표시 이름(1~63자)을 그대로 전달합니다. 한글·공백을 허용하고 제어·줄 구분 문자와 앞뒤 공백은 거부합니다. `PlatformProvisioner`는 이를 플랫폼 `spec["name"]`에 넘기며 템플릿명·UUID로 대체하지 않습니다. 내부 실행 이름과 경로는 기존 UUID 기반 규칙을 사용합니다. 등록된 VM 재시작·재전달은 표시 이름을 갱신하지 않습니다.
