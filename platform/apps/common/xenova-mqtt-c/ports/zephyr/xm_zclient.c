@@ -275,6 +275,20 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 			int rc = mqtt_connect(&c->mqtt); /* TCP 연결 + CONNECT. CONNACK 은 mqtt_input 에서 */
 
 			if (rc == 0) {
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+				int fd = c->socket_io.fd;
+#else
+				int fd = c->mqtt.transport.tcp.sock;
+#endif
+				/* Every fresh v1 socket, including reconnects, disables Nagle
+				 * before subscriptions or application messages can be sent. */
+				const int enabled = 1;
+				if (zsock_setsockopt(fd, NET_IPPROTO_TCP, ZSOCK_TCP_NODELAY,
+						     &enabled, sizeof(enabled)) < 0) {
+					rc = -errno;
+				}
+			}
+			if (rc == 0) {
 				c->socket_open = true;
 				c->retry_at_ms = now + CONNACK_WAIT_MS;
 			} else {

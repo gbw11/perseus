@@ -7,8 +7,14 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(xenova_drive_io)
 # Compile the product exchange/owner unchanged, with real kernel locks/threads.
 # Only Bootstrap, MQTT I/O and capture sink are external boundaries here.
-set_property(TARGET xenova_drive_runtime PROPERTY SOURCES ${PLATFORM}/apps/common/xenova-drive-runtime/src/io.c)
-if(XL_CAPTURE_BOUNDARY)
+if(TARGET xenova_drive_runtime)
+  set_property(TARGET xenova_drive_runtime PROPERTY SOURCES ${PLATFORM}/apps/common/xenova-drive-runtime/src/io.c)
+endif()
+if(XL_NODELAY_BOUNDARY)
+  # Real Zephyr TCP socket options; replace only the MQTT connection/peer I/O.
+  zephyr_link_libraries(-Wl,--wrap=mqtt_connect,--wrap=mqtt_abort,--wrap=mqtt_live,--wrap=mqtt_publish,--wrap=z_impl_zsock_setsockopt)
+  target_sources(app PRIVATE src/nodelay.c)
+elseif(XL_CAPTURE_BOUNDARY)
   # Compile the real console/capture callbacks in the test translation unit;
   # only the authenticated-bootstrap setup and MQTT I/O boundary are fixtures.
   zephyr_link_libraries(-Wl,--wrap=xm_zclient_poll,--wrap=xm_zclient_publish_until,--wrap=xm_zclient_close)
