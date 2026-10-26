@@ -4,6 +4,13 @@ dom0에서 도는 별도 프로세스입니다. 주행 앱의 `drive.command` �
 **활성 앱의 현재 세대 명령만** ESP32로 보냅니다 (S15P31E110-98).
 규칙은 [MQTT 메시지 계약 v1](../../../docs/contracts/mqtt-contract-v1.md) v1.2 5·6장과 [RC카 시나리오](../../../docs/scenario-rc-car.md) 4장·§8 결정(D1·D5·D8)을 따릅니다.
 
+두 VM이 같은 펌웨어에서 AUTO/MANUAL을 모두 수행하는 구성에는 `--vm-a <UUID> --vm-b <UUID>`를 지정합니다.
+이때 앱과 활성 VM을 별개로 선택하고, UUID별 실행·
+heartbeat·현재 세대 명령을 대조합니다. 복구한 VM은 준비를 다시 확인한 뒤 대기로
+재합류하며 자동으로 활성 권한을 되찾지 않습니다. 아래 기존 모드 표는 UUID 쌍을
+생략한 앱별 구성의 규칙입니다. 공통 구성의 준비·양방향 복귀·대칭 승계·ACL 조건은
+[공통 주행 펌웨어 안내](../../apps/drive/README.md)에 정리했습니다.
+
 | 하는 것 | 하지 않는 것 |
 | --- | --- |
 | 활성 앱 명령 100 ms 끊김 → 전환, `generation` 지정 | VM 재시작 (복구 서비스) |
@@ -83,6 +90,8 @@ python3 -m xenova_gateway --sink serial --serial-port /dev/ttyUSB0
 | `--start-mode` | `XENOVA_GATEWAY_START_MODE` | `AUTO` | `SAFE_STOP` 이면 수동 명령이 올 때까지 정지 (시나리오 F5 "자동 출발 없음") |
 | `--retained-wait-s` | `XENOVA_GATEWAY_RETAINED_WAIT_S` | `1.0` | 시작 시 이전 `vehicle/control` 을 기다리는 시간 |
 | `--log-level` | `XENOVA_GATEWAY_LOG_LEVEL` | `INFO` | |
+| `--vm-a` / `--vm-b` | `XENOVA_GATEWAY_VM_A` / `_VM_B` | 없음 | 같은 공통 펌웨어를 실행하는 서로 다른 UUID 쌍. 둘을 함께 지정 |
+| `--initial-active-vm` | `XENOVA_GATEWAY_INITIAL_ACTIVE_VM` | `--vm-a` | retained 활성 문맥이 없는 최초 선택. 고정 Primary 역할이 아님 |
 
 판정 시간(100 ms·3 s·3 s·20 ms, 재개 카운트다운 3 s)은 계약값이라 인자로 바꾸지 않습니다 (`xenova_gateway/machine.py` `Timing`).
 

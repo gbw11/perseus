@@ -33,6 +33,7 @@ Xenova는 Raspberry Pi 4에서 Xen으로 Linux·Zephyr VM을 실행하고 관리
 | 전용·공유 CPU 배치 운영 | [CPU 배치](cpu-layout.md) |
 | Zephyr 초기화·부분 실패·협조 종료 조사 | [Zephyr runtime](../../platform/guests/zephyr/xen-runtime/README.md) |
 | Zephyr 계산·통신·Store 대기와 로컬 계측 이해 | [주행 공통 runtime](../../platform/apps/common/xenova-drive-runtime/README.md) |
+| 같은 Zephyr 펌웨어의 모드 전환·A/B 대칭 승계 | [A/B 공통 주행 펌웨어](../../platform/apps/drive/README.md) |
 
 처음 상태를 볼 때는 dom0에서 `xenova-vm list --short`를 사용한다. 전체 필드가
 필요하면 `xenova-vm list --json`, Wi-Fi 상태는 `xenova-wifi status`로 확인한다.
