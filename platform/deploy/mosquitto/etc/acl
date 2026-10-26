@@ -1,8 +1,8 @@
 # Xenova MQTT ACL — docs/contracts/mqtt-contract-v1.md §9 를 옮긴 것. 계약이 바뀌면 같이 고친다.
 #
 # 계정 이름 규칙: username = 토픽 안의 id
-#   VM 에이전트 = vm_id, 앱 VM = app_id(autonomous·manual·message-board), 젯슨 = perception
-#   Zephyr 앱은 dom0 vchan 중계가 그 앱의 app_id 계정으로 대신 접속한다 (계약 4.1)
+#   공통 Zephyr 직접 MQTT 및 VM 에이전트 = vm_id, legacy 앱 = app_id, 젯슨 = perception
+#   verified Gateway는 VM별 events만 제어 근거로 받는다. v2 Telemetry는 별도 정책이다.
 # pattern 줄은 모든 계정에 적용되고 %u 는 접속한 username 으로 바뀐다.
 # user 아래 topic 줄은 그 계정에만 적용된다.
 
@@ -14,6 +14,8 @@ pattern write xenova/v1/vms/%u/heartbeat
 pattern write xenova/v1/vms/%u/inventory
 pattern write xenova/v1/vms/%u/metrics
 pattern write xenova/v1/vms/%u/command-result
+pattern write xenova/v1/vms/%u/apps/autonomous/events
+pattern write xenova/v1/vms/%u/apps/manual/events
 
 # 앱 VM·젯슨 (username = app_id): 자기 앱 이벤트 토픽에만
 pattern write xenova/v1/apps/%u/events
@@ -28,6 +30,7 @@ topic write xenova/v1/recovery/#
 user backend
 topic write xenova/v1/apps/manual/input
 topic write xenova/v1/vms/+/command
+topic write xenova/v1/console/resume
 
 # 게이트웨이: ESP32 는 MQTT 에 붙지 않고 게이트웨이 시리얼 뒤에 있다 (계약 v1.1). vehicle/status 도 게이트웨이가 낸다.
 user gateway

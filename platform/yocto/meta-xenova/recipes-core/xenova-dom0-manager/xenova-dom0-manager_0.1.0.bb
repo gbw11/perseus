@@ -1,7 +1,7 @@
 SUMMARY = "Xenova platform-backed dom0 HTTP management service"
 LICENSE = "CLOSED"
 FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../services/dom0-manager:${THISDIR}/../../../../services/dom0-manager/deploy:"
-SRC_URI = "file://dom0_manager file://pyproject.toml file://xenova-dom0-manager.service file://dom0-manager.env file://xenova-recovery-worker.service"
+SRC_URI = "file://dom0_manager file://pyproject.toml file://xenova-dom0-manager.service file://dom0-manager.env file://xenova-recovery-worker.service file://drive-rejoin.example.json"
 S = "${UNPACKDIR}"
 
 inherit allarch python3-dir systemd
@@ -19,6 +19,7 @@ do_install() {
         install -D -m 0644 "${S}/dom0_manager/$module" "${D}${PYTHON_SITEPACKAGES_DIR}/dom0_manager/$module"
     done
     install -m 0644 "${S}/pyproject.toml" "${D}${datadir}/xenova/dom0-manager-pyproject.toml"
+    install -m 0644 "${S}/drive-rejoin.example.json" "${D}${datadir}/xenova/drive-rejoin.example.json"
     install -m 0644 "${S}/xenova-dom0-manager.service" "${D}${systemd_system_unitdir}/xenova-dom0-manager.service"
     install -m 0644 "${S}/xenova-recovery-worker.service" "${D}${systemd_system_unitdir}/xenova-recovery-worker.service"
     install -m 0600 "${S}/dom0-manager.env" "${D}${sysconfdir}/xenova/dom0-manager.env"

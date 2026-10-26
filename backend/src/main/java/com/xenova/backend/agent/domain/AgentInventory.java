@@ -43,7 +43,7 @@ public class AgentInventory {
 
     @Lob
     @Convert(converter = NetworkInterfacesConverter.class)
-    @Column(name = "interfaces")
+    @Column(name = "interfaces", columnDefinition = "longtext")
     private List<NetworkInterface> interfaces;
 
     @Column(name = "agent_version", length = 64)

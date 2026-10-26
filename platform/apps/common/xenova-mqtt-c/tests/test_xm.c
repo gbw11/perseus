@@ -127,6 +127,7 @@ static int build(const char *fn, int args, char *out, size_t n)
 	}
 	if (!strcmp(fn, "vm")) return xm_topic_vm(out, n, a, b);
 	if (!strcmp(fn, "app_events")) return xm_topic_app_events(out, n, a);
+	if (!strcmp(fn, "vm_app_events")) return xm_topic_vm_app_events(out, n, a, b);
 	if (!strcmp(fn, "manual_input")) return xm_topic_manual_input(out, n);
 	if (!strcmp(fn, "vehicle_control")) return xm_topic_vehicle_control(out, n);
 	if (!strcmp(fn, "vehicle_status")) return xm_topic_vehicle_status(out, n);

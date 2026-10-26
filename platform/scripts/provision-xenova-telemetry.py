@@ -205,6 +205,9 @@ def save_receipt(path, value, create=False):
         temp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
         save_receipt(temp, value, True)
         os.replace(temp, path)
+    directory=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(directory)
+    finally:os.close(directory)
 
 
 def provision(context, credential, source_identity, receipt_path, previous_path=None, store=None, observe=None,

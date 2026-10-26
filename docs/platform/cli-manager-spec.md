@@ -3593,7 +3593,7 @@ Spring은 소스 기본값만 확인했으며 운영 배포 override는 별도 �
 | FastAPI xl driver | query subprocess 5초, command 소스 기본/배포 관측 95초 | 별도 xl 호출 상한. platform Manager의 전체 timeout이 아님 |
 | HTTP health/stats | xl 직접 관측 및 요청별 관측 경계 5초 | 공통 Manager get/list와 다른 경로. threadpool Q는 별도 |
 | Spring `application.yml`·`Dom0ManagerProperties`·`Dom0ManagerClient.createClient` | 소스 기본 connect/query/command=2/6/100초 | 각 HTTP 시도의 대기 설정. 배포값 미확인. query와 command의 재시도 정책도 서로 다름 |
-| Recovery Worker | interval 5초, intent refresh 60초 등 관측/장애 판정 유예 | 판단 큐까지만 연결. 110초 executor는 미연결 제안이며 실제 적용 설정으로 보고하지 않음 |
+| Recovery Worker | interval 5초, intent refresh 60초 등 관측/장애 판정 유예 | 현재 RecoveryEngine 단일 executor와 연결. 최초 실행 슬롯에서 110초 원 attempt 기한을 고정하고 재전달에는 그대로 사용 |
 
 fsync·프로세스 생성·커널 I/O를 선점하는 엄밀한 wall-clock 상한이 아니다. 필수 내구
 저장은 만료됐다는 이유로 생략하지 않는다. R은 결과 확인에만 사용하고 create/reboot를
@@ -3616,7 +3616,7 @@ DEADLINE_EXCEEDED로 거절한다. 검증 후 게시 직전 만료도 새 정책
 | HTTP get/list | 조회 계약 5초, Spring query 기본 6초. 하위 E/P 15초에 S 최대 5초·Q가 앞섬 | 하위에 호출자 deadline/timeout 입력이 없어서 CLI와 HTTP에 다른 예산을 선택할 수 없음. 기본값 일괄 축소로 검증을 생략하거나 정상 작업을 실패시키지 않음 | 5초 계약을 유지하려면 상위 Q/S를 제한하고 잔여 시간을 get/list에 전달할 최소 계약 확장 협의가 필요. 현재 미구현. 반대로 대기를 늘릴 경우에도 Q상한+S+E/P+반환 여유 산정이 선행 |
 | 일반 HTTP control | 하위 E 90초 + R 최대 15초 + P, S 최대 5초. Spring command 기본 100초 | 물리 작업의 원 기한·안전 검증을 줄이지 않음. 상위 Q가 무기한이면 유한 종단 보장 불가 | Q를 먼저 제한. 대기 확대 대안은 Q상한+5+90+15+반환 여유. 예를 들어 Q=0·반환 여유 5초이면 115초가 필요하다는 계산일 뿐 적용값이 아님. R 축소는 재확인 실패 영향과 함께 별도 검토 |
 | 복구 중 stop HTTP | VM Q와 S가 하위 수락보다 앞섬. 오류 details·원 key도 현재 경로에서 보존하지 않음 | 하위의 짧은 durable 수락만으로 상위 잠금을 우회할 수 없음 | 기존 stop 경로의 짧은 수락/긴 실행 분리와 요청별 Manager 상태 보호, pending/completed 응답 구분 필요. 새 HTTP API를 임의 구현하지 않음 |
-| Worker recover_once 실행 | judgment 큐는 있으나 executor 소비/조립이 없음 | 하위 120초 수락 상한은 실제 Worker 110초 실행을 뜻하지 않음 | 최초 attempt의 원 host·절대 D를 큐 대기부터 차감해 전달. 110초 기본은 연결 설계안, 반환 대기는 잔여 D+R+P. 재시도에 D 재발급 금지 |
+| Worker recover_once 실행 | 현재 Engine이 실행 슬롯·현재 view에서 기본 110초 spec을 선저장한 뒤 호출 | 실행 전 판단 큐/직렬화 대기는 이 실행 예산과 별도. 응답 유실은 원 attempt journal로 확인 | 같은 attempt의 원 host·절대 D를 재사용. 원 D 뒤 기존 verify_timeout_s(기본 150초)까지 결과 조회가 계속 실패하면 final RECONCILE_REQUIRED로 조정 요구. 이 확인 예산은 새 물리 실행 허가가 아님 |
 | 자산 등록 create | cloud root 디스크의 원본/복사본 해시·복사·준비와 후속 start를 포함 | 단일 control 90초나 개별 sha256sum 900초가 등록 전체 기한은 아님 | 전체 생성 요청·하위 단계별 예산과 중복 I/O는 별도 후속 과제. 무결성 검사 축소나 timeout 확대를 해결로 적용하지 않음 |
 
 25초·120초 HTTP 대기는 합의·적용된 계약이 아니다. 관측 최대 시간은 보장 상한이
@@ -3631,7 +3631,7 @@ DEADLINE_EXCEEDED로 거절한다. 검증 후 게시 직전 만료도 새 정책
 | `platform/services/dom0-manager/dom0_manager/service.py:VmService._vm_lock/create/stop`, `drivers/platform.py:SerializedManager.call` | 원 요청 예산에서 Q/S 차감. 긴 복구 잠금 중 별도 stop이 durable pending으로 수락되고 요청별 Manager 상태가 섞이지 않는 HTTP 경쟁 시험 |
 | `drivers/platform.py:PlatformDriver._stop/raise_for_envelope`, `errors.py:Dom0ManagerError.body`, `api/errors.py`, `api/vms.py:stop_vm` | 원 key/operation, accepted/completion/revision/deadline 전달. 미수락 busy·pending·완료·superseded·만료 구별. 기존 204 완료를 접수 완료로 재해석하지 않음 |
 | `backend/src/main/resources/application.yml`, `backend/src/main/java/com/xenova/backend/vm/infrastructure/Dom0ManagerProperties.java`, `Dom0ManagerClient.createClient/executeQuery/executeCommand/handleError` | 실제 배포 timeout 확인, 협의한 전체 예산 반영, 응답 유실 시 원 작업 재확인. 전송 후 timeout을 새 key로 반복하지 않는 시험 |
-| `platform/services/dom0-manager/dom0_manager/recovery/worker.py:RecoveryWorker.run_once`, `recovery/__main__.py:main` | 판단 큐와 executor 연결, 원 attempt/D 내구 보존·중복 전달·중단 재개·실행 중 stop·결과 미확정의 종단 시험 |
+| `platform/services/dom0-manager/dom0_manager/recovery/worker.py:RecoveryWorker.run_once`, `recovery/__main__.py:main` | 현재 Engine 연결·원 attempt/D 선저장·journal 우선 재확인을 유지. 제품 HTTP stop 진입의 Q/S·pending 전달과 실제 보드 중단/복원은 별도 종단 수락 |
 
 <a id="sources"></a>
 ## 구현 근거와 유지 기준
