@@ -60,6 +60,7 @@ class Verdict(str, Enum):
 @dataclass
 class _Track:
     domid: int | None = None
+    execution_id: str | None = None
     domain_since: float | None = None  # 현재 domid 를 처음 본 시각
     signaled: bool = False  # 이번 부팅에서 생존 신호를 받은 적이 있다 (받으면 boot grace 끝)
     absent_since: float | None = None  # 도메인이 없는 것을 처음 본 시각
@@ -224,8 +225,9 @@ class Watcher:
 
     def _track_domain(self, track: _Track, obs: VmObservation, now: float) -> None:
         if obs.present:
-            if track.domid != obs.domid:
+            if track.domid != obs.domid or (obs.execution_id is not None and track.execution_id!=obs.execution_id):
                 track.domid = obs.domid
+                track.execution_id=obs.execution_id
                 track.domain_since = now
                 track.signaled = False
             track.absent_since = None
@@ -266,6 +268,8 @@ class Watcher:
             beat = self._heartbeats.last(obs.vm_id)
         if beat is None:
             return None
+        if obs.expected_app_boot_id is not None and (beat.boot_id!=obs.expected_app_boot_id or
+            getattr(beat,'instance_id',None)!=obs.expected_app_instance_id):return None
         if track.domain_since is not None and beat.received_monotonic < track.domain_since:
             return None  # 이전 부팅의 신호. 새 부팅에서는 아직 한 번도 받지 않은 것과 같다
         if track.domain_since is not None:
@@ -284,12 +288,17 @@ class Watcher:
             return Verdict.FAILED, FailureReason.DOMAIN_CRASHED
         if obs.xen_state != VmState.running:
             return Verdict.UNKNOWN, None  # paused·stopping 은 장애가 아니지만 건강하지도 않다
+        if obs.execution_binding_available is False:return Verdict.UNKNOWN,None
         liveness = self._liveness(track, obs)
         if liveness is None:
             if self._target_unknown(track, obs):
                 return Verdict.UNKNOWN, None
             return Verdict.OK, None  # 생존 신호가 없는 종류: Xen 실행이 전부다
         channel, window, grace, reason = liveness
+        if obs.execution_binding_available is True and not track.signaled:
+            # Never-received app traffic cannot distinguish startup failure
+            # from a per-VM ACL/delivery failure. Xen crash/absence stays above.
+            return Verdict.UNKNOWN,None
         if signal_age is not None and signal_age < window:
             return Verdict.OK, None
         if not self._link_ready(channel, now, window):
@@ -308,6 +317,8 @@ class Watcher:
             state = HealthState.STARTING if obs.eligible else HealthState.STOPPED
         elif obs.xen_state != VmState.running:
             state = HealthState.UNHEALTHY
+        elif obs.execution_binding_available is False:
+            state = HealthState.OBSERVATION_UNAVAILABLE
         elif (liveness := self._liveness(track, obs)) is None:
             # 앱 신호가 선언되지도 관측되지도 않은 Zephyr: Xen 실행만 근거. armed 기록을 잃었으면 대상 여부를 모르므로 관측 불가
             state = HealthState.OBSERVATION_UNAVAILABLE if self._target_unknown(track, obs) else HealthState.HEALTHY
@@ -320,6 +331,8 @@ class Watcher:
                 state = HealthState.OBSERVATION_UNAVAILABLE
             elif not track.signaled and track.domain_since is not None and now - track.domain_since < grace:
                 state = HealthState.STARTING
+            elif obs.execution_binding_available is True and not track.signaled:
+                state = HealthState.OBSERVATION_UNAVAILABLE
             elif not self._link_ready(channel, now, window):
                 state = HealthState.OBSERVATION_UNAVAILABLE
             else:

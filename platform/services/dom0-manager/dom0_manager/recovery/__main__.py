@@ -10,6 +10,7 @@ import logging
 import signal
 import sys
 import threading
+import os
 from pathlib import Path
 
 from ..config import Settings
@@ -51,10 +52,15 @@ def main() -> int:
         return EXIT_LOCKED
 
     manager = load_manager(platform_settings.platform_lib, busy_timeout_s=platform_settings.platform_busy_timeout_s)
-    observer = PlatformObserver(manager, _xl(platform_settings), intent_refresh_s=settings.intent_refresh_s)
+    rejoin=None
+    if os.environ.get('XENOVA_RECOVERY_DRIVE_CONFIG'):
+        from .rejoin import production
+        rejoin=production(os.environ['XENOVA_RECOVERY_DRIVE_CONFIG'],manager.data)
+    observer = PlatformObserver(manager, _xl(platform_settings), intent_refresh_s=settings.intent_refresh_s,
+        drive_bindings=rejoin.cache if rejoin else None,drive_vm_ids=rejoin.vm_ids if rejoin else ())
     heartbeats, app_heartbeats = HeartbeatTable(), AppHeartbeatTable()
     client = build_client(settings)
-    subscribe_liveness(client, heartbeats, app_heartbeats)
+    subscribe_liveness(client, heartbeats, app_heartbeats,rejoin=rejoin)
     # 브로커가 없어도 시작은 한다. 필터별 구독 승인 상태가 매 주기 감시기에 넘어가며, 승인되지 않은 동안 그 신호의 손실 판정은
     # 보류된다(브로커·ACL 문제는 VM 장애가 아니다). crashed·absent 판정은 Xen 관측이라 계속된다
     connected = client.start(wait_s=settings.interval_s)
@@ -83,8 +89,8 @@ def main() -> int:
     log.info("recovery policy=%s max_attempts=%d backoff=%s attempt_deadline=%.0fs verify_timeout=%.0fs", policy.policy, policy.max_attempts,
              ",".join(f"{b:g}" for b in policy.backoff_s), policy.attempt_deadline_s, policy.verify_timeout_s)
     worker = RecoveryWorker(
-        settings, observer, watcher, link=lambda: link_state(client), health_publisher=HealthPublisher(client, refresh_s=settings.health_refresh_s),
-        engine=engine,
+        settings, observer, watcher, link=lambda: link_state(client,verified=rejoin is not None), health_publisher=HealthPublisher(client, refresh_s=settings.health_refresh_s),
+        engine=engine,rejoin=rejoin,
     )
 
     stop = threading.Event()
