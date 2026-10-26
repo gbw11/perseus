@@ -21,7 +21,7 @@ pipeline {
                 updateGitlabCommitStatus name: 'jenkins-platform-check', state: 'running'
                 dir('platform/services/dom0-manager') {
                     sh 'mkdir -p target'
-                    sh 'python3 -m pip install -q --user -e .[test]'
+                    sh 'python3 -m pip install -q --user -e ../vm-agent/mqtt-client -e .[test]'
                     sh 'python3 -m pytest -q --junitxml=target/pytest.xml'
                 }
             }
