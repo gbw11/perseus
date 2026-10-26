@@ -23,7 +23,9 @@ import uuid
 ROOT=Path(__file__).resolve().parents[4]
 sys.path[:0]=[str(ROOT/'platform/services/gateway'),str(ROOT/'platform/services/vm-agent/mqtt-client')]
 from xenova_gateway.machine import Mode
-from xenova_gateway.runner import GatewayRunner
+from xenova_gateway.verified_runner import VerifiedGatewayRunner
+from xenova_gateway.authority import AuthorityStore
+from xenova_mqtt.drive_binding import BindingCache
 from xenova_gateway.sink import MockSink
 from xenova_gateway.frame import DriveFrame
 from xenova_mqtt import Identity, XenovaClient, topics
@@ -83,7 +85,7 @@ def main():
         common={'vm_id':vms[label],'boot_id':boot,'host_boot_id':'','execution_id':'','receipt_id':'',
                 'broker_ipv4':'192.0.2.1','username':vms[label],'password':passwords[label],'trusted_internal_plaintext':True}
         paths={}
-        entry={'label':label,'vm_id':vms[label],'boot_id':boot,'binary_sha256':digest}
+        entry={'label':label,'vm_id':vms[label],'boot_id':boot,'binary_sha256':digest,'execution_id':str(uuid.uuid4())}
         for channel,port in (('drive',18884),('telemetry',18883)):
             instance=str(uuid.uuid4());entry[channel+'_instance']=instance
             paths[channel]=write_private(f'{label}-{count}-{channel}.json',{**common,'publisher_id':instance,'port':port})
@@ -109,7 +111,7 @@ def main():
              'user input\ntopic write xenova/v1/apps/manual/input\ntopic write xenova/v1/apps/perception/events\n'
              'topic write xenova/v1/console/resume\n')
         for label,vm in vms.items():
-            acl+=(f'user {vm}\ntopic write xenova/v1/apps/autonomous/events\ntopic write xenova/v1/apps/manual/events\n'
+            acl+=(f'user {vm}\ntopic write xenova/v1/vms/{vm}/apps/autonomous/events\ntopic write xenova/v1/vms/{vm}/apps/manual/events\n'
                   'topic read xenova/v1/vehicle/control\ntopic read xenova/v1/apps/manual/input\n'
                   'topic read xenova/v1/apps/perception/events\n'+f'topic write xenova/v2/vms/{vm}/telemetry/+\n')
         acl_file=write_private('acl',acl)
@@ -136,9 +138,38 @@ def main():
             receiver.on_connect=on_connect;receiver.on_message=on_message
             receiver.connect('192.0.2.1',port);receiver.loop_start();receivers.append(receiver)
         sender=client('input',Identity(source_id='jetson'));assert sender.start(wait_s=3)
+        attacker=XenovaClient(Identity(vm_id=vms['b'],app_id='manual'),host='192.0.2.1',port=18884,
+            username=vms['a'],password=passwords['a'],client_id='acl-negative-test')
+        clients.append(attacker);assert attacker.start(wait_s=3)
+        forbidden=[]
+        for topic in (topics.vm_app_events(vms['b'],'manual'),topics.app_events('manual')):
+            sent=attacker.publish(topic,'app.heartbeat',{'state':'standby','uptime_s':0})
+            forbidden.append(sent['message_id'])
+        time.sleep(.3)
+        assert not any(r['message']['message_id'] in forbidden for r in records)
+        attacker.stop()
         gw=client('gateway',Identity(source_id='dom0-gateway'))
         sink=MockSink((args.output/'frames.log').open('w'))
-        runner=GatewayRunner(gw,sink,vm_ids=(vms['a'],vms['b']),initial_active_vm=vms[args.initial])
+        host=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        authority=AuthorityStore(private/'authority',host,mountpoint=None);authority.initialize(vms[args.initial])
+        # Test fixture: restoring a previous AUTO preference must still rearm.
+        authority.update(mode='AUTO',reason='isolated_restore_fixture')
+        bindings=BindingCache(host)
+        runner=VerifiedGatewayRunner(gw,sink,authority=authority,bindings=bindings,vm_ids=(vms['a'],vms['b']))
+        def bind_current():
+            while not stop.wait(.05):
+                now=int(time.monotonic()*1000);rows={}
+                for label in ('a','b'):
+                    child=guests.get(label)
+                    if child is None or child.poll() is not None:continue
+                    session=next(s for s in reversed(sessions) if s['label']==label)
+                    rows[vms[label]]={'status':'observed','execution_id':session['execution_id'],
+                        'boot_id':session['boot_id'],'app_instance_id':session['drive_instance'],
+                        'intent_revision':1,'lifecycle_generation':0,'domid':1 if label=='a' else 2,
+                        'xen_unique_id':'1','observed_monotonic_ms':now}
+                bindings.install({'schema_version':'1.0-drive-bindings','host_boot_id':host,
+                    'observed_monotonic_ms':now,'expires_monotonic_ms':now+3000,'vms':rows})
+        th=threading.Thread(target=worker,args=(bind_current,),daemon=True);th.start();threads.append(th)
         def send_inputs():
             while not stop.wait(.05):
                 sender.publish(topics.manual_input(),'drive.input',{'keys':['up']})
@@ -149,12 +180,16 @@ def main():
         start_guest('a');start_guest('b')
         th=threading.Thread(target=worker,args=(lambda:runner.run(stop),),daemon=True);th.start();threads.append(th)
         first=args.initial;other='b' if first=='a' else 'a'
-        until('initial-auto-or-ready',lambda:runner.machine is not None and
-            runner.machine.mode in (Mode.AUTO_READY,Mode.AUTO) and
-            runner.machine.node_status(vms[first],time.monotonic())=='active' and
+        until('initial-disarmed-ready',lambda:runner.machine is not None and
+            runner.machine.node_status(vms[first],time.monotonic())=='ready_disarmed' and
             runner.machine.node_status(vms[other],time.monotonic())=='standby',18)
-        if runner.machine.mode is Mode.AUTO_READY:
-            sender.publish('xenova/v1/console/resume','drive.resume.requested',{'requested_by':'isolated-test'})
+        assert not runner.machine.output_permitted and not [f for _,f,_ in sink.frames if isinstance(f,DriveFrame)]
+        def resume():
+            until('context-bound-resume-available',lambda:runner._control_message_id is not None)
+            sender.publish('xenova/v1/console/resume','drive.resume.requested',
+                {'requested_by':'isolated-test','expected_generation':runner.machine.generation},
+                causation_id=runner._control_message_id)
+        resume()
         until('initial-active-auto',lambda:runner.machine.mode is Mode.AUTO and runner.machine.active_vm==vms[first] and
             runner.machine.node_status(vms[first],time.monotonic())=='active')
         until('standby-prepared',lambda:runner.machine.node_status(vms[other],time.monotonic())=='standby')
@@ -167,7 +202,8 @@ def main():
         until('recovered-perception-auto-ready',lambda:runner.machine.mode is Mode.AUTO_READY and runner.machine.active_vm==vms[other])
         # Merely becoming ready must not drive AUTO.
         time.sleep(.3);assert runner.machine.mode is Mode.AUTO_READY
-        sender.publish('xenova/v1/console/resume','drive.resume.requested',{'requested_by':'isolated-test'})
+        until('auto-ready-held',lambda:runner.machine._ready(vms[other],'autonomous',time.monotonic(),held=True))
+        resume()
         until('other-active-auto',lambda:runner.machine.mode is Mode.AUTO and runner.machine.active_vm==vms[other] and
             runner.machine.node_status(vms[other],time.monotonic())=='active')
         start_guest(first)
@@ -186,13 +222,21 @@ def main():
         with wire_lock:wire=list(records)
         controls=[r['message']['payload'] for r in wire if r['message']['type']=='vehicle.control']
         commands=[r for r in wire if r['message']['type']=='drive.command']
-        for frame_t,frame,_ in sink.frames:
-            if isinstance(frame,DriveFrame):
-                control=next(c for c in reversed(controls) if c['generation']==frame.generation)
-                assert any(r['message']['vm_id']==control['active_vm_id'] and
-                    r['message']['app_id']==control['active_app'] and
-                    r['message']['payload']['generation']==frame.generation and
-                    abs(r['message']['payload']['v_mps']-frame.v_mps)<.0011 for r in commands)
+        # Firmware's documented message_id is session-local, not a global UUID.
+        def source_key(value):return tuple(value[k] for k in ('vm_id','boot_id','agent_instance_id','message_id'))
+        by_id={source_key(r['message']):r['message'] for r in commands}
+        provenance=[]
+        for row in runner.submissions:
+            if not row['source']:continue
+            source=row['source'];message=by_id[source_key(source)]
+            assert message['vm_id']==source['vm_id'] and message['app_id']==source['app_id']
+            assert message['boot_id']==source['boot_id'] and message['agent_instance_id']==source['agent_instance_id']
+            assert message['payload']['generation']==row['generation']
+            assert message['payload']['v_mps']==row['v_mps'] and message['payload']['steer_rad']==row['steer_rad']
+            assert row['serial_result']=='accepted' and row['device_applied'] is None
+            provenance.append(row)
+        assert provenance
+        (args.output/'submissions.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in provenance))
         assert all(s['binary_sha256']==digest for s in sessions)
         for vm in vms.values():
             kinds={r['message']['type'] for r in wire if r['message'].get('vm_id')==vm}

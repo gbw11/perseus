@@ -67,6 +67,8 @@ class GatewayRunner:
         vm_ids: tuple[str, str] | None = None,
         initial_active_vm: str | None = None,
     ) -> None:
+        if vm_ids is not None or initial_active_vm is not None:
+            raise ValueError("paired firmware requires VerifiedGatewayRunner with authority and trusted bindings")
         self._client = client
         self._sink = sink
         self._start_mode = start_mode

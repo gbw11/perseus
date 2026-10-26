@@ -125,10 +125,13 @@ def test_generation_change_alone_does_not_report_vm_fault():
         w.tick()
         assert not any(isinstance(a,PublishEvent) and a.type=="drive.fault.detected" for a in w.actions)
 
-def test_pair_configuration_and_legacy_default():
-    assert parse([],{}).vm_a is None
-    config=parse(["--vm-a",A,"--vm-b",B,"--initial-active-vm",B],{})
+def test_pair_configuration_and_explicit_legacy():
+    with pytest.raises(SystemExit):parse([],{})
+    assert parse(["--profile","legacy"],{}).vm_a is None
+    config=parse(["--vm-a",A,"--vm-b",B,"--initial-active-vm",B,"--initialize-control-state"],{})
     assert config.initial_active_vm==B
     for args in (["--vm-a",A],["--vm-a",A,"--vm-b",A],
-                 ["--vm-a",A,"--vm-b",B,"--initial-active-vm",NEW]):
+                 ["--vm-a",A,"--vm-b",B,"--initial-active-vm",NEW],
+                 ["--vm-a",A,"--vm-b",B,"--start-mode","AUTO"],
+                 ["--profile","legacy","--vm-a",A,"--vm-b",B]):
         with pytest.raises(SystemExit):parse(args,{})
