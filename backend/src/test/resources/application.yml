@@ -1,16 +1,22 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:xenova-test;DB_CLOSE_DELAY=-1
-    username: sa
-    password:
+    url: jdbc:tc:mysql:8.4:///xenova_test?TC_DAEMON=true
+    username: test
+    password: test
   data:
     redis:
       repositories:
         enabled: false
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: validate
     open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
   jackson:
     property-naming-strategy: SNAKE_CASE
 
