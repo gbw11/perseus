@@ -29,7 +29,7 @@ public class ProcessSnapshot {
 
     @Lob
     @Convert(converter = ProcessInfosConverter.class)
-    @Column(name = "processes")
+    @Column(name = "processes", columnDefinition = "longtext")
     private List<ProcessInfo> processes;
 
     protected ProcessSnapshot() {
