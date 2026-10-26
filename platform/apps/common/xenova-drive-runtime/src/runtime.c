@@ -462,8 +462,8 @@ static int drive_cmd_inner(const struct shell *sh, size_t argc, char **argv)
 	struct xd_io_stats io;
 	int io_status=xd_io_stats_get(&io);
 	if ((!records || (sends && !offset)) && !io_status) {
-		emit(sh,"XD_IO {\"enqueued\":\"%" PRIu64 "\",\"replaced\":\"%" PRIu64 "\",\"expired\":\"%" PRIu64 "\",\"context_dropped\":\"%" PRIu64 "\",\"stopped\":\"%" PRIu64 "\",\"attempted\":\"%" PRIu64 "\",\"sent\":\"%" PRIu64 "\",\"failed\":\"%" PRIu64 "\",\"event_dropped\":\"%" PRIu64 "\",\"heartbeat_replaced\":\"%" PRIu64 "\",\"prepare_max_us\":\"%" PRIu64 "\",\"poll_max_us\":\"%" PRIu64 "\",\"exchange_max_us\":\"%" PRIu64 "\",\"delivery_rows\":%zu,\"delivery_overflow\":\"%" PRIu64 "\",\"close_error\":%d}",
-		 io.enqueued,io.replaced,io.expired,io.context_dropped,io.stopped,io.attempted,io.sent,io.failed,io.event_dropped,io.heartbeat_replaced,io.prepare_max_us,io.poll_max_us,io.exchange_max_us,delivery_count,delivery_overflow,io.close_error);
+		emit(sh,"XD_IO {\"enqueued\":\"%" PRIu64 "\",\"replaced\":\"%" PRIu64 "\",\"expired\":\"%" PRIu64 "\",\"context_dropped\":\"%" PRIu64 "\",\"stopped\":\"%" PRIu64 "\",\"attempted\":\"%" PRIu64 "\",\"sent\":\"%" PRIu64 "\",\"failed\":\"%" PRIu64 "\",\"event_dropped\":\"%" PRIu64 "\",\"heartbeat_replaced\":\"%" PRIu64 "\",\"heartbeat_dropped\":\"%" PRIu64 "\",\"heartbeat_expired\":\"%" PRIu64 "\",\"prepare_max_us\":\"%" PRIu64 "\",\"poll_max_us\":\"%" PRIu64 "\",\"exchange_max_us\":\"%" PRIu64 "\",\"delivery_rows\":%zu,\"delivery_overflow\":\"%" PRIu64 "\",\"close_error\":%d}",
+		 io.enqueued,io.replaced,io.expired,io.context_dropped,io.stopped,io.attempted,io.sent,io.failed,io.event_dropped,io.heartbeat_replaced,io.heartbeat_dropped,io.heartbeat_expired,io.prepare_max_us,io.poll_max_us,io.exchange_max_us,delivery_count,delivery_overflow,io.close_error);
 		if (!io.stack_error) {
 			emit(sh,"XD_CLOCK {\"frequency_hz\":%u,\"io_clock_rc\":%d,\"snapshot_busy\":\"%" PRIu64 "\",\"stack_rc\":0,\"stack_unused_bytes\":%zu}",
 			 sys_clock_hw_cycles_per_sec(),io.clock_error,io.snapshot_busy,io.stack_unused_bytes);

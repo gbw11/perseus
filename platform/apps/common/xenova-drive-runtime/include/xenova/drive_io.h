@@ -13,7 +13,7 @@ struct xd_received {
 struct xd_inputs {
  struct xd_received control, input;
  uint64_t control_revision, connection_revision;
- bool connected;
+ bool connected; /* CONNACK observed, not SUBACK or control re-confirmation. */
 };
 struct xd_candidate {
  uint64_t id, created_us, queued_us, capture_us, control_revision, connection_revision;
@@ -29,7 +29,7 @@ struct xd_delivery {
 };
 struct xd_io_stats {
  uint64_t enqueued, replaced, expired, context_dropped, stopped, attempted, sent, failed;
- uint64_t event_dropped, heartbeat_replaced, snapshot_busy;
+ uint64_t event_dropped, heartbeat_replaced, heartbeat_dropped, heartbeat_expired, snapshot_busy;
  uint64_t prepare_max_us, poll_max_us, exchange_max_us;
  bool started, joined;
  int close_error, clock_error, stack_error;

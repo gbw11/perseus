@@ -28,6 +28,7 @@ struct report {
 };
 static struct report heartbeat, events[4], report_active;
 static bool heartbeat_pending;
+static bool last_report_was_event;
 static unsigned event_head,event_count;
 
 static uint64_t clock_us(void) {
@@ -110,15 +111,24 @@ static void send_command(void) {
 static void send_report(void) {
  k_mutex_lock(&exchange_lock,K_FOREVER);
  bool take=event_count||heartbeat_pending;
- if(event_count){report_active=events[event_head];event_head=(event_head+1)%ARRAY_SIZE(events);event_count--;}
- else if(heartbeat_pending){report_active=heartbeat;heartbeat_pending=false;}
+ /* Once a heartbeat is pending, at most one event may pass it. The payload
+  * still comes only from a completed calculation; this owner never renews it. */
+ bool beat=heartbeat_pending&&(!event_count||last_report_was_event);
+ if(beat){report_active=heartbeat;heartbeat_pending=false;last_report_was_event=false;}
+ else if(event_count){report_active=events[event_head];event_head=(event_head+1)%ARRAY_SIZE(events);event_count--;last_report_was_event=true;}
  bool valid=take&&context_ok(report_active.control_revision,report_active.connection_revision);
  k_mutex_unlock(&exchange_lock);
  if(!take)return;
- int rc=-EXDEV;
- if(valid&&!atomic_get(&stop)&&xd_owner_admit()&&k_uptime_get()<report_active.expires_ms)
+ bool expired=valid&&k_uptime_get()>=report_active.expires_ms;
+ int rc=expired?-ETIME:-EXDEV;
+ if(valid&&!expired&&!atomic_get(&stop)&&xd_owner_admit())
   rc=xm_zclient_publish_until(client,report_active.topic,report_active.type,report_active.json,report_active.expires_ms);
- if(rc){k_mutex_lock(&exchange_lock,K_FOREVER);stats.event_dropped++;k_mutex_unlock(&exchange_lock);}
+ if(rc){
+  k_mutex_lock(&exchange_lock,K_FOREVER);
+  if(beat){stats.heartbeat_dropped++;if(expired||(rc==-ETIMEDOUT&&k_uptime_get()>=report_active.expires_ms))stats.heartbeat_expired++;}
+  else stats.event_dropped++;
+  k_mutex_unlock(&exchange_lock);
+ }
 }
 static void owner(void *a,void *b,void *c) {
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
@@ -148,7 +158,8 @@ static void owner(void *a,void *b,void *c) {
  struct xd_delivery d;
  bool discarded=command_pending;
  if(discarded){d=result(&pending,XD_STOPPED,-ESHUTDOWN);command_pending=false;stats.stopped++;}
- stats.event_dropped+=event_count+heartbeat_pending;event_count=0;heartbeat_pending=false;
+ stats.event_dropped+=event_count;stats.heartbeat_dropped+=heartbeat_pending;
+ event_count=0;heartbeat_pending=false;
  shared.connected=false;
  k_mutex_unlock(&exchange_lock);
  if(discarded)xd_delivery_record(&d);
