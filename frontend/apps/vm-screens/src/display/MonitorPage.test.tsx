@@ -29,6 +29,20 @@ function show(output = 'monitor-1', connected = true, p = presentationFixture())
 }
 
 describe('local HDMI screens', () => {
+  it('does not carry a stale app error or current Xen claim into the facts panel', () => {
+    const p = presentationFixture();
+    p.state.vms[0]!.app_state = 'failed';
+    p.state.vms[0]!.sources.app.status = 'stale';
+    p.state.vms[0]!.sources.xen.status = 'disconnected';
+    p.decisions[p.state.vms[0]!.vm_id] = {
+      kind: 'stale',
+      label: 'VM 상태 수신 지연 / 연결 끊김',
+      tone: 'warning',
+    };
+    show('monitor-2', true, p);
+    expect(screen.queryByText('failed')).not.toBeInTheDocument();
+    expect(screen.getByText('Xen 상태 (마지막 관측)')).toBeInTheDocument();
+  });
   it('shows two Zephyr roles and Debian without assigning manual-only to VM2', () => {
     show();
     expect(screen.getByRole('heading', { name: 'VM 전체 상태' })).toBeInTheDocument();
@@ -79,5 +93,23 @@ describe('local HDMI screens', () => {
     show('monitor-2', true, p);
     expect(screen.getByText('VM 장애')).toBeInTheDocument();
     expect(screen.getByText('new-run-2')).toBeInTheDocument();
+  });
+  it('explains why the last detail target is retained after control reports expire', () => {
+    const p = presentationFixture();
+    p.outputs[1]!.selection = 'follow_active';
+    p.outputs[1]!.vm_id = p.state.vms[1]!.vm_id;
+    p.outputs[1]!.reason = '활성 구동 VM 미확인 · 마지막 선택 유지';
+    p.state.drive.source.status = 'stale';
+    show('monitor-2', true, p);
+    expect(screen.getByTestId('card-VM2')).toBeInTheDocument();
+    expect(screen.getByText('활성 구동 VM 미확인 · 마지막 선택 유지')).toBeInTheDocument();
+    expect(screen.queryByText('활성 구동')).not.toBeInTheDocument();
+  });
+  it('does not present a previous selection reason as current after display connection loss', () => {
+    const p = presentationFixture();
+    p.outputs[1]!.reason = '제어 담당이 보고한 활성 구동 VM 따라가기';
+    show('monitor-2', false, p);
+    expect(screen.queryByText(p.outputs[1]!.reason)).not.toBeInTheDocument();
+    expect(screen.getByText('화면 연결 끊김 · 마지막 화면 선택 유지')).toBeInTheDocument();
   });
 });

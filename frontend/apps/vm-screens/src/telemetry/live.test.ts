@@ -136,6 +136,32 @@ describe('applyEvent', () => {
 });
 
 describe('복구 중 표시 (RC카 시나리오 §4.3)', () => {
+  it.each(['recovery.completed', 'recovery.recovered', 'recovery.cancelled', 'recovery.failed'])(
+    'ends the recovery marker for %s without granting driving control',
+    (type) => {
+      const t = {
+        ...emptyTelemetry(0),
+        appVmIds: { autonomous: 'vm-a' },
+        recoveringApps: { autonomous: true as const },
+      };
+      const next = applyEvent(
+        t,
+        {
+          event_id: type,
+          type,
+          severity: 'INFO',
+          vm_id: 'vm-a',
+          occurred_at: '2026-10-26T00:00:00Z',
+          payload: {},
+        },
+        100,
+      );
+      expect(next.recoveringApps?.autonomous).toBeUndefined();
+      expect(next.mode).toBe(t.mode);
+      expect(next.activeApp).toBe(t.activeApp);
+      expect(next.apps.autonomous.health).not.toBe('ok');
+    },
+  );
   const dead = app({
     vm_id: 'vm-a',
     command_fresh: false,

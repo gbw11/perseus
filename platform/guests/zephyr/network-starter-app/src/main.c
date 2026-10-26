@@ -93,6 +93,18 @@ failed:
 }
 
 static int stats_cmd(const struct shell *sh,size_t argc,char **argv) {
+ if(argc==2&&!strcmp(argv[1],"waits")) {
+  struct xnet_waits w;struct xnet_status s;
+  int rc=xnet_waits_get(&w);if(rc)return rc;
+  rc=xnet_status_get(&s);if(rc)return rc;
+  shell_print(sh,"{\"clock\":\"%s\",\"started\":%s,\"backend_observation\":%d,\"backend_error\":%d,\"backend_wait_stage\":%d,\"packet_polls\":%llu,\"pending_batches\":%llu,\"packet_gap_max_us\":%llu,\"packet_lock_wait_max_us\":%llu,\"packet_lock_hold_max_us\":%llu,\"store_observations\":%llu,\"store_lock_wait_max_us\":%llu,\"store_response_max_us\":%llu}",
+   w.cycle_clock?"cycles":"kernel_ticks",s.started?"true":"false",s.backend_observation,s.backend_error,s.backend_wait_stage,
+   (unsigned long long)w.packet_polls,(unsigned long long)w.pending_batches,(unsigned long long)w.packet_gap_max_us,
+   (unsigned long long)w.packet_lock_wait_max_us,(unsigned long long)w.packet_lock_hold_max_us,
+   (unsigned long long)w.store_observations,(unsigned long long)w.store_lock_wait_max_us,(unsigned long long)w.store_response_max_us);
+  return 0;
+ }
+ if(argc!=1)return -EINVAL;
  ARG_UNUSED(argc);ARG_UNUSED(argv);struct xnf_stats v;int rc=xnet_stats(&v);if(rc)return rc;
  shell_print(sh,"{\"tx\":%u,\"rx\":%u,\"tx_drop\":%u,\"rx_drop\":%u,\"pool_busy\":%u,\"protocol_errors\":%u}",
              v.tx,v.rx,v.tx_drop,v.rx_drop,v.pool_busy,v.protocol_errors);return 0;
@@ -116,7 +128,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(xenova_commands,
 #if defined(CONFIG_XENOVA_DIAGNOSTICS_EXERCISE)
  SHELL_CMD(exercise,NULL,"Read common on/off benchmark observer",starter_exercise_cmd),
 #endif
- SHELL_CMD(stats,NULL,"Read bounded netfront counters",stats_cmd),
+ SHELL_CMD(stats,NULL,"Netfront counters; waits for packet/Store observations",stats_cmd),
  SHELL_CMD(hook,NULL,"Development hook: normal/reject/fail/timeout",hook_cmd),
  SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(xenova,&xenova_commands,"Xenova development diagnostics",NULL);

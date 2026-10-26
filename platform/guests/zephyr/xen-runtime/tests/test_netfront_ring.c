@@ -9,10 +9,22 @@ static unsigned char txring[4096] __attribute__((aligned(4096)));
 static unsigned char rxring[4096] __attribute__((aligned(4096)));
 static unsigned char txdata[XNF_SLOTS][4096],rxdata[XNF_SLOTS][4096];
 static struct xnf n;static unsigned notices,delivered;static int drop;
-static void notify(void *p){(void)p;notices++;}
+static bool stream;
+static uint32_t backend_rx;
+static void backend_receive(void) {
+ uint32_t end=n.rx->h.req_prod;
+ while(backend_rx!=end) {
+  unsigned slot=backend_rx&(XNF_RING_SIZE-1);
+  uint16_t id=n.rx->ring[slot].req.id;
+  memset(n.rx_pages[id&(XNF_SLOTS-1)],0x5a,64);
+  n.rx->ring[slot].rsp=(struct xnf_rx_response){.id=id,.status=64};backend_rx++;
+ }
+ n.rx->h.rsp_prod=backend_rx;n.rx->h.req_event=end+1;
+}
+static void notify(void *p){(void)p;notices++;if(stream)backend_receive();}
 static int deliver(void *p,const uint8_t *b,size_t len){(void)p;assert(len==64);assert(b[0]==0x5a);delivered++;return drop;}
 static void init(void){
- memset(&n,0,sizeof(n));notices=delivered=drop=0;
+ memset(&n,0,sizeof(n));notices=delivered=drop=0;stream=false;backend_rx=0;
  n.tx=(void *)txring;n.rx=(void *)rxring;n.tx_pages=txdata;n.rx_pages=rxdata;
  n.notify=notify;n.deliver=deliver;
  for(unsigned i=0;i<XNF_SLOTS;i++){n.tx_grants[i]=10+i;n.rx_grants[i]=20+i;}
@@ -77,6 +89,12 @@ int main(void){
   assert(!xnf_poll(&n));
  }
  cases++;
+ /* The backend continuously replenishes RX, yet the production poll returns
+  * at 64 total completions and exposes more work instead of an empty result. */
+ init();assert(!xnf_send(&n,packet,64));tx(0,n.tx->ring[0].req.id,0);
+ stream=true;backend_receive();assert(xnf_pending(&n));
+ assert(!xnf_poll(&n)&&n.stats.tx+n.stats.rx==64&&n.stats.tx==1&&xnf_pending(&n));
+ stream=false;assert(!xnf_poll(&n)&&!xnf_pending(&n)&&xnf_drained(&n));cases++;
  printf("production netif ring: %u cases, 70000-frame descriptor/ID wrap loop PASS\n",cases);
  return 0;
 }

@@ -1,13 +1,14 @@
 /*
- * Zephyr 자율주행 앱 (S15P31E110-259). 한 스레드가 MQTT 클라이언트를 소유하고 20 ms 마다:
+ * Zephyr 자율주행 앱 (S15P31E110-259). 계산 main은 20 ms 마다 입력 사본을 읽는다:
  *   최신 perception.result·vehicle.control → auto_step → drive.command 발행, 1초마다 app.heartbeat.
  * 활성일 때 판단이 바뀌면(장애물 정지·인지 끊김 등) perception.event 를 낸다 (메시지 보드 알림).
- * 남는 시간에는 xm_zclient_poll 로 수신·keepalive·재연결을 처리한다.
+ * 별도 v1 worker가 수신·keepalive·재연결과 최신 후보 송신을 소유한다.
  * 계약: docs/contracts/mqtt-contract-v1.md §5·§6. 구조는 수동주행 앱(platform/apps/manual/zephyr)과 같다.
  */
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <stdio.h>
+#include <errno.h>
 #include <string.h>
 
 #include "autonomous.h"
@@ -64,7 +65,9 @@ int main(void)
 	int64_t next_beat = start;
 
 	while (!xd_stopping()) {
-		bool ready = xd_client_prepare(&client, control, perception) == 0;
+		int io_rc = xd_client_prepare(&client, control, perception);
+		if (io_rc && io_rc != -EAGAIN && io_rc != -EBUSY) { rc = io_rc; break; }
+		bool ready = io_rc == 0;
 		int64_t now = k_uptime_get();
 		uint64_t cycles_us;
 		if ((rc = xdiag_clock_us(&cycles_us))) { break; }
@@ -81,12 +84,12 @@ int main(void)
 			auto_step(&cfg, &in, &cmd, &st);
 			if (xd_step_end()) { break; }
 			int encoded = xm_drive_command_json(json, sizeof(json), cmd.generation, cmd.v_mps, cmd.steer_rad);
-			xd_command(&client, events, json, encoded, cmd.generation, cmd.v_mps, cmd.steer_rad, input_seq, control_seq, in.perception_age_ms);
+			xd_command(&client, events, json, encoded, cmd.generation, cmd.v_mps, cmd.steer_rad, input_seq, control_seq, in.perception_age_ms, cfg.perception_timeout_ms);
 
 			if (ready && !xd_stopping() && now >= next_beat) {
 				xm_app_heartbeat_json(json, sizeof(json), st.state, now - start);
 				xd_publish(&client, events, "app.heartbeat", json);
-				next_beat += AUTO_HEARTBEAT_MS;
+				next_beat += ((now-next_beat)/AUTO_HEARTBEAT_MS+1)*AUTO_HEARTBEAT_MS;
 			}
 			if (st.reason != last_reason) {
 				/* 대기 중 판단 변화는 알리지 않는다 — 차를 모는 쪽이 아니므로 알림이 헷갈린다 */
@@ -108,8 +111,7 @@ int main(void)
 			if ((rc = xdiag_clock_us(&end_us))) { break; }
 			int32_t wait_ms = end_us < xd_next_release_us() ?
 				(int32_t)((xd_next_release_us() - end_us + 999U) / 1000U) : 0;
-			if (!xd_stopping() && ready) { xd_poll(&client, wait_ms); }
-			else if (!xd_stopping()) { k_msleep(wait_ms); }
+			if (!xd_stopping()) { k_msleep(wait_ms); }
 			xd_iteration_end();
 		} else { k_sleep(K_MSEC(1)); }
 	}

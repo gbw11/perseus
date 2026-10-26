@@ -14,15 +14,26 @@ import {
   MockTelemetryProvider,
 } from './telemetry/TelemetryProvider';
 
-/** VITE_TELEMETRY: live(백엔드) / scenario(혼자 도는 가짜) / 그 밖(기본) = 관리 콘솔 mock 을 따라감 (.env.example) */
+/** Default/display = local HDMI. Explicit live/console/scenario = legacy app preview. */
 const PROVIDERS = { live: LiveTelemetryProvider, scenario: MockTelemetryProvider };
 import { MonitorPage } from './display/MonitorPage';
 
+// Production HDMI uses the local collector/policy. Legacy app views are explicit previews.
+const legacyPreview = ['console', 'scenario', 'live', 'legacy-live'].includes(import.meta.env.VITE_TELEMETRY);
+
+function ScreenEntry({ detail = false }: { detail?: boolean }) {
+  if (legacyPreview) return detail ? <DetailPage /> : <SplitPage />;
+  return <Navigate to={`/display/${detail ? 'monitor-2' : 'monitor-1'}`} replace />;
+}
+
 function Root() {
-  const mode = import.meta.env.VITE_TELEMETRY as keyof typeof PROVIDERS | undefined;
+  if (!legacyPreview) return <Outlet />;
+  const configured = import.meta.env.VITE_TELEMETRY;
+  const mode = (configured === 'legacy-live' ? 'live' : configured) as keyof typeof PROVIDERS | undefined;
   const Provider = (mode && PROVIDERS[mode]) || ConsoleBusTelemetryProvider;
   return (
     <Provider>
+      {legacyPreview && <div role="note">앱 시연 화면 · HDMI 실제 상태/주·백업 승계 검증용이 아닙니다.</div>}
       <DisplayFollower />
       <Outlet />
       <ResumeOverlay />
@@ -45,10 +56,10 @@ const router = createBrowserRouter(
       element: <Root />,
       children: [
         { path: '/', element: <ToSplit /> },
-        { path: '/split', element: <SplitPage /> },
-        { path: '/detail/:app', element: <DetailPage /> },
+        { path: '/split', element: <ScreenEntry /> },
+        { path: '/detail/:app', element: <ScreenEntry detail /> },
         // 화면 배치 view sim (screen_path /sim, 화면 배치 계약 v1.1)
-        { path: '/sim', element: <SimPage /> },
+        { path: '/sim', element: legacyPreview ? <SimPage /> : <Navigate to="/display/monitor-1" replace /> },
       ],
     },
   ],
