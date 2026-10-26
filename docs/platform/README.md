@@ -32,6 +32,7 @@ Xenova는 Raspberry Pi 4에서 Xen으로 Linux·Zephyr VM을 실행하고 관리
 | 부팅 서비스·자동 시작·부분 실패·종료 조사 | [부팅·종료 구조](management-boot-boundaries.md) |
 | 전용·공유 CPU 배치 운영 | [CPU 배치](cpu-layout.md) |
 | Zephyr 초기화·부분 실패·협조 종료 조사 | [Zephyr runtime](../../platform/guests/zephyr/xen-runtime/README.md) |
+| Zephyr 계산·통신·Store 대기와 로컬 계측 이해 | [주행 공통 runtime](../../platform/apps/common/xenova-drive-runtime/README.md) |
 
 처음 상태를 볼 때는 dom0에서 `xenova-vm list --short`를 사용한다. 전체 필드가
 필요하면 `xenova-vm list --json`, Wi-Fi 상태는 `xenova-wifi status`로 확인한다.
@@ -45,3 +46,5 @@ Xenova는 Raspberry Pi 4에서 Xen으로 Linux·Zephyr VM을 실행하고 관리
 Zephyr 초기화·종료와 부팅 표시의 후보별 시험·미검증 범위는
 [Zephyr 수명주기 검증](../verification/zephyr-lifecycle-20261025.md)과
 [부팅 표시 검증](../verification/boot-status-20261025.md)에 정리한다.
+계산·통신·Store 대기 분리의 후보별 시험과 실보드 미검증 범위는
+[대기 경계 검증](../verification/zephyr-wait-separation-20261026.md)에 정리한다.

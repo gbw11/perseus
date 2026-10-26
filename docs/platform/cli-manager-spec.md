@@ -2168,6 +2168,20 @@ Agent는 기본 5초 heartbeat를 `xenova/v1/vms/{vm_id}/heartbeat`로 발행하
 
 Zephyr Network Starter의 capability는 가상 Ethernet·IPv4·DHCP·ICMP이며 SSH/Python Agent capability는 없다.
 
+진단 runtime을 포함한 Zephyr firmware의 PV 콘솔에서는 `xenova diag`,
+`xenova telemetry`를 사용한다. Network Starter의 `xenova stats`는 패킷 누적값,
+`xenova stats waits`는 패킷/Store 대기와 backend 관측 상태를 조회한다.
+주행 앱의 `xenova drive`는 계산·출력함·실제 송신을 구별한다. 측정 창은
+`xenova drive capture 30000 180000`으로 정하고 종료 후 `records 0 4`와
+`transmissions 0 4`를 각각 `xenova drive` 뒤에 붙여 페이지를 읽는다.
+`capture_complete`는 계산 창 종료이며 `transmissions_complete`는 수락 후보의 최종 처리
+기록 확정이다. 둘 다 참이 되기 전 페이지 조회와 capture 재설정은 `-EBUSY`다.
+확정된 창의 페이지 total은 유지된다. 분석기의 기능·자료 정합성 수락과 성능 개선은 별도다.
+이들은 guest의 로컬 shell 명령이며 Manager action이나 HTTP 조회가 아니다.
+기존 불변 firmware에 새 명령이 있다고 가정하지 않는다. 반환 필드와 원자료 해석은
+[Zephyr runtime](../../platform/guests/zephyr/xen-runtime/README.md#패킷-처리와-backend-관측)과
+[주행 runtime](../../platform/apps/common/xenova-drive-runtime/README.md#실제-계산과-계측)을 따른다.
+
 <a id="diagnostics"></a>
 ## 10. 운영 진단·설치 도구
 

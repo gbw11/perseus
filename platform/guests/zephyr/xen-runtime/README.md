@@ -14,7 +14,7 @@ Network Starter와 자율·수동 앱은 같은 전송 기반을 사용하지만
 | event channel·callback | allocate/bind/unmask의 각 성공을 구분 | netfront; 사용자/worker 종료 확인 후 mask·unbind·close | bind 전 실패면 unbind하지 않음. close 실패면 port 소유 유지 |
 | frontend 게시 | transaction 제출 직전부터 backend 노출 가능 | netfront; Store를 이용해 Closing/Closed 확인 | 응답 유실도 노출 가능 상태. `published=false`를 회수 근거로 쓰지 않음 |
 | network worker·interface·DHCP | worker 생성, interface 활성화 시도, DHCP 시작을 구분 | netfront; 생산 차단 → drain → join → backend/event/grant 정리 | 살아 있는 worker가 있으면 페이지를 닫지 않음. interface 오류도 잔존 상태에 포함 |
-| 주행 v1 client | 앱 main 한 스레드만 init/subscribe/poll/publish/close | 앱 main; `xd_finish`에서 close 후 quiesce 완료 통지 | 미초기화 client는 닫지 않음. client 종료 오류는 정리 실패로 전달 |
+| 주행 v1 client | 전용 worker만 Bootstrap/init/subscribe/latest/poll/publish/close | worker가 socket을 닫고 `xd_finish`/quiesce가 실제 join | 미시작 worker는 기다리지 않음. join/close 실패는 잔존·정리 오류로 전달 |
 | Publisher v2 client·socket | `xt_start`로 시작한 단일 worker만 사용 | worker가 직접 socket을 닫고 caller는 join | join timeout 뒤 TCB/stack 재사용 금지. 불확정 close 오류면 재연결·재시작 금지 |
 | 선택 진단 exercise | 시작한 thread만 대상 | Starter가 종료 요청 후 join | 자연 종료·초기화 실패도 실제 thread 종료를 join으로 확인 |
 
@@ -40,7 +40,7 @@ thread 내부 완료 신호와 kernel의 종료 확인을 구별한다.
 종료 감시·netfront·loop·Publisher 시작 자체의 실패는 앱 시작 거절이다. main은 모든 반환에서
 `xd_finish(client, app_result)`를 호출하며, 최초 앱 오류와 정리 오류를 각각 기록한다.
 아직 시작하지 않은 앱의 `app_done`을 기다리지 않는다. 실행 중인 앱에 대해서는 앱 소유자가
-v1 사용을 끝낸 뒤 보내는 완료 신호를 기다린다. 이 신호는 자원 quiesce 확인이며 main thread의
+계산을 끝낸 소유자의 완료 신호와 v1 worker join을 확인한다. 이 신호는 자원 quiesce 확인이며 main thread의
 TCB/stack 재사용 허가가 아니다.
 
 Network Starter는 종료 감시나 netfront 실패 뒤 exercise·Publisher를 추가로 시작하지 않는다.
@@ -94,6 +94,31 @@ Starter의 Diagnostics/Telemetry on/on, on/off, off/off 및 선택 exercise 구�
 off/on은 기존 의존성상 지원하지 않는다. 주행 공통 runtime은 Diagnostics·Telemetry·MQTT를
 필수로 사용한다. 시험용 failpoint와 경계 대역은 `platform/tests/apps`에만 두며 기본 펌웨어에는
 새 원격 장애 명령이나 활성 실패 주입을 추가하지 않는다.
+
+## 패킷 처리와 backend 관측
+
+패킷 worker는 Store API를 호출하지 않는다. 별도 상태 감시 worker가 기존 공유
+Store 세션과 backend watch를 사용한다. watch는 알림이므로 값을 다시 읽으며,
+알림이 합쳐진 경우를 위해 기존 250ms 주기 재관측도 유지한다. watch 대기는
+최대 1ms 세션 사용과 잠금 밖 idle로 나누고, 상태 조회의 기존 50ms 예산은 유지한다.
+새 Store 수신자나 세션, system workqueue의 긴 blocking 작업은 추가하지 않는다.
+
+`xnet_status_get`의 backend_observation은 0=미관측, 1=확인된 정상,
+2=이번 관측 불가, 3=확인된 Closing/Closed, 4=신원/프로토콜/전송 오류다.
+backend_error에 실제 오류를 보존한다. 관측 불가도 기존처럼 TX를 차단하며
+유예나 자동 재연결을 허용하지 않는다. backend_wait_stage는 최근 세션 획득(1),
+응답 대기(2), 정상 종료(0)의 구분이다. 초기화·종료의 Store handshake는 그대로다.
+
+링 poll의 64건 한도와 검증·메모리 게시 순서를 유지한다. 처리할 응답이 남았으면
+일반 10ms idle 대신 한 scheduler tick 뒤 재실행하여 낮은 우선순위 worker에도
+실행 기회를 준다. TX/RX 바이트를 임의로 버리거나 무제한 링 drain으로 바꾸지 않는다.
+일반 상태 감시 worker의 join을 먼저 확인한 뒤 기존 종료 주체가 Store를 이용해
+backend Closing/Closed·watch·grant를 정리한다. Store 자체는 마지막에 닫는다.
+
+Network Starter의 `xenova stats waits`는 패킷 poll 간격, packet lock 대기/보유,
+Store 세션 획득/응답 대기의 누적 최대와 관측 상태를 조회한다. `clock=cycles`는
+cycle counter, `kernel_ticks`는 tick 해상도다. 관측 최대는 최악 지연 보장값이 아니다.
+이 로컬 계측은 MQTT 계약을 늘리거나 앱 정상·차량 안전을 판정하지 않는다.
 
 ## 고정 전송 기반
 
