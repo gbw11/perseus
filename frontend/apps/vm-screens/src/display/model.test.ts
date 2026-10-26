@@ -3,6 +3,22 @@ import { presentationFixture } from './fixture';
 import { parsePresentation, SnapshotOrder } from './model';
 
 describe('HDMI presentation contract', () => {
+  it('rejects incompatible OS roles, missing detail targets and unsupported active driving targets', () => {
+    const wrongOs = presentationFixture();
+    wrongOs.state.vms[1]!.os.expected = 'debian';
+    expect(() => parsePresentation(wrongOs)).toThrow();
+    const missingTarget = presentationFixture();
+    missingTarget.outputs[1]!.vm_id = null;
+    expect(() => parsePresentation(missingTarget)).toThrow();
+    const invalidActive = presentationFixture();
+    invalidActive.state.drive.source.status = 'fresh';
+    invalidActive.state.drive.active_vm_id = invalidActive.state.vms[2]!.vm_id;
+    expect(() => parsePresentation(invalidActive)).toThrow();
+    const expired = presentationFixture();
+    expired.state.drive.source.status = 'stale';
+    expired.state.drive.mode = 'AUTO';
+    expect(() => parsePresentation(expired)).toThrow();
+  });
   it('accepts the three roles and two output mapping', () => {
     expect(parsePresentation(presentationFixture()).state.vms[1]!.role).toBe('backup_drive');
   });

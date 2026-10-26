@@ -128,6 +128,8 @@ export type EventType =
   | 'agent.status.changed'
   | 'recovery.started'
   | 'recovery.completed'
+  | 'recovery.recovered'
+  | 'recovery.cancelled'
   | 'recovery.failed'
   | 'demo.command.sent'
   | 'demo.command.completed'

@@ -29,6 +29,20 @@ function show(output = 'monitor-1', connected = true, p = presentationFixture())
 }
 
 describe('local HDMI screens', () => {
+  it('does not carry a stale app error or current Xen claim into the facts panel', () => {
+    const p = presentationFixture();
+    p.state.vms[0]!.app_state = 'failed';
+    p.state.vms[0]!.sources.app.status = 'stale';
+    p.state.vms[0]!.sources.xen.status = 'disconnected';
+    p.decisions[p.state.vms[0]!.vm_id] = {
+      kind: 'stale',
+      label: 'VM 상태 수신 지연 / 연결 끊김',
+      tone: 'warning',
+    };
+    show('monitor-2', true, p);
+    expect(screen.queryByText('failed')).not.toBeInTheDocument();
+    expect(screen.getByText('Xen 상태 (마지막 관측)')).toBeInTheDocument();
+  });
   it('shows two Zephyr roles and Debian without assigning manual-only to VM2', () => {
     show();
     expect(screen.getByRole('heading', { name: 'VM 전체 상태' })).toBeInTheDocument();

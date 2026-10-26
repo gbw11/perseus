@@ -98,6 +98,7 @@ export function parsePresentation(v: unknown): Presentation {
       typeof vm.agent_supported !== 'boolean' ||
       !object(vm.os) ||
       typeof vm.os.expected !== 'string' ||
+      vm.os.expected !== (vm.role === 'interaction' ? 'debian' : 'zephyr') ||
       !nullableText(vm.os.observed) ||
       typeof vm.os.current_run_verified !== 'boolean' ||
       !object(vm.sources) ||
@@ -129,10 +130,20 @@ export function parsePresentation(v: unknown): Presentation {
       !['pinned', 'follow_active'].includes(String(output.selection)) ||
       !(output.vm_id === null || ids.has(String(output.vm_id))) ||
       (index === 0 && output.vm_id !== null) ||
+      (index === 1 && output.vm_id === null) ||
       (output.reason !== undefined && typeof output.reason !== 'string')
     )
       throw new Error('출력 매핑이 올바르지 않습니다.');
   }
+  const drive = v.state.drive;
+  if (
+    !['AUTO', 'MANUAL', 'AUTO_READY', 'SAFE_STOP', 'unknown'].includes(String(drive.mode)) ||
+    (drive.active_vm_id !== null &&
+      !v.state.vms.some((vm) => vm.vm_id === drive.active_vm_id && vm.role !== 'interaction')) ||
+    ((drive.source as Record<string, unknown>).status !== 'fresh' &&
+      (drive.active_vm_id !== null || drive.mode !== 'unknown'))
+  )
+    throw new Error('활성 구동 VM·주행 모드를 확인할 수 없습니다.');
   return v as unknown as Presentation;
 }
 

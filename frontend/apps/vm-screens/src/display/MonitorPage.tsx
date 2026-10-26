@@ -1,3 +1,5 @@
+import { StatusBadge } from '@xenova/ui';
+import mark from '@xenova/ui/assets/xenova-mark.png';
 import { useEffect } from 'react';
 import { useParams } from 'react-router';
 import { ROLE, SOURCE_LABEL, type DisplayVm, type Presentation } from './model';
@@ -41,10 +43,12 @@ export function MonitorPage() {
   const controlFresh = connected && p?.state.drive.source.status === 'fresh';
   const mode = controlFresh ? p.state.drive.mode : 'unknown';
   return (
-    <main className={styles.screen} data-testid={outputId} data-connected={connected}>
+    <main className={styles.screen} data-theme="dark" data-testid={outputId} data-connected={connected}>
       <header className={styles.header}>
         <div>
-          <span className={styles.eyebrow}>PERSEUS / MULTI OS PLATFORM</span>
+          <span className={styles.eyebrow}>
+            <img src={mark} alt="Xenova" className={styles.brand} /> XENOVA / LOCAL HDMI
+          </span>
           <h1>{outputId === 'monitor-1' ? 'VM 전체 상태' : 'VM 상세 화면'}</h1>
         </div>
         <div className={styles.headerMeta}>
@@ -177,7 +181,20 @@ function VmCard({
         </div>
       </div>
       <div className={styles.status} data-tone={connected ? decision.tone : 'warning'}>
-        {connected ? decision.label : '상태 연결 끊김 · 마지막 관측 값'}
+        <StatusBadge
+          health={
+            !connected
+              ? 'recovering'
+              : decision.tone === 'ok'
+                ? 'ok'
+                : decision.tone === 'danger'
+                  ? 'fault'
+                  : decision.tone === 'muted'
+                    ? 'stopped'
+                    : 'recovering'
+          }
+          label={connected ? decision.label : '상태 연결 끊김 · 마지막 관측 값'}
+        />
       </div>
       <dl className={styles.facts}>
         <div>
@@ -192,12 +209,16 @@ function VmCard({
           </dd>
         </div>
         <div>
-          <dt>Xen 상태{!connected ? ' (과거)' : ''}</dt>
+          <dt>Xen 상태{!connected || vm.sources.xen.status !== 'fresh' ? ' (마지막 관측)' : ''}</dt>
           <dd>{vm.xen_state ?? '미확인'}</dd>
         </div>
         <div>
           <dt>앱 상태{!connected ? ' (과거)' : ''}</dt>
-          <dd>{vm.app_state === 'unknown' ? '미확인' : vm.app_state}</dd>
+          <dd>
+            {!connected || vm.sources.app.status !== 'fresh' || vm.app_state === 'unknown'
+              ? '미확인'
+              : vm.app_state}
+          </dd>
         </div>
       </dl>
       {detailed && (

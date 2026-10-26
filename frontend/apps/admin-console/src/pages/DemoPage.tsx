@@ -13,7 +13,17 @@ import {
 } from '../api/drive';
 import { useDisplays, useRouteDisplay, useVms } from '../api/queries';
 import type { Display, DisplayStatus, DisplayView } from '../api/types';
-import { appHealth, osLabel, plain, ROLE_ORDER, ROLES, signed, vmOf, type AppId } from '../domain/roles';
+import {
+  appHealth,
+  appHealthLabel,
+  osLabel,
+  plain,
+  ROLE_ORDER,
+  ROLES,
+  signed,
+  vmOf,
+  type AppId,
+} from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
 import { SimTrackControl } from './SimTrackControl';
 import styles from './pages.module.css';
@@ -79,14 +89,14 @@ function IsolationCard({ app }: { app: AppId }) {
   const health = appHealth(role, vm, state);
   const linux = vm?.guest_kind === 'linux';
   const down = vm?.state !== 'running' || health === 'recovering' || health === 'fault';
-  const active = drive?.control?.active_app === app;
+  const active = !!vm && drive?.control?.active_vm_id === vm.vm_id && drive.control.received_ago_ms < 3000;
   return (
     <Card>
       <div className={styles.appCard} style={{ borderTop: `3px solid ${role.color}` }}>
         <div className={styles.row}>
           <b style={{ color: role.color, fontSize: 'var(--x-text-lg)' }}>{role.title}</b>
           <span className={styles.grow} />
-          <StatusBadge health={health} size="sm" />
+          <StatusBadge health={health} label={appHealthLabel(vm, state)} size="sm" />
         </div>
         <div className={styles.eyebrow}>
           {vm ? `${vm.name} · ${osLabel(vm)}` : app}
