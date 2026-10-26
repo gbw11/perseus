@@ -20,6 +20,9 @@ Xenova는 Raspberry Pi 4에서 Xen으로 Linux·Zephyr VM을 실행하고 관리
 
 `/srv/xenova`는 템플릿·등록 자산·의도·journal의 영구 저장소다. `/run/xenova`에는
 이번 부팅의 실행·관측·CPU 준비 기록을 둔다. IP와 domid는 영구 신원이 아니다.
+Zephyr의 실제 CPU·pool·이름·펌웨어·UTC 및 실행별 진단 기록은
+[Telemetry Publisher](../../platform/guests/zephyr/telemetry/README.md)를 따른다.
+MQTT의 payload 2.1 지원, 실제 보드 수락과 제품 소비자의 저장·표시는 구분한다.
 
 ## 읽는 순서
 

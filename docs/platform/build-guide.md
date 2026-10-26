@@ -314,6 +314,11 @@ broker 주소·password·VM UUID를 공유 firmware에 넣지 않는다.
 각 비교는 별도의 새 `--output` 경로에서 빌드하고 옵션·실제 config·RAM·수신 결과를 분리해 기록한다.
 주입 계약, 실제 Core 매핑, native_sim의 격리 broker·독립 수신 시험은
 [Telemetry Publisher](../../platform/guests/zephyr/telemetry/README.md)를 따른다.
+현재 발행은 payload 2.1이다. `build_id`는 소스·설정·고정 도구 입력의 식별자이며,
+완성된 `zephyr.bin`의 SHA-256과 다르다. 패키징 manifest의 두 값을 확인하고,
+실행 시 검증한 로딩 기록을 통해 인스턴스에 주입한다. dom0의 clock/evidence timer와
+필터가 포함된 xenconsoled는 해당 실행의 UTC·제한된 오류 보존을 지원한다.
+타이머·패키지 포함 확인과 실제 보드의 시각 품질·fatal 포착 수락은 구분한다.
 게시한 firmware는 불변 입력으로 보존한다. 실제 보드 적용·전환은 대상 UUID와 자산 백업·복원 절차를 확인한 유지보수 단계에서 수행한다.
 
 ### 실제 manifest로 기본 선택 확정
