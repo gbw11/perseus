@@ -50,6 +50,12 @@ int xm_topic_app_events(char *out, size_t n, const char *app_id)
 	return segment_ok(app_id) ? fmt(out, n, "%s/apps/%s/events%s", app_id, "") : -EINVAL;
 }
 
+int xm_topic_vm_app_events(char *out, size_t n, const char *vm_id, const char *app_id)
+{
+	return segment_ok(vm_id) && segment_ok(app_id) ?
+		fmt(out, n, "%s/vms/%s/apps/%s/events", vm_id, app_id) : -EINVAL;
+}
+
 int xm_topic_manual_input(char *out, size_t n)
 {
 	return fmt(out, n, "%s/apps/manual/input%s%s", "", "");
@@ -125,6 +131,15 @@ void xm_topic_parse(const char *topic, struct xm_topic_info *info)
 		return;
 	}
 	const char *rest = topic + plen + 1;
+	if (levels(rest) == 5 && strncmp(rest, "vms/", 4) == 0) {
+		const char *app, *middle, *last; size_t alen, mlen, llen;
+		if (level(rest,1,&seg,&len) && len && level(rest,2,&middle,&mlen) && mlen==4 &&
+		    !strncmp(middle,"apps",4) && level(rest,3,&app,&alen) && alen &&
+		    level(rest,4,&last,&llen) && llen==6 && !strncmp(last,"events",6)) {
+			copy_level(info->vm_id,seg,len); copy_level(info->app_id,app,alen);
+		}
+		return;
+	}
 
 	/* vms/{vm_id}/{kind} — 정확히 3단계, 각 단계 비어 있지 않음 */
 	if (levels(rest) == 3 && strncmp(rest, "vms/", 4) == 0 && level(rest, 1, &seg, &len) && len > 0) {

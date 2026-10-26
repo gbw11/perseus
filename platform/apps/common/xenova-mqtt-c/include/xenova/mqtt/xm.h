@@ -35,6 +35,7 @@ extern "C" {
 
 int xm_topic_vm(char *out, size_t n, const char *vm_id, const char *kind); /* kind: heartbeat … command-result */
 int xm_topic_app_events(char *out, size_t n, const char *app_id);
+int xm_topic_vm_app_events(char *out, size_t n, const char *vm_id, const char *app_id);
 int xm_topic_manual_input(char *out, size_t n);
 int xm_topic_vehicle_control(char *out, size_t n);
 int xm_topic_vehicle_status(char *out, size_t n);
