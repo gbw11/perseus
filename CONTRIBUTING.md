@@ -148,8 +148,8 @@ rebase 후 이미 push했던 브랜치를 다시 올릴 때는 `git push --force
 
 - 기능별 develop 브랜치에서 기능이 동작하면 develop으로 MR을 올립니다. 통합 데모 전에는 최소 1번 반드시 올립니다.
 - 이 MR은 **Squash 없이 Merge commit**으로 머지하고, 소스 브랜치는 **삭제하지 않습니다**.
-- develop의 변경(다른 파트 작업)은 GitLab에서 **develop → 기능별 develop 브랜치 MR**(Merge commit)로 받아옵니다. 여러 명이 쓰는 브랜치라 rebase·force push는 하지 않습니다.
-- 충돌이 나면 작업 브랜치를 하나 따서 해결한 뒤 그 브랜치로 MR을 올립니다.
+- 기능별 develop 브랜치(`platform`, `backend`, `frontend`, `vehicle`) → `develop` MR이 머지되고 develop CI가 성공하면 Jenkins Bot이 검증한 develop 머지 커밋으로 **해당 소스 브랜치 하나만** 자동 fast-forward합니다. 동기화용 브랜치나 MR을 별도로 만들지 않습니다.
+- 자동 동기화 전에 해당 소스 브랜치가 변경되어 fast-forward할 수 없으면 Jenkins는 push하지 않고 실패합니다. 이때만 아래처럼 작업 브랜치를 하나 따서 충돌을 해결한 뒤 MR을 올립니다. 여러 명이 쓰는 브랜치라 rebase·force push는 하지 않습니다.
 
 ```bash
 git switch -c chore/backend/sync-develop origin/backend
