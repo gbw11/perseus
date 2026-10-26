@@ -199,6 +199,52 @@ paths:
           $ref: '#/components/responses/PlatformUnavailable'
         '504':
           $ref: '#/components/responses/DriverTimeout'
+  /api/v1/recovery/events:
+    get:
+      tags: [Recovery]
+      operationId: listRecoveryEvents
+      summary: 복구 이벤트 재보충 (오래된 순)
+      description: >-
+        Recovery Worker(S15P31E110-125) 가 dom0 에 남긴 복구 이벤트(계약 2.5)를 오래된 순으로 돌려준다(계약 4.7).
+        실시간 전달은 MQTT-12 이고 이 엔드포인트는 Spring 이 재시작·단절 뒤 빠진 구간을 채우는 용도다. 최근 2,000 건을 보관한다.
+        after_event_id 가 보관 범위 밖이면 gap: true 와 함께 보관된 가장 오래된 것부터 돌려준다. 커서 뒤의 보관 줄이 손상돼
+        이벤트를 잃었을 수 있어도 gap: true 다. events 가 비어 있으면 next_after_event_id 는 null 이다.
+      parameters:
+        - name: after_event_id
+          in: query
+          required: false
+          description: 이 이벤트 다음부터(UUID). 생략하면 보관된 가장 오래된 것부터
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: 기본 200, 최대 1000
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: 이벤트 목록과 다음 커서
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecoveryEventsResponse'
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
+        '503':
+          description: >-
+            dom0 의 복구 이벤트 파일을 읽을 수 없음(권한·I/O 오류, code PlatformUnavailable). 빈 목록으로 숨기지 않는다.
+            파일이 아직 없으면(이벤트 없음·host 재부팅) 이 응답이 아니라 200 이다. 재시도 가능
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /healthz:
     get:
       tags: [Health]
@@ -423,6 +469,103 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/VmStats'
+    RecoveryEventType:
+      type: string
+      description: 계약 2.5. Spring EventType 의 문자열과 같다
+      enum: [recovery.started, recovery.completed, recovery.recovered, recovery.cancelled, recovery.failed]
+    RecoveryEventError:
+      type: object
+      additionalProperties: false
+      properties:
+        code:
+          type: [string, 'null']
+          description: >-
+            Worker 의 결과 코드. 플랫폼 응답이면 platform_code 와 같고(cancelled 의 VM_NOT_FOUND 등), 그 밖에 TARGET_NOT_ELIGIBLE(cancelled:
+            사용자 stop·삭제·의도 변경), REOBSERVE_TIMEOUT, RECONCILE_REQUIRED, INTERNAL_ERROR
+        platform_code:
+          type: [string, 'null']
+          description: 플랫폼 원본 코드(8.1절)만. Worker 가 스스로 끝낸 경우 null
+        message:
+          type: [string, 'null']
+    RecoveryEvent:
+      type: object
+      description: >-
+        계약 2.5 복구 이벤트 객체. Recovery Worker 가 시도마다 남긴다. 유형별 규칙: started 는 terminal 필드(attempt_duration_ms·recovery_duration_ms·
+        execution_id·final·next_retry_at·error)가 모두 null. completed 는 execution_id·recovery_duration_ms 필수, final·next_retry_at·error null.
+        recovered 는 recovery_duration_ms 필수, execution_id·final·next_retry_at·error null. recovered·cancelled 가 이미 끝난 시도 뒤(backoff 중)에
+        오면 장애 단위 종료라 recovery_attempt_id·attempt_duration_ms 가 null 이다(그 밖의 유형은 recovery_attempt_id 필수). cancelled 는 recovery_duration_ms·error(취소 사유) 필수,
+        execution_id·final·next_retry_at null. failed 는 final·error 필수, execution_id null. final 이면 recovery_duration_ms 필수·next_retry_at null,
+        아니면 next_retry_at 필수·recovery_duration_ms null.
+        규칙에 맞지 않는 이벤트는 저장·발행하지 않는다
+      additionalProperties: false
+      required: [event_id, type, vm_id, recovery_id, attempt, reason, detected_at, occurred_at]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/RecoveryEventType'
+        vm_id:
+          $ref: '#/components/schemas/VmId'
+        recovery_id:
+          type: string
+          format: uuid
+          description: 장애 한 건. 최초 판정부터 최종 성공·포기까지 같은 값
+        recovery_attempt_id:
+          type: [string, 'null']
+          format: uuid
+          description: 논리적 시도. 재전달·결과 조회는 같은 값 재사용
+        attempt:
+          type: integer
+          minimum: 0
+        reason:
+          type: string
+          description: HEARTBEAT_LOST / APP_HEARTBEAT_LOST / DOMAIN_ABSENT / DOMAIN_CRASHED
+        mode:
+          type: [string, 'null']
+          description: start-if-absent / graceful-restart / force-restart
+        detected_at:
+          type: string
+          format: date-time
+        occurred_at:
+          type: string
+          format: date-time
+        attempt_duration_ms:
+          type: [integer, 'null']
+        recovery_duration_ms:
+          type: [integer, 'null']
+        execution_id:
+          type: [string, 'null']
+        final:
+          type: [boolean, 'null']
+        next_retry_at:
+          type: [string, 'null']
+          format: date-time
+        error:
+          oneOf:
+            - $ref: '#/components/schemas/RecoveryEventError'
+            - type: 'null'
+    RecoveryEventsResponse:
+      type: object
+      description: 계약 4.7
+      additionalProperties: false
+      required: [events, gap]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecoveryEvent'
+        next_after_event_id:
+          type: [string, 'null']
+          format: uuid
+          description: 돌려준 마지막 이벤트의 event_id. events 가 비어 있으면 null
+        oldest_event_id:
+          type: [string, 'null']
+          format: uuid
+          description: 보관된 가장 오래된 이벤트(진단용)
+        gap:
+          type: boolean
+          description: after_event_id 가 보관 범위 밖이거나 커서 뒤의 보관 줄이 손상돼 그 이후 이력을 잃었을 수 있음
     Health:
       type: object
       additionalProperties: false

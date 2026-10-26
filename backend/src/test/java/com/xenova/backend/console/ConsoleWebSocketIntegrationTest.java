@@ -165,7 +165,7 @@ class ConsoleWebSocketIntegrationTest {
     }
 
     private String login() throws Exception {
-        String body = "{\"username\":\"console-test-user\",\"password\":\"password123!\"}";
+        String body = "{\"username\":\"console-test-user\",\"nickname\":\"콘솔 테스트\",\"password\":\"password123!\"}";
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         rest.postForEntity("/api/v1/auth/signup", new HttpEntity<>(body, headers), String.class);

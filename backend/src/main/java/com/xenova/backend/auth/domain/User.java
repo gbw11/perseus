@@ -17,20 +17,28 @@ public class User {
     @Column(nullable = false, unique = true, length = 32)
     private String username;
 
+    @Column(nullable = false, length = 50)
+    private String nickname;
+
     @Column(name = "password_hash", nullable = false, length = 100)
     private String passwordHash;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
     protected User() {
     }
 
-    public User(String id, String username, String passwordHash, Instant createdAt) {
+    public User(String id, String username, String nickname, String passwordHash, Instant createdAt) {
         this.id = id;
         this.username = username;
+        this.nickname = nickname;
         this.passwordHash = passwordHash;
         this.createdAt = createdAt;
+        this.updatedAt = createdAt;
     }
 
     public String getId() {
@@ -41,11 +49,19 @@ public class User {
         return username;
     }
 
+    public String getNickname() {
+        return nickname;
+    }
+
     public String getPasswordHash() {
         return passwordHash;
     }
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 }

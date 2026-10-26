@@ -399,6 +399,22 @@ def test_worker_retries_retained_clear_even_when_observation_fails():
     assert worker.run_once() == [] and client.cleared == [health_topic(DEBIAN)]
 
 
+def test_worker_collects_engine_results_even_when_observation_fails():
+    clock = [1000.0]
+    calls = []
+    engine = SimpleNamespace(on_judgment=lambda j, now: calls.append(("judgment", j.vm_id)), tick=lambda now: calls.append(("tick", now)),
+                             collect=lambda now: calls.append(("collect", now)), shutdown=lambda: calls.append(("shutdown",)))
+
+    def observer():
+        raise PlatformUnavailable("busy")
+
+    worker = RecoveryWorker(SETTINGS, observer, Watcher(SETTINGS, HeartbeatTable(), AppHeartbeatTable(), clock=lambda: clock[0]),
+                            link=LinkState.up, engine=engine, clock=lambda: clock[0])
+    assert worker.run_once() == [] and calls == [("collect", 1000.0)]  # 판정은 못 해도 끝난 복구 결과는 회수한다
+    worker.shutdown()
+    assert calls[-1] == ("shutdown",)
+
+
 def test_worker_shutdown_marks_health_unavailable():
     clock = [1000.0]
     client = FakeClient()

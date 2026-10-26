@@ -31,7 +31,7 @@ import org.springframework.test.web.servlet.ResultActions;
 class MetricsApiIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"metrics-user","password":"password123!"}
+            {"username":"metrics-user","nickname":"메트릭 테스트","password":"password123!"}
             """;
     private static final String VM = "vm-metrics";
 

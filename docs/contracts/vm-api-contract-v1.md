@@ -207,7 +207,7 @@ dom0-manager가 `xentop -b -i 1 -n -x -f` 한 번의 출력에서 만드는 VM�
 | 필드 | 의미 |
 |---|---|
 | `event_id` | UUID. Spring이 중복 수신을 거르는 키 |
-| `type` | `recovery.started` / `recovery.completed` / `recovery.failed`. Spring `EventType`의 문자열과 같다 |
+| `type` | `recovery.started` / `recovery.completed` / `recovery.recovered` / `recovery.cancelled` / `recovery.failed`. Spring `EventType`의 문자열과 같다. `completed`는 Worker의 시도로 새 Xen 실행이 관측됨, `recovered`는 시도가 완료되기 전에 다른 경로(사용자 조작·플랫폼 쪽 재시작·생존 신호 복귀)로 건강해짐, `cancelled`는 사용자 stop·삭제·의도 변경으로 대상이 아니게 됨, `failed`는 실제 복구 실패 |
 | `recovery_id` | 장애 한 건의 ID. 최초 판정(`detected_at`)부터 최종 성공 또는 포기(`final`)까지 같은 값. Worker가 재시작해도 dom0에 저장된 미완료 `recovery_id`를 이어 간다 |
 | `recovery_attempt_id` | 논리적 복구 시도마다 발급하는 UUID이자 플랫폼 `recover_once` journal 키. **같은 시도의 재전달(응답 유실·Worker 재시작 뒤 재확인)과 결과 조회(`recovery-operation`)에는 반드시 같은 값을 재사용한다.** 이전 시도가 `failed`로 확정되고 backoff 뒤 다음 시도를 시작할 때만 새 UUID를 발급한다. Spring 이벤트의 `operation_id`로 기록 |
 | `attempt` | 같은 `recovery_id` 안의 시도 번호(1부터). 새 `recovery_attempt_id`를 발급할 때만 1씩 증가하고 재전달·재확인에서는 그대로다. 새 `recovery_id`에서 1로 돌아간다. 재시도 한도·대기는 복구 정책(S15P31E110-125) |
@@ -215,14 +215,14 @@ dom0-manager가 `xentop -b -i 1 -n -x -f` 한 번의 출력에서 만드는 VM�
 | `mode` | 플랫폼 `recover_once`의 `mode`: `start-if-absent` / `graceful-restart` / `force-restart` |
 | `detected_at` | 장애 판정 시각 (dom0) |
 | `occurred_at` | 이 이벤트의 시각 (dom0) |
-| `attempt_duration_ms` | `completed`·`failed`에만. 이 시도의 `started`부터 결과 확정까지 |
-| `recovery_duration_ms` | `completed`, 그리고 `failed`이면서 `final`일 때만. `detected_at`부터 새 실행 관측(`observed`) 또는 포기까지, 장애 한 건 전체. Spring 성능 지표 `vm_recovery_ms`의 원천(성공한 경우만) |
+| `attempt_duration_ms` | `started` 외에만. 마지막 시도의 `started`부터 이 이벤트까지 |
+| `recovery_duration_ms` | 장애 한 건을 끝내는 이벤트(`completed`·`recovered`·`cancelled`, `final`인 `failed`)에만. `detected_at`부터 그 끝까지. Spring 성능 지표 `vm_recovery_ms`의 원천은 `completed`의 값뿐 |
 | `execution_id` | `completed`에만. 플랫폼이 결합한 새 실행 ID |
 | `final` | `failed`에만. 재시도 한도 도달·정책상 중단이면 `true`(더 시도하지 않음) |
 | `next_retry_at` | `failed`이고 `final`이 아닐 때 다음 시도 예정 시각 |
-| `error` | `failed`에만. `{platform_code, message}` (8.1절 `platform_code`) |
+| `error` | `failed`(실패 사유)와 `cancelled`(취소 사유)에만. `{code, platform_code, message}`. `platform_code`는 플랫폼 원본 코드(8.1절)이고 Worker가 스스로 끝낸 경우 `null`. `code`는 Worker의 결과 코드로, 플랫폼 응답이면 `platform_code`와 같고(`cancelled`의 `VM_NOT_FOUND` 등) 그 밖에 `TARGET_NOT_ELIGIBLE`(`cancelled`: 사용자 stop·삭제·의도 변경) / `REOBSERVE_TIMEOUT`(플랫폼이 대상 변경을 알린 뒤 감시기 판단이 없음) / `RECONCILE_REQUIRED`(관측만으로 spec을 만들 수 없거나 새 실행 ID 없이 completed) / `INTERNAL_ERROR` |
 
-한 시도는 `started` 뒤 `completed` 또는 `failed` 하나로 끝나고, 장애 한 건(`recovery_id`)은 `completed` 하나 또는 `final: true`인 `failed` 하나로 끝납니다. 같은 `recovery_id`의 이벤트를 묶으면 시도 횟수·최종 성공 여부·장애당 복구 시간이 나옵니다. 재시작 성공은 Xen 실행이 다시 관측됐다는 뜻이며 앱 준비·주행 권한 회복이 아닙니다(플랫폼 `app_readiness: unknown`). 차량 제어권 전환(활성→대기 승격)은 주행 게이트웨이가 `drive.mode.changed`(MQTT 계약 6장, MQTT-06)와 주행 명세의 `failover_event`로 알리며 **VM 복구 이벤트가 아닙니다.**
+한 시도는 `started` 뒤 `completed`·`recovered`·`cancelled`·`failed` 중 하나로 끝나고, 장애 한 건(`recovery_id`)은 `completed`·`recovered`·`cancelled` 하나 또는 `final: true`인 `failed` 하나로 끝납니다. `completed`는 **이 시도로** 플랫폼이 새 Xen 실행을 관측하고 `execution_id`를 돌려준 경우에만 냅니다. 시도가 완료되기 전에 VM이 건강해지면 Worker는 더 시도하지 않고 `recovered`로, 사용자 stop·삭제·의도 변경이면 `cancelled`로 닫습니다. 둘 다 복구 실패가 아닙니다(5장). 시도 없이 끝난 장애(판정 직후 회복·취소, 정책 `none`)는 이벤트를 내지 않습니다. `recovered`·`cancelled`가 이미 `failed`(`final: false`)로 끝난 시도 뒤(backoff 중)에 오면 그 시도가 아니라 장애 한 건의 종료이므로 `recovery_attempt_id`·`attempt_duration_ms`가 `null`입니다(한 시도에 종료 이벤트는 하나). 같은 `recovery_id`의 이벤트를 묶으면 시도 횟수·최종 성공 여부·장애당 복구 시간이 나옵니다. Worker는 이벤트를 상태 전이와 함께 dom0에 저장한 뒤 발행하므로, Worker가 그 사이 재시작하면 같은 이벤트가 **같은 `event_id`로** 다시 발행될 수 있습니다(Spring은 `event_id`로 거릅니다). 재시작 성공은 Xen 실행이 다시 관측됐다는 뜻이며 앱 준비·주행 권한 회복이 아닙니다(플랫폼 `app_readiness: unknown`). 차량 제어권 전환(활성→대기 승격)은 주행 게이트웨이가 `drive.mode.changed`(MQTT 계약 6장, MQTT-06)와 주행 명세의 `failover_event`로 알리며 **VM 복구 이벤트가 아닙니다.**
 
 ## 3. 상태 모델
 
@@ -353,8 +353,9 @@ Recovery Worker가 dom0에 남긴 복구 이벤트(2.5절)를 오래된 순으�
 | 응답 | 본문 |
 |---|---|
 | `200` | `{"events": [복구 이벤트 객체], "next_after_event_id": "..." \| null, "oldest_event_id": "..." \| null, "gap": false}`. `next_after_event_id`는 돌려준 마지막 이벤트의 `event_id`(비어 있으면 `null`), `oldest_event_id`는 dom0가 보관 중인 가장 오래된 이벤트 |
-| `200` + `gap: true` | `after_event_id`가 보관 범위 밖(만료·삭제)이라 **그 이후 이력을 잃었을 수 있음**. `events`는 보관된 가장 오래된 것부터이고 `oldest_event_id`가 그 첫 이벤트. 빈 배열 + `gap: false`는 "새 이벤트 없음"이며 이와 구분된다 |
+| `200` + `gap: true` | `after_event_id`가 보관 범위 밖(만료·삭제)이라 **그 이후 이력을 잃었을 수 있음**. `events`는 보관된 가장 오래된 것부터이고 `oldest_event_id`가 그 첫 이벤트. 또는 커서와 돌려준 마지막 이벤트 사이의 보관 줄이 손상돼(기록 중 중단 등) 그 자리의 이벤트를 잃었을 수 있음(이때 `events`는 커서 다음부터). dom0는 손상 자리를 보관 범위 안에서 유지하므로 커서가 그 자리를 지나기 전까지 `gap: true`다. 빈 배열 + `gap: false`는 "새 이벤트 없음"이며 이와 구분된다 |
 | `400 InvalidArgument` | `after_event_id`가 UUID 형식이 아니거나 `limit` 범위 밖 |
+| `503 PlatformUnavailable` | dom0의 이벤트 파일을 읽을 수 없음(권한·I/O 오류). 빈 목록으로 숨기지 않는다. 재시도하고 그동안 받은 커서는 그대로 둔다. 파일이 아직 없으면(이벤트 없음·host 재부팅) `200` |
 
 Spring의 페이지 규칙: (1) `gap: true`면 경고(`WARN`)로 `recovery.failed` 유실 가능성을 이벤트 로그에 남기고, (2) 그 응답의 `events`를 정상 처리한 뒤, (3) 다음 요청에는 `oldest_event_id`가 아니라 `next_after_event_id`를 보내며, (4) `events`가 비거나 `next_after_event_id`가 `null`이면 조회를 끝낸다. `oldest_event_id`는 유실 구간 진단용 정보일 뿐 커서로 쓰지 않는다(`after_event_id`는 "그 다음부터"라 다시 보내면 첫 이벤트 이후를 중복 조회한다). dom0는 최근 2,000건을 보관합니다(한도는 복구 정책 S15P31E110-125에서 조정).
 
@@ -391,7 +392,7 @@ Xen은 VM 상태 변화를 누구에게도 알리지 않으므로, Spring이 dom
 
 사용률은 같은 `vm_id`의 연속 두 표본으로 Spring이 계산합니다. `cpu_percent = 100 × Δcpu_time_s ÷ Δt초 ÷ vcpus`(0~100), 전송률은 `Δbytes ÷ Δt초`. `domid`가 바뀌었거나 누적값이 줄었으면 재시작으로 보고 그 구간의 사용률은 계산하지 않습니다. 에이전트 메트릭(MQTT-03)은 `source = "guest_agent"`로 따로 저장하며 두 계열을 섞어 계산하지 않습니다.
 
-**복구 이벤트의 기록.** Spring은 MQTT-12로 받은 복구 이벤트(2.5절)를 `EventType` `recovery.started` / `recovery.completed` / `recovery.failed`로 기록합니다. `operation_id = recovery_attempt_id`, `occurred_at`은 객체의 값, `payload`는 객체 전체이고, `event_id`가 같은 이벤트는 한 번만 기록합니다. 심각도는 `started`·`completed` `INFO`, `failed` `WARN`, `failed`이면서 `final`이면 `ERROR`입니다. `recovery.completed`의 `recovery_duration_ms`를 성능 지표 `vm_recovery_ms`로 기록하고, 같은 `recovery_id`로 시도들을 묶어 표시합니다. 복구로 바뀐 Xen 상태는 기존 주기 조회가 `vm.state.changed`(`cause: detected`)로 따로 기록하며, `cause`에 복구나 페일오버 값을 추가하지 않습니다. 제어권 전환은 주행 이벤트(`drive.mode.changed`, MQTT 계약 5·6장)로만 남깁니다. Spring은 복구 이벤트를 받아 표시할 뿐 재시작 명령을 내리지 않습니다(1.2절). 재시작 뒤 빠진 구간은 4.7절로 채웁니다.
+**복구 이벤트의 기록.** Spring은 MQTT-12로 받은 복구 이벤트(2.5절)를 `EventType` `recovery.started` / `recovery.completed` / `recovery.recovered` / `recovery.cancelled` / `recovery.failed`로 기록합니다. `operation_id = recovery_attempt_id`(장애 단위 `recovered`·`cancelled`처럼 `null`이면 `recovery_id`), `occurred_at`은 객체의 값, `payload`는 객체 전체이고, `event_id`가 같은 이벤트는 한 번만 기록합니다. 심각도는 `started`·`completed`·`recovered`·`cancelled` `INFO`, `failed` `WARN`, `failed`이면서 `final`이면 `ERROR`입니다. 복구 실패율은 `final`인 `failed`만 실패로 세고 `recovered`·`cancelled`는 넣지 않습니다. `recovery.completed`의 `recovery_duration_ms`를 성능 지표 `vm_recovery_ms`로 기록하고, 같은 `recovery_id`로 시도들을 묶어 표시합니다. 복구로 바뀐 Xen 상태는 기존 주기 조회가 `vm.state.changed`(`cause: detected`)로 따로 기록하며, `cause`에 복구나 페일오버 값을 추가하지 않습니다. 제어권 전환은 주행 이벤트(`drive.mode.changed`, MQTT 계약 5·6장)로만 남깁니다. Spring은 복구 이벤트를 받아 표시할 뿐 재시작 명령을 내리지 않습니다(1.2절). 재시작 뒤 빠진 구간은 4.7절로 채웁니다.
 
 ---
 

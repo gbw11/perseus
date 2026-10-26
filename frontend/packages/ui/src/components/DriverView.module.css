@@ -1,0 +1,34 @@
+.frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-sunken);
+}
+.canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.dimmed .canvas,
+.dimmed canvas {
+  opacity: 0.45;
+}
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--x-text-muted);
+}
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--x-space-2) var(--x-space-3);
+  pointer-events: none;
+}
