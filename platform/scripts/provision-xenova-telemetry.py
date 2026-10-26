@@ -150,7 +150,7 @@ class XenStore:
         parent = f"/local/domain/{domid}/data/xenova-{self.channel}"
         target = parent + "/bootstrap"
         wanted = [(0, 0), (domid, 1)]  # dom0 owns; only this guest can read.
-        wire = json.dumps(bootstrap, separators=(",", ":")).encode()
+        wire = json.dumps(bootstrap, ensure_ascii=False, separators=(",", ":")).encode('utf-8')
         if len(wire) > 2048:
             raise ValueError("bootstrap exceeds existing Store client limit")
         for _ in range(4):
@@ -182,6 +182,19 @@ class XenStore:
                         raise OSError("Store permissions failed")
                     if self.permissions(tx, path) != wanted:
                         raise ValueError("Store permission verification failed")
+                if self.channel=='telemetry':
+                    # Existing one Store receiver is reused for a bounded clock
+                    # exchange. No guest may write another VM's response/bootstrap.
+                    clock=parent+'/clock'
+                    for node,perms_value in ((clock,wanted),(clock+'/request',[(0,0),(domid,3)]),
+                                             (clock+'/response',wanted)):
+                        if self.read(tx,node) is None:
+                            if not self.lib.xs_write(self.handle,tx,node.encode(),b'',0):
+                                raise OSError('clock node creation failed')
+                        perms=(Permission*2)(*(Permission(*v) for v in perms_value))
+                        if not self.lib.xs_set_permissions(self.handle,tx,node.encode(),perms,2):
+                            raise OSError('clock permission setup failed')
+                        if self.permissions(tx,node)!=perms_value:raise ValueError('clock permissions differ')
                 committed = self.lib.xs_transaction_end(self.handle, tx, False)
                 transaction_open = False
                 if committed:
@@ -211,10 +224,18 @@ def save_receipt(path, value, create=False):
 
 
 def provision(context, credential, source_identity, receipt_path, previous_path=None, store=None, observe=None,
-              channel="telemetry", guest_boot_receipt=None):
+              channel="telemetry", guest_boot_receipt=None, metadata=None):
     if channel not in ("telemetry", "drive") or getattr(store, "channel", "telemetry") != channel:
         raise ValueError("bootstrap channel/store mismatch")
     shared_boot = None
+    if channel=='telemetry' and metadata is None and isinstance(store,XenStore):
+        if receipt_path.exists():
+            # Retry reuses this session's committed metadata. Current collector
+            # availability is not a new VM execution or a reason to rotate v1 IDs.
+            existing,_=private_json(receipt_path);metadata=existing.get('metadata',{})
+        else:
+            from xenova_telemetry_support import metadata as execution_metadata
+            metadata=execution_metadata(context)
     if channel == "drive":
         if guest_boot_receipt is None:
             raise ValueError("drive channel requires this execution's applied telemetry boot receipt")
@@ -239,13 +260,29 @@ def provision(context, credential, source_identity, receipt_path, previous_path=
         if shared_boot and receipt["boot_id"] != shared_boot:
             raise ValueError("guest boot authority changed")
     else:
-        receipt = {"schema_version": "2.0-bootstrap", "channel": channel, "context": context, "credential_source": source_identity,
+        receipt = {"schema_version": "2.1-bootstrap", "metadata":metadata or {}, "channel": channel, "context": context, "credential_source": source_identity,
                    "boot_id": shared_boot or (previous["boot_id"] if previous else str(uuid.uuid4())),
                    "publisher_id": str(uuid.uuid4()), "receipt_id": str(uuid.uuid4()), "phase": "prepared"}
         save_receipt(receipt_path, receipt, True)
     bootstrap = {**credential, "boot_id": receipt["boot_id"], "publisher_id": receipt["publisher_id"],
                  "host_boot_id": context["host_boot_id"], "execution_id": context["execution_id"],
                  "receipt_id": receipt["receipt_id"]}
+    if metadata is not None and receipt.get('metadata',{})!=metadata:
+        raise ValueError('execution metadata changed; explicit session refresh required')
+    if channel=='telemetry':bootstrap.update(receipt.get('metadata',{}))
+    if channel=='telemetry' and receipt['phase']=='prepared' and bootstrap.get('persistent_crash') and isinstance(store,XenStore):
+        from xenova_telemetry_support import register_capture
+        try:
+            register_capture(context,receipt_path)
+            receipt['capture_setup']={'status':'configured'}
+        except (OSError,ValueError,KeyError) as error:
+            # Optional evidence setup must not block the shared guest boot/v1
+            # provisioning chain. Keep identities and a durable failure fact.
+            receipt['metadata']['persistent_crash']=False
+            bootstrap['persistent_crash']=False
+            receipt['capture_setup']={'status':'unavailable','error':type(error).__name__,
+                'errno':getattr(error,'errno',None)}
+            save_receipt(receipt_path,receipt)
     old = {**previous["context"], **{k: previous[k] for k in ("boot_id", "publisher_id", "receipt_id")}} if previous else None
     if observe() != context:
         raise ValueError("execution changed before injection")
