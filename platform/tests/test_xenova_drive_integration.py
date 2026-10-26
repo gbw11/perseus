@@ -174,6 +174,22 @@ class DriveAnalysisTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "terminal result"):
             self.analyzer.analyze(self.root)
 
+    def test_calculation_complete_does_not_hide_unconfirmed_transmissions(self):
+        self.async_fixture()
+        path = self.root / "manual.stdout"
+        original = path.read_text()
+        for prefix in ("XD_SUMMARY ", "XD_IO "):
+            lines = []
+            for line in original.splitlines():
+                if line.startswith(prefix):
+                    value = json.loads(line[len(prefix):])
+                    value["transmissions_complete"] = False
+                    line = prefix + json.dumps(value)
+                lines.append(line)
+            path.write_text("\n".join(lines))
+            with self.assertRaisesRegex(ValueError, "transmission"):
+                self.analyzer.analyze(self.root)
+
     def test_incomplete_window_clock_failure_and_counter_saturation_refuse(self):
         path = self.root / "manual.stdout"
         original = path.read_text()

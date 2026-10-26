@@ -57,8 +57,12 @@ def source(path):
             summaries[0].get("clock_rc") or summaries[0].get("task_rc")):
         raise ValueError("source capture lost/saturated/truncated")
     if summaries[0].get("schema_version") == 2:
+        if summaries[0].get("transmissions_complete") is False:
+            raise ValueError("calculation window ended but transmissions are not complete")
         if len(io) != 1 or int(io[0]["delivery_overflow"]) or len(sends) != int(io[0]["delivery_rows"]):
             raise ValueError("one complete transmission capture required")
+        if io[0].get("transmissions_complete") is False:
+            raise ValueError("terminal transmission capture is not sealed")
         if len({v["id"] for v in sends}) != len(sends):
             raise ValueError("duplicate candidate terminal result")
         by_id = {v["id"]: v for v in sends}

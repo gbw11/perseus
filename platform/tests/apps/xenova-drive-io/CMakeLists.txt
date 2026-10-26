@@ -8,7 +8,15 @@ project(xenova_drive_io)
 # Compile the product exchange/owner unchanged, with real kernel locks/threads.
 # Only Bootstrap, MQTT I/O and capture sink are external boundaries here.
 set_property(TARGET xenova_drive_runtime PROPERTY SOURCES ${PLATFORM}/apps/common/xenova-drive-runtime/src/io.c)
-if(XL_MQTT_BOUNDARY)
+if(XL_CAPTURE_BOUNDARY)
+  # Compile the real console/capture callbacks in the test translation unit;
+  # only the authenticated-bootstrap setup and MQTT I/O boundary are fixtures.
+  zephyr_link_libraries(-Wl,--wrap=xm_zclient_poll,--wrap=xm_zclient_publish_until,--wrap=xm_zclient_close)
+  if(XL_CAPTURE_DRIVE_SOURCE)
+    target_compile_definitions(app PRIVATE XL_CAPTURE_DRIVE_SOURCE="${XL_CAPTURE_DRIVE_SOURCE}")
+  endif()
+  target_sources(app PRIVATE src/capture.c)
+elseif(XL_MQTT_BOUNDARY)
   zephyr_link_libraries(-Wl,--wrap=mqtt_publish,--wrap=mqtt_abort,--wrap=xt_socket_close)
   target_sources(app PRIVATE src/mqtt.c)
 else()

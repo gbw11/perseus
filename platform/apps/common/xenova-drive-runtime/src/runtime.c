@@ -86,6 +86,11 @@ static uint64_t generated, attempted, accepted, failed, dropped;
 static uint64_t capture_start, capture_end, overflow;
 static size_t count;
 static bool capture_complete, counter_saturated;
+/* Calculation-window completion and terminal transmission accounting are
+ * separate. Freeze pages only when every admitted window candidate has a
+ * terminal result; an in-flight socket is never a completed transmission. */
+static bool transmissions_complete;
+static uint64_t capture_admitted, capture_terminal;
 static struct k_spinlock capture_lock;
 K_MUTEX_DEFINE(xd_output_lock);
 
@@ -344,6 +349,13 @@ static void increment(uint64_t *value)
 	else { ++*value; }
 }
 
+static void seal_transmissions(void)
+{
+	/* Called only with capture_lock held. No candidate can newly enter a
+	 * completed calculation window after its final iteration is recorded. */
+	if (capture_complete && capture_admitted == capture_terminal) { transmissions_complete = true; }
+}
+
 void xd_iteration_end(void)
 {
 	current.iteration_end = now_us();
@@ -354,9 +366,11 @@ void xd_iteration_end(void)
 		increment(current.rc ? &failed : &accepted);
 	} else { increment(&dropped); }
 	if (capture_end && current.begin >= capture_start && current.begin < capture_end) {
+		if (current.attempted && !current.rc) { increment(&capture_admitted); }
 		if (count < ARRAY_SIZE(rows)) { rows[count++] = current; } else { increment(&overflow); }
 	}
 	if (capture_end && current.iteration_end >= capture_end) { capture_complete = true; }
+	seal_transmissions();
 	k_spin_unlock(&capture_lock, key);
 }
 
@@ -378,8 +392,13 @@ void xd_delivery_record(const struct xd_delivery *d)
 {
 	k_spinlock_key_t key=k_spin_lock(&capture_lock);
 	if(capture_end&&d->capture_us>=capture_start&&d->capture_us<capture_end) {
-		if(delivery_count<ARRAY_SIZE(deliveries))deliveries[delivery_count++]=*d;
-		else increment(&delivery_overflow);
+		if (transmissions_complete) { increment(&delivery_overflow); }
+		else {
+			increment(&capture_terminal);
+			if(delivery_count<ARRAY_SIZE(deliveries))deliveries[delivery_count++]=*d;
+			else increment(&delivery_overflow);
+			seal_transmissions();
+		}
 	}
 	k_spin_unlock(&capture_lock,key);
 }
@@ -409,21 +428,23 @@ static int drive_cmd_inner(const struct shell *sh, size_t argc, char **argv)
 		unsigned long duration = strtoul(argv[3], &tail, 10); if (!*argv[3] || *tail || !duration || duration > 240000) { return -EINVAL; }
 		uint64_t now = now_us(); if (now == UINT64_MAX) { return -EIO; }
 		k_spinlock_key_t key = k_spin_lock(&capture_lock);
-		if (capture_end && !capture_complete) { k_spin_unlock(&capture_lock, key); return -EBUSY; }
+		if (capture_end && !transmissions_complete) { k_spin_unlock(&capture_lock, key); return -EBUSY; }
 		capture_start = now + delay * 1000U; capture_end = capture_start + duration * 1000U;
 		count = delivery_count = 0; overflow = delivery_overflow = 0;
-		capture_complete = false;
+		capture_complete = transmissions_complete = false;
+		capture_admitted = capture_terminal = 0;
 		k_spin_unlock(&capture_lock, key);
 	} else if (argc != 1 && !(records && argc <= 4)) { return -EINVAL; }
 	/* Snapshot metadata under the same lock as capture. No long dump holds it. */
 	k_spinlock_key_t key = k_spin_lock(&capture_lock);
 	size_t size = sends ? delivery_count : count; uint64_t lost = overflow, first = capture_start, end = capture_end;
-	bool complete = capture_complete, saturated = counter_saturated;
+	bool complete = capture_complete, sends_complete = transmissions_complete, saturated = counter_saturated;
+	size_t delivery_size = delivery_count; uint64_t delivery_lost = delivery_overflow;
 	uint64_t gen = generated, attempts = attempted, accepts = accepted, failures = failed, drops = dropped;
 	struct xm_zclient *client = app_client;
 	k_spin_unlock(&capture_lock, key);
 	if (!client) { return -ENODATA; }
-	if (records && !complete && !atomic_get(&app_quiesced)) { return -EBUSY; }
+	if (records && (!complete || !sends_complete)) { return -EBUSY; }
 	/* Xen PV console has a bounded output ring. A consumer acknowledges each
 	 * small page before requesting the next; a bulk shell dump can lose rows. */
 	size_t offset = 0, limit = sh ? 4 : size;
@@ -440,9 +461,9 @@ static int drive_cmd_inner(const struct shell *sh, size_t argc, char **argv)
 		limit = value;
 	}
 	if ((!records || !offset) && !sends) {
-		emit(sh, "XD_SUMMARY {\"schema_version\":2,\"app\":\"%s\",\"generated\":\"%" PRIu64 "\",\"mailbox_offered\":\"%" PRIu64 "\",\"mailbox_accepted\":\"%" PRIu64 "\",\"mailbox_rejected\":\"%" PRIu64 "\",\"not_offered\":\"%" PRIu64 "\",\"capture_start_us\":\"%" PRIu64 "\",\"capture_end_us\":\"%" PRIu64 "\",\"rows\":%zu,\"overflow\":\"%" PRIu64 "\",\"capture_complete\":%s,\"counter_saturated\":%s,\"clock_rc\":%d,\"task_rc\":%d}",
+		emit(sh, "XD_SUMMARY {\"schema_version\":2,\"app\":\"%s\",\"generated\":\"%" PRIu64 "\",\"mailbox_offered\":\"%" PRIu64 "\",\"mailbox_accepted\":\"%" PRIu64 "\",\"mailbox_rejected\":\"%" PRIu64 "\",\"not_offered\":\"%" PRIu64 "\",\"capture_start_us\":\"%" PRIu64 "\",\"capture_end_us\":\"%" PRIu64 "\",\"rows\":%zu,\"overflow\":\"%" PRIu64 "\",\"capture_complete\":%s,\"transmissions_complete\":%s,\"counter_saturated\":%s,\"clock_rc\":%d,\"task_rc\":%d}",
 			app, gen, attempts, accepts, failures, drops, first, end, size, lost,
-			complete ? "true" : "false", saturated ? "true" : "false", (int)atomic_get(&clock_rc), (int)atomic_get(&task_rc));
+			complete ? "true" : "false", sends_complete ? "true" : "false", saturated ? "true" : "false", (int)atomic_get(&clock_rc), (int)atomic_get(&task_rc));
 	}
 	if (records) {
 		if (!offset && !sends) {
@@ -462,8 +483,8 @@ static int drive_cmd_inner(const struct shell *sh, size_t argc, char **argv)
 	struct xd_io_stats io;
 	int io_status=xd_io_stats_get(&io);
 	if ((!records || (sends && !offset)) && !io_status) {
-		emit(sh,"XD_IO {\"enqueued\":\"%" PRIu64 "\",\"replaced\":\"%" PRIu64 "\",\"expired\":\"%" PRIu64 "\",\"context_dropped\":\"%" PRIu64 "\",\"stopped\":\"%" PRIu64 "\",\"attempted\":\"%" PRIu64 "\",\"sent\":\"%" PRIu64 "\",\"failed\":\"%" PRIu64 "\",\"event_dropped\":\"%" PRIu64 "\",\"heartbeat_replaced\":\"%" PRIu64 "\",\"heartbeat_dropped\":\"%" PRIu64 "\",\"heartbeat_expired\":\"%" PRIu64 "\",\"prepare_max_us\":\"%" PRIu64 "\",\"poll_max_us\":\"%" PRIu64 "\",\"exchange_max_us\":\"%" PRIu64 "\",\"delivery_rows\":%zu,\"delivery_overflow\":\"%" PRIu64 "\",\"close_error\":%d}",
-		 io.enqueued,io.replaced,io.expired,io.context_dropped,io.stopped,io.attempted,io.sent,io.failed,io.event_dropped,io.heartbeat_replaced,io.heartbeat_dropped,io.heartbeat_expired,io.prepare_max_us,io.poll_max_us,io.exchange_max_us,delivery_count,delivery_overflow,io.close_error);
+		emit(sh,"XD_IO {\"enqueued\":\"%" PRIu64 "\",\"replaced\":\"%" PRIu64 "\",\"expired\":\"%" PRIu64 "\",\"context_dropped\":\"%" PRIu64 "\",\"stopped\":\"%" PRIu64 "\",\"attempted\":\"%" PRIu64 "\",\"sent\":\"%" PRIu64 "\",\"failed\":\"%" PRIu64 "\",\"event_dropped\":\"%" PRIu64 "\",\"heartbeat_replaced\":\"%" PRIu64 "\",\"heartbeat_dropped\":\"%" PRIu64 "\",\"heartbeat_expired\":\"%" PRIu64 "\",\"prepare_max_us\":\"%" PRIu64 "\",\"poll_max_us\":\"%" PRIu64 "\",\"exchange_max_us\":\"%" PRIu64 "\",\"delivery_rows\":%zu,\"delivery_overflow\":\"%" PRIu64 "\",\"transmissions_complete\":%s,\"close_error\":%d}",
+		 io.enqueued,io.replaced,io.expired,io.context_dropped,io.stopped,io.attempted,io.sent,io.failed,io.event_dropped,io.heartbeat_replaced,io.heartbeat_dropped,io.heartbeat_expired,io.prepare_max_us,io.poll_max_us,io.exchange_max_us,delivery_size,delivery_lost,sends_complete ? "true" : "false",io.close_error);
 		if (!io.stack_error) {
 			emit(sh,"XD_CLOCK {\"frequency_hz\":%u,\"io_clock_rc\":%d,\"snapshot_busy\":\"%" PRIu64 "\",\"stack_rc\":0,\"stack_unused_bytes\":%zu}",
 			 sys_clock_hw_cycles_per_sec(),io.clock_error,io.snapshot_busy,io.stack_unused_bytes);
@@ -519,6 +540,7 @@ int xd_finish(struct xm_zclient *client, int app_result)
 #if defined(CONFIG_XENOVA_DRIVE_NATIVE_TEST)
 	k_spinlock_key_t key = k_spin_lock(&capture_lock);
 	capture_end = now_us(); capture_complete = true;
+	seal_transmissions();
 	k_spin_unlock(&capture_lock, key);
 	uint64_t before = now_us();
 	int rc = xt_stop(io_end);
