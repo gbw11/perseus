@@ -29,12 +29,11 @@ int main(void)
  char auto_events[XM_TOPIC_MAX],manual_events[XM_TOPIC_MAX],json[160];
  xm_topic_vehicle_control(control,sizeof(control));xm_topic_manual_input(input,sizeof(input));
  xm_topic_app_events(perception,sizeof(perception),"perception");
- xm_topic_app_events(auto_events,sizeof(auto_events),AUTO_APP_ID);
- xm_topic_app_events(manual_events,sizeof(manual_events),MANUAL_APP_ID);
+ auto_events[0]=manual_events[0]='\0';
  drive_controller_init(&controller);
  int rc=xd_start("drive-controller",20);
  if(rc)return xd_finish(&client,rc);
- int64_t start=k_uptime_get(),next_beat=start;
+ int64_t start=k_uptime_get(),next_beat=start,next_readiness=start;
  enum auto_reason last_reason=AUTO_REASON_NO_PERCEPTION;bool seen_perception=false;
  while(!xd_stopping()){
   int io=xd_client_prepare_dual(&client,control,input,perception);
@@ -43,6 +42,11 @@ int main(void)
   if((rc=xdiag_clock_us(&now)))break;
   if(now<xd_next_release_us()){k_sleep(K_MSEC(1));continue;}
   if((rc=xd_iteration_begin()))break;
+  bool identified=strlen(xd_vm_id())==XM_UUID_LEN;
+  if(identified){
+   xm_topic_vm_app_events(auto_events,sizeof(auto_events),xd_vm_id(),AUTO_APP_ID);
+   xm_topic_vm_app_events(manual_events,sizeof(manual_events),xd_vm_id(),MANUAL_APP_ID);
+  }
   struct xm_span cp,mp,ap;int64_t ca,ma,aa,cs,ms,as;
   xd_latest(&client,control,"vehicle.control",&cp,&ca,&cs);
   xd_latest(&client,input,"drive.input",&mp,&ma,&ms);
@@ -53,7 +57,7 @@ int main(void)
   if((rc=xd_step_end()))break;
   bool automatic=result.mode==DRIVE_AUTO;
   const char *events=automatic?auto_events:manual_events;
-  if(result.control_valid&&result.mode!=DRIVE_STOP){
+  if(identified&&result.control_valid&&result.mode!=DRIVE_STOP){
    rc=xd_command_input(automatic?"perception.result":"drive.input");if(rc)break;
    int encoded=xm_drive_command_json(json,sizeof(json),result.generation,result.v_mps,result.steer_rad);
    xd_command(&client,events,json,encoded,result.generation,result.v_mps,result.steer_rad,
@@ -61,12 +65,19 @@ int main(void)
     automatic?controller.auto_cfg.perception_timeout_ms:controller.manual_cfg.input_timeout_ms);
   }
   if(result.auto_reason!=last_reason){
-   if(result.locally_active&&automatic&&seen_perception&&!xd_stopping())announce(auto_events,last_reason,&result);
+   if(identified&&result.locally_active&&automatic&&seen_perception&&!xd_stopping())announce(auto_events,last_reason,&result);
    seen_perception=seen_perception||result.auto_reason!=AUTO_REASON_NO_PERCEPTION;
    last_reason=result.auto_reason;
   }
   int64_t tick=k_uptime_get();
-  if(!io&&tick>=next_beat&&!xd_stopping()){
+  if(identified&&!io&&tick>=next_readiness&&!xd_stopping()){
+   int n=xm_app_readiness_json(json,sizeof(json),result.generation,result.auto_progress,result.auto_readiness,result.auto_not_ready);
+   if(n>0)(void)xd_publish(&client,auto_events,"app.readiness",json);
+   n=xm_app_readiness_json(json,sizeof(json),result.generation,result.manual_progress,result.manual_readiness,result.manual_not_ready);
+   if(n>0)(void)xd_publish(&client,manual_events,"app.readiness",json);
+   next_readiness+=((tick-next_readiness)/100+1)*100;
+  }
+  if(identified&&!io&&tick>=next_beat&&!xd_stopping()){
    int n=xm_app_heartbeat_json(json,sizeof(json),result.auto_state,tick-start);
    if(n>0)(void)xd_publish(&client,auto_events,"app.heartbeat",json);
    n=xm_app_heartbeat_json(json,sizeof(json),result.manual_state,tick-start);

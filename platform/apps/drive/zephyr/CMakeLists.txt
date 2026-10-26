@@ -10,5 +10,5 @@ list(APPEND ZEPHYR_EXTRA_MODULES
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(xenova_drive)
 target_include_directories(app PRIVATE ../../autonomous/zephyr/src ../../manual/zephyr/src)
-target_sources(app PRIVATE src/main.c src/controller.c
+target_sources(app PRIVATE src/main.c src/controller.c src/adapter.c
   ../../autonomous/zephyr/src/autonomous.c ../../manual/zephyr/src/manual.c)

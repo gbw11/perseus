@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(xenova_drive_controller_tests C)
 enable_testing()
 add_subdirectory(../../common/xenova-mqtt-c mqtt-core)
-add_executable(test_controller controller.c ../zephyr/src/controller.c
+add_executable(test_controller controller.c ../zephyr/src/controller.c ../zephyr/src/adapter.c
   ../../autonomous/zephyr/src/autonomous.c ../../manual/zephyr/src/manual.c)
 target_include_directories(test_controller PRIVATE ../zephyr/src
   ../../autonomous/zephyr/src ../../manual/zephyr/src)

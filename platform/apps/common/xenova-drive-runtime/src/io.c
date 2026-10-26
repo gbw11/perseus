@@ -27,8 +27,10 @@ struct report {
  int64_t expires_ms;
  uint64_t control_revision, connection_revision, completed;
 };
-static struct report heartbeat[2], events[4], report_active;
-static bool heartbeat_pending[2];
+/* heartbeat and readiness have separate per-app slots. A fresh heartbeat must
+ * not renew an old readiness report or replace its actual progress. */
+static struct report heartbeat[4], events[4], report_active;
+static bool heartbeat_pending[4];
 static unsigned heartbeat_cursor;
 static bool last_report_was_event;
 static unsigned event_head,event_count;
@@ -116,13 +118,13 @@ static void send_command(void) {
 static void send_report(void) {
  k_mutex_lock(&exchange_lock,K_FOREVER);
  unsigned slot=heartbeat_cursor;
- if(!heartbeat_pending[slot])slot=1-slot;
+ for(unsigned i=0;i<ARRAY_SIZE(heartbeat)&&!heartbeat_pending[slot];i++)slot=(slot+1)%ARRAY_SIZE(heartbeat);
  bool pending_beat=heartbeat_pending[slot];
  bool take=event_count||pending_beat;
  /* Once a heartbeat is pending, at most one event may pass it. The payload
   * still comes only from a completed calculation; this owner never renews it. */
  bool beat=pending_beat&&(!event_count||last_report_was_event);
- if(beat){report_active=heartbeat[slot];heartbeat_pending[slot]=false;heartbeat_cursor=1-slot;last_report_was_event=false;}
+ if(beat){report_active=heartbeat[slot];heartbeat_pending[slot]=false;heartbeat_cursor=(slot+1)%ARRAY_SIZE(heartbeat);last_report_was_event=false;}
  else if(event_count){report_active=events[event_head];event_head=(event_head+1)%ARRAY_SIZE(events);event_count--;last_report_was_event=true;}
  bool valid=take&&context_ok(report_active.control_revision,report_active.connection_revision);
  k_mutex_unlock(&exchange_lock);
@@ -133,7 +135,12 @@ static void send_report(void) {
   rc=xm_zclient_publish_until(client,report_active.topic,report_active.type,report_active.json,report_active.expires_ms);
  if(rc){
   k_mutex_lock(&exchange_lock,K_FOREVER);
-  if(beat){stats.heartbeat_dropped++;if(expired||(rc==-ETIMEDOUT&&k_uptime_get()>=report_active.expires_ms))stats.heartbeat_expired++;}
+  if(beat){
+   bool readiness=!strcmp(report_active.type,"app.readiness");
+   bool late=expired||(rc==-ETIMEDOUT&&k_uptime_get()>=report_active.expires_ms);
+   if(readiness){stats.readiness_dropped++;stats.readiness_expired+=late;}
+   else {stats.heartbeat_dropped++;stats.heartbeat_expired+=late;}
+  }
   else stats.event_dropped++;
   k_mutex_unlock(&exchange_lock);
  }
@@ -171,7 +178,11 @@ static void owner(void *a,void *b,void *c) {
  bool discarded=command_pending;
  if(discarded){d=result(&pending,XD_STOPPED,-ESHUTDOWN);command_pending=false;stats.stopped++;}
  stats.event_dropped+=event_count;
- for(unsigned i=0;i<ARRAY_SIZE(heartbeat);i++){stats.heartbeat_dropped+=heartbeat_pending[i];heartbeat_pending[i]=false;}
+ for(unsigned i=0;i<ARRAY_SIZE(heartbeat);i++){
+  if(i<2)stats.heartbeat_dropped+=heartbeat_pending[i];
+  else stats.readiness_dropped+=heartbeat_pending[i];
+  heartbeat_pending[i]=false;
+ }
  event_count=0;
  shared.connected=false;
  k_mutex_unlock(&exchange_lock);
@@ -229,7 +240,8 @@ int xd_io_command(struct xd_candidate *c) {
 }
 int xd_io_report(const char *topic,const char *type,const char *json,uint64_t completed,const struct xd_inputs *context) {
  if(!topic||!type||!json||!context||!completed||strlen(topic)>=XM_TOPIC_MAX||strlen(type)>=32||strlen(json)>=160)return -EINVAL;
- bool beat=!strcmp(type,"app.heartbeat");
+ bool readiness=!strcmp(type,"app.readiness");
+ bool beat=!strcmp(type,"app.heartbeat")||readiness;
  if(!beat&&strcmp(type,"perception.event"))return -ENOTSUP;
  if(atomic_get(&stop))return -ESHUTDOWN;
  if(k_mutex_lock(&exchange_lock,K_NO_WAIT))return -EBUSY;
@@ -241,14 +253,21 @@ int xd_io_report(const char *topic,const char *type,const char *json,uint64_t co
   unsigned slot=0;
   if(beat&&dual_mode){
    /* Fixed logical producers, not an unbounded topic-indexed queue. */
-   if(!strcmp(topic,"xenova/v1/apps/autonomous/events"))slot=1;
-   else if(strcmp(topic,"xenova/v1/apps/manual/events")){k_mutex_unlock(&exchange_lock);return -EINVAL;}
+   struct xm_topic_info info;xm_topic_parse(topic,&info);
+   if(!strcmp(info.app_id,"autonomous"))slot=1;
+   else if(strcmp(info.app_id,"manual")){k_mutex_unlock(&exchange_lock);return -EINVAL;}
+   if(info.vm_id[0]&&(!client->id.vm_id||strcmp(info.vm_id,client->id.vm_id))){k_mutex_unlock(&exchange_lock);return -EINVAL;}
   }
+  if(readiness)slot+=2;
   struct report *r=beat?&heartbeat[slot]:&events[(event_head+event_count++)%ARRAY_SIZE(events)];
-  if(beat){stats.heartbeat_replaced+=heartbeat_pending[slot];heartbeat_pending[slot]=true;}
+  if(beat){
+   if(readiness)stats.readiness_replaced+=heartbeat_pending[slot];
+   else stats.heartbeat_replaced+=heartbeat_pending[slot];
+   heartbeat_pending[slot]=true;
+  }
   strcpy(r->topic,topic);strcpy(r->type,type);strcpy(r->json,json);
   r->completed=completed;r->control_revision=context->control_revision;r->connection_revision=context->connection_revision;
-  r->expires_ms=k_uptime_get()+1000;
+  r->expires_ms=k_uptime_get()+(readiness?300:1000);
  }
  k_mutex_unlock(&exchange_lock);return rc;
 }

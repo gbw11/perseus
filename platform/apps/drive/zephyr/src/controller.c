@@ -4,7 +4,7 @@
 
 void drive_controller_init(struct drive_controller *c)
 {
- memset(c,0,sizeof(*c));auto_cfg_default(&c->auto_cfg);manual_cfg_default(&c->manual_cfg);
+ memset(c,0,sizeof(*c));drive_auto_adapter(&c->automatic,&c->auto_cfg);drive_manual_adapter(&c->manual,&c->manual_cfg);
 }
 static bool control_valid(struct drive_controller *c,struct xm_span payload,struct xm_vehicle_control *v)
 {
@@ -30,25 +30,27 @@ void drive_controller_step(struct drive_controller *c,const char *local_vm_id,
  memset(out,0,sizeof(*out));
  out->control_valid=control_valid(c,control,&v);
  struct xm_span accepted=out->control_valid?control:(struct xm_span){0};
- struct auto_inputs ai={.control_payload=accepted,.perception_payload=perception,.perception_age_ms=perception_age_ms};
- struct manual_inputs mi={.control_payload=accepted,.input_payload=input,.input_age_ms=input_age_ms};
- struct auto_command ac;struct auto_status as;struct manual_command mc;const char *ms;
- auto_step(&c->auto_cfg,&ai,&ac,&as);
- manual_step(&c->manual_cfg,&mi,&mc,&ms);
- out->auto_reason=as.reason;
- out->nearest_m=as.nearest_m;
+ struct drive_sample ac,mc;
+ (void)drive_adapter_run(&c->automatic,accepted,perception,perception_age_ms,&ac);
+ (void)drive_adapter_run(&c->manual,accepted,input,input_age_ms,&mc);
+ out->auto_progress=c->automatic.progress;out->manual_progress=c->manual.progress;
+ out->auto_not_ready=out->control_valid?ac.reason:"CONTROL_UNAPPLIED";
+ out->manual_not_ready=out->control_valid?mc.reason:"CONTROL_UNAPPLIED";
+ out->auto_readiness=!out->auto_not_ready?"READY":!strcmp(out->auto_not_ready,"STATE_PREPARING")?"PREPARING":"NOT_READY";
+ out->manual_readiness=!out->manual_not_ready?"READY":!strcmp(out->manual_not_ready,"STATE_PREPARING")?"PREPARING":"NOT_READY";
+ out->auto_reason=ac.auto_reason;out->nearest_m=ac.nearest_m;
  out->auto_state=out->manual_state="idle";
  if(!out->control_valid)return;
  out->generation=v.generation;
  out->locally_active=local_vm_id&&!strcmp(local_vm_id,v.active_vm_id);
  if(!strcmp(v.mode,"AUTO"))out->mode=DRIVE_AUTO;
  else if(!strcmp(v.mode,"MANUAL")||!strcmp(v.mode,"AUTO_READY"))out->mode=DRIVE_MANUAL;
- out->auto_state=as.reason==AUTO_REASON_NO_PERCEPTION?"error":
+ /* Input readiness is distinct from a failed calculation. */
+ bool auto_failed=ac.reason&&(!strcmp(ac.reason,"CALCULATION_FAILED")||!strcmp(ac.reason,"OUTPUT_INVALID"));
+ bool manual_failed=mc.reason&&(!strcmp(mc.reason,"CALCULATION_FAILED")||!strcmp(mc.reason,"OUTPUT_INVALID"));
+ out->auto_state=auto_failed?"error":
   (out->locally_active&&out->mode==DRIVE_AUTO?"active":"standby");
- uint32_t keys;
- bool input_ready=input_age_ms>=0&&input_age_ms<=c->manual_cfg.input_timeout_ms&&
-  !xm_drive_input_parse(input,&keys);
- out->manual_state=!input_ready?"error":
+ out->manual_state=manual_failed?"error":
   (out->locally_active&&out->mode==DRIVE_MANUAL?"active":"standby");
  if(out->mode==DRIVE_AUTO){out->v_mps=ac.v_mps;out->steer_rad=ac.steer_rad;}
  else if(out->mode==DRIVE_MANUAL){out->v_mps=mc.v_mps;out->steer_rad=mc.steer_rad;}

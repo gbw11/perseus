@@ -3,13 +3,13 @@
  * adapter validates generations and never elects itself or changes algorithms. */
 #ifndef XENOVA_DRIVE_CONTROLLER_H
 #define XENOVA_DRIVE_CONTROLLER_H
-#include "autonomous.h"
-#include "manual.h"
+#include "adapter.h"
 
 enum drive_mode { DRIVE_STOP, DRIVE_AUTO, DRIVE_MANUAL };
 struct drive_controller {
  struct auto_cfg auto_cfg;
  struct manual_cfg manual_cfg;
+ struct drive_adapter automatic,manual;
  struct xm_vehicle_control accepted;
  bool seen_control;
 };
@@ -21,6 +21,8 @@ struct drive_result {
  const char *auto_state, *manual_state;
  enum auto_reason auto_reason;
  float nearest_m;
+ uint64_t auto_progress,manual_progress;
+ const char *auto_readiness,*manual_readiness,*auto_not_ready,*manual_not_ready;
 };
 void drive_controller_init(struct drive_controller *);
 /* Both real calculations complete before returning. Missing/invalid/regressed

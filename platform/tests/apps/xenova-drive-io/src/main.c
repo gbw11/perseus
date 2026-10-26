@@ -12,7 +12,7 @@ static struct xm_zclient client;
 static struct xd_inputs snapshot,previous;
 static struct xd_candidate command;
 static struct xd_delivery results[32];
-static unsigned result_count,sends,beats,closes;
+static unsigned result_count,sends,beats,readies,closes;
 static unsigned subscriptions,auto_beats,manual_beats;
 static atomic_t block_poll,block_send,block_prepare;
 static atomic_t new_sender,source_closed;
@@ -35,7 +35,7 @@ int xd_owner_prepare(struct xm_zclient *c,const char *control,const char *input)
 }
 int __wrap_xm_zclient_poll(struct xm_zclient *c,int32_t ms) {
  k_sem_give(&poll_entered);
- if(atomic_get(&block_poll))k_sem_take(&release,is("heartbeat-expire")?K_SECONDS(2):K_MSEC(250));
+ if(atomic_get(&block_poll))k_sem_take(&release,(is("heartbeat-expire")||is("readiness-expire"))?K_SECONDS(2):K_MSEC(250));
  else k_sleep(K_MSEC(ms));
  c->connected=connected;
  return 0;
@@ -59,7 +59,8 @@ int __wrap_xm_zclient_publish_until(struct xm_zclient *c,const char *topic,const
  if(is("wake"))k_sem_give(&entered);
  if(atomic_get(&block_send)){k_sem_give(&entered);k_sem_take(&release,K_MSEC(250));}
  assert(!strcmp(before,json)); /* In-flight bytes are never replaced. */
- if(!strcmp(type,"app.heartbeat")){
+ if(!strcmp(type,"app.readiness")){readies++;}
+ else if(!strcmp(type,"app.heartbeat")){
   beats++;
   if(!strcmp(topic,"xenova/v1/apps/autonomous/events"))auto_beats++;
   if(!strcmp(topic,"xenova/v1/apps/manual/events"))manual_beats++;
@@ -185,6 +186,11 @@ int main(void) {
     assert(!xd_io_report("events","app.heartbeat","{\"uptime_s\":1}",1,&snapshot));
     k_sleep(K_MSEC(1100));
    }
+   if(is("readiness")||is("readiness-expire")){
+    assert(!xd_io_report("events","app.readiness","{\"progress_seq\":\"1\"}",1,&snapshot));
+    assert(!xd_io_report("events","app.readiness","{\"progress_seq\":\"2\"}",2,&snapshot));
+    if(is("readiness-expire"))k_sleep(K_MSEC(350));
+   }
    if(is("expire"))k_sleep(K_MSEC(20));
    unfreeze();k_sleep(K_MSEC(120));
    if(is("heartbeat")){assert(beats==1);k_sleep(K_MSEC(100));assert(beats==1);}
@@ -202,6 +208,8 @@ int main(void) {
  if(is("send-fail"))assert(stats.failed==1&&stats.sent==0);
  if(is("events-full"))assert(stats.event_dropped>=1);
  if(is("heartbeat-expire"))assert(!beats&&!stats.event_dropped&&stats.heartbeat_dropped==1&&stats.heartbeat_expired==1);
+ if(is("readiness"))assert(readies==1&&stats.readiness_replaced==1&&!stats.heartbeat_replaced);
+ if(is("readiness-expire"))assert(!readies&&stats.readiness_dropped==1&&stats.readiness_expired==1&&!stats.heartbeat_dropped&&!stats.event_dropped);
  if(is("reconnect-input-first"))assert(sends==1);
  candidate(9);assert(xd_io_command(&command)==-ESHUTDOWN);
  assert(xd_io_start(&client,"control","input")==-ESHUTDOWN);

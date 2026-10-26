@@ -32,6 +32,7 @@ struct xd_delivery {
 struct xd_io_stats {
  uint64_t enqueued, replaced, expired, context_dropped, stopped, attempted, sent, failed;
  uint64_t event_dropped, heartbeat_replaced, heartbeat_dropped, heartbeat_expired, snapshot_busy;
+ uint64_t readiness_replaced, readiness_dropped, readiness_expired;
  uint64_t prepare_max_us, poll_max_us, exchange_max_us;
  bool started, joined;
  int close_error, clock_error, stack_error;
