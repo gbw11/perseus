@@ -14,10 +14,12 @@ pipeline {
         gitLabConnection('gitlab')    // Jenkins 시스템 설정의 GitLab connection 이름과 같아야 한다
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '30'))
-        disableConcurrentBuilds()
+        // 머지별 소스 브랜치 동기화가 누락되지 않도록 새 요청이 이전 develop 빌드를 취소하지 않는다.
+        disableConcurrentBuilds(abortPrevious: false)
     }
 
     environment {
+        GITLAB_PUSH_CREDENTIALS_ID = 'xenova-gitlab-deploy-key'
         DEPLOY_HOST = 'k15e110.p.ssafy.io'
         DEPLOY_USER = 'ubuntu'
         DEPLOY_DIR = '/opt/xenova'
@@ -97,6 +99,62 @@ pipeline {
                 }
             }
         }
+        stage('Sync source part branch with develop') {
+            when {
+                beforeAgent true
+                expression { isDevelopPush() && currentBuild.currentResult == 'SUCCESS' }
+            }
+            steps {
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: env.GITLAB_PUSH_CREDENTIALS_ID,
+                    keyFileVariable: 'GITLAB_SSH_KEY',
+                    usernameVariable: 'GITLAB_SSH_USER'
+                )]) {
+                    sh '''
+                        set -eu
+
+                        # origin/develop은 다음 머지로 이미 이동했을 수 있으므로 이 빌드가
+                        # 실제로 검사한 커밋(HEAD)만 머지의 소스 파트 브랜치에 반영한다.
+                        trigger_commit="$(git rev-parse HEAD)"
+                        subject="$(git log -1 --pretty=%s "$trigger_commit")"
+
+                        source_branch=''
+                        for candidate in platform frontend backend vehicle; do
+                            if [ "$subject" = "Merge branch '$candidate' into 'develop'" ]; then
+                                source_branch="$candidate"
+                                break
+                            fi
+                        done
+
+                        if [ -z "$source_branch" ]; then
+                            echo 'This is not a part branch -> develop merge; skipping branch sync.'
+                            exit 0
+                        fi
+
+                        parent_count="$(git rev-list --parents -n 1 "$trigger_commit" | awk '{print NF - 1}')"
+                        if [ "$parent_count" -ne 2 ]; then
+                            echo "Expected a two-parent merge commit, got $parent_count parent(s)." >&2
+                            exit 1
+                        fi
+
+                        git fetch --no-tags origin "$source_branch"
+                        source_tip="$(git rev-parse "origin/$source_branch")"
+                        merge_source="$(git rev-parse "${trigger_commit}^2")"
+
+                        if [ "$source_tip" != "$merge_source" ]; then
+                            echo "origin/$source_branch changed after the MR was merged; refusing automatic sync." >&2
+                            exit 1
+                        fi
+
+                        git merge-base --is-ancestor "$source_tip" "$trigger_commit"
+                        GIT_SSH_COMMAND="ssh -i $GITLAB_SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+                          git push -o ci.skip \
+                          "$GITLAB_SSH_USER@lab.ssafy.com:s15-final/S15P31E110.git" \
+                          "${trigger_commit}:refs/heads/${source_branch}"
+                    '''
+                }
+            }
+        }
         stage('Deploy to EC2') {
             when {
                 beforeAgent true
@@ -152,6 +210,14 @@ pipeline {
             notifyMattermost('warning', '⚠️ 빌드 중단')
         }
     }
+}
+
+// 파트 브랜치 자동 동기화는 MR 검사 빌드가 아니라 develop push 빌드에서만 수행한다.
+def isDevelopPush() {
+    def branch = env.BRANCH_NAME ?: env.gitlabSourceBranch ?: env.GIT_BRANCH ?: ''
+    def normalizedBranch = branch.replaceFirst(/^origin\//, '')
+    def action = env.gitlabActionType ?: 'PUSH'
+    return normalizedBranch == 'develop' && action.equalsIgnoreCase('PUSH')
 }
 
 // Multibranch와 GitLab push 파이프라인을 모두 지원한다. MR의 대상 브랜치가 master인 것만으로는 배포하지 않는다.

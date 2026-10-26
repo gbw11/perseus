@@ -82,3 +82,20 @@ def atomic_write(path, content, mode=0o600):
     finally:
         if temp.exists():
             temp.unlink()
+
+
+def boot_progress(kind, runtime=RUN, **context):
+    """선택적 표시 모듈의 부재·고장도 관리 작업에 전파하지 않는 생산자 경계."""
+    try:
+        from xenova_boot_progress import Progress
+        writer = Progress(kind, runtime, **context)
+    except Exception:
+        writer = None
+    def emit(phase, **facts):
+        if writer is not None:
+            try:
+                return writer.emit(phase, **facts)
+            except Exception:
+                pass
+        return False
+    return emit

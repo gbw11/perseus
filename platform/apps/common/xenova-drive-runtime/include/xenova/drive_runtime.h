@@ -10,7 +10,12 @@ int xd_start(const char *app_id, uint32_t period_ms);
 bool xd_stopping(void);
 /* Main thread only: defer authenticated v1 setup until its own bootstrap exists. */
 int xd_client_prepare(struct xm_zclient *, const char *control, const char *input);
+int xd_publish(struct xm_zclient *, const char *topic, const char *type, const char *payload);
+int xd_poll(struct xm_zclient *, int32_t timeout_ms);
 void xd_client_stopped(struct xm_zclient *);
+/* Main owner calls this for every return, including xd_start failure. Original
+ * app error wins; independent cleanup errors remain in local Core history. */
+int xd_finish(struct xm_zclient *, int app_result);
 int xd_iteration_begin(void);
 int xd_step_begin(void);
 int xd_step_end(void);

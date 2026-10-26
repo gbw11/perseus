@@ -262,6 +262,9 @@ int xm_zclient_subscribe(struct xm_zclient *c, const char *filter, uint8_t qos)
 
 int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 {
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	if (c->socket_io.close_error) { return c->socket_io.close_error; }
+#endif
 	int64_t now = k_uptime_get();
 
 	if (!c->socket_open) {
@@ -382,7 +385,7 @@ void xm_zclient_close(struct xm_zclient *c)
 	(void)mqtt_abort(&c->mqtt);
 #if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
 	/* Connect can fail before the MQTT library takes socket ownership. */
-	if (c->socket_io.fd >= 0) { (void)zsock_close(c->socket_io.fd); c->socket_io.fd = -1; }
+	(void)xt_socket_close(&c->socket_io);
 #endif
 	c->connected = false;
 	c->socket_open = false;

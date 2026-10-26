@@ -514,10 +514,16 @@ class CPU:
         self.set_policy(activation, records, execute=True, key=key, context={}, deadline=deadline)
 
     def prepare(self, records, deadline, *, execute=False, restore=False, context=None):
+        from xenova_runtime import boot_progress
+        display = boot_progress('cpu', self.p.runtime, clock=self.p.clock, host=self.e.host)
+        if execute:
+            display('preparing' if not restore else 'restoring')
         if execute and not restore:
             self.factory(records, deadline)
         policy = self.policy()
         if not policy:
+            if execute:
+                display('complete', configured=False)
             return {'configured':False, 'ready':False, 'legacy':True}
         sample = self.observe(deadline)
         self.guard_stopped(records, sample)
@@ -570,6 +576,7 @@ class CPU:
             receipt.update(phase='failed', error=getattr(error, 'error', {'code':'STORAGE_UNAVAILABLE', 'message':str(error)}))
             self.e.write(self.receipt_path, receipt)
             raise
+        display('complete', configured=True, policy_revision=policy['policy_revision'], restored=restore)
         return {'configured':True, 'ready':not restore, 'preparation':receipt}
 
 
