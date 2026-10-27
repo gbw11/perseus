@@ -34,6 +34,35 @@ def test_paths_methods_and_response_codes_match(client):
         assert set(actual[key]["responses"]) == set(op["responses"]), f"{key}: {set(actual[key]['responses'])} != {set(op['responses'])}"
 
 
+def _parameters(spec: dict) -> dict[tuple[str, str], set[tuple[str, str]]]:
+    """operation 마다 (name, in) 집합. path 수준 파라미터를 합치고 $ref 를 components.parameters 에서 푼다."""
+    shared = spec.get("components", {}).get("parameters", {})
+
+    def resolve(param: dict) -> tuple[str, str]:
+        if "$ref" in param:
+            param = shared[param["$ref"].rsplit("/", 1)[-1]]
+        return param["name"], param["in"]
+
+    out = {}
+    for path, item in spec["paths"].items():
+        common = [resolve(p) for p in item.get("parameters", [])]
+        for method in METHODS:
+            if method in item:
+                out[(method.upper(), path)] = {*common, *(resolve(p) for p in item[method].get("parameters", []))}
+    return out
+
+
+def test_parameters_match(client):
+    """경로·질의·헤더 파라미터(요청 예산, Idempotency-Key 포함)가 yaml 과 같다."""
+    expected = _parameters(yaml.safe_load(CONTRACT.read_text(encoding="utf-8")))
+    actual = _parameters(client.app.openapi())
+    assert actual == expected
+    budget = ("X-Request-Budget-Ms", "header")
+    assert all(budget in params for key, params in actual.items() if key[1] != "/healthz")
+    assert budget not in actual[("GET", "/healthz")]
+    assert ("Idempotency-Key", "header") in actual[("POST", "/api/v1/vms/{vm_id}/stop")]
+
+
 def test_no_422_or_http_validation_error_in_schema(client):
     spec = client.app.openapi()
     for item in spec["paths"].values():
@@ -57,12 +86,21 @@ def test_error_body_fields_match(client):
     """오류 본문 필드(platform_code 포함)와 필수 필드가 yaml 과 같다. 한쪽에서만 빠지거나 타입이 바뀌면 여기서 깨진다."""
     contract = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["components"]["schemas"]["Error"]
     actual = client.app.openapi()["components"]["schemas"]["Error"]
-    assert set(actual["properties"]) == set(contract["properties"]) == {"code", "message", "detail", "resource", "platform_code"}
+    assert set(actual["properties"]) == set(contract["properties"]) == {
+        "code", "message", "detail", "resource", "platform_code", "retryable", "operation"}
     assert set(actual["required"]) == set(contract["required"]) == {"code", "message"}
     assert contract["properties"]["platform_code"]["type"] == ["string", "null"]
     live = actual["properties"]["platform_code"]
     assert live.get("anyOf") == [{"type": "string"}, {"type": "null"}] or live.get("type") == ["string", "null"]
     assert actual["additionalProperties"] is False and contract["additionalProperties"] is False
+
+
+def test_control_operation_schema_matches(client):
+    contract = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["components"]["schemas"]
+    actual = client.app.openapi()["components"]["schemas"]
+    assert actual["ControlStatus"]["enum"] == contract["ControlStatus"]["enum"]
+    assert set(actual["ControlOperation"]["properties"]) == set(contract["ControlOperation"]["properties"])
+    assert set(actual["ControlOperation"]["required"]) == set(contract["ControlOperation"]["required"])
 
 
 def test_security_scheme_and_401_are_declared(client):

@@ -128,6 +128,7 @@ curl -i -X POST localhost:8081/api/v1/vms/11111111-1111-4111-8111-111111111111/s
 | `XENOVA_SERVICE_TOKEN` | (없음) | 설정하면 `/healthz`를 포함한 모든 요청에 `Authorization: Bearer <토큰>`을 요구(401). Tailscale 바인드 배포에서는 필수 |
 | `XENOVA_HOST_CPUS` | `4` | vcpus 상한 기본값. `xl info`의 nr_cpus가 있으면 그 값 우선 |
 | `XENOVA_INSTANCE_ROOT` | `/srv/xenova/instances` | 인스턴스 루트 (xen 모드의 등록 확인용. platform 모드는 Manager의 data 경로를 씀) |
+| `XENOVA_RESPONSE_RESERVE` | `0.5` | 요청 예산(`X-Request-Budget-Ms`)이 있을 때 하위 호출에 넘기기 전에 응답 몫으로 남길 초. 실측 전 임시값, 0 이상 |
 | `XENOVA_MOCK_SAMPLES` | `0` | Mock 샘플 VM 3종 미리 생성 |
 | `XENOVA_LOG_LEVEL` | `INFO` | |
 
@@ -200,7 +201,8 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 | --- | --- |
 | `GET /vms`, `GET /vms/{id}` | `list` / `get`. `domid`가 있는 항목만 도메인으로 봄. 등록만 된 VM은 목록에 없고 단건은 404 |
 | `POST /vms` | 등록이 없으면 `create`(`idempotency_key=create-<vm_id>`, Spring 발급 `vm_id`를 그대로 전달) → `start` |
-| `POST /vms/{id}/stop` | `stop` (`force=false`, 플랫폼이 최대 90초 대기). 시한 초과는 504 |
+| `POST /vms/{id}/stop` | `stop` (`force=false`, 플랫폼이 최대 90초 대기). 시한 초과는 504. `Idempotency-Key` 가 있으면 아래 "정지 요청 추적" |
+| `GET /vms/{id}/control-operations?request_key=` | `control-operation` (`vm_id`, `idempotency_key`, `timeout_ms` 기본 5000). 읽기만 한다 |
 | `DELETE /vms/{id}` | 실행 중 409 → 정지 후 `retire`(숨김 보관) |
 
 플랫폼 오류 코드 → HTTP: `INVALID_SPEC`·템플릿 없음 400 / `VM_NOT_FOUND` 404 / 이름·IP·멱등성 충돌과 `VM_NOT_STOPPED` 등 409 / `INSUFFICIENT_STORAGE`·`IP_POOL_EXHAUSTED` 507 / `STORAGE_UNAVAILABLE`·`RECOVERY_REQUIRED`·`CLEANUP_INCOMPLETE`·`OPERATION_IN_PROGRESS`(잠금 보유, 재시도 가능) 503 / 시한 초과 504 / 그 외 500.
@@ -211,7 +213,19 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 
 **생성 입력**: `create`에는 Spring 발급 `vm_id`, 표시 이름(`<template_id 정규화>-<vm_id 앞 12자리>`), 템플릿 ID·버전, vcpus·memory_mib만 보냅니다. 내부 실행 이름(`vm-<hex>`)·MAC·Linux IP는 플랫폼이 전역 잠금 안에서 발급하고, IP가 바닥나면 플랫폼 `IP_POOL_EXHAUSTED`를 507 `InsufficientResources`(resource.name=ipv4)로 냅니다. 플랫폼 `INVALID_SPEC`은 400 그대로입니다. 인스턴스 디렉터리는 `configuration.id`(내부 이름)로 찾고, 통합 테스트는 생성이 201이며 registry·Xen UUID가 요청 UUID와 같은지 항상 검증합니다.
 
-테스트: `tests/test_platform_driver.py`는 봉투를 흉내 내는 FakeManager, `tests/test_platform_integration.py`는 저장소의 실제 `xenova_management`를 플랫폼 파트 픽스처(FakeXen·임시 registry)로 돌립니다.
+### 정지 요청 추적 (S15P31E110-305)
+
+계약 4.3.1·4.8·4.9. 하위 플랫폼의 정지 의도 빠른 수락·멱등 키·원 작업 조회·호출 예산을 HTTP 로 엽니다.
+
+- **키 있는 stop**: VM 락·`SerializedManager` 를 기다리지 않고 `Manager.fork()` 의 요청별 객체로 `stop` 을 부릅니다. 플랫폼은 짧은 admission 잠금으로 정지 의도를 내구 저장하고, 긴 start·복구가 실행 잠금을 쥐고 있으면 기다리지 않고 `OPERATION_IN_PROGRESS` + `details.accepted=true, completion=pending` 으로 돌아옵니다. 이것을 `202 pending` 으로, 완료(재전달 포함)를 `200 completed` 로 냅니다. 상태는 `accepted`·`completion`·`phase`·오류 코드로 정합니다(`completion=pending` 만 보고 202 를 정하지 않습니다. `phase=uncertain`·`RECONCILE_REQUIRED` 는 `uncertain` 503, `superseded` 는 409)
+- **키 없는 stop**: 지금과 같습니다(VM 락 → 직렬화 → 동기 204). Spring 이 키를 보내기 전까지 응답 의미가 바뀌지 않습니다
+- **원 작업 조회**도 요청별 객체로 부릅니다. 플랫폼은 admission 잠금과 원 기록만 읽습니다. `VM_NOT_FOUND` 는 `404 OperationNotFound`(검색 부재, 미수락 증거 아님)
+- `fork` 가 없는 옛 Manager 는 직렬화된 경로를 그대로 씁니다(공유 Manager 를 잠금 없이 부르지 않습니다). `budget_ms` 를 모르는 옛 Manager 에는 예산을 넘기지 않습니다
+- **요청 예산**(`budget.py`): `X-Request-Budget-Ms` 가 있으면 미들웨어가 도착 시각부터 기한을 contextvar 에 둡니다. VM 락·직렬화 대기가 이 안에서 끝나고, 하위에는 `budget_ms`(get/list/조회는 `timeout_ms` 도)로 남은 값에서 `XENOVA_RESPONSE_RESERVE` 를 뺀 만큼 줍니다. 차례가 와도 남은 값이 없으면 제출하지 않고 504 입니다
+- 오류 본문에 플랫폼 원본 `retryable` 이 붙고, 키 있는 stop 의 오류에는 원 작업 문맥(`operation`)이 붙습니다. raw journal·경로·인증정보는 내지 않습니다
+- mock·xen 드라이버는 작업 기록이 없어 키 있는 stop 을 동기 정지 뒤 `200 completed`(`operation_id: null`)로 답하고 조회는 501 입니다
+
+테스트: `tests/test_platform_driver.py`는 봉투를 흉내 내는 FakeManager, `tests/test_control_operations.py`는 fork·budget_ms·control-operation 을 아는 Manager 흉내로 정지 요청 추적·요청 예산·원 작업 ID 불변조건을, `tests/test_platform_integration.py`는 저장소의 실제 `xenova_management`를 플랫폼 파트 픽스처(FakeXen·임시 registry)로 돌립니다. 통합 시험에는 실제 Manager 의 키 있는 stop 완료·같은 키 재전달(추가 shutdown 0)·조회·키 충돌, 실행 잠금을 쥔 동안의 202 수락과 잠금 해제 뒤 같은 키 이행, 예산 만료 시 제출·기록 0 이 들어 있습니다. 이 파일은 fcntl 이 필요해 Linux(CI)에서만 돕니다. 실보드 종단 수락은 별도입니다.
 
 ## Xen 모드 현황
 
@@ -370,6 +384,7 @@ python -m pytest
 | `Unauthorized` | 401 | Bearer 서비스 토큰 없음·불일치. 미들웨어가 내며 `/healthz` 포함 |
 | `InvalidArgument` | 400 | 입력 검증, nil UUID(Domain-0) 대상 호출, 플랫폼 `INVALID_SPEC`·템플릿 없음 |
 | `VMNotFound` | 404 | 도메인 없음(단건), 등록 없음(삭제) |
+| `OperationNotFound` | 404 | 요청 키로 원 제어 작업을 찾지 못함(조회). 검색 부재이며 미수락 증거가 아님 |
 | `VMExists` | 409 | 같은 vm_id가 떠 있음, 다른 명세로 재생성, 이름·멱등성 충돌 |
 | `InvalidState` | 409 | 실행 중 삭제, `VM_NOT_STOPPED`·IP 충돌 등 |
 | `InsufficientResources` | 507 | vcpus·memory_mib 부족, 플랫폼 Linux IP 풀 고갈(`ipv4`), 보드 저장소 부족 |
@@ -385,7 +400,7 @@ python -m pytest
 ## 아직 정하지 않은 것
 
 - `/healthz` 본문은 `{"status": "ok" | "xen_unavailable"}`로 임시 정의.
-- desired_state의 원본은 하위 플랫폼이다. 복구 중 stop의 하위 durable pending 수락과 제품 HTTP의 mutex/응답 전달은 별도 연동·수락 범위다.
+- desired_state의 원본은 하위 플랫폼이다. 복구 중 stop 의 수락·응답 전달은 키 있는 stop 으로 연결했다(S15P31E110-305). Spring 의 키 보존·작업 상태 처리와 실보드 종단 수락은 남아 있다.
 - 템플릿 ID 명명이 Spring 설정과 플랫폼 카탈로그에서 다릅니다. 변환 규칙은 세 파트가 함께 정합니다.
 
 create의 `name`은 Spring에서 받은 표시 이름(1~63자)을 그대로 전달합니다. 한글·공백을 허용하고 제어·줄 구분 문자와 앞뒤 공백은 거부합니다. `PlatformProvisioner`는 이를 플랫폼 `spec["name"]`에 넘기며 템플릿명·UUID로 대체하지 않습니다. 내부 실행 이름과 경로는 기존 UUID 기반 규칙을 사용합니다. 등록된 VM 재시작·재전달은 표시 이름을 갱신하지 않습니다.
