@@ -265,15 +265,15 @@ class VmApiIntegrationTest {
 
     @Test
     void createStoresTheRoleAndListsIt() throws Exception {
-        String vmId = vmIdOf(createVm("auto-01", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 16, "\"autonomous\"")
+        String vmId = vmIdOf(createVm("drive-a", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 16, "\"primary_drive\"")
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.role").value("autonomous")));
+                .andExpect(jsonPath("$.role").value("primary_drive")));
 
         mockMvc.perform(get("/api/v1/vms/" + vmId).header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.role").value("autonomous"));
+                .andExpect(jsonPath("$.role").value("primary_drive"));
         mockMvc.perform(get("/api/v1/vms").header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
-                .andExpect(jsonPath("$.items[?(@.name == 'auto-01')].role").value("autonomous"));
+                .andExpect(jsonPath("$.items[?(@.name == 'drive-a')].role").value("primary_drive"));
     }
 
     @Test
@@ -285,15 +285,15 @@ class VmApiIntegrationTest {
 
     @Test
     void patchChangesAndClearsTheRoleWithoutTouchingTheVm() throws Exception {
-        String vmId = vmIdOf(createVm("board-01", 1, 256).andExpect(status().isCreated()));
+        String vmId = vmIdOf(createVm("interaction-01", 1, 256).andExpect(status().isCreated()));
 
-        patchRole(vmId, "\"message-board\"")
+        patchRole(vmId, "\"interaction\"")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.role").value("message-board"))
-                .andExpect(jsonPath("$.name").value("board-01"))
+                .andExpect(jsonPath("$.role").value("interaction"))
+                .andExpect(jsonPath("$.name").value("interaction-01"))
                 .andExpect(jsonPath("$.agent_status").exists());
         mockMvc.perform(get("/api/v1/vms/" + vmId).header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
-                .andExpect(jsonPath("$.role").value("message-board"));
+                .andExpect(jsonPath("$.role").value("interaction"));
 
         patchRole(vmId, "null")
                 .andExpect(status().isOk())
@@ -318,7 +318,7 @@ class VmApiIntegrationTest {
 
     @Test
     void patchOnAnUnknownVmIsNotFound() throws Exception {
-        patchRole("550e8400-e29b-41d4-a716-446655440000", "\"manual\"")
+        patchRole("550e8400-e29b-41d4-a716-446655440000", "\"backup_drive\"")
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("VM_NOT_FOUND"));
     }
