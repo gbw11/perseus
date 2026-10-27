@@ -10,6 +10,7 @@
 
 static struct xm_zclient client;
 static struct drive_controller controller;
+static struct xdr_snapshot resources;
 static void announce(const char *events,enum auto_reason previous,const struct drive_result *result)
 {
  const char *kind=NULL;char detail[48],json[96];
@@ -53,8 +54,13 @@ int main(void)
   xd_latest(&client,perception,"perception.result",&ap,&aa,&as);
   struct drive_result result;
   if((rc=xd_step_begin()))break;
+  int resource_rc=xdiag_resources_try_get(&resources);
+  drive_controller_health(&controller,xdiag_clock_us,xd_completion_deadline_us(),
+   k_uptime_get(),&resources,resource_rc);
   drive_controller_step(&controller,xd_vm_id(),cp,mp,ma,ap,aa,&result);
   if((rc=xd_step_end()))break;
+  if(xd_step_deadline_missed())drive_controller_deadline_missed(&result);
+  xd_health_record(&result.auto_health,&result.manual_health);
   bool automatic=result.mode==DRIVE_AUTO;
   const char *events=automatic?auto_events:manual_events;
   if(identified&&result.control_valid&&result.mode!=DRIVE_STOP){

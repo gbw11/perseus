@@ -9,6 +9,9 @@ Diagnostics Core·Telemetry 2.0·Xen netfront·협조형 종료를 연결한다.
 A/B가 같은 펌웨어에서 두 계산을 실행하는 구성은
 [공통 주행 펌웨어](../../drive/README.md)를 사용한다. 기존 개별 앱과 같은 runtime을
 재사용하며, `xd_client_prepare_dual()`은 세 입력을 한 owner에 연결한다.
+공통 drive의 건강 hook은 `xd_completion_deadline_us/xd_step_deadline_missed`로 같은 release
+기한을 사용하고 `xd_health_record`로 최신 두 모드의 평가만 복사한다. 조회·기록은 새 계산 진행·
+heartbeat를 만들지 않는다. [건강 근거·행동 책임](../../../../docs/contracts/health-evidence-v1.md)을 따른다.
 매 iteration의 입력 사본에는 두 계산의 입력과 로컬 VM UUID가 함께 들어간다.
 `xd_command_input()`으로 선택 모드의 원 입력을 지정해 명령 만료를 계산한다.
 v1 heartbeat는 고정된 두 앱별 칸을 사용하므로 서로 덮어쓰지 않으며,

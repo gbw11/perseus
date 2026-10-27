@@ -93,6 +93,9 @@ static bool capture_complete, counter_saturated;
 static bool transmissions_complete;
 static uint64_t capture_admitted, capture_terminal;
 static struct k_spinlock capture_lock;
+static struct xdh_health auto_health,manual_health;
+static bool health_observed;
+static uint64_t health_completed,health_step_end;
 K_MUTEX_DEFINE(xd_output_lock);
 
 static uint64_t now_us(void)
@@ -391,6 +394,20 @@ void xd_iteration_end(void)
 }
 
 uint64_t xd_next_release_us(void) { return loop.timing.next_release_us; }
+uint64_t xd_completion_deadline_us(void)
+{
+ return loop.timing.in_flight&&UINT64_MAX-loop.timing.release_us>=loop.timing.deadline_us?
+  loop.timing.release_us+loop.timing.deadline_us:0;
+}
+bool xd_step_deadline_missed(void){return current.missed!=0;}
+void xd_health_record(const struct xdh_health *automatic,const struct xdh_health *manual)
+{
+ if(!automatic||!manual)return;
+ k_spinlock_key_t key=k_spin_lock(&capture_lock);
+ auto_health=*automatic;manual_health=*manual;health_observed=true;
+ health_completed=current.completed;health_step_end=current.step_end;
+ k_spin_unlock(&capture_lock,key);
+}
 
 void xd_latest(struct xm_zclient *client, const char *topic, const char *type,
 		struct xm_span *payload, int64_t *age_ms, int64_t *seq)
@@ -437,6 +454,23 @@ static void output_row(const struct shell *sh, const struct row *r)
 
 static int drive_cmd_inner(const struct shell *sh, size_t argc, char **argv)
 {
+ if(argc==2&&!strcmp(argv[1],"health")){
+  struct xdh_health health[2];
+  k_spinlock_key_t key=k_spin_lock(&capture_lock);
+  bool available=health_observed;health[0]=auto_health;health[1]=manual_health;
+  uint64_t completed=health_completed,step_end=health_step_end;
+  k_spin_unlock(&capture_lock,key);
+  if(!available)return -ENODATA;
+  for(size_t i=0;i<ARRAY_SIZE(health);i++){
+   char cpu[16]="null";
+   if(health[i].cpu_valid)snprintf(cpu,sizeof(cpu),"%u",health[i].cpu_percent_milli);
+   emit(sh,"XD_HEALTH {\"mode\":\"%s\",\"failure\":%u,\"restrict_function\":%s,\"warnings\":%u,\"work_rc\":%d,\"cpu_rc\":%d,\"cpu_valid\":%s,\"cpu_percent_milli\":%s,\"resource_sample\":\"%" PRIu64 "\",\"completed\":\"%" PRIu64 "\",\"step_end_us\":\"%" PRIu64 "\",\"stopping\":%s}",
+    i?"MANUAL":"AUTO",(unsigned)health[i].failure,health[i].restrict_function?"true":"false",
+    health[i].warnings,health[i].work_rc,health[i].cpu_rc,health[i].cpu_valid?"true":"false",
+    cpu,health[i].resource_sample,completed,step_end,xd_stopping()?"true":"false");
+  }
+  return 0;
+ }
 	bool sends = argc >= 2 && !strcmp(argv[1], "transmissions");
 	bool records = sends || (argc >= 2 && !strcmp(argv[1], "records"));
 	if (argc == 4 && !strcmp(argv[1], "capture")) {
@@ -571,6 +605,7 @@ int xd_finish(struct xm_zclient *client, int app_result)
 	char *argv[] = {"drive", "records"};
 	(void)drive_cmd(NULL, 2, argv);
 	argv[1]="transmissions"; (void)drive_cmd(NULL,2,argv);
+	argv[1]="health"; (void)drive_cmd(NULL,2,argv);
 	fflush(stdout);
 	exit(app_result || cleanup || rc || status_rc || state.running ? 1 : 0);
 #endif
@@ -581,6 +616,6 @@ void xd_client_stopped(struct xm_zclient *client) { (void)xd_finish(client, 0); 
 SHELL_STATIC_SUBCMD_SET_CREATE(xenova_commands,
 	SHELL_CMD(diag, NULL, "Local Core snapshot; threads is intrusive", xdiag_shell_cmd),
 	SHELL_CMD(telemetry, NULL, "Separate v2 Publisher status/snapshot", xt_shell_cmd),
-	SHELL_CMD(drive, NULL, "Source observer: capture <delay_ms> <duration_ms>; records [offset] [1..4] after window", drive_cmd),
+	SHELL_CMD(drive, NULL, "Local health; capture <delay_ms> <duration_ms>; records [offset] [1..4] after window", drive_cmd),
 	SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(xenova, &xenova_commands, "Xenova common diagnostics", NULL);

@@ -14,7 +14,44 @@ static int replacement(void *context,struct xm_span control,struct xm_span input
  (void)control;(void)input;(void)age;
  int kind=*(int *)context;out->v_mps=kind==2?NAN:.3f;return kind==1?-EIO:0;
 }
+static uint64_t clock_values[4];static unsigned clock_index;
+static int health_clock(uint64_t *out){assert(clock_index<4);*out=clock_values[clock_index++];return 0;}
+static int no_memory(void *context,struct xm_span control,struct xm_span input,int64_t age,struct drive_sample *out){
+ (void)context;(void)control;(void)input;(void)age;(void)out;return -ENOMEM;
+}
+static void health_tests(void){
+ struct drive_controller c;struct drive_result r;
+ struct xdr_snapshot resource={.sample=1,.raw={.at_ms=100},.cpu={.start_ms=0,.end_ms=100,.percent_milli=100000},
+  .heap_free_bytes=0,.rows=2,.seen=2};
+ const char *control="{\"generation\":42,\"mode\":\"MANUAL\",\"active_app\":\"manual\",\"active_vm_id\":\"" A "\"}";
+ drive_controller_init(&c);drive_controller_health(&c,health_clock,20000,100,&resource,0);
+ uint64_t on_time[]={1000,1500,1500,2000};memcpy(clock_values,on_time,sizeof(on_time));clock_index=0;
+ drive_controller_step(&c,A,span(control),span(input),0,span(perception),0,&r);
+ assert(r.v_mps>0&&!strcmp(r.manual_readiness,"READY"));
+ assert(r.manual_health.warnings&XDH_CPU_NO_IDLE);assert(r.manual_health.warnings&XDH_MEMORY_NO_FREE);
+ /* A failed non-selected AUTO does not poison a valid MANUAL calculation. */
+ c.automatic.calculate=no_memory;memcpy(clock_values,on_time,sizeof(on_time));clock_index=0;
+ drive_controller_step(&c,A,span(control),span(input),0,span(perception),0,&r);
+ assert(!strcmp(r.auto_not_ready,"CALCULATION_FAILED")&&r.auto_health.failure==XDH_RESOURCE_FAILED);
+ assert(!strcmp(r.manual_readiness,"READY")&&r.v_mps>0&&r.manual_progress>r.auto_progress);
+ /* Current serial execution: delayed AUTO can also consume MANUAL's deadline. */
+ drive_auto_adapter(&c.automatic,&c.auto_cfg);
+ uint64_t late[]={1000,25000,25000,26000};memcpy(clock_values,late,sizeof(late));clock_index=0;
+ drive_controller_step(&c,A,span(control),span(input),0,span(perception),0,&r);
+ assert(r.auto_health.failure==XDH_DEADLINE&&r.manual_health.failure==XDH_DEADLINE);
+ assert(!strcmp(r.manual_readiness,"NOT_READY")&&r.v_mps==0);
+ /* Recovery is a fresh actual completion, not transport activity or a new owner. */
+ drive_controller_health(&c,health_clock,40000,100,NULL,-EBUSY);
+ uint64_t recovered[]={21000,21500,21500,22000};memcpy(clock_values,recovered,sizeof(recovered));clock_index=0;
+ drive_controller_step(&c,A,span(control),span(input),0,span(perception),0,&r);
+ assert(!strcmp(r.manual_readiness,"READY")&&r.v_mps>0&&r.generation==42&&r.locally_active);
+ assert(!r.manual_health.cpu_valid&&!r.manual_health.restrict_function);
+ drive_controller_deadline_missed(&r);
+ assert(r.v_mps==0&&!strcmp(r.manual_readiness,"NOT_READY")&&r.manual_health.failure==XDH_DEADLINE);
+ puts("health adapter: actual algorithms, AUTO-only resource fault, serial deadline, fresh recovery PASS");
+}
 int main(void){
+ health_tests();
  for(int swapped=0;swapped<2;swapped++){
   const char *own=swapped?B:A,*other=swapped?A:B;
   struct drive_controller c;struct drive_result r;char cp[256];drive_controller_init(&c);

@@ -6,6 +6,40 @@ void drive_controller_init(struct drive_controller *c)
 {
  memset(c,0,sizeof(*c));drive_auto_adapter(&c->automatic,&c->auto_cfg);drive_manual_adapter(&c->manual,&c->manual_cfg);
 }
+void drive_controller_health(struct drive_controller *c,int (*clock)(uint64_t *),
+ uint64_t deadline,uint64_t uptime,const struct xdr_snapshot *resources,int resource_rc)
+{
+ c->clock_us=clock;c->deadline_us=deadline;c->resource_uptime_ms=uptime;
+ c->resources=resources;c->resource_rc=resource_rc;
+}
+void drive_controller_deadline_missed(struct drive_result *r)
+{
+ if(!r->auto_health.restrict_function)r->auto_health.failure=XDH_DEADLINE;
+ if(!r->manual_health.restrict_function)r->manual_health.failure=XDH_DEADLINE;
+ r->auto_health.restrict_function=r->manual_health.restrict_function=true;
+ if(!r->auto_not_ready||strcmp(r->auto_not_ready,"OUTPUT_INVALID"))r->auto_not_ready="CALCULATION_FAILED";
+ if(!r->manual_not_ready||strcmp(r->manual_not_ready,"OUTPUT_INVALID"))r->manual_not_ready="CALCULATION_FAILED";
+ r->auto_readiness=r->manual_readiness="NOT_READY";
+ r->auto_state=r->manual_state="error";
+ r->v_mps=r->steer_rad=0;
+}
+static void calculate(struct drive_controller *c,struct drive_adapter *adapter,
+ struct xm_span control,struct xm_span input,int64_t age,struct drive_sample *sample,
+ struct xdh_health *health)
+{
+ uint64_t begin=0,end=0;int clock_rc=c->clock_us?c->clock_us(&begin):0;
+ int rc=drive_adapter_run(adapter,control,input,age,sample);
+ if(!c->clock_us)return;
+ int end_rc=c->clock_us(&end);
+ struct xdh_work work={.state=XDH_COMPLETED,.required=true,.rc=rc,
+  .clock_rc=clock_rc?clock_rc:end_rc,.begin_us=begin,.end_us=end,.deadline_us=c->deadline_us};
+ (void)xdh_assess(&work,end,c->resource_uptime_ms,c->resources,c->resource_rc,health);
+ if(health->restrict_function){
+  if(!sample->reason||(strcmp(sample->reason,"OUTPUT_INVALID")&&strcmp(sample->reason,"CALCULATION_FAILED")))
+   sample->reason="CALCULATION_FAILED";
+  sample->v_mps=sample->steer_rad=0;
+ }
+}
 static bool control_valid(struct drive_controller *c,struct xm_span payload,struct xm_vehicle_control *v)
 {
  if(xm_vehicle_control_parse(payload,v))return false;
@@ -31,8 +65,8 @@ void drive_controller_step(struct drive_controller *c,const char *local_vm_id,
  out->control_valid=control_valid(c,control,&v);
  struct xm_span accepted=out->control_valid?control:(struct xm_span){0};
  struct drive_sample ac,mc;
- (void)drive_adapter_run(&c->automatic,accepted,perception,perception_age_ms,&ac);
- (void)drive_adapter_run(&c->manual,accepted,input,input_age_ms,&mc);
+ calculate(c,&c->automatic,accepted,perception,perception_age_ms,&ac,&out->auto_health);
+ calculate(c,&c->manual,accepted,input,input_age_ms,&mc,&out->manual_health);
  out->auto_progress=c->automatic.progress;out->manual_progress=c->manual.progress;
  out->auto_not_ready=out->control_valid?ac.reason:"CONTROL_UNAPPLIED";
  out->manual_not_ready=out->control_valid?mc.reason:"CONTROL_UNAPPLIED";
