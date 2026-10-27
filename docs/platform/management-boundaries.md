@@ -140,6 +140,8 @@ SerializedManager를 먼저 통과하며 pending details와 원 key의 전달도
 Recovery Worker는 현재 Watcher 판단을 기존 Recovery Engine에 연결해, 원 attempt를
 저장한 뒤 Manager의 recover_once를 실행한다. 기본 attempt 실행 예산은 110초다.
 응답 유실은 같은 journal/기한으로 확인하며 복구 완료는 새 Xen 실행 관측이라는 뜻이다.
+Worker의 손상 이력 차단과 사건 기록 실패의 해석은
+[상태 파일·사건 기록](../../platform/services/dom0-manager/README.md#worker-상태-파일과-사건-기록)을 따른다.
 선택한 공통 주행 프로필에서는 그 뒤 실행별 Bootstrap·신뢰 바인딩·Standby 준비를
 별도로 확인한다. [주행·재합류 구조](../../platform/apps/drive/README.md#실행-바인딩과-자동-복구)를 따른다.
 감시 주기·장애 판정 유예는 복구 실행 timeout이 아니다. CPU 조회와 제품 HTTP의
