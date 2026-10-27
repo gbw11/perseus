@@ -302,3 +302,345 @@ print(json.dumps({'status':result['status'],'receipt_id':result['receipt_id']}))
         self.assertNotEqual(fresh['receipt_id'], self.original['receipt_id'])
         self.assertEqual(self.api.reconcile(new, self.credential, self.source, self.path,
             store=self.store, observe=lambda:new)['status'], 'blocked')
+
+
+class RecoveryReconciliationTest(unittest.TestCase):
+    def setUp(self):
+        self.f = foundation.FoundationTest('runTest')
+        self.f.setUp()
+        self.addCleanup(self.f.doCleanups)
+        self.p, self.m, self.r = self.f.p, self.f.m, self.f.r
+
+    def cut(self, checkpoint):
+        self.f.start()
+        spec = self.f.spec()
+        self.f.checkpoint(checkpoint)
+        with self.assertRaises(foundation.Interrupted): self.f.recover(spec)
+        self.p.execution_checkpoint = lambda *args:None
+        self.f.ticks += 100
+        return spec
+
+    def reconcile(self, spec, execute=False, **kw):
+        return self.m.call('recovery-reconcile', {'recovery_attempt_id':spec['recovery_attempt_id'],
+                                                'timeout_ms':kw.pop('timeout_ms',15000)}, execute=execute, **kw)
+
+    def path(self, spec):
+        return self.p.data/'recovery-attempts'/(spec['recovery_attempt_id']+'.json')
+
+    def physical(self):
+        return [c for c in self.f.xen.calls if len(c)>1 and c[0]=='xl' and c[1] in ('create','shutdown','reboot','destroy')]
+
+    def test_T01_T05_stopping_before_submission_can_fail_original_without_commands(self):
+        spec = self.cut('recovery-stopping')
+        path = self.path(spec)
+        original, commands = path.read_bytes(), self.physical()
+        intent = self.p.execution().intent(self.r)
+        plan = self.f.ok(self.reconcile(spec))
+        self.assertEqual(plan['reconciliation']['outcome'], 'not_submitted')
+        self.assertEqual(path.read_bytes(), original)
+        done = self.f.ok(self.reconcile(spec, True))
+        self.assertEqual(done['attempt']['phase'], 'failed')
+        self.assertIsNone(done['original_result'])
+        self.assertEqual(done['attempt']['request'], spec)
+        self.assertEqual(done['attempt']['request_hash'], execution.fingerprint(spec))
+        self.assertEqual(self.physical(), commands)
+        self.assertEqual(self.p.execution().intent(self.r), intent)
+
+    def test_T05_stop_returned_removal_closes_without_replacement(self):
+        spec = self.cut('recovery-stop-returned')
+        original = json.loads(self.path(spec).read_text())
+        commands = self.physical()
+        done = self.f.ok(self.reconcile(spec, True))
+        self.assertEqual(done['reconciliation']['outcome'], 'stopped_without_replacement')
+        self.assertEqual(done['attempt']['phase'], 'failed')
+        self.assertEqual(done['attempt']['operation_id'], original['operation_id'])
+        self.assertEqual(self.physical(), commands)
+
+    def test_T05_uncertain_returned_shutdown_error_is_preserved_after_confirmation(self):
+        self.f.start();spec = self.f.spec()
+        stop = self.p.stop_many
+        def response_lost(*args, **kw):
+            stop(*args, **kw)
+            raise vm.PlatformError('synthetic stop response lost')
+        with patch.object(self.p,'stop_many',side_effect=response_lost):
+            self.f.fails(self.f.recover(spec), 'RECONCILE_REQUIRED')
+        original = json.loads(self.path(spec).read_text())
+        self.assertEqual(original['phase'], 'uncertain')
+        self.assertEqual(original['stop_submission']['state'], 'returned')
+        self.f.ticks += 100
+        commands = self.physical()
+        done = self.f.ok(self.reconcile(spec, True))
+        self.assertEqual(done['attempt']['reconciliation']['original_error'], original['error'])
+        self.assertEqual(done['attempt']['reconciliation']['original_phase'], 'uncertain')
+        self.assertEqual(done['attempt']['phase'], 'failed')
+        self.assertEqual(self.physical(), commands)
+        self.assertEqual(self.f.ok(self.reconcile(spec, True))['reconciliation']['status'], 'recorded')
+        self.assertEqual(self.physical(), commands)
+
+    def test_T06_correlated_observed_launch_completes_after_expiry_without_create(self):
+        spec = self.cut('recovery-observed')
+        commands = self.physical()
+        done = self.f.ok(self.reconcile(spec, True))
+        self.assertEqual(done['attempt']['phase'], 'completed')
+        self.assertEqual(done['original_result']['app_readiness'], 'unknown')
+        self.assertEqual(done['attempt']['request'], spec)
+        self.assertEqual(self.physical(), commands)
+
+    def test_T07_legacy_stopping_is_not_released_on_absence_or_lock_alone(self):
+        spec = self.cut('recovery-stopping')
+        path = self.path(spec)
+        op = json.loads(path.read_text());op.pop('stop_submission')
+        self.p.execution().write(path, op)
+        for present in (True, False):
+            with self.subTest(present=present):
+                if not present: self.f.xen.rows.clear()
+                before, commands = path.read_bytes(), self.physical()
+                self.assertEqual(self.f.ok(self.reconcile(spec))['reconciliation']['status'], 'blocked')
+                self.f.fails(self.reconcile(spec, True), 'RECONCILE_REQUIRED')
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(self.physical(), commands)
+
+    def test_T07_submitted_but_not_returned_launch_is_not_closed(self):
+        spec = self.cut('recovery-launching')
+        before, commands = self.path(spec).read_bytes(), self.physical()
+        self.f.fails(self.reconcile(spec, True), 'RECONCILE_REQUIRED')
+        self.assertEqual(self.path(spec).read_bytes(), before)
+        self.assertEqual(self.physical(), commands)
+
+    def test_T08_final_guard_detects_new_user_stop_intent(self):
+        spec = self.cut('recovery-stop-returned')
+        before, commands = self.path(spec).read_bytes(), self.physical()
+        def change(phase, operation):
+            if phase == 'recovery-reconcile-before-guard':
+                value = self.m.fork().call('stop', {'vm_id':self.r['uuid']}, execute=True, idempotency_key='d03-user-stop')
+                self.assertTrue(value['error']['details']['accepted'])
+        self.p.execution_checkpoint = change
+        self.f.fails(self.reconcile(spec, True), 'TARGET_CHANGED')
+        self.assertEqual(self.path(spec).read_bytes(), before)
+        self.assertEqual(self.physical(), commands)
+        self.assertEqual(self.p.execution().intent(self.r)['desired_state'], 'stopped')
+
+    def test_T09_required_write_failure_and_response_loss_keep_same_owner_ids(self):
+        spec = self.cut('recovery-stop-returned')
+        before, commands = self.path(spec).read_bytes(), self.physical()
+        write = execution.atomic_write
+        def full(path, *args):
+            if Path(path).parent.name == 'recovery-attempts':
+                raise OSError(errno.ENOSPC, 'synthetic full')
+            return write(path, *args)
+        with patch.object(execution, 'atomic_write', side_effect=full):
+            self.assertFalse(self.reconcile(spec, True)['ok'])
+        self.assertEqual(self.path(spec).read_bytes(), before)
+        def cut(phase, value):
+            if phase == 'recovery-failed': raise foundation.Interrupted()
+        self.p.execution_checkpoint = cut
+        with self.assertRaises(foundation.Interrupted): self.reconcile(spec, True)
+        self.p.execution_checkpoint = lambda *args:None
+        response = self.m.fork().call('recovery-reconcile', {'recovery_attempt_id':spec['recovery_attempt_id']}, execute=True)
+        self.assertEqual(self.f.ok(response)['attempt']['phase'], 'failed')
+        self.assertEqual(self.f.ok(response)['attempt']['request'], spec)
+        self.assertEqual(self.physical(), commands)
+
+    def test_T09_actual_process_kill_after_original_journal_save_then_replay(self):
+        spec = self.cut('recovery-stop-returned')
+        before = json.loads(self.path(spec).read_text())
+        commands = self.physical()
+        code = '''
+import os,signal,sys
+from pathlib import Path
+from unittest.mock import patch
+from test_xenova_platform import FakeXen
+from test_xenova_recovery_foundation import HOST_A
+from first_install_fixture import FILES
+from xenova_management import Manager
+import xenova_vm as vm
+class ObserveOnlyXen(FakeXen):
+    def __call__(self,args,**kwargs):
+        assert not (args[0]=='xl' and args[1] in ('create','shutdown','reboot','destroy'))
+        return super().__call__(args,**kwargs)
+data,runtime=map(Path,sys.argv[1:3]);xen=ObserveOnlyXen(data,{})
+p=vm.Platform(data,runtime,command=xen,defaults_path=FILES/'defaults.json',clock=lambda:100,
+    boot_id_reader=lambda:HOST_A)
+def checkpoint(phase,value):
+    if phase=='recovery-failed':os.kill(os.getpid(),signal.SIGKILL)
+p.execution_checkpoint=checkpoint
+with patch.object(vm,'storage_check'):
+    xen.records=p.records(validate_assets=False)
+    result=Manager(p).call('recovery-reconcile',{'recovery_attempt_id':sys.argv[3]},execute=True)
+raise RuntimeError('kill checkpoint not reached: '+str(result.get('error')))
+'''
+        child = subprocess.run([sys.executable,'-B','-c',code,str(self.p.data),str(self.p.runtime),
+                                spec['recovery_attempt_id']],capture_output=True,text=True,timeout=15)
+        self.assertEqual(child.returncode, -9, child.stderr)
+        after = self.f.ok(self.reconcile(spec, True))['attempt']
+        for key in ('operation_id','request','request_hash','accepted_monotonic_ms'):
+            self.assertEqual(after[key], before[key])
+        self.assertEqual(after['phase'], 'failed')
+        self.assertEqual(self.physical(), commands)
+
+    def test_T09_journal_file_sync_replace_parent_sync_failures_preserve_original_ids(self):
+        import stat
+        spec = self.cut('recovery-stop-returned')
+        path = self.path(spec)
+        original, commands = path.read_bytes(), self.physical()
+        sync, replace = os.fsync, os.replace
+        for stage in ('file-sync','replace','parent-sync'):
+            with self.subTest(stage=stage):
+                path.write_bytes(original)
+                def failed_sync(fd):
+                    name = Path(os.readlink('/proc/self/fd/'+str(fd)))
+                    directory = stat.S_ISDIR(os.fstat(fd).st_mode)
+                    target = name.name=='recovery-attempts' if directory else name.parent.name=='recovery-attempts'
+                    if target and directory == (stage=='parent-sync'):
+                        raise OSError(errno.EIO,'synthetic journal fsync')
+                    return sync(fd)
+                def failed_replace(src, dst):
+                    if Path(dst).parent.name=='recovery-attempts':raise OSError(errno.EIO,'synthetic journal replace')
+                    return replace(src,dst)
+                with patch.object(os,'replace',side_effect=failed_replace) if stage=='replace' else \
+                     patch.object(os,'fsync',side_effect=failed_sync):
+                    self.f.fails(self.reconcile(spec, True),'RECONCILE_REQUIRED')
+                result = self.f.ok(self.reconcile(spec, True))
+                self.assertEqual(result['attempt']['request'], spec)
+                self.assertEqual(result['attempt']['operation_id'], json.loads(original)['operation_id'])
+                self.assertEqual(self.physical(), commands)
+
+    def test_T10_actual_execution_lock_rejects_competing_reconciliation(self):
+        spec = self.cut('recovery-stop-returned')
+        before = self.path(spec).read_bytes()
+        with operation_lock(self.p.runtime):
+            self.f.fails(self.reconcile(spec, True), 'OPERATION_IN_PROGRESS')
+        self.assertEqual(self.path(spec).read_bytes(), before)
+
+    def test_public_cli_dispatch_and_input_validation_preserve_original_attempt(self):
+        spec = self.cut('recovery-stop-returned')
+        before = self.path(spec).read_bytes()
+        with patch.object(vm, 'Platform', return_value=self.p), redirect_stdout(io.StringIO()) as output:
+            value = vm.main(['recovery-reconcile','--recovery-attempt-id',spec['recovery_attempt_id']])
+        self.assertTrue(value['ok'])
+        self.assertEqual(json.loads(output.getvalue())['data']['reconciliation']['status'], 'confirmable')
+        for invalid in ({'recovery_attempt_id':'invalid'},
+                        {'recovery_attempt_id':spec['recovery_attempt_id'],'timeout_ms':True},
+                        {'recovery_attempt_id':spec['recovery_attempt_id'],'timeout_ms':15001},
+                        {'recovery_attempt_id':spec['recovery_attempt_id'],'force':True}):
+            self.f.fails(self.m.call('recovery-reconcile',invalid),'INVALID_SPEC')
+        self.f.fails(self.m.call('recovery-reconcile',{'recovery_attempt_id':spec['recovery_attempt_id']},
+                                idempotency_key='new-key'),'INVALID_SPEC')
+        self.assertEqual(self.path(spec).read_bytes(), before)
+
+    def test_T07_active_owned_scope_reaches_budget_without_signal_or_release(self):
+        import xenova_guest_process as guest
+        spec = self.cut('recovery-stop-returned')
+        run = self.p.execution().run_record(self.r)
+        self.p.execution().write(self.p.execution()._path(self.p.runtime,'executions',self.r['uuid']),
+            {**run,'process_scope':guest.scope_name(self.r['uuid'],run['execution_id'])})
+        before, commands = self.path(spec).read_bytes(), self.physical()
+        command = self.p.command
+        def observe(args, **kw):
+            if args[:2] == ['systemctl','show']:
+                self.f.xen.calls.append(args)
+                prop = args[args.index('-p')+1]
+                return {'LoadState':'loaded','ActiveState':'active','Before':'xenova-vm-shutdown.service'}[prop]
+            return command(args, **kw)
+        with patch.object(self.p,'process_isolation',True), patch.object(self.p,'command',side_effect=observe):
+            self.f.fails(self.reconcile(spec, True, timeout_ms=25),'DEADLINE_EXCEEDED')
+        self.assertEqual(self.path(spec).read_bytes(), before)
+        self.assertEqual(self.physical(), commands)
+        self.assertFalse(any(c[:2] == ['systemctl','kill'] for c in self.f.xen.calls))
+
+    def test_T11_host_change_and_small_budget_never_refresh_original_deadline(self):
+        spec = self.cut('recovery-stop-returned')
+        before = self.path(spec).read_bytes()
+        self.f.host = foundation.HOST_B
+        self.f.fails(self.reconcile(spec, True), 'TARGET_CHANGED')
+        self.f.host = foundation.HOST_A
+        command = self.p.command
+        def delayed(args, **kwargs):
+            self.f.ticks += .002
+            return command(args, **kwargs)
+        with patch.object(self.p, 'command', side_effect=delayed):
+            self.f.fails(self.reconcile(spec, True, budget_ms=1), 'DEADLINE_EXCEEDED')
+        self.assertEqual(self.path(spec).read_bytes(), before)
+
+    def test_T12_other_execution_never_completes_original_attempt(self):
+        spec = self.cut('recovery-observed')
+        run = self.p.execution().run_record(self.r)
+        self.p.execution().write(self.p.execution()._path(self.p.runtime,'executions',self.r['uuid']),
+                                 {**run,'owner':{'kind':'user','operation_id':uuid4()},'execution_id':uuid4()})
+        before, commands = self.path(spec).read_bytes(), self.physical()
+        self.f.fails(self.reconcile(spec, True), 'RECONCILE_REQUIRED')
+        self.assertEqual(self.path(spec).read_bytes(), before)
+        self.assertEqual(self.physical(), commands)
+
+    def test_T07_observation_error_and_residual_process_scope_do_not_release_owner(self):
+        spec = self.cut('recovery-stop-returned')
+        before = self.path(spec).read_bytes()
+        with patch.object(self.p, 'domains', side_effect=vm.PlatformError('synthetic observation failure')):
+            self.f.fails(self.reconcile(spec, True), 'OBSERVATION_UNAVAILABLE')
+        import xenova_guest_process
+        with patch.object(self.p, 'process_isolation', True), \
+             patch.object(xenova_guest_process, 'cleanup', side_effect=vm.PlatformError('active scope')):
+            # 보존된 실행에 scope 근거가 없다는 것 자체도 성공으로 치환하지 않는다.
+            self.f.fails(self.reconcile(spec, True), 'RECONCILE_REQUIRED')
+        self.assertEqual(self.path(spec).read_bytes(), before)
+
+    def test_T05_accepted_and_removed_phases_finalize_only_original_attempt(self):
+        # 별도 fixture를 써 서로 다른 원 실행/기한을 섞지 않는다.
+        for checkpoint in ('recovery-accepted', 'recovery-removed'):
+            with self.subTest(checkpoint=checkpoint):
+                other = RecoveryReconciliationTest('runTest');other.setUp()
+                try:
+                    spec = other.cut(checkpoint)
+                    commands = other.physical()
+                    result = other.f.ok(other.reconcile(spec, True))
+                    self.assertEqual(result['attempt']['phase'], 'failed')
+                    self.assertEqual(result['attempt']['request'], spec)
+                    self.assertEqual(other.physical(), commands)
+                finally:other.doCleanups()
+
+    def test_T12_new_legitimate_execution_is_not_changed_by_old_result_recheck(self):
+        spec = self.cut('recovery-stop-returned')
+        self.f.ok(self.reconcile(spec, True))
+        new = self.f.start('d03-new-user-command')
+        execution_id = new['execution_id']
+        commands = self.physical()
+        old = self.f.ok(self.reconcile(spec, True))
+        self.assertIsNone(old['original_result'])
+        self.assertEqual(self.f.state()['execution_id'], execution_id)
+        self.assertEqual(self.physical(), commands)
+
+    def test_T13_real_adapter_can_read_completion_but_final_engine_needs_owner_connection(self):
+        from types import SimpleNamespace
+        from uuid import UUID
+        try:
+            from dom0_manager.recovery.engine import RecoveryEngine
+            from dom0_manager.recovery.platform_recovery import PlatformRecovery
+            from dom0_manager.recovery.policy import RecoveryPolicy
+            from dom0_manager.recovery.state import RecoveryRecord, RecoveryStatus, RecoveryStore
+        except ImportError:
+            self.skipTest('existing isolated dom0-manager integration dependencies required')
+        spec = self.cut('recovery-observed')
+        rid = UUID(uuid4())
+        record = RecoveryRecord(rid, UUID(self.r['uuid']), 'DOMAIN_ABSENT', 'linux', RecoveryStatus.FAILED,
+            '2026-10-27T00:00:00+00:00', 0, attempt=1, recovery_attempt_id=UUID(spec['recovery_attempt_id']),
+            request=dict(spec), mode=spec['mode'], final=True, closed_monotonic=self.f.ticks,
+            last_error={'code':'RECONCILE_REQUIRED','platform_code':'RECONCILE_REQUIRED','message':'unconfirmed'})
+        store = RecoveryStore(self.p.runtime/'owned-d03-upper-fixture.json')
+        store.save({rid:record})
+        adapter = PlatformRecovery(self.m)
+        engine = RecoveryEngine(RecoveryPolicy(), adapter, SimpleNamespace(health=lambda _:None),
+                                store, clock=lambda:self.f.ticks, inline=True)
+        self.addCleanup(engine.shutdown)
+        self.f.ok(self.reconcile(spec, True))
+        commands = self.physical()
+        actual = adapter.attempt(record.recovery_attempt_id)
+        self.assertEqual(actual['phase'], 'completed')
+        engine.tick()
+        self.assertEqual(engine.records()[0].status, RecoveryStatus.FAILED)
+        self.assertEqual(engine.completed_executions(), [])
+        # 직접적인 기존 조회 분기는 원 결과를 읽을 수 있다. final 소비 연결은 제품에 아직 없다.
+        read = engine._task_replay(engine.records()[0])
+        self.assertEqual(read['original_result']['execution_id'], actual['result']['execution_id'])
+        self.assertEqual(engine.records()[0].attempt, 1)
+        self.assertEqual(engine.records()[0].request, spec)
+        self.assertEqual(self.physical(), commands)
