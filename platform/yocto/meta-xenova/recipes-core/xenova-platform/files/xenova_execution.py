@@ -433,7 +433,8 @@ class Execution:
         if self.run_record(record) != value or value.get('phase') != 'launching':
             refuse('RECONCILE_REQUIRED','unsubmitted launch owner changed')
         # 만료 뒤에는 원 실행의 부재 확인·기록 종결만 한다. 제출 권한을 연장하지 않는다.
-        end=deadline if self.p.clock()<deadline else self.p.clock()+15
+        end=min(deadline if self.p.clock()<deadline else self.p.clock()+15,
+                getattr(self.p,'response_deadline',float('inf')))
         if self.p.matching(record,self.p.domains(deadline=end)):
             refuse('RECONCILE_REQUIRED','domain exists after pre-submission rejection')
         self.write(self._path(self.runtime,'executions',record['uuid']),
@@ -750,7 +751,7 @@ class Execution:
             intent = self.intent(record)
             if not intent or intent["accepted_operation_id"] != previous["operation_id"]:
                 refuse("TARGET_CHANGED", "control request intent was superseded")
-            readonly_end = self.p.clock()+15
+            readonly_end = min(self.p.clock()+15,getattr(self.p,'response_deadline',float('inf')))
             observation = self.observe(record, readonly_end)
             run = self.run_record(record)
             confirmed = action in ("stop", "destroy") and observation["presence"] == "absent"
