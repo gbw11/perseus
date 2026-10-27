@@ -27,6 +27,8 @@ struct xdr_region {
  uint64_t capacity, used, free;
 };
 struct xdr_snapshot {
+	int heap_rc;
+	uint64_t heap_allocated_bytes, heap_free_bytes;
 	uint64_t collect_us,total_collect_us,max_collect_us;
 	uint64_t net_start_ms,net_end_ms,tx_bytes,rx_bytes,tx_bytes_per_s,rx_bytes_per_s,net_epoch;
 	int net_rate_rc;

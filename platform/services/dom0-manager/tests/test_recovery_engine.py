@@ -803,7 +803,7 @@ def test_store_invariant_violation_marks_history_lost_and_blocks_execution(tmp_p
     assert store.load() == {} and store.history_lost and path.with_suffix(".json.corrupt").exists()
 
 
-def test_corrupt_store_blocks_execution_but_keeps_judging(tmp_path):
+def test_corrupt_store_blocks_execution_but_keeps_judging(tmp_path, caplog):
     path = tmp_path / "recoveries.json"
     path.write_text("{broken", encoding="utf-8")
     w = make(tmp_path, store=RecoveryStore(path))
@@ -812,6 +812,7 @@ def test_corrupt_store_blocks_execution_but_keeps_judging(tmp_path):
     w.tick()
     assert w.platform.calls == [] and w.record().status == RecoveryStatus.DETECTED
     assert json.loads(path.read_text())["history_lost"] is True
+    assert 'remove ' not in caplog.text and 'until the file is removed' not in caplog.text
 
 
 def test_policy_none_records_but_never_calls_platform(tmp_path):

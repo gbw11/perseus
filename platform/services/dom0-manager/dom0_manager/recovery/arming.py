@@ -4,9 +4,10 @@
 한 번이라도 신호를 받은 사실을 dom0 에 남겨, Worker 가 재시작된 뒤 앱이 이미 죽어 있어도 감시 대상에서 빠지지 않게 한다.
 저장소는 /run/xenova/recovery(tmpfs) 라 host 재부팅이면 비워진다. 재부팅 뒤에는 VM 이 다시 떠서 신호를 보내므로 다시 arm 된다.
 
-파일이 깨졌으면 "대상 아님"으로 조용히 시작하지 않는다. 깨진 파일은 `.corrupt` 로 옮겨 두고 history_lost 를 세워
+파일이 깨졌으면 "대상 아님"으로 조용히 시작하지 않는다. 원본을 `.corrupt` 로 보존한 뒤 history_lost 를 세워
 capability 선언도 armed 기록도 없는 Zephyr VM 을 관측 불가(OBSERVATION_UNAVAILABLE)로 보고한다. history_lost 는 파일에 같이
-남겨 Worker 재시작으로는 사라지지 않고, 운영자가 파일을 지워야 풀린다.
+남긴다. 차단 저장이 실패해도 남은 원본/격리 흔적으로 Worker 재시작 때 차단을 복원한다.
+손상 증거 삭제를 정상 수습으로 취급하지 않는다.
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import UUID
+
+from .store_files import preserve_corrupt, read_state
 
 log = logging.getLogger(__name__)
 
@@ -54,41 +57,53 @@ class ArmingStore:
     def __init__(self, path: Path | None) -> None:
         self._path = path
         self.history_lost = False
+        self._write_blocked = False
 
     @property
     def path(self) -> Path | None:
         return self._path
 
     def load(self) -> ArmingState:
-        """파일이 없으면 빈 상태. 깨졌으면 `.corrupt` 로 보존하고 history_lost 를 세운 빈 상태(파일에도 남긴다)."""
-        if self._path is None or not self._path.exists():
+        """최초 부재만 빈 상태. 손상·읽기 실패·고립된 증거는 이력 상실이다."""
+        if self._path is None:
             return ArmingState()
         try:
-            armed, lost = _parse(self._path.read_text(encoding="utf-8"))
+            text = read_state(self._path)
+            if text is None:
+                return ArmingState(history_lost=self.history_lost)
+            armed, lost = _parse(text)
         except OSError as exc:
             return self._lost(f"unreadable: {exc}", preserve=False)
         except (ValueError, TypeError) as exc:
             return self._lost(str(exc), preserve=True)
-        self.history_lost = lost
-        return ArmingState(armed, lost)
+        self.history_lost = self.history_lost or lost
+        return ArmingState(armed, self.history_lost)
 
     def _lost(self, why: str, *, preserve: bool) -> ArmingState:
         self.history_lost = True
         log.error(
             "arming store %s corrupt (%s): previously armed Zephyr VMs are unknown until they signal again; "
-            "undeclared ones are reported OBSERVATION_UNAVAILABLE. Delete the file to clear history_lost", self._path, why,
+            "undeclared ones are reported OBSERVATION_UNAVAILABLE; preserve state and evidence for investigation", self._path, why,
         )
         if preserve:
             try:
-                os.replace(self._path, self._path.with_suffix(self._path.suffix + ".corrupt"))
+                preserve_corrupt(self._path)
             except OSError as exc:
+                self._write_blocked = True
                 log.warning("arming store %s could not be set aside: %s", self._path, exc)
-        self.save({})
+        else:
+            self._write_blocked = True
+        if not self._write_blocked:
+            self.save({})
         return ArmingState({}, history_lost=True)
 
-    def save(self, armed: dict[UUID, str]) -> None:
+    def save(self, armed: dict[UUID, str]) -> bool:
+        """로컬 기록 확인 여부. 실패는 Watcher에 전달하며 감시 이력을 정상으로 꾸미지 않는다."""
         if self._path is None:
-            return
+            return True
+        if self._write_blocked:
+            log.error("arming store %s not saved: unresolved state/evidence", self._path)
+            return False
         body = {
             "version": SCHEMA_VERSION,
             "armed": {str(k): v for k, v in sorted(armed.items(), key=lambda kv: str(kv[0]))},
@@ -97,7 +112,13 @@ class ArmingStore:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-            tmp.write_text(json.dumps(body, indent=0), encoding="utf-8")
+            with open(tmp, "w", encoding="utf-8") as stream:
+                stream.write(json.dumps(body, indent=0))
+                stream.flush()
+                os.fsync(stream.fileno())
             os.replace(tmp, self._path)
         except OSError as exc:
+            self.history_lost = True
             log.warning("arming store %s not saved: %s", self._path, exc)
+            return False
+        return True

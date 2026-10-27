@@ -74,9 +74,10 @@ Linux VM 의 에이전트는 VM 자원과 에이전트 생존만 알립니다. �
 ```python
 from xenova_mqtt import AppHeartbeat, Identity, XenovaClient, systemd, topics
 
-client = XenovaClient(Identity(vm_id=VM_ID, app_id="message-board"), host=BROKER)
+APP_ID = "my-app"                                # 예시 이름. 브로커에 이 계정은 없다(아래 참고)
+client = XenovaClient(Identity(vm_id=VM_ID, app_id=APP_ID), host=BROKER)
 client.start()
-heartbeat = AppHeartbeat(client, "message-board")
+heartbeat = AppHeartbeat(client, APP_ID)
 systemd.ready()                                  # Type=notify 유닛이면 준비 완료
 while not stopping:
     handle_one_batch()                           # 앱의 실제 일
@@ -86,10 +87,14 @@ while not stopping:
 ```ini
 [Service]
 Type=notify
-ExecStart=/usr/bin/python3 -m xenova_message_board
+ExecStart=/usr/bin/python3 -m my_app
 Restart=on-failure
 WatchdogSec=10
 ```
+
+`my-app` 은 예시일 뿐 등록된 app_id 가 아닙니다. 실제 앱은 계약 4장에 등록된 app_id 를 써야 하고, 그 이름이 브로커 계정·ACL
+(`platform/deploy/mosquitto/etc/accounts`·`acl`)과 백엔드 VM 역할에도 있어야 연결·발행이 됩니다. 지금 Linux 쪽에 등록된 것은
+`message-board` 하나이며, Linux 게스트에 어떤 앱을 올릴지와 그 역할 ID 는 아직 정해지지 않았습니다.
 
 ### VM이 아닌 발행자
 

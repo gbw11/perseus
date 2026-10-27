@@ -94,6 +94,19 @@ class Manager:
         self.trace_sink = trace_sink
         self.last_trace = None
 
+    def fork(self):
+        """stop 수락/원 기록 조회용 독립 요청 객체. 긴 호출의 상위 직렬화는 유지한다.
+
+        stdout 전환과 외부 실행은 기존 execution flock 안에서만 수행한다.
+        임의의 모든 action을 병렬 호출해도 된다는 계약은 아니다.
+        """
+        from copy import copy
+        request_platform=copy(self.p)
+        request_platform.__dict__.pop('response_deadline',None)
+        return type(self)(request_platform, preparer=self.preparer, usage_check=self.usage_check,
+                          checkpoint=self.checkpoint, defaults_path=self.defaults_path,
+                          trace_sink=self.trace_sink)
+
     def _plain_dir(self, path, *, create=False):
         if create and not path.exists() and not path.is_symlink():
             path.mkdir(mode=0o700)
@@ -254,8 +267,22 @@ class Manager:
             if set(spec) != {'barrier_id'} or not isinstance(spec['barrier_id'], str) or not vm.UUID.fullmatch(spec['barrier_id']):
                 fail('INVALID_SPEC', 'host-resume requires the current barrier_id')
             return spec
-        elif action in ('control-operation', 'recovery-operation'):
-            field = 'operation_id' if action == 'control-operation' else 'recovery_attempt_id'
+        elif action == 'control-operation':
+            allowed = {'operation_id', 'idempotency_key', 'vm_id', 'timeout_ms'}
+            selectors = [n for n in ('operation_id', 'idempotency_key') if n in spec]
+            if set(spec)-allowed or len(selectors)!=1:
+                fail('INVALID_SPEC', 'exactly one control operation selector required')
+            selected=selectors[0]
+            if (not self._text_token(spec[selected]) or
+                    selected=='operation_id' and not vm.UUID.fullmatch(spec[selected])):
+                fail('INVALID_SPEC', 'invalid control operation selector')
+            if 'vm_id' in spec:spec={**spec,'vm_id':normalize_uuid(spec['vm_id'])}
+            timeout=spec.get('timeout_ms',15000)
+            if type(timeout) is not int or not 0<timeout<=15000:
+                fail('INVALID_SPEC','timeout_ms must be 1..15000')
+            return {**spec,'timeout_ms':timeout}
+        elif action == 'recovery-operation':
+            field = 'recovery_attempt_id'
             if set(spec) != {field} or not isinstance(spec[field], str) or not vm.UUID.fullmatch(spec[field]):
                 fail('INVALID_SPEC', 'canonical operation selector required')
             return spec
@@ -268,6 +295,10 @@ class Manager:
                                   else {'value'} if action.endswith('-set') else set())
         if action in ('snapshot', 'probe'):
             allowed |= {'max_age_ms'} if action == 'snapshot' else {'timeout_ms'}
+        if action in ('get','list'):
+            allowed.add('timeout_ms')
+            if 'timeout_ms' in spec and (type(spec['timeout_ms']) is not int or not 0<spec['timeout_ms']<=15000):
+                fail('INVALID_SPEC','timeout_ms must be 1..15000')
         if set(spec) - allowed:
             fail('INVALID_SPEC', 'unexpected specification fields')
         if action == 'list':
@@ -736,7 +767,7 @@ class Manager:
     def _completed_busy_replay(self, action, spec, key, context):
         """실행 잠금 충돌은 검증된 과거 완료 결과를 뒤집지 않는다. 현재 조회는 생략한다."""
         # 원 기한 만료 뒤에도 완료 기록만 읽는 제한 예산이다. 새 실행/수락은 하지 않는다.
-        read_end=self.p.clock()+2
+        read_end=min(self.p.clock()+2,getattr(self.p,'response_deadline',float('inf')))
         def complete(op, request):
             return (op and op.get('request')==request and op.get('phase')=='completed'
                     and op.get('error') is None and isinstance(op.get('result'),dict))
@@ -1096,13 +1127,22 @@ class Manager:
         self._save_op(op)
         return self._create(op) if action=='create' else self._transition(op,records)
 
-    def call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None):
-        """동기 공개 계약. 부가 trace 저장 실패는 완료된 작업의 결과를 바꾸지 않는다."""
+    def call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None):
+        """동기 envelope. budget_ms는 이번 호출의 잔여 기간이며 원 spec/기한을 갱신하지 않는다.
+
+        생략 시 기존 예산을 유지한다. 부가 trace 저장 실패는 원 완료를 바꾸지 않는다.
+        """
         from xenova_trace import Trace, span
         trace = Trace(clock=self.p.clock, context={'action':action, 'request_id':request_id})
         with trace.activate(), span('manager.call'):
-            response = self._call(action, spec, execute=execute,
-                                  idempotency_key=idempotency_key, request_id=request_id)
+            had_budget=hasattr(self.p,'response_deadline')
+            previous_budget=getattr(self.p,'response_deadline',None)
+            try:
+                response = self._call(action, spec, execute=execute,
+                                      idempotency_key=idempotency_key, request_id=request_id, budget_ms=budget_ms)
+            finally:
+                if had_budget:self.p.response_deadline=previous_budget
+                else:self.p.__dict__.pop('response_deadline',None)
         try:
             self.last_trace = trace.export()
             if self.trace_sink is not None:
@@ -1120,7 +1160,7 @@ class Manager:
             return value
         return public(response)
 
-    def _call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None):
+    def _call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None):
         """HTTP를 가정하지 않는다. 모든 응답은 동일 JSON envelope이고 stdout을 쓰지 않는다."""
         entered = self.p.clock()
         context = {'operation_id': None, 'replayed': False, 'write_operation': False}
@@ -1128,6 +1168,10 @@ class Manager:
                   'operation_id':None,'replayed':False,'data':None,'error':None}
         trace_bind(request_id=response['request_id'])
         try:
+            if budget_ms is not None and (type(budget_ms) is not int or not 0<budget_ms<=105000):
+                fail('INVALID_SPEC','budget_ms must be 1..105000')
+            if budget_ms is not None and action not in ('start','stop','reboot','destroy','get','list','control-operation'):
+                fail('INVALID_SPEC','budget_ms is supported only for control and bounded reads')
             spec = self._validate_call(action, spec, execute, idempotency_key, request_id)
             trace_bind(vm_id=spec.get('vm_id'), recovery_attempt_id=spec.get('recovery_attempt_id'))
             try:
@@ -1140,10 +1184,45 @@ class Manager:
             deadline = (spec['deadline_monotonic_ms']/1000 if action == 'recover_once' else
                         entered + (90 if action in ('start','stop','reboot','destroy') else
                                    spec.get('timeout_ms',15000)/1000))
+            if budget_ms is not None:
+                deadline=min(deadline,entered+budget_ms/1000)
+                # 호출 예산은 spec/hash에 섞지 않고 원 물리 deadline도 갱신하지 않는다.
+                self.p.response_deadline=entered+budget_ms/1000
+            else:
+                self.p.response_deadline=float('inf')
             cpu_deadline = deadline
             trace_bind(deadline_monotonic_ms=int(deadline*1000))
             if action == 'stop':
                 self._accept_stop(spec,idempotency_key,deadline,context)
+            if action == 'control-operation':
+                # journal 조회는 새 실행을 하지 않으며 긴 execution flock을 기다리지 않는다.
+                with short_lock(self.p.runtime,'admission',deadline=deadline,
+                                clock=self.p.clock,sleep=self.p.sleep):
+                    try:vm.storage_check(self.data)
+                    except (OSError,PlatformError,ValueError):
+                        fail('STORAGE_UNAVAILABLE','persistent storage unavailable')
+                    selected='operation_id' if 'operation_id' in spec else 'idempotency_key'
+                    found=[q for q in self.p.execution().requests() if q.get(selected)==spec[selected]]
+                    if self.p.clock()>=deadline:
+                        fail('DEADLINE_EXCEEDED','control operation lookup budget expired')
+                    if len(found)>1:
+                        fail('RECONCILE_REQUIRED','control operation selector is ambiguous')
+                    if not found or ('vm_id' in spec and found[0]['vm_id']!=spec['vm_id']):
+                        fail('VM_NOT_FOUND','control operation not found')
+                    context['operation_id']=found[0]['operation_id']
+                    trace_bind(operation_id=found[0]['operation_id'],vm_id=found[0]['vm_id'])
+                    try:current_host=self.p.boot_id_reader()
+                    except (OSError,PlatformError,ValueError):current_host=None
+                    same_host=(current_host==found[0]['host_boot_id']) if current_host is not None else None
+                    sampled=int(self.p.clock()*1000)
+                    if self.p.clock()>=deadline:
+                        fail('DEADLINE_EXCEEDED','control operation metadata budget expired')
+                    original_end=found[0].get('deadline_monotonic_ms')
+                    expired=(sampled>=original_end) if same_host and type(original_end) is int else None
+                    response.update(ok=True,data={'operation':found[0], 'deadline_observation':{
+                        'host_boot_id':current_host,'observed_monotonic_ms':sampled,
+                        'original_host_matches':same_host,'execution_deadline_expired':expired}})
+                    return {**response,'operation_id':found[0]['operation_id']}
             with operation_lock(self.p.runtime):
                 try:
                     records=self.p.records(validate_assets=False)
@@ -1193,12 +1272,6 @@ class Manager:
                     else:
                         with tool_output():
                             result = recovery.once(spec, execute=execute, context=context)
-                elif action == 'control-operation':
-                    found = [q for q in self.p.execution().requests() if q['operation_id'] == spec['operation_id']]
-                    if len(found) != 1:
-                        fail('VM_NOT_FOUND', 'control operation not found')
-                    result = {'operation':found[0]}
-                    context['operation_id'] = found[0]['operation_id']
                 elif action == 'host-resume':
                     result = {'host_admission':self.p.execution().resume_host(spec['barrier_id'])}
                 elif action in ('probe', 'execution-context'):
@@ -1292,7 +1365,8 @@ class Manager:
             recorded_deadline=op.get('deadline_monotonic_ms')
             expired=self.p.clock()*1000>=recorded_deadline if type(recorded_deadline) is int else None
             response['error']['details'].update(accepted=True,completion='superseded' if superseded else 'pending' if pending else latest['phase'],
-                operation_id=op['operation_id'],intent_revision=op['intent_revision'],
+                operation_id=op['operation_id'],intent_revision=op['intent_revision'],phase=latest['phase'],
+                host_boot_id=op['host_boot_id'],lifecycle_generation=op['lifecycle_generation'],
                 deadline_monotonic_ms=recorded_deadline,
                 execution_deadline_expired=expired,
                 next_action=('inspect_original_operation_and_explicitly_request_stop_if_still_present' if pending and expired is not False else

@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from ..models import RecoveryEvent
 from .model import FailureReason
+from .store_files import preserve_corrupt, read_state
 
 log = logging.getLogger(__name__)
 
@@ -178,21 +179,25 @@ class RecoveryRecord:
 
 
 class RecoveryStore:
-    """`XENOVA_RECOVERY_STATE_DIR/recoveries.json`. 원자적 쓰기(tmp + rename). 깨진 파일은 `.corrupt` 로 보존하고 history_lost 를 세운다."""
+    """Worker 상태+pending 사건의 원자 저장. 손상 원본/격리 흔적으로 차단을 복원한다."""
 
     def __init__(self, path: Path | None) -> None:
         self._path = path
         self.history_lost = False
+        self._write_blocked = False
 
     @property
     def path(self) -> Path | None:
         return self._path
 
     def load(self) -> dict[UUID, RecoveryRecord]:
-        if self._path is None or not self._path.exists():
+        if self._path is None:
             return {}
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
+            text = read_state(self._path)
+            if text is None:
+                return {}
+            data = json.loads(text)
             if not isinstance(data, dict) or data.get("version") != SCHEMA_VERSION:
                 raise ValueError(f"unsupported schema (expected version {SCHEMA_VERSION})")
             raw = data.get("recoveries")
@@ -214,26 +219,34 @@ class RecoveryStore:
         open_vms = [r.vm_id for r in result.values() if r.open]
         if len(open_vms) != len(set(open_vms)):
             return self._lost("more than one open recovery for a VM", preserve=True)
-        self.history_lost = lost
+        self.history_lost = self.history_lost or lost
         return result
 
     def _lost(self, why: str, *, preserve: bool) -> dict[UUID, RecoveryRecord]:
         self.history_lost = True
         log.error(
-            "recovery store %s corrupt (%s): in-flight recoveries are unknown; no recovery will be executed until the file is removed",
+            "recovery store %s unavailable/corrupt (%s): in-flight recoveries are unknown; recovery is blocked; preserve state and evidence for investigation",
             self._path, why,
         )
         if preserve:
             try:
-                os.replace(self._path, self._path.with_suffix(self._path.suffix + ".corrupt"))
+                preserve_corrupt(self._path)
             except OSError as exc:
+                self._write_blocked = True
                 log.warning("recovery store %s could not be set aside: %s", self._path, exc)
-        self.save({})
+        else:
+            # 읽지 못한 원본·부재 뒤 잔존 증거를 빈 파일로 덮어쓰지 않는다.
+            self._write_blocked = True
+        if not self._write_blocked:
+            self.save({})  # False여도 원본 또는 보존 사본으로 다음 load가 차단된다.
         return {}
 
     def save(self, records: dict[UUID, RecoveryRecord]) -> bool:
         if self._path is None:
             return True
+        if self._write_blocked:
+            log.error("recovery store %s not saved: unresolved state/evidence", self._path)
+            return False
         body = {
             "version": SCHEMA_VERSION,
             "history_lost": self.history_lost,

@@ -4,6 +4,7 @@
 #ifndef XENOVA_DRIVE_RUNTIME_H
 #define XENOVA_DRIVE_RUNTIME_H
 #include <xenova/diagnostics.h>
+#include <xenova/health.h>
 #include "xm_zclient.h"
 #include <xenova/drive_io.h>
 
@@ -25,6 +26,11 @@ int xd_finish(struct xm_zclient *, int app_result);
 int xd_iteration_begin(void);
 int xd_step_begin(void);
 int xd_step_end(void);
+/* Existing release origin/deadline, not a new per-mode execution allowance. */
+uint64_t xd_completion_deadline_us(void);
+bool xd_step_deadline_missed(void);
+/* Latest local assessment only; no message, I/O or app progress generated. */
+void xd_health_record(const struct xdh_health *automatic,const struct xdh_health *manual);
 /* Call for every actual command serialization result, including failures. */
 void xd_command(struct xm_zclient *, const char *topic, const char *json, int encoded,
 		uint32_t generation, float v_mps, float steer_rad, int64_t input_seq,

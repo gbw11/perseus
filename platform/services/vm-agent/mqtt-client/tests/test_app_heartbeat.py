@@ -29,7 +29,7 @@ def make(watchdog_sec=2.0):
     t = [100.0]
     pings = []
     client = FakeClient()
-    hb = AppHeartbeat(client, "message-board", clock=lambda: t[0], watchdog=lambda: pings.append(t[0]) or True,
+    hb = AppHeartbeat(client, "my-app", clock=lambda: t[0], watchdog=lambda: pings.append(t[0]) or True,
                       watchdog_interval_s=watchdog_sec)
     return client, hb, t, pings
 
@@ -42,7 +42,7 @@ def test_beat_from_the_loop_publishes_at_most_once_per_period():
         assert hb.beat("idle") is False
     t[0] += 0.25
     assert hb.beat("active") is True
-    assert [(p[0], p[1]) for p in client.published] == [("xenova/v1/apps/message-board/events", "app.heartbeat")] * 2
+    assert [(p[0], p[1]) for p in client.published] == [("xenova/v1/apps/my-app/events", "app.heartbeat")] * 2
     assert client.published[0][2] == {"state": "idle", "uptime_s": 0.0} and client.published[1][2] == {"state": "active", "uptime_s": 1.0}
 
 
@@ -104,11 +104,11 @@ def test_without_watchdog_sec_no_notification_is_sent():
 def test_watchdog_interval_comes_from_the_unit_environment(monkeypatch):
     monkeypatch.setenv("WATCHDOG_USEC", "8000000")
     monkeypatch.delenv("WATCHDOG_PID", raising=False)
-    assert AppHeartbeat(FakeClient(), "message-board", watchdog=lambda: True).watchdog_every_s == 4.0
+    assert AppHeartbeat(FakeClient(), "my-app", watchdog=lambda: True).watchdog_every_s == 4.0
     monkeypatch.delenv("WATCHDOG_USEC")
-    assert AppHeartbeat(FakeClient(), "message-board", watchdog=lambda: True).watchdog_every_s is None
+    assert AppHeartbeat(FakeClient(), "my-app", watchdog=lambda: True).watchdog_every_s is None
     with pytest.raises(ValueError):
-        AppHeartbeat(FakeClient(), "message-board", watchdog_interval_s=0)
+        AppHeartbeat(FakeClient(), "my-app", watchdog_interval_s=0)
 
 
 def test_package_version_matches_pyproject():

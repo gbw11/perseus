@@ -259,7 +259,7 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 | 부팅 유예 | 도메인이 새로 보인 뒤(새 domid) 첫 신호를 받기 전까지 `XENOVA_RECOVERY_BOOT_GRACE`(Linux 90초)·`XENOVA_RECOVERY_ZEPHYR_BOOT_GRACE`(30초) 동안 UNKNOWN. 이전 부팅의 신호는 세지 않음. 첫 신호 뒤에는 유예 없이 창으로만 판정 |
 | 관측 경로 | 필터별 **구독 승인(SUBACK)** 과 **실제 수신 증거** 둘 다 봅니다. 연결(CONNACK)만으로는 부족하고, 승인만으로도 부족합니다. Mosquitto 는 읽기 ACL 에 막힌 구독도 SUBACK 성공으로 답하고 전달만 거르기 때문입니다(실보드 10/23 확인: 읽기 규칙 없는 ACL 에서 정확한 토픽·와일드카드 모두 승인 0, 전달 없음). 그래서 승인 뒤 그 채널에서 메시지를 하나라도 받기 전에는, 그리고 승인된 지 한 창(window)이 안 됐으면 그 신호의 손실 판정은 UNKNOWN(건강 OBSERVATION_UNAVAILABLE)이고 승인 뒤 한 창 동안 아무것도 안 오면 경고를 남깁니다. agent 와 app 경로를 따로 봅니다. **브로커·ACL 문제는 VM 장애가 아닙니다.** crashed·absent 는 Xen 관측이라 계속 판정하고, 신호가 신선하면 경로 상태와 무관하게 OK. 한계: VM 이 하나뿐이고 그 에이전트가 Worker 기동 뒤 한 번도 보내지 않으면 "에이전트 미기동"과 "브로커가 안 줌"을 구별할 수 없어 HEARTBEAT_LOST 대신 OBSERVATION_UNAVAILABLE 로 남습니다 |
 | 대상 불명 | capability 값이 boolean 이 아닌 템플릿의 Zephyr VM 은 앱 펌웨어인지 starter 인지 알 수 없으므로 UNKNOWN(건강 OBSERVATION_UNAVAILABLE). 신호를 받아 armed 되면 보통대로 |
-| armed 기록 손상 | `armed.json` 이 깨졌으면 `armed.json.corrupt` 로 옮겨 보존하고 빈 기록으로 시작하되 `history_lost` 를 파일에 남깁니다. 그동안 capability 선언도 armed 기록도 없는 Zephyr VM 은 앱 펌웨어인지 starter 인지 알 수 없으므로 UNKNOWN(건강 OBSERVATION_UNAVAILABLE)이고 HEALTHY 로 꾸미지 않습니다. 신호를 받으면 armed 되어 보통대로 판정합니다. Worker 재시작으로는 풀리지 않고 운영자가 파일을 지워야 풀립니다 |
+| armed 기록 손상 | 원본을 이동하지 않고 `armed.json.corrupt` 보존 사본을 확보한 뒤 `history_lost=true` 본 파일로 교체합니다. 저장 실패 때도 손상 원본 또는 격리 흔적으로 Worker 재시작 시 차단을 복원합니다. capability 선언도 armed 기록도 없는 Zephyr VM은 UNKNOWN(건강 OBSERVATION_UNAVAILABLE)이고, 실제 신호를 받으면 해당 VM은 armed되어 기존 규칙으로 판정합니다. 손상은 앱 사망이나 복구 허가가 아닙니다. 파일 삭제로 차단을 해제하지 않습니다 |
 | 장애 아님 | `paused`·`stopping` 은 UNKNOWN(사용자 조작·종료 진행) |
 
 판정을 내기 직전에는 그 VM 만 플랫폼 `get` 으로 의도와 실행 상태를 다시 읽고 **그 관측으로 다시 판정**합니다. 관측 사이에 VM 이 시작·복구됐거나 사용자가 껐으면 판정하지 않고, 건강 스냅샷도 재확인한 관측으로 냅니다. 재확인이 잠금 충돌이면 그 주기는 보류합니다.
@@ -305,10 +305,41 @@ Xen을 관측하지 않는 의도 조회가 생기기 전까지 Worker는 60초 
 | 실패·재시도 | XEN_EXECUTION_FAILED·DEADLINE_EXCEEDED 등은 시도 소비 → `XENOVA_RECOVERY_BACKOFF`(5,15,30초) 뒤 새 attempt id. `XENOVA_RECOVERY_MAX_ATTEMPTS`(3) 초과면 final failed. force 승격(켰을 때만)은 플랫폼이 "정상 종료 실패"를 명시한 코드(RECOVERY_MODE_UNSUPPORTED·DEADLINE_EXCEEDED·정지 대기 만료의 XEN_EXECUTION_FAILED)에서만. 끈 상태의 RECOVERY_MODE_UNSUPPORTED 는 final failed. TARGET_CHANGED·INTENT_MISMATCH 는 재시도하지 않고 감시기의 다음 판단(HEALTHY/STOPPED)을 `XENOVA_RECOVERY_VERIFY_TIMEOUT`(150초)까지 기다린 뒤에야 새 시도. RECONCILE_REQUIRED·IDEMPOTENCY_CONFLICT·정체 모를 예외는 운영자 몫이라 즉시 final failed(force 로 올리지 않음). VM_NOT_FOUND·사용자 stop 은 취소 |
 | 단일 실행 | 시작할 때 `XENOVA_RECOVERY_STATE_DIR/worker.lock` 에 non-blocking flock. 다른 Worker 가 쥐고 있으면 종료 코드 3 으로 끝나고 유닛의 `RestartPreventExitStatus=3` 이 재시작을 멈춤 |
 | 실행 스레드 | `recover_once` 는 플랫폼 잠금 안에서 deadline(`XENOVA_RECOVERY_ATTEMPT_DEADLINE` 110초, 상한 120)까지 막힐 수 있어 엔진의 실행 스레드(하나)에서 부름. 감시 루프·건강 발행은 막히지 않고, 관측이 실패한 주기에도 끝난 결과는 회수(`collect`) |
-| fail-safe | `recoveries.json` 은 상태별 불변조건(EXECUTING 이면 attempt id·같은 id 의 spec·mode·시작 시각 등)까지 검증. 하나라도 어긋나거나 깨졌으면 `.corrupt` 로 보존하고 **복구를 실행하지 않음**(판정·건강은 계속). `XENOVA_RECOVERY_POLICY=none` 도 같음. 닫힌 복구는 20건만 남기고 저장소에도 반영 |
+| fail-safe | `recoveries.json`은 상태별 불변조건(EXECUTING의 원 attempt·spec·mode·시작 시각 등)까지 검증합니다. 손상 원본의 `.corrupt` 사본을 먼저 확보하고 차단 기록을 저장하며, 그 저장이 실패해도 원본/잔존 증거를 정상 최초 부재로 해석하지 않습니다. **이력 상실 시 복구 실행을 차단**하고 판정·건강 관측은 유지합니다. `XENOVA_RECOVERY_POLICY=none`도 실행하지 않습니다. pending 사건이 없는 닫힌 복구는 최근 20건만 보존합니다 |
 | 이벤트 | 계약 2.5 `recovery.started/completed/recovered/cancelled/failed` 는 상태 전이와 **함께 레코드에 적어 `recoveries.json` 에 저장(event_id 고정)** 한 뒤에만 outbox `XENOVA_RECOVERY_STATE_DIR/recovery-events.jsonl`(최근 2,000건)로 옮기고 MQTT-12 `xenova/v1/recovery/events` 로 발행. 상태 저장에 실패하면 이벤트를 내지 않고 다음 주기에 다시 저장. outbox 에 못 옮긴 이벤트는 레코드에 남아 Worker 재시작 뒤에도 같은 event_id 로 저장·발행되며(Spring 은 event_id 로 거름) 그동안 `recovery worker degraded` 를 ERROR 로 남김. `error`(failed 의 실패 사유, cancelled 의 취소 사유)의 `code` 는 Worker 결과 코드, `platform_code` 는 플랫폼 원본 코드만. Spring 은 단절 뒤 `GET /api/v1/recovery/events?after_event_id=&limit=`(4.7)로 채움: 읽을 때 계약 스키마로 검증하고, 커서가 보관 범위 밖이거나 커서 뒤에 손상된 줄이 있으면 `gap: true`(손상 자리는 compaction 뒤에도 tombstone 으로 남김), 빈 페이지면 `next_after_event_id: null`. HTTP 서비스는 같은 디렉터리(`XENOVA_RECOVERY_STATE_DIR`)를 읽음. `/run` 은 tmpfs 라 host 재부팅이면 비고 그때는 `gap: true` |
 
 아직 없는 것: 실보드 검증(플랫폼 `force_restart_vm_ids` 승인과 Mosquitto 배포 뒤), `probe` 로 Xen 관측 불가를 가리는 것, Worker 자체 상태(degraded)를 MQTT·HTTP 로 내보내는 것(계약 추가 필요, 지금은 로그).
+
+### Worker 상태 파일과 사건 기록
+
+기본 저장 위치는 `/run/xenova/recovery`입니다. 같은 host의 Worker 재시작을 지원하며,
+host 재부팅 뒤의 tmpfs 초기화 정책은 별개입니다. `recoveries.json`의 상태와
+`pending_events`는 기존과 같이 한 JSON의 원자 교체 단위입니다.
+
+| 본 파일과 흔적 | 해석·처리 |
+|---|---|
+| 유효 schema, `history_lost=false` | 본 파일의 원 ID·spec·deadline·예산·pending을 복원합니다. 오래된 `.corrupt`/미완료 `.tmp`를 정상 본 파일 대신 읽지 않습니다 |
+| 유효 schema, `history_lost=true` | 이력 상실 차단을 복원합니다. 정상 빈 파일로 취급하지 않습니다 |
+| 본 파일·`.corrupt`·`.tmp` 모두 실제 부재 | 최초 빈 상태를 지원합니다 |
+| 본 파일 부재 + `.corrupt` 또는 `.tmp` 존재 | 이전 구현의 격리 중단 또는 미완료 저장 흔적입니다. 차단하고 증거를 보존하며 임시 파일을 승격하지 않습니다 |
+| 본 파일 손상 | 같은 디렉터리에 hard link로 `.corrupt`를 확보한 뒤 차단 파일을 저장합니다. 공간 부족·격리 실패·다른 기존 `.corrupt`와의 충돌이면 원본을 유지하고 저장 실패를 반환합니다. 같은 inode 사본은 이전 실패의 재시도로 인정합니다 |
+| 읽기·경로 조회 오류 | 정상 부재로 숨기지 않습니다. 읽지 못한 원본이나 격리 흔적을 빈 파일로 덮어쓰지 않습니다 |
+
+두 저장소 모두 `history_lost`는 같은 객체의 반복 load로 해제되지 않습니다.
+`RecoveryStore.save()`와 내부 `ArmingStore.save()`는 로컬 저장 확인 여부를 bool로 반환합니다.
+Watcher는 armed 저장 실패를 받아 미선언·미관측 대상의 관측 불가 보호를 유지합니다.
+ArmingStore도 file flush/fsync 뒤 교체하지만, 이를 영구 저장 모드나 SD 전원 상실 보장으로
+해석하지 않습니다. 원본·격리 파일·journal 삭제나 자동 reset은 지원 수습 절차가 아닙니다.
+
+`EventLog.append=False`는 **로컬 기록 성공 미확정**입니다. 미기록·부분 기록·완전한 줄 뒤
+동기화 실패 모두 가능하므로 Engine은 pending의 **원 event_id와 내용**을 유지합니다.
+재시도는 raw 중복 줄을 만들 수 있지만 조회는 첫 유효 사건만 반환합니다. 개행 없이 잘린
+줄에는 경계 개행을 더해 다음 사건이 붙지 않게 하고, 잘린 UTF-8/JSON은 gap으로 처리합니다.
+손상 위치의 tombstone·cursor·compaction 계약은 유지합니다.
+
+실제 sink는 로컬 EventLog 기록 확인 뒤 QoS1·retain=false·wait_s=0으로 MQTT에 제출합니다.
+로컬 HTTP 재보충 원천이 있으면 MQTT 제출 예외에도 True를 반환합니다. 이는 PUBACK이나
+최종 소비자 반영 확인이 아니며, 영구 MQTT 재전송 큐를 제공하지 않습니다.
 
 ## 공통 주행 실행의 Standby 재합류
 
