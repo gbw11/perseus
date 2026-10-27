@@ -406,7 +406,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | --- | --- |
 | `vm_id` | 토픽의 `{vm_id}` 와 같다 |
 | `ok` | `state == HEALTHY` 일 때만 `true` |
-| `state` | `HEALTHY`(실행 중이고 생존 신호가 신선함. 신호가 없는 종류는 Xen 실행만 근거) / `STARTING`(실행 중이지만 이번 부팅의 생존 신호 전, 유예 중) / `UNHEALTHY`(판정 사유가 있거나 `paused`·`stopping`, 신호 끊김) / `STOPPED`(도메인이 없고 의도가 `running` 이 아님) / `OBSERVATION_UNAVAILABLE`(생존 신호를 관측할 수 없음: 구독 미승인, 승인 뒤 그 경로로 아무것도 받지 못함, 또는 Worker 의 Zephyr 대상 기록 손상. **장애가 아니다**) |
+| `state` | `HEALTHY`(실행 중이고 생존 신호가 신선함. 신호가 없는 종류는 Xen 실행만 근거) / `STARTING`(실행 중이지만 이번 부팅의 생존 신호 전, 유예 중) / `UNHEALTHY`(판정 사유가 있거나 `paused`·`stopping`, 신호 끊김) / `STOPPED`(도메인이 없고 의도가 `running` 이 아님) / `OBSERVATION_UNAVAILABLE`(생존 신호를 관측할 수 없음: 구독 미승인, 승인 뒤 그 경로로 아무것도 받지 못함, 이 VM 의 신호를 받은 적이 없음, 또는 Worker 의 Zephyr 대상 기록 손상. **장애가 아니다**) |
 | `desired_state` | 플랫폼 registry 의도 `running` / `stopped` / `unknown` |
 | `xen_state` | VM API 계약 3.2 의 Xen 상태, 도메인이 없으면 `null` |
 | `heartbeat_age_s` | 이번 부팅에서 마지막 생존 신호(Linux `agent.heartbeat`, Zephyr `app.heartbeat`)를 받은 뒤 지난 초. 없으면 `null` |
@@ -416,6 +416,8 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 
 - 봉투의 발행자는 `source_id = "dom0-server"` 다. 받는 쪽은 토픽의 `{vm_id}` 와 payload `vm_id` 가 같은 것만 쓴다.
 - Linux VM 의 `HEARTBEAT_LOST` 판정은 30초, Zephyr VM 의 `APP_HEARTBEAT_LOST` 는 15초 무수신이다(VM API 계약 2.5). 게이트웨이의 제어권 전환은 이 스냅샷이 아니라 `drive.command` 신선도(5장)로 한다.
+- 무수신 판정은 Worker 가 **그 VM 의 신호를 받은 적이 있을 때만** 한다. 다른 VM 의 수신은 그 VM 의 전달 근거가 아니다. 받은 적 없는 VM(계정·ACL 오류, 배포 누락, 첫 부팅 정체를 구별할 수 없음)은 `OBSERVATION_UNAVAILABLE` 이고 자동 복구하지 않는다. 받은 적 있다는 기록은 현재 신호가 아니다(재부팅 뒤 이전 부팅의 신호는 세지 않는다).
+- `HEALTHY` 는 Xen 실행과 생존 신호가 정상이라는 뜻이다. CPU·메모리·앱의 실제 작업까지 정상이라는 뜻은 아니다([건강 판정 근거](health-evidence-v1.md)).
 - VM 이 등록에서 사라지면(삭제·보관) Worker 가 빈 payload(QoS 1, retain)로 retained 를 지우고 PUBACK 까지 확인한다. 지우지 못했으면 플랫폼 관측과 무관하게 다음 주기에 다시 시도한다.
 - Worker 가 정상 종료할 때는 남은 VM 전부를 `OBSERVATION_UNAVAILABLE` 로 다시 내고 PUBACK 까지 확인한다(`manager_seq` 증가). 비정상 종료면 받는 쪽의 `lease_s` 만료가 같은 결론을 낸다.
 

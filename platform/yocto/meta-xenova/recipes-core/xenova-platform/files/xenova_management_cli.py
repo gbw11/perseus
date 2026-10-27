@@ -85,6 +85,10 @@ def main(argv=None, manager=None):
             spec = {'operation_id':args.operation_id}
         elif action == 'recovery-operation':
             spec = {'recovery_attempt_id':args.recovery_attempt_id}
+        elif action == 'recovery-reconcile':
+            if args.force:
+                raise ManagementError('INVALID_SPEC', 'recovery-reconcile never supports force')
+            spec = {'recovery_attempt_id':args.recovery_attempt_id, 'timeout_ms':args.timeout_ms}
         elif action=='create':
             spec={'vm_id':args.vm_id, 'name':args.name or args.id,'template_id':args.template_id,
                   'template_version':args.template_version,'vcpus':args.vcpus,'memory_mib':args.memory_mib}

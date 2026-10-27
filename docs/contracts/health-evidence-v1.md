@@ -16,8 +16,8 @@
 | Zephyr Diagnostics | 유효 CPU 구간·heap/pool 여유·thread 목록 완전성과 필수 작업 결과를 분리해 로컬 판정 |
 | 공통 drive 펌웨어 | 실제 두 계산의 결과·기존 20ms release deadline을 준비 판단에 연결. 선택된 불충족 결과는 0 출력 후보로 제한 |
 | Xen·dom0 독립 근거 | 기존 Manager probe/execution-context/cpu-layout 및 unit/journal. 새로운 host 건강 수집기나 재시작기 없음 |
-| Linux·Agent | 기존 계측·heartbeat·systemd 감독은 있음. 아래 기능 진행·로컬 복구 연동은 [Linux 요청](../platform/management-integration-request.md#linux-health) 대상 |
-| Worker | 기존 D01 per-VM 전달 분류 반례와 자원/기능 판단 연결은 [Worker 요청](../requests/2026-10-20-manual-app-gateway-ctrl.md#d01-worker) 대상. 제품 수정·종단 수락 전 |
+| Linux·Agent | 기존 계측·heartbeat·systemd 감독은 있음. 아래 기능 진행·로컬 복구 연동은 [Linux·Agent 요청](../requests/2026-10-27-linux-health-agent.md) 대상 |
+| Worker | 기존 D01 per-VM 전달 분류 반례와 자원/기능 판단 연결은 [Worker 요청](../requests/2026-10-27-recovery-health-ctrl.md) 대상. 제품 수정·종단 수락 전 |
 | Gateway | 기존 모드·owner·재무장·출력 권한의 단일 소유자. 건강 모듈·Agent·Worker가 대신 변경하지 않음 |
 
 기존 D01 반례는 **다른 VM의 수신으로 대상 VM의 전달 경로를 정상으로 판단한 문제**다.
@@ -48,6 +48,9 @@ retained·같은 progress·역전·과거 실행·과거 crash를 새 표본처�
 
 `xdh_assess`는 독립된 경고 bits와 필수 작업의 `failure/restrict_function`을 반환한다.
 아래 수치는 새 운영 임계치가 아니라 원 계측의 유효 범위·기존 작업 기한이다.
+정상 고부하는 정상 상태일 수 있다. 합의된 자원 여유·지속 조건 위반과 실제 필수 작업·할당·
+기한 실패를 구분한다. 미합의 임계치를 새 정책값으로 넣지 않는다. 현재 `CPU_NO_IDLE`은
+그 유효 표본 구간에 계상된 idle이 없다는 진단 경고이며, CPU 고장이나 VM 복구 허가가 아니다.
 
 | 관측 → 판정 조건 | 기능 영향·허용 행동 | 회복·반복 억제 | 수락 assertion |
 |---|---|---|---|

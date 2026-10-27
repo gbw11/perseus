@@ -153,6 +153,13 @@ Worker의 손상 이력 차단과 사건 기록 실패의 해석은
 
 ## 진단과 검증 근거
 
+미확정 작업은 [recovery-reconcile](cli-manager-spec.md#cmd-recovery-reconcile)로 원 attempt의
+실제 효과·호출 종료·신원·의도를 진단한다. 명시적 실행도 새 VM 제어 없이 입증한 사실만 같은
+journal에 종결한다. 구형 stopping에 종료 근거가 없거나 미확인 launch/실행자가 남으면 차단한다.
+Bootstrap의 uncertain은 [receipt 적용 확인](../../platform/guests/zephyr/telemetry/README.md#uncertain-receipt의-재주입-없는-적용-확인)으로
+재주입 없이 대조한다. 기록 삭제·phase 편집·새 신원/기한·자동 force는 수습 경로가 아니다.
+Worker의 원 결과 소비·Standby 재합류 및 Gateway Authority 복원은 각각 담당자 인수 대기다.
+
 증상을 조사할 때는 UUID·현재 host_boot_id·intent revision·operation/attempt·execution을
 함께 기록한다. 현재 domain과 원 journal을 구분하고 비밀 설정 전체를 출력하지 않는다.
 `get/probe`는 실제 관측, `snapshot`은 유효기간이 있는 캐시, 작업 이력 명령은 원 기록 조회다.

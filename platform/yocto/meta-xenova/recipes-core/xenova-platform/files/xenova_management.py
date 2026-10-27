@@ -225,7 +225,7 @@ class Manager:
         """외부 호출의 타입/허용 필드를 읽기 전에 검사한다. 내부 예외는 입력 오류로 덮지 않는다."""
         actions = MUTATIONS | {'templates', 'list', 'get', 'operation', 'start', 'stop',
                                'reboot', 'destroy', 'autostart-set', 'board-shutdown-set', 'config',
-                               'recover_once', 'recovery-operation', 'control-operation', 'snapshot', 'probe',
+                               'recover_once', 'recovery-operation', 'recovery-reconcile', 'control-operation', 'snapshot', 'probe',
                                'execution-context', 'host-resume', 'cpu-layout', 'cpu-policy-set', 'cpu-host-prepare'}
         if not isinstance(action, str) or action not in actions:
             fail('INVALID_SPEC', 'unsupported management action')
@@ -281,6 +281,17 @@ class Manager:
             if type(timeout) is not int or not 0<timeout<=15000:
                 fail('INVALID_SPEC','timeout_ms must be 1..15000')
             return {**spec,'timeout_ms':timeout}
+        elif action == 'recovery-reconcile':
+            if key is not None:
+                fail('INVALID_SPEC', 'reconciliation uses the original attempt; no new idempotency key')
+            if set(spec) - {'recovery_attempt_id', 'timeout_ms'} or 'recovery_attempt_id' not in spec:
+                fail('INVALID_SPEC', 'recovery-reconcile requires an original recovery_attempt_id')
+            identity = spec['recovery_attempt_id']
+            timeout = spec.get('timeout_ms', 15000)
+            if (not isinstance(identity, str) or not vm.UUID.fullmatch(identity)
+                    or type(timeout) is not int or not 0 < timeout <= 15000):
+                fail('INVALID_SPEC', 'canonical attempt and timeout_ms 1..15000 required')
+            return {**spec, 'timeout_ms':timeout}
         elif action == 'recovery-operation':
             field = 'recovery_attempt_id'
             if set(spec) != {field} or not isinstance(spec[field], str) or not vm.UUID.fullmatch(spec[field]):
@@ -1170,7 +1181,7 @@ class Manager:
         try:
             if budget_ms is not None and (type(budget_ms) is not int or not 0<budget_ms<=105000):
                 fail('INVALID_SPEC','budget_ms must be 1..105000')
-            if budget_ms is not None and action not in ('start','stop','reboot','destroy','get','list','control-operation'):
+            if budget_ms is not None and action not in ('start','stop','reboot','destroy','get','list','control-operation','recovery-reconcile'):
                 fail('INVALID_SPEC','budget_ms is supported only for control and bounded reads')
             spec = self._validate_call(action, spec, execute, idempotency_key, request_id)
             trace_bind(vm_id=spec.get('vm_id'), recovery_attempt_id=spec.get('recovery_attempt_id'))
@@ -1263,12 +1274,17 @@ class Manager:
                     else:
                         observations = self.p.execution().observe_many([s['record'] for s in states], deadline)
                         result = {'vms':[self._view(s, observation=observations[s['vm_id']]) for s in states]}
-                elif action in ('recover_once', 'recovery-operation'):
+                elif action in ('recover_once', 'recovery-operation', 'recovery-reconcile'):
                     from xenova_recovery import Recovery
                     recovery = Recovery(self)
                     if action == 'recovery-operation':
                         result = {'attempt':recovery.read_attempt(spec['recovery_attempt_id'])}
                         context['operation_id'] = result['attempt']['operation_id']
+                    elif action == 'recovery-reconcile':
+                        if execute:
+                            self._writable()
+                        result = recovery.reconcile(spec['recovery_attempt_id'], execute=execute,
+                                                    deadline=deadline, context=context)
                     else:
                         with tool_output():
                             result = recovery.once(spec, execute=execute, context=context)

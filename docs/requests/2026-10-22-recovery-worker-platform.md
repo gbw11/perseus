@@ -3,8 +3,8 @@
 > 2026-10-27 인수 보완: 아래는 원 S15P31E110-279 요청과 당시 상태다. 현재 하위는
 > 펌웨어별 heartbeat capability·Worker unit 패키징을 제공하지만 Xen 관측 없는 별도 intents
 > action은 추가하지 않았다. 이 문서를 전체 처리 완료로 닫지 않는다. Worker에 요청하는
-> D01 후속 분류·건강 연결은 [기존 ctrl 요청서](2026-10-20-manual-app-gateway-ctrl.md#d01-worker)에
-> 누적하며, [하위 Manager 현행 계약](../platform/cli-manager-spec.md)을 사용한다.
+> D01 후속 분류·건강 연결은 [Worker 전용 요청서](2026-10-27-recovery-health-ctrl.md)에서
+> 이어 추적하며, [하위 Manager 현행 계약](../platform/cli-manager-spec.md)을 사용한다.
 
 > 작성: ctrl 파트, 2026-10-22 · 관련: S15P31E110-124(heartbeat 감시기)·**S15P31E110-279**(이 요청의 플랫폼 티켓), [플랫폼 복구 기반](../platform/management-boundaries.md), [시나리오](../scenario-rc-car.md) D8, [MQTT 계약](../contracts/mqtt-contract-v1.md) 11장
 

@@ -9,6 +9,7 @@ import pytest
 from dom0_manager.drivers.xl import Xl
 from dom0_manager.errors import PlatformUnavailable
 from dom0_manager.models import VmState
+from dom0_manager.recovery.arming import ArmingStore
 from dom0_manager.recovery.config import RecoverySettings
 from dom0_manager.recovery.heartbeats import AppHeartbeatTable, HeartbeatTable
 from dom0_manager.recovery.model import FailureReason, HealthState, VmObservation
@@ -426,12 +427,15 @@ def test_worker_shutdown_marks_health_unavailable():
     assert client.published[-1][2]["state"] == "OBSERVATION_UNAVAILABLE" and client.published[-1][4] is True
 
 
-def test_worker_passes_subscription_state_to_watcher():
+def test_worker_passes_subscription_state_to_watcher(tmp_path):
     clock = [1000.0]
     client = FakeClient(granted=set())  # 연결은 됐지만 ACL 이 구독을 거부
     running = [_obs()]
     table = HeartbeatTable()
-    worker = RecoveryWorker(SETTINGS, lambda: running, Watcher(SETTINGS, table, AppHeartbeatTable(), clock=lambda: clock[0]),
+    arming = ArmingStore(tmp_path / "armed.json")
+    assert arming.save({}, {DEBIAN})  # Worker 재시작 전에 이 VM 의 heartbeat 를 받은 적이 있다
+    watcher = Watcher(SETTINGS, table, AppHeartbeatTable(), arming=arming, clock=lambda: clock[0])
+    worker = RecoveryWorker(SETTINGS, lambda: running, watcher,
                             link=lambda: link_state(client), health_publisher=HealthPublisher(client), clock=lambda: clock[0])
     for _ in range(40):  # 200초, heartbeat 구독 승인 없음
         clock[0] += 5

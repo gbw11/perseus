@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 
+from .. import budget as request_budget
 from ..errors import DriverError, DriverTimeout
 from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner, StatsSample
 from .xentop import Xentop, collect_stats
@@ -71,7 +72,7 @@ class XenDriver(Driver):
     def collect_stats(self) -> StatsSample:
         if self._xentop is None:
             raise NotImplementedError("collect_stats: xentop runner not configured")
-        return collect_stats(self._xentop, self._xl)
+        return collect_stats(self._xentop, self._xl, budget_s=request_budget.clamp(self._xentop.timeout_s, "stats"))
 
     # ---- 명령: S15P31E110-115 ----
 
