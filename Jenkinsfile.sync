@@ -39,7 +39,8 @@ pipeline {
 
                         source_branch=''
                         for candidate in platform frontend backend vehicle; do
-                            if [ "$subject" = "Merge branch '$candidate' into 'develop'" ]; then
+                            if [ "$subject" = "Merge branch '$candidate' into 'develop'" ] || \
+                               [ "$subject" = "$candidate into dev" ]; then
                                 source_branch="$candidate"
                                 break
                             fi
@@ -56,7 +57,13 @@ pipeline {
                             exit 1
                         fi
 
-                        git fetch --no-tags origin "$source_branch"
+                        # Declarative checkout credentials are scoped to the checkout step, so the
+                        # HTTPS origin cannot be fetched from this shell. Reuse the read/write deploy
+                        # key already bound for the final push and refresh the exact part branch.
+                        GIT_SSH_COMMAND="ssh -i $GITLAB_SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+                          git fetch --no-tags \
+                          "$GITLAB_SSH_USER@lab.ssafy.com:s15-final/S15P31E110.git" \
+                          "+refs/heads/${source_branch}:refs/remotes/origin/${source_branch}"
                         source_tip="$(git rev-parse "origin/$source_branch")"
                         merge_source="$(git rev-parse "${trigger_commit}^2")"
 
