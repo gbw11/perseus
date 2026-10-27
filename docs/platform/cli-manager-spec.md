@@ -825,6 +825,8 @@ xenova-vm control-operation --operation-id "$OP_ID" --json
 `INVALID_SPEC`(2). 잠금 대기·조회 예산 만료는 `DEADLINE_EXCEEDED`(4), 손상·저장소 오류는
 기존 `RECONCILE_REQUIRED`·`STORAGE_UNAVAILABLE` 계약을 따른다.
 같은 key에 여러 원 기록이 대응하면 검색 부재가 아닌 `RECONCILE_REQUIRED`로 거절한다.
+디렉터리 부분 열람·열람 실패·나열한 파일의 소실은 `OBSERVATION_UNAVAILABLE`(4)이며,
+불완전한 읽기로 없음/유일성을 확정하지 않는다. malformed key metadata는 수습 오류다.
 
 **확인 방법**
 
@@ -3571,6 +3573,7 @@ PY
 Worker 동작을 유지한다. 105000ms는 입력 상한이며 HTTP 대기시간 설정이 아니다.
 
 `Manager.fork()`는 동일 저장소·실행 잠금을 사용하는 독립 Python 요청 객체를 반환한다.
+실행 중인 원 객체의 이번 호출 `response_deadline`도 새 요청에 복사하지 않는다.
 긴 작업 중 stop 수락·원 기록 조회를 연결할 때 사용한다. OS 프로세스를 만들지 않으며,
 공유 Manager를 임의로 동시 호출하거나 모든 action의 상위 직렬화를 제거해도 된다는 뜻이 아니다.
 HTTP의 VM mutex·직렬화 분리는 아직 연결되지 않았다. 구체적인 담당 범위는

@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 import threading
+import os
 import unittest
 from unittest.mock import patch
 
@@ -73,6 +74,65 @@ class ManagementBudgetTest(unittest.TestCase):
         execution.write(execution._path(self.p.data,'control-requests',foundation.HOST_B),conflicting)
         self.f.fails(self.lookup('duplicate'),'RECONCILE_REQUIRED')
         self.assertEqual(len(self.p.execution().requests()),2)
+
+    def test_incomplete_enumeration_never_confirms_absence_or_unique_key(self):
+        self.f.start('existing')
+        scandir=os.scandir
+        root=self.p.data/'control-requests'
+        class Partial:
+            def __enter__(owner):return owner
+            def __exit__(owner,*args):return False
+            def __iter__(owner):
+                with scandir(root) as entries:yield next(entries)
+                raise OSError('injected EIO after first directory entry')
+        def broken(path):return Partial() if Path(path)==root else scandir(path)
+        for key in ('existing','not-found'):
+            with patch('xenova_execution.os.scandir',broken):
+                self.f.fails(self.lookup(key),'OBSERVATION_UNAVAILABLE')
+        with patch('xenova_execution.os.scandir',side_effect=PermissionError('injected unreadable directory')):
+            self.assertFalse(self.lookup('existing')['ok'])
+        # A file listed then lost is not equivalent to an absent directory.
+        read=Execution.read
+        def missing(execution,path):return None if path.parent==root else read(execution,path)
+        with patch.object(Execution,'read',missing):
+            self.f.fails(self.lookup('existing'),'OBSERVATION_UNAVAILABLE')
+        self.f.ok(self.lookup('existing'))
+
+    def test_fork_separates_concurrent_budgets_and_thread_local_trace(self):
+        from xenova_trace import current
+        entered,release=threading.Event(),threading.Event();seen=[];output=[]
+        def checkpoint(phase,value):
+            if phase=='launch-prepared':
+                seen.append(('start',self.p.response_deadline,current().context['request_id']))
+                entered.set()
+                if not release.wait(5):raise AssertionError('test owner gate not released')
+            if phase=='intent-admission-pending' and value.get('desired_state')=='stopped':
+                seen.append(('stop',stop.p.response_deadline,current().context['request_id']))
+        self.p.execution_checkpoint=checkpoint;stop=None
+        worker=threading.Thread(target=lambda:output.append(self.m.call('start',{'vm_id':self.f.vm_id},
+          idempotency_key='budget-start',request_id='start-context',budget_ms=95000)))
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            stop=self.m.fork()
+            self.assertFalse(hasattr(stop.p,'response_deadline'))
+            self.assertEqual(stop.p.data,self.p.data);self.assertEqual(stop.p.runtime,self.p.runtime)
+            self.assertIs(stop.p.command,self.p.command)
+            reply=stop.call('stop',{'vm_id':self.f.vm_id},idempotency_key='budget-stop',
+                            request_id='stop-context',budget_ms=700)
+            self.assertTrue(reply['error']['details']['accepted'])
+            self.assertEqual(self.p.response_deadline,95)
+            self.assertFalse(hasattr(stop.p,'response_deadline'))
+            self.assertEqual(stop.last_trace['context']['request_id'],'stop-context')
+        finally:
+            release.set();worker.join(5)
+        self.assertFalse(worker.is_alive());self.assertFalse(output[0]['ok'])
+        self.assertIn(('start',95,'start-context'),seen)
+        self.assertIn(('stop',.7,'stop-context'),seen)
+        self.assertEqual(self.m.last_trace['context']['request_id'],'start-context')
+        self.assertEqual(stop.last_trace['context']['request_id'],'stop-context')
+        self.assertFalse(hasattr(self.p,'response_deadline'))
+        self.assertEqual(self.f.physical('create'),[])
 
     def test_query_error_and_budget_exhaustion_are_not_empty_success(self):
         self.f.start('start')

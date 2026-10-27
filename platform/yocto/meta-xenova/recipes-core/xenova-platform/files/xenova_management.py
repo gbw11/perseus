@@ -101,7 +101,9 @@ class Manager:
         임의의 모든 action을 병렬 호출해도 된다는 계약은 아니다.
         """
         from copy import copy
-        return type(self)(copy(self.p), preparer=self.preparer, usage_check=self.usage_check,
+        request_platform=copy(self.p)
+        request_platform.__dict__.pop('response_deadline',None)
+        return type(self)(request_platform, preparer=self.preparer, usage_check=self.usage_check,
                           checkpoint=self.checkpoint, defaults_path=self.defaults_path,
                           trace_sink=self.trace_sink)
 

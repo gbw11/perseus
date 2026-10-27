@@ -621,17 +621,33 @@ class Execution:
                 "observation_revision":observation["observation_revision"] if observation else None}
 
     def requests(self):
+        from xenova_management import Manager
         root = self.data/"control-requests"
-        if not root.exists() and not root.is_symlink():
+        try:
+            root.lstat()
+        except FileNotFoundError:
             return []
+        except OSError:
+            refuse('OBSERVATION_UNAVAILABLE', 'control request directory could not be inspected')
         catalog.plain(root, directory=True)
+        # Path.glob suppresses enumeration OSError on supported Python versions.
+        # A partially read directory cannot establish absence or uniqueness.
+        try:
+            with os.scandir(root) as entries:
+                names = sorted(entry.name for entry in entries if entry.name.endswith('.json'))
+        except OSError:
+            refuse('OBSERVATION_UNAVAILABLE', 'control request enumeration is incomplete')
         result = []
-        for path in sorted(root.glob("*.json")):
+        for name in names:
+            path = root/name
             if not vm.UUID.fullmatch(path.stem):
                 refuse("RECONCILE_REQUIRED", "invalid control request filename")
             value = self.read(path)
+            if value is None:
+                refuse('OBSERVATION_UNAVAILABLE', 'enumerated control request disappeared')
             if (value.get("operation_id") != path.stem or value.get("request_hash") != fingerprint(value.get("request"))
-                    or not vm.UUID.fullmatch(value.get("vm_id", ""))):
+                    or not vm.UUID.fullmatch(value.get("vm_id", "")) or 'idempotency_key' not in value
+                    or value['idempotency_key'] is not None and not Manager._text_token(value['idempotency_key'])):
                 refuse("RECONCILE_REQUIRED", "invalid control request identity")
             result.append(value)
         return result
