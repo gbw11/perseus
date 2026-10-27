@@ -30,13 +30,57 @@
   color: var(--x-primary-text);
   font-weight: 800;
 }
-.devLinks {
-  display: flex;
-  gap: var(--x-space-3);
-  font-size: var(--x-text-xs);
+.dashboardSection {
+  display: grid;
+  gap: var(--x-space-4);
+  max-width: 1600px;
+  margin: 0 auto;
 }
-.devLinks a {
+.dashboardHead {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--x-space-4);
+}
+.dashboardHead h1 {
+  margin: 2px 0 0;
+  font-size: var(--x-text-xl);
+}
+.dashboardHead p {
+  margin: var(--x-space-1) 0 0;
   color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.sectionEyebrow {
+  color: var(--x-primary);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.dashboardTabs {
+  display: flex;
+  gap: var(--x-space-1);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--x-border);
+}
+.dashboardTabs a {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-bottom: 2px solid transparent;
+  color: var(--x-text-muted);
+  font-weight: 700;
+  text-decoration: none;
+}
+.dashboardTabs a:hover {
+  color: var(--x-text);
+}
+.dashboardTabs a[aria-current='page'] {
+  border-bottom-color: var(--x-primary);
+  color: var(--x-primary);
+}
+.dashboardBody {
+  min-width: 0;
 }
 .sep {
   color: var(--x-border);
@@ -99,5 +143,12 @@
   to {
     transform: scale(1);
     opacity: 1;
+  }
+}
+
+@media (max-width: 1080px) {
+  .brandText,
+  .user {
+    display: none;
   }
 }
