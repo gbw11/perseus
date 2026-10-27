@@ -7,6 +7,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from 'react-router';
 import { ApiError } from './api/client';
 import { RequireAuth } from './auth';
 import { ConsoleLayout } from './layout/ConsoleLayout';
+import { DashboardLayout } from './layout/DashboardLayout';
 import { ConsolePage } from './pages/ConsolePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DemoPage } from './pages/DemoPage';
@@ -19,6 +20,7 @@ import { ShowcasePage } from './pages/ShowcasePage';
 import { VmCreatePage } from './pages/VmCreatePage';
 import { VmDetailPage } from './pages/VmDetailPage';
 import { VmListPage } from './pages/VmListPage';
+import { VisionPage } from './pages/VisionPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -40,13 +42,32 @@ const router = createBrowserRouter([
       </RequireAuth>
     ),
     children: [
-      { path: '/', element: <DashboardPage /> },
-      { path: '/vms', element: <VmListPage /> },
-      { path: '/vms/new', element: <VmCreatePage /> },
+      { path: '/', element: <Navigate to="/dashboard/overview" replace /> },
+      {
+        path: '/dashboard',
+        element: <DashboardLayout />,
+        children: [
+          { index: true, element: <Navigate to="/dashboard/overview" replace /> },
+          { path: 'overview', element: <DashboardPage /> },
+          { path: 'cpu', element: <ResourcesPage view="cpu" /> },
+          { path: 'memory', element: <ResourcesPage view="memory" /> },
+          { path: 'console', element: <ConsolePage /> },
+        ],
+      },
+      { path: '/dashboard/vms/:vmId', element: <VmDetailPage /> },
+      { path: '/vision', element: <VisionPage /> },
+      { path: '/control', element: <VmListPage /> },
+      { path: '/control/vms/new', element: <VmCreatePage /> },
+      { path: '/control/vms/:vmId', element: <VmDetailPage /> },
+      { path: '/simulator', element: <DemoPage /> },
+
+      // 기존 북마크와 외부 링크를 깨지 않도록 새 정보구조로 보낸다.
+      { path: '/vms', element: <Navigate to="/control" replace /> },
+      { path: '/vms/new', element: <Navigate to="/control/vms/new" replace /> },
       { path: '/vms/:vmId', element: <VmDetailPage /> },
-      { path: '/resources', element: <ResourcesPage /> },
-      { path: '/demo', element: <DemoPage /> },
-      { path: '/console', element: <ConsolePage /> },
+      { path: '/resources', element: <Navigate to="/dashboard/cpu" replace /> },
+      { path: '/demo', element: <Navigate to="/simulator" replace /> },
+      { path: '/console', element: <Navigate to="/dashboard/console" replace /> },
       { path: '/events', element: <EventsPage /> },
       { path: '/screens', element: <ScreensPage /> },
       { path: '/components', element: <ShowcasePage /> },
@@ -54,7 +75,7 @@ const router = createBrowserRouter([
   },
   // 디자인 확인은 로그인 없이도 볼 수 있게
   { path: '/components-public', element: <ShowcasePage /> },
-  { path: '*', element: <Navigate to="/" replace /> },
+  { path: '*', element: <Navigate to="/dashboard/overview" replace /> },
 ]);
 
 async function start() {
