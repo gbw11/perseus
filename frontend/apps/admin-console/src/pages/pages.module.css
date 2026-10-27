@@ -296,6 +296,23 @@ button.chip:hover:not(.chipOn) {
   color: var(--x-recovering);
   font-size: var(--x-text-xs);
 }
+.placeholder {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--x-space-2);
+  min-height: 280px;
+  padding: var(--x-space-5);
+  border: 1px dashed var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  color: var(--x-text-muted);
+  text-align: center;
+}
+.placeholder strong {
+  color: var(--x-text);
+  font-size: var(--x-text-lg);
+}
 .bar {
   height: 6px;
   border-radius: 3px;
