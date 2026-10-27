@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* Real Zephyr adapter tests; network callback is an explicit fault fixture. */
 #include <xenova/diagnostics.h>
+#include <xenova/health.h>
 #include <zephyr/ztest.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/shell/shell_dummy.h>
@@ -33,6 +34,38 @@ ZTEST(diagnostics,test_fixed_pool_actual_allocate_release)
 
 static struct xdiag_snapshot snapshot;
 static struct xdiag_loop loop;
+extern struct k_mutex resource_cache_lock;
+K_SEM_DEFINE(health_locked,0,1);
+K_SEM_DEFINE(health_release,0,1);
+static struct k_thread health_thread;
+K_THREAD_STACK_DEFINE(health_stack,2048);
+static void health_hold(void *a,void *b,void *c)
+{
+ ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
+ k_mutex_lock(&resource_cache_lock,K_FOREVER);k_sem_give(&health_locked);
+ k_sem_take(&health_release,K_FOREVER);k_mutex_unlock(&resource_cache_lock);
+}
+ZTEST(diagnostics,test_health_uses_actual_heap_and_nonwaiting_cache)
+{
+ struct xdr_snapshot resource;struct xdh_health health;
+ k_sleep(K_MSEC(250));zassert_ok(xdiag_resources_try_get(&resource));
+ zassert_ok(resource.heap_rc);zassert_true(resource.heap_free_bytes>0);
+ void *impossible=k_malloc(CONFIG_HEAP_MEM_POOL_SIZE*2);zassert_is_null(impossible);
+ struct xdh_work work={.state=XDH_COMPLETED,.required=true,.rc=-ENOMEM,.deadline_us=20000};
+ zassert_ok(xdh_assess(&work,1000,k_uptime_get(),&resource,0,&health));
+ zassert_true(health.restrict_function);zassert_equal(health.failure,XDH_RESOURCE_FAILED);
+ work.required=false;zassert_ok(xdh_assess(&work,1000,k_uptime_get(),&resource,0,&health));
+ zassert_false(health.restrict_function);
+ k_thread_create(&health_thread,health_stack,K_THREAD_STACK_SIZEOF(health_stack),health_hold,NULL,NULL,NULL,5,0,K_NO_WAIT);
+ zassert_ok(k_sem_take(&health_locked,K_SECONDS(1)));
+ int64_t begin=k_uptime_get();int rc=xdiag_resources_try_get(&resource);int64_t elapsed=k_uptime_get()-begin;
+ k_sem_give(&health_release);zassert_ok(k_thread_join(&health_thread,K_SECONDS(1)));
+ zassert_equal(rc,-EBUSY);zassert_true(elapsed<20);
+ work=(struct xdh_work){.state=XDH_COMPLETED,.required=true,.begin_us=100,.end_us=1000,.deadline_us=20000};
+ zassert_ok(xdh_assess(&work,1000,k_uptime_get(),NULL,rc,&health));
+ zassert_false(health.restrict_function);zassert_false(health.cpu_valid);
+ printk("HEALTH_NATIVE required_heap_failure=restricted diagnostic_failure=local cache_busy=optional elapsed_ms=%lld\n",elapsed);
+}
 static int provider_rc;
 static uint64_t byte_tx,byte_rx,byte_epoch=1;
 static int provider(struct xdiag_network *out, void *context)

@@ -3,6 +3,10 @@
 같은 `drive/zephyr` 번들을 두 VM에 사용한다. 기존 `auto_step()`과 `manual_step()`은
 바꾸지 않고 링크하며, VM마다 UUID·MAC·인증정보·CPU 배치를 유지한다.
 AUTO/MANUAL 계산 모드와 Active/Standby VM 선택은 서로 다른 축이다.
+실제 CPU·heap/pool·작업 완료 근거와 기능 준비의 관계는
+[건강 판정 계약](../../../docs/contracts/health-evidence-v1.md)을 따른다. 공통 펌웨어는 기존
+release deadline과 필수 계산 실패를 NOT_READY·0 출력 후보로 연결하며, 보조 진단만 없으면
+정상 계산을 차단하지 않는다. `xenova drive health`는 원 계산의 최신 local 평가를 조회한다.
 
 ## 책임과 확인 근거
 

@@ -136,10 +136,16 @@ create/reboot나 강제 종료를 제출할 수는 없다. 관측 실패는 정�
 하위 Manager의 stop 수락은 구현돼 있다. 제품 HTTP는 VM별 mutex와 공유
 SerializedManager를 먼저 통과하며 pending details와 원 key의 전달도 연결돼 있지 않다.
 따라서 하위의 복구 중 stop 수락을 HTTP 종단 수락으로 해석하면 안 된다.
+하위는 독립 요청 객체의 stop 수락, 원 key의 read-only 작업 조회와 호출별 잔여 예산을
+제공한다. FastAPI·Spring·VM 관리 화면의 연결 위치와 수락 조건은
+[관리 요청 연동 요청서](management-integration-request.md)에 정리돼 있다. 요청서는
+담당자가 구현할 범위이며 현재 설치된 HTTP 기능을 뜻하지 않는다.
 
 Recovery Worker는 현재 Watcher 판단을 기존 Recovery Engine에 연결해, 원 attempt를
 저장한 뒤 Manager의 recover_once를 실행한다. 기본 attempt 실행 예산은 110초다.
 응답 유실은 같은 journal/기한으로 확인하며 복구 완료는 새 Xen 실행 관측이라는 뜻이다.
+Worker의 손상 이력 차단과 사건 기록 실패의 해석은
+[상태 파일·사건 기록](../../platform/services/dom0-manager/README.md#worker-상태-파일과-사건-기록)을 따른다.
 선택한 공통 주행 프로필에서는 그 뒤 실행별 Bootstrap·신뢰 바인딩·Standby 준비를
 별도로 확인한다. [주행·재합류 구조](../../platform/apps/drive/README.md#실행-바인딩과-자동-복구)를 따른다.
 감시 주기·장애 판정 유예는 복구 실행 timeout이 아니다. CPU 조회와 제품 HTTP의

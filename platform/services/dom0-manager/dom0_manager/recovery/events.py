@@ -3,8 +3,8 @@
 `XENOVA_RECOVERY_STATE_DIR/recovery-events.jsonl` 에 한 줄에 하나(JSON). Worker 가 쓰고, dom0-manager HTTP 의
 `GET /api/v1/recovery/events` 가 같은 파일을 읽어 Spring 이 재시작·단절 뒤 빠진 구간을 채운다.
 
-- append 가 False 를 돌려주면 아무것도 쓰이지 않은 것이다. 엔진은 그 이벤트를 레코드(recoveries.json)에 남겨 두고 매 주기 같은
-  event_id 로 다시 부른다. 그래서 같은 event_id 가 두 번 쓰일 수 있고(옮긴 뒤 레코드를 저장하기 전에 죽은 경우) 읽을 때 처음 것만 남긴다
+- append=False는 로컬 기록 성공을 확정하지 못했다는 뜻이다. 미기록·부분 기록·완전한 줄 뒤 동기화 실패가 가능하다.
+  엔진은 pending을 유지하고 같은 event_id/내용으로 재시도한다. raw 중복 줄은 허용하며 조회는 처음의 유효한 사건만 남긴다
 - 읽을 때 계약 스키마(RecoveryEvent)로 검증한다. JSON 이 아니거나 계약에 맞지 않는 줄은 "손상" 으로 두고, 커서 뒤에 손상이 있으면
   그 자리의 이벤트를 잃었을 수 있으니 gap=True 로 알린다. 페이지와 커서는 검증된 이벤트만으로 계산한다
 - 최근 KEEP 건만 남기며 넘치면 임시 파일에 다시 써 원자적으로 바꾼다. 보관 범위 안의 손상 자리는 tombstone 줄로 남겨 compaction 뒤에도
@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import errno
 import logging
 import os
 import threading
@@ -52,7 +53,8 @@ class EventLog:
         return self._path
 
     def append(self, event: dict[str, Any]) -> bool:
-        """저장했으면 True. False 면 아무것도 쓰이지 않았고 호출자가 같은 event_id 로 다시 불러야 한다.
+        """로컬 append/flush/fsync를 확인했으면 True. False는 기록 효과 미확정이다.
+        호출자는 pending과 원 ID/내용을 보존해 재시도한다. PUBACK·소비자 반영 확인이 아니다.
         계약에 맞지 않는 이벤트는 쓰지 않는다(읽을 때 손상 줄이 되어 그 이벤트를 영구히 잃는다)."""
         try:
             validate_event(event)
@@ -64,12 +66,24 @@ class EventLog:
         with self._lock:
             try:
                 self._path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self._path, "a", encoding="utf-8") as fh:
-                    fh.write(_line(event))
+                with open(self._path, "a+b") as fh:
+                    # 부분 기록 뒤의 재시도가 손상 줄에 붙어 유실되지 않게 한다.
+                    # 원문은 자르지 않고 개행으로 경계를 남긴다(조회는 gap 처리).
+                    fh.seek(0, os.SEEK_END)
+                    if fh.tell():
+                        fh.seek(-1, os.SEEK_END)
+                        if fh.read(1) != b"\n":
+                            self._lines = None
+                            if fh.write(b"\n") != 1:
+                                raise OSError(errno.EIO, "short event separator write")
+                    payload = _line(event).encode("utf-8")
+                    if fh.write(payload) != len(payload):
+                        raise OSError(errno.EIO, "short event append")
                     fh.flush()
                     os.fsync(fh.fileno())
             except OSError as exc:
-                log.error("recovery event %s not stored in %s: %s", event.get("event_id"), self._path, exc)
+                self._lines = None  # 실패 중 남은 줄도 다음 compaction 판단에 포함한다.
+                log.error("recovery event %s local append unconfirmed in %s: %s", event.get("event_id"), self._path, exc)
                 return False
             if self._lines is None:
                 try:
@@ -121,13 +135,13 @@ class EventLog:
         result: list[Entry] = []
         seen: set[str] = set()
         try:
-            with open(self._path, encoding="utf-8") as fh:
+            with open(self._path, "rb") as fh:
                 for number, raw in enumerate(fh, 1):
                     raw = raw.strip()
                     if not raw:
                         continue
                     try:
-                        event = json.loads(raw)
+                        event = json.loads(raw.decode("utf-8"))
                         if event == TOMBSTONE:
                             result.append(None)
                             continue

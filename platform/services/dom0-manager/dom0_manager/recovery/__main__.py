@@ -75,8 +75,10 @@ def main() -> int:
     event_log = EventLog(Path(settings.state_dir) / "recovery-events.jsonl")
 
     def publish_event(event: dict) -> bool:
-        """계약 2.5: 먼저 dom0 outbox 에 저장(4.7 재보충의 원천), 저장됐을 때만 MQTT-12 로 낸다. 못 썼으면 False → 엔진이 레코드에
-        남겨 두고 매 주기 같은 event_id 로 다시 부른다."""
+        """계약 2.5: 로컬 outbox 기록 확인 뒤 MQTT-12로 제출한다(4.7 재보충 원천).
+        False는 기록 효과 미확정: 엔진이 pending의 원 ID/내용으로 재시도한다.
+        게시 예외도 로컬 원천이 있으면 True이며 PUBACK·소비자 적용을 뜻하지 않는다.
+        """
         if not event_log.append(event):
             return False
         try:

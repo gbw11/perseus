@@ -119,7 +119,7 @@ class RecoveryEngine:
         if pending:
             log.warning("restored %d recovery event(s) not yet stored in the outbox; they will be stored and published with their original event_id", pending)
         if self._lost:
-            log.error("recovery history lost: no recovery will be executed until %s is removed", store.path)
+            log.error("recovery history lost: no recovery will be executed; preserve %s and its evidence for investigation", store.path)
 
     # ---- 조회 ----
 
@@ -237,7 +237,7 @@ class RecoveryEngine:
         if self._lost:
             if not self._lost_warned:
                 self._lost_warned = True
-                log.error("vm %s: recovery %s not executed: recovery history lost (remove %s to resume)", record.vm_id, record.recovery_id, self._store.path)
+                log.error("vm %s: recovery %s not executed: recovery history lost; preserve %s and its evidence for investigation", record.vm_id, record.recovery_id, self._store.path)
             return
         if not self._policy.enabled:
             if record.recovery_id not in self._skipped:
@@ -539,7 +539,7 @@ class RecoveryEngine:
                 log.exception("recovery event sink failed")
                 stored = False
             if stored is False:
-                break  # 순서를 지킨다. 같은 event_id 로 다시 시도한다
+                break  # 기록 효과는 미확정. pending을 보존하고 같은 ID/내용으로 재시도한다.
             record.pending_events.pop(0)
             moved += 1
         if moved:

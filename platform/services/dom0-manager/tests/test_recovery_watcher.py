@@ -230,8 +230,8 @@ def test_corrupt_arming_store_is_set_aside_and_history_lost_persists(tmp_path, t
     assert json.loads(path.read_text()) == {"version": 1, "armed": {}, "history_lost": True}
     store.save({ZEPHYR: "manual"})
     assert ArmingStore(path).load() == ArmingState({ZEPHYR: "manual"}, history_lost=True)  # Worker 재시작으로는 풀리지 않는다
-    path.unlink()  # 운영자가 지우면 풀린다
-    assert ArmingStore(path).load() == ArmingState()
+    path.unlink()  # 본 파일만 없어져도 남은 격리 증거로 차단을 유지한다.
+    assert ArmingStore(path).load() == ArmingState({}, history_lost=True)
 
 
 def test_lost_arming_history_reports_undeclared_zephyr_as_unobservable(tmp_path):
