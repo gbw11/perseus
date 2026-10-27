@@ -5,6 +5,7 @@
 #include <xenova/diagnostics.h>
 #include <zephyr/init.h>
 #include <zephyr/sys/iterable_sections.h>
+#include <zephyr/sys/sys_heap.h>
 #include <errno.h>
 #include <string.h>
 #if defined(CONFIG_XENOVA_DIAGNOSTICS_POOLS)
@@ -127,6 +128,16 @@ static void collect(struct k_work *work)
  result.raw.at_ms=k_uptime_get();
  result.cpu.start_ms=result.cpu.end_ms=result.raw.at_ms;
 #endif
+#if defined(CONFIG_XENOVA_DIAGNOSTICS_HEAP)
+ extern struct k_heap _system_heap;
+ struct sys_memory_stats heap;
+ k_spinlock_key_t heap_key=k_spin_lock(&_system_heap.lock);
+ result.heap_rc=sys_heap_runtime_stats_get(&_system_heap.heap,&heap);
+ k_spin_unlock(&_system_heap.lock,heap_key);
+ if(!result.heap_rc){result.heap_allocated_bytes=heap.allocated_bytes;result.heap_free_bytes=heap.free_bytes;}
+#else
+ result.heap_rc=-ENOTSUP;
+#endif
 #if defined(CONFIG_XENOVA_DIAGNOSTICS_POOLS)
  STRUCT_SECTION_FOREACH(net_buf_pool,pool){
   if(!pool->name||(strcmp(pool->name,"rx_bufs")&&strcmp(pool->name,"tx_bufs")))continue;
@@ -164,24 +175,28 @@ static void collect(struct k_work *work)
  k_mutex_unlock(&resource_cache_lock);
  (void)k_work_reschedule(&resource_work,K_MSEC(200));
 }
-int xdiag_resources_get(struct xdr_snapshot *out)
+static int resources_get(struct xdr_snapshot *out,k_timeout_t wait)
 {
  if(!out||k_is_in_isr())return -EINVAL;
- if(k_mutex_lock(&resource_cache_lock,K_MSEC(20)))return -EBUSY;
+ if(k_mutex_lock(&resource_cache_lock,wait))return -EBUSY;
  *out=cache;k_mutex_unlock(&resource_cache_lock);
  uint64_t now=k_uptime_get();
  if(out->sample&&(now<out->raw.at_ms||now-out->raw.at_ms>1000)){
   if(out->cpu.rc!=-ENOTSUP)out->cpu.rc=-EOVERFLOW;
   for(size_t i=0;i<out->rows;i++)out->threads[i].rc=-EOVERFLOW;
   for(size_t i=0;i<out->regions;i++)out->memory[i].rc=-EOVERFLOW;
+  if(out->heap_rc!=-ENOTSUP)out->heap_rc=-EOVERFLOW;
   out->net_rate_rc=-EOVERFLOW;
  }
  return 0;
 }
+int xdiag_resources_get(struct xdr_snapshot *out){return resources_get(out,K_MSEC(20));}
+int xdiag_resources_try_get(struct xdr_snapshot *out){return resources_get(out,K_NO_WAIT);}
 static int init(void)
 {
  cache.cpu.rc=xdiag_cpu_supported()?-ENODATA:-ENOTSUP;
  cache.threads_rc=xdiag_cpu_supported()?-ENODATA:-ENOTSUP;
+ cache.heap_rc=IS_ENABLED(CONFIG_XENOVA_DIAGNOSTICS_HEAP)?-ENODATA:-ENOTSUP;
  (void)k_work_reschedule(&resource_work,K_MSEC(200));return 0;
 }
 SYS_INIT(init,APPLICATION,CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);

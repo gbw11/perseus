@@ -4,6 +4,9 @@ Zephyr 펌웨어의 실행 상태를 통신과 독립적으로 관측하는 공�
 부팅 단계·오류 이력, 스레드·스택, kernel heap, 앱이 제공하는 네트워크 관측과
 임의 주기 작업의 시작·완료를 고정 크기 메모리에 기록한다.
 MQTT, 주행 알고리즘, 제어권 판단, VM Agent, 영구 crash 저장소를 구현하지 않는다.
+별도의 `health.h` 판정기는 실제 자원 근거와 필수 작업 결과를 경고/기능 제한으로 연결한다.
+VM 재시작이나 출력 권한을 발급하지 않는다. 정의와 행동 책임은
+[건강 판정 계약](../../../../docs/contracts/health-evidence-v1.md)에 모았다.
 
 ## 연결과 조회
 
@@ -90,6 +93,9 @@ provider와 관측할 루프 객체는 static lifetime이어야 한다. 등록 �
 `resources.c`가 system workqueue에서200ms마다 짧은 계측을 소유한다. 조회와 Publisher는
 cache를 복사할 뿐 차분 기준을 바꾸지 않는다. 원천 구간·원 누계·계측 비용은 내부 snapshot에
 남기고 외부에는 [Telemetry 계약](../telemetry/contract/CONTRACT.md)의 결과만 제공한다.
+같은 collector가 kernel heap 통계도 고정 비용으로 cache한다. 계산 연결부의
+`xdiag_resources_try_get`는 K_NO_WAIT로 읽으며 경합은 -EBUSY다. 없는 보조 근거가 계산 실패가
+되지는 않는다. 기존 `xdiag_resources_get`의 최대 20ms 대기와 상세 stack 요청은 유지한다.
 
 CPU는 고정 Zephyr UP runtime statistics를 사용한다. 분모는 CPU API의 non-idle+idle,
 시스템 분자는 non-idle이며 스레드별 분모도 같다. IRQ와 Xen 비실행 시간의 귀속은 guest

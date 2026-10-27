@@ -58,6 +58,9 @@ int xdiag_network_read(struct xdiag_network *);
 int xdiag_clock_us(uint64_t *out);
 /* Reads the single collector's cache; never advances a CPU baseline or scans stacks. */
 int xdiag_resources_get(struct xdr_snapshot *);
+/* Hot-path optional evidence: never waits for the collector. Same age/error
+ * rules as resources_get; failure is unavailable evidence, not app failure. */
+int xdiag_resources_try_get(struct xdr_snapshot *);
 bool xdiag_cpu_supported(void);
 int xdiag_loop_init(struct xdiag_loop *, uint64_t period_us, uint64_t deadline_us);
 int xdiag_loop_begin(struct xdiag_loop *);
