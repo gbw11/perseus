@@ -1,0 +1,27 @@
+{
+  "observed_at": "2026-10-27T08:11:07.808192+00:00",
+  "manager_pid": "1088",
+  "runtime_flags": {
+    "XENOVA_CONSOLE_ENABLED": null,
+    "XENOVA_DRIVER": "platform",
+    "XENOVA_CONSOLE_LOCK_DIR": null
+  },
+  "runtime_token_present": true,
+  "console_processes": [],
+  "live_xen": {
+    "code": 0,
+    "out": "Name                                        ID   Mem VCPUs\tState\tTime(s)\nDomain-0                                     0  1024     4     r-----    1983.6\ndebian-dev                                   1   512     1     -b----     188.9\nzephyr-drive-a                               2    16     1     -b----      75.9\nzephyr-drive-b                               3    16     1     -b----      76.0\n",
+    "err": ""
+  },
+  "listeners": {
+    "code": 0,
+    "out": "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\nLISTEN 0      128          0.0.0.0:22        0.0.0.0:*   \nLISTEN 0      2048       127.0.0.1:8081      0.0.0.0:*   \nLISTEN 0      128             [::]:22           [::]:*   \n",
+    "err": ""
+  },
+  "manager_runtime_files": [],
+  "changes": {
+    "terminal_input_bytes": 0,
+    "service_restart": false,
+    "vm_changed": false
+  }
+}

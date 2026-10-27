@@ -1,0 +1,22 @@
+{
+  "observed_at": "2026-10-27T08:04:19.287970+00:00",
+  "manager_pid": "1088",
+  "runtime_flags": {
+    "XENOVA_CONSOLE_ENABLED": null,
+    "XENOVA_DRIVER": "platform",
+    "XENOVA_CONSOLE_LOCK_DIR": null
+  },
+  "runtime_token_present": true,
+  "console_processes": [],
+  "live_xen": {
+    "code": 0,
+    "out": "Name                                        ID   Mem VCPUs\tState\tTime(s)\nDomain-0                                     0  1024     4     r-----    1880.1\ndebian-dev                                   1   512     1     -b----     183.5\nzephyr-drive-a                               2    16     1     -b----      73.0\nzephyr-drive-b                               3    16     1     -b----      73.1\n",
+    "err": ""
+  },
+  "manager_runtime_files": [],
+  "changes": {
+    "terminal_input_bytes": 0,
+    "service_restart": false,
+    "vm_changed": false
+  }
+}

@@ -1,0 +1,149 @@
+{
+  "issue": "S15P31E110-251",
+  "observed_at": "2026-10-27T08:07:36.918422+00:00",
+  "scope": "physical guest -> actual xl console PTY -> current console router -> loopback TCP WebSocket; isolated test service",
+  "existing_manager_console_enabled": false,
+  "existing_manager_restarted": false,
+  "terminal_input_bytes_sent": 0,
+  "terminal_output_contents_persisted": false,
+  "guests": [
+    {
+      "vm_id": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+      "name": "zephyr-drive-a",
+      "domid": 2,
+      "handshake_status": 101,
+      "xl_console_started": false,
+      "first_output": {
+        "binary_frames": 1,
+        "output_bytes": 525
+      },
+      "concurrent_connection_close": 4409,
+      "only_one_xl_console_during_contention": false,
+      "detach_close": 1000,
+      "first_process_reaped": true,
+      "first_lock_released": true,
+      "reconnect_handshake": 101,
+      "reconnect_xl_started": false,
+      "reconnect_output": {
+        "binary_frames": 0,
+        "output_bytes": 0
+      },
+      "reconnect_detach_close": 1000,
+      "reconnect_process_reaped": true,
+      "reconnect_lock_released": true,
+      "checks": {
+        "xl_console_started": false,
+        "only_one_xl_console_during_contention": false,
+        "first_process_reaped": true,
+        "first_lock_released": true,
+        "reconnect_xl_started": false,
+        "reconnect_process_reaped": true,
+        "reconnect_lock_released": true,
+        "handshake": true,
+        "reconnect": true,
+        "busy": true,
+        "detach": true,
+        "reconnect_detach": true
+      },
+      "connection_checks_passed": false
+    },
+    {
+      "vm_id": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+      "name": "zephyr-drive-b",
+      "domid": 3,
+      "handshake_status": 101,
+      "xl_console_started": false,
+      "first_output": {
+        "binary_frames": 1,
+        "output_bytes": 525
+      },
+      "concurrent_connection_close": 4409,
+      "only_one_xl_console_during_contention": false,
+      "detach_close": 1000,
+      "first_process_reaped": true,
+      "first_lock_released": true,
+      "reconnect_handshake": 101,
+      "reconnect_xl_started": false,
+      "reconnect_output": {
+        "binary_frames": 0,
+        "output_bytes": 0
+      },
+      "reconnect_detach_close": 1000,
+      "reconnect_process_reaped": true,
+      "reconnect_lock_released": true,
+      "checks": {
+        "xl_console_started": false,
+        "only_one_xl_console_during_contention": false,
+        "first_process_reaped": true,
+        "first_lock_released": true,
+        "reconnect_xl_started": false,
+        "reconnect_process_reaped": true,
+        "reconnect_lock_released": true,
+        "handshake": true,
+        "reconnect": true,
+        "busy": true,
+        "detach": true,
+        "reconnect_detach": true
+      },
+      "connection_checks_passed": false
+    },
+    {
+      "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+      "name": "debian-dev",
+      "domid": 1,
+      "handshake_status": 101,
+      "xl_console_started": false,
+      "first_output": {
+        "binary_frames": 12,
+        "output_bytes": 46412
+      },
+      "concurrent_connection_close": 4409,
+      "only_one_xl_console_during_contention": false,
+      "detach_close": 1000,
+      "first_process_reaped": true,
+      "first_lock_released": true,
+      "reconnect_handshake": 101,
+      "reconnect_xl_started": false,
+      "reconnect_output": {
+        "binary_frames": 0,
+        "output_bytes": 0
+      },
+      "reconnect_detach_close": 1000,
+      "reconnect_process_reaped": true,
+      "reconnect_lock_released": true,
+      "checks": {
+        "xl_console_started": false,
+        "only_one_xl_console_during_contention": false,
+        "first_process_reaped": true,
+        "first_lock_released": true,
+        "reconnect_xl_started": false,
+        "reconnect_process_reaped": true,
+        "reconnect_lock_released": true,
+        "handshake": true,
+        "reconnect": true,
+        "busy": true,
+        "detach": true,
+        "reconnect_detach": true
+      },
+      "connection_checks_passed": false
+    }
+  ],
+  "checks": {
+    "no_auth_rejected": true,
+    "wrong_token_rejected": true,
+    "all_three_guests_tested": true,
+    "temporary_api_stopped": true,
+    "no_console_process_left": true,
+    "zephyr-drive-a_connection_and_cleanup": false,
+    "zephyr-drive-b_connection_and_cleanup": false,
+    "debian-dev_connection_and_cleanup": false
+  },
+  "unauthenticated_handshake": 403,
+  "wrong_token_handshake": 403,
+  "passed_connection_checks": false,
+  "all_guests_produced_output": true,
+  "console_module_sha256": {
+    "dom0_manager.console": "ff30a11a83a5bca57ca369e947a393c89e0c336a62708d395d640aa822666130",
+    "dom0_manager.api.console": "59909b45a533c394fc8ced0882a5467a0feaf2410a1e14f7195852b57f407398"
+  }
+}
