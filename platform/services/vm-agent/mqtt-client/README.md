@@ -1,6 +1,6 @@
 # xenova-mqtt — MQTT 계약 v1 클라이언트
 
-VM 에이전트와 RC카 앱 VM(자율주행·수동주행·메시지 보드)이 같이 쓰는 Python MQTT 클라이언트입니다.
+VM 에이전트와 RC카 앱 VM(자율주행·수동주행·인터랙션)이 같이 쓰는 Python MQTT 클라이언트입니다.
 [MQTT 메시지 계약 v1](../../../../docs/contracts/mqtt-contract-v1.md)의 봉투·토픽·QoS를 이 패키지가 맞춰 주므로, 쓰는 쪽은 `type`과 `payload`만 정하면 됩니다.
 
 | 계약 | 패키지가 하는 일 |

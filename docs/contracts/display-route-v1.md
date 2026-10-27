@@ -33,4 +33,4 @@ HDMI 빌드(`VITE_TELEMETRY` 비움 또는 `display`)에서 `/split`은 monitor-
 
 ## VM 역할
 
-VM1=Zephyr 주 구동(AUTO/MANUAL 모두 가능), VM2=동일 Zephyr의 백업, VM3=Debian 인터랙션. AI/인식은 Jetson이다. `autonomous`·`manual`·`message-board`는 기존 송신 앱 ID이며 역할·현재 주행 모드의 증거가 아니다. dom0는 표시 binding의 UUID·역할을 사용한다. 관리 웹은 배포자가 `VITE_VM_ROLE_BINDINGS` JSON으로 확인한 UUID를 설정한 경우에만 역할 이름을 붙인다. 설정이 없으면 VM 이름/역할 미확인으로 남기고 이름으로 추측하지 않는다.
+VM1=Zephyr 주 구동(AUTO/MANUAL 모두 가능), VM2=동일 Zephyr의 백업, VM3=Debian 인터랙션. AI/인식은 Jetson이다. `autonomous`·`manual`·`interaction`은 기존 송신 앱 ID이며 역할·현재 주행 모드의 증거가 아니다. dom0는 표시 binding의 UUID·역할을 사용한다. 관리 웹은 배포자가 `VITE_VM_ROLE_BINDINGS` JSON으로 확인한 UUID를 설정한 경우에만 역할 이름을 붙인다. 설정이 없으면 VM 이름/역할 미확인으로 남기고 이름으로 추측하지 않는다.
