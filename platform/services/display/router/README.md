@@ -32,6 +32,10 @@ python -m uvicorn xenova_display.main:create_app --factory --host 127.0.0.1 --po
 
 상태 API/WS의 `vms[].apps`에 앱별 heartbeat 상태와 `readiness` 관측을 추가한다. heartbeat는 3초, 준비 보고는 300ms에 만료된다. `app_state: ready`는 오류 없이 생존 보고가 온다는 기존 표시 의미이며 실제 주행 준비 완료나 구동 권한을 뜻하지 않는다. `readiness.current`도 신선한 보고일 뿐이고 `execution_verified`, `authority_verified`는 모두 `false`다. 기존 VM 요약은 두 앱 모두 신선할 때만 정상 생존으로 표시한다. 세부 규칙과 실제 연동 전 의존성은 [수신 규격](../../../../docs/contracts/display-vm-app-reports-v1.md), [모의 검증](../../../../docs/verification/display-253-dual-drive-reports.md)을 참고한다.
 
+Debian Agent inventory가 heartbeat보다 먼저 도착하면 OS ID만 VM별 최대 4개 송신 세션·15초 동안 임시 보관한다. 이 시점에는 OS나 생존 상태를 표시하지 않는다. 같은 boot/Agent 인스턴스의 신선한 heartbeat가 확인돼야 반영하며 원래 inventory 수신 시각을 유지한다. retained 선도착, MQTT 연결 세대 변경, Xen 실행 교체, 퇴역 Agent 세션의 자료는 승격하지 않는다. Agent 세션이 바뀌면 이전 세션의 OS 근거도 지운다. [실보드 선도착·복귀 검증](../../../../docs/verification/display-253-inventory-reconnect.md)을 참고한다.
+
+실제 VM3 보고를 보드 loopback의 인증된 REST·WebSocket·presentation까지 연결하고 MQTT 중단/복귀 상태 전파를 확인했다. [실보드 API 검증](../../../../docs/verification/display-253-board-api.md)은 임시 실행 결과이며 영구 배포·외부 Spring·브라우저/HDMI 출력 검증을 의미하지 않는다.
+
 | 환경변수 | 기본/의미 |
 | --- | --- |
 | `XENOVA_DISPLAY_BINDINGS` | 필수: JSON 매핑 파일 |

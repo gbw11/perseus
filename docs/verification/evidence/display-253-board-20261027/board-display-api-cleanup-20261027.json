@@ -1,0 +1,44 @@
+{
+  "broker_listeners": {
+    "127.0.0.1": "closed",
+    "192.168.77.1": "closed"
+  },
+  "broker_processes": [],
+  "zephyr_deployment_metadata": [
+    {
+      "instance": "zephyr-drive-a",
+      "record": {
+        "uuid": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+        "name": "zephyr-drive-a",
+        "template_id": "zephyr-xenvm-starter-arm64",
+        "template_version": "1.1.0",
+        "guest_kind": "zephyr",
+        "ipv4": "192.168.77.2"
+      },
+      "files": [
+        "instance.json",
+        "firmware"
+      ]
+    },
+    {
+      "instance": "zephyr-drive-b",
+      "record": {
+        "uuid": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+        "name": "zephyr-drive-b",
+        "template_id": "zephyr-xenvm-starter-arm64",
+        "template_version": "1.1.0",
+        "guest_kind": "zephyr",
+        "ipv4": "192.168.77.3"
+      },
+      "files": [
+        "instance.json",
+        "firmware"
+      ]
+    }
+  ],
+  "temporary_directories_left": [],
+  "original_service_state": "ActiveState=inactive\nSubState=dead\nMainPID=0\n",
+  "cleanup_verified": true,
+  "listeners_after_api_test": "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\nLISTEN 0      128          0.0.0.0:22        0.0.0.0:*   \nLISTEN 0      2048       127.0.0.1:8081      0.0.0.0:*   \nLISTEN 0      128             [::]:22           [::]:*   \n",
+  "observed_at_utc": "2026-10-27T07:56:31.344351+00:00"
+}

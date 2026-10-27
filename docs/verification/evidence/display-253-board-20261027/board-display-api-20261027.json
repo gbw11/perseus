@@ -1,0 +1,1294 @@
+{
+  "issue": "S15P31E110-253",
+  "step": 2,
+  "physical_guest": "192.168.77.20",
+  "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+  "observed_at_kst": "2026-10-27T16:55:11+09:00",
+  "scope": "actual VM3 Agent -> temporary MQTT -> current collector -> real loopback authenticated REST/WebSocket/presentation",
+  "broker_listeners": [
+    "127.0.0.1:1883",
+    "192.168.77.1:1883"
+  ],
+  "guest_agent_restarted": false,
+  "authentication_scope": "anonymous inside isolated guest network, VM3-only topic ACL; not production authentication proof",
+  "arrivals": [
+    {
+      "type": "agent.inventory",
+      "seq": 5,
+      "accepted_now": false,
+      "mqtt_generation": 1,
+      "pending_inventory_count": 1
+    },
+    {
+      "type": "agent.heartbeat",
+      "seq": 9,
+      "accepted_now": true,
+      "mqtt_generation": 1,
+      "pending_inventory_count": 0
+    },
+    {
+      "type": "agent.inventory",
+      "seq": 6,
+      "accepted_now": false,
+      "mqtt_generation": 3,
+      "pending_inventory_count": 1
+    },
+    {
+      "type": "agent.heartbeat",
+      "seq": 10,
+      "accepted_now": true,
+      "mqtt_generation": 3,
+      "pending_inventory_count": 0
+    }
+  ],
+  "api": {
+    "transport": "actual loopback TCP HTTP and WebSocket on Raspberry Pi dom0",
+    "phases": {
+      "connected": {
+        "rest_status": 200,
+        "rest_cache_control": "no-store",
+        "rest_vm3": {
+          "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "role": "interaction",
+          "app_id": "message-board",
+          "app_topic_scope": "legacy",
+          "apps": {
+            "message-board": {
+              "app_id": "message-board",
+              "topic": "xenova/v1/apps/message-board/events",
+              "app_state": "unknown",
+              "reported_app_state": null,
+              "source": {
+                "status": "unknown",
+                "age_ms": null,
+                "subscription_status": "granted"
+              },
+              "readiness": {
+                "reported": null,
+                "current": null,
+                "source": {
+                  "status": "unknown",
+                  "age_ms": null,
+                  "subscription_status": "unsupported"
+                },
+                "execution_verified": false,
+                "authority_verified": false
+              }
+            }
+          },
+          "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+          "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": "debian",
+            "match": true,
+            "evidence": "agent.inventory",
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-27T07:55:21.600+00:00",
+              "observed_at": null,
+              "age_ms": 10,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-27T07:55:21.492+00:00",
+              "observed_at": "2026-10-27T07:55:23.928Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 9,
+              "retained": false,
+              "age_ms": 118,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "received_at": "2026-10-27T07:55:17.497+00:00",
+              "observed_at": "2026-10-27T07:55:19.929Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 5,
+              "retained": false,
+              "age_ms": 4113,
+              "status": "fresh",
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        "ws_vm3": {
+          "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "role": "interaction",
+          "app_id": "message-board",
+          "app_topic_scope": "legacy",
+          "apps": {
+            "message-board": {
+              "app_id": "message-board",
+              "topic": "xenova/v1/apps/message-board/events",
+              "app_state": "unknown",
+              "reported_app_state": null,
+              "source": {
+                "status": "unknown",
+                "age_ms": null,
+                "subscription_status": "granted"
+              },
+              "readiness": {
+                "reported": null,
+                "current": null,
+                "source": {
+                  "status": "unknown",
+                  "age_ms": null,
+                  "subscription_status": "unsupported"
+                },
+                "execution_verified": false,
+                "authority_verified": false
+              }
+            }
+          },
+          "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+          "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": "debian",
+            "match": true,
+            "evidence": "agent.inventory",
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-27T07:55:21.600+00:00",
+              "observed_at": null,
+              "age_ms": 444,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-27T07:55:21.492+00:00",
+              "observed_at": "2026-10-27T07:55:23.928Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 9,
+              "retained": false,
+              "age_ms": 552,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "received_at": "2026-10-27T07:55:17.497+00:00",
+              "observed_at": "2026-10-27T07:55:19.929Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 5,
+              "retained": false,
+              "age_ms": 4547,
+              "status": "fresh",
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        "ws_source_epoch": "702b7908-db8e-4ec9-968d-6107504be152",
+        "ws_sequence": 34,
+        "presentation_status": 200,
+        "presentation_vm3": {
+          "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "role": "interaction",
+          "app_id": "message-board",
+          "app_topic_scope": "legacy",
+          "apps": {
+            "message-board": {
+              "app_id": "message-board",
+              "topic": "xenova/v1/apps/message-board/events",
+              "app_state": "unknown",
+              "reported_app_state": null,
+              "source": {
+                "status": "unknown",
+                "age_ms": null,
+                "subscription_status": "granted"
+              },
+              "readiness": {
+                "reported": null,
+                "current": null,
+                "source": {
+                  "status": "unknown",
+                  "age_ms": null,
+                  "subscription_status": "unsupported"
+                },
+                "execution_verified": false,
+                "authority_verified": false
+              }
+            }
+          },
+          "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+          "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": "debian",
+            "match": true,
+            "evidence": "agent.inventory",
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-27T07:55:21.600+00:00",
+              "observed_at": null,
+              "age_ms": 31,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-27T07:55:21.492+00:00",
+              "observed_at": "2026-10-27T07:55:23.928Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 9,
+              "retained": false,
+              "age_ms": 139,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "received_at": "2026-10-27T07:55:17.497+00:00",
+              "observed_at": "2026-10-27T07:55:19.929Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 5,
+              "retained": false,
+              "age_ms": 4135,
+              "status": "fresh",
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      },
+      "disconnected": {
+        "rest_status": 200,
+        "rest_cache_control": "no-store",
+        "rest_vm3": {
+          "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "role": "interaction",
+          "app_id": "message-board",
+          "app_topic_scope": "legacy",
+          "apps": {
+            "message-board": {
+              "app_id": "message-board",
+              "topic": "xenova/v1/apps/message-board/events",
+              "app_state": "unknown",
+              "reported_app_state": null,
+              "source": {
+                "status": "unknown",
+                "age_ms": null,
+                "subscription_status": "unavailable"
+              },
+              "readiness": {
+                "reported": null,
+                "current": null,
+                "source": {
+                  "status": "unknown",
+                  "age_ms": null,
+                  "subscription_status": "unsupported"
+                },
+                "execution_verified": false,
+                "authority_verified": false
+              }
+            }
+          },
+          "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+          "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": "debian",
+            "match": true,
+            "evidence": "agent.inventory",
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-27T07:55:22.198+00:00",
+              "observed_at": null,
+              "age_ms": 7,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unavailable"
+            },
+            "agent": {
+              "received_at": "2026-10-27T07:55:21.492+00:00",
+              "observed_at": "2026-10-27T07:55:23.928Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 9,
+              "retained": false,
+              "age_ms": 713,
+              "status": "disconnected",
+              "subscription_status": "unavailable"
+            },
+            "inventory": {
+              "received_at": "2026-10-27T07:55:17.497+00:00",
+              "observed_at": "2026-10-27T07:55:19.929Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 5,
+              "retained": false,
+              "age_ms": 4708,
+              "status": "disconnected",
+              "subscription_status": "unavailable"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        "ws_vm3": {
+          "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "role": "interaction",
+          "app_id": "message-board",
+          "app_topic_scope": "legacy",
+          "apps": {
+            "message-board": {
+              "app_id": "message-board",
+              "topic": "xenova/v1/apps/message-board/events",
+              "app_state": "unknown",
+              "reported_app_state": null,
+              "source": {
+                "status": "unknown",
+                "age_ms": null,
+                "subscription_status": "unavailable"
+              },
+              "readiness": {
+                "reported": null,
+                "current": null,
+                "source": {
+                  "status": "unknown",
+                  "age_ms": null,
+                  "subscription_status": "unsupported"
+                },
+                "execution_verified": false,
+                "authority_verified": false
+              }
+            }
+          },
+          "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+          "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": "debian",
+            "match": true,
+            "evidence": "agent.inventory",
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-27T07:55:22.377+00:00",
+              "observed_at": null,
+              "age_ms": 669,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unavailable"
+            },
+            "agent": {
+              "received_at": "2026-10-27T07:55:21.492+00:00",
+              "observed_at": "2026-10-27T07:55:23.928Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 9,
+              "retained": false,
+              "age_ms": 1555,
+              "status": "disconnected",
+              "subscription_status": "unavailable"
+            },
+            "inventory": {
+              "received_at": "2026-10-27T07:55:17.497+00:00",
+              "observed_at": "2026-10-27T07:55:19.929Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 5,
+              "retained": false,
+              "age_ms": 5550,
+              "status": "disconnected",
+              "subscription_status": "unavailable"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        "ws_source_epoch": "702b7908-db8e-4ec9-968d-6107504be152",
+        "ws_sequence": 38,
+        "presentation_status": 200,
+        "presentation_vm3": {
+          "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "role": "interaction",
+          "app_id": "message-board",
+          "app_topic_scope": "legacy",
+          "apps": {
+            "message-board": {
+              "app_id": "message-board",
+              "topic": "xenova/v1/apps/message-board/events",
+              "app_state": "unknown",
+              "reported_app_state": null,
+              "source": {
+                "status": "unknown",
+                "age_ms": null,
+                "subscription_status": "unavailable"
+              },
+              "readiness": {
+                "reported": null,
+                "current": null,
+                "source": {
+                  "status": "unknown",
+                  "age_ms": null,
+                  "subscription_status": "unsupported"
+                },
+                "execution_verified": false,
+                "authority_verified": false
+              }
+            }
+          },
+          "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+          "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": "debian",
+            "match": true,
+            "evidence": "agent.inventory",
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-27T07:55:22.198+00:00",
+              "observed_at": null,
+              "age_ms": 27,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unavailable"
+            },
+            "agent": {
+              "received_at": "2026-10-27T07:55:21.492+00:00",
+              "observed_at": "2026-10-27T07:55:23.928Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 9,
+              "retained": false,
+              "age_ms": 733,
+              "status": "disconnected",
+              "subscription_status": "unavailable"
+            },
+            "inventory": {
+              "received_at": "2026-10-27T07:55:17.497+00:00",
+              "observed_at": "2026-10-27T07:55:19.929Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 5,
+              "retained": false,
+              "age_ms": 4728,
+              "status": "disconnected",
+              "subscription_status": "unavailable"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      },
+      "reconnected": {
+        "rest_status": 200,
+        "rest_cache_control": "no-store",
+        "rest_vm3": {
+          "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "role": "interaction",
+          "app_id": "message-board",
+          "app_topic_scope": "legacy",
+          "apps": {
+            "message-board": {
+              "app_id": "message-board",
+              "topic": "xenova/v1/apps/message-board/events",
+              "app_state": "unknown",
+              "reported_app_state": null,
+              "source": {
+                "status": "unknown",
+                "age_ms": null,
+                "subscription_status": "granted"
+              },
+              "readiness": {
+                "reported": null,
+                "current": null,
+                "source": {
+                  "status": "unknown",
+                  "age_ms": null,
+                  "subscription_status": "unsupported"
+                },
+                "execution_verified": false,
+                "authority_verified": false
+              }
+            }
+          },
+          "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+          "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": "debian",
+            "match": true,
+            "evidence": "agent.inventory",
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-27T07:55:26.720+00:00",
+              "observed_at": null,
+              "age_ms": 7,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-27T07:55:26.488+00:00",
+              "observed_at": "2026-10-27T07:55:28.926Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 10,
+              "retained": false,
+              "age_ms": 237,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "received_at": "2026-10-27T07:55:25.493+00:00",
+              "observed_at": "2026-10-27T07:55:27.929Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 6,
+              "retained": false,
+              "age_ms": 1234,
+              "status": "fresh",
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        "ws_vm3": {
+          "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "role": "interaction",
+          "app_id": "message-board",
+          "app_topic_scope": "legacy",
+          "apps": {
+            "message-board": {
+              "app_id": "message-board",
+              "topic": "xenova/v1/apps/message-board/events",
+              "app_state": "unknown",
+              "reported_app_state": null,
+              "source": {
+                "status": "unknown",
+                "age_ms": null,
+                "subscription_status": "granted"
+              },
+              "readiness": {
+                "reported": null,
+                "current": null,
+                "source": {
+                  "status": "unknown",
+                  "age_ms": null,
+                  "subscription_status": "unsupported"
+                },
+                "execution_verified": false,
+                "authority_verified": false
+              }
+            }
+          },
+          "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+          "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": "debian",
+            "match": true,
+            "evidence": "agent.inventory",
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-27T07:55:27.010+00:00",
+              "observed_at": null,
+              "age_ms": 49,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-27T07:55:26.488+00:00",
+              "observed_at": "2026-10-27T07:55:28.926Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 10,
+              "retained": false,
+              "age_ms": 570,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "received_at": "2026-10-27T07:55:25.493+00:00",
+              "observed_at": "2026-10-27T07:55:27.929Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 6,
+              "retained": false,
+              "age_ms": 1567,
+              "status": "fresh",
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        "ws_source_epoch": "702b7908-db8e-4ec9-968d-6107504be152",
+        "ws_sequence": 51,
+        "presentation_status": 200,
+        "presentation_vm3": {
+          "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "role": "interaction",
+          "app_id": "message-board",
+          "app_topic_scope": "legacy",
+          "apps": {
+            "message-board": {
+              "app_id": "message-board",
+              "topic": "xenova/v1/apps/message-board/events",
+              "app_state": "unknown",
+              "reported_app_state": null,
+              "source": {
+                "status": "unknown",
+                "age_ms": null,
+                "subscription_status": "granted"
+              },
+              "readiness": {
+                "reported": null,
+                "current": null,
+                "source": {
+                  "status": "unknown",
+                  "age_ms": null,
+                  "subscription_status": "unsupported"
+                },
+                "execution_verified": false,
+                "authority_verified": false
+              }
+            }
+          },
+          "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+          "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": "debian",
+            "match": true,
+            "evidence": "agent.inventory",
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-27T07:55:26.720+00:00",
+              "observed_at": null,
+              "age_ms": 27,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "granted"
+            },
+            "agent": {
+              "received_at": "2026-10-27T07:55:26.488+00:00",
+              "observed_at": "2026-10-27T07:55:28.926Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 10,
+              "retained": false,
+              "age_ms": 257,
+              "status": "fresh",
+              "subscription_status": "granted"
+            },
+            "inventory": {
+              "received_at": "2026-10-27T07:55:25.493+00:00",
+              "observed_at": "2026-10-27T07:55:27.929Z",
+              "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+              "source_epoch": [
+                "36b28e53-bbb6-4953-b232-584e58ab2520",
+                "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+              ],
+              "sequence": 6,
+              "retained": false,
+              "age_ms": 1254,
+              "status": "fresh",
+              "subscription_status": "granted"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      }
+    },
+    "unauthenticated_rest_status": 401,
+    "wrong_token_rest_status": 401,
+    "unauthenticated_ws_status": 403,
+    "wrong_token_ws_status": 403,
+    "authenticated_ws_status": 101,
+    "server_thread_stopped": true
+  },
+  "first_connected": {
+    "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+    "role": "interaction",
+    "app_id": "message-board",
+    "app_topic_scope": "legacy",
+    "apps": {
+      "message-board": {
+        "app_id": "message-board",
+        "topic": "xenova/v1/apps/message-board/events",
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        },
+        "readiness": {
+          "reported": null,
+          "current": null,
+          "source": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          },
+          "execution_verified": false,
+          "authority_verified": false
+        }
+      }
+    },
+    "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+    "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+    "xen_state": "running",
+    "operation": null,
+    "os": {
+      "expected": "debian",
+      "observed": "debian",
+      "match": true,
+      "evidence": "agent.inventory",
+      "current_run_verified": false
+    },
+    "app_state": "unknown",
+    "reported_app_state": null,
+    "agent_supported": true,
+    "sources": {
+      "xen": {
+        "received_at": "2026-10-27T07:55:21.600+00:00",
+        "observed_at": null,
+        "age_ms": 0,
+        "status": "fresh"
+      },
+      "app": {
+        "status": "unknown",
+        "age_ms": null,
+        "subscription_status": "granted"
+      },
+      "agent": {
+        "received_at": "2026-10-27T07:55:21.492+00:00",
+        "observed_at": "2026-10-27T07:55:23.928Z",
+        "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+        "source_epoch": [
+          "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+        ],
+        "sequence": 9,
+        "retained": false,
+        "age_ms": 107,
+        "status": "fresh",
+        "subscription_status": "granted"
+      },
+      "inventory": {
+        "received_at": "2026-10-27T07:55:17.497+00:00",
+        "observed_at": "2026-10-27T07:55:19.929Z",
+        "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+        "source_epoch": [
+          "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+        ],
+        "sequence": 5,
+        "retained": false,
+        "age_ms": 4103,
+        "status": "fresh",
+        "subscription_status": "granted"
+      }
+    },
+    "screen_source": {
+      "kind": "status",
+      "handle": null
+    }
+  },
+  "first_connection_generation": 1,
+  "disconnected": {
+    "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+    "role": "interaction",
+    "app_id": "message-board",
+    "app_topic_scope": "legacy",
+    "apps": {
+      "message-board": {
+        "app_id": "message-board",
+        "topic": "xenova/v1/apps/message-board/events",
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "unavailable"
+        },
+        "readiness": {
+          "reported": null,
+          "current": null,
+          "source": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          },
+          "execution_verified": false,
+          "authority_verified": false
+        }
+      }
+    },
+    "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+    "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+    "xen_state": "running",
+    "operation": null,
+    "os": {
+      "expected": "debian",
+      "observed": "debian",
+      "match": true,
+      "evidence": "agent.inventory",
+      "current_run_verified": false
+    },
+    "app_state": "unknown",
+    "reported_app_state": null,
+    "agent_supported": true,
+    "sources": {
+      "xen": {
+        "received_at": "2026-10-27T07:55:22.198+00:00",
+        "observed_at": null,
+        "age_ms": 0,
+        "status": "fresh"
+      },
+      "app": {
+        "status": "unknown",
+        "age_ms": null,
+        "subscription_status": "unavailable"
+      },
+      "agent": {
+        "received_at": "2026-10-27T07:55:21.492+00:00",
+        "observed_at": "2026-10-27T07:55:23.928Z",
+        "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+        "source_epoch": [
+          "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+        ],
+        "sequence": 9,
+        "retained": false,
+        "age_ms": 705,
+        "status": "disconnected",
+        "subscription_status": "unavailable"
+      },
+      "inventory": {
+        "received_at": "2026-10-27T07:55:17.497+00:00",
+        "observed_at": "2026-10-27T07:55:19.929Z",
+        "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+        "source_epoch": [
+          "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+        ],
+        "sequence": 5,
+        "retained": false,
+        "age_ms": 4700,
+        "status": "disconnected",
+        "subscription_status": "unavailable"
+      }
+    },
+    "screen_source": {
+      "kind": "status",
+      "handle": null
+    }
+  },
+  "reconnected": {
+    "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+    "role": "interaction",
+    "app_id": "message-board",
+    "app_topic_scope": "legacy",
+    "apps": {
+      "message-board": {
+        "app_id": "message-board",
+        "topic": "xenova/v1/apps/message-board/events",
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        },
+        "readiness": {
+          "reported": null,
+          "current": null,
+          "source": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          },
+          "execution_verified": false,
+          "authority_verified": false
+        }
+      }
+    },
+    "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+    "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+    "xen_state": "running",
+    "operation": null,
+    "os": {
+      "expected": "debian",
+      "observed": "debian",
+      "match": true,
+      "evidence": "agent.inventory",
+      "current_run_verified": false
+    },
+    "app_state": "unknown",
+    "reported_app_state": null,
+    "agent_supported": true,
+    "sources": {
+      "xen": {
+        "received_at": "2026-10-27T07:55:26.720+00:00",
+        "observed_at": null,
+        "age_ms": 0,
+        "status": "fresh"
+      },
+      "app": {
+        "status": "unknown",
+        "age_ms": null,
+        "subscription_status": "granted"
+      },
+      "agent": {
+        "received_at": "2026-10-27T07:55:26.488+00:00",
+        "observed_at": "2026-10-27T07:55:28.926Z",
+        "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+        "source_epoch": [
+          "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+        ],
+        "sequence": 10,
+        "retained": false,
+        "age_ms": 230,
+        "status": "fresh",
+        "subscription_status": "granted"
+      },
+      "inventory": {
+        "received_at": "2026-10-27T07:55:25.493+00:00",
+        "observed_at": "2026-10-27T07:55:27.929Z",
+        "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+        "source_epoch": [
+          "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+        ],
+        "sequence": 6,
+        "retained": false,
+        "age_ms": 1227,
+        "status": "fresh",
+        "subscription_status": "granted"
+      }
+    },
+    "screen_source": {
+      "kind": "status",
+      "handle": null
+    }
+  },
+  "reconnected_generation": 3,
+  "after_cleanup": {
+    "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+    "role": "interaction",
+    "app_id": "message-board",
+    "app_topic_scope": "legacy",
+    "apps": {
+      "message-board": {
+        "app_id": "message-board",
+        "topic": "xenova/v1/apps/message-board/events",
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "unavailable"
+        },
+        "readiness": {
+          "reported": null,
+          "current": null,
+          "source": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          },
+          "execution_verified": false,
+          "authority_verified": false
+        }
+      }
+    },
+    "run_id": "702b7908-db8e-4ec9-968d-6107504be152:1",
+    "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+    "xen_state": "running",
+    "operation": null,
+    "os": {
+      "expected": "debian",
+      "observed": "debian",
+      "match": true,
+      "evidence": "agent.inventory",
+      "current_run_verified": false
+    },
+    "app_state": "unknown",
+    "reported_app_state": null,
+    "agent_supported": true,
+    "sources": {
+      "xen": {
+        "received_at": "2026-10-27T07:55:28.154+00:00",
+        "observed_at": null,
+        "age_ms": 58,
+        "status": "fresh"
+      },
+      "app": {
+        "status": "unknown",
+        "age_ms": null,
+        "subscription_status": "unavailable"
+      },
+      "agent": {
+        "received_at": "2026-10-27T07:55:26.488+00:00",
+        "observed_at": "2026-10-27T07:55:28.926Z",
+        "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+        "source_epoch": [
+          "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+        ],
+        "sequence": 10,
+        "retained": false,
+        "age_ms": 1723,
+        "status": "disconnected",
+        "subscription_status": "unavailable"
+      },
+      "inventory": {
+        "received_at": "2026-10-27T07:55:25.493+00:00",
+        "observed_at": "2026-10-27T07:55:27.929Z",
+        "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory",
+        "source_epoch": [
+          "36b28e53-bbb6-4953-b232-584e58ab2520",
+          "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+        ],
+        "sequence": 6,
+        "retained": false,
+        "age_ms": 2720,
+        "status": "disconnected",
+        "subscription_status": "unavailable"
+      }
+    },
+    "screen_source": {
+      "kind": "status",
+      "handle": null
+    }
+  },
+  "elapsed_seconds": 15.2,
+  "checks": {
+    "inventory_arrived_before_first_heartbeat": true,
+    "first_inventory_deferred_until_heartbeat": true,
+    "first_os_debian": true,
+    "first_agent_and_inventory_fresh": true,
+    "agent_disconnected": true,
+    "inventory_disconnected": true,
+    "new_mqtt_connection_generation": true,
+    "reconnected_agent_and_inventory_fresh": true,
+    "reconnected_os_debian": true,
+    "new_agent_sequence_after_reconnect": true,
+    "same_agent_session_without_restart": true,
+    "no_claim_of_verified_execution": true,
+    "rest_no_auth_rejected": true,
+    "rest_wrong_token_rejected": true,
+    "ws_no_auth_rejected": true,
+    "ws_wrong_token_rejected": true,
+    "ws_authenticated_upgrade": true,
+    "api_thread_stopped": true,
+    "connected_rest_and_presentation_ok": true,
+    "connected_rest_state": true,
+    "connected_ws_state": true,
+    "connected_os_matches": true,
+    "connected_cache_no_store": true,
+    "disconnected_rest_and_presentation_ok": true,
+    "disconnected_rest_state": true,
+    "disconnected_ws_state": true,
+    "disconnected_os_matches": true,
+    "disconnected_cache_no_store": true,
+    "reconnected_rest_and_presentation_ok": true,
+    "reconnected_rest_state": true,
+    "reconnected_ws_state": true,
+    "reconnected_os_matches": true,
+    "reconnected_cache_no_store": true,
+    "same_ws_epoch_across_phases": true,
+    "ws_sequence_increases": true
+  },
+  "passed": true,
+  "cleanup": {
+    "temporary_directory_removed": true,
+    "subscriber_stopped": true,
+    "broker_stopped": true
+  },
+  "changes": {
+    "vm_or_firmware_changed": false,
+    "guest_agent_restarted": false,
+    "system_service_changed": false,
+    "collector_published": false
+  },
+  "base_commit": "527a9df",
+  "collector_module_sha256": {
+    "config": "2ab29761b664faed697a3f4e477f3082ccaa81a39babd3f5ada63ee174de482c",
+    "app_reports": "4a7cf5f1fe27a3367b9d267c7ca50969a8aed888aa723de60b784c96ecb2f57e",
+    "state": "5b1a888e10c93135cd4746c80119bb02e6f4f498e51193aa4ff0172d5f57a1a4",
+    "mqtt": "76c5415efac02e8f649472635e286232b472f4f4fd4ed55eae4dcdd4ef2d52ee",
+    "policy": "de5517a77dec97b12f1e7a6eeec240628b93e74e0830ba7076c6ecb84eb9cfff",
+    "main": "38aea2917676abaf3de17ed4338816d1e68f106261d2ed7f574b32b430342580"
+  }
+}

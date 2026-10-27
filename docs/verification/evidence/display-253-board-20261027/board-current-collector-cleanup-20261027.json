@@ -1,0 +1,42 @@
+{
+  "broker_listeners": {
+    "127.0.0.1": "closed",
+    "192.168.77.1": "closed"
+  },
+  "broker_processes": [],
+  "zephyr_deployment_metadata": [
+    {
+      "instance": "zephyr-drive-a",
+      "record": {
+        "uuid": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+        "name": "zephyr-drive-a",
+        "template_id": "zephyr-xenvm-starter-arm64",
+        "template_version": "1.1.0",
+        "guest_kind": "zephyr",
+        "ipv4": "192.168.77.2"
+      },
+      "files": [
+        "instance.json",
+        "firmware"
+      ]
+    },
+    {
+      "instance": "zephyr-drive-b",
+      "record": {
+        "uuid": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+        "name": "zephyr-drive-b",
+        "template_id": "zephyr-xenvm-starter-arm64",
+        "template_version": "1.1.0",
+        "guest_kind": "zephyr",
+        "ipv4": "192.168.77.3"
+      },
+      "files": [
+        "instance.json",
+        "firmware"
+      ]
+    }
+  ],
+  "temporary_directories_left": [],
+  "original_service_state": "ActiveState=inactive\nSubState=dead\nMainPID=0\n",
+  "cleanup_verified": true
+}

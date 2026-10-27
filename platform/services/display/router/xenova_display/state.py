@@ -32,7 +32,7 @@ class StateStore:
         self.guests = {str(b.vm_id): {
             "binding": b, "domid": None, "xen_state": None, "run_id": None,
             "boot_id": None, "retired_boots": set(), "channels": {}, "retired_epochs": set(),
-            "app_instances": {}, "retired_apps": set(), "app_sequences": {},
+            "app_instances": {}, "retired_apps": set(), "app_sequences": {}, "pending_inventory": {},
         } for b in settings.bindings}
         self.control = None
         self.control_epoch = None
@@ -53,6 +53,8 @@ class StateStore:
         with self.lock:
             self.mqtt_connected = connected
             self.mqtt_generation += 1
+            for guest in self.guests.values():
+                guest["pending_inventory"].clear()
             self.subscriptions = {topic: "pending" if connected else "unavailable" for topic in topics}
 
     def subscription(self, topic, status):
@@ -79,7 +81,7 @@ class StateStore:
                 if domid != g["domid"]:
                     if g["boot_id"]:
                         g["retired_boots"].add(g["boot_id"])
-                    g.update(boot_id=None, channels={}, retired_epochs=set(), app_instances={}, retired_apps=set(), app_sequences={})
+                    g.update(boot_id=None, channels={}, retired_epochs=set(), app_instances={}, retired_apps=set(), app_sequences={}, pending_inventory={})
                 g.update(domid=domid, xen_state=d.state.value if d else "stopped",
                          run_id=f"{self.epoch}:{domid}" if domid is not None else None)
             self.xen = self.observation("ok")
@@ -130,6 +132,30 @@ class StateStore:
                 if (not isinstance(os_info, dict) or not isinstance(os_info.get("id"), str)
                         or not 1 <= len(os_info["id"]) <= 64):
                     return False
+                epoch = (env["boot_id"], env["agent_instance_id"])
+                if epoch[0] in g["retired_boots"] or ("agent.heartbeat", epoch) in g["retired_epochs"]:
+                    return False
+                heartbeat = g["channels"].get("agent.heartbeat")
+                heartbeat_topic = f"xenova/v1/vms/{vm_id}/heartbeat"
+                if (heartbeat is None or heartbeat["source_epoch"] != list(epoch)
+                        or self.mqtt_source(heartbeat, 15, heartbeat_topic)["status"] != "fresh"):
+                    # Inventory is not liveness. Hold only a bounded OS observation
+                    # until this exact Agent session reports on the same connection.
+                    if retained:
+                        return False
+                    pending = g["pending_inventory"]
+                    previous = pending.get(epoch)
+                    if previous and env["seq"] <= previous["sequence"]:
+                        return False
+                    for key in list(pending):
+                        if self.clock() - pending[key]["received_mono"] >= 15:
+                            del pending[key]
+                    if epoch not in pending and len(pending) >= 4:
+                        return False
+                    pending[epoch] = self.observation({"os": {"id": os_info["id"]}},
+                        observed_at=env["sent_at"], source_id=topic, source_epoch=list(epoch),
+                        sequence=env["seq"], retained=False, _mqtt_generation=self.mqtt_generation)
+                    return False  # Deferred; not yet accepted as displayed OS evidence.
             # Only a non-retained heartbeat establishes a boot, not historical inventory.
             boot = env["boot_id"]
             if boot != g["boot_id"]:
@@ -137,7 +163,8 @@ class StateStore:
                     return False
                 if g["boot_id"]:
                     g["retired_boots"].add(g["boot_id"])
-                g.update(boot_id=boot, channels={}, retired_epochs=set(), app_instances={}, retired_apps=set(), app_sequences={})
+                pending = {k: v for k, v in g["pending_inventory"].items() if k[0] == boot}
+                g.update(boot_id=boot, channels={}, retired_epochs=set(), app_instances={}, retired_apps=set(), app_sequences={}, pending_inventory=pending)
             if retained and kind != "agent.inventory":
                 return False
             epoch = (boot, env["agent_instance_id"])
@@ -186,6 +213,20 @@ class StateStore:
             g["channels"][key] = self.observation(env["payload"], observed_at=env["sent_at"],
                 source_id=topic, source_epoch=list(epoch), sequence=env["seq"], retained=retained,
                 _mqtt_generation=self.mqtt_generation)
+            if kind == "agent.heartbeat":
+                inventory = g["channels"].get("agent.inventory")
+                if inventory and inventory["source_epoch"] != list(epoch):
+                    del g["channels"]["agent.inventory"]
+                    inventory = None
+                pending = g["pending_inventory"].pop(epoch, None)
+                g["pending_inventory"].clear()
+                inventory_topic = f"xenova/v1/vms/{vm_id}/inventory"
+                if (pending and self.clock() - pending["received_mono"] < 15
+                        and pending["_mqtt_generation"] == self.mqtt_generation
+                        and self.topic_available(inventory_topic)
+                        and (inventory is None or pending["sequence"] > inventory["sequence"])):
+                    # Keep the original inventory receive time, never rejuvenate it.
+                    g["channels"]["agent.inventory"] = pending
             return True
 
     def app_snapshot(self, g, b, app_id, xen_source):
