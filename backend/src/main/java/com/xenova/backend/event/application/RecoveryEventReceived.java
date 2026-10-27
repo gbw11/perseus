@@ -3,16 +3,11 @@ package com.xenova.backend.event.application;
 import java.time.Instant;
 import java.util.Objects;
 
-// Immutable transport event. Contract validation and parsing subscribe to this boundary in the next step.
-public record RecoveryEventReceived(byte[] payload, Instant receivedAt) {
+// Published only after an MQTT-12 payload has passed the recovery event contract.
+public record RecoveryEventReceived(RecoveryEvent event, Instant receivedAt) {
 
     public RecoveryEventReceived {
-        payload = Objects.requireNonNull(payload, "payload").clone();
+        Objects.requireNonNull(event, "event");
         Objects.requireNonNull(receivedAt, "receivedAt");
-    }
-
-    @Override
-    public byte[] payload() {
-        return payload.clone();
     }
 }
