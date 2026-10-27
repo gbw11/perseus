@@ -23,7 +23,7 @@ class MqttSource:
         self.topics = tuple(dict.fromkeys([
             *[topic for b in self.settings.bindings if b.agent_supported for topic in
               (f"xenova/v1/vms/{b.vm_id}/heartbeat", f"xenova/v1/vms/{b.vm_id}/inventory")],
-            *[f"xenova/v1/apps/{b.app_id}/events" for b in self.settings.bindings], DISPLAY_DRIVE_TOPIC]))
+            *[b.app_topic(app) for b in self.settings.bindings for app in b.report_app_ids], DISPLAY_DRIVE_TOPIC]))
         self.pending = {}
         self.early = {}
         self.subscribing = False
@@ -89,6 +89,7 @@ class MqttSource:
             return
         try:
             envelope = json.loads(message.payload.decode("utf-8"))
-            self.store.ingest(message.topic, envelope, retained=message.retain)
+            self.store.ingest(message.topic, envelope, retained=message.retain,
+                              qos=getattr(message, "qos", None), wire_size=len(message.payload))
         except (ValueError, TypeError, KeyError, UnicodeError):
             log.debug("Rejected malformed display observation")

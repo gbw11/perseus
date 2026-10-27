@@ -22,7 +22,15 @@ python -m uvicorn xenova_display.main:create_app --factory --host 127.0.0.1 --po
 
 동일 서비스 인스턴스의 상태를 사용하도록 단일 worker로 실행한다. Xen 조회에는 dom0의 기존 읽기 전용 드라이버를 사용한다. `xl console`, VM 시작/정지/재시작, 주행 명령은 실행하지 않는다. 토큰이 비어 있으면 시작을 거부한다. Python 경로/직접 실행 옵션은 기존 dom0-manager와 같다.
 
-설정 파일은 [QEMU 예제](examples/qemu-bindings.json)를 참고해 실제 등록 UUID·앱 토픽에 맞춘다. `primary-drive`, `backup-drive`는 새 발행 기능을 설치했다는 뜻이 아닌 **수신할 앱 ID 설정 예시**다. 기존 발행자가 `autonomous`, `manual`을 쓴다면 설정에서 명시적으로 매핑할 수 있지만, 이 이름으로 VM 역할/현재 주행 모드를 추론하지 않는다. 같은 역할·UUID·앱 ID의 중복과 dom0 UUID는 거부한다.
+기존 단일 앱 설정은 [QEMU 예제](examples/qemu-bindings.json)를 참고한다. `primary-drive`, `backup-drive`는 **이전 수신 설정의 예시 앱 ID**이며 새 공통 주행 앱의 ID가 아니다. 같은 역할·UUID와 dom0 UUID를 거부하며, 이전 전역 토픽 방식에서는 앱 ID 중복도 거부한다. 새 공통 주행 앱에서는 아래처럼 두 VM에 동일한 두 앱 ID를 설정하고 UUID로 VM을 구분한다. 앱 ID로 VM 역할/현재 주행 모드를 추론하지 않는다.
+
+### 공통 주행 앱의 VM별 두 앱 보고 수신 (253번 보완)
+
+[새 후보 설정](examples/dual-drive-candidate-bindings.json)은 VM1·VM2 각각에 `app_topic_scope: "vm_scoped"`, `app_ids: ["autonomous", "manual"]`을 명시한다. 두 VM 모두 두 앱을 보고하며, `xenova/v1/vms/{vm_id}/apps/{app_id}/events`의 UUID와 봉투의 UUID·앱 ID가 모두 일치해야 수락한다. 이전 `app_id` 단일 설정은 그대로 지원하지만 새 토픽으로 자동 전환하거나 이전 토픽으로 자동 우회하지 않는다.
+
+후보 설정은 합성 UUID이므로 시험 시에만 `XENOVA_DISPLAY_ALLOW_CANDIDATE_BINDINGS=1`로 허용한다. 실제 배포에는 등록 UUID·역할을 확인한 별도 배포 설정을 사용한다. VM3 예시의 `interaction`은 앱/ACL 담당과 확인할 후보이며, 기존 `message-board` 계정·앱·실보드 설정을 변경하지 않는다.
+
+상태 API/WS의 `vms[].apps`에 앱별 heartbeat 상태와 `readiness` 관측을 추가한다. heartbeat는 3초, 준비 보고는 300ms에 만료된다. `app_state: ready`는 오류 없이 생존 보고가 온다는 기존 표시 의미이며 실제 주행 준비 완료나 구동 권한을 뜻하지 않는다. `readiness.current`도 신선한 보고일 뿐이고 `execution_verified`, `authority_verified`는 모두 `false`다. 기존 VM 요약은 두 앱 모두 신선할 때만 정상 생존으로 표시한다. 세부 규칙과 실제 연동 전 의존성은 [수신 규격](../../../../docs/contracts/display-vm-app-reports-v1.md), [모의 검증](../../../../docs/verification/display-253-dual-drive-reports.md)을 참고한다.
 
 | 환경변수 | 기본/의미 |
 | --- | --- |
