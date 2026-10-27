@@ -56,7 +56,7 @@ export function VmListPage() {
         </div>
         <span className={styles.grow} />
         {vms.data && <ObservedClock at={vms.dataUpdatedAt} />}
-        <Button onClick={() => navigate('/vms/new')}>+ VM 만들기</Button>
+        <Button onClick={() => navigate('/control/vms/new')}>+ VM 만들기</Button>
       </section>
 
       {vms.error && (
@@ -78,9 +78,9 @@ export function VmListPage() {
               role="link"
               tabIndex={0}
               aria-label={`${role?.title ?? vm.name} 상세`}
-              onClick={() => navigate(`/vms/${vm.vm_id}`)}
+              onClick={() => navigate(`/control/vms/${vm.vm_id}`)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && e.target === e.currentTarget) navigate(`/vms/${vm.vm_id}`);
+                if (e.key === 'Enter' && e.target === e.currentTarget) navigate(`/control/vms/${vm.vm_id}`);
               }}
             >
               <div

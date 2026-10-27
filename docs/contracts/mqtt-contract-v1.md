@@ -86,11 +86,12 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 | --- | --- | --- | --- |
 | `autonomous` | 자율주행 VM | `zephyr` | 젯슨 인식 결과로 판단·경로 생성, 평소 주행 명령 |
 | `manual` | 수동주행 VM | `zephyr` | 대기, 인계 시 콘솔 키 입력을 주행 명령으로 변환 |
-| `message-board` | 메시지 보드 VM | `linux` | 관제 메시지, 모드·장애 알림 표시, 자율주행 재개 요청 |
+| `interaction` | 인터랙션 VM | `linux` | 관제 메시지, 모드·장애 알림 표시, 자율주행 재개 요청 |
 | `perception` | 젯슨 (`source_id: jetson`) | — | 객체인식 결과. 외부 발행자이며 앱 3종에 포함하지 않는다 |
 | `vehicle` | dom0 서버·게이트웨이 | — | 모드 전환·장애 알림 |
 
 - `guest_kind` 값은 `linux`, `zephyr` 두 가지다 (VM 관리 API 계약과 같다).
+- `interaction` 은 앱 이름이 아니라 VM 역할 ID 다. 이 VM 에 어떤 앱을 올릴지는 정하지 않았고, 무엇을 올려도 토픽·브로커 계정·VM `role` 값은 이 ID 를 쓴다.
 - 자율·수동주행 VM은 Zephyr다 (2026-10-20 [RC카 시나리오](../scenario-rc-car.md) §2). Zephyr에는 VM 에이전트가 없어 `agent.*` 토픽을 내지 않는다. 앱 프로세스 생존은 `app.heartbeat`(6.1)로 알린다.
 - ESP32는 MQTT에 붙지 않는다. dom0 USB 시리얼(이후 CAN)로 게이트웨이와만 통신한다 (시나리오 §8 D1). 이 문서에서 ESP32로 가는 명령·ESP32에서 오는 상태는 모두 게이트웨이를 거친다.
 
@@ -158,7 +159,7 @@ Legacy 수신값이나 readiness 없는 앱을 자동 READY로 취급하지 않�
 uint32 generation 소진 시 wrap/reset하지 않는다. 전역 flock은 dom0 Gateway 중복 실행을 막는다.
 실행 바인딩 lease는 같은 dom0 boot의 3초이며 관측 실패/만료 시 과거 세션으로 새 실행을 승인하지 않는다.
 
-재개 요청은 기존 두 토픽(`console/resume`, `apps/message-board/events`)을 유지한다.
+재개 요청은 기존 두 토픽(`console/resume`, `apps/interaction/events`)을 유지한다.
 verified payload의 필수 `expected_generation`은 현재 uint32 세대, 선택 `requested_by`는 string이다.
 기존 envelope `causation_id`는 현재 Gateway가 ACK 확인한 control의 message_id다.
 `message_id`는 요청 중복 방지에 사용한다. 과거 세대/게시 문맥·retained 요청·재전달 중복은
@@ -244,11 +245,11 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 
 | ID | 토픽 | `type` | 발행 → 구독 | QoS | 주요 payload |
 | --- | --- | --- | --- | --- | --- |
-| MQTT-06 | `xenova/v1/apps/autonomous/events` | `perception.event` | 자율 VM → 메시지 보드 | 1 | `kind`(obstacle 등), `detail` |
-| MQTT-06 | `xenova/v1/apps/message-board/events` | `message.posted` | 메시지 보드 → 주행 화면 | 1 | `text`, `level` |
-| MQTT-06 | `xenova/v1/apps/message-board/events` | `drive.resume.requested` | 메시지 보드 → 게이트웨이 | 1 | `requested_by` |
-| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed` | 게이트웨이 → 메시지 보드, 주행 화면, 백엔드 | 1 | `from`, `to`, `generation`, `reason` |
-| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.fault.detected` | 게이트웨이 → 메시지 보드, 백엔드 | 1 | `app_id`, `vm_id`, `reason`, `detected_at` |
+| MQTT-06 | `xenova/v1/apps/autonomous/events` | `perception.event` | 자율 VM → 인터랙션 VM | 1 | `kind`(obstacle 등), `detail` |
+| MQTT-06 | `xenova/v1/apps/interaction/events` | `message.posted` | 인터랙션 VM → 주행 화면 | 1 | `text`, `level` |
+| MQTT-06 | `xenova/v1/apps/interaction/events` | `drive.resume.requested` | 인터랙션 VM → 게이트웨이 | 1 | `requested_by` |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed` | 게이트웨이 → 인터랙션 VM, 주행 화면, 백엔드 | 1 | `from`, `to`, `generation`, `reason` |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.fault.detected` | 게이트웨이 → 인터랙션 VM, 백엔드 | 1 | `app_id`, `vm_id`, `reason`, `detected_at` |
 
 - Legacy의 `drive.resume.requested`는 `AUTO_READY`일 때만 받아들인다. 다른 모드에서는 무시하고 `drive.mode.changed`를 내지 않는다.
 - 백엔드는 `drive.mode.changed`, `drive.fault.detected`를 콘솔 이벤트 로그(REST-18, `/ws/v1/events`)에 남긴다. 심각도는 모드 전환 `INFO`, `SAFE_STOP` 진입·장애 `WARNING`.
@@ -257,7 +258,7 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 
 | ID | 토픽 | `type` | 발행 → 구독 | 주기 | QoS | 주요 payload |
 | --- | --- | --- | --- | --- | --- | --- |
-| MQTT-06 | `xenova/v1/apps/{app_id}/events` | `app.heartbeat` | 앱 VM → 백엔드, 메시지 보드, 주행 화면 | 1초 | 0 | `state`, `uptime_s` |
+| MQTT-06 | `xenova/v1/apps/{app_id}/events` | `app.heartbeat` | 앱 VM → 백엔드, 인터랙션 VM, 주행 화면 | 1초 | 0 | `state`, `uptime_s` |
 
 | 필드 | 타입 | 설명 |
 | --- | --- | --- |
@@ -436,6 +437,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.1 | 2026-10-21 | 시나리오 D1·D3·D8 반영 (S15P31E110-242). ESP32를 MQTT 참여자에서 빼고 게이트웨이 시리얼 뒤로(4장, 5.3, 9장 계정 삭제), `vehicle.status` 발행 = 게이트웨이 `source_id: dom0-gateway`(5.4), 5.5 ESP32 수용 규칙 → 게이트웨이 수용 규칙, Zephyr vchan + dom0 중계(4.1, 10장에서 삭제), `AUTO_READY`·VM 재시작 근거에서 에이전트 대신 도메인 상태 + `app.heartbeat`(5.1·5.2·6.1). 토픽 이름·payload 필드는 그대로 |
 | v1.2 | 2026-10-22 | 복구 Worker 건강 스냅샷(S15P31E110-124): MQTT-13 `vm.health`(11.1, `lease_s` 수명과 주기 재발행·수신 측 만료 규칙, retain 플래그 수신은 임시값), 계정 `dom0-server` 의 구독에 `apps/+/events`·publish 에 `recovery/health/{vm_id}` 추가(9장), 11장 판정 입력에 Zephyr `app.heartbeat` 명시. 기존 토픽·payload 는 그대로 |
 | v1.3 | 2026-10-26 | Linux 앱도 `app.heartbeat`(6.1)를 같은 형식으로 보낸다. 상태 표시용이며 복구 서비스의 Linux VM 재시작 근거가 아니다. 멈춘 Linux 앱은 게스트 systemd 가 재시작 (S15P31E110-301) |
+| v1.4 | 2026-10-27 | Linux 인터랙션 VM 의 app_id 를 `message-board` 에서 `interaction` 으로 바꾼다(4장). 올릴 앱이 정해지지 않아 앱 이름 대신 역할 ID 를 쓴다. 토픽 `apps/message-board/events` → `apps/interaction/events`(5장 재개 요청, 6장), 구독자 표기 "메시지 보드" → "인터랙션 VM". type·payload 는 그대로 (S15P31E110-303) |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의
 QoS 교환은 메시지 전달을 위한 것이며 앱/장치 적용 확인을 대신하지 않는다.

@@ -4,11 +4,10 @@ import { NavLink, Outlet, useNavigate } from 'react-router';
 import { useLogout } from '../api/queries';
 import { useSession } from '../auth';
 import { DriveProvider } from './DriveContext';
-import { ModeStrip } from './ModeStrip';
 import { ResumeNotice } from './ResumeNotice';
 import styles from './layout.module.css';
 
-/** 웹 공통 틀 (화면 정의서 §2): 위쪽 메뉴 [대시보드 · VM · 자원 · 시연 제어 · 웹 콘솔 · 이벤트] + 주행 모드 띠 */
+/** 관리자 웹 공통 틀: 핵심 업무 4개 영역과 계정 동작. */
 export function ConsoleLayout() {
   const session = useSession();
   const logout = useLogout();
@@ -25,22 +24,14 @@ export function ConsoleLayout() {
         }
         nav={
           <>
-            <NavLink to="/" end>
-              대시보드
-            </NavLink>
-            <NavLink to="/vms">VM</NavLink>
-            <NavLink to="/resources">자원</NavLink>
-            <NavLink to="/demo">시연 제어</NavLink>
-            <NavLink to="/console">웹 콘솔</NavLink>
-            <NavLink to="/events">이벤트</NavLink>
+            <NavLink to="/dashboard">VM Dashboard</NavLink>
+            <NavLink to="/vision">Vision</NavLink>
+            <NavLink to="/control">VM Control</NavLink>
+            <NavLink to="/simulator">Simulator</NavLink>
           </>
         }
         actions={
           <>
-            <span className={styles.devLinks}>
-              <NavLink to="/screens">모니터 화면</NavLink>
-              <NavLink to="/components">컴포넌트</NavLink>
-            </span>
             <span className={styles.user}>
               <span className={styles.avatar} aria-hidden="true">
                 {name.slice(0, 1).toUpperCase()}
@@ -56,7 +47,6 @@ export function ConsoleLayout() {
             </Button>
           </>
         }
-        strip={<ModeStrip />}
       >
         <ResumeNotice />
         <Outlet />

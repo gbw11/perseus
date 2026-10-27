@@ -57,7 +57,7 @@ export function VmCreatePage() {
       <section className={styles.pageHead}>
         <div>
           <div className={styles.eyebrow}>
-            <Link to="/vms">VM 목록</Link> / VM 만들기
+            <Link to="/control">VM 목록</Link> / VM 만들기
           </div>
           <h1>VM 만들기</h1>
         </div>
@@ -195,7 +195,7 @@ export function VmCreatePage() {
               <p>
                 <b>{create.data.name}</b> 을 만들었다.
               </p>
-              <Button onClick={() => navigate(`/vms/${create.data.vm_id}`)}>상세로</Button>
+              <Button onClick={() => navigate(`/control/vms/${create.data.vm_id}`)}>상세로</Button>
             </>
           ) : (
             <>

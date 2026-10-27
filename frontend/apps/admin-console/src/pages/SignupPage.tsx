@@ -16,7 +16,7 @@ export function SignupPage() {
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
 
-  if (session) return <Navigate to="/vms" replace />;
+  if (session) return <Navigate to="/dashboard/overview" replace />;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
