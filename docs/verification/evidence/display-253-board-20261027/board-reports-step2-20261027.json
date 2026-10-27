@@ -1,0 +1,211 @@
+{
+  "issue": "S15P31E110-253",
+  "step": 2,
+  "observed_at_kst": "2026-10-27T14:41:34+09:00",
+  "broker_target": {
+    "host": "127.0.0.1",
+    "port": 1883,
+    "username_configured": false,
+    "password_configured": false
+  },
+  "programs": {
+    "mosquitto": "/usr/sbin/mosquitto",
+    "mosquitto_sub": "/usr/bin/mosquitto_sub",
+    "mosquitto_pub": "/usr/bin/mosquitto_pub"
+  },
+  "broker_service": {
+    "code": 0,
+    "out": "LoadState=loaded\nActiveState=inactive\nSubState=dead\nFragmentPath=/usr/lib/systemd/system/mosquitto.service\nMainPID=0\nResult=success\n",
+    "err": ""
+  },
+  "listeners": {
+    "code": 0,
+    "out": "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\nLISTEN 0      128          0.0.0.0:22        0.0.0.0:*   \nLISTEN 0      2048       127.0.0.1:8081      0.0.0.0:*   \nLISTEN 0      128             [::]:22           [::]:*   \n",
+    "err": ""
+  },
+  "guest_network": {
+    "code": 0,
+    "out": "4: xenbr0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000\n    inet 192.168.77.1/24 scope global xenbr0\n       valid_lft forever preferred_lft forever\n",
+    "err": ""
+  },
+  "neighbors": {
+    "code": 0,
+    "out": "192.168.77.3 lladdr 02:07:47:13:48:a0 STALE \n192.168.77.2 lladdr 02:11:76:bb:98:bd STALE \n192.168.77.20 lladdr 02:81:2d:59:0a:79 REACHABLE \n",
+    "err": ""
+  },
+  "broker_configs": [
+    {
+      "path": "/etc/mosquitto/mosquitto.conf",
+      "nonsecret_directives": []
+    }
+  ],
+  "subscription_observation": null,
+  "broker_tcp": "ConnectionRefusedError",
+  "state": {
+    "schema_version": 1,
+    "type": "display.state",
+    "source_epoch": "22e5c724-da9d-45f8-b2b3-d41c6560c687",
+    "sequence": 1,
+    "generated_at": "2026-10-27T05:41:37.037+00:00",
+    "mqtt_connected": false,
+    "binding_scope": "candidate",
+    "mqtt_subscriptions": {},
+    "vms": [
+      {
+        "vm_id": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+        "role": "primary_drive",
+        "app_id": "autonomous",
+        "run_id": "22e5c724-da9d-45f8-b2b3-d41c6560c687:2",
+        "guest_boot_id": null,
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "zephyr",
+          "observed": null,
+          "match": null,
+          "evidence": null,
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": false,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-27T05:41:37.037+00:00",
+            "observed_at": null,
+            "age_ms": 0,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "untracked"
+          },
+          "agent": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          },
+          "inventory": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      },
+      {
+        "vm_id": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+        "role": "backup_drive",
+        "app_id": "manual",
+        "run_id": "22e5c724-da9d-45f8-b2b3-d41c6560c687:3",
+        "guest_boot_id": null,
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "zephyr",
+          "observed": null,
+          "match": null,
+          "evidence": null,
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": false,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-27T05:41:37.037+00:00",
+            "observed_at": null,
+            "age_ms": 0,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "untracked"
+          },
+          "agent": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          },
+          "inventory": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      },
+      {
+        "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+        "role": "interaction",
+        "app_id": "message-board",
+        "run_id": "22e5c724-da9d-45f8-b2b3-d41c6560c687:1",
+        "guest_boot_id": null,
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "debian",
+          "observed": null,
+          "match": null,
+          "evidence": null,
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": true,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-27T05:41:37.037+00:00",
+            "observed_at": null,
+            "age_ms": 0,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "untracked"
+          },
+          "agent": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "untracked"
+          },
+          "inventory": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "untracked"
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      }
+    ],
+    "drive": {
+      "active_vm_id": null,
+      "mode": "unknown",
+      "ai_status": "unknown",
+      "source": {
+        "status": "unknown",
+        "age_ms": null,
+        "subscription_status": "untracked"
+      }
+    }
+  },
+  "changes": {
+    "packages_installed": false,
+    "services_started_or_restarted": false,
+    "vm_commands_sent": false,
+    "mqtt_messages_published": false,
+    "board_files_written": false
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "issue": "S15P31E110-253",
+  "step": 1,
+  "observed_at_kst": "2026-10-27T14:35:16+09:00",
+  "scope": "physical Raspberry Pi dom0 via pinned SSH; read-only actual xl and staged display bindings",
+  "board": "192.168.30.96",
+  "boot_id": "6bb31ca3-89ad-4987-989d-8861e3a529fc",
+  "bindings_path": "/opt/xenova-display-probe/20261027-70c3ed8-6695dc/config/bindings.json",
+  "bindings_sha256": "2395e1d2c8b3a5f02ea6ded7d800572b66b3b7b9fe0d12085e90c9126b8b44da",
+  "binding_scope": "candidate",
+  "role_evidence": "user-confirmed assignment plus configuration comparison; Xen does not prove driving authority",
+  "observations": [
+    {
+      "xl_list": "Name                                        ID   Mem VCPUs\tState\tTime(s)\nDomain-0                                     0  1024     4     r-----     331.2\ndebian-dev                                   1   512     1     -b----      30.7\nzephyr-drive-a                               2    16     1     -b----      10.0\nzephyr-drive-b                               3    16     1     -b----       9.9\n",
+      "guests": [
+        {
+          "name": "debian-dev",
+          "uuid": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "domid": 1,
+          "flags": "-b----"
+        },
+        {
+          "name": "zephyr-drive-a",
+          "uuid": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+          "domid": 2,
+          "flags": "-b----"
+        },
+        {
+          "name": "zephyr-drive-b",
+          "uuid": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+          "domid": 3,
+          "flags": "-b----"
+        }
+      ]
+    },
+    {
+      "xl_list": "Name                                        ID   Mem VCPUs\tState\tTime(s)\nDomain-0                                     0  1024     4     r-----     334.0\ndebian-dev                                   1   512     1     -b----      30.7\nzephyr-drive-a                               2    16     1     -b----      10.0\nzephyr-drive-b                               3    16     1     -b----      10.0\n",
+      "guests": [
+        {
+          "name": "debian-dev",
+          "uuid": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "domid": 1,
+          "flags": "-b----"
+        },
+        {
+          "name": "zephyr-drive-a",
+          "uuid": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+          "domid": 2,
+          "flags": "-b----"
+        },
+        {
+          "name": "zephyr-drive-b",
+          "uuid": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+          "domid": 3,
+          "flags": "-b----"
+        }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "label": "VM1",
+      "name": "zephyr-drive-a",
+      "actual_uuid": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+      "domid": 2,
+      "raw_xl_flags": "-b----",
+      "configured_role": "primary_drive",
+      "expected_os": "zephyr",
+      "normalized_xen_state": "running",
+      "checks": {
+        "name_present": true,
+        "uuid_matches_previous_confirmed_identity": true,
+        "display_binding_uuid_matches_xen": true,
+        "role_matches_user_confirmed_assignment": true,
+        "expected_os_config_matches": true,
+        "xen_running": true,
+        "collector_xen_observation_fresh": true,
+        "identity_stable_across_two_observations": true
+      },
+      "passed": true
+    },
+    {
+      "label": "VM2",
+      "name": "zephyr-drive-b",
+      "actual_uuid": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+      "domid": 3,
+      "raw_xl_flags": "-b----",
+      "configured_role": "backup_drive",
+      "expected_os": "zephyr",
+      "normalized_xen_state": "running",
+      "checks": {
+        "name_present": true,
+        "uuid_matches_previous_confirmed_identity": true,
+        "display_binding_uuid_matches_xen": true,
+        "role_matches_user_confirmed_assignment": true,
+        "expected_os_config_matches": true,
+        "xen_running": true,
+        "collector_xen_observation_fresh": true,
+        "identity_stable_across_two_observations": true
+      },
+      "passed": true
+    },
+    {
+      "label": "VM3",
+      "name": "debian-dev",
+      "actual_uuid": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+      "domid": 1,
+      "raw_xl_flags": "-b----",
+      "configured_role": "interaction",
+      "expected_os": "debian",
+      "normalized_xen_state": "running",
+      "checks": {
+        "name_present": true,
+        "uuid_matches_previous_confirmed_identity": true,
+        "display_binding_uuid_matches_xen": true,
+        "role_matches_user_confirmed_assignment": true,
+        "expected_os_config_matches": true,
+        "xen_running": true,
+        "collector_xen_observation_fresh": true,
+        "identity_stable_across_two_observations": true
+      },
+      "passed": true
+    }
+  ],
+  "global_checks": {
+    "exactly_three_expected_guest_names": true,
+    "unique_guest_uuids": true,
+    "unique_domids": true,
+    "exactly_three_display_bindings": true
+  },
+  "passed": true,
+  "not_verified": [
+    "actual_guest_os_inventory",
+    "app_heartbeat_or_error",
+    "backup_mirroring_readiness",
+    "active_driving_authority",
+    "hdmi_rendering"
+  ],
+  "changes": {
+    "vm_commands_sent": false,
+    "settings_changed": false,
+    "services_restarted": false,
+    "board_files_written": false
+  }
+}

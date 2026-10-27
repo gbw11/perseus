@@ -1,0 +1,69 @@
+{
+  "guest_ip": "192.168.77.20",
+  "actual_xen_uuid": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+  "os_release": {
+    "PRETTY_NAME": "Debian GNU/Linux 13 (trixie)",
+    "VERSION_ID": "13",
+    "ID": "debian"
+  },
+  "agent_module_installed": false,
+  "mqtt_module_installed": false,
+  "matching_units": [],
+  "unit_states": {},
+  "related_files": [
+    "/etc/xenova/agent-install.json",
+    "/opt/xenova/mqtt-client",
+    "/opt/xenova/agent",
+    "/usr/bin/systemd-tty-ask-password-agent",
+    "/usr/bin/ssh-agent",
+    "/usr/bin/pkttyagent"
+  ],
+  "instance_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+  "ipv4": {
+    "code": 0,
+    "out": "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\n    inet 127.0.0.1/8 scope host lo\n       valid_lft forever preferred_lft forever\n2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000\n    altname enX0\n    altname enx02812d590a79\n    inet 192.168.77.20/24 metric 1024 brd 192.168.77.255 scope global eth0\n       valid_lft forever preferred_lft forever\n",
+    "err": ""
+  },
+  "changes": {
+    "settings_changed": false,
+    "services_started_or_restarted": false,
+    "packages_installed": false
+  },
+  "direct_agent_unit": {
+    "code": 0,
+    "out": "MainPID=465\nResult=success\nLoadState=loaded\nActiveState=active\nSubState=running\nFragmentPath=/usr/lib/systemd/system/xenova-agent.service\n",
+    "err": ""
+  },
+  "agent_unit_files": {
+    "/usr/lib/systemd/system/xenova-agent.service": true,
+    "/etc/systemd/system/xenova-agent.service": false
+  },
+  "agent_python_processes": [
+    {
+      "pid": 465,
+      "comm": "python3"
+    }
+  ],
+  "modules_with_deployment_pythonpath": {
+    "xenova_agent": true,
+    "xenova_mqtt": true,
+    "paho": true
+  },
+  "agent_install_record_keys": [
+    "schema",
+    "scope",
+    "packages",
+    "archives_sha256",
+    "source_sha256",
+    "verification",
+    "broker_connection"
+  ],
+  "agent_defaults_not_live_environment": {
+    "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+    "broker_host": "192.168.77.1",
+    "broker_port": 1883,
+    "heartbeat_interval_s": 5.0,
+    "username_configured": false,
+    "password_configured": false
+  }
+}

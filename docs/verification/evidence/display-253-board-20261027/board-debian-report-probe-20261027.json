@@ -1,0 +1,422 @@
+{
+  "issue": "S15P31E110-253",
+  "step": 2,
+  "physical_guest": "192.168.77.20",
+  "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+  "observed_at_kst": "2026-10-27T14:47:29+09:00",
+  "scope": "actual existing Debian Agent -> temporary private VM3-only broker -> staged display StateStore",
+  "broker_listeners": [
+    "127.0.0.1:1883",
+    "192.168.77.1:1883"
+  ],
+  "guest_agent_restarted": false,
+  "authentication_scope": "anonymous inside isolated guest network, VM3-only topic ACL; not production authentication proof",
+  "during": {
+    "schema_version": 1,
+    "type": "display.state",
+    "source_epoch": "60a24529-ddd8-4acf-a116-b0ca4c8d4a3c",
+    "sequence": 1,
+    "generated_at": "2026-10-27T05:47:47.092+00:00",
+    "mqtt_connected": true,
+    "binding_scope": "candidate",
+    "mqtt_subscriptions": {
+      "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat": "granted",
+      "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory": "granted",
+      "xenova/v1/apps/autonomous/events": "granted",
+      "xenova/v1/apps/manual/events": "granted",
+      "xenova/v1/apps/message-board/events": "granted",
+      "xenova/v1/display/drive-state": "granted"
+    },
+    "vms": [
+      {
+        "vm_id": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+        "role": "primary_drive",
+        "app_id": "autonomous",
+        "run_id": "60a24529-ddd8-4acf-a116-b0ca4c8d4a3c:2",
+        "guest_boot_id": null,
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "zephyr",
+          "observed": null,
+          "match": null,
+          "evidence": null,
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": false,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-27T05:47:47.091+00:00",
+            "observed_at": null,
+            "age_ms": 0,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "granted"
+          },
+          "agent": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          },
+          "inventory": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      },
+      {
+        "vm_id": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+        "role": "backup_drive",
+        "app_id": "manual",
+        "run_id": "60a24529-ddd8-4acf-a116-b0ca4c8d4a3c:3",
+        "guest_boot_id": null,
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "zephyr",
+          "observed": null,
+          "match": null,
+          "evidence": null,
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": false,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-27T05:47:47.091+00:00",
+            "observed_at": null,
+            "age_ms": 0,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "granted"
+          },
+          "agent": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          },
+          "inventory": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      },
+      {
+        "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+        "role": "interaction",
+        "app_id": "message-board",
+        "run_id": "60a24529-ddd8-4acf-a116-b0ca4c8d4a3c:1",
+        "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "debian",
+          "observed": null,
+          "match": null,
+          "evidence": null,
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": true,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-27T05:47:47.091+00:00",
+            "observed_at": null,
+            "age_ms": 0,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "granted"
+          },
+          "agent": {
+            "received_at": "2026-10-27T05:47:46.566+00:00",
+            "observed_at": "2026-10-27T05:47:48.926Z",
+            "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+            "source_epoch": [
+              "36b28e53-bbb6-4953-b232-584e58ab2520",
+              "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+            ],
+            "sequence": 3,
+            "retained": false,
+            "age_ms": 526,
+            "status": "fresh",
+            "subscription_status": "granted"
+          },
+          "inventory": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "granted"
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      }
+    ],
+    "drive": {
+      "active_vm_id": null,
+      "mode": "unknown",
+      "ai_status": "unknown",
+      "source": {
+        "status": "unknown",
+        "age_ms": null,
+        "subscription_status": "granted"
+      }
+    }
+  },
+  "topics": {
+    "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory": {
+      "received": 1,
+      "accepted": 0,
+      "retained": 0,
+      "types": [
+        "agent.inventory"
+      ],
+      "vm_ids": [
+        "055226af-b876-4707-8b5d-99e7f33ad3d7"
+      ],
+      "sequences": [
+        1
+      ]
+    },
+    "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat": {
+      "received": 3,
+      "accepted": 3,
+      "retained": 0,
+      "types": [
+        "agent.heartbeat"
+      ],
+      "vm_ids": [
+        "055226af-b876-4707-8b5d-99e7f33ad3d7"
+      ],
+      "sequences": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  "broker_observation_seconds": 17.3,
+  "after_broker_stop": {
+    "schema_version": 1,
+    "type": "display.state",
+    "source_epoch": "60a24529-ddd8-4acf-a116-b0ca4c8d4a3c",
+    "sequence": 2,
+    "generated_at": "2026-10-27T05:47:48.095+00:00",
+    "mqtt_connected": false,
+    "binding_scope": "candidate",
+    "mqtt_subscriptions": {
+      "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat": "unavailable",
+      "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/inventory": "unavailable",
+      "xenova/v1/apps/autonomous/events": "unavailable",
+      "xenova/v1/apps/manual/events": "unavailable",
+      "xenova/v1/apps/message-board/events": "unavailable",
+      "xenova/v1/display/drive-state": "unavailable"
+    },
+    "vms": [
+      {
+        "vm_id": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+        "role": "primary_drive",
+        "app_id": "autonomous",
+        "run_id": "60a24529-ddd8-4acf-a116-b0ca4c8d4a3c:2",
+        "guest_boot_id": null,
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "zephyr",
+          "observed": null,
+          "match": null,
+          "evidence": null,
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": false,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-27T05:47:47.091+00:00",
+            "observed_at": null,
+            "age_ms": 1003,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unavailable"
+          },
+          "agent": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          },
+          "inventory": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      },
+      {
+        "vm_id": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+        "role": "backup_drive",
+        "app_id": "manual",
+        "run_id": "60a24529-ddd8-4acf-a116-b0ca4c8d4a3c:3",
+        "guest_boot_id": null,
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "zephyr",
+          "observed": null,
+          "match": null,
+          "evidence": null,
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": false,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-27T05:47:47.091+00:00",
+            "observed_at": null,
+            "age_ms": 1003,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unavailable"
+          },
+          "agent": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          },
+          "inventory": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unsupported"
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      },
+      {
+        "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+        "role": "interaction",
+        "app_id": "message-board",
+        "run_id": "60a24529-ddd8-4acf-a116-b0ca4c8d4a3c:1",
+        "guest_boot_id": "36b28e53-bbb6-4953-b232-584e58ab2520",
+        "xen_state": "running",
+        "operation": null,
+        "os": {
+          "expected": "debian",
+          "observed": null,
+          "match": null,
+          "evidence": null,
+          "current_run_verified": false
+        },
+        "app_state": "unknown",
+        "reported_app_state": null,
+        "agent_supported": true,
+        "sources": {
+          "xen": {
+            "received_at": "2026-10-27T05:47:47.091+00:00",
+            "observed_at": null,
+            "age_ms": 1003,
+            "status": "fresh"
+          },
+          "app": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unavailable"
+          },
+          "agent": {
+            "received_at": "2026-10-27T05:47:46.566+00:00",
+            "observed_at": "2026-10-27T05:47:48.926Z",
+            "source_id": "xenova/v1/vms/055226af-b876-4707-8b5d-99e7f33ad3d7/heartbeat",
+            "source_epoch": [
+              "36b28e53-bbb6-4953-b232-584e58ab2520",
+              "45f5f44b-e93c-42e2-ac37-50b722d3a02a"
+            ],
+            "sequence": 3,
+            "retained": false,
+            "age_ms": 1529,
+            "status": "disconnected",
+            "subscription_status": "unavailable"
+          },
+          "inventory": {
+            "status": "unknown",
+            "age_ms": null,
+            "subscription_status": "unavailable"
+          }
+        },
+        "screen_source": {
+          "kind": "status",
+          "handle": null
+        }
+      }
+    ],
+    "drive": {
+      "active_vm_id": null,
+      "mode": "unknown",
+      "ai_status": "unknown",
+      "source": {
+        "status": "unknown",
+        "age_ms": null,
+        "subscription_status": "unavailable"
+      }
+    }
+  },
+  "broker_log": "1793080049: Info: running mosquitto as user: mosquitto.\n1793080049: New connection from 127.0.0.1:58248 on port 1883.\n1793080049: Client 127.0.0.1 [127.0.0.1:58248] disconnected: connection closed by client.\n1793080049: New connection from 127.0.0.1:57627 on port 1883.\n1793080049: New client connected from 127.0.0.1:57627 as display-60a24529-ddd8-4acf-a116-b0ca4c8d4a3c (p4, c1, k30).\n1793080051: New connection from 192.168.77.20:40061 on port 1883.\n1793080051: New client connected from 192.168.77.20:40061 as 055226af-b876-4707-8b5d-99e7f33ad3d7-45f5f44b (p4, c1, k30).\n1793080058: New connection from 127.0.0.1:59203 on port 1883.\n1793080058: New client connected from 127.0.0.1:59203 as dom0-server-9c8cb45d (p4, c1, k30).\n",
+  "broker_process_stopped": true,
+  "checks": {
+    "at_least_three_accepted_heartbeats": true,
+    "reported_vm_uuid_matches_guest": true,
+    "xen_still_running": true,
+    "agent_report_fresh": true,
+    "not_fresh_after_disconnect": true
+  },
+  "passed_debian_heartbeat_path": true,
+  "cleanup": {
+    "temporary_directory_removed": true,
+    "broker_stopped": true,
+    "subscriber_stopped": true
+  },
+  "changes": {
+    "packages_installed": false,
+    "system_services_changed": false,
+    "guest_files_changed": false,
+    "guest_processes_started_or_restarted": false,
+    "vm_or_firmware_changed": false,
+    "collector_published_mqtt": false
+  }
+}
