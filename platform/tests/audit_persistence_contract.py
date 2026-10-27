@@ -47,20 +47,20 @@ def quarantine_gap(home):
     store=RecoveryStore(path)
     with patch('builtins.open',side_effect=OSError(errno.ENOSPC,'audit injected disk full')):
         store.load()
-    assert store.history_lost and not path.exists() and path.with_suffix('.json.corrupt').exists()
-    reopened=RecoveryStore(path);assert reopened.load()=={} and not reopened.history_lost
+    assert store.history_lost and path.read_bytes()==b'{broken' and path.with_suffix('.json.corrupt').exists()
+    reopened=RecoveryStore(path);assert reopened.load()=={} and reopened.history_lost
     engine=module('audit_engine_fixture','platform/services/dom0-manager/tests/test_recovery_engine.py')
     world=engine.make(home,store=reopened)
     try:
         world.engine.on_judgment(engine.judgment());world.engine.tick()
-        calls=len(world.platform.recover_calls());assert calls==1
+        calls=len(world.platform.recover_calls());assert calls==0
     finally:world.engine.shutdown()
     arm=home/'armed.json';arm.write_text('{broken');arming=ArmingStore(arm)
-    with patch.object(Path,'write_text',side_effect=OSError(errno.ENOSPC,'audit injected disk full')):
+    with patch('builtins.open',side_effect=OSError(errno.ENOSPC,'audit injected disk full')):
         first=arming.load()
     after=ArmingStore(arm).load()
-    assert first.history_lost and not after.history_lost and arm.with_suffix('.json.corrupt').exists()
-    return {'finding':'S01','result':'FAIL_BLOCKING_STATE_LOST_AFTER_QUARANTINE_AND_SAVE_FAILURE',
+    assert first.history_lost and after.history_lost and arm.with_suffix('.json.corrupt').exists()
+    return {'finding':'S01','result':'PASS_BLOCKING_HISTORY_PRESERVED_AFTER_SAVE_FAILURE',
         'recovery_history_lost_first':store.history_lost,'recovery_history_lost_reopened':reopened.history_lost,
         'new_mock_recovery_calls_after_restart':calls,'arming_history_lost_first':first.history_lost,
         'arming_history_lost_reopened':after.history_lost,

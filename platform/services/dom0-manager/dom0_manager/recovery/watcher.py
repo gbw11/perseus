@@ -105,7 +105,7 @@ class Watcher:
         if self._armed:
             log.info("restored %d armed Zephyr VM(s) from %s", len(self._armed), arming.path if arming else "-")
         if self._history_lost:
-            log.error("armed history lost: undeclared Zephyr VMs are reported OBSERVATION_UNAVAILABLE until they signal (delete %s to clear)", arming.path if arming else "-")
+            log.error("armed history lost: undeclared Zephyr VMs are reported OBSERVATION_UNAVAILABLE until they signal; preserve %s and its evidence", arming.path if arming else "-")
 
     # ---- 판정 ----
 
@@ -153,7 +153,7 @@ class Watcher:
                 self._heartbeats.forget(vm_id)
                 self._app_heartbeats.forget(vm_id)
                 if self._armed.pop(vm_id, None) is not None and self._arming is not None:
-                    self._arming.save(self._armed)
+                    self._save_armed()
         return judgments
 
     def _evaluate(self, track: _Track, obs: VmObservation, now: float) -> tuple[Verdict, FailureReason | None, float | None]:
@@ -254,6 +254,11 @@ class Watcher:
             return False
         return obs.capability_error is not None or (obs.app_heartbeat_expected is None and self._history_lost)
 
+    def _save_armed(self) -> None:
+        if self._arming.save(self._armed) is False:
+            self._history_lost = True
+            log.error("armed history not saved in %s; undeclared targets remain observation-unavailable", self._arming.path)
+
     def _signal_age(self, track: _Track, obs: VmObservation, now: float) -> float | None:
         if obs.guest_kind == "zephyr":
             track.app_armed = track.app_armed or obs.vm_id in self._armed
@@ -262,7 +267,7 @@ class Watcher:
                 track.app_armed = True
                 self._armed[obs.vm_id] = beat.app_id
                 if self._arming is not None:
-                    self._arming.save(self._armed)
+                    self._save_armed()
                 log.info("vm %s armed for app.heartbeat liveness (app %s)", obs.vm_id, beat.app_id)
         else:
             beat = self._heartbeats.last(obs.vm_id)
