@@ -39,7 +39,7 @@ const PINS: Record<Domain, number[]> = { dom0: [0], autonomous: [1], manual: [2]
 const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512, 'message-board': 256 };
 const DOM0_MEMORY_MIB = 1024;
 
-export function ResourcesPage() {
+export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all' }) {
   const vms = useVms();
   const { drive } = useDrive();
   const vmFor = (d: Domain) => (d === 'dom0' ? undefined : vmOf(d, vms.data?.items, drive));
@@ -54,108 +54,118 @@ export function ResourcesPage() {
       <section className={styles.pageHead}>
         <div>
           <div className={styles.eyebrow}>자원 · Cortex-A72 4코어 · Xen credit2</div>
-          <h1>vCPU·스케줄러·메모리</h1>
+          <h1>{view === 'cpu' ? 'CPU' : view === 'memory' ? 'Memory' : 'vCPU·스케줄러·메모리'}</h1>
         </div>
         <span className={styles.grow} />
       </section>
 
-      <Card title="코어 배치 (vCPU 핀닝)" actions={<span className={styles.dim}>RC카 시나리오 §2 표본</span>}>
-        <table className={styles.matrix}>
-          <thead>
-            <tr>
-              <th>도메인</th>
-              {CORES.map((c) => (
-                <th key={c}>CORE {c}</th>
-              ))}
-              <th>vCPU</th>
-            </tr>
-          </thead>
-          <tbody>
-            {DOMAINS.map((d) => (
-              <tr key={d.id}>
-                <td>
-                  <b style={{ color: d.color }}>{d.title}</b>
-                  <div className={styles.eyebrow}>{d.sub}</div>
-                </td>
-                {CORES.map((core) => {
-                  const on = PINS[d.id].includes(core);
-                  return (
-                    <td key={core}>
-                      <div
-                        className={[styles.cell, on ? styles.cellPinned : ''].join(' ')}
-                        style={
-                          { '--accent': d.color, display: 'grid', placeItems: 'center' } as CSSProperties
-                        }
-                      >
-                        {on ? (d.dedicated ? '전용' : '고정') : '—'}
-                      </div>
-                    </td>
-                  );
-                })}
-                <td className={styles.mono}>{vcpus(d.id) || '—'}</td>
+      {view !== 'memory' && (
+        <Card
+          title="코어 배치 (vCPU 핀닝)"
+          actions={<span className={styles.dim}>RC카 시나리오 §2 표본</span>}
+        >
+          <table className={styles.matrix}>
+            <thead>
+              <tr>
+                <th>도메인</th>
+                {CORES.map((c) => (
+                  <th key={c}>CORE {c}</th>
+                ))}
+                <th>vCPU</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className={styles.dim}>
-          자율주행·수동주행은 코어를 혼자 쓴다 — 네비게이션이 바빠져도 주행 명령 주기(50 Hz)가 흔들리지 않게.
-        </p>
-      </Card>
-
-      <div className={styles.cols2}>
-        <Card title="스케줄러 (credit2 weight)">
+            </thead>
+            <tbody>
+              {DOMAINS.map((d) => (
+                <tr key={d.id}>
+                  <td>
+                    <b style={{ color: d.color }}>{d.title}</b>
+                    <div className={styles.eyebrow}>{d.sub}</div>
+                  </td>
+                  {CORES.map((core) => {
+                    const on = PINS[d.id].includes(core);
+                    return (
+                      <td key={core}>
+                        <div
+                          className={[styles.cell, on ? styles.cellPinned : ''].join(' ')}
+                          style={
+                            { '--accent': d.color, display: 'grid', placeItems: 'center' } as CSSProperties
+                          }
+                        >
+                          {on ? (d.dedicated ? '전용' : '고정') : '—'}
+                        </div>
+                      </td>
+                    );
+                  })}
+                  <td className={styles.mono}>{vcpus(d.id) || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
           <p className={styles.dim}>
-            코어가 겹칠 때 CPU 시간을 나누는 비율. 지금은 코어가 겹치지 않아 참고값이다.
+            자율주행·수동주행은 코어를 혼자 쓴다 — 네비게이션이 바빠져도 주행 명령 주기(50 Hz)가 흔들리지
+            않게.
           </p>
-          {guests.map((d) => {
-            const share = WEIGHT[d.id] / totalWeight;
-            return (
-              <div key={d.id} style={{ marginBottom: 'var(--x-space-3)' }}>
-                <div className={styles.row} style={{ justifyContent: 'space-between', marginBottom: 4 }}>
-                  <b style={{ color: d.color }}>{d.title}</b>
-                  <span className={styles.mono}>
-                    weight {WEIGHT[d.id]} · {Math.round(share * 100)}% · cap 없음
-                  </span>
-                </div>
-                <div className={styles.bar}>
-                  <i style={{ width: `${share * 100}%`, background: d.color }} />
-                </div>
-              </div>
-            );
-          })}
         </Card>
-        <Card title="메모리" actions={<span className={styles.mono}>합계 {totalMemory} MiB</span>}>
-          <div className={styles.stack}>
-            {DOMAINS.map((d) => {
-              const share = totalMemory ? memory(d.id) / totalMemory : 0;
+      )}
+
+      <div className={view === 'all' ? styles.cols2 : styles.detail}>
+        {view !== 'memory' && (
+          <Card title="스케줄러 (credit2 weight)">
+            <p className={styles.dim}>
+              코어가 겹칠 때 CPU 시간을 나누는 비율. 지금은 코어가 겹치지 않아 참고값이다.
+            </p>
+            {guests.map((d) => {
+              const share = WEIGHT[d.id] / totalWeight;
               return (
-                <i
-                  key={d.id}
-                  title={`${d.title} ${memory(d.id)} MiB`}
-                  style={{ flexGrow: memory(d.id), background: d.color }}
-                >
-                  {share > 0.15 ? d.title : ''}
-                </i>
+                <div key={d.id} style={{ marginBottom: 'var(--x-space-3)' }}>
+                  <div className={styles.row} style={{ justifyContent: 'space-between', marginBottom: 4 }}>
+                    <b style={{ color: d.color }}>{d.title}</b>
+                    <span className={styles.mono}>
+                      weight {WEIGHT[d.id]} · {Math.round(share * 100)}% · cap 없음
+                    </span>
+                  </div>
+                  <div className={styles.bar}>
+                    <i style={{ width: `${share * 100}%`, background: d.color }} />
+                  </div>
+                </div>
               );
             })}
-          </div>
-          <div className={styles.rows}>
-            {DOMAINS.map((d) => (
-              <div key={d.id}>
-                <span className={styles.legend}>
-                  <i style={{ background: d.color }} />
-                  {d.title}
-                </span>
-                <span className={styles.mono}>
-                  {memory(d.id) ? `${memory(d.id)} MiB` : '—'}
-                  {totalMemory && memory(d.id)
-                    ? ` · ${((memory(d.id) / totalMemory) * 100).toFixed(1)}%`
-                    : ''}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Card>
+          </Card>
+        )}
+        {view !== 'cpu' && (
+          <Card title="메모리" actions={<span className={styles.mono}>합계 {totalMemory} MiB</span>}>
+            <div className={styles.stack}>
+              {DOMAINS.map((d) => {
+                const share = totalMemory ? memory(d.id) / totalMemory : 0;
+                return (
+                  <i
+                    key={d.id}
+                    title={`${d.title} ${memory(d.id)} MiB`}
+                    style={{ flexGrow: memory(d.id), background: d.color }}
+                  >
+                    {share > 0.15 ? d.title : ''}
+                  </i>
+                );
+              })}
+            </div>
+            <div className={styles.rows}>
+              {DOMAINS.map((d) => (
+                <div key={d.id}>
+                  <span className={styles.legend}>
+                    <i style={{ background: d.color }} />
+                    {d.title}
+                  </span>
+                  <span className={styles.mono}>
+                    {memory(d.id) ? `${memory(d.id)} MiB` : '—'}
+                    {totalMemory && memory(d.id)
+                      ? ` · ${((memory(d.id) / totalMemory) * 100).toFixed(1)}%`
+                      : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
       </div>
     </div>
   );
