@@ -127,6 +127,7 @@ Manager 전용 명령은 `templates, list, get, create, retire, delete, restore,
 | [`xenova-vm operation`](#cmd-operation) | 자산 작업 이력 |
 | [`xenova-vm control-operation`](#cmd-control-operation) | 사용자 제어 이력 |
 | [`xenova-vm recovery-operation`](#cmd-recovery-operation) | 조건부 복구 이력 |
+| [`xenova-vm recovery-reconcile`](#cmd-recovery-reconcile) | 원 복구 시도의 진단·증거 기반 종결 |
 | [`xenova-vm recover-once`](#cmd-recover-once) | 현재 문맥이 일치할 때 한 번 복구 |
 | [`xenova-vm update-resources`](#cmd-update-resources) | 정지 Linux의 vCPU·메모리 변경 |
 | [`xenova-vm firmware-transition`](#cmd-firmware-transition) | Zephyr 활성 firmware·프로필 전환 |
@@ -901,6 +902,104 @@ xenova-vm recovery-operation --recovery-attempt-id "$OP_ID" --json
 원 request·host_boot_id·phase·result/error를 읽는다. 과거 host 시도도 이력 조회는 가능하다. 잠금·journal 파일 삭제로 상태를 초기화하지 않는다.
 
 **Manager 매핑:** `recovery-operation / {recovery_attempt_id}`
+
+[명령어 색인으로](#command-index)
+
+<a id="cmd-recovery-reconcile"></a>
+### `xenova-vm recovery-reconcile` — 원 복구 시도의 진단·종결
+
+**기본 사용**
+
+`xenova-vm recovery-reconcile --recovery-attempt-id UUID`
+
+기존 attempt의 journal·의도·실행과 실제 Xen을 대조한다. 기본은 진단이며,
+`--execute`는 확인한 사실로 **원 attempt만** 종결한다. shutdown/create/reboot/destroy,
+CPU 재배치나 새 attempt·operation·실행 신원·물리 deadline 발급은 수행하지 않는다.
+
+**인자**
+
+| 인자 | 필수·기본값 | 의미 |
+|---|---|---|
+| `--recovery-attempt-id UUID` | 필수 | 기존 소문자 하이픈 표준형 attempt UUID |
+| `--execute` | 선택, 생략하면 진단 | 진단 사본을 승인 토큰으로 쓰지 않고 실제 상태·원 기록을 다시 확인한 뒤 저장 |
+| `--timeout-ms N` | 선택, 15000 | 이번 관측·guard 예산, 정수 1..15000ms. 원 physical deadline을 늘리지 않음 |
+| `--json` | 선택 | 기존 envelope의 compact JSON 출력 |
+
+새 `--idempotency-key`·`--force` spec는 사용하지 않는다. 재확인 대상은 같은 원 attempt다.
+
+**사용 조건**
+
+원 host boot와 같은 host에서 기존 저장소·자산·intent revision·CPU 정책을 대조한다.
+플랫폼 execution flock을 얻지 못하면 즉시 `OPERATION_IN_PROGRESS`다. 관측과 필수 저장은
+전체 15초 기본 예산을 공유한다. 이미 시작한 syscall을 강제 취소하는 보장은 없다.
+변경 단계는 정상 ext4 저장소와 기존 쓰기 guard를 요구한다.
+
+| 원 기록·현재 근거 | 진단의 outcome·허용 종결 |
+|---|---|
+| `accepted`, 원 attempt의 launch 없음 | `not_submitted`; 원 attempt를 failed로 종결, 현재 VM은 그대로 둠 |
+| `removed`, 실제 부재·미확정 launch 없음 | `stopped_without_replacement`; failed, 새 실행을 관측한 completed가 아님 |
+| stopping/그 단계 uncertain, `stop_submission`에 미제출 또는 synchronous 반환 근거, 같은 종료 대상·현재 상태·소유 scope 확인 | 미제출이면 `not_submitted`, 종료 후 부재면 `stopped_without_replacement`; 둘 다 failed |
+| 실제 managed 새 실행이 이 attempt의 owner·실행·구성·완료된 CPU 검증에 연결 | `launch_observed`; 기존 완료 요건으로 completed, 앱 준비는 unknown |
+| 해당 owner의 `launch_aborted_before_submit=true`, stopped 실행 기록·실제 부재 확인 | `not_submitted`; failed |
+| 종료/launch 실행자 잔존·구형 기록에 반환 근거 없음·새 실행 인과 미확인·관측 실패 | 차단 유지. 기한 경과·PID 부재·잠금 획득·domain 부재 하나만으로 종결하지 않음 |
+
+`stop_submission`은 원 호출 경계를 저장한 근거다. `not-submitted`를 먼저 내구 저장하고,
+호출 전에 `submitted`, synchronous 호출 반환 뒤 `returned`를 저장한다. 구형 기록에
+이 근거를 사후 추측해 채우지 않는다. process scope 확인은 observe-only이며 신호도 보내지 않는다.
+현재 실행·의도가 달라졌다면 과거 시도를 그 실행에 적용하지 않는다.
+
+**실행 예시**
+
+```sh
+read -r -p '수습할 원 recovery attempt UUID: ' ATTEMPT
+xenova-vm recovery-operation --recovery-attempt-id "$ATTEMPT" --json
+xenova-vm recovery-reconcile --recovery-attempt-id "$ATTEMPT" --json
+# status=confirmable와 근거·outcome을 검토한 뒤 같은 대상을 명시적으로 종결한다.
+xenova-vm recovery-reconcile --recovery-attempt-id "$ATTEMPT" --execute --json
+xenova-vm recovery-operation --recovery-attempt-id "$ATTEMPT" --json
+```
+
+**정상 응답**
+
+기존 envelope를 유지하며 `operation_id`는 원 operation, `replayed=true`다.
+`data`는 `attempt`, `reconciliation`, `original_result`다. `reconciliation`의 필드는 다음과 같다.
+
+| 필드 | 의미 |
+|---|---|
+| `status` | `confirmable`: 현재 진단에서 종결 가능, `blocked`: 진단 성공이나 근거 부족, `confirmed`: 명시적 저장 성공, `recorded`: 이미 원 기록에 종결 결과 존재 |
+| `outcome` | 위 표의 세 결과 또는 미확인 null. `recorded` 재확인은 원 attempt의 reconciliation/result/error를 읽음 |
+| `checks`·`reasons` | 항목별 대조 결과와 부족한 근거의 이름. 진단 토큰이나 실행 허가가 아님 |
+| `executed` | 이번 호출에서 종결/같은 종결의 내구 재확인을 저장했는지 |
+| `physical_commands` | 이 수습 경로에서 제출한 물리 VM 제어 수. 항상 0 |
+| `host_boot_id`·`observed_monotonic_ms` | 진단 host와 그 부팅의 관측 단조 시각. UTC나 원 물리 실행 기한이 아님. recorded 재확인의 원 근거는 attempt에 있음 |
+
+진단 `ok=true/status=blocked`는 조회 성공이다. `--execute`에서 근거가 부족하면
+`ok=false/RECONCILE_REQUIRED`로 같은 `details.reconciliation`을 반환한다.
+failed 종결의 `original_result`는 null이며 원 error가 이유를 보존한다. 수습 호출의 성공을
+VM 복구 성공으로 바꾸지 않는다. 수습한 terminal 기록의 재요청은 같은 ID·결과를 재확인한다.
+
+**오류 응답**
+
+| 코드·종료 코드 | 의미·다음 행동 |
+|---|---|
+| `INVALID_SPEC`·2 / `VM_NOT_FOUND`·2 | 인자 오류 / 원 attempt 부재. 새 ID 발급으로 우회하지 않음 |
+| `OPERATION_IN_PROGRESS`·3 | execution 소유자 존재. 원 실행과 slot 종료를 먼저 확인 |
+| `TARGET_CHANGED`·3 / `INTENT_MISMATCH`·3 | host·자산·원본·실행 또는 사용자 의도 변경. 현재 intent/execution을 조회하고 과거 요청 적용 금지 |
+| `OBSERVATION_UNAVAILABLE`·4 / `DEADLINE_EXCEEDED`·4 | 관측 미확인 / 이번 예산 소진. 원 물리 작업의 취소나 부재를 뜻하지 않음 |
+| `RECONCILE_REQUIRED`·4 | 근거 부족 또는 내구 저장 미확정. 같은 원 기록을 다시 확인하고 자동 force·phase 편집·삭제 금지 |
+
+**확인 방법**
+
+원 operation/attempt·request/hash·intent revision·deadline이 유지되는지와 실제 phase/result/error를
+다시 조회한다. 종결 후 별도 동작이 필요하면 현재 건강·의도·신원·허가로 일반 요청을 새로 검토한다.
+stopped 의도에서 수습 성공을 이유로 VM을 시작하지 않는다. 지원 근거가 없으면 원 기록과
+진단 사유를 보존해 플랫폼 담당자에게 전달한다. host reboot를 일반 해제 수단으로 쓰지 않는다.
+Worker의 final 결과 재확인·Coordinator 바인딩 연결과 Gateway Authority 복원은
+[담당자 인수 요청](../requests/2026-10-27-recovery-health-ctrl.md#d03-worker)이며 자동 제공되지 않는다.
+
+**Manager 매핑:** `recovery-reconcile / {recovery_attempt_id, timeout_ms?}`,
+`execute=False` 기본. `budget_ms`는 기존 1..105000ms 입력 범위 안에서 이번 timeout을
+더 제한하며 원 spec/hash/물리 기한에는 들어가지 않는다. read-only `recovery-operation`과 다르다.
 
 [명령어 색인으로](#command-index)
 

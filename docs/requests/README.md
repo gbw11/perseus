@@ -14,7 +14,8 @@
 | 문서 | 대상 | 현재 할 일 | 상태 |
 | --- | --- | --- | --- |
 | [Linux·Agent 건강 연결](2026-10-27-linux-health-agent.md) | Linux 엔지니어·Agent | D01-L01~L05: 자원·서비스/앱 진행·Agent 전달·로컬 감독·배포 | 요청 작성·플랫폼 근거 제공 완료, 담당자 구현·연동·실보드 수락 전 |
-| [Worker 건강 분류·복구·재합류](2026-10-27-recovery-health-ctrl.md) | Recovery Worker·Engine(ctrl) | D01-W01~W05: 대상별 전달·건강 입력·행동·원 작업/예산·공동 수락 | 요청 작성·플랫폼 근거 제공 완료, 담당자 구현·수락 전 |
+| [Worker 건강 분류·복구·재합류](2026-10-27-recovery-health-ctrl.md) | Recovery Worker·Engine(ctrl) | D01-W01~W05 및 D03-W01~W04: 건강 입력·행동·원 결과 재확인·receipt 재사용·준비 연결 | 하위 제공물 준비, 담당자 구현·수락 전. D01 대기 유지 |
+| [Gateway Authority 수습](2026-10-27-authority-recovery-ctrl.md) | 기존 Gateway 담당 공병우 | D03-G01~G04: 원본/백업 최신성·단일 소유·제한적 복원·재무장·저장 실패 | 요청·현행 보호 대조 완료, 담당자 제품 구현·운영/장치 수락 전 |
 | [HTTP·Spring·VM 관리 화면 연동](../platform/management-integration-request.md) | FastAPI·Spring·화면 | D02·D08: 원 요청 key·pending/완료·시간 예산·후속 조회/이행 | 하위 구현 마감, 상위 연동 미구현·종단 수락 전 |
 
 ## 기존 요청·과거 이력

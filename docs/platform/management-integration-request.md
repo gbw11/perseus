@@ -208,6 +208,18 @@ FastAPI 연동·Spring 요청 추적·UI 표시를 각각 담당자가 구현한
 위 T01~T16에 더해, fork 중 다른 예산/trace 혼입 0, 부분 열람 뒤 false absence/unique 0,
 완료 replay 추가 물리 명령 0을 담당자 인수 assertion으로 유지한다.
 
+## 수습 후 원 결과 재조회 연동
+
+로컬 운영자의 하위 [recovery-reconcile](cli-manager-spec.md#cmd-recovery-reconcile)과
+receipt 확인은 VM 복구 실행·Standby·출력 허가와 다르다. 상위는 기존 원 key/operation/attempt의
+결과를 다시 조회하고, lower failed/null result를 복구 완료로 표시하지 않는다. completed라도
+현재 `vm=null/warning`과 원 완료를 분리한다. 같은 원 요청 조회가 물리 실행기로 바뀌면 안 된다.
+
+D02·D08의 구현·상위 연동 대기와 기존 권한/허용 details 목록을 유지한다. 수습 관련 최소
+phase/result/error와 재조회 사유만 기존 DTO 연결 요청에 포함하고 raw journal·credential·private
+경로를 그대로 반환하지 않는다. 새 웹 수습 버튼·HTTP 복원 API는 이 요청의 선행조건이 아니다.
+원 attempt의 운영 수습과 Worker final 결과 반영은 [Worker D03 요청](../requests/2026-10-27-recovery-health-ctrl.md#d03-worker)을 따른다.
+
 ## 요청 이력과 담당별 문서
 
 | 기존 위치·요청 | 현재 위치·상태 |

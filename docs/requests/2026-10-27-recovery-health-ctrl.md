@@ -4,6 +4,8 @@
 공병우 소유로 유지한다.
 **상태: D01-W01~W05 요청 작성·플랫폼 근거 제공 완료 / 담당자 구현·로컬·연동·실보드 수락 전.**
 아래 ID는 기존 요청 ID를 유지한 문서 내 추적 ID이며 새 Jira 티켓이 아니다.
+별도 [D03 원 결과 재확인·재합류 요청](#d03-worker)은 하위 수습 도구를 소비하는 담당자 작업이며,
+D01의 대기 상태를 변경하지 않는다.
 
 ## 현재 할 일
 
@@ -14,6 +16,7 @@
 | 3 · [D01-W03](#d01-w03) | 판정별 행동 주체와 Linux 로컬 감독의 경합을 연결 | 출력/승계는 Gateway, 서비스 복구는 감독, VM 복구는 기존 Engine 경로 |
 | 4 · [D01-W04](#d01-w04) | 원 작업·기한·예산과 기능 회복·Standby 재합류를 구분 | S01/S02·사용자 stop 보호, 중복 실행·무조건 예산 초기화 0 |
 | 5 · [D01-W05](#d01-w05) | 근거·행동·보류 이유와 배포/공동 수락을 연결 | 담당자 구현·제품 연결·실보드/장치 수락을 별도 기록 |
+| D03 · [W01~W04](#d03-worker) | 운영자가 수습한 원 attempt/receipt의 결과를 다시 읽어 기존 복구·바인딩 흐름에 반영 | 새 attempt·신원·기한 발급 없이 원 결과 반영. 플랫폼 완료·Standby·출력 허가 구분 |
 
 ## 함께 읽을 파일과 순서
 
@@ -66,7 +69,7 @@
 | 대상 | `observe.py:PlatformObserver`, `model.py:VmObservation/VmHealth`, `worker.py:RecoveryWorker.run_once`, Watcher `_evaluate/_health`, `rejoin.py:RejoinCoordinator._apply_readiness` |
 | 입력 | 기존 Manager 실행·의도, Linux의 실제 구간/서비스 수명, Zephyr v1 readiness·progress와 선택적 v2 CPU/memory. 원천 지원·오류·구간·잘림·현재 실행 확인을 함께 사용 |
 | 권고 | 단일 health 점수나 전체 AND 대신 기능/시간/자원/전달/관측 불가의 근거·영향을 분리. 상세 v2 전체 수신을 주행 필수조건으로 만들지 않음. 필요한 최소 필드 확장은 생산자·schema·소비자와 합의 후 수행 |
-| 행동 | high CPU+정상 완료는 경고/정상 부하, 유효 작업 정체+확정 기한 위반은 해당 기능 실패. 실제 필수 자원 실패는 준비 제한을 존중. 낮은 CPU/정상 heartbeat가 fatal·기능 실패를 상쇄하지 않음 |
+| 행동 | high CPU+정상 완료는 정상 부하일 수 있음. 합의된 자원 여유·지속 조건 위반을 경고/제한 근거로 사용하며 임의 임계치는 넣지 않음. 유효 작업 정체+확정 기한 위반은 해당 기능 실패. 실제 필수 자원 실패는 준비 제한을 존중. 낮은 CPU/정상 heartbeat가 fatal·기능 실패를 상쇄하지 않음 |
 | 신선도 | retained·중복/역전·과거 crash·다른 thread lifetime·stale/partial CPU 페이지는 현재 근거를 갱신하지 않음. 같은 MQTT 경로의 지표 여러 개를 독립 전달 증거처럼 세지 않음 |
 | 우리 제공물 | `xdh_assess`, 실제 어댑터의 -ENOMEM/기한/회복 시험, `xenova drive health` 최신 local 근거. local query는 Worker에 이미 MQTT 연결된 API가 아님 |
 | 수락 | CPU 100%에도 on-time READY·VM 실행 추가 0; fresh task 실패는 CPU 0/heartbeat 정상으로 덮지 않음; resource cache 무효/v2만 단절은 정상 v1 기능 실패로 변환 0; 잘린 thread 목록을 전체 정상으로 확정 0 |
@@ -92,7 +95,7 @@
 | 보존 | S01 손상 차단·Arming 불명, S02 동일 event ID·append 미확정·pending 공동 저장. 원 intent revision·host/execution·attempt/spec/deadline·force 승인·미완료 작업 소유는 Manager guard를 사용 |
 | 권고 | 새 실행 생성/메시지 한 번으로 episode·시도 예산을 무조건 초기화하지 않음. 플랫폼 COMPLETED(새 Xen 실행 관측), 기능·자원 회복, 준비된 Standby 재합류를 별도 확인 |
 | 회복 | 현재 실행의 새 기능 완료·필수 자원/입력·준비 유지. READY/heartbeat 복귀로 이전 Active 자동 원복·AUTO 재무장 없음 |
-| 미확정 | 원 journal/attempt의 제한된 조회와 지원 이행. D03의 receipt/Authority 수습은 미구현 범위 유지. 기록 조회를 실행기로 바꾸거나 만료 뒤 새 key/D/force로 우회하지 않음 |
+| 미확정 | 원 journal/attempt의 제한된 조회와 지원 이행. 하위 receipt/recovery 수습의 제공 범위는 아래 D03 절을 따르며 Worker 소비와 Gateway Authority 수습은 대기. 기록 조회를 실행기로 바꾸거나 만료 뒤 새 key/D/force로 우회하지 않음 |
 | 수락 | 복구 중 stop·호출자 종료·응답 유실·동일 attempt replay에서 원 ID/D/예산 유지, 추가 물리 create/reboot 0. 준비 미완료만으로 정상 새 VM을 반복 복구 0. 신호 한 번으로 예산 초기화 0 |
 
 <a id="d01-w05"></a>
@@ -109,6 +112,75 @@
 아직 적용하지 않은 제안으로 정책 상한을 늘리거나 기존 강제종료 승인을 확대하지 않는다.
 구현 담당자는 각 요청 ID에 후보·시험 assertion·배포·수락 상태를 누적 갱신한다.
 
+<a id="d03-worker"></a>
+## D03 — 수습한 원 결과 재확인·Standby 재합류 연결
+
+**상태: 하위 receipt/recovery 수습 도구 제공 / Worker·Coordinator 소비 구현·제품 종단 수락 대기.**
+D03-W01~W04는 이 문서의 추적 ID다. 새 Jira 티켓이나 담당 재배정이 아니며 D01-W01~W05의
+미완료 상태를 유지한다. 실제 하위 계약은 [recovery-reconcile](../platform/cli-manager-spec.md#cmd-recovery-reconcile)과
+[receipt 적용 확인](../../platform/guests/zephyr/telemetry/README.md#uncertain-receipt의-재주입-없는-적용-확인)에 둔다.
+
+### D03-W01 — 원 attempt 종결을 상위 결과에 반영
+
+| 항목 | 담당자 요청·수락 조건 |
+|---|---|
+| 실제 위치 | `recovery/engine.py:tick/collect/_task_replay/_on_result/_on_error/_close/completed_executions`, `state.py:RecoveryRecord`, `worker.py:run_once` |
+| 현재 공백 | `_task_replay`는 원 attempt의 completed/failed를 읽지만 `tick`은 열린 record만 다룬다. 이미 final FAILED로 닫힌 상위 record는 운영자가 하위를 수습해도 자동 재확인되지 않는다 |
+| 권고 연결 | 기존 운영 흐름에 명시적인 원 recovery/attempt 결과 재확인을 연결한다. `platform_recovery.py:PlatformRecovery.attempt`와 기존 `_task_replay`의 read-only 분기를 재사용하고, 지원 재확인에서 미완료이면 `recover_once`로 넘어가는 현재 실행 분기를 호출하지 않는다. 별도 daemon·웹 수습 API를 선행조건으로 만들지 않는다 |
+| 입력·판정 | 원 recovery/attempt/operation·spec/hash·host·intent revision·deadline·현재 실행을 대조. lower completed+검증된 새 execution만 기존 COMPLETED 해석으로 반영. failed/not_submitted/stopped_without_replacement는 실패 종결이며 복구 성공이 아님 |
+| 저장·사건 | 원 실패 사실을 삭제하지 않고 후속 확인 근거를 함께 기록한다. 같은 확인의 재전달·응답 유실·Worker 재시작에서도 같은 원 ID/시도 수·deadline·pending 공동 저장을 유지하고 논리 사건을 중복 발급하지 않는다. 새 wire 유형이 필요하면 별도 계약 검토 대상이다 |
+| 수락 | 상위 final FAILED + 하위 수습 completed → 명시적 재확인으로 새 execution 연결. 같은 요청 반복 시 사건 논리 중복 0·추가 물리 호출 0. 하위 failed/null result를 COMPLETED로 승격 0. 검색 실패·다른 host·불완전 관측에서 성공 0 |
+
+### D03-W02 — 같은 applied receipt에서 기존 provisioning/binding 흐름 재개
+
+| 항목 | 담당자 요청·수락 조건 |
+|---|---|
+| 실제 위치 | `rejoin.py:ProductionBootstrap.__call__`, `RejoinCoordinator._work/_record/pump/completed`, `xenova_drive_binding.observe`의 기존 신뢰 관측 소비 |
+| 현재 공백 | provisioner는 채널별 `provision`을 호출한다. uncertain은 차단하고, applied여도 원 `apply` 경로를 다시 실행한다. 하위 수습 결과의 read-only 재사용 분기가 아직 없다 |
+| 권고 연결 | 운영자가 수습한 동일 receipt를 private 경계 안에서 다시 읽어 두 채널의 context/boot/phase·현재 관측·credential 원천을 검증하고 기존 ID를 재사용한다. 이 재개 분기에서는 Store 재주입·새 receipt/boot/instance 발급 0. 값·권한 재확인은 하위 `reconcile(..., execute=False)` 또는 같은 정식 조회를 사용하고, 자동 `--execute`로 차단을 풀지 않는다 |
+| 실행·슬롯 | 진행 중인 원 A future/receipt lock이 있으면 원 작업 종료부터 확인한다. 새 Coordinator로 바뀌었다는 이유로 A에 두 번째 쓰기를 제출하지 않는다. B의 독립 조회·lease는 계속 갱신할 수 있어야 한다 |
+| 새 실행 | 새 Manager execution이 정당하게 검증되면 기존 실행별 디렉터리·일반 공급을 사용한다. 새 boot/instance 발급은 그 새 실행의 정상 수명주기다. 같은 미확정 실행에 새 ID를 발급하는 우회와 구분한다 |
+| 수락 | 같은 실행 uncertain→운영 수습 applied→명시적 재개에서 boot/app instance 불변·Store 추가 쓰기 0·현재 binding lease 재획득. 정체 A/정상 B, Worker/Coordinator 재시작, 이전 실행 receipt와 지연 READY 교차를 함께 시험. 과거 READY로 새 lease/준비/출력 승인 0 |
+
+### D03-W03 — 회복·예산·의도와 준비의 별도 종결
+
+| 항목 | 담당자 요청·수락 조건 |
+|---|---|
+| 실제 위치 | `engine.py:_watch_in_flight/_attempt_failed/_commit/_flush_pending`, `rejoin.py:_apply_readiness`, `RecoveryWorker.run_once/shutdown` |
+| 불변조건 | 수습 확인으로 새 episode/attempt 예산을 초기화하거나 원 physical deadline을 재발급하지 않는다. lower COMPLETED는 새 Xen 실행 관측이며, 새 앱 진행·제어 적용·fresh 입력·준비 유지 뒤 Standby를 별도로 확인한다 |
+| 사용자 의도 | 수습 전에 user stop/new revision이면 그 의도를 보존하고 과거 복구의 새 create 0. graceful/force 승인·S01 차단·S02 같은 사건 ID와 pending 공동 저장을 유지한다 |
+| 출력 경계 | Coordinator의 준비 회복이나 Engine의 결과 재확인으로 기존 Active를 원복하거나 AUTO 재무장하지 않는다. Gateway의 현재 실행·제어·출력 guard가 계속 소유한다 |
+| 수락 | 원 호출이 남은 경우 재개 0, 저장 실패는 상위 반영 성공 0. 정상 새 execution 수락과 옛 메시지 배제를 양방향 시험. 같은 VM의 Agent/앱/Publisher만 바뀐 경우를 VM 교체로 오인하지 않음. 새 instance 승인 경로가 없으면 미지원으로 남김 |
+
+### D03-W04 — 실제 호출·반환·인수 시험
+
+다음은 설치된 하위에서 호출할 예다. 원 attempt를 선택하며 새 key/spec를 만들지 않는다.
+
+```python
+import sys
+sys.path.insert(0, '/usr/lib/xenova')
+from xenova_management import Manager
+
+manager = Manager()
+# attempt_id는 기존 RecoveryRecord의 recovery_attempt_id다.
+original = manager.call('recovery-operation', {'recovery_attempt_id': attempt_id})
+diagnostic = manager.call('recovery-reconcile',
+    {'recovery_attempt_id': attempt_id, 'timeout_ms': 3000}, budget_ms=3000)
+# 운영자가 근거를 검토한 명시적 수습 단계에서만 execute=True를 사용한다.
+# 이후 Worker는 원 결과만 다시 조회하며 이 진단을 물리 실행 허가로 쓰지 않는다.
+```
+
+진단은 기존 envelope와 원 operation ID·`replayed=true`를 유지한다.
+`data.reconciliation.status=blocked`이면 조회 성공이어도 종결 근거가 없다.
+명시 실행의 blocked는 `RECONCILE_REQUIRED`, 잠금은 `OPERATION_IN_PROGRESS`, host/intent 변경은
+`TARGET_CHANGED/INTENT_MISMATCH`, 관측·조회 기한 오류는 미확인이다. `recovery-operation`은
+기록 조회만 하며 새 물리 실행·Store 공급·준비/출력을 진행하지 않는다.
+
+하위 T01~T12와 [D03 검증 보고](../verification/reconciliation-closure-20261027.md)의 후보·fixture를
+제공물로 사용한다. 담당자 인수는 기존 `test_recovery_engine/store/store_process/events/lock.py`와
+`test_drive_rejoin.py`에 원 final 상태 재확인·applied 재사용·정체 슬롯·재시작·새/옛 실행 교차를 추가한다.
+T13의 실제 Worker/Coordinator 소비 종단은 **대기**다. 하위 fixture 통과나 요청서 작성으로 닫지 않는다.
+
 ## 요청 이력과 소유 경계
 
 | 이력 | 보존한 의미·상태 |
@@ -116,6 +188,7 @@
 | S15P31E110-155·237·124, D7·D8 | [2026-10-20 원 요청](2026-10-20-manual-app-gateway-ctrl.md)의 작성자·담당 이력·당시 미병합/미구현 표기를 보존한다. 역사적 표기를 현재 배포 상태로 해석하지 않는다 |
 | 2026-10-20 Gateway 담당 분리 | Gateway는 공병우, Worker/Engine은 ctrl 담당 경계를 유지한다. Worker가 제어권·출력 허가를 발급하지 않는다 |
 | 2026-10-27 D01-W01~W05 | 원 요청서 5절에 누적한 내용을 이 문서로 옮겼다. ID·수정 위치·입출력·조건·수락 assertion과 미완료 상태를 유지한다 |
+| D03-W01~W04 | 하위 원 결과/receipt 수습의 소비 요청을 별도로 누적했다. D01·D02/D08 대기 및 Gateway 출력 소유를 유지한다 |
 | 플랫폼 제공 요청 S15P31E110-279 | [2026-10-22 요청](2026-10-22-recovery-worker-platform.md)은 반대 방향의 플랫폼 제공 요청이다. capability/unit 제공과 아직 없는 별도 intents 조회를 구분하며 전체 완료로 닫지 않는다 |
 
 문서 이동이나 플랫폼 로컬/ARM 통과는 Worker 제품 구현·소비 연결·설치본/실보드 수락이 아니다.

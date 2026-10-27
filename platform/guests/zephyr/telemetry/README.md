@@ -172,6 +172,56 @@ python3 /path/to/provision-xenova-telemetry.py \
 새 receipt를 만든다. boot ID를 유지하고 Publisher ID만 교체한다. 옛 receipt를 새 host/실행에
 재사용하거나 uncertain 상태를 새 키로 무조건 우회하지 않는다.
 
+### uncertain receipt의 재주입 없는 적용 확인
+
+기존 도구의 `--reconcile`은 원 private receipt·credential 원천과 현재 실행을 읽어
+Store의 기대 내용·권한을 한 read transaction에서 비교한다. 기본은 진단이다.
+`--execute`도 Store를 다시 쓰지 않고 같은 receipt의 적용 확인만 저장한다.
+receipt 확정은 현재 값의 확인이며 원 commit 시각·앱 READY·Standby·출력 허가가 아니다.
+
+최소 인자는 `--reconcile`, `--vm-id`, `--expected-host-boot-id`, `--expected-execution-id`,
+`--credentials-file`, `--receipt`다. `--timeout-ms`는 선택이며 기본 15000, 허용 1..15000ms다.
+이번 context 조회·Store 비교·최종 guard가 같은 예산을 사용한다. C/파일 syscall 자체를
+강제 취소하는 보장은 없으며, 기한 초과는 원 Store 쓰기의 취소를 뜻하지 않는다.
+
+```sh
+read -r -p '현재 Zephyr VM UUID: ' VM_ID
+xenova-vm execution-context "$VM_ID" --json
+read -r -p '같은 실행의 host_boot_id: ' HOST_BOOT_ID
+read -r -p '같은 실행의 execution_id: ' EXECUTION_ID
+read -r -p '기존 0600 credential JSON 절대 경로: ' CREDENTIALS
+read -r -p '기존 uncertain receipt 절대 경로: ' RECEIPT
+set -- --reconcile --vm-id "$VM_ID" --credentials-file "$CREDENTIALS" --receipt "$RECEIPT" \
+  --expected-host-boot-id "$HOST_BOOT_ID" --expected-execution-id "$EXECUTION_ID"
+python3 -B /usr/lib/xenova/provision_xenova_telemetry.py "$@"
+# status=confirmable와 checks를 검토한 뒤 같은 원 receipt에 적용 확인만 기록한다.
+python3 -B /usr/lib/xenova/provision_xenova_telemetry.py "$@" --execute
+```
+
+v1 drive는 위 인자에 `--channel drive --guest-boot-receipt FILE`을 추가한다. FILE은 같은
+실행의 applied telemetry receipt다. guest boot는 공유하고 app/Publisher instance는 별개다.
+새 Publisher 세션 발급용 `--previous-receipt`와 수습은 함께 사용할 수 없다.
+
+| 근거 | 결과·다음 행동 |
+|---|---|
+| 같은 실행·credential 원천·guest boot, 원 synchronous Store 호출 반환 기록, 같은 lock의 배타 소유, 값·권한 전체 일치 | 진단 `confirmable`, 명시 실행 뒤 `applied`. 같은 receipt/boot/instance 유지·추가 Store 쓰기 0 |
+| 이미 applied인 원 receipt의 같은 확인 | `already_applied` 진단, 명시 실행은 같은 결과의 내구 재확인. 새 receipt 0 |
+| 구형 receipt에 `store_call_returned` 없음, 미종료 transaction/원 provisioner lock, 부분 대조·값/권한 충돌·원천 부재 | 차단 유지. lock 획득이나 값 일부 일치를 원 쓰기 종료로 추측하지 않음 |
+| 현재 execution/host 또는 적용 가능한 running intent 변경 | 원 receipt를 새 실행에 적용하지 않음. 검증된 새 실행의 일반 공급은 별도 새 실행 경로로 진행 |
+| 읽기·예산·write/fsync/replace/parent sync 실패 | 확정 성공을 반환하지 않음. 같은 원 receipt를 재확인. phase 직접 편집·credential 재발급·새 키로 우회 금지 |
+
+결과는 `action/status/context/receipt_id/checks/reasons/executed/store_writes`이며
+credential 원문·그 해시·Store 본문은 반환하지 않는다. 진단 차단은 JSON `status=blocked`,
+CLI 종료 코드 3이다. 입력·관측·저장 오류는 기존 비밀 없는 거절 메시지와 실패 종료를 유지한다.
+최종 guard는 원 receipt·guest boot authority·실제 Store·현재 실행을 다시 확인한다.
+CLI는 같은 호출의 최초 조회에서 intent revision·lifecycle/generation도 잡고 이후 조회마다
+대조한다. 새 running 의도라도 조회 도중 revision이 바뀌면 그 호출의 확정을 거절한다.
+기록의 `reconciliation.observed_monotonic_ms`는 확인 host의 단조 시각이며 원 commit 시각이 아니다.
+
+근거 부족 시 원 receipt/잠금·현재 실행 참조와 공개 checks만 보존해 플랫폼 담당자에게 전달한다.
+운영 기록을 직접 수정하는 해제 도구는 제공하지 않는다. Coordinator의 applied receipt 재사용과
+lease 재획득은 [Worker 인수 요청](../../../../docs/requests/2026-10-27-recovery-health-ctrl.md#d03-worker)이다.
+
 ## Worker·전송·종료
 
 | 항목 | 실제 구현 |
