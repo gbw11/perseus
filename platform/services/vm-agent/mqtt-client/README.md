@@ -62,6 +62,35 @@ if control and perception and perception.age_ms() < 200:
     })
 ```
 
+### Linux 앱 — 앱 생존 신호와 systemd watchdog
+
+Linux VM 의 에이전트는 VM 자원과 에이전트 생존만 알립니다. 앱이 실제로 일하는지는 앱이 직접 `app.heartbeat`(계약 6.1)로 알립니다.
+`AppHeartbeat.beat()` 는 **처리 루프 안에서** 매 반복 부릅니다. MQTT 는 계약 주기 1초로 고정이고, 브로커와 끊겨 있으면 쌓지 않습니다.
+유닛에 `WatchdogSec=` 이 있으면 같은 호출이 그 절반마다 systemd 에 `WATCHDOG=1` 도 보냅니다(브로커 연결과 무관, 주기는 systemd 가
+넘겨 주는 값에서 읽어 유닛과 어긋나지 않음). 루프가 멈추면 통지가 끊겨 systemd 가 앱을 재시작합니다. 루프 한 바퀴가 `WatchdogSec`
+절반보다 길면 정상이어도 재시작되니 `WatchdogSec` 은 넉넉히 잡습니다. dom0 Recovery Worker 는 이 신호로 Linux VM 을 재시작하지 않습니다.
+이 기능은 xenova_mqtt 0.2.0 부터 있습니다.
+
+```python
+from xenova_mqtt import AppHeartbeat, Identity, XenovaClient, systemd, topics
+
+client = XenovaClient(Identity(vm_id=VM_ID, app_id="message-board"), host=BROKER)
+client.start()
+heartbeat = AppHeartbeat(client, "message-board")
+systemd.ready()                                  # Type=notify 유닛이면 준비 완료
+while not stopping:
+    handle_one_batch()                           # 앱의 실제 일
+    heartbeat.beat("idle")                       # active / standby / idle / error. 주행과 무관한 앱의 평상시는 idle
+```
+
+```ini
+[Service]
+Type=notify
+ExecStart=/usr/bin/python3 -m xenova_message_board
+Restart=on-failure
+WatchdogSec=10
+```
+
 ### VM이 아닌 발행자
 
 ```python

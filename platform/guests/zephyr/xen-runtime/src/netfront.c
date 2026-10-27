@@ -433,6 +433,12 @@ int xnet_stats(struct xnf_stats *out) {
  if(packet_acquire(20))return -ETIMEDOUT;
  *out=n.stats;packet_release();return 0;
 }
+int xnet_stats_try(struct xnf_stats *out) {
+ if(!out)return -EINVAL;
+ if(!started||!connected)return -ENETDOWN;
+ if(packet_acquire(0))return -EBUSY;
+ *out=n.stats;packet_release();return 0;
+}
 int xnet_waits_get(struct xnet_waits *out) {
  if(!out)return -EINVAL;
  k_spinlock_key_t key=k_spin_lock(&waits_lock);*out=waits;

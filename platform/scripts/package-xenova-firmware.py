@@ -108,6 +108,12 @@ def main(argv=None):
     if args.networked:
         sources.update({'zephyr.map': args.build_dir / 'zephyr.map',
                         'XEN-ABI-LICENSE': ROOT / 'platform/guests/zephyr/xen-store/LICENSES/MIT-Xen'})
+    # The linked Publisher carries a pre-link input digest, not a self hash.
+    build_ids=set(re.findall(rb'xenova-build:(sha256:[0-9a-f]{64})',sources['zephyr.bin'].read_bytes()))
+    if len(build_ids)>1:
+        raise ValueError('ambiguous embedded build identity')
+    if build_ids:
+        meta['source']['build_id']=next(iter(build_ids)).decode('ascii')
     meta['files'] = {}
     for name, source in sources.items():
         if source.is_symlink() or not source.is_file():

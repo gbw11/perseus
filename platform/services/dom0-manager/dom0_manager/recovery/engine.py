@@ -131,6 +131,18 @@ class RecoveryEngine:
         with self._lock:
             return list(self._records.values())
 
+    def completed_executions(self) -> list[dict[str,str]]:
+        """Durably completed platform results for post-recovery provisioning.
+
+        App readiness is deliberately not part of COMPLETED. Repeated delivery
+        is allowed; the recipient keys work by VM/execution/attempt, not by tick.
+        """
+        with self._lock:
+            if self._dirty:return []
+            return [{'vm_id':str(r.vm_id),'execution_id':r.execution_id,
+                     'recovery_id':str(r.recovery_id),'recovery_attempt_id':str(r.recovery_attempt_id)}
+                    for r in self._records.values() if r.status==RecoveryStatus.COMPLETED and r.execution_id]
+
     # ---- 입력 ----
 
     def on_judgment(self, judgment: Judgment, now: float | None = None) -> RecoveryRecord:
@@ -330,7 +342,8 @@ class RecoveryEngine:
                 record.status = RecoveryStatus.BACKOFF if record.attempt > 0 else RecoveryStatus.DETECTED
             log.error("vm %s: recovery %s attempt not recorded; retrying in %.0fs", record.vm_id, record.recovery_id, self._policy.transient_retry_s)
         except Dom0ManagerError as exc:
-            if record.cancel_requested:
+            confirmed_failure = exc.platform_code in (GONE_CODES | REOBSERVE_CODES | {'XEN_EXECUTION_FAILED','DEADLINE_EXCEEDED','RECOVERY_MODE_UNSUPPORTED'})
+            if record.cancel_requested and confirmed_failure:
                 self._close(record, RecoveryStatus.CANCELLED, now, error={"code": "TARGET_NOT_ELIGIBLE", "platform_code": exc.platform_code, "message": f"cancelled; last platform error: {exc.message}"})
             else:
                 self._on_error(record, exc, now)
@@ -338,7 +351,12 @@ class RecoveryEngine:
             self._close(record, RecoveryStatus.FAILED, now, error={"code": "RECONCILE_REQUIRED", "platform_code": None, "message": str(exc)}, final=True)
         except Exception as exc:  # noqa: BLE001 - 정체 모를 예외: 더 파괴적인 시도로 올리지 않고 운영자에게 넘긴다
             log.exception("vm %s: recovery %s attempt raised", record.vm_id, record.recovery_id)
-            self._close(record, RecoveryStatus.FAILED, now, error={"code": "INTERNAL_ERROR", "platform_code": None, "message": f"{type(exc).__name__}: {exc}"}, final=True)
+            if record.request is not None and record.status == RecoveryStatus.EXECUTING:
+                # A lost response is not proof of failure, nor of cancellation.
+                # Reconcile only the original attempt; never escalate this error.
+                self._on_error(record, DriverTimeout("attempt outcome unavailable; consult original journal"), now)
+            else:
+                self._close(record, RecoveryStatus.FAILED, now, error={"code": "INTERNAL_ERROR", "platform_code": None, "message": f"{type(exc).__name__}: {exc}"}, final=True)
         else:
             if record.cancel_requested:  # 플랫폼이 의도 변경 전에 새 실행을 올렸다. 사실대로 완료로 닫는다(멈춤 의도는 플랫폼·게이트웨이가 따로 적용)
                 log.warning("vm %s: recovery %s attempt %d completed although a cancel was requested meanwhile", record.vm_id, record.recovery_id, record.attempt)
@@ -391,9 +409,15 @@ class RecoveryEngine:
         log.warning("vm %s: recovery %s attempt %d: %s (%s)", record.vm_id, record.recovery_id, record.attempt, code, exc.message)
         if code in GONE_CODES:
             self._close(record, RecoveryStatus.CANCELLED, now, error=error)
-        elif code in TRANSIENT_CODES or (exc.platform_code is None and isinstance(exc, DriverTimeout)):
+        elif code in TRANSIENT_CODES or (exc.platform_code is None and
+                (isinstance(exc, DriverTimeout) or (record.request is not None and record.status==RecoveryStatus.EXECUTING))):
             # 일시 거절 또는 응답 유실: 결과를 모르는 시도로 두고(EXECUTING) journal 을 먼저 조회한 뒤 같은 시도를 다시 보낸다.
             # spec 의 deadline 이 지났으면 플랫폼이 DEADLINE_EXCEEDED 로 닫아 준다
+            if record.request is not None and now*1000 >= record.request['deadline_monotonic_ms'] + self._policy.verify_timeout_s*1000:
+                self._close(record, RecoveryStatus.FAILED, now, final=True, error={
+                    'code':'RECONCILE_REQUIRED','platform_code':None,
+                    'message':'original attempt outcome unresolved after bounded journal recheck; no new physical attempt'})
+                return
             record.last_error = error
             if record.status == RecoveryStatus.EXECUTING and record.request is not None:
                 record.replay = True

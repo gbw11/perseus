@@ -46,7 +46,8 @@ static void status(const struct shell *sh, int rc)
 {
 	const char *reason = rc == 0 ? "ok" : rc == -ENOTSUP ? "unsupported" :
 		rc == -ENOENT ? "not_registered" : rc == -EAGAIN ? "not_ready" :
-		rc == -ENOSPC ? "truncated" : rc == -E2BIG ? "scan_limit" : "collection_failed";
+		rc == -ENOSPC ? "truncated" : rc == -E2BIG ? "scan_limit" :
+		rc == -ENODATA ? "no_sample" : rc == -EOVERFLOW ? "counter_discontinuity" : "collection_failed";
 	emit("\"status\":\"%s\",\"rc\":%d", reason, rc);
 }
 
@@ -129,7 +130,21 @@ int xdiag_shell_cmd(const struct shell *sh, size_t argc, char **argv)
 		     ",\"tx_drop\":%" PRIu64 ",\"rx_drop\":%" PRIu64 ",\"pool_busy\":%" PRIu64
 		     ",\"protocol_errors\":%" PRIu64 "}}", n->link_up ? "true" : "false",
 		     n->tx, n->rx, n->tx_drop, n->rx_drop, n->pool_busy, n->protocol_errors); }
-	emit(",\"timing\":{"); status(sh, s->timing_rc);
+	const struct xdr_snapshot *r=&s->resources;
+	emit(",\"resources\":{\"sample_seq\":%llu,\"cpu\":{",r->sample);status(sh,r->cpu.rc);
+	emit(",\"start_ms\":%llu,\"end_ms\":%llu,\"accounted_total_delta\":%llu,\"accounted_busy_delta\":%llu,\"percent_milli\":",
+	 r->cpu.start_ms,r->cpu.end_ms,r->cpu.total_delta,r->cpu.busy_delta);
+	if(r->cpu.rc)emit("null");else emit("%u",r->cpu.percent_milli);
+	emit("},\"memory_regions\":[");
+	for(size_t i=0;i<r->regions;i++){
+	 const struct xdr_region *m=&r->memory[i];if(i)emit(",");emit("{\"id\":");text(sh,m->id);emit(",");status(sh,m->rc);
+	 if(m->rc)emit(",\"value\":null}");else emit(",\"used\":%llu,\"free\":%llu,\"capacity\":%llu}",m->used,m->free,m->capacity);
+	}
+	emit("],\"network_rates\":{");status(sh,r->net_rate_rc);
+	emit(",\"epoch\":%llu,\"start_ms\":%llu,\"end_ms\":%llu,\"tx_bytes\":%llu,\"rx_bytes\":%llu,\"value\":",
+	 r->net_epoch,r->net_start_ms,r->net_end_ms,r->tx_bytes,r->rx_bytes);
+	if(r->net_rate_rc)emit("null}");else emit("{\"tx_bytes_per_s\":%llu,\"rx_bytes_per_s\":%llu}}",r->tx_bytes_per_s,r->rx_bytes_per_s);
+	emit("},\"timing\":{"); status(sh, s->timing_rc);
 	if (s->timing_rc) { emit(",\"value\":null}"); }
 	else { const struct xdiag_timing *t = &s->timing;
 		emit(",\"value\":{\"period_us\":%" PRIu64 ",\"deadline_us\":%" PRIu64

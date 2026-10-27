@@ -31,4 +31,6 @@ struct xnet_waits {
 int xnet_waits_get(struct xnet_waits *);
 int xnet_status_get(struct xnet_status *);
 int xnet_stats(struct xnf_stats *);
+/* Low-cost cache collector: never blocks the system workqueue on packet I/O. */
+int xnet_stats_try(struct xnf_stats *);
 #endif

@@ -17,7 +17,7 @@ class SinkError(RuntimeError):
 
 
 class Sink(Protocol):
-    def write(self, frame: Frame, t: float) -> None: ...
+    def write(self, frame: Frame, t: float) -> int: ...
 
     def close(self) -> None: ...
 
@@ -35,12 +35,13 @@ class MockSink:
         self.frames: deque[tuple[float, Frame, bytes]] = deque(maxlen=keep)
         self._stream = stream
 
-    def write(self, frame: Frame, t: float) -> None:
+    def write(self, frame: Frame, t: float) -> int:
         data = encode(frame)
         self.frames.append((t, frame, data))
         if self._stream is not None:
             self._stream.write(f"{t:.6f} {describe(frame)} hex={data.hex()}\n")
             self._stream.flush()
+        return len(data)
 
     def close(self) -> None:
         if self._stream is not None and self._stream not in (sys.stdout, sys.stderr):
@@ -61,12 +62,15 @@ class SerialSink:
             raise SinkError(f"시리얼 포트 {port} 열기 실패: {exc}") from exc
         self.failures = 0
 
-    def write(self, frame: Frame, t: float) -> None:
+    def write(self, frame: Frame, t: float) -> int:
         try:
-            self._serial.write(encode(frame))
+            data=encode(frame);accepted=self._serial.write(data)
+            if accepted!=len(data):raise SinkError('partial serial write')
+            return accepted
         except Exception as exc:  # serial.SerialTimeoutException 등
             self.failures += 1
             log.error("시리얼 쓰기 실패 (%d회): %s", self.failures, exc)
+            raise SinkError('serial submission failed; device application unknown') from exc
 
     def close(self) -> None:
         self._serial.close()

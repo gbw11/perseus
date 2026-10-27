@@ -80,7 +80,12 @@ int main(void){
   rx(i,n.rx_id[i&7],0,0,64);
   assert(!xnf_poll(&n));assert(xnf_drained(&n));
  }
- assert(n.stats.tx==70000&&n.stats.rx==70000);cases++;
+ assert(n.stats.tx==70000&&n.stats.rx==70000);
+ assert(n.stats.tx_bytes==70000ULL*64&&n.stats.rx_bytes==70000ULL*64);cases++;
+ uint64_t epoch=n.stats.counter_epoch;xnf_init(&n);
+ assert(n.stats.counter_epoch==epoch+1&&!n.stats.tx_bytes&&!n.stats.rx_bytes);cases++;
+ init();n.stats.tx_bytes=UINT64_MAX-10;assert(!xnf_send(&n,packet,64));
+ assert(n.stats.tx_bytes==UINT64_MAX&&n.stats.bytes_saturated);cases++;
  init();n.tx_prod=n.tx_cons=UINT32_MAX-3;n.rx_prod=4;n.rx_cons=UINT32_MAX-3;
  n.tx->h.req_prod=n.tx_prod;n.rx->h.rsp_prod=n.rx_cons;
  for(unsigned i=0;i<12;i++){

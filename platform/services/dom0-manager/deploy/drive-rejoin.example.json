@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0-drive-rejoin-config",
+  "vm_ids": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
+  "binding_file": "/run/xenova/drive-bindings.json",
+  "authority_file": "/srv/xenova/drive-control/control.json",
+  "receipt_dir": "/srv/xenova/drive-rejoin",
+  "credentials": {
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+      "drive": "/etc/xenova/private/drive-a.json",
+      "telemetry": "/etc/xenova/private/telemetry-a.json"
+    },
+    "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": {
+      "drive": "/etc/xenova/private/drive-b.json",
+      "telemetry": "/etc/xenova/private/telemetry-b.json"
+    }
+  }
+}

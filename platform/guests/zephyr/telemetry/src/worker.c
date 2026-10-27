@@ -4,6 +4,7 @@
 #include <xenova/diagnostics.h>
 #include <zephyr/net/mqtt.h>
 #include <zephyr/net/net_if.h>
+#include <zephyr/net/hostname.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/sys/atomic.h>
 #include <errno.h>
@@ -42,6 +43,11 @@ static struct xt_socket socket_io={.fd=-1};
 static uint8_t tx[XT_PAYLOAD_MAX+256],rx[512];
 static struct xt_message outgoing,inflight;
 static struct xt_observation current,frozen;
+static struct xt_observation cpu_frozen;
+static char cpu_sample[37];
+static unsigned cpu_part,cpu_parts;
+static int64_t cpu_due,cpu_expiry;
+static bool cpu_active;
 static char current_sample[37],frozen_sample[37],frozen_id[37];
 static char guest_boot_id[37],previous_publisher_id[37],client_id[40],interface_name[32];
 static bool connected,connecting,acked,protocol_error,pending,inventory_pending;
@@ -64,8 +70,10 @@ static int collect_current(void)
 	bool failed=current.collection_rc ||
 		(current.heap_rc && current.heap_rc!=-ENOTSUP) ||
 		(current.network_rc && current.network_rc!=-ENOTSUP && current.network_rc!=-ENOENT);
-	if (failed) { ++publisher.counters.collection_failures; }
-	else { publisher.counters.has_success=true;publisher.counters.last_success_ms=current.end_ms; }
+	if(current.resources.cpu.rc && current.resources.cpu.rc!=-ENOTSUP &&
+	   current.resources.cpu.rc!=-ENODATA)failed=true;
+	for(size_t i=0;i<current.resources.regions;i++)if(current.resources.memory[i].rc)failed=true;
+	xt_collection_result(&publisher.counters,failed,current.end_ms);
 	if (!current.history_rc) { xt_capture_events(&publisher,&current.history); }
 	publisher.counters.collect_us+=current.elapsed_us;
 	return xt_sample_id(&publisher,current_sample);
@@ -161,7 +169,7 @@ static int send_observation(enum xt_kind kind,const struct xt_observation *sourc
 	const char *sample,const char *snapshot,unsigned part)
 {
 	if (atomic_get(&stopping)) { return -ESHUTDOWN; }
-	bool qos1=kind==XT_INVENTORY || kind>=XT_EVENT;
+	bool qos1=kind==XT_INVENTORY || kind==XT_EVENT || kind==XT_THREADS || kind==XT_HISTORY;
 	if (qos1 && pending) { return -EBUSY; }
 	/* Reserve the maximum packet size before encoding. No live packet waits
 	 * offline or ages in a serialized queue; collect again on reconnect. */
@@ -243,8 +251,10 @@ static void work(void *a,void *b,void *c)
 	backoff_ms=1000;retry_time=0;connected=false;connecting=false;pending=false;protocol_error=false;
 	snapshot_active=false;tokens=BURST_BYTES;token_time=k_uptime_get();
 	bool identified=false;int previous_error=0;int64_t next_capture=0;
-	enum xt_kind periodic[]={XT_HEARTBEAT,XT_MEMORY,XT_NETWORK,XT_PROGRESS,XT_INTERVAL,XT_JITTER,XT_LATENESS,XT_ELAPSED,XT_PUBLISHER};
-	unsigned periods[]={2000,2000,2000,1000,5000,5000,5000,5000,5000};
+	int64_t next_clock=0;
+	enum xt_kind periodic[]={XT_HEARTBEAT,XT_MEMORY,XT_NETWORK,XT_PROGRESS,XT_INTERVAL,XT_JITTER,XT_LATENESS,XT_ELAPSED,XT_PUBLISHER,XT_POOLS};
+	unsigned periods[]={2000,2000,2000,1000,5000,5000,5000,5000,5000,2000};
+	cpu_active=false;cpu_due=0;
 	int64_t due[ARRAY_SIZE(periodic)]={0};
 	while (!atomic_get(&stopping)) {
 		int64_t now=k_uptime_get();
@@ -258,7 +268,22 @@ static void work(void *a,void *b,void *c)
 			if (!rc && !bootstrap.trusted_internal_plaintext) { rc=-ENOTSUP; }
 			if (!rc && guest_boot_id[0] && strcmp(guest_boot_id,bootstrap.identity.boot_id)) { rc=-EACCES; }
 			if (!rc && !strcmp(previous_publisher_id,bootstrap.identity.publisher_id)) { rc=-EALREADY; }
-			if (!rc) { rc=xt_init(&publisher,&bootstrap.identity,&inventory); }
+			if (!rc) {
+				inventory.build_id=xt_build_id();
+				inventory.cpu_runtime=xdiag_cpu_supported();
+				inventory.pools=IS_ENABLED(CONFIG_XENOVA_DIAGNOSTICS_POOLS);
+				if(bootstrap.build_id[0]&&strcmp(bootstrap.build_id,inventory.build_id))rc=-EXDEV;
+				if(!rc)rc=xt_init(&publisher,&bootstrap.identity,&inventory);
+				if(!rc){
+				 memcpy(publisher.inventory.display_name,bootstrap.display_name,sizeof(bootstrap.display_name));
+				 memcpy(publisher.inventory.artifact_sha256,bootstrap.artifact_sha256,sizeof(bootstrap.artifact_sha256));
+				 publisher.inventory.persistent_crash=bootstrap.persistent_crash;
+#if defined(CONFIG_NET_HOSTNAME_ENABLE)
+				 if(bootstrap.hostname[0])rc=net_hostname_set(bootstrap.hostname,strlen(bootstrap.hostname));
+				 if(!rc){const char *name=net_hostname_get();if(name)snprintf(publisher.inventory.hostname,sizeof(publisher.inventory.hostname),"%s",name);}
+#endif
+				}
+			}
 			if (rc) {
 				connection_error=rc;
 				if (rc!=previous_error) { (void)xdiag_error("telemetry-bootstrap",rc);previous_error=rc; }
@@ -267,11 +292,18 @@ static void work(void *a,void *b,void *c)
 			memcpy(guest_boot_id,bootstrap.identity.boot_id,sizeof(guest_boot_id));
 			memcpy(previous_publisher_id,bootstrap.identity.publisher_id,sizeof(previous_publisher_id));
 			identified=true;
+			printk("XDIAG_BIND %s %s\n",publisher.identity.execution_id,publisher.identity.boot_id);
 		}
 		if (now>=next_capture) {
 			if (collect_current()) { connection_error=-ERANGE;publish_status(connection_error);break; }
 			next_capture=now+200;
 		}
+#if defined(CONFIG_XENOVA_RUNTIME)
+		if(now>=next_clock&&!atomic_get(&stopping)){
+		 (void)xt_xen_clock_poll(&publisher.identity,&publisher.utc,now+25);
+		 next_clock=k_uptime_get()+200;
+		}
+#endif
 		if (!atomic_get(&stopping) && !connected && !connecting && now>=retry_time) {
 			int rc=connect_broker();if (rc) { close_connection(rc); }
 		}
@@ -302,8 +334,20 @@ static void work(void *a,void *b,void *c)
 			}
 			for (unsigned i=0;i<ARRAY_SIZE(periodic) && connected;++i) {
 				if (now<due[i] || (periodic[i]>=XT_INTERVAL && periodic[i]<=XT_ELAPSED && current.timing_rc)) { continue; }
+				if(periodic[i]==XT_POOLS&&!current.resources.regions)continue;
 				int rc=send_observation(periodic[i],&current,current_sample,NULL,0);
 				if (rc!=-EAGAIN && rc!=-EBUSY) { due[i]=now+periods[i]; }
+			}
+			if(cpu_active&&k_uptime_get()>=cpu_expiry){cpu_active=false;++publisher.counters.live_discarded;}
+			if(!cpu_active&&now>=cpu_due){
+			 cpu_frozen=current;memcpy(cpu_sample,current_sample,sizeof(cpu_sample));cpu_part=0;
+			 cpu_parts=(unsigned)MAX(1,(cpu_frozen.resources.rows+3)/4);cpu_active=true;
+			 cpu_expiry=cpu_frozen.resources.cpu.end_ms+2000;cpu_due=now+2000;
+			}
+			if(cpu_active){
+			 int rc=send_observation(XT_CPU,&cpu_frozen,cpu_sample,NULL,cpu_part);
+			 if(!rc&&++cpu_part==cpu_parts)cpu_active=false;
+			 else if(rc&&rc!=-EAGAIN&&rc!=-EBUSY)cpu_active=false;
 			}
 			freeze_request();
 			if (snapshot_active && !pending) { (void)send_observation(snapshot_kind,&frozen,frozen_sample,frozen_id,snapshot_part); }
