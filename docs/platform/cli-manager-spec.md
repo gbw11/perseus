@@ -793,7 +793,8 @@ xenova-vm operation --operation-id "$OP_ID" --json
 
 **사용 조건**
 
-조회할 작업이 존재해야 한다. `ls`에 파일이 없으면 아직 이력이 없는 것이다.
+조회할 작업이 존재해야 한다. 검색 부재는 조회 시점에 기록을 찾지 못했다는 뜻이다.
+앞선 제출이 아직 처리 중일 수 있으므로 미수락·취소·미실행의 증거로 사용하지 않는다.
 
 **실행 예시**
 
@@ -805,17 +806,58 @@ xenova-vm control-operation --operation-id "$OP_ID" --json
 
 **정상 응답**
 
-`data` 예: `{"operation":{"phase":"completed","error":null}}`.
+`data.operation`은 원 제어 기록이다. 예: `{"phase":"completed","error":null}`.
+`data.deadline_observation`은 이번 조회의 기한 비교 근거다.
+
+| 필드 | 의미 |
+|---|---|
+| `host_boot_id` | 현재 host 부팅 UUID. 추가 메타데이터 수집 실패 시 null |
+| `observed_monotonic_ms` | 해당 host의 조회 시점 단조 시각(ms). UTC가 아님 |
+| `original_host_matches` | 원 작업의 host와 일치하는지. 현재 host 미확인 시 null |
+| `execution_deadline_expired` | 같은 host에서 원 물리 실행 기한이 지났는지. host 불일치·미확인 또는 원 기한 부재 시 null |
+
+이 비교는 조회 시점의 정보이며 새 실행 승인 토큰이 아니다. 원 기록 읽기 자체가 실패하면
+정상 응답이나 빈 기록으로 대체하지 않는다.
 
 **오류 응답**
 
-존재하지 않는 이력은 `VM_NOT_FOUND`(2), 비표준 선택자나 복수 선택자는 `INVALID_SPEC`(2).
+존재하지 않는 이력·지정 VM과 다른 기록은 `VM_NOT_FOUND`(2), 비표준 선택자나 복수 선택자는
+`INVALID_SPEC`(2). 잠금 대기·조회 예산 만료는 `DEADLINE_EXCEEDED`(4), 손상·저장소 오류는
+기존 `RECONCILE_REQUIRED`·`STORAGE_UNAVAILABLE` 계약을 따른다.
+같은 key에 여러 원 기록이 대응하면 검색 부재가 아닌 `RECONCILE_REQUIRED`로 거절한다.
 
 **확인 방법**
 
 수락 revision·phase·result/error를 현재 `get` 결과와 구분한다. 잠금·journal 파일 삭제로 상태를 초기화하지 않는다.
 
-**Manager 매핑:** `control-operation / {operation_id}`
+**Manager 매핑:** `control-operation / {operation_id?,idempotency_key?,vm_id?,timeout_ms?}`.
+`operation_id`와 `idempotency_key` 중 정확히 하나가 필수다. key는 기존 요청 키와 같은
+1..200 UTF-8 byte 토큰이며, `vm_id`를 지정하면 대상 UUID도 대조한다. `timeout_ms`는
+1..15000ms, 기본 15000ms다. CLI는 기존 `--operation-id`만 지원한다.
+
+Python 호출자가 최초 응답을 잃어 operation ID를 받지 못했다면 제출 전 보존한 key로 조회한다.
+dom0 root 셸에서 실행하는 다음 예는 원 요청의 UUID·key를 입력받는다. 새 key를 발급하지 않는다.
+
+```bash
+read -r -p "원 요청의 VM UUID: " VM_ID
+read -r -p "최초 제출 때 보존한 작업 키: " REQUEST_KEY
+export VM_ID REQUEST_KEY
+PYTHONPATH=/usr/lib/xenova python3 - <<'PY'
+import json, os
+from xenova_management import Manager
+result = Manager().call(
+    "control-operation",
+    {"vm_id": os.environ["VM_ID"], "idempotency_key": os.environ["REQUEST_KEY"],
+     "timeout_ms": 3000},
+    request_id="original-stop-lookup", budget_ms=3000,
+)
+print(json.dumps(result, ensure_ascii=False, indent=2))
+PY
+```
+
+조회는 긴 실행 잠금 대신 짧은 admission 잠금과 원 기록을 사용한다. VM 시작·정지·이행이나
+현재 Xen 관측을 수행하지 않는다. 실제 이행은 같은 원 key/spec의 control 호출이며 원 기한과
+신원·의도 guard를 다시 검사한다.
 
 [명령어 색인으로](#command-index)
 
@@ -3044,6 +3086,8 @@ CLI 어댑터의 spec-file 읽기·JSON 해석·내부 이름 해석 도중 OSEr
     "details": {
       "accepted": true, "completion": "pending",
       "operation_id": "11111111-1111-4111-8111-111111111111", "intent_revision": 12,
+      "phase": "accepted", "host_boot_id": "22222222-2222-4222-8222-222222222222",
+      "lifecycle_generation": 1,
       "deadline_monotonic_ms": 123456, "execution_deadline_expired": false,
       "next_action": "replay_original_stop_after_execution_lock_is_available"
     }
@@ -3051,10 +3095,14 @@ CLI 어댑터의 spec-file 읽기·JSON 해석·내부 이름 해석 도중 OSEr
 }
 ```
 
-details의 operation_id는 envelope와 같은 원 제어 작업이다. intent_revision은 내구 수락한
-의도의 순서, deadline_monotonic_ms는 해당 host의 원 실행 기한이다. 구형 미완료 journal에
+details의 operation_id는 envelope와 같은 원 제어 작업이다. phase는 원 journal 단계이며,
+host_boot_id와 lifecycle_generation은 해당 수락의 host·VM 수명 문맥이다. intent_revision은
+내구 수락한 의도의 순서, deadline_monotonic_ms는 해당 host의 원 실행 기한이다. 구형 미완료 journal에
 기한이 없으면 deadline/만료 여부는 null이며 새 기한을 발급하지 않는다. accepted는
 실제 종료 완료가 아니다. completion은 pending/failed/completed/superseded를 구분한다.
+`phase=uncertain`·수습 오류를 completion=pending이라는 이유만으로 자동 재시도 가능한 접수로
+바꾸지 않는다. FastAPI·Spring의 구조적 전달은 [연동 요청서](management-integration-request.md)의
+별도 구현·수락 대상이다.
 
 내구 저장 직후 호출자가 종료돼도 원 key의 stop 재전달이 같은 operation/revision/deadline을
 대조해 이어간다. 자동 실행 daemon은 없다. 만료 후 stopped 의도는 남지만 원 요청으로
@@ -3509,7 +3557,24 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 PY
 ```
 
-정식 Python 진입점은 `xenova_management.Manager.call`이다. 서명은 `Manager.call(action, spec=None, *, execute=False, idempotency_key=None, request_id=None)`다. spec은 JSON 표현 가능한 dict이며 허용 필드 외 입력은 거절한다. execute는 bool이다. 정확한 action/spec은 각 명령의 Manager 매핑을 따른다. execute=False도 start/stop/설정 변경에는 dry-run이 아니다.
+정식 Python 진입점은 `xenova_management.Manager.call`이다. 서명은 `Manager.call(action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None)`다. spec은 JSON 표현 가능한 dict이며 허용 필드 외 입력은 거절한다. execute는 bool이다. 정확한 action/spec은 각 명령의 Manager 매핑을 따른다. execute=False도 start/stop/설정 변경에는 dry-run이 아니다.
+
+`get/list`는 선택 spec `timeout_ms`로 1..15000ms의 전체 조회 예산을 받는다. 생략 시 기존
+15000ms이며 CLI에는 이에 대응하는 새 옵션이 없다. 목록의 모든 VM과 registry 비용이 같은
+기한을 공유한다.
+
+`budget_ms`는 `start/stop/reboot/destroy/get/list/control-operation`의 선택 호출 인자다.
+정수 1..105000ms만 허용하며 bool은 거절한다. 상위 대기 후 남은 기간을 전달하는 용도이며
+원 spec/hash에 포함하지 않는다. 물리 실행 기한은 기존 90초와 전달 예산 중 짧은 값이다.
+기존 원 작업 재전달은 저장된 원 기한을 연장하지 않는다. 제한된 결과 재확인도 이번 호출의
+잔여 예산 안에서만 수행하며 새 create/reboot 권한을 만들지 않는다. 생략하면 기존 CLI와
+Worker 동작을 유지한다. 105000ms는 입력 상한이며 HTTP 대기시간 설정이 아니다.
+
+`Manager.fork()`는 동일 저장소·실행 잠금을 사용하는 독립 Python 요청 객체를 반환한다.
+긴 작업 중 stop 수락·원 기록 조회를 연결할 때 사용한다. OS 프로세스를 만들지 않으며,
+공유 Manager를 임의로 동시 호출하거나 모든 action의 상위 직렬화를 제거해도 된다는 뜻이 아니다.
+HTTP의 VM mutex·직렬화 분리는 아직 연결되지 않았다. 구체적인 담당 범위는
+[관리 요청 연동 요청서](management-integration-request.md)를 따른다.
 
 정상/오류는 [envelope](#contract-response)를 반환한다. Python에서는 dict의 ok/data/error를 확인하며 CLI 종료 코드는 별도로 적용하지 않는다. CLI delete/status/recover-once 별칭을 그대로 Python action으로 옮기지 않고 각각 retire/list/recover_once를 호출한다.
 
@@ -3612,10 +3677,10 @@ Spring은 소스 기본값만 확인했으며 운영 배포 override는 별도 �
 
 | 경로·적용 위치 | 현재 적용값·계산 시작점 | 포함·제외와 현재 상태 |
 |---|---|---|
-| Manager get/list (`xenova_management.Manager._call`) | 진입 시점부터 전체 15초 | L·registry·전체 관측이 공유. 공개 spec에 timeout_ms가 없고 CLI의 --timeout-ms로 바꿀 수 없음 |
+| Manager get/list (`xenova_management.Manager._call`) | 진입 시점부터 기본 15초 | 선택 spec timeout_ms 1..15000ms와 선택 호출 budget_ms 중 짧은 기한을 L·registry·전체 관측이 공유. CLI --timeout-ms는 추가하지 않음 |
 | probe / cpu-layout / cpu-host-prepare | timeout_ms 기본 15000, 1..15000ms. Manager 진입부터 | 선택한 잔여 기한이 하위 명령에도 적용. CPU factory 정책 등록도 같은 기한 사용 |
 | cpu-policy-set | Manager 진입부터 기본 15초 | registry·정책 검증·관측이 공유. 별도 내부 15초 재발급 없음. 공개 timeout 입력 추가 없음 |
-| start/stop/reboot/destroy | Manager 진입부터 90초 | 수락·guard·실행·필수 검증. 필수 P와 원 결과 재확인 R 때문에 반환이 더 늦을 수 있음 |
+| start/stop/reboot/destroy | Manager 진입부터 기본 90초 | 선택 budget_ms는 물리 기한을 줄이고 R의 잔여 예산도 제한. 원 요청의 기한은 재발급하지 않음. fsync 등 필수 P를 선점하는 엄밀한 반환 상한은 아님 |
 | 기존 내부 이름 start/reboot/destroy CLI | Execution.control 진입부터 기본 90초 | 공통 Manager 진입과 다르며 앞선 registry 조회는 별도다. 내부 이름 stop도 사전 이름 해석 뒤 Manager를 호출하므로 CLI 시작 전체를 90초로 보장하지 않음 |
 | recover_once | 요청의 deadline_monotonic_ms | 최초 수락 시 미래 120초 이내, 원 host에 결합. 재전달로 갱신하지 않음. 만료 뒤 R 최대 15초는 새 실행 권한이 아님 |
 | autostart / unit | batch 전체 140초 / TimeoutStartSec 150초 | 모든 VM이 공유. 전원 부팅 전체의 상한은 아님 |
@@ -3644,8 +3709,8 @@ DEADLINE_EXCEEDED로 거절한다. 검증 후 게시 직전 만료도 새 정책
 
 | 기능/호출 경로 | 현재 계약·시간 소비 | 하위 조정 또는 어려운 이유 | 최소 변경안·반환 여유·협의 |
 |---|---|---|---|
-| HTTP get/list | 조회 계약 5초, Spring query 기본 6초. 하위 E/P 15초에 S 최대 5초·Q가 앞섬 | 하위에 호출자 deadline/timeout 입력이 없어서 CLI와 HTTP에 다른 예산을 선택할 수 없음. 기본값 일괄 축소로 검증을 생략하거나 정상 작업을 실패시키지 않음 | 5초 계약을 유지하려면 상위 Q/S를 제한하고 잔여 시간을 get/list에 전달할 최소 계약 확장 협의가 필요. 현재 미구현. 반대로 대기를 늘릴 경우에도 Q상한+S+E/P+반환 여유 산정이 선행 |
-| 일반 HTTP control | 하위 E 90초 + R 최대 15초 + P, S 최대 5초. Spring command 기본 100초 | 물리 작업의 원 기한·안전 검증을 줄이지 않음. 상위 Q가 무기한이면 유한 종단 보장 불가 | Q를 먼저 제한. 대기 확대 대안은 Q상한+5+90+15+반환 여유. 예를 들어 Q=0·반환 여유 5초이면 115초가 필요하다는 계산일 뿐 적용값이 아님. R 축소는 재확인 실패 영향과 함께 별도 검토 |
+| HTTP get/list | 조회 계약 5초, Spring query 기본 6초. 하위 기본 E/P 15초에 S 최대 5초·Q가 앞섬 | 하위 timeout_ms/budget_ms는 제공하지만 현행 FastAPI는 전달하지 않음. 기본값 일괄 축소나 관측 생략 없이 남은 기간을 선택할 수 있음 | 상위 Q/S와 반환 여유를 같은 요청 예산에 포함하고 get/list에 잔여값을 연결해야 함. 종단 연결·수락은 미완료 |
+| 일반 HTTP control | 기본 E 90초 + 기존 R 최대 15초 + P, S 최대 5초. Spring command 기본 100초 | 하위 budget_ms로 물리/재확인 잔여 예산을 제한할 수 있지만 FastAPI 전달은 미연결. 상위 Q가 무기한이면 유한 종단 보장 불가 | Q/S 소모와 반환 여유를 뺀 실제 잔여값 전달. 물리 원 기한은 연장하지 않음. 100초 caller 안에서 수습 관측이 충분한지는 제품 조건별 수락 필요 |
 | 복구 중 stop HTTP | VM Q와 S가 하위 수락보다 앞섬. 오류 details·원 key도 현재 경로에서 보존하지 않음 | 하위의 짧은 durable 수락만으로 상위 잠금을 우회할 수 없음 | 기존 stop 경로의 짧은 수락/긴 실행 분리와 요청별 Manager 상태 보호, pending/completed 응답 구분 필요. 새 HTTP API를 임의 구현하지 않음 |
 | Worker recover_once 실행 | 현재 Engine이 실행 슬롯·현재 view에서 기본 110초 spec을 선저장한 뒤 호출 | 실행 전 판단 큐/직렬화 대기는 이 실행 예산과 별도. 응답 유실은 원 attempt journal로 확인 | 같은 attempt의 원 host·절대 D를 재사용. 원 D 뒤 기존 verify_timeout_s(기본 150초)까지 결과 조회가 계속 실패하면 final RECONCILE_REQUIRED로 조정 요구. 이 확인 예산은 새 물리 실행 허가가 아님 |
 | 자산 등록 create | cloud root 디스크의 원본/복사본 해시·복사·준비와 후속 start를 포함 | 단일 control 90초나 개별 sha256sum 900초가 등록 전체 기한은 아님 | 전체 생성 요청·하위 단계별 예산과 중복 I/O는 별도 후속 과제. 무결성 검사 축소나 timeout 확대를 해결로 적용하지 않음 |

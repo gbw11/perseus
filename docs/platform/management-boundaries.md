@@ -136,6 +136,10 @@ create/reboot나 강제 종료를 제출할 수는 없다. 관측 실패는 정�
 하위 Manager의 stop 수락은 구현돼 있다. 제품 HTTP는 VM별 mutex와 공유
 SerializedManager를 먼저 통과하며 pending details와 원 key의 전달도 연결돼 있지 않다.
 따라서 하위의 복구 중 stop 수락을 HTTP 종단 수락으로 해석하면 안 된다.
+하위는 독립 요청 객체의 stop 수락, 원 key의 read-only 작업 조회와 호출별 잔여 예산을
+제공한다. FastAPI·Spring·VM 관리 화면의 연결 위치와 수락 조건은
+[관리 요청 연동 요청서](management-integration-request.md)에 정리돼 있다. 요청서는
+담당자가 구현할 범위이며 현재 설치된 HTTP 기능을 뜻하지 않는다.
 
 Recovery Worker는 현재 Watcher 판단을 기존 Recovery Engine에 연결해, 원 attempt를
 저장한 뒤 Manager의 recover_once를 실행한다. 기본 attempt 실행 예산은 110초다.

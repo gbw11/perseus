@@ -30,6 +30,7 @@ MQTT의 payload 2.1 지원, 실제 보드 수락과 제품 소비자의 저장·
 |---|---|
 | 플랫폼 구조와 요청의 수명 이해 | [관리 구조·수명주기](management-boundaries.md) |
 | VM 조회·생성·시작·정지·복구·Wi-Fi 사용 | [CLI·Manager 명세](cli-manager-spec.md) |
+| pending·원 요청 조회·시간 예산의 제품 연동 담당 범위 | [FastAPI·Spring·화면 연동 요청서](management-integration-request.md) |
 | 외부 SSH 접속·최초 인증·SD 재설치 전 인증 상태 백업 | [Tailscale 사용법](cli-manager-spec.md#cmd-tailscale) |
 | 이미지 제작·템플릿/seed·조립·검증·전달 | [빌드 가이드](build-guide.md) |
 | 부팅 서비스·자동 시작·부분 실패·종료 조사 | [부팅·종료 구조](management-boot-boundaries.md) |
