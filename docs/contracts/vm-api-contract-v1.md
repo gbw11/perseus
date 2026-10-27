@@ -1,6 +1,6 @@
 # VM 관리 API 계약 v1
 
-**최종 갱신** 2026-10-22
+**최종 갱신** 2026-10-27
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼
 **구성 계층** 프론트 ↔ Spring (공개 API) ↔ dom0-manager (FastAPI) ↔ Xen `xl`
 
@@ -97,7 +97,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
   "template_version": "1.0.0",
   "vcpus": 1,
   "memory_mib": 256,
-  "role": "message-board"
+  "role": "interaction"
 }
 ```
 
@@ -111,7 +111,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 | `ipv4` | 에이전트가 마지막으로 보고한 IPv4 (eth0 우선, loopback 제외). 꺼져 있어도 마지막 값을 유지. 보고가 없으면 `null`, `zephyr`는 항상 `null`. **목록·단건 조회에만** 있음. dom0-manager VM 객체에는 IP가 없어 에이전트 보고를 씀 |
 | `template_id`, `template_version` | 생성에 쓴 템플릿. Spring 레코드 |
 | `vcpus`, `memory_mib` | 실행 중이면 dom0-manager가 관측한 값, 꺼져 있으면 Spring 레코드의 값 |
-| `role` | RC카 시나리오에서 이 VM이 맡은 앱. 값은 MQTT 계약의 `app_id`와 같은 `autonomous` / `manual` / `message-board`, 없으면 `null`. 생성 때 지정하거나 `PATCH`로 바꿈. **Spring 레코드에만 있고 dom0-manager 계약에는 없음.** 생성 명세가 아니라서 같은 이름·명세 재시도(200)는 역할이 달라도 기존 VM을 그대로 돌려줌. 같은 역할을 여러 VM이 가져도 막지 않음 |
+| `role` | RC카 시나리오에서 이 VM이 맡은 앱. 값은 MQTT 계약의 `app_id`와 같은 `autonomous` / `manual` / `interaction`, 없으면 `null`. 생성 때 지정하거나 `PATCH`로 바꿈. **Spring 레코드에만 있고 dom0-manager 계약에는 없음.** 생성 명세가 아니라서 같은 이름·명세 재시도(200)는 역할이 달라도 기존 VM을 그대로 돌려줌. 같은 역할을 여러 VM이 가져도 막지 않음 |
 
 ### 2.3 템플릿 객체
 
@@ -530,7 +530,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16) | 템플릿별 하한은 Spring, 템플릿별 범위(`resource_limits`)는 플랫폼 카탈로그가 create 때 검사(벗어나면 `400 InvalidArgument`), 공통 범위는 dom0-manager |
 | 배수 제약 | 없음. 화면 입력만 64 단위 | — |
 | `template_id` | 공개 카탈로그 ID·버전을 그대로 전달 | Spring 목록 검사 + 플랫폼의 정확한 ID·버전·해시 검사 |
-| `role` | 선택. `autonomous` / `manual` / `message-board` 또는 `null` (대소문자 구분). 그 밖의 값은 `422 VALIDATION_ERROR` (`field: role`) | Spring 소유 (생성·`PATCH`) |
+| `role` | 선택. `autonomous` / `manual` / `interaction` 또는 `null` (대소문자 구분). 그 밖의 값은 `422 VALIDATION_ERROR` (`field: role`) | Spring 소유 (생성·`PATCH`) |
 
 `name`은 create에 그대로 전달해 플랫폼의 기존 `display_name`에 저장합니다. UUID 기반 신원·내부 실행 이름·경로와 구분하며 재시작 요청을 rename으로 해석하지 않습니다.
 
@@ -627,3 +627,4 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1.12 | 2026-10-21 | 플랫폼 복구 기반(67b0e26) 반영(S15P31E110-245): 오류 본문에 선택 필드 `platform_code` 추가, 복구 기반 오류 코드의 HTTP 매핑표(8.1), 정지 대기 만료의 임시 메시지 판별 명시, stop 대기는 플랫폼 90초 고정이라 platform 모드는 `XENOVA_SHUTDOWN_GRACE=90`만 허용하고 `XENOVA_XL_COMMAND_TIMEOUT`은 Manager 호출을 제한하지 않음을 명시(10장). 자동 복구 주체를 dom0 Recovery Worker로 확정하고 13장 미확정 항목에서 제거(1.2·4.5) |
 | v1.13 | 2026-10-21 | 메트릭·복구 이벤트 스키마(S15P31E110-33): xentop 원시값 통계 객체(2.4)와 `GET /api/v1/stats`(4.6), 복구 이벤트 객체(2.5)와 MQTT-12·`GET /api/v1/recovery/events`(4.7), Spring의 저장·사용률 계산·복구 이벤트 기록 규칙(5장). 사용률은 Spring 계산, 측정 실패는 `unavailable`, `source`는 Spring 필터 허용값 `xen`, 장애 단위 `recovery_id`와 `attempt_duration_ms`·`recovery_duration_ms` 분리, 재보충 커서 만료는 `gap: true`로 구분하고 페이지는 `next_after_event_id`로만 진행, `recovery_attempt_id`는 논리적 시도 단위(재전달 재사용), Spring stop은 runtime 유무와 관계없이 전달해 stopped 의도를 기록(4.3·5장), FAILOVER는 VM 이벤트가 아님 |
 | v1.14 | 2026-10-22 | 복구 이벤트 `reason` 에 `APP_HEARTBEAT_LOST`(Zephyr VM, D8) 추가, `DOMAIN_ABSENT` 의 60초 유예 명시(2.5). VM 별 건강 스냅샷 `vm.health` 는 MQTT 계약 11.1절 (S15P31E110-124) |
+| v1.15 | 2026-10-27 | `role` 허용값 `message-board` 를 `interaction` 으로 바꾼다(2.2·5장, MQTT 계약 v1.4 의 app_id 변경). 예전 값은 `422 VALIDATION_ERROR` (S15P31E110-303) |
