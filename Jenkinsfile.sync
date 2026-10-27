@@ -20,19 +20,31 @@ pipeline {
     }
 
     environment {
-        GITLAB_PUSH_CREDENTIALS_ID = 'xenova-gitlab-deploy-key'
+        GITLAB_PUSH_CREDENTIALS_ID = 'xenova-gitlab-write-token'
     }
 
     stages {
         stage('Sync merged part branch') {
             steps {
-                withCredentials([sshUserPrivateKey(
+                withCredentials([usernamePassword(
                     credentialsId: env.GITLAB_PUSH_CREDENTIALS_ID,
-                    keyFileVariable: 'GITLAB_SSH_KEY',
-                    usernameVariable: 'GITLAB_SSH_USER'
+                    usernameVariable: 'GITLAB_HTTP_USER',
+                    passwordVariable: 'GITLAB_HTTP_TOKEN'
                 )]) {
                     sh '''
                         set -eu
+
+                        askpass="$(mktemp)"
+                        trap 'rm -f "$askpass"' EXIT
+                        printf '%s\n' \
+                          '#!/bin/sh' \
+                          'case "$1" in' \
+                          '  *Username*) printf "%s\\n" "$GITLAB_HTTP_USER" ;;' \
+                          '  *Password*) printf "%s\\n" "$GITLAB_HTTP_TOKEN" ;;' \
+                          'esac' > "$askpass"
+                        chmod 700 "$askpass"
+                        export GIT_ASKPASS="$askpass"
+                        export GIT_TERMINAL_PROMPT=0
 
                         trigger_commit="$(git rev-parse HEAD)"
                         subject="$(git log -1 --pretty=%s "$trigger_commit")"
@@ -57,12 +69,11 @@ pipeline {
                             exit 1
                         fi
 
-                        # Declarative checkout credentials are scoped to the checkout step, so the
-                        # HTTPS origin cannot be fetched from this shell. Reuse the read/write deploy
-                        # key already bound for the final push and refresh the exact part branch.
-                        GIT_SSH_COMMAND="ssh -i $GITLAB_SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
-                          git fetch --no-tags \
-                          "$GITLAB_SSH_USER@lab.ssafy.com:s15-final/S15P31E110.git" \
+                        # Declarative checkout credentials are scoped to the checkout step. Bind a
+                        # dedicated read/write token for both fetch and push over the already working
+                        # HTTPS route, without embedding the token in the command line or Git config.
+                        git fetch --no-tags \
+                          'https://lab.ssafy.com/s15-final/S15P31E110.git' \
                           "+refs/heads/${source_branch}:refs/remotes/origin/${source_branch}"
                         source_tip="$(git rev-parse "origin/$source_branch")"
                         merge_source="$(git rev-parse "${trigger_commit}^2")"
@@ -73,9 +84,8 @@ pipeline {
                         fi
 
                         git merge-base --is-ancestor "$source_tip" "$trigger_commit"
-                        GIT_SSH_COMMAND="ssh -i $GITLAB_SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
-                          git push -o ci.skip \
-                          "$GITLAB_SSH_USER@lab.ssafy.com:s15-final/S15P31E110.git" \
+                        git push -o ci.skip \
+                          'https://lab.ssafy.com/s15-final/S15P31E110.git' \
                           "${trigger_commit}:refs/heads/${source_branch}"
                     '''
                 }
