@@ -11,6 +11,8 @@ info:
     Spring 이 발급한 vm_id 를 플랫폼 registry 와 Xen UUID의 영구 식별자로 사용한다.
     FastAPI 기본 422(HTTPValidationError)는 400 InvalidArgument 로 정규화하고, 생성 스키마에서
     422 응답과 HTTPValidationError 모델을 제거해야 이 파일과의 차이 검사가 통과한다.
+    /healthz 를 뺀 모든 엔드포인트는 선택 헤더 X-Request-Budget-Ms(components.parameters.RequestBudget)를 받는다.
+    형식 오류는 400. 없으면 기존 한도를 쓴다 (기준 문서 4.9절).
 servers:
   - url: http://{tailscale_address}:8081
     description: dom0 Tailscale address
@@ -32,6 +34,8 @@ paths:
         Xen 에 현재 존재하는 도메인만 반환한다. 종료된 VM 을 포함한 전체 목록은
         Spring 이 자기 레코드와 조합해 만든다.
       x-driver-timeout-seconds: 5
+      parameters:
+        - $ref: '#/components/parameters/RequestBudget'
       responses:
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -62,6 +66,8 @@ paths:
         플랫폼 공통 create 는 정지 등록이므로 실제 도메인 시작은 별도 start 연결이 필요하다.
         Linux IP 는 플랫폼 전역 잠금 안에서 자동 할당한다.
       x-driver-timeout-seconds: 30
+      parameters:
+        - $ref: '#/components/parameters/RequestBudget'
       requestBody:
         required: true
         content:
@@ -99,6 +105,8 @@ paths:
       operationId: getVm
       summary: VM 단건 조회
       x-driver-timeout-seconds: 5
+      parameters:
+        - $ref: '#/components/parameters/RequestBudget'
       responses:
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -126,6 +134,8 @@ paths:
         실행 중인 VM 은 409 로 거부한다. 정지된 VM 은 retire 생명주기로 숨김 보관하며
         tombstone 과 generation 을 유지한다. 같은 디스크를 restore 하면 기존 vm_id 를 유지한다.
       x-driver-timeout-seconds: 90
+      parameters:
+        - $ref: '#/components/parameters/RequestBudget'
       responses:
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -158,14 +168,80 @@ paths:
         멱등성은 목표 상태 기준이다. 없는 VM 에 대한 호출도 204 다.
         호출은 동기 방식이며 최대 90초까지 소멸을 기다린다. 일반 stop 은 시간 초과 시
         자동으로 강제 종료하지 않는다. 강제 종료는 명시적인 force 정책에서만 수행한다.
+        Idempotency-Key 가 있으면 요청 추적 모드다 (기준 문서 4.3.1): VM 잠금·직렬화를 기다리지 않고 정지 의도를 먼저
+        내구 수락하며, 완료면 200, 수락했지만 실행이 남았으면 202 로 ControlOperation 을 돌려준다.
+        2xx 를 정지 완료로 보지 않는다(status 를 본다). 키 없는 호출의 응답은 바뀌지 않는다.
       x-driver-timeout-seconds: 90
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: 최초 전송 전에 정한 요청 키. 재전송·조회에 같은 값. ASCII 가시 문자 1..200자
+          schema:
+            type: [string, 'null']
+        - $ref: '#/components/parameters/RequestBudget'
       responses:
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: 키 있음. 원 작업 완료(같은 키 재전달이어도 같은 operation_id, 물리 동작 반복 없음)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlOperation'
+        '202':
+          description: 키 있음. 정지 의도를 내구 수락했고 실행이 남음 (status=pending). 같은 키로 재전달하거나 조회한다
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlOperation'
         '204':
-          description: 도메인이 없는 상태 (디스크 보존)
+          description: 키 없음 정지 완료, 또는 키 유무와 무관하게 등록이 없어 정지 목표 달성(작업 기록 없음). 디스크 보존
         '400':
           $ref: '#/components/responses/InvalidArgument'
+        '409':
+          $ref: '#/components/responses/InvalidState'
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '501':
+          $ref: '#/components/responses/NotSupported'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
+  /api/v1/vms/{vm_id}/control-operations:
+    parameters:
+      - $ref: '#/components/parameters/VmId'
+    get:
+      tags: [VMs]
+      operationId: getControlOperation
+      summary: 요청 키로 원 제어 작업 조회 (실행하지 않음)
+      description: >-
+        최초 응답을 잃어 operation_id 를 받지 못했을 때 제출 전에 정한 키로 원 작업을 찾는다. 짧은 수락 잠금만 쓰고
+        시작·정지·이행이나 Xen 관측을 하지 않는다. 404 는 조회 시점의 검색 부재이며 미수락의 증거가 아니다.
+        superseded 는 이 조회로 알 수 없다(현재 의도는 VM 조회로 본다). 기본 한도 5초.
+      x-driver-timeout-seconds: 5
+      parameters:
+        - name: request_key
+          in: query
+          required: true
+          description: 최초 제출 때 보낸 Idempotency-Key
+          schema:
+            type: string
+        - $ref: '#/components/parameters/RequestBudget'
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: 원 작업 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlOperation'
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
+        '404':
+          $ref: '#/components/responses/OperationNotFound'
         '500':
           $ref: '#/components/responses/DriverError'
         '501':
@@ -184,6 +260,8 @@ paths:
         Domain-0 은 없고 꺼진 VM 은 표본이 없다. 사용률(CPU %, bytes/s)은 싣지 않으며 Spring 이 연속 표본으로 계산한다.
         측정하지 못한 필드는 0 이 아니라 null 이고 unavailable 에 사유가 있다. 플랫폼 Manager 를 거치지 않는다.
       x-driver-timeout-seconds: 5
+      parameters:
+        - $ref: '#/components/parameters/RequestBudget'
       responses:
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -226,6 +304,7 @@ paths:
             minimum: 1
             maximum: 1000
             default: 200
+        - $ref: '#/components/parameters/RequestBudget'
       responses:
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -277,6 +356,18 @@ components:
       scheme: bearer
       bearerFormat: opaque service token
   parameters:
+    RequestBudget:
+      name: X-Request-Budget-Ms
+      in: header
+      required: false
+      description: >-
+        호출자가 이 요청을 기다릴 남은 시간(ms). 요청 도착부터 VM·자원 잠금 대기, Manager 직렬화 대기, 하위 Manager 호출,
+        xl·xentop 실행이 이 기한 하나를 나눠 쓰고, 다 쓰면 실행·제출하지 않고 504 다. 다른 서버의 시각이 아니라 남은 기간만 보낸다.
+        /healthz 는 받지 않는다 (기준 문서 4.9절)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 105000
     VmId:
       name: vm_id
       in: path
@@ -385,6 +476,7 @@ components:
             - PlatformUnavailable
             - NotSupported
             - Unauthorized
+            - OperationNotFound
         message:
           type: string
         detail:
@@ -398,6 +490,70 @@ components:
         platform_code:
           type: [string, 'null']
           description: 플랫폼 Manager 가 준 원본 오류 코드(HOST_QUIESCING 등). 플랫폼 오류에만 있다. 분기는 detail 문자열이 아니라 이 값으로 한다
+        retryable:
+          type: [boolean, 'null']
+          description: 플랫폼이 준 원본 재시도 가능 여부. 코드의 고정 속성이 아니며 이것만으로 재시도 정책을 만들지 않는다
+        operation:
+          oneOf:
+            - $ref: '#/components/schemas/ControlOperation'
+            - type: 'null'
+          description: 키 있는 제어 요청의 오류에만 있다. 원 작업 문맥(status=failed·uncertain·superseded·unknown·rejected)
+    ControlStatus:
+      type: string
+      description: >-
+        pending 수락·실행 남음 / completed 원 작업 완료 / failed 원 작업 실패(수락된 의도는 되돌리지 않음) /
+        uncertain 결과 미확정(자동 재시도·새 키 금지, 조사) / superseded 이후 사용자 의도로 대체 /
+        unknown 수락 여부 미확인 / rejected 수락 전 거절
+      enum: [pending, completed, failed, uncertain, superseded, unknown, rejected]
+    ControlOperation:
+      type: object
+      additionalProperties: false
+      required: [vm_id, action, status]
+      description: 제어 요청 하나의 상태. 실제 VM 상태(GET /vms/{vm_id})와 별개다. 하위 원 작업 기록의 허용 필드만 담는다
+      properties:
+        vm_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+          description: 현재 stop
+        request_key:
+          type: [string, 'null']
+        operation_id:
+          type: [string, 'null']
+          format: uuid
+          description: 하위 원 제어 작업. 수락 전 거절·작업 기록 없는 드라이버(mock·xen)면 null
+        status:
+          $ref: '#/components/schemas/ControlStatus'
+        accepted:
+          type: [boolean, 'null']
+          description: 의도 수락 여부. 확인하지 못했으면 null
+        phase:
+          type: [string, 'null']
+          description: 원 작업 단계 prepared·accepted·executing·completed·failed·uncertain
+        intent_revision:
+          type: [integer, 'null']
+        host_boot_id:
+          type: [string, 'null']
+        lifecycle_generation:
+          type: [integer, 'null']
+        deadline_monotonic_ms:
+          type: [integer, 'null']
+          description: 원 실행 기한(그 host 의 단조 시각 ms). 다른 시계와 비교하지 않는다
+        execution_deadline_expired:
+          type: [boolean, 'null']
+          description: 같은 host 에서 원 기한이 지났는가. 확인할 수 없으면 null. true 면 재전달해도 새 물리 동작을 하지 않는다
+        next_action:
+          type: [string, 'null']
+          description: 플랫폼이 권하는 다음 동작. 진단 문자열이며 고정 열거값이 아니다
+        error_code:
+          type: [string, 'null']
+          description: 원 작업의 플랫폼 오류 코드
+        warnings:
+          type: array
+          items:
+            type: string
+          description: 진단 경고 코드. 결과를 바꾸지 않는다
     StatsSource:
       type: string
       description: Spring 메트릭 필터의 허용값과 같은 문자열. 에이전트 보고는 guest_agent 다
@@ -583,6 +739,12 @@ components:
             $ref: '#/components/schemas/Error'
     VMNotFound:
       description: 대상 도메인이 Xen 에 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    OperationNotFound:
+      description: 요청 키로 원 제어 작업을 찾지 못함. 조회 시점의 검색 부재이며 미수락·미실행의 증거가 아니다
       content:
         application/json:
           schema:
