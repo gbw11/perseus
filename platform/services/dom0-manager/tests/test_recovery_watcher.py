@@ -293,6 +293,18 @@ def test_linux_vm_ignores_app_heartbeat_and_zephyr_ignores_agent_heartbeat(world
     assert world.health(ZEPHYR).state == HealthState.HEALTHY and world.health(ZEPHYR).heartbeat_age_s is None
 
 
+def test_linux_app_heartbeat_silence_never_judges_the_vm(world):
+    """Linux 앱의 app.heartbeat 는 앱 상태 표시용이다. 에이전트가 살아 있으면 앱 신호가 끊겨도 VM 을 재시작하지 않는다(게스트 안 systemd 몫)."""
+    world.tick(obs())
+    for step in range(40):  # 200초
+        world.clock.now += 5
+        world.beat(vm_id=VM)
+        if step < 4:
+            world.app_beat(vm_id=VM)  # 앱 신호는 20초 뒤 끊긴다
+        assert world.tick(obs()) == []
+    assert world.health().state == HealthState.HEALTHY
+
+
 # ---- 관측 경로 (필터별 구독 승인) ----
 
 
