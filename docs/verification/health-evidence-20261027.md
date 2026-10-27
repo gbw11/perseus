@@ -1,5 +1,12 @@
 # D01 건강 근거 연결과 D02·D08 하위 인수 보완
 
+> 후속 위치 안내: 아래는 당시 후보·검증 결과를 보존한 보고다. 현재 담당자 요청은
+> [Linux·Agent](../requests/2026-10-27-linux-health-agent.md),
+> [Worker](../requests/2026-10-27-recovery-health-ctrl.md),
+> [HTTP·Spring·화면](../platform/management-integration-request.md)으로 분리했다.
+> D03 하위 수습과 별도 담당자 인수는 [후속 보고](reconciliation-closure-20261027.md)를 따른다.
+> D01 담당자 구현 및 D02·D08 상위 미연결을 완료로 닫지 않는다.
+
 ## 판정·기준선
 
 **플랫폼·Zephyr의 확정 가능한 건강 근거/준비 연결을 구현하고, 담당자별 요청을 누적했다.**

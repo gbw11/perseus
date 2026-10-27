@@ -1,6 +1,6 @@
 """조건을 다시 확인하는 일회성 복구 실행. 감시·정책·반복 실행 서비스는 아니다."""
 from first_install_contract import uuid4
-from xenova_execution import ExecutionError, fingerprint, refuse
+from xenova_execution import ExecutionError, fingerprint, refuse, short_lock
 from xenova_runtime import PlatformError
 import xenova_catalog as catalog
 import xenova_vm as vm
@@ -174,6 +174,132 @@ class Recovery:
             "allowed_actions":["query_original_attempt", "replay_original_to_finalize_observed_launch",
                                "review_planned_host_restart"], "automatic_retry":False})
 
+    def reconcile(self, identity, *, execute, deadline, context):
+        """원 attempt만 진단/종결한다. 이 경로는 VM 제어·새 수락·기한 연장을 하지 않는다.
+
+        execution flock은 Manager가 소유한다. 외부 관측 뒤 짧은 admission lock 안에서
+        원 journal/intent/run을 다시 대조하며, 과거 PID나 부재 하나를 종료 증명으로 쓰지 않는다.
+        """
+        op = self.read_attempt(identity)
+        context.update(operation_id=op['operation_id'], replayed=True)
+        spec = validate_request(op['request'])
+        if op.get('schema_version') != '1.0' or op.get('host_boot_id') != spec['expected_host_boot_id']:
+            refuse('RECONCILE_REQUIRED', 'recovery journal context invalid')
+        if spec['expected_host_boot_id'] != self.e.host:
+            refuse('TARGET_CHANGED', 'original attempt belongs to another host; no cross-host deadline comparison',
+                   details={'operation_id':op['operation_id'], 'reason':'HOST_BOOT_CHANGED'})
+        if self.p.clock() >= deadline:
+            refuse('DEADLINE_EXCEEDED', 'recovery reconciliation budget expired')
+        if op['phase'] in ('completed', 'failed'):
+            if execute and op.get('reconciliation'):
+                # 이전 replace 뒤 parent fsync 응답을 잃었을 수도 있어 같은 결과를 재확정한다.
+                self.e.write(self.path(identity), op)
+            return {'attempt':op, 'reconciliation':{'status':'recorded', 'executed':bool(execute and op.get('reconciliation')),
+                    'physical_commands':0}, 'original_result':op.get('result')}
+        record, _, observed = self.conditions(spec, deadline, target=False, gate=False)
+        run = self.e.run_record(record)
+        intent = self.e.intent(record)
+        snapshot = {'record':fingerprint(record), 'run':run, 'intent':intent}
+        phase = op['phase']
+        failed_phase = (op.get('error') or {}).get('details', {}).get('failed_phase')
+        stopping = phase == 'stopping' or phase == 'uncertain' and failed_phase == 'stopping'
+        owner = {'kind':'recovery', 'recovery_attempt_id':identity}
+        checks = {'cpu_policy':self.p.cpu().context(record) == op.get('cpu_policy', {'configured':False})}
+        outcome = None
+        if phase in ('accepted', 'removed'):
+            # 이 phase 이후의 create는 먼저 launching을 내구 저장해야 한다.
+            checks['no_unresolved_launch'] = not run or run.get('phase') not in ('launching', 'uncertain')
+            checks['no_owned_launch'] = not run or run.get('owner') != owner
+            checks['removed_is_absent'] = phase != 'removed' or observed['presence'] == 'absent'
+            outcome = 'not_submitted' if phase == 'accepted' else 'stopped_without_replacement'
+        elif stopping:
+            proof = op.get('stop_submission') or {}
+            target = proof.get('target') or {}
+            checks['stop_target'] = (target.get('execution_id') == spec['expected_execution'].get('execution_id')
+                and target.get('host_boot_id') == self.e.host and type(target.get('domid')) is int
+                and isinstance(target.get('xen_unique_id'), str))
+            checks['no_replacement_launch'] = not run or (run.get('execution_id') == target.get('execution_id')
+                and run.get('phase') not in ('launching', 'uncertain'))
+            state = proof.get('state')
+            checks['original_call_finished'] = state in ('not-submitted', 'returned')
+            checks['target_state'] = (observed['presence'] == 'absent' or state == 'not-submitted'
+                and observed['execution_status'] == 'managed' and observed['execution_id'] == target.get('execution_id')
+                and observed['domid'] == target.get('domid') and observed['xen_unique_id'] == target.get('xen_unique_id'))
+            outcome = 'not_submitted' if state == 'not-submitted' else 'stopped_without_replacement'
+        elif phase in ('launching', 'observed', 'uncertain'):
+            checks['correlated_execution'] = bool(run and run.get('owner') == owner
+                and run.get('phase') == 'observed' and run.get('cpu_verification') == 'complete'
+                and observed['execution_status'] == 'managed' and observed['execution_id'] == run.get('execution_id')
+                and observed.get('_description', {}).get('execution_context') == run)
+            if checks['correlated_execution']:
+                self.p.cpu().require(record, deadline, expected=op.get('cpu_policy', {'configured':False}),
+                                     present=True, expected_identity=run)
+                outcome = 'launch_observed'
+            elif run and run.get('owner') == owner and run.get('launch_aborted_before_submit') is True:
+                checks['correlated_execution'] = observed['presence'] == 'absent' and run.get('phase') == 'stopped'
+                outcome = 'not_submitted'
+        else:
+            checks['supported_phase'] = False
+        if outcome != 'launch_observed' and observed['presence'] == 'absent' and self.p.process_isolation:
+            # observe_only는 신호나 scope stop을 보내지 않는다. 살아 있는 backend/helper는 차단한다.
+            from xenova_guest_process import cleanup
+            if not run or not run.get('process_scope'):
+                if stopping or phase not in ('accepted', 'removed'):
+                    checks['process_ownership'] = False
+            else:
+                try:
+                    cleanup(self.p, record, run, deadline, observe_only=True)
+                except (PlatformError, OSError, ValueError):
+                    checks['process_quiescent'] = False
+        reasons = [key for key, passed in checks.items() if not passed]
+        if outcome is None:
+            reasons.append('original_effect_unconfirmed')
+        result = {'status':'blocked' if reasons else 'confirmable', 'outcome':outcome,
+                  'checks':checks, 'reasons':reasons, 'executed':False, 'physical_commands':0,
+                  'host_boot_id':self.e.host, 'observed_monotonic_ms':int(self.p.clock()*1000)}
+        if self.p.clock() >= deadline:
+            refuse('DEADLINE_EXCEEDED', 'recovery reconciliation observation budget expired')
+        if execute and reasons:
+            refuse('RECONCILE_REQUIRED', 'original effects or ownership not fully confirmed; no record closed',
+                   details={'operation_id':op['operation_id'], 'recovery_attempt_id':identity,
+                            'reconciliation':result, 'automatic_retry':False})
+        if not execute:
+            return {'attempt':op, 'reconciliation':result, 'original_result':op.get('result')}
+        self.e.checkpoint('recovery-reconcile-before-guard', op)
+        # 실제 identity는 다시 관측하고, 그 뒤의 저장된 상태 guard는 admission 안에서 수행한다.
+        final = self.e.observe(record, deadline)
+        fields = ('presence','execution_status','execution_id','domid','xen_unique_id','configuration_revision')
+        if any(final.get(key) != observed.get(key) for key in fields):
+            refuse('TARGET_CHANGED', 'execution changed after reconciliation diagnostic')
+        with short_lock(self.p.runtime, 'admission', deadline=deadline, clock=self.p.clock, sleep=self.p.sleep):
+            current = self.m._state(spec['vm_id'], self.p.records(validate_assets=False))
+            if (self.read_attempt(identity) != op or self.p.boot_id_reader() != self.e.host
+                    or current['lifecycle'] != 'REGISTERED' or current['generation'] != spec['expected_lifecycle_generation']
+                    or fingerprint(current['record']) != snapshot['record'] or self.e.intent(record) != snapshot['intent']
+                    or self.e.run_record(record) != snapshot['run']
+                    or self.p.cpu().context(record) != op.get('cpu_policy', {'configured':False})):
+                refuse('TARGET_CHANGED', 'original attempt, intent or execution changed before durable confirmation')
+            if self.p.clock() >= deadline:
+                refuse('DEADLINE_EXCEEDED', 'recovery reconciliation guard budget expired')
+            op['reconciliation'] = {**result, 'status':'confirmed', 'executed':True,
+                                    'original_phase':phase, 'original_error':op.get('error')}
+            try:
+                if outcome == 'launch_observed':
+                    self.complete(op, final)
+                else:
+                    expired = self.p.clock()*1000 >= spec['deadline_monotonic_ms']
+                    code = 'DEADLINE_EXCEEDED' if expired else 'XEN_EXECUTION_FAILED'
+                    op['error'] = {'code':code, 'message':'original recovery ended without a replacement launch',
+                        'retryable':False, 'details':{'operation_id':op['operation_id'],
+                        'recovery_attempt_id':identity, 'reconciliation_outcome':outcome,
+                        'next_action':'observe_current_intent_before_any_new_request'}}
+                    op['result'] = None
+                    self.save(op, 'failed')
+            except OSError as error:
+                refuse('RECONCILE_REQUIRED', 'reconciliation durability not confirmed; inspect same original attempt',
+                       details={'operation_id':op['operation_id'], 'recovery_attempt_id':identity})
+        return {'attempt':op, 'reconciliation':op['reconciliation'], 'original_result':op.get('result')}
+
     def expire_prelaunch(self, op):
         """기존 소유 잠금 안에서, launch 전임을 재확인한 만료 시도만 닫는다."""
         if op["phase"] not in ("accepted", "removed"):
@@ -296,9 +422,21 @@ class Recovery:
                 self.save(op, "accepted")
         try:
             if not resume_removed and observation["presence"] == "present":
+                op['stop_submission'] = {'state':'not-submitted', 'target':{
+                    'host_boot_id':self.e.host, **{name:observation[name] for name in
+                    ('execution_id','domid','xen_unique_id')}}}
                 self.save(op, "stopping")
-                self.p.stop_many([record], force=spec["mode"] == "force-restart", deadline=deadline,
-                                 _expected_runs={record["uuid"]:observation["xen_unique_id"]})
+                op['stop_submission']['state'] = 'submitted'
+                self.save(op, 'stopping')
+                try:
+                    self.p.stop_many([record], force=spec["mode"] == "force-restart", deadline=deadline,
+                                     _expected_runs={record["uuid"]:observation["xen_unique_id"]})
+                except (PlatformError, OSError, ValueError):
+                    op['stop_submission']['state'] = 'returned'
+                    raise
+                op['stop_submission']['state'] = 'returned'
+                self.save(op, 'stopping')
+                self.e.checkpoint('recovery-stop-returned', op)
             self.save(op, "removed")
             record, records, absent = self.conditions(spec, deadline, target=False)
             if absent["presence"] != "absent":

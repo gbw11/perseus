@@ -22,6 +22,12 @@ DOCUMENTATION = (
     "docs/platform/build-guide.md", "docs/platform/cli-manager-spec.md",
     "docs/platform/README.md", "docs/platform/management-boundaries.md",
     "docs/platform/management-boot-boundaries.md", "docs/platform/cpu-layout.md",
+    # 현행 안내문에서 연결하는 담당별 요청과 공통 계약도 같은 revision으로 전달한다.
+    "docs/platform/management-integration-request.md",
+    "docs/contracts/health-evidence-v1.md", "docs/contracts/mqtt-contract-v1.md",
+    "docs/requests/2026-10-27-linux-health-agent.md",
+    "docs/requests/2026-10-27-recovery-health-ctrl.md",
+    "docs/requests/2026-10-27-authority-recovery-ctrl.md",
     "docs/verification/platform-management-boundaries-history.md",
     "docs/verification/zephyr-lifecycle-20261025.md", "docs/verification/boot-status-20261025.md",
     "platform/tests/fixtures/cpu-layout-responses.json",

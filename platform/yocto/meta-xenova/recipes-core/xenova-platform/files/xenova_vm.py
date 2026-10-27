@@ -1204,7 +1204,7 @@ def dhcp_ready(pid, timeout=5):
 def main(argv=None):
     raw = list(sys.argv[1:] if argv is None else argv)
     managed = {'firmware-transition','update-resources','list','get','retire','restore','purge','operation','create','delete','templates',
-               'recover-once','recover_once','snapshot','probe','execution-context','control-operation','recovery-operation','host-resume','cpu-layout','cpu-policy-set','cpu-host-prepare'}
+               'recover-once','recover_once','snapshot','probe','execution-context','control-operation','recovery-operation','recovery-reconcile','host-resume','cpu-layout','cpu-policy-set','cpu-host-prepare'}
     if '--json' in raw or (raw and raw[0] in managed):
         from xenova_management_cli import main as management_main
         return management_main(raw)
