@@ -283,6 +283,9 @@ verified 앱 전용이며 v2 진단과 구별한다. 공통 봉투의 VM/app/boo
 
 reason: CONTROL_UNAPPLIED, INPUT_UNAVAILABLE, INPUT_STALE, INPUT_INVALID,
 STATE_PREPARING, CALCULATION_FAILED, OUTPUT_INVALID. READY는 세대/진행 모두 1 이상이다.
+공통 drive 어댑터의 CALCULATION_FAILED에는 필수 계산의 실제 자원 실패·기존 release deadline
+미충족도 포함한다. 세부 원 errno/구간은 [local 건강 근거](health-evidence-v1.md)에 남기며
+새 reason·type·필드를 추가하지 않는다. CPU 사용률·v2 미수신만으로 이 사유를 만들지 않는다.
 알 수 없는 필드·상태·이유·범위·자료형은 거절한다. C와 Python은 같은 집합을 사용한다.
 
 ```json

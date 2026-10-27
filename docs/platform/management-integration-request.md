@@ -1,4 +1,4 @@
-# FastAPI·Spring·VM 관리 화면 연동 요청 — D02·D08
+# 플랫폼 연동 누적 요청 — 관리 작업·Linux 건강
 
 이 문서는 **담당자에게 요청하는 미구현 연동**이다. FastAPI·Worker·Spring·프론트 제품 코드는
 변경하지 않았다. 현재 하위 제공 기능은 [Manager 명세](cli-manager-spec.md#python-manager-호출)에,
@@ -11,8 +11,11 @@
 원 key·VM·action·원 spec 및 하위 결과 참조이며 새 실행 원장이 아니다.
 
 아래 변경은 제안한 공개 계약이므로 담당자 검토·구현·회귀를 거쳐야 한다. 기존 정상 VM 응답의
-의미를 바꾸지 않고, 작업 응답이 필요한 경우 별도 DTO로 구별한다. D01 판단·D03 수습,
-차량 입력/resume·전체 Telemetry 화면과 SQLite 도입은 포함하지 않는다.
+의미를 바꾸지 않고, 작업 응답이 필요한 경우 별도 DTO로 구별한다. 1~5절은 D02·D08의
+기존 요청으로, **하위 구현은 마감됐고 상위 연동은 미구현**이다. 6절의 D01 Linux 요청과
+7절의 하위 인수 보완은 이를 덮어쓰지 않는다. Worker 요청은
+[기존 ctrl 요청서](../requests/2026-10-20-manual-app-gateway-ctrl.md#d01-worker)에 누적한다.
+D03 수습·차량 입력/resume·전체 Telemetry 화면과 SQLite 도입은 포함하지 않는다.
 
 ## 1. FastAPI 담당 요청
 
@@ -144,3 +147,149 @@ operation ID/key만 알아서 다른 대상/주체의 요청을 조회·이행�
 
 FastAPI 연동·Spring 요청 추적·UI 표시를 각각 담당자가 구현한 뒤 같은 후보로 종단 수락한다.
 현재 요청서만으로 이 기능들이 설치·연결됐다고 표시하지 않는다.
+
+<a id="linux-health"></a>
+## 6. Linux 엔지니어·Agent 건강 연결 요청
+
+**CPU·메모리·스레드 상태를 정식 건강 판정의 입력으로 사용해야 합니다. 다만 그 결과는 모두
+‘VM 재시작’으로 이어지는 것이 아니라, 경고·준비 제한·기능 축소·승계·앱 재시작·VM 복구 중
+적절한 행동으로 연결돼야 합니다.**
+
+공통 정의와 공동 조건별 수락은 [건강 판정 계약](../contracts/health-evidence-v1.md)에 둔다.
+별도 최신 Linux 업무 요청서는 저장소에서 확인되지 않아 이 누적 문서에 추가했다. 아래 ID는
+문서 내 추적 ID이며 Jira 티켓 신설이 아니다. 수신 역할은 Linux 엔지니어·Agent 담당자다.
+실제 담당자 배정은 팀에서 확인해야 하며, 과거 117번의 담당 이력을 현재 소유자로 추정하지 않는다.
+상태는 모두 **요청 작성·우리 쪽 근거 제공 완료 / 담당자 구현·연동·실보드 수락 전**이다.
+
+### D01-L01 — OS 자원·수집 유효성
+
+- 대상: `platform/services/vm-agent/agent/xenova_agent/metrics.py`의
+  `MetricsCollector.collect/_cpu_values/_memory_values`, `procfs.py`, `processes.py:ProcessSampler.sample`.
+  기존 guest `/proc/stat` CPU는 할당 vCPU 전체 100%, process CPU는 한 코어 100%다.
+- 요청: 원 boot/Agent instance, 실제 표본 구간·reset/역전·read/parse 실패·부분 process 목록을
+  유효성과 함께 소비 가능하게 한다. process의 PID/starttime은 현재 내부에만 있으므로 이름/PID만으로
+  앱 수명을 판단하지 않는다. top-N 밖의 서비스 부재를 서비스 종료로 해석하지 않는다.
+- 권고: 기존 values/processes와 null/reason을 유지하고, 서비스용 근거는 등록된 필수 unit·PID/cgroup에
+  한정한다. 지원되는 환경에서 PSI·OOM 원인·cgroup memory.events를 선택형 근거로 검토하되,
+  미지원/권한 오류는 명시한다. 모든 thread 상시 발행이나 새 공개 지표를 선행조건으로 하지 않는다.
+- 행동: 높은 CPU·낮은 MemAvailable만이면 경고. 확인된 할당 실패·OOM으로 필수 서비스가 실제
+  중단된 경우 해당 기능을 제한하고 D01-L04의 감독/Worker에 원인을 넘긴다. VM 재시작기는 추가하지 않는다.
+- 설정·선행: 현재 metrics 기본 2초·top process 10개, payload 상한 60KiB는 소스값이다.
+  CPU 90%·메모리 90% 같은 새 건강 상수는 미합의다. 사용자 지정 앱의 필수 자원/완료 기한이 먼저 필요하다.
+- 수락: 정상 고부하+정상 완료에 VM 복구 호출 0, 첫 표본/역전/read 실패는 null+reason,
+  PID 재사용·top-N 잘림으로 이전 앱 진행 회복 0, 실제 OOM 종료는 단순 CPU 경고와 다른 이유를 남긴다.
+
+### D01-L02 — 필수 앱 서비스·실제 진행
+
+- 대상: Agent `__main__.py:main`, `reporter.py:Reporter._metrics_payload/tick`,
+  실제 필수 앱의 systemd unit과 업무 완료 연결부. 현재 process 통계·Agent heartbeat는 있지만
+  일반 앱 서비스의 의미 있는 완료/입력 부족 계약은 없다. 임의 unit 이름을 제품 설정으로 추가하지 않는다.
+- 요청: 앱 담당자가 필수 작업, 입력 유무, warm-up, 실제 완료 순번/오류, 적용한 제어 문맥을
+  제공하고 Linux 담당자가 unit/현재 MainPID·starttime·서비스 실행 수명과 결합한다.
+  원 timestamp·완료 순번을 보존하며 Agent 송신이 앱 진행을 대신 생성하지 않는다.
+- 권고: 기존 앱 연결부의 제한된 최신 상태를 우선 사용한다. 원격 앱 restart API·새 daemon·
+  범용 플러그인 시스템을 먼저 만들지 않는다. 새 필드가 필요하면 v1 스키마/소비자와 최소 확장을 합의한다.
+- 행동·회복: 입력 없음/정상 이벤트 대기는 기능의 준비 부족 또는 정상 idle이다. 유효 작업이 있는데
+  기존 기한을 넘겨 완료가 없으면 해당 서비스 기능 실패다. 현재 실행의 새 완료와 준비 유지로 회복을 확인한다.
+- 우리 제공물: Zephyr `xdh_work/xdh_assess`, 실제 progress/readiness 분리, 실제 실패/기한 fixture와
+  Manager 실행 바인딩. Zephyr의 시간값을 Linux의 보편 정책으로 복사하지 않는다.
+- 수락: Agent만 살아 있는 앱 정체를 정상으로 판정하지 않음, 일이 없는 앱은 deadlock 판정 0,
+  서비스 재시작/같은 PID 재사용/지연 보고가 이전 완료를 현재 준비로 되살리는 횟수 0.
+
+### D01-L03 — Agent 자체 건강·전달
+
+- 대상: `heartbeat.py`의 송신 loop, `reporter.py:Reporter.tick`, `__main__.py`의 두 thread 종료,
+  `deploy/xenova-agent.service`, 공용 MQTT의 실제 연결/구독 상태(제품 공용 코드 수정은 소유자 확인 후).
+- 요청: 수집 진행, 원천 오류, 마지막 성공, 송신 실패/크기 초과/오프라인 폐기를 구별한다.
+  Reporter가 멈춰도 별도 heartbeat가 계속될 수 있다는 현재 구조를 보존하고 명시한다.
+  Agent 자신의 heartbeat로 자기 collector 전체를 보증하지 않는다.
+- 권고·설정: 현재 heartbeat 5초, metrics 2초, `Restart=always`, `RestartSec=2`, stop 10초다.
+  종료된 Agent는 기존 systemd가 감독하되 살아 있는 정체 검출/Watchdog 지원은 아직 연결되지 않았다.
+  추가 watchdog을 채택하려면 무엇을 실제 진행으로 세는지·실패 종료 조건을 먼저 확정한다.
+- 행동: broker 단절은 전달 오류다. Agent 단독 종료를 앱 사망/VM 확정 장애로 바꾸지 않는다.
+  수신측이 Agent를 관측하지 못할 때 외부 감독 근거와 per-VM 전달 상태가 없으면 원인을 보류한다.
+- 수락: collector만 정체/Agent만 종료/앱만 종료/broker 단절을 각각 주입해 다른 원인·행동이 나오고,
+  재연결 때 오프라인 과거 표본·READY를 새 진행으로 재생하지 않는다.
+
+### D01-L04 — 지원되는 로컬 복구·VM 복구 경합
+
+- 대상: 실제 필수 서비스 unit의 `Restart/StartLimit*/Timeout*`와 Agent 감독,
+  Worker `watcher.py`, `engine.py`의 소비 연결(Worker 제품 수정은 해당 담당자).
+- 요청 입력: 서비스 실행 수명, 확정 종료 원인, 로컬 복구 시작/진행/성공/실패·소진,
+  원 기능의 회복 근거. 아직 이런 공개 wire 필드는 없으므로 구현된 것처럼 샘플을 만들지 않는다.
+- 권고: 지원되는 systemd 서비스만 로컬 감독이 소유한다. Worker는 로컬 복구 중인 동일 기능에
+  VM 복구를 경쟁 제출하지 않되, 유예를 매 heartbeat로 무한 갱신하지 않는다. 유예 상한은 실제 unit의
+  restart/backoff·시작 기한에서 산정하고 담당자가 확정한다. 임의 새 1회 재시작 기본값은 넣지 않는다.
+- 금지: user stop·원 operation/attempt·기한/예산을 덮지 않음, 공유 자원 정리 없는 thread abort,
+  자동 force, 모든 앱 공통 restart 순서, broker 장애로 반복 VM restart.
+- 회복: unit active가 아니라 현재 실행의 실제 업무 완료·필수 자원/입력·준비 확인이다.
+- 수락: local restart 진행/소진 중 Worker 경합에서 실행 소유자가 하나이고, user stop 이후 신규
+  create 0, 정상 기능 회복 전 episode/시도 예산을 신호 한 번으로 초기화하지 않는다.
+
+### D01-L05 — 배포·인수
+
+- 대상: `agent/deploy/install_into_rootfs.py`, `xenova-agent.service`·identity drop-in,
+  `platform/guests/common/prepare_instance.py`, `platform/scripts/prepare-xenova-guests.py`,
+  `platform/first-install/prepare-xenova-deployment.py`의 factory seed 경로.
+- 요청: 소스/버전·Paho·공용 xenova_mqtt·unit의 실제 설치 바이트와 일반 VM/factory 신원 조건을
+  고정한다. 기존 UUID·hostname·MAC/IP·인증정보를 재발급하지 않는다.
+- 선행·제공물: 현재 템플릿 Paho/Agent 설치 경로와 Manager execution-context, Bootstrap/receipt
+  제공은 이미 존재한다. 이는 새 건강 소비가 설치·연결됐다는 뜻은 아니다. runtime import·enable,
+  broker 전달·원천 계측·정책 행동을 별도 수락한다.
+- 수락: 정상 고부하/정상 idle/앱 정체/앱 종료/Agent 종료/OOM/전달 단절의 동일 입력 시험에서
+  단위·실행 수명·판정·허용 행동·회복 근거를 대조한다. 실제 board/새 템플릿 배포는 별도 승인/인수다.
+
+## 7. D02·D08 하위 마감 인수 보완
+
+기존 하위 마감은 [원 보고서](../verification/management-budget-adapter-20261027.md)를 유지한다.
+추가 경계 보완은 [후속 검증](../verification/health-evidence-20261027.md#d02-d08)에 둔다.
+상위 HTTP의 기존 미구현을 하위 완료의 실패로 다시 등록하지 않는다.
+
+```python
+def read_original(manager, vm_id, original_key, remaining_ms):
+    # 별도 요청 객체이며 같은 권위 저장소·admission/실행 잠금·guard를 사용한다.
+    return manager.fork().call(
+        "control-operation",
+        {"vm_id": vm_id, "idempotency_key": original_key,
+         "timeout_ms": min(remaining_ms, 15000)},
+        request_id="lookup-original", budget_ms=remaining_ms)
+
+def read_current(manager, vm_id, remaining_ms):
+    # get/list는 현행 긴 호출 직렬화 연결을 유지해야 하며 stop 전 선행 호출이 아니다.
+    one = manager.call("get", {"vm_id": vm_id, "timeout_ms": min(remaining_ms, 15000)},
+                       budget_ms=remaining_ms)
+    return one
+
+def read_all(manager, remaining_ms):
+    return manager.call("list", {"lifecycle": "REGISTERED",
+                                "timeout_ms": min(remaining_ms, 15000)},
+                        budget_ms=remaining_ms)
+```
+
+인자는 앞선 대기·호출 비용과 반환 여유를 뺀 **양수 정수 잔여 ms**다. 같은 예산을 두 함수를
+연속 호출할 때마다 다시 주는 예가 아니다. get/list와 원 기록 조회는 최대 15000ms, call의
+budget_ms는 1..105000ms지만 원 control의 물리 deadline은 기존 90초와 최초 잔여 예산으로
+고정한다. 후속 조회의 새 예산은 원 deadline을 재발급하지 않는다. 최초 사용자 control의 key/spec를
+Spring 관리 흐름이 제출 전 보존하고, 허용되는 동일 요청 이행 때 같은 값으로 전달해야 한다.
+
+| 응답·근거 | 담당자의 처리 |
+|---|---|
+| accepted + accepted/executing phase·pending | FastAPI가 원 details를 보존하고 실제 정지 완료와 다른 DTO로 전달. Spring이 원 key/operation을 보존하고 제한된 조회·허용 이행 책임을 가짐 |
+| uncertain·RECONCILE_REQUIRED | 자동 202/polling/새 key/force로 바꾸지 않음. 원 기록·수습 필요를 전달 |
+| VM_NOT_FOUND | 완전한 해당 시점 검색의 부재. 앞선 제출이 결코 수락되지 않았다는 증거가 아님 |
+| DEADLINE_EXCEEDED | 조회 예산 소진. 없음/유일함을 확정하지 않음 |
+| OBSERVATION_UNAVAILABLE·읽기/형식 오류 | 불완전 directory 열람·사라진 항목·읽기 실패를 보존. key 존재 여부 미확인 |
+| 같은 key의 복수 기록 | RECONCILE_REQUIRED. 첫 항목을 임의로 골라 유일한 원 작업으로 확정하지 않음 |
+| host 변경 | 원 host와 다르면 execution_deadline_expired=null. 서로 다른 monotonic을 비교하거나 실행 허가를 복원하지 않음 |
+| completed replay의 vm=null/warning | 원 완료 보존. 현재 상태 미관측을 정지 완료/실패로 채우거나 재실행하지 않음 |
+
+정확한 수정 지점은 1~3절 표를 따른다. FastAPI는 서비스 인증·대상 참조 검증 후 하위 VM-bound
+조회만 호출하고, 허용 details(`accepted/completion/phase/operation_id/intent_revision/host_boot_id/
+lifecycle_generation/deadline_monotonic_ms/execution_deadline_expired/next_action` 및 안전한 warning)를
+구조적으로 전달한다. raw journal·경로·credential 전체를 반환하지 않는다. Spring은 현재 요청
+주체 정책을 대조해야 하며 기존 모델에 사용자 소유 필드가 없다는 한계를 숨기지 않는다.
+
+Spring의 기존 관리 요청 추적이 재시작 뒤 원 key를 회수하고 조회·지원 이행을 이어가는 주체다.
+구현 전에는 자동 후속 이행을 지원한다고 표시하지 않는다. 브라우저의 재확인은 같은 key를
+회수하며 조회가 실행기로 바뀌지 않는다. T01~T16, fork 중 다른 예산/trace 혼입 0,
+부분 열람 뒤 false absence/unique 0, 완료 replay 추가 물리 명령 0을 담당자 인수 assertion으로 유지한다.
