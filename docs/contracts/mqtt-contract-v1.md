@@ -269,6 +269,8 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 - 받는 쪽은 3초 동안 못 받으면 그 앱을 끊김으로 표시한다.
 - verified의 `active`는 게스트가 적용한 control에서 자신이 선택됐다는 보고이며 Gateway의 실제 출력 허가가 아니다. 준비·승격은 §6.2를 따른다.
 - Legacy의 에이전트가 없는 Zephyr 주행 VM에서는 이 신호가 앱 쪽 생존 정보다. 복구 서비스의 VM 재시작 판정(5.1)과 게이트웨이의 `AUTO_READY` 판정(5.2)은 Xen 도메인 상태와 이 신호를 쓴다 (시나리오 §8 D8).
+- Linux VM 의 앱(메시지 보드 등)도 같은 토픽·형식으로 보낸다. 주행과 무관한 앱의 평상시 상태는 `idle` 이다. 에이전트의 `agent.heartbeat`(3장)는 VM·에이전트 생존이고 앱 생존이 아니며, `metrics` 의 `processes[]` 는 CPU 상위 목록이라 앱 생존 근거로 쓰지 않는다.
+- Linux 앱의 이 신호는 **상태 표시용**이다. 복구 서비스는 Linux VM 을 이 신호로 재시작하지 않는다(Linux VM 재시작 근거는 Xen 상태와 `agent.heartbeat`). 멈춘 Linux 앱은 게스트 안 systemd 가 `Restart=on-failure`·`WatchdogSec` 으로 되살린다. 앱은 처리 루프에서 이 신호와 watchdog 통지를 함께 보낸다(공용 클라이언트 `xenova_mqtt.AppHeartbeat`).
 
 ### 6.2 앱 준비 보고 `app.readiness`
 
@@ -428,6 +430,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1 (보완) | 2026-10-20 | 접두사 `xenova/v1/`, 주행 VM Zephyr(4장), `app.heartbeat`(6.1), 수동주행 입력(7장) |
 | v1.1 | 2026-10-21 | 시나리오 D1·D3·D8 반영 (S15P31E110-242). ESP32를 MQTT 참여자에서 빼고 게이트웨이 시리얼 뒤로(4장, 5.3, 9장 계정 삭제), `vehicle.status` 발행 = 게이트웨이 `source_id: dom0-gateway`(5.4), 5.5 ESP32 수용 규칙 → 게이트웨이 수용 규칙, Zephyr vchan + dom0 중계(4.1, 10장에서 삭제), `AUTO_READY`·VM 재시작 근거에서 에이전트 대신 도메인 상태 + `app.heartbeat`(5.1·5.2·6.1). 토픽 이름·payload 필드는 그대로 |
 | v1.2 | 2026-10-22 | 복구 Worker 건강 스냅샷(S15P31E110-124): MQTT-13 `vm.health`(11.1, `lease_s` 수명과 주기 재발행·수신 측 만료 규칙, retain 플래그 수신은 임시값), 계정 `dom0-server` 의 구독에 `apps/+/events`·publish 에 `recovery/health/{vm_id}` 추가(9장), 11장 판정 입력에 Zephyr `app.heartbeat` 명시. 기존 토픽·payload 는 그대로 |
+| v1.3 | 2026-10-26 | Linux 앱도 `app.heartbeat`(6.1)를 같은 형식으로 보낸다. 상태 표시용이며 복구 서비스의 Linux VM 재시작 근거가 아니다. 멈춘 Linux 앱은 게스트 systemd 가 재시작 (S15P31E110-301) |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의
 QoS 교환은 메시지 전달을 위한 것이며 앱/장치 적용 확인을 대신하지 않는다.
