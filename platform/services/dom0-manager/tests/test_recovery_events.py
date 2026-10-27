@@ -180,7 +180,7 @@ def test_compaction_never_rewrites_a_log_it_could_not_read(tmp_path, monkeypatch
     assert path.read_text(encoding="utf-8") == before
 
 
-def test_append_reports_failure_and_writes_nothing(tmp_path):
+def test_unwritable_file_reports_unconfirmed_append_then_same_id_retry(tmp_path):
     if os.name != "nt" and os.geteuid() == 0:
         pytest.skip("root ignores file permissions")
     path = tmp_path / "events.jsonl"
@@ -211,7 +211,7 @@ def test_compaction_keeps_a_tombstone_for_damage_inside_the_retained_window(tmp_
     assert log.after(UUID(int=203), 10)["gap"] is False
 
 
-def test_partial_writes_are_deduplicated_by_event_id(tmp_path):
+def test_complete_duplicate_lines_are_deduplicated_by_event_id(tmp_path):
     path = tmp_path / "events.jsonl"
     log = EventLog(path)
     log.append(event(1))

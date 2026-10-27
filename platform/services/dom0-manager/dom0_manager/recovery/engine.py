@@ -539,7 +539,7 @@ class RecoveryEngine:
                 log.exception("recovery event sink failed")
                 stored = False
             if stored is False:
-                break  # 순서를 지킨다. 같은 event_id 로 다시 시도한다
+                break  # 기록 효과는 미확정. pending을 보존하고 같은 ID/내용으로 재시도한다.
             record.pending_events.pop(0)
             moved += 1
         if moved:

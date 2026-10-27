@@ -1,6 +1,7 @@
 """별도 프로세스와 SIGKILL로 실제 파일 저장·Engine/Watcher 복원을 검증한다."""
 
 import errno
+import json
 import multiprocessing as mp
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from dom0_manager.recovery.arming import ArmingStore
+from dom0_manager.recovery.events import EventLog
 from dom0_manager.recovery.model import HealthState
 from dom0_manager.recovery.state import RecoveryStore, RecoveryStatus
 from test_recovery_engine import REC, judgment, make, pending_event, saved_executing
@@ -158,3 +160,47 @@ def test_state_and_pending_event_remain_one_replace_unit(tmp_path, cut):
         assert restored.pending_events == [pending_event()]
         assert restored.request == original.request
         assert restored.attempt == original.attempt
+
+
+def append_cut_child(root):
+    root = Path(root)
+    log = EventLog(root / 'recovery-events.jsonl')
+    world = make(root, outbox=log)
+    world.engine.on_judgment(judgment())
+    real = log.append
+    def append(value):
+        result = real(value)
+        if value['type'] == 'recovery.completed':
+            assert result is True
+            os.kill(os.getpid(), signal.SIGKILL)
+        return result
+    with patch.object(log, 'append', append):
+        world.tick()
+
+
+def pending_check_child(root, expected):
+    root = Path(root)
+    world = make(root, outbox=EventLog(root / 'recovery-events.jsonl'), id_start=500)
+    try:
+        world.tick()
+        assert world.platform.recover_calls() == []
+        actual = world.record().to_json()
+        assert actual['request'] == expected['request']
+        assert actual['attempt'] == expected['attempt']
+        assert actual['recovery_attempt_id'] == expected['recovery_attempt_id']
+        assert actual['pending_events'] == []
+    finally:
+        world.engine.shutdown()
+
+
+def test_append_confirmed_then_sigkill_before_pending_clear(tmp_path):
+    process(append_cut_child, str(tmp_path), killed=True)
+    original = json.loads((tmp_path / 'recoveries.json').read_text())['recoveries'][0]
+    pending = original['pending_events']
+    assert [e['type'] for e in pending] == ['recovery.completed']
+    before = EventLog(tmp_path / 'recovery-events.jsonl').events()
+    assert before[-1] == pending[0]
+    process(pending_check_child, str(tmp_path), original)
+    log = EventLog(tmp_path / 'recovery-events.jsonl')
+    assert log.events() == before
+    assert len(log.path.read_bytes().splitlines()) == 3  # raw 중복 1개, 논리 사건 2개

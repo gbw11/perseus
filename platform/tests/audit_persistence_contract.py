@@ -75,7 +75,7 @@ def append_uncertainty(home):
     assert log.append(event) is True
     raw=path.read_text().splitlines();events=log.events()
     assert len(raw)==2 and len(events)==1
-    return {'finding':'S02','result':'FAIL_FALSE_MEANS_NO_EFFECT_COMMENT; SAME_ID_DEDUP_PASSES',
+    return {'finding':'S02','result':'PASS_UNCONFIRMED_APPEND_EFFECT_AND_SAME_ID_DEDUP',
         'append_return_on_failed_sync':accepted,'raw_lines_after_same_event_retry':len(raw),
         'visible_events':len(events),'event_id_preserved':events[0]['event_id']==event['event_id']}
 
