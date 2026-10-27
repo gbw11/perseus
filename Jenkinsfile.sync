@@ -39,7 +39,8 @@ pipeline {
 
                         source_branch=''
                         for candidate in platform frontend backend vehicle; do
-                            if [ "$subject" = "Merge branch '$candidate' into 'develop'" ]; then
+                            if [ "$subject" = "Merge branch '$candidate' into 'develop'" ] || \
+                               [ "$subject" = "$candidate into dev" ]; then
                                 source_branch="$candidate"
                                 break
                             fi
