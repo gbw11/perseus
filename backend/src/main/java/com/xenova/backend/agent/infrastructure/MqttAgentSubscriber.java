@@ -1,7 +1,9 @@
 package com.xenova.backend.agent.infrastructure;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
+import com.xenova.backend.event.application.RecoveryEventMessageHandler;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -31,14 +33,16 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
     static final String[] TOPICS = {
             AgentMessageHandler.TOPIC_PREFIX + "+/heartbeat",
             AgentMessageHandler.TOPIC_PREFIX + "+/inventory",
-            AgentMessageHandler.TOPIC_PREFIX + "+/metrics"
+            AgentMessageHandler.TOPIC_PREFIX + "+/metrics",
+            RecoveryEventMessageHandler.TOPIC
     };
-    static final int[] QOS = {1, 1, 0};
+    static final int[] QOS = {1, 1, 0, 1};
 
     private static final Logger log = LoggerFactory.getLogger(MqttAgentSubscriber.class);
 
     private final MqttProperties properties;
     private final AgentMessageHandler handler;
+    private final RecoveryEventMessageHandler recoveryEventHandler;
     private final Clock clock;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "mqtt-agent-subscriber");
@@ -49,9 +53,14 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
     private volatile MqttClient client;
     private volatile boolean running;
 
-    public MqttAgentSubscriber(MqttProperties properties, AgentMessageHandler handler, Clock clock) {
+    public MqttAgentSubscriber(
+            MqttProperties properties,
+            AgentMessageHandler handler,
+            RecoveryEventMessageHandler recoveryEventHandler,
+            Clock clock) {
         this.properties = properties;
         this.handler = handler;
+        this.recoveryEventHandler = recoveryEventHandler;
         this.clock = clock;
     }
 
@@ -116,7 +125,12 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
 
     @Override
     public void messageArrived(String topic, MqttMessage message) {
-        handler.handle(topic, message.getPayload(), clock.instant());
+        Instant receivedAt = clock.instant();
+        if (RecoveryEventMessageHandler.TOPIC.equals(topic)) {
+            recoveryEventHandler.handle(message.getPayload(), receivedAt);
+            return;
+        }
+        handler.handle(topic, message.getPayload(), receivedAt);
     }
 
     @Override

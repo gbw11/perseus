@@ -1,8 +1,11 @@
 package com.xenova.backend.agent.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mockingDetails;
+import static org.mockito.Mockito.verify;
 
 import com.xenova.backend.agent.domain.AgentHeartbeatRepository;
+import com.xenova.backend.event.application.RecoveryEventMessageHandler;
 import io.moquette.broker.Server;
 import io.moquette.broker.config.MemoryConfig;
 import java.io.IOException;
@@ -20,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 // End-to-end through a real (embedded) MQTT broker: publish like an agent, expect the row in the database.
 @SpringBootTest
@@ -31,6 +35,9 @@ class MqttAgentSubscriberIntegrationTest {
 
     @Autowired
     private AgentHeartbeatRepository heartbeatRepository;
+
+    @MockitoBean
+    private RecoveryEventMessageHandler recoveryEventHandler;
 
     @DynamicPropertySource
     static void mqttProperties(DynamicPropertyRegistry registry) {
@@ -67,6 +74,30 @@ class MqttAgentSubscriberIntegrationTest {
 
         assertThat(heartbeatRepository.findById(VM)).isPresent();
         assertThat(heartbeatRepository.findById(VM).orElseThrow().getBootId()).isEqualTo("boot-1");
+    }
+
+    @Test
+    void recoveryEventPublishedToBrokerIsRoutedToRecoveryHandler() throws Exception {
+        byte[] payload = "{\"event_id\":\"event-1\",\"type\":\"recovery.started\"}"
+                .getBytes(StandardCharsets.UTF_8);
+
+        try (MqttClient publisher = new MqttClient(
+                "tcp://127.0.0.1:" + PORT, "fake-recovery-worker", new MemoryPersistence())) {
+            publisher.connect();
+            Instant deadline = Instant.now().plus(Duration.ofSeconds(10));
+            while (mockingDetails(recoveryEventHandler).getInvocations().isEmpty()
+                    && Instant.now().isBefore(deadline)) {
+                MqttMessage message = new MqttMessage(payload);
+                message.setQos(1);
+                publisher.publish(RecoveryEventMessageHandler.TOPIC, message);
+                Thread.sleep(200);
+            }
+            publisher.disconnect();
+        }
+
+        verify(recoveryEventHandler).handle(
+                org.mockito.ArgumentMatchers.any(byte[].class),
+                org.mockito.ArgumentMatchers.any(Instant.class));
     }
 
     private static int freePort() {
