@@ -40,7 +40,7 @@ public class MetricSample {
 
     @Lob
     @Convert(converter = MetricValuesConverter.class)
-    @Column(name = "metric_values")
+    @Column(name = "metric_values", columnDefinition = "longtext")
     private List<MetricValue> values;
 
     protected MetricSample() {
