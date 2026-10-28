@@ -160,7 +160,7 @@ class VmStateWatcherIntegrationTest {
 
     private String createVm(String name) throws Exception {
         String body = """
-                {"name":"%s","template_id":"debian-13-arm64","template_version":"1.0.0","vcpus":1,"memory_mib":256}
+                {"name":"%s","template_id":"debian-13-arm64","template_version":"1.0.2","vcpus":1,"memory_mib":256}
                 """.formatted(name);
         String response = mockMvc.perform(authorized(post("/api/v1/vms"))
                         .contentType(MediaType.APPLICATION_JSON)

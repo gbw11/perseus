@@ -116,6 +116,7 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
         scheduler.execute(() -> {
             try {
                 client.subscribe(TOPICS, QOS);
+                log.info("MQTT subscribed to {} topic filters", TOPICS.length);
                 recoveryEventBackfillService.requestBackfill();
             } catch (MqttException exception) {
                 log.error("MQTT subscribe failed", exception);
