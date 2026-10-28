@@ -39,7 +39,7 @@ heartbeat 는 메인 스레드, inventory·metrics 는 별도 스레드에서 �
 | `disk_read_bytes_total` / `disk_write_bytes_total` | /proc/diskstats 섹터 × 512, `labels.device`. /sys/block 의 디스크 단위만(파티션·loop·ram 제외). /sys/block 을 못 읽으면 파티션과 겹쳐 셀 수 있어 `null` + `read_failed` |
 | `net_rx_bytes_total` / `net_tx_bytes_total` | /proc/net/dev, `labels.iface`. lo 제외 |
 | `processes[]` | CPU 기준 상위 10개(`XENOVA_AGENT_TOP_PROCESSES`, 0~50) `{pid, name, cpu_percent, rss_bytes}`. `cpu_percent` 는 top 과 같은 1코어 기준이라 100 을 넘을 수 있음. 첫 표본은 빈 목록. top-N 목록이라 목록에 없는 프로세스가 끝났다는 뜻이 아님 |
-| 프로세스 수집 상태 | 빈 목록의 뜻을 에이전트 안에서 가른다: `first_sample` / `ok` / `partial`(일부 stat 을 권한·형식 때문에 못 읽음. 첫 표본이어도 실패가 있으면 partial) / `read_failed`(/proc 목록을 못 읽음. 원인 종류를 `PermissionError(EACCES)` 처럼 예외·errno 이름으로만 남김) / `disabled`(0개 설정, /proc 을 훑지 않음). 발견한 PID 수와 읽기 성공·사라짐(읽는 사이 끝난 프로세스, 정상)·실패 수, top-N 잘림을 같이 센다. 상태가 바뀔 때만 로그(`partial`·`read_failed` 는 WARNING). **아직 MQTT 로 내보내지 않는다**(공개 필드는 백엔드와 계약 합의 뒤) |
+| `process_collection` | `processes[]` 가 어떻게 모였는지(MQTT 계약 v1.5 3장). 빈 목록의 뜻을 가른다: `first_sample` / `ok` / `partial`(일부 stat 을 권한·형식 때문에 못 읽음. 첫 표본이어도 실패가 있으면 partial) / `read_failed`(/proc 목록을 못 읽음. 원인 종류를 `PermissionError(EACCES)` 처럼 예외·errno 이름으로만 남김) / `disabled`(0개 설정, /proc 을 훑지 않음). `{status, discovered, read_ok, vanished, failed, truncated, error}` 로 발견한 PID 수와 읽기 성공·사라짐(읽는 사이 끝난 프로세스, 정상)·실패 수, 잘림(top-N·크기 상한)을 같이 보낸다. 에이전트 로그는 상태가 바뀔 때만(`partial`·`read_failed` 는 WARNING) |
 | 측정 실패 | 0 이 아니라 `value: null` + `unavailable_reason`(`first_sample`·`counter_reset`·`not_supported`·`read_failed`·`parse_error`·`device_not_found`) |
 | 단위 | `percent`·`bytes` 만(Spring 이 그 밖의 단위면 메시지를 거부). load average 는 허용 단위가 없어 보내지 않음 |
 | 끊김 | 끊긴 동안에도 수집은 이어 가지만 발행하지 않고 버림(QoS 0 실시간 표본을 쌓았다가 몰아 보내지 않음). 재연결 뒤 새 표본부터 |

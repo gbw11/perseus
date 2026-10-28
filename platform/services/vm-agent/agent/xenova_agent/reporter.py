@@ -9,6 +9,8 @@
 - window_ms 는 설정 주기가 아니라 직전 표본과의 실제 간격이다. 첫 표본은 구간이 없어 null
 - 직렬화한 payload 가 상한을 넘으면 processes[] 를 뒤에서부터 줄인다(Spring 은 64KB 넘는 메시지를 통째로 거부한다).
   다 줄여도 values[] 만으로 넘으면 보내지 않고 oversized 로 센다
+- process_collection 은 processes[] 가 어떻게 모였는지다(processes.py 의 수집 상태·개수). 빈 목록이 첫 표본·/proc 읽기 실패·
+  0개 설정·일부 읽기 실패 중 무엇인지 받는 쪽이 가를 수 있게 한다. truncated 는 top-N 이나 크기 상한으로 목록 밖으로 밀린 것이 있다는 뜻
 - 수집·발행 예외는 그 틱만 버리고 계속 돈다. 고정된 발행 오류는 heartbeat 쪽이 종료 코드로 드러낸다
 """
 
@@ -24,6 +26,7 @@ from typing import Any
 from xenova_mqtt import topics
 
 from .heartbeat import Publisher, StopSignal
+from .processes import ProcessSample
 
 log = logging.getLogger("xenova_agent.reporter")
 
@@ -43,7 +46,7 @@ class Reporter:
         *,
         collect_inventory: Callable[[], dict[str, Any]],
         collect_metrics: Callable[[], list[dict[str, Any]]],
-        collect_processes: Callable[[], list[dict[str, Any]]],
+        collect_processes: Callable[[], ProcessSample],
         interval_s: float = 2.0,
         inventory_refresh_s: float = 60.0,
         clock: Callable[[], float] = time.monotonic,
@@ -102,10 +105,13 @@ class Reporter:
         window_ms = None if self._last_sample_at is None else int(round((now - self._last_sample_at) * 1000))
         self._last_sample_at = now
         values = self._collect_metrics()
-        processes = self._collect_processes()
-        payload = {"window_ms": window_ms, "values": values, "processes": processes}
+        sample = self._collect_processes()
+        collection = {"status": sample.status, "discovered": sample.discovered, "read_ok": sample.read_ok,
+                      "vanished": sample.vanished, "failed": sample.failed, "truncated": sample.truncated, "error": sample.error}
+        payload = {"window_ms": window_ms, "values": values, "processes": list(sample.rows), "process_collection": collection}
         while payload["processes"] and payload_size(payload) > self._limit:
             payload["processes"] = payload["processes"][:-1]
+            collection["truncated"] = True  # 크기 상한으로 줄인 것도 목록 밖으로 밀린 것이다
         return payload
 
     def _reconnected(self, connected: bool) -> bool:
