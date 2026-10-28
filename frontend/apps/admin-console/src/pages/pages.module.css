@@ -1150,11 +1150,6 @@ button.chip:hover:not(.chipOn) {
   font-weight: 700;
   letter-spacing: 0.1em;
 }
-.consoleHint {
-  margin: calc(var(--x-space-2) * -1) 0 0;
-  color: var(--x-text-muted);
-  font-size: var(--x-text-xs);
-}
 .cpuGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

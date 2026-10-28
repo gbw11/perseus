@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVms } from '../api/queries';
 import { osLabel, roleOf } from '../domain/roles';
-import { STATE_HEALTH, STATE_LABEL } from '../format';
+import { capitalizeFirst, STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
 
@@ -24,6 +24,7 @@ export function ConsolePage() {
   const [params, setParams] = useSearchParams();
   const items = vms.data?.items ?? [];
   const selected = items.find((vm) => vm.vm_id === params.get('vm')) ?? items[0];
+  const selectedRole = selected ? roleOf(selected, drive) : null;
 
   return (
     <div className={styles.page}>
@@ -33,10 +34,6 @@ export function ConsolePage() {
           <h1>VM Console</h1>
         </div>
       </header>
-
-      <p className={styles.consoleHint}>
-        [연결]로 접속 · VM 당 쓰기 세션 1개 · 연결 해제는 VM 을 끄지 않습니다.
-      </p>
 
       {vms.error && (
         <p className={styles.error} role="alert">
@@ -60,13 +57,13 @@ export function ConsolePage() {
               onClick={() => setParams({ vm: vm.vm_id }, { replace: true })}
             >
               <span className={styles.row}>
-                <b style={{ color: role?.color }}>{role?.title ?? vm.name}</b>
+                <b style={{ color: role?.color }}>{role?.vmLabel ?? capitalizeFirst(vm.name)}</b>
                 <span className={styles.grow} />
                 <StatusBadge health={STATE_HEALTH[vm.state]} label={STATE_LABEL[vm.state]} size="sm" />
               </span>
               <span className={styles.eyebrow}>
-                {vm.name} · {osLabel(vm)}
-                {vm.guest_kind === 'zephyr' ? ' · 셸 없음(로그만)' : ''}
+                {role ? (role.driving ? 'Drive' : 'Infotainment') : capitalizeFirst(vm.name)} · {osLabel(vm)}
+                {vm.guest_kind === 'zephyr' ? ' · 로그 전용' : ''}
               </span>
             </button>
           );
@@ -75,7 +72,11 @@ export function ConsolePage() {
 
       {selected && (
         <Suspense fallback={<p className={styles.dim}>콘솔 준비 중…</p>}>
-          <ConsolePanel key={selected.vm_id} vm={selected} />
+          <ConsolePanel
+            key={selected.vm_id}
+            vm={selected}
+            displayName={selectedRole?.vmLabel ?? capitalizeFirst(selected.name)}
+          />
         </Suspense>
       )}
     </div>
