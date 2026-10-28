@@ -147,7 +147,7 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
             펌웨어에는 셸이 없습니다.
           </p>
         )}
-        <div data-theme="dark" className={styles.screen}>
+        <div data-theme="xenova" className={styles.screen}>
           <div ref={host} className={styles.terminal} />
         </div>
         <p className={styles.hint}>로그인은 게스트 계정을 사용합니다. 연결 해제는 VM을 종료하지 않습니다.</p>

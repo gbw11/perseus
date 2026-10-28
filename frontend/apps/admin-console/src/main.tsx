@@ -22,6 +22,9 @@ import { VmDetailPage } from './pages/VmDetailPage';
 import { VmListPage } from './pages/VmListPage';
 import { VisionPage } from './pages/VisionPage';
 
+// 관리자 콘솔에만 XENOVA 브랜드 테마를 적용한다. HDMI 화면은 기존 테마를 유지한다.
+document.documentElement.dataset.theme = 'xenova';
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

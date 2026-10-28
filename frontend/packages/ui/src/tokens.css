@@ -93,6 +93,47 @@
   --x-track-lane: #e8b23a;
 }
 
+/*
+ * XENOVA 관리자 콘솔 브랜드 테마.
+ * HDMI 화면의 기존 테마와 분리하기 위해 admin-console에서만 data-theme="xenova"를 지정한다.
+ */
+[data-theme='xenova'] {
+  --x-bg: #0e141d;
+  --x-surface: #19232f;
+  --x-surface-2: #263342;
+  --x-surface-3: #314052;
+  --x-surface-sunken: #0a1018;
+  --x-border: #354353;
+  --x-text: #f5f1e8;
+  --x-text-muted: #a9b3c1;
+  --x-primary: #c0e1e1;
+  --x-primary-text: #0e141d;
+  --x-shadow: 0 12px 32px rgb(2 7 14 / 22%);
+
+  /* 시스템 상태색은 브랜드색·VM 식별색과 분리한다. */
+  --x-ok: #77d6aa;
+  --x-fault: #ff6b78;
+  --x-recovering: #f0ad68;
+  --x-stopped: #8f9baa;
+  --x-ok-soft: #173a33;
+  --x-fault-soft: #432029;
+  --x-recovering-soft: #44331f;
+  --x-stopped-soft: #26313d;
+
+  /* VM 식별색: 넓은 면이 아닌 선·라벨·차트에만 사용한다. */
+  --x-app-autonomous: #c0e1e1;
+  --x-app-manual: #c83f53;
+  --x-app-interaction: #e5dcc8;
+  --x-app-simulator: #7ebfc2;
+  --x-track-road: #2b3745;
+  --x-track-edge: #637082;
+  --x-track-lane: #e5dcc8;
+
+  --x-guest-debian: #e5dcc8;
+  --x-guest-ubuntu: #e7835d;
+  --x-guest-zephyr: #c0e1e1;
+}
+
 *,
 *::before,
 *::after {
