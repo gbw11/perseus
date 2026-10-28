@@ -111,6 +111,41 @@ class EventsWebSocketIntegrationTest {
     }
 
     @Test
+    void reconnectReplaysEachMissedRecoveryEventOnceBeforeLiveEvents() throws Exception {
+        byte[] cursorEvent = recoveryEvent(711, "recovery.started", "");
+        byte[] missedEvent = recoveryEvent(712, "recovery.completed",
+                ",\"attempt_duration_ms\":500,\"recovery_duration_ms\":1000,\"execution_id\":\"exec-replayed\"");
+        assertThat(recoveryEventMessageHandler.handle(cursorEvent, Instant.parse("2026-10-28T00:00:02Z")))
+                .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
+        assertThat(recoveryEventMessageHandler.handle(missedEvent, Instant.parse("2026-10-28T00:00:03Z")))
+                .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
+        assertThat(recoveryEventMessageHandler.handle(missedEvent, Instant.parse("2026-10-28T00:00:04Z")))
+                .isEqualTo(RecoveryEventMessageHandler.Result.DUPLICATE);
+
+        Client client = authenticatedClient();
+        client.send("""
+                {"type":"subscribe","request_id":"recovery-reconnect","vm_ids":["%s"],
+                 "event_types":["recovery.completed","recovery.failed"],"after_event_id":"%s"}
+                """.formatted(RECOVERY_VM_ID, recoveryEventId(711)));
+
+        JsonNode subscribed = client.next();
+        assertThat(subscribed.path("replayed_count").asInt()).isEqualTo(1);
+        JsonNode replayed = client.next();
+        assertThat(replayed.path("seq").asLong()).isEqualTo(1L);
+        assertRecoveryPush(replayed.path("payload"), 712, "recovery.completed", "INFO");
+        assertThat(replayed.path("payload").path("payload").path("execution_id").asText())
+                .isEqualTo("exec-replayed");
+
+        acceptRecoveryEvent(713, "recovery.failed",
+                ",\"attempt_duration_ms\":550,\"recovery_duration_ms\":1100,"
+                        + "\"final\":true,\"error\":" + recoveryError());
+        JsonNode live = client.next();
+        assertThat(live.path("seq").asLong()).isEqualTo(2L);
+        assertRecoveryPush(live.path("payload"), 713, "recovery.failed", "ERROR");
+        client.session.close();
+    }
+
+    @Test
     void subscribeWithAfterEventIdReplaysTheMissedEvents() throws Exception {
         VmEvent lastSeen = record("vm-ws-c", EventType.VM_CREATED);
         VmEvent missed1 = record("vm-ws-c", EventType.VM_STATE_CHANGED);
@@ -168,7 +203,14 @@ class EventsWebSocketIntegrationTest {
     }
 
     private void acceptRecoveryEvent(int eventNumber, String type, String terminalFields) {
-        byte[] payload = ("""
+        byte[] payload = recoveryEvent(eventNumber, type, terminalFields);
+
+        assertThat(recoveryEventMessageHandler.handle(payload, Instant.parse("2026-10-28T00:00:02Z")))
+                .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
+    }
+
+    private static byte[] recoveryEvent(int eventNumber, String type, String terminalFields) {
+        return ("""
                 {
                   "event_id":"%s",
                   "type":"%s",
@@ -185,9 +227,6 @@ class EventsWebSocketIntegrationTest {
                 """).formatted(recoveryEventId(eventNumber), type, RECOVERY_VM_ID,
                         RECOVERY_OPERATION_ID, RECOVERY_CORRELATION_ID, terminalFields)
                 .getBytes(StandardCharsets.UTF_8);
-
-        assertThat(recoveryEventMessageHandler.handle(payload, Instant.parse("2026-10-28T00:00:02Z")))
-                .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
     }
 
     private static void assertRecoveryPush(
