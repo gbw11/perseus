@@ -136,9 +136,9 @@ def test_inventory_values_are_sanitized_to_the_contract(oracle):
              "addresses": [{"address": f"fe80::{j}", "family": "ipv6"} for j in range(6)]} for i in range(20)]
     inventory = {"os": {"id": "Ubuntu Core!", "version_id": None}, "kernel_release": "k" * 200, "hostname": "unknown", "interfaces": many}
     client = FakeClient()
-    publisher, _, t = make(client, inventory=inventory)
+    publisher, _, t = make(client, inventory=inventory, max_payload_bytes=2000)  # 계약 상한 안에서는 inventory 가 4096 을 넘지 않아 상한을 낮춰 본다
     publisher.tick()
-    assert publisher.oversized == 1 and client.messages("inventory") == []  # 16개 × 4주소는 4096 바이트를 넘어 보내지 않는다
+    assert publisher.oversized == 1 and client.messages("inventory") == []  # 상한을 넘는 inventory 는 보내지 않는다
     assert client.payloads("metrics")[0]["samples"][3] == {
         "name": "publisher.payload_oversize_total", "unit": "count", "kind": "counter", "encoding": "u64_decimal", "value": "1",
         "status": "ok", "reason": None, "source_rc": 0, "labels": {},
@@ -151,16 +151,36 @@ def test_inventory_values_are_sanitized_to_the_contract(oracle):
     assert publisher.oversized == 2  # 갱신 주기에 다시 시도한다
     payload = publisher._inventory_payload(inventory)
     assert payload["os"] == {"id": "linux", "version": "unknown", "kernel_release": "k" * 128} and payload["hostname"] is None
-    assert len(payload["interfaces"]) == 16 and payload["interfaces_omitted"] == 4
+    assert len(payload["interfaces"]) == 4 and payload["interfaces_omitted"] == 16
     first = payload["interfaces"][0]
     assert first["name"] == "veryverylongbridgeinterfacename" and first["mac"] == "aa:bb:cc:dd:ee:ff" and len(first["addresses"]) == 4
     assert payload["interfaces"][1]["mac"] is None  # 형식이 아닌 MAC 은 꾸미지 않고 null
     # 줄인 결과는 계약을 지킨다
-    inventory["interfaces"] = many[:3]
+    inventory["interfaces"] = many[:6]
     client = FakeClient()
     publisher, _, _ = make(client, inventory=inventory)
     publisher.tick()
     validate_all(oracle, client)
+    sent = client.payloads("inventory")[0]
+    assert len(sent["interfaces"]) == 4 and sent["interfaces_omitted"] == 2 and sent["limits"]["max_payload_bytes"] == MAX_PAYLOAD_BYTES
+
+
+def test_interfaces_beyond_the_contract_limit_drop_addressless_ones_first(oracle):
+    """dom0 처럼 vif 가 많은 호스트: 계약 상한 4개를 IPv4 있는 것부터 채우고 나머지는 interfaces_omitted 로 센다."""
+    interfaces = [
+        {"name": "eth0", "mac": "d8:3a:dd:a6:b2:77", "addresses": []},
+        {"name": "vif1.0", "mac": "fe:ff:ff:ff:ff:ff", "addresses": [{"address": "fe80::1", "family": "ipv6"}]},
+        {"name": "vif2.0", "mac": "fe:ff:ff:ff:ff:ff", "addresses": []},
+        {"name": "vif3.0", "mac": "fe:ff:ff:ff:ff:ff", "addresses": []},
+        {"name": "wlan0", "mac": "d8:3a:dd:a6:b2:78", "addresses": [{"address": "192.168.30.96", "family": "ipv4"}]},
+        {"name": "xenbr0", "mac": "0a:b5:fa:4c:30:54", "addresses": [{"address": "192.168.77.1", "family": "ipv4"}]},
+    ]
+    client = FakeClient()
+    publisher, _, _ = make(client, inventory={**INVENTORY, "interfaces": interfaces})
+    publisher.tick()
+    validate_all(oracle, client)
+    inventory = client.payloads("inventory")[0]
+    assert [i["name"] for i in inventory["interfaces"]] == ["wlan0", "xenbr0", "vif1.0", "eth0"] and inventory["interfaces_omitted"] == 2
 
 
 def test_seq_is_per_stream_and_offline_ticks_consume_nothing(oracle):

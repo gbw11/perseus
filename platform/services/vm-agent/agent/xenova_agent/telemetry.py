@@ -46,7 +46,7 @@ INVENTORY_REFRESH_S = 60.0
 STALL_INTERVALS = 3  # Reporter 틱이 자기 주기의 이 배수 동안 없으면 정체(degraded)
 DUE_TOLERANCE_S = 0.001  # 대기에서 깬 시각이 예정 시각보다 이만큼 이르면 지금 보낸다(한 바퀴 더 돌지 않게)
 UNSPECIFIED_RC = -1  # 예외에 errno 가 없을 때. 계약은 실패 rc 가 음수이기만 요구한다
-MAX_INTERFACES = 16
+MAX_INTERFACES = 4  # 계약 inventory.interfaces 상한. 넘치면 주소 없는 것(vif 등)부터 빼고 interfaces_omitted 로 센다
 MAX_ADDRESSES = 4  # 계약 inventory.interfaces[].addresses 상한
 QOS = {"inventory": 1, "heartbeat": 0, "metrics": 0}
 RETAIN = {"inventory": True, "heartbeat": False, "metrics": False}
@@ -120,6 +120,7 @@ class TelemetryPublisher:
         heartbeat_period_s: float = HEARTBEAT_PERIOD_S,
         metrics_period_s: float = PUBLISHER_METRICS_PERIOD_S,
         inventory_refresh_s: float = INVENTORY_REFRESH_S,
+        max_payload_bytes: int = MAX_PAYLOAD_BYTES,
     ) -> None:
         """clock 은 Reporter 와 같은 단조 시계여야 한다(ReporterStatus 의 시각을 여기 시각과 빼서 uptime 으로 옮긴다)."""
         self._client = client
@@ -137,6 +138,7 @@ class TelemetryPublisher:
         self._heartbeat_period = float(heartbeat_period_s)
         self._metrics_period = float(metrics_period_s)
         self._inventory_refresh = float(inventory_refresh_s)
+        self._max_payload = int(max_payload_bytes)
         self._started_at = clock()
         self._lock = threading.Lock()
         self._seq: dict[str, int] = {}
@@ -230,6 +232,7 @@ class TelemetryPublisher:
         hostname = inventory.get("hostname")
         hostname = None if not hostname or hostname == "unknown" else str(hostname)[:63]
         all_interfaces = list(inventory.get("interfaces") or [])
+        all_interfaces.sort(key=_interface_rank)  # IPv4 있는 것 → 주소 있는 것 → 없는 것. 안정 정렬이라 같은 급은 이름 순
         interfaces = []
         for iface in all_interfaces[:MAX_INTERFACES]:
             mac = str(iface.get("mac") or "").lower()
@@ -254,7 +257,7 @@ class TelemetryPublisher:
             "capabilities_omitted": 0,
             "clock_domains": {"uptime": "guest_boot_milliseconds", "loop_counter": "local_hw_cycles_converted_us", "frequency_hz": None, "same_epoch": False},
             "limits": {
-                "max_payload_bytes": MAX_PAYLOAD_BYTES,
+                "max_payload_bytes": self._max_payload,
                 "heartbeat_period_ms": int(self._heartbeat_period * 1000),
                 "metrics_period_ms": int(self._metrics_period * 1000),
                 "event_queue_capacity": 0,
@@ -281,9 +284,9 @@ class TelemetryPublisher:
             "payload": payload,
         }
         data = json.dumps(message, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
-        if len(data) > MAX_PAYLOAD_BYTES:
+        if len(data) > self._max_payload:
             self.oversized += 1
-            log.error("telemetry %s not published: %d bytes > %d", stream, len(data), MAX_PAYLOAD_BYTES)
+            log.error("telemetry %s not published: %d bytes > %d", stream, len(data), self._max_payload)
             return False
         with self._lock:
             self._seq[stream] = seq  # 여기서 메시지가 확정된다. 제출에 실패해도 번호는 쓴 것이다(빠진 번호 = 손실)
@@ -358,6 +361,12 @@ class TelemetryPublisher:
         thread = threading.Thread(target=self.run, args=(stop,), name="xenova-agent-telemetry", daemon=True)
         thread.start()
         return thread
+
+
+def _interface_rank(iface: dict[str, Any]) -> tuple[bool, bool]:
+    """상한을 넘을 때 남길 순서. dom0 의 vif 는 링크 로컬 IPv6 만 있어 IPv4 가 있는 브리지·게스트 eth0 보다 뒤로 간다."""
+    addresses = iface.get("addresses") or []
+    return (not any(a.get("family") == "ipv4" for a in addresses), not addresses)
 
 
 def _advance(due: float, now: float, period: float) -> float:
