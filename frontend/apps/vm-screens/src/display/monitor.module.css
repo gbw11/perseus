@@ -410,8 +410,8 @@
     margin-bottom: 12px;
   }
   .contentGrid {
-    height: calc(100vh - 290px);
-    min-height: 310px;
+    height: calc(100vh - 345px);
+    min-height: 300px;
   }
   .navigation,
   .music,
@@ -420,6 +420,35 @@
   }
   .notices {
     margin-top: 12px;
+  }
+  .rightColumn {
+    grid-template-rows: minmax(0, 0.7fr) minmax(0, 1.3fr);
+    gap: 12px;
+  }
+  .music,
+  .guest {
+    padding: 12px 16px;
+  }
+  .music h2,
+  .guest h2 {
+    font-size: 18px;
+    margin: 6px 0 4px;
+  }
+  .music p,
+  .guest p,
+  .guest small {
+    font-size: 12px;
+    line-height: 1.35;
+    margin: 4px 0;
+    overflow-wrap: anywhere;
+  }
+  .screen:has(.alert) .contentGrid {
+    height: calc(100vh - 410px);
+    min-height: 260px;
+  }
+  .screen:has(.alert) .instrument {
+    height: calc(100vh - 280px);
+    min-height: 400px;
   }
 }
 
