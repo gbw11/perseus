@@ -19,6 +19,7 @@ import { useEvents, useMetrics, useVms } from '../api/queries';
 import { restartSimRace, selectSimTrack, useSimState, type SimView } from '../api/sim';
 import type { MetricSample, Vm, VmEvent } from '../api/types';
 import { clock, describe } from '../domain/events';
+import { vmAuthorityOf } from '../domain/vmAuthority';
 import {
   ago,
   appHealth,
@@ -458,7 +459,6 @@ function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null
 }
 
 const MIB_BYTES = 1024 * 1024;
-type VmAuthority = 'ACTIVE' | 'STANDBY' | 'NONE';
 type VmConnection = 'Connected' | 'Delayed' | 'Disconnected' | 'Unknown';
 
 /**
@@ -471,11 +471,7 @@ export function DashboardPage() {
   const events = useEvents({ limit: 30 });
   const items = vms.data?.items ?? [];
   const activeVm = items.find((vm) => vm.vm_id === drive?.control?.active_vm_id);
-  const activeRole = activeVm
-    ? roleOf(activeVm, drive)
-    : drive?.control?.active_app
-      ? ROLES[drive.control.active_app]
-      : null;
+  const activeRole = activeVm ? roleOf(activeVm, drive) : null;
 
   return (
     <div className={styles.overviewPage}>
@@ -556,7 +552,7 @@ function VmOverviewCard({
   const usedBytes = overviewMetricValue(lastSample, 'memory_used_bytes');
   const memory = vm && usedBytes != null ? (usedBytes / (vm.memory_mib * MIB_BYTES)) * 100 : null;
   const app = drive?.apps[role.app];
-  const authority = overviewAuthority(role, vm, drive);
+  const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
   const connection = overviewConnection(vm, app);
   const health = vm ? appHealth(role, vm, app) : 'stopped';
   const eventSummary = latestEvent
@@ -675,13 +671,6 @@ function OverviewMetricBar({
       <small>{unavailable ?? detail ?? '\u00a0'}</small>
     </div>
   );
-}
-
-function overviewAuthority(role: Role, vm: Vm | undefined, drive: DriveState | null): VmAuthority {
-  if (!role.driving || !vm || vm.state !== 'running' || !drive?.control) return 'NONE';
-  if (drive.control.active_vm_id) return drive.control.active_vm_id === vm.vm_id ? 'ACTIVE' : 'STANDBY';
-  if (drive.control.active_app) return drive.control.active_app === role.app ? 'ACTIVE' : 'STANDBY';
-  return 'NONE';
 }
 
 function overviewConnection(vm: Vm | undefined, app: DriveState['apps'][string] | undefined): VmConnection {

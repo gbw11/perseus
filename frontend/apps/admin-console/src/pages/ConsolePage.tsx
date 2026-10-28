@@ -3,10 +3,8 @@ import { lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVms } from '../api/queries';
-import type { Vm } from '../api/types';
-import type { ConsoleAuthority } from '../console/ConsolePanel';
 import { osLabel, roleOf } from '../domain/roles';
-import type { Role } from '../domain/roles';
+import { vmAuthorityOf } from '../domain/vmAuthority';
 import { capitalizeFirst, STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
@@ -15,17 +13,6 @@ import styles from './pages.module.css';
 const ConsolePanel = lazy(() =>
   import('../console/ConsolePanel').then((module) => ({ default: module.ConsolePanel })),
 );
-
-function authorityOf(
-  vm: Pick<Vm, 'vm_id'>,
-  role: Role | null,
-  activeVmId: string | null | undefined,
-): ConsoleAuthority {
-  if (!role) return 'UNKNOWN';
-  if (!role.driving) return 'INFOTAINMENT';
-  if (!activeVmId) return 'UNKNOWN';
-  return activeVmId === vm.vm_id ? 'ACTIVE' : 'STANDBY';
-}
 
 /**
  * 웹 콘솔 — VM 을 골라 바로 게스트 터미널에 입력한다 (UI-05·MO-04). VM 상세의 [웹 콘솔] 탭과 같은 패널.
@@ -40,7 +27,7 @@ export function ConsolePage() {
   const selected = items.find((vm) => vm.vm_id === params.get('vm')) ?? items[0];
   const selectedRole = selected ? roleOf(selected, drive) : null;
   const selectedAuthority = selected
-    ? authorityOf(selected, selectedRole, drive?.control?.active_vm_id)
+    ? vmAuthorityOf(selectedRole, selected, drive?.control?.active_vm_id)
     : undefined;
 
   return (
@@ -62,7 +49,7 @@ export function ConsolePage() {
       <div className={styles.picks} role="tablist" aria-label="콘솔을 열 VM">
         {items.map((vm) => {
           const role = roleOf(vm, drive);
-          const authority = authorityOf(vm, role, drive?.control?.active_vm_id);
+          const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
           const on = vm.vm_id === selected?.vm_id;
           return (
             <button
