@@ -170,3 +170,10 @@ python -B tests/probe_display_runtime.py --execute --soak-seconds 600 \
 `tests/probe_display_control.py --execute --output <결과.json>`은 loopback 브로커를 띄워 별도 표시 상태 보고 → 실제 MQTT 수신 → REST/WS·상세 정책 연결을 시험한다. 기존 테스트 런타임의 amqtt/paho/httpx/websockets가 필요하며 PYTHONPATH는 위 runtime probe와 같다. 제어 엔진/Xen 관측은 합성이고 운영 ACL·실보드 검증이 아니다. [250 후속 검증 결과](../../../../docs/verification/display-250-followup.md)를 참고한다.
 
 `tests/probe_qemu.py`는 기존 격리 실험실 전용이며 일반 테스트에서 자동 실행되지 않는다. `--execute --output <증거 파일>`이 필요하다. 시험 호스트에 amqtt 0.11.3/pexpect, 기존 ARM64 휠과 Java 21/Spring 컴파일 결과가 있어야 한다. 실제 dom0의 임시 디렉터리에 수집기를 올리고 실제 Debian은 메모리에서만 임시 보고기를 실행한다. 테스트 브로커는 호스트 loopback에 있고 SSH 포워딩을 사용하므로 제품 배포의 로컬 Mosquitto 토폴로지와 구별한다. 기존 VM/이미지/서비스·실행 도메인 ID를 바꾸지 않는다. 결과는 [검증 기록](../../../../docs/verification/display-step2.md)을 참고한다.
+
+
+## 전용 X11 절전 방지와 시연 인코딩
+
+키오스크의 `--prevent-idle-blank`는 전용 차량 화면 세션에서만 사용한다. `xset`으로 기존 screen saver/DPMS 값을 읽고, screen saver timeout과 blanking 및 지원되는 DPMS를 끈 뒤 적용 결과를 확인한다. 일반 종료 시 기존 값을 복원한다. 공유 데스크톱에는 이 옵션을 사용하지 않는다. 강제 종료(SIGKILL)·전원 차단은 복원을 보장하지 않으며, 새 전용 X 서버 세션의 초기 설정을 다시 적용해야 한다. 배포 예시 unit은 이 옵션을 명시한다. 실제 보드의 상시 서비스에는 아직 설치하지 않았다.
+
+`outputs[].width/height`는 X11 원본 캡처 영역이다. 별도의 `stream_width/stream_height`는 기본 1280×720인 전송 JPEG 크기이며 짝수만 허용한다. 원본 전체를 비율 유지 축소하고 검은 여백을 채우므로 영역을 잘라내지 않는다. 스트림 metadata의 `rectangle`은 원본 영역, `width/height`는 인코딩 결과 크기다. MJPEG는 yuvj420p, encoder 1 thread와 단순 filter pipeline 1 thread를 사용한다. encoder의 `-threads`와 filter의 `-filter_threads`는 별도 설정이다([FFmpeg 공식 문서](https://ffmpeg.org/ffmpeg.html)).

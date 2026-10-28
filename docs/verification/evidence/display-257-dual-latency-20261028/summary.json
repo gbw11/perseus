@@ -1,0 +1,125 @@
+{
+  "scope": "two encoders, one source duplicated; NOT dual physical HDMI or distinct renderers",
+  "transport": "authenticated HTTP MJPEG over pinned SSH direct-tcpip (board to this PC)",
+  "latency_scope": "PC command sent -> board DOM paint request -> X11 capture -> JPEG encode -> SSH network -> PC JPEG decode + pixel recognition; conservative upper bound, not photon/browser latency",
+  "duration_s": 180.0,
+  "remote_exit": 0,
+  "board_error": null,
+  "groups_cpu_core_percent": {
+    "python_combined": {
+      "n": 107,
+      "mean": 54.17980268659127,
+      "p95": 77.22530431074325,
+      "max": 94.45837019854807,
+      "min": 34.11027951186633,
+      "time_weighted_mean": 53.81905795120065
+    },
+    "encoder": {
+      "n": 107,
+      "mean": 153.48296625721207,
+      "p95": 227.55570424105167,
+      "max": 347.18475429359955,
+      "min": 93.08059324424542,
+      "time_weighted_mean": 159.06533791073596
+    },
+    "browser": {
+      "n": 107,
+      "mean": 14.544709466940592,
+      "p95": 28.018912822201454,
+      "max": 45.21537653864649,
+      "min": 4.090343333744352,
+      "time_weighted_mean": 14.955847734702266
+    },
+    "xorg": {
+      "n": 107,
+      "mean": 9.032944119042343,
+      "p95": 16.636060137112587,
+      "max": 22.107278131575082,
+      "min": 4.451461537989633,
+      "time_weighted_mean": 9.831270496193989
+    },
+    "other": {
+      "n": 107,
+      "mean": 0.5318785807105182,
+      "p95": 1.0986506081721896,
+      "max": 2.0097525574159163,
+      "min": 0.0,
+      "time_weighted_mean": 0.5388503963238316
+    }
+  },
+  "cpu_unit": "100%=one CPU core; Python includes diagnostic sampler; browser not part of sender+encoder target",
+  "streams": [
+    {
+      "output_id": "monitor-1",
+      "error": null,
+      "frames": 879,
+      "observed_fps": 4.874798734107313,
+      "jpeg_payload_mbps": 1.1371523624452606,
+      "gaps_over_1s": 0,
+      "skipped_sequences": 34,
+      "decode_ms": {
+        "n": 879,
+        "mean": 6.788395905170051,
+        "p95": 16.00000000325963,
+        "max": 155.9999999590218,
+        "min": 0.0
+      },
+      "latency_attempts": 30,
+      "latency_matched": 30,
+      "latency_timeouts": 0,
+      "request_to_decoded_pixel_upper_bound_ms": {
+        "n": 30,
+        "mean": 880.2333333316104,
+        "p95": 1813.0000000237487,
+        "max": 1858.9999999967404,
+        "min": 468.99999998277053
+      },
+      "software_upper_bound_p95_500ms_passed": false,
+      "encoder_epochs": 1,
+      "unavailable_samples": 0
+    },
+    {
+      "output_id": "monitor-2",
+      "error": null,
+      "frames": 881,
+      "observed_fps": 4.8867712879964,
+      "jpeg_payload_mbps": 1.1399370050753397,
+      "gaps_over_1s": 0,
+      "skipped_sequences": 30,
+      "decode_ms": {
+        "n": 881,
+        "mean": 6.710556186495135,
+        "p95": 16.00000000325963,
+        "max": 92.99999999348074,
+        "min": 0.0
+      },
+      "latency_attempts": 30,
+      "latency_matched": 29,
+      "latency_timeouts": 1,
+      "request_to_decoded_pixel_upper_bound_ms": {
+        "n": 29,
+        "mean": 965.4137931005419,
+        "p95": 2516.0000000032596,
+        "max": 2905.999999959022,
+        "min": 500.0
+      },
+      "software_upper_bound_p95_500ms_passed": false,
+      "encoder_epochs": 1,
+      "unavailable_samples": 0
+    }
+  ],
+  "sender_plus_encoders_cpu_time_weighted_percent": 212.8843958619366,
+  "single_core_average_target_passed": false,
+  "cleanup": {
+    "namespace_exit": 0,
+    "feed_stopped": true,
+    "framebuffer_restored": true,
+    "restoration_differing_bytes": 0,
+    "restored_active_vt": 1,
+    "graphics_children_stopped": true
+  },
+  "physical_dual_output_acceptance": false,
+  "browser_or_photon_latency_acceptance": false,
+  "temperature_max_celsius": 40.894,
+  "min_memory_available_bytes": 183549952
+}

@@ -1,0 +1,398 @@
+{
+  "scope": "two encoders, one source duplicated; NOT dual physical HDMI or distinct renderers",
+  "transport": "authenticated HTTP MJPEG over pinned SSH direct-tcpip (board to this PC)",
+  "latency_scope": "Board CDP marker-change request -> browser paint scheduling -> X11 capture -> JPEG encode -> actual SSH transport -> PC JPEG decode+pixel detection. Includes board paint scheduling; excludes PC->board control request, excludes physical photons and receiver browser display.",
+  "duration_s": 102.87268889998086,
+  "remote_exit": 0,
+  "board_error": null,
+  "groups_cpu_core_percent": {
+    "python_combined": {
+      "n": 43,
+      "mean": 59.237653649146445,
+      "p95": 94.6110972507164,
+      "max": 144.03316618729832,
+      "min": 38.55998894645318,
+      "time_weighted_mean": 56.19020654472371
+    },
+    "encoder": {
+      "n": 43,
+      "mean": 189.83699677580879,
+      "p95": 301.96050084711396,
+      "max": 437.73208047983394,
+      "min": 108.58975633511065,
+      "time_weighted_mean": 185.42865661418625
+    },
+    "browser": {
+      "n": 43,
+      "mean": 18.917273498914554,
+      "p95": 35.358899758216644,
+      "max": 52.97526974336998,
+      "min": 7.140738693787626,
+      "time_weighted_mean": 19.042074159612252
+    },
+    "xorg": {
+      "n": 43,
+      "mean": 13.107565784296627,
+      "p95": 28.06122658166296,
+      "max": 32.990836947928656,
+      "min": 6.240546811890904,
+      "time_weighted_mean": 13.445478886894671
+    },
+    "other": {
+      "n": 43,
+      "mean": 0.6658384602184018,
+      "p95": 1.4909535591415357,
+      "max": 2.4139636791167316,
+      "min": 0.0,
+      "time_weighted_mean": 0.6435109547027181
+    }
+  },
+  "cpu_unit": "100%=one CPU core; Python includes diagnostic sampler; browser not part of sender+encoder target",
+  "streams": [
+    {
+      "output_id": "monitor-1",
+      "error": null,
+      "frames": 473,
+      "observed_fps": 4.5918990394268935,
+      "jpeg_payload_mbps": 1.0643958932065742,
+      "gaps_over_1s": 0,
+      "skipped_sequences": 47,
+      "decode_ms": {
+        "n": 473,
+        "mean": 3.3023991532442625,
+        "p95": 6.063000007998198,
+        "max": 19.72439995734021,
+        "min": 1.7462000250816345
+      },
+      "latency_attempts": 30,
+      "latency_matched": 18,
+      "latency_timeouts": 12,
+      "request_to_decoded_pixel_upper_bound_ms": {
+        "n": 18,
+        "mean": 998.8798166676942,
+        "p95": 2916.872800036799,
+        "max": 2925.627299991902,
+        "min": 496.4252000208944
+      },
+      "software_upper_bound_p95_500ms_passed": false,
+      "encoder_epochs": 1,
+      "unavailable_samples": 0,
+      "eventual_markers_received": 30,
+      "board_marker_request_to_pc_decoded_ms_estimate": {
+        "n": 30,
+        "mean": 2717.7411102942037,
+        "p95": 7699.449660023674,
+        "max": 7964.953062997665,
+        "min": 491.0658010048792
+      },
+      "late_samples_included_in_final_distribution": true,
+      "clock_uncertainty_p95_interval_ms": [
+        7623.887358990032,
+        7775.011960999109
+      ],
+      "board_to_decoded_p95_target_status": "exceeds_500ms_even_at_low_clock_bound"
+    },
+    {
+      "output_id": "monitor-2",
+      "error": null,
+      "frames": 467,
+      "observed_fps": 4.535219454934063,
+      "jpeg_payload_mbps": 1.0514027680486961,
+      "gaps_over_1s": 0,
+      "skipped_sequences": 48,
+      "decode_ms": {
+        "n": 467,
+        "mean": 3.2312511771815635,
+        "p95": 5.912399967201054,
+        "max": 8.34000000031665,
+        "min": 1.7888000002130866
+      },
+      "latency_attempts": 30,
+      "latency_matched": 20,
+      "latency_timeouts": 10,
+      "request_to_decoded_pixel_upper_bound_ms": {
+        "n": 20,
+        "mean": 775.8139799989294,
+        "p95": 1167.1367999515496,
+        "max": 2300.4036000347696,
+        "min": 515.1550000300631
+      },
+      "software_upper_bound_p95_500ms_passed": false,
+      "encoder_epochs": 1,
+      "unavailable_samples": 0,
+      "eventual_markers_received": 30,
+      "board_marker_request_to_pc_decoded_ms_estimate": {
+        "n": 30,
+        "mean": 2156.4490936211464,
+        "p95": 6329.709526035003,
+        "max": 7204.333162982948,
+        "min": 498.1941270525567
+      },
+      "late_samples_included_in_final_distribution": true,
+      "clock_uncertainty_p95_interval_ms": [
+        6254.147225001361,
+        6405.271827010438
+      ],
+      "board_to_decoded_p95_target_status": "exceeds_500ms_even_at_low_clock_bound"
+    }
+  ],
+  "sender_plus_encoders_cpu_time_weighted_percent": 241.61886315890996,
+  "single_core_average_target_passed": false,
+  "cleanup": {
+    "namespace_exit": 0,
+    "feed_stopped": true,
+    "framebuffer_restored": true,
+    "restoration_differing_bytes": 0,
+    "restored_active_vt": 1,
+    "graphics_children_stopped": true
+  },
+  "physical_dual_output_acceptance": false,
+  "browser_or_photon_latency_acceptance": false,
+  "temperature_max_celsius": 40.894,
+  "min_memory_available_bytes": 136876032,
+  "clock_calibration": {
+    "all_probes": [
+      {
+        "phase": "before",
+        "pc_before": 508958.804663,
+        "pc_after": 508959.5031126,
+        "board_clock": 7692.541702214,
+        "rtt_s": 0.6984496000222862,
+        "offset_lower_s": -501266.961410386,
+        "offset_upper_s": -501266.262960786
+      },
+      {
+        "phase": "before",
+        "pc_before": 508959.5335236,
+        "pc_after": 508960.1441977,
+        "board_clock": 7693.437396968,
+        "rtt_s": 0.610674099996686,
+        "offset_lower_s": -501266.706800732,
+        "offset_upper_s": -501266.096126632
+      },
+      {
+        "phase": "before",
+        "pc_before": 508960.1745373,
+        "pc_after": 508960.7428767,
+        "board_clock": 7693.84026489,
+        "rtt_s": 0.5683393999934196,
+        "offset_lower_s": -501266.90261181,
+        "offset_upper_s": -501266.33427241
+      },
+      {
+        "phase": "before",
+        "pc_before": 508960.7734427,
+        "pc_after": 508961.0199595,
+        "board_clock": 7694.325058014,
+        "rtt_s": 0.24651680001989007,
+        "offset_lower_s": -501266.694901486,
+        "offset_upper_s": -501266.44838468597
+      },
+      {
+        "phase": "before",
+        "pc_before": 508961.0505134,
+        "pc_after": 508961.1786765,
+        "board_clock": 7694.506131234,
+        "rtt_s": 0.12816309998743236,
+        "offset_lower_s": -501266.672545266,
+        "offset_upper_s": -501266.544382166
+      },
+      {
+        "phase": "before",
+        "pc_before": 508961.2088571,
+        "pc_after": 508961.4158988,
+        "board_clock": 7694.706297141,
+        "rtt_s": 0.2070417000213638,
+        "offset_lower_s": -501266.70960165904,
+        "offset_upper_s": -501266.502559959
+      },
+      {
+        "phase": "before",
+        "pc_before": 508961.4463712,
+        "pc_after": 508961.6651293,
+        "board_clock": 7694.934003366,
+        "rtt_s": 0.21875809994526207,
+        "offset_lower_s": -501266.731125934,
+        "offset_upper_s": -501266.51236783405
+      },
+      {
+        "phase": "before",
+        "pc_before": 508961.6958677,
+        "pc_after": 508962.2206609,
+        "board_clock": 7695.475165895,
+        "rtt_s": 0.5247932000202127,
+        "offset_lower_s": -501266.745495005,
+        "offset_upper_s": -501266.22070180497
+      },
+      {
+        "phase": "before",
+        "pc_before": 508962.2508341,
+        "pc_after": 508962.5765667,
+        "board_clock": 7695.848696033,
+        "rtt_s": 0.3257326000020839,
+        "offset_lower_s": -501266.727870667,
+        "offset_upper_s": -501266.402138067
+      },
+      {
+        "phase": "before",
+        "pc_before": 508962.6071722,
+        "pc_after": 508963.006718,
+        "board_clock": 7696.165899582,
+        "rtt_s": 0.39954579999903217,
+        "offset_lower_s": -501266.840818418,
+        "offset_upper_s": -501266.441272618
+      },
+      {
+        "phase": "before",
+        "pc_before": 508963.0371002,
+        "pc_after": 508963.3072667,
+        "board_clock": 7696.632718788,
+        "rtt_s": 0.27016650000587106,
+        "offset_lower_s": -501266.674547912,
+        "offset_upper_s": -501266.404381412
+      },
+      {
+        "phase": "before",
+        "pc_before": 508963.3380255,
+        "pc_after": 508963.8125253,
+        "board_clock": 7697.060921845,
+        "rtt_s": 0.47449980000965297,
+        "offset_lower_s": -501266.751603455,
+        "offset_upper_s": -501266.277103655
+      },
+      {
+        "phase": "after",
+        "pc_before": 509037.5545336,
+        "pc_after": 509037.845891,
+        "board_clock": 7771.091286895,
+        "rtt_s": 0.29135740001220256,
+        "offset_lower_s": -501266.754604105,
+        "offset_upper_s": -501266.463246705
+      },
+      {
+        "phase": "after",
+        "pc_before": 509037.8760852,
+        "pc_after": 509038.2163903,
+        "board_clock": 7771.390416009,
+        "rtt_s": 0.34030510002048686,
+        "offset_lower_s": -501266.825974291,
+        "offset_upper_s": -501266.485669191
+      },
+      {
+        "phase": "after",
+        "pc_before": 509038.2471295,
+        "pc_after": 509038.7768763,
+        "board_clock": 7771.97351309,
+        "rtt_s": 0.5297467999625951,
+        "offset_lower_s": -501266.80336321,
+        "offset_upper_s": -501266.27361641004
+      },
+      {
+        "phase": "after",
+        "pc_before": 509038.8071438,
+        "pc_after": 509038.9857053,
+        "board_clock": 7772.282495694,
+        "rtt_s": 0.17856149998260662,
+        "offset_lower_s": -501266.703209606,
+        "offset_upper_s": -501266.524648106
+      },
+      {
+        "phase": "after",
+        "pc_before": 509039.0159895,
+        "pc_after": 509039.1950811,
+        "board_clock": 7772.512614694,
+        "rtt_s": 0.17909160000272095,
+        "offset_lower_s": -501266.68246640597,
+        "offset_upper_s": -501266.50337480596
+      },
+      {
+        "phase": "after",
+        "pc_before": 509039.2256112,
+        "pc_after": 509039.310047,
+        "board_clock": 7772.614540232,
+        "rtt_s": 0.0844358000322245,
+        "offset_lower_s": -501266.695506768,
+        "offset_upper_s": -501266.611070968
+      },
+      {
+        "phase": "after",
+        "pc_before": 509039.3406152,
+        "pc_after": 509039.7337504,
+        "board_clock": 7772.902030112,
+        "rtt_s": 0.3931352000217885,
+        "offset_lower_s": -501266.831720288,
+        "offset_upper_s": -501266.438585088
+      },
+      {
+        "phase": "after",
+        "pc_before": 509039.7642063,
+        "pc_after": 509040.0817884,
+        "board_clock": 7773.223821441,
+        "rtt_s": 0.31758209998952225,
+        "offset_lower_s": -501266.857966959,
+        "offset_upper_s": -501266.540384859
+      },
+      {
+        "phase": "after",
+        "pc_before": 509040.1120659,
+        "pc_after": 509040.3736669,
+        "board_clock": 7773.577547868,
+        "rtt_s": 0.2616009999765083,
+        "offset_lower_s": -501266.79611903196,
+        "offset_upper_s": -501266.534518032
+      },
+      {
+        "phase": "after",
+        "pc_before": 509040.4038004,
+        "pc_after": 509040.6557332,
+        "board_clock": 7773.937883887,
+        "rtt_s": 0.25193280004896224,
+        "offset_lower_s": -501266.71784931305,
+        "offset_upper_s": -501266.465916513
+      },
+      {
+        "phase": "after",
+        "pc_before": 509040.6861462,
+        "pc_after": 509041.0995227,
+        "board_clock": 7774.266532583,
+        "rtt_s": 0.41337650001514703,
+        "offset_lower_s": -501266.832990117,
+        "offset_upper_s": -501266.419613617
+      },
+      {
+        "phase": "after",
+        "pc_before": 509041.1304476,
+        "pc_after": 509041.548968,
+        "board_clock": 7774.776655714,
+        "rtt_s": 0.4185204000095837,
+        "offset_lower_s": -501266.77231228596,
+        "offset_upper_s": -501266.35379188595
+      }
+    ],
+    "selected_min_rtt_probes": [
+      {
+        "phase": "before",
+        "pc_before": 508961.0505134,
+        "pc_after": 508961.1786765,
+        "board_clock": 7694.506131234,
+        "rtt_s": 0.12816309998743236,
+        "offset_lower_s": -501266.672545266,
+        "offset_upper_s": -501266.544382166
+      },
+      {
+        "phase": "after",
+        "pc_before": 509039.2256112,
+        "pc_after": 509039.310047,
+        "board_clock": 7772.614540232,
+        "rtt_s": 0.0844358000322245,
+        "offset_lower_s": -501266.695506768,
+        "offset_upper_s": -501266.611070968
+      }
+    ],
+    "offset_low_s": -501266.695506768,
+    "offset_high_s": -501266.544382166,
+    "offset_estimate_s": -501266.619944467,
+    "uncertainty_half_width_ms": 75.56230100453831,
+    "assumption": "PC/board perf_counter clock offset remains within the envelope of the best pre/post RTT brackets during this short trial; no NTP synchronization assumed."
+  }
+}
