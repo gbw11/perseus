@@ -169,8 +169,11 @@ export interface MetricValue {
 export interface MetricSample {
   sample_id: string;
   vm_id: string;
+  boot_id?: string | null;
   source: string;
   observed_at: string;
+  received_at?: string;
+  window_ms?: number | null;
   values: MetricValue[];
 }
 
