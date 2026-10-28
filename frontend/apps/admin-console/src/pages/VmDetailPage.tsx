@@ -7,6 +7,7 @@ import type { MetricSample, Vm } from '../api/types';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import { ago, osLabel, roleOf } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
+import { RuntimeLogsPanel } from '../console/RuntimeLogsPanel';
 import styles from './pages.module.css';
 
 const ConsolePanel = lazy(() =>
@@ -89,6 +90,7 @@ export function VmDetailPage() {
       {vm.data && (
         <Suspense fallback={<p className={styles.dim}>콘솔 준비 중…</p>}>
           <ConsolePanel key={vm.data.vm_id} vm={vm.data} />
+          <RuntimeLogsPanel key={`logs-${vm.data.vm_id}`} vmId={vm.data.vm_id} />
         </Suspense>
       )}
     </div>
