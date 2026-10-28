@@ -1,0 +1,38 @@
+{
+  "observed_at": "2026-10-27T08:43:40.895986+00:00",
+  "bundle_root": "/opt/xenova-graphics-probe/20261027-1ddf34f25d30",
+  "archive_sha256": "1ddf34f25d3035199ba42a32f016362b98a193415b4664e4c1ddcb00fe7154d5",
+  "commands": {
+    "ldconfig": {
+      "code": 0,
+      "out": "",
+      "err": ""
+    },
+    "chromium_version": {
+      "code": 0,
+      "out": "Chromium 156.0.8078.47 \n",
+      "err": ""
+    },
+    "xorg_version": {
+      "code": 0,
+      "out": "",
+      "err": "\nX.Org X Server 1.21.1.16\nX Protocol Version 11, Revision 0\nCurrent Operating System: Linux raspberrypi4-64 6.18.33-v8 #1 SMP PREEMPT Thu May 28 02:31:14 UTC 2026 aarch64\nxorg-server 2:21.1.16-1.3+deb13u4 (https://www.debian.org/support) \nCurrent version of pixman: 0.44.0\n\tBefore reporting problems, check http://wiki.x.org\n\tto make sure that you have the latest version.\n"
+    },
+    "ffmpeg_devices": {
+      "code": 127,
+      "out": "",
+      "err": "/usr/bin/ffmpeg: error while loading shared libraries: libblas.so.3: cannot open shared object file: No such file or directory\n"
+    },
+    "xrandr_version": {
+      "code": 1,
+      "out": "xrandr program version       1.5.3\n",
+      "err": "Can't open display \n"
+    }
+  },
+  "system_packages_installed": false,
+  "system_services_changed": false,
+  "vm_changed": false,
+  "display_started": false,
+  "boot_image_changed": false,
+  "archive_removed_after_verified_extraction": true
+}

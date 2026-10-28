@@ -26,8 +26,14 @@ export function presentationFixture(): Presentation {
     revision: 1,
     render_revision: 'render-1',
     outputs: [
-      { output_id: 'monitor-1', view: 'overview', selection: 'pinned', vm_id: null },
-      { output_id: 'monitor-2', view: 'detail', selection: 'pinned', vm_id: vms[0]!.vm_id },
+      { output_id: 'monitor-1', view: 'overview', screen: 'instrument', selection: 'pinned', vm_id: null },
+      {
+        output_id: 'monitor-2',
+        view: 'detail',
+        screen: 'infotainment',
+        selection: 'pinned',
+        vm_id: vms[0]!.vm_id,
+      },
     ],
     decisions: Object.fromEntries(
       vms.map((vm) => [

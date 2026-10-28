@@ -111,3 +111,23 @@ def test_stream_auth_is_separate_read_only_and_never_a_query_token(tmp_path):
         assert "demo-test-token" not in r.headers["set-cookie"]
         assert client.get("/api/v1/streams").status_code == 200
         assert client.post("/api/v1/display/selection",json={}).status_code == 404
+
+
+def test_stream_scales_full_source_without_changing_capture_rectangle():
+    c = config()
+    c.outputs[0].width, c.outputs[0].height = 1824, 984
+    args = capture_command(c, c.outputs[0])
+    assert args[args.index("-video_size")+1] == "1824x984"
+    assert args[args.index("-filter_threads")+1] == "1"
+    assert "scale=1280:720:" in args[args.index("-vf")+1]
+    assert "pad=1280:720:" in args[args.index("-vf")+1]
+    assert "format=yuvj420p" in args[args.index("-vf")+1]
+    metadata, _ = Capture(c, c.outputs[0], "/missing-status").snapshot()
+    assert metadata["rectangle"] == [0, 0, 1824, 984]
+    assert (metadata["width"], metadata["height"]) == (1280, 720)
+
+
+def test_stream_420_dimensions_must_be_even():
+    raw = config().model_dump()
+    raw["stream_width"] = 1279
+    with pytest.raises(ValueError): RuntimeConfig.model_validate(raw)

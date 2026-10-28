@@ -134,6 +134,7 @@ class XenovaClient:
         self._early_subacks: dict[int, Any] = {}
         self._generation = 0  # 연결 세대. 끊길 때마다 +1. 끊기기 전에 보낸 요청의 mid 는 등록하지 않는다 (재연결 때 다시 요청)
         self._connections = 0  # 연결에 성공한 횟수. 두 번 확인하는 사이에 끊겼다 다시 붙어도 값이 바뀐다
+        self._connection_attempts = 0  # CONNACK 를 받은 연결 시도 수(거부 포함). TCP 가 닿지 않은 시도는 paho 안에서 끝나 세지 못한다
         self._inflight = 0  # 이 세대에서 subscribe() 가 진행 중인 요청 수. 0 이면 모르는 mid 의 SUBACK 은 보관하지 않고 버린다
         self._pending_infos: list[Any] = []  # PUBACK 을 아직 받지 못한 QoS>0 발행. stop() 이 끊기 전에 기다린다
         self._latest: dict[str, Message] = {}
@@ -188,10 +189,17 @@ class XenovaClient:
         브로커가 재시작했다면 retained 도 잃었을 수 있다. connected 만 보면 짧은 끊김을 놓친다."""
         return self._connections
 
+    @property
+    def connection_attempts(self) -> int:
+        """CONNACK 를 받은 연결 시도 수(거부 포함). v2 Telemetry heartbeat 의 connection_attempts_total."""
+        return self._connection_attempts
+
     def wait_connected(self, timeout_s: float) -> bool:
         return self._connected.wait(timeout_s)
 
     def _on_connect(self, client: mqtt.Client, userdata: Any, flags: Any, reason_code: Any, *_: Any) -> None:
+        with self._lock:
+            self._connection_attempts += 1
         if _failed(reason_code):
             log.warning("MQTT 연결 거부: %s", reason_code)
             return
@@ -323,6 +331,17 @@ class XenovaClient:
         )
         self._track_publish(info, topic, wait_s)
         return envelope
+
+    def publish_raw(self, topic: str, data: bytes, *, qos: int, retain: bool, wait_s: float | None = None) -> None:
+        """봉투를 씌우지 않고 그대로 발행한다. v1 봉투가 아닌 자기 계약을 가진 메시지용(v2 Telemetry, xenova_agent.telemetry).
+
+        v1 type 정책·seq·크기 한도를 적용하지 않으므로 호출자가 자기 계약의 QoS·retain·크기를 지킨다.
+        끊긴 동안의 동작과 wait_s 의 뜻은 publish() 와 같다.
+        """
+        if not isinstance(data, (bytes, bytearray)):
+            raise TypeError("publish_raw takes encoded bytes")
+        info = self._paho.publish(topic, bytes(data), qos=qos, retain=retain)
+        self._track_publish(info, topic, wait_s)
 
     def clear_retained(self, topic: str, *, wait_s: float | None = None) -> None:
         """retained 메시지를 지운다 (빈 payload + retain). 예: VM 삭제 시 inventory. wait_s 는 publish() 와 같다."""

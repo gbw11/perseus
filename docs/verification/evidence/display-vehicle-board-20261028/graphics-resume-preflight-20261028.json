@@ -1,0 +1,14 @@
+{
+  "board_observed_at": "2026-10-28T00:43:57.709391+00:00",
+  "graphics_bundle_present": true,
+  "graphics_processes": [],
+  "listeners": "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\nLISTEN 0      128          0.0.0.0:22        0.0.0.0:*   \nLISTEN 0      2048       127.0.0.1:8081      0.0.0.0:*   \nLISTEN 0      128             [::]:22           [::]:*   \n",
+  "xen": "Name                                        ID   Mem VCPUs\tState\tTime(s)\nDomain-0                                     0  1024     4     r-----     880.8\ndebian-dev                                   1   512     1     -b----      41.1\nzephyr-drive-a                               2    16     1     -b----      15.4\nzephyr-drive-b                               3    16     1     -b----      15.5\n",
+  "mounts_for_bundle": [],
+  "framebuffer_nodes": [
+    "/dev/fb1",
+    "/dev/fb0"
+  ],
+  "changes": false,
+  "active_vt": 1
+}
