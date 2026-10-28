@@ -19,17 +19,20 @@ class XenovaBackendApplicationTests {
 
     @Test
     void flywayBuildsTheSchemaExpectedByHibernate() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
 
         Integer tableCount = jdbcTemplate.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM information_schema.tables
                 WHERE table_schema = DATABASE()
-                  AND table_name IN ('users', 'vms', 'vm_events')
+                  AND table_name IN (
+                    'users', 'vms', 'vm_events', 'vehicle_control_states',
+                    'vm_metric_samples', 'vm_process_snapshots', 'vm_recovery_health'
+                  )
                 """,
                 Integer.class);
 
-        assertThat(tableCount).isEqualTo(3);
+        assertThat(tableCount).isEqualTo(7);
     }
 }
