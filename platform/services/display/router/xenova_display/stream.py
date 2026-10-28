@@ -48,6 +48,9 @@ def capture_command(config, output):
         "-f", "x11grab", "-draw_mouse", "0", "-framerate", str(config.fps),
         "-video_size", f"{output.width}x{output.height}",
         "-i", f"{config.display}+{output.x},{output.y}", "-an",
+        "-filter_threads", "1", "-vf",
+        f"scale={config.stream_width}:{config.stream_height}:flags=fast_bilinear:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+        f"pad={config.stream_width}:{config.stream_height}:(ow-iw)/2:(oh-ih)/2,format=yuvj420p",
         "-c:v", "mjpeg", "-q:v", str(config.jpeg_quality), "-threads", "1", "-f", "mjpeg", "pipe:1"]
 
 
@@ -146,7 +149,7 @@ class Capture:
             metadata = {"stream_id": self.output.output_id, "output_id": self.output.output_id,
                 "capture_source_id": f"x11-root:{self.output.connector}", "capture_epoch": self.capture_epoch,
                 "rectangle": [self.output.x,self.output.y,self.output.width,self.output.height],
-                "width": self.output.width, "height": self.output.height, "codec": "mjpeg", "fps": self.config.fps,
+                "width": self.config.stream_width, "height": self.config.stream_height, "codec": "mjpeg", "fps": self.config.fps,
                 "frame_sequence": self.sequence, "frame_age_ms": int(age) if age is not None else None,
                 "status": "live" if ready else "unavailable", "error": None if ready else self.error or "frame_stale",
                 "bytes_total": self.bytes_total, "backend": self.config.backend,
