@@ -3,7 +3,10 @@ import { lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVms } from '../api/queries';
+import type { Vm } from '../api/types';
+import type { ConsoleAuthority } from '../console/ConsolePanel';
 import { osLabel, roleOf } from '../domain/roles';
+import type { Role } from '../domain/roles';
 import { capitalizeFirst, STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
@@ -12,6 +15,17 @@ import styles from './pages.module.css';
 const ConsolePanel = lazy(() =>
   import('../console/ConsolePanel').then((module) => ({ default: module.ConsolePanel })),
 );
+
+function authorityOf(
+  vm: Pick<Vm, 'vm_id'>,
+  role: Role | null,
+  activeVmId: string | null | undefined,
+): ConsoleAuthority {
+  if (!role) return 'UNKNOWN';
+  if (!role.driving) return 'INFOTAINMENT';
+  if (!activeVmId) return 'UNKNOWN';
+  return activeVmId === vm.vm_id ? 'ACTIVE' : 'STANDBY';
+}
 
 /**
  * 웹 콘솔 — VM 을 골라 바로 게스트 터미널에 입력한다 (UI-05·MO-04). VM 상세의 [웹 콘솔] 탭과 같은 패널.
@@ -25,6 +39,9 @@ export function ConsolePage() {
   const items = vms.data?.items ?? [];
   const selected = items.find((vm) => vm.vm_id === params.get('vm')) ?? items[0];
   const selectedRole = selected ? roleOf(selected, drive) : null;
+  const selectedAuthority = selected
+    ? authorityOf(selected, selectedRole, drive?.control?.active_vm_id)
+    : undefined;
 
   return (
     <div className={styles.page}>
@@ -45,6 +62,7 @@ export function ConsolePage() {
       <div className={styles.picks} role="tablist" aria-label="콘솔을 열 VM">
         {items.map((vm) => {
           const role = roleOf(vm, drive);
+          const authority = authorityOf(vm, role, drive?.control?.active_vm_id);
           const on = vm.vm_id === selected?.vm_id;
           return (
             <button
@@ -59,7 +77,12 @@ export function ConsolePage() {
               <span className={styles.row}>
                 <b style={{ color: role?.color }}>{role?.vmLabel ?? capitalizeFirst(vm.name)}</b>
                 <span className={styles.grow} />
-                <StatusBadge health={STATE_HEALTH[vm.state]} label={STATE_LABEL[vm.state]} size="sm" />
+                <span className={styles.consoleStates}>
+                  <span className={styles.consoleAuthority} data-authority={authority.toLowerCase()}>
+                    {authority}
+                  </span>
+                  <StatusBadge health={STATE_HEALTH[vm.state]} label={STATE_LABEL[vm.state]} size="sm" />
+                </span>
               </span>
               <span className={styles.eyebrow}>
                 {role ? (role.driving ? 'Drive' : 'Infotainment') : capitalizeFirst(vm.name)} · {osLabel(vm)}
@@ -76,6 +99,7 @@ export function ConsolePage() {
             key={selected.vm_id}
             vm={selected}
             displayName={selectedRole?.vmLabel ?? capitalizeFirst(selected.name)}
+            authority={selectedAuthority}
           />
         </Suspense>
       )}

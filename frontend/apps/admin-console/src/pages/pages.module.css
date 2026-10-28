@@ -502,6 +502,39 @@ button.chip:hover:not(.chipOn) {
   gap: var(--x-space-1);
   border-top-width: 3px;
 }
+.consoleStates {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--x-space-2);
+}
+.consoleAuthority {
+  padding: 4px var(--x-space-2);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.consoleAuthority[data-authority='active'] {
+  border-color: color-mix(in srgb, var(--x-ok) 48%, var(--x-border));
+  background: var(--x-ok-soft);
+  color: var(--x-ok);
+}
+.consoleAuthority[data-authority='standby'] {
+  border-color: color-mix(in srgb, var(--x-recovering) 42%, var(--x-border));
+  background: var(--x-recovering-soft);
+  color: var(--x-recovering);
+}
+.consoleAuthority[data-authority='infotainment'] {
+  border-color: color-mix(in srgb, var(--x-app-interaction) 42%, var(--x-border));
+  background: color-mix(in srgb, var(--x-app-interaction) 10%, var(--x-surface-2));
+  color: var(--x-app-interaction);
+}
 .clickCard {
   cursor: pointer;
   transition:

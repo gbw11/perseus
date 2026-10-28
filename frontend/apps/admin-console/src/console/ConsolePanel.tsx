@@ -17,7 +17,17 @@ const LABEL: Record<ConsoleState, string> = {
   error: '연결 오류',
 };
 
-export function ConsolePanel({ vm, displayName }: { vm: Vm; displayName?: string }) {
+export type ConsoleAuthority = 'ACTIVE' | 'STANDBY' | 'UNKNOWN' | 'INFOTAINMENT';
+
+export function ConsolePanel({
+  vm,
+  displayName,
+  authority,
+}: {
+  vm: Vm;
+  displayName?: string;
+  authority?: ConsoleAuthority;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const transport = useRef<ConsoleTransport | null>(null);
   const terminal = useRef<Terminal | null>(null);
@@ -115,6 +125,11 @@ export function ConsolePanel({ vm, displayName }: { vm: Vm; displayName?: string
         <div className={styles.toolbar}>
           <div className={styles.identity}>
             <strong>{consoleName}</strong>
+            {authority && (
+              <span className={styles.authority} data-authority={authority.toLowerCase()}>
+                {authority}
+              </span>
+            )}
             <span className={styles.badge} data-state={status.state}>
               {LABEL[status.state]}
             </span>

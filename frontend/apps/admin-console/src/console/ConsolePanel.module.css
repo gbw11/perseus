@@ -42,6 +42,31 @@
   background: var(--x-fault-soft);
   color: var(--x-fault);
 }
+.authority {
+  padding: 5px var(--x-space-2);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.authority[data-authority='active'] {
+  border-color: color-mix(in srgb, var(--x-ok) 48%, var(--x-border));
+  background: var(--x-ok-soft);
+  color: var(--x-ok);
+}
+.authority[data-authority='standby'] {
+  border-color: color-mix(in srgb, var(--x-recovering) 42%, var(--x-border));
+  background: var(--x-recovering-soft);
+  color: var(--x-recovering);
+}
+.authority[data-authority='infotainment'] {
+  border-color: color-mix(in srgb, var(--x-app-interaction) 42%, var(--x-border));
+  background: color-mix(in srgb, var(--x-app-interaction) 10%, var(--x-surface-2));
+  color: var(--x-app-interaction);
+}
 .hint,
 .error {
   margin: 0;
