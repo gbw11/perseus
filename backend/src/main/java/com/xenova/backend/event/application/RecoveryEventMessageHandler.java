@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 // Entry point for recovery events delivered by MQTT-12. It never throws: malformed or contract-invalid
@@ -19,21 +19,29 @@ public class RecoveryEventMessageHandler {
     private static final Logger log = LoggerFactory.getLogger(RecoveryEventMessageHandler.class);
 
     private final ObjectMapper objectMapper;
-    private final ApplicationEventPublisher eventPublisher;
+    private final RecoveryEventStore eventStore;
 
-    public RecoveryEventMessageHandler(ObjectMapper objectMapper, ApplicationEventPublisher eventPublisher) {
+    public RecoveryEventMessageHandler(ObjectMapper objectMapper, RecoveryEventStore eventStore) {
         this.objectMapper = objectMapper;
-        this.eventPublisher = eventPublisher;
+        this.eventStore = eventStore;
     }
 
     public Result handle(byte[] payload, Instant receivedAt) {
         try {
             RecoveryEvent event = parse(payload);
             validate(event);
-            eventPublisher.publishEvent(new RecoveryEventReceived(event, receivedAt));
-            return Result.ACCEPTED;
+            RecoveryEventStore.StoreResult stored = eventStore.store(event, receivedAt);
+            return stored == RecoveryEventStore.StoreResult.DUPLICATE ? Result.DUPLICATE : Result.ACCEPTED;
         } catch (Rejected rejected) {
             log.warn("Rejected recovery event on {}: {} {}", TOPIC, rejected.code, rejected.getMessage());
+            return Result.REJECTED;
+        } catch (DataIntegrityViolationException duplicateRace) {
+            RecoveryEvent event = parse(payload);
+            if (event.eventId() != null && eventStore.exists(event.eventId())) {
+                log.debug("Ignored concurrently duplicated recovery event {} on {}", event.eventId(), TOPIC);
+                return Result.DUPLICATE;
+            }
+            log.error("Failed to persist recovery event on {}", TOPIC, duplicateRace);
             return Result.REJECTED;
         } catch (RuntimeException exception) {
             log.error("Failed to handle recovery event on {}", TOPIC, exception);
@@ -139,6 +147,7 @@ public class RecoveryEventMessageHandler {
 
     public enum Result {
         ACCEPTED,
+        DUPLICATE,
         REJECTED
     }
 

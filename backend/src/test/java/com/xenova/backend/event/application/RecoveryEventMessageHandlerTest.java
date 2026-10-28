@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
@@ -18,14 +19,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.mockito.ArgumentCaptor;
-import org.springframework.context.ApplicationEventPublisher;
 
 class RecoveryEventMessageHandlerTest {
 
     private static final Instant RECEIVED_AT = Instant.parse("2026-10-27T06:00:00Z");
 
-    private ApplicationEventPublisher publisher;
+    private RecoveryEventStore eventStore;
     private RecoveryEventMessageHandler handler;
 
     @BeforeEach
@@ -34,8 +33,10 @@ class RecoveryEventMessageHandlerTest {
                 .addModule(new JavaTimeModule())
                 .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
                 .build();
-        publisher = mock(ApplicationEventPublisher.class);
-        handler = new RecoveryEventMessageHandler(objectMapper, publisher);
+        eventStore = mock(RecoveryEventStore.class);
+        when(eventStore.store(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(RecoveryEventStore.StoreResult.STORED);
+        handler = new RecoveryEventMessageHandler(objectMapper, eventStore);
     }
 
     @ParameterizedTest
@@ -44,12 +45,10 @@ class RecoveryEventMessageHandlerTest {
         RecoveryEventMessageHandler.Result result = handler.handle(event(type, terminalFields), RECEIVED_AT);
 
         assertThat(result).isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
-        ArgumentCaptor<RecoveryEventReceived> captor = ArgumentCaptor.forClass(RecoveryEventReceived.class);
-        verify(publisher).publishEvent(captor.capture());
-        RecoveryEventReceived received = captor.getValue();
-        assertThat(received.event().type().value()).isEqualTo(type);
-        assertThat(received.event().eventId().toString()).isEqualTo("00000000-0000-0000-0000-000000000001");
-        assertThat(received.receivedAt()).isEqualTo(RECEIVED_AT);
+        verify(eventStore).store(
+                org.mockito.ArgumentMatchers.argThat(event -> event.type().value().equals(type)
+                        && event.eventId().toString().equals("00000000-0000-0000-0000-000000000001")),
+                org.mockito.ArgumentMatchers.eq(RECEIVED_AT));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -57,7 +56,7 @@ class RecoveryEventMessageHandlerTest {
     void rejectsMalformedOrContractInvalidEvents(String name, byte[] payload) {
         assertThat(handler.handle(payload, RECEIVED_AT))
                 .isEqualTo(RecoveryEventMessageHandler.Result.REJECTED);
-        verify(publisher, never()).publishEvent(org.mockito.ArgumentMatchers.any());
+        verify(eventStore, never()).store(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -66,12 +65,14 @@ class RecoveryEventMessageHandlerTest {
 
         assertThat(handler.handle(oversized, RECEIVED_AT))
                 .isEqualTo(RecoveryEventMessageHandler.Result.REJECTED);
-        verify(publisher, never()).publishEvent(org.mockito.ArgumentMatchers.any());
+        verify(eventStore, never()).store(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
 
-        reset(publisher);
+        reset(eventStore);
+        when(eventStore.store(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(RecoveryEventStore.StoreResult.STORED);
         assertThat(handler.handle(event("recovery.started", ""), RECEIVED_AT))
                 .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
-        verify(publisher).publishEvent(org.mockito.ArgumentMatchers.any(RecoveryEventReceived.class));
+        verify(eventStore).store(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(RECEIVED_AT));
     }
 
     @ParameterizedTest
@@ -83,7 +84,16 @@ class RecoveryEventMessageHandlerTest {
 
         assertThat(handler.handle(payload, RECEIVED_AT))
                 .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
-        verify(publisher).publishEvent(org.mockito.ArgumentMatchers.any(RecoveryEventReceived.class));
+        verify(eventStore).store(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(RECEIVED_AT));
+    }
+
+    @Test
+    void reportsDuplicateWithoutRejectingTheMessage() {
+        when(eventStore.store(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(RecoveryEventStore.StoreResult.DUPLICATE);
+
+        assertThat(handler.handle(event("recovery.started", ""), RECEIVED_AT))
+                .isEqualTo(RecoveryEventMessageHandler.Result.DUPLICATE);
     }
 
     private static Stream<Arguments> validEvents() {
