@@ -291,16 +291,16 @@ public class DisplayRegistry {
         }
     }
 
-    // Kiosk path the service appends to its own base URL. os-face uses the screen id of the VM role
-    // (message-board is the interaction screen).
+    // Legacy Spring display route. The role is an explicit UUID binding; never infer A/B ownership from
+    // autonomous/manual app ids. The dom0 display pipeline uses its own /display/* routes.
     static String screenPath(String view, VmRole role) {
         if (!OS_FACE.equals(view) || role == null) {
             return "/split";
         }
         return switch (role) {
-            case AUTONOMOUS -> "/detail/autonomous";
-            case MANUAL -> "/detail/manual";
-            case MESSAGE_BOARD -> "/detail/interaction";
+            case PRIMARY_DRIVE -> "/detail/primary_drive";
+            case BACKUP_DRIVE -> "/detail/backup_drive";
+            case INTERACTION -> "/detail/interaction";
         };
     }
 

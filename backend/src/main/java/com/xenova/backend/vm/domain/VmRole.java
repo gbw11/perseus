@@ -3,15 +3,15 @@ package com.xenova.backend.vm.domain;
 import com.fasterxml.jackson.annotation.JsonValue;
 import java.util.Arrays;
 
-// What the VM is for in the RC car scenario. The values are the MQTT app_id (MQTT contract §4), so the console
-// can match a VM with its app events and monitor slot. Spring-only: dom0-manager never sees it.
+// Deployment binding for the current A/B drive topology. A drive VM can run both autonomous and manual apps;
+// those app ids are not VM roles. Spring owns this label and dom0-manager never infers it from a VM name.
 public enum VmRole {
-    AUTONOMOUS("autonomous"),
-    MANUAL("manual"),
-    MESSAGE_BOARD("message-board");
+    PRIMARY_DRIVE("primary_drive"),
+    BACKUP_DRIVE("backup_drive"),
+    INTERACTION("interaction");
 
     /** Request validation pattern; keep in step with the values above. */
-    public static final String PATTERN = "^(autonomous|manual|message-board)$";
+    public static final String PATTERN = "^(primary_drive|backup_drive|interaction)$";
 
     private final String value;
 
