@@ -857,14 +857,19 @@ button.chip:hover:not(.chipOn) {
   letter-spacing: 0.06em;
 }
 .authority[data-authority='active'] {
-  border-color: color-mix(in srgb, var(--x-ok) 46%, var(--x-border));
-  background: var(--x-ok-soft);
-  color: var(--x-ok);
+  border-color: color-mix(in srgb, var(--x-primary) 52%, var(--x-border));
+  background: color-mix(in srgb, var(--x-primary) 14%, var(--x-surface-2));
+  color: var(--x-primary);
 }
 .authority[data-authority='standby'] {
-  border-color: color-mix(in srgb, var(--x-primary) 48%, var(--x-border));
-  background: color-mix(in srgb, var(--x-primary) 10%, transparent);
-  color: var(--x-primary);
+  border-color: color-mix(in srgb, var(--x-recovering) 42%, var(--x-border));
+  background: var(--x-recovering-soft);
+  color: var(--x-recovering);
+}
+.authority[data-authority='infotainment'] {
+  border-color: color-mix(in srgb, var(--x-app-interaction) 42%, var(--x-border));
+  background: color-mix(in srgb, var(--x-app-interaction) 10%, var(--x-surface-2));
+  color: var(--x-app-interaction);
 }
 .vmStatusRows {
   display: grid;
