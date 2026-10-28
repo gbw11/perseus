@@ -2,6 +2,7 @@ package com.xenova.backend.agent.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mockingDetails;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.timeout;
 
@@ -38,6 +39,9 @@ class MqttAgentSubscriberIntegrationTest {
     @Autowired
     private AgentHeartbeatRepository heartbeatRepository;
 
+    @Autowired
+    private MqttAgentSubscriber subscriber;
+
     @MockitoBean
     private RecoveryEventMessageHandler recoveryEventHandler;
 
@@ -58,6 +62,9 @@ class MqttAgentSubscriberIntegrationTest {
 
     @Test
     void requestsRecoveryBackfillAfterConnecting() {
+        clearInvocations(recoveryEventBackfillService);
+        subscriber.connectComplete(true, "tcp://127.0.0.1:" + PORT);
+
         verify(recoveryEventBackfillService, timeout(10_000)).requestBackfill();
     }
 
