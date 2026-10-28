@@ -1,0 +1,21 @@
+[Unit]
+Description=Xenova vehicle two-monitor kiosk
+Requires=xenova-display-graphics.service
+After=xenova-display-graphics.service xenova-display-feed.service
+PartOf=xenova-display.target xenova-display-graphics.service
+[Service]
+Type=simple
+EnvironmentFile=/etc/xenova/display-256/kiosk.env
+RootDirectory=@GRAPHICS_ROOT@
+MountAPIVFS=yes
+BindPaths=@GRAPHICS_ROOT@/run:/run @GRAPHICS_ROOT@/tmp:/tmp
+User=root
+Group=root
+WorkingDirectory=/home/kiosk
+Environment="PYTHONPATH=/opt/xenova-kiosk-runtime/20261028/lib" "DISPLAY=:5" "XAUTHORITY=/run/xenova-display.Xauthority" "HOME=/home/kiosk" "XDG_RUNTIME_DIR=/run/user/1000" "CHROME_DEVEL_SANDBOX=/usr/lib/chromium/chrome-sandbox"
+ExecStart=/usr/bin/setpriv --reuid=1000 --regid=1000 --clear-groups /usr/bin/python3 -m xenova_display.kiosk --config /run/xenova-display-runtime.json --status /run/xenova-kiosk/display-runtime.json --chromium /usr/lib/chromium/chromium --prevent-idle-blank
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
