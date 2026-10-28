@@ -1,0 +1,20 @@
+{
+  "072845-remote-source.py.gz": "15e64bf1bf60b7f42ef28572a8ac5baa26a2194be5bbf5a03c67e0549d9b4ed0",
+  "072845-result.json.gz": "2d0d3622d4153de0937e254b71725f0054b575ae3dbfe400d3be0238e5634cde",
+  "073109-remote-source.py.gz": "c8843e7c4f5f725afd3455251f67b9eaa9b1571be13d567fbb4817960d14d92f",
+  "073109-result.json.gz": "60291a65e4757a21a411f29010a40b7f31d549ce6690d53defddbb88b851d111",
+  "073246-remote-source.py.gz": "0b09db6806d5391d92b8d80bae8906a16159b595717670dede296c3d570772bb",
+  "073246-result.json.gz": "055464eb8f3049daf3b009a898d90da112e891198b5f38f4094434841b270fe9",
+  "073643-remote-source.py.gz": "56548d654e0ac39956ba99bfbf6415bde818dbcb8b0ce1dee626eafab7ccab0f",
+  "073643-result.json.gz": "bdc58e62d7920fbbb60565a029b68d67dbb9fae4c66cb2c0378f5d2d048c5b04",
+  "kiosk-deps-staged.json": "fc857d4a6235ebfec7823c97d27245266013cb23ed2691d071be6f5c064e072c",
+  "kiosk-runtime-preflight.json": "6a83c00aa7d1051d50e07c1a80e87cc4dcbaa40674a32110a7c8af0f8e24e89d",
+  "monitor-1-service-initial.jpg": "f5c93066944edb15a0732340a83c6c00a8d31d753f4dc4e380e267aa47b64997",
+  "monitor-1-service-recovered.jpg": "f5c93066944edb15a0732340a83c6c00a8d31d753f4dc4e380e267aa47b64997",
+  "monitor-2-service-initial.jpg": "a810282b99fdeebc43e16b8a0078e227171926b5e9692b737eedd70ffc9ea0cc",
+  "monitor-2-service-recovered.jpg": "a810282b99fdeebc43e16b8a0078e227171926b5e9692b737eedd70ffc9ea0cc",
+  "postflight.json": "4298df9f522bf19ba9af38ff725e3654f98e8fe954fe5c7419e8dff452fd9479",
+  "probe_kiosk_service.py.gz": "88102092c6b79dd7c137030d2b45c1382cf8d8e0949320ac58c80fa0b706dd16",
+  "summary.json": "3796cfebb4233ca26c27fe7958abf1a39c11c2464bd9d7c230600d0fd16c106f",
+  "trial-kiosk.service": "7d139428faf6c3f1be102537f1132e903d2fc198fe1abdccf56a6425099014a7"
+}

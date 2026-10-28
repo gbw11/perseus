@@ -1,0 +1,30 @@
+[Unit]
+Description=Perseus local two-output X11 kiosk
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/xenova/display.env
+ExecStart=/opt/xenova-display/bin/python -m xenova_display.kiosk --config /etc/xenova/display-runtime.json --status %t/xenova/display-runtime.json --chromium /usr/bin/chromium --prevent-idle-blank
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target
+
+[Service]
+EnvironmentFile=
+EnvironmentFile=/opt/xenova-graphics-probe/20261027-1ddf34f25d30/rootfs/run/probe-kiosk.env
+RootDirectory=/opt/xenova-graphics-probe/20261027-1ddf34f25d30/rootfs
+MountAPIVFS=yes
+BindPaths=/opt/xenova-graphics-probe/20261027-1ddf34f25d30/rootfs/run:/run /opt/xenova-graphics-probe/20261027-1ddf34f25d30/rootfs/tmp:/tmp
+User=root
+Group=root
+WorkingDirectory=/home/kiosk
+Environment="PYTHONPATH=/opt/xenova-kiosk-runtime/20261028/lib" "DISPLAY=:5" "XAUTHORITY=/run/probe.Xauthority" "HOME=/home/kiosk" "XDG_RUNTIME_DIR=/run/user/1000" "CHROME_DEVEL_SANDBOX=/usr/lib/chromium/chrome-sandbox"
+ExecStart=
+ExecStart=/usr/bin/setpriv --reuid=1000 --regid=1000 --clear-groups /usr/bin/python3 -m xenova_display.kiosk --config /run/probe-kiosk-config.json --status /run/kiosk-trial/display-runtime.json --chromium /usr/lib/chromium/chromium --prevent-idle-blank
