@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 
 from xenova_agent.__main__ import run
@@ -16,6 +17,10 @@ class FakeClient:
         self.started_with: list[float | None] = []
         self.stopped = False
         self.published: list[tuple[str, str, dict]] = []
+        self.raw: list[tuple[str, bytes]] = []  # v2 telemetry (봉투 없는 원문)
+
+    def publish_raw(self, topic, data, *, qos, retain, wait_s=None):
+        self.raw.append((topic, bytes(data)))
 
     @property
     def connected(self) -> bool:
@@ -90,3 +95,27 @@ def test_slow_collection_does_not_delay_heartbeats():
     assert run(settings, client_factory=lambda s: client, reporter_factory=factory, stop=stop, install_signals=False) == 0
     release.set()
     assert len(heartbeats) == 3 and heartbeats[-1] - started < 1.0
+
+
+def test_telemetry_thread_publishes_v2_streams_and_a_final_stopping_heartbeat():
+    """세 번째 스레드는 Reporter 와 무관하게 돌고, 정지 때 클라이언트를 닫기 전에 stopping heartbeat 를 한 번 보낸다."""
+    stop = threading.Event()
+    client = FakeClient(stop)  # 첫 v1 heartbeat 뒤 정지
+    settings = AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.05)
+    assert run(settings, client_factory=lambda s: client, reporter_factory=None, stop=stop, install_signals=False) == 0
+    streams = [topic.rsplit("/", 1)[1] for topic, _ in client.raw]
+    assert streams[:3] == ["inventory", "heartbeat", "metrics"] and all(t.startswith(f"xenova/v2/vms/{VM_ID}/telemetry/") for t, _ in client.raw)
+    first = json.loads(client.raw[1][1])
+    assert first["payload"]["publisher_state"] == "degraded"  # Reporter 가 없으면 수집 루프가 없는 것이다
+    assert first["payload"]["app_health_asserted"] is False
+    last = json.loads(client.raw[-1][1])
+    assert last["type"] == "telemetry.heartbeat" and last["payload"]["publisher_state"] == "stopping"
+    assert client.stopped is True
+
+
+def test_telemetry_can_be_disabled_by_settings():
+    stop = threading.Event()
+    client = FakeClient(stop)
+    settings = AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.05, telemetry_enabled=False)
+    assert run(settings, client_factory=lambda s: client, reporter_factory=None, stop=stop, install_signals=False) == 0
+    assert client.raw == [] and len(client.published) == 1

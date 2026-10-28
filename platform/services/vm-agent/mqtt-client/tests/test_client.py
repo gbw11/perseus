@@ -259,3 +259,21 @@ def test_connections_counts_successful_connects_so_a_fast_reconnect_is_visible(c
     assert client.connections == 2 and client.connected
     client._on_connect(client._fake, None, {}, 135)  # 거부된 CONNACK 은 세지 않는다
     assert client.connections == 2
+
+
+def test_connection_attempts_counts_every_connack_including_refusals(client):
+    assert client.connection_attempts == 0
+    client._on_connect(client._fake, None, {}, 0)
+    client._on_connect(client._fake, None, {}, 135)
+    assert client.connection_attempts == 2 and client.connections == 1
+
+
+def test_publish_raw_sends_the_bytes_as_given_without_a_v1_envelope(client):
+    topic = "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/heartbeat"
+    client.publish_raw(topic, b'{"schema_version":"2.1"}', qos=0, retain=False, wait_s=0)
+    assert client._fake.published[-1] == (topic, b'{"schema_version":"2.1"}', 0, False)
+    with pytest.raises(TypeError):
+        client.publish_raw(topic, {"schema_version": "2.1"}, qos=0, retain=False)
+    client._fake.publish_rc = 4  # MQTT_ERR_NO_CONN
+    with pytest.raises(PublishError):
+        client.publish_raw(topic, b"{}", qos=1, retain=True, wait_s=0)
