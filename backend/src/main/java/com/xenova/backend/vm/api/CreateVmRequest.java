@@ -33,8 +33,8 @@ public record CreateVmRequest(
         @Min(value = 16, message = "memory_mib는 16~1024여야 합니다.")
         @Max(value = 1024, message = "memory_mib는 16~1024여야 합니다.")
         Integer memoryMib,
-        // Optional. The MQTT app_id this VM runs (VmRole); omitted or null means no role.
-        @Pattern(regexp = VmRole.PATTERN, message = "role은 autonomous, manual, message-board 중 하나여야 합니다.")
+        // Optional deployment binding. It is independent of autonomous/manual app ids within a drive VM.
+        @Pattern(regexp = VmRole.PATTERN, message = "role은 primary_drive, backup_drive, interaction 중 하나여야 합니다.")
         String role) {
 
     CreateVmCommand toCommand() {
