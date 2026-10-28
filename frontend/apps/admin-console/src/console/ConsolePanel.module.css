@@ -15,31 +15,32 @@
   justify-content: space-between;
 }
 .badge {
-  padding: 6px var(--x-space-3);
-  border: 1px solid transparent;
-  border-radius: var(--x-radius-sm);
-  background: var(--x-stopped-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--x-text-muted);
-  font-size: var(--x-text-xs);
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.badge::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
 }
 .badge[data-state='idle'] {
-  border-color: color-mix(in srgb, var(--x-primary) 48%, var(--x-border));
-  background: color-mix(in srgb, var(--x-primary) 12%, var(--x-surface-2));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--x-primary) 12%, transparent);
-  color: var(--x-primary);
+  color: color-mix(in srgb, var(--x-primary) 72%, var(--x-text-muted));
 }
 .badge[data-state='connected'] {
-  background: var(--x-ok-soft);
   color: var(--x-ok);
 }
 .badge[data-state='connecting'] {
-  background: var(--x-recovering-soft);
   color: var(--x-recovering);
 }
 .badge[data-state='error'] {
-  background: var(--x-fault-soft);
   color: var(--x-fault);
 }
 .authority {
@@ -53,9 +54,9 @@
   letter-spacing: 0.06em;
 }
 .authority[data-authority='active'] {
-  border-color: color-mix(in srgb, var(--x-ok) 48%, var(--x-border));
-  background: var(--x-ok-soft);
-  color: var(--x-ok);
+  border-color: color-mix(in srgb, var(--x-primary) 52%, var(--x-border));
+  background: color-mix(in srgb, var(--x-primary) 14%, var(--x-surface-2));
+  color: var(--x-primary);
 }
 .authority[data-authority='standby'] {
   border-color: color-mix(in srgb, var(--x-recovering) 42%, var(--x-border));

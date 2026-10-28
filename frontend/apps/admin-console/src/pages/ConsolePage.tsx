@@ -81,7 +81,9 @@ export function ConsolePage() {
                   <span className={styles.consoleAuthority} data-authority={authority.toLowerCase()}>
                     {authority}
                   </span>
-                  <StatusBadge health={STATE_HEALTH[vm.state]} label={STATE_LABEL[vm.state]} size="sm" />
+                  <span className={styles.consoleRuntime}>
+                    <StatusBadge health={STATE_HEALTH[vm.state]} label={STATE_LABEL[vm.state]} size="sm" />
+                  </span>
                 </span>
               </span>
               <span className={styles.eyebrow}>
