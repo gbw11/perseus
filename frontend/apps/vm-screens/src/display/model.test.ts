@@ -31,6 +31,11 @@ describe('HDMI presentation contract', () => {
     other.outputs[1]!.vm_id = 'missing';
     expect(() => parsePresentation(other)).toThrow();
   });
+  it('rejects legacy or swapped vehicle screen mappings', () => {
+    const p = presentationFixture();
+    p.outputs[0]!.screen = 'infotainment';
+    expect(() => parsePresentation(p)).toThrow();
+  });
   it('rejects duplicate/reordered snapshots and retired collector epochs', () => {
     const order = new SnapshotOrder();
     const p = presentationFixture();

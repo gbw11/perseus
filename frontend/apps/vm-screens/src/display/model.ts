@@ -29,6 +29,7 @@ export interface Presentation {
   outputs: {
     output_id: 'monitor-1' | 'monitor-2';
     view: 'overview' | 'detail';
+    screen: 'instrument' | 'infotainment';
     selection: 'pinned' | 'follow_active';
     vm_id: string | null;
     reason?: string;
@@ -127,6 +128,7 @@ export function parsePresentation(v: unknown): Presentation {
       !object(output) ||
       output.output_id !== `monitor-${index + 1}` ||
       output.view !== (index === 0 ? 'overview' : 'detail') ||
+      output.screen !== (index === 0 ? 'instrument' : 'infotainment') ||
       !['pinned', 'follow_active'].includes(String(output.selection)) ||
       !(output.vm_id === null || ids.has(String(output.vm_id))) ||
       (index === 0 && output.vm_id !== null) ||

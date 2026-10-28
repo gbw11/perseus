@@ -63,7 +63,7 @@ export DISPLAY_FEED_BASE_URL=http://127.0.0.1:8082
 
 ## 3단계 로컬 화면 렌더링
 
-`frontend`에서 `npm run build -w @xenova/vm-screens`로 빌드한 뒤 수집기에 `XENOVA_DISPLAY_WEB_ROOT=<vm-screens/dist 절대 경로>`를 지정한다. 두 화면은 `/display/monitor-1`(전체 상태), `/display/monitor-2`(선택 VM 상세)다. 외부 대시보드의 페이지 라우팅과는 별도의 dom0 로컬 화면이다. 새 화면은 mock telemetry나 기존 자동/수동 VM 시나리오에 연결하지 않는다. 기존 `/split`, `/detail/:app`는 이전 시연 화면으로 남아 있으며 HDMI의 기본 진입점은 아니다.
+`frontend`에서 `npm run build -w @xenova/vm-screens`로 빌드한 뒤 수집기에 `XENOVA_DISPLAY_WEB_ROOT=<vm-screens/dist 절대 경로>`를 지정한다. 두 화면은 `/display/monitor-1`(차량 계기판), `/display/monitor-2`(인포테인먼트·선택 게스트 콘텐츠)다. `outputs.screen`을 각각 `instrument`/`infotainment`로 고정한다. 이전 `view` 필드는 선택 API 호환용이다. 속도·배터리·네비·음악과 게스트 영상 어댑터가 연결되기 전에는 수신 대기를 표시한다. 외부 대시보드의 페이지 라우팅과는 별도의 dom0 로컬 화면이다. 새 화면은 mock telemetry나 기존 자동/수동 VM 시나리오에 연결하지 않는다. 기존 `/split`, `/detail/:app`는 이전 시연 화면으로 남아 있으며 HDMI의 기본 진입점은 아니다.
 
 | 로컬 경로 | 용도/권한 |
 | --- | --- |
