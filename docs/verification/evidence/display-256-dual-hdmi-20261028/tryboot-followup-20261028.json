@@ -1,0 +1,15 @@
+{
+  "boot_id": "7940cc56-bd4c-4c2a-ba44-4e581764fab2",
+  "uptime": "1429.51 5394.57\n",
+  "tryboot_flag": 0,
+  "normal_config_hash": "d12f36efcda22fa448063ba0c3901652780076248cef047da16ee6d5cd167401",
+  "tryboot_exists": true,
+  "reboot_param": null,
+  "jobs": "No jobs running.\n",
+  "reboot_related_log": [
+    "Oct 28 14:47:11 raspberrypi4-64 systemd[1]: Starting Coordinate Xenova host admission before guest shutdown...",
+    "Oct 28 14:47:11 raspberrypi4-64 systemd[1]: Finished Coordinate Xenova host admission before guest shutdown."
+  ],
+  "boot_changed": false,
+  "normal_config_unchanged": true
+}
