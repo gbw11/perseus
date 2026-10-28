@@ -19,7 +19,7 @@ class XenovaBackendApplicationTests {
 
     @Test
     void flywayBuildsTheSchemaExpectedByHibernate() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
 
         Integer tableCount = jdbcTemplate.queryForObject(
                 """

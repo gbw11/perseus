@@ -13,6 +13,7 @@ public record EventResponse(
         EventSeverity severity,
         String vmId,
         String operationId,
+        String correlationId,
         Instant occurredAt,
         Instant recordedAt,
         Map<String, Object> payload) {
@@ -24,6 +25,7 @@ public record EventResponse(
                 event.getSeverity(),
                 event.getVmId(),
                 event.getOperationId(),
+                event.getCorrelationId(),
                 event.getOccurredAt(),
                 event.getRecordedAt(),
                 event.getPayload());
