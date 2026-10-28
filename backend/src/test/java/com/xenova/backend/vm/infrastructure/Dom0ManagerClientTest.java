@@ -108,6 +108,8 @@ class Dom0ManagerClientTest {
                 .containsExactlyInAnyOrder("vm_id", "name", "template_id", "template_version", "vcpus", "memory_mib");
         assertThat(sent.path("name").asText()).isEqualTo(SPEC.name());
         assertThat(sent.path("vm_id").asText()).isEqualTo(VM_ID);
+        assertThat(sent.path("template_id").asText()).isEqualTo(SPEC.templateId());
+        assertThat(sent.path("template_version").asText()).isEqualTo(SPEC.templateVersion());
     }
 
     @Test
