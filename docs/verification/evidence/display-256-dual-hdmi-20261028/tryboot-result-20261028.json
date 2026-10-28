@@ -1,0 +1,23 @@
+{
+  "normal_config_modified": false,
+  "overlay_sha256": "155ec071f26a8d45c4524ee00c5037ad7ceb8cc81d221640b9d9d7177c416ddf",
+  "trial_config_sha256": "d630ff80a953dfa5d4858a4ec64a20c6e80f823b78e635407168cfca584bdfda",
+  "reboot_request": "systemctl reboot \"0 tryboot\"",
+  "kernel_commit": "95b85bebbedcaedfa7ca79116ed38b7376fba412",
+  "expected_cma_mib": 64,
+  "preflight": {
+    "backup": "/root/xenova-hdmi-backup/20261028-060513",
+    "boot_id": "7940cc56-bd4c-4c2a-ba44-4e581764fab2",
+    "original_hashes": {
+      "config.txt": "d12f36efcda22fa448063ba0c3901652780076248cef047da16ee6d5cd167401",
+      "boot.scr": "c7b5b42cf6647c9915919e4b095b062ae0a155dabeac6c2379f953b154dfb19a",
+      "bcm2711-rpi-4-b.dtb": "75761b73c284e26623e4d1624bff13e67bce2ae620880efd81d6571a3739fcfb"
+    }
+  },
+  "staged": {
+    "normal_config_unchanged": true,
+    "trial_and_overlay_hashes_verified": true
+  },
+  "reboot_observed": false,
+  "reason": "SSH unavailable or boot id unchanged within bounded observation; normal config remains untouched"
+}
