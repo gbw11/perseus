@@ -8,5 +8,7 @@ public interface VmEventRepository extends JpaRepository<VmEvent, Long>, JpaSpec
 
     boolean existsByEventId(String eventId);
 
+    long countByEventId(String eventId);
+
     Optional<VmEvent> findByEventId(String eventId);
 }
