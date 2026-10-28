@@ -89,8 +89,8 @@ class DisplayPolicy:
                 self.selected = active
             decisions = {v["vm_id"]: decide_vm(v) for v in state["vms"]}
             outputs = [
-                {"output_id": "monitor-1", "view": "overview", "selection": "pinned", "vm_id": None},
-                {"output_id": "monitor-2", "view": "detail", "selection": self.selection, "vm_id": self.selected},
+                {"output_id": "monitor-1", "view": "overview", "screen": "instrument", "selection": "pinned", "vm_id": None},
+                {"output_id": "monitor-2", "view": "detail", "screen": "infotainment", "selection": self.selection, "vm_id": self.selected},
             ]
             # Content identity excludes continuously changing age/capture time, but includes run/boot/source changes.
             content = {"outputs": outputs, "decisions": decisions, "drive": drive,

@@ -33,6 +33,7 @@ def test_default_and_explicit_follow_do_not_conflate_mode_and_vm(settings, store
     state["drive"].update(active_vm_id=VM2, mode="MANUAL", source={"status": "fresh"})
     default = policy.presentation(state)
     assert default["outputs"][0]["view"] == "overview"
+    assert [o["screen"] for o in default["outputs"]] == ["instrument", "infotainment"]
     assert default["outputs"][1]["vm_id"] == VM1  # pinned
     policy.select(Selection(policy_epoch=policy.epoch, revision=1, selection="follow_active"))
     followed = policy.presentation(state)
@@ -50,6 +51,7 @@ def test_vm_fault_alone_never_switches_selection(settings, store):
     state = store.snapshot()
     state["vms"][0]["xen_state"] = "crashed"
     assert policy.presentation(state)["outputs"][1]["vm_id"] == VM1
+    assert [o["screen"] for o in policy.presentation(state)["outputs"]] == ["instrument", "infotainment"]
 
 
 def test_os_mismatch_and_unrecognized_xen_state_are_not_normal(store):

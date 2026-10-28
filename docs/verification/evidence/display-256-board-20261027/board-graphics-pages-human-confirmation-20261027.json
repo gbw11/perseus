@@ -1,0 +1,10 @@
+{
+  "source": "direct user reply to the final 30-second-per-page display question",
+  "answer": "두 화면이 정상 크기로 보였음",
+  "single_monitor_sequential_pages_visible": true,
+  "does_not_prove": [
+    "two simultaneous physical outputs",
+    "remote streaming",
+    "new instrument/infotainment UI"
+  ]
+}
