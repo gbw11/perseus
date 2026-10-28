@@ -3,6 +3,7 @@ package com.xenova.backend.event.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -10,7 +11,9 @@ import com.xenova.backend.event.domain.RecoverySyncState;
 import com.xenova.backend.event.domain.RecoverySyncStateRepository;
 import com.xenova.backend.event.infrastructure.RecoveryEventsClient;
 import com.xenova.backend.event.infrastructure.RecoveryEventsClient.RecoveryEventsClientException;
+import com.xenova.backend.vm.infrastructure.Dom0ManagerProperties;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -28,7 +31,7 @@ class RecoveryEventBackfillServiceTest {
     private final RecoveryEventMessageHandler handler = mock(RecoveryEventMessageHandler.class);
     private final RecoverySyncStateRepository repository = mock(RecoverySyncStateRepository.class);
     private final RecoveryEventBackfillService service = new RecoveryEventBackfillService(
-            client, handler, repository, Clock.fixed(NOW, ZoneOffset.UTC));
+            client, handler, repository, Clock.fixed(NOW, ZoneOffset.UTC), properties(Duration.ofMillis(10)));
 
     @Test
     void processesPagesAndAdvancesOnlyToNextCursor() {
@@ -40,7 +43,7 @@ class RecoveryEventBackfillServiceTest {
                 .thenReturn(new RecoveryEventsClient.Page(List.of(), null, EVENT_ID, false));
         when(handler.handle(event, NOW)).thenReturn(RecoveryEventMessageHandler.Result.ACCEPTED);
 
-        service.backfill();
+        assertThat(service.backfill()).isEqualTo(RecoveryEventBackfillService.BackfillResult.COMPLETED);
 
         verify(handler).handle(event, NOW);
         verify(client).fetch(EVENT_ID.toString(), RecoveryEventBackfillService.PAGE_SIZE);
@@ -57,7 +60,7 @@ class RecoveryEventBackfillServiceTest {
                 .thenReturn(new RecoveryEventsClient.Page(List.of(event), EVENT_ID, EVENT_ID, false));
         when(handler.handle(event, NOW)).thenReturn(RecoveryEventMessageHandler.Result.REJECTED);
 
-        service.backfill();
+        assertThat(service.backfill()).isEqualTo(RecoveryEventBackfillService.BackfillResult.TERMINAL_FAILURE);
 
         verify(repository, never()).saveAndFlush(org.mockito.ArgumentMatchers.any());
     }
@@ -70,10 +73,46 @@ class RecoveryEventBackfillServiceTest {
         when(client.fetch(EVENT_ID.toString(), RecoveryEventBackfillService.PAGE_SIZE))
                 .thenThrow(new RecoveryEventsClientException(503));
 
-        service.backfill();
+        assertThat(service.backfill()).isEqualTo(RecoveryEventBackfillService.BackfillResult.RETRYABLE_FAILURE);
 
         verify(repository, never()).saveAndFlush(org.mockito.ArgumentMatchers.any());
         assertThat(state.getAfterEventId()).isEqualTo(EVENT_ID.toString());
+    }
+
+    @Test
+    void retryableFailureAutomaticallyRetriesWithTheSameCursor() {
+        RecoverySyncState state = new RecoverySyncState(RecoverySyncState.RECOVERY_EVENTS, NOW);
+        state.advance(EVENT_ID.toString(), NOW);
+        when(repository.findById(RecoverySyncState.RECOVERY_EVENTS)).thenReturn(Optional.of(state));
+        when(client.fetch(EVENT_ID.toString(), RecoveryEventBackfillService.PAGE_SIZE))
+                .thenThrow(new RecoveryEventsClientException(503))
+                .thenReturn(new RecoveryEventsClient.Page(List.of(), null, EVENT_ID, false));
+
+        service.requestBackfill();
+
+        verify(client, timeout(1_000).times(2))
+                .fetch(EVENT_ID.toString(), RecoveryEventBackfillService.PAGE_SIZE);
+        verify(repository, never()).saveAndFlush(org.mockito.ArgumentMatchers.any());
+        assertThat(state.getAfterEventId()).isEqualTo(EVENT_ID.toString());
+        service.stop();
+    }
+
+    @Test
+    void backoffDoublesAndCapsAtThirtySeconds() {
+        assertThat(service.retryDelayMillis(0)).isEqualTo(10);
+        assertThat(service.retryDelayMillis(1)).isEqualTo(20);
+        assertThat(service.retryDelayMillis(2)).isEqualTo(40);
+        assertThat(service.retryDelayMillis(30)).isEqualTo(30_000);
+    }
+
+    private static Dom0ManagerProperties properties(Duration retryBackoff) {
+        return new Dom0ManagerProperties(
+                "http://127.0.0.1:18081",
+                "test-token",
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(2),
+                Duration.ofSeconds(3),
+                retryBackoff);
     }
 
     private static RecoveryEvent event(UUID eventId) {
