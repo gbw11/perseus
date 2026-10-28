@@ -1,0 +1,17 @@
+{
+  "release": "6.18.33-v8",
+  "version": "Linux version 6.18.33-v8 (oe-user@oe-host) (aarch64-poky-linux-gcc (GCC) 15.3.0, GNU ld (GNU Binutils) 2.46.1.20260718) #1 SMP PREEMPT Thu May 28 02:31:14 UTC 2026\n",
+  "compatible": "raspberrypi,4-model-b,brcm,bcm2711,",
+  "model": "Raspberry Pi 4 Model B Rev 1.5",
+  "cma": [
+    "CmaTotal:          65536 kB",
+    "CmaFree:           64332 kB"
+  ],
+  "tryboot_exists": false,
+  "xen": "Name                                        ID   Mem VCPUs\tState\tTime(s)\nDomain-0                                     0  1024     4     r-----     219.2\ndebian-dev                                   1   512     1     -b----      24.6\nzephyr-drive-a                               2    16     1     -b----       6.5\nzephyr-drive-b                               3    16     1     -b----       6.4\n",
+  "sha256": {
+    "config.txt": "d12f36efcda22fa448063ba0c3901652780076248cef047da16ee6d5cd167401",
+    "boot.scr": "c7b5b42cf6647c9915919e4b095b062ae0a155dabeac6c2379f953b154dfb19a",
+    "bcm2711-rpi-4-b.dtb": "75761b73c284e26623e4d1624bff13e67bce2ae620880efd81d6571a3739fcfb"
+  }
+}
