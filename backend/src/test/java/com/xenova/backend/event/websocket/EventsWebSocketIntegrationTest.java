@@ -5,9 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.event.application.EventRecorder;
+import com.xenova.backend.event.application.RecoveryEventMessageHandler;
 import com.xenova.backend.event.domain.EventSeverity;
 import com.xenova.backend.event.domain.EventType;
 import com.xenova.backend.event.domain.VmEvent;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -46,6 +49,9 @@ class EventsWebSocketIntegrationTest {
     @Autowired
     private EventRecorder eventRecorder;
 
+    @Autowired
+    private RecoveryEventMessageHandler recoveryEventMessageHandler;
+
     @Test
     void subscribedClientReceivesMatchingEventsOnly() throws Exception {
         Client client = authenticatedClient();
@@ -72,6 +78,35 @@ class EventsWebSocketIntegrationTest {
 
         client.send("{\"type\":\"ping\",\"request_id\":\"r-2\"}");
         assertThat(client.next().path("type").asText()).isEqualTo("pong");
+        client.session.close();
+    }
+
+    @Test
+    void recoveryEventsReceivedFromMqttArePushedForPopupRendering() throws Exception {
+        Client client = authenticatedClient();
+        client.send("""
+                {"type":"subscribe","request_id":"recovery-popup","vm_ids":["%s"],
+                 "event_types":["recovery.completed","recovery.failed"]}
+                """.formatted(RECOVERY_VM_ID));
+        assertThat(client.next().path("type").asText()).isEqualTo("subscribed");
+
+        acceptRecoveryEvent(701, "recovery.started", "");
+        acceptRecoveryEvent(702, "recovery.completed",
+                ",\"attempt_duration_ms\":500,\"recovery_duration_ms\":1000,\"execution_id\":\"exec-new\"");
+        acceptRecoveryEvent(703, "recovery.failed",
+                ",\"attempt_duration_ms\":550,\"recovery_duration_ms\":1100,"
+                        + "\"final\":true,\"error\":" + recoveryError());
+
+        JsonNode completed = client.next().path("payload");
+        assertRecoveryPush(completed, 702, "recovery.completed", "INFO");
+        assertThat(completed.path("payload").path("recovery_duration_ms").asLong()).isEqualTo(1000L);
+        assertThat(completed.path("payload").path("execution_id").asText()).isEqualTo("exec-new");
+
+        JsonNode failed = client.next().path("payload");
+        assertRecoveryPush(failed, 703, "recovery.failed", "ERROR");
+        assertThat(failed.path("payload").path("final").asBoolean()).isTrue();
+        assertThat(failed.path("payload").path("error").path("code").asText())
+                .isEqualTo("XEN_EXECUTION_FAILED");
         client.session.close();
     }
 
@@ -132,6 +167,49 @@ class EventsWebSocketIntegrationTest {
         return eventRecorder.record(type, EventSeverity.INFO, vmId, null, Map.of("to", "running"));
     }
 
+    private void acceptRecoveryEvent(int eventNumber, String type, String terminalFields) {
+        byte[] payload = ("""
+                {
+                  "event_id":"%s",
+                  "type":"%s",
+                  "vm_id":"%s",
+                  "recovery_id":"%s",
+                  "recovery_attempt_id":"%s",
+                  "attempt":1,
+                  "reason":"HEARTBEAT_LOST",
+                  "mode":"graceful-restart",
+                  "detected_at":"2026-10-28T00:00:00Z",
+                  "occurred_at":"2026-10-28T00:00:01Z"
+                  %s
+                }
+                """).formatted(recoveryEventId(eventNumber), type, RECOVERY_VM_ID,
+                        RECOVERY_OPERATION_ID, RECOVERY_CORRELATION_ID, terminalFields)
+                .getBytes(StandardCharsets.UTF_8);
+
+        assertThat(recoveryEventMessageHandler.handle(payload, Instant.parse("2026-10-28T00:00:02Z")))
+                .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
+    }
+
+    private static void assertRecoveryPush(
+            JsonNode event, int eventNumber, String type, String severity) {
+        assertThat(event.path("event_id").asText()).isEqualTo(recoveryEventId(eventNumber));
+        assertThat(event.path("type").asText()).isEqualTo(type);
+        assertThat(event.path("severity").asText()).isEqualTo(severity);
+        assertThat(event.path("vm_id").asText()).isEqualTo(RECOVERY_VM_ID);
+        assertThat(event.path("operation_id").asText()).isEqualTo(RECOVERY_OPERATION_ID);
+        assertThat(event.path("correlation_id").asText()).isEqualTo(RECOVERY_CORRELATION_ID);
+        assertThat(event.path("payload").path("reason").asText()).isEqualTo("HEARTBEAT_LOST");
+    }
+
+    private static String recoveryEventId(int value) {
+        return "00000000-0000-0000-0002-%012d".formatted(value);
+    }
+
+    private static String recoveryError() {
+        return "{\"code\":\"XEN_EXECUTION_FAILED\",\"platform_code\":\"XEN_EXECUTION_FAILED\","
+                + "\"message\":\"xl failed\"}";
+    }
+
     private Client authenticatedClient() throws Exception {
         Client client = connect();
         client.send("{\"type\":\"auth\",\"access_token\":\"" + login() + "\"}");
@@ -182,4 +260,8 @@ class EventsWebSocketIntegrationTest {
             return objectMapper.readTree(message);
         }
     }
+
+    private static final String RECOVERY_VM_ID = "00000000-0000-0000-0000-000000000012";
+    private static final String RECOVERY_OPERATION_ID = "00000000-0000-0000-0000-000000000013";
+    private static final String RECOVERY_CORRELATION_ID = "00000000-0000-0000-0000-000000000014";
 }
