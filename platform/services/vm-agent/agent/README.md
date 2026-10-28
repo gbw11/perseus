@@ -34,12 +34,13 @@ heartbeat 는 메인 스레드, inventory·metrics 는 별도 스레드에서 �
 | --- | --- |
 | 토픽 | `xenova/v1/vms/{vm_id}/metrics`, `type: agent.metrics`, QoS 0 |
 | 주기 | 2초(`XENOVA_AGENT_METRICS_INTERVAL`). `window_ms` 는 설정값이 아니라 직전 표본과의 실제 간격, 첫 표본은 `null` |
-| `cpu_percent_allocated` | /proc/stat 합계. 할당된 vCPU 전체를 100% 로 정규화. steal 은 사용으로 세지 않음. 첫 표본은 `null` + `first_sample` |
+| `cpu_percent_allocated` | /proc/stat 합계. 할당된 vCPU 전체를 100% 로 정규화. steal 은 사용으로 세지 않음. 첫 표본은 `null` + `first_sample`, 누적 카운터가 되돌아간 표본은 `null` + `counter_reset`(그 값이 새 기준이라 다음 표본부터 정상) |
 | `memory_used_bytes` / `memory_available_bytes` | /proc/meminfo `MemTotal − MemAvailable`, `MemAvailable` |
 | `disk_read_bytes_total` / `disk_write_bytes_total` | /proc/diskstats 섹터 × 512, `labels.device`. /sys/block 의 디스크 단위만(파티션·loop·ram 제외). /sys/block 을 못 읽으면 파티션과 겹쳐 셀 수 있어 `null` + `read_failed` |
 | `net_rx_bytes_total` / `net_tx_bytes_total` | /proc/net/dev, `labels.iface`. lo 제외 |
-| `processes[]` | CPU 기준 상위 10개(`XENOVA_AGENT_TOP_PROCESSES`, 0~50) `{pid, name, cpu_percent, rss_bytes}`. `cpu_percent` 는 top 과 같은 1코어 기준이라 100 을 넘을 수 있음. 첫 표본은 빈 목록 |
-| 측정 실패 | 0 이 아니라 `value: null` + `unavailable_reason`(`first_sample`·`not_supported`·`read_failed`·`parse_error`·`device_not_found`) |
+| `processes[]` | CPU 기준 상위 10개(`XENOVA_AGENT_TOP_PROCESSES`, 0~50) `{pid, name, cpu_percent, rss_bytes}`. `cpu_percent` 는 top 과 같은 1코어 기준이라 100 을 넘을 수 있음. 첫 표본은 빈 목록. top-N 목록이라 목록에 없는 프로세스가 끝났다는 뜻이 아님 |
+| 프로세스 수집 상태 | 빈 목록의 뜻을 에이전트 안에서 가른다: `first_sample` / `ok` / `partial`(일부 stat 을 권한·형식 때문에 못 읽음. 첫 표본이어도 실패가 있으면 partial) / `read_failed`(/proc 목록을 못 읽음. 원인 종류를 `PermissionError(EACCES)` 처럼 예외·errno 이름으로만 남김) / `disabled`(0개 설정, /proc 을 훑지 않음). 발견한 PID 수와 읽기 성공·사라짐(읽는 사이 끝난 프로세스, 정상)·실패 수, top-N 잘림을 같이 센다. 상태가 바뀔 때만 로그(`partial`·`read_failed` 는 WARNING). **아직 MQTT 로 내보내지 않는다**(공개 필드는 백엔드와 계약 합의 뒤) |
+| 측정 실패 | 0 이 아니라 `value: null` + `unavailable_reason`(`first_sample`·`counter_reset`·`not_supported`·`read_failed`·`parse_error`·`device_not_found`) |
 | 단위 | `percent`·`bytes` 만(Spring 이 그 밖의 단위면 메시지를 거부). load average 는 허용 단위가 없어 보내지 않음 |
 | 끊김 | 끊긴 동안에도 수집은 이어 가지만 발행하지 않고 버림(QoS 0 실시간 표본을 쌓았다가 몰아 보내지 않음). 재연결 뒤 새 표본부터 |
 | 크기 | 직렬화한 payload 가 60KB 를 넘으면 `processes[]` 를 뒤에서부터 줄임(Spring 은 봉투 포함 64KB 초과를 거부). 다 줄여도 넘으면 그 표본은 보내지 않고 ERROR 로그 |
@@ -54,7 +55,7 @@ heartbeat 는 메인 스레드, inventory·metrics 는 별도 스레드에서 �
 | `XENOVA_AGENT_BROKER_HOST` / `PORT` | `192.168.77.1` / `1883` | dom0 xenbr0 의 Mosquitto |
 | `XENOVA_AGENT_BROKER_USERNAME` / `PASSWORD` | (없음) | 브로커 계정이 생기면 설정 (`deploy/`의 ACL) |
 | `XENOVA_AGENT_METRICS_INTERVAL` | `2` | metrics 수집·발행 주기(초) |
-| `XENOVA_AGENT_TOP_PROCESSES` | `10` | `processes[]` 개수(0~50). 0 이면 빈 목록 |
+| `XENOVA_AGENT_TOP_PROCESSES` | `10` | `processes[]` 개수(0~50). 0 이면 빈 목록이고 /proc 을 훑지 않는다 |
 | `XENOVA_AGENT_LOG_LEVEL` | `INFO` | DEBUG/INFO/WARNING/ERROR/CRITICAL |
 
 heartbeat 주기는 계약값 5초로 고정이며 환경변수로 바꿀 수 없습니다(`XENOVA_AGENT_HEARTBEAT_INTERVAL`이 설정돼 있으면 시작을 거부). 시험용 짧은 주기는 `AgentSettings(heartbeat_interval_s=…)` 생성자로만 줍니다. vm_id 는 소문자·하이픈 표준형으로 정규화해 토픽과 봉투에 씁니다(Spring·registry 문자열과 글자까지 같아야 함). UUID 가 아니거나 nil UUID(Domain-0)이거나, 포트·로그 레벨이 범위 밖이면 시작하지 않고 종료 코드 2 로 끝납니다.

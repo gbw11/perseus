@@ -36,6 +36,24 @@ def test_first_sample_has_no_cpu_rate_and_the_second_is_normalised_to_all_vcpus(
     assert second["value"] == 37.5 and second["unavailable_reason"] is None
 
 
+def test_cpu_counter_going_back_is_counter_reset_not_first_sample(roots):
+    collector = MetricsCollector(roots)
+    collector.collect()
+    cpu_stat(roots, user=10, system=5, idle=85)  # 누적값이 줄었다(재부팅·리셋)
+    reset = by_name(collector.collect(), "cpu_percent_allocated")[0]
+    assert (reset["value"], reset["unavailable_reason"]) == (None, "counter_reset")
+    cpu_stat(roots, user=30, system=15, idle=155)  # 줄어든 값이 새 기준: busy +30, total +100
+    after = by_name(collector.collect(), "cpu_percent_allocated")[0]
+    assert (after["value"], after["unavailable_reason"]) == (30.0, None)
+
+
+def test_same_tick_is_still_no_interval(roots):
+    collector = MetricsCollector(roots)
+    collector.collect()
+    again = by_name(collector.collect(), "cpu_percent_allocated")[0]  # 카운터 그대로: 되돌아간 게 아니라 구간이 없다
+    assert (again["value"], again["unavailable_reason"]) == (None, "first_sample")
+
+
 def test_memory_and_counters_use_bytes_and_skip_partitions_loop_and_lo(roots):
     values = MetricsCollector(roots).collect()
     assert by_name(values, "memory_used_bytes")[0]["value"] == (512000 - 300000) * 1024
@@ -103,6 +121,114 @@ def test_vanished_and_reused_pids_are_not_reported_as_cpu_spikes(tmp_path):
     (roots.proc / "11" / "stat").unlink()
     clock[0] = 2.0
     assert sampler.sample() == []
+
+
+# ---- processes: 수집 상태 (빈 목록이 무엇을 뜻하는가) ----
+
+
+def sampler_for(roots, clock, **kwargs):
+    return ProcessSampler(roots, clk_tck=100, page_bytes=4096, clock=lambda: clock[0], **kwargs)
+
+
+def test_first_then_ok_with_pid_and_read_counts(tmp_path):
+    roots = make_roots(tmp_path)
+    clock = [0.0]
+    for pid in (1, 2, 3):
+        process(roots, pid, f"p{pid}", utime=0)
+    sampler = sampler_for(roots, clock, top_n=2)
+    first = sampler.collect()
+    assert (first.status, first.rows, first.discovered, first.read_ok, first.failed) == ("first_sample", [], 3, 3, 0)
+    for pid in (1, 2, 3):
+        process(roots, pid, f"p{pid}", utime=pid)
+    clock[0] = 2.0
+    second = sampler.collect()
+    assert (second.status, second.discovered, second.read_ok, second.vanished, second.failed) == ("ok", 3, 3, 0, 0)
+    assert len(second.rows) == 2 and second.candidates == 3 and second.truncated  # top-2 밖의 1개는 끝난 게 아니다
+    assert sampler.last is second
+
+
+def test_vanished_process_is_normal_but_unreadable_stat_is_partial(tmp_path):
+    roots = make_roots(tmp_path)
+    clock = [0.0]
+    for pid in (1, 2, 3, 4):
+        process(roots, pid, f"p{pid}", utime=0)
+    sampler = sampler_for(roots, clock)
+    sampler.collect()
+    clock[0] = 2.0
+    (roots.proc / "2" / "stat").unlink()  # 목록에는 있지만 그 사이 끝났다
+    second = sampler.collect()
+    assert (second.status, second.discovered, second.read_ok, second.vanished, second.failed) == ("ok", 4, 3, 1, 0)
+
+    write(roots.proc / "3" / "stat", "3 (broken stat with no fields)\n")  # 형식이 틀림
+    (roots.proc / "4" / "stat").unlink()
+    (roots.proc / "4" / "stat").mkdir()  # 열 수 없음(권한·I/O 와 같은 OSError)
+    clock[0] = 4.0
+    third = sampler.collect()
+    assert (third.status, third.read_ok, third.vanished, third.failed) == ("partial", 1, 1, 2)
+    assert [r["pid"] for r in third.rows] == [1]
+
+
+def test_unreadable_proc_is_read_failed_not_an_empty_system(tmp_path):
+    roots = make_roots(tmp_path)
+    (roots.proc).rmdir()
+    clock = [0.0]
+    result = sampler_for(roots, clock).collect()
+    assert (result.status, result.rows, result.discovered, result.error) == ("read_failed", [], 0, "FileNotFoundError(ENOENT)")
+
+
+def test_first_sample_with_a_broken_stat_is_partial_not_first_sample(tmp_path):
+    """첫 표본이라고 읽기 실패를 가리지 않는다. 목록이 빠졌을 수 있다는 사실이 더 중요하다."""
+    roots = make_roots(tmp_path)
+    process(roots, 1, "ok", utime=0)
+    write(roots.proc / "2" / "stat", "2 (broken)\n")
+    result = sampler_for(roots, [0.0]).collect()
+    assert (result.status, result.rows, result.discovered, result.read_ok, result.failed) == ("partial", [], 2, 1, 1)
+
+
+def test_permission_denied_on_proc_is_read_failed_with_a_safe_cause(tmp_path, monkeypatch, caplog):
+    import errno
+
+    import xenova_agent.processes as processes
+
+    roots = make_roots(tmp_path)
+
+    def denied(path):
+        raise PermissionError(errno.EACCES, "Permission denied", "/proc/secret-path")
+
+    monkeypatch.setattr(processes.os, "listdir", denied)
+    with caplog.at_level("WARNING", logger="xenova_agent.processes"):
+        result = sampler_for(roots, [0.0]).collect()
+    assert (result.status, result.error) == ("read_failed", "PermissionError(EACCES)")
+    [record] = [r for r in caplog.records if "read_failed" in r.getMessage()]
+    assert record.levelname == "WARNING" and "error=PermissionError(EACCES)" in record.getMessage()
+    assert "secret-path" not in record.getMessage()  # 경로·메시지는 남기지 않는다
+
+
+def test_top_zero_is_disabled_and_does_not_scan(tmp_path, monkeypatch):
+    roots = make_roots(tmp_path)
+    process(roots, 1, "p1", utime=0)
+    import xenova_agent.processes as processes
+
+    monkeypatch.setattr(processes.os, "listdir", lambda path: pytest.fail("top_n=0 must not scan /proc"))
+    clock = [0.0]
+    result = sampler_for(roots, clock, top_n=0).collect()
+    assert (result.status, result.rows, result.discovered) == ("disabled", [], 0)
+
+
+def test_status_changes_are_logged_once(tmp_path, caplog):
+    roots = make_roots(tmp_path)
+    clock = [0.0]
+    process(roots, 1, "p1", utime=0)
+    process(roots, 2, "p2", utime=0)
+    sampler = sampler_for(roots, clock)
+    sampler.collect()
+    write(roots.proc / "2" / "stat", "garbage\n")
+    with caplog.at_level("INFO", logger="xenova_agent.processes"):
+        for step in range(1, 4):
+            clock[0] = step * 2.0
+            sampler.collect()
+    partial_logs = [r for r in caplog.records if "partial" in r.getMessage()]
+    assert len(partial_logs) == 1 and partial_logs[0].levelname == "WARNING"
 
 
 # ---- inventory ----
