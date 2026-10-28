@@ -90,7 +90,7 @@ pipeline {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     dir('platform/services/vm-agent/mqtt-client') {
-                        sh 'python3 -m pip install -q --user "paho-mqtt>=1.6,<3" "pytest>=7" && python3 -m pytest -q --junitxml=target/pytest.xml'
+                        sh 'python3 -m pip install -q --user "paho-mqtt>=1.6,<3" "pytest>=7" "jsonschema>=4,<5" && python3 -m pytest -q --junitxml=target/pytest.xml'
                     }
                     dir('platform/services/vm-agent/agent') {
                         sh 'python3 -m pytest -q --junitxml=target/pytest.xml'

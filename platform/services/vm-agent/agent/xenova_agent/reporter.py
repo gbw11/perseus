@@ -12,6 +12,9 @@
 - process_collection 은 processes[] 가 어떻게 모였는지다(processes.py 의 수집 상태·개수). 빈 목록이 첫 표본·/proc 읽기 실패·
   0개 설정·일부 읽기 실패 중 무엇인지 받는 쪽이 가를 수 있게 한다. truncated 는 top-N 이나 크기 상한으로 목록 밖으로 밀린 것이 있다는 뜻
 - 수집·발행 예외는 그 틱만 버리고 계속 돈다. 고정된 발행 오류는 heartbeat 쪽이 종료 코드로 드러낸다
+- 틱의 성패(status() 의 last_tick_ok, v2 heartbeat 의 publisher_state 근거)는 예외만이 아니라 반환값까지 보고 판정한다. 수집기는 /proc
+  읽기 실패를 예외가 아니라 value null + unavailable_reason, ProcessSample.status 로 돌려주기 때문이다(collection_failure). 실패한
+  표본도 보낸다(null + 사유가 그 자체로 정보다)
 """
 
 from __future__ import annotations
@@ -21,21 +24,54 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from xenova_mqtt import topics
 
 from .heartbeat import Publisher, StopSignal
+from .procfs import PARSE_ERROR, READ_FAILED
 from .processes import ProcessSample
 
 log = logging.getLogger("xenova_agent.reporter")
 
 # 봉투(약 400 바이트)를 감안한 payload 상한. 공용 클라이언트의 64KB 검사보다 먼저 줄여 메시지를 잃지 않는다
 PAYLOAD_LIMIT_BYTES = 60 * 1024
+# 틱의 성패를 가르는 필수 원천: CPU·메모리 값과 프로세스 목록. first_sample·counter_reset 은 구간이 없을 뿐 정상이고 partial 은 읽은 값이
+# 유효한 부분 성공, disabled 는 설정이다. 디스크·네트워크는 장치별 값이라(장치가 없는 VM 도 있다) 틱의 성패를 가르지 않는다
+REQUIRED_METRICS = ("cpu_percent_allocated", "memory_used_bytes", "memory_available_bytes")
+FAILURE_REASONS = frozenset({READ_FAILED, PARSE_ERROR})
 
 
 def payload_size(payload: dict[str, Any]) -> int:
     return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def collection_failure(payload: dict[str, Any]) -> str | None:
+    """metrics payload 가 실패한 수집이면 그 이유(`원천:사유`), 유효하면 None."""
+    for value in payload["values"]:
+        if value.get("name") in REQUIRED_METRICS and value.get("unavailable_reason") in FAILURE_REASONS:
+            return f"{value['name']}:{value['unavailable_reason']}"
+    collection = payload["process_collection"]
+    if collection["status"] == READ_FAILED:
+        return f"processes:{collection['error'] or READ_FAILED}"
+    return None
+
+
+@dataclass(frozen=True)
+class ReporterStatus:
+    """수집·발행 루프의 자체 상태 스냅샷. telemetry.py 가 v2 heartbeat 의 publisher_state 를 정하는 데 쓴다. 시각은 Reporter 의 clock 기준."""
+
+    interval_s: float
+    last_tick_at: float | None  # 마지막 틱 시작 시각. None 이면 아직 한 번도 돌지 않았다
+    last_tick_ok: bool | None  # 마지막 틱의 metrics 수집이 성공했는가
+    last_collect_ok_at: float | None
+    last_publish_ok_at: float | None
+    collect_errors: int  # /proc·inventory 수집 실패 수
+    publish_errors: int  # 발행 제출 실패 수
+    metrics_dropped: int
+    oversized: int
+    last_error: str | None  # 마지막 오류의 예외 종류. 메시지·경로는 담지 않는다
 
 
 class Reporter:
@@ -71,7 +107,62 @@ class Reporter:
         self.metrics_dropped = 0  # 연결이 없어 버린 표본
         self.inventory_sent = 0
         self.oversized = 0  # processes 를 모두 빼도 상한을 넘어 보내지 않은 표본
-        self.errors = 0
+        self.errors = 0  # 수집·발행 오류 합계
+        self.collect_errors = 0
+        self.publish_errors = 0
+        self.last_error: str | None = None
+        self._last_tick_at: float | None = None
+        self._last_tick_ok: bool | None = None
+        self._last_collect_ok_at: float | None = None
+        self._last_publish_ok_at: float | None = None
+        self._last_failure: str | None = None  # 직전 틱의 실패 이유. 로그는 바뀔 때만
+        self._status_lock = threading.Lock()
+
+    # ---- 자체 상태 ----
+
+    def status(self) -> ReporterStatus:
+        with self._status_lock:
+            return ReporterStatus(
+                self._interval, self._last_tick_at, self._last_tick_ok, self._last_collect_ok_at, self._last_publish_ok_at,
+                self.collect_errors, self.publish_errors, self.metrics_dropped, self.oversized, self.last_error,
+            )
+
+    def _collect_failed(self, exc: BaseException, *, required: bool) -> None:
+        """required 는 metrics 수집(틱의 필수 작업). inventory 는 선택이라 틱 성공 여부를 바꾸지 않는다."""
+        with self._status_lock:
+            self.errors += 1
+            self.collect_errors += 1
+            self.last_error = type(exc).__name__
+            if required:
+                self._last_tick_ok = False
+                self._last_failure = self.last_error
+
+    def _judge(self, failure: str | None, now: float) -> None:
+        """반환값으로 본 metrics 틱의 성패. 성공일 때만 last_collect_ok_at 이 움직인다."""
+        with self._status_lock:
+            self._last_tick_ok = failure is None
+            if failure is None:
+                self._last_collect_ok_at = now
+            else:
+                self.errors += 1
+                self.collect_errors += 1
+                self.last_error = failure
+        if failure != self._last_failure:
+            if failure is None:
+                log.info("metrics collection recovered")
+            else:
+                log.warning("metrics collection failed: %s", failure)
+            self._last_failure = failure
+
+    def _publish_failed(self, exc: BaseException) -> None:
+        with self._status_lock:
+            self.errors += 1
+            self.publish_errors += 1
+            self.last_error = type(exc).__name__
+
+    def _publish_ok(self, now: float) -> None:
+        with self._status_lock:
+            self._last_publish_ok_at = now
 
     # ---- inventory ----
 
@@ -82,8 +173,8 @@ class Reporter:
         self._inventory_checked_at = now
         try:
             inventory = self._collect_inventory()
-        except Exception:  # noqa: BLE001 - 수집 실패는 다음 주기에 다시
-            self.errors += 1
+        except Exception as exc:  # noqa: BLE001 - 수집 실패는 다음 주기에 다시
+            self._collect_failed(exc, required=False)
             log.exception("inventory collection failed")
             return
         if not reconnected and inventory == self._inventory_sent:
@@ -91,11 +182,12 @@ class Reporter:
         try:
             self._client.publish(self._inventory_topic, "agent.inventory", inventory, wait_s=0)
         except Exception as exc:  # noqa: BLE001
-            self.errors += 1
+            self._publish_failed(exc)
             log.warning("inventory publish failed: %s", exc)
             return
         self._inventory_sent = inventory
         self.inventory_sent += 1
+        self._publish_ok(now)
         log.info("inventory published (%s %s, %d interface(s))", (inventory.get("os") or {}).get("id"), inventory.get("kernel_release"),
                  len(inventory.get("interfaces") or []))
 
@@ -124,6 +216,8 @@ class Reporter:
 
     def tick(self) -> None:
         now = self._clock()
+        with self._status_lock:
+            self._last_tick_at = now
         connected = bool(self._client.connected)
         reconnected = self._reconnected(connected)
         self._was_connected = connected
@@ -131,10 +225,11 @@ class Reporter:
             self._maybe_send_inventory(now, reconnected)
         try:
             payload = self._metrics_payload(now)
-        except Exception:  # noqa: BLE001
-            self.errors += 1
+        except Exception as exc:  # noqa: BLE001
+            self._collect_failed(exc, required=True)
             log.exception("metrics collection failed")
             return
+        self._judge(collection_failure(payload), now)
         if not connected:
             self.metrics_dropped += 1  # 쌓지 않는다
             return
@@ -146,18 +241,19 @@ class Reporter:
         try:
             self._client.publish(self._metrics_topic, "agent.metrics", payload, wait_s=0)
         except Exception as exc:  # noqa: BLE001
-            self.errors += 1
+            self._publish_failed(exc)
             log.warning("metrics publish failed: %s", exc)
             return
         self.metrics_sent += 1
+        self._publish_ok(now)
 
     def run(self, stop: StopSignal) -> None:
         due = self._clock()
         while True:
             try:
                 self.tick()
-            except Exception:  # noqa: BLE001 - 예상 못 한 예외 하나로 보고 스레드가 끝나 버리지 않게 그 틱만 버린다
-                self.errors += 1
+            except Exception as exc:  # noqa: BLE001 - 예상 못 한 예외 하나로 보고 스레드가 끝나 버리지 않게 그 틱만 버린다
+                self._collect_failed(exc, required=True)
                 log.exception("reporter tick failed")
             due += self._interval
             now = self._clock()
