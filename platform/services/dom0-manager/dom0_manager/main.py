@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 from . import __version__
-from .api import console, health, recovery, stats, vms
+from .api import console, health, logs, recovery, stats, vms
 from .api.errors import install_error_handlers
 from .config import Settings
 from .console import ConsoleSession
@@ -45,6 +45,7 @@ def create_app(
     app.include_router(stats.router, prefix="/api/v1")
     app.include_router(console.router, prefix="/api/v1")
     app.include_router(recovery.router, prefix="/api/v1")
+    app.include_router(logs.router, prefix="/api/v1")
     install_error_handlers(app)
     _install_request_budget(app, settings.response_reserve_s)
     if settings.service_token:
@@ -90,7 +91,9 @@ def _install_bearer_auth(app: FastAPI, token: str) -> None:
 
     @app.middleware("http")
     async def require_service_token(request, call_next):
-        if request.url.path in _PUBLIC_PATHS:
+        if request.url.path in _PUBLIC_PATHS or request.url.path == "/api/v1/logs/ingest":
+            # Log producers authenticate with their own source-scoped token in the route.
+            # They must never receive the root dom0 control service token.
             return await call_next(request)
         supplied = request.headers.get("authorization", "")
         if not hmac.compare_digest(supplied.encode(), expected.encode()):
@@ -120,6 +123,9 @@ def _contract_openapi(app: FastAPI):
             "bearerFormat": "opaque service token",
         }
         schema["security"] = [{"ServiceToken": []}]
+        schema["components"]["securitySchemes"]["LogProducerToken"] = {
+            "type": "http", "scheme": "bearer", "bearerFormat": "source-scoped log producer token",
+        }
         # 요청 예산도 미들웨어라 라우트에서 보이지 않는다. /healthz 를 뺀 모든 operation 에 헤더 파라미터로 선언한다(budget.py)
         from . import budget
 

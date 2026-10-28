@@ -1,0 +1,29 @@
+.panel {
+  display: grid;
+  gap: var(--x-space-3);
+}
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--x-space-4);
+}
+.controls h2 {
+  margin-right: auto;
+}
+.controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--x-space-2);
+}
+.output {
+  height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: var(--x-space-3);
+  background: #10151c;
+  color: #dce6ef;
+  font-size: 12px;
+  line-height: 1.6;
+}

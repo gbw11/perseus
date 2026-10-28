@@ -25,6 +25,164 @@ tags:
   - name: VMs
   - name: Health
 paths:
+  /api/v1/logs:
+    get:
+      tags:
+      - logs
+      summary: List Logs
+      operationId: listRuntimeLogs
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+          title: After
+      - name: source_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Source Id
+      - name: vm_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Vm Id
+      - name: component
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Component
+      - name: level
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            pattern: ^(DEBUG|INFO|WARN|ERROR|FATAL)$
+          - type: 'null'
+          title: Level
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 200
+          title: Limit
+      - $ref: '#/components/parameters/RequestBudget'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Service Unavailable
+  /api/v1/logs/sources:
+    get:
+      tags:
+      - logs
+      summary: Sources
+      operationId: listRuntimeLogSources
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - $ref: '#/components/parameters/RequestBudget'
+  /api/v1/logs/ingest:
+    post:
+      tags:
+      - logs
+      summary: Ingest
+      description: Private producer endpoint, intentionally not proxied by Spring's
+        browser API.
+      operationId: ingestRuntimeLogs
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Service Unavailable
+      security:
+      - LogProducerToken: []
+      parameters:
+      - name: X-Log-Source
+        in: header
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/RequestBudget'
   /api/v1/vms:
     get:
       tags: [VMs]
@@ -351,6 +509,10 @@ paths:
                 $ref: '#/components/schemas/Health'
 components:
   securitySchemes:
+    LogProducerToken:
+      type: http
+      scheme: bearer
+      bearerFormat: source-scoped log producer token
     ServiceToken:
       type: http
       scheme: bearer

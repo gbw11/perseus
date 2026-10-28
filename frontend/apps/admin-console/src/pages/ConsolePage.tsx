@@ -6,6 +6,7 @@ import { useVms } from '../api/queries';
 import { osLabel, roleOf } from '../domain/roles';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
+import { RuntimeLogsPanel } from '../console/RuntimeLogsPanel';
 import styles from './pages.module.css';
 
 /** xterm 이 무거워서 이 화면을 열 때만 불러온다 (platform -248 구현) */
@@ -78,6 +79,7 @@ export function ConsolePage() {
           <ConsolePanel key={selected.vm_id} vm={selected} />
         </Suspense>
       )}
+      <RuntimeLogsPanel key={`logs-${selected?.vm_id ?? 'all'}`} vmId={selected?.vm_id} />
     </div>
   );
 }

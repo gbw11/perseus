@@ -1,0 +1,27 @@
+{
+  "branch": "feat/platform/runtime-log-pipeline",
+  "base_platform": "5035a87",
+  "python_logs_auth_contract_tests_passed": 25,
+  "spring_mvc_and_manager_client_tests_passed": 19,
+  "frontend_log_and_console_tests_passed": 14,
+  "linux_real_pty_tests_passed": 9,
+  "frontend_build_typecheck_eslint": "passed",
+  "local_real_journal": "passed",
+  "local_real_http_ingestion_and_reconnect": "passed",
+  "real_board_available": false,
+  "real_board_deployed": false,
+  "external_spring_server_deployed": false,
+  "linux_journal_shipper_provided": true,
+  "zephyr_firmware_sender_implemented": false,
+  "docker_log_adapter_implemented": false,
+  "console_input_unchanged": true,
+  "console_input_audit_added": false,
+  "git_commit_or_push": false,
+  "jira_changed": false,
+  "known_nonblocking_warnings": [
+    "Starlette httpx TestClient deprecation",
+    "existing administrator bundle >500kB"
+  ],
+  "frontend_full_regression_passed": 134,
+  "frontend_test_files_passed": 18
+}
