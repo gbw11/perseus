@@ -43,6 +43,37 @@ static int parse_object(struct xm_json *j, struct xm_span payload)
 	return 0;
 }
 
+int xm_app_readiness_json(char *out,size_t n,uint32_t generation,uint64_t progress,
+                         const char *readiness,const char *reason)
+{
+	if (!readiness || (strcmp(readiness,"READY") && strcmp(readiness,"PREPARING") && strcmp(readiness,"NOT_READY"))) return -EINVAL;
+	if ((!strcmp(readiness,"READY")) != (reason==NULL)) return -EINVAL;
+	if (!strcmp(readiness,"READY") && (!generation || !progress)) return -EINVAL;
+	static const char *const reasons[]={"CONTROL_UNAPPLIED","INPUT_UNAVAILABLE","INPUT_STALE","INPUT_INVALID",
+		"STATE_PREPARING","CALCULATION_FAILED","OUTPUT_INVALID"};
+	if(reason){bool known=false;for(size_t i=0;i<sizeof(reasons)/sizeof(reasons[0]);i++)known|=!strcmp(reason,reasons[i]);if(!known)return -EINVAL;}
+	size_t pos=0;int rc=0;
+	rc|=xm_put(out,n,&pos,"{\"applied_generation\":");rc|=xm_put_uint(out,n,&pos,generation);
+	rc|=xm_put(out,n,&pos,",\"progress_seq\":\"");rc|=xm_put_uint(out,n,&pos,progress);
+	rc|=xm_put(out,n,&pos,"\",\"readiness\":");rc|=xm_put_json_string(out,n,&pos,readiness);
+	rc|=xm_put(out,n,&pos,",\"reason\":");
+	rc|=reason?xm_put_json_string(out,n,&pos,reason):xm_put(out,n,&pos,"null");
+	rc|=xm_put(out,n,&pos,"}");return rc?-ENOSPC:(int)pos;
+}
+
+static bool canonical_uuid(const char *value)
+{
+	if (strlen(value) != XM_UUID_LEN) { return false; }
+	for (size_t i = 0; i < XM_UUID_LEN; ++i) {
+		if (i == 8 || i == 13 || i == 18 || i == 23) {
+			if (value[i] != '-') { return false; }
+		} else if (!((value[i] >= '0' && value[i] <= '9') || (value[i] >= 'a' && value[i] <= 'f'))) {
+			return false;
+		}
+	}
+	return true;
+}
+
 int xm_vehicle_control_parse(struct xm_span payload, struct xm_vehicle_control *out)
 {
 	static struct xm_json j;
@@ -66,6 +97,12 @@ int xm_vehicle_control_parse(struct xm_span payload, struct xm_vehicle_control *
 	}
 	if (xm_json_is_string(&j, active)) {
 		xm_span_copy(out->active_app, sizeof(out->active_app), xm_json_span(&j, active));
+	}
+	int vm = xm_json_get(&j, 0, "active_vm_id");
+	if (vm >= 0 && !xm_json_is_null(&j, vm)) {
+		if (!xm_json_is_string(&j, vm) ||
+		    xm_span_copy(out->active_vm_id, sizeof(out->active_vm_id), xm_json_span(&j, vm)) < 0 ||
+		    !canonical_uuid(out->active_vm_id)) { return -EINVAL; }
 	}
 	return 0;
 }

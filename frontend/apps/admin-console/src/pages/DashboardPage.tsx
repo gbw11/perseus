@@ -21,6 +21,7 @@ import { clock, describe } from '../domain/events';
 import {
   ago,
   appHealth,
+  appHealthLabel,
   controlLabel,
   MODE_HEALTH,
   MODE_LABEL,
@@ -55,6 +56,10 @@ export function DashboardPage() {
   const vehicle = drive?.vehicle;
   const flags = vehicle?.flags;
   const perception = drive?.perception;
+  const activeVm =
+    control && control.received_ago_ms < 3000
+      ? vms.data?.items.find((vm) => vm.vm_id === control.active_vm_id)
+      : undefined;
   const vmName = (vmId: string | null) => {
     const vm = vms.data?.items.find((v) => v.vm_id === vmId);
     return vm ? (roleOf(vm, drive)?.title ?? vm.name) : (vmId ?? '시스템');
@@ -73,12 +78,12 @@ export function DashboardPage() {
           <StatusBadge health={MODE_HEALTH[control.mode]} label={MODE_LABEL[control.mode]} size="lg" />
         )}
         <div
-          className={[styles.controlBar, control?.active_app ? styles.controlOn : ''].join(' ')}
-          style={
-            { '--accent': control?.active_app ? ROLES[control.active_app].color : undefined } as CSSProperties
-          }
+          className={[styles.controlBar, activeVm ? styles.controlOn : ''].join(' ')}
+          style={{ '--accent': activeVm ? roleOf(activeVm, drive)?.color : undefined } as CSSProperties}
         >
-          {control?.active_app ? `▶ ${ROLES[control.active_app].title} 차량 제어 중` : '차량 제어 앱 없음'}
+          {activeVm
+            ? `▶ ${roleOf(activeVm, drive)?.title ?? activeVm.name} 활성 구동`
+            : '활성 구동 VM 미확인'}
         </div>
         {/* 안전 플래그 셋은 위쪽에서 뺐다 (2026-10-22 요청) — 아래 "차량 상태" 카드에 그대로 있다 */}
       </section>
@@ -88,7 +93,7 @@ export function DashboardPage() {
           {drive?.resume
             ? `자율주행 ${drive.resume.requested_by === 'auto' ? '자동 복귀' : '재개'} — ${Math.max(1, Math.ceil(drive.resume.remaining_ms / 1000))}초 뒤 전환`
             : '자율주행 재개 가능 (자동 복귀 취소됨)'}{' '}
-          — <Link to="/demo">시연 제어</Link>에서 {drive?.resume ? '[취소]' : '[자율주행 재개]'}
+          — <Link to="/simulator">Simulator</Link>에서 {drive?.resume ? '[취소]' : '[자율주행 재개]'}
         </div>
       )}
 
@@ -217,7 +222,7 @@ function AppCard({
   const state = drive?.apps[app];
   const health = appHealth(role, vm, state);
   const control = controlLabel(role, drive);
-  const active = drive?.control?.active_app === app;
+  const active = !!vm && drive?.control?.active_vm_id === vm.vm_id && drive.control.received_ago_ms < 3000;
   const command = state?.last_command;
   // 시뮬레이터 구성(계약 v1.4 실제 서킷)이면 모니터와 같은 차 1인칭을 카드에도 (자율 = 인식 박스)
   const circuit =
@@ -230,7 +235,7 @@ function AppCard({
       className={styles.appCard}
       style={{ '--accent': role.color } as CSSProperties}
       title={<span style={{ color: role.color }}>{role.title}</span>}
-      actions={<StatusBadge health={health} size="sm" />}
+      actions={<StatusBadge health={health} label={appHealthLabel(vm, state)} size="sm" />}
     >
       <div className={styles.rows}>
         <div>

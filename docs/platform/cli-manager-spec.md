@@ -18,7 +18,7 @@ Xenova는 Raspberry Pi 4의 Xen dom0에서 VM 등록·실행·관측·복구·�
 - [7. 자동 시작·VM 정책·설정](#policies)
   - [CPU 정책 변경·실제 배치 조회](#cpu-contract)
 - [8. 자산 수명주기](#assets)
-- [9. Wi-Fi·콘솔·SSH](#access)
+- [9. Wi-Fi·Tailscale·콘솔·SSH](#access)
 - [10. 운영 진단·설치 도구](#diagnostics)
 - [11. host gate·보드 종료·서비스 내부 명령](#host)
 - [공통 계약 A. 응답·오류·멱등성](#contract-response)
@@ -127,6 +127,7 @@ Manager 전용 명령은 `templates, list, get, create, retire, delete, restore,
 | [`xenova-vm operation`](#cmd-operation) | 자산 작업 이력 |
 | [`xenova-vm control-operation`](#cmd-control-operation) | 사용자 제어 이력 |
 | [`xenova-vm recovery-operation`](#cmd-recovery-operation) | 조건부 복구 이력 |
+| [`xenova-vm recovery-reconcile`](#cmd-recovery-reconcile) | 원 복구 시도의 진단·증거 기반 종결 |
 | [`xenova-vm recover-once`](#cmd-recover-once) | 현재 문맥이 일치할 때 한 번 복구 |
 | [`xenova-vm update-resources`](#cmd-update-resources) | 정지 Linux의 vCPU·메모리 변경 |
 | [`xenova-vm firmware-transition`](#cmd-firmware-transition) | Zephyr 활성 firmware·프로필 전환 |
@@ -144,12 +145,16 @@ Manager 전용 명령은 `templates, list, get, create, retire, delete, restore,
 | [`xenova-wifi configure`](#cmd-wifi-configure) | SSID·PSK와 국가 저장 |
 | [`xenova-wifi activate`](#cmd-wifi-activate) | 저장한 Wi-Fi 활성화 |
 | [`xenova-wifi status`](#cmd-wifi-status) | 인증·주소·내부망 중복 조회 |
+| [`tailscale up/status/ip`](#cmd-tailscale) | 최초 Tailnet 인증·원격 관리 주소 확인 |
+| [`xenova-tailscale-state backup/restore`](#cmd-tailscale-backup) | 같은 물리 보드의 인증 상태 백업·복원 |
 | [`xenova-vm console`](#cmd-console) | Xen PV 콘솔 접속 |
 | [`xenova-vm check-xen`](#cmd-check-xen) | dom0 Xen 제어 기반 확인 |
 | [`xenova-vm check-network`](#cmd-check-network) | 격리된 내부 브리지 검사 |
+| [`xenova-boot-status`](#cmd-boot-status) | 부팅 진행·지연·실패 요약과 상세 조회 |
 | [`xenova-vm diagnose`](#cmd-diagnose) | 부팅 인자·가동 시간·시각 진단 |
 | [`xenova-domain-identity`](#cmd-domain-identity) | libxenmanage로 incarnation 조회 |
 | [`xenova-verify-artifacts`](#cmd-verify-artifacts) | 생성 cfg·Xen/QEMU 설치 내용 검사 |
+| [`xenova-telemetry-support evidence-list`](#cmd-telemetry-evidence) | Zephyr 과거 실행의 보존 진단 자료 조회 |
 | [`update_guest_ssh.py`](#cmd-update-guest-ssh) | 정지 Linux rootfs의 SSH service 정책 갱신 |
 | [`xenova-vm cpu-host-prepare`](#cmd-cpu-host-prepare) | 설치/부팅 내부용 dom0 CPU 준비·원복 |
 | [`xenova-vm host-init`](#cmd-host-init) | 이번 부팅의 host barrier 초기화 |
@@ -789,7 +794,8 @@ xenova-vm operation --operation-id "$OP_ID" --json
 
 **사용 조건**
 
-조회할 작업이 존재해야 한다. `ls`에 파일이 없으면 아직 이력이 없는 것이다.
+조회할 작업이 존재해야 한다. 검색 부재는 조회 시점에 기록을 찾지 못했다는 뜻이다.
+앞선 제출이 아직 처리 중일 수 있으므로 미수락·취소·미실행의 증거로 사용하지 않는다.
 
 **실행 예시**
 
@@ -801,17 +807,60 @@ xenova-vm control-operation --operation-id "$OP_ID" --json
 
 **정상 응답**
 
-`data` 예: `{"operation":{"phase":"completed","error":null}}`.
+`data.operation`은 원 제어 기록이다. 예: `{"phase":"completed","error":null}`.
+`data.deadline_observation`은 이번 조회의 기한 비교 근거다.
+
+| 필드 | 의미 |
+|---|---|
+| `host_boot_id` | 현재 host 부팅 UUID. 추가 메타데이터 수집 실패 시 null |
+| `observed_monotonic_ms` | 해당 host의 조회 시점 단조 시각(ms). UTC가 아님 |
+| `original_host_matches` | 원 작업의 host와 일치하는지. 현재 host 미확인 시 null |
+| `execution_deadline_expired` | 같은 host에서 원 물리 실행 기한이 지났는지. host 불일치·미확인 또는 원 기한 부재 시 null |
+
+이 비교는 조회 시점의 정보이며 새 실행 승인 토큰이 아니다. 원 기록 읽기 자체가 실패하면
+정상 응답이나 빈 기록으로 대체하지 않는다.
 
 **오류 응답**
 
-존재하지 않는 이력은 `VM_NOT_FOUND`(2), 비표준 선택자나 복수 선택자는 `INVALID_SPEC`(2).
+존재하지 않는 이력·지정 VM과 다른 기록은 `VM_NOT_FOUND`(2), 비표준 선택자나 복수 선택자는
+`INVALID_SPEC`(2). 잠금 대기·조회 예산 만료는 `DEADLINE_EXCEEDED`(4), 손상·저장소 오류는
+기존 `RECONCILE_REQUIRED`·`STORAGE_UNAVAILABLE` 계약을 따른다.
+같은 key에 여러 원 기록이 대응하면 검색 부재가 아닌 `RECONCILE_REQUIRED`로 거절한다.
+디렉터리 부분 열람·열람 실패·나열한 파일의 소실은 `OBSERVATION_UNAVAILABLE`(4)이며,
+불완전한 읽기로 없음/유일성을 확정하지 않는다. malformed key metadata는 수습 오류다.
 
 **확인 방법**
 
 수락 revision·phase·result/error를 현재 `get` 결과와 구분한다. 잠금·journal 파일 삭제로 상태를 초기화하지 않는다.
 
-**Manager 매핑:** `control-operation / {operation_id}`
+**Manager 매핑:** `control-operation / {operation_id?,idempotency_key?,vm_id?,timeout_ms?}`.
+`operation_id`와 `idempotency_key` 중 정확히 하나가 필수다. key는 기존 요청 키와 같은
+1..200 UTF-8 byte 토큰이며, `vm_id`를 지정하면 대상 UUID도 대조한다. `timeout_ms`는
+1..15000ms, 기본 15000ms다. CLI는 기존 `--operation-id`만 지원한다.
+
+Python 호출자가 최초 응답을 잃어 operation ID를 받지 못했다면 제출 전 보존한 key로 조회한다.
+dom0 root 셸에서 실행하는 다음 예는 원 요청의 UUID·key를 입력받는다. 새 key를 발급하지 않는다.
+
+```bash
+read -r -p "원 요청의 VM UUID: " VM_ID
+read -r -p "최초 제출 때 보존한 작업 키: " REQUEST_KEY
+export VM_ID REQUEST_KEY
+PYTHONPATH=/usr/lib/xenova python3 - <<'PY'
+import json, os
+from xenova_management import Manager
+result = Manager().call(
+    "control-operation",
+    {"vm_id": os.environ["VM_ID"], "idempotency_key": os.environ["REQUEST_KEY"],
+     "timeout_ms": 3000},
+    request_id="original-stop-lookup", budget_ms=3000,
+)
+print(json.dumps(result, ensure_ascii=False, indent=2))
+PY
+```
+
+조회는 긴 실행 잠금 대신 짧은 admission 잠금과 원 기록을 사용한다. VM 시작·정지·이행이나
+현재 Xen 관측을 수행하지 않는다. 실제 이행은 같은 원 key/spec의 control 호출이며 원 기한과
+신원·의도 guard를 다시 검사한다.
 
 [명령어 색인으로](#command-index)
 
@@ -853,6 +902,104 @@ xenova-vm recovery-operation --recovery-attempt-id "$OP_ID" --json
 원 request·host_boot_id·phase·result/error를 읽는다. 과거 host 시도도 이력 조회는 가능하다. 잠금·journal 파일 삭제로 상태를 초기화하지 않는다.
 
 **Manager 매핑:** `recovery-operation / {recovery_attempt_id}`
+
+[명령어 색인으로](#command-index)
+
+<a id="cmd-recovery-reconcile"></a>
+### `xenova-vm recovery-reconcile` — 원 복구 시도의 진단·종결
+
+**기본 사용**
+
+`xenova-vm recovery-reconcile --recovery-attempt-id UUID`
+
+기존 attempt의 journal·의도·실행과 실제 Xen을 대조한다. 기본은 진단이며,
+`--execute`는 확인한 사실로 **원 attempt만** 종결한다. shutdown/create/reboot/destroy,
+CPU 재배치나 새 attempt·operation·실행 신원·물리 deadline 발급은 수행하지 않는다.
+
+**인자**
+
+| 인자 | 필수·기본값 | 의미 |
+|---|---|---|
+| `--recovery-attempt-id UUID` | 필수 | 기존 소문자 하이픈 표준형 attempt UUID |
+| `--execute` | 선택, 생략하면 진단 | 진단 사본을 승인 토큰으로 쓰지 않고 실제 상태·원 기록을 다시 확인한 뒤 저장 |
+| `--timeout-ms N` | 선택, 15000 | 이번 관측·guard 예산, 정수 1..15000ms. 원 physical deadline을 늘리지 않음 |
+| `--json` | 선택 | 기존 envelope의 compact JSON 출력 |
+
+새 `--idempotency-key`·`--force` spec는 사용하지 않는다. 재확인 대상은 같은 원 attempt다.
+
+**사용 조건**
+
+원 host boot와 같은 host에서 기존 저장소·자산·intent revision·CPU 정책을 대조한다.
+플랫폼 execution flock을 얻지 못하면 즉시 `OPERATION_IN_PROGRESS`다. 관측과 필수 저장은
+전체 15초 기본 예산을 공유한다. 이미 시작한 syscall을 강제 취소하는 보장은 없다.
+변경 단계는 정상 ext4 저장소와 기존 쓰기 guard를 요구한다.
+
+| 원 기록·현재 근거 | 진단의 outcome·허용 종결 |
+|---|---|
+| `accepted`, 원 attempt의 launch 없음 | `not_submitted`; 원 attempt를 failed로 종결, 현재 VM은 그대로 둠 |
+| `removed`, 실제 부재·미확정 launch 없음 | `stopped_without_replacement`; failed, 새 실행을 관측한 completed가 아님 |
+| stopping/그 단계 uncertain, `stop_submission`에 미제출 또는 synchronous 반환 근거, 같은 종료 대상·현재 상태·소유 scope 확인 | 미제출이면 `not_submitted`, 종료 후 부재면 `stopped_without_replacement`; 둘 다 failed |
+| 실제 managed 새 실행이 이 attempt의 owner·실행·구성·완료된 CPU 검증에 연결 | `launch_observed`; 기존 완료 요건으로 completed, 앱 준비는 unknown |
+| 해당 owner의 `launch_aborted_before_submit=true`, stopped 실행 기록·실제 부재 확인 | `not_submitted`; failed |
+| 종료/launch 실행자 잔존·구형 기록에 반환 근거 없음·새 실행 인과 미확인·관측 실패 | 차단 유지. 기한 경과·PID 부재·잠금 획득·domain 부재 하나만으로 종결하지 않음 |
+
+`stop_submission`은 원 호출 경계를 저장한 근거다. `not-submitted`를 먼저 내구 저장하고,
+호출 전에 `submitted`, synchronous 호출 반환 뒤 `returned`를 저장한다. 구형 기록에
+이 근거를 사후 추측해 채우지 않는다. process scope 확인은 observe-only이며 신호도 보내지 않는다.
+현재 실행·의도가 달라졌다면 과거 시도를 그 실행에 적용하지 않는다.
+
+**실행 예시**
+
+```sh
+read -r -p '수습할 원 recovery attempt UUID: ' ATTEMPT
+xenova-vm recovery-operation --recovery-attempt-id "$ATTEMPT" --json
+xenova-vm recovery-reconcile --recovery-attempt-id "$ATTEMPT" --json
+# status=confirmable와 근거·outcome을 검토한 뒤 같은 대상을 명시적으로 종결한다.
+xenova-vm recovery-reconcile --recovery-attempt-id "$ATTEMPT" --execute --json
+xenova-vm recovery-operation --recovery-attempt-id "$ATTEMPT" --json
+```
+
+**정상 응답**
+
+기존 envelope를 유지하며 `operation_id`는 원 operation, `replayed=true`다.
+`data`는 `attempt`, `reconciliation`, `original_result`다. `reconciliation`의 필드는 다음과 같다.
+
+| 필드 | 의미 |
+|---|---|
+| `status` | `confirmable`: 현재 진단에서 종결 가능, `blocked`: 진단 성공이나 근거 부족, `confirmed`: 명시적 저장 성공, `recorded`: 이미 원 기록에 종결 결과 존재 |
+| `outcome` | 위 표의 세 결과 또는 미확인 null. `recorded` 재확인은 원 attempt의 reconciliation/result/error를 읽음 |
+| `checks`·`reasons` | 항목별 대조 결과와 부족한 근거의 이름. 진단 토큰이나 실행 허가가 아님 |
+| `executed` | 이번 호출에서 종결/같은 종결의 내구 재확인을 저장했는지 |
+| `physical_commands` | 이 수습 경로에서 제출한 물리 VM 제어 수. 항상 0 |
+| `host_boot_id`·`observed_monotonic_ms` | 진단 host와 그 부팅의 관측 단조 시각. UTC나 원 물리 실행 기한이 아님. recorded 재확인의 원 근거는 attempt에 있음 |
+
+진단 `ok=true/status=blocked`는 조회 성공이다. `--execute`에서 근거가 부족하면
+`ok=false/RECONCILE_REQUIRED`로 같은 `details.reconciliation`을 반환한다.
+failed 종결의 `original_result`는 null이며 원 error가 이유를 보존한다. 수습 호출의 성공을
+VM 복구 성공으로 바꾸지 않는다. 수습한 terminal 기록의 재요청은 같은 ID·결과를 재확인한다.
+
+**오류 응답**
+
+| 코드·종료 코드 | 의미·다음 행동 |
+|---|---|
+| `INVALID_SPEC`·2 / `VM_NOT_FOUND`·2 | 인자 오류 / 원 attempt 부재. 새 ID 발급으로 우회하지 않음 |
+| `OPERATION_IN_PROGRESS`·3 | execution 소유자 존재. 원 실행과 slot 종료를 먼저 확인 |
+| `TARGET_CHANGED`·3 / `INTENT_MISMATCH`·3 | host·자산·원본·실행 또는 사용자 의도 변경. 현재 intent/execution을 조회하고 과거 요청 적용 금지 |
+| `OBSERVATION_UNAVAILABLE`·4 / `DEADLINE_EXCEEDED`·4 | 관측 미확인 / 이번 예산 소진. 원 물리 작업의 취소나 부재를 뜻하지 않음 |
+| `RECONCILE_REQUIRED`·4 | 근거 부족 또는 내구 저장 미확정. 같은 원 기록을 다시 확인하고 자동 force·phase 편집·삭제 금지 |
+
+**확인 방법**
+
+원 operation/attempt·request/hash·intent revision·deadline이 유지되는지와 실제 phase/result/error를
+다시 조회한다. 종결 후 별도 동작이 필요하면 현재 건강·의도·신원·허가로 일반 요청을 새로 검토한다.
+stopped 의도에서 수습 성공을 이유로 VM을 시작하지 않는다. 지원 근거가 없으면 원 기록과
+진단 사유를 보존해 플랫폼 담당자에게 전달한다. host reboot를 일반 해제 수단으로 쓰지 않는다.
+Worker의 final 결과 재확인·Coordinator 바인딩 연결과 Gateway Authority 복원은
+[담당자 인수 요청](../requests/2026-10-27-recovery-health-ctrl.md#d03-worker)이며 자동 제공되지 않는다.
+
+**Manager 매핑:** `recovery-reconcile / {recovery_attempt_id, timeout_ms?}`,
+`execute=False` 기본. `budget_ms`는 기존 1..105000ms 입력 범위 안에서 이번 timeout을
+더 제한하며 원 spec/hash/물리 기한에는 들어가지 않는다. read-only `recovery-operation`과 다르다.
 
 [명령어 색인으로](#command-index)
 
@@ -1764,9 +1911,180 @@ get의 lifecycle·generation과 operation journal을 비교한다. 완료마다 
 [명령어 색인으로](#command-index)
 
 <a id="access"></a>
-## 9. Wi-Fi·콘솔·SSH
+## 9. Wi-Fi·Tailscale·콘솔·SSH
 
 Wi-Fi 구성·활성화·조회는 각각 독립 명령이다. 관리 Wi-Fi를 재활성화하면 SSH가 끊길 수 있으므로 configure/activate는 UART 등 복귀 경로를 확보한 상태에서 실행한다. 실제 PSK를 명령행·로그·Git에 넣지 않는다.
+
+<a id="cmd-tailscale"></a>
+### Tailscale — 최초 인증·상태·원격 SSH
+
+**기본 사용 — dom0에서 root로 실행**
+
+```bash
+tailscale up --accept-dns=false
+tailscale status
+tailscale ip -4
+```
+
+이 recipe로 만든 새 이미지에는 CLI와 `tailscaled.service`가 설치·enable되어 있다.
+미인증 상태도 정상적인 최초 상태다. 첫 명령이 출력한 인증 URL을 다른 PC·스마트폰의
+브라우저에서 열고 본인의 Tailnet으로 로그인·승인한다. 인증 후 다른 Tailnet 장치에서
+확인한 Tailscale IP로 `ssh root@<Tailscale-IP>`를 실행한다. 기존 OpenSSH 계정·암호/키·
+host key 검사를 그대로 사용하며, Tailscale SSH를 켜는 절차가 아니다.
+
+**필수·선택과 기본값**
+
+`--accept-dns=false`는 이 플랫폼의 권장 최초 인증 옵션이며 기존 dom0 DNS를 유지한다.
+Tailscale 자체 `up`의 기본은 DNS 수락이므로 생략과 구분한다. Linux의 `--accept-routes`는
+기본 false다. subnet router·exit node·Tailscale SSH·Funnel은 자동 활성화하지 않는다.
+hostname 변경 등 선택 옵션은 [공식 up 명세](https://tailscale.com/docs/reference/tailscale-cli/up)를 따른다.
+공통 이미지나 부팅 명령에 `--auth-key`를 넣지 않는다. 재부팅마다 `up`을 다시 실행할 필요는 없다.
+
+**반환·확인 방법**
+
+이 명령들은 Tailscale 자체 출력·종료 코드를 사용하며 Manager envelope를 반환하지 않는다.
+`status`의 장치/연결 결과와 `ip -4`의 실제 주소를 확인한다. 서비스 active만으로 인증이나
+외부 SSH 성공을 판정하지 않는다. 인증 URL·state 파일·전체 환경은 시험 로그에 수집하지 않는다.
+
+```bash
+systemctl is-active tailscaled.service
+tailscale status
+tailscale ip -4
+journalctl -b -u tailscaled.service --no-pager -n 40
+```
+
+| 상태·증상 | 확인과 다음 행동 |
+|---|---|
+| 데몬 inactive/failed, 저장소 검사 거절 | `/srv/xenova` 마운트·검증 장치·권한·중단된 복원을 먼저 확인. rootfs에 대체 상태를 만들지 않음 |
+| 미인증/NeedsLogin | 최초 인증 또는 키 만료·로그아웃·서버 측 취소를 구분. 필요한 경우 원 상태를 보존한 채 재인증 |
+| 관리자 장치 승인 대기/NeedsMachineAuth | Tailnet 관리자의 장치 승인 여부 확인 |
+| 인증됐지만 원격 SSH 거절 | Tailnet 접근 정책·현재 경로·기존 sshd 인증/host key를 각각 확인 |
+| TUN 장치/네트워크 오류 | `test -c /dev/net/tun`, `ip link show tailscale0`, kernel module과 journal 확인. userspace 모드로 조용히 우회하지 않음 |
+| DNS·TLS·시각 오류 | 기존 resolver·이름 해석·UTC 시각/NTP를 각각 확인. 외부 IP ping이나 서비스 active를 DNS/NTP 성공으로 해석하지 않음 |
+| 인터넷 단절 뒤 복구 | 기존 네트워크를 복구한 뒤 자체 재연결 상태 확인. 반복 로그인이나 새 장치 등록으로 대신하지 않음 |
+
+**보존·만료·재인증**
+
+장치 상태와 설정은 root 전용 `/srv/xenova/tailscale/`에 있고 주 state는
+`tailscaled.state`다. 일반 재부팅·정상 서비스 재시작은 이를 재사용한다.
+데이터 파티션을 보존한 이미지 갱신도 같은 범위지만, SD 전체 기록은 데이터까지 초기화한다.
+Tailscale 상태 복원이 VM factory UUID·자산·desired_state를 복원하는 것은 아니다.
+
+키 만료는 저장소 유실과 다르다. Tailnet의 장치 키 만료·취소·승인 정책은 정상 재연결에도
+적용되므로 백업만으로 서버 측 만료를 되돌릴 수 없다. 필요한 재인증은 LAN/UART에서
+`tailscale up --force-reauth --accept-dns=false`로 진행한다. 키 만료 비활성화는 운영자가
+Tailnet 보안 정책으로 결정하며 이미지에서 자동 적용하지 않는다.
+정확한 의미는 [공식 키 만료 안내](https://tailscale.com/docs/features/access-control/key-expiry)와
+[daemon state 옵션](https://tailscale.com/docs/reference/tailscaled)을 따른다.
+
+<a id="cmd-tailscale-backup"></a>
+### Tailscale 인증 상태 — SD 재설치 전 암호화 백업·같은 보드 복원
+
+**명령과 조건**
+
+`xenova-tailscale-state backup --stdout`은 비공개 JSON 묶음을 stdout으로 보낸다.
+터미널 직접 출력은 거절한다. `restore --stdin --check`는 무변경 검사,
+`restore --stdin`은 실제 복원이다. 모두 root·검증된 ext4 데이터 마운트·중지된
+`tailscaled`와 대기 중인 서비스 job이 없는 유지보수 창이 필요하다. helper가 서비스를
+몰래 중지·시작하거나 인증하지 않는다. `prepare`·`cleanup`은 서비스 내부 저장소 검사와 종료 정리다.
+
+백업은 state 디렉터리의 일반 파일을 최대 512개·총 16MiB로 제한해 수집하며 링크·특수 파일·
+권한 소유자 이상이나 제한 초과를 거절한다. 하드웨어 serial·상대 경로·파일별 checksum을
+함께 보관한다. 복원은 같은 Raspberry Pi의 `/proc/device-tree/serial-number`를 대조하고,
+경로 이탈·변조·중복·기존 상태 덮어쓰기를 거절한다. 이 대조는 실수로 다른 보드에 복제하는
+것을 막는 장치이며 root 사용자를 상대로 한 암호학적 하드웨어 증명은 아니다.
+
+백업에는 장치 키와 인증 상태가 있으므로 **Git·공통 이미지·공개 보고서에 넣지 않는다.**
+아래 절차는 기존 LAN SSH 또는 UART로 수행한다. Tailnet IP를 통한 SSH 접속 중 데몬을
+중지하면 관리 연결이 끊긴다. 같은 상태로 두 보드를 동시에 실행하지 않는다.
+운영자가 TPM 기반 state 암호화를 별도로 켰다면 같은 TPM도 유지해야 한다. 보드 serial이
+같아도 TPM을 초기화·교체하면 백업만으로 복호화되지 않을 수 있다.
+[공식 state 보호 설명](https://tailscale.com/docs/features/secure-node-state-storage)을 참고하며,
+이 통합은 TPM 보호 설정을 자동으로 켜거나 끄지 않는다.
+
+**백업 — PC의 WSL Bash에서 실행**
+
+기존 `gpg`를 사용하며 이미지에 GPG를 추가할 필요는 없다. 암호는 GPG 입력창에서만
+입력하고 명령행·환경·기록 파일에 넣지 않는다. 암호화 백업은 보드 밖에서 보관한다.
+백업 전에 Tailnet 관리 콘솔에서 장치와 Tailscale IP를 기록해 복원 후 대조한다.
+
+```bash
+set -euo pipefail
+command -v gpg >/dev/null
+read -r -p '현재 LAN SSH 접속점(root@IP): ' SSH_DEST
+umask 077
+install -d -m 0700 "$HOME/xenova-private-backups"
+BACKUP="$HOME/xenova-private-backups/tailscale-$(date +%Y%m%d-%H%M%S).json.gpg"
+test ! -e "$BACKUP" && test ! -e "$BACKUP.partial"
+PRIVATE=$(mktemp -d /dev/shm/xenova-tailscale.XXXXXXXX)
+trap 'rm -f -- "$PRIVATE/state.json"; rmdir -- "$PRIVATE"' EXIT
+ssh "$SSH_DEST" 'systemctl stop tailscaled.service'
+ssh -T "$SSH_DEST" 'xenova-tailscale-state backup --stdout' |
+  gpg --no-symkey-cache --symmetric --cipher-algo AES256 --output "$BACKUP.partial"
+gpg --no-symkey-cache --output "$PRIVATE/state.json" --decrypt "$BACKUP.partial"
+ssh -T "$SSH_DEST" 'xenova-tailscale-state restore --stdin --check' <"$PRIVATE/state.json"
+mv -- "$BACKUP.partial" "$BACKUP"
+ssh "$SSH_DEST" 'systemctl start tailscaled.service'
+printf 'Encrypted backup: %s\n' "$BACKUP"
+```
+
+실패하면 SD 기록을 진행하지 않는다. `partial` 파일을 성공한 백업으로 사용하지 않으며,
+원 상태가 남은 보드의 daemon 재시작 여부를 LAN/UART에서 확인한다. 초기 인증·재인증 뒤
+백업을 갱신하고, 오래된 백업의 키가 아직 유효하다고 가정하지 않는다.
+
+**SD 전체 기록 후 복원 — 같은 PC의 WSL Bash에서 실행**
+
+새 이미지의 데이터 마운트가 정상인지 먼저 확인한다. LAN 주소는 바뀔 수 있고 SSH host key도
+새로 생성되므로 UART 등 신뢰한 경로에서 확인한다. host key 검사를 끄지 않는다.
+Tailscale 상태를 복원해 이전 Tailnet IP를 다시 쓰더라도 OpenSSH host key까지 복원되는 것은 아니다.
+아래는 **같은 물리 보드의 새 설치**에서 사용하는 절차다. 기존 인증 상태가 있는 설치본에
+무작정 적용하지 않는다. GPG 무결성 검사가 끝난 뒤에만 평문을 SSH로 보낸다.
+복원할 백업이 있다면 새 설치에서 `tailscale up`을 먼저 실행하지 않는다. 상태 복원·데몬
+재시작 후 기존 장치로 연결되는지 확인하고, 서버 측 만료 등으로 필요한 경우에만 재인증한다.
+
+```bash
+set -euo pipefail
+command -v gpg >/dev/null
+read -r -p '재설치한 같은 보드의 LAN SSH 접속점(root@IP): ' SSH_DEST
+read -r -p '암호화 백업의 전체 경로: ' BACKUP
+umask 077
+PRIVATE=$(mktemp -d /dev/shm/xenova-tailscale.XXXXXXXX)
+trap 'rm -f -- "$PRIVATE/state.json"; rmdir -- "$PRIVATE"' EXIT
+gpg --no-symkey-cache --output "$PRIVATE/state.json" --decrypt "$BACKUP"
+ssh "$SSH_DEST" 'systemctl stop tailscaled.service'
+ssh -T "$SSH_DEST" 'xenova-tailscale-state restore --stdin --check' <"$PRIVATE/state.json"
+# 최초 자동 시작이 만든 미인증 상태도 삭제하지 않고 같은 데이터 파티션에 보관한다.
+ssh "$SSH_DEST" 'set -eu; if test -e /srv/xenova/tailscale; then
+  saved=/srv/xenova/tailscale.before-restore-$(cat /proc/sys/kernel/random/uuid)
+  test ! -e "$saved"
+  mv -T -- /srv/xenova/tailscale "$saved"
+  printf "Preserved prior state directory: %s\n" "$saved"
+fi'
+ssh -T "$SSH_DEST" 'xenova-tailscale-state restore --stdin' <"$PRIVATE/state.json"
+ssh "$SSH_DEST" 'systemctl start tailscaled.service'
+ssh "$SSH_DEST" 'tailscale status; tailscale ip -4'
+```
+
+`--check`의 `checked=true`는 입력·같은 보드 대조 성공이며 복원·인증 완료가 아니다.
+실제 복원은 `restored=true`를 반환하고, 다른 Tailnet 장치에서 기존 장치 ID/IP·SSH와
+정상 재부팅 뒤 자동 연결을 별도로 확인한다. Tailnet에서 삭제·만료된 장치는 재인증이
+필요할 수 있다. 모든 상태 변경 오류는 종료 1, parser 오류는 2이며 Manager envelope는 없다.
+
+**중단·손상 복구**
+
+복원은 비공개 staging 디렉터리에서 검증·fsync한 뒤 게시한다. 오류를 성공으로 반환하지 않는다.
+프로세스 강제 종료·전원 상실로 `.tailscale-restore-*`가 남으면 새 상태를 생성하지 않고
+daemon 시작과 재복원을 거절한다. LAN/UART에서 데몬을 중지한 채 원 암호화 백업과 잔여 파일을
+보존·대조한 뒤, 해당 소유 staging만 root 전용 다른 경로로 옮기고 검증한 백업으로 다시 복원한다.
+광범위한 상태 삭제나 자동 새 로그인으로 해결하지 않는다. 응답 유실 뒤에는 실제 게시 여부와
+기존 상태를 먼저 확인하며, 이미 존재하는 상태를 같은 요청으로 덮어쓰지 않는다.
+
+복원 전 상태로 되돌려야 한다면 LAN/UART에서 데몬을 중지하고, 현재 `tailscale` 디렉터리를
+다른 root 전용 이름으로 보관한 뒤 위에서 출력한 `tailscale.before-restore-…` 디렉터리를
+원래 위치로 옮긴다. 잔여 staging도 따로 보존·검토한 후 서비스를 시작한다. 복원 전 상태가
+미인증이었다면 원복 결과도 미인증이며, 이를 인증 복구 성공으로 판정하지 않는다.
+
+[명령어 색인으로](#command-index)
 
 <a id="cmd-wifi-configure"></a>
 ### `xenova-wifi configure` — SSID·PSK와 국가 저장
@@ -1994,6 +2312,20 @@ Agent는 기본 5초 heartbeat를 `xenova/v1/vms/{vm_id}/heartbeat`로 발행하
 
 Zephyr Network Starter의 capability는 가상 Ethernet·IPv4·DHCP·ICMP이며 SSH/Python Agent capability는 없다.
 
+진단 runtime을 포함한 Zephyr firmware의 PV 콘솔에서는 `xenova diag`,
+`xenova telemetry`를 사용한다. Network Starter의 `xenova stats`는 패킷 누적값,
+`xenova stats waits`는 패킷/Store 대기와 backend 관측 상태를 조회한다.
+주행 앱의 `xenova drive`는 계산·출력함·실제 송신을 구별한다. 측정 창은
+`xenova drive capture 30000 180000`으로 정하고 종료 후 `records 0 4`와
+`transmissions 0 4`를 각각 `xenova drive` 뒤에 붙여 페이지를 읽는다.
+`capture_complete`는 계산 창 종료이며 `transmissions_complete`는 수락 후보의 최종 처리
+기록 확정이다. 둘 다 참이 되기 전 페이지 조회와 capture 재설정은 `-EBUSY`다.
+확정된 창의 페이지 total은 유지된다. 분석기의 기능·자료 정합성 수락과 성능 개선은 별도다.
+이들은 guest의 로컬 shell 명령이며 Manager action이나 HTTP 조회가 아니다.
+기존 불변 firmware에 새 명령이 있다고 가정하지 않는다. 반환 필드와 원자료 해석은
+[Zephyr runtime](../../platform/guests/zephyr/xen-runtime/README.md#패킷-처리와-backend-관측)과
+[주행 runtime](../../platform/apps/common/xenova-drive-runtime/README.md#실제-계산과-계측)을 따른다.
+
 <a id="diagnostics"></a>
 ## 10. 운영 진단·설치 도구
 
@@ -2080,6 +2412,79 @@ bridge 주소·VM의 등록 IP·MAC/lease를 각각 비교한다. 생성한 host
 **Manager 매핑:** 운영 CLI 전용.
 
 [명령어 색인으로](#command-index)
+
+<a id="cmd-boot-status"></a>
+### `xenova-boot-status` — 부팅 진행·지연·실패 조회
+
+**기본 사용**
+
+`xenova-boot-status`
+
+인자 없이 현재 systemd 상태와 이번 unit 실행의 부가 진행 사실을 평문으로 읽는다.
+VM 제어나 Manager 전체 조회를 수행하지 않는다.
+
+**인자**
+
+모두 선택: `--details`는 unit·전체 VM UUID·상세 조회 명령을 추가하고, `--ascii`는
+표시 이름을 ASCII로 치환한다. `--json`은 같은 표시 snapshot을 JSON으로 출력한다.
+`--watch`는 설치 서비스용 내부 모드이며 안내 파일을 갱신한다. 일반 조회에는 쓰지 않는다.
+`--json`과 `--details`를 같이 주면 JSON이 우선한다. `--ascii`는 평문에만 적용된다.
+
+**사용 조건**
+
+dom0의 systemd와 `/proc`·`/run/xenova`를 읽을 수 있어야 한다. systemctl 조회는
+고정 unit/속성의 한 호출에 최대 2초, 수신 크기 128KiB를 적용한다. 공통 플랫폼 잠금을
+얻지 않는다. 원 기록이 없거나 오래됐으면 정보를 만들지 않는다.
+
+**실행 예시**
+
+```bash
+xenova-boot-status
+xenova-boot-status --details
+xenova-boot-status --json
+```
+
+**정상 응답**
+
+기본 평문은 `Xenova startup`으로 시작하며 완료된 서비스는 `[ OK ]` 한 줄,
+진행 중인 서비스는 `[START]`, 아직 미시작인 서비스는 `[WAIT; reason unconfirmed]`로 묶어 표시한다.
+`--details`의 `COMPLETE/PROGRESS/WAITING/DELAYED/DEFERRED/FAILED/UNKNOWN/UNAVAILABLE`은
+같은 snapshot의 표시 상태다. 지연·실패·미확정은 기본 출력에도 남는다.
+VM별 `verified`는 공통 start의 실행 검증과 필수 결과 저장까지 확인한
+부팅 사실이며, 현재 OS·앱 정상 여부는 아니다. 표시 이름·원 unit·전체 UUID와
+읽기 전용 상세 명령을 함께 확인한다. 선택 전에는 분모를 미확정으로 표시한다.
+
+JSON은 **Manager envelope가 아닌 표시 snapshot**이다.
+
+| 필드 | 의미 |
+|---|---|
+| host_boot_id / observed_monotonic_ms | 이번 관측 host / 해당 host의 단조 ms. UTC 아님 |
+| stages[] | key·label·unit·invocation_id·state·reason. 알 수 있는 경우 elapsed_ms·phase·last_change_ms_ago·batch_id·mode·exit 정보를 포함 |
+| stages[].progress_issue | missing·unreadable-or-incomplete·stale-host-or-invocation·stale-batch 등 부가 기록의 한계. null이면 대조 통과 |
+| vms[] | vm_id·name·internal_name·state·selected·code·os_readiness·app_readiness. selected는 실제 선택 여부 또는 아직 미확정이면 null |
+| vm_counts | 현재 invocation의 verified·excluded·failed·not-started·uncertain 수와 selected 수. 정책 선택이 미완료면 selected=null, 기록 자체가 없으면 vm_counts=null |
+| issues[] | systemd-query-timeout/unavailable/failed/empty/too-large/partial 등 전체 관측 오류 |
+| failure_history[] | 표시기가 같은 boot에서 관측한 최대 16개 unit 실패. 현재 회복과 다르며 영구 journal이 아님 |
+
+**오류 응답**
+
+정상 관측으로 부팅 실패를 발견한 경우 평문/JSON에 실패를 표시하고 종료 0이다.
+systemd 전체 조회 자체가 실패하면 `issues`와 unknown 행을 반환하며 종료 1이다.
+치명적 읽기·표시 오류는 stderr의 짧은 오류와 종료 1, parser 입력 오류는 종료 2다.
+없는 진행 기록을 빈 성공 목록으로 대신하지 않는다. 서비스 모드 오류도 VM 제어에
+전파되지 않는다.
+
+**확인 방법**
+
+표시한 `journalctl -b -u UNIT`로 Result와 상세 로그를 확인한다. 결과가 미확정인 VM은
+원 UUID·operation·실행 신원을 확인한 후 기존 제어 계약을 따른다. 이 명령이 재시도나
+복구를 대신하지 않는다. 실제 HDMI·UART 경로와 복구 방법은
+[부팅 표시](management-boot-boundaries.md#부팅-진행지연실패-표시)에 있다.
+
+**Manager 매핑:** 별도 표시 CLI. Manager action·VMView·HTTP 계약을 추가하지 않는다.
+
+[명령어 색인으로](#command-index)
+
 
 <a id="cmd-diagnose"></a>
 ### `xenova-vm diagnose` — 부팅 인자·가동 시간·시각 진단
@@ -2555,6 +2960,29 @@ stderr `[xenova] ERROR: …`, 종료 1. 원인별 VM method/stage/xen_state/erro
 
 [명령어 색인으로](#command-index)
 
+<a id="cmd-telemetry-evidence"></a>
+### Zephyr 실행별 진단 기록 조회
+
+dom0의 root 셸에서 해당 실행의 보존 자료를 조회한다. 이 명령은 Manager action이 아니며
+VM을 시작·정지하거나 현재 실행의 건강 상태를 판정하지 않는다.
+
+```sh
+xenova-telemetry-support evidence-list \
+  --archive /srv/xenova/diagnostics/telemetry/<VM_UUID>/<EXECUTION_UUID>
+```
+
+`evidence-list`와 `--archive`는 필수다. archive는 영구 진단 영역 안의 경로여야 한다.
+정상 출력은 기록 목록 JSON이며 종료 코드는 0이다. 저장·경로 검증 오류는 stderr의
+`{ok:false,error,errno,stage}`와 종료 코드 1, 인자 오류는 2로 구분한다. 빈 목록은
+저장된 자료가 없다는 뜻이며, 오류나 fatal이 없었다는 증거가 아니다.
+손상·미완료 파일은 `status=incomplete`로 표시한다.
+
+자료에는 원 VM·host boot·execution·guest boot, 로딩 펌웨어, 원 시계와 수집 시각,
+일반 오류·관측한 fatal 및 포착 불연속을 구분해 남긴다. 한도에서 오래된 정상 기록을
+자동 회전하며 삭제 요약은 `/srv/xenova/diagnostics/telemetry/retention.json`에 남는다.
+포착 범위·권한·한도·미포착 조건과 내부 서비스 명령은
+[Publisher의 실행별 보존](../../platform/guests/zephyr/telemetry/README.md#내부-진단과-실행별-보존)을 따른다.
+
 <a id="cmd-bridge-up"></a>
 ### `xenova-bridge-up` — 내부 bridge 생성·주소 준비
 
@@ -2759,6 +3187,8 @@ CLI 어댑터의 spec-file 읽기·JSON 해석·내부 이름 해석 도중 OSEr
     "details": {
       "accepted": true, "completion": "pending",
       "operation_id": "11111111-1111-4111-8111-111111111111", "intent_revision": 12,
+      "phase": "accepted", "host_boot_id": "22222222-2222-4222-8222-222222222222",
+      "lifecycle_generation": 1,
       "deadline_monotonic_ms": 123456, "execution_deadline_expired": false,
       "next_action": "replay_original_stop_after_execution_lock_is_available"
     }
@@ -2766,10 +3196,14 @@ CLI 어댑터의 spec-file 읽기·JSON 해석·내부 이름 해석 도중 OSEr
 }
 ```
 
-details의 operation_id는 envelope와 같은 원 제어 작업이다. intent_revision은 내구 수락한
-의도의 순서, deadline_monotonic_ms는 해당 host의 원 실행 기한이다. 구형 미완료 journal에
+details의 operation_id는 envelope와 같은 원 제어 작업이다. phase는 원 journal 단계이며,
+host_boot_id와 lifecycle_generation은 해당 수락의 host·VM 수명 문맥이다. intent_revision은
+내구 수락한 의도의 순서, deadline_monotonic_ms는 해당 host의 원 실행 기한이다. 구형 미완료 journal에
 기한이 없으면 deadline/만료 여부는 null이며 새 기한을 발급하지 않는다. accepted는
 실제 종료 완료가 아니다. completion은 pending/failed/completed/superseded를 구분한다.
+`phase=uncertain`·수습 오류를 completion=pending이라는 이유만으로 자동 재시도 가능한 접수로
+바꾸지 않는다. FastAPI·Spring의 구조적 전달은 [연동 요청서](management-integration-request.md)의
+별도 구현·수락 대상이다.
 
 내구 저장 직후 호출자가 종료돼도 원 key의 stop 재전달이 같은 operation/revision/deadline을
 대조해 이어간다. 자동 실행 daemon은 없다. 만료 후 stopped 의도는 남지만 원 요청으로
@@ -2973,6 +3407,13 @@ Xen 목록의 전후 비교·incarnation 확인 도중 변경되면 TARGET_CHANG
 성공 없음·이전 host·음수 age·max_age 초과면 stale이다. stale 또는 현재 오류가 있으면 unknown/current=null이다. snapshot.current는 저장된 value이므로 probe 바깥에서 붙이는 host/revision/time 필드가 없다. host/revision은 Snapshot 상위, 시각은 last_success.monotonic_ms에서 읽는다. ok=true/unknown=true는 현재 실행을 성공 관측했다는 뜻이 아니다.
 
 ### B.5 Runtime execution record
+
+Zephyr의 새 실행에는 선택 필드 `loaded_artifact`를 기록한다. 검증한 로딩 대상
+`file=zephyr.bin`, `artifact_sha256`, `manifest_sha256`, `build_id`와 실행 시점의
+`display_name`, `hostname`, `internal_name`이다. 기존 `execution_context`에도 이
+필드가 보일 수 있다. 과거 실행에는 없을 수 있으며 현재 디스크의 파일로 값을 추정하지
+않는다. 로딩 기록과 인스턴스 주입의 결합이며 암호학적 원격 증명이 아니다.
+Manager action·envelope·기존 실행 신원과 복구 완료의 의미는 유지한다.
 
 | 필드 | 타입·의미 |
 |---|---|
@@ -3217,7 +3658,25 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 PY
 ```
 
-정식 Python 진입점은 `xenova_management.Manager.call`이다. 서명은 `Manager.call(action, spec=None, *, execute=False, idempotency_key=None, request_id=None)`다. spec은 JSON 표현 가능한 dict이며 허용 필드 외 입력은 거절한다. execute는 bool이다. 정확한 action/spec은 각 명령의 Manager 매핑을 따른다. execute=False도 start/stop/설정 변경에는 dry-run이 아니다.
+정식 Python 진입점은 `xenova_management.Manager.call`이다. 서명은 `Manager.call(action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None)`다. spec은 JSON 표현 가능한 dict이며 허용 필드 외 입력은 거절한다. execute는 bool이다. 정확한 action/spec은 각 명령의 Manager 매핑을 따른다. execute=False도 start/stop/설정 변경에는 dry-run이 아니다.
+
+`get/list`는 선택 spec `timeout_ms`로 1..15000ms의 전체 조회 예산을 받는다. 생략 시 기존
+15000ms이며 CLI에는 이에 대응하는 새 옵션이 없다. 목록의 모든 VM과 registry 비용이 같은
+기한을 공유한다.
+
+`budget_ms`는 `start/stop/reboot/destroy/get/list/control-operation`의 선택 호출 인자다.
+정수 1..105000ms만 허용하며 bool은 거절한다. 상위 대기 후 남은 기간을 전달하는 용도이며
+원 spec/hash에 포함하지 않는다. 물리 실행 기한은 기존 90초와 전달 예산 중 짧은 값이다.
+기존 원 작업 재전달은 저장된 원 기한을 연장하지 않는다. 제한된 결과 재확인도 이번 호출의
+잔여 예산 안에서만 수행하며 새 create/reboot 권한을 만들지 않는다. 생략하면 기존 CLI와
+Worker 동작을 유지한다. 105000ms는 입력 상한이며 HTTP 대기시간 설정이 아니다.
+
+`Manager.fork()`는 동일 저장소·실행 잠금을 사용하는 독립 Python 요청 객체를 반환한다.
+실행 중인 원 객체의 이번 호출 `response_deadline`도 새 요청에 복사하지 않는다.
+긴 작업 중 stop 수락·원 기록 조회를 연결할 때 사용한다. OS 프로세스를 만들지 않으며,
+공유 Manager를 임의로 동시 호출하거나 모든 action의 상위 직렬화를 제거해도 된다는 뜻이 아니다.
+HTTP의 VM mutex·직렬화 분리는 아직 연결되지 않았다. 구체적인 담당 범위는
+[관리 요청 연동 요청서](management-integration-request.md)를 따른다.
 
 정상/오류는 [envelope](#contract-response)를 반환한다. Python에서는 dict의 ok/data/error를 확인하며 CLI 종료 코드는 별도로 적용하지 않는다. CLI delete/status/recover-once 별칭을 그대로 Python action으로 옮기지 않고 각각 retire/list/recover_once를 호출한다.
 
@@ -3320,10 +3779,10 @@ Spring은 소스 기본값만 확인했으며 운영 배포 override는 별도 �
 
 | 경로·적용 위치 | 현재 적용값·계산 시작점 | 포함·제외와 현재 상태 |
 |---|---|---|
-| Manager get/list (`xenova_management.Manager._call`) | 진입 시점부터 전체 15초 | L·registry·전체 관측이 공유. 공개 spec에 timeout_ms가 없고 CLI의 --timeout-ms로 바꿀 수 없음 |
+| Manager get/list (`xenova_management.Manager._call`) | 진입 시점부터 기본 15초 | 선택 spec timeout_ms 1..15000ms와 선택 호출 budget_ms 중 짧은 기한을 L·registry·전체 관측이 공유. CLI --timeout-ms는 추가하지 않음 |
 | probe / cpu-layout / cpu-host-prepare | timeout_ms 기본 15000, 1..15000ms. Manager 진입부터 | 선택한 잔여 기한이 하위 명령에도 적용. CPU factory 정책 등록도 같은 기한 사용 |
 | cpu-policy-set | Manager 진입부터 기본 15초 | registry·정책 검증·관측이 공유. 별도 내부 15초 재발급 없음. 공개 timeout 입력 추가 없음 |
-| start/stop/reboot/destroy | Manager 진입부터 90초 | 수락·guard·실행·필수 검증. 필수 P와 원 결과 재확인 R 때문에 반환이 더 늦을 수 있음 |
+| start/stop/reboot/destroy | Manager 진입부터 기본 90초 | 선택 budget_ms는 물리 기한을 줄이고 R의 잔여 예산도 제한. 원 요청의 기한은 재발급하지 않음. fsync 등 필수 P를 선점하는 엄밀한 반환 상한은 아님 |
 | 기존 내부 이름 start/reboot/destroy CLI | Execution.control 진입부터 기본 90초 | 공통 Manager 진입과 다르며 앞선 registry 조회는 별도다. 내부 이름 stop도 사전 이름 해석 뒤 Manager를 호출하므로 CLI 시작 전체를 90초로 보장하지 않음 |
 | recover_once | 요청의 deadline_monotonic_ms | 최초 수락 시 미래 120초 이내, 원 host에 결합. 재전달로 갱신하지 않음. 만료 뒤 R 최대 15초는 새 실행 권한이 아님 |
 | autostart / unit | batch 전체 140초 / TimeoutStartSec 150초 | 모든 VM이 공유. 전원 부팅 전체의 상한은 아님 |
@@ -3332,7 +3791,7 @@ Spring은 소스 기본값만 확인했으며 운영 배포 override는 별도 �
 | FastAPI xl driver | query subprocess 5초, command 소스 기본/배포 관측 95초 | 별도 xl 호출 상한. platform Manager의 전체 timeout이 아님 |
 | HTTP health/stats | xl 직접 관측 및 요청별 관측 경계 5초 | 공통 Manager get/list와 다른 경로. threadpool Q는 별도 |
 | Spring `application.yml`·`Dom0ManagerProperties`·`Dom0ManagerClient.createClient` | 소스 기본 connect/query/command=2/6/100초 | 각 HTTP 시도의 대기 설정. 배포값 미확인. query와 command의 재시도 정책도 서로 다름 |
-| Recovery Worker | interval 5초, intent refresh 60초 등 관측/장애 판정 유예 | 판단 큐까지만 연결. 110초 executor는 미연결 제안이며 실제 적용 설정으로 보고하지 않음 |
+| Recovery Worker | interval 5초, intent refresh 60초 등 관측/장애 판정 유예 | 현재 RecoveryEngine 단일 executor와 연결. 최초 실행 슬롯에서 110초 원 attempt 기한을 고정하고 재전달에는 그대로 사용 |
 
 fsync·프로세스 생성·커널 I/O를 선점하는 엄밀한 wall-clock 상한이 아니다. 필수 내구
 저장은 만료됐다는 이유로 생략하지 않는다. R은 결과 확인에만 사용하고 create/reboot를
@@ -3352,10 +3811,10 @@ DEADLINE_EXCEEDED로 거절한다. 검증 후 게시 직전 만료도 새 정책
 
 | 기능/호출 경로 | 현재 계약·시간 소비 | 하위 조정 또는 어려운 이유 | 최소 변경안·반환 여유·협의 |
 |---|---|---|---|
-| HTTP get/list | 조회 계약 5초, Spring query 기본 6초. 하위 E/P 15초에 S 최대 5초·Q가 앞섬 | 하위에 호출자 deadline/timeout 입력이 없어서 CLI와 HTTP에 다른 예산을 선택할 수 없음. 기본값 일괄 축소로 검증을 생략하거나 정상 작업을 실패시키지 않음 | 5초 계약을 유지하려면 상위 Q/S를 제한하고 잔여 시간을 get/list에 전달할 최소 계약 확장 협의가 필요. 현재 미구현. 반대로 대기를 늘릴 경우에도 Q상한+S+E/P+반환 여유 산정이 선행 |
-| 일반 HTTP control | 하위 E 90초 + R 최대 15초 + P, S 최대 5초. Spring command 기본 100초 | 물리 작업의 원 기한·안전 검증을 줄이지 않음. 상위 Q가 무기한이면 유한 종단 보장 불가 | Q를 먼저 제한. 대기 확대 대안은 Q상한+5+90+15+반환 여유. 예를 들어 Q=0·반환 여유 5초이면 115초가 필요하다는 계산일 뿐 적용값이 아님. R 축소는 재확인 실패 영향과 함께 별도 검토 |
+| HTTP get/list | 조회 계약 5초, Spring query 기본 6초. 하위 기본 E/P 15초에 S 최대 5초·Q가 앞섬 | 하위 timeout_ms/budget_ms는 제공하지만 현행 FastAPI는 전달하지 않음. 기본값 일괄 축소나 관측 생략 없이 남은 기간을 선택할 수 있음 | 상위 Q/S와 반환 여유를 같은 요청 예산에 포함하고 get/list에 잔여값을 연결해야 함. 종단 연결·수락은 미완료 |
+| 일반 HTTP control | 기본 E 90초 + 기존 R 최대 15초 + P, S 최대 5초. Spring command 기본 100초 | 하위 budget_ms로 물리/재확인 잔여 예산을 제한할 수 있지만 FastAPI 전달은 미연결. 상위 Q가 무기한이면 유한 종단 보장 불가 | Q/S 소모와 반환 여유를 뺀 실제 잔여값 전달. 물리 원 기한은 연장하지 않음. 100초 caller 안에서 수습 관측이 충분한지는 제품 조건별 수락 필요 |
 | 복구 중 stop HTTP | VM Q와 S가 하위 수락보다 앞섬. 오류 details·원 key도 현재 경로에서 보존하지 않음 | 하위의 짧은 durable 수락만으로 상위 잠금을 우회할 수 없음 | 기존 stop 경로의 짧은 수락/긴 실행 분리와 요청별 Manager 상태 보호, pending/completed 응답 구분 필요. 새 HTTP API를 임의 구현하지 않음 |
-| Worker recover_once 실행 | judgment 큐는 있으나 executor 소비/조립이 없음 | 하위 120초 수락 상한은 실제 Worker 110초 실행을 뜻하지 않음 | 최초 attempt의 원 host·절대 D를 큐 대기부터 차감해 전달. 110초 기본은 연결 설계안, 반환 대기는 잔여 D+R+P. 재시도에 D 재발급 금지 |
+| Worker recover_once 실행 | 현재 Engine이 실행 슬롯·현재 view에서 기본 110초 spec을 선저장한 뒤 호출 | 실행 전 판단 큐/직렬화 대기는 이 실행 예산과 별도. 응답 유실은 원 attempt journal로 확인 | 같은 attempt의 원 host·절대 D를 재사용. 원 D 뒤 기존 verify_timeout_s(기본 150초)까지 결과 조회가 계속 실패하면 final RECONCILE_REQUIRED로 조정 요구. 이 확인 예산은 새 물리 실행 허가가 아님 |
 | 자산 등록 create | cloud root 디스크의 원본/복사본 해시·복사·준비와 후속 start를 포함 | 단일 control 90초나 개별 sha256sum 900초가 등록 전체 기한은 아님 | 전체 생성 요청·하위 단계별 예산과 중복 I/O는 별도 후속 과제. 무결성 검사 축소나 timeout 확대를 해결로 적용하지 않음 |
 
 25초·120초 HTTP 대기는 합의·적용된 계약이 아니다. 관측 최대 시간은 보장 상한이
@@ -3370,7 +3829,7 @@ DEADLINE_EXCEEDED로 거절한다. 검증 후 게시 직전 만료도 새 정책
 | `platform/services/dom0-manager/dom0_manager/service.py:VmService._vm_lock/create/stop`, `drivers/platform.py:SerializedManager.call` | 원 요청 예산에서 Q/S 차감. 긴 복구 잠금 중 별도 stop이 durable pending으로 수락되고 요청별 Manager 상태가 섞이지 않는 HTTP 경쟁 시험 |
 | `drivers/platform.py:PlatformDriver._stop/raise_for_envelope`, `errors.py:Dom0ManagerError.body`, `api/errors.py`, `api/vms.py:stop_vm` | 원 key/operation, accepted/completion/revision/deadline 전달. 미수락 busy·pending·완료·superseded·만료 구별. 기존 204 완료를 접수 완료로 재해석하지 않음 |
 | `backend/src/main/resources/application.yml`, `backend/src/main/java/com/xenova/backend/vm/infrastructure/Dom0ManagerProperties.java`, `Dom0ManagerClient.createClient/executeQuery/executeCommand/handleError` | 실제 배포 timeout 확인, 협의한 전체 예산 반영, 응답 유실 시 원 작업 재확인. 전송 후 timeout을 새 key로 반복하지 않는 시험 |
-| `platform/services/dom0-manager/dom0_manager/recovery/worker.py:RecoveryWorker.run_once`, `recovery/__main__.py:main` | 판단 큐와 executor 연결, 원 attempt/D 내구 보존·중복 전달·중단 재개·실행 중 stop·결과 미확정의 종단 시험 |
+| `platform/services/dom0-manager/dom0_manager/recovery/worker.py:RecoveryWorker.run_once`, `recovery/__main__.py:main` | 현재 Engine 연결·원 attempt/D 선저장·journal 우선 재확인을 유지. 제품 HTTP stop 진입의 Q/S·pending 전달과 실제 보드 중단/복원은 별도 종단 수락 |
 
 <a id="sources"></a>
 ## 구현 근거와 유지 기준

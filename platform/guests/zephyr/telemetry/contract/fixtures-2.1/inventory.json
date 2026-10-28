@@ -1,0 +1,113 @@
+{
+  "schema_version": "2.1",
+  "type": "telemetry.inventory",
+  "message_id": "f1000000-0000-4000-8000-000000000001/f2000000-0000-4000-8000-000000000001/f3000000-0000-4000-8000-000000000001/inventory/1",
+  "vm_id": "f1000000-0000-4000-8000-000000000001",
+  "boot_id": "f2000000-0000-4000-8000-000000000001",
+  "publisher_instance_id": "f3000000-0000-4000-8000-000000000001",
+  "seq": "1",
+  "context": {
+    "binding": "unbound",
+    "host_boot_id": null,
+    "execution_id": null,
+    "receipt_id": null
+  },
+  "clock": {
+    "sent_uptime_ms": "50000",
+    "sent_at": null,
+    "utc_quality": "unavailable",
+    "utc_source": null,
+    "uncertainty_ms": null
+  },
+  "payload": {
+    "collection": {
+      "sample_id": "f3000000-0000-4000-8000-000000000003",
+      "start_uptime_ms": "49999",
+      "end_uptime_ms": "50000",
+      "elapsed_us": "700",
+      "status": "ok",
+      "source_rc": 0
+    },
+    "os": {
+      "id": "zephyr",
+      "version": "4.4.0",
+      "kernel_release": "4.4.0"
+    },
+    "hostname": null,
+    "display_name": null,
+    "firmware": {
+      "build_id": "producer-unit-boundaries",
+      "artifact_sha256": null,
+      "measurement_profile": "diagnostic_exercise"
+    },
+    "publisher": {
+      "name": "xenova.telemetry",
+      "version": "2.1.0",
+      "metric_catalog": "xenova-telemetry-core-2.1"
+    },
+    "interfaces": [
+      {
+        "name": "eth0",
+        "mac": "02:11:22:33:44:55",
+        "addresses": [
+          {
+            "family": "ipv4",
+            "address": "192.0.2.3"
+          }
+        ]
+      }
+    ],
+    "interfaces_omitted": 0,
+    "capabilities": [
+      {
+        "id": "kernel_heap",
+        "support": "available",
+        "reason": null
+      },
+      {
+        "id": "thread_stack",
+        "support": "available",
+        "reason": null
+      },
+      {
+        "id": "timing",
+        "support": "available",
+        "reason": null
+      },
+      {
+        "id": "cpu_runtime",
+        "support": "unsupported",
+        "reason": "runtime provider not enabled"
+      },
+      {
+        "id": "memory_pools",
+        "support": "unsupported",
+        "reason": "fixed data pool statistics not enabled"
+      },
+      {
+        "id": "persistent_crash",
+        "support": "unsupported",
+        "reason": "no verified external capture configuration"
+      },
+      {
+        "id": "loop",
+        "support": "available",
+        "reason": null
+      }
+    ],
+    "capabilities_omitted": 0,
+    "clock_domains": {
+      "uptime": "guest_boot_milliseconds",
+      "loop_counter": "local_hw_cycles_converted_us",
+      "frequency_hz": "54000000",
+      "same_epoch": false
+    },
+    "limits": {
+      "max_payload_bytes": 4096,
+      "heartbeat_period_ms": 2000,
+      "metrics_period_ms": 2000,
+      "event_queue_capacity": 32,
+      "diagnostic_stack_scan_default": "off"
+    }
+  }
+}

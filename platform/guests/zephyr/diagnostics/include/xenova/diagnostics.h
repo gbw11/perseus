@@ -5,11 +5,14 @@
 #define XENOVA_DIAGNOSTICS_H
 #include <xenova/diagnostics_core.h>
 #include <zephyr/kernel.h>
+#include <xenova/resources.h>
 
 struct xdiag_network {
 	int rc;
 	bool link_up;
 	uint64_t tx, rx, tx_drop, rx_drop, pool_busy, protocol_errors;
+	uint64_t tx_bytes, rx_bytes, counter_epoch;
+	int bytes_rc;
 };
 
 /* Provider must be bounded and supply real observations; output is ignored on
@@ -30,6 +33,7 @@ struct xdiag_thread {
 };
 
 struct xdiag_snapshot {
+	struct xdr_snapshot resources;
 	uint64_t captured_uptime_ms, collection_elapsed_us;
 	uint64_t cycle_hz, cycle_now_us;
 	int clock_rc, collection_rc, threads_rc, heap_rc, timing_rc;
@@ -49,7 +53,15 @@ int xdiag_snapshot_get(struct xdiag_snapshot *, bool include_threads);
 int xdiag_boot(const char *stage, int rc);
 int xdiag_error(const char *stage, int rc);
 int xdiag_network_register(xdiag_network_provider, void *context);
+/* Internal low-frequency owner / snapshot adapter; same registered provider. */
+int xdiag_network_read(struct xdiag_network *);
 int xdiag_clock_us(uint64_t *out);
+/* Reads the single collector's cache; never advances a CPU baseline or scans stacks. */
+int xdiag_resources_get(struct xdr_snapshot *);
+/* Hot-path optional evidence: never waits for the collector. Same age/error
+ * rules as resources_get; failure is unavailable evidence, not app failure. */
+int xdiag_resources_try_get(struct xdr_snapshot *);
+bool xdiag_cpu_supported(void);
 int xdiag_loop_init(struct xdiag_loop *, uint64_t period_us, uint64_t deadline_us);
 int xdiag_loop_begin(struct xdiag_loop *);
 int xdiag_loop_end(struct xdiag_loop *);

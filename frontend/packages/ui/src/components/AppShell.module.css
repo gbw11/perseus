@@ -64,3 +64,31 @@
   flex: 1;
   padding: var(--x-space-5);
 }
+
+@media (max-width: 1080px) {
+  .top {
+    align-items: stretch;
+    gap: var(--x-space-3);
+    height: auto;
+    min-height: 64px;
+    padding: var(--x-space-2) var(--x-space-4);
+  }
+  .brand,
+  .actions {
+    align-items: center;
+  }
+  .nav {
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+  .nav a {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    padding-inline: 10px;
+    white-space: nowrap;
+  }
+  .main {
+    padding: var(--x-space-4);
+  }
+}

@@ -1,0 +1,6 @@
+#!/usr/bin/python3
+"""Read-only boot summary; independent from VM Manager actions."""
+import sys
+sys.path.insert(0, '/usr/lib/xenova')
+from xenova_boot_status import entrypoint
+sys.exit(entrypoint())

@@ -1,0 +1,95 @@
+// develop에 병합된 파트 브랜치를 해당 develop 병합 커밋으로 fast-forward한다.
+pipeline {
+    agent any
+
+    options {
+        gitLabConnection('gitlab')
+        timeout(time: 10, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        disableConcurrentBuilds()
+    }
+
+    triggers {
+        gitlab(
+            triggerOnPush: true,
+            triggerOnMergeRequest: false,
+            branchFilterType: 'NameBasedFilter',
+            includeBranchesSpec: 'develop',
+            excludeBranchesSpec: ''
+        )
+    }
+
+    environment {
+        GITLAB_PUSH_CREDENTIALS_ID = 'xenova-gitlab-write-token'
+    }
+
+    stages {
+        stage('Sync merged part branch') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: env.GITLAB_PUSH_CREDENTIALS_ID,
+                    usernameVariable: 'GITLAB_HTTP_USER',
+                    passwordVariable: 'GITLAB_HTTP_TOKEN'
+                )]) {
+                    sh '''
+                        set -eu
+
+                        askpass="$(mktemp)"
+                        trap 'rm -f "$askpass"' EXIT
+                        printf '%s\n' \
+                          '#!/bin/sh' \
+                          'case "$1" in' \
+                          '  *Username*) printf "%s\\n" "$GITLAB_HTTP_USER" ;;' \
+                          '  *Password*) printf "%s\\n" "$GITLAB_HTTP_TOKEN" ;;' \
+                          'esac' > "$askpass"
+                        chmod 700 "$askpass"
+                        export GIT_ASKPASS="$askpass"
+                        export GIT_TERMINAL_PROMPT=0
+
+                        trigger_commit="$(git rev-parse HEAD)"
+                        subject="$(git log -1 --pretty=%s "$trigger_commit")"
+
+                        source_branch=''
+                        for candidate in platform frontend backend vehicle; do
+                            if [ "$subject" = "Merge branch '$candidate' into 'develop'" ] || \
+                               [ "$subject" = "$candidate into dev" ]; then
+                                source_branch="$candidate"
+                                break
+                            fi
+                        done
+
+                        if [ -z "$source_branch" ]; then
+                            echo 'This is not a part branch -> develop merge; skipping branch sync.'
+                            exit 0
+                        fi
+
+                        parent_count="$(git rev-list --parents -n 1 "$trigger_commit" | awk '{print NF - 1}')"
+                        if [ "$parent_count" -ne 2 ]; then
+                            echo "Expected a two-parent merge commit, got $parent_count parent(s)." >&2
+                            exit 1
+                        fi
+
+                        # Declarative checkout credentials are scoped to the checkout step. Bind a
+                        # dedicated read/write token for both fetch and push over the already working
+                        # HTTPS route, without embedding the token in the command line or Git config.
+                        git fetch --no-tags \
+                          'https://lab.ssafy.com/s15-final/S15P31E110.git' \
+                          "+refs/heads/${source_branch}:refs/remotes/origin/${source_branch}"
+                        source_tip="$(git rev-parse "origin/$source_branch")"
+                        merge_source="$(git rev-parse "${trigger_commit}^2")"
+
+                        if [ "$source_tip" != "$merge_source" ]; then
+                            echo "origin/$source_branch changed after the MR was merged; refusing automatic sync." >&2
+                            exit 1
+                        fi
+
+                        git merge-base --is-ancestor "$source_tip" "$trigger_commit"
+                        git push -o ci.skip \
+                          'https://lab.ssafy.com/s15-final/S15P31E110.git' \
+                          "${trigger_commit}:refs/heads/${source_branch}"
+                    '''
+                }
+            }
+        }
+    }
+}

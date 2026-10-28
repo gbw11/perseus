@@ -1,0 +1,46 @@
+{
+  "observed_at": "2026-10-27T08:46:06.975896+00:00",
+  "bundle_root": "/opt/xenova-graphics-probe/20261027-1ddf34f25d30",
+  "links": {
+    "usr/lib/aarch64-linux-gnu/libblas.so.3": "blas/libblas.so.3",
+    "usr/lib/aarch64-linux-gnu/liblapack.so.3": "lapack/liblapack.so.3"
+  },
+  "commands": {
+    "ldconfig": {
+      "code": 0,
+      "out": "",
+      "err": ""
+    },
+    "ffmpeg_devices": {
+      "code": 0,
+      "out": "Devices:\n D. = Demuxing supported\n .E = Muxing supported\n ---\n DE alsa            ALSA audio output\n  E caca            caca (color ASCII art) output device\n DE fbdev           Linux framebuffer\n D  iec61883        libiec61883 (new DV1394) A/V input device\n D  jack            JACK Audio Connection Kit\n D  kmsgrab         KMS screen capture\n D  lavfi           Libavfilter virtual input device\n D  libcdio          \n D  libdc1394       dc1394 v.2 A/V grab\n D  openal          OpenAL audio capture device\n  E opengl          OpenGL output\n DE oss             OSS (Open Sound System) playback\n DE pulse           Pulse audio output\n  E sdl,sdl2        SDL2 output device\n DE video4linux2,v4l2 Video4Linux2 output device\n D  x11grab         X11 screen capture, using XCB\n  E xv              XV (XVideo) output device\n",
+      "err": ""
+    },
+    "ffmpeg_mjpeg": {
+      "code": 0,
+      "out": "Encoders:\n V..... = Video\n A..... = Audio\n S..... = Subtitle\n .F.... = Frame-level multithreading\n ..S... = Slice-level multithreading\n ...X.. = Codec is experimental\n ....B. = Supports draw_horiz_band\n .....D = Supports direct rendering method 1\n ------\n V....D a64multi             Multicolor charset for Commodore 64 (codec a64_multi)\n V....D a64multi5            Multicolor charset for Commodore 64, extended with 5th color (colram) (codec a64_multi5)\n V....D alias_pix            Alias/Wavefront PIX image\n V..... amv                  AMV Video\n V....D apng                 APNG (Animated Portable Network Graphics) image\n V....D asv1                 ASUS V1\n V....D asv2                 ASUS V2\n V....D libaom-av1           libaom AV1 (codec av1)\n V....D librav1e             librav1e AV1 (codec av1)\n V..... libsvtav1            SVT-AV1(Scalable Video Technology for AV1) encoder (codec av1)\n V....D av1_nvenc            NVIDIA NVENC av1 encoder (codec av1)\n V....D av1_vaapi            AV1 (VAAPI) (codec av1)\n V....D avrp                 Avid 1:1 10-bit RGB Packer\n V..X.D avui                 Avid Meridien Uncompressed\n VF...D bitpacked            Bitpacked\n V....D bmp                  BMP (Windows and OS/2 bitmap)\n VF...D cfhd                 GoPro CineForm HD\n V....D cinepak              Cinepak\n V....D cljr                 Cirrus Logic AccuPak\n V.S..D vc2                  SMPTE VC-2 (codec dirac)\n VFS..D dnxhd                VC3/DNxHD\n V....D dpx                  DPX (Digital Picture Exchange) image\n VFS..D dvvideo              DV (Digital Video)\n VFS..D dxv                  Resolume DXV\n VF...D exr                  OpenEXR image\n V.S..D ffv1                 FFmpeg video codec #1\n VF...D ffvhuff              Huffyuv FFmpeg variant\n V....D fits                 Flexible Image Transport System\n V....D flashsv              Flash Screen Video\n V....D flashsv2             Flash Screen Video Version 2\n V..... flv                  FLV / Sorenson Spark / Sorenson H.263 (Flash Vi",
+      "err": ""
+    },
+    "private_mount_namespace": {
+      "code": 0,
+      "out": "",
+      "err": ""
+    },
+    "unprivileged_user_namespace": {
+      "code": 1,
+      "out": "",
+      "err": "unshare: unshare failed: Operation not permitted\n"
+    }
+  },
+  "host_files_changed": false,
+  "schema_compilers": [
+    "usr/lib/aarch64-linux-gnu/glib-2.0/glib-compile-schemas"
+  ],
+  "gsettings_schema_files": [
+    "org.gtk.Settings.EmojiChooser.gschema.xml",
+    "org.gtk.Settings.ColorChooser.gschema.xml",
+    "org.gtk.Settings.FileChooser.gschema.xml",
+    "org.gtk.Settings.Debug.gschema.xml"
+  ],
+  "free_bytes_opt": 1893720064
+}

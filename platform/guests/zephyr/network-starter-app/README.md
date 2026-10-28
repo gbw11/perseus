@@ -1,4 +1,4 @@
-# Network Starter 1.1.0 (development candidate)
+# Network Starter (development candidate)
 
 Diskless 1-vCPU / 16-MiB Xen guest, with Ethernet/IPv4/ARP/ICMP/DHCP and a
 reusable cooperative shutdown hook. The old Starter and G1 app are preserved.
@@ -7,6 +7,11 @@ PV console commands: net iface, net ping <IPv4>, xenova stats.
 The demo hook has no driving state or physical output and says so explicitly.
 xenova hook normal|reject|fail|timeout controls only this development hook.
 A shutdown failure is latched until a new execution; no output is rearmed.
+
+종료 감시 또는 netfront 초기화 실패는 필수 기반 실패다. 후속 exercise/Publisher를
+시작하지 않고 확보 자원을 제한 기한 안에서 정리한다. 선택 진단 기능의 실패는
+로컬 오류 기록을 남기는 저하 상태다. 소유권·부분 실패·종료 순서는
+[공통 runtime](../xen-runtime/README.md)을 따른다.
 
 The xenvm board has no entropy device. Zephyr's timer test RNG is explicitly
 limited to DHCP/ping identifiers and UDP source selection. It is not an

@@ -1,0 +1,27 @@
+{
+  "checks": {
+    "new_vehicle_titles": true,
+    "no_document_overflow": true,
+    "new_screen_relay_titles": true,
+    "continuous_receive_and_reconnect": true,
+    "auth": true,
+    "source_removed_no_stale_frame": true,
+    "encoders_produced_new_sequences": true,
+    "restored": true,
+    "processes_and_mounts_clean": true,
+    "stream_port_closed": true,
+    "staged_sources_verified": true
+  },
+  "all_passed": true,
+  "frames_received": 80,
+  "note": "Static waiting pages produce identical JPEG hashes; actual encoder sequences and multipart receives were verified. PC read timings are not end-to-end latency or formal FPS acceptance.",
+  "files": {
+    "board-vehicle-pages-20261028.json": "90cae6c0c527befbbc002e1e1d702f9fb2137865f5d61de7604ad07e090963a6",
+    "board-vehicle-relay-20261028.json": "58be92f35b581ae099b0c9b108cda2b7504472101d55f4aec9116b83291eeee1",
+    "board-vehicle-stage-20261028.json": "20c477031b28d8c398b1c52438d6bc68e8c472c03eba6a8949f75a1c1082b1de",
+    "graphics-resume-preflight-20261028.json": "3ae2fa4e06d36f464d9eb16a08a8b54866bafe8eb2bf10a255fbf8c1f7db50e8",
+    "human-confirmation.json": "f106003ef79641c221ee2824aeb512bd42f750ca4176d1a93543ff250d566da6",
+    "vehicle-monitor-1-20261028.jpg": "24c495542ebd062dfa6cebd3756b9c808fa23959f94425e2d10a7e61b36c6065",
+    "vehicle-monitor-2-20261028.jpg": "a8948aa457626fcdaad8ff823ec9a4ba3e89bfa3f1b02e2058aad3f06be0e691"
+  }
+}

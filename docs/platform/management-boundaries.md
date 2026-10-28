@@ -136,13 +136,29 @@ create/reboot나 강제 종료를 제출할 수는 없다. 관측 실패는 정�
 하위 Manager의 stop 수락은 구현돼 있다. 제품 HTTP는 VM별 mutex와 공유
 SerializedManager를 먼저 통과하며 pending details와 원 key의 전달도 연결돼 있지 않다.
 따라서 하위의 복구 중 stop 수락을 HTTP 종단 수락으로 해석하면 안 된다.
+하위는 독립 요청 객체의 stop 수락, 원 key의 read-only 작업 조회와 호출별 잔여 예산을
+제공한다. FastAPI·Spring·VM 관리 화면의 연결 위치와 수락 조건은
+[관리 요청 연동 요청서](management-integration-request.md)에 정리돼 있다. 요청서는
+담당자가 구현할 범위이며 현재 설치된 HTTP 기능을 뜻하지 않는다.
 
-Recovery Worker는 Xen/heartbeat 관측과 판단 큐까지 제공한다. 110초 attempt executor가
-큐를 소비해 recover_once를 호출하는 경로는 현재 미연결이다. 감시 주기·장애 판정 유예는
-복구 실행 timeout이 아니다. CPU 조회도 별도 하위 기능이며 제품 Vm 응답에 자동 포함되지 않는다.
-필요한 호출 지점과 수락 조건은 [제품 연동](cli-manager-spec.md#integration)에 있다.
+Recovery Worker는 현재 Watcher 판단을 기존 Recovery Engine에 연결해, 원 attempt를
+저장한 뒤 Manager의 recover_once를 실행한다. 기본 attempt 실행 예산은 110초다.
+응답 유실은 같은 journal/기한으로 확인하며 복구 완료는 새 Xen 실행 관측이라는 뜻이다.
+Worker의 손상 이력 차단과 사건 기록 실패의 해석은
+[상태 파일·사건 기록](../../platform/services/dom0-manager/README.md#worker-상태-파일과-사건-기록)을 따른다.
+선택한 공통 주행 프로필에서는 그 뒤 실행별 Bootstrap·신뢰 바인딩·Standby 준비를
+별도로 확인한다. [주행·재합류 구조](../../platform/apps/drive/README.md#실행-바인딩과-자동-복구)를 따른다.
+감시 주기·장애 판정 유예는 복구 실행 timeout이 아니다. CPU 조회와 제품 HTTP의
+복구 중 stop 수락은 별도 연결·수락 범위를 유지한다.
 
 ## 진단과 검증 근거
+
+미확정 작업은 [recovery-reconcile](cli-manager-spec.md#cmd-recovery-reconcile)로 원 attempt의
+실제 효과·호출 종료·신원·의도를 진단한다. 명시적 실행도 새 VM 제어 없이 입증한 사실만 같은
+journal에 종결한다. 구형 stopping에 종료 근거가 없거나 미확인 launch/실행자가 남으면 차단한다.
+Bootstrap의 uncertain은 [receipt 적용 확인](../../platform/guests/zephyr/telemetry/README.md#uncertain-receipt의-재주입-없는-적용-확인)으로
+재주입 없이 대조한다. 기록 삭제·phase 편집·새 신원/기한·자동 force는 수습 경로가 아니다.
+Worker의 원 결과 소비·Standby 재합류 및 Gateway Authority 복원은 각각 담당자 인수 대기다.
 
 증상을 조사할 때는 UUID·현재 host_boot_id·intent revision·operation/attempt·execution을
 함께 기록한다. 현재 domain과 원 journal을 구분하고 비밀 설정 전체를 출력하지 않는다.

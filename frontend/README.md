@@ -1,5 +1,15 @@
 # frontend
 
+## 252 통합 기준 (2026-10-26)
+
+실제 HDMI는 dom0의 `/display/monitor-1`(전체)·`/display/monitor-2`(선택 UUID 상세)이며 로컬 수집기·254 정책을 따른다. `VITE_TELEMETRY` 비움/`display`에서 기존 `/split`·`/detail/:app`은 이 경로로 이동한다. 이 모드는 Spring 주행 Provider나 로그인에 의존하지 않는다. 두 Zephyr는 VM1 주 구동·VM2 백업이며 주행 모드와 구별한다. VM3는 Debian 인터랙션이고 인식은 Jetson 담당이다.
+
+아래 `/split`·`/detail`·`/sim` 설명은 **명시적 앱 미리보기 모드**(`console`/`scenario`/`live`/`legacy-live`)에 해당한다. 기본을 console mock으로 가정하지 않는다. 외부 Docker screens는 Spring 앱 미리보기를 명시적으로 유지한다. 앱 ID autonomous/manual은 VM의 주·백업 역할과 동의어가 아니다. 실제 HDMI 캡처와 외부 앱 미리보기를 같은 출력 증거로 취급하지 않는다.
+
+관리 콘솔은 `VITE_VM_ROLE_BINDINGS` JSON에 합의한 UUID 세 개를 설정해야 주·백업 역할을 표시한다. 미설정 시 역할 미확인/VM 이름을 사용한다. 값은 빌드 시 반영하며 Docker build arg/Compose build args를 지원한다. 기존 명령·앱 ID는 변경하지 않는다.
+
+실제/미연결 경계는 [표시 경로 계약](../docs/contracts/display-route-v1.md), [카메라 계약](../docs/contracts/camera-stream-v1.md), [통합 검증 기록](../docs/verification/display-252-integration.md)을 따른다.
+
 관리 콘솔과 모니터 화면(VM 앱 화면)이 같은 디자인 시스템을 쓰는 npm workspaces 입니다.
 
 ```text
@@ -44,21 +54,23 @@ API·WebSocket 프록시와 운영 도메인은 배포 Nginx 설정에서 연결
 
 ## 관리 콘솔
 
-화면은 [화면 정의서](../docs/design/screen-spec.md) W-01~W-08 의 초안입니다 (Stitch 시안 색·배치). 위쪽 메뉴 아래 **주행 모드 띠**가 모든 화면에 고정됩니다.
+관리자 웹은 **VM Dashboard · Vision · VM Control · Simulator** 네 영역으로 구성합니다. 주행 상태는 전역 띠로 반복하지 않고 Dashboard Overview와 Simulator 안에서 맥락에 맞게 보여 줍니다.
 
-| 경로                      | 화면                                | 데이터                                 | 이어받을 작업            |
-| ------------------------- | ----------------------------------- | -------------------------------------- | ------------------------ |
-| `/login`                  | W-01 로그인                         | auth                                   | -53                      |
-| `/`                       | W-02 대시보드 (주행 통합)           | `/ws/v1/drive/state`, vms, events      | 공병우 (정의서 Q2)       |
-| `/vms`, `/vms/new`        | W-03 목록 · W-05 생성               | vms, templates                         | -55 · -159               |
-| `/vms/:vmId`              | W-04 상세 (개요·차트·프로세스·콘솔) | vms, metrics, processes, 콘솔 WS-03    | 정수환                   |
-| `/resources`              | W-06 자원 제어                      | 없음 (-107) — 화면 안 미리보기         | 정수환 -113·-114         |
-| `/demo`                   | W-07 시연 제어                      | drive state·input. 배치·격리·재개 없음 | -129·-135, 재개 API 계약 |
-| `/console`                | 웹 콘솔 (UI-05·MO-04)               | WS `/ws/v1/vms/{id}/console`           | platform -248            |
-| `/events`                 | W-08 이벤트 타임라인                | events (3초 재조회)                    | -160                     |
-| `/screens`, `/components` | 모니터 바로가기, 컴포넌트           | —                                      |                          |
+| 경로                                                 | 화면                              | 데이터                              |
+| ---------------------------------------------------- | --------------------------------- | ----------------------------------- |
+| `/login`                                             | 로그인                            | auth                                |
+| `/dashboard/overview`                                | VM 3대 통합 현황                  | drive state, vms, events            |
+| `/dashboard/cpu`, `/dashboard/memory`                | CPU·Memory 자원 현황              | vms, metrics                        |
+| `/dashboard/console`                                 | VM별 웹 콘솔                      | WS `/ws/v1/vms/{id}/console`        |
+| `/dashboard/vms/:vmId`                               | Overview에서 진입하는 VM 상세     | vms, metrics, processes, 콘솔 WS-03 |
+| `/vision`                                            | Jetson 카메라·인지 현황           | 후속 이슈 -306                      |
+| `/control`, `/control/vms/new`, `/control/vms/:vmId` | VM 목록·생성·생명주기 제어        | vms, templates                      |
+| `/simulator`                                         | 실차 전 시뮬레이터·장애/복구 시연 | drive state, input, display route   |
+| `/events`, `/screens`, `/components`                 | 기존 보조·개발 화면               | events 또는 —                       |
 
-VM 은 "VM 1·2·3" 이 아니라 역할 이름(자율주행·수동주행·네비게이션)으로 부릅니다 (`src/domain/roles.ts`). 이벤트 분류·문구는 `src/domain/events.ts`.
+기존 `/vms`, `/resources`, `/demo`, `/console` 주소는 북마크 호환을 위해 새 주소로 이동시킵니다.
+
+VM 역할은 확정된 UUID 매핑으로 VM1 주 구동·VM2 백업·VM3 Debian 인터랙션을 구분합니다 (`src/domain/vmBindings.ts`, `src/domain/roles.ts`). 앱 ID나 이름만으로 역할을 추측하지 않습니다. 이벤트 분류·문구는 `src/domain/events.ts`.
 
 ### 웹 콘솔 (UI-05 / MO-04)
 
@@ -70,7 +82,7 @@ VM 상세 화면의 **웹 콘솔 → 연결**에서 실제 게스트 터미널�
 `@xterm/xterm`과 `@xterm/addon-fit`을 사용하며, Spring이 내부 dom0 서비스 토큰을 대신 처리합니다.
 프론트 설정에 서비스 토큰을 넣지 않습니다. 연결 경로·메시지는
 [웹 터미널 계약](../docs/contracts/browser-console-v1.md)에 정의합니다.
-상세 화면 카드 아래와 위쪽 메뉴 `/console` 두 곳에서 열 수 있습니다.
+상세 화면 카드 아래와 VM Dashboard의 `/dashboard/console` 탭에서 열 수 있습니다.
 
 API 타입(`src/api/types.ts`)은 팀 문서를 그대로 옮겼습니다. 문서가 바뀌면 타입도 같이 고칩니다.
 
@@ -99,7 +111,7 @@ VITE_MOCK=true npm run dev:console    # 또는 .env.local 에 VITE_MOCK=true
 | `/detail/autonomous` · `manual` · `interaction` | 모니터 2 — 관리자가 고른 1개 상세 |
 
 - **모니터는 보여 주기만 합니다** (화면 정의서 §1). 버튼·키 입력이 없고, 강제 종료·부하·재개·수동 키는 모두 관리 콘솔 **시연 제어**에서 합니다. 아래 띠는 데이터 출처·연결 상태와 화면 링크뿐이고 키오스크(`?kiosk=1`)에서는 숨깁니다.
-- 데이터 출처 (`VITE_TELEMETRY`): 비움 = 관리 콘솔 mock 시나리오를 따라감 · `live` = 백엔드 중계(`/ws/v1/drive/state`, `/ws/v1/events`, 시나리오 D2) · `scenario` = 이 앱 혼자 도는 가짜 시나리오.
+- 데이터 출처 (`VITE_TELEMETRY`): 비움/`display` = 실제 HDMI 로컬 정책 · `console` = 관리 콘솔 mock 시나리오 · `live`/`legacy-live` = 기존 Spring 앱 미리보기 · `scenario` = 합성 시나리오.
 - 복구 서비스의 `recovery.started` 를 받으면 그 앱 칸은 명령이 다시 신선해질 때까지 '복구 중'(노랑)으로 표시합니다.
 - 색·배치는 Stitch 시안(a_1·b_vm_1·interaction 계열)을 따릅니다. 1920×1080 기준.
 
@@ -108,14 +120,14 @@ VITE_MOCK=true npm run dev:console    # 또는 .env.local 에 VITE_MOCK=true
 콘솔 mock 시나리오는 브라우저 채널(BroadcastChannel)로 상태를 내보내므로 두 화면이 **같은 origin** 이어야 합니다. 콘솔 개발 서버가 `/monitor/` 를 모니터 개발 서버로 넘깁니다.
 
 ```bash
-cd apps/vm-screens    && VITE_BASE=/monitor/ npx vite --port 5174       # Git Bash 는 앞에 MSYS_NO_PATHCONV=1
+cd apps/vm-screens    && VITE_TELEMETRY=console VITE_BASE=/monitor/ npx vite --port 5174       # Git Bash 는 앞에 MSYS_NO_PATHCONV=1
 cd apps/admin-console && VITE_MOCK=true npx vite --port 5173            # VITE_MONITOR_ORIGIN 기본 http://localhost:5174
 ```
 
-- 콘솔: `http://localhost:5173/demo` (admin / 1234) — 여기서 [강제 종료] → 인계 → 복구 → AUTO_READY → [자율주행 재개]
-- 콘솔: `http://localhost:5173/demo` 의 세 VM 카드마다 [강제 종료]. 재개는 바로 바뀌지 않고 3·2·1 을 센 뒤 AUTO (MQTT 계약 v1.2 §6)
+- 콘솔: `http://localhost:5173/simulator` (admin / 1234) — 여기서 [강제 종료] → 인계 → 복구 → AUTO_READY → [자율주행 재개]
+- 콘솔: `http://localhost:5173/simulator` 의 세 VM 카드마다 [강제 종료]. 재개는 바로 바뀌지 않고 3·2·1 을 센 뒤 AUTO (MQTT 계약 v1.2 §6)
 - 카메라: 세 번째 VM 이 젯슨 카메라 영상을 받아 AI 로 장애물을 감지하고, 감지 박스를 그린 영상을 낸다 — 대시보드 세 번째 VM 카드와 모니터 그 칸·상세에 보인다. 실제는 `/camera/stream.mjpg`(dom0 웹 프록시 → 세 번째 VM, 카메라 계약 `docs/contracts/camera-stream-v1.md`, `VITE_CAMERA_URL` 로 바꿀 수 있음), mock 은 차량 움직임을 따라가는 시험 영상. 감지 결과는 화면용이고 주행 판단에 쓰지 않는다 — 이 VM 을 강제 종료하면 영상만 멈추고 주행은 그대로다
-- 웹 콘솔: 위쪽 메뉴 [웹 콘솔] 에서 VM 을 골라 [연결]. 웹 터미널 계약 `browser-console-v1` 그대로 — 자동 접속·재접속 없음, [연결 해제] 로 점유를 푼다(platform -248). mock 에서는 가짜 셸(Debian: `help`·`uname -a`·`ps` 등, Zephyr: 부팅 로그만)
+- 웹 콘솔: VM Dashboard의 [Console] 탭에서 VM 을 골라 [연결]. 웹 터미널 계약 `browser-console-v1` 그대로 — 자동 접속·재접속 없음, [연결 해제] 로 점유를 푼다(platform -248). mock 에서는 가짜 셸(Debian: `help`·`uname -a`·`ps` 등, Zephyr: 부팅 로그만)
 - 모니터: `http://localhost:5173/monitor/split?kiosk=1`, 상세는 `/monitor/detail/<앱>`. 실제로는 dom0 표시 서비스가 콘솔 [화면 배치] 에 따라 키오스크 주소를 바꾼다(화면 배치 계약 `docs/contracts/display-route-v1.md`). mock 에서는 `?display=display-0` 으로 열면 모니터가 표시 서비스 대신 콘솔 mock 배치를 따라간다. 콘솔 탭이 열려 있는 동안 따라갑니다.
 
 ## 규칙

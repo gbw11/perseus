@@ -22,7 +22,7 @@ const TABS: [Tab, string][] = [
 
 /**
  * W-04 VM 상세 (화면 정의서 W-04, UI-04·UI-05) — 초안. 화면 완성은 정수환 담당 작업이 이어받는다.
- * Zephyr 는 에이전트가 없어 차트·프로세스 대신 안내를 보인다. 웹 콘솔은 카드 아래(-248)와 위쪽 메뉴 [웹 콘솔](/console) 둘 다.
+ * Zephyr 는 에이전트가 없어 차트·프로세스 대신 안내를 보인다. 웹 콘솔은 카드 아래와 Dashboard의 Console 탭에 있다.
  * 참고 시안: stitch_untitled_project/ui_04_vm, ui_05.
  */
 export function VmDetailPage() {
@@ -39,7 +39,7 @@ export function VmDetailPage() {
       <section className={styles.pageHead} style={{ borderTop: `3px solid ${color}` }}>
         <div>
           <div className={styles.eyebrow}>
-            <Link to="/vms">VM 목록</Link> / {vm.data?.name ?? vmId}
+            <Link to="/control">VM 목록</Link> / {vm.data?.name ?? vmId}
           </div>
           <h1 style={{ color }}>{role?.title ?? vm.data?.name ?? 'VM 상세'}</h1>
         </div>

@@ -6,6 +6,24 @@ menuconfig XENOVA_DIAGNOSTICS
 	  No MQTT, automatic thread scans, fatal-handler override or VM control.
 
 if XENOVA_DIAGNOSTICS
+config XENOVA_DIAGNOSTICS_CPU
+	bool "Single-vCPU guest runtime windows and thread lifetimes"
+	depends on !SMP
+	select THREAD_RUNTIME_STATS
+	select THREAD_MONITOR
+	select THREAD_NAME
+	select TRACING
+	default y if BOARD_XENVM || BOARD_NATIVE_SIM
+	help
+	  Frozen Zephyr usage API, 200 ms cached collection, no stack scan.
+	  Finite-width accounting gaps are invalidated rather than repaired.
+
+config XENOVA_DIAGNOSTICS_POOLS
+	bool "Fixed network data pool payload occupancy"
+	depends on NETWORKING && NET_BUF_FIXED_DATA_SIZE
+	select NET_BUF_POOL_USAGE
+	default y
+
 config XENOVA_DIAGNOSTICS_TIMING
 	bool "64-bit cycle clock and periodic work measurements"
 	depends on TIMER_HAS_64BIT_CYCLE_COUNTER
@@ -38,3 +56,7 @@ config XENOVA_DIAGNOSTICS_HEAP
 	select SYS_HEAP_RUNTIME_STATS
 	default y
 endif
+
+choice TRACING_FORMAT_CHOICE
+	default TRACING_USER if XENOVA_DIAGNOSTICS_CPU
+endchoice

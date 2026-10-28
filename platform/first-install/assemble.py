@@ -325,10 +325,11 @@ def platform_root_ok(root):
                 **{'usr/lib/xenova/'+n:FILES/n for n in ('xenova_resources.py','xenova_zephyr_transition.py','xenova_zephyr_control.py')},
                 'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                 'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
-    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
+    for name in ('xenova_boot_status.py','xenova_boot_progress.py','xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
                  'xenova_cpu.py','xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
         expected['usr/lib/xenova/'+name] = FILES/name
     expected['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
+    expected['usr/sbin/xenova-boot-status'] = FILES/'xenova-boot-status'
     expected['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
     expected['etc/modprobe.d/xenova-wifi.conf'] = FILES/'xenova-wifi-modprobe.conf'
     expected['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
@@ -338,7 +339,7 @@ def platform_root_ok(root):
     expected['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'platform/scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
         expected['usr/lib/xenova/' + name] = ROOT / 'platform/guests/common' / name
-    units = ['xenova-cpu-prepare.service', 'xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
+    units = ['xenova-boot-status.service', 'xenova-cpu-prepare.service', 'xenova-data-prepare.service', 'xenova-first-boot.service', 'srv-xenova.mount',
              'xenova-vms.service', 'xenova-vm-shutdown.service', 'xenova-xen-ready.service', 'xenova-host-admission.service']
     expected.update({'usr/lib/systemd/system/' + u: FILES / u for u in units})
     expected.update(deployment_payloads.installed_sources(root))
@@ -412,6 +413,33 @@ def platform_root_ok(root):
         link = root / 'etc/systemd/system/multi-user.target.wants' / unit
         if not link.is_symlink() or path('etc/systemd/system/multi-user.target.wants/' + unit).read_bytes() != (FILES / unit).read_bytes():
             raise ValueError('required platform unit not enabled: ' + unit)
+    indicator = 'etc/systemd/system/sysinit.target.wants/xenova-boot-status.service'
+    if not (root/indicator).is_symlink() or path(indicator).read_bytes() != (FILES/'xenova-boot-status.service').read_bytes():
+        raise ValueError('boot display unit not enabled under sysinit.target')
+    # Content validation only: partition layout, seed identity and data initialization are unchanged.
+    tailscale = ROOT/'platform/yocto/meta-xenova/recipes-connectivity/tailscale/files'
+    for relative, source in {
+        'usr/sbin/xenova-tailscale-state': tailscale/'xenova-tailscale-state',
+        'usr/lib/systemd/system/tailscaled.service.d/20-xenova-persistence.conf': tailscale/'20-xenova-persistence.conf',
+    }.items():
+        expected[relative] = source
+        if not path(relative).is_file() or path(relative).read_bytes() != source.read_bytes():
+            raise ValueError('Tailscale persistence source/installed mismatch: '+relative)
+    for relative in ('usr/bin/tailscale', 'usr/sbin/tailscaled', 'usr/sbin/xenova-tailscale-state'):
+        if not path(relative).is_file() or not path(relative).stat().st_mode & 0o111:
+            raise ValueError('required Tailscale executable missing: '+relative)
+    service = 'usr/lib/systemd/system/tailscaled.service'
+    link = root/'etc/systemd/system/multi-user.target.wants/tailscaled.service'
+    if not path(service).is_file() or not link.is_symlink() or path(str(link.relative_to(root))).read_bytes() != path(service).read_bytes():
+        raise ValueError('Tailscale daemon unit not enabled')
+    for release in releases:
+        for relative in ('kernel/drivers/net/tun.ko', 'kernel/net/ipv6/ipv6.ko'):
+            if not any((release/(relative+suffix)).is_file() for suffix in ('', '.xz', '.gz', '.zst')):
+                raise ValueError('required Tailscale kernel module missing: '+relative)
+    for relative in ('srv/xenova/tailscale','var/lib/tailscale/tailscaled.state'):
+        candidate = inside(root, relative, create_parents=False, follow_final=False)
+        if candidate.is_symlink() or candidate.exists():
+            raise ValueError('common image must not contain Tailscale runtime state')
     return {relative: sha(path(relative)) for relative in expected}
 
 

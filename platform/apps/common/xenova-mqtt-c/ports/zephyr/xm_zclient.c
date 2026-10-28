@@ -24,6 +24,7 @@ static void io_budget(struct xm_zclient *c)
 {
 #if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
 	c->socket_io.deadline_ms = k_uptime_get() + CONFIG_XENOVA_MQTT_IO_MS;
+	if (c->publish_deadline_ms) { c->socket_io.deadline_ms = MIN(c->socket_io.deadline_ms, c->publish_deadline_ms); }
 #else
 	ARG_UNUSED(c);
 #endif
@@ -262,6 +263,9 @@ int xm_zclient_subscribe(struct xm_zclient *c, const char *filter, uint8_t qos)
 
 int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 {
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	if (c->socket_io.close_error) { return c->socket_io.close_error; }
+#endif
 	int64_t now = k_uptime_get();
 
 	if (!c->socket_open) {
@@ -270,6 +274,20 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 			io_budget(c);
 			int rc = mqtt_connect(&c->mqtt); /* TCP 연결 + CONNECT. CONNACK 은 mqtt_input 에서 */
 
+			if (rc == 0) {
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+				int fd = c->socket_io.fd;
+#else
+				int fd = c->mqtt.transport.tcp.sock;
+#endif
+				/* Every fresh v1 socket, including reconnects, disables Nagle
+				 * before subscriptions or application messages can be sent. */
+				const int enabled = 1;
+				if (zsock_setsockopt(fd, NET_IPPROTO_TCP, ZSOCK_TCP_NODELAY,
+						     &enabled, sizeof(enabled)) < 0) {
+					rc = -errno;
+				}
+			}
 			if (rc == 0) {
 				c->socket_open = true;
 				c->retry_at_ms = now + CONNACK_WAIT_MS;
@@ -372,7 +390,23 @@ int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type
 	if (rc == 0) {
 		pub->seq++;
 		c->published++;
+	} else {
+		/* A partial frame cannot be overwritten by the next candidate. Abort
+		 * this byte stream; never retry this message on the next connection. */
+		c->last_io_rc = rc;
+		xm_zclient_close(c);
+		schedule_retry(c);
 	}
+	return rc;
+}
+
+int xm_zclient_publish_until(struct xm_zclient *c,const char *topic,const char *type,
+			    const char *json,int64_t end)
+{
+	if (end <= k_uptime_get()) { return -ETIMEDOUT; }
+	c->publish_deadline_ms = end;
+	int rc = xm_zclient_publish(c,topic,type,json);
+	c->publish_deadline_ms = 0;
 	return rc;
 }
 
@@ -382,7 +416,7 @@ void xm_zclient_close(struct xm_zclient *c)
 	(void)mqtt_abort(&c->mqtt);
 #if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
 	/* Connect can fail before the MQTT library takes socket ownership. */
-	if (c->socket_io.fd >= 0) { (void)zsock_close(c->socket_io.fd); c->socket_io.fd = -1; }
+	(void)xt_socket_close(&c->socket_io);
 #endif
 	c->connected = false;
 	c->socket_open = false;

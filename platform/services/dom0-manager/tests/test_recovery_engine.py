@@ -292,17 +292,32 @@ def test_explicit_graceful_failure_escalates_the_next_attempt_to_force_only_when
     assert w.platform.recover_calls()[1][1]["mode"] == "force-restart"
 
 
-def test_unexpected_exception_is_final_without_force_escalation(tmp_path):
+def test_lost_adapter_result_rechecks_original_journal_without_force_escalation(tmp_path):
     w = make(tmp_path)
     w.platform.results = [RuntimeError("adapter bug")]
     w.engine.on_judgment(judgment())
     w.tick()
     record = w.record()
-    assert record.status == RecoveryStatus.FAILED and record.final and record.graceful_failed is False
-    assert w.events[-1]["error"]["code"] == "INTERNAL_ERROR"
-    w.advance(100)
+    assert record.status == RecoveryStatus.EXECUTING and record.replay and record.graceful_failed is False
+    spec=dict(record.request)
+    w.platform.journal[spec['recovery_attempt_id']]={'phase':'completed','result':{'execution_id':'confirmed-new'}}
+    w.advance(5)
     w.tick()
-    assert len(w.platform.recover_calls()) == 1
+    assert len(w.platform.recover_calls()) == 1 and record.status==RecoveryStatus.COMPLETED
+    assert record.request==spec and record.execution_id=='confirmed-new'
+
+
+def test_stop_during_lost_response_is_not_false_cancellation_or_new_attempt(tmp_path):
+    w=make(tmp_path);w.platform.results=[DriverTimeout('lost')]
+    w.engine.on_judgment(judgment());w.tick();record=w.record();spec=dict(record.request)
+    w.watcher.set(VM,HealthState.STOPPED,desired='stopped')
+    w.platform.attempt=lambda _:(_ for _ in ()).throw(DriverTimeout('journal unavailable'))
+    w.advance(5);w.tick()
+    assert record.cancel_requested and record.status==RecoveryStatus.EXECUTING
+    w.advance(260);w.tick()
+    assert record.status==RecoveryStatus.FAILED and record.final
+    assert record.last_error['code']=='RECONCILE_REQUIRED' and not record.graceful_failed
+    assert record.request==spec and len(w.platform.recover_calls())==1
 
 
 def test_target_changed_waits_for_the_watcher_and_times_out_into_a_new_attempt(tmp_path):
@@ -788,7 +803,7 @@ def test_store_invariant_violation_marks_history_lost_and_blocks_execution(tmp_p
     assert store.load() == {} and store.history_lost and path.with_suffix(".json.corrupt").exists()
 
 
-def test_corrupt_store_blocks_execution_but_keeps_judging(tmp_path):
+def test_corrupt_store_blocks_execution_but_keeps_judging(tmp_path, caplog):
     path = tmp_path / "recoveries.json"
     path.write_text("{broken", encoding="utf-8")
     w = make(tmp_path, store=RecoveryStore(path))
@@ -797,6 +812,7 @@ def test_corrupt_store_blocks_execution_but_keeps_judging(tmp_path):
     w.tick()
     assert w.platform.calls == [] and w.record().status == RecoveryStatus.DETECTED
     assert json.loads(path.read_text())["history_lost"] is True
+    assert 'remove ' not in caplog.text and 'until the file is removed' not in caplog.text
 
 
 def test_policy_none_records_but_never_calls_platform(tmp_path):

@@ -8,6 +8,7 @@
 ## 목차
 
 - [부팅의 세 경계](#부팅의-세-경계)
+- [부팅 진행·지연·실패 표시](#부팅-진행지연실패-표시)
 - [플랫폼 서비스와 준비 의존성](#플랫폼-서비스와-준비-의존성)
 - [최초 등록과 매 부팅 준비](#최초-등록과-매-부팅-준비)
 - [자동 시작과 부분 실패](#자동-시작과-부분-실패)
@@ -26,6 +27,115 @@
 게스트 장애가 dom0의 진단·관리 경로를 불필요하게 막지 않도록, 모든 VM의 앱 준비를
 부팅 서비스의 선행 조건으로 만들지 않는다. Wi-Fi·외부망/NTP 성공도 VM 부팅의 조건이 아니다.
 
+## 부팅 진행·지연·실패 표시
+
+화면을 사용할 수 있게 된 뒤 `xenova-boot-status.service`가 systemd와 현재 부팅의
+보조 진행 기록을 읽어 로그인 전 안내문을 갱신한다. VM을 시작·정지하거나 준비 여부를
+판정하는 서비스가 아니다. 표시기 없이도 기존 부팅과 로그인이 진행된다. 커널·PID1 정지나 표시기 실행 전 문제를
+이 서비스가 관측할 수 있다고 가정하지 않는다.
+
+### 무엇을 표시하는가
+
+| 표시 대상 | 실제 출처와 완료 의미 | 정보가 없을 때 |
+|---|---|---|
+| 저장소 준비·데이터 mount | 해당 unit의 실행 상태·Result·exit status. mount 완료와 저장소 준비 명령 완료를 구분 | 대기·선행 실패·관측 불가를 구분 |
+| 최초 등록·기존 등록 검증 | first-boot의 실제 identity plan 판정 지점에서 게시한 모드와 unit 결과 | verification/resume으로 표시하며 최초 설치 여부를 추측하지 않음 |
+| Xen 관리 기능 | `xenova-xen-ready.service`의 실제 check-xen 결과 | unit 실패 이유와 journal 조회 안내 |
+| CPU 준비 | 같은 unit invocation이 게시한 정책 미설정 호환 모드 또는 준비 검증 완료 | service active만으로 현재 affinity 일치·전용성을 주장하지 않음 |
+| 내부망 | bridge와 DHCP 각각의 unit 상태·필수 의존성. guest 연결을 대신 검증하지 않음 | 선행 실패·관측 불가·미설치를 구분 |
+| VM 자동 시작 | 실제 정책 선택, 네트워크 준비, 공통 start, 필수 결과 저장 직후의 보조 기록 | 선택 전 분모 미확정. 중단된 진행은 결과 미확정 |
+| host admission·관리 서비스 | 해당 unit 실행 상태. API·외부 서비스 기능 검사는 아님 | 미설치·미시작·조회 실패를 구분 |
+
+Wi-Fi·NTP·MQTT·앱 신호는 추가 부팅 조건으로 만들지 않는다. **VM 실행 검증 완료,
+guest OS 준비, 앱 준비는 다르다.** 이 표시기는 OS 준비를 관측하지 않고 앱 readiness
+소비 경로도 연결하지 않는다. 화면에 각각 `unobserved`, `unconnected`로 명시한다.
+앱 readiness를 연결할 때는 별도 소비자가 검증한 실행 신원과 근거를 제공해야 한다.
+
+`complete`는 그 행에 정의된 사실의 완료다. `progress`는 실제 unit 또는 코드 단계의 진행,
+`waiting`은 아직 시작되지 않은 상태다. 확인된 필수 선행 unit 실패는 `deferred`,
+사용자 부팅 정책에 따른 VM 제외는 `excluded`다. 실행 결과를 확인하지 못하면
+`uncertain` 또는 `unknown`이며 성공·부재로 바꾸지 않는다.
+
+`delayed`는 unit 시작 뒤 **20초**가 지난 표시 주의 상태다. 실행 timeout이나 고장 판정이
+아니며, 단조 시계의 실제 경과시간과 마지막 보조 기록 변경 시각을 보여준다.
+기록 변화가 없다는 사실만으로 실제 작업이 멈췄다고 단정하지 않는다. 관측된 실패는
+같은 부팅의 제한된 이력에 남겨, 재시도 성공과 과거 실패를 구분한다.
+
+### HDMI·로그인·UART의 관계
+
+dom0 Linux의 `console=hvc0`는 Xen PV 콘솔 경로이며 Xen의 `console=dtuart` 인자와
+별개다. 기본 systemd의 오류 표시는 `/dev/console` 쪽이고, 이것만으로 HDMI
+진행 화면이 생기지는 않는다. dom0의 부팅 인자 `loglevel=4`는 우선순위가 4보다 작은
+`KERN_ERR(3)`까지의 초기 콘솔 필터다. 이후 서비스가 바꾼 현재 필터는
+`cat /proc/sys/kernel/printk`로 확인한다. Xen이 UART에 직접 쓰는 경고에는 이 필터가
+적용되지 않는다. 전체 커널·서비스 기록은 기존 journal에 남는다.
+정상 U-Boot 경로는 `/chosen` 전체를 출력하지 않는다. `xenova_debug=1`일 때만
+Xen·dom0의 bootargs 두 속성을 출력하며 firmware 난수 seed는 덤프하지 않는다.
+
+HDMI의 텍스트 VT는 기존 `getty@tty1`과 agetty가 소유한다. 표시기는 VT를 직접 열거나
+전환하지 않고 `/run/issue.d/90-xenova.issue`와 agetty의 reload trigger만 갱신한다.
+agetty는 입력 전의 로그인 안내문만 다시 읽고, 사용자 이름의 첫 문자를 읽으면 갱신을
+멈춘다. 암호 입력·로그인 셸에 별도 출력을 주입하지 않는다. 키 입력을 기다리는
+새 부팅 장벽도 없다. SSH 명령 출력과 셸 초기화는 변경하지 않는다.
+
+초기 VT의 한글 폰트 지원을 전제하지 않으므로 로그인 전 안내는 ASCII다. 상세 명령은
+UTF-8 표시 이름을 보존한다. 한글 렌더러가 없는 VT에서 실제 한글 모양을 그리는
+기능을 추가한 것은 아니다. hvc0의 기존 agetty에도 같은 평문 안내가 표시될 수 있다.
+표시기는 ANSI 재출력·강제 VT 전환·PAM·계정·mount namespace를 변경하지 않는다.
+
+별도로 설치한 kmscon이나 그래픽 키오스크는 자신의 화면을 계속 소유한다. 이 표시기는
+그 화면을 덮거나 전환하지 않는다. 해당 렌더러에서 issue를 읽지 않으면 자동 안내가
+보이지 않으며, 기존 로그인·SSH에서 아래 명령으로 조회한다. 실제 HDMI 인계 수락은
+설치된 renderer·getty 구성과 물리 화면을 함께 확인해야 한다.
+
+고정 getty는 sysinit 뒤에 시작한다. 따라서 그 이전 저장소 준비가 오래 걸리면 보조
+진행 기록은 쌓여도 HDMI에는 getty 시작 후에 표시된다. 이 구간의 실시간 HDMI 진행은
+현재 지원 범위가 아니며 hvc0의 기본 오류 경로를 사용한다. 표시기를 일찍 실행하는 것과
+화면 renderer가 일찍 준비되는 것은 별개다.
+
+`systemd.show_status=true`는 간결한 unit 시작·종료 상태 전체를, `error`는 실패 상태를
+표시한다. `auto`는 평소 조용히 있다가 상당한 부팅 지연이 생기면 표시를 켠다.
+현재 기본값은 `error`를 유지하며 이 선택은 journal 수집 수준과 다르다.
+의미의 근거는 [systemd 문서](https://www.freedesktop.org/software/systemd/man/latest/systemd.html#systemd.show_status)와
+[agetty 구현](https://github.com/util-linux/util-linux/blob/v2.41.5/term-utils/agetty.c)의
+입력 전 issue 갱신 경계다.
+
+### 자세히 확인하기
+
+```bash
+xenova-boot-status
+xenova-boot-status --details
+xenova-boot-status --json
+journalctl -b -u xenova-vms.service --no-pager -n 60
+```
+
+기본 출력은 완료된 서비스를 한 줄로 묶고 진행 중인 실제 대상만 보여준다. 선택 전의
+대상 수는 `selection unknown`으로 남기며 실패·지연·미확정은 생략하지 않는다.
+`--details`는 원 단계·판정 근거·unit·전체 VM UUID와 journal 조회 명령을 보여준다.
+요약의 `prepared for this boot`는 해당 부팅의 CPU 준비 기록을 확인했다는 뜻이며,
+현재 affinity를 새로 조회한 결과는 `xenova-vm cpu-layout --json`으로 확인한다.
+
+명령은 현재 unit 상태를 한 번 읽는다. 표시 파일을 수정하거나 Manager·Xen 전체 조회,
+공통 실행 잠금, VM 제어를 수행하지 않는다. 예산·필드·종료 코드의 정식 정의는
+[명령 명세](cli-manager-spec.md#cmd-boot-status)에 있다.
+
+보조 파일은 host_boot_id·unit invocation ID·batch ID로 구분한다. 이전 boot나 이전
+unit 실행의 성공을 현재 것으로 사용하지 않는다. `/run/xenova/boot-progress/`는
+진행 사실, `boot-display.json`은 표시기가 본 요약과 최대 16개 실패 이력이다.
+둘 다 관리 원장이나 영구 보관소가 아니다. 진행 게시 실패는 기존 필수 journal·결과
+저장·JSON stdout을 바꾸지 않는다. 원인 문자열 전체나 인증 설정은 화면에 싣지 않는다.
+
+표시 서비스는 5초 간격으로 최대 600초 동안 관측하고, 상태 변화에 안내문을 갱신한다.
+지연의 경과시간만 바뀌면 최대 30초 간격으로 갱신한다. 종료 뒤에도 마지막 안내는
+남지만 현재 상태의 보장이 아니므로 상세 명령으로 다시 읽는다. 실패 요약을 남기기
+위해 로그인이나 정상 VM을 막지 않는다. 표시용 데이터가 불완전하면 그 한계를 표시한다.
+
+표시만 중지하려면 `systemctl disable --now xenova-boot-status.service`를 사용한다.
+기존 VM·부팅 unit·getty에는 중지 의존성이 없다. 안내 파일까지 없애려면 표시기를
+중지한 뒤 **표시기 소유 파일** `/run/issue.d/90-xenova.issue`만 제거하고
+`agetty --reload`를 실행한다. `/etc/issue`나 기존 로그인 설정은 건드리지 않는다.
+
+
 ## 플랫폼 서비스와 준비 의존성
 
 | 서비스·자원 | 역할과 시작 조건 |
@@ -38,6 +148,7 @@
 | `xenova-vm-shutdown.service` | backend/toolstack·저장소가 남아 있는 동안 guest를 정리할 독립 종료 guard |
 | `xenova-vms.service` | 등록 VM들의 autostart 판정과 시작을 한 batch로 실행 |
 | `xenova-host-admission.service` | autostart 뒤 이번 host의 admission barrier 초기화. 종료 시 새 시작·복구 차단 |
+| `tailscaled.service` | 검증된 `/srv/xenova`가 마운트된 뒤 원격 관리 데몬 시작. Tailnet 인증·인터넷 연결은 VM 시작 조건이 아님 |
 
 unit의 `After/Before`는 순서를 지정하고 `Requires/Wants`는 함께 시작할 의존성을
 지정한다. ordering만으로 준비 성공을 보장하지 않는다. vms는 저장소·first-boot·Xen ready·
@@ -48,6 +159,33 @@ CPU 정책이 활성화되면 모든 수동/자동 start·reboot·recover_once�
 CPU 준비 서비스에는 VM으로 중지 전파를 일으키는 PartOf/BindsTo나 ExecStop이 없다.
 재시작이 실행 중 VM을 종료하거나 affinity를 초기화하지 않는다. 네트워크가 필요 없는
 게스트와 진단을 외부 네트워크 준비 뒤로 일괄 직렬화하지 않는다.
+
+### Tailscale의 저장소·부팅 경계
+
+Tailscale은 외부 원격 관리 경로다. `tailscaled`의 `RequiresMountsFor`·`BindsTo`·`After`는
+`srv-xenova.mount`에만 연결하며, 기존 VM·내부 bridge/DHCP·admission unit은 Tailscale을
+요구하지 않는다. `network-online.target`이나 Tailnet 로그인 완료를 기다리지 않는다.
+데이터 마운트가 중지될 때 데몬을 먼저 중지하되 기존 guest 종료 순서는 유지한다.
+
+데몬의 `--statedir`와 `--state`는 `/srv/xenova/tailscale/`을 사용한다. 시작 전 검사에서
+실제 writable ext4 mount의 장치 번호가 기존 data-prepare의 `/run/xenova/data-device`와
+같은지 확인한다. 마운트 실패·다른 장치·심볼릭 링크·중단된 복원이 있으면 시작을 거절하며
+rootfs에 대체 인증 상태를 만들지 않는다. 디렉터리는 root 0700, state 파일은 0600이다.
+기본 `/var/lib/tailscale`용 `StateDirectory`는 해제하며 daemon restart는 저장된 설정을 재사용한다.
+종료 후의 상위 `--cleanup`도 같은 저장 경로와 mount 검사를 거쳐 실행한다. 마운트가 없을 때
+cleanup이 기본 rootfs 상태 디렉터리를 새로 만드는 경로는 사용하지 않는다.
+
+미인증 데몬 실행, Tailnet 인증, 다른 장치에서의 SSH 성공은 서로 다른 확인 단계다.
+인증 URL 발급은 운영자가 `tailscale up --accept-dns=false`를 실행할 때만 요청한다.
+연결 단절 시에는 Tailscale 자체 재연결을 사용하며 별도 감시·인증 루프를 추가하지 않는다.
+기존 OpenSSH 인증을 그대로 쓰고 Tailscale SSH·subnet router·exit node·Funnel을 자동 활성화하지 않는다.
+
+VM factory UUID·실행 의도와 Tailscale 장치 키는 별개의 신원이다. 일반 재부팅·서비스
+재시작과 **데이터 파티션을 실제로 보존한** 이미지 갱신은 상태를 재사용한다.
+`xenova-first-install.img`를 SD 전체에 쓰면 데이터 파티션도 초기화되므로 보존되지 않는다.
+이 경우 같은 물리 보드의 암호화 백업을 복원하거나 재인증한다. 이미지 파티션 배치와
+factory seed·초기화/grow 정책은 이 통합으로 바꾸지 않는다.
+사용법·백업/복원과 중단 복구는 [접속 명세](cli-manager-spec.md#cmd-tailscale)를 따른다.
 
 ## 최초 등록과 매 부팅 준비
 

@@ -46,6 +46,7 @@ def create_app(
     app.include_router(console.router, prefix="/api/v1")
     app.include_router(recovery.router, prefix="/api/v1")
     install_error_handlers(app)
+    _install_request_budget(app, settings.response_reserve_s)
     if settings.service_token:
         _install_bearer_auth(app, settings.service_token)
     app.openapi = _contract_openapi(app)  # type: ignore[method-assign]
@@ -55,6 +56,28 @@ def create_app(
 
 
 _PUBLIC_PATHS = ("/docs", "/redoc", "/openapi.json")
+
+
+def _install_request_budget(app: FastAPI, reserve_s: float) -> None:
+    """X-Request-Budget-Ms 가 있으면 요청이 도착한 지금(스레드풀 대기 전)부터 기한을 잰다(budget.py). /healthz 는 쓰지 않는다."""
+    from fastapi.responses import JSONResponse
+
+    from . import budget
+
+    @app.middleware("http")
+    async def request_budget(request, call_next):
+        raw = request.headers.get(budget.HEADER)
+        if raw is None or request.url.path in budget.EXEMPT_PATHS:
+            return await call_next(request)
+        try:
+            ms = budget.parse(raw)
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"code": "InvalidArgument", "message": str(exc)})
+        token = budget.start(ms, reserve_s=reserve_s)
+        try:
+            return await call_next(request)
+        finally:
+            budget.reset(token)
 
 
 def _install_bearer_auth(app: FastAPI, token: str) -> None:
@@ -97,6 +120,22 @@ def _contract_openapi(app: FastAPI):
             "bearerFormat": "opaque service token",
         }
         schema["security"] = [{"ServiceToken": []}]
+        # 요청 예산도 미들웨어라 라우트에서 보이지 않는다. /healthz 를 뺀 모든 operation 에 헤더 파라미터로 선언한다(budget.py)
+        from . import budget
+
+        schema["components"].setdefault("parameters", {})["RequestBudget"] = {
+            "name": budget.HEADER,
+            "in": "header",
+            "required": False,
+            "description": "호출자가 이 요청을 기다릴 남은 시간(ms). 다 쓰면 실행·제출하지 않고 504 (계약 4.9절)",
+            "schema": {"type": "integer", "minimum": 1, "maximum": budget.MAX_MS},
+        }
+        for path, path_item in schema.get("paths", {}).items():
+            if path in budget.EXEMPT_PATHS:
+                continue
+            for operation in path_item.values():
+                if isinstance(operation, dict):
+                    operation.setdefault("parameters", []).append({"$ref": "#/components/parameters/RequestBudget"})
         app.openapi_schema = schema
         return schema
 

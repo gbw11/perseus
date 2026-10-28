@@ -28,6 +28,8 @@ def fingerprint(app):
     groups = [f"platform/apps/{app}/zephyr", "platform/apps/common/xenova-mqtt-c",
               "platform/apps/common/xenova-drive-runtime"]
     groups += ["platform/guests/zephyr/" + name for name in ("xen-store", "xen-runtime", "diagnostics", "telemetry")]
+    if app == "drive":
+        groups += ["platform/apps/autonomous/zephyr/src", "platform/apps/manual/zephyr/src"]
     # Interpreter caches are generated output, never firmware source inputs.
     paths = [p for group in groups for p in sorted((ROOT / group).rglob("*"))
              if p.is_file() and "__pycache__" not in p.parts and p.suffix not in (".pyc", ".pyo")]
@@ -37,7 +39,8 @@ def fingerprint(app):
         "platform/guests/zephyr/starter.lock.json", "platform/first-install/artifact_io.py",
         "platform/first-install/first_install_contract.py",
         "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_zephyr.py",
-        "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_runtime.py")]
+        "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_runtime.py",
+        "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_trace.py")]
     if any(p.is_symlink() for p in paths):
         raise ValueError("source snapshot must not contain linked inputs")
     return {str(p.relative_to(ROOT)): {"sha256": sha(p), "bytes": p.stat().st_size} for p in paths}
@@ -45,7 +48,7 @@ def fingerprint(app):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--app", choices=("manual", "autonomous"), required=True)
+    p.add_argument("--app", choices=("manual", "autonomous", "drive"), required=True)
     p.add_argument("--zephyr-source", type=Path, required=True)
     p.add_argument("--tools", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)

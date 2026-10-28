@@ -35,6 +35,7 @@ extern "C" {
 
 int xm_topic_vm(char *out, size_t n, const char *vm_id, const char *kind); /* kind: heartbeat … command-result */
 int xm_topic_app_events(char *out, size_t n, const char *app_id);
+int xm_topic_vm_app_events(char *out, size_t n, const char *vm_id, const char *app_id);
 int xm_topic_manual_input(char *out, size_t n);
 int xm_topic_vehicle_control(char *out, size_t n);
 int xm_topic_vehicle_status(char *out, size_t n);
@@ -131,11 +132,17 @@ bool xm_seq_accept(struct xm_seq_tracker *t, const char *topic, const struct xm_
 
 int xm_drive_command_json(char *out, size_t n, uint32_t generation, float v_mps, float steer_rad);
 int xm_app_heartbeat_json(char *out, size_t n, const char *state, int64_t uptime_ms);
+/* progress is a decimal uint64 string on the wire, never a transport counter. */
+/* Completed work only; progress is a lossless uint64 decimal string.
+ * READY requires nonzero generation/progress and a null reason. */
+int xm_app_readiness_json(char *out, size_t n, uint32_t applied_generation,
+                         uint64_t progress, const char *readiness, const char *reason);
 
 struct xm_vehicle_control {
 	uint32_t generation;
 	char mode[16];
 	char active_app[XM_ID_MAX]; /* null 이면 빈 문자열 */
+	char active_vm_id[XM_UUID_LEN + 1]; /* 기존 vehicle.control 필드, null/생략이면 빈 문자열 */
 };
 int xm_vehicle_control_parse(struct xm_span payload, struct xm_vehicle_control *out);
 

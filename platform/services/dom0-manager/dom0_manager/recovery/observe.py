@@ -42,11 +42,13 @@ def _intent(view: dict[str, Any]) -> dict[str, Any]:
 
 
 class PlatformObserver:
-    def __init__(self, manager: ManagerLike, xl: Xl, *, intent_refresh_s: float = 60.0, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, manager: ManagerLike, xl: Xl, *, intent_refresh_s: float = 60.0, clock: Callable[[], float] = time.monotonic,
+                 drive_bindings=None,drive_vm_ids=()) -> None:
         self._manager = manager
         self._xen = XenDriver(xl)
         self._refresh_s = intent_refresh_s
         self._clock = clock
+        self._drive_bindings=drive_bindings;self._drive_vm_ids=set(drive_vm_ids)
         self._intents: dict[UUID, dict[str, Any]] | None = None
         self._capabilities: dict[tuple[str, str], dict[str, Any]] = {}
         self._capability_errors: set[tuple[str, str]] = set()  # 잘못된 값을 이미 로그한 템플릿
@@ -97,7 +99,10 @@ class PlatformObserver:
                 self._capability_errors.add(template)
                 log.error("%s; its Zephyr VMs are reported OBSERVATION_UNAVAILABLE until the catalog is fixed", error)
             declared = None
-        expected = declared
+        expected = True if str(vm_id) in self._drive_vm_ids else declared
+        binding=None;verified=str(vm_id) in self._drive_vm_ids
+        if verified:binding=self._drive_bindings.current(str(vm_id),self._clock())
+        if binding and (domain is None or binding['domid']!=domain.domid):binding=None
         return VmObservation(
             vm_id=vm_id,
             present=domain is not None,
@@ -105,6 +110,10 @@ class PlatformObserver:
             domid=domain.domid if domain else None,
             app_heartbeat_expected=expected,
             capability_error=error,
+            execution_binding_available=bool(binding) if verified else None,
+            execution_id=binding['execution_id'] if binding else None,
+            expected_app_boot_id=binding['boot_id'] if binding else None,
+            expected_app_instance_id=binding['app_instance_id'] if binding else None,
             **fields,
         )
 

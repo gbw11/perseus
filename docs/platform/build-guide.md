@@ -298,6 +298,14 @@ PY
 
 빌드 영수증의 ELF·DTS·config·앱/런타임 해시와 고정 Zephyr 원본을 함께 보관한다.
 
+불변 게시본과 factory 선택을 유지하면서 변경한 앱 소스를 시험할 때는 빌드에
+`--candidate-version <새 SemVer>`를 추가하고 새 출력 경로를 사용한다. 예를 들어
+`--candidate-version 1.1.1-lifecycle.2`는 해당 후보 영수증의 앱 버전·실제 소스 해시만
+정하며 저장소의 `network-starter.lock.json`이나 기본 선택 lock을 바꾸지 않는다.
+기존 lock의 버전을 재사용하거나, 별도 후보 버전 없이 불일치한 소스로 빌드하면 거절한다.
+패키징은 후보 영수증의 출처를 사용한다. 후보의 게시·factory 채택과 새 이미지 수락은
+빌드·패키징 성공과 구분해 진행한다.
+
 Network Starter의 공통 Diagnostics와 Telemetry Publisher는 `--diagnostics on|off`,
 `--telemetry on|off`로 선택한다. 기본은 둘 다 on이며 Diagnostics off의 기본 Publisher는 off다.
 Publisher는 TCP/MQTT를 사용하고 인스턴스별 private XenStore bootstrap이 있어야 송신한다.
@@ -306,6 +314,11 @@ broker 주소·password·VM UUID를 공유 firmware에 넣지 않는다.
 각 비교는 별도의 새 `--output` 경로에서 빌드하고 옵션·실제 config·RAM·수신 결과를 분리해 기록한다.
 주입 계약, 실제 Core 매핑, native_sim의 격리 broker·독립 수신 시험은
 [Telemetry Publisher](../../platform/guests/zephyr/telemetry/README.md)를 따른다.
+현재 발행은 payload 2.1이다. `build_id`는 소스·설정·고정 도구 입력의 식별자이며,
+완성된 `zephyr.bin`의 SHA-256과 다르다. 패키징 manifest의 두 값을 확인하고,
+실행 시 검증한 로딩 기록을 통해 인스턴스에 주입한다. dom0의 clock/evidence timer와
+필터가 포함된 xenconsoled는 해당 실행의 UTC·제한된 오류 보존을 지원한다.
+타이머·패키지 포함 확인과 실제 보드의 시각 품질·fatal 포착 수락은 구분한다.
 게시한 firmware는 불변 입력으로 보존한다. 실제 보드 적용·전환은 대상 UUID와 자산 백업·복원 절차를 확인한 유지보수 단계에서 수행한다.
 
 ### 실제 manifest로 기본 선택 확정
@@ -452,6 +465,37 @@ bzcat "$WIC" >"$RUN/dom0.wic"
 
 빌드 진행은 다른 WSL 창에서 `tail -f "$RUN/logs/dom0-build.stdout"`로 확인한다. 같은 `RUN` 경로를 지정하면 전체 로그를 이어서 볼 수 있다.
 
+부분 패키징은 같은 빌드 환경에서 `bitbake xenova-platform xen-rpi-u-boot-scr`로
+실행할 수 있다. 플랫폼 패키지의 `/usr/sbin/xenova-boot-status`, 두 표시 모듈,
+`xenova-boot-status.service`와 sysinit enablement를 확인한다. 기존 agetty의
+`/run/issue.d`·reload 기능을 사용하며 새 그래픽 런타임은 필요하지 않다.
+고정 이미지의 getty가 agetty인지도 패키지 manifest와 실제 unit에서 대조한다.
+다른 renderer를 쓰는 설치본의 화면 인계는 [부팅 표시](management-boot-boundaries.md#부팅-진행지연실패-표시)를 따른다.
+
+생성된 `boot.cmd`/`boot.scr`에서 dom0의 `console=hvc0 loglevel=4`,
+`systemd.show_status=error`와 journal target을 확인한다. Xen의 dtuart·메모리 인자는
+별도로 보존한다. `loglevel=4`는 ERR까지의 초기 필터이며 전체 디버그 출력이 아니다.
+정상 경로에는 `/chosen` 전체 덤프가 없어야 한다. 진단 경로의 `fdt print`는
+`xen,xen-bootargs`와 `xen,dom0-bootargs` 두 속성만 대상으로 한다.
+소스 템플릿 검사·부분 패키지 통과와 실제 이미지·HDMI 전원 부팅 수락은 구분한다.
+
+고정 meta-networking에는 Tailscale 1.94.2가 있지만, 현재 이미지는 보안 수정이 포함된
+공식 ARM64 정적 릴리스 1.104.2를 meta-xenova recipe로 고정한다. TS-2026-013의 수정은
+Go 1.27.3에 포함되어 기존 고정 Go 1.26.8 빌드와 구분한다. 외부 레이어·공용 컴파일러는 바꾸지 않는다.
+`bitbake-layers show-recipes tailscale`와 `bitbake-layers show-appends`에서 선택된 1.104.2와
+persistence append를 확인한다. archive·공식 checksum·라이선스 해시는 recipe에 고정하며
+`bitbake tailscale`로 부분 패키징할 수 있다.
+이미지에는 `tailscale`·`tailscaled`와 현재 모듈 구성의 TUN·IPv6를 포함한다.
+실제 kernel `.config`의 `CONFIG_TUN=m`, `CONFIG_IPV6=m`, 다중 라우팅 테이블과
+netfilter 설정을 확인하고 모듈 패키지가 이미지에 있는지도 대조한다.
+
+실제 rootfs의 CLI·daemon ARM64 실행, `tailscaled.service`의 enablement와
+`20-xenova-persistence.conf`·`xenova-tailscale-state` 소스 일치를 검사한다.
+`assemble.platform_root_ok()`는 이 내용과 TUN·IPv6 모듈을 검사하지만 파티션 구조는 바꾸지 않는다.
+공통 rootfs·factory seed에는 Tailscale 인증 상태·장치 키·auth key를 넣지 않는다.
+최초 인증과 같은 보드 전용 암호화 백업/복원은 [접속 명세](cli-manager-spec.md#cmd-tailscale)를 따른다.
+실행 환경 패키징 성공을 Tailnet 인증·외부 SSH·재부팅 후 동일 장치 수락으로 대신하지 않는다.
+
 WIC의 실제 FAT에서 `boot.scr`·`xen`·`Image`·U-Boot와 UART/GIC·무선 SDIO PIO 설정을 확인한다. 다음 공통 검사 도구는 실제 ext4를 읽기 전용으로 열어 소스 일치, 패키지, ARM64 import와 unit graph를 확인하며 최종 이미지에서도 재사용한다.
 
 ```bash
@@ -528,6 +572,7 @@ try:
     work.mount(dev+"p2", root, readonly=True)
     installed = assemble.platform_root_ok(root)
     check(bool(installed), "actual dom0 source, units, cfg, Wi-Fi, identity")
+    check((root/"usr/bin/systemd-run").is_file(), "per-execution scope tool systemd-run")
     command(["chroot", root, "/usr/bin/python3", "-B", "-c",
         "import fastapi,uvicorn,pydantic,pydantic_core,paho.mqtt.client;"
         "import tty,termios,fcntl,websockets,dom0_manager,xenova_mqtt;"
@@ -621,9 +666,11 @@ required = {"xenova-platform", "xenova-bringup", "xenova-dom0-manager",
     "xenova-mqtt-client", "python3-fastapi", "python3-uvicorn", "python3-paho-mqtt",
     "python3-shell", "python3-terminal", "python3-websockets", "xen-tools-xl",
     "xen-tools-xenstat", "libxenmanage1", "mosquitto", "mosquitto-clients",
-    "qemu-system-i386"}
+    "qemu-system-i386", "systemd-extra-utils", "tailscale", "tailscaled"}
 assert required <= names, sorted(required-names)
 assert any(n.startswith("kernel-module-brcmfmac-cyw-") for n in names)
+assert any(n.startswith("kernel-module-tun-") for n in names)
+assert any(n.startswith("kernel-module-ipv6-") for n in names)
 assert "python3-fastapi-ptest" not in names
 print(path)
 print("PASS", len(required)+1, "required packages including kernel-versioned CYW module")
@@ -830,6 +877,12 @@ sha256sum "$EXPORT/xenova-first-install.img.zst" \
 
 이미지 인계 이후에는 같은 이미지 해시 기준으로 다음을 확인한다. 자세한 명령·반환값은 [CLI·Manager 명세](cli-manager-spec.md)를 따른다.
 
+`xenova-first-install.img`의 SD 전체 기록은 기존 데이터 파티션도 초기화한다. 인증한 보드에
+반복 기록하기 전에는 [같은 보드 전용 암호화 백업·복원](cli-manager-spec.md#cmd-tailscale-backup)을
+완료하고 복호화·무변경 검사를 통과한 백업을 PC에 보관한다. 이 백업은 개인 운영 자료이며
+위의 공통 이미지·전달 묶음에 포함하지 않는다. 데이터 파티션을 보존하는 갱신과 SD 전체 기록을
+같은 작업으로 취급하지 않는다.
+
 | 확인 대상 | 수락 근거 |
 |---|---|
 | 최초 등록·신원 | 기본 세 VM의 UUID/MAC, Linux machine-id·SSH 공개키, seed 등록 완료 |
@@ -838,10 +891,11 @@ sha256sum "$EXPORT/xenova-first-install.img.zst" \
 | 서비스 | dom0-manager·recovery worker enable/active, xentop 통계 조회, broker 인증·구독·건강 상태 게시 |
 | 보드별 비밀 | 최초 API 서비스 시작에서 root 전용 HTTP 토큰 생성, 기존 토큰 보존. MQTT 계정과 별도로 취급 |
 | 접속·게스트 | Wi-Fi 자동 재연결·SSH, Paho/Agent import·enable, 실제 broker 종단 연결, A/B Ethernet·협조형 종료 |
+| 외부 원격 관리 | 최초 Tailnet 인증·다른 장치의 SSH, daemon/host 재시작 뒤 같은 장치·IP, SD 재설치 뒤 같은 보드의 상태 복원. 서비스 active만으로 대체하지 않음 |
 
 CPU 정책이 없는 기존 설치의 활성화는 모든 관리 게스트가 정지한 유지보수 창에서 `cpu-policy-set` 계획·실행 → 내부 `cpu-host-prepare` → 실제 배치 조회 순서로 진행한다. 정책 저장과 현재 host 적용은 서로 다른 단계다.
 
-일반 UART 콘솔의 커널 출력은 `loglevel=3`이며 연결 중 채널 진단도 `dmesg`·journal에서 조회한다. 진단용 부팅의 상세 로그 설정은 별도로 유지한다. Wi-Fi 연결 요청 응답과 실제 인증·DHCP 완료는 구분한다.
+일반 UART 콘솔의 초기 커널 출력은 `loglevel=4`로 KERN_ERR(3)까지 허용한다. 실행 중 필터는 `/proc/sys/kernel/printk`로 확인하고 연결 중 채널 진단은 `dmesg`·journal에서 조회한다. Xen의 직접 UART 경고에는 Linux 필터가 적용되지 않는다. 진단용 부팅의 상세 로그 설정은 별도로 유지한다. Wi-Fi 연결 요청 응답과 실제 인증·DHCP 완료는 구분한다.
 
 공통 이미지에는 HTTP 토큰·MQTT 암호·개인 Wi-Fi 설정을 넣지 않는다. 설치 후 `xenova-dom0-manager.service`가 `dom0_manager.service_token`을 실행해 `/etc/xenova/dom0-manager-token.env`를 0600으로 준비한다. `/etc/xenova/dom0-manager.env`의 기존 서비스 토큰은 우선하며 자동 회전하지 않는다. worker는 `/etc/xenova/recovery-worker.env`의 `XENOVA_RECOVERY_*` 설정을 읽고, broker 연결 문제로 VM 자동 시작이나 host admission을 외부 online 대기에 묶지 않는다.
 

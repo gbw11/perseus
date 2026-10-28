@@ -1,0 +1,6 @@
+#!/usr/bin/python3
+"""Local clock/evidence support; never a VM control or health entry point."""
+import sys
+sys.path.insert(0,'/usr/lib/xenova')
+from xenova_telemetry_support import main
+raise SystemExit(main())

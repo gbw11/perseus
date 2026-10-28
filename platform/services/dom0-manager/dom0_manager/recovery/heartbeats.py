@@ -58,5 +58,5 @@ class HeartbeatTable(LastSeenTable[Heartbeat]):
 class AppHeartbeatTable(LastSeenTable[AppHeartbeat]):
     """app.heartbeat (Zephyr 주행 VM). 봉투의 vm_id 로 묶으므로 app_id↔vm_id 대응표가 따로 필요 없다."""
 
-    def record(self, vm_id: UUID, app_id: str, state: str, boot_id: str, seq: int, received_monotonic: float) -> AppHeartbeat:
-        return self.put(AppHeartbeat(vm_id=vm_id, app_id=app_id, state=state, boot_id=boot_id, seq=seq, received_monotonic=received_monotonic))
+    def record(self, vm_id: UUID, app_id: str, state: str, boot_id: str, seq: int, received_monotonic: float,instance_id: str | None=None) -> AppHeartbeat:
+        return self.put(AppHeartbeat(vm_id=vm_id, app_id=app_id, state=state, boot_id=boot_id, seq=seq, received_monotonic=received_monotonic,instance_id=instance_id))

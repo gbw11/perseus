@@ -43,7 +43,10 @@ int xgrant_share(uint16_t backend,void *page,bool readonly,uint32_t *reference) 
  int rc=xgp_share(&pool,backend,physical>>12,readonly,reference);
  k_mutex_unlock(&grant_lock);return rc;
 }
-int xgrant_revoke(uint32_t ref) {
- if(k_mutex_lock(&grant_lock,K_MSEC(20)))return -ETIMEDOUT;
+int xgrant_revoke_until(uint32_t ref,int64_t end) {
+ int64_t left=end-k_uptime_get();if(left<=0)return -ETIMEDOUT;
+ if(k_mutex_lock(&grant_lock,K_MSEC(MIN(20,left))))return -ETIMEDOUT;
+ if(k_uptime_get()>=end){k_mutex_unlock(&grant_lock);return -ETIMEDOUT;}
  int rc=xgp_revoke(&pool,ref);k_mutex_unlock(&grant_lock);return rc;
 }
+int xgrant_revoke(uint32_t ref) { return xgrant_revoke_until(ref,k_uptime_get()+20); }

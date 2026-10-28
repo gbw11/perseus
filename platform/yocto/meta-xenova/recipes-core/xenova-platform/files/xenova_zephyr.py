@@ -166,6 +166,9 @@ def bundle_info(directory, expected=None):
             if not isinstance(spec, dict) or type(spec.get('bytes')) is not int or spec['bytes'] != size or sha(p) != spec.get('sha256'):
                 raise PlatformError('firmware payload hash/size mismatch: ' + name)
     payload_ok(directory, profile=NET_PROFILE if network else PROFILE)
+    ids=set(re.findall(rb'xenova-build:(sha256:[0-9a-f]{64})',asset(directory,'zephyr.bin').read_bytes()))
+    if len(ids)>1 or (ids and source.get('build_id') != next(iter(ids)).decode('ascii')):
+        raise PlatformError('firmware embedded build identity/manifest mismatch')
     if manifest == 'firmware.json' and not re.search(
             r'^#define KERNEL_VERSION_STRING\s+"4\.4\.0"\s*$', asset(directory, 'zephyr.version.h').read_text(), re.M):
         raise PlatformError('firmware build version header must declare Zephyr 4.4.0')

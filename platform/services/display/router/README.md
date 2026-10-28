@@ -63,7 +63,7 @@ export DISPLAY_FEED_BASE_URL=http://127.0.0.1:8082
 
 ## 3단계 로컬 화면 렌더링
 
-`frontend`에서 `npm run build -w @xenova/vm-screens`로 빌드한 뒤 수집기에 `XENOVA_DISPLAY_WEB_ROOT=<vm-screens/dist 절대 경로>`를 지정한다. 두 화면은 `/display/monitor-1`(전체 상태), `/display/monitor-2`(선택 VM 상세)다. 외부 대시보드의 페이지 라우팅과는 별도의 dom0 로컬 화면이다. 새 화면은 mock telemetry나 기존 자동/수동 VM 시나리오에 연결하지 않는다. 기존 `/split`, `/detail/:app`는 이전 시연 화면으로 남아 있으며 HDMI의 기본 진입점은 아니다.
+`frontend`에서 `npm run build -w @xenova/vm-screens`로 빌드한 뒤 수집기에 `XENOVA_DISPLAY_WEB_ROOT=<vm-screens/dist 절대 경로>`를 지정한다. 두 화면은 `/display/monitor-1`(차량 계기판), `/display/monitor-2`(인포테인먼트·선택 게스트 콘텐츠)다. `outputs.screen`을 각각 `instrument`/`infotainment`로 고정한다. 이전 `view` 필드는 선택 API 호환용이다. 속도·배터리·네비·음악과 게스트 영상 어댑터가 연결되기 전에는 수신 대기를 표시한다. 외부 대시보드의 페이지 라우팅과는 별도의 dom0 로컬 화면이다. 새 화면은 mock telemetry나 기존 자동/수동 VM 시나리오에 연결하지 않는다. 기존 `/split`, `/detail/:app`는 이전 시연 화면으로 남아 있으며 HDMI의 기본 진입점은 아니다.
 
 | 로컬 경로 | 용도/권한 |
 | --- | --- |
@@ -81,6 +81,8 @@ export DISPLAY_FEED_BASE_URL=http://127.0.0.1:8082
 ```
 
 `pinned`는 등록 UUID가 필수다. 잘못된 UUID/조합은 400, 이전 epoch/revision은 409, 요청 형식 오류는 422다. 기본은 VM1 pinned다. follow_active에서도 신선하고 명시적인 active_vm_id만 따라가며, 확인된 새 값이 없으면 마지막 선택을 유지한다. 장애·AUTO/MANUAL 변화만으로 다른 VM을 고르지 않는다.
+
+254번 보완: `outputs[].reason`에 전체/상세 화면의 선택 이유를 제공한다. 상세 화면은 이를 표시하며, 표시 피드 자체가 끊기면 과거 선택임을 안내한다. follow_active의 대상은 등록된 주 구동·백업 VM으로 제한하며, Debian 인터랙션 VM을 활성 구동 대상으로 선택하지 않는다. Debian을 명시적으로 pinned하는 것은 가능하다. 앱 구독 경로·보고 신선도를 먼저 확인하므로 과거 `failed` 값만으로 현재 앱 오류를 표시하지 않는다. 보드 없는 상태 전이 검증과 미검증 범위는 [254 검증 기록](../../../../docs/verification/display-254-policy.md)에 정리했다.
 
 presentation의 `revision`은 선택 설정 버전, `render_revision`은 실행 ID/상태·내용의 해시다. 렌더러는 두 animation frame 이후 epoch/revision/render_revision을 ACK한다. 이전 내용의 ACK는 409이며, 출력별 ACK는 3초 동안 갱신되지 않으면 만료된다. 응답의 `renderer_ack.stage=dom_rendered`는 DOM 렌더 확인이며 물리 HDMI `ready`나 캡처 성공을 의미하지 않는다. 물리 `applied_revision`/장치 연결 상태는 4단계에서 추가한다.
 
@@ -168,3 +170,10 @@ python -B tests/probe_display_runtime.py --execute --soak-seconds 600 \
 `tests/probe_display_control.py --execute --output <결과.json>`은 loopback 브로커를 띄워 별도 표시 상태 보고 → 실제 MQTT 수신 → REST/WS·상세 정책 연결을 시험한다. 기존 테스트 런타임의 amqtt/paho/httpx/websockets가 필요하며 PYTHONPATH는 위 runtime probe와 같다. 제어 엔진/Xen 관측은 합성이고 운영 ACL·실보드 검증이 아니다. [250 후속 검증 결과](../../../../docs/verification/display-250-followup.md)를 참고한다.
 
 `tests/probe_qemu.py`는 기존 격리 실험실 전용이며 일반 테스트에서 자동 실행되지 않는다. `--execute --output <증거 파일>`이 필요하다. 시험 호스트에 amqtt 0.11.3/pexpect, 기존 ARM64 휠과 Java 21/Spring 컴파일 결과가 있어야 한다. 실제 dom0의 임시 디렉터리에 수집기를 올리고 실제 Debian은 메모리에서만 임시 보고기를 실행한다. 테스트 브로커는 호스트 loopback에 있고 SSH 포워딩을 사용하므로 제품 배포의 로컬 Mosquitto 토폴로지와 구별한다. 기존 VM/이미지/서비스·실행 도메인 ID를 바꾸지 않는다. 결과는 [검증 기록](../../../../docs/verification/display-step2.md)을 참고한다.
+
+
+## 전용 X11 절전 방지와 시연 인코딩
+
+키오스크의 `--prevent-idle-blank`는 전용 차량 화면 세션에서만 사용한다. `xset`으로 기존 screen saver/DPMS 값을 읽고, screen saver timeout과 blanking 및 지원되는 DPMS를 끈 뒤 적용 결과를 확인한다. 일반 종료 시 기존 값을 복원한다. 공유 데스크톱에는 이 옵션을 사용하지 않는다. 강제 종료(SIGKILL)·전원 차단은 복원을 보장하지 않으며, 새 전용 X 서버 세션의 초기 설정을 다시 적용해야 한다. 배포 예시 unit은 이 옵션을 명시한다. 실제 보드의 상시 서비스에는 아직 설치하지 않았다.
+
+`outputs[].width/height`는 X11 원본 캡처 영역이다. 별도의 `stream_width/stream_height`는 기본 1280×720인 전송 JPEG 크기이며 짝수만 허용한다. 원본 전체를 비율 유지 축소하고 검은 여백을 채우므로 영역을 잘라내지 않는다. 스트림 metadata의 `rectangle`은 원본 영역, `width/height`는 인코딩 결과 크기다. MJPEG는 yuvj420p, encoder 1 thread와 단순 filter pipeline 1 thread를 사용한다. encoder의 `-threads`와 filter의 `-filter_threads`는 별도 설정이다([FFmpeg 공식 문서](https://ffmpeg.org/ffmpeg.html)).

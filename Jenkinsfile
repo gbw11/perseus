@@ -14,7 +14,8 @@ pipeline {
         gitLabConnection('gitlab')    // Jenkins 시스템 설정의 GitLab connection 이름과 같아야 한다
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '30'))
-        disableConcurrentBuilds(abortPrevious: true)
+        // 머지별 소스 브랜치 동기화가 누락되지 않도록 새 요청이 이전 develop 빌드를 취소하지 않는다.
+        disableConcurrentBuilds(abortPrevious: false)
     }
 
     environment {
@@ -77,7 +78,7 @@ pipeline {
             steps {
                 dir('platform/services/dom0-manager') {
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                        sh 'python3 -m pip install -q --user -e .[test] && python3 -m pytest -q --junitxml=target/pytest.xml'
+                        sh 'python3 -m pip install -q --user -e ../vm-agent/mqtt-client -e .[test] && python3 -m pytest -q --junitxml=target/pytest.xml'
                     }
                 }
             }
@@ -89,7 +90,7 @@ pipeline {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     dir('platform/services/vm-agent/mqtt-client') {
-                        sh 'python3 -m pip install -q --user "paho-mqtt>=1.6,<3" "pytest>=7" && python3 -m pytest -q --junitxml=target/pytest.xml'
+                        sh 'python3 -m pip install -q --user "paho-mqtt>=1.6,<3" "pytest>=7" "jsonschema>=4,<5" && python3 -m pytest -q --junitxml=target/pytest.xml'
                     }
                     dir('platform/services/vm-agent/agent') {
                         sh 'python3 -m pytest -q --junitxml=target/pytest.xml'

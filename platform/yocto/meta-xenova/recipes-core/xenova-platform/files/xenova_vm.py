@@ -768,6 +768,14 @@ class Platform:
         results = {key: {'result': 'failed', 'error': 'default instance not provisioned'} for key in missing}
         results.update({key: {'result': 'pending'} for key in records})
         ensure_runtime(self.runtime)
+        from xenova_runtime import boot_progress
+        display = boot_progress('autostart', self.runtime, clock=self.clock, host=host)
+        display_states = {key: {'vm_id': record['uuid'], 'name': record.get('display_name', record['id']),
+                               'internal_name': key, 'state': 'waiting', 'selected': None, 'code': None}
+                          for key, record in records.items()}
+        def show(phase):
+            display(phase, vms=list(display_states.values()), missing_instances=missing)
+        show('targets-discovered')
         result_path = self.runtime / 'autostart-results.json'
         def save_results():
             for value in results.values():
@@ -781,35 +789,58 @@ class Platform:
                     if value['result'] == 'pending':
                         value.update(result='not-started', error='autostart batch deadline exceeded',
                                      start_invoked=False)
+                for key, item in results.items():
+                    if item['result'] == 'not-started' and key in display_states:
+                        display_states[key].update(state='not-started', code='BATCH_DEADLINE_EXCEEDED')
+                show('deadline-exceeded')
                 failures.append('autostart batch deadline exceeded; pending guests not started')
                 save_results()
                 break
             decision = self.execution().boot_decision(record)
+            display_states[key]['selected'] = bool(decision['start'])
             if not decision['start']:
                 results[key] = {'result': 'skipped', 'autostart': record['autostart'],
                                 'boot_admission': decision['admission']}
                 save_results()
+                display_states[key].update(state='excluded', code=decision['admission'].get('reason'))
+                show('policy-selection')
                 continue
             results[key] = {'result': 'starting'}
             save_results()
             start_invoked = False
+            failure_code = None
             try:
                 if has_network(record):
+                    display_states[key]['state'] = 'network-prepare'
+                    show('network-preparation')
                     self.prepare_dhcp(records, deadline=deadline)
                 if self.clock() >= deadline:
                     raise PlatformError('autostart batch deadline exceeded before start')
                 start_invoked = True
+                display_states[key]['state'] = 'execution-start'
+                show('execution-start-and-verification')
                 state = self.start(record, deadline=deadline)
                 results[key] = {'result': state, 'xen_state': state, 'app_readiness': 'unknown',
                                 'boot_admission': decision['admission']}
             except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
                 failures.append(f"{key}: {exc}")
+                known_code = getattr(exc, 'error', {}).get('code')
+                if isinstance(known_code, str) and re.fullmatch('[A-Z][A-Z0-9_]{0,63}', known_code):
+                    failure_code = known_code
                 results[key] = {'result': 'not-started' if not start_invoked and self.clock() >= deadline else 'failed',
                                 'error': str(exc), 'app_readiness': 'unknown',
                                 'start_invoked': start_invoked, 'boot_admission': decision['admission']}
                 if isinstance(exc, DomainStateError):
                     results[key].update(xen_state=exc.xen_state, xen_state_flags=exc.xen_state_flags)
             save_results()
+            outcome = results[key]['result']
+            code = None
+            if outcome in ('failed', 'not-started'):
+                # 원문 stderr/exception에는 비밀이 있을 수 있어 화면에는 원인 유형만 게시한다.
+                code = failure_code or ('START_FAILED_RESULT_MAY_EXIST' if start_invoked else 'START_NOT_SUBMITTED')
+            display_states[key].update(state=outcome if outcome in ('failed', 'not-started') else 'verified', code=code)
+            show('result-recorded')
+        show('failed' if failures else 'complete')
         print(json.dumps({'autostart_results': results}, indent=2))
         if failures:
             raise PlatformError('; '.join(failures))
@@ -1173,7 +1204,7 @@ def dhcp_ready(pid, timeout=5):
 def main(argv=None):
     raw = list(sys.argv[1:] if argv is None else argv)
     managed = {'firmware-transition','update-resources','list','get','retire','restore','purge','operation','create','delete','templates',
-               'recover-once','recover_once','snapshot','probe','execution-context','control-operation','recovery-operation','host-resume','cpu-layout','cpu-policy-set','cpu-host-prepare'}
+               'recover-once','recover_once','snapshot','probe','execution-context','control-operation','recovery-operation','recovery-reconcile','host-resume','cpu-layout','cpu-policy-set','cpu-host-prepare'}
     if '--json' in raw or (raw and raw[0] in managed):
         from xenova_management_cli import main as management_main
         return management_main(raw)

@@ -48,6 +48,7 @@ class AppHeartbeat:
     boot_id: str
     seq: int
     received_monotonic: float
+    instance_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,10 @@ class VmObservation:
     # Zephyr: 템플릿 capability `app_heartbeat`. True 앱 펌웨어, False starter(Xen 상태만), None 선언 없음(신호를 한 번 받은 뒤 armed 로 대상)
     app_heartbeat_expected: bool | None = None
     capability_error: str | None = None  # 템플릿 capability 값이 JSON boolean 이 아니다. 대상 여부를 알 수 없으므로 판정하지 않는다
+    execution_binding_available: bool | None = None  # None: explicit legacy observation
+    execution_id: str | None = None
+    expected_app_boot_id: str | None = None
+    expected_app_instance_id: str | None = None
 
     @property
     def eligible(self) -> bool:
