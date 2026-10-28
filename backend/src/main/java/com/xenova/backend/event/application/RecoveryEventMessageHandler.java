@@ -29,9 +29,7 @@ public class RecoveryEventMessageHandler {
     public Result handle(byte[] payload, Instant receivedAt) {
         try {
             RecoveryEvent event = parse(payload);
-            validate(event);
-            RecoveryEventStore.StoreResult stored = eventStore.store(event, receivedAt);
-            return stored == RecoveryEventStore.StoreResult.DUPLICATE ? Result.DUPLICATE : Result.ACCEPTED;
+            return handle(event, receivedAt);
         } catch (Rejected rejected) {
             log.warn("Rejected recovery event on {}: {} {}", TOPIC, rejected.code, rejected.getMessage());
             return Result.REJECTED;
@@ -45,6 +43,27 @@ public class RecoveryEventMessageHandler {
             return Result.REJECTED;
         } catch (RuntimeException exception) {
             log.error("Failed to handle recovery event on {}", TOPIC, exception);
+            return Result.REJECTED;
+        }
+    }
+
+    public Result handle(RecoveryEvent event, Instant receivedAt) {
+        try {
+            validate(event);
+            RecoveryEventStore.StoreResult stored = eventStore.store(event, receivedAt);
+            return stored == RecoveryEventStore.StoreResult.DUPLICATE ? Result.DUPLICATE : Result.ACCEPTED;
+        } catch (Rejected rejected) {
+            log.warn("Rejected recovery event from backfill: {} {}", rejected.code, rejected.getMessage());
+            return Result.REJECTED;
+        } catch (DataIntegrityViolationException duplicateRace) {
+            if (event.eventId() != null && eventStore.exists(event.eventId())) {
+                log.debug("Ignored concurrently duplicated recovery event {} from backfill", event.eventId());
+                return Result.DUPLICATE;
+            }
+            log.error("Failed to persist recovery event from backfill", duplicateRace);
+            return Result.REJECTED;
+        } catch (RuntimeException exception) {
+            log.error("Failed to handle recovery event from backfill", exception);
             return Result.REJECTED;
         }
     }

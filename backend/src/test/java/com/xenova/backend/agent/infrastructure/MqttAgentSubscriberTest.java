@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
+import com.xenova.backend.event.application.RecoveryEventBackfillService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -21,16 +22,19 @@ class MqttAgentSubscriberTest {
 
     private AgentMessageHandler agentHandler;
     private RecoveryEventMessageHandler recoveryHandler;
+    private RecoveryEventBackfillService backfillService;
     private MqttAgentSubscriber subscriber;
 
     @BeforeEach
     void setUp() {
         agentHandler = mock(AgentMessageHandler.class);
         recoveryHandler = mock(RecoveryEventMessageHandler.class);
+        backfillService = mock(RecoveryEventBackfillService.class);
         MqttProperties properties = new MqttProperties(
                 true, "tcp://127.0.0.1:1883", "test-client", null, null, Duration.ofSeconds(1));
         subscriber = new MqttAgentSubscriber(
-                properties, agentHandler, recoveryHandler, Clock.fixed(RECEIVED_AT, ZoneOffset.UTC));
+                properties, agentHandler, recoveryHandler, backfillService,
+                Clock.fixed(RECEIVED_AT, ZoneOffset.UTC));
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.xenova.backend.agent.infrastructure;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
+import com.xenova.backend.event.application.RecoveryEventBackfillService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.concurrent.Executors;
@@ -43,6 +44,7 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
     private final MqttProperties properties;
     private final AgentMessageHandler handler;
     private final RecoveryEventMessageHandler recoveryEventHandler;
+    private final RecoveryEventBackfillService recoveryEventBackfillService;
     private final Clock clock;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "mqtt-agent-subscriber");
@@ -57,10 +59,12 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
             MqttProperties properties,
             AgentMessageHandler handler,
             RecoveryEventMessageHandler recoveryEventHandler,
+            RecoveryEventBackfillService recoveryEventBackfillService,
             Clock clock) {
         this.properties = properties;
         this.handler = handler;
         this.recoveryEventHandler = recoveryEventHandler;
+        this.recoveryEventBackfillService = recoveryEventBackfillService;
         this.clock = clock;
     }
 
@@ -112,6 +116,7 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
         scheduler.execute(() -> {
             try {
                 client.subscribe(TOPICS, QOS);
+                recoveryEventBackfillService.requestBackfill();
             } catch (MqttException exception) {
                 log.error("MQTT subscribe failed", exception);
             }

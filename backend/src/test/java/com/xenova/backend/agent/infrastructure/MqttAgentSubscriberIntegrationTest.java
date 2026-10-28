@@ -3,9 +3,11 @@ package com.xenova.backend.agent.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.timeout;
 
 import com.xenova.backend.agent.domain.AgentHeartbeatRepository;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
+import com.xenova.backend.event.application.RecoveryEventBackfillService;
 import io.moquette.broker.Server;
 import io.moquette.broker.config.MemoryConfig;
 import java.io.IOException;
@@ -39,6 +41,9 @@ class MqttAgentSubscriberIntegrationTest {
     @MockitoBean
     private RecoveryEventMessageHandler recoveryEventHandler;
 
+    @MockitoBean
+    private RecoveryEventBackfillService recoveryEventBackfillService;
+
     @DynamicPropertySource
     static void mqttProperties(DynamicPropertyRegistry registry) {
         registry.add("xenova.mqtt.enabled", () -> "true");
@@ -49,6 +54,11 @@ class MqttAgentSubscriberIntegrationTest {
     @AfterAll
     static void stopBroker() {
         BROKER.stopServer();
+    }
+
+    @Test
+    void requestsRecoveryBackfillAfterConnecting() {
+        verify(recoveryEventBackfillService, timeout(10_000)).requestBackfill();
     }
 
     @Test
