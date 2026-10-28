@@ -660,3 +660,606 @@ button.chip:hover:not(.chipOn) {
   border-color: var(--x-app-simulator);
   box-shadow: 0 0 0 1px var(--x-app-simulator);
 }
+
+/* ---- S15P31E110-299 Active/Standby VM Overview ---- */
+.overviewPage {
+  display: grid;
+  gap: var(--x-space-5);
+}
+.overviewTitle {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--x-space-5);
+}
+.overviewTitle h2 {
+  margin: 4px 0 0;
+  color: var(--x-text);
+  font-size: clamp(30px, 3vw, 46px);
+  letter-spacing: -0.04em;
+}
+.overviewTitle p {
+  margin: var(--x-space-2) 0 0;
+  color: var(--x-text-muted);
+}
+.overviewTitle > strong {
+  padding-bottom: 6px;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-md);
+  font-weight: 500;
+}
+.overviewSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--x-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--x-surface) 74%, var(--x-bg));
+}
+.summaryItem {
+  display: grid;
+  gap: 4px;
+  padding: var(--x-space-3) var(--x-space-4);
+  border-right: 1px solid var(--x-border);
+}
+.summaryItem:last-child {
+  border-right: 0;
+}
+.summaryItem span,
+.vmKicker,
+.vmCardFoot span {
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.summaryItem strong {
+  overflow: hidden;
+  color: var(--x-text);
+  font-size: var(--x-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.summaryItem[data-tone='ok'] strong {
+  color: var(--x-ok);
+}
+.summaryItem[data-tone='recovering'] strong {
+  color: var(--x-recovering);
+}
+.summaryItem[data-tone='fault'] strong {
+  color: var(--x-fault);
+}
+.statePanel {
+  padding: var(--x-space-4);
+  border: 1px dashed var(--x-border);
+  border-radius: var(--x-radius);
+  color: var(--x-text-muted);
+  text-align: center;
+}
+.vmGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--x-space-4);
+}
+.vmCard {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 560px;
+  flex-direction: column;
+  gap: var(--x-space-5);
+  padding: var(--x-space-5);
+  overflow: hidden;
+  border: 1px solid var(--x-border);
+  border-radius: 18px;
+  background: var(--x-surface);
+  box-shadow: var(--x-shadow);
+  color: var(--x-text);
+  text-decoration: none;
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.vmCard::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 5px;
+  background: var(--vm-accent);
+  content: '';
+}
+.vmCard[href]:hover,
+.vmCard[href]:focus-visible {
+  border-color: color-mix(in srgb, var(--vm-accent) 62%, var(--x-border));
+  box-shadow: 0 18px 38px rgb(2 7 14 / 34%);
+  transform: translateY(-3px);
+}
+.vmCard[href]:focus-visible {
+  outline: 2px solid var(--x-primary);
+  outline-offset: 3px;
+}
+.vmCardMissing {
+  opacity: 0.72;
+}
+.vmCardTop {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--x-space-3);
+}
+.vmCardTop h3 {
+  margin: 6px 0 2px;
+  font-size: 36px;
+  letter-spacing: -0.04em;
+}
+.vmCardTop p {
+  margin: 0;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.vmKicker {
+  color: var(--vm-accent);
+}
+.authority {
+  padding: 5px 9px;
+  border: 1px solid var(--x-border);
+  border-radius: 999px;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.authority[data-authority='active'] {
+  border-color: color-mix(in srgb, var(--x-ok) 46%, var(--x-border));
+  background: var(--x-ok-soft);
+  color: var(--x-ok);
+}
+.authority[data-authority='standby'] {
+  border-color: color-mix(in srgb, var(--x-primary) 48%, var(--x-border));
+  background: color-mix(in srgb, var(--x-primary) 10%, transparent);
+  color: var(--x-primary);
+}
+.vmStatusRows {
+  display: grid;
+  gap: var(--x-space-2);
+  padding-block: var(--x-space-4);
+  border-block: 1px solid var(--x-border);
+}
+.statusLine {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--x-space-2);
+  min-height: 24px;
+}
+.statusLine > span,
+.statusLine small {
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+}
+.statusLine strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--x-text-sm);
+}
+.statusLine strong i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.statusLine[data-tone='ok'] strong {
+  color: var(--x-ok);
+}
+.statusLine[data-tone='fault'] strong {
+  color: var(--x-fault);
+}
+.statusLine[data-tone='recovering'] strong {
+  color: var(--x-recovering);
+}
+.statusLine[data-tone='stopped'] strong {
+  color: var(--x-stopped);
+}
+.resourceBlock {
+  display: grid;
+  gap: var(--x-space-4);
+}
+.metricRow {
+  display: grid;
+  gap: var(--x-space-2);
+}
+.metricRow > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--x-space-3);
+}
+.metricRow span {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.metricRow strong {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+}
+.metricRow small {
+  min-height: 1em;
+  color: var(--x-text-muted);
+  font-size: 11px;
+}
+.metricTrack {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--x-surface-3);
+}
+.metricTrack i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--vm-accent);
+}
+.vmCardFoot {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--x-space-3);
+  margin-top: auto;
+  padding-top: var(--x-space-4);
+  border-top: 1px solid var(--x-border);
+}
+.vmCardFoot > div {
+  min-width: 0;
+}
+.vmCardFoot p {
+  margin: 5px 0 0;
+  overflow: hidden;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vmCardFoot strong {
+  flex: 0 0 auto;
+  color: var(--vm-accent);
+  font-size: var(--x-text-sm);
+}
+
+@media (max-width: 1200px) {
+  .vmGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .overviewSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .summaryItem:nth-child(2) {
+    border-right: 0;
+  }
+  .summaryItem:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--x-border);
+  }
+}
+@media (max-width: 760px) {
+  .overviewTitle {
+    align-items: start;
+    flex-direction: column;
+  }
+  .overviewTitle > strong {
+    padding: 0;
+  }
+  .overviewSummary,
+  .vmGrid {
+    grid-template-columns: 1fr;
+  }
+  .summaryItem {
+    border-right: 0;
+    border-bottom: 1px solid var(--x-border);
+  }
+  .summaryItem:last-child {
+    border-bottom: 0;
+  }
+  .vmCard {
+    min-height: 0;
+    padding: var(--x-space-4);
+  }
+}
+
+/* ---- S15P31E110-299 관측 중심 VM 상세 ---- */
+.vmDetailPage {
+  display: grid;
+  gap: var(--x-space-4);
+  max-width: 1500px;
+  margin: 0 auto;
+}
+.vmDetailHero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--x-space-5);
+  padding: var(--x-space-5);
+  overflow: hidden;
+  border: 1px solid var(--x-border);
+  border-radius: 16px;
+  background: var(--x-surface);
+}
+.vmDetailHero::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 4px;
+  background: var(--vm-accent);
+  content: '';
+}
+.vmDetailHero h1 {
+  margin: 6px 0 0;
+  font-size: clamp(34px, 4vw, 52px);
+  letter-spacing: -0.04em;
+}
+.vmDetailHero p {
+  margin: 4px 0 0;
+  color: var(--x-text-muted);
+}
+.vmDetailBadges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--x-space-2);
+}
+.vmDetailGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--x-space-4);
+}
+.resourceFacts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--x-space-2);
+  margin-bottom: var(--x-space-4);
+}
+.resourceFacts > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--x-space-3);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+}
+.resourceFacts span {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.resourceFacts strong {
+  overflow: hidden;
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resourceFacts small {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.telemetryEmpty {
+  display: grid;
+  place-items: center;
+  gap: var(--x-space-2);
+  min-height: 160px;
+  padding: var(--x-space-5);
+  border: 1px dashed var(--x-border);
+  border-radius: var(--x-radius-sm);
+  color: var(--x-text-muted);
+  text-align: center;
+}
+.telemetryEmpty strong {
+  color: var(--x-text);
+  font-size: var(--x-text-lg);
+}
+.detailEvents {
+  display: grid;
+}
+.detailEvents > div {
+  display: grid;
+  grid-template-columns: 90px 82px minmax(0, 1fr);
+  gap: var(--x-space-3);
+  align-items: start;
+  padding: var(--x-space-3) 0;
+  border-bottom: 1px solid var(--x-border);
+}
+.detailEvents > div:last-child {
+  border-bottom: 0;
+}
+.detailEvents > div > div {
+  display: grid;
+  gap: 3px;
+}
+.detailEvents small {
+  color: var(--x-text-muted);
+}
+.controlHandoff {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--x-space-4);
+  padding: var(--x-space-4) var(--x-space-5);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  background: color-mix(in srgb, var(--x-surface) 72%, var(--x-bg));
+}
+.controlHandoff > div {
+  display: grid;
+  gap: 3px;
+}
+.controlHandoff span {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.controlHandoff a {
+  flex: 0 0 auto;
+  font-weight: 700;
+  text-decoration: none;
+}
+@media (max-width: 800px) {
+  .vmDetailHero,
+  .controlHandoff {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .vmDetailBadges {
+    justify-content: flex-start;
+  }
+  .vmDetailGrid,
+  .resourceFacts {
+    grid-template-columns: 1fr;
+  }
+  .detailEvents > div {
+    grid-template-columns: 76px 74px minmax(0, 1fr);
+    gap: var(--x-space-2);
+  }
+}
+
+/* ---- S15P31E110-299 VM별 CPU 시계열 ---- */
+.contentHeading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--x-space-4);
+  padding: var(--x-space-2) 0;
+}
+.contentHeading h1,
+.contentHeading h2 {
+  margin: 6px 0 0;
+  color: var(--x-text);
+  font-size: clamp(30px, 3vw, 46px);
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+}
+.contentEyebrow {
+  color: var(--x-primary);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.consoleHint {
+  margin: calc(var(--x-space-2) * -1) 0 0;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.cpuGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--x-space-4);
+}
+.cpuCard {
+  min-width: 0;
+  border-top: 4px solid var(--vm-accent);
+}
+.cpuCardTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-2);
+}
+.cpuCardTitle > i {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--vm-accent);
+}
+.cpuCardTitle > span {
+  display: grid;
+  gap: 2px;
+}
+.cpuCardTitle strong {
+  font-size: var(--x-text-lg);
+}
+.cpuCardTitle small {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  font-weight: 500;
+}
+.cpuCurrent {
+  color: var(--vm-accent);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xl);
+  font-weight: 800;
+}
+.cpuChart {
+  position: relative;
+  min-height: 260px;
+  padding: var(--x-space-3) 0 var(--x-space-5);
+  border-block: 1px solid var(--x-border);
+}
+.cpuChart svg {
+  display: block;
+  width: 100%;
+  height: 220px;
+  overflow: visible;
+}
+.cpuGridLine {
+  stroke: var(--x-border);
+  stroke-width: 0.5;
+}
+.cpuLine {
+  fill: none;
+  stroke: var(--vm-accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+.cpuEmpty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--x-space-2);
+  min-height: 220px;
+  color: var(--x-text-muted);
+  text-align: center;
+}
+.cpuEmpty strong {
+  color: var(--x-text);
+}
+.cpuEmpty span {
+  max-width: 280px;
+  font-size: var(--x-text-xs);
+}
+.cpuAxis {
+  position: absolute;
+  right: 0;
+  bottom: 7px;
+  left: 0;
+  display: flex;
+  justify-content: space-between;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+}
+.cpuMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--x-space-3);
+  padding-top: var(--x-space-3);
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 11px;
+}
+@media (max-width: 1200px) {
+  .cpuGrid {
+    grid-template-columns: 1fr;
+  }
+  .cpuChart svg,
+  .cpuEmpty {
+    min-height: 200px;
+    height: 200px;
+  }
+}

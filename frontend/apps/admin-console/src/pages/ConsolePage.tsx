@@ -27,16 +27,16 @@ export function ConsolePage() {
 
   return (
     <div className={styles.page}>
-      <section className={styles.pageHead}>
+      <header className={styles.contentHeading}>
         <div>
-          <div className={styles.eyebrow}>웹 콘솔 · 게스트 터미널</div>
-          <h1>VM 을 골라 바로 입력</h1>
+          <span className={styles.contentEyebrow}>VM ACCESS</span>
+          <h1>VM Console</h1>
         </div>
-        <span className={styles.grow} />
-        <span className={styles.dim}>
-          [연결]로 접속 · VM 당 쓰기 세션 1개 · 연결 해제는 VM 을 끄지 않는다
-        </span>
-      </section>
+      </header>
+
+      <p className={styles.consoleHint}>
+        [연결]로 접속 · VM 당 쓰기 세션 1개 · 연결 해제는 VM 을 끄지 않습니다.
+      </p>
 
       {vms.error && (
         <p className={styles.error} role="alert">

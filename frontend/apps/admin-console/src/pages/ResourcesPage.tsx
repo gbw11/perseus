@@ -1,7 +1,8 @@
 import { Card } from '@xenova/ui';
 import type { CSSProperties } from 'react';
-import { useVms } from '../api/queries';
-import { ROLES, vmOf, type AppId } from '../domain/roles';
+import { useMetrics, useVms } from '../api/queries';
+import type { MetricSample, Vm } from '../api/types';
+import { ROLE_ORDER, ROLES, vmOf, type AppId, type Role } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
 
@@ -49,15 +50,18 @@ export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all
   const guests = DOMAINS.filter((d) => d.id !== 'dom0');
   const totalWeight = guests.reduce((sum, d) => sum + WEIGHT[d.id], 0);
 
+  if (view === 'cpu') {
+    return <CpuDashboard items={vms.data?.items} drive={drive} pending={vms.isPending} />;
+  }
+
   return (
     <div className={styles.page}>
-      <section className={styles.pageHead}>
+      <header className={styles.contentHeading}>
         <div>
-          <div className={styles.eyebrow}>자원 · Cortex-A72 4코어 · Xen credit2</div>
-          <h1>{view === 'cpu' ? 'CPU' : view === 'memory' ? 'Memory' : 'vCPU·스케줄러·메모리'}</h1>
+          <span className={styles.contentEyebrow}>RESOURCE MONITORING</span>
+          <h1>Memory Usage</h1>
         </div>
-        <span className={styles.grow} />
-      </section>
+      </header>
 
       {view !== 'memory' && (
         <Card
@@ -102,8 +106,7 @@ export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all
             </tbody>
           </table>
           <p className={styles.dim}>
-            자율주행·수동주행은 코어를 혼자 쓴다 — 네비게이션이 바빠져도 주행 명령 주기(50 Hz)가 흔들리지
-            않게.
+            주행 VM A·B는 코어를 혼자 쓴다 — 인포테인먼트 VM이 바빠져도 주행 명령 주기(50 Hz)가 흔들리지 않게.
           </p>
         </Card>
       )}
@@ -132,41 +135,148 @@ export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all
             })}
           </Card>
         )}
-        {view !== 'cpu' && (
-          <Card title="메모리" actions={<span className={styles.mono}>합계 {totalMemory} MiB</span>}>
-            <div className={styles.stack}>
-              {DOMAINS.map((d) => {
-                const share = totalMemory ? memory(d.id) / totalMemory : 0;
-                return (
-                  <i
-                    key={d.id}
-                    title={`${d.title} ${memory(d.id)} MiB`}
-                    style={{ flexGrow: memory(d.id), background: d.color }}
-                  >
-                    {share > 0.15 ? d.title : ''}
-                  </i>
-                );
-              })}
-            </div>
-            <div className={styles.rows}>
-              {DOMAINS.map((d) => (
-                <div key={d.id}>
-                  <span className={styles.legend}>
-                    <i style={{ background: d.color }} />
-                    {d.title}
-                  </span>
-                  <span className={styles.mono}>
-                    {memory(d.id) ? `${memory(d.id)} MiB` : '—'}
-                    {totalMemory && memory(d.id)
-                      ? ` · ${((memory(d.id) / totalMemory) * 100).toFixed(1)}%`
-                      : ''}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
+        <Card title="메모리" actions={<span className={styles.mono}>합계 {totalMemory} MiB</span>}>
+          <div className={styles.stack}>
+            {DOMAINS.map((d) => {
+              const share = totalMemory ? memory(d.id) / totalMemory : 0;
+              return (
+                <i
+                  key={d.id}
+                  title={`${d.title} ${memory(d.id)} MiB`}
+                  style={{ flexGrow: memory(d.id), background: d.color }}
+                >
+                  {share > 0.15 ? d.title : ''}
+                </i>
+              );
+            })}
+          </div>
+          <div className={styles.rows}>
+            {DOMAINS.map((d) => (
+              <div key={d.id}>
+                <span className={styles.legend}>
+                  <i style={{ background: d.color }} />
+                  {d.title}
+                </span>
+                <span className={styles.mono}>
+                  {memory(d.id) ? `${memory(d.id)} MiB` : '—'}
+                  {totalMemory && memory(d.id)
+                    ? ` · ${((memory(d.id) / totalMemory) * 100).toFixed(1)}%`
+                    : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
       </div>
     </div>
   );
+}
+
+function CpuDashboard({
+  items,
+  drive,
+  pending,
+}: {
+  items: Vm[] | undefined;
+  drive: ReturnType<typeof useDrive>['drive'];
+  pending: boolean;
+}) {
+  return (
+    <div className={styles.page}>
+      <header className={styles.contentHeading}>
+        <div>
+          <span className={styles.contentEyebrow}>RESOURCE MONITORING</span>
+          <h1>CPU Usage</h1>
+        </div>
+      </header>
+
+      {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
+
+      <div className={styles.cpuGrid}>
+        {ROLE_ORDER.map((app) => (
+          <CpuVmChart key={app} role={ROLES[app]} vm={vmOf(app, items, drive)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CpuVmChart({ role, vm }: { role: Role; vm: Vm | undefined }) {
+  const metrics = useMetrics(vm?.vm_id ?? '', !!vm);
+  const samples = metrics.data?.items ?? [];
+  const values = samples.map((sample) => cpuValue(sample)).filter((value): value is number => value != null);
+  const current = values.at(-1) ?? null;
+  const points = samples
+    .map((sample, index) => {
+      const value = cpuValue(sample);
+      if (value == null) return null;
+      const x = samples.length <= 1 ? 100 : (index / (samples.length - 1)) * 100;
+      const y = 100 - Math.max(0, Math.min(100, value));
+      return `${x},${y}`;
+    })
+    .filter((point): point is string => point != null)
+    .join(' ');
+  const style = { '--vm-accent': role.color } as CSSProperties;
+
+  return (
+    <Card
+      className={styles.cpuCard}
+      style={style}
+      title={
+        <span className={styles.cpuCardTitle}>
+          <i aria-hidden="true" />
+          <span>
+            <strong>{role.vmLabel}</strong>
+            <small>{role.title}</small>
+          </span>
+        </span>
+      }
+      actions={<span className={styles.cpuCurrent}>{current == null ? '—' : `${current.toFixed(1)}%`}</span>}
+    >
+      <div className={styles.cpuChart}>
+        {points ? (
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label={`${role.vmLabel} CPU 사용률 최근 5분 그래프`}
+          >
+            {[0, 25, 50, 75, 100].map((value) => (
+              <line
+                key={value}
+                x1="0"
+                x2="100"
+                y1={100 - value}
+                y2={100 - value}
+                className={styles.cpuGridLine}
+              />
+            ))}
+            <polyline points={points} className={styles.cpuLine} vectorEffect="non-scaling-stroke" />
+          </svg>
+        ) : (
+          <div className={styles.cpuEmpty}>
+            <strong>{metrics.isPending ? '메트릭 수신 대기 중' : 'CPU 데이터 없음'}</strong>
+            <span>실제 측정값이 도착하면 최근 5분 그래프가 표시됩니다.</span>
+          </div>
+        )}
+        <div className={styles.cpuAxis} aria-hidden="true">
+          <span>5분 전</span>
+          <span>현재</span>
+        </div>
+      </div>
+
+      <div className={styles.cpuMeta}>
+        <span>
+          {vm ? `${vm.vcpus} vCPU · ${vm.guest_kind === 'zephyr' ? 'Zephyr' : 'Linux'}` : 'VM 연결 대기'}
+        </span>
+        <span>
+          {metrics.error ? '메트릭 연결 오류' : values.length ? `${values.length} samples` : 'No samples'}
+        </span>
+      </div>
+    </Card>
+  );
+}
+
+function cpuValue(sample: MetricSample): number | null {
+  return sample.values.find((value) => value.name === 'cpu_percent')?.value ?? null;
 }

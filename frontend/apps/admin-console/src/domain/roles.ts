@@ -11,6 +11,7 @@ export type AppId = 'autonomous' | 'manual' | 'message-board';
 
 export interface Role {
   app: AppId;
+  vmLabel: string;
   title: string;
   short: string;
   color: string;
@@ -21,22 +22,25 @@ export interface Role {
 export const ROLES: Record<AppId, Role> = {
   autonomous: {
     app: 'autonomous',
-    title: '자율주행 VM',
-    short: '자율주행',
+    vmLabel: 'VM A',
+    title: 'Driving VM A',
+    short: 'VM A',
     color: 'var(--x-app-autonomous)',
     driving: true,
   },
   manual: {
     app: 'manual',
-    title: '수동주행 VM',
-    short: '수동주행',
+    vmLabel: 'VM B',
+    title: 'Driving VM B',
+    short: 'VM B',
     color: 'var(--x-app-manual)',
     driving: true,
   },
   'message-board': {
     app: 'message-board',
-    title: '네비게이션 VM',
-    short: '네비게이션',
+    vmLabel: 'VM C',
+    title: 'Infotainment VM C',
+    short: 'VM C',
     color: 'var(--x-app-interaction)',
     driving: false,
   },
