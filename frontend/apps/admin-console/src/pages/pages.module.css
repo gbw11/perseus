@@ -993,6 +993,369 @@ button.chip:hover:not(.chipOn) {
     border-bottom: 1px solid var(--x-border);
   }
 }
+/* ---- S15P31E110-311 VM별 RX/TX 데이터 Pool ---- */
+.memoryHeadingMeta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--x-space-2);
+}
+.memoryHeadingMeta span {
+  padding: 6px 10px;
+  border: 1px solid var(--x-border);
+  border-radius: 999px;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+}
+.memoryVmGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--x-space-4);
+  align-items: stretch;
+}
+.memoryVmCard {
+  min-width: 0;
+  height: 100%;
+  border-top: 4px solid var(--vm-accent);
+}
+.memoryVmTitle {
+  display: grid;
+  gap: 3px;
+}
+.memoryVmTitle strong {
+  font-size: var(--x-text-lg);
+}
+.memoryVmTitle small,
+.memoryCardActions small {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  font-weight: 500;
+}
+.memoryCardActions {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+.memoryNotice {
+  margin-bottom: var(--x-space-3);
+  padding: 8px var(--x-space-3);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.memoryNotice[data-tone='fault'] {
+  background: var(--x-fault-soft);
+  color: var(--x-fault);
+}
+.poolSummaryGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--x-space-3);
+}
+.poolSummary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px var(--x-space-3);
+  min-width: 0;
+  padding: var(--x-space-4);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  background: var(--x-surface-2);
+  --pool-accent: var(--rx-accent);
+}
+.poolSummary[data-tone='tx'] {
+  --pool-accent: var(--tx-accent);
+}
+.poolSummaryHead {
+  display: contents;
+}
+.poolSummaryHead > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 700;
+}
+.poolSummaryHead > span i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--pool-accent);
+}
+.poolSummaryHead > strong {
+  color: var(--pool-accent);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+}
+.poolAmount {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+.poolAmount strong {
+  color: var(--x-text);
+  font-family: var(--x-font-mono);
+  font-size: clamp(18px, 1.5vw, 24px);
+  white-space: nowrap;
+}
+.poolAmount span,
+.poolFree span {
+  color: var(--x-text-muted);
+  font-size: 10px;
+}
+.poolFree {
+  display: grid;
+  justify-items: end;
+  align-content: center;
+  gap: 2px;
+}
+.poolFree strong {
+  color: var(--x-text);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+}
+.poolBar {
+  grid-column: 1 / -1;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--x-surface-sunken);
+}
+.poolBar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--pool-accent);
+}
+.memoryChartBlock {
+  margin-top: var(--x-space-3);
+  padding: var(--x-space-3);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  background: color-mix(in srgb, var(--x-surface-2) 55%, transparent);
+}
+.memoryChartBlock > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--x-space-3);
+  margin-bottom: var(--x-space-2);
+}
+.memoryLegend {
+  display: flex;
+  gap: var(--x-space-3);
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+}
+.memoryLegend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.memoryLegend i {
+  width: 15px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--rx-accent);
+}
+.memoryLegend span[data-tone='tx'] i {
+  background: var(--tx-accent);
+}
+.memoryChart {
+  position: relative;
+  min-height: 170px;
+  padding: var(--x-space-2) 0 var(--x-space-4);
+}
+.memoryChart svg {
+  display: block;
+  width: 100%;
+  height: 150px;
+  overflow: visible;
+}
+.memoryGridLine {
+  stroke: var(--x-border);
+  stroke-width: 0.45;
+}
+.memoryRxLine,
+.memoryTxLine {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+.memoryRxLine {
+  stroke: var(--rx-accent);
+}
+.memoryTxLine {
+  stroke: var(--tx-accent);
+}
+.memoryChartEmpty {
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.memoryChartMax {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 9px;
+}
+.memoryChartAxis {
+  position: absolute;
+  right: 0;
+  bottom: 1px;
+  left: 0;
+  display: flex;
+  justify-content: space-between;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+}
+.counterGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--x-space-2);
+  margin-top: var(--x-space-3);
+}
+.counterItem {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+}
+.counterItem span,
+.counterItem small {
+  overflow: hidden;
+  color: var(--x-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.counterItem strong {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+}
+.counterItem[data-active='true'] {
+  border-color: color-mix(in srgb, var(--x-recovering) 55%, var(--x-border));
+}
+.counterItem[data-active='true'] strong {
+  color: var(--x-recovering);
+}
+.memoryObservation {
+  margin-top: var(--x-space-2);
+  padding: 9px var(--x-space-3);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-sunken);
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.memoryPendingCard {
+  min-width: 0;
+}
+.memoryPendingIntro {
+  margin-bottom: var(--x-space-3);
+  padding: var(--x-space-3);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-sunken);
+}
+.memoryPendingIntro p {
+  margin: 5px 0 0;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.poolUnavailable {
+  min-height: 112px;
+}
+.poolUnavailableText {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 3px;
+  padding-top: var(--x-space-2);
+  border-top: 1px solid var(--x-border);
+}
+.poolUnavailableText strong {
+  color: var(--x-text);
+  font-size: var(--x-text-sm);
+}
+.poolUnavailableText span {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.memoryUnavailableChart > div {
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  align-content: center;
+  gap: var(--x-space-2);
+  border-block: 1px solid var(--x-border);
+  color: var(--x-text-muted);
+  text-align: center;
+}
+.memoryUnavailableChart > div strong {
+  color: var(--x-text);
+  font-size: var(--x-text-sm);
+}
+.memoryUnavailableChart > div span {
+  font-size: var(--x-text-xs);
+}
+.memoryPendingMeta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--x-space-2);
+  margin-top: var(--x-space-4);
+}
+.memoryPendingMeta > span {
+  display: grid;
+  gap: 4px;
+  padding: var(--x-space-3);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+}
+.memoryPendingMeta small {
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+}
+.memoryPendingMeta strong {
+  font-size: var(--x-text-sm);
+}
+@media (max-width: 1200px) {
+  .memoryVmGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .contentHeading,
+  .memoryVmTitle,
+  .memoryCardActions {
+    align-items: flex-start;
+  }
+  .contentHeading,
+  .memoryCardActions {
+    flex-direction: column;
+  }
+  .memoryHeadingMeta {
+    justify-content: flex-start;
+  }
+  .memoryCardActions {
+    justify-items: start;
+  }
+}
+@media (max-width: 760px) {
+  .memoryVmGrid {
+    grid-template-columns: 1fr;
+  }
+}
 @media (max-width: 760px) {
   .overviewTitle {
     align-items: start;
@@ -1303,5 +1666,11 @@ button.chip:hover:not(.chipOn) {
   .cpuEmpty {
     min-height: 200px;
     height: 200px;
+  }
+}
+@media (max-width: 720px) {
+  .page .contentHeading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

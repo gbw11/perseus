@@ -46,6 +46,7 @@
   --x-app-autonomous: #2f6fed;
   --x-app-manual: #8a4ddb;
   --x-app-interaction: #db2777;
+  --x-pool-tx: #8a4ddb;
   /* 시뮬레이터 화면 (시뮬레이터 시연 시나리오 §4): 칸 색, 트랙 노면·가장자리·중앙선 */
   --x-app-simulator: #0f8f7e;
   --x-track-road: #c9ced6;
@@ -87,6 +88,7 @@
   --x-app-autonomous: #38bdf8;
   --x-app-manual: #a78bfa;
   --x-app-interaction: #f472b6;
+  --x-pool-tx: #a78bfa;
   --x-app-simulator: #2dd4bf;
   --x-track-road: #2b313b;
   --x-track-edge: #59606b;
@@ -124,6 +126,7 @@
   --x-app-autonomous: #c0e1e1;
   --x-app-manual: #c83f53;
   --x-app-interaction: #e5dcc8;
+  --x-pool-tx: #b991e8;
   --x-app-simulator: #7ebfc2;
   --x-track-road: #2b3745;
   --x-track-edge: #637082;
