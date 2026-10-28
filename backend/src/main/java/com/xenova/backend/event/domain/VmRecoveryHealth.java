@@ -65,11 +65,6 @@ public class VmRecoveryHealth {
             Long completedRecoveryDurationMs,
             Instant occurredAt,
             Instant updatedAt) {
-        this.lastEventId = eventId;
-        this.recoveryId = recoveryId;
-        this.recoveryAttemptId = recoveryAttemptId;
-        this.status = status;
-        this.attempt = attempt;
         if (completed) {
             this.recoveriesTotal++;
             this.lastRecoveryDurationMs = completedRecoveryDurationMs;
@@ -77,7 +72,14 @@ public class VmRecoveryHealth {
         if (finalFailure) {
             this.finalFailuresTotal++;
         }
-        this.lastOccurredAt = occurredAt;
+        if (this.lastOccurredAt == null || !occurredAt.isBefore(this.lastOccurredAt)) {
+            this.lastEventId = eventId;
+            this.recoveryId = recoveryId;
+            this.recoveryAttemptId = recoveryAttemptId;
+            this.status = status;
+            this.attempt = attempt;
+            this.lastOccurredAt = occurredAt;
+        }
         this.updatedAt = updatedAt;
     }
 

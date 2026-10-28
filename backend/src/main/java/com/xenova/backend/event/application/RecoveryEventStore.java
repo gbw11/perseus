@@ -4,6 +4,8 @@ import com.xenova.backend.event.domain.EventSeverity;
 import com.xenova.backend.event.domain.EventType;
 import com.xenova.backend.event.domain.VmEvent;
 import com.xenova.backend.event.domain.VmEventRepository;
+import com.xenova.backend.event.domain.VmRecoveryHealth;
+import com.xenova.backend.event.domain.VmRecoveryHealthRepository;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -16,10 +18,15 @@ import org.springframework.transaction.annotation.Transactional;
 public class RecoveryEventStore {
 
     private final VmEventRepository repository;
+    private final VmRecoveryHealthRepository healthRepository;
     private final ApplicationEventPublisher eventPublisher;
 
-    public RecoveryEventStore(VmEventRepository repository, ApplicationEventPublisher eventPublisher) {
+    public RecoveryEventStore(
+            VmEventRepository repository,
+            VmRecoveryHealthRepository healthRepository,
+            ApplicationEventPublisher eventPublisher) {
         this.repository = repository;
+        this.healthRepository = healthRepository;
         this.eventPublisher = eventPublisher;
     }
 
@@ -44,8 +51,40 @@ public class RecoveryEventStore {
                 source.occurredAt(),
                 receivedAt,
                 payload(source)));
+        updateHealth(source, receivedAt);
         eventPublisher.publishEvent(new EventRecorded(stored));
         return StoreResult.STORED;
+    }
+
+    private void updateHealth(RecoveryEvent source, Instant receivedAt) {
+        String vmId = source.vmId().toString();
+        VmRecoveryHealth health = healthRepository.findById(vmId)
+                .orElseGet(() -> new VmRecoveryHealth(vmId, receivedAt));
+        boolean completed = source.type() == RecoveryEvent.Type.COMPLETED;
+        boolean finalFailure = source.type() == RecoveryEvent.Type.FAILED
+                && Boolean.TRUE.equals(source.finalAttempt());
+        health.update(
+                source.eventId().toString(),
+                source.recoveryId().toString(),
+                source.recoveryAttemptId() == null ? null : source.recoveryAttemptId().toString(),
+                healthStatus(source),
+                source.attempt(),
+                completed,
+                finalFailure,
+                completed ? source.recoveryDurationMs() : null,
+                source.occurredAt(),
+                receivedAt);
+        healthRepository.save(health);
+    }
+
+    private static String healthStatus(RecoveryEvent event) {
+        return switch (event.type()) {
+            case STARTED -> "STARTED";
+            case COMPLETED -> "COMPLETED";
+            case RECOVERED -> "RECOVERED";
+            case CANCELLED -> "CANCELLED";
+            case FAILED -> Boolean.TRUE.equals(event.finalAttempt()) ? "FAILED" : "RETRYING";
+        };
     }
 
     private static EventType eventType(RecoveryEvent.Type type) {

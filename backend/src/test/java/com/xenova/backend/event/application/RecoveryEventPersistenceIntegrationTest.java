@@ -6,6 +6,8 @@ import com.xenova.backend.event.domain.EventSeverity;
 import com.xenova.backend.event.domain.EventType;
 import com.xenova.backend.event.domain.VmEvent;
 import com.xenova.backend.event.domain.VmEventRepository;
+import com.xenova.backend.event.domain.VmRecoveryHealth;
+import com.xenova.backend.event.domain.VmRecoveryHealthRepository;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -35,8 +37,12 @@ class RecoveryEventPersistenceIntegrationTest {
     @Autowired
     private VmEventRepository repository;
 
+    @Autowired
+    private VmRecoveryHealthRepository healthRepository;
+
     @BeforeEach
     void clearEvents() {
+        healthRepository.deleteAll();
         repository.deleteAll();
     }
 
@@ -51,6 +57,11 @@ class RecoveryEventPersistenceIntegrationTest {
                 .isEqualTo(RecoveryEventMessageHandler.Result.DUPLICATE);
 
         assertThat(repository.countByEventId(eventId)).isEqualTo(1);
+        VmRecoveryHealth health = healthRepository.findById(VM_ID).orElseThrow();
+        assertThat(health.getLastEventId()).isEqualTo(eventId);
+        assertThat(health.getStatus()).isEqualTo("STARTED");
+        assertThat(health.getRecoveriesTotal()).isZero();
+        assertThat(health.getFinalFailuresTotal()).isZero();
     }
 
     @Test
@@ -75,6 +86,34 @@ class RecoveryEventPersistenceIntegrationTest {
         }
 
         assertThat(repository.countByEventId(eventId)).isEqualTo(1);
+        assertThat(healthRepository.findById(VM_ID).orElseThrow().getLastEventId()).isEqualTo(eventId);
+    }
+
+    @Test
+    void lifecycleKeepsCompletedDurationAndCountsOnlyFinalFailure() {
+        assertThat(handler.handle(event(eventId(301), "recovery.started", ""), RECEIVED_AT))
+                .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
+        assertThat(handler.handle(event(eventId(302), "recovery.failed",
+                        ",\"attempt_duration_ms\":500,\"final\":false,"
+                                + "\"next_retry_at\":\"2026-10-28T00:00:05Z\",\"error\":" + error()),
+                        RECEIVED_AT.plusMillis(1)))
+                .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
+        assertThat(handler.handle(event(eventId(303), "recovery.completed",
+                        ",\"attempt_duration_ms\":500,\"recovery_duration_ms\":1250,"
+                                + "\"execution_id\":\"exec-new\""),
+                        RECEIVED_AT.plusMillis(2)))
+                .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
+        assertThat(handler.handle(event(eventId(304), "recovery.recovered",
+                        ",\"attempt_duration_ms\":500,\"recovery_duration_ms\":1300"),
+                        RECEIVED_AT.plusMillis(3)))
+                .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
+
+        VmRecoveryHealth health = healthRepository.findById(VM_ID).orElseThrow();
+        assertThat(health.getStatus()).isEqualTo("RECOVERED");
+        assertThat(health.getRecoveriesTotal()).isEqualTo(1);
+        assertThat(health.getFinalFailuresTotal()).isZero();
+        assertThat(health.getLastRecoveryDurationMs()).isEqualTo(1250L);
+        assertThat(repository.count()).isEqualTo(4);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -85,7 +124,11 @@ class RecoveryEventPersistenceIntegrationTest {
             String externalType,
             String terminalFields,
             EventType storedType,
-            EventSeverity severity) {
+            EventSeverity severity,
+            String healthStatus,
+            long recoveriesTotal,
+            long finalFailuresTotal,
+            Long recoveryDurationMs) {
         String eventId = eventId(eventNumber);
 
         assertThat(handler.handle(event(eventId, externalType, terminalFields), RECEIVED_AT))
@@ -99,6 +142,12 @@ class RecoveryEventPersistenceIntegrationTest {
         assertThat(stored.getCorrelationId()).isEqualTo(ATTEMPT_ID);
         assertThat(stored.getOccurredAt()).isEqualTo(Instant.parse("2026-10-28T00:00:01Z"));
         assertThat(stored.getRecordedAt()).isEqualTo(RECEIVED_AT);
+        VmRecoveryHealth health = healthRepository.findById(VM_ID).orElseThrow();
+        assertThat(health.getLastEventId()).isEqualTo(eventId);
+        assertThat(health.getStatus()).isEqualTo(healthStatus);
+        assertThat(health.getRecoveriesTotal()).isEqualTo(recoveriesTotal);
+        assertThat(health.getFinalFailuresTotal()).isEqualTo(finalFailuresTotal);
+        assertThat(health.getLastRecoveryDurationMs()).isEqualTo(recoveryDurationMs);
     }
 
     private RecoveryEventMessageHandler.Result handleWhenReleased(
@@ -111,24 +160,30 @@ class RecoveryEventPersistenceIntegrationTest {
     private static Stream<Arguments> eventCases() {
         return Stream.of(
                 Arguments.of("started", 201, "recovery.started", "",
-                        EventType.RECOVERY_STARTED, EventSeverity.INFO),
+                        EventType.RECOVERY_STARTED, EventSeverity.INFO,
+                        "STARTED", 0L, 0L, null),
                 Arguments.of("completed", 202, "recovery.completed",
                         ",\"attempt_duration_ms\":500,\"recovery_duration_ms\":1000,\"execution_id\":\"exec-new\"",
-                        EventType.RECOVERY_COMPLETED, EventSeverity.INFO),
+                        EventType.RECOVERY_COMPLETED, EventSeverity.INFO,
+                        "COMPLETED", 1L, 0L, 1000L),
                 Arguments.of("recovered", 203, "recovery.recovered",
                         ",\"attempt_duration_ms\":500,\"recovery_duration_ms\":1000",
-                        EventType.RECOVERY_RECOVERED, EventSeverity.INFO),
+                        EventType.RECOVERY_RECOVERED, EventSeverity.INFO,
+                        "RECOVERED", 0L, 0L, null),
                 Arguments.of("cancelled", 204, "recovery.cancelled",
                         ",\"attempt_duration_ms\":500,\"recovery_duration_ms\":1000,\"error\":" + error(),
-                        EventType.RECOVERY_CANCELLED, EventSeverity.INFO),
+                        EventType.RECOVERY_CANCELLED, EventSeverity.INFO,
+                        "CANCELLED", 0L, 0L, null),
                 Arguments.of("retryable failed", 205, "recovery.failed",
                         ",\"attempt_duration_ms\":500,\"final\":false,"
                                 + "\"next_retry_at\":\"2026-10-28T00:00:05Z\",\"error\":" + error(),
-                        EventType.RECOVERY_FAILED, EventSeverity.WARNING),
+                        EventType.RECOVERY_FAILED, EventSeverity.WARNING,
+                        "RETRYING", 0L, 0L, null),
                 Arguments.of("final failed", 206, "recovery.failed",
                         ",\"attempt_duration_ms\":500,\"recovery_duration_ms\":1000,"
                                 + "\"final\":true,\"error\":" + error(),
-                        EventType.RECOVERY_FAILED, EventSeverity.ERROR));
+                        EventType.RECOVERY_FAILED, EventSeverity.ERROR,
+                        "FAILED", 0L, 1L, null));
     }
 
     private static byte[] event(String eventId, String type, String terminalFields) {

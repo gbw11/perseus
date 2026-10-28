@@ -11,6 +11,8 @@ import com.xenova.backend.event.domain.EventSeverity;
 import com.xenova.backend.event.domain.EventType;
 import com.xenova.backend.event.domain.VmEvent;
 import com.xenova.backend.event.domain.VmEventRepository;
+import com.xenova.backend.event.domain.VmRecoveryHealth;
+import com.xenova.backend.event.domain.VmRecoveryHealthRepository;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -26,8 +28,9 @@ class RecoveryEventStoreTest {
     private static final UUID ATTEMPT_ID = UUID.fromString("00000000-0000-0000-0000-000000000004");
 
     private final VmEventRepository repository = mock(VmEventRepository.class);
+    private final VmRecoveryHealthRepository healthRepository = mock(VmRecoveryHealthRepository.class);
     private final ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-    private final RecoveryEventStore store = new RecoveryEventStore(repository, publisher);
+    private final RecoveryEventStore store = new RecoveryEventStore(repository, healthRepository, publisher);
 
     @Test
     void storesExternalIdentityCorrelationSeverityAndPayload() {
@@ -48,6 +51,10 @@ class RecoveryEventStoreTest {
         assertThat(saved.getOccurredAt()).isEqualTo(Instant.parse("2026-10-23T01:00:01Z"));
         assertThat(saved.getRecordedAt()).isEqualTo(RECEIVED_AT);
         assertThat(saved.getPayload()).containsEntry("attempt", 1).containsEntry("final", false);
+        ArgumentCaptor<VmRecoveryHealth> healthCaptor = ArgumentCaptor.forClass(VmRecoveryHealth.class);
+        verify(healthRepository).save(healthCaptor.capture());
+        assertThat(healthCaptor.getValue().getStatus()).isEqualTo("RETRYING");
+        assertThat(healthCaptor.getValue().getFinalFailuresTotal()).isZero();
         verify(publisher).publishEvent(any(EventRecorded.class));
     }
 
