@@ -2,6 +2,7 @@ package com.xenova.backend.vm.api;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -84,10 +85,10 @@ class VmApiIntegrationTest {
 
     @Test
     void zephyrAcceptsItsFixed16MibProfileButNot15() throws Exception {
-        createVm("zephyr-16", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 16)
+        createVm("zephyr-16", "zephyr-xenvm-starter-arm64", "1.1.0", 1, 16)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.memory_mib").value(16));
-        createVm("zephyr-15", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 15)
+        createVm("zephyr-15", "zephyr-xenvm-starter-arm64", "1.1.0", 1, 15)
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.errors[0].field").value("memory_mib"));
@@ -95,7 +96,7 @@ class VmApiIntegrationTest {
 
     @Test
     void linuxTemplatesKeepTheirOwnMinimumBelowTheCommonFloor() throws Exception {
-        createVm("debian-16", "debian-13-arm64", "1.0.0", 1, 16)
+        createVm("debian-16", "debian-13-arm64", "1.0.2", 1, 16)
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
 
@@ -221,20 +222,23 @@ class VmApiIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].template_id").value("debian-13-arm64"))
-                .andExpect(jsonPath("$[0].version").value("1.0.0"))
-                .andExpect(jsonPath("$[0].display_name").value("Debian 12"))
+                .andExpect(jsonPath("$[0].version").value("1.0.2"))
+                .andExpect(jsonPath("$[0].display_name").value("Debian 13"))
                 .andExpect(jsonPath("$[0].guest_kind").value("linux"))
+                .andExpect(jsonPath("$[1].version").value("1.0.2"))
                 .andExpect(jsonPath("$[1].min_memory_mib").value(512))
                 .andExpect(jsonPath("$[2].template_id").value("zephyr-xenvm-starter-arm64"))
+                .andExpect(jsonPath("$[2].version").value("1.1.0"))
+                .andExpect(jsonPath("$[2].display_name").value("Zephyr Network Starter 1.1.0"))
                 .andExpect(jsonPath("$[2].guest_kind").value("zephyr"));
     }
 
     @Test
     void vmsCarryTheGuestKindOfTheirTemplate() throws Exception {
-        createVm("zephyr-01", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 16)
+        createVm("zephyr-01", "zephyr-xenvm-starter-arm64", "1.1.0", 1, 16)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.guest_kind").value("zephyr"));
-        createVm("debian-02", "debian-13-arm64", "1.0.0", 1, 256)
+        createVm("debian-02", "debian-13-arm64", "1.0.2", 1, 256)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.guest_kind").value("linux"));
 
@@ -256,7 +260,7 @@ class VmApiIntegrationTest {
 
     @Test
     void createRejectsMemoryBelowTemplateMinimum() throws Exception {
-        createVm("ubuntu-01", "ubuntu-24.04-arm64", "1.0.0", 1, 511)
+        createVm("ubuntu-01", "ubuntu-24.04-arm64", "1.0.2", 1, 511)
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
 
@@ -265,7 +269,7 @@ class VmApiIntegrationTest {
 
     @Test
     void createStoresTheRoleAndListsIt() throws Exception {
-        String vmId = vmIdOf(createVm("drive-a", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 16, "\"primary_drive\"")
+        String vmId = vmIdOf(createVm("drive-a", "zephyr-xenvm-starter-arm64", "1.1.0", 1, 16, "\"primary_drive\"")
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.role").value("primary_drive")));
 
@@ -281,6 +285,15 @@ class VmApiIntegrationTest {
         createVm("debian-01", 1, 256)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.role").isEmpty());
+    }
+
+    @Test
+    void createForwardsTheCatalogTemplateVersionToDom0Manager() throws Exception {
+        createVm("ubuntu-forwarding", "ubuntu-24.04-arm64", "1.0.2", 1, 512)
+                .andExpect(status().isCreated());
+
+        verify(vmControlPort).launch(anyString(), eq(
+                new VmLaunchSpec("ubuntu-forwarding", "ubuntu-24.04-arm64", "1.0.2", 1, 512)));
     }
 
     @Test
@@ -304,7 +317,7 @@ class VmApiIntegrationTest {
 
     @Test
     void unknownRoleIsAValidationError() throws Exception {
-        createVm("pilot-01", "debian-13-arm64", "1.0.0", 1, 256, "\"pilot\"")
+        createVm("pilot-01", "debian-13-arm64", "1.0.2", 1, 256, "\"pilot\"")
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.errors[0].field").value("role"));
@@ -349,7 +362,7 @@ class VmApiIntegrationTest {
 
     private org.springframework.test.web.servlet.ResultActions createVm(String name, int vcpus, int memoryMib)
             throws Exception {
-        return createVm(name, "debian-13-arm64", "1.0.0", vcpus, memoryMib);
+        return createVm(name, "debian-13-arm64", "1.0.2", vcpus, memoryMib);
     }
 
     private org.springframework.test.web.servlet.ResultActions createVm(
