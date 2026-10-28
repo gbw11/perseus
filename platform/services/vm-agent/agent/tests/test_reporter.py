@@ -6,6 +6,7 @@ import json
 
 from xenova_mqtt import Identity, envelope
 
+from xenova_agent.processes import ProcessSample
 from xenova_agent.reporter import Reporter
 
 VM_ID = "11111111-1111-4111-8111-111111111111"
@@ -28,14 +29,19 @@ class FakeClient:
         return [p[1] for p in self.published]
 
 
-def make(client, *, inventory=None, processes=None, clock=None, **kwargs):
+def ok_sample(rows):
+    rows = list(rows or [])
+    return ProcessSample("ok", rows, discovered=len(rows), read_ok=len(rows), candidates=len(rows))
+
+
+def make(client, *, inventory=None, processes=None, sample=None, clock=None, **kwargs):
     state = {"inventory": dict(inventory or INVENTORY)}
     t = clock or [100.0]
     reporter = Reporter(
         client, VM_ID,
         collect_inventory=lambda: dict(state["inventory"]),
         collect_metrics=lambda: [dict(v) for v in VALUES],
-        collect_processes=lambda: list(processes or []),
+        collect_processes=lambda: sample if sample is not None else ok_sample(processes),
         interval_s=2.0, inventory_refresh_s=60.0, clock=lambda: t[0], **kwargs,
     )
     return reporter, state, t
@@ -92,6 +98,26 @@ def test_oversized_payload_drops_processes_from_the_tail():
     sent = client.published[-1][2]["processes"]
     assert 0 < len(sent) < 40 and sent == processes[: len(sent)]
     assert len(json.dumps(client.published[-1][2]).encode()) <= 3000
+    assert client.published[-1][2]["process_collection"]["truncated"] is True  # 크기 상한으로 줄인 것도 잘림이다
+
+
+def test_process_collection_tells_why_the_list_is_empty():
+    client = FakeClient()
+    failed = ProcessSample("read_failed", error="PermissionError(EACCES)")
+    reporter, _, _ = make(client, sample=failed)
+    reporter.tick()
+    metrics = client.published[-1][2]
+    assert metrics["processes"] == []
+    assert metrics["process_collection"] == {"status": "read_failed", "discovered": 0, "read_ok": 0, "vanished": 0, "failed": 0,
+                                             "truncated": False, "error": "PermissionError(EACCES)"}
+
+    client2 = FakeClient()
+    partial = ProcessSample("partial", [{"pid": 1, "name": "a", "cpu_percent": 1.0, "rss_bytes": 1}], discovered=5, read_ok=3,
+                            vanished=1, failed=1, candidates=3)
+    reporter2, _, _ = make(client2, sample=partial)
+    reporter2.tick()
+    collection = client2.published[-1][2]["process_collection"]
+    assert (collection["status"], collection["failed"], collection["truncated"], collection["error"]) == ("partial", 1, True, None)
 
 
 def test_collection_or_publish_errors_skip_the_tick_without_stopping():
@@ -121,7 +147,9 @@ def test_payloads_follow_the_spring_receiver_rules():
     inv = client.published[0][2]
     assert inv["os"]["id"] and inv["kernel_release"] and inv["hostname"]
     metrics = client.published[1][2]
-    assert set(metrics) == {"window_ms", "values", "processes"}
+    assert set(metrics) == {"window_ms", "values", "processes", "process_collection"}
+    assert set(metrics["process_collection"]) == {"status", "discovered", "read_ok", "vanished", "failed", "truncated", "error"}
+    assert metrics["process_collection"]["status"] in ("first_sample", "ok", "partial", "read_failed", "disabled")
     for v in metrics["values"]:
         assert v["name"] and v["unit"] in ("percent", "bytes") and set(v) == {"name", "value", "unit", "labels", "unavailable_reason"}
         assert (v["value"] is None) == (v["unavailable_reason"] is not None)

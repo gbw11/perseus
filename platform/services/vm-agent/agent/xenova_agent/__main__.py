@@ -39,7 +39,7 @@ def build_reporter(client: Any, settings: AgentSettings) -> Reporter:
         client, settings.vm_id,
         collect_inventory=inventory.collect,
         collect_metrics=MetricsCollector().collect,
-        collect_processes=ProcessSampler(top_n=settings.top_processes).sample,
+        collect_processes=ProcessSampler(top_n=settings.top_processes).collect,
         interval_s=settings.metrics_interval_s,
         inventory_refresh_s=settings.inventory_refresh_s,
     )

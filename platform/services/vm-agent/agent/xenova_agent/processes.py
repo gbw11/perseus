@@ -14,7 +14,7 @@
 - first_sample: 구간이 없어 사용률을 계산하지 못함(기준만 남긴다). 읽기 실패는 없음
 - ok: 발견한 프로세스를 다 읽었다
 읽는 사이 끝난 프로세스(stat 이 없어짐)는 정상이라 실패로 세지 않는다(vanished). 목록은 top-N 이라 밖으로 밀린 프로세스가
-없어진 것이 아니다(truncated). 이 상태는 아직 MQTT 로 내보내지 않는다(공개 필드는 백엔드와 계약 합의 뒤).
+없어진 것이 아니다(truncated). 이 상태는 metrics 의 process_collection 으로 보낸다(MQTT 계약 v1.5 3장, reporter.py).
 """
 
 from __future__ import annotations

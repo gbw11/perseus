@@ -62,6 +62,7 @@ def test_slow_collection_does_not_delay_heartbeats():
     """reporter 는 별도 스레드다. 수집이 멈춰 있어도 heartbeat 는 주기대로 나가고, 정지 때 reporter 도 멈춘다."""
     import time
 
+    from xenova_agent.processes import ProcessSample
     from xenova_agent.reporter import Reporter
 
     stop = threading.Event()
@@ -81,7 +82,7 @@ def test_slow_collection_does_not_delay_heartbeats():
         return {}
 
     def factory(client, settings):
-        return Reporter(client, settings.vm_id, collect_inventory=stuck_inventory, collect_metrics=list, collect_processes=list, interval_s=0.05)
+        return Reporter(client, settings.vm_id, collect_inventory=stuck_inventory, collect_metrics=list, collect_processes=lambda: ProcessSample("disabled"), interval_s=0.05)
 
     client = Client(stop)
     settings = AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.05)
