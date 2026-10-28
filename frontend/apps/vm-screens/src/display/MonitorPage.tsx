@@ -2,7 +2,7 @@ import { StatusBadge } from '@xenova/ui';
 import mark from '@xenova/ui/assets/xenova-mark.png';
 import { useEffect } from 'react';
 import { useParams } from 'react-router';
-import { ROLE, type Presentation } from './model';
+import { ROLE, type DisplayVm, type Presentation } from './model';
 import { useDisplay } from './useDisplay';
 import styles from './monitor.module.css';
 const MODES: Record<string, string> = {
@@ -11,6 +11,14 @@ const MODES: Record<string, string> = {
   AUTO_READY: '자율 재개 대기',
   SAFE_STOP: '안전 정지',
 };
+const OS_NAMES: Record<string, string> = { zephyr: 'Zephyr', debian: 'Debian' };
+const osName = (name: string) => OS_NAMES[name] ?? name;
+function osReport(vm: DisplayVm, connected: boolean) {
+  if (!connected) return 'OS 보고 연결 미확인';
+  if (!vm.os.observed) return 'OS 보고 미수신';
+  if (vm.sources.inventory.status !== 'fresh') return 'OS 보고 지연 · 현재 OS 미확인';
+  return `OS 보고: ${osName(vm.os.observed)}${vm.os.current_run_verified ? '' : ' · 실행 연결 미검증'}`;
+}
 export function MonitorPage() {
   const { outputId } = useParams();
   const { presentation: p, connected, error } = useDisplay();
@@ -176,6 +184,11 @@ export function MonitorPage() {
                       ? p?.decisions[selected.vm_id]?.label
                       : '선택된 게스트 없음'}
                 </p>
+                {selected && (
+                  <p data-testid="guest-os">
+                    설정 OS: {osName(selected.os.expected)} · {osReport(selected, connected)}
+                  </p>
+                )}
                 <small>
                   {selected?.screen_source.kind === 'graphics'
                     ? '게스트 영상 어댑터 연결 대기'
@@ -202,8 +215,12 @@ function Notices({ p, connected }: { p: Presentation | null; connected: boolean 
     connected && p
       ? p.state.vms.flatMap((v) => {
           const d = p.decisions[v.vm_id];
-          return d && (d.tone === 'danger' || d.kind === 'operation' || d.kind === 'stale')
-            ? [{ id: v.vm_id, text: `${ROLE[v.role].name} · ${d.label}`, tone: d.tone }]
+          return d &&
+            (d.tone === 'danger' ||
+              ['operation', 'stale', 'stopped', 'stopping', 'paused', 'waiting', 'os_mismatch'].includes(
+                d.kind,
+              ))
+            ? [{ id: v.vm_id, text: `${ROLE[v.role].name} · ${d.label}`, tone: d.tone, kind: d.kind }]
             : [];
         })
       : [];
@@ -212,7 +229,11 @@ function Notices({ p, connected }: { p: Presentation | null; connected: boolean 
       <span>알림</span>
       {notices.length ? (
         notices.map((n) => (
-          <StatusBadge key={n.id} health={n.tone === 'danger' ? 'fault' : 'recovering'} label={n.text} />
+          <StatusBadge
+            key={n.id}
+            health={n.tone === 'danger' ? 'fault' : n.kind === 'stopped' ? 'stopped' : 'recovering'}
+            label={n.text}
+          />
         ))
       ) : (
         <p>{connected ? '오류·복구 이벤트 수신 대기' : '알림 연결 미확인'}</p>

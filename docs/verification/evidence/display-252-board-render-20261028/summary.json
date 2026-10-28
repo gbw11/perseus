@@ -1,0 +1,336 @@
+{
+  "physical_outputs": 1,
+  "physical_framebuffer": [
+    1824,
+    984
+  ],
+  "real_xen_read": true,
+  "faults_and_OS_reports": "synthetic snapshots in isolated test feed; real guest MQTT disabled; no VM commands",
+  "trials": [
+    {
+      "trial": "board-render-20261028-053052",
+      "web_sha256": "78f0c4b44476c53ecfbc8c8320e70ce1a588d507383ca566f5b335757cd7ed1c",
+      "stage": "/opt/xenova-display-probe/20261028-soak-78f0c4b44476-053052",
+      "remote_exit": 0,
+      "board_error": null,
+      "cases": 44,
+      "passed": 43,
+      "failed": [
+        {
+          "output": "monitor-2",
+          "case": "resize-1280x720"
+        }
+      ],
+      "cleanup": {
+        "namespace_exit": 0,
+        "framebuffer_restored": true,
+        "restoration_differing_bytes": 0,
+        "restored_active_vt": 1,
+        "feed_stopped": true
+      },
+      "graphics_children_stopped": true,
+      "resize_checks": [
+        {
+          "output": "monitor-1",
+          "case": "resize-1280x720",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 687,
+            "guestBottom": null,
+            "guestContentBottom": null
+          }
+        },
+        {
+          "output": "monitor-2",
+          "case": "resize-1280x720",
+          "passed": false,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1265,
+            "scrollHeight": 750,
+            "footerBottom": 740,
+            "guestBottom": null,
+            "guestContentBottom": null
+          }
+        }
+      ]
+    },
+    {
+      "trial": "board-render-20261028-053606",
+      "web_sha256": "6a4656b5c12ecfdba32fb10cbf930196a6fae459cafdc08bb739ae86158e2eb0",
+      "stage": "/opt/xenova-display-probe/20261028-soak-6a4656b5c12e-053606",
+      "remote_exit": 0,
+      "board_error": null,
+      "cases": 54,
+      "passed": 53,
+      "failed": [
+        {
+          "output": "monitor-1",
+          "case": "720p-http503"
+        }
+      ],
+      "cleanup": {
+        "namespace_exit": 0,
+        "framebuffer_restored": true,
+        "restoration_differing_bytes": 0,
+        "restored_active_vt": 1,
+        "feed_stopped": true
+      },
+      "graphics_children_stopped": true,
+      "resize_checks": [
+        {
+          "output": "monitor-1",
+          "case": "resize-1280x720",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 687,
+            "guestBottom": null,
+            "guestContentBottom": 0
+          }
+        },
+        {
+          "output": "monitor-1",
+          "case": "720p-app_error",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 693,
+            "guestBottom": null,
+            "guestContentBottom": 0
+          }
+        },
+        {
+          "output": "monitor-1",
+          "case": "720p-http503",
+          "passed": false,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1265,
+            "scrollHeight": 762,
+            "footerBottom": 752,
+            "guestBottom": null,
+            "guestContentBottom": 0
+          }
+        },
+        {
+          "output": "monitor-1",
+          "case": "720p-live",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 687,
+            "guestBottom": null,
+            "guestContentBottom": 0
+          }
+        },
+        {
+          "output": "monitor-2",
+          "case": "resize-1280x720",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 685,
+            "guestBottom": 592,
+            "guestContentBottom": 505.609375
+          }
+        },
+        {
+          "output": "monitor-2",
+          "case": "720p-app_error",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 691,
+            "guestBottom": 592,
+            "guestContentBottom": 505.609375
+          }
+        },
+        {
+          "output": "monitor-2",
+          "case": "720p-http503",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 685,
+            "guestBottom": 592,
+            "guestContentBottom": 547.859375
+          }
+        },
+        {
+          "output": "monitor-2",
+          "case": "720p-live",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 685,
+            "guestBottom": 592,
+            "guestContentBottom": 505.609375
+          }
+        }
+      ]
+    },
+    {
+      "trial": "board-render-final-20261028-053914",
+      "web_sha256": "dd2d25c2ca17f5926e6aa0e99a56c17a7b49cb20b6cd497536fbeec5df8796ed",
+      "stage": "/opt/xenova-display-probe/20261028-soak-dd2d25c2ca17-053914",
+      "remote_exit": 0,
+      "board_error": null,
+      "cases": 20,
+      "passed": 20,
+      "failed": [],
+      "cleanup": {
+        "namespace_exit": 0,
+        "framebuffer_restored": true,
+        "restoration_differing_bytes": 0,
+        "restored_active_vt": 1,
+        "feed_stopped": true
+      },
+      "graphics_children_stopped": true,
+      "resize_checks": [
+        {
+          "output": "monitor-1",
+          "case": "resize-1280x720",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 687,
+            "guestBottom": null,
+            "guestContentBottom": 0
+          }
+        },
+        {
+          "output": "monitor-1",
+          "case": "720p-app_error",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 693,
+            "guestBottom": null,
+            "guestContentBottom": 0
+          }
+        },
+        {
+          "output": "monitor-1",
+          "case": "720p-http503",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 697,
+            "guestBottom": null,
+            "guestContentBottom": 0
+          }
+        },
+        {
+          "output": "monitor-1",
+          "case": "720p-live",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 687,
+            "guestBottom": null,
+            "guestContentBottom": 0
+          }
+        },
+        {
+          "output": "monitor-2",
+          "case": "resize-1280x720",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 685,
+            "guestBottom": 592,
+            "guestContentBottom": 505.609375
+          }
+        },
+        {
+          "output": "monitor-2",
+          "case": "720p-app_error",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 691,
+            "guestBottom": 592,
+            "guestContentBottom": 505.609375
+          }
+        },
+        {
+          "output": "monitor-2",
+          "case": "720p-http503",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 685,
+            "guestBottom": 592,
+            "guestContentBottom": 547.859375
+          }
+        },
+        {
+          "output": "monitor-2",
+          "case": "720p-live",
+          "passed": true,
+          "geometry": {
+            "width": 1280,
+            "height": 720,
+            "scrollWidth": 1280,
+            "scrollHeight": 720,
+            "footerBottom": 685,
+            "guestBottom": 592,
+            "guestContentBottom": 505.609375
+          }
+        }
+      ]
+    }
+  ],
+  "final_frontend_tests": 20,
+  "two_output_acceptance": false,
+  "actual_guest_graphics_or_driving_telemetry_acceptance": false
+}
