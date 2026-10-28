@@ -13,13 +13,14 @@ platform/deploy/mosquitto/
 │   └── accounts          #   계정 이름 목록 (비밀번호 없음)
 ├── listeners/            # 환경마다 다른 것 → /etc/mosquitto/conf.d/listeners.conf
 │   ├── local.conf        #   로컬: 1883, 9001(WebSocket)
-│   └── dom0.conf         #   dom0 초안 (S15P31E110-152 에서 확정)
+│   └── dom0.conf         #   dom0: 192.168.77.1(VM)·127.0.0.1. Tailscale 은 설치 스크립트가 보드 주소로 만든다
 ├── local/                # 로컬 개발용 Docker
 │   ├── docker-compose.yml
 │   └── .env.example
 └── scripts/
-    ├── make-passwd.sh    # accounts → passwd (로컬: 공통 개발 비밀번호 / 서버: --random)
-    └── check.sh          # 권한·크기·WebSocket 검사 (로컬·서버 공용)
+    ├── make-passwd.sh    # accounts → passwd (로컬: 공통 개발 비밀번호)
+    ├── dom0-broker.sh    # dom0 설치·계정 관리 (POSIX sh, root)
+    └── check.sh          # 권한·크기·WebSocket 검사 (로컬·서버 공용, bash)
 ```
 
 ## 로컬에서 쓰기
@@ -47,7 +48,7 @@ bash scripts/check.sh                      # 결과: 통과 15, 실패 0
 | --- | --- | --- | --- |
 | 백엔드 | `tcp://127.0.0.1:1883` | `backend` | `MQTT_BROKER_URL`, `MQTT_USERNAME`, `MQTT_PASSWORD` |
 | VM 에이전트 | `127.0.0.1:1883` | 그 VM 의 `vm_id` | `XENOVA_AGENT_BROKER_HOST/PORT/USERNAME/PASSWORD` |
-| 앱 (`xenova_mqtt`) | `127.0.0.1:1883` | `autonomous` · `manual` · `message-board` | `XenovaClient(..., username=, password=)` |
+| 앱 (`xenova_mqtt`) | `127.0.0.1:1883` | `autonomous` · `manual` · `interaction` | `XenovaClient(..., username=, password=)` |
 | 젯슨 | `127.0.0.1:1883` | `perception` | |
 | Zephyr 앱 (dom0 vchan 중계가 대신 접속) | `127.0.0.1:1883` | 그 앱의 `app_id` | 계약 4.1 |
 | 게이트웨이 | `127.0.0.1:1883` | `gateway` | |
@@ -69,28 +70,63 @@ bash scripts/check.sh                      # 결과: 통과 15, 실패 0
 - 읽기는 개발 단계라 모든 계정이 `xenova/v1/#` 를 읽을 수 있습니다. 계정별 구독 제한은 계약 다음 개정(v1.2)에서 정합니다.
 - 권한 없는 발행은 브로커가 조용히 버립니다 (MQTT 3.1.1 은 발행자에게 오류를 돌려주지 않음). `check.sh` 는 구독 쪽에서 안 오는 것으로 확인합니다.
 
-## dom0 로 옮길 때 (S15P31E110-152, 인프라 담당)
+## dom0 (실보드)
 
-로컬에서 검증한 파일을 **수정 없이** 가져갑니다. 바꾸는 것은 리스너 파일과 계정 목록뿐입니다.
+dom0 Yocto 이미지에는 `mosquitto`·`mosquitto-clients` 가 들어 있지만 서비스는 꺼져 있고 설정도 없습니다.
+`scripts/dom0-broker.sh` 가 설정 배치·계정 발급·자동 기동을 합니다. dom0 에 bash 가 없을 수 있어 POSIX sh 로 씁니다.
 
-1. 이미지에 `mosquitto`(+ 검사용 `mosquitto-clients`) 패키지를 넣는다. 레시피는 `meta-openembedded/meta-networking` 에 있고 이 레이어는 이미 빌드 설정에 등록돼 있다 (`platform/yocto/layers.lock`).
-2. 파일 배치
+### 설치 (보드마다 한 번)
 
-   | 저장소 | dom0 |
-   | --- | --- |
-   | `etc/mosquitto.conf` | `/etc/mosquitto/mosquitto.conf` |
-   | `etc/acl` | `/etc/mosquitto/acl` |
-   | `listeners/dom0.conf` | `/etc/mosquitto/conf.d/listeners.conf` |
+이 폴더(`platform/deploy/mosquitto`)를 dom0 에 복사한 뒤 root 로:
 
-3. 계정: `etc/accounts` 의 예시 vm_id 두 줄을 실제 VM 의 vm_id 로 바꾸고 계정마다 무작위 비밀번호를 만든다.
+```sh
+sh scripts/dom0-broker.sh install
+```
 
-   ```bash
-   bash scripts/make-passwd.sh --random etc/accounts /etc/mosquitto/passwd
-   # → /etc/mosquitto/passwd.credentials 의 user:password 를 각 VM·서비스 설정에 넣은 뒤 지운다
-   chown mosquitto: /etc/mosquitto/passwd && chmod 600 /etc/mosquitto/passwd
-   ```
+| 하는 일 | 결과 |
+| --- | --- |
+| 설정 배치 | `etc/mosquitto.conf`·`etc/acl` → `/etc/mosquitto/`, `listeners/dom0.conf` → `/etc/mosquitto/conf.d/listeners.conf` |
+| 서비스·앱 계정 | `etc/accounts` 의 이름마다 무작위 비밀번호. 해시는 `/etc/mosquitto/passwd`, 평문은 `/etc/mosquitto/passwd.credentials` (root 0600). 다시 실행해도 기존 비밀번호는 그대로 |
+| 명령 설치 | 이 스크립트를 `/usr/local/sbin/xenova-broker` 로 복사 (이후 저장소 사본 없이 계정 관리) |
+| 자동 기동 | `mosquitto.service` drop-in: `xenova-bridge`(192.168.77.1)·`tailscaled` 뒤에 시작, 실패하면 3초 뒤 재시작 |
+| Tailscale 리스너 | 시작 직전 `xenova-broker tailscale-listener` 가 `tailscale ip -4` 로 `conf.d/tailscale.conf` 를 다시 씀 (최대 20초 대기). 주소가 없으면 외부 리스너 없이 뜬다 — VM 쪽 브로커를 Tailscale 상태에 묶지 않는다 |
 
-4. 패키지의 systemd 서비스(`mosquitto.service`)로 자동 기동한다.
-5. 검사: `XENOVA_MQTT_HOST=192.168.77.1 XENOVA_MQTT_CREDENTIALS=/etc/mosquitto/passwd.credentials bash scripts/check.sh`
+외부 서버의 Spring 은 Tailscale 주소로 붙습니다.
 
--152 에서 정할 것: VM 이 늘 때 계정 추가 방식(vm 생성 시 자동 등록 여부), 백엔드 위치에 따른 리스너 주소, 브라우저 WebSocket 노출 범위, 로그 보관.
+```text
+MQTT_BROKER_URL=tcp://<보드 Tailscale IP>:1883
+MQTT_USERNAME=backend
+MQTT_PASSWORD=<passwd.credentials 의 backend 줄>
+```
+
+Recovery Worker 는 `/etc/xenova/recovery-worker.env` 에 `dom0-server` 계정을 넣습니다 ([dom0-manager](../../services/dom0-manager/README.md)).
+
+### VM 계정 (VM 마다)
+
+에이전트 계정 이름은 그 VM 의 `vm_id` 입니다 (ACL `%u`). VM 을 만들 때 자동으로 생기지 않으므로 직접 추가합니다.
+
+```sh
+xenova-broker add-account <vm_id>       # 대소문자 무관, 소문자로 저장. 이미 있으면 비밀번호를 바꾸지 않는다
+# → /etc/mosquitto/agent-env/<vm_id>.env 의 두 줄을 그 VM 의 /etc/xenova/agent.env 에 넣고
+#   그 VM 에서 systemctl restart xenova-agent
+xenova-broker list
+xenova-broker remove-account <vm_id>    # 이미 접속 중인 연결은 다시 접속할 때 거부
+```
+
+- 계정 추가·삭제는 SIGHUP 으로 반영되어 다른 클라이언트의 연결을 끊지 않습니다.
+- 에이전트는 계정이 틀려도 경고만 남기고 재시도합니다. 대시보드에 VM 이 안 뜨면 dom0 에서 `journalctl -u mosquitto | grep <vm_id>` 로 `not authorised` 를 먼저 봅니다.
+- 평문 파일(`passwd.credentials`, `agent-env/`)은 각 설정에 넣은 뒤 지워도 됩니다. 지운 계정의 비밀번호는 다시 볼 수 없으니 `remove-account` 뒤 `add-account` 로 새로 발급합니다.
+
+### 검사
+
+`check.sh` 는 bash 와 예시 vm_id 두 개를 씁니다. dom0 에 bash 가 있으면:
+
+```sh
+xenova-broker add-account 11111111-1111-4111-8111-111111111111
+xenova-broker add-account 22222222-2222-4222-8222-222222222222
+XENOVA_MQTT_HOST=192.168.77.1 XENOVA_MQTT_CREDENTIALS=/etc/mosquitto/passwd.credentials bash scripts/check.sh
+xenova-broker remove-account 11111111-1111-4111-8111-111111111111
+xenova-broker remove-account 22222222-2222-4222-8222-222222222222
+```
+
+남은 일: VM 생성 때 계정 자동 등록, Yocto 이미지에 설정·자동 기동 포함 (S15P31E110-258).
