@@ -98,9 +98,9 @@ class DisplayPolicy:
                 detail_reason = "활성 구동 VM 미확인 · 마지막 선택 유지"
             decisions = {v["vm_id"]: decide_vm(v) for v in state["vms"]}
             outputs = [
-                {"output_id": "monitor-1", "view": "overview", "selection": "pinned", "vm_id": None,
-                 "reason": "등록된 VM 전체 상태 표시"},
-                {"output_id": "monitor-2", "view": "detail", "selection": self.selection, "vm_id": self.selected,
+                {"output_id": "monitor-1", "view": "overview", "screen": "instrument", "selection": "pinned", "vm_id": None,
+                 "reason": "차량 계기판 표시"},
+                {"output_id": "monitor-2", "view": "detail", "screen": "infotainment", "selection": self.selection, "vm_id": self.selected,
                  "reason": detail_reason},
             ]
             # Content identity excludes continuously changing age/capture time, but includes run/boot/source changes.

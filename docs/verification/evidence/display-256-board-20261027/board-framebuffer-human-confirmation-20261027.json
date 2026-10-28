@@ -1,0 +1,7 @@
+{
+  "source": "direct user reply to the framebuffer diagnostic question",
+  "question": "실제 모니터에서 RGB 색상 막대와 흰 테두리가 보였는지",
+  "answer": "색상 막대와 흰 테두리가 보였음",
+  "physical_monitor_visible": true,
+  "does_not_prove": ["two independent HDMI outputs", "Chromium rendering", "product UI", "remote streaming performance"]
+}
