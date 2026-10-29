@@ -31,11 +31,22 @@ static int copy(char *out,size_t capacity,const char *in)
 	if (!in || strlen(in)>=capacity) { return -EOVERFLOW; }
 	memcpy(out,in,strlen(in)+1);return 0;
 }
-int xt_bootstrap_decode(char *json,size_t bytes,const char *own_vm_id,struct xt_bootstrap *out)
+bool xt_bootstrap_account_matches(const char *username,const char *vm_id,const char *channel)
+{
+	if (!username || !xt_uuid_valid(vm_id)) { return false; }
+	if (channel && !strcmp(channel,"xenova-drive")) { return !strcmp(username,vm_id); }
+	if (channel && strcmp(channel,"xenova-telemetry")) { return false; }
+	return !strncmp(username,"telemetry-",10) && !strcmp(username+10,vm_id);
+}
+
+int xt_bootstrap_decode_channel(char *json,size_t bytes,const char *own_vm_id,
+			       const char *channel,struct xt_bootstrap *out)
 {
 	if(!out)return -EINVAL;
 	memset(out,0,sizeof(*out));
 	if (!json || !xt_uuid_valid(own_vm_id)) { return -EINVAL; }
+	bool drive = channel && !strcmp(channel,"xenova-drive");
+	if (channel && !drive && strcmp(channel,"xenova-telemetry")) { return -EINVAL; }
 	for(size_t i=0;i+1<bytes;i++)if(json[i]=='\\'){
 	 if(json[i+1]=='u')return -EPROTO;
 	 ++i;
@@ -60,7 +71,8 @@ int xt_bootstrap_decode(char *json,size_t bytes,const char *own_vm_id,struct xt_
 	 for(const char *p=raw.artifact_sha256;*p;p++)if(!((*p>='0'&&*p<='9')||(*p>='a'&&*p<='f')))return -EINVAL;
 	}
 	if (strcmp(own_vm_id,raw.vm_id) || raw.port<1 || raw.port>65535 || !raw.password[0] ||
-	    strcmp(raw.username,own_vm_id) || !raw.trusted_internal_plaintext) { return -EACCES; }
+	    !xt_bootstrap_account_matches(raw.username,own_vm_id,channel) ||
+	    !raw.trusted_internal_plaintext) { return -EACCES; }
 	if (!xt_uuid_valid(raw.boot_id) || !xt_uuid_valid(raw.publisher_id)) { return -EINVAL; }
 	bool bound=raw.host_boot_id[0] || raw.execution_id[0] || raw.receipt_id[0];
 	if (bound && (!xt_uuid_valid(raw.host_boot_id) || !xt_uuid_valid(raw.execution_id) || !xt_uuid_valid(raw.receipt_id))) { return -EINVAL; }
@@ -75,4 +87,9 @@ int xt_bootstrap_decode(char *json,size_t bytes,const char *own_vm_id,struct xt_
 	out->persistent_crash=raw.persistent_crash;
 #undef COPY
 	out->port=(uint16_t)raw.port;out->trusted_internal_plaintext=true;return 0;
+}
+
+int xt_bootstrap_decode(char *json,size_t bytes,const char *own_vm_id,struct xt_bootstrap *out)
+{
+	return xt_bootstrap_decode_channel(json,bytes,own_vm_id,"xenova-telemetry",out);
 }
