@@ -23,7 +23,7 @@ export const keys = {
   vm: (id: string) => ['vms', id] as const,
   templates: ['templates'] as const,
   events: (query: string) => ['events', query] as const,
-  metrics: (id: string) => ['vms', id, 'metrics'] as const,
+  metrics: (id: string, minutes = 5) => ['vms', id, 'metrics', minutes] as const,
   processes: (id: string) => ['vms', id, 'processes'] as const,
   displays: ['displays'] as const,
 };
@@ -70,9 +70,9 @@ export function useEvents(params: { vm_id?: string; type?: string; severity?: st
 }
 
 /** 최근 n 분 메트릭 (Linux VM 만, 에이전트 MQTT-03) */
-export function useMetrics(vmId: string, enabled: boolean, minutes = 5) {
+export function useMetrics(vmId: string, enabled: boolean, minutes = 5, pollMs = POLL_MS) {
   return useQuery({
-    queryKey: keys.metrics(vmId),
+    queryKey: keys.metrics(vmId, minutes),
     queryFn: ({ signal }) => {
       const from = new Date(Date.now() - minutes * 60_000).toISOString();
       return request<MetricHistoryResponse>(
@@ -81,7 +81,7 @@ export function useMetrics(vmId: string, enabled: boolean, minutes = 5) {
       );
     },
     enabled,
-    refetchInterval: POLL_MS,
+    refetchInterval: pollMs,
   });
 }
 
