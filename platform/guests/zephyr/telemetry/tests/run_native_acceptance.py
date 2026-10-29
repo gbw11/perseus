@@ -111,7 +111,7 @@ def main():
             vm_id = str(uuid.uuid4())
             bootstraps.append({"vm_id": vm_id, "boot_id": str(uuid.uuid4()), "publisher_id": str(uuid.uuid4()),
                                "host_boot_id": "", "execution_id": "", "receipt_id": "",
-                               "broker_ipv4": "192.0.2.1", "port": 18883, "username": vm_id,
+                               "broker_ipv4": "192.0.2.1", "port": 18883, "username": "telemetry-" + vm_id,
                                "password": secrets.token_urlsafe(32), "trusted_internal_plaintext": True,
                                "hostname":"native-"+str(_),"display_name":'주행 '+str(_)+' "\\' if _==0 else '🚗'*63,
                                "build_id":native_build,"artifact_sha256":native_artifact})

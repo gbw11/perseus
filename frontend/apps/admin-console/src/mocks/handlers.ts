@@ -7,7 +7,14 @@
  * 메모리에만 상태를 두므로 새로고침하면 처음으로 돌아간다 (로그인 세션은 쿠키로 유지).
  */
 import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
-import type { CreateVmRequest, LoginRequest, SignupRequest, TokenResponse, Vm } from '../api/types';
+import {
+  VM_CPU_PERCENT_METRIC,
+  type CreateVmRequest,
+  type LoginRequest,
+  type SignupRequest,
+  type TokenResponse,
+  type Vm,
+} from '../api/types';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
 import { mockMemoryPoolSamples } from './memoryMetrics';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
@@ -285,7 +292,7 @@ export const handlers = [
         observed_at: new Date(t).toISOString(),
         values: [
           {
-            name: 'cpu_percent',
+            name: VM_CPU_PERCENT_METRIC,
             value: Math.round((8 + 4 * wave) * 10) / 10,
             unit: '%',
             labels: null,

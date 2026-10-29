@@ -3,7 +3,7 @@ import { lazy, Suspense, useState, type CSSProperties } from 'react';
 import { Link, useParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useEvents, useMetrics, useProcesses, useVm, useVmAction, type VmAction } from '../api/queries';
-import type { MetricSample, Vm } from '../api/types';
+import { VM_CPU_PERCENT_METRIC, type MetricSample, type Vm } from '../api/types';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import { clock, describe } from '../domain/events';
 import { ago, appHealth, MODE_LABEL, osLabel, roleOf } from '../domain/roles';
@@ -187,7 +187,7 @@ function Charts({ vmId }: { vmId: string }) {
   if (metrics.isPending) return <p className={styles.dim}>불러오는 중…</p>;
   if (samples.length === 0)
     return <p className={styles.dim}>최근 5분 메트릭이 없다 (에이전트 metrics 미수신).</p>;
-  const cpu = samples.map((s) => valueOf(s, 'cpu_percent'));
+  const cpu = samples.map((s) => valueOf(s, VM_CPU_PERCENT_METRIC));
   const mem = samples.map((s) => {
     const v = valueOf(s, 'memory_used_bytes');
     return v == null ? null : v / MIB;

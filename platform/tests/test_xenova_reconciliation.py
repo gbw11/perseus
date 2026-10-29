@@ -81,7 +81,10 @@ class ReceiptReconciliationTest(unittest.TestCase):
                             domid=42, xen_unique_id='18446744073709551615')
         self.credential = dict(vm_id=self.context['vm_id'], broker_ipv4='192.0.2.1', port=18883,
             username=self.context['vm_id'], password='SYNTHETIC-NOT-A-REAL-SECRET', trusted_internal_plaintext=True)
-        self.source = dict(inode=123, mtime_ns=456, bytes=100)
+        self.credential_path = self.home / 'legacy-credentials.json'
+        self.credential_path.write_text(json.dumps(self.credential))
+        self.credential_path.chmod(0o600)
+        _, self.source = self.api.private_json(self.credential_path)
         self.store = StoreBoundary(self.api)
         with self.assertRaises(OSError):
             self.api.provision(self.context, self.credential, self.source, self.path,
@@ -108,6 +111,18 @@ class ReceiptReconciliationTest(unittest.TestCase):
         self.assertEqual(result['status'], 'applied')
         self.identities_unchanged()
         self.assertNotIn(self.credential['password'], json.dumps(result) + self.path.read_text())
+
+    def test_legacy_uuid_account_can_only_reconcile_its_original_receipt_without_reinjection(self):
+        with self.assertRaises(ValueError):
+            self.api.credentials(self.credential_path, self.context['vm_id'], 'telemetry')
+        credential, identity = self.api.credentials(self.credential_path, self.context['vm_id'], 'telemetry',
+                                                     for_reconciliation=True)
+        self.assertEqual(identity, self.original['credential_source'])
+        result = self.api.reconcile(self.context, credential, identity, self.path,
+            store=self.store, observe=lambda: dict(self.context), execute=True)
+        self.assertEqual(result['status'], 'applied')
+        self.identities_unchanged()
+        self.assertEqual(self.store.writes, 1)
 
     def test_T03_mismatch_acl_missing_expectation_and_unfinished_call_remain_blocked(self):
         parent = f"/local/domain/{self.context['domid']}/data/xenova-telemetry"
