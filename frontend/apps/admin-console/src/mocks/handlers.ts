@@ -9,6 +9,7 @@
 import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import type { CreateVmRequest, LoginRequest, SignupRequest, TokenResponse, Vm } from '../api/types';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
+import { mockMemoryPoolSamples } from './memoryMetrics';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
@@ -269,6 +270,9 @@ export const handlers = [
   http.get('*/api/v1/vms/:vmId/metrics', async ({ request, params }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
+    if (params.vmId === VM_IDS.autonomous || params.vmId === VM_IDS.manual) {
+      return HttpResponse.json({ items: mockMemoryPoolSamples(String(params.vmId)) });
+    }
     if (params.vmId !== VM_IDS.interaction) return HttpResponse.json({ items: [] });
     const now = Date.now();
     const items = Array.from({ length: 30 }, (_, i) => {
