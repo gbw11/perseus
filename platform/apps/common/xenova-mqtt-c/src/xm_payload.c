@@ -61,6 +61,33 @@ int xm_app_readiness_json(char *out,size_t n,uint32_t generation,uint64_t progre
 	rc|=xm_put(out,n,&pos,"}");return rc?-ENOSPC:(int)pos;
 }
 
+int xm_app_lifecycle_json(char *out,size_t n,uint32_t generation,uint64_t check,
+ uint64_t progress,const char *phase,const char *state,const char *reason)
+{
+ if(!check||!phase||!state)return -EINVAL;
+ bool waiting=!strcmp(phase,"WAITING"),executing=!strcmp(phase,"EXECUTING");
+ if(!waiting&&!executing&&strcmp(phase,"ACTIVATING")&&strcmp(phase,"STOPPING")&&strcmp(phase,"RESIDUAL"))return -EINVAL;
+ if(strcmp(state,"QUALIFIED")&&strcmp(state,"READY")&&strcmp(state,"NOT_READY"))return -EINVAL;
+ if((!strcmp(state,"NOT_READY"))!=(reason!=NULL))return -EINVAL;
+ if(!strcmp(state,"QUALIFIED")&&(!waiting||!generation))return -EINVAL;
+ if(!strcmp(state,"READY")&&(!executing||!generation||!progress))return -EINVAL;
+ if(reason){
+  static const char *const reasons[]={"CONTROL_UNAPPLIED","INPUT_UNAVAILABLE","INPUT_STALE","INPUT_INVALID",
+   "STATE_PREPARING","CALCULATION_FAILED","OUTPUT_INVALID","APP_STOPPING","RESOURCE_RETAINED"};
+  bool known=false;for(size_t i=0;i<sizeof(reasons)/sizeof(reasons[0]);i++)known|=!strcmp(reason,reasons[i]);
+  if(!known)return -EINVAL;
+ }
+ size_t pos=0;int rc=0;
+ rc|=xm_put(out,n,&pos,"{\"profile\":\"warm-drive-1\",\"applied_generation\":");rc|=xm_put_uint(out,n,&pos,generation);
+ rc|=xm_put(out,n,&pos,",\"check_seq\":\"");rc|=xm_put_uint(out,n,&pos,check);
+ rc|=xm_put(out,n,&pos,"\",\"progress_seq\":\"");rc|=xm_put_uint(out,n,&pos,progress);
+ rc|=xm_put(out,n,&pos,"\",\"phase\":");rc|=xm_put_json_string(out,n,&pos,phase);
+ rc|=xm_put(out,n,&pos,",\"readiness\":");rc|=xm_put_json_string(out,n,&pos,state);
+ rc|=xm_put(out,n,&pos,",\"reason\":");
+ rc|=reason?xm_put_json_string(out,n,&pos,reason):xm_put(out,n,&pos,"null");
+ rc|=xm_put(out,n,&pos,"}");return rc?-ENOSPC:(int)pos;
+}
+
 static bool canonical_uuid(const char *value)
 {
 	if (strlen(value) != XM_UUID_LEN) { return false; }
@@ -76,7 +103,8 @@ static bool canonical_uuid(const char *value)
 
 int xm_vehicle_control_parse(struct xm_span payload, struct xm_vehicle_control *out)
 {
-	static struct xm_json j;
+	/* App owners and the control coordinator may parse concurrently. */
+	struct xm_json j;
 	int64_t generation;
 
 	memset(out, 0, sizeof(*out));
@@ -104,7 +132,59 @@ int xm_vehicle_control_parse(struct xm_span payload, struct xm_vehicle_control *
 		    xm_span_copy(out->active_vm_id, sizeof(out->active_vm_id), xm_json_span(&j, vm)) < 0 ||
 		    !canonical_uuid(out->active_vm_id)) { return -EINVAL; }
 	}
+ int policy=xm_json_get(&j,0,"manual_policy"),session=xm_json_get(&j,0,"manual_session");
+ if(policy>=0||session>=0){
+  if(!xm_json_is_string(&j,policy)||!xm_json_is_string(&j,session)||
+     xm_span_copy(out->manual_policy,sizeof(out->manual_policy),xm_json_span(&j,policy))<0||
+     xm_span_copy(out->manual_session,sizeof(out->manual_session),xm_json_span(&j,session))<0||
+     !canonical_uuid(out->manual_session)||!strcmp(out->manual_session,"00000000-0000-0000-0000-000000000000")||
+     (strcmp(out->manual_policy,"CONTINUE_SESSION")&&strcmp(out->manual_policy,"NEUTRAL_THEN_ACTION"))||
+     (strcmp(out->mode,"MANUAL")&&strcmp(out->mode,"AUTO_READY")))return -EINVAL;
+ }
 	return 0;
+}
+
+static int source_counter(const struct xm_json *j,const char *name,uint64_t *out)
+{
+ int token=xm_json_get(j,0,name);if(!xm_json_is_string(j,token))return -EINVAL;
+ struct xm_span s=xm_json_span(j,token);uint64_t value=0;
+ if(!s.len||s.len>20||(s.len>1&&s.p[0]=='0'))return -EINVAL;
+ for(unsigned i=0;i<s.len;i++){
+  if(s.p[i]<'0'||s.p[i]>'9'||value>(UINT64_MAX-(s.p[i]-'0'))/10)return -EINVAL;
+  value=value*10+(s.p[i]-'0');
+ }
+ *out=value;return 0;
+}
+int xm_manual_sample_parse(struct xm_span payload,struct xm_manual_sample *out)
+{
+ struct xm_json j;int64_t generation,age;memset(out,0,sizeof(*out));
+ if(parse_object(&j,payload))return -EINVAL;
+ if(xm_json_get(&j,0,"profile")<0){
+  static const char *const metadata[]={"session_id","sample_seq","action_seq","generation","valid","age_ms"};
+  for(unsigned i=0;i<6;i++)if(xm_json_get(&j,0,metadata[i])>=0)return -EINVAL;
+  return -ENOMSG;
+ }
+ if(j.tok[0].size!=8||
+    !xm_json_is_string(&j,xm_json_get(&j,0,"profile"))||
+    !xm_span_eq(xm_json_span(&j,xm_json_get(&j,0,"profile")),"manual-session-1")||
+    source_counter(&j,"sample_seq",&out->sample)||!out->sample||source_counter(&j,"action_seq",&out->action)||
+    xm_json_int(&j,xm_json_get(&j,0,"generation"),&generation)||generation<1||generation>UINT32_MAX||
+    xm_json_int(&j,xm_json_get(&j,0,"age_ms"),&age)||age<0||age>INT32_MAX)return -EINVAL;
+ int session=xm_json_get(&j,0,"session_id");
+ if(!xm_json_is_string(&j,session)||xm_span_copy(out->session,sizeof(out->session),xm_json_span(&j,session))<0||
+    !canonical_uuid(out->session)||!strcmp(out->session,"00000000-0000-0000-0000-000000000000"))return -EINVAL;
+ if(!xm_json_is_bool(&j,xm_json_get(&j,0,"valid"),&out->valid)||xm_drive_input_parse(payload,&out->keys))return -EINVAL;
+ int array=xm_json_get(&j,0,"keys"),token=array+1;uint32_t seen=0;
+ if(j.tok[array].size>5)return -EINVAL;
+ static const char *const names[]={"up","down","left","right","brake"};
+ for(int i=0;i<j.tok[array].size;i++){
+  uint32_t bit=0;
+  if(!xm_json_is_string(&j,token))return -EINVAL;
+  for(unsigned k=0;k<5;k++)if(xm_span_eq(xm_json_span(&j,token),names[k]))bit=1u<<k;
+  if(!bit||(seen&bit))return -EINVAL;
+  seen|=bit;token=xm_json_skip(&j,token);
+ }
+ out->generation=generation;out->age_ms=age;return 0;
 }
 
 int xm_drive_input_parse(struct xm_span payload, uint32_t *keys)
@@ -116,7 +196,7 @@ int xm_drive_input_parse(struct xm_span payload, uint32_t *keys)
 		{"up", XM_KEY_UP}, {"down", XM_KEY_DOWN}, {"left", XM_KEY_LEFT},
 		{"right", XM_KEY_RIGHT}, {"brake", XM_KEY_BRAKE},
 	};
-	static struct xm_json j;
+	struct xm_json j;
 
 	*keys = 0;
 	if (parse_object(&j, payload) != 0) {
@@ -158,7 +238,7 @@ static int finite_float(const struct xm_json *j, int i, float *out)
 
 int xm_perception_result_parse(struct xm_span payload, struct xm_perception_result *out)
 {
-	static struct xm_json j;
+	struct xm_json j;
 
 	memset(out, 0, sizeof(*out));
 	if (parse_object(&j, payload) != 0 ||

@@ -52,6 +52,11 @@ struct xm_zclient {
 	struct xm_zlatest latest[CONFIG_XENOVA_MQTT_LATEST_SLOTS];
 	struct xm_zpub pubs[CONFIG_XENOVA_MQTT_PUB_TOPICS];
 	int nsubs;
+	/* Optional synchronous accepted-input guard, owned by the polling thread.
+	 * Runs after envelope/sequence/subscription checks, before latest replacement.
+	 * Nonzero rejects only this cache update. Must not block or perform I/O. */
+	int (*accept_input)(void *, const char *, const struct xm_envelope *, int64_t);
+	void *accept_context;
 
 	bool socket_open;
 	bool connected;
@@ -90,6 +95,10 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms);
 int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type, const char *payload_json);
 int xm_zclient_publish_until(struct xm_zclient *, const char *topic, const char *type,
 			    const char *payload_json, int64_t deadline_ms);
+/* Single transport owner; immutable per-message app identity. The connection
+ * identity never changes. Caller must validate the root-issued app binding. */
+int xm_zclient_publish_as_until(struct xm_zclient *,const char *topic,const char *type,
+                               const char *payload,const char *instance_id,int64_t deadline_ms);
 /* topic 의 마지막 메시지와 나이(ms). 없으면 -ENOENT. env 의 span 은 다음 poll 전까지 유효 */
 /* Single owner only. Abort pending I/O; no offline flush or publish retry. */
 void xm_zclient_close(struct xm_zclient *c);

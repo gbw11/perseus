@@ -49,7 +49,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         from xenova_mqtt import Identity,XenovaClient
         from xenova_mqtt.drive_binding import BindingFile
         if os.name=='posix':lease=GatewayLease(Path('/run/lock/xenova-drive-gateway.lock')).acquire()
-        if settings.profile=="verified":
+        if settings.profile in ("verified","warm"):
             if os.geteuid()!=0:raise AuthorityError('verified dom0 Gateway must run as root')
             # The lower platform installs private libraries here, outside the
             # site-packages containing Gateway and xenova_mqtt.
@@ -69,9 +69,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         sink=open_sink(settings)  # only the lease owner may open the output device
         client=XenovaClient(Identity(source_id=SOURCE_ID),settings.broker_host,settings.broker_port,
                            username=settings.username,password=settings.password)
-        if settings.profile=="verified":
+        if settings.profile in ("verified","warm"):
             runner=VerifiedGatewayRunner(client,sink,authority=authority,bindings=bindings,
-                                          vm_ids=(settings.vm_a,settings.vm_b))
+                                          vm_ids=(settings.vm_a,settings.vm_b),
+                                          readiness_profile='warm-drive-1' if settings.profile=='warm' else 'verified-drive-1')
         else:runner=GatewayRunner(client,sink,start_mode=settings.start_mode,retained_wait_s=settings.retained_wait_s)
         log.info('Gateway profile=%s sink=%s',settings.profile,settings.sink)
         runner.run(stop)

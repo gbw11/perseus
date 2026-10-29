@@ -38,6 +38,9 @@ void drive_controller_health(struct drive_controller *,int (*clock_us)(uint64_t 
  uint64_t deadline_us,uint64_t uptime_ms,const struct xdr_snapshot *,int resource_rc);
 /* Whole serial step missed the same release deadline, including adapter cost. */
 void drive_controller_deadline_missed(struct drive_result *);
+/* Pure existing control validation/selection; no app progress or readiness. */
+void drive_controller_select(struct drive_controller *, const char *local_vm_id,
+ struct xm_span control, struct drive_result *);
 /* Both real calculations complete before returning. Missing/invalid/regressed
  * control produces no command; standby still computes the selected mode. */
 void drive_controller_step(struct drive_controller *, const char *local_vm_id,

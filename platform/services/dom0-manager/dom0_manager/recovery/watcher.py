@@ -279,6 +279,9 @@ class Watcher:
         if obs.guest_kind == "zephyr":
             track.app_armed = track.app_armed or obs.vm_id in self._armed
             beat = self._app_heartbeats.last(obs.vm_id)
+            if obs.expected_app_instances is not None:
+                pair=self._app_heartbeats.supervision_pair(obs.vm_id,obs.expected_app_boot_id,obs.expected_app_instances)
+                beat=min(pair,key=lambda value:value.received_monotonic) if pair else None
             if beat is not None and not track.app_armed:
                 track.app_armed = True
                 self._armed[obs.vm_id] = beat.app_id
@@ -294,7 +297,7 @@ class Watcher:
                 log.info("vm %s armed for agent.heartbeat loss judgments (first delivery observed)", obs.vm_id)
         if beat is None:
             return None
-        if obs.expected_app_boot_id is not None and (beat.boot_id!=obs.expected_app_boot_id or
+        if obs.expected_app_instances is None and obs.expected_app_boot_id is not None and (beat.boot_id!=obs.expected_app_boot_id or
             getattr(beat,'instance_id',None)!=obs.expected_app_instance_id):return None
         if track.domain_since is not None and beat.received_monotonic < track.domain_since:
             return None  # 이전 부팅의 신호. 새 부팅에서는 아직 한 번도 받지 않은 것과 같다
@@ -315,6 +318,17 @@ class Watcher:
         if obs.xen_state != VmState.running:
             return Verdict.UNKNOWN, None  # paused·stopping 은 장애가 아니지만 건강하지도 않다
         if obs.execution_binding_available is False:return Verdict.UNKNOWN,None
+        if obs.expected_app_instances is not None:
+            pair=self._app_heartbeats.supervision_pair(obs.vm_id,obs.expected_app_boot_id,obs.expected_app_instances)
+            if pair is None:return Verdict.UNKNOWN,None
+            # Fresh functional restrictions are not VM death. Stale supervision
+            # still follows existing delivery/grace/common-path loss safeguards.
+            if all(0<=now-value.received_monotonic<=.3 for value in pair):
+                healthy=lambda value: (value.phase=='WAITING' and value.readiness=='QUALIFIED') or (
+                    value.phase=='EXECUTING' and value.readiness=='READY' and value.work_at is not None and 0<=now-value.work_at<=.3)
+                if not all(healthy(value) for value in pair):return Verdict.UNKNOWN,None
+            elif signal_age is not None and signal_age<self._settings.app_heartbeat_lost_s:
+                return Verdict.UNKNOWN,None
         liveness = self._liveness(track, obs)
         if liveness is None:
             if self._target_unknown(track, obs):
@@ -347,6 +361,8 @@ class Watcher:
         elif obs.xen_state != VmState.running:
             state = HealthState.UNHEALTHY
         elif obs.execution_binding_available is False:
+            state = HealthState.OBSERVATION_UNAVAILABLE
+        elif obs.expected_app_instances is not None and verdict==Verdict.UNKNOWN:
             state = HealthState.OBSERVATION_UNAVAILABLE
         elif (liveness := self._liveness(track, obs)) is None:
             # 앱 신호가 선언되지도 관측되지도 않은 Zephyr: Xen 실행만 근거. armed 기록을 잃었으면 대상 여부를 모르므로 관측 불가

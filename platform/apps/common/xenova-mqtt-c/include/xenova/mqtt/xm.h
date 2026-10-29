@@ -137,12 +137,16 @@ int xm_app_heartbeat_json(char *out, size_t n, const char *state, int64_t uptime
  * READY requires nonzero generation/progress and a null reason. */
 int xm_app_readiness_json(char *out, size_t n, uint32_t applied_generation,
                          uint64_t progress, const char *readiness, const char *reason);
+/* warm-drive-1 only: checked waiting qualification is not completed work. */
+int xm_app_lifecycle_json(char *out,size_t n,uint32_t generation,uint64_t check,
+                         uint64_t progress,const char *phase,const char *readiness,const char *reason);
 
 struct xm_vehicle_control {
 	uint32_t generation;
 	char mode[16];
 	char active_app[XM_ID_MAX]; /* null 이면 빈 문자열 */
 	char active_vm_id[XM_UUID_LEN + 1]; /* 기존 vehicle.control 필드, null/생략이면 빈 문자열 */
+ char manual_session[XM_UUID_LEN+1],manual_policy[24]; /* explicit session contract only */
 };
 int xm_vehicle_control_parse(struct xm_span payload, struct xm_vehicle_control *out);
 
@@ -155,6 +159,12 @@ enum xm_key {
 };
 /* keys 배열을 비트마스크로. 모르는 키는 무시. keys 가 배열이 아니면 -EINVAL */
 int xm_drive_input_parse(struct xm_span payload, uint32_t *keys);
+struct xm_manual_sample {
+ char session[XM_UUID_LEN+1];uint64_t sample,action;
+ uint32_t generation,keys,age_ms;bool valid;
+};
+/* Strict manual-session-1 payload; counters are original source evidence. */
+int xm_manual_sample_parse(struct xm_span payload,struct xm_manual_sample *out);
 
 /* perception.result (계약 5.4). 좌표는 차량 기준 지면: x 전방, y 왼쪽 + (m) */
 #define XM_PERCEPTION_MAX_OBSTACLES 8
