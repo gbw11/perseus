@@ -10,17 +10,6 @@ pipeline {
         disableConcurrentBuilds()
     }
 
-    triggers {
-        gitlab(
-            triggerOnPush: false,
-            triggerOnMergeRequest: false,
-            triggerOnAcceptedMergeRequest: true,
-            branchFilterType: 'NameBasedFilter',
-            includeBranchesSpec: 'develop',
-            excludeBranchesSpec: ''
-        )
-    }
-
     environment {
         GITLAB_SSH_CREDENTIALS_ID = 'xenova-gitlab-deploy-key'
     }
