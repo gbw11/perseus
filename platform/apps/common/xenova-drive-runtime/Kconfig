@@ -51,6 +51,25 @@ config XENOVA_DRIVE_WORKERS
 	  Local app execution building block. This does not change the verified
 	  MQTT readiness profile or activate warm Standby automatically.
 
+config XENOVA_DRIVE_WARM
+	bool "Explicit warm-drive-1 app lifecycle profile"
+	depends on XENOVA_DRIVE_WORKERS
+	default n
+	help
+	  Requires matching root Bootstrap, per-app binding and Gateway/Worker
+	  consumers. Waiting qualification is not calculation or output permission.
+	  The 100ms supervisor/300ms lease are bounded foundation test settings,
+	  not acceptance of a future stateful driving algorithm or vehicle timing.
+
+config XENOVA_DRIVE_APP_STOP_MS
+	int "Warm profile local app cleanup allowance (ms)"
+	depends on XENOVA_DRIVE_WARM
+	range 20 1000
+	default 500
+	help
+	  Foundation test allowance for a root-requested app reset. Expiry retains
+	  resources and reports failure; it never grants abort or another attempt.
+
 if XENOVA_DRIVE_WORKERS
 config XENOVA_DRIVE_WORKER_STACK_SIZE
 	int "Reserved stack bytes per calculation owner"

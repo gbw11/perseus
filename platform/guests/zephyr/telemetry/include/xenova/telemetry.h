@@ -14,6 +14,8 @@ struct xt_bootstrap {
 	bool trusted_internal_plaintext;
 	char hostname[64],display_name[253],artifact_sha256[65],build_id[129];
 	bool persistent_crash;
+	/* Drive-only root-issued app identities. Absent in the v2 Publisher channel. */
+	char drive_profile[24],auto_instance_id[37],manual_instance_id[37];
 };
 typedef int (*xt_bootstrap_loader)(struct xt_bootstrap *, int64_t deadline_ms, void *);
 /* Mutable JSON is parsed in place. own_vm_id must come from an independent,

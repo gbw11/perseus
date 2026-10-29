@@ -52,7 +52,8 @@ static bool control_valid(struct drive_controller *c,struct xm_span payload,stru
   if(v->generation<c->accepted.generation)return false;
   if(v->generation==c->accepted.generation&&
      (strcmp(v->mode,c->accepted.mode)||strcmp(v->active_app,c->accepted.active_app)||
-      strcmp(v->active_vm_id,c->accepted.active_vm_id)))return false;
+      strcmp(v->active_vm_id,c->accepted.active_vm_id)||strcmp(v->manual_session,c->accepted.manual_session)||
+      strcmp(v->manual_policy,c->accepted.manual_policy)))return false;
  }
  c->accepted=*v;c->seen_control=true;return true;
 }

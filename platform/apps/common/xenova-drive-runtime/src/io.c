@@ -23,7 +23,7 @@ static struct xd_io_stats stats;
 static atomic_t snapshot_busy;
 static atomic_t clock_error;
 struct report {
- char topic[XM_TOPIC_MAX], type[32], json[160];
+ char topic[XM_TOPIC_MAX], type[32], json[256], app_instance[XM_UUID_LEN+1];
  int64_t expires_ms;
  uint64_t control_revision, connection_revision, completed;
 };
@@ -76,6 +76,9 @@ static void refresh(void) {
  working.dual_mode=dual_mode;
  if(client->id.vm_id&&strlen(client->id.vm_id)==XM_UUID_LEN)strcpy(working.vm_id,client->id.vm_id);
  working.connected=client->connected;
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+ xd_owner_context(&working);
+#endif
  k_mutex_lock(&exchange_lock,K_FOREVER);
  if(!same_control_context(&working.control,&shared.control))shared.control_revision++;
  if(working.connected!=shared.connected)shared.connection_revision++;
@@ -87,11 +90,28 @@ static void refresh(void) {
 static bool context_ok(uint64_t control,uint64_t connection) {
  return shared.connected&&shared.control_revision==control&&shared.connection_revision==connection;
 }
+static int app_index(const char *topic){struct xm_topic_info info;xm_topic_parse(topic,&info);
+ return !strcmp(info.app_id,"autonomous")?0:!strcmp(info.app_id,"manual")?1:-1;}
+static bool app_ok(const char *topic,const char *instance){
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+ int index=app_index(topic);
+ return index>=0&&instance[0]&&!strcmp(instance,shared.app_instances[index])&&xd_owner_instance(index,instance);
+#else
+ ARG_UNUSED(topic);ARG_UNUSED(instance);return true;
+#endif
+}
+static int publish_as(const char *topic,const char *type,const char *json,const char *instance,int64_t end){
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+ return xm_zclient_publish_as_until(client,topic,type,json,instance,end);
+#else
+ ARG_UNUSED(instance);return xm_zclient_publish_until(client,topic,type,json,end);
+#endif
+}
 static void send_command(void) {
  k_mutex_lock(&exchange_lock,K_FOREVER);
  bool take=command_pending;
  if(take){active=pending;command_pending=false;}
- bool valid=take&&context_ok(active.control_revision,active.connection_revision);
+ bool valid=take&&context_ok(active.control_revision,active.connection_revision)&&app_ok(active.topic,active.app_instance);
  k_mutex_unlock(&exchange_lock);
  if(!take)return;
  struct xd_delivery d=result(&active,XD_SENT,0);
@@ -101,7 +121,7 @@ static void send_command(void) {
  else {
   d.send_begin_us=clock_us();
   uint32_t before=client->message_counter;
-  d.rc=xm_zclient_publish_until(client,active.topic,"drive.command",active.json,active.expires_ms);
+  d.rc=publish_as(active.topic,"drive.command",active.json,active.app_instance,active.expires_ms);
   d.send_end_us=clock_us();
   d.disposition=d.rc?XD_SEND_FAILED:XD_SENT;
   if(before!=client->message_counter)d.message=client->message_counter;
@@ -126,17 +146,17 @@ static void send_report(void) {
  bool beat=pending_beat&&(!event_count||last_report_was_event);
  if(beat){report_active=heartbeat[slot];heartbeat_pending[slot]=false;heartbeat_cursor=(slot+1)%ARRAY_SIZE(heartbeat);last_report_was_event=false;}
  else if(event_count){report_active=events[event_head];event_head=(event_head+1)%ARRAY_SIZE(events);event_count--;last_report_was_event=true;}
- bool valid=take&&context_ok(report_active.control_revision,report_active.connection_revision);
+ bool valid=take&&context_ok(report_active.control_revision,report_active.connection_revision)&&app_ok(report_active.topic,report_active.app_instance);
  k_mutex_unlock(&exchange_lock);
  if(!take)return;
  bool expired=valid&&k_uptime_get()>=report_active.expires_ms;
  int rc=expired?-ETIME:-EXDEV;
  if(valid&&!expired&&!atomic_get(&stop)&&xd_owner_admit())
-  rc=xm_zclient_publish_until(client,report_active.topic,report_active.type,report_active.json,report_active.expires_ms);
+  rc=publish_as(report_active.topic,report_active.type,report_active.json,report_active.app_instance,report_active.expires_ms);
  if(rc){
   k_mutex_lock(&exchange_lock,K_FOREVER);
   if(beat){
-   bool readiness=!strcmp(report_active.type,"app.readiness");
+   bool readiness=!strcmp(report_active.type,"app.readiness")||!strcmp(report_active.type,"app.lifecycle");
    bool late=expired||(rc==-ETIMEDOUT&&k_uptime_get()>=report_active.expires_ms);
    if(readiness){stats.readiness_dropped++;stats.readiness_expired+=late;}
    else {stats.heartbeat_dropped++;stats.heartbeat_expired+=late;}
@@ -228,7 +248,7 @@ int xd_io_command(struct xd_candidate *c) {
  int rc=0;struct xd_delivery old;
  bool replaced=false;
  if(atomic_get(&stop))rc=-ESHUTDOWN;
- else if(!context_ok(c->control_revision,c->connection_revision))rc=-EXDEV;
+ else if(!context_ok(c->control_revision,c->connection_revision)||!app_ok(c->topic,c->app_instance))rc=-EXDEV;
  else {
   if(command_pending){old=result(&pending,XD_REPLACED,-EALREADY);stats.replaced++;replaced=true;}
   c->queued_us=clock_us();pending=*c;command_pending=true;stats.enqueued++;
@@ -239,8 +259,8 @@ int xd_io_command(struct xd_candidate *c) {
  return rc;
 }
 int xd_io_report_at(const char *topic,const char *type,const char *json,uint64_t completed,const struct xd_inputs *context,int64_t produced_ms) {
- if(!topic||!type||!json||!context||!completed||strlen(topic)>=XM_TOPIC_MAX||strlen(type)>=32||strlen(json)>=160)return -EINVAL;
- bool readiness=!strcmp(type,"app.readiness");
+ if(!topic||!type||!json||!context||!completed||strlen(topic)>=XM_TOPIC_MAX||strlen(type)>=32||strlen(json)>=256)return -EINVAL;
+ bool readiness=!strcmp(type,"app.readiness")||!strcmp(type,"app.lifecycle");
  bool beat=!strcmp(type,"app.heartbeat")||readiness;
  if(!beat&&strcmp(type,"perception.event"))return -ENOTSUP;
  int64_t now=k_uptime_get(), lifetime=readiness?300:1000;
@@ -250,7 +270,8 @@ int xd_io_report_at(const char *topic,const char *type,const char *json,uint64_t
  if(k_mutex_lock(&exchange_lock,K_NO_WAIT))return -EBUSY;
  int rc=0;
  if(atomic_get(&stop))rc=-ESHUTDOWN;
- else if(!context_ok(context->control_revision,context->connection_revision))rc=-EXDEV;
+ else if(!context_ok(context->control_revision,context->connection_revision)||
+   !app_ok(topic,context->app_instances[app_index(topic)==1?1:0]))rc=-EXDEV;
  else if(!beat&&event_count==ARRAY_SIZE(events)){stats.event_dropped++;rc=-ENOBUFS;}
  else {
   unsigned slot=0;
@@ -269,10 +290,11 @@ int xd_io_report_at(const char *topic,const char *type,const char *json,uint64_t
    heartbeat_pending[slot]=true;
   }
   strcpy(r->topic,topic);strcpy(r->type,type);strcpy(r->json,json);
+  strcpy(r->app_instance,context->app_instances[app_index(topic)==1?1:0]);
   r->completed=completed;r->control_revision=context->control_revision;r->connection_revision=context->connection_revision;
   r->expires_ms=produced_ms+lifetime;
  }
- k_mutex_unlock(&exchange_lock);return rc;
+ k_mutex_unlock(&exchange_lock);if(!rc&&!strcmp(type,"app.lifecycle"))k_sem_give(&io_wake);return rc;
 }
 int xd_io_report(const char *topic,const char *type,const char *json,uint64_t completed,const struct xd_inputs *context) {
  return xd_io_report_at(topic,type,json,completed,context,k_uptime_get());

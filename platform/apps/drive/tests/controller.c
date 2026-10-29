@@ -14,6 +14,9 @@ static int replacement(void *context,struct xm_span control,struct xm_span input
  (void)control;(void)input;(void)age;
  int kind=*(int *)context;out->v_mps=kind==2?NAN:.3f;return kind==1?-EIO:0;
 }
+static const char *replacement_qualify(const void *context,struct xm_span input,int64_t age){
+ (void)context;(void)input;(void)age;return NULL;
+}
 static uint64_t clock_values[4];static unsigned clock_index;
 static int health_clock(uint64_t *out){assert(clock_index<4);*out=clock_values[clock_index++];return 0;}
 static int no_memory(void *context,struct xm_span control,struct xm_span input,int64_t age,struct drive_sample *out){
@@ -83,8 +86,21 @@ int main(void){
  int kind=0;struct drive_adapter a={.calculate=replacement,.context=&kind,.requires_state_sync=true};struct drive_sample result;
  assert(!drive_adapter_run(&a,(struct xm_span){0},(struct xm_span){0},0,&result));
  assert(a.progress==1&&!strcmp(result.reason,"STATE_PREPARING"));
- a.state_ready=true;assert(!drive_adapter_run(&a,(struct xm_span){0},(struct xm_span){0},0,&result)&&!result.reason);
- kind=1;assert(drive_adapter_run(&a,(struct xm_span){0},(struct xm_span){0},0,&result)==-EIO&&a.progress==2);
+ a.state_ready=true;assert(!drive_adapter_run(&a,(struct xm_span){0},(struct xm_span){0},0,&result)&&result.reason);
+ struct drive_state_context context={.request=A,.execution=A,.instance=B,.frame=1,.configuration=1,.maneuver=1};
+ struct drive_state_preparation prepared={0};
+ assert(!drive_state_begin(&prepared,&context,0,500));
+ assert(!drive_state_publish(&prepared,&context,1,DRIVE_STATE_REBUILT,1,NULL,true));
+ a.prepared_state=&prepared;a.state_context=&context;
+ assert(!drive_adapter_run(&a,(struct xm_span){0},(struct xm_span){0},0,&result)&&result.reason&&result.v_mps==0);
+ assert(!strcmp(drive_adapter_qualify(&a,(struct xm_span){0},0),"STATE_PREPARING"));
+ a.qualify=replacement_qualify;
+ assert(!drive_adapter_run(&a,(struct xm_span){0},(struct xm_span){0},0,&result)&&!result.reason);
+ struct drive_adapter waiting;struct manual_cfg mc;drive_manual_adapter(&waiting,&mc);
+ assert(!drive_adapter_qualify(&waiting,span(input),0)&&waiting.progress==0);
+ waiting.requires_state_sync=true;waiting.state_ready=false;
+ assert(!strcmp(drive_adapter_qualify(&waiting,span(input),0),"STATE_PREPARING")&&waiting.progress==0);
+ kind=1;assert(drive_adapter_run(&a,(struct xm_span){0},(struct xm_span){0},0,&result)==-EIO&&a.progress==4);
  kind=2;assert(drive_adapter_run(&a,(struct xm_span){0},(struct xm_span){0},0,&result)==-ERANGE&&result.v_mps==0);
  char ready[160];assert(xm_app_readiness_json(ready,sizeof(ready),UINT32_MAX,UINT64_MAX,"READY",NULL)>0);
  assert(strstr(ready,"18446744073709551615"));

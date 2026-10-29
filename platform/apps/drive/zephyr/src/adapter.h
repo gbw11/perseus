@@ -6,10 +6,14 @@
 #include <xenova/mqtt/xm.h>
 #include "autonomous.h"
 #include "manual.h"
+#include "preparation.h"
+#include "manual_session.h"
 
 struct drive_sample { float v_mps,steer_rad,nearest_m; enum auto_reason auto_reason; const char *reason; };
 typedef int (*drive_calculate)(void *context,struct xm_span control,struct xm_span input,
                                int64_t age_ms,struct drive_sample *out);
+/* Bounded validation of immutable configuration/input, no work progress or I/O. */
+typedef const char *(*drive_qualify)(const void *context,struct xm_span input,int64_t age_ms);
 struct drive_adapter {
  drive_calculate calculate;
  void *context;
@@ -18,9 +22,17 @@ struct drive_adapter {
  /* Stateful replacements must leave state_ready false until their own
   * synchronization/warm-up completes; a return from calculate is insufficient. */
  bool requires_state_sync,state_ready;
+ /* Immutable app-owned proof and expected receiving context. Both outlive
+  * worker join. A boolean alone never qualifies a stateful replacement. */
+ const struct drive_state_preparation *prepared_state;
+ const struct drive_state_context *state_context;
+ bool manual_input;
+ struct drive_manual_gate movement;
+ drive_qualify qualify;
 };
 void drive_auto_adapter(struct drive_adapter *,struct auto_cfg *);
 void drive_manual_adapter(struct drive_adapter *,struct manual_cfg *);
 int drive_adapter_run(struct drive_adapter *,struct xm_span control,struct xm_span input,
                       int64_t age_ms,struct drive_sample *out);
+const char *drive_adapter_qualify(const struct drive_adapter *,struct xm_span input,int64_t age_ms);
 #endif

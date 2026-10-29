@@ -15,7 +15,7 @@ release deadline과 필수 계산 실패를 NOT_READY·0 출력 후보로 연결
 | MQTT 연결·구독 | v1 socket / Gateway의 CONNACK·SUBACK | 앱 준비·제어 적용 |
 | 현재 허용된 실행 | Manager Execution 관측 + 적용된 Bootstrap receipt의 root 전용 바인딩 | 게스트 본문에 적은 execution ID만으로 승인 |
 | 실제 계산 완료 | 앱 어댑터의 `progress_seq` | worker 송신 횟수 |
-| 제어 적용·기능 준비 | `app.readiness` | 출력 권한 |
+| 제어 적용·기능 준비 | verified의 `app.readiness`, warm의 `app.lifecycle` | 출력 권한 |
 | 출력 허가 | Gateway 영구 원본·현재 제어 적용·명시적 재무장 | heartbeat 복귀·부팅 성공 |
 | 시리얼 제출 | 실제 쓰기 수락 바이트 수 | 최종 장치 적용 |
 
@@ -37,6 +37,10 @@ release deadline과 필수 계산 실패를 NOT_READY·0 출력 후보로 연결
 유한한 출력값 검증을 맡는다. 현재 두 계산은 상태 없는 어댑터로 선언한다. 상태 있는
 앱으로 교체할 때는 `requires_state_sync=true`, `state_ready=false`로 시작하고 앱이
 warm-up·동기화를 확인해야 한다. 함수가 반환됐다는 사실만으로 READY가 되지 않는다.
+상태 있는 앱은 `preparation.h`의 완전한 준비 근거와 현재 수신 문맥도 제공한다.
+`state_ready=true`만으로는 READY가 되지 않는다. 준비 작업자는 자기 작업 기록을
+갱신하고 완성 사본을 불변 객체로 게시한다. 어댑터가 참조하는 사본·문맥은 실제 worker
+join까지 유효해야 하며 작업 중인 기록을 직접 공유하거나 취소 직후 재사용하지 않는다.
 계산 오류는 진행 순번을 올리지 않으며, 잘못된 출력은 0으로 안전 처리하고 NOT_READY다.
 입력 부족·만료는 계산 실패와 별개다. 안전 정지 입력(`keys: []`, 인지 `stop`)도
 형식·신선도가 유효하면 기능 준비와 구분할 수 있다. 입력을 가짜로 만들어 준비시키지 않는다.
@@ -47,8 +51,9 @@ warm-up·동기화를 확인해야 한다. 함수가 반환됐다는 사실만�
 control/connection revision, 실제 시작·완료가 남는다. 현재 문맥과 다른 결과는 사용하지 않는다.
 
 앱별 `progress_seq`는 각 어댑터의 실제 진행이다. 공통 `loop_seq`·지터·elapsed는 **현재 선택된
-계산의 실제 시작·완료**를 관측하며, SAFE_STOP에서는 실제 MANUAL 계산을 관측한다. main의
-poll·작업 제출·송신·WAITING 상태가 순번을 증가시키지 않는다. 이전 직렬 두 계산 합계와
+계산의 실제 시작·완료**를 관측하며, verified의 SAFE_STOP에서는 실제 MANUAL 계산을 관측한다. main의
+poll·작업 제출·송신·WAITING 상태가 순번을 증가시키지 않는다. warm의 SAFE_STOP은 계산을
+제출하지 않으므로 공통 loop_seq도 증가하지 않는다. 이전 직렬 두 계산 합계와
 동일한 성능 표본으로 비교하지 않는다. 기존 standalone 앱의 직렬 hook은 그대로 유지한다.
 
 계산 스레드는 취소 요청을 확인한 뒤 callback이 반환해야 종료할 수 있다. 반환하지 않는
@@ -57,11 +62,48 @@ callback은 원 종료 기한에서 실패·자원 잔존으로 남기며 thread
 8KiB씩의 계산 stack은 현재 알고리즘용 초기 구성이다. 실제 Xen의 실행 지연·전체 call chain
 stack peak·미래 planner의 자원 수락을 뜻하지 않는다. 같은 주소 공간의 메모리 손상 격리는 없다.
 
-현재 `verified-drive-1` 호환 구성은 두 앱의 실제 계산으로 준비를 보고한다. 설계의 warm
-Standby처럼 계산을 대기시키는 프로필은 아직 활성화하지 않는다. 내부 WAITING은 다음 작업을
-기다린다는 뜻이며 `app.readiness=READY`나 승계 자격이 아니다. 대기 자격·활성화 확인·활성
-진행을 구분하는 새 소비자 계약은 설계 9.6절의 공동 확정 대상으로 유지한다. 같은 READY를
-갱신해 대기 계산이 진행한 것처럼 만들지 않는다. 앱 단독 재초기화·instance 재발급도 미지원이다.
+기본 `verified-drive-1`은 두 앱의 실제 계산으로 준비를 보고한다. 명시적인
+`warm-operations` / `warm-experiment`는 `warm-drive-1` 계약을 사용한다. 비선택 앱과
+Standby는 계산을 제출하지 않고 입력·설정·소유 상태의 제한된 검사로 대기 자격을 보고한다.
+실제 계산·활성화·출력 허가는 별도다. 입력이 없으면 자격을 만들지 않는다.
+필드·enum·시각·거절 조건의 원문은 [MQTT 계약 6.3절](../../../docs/contracts/mqtt-contract-v1.md#63-대기활성화-보고-applifecycle)이다.
+
+`drive_adapter.qualify`는 불변 설정·입력의 제한된 검사이며 계산이나 I/O를 실행하지 않는다.
+상태 있는 앱은 준비 조건을 이 연결부에 구현해야 한다. qualifier가 없거나 상태 준비가
+끝나지 않으면 STATE_PREPARING이다. 현재 두 앱은 현재 입력으로 준비 가능한 상태 없는
+구현이다. 지도·상태 사본·새 planner를 구현한 것으로 확대하지 않는다.
+
+상태 준비의 공통 검사는 원 요청·수신 execution/instance·frame/설정/maneuver 문맥,
+완전한 상태 revision과 재구축/인계 출처를 보존한다. 인계 사본은 수락 당시의 원 VM·
+execution/instance·generation도 보존한다. 이 필드만으로 출처가 인증되는 것은 아니며
+향후 실제 상태 수신부가 먼저 신뢰된 출처·완전성·기능적 호환성을 확인해야 한다.
+사본 적용 완료 뒤 정상 pose/입력 갱신은 어댑터가 제한된 비용으로 재검증한다.
+준비 완료 기한을 지도/경로 사본의 일괄 TTL로 쓰지 않는다. 실제 상태 전송·live 참조
+교환·planner는 아직 연결되지 않았다. Gateway의 현재 계획 인계도 root가 명시한
+stateless 앱만 허용하며 상태 있는 앱을 일반 QUALIFIED로 대신 승인하지 않는다.
+
+선택형 [세션 입력](../../../docs/contracts/mqtt-contract-v1.md#71-명시적-세션-입력-manual-session-1)은
+원 sample/action·세션 유효성·원 나이를 C/Python에서 검사한다. 새 control의
+`manual_policy`/`manual_session`을 받은 계산 소유자가 전환별 중립/새 조작 순서를
+관리한다. 정상 중립은 READY·0 출력일 수 있으며 과거 키 재발행은 새 조작이 아니다.
+같은 MANUAL 승계에는 현재 유효한 누른 키를 처리할 수 있다. 새 session metadata가
+없는 keys-only 입력은 이 선택 계약의 증거가 아니다. 현재 Spring 생산 경로의 연동은
+담당자 작업으로 남아 있다. 기존 keys-only 사용 경로는 별도로 유지한다.
+
+warm에서 root가 같은 실행의 Bootstrap 앱 instance를 바꾸면 해당 앱의 결과 사용과
+새 제출을 먼저 철회한다. 무대기 join 관측으로 실제 종료한 뒤에만 어댑터·thread/stack을
+재사용한다. 원 500ms 앱 정리 허용량을 재발급하지 않고 잔존이면 재사용을 막는다.
+이는 시험 설정 `CONFIG_XENOVA_DRIVE_APP_STOP_MS`이며 VM 종료 예산이나 자동 재시작
+정책이 아니다. AUTO 정리 중 MANUAL·통신·감독은 계속 진행한다. 같은 root 요청의 재시도는
+같은 instance를 사용한다. 생성 실패나 잔존을 새 준비로 숨기지 않는다.
+생성 실패 뒤 같은 root 요청으로 자동 재시도하지 않으며, 운영자가 새 instance 변경을
+명시적으로 요청한 경우에만 새 시도를 수락한다. 종료가 확인되지 않은 stack은 계속 보존한다.
+
+Bootstrap 갱신은 별도 `drive-context` owner가 기존 Store receiver로 읽는다. 계산·v1 packet
+owner는 메모리 사본만 읽는다. 현재 설정은 100ms refresh·호출 예산 50ms·사본 300ms이며
+오류/만료에서 새 출처를 승인하지 않는다. guest boot·execution·transport 신원이나 계정이
+바뀐 응답은 거절한다. 종료 시 기존 guest cleanup deadline으로 이 owner도 join하며,
+미종료 상태에서 netfront/Store를 해제하지 않는다.
 
 고정 release origin, 놓친 계산을 몰아서 실행하지 않는 정책, 원 입력 수신 시각,
 200ms 수동 입력·300ms 인지 만료, 명령 100ms 신선도를 유지한다. F01의 창 확정/송신
@@ -70,7 +112,7 @@ Standby처럼 계산을 대기시키는 프로필은 아직 활성화하지 않�
 
 ## 모드·VM·출력 허가
 
-Gateway 기본 `verified` 프로필은 영구 제어 원본과 신뢰된 실행 바인딩을 필수로 사용한다.
+Gateway 기본 `verified`와 명시적 `--profile warm`은 영구 제어 원본과 신뢰된 실행 바인딩을 필수로 사용한다.
 구형 분리 앱은 명시적 `--profile legacy`이며 공통 A/B의 준비·신원 수락으로 간주하지 않는다.
 
 * AUTO↔MANUAL은 같은 VM 실행에서 계산 모드와 generation만 바꾼다.
@@ -123,7 +165,7 @@ Gateway/dom0 재시작은 마지막 모드·선호 owner를 복원하지만 출�
 ```
 
 플랫폼 COMPLETED는 새 Xen 실행 관측이라는 기존 뜻이다. rejoin의 PROVISIONING,
-PROVISIONED, PREPARING, READY_OBSERVED는 별도 상태다. READY_OBSERVED는 출력 권한이나
+PROVISIONED, PREPARING, READY_OBSERVED 및 warm의 QUALIFIED_OBSERVED는 별도 상태다. 이 관측은 출력 권한이나
 지속 보장도 아니다. 보고가 만료되면 PREPARING으로 돌아간다.
 
 `xenova_drive_binding.observe()`는 기존 Execution의 UUID/name/domid/xen_unique_id 확인과
@@ -142,6 +184,42 @@ Store C 호출이 외부에서 정체하면 작업이 남을 수 있으며 이�
 RECONCILE_REQUIRED로 운영자에게 넘기며 새 force나 재시작 시도를 발급하지 않는다.
 
 ## 발행 출처와 소비자 이행
+
+### warm 구성과 앱별 재초기화
+
+warm 펌웨어에는 Gateway `--profile warm`, Worker 설정의
+`"readiness_profile": "warm-drive-1"`, 최초 drive provisioning의
+`--drive-profile warm-drive-1`이 함께 필요하다. 기존 적용 receipt의 프로필을 몰래 바꾸지
+않는다. v2 receipt·guest boot·drive transport와 앱별 두 instance는 별개다.
+기본 example 설정은 verified이며 warm을 자동으로 켜지 않는다.
+
+앱별 재초기화는 기존 root provisioning 도구의 명시적 요청이다. 아래 값은 현재 실행과
+root 전용 receipt에서 확인한다. 인증정보 파일의 내용은 출력하거나 명령행에 넣지 않는다.
+
+```sh
+python3 /usr/lib/xenova/provision_xenova_telemetry.py \
+  --channel drive --vm-id "$VM_UUID" --credentials-file "$DRIVE_CREDENTIALS" \
+  --receipt "$DRIVE_RECEIPT" --expected-host-boot-id "$HOST_BOOT_ID" \
+  --expected-execution-id "$EXECUTION_ID" --reinitialize-app autonomous \
+  --expected-app-instance "$OLD_APP_INSTANCE" --app-request-id "$REQUEST_UUID"
+```
+
+이는 계획 조회다. 확인한 같은 명령에 `--execute`를 추가하면 receipt 잠금 아래 원 instance를
+대조하고 대상 앱의 새 instance를 한 번만 발급·저장한 뒤 Store에 적용한다. 응답을 잃으면
+**같은 REQUEST_UUID·OLD_APP_INSTANCE·receipt·execution**으로 재전달한다. 다른 key로
+불확실한 결과를 우회하지 않는다. uncertain은 기존 `--reconcile`의 관측 경로로 확인하며
+재확인은 새 Store 쓰기나 앱 재시작을 수행하지 않는다.
+
+`configured=true`는 receipt/Store 단계의 완료다. 게스트의 실제 join·새 앱 instance 보고와
+현재 제어 준비를 별도로 확인해야 한다. root 바인딩 갱신과 Gateway의 현재 instance·신선한
+app.lifecycle로 확인하며, 옛 신원 보고나 heartbeat 복귀를 완료 근거로 삼지 않는다.
+다른 앱·UUID·실행·인증정보·CPU·Authority generation은 유지한다. 자동 복구 정책·상태 있는
+앱의 warm-up/상태 사본·운영 HTTP 연결·실제 차량 수락은 이 수동 경로에 포함되지 않는다.
+앱 하나의 Store 갱신이 미확정이면 원래 적용된 앱별 신원을 대조해 대상만 차단한다.
+검증 가능한 변경 전 근거가 있을 때 영향 없는 앱의 바인딩은 유지한다. 최초 공급이나
+기록 손상까지 정상으로 추측하는 예외가 아니며, 대상 앱은 재확인 전 승격하지 않는다.
+
+### 공통 출처와 외부 소비자
 
 verified 앱은 `xenova/v1/vms/{vm_id}/apps/{app_id}/events`에 발행한다.
 username은 VM UUID이며 자기 두 앱 경로만 쓰도록 ACL을 제한한다. Gateway·Worker는
@@ -165,6 +243,10 @@ CPU 계상·heap/pool·기한·오류와 실제 계산 진행, Publisher·협조
 원자료 시험은 `--profile experiment`를 명시한다. profile과 실제 `.config` 해시는 빌드
 영수증에 들어가며 두 구성의 firmware/source digest를 구별한다. recorder가 없는 구성의
 `capture/records/transmissions`는 `-ENOTSUP`이며 빈 원자료 성공으로 반환하지 않는다.
+
+warm은 각각 `--profile warm-operations`, `--profile warm-experiment`로 선택한다.
+이 네 가지 빌드 프로필은 같은 소스의 다른 구성이고, A/B에는 선택한 **하나의 동일 번들**을
+사용한다. warm 프로필의 새 계약·runtime을 기존 verified 설치본에 자동 혼용하지 않는다.
 
 ```bash
 cmake -S platform/apps/drive/tests -B "$HOST_BUILD" -GNinja

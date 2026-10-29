@@ -16,11 +16,13 @@ struct xd_inputs {
  uint64_t control_revision, connection_revision;
  bool connected; /* CONNACK observed, not SUBACK or control re-confirmation. */
  bool dual_mode;
+ char app_instances[2][XM_UUID_LEN+1]; /* AUTO, MANUAL; empty means unavailable */
 };
 struct xd_candidate {
  uint64_t id, created_us, queued_us, capture_us, control_revision, connection_revision;
  int64_t expires_ms;
  char topic[XM_TOPIC_MAX], json[160];
+ char app_instance[XM_UUID_LEN+1];
 };
 enum xd_disposition { XD_SENT, XD_SEND_FAILED, XD_REPLACED, XD_EXPIRED, XD_CONTEXT_CHANGED, XD_STOPPED };
 struct xd_delivery {
@@ -56,5 +58,7 @@ int xd_io_stats_get(struct xd_io_stats *);
 /* Runtime-owned local capture callbacks; never create a heartbeat or drive step. */
 int xd_owner_prepare(struct xm_zclient *, const char *, const char *);
 bool xd_owner_admit(void);
+void xd_owner_context(struct xd_inputs *);
+bool xd_owner_instance(int app_index,const char *instance);
 void xd_delivery_record(const struct xd_delivery *);
 #endif

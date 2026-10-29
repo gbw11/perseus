@@ -49,13 +49,14 @@ def fingerprint(app):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--app", choices=("manual", "autonomous", "drive"), required=True)
-    p.add_argument("--profile", choices=("operations", "experiment"), default="operations",
+    p.add_argument("--profile", choices=("operations", "experiment", "warm-operations", "warm-experiment"), default="operations",
                    help="operations excludes raw capture; experiment explicitly includes it")
     p.add_argument("--zephyr-source", type=Path, required=True)
     p.add_argument("--tools", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
+    if args.profile.startswith('warm-') and args.app!='drive':p.error('warm profiles require the common drive firmware')
     for path in (args.zephyr_source, args.tools, args.output):
         if not path.is_absolute() or path.resolve() != path or path.is_symlink():
             raise ValueError("canonical absolute paths required")
@@ -131,8 +132,10 @@ def main():
         raise ValueError("netfront send exceeds the direct 256-byte stack-frame budget")
     config = (build / "zephyr/.config").read_text()
     for name in ("XENOVA_DRIVE_RECORDER", "XENOVA_DIAGNOSTICS_THREADS"):
-        if ("CONFIG_" + name + "=y\n" in config) != (args.profile == "experiment"):
+        if ("CONFIG_" + name + "=y\n" in config) != args.profile.endswith("experiment"):
             raise ValueError("resolved configuration differs from selected profile: " + name)
+    if ("CONFIG_XENOVA_DRIVE_WARM=y\n" in config)!=args.profile.startswith('warm-'):
+        raise ValueError('resolved readiness profile differs from requested profile')
     if "CONFIG_STACK_SENTINEL=y\n" not in config:
         raise ValueError("drive target must retain stack boundary detection")
     netfront_stack_audit = {"send_frame_bytes": int(send[0][1]), "direct_frame_budget_bytes": 256,
@@ -141,7 +144,9 @@ def main():
     calculation_stack_audit = None
     if args.app == "drive":
         frames = {}
-        for basename in ("workers.c", "adapter.c", "autonomous.c", "manual.c", "xm_payload.c", "xm_json.c"):
+        basenames=["workers.c", "adapter.c", "autonomous.c", "manual.c", "xm_payload.c", "xm_json.c"]
+        if args.profile.startswith('warm-'):basenames += ['context.c','runtime.c','main.c','xen_bootstrap.c','xm_zclient.c']
+        for basename in basenames:
             item = next(v for v in commands if v["file"].endswith("/" + basename))
             argv = shlex.split(item["command"])
             if set(argv) & {"-MF", "-MD", "-MMD"}:
