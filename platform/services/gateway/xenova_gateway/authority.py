@@ -4,13 +4,14 @@ generation from MQTT absence. Stored preference does not restore output power.
 from __future__ import annotations
 import json,os,stat,threading
 from pathlib import Path
-from xenova_mqtt.drive_binding import atomic_json,private_json,canonical
+from xenova_mqtt.drive_binding import atomic_json,canonical
 from .machine import Mode,ACTIVE_APP
 
 class AuthorityError(RuntimeError):pass
 
 TRANSITION_LIMIT=32  # Bounded private records; never silently evict dedup evidence.
 TRANSITION_PHASES={'PREPARING','PREPARED','COMMITTED','CANCELLED','FAILED','ABANDONED'}
+GATEWAY_LOCK=Path('/run/lock/xenova-drive-gateway.lock')
 
 class GatewayLease:
     """The Worker's nonblocking flock ownership pattern, scoped to drive output."""
@@ -33,16 +34,7 @@ class AuthorityStore:
     def __init__(self,directory: Path,host_boot_id: str,*,uid=0,mountpoint: Path | None=Path('/srv/xenova')):
         self.directory=Path(directory);self.host=canonical(host_boot_id);self.uid=uid;self.error=None
         self._lock=threading.RLock()
-        if not self.directory.is_absolute() or self.directory.resolve()!=self.directory:
-            raise AuthorityError('canonical absolute authority directory required')
-        if mountpoint is not None and (not os.path.ismount(mountpoint) or not self.directory.is_relative_to(mountpoint)):
-            raise AuthorityError('mounted persistent Xenova data required')
-        if mountpoint is not None:
-            try:
-                from xenova_vm import storage_check
-                storage_check(Path(mountpoint))
-            except (ImportError,RuntimeError,OSError,ValueError) as exc:
-                raise AuthorityError('verified Xenova ext4 storage/installation required') from exc
+        self.check_storage(self.directory,mountpoint)
         self.directory.mkdir(parents=True,exist_ok=True,mode=0o700)
         s=self.directory.lstat()
         if not stat.S_ISDIR(s.st_mode) or s.st_uid!=uid or s.st_mode&0o077:
@@ -50,9 +42,33 @@ class AuthorityStore:
         self.path=self.directory/'control.json';self.marker=self.directory/'initialized'
         self.value=None
 
+    @staticmethod
+    def check_storage(directory,mountpoint):
+        """Check the existing storage boundary without creating an authority."""
+        directory=Path(directory)
+        if not directory.is_absolute() or directory.resolve()!=directory:
+            raise AuthorityError('canonical absolute authority directory required')
+        if mountpoint is not None and (not os.path.ismount(mountpoint) or not directory.is_relative_to(mountpoint)):
+            raise AuthorityError('mounted persistent Xenova data required')
+        if mountpoint is not None:
+            try:
+                from xenova_vm import storage_check
+                storage_check(Path(mountpoint))
+            except (ImportError,RuntimeError,OSError,ValueError) as exc:
+                raise AuthorityError('verified Xenova ext4 storage/installation required') from exc
+
+    def check_marker(self):
+        """The first-install marker is private evidence, never a followed link."""
+        fd=os.open(self.marker,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        with os.fdopen(fd,'rb') as stream:
+            info=os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid!=self.uid or
+                    info.st_mode&0o077 or info.st_size!=2 or stream.read(3)!=b'1\n'):
+                raise AuthorityError('private initialized marker invalid')
+
     def initialize(self,owner: str):
         canonical(owner)
-        if self.path.exists() or self.path.is_symlink() or self.marker.exists() or self.marker.is_symlink():
+        if next(self.directory.iterdir(),None) is not None:
             raise AuthorityError('authority already initialized; no overwrite')
         fd=os.open(self.marker,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
         with os.fdopen(fd,'w') as stream:stream.write('1\n');stream.flush();os.fsync(stream.fileno())
@@ -63,10 +79,30 @@ class AuthorityStore:
             'reason':'first_install','phase':'DISARMED','pending':None,'rearm_required':True,'requests':[]})
 
     def load(self):
-        if not self.marker.is_file():raise AuthorityError('explicit first-install initialization required')
-        try:self.value=private_json(self.path,self.uid);self.validate(self.value)
-        except (OSError,ValueError,KeyError,TypeError) as exc:raise AuthorityError('authority missing/corrupt; output forbidden') from exc
+        try:
+            self.check_marker()
+            value=self.read_current();self.validate(value)
+        except FileNotFoundError as exc:
+            if next(self.directory.iterdir(),None) is None:
+                raise AuthorityError('explicit first-install initialization required') from exc
+            raise AuthorityError('authority missing/corrupt; output forbidden') from exc
+        except (OSError,ValueError,KeyError,TypeError,AuthorityError) as exc:
+            raise AuthorityError('authority missing/corrupt; output forbidden') from exc
+        self.value=value
         return self.value
+
+    def read_current(self):
+        """A corrupt path must not turn a FIFO/device open into an unbounded wait."""
+        fd=os.open(self.path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        with os.fdopen(fd) as stream:
+            info=os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid!=self.uid or info.st_mode&0o077 or info.st_size>65536:
+                raise AuthorityError('private bounded authority record required')
+            raw=stream.read(65537)
+            if len(raw.encode())>65536:raise AuthorityError('authority record too large')
+            value=json.loads(raw)
+            if not isinstance(value,dict):raise AuthorityError('authority record object required')
+            return value
 
     @staticmethod
     def validate(value):
@@ -136,9 +172,10 @@ class AuthorityStore:
         """Background read: loss or uncoordinated replacement blocks output."""
         with self._lock:
             try:
-                current=private_json(self.path,self.uid);self.validate(current)
-                if current!=self.value or not self.marker.is_file():raise ValueError('authority replaced/lost')
-            except (OSError,ValueError,KeyError,TypeError):self.error='AUTHORITY_STORAGE_UNCERTAIN'
+                current=self.read_current();self.validate(current)
+                self.check_marker()
+                if current!=self.value:raise ValueError('authority replaced/lost')
+            except (OSError,ValueError,KeyError,TypeError,AuthorityError):self.error='AUTHORITY_STORAGE_UNCERTAIN'
         return self.error is None
 
     def update(self,**fields):
