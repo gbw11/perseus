@@ -55,7 +55,7 @@ for path in sys.argv[2:]:
     if re.match(r"^/mnt/[a-zA-Z](?:/|$)", path):
         sys.exit("ERROR: keep project, sources and build on a Linux filesystem")
 expected = {"openembedded-core", "bitbake", "meta-yocto", "meta-raspberrypi",
-            "meta-openembedded", "meta-virtualization"}
+            "meta-openembedded", "meta-virtualization", "meta-browser", "meta-clang"}
 seen = set()
 for number, line in enumerate(Path(sys.argv[1]).read_text().splitlines(), 1):
     if not line.strip() or line.lstrip().startswith("#"):
@@ -70,7 +70,7 @@ for number, line in enumerate(Path(sys.argv[1]).read_text().splitlines(), 1):
         sys.exit(f"ERROR: expected public HTTPS URL without credentials at line {number}")
     seen.add(repo)
 if seen != expected:
-    sys.exit("ERROR: layers.lock must contain exactly the six expected repositories")
+    sys.exit("ERROR: layers.lock must contain exactly the eight expected repositories")
 PY
 WORKSPACE="$(realpath -m -- "$WORKSPACE")"
 BUILD_DIR="$(realpath -m -- "$BUILD_DIR")"
@@ -122,6 +122,8 @@ layers=(
   "$LAYERS_DIR/meta-openembedded/meta-filesystems"
   "$LAYERS_DIR/meta-raspberrypi"
   "$LAYERS_DIR/meta-virtualization"
+  "$LAYERS_DIR/meta-clang"
+  "$LAYERS_DIR/meta-browser/meta-chromium"
   "$CUSTOM_LAYER"
 )
 for layer in "${layers[@]}"; do

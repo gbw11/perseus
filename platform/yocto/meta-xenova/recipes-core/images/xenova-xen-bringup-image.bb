@@ -74,3 +74,6 @@ xenova_set_timezone() {
     ln -snf "${datadir}/zoneinfo/Asia/Seoul" "${IMAGE_ROOTFS}${sysconfdir}/localtime"
     printf 'Asia/Seoul\n' > "${IMAGE_ROOTFS}${sysconfdir}/timezone"
 }
+
+# Local display runtime is independent of guest startup and external connectivity.
+IMAGE_INSTALL:append = " xenova-display xenova-gateway kernel-module-v3d"

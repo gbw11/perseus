@@ -13,6 +13,8 @@
 #   meta-openembedded/meta-filesystems
 #   meta-raspberrypi
 #   meta-virtualization
+#   meta-clang
+#   meta-browser/meta-chromium
 
 openembedded-core https://git.openembedded.org/openembedded-core 0f03c732a0a2d0506b41b1abe60b3f368b2300dc
 bitbake https://git.openembedded.org/bitbake 51fd94a67fa17650a9ff623492005972bbc7d26f
@@ -20,3 +22,7 @@ meta-yocto https://git.yoctoproject.org/meta-yocto 7c25b11156553145fa6b241a2d4f6
 meta-raspberrypi https://git.yoctoproject.org/meta-raspberrypi 919588393f41b48cb6c5d832aa35e58a19b6762d
 meta-virtualization https://git.yoctoproject.org/meta-virtualization 2807579615834a143c8ed453b463f93f43446019
 meta-openembedded https://git.openembedded.org/meta-openembedded 47d7dbdd10890bbd429bc0cccbe14435c37e5af1
+
+# HDMI Chromium uses its supported clang toolchain; both match wrynose.
+meta-browser https://github.com/OSSystems/meta-browser.git 0715454e29ac38fb0a25bdbb1e0e26fdc4dc7ae3
+meta-clang https://github.com/kraj/meta-clang.git ef0d22f21910a0c30c967eeb17d8f209806e2d81
