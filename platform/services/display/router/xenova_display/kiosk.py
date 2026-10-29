@@ -22,7 +22,7 @@ def write_status(path, value):
 
 
 class Kiosk:
-    def __init__(self, config, token, status_path, *, allow_virtual=False, chromium_path=None, test_no_sandbox=False, prevent_idle_blank=False):
+    def __init__(self, config, token, status_path, *, allow_virtual=False, chromium_path=None, test_no_sandbox=False, prevent_idle_blank=False, shared_browser=False):
         if not token: raise ValueError("XENOVA_DISPLAY_TOKEN required")
         if test_no_sandbox and config.backend != "virtual_x11":
             raise ValueError("sandbox bypass is restricted to virtual test mode")
@@ -30,6 +30,8 @@ class Kiosk:
         self.layout = X11Layout(config, allow_virtual=allow_virtual)
         self.chromium_path, self.test_no_sandbox = chromium_path, test_no_sandbox
         self.prevent_idle_blank = prevent_idle_blank
+        self.shared_browser = shared_browser
+        self.browser = None
         self.epoch = str(uuid4())
         self.contexts, self.pages, self.renewed = {}, {}, {}
         self.profiles = {}
@@ -45,16 +47,27 @@ class Kiosk:
         # Chromium never receives the service token via argv, extra headers or page JS.
         env = {k: v for k, v in os.environ.items() if not (k.startswith("XENOVA_") and ("TOKEN" in k or "PASSWORD" in k))}
         env["DISPLAY"] = self.config.display
-        profile = tempfile.TemporaryDirectory(prefix="xenova-kiosk-")
-        self.profiles[output.output_id] = profile
-        default = Path(profile.name)/"Default"
-        default.mkdir()
-        (default/"Preferences").write_text(json.dumps({"translate":{"enabled":False},
-            "intl":{"accept_languages":"ko-KR,ko"}}),encoding="utf-8")
-        context = await browser_type.launch_persistent_context(profile.name, headless=False, no_viewport=True, locale="ko-KR",
-                    executable_path=self.chromium_path, args=args, env=env,
-                    ignore_default_args=["about:blank"],
+        if self.shared_browser:
+            # Share Chromium's browser/GPU overhead, not cookies or output windows.
+            # Every output still owns an independent context and CDP window mapping.
+            if self.browser is None or not self.browser.is_connected():
+                common = [arg for arg in args if not arg.startswith(("--app=", "--window-position=", "--window-size="))
+                          and arg != "--kiosk"]
+                self.browser = await browser_type.launch(headless=False,
+                    executable_path=self.chromium_path, args=common, env=env,
                     chromium_sandbox=not self.test_no_sandbox)
+            context = await self.browser.new_context(no_viewport=True, locale="ko-KR")
+        else:
+            profile = tempfile.TemporaryDirectory(prefix="xenova-kiosk-")
+            self.profiles[output.output_id] = profile
+            default = Path(profile.name)/"Default"
+            default.mkdir()
+            (default/"Preferences").write_text(json.dumps({"translate":{"enabled":False},
+                "intl":{"accept_languages":"ko-KR,ko"}}),encoding="utf-8")
+            context = await browser_type.launch_persistent_context(profile.name, headless=False, no_viewport=True, locale="ko-KR",
+                        executable_path=self.chromium_path, args=args, env=env,
+                        ignore_default_args=["about:blank"],
+                        chromium_sandbox=not self.test_no_sandbox)
         self.contexts[output.output_id] = context
         await self.renew(context)
         page = context.pages[0] if context.pages else await context.new_page()
@@ -158,6 +171,9 @@ class Kiosk:
                     await asyncio.sleep(1)
             finally:
                 for identity in set(self.contexts) | set(self.profiles): await self.close_output(identity)
+                if self.browser:
+                    try: await self.browser.close()
+                    finally: self.browser = None
                 write_status(self.status_path, {"schema_version": 1, "layout_epoch": self.epoch,
                     "backend": self.config.backend, "updated_monotonic": time.monotonic(), "outputs": {}})
 
@@ -170,9 +186,10 @@ if __name__ == "__main__":
     parser.add_argument("--test-no-sandbox", action="store_true")
     parser.add_argument("--chromium")
     parser.add_argument("--prevent-idle-blank", action="store_true", help="dedicated X11 session only")
+    parser.add_argument("--shared-browser", action="store_true", help="one Chromium process with isolated output contexts")
     args = parser.parse_args()
     kiosk = Kiosk(RuntimeConfig.load(args.config), os.environ.get("XENOVA_DISPLAY_TOKEN"), args.status,
-                  allow_virtual=args.allow_virtual, chromium_path=args.chromium, test_no_sandbox=args.test_no_sandbox, prevent_idle_blank=args.prevent_idle_blank)
+                  allow_virtual=args.allow_virtual, chromium_path=args.chromium, test_no_sandbox=args.test_no_sandbox, prevent_idle_blank=args.prevent_idle_blank, shared_browser=args.shared_browser)
     async def serve():
         task = asyncio.current_task()
         loop = asyncio.get_running_loop()
