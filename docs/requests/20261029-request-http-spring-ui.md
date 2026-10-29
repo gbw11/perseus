@@ -84,6 +84,36 @@ Agent 장애의 증거가 아니다.
 시험 VM은 범위를 확인해 정리하되, 정상 생성된 제품 사건과 작업 기록을 지워 시험 흔적을
 숨기지 않는다. 보드 직접 호출 통과와 Spring·화면 종단 통과는 별개로 기록한다.
 
+### 설치본에서 재현한 직렬화 경합과 배포 대조
+
+2026-10-30의 [실행 기록](../verification/recovery-scenario-closure-20261030.md#설치본-fastapiec2-직접-호출)에서
+동일 소유 Zephyr UUID로 dom0 localhost와 EC2→FastAPI를 각각 한 번 호출했다.
+두 요청 모두 `OPERATION_IN_PROGRESS`/503이며 각각 `create waited 30s for the manager`,
+`get waited 30s for the manager`였다. 등록·작업 journal·도메인은 생성되지 않았다.
+Spring 공개 API를 거친 호출은 아니므로 Spring 생성 실패를 재현한 것으로 확대하지 않는다.
+
+즉시 실패 지점은 설치된 `drivers/platform.py:SerializedManager.call`의 차례 대기다.
+전체 관측 시간 약 71초/59초에는 앞선 조회·대기도 포함되므로 `30초 = 전체 HTTP 예산`이
+아니다. 설치본의 유효 `XENOVA_PLATFORM_BUSY_TIMEOUT`은 30이고, 최신 소스 기본 5와 다르다.
+기본 VM 단건도 같은 잠금에서 503인 반면 `/api/v1/stats`는 200이었다.
+
+담당자는 기존 D02·D08에 다음을 누적 수락한다.
+
+- 현재 배포의 module hash·실제 설정과 정규 후보를 맞춘다. 설치 OpenAPI에는 원 key 조회와
+  key stop의 200/202 계약이 없었다. 저장소에 구현이 있다는 사실을 설치 완료로 보지 않는다.
+- `SerializedManager.call`·`VmService.create`의 선행 `has_domain/ensure_instance`와
+  실제 반복 `list` 소비자를 함께 시험한다. 조회를 잠시 멈춘 우연한 성공이나 대기 숫자
+  증가만으로 경합을 마감하지 않는다. 필수 현재 신원·CPU·자산 검증을 생략하지 않는다.
+- 이미 구현된 native 신원 조회와 검증 목록 메타데이터 재사용의 배포 여부를 먼저 대조한다.
+  공유 관측을 사용할 때는 기존 opt-in·유효성·만료 거절과 제어 직전의 새 guard를 보존한다.
+  이 근거 없이 별도 cache나 raw Xen 우회 경로를 추가하지 않는다.
+- Spring 공개 경로에서 생성과 사용자 stop의 원 UUID/key·전체 잔여 예산을 이어가고,
+  실제 배포본의 6초 조회 대기와 하위 관측 비용을 대조한다. timeout을 미실행·취소로
+  처리하거나 새 UUID/key를 발급하지 않는다. helper 단축만으로 이 종단 계약을 닫지 않는다.
+- 기존 콘솔의 인증·독점 lease와 함께 실제 `XENOVA_CONSOLE_ENABLED` 배포값을 확인한다.
+  이번 설치본은 해당 환경 설정이 없고 config 기본은 false였다. 라우터 코드 존재만으로
+  프론트 콘솔 입출력이 가능하다고 보고하지 않는다. 활성화와 제품 왕복은 담당자 수락이다.
+
 ## 진행 기록
 
 - 2026-10-29: 현재 HTTP 소스의 key stop/조회 제공을 확인했습니다. Spring의 `stop`은 void 호출이며 종단 연결은 별도 과제입니다. 운영 API·DB·env·서비스를 변경하지 않았습니다.
