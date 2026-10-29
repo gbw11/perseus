@@ -40,7 +40,7 @@ int xt_xen_bootstrap_load(struct xt_bootstrap *out, int64_t end, void *channel)
 	int rc = xsr_transaction((int)left, read_transaction, &input);
 	if (!rc) {
 		rc = strncmp(input.own_vm, "/vm/", 4) ? -EACCES :
-			xt_bootstrap_decode(input.json, strlen(input.json), input.own_vm + 4, out);
+			xt_bootstrap_decode_channel(input.json, strlen(input.json), input.own_vm + 4, node, out);
 		/* Empty host/execution binding is allowed only by the native test loader. */
 		if (!rc && (!out->identity.host_boot_id[0] || !out->identity.execution_id[0] ||
 			    !out->identity.receipt_id[0])) { rc = -EACCES; }

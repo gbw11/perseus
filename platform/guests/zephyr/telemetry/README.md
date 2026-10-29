@@ -134,14 +134,14 @@ Manager의 `execution-context`와 실제 Xen unique ID를 전후 확인한다. b
 private receipt를 uncertain으로 남기고 성공으로 보고하지 않는다.
 
 준비된 private 디렉터리의 credential JSON에는 아래 필드만 둔다. 실제 값은 Git·터미널·로그에
-출력하지 않고 안전한 파일 입력으로 준비한다. username은 VM의 full UUID다.
+출력하지 않고 안전한 파일 입력으로 준비한다. 새 공통 broker의 v2 username은 `telemetry-<VM full UUID>`다. v1 drive 채널의 username은 기존 UUID다.
 
 ```json
 {
   "vm_id": "<actual VM UUID>",
   "broker_ipv4": "<trusted internal broker IPv4>",
-  "port": 18883,
-  "username": "<same actual VM UUID>",
+  "port": 1883,
+  "username": "telemetry-<same actual VM UUID>",
   "password": "<instance-specific printable password>",
   "trusted_internal_plaintext": true
 }
@@ -149,7 +149,10 @@ private receipt를 uncertain으로 남기고 성공으로 보고하지 않는다
 
 디렉터리는 root-owned 0700, credential/receipt는 0600이어야 한다. protocol decoder와 맞추기 위해
 password는 따옴표·역슬래시·공백 없는 printable ASCII 1..128 bytes를 사용한다.
-운영 broker 계정·ACL 발급은 별도 작업이다. untrusted/TLS-required 경로는 이 TCP adapter가
+운영 계정은 `xenova-broker add-account telemetry-UUID --execute`로 추가하고
+`export-account --format telemetry`로 private 입력을 만든다. Unix 로그인 계정이 아니다.
+Linux에 별도 v2 Publisher를 연결할 때도 같은 MQTT 계정 규칙을 사용하지만 기존 Linux
+Agent의 v1 계정·메시지를 바꾸지는 않는다. 계정·ACL 검사는 앱 실행 신원 검증을 대신하지 않는다. untrusted/TLS-required 경로는 이 TCP adapter가
 거절하며 익명·평문 fallback을 하지 않는다. 내부 평문 시험을 TLS 보안 수락으로 보고하지 않는다.
 
 승인된 dom0 시험 창에서 실제 UUID와 조회한 실행 문맥을 선택한다.

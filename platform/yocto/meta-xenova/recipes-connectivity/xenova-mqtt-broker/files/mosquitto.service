@@ -1,0 +1,20 @@
+# Based on the locked Mosquitto 2.1.2 notify unit. A complete override is required:
+# systemd dependency lists cannot be cleared from a drop-in.
+[Unit]
+Description=Mosquitto MQTT Broker
+Documentation=man:mosquitto.conf(5) man:mosquitto(8)
+After=network.target
+
+[Service]
+User=mosquitto
+Type=notify
+WatchdogSec=3min
+NotifyAccess=main
+ExecStart=/usr/sbin/mosquitto -c /etc/mosquitto/mosquitto.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RuntimeDirectory=mosquitto
+LogsDirectory=mosquitto
+
+[Install]
+WantedBy=multi-user.target
