@@ -13,7 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.event.domain.ReportedVmStateRepository;
 import com.xenova.backend.event.domain.VmEventRepository;
-import com.xenova.backend.vm.domain.VmControlPort;
+import com.xenova.backend.vm.infrastructure.Dom0ManagerClient;
 import com.xenova.backend.vm.domain.VmLaunchSpec;
 import com.xenova.backend.vm.domain.VmRecordRepository;
 import com.xenova.backend.vm.domain.VmRuntime;
@@ -47,7 +47,7 @@ class VmStateWatcherIntegrationTest {
     private ObjectMapper objectMapper;
 
     @MockitoBean
-    private VmControlPort vmControlPort;
+    private Dom0ManagerClient vmControlPort;
 
     @Autowired
     private VmRecordRepository vmRecordRepository;
