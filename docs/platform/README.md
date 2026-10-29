@@ -13,6 +13,7 @@ Xenova는 Raspberry Pi 4에서 Xen으로 Linux·Zephyr VM을 실행하고 관리
 | domU | 독립 UUID·자산을 가진 Linux 또는 Zephyr 게스트 VM |
 | 플랫폼 Manager | 등록·실행 의도·신원·작업 journal을 검증하고 실제 Xen 실행을 제어하는 Python 라이브러리 |
 | `xenova-vm`·`xenova-wifi` | dom0에서 사용하는 VM 관리·Wi-Fi CLI |
+| MQTT broker | 내부 VM·dom0 소비자 간 메시지 전달. 이미지에 설정을 포함하고 보드별 계정은 최초에 별도 발급 |
 | Tailscale | 선택적인 외부 원격 관리 연결. 최초 사용자 인증 뒤 데이터 파티션의 장치 상태를 재사용 |
 | dom0-manager | 플랫폼 Manager를 사용하는 FastAPI 서비스. 하위 CLI와 HTTP의 지원 범위는 같지 않음 |
 | Recovery Worker | Xen·heartbeat 관측과 기존 Recovery Engine 실행. 공통 주행 프로필은 복구 완료 뒤 실행별 Bootstrap·바인딩·Standby 준비를 별도로 연결 |
@@ -35,6 +36,8 @@ MQTT의 payload 2.1 지원, 실제 보드 수락과 제품 소비자의 저장·
 | Linux·Agent의 자원·앱 진행·로컬 감독 연결 | [Linux·Agent 요청서](../requests/2026-10-27-linux-health-agent.md) |
 | Worker의 전달 분류·건강 판단·복구/재합류 연결 | [Worker 요청서](../requests/2026-10-27-recovery-health-ctrl.md) |
 | 외부 SSH 접속·최초 인증·SD 재설치 전 인증 상태 백업 | [Tailscale 사용법](cli-manager-spec.md#cmd-tailscale) |
+| MQTT 최초 계정 설정·접속 범위 | [MQTT 사용법](cli-manager-spec.md#cmd-mqtt-init) |
+| EC2에서 보드 MQTT·FastAPI 직접 접속 | [Tailnet 접속 설정](cli-manager-spec.md#cmd-tailscale-serve) |
 | 이미지 제작·템플릿/seed·조립·검증·전달 | [빌드 가이드](build-guide.md) |
 | 부팅 서비스·자동 시작·부분 실패·종료 조사 | [부팅·종료 구조](management-boot-boundaries.md) |
 | 전용·공유 CPU 배치 운영 | [CPU 배치](cpu-layout.md) |

@@ -110,7 +110,7 @@ class TelemetryBootstrapTest(unittest.TestCase):
         self.context = {"vm_id": str(uuid.uuid4()), "host_boot_id": str(uuid.uuid4()),
                         "execution_id": str(uuid.uuid4()), "domid": 42, "xen_unique_id": "18446744073709551615"}
         self.credential = {"vm_id": self.context["vm_id"], "broker_ipv4": "192.0.2.1", "port": 18883,
-                           "username": self.context["vm_id"], "password": "synthetic-unit-test-password",
+                           "username": "telemetry-" + self.context["vm_id"], "password": "synthetic-unit-test-password",
                            "trusted_internal_plaintext": True}
         self.source = {"inode": 123, "mtime_ns": 456, "bytes": 100}
         self.calls = []
@@ -255,3 +255,21 @@ class TelemetryBootstrapTest(unittest.TestCase):
         path.write_text(json.dumps({**self.credential, "trusted_internal_plaintext": False}))
         with self.assertRaises(ValueError):
             self.module.credentials(path, self.context["vm_id"])
+
+    def test_broker_account_namespace_is_bound_to_selected_channel(self):
+        path = self.directory / 'account.json'
+        path.write_text(json.dumps(self.credential))
+        path.chmod(0o600)
+        self.module.credentials(path, self.context['vm_id'], 'telemetry')
+        self.module.credentials(path, self.context['vm_id'])
+        with self.assertRaises(ValueError):
+            self.module.credentials(path, self.context['vm_id'], 'drive')
+        path.write_text(json.dumps({**self.credential, 'username': self.context['vm_id']}))
+        self.module.credentials(path, self.context['vm_id'], 'drive')
+        self.module.credentials(path, self.context['vm_id'])
+        with self.assertRaises(ValueError):
+            self.module.credentials(path, self.context['vm_id'], 'telemetry')
+        self.module.credentials(path, self.context['vm_id'], 'telemetry', for_reconciliation=True)
+        path.write_text(json.dumps({**self.credential, 'username': 'telemetry-' + str(uuid.uuid4())}))
+        with self.assertRaises(ValueError):
+            self.module.credentials(path, self.context['vm_id'], 'telemetry')

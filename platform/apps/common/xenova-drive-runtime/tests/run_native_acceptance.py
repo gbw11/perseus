@@ -85,7 +85,9 @@ def main():
                          "host_boot_id": "", "execution_id": "", "receipt_id": "", "broker_ipv4": "192.0.2.1",
                          "username": vm, "trusted_internal_plaintext": True}
             for channel, port in (("drive", 18884), ("telemetry", 18883)):
-                value = {**bootstrap, "publisher_id": str(uuid.uuid4()), "port": port, "password": secrets.token_urlsafe(32)}
+                value = {**bootstrap, "publisher_id": str(uuid.uuid4()), "port": port,
+                         "username": vm if channel == "drive" else "telemetry-" + vm,
+                         "password": secrets.token_urlsafe(32)}
                 private(secret / (app + "-" + channel + ".json"), value)
                 if channel == "telemetry":
                     bootstrap["publisher_id"] = value["publisher_id"]
@@ -105,8 +107,8 @@ def main():
                 acl += "user input\ntopic write xenova/v1/vehicle/control\ntopic write xenova/v1/apps/manual/input\ntopic write xenova/v1/apps/perception/events\n"
             for app, _, _, vm in guests:
                 credential = json.loads((secret / (app + "-" + channel + ".json")).read_text())
-                passwords += vm + ":" + credential["password"] + "\n"
-                acl += "user " + vm + "\n"
+                passwords += credential["username"] + ":" + credential["password"] + "\n"
+                acl += "user " + credential["username"] + "\n"
                 if channel == "drive":
                     acl += f"topic write xenova/v1/apps/{app}/events\ntopic read xenova/v1/vehicle/control\n"
                     acl += "topic read " + ("xenova/v1/apps/manual/input" if app == "manual" else "xenova/v1/apps/perception/events") + "\n"
