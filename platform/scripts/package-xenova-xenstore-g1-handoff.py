@@ -45,7 +45,9 @@ DOCUMENTATION = (
     "platform/guests/zephyr/telemetry/contract/schemas/message.schema.json",
     "platform/guests/zephyr/telemetry/contract/schemas/metric-catalog.json",
     "platform/guests/zephyr/telemetry/contract/docs/CONSUMER_HANDOFF.md",
-    "platform/scripts/provision-xenova-telemetry.py")
+    "platform/scripts/provision-xenova-telemetry.py",
+    "platform/services/display/router/README.md",
+    "platform/services/gateway/README.md")
 RUNBOOK = """# XenStore G1 인계물
 
 G1 빌드·패키징과 시험 도구 사용은
