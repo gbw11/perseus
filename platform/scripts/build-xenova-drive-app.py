@@ -49,6 +49,8 @@ def fingerprint(app):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--app", choices=("manual", "autonomous", "drive"), required=True)
+    p.add_argument("--profile", choices=("operations", "experiment"), default="operations",
+                   help="operations excludes raw capture; experiment explicitly includes it")
     p.add_argument("--zephyr-source", type=Path, required=True)
     p.add_argument("--tools", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
@@ -73,9 +75,11 @@ def main():
     if not all(path.is_file() for path in (cmake, ninja, compiler)):
         raise ValueError("existing fixed CMake/Ninja/AArch64 toolchain required")
     source = fingerprint(args.app)
-    digest = hashlib.sha256(json.dumps(source, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    digest = hashlib.sha256(json.dumps({"profile": args.profile, "files": source},
+                                      sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     print(json.dumps({"action": "build-drive-candidate" if args.execute else "plan", "app": args.app,
-                      "source_sha256": digest, "output": str(args.output), "board_tested": False}), flush=True)
+                      "source_sha256": digest, "profile": args.profile,
+                      "output": str(args.output), "board_tested": False}), flush=True)
     if not args.execute:
         return
     args.output.mkdir(mode=0o755)
@@ -101,8 +105,13 @@ def main():
         if result.returncode:
             raise RuntimeError(label + " failed; full output preserved")
 
+    profile_args = ["-DCONFIG_XENOVA_DRIVE_RECORDER=" + ("y" if args.profile == "experiment" else "n"),
+                    "-DCONFIG_XENOVA_DIAGNOSTICS_THREADS=" + ("y" if args.profile == "experiment" else "n")]
+    if args.app == "drive":
+        profile_args = ["-DEXTRA_CONF_FILE=" + str(home / "profiles" / (args.profile + ".conf"))]
     run("configure", [cmake, "-S", home, "-B", build, "-GNinja", "-DBOARD=xenvm",
-                      "-DCMAKE_MAKE_PROGRAM=" + str(ninja), "-DDTC_OVERLAY_FILE=" + str(home / "boards/xenvm.overlay")])
+                      "-DCMAKE_MAKE_PROGRAM=" + str(ninja), "-DDTC_OVERLAY_FILE=" + str(home / "boards/xenvm.overlay"),
+                      *profile_args])
     run("compile", [cmake, "--build", build, "-j", "4"])
 
     # .send may run on the kernel's small TCP workqueue, rather than app main.
@@ -121,6 +130,9 @@ def main():
     if len(send) != 1 or send[0][2] != "static" or int(send[0][1]) > 256:
         raise ValueError("netfront send exceeds the direct 256-byte stack-frame budget")
     config = (build / "zephyr/.config").read_text()
+    for name in ("XENOVA_DRIVE_RECORDER", "XENOVA_DIAGNOSTICS_THREADS"):
+        if ("CONFIG_" + name + "=y\n" in config) != (args.profile == "experiment"):
+            raise ValueError("resolved configuration differs from selected profile: " + name)
     if "CONFIG_STACK_SENTINEL=y\n" not in config:
         raise ValueError("drive target must retain stack boundary detection")
     netfront_stack_audit = {"send_frame_bytes": int(send[0][1]), "direct_frame_budget_bytes": 256,
@@ -136,7 +148,9 @@ def main():
                     "--version", "0.1.0-drive-" + digest[:12], "--app", "xenova-" + args.app,
                     "--source-revision", "sha256:" + digest, "--build-id", args.output.name,
                     "--app-source", home, "--networked", "--output", args.output / "firmware", "--execute"])
-    receipt = {"netfront_stack_audit": netfront_stack_audit, "app": args.app, "source_files": source, "source_sha256": digest, "zephyr_commit": commit,
+    receipt = {"netfront_stack_audit": netfront_stack_audit, "app": args.app, "profile": args.profile,
+               "config_sha256": sha(build / "zephyr/.config"),
+               "source_files": source, "source_sha256": digest, "zephyr_commit": commit,
                "compiler_sha256": sha(compiler), "compiler_version": subprocess.check_output([str(compiler), "--version"], text=True).splitlines()[0],
                "sdk_version": lock["sdk_version"], "elf_segments": segments,
                "files": {p.name: {"sha256": sha(p), "bytes": p.stat().st_size}

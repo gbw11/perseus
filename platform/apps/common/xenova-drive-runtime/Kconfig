@@ -21,8 +21,18 @@ config XENOVA_DRIVE_COMMAND_MAX_AGE_MS
 	  timeout. Fresh-input motion also expires at the original input deadline.
 	  Final Gateway control/generation validation remains necessary.
 
+config XENOVA_DRIVE_RECORDER
+	bool "Optional bounded experiment recorder and console pages"
+	default y if XENOVA_DRIVE_NATIVE_TEST
+	default n
+	help
+	  Keep source and transmission rows only for an explicitly selected
+	  experiment build. Runtime health, timing and shutdown remain available
+	  without these arrays. This does not enable periodic console output.
+
 config XENOVA_DRIVE_CAPTURE_ROWS
 	int "Bounded source measurement rows (never overwrite)"
+	depends on XENOVA_DRIVE_RECORDER
 	range 128 16384
 	default 12288
 	help
@@ -33,4 +43,5 @@ config XENOVA_DRIVE_NATIVE_TEST
 	bool "Runtime-file bootstrap and bounded native test exit"
 	depends on ARCH_POSIX
 	default n
+
 endif

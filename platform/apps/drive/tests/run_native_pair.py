@@ -53,6 +53,7 @@ def main():
     vms={label:str(uuid.uuid4()) for label in ('a','b')}
     passwords={key:secrets.token_urlsafe(32) for key in ('a','b','gateway','input','subscriber')}
     guests={}
+    fixture_host_boot=str(uuid.uuid4())
     def write_private(name,value):
         fd=os.open(private/name,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
         with os.fdopen(fd,'w') as stream:stream.write(value if isinstance(value,str) else json.dumps(value))
@@ -86,9 +87,13 @@ def main():
                 'broker_ipv4':'192.0.2.1','username':vms[label],'password':passwords[label],'trusted_internal_plaintext':True}
         paths={}
         entry={'label':label,'vm_id':vms[label],'boot_id':boot,'binary_sha256':digest,'execution_id':str(uuid.uuid4())}
+        # Synthetic native execution context, not a Manager/receipt acceptance
+        # test. Let the actual guest source retain the same explicit identity.
+        common.update(host_boot_id=fixture_host_boot,execution_id=entry['execution_id'])
         for channel,port in (('drive',18884),('telemetry',18883)):
             instance=str(uuid.uuid4());entry[channel+'_instance']=instance
-            paths[channel]=write_private(f'{label}-{count}-{channel}.json',{**common,'publisher_id':instance,'port':port})
+            paths[channel]=write_private(f'{label}-{count}-{channel}.json',
+                {**common,'publisher_id':instance,'receipt_id':str(uuid.uuid4()),'port':port})
         sessions.append(entry)
         child_env=dict(env,XT_TEST_BOOTSTRAP=str(paths['telemetry']),XD_TEST_APP_BOOTSTRAP=str(paths['drive']),
                        XT_TEST_INSTANCE_ID=vms[label],XD_TEST_DURATION_MS='120000')
