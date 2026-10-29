@@ -66,6 +66,49 @@ static void manual_tests(void)
  drive_controller_select(&coordinator,A,span(downgrade),&selected);assert(!selected.control_valid);
  puts("manual adapter: neutral/action causal order, no re-press on same-mode takeover, expiry PASS");
 }
+static void receive_tests(void)
+{
+ const char *control="{\"generation\":42,\"mode\":\"MANUAL\",\"active_app\":\"manual\",\"active_vm_id\":\"" A
+  "\",\"manual_policy\":\"NEUTRAL_THEN_ACTION\",\"manual_session\":\"" B "\"}";
+ const char *neutral="{\"profile\":\"manual-session-1\",\"session_id\":\"" B "\",\"sample_seq\":\"1\","
+  "\"action_seq\":\"1\",\"generation\":42,\"keys\":[],\"valid\":true,\"age_ms\":0}";
+ const char *action="{\"profile\":\"manual-session-1\",\"session_id\":\"" B "\",\"sample_seq\":\"2\","
+  "\"action_seq\":\"2\",\"generation\":42,\"keys\":[\"up\"],\"valid\":true,\"age_ms\":0}";
+ struct xd_manual_source source={0};xd_manual_bind(&source,B);xd_manual_control(&source,span(control));
+ assert(!xd_manual_accept(&source,span(neutral),1000));
+ assert(!xd_manual_accept(&source,span(action),1010));
+ struct drive_adapter adapter;struct manual_cfg cfg;struct drive_sample output;
+ drive_manual_adapter(&adapter,&cfg);
+ /* One calculation after BOTH receives still has the original neutral proof. */
+ assert(!drive_adapter_run_observed(&adapter,span(control),span(action),0,&source.witness,B,&output));
+ assert(output.v_mps>0&&!output.reason&&adapter.progress==1);
+ assert(xd_manual_accept(&source,span(action),1300)==-EALREADY&&source.received_ms==1010);
+ assert(xd_manual_accept(&source,span(neutral),1300)==-EALREADY&&source.received_ms==1010);
+ assert(!drive_adapter_run_observed(&adapter,span(control),span(action),290,&source.witness,B,&output));
+ assert(!output.v_mps&&!strcmp(output.reason,"INPUT_STALE"));
+ struct xd_manual_witness old=source.witness;
+ xd_manual_bind(&source,A);assert(!source.witness.present&&source.received_ms==1010);
+ assert(xd_manual_accept(&source,span(neutral),1300)==-EALREADY); /* app replacement cannot refresh old source */
+ drive_manual_adapter(&adapter,&cfg);
+ assert(!drive_adapter_run_observed(&adapter,span(control),span(action),0,&old,A,&output));
+ assert(!output.v_mps&&!strcmp(output.reason,"INPUT_INVALID"));
+ /* New genuine neutral/action samples belong to the replacement app only. */
+ char n2[512],a2[512];strcpy(n2,neutral);strcpy(a2,action);
+ char *at=strstr(n2,"sample_seq\":\"1");assert(at);at[strlen("sample_seq\":\"")]='3';
+ at=strstr(a2,"sample_seq\":\"2");assert(at);at[strlen("sample_seq\":\"")]='4';
+ at=strstr(n2,"action_seq\":\"1");assert(at);at[strlen("action_seq\":\"")]='3';
+ at=strstr(a2,"action_seq\":\"2");assert(at);at[strlen("action_seq\":\"")]='4';
+ assert(!xd_manual_accept(&source,span(n2),1310));assert(!xd_manual_accept(&source,span(a2),1320));
+ drive_manual_adapter(&adapter,&cfg);
+ assert(!drive_adapter_run_observed(&adapter,span(control),span(a2),0,&source.witness,A,&output)&&output.v_mps>0);
+ char invalid[512];strcpy(invalid,a2);at=strstr(invalid,"sample_seq\":\"4");at[strlen("sample_seq\":\"")]='5';
+ at=strstr(invalid,"true");memmove(at+5,at+4,strlen(at+4)+1);memcpy(at,"false",5);
+ assert(!xd_manual_accept(&source,span(invalid),1330)&&!source.witness.present);
+ at=strstr(a2,"sample_seq\":\"4");at[strlen("sample_seq\":\"")]='6';
+ assert(xd_manual_accept(&source,span(a2),1340)==-ENODATA); /* invalid notice cannot be coalesced away */
+ puts("receive evidence: coalesced neutral, duplicate/reversal, original age, app replacement, invalid-session latch PASS");
+}
+
 static void vectors(const char *path)
 {
  FILE *file=fopen(path,"r");assert(file);char line[2048];unsigned count=0;
@@ -78,4 +121,4 @@ static void vectors(const char *path)
  }
  fclose(file);assert(count>=10);printf("shared manual vectors: %u PASS\n",count);
 }
-int main(int argc,char **argv){state_tests();manual_tests();assert(argc==2);vectors(argv[1]);}
+int main(int argc,char **argv){state_tests();manual_tests();receive_tests();assert(argc==2);vectors(argv[1]);}

@@ -12,6 +12,6 @@ target_include_directories(app PRIVATE ${DRIVE}
 target_sources(app PRIVATE src/main.c ${DRIVE}/workers.c ${DRIVE}/adapter.c ${DRIVE}/controller.c
   ${PLATFORM}/apps/autonomous/zephyr/src/autonomous.c ${PLATFORM}/apps/manual/zephyr/src/manual.c)
 # Real main/runtime/adapter/threads; external transport and Publisher only.
-foreach(name drive_adapter_run xd_io_start_dual xd_io_snapshot xd_io_report_at xd_io_command xd_io_join xt_start xt_stop xt_status_get exit)
+foreach(name drive_adapter_run_observed xd_io_start_dual xd_io_snapshot xd_io_report_at xd_io_command xd_io_join xt_start xt_stop xt_status_get exit)
   zephyr_link_libraries(-Wl,--wrap=${name})
 endforeach()

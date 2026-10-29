@@ -144,11 +144,16 @@ static void on_publish(struct xm_zclient *c, const struct mqtt_publish_param *p)
 	}
 	for (int i = 0; i < c->nsubs; i++) {
 		if (xm_topic_matches(c->subs[i].filter, topic)) {
+			int64_t received = k_uptime_get();
+			if (c->accept_input && c->accept_input(c->accept_context, topic, &env, received)) {
+				c->dropped++;
+				return;
+			}
 			struct xm_zlatest *slot = latest_slot(c, topic, true);
 
 			memcpy(slot->data, c->payload, len);
 			slot->len = len;
-			slot->rx_ms = k_uptime_get();
+			slot->rx_ms = received;
 			break;
 		}
 	}

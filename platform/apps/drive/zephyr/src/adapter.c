@@ -66,6 +66,11 @@ void drive_manual_adapter(struct drive_adapter *a,struct manual_cfg *cfg)
 }
 int drive_adapter_run(struct drive_adapter *a,struct xm_span control,struct xm_span input,int64_t age,struct drive_sample *out)
 {
+ return drive_adapter_run_observed(a,control,input,age,NULL,NULL,out);
+}
+int drive_adapter_run_observed(struct drive_adapter *a,struct xm_span control,struct xm_span input,
+ int64_t age,const struct xd_manual_witness *w,const char *receiver,struct drive_sample *out)
+{
  memset(out,0,sizeof(*out));
  int rc=a->calculate?a->calculate(a->context,control,input,age,out):-ENOSYS;
  if(rc||a->progress==UINT64_MAX){out->reason="CALCULATION_FAILED";out->v_mps=out->steer_rad=0;return rc?rc:-EOVERFLOW;}
@@ -83,6 +88,15 @@ int drive_adapter_run(struct drive_adapter *a,struct xm_span control,struct xm_s
    struct xm_manual_sample source;
    int gate=drive_manual_begin(&a->movement,&selected);
    if(!gate)gate=xm_manual_sample_parse(input,&source);
+   if(!gate&&w&&w->present){
+    const struct xm_manual_sample *n=&w->neutral;
+    if(!receiver||strcmp(receiver,w->receiver)||!n->valid||n->keys||n->age_ms>200||
+       w->received_ms<0||strcmp(n->session,selected.manual_session)||n->generation!=selected.generation||
+       n->sample>source.sample||n->action>source.action)gate=-EXDEV;
+    else if(!a->movement.neutral||n->action>a->movement.neutral_action){
+     a->movement.neutral=true;a->movement.neutral_action=n->action;
+    }
+   }
    if(!gate)gate=drive_manual_observe(&a->movement,&source,age);
    if(gate){out->reason=gate==-ETIME?"INPUT_STALE":gate==-ENODATA?"INPUT_UNAVAILABLE":"INPUT_INVALID";out->v_mps=out->steer_rad=0;}
    else if(!a->movement.allowed)out->v_mps=out->steer_rad=0;

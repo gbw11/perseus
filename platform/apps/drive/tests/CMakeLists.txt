@@ -5,7 +5,7 @@ add_subdirectory(../../common/xenova-mqtt-c mqtt-core)
 add_executable(test_controller controller.c ../zephyr/src/controller.c ../zephyr/src/adapter.c
   ../../../guests/zephyr/diagnostics/src/health.c
   ../../autonomous/zephyr/src/autonomous.c ../../manual/zephyr/src/manual.c)
-target_include_directories(test_controller PRIVATE ../zephyr/src
+target_include_directories(test_controller PRIVATE ../zephyr/src ../../common/xenova-drive-runtime/include
   ../../../guests/zephyr/diagnostics/include
   ../../autonomous/zephyr/src ../../manual/zephyr/src)
 target_compile_options(test_controller PRIVATE -Wall -Wextra -Werror -fsanitize=address,undefined)
@@ -21,7 +21,7 @@ add_test(NAME health-evidence COMMAND test_health)
 add_executable(test_preparation preparation.c ../zephyr/src/adapter.c ../zephyr/src/controller.c
   ../../../guests/zephyr/diagnostics/src/health.c
   ../../autonomous/zephyr/src/autonomous.c ../../manual/zephyr/src/manual.c)
-target_include_directories(test_preparation PRIVATE ../zephyr/src
+target_include_directories(test_preparation PRIVATE ../zephyr/src ../../common/xenova-drive-runtime/include
   ../../../guests/zephyr/diagnostics/include
   ../../autonomous/zephyr/src ../../manual/zephyr/src ../../common/xenova-mqtt-c/src
   ../../common/xenova-mqtt-c/third_party/jsmn)

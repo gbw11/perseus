@@ -52,6 +52,11 @@ struct xm_zclient {
 	struct xm_zlatest latest[CONFIG_XENOVA_MQTT_LATEST_SLOTS];
 	struct xm_zpub pubs[CONFIG_XENOVA_MQTT_PUB_TOPICS];
 	int nsubs;
+	/* Optional synchronous accepted-input guard, owned by the polling thread.
+	 * Runs after envelope/sequence/subscription checks, before latest replacement.
+	 * Nonzero rejects only this cache update. Must not block or perform I/O. */
+	int (*accept_input)(void *, const char *, const struct xm_envelope *, int64_t);
+	void *accept_context;
 
 	bool socket_open;
 	bool connected;

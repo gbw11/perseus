@@ -142,6 +142,7 @@ static int offer(enum drive_task task,uint64_t release,uint64_t sequence,uint64_
  struct drive_task_status status;int rc=drive_workers_status(task,&status);if(rc)return rc;
  job.lifetime=status.lifetime;
  job.input_seq=in->seq;job.control_seq=inputs.control.seq;job.input_received_ms=in->received_ms;
+ if(task==DRIVE_TASK_MANUAL)job.manual_witness=inputs.manual_witness;
  strcpy(job.vm_id,inputs.vm_id);
  strcpy(job.app_instance,inputs.app_instances[task]);
  if(!inputs.control.error)job.control_length=inputs.control.length;
