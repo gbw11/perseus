@@ -7,6 +7,7 @@ import type { Vm } from '../api/types';
 import { osLabel } from '../domain/roles';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
+import { VcpuPinningPanel } from './VcpuPinningPanel';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
 
@@ -27,7 +28,7 @@ export function ControlVmDetailPage() {
   const navigate = useNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const index = vms.data?.items.findIndex((item) => item.vm_id === vmId) ?? -1;
-  const accent = index >= 0 ? VM_ACCENTS[index % VM_ACCENTS.length] : 'var(--x-primary)';
+  const accent = (index >= 0 ? VM_ACCENTS[index % VM_ACCENTS.length] : undefined) ?? 'var(--x-primary)';
 
   const run = (target: Vm, kind: VmAction) =>
     action.mutate(
@@ -165,8 +166,8 @@ export function ControlVmDetailPage() {
               </div>
               <div data-available="false">
                 <span>CPU 핀닝</span>
-                <strong>—</strong>
-                <small>설정 미조회</small>
+                <strong>관리</strong>
+                <small>아래 매트릭스에서 설정</small>
               </div>
               <div data-available="false">
                 <span>스케줄러</span>
@@ -177,11 +178,13 @@ export function ControlVmDetailPage() {
             <div className={styles.resourceControlNotice}>
               <div>
                 <strong>고급 자원 관리</strong>
-                <span>vCPU 핀닝과 vCPU·메모리·스케줄러 가중치 설정이 이 영역에 연결됩니다.</span>
+                <span>vCPU 핀닝은 아래에서 관리하고, vCPU·메모리·스케줄러 설정은 114번에서 연결합니다.</span>
               </div>
               <span>RESOURCE CONTROL</span>
             </div>
           </Card>
+
+          <VcpuPinningPanel vm={vm.data} accent={accent} />
 
           <section className={styles.dangerZone} aria-labelledby="danger-zone-title">
             <div>
