@@ -39,6 +39,8 @@ def create_app(
     app.state.driver = driver
     app.state.service = VmService(driver, provisioner, settings)
     app.state.console_factory = ConsoleSession
+    from .observations import install_observations
+    install_observations(app)
 
     app.include_router(health.router)
     app.include_router(vms.router, prefix="/api/v1")

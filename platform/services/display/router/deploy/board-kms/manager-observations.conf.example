@@ -1,0 +1,5 @@
+# Install as xenova-dom0-manager.service.d/253-observations.conf only during an
+# agreed board test window, after deploying the matching manager package.
+# Keep the existing driver, authentication and lifecycle configuration unchanged.
+[Service]
+Environment=XENOVA_OBSERVATIONS_PATH=/run/xenova/vm-observations.json
