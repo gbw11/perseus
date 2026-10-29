@@ -90,11 +90,11 @@ for c in python3 python; do
   if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import paho.mqtt' >/dev/null 2>&1; then py="$c"; break; fi
 done
 if [[ -n "$py" ]]; then
-  if XENOVA_WS="$HOST:$WS_PORT" XENOVA_PW_OBS="$(pw observer)" XENOVA_PW_PUB="$(pw message-board)" "$py" - <<'PY'
+  if XENOVA_WS="$HOST:$WS_PORT" XENOVA_PW_OBS="$(pw observer)" XENOVA_PW_PUB="$(pw interaction)" "$py" - <<'PY'
 import os, queue, sys, time
 import paho.mqtt.client as mqtt
 host, port = os.environ["XENOVA_WS"].rsplit(":", 1)
-got, topic = queue.Queue(), "xenova/v1/apps/message-board/events"
+got, topic = queue.Queue(), "xenova/v1/apps/interaction/events"
 def client(user, pw):
     c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, transport="websockets")
     c.username_pw_set(user, pw)
@@ -104,7 +104,7 @@ def client(user, pw):
 sub = client("observer", os.environ["XENOVA_PW_OBS"])
 sub.on_message = lambda c, u, m: got.put(m.payload)
 sub.subscribe(topic, 1); time.sleep(1)
-pub = client("message-board", os.environ["XENOVA_PW_PUB"])
+pub = client("interaction", os.environ["XENOVA_PW_PUB"])
 pub.publish(topic, b'{"check":"ws"}', qos=1).wait_for_publish(5)
 try:
     got.get(timeout=5); sys.exit(0)

@@ -264,7 +264,7 @@ static void work(void *a,void *b,void *c)
 			int rc=load_bootstrap(&bootstrap,now+500,loader_context);
 			if (atomic_get(&stopping)) { break; }
 			if (!rc && (!bootstrap.port || !bootstrap.password[0] ||
-				strcmp(bootstrap.username,bootstrap.identity.vm_id))) { rc=-EACCES; }
+				!xt_bootstrap_account_matches(bootstrap.username,bootstrap.identity.vm_id,"xenova-telemetry"))) { rc=-EACCES; }
 			if (!rc && !bootstrap.trusted_internal_plaintext) { rc=-ENOTSUP; }
 			if (!rc && guest_boot_id[0] && strcmp(guest_boot_id,bootstrap.identity.boot_id)) { rc=-EACCES; }
 			if (!rc && !strcmp(previous_publisher_id,bootstrap.identity.publisher_id)) { rc=-EALREADY; }

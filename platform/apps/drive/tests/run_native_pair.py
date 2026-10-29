@@ -51,7 +51,7 @@ def main():
     children=[];handles=[];clients=[];threads=[];stop=threading.Event();errors=[];stages=[]
     records=[];wire_lock=threading.Lock();sessions=[];inputs_enabled=threading.Event();inputs_enabled.set()
     vms={label:str(uuid.uuid4()) for label in ('a','b')}
-    passwords={key:secrets.token_urlsafe(32) for key in ('a','b','gateway','input','subscriber')}
+    passwords={key:secrets.token_urlsafe(32) for key in ('a','b','gateway','input','subscriber','telemetry-a','telemetry-b')}
     guests={}
     def write_private(name,value):
         fd=os.open(private/name,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
@@ -88,7 +88,10 @@ def main():
         entry={'label':label,'vm_id':vms[label],'boot_id':boot,'binary_sha256':digest,'execution_id':str(uuid.uuid4())}
         for channel,port in (('drive',18884),('telemetry',18883)):
             instance=str(uuid.uuid4());entry[channel+'_instance']=instance
-            paths[channel]=write_private(f'{label}-{count}-{channel}.json',{**common,'publisher_id':instance,'port':port})
+            account=vms[label] if channel=='drive' else 'telemetry-'+vms[label]
+            password=passwords[label] if channel=='drive' else passwords['telemetry-'+label]
+            paths[channel]=write_private(f'{label}-{count}-{channel}.json',
+                {**common,'publisher_id':instance,'port':port,'username':account,'password':password})
         sessions.append(entry)
         child_env=dict(env,XT_TEST_BOOTSTRAP=str(paths['telemetry']),XD_TEST_APP_BOOTSTRAP=str(paths['drive']),
                        XT_TEST_INSTANCE_ID=vms[label],XD_TEST_DURATION_MS='120000')
@@ -104,7 +107,8 @@ def main():
         for i in range(2):
             for argv in (['ip','tuntap','add','dev','xdtap'+str(i),'mode','tap'],
                          ['ip','link','set','xdtap'+str(i),'master','xdbr'],['ip','link','set','xdtap'+str(i),'up']):run(argv)
-        passwd=''.join((vms.get(name,name)+':'+value+'\n') for name,value in passwords.items())
+        passwd=''.join(((('telemetry-'+vms[name[10:]]) if name.startswith('telemetry-') else vms.get(name,name))+
+                        ':'+value+'\n') for name,value in passwords.items())
         password_file=write_private('passwords',passwd);run([tools/'usr/bin/mosquitto_passwd','-U',password_file])
         acl=('user subscriber\ntopic read xenova/#\nuser gateway\ntopic read xenova/v1/#\n'
              'topic write xenova/v1/vehicle/control\ntopic write xenova/v1/apps/vehicle/events\n'
@@ -113,7 +117,8 @@ def main():
         for label,vm in vms.items():
             acl+=(f'user {vm}\ntopic write xenova/v1/vms/{vm}/apps/autonomous/events\ntopic write xenova/v1/vms/{vm}/apps/manual/events\n'
                   'topic read xenova/v1/vehicle/control\ntopic read xenova/v1/apps/manual/input\n'
-                  'topic read xenova/v1/apps/perception/events\n'+f'topic write xenova/v2/vms/{vm}/telemetry/+\n')
+                  'topic read xenova/v1/apps/perception/events\n'+
+                  f'user telemetry-{vm}\ntopic write xenova/v2/vms/{vm}/telemetry/+\n')
         acl_file=write_private('acl',acl)
         config=write_private('broker.conf',f'listener 18884 192.0.2.1\nlistener 18883 192.0.2.1\nuser root\n'
             f'allow_anonymous false\npassword_file {password_file}\nacl_file {acl_file}\npersistence false\nlog_type error\n')
