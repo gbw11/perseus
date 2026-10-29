@@ -1,0 +1,10 @@
+#!/usr/bin/python3
+"""공통 브로커 관리 구현의 설치/저장소 진입점."""
+import sys
+from pathlib import Path
+sys.path.insert(0, '/usr/lib/xenova')
+if not Path('/usr/lib/xenova/xenova_broker.py').exists():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[5] / 'deploy/mosquitto/scripts'))
+from xenova_broker import main
+if __name__ == '__main__':
+    raise SystemExit(main())
