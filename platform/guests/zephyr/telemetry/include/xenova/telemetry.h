@@ -7,7 +7,7 @@
 
 struct xt_bootstrap {
 	struct xt_identity identity;
-	char broker_ipv4[16], username[37], password[129];
+	char broker_ipv4[16], username[47], password[129];
 	uint16_t port;
 	/* This transport is explicitly restricted to trusted internal test networks.
 	 * Untrusted/TLS-required deployment fails closed, never falls back to TCP. */
@@ -19,6 +19,10 @@ typedef int (*xt_bootstrap_loader)(struct xt_bootstrap *, int64_t deadline_ms, v
 /* Mutable JSON is parsed in place. own_vm_id must come from an independent,
  * verified own-domain source. No credentials may be logged on failure. */
 int xt_bootstrap_decode(char *json,size_t bytes,const char *own_vm_id,struct xt_bootstrap *);
+/* The trusted Store channel selects the account namespace, never the JSON body. */
+int xt_bootstrap_decode_channel(char *json,size_t bytes,const char *own_vm_id,
+			       const char *channel,struct xt_bootstrap *);
+bool xt_bootstrap_account_matches(const char *username,const char *vm_id,const char *channel);
 /* Runtime-owned Store session; NULL selects xenova-telemetry. xenova-drive is
  * a separately provisioned v1 app channel, with separate broker credentials.
  * Never opens another Store receiver or accepts an unbound Xen execution. */
