@@ -16,14 +16,45 @@ class VerifiedGatewayRunner(GatewayRunner):
     drain_limit=64
     drain_budget_s=.001
 
-    def __init__(self,client,sink,*,authority,bindings,vm_ids,clock=time.monotonic,**kwargs):
+    def __init__(self,client,sink,*,authority,bindings,vm_ids,clock=time.monotonic,readiness_profile='verified-drive-1',**kwargs):
         super().__init__(client,sink,clock=clock,**kwargs)
         self.authority=authority;self.bindings=bindings;self.pair=vm_ids
+        if readiness_profile not in ('verified-drive-1','warm-drive-1'):raise ValueError('unknown readiness profile')
+        self.readiness_profile=readiness_profile
         self._control=None;self._control_message_id=None;self._connection=None;self._output_broken=False
         self.submissions=deque(maxlen=8192);self.serial_accepted=0;self.serial_failed=0;self.serial_context_rejected=0
         self._latest_commands={};self._command_lock=__import__('threading').Lock();self.aux_publish_failures=0
+        # Local integration seam, deliberately not an HTTP/MQTT API. Enqueue is
+        # nonblocking; durable acceptance is reported later by the actor.
+        self._transitions=__import__('queue').Queue(maxsize=8)
+
+    def submit_transition(self,action,request_id,**arguments):
+        import queue
+        if self.readiness_profile!='warm-drive-1':raise ValueError('planned preparation requires warm profile')
+        if action not in ('prepare','refresh','commit','cancel','get'):raise ValueError('unknown transition action')
+        result=queue.Queue(maxsize=1)
+        self._transitions.put_nowait((action,request_id,dict(arguments),result))
+        return result
+
+    def _transition_once(self):
+        import queue
+        try:action,request_id,arguments,result=self._transitions.get_nowait()
+        except queue.Empty:return
+        try:
+            planning=self.machine.planning;actions=[]
+            if action=='prepare':row=planning.begin(request_id,**arguments)
+            elif action=='commit':row,actions=planning.commit(request_id)
+            elif action=='get':row=self.authority.transition(request_id)
+            elif action=='refresh':row=planning.refresh(request_id)
+            else:row=planning.cancel(request_id)
+            self._emit(actions)
+            result.put_nowait(dict(ok=True,record=row))
+        except (AuthorityError,ValueError,KeyError,TypeError) as exc:
+            result.put_nowait(dict(ok=False,error=str(exc)))
 
     def subscribe(self):
+        if hasattr(self._client,'set_receive_guard'):self._client.set_receive_guard(self.bindings.guard(self.pair))
+        elif self.readiness_profile=='warm-drive-1':raise ValueError('warm profile requires pre-sequence binding guard')
         self._app_filters=[]
         for vm in self.pair:
             topic=f'{topics.PREFIX}/vms/{vm}/apps/+/events';self._app_filters.append(topic)
@@ -31,15 +62,17 @@ class VerifiedGatewayRunner(GatewayRunner):
         self._client.subscribe(CONSOLE_RESUME,self._enqueue,qos=1)
         self._client.subscribe(topics.app_events('message-board'),self._enqueue,qos=1)
         self._client.subscribe(topics.vehicle_control(),self._enqueue,qos=1)
+        if self.readiness_profile=='warm-drive-1':self._client.subscribe(topics.manual_input(),self._enqueue,qos=0)
 
     def _enqueue(self,message):
         info=topics.parse(message.topic)
-        if message.type in ('drive.command','app.heartbeat','app.readiness'):
+        if message.type in ('drive.command','app.heartbeat','app.readiness','app.lifecycle'):
             if (info.vm_id not in self.pair or info.app_id not in DRIVE_APPS or
                 info.vm_id!=message.envelope.get('vm_id') or info.app_id!=message.envelope.get('app_id') or
                 getattr(message,'retained',False)):return
             if not self.bindings.accepts(info.vm_id,message.envelope.get('boot_id'),
-                                         message.envelope.get('agent_instance_id'),self._clock()):return
+                                         message.envelope.get('agent_instance_id'),self._clock(),app=info.app_id):return
+            if (message.type=='app.lifecycle')!=(self.readiness_profile=='warm-drive-1') and message.type in ('app.lifecycle','app.readiness'):return
             if message.type=='drive.command':
                 # Admit only the current control into the bounded latest-value
                 # mailbox. Old-context traffic cannot replace a valid candidate.
@@ -51,17 +84,23 @@ class VerifiedGatewayRunner(GatewayRunner):
 
     def _feed(self,t,message):
         if getattr(message,'retained',False) and message.type!='vehicle.control':return
+        if (self.readiness_profile=='warm-drive-1' and message.type=='drive.input' and message.topic==topics.manual_input()):
+            self.machine.on_manual_input(message.payload,message.received_monotonic);return
         if message.type=='vehicle.control':
             try:self.authority.reconcile(message.payload)
             except (AuthorityError,ValueError,TypeError):self.machine._fail('CONTROL_AUTHORITY_CONFLICT',t)
             return
         info=topics.parse(message.topic);envelope=message.envelope;vm=info.vm_id;app=info.app_id
         if app in DRIVE_APPS and vm in self.pair:
-            if not self.machine.accept_session(vm,envelope.get('boot_id'),envelope.get('agent_instance_id'),t):return
+            if self.readiness_profile=='warm-drive-1':t=message.received_monotonic
+            trust_at=self._clock() if self.readiness_profile=='warm-drive-1' else t
+            if not self.machine.accept_session(vm,envelope.get('boot_id'),envelope.get('agent_instance_id'),trust_at,app=app):return
             if message.type=='app.readiness':self.machine.on_readiness(app,vm,message.payload,t)
+            elif message.type=='app.lifecycle' and self.readiness_profile=='warm-drive-1':self.machine.on_lifecycle(app,vm,message.payload,t)
             elif message.type=='app.heartbeat':self.machine.on_heartbeat(app,vm,message.payload,t)
             elif message.type=='drive.command':
-                binding=self.bindings.current(vm,t)
+                binding=self.bindings.current(vm,trust_at)
+                if binding is None:return
                 ref={k:envelope.get(k) for k in ('message_id','boot_id','agent_instance_id','seq')}
                 ref.update(vm_id=vm,app_id=app,execution_id=binding['execution_id'],received_monotonic=t)
                 self.machine.on_command(app,vm,message.payload,t,ref)
@@ -85,9 +124,12 @@ class VerifiedGatewayRunner(GatewayRunner):
         # queue or prevent this iteration's safety decision.
         with self._command_lock:commands=self._latest_commands;self._latest_commands={}
         for received,message in commands.values():self._feed(received,message)
+        self._transition_once()
 
     def begin(self):
-        self.machine=VerifiedDriveMachine(vm_ids=self.pair,authority=self.authority,bindings=self.bindings,
+        from .warm import WarmDriveMachine
+        machine=WarmDriveMachine if self.readiness_profile=='warm-drive-1' else VerifiedDriveMachine
+        self.machine=machine(vm_ids=self.pair,authority=self.authority,bindings=self.bindings,
             clock=self._clock,timing=self._timing)
         retained=self._client.latest(topics.vehicle_control())
         if retained is not None:
@@ -134,7 +176,7 @@ class VerifiedGatewayRunner(GatewayRunner):
             if not self.machine.output_permitted or action.generation!=self.machine.generation or not source:return
             row=self.bindings.current(source['vm_id'],now)
             if (not row or row['execution_id']!=source['execution_id'] or
-                not self.bindings.accepts(source['vm_id'],source['boot_id'],source['agent_instance_id'],now) or
+                not self.bindings.accepts(source['vm_id'],source['boot_id'],source['agent_instance_id'],now,app=source['app_id']) or
                 not 0<=now-source['received_monotonic']<=self.machine.timing.command_timeout_s or
                 not self.machine._ready(source['vm_id'],source['app_id'],now)):
                 self.serial_context_rejected+=1;return

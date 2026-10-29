@@ -64,14 +64,14 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
     p.add_argument("--vm-a", default=_env(env, "VM_A"), help="공통 펌웨어를 실행하는 VM UUID, --vm-b와 함께 지정")
     p.add_argument("--vm-b", default=_env(env, "VM_B"))
     p.add_argument("--initial-active-vm", default=_env(env, "INITIAL_ACTIVE_VM"), help="최초 활성 UUID, 생략하면 --vm-a")
-    p.add_argument("--profile",choices=("verified","legacy"),default=_env(env,"PROFILE") or d.profile)
+    p.add_argument("--profile",choices=("verified","warm","legacy"),default=_env(env,"PROFILE") or d.profile)
     p.add_argument("--authority-dir",default=_env(env,"AUTHORITY_DIR") or d.authority_dir)
     p.add_argument("--binding-file",default=_env(env,"BINDING_FILE") or d.binding_file)
     p.add_argument("--initialize-control-state",action="store_true",help="확인한 최초 설치에서만 정지 상태 원본을 생성")
     a = p.parse_args(argv)
-    if a.profile=="verified" and not (a.vm_a and a.vm_b):p.error("verified profile requires --vm-a and --vm-b")
+    if a.profile in ("verified","warm") and not (a.vm_a and a.vm_b):p.error("verified/warm profile requires --vm-a and --vm-b")
     if a.profile=="legacy" and (a.vm_a or a.vm_b or a.initialize_control_state):p.error("legacy profile is for separate apps; no paired authority fallback")
-    if a.profile=="verified" and a.start_mode:p.error("verified mode/owner come from the durable authority, not --start-mode")
+    if a.profile in ("verified","warm") and a.start_mode:p.error("verified mode/owner come from the durable authority, not --start-mode")
     if a.initial_active_vm and not a.initialize_control_state:p.error("--initial-active-vm is only valid during explicit initialization")
     if a.vm_a or a.vm_b or a.initial_active_vm:
         from xenova_mqtt.drive_binding import canonical as vm_uuid

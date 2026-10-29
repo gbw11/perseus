@@ -63,6 +63,53 @@ CONTROL_PUBLISH_UNCONFIRMED / CONTROL_APPLY_UNCONFIRMED 등으로 남기고 STOP
 현재 준비를 확인한 운영자는 새 요청으로 재무장할 수 있다. 저장 상태·retained 충돌은
 CONTROL_AUTHORITY_CONFLICT이며 원본/복원 근거를 확인해야 한다. 임의 초기화하지 않는다.
 
+## warm의 사전 준비와 조건부 커밋
+
+warm actor의 `submit_transition`은 로컬 연결부다. 운영 HTTP/MQTT 전환 API가 아니다.
+같은 원 요청 UUID와 예상 owner/generation·대상 VM·모드·절대 deadline을 보존한다.
+deadline은 같은 dom0 host boot의 단조 밀리초다. 외부 장치 시각을 전달하지 않는다.
+
+```python
+reply = runner.submit_transition(
+    'prepare', request_id, mode='AUTO', target_vm=target_vm,
+    expected_owner=current_owner, expected_generation=current_generation,
+    deadline_ms=original_deadline_ms,
+)
+```
+
+반환 queue는 제출 통로다. 큐 등록을 내구 수락으로 표시하지 않는다. actor가 처리한
+`ok=true, record.phase=PREPARING`을 받아야 원본 저장을 확인한 것이다. `refresh`는 현재
+근거를 원 요청에 채택하고 `commit`은 조건부 권위 전환, `cancel`은 미커밋 준비 취소,
+`get`은 원 기록 조회다. `get`과 동일 요청 재전달은 실행·기한 갱신을 하지 않는다.
+응답을 잃으면 같은 ID/인자를 보존하고 원 기록을 확인한다. caller의 기다림 종료는
+actor 취소가 아니다. 처리 queue는 최대 8건, 판정 회차당 한 건이며 포화는 제출 실패다.
+
+Gateway는 기존 Authority JSON에 원 요청·고정 spec·준비 결과·커밋 generation을 함께
+저장한다. 준비 중 정상 owner의 권한은 유지한다. 커밋에서 이전 명령 자격을 끝내고,
+대상의 새 generation 계산·신선한 명령을 확인한 뒤 출력한다. `COMMITTED`는 권위 변경이며
+앱 적용/장치 적용 완료가 아니다. 같은 요청의 반복 commit은 원 결과만 반환한다.
+커밋 후 취소 응답도 `COMMITTED`를 보존한다. 이후 정지는 기존 정지 의도로 요청한다.
+저장 효과 미확정이면 출력 금지이며 옛 generation으로 되돌리지 않는다.
+
+프로세스 재시작은 미커밋 준비를 ABANDONED로 보존하고 기존 출력은 재무장 전 금지한다.
+옛 승인·응답을 새 전환에 쓰지 않으며 커밋 결과와 원 key는 유지한다. 내구 기록은 최대
+32건·전체 JSON 64KiB이며 자동 삭제하지 않는다. 한도에서는 새 계획 요청을 거절하고
+기존 기록/정상 운행을 보존한다. 기록을 지워 차단을 해제하는 운영 절차는 제공하지 않는다.
+fsync 비용은 actor 지연에 포함되며 큐/틱 설정으로 worst-case를 보장하지 않는다.
+
+현재 계획 인계의 실제 연결은 root 바인딩에 `app_state_models`로 명시한 stateless 앱이다.
+root rejoin 설정은 고정한 실제 firmware/adapter의 선언과 일치해야 한다. 선언 누락이나
+stateful 앱은 일반 QUALIFIED를 요청별 상태 적용 확인으로 바꿔 쓰지 않고 계획 인계를
+거절한다. stateful의 로컬 어댑터 검증은 구현돼 있으나 실제 사본 전송·요청별 적용 보고는
+후속 생산자 연결이다. 현재 stateless 자격은 지속 관측을 원 요청에 채택한 것이며,
+게스트가 준비 요청을 ACK했다고 보고하지 않는다.
+
+계획 MANUAL은 [세션 입력 계약](../../../docs/contracts/mqtt-contract-v1.md#71-명시적-세션-입력-manual-session-1)을
+요구한다. 같은 MANUAL 승계와 AUTO→MANUAL의 이동 조건은 별도다. 이 경로를 커밋하면
+세션 계약 선택을 영구 원본에 남기며 이후 원 세션의 확인이 없을 때 keys-only로 하향하지
+않는다. 현재 Spring은 새 표본 생산을 하지 않으므로 그 상태에서 성공으로 표시하지 않는다.
+준비·커밋·MANUAL 소비의 소스/로컬 수락과 실제 장치·제품 종단 수락은 구분한다.
+
 ## 수신·출력 진단
 
 수신 판정은 매 회 최대 64건 또는 1ms 처리 뒤 진행한다. 명령은 허용된 실행/현재
