@@ -143,16 +143,16 @@ public class VmService {
         });
     }
 
-    // The state is read first so the event says what was stopped; a VM that is already off records nothing.
+    // The state is read first so the event says what was stopped. Always forward stop even without a runtime:
+    // dom0-manager persists desired_state=stopped, which prevents recovery from relaunching the VM.
     public Vm stop(String vmId) {
         VmRecord record = findRecord(vmId);
         return underOperation(vmId, () -> {
             VmState before = vmControlPort.find(vmId).map(VmRuntime::state).orElse(null);
-            if (before == null) {
-                return Vm.of(record, null);
-            }
             vmControlPort.stop(vmId);
-            stateTracker.changedByUser(vmId, before, VmState.STOPPED, VmStateTracker.CAUSE_USER_STOP);
+            if (before != null) {
+                stateTracker.changedByUser(vmId, before, VmState.STOPPED, VmStateTracker.CAUSE_USER_STOP);
+            }
             return Vm.of(record, null);
         });
     }

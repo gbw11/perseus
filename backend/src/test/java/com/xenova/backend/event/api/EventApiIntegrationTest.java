@@ -15,13 +15,16 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.agent.application.AgentDataService;
 import com.xenova.backend.event.application.AgentStatusWatcher;
+import com.xenova.backend.event.application.RecoveryEventMessageHandler;
 import com.xenova.backend.event.domain.ReportedAgentStatusRepository;
 import com.xenova.backend.event.domain.VmEventRepository;
-import com.xenova.backend.vm.domain.VmControlPort;
+import com.xenova.backend.event.domain.VmRecoveryHealthRepository;
+import com.xenova.backend.vm.infrastructure.Dom0ManagerClient;
 import com.xenova.backend.vm.domain.VmLaunchSpec;
 import com.xenova.backend.vm.domain.VmRecordRepository;
 import com.xenova.backend.vm.domain.VmRuntime;
 import com.xenova.backend.vm.domain.VmState;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -53,13 +56,16 @@ class EventApiIntegrationTest {
     private ObjectMapper objectMapper;
 
     @MockitoBean
-    private VmControlPort vmControlPort;
+    private Dom0ManagerClient vmControlPort;
 
     @Autowired
     private VmRecordRepository vmRecordRepository;
 
     @Autowired
     private VmEventRepository vmEventRepository;
+
+    @Autowired
+    private VmRecoveryHealthRepository vmRecoveryHealthRepository;
 
     @Autowired
     private ReportedAgentStatusRepository reportedAgentStatusRepository;
@@ -70,13 +76,17 @@ class EventApiIntegrationTest {
     @Autowired
     private AgentStatusWatcher agentStatusWatcher;
 
+    @Autowired
+    private RecoveryEventMessageHandler recoveryEventMessageHandler;
+
     private String accessToken;
 
     @BeforeEach
     void setUp() throws Exception {
-        vmRecordRepository.deleteAll();
+        vmRecoveryHealthRepository.deleteAll();
         vmEventRepository.deleteAll();
         reportedAgentStatusRepository.deleteAll();
+        vmRecordRepository.deleteAll();
         when(vmControlPort.launch(anyString(), any(VmLaunchSpec.class))).thenAnswer(invocation -> {
             VmLaunchSpec spec = invocation.getArgument(1);
             return new VmRuntime(invocation.getArgument(0), VmState.RUNNING, spec.vcpus(), spec.memoryMib());
@@ -152,6 +162,43 @@ class EventApiIntegrationTest {
     }
 
     @Test
+    void recoveryEventsExposeTheMqttContractThroughTheRestApi() throws Exception {
+        acceptRecoveryEvent(601, "recovery.started", "");
+        acceptRecoveryEvent(602, "recovery.completed",
+                ",\"attempt_duration_ms\":500,\"recovery_duration_ms\":1000,\"execution_id\":\"exec-new\"");
+        acceptRecoveryEvent(603, "recovery.recovered",
+                ",\"attempt_duration_ms\":510,\"recovery_duration_ms\":1010");
+        acceptRecoveryEvent(604, "recovery.cancelled",
+                ",\"attempt_duration_ms\":520,\"recovery_duration_ms\":1020,\"error\":" + recoveryError());
+        acceptRecoveryEvent(605, "recovery.failed",
+                ",\"attempt_duration_ms\":530,\"final\":false,"
+                        + "\"next_retry_at\":\"2026-10-28T00:00:05Z\",\"error\":" + recoveryError());
+        acceptRecoveryEvent(606, "recovery.failed",
+                ",\"attempt_duration_ms\":540,\"recovery_duration_ms\":1040,"
+                        + "\"final\":true,\"error\":" + recoveryError());
+
+        JsonNode items = events("?vm_id=" + RECOVERY_VM_ID);
+
+        assertRecoveryEvent(items, 601, "recovery.started", "INFO");
+        JsonNode completed = assertRecoveryEvent(items, 602, "recovery.completed", "INFO");
+        assertThat(completed.path("payload").path("recovery_duration_ms").asLong()).isEqualTo(1000L);
+        assertThat(completed.path("payload").path("execution_id").asText()).isEqualTo("exec-new");
+        assertRecoveryEvent(items, 603, "recovery.recovered", "INFO");
+        JsonNode cancelled = assertRecoveryEvent(items, 604, "recovery.cancelled", "INFO");
+        assertThat(cancelled.path("payload").path("error").path("code").asText())
+                .isEqualTo("XEN_EXECUTION_FAILED");
+        JsonNode retryableFailure = assertRecoveryEvent(items, 605, "recovery.failed", "WARNING");
+        assertThat(retryableFailure.path("payload").path("final").asBoolean()).isFalse();
+        assertThat(retryableFailure.path("payload").path("next_retry_at").asText())
+                .isEqualTo("2026-10-28T00:00:05Z");
+        JsonNode finalFailure = assertRecoveryEvent(items, 606, "recovery.failed", "ERROR");
+        assertThat(finalFailure.path("payload").path("final").asBoolean()).isTrue();
+        assertThat(finalFailure.path("payload").path("recovery_duration_ms").asLong()).isEqualTo(1040L);
+
+        assertThat(events("?vm_id=" + RECOVERY_VM_ID + "&type=recovery.completed")).hasSize(1);
+    }
+
+    @Test
     void agentStatusChangesAreRecordedOncePerTransition() throws Exception {
         String vmId = createVm("event-web-05");
         Instant now = Instant.now();
@@ -197,7 +244,7 @@ class EventApiIntegrationTest {
 
     private String createVm(String name) throws Exception {
         String body = """
-                {"name":"%s","template_id":"debian-13-arm64","template_version":"1.0.0","vcpus":1,"memory_mib":256}
+                {"name":"%s","template_id":"debian-13-arm64","template_version":"1.0.2","vcpus":1,"memory_mib":256}
                 """.formatted(name);
         String response = mockMvc.perform(authorized(post("/api/v1/vms"))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -205,6 +252,62 @@ class EventApiIntegrationTest {
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return objectMapper.readTree(response).get("vm_id").asText();
+    }
+
+    private void acceptRecoveryEvent(int eventNumber, String type, String terminalFields) {
+        byte[] payload = ("""
+                {
+                  "event_id":"%s",
+                  "type":"%s",
+                  "vm_id":"%s",
+                  "recovery_id":"%s",
+                  "recovery_attempt_id":"%s",
+                  "attempt":1,
+                  "reason":"HEARTBEAT_LOST",
+                  "mode":"graceful-restart",
+                  "detected_at":"2026-10-28T00:00:00Z",
+                  "occurred_at":"2026-10-28T00:00:01Z"
+                  %s
+                }
+                """).formatted(recoveryEventId(eventNumber), type, RECOVERY_VM_ID,
+                        RECOVERY_OPERATION_ID, RECOVERY_CORRELATION_ID, terminalFields)
+                .getBytes(StandardCharsets.UTF_8);
+
+        assertThat(recoveryEventMessageHandler.handle(payload, Instant.parse("2026-10-28T00:00:02Z")))
+                .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
+    }
+
+    private static JsonNode assertRecoveryEvent(
+            JsonNode items, int eventNumber, String type, String severity) {
+        String eventId = recoveryEventId(eventNumber);
+        JsonNode event = null;
+        for (JsonNode candidate : items) {
+            if (eventId.equals(candidate.path("event_id").asText())) {
+                event = candidate;
+                break;
+            }
+        }
+        assertThat(event).as("REST response for %s", eventId).isNotNull();
+        assertThat(event.path("type").asText()).isEqualTo(type);
+        assertThat(event.path("severity").asText()).isEqualTo(severity);
+        assertThat(event.path("vm_id").asText()).isEqualTo(RECOVERY_VM_ID);
+        assertThat(event.path("operation_id").asText()).isEqualTo(RECOVERY_OPERATION_ID);
+        assertThat(event.path("correlation_id").asText()).isEqualTo(RECOVERY_CORRELATION_ID);
+        assertThat(event.path("occurred_at").asText()).isEqualTo("2026-10-28T00:00:01Z");
+        assertThat(event.path("recorded_at").asText()).isEqualTo("2026-10-28T00:00:02Z");
+        assertThat(event.path("payload").path("attempt").asInt()).isEqualTo(1);
+        assertThat(event.path("payload").path("reason").asText()).isEqualTo("HEARTBEAT_LOST");
+        assertThat(event.path("payload").path("mode").asText()).isEqualTo("graceful-restart");
+        return event;
+    }
+
+    private static String recoveryEventId(int value) {
+        return "00000000-0000-0000-0001-%012d".formatted(value);
+    }
+
+    private static String recoveryError() {
+        return "{\"code\":\"XEN_EXECUTION_FAILED\",\"platform_code\":\"XEN_EXECUTION_FAILED\","
+                + "\"message\":\"xl failed\"}";
     }
 
     private JsonNode events(String query) throws Exception {
@@ -223,4 +326,8 @@ class EventApiIntegrationTest {
     private MockHttpServletRequestBuilder authorized(MockHttpServletRequestBuilder request) {
         return request.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken);
     }
+
+    private static final String RECOVERY_VM_ID = "00000000-0000-0000-0000-000000000002";
+    private static final String RECOVERY_OPERATION_ID = "00000000-0000-0000-0000-000000000003";
+    private static final String RECOVERY_CORRELATION_ID = "00000000-0000-0000-0000-000000000004";
 }

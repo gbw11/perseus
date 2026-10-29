@@ -141,6 +141,26 @@ docker compose -f local/docker-compose.yml --env-file local/.env up -d
 bash scripts/check.sh
 ```
 
+로컬 개발 계정의 비밀번호는 `local/.env`의 `XENOVA_MQTT_DEV_PASSWORD`입니다.
+보드에서 발급한 계정·비밀번호와는 별개이며, 포트를 변경했다면 아래 기본값도 바꿉니다.
+
+| 소비자 | 기본 접속 주소 | 계정·설정 |
+|---|---|---|
+| 백엔드 | `tcp://127.0.0.1:1883` | `MQTT_BROKER_URL`, `MQTT_USERNAME=backend`, `MQTT_PASSWORD` |
+| VM Agent | `127.0.0.1:1883` | username은 VM UUID. `XENOVA_AGENT_BROKER_HOST/PORT/USERNAME/PASSWORD` |
+| legacy 앱·Jetson | `127.0.0.1:1883` | 앱 계정 `autonomous`·`manual`·`interaction`, Jetson 계정 `perception` |
+| 공통 Zephyr 주행 앱 | 내부 브리지의 `192.168.77.1:1883` | netfront 직접 MQTT, username은 VM UUID. 로컬 시험에서는 broker 주소를 별도 지정 |
+| v2 Publisher | 시험·실행 환경의 broker 주소 | `telemetry-UUID`, v1 계정과 구분 |
+| Gateway / Recovery Worker | `127.0.0.1:1883` | 각각 `gateway` / `dom0-server` |
+| 확인·모니터링 | `127.0.0.1:1883` | `observer`는 v1 읽기, `telemetry-reference-subscriber`는 v2 읽기 전용 |
+| 브라우저 | 백엔드 중계 | `ws://127.0.0.1:9001`은 개발 확인용 |
+
+Recovery Worker의 보드별 인증정보는 `/etc/xenova/recovery-worker.env`에 적용합니다.
+설정 항목과 서비스 사용법은 [dom0-manager 안내](../../services/dom0-manager/README.md)를 따릅니다.
+로컬 계정·ACL을 변경할 때는 `policy.json`을 수정한 뒤 생성·검사·passwd 재생성 순서로
+반영하며 `etc/accounts`를 별도로 편집하지 않습니다. 로컬 broker 종료는
+`docker compose -f local/docker-compose.yml --env-file local/.env down`입니다.
+
 로컬 예시 UUID 두 개는 개발용 생성물에만 포함됩니다. WebSocket 9001은 개발 경로입니다.
 실제 인증·구독·독립 수신은 서비스 active나 SUBACK/PUBACK만으로 대체하지 않습니다.
 로컬 검증과 기존 보드 시험의 범위는

@@ -32,9 +32,29 @@ public class EventRecorder {
     @Transactional
     public VmEvent record(
             EventType type, EventSeverity severity, String vmId, Instant occurredAt, Map<String, Object> payload) {
+        return record(type, severity, vmId, null, null, occurredAt, payload);
+    }
+
+    @Transactional
+    public VmEvent record(
+            EventType type,
+            EventSeverity severity,
+            String vmId,
+            String operationId,
+            String correlationId,
+            Instant occurredAt,
+            Map<String, Object> payload) {
         Instant now = clock.instant();
         VmEvent event = repository.save(new VmEvent(
-                UUID.randomUUID().toString(), type, severity, vmId, occurredAt == null ? now : occurredAt, now, payload));
+                UUID.randomUUID().toString(),
+                type,
+                severity,
+                vmId,
+                operationId,
+                correlationId,
+                occurredAt == null ? now : occurredAt,
+                now,
+                payload));
         eventPublisher.publishEvent(new EventRecorded(event));
         return event;
     }

@@ -42,8 +42,13 @@ services:
       - --collation-server=utf8mb4_0900_ai_ci
     volumes:
       - mysql-data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:3306:3306"
     networks:
       - data
+      # Docker 29 does not publish ports for containers attached only to an internal network.
+      # Keep application traffic on data while providing a dedicated bridge for the loopback binding.
+      - mysql-management
     healthcheck:
       test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_ROOT_PASSWORD}\" mysqladmin ping --host=127.0.0.1 --user=root --silent"]
       interval: 10s
@@ -92,8 +97,10 @@ services:
       REDIS_HEALTH_ENABLED: "true"
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
-      MQTT_ENABLED: ${MQTT_ENABLED:-false}
+      MQTT_ENABLED: ${MQTT_ENABLED:-true}
       MQTT_BROKER_URL: ${MQTT_BROKER_URL:-tcp://host.docker.internal:1883}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
       DOM0_MANAGER_BASE_URL: ${DOM0_MANAGER_BASE_URL:-http://host.docker.internal:8081}
       DOM0_MANAGER_SERVICE_TOKEN: ${DOM0_MANAGER_SERVICE_TOKEN:-}
       XENOVA_DISPLAY_SERVICE_TOKEN: ${XENOVA_DISPLAY_SERVICE_TOKEN:-}
@@ -173,3 +180,4 @@ networks:
   app:
   data:
     internal: true
+  mysql-management:

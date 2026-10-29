@@ -9,6 +9,7 @@ import { RequireAuth } from './auth';
 import { ConsoleLayout } from './layout/ConsoleLayout';
 import { DashboardLayout } from './layout/DashboardLayout';
 import { ConsolePage } from './pages/ConsolePage';
+import { ControlVmDetailPage } from './pages/ControlVmDetailPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DemoPage } from './pages/DemoPage';
 import { EventsPage } from './pages/EventsPage';
@@ -21,6 +22,9 @@ import { VmCreatePage } from './pages/VmCreatePage';
 import { VmDetailPage } from './pages/VmDetailPage';
 import { VmListPage } from './pages/VmListPage';
 import { VisionPage } from './pages/VisionPage';
+
+// 관리자 콘솔에만 XENOVA 브랜드 테마를 적용한다. HDMI 화면은 기존 테마를 유지한다.
+document.documentElement.dataset.theme = 'xenova';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -58,7 +62,7 @@ const router = createBrowserRouter([
       { path: '/vision', element: <VisionPage /> },
       { path: '/control', element: <VmListPage /> },
       { path: '/control/vms/new', element: <VmCreatePage /> },
-      { path: '/control/vms/:vmId', element: <VmDetailPage /> },
+      { path: '/control/vms/:vmId', element: <ControlVmDetailPage /> },
       { path: '/simulator', element: <DemoPage /> },
 
       // 기존 북마크와 외부 링크를 깨지 않도록 새 정보구조로 보낸다.

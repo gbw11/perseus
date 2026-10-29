@@ -3,7 +3,7 @@
   flex-direction: column;
   background: var(--x-surface);
   border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
+  border-radius: 14px;
   box-shadow: var(--x-shadow);
   min-width: 0;
 }
@@ -14,6 +14,7 @@
   gap: var(--x-space-3);
   padding: var(--x-space-3) var(--x-space-4);
   border-bottom: 1px solid var(--x-border);
+  background: color-mix(in srgb, var(--x-surface-2) 34%, transparent);
 }
 .title {
   margin: 0;

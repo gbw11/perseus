@@ -1,5 +1,6 @@
-// Xenova Merge Check
-// GitLab MR의 소스 브랜치를 검사한다. 배포와 운영 Health Check는 수행하지 않는다.
+// Xenova integration check
+// xenova-develop-check과 xenova-master-check Job이 공통으로 사용한다.
+// MR merge 결과에서 Backend·Frontend·Platform·Docker 구성을 모두 검사하며 배포는 하지 않는다.
 
 pipeline {
     agent any
@@ -22,29 +23,24 @@ pipeline {
 
                     checkout([
                         $class: 'GitSCM',
-                        branches: [[name: "origin/${env.gitlabSourceBranch}"]],
-                        extensions: [[
-                            $class: 'PreBuildMerge',
-                            options: [
-                                fastForwardMode: 'FF',
-                                mergeRemote: 'origin',
-                                mergeStrategy: 'DEFAULT',
-                                mergeTarget: env.gitlabTargetBranch
-                            ]
-                        ]],
+                        branches: [[name: "origin/${env.gitlabTargetBranch}"]],
                         userRemoteConfigs: [[
                             credentialsId: 'xenova-gitlab-checkout',
                             name: 'origin',
+                            refspec: '+refs/heads/*:refs/remotes/origin/*',
                             url: 'https://lab.ssafy.com/s15-final/S15P31E110.git'
                         ]]
                     ])
+                    withEnv(["MR_SOURCE_REF=origin/${env.gitlabSourceBranch}"]) {
+                        sh '''git -c user.name='Xenova Jenkins' -c user.email='jenkins@k15e110.p.ssafy.io' merge --no-edit "$MR_SOURCE_REF"'''
+                    }
                 }
             }
         }
 
         stage('Backend Test') {
             steps {
-                updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'running'
+                updateGitlabCommitStatus name: integrationStatusName(), state: 'running'
                 dir('backend') {
                     sh './mvnw -B -ntp test'
                 }
@@ -93,6 +89,7 @@ pipeline {
             steps {
                 dir('platform/services/dom0-manager') {
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                        sh 'mkdir -p target'
                         sh 'python3 -m pip install -q --user -e .[test] && python3 -m pytest -q --junitxml=target/pytest.xml'
                     }
                 }
@@ -103,9 +100,11 @@ pipeline {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     dir('platform/services/vm-agent/mqtt-client') {
+                        sh 'mkdir -p target'
                         sh 'python3 -m pip install -q --user "paho-mqtt>=1.6,<3" "pytest>=7" && python3 -m pytest -q --junitxml=target/pytest.xml'
                     }
                     dir('platform/services/vm-agent/agent') {
+                        sh 'mkdir -p target'
                         sh 'python3 -m pytest -q --junitxml=target/pytest.xml'
                     }
                 }
@@ -126,22 +125,26 @@ pipeline {
             '''
         }
         success {
-            updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'success'
+            updateGitlabCommitStatus name: integrationStatusName(), state: 'success'
             notifyMattermost('good', '✅ CI 성공')
         }
         unstable {
-            updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'failed'
+            updateGitlabCommitStatus name: integrationStatusName(), state: 'failed'
             notifyMattermost('warning', '⚠️ CI 불안정')
         }
         failure {
-            updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'failed'
+            updateGitlabCommitStatus name: integrationStatusName(), state: 'failed'
             notifyMattermost('danger', '❌ CI 실패')
         }
         aborted {
-            updateGitlabCommitStatus name: 'jenkins-merge-check', state: 'canceled'
+            updateGitlabCommitStatus name: integrationStatusName(), state: 'canceled'
             notifyMattermost('warning', '⚠️ CI 중단')
         }
     }
+}
+
+def integrationStatusName() {
+    return env.gitlabTargetBranch == 'master' ? 'jenkins-master-check' : 'jenkins-develop-check'
 }
 
 // Mattermost 웹훅 URL과 채널은 Jenkins 시스템 설정(Global Mattermost Notifier Settings)에 둔다.

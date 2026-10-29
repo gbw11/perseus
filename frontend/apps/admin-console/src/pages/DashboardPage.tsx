@@ -11,13 +11,15 @@ import {
   TrackView,
   useToast,
 } from '@xenova/ui';
+import type { Health } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
 import type { DriveState } from '../api/drive';
-import { useEvents, useVms } from '../api/queries';
+import { useEvents, useMetrics, useVms } from '../api/queries';
 import { restartSimRace, selectSimTrack, useSimState, type SimView } from '../api/sim';
-import type { Vm } from '../api/types';
+import { VM_CPU_PERCENT_METRIC, type MetricSample, type Vm, type VmEvent } from '../api/types';
 import { clock, describe } from '../domain/events';
+import { vmAuthorityOf } from '../domain/vmAuthority';
 import {
   ago,
   appHealth,
@@ -34,7 +36,9 @@ import {
   signed,
   vmOf,
   type AppId,
+  type Role,
 } from '../domain/roles';
+import { STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
 import { SimTrackSelect } from './SimTrackSelect';
 import styles from './pages.module.css';
@@ -47,7 +51,7 @@ const CAMERA_URL: string = import.meta.env.VITE_CAMERA_URL || '/camera/stream.mj
  * W-02 대시보드 — 주행 통합 상태 (화면 정의서 W-02, UI-09). 데모 내내 띄워 두는 화면.
  * "지금 누가 차를 몰고 있고, 넘길 준비가 됐는지" 를 한 화면에. 참고 시안: stitch_untitled_project/auto.
  */
-export function DashboardPage() {
+export function LegacyDashboardPage() {
   const { drive } = useDrive();
   const vms = useVms();
   const events = useEvents({ limit: 5 });
@@ -457,4 +461,269 @@ function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null
       </div>
     </Card>
   );
+}
+
+const MIB_BYTES = 1024 * 1024;
+type VmConnection = 'Connected' | 'Delayed' | 'Disconnected' | 'Unknown';
+
+/**
+ * VM Dashboard / Overview.
+ * VM A·B는 동일한 주행 VM으로 표현하고, 제어권(Active/Standby)과 주행 모드(AUTO/MANUAL)를 분리한다.
+ */
+export function DashboardPage() {
+  const { drive, socket } = useDrive();
+  const vms = useVms();
+  const events = useEvents({ limit: 30 });
+  const items = vms.data?.items ?? [];
+  const activeVm = items.find((vm) => vm.vm_id === drive?.control?.active_vm_id);
+  const activeRole = activeVm ? roleOf(activeVm, drive) : null;
+
+  return (
+    <div className={styles.overviewPage}>
+      <header className={styles.contentHeading}>
+        <div>
+          <span className={styles.contentEyebrow}>OVERVIEW</span>
+          <h2>Virtual Machines</h2>
+        </div>
+      </header>
+
+      <section className={styles.overviewSummary} aria-label="주행 및 연결 요약">
+        <OverviewSummaryItem
+          label="DRIVE MODE"
+          value={drive?.control?.mode ? MODE_LABEL[drive.control.mode] : 'Unknown'}
+        />
+        <OverviewSummaryItem
+          label="CONTROL AUTHORITY"
+          value={activeRole?.vmLabel ?? activeVm?.name ?? 'None'}
+        />
+        <OverviewSummaryItem
+          label="TELEMETRY"
+          value={socket === 'open' ? 'Connected' : socket === 'connecting' ? 'Connecting' : 'Disconnected'}
+          tone={socket === 'open' ? 'ok' : socket === 'connecting' ? 'recovering' : 'fault'}
+        />
+        <OverviewSummaryItem label="LAST OBSERVED" value={overviewObserved(vms.data?.observed_at)} />
+      </section>
+
+      {vms.isPending && <div className={styles.statePanel}>VM 상태를 불러오는 중입니다…</div>}
+      {vms.error && (
+        <div className={styles.statePanel} role="alert">
+          VM 상태를 불러오지 못했습니다. 연결을 확인해 주세요.
+        </div>
+      )}
+
+      <div className={styles.vmGrid}>
+        {ROLE_ORDER.map((app) => {
+          const role = ROLES[app];
+          const vm = vmOf(app, items, drive);
+          return (
+            <VmOverviewCard
+              key={app}
+              role={role}
+              vm={vm}
+              drive={drive}
+              latestEvent={overviewLatestEvent(events.data?.items, vm?.vm_id)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function OverviewSummaryItem({ label, value, tone }: { label: string; value: string; tone?: Health }) {
+  return (
+    <div className={styles.summaryItem} data-tone={tone}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function VmOverviewCard({
+  role,
+  vm,
+  drive,
+  latestEvent,
+}: {
+  role: Role;
+  vm: Vm | undefined;
+  drive: DriveState | null;
+  latestEvent: VmEvent | undefined;
+}) {
+  const metrics = useMetrics(vm?.vm_id ?? '', vm?.guest_kind === 'linux');
+  const samples = metrics.data?.items ?? [];
+  const lastSample = samples.at(-1);
+  const cpu = overviewMetricValue(lastSample, VM_CPU_PERCENT_METRIC);
+  const usedBytes = overviewMetricValue(lastSample, 'memory_used_bytes');
+  const memory = vm && usedBytes != null ? (usedBytes / (vm.memory_mib * MIB_BYTES)) * 100 : null;
+  const app = drive?.apps[role.app];
+  const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
+  const connection = overviewConnection(vm, app);
+  const health = vm ? appHealth(role, vm, app) : 'stopped';
+  const eventSummary = latestEvent
+    ? `${clock(latestEvent.occurred_at)} · ${describe(latestEvent, () => role.vmLabel).title}`
+    : '최근 중요 이벤트 없음';
+  const unavailable = overviewMetricUnavailable(vm, metrics.isPending, samples.length);
+
+  const content = (
+    <>
+      <div className={styles.vmCardTop}>
+        <div>
+          <span className={styles.vmKicker}>{role.title}</span>
+          <h3>{role.vmLabel}</h3>
+          <p>
+            {role.driving ? 'Drive' : 'Infotainment'} · {vm ? osLabel(vm) : 'Not discovered'}
+          </p>
+        </div>
+        <span className={styles.authority} data-authority={authority.toLowerCase()}>
+          {authority}
+        </span>
+      </div>
+
+      <div className={styles.vmStatusRows}>
+        <OverviewStatusLine
+          label="VM"
+          value={vm ? STATE_LABEL[vm.state] : '연결 대기'}
+          tone={vm ? STATE_HEALTH[vm.state] : 'stopped'}
+        />
+        <OverviewStatusLine label="APP" value={overviewAppStatus(health, !!app)} tone={health} />
+        <OverviewStatusLine
+          label="LINK"
+          value={connection}
+          tone={overviewConnectionTone(connection)}
+          detail={app?.heartbeat_ago_ms != null ? ago(app.heartbeat_ago_ms) : undefined}
+        />
+      </div>
+
+      <div className={styles.resourceBlock}>
+        <OverviewMetricBar label="CPU" value={cpu} unavailable={unavailable} />
+        <OverviewMetricBar
+          label="Memory"
+          value={memory}
+          unavailable={unavailable}
+          detail={vm ? `${vm.memory_mib} MiB allocated` : undefined}
+        />
+      </div>
+
+      <div className={styles.vmCardFoot}>
+        <div>
+          <span>RECENT SIGNAL</span>
+          <p>{eventSummary}</p>
+        </div>
+        <strong>{vm ? 'View details ↗' : 'Waiting for VM'}</strong>
+      </div>
+    </>
+  );
+
+  const style = { '--vm-accent': role.color } as CSSProperties;
+  return vm ? (
+    <Link className={styles.vmCard} style={style} to={`/dashboard/vms/${vm.vm_id}`}>
+      {content}
+    </Link>
+  ) : (
+    <article className={`${styles.vmCard} ${styles.vmCardMissing}`} style={style}>
+      {content}
+    </article>
+  );
+}
+
+function OverviewStatusLine({
+  label,
+  value,
+  tone,
+  detail,
+}: {
+  label: string;
+  value: string;
+  tone: Health;
+  detail?: string;
+}) {
+  return (
+    <div className={styles.statusLine} data-tone={tone}>
+      <span>{label}</span>
+      <strong>
+        <i aria-hidden="true" /> {value}
+      </strong>
+      {detail && <small>{detail}</small>}
+    </div>
+  );
+}
+
+function OverviewMetricBar({
+  label,
+  value,
+  unavailable,
+  detail,
+}: {
+  label: string;
+  value: number | null;
+  unavailable: string | null;
+  detail?: string;
+}) {
+  const safeValue = value == null ? 0 : Math.max(0, Math.min(100, value));
+  return (
+    <div className={styles.metricRow}>
+      <div>
+        <span>{label}</span>
+        <strong>{value == null ? '—' : `${value.toFixed(0)}%`}</strong>
+      </div>
+      <div
+        className={styles.metricTrack}
+        aria-label={`${label} ${value == null ? '데이터 없음' : `${value.toFixed(0)}%`}`}
+      >
+        <i style={{ width: `${safeValue}%` }} />
+      </div>
+      <small>{unavailable ?? detail ?? '\u00a0'}</small>
+    </div>
+  );
+}
+
+function overviewConnection(vm: Vm | undefined, app: DriveState['apps'][string] | undefined): VmConnection {
+  if (!vm) return 'Unknown';
+  if (app?.heartbeat_ago_ms != null) {
+    if (app.heartbeat_ago_ms <= 3000) return 'Connected';
+    if (app.heartbeat_ago_ms <= 10_000) return 'Delayed';
+    return 'Disconnected';
+  }
+  if (vm.agent_status === 'ONLINE') return 'Connected';
+  if (vm.agent_status === 'STALE') return 'Delayed';
+  if (vm.agent_status === 'OFFLINE') return 'Disconnected';
+  return 'Unknown';
+}
+
+function overviewConnectionTone(connection: VmConnection): Health {
+  if (connection === 'Connected') return 'ok';
+  if (connection === 'Delayed') return 'recovering';
+  if (connection === 'Disconnected') return 'fault';
+  return 'stopped';
+}
+
+function overviewAppStatus(health: Health, hasApp: boolean): string {
+  if (!hasApp) return 'Unknown';
+  if (health === 'ok') return 'Ready';
+  if (health === 'recovering') return 'Degraded';
+  if (health === 'fault') return 'Failed';
+  return 'Unknown';
+}
+
+function overviewMetricValue(sample: MetricSample | undefined, name: string): number | null {
+  return sample?.values.find((value) => value.name === name)?.value ?? null;
+}
+
+function overviewMetricUnavailable(vm: Vm | undefined, pending: boolean, sampleCount: number): string | null {
+  if (!vm) return 'VM not discovered';
+  if (vm.guest_kind === 'zephyr') return 'Guest metrics not reported';
+  if (pending) return 'Loading metrics';
+  if (sampleCount === 0) return 'No metric data';
+  return null;
+}
+
+function overviewLatestEvent(events: VmEvent[] | undefined, vmId: string | undefined): VmEvent | undefined {
+  return vmId ? events?.find((event) => event.vm_id === vmId) : undefined;
+}
+
+function overviewObserved(value: string | undefined): string {
+  if (!value) return 'Waiting for data';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString('ko-KR', { hour12: false });
 }
