@@ -56,6 +56,34 @@ Gateway의 로컬 `submit_transition` queue는 제품 HTTP API가 아니다. 관
 큰 템플릿 생성의 자산 검증/복사 시간과 상위 응답 대기는 별도 항목이다. 이번 조회 순회
 보완으로 8GiB 등록 비용이나 생성 중 전역 잠금이 해결됐다고 간주하지 않는다.
 
+## 기본 VM 관리의 제품 종단 수락
+
+아래는 기존 D02·D08과 Linux D01-L05를 제품 경로에서 확인할 조건이다. 새 API나
+구현 완료 선언이 아니다. 하위 원문은 [VM 관리 API 계약](../contracts/vm-api-contract-v1.md),
+Agent 설치·실계측은 [Linux·Agent 요청](20261029-request-linux-agent.md)을 따른다.
+현재 소스의 기능과 실제 배포본의 기능은 각각 대조한다.
+
+두 시작점은 **EC2의 Spring 공개 API**와 **보드의 FastAPI 직접 호출**이다. 같은 이름의
+서로 다른 계층 응답을 그대로 비교하지 않는다. FastAPI는 현재 Xen 실행을, Spring은
+자기 VM 명세와 실행·Agent 관측을 조합한다. 실제 HTTP 상태·원 오류·대상 UUID·원 요청을
+대조해 어느 경계에서 실패했는지 남긴다. 보드에 연결되지 않는 상태는 생성 실패나
+Agent 장애의 증거가 아니다.
+
+| 확인 대상 | 기존 구현·담당 연결 위치 | 제품 수락 assertion |
+|---|---|---|
+| Debian·Ubuntu·Zephyr 생성 | `Dom0ManagerClient.launch`, `VmService.create`, FastAPI `api/vms.py:create_vm`·Provisioner | 실제 카탈로그 ID·버전·자원을 사용. 최초 UUID/명세 보존. 응답 유실 뒤 원 작업을 확인하기 전 새 UUID로 재생성하지 않음 |
+| 목록·상세와 기본 정보 | Spring `VmService.list/get`, `VmResponse`, FastAPI `list_vms/get_vm` | 정지한 등록 VM도 Spring 목록에 유지. OS·템플릿·vCPU·메모리 출처와 Agent 보고 IP를 구분. 실제 실행 부재를 등록 부재로 치환하지 않음 |
+| 시작·정지·삭제 | 기존 start/stop/delete와 프론트 `api/queries.ts:useVmAction` | 새 소유 VM만 제어. pending을 stopped로 표시하지 않음. 정지 확인 후 삭제·목록 제외. 하위 retire와 물리 자산 purge를 혼동하지 않음 |
+| Linux 실시간 메트릭·프로세스 | `AgentMessageHandler` → `AgentDataService` → metrics/processes API, 프론트 `useMetrics/useProcesses` | 실제 해당 실행에서 온 CPU·메모리·네트워크 표본과 top 프로세스 확인. null/만료·누적값을 정상 0 또는 현재 사용률로 꾸미지 않음. mock 차트를 제품 계측으로 수락하지 않음 |
+| Agent 상태·사건 | `AgentDataService.statusOf`, Agent 상태 관측기·사건 저장/조회 | 실제 heartbeat의 ONLINE→STALE→OFFLINE과 재수신 회복을 확인. Zephyr의 UNKNOWN을 Linux Agent 장애로 분류하지 않음. VM 생성·상태 변경·삭제와 Agent 사건의 UUID/시각 대조 |
+| 화면 주기 갱신 | `frontend/apps/admin-console/src/api/queries.ts`, 목록·상세·메트릭·이벤트 화면 | 강제 새로고침 없이 변경·새 표본·새 사건을 반영. 소스의 VM/메트릭 5초·이벤트 3초 설정은 실제 배포 화면 관측과 별도로 확인. 오류를 빈 정상 목록으로 숨기지 않음 |
+| 웹 콘솔 | 프론트 `api/console.ts`·`ConsolePanel`, Spring WebSocket relay, FastAPI 콘솔 경로 | 새 소유 VM에서 프론트 입력과 실제 guest 출력의 왕복 확인. 인증·독점 lease·종료 복귀 보존. 가짜 셸이나 접속 표시만으로 입출력 수락하지 않음 |
+
+제품 시험을 위해 기존 서비스·DB·env·Agent 설치를 임의로 바꿔 통과시키지 않는다.
+누락된 제공물이나 불일치는 원 요청 ID를 유지한 담당 작업으로 남긴다. 임시 도구·소유
+시험 VM은 범위를 확인해 정리하되, 정상 생성된 제품 사건과 작업 기록을 지워 시험 흔적을
+숨기지 않는다. 보드 직접 호출 통과와 Spring·화면 종단 통과는 별개로 기록한다.
+
 ## 진행 기록
 
 - 2026-10-29: 현재 HTTP 소스의 key stop/조회 제공을 확인했습니다. Spring의 `stop`은 void 호출이며 종단 연결은 별도 과제입니다. 운영 API·DB·env·서비스를 변경하지 않았습니다.
