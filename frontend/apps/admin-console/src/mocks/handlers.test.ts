@@ -1,8 +1,14 @@
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ApiError, getSession, refreshSession, request, setSession } from '../api/client';
-import type { TokenResponse, Vm, VmListResponse } from '../api/types';
-import { MOCK_PASSWORD } from './data';
+import {
+  VM_CPU_PERCENT_METRIC,
+  type MetricHistoryResponse,
+  type TokenResponse,
+  type Vm,
+  type VmListResponse,
+} from '../api/types';
+import { MOCK_PASSWORD, VM_IDS } from './data';
 import { handlers, resetMockState } from './handlers';
 
 // 화면이 쓰는 실제 클라이언트(api/client.ts)로 mock 흐름을 돌린다
@@ -101,5 +107,18 @@ describe('MSW mock API', () => {
     const id = '22222222-2222-4222-8222-222222222222';
     await request(`/api/v1/vms/${id}`, { method: 'DELETE' });
     await expect(request(`/api/v1/vms/${id}`)).rejects.toMatchObject({ status: 404, code: 'VM_NOT_FOUND' });
+  });
+
+  it('VM CPU 메트릭은 할당 vCPU 기준 필드명을 사용한다', async () => {
+    await login();
+    const metrics = await request<MetricHistoryResponse>(
+      `/api/v1/vms/${VM_IDS.interaction}/metrics?from=${encodeURIComponent(new Date(0).toISOString())}`,
+    );
+    expect(metrics.items.at(-1)?.values).toContainEqual(
+      expect.objectContaining({ name: VM_CPU_PERCENT_METRIC, unit: '%' }),
+    );
+    expect(
+      metrics.items.flatMap((sample) => sample.values).some((value) => value.name === 'cpu_percent'),
+    ).toBe(false);
   });
 });

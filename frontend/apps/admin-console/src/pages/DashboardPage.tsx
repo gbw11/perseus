@@ -17,7 +17,7 @@ import { Link } from 'react-router';
 import type { DriveState } from '../api/drive';
 import { useEvents, useMetrics, useVms } from '../api/queries';
 import { restartSimRace, selectSimTrack, useSimState, type SimView } from '../api/sim';
-import type { MetricSample, Vm, VmEvent } from '../api/types';
+import { VM_CPU_PERCENT_METRIC, type MetricSample, type Vm, type VmEvent } from '../api/types';
 import { clock, describe } from '../domain/events';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import {
@@ -548,7 +548,7 @@ function VmOverviewCard({
   const metrics = useMetrics(vm?.vm_id ?? '', vm?.guest_kind === 'linux');
   const samples = metrics.data?.items ?? [];
   const lastSample = samples.at(-1);
-  const cpu = overviewMetricValue(lastSample, 'cpu_percent');
+  const cpu = overviewMetricValue(lastSample, VM_CPU_PERCENT_METRIC);
   const usedBytes = overviewMetricValue(lastSample, 'memory_used_bytes');
   const memory = vm && usedBytes != null ? (usedBytes / (vm.memory_mib * MIB_BYTES)) * 100 : null;
   const app = drive?.apps[role.app];
