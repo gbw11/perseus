@@ -137,8 +137,8 @@ class ManagementBudgetTest(unittest.TestCase):
     def test_query_error_and_budget_exhaustion_are_not_empty_success(self):
         self.f.start('start')
         original=Execution.requests
-        def slow(e):
-            rows=original(e);self.f.ticks+=1;return rows
+        def slow(e,**kwargs):
+            rows=original(e,**kwargs);self.f.ticks+=1;return rows
         with patch.object(Execution,'requests',slow):
             self.f.fails(self.lookup('start',budget=100),'DEADLINE_EXCEEDED')
         with patch.object(Execution,'requests',side_effect=OSError('injected read failure')):
@@ -296,6 +296,42 @@ class ManagementBudgetTest(unittest.TestCase):
         self.assertNotIn('accepted',failed['error']['details'])
         self.assertEqual(before,self.p.execution().intent(self.r))
         self.f.fails(self.lookup('timed-out-before-admission'),'VM_NOT_FOUND')
+
+    def test_lookup_interrupts_enumeration_without_false_absence_or_uniqueness(self):
+        self.f.start('existing')
+        original=self.f.ok(self.lookup('existing'))['operation']
+        root=self.p.data/'control-requests';scandir=os.scandir;seen=[]
+        class Slow:
+            def __enter__(owner):return owner
+            def __exit__(owner,*args):return False
+            def __iter__(owner):
+                with scandir(root) as entries:
+                    for entry in entries:
+                        seen.append(entry.name);self.f.ticks+=.2;yield entry
+                raise AssertionError('scan must stop before requesting another entry')
+        for key in ('existing','not-found'):
+            with patch('xenova_execution.os.scandir',lambda path:Slow() if Path(path)==root else scandir(path)):
+                self.f.fails(self.lookup(key,budget=100),'DEADLINE_EXCEEDED')
+        self.assertEqual(len(seen),2)
+        latest=self.f.ok(self.lookup('existing'))['operation']
+        self.assertEqual(latest,original)
+
+    def test_stop_scan_budget_does_not_accept_or_shorten_original_execution(self):
+        self.f.start('running')
+        before=copy.deepcopy(self.p.execution().intent(self.r));read=Execution.read
+        def delayed(execution,path):
+            value=read(execution,path)
+            if path.parent==self.p.data/'control-requests':self.f.ticks+=2.1
+            return value
+        with patch.object(Execution,'read',delayed):
+            self.f.fails(self.call('stop',key='scan-expired-stop',budget=90000),'DEADLINE_EXCEEDED')
+        self.assertEqual(self.p.execution().intent(self.r),before)
+        self.f.fails(self.lookup('scan-expired-stop'),'VM_NOT_FOUND')
+        with operation_lock(self.p.runtime):
+            accepted=self.call('stop',key='scan-expired-stop',budget=90000)
+        self.assertTrue(accepted['error']['details']['accepted'])
+        op=self.f.ok(self.lookup('scan-expired-stop'))['operation']
+        self.assertGreater(op['deadline_monotonic_ms']-int(self.f.ticks*1000),88000)
 
 
 if __name__=='__main__':unittest.main()

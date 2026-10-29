@@ -792,7 +792,7 @@ class Manager:
                                 clock=self.p.clock,sleep=self.p.sleep):
                     tomb=self._state(spec['vm_id'],self.p.records(validate_assets=False))
                     if tomb['lifecycle']!='REGISTERED':return None
-                    op=next((q for q in self.p.execution().requests() if q['idempotency_key']==key),None)
+                    op=next((q for q in self.p.execution().requests(deadline=read_end) if q['idempotency_key']==key),None)
                     if not complete(op,request):return None
             data={'vm':None,'original_result':op['result'],'current_observation':None}
         elif action=='recover_once':
@@ -813,8 +813,9 @@ class Manager:
         """긴 실행 잠금 없이 짧게 의도를 수락한다. 정상 완료 응답을 만들지는 않는다."""
         execution = self.p.execution()
         receipt = {}
+        admission_end=min(deadline,self.p.clock()+2)
         try:
-            with short_lock(self.p.runtime, 'admission', deadline=min(deadline,self.p.clock()+2),
+            with short_lock(self.p.runtime, 'admission', deadline=admission_end,
                             clock=self.p.clock, sleep=self.p.sleep):
                 records = self.p.records(validate_assets=False)
                 tomb = self._state(spec['vm_id'], records)
@@ -827,7 +828,7 @@ class Manager:
                     fail('OPERATION_IN_PROGRESS','asset operation owns stop target',retryable=True)
                 request = {'vm_id':record['uuid'],'action':'stop','force':bool(spec.get('force',False))}
                 intent = execution.intent(record)
-                previous = next((q for q in execution.requests() if key is not None and q['idempotency_key']==key),None)
+                previous = next((q for q in execution.requests(deadline=admission_end) if key is not None and q['idempotency_key']==key),None)
                 if key is None and intent and intent['desired_state']=='stopped':
                     candidate=execution.read(execution._path(execution.data,'control-requests',intent['accepted_operation_id']))
                     if candidate and candidate['request']==request and candidate['phase'] in ('prepared','accepted','executing','uncertain'):
@@ -1213,7 +1214,7 @@ class Manager:
                     except (OSError,PlatformError,ValueError):
                         fail('STORAGE_UNAVAILABLE','persistent storage unavailable')
                     selected='operation_id' if 'operation_id' in spec else 'idempotency_key'
-                    found=[q for q in self.p.execution().requests() if q.get(selected)==spec[selected]]
+                    found=[q for q in self.p.execution().requests(deadline=deadline) if q.get(selected)==spec[selected]]
                     if self.p.clock()>=deadline:
                         fail('DEADLINE_EXCEEDED','control operation lookup budget expired')
                     if len(found)>1:

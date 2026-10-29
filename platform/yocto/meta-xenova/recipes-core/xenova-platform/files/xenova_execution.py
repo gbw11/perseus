@@ -620,12 +620,22 @@ class Execution:
                 "execution_context":run if observation and observation["execution_status"] == "managed" else None,
                 "observation_revision":observation["observation_revision"] if observation else None}
 
-    def requests(self):
+    def requests(self, *, deadline=None):
+        """Complete journal scan within the caller's existing observation budget.
+
+        A partial scan never proves absence or uniqueness. This deadline is not
+        written into any original operation and grants no physical execution.
+        """
         from xenova_management import Manager
+        def check():
+            if deadline is not None and self.p.clock()>=deadline:
+                refuse('DEADLINE_EXCEEDED','control request scan budget expired')
+        check()
         root = self.data/"control-requests"
         try:
             root.lstat()
         except FileNotFoundError:
+            check()
             return []
         except OSError:
             refuse('OBSERVATION_UNAVAILABLE', 'control request directory could not be inspected')
@@ -634,15 +644,21 @@ class Execution:
         # A partially read directory cannot establish absence or uniqueness.
         try:
             with os.scandir(root) as entries:
-                names = sorted(entry.name for entry in entries if entry.name.endswith('.json'))
+                names=[]
+                for entry in entries:
+                    check()
+                    if entry.name.endswith('.json'):names.append(entry.name)
         except OSError:
             refuse('OBSERVATION_UNAVAILABLE', 'control request enumeration is incomplete')
         result = []
-        for name in names:
+        check()
+        for name in sorted(names):
+            check()
             path = root/name
             if not vm.UUID.fullmatch(path.stem):
                 refuse("RECONCILE_REQUIRED", "invalid control request filename")
             value = self.read(path)
+            check()
             if value is None:
                 refuse('OBSERVATION_UNAVAILABLE', 'enumerated control request disappeared')
             if (value.get("operation_id") != path.stem or value.get("request_hash") != fingerprint(value.get("request"))
@@ -650,6 +666,7 @@ class Execution:
                     or value['idempotency_key'] is not None and not Manager._text_token(value['idempotency_key'])):
                 refuse("RECONCILE_REQUIRED", "invalid control request identity")
             result.append(value)
+        check()
         return result
 
     @traced('execution.save_request')
