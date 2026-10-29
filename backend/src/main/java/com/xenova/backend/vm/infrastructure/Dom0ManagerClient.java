@@ -111,6 +111,7 @@ public class Dom0ManagerClient implements VmControlPort {
 
     private RestClient createClient(Dom0ManagerProperties properties, Duration readTimeout) {
         HttpClient httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(properties.connectTimeout())
                 .build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
