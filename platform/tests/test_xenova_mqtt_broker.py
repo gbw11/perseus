@@ -101,13 +101,26 @@ class Contracts(unittest.TestCase):
         for stored in (True, None):
             errors = io.StringIO()
             response = {'stored': True, 'configured': True} if stored else OSError('injected storage failure')
-            with patch.object(broker, 'change', side_effect=response if stored is None else None,
+            with patch.object(broker.os, 'geteuid', return_value=0), \
+                 patch.object(broker, 'change', side_effect=response if stored is None else None,
                               return_value=response), patch.object(broker, 'reload_broker',
                               side_effect=broker.SetupError('stored; reload unconfirmed')), redirect_stderr(errors):
                 self.assertEqual(broker.main(['add-account', A, '--execute']), 1)
             value = json.loads(errors.getvalue())
             self.assertEqual(value['stored'], stored)
             self.assertEqual(value['configured'], stored)
+
+    def test_unprivileged_request_is_rejected_before_writer_and_reload(self):
+        errors = io.StringIO()
+        with patch.object(broker.os, 'geteuid', return_value=1000), \
+             patch.object(broker, 'change') as writer, \
+             patch.object(broker, 'reload_broker') as reload, redirect_stderr(errors):
+            self.assertEqual(broker.main(['add-account', A, '--execute']), 1)
+        writer.assert_not_called()
+        reload.assert_not_called()
+        value = json.loads(errors.getvalue())
+        self.assertIsNone(value['stored'])
+        self.assertIsNone(value['configured'])
 
     def test_account_state_does_not_change_factory_uuid_or_assets(self):
         from first_install_fixture import Board
