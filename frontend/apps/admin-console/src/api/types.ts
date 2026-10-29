@@ -160,6 +160,9 @@ export interface EventListResponse {
 
 // ---- 메트릭·프로세스 (노션 API 명세 "메트릭 조회", 백엔드 MetricsController) — 에이전트가 있는 Linux VM 만 ----
 
+/** VM에 할당된 vCPU 용량을 기준으로 계산한 전체 CPU 사용률. 프로세스 cpu_percent와 구분한다. */
+export const VM_CPU_PERCENT_METRIC = 'cpu_percent_allocated';
+
 export interface MetricValue {
   name: string;
   value: number | null;

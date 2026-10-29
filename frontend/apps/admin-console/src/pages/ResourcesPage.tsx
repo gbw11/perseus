@@ -2,7 +2,7 @@ import { Card } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import type { DriveState } from '../api/drive';
 import { useMetrics, useVms } from '../api/queries';
-import type { MetricSample, Vm } from '../api/types';
+import { VM_CPU_PERCENT_METRIC, type MetricSample, type Vm } from '../api/types';
 import { buildMemoryPoolSeries, bytesToKiB, type PoolSnapshot } from '../domain/memoryPools';
 import { ago, ROLE_ORDER, ROLES, vmOf, type AppId, type Role } from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
@@ -675,5 +675,5 @@ function CpuVmChart({ role, vm }: { role: Role; vm: Vm | undefined }) {
 }
 
 function cpuValue(sample: MetricSample): number | null {
-  return sample.values.find((value) => value.name === 'cpu_percent')?.value ?? null;
+  return sample.values.find((value) => value.name === VM_CPU_PERCENT_METRIC)?.value ?? null;
 }
