@@ -184,10 +184,11 @@ class AcceptanceTest(unittest.TestCase):
         self.assertEqual({z['id'] for z in defaults['firmware_instances']}, {'zephyr-drive-a','zephyr-drive-b'})
         for z in defaults['firmware_instances']:
             self.assertTrue(z['autostart'])
-            self.assertEqual(z['template'], 'xenova-zephyr-network-starter-1.1.0')
+            self.assertEqual(z['template'], 'xenova-zephyr-drive-common')
             self.assertEqual(z['board_shutdown_policy'], 'graceful')
             self.assertEqual(z['template_id'], 'zephyr-xenvm-starter-arm64')
-            self.assertEqual(z['template_version'], '1.1.0')
+            selected = json.loads((ROOT / 'platform/guests/default-templates.lock.json').read_text())['templates']
+            self.assertEqual(z['template_version'], next(e['version'] for e in selected if e['guest_kind'] == 'zephyr'))
         self.assertTrue(all(row['autostart'] for row in defaults['instances']))
         self.assertFalse(zephyr.CAPABILITIES['graceful_shutdown'])
         old = self.add_zephyr()

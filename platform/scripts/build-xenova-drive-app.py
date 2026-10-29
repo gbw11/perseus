@@ -39,6 +39,7 @@ def fingerprint(app):
         "platform/guests/zephyr/starter.lock.json", "platform/first-install/artifact_io.py",
         "platform/first-install/first_install_contract.py",
         "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_zephyr.py",
+        "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_catalog.py",
         "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_runtime.py",
         "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_trace.py")]
     if any(p.is_symlink() for p in paths):
@@ -135,7 +136,8 @@ def main():
                     "--build-dir", build / "zephyr", "--license", args.zephyr_source / "LICENSE",
                     "--version", "0.1.0-drive-" + digest[:12], "--app", "xenova-" + args.app,
                     "--source-revision", "sha256:" + digest, "--build-id", args.output.name,
-                    "--app-source", home, "--networked", "--output", args.output / "firmware", "--execute"])
+                    "--app-source", home, "--networked", "--output", args.output / "firmware",
+                    *(["--template-id", "xenova-zephyr-drive-common", "--template-version", "1.2.0-drive-" + digest[:12]] if args.app == "drive" else []), "--execute"])
     receipt = {"netfront_stack_audit": netfront_stack_audit, "app": args.app, "source_files": source, "source_sha256": digest, "zephyr_commit": commit,
                "compiler_sha256": sha(compiler), "compiler_version": subprocess.check_output([str(compiler), "--version"], text=True).splitlines()[0],
                "sdk_version": lock["sdk_version"], "elf_segments": segments,

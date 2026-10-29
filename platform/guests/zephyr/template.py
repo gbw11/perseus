@@ -43,6 +43,22 @@ def info(directory, expected_manifest):
         import xenova_zephyr as zephyr
         info = zephyr.bundle_info(directory, expected_manifest)
         meta = json.loads((directory / 'firmware.json').read_text())
+        if meta.get('id') == 'xenova-zephyr-drive-common':
+            selected = json.loads((HERE.parent / 'default-templates.lock.json').read_text())['templates']
+            pinned = [entry for entry in selected if entry.get('guest_kind') == 'zephyr' and entry.get('id') == meta['id']]
+            if (len(pinned) != 1 or pinned[0]['manifest_sha256'] != expected_manifest
+                    or pinned[0]['version'] != meta.get('template_version')
+                    or pinned[0]['template_id'] != meta.get('template_id')
+                    or meta.get('kind') != 'zephyr-xen-firmware'
+                    or meta.get('hardware_profile') != zephyr.NET_PROFILE
+                    or meta['source'].get('app') != 'xenova-drive'
+                    or meta['source'].get('zephyr_commit') != source_lock()['commit']):
+                raise ValueError('unexpected common drive catalog provenance')
+            return {'id': meta['id'], 'kind': meta['kind'], 'template': str(directory),
+                    'template_manifest_sha256': expected_manifest, 'logical_bytes': info['logical_bytes'],
+                    'allocated_bytes': sum(p.stat().st_blocks * 512 for p in directory.iterdir()),
+                    'metadata': meta, 'autostart': False, 'storage_directory': 'rtos-templates',
+                    'runtime_hardware_verified': False, 'bundle_manifest': info['manifest'], 'payloads': info['payloads']}
         lock_file = 'network-starter.lock.json' if meta.get('hardware_profile') == zephyr.NET_PROFILE else 'starter.lock.json'
         lock = json.loads((HERE / lock_file).read_text())
         if (meta.get('id') != lock['id'] or meta.get('kind') != 'zephyr-xen-firmware'

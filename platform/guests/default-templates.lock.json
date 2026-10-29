@@ -4,25 +4,25 @@
     {
       "guest_kind": "linux",
       "id": "ubuntu-24.04-20260926",
-      "version": "1.0.2",
-      "directory": "linux/ubuntu-24.04-20260926/1.0.2",
-      "manifest_sha256": "ea568bb4ca659bf25c5e7dd493e77840916f595fe63710b4046bd63906b2b3c8",
+      "version": "1.0.3",
+      "directory": "linux/ubuntu-24.04-20260926/1.0.3",
+      "manifest_sha256": "200832238ec4be6e6e474a108abed18c83de79c381b18df0bd853821cdba460c",
       "template_id": "ubuntu-24.04-arm64"
     },
     {
       "guest_kind": "linux",
       "id": "debian-13-20261015",
-      "version": "1.0.2",
-      "directory": "linux/debian-13-20261015/1.0.2",
-      "manifest_sha256": "efe60d0d9961c5bb15182fbe22e99d8631f23c570de13ae418adb79d68adccb3",
+      "version": "1.0.3",
+      "directory": "linux/debian-13-20261015/1.0.3",
+      "manifest_sha256": "b921978f23c63f62fda32a883f2a8bcc1307426ce13c2aee9727481f2a8cb842",
       "template_id": "debian-13-arm64"
     },
     {
       "guest_kind": "zephyr",
-      "id": "xenova-zephyr-network-starter-1.1.0",
-      "version": "1.1.0",
-      "directory": "zephyr/xenova-zephyr-network-starter-1.1.0/1.1.0",
-      "manifest_sha256": "b540e67932762992a990cb6109aca1d1c36ea60116676d6a98ac1ffc82a9dedb",
+      "id": "xenova-zephyr-drive-common",
+      "version": "1.2.0-drive-8ac7253967da",
+      "directory": "zephyr/xenova-zephyr-drive-common/1.2.0-drive-8ac7253967da",
+      "manifest_sha256": "721ef2b0adf39a570ab38b3e70e4d7c438f2aa84b42c3e174a92e6386e2a854c",
       "template_id": "zephyr-xenvm-starter-arm64"
     }
   ]

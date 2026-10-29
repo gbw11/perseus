@@ -198,21 +198,19 @@ def copy_rtos_templates(data, entries):
 
 def copy_management_catalog(data):
     """새 조립 저장소에만 factory public ID/version 카탈로그를 준비한다."""
-    from xenova_catalog import describe
+    from xenova_catalog import describe, DEFAULT_IDS, deployment_version
     from artifact_io import publish
-    locked=json.loads((ROOT/'platform/guests/default-templates.lock.json').read_text())['templates']
-    selected={e['id']:e for e in locked}
     for kind, folder in [('linux','templates'),('zephyr','rtos-templates')]:
         parent = data / folder
         if not parent.exists():
             continue
         for directory in parent.iterdir():
-            if directory.name.startswith('.') or directory.name not in selected:
+            if directory.name.startswith('.') or directory.name not in DEFAULT_IDS:
                 continue
             manifest = directory / ('firmware.json' if (directory / 'firmware.json').exists() else 'template.json')
             meta = json.loads(manifest.read_text())
-            descriptor = {'schema_version':'1.0','template_id':selected[directory.name]['template_id'],
-                          'template_version':selected[directory.name]['version'],'guest_kind':kind,
+            descriptor = {'schema_version':'1.0','template_id':DEFAULT_IDS[directory.name],
+                          'template_version':deployment_version(meta),'guest_kind':kind,
                           'asset_directory':str(directory.relative_to(data)),
                           'manifest_sha256':sha(manifest),'source_template_id':meta['id']}
             describe(data, descriptor, full=True)
@@ -235,7 +233,7 @@ def copy_rtos_seeds(data, entries):
     # Current config selects the new immutable template. Legacy input bundles remain
     # readable for rerunning old receipts; no existing store is migrated here.
     allowed={'xenova-zephyr-network-starter-1.1.0','xenova-zephyr-starter-1.0.0',
-             'zephyr-4.4.0-xenvm'}
+             'zephyr-4.4.0-xenvm', 'xenova-zephyr-drive-common'}
     if template not in allowed:
         raise ValueError('unknown immutable Zephyr factory template')
     records=[];reservations={}

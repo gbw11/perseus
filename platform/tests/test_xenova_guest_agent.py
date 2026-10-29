@@ -45,8 +45,12 @@ class GuestAgentTest(unittest.TestCase):
             agent.apt_command([sys.executable, '-B', '-c', script, str(child)], timeout=1)
         pid = child.read_text().strip()
         status = Path('/proc') / pid / 'status'
-        if status.exists():
-            self.assertIn('Z (zombie)', status.read_text())
+        try:
+            state = status.read_text()
+        except FileNotFoundError:
+            pass  # PID 1 may reap the child between probing and reading /proc.
+        else:
+            self.assertIn('Z (zombie)', state)
         # PID 1 수거 전 잠시 zombie일 수 있지만 실행을 계속하면 실패다.
 
     def test_policy_rejects_unknown_packages_and_existing_instances_before_apt(self):
@@ -103,7 +107,7 @@ class GuestAgentTest(unittest.TestCase):
             recipe = ROOT / 'platform/guests/linux' / source / 'recipe.json'
             result = template_recipe.source_info(recipe, source)
             self.assertEqual(result['recipe']['guest_agent'], {'packages': ['python3-paho-mqtt']})
-            self.assertEqual(result['recipe']['version'], '1.0.2')
+            self.assertEqual(result['recipe']['version'], '1.0.3')
             inputs = result['preparer_files']
             for path in agent.source_files():
                 self.assertEqual(inputs[str(path.relative_to(ROOT))], hashlib.sha256(path.read_bytes()).hexdigest())
