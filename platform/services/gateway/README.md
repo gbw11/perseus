@@ -34,7 +34,8 @@ broker 주소·계정은 기존 `--host/--port/--username`과 `XENOVA_GATEWAY_BR
 사용한다. 제품 인증정보를 명령행·Git·공개 로그에 넣지 않는다. 선택 경로는
 `--authority-dir`(`/srv/xenova/drive-control`), `--binding-file`
 (`/run/xenova/drive-bindings.json`)이다. `--start-mode`는 legacy 전용이다.
-실제 출력은 검증된 장치/복구 경로를 준비한 뒤 `--sink serial --serial-port ...`로 선택한다.
+실제 출력은 검증된 장치/복구 경로와 아래 차량 한계 파일을 준비한 뒤
+`--sink serial --serial-port /dev/ttyUSB0 --vehicle-limits /etc/xenova/vehicle-limits.json`로 선택한다.
 Gateway 자체의 Yocto recipe·자동 시작 연결은 아직 없으므로 파일 존재를 이미지 포함으로
 간주하지 않는다. Worker/helper/common MQTT는 각 기존 recipe에서 설치한다.
 
@@ -62,6 +63,63 @@ python3 platform/services/gateway/tools/send_resume.py --console --verified --ho
 CONTROL_PUBLISH_UNCONFIRMED / CONTROL_APPLY_UNCONFIRMED 등으로 남기고 STOP이다.
 현재 준비를 확인한 운영자는 새 요청으로 재무장할 수 있다. 저장 상태·retained 충돌은
 CONTROL_AUTHORITY_CONFLICT이며 원본/복원 근거를 확인해야 한다. 임의 초기화하지 않는다.
+
+## 권위 원본 진단과 재확인
+
+다음 로컬 도구는 root 전용이며 broker·시리얼·VM을 조작하지 않는다. 실제 데이터 마운트를
+검증하고 원본을 조회한다. 디렉터리·marker·원본을 생성하거나 초기화하지 않는다.
+
+```bash
+python3 -m xenova_gateway.authority_ops inspect
+```
+
+`FIRST_INSTALL`은 디렉터리 부재/빈 디렉터리라는 관측이다. 그 자체가 최초 설치 승인이나
+출력 허가는 아니다. `VALID`는 private marker와 현재 원본의 schema·일관성을 읽었다는 뜻이다.
+`BLOCKED`는 손상·권한·마운트·동시 변경 등으로 근거를 확정하지 못한 상태다. 남은 임시 파일도
+최초 빈 상태로 취급하지 않으며 FIFO·symlink·공개 파일을 원본/marker로 받지 않는다.
+`--candidate /root/backup.json`은 선택적인 백업 내용 비교다. 백업이 정상 JSON이거나 같은
+generation이라는 사실만으로 최신성을 인정하지 않으며 원본을 백업으로 교체하지 않는다.
+
+현재 원본이 정상이고, 운영자가 기존 Gateway 실행을 종료한 뒤 동일 원본의 내구성을
+다시 확인하려면 아래 명령을 사용한다. SHA는 앞선 진단의 실제 `record_sha256`으로 바꾼다.
+
+```bash
+python3 -m xenova_gateway.authority_ops revalidate --execute \
+  --expected-sha256 '진단에서 확인한 64자리 record_sha256'
+```
+
+도구는 Gateway와 같은 단일 lease를 확보한 뒤 원본 해시를 다시 대조한다. 달라졌거나
+Gateway가 실행 중이면 거절한다. generation·owner·mode·원 요청·결과·pending·기한은
+보존하고 `rearm_required=true`로 내구 재기록한다. 저장 실패는 미확정이며 성공으로
+반환하지 않는다. 이 도구는 출력 자원을 열지 않으며 다음 Gateway 실행도 현재 신원·
+준비·명시적 재무장을 다시 확인한다. 원본 손상/유실의 백업 복원은 지원하지 않는다.
+marker까지 포함한 최신성 근거 없이 파일 삭제·과거 원본 복사·generation 초기화로 수습하지 않는다.
+
+## 차량 한계와 출력 실패
+
+`--vehicle-limits` 또는 `XENOVA_GATEWAY_VEHICLE_LIMITS`는 root 소유·0600의 JSON 파일이다.
+serial 출력에서는 필수이며, mock에서는 통제된 시험을 위해 선택할 수 있다. 검증은
+장치를 열기 전에 수행한다. 실제 차량 값은 차량 담당자가 측정·확정하며 코드에 기본값을 넣지 않는다.
+
+| 필드 | 단위·조건 |
+|---|---|
+| `schema_version` | `1.0-drive-output-limits` |
+| `min_v_mps`, `max_v_mps` | m/s. 하한 < 상한, 중립 0 포함 |
+| `min_steer_rad`, `max_steer_rad` | rad. 하한 < 상한, 중립 0 포함 |
+| `max_accel_mps2` | 양수 m/s². 연속 제출 목표 속도의 변화 한계 |
+| `max_steer_rate_rad_s` | 양수 rad/s. 연속 제출 목표 조향의 변화 한계 |
+
+모든 수치는 유한해야 하고 시리얼 i16 표현 범위에도 들어야 한다. 요청값과 양자화된
+출력값을 모두 검사한다. 변화율은 dom0의 같은 단조 시계에서 마지막으로 완전히 제출한
+목표를 기준으로 하며 경과 시간은 기존 명령 신선도 100ms까지만 인정한다. 긴 공백으로
+큰 목표 변화가 허용되지 않는다. 시작 속도/조향 목표는 중립이고 STOP 제출은 속도 목표만
+0으로 바꾼다. 이 값은 실제 차량 속도·조향 측정이 아니다.
+
+한계 위반·불완전 쓰기·출력 실패는 후속 DRIVE를 차단한다. verified/warm은 같은 처리
+차례에서 실패 journal의 fsync보다 먼저 STOP도 시도한다. STOP에는 완만한 변화율 제한을 적용하지 않는다. STOP도 실패할 수
+있으며 최종 정지는 기존 장치 watchdog/E-stop이 담당한다. 출력 경로를 수습해 Gateway를
+다시 시작하고 명시적으로 재무장하기 전 DRIVE를 재개하지 않는다. 장치 ACK·실제 정지
+확인은 별도 미연결 경계다. MQTT 공개 메시지나 필드는 이 검사 때문에 추가하지 않는다.
 
 ## warm의 사전 준비와 조건부 커밋
 

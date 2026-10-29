@@ -1,7 +1,7 @@
 # Gateway Authority 증거 기반 복원 요청
 
-담당: 박신영 / 플랫폼·Gateway. **상태: D03-G01~G04 수습 과제·현행 보호 대조 완료 /
-직접 구현·운영 복원·실보드/장치 수락 전.** ID는 문서 내부 추적용이며 새 Jira 티켓이 아니다.
+담당: 박신영 / 플랫폼·Gateway. **상태: G01 로컬 진단·현재 정상 원본 재확인 구현,
+G03·G04 관련 로컬 보호·회귀 / G02 백업 최신성·운영 복원·실보드/장치 수락 전.** ID는 문서 내부 추적용이며 새 Jira 티켓이 아니다.
 2026-10-29에 현재 Gateway 커밋(`48dc3cc`, `b35a675`, `0f26bf9`)과 사용자 확인으로 담당을 정정했다. 과거 요청의 담당 표기를 현재 소유권으로 사용하지 않는다.
 기존 Gateway 요청은 [2026-10-20 원문](2026-10-20-manual-app-gateway-ctrl.md)에 보존돼 있으나
 현재 Authority 복원의 전용 요청서는 없어 이 문서에서 단일 기준으로 추적한다.
@@ -18,6 +18,13 @@
    [이번 하위 검증](../verification/reconciliation-closure-20261027.md)을 참고한다.
 
 ## 현재 코드와 수습 공백
+
+현재 로컬 진입점은 `python3 -m xenova_gateway.authority_ops inspect`와 명시적 `revalidate`다.
+정식 사용법·반환 의미는 [Gateway 운영 안내](../../platform/services/gateway/README.md#권위-원본-진단과-재확인),
+특정 후보의 결과는 [국소 검증](../verification/recovery-scenario-closure-20261030.md)에 둔다.
+재확인은 현재 정상 원본의 SHA-256을 조건으로 같은 단일 lease에서 내구 재기록하고 재무장을 요구한다.
+원 generation·요청/결과·pending·기한은 유지하며 backup을 입력으로 받지 않는다. 손상 원본의
+최신 backup 복원 성공까지 구현한 것으로 해석하지 않는다.
 
 `xenova_gateway/authority.py`의 `AuthorityStore.initialize/load/save/verify/reconcile`은 작은
 파일 원본을 사용한다. `initialized`를 먼저 내구 저장한 뒤 `control.json`을 만든다.
@@ -78,6 +85,7 @@ partial init·파일 유실/손상은 차단하고, `save`의 replace/parent fsy
 - 추가 수락: 정상 복원·근거 부족 거절·재시작·중복 소유·소비 ID 재생·장치 제출/적용을 독립적으로
   확인한다. 이번 하위 회귀는 기존 보호의 근거이며 실제 복원 도구 구현을 뜻하지 않는다.
 
-현재 운영자는 Authority 파일을 편집/삭제해 차단을 해제하지 않고, 원본·백업 출처와 공개 진단
-근거를 보존해 Gateway 담당자에게 전달한다. 지원 복원 도구가 연결되기 전 일반 자동 복원을
-안내하지 않는다. Worker·Agent·하위 Manager가 Authority를 대신 쓰는 수습 경로도 만들지 않는다.
+현재 운영자는 Authority 파일을 편집/삭제해 차단을 해제하지 않는다. 위 로컬 도구로 현재 정상
+원본을 진단·재확인할 수 있으나, 손상/유실이면 원본·백업 출처와 진단 근거를 보존한다.
+G02의 최신성 근거가 확정되기 전 backup 복원을 안내하지 않는다. Worker·Agent·하위 Manager가
+Authority를 대신 쓰는 수습 경로도 만들지 않는다.

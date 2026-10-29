@@ -994,8 +994,10 @@ VM 복구 성공으로 바꾸지 않는다. 수습한 terminal 기록의 재요�
 다시 조회한다. 종결 후 별도 동작이 필요하면 현재 건강·의도·신원·허가로 일반 요청을 새로 검토한다.
 stopped 의도에서 수습 성공을 이유로 VM을 시작하지 않는다. 지원 근거가 없으면 원 기록과
 진단 사유를 보존해 플랫폼 담당자에게 전달한다. host reboot를 일반 해제 수단으로 쓰지 않는다.
-Worker의 final 결과 재확인·Coordinator 바인딩 연결과 Gateway Authority 복원은
-[담당자 인수 요청](../requests/2026-10-27-recovery-health-ctrl.md#d03-worker)이며 자동 제공되지 않는다.
+Worker의 final 결과 재확인·Coordinator 바인딩 종단 연결은
+[담당자 인수 요청](../requests/2026-10-27-recovery-health-ctrl.md#d03-worker)이다.
+Gateway의 정상 권위 원본은 별도 [로컬 진단·재확인](../../platform/services/gateway/README.md#권위-원본-진단과-재확인)을
+사용한다. 이는 Manager/Worker가 Authority를 쓰는 경로나 손상 backup의 자동 복원이 아니다.
 
 **Manager 매핑:** `recovery-reconcile / {recovery_attempt_id, timeout_ms?}`,
 `execute=False` 기본. `budget_ms`는 기존 1..105000ms 입력 범위 안에서 이번 timeout을
@@ -3663,6 +3665,11 @@ PY
 `get/list`는 선택 spec `timeout_ms`로 1..15000ms의 전체 조회 예산을 받는다. 생략 시 기존
 15000ms이며 CLI에는 이에 대응하는 새 옵션이 없다. 목록의 모든 VM과 registry 비용이 같은
 기한을 공유한다.
+
+원 `control-operation` 검색도 전달된 조회 기한을 journal 열거·파일 읽기 사이에서 검사한다.
+순회를 끝내지 못하면 만료/관측 실패이며 부재나 유일한 원 작업을 확정하지 않는다. 짧은
+stop 수락의 검색 예산과 원 stop의 물리 실행 deadline은 구별하며 검색 예산으로 원 기한을
+축소·연장하지 않는다. 개별 filesystem syscall을 선점하는 hard realtime 보장은 아니다.
 
 `budget_ms`는 `start/stop/reboot/destroy/get/list/control-operation`의 선택 호출 인자다.
 정수 1..105000ms만 허용하며 bool은 거절한다. 상위 대기 후 남은 기간을 전달하는 용도이며

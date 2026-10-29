@@ -18,7 +18,8 @@ Gateway 자체는 타 담당자에게 넘기는 영역이 아닙니다. 현재 `
 | 승인된 최소 연결, 로컬 완료 | `platform/services/gateway/xenova_gateway/warm.py:WarmDriveMachine`, `verified.py`, `verified_runner.py`, `config.py`, 공용 `drive_binding.py`·`client.py` | warm-drive-1 선택, 앱별 바인딩·대기/활성화/실제 진행과 seq 전 신원 guard. Authority·generation·출력 보호 유지 | `tests/test_warm.py`, 공용 `tests/test_client.py`, 동일 native 후보의 A/B 실제 격리 broker 시험. [후속 검증](../verification/zephyr-drive-foundation-20261029.md#후속-앱별-수명과-warm-준비-연결) |
 | DEC-11·16, 공통 계약 구현 | `planning.py`, `authority.py:commit_transition`, warm actor/runner | 원 요청에 준비 근거를 채택하고 owner/generation·대상과 원 결과를 한 번 커밋. 정상 A 사전 준비 중 유지, 새 문맥 계산 뒤 출력. 현재 실제 연결은 명시적 stateless 앱 | 원 ID/기한 재발급 0, 취소/커밋 순서, 저장 미확정·프로세스 재시작, A/B 대칭 계획 인계. 상태 있는 앱의 실제 전송·연속 장치 적용 수락은 별도 |
 | DEC-19·ARCH-T21~23·32·35, 후속 | 상태 수락·전환 연결부. 구체 함수는 계약 확정 후 지정 | 당시 허용 출처에서 수락한 완전 사본의 현재 호환성 확인. 경로를 대신 계산하거나 옛 명령을 새 generation으로 포장하지 않음 | 정상 사본은 유한하게 채택, 불일치·부분·권한 종료 후 지연 갱신 거절. 남은 출력 예산으로 연속 승계/정지 후 재개 구분 |
-| D03-G01~G04, 기존 대기 | `authority.py`, `__main__.py`, 기존 요청의 진단·복원 지점 | 원본/백업 최신성·단일 소유·저장 미확정의 지원 수습 | 기존 요청의 성공/거절 반례 유지. marker 삭제·generation 초기화·자동 재무장 금지 |
+| D03-G01·G03·G04, 국소 구현 / G02 대기 | `authority_ops.py`, `authority.py`, 기존 요청의 복원 지점 | 읽기 전용 진단, 같은 lease·원본 hash 대조의 정상 원본 재확인. 백업 최신성 입증은 별도 | 원 ID/기한/generation 보존·재무장 유지·파일 오류/중단 회귀. marker 삭제·generation 초기화 금지 |
+| B3·BO3·DEC-02, 국소 구현 / 실측 수락 전 | `output_guard.py`, `__main__.py:open_sink`, `verified_runner.py:_submit` | root 소유 차량 설정으로 요청/양자화 값·제출 목표 변화율 제한. serial은 설정 필수, 위반·쓰기 실패에 DRIVE 차단·같은 회차 STOP 시도 | 정상 목표 제출, 범위/변화율/부분 쓰기/시계 이상 거절. 실제 값·장치 적용은 차량 담당자와 수락 |
 | DEC-13·ARCH-T25·26·38, 후속 | `sink.py`, `frame.py`, 실제 장치 피드백 연결부 | 시리얼 쓰기·장치 수락·적용·실제 정지를 구분하고 오류를 출력 보호에 연결 | 제출만의 적용/정지 완료 0. 장치 미응답은 유한 종결, watchdog/E-stop 보존 |
 
 ## 제공물·선행조건·금지 효과

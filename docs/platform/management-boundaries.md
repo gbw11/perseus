@@ -158,7 +158,10 @@ Worker의 손상 이력 차단과 사건 기록 실패의 해석은
 journal에 종결한다. 구형 stopping에 종료 근거가 없거나 미확인 launch/실행자가 남으면 차단한다.
 Bootstrap의 uncertain은 [receipt 적용 확인](../../platform/guests/zephyr/telemetry/README.md#uncertain-receipt의-재주입-없는-적용-확인)으로
 재주입 없이 대조한다. 기록 삭제·phase 편집·새 신원/기한·자동 force는 수습 경로가 아니다.
-Worker의 원 결과 소비·Standby 재합류 및 Gateway Authority 복원은 각각 담당자 인수 대기다.
+Worker의 원 결과 소비·Standby 재합류 종단 연결은 담당자 인수 대기다. Gateway의
+[로컬 원본 진단·재확인](../../platform/services/gateway/README.md#권위-원본-진단과-재확인)은
+기존 정상 원본과 같은 lease를 조건으로 제공한다. 손상 원본의 backup 최신성 입증·복원과
+장치 적용 수락은 별도다.
 
 증상을 조사할 때는 UUID·현재 host_boot_id·intent revision·operation/attempt·execution을
 함께 기록한다. 현재 domain과 원 journal을 구분하고 비밀 설정 전체를 출력하지 않는다.
