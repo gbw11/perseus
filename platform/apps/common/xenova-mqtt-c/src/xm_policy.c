@@ -23,6 +23,7 @@ static const struct xm_policy POLICIES[] = {
 	{"drive.fault.detected", 1, false, false},
 	{"app.heartbeat", 0, false, false},
 	{"app.readiness", 0, false, true},
+	{"app.lifecycle", 0, false, true},
 	/* 7장 수동 입력 */
 	{"drive.input", 0, false, false},
 	/* 8장 지연 측정 */

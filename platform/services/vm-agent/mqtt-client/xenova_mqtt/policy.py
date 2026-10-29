@@ -45,6 +45,7 @@ POLICIES: dict[str, Policy] = {
     # 6.1 앱 생존 신호: 1초마다 다시 오므로 유실돼도 다음 것으로 충분하다
     "app.heartbeat": Policy(qos=0),
     "app.readiness": Policy(qos=0, driving=True),
+    "app.lifecycle": Policy(qos=0, driving=True),
     # 7장 수동 입력
     "drive.input": Policy(qos=0),
     # 8장 지연 측정
