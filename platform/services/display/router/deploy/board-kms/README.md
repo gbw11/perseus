@@ -5,7 +5,7 @@
 ## 구성
 
 - `xenova-display.target`: 세 서비스를 함께 기동/종료. `multi-user.target`에 enable한다.
-- `xenova-display-feed.service`: 호스트 Python의 기존 FastAPI/Xen/MQTT 의존성으로 실제 Xen 조회와 기존 수신기를 실행한다. 127.0.0.1:8082에만 listen한다.
+- `xenova-display-feed.service`: 기존 상태 경로와 MQTT 수신기를 사용하며 127.0.0.1:8082에만 listen한다. 상태 공유는 두 서비스의 명시적 opt-in으로만 활성화한다.
 - `xenova-display-graphics.service`: private mount/PID namespace에서 KMS Xorg :5/VT2 및 Openbox를 실행한다. 준비 완료 후 systemd READY=1을 보낸다.
 - `xenova-display-kiosk.service`: 그래픽 준비 후 제품 Kiosk를 실행한다. rootfs의 setpriv로 UID/GID1000으로 낮추며 Chromium sandbox를 유지한다. 물리 출력은 EDID에 고정한다.
 
@@ -17,7 +17,10 @@
 
 release의 `bin/`에 세 Python 파일, `lib/`에 호스트 Python 3.14용 기존 feed 의존성과 제품 패키지, `web/`에 252 vm-screens production build를 둔다. rootfs에는 별도 Python 3.13용 Playwright 및 pydantic 실행 의존성이 `/opt/xenova-kiosk-runtime/20261028/lib`에 있다. 서로 다른 Python의 native wheel을 섞지 않는다. 정확한 의존성 해시와 배포 manifest는 256 검증 자료를 참고한다.
 
-- `/etc/xenova/display-256/feed.env`: PYTHONPATH, bindings 경로, web root, XENOVA_DISPLAY_TOKEN 및 필요하면 기존 담당이 발급한 MQTT 인증 정보. 익명 broker 접속 허용이나 ACL 변경은 하지 않는다.
+- `/etc/xenova/display-256/feed.env`: PYTHONPATH, bindings 경로, web root, XENOVA_DISPLAY_TOKEN.
+- `/etc/xenova/display-253/mqtt.env`: 기존 observer 읽기 전용 계정의 MQTT 인증 정보. 보드 진입점은 사용자명·암호가 없으면 시작을 거부한다. 익명 broker 접속 허용이나 ACL 변경은 하지 않는다.
+- `feed-observations.conf.example`: 공유 모드의 수집기 opt-in 예시. 관리 서비스와 동일 경로를 지정하며 최종 실보드 검증 후 적용한다.
+- `manager-observations.conf.example`: 관리 서비스에 공유 상태 파일 경로를 설정하는 opt-in 예시. 자동 적용하지 않는다. [적용·되돌리기 절차](../../../../../../docs/design/display-shared-observations.md)를 먼저 확인한다.
 - `/etc/xenova/display-256/kiosk.env`: 같은 로컬 표시 토큰.
 - `/etc/xenova/display-256/bindings.json`: 실제 UUID·역할을 확인한 deployment profile.
 - 위 디렉터리 0700, 파일 0600. 토큰·비밀번호를 Git/URL/VITE 번들에 넣지 않는다.

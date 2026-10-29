@@ -138,7 +138,8 @@ def install_policy(root, *, replay_recipe=False):
         enabled.symlink_to('/usr/lib/systemd/system/sshd.service')
     if replay_recipe:
         recipe = ROOT / 'platform/yocto/meta-xenova/recipes-core/xenova-platform/xenova-platform_1.0.bb'
-        body = recipe.read_text().split('do_install() {\n', 1)[1].split('\n}\n', 1)[0]
+        recipe_text = recipe.read_text()
+        body = recipe_text.split('do_install() {\n', 1)[1].split('\n}\n', 1)[0]
         with tempfile.TemporaryDirectory(prefix='xenova-dom0-recipe-source-') as tmp:
             source = Path(tmp)
             for directory in (FILES, ROOT / 'platform/scripts', ROOT / 'platform/guests/common', ROOT / 'platform/first-install'):
@@ -147,9 +148,16 @@ def install_policy(root, *, replay_recipe=False):
                         (source / path.name).write_bytes(path.read_bytes())
             for os_id in ('ubuntu', 'debian'):
                 shutil.copytree(ROOT / 'platform/guests' / os_id, source / os_id)
-            env = {**os.environ, 'D': str(root), 'S': str(source), 'sbindir': '/usr/sbin',
+            build = source / 'build'
+            build.mkdir()
+            env = {**os.environ, 'D': str(root), 'S': str(source), 'B': str(build),
+                   'CC': os.environ.get('XENOVA_TEST_CC', 'cc'), 'CFLAGS': '-O2', 'LDFLAGS': '',
+                   'sbindir': '/usr/sbin', 'libexecdir': '/usr/libexec',
                    'libdir': '/usr/lib', 'datadir': '/usr/share', 'sysconfdir': '/etc',
                    'systemd_system_unitdir': '/usr/lib/systemd/system'}
+            if 'do_compile() {\n' in recipe_text:
+                compile_body = recipe_text.split('do_compile() {\n', 1)[1].split('\n}\n', 1)[0]
+                subprocess.run(['sh', '-eu', '-c', compile_body], env=env, check=True, capture_output=True)
             subprocess.run(['sh', '-eu', '-c', body], env=env, check=True, capture_output=True)
     else:
         drop = root / 'etc/systemd/system/sshd.service.d/10-xenova-keys.conf'
