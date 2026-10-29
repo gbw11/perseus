@@ -56,13 +56,23 @@ static bool control_valid(struct drive_controller *c,struct xm_span payload,stru
  }
  c->accepted=*v;c->seen_control=true;return true;
 }
-void drive_controller_step(struct drive_controller *c,const char *local_vm_id,
- struct xm_span control,struct xm_span input,int64_t input_age_ms,
- struct xm_span perception,int64_t perception_age_ms,struct drive_result *out)
+void drive_controller_select(struct drive_controller *c,const char *local_vm_id,
+ struct xm_span control,struct drive_result *out)
 {
  struct xm_vehicle_control v;
  memset(out,0,sizeof(*out));
  out->control_valid=control_valid(c,control,&v);
+ if(!out->control_valid)return;
+ out->generation=v.generation;
+ out->locally_active=local_vm_id&&!strcmp(local_vm_id,v.active_vm_id);
+ if(!strcmp(v.mode,"AUTO"))out->mode=DRIVE_AUTO;
+ else if(!strcmp(v.mode,"MANUAL")||!strcmp(v.mode,"AUTO_READY"))out->mode=DRIVE_MANUAL;
+}
+void drive_controller_step(struct drive_controller *c,const char *local_vm_id,
+ struct xm_span control,struct xm_span input,int64_t input_age_ms,
+ struct xm_span perception,int64_t perception_age_ms,struct drive_result *out)
+{
+ drive_controller_select(c,local_vm_id,control,out);
  struct xm_span accepted=out->control_valid?control:(struct xm_span){0};
  struct drive_sample ac,mc;
  calculate(c,&c->automatic,accepted,perception,perception_age_ms,&ac,&out->auto_health);
@@ -75,10 +85,6 @@ void drive_controller_step(struct drive_controller *c,const char *local_vm_id,
  out->auto_reason=ac.auto_reason;out->nearest_m=ac.nearest_m;
  out->auto_state=out->manual_state="idle";
  if(!out->control_valid)return;
- out->generation=v.generation;
- out->locally_active=local_vm_id&&!strcmp(local_vm_id,v.active_vm_id);
- if(!strcmp(v.mode,"AUTO"))out->mode=DRIVE_AUTO;
- else if(!strcmp(v.mode,"MANUAL")||!strcmp(v.mode,"AUTO_READY"))out->mode=DRIVE_MANUAL;
  /* Input readiness is distinct from a failed calculation. */
  bool auto_failed=ac.reason&&(!strcmp(ac.reason,"CALCULATION_FAILED")||!strcmp(ac.reason,"OUTPUT_INVALID"));
  bool manual_failed=mc.reason&&(!strcmp(mc.reason,"CALCULATION_FAILED")||!strcmp(mc.reason,"OUTPUT_INVALID"));

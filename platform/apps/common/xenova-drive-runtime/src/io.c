@@ -238,11 +238,14 @@ int xd_io_command(struct xd_candidate *c) {
  if(!rc)k_sem_give(&io_wake);
  return rc;
 }
-int xd_io_report(const char *topic,const char *type,const char *json,uint64_t completed,const struct xd_inputs *context) {
+int xd_io_report_at(const char *topic,const char *type,const char *json,uint64_t completed,const struct xd_inputs *context,int64_t produced_ms) {
  if(!topic||!type||!json||!context||!completed||strlen(topic)>=XM_TOPIC_MAX||strlen(type)>=32||strlen(json)>=160)return -EINVAL;
  bool readiness=!strcmp(type,"app.readiness");
  bool beat=!strcmp(type,"app.heartbeat")||readiness;
  if(!beat&&strcmp(type,"perception.event"))return -ENOTSUP;
+ int64_t now=k_uptime_get(), lifetime=readiness?300:1000;
+ if(produced_ms<0||produced_ms>now)return -EINVAL;
+ if(now-produced_ms>=lifetime)return -ETIME;
  if(atomic_get(&stop))return -ESHUTDOWN;
  if(k_mutex_lock(&exchange_lock,K_NO_WAIT))return -EBUSY;
  int rc=0;
@@ -267,9 +270,12 @@ int xd_io_report(const char *topic,const char *type,const char *json,uint64_t co
   }
   strcpy(r->topic,topic);strcpy(r->type,type);strcpy(r->json,json);
   r->completed=completed;r->control_revision=context->control_revision;r->connection_revision=context->connection_revision;
-  r->expires_ms=k_uptime_get()+(readiness?300:1000);
+  r->expires_ms=produced_ms+lifetime;
  }
  k_mutex_unlock(&exchange_lock);return rc;
+}
+int xd_io_report(const char *topic,const char *type,const char *json,uint64_t completed,const struct xd_inputs *context) {
+ return xd_io_report_at(topic,type,json,completed,context,k_uptime_get());
 }
 void xd_io_stop_request(void){atomic_set(&stop,1);k_sem_give(&io_wake);}
 int xd_io_join(int64_t end) {

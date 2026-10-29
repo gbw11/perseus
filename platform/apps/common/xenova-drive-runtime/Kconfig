@@ -44,4 +44,25 @@ config XENOVA_DRIVE_NATIVE_TEST
 	depends on ARCH_POSIX
 	default n
 
+config XENOVA_DRIVE_WORKERS
+	bool "Independent app calculation-owner foundation"
+	default n
+	help
+	  Local app execution building block. This does not change the verified
+	  MQTT readiness profile or activate warm Standby automatically.
+
+if XENOVA_DRIVE_WORKERS
+config XENOVA_DRIVE_WORKER_STACK_SIZE
+	int "Reserved stack bytes per calculation owner"
+	range 4096 32768
+	default 8192
+config XENOVA_DRIVE_AUTO_PRIORITY
+	int "Preemptible AUTO calculation priority"
+	range 0 14
+	default 10
+config XENOVA_DRIVE_MANUAL_PRIORITY
+	int "Preemptible MANUAL calculation priority"
+	range 0 14
+	default 6
+endif
 endif

@@ -34,7 +34,7 @@ static void health_tests(void){
  drive_controller_step(&c,A,span(control),span(input),0,span(perception),0,&r);
  assert(!strcmp(r.auto_not_ready,"CALCULATION_FAILED")&&r.auto_health.failure==XDH_RESOURCE_FAILED);
  assert(!strcmp(r.manual_readiness,"READY")&&r.v_mps>0&&r.manual_progress>r.auto_progress);
- /* Current serial execution: delayed AUTO can also consume MANUAL's deadline. */
+ /* Legacy serial helper compatibility; the product main uses separate owners. */
  drive_auto_adapter(&c.automatic,&c.auto_cfg);
  uint64_t late[]={1000,25000,25000,26000};memcpy(clock_values,late,sizeof(late));clock_index=0;
  drive_controller_step(&c,A,span(control),span(input),0,span(perception),0,&r);

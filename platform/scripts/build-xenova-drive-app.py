@@ -138,6 +138,26 @@ def main():
     netfront_stack_audit = {"send_frame_bytes": int(send[0][1]), "direct_frame_budget_bytes": 256,
                             "stack_sentinel": True,
                             "scope": "adapter direct frame; target tests still validate the caller chain"}
+    calculation_stack_audit = None
+    if args.app == "drive":
+        frames = {}
+        for basename in ("workers.c", "adapter.c", "autonomous.c", "manual.c", "xm_payload.c", "xm_json.c"):
+            item = next(v for v in commands if v["file"].endswith("/" + basename))
+            argv = shlex.split(item["command"])
+            if set(argv) & {"-MF", "-MD", "-MMD"}:
+                raise ValueError("calculation audit must preserve original dependency output")
+            argv[argv.index("-o") + 1] = str(stack_dir / (basename + ".o"))
+            run("stack-" + basename, argv + ["-fstack-usage"], cwd=item["directory"])
+            frames[basename] = [{"function": row[0].rsplit(":", 1)[-1],
+                                "frame_bytes": int(row[1]), "kind": row[2]}
+                               for line in (stack_dir / (basename + ".su")).read_text().splitlines()
+                               if len(row := line.split("\t")) == 3]
+        worker_stack = int(next(line.split("=", 1)[1] for line in config.splitlines()
+                                if line.startswith("CONFIG_XENOVA_DRIVE_WORKER_STACK_SIZE=")))
+        if any(row["frame_bytes"] >= worker_stack for rows in frames.values() for row in rows):
+            raise ValueError("a calculation/parser direct frame exceeds the reserved worker stack")
+        calculation_stack_audit = {"worker_stack_bytes": worker_stack, "direct_frames": frames,
+            "scope": "direct compiler frames, not full call-chain peak or on-board stack high-water"}
     spec = importlib.util.spec_from_file_location("xenova_network_build", snapshot / "platform/scripts/build-xenova-network-starter.py")
     verifier = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(verifier)
@@ -149,6 +169,7 @@ def main():
                     "--source-revision", "sha256:" + digest, "--build-id", args.output.name,
                     "--app-source", home, "--networked", "--output", args.output / "firmware", "--execute"])
     receipt = {"netfront_stack_audit": netfront_stack_audit, "app": args.app, "profile": args.profile,
+               "calculation_stack_audit": calculation_stack_audit,
                "config_sha256": sha(build / "zephyr/.config"),
                "source_files": source, "source_sha256": digest, "zephyr_commit": commit,
                "compiler_sha256": sha(compiler), "compiler_version": subprocess.check_output([str(compiler), "--version"], text=True).splitlines()[0],

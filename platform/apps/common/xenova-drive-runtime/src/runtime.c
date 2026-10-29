@@ -77,6 +77,7 @@ struct row {
 	bool attempted;
 };
 static struct row current;
+static int64_t work_finished_ms;
 #if defined(CONFIG_XENOVA_DRIVE_RECORDER)
 static struct row rows[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
 static struct xd_delivery deliveries[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
@@ -308,6 +309,46 @@ int xd_iteration_begin(void)
 	}
 	return current.iteration_begin == UINT64_MAX ? -EIO : 0;
 }
+void xd_inputs_copy(struct xd_inputs *out) { if (out) { *out = cycle_inputs; } }
+int xd_publish_completed(const char *topic,const char *type,const char *payload,
+ uint64_t progress,int64_t produced_ms,const struct xd_inputs *source)
+{
+ return admit() ? xd_io_report_at(topic,type,payload,progress,source,produced_ms) : -ESHUTDOWN;
+}
+int64_t xd_cleanup_deadline_ms(void) { return cleanup_end(); }
+void xd_app_cleanup_error(int error)
+{
+ if(error){atomic_set(&app_close_error,error);(void)xdiag_error("drive-app-cleanup",error);}
+}
+int xd_completed_work(uint64_t release,uint64_t begin,uint64_t end,
+ uint64_t iteration_begin,int64_t finished_ms,const struct xd_inputs *source)
+{
+ uint64_t observed=now_us();
+ if(observed==UINT64_MAX)return -EIO;
+ if(!source||iteration_begin>begin||begin>end||end>observed||release>begin||
+    finished_ms<0||finished_ms>k_uptime_get())return -EINVAL;
+ k_spinlock_key_t key=k_spin_lock(&loop.lock);
+ struct xdiag_timing next=loop.timing;
+ int rc=0;
+ if(!next.initialized||next.in_flight)rc=-EINVAL;
+ else if(release<next.next_release_us)rc=-EALREADY;
+ else if(release<next.origin_us||(release-next.origin_us)%next.period_us)rc=-EINVAL;
+ uint64_t missing=rc?0:(release-next.next_release_us)/next.period_us;
+ if(!rc&&UINT64_MAX-next.skipped_release_count<missing)rc=-EOVERFLOW;
+ if(!rc){next.next_release_us=release;next.skipped_release_count+=missing;rc=xdiag_timing_begin(&next,begin);}
+ uint64_t misses=next.deadline_miss_count,skips=loop.timing.skipped_release_count;
+ if(!rc)rc=xdiag_timing_end(&next,end);
+ if(!rc)loop.timing=next;
+ k_spin_unlock(&loop.lock,key);
+ if(rc)return rc;
+ memset(&current,0,sizeof(current));
+ current.iteration_begin=iteration_begin;current.begin=begin;current.step_end=end;
+ current.release=release;current.completed=next.loop_seq;
+ current.missed=next.deadline_miss_count-misses;current.skipped=next.skipped_release_count-skips;
+ work_finished_ms=finished_ms;
+ cycle_inputs=*source;command_input=&cycle_inputs.input;
+ return 0;
+}
 
 int xd_step_begin(void)
 {
@@ -325,6 +366,7 @@ int xd_step_end(void)
 {
 	int rc = xdiag_loop_end(&loop);
 	if (!rc) {
+		work_finished_ms = k_uptime_get();
 		current.step_end = loop.timing.last_completion_us;
 		current.completed = loop.timing.loop_seq;
 		/* Per-completion increments remain valid for an arbitrary capture window. */
@@ -356,7 +398,7 @@ void xd_command(struct xm_zclient *client, const char *topic, const char *json, 
 		candidate.capture_us=current.begin;
 		candidate.control_revision=cycle_inputs.control_revision;
 		candidate.connection_revision=cycle_inputs.connection_revision;
-		candidate.expires_ms=k_uptime_get()+CONFIG_XENOVA_DRIVE_COMMAND_MAX_AGE_MS;
+		candidate.expires_ms=work_finished_ms+CONFIG_XENOVA_DRIVE_COMMAND_MAX_AGE_MS;
 		if ((v_mps!=0.0f||steer_rad!=0.0f) && !command_input->error)
 			candidate.expires_ms=MIN(candidate.expires_ms,command_input->received_ms+input_timeout_ms+1);
 		if (strlen(topic)>=sizeof(candidate.topic)||strlen(json)>=sizeof(candidate.json)) current.rc=-EMSGSIZE;
