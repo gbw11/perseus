@@ -126,7 +126,8 @@ static int bootstrap_load(struct xt_bootstrap *out, int64_t end, void *channel)
 	char json[2049] = {0};
 	size_t bytes = fread(json, 1, sizeof(json) - 1, f);
 	bool extra = fgetc(f) != EOF; fclose(f);
-	int rc = extra ? -EOVERFLOW : xt_bootstrap_decode(json, bytes, own, out);
+	int rc = extra ? -EOVERFLOW : xt_bootstrap_decode_channel(json, bytes, own,
+		channel ? channel : "xenova-telemetry", out);
 	for (volatile char *p = json; p < json + sizeof(json); ++p) { *p = 0; }
 	return rc;
 #elif defined(CONFIG_XENOVA_RUNTIME)

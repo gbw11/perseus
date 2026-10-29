@@ -3,6 +3,7 @@
 #ifndef XENOVA_DRIVE_IO_H
 #define XENOVA_DRIVE_IO_H
 #include "xm_zclient.h"
+#include <xenova/manual_input.h>
 struct xd_received {
  char payload[XM_MAX_DRIVING_BYTES + 1];
  char sender[XM_ID_MAX + 1], boot[XM_UUID_LEN + 1], instance[XM_UUID_LEN + 1];
@@ -12,6 +13,7 @@ struct xd_received {
 };
 struct xd_inputs {
  struct xd_received control, input, perception;
+ struct xd_manual_witness manual_witness;
  char vm_id[XM_UUID_LEN + 1];
  uint64_t control_revision, connection_revision;
  bool connected; /* CONNACK observed, not SUBACK or control re-confirmation. */

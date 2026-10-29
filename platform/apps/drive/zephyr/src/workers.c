@@ -59,7 +59,8 @@ static void run(void *argument, void *unused1, void *unused2)
    struct xm_span control = {t->running.control, t->running.control_length};
    struct xm_span input = {t->running.input, t->running.input_length};
    if (!t->running.input_length) { input.p = NULL; }
-   result.rc = drive_adapter_run(&t->adapter, control, input, age, &result.sample);
+   result.rc = drive_adapter_run_observed(&t->adapter, control, input, age,
+     &t->running.manual_witness,t->running.app_instance,&result.sample);
   }
   int end_rc = xdiag_clock_us(&result.end_us);
   result.finished_ms = k_uptime_get();

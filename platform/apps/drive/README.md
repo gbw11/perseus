@@ -86,6 +86,11 @@ stateless 앱만 허용하며 상태 있는 앱을 일반 QUALIFIED로 대신 �
 원 sample/action·세션 유효성·원 나이를 C/Python에서 검사한다. 새 control의
 `manual_policy`/`manual_session`을 받은 계산 소유자가 전환별 중립/새 조작 순서를
 관리한다. 정상 중립은 READY·0 출력일 수 있으며 과거 키 재발행은 새 조작이 아니다.
+v1 수신 소유자는 원 sample의 중복·역전을 latest 교체 전에 거절하므로 새 봉투가
+원 수신 시각을 갱신하지 않는다. 수락한 중립 근거는 최신 입력과 별도로 보존해 실제
+계산에 전달하고, 현재 manual 앱 instance·generation·session이 맞을 때만 사용한다.
+이 사본은 계산 진행·준비 완료·출력 허가를 만들지 않는다. 보완 근거와 로컬/제품 수락의
+구분은 [정합성 검토](../../../docs/verification/zephyr-drive-foundation-review-20261030.md)의 R02·R03을 따른다.
 같은 MANUAL 승계에는 현재 유효한 누른 키를 처리할 수 있다. 새 session metadata가
 없는 keys-only 입력은 이 선택 계약의 증거가 아니다. 현재 Spring 생산 경로의 연동은
 담당자 작업으로 남아 있다. 기존 keys-only 사용 경로는 별도로 유지한다.

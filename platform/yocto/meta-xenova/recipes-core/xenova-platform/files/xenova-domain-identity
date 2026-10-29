@@ -1,2 +1,5 @@
 #!/bin/sh
+if [ -x /usr/libexec/xenova-domain-identity-native ]; then
+    exec /usr/libexec/xenova-domain-identity-native "$@"
+fi
 exec /usr/bin/python3 -B /usr/lib/xenova/xenova_domain_identity.py "$@"

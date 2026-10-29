@@ -162,6 +162,11 @@ stateful 앱은 일반 QUALIFIED를 요청별 상태 적용 확인으로 바꿔 
 후속 생산자 연결이다. 현재 stateless 자격은 지속 관측을 원 요청에 채택한 것이며,
 게스트가 준비 요청을 ACK했다고 보고하지 않는다.
 
+계획 AUTO는 이미 AUTO인 상태의 동일 모드 인계에 사용한다. MANUAL·AUTO_READY에서
+AUTO로 복귀할 때는 위의 명시적 재개·준비 유지·카운트다운 경로를 사용하며 계획
+커밋으로 우회할 수 없다. 이미 확정된 요청의 replay는 현재 모드가 달라도 원 결과를
+그대로 반환하고 새 제어를 발급하지 않는다.
+
 계획 MANUAL은 [세션 입력 계약](../../../docs/contracts/mqtt-contract-v1.md#71-명시적-세션-입력-manual-session-1)을
 요구한다. 같은 MANUAL 승계와 AUTO→MANUAL의 이동 조건은 별도다. 이 경로를 커밋하면
 세션 계약 선택을 영구 원본에 남기며 이후 원 세션의 확인이 없을 때 keys-only로 하향하지

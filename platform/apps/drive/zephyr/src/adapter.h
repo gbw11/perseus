@@ -8,6 +8,7 @@
 #include "manual.h"
 #include "preparation.h"
 #include "manual_session.h"
+#include <xenova/manual_input.h>
 
 struct drive_sample { float v_mps,steer_rad,nearest_m; enum auto_reason auto_reason; const char *reason; };
 typedef int (*drive_calculate)(void *context,struct xm_span control,struct xm_span input,
@@ -34,5 +35,9 @@ void drive_auto_adapter(struct drive_adapter *,struct auto_cfg *);
 void drive_manual_adapter(struct drive_adapter *,struct manual_cfg *);
 int drive_adapter_run(struct drive_adapter *,struct xm_span control,struct xm_span input,
                       int64_t age_ms,struct drive_sample *out);
+/* Immutable receive-owner neutral proof is scoped to this app instance.
+ * It does not grant movement; the latest fresh sample must still pass the gate. */
+int drive_adapter_run_observed(struct drive_adapter *,struct xm_span control,struct xm_span input,
+ int64_t age_ms,const struct xd_manual_witness *,const char *receiver,struct drive_sample *out);
 const char *drive_adapter_qualify(const struct drive_adapter *,struct xm_span input,int64_t age_ms);
 #endif

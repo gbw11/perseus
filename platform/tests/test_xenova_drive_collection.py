@@ -61,6 +61,27 @@ class CollectionTest(unittest.TestCase):
         self.assertEqual(raw.count('XD_SESSION '), 1)
         self.assertTrue(all(c.startswith(('xenova drive records ', 'xenova drive transmissions ')) for c in f.calls))
 
+    def test_small_anchors_keep_full_page_verification_and_identical_output(self):
+        fixture = Fixture()
+        responses = []
+        def exchange(command, end):
+            text = fixture(command, end)
+            responses.append((command, text))
+            return text
+        report, raw = collector.collect(exchange)
+        self.assertTrue(report['complete'], report)
+        self.assertEqual(report['requests'], 18)
+        anchors = [text for command, text in responses if command == 'xenova drive records 0 1']
+        self.assertEqual(len(anchors), 10)
+        self.assertTrue(all(text.count('XD_ROW ') == 1 for text in anchors))
+        self.assertEqual(sum(text.count('XD_ROW ') for _, text in responses), 22)
+        self.assertEqual(raw.count('XD_ROW '), 6)
+        self.assertEqual(raw.count('XD_SEND '), 6)
+        # Every actual data page is still read twice at the original limit.
+        for stream in ('records', 'transmissions'):
+            for offset in (0, 4):
+                self.assertEqual(fixture.calls.count(f'xenova drive {stream} {offset} 4'), 2)
+
     def test_missing_row_retries_original_offset_without_duplicate_output(self):
         f = Fixture()
         failed = False

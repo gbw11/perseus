@@ -17,6 +17,7 @@ static struct xm_zclient *client;
 static char control_topic[XM_TOPIC_MAX], input_topic[XM_TOPIC_MAX], perception_topic[XM_TOPIC_MAX];
 static bool dual_mode, perception_registered;
 static struct xd_inputs shared, working;
+static struct xd_manual_source manual_source; /* v1 receive owner only */
 static struct xd_candidate pending, active;
 static bool command_pending, initialized, attempted_start;
 static struct xd_io_stats stats;
@@ -69,10 +70,20 @@ static void receive(const char *topic,const char *type,struct xd_received *out) 
   out->length=0;out->error=-EOVERFLOW;
  }
 }
+static int accept_input(void *unused,const char *topic,const struct xm_envelope *env,int64_t now)
+{
+ ARG_UNUSED(unused);
+ if(!strcmp(topic,control_topic)&&xm_span_eq(env->type,"vehicle.control"))
+  xd_manual_control(&manual_source,env->payload);
+ if(!strcmp(topic,input_topic)&&xm_span_eq(env->type,"drive.input"))
+  return xd_manual_accept(&manual_source,env->payload,now);
+ return 0;
+}
 static void refresh(void) {
  receive(control_topic,"vehicle.control",&working.control);
  receive(input_topic,dual_mode||(client->id.app_id&&!strcmp(client->id.app_id,"manual"))?"drive.input":"perception.result",&working.input);
  if(dual_mode)receive(perception_topic,"perception.result",&working.perception);
+ working.manual_witness=manual_source.witness;
  working.dual_mode=dual_mode;
  if(client->id.vm_id&&strlen(client->id.vm_id)==XM_UUID_LEN)strcpy(working.vm_id,client->id.vm_id);
  working.connected=client->connected;
@@ -182,6 +193,11 @@ static void owner(void *a,void *b,void *c) {
   if(atomic_get(&stop)||!xd_owner_admit())break;
   /* Probe socket readiness without an idle wait. Frame reads/connect still
    * have the original bounded I/O budget. Idle below is mailbox-wakeable. */
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+  xd_owner_context(&working);
+#endif
+  xd_manual_bind(&manual_source,working.app_instances[1]);
+  client->accept_input=accept_input;client->accept_context=NULL;
   before=clock_us();(void)xm_zclient_poll(client,0);after=clock_us();
   k_mutex_lock(&exchange_lock,K_FOREVER);stats.poll_max_us=MAX(stats.poll_max_us,after-before);k_mutex_unlock(&exchange_lock);
   refresh();

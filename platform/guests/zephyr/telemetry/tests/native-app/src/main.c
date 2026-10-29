@@ -47,6 +47,16 @@ static int64_t option(const char *name,int64_t fallback)
 int main(void)
 {
 	const char *own=getenv("XT_TEST_INSTANCE_ID");assert(own && xt_uuid_valid(own));strcpy(instance_id,own);
+	if (getenv("XT_TEST_BOOTSTRAP_CHECK")) {
+		/* Exercise the product decoder without starting Publisher or changing Store. */
+		FILE *file=fopen(getenv("XT_TEST_BOOTSTRAP"),"rb");assert(file);
+		char json[2049]={0};size_t bytes=fread(json,1,sizeof(json)-1,file);
+		bool overflow=fgetc(file)!=EOF;fclose(file);struct xt_bootstrap value;
+		int rc=overflow ? -EOVERFLOW : xt_bootstrap_decode_channel(json,bytes,own,
+			getenv("XT_TEST_ACCOUNT_CHANNEL"),&value);
+		memset(json,0,sizeof(json));memset(&value,0,sizeof(value));
+		printf("BOOTSTRAP_CHECK %d\n",rc);exit(rc ? 1 : 0);
+	}
 	assert(!xdiag_boot("native-main",0));
 	assert(!xdiag_loop_init(&loop,20000,20000));assert(!xdiag_loop_watch(&loop));
 	assert(!xt_start(bootstrap_load,NULL,&info));

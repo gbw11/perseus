@@ -44,8 +44,9 @@ int __wrap_xd_completed_work(uint64_t release,uint64_t begin,uint64_t end,uint64
  return 0;
 }
 
-int __real_drive_adapter_run(struct drive_adapter *,struct xm_span,struct xm_span,int64_t,struct drive_sample *);
-int __wrap_drive_adapter_run(struct drive_adapter *a,struct xm_span control,struct xm_span input,int64_t age,struct drive_sample *out)
+int __real_drive_adapter_run_observed(struct drive_adapter *,struct xm_span,struct xm_span,int64_t,const struct xd_manual_witness *,const char *,struct drive_sample *);
+int __wrap_drive_adapter_run_observed(struct drive_adapter *a,struct xm_span control,struct xm_span input,int64_t age,
+ const struct xd_manual_witness *w,const char *receiver,struct drive_sample *out)
 {
  bool automatic=a->context==&controller.auto_cfg;
  if(automatic&&!calls[0]){
@@ -53,7 +54,7 @@ int __wrap_drive_adapter_run(struct drive_adapter *a,struct xm_span control,stru
  }
  if(!automatic&&atomic_get(&auto_held))manual_during_auto++;
  calls[automatic?0:1]++;
- return __real_drive_adapter_run(a,control,input,age,out);
+ return __real_drive_adapter_run_observed(a,control,input,age,w,receiver,out);
 }
 int __wrap_xd_io_start_dual(struct xm_zclient *c,const char *control,const char *input,const char *perception)
 {ARG_UNUSED(c);ARG_UNUSED(control);ARG_UNUSED(input);ARG_UNUSED(perception);return 0;}

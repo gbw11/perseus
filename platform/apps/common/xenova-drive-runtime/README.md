@@ -190,9 +190,11 @@ QoS0 로컬 성공과 독립 수신 성공은 다르다. 종료는 offline flush
 ### 같은 실행의 페이지 회수
 
 recorder가 있는 실험 구성에서 측정 창과 송신 결과가 모두 확정된 뒤 회수한다.
-`tools/collect_console.py`는 기존 명령·출력만 사용한다. 매 페이지의 전후에 `records 0`의
+`tools/collect_console.py`는 기존 명령·출력만 사용한다. 매 페이지의 전후에 `records 0 1`의
 VM/boot/app instance/execution과 capture 시작·종료·행 수를 대조하고, 페이지를 두 번 읽어
-동일한 offset/next/total·내용·행 수를 확인한다. 실행·창·total이 바뀌면 혼합하지 않고 실패한다.
+동일한 offset/next/total·내용·행 수를 확인한다. 신원·창 확인은 기존 CLI의 1행 조회로
+불필요한 반복 출력을 줄이고, 실제 데이터 페이지는 기존 4행씩 두 번 읽는다.
+실행·창·total이 바뀌면 혼합하지 않고 실패한다.
 한 페이지 최대 3회, 전체 기본 300초이며 조회 재시도로 전체 기한을 갱신하지 않는다.
 
 ```sh

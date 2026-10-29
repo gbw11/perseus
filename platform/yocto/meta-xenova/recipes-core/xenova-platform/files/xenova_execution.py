@@ -477,11 +477,11 @@ class Execution:
         return self._observe_many([record], deadline)[record['uuid']]
 
     @traced('execution.observe_many')
-    def observe_many(self, records, deadline):
+    def observe_many(self, records, deadline, *, _lifecycles=None):
         """명시 목록 조회의 전체 예산과 두 목록을 공유한다. 부분 성공은 반환하지 않는다."""
         records = list(records)
         try:
-            return self._observe_many(records, deadline)
+            return self._observe_many(records, deadline, _lifecycles=_lifecycles)
         except ExecutionError as error:
             failure = error
         except vm.DomainIdentityError as error:
@@ -494,9 +494,17 @@ class Execution:
         failure.observation_error_handled = True
         raise failure
 
-    def _observe_many(self, records, deadline):
+    def _observe_many(self, records, deadline, *, _lifecycles=None):
         if not records:
             return {}
+        # Only Manager.list supplies this snapshot while holding operation_lock.
+        # Single-domain/control paths still read their lifecycle at publication.
+        if _lifecycles is not None and (not isinstance(_lifecycles, dict)
+                or set(_lifecycles) != {r['uuid'] for r in records}
+                or any(not isinstance(v, tuple) or len(v) != 2
+                       or v[0] not in ('REGISTERED','RETIRED','PURGING','PURGED')
+                       or type(v[1]) is not int or v[1] < 0 for v in _lifecycles.values())):
+            refuse('RECONCILE_REQUIRED', 'invalid internal list lifecycle snapshot')
         if self.p.boot_id_reader() != self.host:
             refuse('TARGET_CHANGED', 'observation belongs to a previous host boot')
         before = self.p.removal_snapshot(deadline)
@@ -523,13 +531,17 @@ class Execution:
             verified.append((record, row, unique))
         if self.p.boot_id_reader() != self.host:
             refuse('TARGET_CHANGED', 'host boot changed during observation')
-        return {record['uuid']:self.publish_observation(record, row, unique, deadline)
+        if _lifecycles is None:
+            return {record['uuid']:self.publish_observation(record, row, unique, deadline)
+                    for record, row, unique in verified}
+        return {record['uuid']:self.publish_observation(record, row, unique, deadline,
+                                                       _lifecycle=_lifecycles[record['uuid']])
                 for record, row, unique in verified}
 
     @traced('execution.publish_observation')
-    def publish_observation(self, record, row, unique, deadline):
+    def publish_observation(self, record, row, unique, deadline, *, _lifecycle=None):
         """확인된 한 단계의 사실을 게시한다. 이 함수는 Xen을 조회하지 않는다."""
-        lifecycle, generation = self.lifecycle(record)
+        lifecycle, generation = self.lifecycle(record) if _lifecycle is None else _lifecycle
         run = self.run_record(record)
         managed = bool(row and run and run.get("phase") == "observed" and
                        run.get("domid") == row["domid"] and run.get("xen_unique_id") == unique and

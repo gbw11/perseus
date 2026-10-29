@@ -3,8 +3,8 @@
 HDMI 렌더러와 외부 웹이 함께 사용할 읽기 전용 상태 피드와 로컬 화면 선택 정책이다. 3단계 전체/상세 웹 렌더러에 이어 4단계에서 X11 실행기·실제 픽셀 캡처·원격 시연 전송을 추가했다. 실보드 HDMI 검증과 이미지 준비는 남아 있다. 기존 MO-04 터미널을 열거나 콘솔 출력을 상태 분석용으로 가로채지 않는다.
 
 ```text
-Xen xl 조회 ───────────────┐
-domU Agent/앱 ─ 로컬 MQTT ─┼─ dom0 display feed ─ 정책 ─ 로컬 전체/상세 렌더러
+기존 관리 서비스의 공유 상태 ┐
+domU Agent/앱 ─ 로컬 MQTT ─┼─ dom0 display feed ─ 정책 ─ 계기판/인포테인먼트
 권위 있는 제어 상태 ───────┘                 └ Spring ─ 외부 REST/WebSocket
 ```
 
@@ -14,13 +14,13 @@ Python 3.11 이상에서 저장소 루트 기준으로 같은 가상환경에 �
 
 ```sh
 python -m pip install ./platform/services/dom0-manager ./platform/services/vm-agent/mqtt-client ./platform/services/display/router
-export XENOVA_DRIVER=xen
+export XENOVA_OBSERVATIONS_PATH=/run/xenova/vm-observations.json
 export XENOVA_DISPLAY_BINDINGS=/etc/xenova/display-bindings.json
 # XENOVA_DISPLAY_TOKEN은 서비스 환경 파일 등으로 주입한다.
 python -m uvicorn xenova_display.main:create_app --factory --host 127.0.0.1 --port 8082 --workers 1
 ```
 
-동일 서비스 인스턴스의 상태를 사용하도록 단일 worker로 실행한다. Xen 조회에는 dom0의 기존 읽기 전용 드라이버를 사용한다. `xl console`, VM 시작/정지/재시작, 주행 명령은 실행하지 않는다. 토큰이 비어 있으면 시작을 거부한다. Python 경로/직접 실행 옵션은 기존 dom0-manager와 같다.
+동일 서비스 인스턴스의 상태를 사용하도록 단일 worker로 실행한다. 관리 서비스에도 같은 `XENOVA_OBSERVATIONS_PATH`를 설정하고 worker 1개로 실행해야 한다. 위 공유 모드를 명시한 수집기는 관리 서비스의 상태 파일만 읽고 Xen을 직접 조회하지 않는다. 경로를 설정하지 않으면 기존 드라이버 경로를 유지한다. 공유 파일이 실패하거나 만료되어도 직접 조회로 우회하지 않는다. 최종 공유 모드의 실보드 연속 검증은 별도이다. `xl console`, VM 시작/정지/재시작, 주행 명령은 실행하지 않는다. 토큰이 비어 있으면 시작을 거부한다. Python 경로/직접 실행 옵션은 기존 dom0-manager와 같다. [상태 공유·인증·적용 절차](../../../../docs/design/display-shared-observations.md)를 참고한다.
 
 설정 파일은 [QEMU 예제](examples/qemu-bindings.json)를 참고해 실제 등록 UUID·앱 토픽에 맞춘다. `primary-drive`, `backup-drive`는 새 발행 기능을 설치했다는 뜻이 아닌 **수신할 앱 ID 설정 예시**다. 기존 발행자가 `autonomous`, `manual`을 쓴다면 설정에서 명시적으로 매핑할 수 있지만, 이 이름으로 VM 역할/현재 주행 모드를 추론하지 않는다. 같은 역할·UUID·앱 ID의 중복과 dom0 UUID는 거부한다.
 
@@ -28,8 +28,9 @@ python -m uvicorn xenova_display.main:create_app --factory --host 127.0.0.1 --po
 | --- | --- |
 | `XENOVA_DISPLAY_BINDINGS` | 필수: JSON 매핑 파일 |
 | `XENOVA_DISPLAY_TOKEN` | 필수: 내부 REST/WS 서비스 토큰 |
+| `XENOVA_OBSERVATIONS_PATH` | 미설정 시 기존 경로 유지; 공유 모드 사용 시 관리 서비스와 같은 경로 지정 |
 | `XENOVA_DISPLAY_MQTT_HOST` / `PORT` | `127.0.0.1` / `1883` |
-| `XENOVA_DISPLAY_MQTT_USERNAME` / `PASSWORD` | 기존 브로커의 구독 계정 |
+| `XENOVA_DISPLAY_MQTT_USERNAME` / `PASSWORD` | 기존 브로커의 observer 읽기 전용 계정; 보드 진입점에서 필수 |
 | `XENOVA_DISPLAY_CONTROL_SOURCE` | `dom0-gateway`: 제어 상태 발행 source_id |
 
 MQTT는 기본적으로 dom0 loopback 브로커를 사용한다. 게스트별 토픽 발행권과 control 발행권은 브로커 계정/ACL로 제한해야 한다. 봉투의 `source_id` 검사만으로 발행자 인증을 대신하지 않는다. 실제 브로커 ACL이나 기존 메시지 계약은 변경하지 않는다.
@@ -158,7 +159,7 @@ python -B tests/probe_display_runtime.py --execute --soak-seconds 600 \
 - Xen 조회 성공 시에만 목록에서 사라진 등록 VM을 `stopped`로 표시한다. 조회 실패는 `disconnected`, 미수신은 `unknown`이다.
 - Xen 수신 유효기간 3초, 앱 heartbeat 3초, Agent heartbeat 15초를 사용한다. 모든 경과 시간은 dom0 단조 시계로 계산한다. inventory는 30초 이후 stale로 표시하지만 heartbeat와 독립된 과거 근거로 유지한다.
 - 실행 domid가 바뀌거나 부팅 ID가 변경되면 이전 앱·OS 자료를 비운다. inventory만으로 새로운 부팅을 확정하지 않는다. 먼저 비-retained heartbeat를 받아야 한다. 이전 boot/프로세스 epoch·중복/역순 seq는 버린다.
-- `run_id`는 수집기 epoch와 관측 domid를 묶은 관측 식별자다. 빠른 재부팅/동일 domid 재사용을 전부 증명하는 Xen 시작 세대 API는 아직 없다. `guest_boot_id`는 게스트 보고값이며 OS의 `current_run_verified`는 항상 false다. 부팅 전후를 놓치면 현재 실행과 OS 근거가 확실히 결합됐다고 표시하지 않는다.
+- `run_id`는 표시 수집기·관리 상태 제공자의 세대와 관측 실행 식별자(제공 시) 또는 domid를 묶는다. 시작 세대가 없는 드라이버는 동일 domid의 빠른 교체를 모두 증명하지 못한다. `guest_boot_id`는 게스트 보고값이며 OS의 `current_run_verified`는 항상 false다. 관측 식별자만으로 현재 실행과 OS 근거가 확실히 결합됐다고 표시하지 않는다.
 - 프로세스 수명 내 소스별 retired epoch는 128개까지만 추적한다. 한도 이후 새로운 세대는 수락하지 않고 운영 재시작/점검이 필요하다. 임의 발행자 수를 누적하지 않도록 등록된 세 VM·앱·지정된 control만 구독한다.
 - Zephyr Starter는 현재 앱 heartbeat를 보내지 않는다. 이때 앱/관측 OS는 unknown이고 기대 OS와 실제 Xen 실행 상태만 표시한다. 모터/미러링/승계 기능이 구현됐다고 표시하지 않는다.
 - `display.drive_state`의 명시적 `active_vm_id`와 `mode`를 따로 전달한다. `active_app`이나 구형 `vehicle.control`로 VM을 추측하지 않는다. retained 재생 보고는 현재 상태로 수락하지 않으며 3초 수신 지연 시 mode=unknown이다. AI 상태는 아직 unknown이다.

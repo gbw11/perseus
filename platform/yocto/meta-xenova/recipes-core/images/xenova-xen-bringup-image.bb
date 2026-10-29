@@ -4,7 +4,7 @@ require recipes-extended/images/xen-image-minimal.bb
 SUMMARY = "Xenova Raspberry Pi 4 Xen minimal bring-up image"
 DESCRIPTION = "xen-image-minimal plus diagnostic tools, isolated bridge/DHCP and a small preloaded Arm64 domU"
 
-IMAGE_INSTALL:append = " xenova-platform xenova-bringup xenova-dom0-manager xenova-mqtt-client mosquitto mosquitto-clients iproute2 bridge-utils dnsmasq kmod iputils-ping tzdata-asia"
+IMAGE_INSTALL:append = " xenova-platform xenova-bringup xenova-dom0-manager xenova-mqtt-client xenova-mqtt-broker mosquitto mosquitto-clients iproute2 bridge-utils dnsmasq kmod iputils-ping tzdata-asia"
 
 # External management is optional at runtime; never a prerequisite of VM startup.
 IMAGE_INSTALL:append = " tailscale tailscaled kernel-module-tun kernel-module-ipv6"

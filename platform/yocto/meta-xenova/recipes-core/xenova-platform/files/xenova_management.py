@@ -342,11 +342,11 @@ class Manager:
         return spec
 
     @traced('manager.registry-state')
-    def _state(self, identity, records):
+    def _state(self, identity, records, *, tombstones=None):
         if not isinstance(identity, str) or not vm.UUID.fullmatch(identity):
             fail('INVALID_SPEC', 'vm_id must be the existing permanent UUID')
         active = [r for r in records.values() if r['uuid'] == identity]
-        tomb = self._tombs().get(identity)
+        tomb = (self._tombs() if tombstones is None else tombstones).get(identity)
         if active:
             if tomb and tomb['lifecycle'] != 'REGISTERED':
                 fail('RECOVERY_REQUIRED', 'registry and tombstone disagree')
@@ -754,7 +754,9 @@ class Manager:
                   'configuration_sha256':digest(record),
                   'xen_state':None,'domid':None,'app_readiness':'unknown'}
         if observation is not None:
-            result.update(xen_state=observation['xen_state'], domid=observation['domid'])
+            result.update(xen_state=observation['xen_state'], domid=observation['domid'],
+                          observed_monotonic_ms=observation.get('observed_monotonic_ms'),
+                          xen_unique_id=observation.get('xen_unique_id'))
         description = observation.get('_description') if observation is not None else None
         result.update(description if description is not None else
                       self.p.execution().describe(record, tomb['generation'], tomb['lifecycle'], observation))
@@ -1260,20 +1262,25 @@ class Manager:
                     if action=='get':
                         states=[self._state(spec.get('vm_id'),records)]
                     else:
-                        states=[self._state(r['uuid'],records) for r in records.values()]
+                        # This entire read holds operation_lock. Reuse its
+                        # validated lifecycle snapshot only within this list.
+                        list_tombs=self._tombs()
+                        states=[self._state(r['uuid'],records,tombstones=list_tombs) for r in records.values()]
                         lifecycle=spec.get('lifecycle','REGISTERED')
                         if lifecycle in ('RETIRED','all'):
                             for path in (self.data/'instances').glob('.deleted-*'):
                                 rec=self._read(path/'instance.json')
                                 if rec['uuid'] not in {s['vm_id'] for s in states}:
-                                    states.append(self._state(rec['uuid'],records))
-                        states += [t for t in self._tombs().values() if t['vm_id'] not in {s['vm_id'] for s in states}]
+                                    states.append(self._state(rec['uuid'],records,tombstones=list_tombs))
+                        states += [t for t in list_tombs.values() if t['vm_id'] not in {s['vm_id'] for s in states}]
                         states=[s for s in states if lifecycle=='all' or s['lifecycle']==lifecycle]
                     if action == 'get':
                         observation = self.p.execution().observe(states[0]['record'], deadline)
                         result = {'vm':self._view(states[0], observation=observation)}
                     else:
-                        observations = self.p.execution().observe_many([s['record'] for s in states], deadline)
+                        lifecycles={s['vm_id']:(s['lifecycle'],s['generation']) for s in states}
+                        observations = self.p.execution().observe_many([s['record'] for s in states], deadline,
+                                                                      _lifecycles=lifecycles)
                         result = {'vms':[self._view(s, observation=observations[s['vm_id']]) for s in states]}
                 elif action in ('recover_once', 'recovery-operation', 'recovery-reconcile'):
                     from xenova_recovery import Recovery
