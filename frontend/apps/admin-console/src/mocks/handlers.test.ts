@@ -117,8 +117,8 @@ describe('MSW mock API', () => {
     expect(metrics.items.at(-1)?.values).toContainEqual(
       expect.objectContaining({ name: VM_CPU_PERCENT_METRIC, unit: '%' }),
     );
-    expect(metrics.items.flatMap((sample) => sample.values).some((value) => value.name === 'cpu_percent')).toBe(
-      false,
-    );
+    expect(
+      metrics.items.flatMap((sample) => sample.values).some((value) => value.name === 'cpu_percent'),
+    ).toBe(false);
   });
 });
