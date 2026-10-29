@@ -148,6 +148,7 @@ unit 실행의 성공을 현재 것으로 사용하지 않는다. `/run/xenova/b
 | `xenova-vm-shutdown.service` | backend/toolstack·저장소가 남아 있는 동안 guest를 정리할 독립 종료 guard |
 | `xenova-vms.service` | 등록 VM들의 autostart 판정과 시작을 한 batch로 실행 |
 | `xenova-host-admission.service` | autostart 뒤 이번 host의 admission barrier 초기화. 종료 시 새 시작·복구 차단 |
+| `mosquitto.service` | 내부 bridge·검증된 데이터 마운트와 최초 계정이 준비되면 broker 시작. 외부 네트워크 연결·소비자 인증은 VM 시작 조건이 아님 |
 | `tailscaled.service` | 검증된 `/srv/xenova`가 마운트된 뒤 원격 관리 데몬 시작. Tailnet 인증·인터넷 연결은 VM 시작 조건이 아님 |
 
 unit의 `After/Before`는 순서를 지정하고 `Requires/Wants`는 함께 시작할 의존성을
@@ -159,6 +160,29 @@ CPU 정책이 활성화되면 모든 수동/자동 start·reboot·recover_once�
 CPU 준비 서비스에는 VM으로 중지 전파를 일으키는 PartOf/BindsTo나 ExecStop이 없다.
 재시작이 실행 중 VM을 종료하거나 affinity를 초기화하지 않는다. 네트워크가 필요 없는
 게스트와 진단을 외부 네트워크 준비 뒤로 일괄 직렬화하지 않는다.
+
+### MQTT의 저장소·부팅 경계
+
+`xenova-mqtt-broker` 설정 패키지가 기존 `mosquitto.service`의 운영 설정과 enable을
+소유한다. Mosquitto 단독 패키지는 계속 기본 disable 상태다. 전체 unit override로
+외부 `network-online.target` 대기를 제외하며, 내부 bridge와 `/srv/xenova`만 요구한다.
+VM·CPU 준비·admission unit은 broker에 새 성공 의존성을 갖지 않는다.
+
+인증 자료는 공통 이미지에 넣지 않는다. 최초 계정이 없으면 broker 시작을 건너뛰고,
+운영자가 [계정 초기화](cli-manager-spec.md#cmd-broker)를 수행한 뒤 서비스를 시작한다.
+시작 전 검사는 실제 writable ext4 데이터 장치·계정 파일 권한·manifest를 확인한다.
+검증 실패를 익명 접속이나 rootfs의 새 계정으로 대체하지 않는다.
+
+Mosquitto listener는 localhost·내부 bridge에만 연다. EC2의 외부 접속은 보드의 기존
+`tailscaled`가 Tailnet IP의 1883·8081을 localhost MQTT·FastAPI로 전달한다.
+최초 인증 뒤 명시적으로 설정하는 [background Serve](cli-manager-spec.md#cmd-tailscale-serve)를
+사용하며 PC·SSH 터널·추가 daemon에 의존하지 않는다. 표시 피드 8082와 VM 사설망은 공개하지 않는다.
+broker 실행과 Agent/주행/Telemetry 소비자의 인증·실제 수신은 별도로 확인한다.
+서비스 재시작은 저장된 current 계정 세대를 재사용하며 VM 신원·의도·CPU 정책을 바꾸지 않는다.
+계정 작성은 xenova-broker 하나가 소유한다. 완성한 세대의 passwd·ACL을 고정 경로로 읽으며,
+저장 완료와 SIGHUP 요청·실제 인증을 구분한다. 과거 세대와 중단 기록을 지워 최초 상태로
+만들지 않는다. 기존 schema 1 또는 수동 배포 계정은 명시적인 전환 뒤 새 runtime을 시작한다.
+Tailnet이 늦다는 이유로 broker를 재시작하거나 주소를 반복 대기하지 않는다.
 
 ### Tailscale의 저장소·부팅 경계
 
@@ -179,6 +203,8 @@ cleanup이 기본 rootfs 상태 디렉터리를 새로 만드는 경로는 사�
 인증 URL 발급은 운영자가 `tailscale up --accept-dns=false`를 실행할 때만 요청한다.
 연결 단절 시에는 Tailscale 자체 재연결을 사용하며 별도 감시·인증 루프를 추가하지 않는다.
 기존 OpenSSH 인증을 그대로 쓰고 Tailscale SSH·subnet router·exit node·Funnel을 자동 활성화하지 않는다.
+MQTT·FastAPI의 background Serve 설정도 같은 장치 상태에 보존한다. Serve 연결이나 인증이
+실패해도 broker·관리 API·guest 부팅을 기다리게 하거나 해당 서비스를 재시작하지 않는다.
 
 VM factory UUID·실행 의도와 Tailscale 장치 키는 별개의 신원이다. 일반 재부팅·서비스
 재시작과 **데이터 파티션을 실제로 보존한** 이미지 갱신은 상태를 재사용한다.

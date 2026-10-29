@@ -479,6 +479,21 @@ bzcat "$WIC" >"$RUN/dom0.wic"
 `xen,xen-bootargs`와 `xen,dom0-bootargs` 두 속성만 대상으로 한다.
 소스 템플릿 검사·부분 패키지 통과와 실제 이미지·HDMI 전원 부팅 수락은 구분한다.
 
+MQTT 운영 설정은 `xenova-mqtt-broker` 패키지로 설치하며, `bitbake xenova-mqtt-broker`로
+부분 패키징·QA를 수행할 수 있다. 같은 이름의 `mosquitto.service` override·Xenova drop-in·설정·enable
+preset과 `xenova-broker`의 설치 바이트를 확인한다. 공통 이미지와 seed에는
+`/srv/xenova/mqtt`의 계정·암호·초기화 흔적을 넣지 않는다. 데이터 마운트와 내부 브리지 뒤에
+기동하며 외부 online 대기를 VM 자동 시작에 연결하지 않는다. 첫 계정 발급은
+[MQTT 최초 설정](cli-manager-spec.md#cmd-mqtt-init), EC2의 MQTT·FastAPI 직접 접속은
+[Tailnet 접속 설정](cli-manager-spec.md#cmd-tailscale-serve)을 따른다. 인증 후 background Serve를
+한 번 설정하며 공통 이미지에 장치 인증자료·개별 Serve 상태를 넣지 않는다.
+계정·ACL 정책은 `platform/deploy/mosquitto/etc/policy.json` 하나를 사용한다.
+로컬 개발 파일의 일치는 `python3 platform/deploy/mosquitto/scripts/render-policy.py --check`로
+검사한다. 제품 패키지는 공통 관리 모듈·정책을 설치하며 개발용 예시 UUID와 비밀번호를
+seed에 넣지 않는다. 새 VM 계정은 이미지 재빌드 없이 `xenova-broker add-account`로 추가한다.
+v1 drive와 v2 Telemetry는 다른 계정이며 새 Telemetry Bootstrap은 telemetry-UUID를 사용한다.
+기존 UUID 형식 v2 펌웨어·Bootstrap은 이 새 계정과 호환된다고 가정하지 않는다.
+
 고정 meta-networking에는 Tailscale 1.94.2가 있지만, 현재 이미지는 보안 수정이 포함된
 공식 ARM64 정적 릴리스 1.104.2를 meta-xenova recipe로 고정한다. TS-2026-013의 수정은
 Go 1.27.3에 포함되어 기존 고정 Go 1.26.8 빌드와 구분한다. 외부 레이어·공용 컴파일러는 바꾸지 않는다.
@@ -577,7 +592,7 @@ try:
         "import fastapi,uvicorn,pydantic,pydantic_core,paho.mqtt.client;"
         "import tty,termios,fcntl,websockets,dom0_manager,xenova_mqtt;"
         "import sys;sys.path.insert(0,'/usr/lib/xenova');"
-        "import xenova_management,xenova_execution,xenova_recovery,xenova_cpu;"
+        "import xenova_management,xenova_execution,xenova_recovery,xenova_cpu,xenova_broker;"
         "import dom0_manager.drivers.xentop,dom0_manager.recovery,dom0_manager.service_token"])
     graph(root, ["multi-user.target", "sshd.service", "xenova-vms.service",
                  "xenova-dom0-manager.service", "xenova-recovery-worker.service",
@@ -663,7 +678,7 @@ deploy = Path(os.environ["DEPLOY"])
 path = (deploy/"xenova-xen-bringup-image-raspberrypi4-64.rootfs.manifest").resolve()
 names = {line.split()[0] for line in path.read_text().splitlines() if line.strip()}
 required = {"xenova-platform", "xenova-bringup", "xenova-dom0-manager",
-    "xenova-mqtt-client", "python3-fastapi", "python3-uvicorn", "python3-paho-mqtt",
+    "xenova-mqtt-client", "xenova-mqtt-broker", "python3-fastapi", "python3-uvicorn", "python3-paho-mqtt",
     "python3-shell", "python3-terminal", "python3-websockets", "xen-tools-xl",
     "xen-tools-xenstat", "libxenmanage1", "mosquitto", "mosquitto-clients",
     "qemu-system-i386", "systemd-extra-utils", "tailscale", "tailscaled"}

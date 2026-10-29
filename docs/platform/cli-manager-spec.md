@@ -18,7 +18,7 @@ Xenova는 Raspberry Pi 4의 Xen dom0에서 VM 등록·실행·관측·복구·�
 - [7. 자동 시작·VM 정책·설정](#policies)
   - [CPU 정책 변경·실제 배치 조회](#cpu-contract)
 - [8. 자산 수명주기](#assets)
-- [9. Wi-Fi·Tailscale·콘솔·SSH](#access)
+- [9. Wi-Fi·MQTT·Tailscale·콘솔·SSH](#access)
 - [10. 운영 진단·설치 도구](#diagnostics)
 - [11. host gate·보드 종료·서비스 내부 명령](#host)
 - [공통 계약 A. 응답·오류·멱등성](#contract-response)
@@ -145,7 +145,9 @@ Manager 전용 명령은 `templates, list, get, create, retire, delete, restore,
 | [`xenova-wifi configure`](#cmd-wifi-configure) | SSID·PSK와 국가 저장 |
 | [`xenova-wifi activate`](#cmd-wifi-activate) | 저장한 Wi-Fi 활성화 |
 | [`xenova-wifi status`](#cmd-wifi-status) | 인증·주소·내부망 중복 조회 |
+| [`xenova-broker`](#cmd-broker) | MQTT 최초 설정·계정 추가/삭제·조회·전달·무결성 확인 |
 | [`tailscale up/status/ip`](#cmd-tailscale) | 최초 Tailnet 인증·원격 관리 주소 확인 |
+| [`tailscale serve`](#cmd-tailscale-serve) | EC2 등 Tailnet 장치에서 MQTT·FastAPI 직접 접속 |
 | [`xenova-tailscale-state backup/restore`](#cmd-tailscale-backup) | 같은 물리 보드의 인증 상태 백업·복원 |
 | [`xenova-vm console`](#cmd-console) | Xen PV 콘솔 접속 |
 | [`xenova-vm check-xen`](#cmd-check-xen) | dom0 Xen 제어 기반 확인 |
@@ -1911,9 +1913,141 @@ get의 lifecycle·generation과 operation journal을 비교한다. 완료마다 
 [명령어 색인으로](#command-index)
 
 <a id="access"></a>
-## 9. Wi-Fi·Tailscale·콘솔·SSH
+## 9. Wi-Fi·MQTT·Tailscale·콘솔·SSH
 
 Wi-Fi 구성·활성화·조회는 각각 독립 명령이다. 관리 Wi-Fi를 재활성화하면 SSH가 끊길 수 있으므로 configure/activate는 UART 등 복귀 경로를 확보한 상태에서 실행한다. 실제 PSK를 명령행·로그·Git에 넣지 않는다.
+
+<a id="cmd-mqtt-init"></a>
+<a id="cmd-broker"></a>
+### `xenova-broker` — MQTT 계정 초기화·운영·전달
+
+**의도·조건**: dom0 root의 로컬 운영 명령이다. Manager action·VM 제어가 아니다.
+이미지의 `xenova-mqtt-broker` 패키지가 도구·정책·기존 `mosquitto.service` 설정을 제공한다.
+실제 writable ext4 `/srv/xenova` 마운트가 필요하며 비밀번호는 이미지에 넣지 않는다.
+계정이 없는 첫 부팅에는 broker 시작을 건너뛴다.
+
+**최소 명령**:
+
+```sh
+xenova-broker initialize
+```
+
+기본 서비스 계정의 계획만 출력한다. 저장하려면 `--execute`가 필요하다.
+`--vm UUID`는 선택·반복 옵션이며 해당 VM의 v1(UUID)·v2(`telemetry-UUID`) 계정을 함께 추가한다.
+생략해도 서비스 계정은 만들 수 있고, 새 VM 계정은 나중에 추가할 수 있다.
+초기화 재실행은 기존 계정·비밀번호를 보존하고 빠진 기본 계정과 지정 VM만 추가한다.
+기존 목록에서 빠진 UUID를 삭제하지 않는다.
+
+| 명령 | 필수 인자 | 선택·기본값 | 동작 |
+|---|---|---|---|
+| `initialize` | 없음 | `--vm UUID` 반복, `--execute` | 기본 서비스와 지정 VM 계정 계획/저장 |
+| `add-account NAME` | 계정 이름 | `--execute` | 알려진 서비스·canonical UUID·`telemetry-UUID` 추가. 기존 계정은 재발급하지 않음 |
+| `remove-account NAME` | 계정 이름 | `--execute` | 해당 계정만 제거. v1/v2 동반 계정·VM·자산은 유지 |
+| `list` | 없음 | 없음 | 계정 이름·프로필·저장 revision 조회. 비밀번호 제외 |
+| `check` | 없음 | `--runtime` | 마운트·권한·해시·ACL 검사. runtime은 새 설정과 호환되는 현재 세대를 요구 |
+| `export-account NAME` | `--format`, `--output` 절대 경로 | `--execute` | 한 계정만 새 root 전용 파일로 전달. 소비자 설정은 변경하지 않음 |
+| `import-legacy` | 없음 | `--source /etc/mosquitto`, `--execute` | 기존 dom0-broker.sh 계정 파일을 읽기만 하여 복사. 해시·비밀번호 유지 |
+
+변경·내보내기는 기본 계획 모드다. `list/check`는 항상 조회다.
+이름과 프로필이 정의되지 않은 임의 서비스는 거절한다. 계정 정책의 원본은
+`platform/deploy/mosquitto/etc/policy.json`이며 Unix 로그인 계정·주행 제어권 정책과 다르다.
+로컬 Docker의 `etc/accounts`·`etc/acl`도 이 정책에서 생성한다.
+구형 `xenova-mqtt-init initialize/check`는 같은 구현으로 연결된다.
+`dom0-broker.sh`의 계정 명령도 공통 도구에 위임하며 별도로 `/etc/mosquitto`를 수정하지 않는다.
+
+**최초 실행·VM 추가 예시**:
+
+```sh
+xenova-broker initialize --execute
+xenova-broker check --runtime
+systemctl enable --now mosquitto
+
+xenova-vm list --short
+# 위 조회에서 사용할 실제 VM의 UUID를 입력한다.
+read -r -p 'VM UUID: ' VM_ID
+xenova-broker add-account "$VM_ID"
+xenova-broker add-account "$VM_ID" --execute
+# v2 Publisher도 사용할 때만 별도 계정을 추가한다.
+xenova-broker add-account "telemetry-$VM_ID" --execute
+xenova-broker list
+```
+
+UUID는 canonical 소문자·하이픈 형식의 전체 값을 사용한다. 도구는 UUID 형식을 검사하며
+VM을 등록·시작하거나 Manager 실행 신원을 대신 검증하지 않는다.
+서비스 계정은 backend·dom0-server·gateway·perception·autonomous·manual·interaction·observer와
+telemetry-reference-subscriber다. 예시 VM UUID는 제품 기본 계정에 포함되지 않는다.
+기존 message-board 계정은 자동 삭제/개명하지 않으며 새 설치의 기본 계정에는 넣지 않는다.
+
+**반환·오류**: 정상은 exit 0, stdout JSON이다. `configured`, `revision`, `accounts`는
+저장 상태이며 broker active·소비자 인증 성공을 뜻하지 않는다. 변경 실행의 `stored=true`는
+저장 완료, `reused=true`는 같은 계정 상태 재사용이다. `added/removed`는 해당 변경 목록이다.
+`list/check`의 `profiles`는 service/vm/telemetry 구분이다.
+실행 뒤 `broker="reload_requested"`는 reload 요청 완료, `"next_start"`는 비활성 broker의
+다음 시작 때 반영될 상태다. `client_authentication_verified=false`는 별도 인증 시험이 필요함을 뜻한다.
+
+오류는 exit 1과 stderr JSON `error="MQTT_SETUP_FAILED"`, 비밀을 포함하지 않는 message다.
+`stored=true` 오류는 계정은 저장됐지만 뒤따른 broker 조회/reload를 확정하지 못한 경우다.
+`stored=null`이면 저장 효과를 확정하지 못했으므로 `check/list`와 원 명령으로 재확인한다.
+새 비밀번호를 얻기 위해 파일을 삭제하거나 다른 초기화를 수행하지 않는다.
+문법 오류는 argparse exit 2다. 다른 작성자가 잠금을 보유하면 기다리지 않고 실패한다.
+
+계정 추가·삭제는 실행 중 broker에 SIGHUP reload를 요청한다. 신호 전송만으로 인증·ACL 적용을
+수락하지 않으며 실제 허용·거절과 독립 수신을 확인한다. 비밀번호 파일 reload는 기존 연결을
+강제 종료하지 않는다. 삭제한 계정의 ACL 제거와 새 연결 거절도 각각 확인한다.
+동일 이름 재등록은 기존 연결의 재인증을 보장하는 암호 회전 기능이 아니다.
+
+**소비자 설정 전달**:
+
+```sh
+install -d -m 0700 /root/xenova-private
+xenova-broker export-account "$VM_ID" --format agent-env \
+  --output /root/xenova-private/agent.env --execute
+xenova-broker export-account "telemetry-$VM_ID" --format telemetry \
+  --output /root/xenova-private/telemetry.json --execute
+```
+
+`--format`은 agent-env(Agent 두 인증 변수), backend-env(MQTT 두 인증 변수),
+credentials(username/password JSON), drive(v1 Bootstrap 입력), telemetry(v2 Bootstrap 입력)다.
+Bootstrap 입력은 내부 주소 192.168.77.1:1883을 사용한다. 부모는 root 0700 등 비공개
+디렉터리여야 하고 출력은 새 파일 0600이다. 기존 파일·심볼릭 링크는 덮어쓰지 않는다.
+응답에는 경로만 표시한다. 각 담당자에게 자기 계정만 보안 경로로 전달하며,
+게스트 env 설치·서비스 재시작·EC2 컨테이너 재생성은 별도 소비자 적용 절차다.
+
+**기존 설치의 전환·보존**:
+
+기존 `/srv/xenova/mqtt` schema 1 계정은 원 파일을 유지한 채
+`xenova-broker initialize` 계획 → `--execute`로 새 세대에 복사한다. 기존 비밀번호·해시와
+message-board 등 기존 계정을 보존한다. 기존 `/etc/mosquitto/passwd`와 passwd.credentials를
+사용했다면 먼저 `import-legacy` 계획/실행을 사용한다. 원본은 이동·수정하지 않는다.
+두 파일의 계정 집합이 다르거나 평문이 없으면 자동 재발급하지 않고 거절한다.
+기존 계정이 발견되면 최초 설치로 조용히 대체하지 않는다.
+
+계정 묶음은 `/srv/xenova/mqtt/generations/`의 불변 세대로 저장하고 current 포인터로
+게시한다. passwd·ACL은 root:mosquitto 0640, 평문·manifest는 root:root 0600이다.
+한 설정 파일이 해당 세대의 passwd·ACL 절대 경로를 지정해 혼합 읽기를 막는다.
+파일 게시와 broker 내부 반영은 하나의 원자적 동작이 아니다.
+중단 transaction·pending과 기존 세대는 보존한다. 완성된 같은 작업의 재시도는 준비된
+비밀번호를 재사용하며 불완전 파일·손상·유실은 차단한다. 과거 세대는 자동으로 재활성화하지 않는다.
+설치된 policy가 바뀌면 기존 비밀번호를 보존한 명시적 initialize로 새 정책을 게시한다.
+
+서비스 재시작·재부팅·데이터 보존 업데이트는 기존 계정을 재사용한다.
+SD 전체 재기록으로 데이터가 초기화되면 새 계정을 발급하고 소비자 접속정보를 갱신한다.
+VM UUID도 바뀌었다면 VM 계정 이름과 Bootstrap 입력도 새 UUID에 맞춘다.
+이는 Tailscale의 같은 보드 인증 상태 백업·복원과 다른 수명주기다.
+
+**확인 방법·접속 범위**:
+
+```sh
+xenova-broker check --runtime
+mosquitto --test-config -c /etc/xenova/mqtt/mosquitto.conf
+systemctl status mosquitto --no-pager
+ss -lntp
+```
+
+내부 listener는 localhost와 192.168.77.1:1883이다. EC2 등 외부 소비자는
+[Tailnet 접속 설정](#cmd-tailscale-serve) 뒤 보드 Tailscale IP:1883으로 직접 인증한다.
+PC 중계는 필요 없다. [브로커 안내](../../platform/deploy/mosquitto/README.md)에서
+공통 정책·개발용 검사와 실제 broker 수신 수락 범위를 확인한다.
 
 <a id="cmd-tailscale"></a>
 ### Tailscale — 최초 인증·상태·원격 SSH
@@ -1976,6 +2110,60 @@ Tailscale 상태 복원이 VM factory UUID·자산·desired_state를 복원하�
 Tailnet 보안 정책으로 결정하며 이미지에서 자동 적용하지 않는다.
 정확한 의미는 [공식 키 만료 안내](https://tailscale.com/docs/features/access-control/key-expiry)와
 [daemon state 옵션](https://tailscale.com/docs/reference/tailscaled)을 따른다.
+
+<a id="cmd-tailscale-serve"></a>
+### Tailscale — EC2에서 MQTT·FastAPI 직접 접속
+
+**의도·조건**: EC2와 dom0가 같은 Tailnet에 등록돼 있어야 한다. 다른 사용자 계정이라면
+Tailnet 관리자가 해당 장치 사이의 접근을 허용해야 한다. dom0의 broker와 FastAPI가 각각
+localhost 1883·8081에서 실행돼 있어야 하며, FastAPI는 기존 Bearer 서비스 토큰을 요구한다.
+네트워크 연결과 MQTT 계정/HTTP 토큰 인증은 별개의 조건이다.
+
+**최초 설정 — dom0 root에서 한 번 실행**:
+
+```sh
+tailscale up --accept-dns=false
+# 출력된 URL에서 EC2와 같은 Tailnet으로 승인한 뒤 계속한다.
+tailscale serve --bg --tcp=1883 tcp://127.0.0.1:1883
+tailscale serve --bg --tcp=8081 tcp://127.0.0.1:8081
+tailscale ip -4
+tailscale serve status
+```
+
+`--tcp`는 해당 포트의 TCP 통신을 보드 localhost로 전달한다. `--bg`는 터미널이 끝난 뒤에도
+설정을 유지하고 정상 daemon 재시작·재부팅 때 다시 제공하게 한다. foreground가 기본이므로
+이 운영 절차에서는 생략하지 않는다. 기존 다른 Serve 설정이 있으면 먼저 `status`로 확인하고,
+충돌 포트를 덮어쓰거나 전체 `reset`을 실행하지 않는다. 명령 출력·종료 코드는 Tailscale 자체
+계약이며 Manager envelope를 사용하지 않는다.
+
+| EC2의 연결 대상 | 주소 | 별도 인증 |
+|---|---|---|
+| MQTT | `tcp://<보드 Tailscale IP>:1883` | 보드에서 발급한 해당 소비자 계정 |
+| FastAPI | `http://<보드 Tailscale IP>:8081` | 기존 `Authorization: Bearer` 서비스 토큰 |
+| 보드 SSH | `ssh root@<보드 Tailscale IP>` | 기존 OpenSSH 계정·암호/키·host key 검사 |
+
+이 통신은 EC2와 보드 사이에서 이루어진다. 최초 인증 URL을 여는 PC·휴대폰은 통신 중계가
+아니며 상시 켜둘 필요가 없다. Serve는 보드의 기존 `tailscaled` 안에서 동작한다. MQTT/FastAPI의
+기존 localhost bind·비밀번호·토큰을 유지하며 별도 proxy daemon이나 SSH 전달 권한을 추가하지 않는다.
+표시 피드 8082나 VM 사설망 전체를 자동 공개하지 않고 subnet router·Funnel·exit node도 사용하지 않는다.
+
+**확인·실패 처리**: `tailscale status`의 인증/연결, `serve status`의 두 포트 설정,
+EC2에서의 MQTT 독립 수신과 FastAPI 인증 응답을 각각 확인한다. 무인증·틀린 HTTP 토큰은 401,
+잘못된 MQTT 계정은 연결 거절이어야 한다. 서비스 active나 Serve 설정 저장만으로 종단 접속
+성공을 판정하지 않는다. 거절 시 Tailnet 접근 정책, 대상 서비스 실행, 애플리케이션 인증을 구분한다.
+SSH나 관리 LAN에 MQTT를 대신 공개하지 않는다.
+
+**보존·해제**: background Serve 설정은 Tailscale 장치 상태와 함께 보존한다.
+데이터 파티션 보존·같은 보드의 암호화 백업/복원 경계는 다음 절과 같다. 데이터까지 초기화한
+재설치가 이 설정을 자동 보존한다고 가정하지 않는다. 두 경로만 해제하려면 다음을 사용한다.
+
+```sh
+tailscale serve --tcp=1883 off
+tailscale serve --tcp=8081 off
+```
+
+이는 내부 broker·FastAPI나 VM을 중지하지 않는다. Tailscale이 늦거나 끊겨도 기존 내부 서비스는
+계속 실행한다. TCP 전달과 `--bg`의 의미는 [공식 Serve 명세](https://tailscale.com/docs/reference/tailscale-cli/serve)를 따른다.
 
 <a id="cmd-tailscale-backup"></a>
 ### Tailscale 인증 상태 — SD 재설치 전 암호화 백업·같은 보드 복원
@@ -2308,7 +2496,7 @@ systemctl status xenova-agent.service --no-pager
 
 instance-id·machine-id·SSH host key는 VM 신원이며 reboot/복구/자원 변경으로 재생성하지 않는다. Linux 템플릿에는 Paho·공용 MQTT 클라이언트·`/opt/xenova/agent`가 설치된다. 일반 VM은 생성 때 instance-id를 기록하고 factory seed는 `xenova-guest-identity.service` 뒤에 Agent/SSH를 연결한다.
 
-Agent는 기본 5초 heartbeat를 `xenova/v1/vms/{vm_id}/heartbeat`로 발행하며 수신 측이 생존을 판정한다. 기본 broker는 `192.168.77.1:1883`, 선택 환경은 `/etc/xenova/agent.env`다. dom0에도 Paho·공용 MQTT 클라이언트·Mosquitto/clients가 설치되지만 broker enable·접속/ACL은 별도 운영 설정이다. 설치/import/enable 성공을 broker 종단 통신 성공으로 확대하지 않는다. 메시지는 [MQTT 계약](../contracts/mqtt-contract-v1.md)을 따른다.
+Agent는 기본 5초 heartbeat를 `xenova/v1/vms/{vm_id}/heartbeat`로 발행하며 수신 측이 생존을 판정한다. 기본 broker는 `192.168.77.1:1883`, 선택 환경은 `/etc/xenova/agent.env`다. dom0에는 Paho·공용 MQTT 클라이언트·Mosquitto/clients와 `xenova-mqtt-broker` 운영 설정이 설치된다. 최초 계정 발급과 소비자별 접속정보 전달은 아래 MQTT 절차로 수행한다. 설치/import/enable 성공을 broker 종단 통신 성공으로 확대하지 않는다. 메시지는 [MQTT 계약](../contracts/mqtt-contract-v1.md)을 따른다.
 
 Zephyr Network Starter의 capability는 가상 Ethernet·IPv4·DHCP·ICMP이며 SSH/Python Agent capability는 없다.
 

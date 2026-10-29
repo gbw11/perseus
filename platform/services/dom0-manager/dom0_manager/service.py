@@ -42,6 +42,7 @@ class VmService:
         self._vm_locks: dict[UUID, threading.Lock] = defaultdict(threading.Lock)
         self._vm_locks_guard = threading.Lock()
         self._resource_lock = threading.Lock()
+        self.observations = None
 
     @property
     def driver(self) -> Driver:
@@ -68,6 +69,8 @@ class VmService:
     # ---- 조회 ----
 
     def list(self) -> list[Domain]:
+        if self.observations is not None:
+            return self.observations.list_domains()
         return self._driver.list_domains()
 
     def get(self, vm_id: UUID) -> Domain:

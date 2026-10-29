@@ -63,6 +63,32 @@ class FoundationTest(unittest.TestCase):
     def start(self, key=None):
         return self.ok(self.call("start", key=key))["vm"]
 
+    def test_list_forwards_original_verified_clock_and_incarnation(self):
+        self.start()
+        row = self.ok(self.m.call('list', {'lifecycle': 'REGISTERED'}))['vms'][0]
+        stored = json.loads((self.p.runtime/'observations'/(self.vm_id+'.json')).read_text())
+        self.assertEqual(row['observed_monotonic_ms'], stored['last_success']['monotonic_ms'])
+        self.assertEqual(row['xen_unique_id'], stored['last_success']['value']['xen_unique_id'])
+        self.assertEqual(row['host_boot_id'], self.host)
+
+    def test_lifecycle_reuse_is_scoped_to_one_locked_list_not_get(self):
+        self.start()
+        with patch.object(self.m, '_tombs', wraps=self.m._tombs) as reads:
+            self.ok(self.m.call('list', {'lifecycle': 'REGISTERED'}))
+            self.assertEqual(reads.call_count, 1)
+            self.ok(self.m.call('list', {'lifecycle': 'REGISTERED'}))
+            self.assertEqual(reads.call_count, 2)  # no persistent metadata cache
+        original = execution.Execution.lifecycle
+        with patch.object(execution.Execution, 'lifecycle', autospec=True, side_effect=original) as fresh:
+            self.ok(self.call('get'))
+            self.assertGreaterEqual(fresh.call_count, 1)
+
+    def test_incomplete_internal_list_lifecycle_is_rejected(self):
+        self.start()
+        with self.assertRaises(execution.ExecutionError) as raised:
+            self.p.execution().observe_many([self.r], self.ticks+15, _lifecycles={})
+        self.assertEqual(raised.exception.error['code'], 'RECONCILE_REQUIRED')
+
     def stop(self, key=None):
         with patch.object(vm.os, "sync"):
             return self.ok(self.call("stop", key=key))["vm"]

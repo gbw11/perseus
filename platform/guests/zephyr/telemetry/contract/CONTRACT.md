@@ -375,7 +375,11 @@ Core begin/end는 기존처럼 allocation·I/O·로그 없이 경량으로 유�
 
 ## 12. 인증·ACL·배포
 
-- 전용 Telemetry username을 실제 vm_id에 대응시킨다. 한 VM의 발행자는 자기 v2 다섯 토픽에만 쓴다. 다른 VM·주행 command·vehicle control 쓰기 금지.
+- 공통 broker의 전용 Telemetry username은 `telemetry-<canonical VM UUID>`이며 실제 vm_id에 대응시킨다.
+  v1 drive username은 UUID 그대로다. 계정 규칙은 OS와 독립적이며 기존 Linux Agent v1을 바꾸지 않는다.
+  게스트의 신뢰된 Store 채널이 계정 형식을 선택한다. payload가 채널이나 임의 username을 선택하지 않는다.
+  username 버퍼는 접두사·UUID·NUL을 포함한 47 bytes다. VM UUID·boot/execution/receipt 식별자는 유지한다.
+  과거 격리 listener의 UUID 형식 v2 입력은 새 펌웨어의 자동 fallback 대상이 아니다. 한 VM의 발행자는 자기 v2 다섯 토픽에만 쓴다. 다른 VM·주행 command·vehicle control 쓰기 금지.
 - MQTT Client ID는 `xt2-<하이픈을 제거한 full VM UUID>`를 기본으로 한다. 한 VM의 system Telemetry 발행자 하나라는 운영 계약이다. 기존 주행 연결과 Client ID 충돌하지 않아야 한다. 새 publisher가 이전 실행과 중복 동작하지 않도록 host 실행·guest singleton을 확인한다.
 - password/인증서는 공유 불변 펌웨어·소스·Golden·로그에 넣지 않는다. 인스턴스별 제한된 주입원에서 받는다. 안전한 제공 경로가 없으면 insecure mode로 자동 fallback하지 않고 BLOCKED로 보고한다.
 - 인증된 네트워크 사용을 기본으로 하며, 신뢰되지 않는 네트워크로 나가면 TLS와 서버 검증이 필요하다. 내부 xenbr0 평문 시험을 수행하면 그 보안 한계를 시험 영수증에 기록한다. 평문 패스워드를 안전하다고 표시하지 않는다.

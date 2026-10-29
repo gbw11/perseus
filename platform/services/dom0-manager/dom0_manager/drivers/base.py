@@ -37,6 +37,9 @@ class Domain:
     domid: int | None = None
     name: str | None = None
 
+    # Internal observation identity; deliberately absent from the public Vm schema.
+    observation_id: str | None = None
+
     def to_vm(self) -> Vm:
         return Vm(vm_id=self.vm_id, state=self.state, vcpus=self.vcpus, memory_mib=self.memory_mib)
 

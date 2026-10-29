@@ -39,11 +39,26 @@ def private_json(path):
         return json.load(stream), {"inode": st.st_ino, "mtime_ns": st.st_mtime_ns, "bytes": st.st_size}
 
 
-def credentials(path, vm_id):
+def credentials(path, vm_id, channel=None, *, for_reconciliation=False):
+    """Parse private credentials and bind their account to this VM.
+
+    The existing two-argument Coordinator API is channel-neutral. Explicit CLI
+    callers also check the intended channel here; the guest always checks its
+    trusted Store channel. Parsing an account does not grant broker permission.
+    """
     value, identity = private_json(path)
     if set(value) != {"vm_id", "broker_ipv4", "port", "username", "password", "trusted_internal_plaintext"}:
         raise ValueError("credential input fields invalid")
-    if canonical(value["vm_id"]) != vm_id or value["username"] != vm_id:
+    if channel not in (None, "telemetry", "drive"):
+        raise ValueError("unsupported bootstrap channel")
+    expected = vm_id if channel == "drive" else "telemetry-" + vm_id
+    # Historical isolated-listener receipts may bind UUID accounts. Only the
+    # explicit reconciliation path can read them; it still checks the original
+    # payload hash, execution and Store value and never submits a new bootstrap.
+    allowed = {vm_id, "telemetry-" + vm_id} if channel is None else {expected}
+    if for_reconciliation and channel == "telemetry":
+        allowed.add(vm_id)
+    if canonical(value["vm_id"]) != vm_id or value["username"] not in allowed:
         raise ValueError("credential VM/account mismatch")
     if str(ipaddress.IPv4Address(value["broker_ipv4"])) != value["broker_ipv4"]:
         raise ValueError("numeric broker IPv4 required")
@@ -562,7 +577,8 @@ def main(argv=None):
     context = current(args.vm_id, deadline=deadline, guard=guard) if args.reconcile else current(args.vm_id)
     if context["host_boot_id"] != args.expected_host_boot_id or context["execution_id"] != args.expected_execution_id:
         raise ValueError("expected execution changed")
-    credential, identity = credentials(args.credentials_file, args.vm_id)
+    credential, identity = credentials(args.credentials_file, args.vm_id, args.channel,
+                                       for_reconciliation=args.reconcile)
     if args.reconcile:
         store = XenStore(args.channel)
         try:
