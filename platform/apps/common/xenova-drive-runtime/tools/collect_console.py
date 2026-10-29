@@ -95,7 +95,7 @@ def collect(exchange, *, timeout=300.0, attempts=3, clock=time.monotonic):
                 'failure': None, 'session': None, 'window': None}
     output = []
 
-    def query(stream, offset):
+    def query(stream, offset, page_size=4):
         last = None
         for trial in range(attempts):
             if clock() >= end:
@@ -104,16 +104,19 @@ def collect(exchange, *, timeout=300.0, attempts=3, clock=time.monotonic):
             if trial:
                 evidence['retries'] += 1
             try:
-                response = exchange(f'xenova drive {stream} {offset} 4', end)
+                response = exchange(f'xenova drive {stream} {offset} {page_size}', end)
                 if clock() >= end:
                     raise CollectionError('collection deadline exhausted')
-                return parse_page(response, stream, offset)
+                return parse_page(response, stream, offset, page_size)
             except (CollectionError, TimeoutError, OSError) as error:
                 last = error
         raise CollectionError('page retry limit: ' + str(last))
 
     def anchor():
-        meta, _ = query('records', 0)
+        # The existing formatter emits the same identity/window at offset 0
+        # for every legal limit. One row keeps framing/count validation while
+        # avoiding three unused rows on every before/after anchor.
+        meta, _ = query('records', 0, 1)
         session, summary = meta.get('XD_SESSION', {}), meta.get('XD_SUMMARY', {})
         if any(not isinstance(session.get(k), str) or not session[k] for k in IDENTITY):
             raise CollectionError('unverified/missing execution identity')
