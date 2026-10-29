@@ -27,6 +27,10 @@ class PlannedTransition:
                     generation=expected_generation,deadline_ms=deadline_ms).items()):
                 raise AuthorityError('transition request content differs')
             return old
+        # A planned handoff cannot replace the existing explicit AUTO-resume
+        # approval/countdown. Replay above remains an original-result lookup.
+        if mode is Mode.AUTO and m.mode is not Mode.AUTO:
+            raise AuthorityError('AUTO return requires the explicit resume/countdown path')
         app=AUTONOMOUS if mode is Mode.AUTO else MANUAL_APP
         source=m.bindings.current(expected_owner,now);target=m.bindings.current(target_vm,now)
         if not target or (source is None and (m.output_permitted or m.phase not in ('FAILED','DISARMED'))):
@@ -52,7 +56,10 @@ class PlannedTransition:
             if sample is None or sample.session!=spec['manual_session'] or sample.generation!=m.generation:return False
         source_ok=(context(source,spec['source_app'])==spec['source']) if source else (
             spec['source'] is None and not m.output_permitted and m.phase in ('FAILED','DISARMED'))
-        return bool(source_ok and target and row['host_boot_id']==m.authority.host and
+        # Recheck persisted preparations as well: they may predate this
+        # admission guard or have waited while the caller lost its response.
+        return bool((spec['mode']!='AUTO' or m.mode is Mode.AUTO) and
+            source_ok and target and row['host_boot_id']==m.authority.host and
             target.get('app_state_models',{}).get(app)==spec['state_model'] and
             spec['owner']==m.active_vm and spec['generation']==m.generation and now*1000<spec['deadline_ms'] and
             context(target,app)==spec['target'] and m.transport_ok and not m.authority.error and
