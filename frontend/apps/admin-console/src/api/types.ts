@@ -78,6 +78,38 @@ export interface CreateVmRequest {
   memory_mib: number;
 }
 
+// ---- VM 리소스 제어 (Jira -107 공개 API, FE -113·-114) -------------------------------
+
+/** Xen vCPU 하나가 실행될 수 있는 물리 CPU 집합(hard affinity). */
+export interface VcpuPinning {
+  vcpu: number;
+  pcpus: number[];
+}
+
+export interface PcpuStatus {
+  pcpu: number;
+  /** 최근 호스트 메트릭이 없으면 null. 프론트에서 추정하지 않는다. */
+  load_percent: number | null;
+}
+
+/** GET /api/v1/vms/{id}/resources */
+export interface VmResources {
+  vm_id: string;
+  vcpus: number;
+  memory_mib: number;
+  pcpu_count: number;
+  vcpu_pinning: VcpuPinning[];
+  /** 서버가 전용으로 검증한 코어만 강조한다. 이름이나 OS로 전용 여부를 추론하지 않는다. */
+  exclusive_pcpus: number[];
+  pcpus: PcpuStatus[];
+  observed_at: string;
+}
+
+/** PUT /api/v1/vms/{id}/resources/vcpu-pinning */
+export interface UpdateVcpuPinningRequest {
+  mappings: VcpuPinning[];
+}
+
 /** §2.3 */
 export interface Template {
   template_id: string;

@@ -2729,6 +2729,306 @@ button.chip:hover:not(.chipOn) {
   font-weight: 800;
   letter-spacing: 0.08em;
 }
+.pinningCardTag {
+  color: var(--x-primary);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+.pinningIntro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--x-space-5);
+  margin-bottom: var(--x-space-4);
+}
+.pinningIntro > div:first-child {
+  display: grid;
+  gap: 6px;
+}
+.pinningIntro strong {
+  color: var(--x-text);
+  font-size: var(--x-text-md);
+}
+.pinningIntro p {
+  margin: 0;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+  line-height: 1.55;
+}
+.pinningObservation {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--x-space-2);
+}
+.pinningObservation span {
+  padding: 6px 9px;
+  border: 1px solid var(--x-border);
+  border-radius: 999px;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+.pinningObservation span:first-child {
+  border-color: color-mix(in srgb, var(--x-primary) 35%, var(--x-border));
+  color: var(--x-primary);
+}
+.pinningState {
+  display: grid;
+  gap: 6px;
+  min-height: 108px;
+  place-content: center;
+  padding: var(--x-space-5);
+  border: 1px dashed var(--x-border);
+  border-radius: 12px;
+  color: var(--x-text-muted);
+  text-align: center;
+}
+.pinningState strong {
+  color: var(--x-text);
+}
+.pinningState span {
+  max-width: 620px;
+  font-size: var(--x-text-sm);
+  line-height: 1.55;
+}
+.pinningState[data-tone='waiting'] {
+  border-color: color-mix(in srgb, var(--x-recovering) 48%, var(--x-border));
+  background: color-mix(in srgb, var(--x-recovering) 5%, transparent);
+}
+.pinningTableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--x-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--x-surface-2) 74%, transparent);
+}
+.pinningTable {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.pinningTable th,
+.pinningTable td {
+  border-right: 1px solid var(--x-border);
+  border-bottom: 1px solid var(--x-border);
+}
+.pinningTable tr:last-child th,
+.pinningTable tr:last-child td {
+  border-bottom: 0;
+}
+.pinningTable th:last-child,
+.pinningTable td:last-child {
+  border-right: 0;
+}
+.pinningTable thead th {
+  position: relative;
+  height: 94px;
+  padding: var(--x-space-3);
+  background: color-mix(in srgb, var(--x-surface-3) 82%, transparent);
+  color: var(--x-text);
+  text-align: center;
+}
+.pinningTable thead th:first-child {
+  width: 210px;
+  color: var(--x-text);
+  text-align: left;
+}
+.pinningTable thead th > span,
+.pinningTable thead th > small {
+  display: block;
+}
+.pinningTable thead th > span {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-md);
+  font-weight: 800;
+}
+.pinningTable thead th:first-child > span {
+  font-family: inherit;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+.pinningTable thead th > small {
+  margin-top: 7px;
+  color: var(--x-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.pinningTable thead th > em {
+  display: inline-block;
+  margin-top: 7px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vm-accent) 16%, transparent);
+  color: var(--vm-accent);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.pinningTable thead th[data-exclusive='true'] {
+  box-shadow: inset 0 3px 0 var(--vm-accent);
+}
+.pinningTable tbody th {
+  padding: 20px;
+  background: color-mix(in srgb, var(--x-surface-3) 48%, transparent);
+  text-align: left;
+}
+.pinningTable tbody th span,
+.pinningTable tbody th small {
+  display: block;
+}
+.pinningTable tbody th span {
+  color: var(--x-text);
+  font-family: var(--x-font-mono);
+  font-size: 17px;
+  font-weight: 800;
+}
+.pinningTable tbody th small {
+  margin-top: 8px;
+  color: color-mix(in srgb, var(--x-text-muted) 86%, var(--x-text));
+  font-size: 12px;
+  font-weight: 700;
+}
+.pinningTable td {
+  height: 84px;
+  padding: 12px;
+  text-align: center;
+}
+.pinningCell {
+  display: inline-grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid var(--x-border-strong);
+  border-radius: 12px;
+  background: var(--x-surface);
+  color: var(--x-bg);
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+.pinningCell:hover:not(:disabled),
+.pinningCell:focus-visible {
+  border-color: var(--vm-accent);
+  outline: none;
+  transform: translateY(-1px);
+}
+.pinningCell[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--vm-accent) 78%, white);
+  background: var(--vm-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vm-accent) 14%, transparent);
+}
+.pinningCell[data-changed='true'] {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--x-recovering) 25%, transparent),
+    inset 0 0 0 2px var(--x-recovering);
+}
+.pinningCell:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+.pinningCell > span {
+  font-size: 21px;
+  font-weight: 900;
+  line-height: 1;
+}
+.pinningReview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--x-space-5);
+  margin-top: var(--x-space-4);
+  padding: var(--x-space-4);
+  border: 1px solid var(--x-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--x-surface-2) 76%, transparent);
+}
+.pinningReview[data-dirty='true'] {
+  border-color: color-mix(in srgb, var(--x-recovering) 44%, var(--x-border));
+  background: color-mix(in srgb, var(--x-recovering) 5%, var(--x-surface-2));
+}
+.pinningReview > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 11px;
+}
+.pinningReview > div:first-child > span {
+  color: var(--x-text);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.pinningReview p {
+  margin: 0;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+  line-height: 1.55;
+}
+.pinningReview ul {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pinningReview li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 11px;
+  color: color-mix(in srgb, var(--x-text-muted) 82%, var(--x-text));
+  font-family: var(--x-font-mono);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+.pinningReview li strong {
+  color: var(--x-text);
+  font-size: 15px;
+  font-weight: 850;
+}
+.pinningReview li b {
+  color: var(--x-recovering);
+  font-size: 17px;
+  font-weight: 900;
+}
+.pinningActions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--x-space-2);
+}
+.pinningFeedback {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: var(--x-space-3);
+  padding: 11px 13px;
+  border-radius: 10px;
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+}
+.pinningFeedback > i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+.pinningFeedback[data-tone='ok'] {
+  background: color-mix(in srgb, var(--x-ok) 10%, transparent);
+  color: var(--x-ok);
+}
+.pinningFeedback[data-tone='fault'] {
+  background: color-mix(in srgb, var(--x-fault) 10%, transparent);
+  color: var(--x-fault);
+}
 .dangerZone {
   display: flex;
   align-items: center;
@@ -2788,5 +3088,17 @@ button.chip:hover:not(.chipOn) {
   }
   .lifecycleActions {
     flex-direction: column;
+  }
+  .pinningIntro,
+  .pinningReview {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .pinningObservation {
+    flex-wrap: wrap;
+  }
+  .pinningActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -5,6 +5,7 @@ import {
   VM_CPU_PERCENT_METRIC,
   type MetricHistoryResponse,
   type TokenResponse,
+  type VmResources,
   type Vm,
   type VmListResponse,
 } from '../api/types';
@@ -120,5 +121,30 @@ describe('MSW mock API', () => {
     expect(
       metrics.items.flatMap((sample) => sample.values).some((value) => value.name === 'cpu_percent'),
     ).toBe(false);
+  });
+
+  it('vCPU 핀닝을 적용한 뒤 재조회 값이 일치한다', async () => {
+    await login();
+    const id = VM_IDS.interaction;
+    const before = await request<VmResources>(`/api/v1/vms/${id}/resources`);
+    expect(before.vcpu_pinning).toEqual([{ vcpu: 0, pcpus: [0, 3] }]);
+
+    await request<VmResources>(`/api/v1/vms/${id}/resources/vcpu-pinning`, {
+      method: 'PUT',
+      body: { mappings: [{ vcpu: 0, pcpus: [3] }] },
+    });
+
+    const after = await request<VmResources>(`/api/v1/vms/${id}/resources`);
+    expect(after.vcpu_pinning).toEqual([{ vcpu: 0, pcpus: [3] }]);
+  });
+
+  it('vCPU에 pCPU를 하나도 선택하지 않으면 변경을 거절한다', async () => {
+    await login();
+    await expect(
+      request(`/api/v1/vms/${VM_IDS.interaction}/resources/vcpu-pinning`, {
+        method: 'PUT',
+        body: { mappings: [{ vcpu: 0, pcpus: [] }] },
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'INVALID_ARGUMENT' });
   });
 });
