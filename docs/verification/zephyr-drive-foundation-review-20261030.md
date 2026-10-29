@@ -198,3 +198,22 @@ Windows 메인·WSL 원본/빌드 워크트리·진행 빌드·상위 제품·�
 새 의존성, 실보드·실제 VM/운영 broker·CPU/네트워크·host/SD·이미지 작업은 하지 않았다.
 커밋·feature 통합·platform 충돌 해결은 후속 사용자 요청에 따라 수행한다. MR은 platform 대상이며
 기존 커밋을 유지한다. 소유한 WSL 검토 워크트리 밖의 작업 파일은 수정하지 않았다.
+
+## 동기화 반영 후 원 커밋 보존 확인
+
+동기화 MR [!298](https://lab.ssafy.com/s15-final/S15P31E110/-/merge_requests/298)이 반영된
+platform `6b2ffbe09a201dbc6f260ae2606afa97939bab18`을 기준으로 원 작업 15개 커밋의
+조상 관계를 각각 확인했다. 원 SHA·작업 단위·시험/문서 내용은 유지되며, 중단된 분리
+이관의 복사 커밋으로 원 작업을 대체하지 않았다.
+
+최종 대조에서 기존 MQTT launcher 본문은 같지만 실행 권한을 0755에서 0644로
+되돌리는 불필요한 차이를 찾았다. 최신 platform의 0755를 보존해 이 경로를 MR diff에서
+제외했다. 순수 foundation 차이는 platform/docs 107파일이고 Backend·Frontend·CI는 없다.
+이 수정은 launcher 본문·주행/복구 제품 코드·시간값을 바꾸지 않는다. 앞서 통과한
+Gateway 131건·관련 Python 121건·native A/B 각 42단계·ARM 3개 프로필의 소스 해시를
+대조해 근거를 재사용하며, 새 빌드나 실보드 수락으로 표시하지 않는다.
+
+중단한 cherry-pick과 복사본 전용 로컬 review 브랜치는 스냅샷 일치와 원본 보존을
+확인하고 사용자 승인 후 정리했다. 기존 sub·다른 브랜치와 원 실패 자료·검증 영수증·
+최종 펌웨어·공용 캐시는 보존한다. 최종 제출 후보·원 커밋·정리 결과는 별도 증거의
+`develop-sync-20261030/FOUNDATION_MR_READY.json`에 연결한다.
