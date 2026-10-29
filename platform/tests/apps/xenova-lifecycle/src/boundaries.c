@@ -21,7 +21,23 @@ static unsigned front,watched;
 static bool advertised;
 static struct xnf_tx_ring *tx_ring;
 static bool event_bound;
+atomic_uint xl_polls;
+atomic_bool xl_wait_enabled;
+K_SEM_DEFINE(xl_store_wait,0,1);
+int __real_xnf_poll(struct xnf *);
+int __wrap_xnf_poll(struct xnf *n) {
+ atomic_fetch_add(&xl_polls,1);return __real_xnf_poll(n);
+}
 static bool is(const char *s) { return !strcmp(xl_case,s); }
+k_tid_t __real_z_impl_k_thread_create(struct k_thread *,k_thread_stack_t *,size_t,k_thread_entry_t,void *,void *,void *,int,uint32_t,k_timeout_t);
+k_tid_t __wrap_z_impl_k_thread_create(struct k_thread *t,k_thread_stack_t *stack,size_t size,k_thread_entry_t entry,void *a,void *b,void *c,int priority,uint32_t options,k_timeout_t delay) {
+ static unsigned created;
+ if(xl_case) {
+  created++;
+  if((is("net-monitor-thread")&&created==1)||(is("net-packet-thread")&&created==2))return NULL;
+ }
+ return __real_z_impl_k_thread_create(t,stack,size,entry,a,b,c,priority,options,delay);
+}
 int xsr_open(void) { xl_opened++;return is("net-store")||is("shutdown-store")?-EIO:0; }
 struct xs_client *xsr_acquire(int64_t end) { return end>k_uptime_get()?&client:NULL; }
 void xsr_release(void) { }
@@ -75,6 +91,14 @@ int xvif_watch_backend(struct xs_client *c,const struct xvif *v,uint32_t *id,int
 }
 int xvif_refresh(struct xs_client *c,struct xvif *v,int ms) {
  ARG_UNUSED(c);if(ms<=0)return -ETIMEDOUT;
+ if(xl_wait_enabled&&front==4) {
+  k_sem_give(&xl_store_wait);
+  if(is("wait-delay"))k_sleep(K_MSEC(35));
+  if(is("wait-timeout"))return -ETIMEDOUT;
+  if(is("wait-identity"))return -EXDEV;
+  if(is("wait-protocol"))return -EPROTO;
+  if(is("wait-closing")){v->backend_state=XenbusStateClosing;return 0;}
+ }
  if((is("net-backend")&&!xl_retry)||is("net-init-wait"))return -ETIMEDOUT;
  v->backend_state=front==6?XenbusStateClosed:front==5?XenbusStateClosing:advertised?XenbusStateConnected:XenbusStateInitWait;
  if(is("net-close-timeout")&&!xl_retry&&front>=5)v->backend_state=XenbusStateConnected;

@@ -108,6 +108,7 @@ public class MqttDriveClient implements SmartLifecycle, MqttCallbackExtended, Dr
         scheduler.execute(() -> {
             try {
                 client.subscribe(TOPICS, QOS);
+                log.info("MQTT drive relay subscribed to {} topic filters", TOPICS.length);
             } catch (MqttException exception) {
                 log.error("MQTT drive subscribe failed", exception);
             }

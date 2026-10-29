@@ -44,6 +44,22 @@ class Message:
         return (time.monotonic() - self.received_monotonic) * 1000.0
 
 
+@dataclass(frozen=True)
+class PublishTicket:
+    """Local submission/PUBACK observation; never an app/device acknowledgement."""
+    envelope: dict[str, Any]
+    info: Any
+    connections: int
+    disconnect_generation: int
+
+    def status(self,client: "XenovaClient") -> str:
+        if not client.connected or client.connections!=self.connections or client._generation!=self.disconnect_generation:
+            return "disconnected"
+        if self.info.rc!=mqtt.MQTT_ERR_SUCCESS:return "failed"
+        try:return "acknowledged" if self.info.is_published() else "pending"
+        except (ValueError,RuntimeError):return "failed"
+
+
 Handler = Callable[[Message], None]
 
 
@@ -117,6 +133,8 @@ class XenovaClient:
         # 우리 잠금을 기다림)과 맞물릴 수 있어 잠금을 걸쳐 두지 않는다
         self._early_subacks: dict[int, Any] = {}
         self._generation = 0  # 연결 세대. 끊길 때마다 +1. 끊기기 전에 보낸 요청의 mid 는 등록하지 않는다 (재연결 때 다시 요청)
+        self._connections = 0  # 연결에 성공한 횟수. 두 번 확인하는 사이에 끊겼다 다시 붙어도 값이 바뀐다
+        self._connection_attempts = 0  # CONNACK 를 받은 연결 시도 수(거부 포함). TCP 가 닿지 않은 시도는 paho 안에서 끝나 세지 못한다
         self._inflight = 0  # 이 세대에서 subscribe() 가 진행 중인 요청 수. 0 이면 모르는 mid 의 SUBACK 은 보관하지 않고 버린다
         self._pending_infos: list[Any] = []  # PUBACK 을 아직 받지 못한 QoS>0 발행. stop() 이 끊기 전에 기다린다
         self._latest: dict[str, Message] = {}
@@ -165,10 +183,23 @@ class XenovaClient:
     def connected(self) -> bool:
         return self._connected.is_set()
 
+    @property
+    def connections(self) -> int:
+        """브로커 연결에 성공한 횟수. 값이 바뀌었으면 그 사이 (재)연결이 있었다: clean session 이라 브로커가 이 연결의 상태를 모르고,
+        브로커가 재시작했다면 retained 도 잃었을 수 있다. connected 만 보면 짧은 끊김을 놓친다."""
+        return self._connections
+
+    @property
+    def connection_attempts(self) -> int:
+        """CONNACK 를 받은 연결 시도 수(거부 포함). v2 Telemetry heartbeat 의 connection_attempts_total."""
+        return self._connection_attempts
+
     def wait_connected(self, timeout_s: float) -> bool:
         return self._connected.wait(timeout_s)
 
     def _on_connect(self, client: mqtt.Client, userdata: Any, flags: Any, reason_code: Any, *_: Any) -> None:
+        with self._lock:
+            self._connection_attempts += 1
         if _failed(reason_code):
             log.warning("MQTT 연결 거부: %s", reason_code)
             return
@@ -176,6 +207,7 @@ class XenovaClient:
         # 먼저 연결 표시를 해야 그 사이 subscribe() 로 들어온 필터도 빠지지 않는다.
         self._connected.set()
         with self._lock:
+            self._connections += 1
             subscriptions = [(topic_filter, qos) for topic_filter, (qos, _) in self._subscriptions.items()]
         for topic_filter, qos in subscriptions:
             self._request_subscribe(client, topic_filter, qos)
@@ -300,10 +332,40 @@ class XenovaClient:
         self._track_publish(info, topic, wait_s)
         return envelope
 
+    def publish_raw(self, topic: str, data: bytes, *, qos: int, retain: bool, wait_s: float | None = None) -> None:
+        """봉투를 씌우지 않고 그대로 발행한다. v1 봉투가 아닌 자기 계약을 가진 메시지용(v2 Telemetry, xenova_agent.telemetry).
+
+        v1 type 정책·seq·크기 한도를 적용하지 않으므로 호출자가 자기 계약의 QoS·retain·크기를 지킨다.
+        끊긴 동안의 동작과 wait_s 의 뜻은 publish() 와 같다.
+        """
+        if not isinstance(data, (bytes, bytearray)):
+            raise TypeError("publish_raw takes encoded bytes")
+        info = self._paho.publish(topic, bytes(data), qos=qos, retain=retain)
+        self._track_publish(info, topic, wait_s)
+
     def clear_retained(self, topic: str, *, wait_s: float | None = None) -> None:
         """retained 메시지를 지운다 (빈 payload + retain). 예: VM 삭제 시 inventory. wait_s 는 publish() 와 같다."""
         info = self._paho.publish(topic, b"", qos=1, retain=True)
         self._track_publish(info, topic, wait_s)
+
+    def publish_tracked(self,topic: str,message_type: str,payload: dict[str,Any]) -> PublishTicket:
+        """Nonblocking verified-profile submission. Offline calls are refused.
+
+        A disconnect after submission is uncertain: Paho may replay a QoS1
+        frame. Consumers must validate authority/generation/application; this
+        method does not claim queued bytes were cancelled.
+        """
+        if not self.connected:raise PublishError('publisher disconnected before submission')
+        rule=policy.for_type(message_type)
+        with self._lock:
+            seq=self._seq.get(topic,0)+1;self._seq[topic]=seq
+            generation,connections=self._generation,self._connections
+        envelope=env.build(self.identity,message_type,payload,seq,app_id=topics.parse(topic).app_id)
+        data=json.dumps(envelope,ensure_ascii=False,separators=(',',':')).encode()
+        if len(data)>rule.max_bytes:raise ValueError('message exceeds policy limit')
+        info=self._paho.publish(topic,data,qos=rule.qos,retain=rule.retain)
+        self._track_publish(info,topic,0)
+        return PublishTicket(envelope,info,connections,generation)
 
     def _track_publish(self, info: Any, topic: str, wait_s: float | None) -> None:
         """paho 의 MQTTMessageInfo 를 본다. 끊긴 동안 QoS 1 은 rc=NO_CONN 이지만 큐에 남아 재연결 뒤 나간다."""

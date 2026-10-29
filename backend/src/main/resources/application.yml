@@ -2,9 +2,9 @@ spring:
   application:
     name: xenova-backend
   datasource:
-    url: ${DB_URL:jdbc:h2:file:./data/xenova;AUTO_SERVER=TRUE}
-    username: ${DB_USERNAME:sa}
-    password: ${DB_PASSWORD:}
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/xenova?serverTimezone=UTC&characterEncoding=UTF-8}
+    username: ${DB_USERNAME:xenova}
+    password: ${DB_PASSWORD:xenova}
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}
@@ -17,8 +17,14 @@ spring:
       timeout: ${REDIS_TIMEOUT:2s}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
   jackson:
     property-naming-strategy: SNAKE_CASE
 
@@ -58,19 +64,19 @@ xenova:
   template-catalog:
     templates:
       - template-id: ubuntu-24.04-arm64
-        version: "1.0.0"
+        version: "1.0.2"
         display-name: Ubuntu 24.04
         min-memory-mib: 512
         guest-kind: linux
       - template-id: debian-13-arm64
-        version: "1.0.0"
+        version: "1.0.2"
         display-name: Debian 13
         min-memory-mib: 256
         guest-kind: linux
       - template-id: zephyr-xenvm-starter-arm64
-        version: "1.0.0"
-        display-name: Zephyr Starter 1.0.0
-        # 플랫폼 starter 1.0.0은 1 vCPU / 16MiB 고정 프로필이다.
+        version: "1.1.0"
+        display-name: Zephyr Network Starter 1.1.0
+        # 플랫폼 Network Starter 1.1.0은 1 vCPU / 16MiB 고정 프로필이다.
         min-memory-mib: 16
         guest-kind: zephyr
   agent:

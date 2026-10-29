@@ -4,6 +4,9 @@ Zephyr 펌웨어의 실행 상태를 통신과 독립적으로 관측하는 공�
 부팅 단계·오류 이력, 스레드·스택, kernel heap, 앱이 제공하는 네트워크 관측과
 임의 주기 작업의 시작·완료를 고정 크기 메모리에 기록한다.
 MQTT, 주행 알고리즘, 제어권 판단, VM Agent, 영구 crash 저장소를 구현하지 않는다.
+별도의 `health.h` 판정기는 실제 자원 근거와 필수 작업 결과를 경고/기능 제한으로 연결한다.
+VM 재시작이나 출력 권한을 발급하지 않는다. 정의와 행동 책임은
+[건강 판정 계약](../../../../docs/contracts/health-evidence-v1.md)에 모았다.
 
 ## 연결과 조회
 
@@ -69,20 +72,52 @@ C 소비자는 `xdiag_snapshot_get(&snapshot, include_threads)`를 호출한다.
   실패 시 `unused=0`으로 바꾸는 경로를 거치지 않아 오류를 보존한다.
   수명이 변하는 thread pointer를 잠금 밖에 보관하지 않고 `k_thread_foreach()`에서
   제한된 행을 수집한다. 이 동안 인터럽트 지연이 발생할 수 있으므로 성능 측정 중
-  `diag threads`를 호출하지 않는다. CPU 점유율·상세 tracing은 이 버전에 포함하지 않는다.
+  `diag threads`를 호출하지 않는다. 상세 stack 조회는 CPU 수집과 분리한다. 일반 주기 CPU 수집은 stack scan을 호출하지 않는다.
 - heap: `k_malloc` 계열이 사용하는 **kernel system heap만** 관측한다.
   Zephyr 4.4의 kernel shell과 동일한 `_system_heap.heap`을 사용하고 allocator의
   spinlock 아래에서 `sys_heap_runtime_stats_get()`를 호출한다. 이 부분은 고정 버전의
   내부 구조에 의존하는 adapter다. Zephyr 변경 시 다시 검토·빌드·실행 시험한다.
   libc heap·static RAM·네트워크 packet pool을 전체 free RAM으로 합산하지 않는다.
 - 네트워크: 모듈은 Xen을 알지 못한다. 앱이 한 번 등록한 bounded provider를 호출한다.
-  Network Starter는 실제 `xnet_stats()`와 `net_if` up/carrier 상태를 제공한다.
+  Network Starter는 실제 `xnet_stats_try()`와 `net_if` up/carrier 상태를 제공한다.
+  system workqueue를 packet lock에 대기시키지 않고 경합은 오류로 보존한다.
   초기화 실패 시 해당 errno를 반환한다. link up은 DHCP·IP·broker 준비와 다르다.
   원본 netfront의 32비트 카운터는 64비트 snapshot 필드로 전달되지만 wrap을 복원하지 않는다.
 
 provider와 관측할 루프 객체는 static lifetime이어야 한다. 등록 후 임의 교체하지 않는다.
 실제 Xen 실행 UUID·host_boot_id·execution_id·펌웨어 해시는 수집자가 실행 문맥과 함께
 기록해야 한다. 이 모듈은 임의 UUID를 만들어 Xen의 신원인 것처럼 사용하지 않는다.
+
+## 시스템·스레드 CPU와 메모리 영역
+
+`resources.c`가 system workqueue에서200ms마다 짧은 계측을 소유한다. 조회와 Publisher는
+cache를 복사할 뿐 차분 기준을 바꾸지 않는다. 원천 구간·원 누계·계측 비용은 내부 snapshot에
+남기고 외부에는 [Telemetry 계약](../telemetry/contract/CONTRACT.md)의 결과만 제공한다.
+같은 collector가 kernel heap 통계도 고정 비용으로 cache한다. 계산 연결부의
+`xdiag_resources_try_get`는 K_NO_WAIT로 읽으며 경합은 -EBUSY다. 없는 보조 근거가 계산 실패가
+되지는 않는다. 기존 `xdiag_resources_get`의 최대 20ms 대기와 상세 stack 요청은 유지한다.
+
+CPU는 고정 Zephyr UP runtime statistics를 사용한다. 분모는 CPU API의 non-idle+idle,
+시스템 분자는 non-idle이며 스레드별 분모도 같다. IRQ와 Xen 비실행 시간의 귀속은 guest
+계측기의 한계다. pCPU 점유율 또는 계산의 순수 CPU 시간으로 해석하지 않는다.
+원천32비트 clock의 half-wrap보다 긴 공백, reset/역전, 1초 이상 오래된 cache는
+불연속/null이다. 첫 표본·분모0은 no_sample이다. 새 Publisher는 기존 guest 계측을 초기화하지 않는다.
+
+생성 hook·thread monitor로 guest-boot-local 수명 ID를 유지한다. registry64개,
+반환행32개이며 목록이 잘리면 전체 seen과 잘림을 남긴다. 이름·주소 재사용을 같은 수명으로
+합치지 않고 raw pointer를 발행하지 않는다. 스레드 접근은 monitor 잠금 안에서 끝난다.
+
+| 영역 | 소유/실제 API | 포함·중복 경계 |
+|---|---|---|
+| kernel system heap | `_system_heap`/sys_heap stats | 기존 used/free/peak. libc heap·전체 RAM 아님 |
+| net_rx_data | 고정 rx_bufs/net_buf 가용 block | data payload만. descriptor·정렬/관리 비용 제외 |
+| net_tx_data | 고정 tx_bufs/net_buf 가용 block | 같은 범위. static RAM 안의 예약이므로 RAM과 합산 금지 |
+| thread stack | 명시적 `k_thread_stack_space_get` | 예약 크기와 high-water. 현재 SP/호출 stack 아님 |
+
+`CONFIG_XENOVA_DIAGNOSTICS_CPU=n` 또는 pools 비활성 구성의 capability/표본 상태를
+구별한다. 기능 off를 수집 성공·0%로 표시하지 않는다. provider의 현재 실패도 기능 미지원으로
+바꾸지 않는다. [실행별 보존과 조회](../telemetry/README.md#내부-진단과-실행별-보존)는 dom0의
+별도 책임이며 Core의 RAM 이력을 guest 비휘발 저장소로 바꾸지 않는다.
 
 ## 재사용 가능한 주기 작업 계측
 
@@ -193,7 +228,7 @@ Debian 유휴/부하 네 조건을 비교한다. 실제 Xen hard affinity 관측
 기능 수락과 주기·통신 성능 수락은 별개다. 이 모듈 도입만으로 실제 주행 성능,
 MQTT 수신 지연, IRQ·메모리 격리 또는 실시간 기한 보장을 주장하지 않는다.
 
-[Telemetry Publisher 2.0](../telemetry/README.md)는 이 Core를 사용하는 별도 adapter다.
+[Telemetry Publisher](../telemetry/README.md)는 이 Core를 사용하는 별도 adapter다.
 Core에 MQTT 의존성을 넣거나 이 로컬 JSON을 wire 계약으로 간주하지 않는다.
 `agent.heartbeat`, `app.heartbeat`, 루프 완료는 각각 다른 근거이며
 통신 스레드만 살아 있다고 멈춘 계산을 정상 진행으로 보고해서는 안 된다.

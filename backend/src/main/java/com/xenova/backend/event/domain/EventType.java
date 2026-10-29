@@ -12,6 +12,8 @@ public enum EventType {
     AGENT_STATUS_CHANGED("agent.status.changed"),
     RECOVERY_STARTED("recovery.started"),
     RECOVERY_COMPLETED("recovery.completed"),
+    RECOVERY_RECOVERED("recovery.recovered"),
+    RECOVERY_CANCELLED("recovery.cancelled"),
     RECOVERY_FAILED("recovery.failed"),
     DEMO_COMMAND_SENT("demo.command.sent"),
     DEMO_COMMAND_COMPLETED("demo.command.completed"),

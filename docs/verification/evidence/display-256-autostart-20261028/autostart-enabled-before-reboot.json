@@ -1,0 +1,6 @@
+{
+  "boot_id_before": "98d7d22b-7484-49a2-a5f7-d660303e85fb",
+  "enabled": "enabled",
+  "enable_output": "Created symlink '/etc/systemd/system/multi-user.target.wants/xenova-display.target' → '/etc/systemd/system/xenova-display.target'.\n",
+  "new_display_services_only": true
+}

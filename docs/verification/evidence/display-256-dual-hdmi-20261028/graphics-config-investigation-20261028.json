@@ -1,0 +1,164 @@
+{
+  "observed_at": "2026-10-28T05:54:51.230818+00:00",
+  "changes": false,
+  "kernel_release": "6.18.33-v8",
+  "boot_configs": {
+    "/boot/config.txt": "#sdtv_mode=0\n\n#sdtv_aspect=1\n\n#sdtv_disable_colourburst=1\n\n\n#hdmi_safe=1\n\n#hdmi_ignore_edid=0xa5000080\n\n#hdmi_edid_file=1\n\n#hdmi_force_edid_audio=1\n\n#hdmi_ignore_edid_audio=1\n\n#hdmi_force_edid_3d=1\n\n#avoid_edid_fuzzy_match=1\n\n#hdmi_ignore_cec_init=1\n\n#hdmi_ignore_cec=1\n\n#cec_osd_name=raspberry\n\n#hdmi_pixel_encoding=1\n\n#hdmi_blanking=1\n\n#hdmi_drive=2\n\n#config_hdmi_boost=0\n\n#hdmi_group=1\n\n#hdmi_mode=1\n\n#hdmi_force_mode=1\n\n#edid_content_type=1\n\n\n#ignore_lcd=1\n\n#display_default_lcd=0\n\n#lcd_framerate=60\n\n#lcd_rotate=0\n\n#disable_touchscreen=0\n\n#enable_dpi_lcd=0\n\n#dpi_group=1\n\n#dpi_mode=1\n\n#dpi_output_format=0x6f005\n\n\n#hdmi_force_hotplug=1\n\n#hdmi_ignore_hotplug=1\n\n#disable_overscan=1\n\n#overscan_left=0\n\n#overscan_right=0\n\n#overscan_top=0\n\n#overscan_bottom=0\n\n#overscan_scale=0\n\n#framebuffer_width=0\n\n#max_framebuffer_height=0\n\n#max_framebuffer_width=0\n\n#framebuffer_height=0\n\n#framebuffer_depth=16\n\n#framebuffer_ignore_alpha=0\n\n#test_mode=0\n\n#display_hdmi_rotate=0\n\n#display_lcd_rotate=0\n\n#display_rotate=0\n\n#dispmanx_offline=0\n\n\n#decode_MPG2=0x12345678\n\n#decode_WVC1=0x12345678\n\n\n#start_x=0\n\n#disable_camera_led=1\n\n\n#gpu_mem=128\n\n#gpu_mem_256=192\n\n#gpu_mem_512=448\n\n#gpu_mem_1024=944\n\n#disable_l2cache=0\n\n\n\n#disable_audio_dither=0\n\n#enable_audio_dither=0\n\n#pwm_sample_bits=11\n\n\n#disable_commandline_tags=0\n\n#cmdline=\"\"\n\n#kernel=\"\"\n\n#kernel_address=0x00000000\n\n#kernel_old=1\n\n#ramfsfile=\"\"\n\n#ramfsaddr=0x00000000\n\n#initramfs initramf.gz 0x00800000\n\n#device_tree_address=0x00000000\n\n#init_uart_baud=115200\n\n#init_uart_clock=3000000\n\n#boot_delay=0\n\n#boot_delay_ms=0\n\n#disable_splash=1\n\n\n#force_turbo=0\n\n#initial_turbo=0\n\n#temp_limit=85\n\n#arm_freq=700\n\n#arm_freq_min=700\n\n#gpu_freq=250\n\n#core_freq=250\n\n#core_freq_min=250\n\n#h264_freq=250\n\n#isp_freq=250\n\n#v3d_freq=250\n\n#sdram_freq=400\n\n#sdram_freq_min=400\n\n#avoid_pwm_pll=1\n\n\n#current_limit_override=0x5A000020\n\n#over_voltage=0\n\n#over_voltage_min=0\n\n#over_voltage_sdram=0\n\n#over_voltage_sdram_c=0\n\n#over_voltage_sdram_i=0\n\n#over_voltage_sdram_p=0\n\n\n#max_usb_current=0\n\n\n#dtparam=audio=off\n\n#dtparam=i2c_arm=off\n\n#dtparam=i2c_vc=off\n\n#dtparam=i2c_arm_baudrate=100000\n\n#dtparam=i2c_vc_baudrate=100000\n\n#dtparam=i2s=off\n\n#dtparam=spi=off\n\n#dtparam=random=off\n\n#dtparam=uart0=on\n\n#dtparam=watchdog=off\n\n#dtparam=act_led_trigger=mmc\n\n#dtparam=act_led_activelow=off\n\n#dtparam=act_led_gpio=47\n\n#dtparam=pwr_led_trigger=mmc\n\n#dtparam=pwr_led_activelow=off\n\n#dtparam=pwr_led_gpio=35\n\n\n#dtoverlay=act-led,activelow=off\n# Enable UART\nenable_uart=1\n# Enable VC4 Graphics\ndtoverlay=vc4-kms-v3d\n\nenable_gic=1"
+  },
+  "kernel_config": {},
+  "dt_nodes": [
+    {
+      "path": "framebuffer@3e513000",
+      "compatible": "simple-framebuffer,",
+      "status": "okay",
+      "driver": "/sys/bus/platform/devices/framebuffer@3e513000/driver"
+    },
+    {
+      "path": "v3dbus/v3d@7ec04000",
+      "compatible": "brcm,2711-v3d,",
+      "status": "disabled",
+      "driver": "/sys/bus/platform/devices/v3d@7ec04000/driver"
+    },
+    {
+      "path": "soc/hdmi@7ef05700",
+      "compatible": "brcm,bcm2711-hdmi1,",
+      "status": "disabled",
+      "driver": "/sys/bus/platform/devices/hdmi@7ef05700/driver"
+    },
+    {
+      "path": "soc/pixelvalve@7e216000",
+      "compatible": "brcm,bcm2711-pixelvalve4,",
+      "status": "disabled",
+      "driver": "/sys/bus/platform/devices/pixelvalve@7e216000/driver"
+    },
+    {
+      "path": "soc/i2c@7ef09500",
+      "compatible": "brcm,bcm2711-hdmi-i2c,",
+      "status": "disabled",
+      "driver": "/sys/bus/platform/devices/i2c@7ef09500/driver"
+    },
+    {
+      "path": "soc/hvs@7e400000",
+      "compatible": "brcm,bcm2711-hvs,",
+      "status": "disabled",
+      "driver": "/sys/bus/platform/devices/hvs@7e400000/driver"
+    },
+    {
+      "path": "soc/pixelvalve@7ec12000",
+      "compatible": "brcm,bcm2711-pixelvalve3,",
+      "status": "disabled",
+      "driver": "/sys/bus/platform/devices/pixelvalve@7ec12000/driver"
+    },
+    {
+      "path": "soc/pixelvalve@7e20a000",
+      "compatible": "brcm,bcm2711-pixelvalve2,",
+      "status": "disabled",
+      "driver": "/sys/bus/platform/devices/pixelvalve@7e20a000/driver"
+    },
+    {
+      "path": "soc/pixelvalve@7e207000",
+      "compatible": "brcm,bcm2711-pixelvalve1,",
+      "status": "disabled",
+      "driver": "/sys/bus/platform/devices/pixelvalve@7e207000/driver"
+    },
+    {
+      "path": "soc/hdmi@7ef00700",
+      "compatible": "brcm,bcm2711-hdmi0,",
+      "status": "disabled",
+      "driver": "/sys/bus/platform/devices/hdmi@7ef00700/driver"
+    },
+    {
+      "path": "soc/i2c@7ef04500",
+      "compatible": "brcm,bcm2711-hdmi-i2c,",
+      "status": "disabled",
+      "driver": "/sys/bus/platform/devices/i2c@7ef04500/driver"
+    },
+    {
+      "path": "soc/pixelvalve@7e206000",
+      "compatible": "brcm,bcm2711-pixelvalve0,",
+      "status": "disabled",
+      "driver": "/sys/bus/platform/devices/pixelvalve@7e206000/driver"
+    },
+    {
+      "path": "soc/mailbox@7e00b840",
+      "compatible": "brcm,bcm2711-vchiq,",
+      "status": "(absent=okay)",
+      "driver": "/sys/bus/platform/devices/mailbox@7e00b840/driver"
+    }
+  ],
+  "loaded_graphics_modules": [],
+  "module_files": [
+    "modules.builtin"
+  ],
+  "platform_drivers": [
+    "vc4_dpi",
+    "vc4_v3d",
+    "dwc3-of-simple",
+    "vc4_txp",
+    "simple-reset",
+    "vc4_crtc",
+    "vc4_vec",
+    "simple-pm-bus",
+    "vc4_hvs",
+    "vc4-drm",
+    "vc4_hdmi",
+    "simple-framebuffer",
+    "hdmi-audio-codec",
+    "vc4_firmware_kms",
+    "pwrseq_simple",
+    "vc4_dsi"
+  ],
+  "boot_entries": [
+    "Image",
+    "bcm2711-rpi-4-b.dtb",
+    "boot.scr",
+    "bootcode.bin",
+    "cmdline.txt",
+    "config.txt",
+    "fixup.dat",
+    "fixup4.dat",
+    "fixup4cd.dat",
+    "fixup4db.dat",
+    "fixup4x.dat",
+    "fixup_cd.dat",
+    "fixup_db.dat",
+    "fixup_x.dat",
+    "kernel8.img",
+    "rpi-bootfiles-20260521.stamp",
+    "start.elf",
+    "start4.elf",
+    "start4cd.elf",
+    "start4db.elf",
+    "start4x.elf",
+    "start_cd.elf",
+    "start_db.elf",
+    "start_x.elf",
+    "xen"
+  ],
+  "boot_mount": {
+    "code": 0,
+    "out": "TARGET SOURCE         FSTYPE OPTIONS\n/boot  /dev/mmcblk0p1 vfat   rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,errors=remount-ro\n",
+    "error": ""
+  },
+  "cmdline_display_args": [],
+  "dmesg_display": {
+    "code": 0,
+    "out": "[    0.053690] iommu: Default domain type: Translated\n[    0.053697] iommu: DMA domain TLB invalidation policy: strict mode\n[    0.665051] bcm2708_fb soc:fb: Registered framebuffer for display 0, size 1824x984\n[    0.665215] simple-framebuffer 3e513000.framebuffer: framebuffer at 0x3e513000, 0x6d8c00 bytes\n[    0.665222] simple-framebuffer 3e513000.framebuffer: format=a8r8g8b8, mode=1824x984x32, linelength=7296\n[    0.665359] simple-framebuffer 3e513000.framebuffer: fb1: simplefb registered!\n[    3.890530] systemd[1]: Load Kernel Module drm skipped, unmet condition check ConditionKernelModuleLoaded=!drm",
+    "error": ""
+  },
+  "module_root_exists": true,
+  "modprobe_path": "/usr/sbin/modprobe",
+  "vc4_modprobe_dryrun": {
+    "code": 0,
+    "out": "",
+    "error": ""
+  },
+  "sys_modules": {
+    "vc4": true,
+    "v3d": false,
+    "drm": true,
+    "drm_kms_helper": true,
+    "simpledrm": false,
+    "simplefb": false
+  }
+}

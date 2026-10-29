@@ -1,4 +1,4 @@
-"""재개 요청 목: drive.resume.requested 를 한 번 발행한다 (MQTT 계약 v1.2 6장). 게이트웨이는 AUTO_READY 일 때만 받는다.
+"""재개 요청 제출 도구. --verified는 현재 control 문맥을 결합하고, 생략은 legacy다.
 
 기본은 메시지 보드 VM 경로(MQTT-06), --console 이면 운영자 콘솔 경로(MQTT-13, 백엔드 계정 backend·source_id dom0-server).
 받아들여지면 게이트웨이가 drive.resume.accepted 를 내고 3초 뒤 AUTO 로 바꾼다.
@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "vm-agent/mqtt-client"))
@@ -27,9 +29,11 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=1883)
     parser.add_argument("--console", action="store_true", help="xenova/v1/console/resume 로 보낸다 (백엔드 대신)")
     parser.add_argument("--username", help="기본: 메시지 보드 경로 message-board, --console 이면 backend")
-    parser.add_argument("--password")
+    parser.add_argument("--password",default=os.environ.get('XENOVA_RESUME_BROKER_PASSWORD'),
+                        help="권장: root 전용 환경의 XENOVA_RESUME_BROKER_PASSWORD")
     parser.add_argument("--vm-id", default=MESSAGE_BOARD_VM)
     parser.add_argument("--requested-by", default="operator")
+    parser.add_argument("--verified",action="store_true",help="현재 control의 세대·게시 ID에 결합한 공통 A/B 재개 요청")
     args = parser.parse_args()
 
     if args.console:
@@ -38,11 +42,27 @@ def main() -> int:
         identity = Identity(vm_id=args.vm_id, app_id="message-board")
         topic, username = topics.app_events("message-board"), "message-board"
     client = XenovaClient(identity, args.host, args.port, username=args.username or username, password=args.password)
+    if args.verified:client.subscribe(topics.vehicle_control(),qos=1)
     if not client.start(wait_s=5):
         print("브로커 연결 실패", file=sys.stderr)
+        client.stop()
         return 1
-    client.publish(topic, "drive.resume.requested", {"requested_by": args.requested_by})
-    client.stop()
+    try:
+        payload={"requested_by":args.requested_by};cause=None
+        if args.verified:
+            end=time.monotonic()+5;control=None
+            while time.monotonic()<end:
+                control=client.latest(topics.vehicle_control())
+                if control is not None:break
+                time.sleep(.025)
+            if control is None:raise ValueError('current control unavailable; request not submitted')
+            generation=control.payload.get('generation')
+            if type(generation) is not int or not 1<=generation<=0xffffffff:
+                raise ValueError('control generation invalid')
+            payload['expected_generation']=generation;cause=control.envelope['message_id']
+        client.publish(topic,"drive.resume.requested",payload,causation_id=cause,wait_s=1)
+        print('request submitted; verify drive.resume.accepted and the resulting control separately')
+    finally:client.stop()
     return 0
 
 

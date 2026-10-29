@@ -64,6 +64,8 @@ struct xm_zclient {
 	uint32_t published, dropped, received;
 	uint32_t connection_attempts;
 	int last_io_rc;
+	/* Optional local send ceiling, never a new wire timestamp. */
+	int64_t publish_deadline_ms;
 };
 
 struct xm_zconfig {
@@ -86,6 +88,8 @@ int xm_zclient_subscribe(struct xm_zclient *c, const char *filter, uint8_t qos);
 int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms);
 /* 봉투를 씌워 발행. 끊겨 있으면 -ENOTCONN (QoS 0 는 버린다, Python 과 같다) */
 int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type, const char *payload_json);
+int xm_zclient_publish_until(struct xm_zclient *, const char *topic, const char *type,
+			    const char *payload_json, int64_t deadline_ms);
 /* topic 의 마지막 메시지와 나이(ms). 없으면 -ENOENT. env 의 span 은 다음 poll 전까지 유효 */
 /* Single owner only. Abort pending I/O; no offline flush or publish retry. */
 void xm_zclient_close(struct xm_zclient *c);

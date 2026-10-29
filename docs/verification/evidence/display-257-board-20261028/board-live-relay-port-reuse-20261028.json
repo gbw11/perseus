@@ -1,0 +1,142 @@
+{
+  "scope": "one physical framebuffer; sequential existing pages; production EDID mapping not verified",
+  "pc": [
+    {
+      "output_id": "monitor-1",
+      "transport": "HTTP MJPEG over pinned SSH direct-tcpip",
+      "pc_observed_at": "2026-10-28T09:25:24+0900",
+      "unauthenticated_status": 401,
+      "wrong_token_status": 401,
+      "login_status": 204,
+      "cookie_httponly": true,
+      "cookie_samesite": true,
+      "cookie_status": 200,
+      "metadata": {
+        "streams": [
+          {
+            "stream_id": "monitor-1",
+            "output_id": "monitor-1",
+            "capture_source_id": "x11-root:diagnostic-monitor-1",
+            "capture_epoch": "dfc3d5a8-ae73-4167-a356-f6ea44bece6f",
+            "rectangle": [
+              0,
+              0,
+              1824,
+              984
+            ],
+            "width": 1824,
+            "height": 984,
+            "codec": "mjpeg",
+            "fps": 5,
+            "frame_sequence": 2,
+            "frame_age_ms": 408,
+            "status": "live",
+            "error": null,
+            "bytes_total": 175561,
+            "backend": "virtual_x11",
+            "physical_verified": false,
+            "render_revision": null,
+            "render_correlation": "unverified",
+            "reported_dom_revision": null
+          },
+          {
+            "stream_id": "monitor-2",
+            "output_id": "monitor-2",
+            "capture_source_id": "x11-root:diagnostic-monitor-2",
+            "capture_epoch": "3b81dd00-cd78-4ada-9701-f7dca1237d41",
+            "rectangle": [
+              1824,
+              0,
+              1824,
+              984
+            ],
+            "width": 1824,
+            "height": 984,
+            "codec": "mjpeg",
+            "fps": 5,
+            "frame_sequence": 0,
+            "frame_age_ms": null,
+            "status": "unavailable",
+            "error": "output_unavailable",
+            "bytes_total": 0,
+            "backend": "virtual_x11",
+            "physical_verified": false,
+            "render_revision": null,
+            "render_correlation": "unverified",
+            "reported_dom_revision": null
+          }
+        ]
+      },
+      "connections": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "content_type": "multipart/x-mixed-replace; boundary=frame",
+          "frames": 20,
+          "distinct_frames": 13,
+          "jpeg_bytes": 1756084,
+          "elapsed_s": 8.781,
+          "received_fps": 2.29,
+          "jpeg_mbps": 1.6,
+          "frame_hashes": [
+            "aca4fde6d9a8b568dcadccc7430c839de4b6f91b4913b22e89868aac1a480108",
+            "589308eedad207f8605d494497401ac0771f594945cf7e88aa02f40f4108240a",
+            "3a9548ce9ac44cb54afc810c97356e078852e3ea3576ba70ba8931186b93d15e",
+            "50017076164f435aa3788c407d72ee8f072c28f08b0666573f1ad0f180ff2305",
+            "e3d706c7be3d3e693bc84dd01e4e997403e54d400a665015b2868874001b480d",
+            "559bad988bd38cd08388dc981b4baed41ef67017a91ee39bac68556a3de88ad7",
+            "559bad988bd38cd08388dc981b4baed41ef67017a91ee39bac68556a3de88ad7",
+            "1a3c2d9f04cab77252703acdc5d9f5f725c30abe9b75284b255dcf48c4589393",
+            "a16ace33563cacf16a92e58d636210971dc8cf7a30de0d134a474bbfd1cdaa6a",
+            "d9e0e5b03899ac913427db03143fa50a9eee2dfc7f82d447e2aee96c1c0d2479",
+            "50017076164f435aa3788c407d72ee8f072c28f08b0666573f1ad0f180ff2305",
+            "447afc8bb350e4ac570dd35737a472616407a7d201168d2e93132e35b4155ad6",
+            "9d87bfaeaae39c58edc610e7c173da081b0069b6e228e77694d2e29f1eafa212",
+            "7a6f8b8b0584ec0778d26dceea75e6674a4d1aaf526edd945135037450335332",
+            "589308eedad207f8605d494497401ac0771f594945cf7e88aa02f40f4108240a",
+            "e3d706c7be3d3e693bc84dd01e4e997403e54d400a665015b2868874001b480d",
+            "50017076164f435aa3788c407d72ee8f072c28f08b0666573f1ad0f180ff2305",
+            "ff0cc527f8eb5aa3c5416e8fee025b1b60b5dc5bdaf10c266a93aca9a8100c55",
+            "559bad988bd38cd08388dc981b4baed41ef67017a91ee39bac68556a3de88ad7",
+            "aca4fde6d9a8b568dcadccc7430c839de4b6f91b4913b22e89868aac1a480108"
+          ]
+        },
+        {
+          "attempt": 2,
+          "status": 200,
+          "content_type": "multipart/x-mixed-replace; boundary=frame",
+          "frames": 20,
+          "distinct_frames": 11,
+          "jpeg_bytes": 1756017,
+          "elapsed_s": 7.593,
+          "received_fps": 2.62,
+          "jpeg_mbps": 1.85,
+          "frame_hashes": [
+            "589308eedad207f8605d494497401ac0771f594945cf7e88aa02f40f4108240a",
+            "54934fe2ef1f90bbe29a53ff3ca68b98aa3d3e0a119026fe9a49ebae7649dbcd",
+            "f41f7f4f397cd2a43ca3d9f90e9e0d2dbda4e41defce845bd5735519dc6912b5",
+            "e3d706c7be3d3e693bc84dd01e4e997403e54d400a665015b2868874001b480d",
+            "3eb297045823753a5c365ef5cdc93c2d8a97daca326e85468cda66cd7c1cd341",
+            "1a3c2d9f04cab77252703acdc5d9f5f725c30abe9b75284b255dcf48c4589393",
+            "79ffca5aeaf5dc8f86b8d7b77c1bece9bf3b27467083edf92ff3bbe485f89070",
+            "e3d706c7be3d3e693bc84dd01e4e997403e54d400a665015b2868874001b480d",
+            "f41f7f4f397cd2a43ca3d9f90e9e0d2dbda4e41defce845bd5735519dc6912b5",
+            "e3d706c7be3d3e693bc84dd01e4e997403e54d400a665015b2868874001b480d",
+            "1a3c2d9f04cab77252703acdc5d9f5f725c30abe9b75284b255dcf48c4589393",
+            "1a3c2d9f04cab77252703acdc5d9f5f725c30abe9b75284b255dcf48c4589393",
+            "85c0ca5124c13d75774ee58a9b891520baa906780b7e080bb8f8e13c8209ace3",
+            "85c0ca5124c13d75774ee58a9b891520baa906780b7e080bb8f8e13c8209ace3",
+            "3a9548ce9ac44cb54afc810c97356e078852e3ea3576ba70ba8931186b93d15e",
+            "3a9548ce9ac44cb54afc810c97356e078852e3ea3576ba70ba8931186b93d15e",
+            "fd45ef82649bfa8325d986c3f26a05e3b4d0d87162e20d3b21359c249742d467",
+            "fd45ef82649bfa8325d986c3f26a05e3b4d0d87162e20d3b21359c249742d467",
+            "fd45ef82649bfa8325d986c3f26a05e3b4d0d87162e20d3b21359c249742d467",
+            "59bce631b745cad33a7b05f0ba03dac33f3ad971b6782d3b507b30f1c49886c1"
+          ]
+        }
+      ]
+    }
+  ],
+  "remote_exit": 1,
+  "remote_error": "Traceback (most recent call last):\n  File \"<stdin>\", line 185, in <module>\n  File \"<stdin>\", line 116, in run_relay\nOSError: [Errno 98] Address already in use\n"
+}

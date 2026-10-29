@@ -39,10 +39,16 @@ class Settings:
     # platform 드라이버: 다른 요청이 Manager 를 쓰는 동안 기다릴 최대 초. 넘으면 503 PlatformUnavailable(재시도 가능).
     # 정지가 최대 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다. 조회 드라이버 한도 5초와 맞춘다
     platform_busy_timeout_s: float = 5.0
+    # 호출자가 X-Request-Budget-Ms 로 남은 대기 시간을 줄 때, 하위 호출에 넘기기 전에 응답을 돌려줄 몫으로 남겨 둘 초.
+    # 실측 전 임시값이다. 0 이면 남은 예산을 전부 하위에 준다
+    response_reserve_s: float = 0.5
     # Recovery Worker 가 복구 상태·이벤트를 남기는 곳. GET /api/v1/recovery/events 가 같은 파일을 읽는다 (Worker 의 XENOVA_RECOVERY_STATE_DIR 와 같아야 함)
     recovery_state_dir: str = "/run/xenova/recovery"
     mock_samples: bool = False
     log_level: str = "INFO"
+    # Separate bounded execution-log database; empty means the log collector is not deployed.
+    runtime_log_db: str = ""
+    runtime_log_ingest_config: str = ""
 
     def __post_init__(self) -> None:
         if self.console_enabled and not self.service_token:
@@ -54,6 +60,8 @@ class Settings:
             value = getattr(self, name)
             if not (math.isfinite(value) and value > 0):
                 raise ValueError(f"{name} must be a finite positive number of seconds, got {value!r}")
+        if not (math.isfinite(self.response_reserve_s) and self.response_reserve_s >= 0):
+            raise ValueError(f"response_reserve_s must be a finite non-negative number of seconds, got {self.response_reserve_s!r}")
         if self.driver == "platform" and self.shutdown_grace_s != PLATFORM_STOP_WAIT_S:
             # 플랫폼은 설정과 무관하게 90초를 기다린다. 다른 값은 운영자가 짧은 정지를 기대하게 만들므로 시작 시점에 거부한다
             raise ValueError(
@@ -93,7 +101,10 @@ class Settings:
             instance_root=read("XENOVA_INSTANCE_ROOT", cls.instance_root, str),
             platform_lib=read("XENOVA_PLATFORM_LIB", cls.platform_lib, str),
             platform_busy_timeout_s=read("XENOVA_PLATFORM_BUSY_TIMEOUT", cls.platform_busy_timeout_s, float),
+            response_reserve_s=read("XENOVA_RESPONSE_RESERVE", cls.response_reserve_s, float),
             recovery_state_dir=read("XENOVA_RECOVERY_STATE_DIR", cls.recovery_state_dir, str),
             mock_samples=read("XENOVA_MOCK_SAMPLES", cls.mock_samples, as_bool),
             log_level=read("XENOVA_LOG_LEVEL", cls.log_level, str).upper(),
+            runtime_log_db=read("XENOVA_RUNTIME_LOG_DB", cls.runtime_log_db, str),
+            runtime_log_ingest_config=read("XENOVA_RUNTIME_LOG_INGEST_CONFIG", cls.runtime_log_ingest_config, str),
         )

@@ -226,7 +226,9 @@ function text(event: EventDto): string {
     return p.reason === 'operator_cancelled'
       ? '자율주행 복귀 취소 (운영자) — 수동주행 유지'
       : `자율주행 재개 취소${p.reason ? ` (${String(p.reason)})` : ''}`;
-  if (event.type === 'recovery.completed') return 'VM 복구 완료';
+  if (event.type === 'recovery.completed') return '새 Xen 실행 확인 · 앱 준비·주행권은 별도 확인';
+  if (event.type === 'recovery.recovered') return '다른 경로에서 회복 관측 · 주행권은 별도 확인';
+  if (event.type === 'recovery.cancelled') return '복구 취소 · 실패와 구분';
   if (event.type === 'drive.fault.detected') {
     const title = APP_TITLE[String(p.app_id)] ?? String(p.app_id ?? '앱');
     return `${title} 장애${p.reason ? ` (${String(p.reason)})` : ''}`;
@@ -248,6 +250,19 @@ export function applyEvent(t: Telemetry, event: EventDto, now: number, wallNow =
     if (app) {
       next.recoveringApps = { ...t.recoveringApps, [app]: true };
       next.apps = { ...t.apps, [app]: { ...t.apps[app], health: 'recovering', healthSince: now } };
+    }
+  }
+  if (
+    ['recovery.completed', 'recovery.recovered', 'recovery.cancelled', 'recovery.failed'].includes(
+      event.type,
+    ) &&
+    event.vm_id
+  ) {
+    const app = (Object.keys(t.appVmIds ?? {}) as AppId[]).find((id) => t.appVmIds?.[id] === event.vm_id);
+    if (app) {
+      // A terminal event ends the recovery marker; only a subsequent state report establishes readiness.
+      next.recoveringApps = { ...t.recoveringApps };
+      delete next.recoveringApps[app];
     }
   }
   return next;

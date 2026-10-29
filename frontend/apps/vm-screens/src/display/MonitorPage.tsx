@@ -1,9 +1,24 @@
+import { StatusBadge } from '@xenova/ui';
+import mark from '@xenova/ui/assets/xenova-mark.png';
 import { useEffect } from 'react';
 import { useParams } from 'react-router';
-import { ROLE, SOURCE_LABEL, type DisplayVm, type Presentation } from './model';
+import { ROLE, type DisplayVm, type Presentation } from './model';
 import { useDisplay } from './useDisplay';
 import styles from './monitor.module.css';
-
+const MODES: Record<string, string> = {
+  AUTO: '자율주행',
+  MANUAL: '수동주행',
+  AUTO_READY: '자율 재개 대기',
+  SAFE_STOP: '안전 정지',
+};
+const OS_NAMES: Record<string, string> = { zephyr: 'Zephyr', debian: 'Debian' };
+const osName = (name: string) => OS_NAMES[name] ?? name;
+function osReport(vm: DisplayVm, connected: boolean) {
+  if (!connected) return 'OS 보고 연결 미확인';
+  if (!vm.os.observed) return 'OS 보고 미수신';
+  if (vm.sources.inventory.status !== 'fresh') return 'OS 보고 지연 · 현재 OS 미확인';
+  return `OS 보고: ${osName(vm.os.observed)}${vm.os.current_run_verified ? '' : ' · 실행 연결 미검증'}`;
+}
 export function MonitorPage() {
   const { outputId } = useParams();
   const { presentation: p, connected, error } = useDisplay();
@@ -35,191 +50,194 @@ export function MonitorPage() {
     };
   }, [p, connected, output]);
 
-  if (outputId !== 'monitor-1' && outputId !== 'monitor-2')
-    return <main className={styles.screen}>알 수 없는 출력입니다.</main>;
-  const vm = p?.state.vms.find((v) => v.vm_id === output?.vm_id);
-  const controlFresh = connected && p?.state.drive.source.status === 'fresh';
-  const mode = controlFresh ? p.state.drive.mode : 'unknown';
+  if (outputId !== 'monitor-1' && outputId !== 'monitor-2') return <main>알 수 없는 출력입니다.</main>;
+  const instrument = outputId === 'monitor-1';
+  const mapped = output?.screen === (instrument ? 'instrument' : 'infotainment');
+  const fresh = connected && mapped && p?.state.drive.source.status === 'fresh';
+  const mode = fresh ? p.state.drive.mode : 'unknown';
+  const modeLabel = MODES[mode] ?? '주행 모드 미확인';
+  const selected = p?.state.vms.find((v) => v.vm_id === output?.vm_id);
+  const active = fresh ? p.state.vms.find((v) => v.vm_id === p.state.drive.active_vm_id) : null;
   return (
-    <main className={styles.screen} data-testid={outputId} data-connected={connected}>
+    <main className={styles.screen} data-theme="dark" data-testid={outputId} data-connected={connected}>
       <header className={styles.header}>
         <div>
-          <span className={styles.eyebrow}>PERSEUS / MULTI OS PLATFORM</span>
-          <h1>{outputId === 'monitor-1' ? 'VM 전체 상태' : 'VM 상세 화면'}</h1>
+          <span className={styles.eyebrow}>
+            <img src={mark} alt="Xenova" className={styles.brand} /> XENOVA / VEHICLE DISPLAY
+          </span>
+          <h1>{instrument ? '드라이버 계기판' : '인포테인먼트 · 게스트 데이터'}</h1>
         </div>
         <div className={styles.headerMeta}>
-          <span>{outputId === 'monitor-1' ? 'MONITOR 01' : 'MONITOR 02'}</span>
+          <span>HDMI {instrument ? '1' : '2'}</span>
           <strong className={connected ? styles.live : styles.warning}>
-            {connected ? '상태 피드 연결' : '연결 대기 / 중단'}
+            {connected ? '표시 연결됨' : '표시 연결 끊김'}
           </strong>
         </div>
       </header>
       {!connected && (
-        <div className={styles.alert} role="alert">
-          {error ?? '표시 상태를 기다리고 있습니다.'} {p && '아래 정보는 마지막 수신 값입니다.'}
+        <div role="alert" className={styles.alert}>
+          {error ?? '연결 대기'} · 현재 값은 미확인입니다.
         </div>
       )}
-      <section className={styles.drive} aria-label="주행 상태">
-        <div>
-          <small>주행 모드</small>
-          <strong>{mode === 'unknown' ? '미확인' : mode}</strong>
-        </div>
-        <div>
-          <small>활성 구동 VM</small>
-          <strong>{controlFresh ? activeLabel(p) : '미확인'}</strong>
-        </div>
-        <div>
-          <small>Jetson AI · 인식</small>
-          <strong>
-            {controlFresh && p.state.drive.ai_status !== 'unknown' ? p.state.drive.ai_status : '미확인'}
-          </strong>
-        </div>
-        <p>주·백업 전환과 자동·수동 전환을 별도로 표시합니다.</p>
-      </section>
-      {!p || !output ? (
-        <section className={styles.empty}>상태 수신 대기</section>
-      ) : output.view === 'overview' ? (
-        <section className={styles.grid} aria-label="VM 3개 전체 상태">
-          {[...p.state.vms]
-            .sort((a, b) => Object.keys(ROLE).indexOf(a.role) - Object.keys(ROLE).indexOf(b.role))
-            .map((v) => (
-              <VmCard key={v.vm_id} vm={v} p={p} connected={connected} />
-            ))}
-        </section>
-      ) : vm ? (
-        <section className={styles.detail}>
-          <VmCard key={vm.vm_id + vm.run_id} vm={vm} p={p} connected={connected} detailed />
-          <aside className={styles.inspector}>
-            <h2>수신 근거</h2>
-            <p className={styles.subtle}>소스별 연결 상태를 따로 확인합니다.</p>
-            <dl>
-              {(['xen', 'app', 'agent', 'inventory'] as const).map((key) => (
-                <div key={key}>
-                  <dt>
-                    {
-                      {
-                        xen: 'Xen 실행 정보',
-                        app: '앱 heartbeat',
-                        agent: 'VM Agent',
-                        inventory: 'OS inventory',
-                      }[key]
-                    }
-                  </dt>
-                  <dd>
-                    {!connected
-                      ? '화면 연결 끊김'
-                      : key === 'agent' && !vm.agent_supported
-                        ? '미지원'
-                        : SOURCE_LABEL[vm.sources[key].status]}
-                    {vm.sources[key].age_ms !== null &&
-                      ` · ${(vm.sources[key].age_ms / 1000).toFixed(1)}초 전`}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-            <h2>화면 선택</h2>
-            <p>{output.selection === 'pinned' ? '선택 VM 유지' : '확인된 활성 구동 VM 따라가기'}</p>
-            <p className={styles.subtle}>
-              주행 모드와 활성 구동 VM은 확인된 제어 상태를 기준으로 표시합니다.
-            </p>
-          </aside>
-        </section>
+      {!mapped ? (
+        <section className={styles.empty}>차량 화면 정책 수신 대기</section>
+      ) : instrument ? (
+        <>
+          <section className={styles.instrument} aria-label="차량 계기판">
+            <article className={styles.speed} aria-label="실제 차량 속도">
+              <span className={styles.caption}>VEHICLE SPEED</span>
+              <strong data-testid="speed-value">—</strong>
+              <span className={styles.unit}>km/h</span>
+              <p>속도 데이터 수신 대기</p>
+            </article>
+            <div className={styles.driveLane} aria-hidden="true">
+              <span />
+              <span />
+              <span />
+              <i />
+            </div>
+            <article className={styles.driveMode} aria-label="주행 모드">
+              <span className={styles.caption}>DRIVE MODE</span>
+              <strong>{modeLabel}</strong>
+              <span className={styles.modeCode}>{mode === 'unknown' ? '—' : mode}</span>
+              <p>확정된 주행 모드를 표시합니다.</p>
+            </article>
+            <article className={styles.battery} aria-label="차량 배터리">
+              <div>
+                <span>배터리 잔량</span>
+                <strong data-testid="battery-value">
+                  — <small>%</small>
+                </strong>
+              </div>
+              <div className={styles.batteryTrack} />
+              <p>배터리 데이터 수신 대기</p>
+            </article>
+          </section>
+          <Notices p={p} connected={connected} />
+        </>
       ) : (
-        <section className={styles.empty}>선택 VM 상태 수신 대기</section>
+        <>
+          <section className={styles.modeStrip} aria-label="주행 안내">
+            <strong>{modeLabel}</strong>
+            <span>현재 구동 {active ? ROLE[active.role].name : '미확인'}</span>
+          </section>
+          <section className={styles.vmStrip} aria-label="현재 켜진 VM">
+            {p?.state.vms.map((v) => {
+              const known = connected && v.sources.xen.status === 'fresh';
+              const running = known && v.xen_state === 'running';
+              const label = !known
+                ? '실행 미확인'
+                : running
+                  ? '켜짐'
+                  : ((
+                      {
+                        stopped: '꺼짐',
+                        crashed: '오류',
+                        paused: '일시 정지',
+                        stopping: '종료 중',
+                      } as Record<string, string>
+                    )[v.xen_state ?? ''] ?? '실행 미확인');
+              return (
+                <div key={v.vm_id} data-testid={`vm-${ROLE[v.role].name}`} data-running={running}>
+                  <span className={styles.dot} />
+                  <strong>{ROLE[v.role].name}</strong>
+                  <span>{ROLE[v.role].title}</span>
+                  <em>{label}</em>
+                </div>
+              );
+            })}
+          </section>
+          <section className={styles.contentGrid}>
+            <article className={styles.navigation} aria-label="네비게이션">
+              <div className={styles.panelHead}>
+                <h2>네비게이션</h2>
+                <span>안내 수신 대기</span>
+              </div>
+              <div className={styles.mapPlaceholder}>
+                <span className={styles.location}>⌖</span>
+                <h3>목적지 안내를 기다리고 있어요</h3>
+                <p>게스트 앱의 경로 데이터가 아직 연결되지 않았습니다.</p>
+              </div>
+            </article>
+            <div className={styles.rightColumn}>
+              <article className={styles.music} aria-label="음악">
+                <span className={styles.caption}>MUSIC</span>
+                <div className={styles.album}>♪</div>
+                <h2>재생 정보 수신 대기</h2>
+                <p>음악 앱 연결 대기 · 재생 중인 곡 미확인</p>
+              </article>
+              <article
+                className={styles.guest}
+                aria-label="게스트 콘텐츠"
+                key={(selected?.vm_id ?? '') + (selected?.run_id ?? '')}
+              >
+                <span className={styles.caption}>GUEST CONTENT</span>
+                <h2>
+                  {selected
+                    ? `${ROLE[selected.role].name} · ${ROLE[selected.role].title}`
+                    : '선택 게스트 대기'}
+                </h2>
+                <p>
+                  {!connected
+                    ? '연결 끊김 · 게스트 콘텐츠 표시 중단'
+                    : selected
+                      ? p?.decisions[selected.vm_id]?.label
+                      : '선택된 게스트 없음'}
+                </p>
+                {selected && (
+                  <p data-testid="guest-os">
+                    설정 OS: {osName(selected.os.expected)} · {osReport(selected, connected)}
+                  </p>
+                )}
+                <small>
+                  {selected?.screen_source.kind === 'graphics'
+                    ? '게스트 영상 어댑터 연결 대기'
+                    : 'domU 앱 화면·데이터 수신 대기'}
+                </small>
+                {output.reason && (
+                  <p>{connected ? output.reason : '화면 연결 끊김 · 마지막 화면 선택 유지'}</p>
+                )}
+              </article>
+            </div>
+          </section>
+          <Notices p={p} connected={connected} />
+        </>
       )}
       <footer className={styles.footer}>
-        <span>LOCAL DISPLAY · 읽기 전용</span>
-        <span>{p ? `정책 ${p.revision} · 렌더 ${p.render_revision.slice(0, 8)}` : '초기 연결 중'}</span>
+        <span>읽기 전용 · {instrument ? '시연 연출: 대기 배경' : '차량 인포테인먼트'}</span>
+        <span>수신되지 않은 값은 대기로 표시합니다.</span>
       </footer>
     </main>
   );
 }
-
-function activeLabel(p: Presentation): string {
-  const vm = p.state.vms.find((v) => v.vm_id === p.state.drive.active_vm_id);
-  return vm ? `${ROLE[vm.role].name} · ${ROLE[vm.role].title}` : '없음 / 미확인';
-}
-
-function VmCard({
-  vm,
-  p,
-  connected,
-  detailed = false,
-}: {
-  vm: DisplayVm;
-  p: Presentation;
-  connected: boolean;
-  detailed?: boolean;
-}) {
-  const meta = ROLE[vm.role];
-  const decision = p.decisions[vm.vm_id]!;
-  const active =
-    connected && p.state.drive.source.status === 'fresh' && p.state.drive.active_vm_id === vm.vm_id;
+function Notices({ p, connected }: { p: Presentation | null; connected: boolean }) {
+  const notices =
+    connected && p
+      ? p.state.vms.flatMap((v) => {
+          const d = p.decisions[v.vm_id];
+          return d &&
+            (d.tone === 'danger' ||
+              ['operation', 'stale', 'stopped', 'stopping', 'paused', 'waiting', 'os_mismatch'].includes(
+                d.kind,
+              ))
+            ? [{ id: v.vm_id, text: `${ROLE[v.role].name} · ${d.label}`, tone: d.tone, kind: d.kind }]
+            : [];
+        })
+      : [];
   return (
-    <article
-      className={styles.card}
-      data-role={vm.role}
-      data-kind={connected ? decision.kind : 'stale'}
-      data-testid={`card-${meta.name}`}
-    >
-      <div className={styles.cardHead}>
-        <span>
-          {meta.name} / {meta.title}
-        </span>
-        {active && <strong className={styles.active}>활성 구동</strong>}
-      </div>
-      <div className={styles.face} data-os={vm.os.expected}>
-        <span className={styles.osMark}>{vm.os.expected === 'zephyr' ? 'Z' : 'D'}</span>
-        <div>
-          <h2>{vm.os.expected === 'zephyr' ? 'Zephyr RTOS' : 'Debian GNU/Linux'}</h2>
-          <p>{meta.note}</p>
-        </div>
-      </div>
-      <div className={styles.status} data-tone={connected ? decision.tone : 'warning'}>
-        {connected ? decision.label : '상태 연결 끊김 · 마지막 관측 값'}
-      </div>
-      <dl className={styles.facts}>
-        <div>
-          <dt>기대 OS</dt>
-          <dd>{vm.os.expected}</dd>
-        </div>
-        <div>
-          <dt>관측 OS</dt>
-          <dd>
-            {vm.os.observed ?? '근거 미수신'}
-            {vm.os.observed && !vm.os.current_run_verified && ' · 현재 부팅 확인 전'}
-          </dd>
-        </div>
-        <div>
-          <dt>Xen 상태{!connected ? ' (과거)' : ''}</dt>
-          <dd>{vm.xen_state ?? '미확인'}</dd>
-        </div>
-        <div>
-          <dt>앱 상태{!connected ? ' (과거)' : ''}</dt>
-          <dd>{vm.app_state === 'unknown' ? '미확인' : vm.app_state}</dd>
-        </div>
-      </dl>
-      {detailed && (
-        <section className={styles.appArea}>
-          <h3>앱 · 상태 화면</h3>
-          <p>
-            {vm.screen_source.kind === 'graphics'
-              ? '그래픽 소스 연결 대기'
-              : '현재는 상태 화면을 표시합니다.'}
-          </p>
-          <small>앱 화면 소스가 아직 연결되지 않았습니다.</small>
-        </section>
+    <section className={styles.notices} aria-label="오류·복구 알림">
+      <span>알림</span>
+      {notices.length ? (
+        notices.map((n) => (
+          <StatusBadge
+            key={n.id}
+            health={n.tone === 'danger' ? 'fault' : n.kind === 'stopped' ? 'stopped' : 'recovering'}
+            label={n.text}
+          />
+        ))
+      ) : (
+        <p>{connected ? '오류·복구 이벤트 수신 대기' : '알림 연결 미확인'}</p>
       )}
-      <div className={styles.identity}>
-        <span>VM UUID</span>
-        <code>{vm.vm_id}</code>
-        {detailed && (
-          <>
-            <span>관측 실행 ID</span>
-            <code>{vm.run_id ?? '미확인'}</code>
-          </>
-        )}
-      </div>
-    </article>
+    </section>
   );
 }

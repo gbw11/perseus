@@ -82,6 +82,41 @@ class ErrorCode(str, Enum):
     PlatformUnavailable = "PlatformUnavailable"  # 503 registry·저장소·Xen 일시 장애
     NotSupported = "NotSupported"  # 501 플랫폼이 아직 제공하지 않는 동작
     Unauthorized = "Unauthorized"  # 401 Bearer 서비스 토큰 없음·불일치. 미들웨어가 내며 /healthz 포함
+    OperationNotFound = "OperationNotFound"  # 404 요청 키로 원 제어 작업을 찾지 못함 (검색 부재, 미수락 증거 아님)
+
+
+class ControlStatus(str, Enum):
+    """제어 요청(현재 stop)의 상태. 실제 VM 상태(GET /vms/{id})와 별개다."""
+
+    pending = "pending"  # 정지 의도를 내구 수락했고 실행이 남음. 같은 키로 재전달하면 원 작업을 이어 간다
+    completed = "completed"  # 원 작업 완료
+    failed = "failed"  # 원 작업 실패 확정. 수락된 의도(stopped)는 되돌리지 않는다
+    uncertain = "uncertain"  # 플랫폼이 결과를 안전하게 확정하지 못함. 자동 재시도·새 키 금지, 원 기록 조사
+    superseded = "superseded"  # 이후 사용자 의도가 수락돼 이 요청은 대체됨. 원 결과로 현재 상태를 덮지 않는다
+    unknown = "unknown"  # 수락 여부를 확인하지 못함(응답 유실·수락 저장 미확인). 미수락으로 추측하지 않는다
+    rejected = "rejected"  # 수락 전에 거절됨. 의도는 바뀌지 않았다
+
+
+class ControlOperation(BaseModel):
+    """제어 요청 하나의 상태(S15P31E110-305). 하위 원 작업 기록 중 허용된 필드만 담는다(raw journal·경로·인증정보 없음)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vm_id: UUID
+    action: str = Field(description="현재 stop")
+    request_key: str | None = Field(default=None, description="최초 제출 전에 호출자가 정한 Idempotency-Key")
+    operation_id: UUID | None = Field(default=None, description="하위 원 제어 작업. 수락 전 거절·작업 기록 없는 드라이버면 null")
+    status: ControlStatus
+    accepted: bool | None = Field(default=None, description="의도 수락 여부. 확인하지 못했으면 null")
+    phase: str | None = Field(default=None, description="원 작업 단계(prepared·accepted·executing·completed·failed·uncertain)")
+    intent_revision: int | None = Field(default=None, description="내구 수락한 의도의 순서")
+    host_boot_id: str | None = Field(default=None, description="수락한 host 부팅")
+    lifecycle_generation: int | None = None
+    deadline_monotonic_ms: int | None = Field(default=None, description="원 실행 기한(그 host 의 단조 시각 ms). 다른 시계와 비교하지 않는다")
+    execution_deadline_expired: bool | None = Field(default=None, description="같은 host 에서 원 기한이 지났는가. 확인할 수 없으면 null")
+    next_action: str | None = Field(default=None, description="플랫폼이 권하는 다음 동작(진단 문자열, 고정 열거값 아님)")
+    error_code: str | None = Field(default=None, description="원 작업의 플랫폼 오류 코드")
+    warnings: list[str] = Field(default_factory=list, description="진단 경고 코드(DIAGNOSTIC_UNAVAILABLE 등). 결과를 바꾸지 않는다")
 
 
 class Error(BaseModel):
@@ -95,6 +130,8 @@ class Error(BaseModel):
         default=None,
         description="플랫폼 Manager 가 준 원본 오류 코드(HOST_QUIESCING 등). 플랫폼 오류에만 있다. 분기는 detail 문자열이 아니라 이 값으로 한다",
     )
+    retryable: bool | None = Field(default=None, description="플랫폼이 준 원본 재시도 가능 여부. 코드만으로 재시도 정책을 만들지 않는다")
+    operation: ControlOperation | None = Field(default=None, description="제어 요청이 받아들여진 뒤의 오류에만 있다. 원 작업 문맥")
 
 
 class HealthStatus(str, Enum):

@@ -222,6 +222,19 @@ def platform_root(root):
     for name, text in [('qemu-config-host.h', '#define CONFIG_VNC 1\n#define CONFIG_XEN_BACKEND 1\n'),
                        ('qemu-i386-config-target.h', '#define CONFIG_XEN 1\n')]:
         (root / 'usr/share/xenova' / name).write_text(text)
+    tailscale=ROOT/'platform/yocto/meta-xenova/recipes-connectivity/tailscale/files'
+    for relative,name in [('usr/sbin/xenova-tailscale-state','xenova-tailscale-state'),
+                          ('usr/lib/systemd/system/tailscaled.service.d/20-xenova-persistence.conf','20-xenova-persistence.conf')]:
+        target=root/relative;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes((tailscale/name).read_bytes())
+    for name in ('tailscale','tailscaled'):
+        target=root/('usr/bin/' if name=='tailscale' else 'usr/sbin/')/name
+        target.write_text('packaging fixture: not a Tailscale implementation');target.chmod(0o755)
+    (root/'usr/sbin/xenova-tailscale-state').chmod(0o755)
+    (root/'usr/lib/systemd/system/tailscaled.service').write_text('[Service]\nExecStart=/usr/sbin/tailscaled\n')
+    (wants/'tailscaled.service').symlink_to('/usr/lib/systemd/system/tailscaled.service')
+    for relative in ('kernel/drivers/net/tun.ko','kernel/net/ipv6/ipv6.ko'):
+        target=root/'usr/lib/modules/6.18.33-v8'/relative;target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_bytes(b'packaging fixture: not a kernel module')
     return root
 
 

@@ -1,0 +1,18 @@
+{
+  "meta_raspberrypi_commit": "919588393f41b48cb6c5d832aa35e58a19b6762d",
+  "linux_commit": "95b85bebbedcaedfa7ca79116ed38b7376fba412",
+  "kernel_version": "6.18.33",
+  "overlay_sha256": "155ec071f26a8d45c4524ee00c5037ad7ceb8cc81d221640b9d9d7177c416ddf",
+  "sources": {
+    "cma-overlay.dts": "a6846aac7f4523f14ac6b693f40bce203b9926905211970d634251f2305b30ef",
+    "include/dt-bindings/clock/bcm2835.h": "6be4dec6ec320185e3ebf243ec06b61e687493e0c9500f0e486d2dec639ad0b6",
+    "overlay_map.dts": "c35bdbe12cdc64f36ae1670bd9f66bf84cb5f4e2b7644de5398ca981310f9614",
+    "vc4-kms-v3d-overlay.dts": "631e8ada491b2eb23e5a095483126eb27af1624c3e4c2bbc719ec198b1bc2ec8",
+    "vc4-kms-v3d-pi4-overlay.dts": "317f33bdcce8ce21f1e112d33df53f28b692833c6550898406ba9420497cc8a5",
+    "vc4-kms-v3d-pi4.preprocessed.dts": "d3fd9f10b635c17f913738500ab72c43ddf5893765bbc7771f14ecf4a85f90f5"
+  },
+  "offline_apply_hdmi0": "okay",
+  "offline_apply_hdmi1": "okay",
+  "offline_apply_hvs": "okay",
+  "offline_parameterized_cma_bytes": 67108864
+}

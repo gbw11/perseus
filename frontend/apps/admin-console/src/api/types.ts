@@ -128,6 +128,8 @@ export type EventType =
   | 'agent.status.changed'
   | 'recovery.started'
   | 'recovery.completed'
+  | 'recovery.recovered'
+  | 'recovery.cancelled'
   | 'recovery.failed'
   | 'demo.command.sent'
   | 'demo.command.completed'
@@ -169,8 +171,11 @@ export interface MetricValue {
 export interface MetricSample {
   sample_id: string;
   vm_id: string;
+  boot_id?: string | null;
   source: string;
   observed_at: string;
+  received_at?: string;
+  window_ms?: number | null;
   values: MetricValue[];
 }
 

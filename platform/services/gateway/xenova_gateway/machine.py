@@ -80,6 +80,7 @@ class ForwardDrive:
     generation: int
     v_mps: float
     steer_rad: float
+    source: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

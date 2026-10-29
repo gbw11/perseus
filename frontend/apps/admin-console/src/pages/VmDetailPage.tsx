@@ -1,12 +1,14 @@
 import { Button, Card, StatusBadge, useToast } from '@xenova/ui';
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useState, type CSSProperties } from 'react';
 import { Link, useParams } from 'react-router';
 import { ApiError } from '../api/client';
-import { useMetrics, useProcesses, useVm, useVmAction, type VmAction } from '../api/queries';
+import { useEvents, useMetrics, useProcesses, useVm, useVmAction, type VmAction } from '../api/queries';
 import type { MetricSample, Vm } from '../api/types';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
-import { ago, osLabel, roleOf } from '../domain/roles';
+import { clock, describe } from '../domain/events';
+import { ago, appHealth, MODE_LABEL, osLabel, roleOf } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
+import { RuntimeLogsPanel } from '../console/RuntimeLogsPanel';
 import styles from './pages.module.css';
 
 const ConsolePanel = lazy(() =>
@@ -22,10 +24,10 @@ const TABS: [Tab, string][] = [
 
 /**
  * W-04 VM 상세 (화면 정의서 W-04, UI-04·UI-05) — 초안. 화면 완성은 정수환 담당 작업이 이어받는다.
- * Zephyr 는 에이전트가 없어 차트·프로세스 대신 안내를 보인다. 웹 콘솔은 카드 아래(-248)와 위쪽 메뉴 [웹 콘솔](/console) 둘 다.
+ * Zephyr 는 에이전트가 없어 차트·프로세스 대신 안내를 보인다. 웹 콘솔은 카드 아래와 Dashboard의 Console 탭에 있다.
  * 참고 시안: stitch_untitled_project/ui_04_vm, ui_05.
  */
-export function VmDetailPage() {
+export function LegacyVmDetailPage() {
   const { vmId = '' } = useParams();
   const vm = useVm(vmId);
   const { drive } = useDrive();
@@ -39,7 +41,7 @@ export function VmDetailPage() {
       <section className={styles.pageHead} style={{ borderTop: `3px solid ${color}` }}>
         <div>
           <div className={styles.eyebrow}>
-            <Link to="/vms">VM 목록</Link> / {vm.data?.name ?? vmId}
+            <Link to="/control">VM 목록</Link> / {vm.data?.name ?? vmId}
           </div>
           <h1 style={{ color }}>{role?.title ?? vm.data?.name ?? 'VM 상세'}</h1>
         </div>
@@ -89,6 +91,7 @@ export function VmDetailPage() {
       {vm.data && (
         <Suspense fallback={<p className={styles.dim}>콘솔 준비 중…</p>}>
           <ConsolePanel key={vm.data.vm_id} vm={vm.data} />
+          <RuntimeLogsPanel key={`logs-${vm.data.vm_id}`} vmId={vm.data.vm_id} />
         </Suspense>
       )}
     </div>
@@ -282,5 +285,196 @@ function Processes({ vmId }: { vmId: string }) {
         </tbody>
       </table>
     </>
+  );
+}
+
+/** S15P31E110-299: 제어 작업과 분리한 관측 중심 VM 상세 화면. */
+export function VmDetailPage() {
+  const { vmId = '' } = useParams();
+  const vm = useVm(vmId);
+  const events = useEvents({ vm_id: vmId, limit: 8 });
+  const { drive } = useDrive();
+  const role = vm.data ? roleOf(vm.data, drive) : null;
+  const app = role ? drive?.apps[role.app] : undefined;
+  const color = role?.color ?? 'var(--x-primary)';
+  const authority =
+    !role?.driving || !vm.data || vm.data.state !== 'running'
+      ? 'NONE'
+      : drive?.control?.active_vm_id
+        ? drive.control.active_vm_id === vm.data.vm_id
+          ? 'ACTIVE'
+          : 'STANDBY'
+        : drive?.control?.active_app === role.app
+          ? 'ACTIVE'
+          : drive?.control?.active_app
+            ? 'STANDBY'
+            : 'NONE';
+  const health = vm.data && role ? appHealth(role, vm.data, app) : 'stopped';
+  const appLabel = !app
+    ? 'Unknown'
+    : health === 'ok'
+      ? 'Ready'
+      : health === 'recovering'
+        ? 'Degraded'
+        : health === 'fault'
+          ? 'Failed'
+          : 'Unknown';
+
+  return (
+    <div className={styles.vmDetailPage} style={{ '--vm-accent': color } as CSSProperties}>
+      <section className={styles.vmDetailHero}>
+        <div>
+          <div className={styles.eyebrow}>
+            <Link to="/dashboard/overview">VM Dashboard</Link> / {role?.vmLabel ?? vm.data?.name ?? vmId}
+          </div>
+          <h1>{role?.vmLabel ?? vm.data?.name ?? 'VM Detail'}</h1>
+          <p>
+            {role?.title ?? 'Virtual Machine'} · {vm.data ? osLabel(vm.data) : 'Loading'}
+          </p>
+        </div>
+        <div className={styles.vmDetailBadges}>
+          {role?.driving && (
+            <span className={styles.authority} data-authority={authority.toLowerCase()}>
+              {authority}
+            </span>
+          )}
+          {vm.data && (
+            <StatusBadge health={STATE_HEALTH[vm.data.state]} label={STATE_LABEL[vm.data.state]} size="lg" />
+          )}
+        </div>
+      </section>
+
+      {vm.isPending && <div className={styles.statePanel}>VM 상세 정보를 불러오는 중입니다…</div>}
+      {vm.error && (
+        <div className={styles.statePanel} role="alert">
+          {vm.error instanceof ApiError ? `${vm.error.message} (${vm.error.code})` : String(vm.error)}
+        </div>
+      )}
+
+      {vm.data && (
+        <>
+          <div className={styles.vmDetailGrid}>
+            <Card title="Identity & state" accent={color}>
+              <div className={styles.rows}>
+                <div>
+                  <span>VM ID</span>
+                  <span>{vm.data.vm_id}</span>
+                </div>
+                <div>
+                  <span>Role</span>
+                  <span>{role?.title ?? 'Unassigned'}</span>
+                </div>
+                <div>
+                  <span>VM state</span>
+                  <span>{STATE_LABEL[vm.data.state]}</span>
+                </div>
+                <div>
+                  <span>App state</span>
+                  <span>{appLabel}</span>
+                </div>
+                <div>
+                  <span>Control authority</span>
+                  <span>{authority}</span>
+                </div>
+                {role?.driving && (
+                  <div>
+                    <span>Drive mode</span>
+                    <span>{drive?.control?.mode ? MODE_LABEL[drive.control.mode] : 'Unknown'}</span>
+                  </div>
+                )}
+                <div>
+                  <span>Heartbeat</span>
+                  <span>{app?.heartbeat_ago_ms != null ? ago(app.heartbeat_ago_ms) : 'Unknown'}</span>
+                </div>
+              </div>
+            </Card>
+
+            <Card title="Assigned resources">
+              <div className={styles.resourceFacts}>
+                <div>
+                  <span>vCPU</span>
+                  <strong>{vm.data.vcpus}</strong>
+                </div>
+                <div>
+                  <span>Memory</span>
+                  <strong>
+                    {vm.data.memory_mib}
+                    <small> MiB</small>
+                  </strong>
+                </div>
+                <div>
+                  <span>Network</span>
+                  <strong>{vm.data.guest_kind === 'zephyr' ? 'vchan' : (vm.data.ipv4 ?? '—')}</strong>
+                </div>
+              </div>
+              <div className={styles.rows}>
+                <div>
+                  <span>Template</span>
+                  <span>{vm.data.template_id}</span>
+                </div>
+                <div>
+                  <span>Version</span>
+                  <span>{vm.data.template_version}</span>
+                </div>
+                <div>
+                  <span>Agent</span>
+                  <span>{vm.data.agent_status ?? 'UNKNOWN'}</span>
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          <Card
+            title="CPU & Memory telemetry"
+            actions={<span className={styles.dim}>최근 5분 · 실제 수신 데이터</span>}
+          >
+            {vm.data.guest_kind === 'linux' ? (
+              <Charts vmId={vm.data.vm_id} />
+            ) : (
+              <div className={styles.telemetryEmpty}>
+                <strong>Guest metrics not reported</strong>
+                <span>Zephyr VM은 현재 메트릭 API를 제공하지 않습니다. 0%로 표시하지 않습니다.</span>
+              </div>
+            )}
+          </Card>
+
+          <Card title="Recent lifecycle & recovery events">
+            <div className={styles.detailEvents}>
+              {(events.data?.items ?? []).map((event) => {
+                const summary = describe(event, () => role?.vmLabel ?? vm.data.name);
+                return (
+                  <div key={event.event_id}>
+                    <span className={styles.mono}>{clock(event.occurred_at)}</span>
+                    <span className={`${styles.sev} ${styles[`sev${event.severity}`]}`}>
+                      {event.severity}
+                    </span>
+                    <div>
+                      <strong>{summary.title}</strong>
+                      {summary.detail && <small>{summary.detail}</small>}
+                    </div>
+                  </div>
+                );
+              })}
+              {!events.isPending && (events.data?.items.length ?? 0) === 0 && (
+                <p className={styles.dim}>최근 lifecycle·장애·복구 이벤트가 없습니다.</p>
+              )}
+              {events.error && <p className={styles.error}>이벤트를 불러오지 못했습니다.</p>}
+            </div>
+          </Card>
+
+          <Suspense fallback={<div className={styles.statePanel}>콘솔을 준비하는 중입니다…</div>}>
+            <ConsolePanel key={vm.data.vm_id} vm={vm.data} />
+          </Suspense>
+
+          <div className={styles.controlHandoff}>
+            <div>
+              <strong>Lifecycle control</strong>
+              <span>시작·정지·삭제 같은 작업은 관측 화면과 분리되어 있습니다.</span>
+            </div>
+            <Link to="/control">VM Control에서 관리 →</Link>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

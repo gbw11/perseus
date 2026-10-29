@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import UUID
 
+from .. import budget as request_budget
 from ..errors import DriverError, DriverTimeout, PlatformUnavailable
 from ..models import UnavailableReason, VmState
 from .base import DomainStats, StatsSample
@@ -262,9 +263,10 @@ class Xentop:
         self._clock = clock
 
     def sample(self, *, timeout_s: float | None = None) -> tuple[list[XentopRow], datetime]:
-        """timeout_s 는 상위 요청이 남은 예산을 줄 때만 넘긴다. 기본은 자체 시한."""
+        """timeout_s 는 상위 요청이 남은 예산을 줄 때만 넘긴다. 기본은 자체 시한. 요청 예산(budget.py)이 더 짧으면 그 값이다."""
+        limit = request_budget.clamp(self.timeout_s if timeout_s is None else timeout_s, "xentop")
         try:
-            result = self._runner.run(list(XENTOP_ARGS), timeout_s=self.timeout_s if timeout_s is None else timeout_s)
+            result = self._runner.run(list(XENTOP_ARGS), timeout_s=limit)
         except CommandUnavailable as exc:
             raise PlatformUnavailable("xentop is not available on this host", detail=exc.detail) from exc
         if result.returncode != 0:

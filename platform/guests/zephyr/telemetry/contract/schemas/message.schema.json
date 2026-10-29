@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Xenova Telemetry Publisher 2.0 — normative message schema",
+  "title": "Xenova Telemetry Publisher 2.1",
   "description": "NEW protocol proposal; fixtures are synthetic and are not hardware evidence.",
   "type": "object",
   "properties": {
     "schema_version": {
-      "const": "2.0"
+      "const": "2.1"
     },
     "type": {
       "enum": [
@@ -799,7 +799,7 @@
               "maxLength": 32
             },
             "metric_catalog": {
-              "const": "xenova-telemetry-core-2.0"
+              "const": "xenova-telemetry-core-2.1"
             }
           },
           "required": [
@@ -1101,6 +1101,129 @@
             "collection",
             "family",
             "distribution"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "$ref": "#/$defs/collection"
+            },
+            "family": {
+              "const": "cpu"
+            },
+            "samples": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sample"
+              },
+              "minItems": 1,
+              "maxItems": 12
+            },
+            "window": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sample_seq",
+                "start_uptime_ms",
+                "end_uptime_ms",
+                "scope",
+                "part_index",
+                "part_count",
+                "threads_status",
+                "rows_seen",
+                "rows_returned"
+              ],
+              "properties": {
+                "sample_seq": {
+                  "$ref": "#/$defs/u64"
+                },
+                "start_uptime_ms": {
+                  "$ref": "#/$defs/u64"
+                },
+                "end_uptime_ms": {
+                  "$ref": "#/$defs/u64"
+                },
+                "scope": {
+                  "const": "guest_accounted_up"
+                },
+                "part_index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 7
+                },
+                "part_count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                },
+                "threads_status": {
+                  "enum": [
+                    "ok",
+                    "truncated",
+                    "unsupported",
+                    "no_sample",
+                    "collection_failed"
+                  ]
+                },
+                "rows_seen": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "rows_returned": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 32
+                }
+              }
+            }
+          },
+          "required": [
+            "collection",
+            "family",
+            "samples",
+            "window"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "$ref": "#/$defs/collection"
+            },
+            "family": {
+              "const": "memory_regions"
+            },
+            "samples": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sample"
+              },
+              "minItems": 1,
+              "maxItems": 12
+            },
+            "source_sample_seq": {
+              "$ref": "#/$defs/u64"
+            },
+            "observed_uptime_ms": {
+              "$ref": "#/$defs/u64"
+            }
+          },
+          "required": [
+            "collection",
+            "family",
+            "samples",
+            "source_sample_seq",
+            "observed_uptime_ms"
           ],
           "additionalProperties": false
         }

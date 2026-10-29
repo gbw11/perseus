@@ -2,6 +2,7 @@
 cmake_minimum_required(VERSION 3.20.5)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(xenova_lifecycle)
+zephyr_link_libraries(-Wl,--wrap=xnf_poll,--wrap=z_impl_k_thread_create)
 set(BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../../guests/zephyr)
 target_include_directories(app BEFORE PRIVATE boundaries ${BASE}/xen-runtime/include ${BASE}/xen-store/include)
 target_compile_definitions(app PRIVATE CONFIG_XENOVA_NETFRONT=1

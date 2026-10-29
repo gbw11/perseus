@@ -1,0 +1,84 @@
+{
+  "devices": [
+    {
+      "device": "/dev/fb0",
+      "id": "BCM2708 FB",
+      "smem_start": 1045508096,
+      "smem_len": 7179264,
+      "visual": 2,
+      "line_length": 7296,
+      "xres": 1824,
+      "yres": 984,
+      "xres_virtual": 1824,
+      "yres_virtual": 984,
+      "xoffset": 0,
+      "yoffset": 0,
+      "bits_per_pixel": 32,
+      "grayscale": 0,
+      "channels": {
+        "red": {
+          "offset": 0,
+          "length": 8,
+          "msb_right": 0
+        },
+        "green": {
+          "offset": 8,
+          "length": 8,
+          "msb_right": 0
+        },
+        "blue": {
+          "offset": 16,
+          "length": 8,
+          "msb_right": 0
+        },
+        "transp": {
+          "offset": 24,
+          "length": 8,
+          "msb_right": 0
+        }
+      },
+      "tty1_framebuffer": 0
+    },
+    {
+      "device": "/dev/fb1",
+      "id": "simple",
+      "smem_start": 1045508096,
+      "smem_len": 7179264,
+      "visual": 2,
+      "line_length": 7296,
+      "xres": 1824,
+      "yres": 984,
+      "xres_virtual": 1824,
+      "yres_virtual": 984,
+      "xoffset": 0,
+      "yoffset": 0,
+      "bits_per_pixel": 32,
+      "grayscale": 0,
+      "channels": {
+        "red": {
+          "offset": 16,
+          "length": 8,
+          "msb_right": 0
+        },
+        "green": {
+          "offset": 8,
+          "length": 8,
+          "msb_right": 0
+        },
+        "blue": {
+          "offset": 0,
+          "length": 8,
+          "msb_right": 0
+        },
+        "transp": {
+          "offset": 24,
+          "length": 8,
+          "msb_right": 0
+        }
+      },
+      "tty1_framebuffer": 0,
+      "capture_sha256": "af3a988cc16c8cf0f7ee9592b12d66415f8f97d50818684a1a891e5c61e6f715"
+    }
+  ],
+  "writes": false
+}

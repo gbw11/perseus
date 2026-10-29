@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import json
 import os
+import signal
 from pathlib import Path
 import tempfile
 import time
@@ -21,13 +22,14 @@ def write_status(path, value):
 
 
 class Kiosk:
-    def __init__(self, config, token, status_path, *, allow_virtual=False, chromium_path=None, test_no_sandbox=False):
+    def __init__(self, config, token, status_path, *, allow_virtual=False, chromium_path=None, test_no_sandbox=False, prevent_idle_blank=False):
         if not token: raise ValueError("XENOVA_DISPLAY_TOKEN required")
         if test_no_sandbox and config.backend != "virtual_x11":
             raise ValueError("sandbox bypass is restricted to virtual test mode")
         self.config, self.token, self.status_path = config, token, status_path
         self.layout = X11Layout(config, allow_virtual=allow_virtual)
         self.chromium_path, self.test_no_sandbox = chromium_path, test_no_sandbox
+        self.prevent_idle_blank = prevent_idle_blank
         self.epoch = str(uuid4())
         self.contexts, self.pages, self.renewed = {}, {}, {}
         self.profiles = {}
@@ -85,6 +87,15 @@ class Kiosk:
         if profile: profile.cleanup()
 
     async def run(self):
+        from .idle import X11IdleGuard
+        guard = X11IdleGuard(self.config.display) if self.prevent_idle_blank else None
+        try:
+            if guard: await asyncio.to_thread(guard.enable)
+            await self._run()
+        finally:
+            if guard: await asyncio.to_thread(guard.restore)
+
+    async def _run(self):
         from playwright.async_api import async_playwright
         async with async_playwright() as playwright:
             try:
@@ -158,8 +169,19 @@ if __name__ == "__main__":
     parser.add_argument("--allow-virtual", action="store_true")
     parser.add_argument("--test-no-sandbox", action="store_true")
     parser.add_argument("--chromium")
+    parser.add_argument("--prevent-idle-blank", action="store_true", help="dedicated X11 session only")
     args = parser.parse_args()
     kiosk = Kiosk(RuntimeConfig.load(args.config), os.environ.get("XENOVA_DISPLAY_TOKEN"), args.status,
-                  allow_virtual=args.allow_virtual, chromium_path=args.chromium, test_no_sandbox=args.test_no_sandbox)
-    try: asyncio.run(kiosk.run())
+                  allow_virtual=args.allow_virtual, chromium_path=args.chromium, test_no_sandbox=args.test_no_sandbox, prevent_idle_blank=args.prevent_idle_blank)
+    async def serve():
+        task = asyncio.current_task()
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGTERM, task.cancel)
+        try:
+            await kiosk.run()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            loop.remove_signal_handler(signal.SIGTERM)
+    try: asyncio.run(serve())
     except KeyboardInterrupt: pass

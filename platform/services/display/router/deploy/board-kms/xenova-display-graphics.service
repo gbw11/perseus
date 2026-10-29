@@ -1,0 +1,18 @@
+[Unit]
+Description=Xenova dedicated KMS X11 session
+After=local-fs.target systemd-udev-settle.service
+Wants=xenova-display-kiosk.service
+PartOf=xenova-display.target
+[Service]
+Type=notify
+NotifyAccess=main
+Environment=XENOVA_GRAPHICS_ROOT=@GRAPHICS_ROOT@
+RuntimeDirectory=xenova-display
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/python3 /opt/xenova-display/current/bin/graphics-session.py
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+KillMode=mixed
+UMask=0077

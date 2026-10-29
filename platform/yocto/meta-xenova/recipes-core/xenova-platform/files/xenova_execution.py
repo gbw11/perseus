@@ -332,6 +332,16 @@ class Execution:
                  'intent_sha256':fingerprint(intent), 'record_sha256':fingerprint(record),
                  "phase":"launching", "owner":owner, "prepared_monotonic_ms":int(self.p.clock()*1000),
                  "configuration_sha256":fingerprint(self.p.config(record)), "domid":None, "xen_unique_id":None}
+        if vm.guest_kind(record) == 'zephyr':
+            # Capture the verified loader input before submission, never hash the
+            # latest file later and label it as an already running execution.
+            from xenova_zephyr import active_directory, bundle_info
+            directory=self.data/'instances'/record['id']
+            info=bundle_info(active_directory(directory,record),record['active_firmware']['revision'])
+            value['loaded_artifact']={'file':'zephyr.bin','artifact_sha256':info['sha256'],
+                'manifest_sha256':info['revision'],'build_id':info['source'].get('build_id'),
+                'display_name':record.get('display_name'),'hostname':record.get('hostname'),
+                'internal_name':record['name']}
         if self.p.process_isolation:
             from xenova_guest_process import scope_name
             previous=self.run_record(record)
@@ -374,6 +384,12 @@ class Execution:
             refuse('TARGET_CHANGED', 'launch record, lifecycle, intent or owner changed')
         if fingerprint(self.p.config(record)) != value['configuration_sha256']:
             refuse('TARGET_CHANGED', 'launch configuration changed')
+        if value.get('loaded_artifact'):
+            from xenova_zephyr import active_directory,bundle_info
+            info=bundle_info(active_directory(self.data/'instances'/record['id'],record),record['active_firmware']['revision'])
+            loaded=value['loaded_artifact']
+            if info['sha256']!=loaded['artifact_sha256'] or info['revision']!=loaded['manifest_sha256']:
+                refuse('TARGET_CHANGED','verified loader artifact changed before submission/binding')
         if self.p.cpu().context(record) != value.get('cpu_policy', {'configured':False}):
             refuse('TARGET_CHANGED', 'launch CPU policy changed')
         if self.p.clock() >= deadline:
@@ -417,7 +433,8 @@ class Execution:
         if self.run_record(record) != value or value.get('phase') != 'launching':
             refuse('RECONCILE_REQUIRED','unsubmitted launch owner changed')
         # 만료 뒤에는 원 실행의 부재 확인·기록 종결만 한다. 제출 권한을 연장하지 않는다.
-        end=deadline if self.p.clock()<deadline else self.p.clock()+15
+        end=min(deadline if self.p.clock()<deadline else self.p.clock()+15,
+                getattr(self.p,'response_deadline',float('inf')))
         if self.p.matching(record,self.p.domains(deadline=end)):
             refuse('RECONCILE_REQUIRED','domain exists after pre-submission rejection')
         self.write(self._path(self.runtime,'executions',record['uuid']),
@@ -604,17 +621,33 @@ class Execution:
                 "observation_revision":observation["observation_revision"] if observation else None}
 
     def requests(self):
+        from xenova_management import Manager
         root = self.data/"control-requests"
-        if not root.exists() and not root.is_symlink():
+        try:
+            root.lstat()
+        except FileNotFoundError:
             return []
+        except OSError:
+            refuse('OBSERVATION_UNAVAILABLE', 'control request directory could not be inspected')
         catalog.plain(root, directory=True)
+        # Path.glob suppresses enumeration OSError on supported Python versions.
+        # A partially read directory cannot establish absence or uniqueness.
+        try:
+            with os.scandir(root) as entries:
+                names = sorted(entry.name for entry in entries if entry.name.endswith('.json'))
+        except OSError:
+            refuse('OBSERVATION_UNAVAILABLE', 'control request enumeration is incomplete')
         result = []
-        for path in sorted(root.glob("*.json")):
+        for name in names:
+            path = root/name
             if not vm.UUID.fullmatch(path.stem):
                 refuse("RECONCILE_REQUIRED", "invalid control request filename")
             value = self.read(path)
+            if value is None:
+                refuse('OBSERVATION_UNAVAILABLE', 'enumerated control request disappeared')
             if (value.get("operation_id") != path.stem or value.get("request_hash") != fingerprint(value.get("request"))
-                    or not vm.UUID.fullmatch(value.get("vm_id", ""))):
+                    or not vm.UUID.fullmatch(value.get("vm_id", "")) or 'idempotency_key' not in value
+                    or value['idempotency_key'] is not None and not Manager._text_token(value['idempotency_key'])):
                 refuse("RECONCILE_REQUIRED", "invalid control request identity")
             result.append(value)
         return result
@@ -734,7 +767,7 @@ class Execution:
             intent = self.intent(record)
             if not intent or intent["accepted_operation_id"] != previous["operation_id"]:
                 refuse("TARGET_CHANGED", "control request intent was superseded")
-            readonly_end = self.p.clock()+15
+            readonly_end = min(self.p.clock()+15,getattr(self.p,'response_deadline',float('inf')))
             observation = self.observe(record, readonly_end)
             run = self.run_record(record)
             confirmed = action in ("stop", "destroy") and observation["presence"] == "absent"

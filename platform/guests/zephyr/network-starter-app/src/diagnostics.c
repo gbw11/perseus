@@ -4,6 +4,7 @@
 #include <xenova/netfront.h>
 #include <zephyr/net/net_if.h>
 #include <stdatomic.h>
+#include <errno.h>
 #include "diagnostics_app.h"
 
 static atomic_int startup_rc = -EAGAIN;
@@ -14,7 +15,7 @@ static int network_snapshot(struct xdiag_network *out, void *context)
 	int rc = atomic_load(&startup_rc);
 	if (rc) { return rc; }
 	struct xnf_stats stats;
-	rc = xnet_stats(&stats);
+	rc = xnet_stats_try(&stats);
 	if (rc) { return rc; }
 	struct net_if *iface = net_if_get_default();
 	if (!iface) { return -ENODEV; }
@@ -23,6 +24,8 @@ static int network_snapshot(struct xdiag_network *out, void *context)
 		.tx = stats.tx, .rx = stats.rx, .tx_drop = stats.tx_drop,
 		.rx_drop = stats.rx_drop, .pool_busy = stats.pool_busy,
 		.protocol_errors = stats.protocol_errors,
+		.tx_bytes=stats.tx_bytes,.rx_bytes=stats.rx_bytes,.counter_epoch=stats.counter_epoch,
+		.bytes_rc=stats.bytes_saturated?-ERANGE:0,
 	};
 	return 0;
 }

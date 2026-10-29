@@ -8,11 +8,13 @@
 |---|---|---|
 | 입력 | `xenova/v1/vehicle/control` · `vehicle.control` | retained generation·active_app |
 | 입력 | `xenova/v1/apps/manual/input` · `drive.input` | latest-only, 200ms 초과 시 기존 정지 계산 |
-| 출력 | `xenova/v1/apps/manual/events` · `drive.command` | 실제 계산 후 QoS0 제출 |
+| 출력 | `xenova/v1/apps/manual/events` · `drive.command` | 실제 계산 후 최신 출력함 → worker의 QoS0 제출 |
 | 출력 | 같은 events · `app.heartbeat` | 실제 계산 루프의 1초 heartbeat |
 | 진단 | `xenova/v2/vms/<UUID>/telemetry/+` | 별도 Publisher·인증·세션, 기존 v2 계약 |
 
 [공통 통합·시험 절차](../../common/xenova-drive-runtime/README.md)에 빌드·인증 bootstrap·명령·수신 분석·CPU 4조건 실험 절차가 있다.
+계산 main은 고정 20ms 주기와 한 주기의 입력 사본을 사용하고, 별도 worker가
+Bootstrap·v1 통신을 소유한다. 출력함 수락과 실제 송신 성공은 별개다.
 브로커 자격증명과 VM UUID는 빌드 설정에 넣지 않는다.
 Xen은 공유 Store의 자신의 VM 신원과 실행-bound bootstrap을 사용하며 익명/Kconfig fallback을 하지 않는다.
 native_sim은 격리 TAP와 private runtime 파일을 사용하는 시험 전용 경로다.

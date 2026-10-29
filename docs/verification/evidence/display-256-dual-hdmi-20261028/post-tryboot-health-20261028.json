@@ -1,0 +1,34 @@
+{
+  "xl list": {
+    "code": 0,
+    "out": "Name                                        ID   Mem VCPUs\tState\tTime(s)\nDomain-0                                     0  1024     4     r-----     108.0\ndebian-dev                                   1   512     1     -b----      16.3\nzephyr-drive-a                               2    16     1     -b----       2.0\nzephyr-drive-b                               3    16     1     -b----       2.0\n",
+    "error": ""
+  },
+  "systemctl --failed --no-pager": {
+    "code": 0,
+    "out": "  UNIT LOAD ACTIVE SUB DESCRIPTION\n\n0 loaded units listed.\n",
+    "error": ""
+  },
+  "systemctl list-jobs --no-pager": {
+    "code": 0,
+    "out": "No jobs running.\n",
+    "error": ""
+  },
+  "systemctl list-units --all --no-pager xenova* xendomains*": {
+    "code": 0,
+    "out": "  UNIT                           LOAD   ACTIVE   SUB     DESCRIPTION\n● xendomains.service             masked inactive dead    xendomains.service\n  xenova-boot-status.service     loaded inactive dead    Summarize Xenova boot facts through the existing agetty login banner\n  xenova-bridge.service          loaded active   exited  Xenova isolated internal xenbr0 bridge (no physical NIC attached)\n  xenova-cpu-prepare.service     loaded active   exited  Prepare and verify Xenova dom0 hard CPU affinity for this boot\n  xenova-data-prepare.service    loaded active   exited  Verify boot medium and grow only the last Xenova ext4 data partition\n  xenova-dhcp.service            loaded active   running Xenova internal DHCP server on xenbr0 (DNS disabled)\n  xenova-dom0-manager.service    loaded active   running Xenova dom0 management API\n  xenova-first-boot.service      loaded active   exited  Verify/resume factory registration before any Xenova VM starts\n  xenova-host-admission.service  loaded active   exited  Coordinate Xenova host admission before guest shutdown\n  xenova-recovery-worker.service loaded active   running Xenova dom0 recovery worker (heartbeat watcher, S15P31E110-124)\n  xenova-vm-shutdown.service     loaded active   exited  Stop registered guests by per-VM board shutdown policy before storage/toolstack stop\n  xenova-vms.service             loaded active   exited  Start registered Xenova VMs once (OS/app readiness is separate)\n  xenova-wifi@wlan0.service      loaded active   running Xenova WPA2 management Wi-Fi on wlan0\n  xenova-xen-ready.service       loaded active   exited  Verify Xen dom0 control interface and xl toolstack\n\nLegend: LOAD   → Reflects whether the unit definition was properly loaded.\n        ACTIVE → The high-level unit activation state, i.e. generalization of SUB.\n        SUB    → The low-level unit activation state, values depend on unit type.\n\n14 loaded units listed.\nTo show all installed unit files use 'systemctl list-unit-files'.\n",
+    "error": ""
+  },
+  "cma": [
+    "MemAvailable:     636440 kB",
+    "CmaTotal:          65536 kB",
+    "CmaFree:           59320 kB"
+  ],
+  "normal_config_hash": "d12f36efcda22fa448063ba0c3901652780076248cef047da16ee6d5cd167401",
+  "framebuffers": {
+    "/sys/class/graphics/fb0": {
+      "name": "vc4drmfb",
+      "virtual_size": "1920,1080"
+    }
+  }
+}

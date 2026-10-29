@@ -67,8 +67,9 @@ POST /api/v1/auth/logout
 Refresh Token은 폐기합니다. 이미 폐기된 Refresh Token이 다시 사용되면 탈취로 보고 해당 사용자의
 모든 Refresh Token을 폐기합니다. 로그아웃은 두 토큰을 서버에서 폐기합니다.
 
-로컬 실행에는 개발용 JWT 비밀값과 H2 파일 DB가 사용됩니다. 운영 환경에서는 반드시 다음
-환경변수를 설정해야 합니다.
+로컬 실행과 운영은 MySQL 8.4를 사용하며, 애플리케이션 시작 시 Flyway가 아직 적용되지 않은
+마이그레이션을 실행합니다. 로컬에서는 저장소 루트의 `compose.yaml`로 MySQL을 먼저 실행하고,
+운영 환경에서는 반드시 다음 환경변수를 설정해야 합니다.
 
 ```text
 JWT_SECRET=<32바이트 이상의 임의 비밀값>
@@ -89,7 +90,9 @@ MySQL은 사용자·VM 등 영구 데이터를 저장합니다. Redis 7은 Refre
 Token의 JTI, 로그인 실패 횟수를 TTL과 함께 저장합니다. Refresh Token 회전 및 재사용 감지와
 로그인 실패 횟수 증가는 Redis Lua 스크립트로 원자적으로 처리하므로 백엔드를 여러 대 실행해도
 인증 상태가 공유됩니다. 사용자 이름은 로그인 제한 키에 원문 대신 SHA-256 해시로 저장됩니다.
-자동 테스트는 `AUTH_STATE_STORE=jpa`와 H2를 사용해 Redis 없이 실행되며, 운영 기본값은 `redis`입니다.
+자동 테스트는 `AUTH_STATE_STORE=jpa`와 MySQL 8.4 Testcontainers를 사용해 Redis 없이 실행되며,
+운영 기본값은 `redis`입니다. 테스트 실행 환경에는 Docker Engine이 필요합니다. 테스트 시작 시
+빈 MySQL DB에 Flyway 마이그레이션 전체를 적용한 뒤 Hibernate가 엔티티와 스키마의 일치를 검증합니다.
 Redis 헬스체크는 Redis가 함께 배포되는 운영 환경에서만 `REDIS_HEALTH_ENABLED=true`로
 활성화합니다.
 

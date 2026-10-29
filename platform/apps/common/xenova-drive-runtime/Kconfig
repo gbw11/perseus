@@ -5,6 +5,22 @@ config XENOVA_DRIVE_RUNTIME
 	select XENOVA_MQTT_BOUNDED_IO
 
 if XENOVA_DRIVE_RUNTIME
+config XENOVA_DRIVE_IO_PRIORITY
+	int "v1 communication worker ordinary preemptive priority"
+	range 0 14
+	default 8
+	help
+	  Separate bounded I/O owner, not a real-time scheduling guarantee.
+
+config XENOVA_DRIVE_COMMAND_MAX_AGE_MS
+	int "Maximum unsent command candidate age (ms)"
+	range 1 1000
+	default 200
+	help
+	  Provisional local queue limit, separate from the 20ms release and socket
+	  timeout. Fresh-input motion also expires at the original input deadline.
+	  Final Gateway control/generation validation remains necessary.
+
 config XENOVA_DRIVE_CAPTURE_ROWS
 	int "Bounded source measurement rows (never overwrite)"
 	range 128 16384

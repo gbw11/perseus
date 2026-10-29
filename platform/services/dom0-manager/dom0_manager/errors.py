@@ -5,6 +5,7 @@
 
 platform_code 는 플랫폼 Manager 가 준 원본 코드(HOST_QUIESCING 등)다. 플랫폼 오류에만 붙고 응답 본문에 그대로 나간다.
 detail 의 "CODE: message" 문자열은 사람용이며, 호출자의 분기는 platform_code 로 한다.
+retryable 은 플랫폼이 준 원본 값이다(코드의 고정 속성이 아니다). operation 은 제어 요청이 받아들여진 뒤의 오류에 붙는 원 작업 문맥이다.
 """
 
 from __future__ import annotations
@@ -23,12 +24,16 @@ class Dom0ManagerError(Exception):
         detail: str | None = None,
         resource: dict[str, Any] | None = None,
         platform_code: str | None = None,
+        retryable: bool | None = None,
+        operation: dict[str, Any] | None = None,
     ):
         super().__init__(message)
         self.message = message
         self.detail = detail
         self.resource = resource
         self.platform_code = platform_code
+        self.retryable = retryable
+        self.operation = operation
 
     def body(self) -> dict[str, Any]:
         out: dict[str, Any] = {"code": self.code, "message": self.message}
@@ -38,6 +43,10 @@ class Dom0ManagerError(Exception):
             out["resource"] = self.resource
         if self.platform_code is not None:
             out["platform_code"] = self.platform_code
+        if self.retryable is not None:
+            out["retryable"] = self.retryable
+        if self.operation is not None:
+            out["operation"] = self.operation
         return out
 
 
@@ -49,6 +58,13 @@ class InvalidArgument(Dom0ManagerError):
 class VMNotFound(Dom0ManagerError):
     status_code = 404
     code = "VMNotFound"
+
+
+class OperationNotFound(Dom0ManagerError):
+    """요청 키로 원 제어 작업을 찾지 못함. 조회 시점의 검색 부재일 뿐 미수락·미실행의 증거가 아니다."""
+
+    status_code = 404
+    code = "OperationNotFound"
 
 
 class VMExists(Dom0ManagerError):
@@ -65,11 +81,12 @@ class InsufficientResources(Dom0ManagerError):
     status_code = 507
     code = "InsufficientResources"
 
-    def __init__(self, name: str, requested: int, available: int, *, platform_code: str | None = None):
+    def __init__(self, name: str, requested: int, available: int, *, platform_code: str | None = None, retryable: bool | None = None):
         super().__init__(
             f"insufficient {name}: requested {requested}, available {available}",
             resource={"name": name, "requested": requested, "available": available},
             platform_code=platform_code,
+            retryable=retryable,
         )
 
 

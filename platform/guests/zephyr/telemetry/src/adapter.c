@@ -27,6 +27,11 @@ int xt_observe(struct xt_observation *out,bool threads)
 		return rc;
 	}
 	out->history=source.history;
+	out->resources=source.resources;
+	for(size_t i=0;i<out->resources.rows;i++){
+	 struct xdr_thread *t=&out->resources.threads[i];
+	 while(!xt_utf8_valid(t->name)&&t->name[0]){t->name[strlen(t->name)-1]=0;t->name_truncated=true;}
+	}
 	out->frequency_hz=source.cycle_hz;
 	out->heap_rc=source.heap_rc;
 	out->heap_used=source.heap_allocated_bytes;out->heap_free=source.heap_free_bytes;out->heap_peak=source.heap_peak_bytes;

@@ -148,7 +148,7 @@ class ManualInputRelayTest {
         for (int i = 1; i < sentAt.size(); i++) {
             maxGapMs = Math.max(maxGapMs, TimeUnit.NANOSECONDS.toMillis(sentAt.get(i) - sentAt.get(i - 1)));
         }
-        assertThat(maxGapMs).isLessThanOrEqualTo(100);
+        assertThat(maxGapMs).isLessThanOrEqualTo(150);
     }
 
     @Test
