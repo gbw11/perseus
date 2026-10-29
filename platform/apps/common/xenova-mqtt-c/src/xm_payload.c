@@ -76,7 +76,8 @@ static bool canonical_uuid(const char *value)
 
 int xm_vehicle_control_parse(struct xm_span payload, struct xm_vehicle_control *out)
 {
-	static struct xm_json j;
+	/* App owners and the control coordinator may parse concurrently. */
+	struct xm_json j;
 	int64_t generation;
 
 	memset(out, 0, sizeof(*out));
@@ -116,7 +117,7 @@ int xm_drive_input_parse(struct xm_span payload, uint32_t *keys)
 		{"up", XM_KEY_UP}, {"down", XM_KEY_DOWN}, {"left", XM_KEY_LEFT},
 		{"right", XM_KEY_RIGHT}, {"brake", XM_KEY_BRAKE},
 	};
-	static struct xm_json j;
+	struct xm_json j;
 
 	*keys = 0;
 	if (parse_object(&j, payload) != 0) {
@@ -158,7 +159,7 @@ static int finite_float(const struct xm_json *j, int i, float *out)
 
 int xm_perception_result_parse(struct xm_span payload, struct xm_perception_result *out)
 {
-	static struct xm_json j;
+	struct xm_json j;
 
 	memset(out, 0, sizeof(*out));
 	if (parse_object(&j, payload) != 0 ||
