@@ -46,6 +46,9 @@ class Settings:
     recovery_state_dir: str = "/run/xenova/recovery"
     mock_samples: bool = False
     log_level: str = "INFO"
+    # Separate bounded execution-log database; empty means the log collector is not deployed.
+    runtime_log_db: str = ""
+    runtime_log_ingest_config: str = ""
 
     def __post_init__(self) -> None:
         if self.console_enabled and not self.service_token:
@@ -102,4 +105,6 @@ class Settings:
             recovery_state_dir=read("XENOVA_RECOVERY_STATE_DIR", cls.recovery_state_dir, str),
             mock_samples=read("XENOVA_MOCK_SAMPLES", cls.mock_samples, as_bool),
             log_level=read("XENOVA_LOG_LEVEL", cls.log_level, str).upper(),
+            runtime_log_db=read("XENOVA_RUNTIME_LOG_DB", cls.runtime_log_db, str),
+            runtime_log_ingest_config=read("XENOVA_RUNTIME_LOG_INGEST_CONFIG", cls.runtime_log_ingest_config, str),
         )

@@ -79,6 +79,20 @@ class Dom0ManagerClientTest {
     }
 
     @Test
+    void runtimeLogsForwardOnlyQueryAndServerServiceToken() {
+        AtomicReference<String> query = new AtomicReference<>();
+        server.createContext("/api/v1/logs", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            query.set(exchange.getRequestURI().getQuery());
+            respond(exchange, 200, "{\"epoch\":\"one\",\"items\":[],\"next_cursor\":42,\"has_more\":false,\"history_truncated\":false}");
+        });
+        JsonNode page = client.runtimeLogs(java.util.Map.of("after", 41, "component", "api.service"), false);
+        assertThat(page.path("next_cursor").asInt()).isEqualTo(42);
+        assertThat(query.get()).contains("after=41", "component=api.service");
+        assertThat(authorization.get()).isEqualTo("Bearer service-secret");
+    }
+
+    @Test
     void findTreatsVmNotFoundAsAbsentDomain() {
         server.createContext("/api/v1/vms/" + VM_ID, exchange -> respond(exchange, 404, """
                 {"code":"VMNotFound","message":"no domain","detail":"xl: domain not found"}

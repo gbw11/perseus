@@ -1,0 +1,14 @@
+{
+  "backup-original-manifest.json": "7d54592933b07270129244b8fcdc6cfa36849fc31500d9dceec991a5bd84cf27",
+  "graphics-boot-investigation-20261028.json": "93a1c726270626bf240a03d18fcd2e0a20086f0364bbd60c2caf5584221c2765",
+  "graphics-config-investigation-20261028.json": "5505efd41dc4ab7b9550c0cd54720d877aacdeedf4f862185bdc206e520af6db",
+  "persist_hdmi_config.py.gz": "60202f286ad98ed0fa8c6afa6c1c09f38865cf386c6d5debe270585abae9efe3",
+  "persisted-hdmi-config-20261028.json": "ca3807a179aaa39f3233a735f334017663e36e18055c60dc3c03dca0672fdc5f",
+  "post-tryboot-health-20261028.json": "7d202a929588c849bd07a1bf3b51198787f654d368675b4e4d63ff6af4945285",
+  "retry_tryboot.py.gz": "607010a8d613318edebb2f38034e298e91b2c0e15e845ce9495194072c807e0c",
+  "source-manifest.json": "c07e26c7eec5f7096baab83b26a2f7a65e6a83878e11510b92e0763f2408b8dd",
+  "tryboot-followup-20261028.json": "a004fe1aff5b0ae5ea6df34618b96497f1802de15e5faf25a9d5ef85870fdd8a",
+  "tryboot-result-20261028.json": "ad91472d8e577f2c7093ac4e12b06481fa560bbf97ae5b7d2bc734918e987a30",
+  "tryboot-retry-result-20261028.json": "2772f6bcd1ff06930c6d9e961c64479c84bf4e0527de4f6990b48ffd6e9d2f87",
+  "tryboot_hdmi.py.gz": "12887e81bb01a7c3a2dad1c1578f564d53ae35b1fa802df5caaeaae227cba7af"
+}

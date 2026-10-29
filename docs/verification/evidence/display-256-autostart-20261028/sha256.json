@@ -1,0 +1,15 @@
+{
+  "autostart-after-reboot.json": "e52ad437864703bb4eb7de21ad11be00fa474a4036c9a157890a94d6747e6c24",
+  "autostart-backup.json": "e160389cde0df78280554c133a2672c8e6ce060ce60a758f057ca9e9ea5917cb",
+  "autostart-captures-manifest.json": "e341056abae0f22adec79dd38766d680faf3f44d4083eeb41916fa5d51c7dd69",
+  "autostart-enabled-before-reboot.json": "1ec1d3732eee9e7b563d4ec2843b3e9eb983cc4a3464b23972b321f9cf7fb379",
+  "autostart-manual-start.json": "976f7134634786b925f278bc71f42f51859f9baebe2b67472b43fd8ba5433172",
+  "capture_autostart.py.gz": "2423d4badebee3df0cc2f68754eb5a764b799951d98ec2bfdb9fbf59fe2a02c3",
+  "deploy_autostart.py.gz": "eecc821d8450e47fab3f33f370d533004284df58f6f74926c45929005c0b277f",
+  "enable_reboot_autostart.py.gz": "59cb024e50cafc0f056d24b4a6d81af1a3d6a5032c2f57ce0734c6a53b3bfbcc",
+  "monitor-1-after-boot.jpg": "f5c93066944edb15a0732340a83c6c00a8d31d753f4dc4e380e267aa47b64997",
+  "monitor-2-after-boot.jpg": "a810282b99fdeebc43e16b8a0078e227171926b5e9692b737eedd70ffc9ea0cc",
+  "start_autostart.py.gz": "0edaa3597289df19226ba0c2e0d28a09ac257efa4fbfd60acedfae7580f35fc1",
+  "summary.json": "692ee372c2a57851a8e86684d8922e5a6537f3ef69312fab287f2886b070f1ea",
+  "verify_autostart_boot.py.gz": "41b360e535f710622d76ad2fa658d6ff162bbf88fb146c27aa2d7c272f3ad0e2"
+}

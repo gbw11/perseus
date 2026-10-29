@@ -1,0 +1,62 @@
+{
+  "normal_config_modified": false,
+  "overlay_sha256": "155ec071f26a8d45c4524ee00c5037ad7ceb8cc81d221640b9d9d7177c416ddf",
+  "trial_config_sha256": "d630ff80a953dfa5d4858a4ec64a20c6e80f823b78e635407168cfca584bdfda",
+  "reboot_request": "systemctl --reboot-argument=\"0 tryboot\" reboot",
+  "kernel_commit": "95b85bebbedcaedfa7ca79116ed38b7376fba412",
+  "expected_cma_mib": 64,
+  "preflight": {
+    "backup": "/root/xenova-hdmi-backup/20261028-060513",
+    "boot_id": "7940cc56-bd4c-4c2a-ba44-4e581764fab2",
+    "original_hashes": {
+      "config.txt": "d12f36efcda22fa448063ba0c3901652780076248cef047da16ee6d5cd167401",
+      "boot.scr": "c7b5b42cf6647c9915919e4b095b062ae0a155dabeac6c2379f953b154dfb19a",
+      "bcm2711-rpi-4-b.dtb": "75761b73c284e26623e4d1624bff13e67bce2ae620880efd81d6571a3739fcfb"
+    }
+  },
+  "dry_run": {
+    "code": 0,
+    "out": "",
+    "error": ""
+  },
+  "postboot": {
+    "observed_at": "2026-10-28T06:13:10.803884+00:00",
+    "boot_id": "98d7d22b-7484-49a2-a5f7-d660303e85fb",
+    "tryboot_flag": 1,
+    "drm": [
+      {
+        "name": "card0-HDMI-A-1",
+        "status": "connected",
+        "modes": "1920x1080\n1920x1080\n1920x1080\n1920x1080\n1920x1080\n1680x1050\n1600x900\n1280x1024\n1280x1024\n1440x900\n1280x800\n1152x864\n1280x720\n1280x720\n1280x720\n1280x720\n1280x720\n1024x768\n1024x768\n1024x768\n832x624\n800x600\n800x600\n800x600\n800x600\n720x576\n720x576\n720x480\n720x480\n720x480\n720x480\n640x480\n640x480\n640x480\n640x480\n640x480\n720x400",
+        "edid_bytes": 256,
+        "edid_sha256": "92a52d12e80b125e5d1d8a90c1acc772e6303e03a79961f98cea844e44e643f6"
+      },
+      {
+        "name": "card0-HDMI-A-2",
+        "status": "connected",
+        "modes": "1920x1080\n1920x1080\n1920x1080\n1920x1080\n1920x1080\n1680x1050\n1600x900\n1280x1024\n1280x1024\n1440x900\n1280x800\n1152x864\n1280x720\n1280x720\n1280x720\n1280x720\n1280x720\n1024x768\n1024x768\n1024x768\n832x624\n800x600\n800x600\n800x600\n800x600\n720x576\n720x576\n720x480\n720x480\n720x480\n720x480\n640x480\n640x480\n640x480\n640x480\n640x480\n720x400",
+        "edid_bytes": 256,
+        "edid_sha256": "ce1acb6e187b736d79d8103859f765f9f970863ad45b38fad07f2be5cb4c0275"
+      },
+      {
+        "name": "card0-Writeback-1",
+        "status": "unknown",
+        "modes": "",
+        "edid_bytes": 0,
+        "edid_sha256": null
+      }
+    ],
+    "dri_nodes": [
+      "/dev/dri/by-path",
+      "/dev/dri/card0"
+    ],
+    "hdmi_statuses": {
+      "/sys/firmware/devicetree/base/soc/hdmi@7ef05700": "okay",
+      "/sys/firmware/devicetree/base/soc/hdmi@7ef00700": "okay"
+    },
+    "xen": "Name                                        ID   Mem VCPUs\tState\tTime(s)\nDomain-0                                     0  1024     4     r-----      20.0\n",
+    "config_sha256": "d12f36efcda22fa448063ba0c3901652780076248cef047da16ee6d5cd167401",
+    "dmesg_graphics": "[    0.050930] OF: /v3dbus/v3d@7ec04000: could not find phandle 73\n[    0.056258] OF: /v3dbus/v3d@7ec04000: could not find phandle 73\n[    0.674380] simple-framebuffer 3e511000.framebuffer: framebuffer at 0x3e511000, 0x6d8c00 bytes\n[    0.674387] simple-framebuffer 3e511000.framebuffer: format=a8r8g8b8, mode=1824x984x32, linelength=7296\n[    0.680502] simple-framebuffer 3e511000.framebuffer: fb0: simplefb registered!\n[    0.763733] vc4-drm gpu: bound fe400000.hvs (ops vc4_hvs_ops)\n[    1.118498] vc4-drm gpu: bound fe400000.hvs (ops vc4_hvs_ops)\n[    1.121709] rc rc0: vc4-hdmi-0 as /devices/platform/soc/fef00700.hdmi/rc/rc0\n[    1.121794] input: vc4-hdmi-0 as /devices/platform/soc/fef00700.hdmi/rc/rc0/input0\n[    1.122951] input: vc4-hdmi-0 HDMI Jack as /devices/platform/soc/fef00700.hdmi/sound/card0/input1\n[    1.126891] vc4-drm gpu: bound fef00700.hdmi (ops vc4_hdmi_ops)\n[    1.130146] rc rc1: vc4-hdmi-1 as /devices/platform/soc/fef05700.hdmi/rc/rc1\n[    1.130237] input: vc4-hdmi-1 as /devices/platform/soc/fef05700.hdmi/rc/rc1/input2\n[    1.131454] input: vc4-hdmi-1 HDMI Jack as /devices/platform/soc/fef05700.hdmi/sound/card1/input3\n[    1.135368] vc4-drm gpu: bound fef05700.hdmi (ops vc4_hdmi_ops)\n[    1.135564] vc4-drm gpu: bound fe004000.txp (ops vc4_txp_ops)\n[    1.135700] vc4-drm gpu: bound fe206000.pixelvalve (ops vc4_crtc_ops)\n[    1.135793] vc4-drm gpu: bound fe207000.pixelvalve (ops vc4_crtc_ops)\n[    1.135882] vc4-drm gpu: bound fe20a000.pixelvalve (ops vc4_crtc_ops)\n[    1.135937] vc4-drm gpu: bound fe216000.pixelvalve (ops vc4_crtc_ops)\n[    1.136036] vc4-drm gpu: bound fec12000.pixelvalve (ops vc4_crtc_ops)\n[    1.137965] [drm] Initialized vc4 0.0.0 for gpu on minor 0\n[    1.294022] vc4-drm gpu: [drm] fb0: vc4drmfb frame buffer device\n[    1.371705]   #0: vc4-hdmi-0\n[    1.371709]   #1: vc4-hdmi-1\n[    3.784595] systemd[1]: Load Kernel Module drm skipped, unmet condition check ConditionKernelModuleLoaded=!drm"
+  },
+  "reboot_observed": true
+}
