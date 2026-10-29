@@ -192,8 +192,15 @@ class VerifiedGatewayRunner(GatewayRunner):
             self.serial_accepted+=1;record['serial_result']='accepted';record['accepted_bytes']=accepted
         except (SinkError,OSError):
             self.serial_failed+=1;record['serial_result']='failed';self._output_broken=True
-            self.machine._fail('OUTPUT_PATH_FAILED',now)
+            record['failure_reason']=getattr(self._sink,'failed_reason',None) or 'OUTPUT_SUBMISSION_FAILED'
+            self.machine.output_permitted=False;self.machine._authorized=False
         self.submissions.append(record)
+        if record['serial_result']=='failed':
+            if isinstance(action,ForwardDrive):
+                # Fence in RAM, then attempt STOP before failure-journal fsync.
+                # A failed STOP does not recurse; device application stays unknown.
+                self._submit(ForwardStop(action.generation))
+            self.machine._fail('OUTPUT_PATH_FAILED',now)
 
     def _emit(self,actions):
         for action in actions:

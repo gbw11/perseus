@@ -13,20 +13,24 @@ from collections.abc import Sequence
 from .config import SOURCE_ID, GatewaySettings, parse
 from .runner import GatewayRunner
 from .sink import MockSink, SerialSink, Sink, SinkError
-from .authority import AuthorityStore,GatewayLease,AuthorityError
+from .authority import AuthorityStore,GatewayLease,AuthorityError,GATEWAY_LOCK
 from .verified_runner import VerifiedGatewayRunner
 
 log = logging.getLogger("xenova_gateway")
 
 
 def open_sink(settings: GatewaySettings) -> Sink:
+    from .output_guard import VehicleLimits,LimitedSink
+    # Validate before opening a real output device. Mock-only tests may opt in
+    # with controlled limits; this does not provide measured vehicle values.
+    limits=VehicleLimits.load(Path(settings.vehicle_limits)) if settings.vehicle_limits else None
+    if settings.sink=='serial' and limits is None:raise SinkError('serial output requires vehicle limits')
     if settings.sink == "serial":
-        return SerialSink(settings.serial_port, settings.serial_baud)
-    if settings.frame_log == "-":
-        return MockSink(sys.stdout)
-    if settings.frame_log:
-        return MockSink(open(settings.frame_log, "a", encoding="utf-8"))
-    return MockSink()
+        sink=SerialSink(settings.serial_port, settings.serial_baud)
+    elif settings.frame_log == "-":sink=MockSink(sys.stdout)
+    elif settings.frame_log:sink=MockSink(open(settings.frame_log, "a", encoding="utf-8"))
+    else:sink=MockSink()
+    return LimitedSink(sink,limits,__import__('time').monotonic()) if limits else sink
 
 
 def _windows_timer_resolution() -> None:
@@ -48,7 +52,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         from xenova_mqtt import Identity,XenovaClient
         from xenova_mqtt.drive_binding import BindingFile
-        if os.name=='posix':lease=GatewayLease(Path('/run/lock/xenova-drive-gateway.lock')).acquire()
+        if os.name=='posix':lease=GatewayLease(GATEWAY_LOCK).acquire()
         if settings.profile in ("verified","warm"):
             if os.geteuid()!=0:raise AuthorityError('verified dom0 Gateway must run as root')
             # The lower platform installs private libraries here, outside the
@@ -76,7 +80,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:runner=GatewayRunner(client,sink,start_mode=settings.start_mode,retained_wait_s=settings.retained_wait_s)
         log.info('Gateway profile=%s sink=%s',settings.profile,settings.sink)
         runner.run(stop)
-    except (AuthorityError,SinkError,OSError) as exc:
+    except (AuthorityError,SinkError,OSError,ValueError) as exc:
         log.error('Gateway stopped: %s',exc);return 2
     finally:
         stop.set()
