@@ -485,7 +485,7 @@ def platform_boot_ok(image, table, output):
                    'fdt move ${fdtcontroladdr} ${fdt_addr_r}', 'booti ${xen_loadaddr} - ${fdt_addr_r}',
                    'fdt rm /soc/mmcnr@7e300000 dmas || exit 1',
                    'fdt rm /soc/mmcnr@7e300000 dma-names || exit 1',
-                   'xenova_debug', 'setenv xenova_logargs "loglevel=3 ', 'systemd.show_status=error'):
+                   'xenova_debug', 'setenv xenova_logargs "loglevel=4 ', 'systemd.show_status=error'):
         if marker not in script:
             raise ValueError('platform lacks validated Xen boot/PARTUUID contract: ' + marker)
     return result

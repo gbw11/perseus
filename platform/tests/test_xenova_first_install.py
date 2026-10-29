@@ -9,6 +9,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import zlib
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -54,6 +55,55 @@ class CapacityTest(unittest.TestCase):
             guests[0]['allocated_bytes'] = value
             with self.assertRaises(ValueError):
                 contract.capacity(3347054592, guests)
+
+
+class PlatformBootContractTest(unittest.TestCase):
+    """실제 부팅 템플릿의 계약을 검사하고 손상된 U-Boot payload는 거절한다."""
+
+    def boot_script(self):
+        return (ROOT / 'platform/yocto/meta-xenova/recipes-bsp/xen-rpi-u-boot-scr/'
+                'files/boot.cmd.xen.in').read_text()
+
+    def check_script(self, script, *, corrupt=False):
+        data = script.encode()
+        payload = struct.pack('>2I', len(data), 0) + data
+        header = bytearray(struct.pack('>7I4B32s',
+            0x27051956, 0, 0, len(payload), 0, 0,
+            zlib.crc32(payload) & 0xffffffff, 5, 22, 6, 0, b'boot-contract-test'))
+        struct.pack_into('>I', header, 4, zlib.crc32(header) & 0xffffffff)
+        encoded = bytes(header) + payload
+        if corrupt:
+            encoded = encoded[:-1] + bytes([encoded[-1] ^ 1])
+        with tempfile.TemporaryDirectory() as name:
+            base = Path(name)
+            image = base / 'platform.img'
+            image.write_bytes(b'filesystem boundary fixture')
+            output = base / 'extracted'
+            output.mkdir()
+            def copy_asset(args):
+                name = str(args[-2]).removeprefix('::')
+                Path(args[-1]).write_bytes(encoded if name == 'boot.scr' else name.encode())
+            with patch.object(assemble.prepare, 'command', side_effect=copy_asset):
+                return assemble.platform_boot_ok(image, {'partitions': [{'start': 8192}]}, output)
+
+    def test_actual_boot_template_satisfies_platform_boot_contract(self):
+        result = self.check_script(self.boot_script())
+        self.assertEqual(set(result), {
+            'xen', 'boot.scr', 'Image', 'kernel8.img', 'config.txt', 'bcm2711-rpi-4-b.dtb'})
+
+    def test_normal_boot_keeps_error_visibility_and_partuuid_contract(self):
+        script = self.boot_script()
+        for case, changed in (
+            ('console-errors-suppressed', script.replace('loglevel=4 ', 'loglevel=3 ', 1)),
+            ('rootfs-partition-changed', script.replace('part uuid mmc ${devnum}:2', 'part uuid mmc ${devnum}:3', 1)),
+        ):
+            with self.subTest(case=case):
+                with self.assertRaisesRegex(ValueError, 'validated Xen boot/PARTUUID contract'):
+                    self.check_script(changed)
+
+    def test_payload_crc_failure_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'CRC mismatch'):
+            self.check_script(self.boot_script(), corrupt=True)
 
 
 class InputSafetyTest(unittest.TestCase):
