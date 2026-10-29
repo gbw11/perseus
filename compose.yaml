@@ -42,8 +42,13 @@ services:
       - --collation-server=utf8mb4_0900_ai_ci
     volumes:
       - mysql-data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:3306:3306"
     networks:
       - data
+      # Docker 29 does not publish ports for containers attached only to an internal network.
+      # Keep application traffic on data while providing a dedicated bridge for the loopback binding.
+      - mysql-management
     healthcheck:
       test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_ROOT_PASSWORD}\" mysqladmin ping --host=127.0.0.1 --user=root --silent"]
       interval: 10s
@@ -175,3 +180,4 @@ networks:
   app:
   data:
     internal: true
+  mysql-management:

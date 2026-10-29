@@ -59,6 +59,10 @@ cd "${DEPLOY_DIR}"
 IMAGE_TAG="${IMAGE_TAG}" docker compose --env-file .env build
 IMAGE_TAG="${IMAGE_TAG}" docker compose --env-file .env up -d --remove-orphans
 
+# Backend·Frontend 컨테이너가 재생성되면 내부 IP가 바뀐 수 있다.
+# 장기 실행 중인 Nginx가 이전 upstream IP를 계속 사용하지 않도록 다시 시작한다.
+docker compose --env-file .env restart nginx
+
 deadline=$((SECONDS + 180))
 while (( SECONDS < deadline )); do
   unhealthy="$(docker compose --env-file .env ps --format json | grep -E '"Health":"(starting|unhealthy)"|"State":"(exited|dead|restarting)"' || true)"

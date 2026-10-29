@@ -1,0 +1,93 @@
+// Frontend-only merge request validation. Configure this Job for MR target branch: frontend.
+pipeline {
+    agent any
+
+    options {
+        gitLabConnection('gitlab')
+        timeout(time: 20, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+    }
+
+    stages {
+        stage('Checkout Merge Result') {
+            steps {
+                script { checkoutMergeResult() }
+            }
+        }
+        stage('Frontend Quality') {
+            steps {
+                updateGitlabCommitStatus name: 'jenkins-frontend-check', state: 'running'
+                dir('frontend') {
+                    sh 'npm ci'
+                    sh 'npm run lint'
+                    sh 'npm run typecheck'
+                    sh 'mkdir -p target && npm test -- --reporter=junit --outputFile=target/vitest.xml'
+                    withEnv(['VITE_BASE_PATH=/screens/', 'VITE_SCREENS_ORIGIN=/screens', 'VITE_TELEMETRY=live']) {
+                        sh 'npm run build'
+                    }
+                }
+            }
+        }
+        stage('Frontend Image Build') {
+            steps {
+                sh 'docker build --target admin-console -t xenova-admin-console:frontend-check-${BUILD_NUMBER} frontend'
+                sh 'docker build --target vm-screens -t xenova-vm-screens:frontend-check-${BUILD_NUMBER} frontend'
+            }
+        }
+    }
+
+    post {
+        always {
+            junit testResults: 'frontend/target/vitest.xml', allowEmptyResults: true
+            sh '''
+                docker image rm \
+                  xenova-admin-console:frontend-check-${BUILD_NUMBER} \
+                  xenova-vm-screens:frontend-check-${BUILD_NUMBER} >/dev/null 2>&1 || true
+            '''
+        }
+        success {
+            updateGitlabCommitStatus name: 'jenkins-frontend-check', state: 'success'
+            notifyMattermost('good', '✅ Frontend CI 성공')
+        }
+        failure {
+            updateGitlabCommitStatus name: 'jenkins-frontend-check', state: 'failed'
+            notifyMattermost('danger', '❌ Frontend CI 실패')
+        }
+        aborted {
+            updateGitlabCommitStatus name: 'jenkins-frontend-check', state: 'canceled'
+            notifyMattermost('warning', '⚠️ Frontend CI 중단')
+        }
+    }
+}
+
+def checkoutMergeResult() {
+    requireMergeRequest()
+    checkout([
+        $class: 'GitSCM',
+        branches: [[name: "origin/${env.gitlabTargetBranch}"]],
+        userRemoteConfigs: [[
+            credentialsId: 'xenova-gitlab-checkout',
+            name: 'origin',
+            refspec: '+refs/heads/*:refs/remotes/origin/*',
+            url: 'https://lab.ssafy.com/s15-final/S15P31E110.git'
+        ]]
+    ])
+    withEnv(["MR_SOURCE_REF=origin/${env.gitlabSourceBranch}"]) {
+        sh '''git -c user.name='Xenova Jenkins' -c user.email='jenkins@k15e110.p.ssafy.io' merge --no-edit "$MR_SOURCE_REF"'''
+    }
+}
+
+def requireMergeRequest() {
+    if (!env.gitlabSourceBranch || !env.gitlabTargetBranch) {
+        error('This job must be started by a GitLab Merge Request webhook.')
+    }
+}
+
+def notifyMattermost(String color, String title) {
+    mattermostSend color: color, message: """#### ${title}
+- Source: `${env.gitlabSourceBranch ?: '-'}`
+- Target: `${env.gitlabTargetBranch ?: '-'}`
+- Build: [${env.JOB_NAME} #${env.BUILD_NUMBER}](${env.BUILD_URL})"""
+}
