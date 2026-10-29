@@ -14,7 +14,7 @@
 | 영역 | 현재 구현·인계 상태 |
 |---|---|
 | Zephyr Diagnostics | 유효 CPU 구간·heap/pool 여유·thread 목록 완전성과 필수 작업 결과를 분리해 로컬 판정 |
-| 공통 drive 펌웨어 | 실제 두 계산의 결과·기존 20ms release deadline을 준비 판단에 연결. 선택된 불충족 결과는 0 출력 후보로 제한 |
+| 공통 drive 펌웨어 | AUTO/MANUAL 계산 소유자를 분리하고 각각의 실제 결과·원 20ms release deadline을 준비 판단에 연결. 선택된 불충족 결과는 0 출력 후보로 제한 |
 | Xen·dom0 독립 근거 | 기존 Manager probe/execution-context/cpu-layout 및 unit/journal. 새로운 host 건강 수집기나 재시작기 없음 |
 | Linux·Agent | 기존 계측·heartbeat·systemd 감독은 있음. 아래 기능 진행·로컬 복구 연동은 [Linux·Agent 요청](../requests/2026-10-27-linux-health-agent.md) 대상 |
 | Worker | 기존 D01 per-VM 전달 분류 반례와 자원/기능 판단 연결은 [Worker 요청](../requests/2026-10-27-recovery-health-ctrl.md) 대상. 제품 수정·종단 수락 전 |
@@ -60,13 +60,28 @@ retained·같은 progress·역전·과거 실행·과거 crash를 새 표본처�
 | 해당 필수 어댑터가 실제 -ENOMEM/-ENOBUFS 반환 | `RESOURCE_FAILED`, 해당 모드 NOT_READY·결과 0. 기존 `CALCULATION_FAILED`와 local 원 errno 사용 | 다음 실제 계산·입력·상태 준비가 충족돼야 회복 | AUTO 할당 실패 중 정상 MANUAL READY 유지 |
 | 실제 계산 오류·잘못된 출력 | 해당 모드 제한. `OUTPUT_INVALID`는 기존 사유 유지 | 새 실제 완료·출력 검증. heartbeat로 상쇄하지 않음 | 낮은 CPU·정상 통신이어도 오류 결과 선택 불가 |
 | 실행한 작업이 기존 release deadline 초과·시각 근거 불명 | `DEADLINE` 또는 `UNVERIFIED`, 해당 결과 제한. end==deadline은 정상 | 다음 현재 release의 실제 완료. 기한 연장·재전달·catch-up 없음 | 늦은 계산은 NOT_READY, 다음 정상 계산은 회복 |
-| 직렬 AUTO 지연 때문에 전체 step 기한 초과 | 두 모드에 공통 영향. whole-step miss 확인 후 두 결과 제한 | 원 serial 구조 유지. 별도 안전한 계산 분리 없이는 MANUAL만 독립 정상이라고 주장하지 않음 | AUTO→MANUAL 모두 지연되는 반례 보존 |
+| AUTO callback 지연 중 MANUAL은 원 기한 안에 실제 완료 | AUTO 결과·준비만 제한. 정상 MANUAL의 실제 진행·준비는 유지 | 오래된 AUTO 결과로 새 제어를 적용했다고 하지 않음. 기존 serial helper의 과거 반례는 회귀로 보존 | 실제 main에서 AUTO 지연 중 MANUAL 진행, 옛 문맥 거절·원 기한 join 확인 |
 | 필수 작업 미시작·일 없음·종료 중 | 존재/낮은 CPU/대기를 진행 실패로 해석하지 않음 | 현재 lifecycle·작업 기대 조건으로 재평가 | IDLE/NOT_STARTED/STOPPING에 과거 deadline 적용 금지 |
 | 진단 전용 작업의 allocation 실패 | 진단 실패를 남기되 drive 준비를 제한하지 않음 | 진단 작업의 재수집. 새 실행·원 intent 변경 없음 | 동일 ENOMEM도 required=false면 기능 제한 0 |
 
-실제 알고리즘이 영원히 반환하지 않으면 같은 main이 자신의 NOT_READY를 새로 만들 수는 없다.
-이때 과거 READY/heartbeat를 통신 worker가 갱신하지 않는 기존 구조와 Gateway의 신선도 제한이
-작동한다. 이를 새 로컬 deadlock 검출·스레드 복구 완료로 표현하지 않는다.
+알고리즘이 반환하지 않으면 해당 계산 소유자는 새 완료·READY를 만들 수 없다. main과
+다른 계산은 계속 동작할 수 있지만, 통신 작업자가 과거 READY/heartbeat를 갱신하지 않는다.
+Gateway의 기존 신선도 제한이 적용된다. 종료 시 원 기한 내 join이 안 되면 잔존으로 남기며,
+이를 새 deadlock 검출·앱 재시작·메모리 손상 격리 완료로 표현하지 않는다.
+
+### 대기와 준비의 구분
+
+내부 `WAITING`은 다음 작업이 없다는 뜻이다. 실제 계산 완료나 `app.readiness=READY`가
+아니며, 대기에 과거 계산 deadline을 적용하지 않는다. 현재 `verified-drive-1`은 기존과 같이
+실제 계산·입력·제어 적용 근거로 준비를 보고한다. 새 설계의 warm Standby 대기 자격,
+활성화 준비 확인, 활성 실행 진행은 서로 다른 근거이며 이 프로필의 READY 하나로 대체하지 않는다.
+새 wire/profile의 소비자 공동 확정·연결은 남아 있다. 현재 코드가 계산을 쉬는 Standby를
+승격할 수 있게 됐다는 뜻은 아니다. 정식 목표·미정 사항은 주행 설계 9.6·20절을 유지한다.
+
+공통 `loop_seq`는 선택된 계산의 실제 완료를 관측한다(SAFE_STOP에서는 실제 MANUAL 계산).
+앱별 progress와 공통 관측 순번, 통신 제출 순번을 합치지 않는다. 직렬 두 계산 합계였던
+후보와 동일한 비용·지터 측정으로 비교하지 않는다. 미완료·시각 오류·입력/문맥 변경·
+보고 만료를 0이나 새 관측 시각으로 덮어쓰지 않는다.
 
 ## 준비·전달·행동의 책임
 
@@ -102,10 +117,14 @@ operation/attempt·의도 revision·미완료 소유·원 deadline·예산을 �
 `1=CPU_UNAVAILABLE, 2=CPU_NO_IDLE, 4=MEMORY_UNAVAILABLE, 8=MEMORY_NO_FREE,
 16=THREADS_INCOMPLETE` bits다. 처음에는 `-ENODATA`다.
 
-`completed/step_end_us`는 저장 당시 원 계산의 순번·guest cycle 시각이며 조회가 갱신하지 않는다.
+공통 drive의 두 모드 평가를 처음 게시하려면 같은 control/connection 문맥에서 각 계산이
+실제로 완료되어야 한다. 미완료 모드의 초기 0을 정상 평가로 게시하지 않는다.
+`completed/step_end_us`는 평가 쌍을 저장한 시점의 선택 계산 관측 순번·guest cycle 시각이다.
+두 모드가 동시에 끝났다는 뜻이나 각 모드의 별도 최신성 표식은 아니며 조회가 갱신하지 않는다.
 `stopping`과 현재 실행 문맥도 대조한다. 이것은 마지막 평가이며 현재 lease·UTC·운행 허가가 아니다.
 `cpu_valid=false`이면 `cpu_percent_milli=null`이다. 수집·해석 오류를 실제 0%로 바꾸지 않는다.
 cache·local 평가와 시각은 RAM이며 guest 재실행에서 초기화된다. 영구 원문 저장은 추가하지 않는다.
 
-현재 구현·고정 후보·시험·미수행은 [검증 보고](../verification/health-evidence-20261027.md)에 둔다.
+기존 후보는 [건강 검증 보고](../verification/health-evidence-20261027.md), 독립 실행 기반의
+현 후보·시험·미수행은 [기반 검증 보고](../verification/zephyr-drive-foundation-20261029.md)에 둔다.
 Linux/Worker 요청 작성, 담당자 제품 구현, 소비 연결, 설치본·Xen·실보드 수락은 각각 별도 단계다.

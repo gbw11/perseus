@@ -26,8 +26,9 @@ release deadline과 필수 계산 실패를 NOT_READY·0 출력 후보로 연결
 
 ```text
 실행별 Bootstrap → netfront/Store/협조 종료 runtime
-                 ├─ main: 동일 입력 snapshot → AUTO 어댑터 → MANUAL 어댑터
-                 │         실제 완료·준비 평가 / 현재 모드의 명령 후보 하나 / 20ms
+                 ├─ main: 고정 20ms release → 입력 사본 제출 / 결과·현재 문맥 확인
+                 ├─ AUTO 계산 스레드 → AUTO 어댑터 → 원 입력·실제 완료·결과
+                 ├─ MANUAL 계산 스레드 → MANUAL 어댑터 → 원 입력·실제 완료·결과
                  ├─ v1 owner: control·수동 입력·인지 구독, 최신 명령 + 보고 칸 4개
                  └─ 별도 v2 Publisher: Diagnostics Core의 실제 관측값
 ```
@@ -40,11 +41,27 @@ warm-up·동기화를 확인해야 한다. 함수가 반환됐다는 사실만�
 입력 부족·만료는 계산 실패와 별개다. 안전 정지 입력(`keys: []`, 인지 `stop`)도
 형식·신선도가 유효하면 기능 준비와 구분할 수 있다. 입력을 가짜로 만들어 준비시키지 않는다.
 
-두 계산은 현재 직렬 실행한다. Diagnostics의 공통 `loop_seq`·step 시간은 두 계산을
-포함한 20ms 작업이다. 결합 비용은 이 release 안에 들어와야 하며 초과·누락은 기존
-진단에 남긴다. 임의의 callback 정지나 AUTO 무한 대기를 어댑터가 선점하지는 못한다.
-그 경우 MANUAL·공통 진행도 멈춘다. 예산을 지킬 수 없는 후속 앱은 이 호출 경계에서
-별도 실행 구조를 검토해야 하며 통신 worker가 진행·READY를 대신 만들지 않는다.
+`workers.c`는 계산별로 실행 중 사본과 최신 대기 사본, 결과 칸을 소유한다. AUTO callback이
+늦어도 MANUAL이나 main이 그 완료를 기다리지 않는다. 대기 중인 여러 release는 최신 작업
+하나로 교체하며 놓친 계산을 몰아서 실행하지 않는다. 결과에는 원 입력의 수신 시각·seq,
+control/connection revision, 실제 시작·완료가 남는다. 현재 문맥과 다른 결과는 사용하지 않는다.
+
+앱별 `progress_seq`는 각 어댑터의 실제 진행이다. 공통 `loop_seq`·지터·elapsed는 **현재 선택된
+계산의 실제 시작·완료**를 관측하며, SAFE_STOP에서는 실제 MANUAL 계산을 관측한다. main의
+poll·작업 제출·송신·WAITING 상태가 순번을 증가시키지 않는다. 이전 직렬 두 계산 합계와
+동일한 성능 표본으로 비교하지 않는다. 기존 standalone 앱의 직렬 hook은 그대로 유지한다.
+
+계산 스레드는 취소 요청을 확인한 뒤 callback이 반환해야 종료할 수 있다. 반환하지 않는
+callback은 원 종료 기한에서 실패·자원 잔존으로 남기며 thread abort나 stack 재사용으로
+숨기지 않는다. 계산 소유자 join 실패는 기존 shared runtime 정리 전에 전달한다. 우선순위와
+8KiB씩의 계산 stack은 현재 알고리즘용 초기 구성이다. 실제 Xen의 실행 지연·전체 call chain
+stack peak·미래 planner의 자원 수락을 뜻하지 않는다. 같은 주소 공간의 메모리 손상 격리는 없다.
+
+현재 `verified-drive-1` 호환 구성은 두 앱의 실제 계산으로 준비를 보고한다. 설계의 warm
+Standby처럼 계산을 대기시키는 프로필은 아직 활성화하지 않는다. 내부 WAITING은 다음 작업을
+기다린다는 뜻이며 `app.readiness=READY`나 승계 자격이 아니다. 대기 자격·활성화 확인·활성
+진행을 구분하는 새 소비자 계약은 설계 9.6절의 공동 확정 대상으로 유지한다. 같은 READY를
+갱신해 대기 계산이 진행한 것처럼 만들지 않는다. 앱 단독 재초기화·instance 재발급도 미지원이다.
 
 고정 release origin, 놓친 계산을 몰아서 실행하지 않는 정책, 원 입력 수신 시각,
 200ms 수동 입력·300ms 인지 만료, 명령 100ms 신선도를 유지한다. F01의 창 확정/송신
@@ -143,6 +160,12 @@ Spring/화면 담당자는 VM별 토픽 구독, `expected_generation` 및 기존
 
 ## 빌드·시험·이미지 편입
 
+기본 `--profile operations`는 원자료 recorder와 요청형 상세 stack scan을 제외한다.
+CPU 계상·heap/pool·기한·오류와 실제 계산 진행, Publisher·협조 종료는 유지한다.
+원자료 시험은 `--profile experiment`를 명시한다. profile과 실제 `.config` 해시는 빌드
+영수증에 들어가며 두 구성의 firmware/source digest를 구별한다. recorder가 없는 구성의
+`capture/records/transmissions`는 `-ENOTSUP`이며 빈 원자료 성공으로 반환하지 않는다.
+
 ```bash
 cmake -S platform/apps/drive/tests -B "$HOST_BUILD" -GNinja
 cmake --build "$HOST_BUILD"
@@ -150,6 +173,7 @@ ctest --test-dir "$HOST_BUILD" --output-on-failure
 (cd platform/services/gateway && python3 -m pytest)
 (cd platform/services/dom0-manager && python3 -m pytest)
 python3 platform/scripts/build-xenova-drive-app.py --app drive \
+  --profile operations \
   --zephyr-source "$ZEPHYR_SOURCE" --tools "$ZEPHYR_TOOLS" \
   --output "$NEW_OUTPUT" --execute
 ```
@@ -168,3 +192,5 @@ VM/boot/instance/message_id/실행/app/세대와 프레임을 연결한다. 펌�
 
 native/ARM/실보드/이미지/차량 성능 수락을 구별한다. 특정 후보·실패·해시는
 [검증 기록](../../../docs/verification/common-drive-integration-20261026.md)에 둔다.
+독립 실행·원자료 회수·구성 분리의 로컬/ARM 수락과 남은 범위는
+[기반 검증 기록](../../../docs/verification/zephyr-drive-foundation-20261029.md)을 따른다.
