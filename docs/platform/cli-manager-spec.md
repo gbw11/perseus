@@ -403,11 +403,13 @@ xenova-vm get "$VM_ID" --json
 
 **정상 응답**
 
-계획은 `data.plan`을 포함한다. 최초 완료 `data`는 **VMView 자체**: `{"vm_id":"22222222-2222-4222-8222-222222222222","lifecycle":"REGISTERED","generation":0,"desired_state":"stopped","intent_revision":1}`. `{vm:…}`로 감싸지 않는다.
+계획은 `data.plan`을 포함한다. Linux 계획은 metadata·용량·소유권 검사의 결과이며 payload 전체 검증이나 실제 등록 완료를 뜻하지 않는다. 기존 실패 작업의 계획 재조회도 `ok=true`일 수 있으므로 포함된 `operation.status/error`를 확인한다. 최초 완료 `data`는 **VMView 자체**: `{"vm_id":"22222222-2222-4222-8222-222222222222","lifecycle":"REGISTERED","generation":0,"desired_state":"stopped","intent_revision":1}`. `{vm:…}`로 감싸지 않는다.
 
 **오류 응답**
 
 같은 UUID의 다른 명세는 `IDEMPOTENCY_CONFLICT`(3). 버전 없음은 `TEMPLATE_VERSION_NOT_FOUND`(2), 주소 충돌 `IP_CONFLICT`(3), 용량 부족 `INSUFFICIENT_STORAGE`(4).
+
+Linux 복사 검증·준비 실패는 원 작업이 기록된 뒤의 `RECOVERY_REQUIRED`(4)일 수 있다. `operation_id`와 [부분 준비·원 요청 재확인 규칙](#creation-contract)을 확인한다. 실패나 응답 유실을 미수락으로 단정해 새 UUID로 다시 생성하지 않는다.
 
 **확인 방법**
 
@@ -3555,7 +3557,11 @@ create의 정확한 spec은 `vm_id,name,template_id,template_version,vcpus,memor
 - Network Starter는 MAC/IP/hostname을 갖고, legacy 비네트워크 Starter는 ipv4 입력을 거절한다.
 - MAC은 플랫폼이 생성하는 `02:xx:xx:xx:xx:xx`다. UUID·MAC·IP·내부 이름 예약은 공통 operation lock 안에서 대조한다.
 - create 완료는 REGISTERED/generation=0/autostart=false/의도 stopped/revision=1. 기본 board policy는 협조형 graceful, legacy refuse다.
-- 용량 검사는 현재 할당뿐 아니라 기존·미완료 VM의 향후 디스크 증가 예약을 포함한다. 부분 준비본은 journal/workspace를 보존하며 자동 디스크 재초기화를 하지 않는다.
+- 용량 검사는 현재 할당뿐 아니라 기존·미완료 VM의 향후 디스크 증가 예약을 포함한다. 카탈로그 metadata·manifest 신원·자산 크기·불변성과 소유권을 확인한 뒤 용량을 검사하므로, 이 단계의 용량 부족은 payload 전체를 읽기 전에 거절한다. 사전 검사는 자원 예약이 아니다. 실제 Linux 준비 전에 원 operation·명세·템플릿 manifest·UUID/MAC/IP·작업 경로를 기록하며, 미완료 작업의 예약은 이후 요청의 용량·신원 검사에도 포함한다.
+- Linux 신규 생성은 별도의 사전 전체 payload 해시를 수행하지 않는다. 계획은 metadata·용량 검사까지이며, 실제 준비는 선택된 manifest를 다시 대조하고 신규 private 파일로 복사하는 바이트 전체를 기대 해시·크기와 비교한다. `files["root.raw"]["sha256"]`와 `root_sha256`의 일치를 먼저 확인하고 같은 복사 digest로 검증하므로 두 필드의 검증도 유지한다. 모든 payload 복사가 검증된 뒤 게스트 설정을 수행하며, 게시 직전 원본 경로·파일 신원·변경 여부를 다시 확인한다. 이전 요청이나 프로세스의 검증 cache는 사용하지 않는다. Zephyr의 기존 bundle 검증은 유지한다.
+- 검증 결합 복사는 sparse hole도 논리적인 0 바이트로 해시에 포함한다. 파일시스템이 hole 조회를 지원하지 않아도 전체 스트림 검증을 유지한다. 복사·동기화·해시 실패나 원본 교체 시 부분 workspace를 보존하고 게시하지 않는다. 외부 root 변경을 원자적으로 통제하거나 저장 매체의 전원 상실을 보장하는 계약은 아니다.
+- 수락 뒤 Linux 준비 실패는 원 operation의 `status=RECOVERY_REQUIRED`·진행 `phase`·`error`로 남긴다. 검증 이유와 I/O errno를 보존한다. 실패 기록의 저장도 실패하면 응답에 내구 저장 미확정을 밝힌다. 부분 파일이나 원 작업을 지워 정상 최초 상태로 만들지 않는다.
+- 같은 UUID·명세는 같은 `create:UUID`로 재확인한다. [자산 작업 조회](#cmd-operation)는 원 작업과 `effective_status`를 반환한다. 기록된 실패와 부분 workspace가 있으면 재실행도 재복사·재할당 없이 차단하고 최초 실패를 보존한다. 프로세스 중단으로 실패 기록이 없더라도 남은 부분 경로를 재초기화하지 않는다. workspace 생성 전 실패는 원 manifest를 다시 확인한 뒤 같은 작업·예약으로 재개할 수 있고, 이미 게시한 자산은 재복사 없이 기존 소유권을 확인해 후속 등록을 진행한다. 미게시 VM의 `get` 부재는 원 작업·부분 자산의 부재가 아니다.
 
 <a id="observation-fields"></a>
 ### B.4 Observation·Snapshot

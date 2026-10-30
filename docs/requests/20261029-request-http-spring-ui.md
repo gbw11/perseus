@@ -114,6 +114,52 @@ Spring 공개 API를 거친 호출은 아니므로 Spring 생성 실패를 재�
   이번 설치본은 해당 환경 설정이 없고 config 기본은 false였다. 라우터 코드 존재만으로
   프론트 콘솔 입출력이 가능하다고 보고하지 않는다. 활성화와 제품 왕복은 담당자 수락이다.
 
+### Linux 생성의 복사 검증 실패와 원 작업 회수
+
+하위 Linux create는 사전 전체 payload 해시 없이 metadata·용량을 확인하고 원 operation과
+예약을 저장한 뒤, 실제 복사 바이트 전체를 검증한다. [정식 생성 계약](../platform/cli-manager-spec.md#creation-contract)을
+따른다. 준비 실패는 기존 `RECOVERY_REQUIRED`이며 미게시 VM의 상세 조회가 부재여도
+원 작업·부분 디스크가 남을 수 있다. 이 요청은 D02·D08의 상위 미구현 항목에 누적하며
+HTTP·Spring·화면 제품 코드는 이번에 대신 수정하지 않는다.
+
+- FastAPI `PlatformProvisioner.ensure_instance`와 `PlatformDriver.create`의 담당자는
+  실제 하위 `operation_id/error`와 제출 전 VM UUID를 응답 유실·준비 실패 뒤에도 보존한다.
+  Spring `Dom0ManagerClient.launch`·`VmService.create`는 상세 GET의 부재나 HTTP 오류만으로
+  새 UUID를 발급하지 않는다. 실제 배포본의 Driver 클래스명·연결 경로부터 대조한다.
+- 하위 조회 예시는 `manager.fork().call("operation", {"idempotency_key": "create:" + vm_id})`다.
+  자산 operation 원장을 조회해야 하며 `control-operation(s)`의 부재로 생성 미수락을 확정하지
+  않는다. 상위 담당자는 기존 인증·권한 검사 아래 이 자산 조회를 연결할 최소 HTTP 경로를
+  정하고, 지원하지 않는 배포에서는 확인 불가로 표시한다. 이 문서의 Python 예시는 HTTP API가 아니다.
+- 같은 UUID·정확한 명세의 조건부 재전달만 허용한다. 실패한 부분 workspace는 자동 삭제·
+  덮어쓰기·재복사하지 않는다. 실패 저장 미확정, 원 기록 조회 실패, 정상 검색 부재를 구분한다.
+  기존 후속 책임·예산·운영 수습 제한은 유지한다.
+- 수락 assertion: 손상 payload/복사 ENOSPC·EIO 뒤 원 operation을 회수하고, 상위 재시작과
+  응답 유실 뒤에도 UUID·key·할당을 유지한다. 미게시 상세 부재를 중복 생성으로 연결하지 않는다.
+  부분 실패 재전달은 원 오류·파일을 유지하고, 게시 후 응답 유실은 재복사 없이 원 작업을
+  회수한다. 로컬 하위 시험 통과를 실제 HTTP·Spring·화면 연결 완료로 처리하지 않는다.
+
+## 설치본 API 재시작과 VM backend 소유
+
+기본 관리 시험에서 `xenova-dom0-manager.service`의 cgroup에 기본 Debian의 qemu
+(`-xen-domid 9 -name debian-dev`)와 xl create monitor가 함께 남은 것을 확인했다.
+unit의 KillMode는 control-group이었다. [실보드 기록](../verification/recovery-scenario-closure-20261030.md#검증-결합-복사의-승인-후-실보드-측정)에
+근거와 승인된 정상 정지·복원 절차를 둔다. API가 active라는 사실이나 Xen domain만
+남았다는 사실로 guest 저장소 backend 보존까지 수락하지 않는다.
+
+기존 부팅/종료 계약은 `xenova-vm-<VM UUID>-<execution UUID>.scope`에 지속 프로세스를
+귀속하고 실패 시 직접 xl로 우회하지 않는 것이다. 하위 runtime 배포 담당자는 실제
+`xenova_vm.Platform`·`xenova_execution`·`xenova_guest_process`의 설치 버전과 호출 연결을
+대조한다. HTTP 담당자는 `PlatformDriver.create`→하위 start의 직접 객체 호출에서도
+같은 실행 소유 경계가 적용되는지 확인한다. 이번 I/O 후보 세 파일 교체는 이 설치본의
+프로세스 소유권까지 갱신한 작업이 아니다. 현재 코드에 이미 있는 scope를 중복 구현하지 않는다.
+
+권고 수락은 CLI/FastAPI의 새 Linux 실행 각각에서 monitor/backend PID·cgroup·실행
+UUID를 대조하고, API 정상 재시작 때 기존 guest의 디스크 I/O·네트워크·실행이 유지되는지
+격리 시험→승인된 실보드 순으로 확인하는 것이다. 실패 batch·개별 VM stop·host 종료의
+정리 책임도 기존 부팅 계약과 연결한다. KillMode=process/none, 고아 프로세스 방치,
+살아 있는 기본 VM backend의 무단 강제 이동으로 우회하지 않는다. 원 execution·의도·
+CPU 정책은 보존한다. 이 항목은 미완료이며 D02·D08의 하위 수락을 다시 실패로 닫지 않는다.
+
 ## 진행 기록
 
 - 2026-10-29: 현재 HTTP 소스의 key stop/조회 제공을 확인했습니다. Spring의 `stop`은 void 호출이며 종단 연결은 별도 과제입니다. 운영 API·DB·env·서비스를 변경하지 않았습니다.

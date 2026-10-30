@@ -17,6 +17,35 @@
 seed의 해당 표식은 **식별자·SSH 키 준비 완료**만 뜻한다. 네트워크 연결이나 에이전트 준비 완료를 뜻하지 않는다.
 `xenova_first_boot.py`는 dom0의 공통 SD 최초 등록 처리이며, domU 에이전트 설치기가 아니다.
 
+## 인스턴스 디스크 준비와 검증
+
+Linux 관리 경로는 템플릿 선택 때 metadata·manifest 신원·자산 크기·소유권·용량을 검사한다.
+사전 전체 payload 해시 없이 원 작업과 예약을 기록한 뒤 준비한다. `make_instance()`는 선택된
+`template_manifest_sha256`을 현재 manifest와 대조하고, 원본에서 신규 private 파일로
+복사하는 동일 바이트 전체를 기대 SHA-256과 비교한다. `root.raw`·커널·initrd·boot.json·
+kernel.config를 모두 검증한 뒤 파일시스템 UUID와 게스트 신원·SSH를 설정한다.
+
+복사본은 원본과 다른 inode로 생성한다. sparse hole은 출력에서도 유지하고 해시에는
+해당 길이의 0 바이트를 포함한다. hole 조회가 지원되지 않으면 전체 스트림을 검증하며
+복사한다. 전역 검증 cache나 reflink를 사용하지 않는다.
+
+원본의 dev/inode·크기·mtime/ctime·mode 등은 복사 전후와 게시 직전에 비교한다.
+이 정보는 같은 준비 작업의 변경 guard이며 내용 검증은 전체 스트림 해시가 담당한다.
+guest 설정으로 복사본이 바뀌는 것과 원본 변경은 구분한다. 원본 교체·해시 불일치·
+I/O 오류·동기화 실패 시 게시하지 않고 작업 경로를 보존한다. 기존 출력은 덮어쓰지 않는다.
+실행자 중단 뒤 부분 작업의 자동 초기화나 새 operation 발급도 하지 않는다.
+
+관리 경로의 준비 실패는 기존 operation에 `RECOVERY_REQUIRED`와 원인을 기록한다.
+실패 기록 저장이 미확정이면 응답에도 이를 남긴다. 같은 요청의 조회는 원 기록을 읽으며,
+실패가 기록된 부분 workspace의 재실행은 최초 오류와 파일을 보존한 채 차단한다.
+workspace 생성 전 실패와 이미 게시된 자산의 후속 등록은 같은 operation·예약으로
+재확인한다. 정확한 상태·오류·재전달 계약은 [생성 계약](../../../docs/platform/cli-manager-spec.md#creation-contract)을 따른다.
+Linux 계획 성공은 payload 무결성이나 생성 완료의 확인이 아니다.
+
+기존 직접 준비 경로의 구형 Linux manifest가 `files`를 생략한 경우에는 기존
+`root_sha256`와 boot manifest의 해시로 검증한다. 새 관리 카탈로그는 계속 완전한
+`files` manifest를 요구한다. 준비 완료는 Xen 실행·OS 기동·Agent 연결 완료를 뜻하지 않는다.
+
 ## Linux Bash 프롬프트
 
 새 Linux VM의 준비 레코드에 있는 `display_name`을 게스트의
