@@ -7,6 +7,7 @@
 1. [기존 관리 연동 요청](../platform/management-integration-request.md)의 실제 하위 호출·허용 details·원 key 검색 결과와 Spring 요청을 읽습니다.
 2. 최신 `platform/services/dom0-manager/dom0_manager/api/vms.py`, `service.py`, `drivers/platform.py`를 대조합니다. 현재 소스에는 key 있는 stop의 200/202와 원 key 조회 경로가 있으므로 과거 문서의 HTTP 미구현 설명을 그대로 적용하지 않습니다. 배포·종단 수락은 별도입니다.
 3. [관리 수명주기](../platform/management-boundaries.md), [복구 시나리오](../platform/recovery-scenarios.md)의 F1·F2·F4·FO1, 주행 설계 11~12·20절을 읽습니다.
+4. Linux 준비 중 동시 조회·정지는 [아래 3번 연결 조건](#linux-준비-중-조회제어의-동시-연결)을 확인합니다. 현재 하위 제공과 실제 HTTP/제품 연결은 별개입니다.
 
 ## 담당자 작업
 
@@ -146,6 +147,69 @@ HTTP·Spring·화면 제품 코드는 이번에 대신 수정하지 않는다.
   HTTP·Spring 담당은 조회·사용자 표시를 연결하되 파일 정리나 새 UUID 우회를 대신 구현하지 않는다.
   수락은 종결/정리 중 중단·응답 유실에도 원 기록을 회수하고, 미종료 실행자·사용 중 자산·
   증거 불충분에서는 해제를 거절하며, 확인된 종결 뒤에만 후속 생성으로 진행하는 것이다.
+
+## Linux 준비 중 조회·제어의 동시 연결
+
+**D02·D08 후속 / 하위 3번 제공, FastAPI·Spring·화면 연결 및 설치 수락 전.**
+지원 기준은 [3번 검증 후보](../verification/recovery-scenario-closure-20261030.md#장기-linux-준비와-공통-잠금-분리)의
+모든 관련 모듈·실제 import 경로·recipe 포함 바이트가 일치하는 단일 설치본이다.
+`fork()` 존재만으로 구형/혼합 설치본을 새 동시 호출 지원으로 판정하지 않는다.
+현재 이 제품 코드는 플랫폼에서 대신 수정하지 않았다.
+
+### FastAPI 담당
+
+| 실제 위치 | 변경 요청·제공 근거 | 수락 assertion |
+|---|---|---|
+| `drivers/platform.py:SerializedManager.call/fork/load_manager`, `build_driver` | 기본 직렬화를 전부 삭제하지 않는다. 확인한 새 하위에서 Linux create와 get/list/asset operation 및 다른 VM stop을 요청별 fork 객체로 연결한다. 같은 inner를 여러 thread가 직접 공유하지 않는다. 하위의 동일 VM 충돌·실행 잠금·CPU/신원/의도 guard는 유지한다 | A의 실제 복사를 막아 둔 동안 B 조회와 실제 stop·완료 조회가 끝남. 상위 전역 mutex나 VM 공통 mutex가 하위의 새 진행성을 다시 막지 않음 |
+| `drivers/platform.py:_BUDGET_ACTIONS/call_with_budget`·서비스/라우터의 요청 예산 | 새 하위의 `operation`에 현재 남은 budget_ms를 전달한다. 기존 get/list의 timeout_ms도 같은 잔여값으로 제한한다. 만료 대기자의 뒤늦은 제출은 금지한다. create 전체 deadline 지원은 이번에 제공하지 않았으므로 budget_ms를 create에 추가하거나 timeout을 취소로 해석하지 않는다 | 원 작업 조회 만료·읽기 실패를 검색 부재로 바꾸지 않음. 조회 예산으로 원 실행 기한을 갱신하지 않음 |
+| `PlatformProvisioner.ensure_instance/_registration/_paths`, `PlatformDriver.create`, `VmService.create` | 현재 ensure_instance는 create의 ok 응답 뒤 view/_registration에서 configuration.id를 찾는다. 활성 재전달의 data.operation/effective_status=RUNNING은 그 VMView가 아니다. 먼저 원 작업을 추적하고, SUCCEEDED의 등록 결과가 확인되기 전 `_paths`·start나 새 UUID 재생성을 하지 않는다. 선행 get의 직렬화도 함께 대조한다 | 같은 key 재전달을 잘못된 UUID/빈 경로 오류로 바꾸지 않음. 실제 등록 전 GET 부재를 중복 생성으로 연결하지 않음 |
+| 원 자산 작업 조회의 API/DTO·`raise_for_envelope` | asset `operation`과 control-operation을 분리해 연결한다. 새 HTTP 경로·응답 DTO는 담당자가 기존 인증/VM 접근권한과 함께 확정한다. key 또는 operation ID로 얻은 원 record의 vm_id가 권한 대상과 일치하는지 확인한다. raw journal·workspace 경로·내부 소유 PID/FD·진단 원문을 그대로 외부에 반환하지 않는다 | 정상 검색 부재·읽기/소유권 관측 실패·기한 초과·중복 key를 구별. 다른 VM 원장을 볼 수 없음 |
+
+하위 호출 예시는 다음과 같다. 첫 전송 전에 정한 동일 SPEC/UUID를 보존한다.
+
+```python
+create = manager.fork().call("create", SPEC, execute=True, request_id=CORRELATION_ID)
+original = manager.fork().call(
+    "operation", {"idempotency_key": "create:" + VM_ID}, budget_ms=REMAINING_MS)
+current = manager.fork().call(
+    "get", {"vm_id": OTHER_VM_ID, "timeout_ms": min(REMAINING_MS, 15000)},
+    budget_ms=REMAINING_MS)
+```
+
+각 호출에는 그 시점에 다시 계산한 양수 잔여 ms를 사용한다. 위 예시의 동일 변수 표기는
+연속 호출마다 전체 예산을 다시 지급한다는 뜻이 아니다. create의 외부 응답을 잃으면
+새 key로 우회하지 않고 asset operation으로 원 작업을 확인한다. 준비를 실행하는 호출자는
+동기 호출의 수명과 원 결과 회수 책임을 유지한다. 새 자동 이행기나 재시도 queue는 제공하지 않는다.
+
+### Spring·화면 담당
+
+`Dom0ManagerClient.launch`·`VmService.create`와 VM 작업 추적/DTO, 프론트 VM 생성·목록·
+상세 action query에서 다음 의미를 보존한다. 정확한 필드 원문은
+[자산 원장 계약](../platform/cli-manager-spec.md#operation-fields)에 둔다.
+
+- `effective_status=RUNNING`은 원 Linux 준비의 활성 실행 관측이다. VM RUNNING·OS/Agent
+  준비·생성 완료가 아니다. 아직 등록되지 않은 VM을 실제 실행으로 표시하거나 start하지 않는다.
+- 신규 슬롯 경합의 `error.details.accepted=false`·operation_id=null은 확인된 미수락이다.
+  일반 OPERATION_IN_PROGRESS·503·timeout에는 이 해석을 적용하지 않는다. 이미 수락된 원
+  작업을 소급 취소하거나 모든 경합을 202/접수 완료로 변환하지 않는다.
+- 원 기록의 RECOVERY_REQUIRED, 원장/소유권 조회 오류, 정상 검색 부재는 다르다.
+  원 key·spec·UUID를 보존하고 읽기 예산으로 조회한다. 현재 표시값을 권한/실행 허가로 쓰지 않는다.
+- SUCCEEDED 이후 현재 VM 관측만 실패한 재전달은 원 성공과 current=null/diagnostic_warnings를
+  유지한다. 부분 실패의 정리 완료나 새 생성 허용은 위 5번 수습 기능 제공 전 표시하지 않는다.
+- 기존 stop의 accepted/pending·원 물리 deadline·후속 이행 주체는 그대로 유지한다.
+  하위의 Linux 준비 분리가 긴 Recovery Engine 작업 전체를 병렬화한 것은 아니다.
+
+### 공동 제품 수락
+
+S3-T01과 같은 순서를 **실제 FastAPI 직접 경로**, 이어서 **EC2/Spring·화면 경로**에서
+각각 수행한다. Debian·Ubuntu A의 복사 진입을 통제한 상태에서 B 목록/상세·원 create 조회·
+B key stop·실제 Xen 종료와 완료 조회가 A 해제 전에 끝나야 한다. 그 뒤 A를 해제하여
+같은 원 operation·예약으로 생성 완료를 확인한다. 상위 handler를 mock으로 바꾸거나
+먼저 A를 끝낸 결과는 제품 수락이 아니다. 동일 key 동시 요청·신규 슬롯 미수락·응답 유실·
+관측 실패와 상태 역전도 포함한다. 보드 배포·임시 barrier 적용은 별도 승인을 받는다.
+
+하위 로컬 통과와 위 제품 수락은 분리한다. 기존 기본 VM·CPU·네트워크·Tailscale을 보존하며,
+서비스 재시작의 backend cgroup 문제는 아래의 독립 미완료 항목으로 유지한다.
 
 ## 설치본 API 재시작과 VM backend 소유
 

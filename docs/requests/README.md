@@ -14,7 +14,7 @@
 | [Gateway 직접 구현·공동 연동](20261029-request-gateway.md) | 박신영 / 플랫폼·Gateway | 직접 구현의 후속 계획과 ESP32·입력·Worker 공동 연결. 타 담당자에게 Gateway 전체를 위임하는 요청이 아님 |
 | [Recovery Worker](20261029-request-recovery-worker.md) | Worker·Engine | D01 건강 분류·episode 회복, D03 원 결과 수습·전체 복구 연동 |
 | [Linux·Agent](20261029-request-linux-agent.md) | Linux 엔지니어·Agent | D01-L01~L05 자원·서비스 진행·로컬 감독·설치 |
-| [HTTP·Spring·화면](20261029-request-http-spring-ui.md) | FastAPI·Spring·프론트 | 원 key·pending 종단 연결, 수동 입력 세션·명시적 모드/복귀 |
+| [HTTP·Spring·화면](20261029-request-http-spring-ui.md) | FastAPI·Spring·프론트 | Linux 준비 중 조회/실제 정지 연결, 원 key·pending 종단 연결, 수동 입력 세션·명시적 모드/복귀 |
 | [Jetson](20261029-request-jetson.md) | 인지·지도·영상 | 실제 센서·지도/위치·바이너리 snapshot·보존/복원·영상 분리 |
 | [ESP32·차량](20261029-request-esp32.md) | 장치·차량 제어 | 실제 피드백·적용/정지 확인·차량 보정·출력 연속성 |
 

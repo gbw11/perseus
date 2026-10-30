@@ -44,6 +44,18 @@ Linux 계획 성공은 payload 무결성이나 생성 완료의 확인이 아니
 미게시 부분 준비를 정리하는 관리 명령은 아직 없으며, 등록/보관 VM용 `retire/purge`로
 대신 처리하지 않는다. 원 key 조회와 파일 보존 이후의 종결·예약 해제는 별도 후속 범위다.
 
+Manager는 `make_instance(private=True)`로 준비 결과를 받아 공통/admission 잠금 안에서
+현재 원 작업·등록부·예약·gate와 대조한 뒤 게시한다. 준비 결과는 원 manifest·사본·
+workspace/target에 결합하며, helper는 먼저 public 경로로 옮기지 않는다.
+독립 factory seed 준비는 기존 오프라인 경로를 유지한다. 초기화된 운영 저장소의
+`prepare-xenova-guests.py instance` 직접 실행은 거절하며 Manager create를 사용한다.
+원 실행 소유권 없이 private 모드만 지정하는 것으로 이 제한을 우회할 수 없다.
+
+`Workspace`는 할당/해제의 미확정 여부와 mount/loop를 private 자원 파일에 기록한다.
+정리 확인 후에만 준비 결과를 반환한다. Python 진단과 외부 명령 출력은 요청별 제한
+sink로 보내며 전역 stdout/FD를 바꾸지 않는다. 새 외부 의존성 없이 기존 thread-local
+기반을 사용한다. 동기 Manager 호출은 요청마다 별도 fork 객체를 사용한다.
+
 기존 직접 준비 경로의 구형 Linux manifest가 `files`를 생략한 경우에는 기존
 `root_sha256`와 boot manifest의 해시로 검증한다. 새 관리 카탈로그는 계속 완전한
 `files` manifest를 요구한다. 준비 완료는 Xen 실행·OS 기동·Agent 연결 완료를 뜻하지 않는다.

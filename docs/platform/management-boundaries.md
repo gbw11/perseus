@@ -39,6 +39,7 @@ Manager는 HTTP 상태 코드나 웹 세션을 알지 못하고 같은 envelope�
 1. 입력과 등록 자산을 검증한다. 대상 UUID, 현재 host/lifecycle, 구성·정책을 확인한다.
 2. 실행 작업은 공통 operation 잠금으로 직렬화한다. 충돌하면 무한 대기하지 않는다.
    stop은 이 긴 잠금보다 앞에서 짧은 admission 잠금으로 의도 수락을 시도할 수 있다.
+   Linux 자산 생성은 아래처럼 긴 private 준비만 공통 잠금 밖에서 수행한다.
 3. 원 요청 journal과 사용자 의도를 내구 저장한다. 의도 파일은 file fsync → rename →
    directory fsync를 거친다. 저장을 확인하지 못하면 수락 성공으로 반환하지 않는다.
 4. 조치 직전 guard가 host·lifecycle·의도 revision·실행 신원·구성·CPU 정책·기한을
@@ -50,6 +51,34 @@ Manager는 HTTP 상태 코드나 웹 세션을 알지 못하고 같은 envelope�
 명령이 이미 제출됐거나 응답을 잃은 경우, CLI 종료·HTTP timeout을 취소 증거로 쓰지 않는다.
 Xen이 명령을 받았을 수 있으므로 원 operation과 현재 실행을 대조한다.
 현재 CPU 정책 오류가 있어도 신원을 확인한 대상의 stop/shutdown은 가능해야 한다.
+
+### Linux 준비의 소유권과 게시
+
+Debian·Ubuntu는 하나의 준비 슬롯을 공유한다. 기존 key의 결과·활성 실행을 먼저 확인하고,
+신규 요청은 공통 잠금 밖에서 슬롯을 시도한다. 슬롯이 없으면 새 작업·예약을 수락하지 않는다.
+슬롯을 얻어도 수락 직전에 원 key·현재 자원/주소·gate를 다시 확인한다.
+
+원 operation과 예약을 저장한 뒤, 동일한 원본의 검증 결합 복사·guest 설정·필수 검증과
+자원 정리를 private workspace에서 수행한다. Manager가 게시를 결정하기 전에는 등록된
+VM 경로로 옮기지 않는다. 게시 직전 현재 원장·등록부·예약·manifest와 준비 결과의
+신원/대상 경로를 대조한다. source guard와 실제 게시 사이에는 공통/admission 잠금을
+유지한다. 복사 전의 등록부를 다시 덮어쓰지 않는다.
+
+| 보호 대상 | 실제 소유·순서 | 해제·오류의 의미 |
+|---|---|---|
+| 공통 metadata/물리 변경 | `locks/platform.lock`. Linux 수락과 채택 때만 유지. 다른 VM의 물리 제어는 기존 직렬 경로 사용 | 긴 Linux 복사 자체가 목록·상세·다른 VM stop을 막지 않음. 모든 작업의 병렬 실행 보장은 아님 |
+| Linux 준비 실행량 | `locks/linux-prepare.lock`. 공통 잠금 밖에서 무대기 획득한 뒤 공통 수락을 재검사 | 미수락 슬롯 경합과 이미 기록한 원 요청을 구별. 숨은 대기열/실행기는 없음 |
+| 특정 원 실행 | `locks/linux-owner-<operation UUID>.lock`의 원 요청/host/프로세스 시작 신원과 잠긴 실제 FD 결합 | PID·파일 존재·다른 잠금 busy만으로 RUNNING을 확정하지 않음. 종료된 부모의 잔존 자식은 미확정으로 보호 |
+| 게시·host 의도 | 공통 잠금 → `locks/admission.lock` 순서. 현재 gate/준비 admission 문맥을 확인한 채 게시 | quiesce는 admission을 해제한 뒤 공통 잠금 밖에서 drain. 역순으로 긴 작업 종료를 기다리지 않음 |
+| private 자원 | `instances/.operation-<UUID>/.preparation-resources.json`에 mount/loop·미확정 할당·정리 결과 기록 | 슬롯이 없어도 자원 정리 기록이 미확정이면 저장소 해제 불가. 조회가 자원을 정리하거나 예약을 풀지 않음 |
+
+원 준비 소유 FD는 준비의 외부 자식에도 전달한다. 부모 종료/응답 유실을 자식 종료로
+해석하지 않는다. 같은 key/spec의 활성 재전달은 원 operation만 돌려주며, 다른 spec는
+거절한다. 정상 완료가 내구 확정된 경우에는 실행 잠금의 뒤늦은 해제보다 원 성공을 우선한다.
+정확한 `effective_status`·미수락·조회 오류는 [원장 계약](cli-manager-spec.md#operation-fields)을 따른다.
+
+부분 실패의 원 기록·파일 보존과, 운영자의 정식 종결·정리·예약 해제는 다른 기능이다.
+후자는 아직 제공되지 않는다. 현재의 보호를 파일 삭제·원 ID 재발급·자동 force로 해제하지 않는다.
 
 ## 검증 근거의 수명
 

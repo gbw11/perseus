@@ -405,11 +405,21 @@ xenova-vm get "$VM_ID" --json
 
 계획은 `data.plan`을 포함한다. Linux 계획은 metadata·용량·소유권 검사의 결과이며 payload 전체 검증이나 실제 등록 완료를 뜻하지 않는다. 기존 실패 작업의 계획 재조회도 `ok=true`일 수 있으므로 포함된 `operation.status/error`를 확인한다. 최초 완료 `data`는 **VMView 자체**: `{"vm_id":"22222222-2222-4222-8222-222222222222","lifecycle":"REGISTERED","generation":0,"desired_state":"stopped","intent_revision":1}`. `{vm:…}`로 감싸지 않는다.
 
+같은 원 요청의 Linux 준비 실행이 확인되면 재전달은 `data.operation`, `recovery_required=false`,
+`effective_status=RUNNING`을 반환한다. 이 `ok=true`는 원 작업 확인 성공이며 등록 완료나
+VM 실행 성공이 아니다. 완료 재전달에서 현재 관측만 실패하면 원 결과와
+`current=null`·`diagnostic_warnings`를 반환하고 원 성공을 유지한다.
+
 **오류 응답**
 
 같은 UUID의 다른 명세는 `IDEMPOTENCY_CONFLICT`(3). 버전 없음은 `TEMPLATE_VERSION_NOT_FOUND`(2), 주소 충돌 `IP_CONFLICT`(3), 용량 부족 `INSUFFICIENT_STORAGE`(4).
 
 Linux 복사 검증·준비 실패는 원 작업이 기록된 뒤의 `RECOVERY_REQUIRED`(4)일 수 있다. `operation_id`와 [부분 준비·원 요청 재확인 규칙](#creation-contract)을 확인한다. 실패나 응답 유실을 미수락으로 단정해 새 UUID로 다시 생성하지 않는다.
+
+다른 Linux 준비가 슬롯을 점유하여 **신규 요청 미수락을 확인한 경우**에는
+`OPERATION_IN_PROGRESS`(3), `operation_id=null`, `error.details.accepted=false`다.
+새 예약·workspace·대기열은 만들지 않는다. 일반 잠금 경합·timeout에 이 미수락 의미를
+일괄 적용하지 않는다. 기존 원 작업 조회·완료 재전달은 신규 슬롯 경합보다 먼저 확인한다.
 
 **확인 방법**
 
@@ -757,7 +767,7 @@ xenova-vm snapshot "$VM_ID" --max-age-ms 3000 --json
 
 **사용 조건**
 
-조회할 작업이 존재해야 한다. `ls`에 파일이 없으면 아직 이력이 없는 것이다.
+원 operation ID 또는 제출 전 보존한 create key로 조회한다. 조회는 재실행·청소·예약 해제를 하지 않는다.
 
 **실행 예시**
 
@@ -771,9 +781,14 @@ xenova-vm operation --operation-id "$OP_ID" --json
 
 `data` 예: `{"operation":{"action":"create","status":"SUCCEEDED","phase":"complete"},"recovery_required":false,"effective_status":"SUCCEEDED"}`.
 
+Linux의 확인된 원 준비 실행은 `effective_status=RUNNING`이다. 원 status/phase와
+관측 의미는 [작업 원장 계약](#operation-fields)을 따른다. VM의 RUNNING 상태와 구별한다.
+
 **오류 응답**
 
 존재하지 않는 이력은 `VM_NOT_FOUND`(2), 비표준 선택자나 복수 선택자는 `INVALID_SPEC`(2).
+불완전한 검색·기한 소진은 `DEADLINE_EXCEEDED`, 중복 key는 `RECONCILE_REQUIRED`,
+원 실행 소유권을 확인하지 못하면 `OBSERVATION_UNAVAILABLE`이다. 이를 부재로 처리하지 않는다.
 
 **확인 방법**
 
@@ -3559,10 +3574,12 @@ create의 정확한 spec은 `vm_id,name,template_id,template_version,vcpus,memor
 - create 완료는 REGISTERED/generation=0/autostart=false/의도 stopped/revision=1. 기본 board policy는 협조형 graceful, legacy refuse다.
 - 용량 검사는 현재 할당뿐 아니라 기존·미완료 VM의 향후 디스크 증가 예약을 포함한다. 카탈로그 metadata·manifest 신원·자산 크기·불변성과 소유권을 확인한 뒤 용량을 검사하므로, 이 단계의 용량 부족은 payload 전체를 읽기 전에 거절한다. 사전 검사는 자원 예약이 아니다. 실제 Linux 준비 전에 원 operation·명세·템플릿 manifest·UUID/MAC/IP·작업 경로를 기록하며, 미완료 작업의 예약은 이후 요청의 용량·신원 검사에도 포함한다.
 - Linux 신규 생성은 별도의 사전 전체 payload 해시를 수행하지 않는다. 계획은 metadata·용량 검사까지이며, 실제 준비는 선택된 manifest를 다시 대조하고 신규 private 파일로 복사하는 바이트 전체를 기대 해시·크기와 비교한다. `files["root.raw"]["sha256"]`와 `root_sha256`의 일치를 먼저 확인하고 같은 복사 digest로 검증하므로 두 필드의 검증도 유지한다. 모든 payload 복사가 검증된 뒤 게스트 설정을 수행하며, 게시 직전 원본 경로·파일 신원·변경 여부를 다시 확인한다. 이전 요청이나 프로세스의 검증 cache는 사용하지 않는다. Zephyr의 기존 bundle 검증은 유지한다.
+- Debian·Ubuntu의 실제 Linux 준비는 단일 슬롯을 사용한다. 원 요청/예약 확정과 게시 채택은 공통 잠금 안에서, 검증 복사·guest 설정·자원 정리는 그 밖의 private 경로에서 수행한다. 게시 때 현재 등록부·원 manifest·신원/주소 예약·host gate/의도를 다시 확인하고 해당 VM의 변경만 반영한다. 준비 전의 공통 등록부 사본으로 다른 VM의 변경을 덮지 않는다.
 - 검증 결합 복사는 sparse hole도 논리적인 0 바이트로 해시에 포함한다. 파일시스템이 hole 조회를 지원하지 않아도 전체 스트림 검증을 유지한다. 복사·동기화·해시 실패나 원본 교체 시 부분 workspace를 보존하고 게시하지 않는다. 외부 root 변경을 원자적으로 통제하거나 저장 매체의 전원 상실을 보장하는 계약은 아니다.
 - 수락 뒤 Linux 준비 실패는 원 operation의 `status=RECOVERY_REQUIRED`·진행 `phase`·`error`로 남긴다. 검증 이유와 I/O errno를 보존한다. 실패 기록의 저장도 실패하면 응답에 내구 저장 미확정을 밝힌다. 부분 파일이나 원 작업을 지워 정상 최초 상태로 만들지 않는다.
 - 같은 UUID·명세는 같은 `create:UUID`로 재확인한다. [자산 작업 조회](#cmd-operation)는 원 작업과 `effective_status`를 반환한다. 기록된 실패와 부분 workspace가 있으면 재실행도 재복사·재할당 없이 차단하고 최초 실패를 보존한다. 프로세스 중단으로 실패 기록이 없더라도 남은 부분 경로를 재초기화하지 않는다. workspace 생성 전 실패는 원 manifest를 다시 확인한 뒤 같은 작업·예약으로 재개할 수 있고, 이미 게시한 자산은 재복사 없이 기존 소유권을 확인해 후속 등록을 진행한다. 미게시 VM의 `get` 부재는 원 작업·부분 자산의 부재가 아니다.
 - 미게시 부분 workspace를 종결·정리하고 예약을 해제하는 관리 명령은 현재 없다. `retire`는 REGISTERED, `purge`는 RETIRED 자산을 대상으로 하므로 이 부분 준비에 적용하지 않는다. 원 key로 작업·오류를 조회하고 원 기록과 파일을 보존한다. 파일 삭제·phase 수정·새 UUID 발급으로 차단을 우회하지 않는다. 실패 자산의 소유권·사용 중인 mount/loop·잔존 효과를 확인한 뒤 종결하고 후속 생성으로 연결하는 절차는 별도 미완료 범위다.
+- 슬롯 해제는 자식·mount/loop 정리 완료의 증거가 아니다. 작업 경로의 자원 기록이 미확정이면 host 종료의 저장소 해제를 거절한다. host gate가 닫히거나 준비 중 admission 문맥이 교체되면 뒤늦은 게시를 허가하지 않는다. 새 준비 소유권/출력 모듈을 포함한 단일 설치 후보와 요청별 Manager 객체를 사용해야 한다. 일부 파일만 섞은 설치본의 동시 호출을 지원한다고 간주하지 않는다.
 
 <a id="observation-fields"></a>
 ### B.4 Observation·Snapshot
@@ -3644,7 +3661,19 @@ cpu_policy의 policy_sha256은 key 정렬·공백 없는 UTF-8 JSON(ensure_ascii
 | 사용자 제어 | schema_version, operation_id, vm_id, request, request_hash, idempotency_key, host_boot_id, lifecycle_generation, base_revision, intent_revision, desired_state, source, result, error, events | prepared/accepted/executing/completed/failed/uncertain |
 | 복구 | schema_version, recovery_attempt_id, operation_id, request, request_hash, host_boot_id, accepted_monotonic_ms, result, error, events, phase | accepted/stopping/removed/launching/observed/completed/failed/uncertain |
 
-자산 journal phase는 preparing/published/dhcp-pending/dhcp-applied/moving/moved/purge-inventory/deleting/complete 등 물리 진행 경계다. operation 조회의 effective_status는 SUCCEEDED이면 SUCCEEDED, 나머지는 RECOVERY_REQUIRED다. 이는 별도의 자동 복구 실행 성공을 뜻하지 않는다.
+<a id="operation-fields"></a>
+자산 journal phase는 preparing/published/dhcp-pending/dhcp-applied/moving/moved/purge-inventory/deleting/complete 등 물리 진행 경계다. 자산 `operation` 조회와 활성 create 재전달의 관측 필드는 다음과 같다.
+
+| 필드 | 값·의미 |
+|---|---|
+| `effective_status` | `SUCCEEDED`: 원 결과 내구 확정. `RUNNING`: 같은 원 Linux 준비의 활성 실행 소유권 확인. `RECOVERY_REQUIRED`: 실행자 부재/잔존 효과와 미완료 기록 또는 기록된 실패의 재확인 필요 |
+| `recovery_required` | effective_status가 RECOVERY_REQUIRED이면 true, 나머지 두 값은 false. 자동 복구 이행·허가를 뜻하지 않음 |
+
+RUNNING은 응답 시점의 관측이며 VM 실행·생성 완료·기한 연장이 아니다. 원 작업/host/프로세스
+시작 신원·실제 소유 FD/잠금을 대조한다. 소유권 관측 실패는 오류로 반환하며 RUNNING이나
+부재를 추정하지 않는다. 조회는 원 status·phase·key·기한을 쓰지 않는다. workspace 생성 전
+실패를 명시적으로 같은 요청으로 재개할 때는 실제 실행 전이를 RUNNING으로 기록하고,
+원 ID·할당과 이전 error를 보존한다. 부분 workspace가 있는 실패는 이 재개 대상이 아니다.
 
 최초 create/retire/restore 완료의 data는 VMView 자체다. 완료 재전달은 이 필드에 operation/original_result/current을 추가한다. 자원/firmware 전환 완료는 처음부터 operation/original_result/current으로 감싼다. 제어 응답의 vm은 현재 관측이며 원 제어 결과는 control-operation.result다. 이 차이를 응답 parser에서 유지한다.
 
@@ -3866,7 +3895,7 @@ PY
 stop 수락의 검색 예산과 원 stop의 물리 실행 deadline은 구별하며 검색 예산으로 원 기한을
 축소·연장하지 않는다. 개별 filesystem syscall을 선점하는 hard realtime 보장은 아니다.
 
-`budget_ms`는 `start/stop/reboot/destroy/get/list/control-operation`의 선택 호출 인자다.
+`budget_ms`는 `start/stop/reboot/destroy/get/list/operation/control-operation/recovery-reconcile`의 선택 호출 인자다.
 정수 1..105000ms만 허용하며 bool은 거절한다. 상위 대기 후 남은 기간을 전달하는 용도이며
 원 spec/hash에 포함하지 않는다. 물리 실행 기한은 기존 90초와 전달 예산 중 짧은 값이다.
 기존 원 작업 재전달은 저장된 원 기한을 연장하지 않는다. 제한된 결과 재확인도 이번 호출의
@@ -3875,8 +3904,17 @@ Worker 동작을 유지한다. 105000ms는 입력 상한이며 HTTP 대기시간
 
 `Manager.fork()`는 동일 저장소·실행 잠금을 사용하는 독립 Python 요청 객체를 반환한다.
 실행 중인 원 객체의 이번 호출 `response_deadline`도 새 요청에 복사하지 않는다.
-긴 작업 중 stop 수락·원 기록 조회를 연결할 때 사용한다. OS 프로세스를 만들지 않으며,
-공유 Manager를 임의로 동시 호출하거나 모든 action의 상위 직렬화를 제거해도 된다는 뜻이 아니다.
+Linux private 준비와 다른 등록 VM의 get/list·operation 조회·허용된 stop을 병행할 때도
+요청마다 fork 객체를 사용한다. 기본 준비/사용 확인 메서드도 새 Platform 객체에 결합한다.
+OS 프로세스를 만들지 않으며, 공유 Manager를 임의로 동시 호출하거나 모든 action의
+상위 직렬화를 제거해도 된다는 뜻이 아니다. 실제 변경/관측의 공통 잠금과 같은 VM의
+소유·신원·의도 검증은 유지된다. Python/외부 명령 진단은 요청별 64KiB sink로 수집한다.
+명령 데이터 stdout의 한도 64KiB 초과는 잘린 정상값 대신 오류다. sink의 초과 분량은
+누락 수로 남기며 프로세스 전역 FD/stdout·cwd/env는 바꾸지 않는다.
+`operation`은 기본 15초 조회 예산과 전달한 budget_ms 중 짧은 잔여 기간을 사용한다.
+create의 전체 물리 실행 deadline·상위 timeout 연결은 별도 미완료이며 budget_ms를
+create에 전달하거나 HTTP timeout을 취소로 간주하지 않는다. 새 슬롯 시도는 무대기이고
+수락 재검사 전에 이번 호출의 초기 잔여 예산을 확인한다.
 HTTP의 VM mutex·직렬화 분리는 아직 연결되지 않았다. 구체적인 담당 범위는
 [관리 요청 연동 요청서](management-integration-request.md)를 따른다.
 
