@@ -35,6 +35,9 @@ broker 주소·계정은 기존 `--host/--port/--username`과 `XENOVA_GATEWAY_BR
 `--authority-dir`(`/srv/xenova/drive-control`), `--binding-file`
 (`/run/xenova/drive-bindings.json`)이다. `--start-mode`는 legacy 전용이다.
 실제 출력은 검증된 장치/복구 경로를 준비한 뒤 `--sink serial --serial-port ...`로 선택한다.
+`--serial-port`는 pyserial URL도 받는다. `--serial-port socket://<PC>:7600`이면 같은 프레임
+바이트를 TCP로 PC 시뮬레이터(`--input frames --frame-listen 0.0.0.0:7600`)에 보낸다.
+연결 실패·끊김은 시리얼 오류와 같이 SinkError(출력 금지)로 처리된다.
 Gateway 자체의 Yocto recipe·자동 시작 연결은 아직 없으므로 파일 존재를 이미지 포함으로
 간주하지 않는다. Worker/helper/common MQTT는 각 기존 recipe에서 설치한다.
 
