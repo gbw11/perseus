@@ -419,7 +419,9 @@ class CPU:
             if op['phase'] != 'completed' and op['operation_id'] != policy_operation:
                 refuse('RECONCILE_REQUIRED', 'finish the pending CPU policy publication first')
         from xenova_management import Manager
-        if any(op['status'] != 'SUCCEEDED' for op in Manager(self.p)._operations()):
+        from xenova_creation import holds
+        manager=Manager(self.p)
+        if any(holds(manager,op) for op in manager._operations()):
             refuse('OPERATION_IN_PROGRESS', 'unfinished asset operation blocks CPU policy', retryable=True)
         from xenova_recovery import Recovery
         for op in self.e.requests()+Recovery(Manager(self.p)).attempts():

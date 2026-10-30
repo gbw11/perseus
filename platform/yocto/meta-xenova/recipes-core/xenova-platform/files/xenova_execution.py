@@ -807,8 +807,10 @@ class Execution:
         if action not in ("start", "stop", "reboot", "destroy"):
             refuse("INVALID_SPEC", "invalid control action")
         from xenova_management import Manager
-        if any(q["vm_id"] == record["uuid"] and q["status"] != "SUCCEEDED"
-               for q in Manager(self.p)._operations()):
+        from xenova_creation import holds
+        manager=Manager(self.p)
+        if any(q["vm_id"] == record["uuid"] and holds(manager,q)
+               for q in manager._operations()):
             refuse("OPERATION_IN_PROGRESS", "an incomplete asset operation owns this VM", retryable=True)
         if action == "reboot" and vm.guest_kind(record) == "zephyr" and vm.cooperative(record) and not force:
             from xenova_zephyr_control import reboot

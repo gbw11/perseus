@@ -15,11 +15,13 @@ from artifact_io import publish
 from xenova_catalog import deployment_version
 from xenova_trace import span
 from xenova_runtime import atomic_write
-from xenova_preparation import run as request_run, check_output, diagnostic as print, managed_preparation
+from xenova_preparation import (run as request_run, check_output, diagnostic as print,
+                                managed_preparation, check_creation, cleanup_output, child_exit_unconfirmed)
 from prepare_rootfs import prepare_instance, prepare_deployment_seed, inside, verify_guest_agent
 
 
 def command(args, **kwargs):
+    check_creation()
     kwargs.setdefault('check', True)
     return request_run([str(a) for a in args], **kwargs)
 
@@ -63,6 +65,7 @@ def _metadata(path):
     with _input(path) as (fd, identity):
         remaining, parts = identity[2], []
         while remaining:
+            check_creation()
             part = os.read(fd, min(1024 * 1024, remaining))
             if not part:
                 raise ValueError('template metadata ended before its declared size')
@@ -80,6 +83,7 @@ def _ranges(fd, size):
     position = 0
     unsupported = (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP)
     while position < size:
+        check_creation()
         try:
             data = os.lseek(fd, position, os.SEEK_DATA)
         except OSError as error:
@@ -118,6 +122,7 @@ def _copy_verified(source, target, expected, *, expected_bytes=None):
         raise ValueError('template input SHA-256 required')
     if expected_bytes is not None and (type(expected_bytes) is not int or expected_bytes < 0):
         raise ValueError('template input byte size required')
+    check_creation()
     zero = bytes(1024 * 1024)
     value = hashlib.sha256()
     with span('prepare.verified-copy', asset=source.name), _input(source) as (fd, identity):
@@ -127,10 +132,12 @@ def _copy_verified(source, target, expected, *, expected_bytes=None):
         output = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         try:
             for start, end, data in _ranges(fd, size):
+                check_creation()
                 os.lseek(fd, start, os.SEEK_SET)
                 os.lseek(output, start, os.SEEK_SET)
                 remaining = end - start
                 while remaining:
+                    check_creation()
                     length = min(len(zero), remaining)
                     part = os.read(fd, length) if data else zero[:length]
                     if not part:
@@ -142,14 +149,17 @@ def _copy_verified(source, target, expected, *, expected_bytes=None):
                     else:
                         pending = memoryview(part)
                         while pending:
+                            check_creation()
                             count = os.write(output, pending)
                             if count <= 0:
                                 raise OSError(errno.EIO, 'template copy write made no progress')
                             pending = pending[count:]
+                    check_creation()
             os.ftruncate(output, size)
             if value.hexdigest() != expected:
                 raise ValueError('copied template input SHA-256 mismatch: ' + source.name)
             os.fsync(output)
+            check_creation()
         finally:
             os.close(output)
     return identity
@@ -167,6 +177,7 @@ def require_new_output(path):
 class Workspace:
     """전용 임시 경로·직접 할당한 loop 장치만 사용하고 해제 실패 시 보존한다."""
     def __init__(self, parent, owned_path=None):
+        check_creation()
         self.path = Path(owned_path) if owned_path is not None else Path(parent) / ('.xenova-preparing-' + uuid4())
         self.path.mkdir(mode=0o700)
         self.mounts, self.loops = [], []
@@ -184,6 +195,7 @@ class Workspace:
         self._resources(True)
 
     def loop(self, image, readonly=False, partitions=False):
+        check_creation()
         args = ['losetup', '--find', '--show']
         if readonly:
             args.append('--read-only')
@@ -200,6 +212,7 @@ class Workspace:
         return value
 
     def mount(self, device, target, readonly=False):
+        check_creation()
         target.mkdir(parents=True, exist_ok=True)
         self.pending = True
         self.mounts.append(target)
@@ -209,6 +222,8 @@ class Workspace:
         self._resources()
 
     def close(self):
+        if child_exit_unconfirmed():
+            raise ValueError('owned child exit unconfirmed; mount/loop cleanup deferred')
         while self.mounts:
             command(['umount', self.mounts[-1]])
             self.mounts.pop()
@@ -245,9 +260,10 @@ def guest_runtime(work, root):
         inside(root, 'run/sshd').mkdir(mode=0o755)
         yield
     finally:
-        while len(work.mounts) > checkpoint:
-            command(['umount', work.mounts[-1]])
-            work.mounts.pop()
+        with cleanup_output():
+            while len(work.mounts) > checkpoint:
+                command(['umount', work.mounts[-1]])
+                work.mounts.pop()
 
 
 def verify_guest_ssh(root, *, seed=False):
@@ -282,6 +298,7 @@ class PreparedInstance:
         self.assets={path:_input_identity(path.lstat()) for path in stage.iterdir()}
 
     def publish(self):
+        check_creation()
         self.vm.validate_record(self.record,self.stage,allow_seed=self.seed)
         for path,identity in self.assets.items():
             _unchanged(path,identity)
@@ -298,10 +315,12 @@ class PreparedInstance:
             for path,identity in self.inputs.items():
                 _unchanged(path,identity)
         require_new_output(self.output)
+        check_creation()
         publish(self.stage,self.output)
 
 
 def make_instance(args, *, vm, defaults_path, record_override=None, identity=None, workspace_path=None, template_directory=None, private=False):
+    check_creation()
     seed = getattr(args, 'deployment_seed', False)
     # 새 출력의 부모도 같은 저장소 안의 일반 디렉터리여야 한다.
     for directory in [args.data_root, args.data_root / 'templates', args.data_root / 'instances', *([args.data_root / 'seeds'] if seed else [])]:
@@ -392,6 +411,7 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
         stage = work.path / args.id
         stage.mkdir()
         for filename in ('root.raw', 'Image', 'initrd', 'boot.json', 'kernel.config'):
+            check_creation()
             for path, source_identity in inputs.items():
                 _unchanged(path, source_identity)
             source_identity = _copy_verified(template / filename, stage / filename,
@@ -399,6 +419,7 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
             if source_identity != inputs[template / filename]:
                 raise ValueError('template input replaced before copy: ' + filename)
         (stage / 'root.raw').chmod(0o600)
+        check_creation()
         command(['tune2fs', '-U', 'random', stage / 'root.raw'])
         root = work.path / 'root'
         work.mount(work.loop(stage / 'root.raw'), root)
@@ -407,14 +428,16 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
         else:
             prepare_instance(root, record, command=command)
         with guest_runtime(work, root):
+            check_creation()
             verify_guest_ssh(root, seed=seed)
             verify_guest_agent(root, seed=seed)
         os.sync()
-        work.close()
+        with cleanup_output():work.close()
         work.seal_clean()
         work.mounts, work.loops = [], []
         vm.atomic_write(stage / 'instance.json', json.dumps(record, indent=2) + '\n')
         vm.validate_record(record, stage, allow_seed=seed)
+        check_creation()
         result=PreparedInstance(vm,record,stage,output,inputs,seed=seed)
         if private:
             return result
@@ -422,9 +445,12 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
         os.sync()
     except BaseException as error:
         try:
-            work.close()
+            with cleanup_output():work.close()
             work.seal_clean()
         except Exception as cleanup:
+            if hasattr(error,'error'):
+                error.error.setdefault('details',{})['cleanup_error']={'cause_type':type(cleanup).__name__}
+                raise error from cleanup
             raise ValueError(str(error)+'; resource cleanup unconfirmed: '+type(cleanup).__name__) from error
         raise
 

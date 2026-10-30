@@ -61,6 +61,7 @@ def main(argv=None, manager=None):
     parser.add_argument('--barrier-id')
     parser.add_argument('--max-age-ms', type=int)
     parser.add_argument('--timeout-ms', type=int, default=15000)
+    parser.add_argument('--budget-ms',type=int)
     short=False
     try:
         args=parser.parse_args(args_list)
@@ -69,7 +70,7 @@ def main(argv=None, manager=None):
         short=args.short
         action='recover_once' if args.action == 'recover-once' else args.action
         spec={}
-        if action in ('recover_once', 'cpu-policy-set'):
+        if action in ('recover_once', 'cpu-policy-set','operation-reconcile'):
             if args.spec_file is None:
                 raise ManagementError('INVALID_SPEC', 'recover-once requires --spec-file')
             spec = json.loads(args.spec_file.read_text())
@@ -133,7 +134,8 @@ def main(argv=None, manager=None):
             spec={'operation_id':args.operation_id,'idempotency_key':args.idempotency_key}
         elif action=='status':
             action='list'
-        result=service.call(action,spec,execute=args.execute,idempotency_key=args.idempotency_key,request_id=request_id)
+        options={'budget_ms':args.budget_ms} if args.budget_ms is not None else {}
+        result=service.call(action,spec,execute=args.execute,idempotency_key=args.idempotency_key,request_id=request_id,**options)
     except ManagementError as exc:
         result={'schema_version':'1.0','ok':False,'request_id':request_id,'operation_id':None,
                 'replayed':False,'data':None,'error':exc.error}

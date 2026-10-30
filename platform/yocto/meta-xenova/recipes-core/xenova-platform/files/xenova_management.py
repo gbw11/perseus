@@ -21,6 +21,7 @@ import xenova_catalog as catalog
 from xenova_runtime import PlatformError, OperationBusy, atomic_write, operation_lock, sync_directory, observation_slot
 import xenova_vm as vm
 import xenova_zephyr as zephyr
+import xenova_creation as creation
 from xenova_execution import ExecutionError, ReadChanged, short_lock
 from xenova_preparation import request_output, LinuxSlot, owner_state
 from xenova_trace import bind as trace_bind, traced, span
@@ -198,6 +199,7 @@ class Manager:
         atomic_write(path, json.dumps(value, indent=2, ensure_ascii=False) + '\n')
 
     def _operations(self, *, deadline=None):
+        if deadline is None:deadline=getattr(self.p,'response_deadline',None)
         path = self.data / 'operations'
         if not path.exists() and not path.is_symlink():
             return []
@@ -214,12 +216,13 @@ class Manager:
             op = self._read(entry)
             if deadline is not None and self.p.clock()>=deadline:
                 fail('DEADLINE_EXCEEDED','asset operation read budget expired')
-            if (op.get('operation_id') != entry.stem or op.get('schema_version') != '1.0'
+            if (op.get('operation_id') != entry.stem or op.get('schema_version') not in ('1.0','1.1')
                     or op.get('spec_hash') != digest(op.get('initial_spec'))):
                 fail('RECOVERY_REQUIRED', 'operation integrity mismatch')
             if not vm.UUID.fullmatch(op.get('vm_id','')) or op.get('action') not in MUTATIONS:
                 fail('RECOVERY_REQUIRED','invalid operation identity/action')
             if op['action']=='create':
+                creation.validate(op)
                 assigned = op.get('assigned', {})
                 initial = op['initial_spec']
                 if not isinstance(assigned, dict) or not isinstance(initial, dict):
@@ -274,6 +277,7 @@ class Manager:
         self.checkpoint(op['phase'], op)
 
     def _tombs(self, *, deadline=None):
+        if deadline is None:deadline=getattr(self.p,'response_deadline',None)
         try:
             return vm.read_tombstones(self.data,deadline=deadline,clock=self.p.clock)
         except ExecutionError:
@@ -303,6 +307,7 @@ class Manager:
                                'reboot', 'destroy', 'autostart-set', 'board-shutdown-set', 'config',
                                'recover_once', 'recovery-operation', 'recovery-reconcile', 'control-operation', 'snapshot', 'probe',
                                'execution-context', 'host-resume', 'cpu-layout', 'cpu-policy-set', 'cpu-host-prepare'}
+        actions.add('operation-reconcile')
         if not isinstance(action, str) or action not in actions:
             fail('INVALID_SPEC', 'unsupported management action')
         if type(execute) is not bool:
@@ -315,6 +320,7 @@ class Manager:
             spec = {}
         if not isinstance(spec, dict):
             fail('INVALID_SPEC', 'request must be an object')
+        if action=='operation-reconcile':return creation.validate_request(self,spec,key)
         if action in MUTATIONS:
             if action != 'create' and not self._text_token(key):
                 fail('INVALID_SPEC', 'idempotency_key of 1..200 UTF-8 bytes required')
@@ -612,7 +618,7 @@ class Manager:
                 disk_paths[record['id']] = catalog.plain(directory / 'root.raw')
         active = {record['uuid'] for record in future.values()}
         for op in self._operations():
-            if op['action'] != 'create' or op['status'] == 'SUCCEEDED' or op['vm_id'] in active:
+            if op['action'] != 'create' or not creation.holds(self,op) or op['vm_id'] in active:
                 continue
             selected = catalog.describe(self.data, {key: op['template'][key] for key in (
                 'schema_version', 'template_id', 'template_version', 'guest_kind',
@@ -731,7 +737,7 @@ class Manager:
         owned += [t['record'] for t in self._tombs().values() if t['lifecycle'] != 'PURGED']
         held.update(r['ipv4'] for r in owned if r['uuid'] != excluding and r.get('ipv4'))
         for op in self._operations():
-            if op['action'] in ('create','firmware-transition') and op['status'] != 'SUCCEEDED' and op['vm_id'] != excluding:
+            if op['action'] in ('create','firmware-transition') and creation.holds(self,op) and op['vm_id'] != excluding:
                 ip = op.get('assigned', {}).get('ipv4', op['initial_spec'].get('ipv4'))
                 if ip is not None:
                     if not self._valid_ip(ip):
@@ -909,7 +915,7 @@ class Manager:
                 record = tomb['record']
                 if self.p.boot_id_reader() != execution.host:
                     fail('TARGET_CHANGED', 'stop acceptance host changed')
-                if any(q['vm_id']==record['uuid'] and q['status']!='SUCCEEDED' for q in self._operations()):
+                if any(q['vm_id']==record['uuid'] and creation.holds(self,q) for q in self._operations()):
                     fail('OPERATION_IN_PROGRESS','asset operation owns stop target',retryable=True)
                 request = {'vm_id':record['uuid'],'action':'stop','force':bool(spec.get('force',False))}
                 intent = execution.intent(record)
@@ -954,6 +960,8 @@ class Manager:
         if op['action'] == 'create':
             self.p.execution().initialize(tomb['record'], 'stopped', 'create', op['operation_id'])
         result = self._view(tomb)
+        if op['action']=='create' and op.get('error') is not None:
+            op.setdefault('first_error',op['error'])
         op.update(status='SUCCEEDED',result=result,error=None)
         self._save_op(op, 'complete')
         return result
@@ -978,9 +986,13 @@ class Manager:
         if deadline is not None and self.p.clock()>=deadline:
             fail('DEADLINE_EXCEEDED','asset operation lookup budget expired')
         effective=op['status'] if op['status']=='SUCCEEDED' else 'RECOVERY_REQUIRED'
+        if op['action']=='create' and creation.released(self,op):effective='FAILED'
         if (op['action']=='create' and op['template']['guest_kind']=='linux' and op['status']=='RUNNING'
                 and self._owner_state(op)=='active'):
             effective='RUNNING'
+        if (op['action']=='create' and op['status']!='SUCCEEDED' and effective!='FAILED'
+                and op['template']['guest_kind']=='linux' and self._owner_state(op)=='reconciling'):
+            effective='RECONCILING'
         if deadline is not None and self.p.clock()>=deadline:
             fail('DEADLINE_EXCEEDED','asset operation ownership lookup budget expired')
         return {'operation':op,'recovery_required':effective=='RECOVERY_REQUIRED','effective_status':effective}
@@ -996,7 +1008,7 @@ class Manager:
     def _complete_private(self, pending, context):
         op=pending.operation
         try:
-            prepared=self._prepare(op,private=True)
+            with creation.work(self,op,context):prepared=self._prepare(op,private=True)
             from prepare_instance import PreparedInstance
             if not isinstance(prepared,PreparedInstance):
                 fail('RECOVERY_REQUIRED','private preparation returned no verified result',
@@ -1032,7 +1044,7 @@ class Manager:
                         fail('TARGET_CHANGED','VM intent appeared before private creation was adopted')
                     if op['vm_id'] in self._tombs():
                         fail('TARGET_CHANGED','VM lifecycle appeared before private creation was adopted')
-                    prepared.publish()
+                    with creation.work(self,op,context):prepared.publish()
                 return self._create(op,context)
         except (ManagementError,ExecutionError):
             raise
@@ -1041,6 +1053,7 @@ class Manager:
 
     def _create(self, op, context=None):
         context=context if context is not None else {}
+        dhcp_applied=op.get('phase') in ('dhcp-applied','complete')
         trace_bind(operation_id=op['operation_id'],vm_id=op['vm_id'])
         if op.get('assigned',{}).get('ipv4'):
             records = self.p.records(validate_assets=False)
@@ -1088,9 +1101,15 @@ class Manager:
                 'lifecycle':'REGISTERED','record':record,'history':[]}
         tomb = self._save_tomb(tomb, op, 'REGISTERED', 0)
         if vm.has_network(record):
-            self._save_op(op, 'dhcp-pending')
-            with tool_output():
-                self.p.prepare_dhcp(self.p.records(validate_assets=False))
+            if not dhcp_applied:
+                if record['guest_kind']=='linux':
+                    # DHCP 재제출은 결과 조회가 아닌 외부 효과다. 원 생성 기한 밖에서 반복하지 않는다.
+                    with creation.work(self,op,context) as end:
+                        self._save_op(op, 'dhcp-pending')
+                        with tool_output():self.p.prepare_dhcp(self.p.records(validate_assets=False),deadline=end)
+                else:
+                    self._save_op(op, 'dhcp-pending')
+                    with tool_output():self.p.prepare_dhcp(self.p.records(validate_assets=False))
             self._save_op(op, 'dhcp-applied')
         return self._finish(op, tomb)
 
@@ -1222,9 +1241,14 @@ class Manager:
                 fail('IDEMPOTENCY_CONFLICT','same key has a different action or request')
             context['replayed']=True
             tomb = self._tombs().get(previous['vm_id'])
+            if action=='create' and creation.released(self,previous,durable=True):
+                error=previous['error']
+                fail(error['code'],error['message'],retryable=False,
+                     details={**error.get('details',{}),'operation_id':previous['operation_id'],
+                              'replayed':True,'original_create_succeeded':False,'reconciliation':previous['reconciliation']})
             if (action=='create' and previous['template']['guest_kind']=='linux' and previous['status']!='SUCCEEDED'):
                 state=self._owner_state(previous)
-                if state=='active':
+                if state in ('active','reconciling'):
                     return self._operation_view(previous)
                 if state=='residual':
                     fail('RECOVERY_REQUIRED','owned preparation child may remain; inspect the original operation',
@@ -1269,6 +1293,9 @@ class Manager:
                 if tomb and tomb['lifecycle']!='REGISTERED':
                     fail('TARGET_CHANGED','creation has a newer lifecycle')
                 self._reserve_space(0, records)
+                target=self.data/'instances'/previous.get('assigned',{}).get('internal_name',previous['initial_spec']['name'])
+                if previous['template']['guest_kind']=='linux' and not target.exists():
+                    with creation.work(self,previous,context):pass
                 return self._create(previous,context)
             return self._transition(previous,records)
         if action=='create':
@@ -1291,7 +1318,7 @@ class Manager:
                 fail('VM_PURGED','VM assets have been purged')
             if (action=='retire' and state!='REGISTERED') or (action in ('restore','purge') and state!='RETIRED'):
                 fail('INVALID_SPEC','lifecycle does not permit this operation')
-            if any(o['vm_id']==tomb['vm_id'] and o['status']!='SUCCEEDED' for o in self._operations()):
+            if any(o['vm_id']==tomb['vm_id'] and creation.holds(self,o) for o in self._operations()):
                 fail('OPERATION_IN_PROGRESS','an incomplete operation owns this VM; retry its original key',retryable=True)
             directory = self.data/'instances'/tomb['name'] if action=='retire' else self._archive(tomb)
             if action=='purge':
@@ -1334,6 +1361,7 @@ class Manager:
                 fail('VM_NAME_CONFLICT','allocated identity collides; no assets created')
             op.update(template=selected,assigned={'internal_name':internal_name(identity), **({'mac':assigned_mac, 'ipv4':assigned_ip} if selected['capabilities'].get('dhcp') else {})},
                       owned_workspace='instances/.operation-'+opid)
+            if selected['guest_kind']=='linux':creation.accept(self,op,context)
         else:
             op['expected_generation']=tomb['generation']
             op['source']=str((self.data/'instances'/tomb['name'] if action=='retire' else self._archive(tomb)).relative_to(self.data))
@@ -1342,6 +1370,8 @@ class Manager:
         context['operation_id']=opid
         context['write_operation'] = True
         self._save_op(op)
+        if action=='create' and op['template']['guest_kind']=='linux':
+            with creation.work(self,op,context):pass
         return self._create(op,context) if action=='create' else self._transition(op,records)
 
     def call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None):
@@ -1571,14 +1601,14 @@ class Manager:
     def _call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None, _output=None):
         """HTTP를 가정하지 않는다. 모든 응답은 동일 JSON envelope이고 stdout을 쓰지 않는다."""
         entered = self.p.clock()
-        context = {'operation_id': None, 'replayed': False, 'write_operation': False}
+        context = {'operation_id': None, 'replayed': False, 'write_operation': False,'entered':entered,'budget_ms':budget_ms}
         response={'schema_version':'1.0','ok':False,'request_id':request_id if self._text_token(request_id) else uuid4(),
                   'operation_id':None,'replayed':False,'data':None,'error':None}
         trace_bind(request_id=response['request_id'])
         try:
-            if budget_ms is not None and (type(budget_ms) is not int or not 0<budget_ms<=105000):
-                fail('INVALID_SPEC','budget_ms must be 1..105000')
-            if budget_ms is not None and action not in ('start','stop','reboot','destroy','get','list','operation','control-operation','recovery-reconcile'):
+            if budget_ms is not None and (type(budget_ms) is not int or not 0<budget_ms<=(creation.MAX_CALL_MS if action=='create' else 105000)):
+                fail('INVALID_SPEC','budget_ms must be 1..'+str(creation.MAX_CALL_MS if action=='create' else 105000))
+            if budget_ms is not None and action not in ('create','operation-reconcile','start','stop','reboot','destroy','get','list','operation','control-operation','recovery-reconcile'):
                 fail('INVALID_SPEC','budget_ms is supported only for control and bounded reads')
             spec = self._validate_call(action, spec, execute, idempotency_key, request_id)
             trace_bind(vm_id=spec.get('vm_id'), recovery_attempt_id=spec.get('recovery_attempt_id'))
@@ -1592,14 +1622,21 @@ class Manager:
             deadline = (spec['deadline_monotonic_ms']/1000 if action == 'recover_once' else
                         entered + (90 if action in ('start','stop','reboot','destroy') else
                                    spec.get('timeout_ms',15000)/1000))
+            if action=='create':
+                configured=creation.policy(self,required=False)
+                deadline=entered+(budget_ms or (configured['call_ms'] if configured else 15000))/1000
             if budget_ms is not None:
                 deadline=min(deadline,entered+budget_ms/1000)
                 # 호출 예산은 spec/hash에 섞지 않고 원 물리 deadline도 갱신하지 않는다.
                 self.p.response_deadline=entered+budget_ms/1000
             else:
                 self.p.response_deadline=float('inf')
+            if action=='create':self.p.response_deadline=deadline
             cpu_deadline = deadline
             trace_bind(deadline_monotonic_ms=int(deadline*1000))
+            if action=='operation-reconcile':
+                result=creation.reconcile(self,spec,execute,context,deadline,_output)
+                return {**response,'ok':True,'data':result,'operation_id':context['operation_id']}
             if action in ('get','list','operation','control-operation'):
                 self.p.response_deadline=min(self.p.response_deadline,deadline)
                 if action in ('get','list'):
@@ -1731,7 +1768,7 @@ class Manager:
                             and self._owner_state(op)=='active'):
                         self._writable()
                     if op['status']!='SUCCEEDED':
-                        op.update(status='RECOVERY_REQUIRED',error=response['error'])
+                        op.update(status='RECOVERY_REQUIRED',error=op.get('error') or response['error'])
                         self._save_op(op)
             except (OSError,PlatformError,ValueError):
                 if action=='create':

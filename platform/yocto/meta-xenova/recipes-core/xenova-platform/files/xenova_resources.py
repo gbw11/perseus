@@ -33,7 +33,8 @@ def guards(manager, tomb, operations, fail):
     if (not intent or intent["desired_state"] != "stopped" or
             intent["lifecycle_generation"] != tomb["generation"]):
         fail("INTENT_MISMATCH", "resource change requires applicable stopped intent")
-    if any(o["vm_id"] == record["uuid"] and o["status"] != "SUCCEEDED" for o in operations):
+    from xenova_creation import holds
+    if any(o["vm_id"] == record["uuid"] and holds(manager,o) for o in operations):
         fail("OPERATION_IN_PROGRESS", "an incomplete asset operation owns this VM", retryable=True)
     from xenova_recovery import Recovery
     if any(q["request"]["vm_id"] == record["uuid"] and q["phase"] not in ("completed", "failed")

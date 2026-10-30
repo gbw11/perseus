@@ -96,7 +96,8 @@ class Recovery:
         if (not admission or not admission["allowed"] or admission["intent_revision"] != intent["intent_revision"]
                 or admission["lifecycle_generation"] != tomb["generation"]):
             refuse("BOOT_ADMISSION_REQUIRED", "this host boot has not admitted this intent")
-        if any(q["vm_id"] == record["uuid"] and q["status"] != "SUCCEEDED" for q in self.m._operations()):
+        from xenova_creation import holds
+        if any(q["vm_id"] == record["uuid"] and holds(self.m,q) for q in self.m._operations()):
             refuse("OPERATION_IN_PROGRESS", "an incomplete asset operation owns this VM", retryable=True)
         self.m._record_at(record, self.p.data/"instances"/record["id"])
         if self.p.clock() >= deadline:

@@ -10,6 +10,7 @@ SRC_URI = "file://xenova_boot_progress.py file://xenova_boot_status.py file://xe
 FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../scripts:${THISDIR}/../../../../first-install:${THISDIR}/../../../../guests/common:${THISDIR}/../../../../guests:"
 S = "${UNPACKDIR}"
 SRC_URI += " file://xenova_preparation.py"
+SRC_URI += " file://xenova_creation.py file://creation-policy.json.example"
 SRC_URI += " file://xenova_drive_binding.py file://provision-xenova-telemetry.py"
 SRC_URI += " file://xenova_telemetry_support.py file://xenova_telemetry_evidence.py file://xenova-telemetry-support file://xenova-telemetry-clock.service file://xenova-telemetry-clock.timer"
 SRC_URI += "file://xenova-console-evidence.conf file://xenova-telemetry-evidence.service file://xenova-telemetry-evidence.timer"
@@ -41,6 +42,7 @@ do_install() {
     install -m 0755 "${S}/xenova-domain-identity" "${D}${sbindir}/xenova-domain-identity"
     install -m 0644 "${S}/cpu-policy-preset.json" "${D}${sysconfdir}/xenova/cpu-policy-preset.json"
     install -m 0644 "${S}/execution-policy.json" "${D}${sysconfdir}/xenova/execution-policy.json"
+    install -m 0644 "${S}/xenova_creation.py" "${D}${libdir}/xenova/xenova_creation.py"
     install -m 0755 "${S}/xenova-boot-status" "${D}${sbindir}/xenova-boot-status"
     install -m 0755 "${S}/xenova-wifi" "${D}${sbindir}/xenova-wifi"
     install -d "${D}${sysconfdir}/modprobe.d"
@@ -76,6 +78,8 @@ do_install() {
     done
     install -m 0644 "${S}/update-xenova-guest-ssh.py" "${D}${libdir}/xenova/update_guest_ssh.py"
     install -d "${D}${datadir}/xenova"
+    # 운영 시간값은 보드 수락 후 별도로 공급한다. 예시를 활성 설정으로 설치하지 않는다.
+    install -m 0644 "${S}/creation-policy.json.example" "${D}${datadir}/xenova/creation-policy.json.example"
     install -m 0644 "${S}/first-install-capabilities.json" "${D}${datadir}/xenova/first-install-capabilities.json"
     install -d "${D}${sysconfdir}/systemd/system/sshd.service.d" "${D}${sysconfdir}/systemd/system-generators"
     install -m 0644 "${S}/xenova-sshd-keys.conf" "${D}${sysconfdir}/systemd/system/sshd.service.d/10-xenova-keys.conf"

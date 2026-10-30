@@ -34,6 +34,11 @@ class RequestOutput:
         self.stack = ExitStack()
         self.fds = ()
         self.preparation_fds = ()
+        self.creation_deadline = None
+        self.creation_clock = time.monotonic
+        self.cleanup_ms = None
+        self.cleanup_deadline = None
+        self.unconfirmed_child = False
 
     def write(self, value):
         value = value.encode('utf-8',errors='replace') if isinstance(value,str) else value
@@ -71,6 +76,49 @@ def managed_preparation():
             and set(current.preparation_fds).issubset(current.fds))
 
 
+def check_creation():
+    """현재 생성/정리 문맥의 협조 기한. seed와 독립 준비 호출에는 새 정책을 강제하지 않는다."""
+    current=_current()
+    if current is not None and current.creation_deadline is not None:
+        if current.creation_clock()>=current.creation_deadline:
+            from xenova_execution import refuse
+            refuse('DEADLINE_EXCEEDED','original creation or cleanup budget expired')
+
+
+@contextmanager
+def creation_work(deadline, clock, cleanup_ms, *, state=None):
+    with request_output() as current:
+        previous=(current.creation_deadline,current.creation_clock,current.cleanup_ms,current.cleanup_deadline)
+        current.creation_deadline,current.creation_clock,current.cleanup_ms=deadline,clock,cleanup_ms
+        current.cleanup_deadline=state.get('cleanup_deadline') if state is not None else None
+        try:
+            check_creation()
+            yield
+        finally:
+            if state is not None:state['cleanup_deadline']=current.cleanup_deadline
+            (current.creation_deadline,current.creation_clock,current.cleanup_ms,current.cleanup_deadline)=previous
+
+
+@contextmanager
+def cleanup_output():
+    """같은 원 실행의 종료 여유만 사용한다. 호출마다 전체 여유를 다시 발급하지 않는다."""
+    current=_current()
+    if current is None or current.cleanup_ms is None:
+        yield
+        return
+    if current.cleanup_deadline is None:
+        current.cleanup_deadline=current.creation_clock()+current.cleanup_ms/1000
+    previous=current.creation_deadline
+    current.creation_deadline=current.cleanup_deadline
+    try:yield
+    finally:current.creation_deadline=previous
+
+
+def child_exit_unconfirmed():
+    current=_current()
+    return current is not None and current.unconfirmed_child
+
+
 def run(args, *, capture=False, **kwargs):
     """파이프를 끝까지 비우되 메모리는 제한한다. 데이터 출력 잘림은 정상값으로 반환하지 않는다."""
     current = _current()
@@ -79,6 +127,10 @@ def run(args, *, capture=False, **kwargs):
             kwargs.update(stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         return subprocess.run(args,**kwargs)
     timeout = kwargs.pop('timeout',None)
+    check_creation()
+    if current.creation_deadline is not None:
+        remaining=current.creation_deadline-current.creation_clock()
+        timeout=remaining if timeout is None else min(timeout,remaining)
     check = kwargs.pop('check',False)
     text = kwargs.pop('text',False)
     data = kwargs.pop('input',None)
@@ -110,8 +162,7 @@ def run(args, *, capture=False, **kwargs):
             pending = memoryview(data or b'')
             while selector.get_map():
                 if end is not None and time.monotonic()>=end:
-                    proc.kill()  # subprocess.run의 기존 timeout과 같은 소유 자식 처리다.
-                    proc.wait(timeout=1)
+                    # 아래 공통 종료 경로에서 한 번만 회수하고 현재 정리 여유를 적용한다.
                     raise subprocess.TimeoutExpired(args,timeout)
                 wait = min(.1,max(0,end-time.monotonic())) if end is not None else .1
                 for key,_ in selector.select(wait):
@@ -132,6 +183,7 @@ def run(args, *, capture=False, **kwargs):
                     current.write(chunk)
             remaining=max(0,end-time.monotonic()) if end is not None else None
             proc.wait(timeout=remaining)
+        check_creation()
         output,error=(bytes(buffers[name]) for name in ('stdout','stderr'))
         if capture and totals['stdout']>LIMIT:
             raise ValueError('preparation command data output limit exceeded')
@@ -146,10 +198,15 @@ def run(args, *, capture=False, **kwargs):
             if proc.poll() is None:proc.kill()
         except OSError:
             pass
-        try:proc.wait(timeout=1)
+        cleanup_wait=1
+        if current.cleanup_ms is not None:
+            if current.cleanup_deadline is None:current.cleanup_deadline=current.creation_clock()+current.cleanup_ms/1000
+            cleanup_wait=min(cleanup_wait,max(0,current.cleanup_deadline-current.creation_clock()))
+        try:proc.wait(timeout=cleanup_wait)
         except (OSError,subprocess.TimeoutExpired):
             # 커널 대기 등으로 종료 미확정이면 상속된 슬롯 FD가 남는다. 원 오류를 성공으로 바꾸지 않는다.
             current.write('owned command exit remains unconfirmed\n')
+            current.unconfirmed_child=True
         raise
     finally:
         for stream in (proc.stdout,proc.stderr,proc.stdin):
@@ -211,14 +268,15 @@ class LinuxSlot:
             raise
         return self
 
-    def claim(self, op):
+    def claim(self, op, *, role='create', reconciliation_id=None):
         directory=_owners(self.p.runtime)
         fd,name=tempfile.mkstemp(prefix='.linux-owner-',dir=directory)
         self.owner_fd=fd
         try:
             fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
             value={'schema':1,**_binding(op),'host_boot_id':self.p.boot_id_reader(),
-                   'pid':os.getpid(),'start_ticks':_ticks(os.getpid()),'fd':fd}
+                   'pid':os.getpid(),'start_ticks':_ticks(os.getpid()),'fd':fd,
+                   'role':role,'reconciliation_id':reconciliation_id}
             raw=json.dumps(value,sort_keys=True).encode()
             with os.fdopen(os.dup(fd),'wb') as stream:
                 stream.write(raw);stream.flush();os.fsync(fd)
@@ -266,7 +324,9 @@ def owner_state(platform, op):
             owned=os.stat(Path('/proc')/str(value['pid'])/'fd'/str(value['fd']))
             if (owned.st_dev,owned.st_ino)!=(info.st_dev,info.st_ino):
                 raise ValueError('preparation owner fd identity changed')
-            return 'active'
+            if value.get('role','create') not in ('create','discard-private'):
+                raise ValueError('unknown preparation owner role')
+            return 'reconciling' if value.get('role')=='discard-private' else 'active'
         return 'absent'
     finally:os.close(fd)
 

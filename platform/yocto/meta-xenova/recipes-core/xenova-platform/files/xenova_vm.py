@@ -239,7 +239,7 @@ def started_state(record, row):
 
 class Platform:
     def __init__(self, data=DATA, runtime=RUN, command=run, sleep=time.sleep, clock=time.monotonic, *, defaults_path=Path("/etc/xenova/defaults.json"),
-                 boot_id_reader=None, execution_checkpoint=None, execution_policy_path=None):
+                 boot_id_reader=None, execution_checkpoint=None, execution_policy_path=None, creation_policy_path=None):
         self.data, self.runtime = Path(data), Path(runtime)
         self.defaults_path = Path(defaults_path)
         self.command, self.sleep, self.clock = command, sleep, clock
@@ -248,6 +248,7 @@ class Platform:
         self.boot_id_reader = boot_id_reader or (lambda: Path("/proc/sys/kernel/random/boot_id").read_text().strip())
         self.execution_checkpoint = execution_checkpoint or (lambda phase, value: None)
         self.execution_policy_path = Path(execution_policy_path) if execution_policy_path else self.defaults_path.with_name("execution-policy.json")
+        self.creation_policy_path = Path(creation_policy_path) if creation_policy_path else self.defaults_path.with_name('creation-policy.json')
 
     def execution(self):
         from xenova_execution import Execution
@@ -1217,7 +1218,7 @@ def dhcp_ready(pid, timeout=5):
 
 def main(argv=None):
     raw = list(sys.argv[1:] if argv is None else argv)
-    managed = {'firmware-transition','update-resources','list','get','retire','restore','purge','operation','create','delete','templates',
+    managed = {'firmware-transition','update-resources','list','get','retire','restore','purge','operation','operation-reconcile','create','delete','templates',
                'recover-once','recover_once','snapshot','probe','execution-context','control-operation','recovery-operation','recovery-reconcile','host-resume','cpu-layout','cpu-policy-set','cpu-host-prepare'}
     if '--json' in raw or (raw and raw[0] in managed):
         from xenova_management_cli import main as management_main
