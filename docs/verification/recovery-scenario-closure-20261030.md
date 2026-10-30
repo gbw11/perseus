@@ -10,7 +10,8 @@
 | 2번 공통 적용 | 기본 lock의 Debian·Ubuntu ID/버전·출처와 실제 카탈로그/준비 경로를 축소 payload로 검증. 실제 고정 대용량 산출물·Ubuntu 부팅 수락은 별도 |
 | 실패 후 종결 | 부분 파일 보존·재복사 차단은 제공. 미게시 자산의 지원되는 종결·정리·예약 해제는 후속 5번 미완료 |
 | 3번 로컬 마감 | 단일 Linux 준비 슬롯·원 실행 소유권·private 준비/게시 분리·요청별 출력. 최종 관련 회귀 481개 통과, 두 OS 모두 A 복사 해제 전 B 조회/실제 stop 완료 원자료 확인. 부분 설치 29개 Python 파일·독립 import 일치 |
-| 남은 범위 | 4번 polling/공정성·5번 create 전체 deadline/실패 종결, 상위 제품 연결·정규 설치/보드 수락·API cgroup의 guest backend 문제는 미완료 |
+| 4번 하위 로컬 마감 | 요청별 관측·공통 잠금 밖 조회·유한 재관측·관측 실행량/지연 표본 보호. 기존 541개 후 슬롯 부모 중단/정상 반환·파일 안전 검사 보완 후보로 22 suite 543개 통과. 두 중심 barrier·양 OS polling, 부분 설치 29개 바이트·6개 격리 import 재확인 |
+| 남은 범위 | 5번 create 전체 deadline/실패 종결, 상위 제품 연결·실제 HTTP polling/정규 설치/보드 수락·API cgroup의 guest backend 문제는 미완료. 모든 부하/스케줄의 무기아나 지연 상한 수락은 아님 |
 
 아래는 후보별 이력이다. 과거 2회/439개/보드 적용 기록을 최종 1회/449개 이후 후보의
 실보드 수락으로 읽지 않는다. OS별 보완과 3번 수정 전 반례는 마지막 절에 연결한다.
@@ -744,3 +745,249 @@ ARM·전체 이미지를 다시 빌드하지 않았다. 문서 링크와 diff �
 3번은 **하위 구현·로컬 검증 마감**이다. 4번의 반복 polling 비용·공정성, 5번의 전체
 deadline·실패 자산 수습, 상위 연결·실제 설치본/보드·API cgroup 수락은 별도 미완료로
 유지한다. 이 후속 확인에서 보드 적용·다른 담당자 제품 수정·commit/push는 하지 않았다.
+
+## 반복 조회의 비용·일관성과 제어 진행성
+
+### 기준선·후보와 범위
+
+4번은 3번 후속 보완까지 커밋된 `72868ebe7d15a493279faf6b49a5b242170c19b4`,
+`feat/platform/recovery-scenario-closure`의 깨끗한 작업트리에서 시작했다. 과거 HEAD로
+되돌리지 않았다. 실제 실행 후보는 이 HEAD와 제품/시험 diff·새 시험 파일의 조합이다.
+PC 원자료는 `C:/Users/SSAFY/Documents/Codex/2026-10-30/xenova-stage4-20261030/`,
+소유 실행 사본은 `/home/ssafy/xenova-stage4-20261030/candidate-proof/`다.
+`BASELINE_SOURCE.json`·`CANDIDATE-PROOF_SOURCE.json`·최종 `FINAL_CANDIDATE.json`과
+`final.diff`로 입력·실행 소스·최종 문서를 구분한다.
+
+직접 수정한 제품은 하위 `xenova_management.py`, `xenova_execution.py`, `xenova_vm.py`,
+`xenova_runtime.py`, `xenova_preparation.py`다. FastAPI/Worker/Agent/Spring/프론트 제품,
+두 기준 설계서, 보드·운영 서비스/VM/상태·네트워크/CPU·진행 중 이미지 빌드는 변경하지 않았다.
+새 TTL cache·daemon·DB·공용 영구 작업 큐나 새 공개 action/필드는 추가하지 않았다.
+
+### 4-A·4-B: 같은 조건의 비용과 유지한 검증
+
+두 등록 Linux VM·두 원 자산 기록·두 시작 제어 기록, 같은 외부 FakeXen runner와
+list/get/asset operation/control-operation 호출을 사용했다. 전체 UUID/name/state 목록의
+전후 대조와 대상 incarnation 두 확인은 서로 다른 검증 경계여서 유지했다. 표시 조회에
+불필요한 상세 디스크 설정 목록·짧은 목록을 제거하고, 검증된 등록부를 UUID로 나눠
+builder가 VM마다 전체 dict를 재검색하지 않게 했다. get은 다른 VM의 identity를 호출하지 않는다.
+asset 원장 조회는 전 VM 등록부를 읽지 않으며 control 원장은 별도 원본/의미를 유지한다.
+
+`paired_cost.py candidate-proof`는 자체 회귀/스테이징 종료 후 기준선/후보를 번갈아 3쌍
+순차 실행했다. `PAIRED_COST-FINAL.json`, `metrics-finalpair*-*-facts.json`에 입력·응답·
+명령 계수·텍스트 읽기 바이트/JSON 파싱·trace·짧은 잠금 대기/보유·FD를 기록했다.
+시계는 이 비교에서 두 후보 모두 같은 호스트의 실제 단조 시계다. 다른 이미지 빌드·OS cache는
+제어하지 않았고 하드웨어 Xen/SD 성능 시험이 아니다.
+
+| action | 외부 명령: 기준선 → 후보 | 텍스트 파일 읽기 / JSON parse | 읽은 바이트: 기준선 → 후보 | 응답 중앙값 ms, n=3 |
+|---|---|---|---|---|
+| list, 대상 2개 | verbose 목록 2·상세 1·짧은 목록 1·identity 4 → verbose 2·identity 4 | 12/17 → 28/32 | 10,202 → 31,762 | 31.122 → 33.805 |
+| get, 대상 1개 | verbose 2·상세 1·짧은 목록 1·identity 2 → verbose 2·identity 2 | 10/13 → 14/16 | 10,625 → 15,841 | 19.636 → 17.278 |
+| asset operation | 양쪽 Xen/helper 0 | 4/4 → 4/4 | 10,678 → 17,560 | 2.162 → 1.579 |
+| control-operation | 양쪽 Xen/helper 0 | 2/2 → 4/4 | 8,509 → 17,018 | 1.590 → 1.730 |
+
+파일 바이트는 이 임시 fixture의 텍스트 입력이며 이미지 payload·pipe·/proc 읽기를 합친
+물리 I/O량이 아니다. 잠금 해제 뒤 현재 구성/실행과 검색 완전성을 다시 확인하므로 메타데이터
+읽기·파싱은 증가했다. 작은 fixture의 list/control 원장 응답시간도 줄었다고 주장하지 않는다.
+전체 응답시간 개선률·p99·최악 지연 보장은 제시하지 않는다. 확정한 효과는 불필요한 외부
+목록/반복 builder 검색 제거와, 아래 보호를 유지하면서 공통 대기를 끊은 것이다.
+
+| 보호 구간 | 기준선 | 후보·writer와의 관계 |
+|---|---|---|
+| `platform.lock` | list/get의 외부 관측·응답 및 asset 원장 검색 동안 유지 | 네 일반 조회는 획득하지 않음. cost 세 표본 모두 hold=0. 실제 변경·예약/게시와 제출 guard는 기존 실행 잠금 유지 |
+| admission | control 원장의 전체 검색 동안 유지 | 원장 검색 밖으로 분리. 원자 기록을 완전 검색·대조하며 첫 일치에서 유일성을 확정하지 않음. 실제 stop 수락/제출의 짧은 writer 잠금은 유지 |
+| observation-VM | 기존 파생 snapshot 저장 | 해당 VM의 현재 구성/수명·실행 근거를 대조하고 필요한 snapshot만 게시. 전체 등록부/Xen/helper 대기는 이 잠금 밖 |
+| 요청 객체 | 가변 예산/진단을 공유하면 안전한 동시 사용 계약 아님 | 객체별 무대기 guard. 실제 병행 호출은 fork. 기존 lock-free snapshot은 내부 fork로 격리해 보존 |
+| `observation-slot-0..3` | 없음 | list/get의 외부 관측 네 개, 공통/admission 밖 무대기. helper FD 상속·실제 종료 확인. 원장 조회/실제 제어·Linux 준비와 다른 보호이며 전체 API 동시수/QPS 보장은 아님 |
+
+원자 JSON과 private/public 게시 규칙, 단조 수명/실행 신원을 사용해 현재 대상과 다시
+결합한다. 모든 파일/Xen을 같은 시각의 단일 트랜잭션으로 관측했다는 보장은 아니다.
+새 reader 잠금만 붙이고 writer를 보호했다고 주장하지 않으며 외부 root/xl 변경을
+원자적으로 차단하지 않는다. 자세한 읽기/쓰기 대응은 [관리 구조](../platform/management-boundaries.md#일반-조회와-변경-작업의-진행)를 따른다.
+
+### 4-C·4-D: 두 중심 수락과 오류·게시 순서
+
+수정 전 `slow-baseline-facts.json`은 지정된 identity 조회가 계속 막힌 동안 다른 VM의
+asset operation이 OPERATION_IN_PROGRESS, stop이 내구 수락 후 pending이며 shutdown
+경계 호출은 0이었다. `poll-before-baseline.log`의 양 OS·1/2 폴러 네 건은 polling을
+유지한 상태의 stop 완료 assertion에서 실패했다. 4 폴러 두 건은 그 전 단계에서 정상
+operation 조회가 한 번도 완료되지 않아 실패했고 stop까지 도달하지 않았다. 같은
+barrier/호출 mix에서 확인한 진행성 반례이며
+과거 보드 helper 지연이나 SD 시간을 현재 소스의 원인으로 대입하지 않았다.
+
+후보의 `S4-T02-get/list.json`은 느린 조회 release=false·thread alive인 동안 다른 VM의
+asset 원 조회 성공, key stop의 실제 하위 shutdown 명령 경계와 원 control phase=completed를
+확인한다. list에 포함된 B가 그 사이 종료되면 오래된 목록은 명시 관측 오류로 끝날 수 있다.
+관측 해제 뒤 정상 list도 성공한다. get의 무관한 대상 조회는 그대로 성공한다.
+
+S4-T03은 A의 실제 검증 root 사본 첫 쓰기를 막아 둔 상태에서 폴러를 시작한다. 각 폴러가
+list/get/A operation을 실제 호출하고, B 정지 후에도 polling 완료 수가 더 증가한 것을
+event/condition으로 확인한 뒤에만 폴러와 A를 해제한다. 다음은 원 완료 확인 시점의
+완료된 정상 조회 수다. 전체 실행의 총 호출 수나 운영 QPS가 아니다.
+
+| A 입력 | 폴러 | 정상 list/get/operation | 오류 | B 정지·원 완료 / A 상태 |
+|---|---|---|---|---|
+| Debian | 1 | 8/8/8 | 0 | completed, polling alive·A blocked |
+| Debian | 2 | 11/11/11 | 0 | 동일 |
+| Debian | 4 | 21/18/18 | 0 | 동일 |
+| Ubuntu | 1 | 10/10/10 | 0 | 동일 |
+| Ubuntu | 2 | 13/11/13 | TARGET_CHANGED 2 | 동일; B 전환 중 명시 오류와 정상 읽기 동시 존재 |
+| Ubuntu | 4 | 17/16/15 | 0 | 동일 |
+
+각 조합에서 shutdown 경계 호출은 하나이며 A root 쓰기는 1회다. 그 뒤 A도 같은 원
+operation으로 성공함을 실제 create fixture의 종료 assertion으로 확인했다. 원자료는
+`assertions-regression-candidate-proof/S4-T02-*.json`, `S4-T03-*.json`과 같은 소스의
+시험 assertion이다. 10ms는 로컬 폴러의 회차 간 시험 간격이며 제품 설정이 아니다.
+Xen·mount/chroot·guest 설정·DHCP는 외부 대역이고 Manager/원장/복사/잠금/runner/
+thread/프로세스/FD는 실제다. 이 결과는 HTTP·화면·실제 Xen 종료 수락이 아니다.
+
+추가로 확인한 경계와 고친 실패 이력은 다음과 같다. 모든 실패 로그를 보존했다.
+
+| 근거 | 수정·수락 |
+|---|---|
+| `fault-before-candidate-3.log` | selector I/O 실패 뒤 소유 read 자식이 남는 반례. timeout/예외 때 해당 직접 자식을 제한 회수하고 원 오류는 유지. guest backend나 다른 PID를 정리하지 않음. FD/자식 누수와 정상 조회 회복 시험 |
+| `deadline-before-candidate-closed.log` | 실제 helper가 원 읽기 예산을 소진했는데 일반 관측 오류로 반환. 읽기 문맥의 만료는 DEADLINE_EXCEEDED로 보존. 빈 원장/VM 검색의 만료도 정상 부재로 바꾸지 않음 |
+| `timestamp-before-candidate-final-check.log` | 늦은 성공이 게시 시각을 새 표본 시각으로 쓰고, 늦은 실패가 새 성공 cache를 unknown으로 덮는 두 반례. 자기 원 관측 시각 유지·더 새 성공/오류의 파생 기록 보호 |
+| `per-vm-before-candidate-audit-final.log`, `absence-clock-before-candidate-final-verified.log` | 뒤 VM의 대기가 앞 VM/부재의 시각까지 밀어 올리는 반례. 존재는 대상의 마지막 incarnation 검증 시각, 부재는 두 번째 완전 목록 시각을 보존 |
+| `focused-candidate-1.log` | 변경 중인 목록의 명시 오류를 허용하지 않은 기대값과 FakeXen의 중간 ID 제거 뒤 중복 할당을 구분. 실제 source stop/restart를 유지하고 외부 대역의 빈 domid 재사용만 수정. 정상 읽기 성공은 별도로 강제 |
+| `regression-candidate-3.log`, `regression-candidate-validated.log` | 목록 표시 순서·공유 요청 객체 보호·기존 동시 snapshot 호환성 회귀를 수정. 옛 상세 목록/긴 잠금에 묶인 비용 assertion은 현재의 두 관측/집합 재확인에 대응시키되 원 예산/제어 guard assertion은 유지 |
+
+### 4-E: 최종 검증·계약·부분 설치
+
+`run_checks.py regression candidate-proof`는 **22개 관련 suite, 541 passed / 224.37초,
+skip 없음**이다. 실제 argv/rc/출력은 `regression-candidate-proof.json/.log`다. 같은 후보의
+집중 시험 29개는 그 안에 포함되므로 기존 481/31개나 집중 결과와 합산하지 않는다.
+
+| 수락 ID | 연결한 실제 시험·경계 |
+|---|---|
+| S4-T01 | 2-VM 비용/명령/JSON 계수·builder의 단건 입력. 완전 목록 2·identity 2/대상은 유지. 대상별·부재의 고정 시각과 원 게시 시각 보존 |
+| S4-T02/03 | 위 두 중심 수락·양 OS·폴러 1/2/4, 정상 읽기와 실제 stop 경계/원 완료·A 원 작업 성공 |
+| S4-T04/05 | domid 재사용을 포함한 새 실행, 대상 구성 변경의 최대 2회 관측, 계속 변경 시 TARGET_CHANGED·회복. 다른 VM autostart 변화는 get을 다시 시작하지 않음. 새 등록을 목록에서 조용히 누락하지 않음 |
+| S4-T06/07 | registry/legacy 열람 실패·뒤늦은 중복 key와 기존 S3-T06/T07/T09 재실행. 실패를 empty/absence/unique로 바꾸지 않고 성공/활성/잔존 자식/미확인을 구별 |
+| S4-T08/09 | 빈 검색·registry/원장/외부 helper의 잔여 예산, 실제 자식 EOF·selector 오류 후 회수. 화면 관측 뒤 실제 stop의 상세 자산/신원 제출 guard가 새로 수행됨 |
+| S4-T10/11 | 설정 IP·unknown 앱 준비 보존, fork에 memo 상속 0·예산/trace/출력 분리. 같은 객체의 동시 호출 거절·동시 snapshot 호환, 늦은 성공/실패/시각의 최신 파생 기록 침범 0 |
+| S4-T12/13 | 네 read 슬롯의 초과 거절 및 다른 프로세스 참여, 슬롯 점유 중 원 조회/stop 진행·해소 후 읽기 성공. 잘린/잘못된 identity의 정상값 fallback 0·기존 native/Python 64-bit/오류/timeout ABI 회귀 |
+| S4-T14/15 | 원 완료 replay/현재 관측 실패 분리와 모든 기존 2·3번·복구/종료/trace 회귀. 두 OS prehash 0·검증 root 복사 1, 원 manifest·부분 파일/오류·private 게시·소유권·quiesce 보호 유지 |
+| S4-T16 | 아래 정규 recipe 소유 source/staging/archive와 실제 설치 경로 import. 상위 호출/권한/오류·버전 인수 요청과 연결 |
+
+부분 설치는 `SUBSET_PACKAGE-CANDIDATE-PROOF.json`과
+`xenova-stage4-runtime-files-20261030-candidate-proof.tar`다. recipe의 기존 Python 29개를
+0644로 스테이징하고 source/staging/archive를 바이트 대조했다. 변경 5개 모듈과 준비
+모듈의 총 6개가 Python `-I`에서 설치 경로로 import됐다. recipe/RDEPENDS·고정 표준
+모듈 의존성은 유지하며 새 잠금은 기존 core builtin `_thread.allocate_lock`이다.
+native wrapper·Python/native 원본은 바뀌지 않았다. wrapper는 실행 가능한 기존 native를
+exec하고 그 실패를 약한 Python 성공으로 fallback하지 않는다. native 부재 때의 기존
+엄격한 Python 경로도 유지한다. 무관한 Zephyr/ARM 재빌드는 하지 않았다.
+
+| runtime source | SHA-256 |
+|---|---|
+| xenova_management.py | `cfdc49c69ee6885dffed43c916b7a8b645e263ecb48a999ba8bea707ab4e6067` |
+| xenova_execution.py | `6b978b786c621f965b501d65482bd53c8b47d05101b1b605b4805d17bccbe245` |
+| xenova_vm.py | `40708ac8fedceb86642a848fc84c32a8a85f3f612f8910c2d0207e9422b7b810` |
+| xenova_runtime.py | `43dee327af2ad13ad7d10b2a59449c67e7a2af33290f99f9523cc3995807d99d` |
+| xenova_preparation.py | `1f039585daca5b4c22a9133b241b0383dc9b8c9dad8b504e7168d80020be8d3f` |
+
+묶음 SHA-256은 `9113c1553798405ddccd4a9b58002db70d997b45ec9d128009f1935d50a8c6f4`다.
+이는 Python 라이브러리 부분 설치/묶음과 host ABI 검증이며 BitBake/RPM·전체 이미지·실제
+ARM/Xen/SD 설치본 수락이 아니다. 정규 이미지/설치 때 같은 후보의 전체 관련 모듈·helper
+실제 경로·서비스 연결을 대조해야 한다. 일부 모듈 혼재 상태의 동시 호출은 지원으로 간주하지 않는다.
+
+정식 의미는 [일반 조회 계약](../platform/cli-manager-spec.md#read-concurrency), 담당자
+수정 위치·fork/예산·threadpool/선행 get·실제 polling/응답 역전·권한/허용 details는
+[기존 HTTP·Spring·화면 요청서](../requests/20261029-request-http-spring-ui.md#반복-조회와-제어-진행성-연결)에 누적했다.
+Worker의 관측 오류/옛 intent를 부재·새 복구 허가로 바꾸지 않는 연결은
+[기존 Worker 요청](../requests/20261029-request-recovery-worker.md#일반-조회-변경의-소비-연결)에 추가했다.
+D01/D03·D02/D08의 담당자 미완료를 대신 닫지 않는다.
+
+4번의 **하위 구현·로컬 수락·부분 패키징**을 마감한다. 모든 실행 스케줄의 무기아나
+저장장치/커널 I/O 선점 상한을 보장하지 않는다. 남는 정당한 대기는 실제 변경의 실행
+소유권, 해당 VM의 짧은 관측 게시/필수 저장과 Xen/Store 자체의 응답이다. 5번의 create
+전체 deadline·미게시 실패 자산 종결/예약 해제, 상위/Worker 연결·실제 HTTP/화면/보드,
+API cgroup/backend 귀속 수락은 별도다. 다음 단계·보드 적용·commit/push로 자동 진행하지 않았다.
+
+## 4번 후속: 재검증 상한·슬롯 중단과 반환
+
+### 1번 기준선·비용 복원의 기능별 대응
+
+1번은 2~4번에서 주요 기준선·비용·설치본 차이를 확인한 상태다. 아래는 그 자료와 현재
+진입점을 묶은 표이며 시작/삭제의 실제 보드 비용이나 제품 종단까지 완료했다는 뜻은 아니다.
+이전 설치 모듈 8개 중 1개 일치는 위 초기 `RUNTIME_MATCH.json` 당시 결과이고, 이번에
+보드 설치 상태를 다시 조회하지 않았다.
+
+| 기능·현재 진입점 | 잠금·원장·외부 효과/저장 위치 | 기존 근거와 이번 확인 | 미확인·후속 |
+|---|---|---|---|
+| 생성 `Manager._mutate/_create/_complete_private` → `_prepare/make_instance` | 공통 수락/예약·게시와 잠금 밖 단일 Linux 준비. `operations`, `.operation-ID` workspace·public instance·tombstone·control 초기화·DHCP | 2번 양 OS prehash 0/검증 복사 1, 3번 원 실행·private/public·중단, 4번 polling 진행성 | 현재 단일 복사/동시성 후보의 대용량 보드 성능·원 create 기한·미게시 실패 종결은 5·7번 |
+| 조회 `_query/ReadContext/_read_states` → `Execution.observe_many` | 네 일반 조회는 공통 실행 잠금 없음. 외부 관측 4슬롯, VM별 snapshot 게시. 원장 별도 완전 검색 | 위 같은 조건의 외부 명령/메타데이터/잠금 전후 표·S4-T02/03, 아래 비용 목적/상한 | 설치 VM/원장 수·helper·SD의 실제 비용은 7번 |
+| 시작 `_dispatch_locked` → `request_control/Execution.control` → `Platform.start` | 기존 공통 실행·admission·원 `control-requests/control/runs`·launch 기록. Xen create/scope·CPU guard·DHCP | management_budget의 원 key/기한과 replay, preparation_concurrency의 같은 VM 충돌, recovery/reconciliation의 launch/scope/receipt 회귀·현재 source 경로 | 보드의 시작 단계별 비용과 API 재시작 backend 보존·Agent/화면은 7번 |
+| 정지 `_accept_stop/_dispatch_locked` → `Execution.control/Platform.stop_many` | 짧은 의도 수락 뒤 실행 잠금·현재 자산/신원 재검증·shutdown·부재 확인·원 control 결과 | 3·4번 A/느린 조회 미해제 중 B 실제 하위 종료 명령/원 completed, 예산·의도·미확정 회귀 | 로컬 Xen 대역. 실제 Xen 종료 및 상위 원 key/후속 이행 수락은 6·7번 |
+| 삭제/복원 `_transition/_purge` → `_stopped/_usage/_ownership` | 공통 실행 잠금. retire 숨김 보관, restore 현재 IP/용량·Linux e2fsck, retired만 purge. 원 operation/tombstone·inode inventory·unlink/fsync·DHCP | management의 이동 중단·partial purge 재개·EIO·링크/Xen/loop 보호 시험과 현재 함수 대조. 이번에 삭제/이동을 실행하지 않음 | 미게시 workspace 수습은 기존 retire/purge가 아님: 5번. lifecycle 비용·화면 용어/공간은 6·7번 |
+
+### 추가 읽기의 목적과 상한
+
+관측 정합성에 필요한 다른 경계의 확인을 동일 단계 중복으로 합치지 않는다. 위 비용 표의
+증가한 JSON 읽기는 아래 목적에 연결된다. 함수/회차의 상한이지 전체 VM/원장 수나 커널 I/O
+시간에 무관한 고정 비용·최악 지연 보장이 아니다. 파일별 추가 호출은 trace로 먼저 대조한다.
+
+| 구분·함수 | 재사용/재검증의 목적 | 현재 상한·범위 |
+|---|---|---|
+| 같은 회차의 외부 사실: `_observe_many/_view` | 완전 목록을 모든 대상에 공유, UUID별 builder 입력·사전 읽은 intent/run을 응답 조립에 재사용 | 비어 있지 않은 한 회차에 `xl list -v` 2회·존재 대상별 identity 2회. builder의 재호출/상세·짧은 목록 0 |
+| 잠금 밖 조회 후 등록/수명 대조: `ReadContext.validate/validate_one` | 최초 구성/수명과 현재 대상 집합·record/tomb·실행/의도를 결합. 오래된 구성+새 실행 혼합 방지 | get 등록부 1회, list 최초+집합 재확인 2회/회차. 대상별 채택 직전 metadata 대조 1회, 외부 helper/전체 등록부 재검색 없음 |
+| 원 key 검색 완전성: `_query.search/_operation_view` | 첫 일치가 유일함을 추정하지 않고 전체 검색 결과·원 실행 소유 변화 확인 | asset/control 각각 완전 검색 2회/회차. asset 원 결과/소유 대조 최대 2회/회차. Xen/VM 등록부 enrichment 0 |
+| 문맥 변경의 재시도: `_query` | 계속 바뀌는 입력을 무한 재관측하지 않음 | ReadChanged에만 새 회차 최대 1회, 합계 최대 2회. 최대 외부 목록 4회·identity는 회차별 2×존재 대상 수의 합, 원장 완전 검색 4회. 같은 잔여 예산, 기한 연장 없음 |
+| 효과 제출의 별도 guard | 표시 근거를 start/stop/삭제/복구 허가로 사용하지 않음 | 실제 제어의 상세 자산/신원 검사는 별도 기존 경계. 제거할 같은 회차 중복으로 취급하지 않음 |
+
+호출 간 cache/새 DB/helper는 만들지 않았다. 4번 최초 비용 비교의 세 표본은
+`candidate-proof` 당시 값으로 보존하며 아래 파일 모드 검사 보완 후보의 새 지연 실측으로
+바꿔 표기하지 않는다. 관측/검색 구조와 계수 assertion은 아래 최종 회귀에서도 유지했다.
+실제 설치 자료로 단건/전체 비용을 판정하는 것은 7번이다.
+
+### 슬롯 소유자 중단·파일 보호의 직접 시험
+
+`test_S4_T12_owner_exit_keeps_helper_slot_until_actual_exit_then_recovers`는 세 슬롯을
+계속 보유하고 나머지 하나에 실제 Manager get과 Python helper를 진입시킨다. Xen 출력만
+기존 대역이며 실제 runner·fork·pipe·flock·상속 FD·부모 SIGKILL/waitpid·자식 pidfd를 사용한다.
+부모 중단 뒤 helper 생존과 슬롯 FD 하나를 확인한 채 신규 list는 미수락 경합,
+원 operation 조회는 성공한다. helper를 해제해 실제 종료를 확인한 뒤 **동일 inode의 슬롯**을
+획득하고, 다른 세 슬롯을 해제하기 전 정상 get도 성공한다. FD 누수는 없다.
+Linux 준비의 부모/자식 시험을 이 새 관측 슬롯의 근거로 대체하지 않았다.
+
+`test_S4_T12_slot_files_reject_unsafe_paths_modes_and_owners_without_repair`는 symlink·
+hardlink·directory·FIFO·0666 모드·다른 uid·연결된 runtime/locks 경로를 각각 거절한다.
+uid만 fstat 경계에서 대역으로 바꾸고 파일/링크/모드와 FD는 실제다. inode/mode/외부 원문
+보존과 정상 0600 파일 획득, FD 회수를 확인했다. 실제 타 uid 침입·적대적 root의 경합까지
+시험한 보안 감사라고 확대하지 않는다.
+
+확인한 실제 차이는 관측 슬롯이 0666 기존 파일을 수락하던 한 곳이다.
+`xenova_runtime.observation_slot`에 기존 Linux 준비 `_plain`과 같은 0600 검사를 추가했다.
+잘못된 파일을 삭제/chmod하거나 다른 슬롯으로 건너뛰지 않는다. 초기 실패
+`focused-followup-before.log` 2건은 vm.run에 없는 pass_fds 인자를 준 시험과 runtime 부모
+디렉터리 누락이라는 fixture 오류였다. 이를 고친 `focused-followup-repro.log`는
+**1 failed/30 passed**, 실제 permissive-mode 수락만 재현했다. 두 실패 이력 모두 보존한다.
+
+### 후속 후보·회귀·부분 설치와 인계
+
+후속 후보는 같은 HEAD에 기존 diff와 runtime 검사/새 시험/문서를 더한 조합이다.
+원자료 폴더는 기존 `C:/Users/SSAFY/Documents/Codex/2026-10-30/xenova-stage4-20261030/`,
+실행 소스는 `/home/ssafy/xenova-stage4-20261030/followup-final/`, 소스 봉인은
+`FOLLOWUP-FINAL_SOURCE.json`이다. 기존 `FINAL_CANDIDATE.json/final.diff`는 앞선 후보의
+자료로 보존하고 후속은 `FOLLOWUP_CANDIDATE.json/followup.diff`로 구분한다.
+
+`run_checks.py regression followup-final`: **22 suite, 543 passed / 135.09초, skip 없음**.
+기존 541개와 추가 집중 결과를 합산하지 않는다. 같은 후보의 두 중심 barrier·양 OS
+polling·2/3번 비용/소유권/게시/종료·신원/예산/native/seed/Zephyr 회귀가 포함됐다.
+신규 원자료는 `assertions-regression-followup-final/S4-T12-owner-exit.json`과
+`S4-T12-slot-files.json`, 실제 argv/rc는 `regression-followup-final.json/.log`다.
+
+`package_check.py followup-final`: recipe 소유 Python 29개 source/staging/archive의 바이트·
+0644 모드와 6개 Python `-I` import를 재확인했다. recipe/의존성/native/게스트는 무변경이다.
+`SUBSET_PACKAGE-FOLLOWUP-FINAL.json`과 `xenova-stage4-runtime-files-20261030-followup-final.tar`,
+묶음 SHA-256 `dbe68291756460538993b4580d519e8bd947546cb2f4ec818360e07a78421b0c`로 연결한다.
+이것은 부분 설치 묶음이며 정규 RPM/이미지/ARM/Xen/SD 설치 수락이 아니다. 무관한 ARM 재빌드는 안 했다.
+
+정식 조회 계약/관리 구조에 슬롯의 파일 조건과 부모 중단 의미를 반영했다. 기존 HTTP 요청서에
+다른 VM stop·원 key/ID 조회의 권한 거절, 내부 경로/비밀 오류 노출 차단, 실제 threadpool 포화 중
+정상 읽기+제어 진행의 음성 수락을 명시했다. Worker 요청에는 이 입력을 사망/새 복구 허가로
+바꾸지 않도록 누적했다. 두 요청서의 제품 수락은 계속 대기이며 타 담당자 코드는 변경하지 않았다.
+
+5번 제안은 같은 작업 폴더의 `STAGE5_IMPLEMENTATION_PROPOSAL.md`에 둔다. 원 create 기한·
+기존 원 결과 회수·명시적 미게시 수습·예약 반환·schema/권한/삭제의 미확정 결정을 구분한다.
+큰 설계서에 일시 작업 계획을 추가하지 않았다. 5번 구현·실제 자산 정리·보드·commit/push는 하지 않았다.
