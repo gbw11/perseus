@@ -8,10 +8,10 @@
 | 로컬 근거 | 기존 최종 57개 집중·449개 관련 회귀와 세 모듈 부분 설치 바이트 대조. 이후 Debian·Ubuntu 명시 사례 4개를 추가해 집중 61개 통과, 관리·Zephyr 54개 재실행 통과 |
 | 보드 상태 | 앞선 2회 처리 후보의 Debian 생성 477.203초만 측정. 최종 1회 후보는 미적용·성능 미측정 |
 | 2번 공통 적용 | 기본 lock의 Debian·Ubuntu ID/버전·출처와 실제 카탈로그/준비 경로를 축소 payload로 검증. 실제 고정 대용량 산출물·Ubuntu 부팅 수락은 별도 |
-| 실패 후 종결 | 부분 파일 보존·재복사 차단은 제공. 미게시 자산의 지원되는 종결·정리·예약 해제는 후속 5번 미완료 |
+| 실패 후 종결 | 5번 하위 후보에서 원 host/기한·명시 private 수습·동일 수습 재개·내구 예약 반환과 다음 신규 생성까지 로컬 검증. 운영 시간 정책과 상위 연결·설치본 수락은 별도 |
 | 3번 로컬 마감 | 단일 Linux 준비 슬롯·원 실행 소유권·private 준비/게시 분리·요청별 출력. 최종 관련 회귀 481개 통과, 두 OS 모두 A 복사 해제 전 B 조회/실제 stop 완료 원자료 확인. 부분 설치 29개 Python 파일·독립 import 일치 |
 | 4번 하위 로컬 마감 | 요청별 관측·공통 잠금 밖 조회·유한 재관측·관측 실행량/지연 표본 보호. 기존 541개 후 슬롯 부모 중단/정상 반환·파일 안전 검사 보완 후보로 22 suite 543개 통과. 두 중심 barrier·양 OS polling, 부분 설치 29개 바이트·6개 격리 import 재확인 |
-| 남은 범위 | 5번 create 전체 deadline/실패 종결, 상위 제품 연결·실제 HTTP polling/정규 설치/보드 수락·API cgroup의 guest backend 문제는 미완료. 모든 부하/스케줄의 무기아나 지연 상한 수락은 아님 |
+| 남은 범위 | 운영 create 시간값 공급·보드 수락, 상위 제품 연결·실제 HTTP polling/정규 설치/보드 수락·API cgroup의 guest backend 문제는 미완료. 모든 부하/스케줄의 무기아나 지연 상한 수락은 아님 |
 
 아래는 후보별 이력이다. 과거 2회/439개/보드 적용 기록을 최종 1회/449개 이후 후보의
 실보드 수락으로 읽지 않는다. OS별 보완과 3번 수정 전 반례는 마지막 절에 연결한다.
@@ -991,3 +991,197 @@ polling·2/3번 비용/소유권/게시/종료·신원/예산/native/seed/Zephyr
 5번 제안은 같은 작업 폴더의 `STAGE5_IMPLEMENTATION_PROPOSAL.md`에 둔다. 원 create 기한·
 기존 원 결과 회수·명시적 미게시 수습·예약 반환·schema/권한/삭제의 미확정 결정을 구분한다.
 큰 설계서에 일시 작업 계획을 추가하지 않았다. 5번 구현·실제 자산 정리·보드·commit/push는 하지 않았다.
+
+## 원 create 기한·실패 종결과 예약 반환
+
+### 기준선과 변경 책임
+
+2026-10-31, 기준 HEAD `69387c119f3ca66b59a2b5b450503721a74bad7b`, 브랜치
+`feat/platform/recovery-scenario-closure`의 작업트리 후보다. 위 4번의 543개는 선행 근거이며
+이번 결과와 합산하지 않는다. 착수 시 tracked/untracked 변경은 없었다. 과거 후보로 되돌리지 않았다.
+원 입력 계획과 원자료는 저장소 밖 `C:/Users/SSAFY/Documents/Codex/2026-10-31/xenova-stage5/`
+(이하 P5)에 보존한다. `BASELINE_SOURCE.json`, `CANDIDATE-FINAL_SOURCE.json`,
+`FINAL_CANDIDATE.json`의 HEAD·diff·새 파일·해시로 후보를 식별한다.
+시험 snapshot 뒤의 문서 수정은 최종 봉인에 따로 포함하며 시험/패키지의 제품 바이트와 대조한다.
+
+| 변경 위치 | 책임과 유지한 경계 |
+|---|---|
+| `xenova_creation.py`(새 내부 모듈) | 원 생성의 유한 정책/host/기한, 버전형 수습 검증, private inventory·현재 사용 검사, 명시 삭제 계획/재개, 공통 예약 반환 판정. 새 원장·DB·자동 실행기를 만들지 않음 |
+| `xenova_management.py` | 수락 저장 전후 기한, private 준비/게시와 원 결과 정산, 원 조회의 RUNNING/RECONCILING/FAILED, 같은 create key의 실패 replay. 원 UUID/spec/할당/의도·단일 Linux 슬롯을 유지 |
+| `xenova_preparation.py`, `guests/common/prepare_instance.py` | 요청별 실행/정리 예산, 실제 sparse 읽기·부분 write·guest 명령/반환·게시 전 검사, 자기 자식/FD·Workspace 역순 종료. 전역 stdout/cwd/env 변경·추가 prehash 없음 |
+| `xenova_execution.py`, `xenova_cpu.py`, `xenova_resources.py`, `xenova_recovery.py`, `xenova_zephyr_control.py` | 기존 미완료 자산 guard가 같은 `creation.holds`를 소비. 단순 status != SUCCEEDED로 수습 완료를 영구 차단하던 판단을 교체. 복구 정책/CPU 배치/사용자 의도/실행 신원은 변경하지 않음 |
+| `xenova_vm.py`, `xenova_management_cli.py`, recipe | 하위 `operation-reconcile` 진입, create 한정 호출 상한과 설정 경로. 새 모듈 포함과 비활성 예시 설치 |
+| 관련 platform 시험·bridge 및 dom0-manager `tests/test_platform_integration.py` | 명시 유한 시험 정책과 실제 private 준비 결과를 fixture에 제공. dom0-manager/FastAPI/Worker/Agent/Spring/프론트 **제품 소스는 변경하지 않음** |
+
+두 기준 설계 문서의 설계나 MQTT 공개 계약은 변경하지 않았다. 새 runtime 의존성·SQLite·
+daemon·청소 스케줄러·영구 큐는 없다. 실제 정리는 이번 시험이 만든 격리 fixture만 대상으로 했다.
+
+### 5-A: 시간·호환·공개 의미
+
+정식 사용법은 [operation-reconcile](../platform/cli-manager-spec.md#cmd-operation-reconcile)와
+[생성 기한](../platform/cli-manager-spec.md#creation-deadline),
+[관리 경계](../platform/management-boundaries.md#원-생성-실패와-예약-반환)에 둔다.
+새 호출을 HTTP에 자동 노출하지 않았다. root 하위 CLI/Python과 사용자 HTTP 권한은 별개다.
+
+| 계약 | 이번 확정 |
+|---|---|
+| 정책 | `/etc/xenova/creation-policy.json`: schema 1.0, 명시 양수 call_ms/execution_ms/cleanup_ms. call/실행 입력 상한 86460000ms, cleanup 상한 60000ms는 직렬화 한계이며 운영 기본값이 아님. 누락/무효 정책은 새 Linux create 수락 전 거절 |
+| 세 시간 | 새 수락에서 `D_create=min(t_accept+execution_ms,D_call-cleanup_ms)`. 호출 대기는 D_call을 소비. 같은 원 요청·새 caller·재시작·조회가 D_create를 연장하지 않음. 종료 여유는 원 실행의 여러 단계에서 한 번 시작한 동일 예산을 공유 |
+| 저장 | 새 Linux create는 asset journal schema 1.1의 `creation.version=1`에 host boot·수락 시각·원 기한·정책을 저장. spec_hash에 timeout을 넣지 않음. 수습도 원 JSON의 reconciliation.version=1에 결합 |
+| 호환 | 완료된 1.0 결과 replay 유지. 원 기한 불명/다른 boot의 미완료 생성은 자동 재개 금지, 현재 host의 명시 private 수습은 가능. 구형 writer와 혼합 배포는 지원하지 않음 |
+| 진단/명시 적용 | 원 operation ID 또는 key·VM UUID·원 spec hash·discard-private. execute에는 진단 context hash와 안정 reconciliation_id 필요. 임의 경로/PID/device/force 입력 없음 |
+| 결과 | 원 생성 실패와 수습 complete/release를 분리. 원장 status/phase와 관측 effective_status는 별개. 같은 create key는 원 실패+수습 기록, 새 복사/신원/기한 0. 별도 신규 생성은 새 UUID/current 자원 검사를 거침 |
+
+recipe는 값이 null인 `creation-policy.json.example`만 `/usr/share/xenova`에 넣는다.
+**운영 정책은 이번에 활성화하지 않았다.** 동일 후보를 설치하더라도 승인된 유한 정책을
+공급하기 전에는 새 Linux create가 거절된다. 보드 실측 없는 숫자를 제품 기본값으로 정하지 않았다.
+수습의 기본 15초/호출 상한 105000ms는 생성 운영 기한이 아니다.
+
+### 5-B·5-C: 원 기한과 정상 종료·원 결과 회수
+
+같은 조건의 수정 전후 반례는 `run_checks.py audit-before baseline`과
+`audit-sealed candidate-final`이다. 실제 Manager/검증 복사/원장을 실행하고 첫 root write 뒤
+제어 시계를 10초에서 100초로 이동했다. 시험 정책은 call 60000/실행 10000/정리 1000ms로 동일하다.
+
+| 관측 | 기준선 | 최종 후보 |
+|---|---|---|
+| 원 host/실행 기한 기록 | 없음 | 최초 수락의 원 기한 20000ms 보존 |
+| 동일한 원 root write 뒤 시계 이동 | 계속 진행·public 게시·ok=true | DEADLINE_EXCEEDED·public 없음·원 operation/부분 파일/오류 보존 |
+
+두 감사 도구의 rc=0은 각각 반례/수정 후 assertion 확인이다. 기준선의 제품 성공을 수락한
+결과가 아니다. `audit-before-facts.json`/`audit-sealed-facts.json`에 원 operation과 응답을 남겼다.
+로컬 제어 시계 분기이며 실제 SD 생성 시간/최악 지연/전원 상실 결과가 아니다.
+
+수락 저장 직후, 복사 반복문, guest 반환, 게시 직전 만료를 직접 주입했다. 기한 뒤 새
+준비/public 게시는 없다. 정상 실패는 자기 실행 자원을 제한적으로 정리하며 private 이미지를
+자동 폐기하지 않는다. 실제 Workspace.close의 역순 umount/loop detach와 자식 종료 미확정 시
+보류를 시험했다. mount/loop 명령은 대역이며 실제 커널 해제 수락은 아니다.
+
+자식 timeout의 추가 반례(`cleanup-before-candidate-8.log`)에서 wait 인자는
+`[1, 약 0.05]`였다. 정리 여유와 별개의 1초 wait를 없애 공통 소유 자식 종료 경로에서
+남은 정리 예산만 쓴다. 이 수정은 실제 소유 subprocess와 wait 인자를 검사하며 통과했다.
+이후 시간 검사는 협조적이며 fsync/커널 I/O의 강제 선점이나 실제 종료 상한을 보장하지 않는다.
+
+public 이후는 원 자산 검증/등록 정산과 새 외부 효과를 나눈다. **dhcp-applied가 이미
+확인된 원 작업**은 원 기한 뒤에도 현재 호출 예산으로 결과를 마감하고 최신 stopped 의도를
+보존했다. DHCP 재제출/launch는 0이다. 확인되지 않은 DHCP는 만료 뒤 새 효과를 허가하지 않고
+미확정으로 남긴다. 이 시험은 미완료 create에 대한 HTTP stop 지원을 가정하지 않으며 실제
+짧은 Execution.accept 원시 연산으로 선행 수락된 stopped 의도를 구성한다.
+
+### 5-D: 수습·잠금·예약 판정
+
+| 현재 근거 | 수습/반환 판단 |
+|---|---|
+| 확인된 active 원 준비 또는 다른 cleanup | 원 실행/원 조회로 연결, 탈취·삭제·예약 반환 없음 |
+| 부모 부재여도 상속 FD·private inode·mount/loop 등 사용 잔존 | 원 실행 종료/미사용 확인 전 차단. 슬롯 파일 부재/PID/시간으로 대체하지 않음 |
+| 관측 실패·불완전 열람·원장/schema 손상 | 없음/정상/반환으로 추정하지 않고 해당 오류로 종료 |
+| workspace 전 실패·소유 효과 없음 | 명시 수습에서 삭제 0회로 원 실패와 예약 종결 가능 |
+| 부분/완성 private·소유 확인·현재 미사용 | 원 계획 내구 저장 뒤 고정 항목만 폐기. source 손상/부재를 재해시하며 폐기를 막지 않음 |
+| public/등록 충돌·원인 모를 부재·교체 inode·링크/특수 파일/권한 불일치 | 삭제/성공/예약 반환 금지. 진단 이후 변경도 실행 시 재확인 |
+| 계획 저장 실패 | 삭제 0. 최초 create 오류와 수습 저장 오류는 별도 |
+| unlink/부모 fsync/최종 저장 뒤 중단 | 저장한 deleting/root_pending과 남은 항목으로 동일 수습 재개. 자기 진행 revision은 새 요청으로 보지 않음 |
+| complete JSON만 보이고 동기화 미확정 | 조회는 기록 내용을 표시. 실제 예약 소비 writer의 파일/부모 fsync와 동일 원장 재확정 실패 시 자원 소비 금지 |
+| 현재 미사용·자산 부재·내구 완료 확인 | 해제 가능한 활성 예약 제외. 원 실패/key/spec/UUID 이력과 stable lock은 보존. 별도 정상 생성 허용 |
+
+순서는 기존 Linux 슬롯(공통 잠금 밖) → 원 작업 확인/계획 저장(짧은 공통 잠금) →
+열거·현재 사용 확인(잠금 밖) → 각 삭제 marker 저장 → inode/gate 확인 후 개별 unlink/부모
+fsync(짧은 admission) → 진행 저장 → 잔여 사용/충돌 검사 → 내구 완료다. 긴 정리 전체로
+공통 잠금을 점유하지 않으며 quiesce 뒤 다음 파괴적 단계를 차단한다. 재개는 같은 명시
+수습의 새 호출이고 옛 생성의 게시 허가를 부활시키지 않는다.
+
+`_reserve_space/_ip_inventory/_mutate/_control_view`, Execution.control, resource guards,
+Recovery.conditions, CPU.guard_stopped, Zephyr reboot가 동일 holds 판정을 사용한다.
+원 UUID 이력 충돌은 계속 막고 IP/활성 용량 예약은 완료 후 반환한다. CPU의 전역 guard가
+수습 전에는 차단하고 수습 뒤에는 통과하는 직접 시험도 포함한다. sparse 실제 블록 차감은
+기존 식을 유지했고 기존 용량/IP/lease·복구/자원 suite를 함께 재실행했다. 모든 action의
+운영 조합/실제 DHCP·CPU 변경을 이번에 수락한 것은 아니다.
+
+기존 2GiB 증가분 여유와 128KiB 수습 기록 상한은 유지하나 별도 물리 공간을 보장하지
+않는다. 저장소 ENOSPC/EIO에서는 계획/완료를 확정하지 않고 호출을 끝낸다. 원장/다른 VM/
+로그 삭제나 reserve-file로 우회하지 않았다. 저장소 회복 후 동일 수습·새 생성 성공까지 시험했다.
+
+### 5-E: 수락 대응과 원자료
+
+새 시험은 `platform/tests/test_xenova_creation_reconcile.py`, 기존 근거는 같은 최종 후보의
+preparation_concurrency/read_progress/verified_copy/creation_failure 및 관리/복구 suite다.
+
+| 요구 | 실제 assertion·근거 |
+|---|---|
+| S5-T01 | 정책 부재에서 원장/준비 0·정상 읽기, 수락 저장 직후 만료에서 원 기한/ID 보존·준비 0. 기존 management_budget/atomic_write/failure_record 시험으로 미수락/저장 미확정 구분 |
+| S5-T02 | 양 OS 실제 검증 복사 내 만료, Ubuntu guest 반환·Debian 게시 직전 만료, 공유 cleanup margin·소유 child wait 한도·실제 Workspace 역순 종료. sparse/부분 write/source guard는 기존 verified_copy/두 OS 경로 시험 |
+| S5-T03 | 새 caller/동일 boot 원 기한 보존, legacy·다른 boot 재개 금지/명시 폐기 성공. 기존 완료 replay 회귀 유지 |
+| S5-T04 | 실제 열린/unlinked FD, loop 사용·관측 EIO에서 삭제 0; 해소 후 같은 수습 성공. 자식 미확정 시 close 보류. 상속 FD 부모 중단·host unmount 차단은 기존 S3/S4 프로세스 시험 재실행 |
+| S5-T05 | workspace 전 실패 삭제 0 종결, private 만료 게시 0, dhcp-applied 이후 원 결과 정산·stopped 의도 유지. 기존 recorded/private/public 중단 회귀 |
+| S5-T06 | 진단 뒤 다른 inode·원인 모를 다른 항목 부재·public broken symlink·hardlink/FIFO/모드·열린 파일 거절. 자기 private 폐기와 정상 후속 생성도 성공 |
+| S5-T07 | 계획 ENOSPC 삭제 0, 완료 부모 fsync EIO에서 보이는 complete만으로 예약 소비 0, unlink/루트 제거 뒤 실제 SIGKILL 및 새 프로세스 회수. 같은 원 오류·수습 ID 보존 |
+| S5-T08·T10 | 동일 수습 병행은 슬롯 미수락, 완료 응답 유실 replay/다른 수습 ID 거절. 원 create는 원 실패+수습 완료·재복사 0. 완료된 원 성공/현재 관측 실패 분리는 S3/S4 회귀 |
+| S5-T09 | 양 OS 수습 barrier를 해제하지 않은 채 정상 list/get/원 조회·B 실제 하위 graceful stop/원 completed. polling 계속 성공. 준비 중 polling은 기존 S4-T03 양 OS·1/2/4 폴러 회귀. quiesce 뒤 삭제 차단/명시 재개 |
+| S5-T11 | 아래 29 suite와 별도 dom0-manager 전체 회귀. prehash 0/검증 복사 1·seed/Zephyr·S01/S02·receipt/복구/CPU/의도 유지 |
+| S5-T12 | 하위 strict CLI 진단/임의 path 거절만 확인. 실제 HTTP/Spring/화면 권한·DTO·명시 확인·사용성은 담당자 구현/종단 수락 대기 |
+| S5-T13~16 | 실패 후 공통 잠금 반환, workspace 0개 종결, source 손상/부재 폐기, 저장소 회복 뒤 같은 수습 완료, 공통 예약 guard/원 UUID 이력·반환 IP 재사용과 별도 정상 생성 |
+
+중심 양 OS 흐름은 실제 원 root write EIO → 부분 파일/원 오류 → cleanup unlink 뒤 중단 →
+새 Python 프로세스에서 동일 수습 완료 → 같은 create key 원 실패 replay/복사 0 → 새 UUID
+생성 성공·반환 IP 재사용이다. `assertions-regression-candidate-final/S5-T08-*`에 원/새
+operation·오류·수습·동일 key 응답을 연결했다. `S5-T07-kill-*`은 실제 SIGKILL 두 지점,
+`S5-T09-cleanup-barrier-*`는 cleanup_alive/released=false·polling_alive·정상 조회 수와
+B의 physical_result/원 control operation completed를 남긴다. 전체 기록에 비슷한 상태가
+있었다는 추정 대신 해당 barrier 안에서의 원 요청·응답 인과를 assertion으로 검사한다.
+
+최종 실행은 기존 고정 WSL 도구·격리 경로에서 수행했다. `run_checks.py`의 각 JSON에 전체
+pytest argv/rc/실행 시간을, 같은 이름의 log에 원 출력을 보존했다.
+
+| 명령(모두 P5의 run_checks.py) | 최종 결과 |
+|---|---|
+| `focused candidate-final` | 새 수습+S4 집중 66 passed, 32.00초, rc=0 |
+| `regression candidate-final` | 관련 29 suite, 696 passed, 197.70초(pytest)/198.10초(실행기), rc=0, skip 없음 |
+| `manager candidate-final` | dom0-manager 전체 576 passed, 58.85초/59.65초, rc=0, skip 없음. 기존 Starlette/httpx 사용 deprecation warning 1개 |
+| `audit-sealed candidate-final` | 원 기한 뒤 public 없음·원 기한/부분 파일 보존 assertion 통과 |
+| `check_docs.py`, `git diff --check` | 6개 소유 문서의 로컬 링크/앵커 289개 오류 0, diff 공백 오류 0 |
+
+집중 시험은 관련 회귀에 포함되므로 수를 합치지 않는다. 새 dom0-manager 의존성이나
+httpx 버전을 설치/변경하여 warning을 숨기지 않았다. 기존 S01/S02의 손상 차단·동일 사건 ID·
+pending 원자 저장 시험은 이 별도 suite에서 재실행했다.
+
+시험은 실제 하위 Manager/원장/파일/검증 복사/flock/요청별 runner/subprocess를 사용한다.
+Xen/Store·mount/loop·chroot/게스트 설정과 storage_check는 명시 외부 대역이다. 새 수습
+시험의 전역 `/proc` 열람은 자기 프로세스(새 프로세스 시험은 자기/부모)의 실제 FD로 제한했다.
+따라서 전체 root 프로세스 접근·실제 Xen/SD/게스트 backend·권한/전원 상실 수락은 아니다.
+테스트의 짧은 timeout·제어 시계/축소 payload를 운영 시간/보장 상한으로 옮기지 않는다.
+
+초기 실패 원자료를 삭제하지 않았다. candidate-1의 evidence 파일명 충돌, candidate-2의
+추가 fixture 정책 누락, candidate-3의 해제된 inode가 새 소유 파일에 재사용된 오탐을
+구분했다. inode 오탐은 현재 FD 경로/nlink까지 확인해 수정했다. candidate-4의 HTTP stop
+가정·candidate-5의 임의 key 가정은 실제 기존 계약에 맞춰 시험만 고쳤다. candidate-6의
+bridge public/None 대역은 기준선에서도 재현(`bridge-before-baseline.log`)되어 실제 private
+결과 fixture로 교정했다. dom0-manager 7개 실패도 정책/private 시험 경계만 보완했다.
+최종 후보의 제품 통과를 이 초기 실패 로그로 대체하지 않는다. 최초 독립 cleanup-wait
+명령의 pytest 경로 누락은 환경 실패이며, 고정 도구를 사용한 재실행에서 wait 반례를 재현했다.
+
+### 부분 패키지·인계와 남은 수락
+
+`package_check.py candidate-final`은 recipe의 실제 install 목적지/모드를 따라 Python
+**33개와 비활성 설정 예시 1개**를 소유 staging/archive로 구성했다. 이전 29개 subset에
+없던 기존 하이픈 이름 Python 도구도 실제 목적지로 포함했으므로 파일 개수를 직접 비교하지
+않는다. source/staging/archive 바이트·모드와 **11개 설치 경로의 `python -I -B` import**를
+확인했다. `SUBSET_PACKAGE-CANDIDATE-FINAL.json`에 각 파일 해시/모드/출처를 둔다.
+archive SHA-256은 `cd7e9d164107d5e7708066c8754f684eec50d3f60ad707b70c28570521b59b0c`다.
+
+RDEPENDS는 기준선과 동일하다. 새 내부 모듈의 contextlib/hashlib/json/os/pathlib/re/stat는
+기존 설치 모듈에서 이미 쓰는 표준 모듈이다. 고정 OE `0f03c732a0a2d0506b41b1abe60b3f368b2300dc`의
+기존 표준 패키지 closure/manifest 근거를 재사용했다. 새 표준/runtime 패키지는 추가하지 않았다.
+recipe의 새 module/example 포함을 확인했으며 native identity/guest 소스는 그대로다.
+이 결과는 **부분 설치 묶음**이며 BitBake/RPM/전체 이미지/실제 설치본 검증이 아니다.
+호스트 Python만 바뀌어 무관한 Zephyr ARM 재빌드는 하지 않았다.
+
+[HTTP·Spring·화면 요청](../requests/20261029-request-http-spring-ui.md#원-create-기한과-실패-자산-수습-연결)에
+실제 `_BUDGET_ACTIONS/SerializedManager/PlatformDriver` 위치, 권한/명시 확인, 원 key·
+context·수습 ID 보존, 허용 응답 필드와 같은 시험의 실제 HTTP 인수 조건을 누적했다.
+[Worker 요청](../requests/20261029-request-recovery-worker.md#원-create-실패-종결의-소비)은
+수습을 VM 사망/재시작·Standby 재합류·출력 허가로 소비하지 않도록 연결했다. 요청서 작성은
+담당자 제품 구현 완료가 아니다.
+
+5번의 하위 구현·로컬 검증·부분 패키징 범위는 여기서 마감한다. 운영 유한 시간값 공급/
+실측, 동일 모듈 후보 설치, 실제 HTTP/Spring/화면 권한과 응답 유실/명시 삭제 수락,
+Xen·SD/전원 상실·실제 mount/loop·API cgroup/backend 소유는 별도 미완료다.
+이번에는 보드·서비스·운영 상태·전체 이미지·commit/push를 변경하지 않았으며 6·7번은 실행하지 않았다.
