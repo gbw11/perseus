@@ -80,3 +80,30 @@ def test_draw_returns_same_size_frame():
     r = detector.detect(frame, at=1.0)
     out = draw(frame, r, detector.projector(W, H), SETTINGS)
     assert out.shape == frame.shape
+
+
+def curved_line(frame: np.ndarray, y0: float, curvature: float, x0: float = 0.2, x1: float = 1.8) -> np.ndarray:
+    """지면 곡선 y = y0 + curvature·x² 을 흰 선으로 그린다 (왼쪽으로 굽는 차로)."""
+    p = Detector(SETTINGS).projector(W, H)
+    pts = [p.to_image(x, y0 + curvature * x * x) for x in np.linspace(x0, x1, 40)]
+    poly = np.array([[int(u), int(v)] for u, v in pts if u is not None], dtype=np.int32)
+    cv2.polylines(frame, [poly], False, (255, 255, 255), 6)
+    return frame
+
+
+def test_curved_lane_keeps_sides_and_reports_left_turn():
+    # 오른쪽 선이 앞에서 y > 0 으로 넘어가도(곡선) 왼쪽 선과 섞이지 않아야 한다
+    k = 0.3
+    frame = curved_line(curved_line(blank(), 0.175, k), -0.175, k)
+    r = Detector(SETTINGS).detect(frame, at=1.0)
+    assert r.extra["lane_found"] is True
+    assert r.lane.offset_m == pytest.approx(0.0, abs=0.03)
+    # 0.6 m 앞 중심은 k·0.36 왼쪽 → atan(0.108/0.6) ≈ 0.18 rad
+    assert r.lane.heading_err_rad == pytest.approx(math.atan2(k * 0.36, 0.6), abs=0.05)
+
+
+def test_single_left_line_is_shifted_by_half_lane():
+    frame = white_line(blank(), 0.3)
+    r = Detector(SETTINGS).detect(frame, at=1.0)
+    assert r.extra["lane_found"] is True
+    assert r.lane.offset_m == pytest.approx(0.0, abs=0.03)  # 왼쪽 선 − 0.6/2 = 0
