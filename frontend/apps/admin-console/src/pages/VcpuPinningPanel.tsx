@@ -139,7 +139,7 @@ export function VcpuPinningPanel({ vm, accent }: VcpuPinningPanelProps) {
       {resources.isPending && <div className={styles.pinningState}>실제 CPU 매핑을 조회하는 중입니다…</div>}
       {resources.error && (
         <div className={styles.pinningState} data-tone="waiting" role="status">
-          <strong>CPU 핀닝 정보를 불러올 수 없습니다.</strong>
+          <strong>vCPU 핀닝 정보를 불러올 수 없습니다.</strong>
           <span>{errorMessage(resources.error)}</span>
         </div>
       )}

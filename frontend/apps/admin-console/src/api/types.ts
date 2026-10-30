@@ -92,6 +92,14 @@ export interface PcpuStatus {
   load_percent: number | null;
 }
 
+export interface ResourceLimits {
+  vcpus_min: number;
+  vcpus_max: number;
+  memory_mib_min: number;
+  memory_mib_max: number;
+  memory_mib_step: number;
+}
+
 /** GET /api/v1/vms/{id}/resources */
 export interface VmResources {
   vm_id: string;
@@ -102,6 +110,7 @@ export interface VmResources {
   /** 서버가 전용으로 검증한 코어만 강조한다. 이름이나 OS로 전용 여부를 추론하지 않는다. */
   exclusive_pcpus: number[];
   pcpus: PcpuStatus[];
+  limits: ResourceLimits;
   observed_at: string;
 }
 
@@ -109,6 +118,17 @@ export interface VmResources {
 export interface UpdateVcpuPinningRequest {
   mappings: VcpuPinning[];
 }
+
+export interface UpdateMemoryRequest {
+  memory_mib: number;
+}
+
+export interface UpdateVcpusRequest {
+  vcpus: number;
+}
+
+export type VmResourceUpdate =
+  { kind: 'memory'; body: UpdateMemoryRequest } | { kind: 'vcpus'; body: UpdateVcpusRequest };
 
 /** §2.3 */
 export interface Template {
@@ -149,6 +169,7 @@ export type KnownErrorCode =
   | 'VM_CONTROL_UNAVAILABLE'
   | 'VM_CONTROL_TIMEOUT'
   | 'VM_CONTROL_BAD_RESPONSE'
+  | 'RESOURCE_UNSUPPORTED'
   | 'INTERNAL_SERVER_ERROR';
 
 // ---- 이벤트 (노션 API 명세 REST-18 "이벤트 조회", 백엔드 EventResponse) -------------------
