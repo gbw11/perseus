@@ -1,0 +1,13 @@
+[Unit]
+Description=Xenova local display feed (read-only Xen and existing MQTT)
+After=network.target xenova-vms.service
+PartOf=xenova-display.target
+[Service]
+Type=simple
+EnvironmentFile=/etc/xenova/display-256/feed.env
+ExecStart=/usr/bin/python3 /opt/xenova-display/current/bin/feed.py
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillMode=control-group
+UMask=0077

@@ -1,0 +1,31 @@
+{
+  "scope": "real loopback MQTT/HTTP/WebSocket and policy; candidate UUIDs, synthetic app/Xen; no guest or production ACL test",
+  "cases": [
+    "all_configured_topics_receive_real_suback_before_reports",
+    "manual_report_reaches_vm2_only_without_inventing_mode_or_os",
+    "wrong_vm_on_correct_app_topic_is_rejected",
+    "authenticated_websocket_exposes_same_uuid_and_report",
+    "app_error_selects_error_panel_while_vm_stays_running",
+    "xen_paused_has_priority_over_previous_app_report",
+    "fresh_report_restores_normal_panel_without_vm_control_commands"
+  ],
+  "observations": [
+    {
+      "xen": "running",
+      "report": "error",
+      "decision": "app_error"
+    },
+    {
+      "xen": "paused",
+      "report": "previous error",
+      "decision": "paused"
+    },
+    {
+      "xen": "running",
+      "report": "standby",
+      "decision": "status"
+    }
+  ],
+  "passed": true,
+  "completed_at": "2026-10-22T05:49:11.732260+00:00"
+}

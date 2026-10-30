@@ -1,0 +1,389 @@
+{
+  "scope": "single physical framebuffer; 5min instrument + 5min infotainment; 1824x984 target 5 FPS",
+  "stage": "/opt/xenova-display-probe/20261028-soak-78f0c4b44476-012158",
+  "phases": [
+    {
+      "output_id": "monitor-1",
+      "received_duration_s": 300.01500000001397,
+      "frames": 1478,
+      "observed_fps": 4.923333333333333,
+      "jpeg_payload_mbps": 1.98993256,
+      "inter_frame_interval_ms": {
+        "n": 1477,
+        "mean": 203.1144211238998,
+        "p50": 202.9999999795109,
+        "p95": 344.0000000409782,
+        "max": 625.0,
+        "min": 0.0
+      },
+      "gaps_over_1s": 0,
+      "skipped_sequence_numbers": 0,
+      "sampling_errors": 0,
+      "sender_plus_encoder_cpu_core_percent": {
+        "n": 207,
+        "mean": 230.78983723606783,
+        "p50": 230.85951151278317,
+        "p95": 277.3490298860496,
+        "max": 322.3534253622083,
+        "min": 167.5204993285187,
+        "time_weighted_mean": 228.76219703373135
+      },
+      "temperature_celsius": {
+        "n": 208,
+        "mean": 38.26232692307693,
+        "p50": 38.459,
+        "p95": 39.433,
+        "max": 39.92,
+        "min": 36.024
+      },
+      "memory_available_bytes": {
+        "n": 208,
+        "mean": 271903369.84615386,
+        "p50": 262897664,
+        "p95": 375943168,
+        "max": 384081920,
+        "min": 236638208
+      },
+      "groups": {
+        "python_combined": {
+          "cpu_core_percent": {
+            "n": 207,
+            "mean": 46.85643992646542,
+            "p50": 45.27959800073414,
+            "p95": 60.25874926160405,
+            "max": 82.22257777214871,
+            "min": 31.088636053771594,
+            "time_weighted_mean": 46.89703367570411
+          },
+          "rss_bytes_sum": {
+            "n": 208,
+            "mean": 70477784.61538461,
+            "p50": 70365184,
+            "p95": 70897664,
+            "max": 70897664,
+            "min": 69971968
+          }
+        },
+        "encoder": {
+          "cpu_core_percent": {
+            "n": 207,
+            "mean": 183.93339730960238,
+            "p50": 183.97505896445026,
+            "p95": 221.14639442696563,
+            "max": 249.4401505778993,
+            "min": 126.3502071206624,
+            "time_weighted_mean": 181.86516335802725
+          },
+          "rss_bytes_sum": {
+            "n": 208,
+            "mean": 229503291.07692307,
+            "p50": 243331072,
+            "p95": 244117504,
+            "max": 244379648,
+            "min": 106450944
+          }
+        },
+        "browser": {
+          "cpu_core_percent": {
+            "n": 207,
+            "mean": 14.180323843940036,
+            "p50": 11.427663704326667,
+            "p95": 24.40545123302022,
+            "max": 130.63400206789981,
+            "min": 6.157518986982063,
+            "time_weighted_mean": 14.025779510118186
+          },
+          "rss_bytes_sum": {
+            "n": 208,
+            "mean": 839545659.0769231,
+            "p50": 831381504,
+            "p95": 889962496,
+            "max": 891039744,
+            "min": 814104576
+          }
+        },
+        "xorg": {
+          "cpu_core_percent": {
+            "n": 207,
+            "mean": 5.005540348882481,
+            "p50": 4.644008404148008,
+            "p95": 6.977838229946959,
+            "max": 27.001085314269098,
+            "min": 2.3380271779978457,
+            "time_weighted_mean": 5.036348108314776
+          },
+          "rss_bytes_sum": {
+            "n": 208,
+            "mean": 173899145.84615386,
+            "p50": 174260224,
+            "p95": 187629568,
+            "max": 187760640,
+            "min": 122486784
+          }
+        },
+        "other": {
+          "cpu_core_percent": {
+            "n": 207,
+            "mean": 0.5321429546271361,
+            "p50": 0.6656651047313197,
+            "p95": 1.2529421320895848,
+            "max": 1.6142181327488432,
+            "min": 0.0,
+            "time_weighted_mean": 0.5299664786380208
+          },
+          "rss_bytes_sum": {
+            "n": 208,
+            "mean": 31967389.53846154,
+            "p50": 32747520,
+            "p95": 36679680,
+            "max": 36679680,
+            "min": 28684288
+          }
+        }
+      },
+      "encoder_epochs": 1,
+      "unavailable_samples": 0,
+      "stale_frame_withheld_after_stop": true,
+      "physical_verified": false,
+      "interfaces_delta_bytes": {
+        "lo": {
+          "rx_bytes": 76551828,
+          "tx_bytes": 76551828
+        },
+        "eth0": {
+          "rx_bytes": 0,
+          "tx_bytes": 0
+        },
+        "wlan0": {
+          "rx_bytes": 198292,
+          "tx_bytes": 78273842
+        },
+        "xenbr0": {
+          "rx_bytes": 2136,
+          "tx_bytes": 2124
+        },
+        "vif1.0": {
+          "rx_bytes": 2136,
+          "tx_bytes": 2124
+        },
+        "vif2.0": {
+          "rx_bytes": 0,
+          "tx_bytes": 0
+        },
+        "vif3.0": {
+          "rx_bytes": 0,
+          "tx_bytes": 0
+        }
+      }
+    },
+    {
+      "output_id": "monitor-2",
+      "received_duration_s": 300.03100000001723,
+      "frames": 1484,
+      "observed_fps": 4.943086179024152,
+      "jpeg_payload_mbps": 2.442571684748982,
+      "inter_frame_interval_ms": {
+        "n": 1483,
+        "mean": 202.30276466622655,
+        "p50": 202.9999999795109,
+        "p95": 342.99999999348074,
+        "max": 641.0000000032596,
+        "min": 0.0
+      },
+      "gaps_over_1s": 0,
+      "skipped_sequence_numbers": 0,
+      "sampling_errors": 0,
+      "sender_plus_encoder_cpu_core_percent": {
+        "n": 208,
+        "mean": 230.61204496044718,
+        "p50": 233.0490884881247,
+        "p95": 271.58154874870354,
+        "max": 286.6417498548496,
+        "min": 166.10232791880833,
+        "time_weighted_mean": 228.845201544424
+      },
+      "temperature_celsius": {
+        "n": 209,
+        "mean": 39.60077033492823,
+        "p50": 39.433,
+        "p95": 40.894,
+        "max": 41.381,
+        "min": 37.972
+      },
+      "memory_available_bytes": {
+        "n": 209,
+        "mean": 267055574.354067,
+        "p50": 248000512,
+        "p95": 393732096,
+        "max": 398503936,
+        "min": 233500672
+      },
+      "groups": {
+        "python_combined": {
+          "cpu_core_percent": {
+            "n": 208,
+            "mean": 46.542162263532,
+            "p50": 45.10108985341149,
+            "p95": 59.741331592878865,
+            "max": 67.4941329600082,
+            "min": 31.972250133119857,
+            "time_weighted_mean": 46.650429428996304
+          },
+          "rss_bytes_sum": {
+            "n": 209,
+            "mean": 72889456.68899521,
+            "p50": 72732672,
+            "p95": 73781248,
+            "max": 73781248,
+            "min": 71815168
+          }
+        },
+        "encoder": {
+          "cpu_core_percent": {
+            "n": 208,
+            "mean": 184.06988269691516,
+            "p50": 185.42322673783937,
+            "p95": 217.10651784383788,
+            "max": 228.88074765667707,
+            "min": 124.21141823840505,
+            "time_weighted_mean": 182.1947721154277
+          },
+          "rss_bytes_sum": {
+            "n": 209,
+            "mean": 236176241.9138756,
+            "p50": 258969600,
+            "p95": 258969600,
+            "max": 258969600,
+            "min": 99192832
+          }
+        },
+        "browser": {
+          "cpu_core_percent": {
+            "n": 208,
+            "mean": 12.146049461722122,
+            "p50": 10.705169233127771,
+            "p95": 21.497171258095836,
+            "max": 51.91161538747086,
+            "min": 0.58173630042426,
+            "time_weighted_mean": 12.14653987414049
+          },
+          "rss_bytes_sum": {
+            "n": 209,
+            "mean": 712202563.3684211,
+            "p50": 688365568,
+            "p95": 870457344,
+            "max": 871997440,
+            "min": 682835968
+          }
+        },
+        "xorg": {
+          "cpu_core_percent": {
+            "n": 208,
+            "mean": 4.906967910135364,
+            "p50": 4.583070429317058,
+            "p95": 6.37681640361622,
+            "max": 28.680096587800463,
+            "min": 2.284794985177693,
+            "time_weighted_mean": 4.955735052702445
+          },
+          "rss_bytes_sum": {
+            "n": 209,
+            "mean": 161341969.14832535,
+            "p50": 174993408,
+            "p95": 175443968,
+            "max": 175443968,
+            "min": 60567552
+          }
+        },
+        "other": {
+          "cpu_core_percent": {
+            "n": 208,
+            "mean": 0.5295199677727855,
+            "p50": 0.6624797241456334,
+            "p95": 1.2531764129393193,
+            "max": 1.5458061557878753,
+            "min": 0.0,
+            "time_weighted_mean": 0.5354854654262374
+          },
+          "rss_bytes_sum": {
+            "n": 209,
+            "mean": 28057012.057416268,
+            "p50": 27897856,
+            "p95": 28684288,
+            "max": 28684288,
+            "min": 27897856
+          }
+        }
+      },
+      "encoder_epochs": 1,
+      "unavailable_samples": 0,
+      "stale_frame_withheld_after_stop": true,
+      "physical_verified": false,
+      "interfaces_delta_bytes": {
+        "lo": {
+          "rx_bytes": 93488323,
+          "tx_bytes": 93488323
+        },
+        "eth0": {
+          "rx_bytes": 0,
+          "tx_bytes": 0
+        },
+        "wlan0": {
+          "rx_bytes": 221624,
+          "tx_bytes": 95887904
+        },
+        "xenbr0": {
+          "rx_bytes": 2220,
+          "tx_bytes": 2250
+        },
+        "vif1.0": {
+          "rx_bytes": 2220,
+          "tx_bytes": 2320
+        },
+        "vif2.0": {
+          "rx_bytes": 0,
+          "tx_bytes": 0
+        },
+        "vif3.0": {
+          "rx_bytes": 0,
+          "tx_bytes": 0
+        }
+      }
+    }
+  ],
+  "remote_exit": 0,
+  "performance_acceptance": "diagnostic baseline only; single 1824x984 physical fbdev source, no dual 720p acceptance",
+  "end_to_end_latency_ms": null,
+  "latency_reason": "No synchronized local/remote presentation measurement; inter-frame intervals are not latency.",
+  "cpu_basis": "100%=one CPU core; Python includes collector, sender and diagnostic sampler; RSS sums shared pages more than once.",
+  "first_sample_cpu_excluded": true,
+  "board_error": null,
+  "cleanup": {
+    "namespace_exit": 0,
+    "feed_stopped": true,
+    "framebuffer_restored": true,
+    "restoration_differing_bytes": 0,
+    "restored_active_vt": 1,
+    "graphics_children_stopped": true
+  },
+  "completed_receive_seconds": 600.0460000000312,
+  "visual_acceptance_passed": false,
+  "visual_failure": {
+    "observed": "Final received infotainment JPEG is black while multipart sequence continues",
+    "evidence": "monitor-2-last.jpg",
+    "first_black_size_match_in_phase_s": 275,
+    "size_matching_is_timing_proxy_not_full_pixel_analysis": true
+  },
+  "blanking_diagnostic": {
+    "screen_saver_timeout_s": 600,
+    "dpms_enabled": true,
+    "dpms_standby_suspend_off_s": [
+      600,
+      600,
+      600
+    ],
+    "activate_reproduces_black": true,
+    "reset_restores_ui": true,
+    "production_fix_applied": false
+  }
+}

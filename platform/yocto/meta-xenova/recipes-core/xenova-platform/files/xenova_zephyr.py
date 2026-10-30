@@ -1,4 +1,4 @@
-"""Zephyr 펌웨어 검증·독립 복사·원자적 활성 버전 전환. 네트워크/게스트 저장소는 제공하지 않는다."""
+"""Zephyr 펌웨어 검증·독립 복사·원자적 활성 버전 전환. 고정 Starter 및 별도 네트워크 프로필을 검증한다."""
 import copy
 import hashlib
 import json
@@ -32,6 +32,21 @@ PROFILE = {
                               'event_trigger_difference': 'Zephyr=edge; Xen source=level-low; board validation required'},
     'validation': 'static-firmware-checked', 'runtime_hardware_verified': False,
 }
+# Separate active profile; the legacy Starter and its immutable bundle stay valid.
+NET_PROFILE = copy.deepcopy(PROFILE)
+NET_PROFILE.update(id='xenvm-arm64-gicv2-net-16m-v1')
+NET_PROFILE['event_channel'].update(cells=[1,15,2,160],trigger='level',
+                                    encoding='Zephyr IRQ_TYPE_LEVEL=BIT(1)')
+NET_PROFILE['xen_source_comparison']['event_trigger_difference'] = 'Zephyr level IRQ; board validation required'
+NET_CAPABILITIES = {**CAPABILITIES, 'dhcp':True, 'graceful_shutdown':True,
+                    'ethernet':True, 'ipv4':True, 'icmpv4':True, 'cooperative_reboot':True}
+
+
+def networked(record):
+    return (record.get('hardware_profile') == NET_PROFILE and
+            record.get('capabilities') == NET_CAPABILITIES)
+
+
 REQUIRED_CONFIG = ('CONFIG_ARM64=y', 'CONFIG_XEN=y', 'CONFIG_GIC_V2=y',
                    'CONFIG_UART_XEN_HVC=y', 'CONFIG_TIMER_READS_ITS_FREQUENCY_AT_RUNTIME=y',
                    'CONFIG_SRAM_BASE_ADDRESS=0x40000000', 'CONFIG_SRAM_SIZE=16384')
@@ -71,9 +86,15 @@ def _cells(node, prop):
         raise PlatformError('unsupported static hardware encoding: ' + prop) from exc
 
 
-def payload_ok(directory, *, config_name='zephyr.config'):
+def payload_ok(directory, *, config_name='zephyr.config', profile=None):
     """빌드 결과의 RAM·GIC·IRQ cell/flag·grant·timer 계약을 검사한다. 실보드 일치는 미검증이다."""
+    profile = PROFILE if profile is None else profile
     config = asset(directory, config_name).read_text().splitlines()
+    if profile == NET_PROFILE and any(line not in config for line in (
+            'CONFIG_XENOVA_RUNTIME=y','CONFIG_XENOVA_NETFRONT=y','CONFIG_NETWORKING=y',
+            'CONFIG_NET_L2_ETHERNET=y','CONFIG_NET_IPV4=y','CONFIG_NET_ARP=y','CONFIG_NET_DHCPV4=y',
+            '# CONFIG_XEN_GRANT_TABLE is not set')):
+        raise PlatformError('network firmware lacks bounded netfront/shared Store profile')
     if any(option not in config for option in REQUIRED_CONFIG):
         raise PlatformError('firmware lacks fixed Xen/GICv2/16MiB/runtime timer configuration')
     binary, elf = asset(directory, 'zephyr.bin').read_bytes(), asset(directory, 'zephyr.elf').read_bytes()
@@ -84,10 +105,10 @@ def payload_ok(directory, *, config_name='zephyr.config'):
         raise PlatformError('firmware ELF architecture/entry outside fixed RAM')
     text = re.sub(r'/\*.*?\*/|//[^\n]*', '', asset(directory, 'zephyr.dts').read_text(), flags=re.S)
     for node, properties in [
-        ('memory@40000000', {'reg': PROFILE['ram']}),
-        ('interrupt-controller@3001000', {'reg': PROFILE['gic']['reg'], '#interrupt-cells': [4]}),
-        ('hypervisor@38000000', {'reg': PROFILE['grant_table']['reg'], 'interrupts': PROFILE['event_channel']['cells']}),
-        ('timer', {'interrupts': PROFILE['timer']['cells']}),
+        ('memory@40000000', {'reg': profile['ram']}),
+        ('interrupt-controller@3001000', {'reg': profile['gic']['reg'], '#interrupt-cells': [4]}),
+        ('hypervisor@38000000', {'reg': profile['grant_table']['reg'], 'interrupts': profile['event_channel']['cells']}),
+        ('timer', {'interrupts': profile['timer']['cells']}),
     ]:
         matches = re.findall(r'(?<![\w@-])' + node + r'\s*\{([^{}]*)\}', text)
         if len(matches) != 1:
@@ -104,7 +125,9 @@ def bundle_info(directory, expected=None):
     directory = plain(directory)
     names = {p.name for p in directory.iterdir()}
     manifest = 'firmware.json' if 'firmware.json' in names else 'template.json'
-    payloads = PAYLOADS | ({'zephyr.version.h'} if manifest == 'firmware.json' else set())
+    raw_meta = json.loads(asset(directory,manifest).read_text())
+    network = raw_meta.get('hardware_profile') == NET_PROFILE
+    payloads = PAYLOADS | ({'zephyr.version.h'} if manifest == 'firmware.json' else set()) | ({'zephyr.map','XEN-ABI-LICENSE'} if network else set())
     if names != payloads | {manifest}:
         raise PlatformError('unexpected firmware bundle files')
     path = asset(directory, manifest)
@@ -125,8 +148,8 @@ def bundle_info(directory, expected=None):
     else:
         source = meta.get('source', {})
         version = meta.get('version', '')
-        if (meta.get('guest_kind') != 'zephyr' or meta.get('hardware_profile') != PROFILE
-                or meta.get('capabilities') != CAPABILITIES or not TOKEN.fullmatch(version)
+        if (meta.get('guest_kind') != 'zephyr' or meta.get('hardware_profile') != (NET_PROFILE if network else PROFILE)
+                or meta.get('capabilities') != (NET_CAPABILITIES if network else CAPABILITIES) or not TOKEN.fullmatch(version)
                 or not isinstance(source, dict) or any(not isinstance(source.get(k), str) or not source[k].strip()
                                                        for k in ('zephyr_version', 'app', 'source_revision', 'build_id'))
                 or source['zephyr_version'] != '4.4.0'):
@@ -142,13 +165,17 @@ def bundle_info(directory, expected=None):
             spec = meta['files'][name]
             if not isinstance(spec, dict) or type(spec.get('bytes')) is not int or spec['bytes'] != size or sha(p) != spec.get('sha256'):
                 raise PlatformError('firmware payload hash/size mismatch: ' + name)
-    payload_ok(directory)
+    payload_ok(directory, profile=NET_PROFILE if network else PROFILE)
+    ids=set(re.findall(rb'xenova-build:(sha256:[0-9a-f]{64})',asset(directory,'zephyr.bin').read_bytes()))
+    if len(ids)>1 or (ids and source.get('build_id') != next(iter(ids)).decode('ascii')):
+        raise PlatformError('firmware embedded build identity/manifest mismatch')
     if manifest == 'firmware.json' and not re.search(
             r'^#define KERNEL_VERSION_STRING\s+"4\.4\.0"\s*$', asset(directory, 'zephyr.version.h').read_text(), re.M):
         raise PlatformError('firmware build version header must declare Zephyr 4.4.0')
     return {'manifest': manifest, 'revision': digest, 'version': version,
             'sha256': meta['files']['zephyr.bin']['sha256'], 'source': source,
-            'logical_bytes': total, 'payloads': sorted(payloads)}
+            'logical_bytes': total, 'payloads': sorted(payloads),
+            **({'hardware_profile':NET_PROFILE, 'capabilities':NET_CAPABILITIES} if network else {})}
 
 
 def active_directory(directory, record):
@@ -161,9 +188,11 @@ def active_directory(directory, record):
 
 
 def validate_instance(record, directory):
+    network = networked(record)
     if (record.get('schema') != 2 or record.get('guest_kind') != 'zephyr'
-            or record.get('hardware_profile') != PROFILE or record.get('capabilities') != CAPABILITIES
-            or record.get('shutdown_policy') != 'explicit-force'
+            or record.get('hardware_profile') != (NET_PROFILE if network else PROFILE)
+            or record.get('capabilities') != (NET_CAPABILITIES if network else CAPABILITIES)
+            or record.get('shutdown_policy') != ('cooperative-xenstore' if network else 'explicit-force')
             or type(record.get('memory_mib')) is not int or record['memory_mib'] != 16
             or type(record.get('vcpus')) is not int or record['vcpus'] != 1):
         raise PlatformError('invalid persistent Zephyr profile/capabilities/resources')
@@ -172,6 +201,8 @@ def validate_instance(record, directory):
             or not DIGEST.fullmatch(origin.get('manifest_sha256', '')) or not isinstance(origin.get('source'), dict)):
         raise PlatformError('invalid Zephyr creation origin')
     info = bundle_info(active_directory(directory, record), record['active_firmware']['revision'])
+    if network != ('hardware_profile' in info):
+        raise PlatformError('active firmware/profile capability mismatch')
     if record['active_firmware'] != {k: info[k] for k in ('manifest', 'revision', 'version', 'sha256')}:
         raise PlatformError('active firmware metadata/hash mismatch')
     return record
@@ -202,7 +233,7 @@ def copy_revision(source, parent, expected):
 
 def new_instance(data, key, template, records, *, autostart=False, board_shutdown_policy='refuse', registry='instances', seed=False, identity=None, workspace_path=None, metadata=None):
     """신규 인스턴스만 생성한다. seed는 새 조립 저장소에서만 호출한다."""
-    if board_shutdown_policy not in ('refuse', 'force-allowed'):
+    if board_shutdown_policy not in ('graceful', 'refuse', 'force-allowed'):
         raise PlatformError('invalid Zephyr board shutdown policy')
     data, template = Path(data), plain(template)
     if not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', key) or key in records:
@@ -218,14 +249,19 @@ def new_instance(data, key, template, records, *, autostart=False, board_shutdow
     identity = identity or uuid4()
     if any(r['uuid'] == identity or r['name'] == key for r in records.values()):
         raise PlatformError('new instance UUID/name conflicts with registry')
+    network = 'hardware_profile' in info
     record = {'schema': 2, 'guest_kind': 'zephyr', 'id': key, 'name': key, 'uuid': identity,
               'template': meta['id'], 'autostart': bool(autostart), 'memory_mib': 16, 'vcpus': 1,
-              'hardware_profile': copy.deepcopy(PROFILE), 'capabilities': dict(CAPABILITIES),
-              'shutdown_policy': 'explicit-force', 'board_shutdown_policy': board_shutdown_policy,
+              'hardware_profile': copy.deepcopy(NET_PROFILE if network else PROFILE), 'capabilities': dict(NET_CAPABILITIES if network else CAPABILITIES),
+              'shutdown_policy': 'cooperative-xenstore' if network else 'explicit-force', 'board_shutdown_policy': board_shutdown_policy,
               'creation_origin': {'template': meta['id'], 'manifest_sha256': info['revision'], 'source': info['source']},
               'active_firmware': {k: info[k] for k in ('manifest', 'revision', 'version', 'sha256')}}
     if metadata:
         record.update(metadata)
+    if network and not all(record.get(k) for k in ('mac','ipv4','hostname')):
+        raise PlatformError('network firmware requires platform-assigned MAC/IP/hostname')
+    if not network and board_shutdown_policy == 'graceful':
+        raise PlatformError('legacy Starter has no cooperative shutdown')
     if seed:
         record.update(uuid='00000000-0000-4000-8000-000000000000', identity_state='pending')
     staging = Path(workspace_path) if workspace_path is not None else data / registry / ('.preparing-' + uuid4())
@@ -254,8 +290,15 @@ def replace_firmware(directory, record, source, expected):
     return updated
 
 
-def config(record, directory):
+def _config(record, directory):
     kernel = active_directory(directory, record) / 'zephyr.bin'
     return '\n'.join([f"name = '{record['name']}'", f"uuid = '{record['uuid']}'",
                       f"kernel = '{kernel}'", 'vcpus = 1', 'memory = 16', "gic_version = 'v2'",
-                      "on_poweroff = 'destroy'", "on_reboot = 'destroy'", "on_crash = 'preserve'", ''])
+                      "on_poweroff = 'destroy'", "on_reboot = 'destroy'", "on_crash = 'preserve'",
+                      *([f"vif = [ 'mac={record['mac']},bridge=xenbr0,script=vif-bridge' ]"] if networked(record) else []), ''])
+
+
+def config(record, directory, *, cpu_context=None):
+    """CPU placement is separate from the unchanged RAM/GIC/firmware profile."""
+    from xenova_cpu import affinity_text
+    return _config(record, directory)+"\n"+affinity_text(cpu_context)

@@ -1,26 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 mainmenu "Xenova manual drive app"
 
-config XENOVA_MANUAL_BROKER_HOST
-	string "MQTT broker IPv4 address"
-	default "192.168.77.1"
-	help
-	  dom0 Mosquitto on xenbr0 (same default as the VM agent).
-
-config XENOVA_MANUAL_BROKER_PORT
-	int "MQTT broker port"
-	default 1883
-
-config XENOVA_MANUAL_BROKER_USERNAME
-	string "Broker username (ACL username = app_id)"
-	default "manual"
-
-config XENOVA_MANUAL_BROKER_PASSWORD
-	string "Broker password (injected at template build)"
-	default ""
-
-config XENOVA_MANUAL_VM_ID
-	string "vm_id fallback when XenStore cannot be read (design D5)"
-	default "00000000-0000-4000-8000-000000000000"
-
+# Identity and separate app/Telemetry credentials are provisioned per execution.
 source "Kconfig.zephyr"

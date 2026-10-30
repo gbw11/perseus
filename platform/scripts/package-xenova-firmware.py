@@ -27,12 +27,14 @@ def main(argv=None):
     parser.add_argument('--build-id', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--app-source', type=Path, help='application source files to fingerprint; no build or source changes')
+    parser.add_argument('--networked', action='store_true', help='validated existing netfront/cooperative 16MiB profile')
     parser.add_argument('--template-id', help='publish a new catalog entry for the pinned Starter App')
     parser.add_argument('--template-version', help='catalog deployment version; distinct from application firmware version')
     parser.add_argument('--execute', action='store_true')
     args = parser.parse_args(argv)
     zephyr.plain(args.build_dir)
-    zephyr.payload_ok(args.build_dir, config_name='.config')
+    profile = zephyr.NET_PROFILE if args.networked else zephyr.PROFILE
+    zephyr.payload_ok(args.build_dir, config_name='.config', profile=profile)
     version_header = zephyr.asset(args.build_dir / 'include/generated/zephyr', 'version.h')
     if not re.search(r'^#define KERNEL_VERSION_STRING\s+"4\.4\.0"\s*$', version_header.read_text(), re.M):
         raise ValueError('completed build must use fixed Zephyr 4.4.0')
@@ -44,7 +46,7 @@ def main(argv=None):
     meta = {'schema': 1, 'guest_kind': 'zephyr', 'version': args.version,
             'source': {'zephyr_version': '4.4.0', 'app': args.app,
                        'source_revision': args.source_revision, 'build_id': args.build_id},
-            'hardware_profile': zephyr.PROFILE, 'capabilities': zephyr.CAPABILITIES}
+            'hardware_profile': profile, 'capabilities': zephyr.NET_CAPABILITIES if args.networked else zephyr.CAPABILITIES}
     if not all(value.strip() for value in meta['source'].values()):
         raise ValueError('firmware provenance values must not be empty')
     if args.app_source is not None:
@@ -63,6 +65,8 @@ def main(argv=None):
         meta['source']['app_files'] = fingerprints
         meta['source']['app_source_sha256'] = hashlib.sha256(json.dumps(fingerprints, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     if args.template_id is not None:
+        if args.networked:
+            raise ValueError('networked application candidate is not the pinned legacy Starter catalog publication')
         lock = json.loads((ROOT / 'platform/guests/zephyr/starter.lock.json').read_text())
         if (args.template_id != lock['id'] or args.version != lock['version'] or args.app != lock['app']
                 or meta['source'].get('app_files') != lock['app_files']
@@ -99,7 +103,17 @@ def main(argv=None):
     stage.mkdir(mode=0o700)
     sources = {name: args.build_dir / name for name in ('zephyr.bin', 'zephyr.elf', 'zephyr.dts')}
     sources.update({'zephyr.version.h': version_header, 'zephyr.config': args.build_dir / '.config', 'LICENSE': args.license,
-                    'xen.cfg.in': ROOT / 'platform/guests/zephyr/xen.cfg.in'})
+                    'xen.cfg.in': ROOT / ('platform/guests/zephyr/network-xen.cfg.in' if args.networked else
+                                         'platform/guests/zephyr/xen.cfg.in')})
+    if args.networked:
+        sources.update({'zephyr.map': args.build_dir / 'zephyr.map',
+                        'XEN-ABI-LICENSE': ROOT / 'platform/guests/zephyr/xen-store/LICENSES/MIT-Xen'})
+    # The linked Publisher carries a pre-link input digest, not a self hash.
+    build_ids=set(re.findall(rb'xenova-build:(sha256:[0-9a-f]{64})',sources['zephyr.bin'].read_bytes()))
+    if len(build_ids)>1:
+        raise ValueError('ambiguous embedded build identity')
+    if build_ids:
+        meta['source']['build_id']=next(iter(build_ids)).decode('ascii')
     meta['files'] = {}
     for name, source in sources.items():
         if source.is_symlink() or not source.is_file():

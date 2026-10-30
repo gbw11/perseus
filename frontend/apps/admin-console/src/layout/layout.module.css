@@ -1,0 +1,172 @@
+.logo {
+  display: block;
+  height: 24px;
+  width: auto;
+}
+.brandLink {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-3);
+  color: inherit;
+  text-decoration: none;
+}
+.brandLink:focus-visible {
+  border-radius: var(--x-radius-sm);
+  outline: 2px solid var(--x-primary);
+  outline-offset: 4px;
+}
+.brandText {
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--x-text-muted);
+}
+.user {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-2);
+  padding: 4px 10px;
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-sm);
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--x-primary);
+  color: var(--x-primary-text);
+  font-weight: 800;
+}
+.dashboardSection {
+  display: grid;
+  gap: var(--x-space-4);
+  max-width: 1600px;
+  margin: 0 auto;
+}
+.dashboardHead {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--x-space-4);
+}
+.dashboardHead h1 {
+  margin: 2px 0 0;
+  font-size: var(--x-text-xl);
+}
+.dashboardHead p {
+  margin: var(--x-space-1) 0 0;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.sectionEyebrow {
+  color: var(--x-primary);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.dashboardTabs {
+  display: flex;
+  gap: var(--x-space-1);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--x-border);
+}
+.dashboardTabs a {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-bottom: 2px solid transparent;
+  color: var(--x-text-muted);
+  font-weight: 700;
+  text-decoration: none;
+}
+.dashboardTabs a:hover {
+  color: var(--x-text);
+}
+.dashboardTabs a[aria-current='page'] {
+  border-bottom-color: var(--x-primary);
+  color: var(--x-primary);
+}
+.dashboardTabs a:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--x-primary) 7%, transparent);
+  box-shadow: inset 0 -2px var(--x-primary);
+  color: var(--x-primary);
+}
+.dashboardBody {
+  min-width: 0;
+}
+.sep {
+  color: var(--x-border);
+}
+.spacer {
+  flex: 1;
+}
+.dim {
+  color: var(--x-text-muted);
+  font-weight: 500;
+}
+.ok {
+  color: var(--x-ok);
+}
+.warn {
+  color: var(--x-recovering);
+}
+.fault {
+  color: var(--x-fault);
+}
+.countdown {
+  position: fixed;
+  top: 128px;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-4);
+  padding: var(--x-space-3) var(--x-space-5);
+  transform: translateX(-50%);
+  border: 1px solid var(--x-app-autonomous);
+  border-radius: var(--x-radius);
+  background: var(--x-surface-3);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 0.45);
+}
+.countdownLabel {
+  font-size: var(--x-text-lg);
+  font-weight: 700;
+}
+.countdownNumber {
+  min-width: 1.2em;
+  font-family: var(--x-font-mono);
+  font-size: 48px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  color: var(--x-app-autonomous);
+  animation: tick 1s ease-out;
+}
+.countdownHint {
+  max-width: 14em;
+  font-size: var(--x-text-xs);
+  color: var(--x-text-muted);
+}
+@keyframes tick {
+  from {
+    transform: scale(1.6);
+    opacity: 0.3;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1080px) {
+  .brandText,
+  .user {
+    display: none;
+  }
+}

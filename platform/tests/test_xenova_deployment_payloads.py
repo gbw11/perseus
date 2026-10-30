@@ -3,6 +3,7 @@ import json
 import re
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -57,6 +58,8 @@ class DeploymentPayloadTest(unittest.TestCase):
         for setting in ("XENOVA_DRIVER=platform","XENOVA_HOST=127.0.0.1","XENOVA_PORT=8081"):
             self.assertIn(setting,env)
         self.assertNotIn("XENOVA_SERVICE_TOKEN=",env)
+        self.assertEqual(stat.S_IMODE((self.root/"etc/xenova/dom0-manager.env").stat().st_mode),0o600)
+        self.assertIn("dom0_manager.service_token",(self.root/"usr/lib/systemd/system/xenova-dom0-manager.service").read_text())
         self.assertFalse(list(self.root.rglob("test_*.py")))
         self.assertTrue((self.root/"usr/lib/python3.14/site-packages/xenova_mqtt/__init__.py").is_file())
         self.assertFalse((self.root/"usr/lib/python3.14/site-packages/perseus_mqtt").exists())
@@ -124,12 +127,33 @@ class DeploymentPayloadTest(unittest.TestCase):
         value=json.loads(cap.read_text());value.pop("dom0_api");cap.write_text(json.dumps(value))
         with self.assertRaisesRegex(ValueError,"capabilities"):assemble.platform_root_ok(self.root)
 
+    def test_gate_rejects_missing_worker_enable_and_shared_secret(self):
+        platform_root(self.root)
+        link=self.root/"etc/systemd/system/multi-user.target.wants/xenova-recovery-worker.service"
+        link.unlink()
+        with self.assertRaisesRegex(ValueError,"not enabled"):assemble.platform_root_ok(self.root)
+        link.symlink_to("/usr/lib/systemd/system/xenova-recovery-worker.service")
+        (self.root/"etc/xenova/dom0-manager-token.env").write_text("private board token sentinel")
+        with self.assertRaisesRegex(ValueError,"board service token"):assemble.platform_root_ok(self.root)
+
+    def test_gate_rejects_world_readable_environment(self):
+        platform_root(self.root)
+        (self.root/"etc/xenova/dom0-manager.env").chmod(0o644)
+        with self.assertRaisesRegex(ValueError,"root-only"):assemble.platform_root_ok(self.root)
+
     def test_real_259_loader_accepts_service_and_detects_injected_cycle(self):
         self.root.mkdir();extract(self.root);install_policy(self.root,replay_recipe=True)
         unit=self.root/"usr/lib/systemd/system/xenova-dom0-manager.service"
         unit.write_bytes((payloads.RECIPES/"xenova-dom0-manager/files"/unit.name).read_bytes())
         python=self.root/"usr/bin/python3";python.write_text("#!/bin/sh\nexit 0\n");python.chmod(0o755)
-        normal=verify(self.root,unit.name)
+        worker=self.root/"usr/lib/systemd/system/xenova-recovery-worker.service"
+        worker.write_bytes((payloads.API/"deploy"/worker.name).read_bytes())
+        self.assertNotIn("network-online.target",worker.read_text())
+        self.assertIn("network.target",worker.read_text())
+        self.assertIn("ReadWritePaths=/srv/xenova /run/xenova /var/lib/xen",worker.read_text())
+        for source in (payloads.RECIPES/"xenova-platform/files").glob("*.service"):
+            (self.root/"usr/lib/systemd/system"/source.name).write_bytes(source.read_bytes())
+        normal=verify(self.root,unit.name,worker.name)
         self.assertEqual(normal.returncode,0,normal.stdout+normal.stderr)
         for text in ("Found ordering cycle","deleted to break ordering cycle","Ordering cycle found, skipping"):
             self.assertNotIn(text,normal.stdout+normal.stderr)

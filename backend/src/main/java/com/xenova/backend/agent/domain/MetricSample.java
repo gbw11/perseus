@@ -12,8 +12,8 @@ import java.util.List;
 
 // One metrics report from a VM (MQTT-03). The message_id becomes sample_id so redelivered messages are dropped.
 @Entity
-@Table(name = "metric_samples",
-        indexes = @Index(name = "idx_metric_samples_vm_observed", columnList = "vm_id, observed_at"))
+@Table(name = "vm_metric_samples",
+        indexes = @Index(name = "idx_vm_metric_samples_vm_observed", columnList = "vm_id, observed_at"))
 public class MetricSample {
 
     @Id
@@ -40,7 +40,7 @@ public class MetricSample {
 
     @Lob
     @Convert(converter = MetricValuesConverter.class)
-    @Column(name = "metric_values")
+    @Column(name = "metric_values", columnDefinition = "longtext")
     private List<MetricValue> values;
 
     protected MetricSample() {

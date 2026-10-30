@@ -1,0 +1,182 @@
+{
+  "architecture": "aarch64",
+  "python": "3.14.7",
+  "programs": {
+    "python3": "/usr/bin/python3",
+    "pip3": null,
+    "Xorg": null,
+    "Xwayland": null,
+    "weston": null,
+    "chromium": null,
+    "chromium-browser": null,
+    "ffmpeg": null,
+    "ffprobe": null,
+    "xrandr": null,
+    "xauth": null,
+    "openbox": null,
+    "systemctl": "/usr/bin/systemctl",
+    "opkg": null,
+    "rpm": null,
+    "dpkg": null,
+    "node": null
+  },
+  "modules": {
+    "fastapi": true,
+    "uvicorn": true,
+    "pydantic": true,
+    "playwright": false,
+    "paho": true,
+    "xenova_display": false,
+    "dom0_manager": true,
+    "xenova_mqtt": true
+  },
+  "os": "ID=poky\nNAME=\"Poky (Yocto Project Reference Distro)\"\nVERSION=\"6.0.4 (wrynose)\"\nVERSION_ID=6.0.4\nVERSION_CODENAME=\"wrynose\"\nPRETTY_NAME=\"Poky (Yocto Project Reference Distro) 6.0.4 (wrynose)\"\nCPE_NAME=\"cpe:/o:openembedded:poky:6.0.4\"\n",
+  "disk": {
+    "code": 0,
+    "stdout": "Filesystem      Size  Used Avail Use% Mounted on\n/dev/root       4.0G  714M  3.0G  19% /\ntmpfs           457M     0  457M   0% /tmp\n/dev/root       4.0G  714M  3.0G  19% /",
+    "stderr": ""
+  },
+  "x_sockets": [],
+  "runtime_directories": [],
+  "graphics_processes": {
+    "code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "listeners": {
+    "code": 0,
+    "stdout": "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\nLISTEN 0      128          0.0.0.0:22        0.0.0.0:*   \nLISTEN 0      2048       127.0.0.1:8081      0.0.0.0:*   \nLISTEN 0      128             [::]:22           [::]:*",
+    "stderr": ""
+  },
+  "drm": [],
+  "xen": {
+    "code": 0,
+    "stdout": "Name                                        ID   Mem VCPUs\tState\tTime(s)\nDomain-0                                     0  1024     4     r-----    2078.6\ndebian-dev                                   1   512     1     -b----     196.2\nzephyr-drive-a                               2    16     1     -b----      79.9\nzephyr-drive-b                               3    16     1     -b----      80.0",
+    "stderr": ""
+  },
+  "services": {
+    "code": 0,
+    "stdout": "  dev-disk-by\\x2dlabel-xenova\\x2ddata.device                                                                              loaded    active   plugged   /dev/disk/by-label/xenova-data\n  dev-disk-by\\x2dpath-platform\\x2dfe340000.mmc\\x2dpart-by\\x2dlabel-xenova\\x2ddata.device                                  loaded    active   plugged   /dev/disk/by-path/platform-fe340000.mmc-part/by-label/xenova-data",
+    "stderr": ""
+  },
+  "display_files": [
+    "/opt/xenova",
+    "/opt/xenova-display-probe",
+    "/usr/lib/systemd/system/xenova-first-boot.service",
+    "/usr/lib/systemd/system/xenova-dhcp.service",
+    "/usr/lib/systemd/system/xenova-cpu-prepare.service",
+    "/usr/lib/systemd/system/xenova-bridge.service",
+    "/usr/lib/systemd/system/xenova-host-admission.service",
+    "/usr/lib/systemd/system/srv-xenova.mount",
+    "/usr/lib/systemd/system/xenova-wifi@.service",
+    "/usr/lib/systemd/system/xenova-dom0-manager.service",
+    "/usr/lib/systemd/system/xenova-vms.service",
+    "/usr/lib/systemd/system/xenova-console@.service",
+    "/usr/lib/systemd/system/xenova-recovery-worker.service",
+    "/usr/lib/systemd/system/xenova-data-prepare.service",
+    "/usr/lib/systemd/system/xenova-boot-status.service",
+    "/usr/lib/systemd/system/xenova-xen-ready.service",
+    "/usr/lib/systemd/system/xenova-vm-shutdown.service"
+  ],
+  "observed_at": "2026-10-27T08:20:31.531247+00:00",
+  "framebuffers": [
+    {
+      "name": "fb1",
+      "attributes": {
+        "name": "simple",
+        "virtual_size": "1824,984",
+        "bits_per_pixel": "32",
+        "stride": "7296",
+        "modes": "U:1824x984p-0",
+        "mode": "",
+        "blank": "0",
+        "console": ""
+      },
+      "driver": "/sys/bus/platform/drivers/simple-framebuffer"
+    },
+    {
+      "name": "fb0",
+      "attributes": {
+        "name": "BCM2708 FB",
+        "virtual_size": "1824,984",
+        "bits_per_pixel": "32",
+        "stride": "7296",
+        "modes": "U:1824x984p-0",
+        "mode": "",
+        "blank": "4",
+        "console": ""
+      },
+      "driver": "/sys/bus/platform/drivers/bcm2708_fb"
+    },
+    {
+      "name": "fbcon",
+      "attributes": {
+        "name": null,
+        "virtual_size": null,
+        "bits_per_pixel": null,
+        "stride": null,
+        "modes": null,
+        "mode": null,
+        "blank": null,
+        "console": null
+      },
+      "driver": null
+    }
+  ],
+  "device_nodes": [
+    "/dev/fb1",
+    "/dev/fb0",
+    "/dev/vchiq"
+  ],
+  "proc_fb": "0 BCM2708 FB\n1 simple",
+  "loaded_graphics_modules": [],
+  "filtered_kernel_cmdline": [
+    "console=hvc0"
+  ],
+  "vt_bindings": [
+    {
+      "name": "vtcon0",
+      "driver": "(S) dummy device",
+      "bound": "0"
+    },
+    {
+      "name": "vtcon1",
+      "driver": "(M) frame buffer device",
+      "bound": "1"
+    }
+  ],
+  "graphics_platform_drivers": [
+    "vc4_dpi",
+    "vc4_v3d",
+    "vc4_txp",
+    "bcm2708_fb",
+    "vc4_crtc",
+    "vc4_vec",
+    "vc4_hvs",
+    "vc4-drm",
+    "vc4_hdmi",
+    "hdmi-audio-codec",
+    "vc4_firmware_kms",
+    "vc4_dsi"
+  ],
+  "boot_graphics_configuration": {
+    "/boot/config.txt": [
+      "dtoverlay=vc4-kms-v3d"
+    ]
+  },
+  "graphics_kernel_messages": {
+    "code": 0,
+    "lines": []
+  },
+  "graphics_binaries_outside_path": [],
+  "kernel_config_graphics": {},
+  "changes": {
+    "board_files_written": false,
+    "framebuffer_written": false,
+    "vt_changed": false,
+    "module_loaded": false,
+    "packages_installed": false,
+    "service_restarted": false,
+    "vm_changed": false
+  }
+}

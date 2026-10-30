@@ -1,0 +1,19 @@
+[Unit]
+Description=Xenova private source-scoped execution log receiver
+After=network.target
+[Service]
+Type=simple
+EnvironmentFile=/etc/xenova/runtime-logs/ingest.env
+ExecStart=@PYTHON@ -m dom0_manager.log_ingest_app
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+StateDirectory=xenova-runtime-logs
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/xenova-runtime-logs
+[Install]
+WantedBy=multi-user.target

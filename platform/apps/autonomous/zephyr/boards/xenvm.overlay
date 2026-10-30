@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Match the Xen event PPI level trigger in this separate G1 trial. */
+#include <zephyr/dt-bindings/interrupt-controller/arm-gic.h>
+
+&hypervisor {
+	interrupts = <GIC_PPI 0x0f IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+};
+
+/ { chosen { zephyr,shell-uart = &xen_hvc; }; };

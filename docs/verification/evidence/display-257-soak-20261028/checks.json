@@ -1,0 +1,46 @@
+{
+  "stability_checks": {
+    "both_phases_completed": true,
+    "total_receive_10min": true,
+    "no_receiver_frame_gaps_over_1s": true,
+    "no_skipped_sequences": true,
+    "no_sampling_errors": true,
+    "single_encoder_epoch_each": true,
+    "no_observed_unavailable_capture": true,
+    "stale_frames_withheld": true,
+    "original_pixels_restored": true,
+    "clean_postflight": true
+  },
+  "all_stability_checks_passed": false,
+  "performance_accepted": false,
+  "performance_limits": [
+    "single physical 1824x984 source, not dual 1280x720",
+    "Python combined plus encoder weighted CPU about 2.29 cores; includes diagnostic overhead",
+    "end-to-end display latency and sustained browser decode not measured",
+    "Terminal infotainment frame is black despite live transport; idle blanking under investigation"
+  ],
+  "source_sha256": "b3566dba90f50a109200cbca97d9531862954e639b993d8f710a51883af31a61",
+  "files_sha256": {
+    "blank-active.jpg": "472ec46fb54710885edc2e8f37896c38ef0cbb6ff3aa414975c857351856d5a2",
+    "blank-before.jpg": "2065af35d1e20e6785dd40e585c5728725595fa88a4c773cc75c130b02cad49d",
+    "blank-diagnostic.json": "449cb67449de7579b248437c1ba8c3d23c060c08f6dd711a4a6e28fa44f1aa6b",
+    "blank-reset.jpg": "2065af35d1e20e6785dd40e585c5728725595fa88a4c773cc75c130b02cad49d",
+    "monitor-1-first.jpg": "e33df30a7e08a22ac79cb842592e9606745f89a5a8308cd7a5081bbab9a55d66",
+    "monitor-1-last.jpg": "e33df30a7e08a22ac79cb842592e9606745f89a5a8308cd7a5081bbab9a55d66",
+    "monitor-2-first.jpg": "555d0af2b4b3ce3ba54626d4ccca37d9111f1130e74c6d4de0906016a093630c",
+    "monitor-2-last.jpg": "6cfa346c112d28d1ead17d58029ed8377aa100864aedea36f7818d081d15de39",
+    "postflight-after-diagnostic.json": "fe5b3a83ce75e60fed9f2085df7adee03888af43c8b1620c134140f35621b2f1",
+    "postflight.json": "f0a0ad0af95ffea295c1f9e12df8d4bc73401454570d09b9dde48722c9daff62",
+    "remote-source.py.gz": "2f1b10ee7d1eda0f80a71e6bd8199a2c01aad57e7d9e02865e359b6f9d0dfa81",
+    "samples.json.gz": "b4da5dfb62e05df2a7cff7060fda48408de7a6d437dabfdb93ec8c4f17c6b1df",
+    "summary.json": "dcdba17d9b54767e81b39023be2bda736a7170bd511e680565ae2ffe467e6afa",
+    "visual-review.json": "30f25831eb9105dbfd3ee9c7b4ee638beaac221f9edd68e4b7828396b08a93dd"
+  },
+  "all_transport_checks_passed": true,
+  "visual_checks": {
+    "final_infotainment_screen_visible": false,
+    "black_reproduced_by_screen_saver": true,
+    "ui_returned_after_reset": true
+  },
+  "visual_acceptance_passed": false
+}

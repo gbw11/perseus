@@ -10,6 +10,8 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "websockets>=14",
+    "xenova-mqtt>=0.1.0",
 ]
 
 [project.optional-dependencies]

@@ -114,6 +114,16 @@ class LifecycleTest(unittest.TestCase):
         self.base = Path(self.temp.name)
         self.r = record()
         self.directory = fixture(self.base, self.r)
+        (self.base / '.xenova-storage.json').write_text(json.dumps(
+            {'schema':1, 'uuid':'12345678-1234-4234-8234-123456789abc'}))
+        mountinfo = self.base / 'mountinfo'
+        mountinfo.write_text(f'1 0 8:3 / {self.base} rw - ext4 /dev/fixture rw\n')
+        # Direct start now rechecks the real registry at its physical guard. Supply
+        # the small fixture's mount evidence while retaining storage_check logic.
+        real_storage_check = vm.storage_check
+        storage = patch.object(vm, 'storage_check', side_effect=lambda data: real_storage_check(data, mountinfo))
+        storage.start()
+        self.addCleanup(storage.stop)
         self.records = {self.r['id']: self.r}
         self.runner = FakeXen(self.base, self.records)
         self.ticks = 0
@@ -387,6 +397,12 @@ class GuestPreparationTest(unittest.TestCase):
         startup = (FILES / 'xenova-vms.service').read_text()
         shutdown = (FILES / 'xenova-vm-shutdown.service').read_text()
         self.assertIn('Restart=no', startup)
+        self.assertIn('ExecStop=/usr/sbin/xenova-vm shutdown-all', startup)
+        self.assertIn('TimeoutStopSec=110s', startup)
+        # Startup owns the libxl/qdisk cgroup; its ExecStop precedes systemd cleanup.
+        self.assertNotIn('KillMode=none', startup)
+        after=next(line for line in shutdown.splitlines() if line.startswith('After='))
+        self.assertIn('xen-qemu-dom0-disk-backend.service',after.split())
         self.assertIn('xenova-vm-shutdown.service', startup)
         self.assertIn('ExecStart=/bin/true', shutdown)
         self.assertIn('ExecStop=/usr/sbin/xenova-vm shutdown-all', shutdown)

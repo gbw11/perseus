@@ -1,0 +1,266 @@
+{
+  "branch": "feat/platform/S15P31E110-252-board-render-check",
+  "web_sha256": "49b1057ea4ac87a518fa0e3d5ef2c025ce2961fa12b3a50a6e64002c0e99f5a2",
+  "backend_source": "252 worktree based on platform ef79127",
+  "all_cases_passed": true,
+  "case_count": 13,
+  "output_checks": 26,
+  "cases": [
+    {
+      "case": "normal",
+      "synthetic": true,
+      "elapsed_s": 1.162,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "paused",
+      "synthetic": true,
+      "elapsed_s": 1.136,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "normal",
+      "synthetic": true,
+      "elapsed_s": 1.143,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "stopped",
+      "synthetic": true,
+      "elapsed_s": 0.921,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "normal",
+      "synthetic": true,
+      "elapsed_s": 0.831,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "operation",
+      "synthetic": true,
+      "elapsed_s": 0.863,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "normal",
+      "synthetic": true,
+      "elapsed_s": 1.182,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "waiting",
+      "synthetic": true,
+      "elapsed_s": 0.894,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "normal",
+      "synthetic": true,
+      "elapsed_s": 0.977,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "xen_stale",
+      "synthetic": true,
+      "elapsed_s": 1.232,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "normal",
+      "synthetic": true,
+      "elapsed_s": 0.886,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "http503",
+      "synthetic": true,
+      "elapsed_s": 0.824,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    },
+    {
+      "case": "normal",
+      "synthetic": true,
+      "elapsed_s": 0.863,
+      "outputs": {
+        "1": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        },
+        "2": {
+          "passed": true,
+          "expected_status": true,
+          "geometry": true,
+          "sensors_not_fabricated": true
+        }
+      }
+    }
+  ],
+  "synthetic_statuses": true,
+  "actual_guest_or_drive_mutation": false,
+  "real_two_hdmi": true,
+  "framebuffer_exact_restore": false,
+  "restoration_differing_bytes": 32,
+  "restored_active_vt": 1,
+  "feed_stopped": true,
+  "unit_tests_passed": 30,
+  "build_typecheck_eslint_passed": true
+}

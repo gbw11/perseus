@@ -1,23 +1,30 @@
-import { Button, Card, StatusBadge, useToast } from '@xenova/ui';
-import { Link } from 'react-router';
+import { Button, Card, Modal, StatusBadge, useToast } from '@xenova/ui';
+import { useState, type CSSProperties } from 'react';
+import { useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVmAction, useVms, type VmAction } from '../api/queries';
-import { AGENT_LABEL, GUEST_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
+import type { Vm } from '../api/types';
+import { osLabel } from '../domain/roles';
+import { STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
 
-/** 기본형 — 목록·조작 흐름 확인용. 배포판별 카드 화면은 S15P31E110-55 */
+const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
+
+/** VM 생명주기와 할당 자원을 관리하는 목록. 주행 모드·제어권은 Overview에서만 다룬다. */
 export function VmListPage() {
-  const vms = useVms();
+  const vms = useVms(1000);
   const action = useVmAction();
   const toast = useToast();
+  const navigate = useNavigate();
+  const [deleting, setDeleting] = useState<Vm | null>(null);
 
-  const run = (vmId: string, name: string, kind: VmAction) =>
+  const run = (vm: Vm, kind: VmAction) =>
     action.mutate(
-      { vmId, action: kind },
+      { vmId: vm.vm_id, action: kind },
       {
         onSuccess: () =>
           toast.show(
-            `${name}: ${kind === 'start' ? '시작' : kind === 'stop' ? '정지' : '삭제'} 요청 완료`,
+            `${vm.name}: ${kind === 'start' ? '시작' : kind === 'stop' ? '정지' : '삭제'} 요청 완료`,
             'ok',
           ),
         onError: (error) =>
@@ -25,80 +32,179 @@ export function VmListPage() {
       },
     );
 
+  const items = vms.data?.items ?? [];
+  const running = items.filter((vm) => vm.state === 'running').length;
+  const vcpus = items.reduce((sum, vm) => sum + vm.vcpus, 0);
+  const memory = items.reduce((sum, vm) => sum + vm.memory_mib, 0);
+
   return (
-    <Card
-      title="VM 목록"
-      actions={
-        <span className={styles.dim}>
-          {vms.data ? `관측 ${new Date(vms.data.observed_at).toLocaleTimeString()}` : ''}
-        </span>
-      }
-    >
-      {vms.isPending && <p className={styles.dim}>불러오는 중…</p>}
+    <div className={styles.controlPage}>
+      <header className={styles.contentHeading}>
+        <div>
+          <span className={styles.contentEyebrow}>VM CONTROL</span>
+          <h2>VM Management</h2>
+          <p className={styles.headingDescription}>VM 생성과 생명주기, 할당 자원을 관리합니다.</p>
+        </div>
+        <div className={styles.controlHeadingActions}>
+          {vms.data && <ObservedClock at={vms.dataUpdatedAt} />}
+          <Button onClick={() => navigate('/control/vms/new')}>+ VM 생성</Button>
+        </div>
+      </header>
+
+      <section className={styles.controlSummary} aria-label="VM 자원 요약">
+        <SummaryItem label="TOTAL VMS" value={`${items.length}대`} />
+        <SummaryItem label="RUNNING" value={`${running}대`} tone="ok" />
+        <SummaryItem label="ALLOCATED VCPU" value={`${vcpus} / 4 cores`} />
+        <SummaryItem label="ALLOCATED MEMORY" value={`${memory} MiB`} />
+      </section>
+
       {vms.error && (
-        <p className={styles.error} role="alert">
+        <div className={styles.statePanel} role="alert">
           {vms.error instanceof ApiError ? `${vms.error.message} (${vms.error.code})` : String(vms.error)}
-        </p>
+        </div>
       )}
-      {vms.data && (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>이름</th>
-              <th>종류</th>
-              <th>상태</th>
-              <th>에이전트</th>
-              <th>IP</th>
-              <th>자원</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {vms.data.items.map((vm) => (
-              <tr key={vm.vm_id}>
-                <td>
-                  <Link to={`/vms/${vm.vm_id}`}>{vm.name}</Link>
-                </td>
-                <td>
-                  {GUEST_LABEL[vm.guest_kind]} · {vm.template_id}
-                </td>
-                <td>
+      {vms.isPending && <div className={styles.statePanel}>VM 목록을 불러오는 중입니다…</div>}
+      {vms.data && items.length === 0 && (
+        <div className={styles.controlEmpty}>
+          <strong>등록된 VM이 없습니다.</strong>
+          <span>새 VM을 생성해 관리 목록에 추가할 수 있습니다.</span>
+          <Button onClick={() => navigate('/control/vms/new')}>VM 생성</Button>
+        </div>
+      )}
+
+      <div className={styles.controlGrid}>
+        {items.map((vm, index) => {
+          const accent = VM_ACCENTS[index % VM_ACCENTS.length];
+          const zephyr = vm.guest_kind === 'zephyr';
+          return (
+            <Card
+              key={vm.vm_id}
+              className={`${styles.controlVmCard} ${styles.clickCard}`}
+              style={{ '--vm-accent': accent } as CSSProperties}
+              role="link"
+              tabIndex={0}
+              aria-label={`${vm.name} 상세`}
+              onClick={() => navigate(`/control/vms/${vm.vm_id}`)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && event.target === event.currentTarget) {
+                  navigate(`/control/vms/${vm.vm_id}`);
+                }
+              }}
+            >
+              <div className={styles.controlCardBody}>
+                <div className={styles.controlCardTop}>
+                  <div>
+                    <span className={styles.controlCardKicker}>VIRTUAL MACHINE</span>
+                    <h3>{vm.name}</h3>
+                    <p>{osLabel(vm)}</p>
+                  </div>
                   <StatusBadge health={STATE_HEALTH[vm.state]} label={STATE_LABEL[vm.state]} size="sm" />
-                </td>
-                <td>{vm.agent_status ? AGENT_LABEL[vm.agent_status] : '—'}</td>
-                <td className={styles.mono}>{vm.ipv4 ?? '—'}</td>
-                <td className={styles.mono}>
-                  {vm.vcpus} vCPU · {vm.memory_mib} MiB
-                </td>
-                <td className={styles.rowActions}>
-                  <Button
-                    size="sm"
-                    onClick={() => run(vm.vm_id, vm.name, 'start')}
-                    disabled={vm.state === 'running'}
-                  >
-                    시작
+                </div>
+
+                <dl className={styles.controlFacts}>
+                  <div>
+                    <dt>vCPU</dt>
+                    <dd>{vm.vcpus}</dd>
+                  </div>
+                  <div>
+                    <dt>메모리</dt>
+                    <dd>{vm.memory_mib} MiB</dd>
+                  </div>
+                  <div className={styles.controlFactWide}>
+                    <dt>템플릿</dt>
+                    <dd>
+                      {vm.template_id} <small>v{vm.template_version}</small>
+                    </dd>
+                  </div>
+                  <div className={styles.controlFactWide}>
+                    <dt>연결</dt>
+                    <dd>{zephyr ? 'vchan · dom0 중계' : (vm.ipv4 ?? 'IP 할당 대기')}</dd>
+                  </div>
+                </dl>
+
+                <div
+                  className={styles.controlCardActions}
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  <div>
+                    <Button size="sm" onClick={() => run(vm, 'start')} disabled={vm.state === 'running'}>
+                      시작
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => run(vm, 'stop')}
+                      disabled={vm.state !== 'running'}
+                    >
+                      정지
+                    </Button>
+                  </div>
+                  <Button size="sm" variant="danger" onClick={() => setDeleting(vm)}>
+                    삭제
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => run(vm.vm_id, vm.name, 'stop')}
-                    disabled={vm.state === 'stopped'}
-                  >
-                    정지
-                  </Button>
-                </td>
-              </tr>
-            ))}
-            {vms.data.items.length === 0 && (
-              <tr>
-                <td colSpan={7} className={styles.dim}>
-                  VM 이 없습니다.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      )}
-    </Card>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      <Modal
+        open={deleting !== null}
+        title="VM 삭제"
+        onClose={() => setDeleting(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeleting(null)}>
+              취소
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                if (deleting) run(deleting, 'delete');
+                setDeleting(null);
+              }}
+            >
+              VM 삭제
+            </Button>
+          </>
+        }
+      >
+        {deleting && (
+          <div className={styles.deleteConfirm}>
+            <span aria-hidden="true">!</span>
+            <div>
+              <strong>‘{deleting.name}’ VM을 삭제하시겠습니까?</strong>
+              <p>
+                VM을 종료하고 연결된 디스크를 삭제합니다.
+                <span className={styles.deleteIrreversible}>이 작업은 되돌릴 수 없습니다.</span>
+              </p>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+function SummaryItem({ label, value, tone }: { label: string; value: string; tone?: 'ok' }) {
+  return (
+    <div className={styles.controlSummaryItem} data-tone={tone}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ObservedClock({ at }: { at: number }) {
+  const time = new Date(at).toTimeString().slice(0, 8);
+  return (
+    <span className={styles.observedTime}>
+      마지막 갱신
+      <b key={time} className={styles.tick}>
+        {time}
+      </b>
+    </span>
   );
 }

@@ -102,24 +102,9 @@ Raspberry Pi 4 + Xen 멀티 OS 플랫폼을 자율주행 RC카에 올린다. 세
 | 컨트롤러 알고리즘 | pure pursuit(무상태) / PI 포함(동기화 부담) |
 | 새 폴더와 part 이름 | `vehicle-gateway`, `perception`, `firmware` 신설 여부 |
 
-## 8. 화면 배치·카메라 경로
-
-모니터 화면과 카메라 영상은 주행 경로와 따로 돈다. 둘 다 멈춰도 주행에는 영향이 없다.
-
-```text
- 화면 배치   관리 콘솔 ─REST·WS─▶ 백엔드 ─WS /ws/v1/display-service─▶ dom0 표시 서비스 ─▶ 키오스크 (모니터 1·2)
- 카메라      젯슨 카메라 ─MJPEG─▶ 세 번째 VM AI 감지 ─MJPEG─▶ dom0 웹 프록시 /camera/stream.mjpg ─▶ 관리 콘솔·키오스크
-                                       └─ MQTT-14 vision.result ─▶ 백엔드 (화면·기록, 주행 판단에 안 씀)
-```
-
-- 화면 배치: 콘솔이 "이 모니터에 이 화면" 을 백엔드에 요청하면, 백엔드가 dom0 표시 서비스에 `route.set` 을 보내고, 표시 서비스가 키오스크 브라우저를 그 주소로 옮긴 뒤 `route.applied` 로 답한다. 모니터 브라우저는 스스로 배치를 따라가지 않는다. → [화면 배치 계약](contracts/display-route-v1.md)
-- 카메라: 세 번째 VM(메시지 보드)이 젯슨 원본 영상에 AI 감지 박스를 그려 내보낸다. 주행 판단은 젯슨 `perception.result` 만 쓰므로, 세 번째 VM 이 죽어도 영상만 멈추고 차는 달린다 (격리 시연). → [카메라·AI 감지 계약](contracts/camera-stream-v1.md)
-
 ## 상세 문서
 
 - [차량 제어 상세 명세](design/vehicle-control-spec.md): 게이트웨이 상태 머신, 명령 검증, 세션·epoch, ESP32 안전 규칙, 전환 시간 측정, 메시지·CAN·시리얼 계약 초안(MQTT는 MQTT 계약), 전원 계통 후보값
 - [VM 관리 API 계약 v1](contracts/vm-api-contract-v1.md): Spring ↔ dom0-manager 경계의 계층 책임, 상태 모델, 엔드포인트, 디스크 수명주기, 오류 코드, 타임아웃·재시도
 - [MQTT 메시지 계약 v1](contracts/mqtt-contract-v1.md): VM 에이전트·RC카 앱·젯슨·게이트웨이·ESP32의 MQTT 토픽, 공통 봉투, 주행 명령·제어권 전환·차량 상태, ACL
-- [화면 배치 계약 v1](contracts/display-route-v1.md): 콘솔 → 백엔드 → dom0 표시 서비스 → 키오스크. REST·WS, 표시 서비스 소켓 프레임, status 판정, `screen_path`
-- [카메라·AI 감지 계약 v1](contracts/camera-stream-v1.md): 젯슨 원본 MJPEG → 세 번째 VM AI → dom0 프록시 `/camera/stream.mjpg`, MQTT-14 `vision.result`, 주행 판단 격리
 - [브링업 가이드](build-guides/)

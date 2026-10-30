@@ -33,7 +33,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 class MetricsWebSocketIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"ws-metrics-user","password":"password123!"}
+            {"username":"ws-metrics-user","nickname":"메트릭 웹소켓 테스트","password":"password123!"}
             """;
 
     @LocalServerPort

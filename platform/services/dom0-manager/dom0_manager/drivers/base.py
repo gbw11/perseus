@@ -9,20 +9,21 @@ Xen 드라이버와 Mock 드라이버가 같은 인터페이스를 구현하고,
 - 모든 메서드는 동기(blocking)다. xl 은 subprocess 이므로 API 계층이 스레드풀에서 호출한다(계약 11장).
 - shutdown/destroy 는 멱등이다. 없는 VM 에 대해 예외를 내지 않는다(계약 4.3, 4.4).
 
-v1 계약 범위 밖 메서드(reboot, set_vcpus, set_memory, pin_vcpu, set_sched_weight, get_stats)는
-기본 구현이 NotImplementedError 를 낸다. S15P31E110-208, -101, -112 에서 채운다.
+v1 계약 범위 밖 메서드(reboot, set_vcpus, set_memory, pin_vcpu, set_sched_weight)는 기본 구현이 NotImplementedError 를 낸다.
+S15P31E110-208, -101 에서 채운다. collect_stats 는 xentop 원시값(S15P31E110-112, 계약 2.4·4.6)이다.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 from uuid import UUID
 
-from ..errors import VMNotFound
-from ..models import Vm, VmState
+from ..errors import NotSupportedByPlatform, VMNotFound
+from ..models import ControlOperation, StatsSource, UnavailableReason, Vm, VmState, VmStats
 
 
 @dataclass(frozen=True)
@@ -68,8 +69,56 @@ class HostInfo:
     nr_cpus: int
 
 
+@dataclass(frozen=True)
+class DomainStats:
+    """xentop 한 행을 계약 2.4 통계 객체로 옮긴 것. 측정하지 못한 필드는 None 이고 unavailable 에 사유(UnavailableReason 값)가 있다."""
+
+    vm_id: UUID
+    domid: int
+    sampled_at: datetime
+    state: VmState
+    vcpus: int
+    cpu_time_s: int
+    memory_mib: int
+    max_memory_mib: int | None
+    net_rx_bytes: int | None
+    net_tx_bytes: int | None
+    disk_rd_bytes: int | None
+    disk_wr_bytes: int | None
+    unavailable: dict[str, str] = field(default_factory=dict)
+    name: str | None = None
+
+    def to_model(self) -> VmStats:
+        return VmStats(
+            vm_id=self.vm_id,
+            domid=self.domid,
+            source=StatsSource.xen,
+            sampled_at=self.sampled_at,
+            state=self.state,
+            vcpus=self.vcpus,
+            cpu_time_s=self.cpu_time_s,
+            memory_mib=self.memory_mib,
+            max_memory_mib=self.max_memory_mib,
+            net_rx_bytes=self.net_rx_bytes,
+            net_tx_bytes=self.net_tx_bytes,
+            disk_rd_bytes=self.disk_rd_bytes,
+            disk_wr_bytes=self.disk_wr_bytes,
+            unavailable={k: UnavailableReason(v) for k, v in self.unavailable.items()},
+        )
+
+
+@dataclass(frozen=True)
+class StatsSample:
+    """한 번의 xentop 실행 결과. Domain-0 은 없다."""
+
+    sampled_at: datetime
+    domains: list[DomainStats]
+
+
 class Driver(ABC):
     name: ClassVar[str] = "base"
+    # 제어 요청을 하위 작업 기록(멱등 키·원 작업 조회)으로 추적하는가. platform 만 True. 아니면 VmService 가 동기 정지로 처리한다
+    tracks_control_operations: ClassVar[bool] = False
 
     # ---- v1 계약 (생명주기·조회·상태) ----
 
@@ -99,6 +148,14 @@ class Driver(ABC):
     def destroy(self, vm_id: UUID) -> None:
         """강제 종료. 디스크는 건드리지 않는다(디스크 삭제는 Provisioner). 멱등."""
 
+    def request_stop(self, vm_id: UUID, *, key: str) -> ControlOperation | None:
+        """키 있는 정지(S15P31E110-305). tracks_control_operations 인 드라이버만 구현한다. 등록이 없으면 None."""
+        raise NotSupportedByPlatform(f"{self.name} driver does not track control operations")
+
+    def control_operation(self, vm_id: UUID, *, key: str) -> ControlOperation:
+        """요청 키로 원 제어 작업 조회. 작업 기록이 없는 드라이버는 501."""
+        raise NotSupportedByPlatform(f"{self.name} driver does not track control operations")
+
     @abstractmethod
     def host_info(self) -> HostInfo:
         """가용 메모리·코어 수."""
@@ -124,8 +181,11 @@ class Driver(ABC):
     def set_sched_weight(self, vm_id: UUID, weight: int) -> None:  # S15P31E110-101
         raise NotImplementedError("set_sched_weight: S15P31E110-101")
 
-    def get_stats(self, vm_id: UUID) -> dict[str, Any]:  # S15P31E110-112
-        raise NotImplementedError("get_stats: S15P31E110-112")
+    # ---- 통계 (S15P31E110-112) ----
+
+    def collect_stats(self) -> StatsSample:
+        """실행 중 도메인 전부의 xentop 원시값. Domain-0 제외. xentop 이 없는 드라이버는 501."""
+        raise NotImplementedError("collect_stats: this driver has no xentop")
 
 
 class Provisioner(ABC):

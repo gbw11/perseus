@@ -12,7 +12,7 @@ Zephyr 자율·수동주행 앱이 쓰는 C판 `xenova_mqtt`입니다. Python [`
 | `src/xm_policy.c` | type별 QoS·retain·1 KB/64 KB 한도 (`app.heartbeat` 포함 18개 + DEFAULT) | `policy.py` |
 | `src/xm_envelope.c` | 봉투 인코드(필드 순서 같음, 크기 한도), 검사(같은 순서·같은 오류 코드), UUID v4 | `envelope.py` |
 | `src/xm_seq.c` | (토픽, 발행자)별 seq 중복·역전 버림, 재시작 시 기준 재설정. 고정 8슬롯 LRU | `SeqTracker` |
-| `src/xm_payload.c` | `drive.command`·`app.heartbeat`·`perception.event` 인코드, `vehicle.control`·`drive.input`·`perception.result` 디코드 | 수동·자율 앱 |
+| `src/xm_payload.c` | `drive.command`·`app.heartbeat` 인코드, `vehicle.control`·`drive.input` 디코드 | 수동 앱 |
 | `third_party/jsmn/jsmn.h` | JSON 토크나이저 jsmn v1.1.0 (MIT, sha256 `1ed6154d…c13b`) | `json` |
 | `ports/zephyr/xm_zclient.c` | Zephyr `net/mqtt` 클라이언트: clean session·3.1.1, 재연결 1→10초, 연결마다 재구독, 수신 검사→seq→latest, QoS 1 PUBACK | `client.py` |
 | `zephyr/` | Zephyr 모듈 (`ZEPHYR_EXTRA_MODULES` 에 이 디렉터리, `CONFIG_XENOVA_MQTT=y`) | — |

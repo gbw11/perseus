@@ -16,10 +16,11 @@ class UnitOwnershipTest(unittest.TestCase):
     def test_all_installed_units_have_package_owner_without_enabling_static_unit(self):
         recipe = (FILES.parent / 'xenova-platform_1.0.bb').read_text()
         installed = set(re.search(r'for unit in ([^;]+); do', recipe).group(1).split())
-        units = {p.name for p in FILES.iterdir() if p.suffix in ('.service', '.mount')}
+        installed.update(re.findall(r'install -m 0644 "\$\{S\}/([^"/]+\.(?:service|mount|timer))"',recipe))
+        units = {p.name for p in FILES.iterdir() if p.suffix in ('.service', '.mount', '.timer')}
         self.assertEqual(installed, units)
-        enabled = set(re.search(r'SYSTEMD_SERVICE:\$\{PN\} = "([^"]+)"', recipe).group(1).split())
-        shipped = re.search(r'FILES:\$\{PN\} \+= "([^"]+)"', recipe, re.S).group(1).replace('\\\n', ' ').split()
+        enabled = set(' '.join(re.findall(r'SYSTEMD_SERVICE:\$\{PN\} \+?= "([^"]+)"',recipe)).split())
+        shipped = ' '.join(re.findall(r'FILES:\$\{PN\} \+= "([^"]+)"',recipe,re.S)).replace('\\\n',' ').split()
         explicit = {p.rsplit('/', 1)[-1] for p in shipped if p.startswith('${systemd_system_unitdir}/')}
         # 고정 systemd.bbclass는 SYSTEMD_SERVICE 목록을 소유하지만 Requires는 추적하지 않는다.
         self.assertFalse(installed - enabled - explicit, f'unowned installed units: {sorted(installed - enabled - explicit)}')
@@ -77,6 +78,14 @@ class NetworkLifecycleRegressionTest(unittest.TestCase):
         self.records = {r['id']: r for r in [record(), record('debian-dev')]}
         for r in self.records.values():
             fixture(self.base, r)
+        (self.base / '.xenova-storage.json').write_text(json.dumps(
+            {'schema':1, 'uuid':'12345678-1234-4234-8234-123456789abc'}))
+        mountinfo = self.base / 'mountinfo'
+        mountinfo.write_text(f'1 0 8:3 / {self.base} rw - ext4 /dev/fixture rw\n')
+        real_storage_check = vm.storage_check
+        storage = patch.object(vm, 'storage_check', side_effect=lambda data: real_storage_check(data, mountinfo))
+        storage.start()
+        self.addCleanup(storage.stop)
         self.xen = FakeXen(self.base, self.records)
         self.p = vm.Platform(self.base, self.base / 'run', self.command)
         check = self.p.check_network

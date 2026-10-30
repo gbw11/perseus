@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "autostart_stopped": null,
-  "manual_running": null,
+  "autostart_stopped": "keep-stopped",
+  "manual_running": "keep-stopped",
   "force_restart_vm_ids": []
 }

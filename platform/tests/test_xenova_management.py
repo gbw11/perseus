@@ -62,6 +62,25 @@ class ManagementTest(unittest.TestCase):
 
         self.key=management.internal_name(self.spec['vm_id'])
 
+    def test_starter_heartbeat_capability_does_not_rewrite_firmware_manifest(self):
+        source=application_bundle(bundle(self.data/"legacy"),self.data/"rtos-templates"/"capability-fixture")
+        manifest=source/"firmware.json"
+        meta=json.loads(manifest.read_text())
+        meta.update(id="capability-fixture",kind="zephyr-xen-firmware",template_version="1.0.0")
+        descriptor={"schema_version":"1.0","template_id":"capability-fixture",
+                    "template_version":catalog.deployment_version(meta),"guest_kind":"zephyr",
+                    "asset_directory":"rtos-templates/capability-fixture",
+                    "source_template_id":meta["id"],"manifest_sha256":""}
+        for app,expected in (("xenova-starter",False),("xenova-network-starter",False),("custom-app",None)):
+            with self.subTest(app=app):
+                meta["source"]["app"]=app
+                manifest.chmod(0o644);manifest.write_text(json.dumps(meta));manifest.chmod(0o444)
+                descriptor["manifest_sha256"]=catalog.sha(manifest)
+                original=manifest.read_bytes()
+                view=catalog.describe(self.data,descriptor)
+                self.assertIs(view["capabilities"].get("app_heartbeat"),expected)
+                self.assertEqual(manifest.read_bytes(),original)
+
     def prepare(self,op):
         self.copies+=1
         spec=op['initial_spec'];r=record();name=op['assigned']['internal_name']
@@ -88,6 +107,112 @@ class ManagementTest(unittest.TestCase):
         result=self.call('get',{'vm_id':identity})
         self.assertTrue(result['ok'],result)
         return result['data']['vm']
+
+    def cli_output(self,args):
+        output=io.StringIO()
+        with patch.object(cli,'Manager',return_value=self.m),redirect_stdout(output):
+            result=vm.main(args)
+        return result,output.getvalue()
+
+    def test_cli_short_list_shows_display_and_internal_names_actual_state_and_full_identity(self):
+        self.spec['name']='시험 개발 VM'
+        identity=self.create()
+        debian=record('debian-dev');debian['display_name']='Debian Interaction'
+        directory=fixture(self.data,debian)
+        self.xen.rows=[domain(debian,directory/'root.raw')]
+        self.xen.states={1:'-b----'}
+        result,output=self.cli_output(['list','--short'])
+        self.assertTrue(result['ok'],result)
+        self.assertEqual(output.splitlines(),[
+            'NAME | INTERNAL_NAME | UUID | STATE | IP',
+            f"Debian Interaction | debian-dev | {debian['uuid']} | blocked | {debian['ipv4']}",
+            f'시험 개발 VM | {self.key} | {identity} | stopped | 192.168.77.30'])
+
+    def test_cli_short_list_empty_prints_only_header(self):
+        result,output=self.cli_output(['list','--short'])
+        self.assertEqual(result['data']['vms'],[])
+        self.assertEqual(output,'NAME | INTERNAL_NAME | UUID | STATE | IP\n')
+
+    def test_cli_short_list_null_missing_fields_and_configuration_id_mapping(self):
+        response=self.call('list',{})
+        response['data']['vms']=[{},
+            {'name':None,'configuration':None,'vm_id':None,'xen_state':None,'ipv4':None},
+            {'name':'표시 이름','configuration':{'id':'registered-name','name':'not-the-cli-target'},
+             'vm_id':self.spec['vm_id'],'xen_state':None,'desired_state':'running',
+             'lifecycle':'REGISTERED','ipv4':'192.168.123.113'}]
+        with patch.object(self.m,'call',return_value=response):
+            result,output=self.cli_output(['list','--short'])
+        self.assertIs(result,response)
+        self.assertEqual(output.splitlines(),[
+            'NAME | INTERNAL_NAME | UUID | STATE | IP',
+            '- | - | - | - | -',
+            '- | - | - | - | -',
+            f"표시 이름 | registered-name | {self.spec['vm_id']} | - | 192.168.123.113"])
+
+    def test_cli_list_keeps_existing_pretty_and_compact_json_output(self):
+        self.spec['name']='시험 VM'
+        self.create()
+        for options,indent in (([],2),(['--json'],None)):
+            with self.subTest(options=options):
+                result,output=self.cli_output(['list',*options])
+                self.assertTrue(result['ok'],result)
+                self.assertEqual(output,json.dumps(result,ensure_ascii=False,indent=indent)+'\n')
+                self.assertIn('configuration',result['data']['vms'][0])
+
+    def test_cli_short_list_preserves_lifecycle_filter(self):
+        identity=self.create()
+        self.assertTrue(self.call('retire',{'vm_id':identity})['ok'])
+        result,output=self.cli_output(['list','--short'])
+        self.assertEqual(result['data']['vms'],[])
+        self.assertEqual(output.count('\n'),1)
+        for lifecycle in ('all','RETIRED'):
+            with self.subTest(lifecycle=lifecycle):
+                result,output=self.cli_output(['list','--short','--lifecycle',lifecycle])
+                self.assertEqual(len(result['data']['vms']),1)
+                self.assertEqual(result['data']['vms'][0]['lifecycle'],'RETIRED')
+                self.assertIn(f"custom | {self.key} | {identity} |",output)
+
+    def test_cli_short_option_conflicts_and_other_commands_fail_before_manager_call(self):
+        for args in (['list','--short','--json'],['list','--json','--short'],
+                     ['get',self.spec['vm_id'],'--short'],['templates','--short'],
+                     ['start',self.spec['vm_id'],'--short','--json'],['status','--short','--json']):
+            with self.subTest(args=args):
+                output=io.StringIO()
+                with patch.object(cli,'Manager',return_value=self.m),\
+                     patch.object(self.m,'call') as call,redirect_stdout(output),\
+                     self.assertRaises(SystemExit) as caught:
+                    vm.main(args)
+                self.assertEqual(caught.exception.code,2)
+                self.assertEqual(json.loads(output.getvalue())['error']['code'],'INVALID_SPEC')
+                call.assert_not_called()
+
+    def test_cli_short_list_query_error_keeps_json_error_and_exit_code(self):
+        self.create()
+        errors=[]
+        for options in ([],['--short'],['--json']):
+            with self.subTest(options=options):
+                output=io.StringIO()
+                with patch.object(cli,'Manager',return_value=self.m),\
+                     patch.object(cli,'uuid4',return_value=self.spec['vm_id']),\
+                     patch.object(self.p,'command',side_effect=vm.PlatformError('injected Xen query failure')),\
+                     redirect_stdout(output),self.assertRaises(SystemExit) as caught:
+                    vm.main(['list',*options])
+                self.assertEqual(caught.exception.code,4)
+                result=json.loads(output.getvalue())
+                self.assertFalse(result['ok'])
+                self.assertIsNone(result['data'])
+                self.assertNotIn('NAME |',output.getvalue())
+                errors.append(result)
+        self.assertEqual(errors[0],errors[1])
+        self.assertEqual(errors[0],errors[2])
+
+    def test_cli_list_help_documents_short_option(self):
+        output=io.StringIO()
+        with redirect_stdout(output),self.assertRaises(SystemExit) as caught:
+            vm.main(['list','--help'])
+        self.assertEqual(caught.exception.code,0)
+        self.assertIn('--short',output.getvalue())
+        self.assertIn('INTERNAL_NAME',output.getvalue())
 
     def test_plan_does_not_reserve_identity_key_name_ip_or_write_operations(self):
         result=self.call('create',self.spec,execute=False)

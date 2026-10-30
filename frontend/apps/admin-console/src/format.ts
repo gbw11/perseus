@@ -26,3 +26,6 @@ export const AGENT_LABEL: Record<AgentStatus, string> = {
 };
 
 export const GUEST_LABEL: Record<GuestKind, string> = { linux: 'Linux', zephyr: 'Zephyr' };
+
+export const capitalizeFirst = (value: string): string =>
+  value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;

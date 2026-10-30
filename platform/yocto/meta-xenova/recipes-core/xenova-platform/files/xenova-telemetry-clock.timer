@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh optional guest UTC correspondence
+
+[Timer]
+OnBootSec=10
+OnUnitInactiveSec=1
+Unit=xenova-telemetry-clock.service
+
+[Install]
+WantedBy=timers.target

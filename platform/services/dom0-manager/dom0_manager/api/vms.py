@@ -2,9 +2,11 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Header, Query, Response
+from fastapi.responses import JSONResponse
 
-from ..models import CreateVmRequest, Error, Vm
+from ..errors import InvalidArgument
+from ..models import ControlOperation, ControlStatus, CreateVmRequest, Error, Vm
 from ..service import VmService
 from . import get_service
 
@@ -20,6 +22,15 @@ _DRIVER_ERRS = {
 }
 # 명령(생성·정지·보관)은 xen 모드나 플랫폼 미지원 동작에서 501 을 더 낸다
 _COMMAND_ERRS = {**_DRIVER_ERRS, 501: {"model": Error, "description": "NotSupported: 드라이버·플랫폼이 제공하지 않는 동작"}}
+
+_KEY_MAX = 200
+
+
+def _request_key(value: str, name: str) -> str:
+    """Idempotency-Key·request_key: 하위 Manager 키와 같은 1..200 바이트. HTTP 헤더로 오가므로 ASCII 가시 문자만 받는다."""
+    if not 1 <= len(value) <= _KEY_MAX or not all("!" <= ch <= "~" for ch in value):
+        raise InvalidArgument(f"{name} must be 1..{_KEY_MAX} visible ASCII characters")
+    return value
 
 
 @router.get("/vms", operation_id="listVms", summary="Xen 에 존재하는 도메인 목록", response_model=list[Vm], responses=_DRIVER_ERRS)
@@ -63,8 +74,43 @@ def delete_vm(vm_id: UUID, service: VmService = Depends(get_service)) -> Respons
     summary="정상 종료 (디스크 보존)",
     status_code=204,
     response_class=Response,
-    responses={400: _ERR, **_COMMAND_ERRS},
+    responses={
+        200: {"model": ControlOperation, "description": "Idempotency-Key 가 있을 때: 원 작업 완료(재전달 포함)"},
+        202: {"model": ControlOperation, "description": "Idempotency-Key 가 있을 때: 정지 의도를 내구 수락했고 실행이 남음. 같은 키로 재전달·조회"},
+        204: {"description": "키 없음: 정지 완료. 키 유무와 무관하게 등록이 없으면 정지 목표 달성(작업 기록 없음)"},
+        400: _ERR,
+        409: _ERR,
+        **_COMMAND_ERRS,
+    },
 )
-def stop_vm(vm_id: UUID, service: VmService = Depends(get_service)) -> Response:
-    service.stop(vm_id)
-    return Response(status_code=204)
+def stop_vm(
+    vm_id: UUID,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key",
+        description="최초 전송 전에 정한 요청 키. 재전송·조회에 같은 값을 쓴다. 없으면 기존 동기 정지(204)",
+    ),
+    service: VmService = Depends(get_service),
+) -> Response:
+    if idempotency_key is None:
+        service.stop(vm_id)
+        return Response(status_code=204)
+    operation = service.request_stop(vm_id, _request_key(idempotency_key, "Idempotency-Key"))
+    if operation is None:
+        return Response(status_code=204)
+    status = 202 if operation.status == ControlStatus.pending else 200
+    return JSONResponse(status_code=status, content=operation.model_dump(mode="json"))
+
+
+@router.get(
+    "/vms/{vm_id}/control-operations",
+    operation_id="getControlOperation",
+    summary="요청 키로 원 제어 작업 조회 (실행하지 않음)",
+    response_model=ControlOperation,
+    responses={400: _ERR, 404: _ERR, **_COMMAND_ERRS},
+)
+def get_control_operation(
+    vm_id: UUID,
+    request_key: str = Query(description="최초 제출 때 보낸 Idempotency-Key"),
+    service: VmService = Depends(get_service),
+) -> ControlOperation:
+    return service.control_operation(vm_id, _request_key(request_key, "request_key"))

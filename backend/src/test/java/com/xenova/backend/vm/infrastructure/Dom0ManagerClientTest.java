@@ -79,6 +79,20 @@ class Dom0ManagerClientTest {
     }
 
     @Test
+    void runtimeLogsForwardOnlyQueryAndServerServiceToken() {
+        AtomicReference<String> query = new AtomicReference<>();
+        server.createContext("/api/v1/logs", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            query.set(exchange.getRequestURI().getQuery());
+            respond(exchange, 200, "{\"epoch\":\"one\",\"items\":[],\"next_cursor\":42,\"has_more\":false,\"history_truncated\":false}");
+        });
+        JsonNode page = client.runtimeLogs(java.util.Map.of("after", 41, "component", "api.service"), false);
+        assertThat(page.path("next_cursor").asInt()).isEqualTo(42);
+        assertThat(query.get()).contains("after=41", "component=api.service");
+        assertThat(authorization.get()).isEqualTo("Bearer service-secret");
+    }
+
+    @Test
     void findTreatsVmNotFoundAsAbsentDomain() {
         server.createContext("/api/v1/vms/" + VM_ID, exchange -> respond(exchange, 404, """
                 {"code":"VMNotFound","message":"no domain","detail":"xl: domain not found"}
@@ -91,8 +105,10 @@ class Dom0ManagerClientTest {
     void launchPostsTheOpenApiBodyWithSpringName() throws IOException {
         AtomicReference<String> body = new AtomicReference<>();
         AtomicReference<String> contentType = new AtomicReference<>();
+        AtomicReference<String> upgrade = new AtomicReference<>();
         server.createContext("/api/v1/vms", exchange -> {
             contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            upgrade.set(exchange.getRequestHeaders().getFirst("Upgrade"));
             body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             respond(exchange, 201, """
                     {"vm_id":"%s","state":"running","vcpus":1,"memory_mib":256}
@@ -103,11 +119,14 @@ class Dom0ManagerClientTest {
 
         assertThat(runtime.state()).isEqualTo(VmState.RUNNING);
         assertThat(contentType.get()).startsWith("application/json");
+        assertThat(upgrade.get()).isNull();
         JsonNode sent = objectMapper.readTree(body.get());
         assertThat(sent.fieldNames()).toIterable()
                 .containsExactlyInAnyOrder("vm_id", "name", "template_id", "template_version", "vcpus", "memory_mib");
         assertThat(sent.path("name").asText()).isEqualTo(SPEC.name());
         assertThat(sent.path("vm_id").asText()).isEqualTo(VM_ID);
+        assertThat(sent.path("template_id").asText()).isEqualTo(SPEC.templateId());
+        assertThat(sent.path("template_version").asText()).isEqualTo(SPEC.templateVersion());
     }
 
     @Test

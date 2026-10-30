@@ -1,0 +1,415 @@
+{
+  "scope": "real QEMU VM2 manual heartbeat-only trial over Ethernet; no driving input/command or graphics",
+  "cases": [
+    "original_vm2_config_and_firmware_saved_before_trial",
+    "only_vm2_restarted_with_trial_firmware_and_one_vif",
+    "real_zephyr_manual_heartbeats_reach_dom0_with_uuid_and_increasing_sequence",
+    "no_drive_commands_or_input_subscriptions_in_trial_build",
+    "rest_app_liveness_fresh_without_invented_os_driving_mode_or_active_vm",
+    "authenticated_dom0_websocket_has_same_real_vm2_app_source",
+    "hdmi_presentation_uses_vm2_status_panel_without_graphics_claim"
+  ],
+  "build_source": {
+    "scope": "QEMU VM2 candidate only; manual heartbeat/Ethernet; no drive commands or subscriptions",
+    "manual_main_sha256": "84586e3916f03b2cf8f25fd42a2c7541ca9b0ae178e03b23a220bef04ec91ec7",
+    "adapted_main_sha256": "d7ce772452be72ba8271c9253ceca124abe17ce0789c6a5bbb9c12f7ad45b3d5",
+    "mqtt_original_sha256": "e3ec1682ea3d6ff40e9827846ff39a68b8df586ab5f84f45e5d42cd297afef04",
+    "mqtt_diagnostic_sha256": "a97437e54d2ac535f1488db2b64b505adb5bf709cb4cc7b2a283c6f3ff91b044",
+    "lab_main_thread_priority": 10,
+    "broker_port": 51883,
+    "source_root": "/mnt/c/Users/SSAFY/Desktop/자율프로젝트/S15P31E110"
+  },
+  "firmware_sha256": "956200ab5ebbce2258e4672e10573017af6ff5cbb69100b3b9ffda3b0e938736",
+  "zephyr_boot_id_is_os_verified": false,
+  "test_password_hash_rounds": 5000,
+  "restored": true,
+  "compiled_thread_priorities": {
+    "CONFIG_XENOVA_SHUTDOWN_THREAD_PRIORITY": 6,
+    "CONFIG_XENOVA_NETFRONT_THREAD_PRIORITY": 7,
+    "CONFIG_MAIN_THREAD_PRIORITY": 10
+  },
+  "original": {
+    "backup_path": "/var/tmp/display253-vm2-zYRN7Z9F",
+    "original_kernel": "/srv/xenova/instances/zephyr-backup/firmware/fac5771450f9bbc9260c5e27ac5b05bb90cccaf00446664be6f538c825dea1c1/zephyr.bin",
+    "original_sha256": "1b9264b36e321aa183e3f74568e59354c24c14c3bcbe3c226fd5ac9b6f699dba",
+    "record_sha256": "36660439ad357ea3532de9fff19ecf5febf369e55ff197e60cc3deef2fff8971",
+    "cfg_sha256": "a3c0286645aa485c6d5537bf72500520874853561ea990c8b74fae6493aea9bc"
+  },
+  "control_observation_warning": "legacy Manager stop returned an error; two fresh Xen snapshots confirmed VM2 absent and all other domain IDs unchanged",
+  "trial_domid": 21,
+  "reports": [
+    {
+      "topic": "xenova/v1/apps/manual/events",
+      "retained": false,
+      "envelope": {
+        "schema_version": "1.0",
+        "message_id": "1",
+        "vm_id": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "app_id": "manual",
+        "boot_id": "50c2392e-63fd-4e60-90a5-c8749a72a71e",
+        "agent_instance_id": "c6d174bc-8ee2-48ed-86e2-a7c1aaeb9266",
+        "type": "app.heartbeat",
+        "seq": 1,
+        "sent_at": "1970-01-01T00:00:01.351Z",
+        "payload": {
+          "state": "idle",
+          "uptime_s": 1.0
+        }
+      }
+    },
+    {
+      "topic": "xenova/v1/apps/manual/events",
+      "retained": false,
+      "envelope": {
+        "schema_version": "1.0",
+        "message_id": "2",
+        "vm_id": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "app_id": "manual",
+        "boot_id": "50c2392e-63fd-4e60-90a5-c8749a72a71e",
+        "agent_instance_id": "c6d174bc-8ee2-48ed-86e2-a7c1aaeb9266",
+        "type": "app.heartbeat",
+        "seq": 2,
+        "sent_at": "1970-01-01T00:00:02.351Z",
+        "payload": {
+          "state": "idle",
+          "uptime_s": 2.0
+        }
+      }
+    },
+    {
+      "topic": "xenova/v1/apps/manual/events",
+      "retained": false,
+      "envelope": {
+        "schema_version": "1.0",
+        "message_id": "3",
+        "vm_id": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "app_id": "manual",
+        "boot_id": "50c2392e-63fd-4e60-90a5-c8749a72a71e",
+        "agent_instance_id": "c6d174bc-8ee2-48ed-86e2-a7c1aaeb9266",
+        "type": "app.heartbeat",
+        "seq": 3,
+        "sent_at": "1970-01-01T00:00:03.351Z",
+        "payload": {
+          "state": "idle",
+          "uptime_s": 3.0
+        }
+      }
+    },
+    {
+      "topic": "xenova/v1/apps/manual/events",
+      "retained": false,
+      "envelope": {
+        "schema_version": "1.0",
+        "message_id": "4",
+        "vm_id": "820a0522-243f-42f1-90e9-9b74e1522965",
+        "app_id": "manual",
+        "boot_id": "50c2392e-63fd-4e60-90a5-c8749a72a71e",
+        "agent_instance_id": "c6d174bc-8ee2-48ed-86e2-a7c1aaeb9266",
+        "type": "app.heartbeat",
+        "seq": 4,
+        "sent_at": "1970-01-01T00:00:04.352Z",
+        "payload": {
+          "state": "idle",
+          "uptime_s": 4.001
+        }
+      }
+    }
+  ],
+  "app_source": {
+    "received_at": "2026-10-22T07:38:27.175+00:00",
+    "observed_at": "1970-01-01T00:00:04.352Z",
+    "source_id": "xenova/v1/apps/manual/events",
+    "source_epoch": [
+      "50c2392e-63fd-4e60-90a5-c8749a72a71e",
+      "c6d174bc-8ee2-48ed-86e2-a7c1aaeb9266"
+    ],
+    "sequence": 4,
+    "retained": false,
+    "age_ms": 511,
+    "status": "fresh",
+    "subscription_status": "granted"
+  },
+  "presentation_kind": "status",
+  "resilience": {
+    "scope": "actual QEMU VM2 VIF loss, feed MQTT reconnect, pause/restart; wire replay derived from actual packets; Xen-read failure is injected",
+    "cases": [
+      "vif_loss_expires_app_after_three_seconds_without_claiming_vm_failure",
+      "duplicate_wire_replay_does_not_refresh_or_replace_accepted_observation",
+      "out_of_order_wire_replay_does_not_refresh_or_replace_accepted_observation",
+      "real_feed_disconnect_keeps_vm_running_and_marks_receive_path_unavailable",
+      "resuback_and_retained_delivery_cannot_revive_pre_disconnect_cache",
+      "no_false_ready_after_unrecovered_vif_and_explicit_trial_restart_restores_real_reports",
+      "actual_xen_pause_overrides_app_report_and_unpause_recovers",
+      "test_driver_read_failure_removes_normal_badge_and_real_xen_read_recovery_restores_it",
+      "actual_vm2_restart_changes_execution_and_publisher_epoch_and_rejects_old_boot_replay",
+      "no_new_xl_console_client_observed_during_fault_or_restart_checks"
+    ],
+    "observations": [
+      {
+        "case": "actual_vm2_network_loss",
+        "xen_state": "running",
+        "app_state": "unknown",
+        "app_source": {
+          "received_at": "2026-10-22T07:38:32.198+00:00",
+          "observed_at": "1970-01-01T00:00:09.351Z",
+          "source_id": "xenova/v1/apps/manual/events",
+          "source_epoch": [
+            "50c2392e-63fd-4e60-90a5-c8749a72a71e",
+            "c6d174bc-8ee2-48ed-86e2-a7c1aaeb9266"
+          ],
+          "sequence": 9,
+          "retained": false,
+          "age_ms": 3087,
+          "status": "stale",
+          "subscription_status": "granted"
+        },
+        "run_id": "5d54bb9a-e8ae-43aa-9574-2419a87d7fe5:21",
+        "decision": "app_waiting"
+      },
+      {
+        "case": "duplicate",
+        "xen_state": "running",
+        "app_state": "unknown",
+        "app_source": {
+          "received_at": "2026-10-22T07:38:32.198+00:00",
+          "observed_at": "1970-01-01T00:00:09.351Z",
+          "source_id": "xenova/v1/apps/manual/events",
+          "source_epoch": [
+            "50c2392e-63fd-4e60-90a5-c8749a72a71e",
+            "c6d174bc-8ee2-48ed-86e2-a7c1aaeb9266"
+          ],
+          "sequence": 9,
+          "retained": false,
+          "age_ms": 3488,
+          "status": "stale",
+          "subscription_status": "granted"
+        },
+        "run_id": "5d54bb9a-e8ae-43aa-9574-2419a87d7fe5:21",
+        "decision": "app_waiting"
+      },
+      {
+        "case": "out_of_order",
+        "xen_state": "running",
+        "app_state": "unknown",
+        "app_source": {
+          "received_at": "2026-10-22T07:38:32.198+00:00",
+          "observed_at": "1970-01-01T00:00:09.351Z",
+          "source_id": "xenova/v1/apps/manual/events",
+          "source_epoch": [
+            "50c2392e-63fd-4e60-90a5-c8749a72a71e",
+            "c6d174bc-8ee2-48ed-86e2-a7c1aaeb9266"
+          ],
+          "sequence": 9,
+          "retained": false,
+          "age_ms": 3833,
+          "status": "stale",
+          "subscription_status": "granted"
+        },
+        "run_id": "5d54bb9a-e8ae-43aa-9574-2419a87d7fe5:21",
+        "decision": "app_waiting"
+      },
+      {
+        "case": "feed_mqtt_disconnected",
+        "xen_state": "running",
+        "app_state": "unknown",
+        "app_source": {
+          "received_at": "2026-10-22T07:38:32.198+00:00",
+          "observed_at": "1970-01-01T00:00:09.351Z",
+          "source_id": "xenova/v1/apps/manual/events",
+          "source_epoch": [
+            "50c2392e-63fd-4e60-90a5-c8749a72a71e",
+            "c6d174bc-8ee2-48ed-86e2-a7c1aaeb9266"
+          ],
+          "sequence": 9,
+          "retained": false,
+          "age_ms": 3996,
+          "status": "disconnected",
+          "subscription_status": "unavailable"
+        },
+        "run_id": "5d54bb9a-e8ae-43aa-9574-2419a87d7fe5:21",
+        "decision": "app_source_unavailable"
+      },
+      {
+        "case": "suback_and_retained_without_new_guest_report",
+        "xen_state": "running",
+        "app_state": "unknown",
+        "app_source": {
+          "received_at": "2026-10-22T07:38:32.198+00:00",
+          "observed_at": "1970-01-01T00:00:09.351Z",
+          "source_id": "xenova/v1/apps/manual/events",
+          "source_epoch": [
+            "50c2392e-63fd-4e60-90a5-c8749a72a71e",
+            "c6d174bc-8ee2-48ed-86e2-a7c1aaeb9266"
+          ],
+          "sequence": 9,
+          "retained": false,
+          "age_ms": 5107,
+          "status": "disconnected",
+          "subscription_status": "granted"
+        },
+        "run_id": "5d54bb9a-e8ae-43aa-9574-2419a87d7fe5:21",
+        "decision": "app_waiting"
+      },
+      {
+        "case": "vif_up_without_fresh_report_after_90_seconds",
+        "xen_state": "running",
+        "app_state": "unknown",
+        "app_source": {
+          "received_at": "2026-10-22T07:38:32.198+00:00",
+          "observed_at": "1970-01-01T00:00:09.351Z",
+          "source_id": "xenova/v1/apps/manual/events",
+          "source_epoch": [
+            "50c2392e-63fd-4e60-90a5-c8749a72a71e",
+            "c6d174bc-8ee2-48ed-86e2-a7c1aaeb9266"
+          ],
+          "sequence": 9,
+          "retained": false,
+          "age_ms": 99007,
+          "status": "disconnected",
+          "subscription_status": "granted"
+        },
+        "run_id": "5d54bb9a-e8ae-43aa-9574-2419a87d7fe5:21",
+        "decision": "app_waiting"
+      },
+      {
+        "case": "explicit_trial_restart_after_network_loss",
+        "xen_state": "running",
+        "app_state": "ready",
+        "app_source": {
+          "received_at": "2026-10-22T07:41:24.148+00:00",
+          "observed_at": "1970-01-01T00:00:01.257Z",
+          "source_id": "xenova/v1/apps/manual/events",
+          "source_epoch": [
+            "a7a1f434-a929-4941-a002-effd28e762fd",
+            "e38d7f5a-e3b2-413a-ae38-b7894438998b"
+          ],
+          "sequence": 1,
+          "retained": false,
+          "age_ms": 446,
+          "status": "fresh",
+          "subscription_status": "granted"
+        },
+        "run_id": "5d54bb9a-e8ae-43aa-9574-2419a87d7fe5:22",
+        "decision": "status"
+      },
+      {
+        "case": "actual_xen_pause",
+        "xen_state": "paused",
+        "app_state": "unknown",
+        "app_source": {
+          "received_at": "2026-10-22T07:41:26.156+00:00",
+          "observed_at": "1970-01-01T00:00:03.258Z",
+          "source_id": "xenova/v1/apps/manual/events",
+          "source_epoch": [
+            "a7a1f434-a929-4941-a002-effd28e762fd",
+            "e38d7f5a-e3b2-413a-ae38-b7894438998b"
+          ],
+          "sequence": 3,
+          "retained": false,
+          "age_ms": 3056,
+          "status": "stale",
+          "subscription_status": "granted"
+        },
+        "run_id": "5d54bb9a-e8ae-43aa-9574-2419a87d7fe5:22",
+        "decision": "paused"
+      },
+      {
+        "case": "injected_xen_read_failure",
+        "xen_state": "running",
+        "app_state": "unknown",
+        "app_source": {
+          "received_at": "2026-10-22T07:41:34.156+00:00",
+          "observed_at": "1970-01-01T00:00:11.268Z",
+          "source_id": "xenova/v1/apps/manual/events",
+          "source_epoch": [
+            "a7a1f434-a929-4941-a002-effd28e762fd",
+            "e38d7f5a-e3b2-413a-ae38-b7894438998b"
+          ],
+          "sequence": 11,
+          "retained": false,
+          "age_ms": 1251,
+          "status": "fresh",
+          "subscription_status": "granted"
+        },
+        "run_id": "5d54bb9a-e8ae-43aa-9574-2419a87d7fe5:22",
+        "decision": "stale"
+      },
+      {
+        "case": "actual_trial_stopped",
+        "xen_state": "stopped",
+        "app_state": "unknown",
+        "app_source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "granted"
+        },
+        "run_id": null,
+        "decision": "stopped"
+      },
+      {
+        "case": "actual_trial_restarted",
+        "xen_state": "running",
+        "app_state": "ready",
+        "app_source": {
+          "received_at": "2026-10-22T07:41:49.667+00:00",
+          "observed_at": "1970-01-01T00:00:02.242Z",
+          "source_id": "xenova/v1/apps/manual/events",
+          "source_epoch": [
+            "b36301d3-0372-4840-be89-1ed445506782",
+            "2817a02a-a480-419c-8f99-c82fab0d60af"
+          ],
+          "sequence": 2,
+          "retained": false,
+          "age_ms": 506,
+          "status": "fresh",
+          "subscription_status": "granted"
+        },
+        "run_id": "5d54bb9a-e8ae-43aa-9574-2419a87d7fe5:23",
+        "decision": "status"
+      },
+      {
+        "case": "retired_publisher_wire_replay",
+        "xen_state": "running",
+        "app_state": "ready",
+        "app_source": {
+          "received_at": "2026-10-22T07:41:49.667+00:00",
+          "observed_at": "1970-01-01T00:00:02.242Z",
+          "source_id": "xenova/v1/apps/manual/events",
+          "source_epoch": [
+            "b36301d3-0372-4840-be89-1ed445506782",
+            "2817a02a-a480-419c-8f99-c82fab0d60af"
+          ],
+          "sequence": 2,
+          "retained": false,
+          "age_ms": 834,
+          "status": "fresh",
+          "subscription_status": "granted"
+        },
+        "run_id": "5d54bb9a-e8ae-43aa-9574-2419a87d7fe5:23",
+        "decision": "status"
+      }
+    ],
+    "limitations": [
+      "Guest heartbeat did not recover within 90 seconds after VIF down/up; lower-layer/sender live recovery is not accepted. Explicit VM2 trial restart was needed."
+    ],
+    "passed": false,
+    "vif_up_to_timeout_seconds": 90.344,
+    "console_clients_before_after": [],
+    "old_epoch": [
+      "a7a1f434-a929-4941-a002-effd28e762fd",
+      "e38d7f5a-e3b2-413a-ae38-b7894438998b"
+    ],
+    "new_epoch": [
+      "b36301d3-0372-4840-be89-1ed445506782",
+      "2817a02a-a480-419c-8f99-c82fab0d60af"
+    ],
+    "display_safety_checks_passed": true,
+    "live_vif_recovery_passed": false,
+    "verification_completed": true
+  },
+  "verification_completed": true,
+  "passed": false,
+  "other_domain_ids_unchanged": true,
+  "temporary_broker_stopped": true,
+  "completed_at": "2026-10-22T07:42:10.979007+00:00"
+}

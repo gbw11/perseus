@@ -125,10 +125,12 @@ int xs_zephyr_open(struct xs_zephyr *z)
 
 int xs_zephyr_close(struct xs_zephyr *z, int ms)
 {
-	if (!z || k_is_in_isr()) { return -EINVAL; }
-	k_mutex_lock(&store_owner_lock, K_FOREVER);
+	if (!z || ms < 0 || k_is_in_isr()) { return -EINVAL; }
+	int64_t end = k_uptime_get() + ms;
+	if (k_mutex_lock(&store_owner_lock, K_MSEC(ms))) { return -ETIMEDOUT; }
 	if (owner != z) { k_mutex_unlock(&store_owner_lock); return -ENOENT; }
-	int rc = xs_link_close(&z->link, ms);
+	int64_t left = end - k_uptime_get();
+	int rc = xs_link_close(&z->link, left > 0 ? left : 0);
 	if (!z->link.open) { owner = NULL; }
 	k_mutex_unlock(&store_owner_lock);
 	return rc;

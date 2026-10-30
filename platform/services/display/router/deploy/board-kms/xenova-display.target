@@ -1,0 +1,6 @@
+[Unit]
+Description=Xenova local vehicle HDMI screens
+Wants=xenova-display-feed.service xenova-display-graphics.service xenova-display-kiosk.service
+After=xenova-display-feed.service xenova-display-graphics.service xenova-display-kiosk.service
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,4 @@
-"""MQTT 계약 v1 토픽 빌더와 파서 (docs/contracts/mqtt-contract-v1.md 3·5·6·7·8·11장)."""
+"""MQTT 계약 v1 토픽 빌더와 파서 (docs/contracts/mqtt-contract-v1.md 3·5·6·7·8장)."""
 
 from __future__ import annotations
 
@@ -51,6 +51,11 @@ def app_events(app_id: str) -> str:
     return f"{PREFIX}/apps/{_segment('app_id', app_id)}/events"
 
 
+def vm_app_events(vm_id: str, app_id: str) -> str:
+    """Verified drive profile: the broker binds the publisher account to VM path."""
+    return f"{PREFIX}/vms/{_segment('vm_id', vm_id)}/apps/{_segment('app_id', app_id)}/events"
+
+
 def manual_input() -> str:
     """백엔드 → 수동 VM 키 입력 (MQTT-11)."""
     return f"{PREFIX}/apps/manual/input"
@@ -62,21 +67,6 @@ def vehicle_control() -> str:
 
 def vehicle_status() -> str:
     return f"{PREFIX}/vehicle/status"
-
-
-def sim_pose() -> str:
-    """시뮬레이터 차 위치 (MQTT-15, 실차에는 없음)."""
-    return f"{PREFIX}/sim/pose"
-
-
-def sim_world() -> str:
-    """시뮬레이터 트랙·장애물·E-stop, retained (MQTT-16)."""
-    return f"{PREFIX}/sim/world"
-
-
-def sim_command() -> str:
-    """백엔드 → 시뮬레이터 조작 명령 (MQTT-17)."""
-    return f"{PREFIX}/sim/command"
 
 
 def probe_request(target_vm_id: str) -> str:
@@ -98,10 +88,13 @@ class TopicInfo:
 _VM = re.compile(rf"^{PREFIX}/vms/([^/]+)/[^/]+$")
 # apps/manual/input 은 백엔드가 보내는 입력이라 app_id 대조 대상이 아니다 (events 만)
 _APP = re.compile(rf"^{PREFIX}/apps/([^/]+)/events$")
+_VM_APP = re.compile(rf"^{PREFIX}/vms/([^/]+)/apps/([^/]+)/events$")
 
 
 def parse(topic: str) -> TopicInfo:
     """토픽에서 vm_id·app_id 를 꺼낸다. 계약 밖 토픽이면 빈 TopicInfo."""
+    if match := _VM_APP.match(topic):
+        return TopicInfo(vm_id=match.group(1), app_id=match.group(2))
     if match := _VM.match(topic):
         return TopicInfo(vm_id=match.group(1))
     if match := _APP.match(topic):

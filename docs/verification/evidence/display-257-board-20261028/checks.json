@@ -1,0 +1,33 @@
+{
+  "checks": {
+    "remote_completed": true,
+    "both_pages": true,
+    "authentication": true,
+    "continuous_receive_and_reconnect": true,
+    "stale_frames_withheld": true,
+    "physical_mapping_not_claimed": true,
+    "framebuffer_exact_restore_this_run": true,
+    "processes_mounts_vt_clean": true,
+    "relay_port_closed": true,
+    "feed_and_children_stopped": true
+  },
+  "check_count": 10,
+  "all_passed": true,
+  "tested_commit": "73c8e2a5f6debb9b506aa1e0ef0a2ba6ca6d7019",
+  "diagnostic_sha256": "9197a44a77d07b8e7f74e530af8e81e92bbc453a1b15d90adf50fcaff4438a52",
+  "stream_module_sha256": "f9352492d5e6fb1725f33a6014661bd6790016b180de8251771b971bcbf10630",
+  "initial_trial_notes": [
+    "Random forwarding port blocked by existing SSH PermitOpen; policy unchanged.",
+    "Next trial received monitor-1, then diagnostic bind failed on port reuse. Final trial adds SO_REUSEADDR to the diagnostic only."
+  ],
+  "evidence_sha256": {
+    "board-framebuffer-after-20261028.json": "c9cef78d1b8f90b96f3cb7c4913333ec92689eb8b5951f72a1d008d1bc4e4491",
+    "board-framebuffer-after-20261028.png": "8c9e51786fd4ca0d2973d183ff600042dc5c2ae2893e65953b6421de77d55069",
+    "board-live-relay-20261028.json": "133a15e408719182a6788a450d56542f34beb08bcc20931389957cbd1162f56a",
+    "board-live-relay-initial-20261028.json": "f22c343556f28ff59854989faf5fcd715b2e8bb48d68a31eb19b37b451de2e0c",
+    "board-live-relay-port-reuse-20261028.json": "52c2dae83502ca142412136357ed16652586840c46caafd34631078975b7dff1",
+    "graphics-post-live-relay-20261028.json": "a4de0e84c2b050221f36ddb04154ae4d6b6eebd56462849d0a7437c7ec60761f",
+    "live-monitor-1-0-20261028.jpg": "827d5b083970c5c74823fc2bfd7ba7922f887af95466f9f488b0676cf8e9fd56",
+    "live-monitor-2-0-20261028.jpg": "684b7a0201f852dae63e950ef8456109ceb2b5ced434c55a83580eb812e90ee6"
+  }
+}

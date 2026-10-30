@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -21,6 +22,23 @@ def inputs():
     return {str(p.relative_to(BASE)): {"sha256": sha(p), "bytes": p.stat().st_size}
             for directory in ("xen-store", "xenstore-test-app")
             for p in sorted((BASE / directory).rglob("*")) if p.is_file()}
+
+
+
+def verify_event_irq(path):
+    """생성된 Zephyr DTS의 G1 event PPI31·level·priority를 확인한다."""
+    text = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(), flags=re.S)
+    nodes = re.findall(r"\bhypervisor@[0-9a-fA-F]+\s*\{([^{}]*)\}", text, re.S)
+    if len(nodes) != 1 or not re.search(r'compatible\s*=\s*"xen,xen"\s*;', nodes[0]):
+        raise ValueError("G1 DTS requires one Xen hypervisor node")
+    properties = re.findall(r"\binterrupts\s*=\s*<([^<>]+)>\s*;", nodes[0])
+    try:
+        cells = [int(cell, 0) for cell in properties[0].split()] if len(properties) == 1 else []
+    except ValueError:
+        cells = []
+    # Zephyr IRQ_TYPE_LEVEL=2. Standard DT level-low=8과 다른 encoding이다.
+    if cells != [1, 15, 2, 160]:
+        raise ValueError("G1 event PPI31 must use Zephyr level trigger and frozen priority")
 
 
 def run(command, cwd, env, output, name):
@@ -117,6 +135,7 @@ def main(argv=None):
                 "CONFIG_SRAM_BASE_ADDRESS=0x40000000", "CONFIG_SRAM_SIZE=16384")
     if any(line not in config for line in required) or "CONFIG_NET_L2_ETHERNET=y" in config:
         raise ValueError("G1 build differs from frozen xenvm/Store profile")
+    verify_event_irq(artifacts/"zephyr.dts")
     binary = (artifacts/"zephyr.bin").read_bytes()
     if binary[56:60] != b"ARM\x64":
         raise ValueError("expected ARM64 Image header")

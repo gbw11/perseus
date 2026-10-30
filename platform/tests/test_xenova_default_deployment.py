@@ -25,11 +25,11 @@ class DefaultDeploymentTest(unittest.TestCase):
         firmware = defaults["firmware_instances"]
         self.assertEqual({r["id"] for r in firmware}, DRIVE_IDS)
         self.assertEqual(len({r["template"] for r in firmware}), 1)
-        self.assertTrue(all(r["autostart"] and r["board_shutdown_policy"] == "force-allowed" for r in firmware))
+        self.assertTrue(all(r["autostart"] and r["board_shutdown_policy"] == "graceful" for r in firmware))
         self.assertTrue(defaults["instances"][0]["autostart"])
         self.assertEqual(defaults["instances"][0]["ipv4"], "192.168.77.20")
 
-    def test_factory_versions_match_selected_catalog_and_linux_recipes(self):
+    def test_factory_versions_match_selected_catalog_and_editable_recipes_do_not_regress(self):
         selected = json.loads((ROOT / "platform/guests/default-templates.lock.json").read_text())["templates"]
         defaults = json.loads((FILES / "defaults.json").read_text())
         by_id = {e["template_id"]: e for e in selected}
@@ -38,7 +38,11 @@ class DefaultDeploymentTest(unittest.TestCase):
         for entry in selected:
             if entry["guest_kind"] == "linux":
                 recipe = ROOT / "platform/guests/linux" / entry["id"] / "recipe.json"
-                self.assertEqual(json.loads(recipe.read_text())["version"], entry["version"])
+                # recipe는 다음 게시본의 입력이다. 편집만으로 기존 선택 lock/영수증을 바꾸지 않는다.
+                current = json.loads(recipe.read_text())["version"]
+                version = lambda v: tuple(int(n) for n in v.split("-")[0].split("+")[0].split("."))
+                self.assertGreaterEqual(version(current), version(entry["version"]))
+                self.assertRegex(entry["manifest_sha256"], r"^[0-9a-f]{64}$")
 
     def test_capacity_separates_retained_ubuntu_from_default_disks(self):
         templates = [{"logical_bytes": 8 * contract.GIB, "allocated_bytes": 1024, "boot_bytes": 4096}] * 2
@@ -49,7 +53,7 @@ class DefaultDeploymentTest(unittest.TestCase):
         self.assertEqual(result["boot_catalog_bytes"], 3 * 4096)
         self.assertEqual(result["retained_firmware_bytes"], 3 * contract.MIB)
 
-    def current_board(self):
+    def current_board(self, *, network=False):
         board = Board(self.base / "board")
         board.grow_mount()
         factory = board.factory()
@@ -58,11 +62,15 @@ class DefaultDeploymentTest(unittest.TestCase):
         record = factory["instances"][0]["record"]
         record["display_name"] = "Debian Interaction"
         (board.data / "seeds/debian-dev/instance.json").write_text(json.dumps(record))
-        source = application_bundle(bundle(self.base / "diagnostic"), self.base / "starter")
+        if network:
+            from test_xenova_network_zephyr import network_bundle
+            source = network_bundle(bundle(self.base / "diagnostic"), self.base / "starter")
+        else:
+            source = application_bundle(bundle(self.base / "diagnostic"), self.base / "starter")
         manifest = source / "firmware.json"
         meta = json.loads(manifest.read_text())
-        lock = json.loads((ROOT / "platform/guests/zephyr/starter.lock.json").read_text())
-        meta.update(id=lock["id"], kind="zephyr-xen-firmware", version=lock["version"], template_version="1.0.1")
+        lock = json.loads((ROOT / ("platform/guests/zephyr/network-starter.lock.json" if network else "platform/guests/zephyr/starter.lock.json")).read_text())
+        meta.update(id=lock["id"], kind="zephyr-xen-firmware", version=lock["version"], template_version="1.1.0" if network else "1.0.1")
         meta["source"].update({k: lock[k] for k in ("app", "app_files", "app_source_sha256", "zephyr_commit", "sdk_version")})
         meta["source"]["source_revision"] = "sha256:" + lock["app_source_sha256"]
         manifest.chmod(0o644)
@@ -165,7 +173,9 @@ class DefaultDeploymentTest(unittest.TestCase):
 
     def test_catalog_keeps_ubuntu_without_an_ubuntu_seed(self):
         import xenova_catalog as catalog
-        board, _ = self.current_board()
+        board, _ = self.current_board(network=True)
+        selected = json.loads((ROOT / "platform/guests/default-templates.lock.json").read_text())["templates"]
+        versions = {entry["id"]: entry["version"] for entry in selected}
         for directory in (board.data / "templates").iterdir():
             meta = json.loads((directory / "template.json").read_text())
             boot_path = directory / "boot.json"
@@ -175,7 +185,7 @@ class DefaultDeploymentTest(unittest.TestCase):
             boot_path.write_text(json.dumps(boot))
             boot_path.chmod(0o444)
             names = ("root.raw", "Image", "initrd", "kernel.config", "boot.json")
-            meta.update(version="1.0.1", files={n: {"sha256": assemble.sha(directory / n),
+            meta.update(version=versions[directory.name], files={n: {"sha256": assemble.sha(directory / n),
                         "bytes": (directory / n).stat().st_size} for n in names})
             path = directory / "template.json"
             path.write_text(json.dumps(meta))
@@ -184,5 +194,6 @@ class DefaultDeploymentTest(unittest.TestCase):
         rows = catalog.entries(board.data)
         self.assertEqual({e["template_id"] for e in rows},
                          {"ubuntu-24.04-arm64", "debian-13-arm64", "zephyr-xenvm-starter-arm64"})
-        self.assertTrue(all(e["template_version"] == "1.0.1" for e in rows))
+        self.assertEqual({e["template_id"]: e["template_version"] for e in rows},
+                         {e["template_id"]: e["version"] for e in selected})
         self.assertFalse((board.data / "seeds/ubuntu-dev").exists())
