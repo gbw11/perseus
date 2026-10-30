@@ -3911,7 +3911,9 @@ Linux private 준비와 다른 등록 VM의 get/list·operation 조회·허용�
 요청마다 fork 객체를 사용한다. 기본 준비/사용 확인 메서드도 새 Platform 객체에 결합한다.
 OS 프로세스를 만들지 않으며, 공유 Manager를 임의로 동시 호출하거나 모든 action의
 상위 직렬화를 제거해도 된다는 뜻이 아니다. 실제 변경/관측의 공통 잠금과 같은 VM의
-소유·신원·의도 검증은 유지된다. Python/외부 명령 진단은 요청별 64KiB sink로 수집한다.
+소유·신원·의도 검증은 유지된다. 같은 요청 객체의 동시 call은 무대기 OPERATION_IN_PROGRESS로
+거절하며 진행 중 요청의 예산·진단 상태를 덮지 않는다. Python/외부 명령 진단은 요청별 64KiB sink로 수집한다.
+기존 파생 `snapshot`의 동시 조회는 내부 fork로 격리해 유지하며 Xen이나 실행 잠금을 호출하지 않는다.
 명령 데이터 stdout의 한도 64KiB 초과는 잘린 정상값 대신 오류다. sink의 초과 분량은
 누락 수로 남기며 프로세스 전역 FD/stdout·cwd/env는 바꾸지 않는다.
 `operation`은 기본 15초 조회 예산과 전달한 budget_ms 중 짧은 잔여 기간을 사용한다.
@@ -3920,6 +3922,44 @@ create에 전달하거나 HTTP timeout을 취소로 간주하지 않는다. 새 
 수락 재검사 전에 이번 호출의 초기 잔여 예산을 확인한다.
 HTTP의 VM mutex·직렬화 분리는 아직 연결되지 않았다. 구체적인 담당 범위는
 [관리 요청 연동 요청서](management-integration-request.md)를 따른다.
+
+<a id="read-concurrency"></a>
+#### 일반 조회의 동시 실행과 정합성
+
+`list/get/operation/control-operation`은 공통 물리 실행 잠금을 획득하지 않는다.
+변경 action과 복구의 기존 실행·수락·효과 제출 guard는 유지한다. 각 호출은 새 fork 객체와
+그 진입에서 정한 잔여 예산을 쓰며, 이전 조회 결과를 start/stop/retire/recover의 승인에 쓰지 않는다.
+
+- list/get의 요청별 문맥은 등록 구성·수명·현재 host/실행/의도 근거와 한 관측 회차만 묶는다.
+  완전한 UUID/name/state 목록을 회차 전후로 확인하고 각 대상의 incarnation을 두 번 대조한다.
+  화면 조회에서는 쓰기 디스크 설정용 `xl list -l`·짧은 목록을 추가로 수집하지 않는다.
+  실제 제어의 상세 자산·실행 검증은 별도로 수행한다.
+  `observed_monotonic_ms`는 이 Xen 관측의 검증 완료 시각이다. 뒤따르는 metadata 대조/게시나
+  늦은 응답 시각으로 갱신하지 않는다. 늦은 이전 성공/실패가 더 새 파생 표본을 덮지 않으며,
+  같은 내용의 이전 응답도 자기 관측 시각을 유지한다.
+- 등록부/수명 JSON은 기존 원자 게시 규칙으로 읽는다. list는 외부 관측 뒤 전체 대상 집합과
+  구성을 대조하고, get은 해당 대상만 대조한다. 관측 snapshot 게시 직전 해당 VM의 구성·
+  수명·실행/의도/host를 다시 확인한다. 서로 다른 모든 원천의 동시 원자 관측 보장은 아니다.
+  미완료 신규 등록이나 변경된 근거를 정상 전체 목록으로 조립하지 않는다.
+- 결합 근거가 바뀌면 남은 예산으로 최대 한 번 새 회차를 수행한다. 다시 바뀌면
+  TARGET_CHANGED로 끝낸다. 실패한 helper를 각 응답 builder에서 새로 호출하지 않으며,
+  Xen 신원 불일치는 기존 TARGET_CHANGED로 즉시 종결할 수도 있다.
+  실패/부분 열람은 빈 목록·VM 부재·정상 snapshot으로 바꾸지 않는다.
+- asset/control 원장 조회는 서로 다른 원본의 완전 검색·유일성/현재 소유 확인을 유지한다.
+  원자 기록을 두 회차에 대조하며 변경이 있으면 위 유한 재확인만 한다. 긴 원장 열람 중
+  admission을 보유하지 않는다. 조회는 raw phase·원 key/기한·예약을 쓰거나 작업을 이행하지 않는다.
+- 외부 list/get 관측은 같은 runtime의 네 슬롯으로 제한한다. 초기 로컬 수락 상한이며 보드의
+  허용 QPS나 최악 지연 보장은 아니다. 슬롯 경합은 OPERATION_IN_PROGRESS이며 숨은 큐는 없다.
+  asset/control 원장 조회와 실제 제어는 이 슬롯을 사용하지 않는다. helper는 요청 소유 FD를
+  상속하며 timeout/I/O 실패 때 해당 자식만 제한적으로 회수한다. 종료 미확정은 성공이 아니다.
+  조회 부모가 중단돼도 helper의 FD가 살아 있으면 슬롯을 재사용하지 않으며 실제 종료 뒤 반환한다.
+  슬롯은 canonical/unlinked runtime·locks 경로의 소유자 일치·단일 링크·0600 일반 파일이어야 한다.
+  비정상 파일은 오류로 거절하고 삭제·chmod·다른 슬롯으로 우회하여 정상으로 취급하지 않는다.
+
+기존 `snapshot`은 마지막 성공/오류와 나이를 가진 파생 관측이다. 새 TTL cache·관측 daemon·DB는
+추가하지 않았다. 구성의 ipv4는 설정/예약 주소이고 app_readiness=unknown은 앱 준비 미확인이다.
+Xen 상태를 Agent 정상이나 장치 출력 허가로 승격하지 않는다. 제품 HTTP의 threadpool·직렬화·
+polling 및 응답 역전 연결은 [담당자 요청서](../requests/20261029-request-http-spring-ui.md#반복-조회와-제어-진행성-연결)의 별도 수락이다.
 
 정상/오류는 [envelope](#contract-response)를 반환한다. Python에서는 dict의 ok/data/error를 확인하며 CLI 종료 코드는 별도로 적용하지 않는다. CLI delete/status/recover-once 별칭을 그대로 Python action으로 옮기지 않고 각각 retire/list/recover_once를 호출한다.
 

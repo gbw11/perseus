@@ -52,6 +52,35 @@ Manager recovery COMPLETED나 Standby 재합류로 치환하지 않는다. 원 �
 
 Gateway가 모드·출력 보호·승계를 맡고 Worker는 기존 Engine/Manager를 통한 필요한 VM 복구를 맡습니다. 입력 부재·Jetson 단절·준비 미완료 자체를 반복 VM 재시작으로 수습하지 않습니다.
 
+## 일반 조회 변경의 소비 연결
+
+기존 D01-W01/W02·A2/F4/FO1 요청의 후속이며 새 장애/재시도 정책이 아니다.
+하위 4번의 [조회 계약](../platform/cli-manager-spec.md#read-concurrency)과
+[HTTP 공동 수락](20261029-request-http-spring-ui.md#반복-조회와-제어-진행성-연결)을 함께 읽는다.
+Worker 제품은 이번 플랫폼 변경에서 수정하지 않았다.
+
+`recovery/observe.py:PlatformObserver.__call__/_refresh_intents/_merge`는 list 실패와 Xen
+부재를 구분해야 한다. 현재 `_refresh_intents` 실패 뒤 기존 intent cache를 남기는 경로와
+별도 Xen 목록의 출처/신선도를 대조한다. TARGET_CHANGED·관측 슬롯 OPERATION_IN_PROGRESS·
+열람/원장 오류를 빈 목록/VM 사망으로 변환하지 않으며, 남겨둔 cache를 현재 수명/실행의
+검증 근거로 승격하지 않는다. 새 TTL/cache를 추가하거나 미확인 입력에 recover_once를
+바로 제출하는 것으로 해결하지 않는다. 요청별 Manager fork 사용은 해당 어댑터의 실제
+버전 확인 뒤 연결하고 같은 공유 inner를 여러 thread가 직접 호출하지 않는다.
+
+`watcher.py:_judge`와 기존 Engine의 원 결과 소비는 관측 불가를 별도로 유지하고, 원
+attempt·host/실행·의도·물리 deadline을 그대로 대조한다. asset RUNNING은 준비 실행 관측,
+recovery completed는 기존 플랫폼 새 실행 관측이며 Standby 재합류 완료가 아니다.
+조회 응답만으로 후속 복구 시도·새 key/기한·force를 만들지 않는다.
+
+인수 assertion은 정상 관측→느린 list/identity·부분 열람 실패→회복, 그 사이 사용자 stop 및
+원 attempt 조회를 주입하여 관측 오류에서 복구 폭주 0·옛 intent 재적용 0·정상 관측 재개를
+확인하는 것이다. 하위 S4-T02/03의 보호/진행성은 제공물이며 실제 Worker/상위 연결 수락은
+담당자 구현 후 별도로 남긴다. D01/D03의 기존 미완료를 이 변경으로 닫지 않는다.
+S4-T12 후속의 관측 슬롯 소유 부모 중단/잔존 helper·비정상 잠금 파일도 관측 불가 입력이다.
+슬롯 경합·권한/경로 오류가 있는 동안 새 recover_once 제출 0·옛 intent 재적용 0을 확인하고,
+helper 종료/정상 경로 회복 후 정상 관측이 다시 소비되는 양쪽을 수락한다. Worker가 슬롯 파일을
+지우거나 chmod하여 차단을 해제하지 않는다. 이 요청은 Worker 제품에서 아직 수락 전이다.
+
 ## 진행 기록
 
 - 2026-10-29: 승인한 최소 소비 연결과 로컬 회귀를 완료했습니다. D01·D03 요청 전체나 실제 Xen/Store·설치본 수락을 완료한 것은 아닙니다. Worker가 앱 재초기화를 자동 선택·요청하는 정책은 구현하지 않았으며, 로컬 root 수동 경로와 별도로 D01-W03·W04에서 결정해야 합니다.

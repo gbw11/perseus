@@ -8,6 +8,7 @@
 2. 최신 `platform/services/dom0-manager/dom0_manager/api/vms.py`, `service.py`, `drivers/platform.py`를 대조합니다. 현재 소스에는 key 있는 stop의 200/202와 원 key 조회 경로가 있으므로 과거 문서의 HTTP 미구현 설명을 그대로 적용하지 않습니다. 배포·종단 수락은 별도입니다.
 3. [관리 수명주기](../platform/management-boundaries.md), [복구 시나리오](../platform/recovery-scenarios.md)의 F1·F2·F4·FO1, 주행 설계 11~12·20절을 읽습니다.
 4. Linux 준비 중 동시 조회·정지는 [아래 3번 연결 조건](#linux-준비-중-조회제어의-동시-연결)을 확인합니다. 현재 하위 제공과 실제 HTTP/제품 연결은 별개입니다.
+5. 느린 조회·반복 polling과 제어의 연결은 [4번 후속 요청](#반복-조회와-제어-진행성-연결)을 읽습니다. 실제 threadpool/선행 get·현재 polling 주기와 공동 수락을 대조합니다.
 
 ## 담당자 작업
 
@@ -210,6 +211,54 @@ B key stop·실제 Xen 종료와 완료 조회가 A 해제 전에 끝나야 한�
 
 하위 로컬 통과와 위 제품 수락은 분리한다. 기존 기본 VM·CPU·네트워크·Tailscale을 보존하며,
 서비스 재시작의 backend cgroup 문제는 아래의 독립 미완료 항목으로 유지한다.
+
+## 반복 조회와 제어 진행성 연결
+
+**하위 4번 제공 후보 / 제품 HTTP·Spring·화면 수락 전.** 기존 D02·D08·3번 요청 ID와
+미완료 상태를 유지한다. 지원 근거는 [정식 조회 계약](../platform/cli-manager-spec.md#read-concurrency)과
+[현재 검증 보고서](../verification/recovery-scenario-closure-20261030.md#반복-조회의-비용일관성과-제어-진행성)다.
+단일 후보의 Manager/Execution/Platform/runtime/요청별 출력 모듈과 실제 import 경로를 맞춘 뒤
+아래 네 일반 조회만 새 읽기 경로로 연결한다. `fork()`만 있는 구형/혼합 설치본은 기존 보호를 유지한다.
+
+| 담당·실제 수정 위치 | 입력·출력·거절 조건과 권고 연결 | 수락 assertion |
+|---|---|---|
+| FastAPI `drivers/platform.py:SerializedManager.call/fork`, `PlatformDriver._views/list_domains`, `drivers/base.py:find` | list/get/asset operation/control-operation을 요청별 inner.fork 객체로 호출. 공유 inner 직접 동시 호출 금지. 긴 제어의 직렬화 전부 삭제 금지. stop 앞의 불필요한 전체 find/list와 전역 mutex 대기를 분리 | 느린 list/get 미해제 중 다른 VM stop 및 원 결과 조회 진입·완료. 같은 요청 객체를 잘못 공유하면 OPERATION_IN_PROGRESS이며 원 진행 요청의 예산/trace가 섞이지 않음 |
+| FastAPI `api/vms.py`, `service.py`, request_budget·실행 threadpool | 네 외부 관측 슬롯은 하위 보호다. 상위의 동기 handler/threadpool도 유한하게 두고 느린 조회가 stop/원 조회 진입을 모두 점유하지 않게 실행량/대기를 분리. 기다린 만큼 잔여 예산을 줄이고 만료 뒤 제출 금지. 새 queue/daemon을 추가하지 않는 연결을 우선 | 하위 대신 mock 응답으로 통과시키지 않음. 실제 handler에서 정상 읽기와 제어 모두 진행. 초과 부하의 거절/예산 소진과 수락 후 pending을 구분 |
+| FastAPI `_BUDGET_ACTIONS/call_with_budget`, `raise_for_envelope`·오류 응답 | asset operation의 하위 예산 지원을 포함. get/list/control-operation timeout_ms와 현재 budget_ms를 제한. TARGET_CHANGED·OBSERVATION_UNAVAILABLE·원장 오류·관측 슬롯 OPERATION_IN_PROGRESS를 빈 목록/404/STOPPED/accepted로 바꾸지 않음 | 정상 검색 부재·불완전 열람·예산/소유권 오류를 각각 보존. 원 key/기한 변경·원 journal 직접 쓰기 0 |
+| 기존 `observations.py:verified_platform_batch/Recorder.refresh/Reader` | 이미 있는 선택형 파생 관측은 검증된 한 list의 시각/신원만 소비. VM별 get/snapshot 재호출을 덧붙이지 않음. 기존 실패/만료/foreign-host 정책 유지. 표시 snapshot을 control guard로 사용하지 않음 | 일부 항목 실패를 완전한 정상 목록으로 게시하지 않음. 이전 표본에 현재 시각을 붙이거나 다른 실행으로 바꾸지 않음 |
+| Spring `VmStateWatcher.check`, `VmService.list/stop`, `Dom0ManagerClient` | 기존 상태 감시 fixedDelay 기본 5초와 사용자 조회의 실제 중첩을 계측. stop 선행 전체 조회를 제거할 때 VM 접근권한 검사는 별도로 유지. 동일 대상의 겹친 조회는 완료/취소를 추적하여 누적하지 않음. 일괄 polling/timeout 확대는 하지 않음 | 원 stop key·deadline·완료 추적 보존. 옛 조회 응답이 새 의도/원 결과를 덮지 않으며 연결 실패를 전체 VM 정지로 기록하지 않음 |
+| 프론트 `api/queries.ts:useVms/useVm` 및 생성/정지 작업 화면 | 현재 목록 기본 5초·화면 override 1초, 상세 5초와 사용자 중복 화면을 구분. AbortSignal·동일 query key를 사용해 취소/최신 응답 순서를 연결. 로딩/관측 오류와 VM 부재, pending과 현재 실행을 별도로 표시 | 요청 단절/슬롯 거절이 삭제/빈 목록으로 보이지 않음. 늦은 목록·상세가 더 최신 사용자 stop/완료 상태를 덮지 않음 |
+
+우리 쪽 제공물은 `test_xenova_read_progress.py`의 S4-T02(느린 조회)와 S4-T03(양 OS·
+폴러 1/2/4개), 오류/재관측·현재 실행 guard·프로세스/FD 회수 및 기존 2·3번 회귀다.
+10ms의 로컬 시험 polling은 운영 설정/QPS가 아니며 제품 기본값으로 설치하지 않는다.
+네 관측 슬롯 상한은 초기 검증 구성이다. shared Xen/Store 자체의 무응답에서는 제어도
+실패할 수 있으므로 모든 고장을 이 잠금 개선으로 수락했다고 하지 않는다.
+
+인수 호출은 같은 Manager 인스턴스를 공유하지 않고 각각 `manager.fork().call(...)`을 사용한다.
+list/get에 `budget_ms=remaining_ms`와 필요한 timeout_ms를, asset/control 원 조회에도 그 순간
+남은 예산을 준다. query→stop 순서에서 query 결과를 guard 인자로 넘기지 않는다. stop은
+원 key로 요청하고 control-operation으로 원 phase/result를 회수한다. 잔여 예산이 0이면 제출하지 않는다.
+새 HTTP endpoint·공개 DTO/필드는 담당자가 기존 권한 검사와 확정하며 raw journal·private
+경로·PID/FD·credential·진단 원문을 외부로 전달하지 않는다.
+
+공동 수락은 같은 프로세스의 실제 FastAPI 직접 경로에서 먼저 수행하고, EC2/Spring/화면을
+이어 확인한다. 느린 조회를 해제하기 전에 다른 VM stop과 원 조회 완료, 이어 두 OS 복사 및
+실제 polling 유지 중 정상 조회 성공·B 실제 종료·원 완료가 필요하다. 종료/초기화와 부하 해소 후
+읽기 회복도 확인한다. 하위 로컬 대역 통과는 이 제품/설치/보드 수락을 대신하지 않는다.
+
+다음 음성 시험은 기존 요청의 제품 수락 조건이며 하위 통과로 완료 처리하지 않는다.
+
+| 실제 경로 | 음성 assertion |
+|---|---|
+| `VmService.stop` 선행 조회 개정·FastAPI 권한 연결 | 불필요한 전체 목록 조회만 제거한다. 권한 없는 다른 VM의 stop은 기존 접근 정책대로 거절하며 의도 수락/실제 shutdown 0. 표시 snapshot으로 권한 검사를 대체하지 않음 |
+| 원 key/operation 조회 handler·`Dom0ManagerClient` 결과 반환 | ID를 안다는 사실은 권한이 아니다. 원 기록의 VM과 요청자의 허용 대상을 대조한다. 다른 VM의 key/ID·불일치 vm_id 요청에서 원 spec/result·진행 참조가 노출되지 않음 |
+| `raise_for_envelope`·Spring 오류 변환·화면 표시 | raw journal·workspace·PID/FD·credential·진단 문자열을 포함한 하위 오류를 주입. 기존 허용 코드/작업 참조만 응답하며 본문/상위 로그/화면에 비밀·내부 경로가 노출되지 않음 |
+| handler/threadpool의 느린 관측 포화 | 느린 조회가 입장한 채로 허용 stop·원 조회가 진입/완료하고 정상 읽기도 성공. 전부 거절하거나 polling을 종료한 뒤 성공시키는 결과는 수락하지 않음 |
+
+우리 쪽 슬롯 후속 시험은 실제 부모 중단/자식 FD/정상 반환과 비정상 경로·파일 거절을 제공한다.
+다른 uid는 로컬 fstat 경계 대역으로 확인했으며 실제 HTTP 인증/권한·운영 파일 보안 감사는 아니다.
+5번의 create 전체 deadline·실패 자산 종결, API 재시작 backend 귀속 문제는 계속 별도 미완료다.
 
 ## 설치본 API 재시작과 VM backend 소유
 

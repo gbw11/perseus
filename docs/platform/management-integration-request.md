@@ -48,12 +48,18 @@ D03 수습·차량 입력/resume·전체 Telemetry 화면과 SQLite 도입은 �
 `Manager.fork()`는 Python 요청 객체 분리이며 새 프로세스·실행기·daemon이 아니다.
 fork만으로 상위 VM mutex가 없어지지는 않는다. CPU·신원·의도·물리 실행 guard와
 execution flock은 하위에 남긴다. stop은 이미 다른 작업이 flock을 보유했다면 내구 수락 후
-pending을 반환한다. 사용자 제어의 control-operation 조회는 admission 잠금 경로이며,
-자산 operation 조회는 별도의 공통 metadata/원 실행 소유권 확인 경로다. 새 하위의
+pending을 반환한다. 3번 후보의 control-operation은 admission, asset operation은 공통
+잠금의 경로였다. [4번 후보](cli-manager-spec.md#read-concurrency)는 두 원장 조회를 모두
+긴 잠금/긴 admission 열람에서 분리하고 원자 기록·실행 소유권을 제한된 회차로 대조한다. 새 하위의
 Linux private 준비는 이 공통 실행 잠금을 계속 보유하지 않으므로 다른 VM의 실제 stop도
 진행할 수 있다. 긴 복구 등 다른 경로의 직렬화까지 제거됐다는 의미는 아니다.
 현재 `ManagerLike` protocol에는 fork 선언이 없으므로 platform 전용 어댑터의 지원 확인도
 연결한다. 미지원 설치본에서 공유 inner를 잠금 없이 호출하는 fallback으로 우회하지 않는다.
+
+4번의 action별 요청 객체·실행량·threadpool/선행 get·polling 연결은 최신
+[담당자 요청서](../requests/20261029-request-http-spring-ui.md#반복-조회와-제어-진행성-연결)에
+누적한다. D02·D08의 원 key·원 기한·pending/uncertain 및 후속 이행 책임은 그대로다.
+기존 소비자에 필요한 실제 변경 위치·공동 수락도 그 절을 사용하며 이 문서에 별도 정책을 복제하지 않는다.
 
 ### 하위에서 실제 제공하는 호출
 
