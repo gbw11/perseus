@@ -245,6 +245,62 @@ with patch.object(vm,'storage_check'):
             self.assertEqual(next(o for o in self.m._operations() if o['vm_id']==self.spec['vm_id']),state['op'])
             self.assertEqual(state['writes'],1)
 
+    def recovery_during_preparation(self, distribution):
+        with self.blocked(distribution,other=False) as state:
+            identity=self.spec['vm_id']
+            attempt='650e8400-e29b-41d4-a716-446655440001'
+            request={'vm_id':identity,'recovery_attempt_id':attempt,
+                'expected_host_boot_id':self.p.boot_id_reader(),'expected_lifecycle_generation':0,
+                'expected_intent_revision':1,'expected_execution':{'absent_observation_revision':1},
+                'mode':'start-if-absent','deadline_monotonic_ms':int((self.p.clock()+10)*1000)}
+            operation_path=self.f.data/'operations'/(state['op']['operation_id']+'.json')
+            owner_path=self.p.runtime/'locks'/('linux-owner-'+state['op']['operation_id']+'.lock')
+            workspace=self.f.data/state['op']['owned_workspace']
+            files=[operation_path,owner_path,*[p for p in workspace.rglob('*') if p.is_file()]]
+            before={path:(path.stat().st_ino,path.read_bytes()) for path in files}
+            calls=list(self.f.xen.calls)
+            responses=[]
+            # 미게시 VM에는 아직 복구할 등록 실행/attempt가 없다. 부재를 create 재개로 바꾸지 않는다.
+            for execute in (False,True):
+                response=self.m.fork().call('recover_once',request,execute=execute)
+                self.error(response,'VM_NOT_FOUND')
+                responses.append(response)
+                response=self.m.fork().call('recovery-reconcile',{'recovery_attempt_id':attempt},
+                                           execute=execute,budget_ms=2000)
+                self.error(response,'VM_NOT_FOUND')
+                responses.append(response)
+            response=self.m.fork().call('recovery-operation',{'recovery_attempt_id':attempt})
+            self.error(response,'VM_NOT_FOUND')
+            responses.append(response)
+            self.assertEqual(list(self.f.xen.calls),calls)
+            self.assertFalse((self.f.data/'recovery-attempts'/(attempt+'.json')).exists())
+            self.assertFalse((self.f.data/'control'/(identity+'.json')).exists())
+            self.assertFalse((self.f.data/'instances'/management.internal_name(identity)).exists())
+            self.assertEqual({path:(path.stat().st_ino,path.read_bytes()) for path in files},before)
+            self.assertEqual({p for p in workspace.rglob('*') if p.is_file()},set(files)-{operation_path,owner_path})
+            current=self.m.fork().call('operation',{'idempotency_key':'create:'+identity},budget_ms=2000)
+            self.assertTrue(current['ok'],current)
+            self.assertEqual(current['data']['effective_status'],'RUNNING')
+            self.assertEqual(current['data']['operation'],state['op'])
+            self.assertEqual(state['writes'],1)
+            self.assertFalse(state['release'].is_set())
+            self.assertTrue(state['thread'].is_alive())
+            if os.environ.get('XENOVA_STAGE3_EVIDENCE'):
+                evidence={'kind':'same unpublished VM recovery entry during actual paused Linux copy',
+                    'distribution':distribution,'a_operation':state['op'],'a_released':False,
+                    'recovery_responses':responses,'a_lookup':current,'new_xen_calls':[],
+                    'same_partial_assets':True,'same_owner_record':True,'root_writes':state['writes']}
+                with (Path(os.environ['XENOVA_STAGE3_EVIDENCE'])/('S3-T04-'+distribution+'-recovery-before-release.json')).open('x') as stream:
+                    json.dump(evidence,stream,indent=2)
+        self.assertEqual(self.last['response']['operation_id'],self.last['op']['operation_id'])
+        self.assertTrue(self.last['response']['ok'],self.last['response'])
+
+    def test_S3_T04_debian_recovery_entries_do_not_reclaim_live_unpublished_preparation(self):
+        self.recovery_during_preparation('debian')
+
+    def test_S3_T04_ubuntu_recovery_entries_do_not_reclaim_live_unpublished_preparation(self):
+        self.recovery_during_preparation('ubuntu')
+
     def test_S3_T05_adoption_preserves_other_configuration_and_reserved_address(self):
         with self.blocked() as state:
             changed=self.m.fork().call('autostart-set',{'vm_id':state['other'],'value':'on'})
@@ -321,6 +377,56 @@ with patch.object(vm,'storage_check'):
             request.p.clock=clock
             self.error(request.call('operation',{'idempotency_key':'create:'+self.spec['vm_id']},budget_ms=1),'DEADLINE_EXCEEDED')
             self.assertEqual(next(o for o in self.m._operations() if o['vm_id']==self.spec['vm_id']),state['op'])
+
+    def test_S3_T07_asset_scan_read_format_integrity_and_duplicate_errors_are_distinct(self):
+        with self.blocked(other=False) as state:
+            root=self.f.data/'operations'
+            path=root/(state['op']['operation_id']+'.json')
+            before=path.read_bytes()
+            read_text,iterdir=Path.read_text,Path.iterdir
+            results={}
+
+            def query(code,label):
+                response=self.m.fork().call('operation',{'idempotency_key':'create:'+self.spec['vm_id']},budget_ms=2000)
+                self.error(response,code)
+                self.assertIsNone(response['data'])
+                results[label]=response
+
+            def unreadable(file,*args,**kwargs):
+                if file==path:raise PermissionError('injected journal read failure')
+                return read_text(file,*args,**kwargs)
+
+            def partial_scan(directory):
+                yield from iterdir(directory)
+                if directory==root:raise OSError('injected incomplete directory read')
+
+            with patch.object(Path,'read_text',unreadable):
+                query('ARTIFACT_INVALID','journal-read-failure')
+            with patch.object(Path,'iterdir',partial_scan):
+                query('ARTIFACT_INVALID','incomplete-directory-read')
+            try:
+                path.write_bytes(b'{')
+                query('ARTIFACT_INVALID','json-format-failure')
+                path.write_text(json.dumps({**state['op'],'spec_hash':'0'*64}))
+                query('RECOVERY_REQUIRED','journal-integrity-mismatch')
+            finally:path.write_bytes(before)
+            duplicate={**state['op'],'operation_id':'650e8400-e29b-41d4-a716-446655440002',
+                       'owned_workspace':'instances/.operation-650e8400-e29b-41d4-a716-446655440002'}
+            extra=root/(duplicate['operation_id']+'.json')
+            try:
+                extra.write_text(json.dumps(duplicate))
+                query('RECONCILE_REQUIRED','duplicate-key')
+            finally:extra.unlink()
+            self.assertEqual(path.read_bytes(),before)
+            current=self.m.fork().call('operation',{'idempotency_key':'create:'+self.spec['vm_id']})
+            self.assertTrue(current['ok'],current)
+            self.assertEqual(current['data']['effective_status'],'RUNNING')
+            self.assertEqual(state['writes'],1)
+            self.assertFalse(state['release'].is_set())
+            if os.environ.get('XENOVA_STAGE3_EVIDENCE'):
+                with (Path(os.environ['XENOVA_STAGE3_EVIDENCE'])/'S3-T07-asset-lookup-errors.json').open('x') as stream:
+                    json.dump({'kind':'owned temporary journal faults; no product state changes',
+                               'results':results,'after_faults':current},stream,indent=2)
 
     def interrupted_private(self, phase):
         self.select()
