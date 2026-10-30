@@ -11,7 +11,7 @@ pipeline {
     }
 
     environment {
-        GITLAB_SSH_CREDENTIALS_ID = 'xenova-gitlab-deploy-key'
+        GITLAB_PUSH_CREDENTIALS_ID = 'xenova-gitlab-write-token'
     }
 
     stages {
@@ -23,9 +23,10 @@ pipeline {
                 }
             }
             steps {
-                withCredentials([sshUserPrivateKey(
-                    credentialsId: env.GITLAB_SSH_CREDENTIALS_ID,
-                    keyFileVariable: 'GITLAB_SSH_KEY'
+                withCredentials([usernamePassword(
+                    credentialsId: env.GITLAB_PUSH_CREDENTIALS_ID,
+                    usernameVariable: 'GITLAB_HTTP_USER',
+                    passwordVariable: 'GITLAB_HTTP_TOKEN'
                 )]) {
                     sh '''
                         set -eu
@@ -46,8 +47,19 @@ pipeline {
                             exit 1
                         fi
 
-                        export GIT_SSH_COMMAND="ssh -i $GITLAB_SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-                        repository_url='git@lab.ssafy.com:s15-final/S15P31E110.git'
+                        askpass="$(mktemp)"
+                        trap 'rm -f "$askpass"' EXIT
+                        printf '%s\n' \
+                          '#!/bin/sh' \
+                          'case "$1" in' \
+                          '  *Username*) printf "%s\\n" "$GITLAB_HTTP_USER" ;;' \
+                          '  *Password*) printf "%s\\n" "$GITLAB_HTTP_TOKEN" ;;' \
+                          'esac' > "$askpass"
+                        chmod 700 "$askpass"
+                        export GIT_ASKPASS="$askpass"
+                        export GIT_TERMINAL_PROMPT=0
+
+                        repository_url='https://lab.ssafy.com/s15-final/S15P31E110.git'
                         git fetch --no-tags "$repository_url" \
                           "+refs/heads/${target_branch}:refs/remotes/origin/${target_branch}" \
                           "+refs/heads/${source_branch}:refs/remotes/origin/${source_branch}"
