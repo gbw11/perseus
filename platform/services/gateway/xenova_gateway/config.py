@@ -55,7 +55,8 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
     p.add_argument("--password", default=_env(env, "BROKER_PASSWORD"),
                    help="가능하면 환경변수 XENOVA_GATEWAY_BROKER_PASSWORD 로 준다 (ps 에 보이지 않게)")
     p.add_argument("--sink", choices=("mock", "serial"), default=_env(env, "SINK") or d.sink)
-    p.add_argument("--serial-port", default=_env(env, "SERIAL_PORT") or d.serial_port)
+    p.add_argument("--serial-port", default=_env(env, "SERIAL_PORT") or d.serial_port,
+                   help="장치 경로(/dev/ttyUSB0) 또는 pyserial URL. socket://<PC>:7600 이면 같은 프레임을 TCP 로 시뮬레이터에 보낸다")
     p.add_argument("--serial-baud", type=int, default=int(_env(env, "SERIAL_BAUD") or d.serial_baud))
     p.add_argument("--frame-log", default=_env(env, "FRAME_LOG"))
     p.add_argument("--start-mode", choices=("AUTO", "SAFE_STOP"), default=_env(env, "START_MODE"),help="legacy profile only")

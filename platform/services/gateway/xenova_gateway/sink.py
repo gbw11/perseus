@@ -1,4 +1,8 @@
-"""ESP32 출력. 실제는 USB 시리얼(pyserial), 보드가 없을 때는 목 싱크가 프레임을 기록한다."""
+"""ESP32 출력. 실제는 USB 시리얼(pyserial), 보드가 없을 때는 목 싱크가 프레임을 기록한다.
+
+시리얼 포트 자리에는 pyserial URL 도 줄 수 있다. ``socket://<host>:<port>`` 로 주면 같은 바이트를
+TCP 로 보낸다 (PC 시뮬레이터의 프레임 수신 포트, 예: ``socket://192.168.0.10:7600``).
+"""
 
 from __future__ import annotations
 
@@ -49,7 +53,11 @@ class MockSink:
 
 
 class SerialSink:
-    """USB 시리얼로 프레임을 보낸다. 쓰기가 막히면 기다리지 않고 실패로 센다 (최종 정지는 ESP32 와치독)."""
+    """USB 시리얼로 프레임을 보낸다. 쓰기가 막히면 기다리지 않고 실패로 센다 (최종 정지는 ESP32 와치독).
+
+    port 는 장치 경로(/dev/ttyUSB0) 또는 pyserial URL(socket://host:port) 이다. 둘 다
+    serial_for_url 로 열어 같은 non-blocking 쓰기·SinkError 흐름을 탄다 (socket:// 은 baudrate 무시).
+    """
 
     def __init__(self, port: str, baudrate: int = 115200) -> None:
         try:
@@ -57,7 +65,7 @@ class SerialSink:
         except ImportError as exc:
             raise SinkError("시리얼 출력에는 pyserial 이 필요하다 (apt install python3-serial 또는 pip install pyserial)") from exc
         try:
-            self._serial = serial.Serial(port, baudrate=baudrate, timeout=0, write_timeout=0.005)
+            self._serial = serial.serial_for_url(port, baudrate=baudrate, timeout=0, write_timeout=0.005)
         except Exception as exc:  # serial.SerialException
             raise SinkError(f"시리얼 포트 {port} 열기 실패: {exc}") from exc
         self.failures = 0
