@@ -41,6 +41,8 @@ I/O 오류·동기화 실패 시 게시하지 않고 작업 경로를 보존한�
 workspace 생성 전 실패와 이미 게시된 자산의 후속 등록은 같은 operation·예약으로
 재확인한다. 정확한 상태·오류·재전달 계약은 [생성 계약](../../../docs/platform/cli-manager-spec.md#creation-contract)을 따른다.
 Linux 계획 성공은 payload 무결성이나 생성 완료의 확인이 아니다.
+미게시 부분 준비를 정리하는 관리 명령은 아직 없으며, 등록/보관 VM용 `retire/purge`로
+대신 처리하지 않는다. 원 key 조회와 파일 보존 이후의 종결·예약 해제는 별도 후속 범위다.
 
 기존 직접 준비 경로의 구형 Linux manifest가 `files`를 생략한 경우에는 기존
 `root_sha256`와 boot manifest의 해시로 검증한다. 새 관리 카탈로그는 계속 완전한

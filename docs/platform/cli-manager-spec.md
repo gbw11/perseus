@@ -3562,6 +3562,7 @@ create의 정확한 spec은 `vm_id,name,template_id,template_version,vcpus,memor
 - 검증 결합 복사는 sparse hole도 논리적인 0 바이트로 해시에 포함한다. 파일시스템이 hole 조회를 지원하지 않아도 전체 스트림 검증을 유지한다. 복사·동기화·해시 실패나 원본 교체 시 부분 workspace를 보존하고 게시하지 않는다. 외부 root 변경을 원자적으로 통제하거나 저장 매체의 전원 상실을 보장하는 계약은 아니다.
 - 수락 뒤 Linux 준비 실패는 원 operation의 `status=RECOVERY_REQUIRED`·진행 `phase`·`error`로 남긴다. 검증 이유와 I/O errno를 보존한다. 실패 기록의 저장도 실패하면 응답에 내구 저장 미확정을 밝힌다. 부분 파일이나 원 작업을 지워 정상 최초 상태로 만들지 않는다.
 - 같은 UUID·명세는 같은 `create:UUID`로 재확인한다. [자산 작업 조회](#cmd-operation)는 원 작업과 `effective_status`를 반환한다. 기록된 실패와 부분 workspace가 있으면 재실행도 재복사·재할당 없이 차단하고 최초 실패를 보존한다. 프로세스 중단으로 실패 기록이 없더라도 남은 부분 경로를 재초기화하지 않는다. workspace 생성 전 실패는 원 manifest를 다시 확인한 뒤 같은 작업·예약으로 재개할 수 있고, 이미 게시한 자산은 재복사 없이 기존 소유권을 확인해 후속 등록을 진행한다. 미게시 VM의 `get` 부재는 원 작업·부분 자산의 부재가 아니다.
+- 미게시 부분 workspace를 종결·정리하고 예약을 해제하는 관리 명령은 현재 없다. `retire`는 REGISTERED, `purge`는 RETIRED 자산을 대상으로 하므로 이 부분 준비에 적용하지 않는다. 원 key로 작업·오류를 조회하고 원 기록과 파일을 보존한다. 파일 삭제·phase 수정·새 UUID 발급으로 차단을 우회하지 않는다. 실패 자산의 소유권·사용 중인 mount/loop·잔존 효과를 확인한 뒤 종결하고 후속 생성으로 연결하는 절차는 별도 미완료 범위다.
 
 <a id="observation-fields"></a>
 ### B.4 Observation·Snapshot
