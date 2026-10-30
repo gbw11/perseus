@@ -257,7 +257,7 @@ class ManagementTest(unittest.TestCase):
         self.assertEqual(result['error']['code'],'IP_CONFLICT')
 
     def test_manifest_content_and_parent_links_cannot_select_another_artifact(self):
-        source=self.data/'templates/source/Image';source.chmod(0o644);source.write_bytes(b'changed');source.chmod(0o444)
+        source=self.data/'templates/source/template.json';source.chmod(0o644);source.write_bytes(b'changed');source.chmod(0o444)
         result=self.call('create',self.spec)
         self.assertEqual(result['error']['code'],'ARTIFACT_INVALID')
         self.assertFalse((self.data/'operations').exists())

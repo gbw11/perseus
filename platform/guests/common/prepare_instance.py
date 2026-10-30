@@ -1,9 +1,11 @@
 """PC와 Pi에서 공유하는 명시적 최초 인스턴스 생성. lifecycle start/stop은 호출하지 않는다."""
 from contextlib import contextmanager
+import errno
+import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
+import re
 import stat
 import subprocess
 import time
@@ -11,6 +13,7 @@ import time
 from first_install_contract import uuid4
 from artifact_io import publish
 from xenova_catalog import deployment_version
+from xenova_trace import span
 from prepare_rootfs import prepare_instance, prepare_deployment_seed, inside, verify_guest_agent
 
 
@@ -21,6 +24,133 @@ def command(args, **kwargs):
 
 def digest(path):
     return subprocess.check_output(['sha256sum', str(path)], text=True, timeout=900).split()[0]
+
+
+def _input_identity(info):
+    """정상 읽기로 바뀌는 atime은 제외하고 이번 준비의 원본 연결을 비교한다."""
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise ValueError('template input must be an unshared regular file')
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+            info.st_mode, info.st_uid, info.st_gid, info.st_nlink)
+
+
+def _unchanged(path, identity):
+    """한 준비 작업의 경로·원본 변경 guard. digest나 영구 검증 cache를 대신하지 않는다."""
+    if _input_identity(path.lstat()) != identity:
+        raise ValueError('template input changed during instance preparation: ' + path.name)
+
+
+@contextmanager
+def _input(path):
+    if path.resolve() != path:
+        raise ValueError('template input path must be canonical and unlinked')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        identity = _input_identity(os.fstat(fd))
+        _unchanged(path, identity)
+        yield fd, identity
+        if _input_identity(os.fstat(fd)) != identity:
+            raise ValueError('open template input changed during instance preparation: ' + path.name)
+        _unchanged(path, identity)
+    finally:
+        os.close(fd)
+
+
+def _metadata(path):
+    """동일하게 읽은 metadata 바이트로 해시와 JSON을 얻고 원본 변경 guard를 반환한다."""
+    with _input(path) as (fd, identity):
+        remaining, parts = identity[2], []
+        while remaining:
+            part = os.read(fd, min(1024 * 1024, remaining))
+            if not part:
+                raise ValueError('template metadata ended before its declared size')
+            parts.append(part)
+            remaining -= len(part)
+    raw = b''.join(parts)
+    return json.loads(raw), hashlib.sha256(raw).hexdigest(), identity
+
+
+def _ranges(fd, size):
+    """지원되는 filesystem에서는 hole을 유지하고, 비지원 시 같은 검증 stream으로 읽는다."""
+    if not hasattr(os, 'SEEK_DATA') or not hasattr(os, 'SEEK_HOLE'):
+        yield 0, size, True
+        return
+    position = 0
+    unsupported = (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP)
+    while position < size:
+        try:
+            data = os.lseek(fd, position, os.SEEK_DATA)
+        except OSError as error:
+            if error.errno == errno.ENXIO:
+                yield position, size, False
+                return
+            if error.errno not in unsupported:
+                raise
+            yield position, size, True
+            return
+        if data < position:
+            raise ValueError('template extent did not advance')
+        if data > position:
+            yield position, min(data, size), False
+        if data >= size:
+            return
+        try:
+            end = os.lseek(fd, data, os.SEEK_HOLE)
+        except OSError as error:
+            if error.errno not in unsupported:
+                raise
+            end = size
+        if end <= data:
+            raise ValueError('template data extent did not advance')
+        yield data, min(end, size), True
+        position = min(end, size)
+
+
+def _copy_verified(source, target, expected, *, expected_bytes=None):
+    """신규 private 파일로 복사하는 바이트 전체를 검증한다. 실패 결과는 게시·삭제하지 않는다.
+
+    sparse hole도 논리적인 0 바이트로 hash에 포함한다. 복사본 물리 매체의 재읽기 검증이나
+    전원 상실 수락은 아니다. 반환한 원본 신원은 이번 준비의 최종 변경 guard에만 사용한다.
+    """
+    if not isinstance(expected, str) or not re.fullmatch(r'[0-9a-f]{64}', expected):
+        raise ValueError('template input SHA-256 required')
+    if expected_bytes is not None and (type(expected_bytes) is not int or expected_bytes < 0):
+        raise ValueError('template input byte size required')
+    zero = bytes(1024 * 1024)
+    value = hashlib.sha256()
+    with span('prepare.verified-copy', asset=source.name), _input(source) as (fd, identity):
+        size = identity[2]
+        if expected_bytes is not None and size != expected_bytes:
+            raise ValueError('template input byte size mismatch')
+        output = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            for start, end, data in _ranges(fd, size):
+                os.lseek(fd, start, os.SEEK_SET)
+                os.lseek(output, start, os.SEEK_SET)
+                remaining = end - start
+                while remaining:
+                    length = min(len(zero), remaining)
+                    part = os.read(fd, length) if data else zero[:length]
+                    if not part:
+                        raise ValueError('template input ended during copy')
+                    value.update(part)
+                    remaining -= len(part)
+                    if not data or part == zero[:len(part)]:
+                        os.lseek(output, len(part), os.SEEK_CUR)
+                    else:
+                        pending = memoryview(part)
+                        while pending:
+                            count = os.write(output, pending)
+                            if count <= 0:
+                                raise OSError(errno.EIO, 'template copy write made no progress')
+                            pending = pending[count:]
+            os.ftruncate(output, size)
+            if value.hexdigest() != expected:
+                raise ValueError('copied template input SHA-256 mismatch: ' + source.name)
+            os.fsync(output)
+        finally:
+            os.close(output)
+    return identity
 
 
 def require_new_output(path):
@@ -152,7 +282,11 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
         raise ValueError('template path escapes persistent storage')
     for filename in ('root.raw', 'template.json', 'boot.json', 'Image', 'initrd', 'kernel.config'):
         vm.regular_asset(template, filename)
-    meta = json.loads((template / 'template.json').read_text())
+    meta, manifest_digest, manifest_identity = _metadata(template / 'template.json')
+    if ('template_manifest_sha256' in record
+            and record['template_manifest_sha256'] != manifest_digest):
+        raise ValueError('selected template manifest differs from bundle')
+    inputs = {template / 'template.json': manifest_identity}
     version = deployment_version(meta)
     if 'template_version' in meta or 'version' in meta:
         if not isinstance(version, str) or not __import__('re').fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?', version):
@@ -160,7 +294,7 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
         if 'template_version' in record and record['template_version'] != version:
             raise ValueError('selected template version differs from bundle deployment version')
         record['template_version'] = version
-        record['template_manifest_sha256'] = digest(template / 'template.json')
+        record['template_manifest_sha256'] = manifest_digest
     if record.get('guest_kind', 'linux') != 'linux':
         raise ValueError('Linux preparation cannot replace the selected guest kind')
     if (meta.get('template_id') is not None and record.get('template_id') is not None
@@ -172,14 +306,29 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
         raise ValueError('template is writable, not an immutable source')
     if meta.get('source', {}).get('distribution') not in ('ubuntu', 'debian'):
         raise ValueError('unsupported Linux template adapter; RTOS firmware uses its separate bundle')
-    if digest(template / 'root.raw') != meta['root_sha256']:
-        raise ValueError('template root disk changed since publication')
-    boot = json.loads((template / 'boot.json').read_text())
+    boot, boot_digest, boot_identity = _metadata(template / 'boot.json')
+    inputs[template / 'boot.json'] = boot_identity
     if boot.get('source') != meta.get('source'):
         raise ValueError('template root and boot provenance disagree')
+    hashes = {'root.raw': meta['root_sha256'], 'boot.json': boot_digest}
     for filename, key in [('Image', 'kernel_sha256'), ('initrd', 'initrd_sha256'), ('kernel.config', 'config_sha256')]:
-        if digest(template / filename) != boot[key]:
-            raise ValueError('template boot asset digest mismatch')
+        hashes[filename] = boot[key]
+    declared = meta.get('files')
+    if declared is not None:
+        if not isinstance(declared, dict) or set(declared) != set(hashes):
+            raise ValueError('complete template input manifest required')
+        for filename, expected in hashes.items():
+            if declared[filename]['sha256'] != expected:
+                raise ValueError('template input manifest hashes disagree')
+    for filename, expected in hashes.items():
+        if not isinstance(expected, str) or not re.fullmatch(r'[0-9a-f]{64}', expected):
+            raise ValueError('template input SHA-256 required')
+        if declared is not None and (type(declared[filename]['bytes']) is not int or declared[filename]['bytes'] < 0):
+            raise ValueError('template input byte size required')
+        path = template / filename
+        inputs.setdefault(path, _input_identity(path.lstat()))
+        if (declared is not None or filename == 'root.raw') and inputs[path][5] & 0o222:
+            raise ValueError('template input is writable, not an immutable source')
     output = args.data_root / ('seeds' if seed else 'instances') / args.id
     require_new_output(output)
     record.update(schema=1, guest_kind='linux', uuid='00000000-0000-4000-8000-000000000000' if seed else (identity or uuid4()), kernel_release=boot['kernel_release'])
@@ -191,10 +340,12 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
         stage = work.path / args.id
         stage.mkdir()
         for filename in ('root.raw', 'Image', 'initrd', 'boot.json', 'kernel.config'):
-            if filename == 'root.raw':
-                command(['cp', '--sparse=always', '--reflink=never', '--', template / filename, stage / filename])
-            else:
-                shutil.copyfile(template / filename, stage / filename)
+            for path, source_identity in inputs.items():
+                _unchanged(path, source_identity)
+            source_identity = _copy_verified(template / filename, stage / filename,
+                hashes[filename], expected_bytes=declared[filename]['bytes'] if declared is not None else None)
+            if source_identity != inputs[template / filename]:
+                raise ValueError('template input replaced before copy: ' + filename)
         (stage / 'root.raw').chmod(0o600)
         command(['tune2fs', '-U', 'random', stage / 'root.raw'])
         root = work.path / 'root'
@@ -221,8 +372,9 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
             for field in ('id', 'uuid', 'name', 'hostname', 'mac', 'ipv4'):
                 if current.get(field) == record[field] and not (seed and field == 'uuid'):
                     raise ValueError(f'duplicate {field} with {other.name}')
-        if digest(template / 'root.raw') != meta['root_sha256']:
-            raise ValueError('immutable template changed during instance preparation')
+        with span('prepare.source-guard'):
+            for path, source_identity in inputs.items():
+                _unchanged(path, source_identity)
         require_new_output(output)
         publish(stage, output)
         os.sync()

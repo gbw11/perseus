@@ -240,7 +240,11 @@ class LinuxDeploymentVersionTest(FollowupFixture):
         with self.linux_boundaries() as commands:
             result = self.m.call('create', self.spec, execute=True)
         self.assertTrue(result['ok'], result)
-        self.assertEqual(sum(c[0]=='cp' for c in commands), 1)
+        self.assertFalse(any(c[0]=='cp' for c in commands))
+        target = self.f.data/'instances'/self.f.key
+        self.assertNotEqual((target/'root.raw').stat().st_ino, (source/'root.raw').stat().st_ino)
+        for name in ('root.raw','Image','initrd','boot.json','kernel.config'):
+            self.assertEqual(sha(target/name), before[name])
         self.assertEqual({p.name:sha(p) for p in source.iterdir()}, before)
         record = json.loads((self.f.data/'instances'/self.f.key/'instance.json').read_text())
         rows = [result['data'], self.m.call('get', {'vm_id':self.spec['vm_id']})['data']['vm'],

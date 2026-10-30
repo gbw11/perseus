@@ -558,7 +558,7 @@ class Manager:
         except PlatformError:
             fail('INSUFFICIENT_STORAGE', 'insufficient capacity including registered and pending VM growth reserve')
 
-    def _selection(self, spec):
+    def _selection(self, spec, *, full=True):
         all_entries = catalog.entries(self.data)
         matches = [e for e in all_entries if e['template_id'] == spec['template_id']]
         if not matches:
@@ -579,7 +579,7 @@ class Manager:
                 fail('INVALID_SPEC', 'explicit Linux IP must be 192.168.77.2..99')
         descriptor = {k:selected[k] for k in ('schema_version','template_id','template_version','guest_kind',
                                              'asset_directory','manifest_sha256','source_template_id')}
-        return catalog.describe(self.data, descriptor, full=True)
+        return catalog.describe(self.data, descriptor, full=full)
 
     @staticmethod
     def _valid_ip(value):
@@ -717,7 +717,8 @@ class Manager:
         spec, selected = op['initial_spec'], op['template']
         descriptor={k:selected[k] for k in ('schema_version','template_id','template_version',
                     'guest_kind','asset_directory','manifest_sha256','source_template_id')}
-        selected=catalog.describe(self.data,descriptor,full=True)
+        # Linux payload는 실제 복사 stream 전체를 검증한다. 이 단계의 manifest guard는 유지한다.
+        selected=catalog.describe(self.data,descriptor,full=descriptor['guest_kind'] != 'linux')
         name = op.get('assigned', {}).get('internal_name', spec['name'])
         metadata = {'display_name':spec['name'], 'creation_spec':spec, 'creation_operation_id':op['operation_id'],
                     'template_id':spec['template_id'], 'template_version':spec['template_version'],
@@ -900,8 +901,22 @@ class Manager:
                 fail('RECOVERY_REQUIRED', 'partial preparation retained; no automatic disk reset',
                      details={'operation_id':op['operation_id'],'owned_workspace':op['owned_workspace']})
             self._save_op(op, 'preparing')
-            with tool_output():
-                self.preparer(op)
+            try:
+                with tool_output():
+                    self.preparer(op)
+            except ManagementError:
+                raise
+            except (PlatformError,OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as error:
+                if op['template']['guest_kind']!='linux':
+                    raise
+                # 내용 검증은 수락 후 복사에서 수행한다. 이미 기록한 작업을 미수락으로 표현하지 않는다.
+                # 검증 이유·I/O errno는 보존하되 외부 명령의 인자나 출력은 오류에 복제하지 않는다.
+                cause = str(error) if isinstance(error,(PlatformError,ValueError)) else (
+                    'errno='+str(error.errno) if isinstance(error,OSError) else
+                    'returncode='+str(error.returncode) if isinstance(error,subprocess.CalledProcessError) else '')
+                fail('RECOVERY_REQUIRED', type(error).__name__+': Linux preparation failed'+(' ('+cause+')' if cause else '')+
+                     '; original operation and any partial assets retained',
+                     details={'operation_id':op['operation_id']})
         self._save_op(op, 'published')
         record = self._read(target / 'instance.json')
         if (record['uuid'] != op['vm_id'] or record.get('creation_operation_id') != op['operation_id']
@@ -1055,6 +1070,15 @@ class Manager:
                 current = self._observe_view(self._state(previous['vm_id'],records))
                 return {**(current if action == 'create' else previous['result']),
                         'operation':previous,'original_result':previous['result'], 'current':current}
+            if action=='create' and previous['status']=='RECOVERY_REQUIRED':
+                target=self.data/'instances'/previous.get('assigned',{}).get('internal_name',previous['initial_spec']['name'])
+                workspace=self.data/previous['owned_workspace']
+                if not target.exists() and not target.is_symlink() and (workspace.exists() or workspace.is_symlink()):
+                    # 실패가 확정된 부분 준비의 재전달은 최초 오류·부분 파일을 다시 쓰지 않는다.
+                    if not execute:
+                        return {'plan':True,'operation':previous}
+                    fail('RECOVERY_REQUIRED','original preparation failure and partial workspace retained; inspect the original operation',
+                         details={'operation_id':previous['operation_id'],'owned_workspace':previous['owned_workspace']})
             if not execute:
                 if action == 'restore':
                     if tomb and tomb['generation'] == previous['expected_generation'] and tomb['lifecycle'] == 'RETIRED':
@@ -1079,9 +1103,16 @@ class Manager:
             return self._transition(previous,records)
         if action=='create':
             self._conflicts(spec,records)
-            selected=self._selection(spec)
+            selected=self._selection(spec, full=False)
             assigned_ip = self._allocate_ip(spec, records) if selected['capabilities'].get('dhcp') else None
+            # 명백한 용량 부족은 payload 전체 읽기 전에 거절한다. 이 결과는 예약이 아니다.
             self._reserve_space(sum(p.stat().st_size for p in Path(selected['directory']).iterdir()), records)
+            if selected['guest_kind']!='linux':
+                descriptor={k:selected[k] for k in ('schema_version','template_id','template_version',
+                            'guest_kind','asset_directory','manifest_sha256','source_template_id')}
+                selected=catalog.describe(self.data,descriptor,full=True)
+                self._reserve_space(sum(p.stat().st_size for p in Path(selected['directory']).iterdir()), records)
+            # Linux 내용 검증은 원 작업/예약을 저장한 뒤 실제 복사 바이트에 대해 한 번 수행한다.
             tomb=None
         else:
             tomb=self._state(spec['vm_id'],records)
@@ -1442,7 +1473,8 @@ class Manager:
                         op.update(status='RECOVERY_REQUIRED',error=response['error'])
                         self._save_op(op)
             except (OSError,PlatformError,ValueError):
-                pass
+                if action=='create':
+                    response['error']['message'] += '; operation failure was not confirmed durable; inspect the original operation'
         return response
 
 
