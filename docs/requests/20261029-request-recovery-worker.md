@@ -81,6 +81,29 @@ S4-T12 후속의 관측 슬롯 소유 부모 중단/잔존 helper·비정상 잠
 helper 종료/정상 경로 회복 후 정상 관측이 다시 소비되는 양쪽을 수락한다. Worker가 슬롯 파일을
 지우거나 chmod하여 차단을 해제하지 않는다. 이 요청은 Worker 제품에서 아직 수락 전이다.
 
+## 원 create 실패 종결의 소비
+
+5번 하위의 [원 작업 수습](../platform/cli-manager-spec.md#cmd-operation-reconcile)을
+일반 VM recovery나 app Standby 재합류와 합치지 않는다. 기존 D01/D03·시도/기한/의도
+보호는 유지하고 Worker 제품 구현은 계속 대기 상태다.
+
+`recovery/observe.py:PlatformObserver.__call__/_refresh_intents/_merge`와 Engine의
+원 결과 소비에서 asset RECONCILING은 명시 자산 수습 실행, FAILED는 원 생성 실패와
+기록된 수습 완료다. VM 사망/새 실행 관측/복구 완료/준비/출력 허가가 아니다. 원 journal
+status의 non-SUCCEEDED 하나만 보고 자산 수습을 반복 VM 재시작으로 연결하지 않는다.
+하위 제어/Recovery guard는 공통 예약 판정과 내구 재확인을 사용하지만 Worker가 원
+attempt·사용자 stop·backoff/시도 예산을 새로 발급할 근거는 아니다.
+
+Worker에 자동 operation-reconcile 실행/삭제 권한/수습 스케줄러를 추가하지 않는다.
+수습 필요·관측 오류·슬롯 경합은 원 작업 참조를 유지해 운영 수습으로 넘기고 raw
+workspace/credential/진단 원문을 공개 사건으로 전달하지 않는다. 원 실패 파일/기록을
+지워 관측 대상 부재로 만드는 fallback은 금지한다.
+
+수락은 실패 private/잔존 자식/수습 중/기록 완료/저장 미확정을 순서대로 입력하고,
+recover_once 폭주 0·옛 intent/attempt 재적용 0·수습을 VM 복구/Standby 완료로 승격 0을
+확인한다. 이후 사용자가 명시 생성·시작한 새 VM execution은 기존 신원·준비 계약으로
+정상 수락한다. 플랫폼 로컬 수습·신규 생성 통과는 실제 Worker 연결 수락이 아니다.
+
 ## 진행 기록
 
 - 2026-10-29: 승인한 최소 소비 연결과 로컬 회귀를 완료했습니다. D01·D03 요청 전체나 실제 Xen/Store·설치본 수락을 완료한 것은 아닙니다. Worker가 앱 재초기화를 자동 선택·요청하는 정책은 구현하지 않았으며, 로컬 root 수동 경로와 별도로 D01-W03·W04에서 결정해야 합니다.

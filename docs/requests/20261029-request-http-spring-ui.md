@@ -139,13 +139,12 @@ HTTP·Spring·화면 제품 코드는 이번에 대신 수정하지 않는다.
   응답 유실 뒤에도 UUID·key·할당을 유지한다. 미게시 상세 부재를 중복 생성으로 연결하지 않는다.
   부분 실패 재전달은 원 오류·파일을 유지하고, 게시 후 응답 유실은 재복사 없이 원 작업을
   회수한다. 로컬 하위 시험 통과를 실제 HTTP·Spring·화면 연결 완료로 처리하지 않는다.
-- 후속 5번의 하위 플랫폼 담당은 미게시 부분 자산의 종결·예약 해제·후속 생성 절차를
-  제공해야 한다. 현재 `retire/purge`는 이 자산에 `VM_NOT_FOUND`를 반환하며 정리 기능이
-  아니다. 원 operation/명세/manifest/할당·부분 파일과 mount/loop·실행자 잔존 효과를
-  먼저 대조하고, 확인한 만큼만 종결해야 한다. 원 기록 삭제·임의 phase 변경·자동 재복사는
-  허용하지 않는다. 종결 뒤 같은 원 요청을 재개할지 새 생성을 허용할지의 조건과 API는
-  아직 미정이며, 제공 전에는 화면이 ‘정리 완료·재시도 가능’으로 표시하지 않는다.
-  HTTP·Spring 담당은 조회·사용자 표시를 연결하되 파일 정리나 새 UUID 우회를 대신 구현하지 않는다.
+- 이 절 작성 당시 미제공이던 미게시 종결/예약 반환은 아래
+  [5번 연결](#원-create-기한과-실패-자산-수습-연결)을 따른다. retire/purge는 여전히
+  미게시 정리 기능이 아니다. 원 기록 삭제·phase 변경·자동 재복사는 허용하지 않는다.
+  같은 원 create는 원 실패/수습 결과만 회수하고 별도 신규 생성은 명시 새 요청으로 처리한다.
+  HTTP·Spring 담당은 새 지원 버전의 권한·확인·조회/사용자 표시를 연결하되 파일 정리나
+  새 UUID 우회를 대신 구현하지 않는다. 담당자 구현 전 제품 ‘정리 완료’ 표시는 미수락이다.
   수락은 종결/정리 중 중단·응답 유실에도 원 기록을 회수하고, 미종료 실행자·사용 중 자산·
   증거 불충분에서는 해제를 거절하며, 확인된 종결 뒤에만 후속 생성으로 진행하는 것이다.
 
@@ -162,7 +161,7 @@ HTTP·Spring·화면 제품 코드는 이번에 대신 수정하지 않는다.
 | 실제 위치 | 변경 요청·제공 근거 | 수락 assertion |
 |---|---|---|
 | `drivers/platform.py:SerializedManager.call/fork/load_manager`, `build_driver` | 기본 직렬화를 전부 삭제하지 않는다. 확인한 새 하위에서 Linux create와 get/list/asset operation 및 다른 VM stop을 요청별 fork 객체로 연결한다. 같은 inner를 여러 thread가 직접 공유하지 않는다. 하위의 동일 VM 충돌·실행 잠금·CPU/신원/의도 guard는 유지한다 | A의 실제 복사를 막아 둔 동안 B 조회와 실제 stop·완료 조회가 끝남. 상위 전역 mutex나 VM 공통 mutex가 하위의 새 진행성을 다시 막지 않음 |
-| `drivers/platform.py:_BUDGET_ACTIONS/call_with_budget`·서비스/라우터의 요청 예산 | 새 하위의 `operation`에 현재 남은 budget_ms를 전달한다. 기존 get/list의 timeout_ms도 같은 잔여값으로 제한한다. 만료 대기자의 뒤늦은 제출은 금지한다. create 전체 deadline 지원은 이번에 제공하지 않았으므로 budget_ms를 create에 추가하거나 timeout을 취소로 해석하지 않는다 | 원 작업 조회 만료·읽기 실패를 검색 부재로 바꾸지 않음. 조회 예산으로 원 실행 기한을 갱신하지 않음 |
+| `drivers/platform.py:_BUDGET_ACTIONS/call_with_budget`·서비스/라우터의 요청 예산 | operation에 현재 남은 budget_ms를 전달하고 get/list timeout_ms도 같은 잔여값으로 제한. 만료 뒤 제출 금지. 3번 후보에는 create 기한이 없었으며, 5번 지원 버전의 유한 정책/호출 범위는 아래 절을 조건부 적용. timeout은 취소가 아님 | 원 작업 조회 만료·읽기 실패를 검색 부재로 바꾸지 않음. 조회 예산으로 원 실행 기한을 갱신하지 않음 |
 | `PlatformProvisioner.ensure_instance/_registration/_paths`, `PlatformDriver.create`, `VmService.create` | 현재 ensure_instance는 create의 ok 응답 뒤 view/_registration에서 configuration.id를 찾는다. 활성 재전달의 data.operation/effective_status=RUNNING은 그 VMView가 아니다. 먼저 원 작업을 추적하고, SUCCEEDED의 등록 결과가 확인되기 전 `_paths`·start나 새 UUID 재생성을 하지 않는다. 선행 get의 직렬화도 함께 대조한다 | 같은 key 재전달을 잘못된 UUID/빈 경로 오류로 바꾸지 않음. 실제 등록 전 GET 부재를 중복 생성으로 연결하지 않음 |
 | 원 자산 작업 조회의 API/DTO·`raise_for_envelope` | asset `operation`과 control-operation을 분리해 연결한다. 새 HTTP 경로·응답 DTO는 담당자가 기존 인증/VM 접근권한과 함께 확정한다. key 또는 operation ID로 얻은 원 record의 vm_id가 권한 대상과 일치하는지 확인한다. raw journal·workspace 경로·내부 소유 PID/FD·진단 원문을 그대로 외부에 반환하지 않는다 | 정상 검색 부재·읽기/소유권 관측 실패·기한 초과·중복 key를 구별. 다른 VM 원장을 볼 수 없음 |
 
@@ -258,7 +257,65 @@ list/get에 `budget_ms=remaining_ms`와 필요한 timeout_ms를, asset/control �
 
 우리 쪽 슬롯 후속 시험은 실제 부모 중단/자식 FD/정상 반환과 비정상 경로·파일 거절을 제공한다.
 다른 uid는 로컬 fstat 경계 대역으로 확인했으며 실제 HTTP 인증/권한·운영 파일 보안 감사는 아니다.
-5번의 create 전체 deadline·실패 자산 종결, API 재시작 backend 귀속 문제는 계속 별도 미완료다.
+4번 당시 별도였던 create 기한/실패 종결은 아래 5번 제공 범위를 따른다.
+실제 상위 연결·운영 시간값·설치/보드와 API 재시작 backend 귀속은 계속 별도 미완료다.
+
+## 원 create 기한과 실패 자산 수습 연결
+
+**5번 하위 제공 / FastAPI·Spring·화면 제품 구현과 종단 수락 대기.** 기존 요청 ID·
+D02/D08의 원 key/응답 유실·pending/uncertain 후속 책임은 유지한다.
+읽는 순서는 [원 생성/수습 명세](../platform/cli-manager-spec.md#cmd-operation-reconcile),
+[관리 경계](../platform/management-boundaries.md#원-생성-실패와-예약-반환), 기존 원 key 절이다.
+
+| 담당·실제 위치 | 권고 연결·하위 제공 | 수락 assertion |
+|---|---|---|
+| 플랫폼 설치 담당·FastAPI `drivers/platform.py`의 `SerializedManager/_BUDGET_ACTIONS/call_with_budget/PlatformDriver.create` | 동일 후보의 새 helper/관련 모듈·정식 import를 설치. 운영 승인된 `/etc/xenova/creation-policy.json` 공급 확인. create/operation-reconcile의 잔여 budget 전달, 요청별 fork 사용 | 예시 null 설정이나 정책 부재는 새 Linux create 수락 전 거절. 기존 완료 조회/수습을 정책 부재로 막지 않음. schema 1.1을 모르는 writer/혼합 모듈 운용 0 |
+| FastAPI 요청 모델·`api/vms.py`·`service.py`, Spring `VmService.create/Dom0ManagerClient.launch` | VM spec과 호출 예산을 분리. 제출 전 UUID/spec·정규 create:UUID key·사용자 소유를 보존. create 등록과 이후 start는 별도 원 요청으로 추적 | timeout/연결 단절/GET 부재에서 새 UUID·복사 제출 0. 늦은 create 결과로 최신 stop 이후 자동 launch 0 |
+| 원 작업 조회/수습의 HTTP 어댑터·Spring 작업 추적 | asset operation의 SUCCEEDED/RUNNING/RECONCILING/FAILED/RECOVERY_REQUIRED와 VM 실행 상태를 구별. 하위 진단과 명시 적용은 기존 조회의 자동 후속이 아닌 별도 인증/확인 경로 | FAILED+수습 완료를 create 성공/VM 실행/정지 완료로 표시하지 않음. 일반 polling이 수습·삭제를 시작하지 않음 |
+| 미게시 대상의 접근권한·명시 확인·수습 요청 저장 | 일반 get이 없을 수 있으므로 원 생성 요청 소유/정책 주체로 권한 확인. 원 operation·VM·spec hash·목적·진단 context·안정 reconciliation_id를 저장한 뒤 명시 execute | ID를 아는 다른 사용자의 진단/조회/폐기는 기존 권한 정책대로 거절. 진단 뒤 inode/문맥 교체는 거절. 같은 수습 진행 revision을 새 요청으로 오인하지 않음 |
+| 프론트 VM 생성/작업 상세·원 결과 재확인 | 원 생성 실패, 수습 진단 가능/진행/기록 완료, 예약 소비자의 내구 확인 및 새 생성 가능성을 구별. 계획 예상 항목 수·대상 확인 후 명시 폐기 | 같은 create key는 원 실패+수습 결과만 회수. 정리 응답 유실 뒤 같은 수습 ID 회수. 새 정상 생성은 별도 사용자 요청·UUID/current 자원 검사로만 시작 |
+
+하위 사용 예시는 다음과 같다. `REMAINING_MS`는 각 호출 직전 다시 계산한 실제 잔여
+예산이며 이 예시가 새 운영 시간값을 정하지 않는다. 원 VM 명세에 timeout을 추가하지 않는다.
+
+```python
+created = manager.fork().call("create", original_vm_spec, execute=True,
+                              budget_ms=REMAINING_MS)
+original = manager.fork().call("operation", {"idempotency_key": "create:" + VM_ID},
+                               budget_ms=REMAINING_MS)
+diagnostic_spec = {"operation_id": OP_ID, "vm_id": VM_ID,
+                   "expected_spec_sha256": SPEC_HASH, "purpose": "discard-private"}
+diagnostic = manager.fork().call("operation-reconcile", diagnostic_spec,
+                                 budget_ms=REMAINING_MS)
+# 인증·대상 확인·사용자의 명시 폐기를 받은 뒤 아래 요청을 안정적으로 보존한다.
+discard_spec = {**diagnostic_spec, "expected_context_sha256": CONTEXT_FROM_DIAGNOSTIC,
+                "reconciliation_id": SAVED_RECONCILIATION_UUID}
+discarded = manager.fork().call("operation-reconcile", discard_spec, execute=True,
+                                budget_ms=REMAINING_MS)
+```
+
+create의 원 기한은 최초 수락에서 host와 함께 저장되며 재전달/조회로 연장하지 않는다.
+수습은 현재 호출의 별도 기한으로 실행하며 원 생성의 기한/신원을 고치지 않는다. 구버전
+기한 불명·다른 host의 실패도 현재 사용/소유 확인 뒤 명시 폐기할 수 있다. 수습의 기본
+timeout 15초와 상한 105000ms는 생성 운영 한도나 HTTP 대기시간이 아니다.
+
+다음은 **하위 값의 외부 반환 허용안**이며 새 HTTP DTO를 이미 구현한 목록이 아니다.
+기존 권한과 API 계약에 맞춰 담당자가 확정한다.
+
+| 하위 원천 | 허용할 최소 의미 | 외부 전달 금지 |
+|---|---|---|
+| envelope/operation 관측 | 권한 확인된 operation_id·vm_id·effective_status, 기존 오류 code/원 작업 참조 | raw operation/request/template/할당·spec 원문 전체 |
+| 진단 | purpose·context_sha256·spec_sha256·private_items/private_absent·명시 수습 필요 여부 | filesystem 경로·dev/inode·PID/FD·전체 진단 자료 |
+| reconciliation | 권한 확인된 request.reconciliation_id·purpose·phase·남은 개수, 원 생성 실패와 기록된 release 의미 | plan/items/remaining 경로 목록, credential·최초 오류/cleanup 진단 문자열 |
+| 시간 | 필요하고 권한이 확인된 원 host/기한과 이번 조회의 만료 판정 | 이를 자동 실행 승인·재시작 신호로 사용하는 동작 |
+
+공동 인수는 Debian·Ubuntu 각각 실패/만료→진단→명시 수습→수습 중 단절→같은 수습
+재확인→원 create 실패 replay→별도 새 생성으로 수행한다. 수습을 막은 상태에서도 다른
+VM 정상 조회·실제 stop·원 제어 결과가 완료되어야 한다. 실제 HTTP threadpool·Spring·
+화면으로 수행하며 하위 Python fixture 통과로 대체하지 않는다.
+fsync/저장 오류에서 raw complete JSON을 보았다는 이유만으로 성공/예약 반환을 표시하지
+않고 원 수습 결과를 재확인한다. 상위가 journal/lock 파일 삭제·phase 변경·자동 force로
+대신 수습하는 fallback은 금지한다. API cgroup/backend 소유는 이 작업의 해결 범위가 아니다.
 
 ## 설치본 API 재시작과 VM backend 소유
 

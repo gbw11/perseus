@@ -101,8 +101,11 @@ Spring 관리 흐름이 제출 전 보존하고, 허용되는 동일 요청 이�
 위 fork의 새 지원 범위는 [현재 HTTP 담당 요청의 3번 연결](../requests/20261029-request-http-spring-ui.md#linux-준비-중-조회제어의-동시-연결)에
 조건·실제 소비 위치·제품 수락을 정리했다. 이 조건부 개정은 이전 D02·D08의 하위 완료나
 상위 미연결 상태를 덮어쓰지 않는다. asset operation의 RUNNING은 VM 실행 상태가 아니며,
-create의 `ok=true`만으로 `_paths`/start를 호출하지 않는다. create 전체 deadline은 이번
-조회 예산과 별개로 미완료다. 알려진 실제 source/installed hash의 일치를 먼저 확인한다.
+create의 `ok=true`만으로 `_paths`/start를 호출하지 않는다. 5번은 조회 예산과 별개인
+[원 create 기한·명시 수습](cli-manager-spec.md#cmd-operation-reconcile)을 제공한다.
+실제 제공 필드·운영 정책/모듈 버전·권한·상위 후속 책임은
+[담당자 요청](../requests/20261029-request-http-spring-ui.md#원-create-기한과-실패-자산-수습-연결)을 따른다.
+알려진 실제 source/installed hash의 일치를 먼저 확인하며 구버전에 새 호출을 보내지 않는다.
 
 조회는 `data.operation`에 원 record를 반환한다. `data.deadline_observation`은 현재 host의
 단조 시각과 원 host 일치/원 실행 기한 만료 여부를 반환한다. host가 다르거나 기한 근거가

@@ -125,6 +125,7 @@ Manager 전용 명령은 `templates, list, get, create, retire, delete, restore,
 | [`xenova-vm probe`](#cmd-probe) | 제한시간을 둔 실제 Xen 관측 |
 | [`xenova-vm snapshot`](#cmd-snapshot) | 공통 작업을 기다리지 않는 캐시 조회 |
 | [`xenova-vm operation`](#cmd-operation) | 자산 작업 이력 |
+| [`xenova-vm operation-reconcile`](#cmd-operation-reconcile) | 실패한 Linux private 자산의 진단·명시 수습 |
 | [`xenova-vm control-operation`](#cmd-control-operation) | 사용자 제어 이력 |
 | [`xenova-vm recovery-operation`](#cmd-recovery-operation) | 조건부 복구 이력 |
 | [`xenova-vm recovery-reconcile`](#cmd-recovery-reconcile) | 원 복구 시도의 진단·증거 기반 종결 |
@@ -800,6 +801,101 @@ Linux의 확인된 원 준비 실행은 `effective_status=RUNNING`이다. 원 st
 **Manager 매핑:** `operation / {operation_id} 또는 {idempotency_key}`
 
 [명령어 색인으로](#command-index)
+
+<a id="cmd-operation-reconcile"></a>
+### `xenova-vm operation-reconcile` — 원 create의 private 실패 종결
+
+기본 호출은 읽기 전용 진단이다. 등록 VM의 retire/purge나 VM recovery-reconcile와 다르다.
+운영 자산을 임의 삭제하는 명령이 아니며, 원 기록에서 도출한 미게시 Linux workspace만 다룬다.
+
+`xenova-vm operation-reconcile --spec-file REQUEST.json [--execute] [--budget-ms MS] --json`
+
+Manager 매핑은 `call("operation-reconcile", spec, execute=False, budget_ms=...)`다.
+`execute=True`는 해당 원 작업의 `discard-private` 목적을 명시 확인한 호출이다.
+외부 HTTP는 자동 노출하지 않으며 소유자 권한·확인·허용 응답 필드는 담당자 연결 사항이다.
+
+| spec 필드 | 범위·의미 |
+|---|---|
+| `operation_id` 또는 `idempotency_key` | 정확히 하나의 원 create 선택자. 중복 key는 부재/유일성으로 추정하지 않음 |
+| `vm_id` | 원 create의 소문자 표준 UUID. ID를 안다는 사실은 사용자 접근권한이 아님 |
+| `expected_spec_sha256` | 원 operation.spec_hash의 소문자 SHA-256. 호출 timeout을 VM 명세에 넣지 않음 |
+| `purpose` | `discard-private`만 허용. 임의 경로/PID/device/force 입력은 없음 |
+| `timeout_ms` | 선택 1..105000, 생략 15000. 이번 진단/수습 기한이며 원 create 기한이 아님 |
+| `expected_context_sha256` | 명시 적용 시 진단 data.context_sha256. 대상/자산/gate가 바뀌면 재진단. 진단 자체가 삭제 권한 토큰은 아님 |
+| `reconciliation_id` | 명시 적용 시 안정적인 소문자 표준 UUID. 같은 수습의 재전달에는 같은 ID/목적/원 spec/진단 문맥을 사용 |
+
+진단 data는 `operation_id/vm_id/spec_sha256/purpose/context_sha256/private_items/private_absent/
+reservation_released=false`를 반환한다. 실행자 active/residual·다른 수습·관측 실패·public/등록
+충돌에서는 오류로 종결하며 준비 실행을 탈취하지 않는다. 빈 workspace도 원 효과/사용 부재를
+확인한 명시 종결 대상이며, 진단/일반 operation 조회는 삭제나 예약 반환을 수행하지 않는다.
+
+명시 수습은 기존 Linux 준비 슬롯 밖에서 대기열을 만들지 않는다. 슬롯을 확보하고 원 작업에
+`discard-private` 소유를 연결한 뒤 계획을 저장한다. 긴 열거/사용 검사/정리는 공통 잠금 밖이고
+각 삭제 직전에는 gate와 계획 inode를 재확인한다. 계획·기록·완료의 짧은 변경은 공통 잠금,
+실제 개별 unlink는 짧은 admission으로 gate와 직렬화한다. 안정 lock·원 journal·template·public
+VM·진단 원본은 삭제하지 않는다. 계획은 고정 private topology, 최대 128항목/직렬화 128KiB로 제한한다.
+
+적용 data는 원 `operation`, `effective_status=FAILED`, `recovery_required=false`,
+`reconciliation`을 반환한다. **수습 완료는 원 create 성공이 아니다.** 같은 create key를 다시
+실행하면 원 실패와 수습 기록을 error.details로 회수하며 새 복사/신원/기한을 발급하지 않는다.
+명시 신규 create는 새 key/VM 신원과 현재 IP/용량 검사로 수행한다. 원 UUID 이력은 계속 보존한다.
+
+수습 기록은 자산 journal `schema_version=1.1`의 `reconciliation.version=1`이다.
+`request/context_sha256/plan/plan_sha256/phase/remaining/deleting/root_pending/error/release`를
+한 원자 JSON 단위로 저장한다. phase는 planned/cleaning/complete이며 원 spec_hash/최초
+error/result를 수습 결과로 덮지 않는다. cleanup 오류는 별도 reconciliation.error에 둔다.
+알 수 없는 subtree·손상·관측 실패는 반환 가능한 예약 0으로 해석하지 않는다.
+
+삭제 전에 계획과 다음 삭제 항목을 저장한다. unlink/부모 fsync 뒤 중단되면 동일 수습으로
+해당 항목의 부재와 남은 계획을 확인한다. 원인 모를 부재·다른 inode·링크·특수 파일·mount·
+사용 FD는 거절한다. 새 프로세스의 소유 파일에 재사용된 inode와 아직 열린 private inode는
+현재 FD 경로/링크 상태도 대조하여 구별한다. 원 source 손상은 게시를 막지만 소유가 확인된
+실패 사본 폐기를 무조건 막지는 않으며, 폐기를 위해 payload 전체를 다시 해시하지 않는다.
+
+완료 JSON이 보인다는 사실만으로 과거 fsync 성공을 추정하지 않는다. 일반 조회가 표시하는
+complete/release는 기록 내용이다. 예약을 실제 소비하는 writer는 기존 공통 잠금 안에서
+workspace 부재·동일 원 기록을 확인하고 파일/부모 fsync를 재확정한다. 실패하면 예약을
+소비하지 않는다. 일반 목록/operation 조회를 fsync 실행기로 바꾸지 않는다.
+계획 저장 실패에서는 삭제 0, 완료 저장 미확정에서는 반환 성공 0이며, 회복 후 같은 수습으로
+다시 확인한다. 기록/잠금 삭제·phase 수정·새 UUID로 차단을 우회하지 않는다.
+
+용량 검사는 기존의 VM 증가분과 2GiB 여유를 유지한다. 수습 메타데이터 상한 128KiB는
+정리 기록의 별도 물리 공간 예약이 아니다. 외부 쓰기로 여유가 소진되거나 매체 EIO가 생기면
+계획/완료 저장을 실패로 반환하며, 저장소가 회복된 뒤 같은 수습을 명시 재전달한다.
+다른 VM·원장·로그를 지워 기록 공간을 자동 확보하지 않는다.
+
+<a id="creation-deadline"></a>
+#### Linux 생성의 세 시간과 호환
+
+새 Linux create는 `/etc/xenova/creation-policy.json`의 유한 정책을 요구한다.
+정확한 key는 `schema_version="1.0", call_ms, execution_ms, cleanup_ms`다. 정수 양수이며
+call_ms>cleanup_ms여야 한다. call/실행의 직렬화 입력 상한은 86460000ms,
+cleanup_ms 상한은 60000ms다. 이는 운영 기본값·보드 지연 보장이 아니다.
+recipe는 값이 null인 예시를 `/usr/share/xenova/creation-policy.json.example`로만 설치한다.
+승인된 보드 정책을 별도로 공급하기 전 새 Linux create는 수락 전 RECONCILE_REQUIRED,
+accepted=false다. 완료 replay·조회·기한 불명 작업의 명시 수습은 이 설정 부재로 막지 않는다.
+Zephyr의 기존 bundle·독립 factory seed 준비 계약은 유지한다.
+
+| 시간 | 현재 의미 |
+|---|---|
+| 이번 호출 | 진입부터 registry/슬롯/잠금/준비/반환의 잔여 예산. create budget_ms는 이 정책의 call_ms 이하로 제한 |
+| 원 생성 | 수락 시 `min(t_accept+execution_ms, D_call-cleanup_ms)`를 host boot와 함께 내구 기록. 재전달/조회/재시작으로 연장하지 않음 |
+| 종료·수습 | 소유 자식/FD·mount/loop 종료와 기록 또는 명시 수습의 유한 예산. 만료된 생성의 새 복사/게시/launch를 허가하지 않음 |
+
+새 Linux journal의 `creation`에는 version=1·host_boot_id·accepted_monotonic_ms·
+deadline_monotonic_ms·limits를 둔다. schema 1.0 완료 기록은 replay하고, 원 기한 없는
+미완료나 다른 host 기록을 새 생성 기한으로 자동 재개하지 않는다. 현재 host의 별도 수습은
+가능하다. 새 의미를 모르는 구형 writer/일부 모듈 혼합 배포는 지원하지 않는다.
+
+실제 복사의 읽기/extent/부분 write, 다음 payload, guest 명령 제출/반환과 source/public
+게시 직전에 원 기한을 검사한다. 자기 일시 자원의 정상 종료와 실패 이미지의 명시 폐기를
+구별한다. fsync/커널 I/O의 즉시 선점을 보장하지 않는다. 파일과 부모 동기화는 각각 필요하다.
+([fsync(2)](https://man7.org/linux/man-pages/man2/fsync.2.html))
+
+public 게시 뒤에는 원 자산 검증·등록/결과 기록과 DHCP 같은 외부 효과를 구별한다.
+dhcp-applied가 확인된 원 작업의 결과는 원 생성 기한 뒤에도 이번 조회/정산 예산으로
+회수할 수 있다. 최신 stopped 의도를 초기 값으로 덮거나 Xen launch하지 않는다.
+확인되지 않은 DHCP를 만료 후 다시 제출하며 결과 회수라고 부르지 않는다.
 
 <a id="cmd-control-operation"></a>
 ### `xenova-vm control-operation` — 사용자 제어 이력
@@ -3580,8 +3676,8 @@ create의 정확한 spec은 `vm_id,name,template_id,template_version,vcpus,memor
 - Debian·Ubuntu의 실제 Linux 준비는 단일 슬롯을 사용한다. 원 요청/예약 확정과 게시 채택은 공통 잠금 안에서, 검증 복사·guest 설정·자원 정리는 그 밖의 private 경로에서 수행한다. 게시 때 현재 등록부·원 manifest·신원/주소 예약·host gate/의도를 다시 확인하고 해당 VM의 변경만 반영한다. 준비 전의 공통 등록부 사본으로 다른 VM의 변경을 덮지 않는다.
 - 검증 결합 복사는 sparse hole도 논리적인 0 바이트로 해시에 포함한다. 파일시스템이 hole 조회를 지원하지 않아도 전체 스트림 검증을 유지한다. 복사·동기화·해시 실패나 원본 교체 시 부분 workspace를 보존하고 게시하지 않는다. 외부 root 변경을 원자적으로 통제하거나 저장 매체의 전원 상실을 보장하는 계약은 아니다.
 - 수락 뒤 Linux 준비 실패는 원 operation의 `status=RECOVERY_REQUIRED`·진행 `phase`·`error`로 남긴다. 검증 이유와 I/O errno를 보존한다. 실패 기록의 저장도 실패하면 응답에 내구 저장 미확정을 밝힌다. 부분 파일이나 원 작업을 지워 정상 최초 상태로 만들지 않는다.
-- 같은 UUID·명세는 같은 `create:UUID`로 재확인한다. [자산 작업 조회](#cmd-operation)는 원 작업과 `effective_status`를 반환한다. 기록된 실패와 부분 workspace가 있으면 재실행도 재복사·재할당 없이 차단하고 최초 실패를 보존한다. 프로세스 중단으로 실패 기록이 없더라도 남은 부분 경로를 재초기화하지 않는다. workspace 생성 전 실패는 원 manifest를 다시 확인한 뒤 같은 작업·예약으로 재개할 수 있고, 이미 게시한 자산은 재복사 없이 기존 소유권을 확인해 후속 등록을 진행한다. 미게시 VM의 `get` 부재는 원 작업·부분 자산의 부재가 아니다.
-- 미게시 부분 workspace를 종결·정리하고 예약을 해제하는 관리 명령은 현재 없다. `retire`는 REGISTERED, `purge`는 RETIRED 자산을 대상으로 하므로 이 부분 준비에 적용하지 않는다. 원 key로 작업·오류를 조회하고 원 기록과 파일을 보존한다. 파일 삭제·phase 수정·새 UUID 발급으로 차단을 우회하지 않는다. 실패 자산의 소유권·사용 중인 mount/loop·잔존 효과를 확인한 뒤 종결하고 후속 생성으로 연결하는 절차는 별도 미완료 범위다.
+- 같은 UUID·명세는 정규 `create:UUID`로 재확인한다. 별도 key 인자가 이 원 key를 바꾸지 않는다. [자산 작업 조회](#cmd-operation)는 원 작업과 `effective_status`를 반환한다. 부분 workspace를 재초기화/재복사하지 않는다. workspace 전 실패는 같은 host·유효한 원 기한·원 manifest/예약에서만 재개한다. 게시 후 원 결과 회수도 재복사하지 않으며, 확인된 DHCP/메타데이터 정산과 새 외부 효과를 구별한다. 미게시 VM의 get 부재는 원 작업·부분 자산의 부재가 아니다.
+- 실패 private의 명시 종결은 [operation-reconcile](#cmd-operation-reconcile)을 사용한다. retire는 REGISTERED, purge는 RETIRED 자산의 별도 수명 계약이며 미게시 정리에 적용하지 않는다. 실행·자산·사용 상태와 완료 내구성을 확인하기 전 예약을 반환하지 않는다. 수습 뒤 같은 원 key는 원 실패를 유지하고, 별도 신규 생성은 새 VM 신원과 현재 자원 검사를 거친다. 파일/원장 삭제·phase 수정·새 UUID 우회는 지원 수습이 아니다.
 - 슬롯 해제는 자식·mount/loop 정리 완료의 증거가 아니다. 작업 경로의 자원 기록이 미확정이면 host 종료의 저장소 해제를 거절한다. host gate가 닫히거나 준비 중 admission 문맥이 교체되면 뒤늦은 게시를 허가하지 않는다. 새 준비 소유권/출력 모듈을 포함한 단일 설치 후보와 요청별 Manager 객체를 사용해야 한다. 일부 파일만 섞은 설치본의 동시 호출을 지원한다고 간주하지 않는다.
 
 <a id="observation-fields"></a>
@@ -3669,8 +3765,8 @@ cpu_policy의 policy_sha256은 key 정렬·공백 없는 UTF-8 JSON(ensure_ascii
 
 | 필드 | 값·의미 |
 |---|---|
-| `effective_status` | `SUCCEEDED`: 원 결과 내구 확정. `RUNNING`: 같은 원 Linux 준비의 활성 실행 소유권 확인. `RECOVERY_REQUIRED`: 실행자 부재/잔존 효과와 미완료 기록 또는 기록된 실패의 재확인 필요 |
-| `recovery_required` | effective_status가 RECOVERY_REQUIRED이면 true, 나머지 두 값은 false. 자동 복구 이행·허가를 뜻하지 않음 |
+| `effective_status` | `SUCCEEDED`: 원 결과 내구 확정. `RUNNING`: 같은 원 Linux 준비의 활성 실행 확인. `RECONCILING`: 원 작업에 결합된 명시 수습 실행 확인. `FAILED`: 원 생성 실패와 기록된 수습 완료. `RECOVERY_REQUIRED`: 미완료/미확정·실패의 재확인 필요 |
+| `recovery_required` | effective_status가 RECOVERY_REQUIRED이면 true, 나머지는 false. 자동 복구 이행·출력 허가·할당자의 내구 확인 완료를 뜻하지 않음 |
 
 RUNNING은 응답 시점의 관측이며 VM 실행·생성 완료·기한 연장이 아니다. 원 작업/host/프로세스
 시작 신원·실제 소유 FD/잠금을 대조한다. 소유권 관측 실패는 오류로 반환하며 RUNNING이나
@@ -3898,7 +3994,7 @@ PY
 stop 수락의 검색 예산과 원 stop의 물리 실행 deadline은 구별하며 검색 예산으로 원 기한을
 축소·연장하지 않는다. 개별 filesystem syscall을 선점하는 hard realtime 보장은 아니다.
 
-`budget_ms`는 `start/stop/reboot/destroy/get/list/operation/control-operation/recovery-reconcile`의 선택 호출 인자다.
+`budget_ms`는 `start/stop/reboot/destroy/get/list/operation/control-operation/recovery-reconcile/operation-reconcile`의 선택 호출 인자다.
 정수 1..105000ms만 허용하며 bool은 거절한다. 상위 대기 후 남은 기간을 전달하는 용도이며
 원 spec/hash에 포함하지 않는다. 물리 실행 기한은 기존 90초와 전달 예산 중 짧은 값이다.
 기존 원 작업 재전달은 저장된 원 기한을 연장하지 않는다. 제한된 결과 재확인도 이번 호출의
@@ -3917,8 +4013,8 @@ OS 프로세스를 만들지 않으며, 공유 Manager를 임의로 동시 호�
 명령 데이터 stdout의 한도 64KiB 초과는 잘린 정상값 대신 오류다. sink의 초과 분량은
 누락 수로 남기며 프로세스 전역 FD/stdout·cwd/env는 바꾸지 않는다.
 `operation`은 기본 15초 조회 예산과 전달한 budget_ms 중 짧은 잔여 기간을 사용한다.
-create의 전체 물리 실행 deadline·상위 timeout 연결은 별도 미완료이며 budget_ms를
-create에 전달하거나 HTTP timeout을 취소로 간주하지 않는다. 새 슬롯 시도는 무대기이고
+Linux create의 budget_ms는 [별도 유한 생성 정책](#creation-deadline)의 call_ms 상한 안에서
+전달한다. 상위 HTTP timeout을 취소로 간주하지 않는다. 새 슬롯 시도는 무대기이고
 수락 재검사 전에 이번 호출의 초기 잔여 예산을 확인한다.
 HTTP의 VM mutex·직렬화 분리는 아직 연결되지 않았다. 구체적인 담당 범위는
 [관리 요청 연동 요청서](management-integration-request.md)를 따른다.
@@ -4098,7 +4194,7 @@ DEADLINE_EXCEEDED로 거절한다. 검증 후 게시 직전 만료도 새 정책
 | 일반 HTTP control | 기본 E 90초 + 기존 R 최대 15초 + P, S 최대 5초. Spring command 기본 100초 | 하위 budget_ms로 물리/재확인 잔여 예산을 제한할 수 있지만 FastAPI 전달은 미연결. 상위 Q가 무기한이면 유한 종단 보장 불가 | Q/S 소모와 반환 여유를 뺀 실제 잔여값 전달. 물리 원 기한은 연장하지 않음. 100초 caller 안에서 수습 관측이 충분한지는 제품 조건별 수락 필요 |
 | 복구 중 stop HTTP | VM Q와 S가 하위 수락보다 앞섬. 오류 details·원 key도 현재 경로에서 보존하지 않음 | 하위의 짧은 durable 수락만으로 상위 잠금을 우회할 수 없음 | 기존 stop 경로의 짧은 수락/긴 실행 분리와 요청별 Manager 상태 보호, pending/completed 응답 구분 필요. 새 HTTP API를 임의 구현하지 않음 |
 | Worker recover_once 실행 | 현재 Engine이 실행 슬롯·현재 view에서 기본 110초 spec을 선저장한 뒤 호출 | 실행 전 판단 큐/직렬화 대기는 이 실행 예산과 별도. 응답 유실은 원 attempt journal로 확인 | 같은 attempt의 원 host·절대 D를 재사용. 원 D 뒤 기존 verify_timeout_s(기본 150초)까지 결과 조회가 계속 실패하면 final RECONCILE_REQUIRED로 조정 요구. 이 확인 예산은 새 물리 실행 허가가 아님 |
-| 자산 등록 create | cloud root 디스크의 원본/복사본 해시·복사·준비와 후속 start를 포함 | 단일 control 90초나 개별 sha256sum 900초가 등록 전체 기한은 아님 | 전체 생성 요청·하위 단계별 예산과 중복 I/O는 별도 후속 과제. 무결성 검사 축소나 timeout 확대를 해결로 적용하지 않음 |
+| 자산 등록 create | metadata·용량 후 검증 root 복사 1회·guest 준비·조건부 게시/등록. 후속 start는 별도 제어 | 하위는 유한 생성 정책/원 host·기한을 제공. 제어 90초·조회 15초를 생성 운영값으로 쓰지 않음 | 승인된 생성 정책 공급·잔여 호출 예산과 원 결과 회수·명시 수습을 상위에서 연결. 실제 운영 시간/HTTP/보드 수락은 별도 |
 
 25초·120초 HTTP 대기는 합의·적용된 계약이 아니다. 관측 최대 시간은 보장 상한이
 아니며, 특정 후보의 표본 수·정책·firmware·domain·저장소 조건은
