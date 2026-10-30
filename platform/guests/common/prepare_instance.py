@@ -14,12 +14,14 @@ from first_install_contract import uuid4
 from artifact_io import publish
 from xenova_catalog import deployment_version
 from xenova_trace import span
+from xenova_runtime import atomic_write
+from xenova_preparation import run as request_run, check_output, diagnostic as print, managed_preparation
 from prepare_rootfs import prepare_instance, prepare_deployment_seed, inside, verify_guest_agent
 
 
 def command(args, **kwargs):
     kwargs.setdefault('check', True)
-    return subprocess.run([str(a) for a in args], **kwargs)
+    return request_run([str(a) for a in args], **kwargs)
 
 
 def digest(path):
@@ -168,6 +170,18 @@ class Workspace:
         self.path = Path(owned_path) if owned_path is not None else Path(parent) / ('.xenova-preparing-' + uuid4())
         self.path.mkdir(mode=0o700)
         self.mounts, self.loops = [], []
+        self.pending = False
+        self._resources(False)
+
+    def _resources(self, clean=False):
+        atomic_write(self.path/'.preparation-resources.json',json.dumps({
+            'schema':1,'workspace':str(self.path),'mounts':[str(p) for p in self.mounts],
+            'loops':self.loops,'pending':self.pending,'clean':clean})+'\n')
+
+    def seal_clean(self):
+        if self.pending or self.mounts or self.loops:
+            raise ValueError('preparation resource cleanup is unconfirmed')
+        self._resources(True)
 
     def loop(self, image, readonly=False, partitions=False):
         args = ['losetup', '--find', '--show']
@@ -175,24 +189,34 @@ class Workspace:
             args.append('--read-only')
         if partitions:
             args.append('--partscan')
-        value = subprocess.check_output(args + [str(image)], text=True).strip()
+        self.pending = True
+        self._resources()
+        value = check_output(args + [str(image)], text=True).strip()
         if not __import__('re').fullmatch(r'/dev/loop[0-9]+', value):
             raise ValueError('unexpected allocated loop device')
         self.loops.append(value)
+        self.pending = False
+        self._resources()
         return value
 
     def mount(self, device, target, readonly=False):
         target.mkdir(parents=True, exist_ok=True)
-        command(['mount', '-o', 'ro,noload' if readonly else 'rw', device, target])
+        self.pending = True
         self.mounts.append(target)
+        self._resources()
+        command(['mount', '-o', 'ro,noload' if readonly else 'rw', device, target])
+        self.pending = False
+        self._resources()
 
     def close(self):
         while self.mounts:
             command(['umount', self.mounts[-1]])
             self.mounts.pop()
+            self._resources()
         while self.loops:
             command(['losetup', '--detach', self.loops[-1]])
             self.loops.pop()
+            self._resources()
         # 디버깅과 실패 분석을 위해 작업 경로를 자동 삭제하지 않는다.
         print('scratch retained for inspection:', self.path)
 
@@ -229,7 +253,7 @@ def guest_runtime(work, root):
 def verify_guest_ssh(root, *, seed=False):
     # -C의 Match 조건 검사는 -T가 필요하다. seed의 -G는 공유 host key 없이 설정만 검사한다.
     options = ['-G', '-T'] if seed else ['-T']
-    effective = subprocess.check_output(
+    effective = check_output(
         ['chroot', str(root), '/usr/sbin/sshd', *options, '-C',
          'user=root,host=xenova,addr=192.168.77.1,laddr=192.168.77.10,lport=22'],
         text=True, timeout=60)
@@ -251,7 +275,33 @@ def seed_store_check(data):
         raise ValueError('existing live storage/instances must never become factory seeds')
 
 
-def make_instance(args, *, vm, defaults_path, record_override=None, identity=None, workspace_path=None, template_directory=None):
+class PreparedInstance:
+    """private 준비의 원 바이트/manifest와 게시 대상을 결합한다. Manager가 채택 시에만 publish한다."""
+    def __init__(self, vm, record, stage, output, inputs, *, seed=False):
+        self.vm,self.record,self.stage,self.output,self.inputs,self.seed=vm,record,stage,output,inputs,seed
+        self.assets={path:_input_identity(path.lstat()) for path in stage.iterdir()}
+
+    def publish(self):
+        self.vm.validate_record(self.record,self.stage,allow_seed=self.seed)
+        for path,identity in self.assets.items():
+            _unchanged(path,identity)
+        for other in self.output.parent.iterdir():
+            if other.name.startswith('.'):
+                continue
+            if other.is_symlink() or not other.is_dir():
+                raise ValueError('invalid existing instance registry entry')
+            current=json.loads(self.vm.regular_asset(other,'instance.json').read_text())
+            for field in ('id','uuid','name','hostname','mac','ipv4'):
+                if current.get(field)==self.record[field] and not (self.seed and field=='uuid'):
+                    raise ValueError('duplicate '+field+' with '+other.name)
+        with span('prepare.source-guard'):
+            for path,identity in self.inputs.items():
+                _unchanged(path,identity)
+        require_new_output(self.output)
+        publish(self.stage,self.output)
+
+
+def make_instance(args, *, vm, defaults_path, record_override=None, identity=None, workspace_path=None, template_directory=None, private=False):
     seed = getattr(args, 'deployment_seed', False)
     # 새 출력의 부모도 같은 저장소 안의 일반 디렉터리여야 한다.
     for directory in [args.data_root, args.data_root / 'templates', args.data_root / 'instances', *([args.data_root / 'seeds'] if seed else [])]:
@@ -261,6 +311,8 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
         seed_store_check(args.data_root)
     else:
         vm.storage_check(args.data_root)
+        if (args.data_root/'.xenova-storage.json').exists() and (not private or not managed_preparation()):
+            raise ValueError('initialized live storage requires private preparation owned by Manager')
     defaults = json.loads(Path(defaults_path).read_text())['instances']
     if not vm.ID.fullmatch(args.id):
         raise ValueError('invalid instance id')
@@ -359,27 +411,21 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
             verify_guest_agent(root, seed=seed)
         os.sync()
         work.close()
+        work.seal_clean()
         work.mounts, work.loops = [], []
         vm.atomic_write(stage / 'instance.json', json.dumps(record, indent=2) + '\n')
         vm.validate_record(record, stage, allow_seed=seed)
-        # 전체 registry의 식별자·디스크 중복도 게시 전에 확인한다.
-        for other in output.parent.iterdir():
-            if other.name.startswith('.'):
-                continue
-            if other.is_symlink() or not other.is_dir():
-                raise ValueError('invalid existing instance registry entry')
-            current = json.loads(vm.regular_asset(other, 'instance.json').read_text())
-            for field in ('id', 'uuid', 'name', 'hostname', 'mac', 'ipv4'):
-                if current.get(field) == record[field] and not (seed and field == 'uuid'):
-                    raise ValueError(f'duplicate {field} with {other.name}')
-        with span('prepare.source-guard'):
-            for path, source_identity in inputs.items():
-                _unchanged(path, source_identity)
-        require_new_output(output)
-        publish(stage, output)
+        result=PreparedInstance(vm,record,stage,output,inputs,seed=seed)
+        if private:
+            return result
+        result.publish()
         os.sync()
-    finally:
-        if work.mounts or work.loops:
+    except BaseException as error:
+        try:
             work.close()
+            work.seal_clean()
+        except Exception as cleanup:
+            raise ValueError(str(error)+'; resource cleanup unconfirmed: '+type(cleanup).__name__) from error
+        raise
 
 

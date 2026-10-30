@@ -406,7 +406,8 @@ def verify_guest_agent(root, *, seed=False, required=False):
             raise ValueError('seed Agent identity dependency absent')
     elif identity.exists() or dropin.exists():
         raise ValueError('ordinary Agent has a seed identity dependency')
-    enabled = subprocess.check_output(['systemctl', '--root=' + str(root), 'is-enabled',
+    from xenova_preparation import check_output
+    enabled = check_output(['systemctl', '--root=' + str(root), 'is-enabled',
                                        'xenova-agent.service'], text=True, timeout=60).strip()
     if enabled != 'enabled':
         raise ValueError('guest Agent is not enabled')
@@ -420,7 +421,7 @@ def verify_guest_agent(root, *, seed=False, required=False):
         'print(json.dumps({"python":sys.version.split()[0],"paho_mqtt":v,'
         '"imports":["paho.mqtt.client","xenova_mqtt","xenova_agent.heartbeat","xenova_agent.__main__"]}))'
     )
-    result = json.loads(subprocess.check_output(
+    result = json.loads(check_output(
         ['chroot', str(root), '/usr/bin/python3', '-B', '-c', script],
         text=True, timeout=60))
     return {**result, 'installed': True, 'enabled': True, 'identity_gate': seed,

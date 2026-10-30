@@ -15,6 +15,7 @@ import time
 
 from xenova_runtime import PlatformError, atomic_write, ensure_runtime, operation_lock, sync_directory
 from xenova_trace import span, traced
+from xenova_preparation import run as request_run, diagnostic as print, ensure_quiet, drain
 import xenova_zephyr as zephyr
 
 DATA = Path('/srv/xenova')
@@ -28,8 +29,7 @@ AUTOSTART_TIMEOUT = 140
 
 def run(args, timeout=15):
     try:
-        p = subprocess.run(args, text=True, stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, timeout=timeout, check=False)
+        p = request_run(args, text=True, capture=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise PlatformError(f'{args[0]} failed: {exc}') from exc
     if p.returncode:
@@ -862,6 +862,8 @@ class Platform:
                   _accept=None, _expected_runs=None, _observed=None, _result=None):
         """사전 안전 검사와 요청 후 신원 관측을 분리한다. 자동 강제 종료는 없다."""
         ensure_runtime(self.runtime)
+        if board:
+            ensure_quiet(self)
         attempt = os.urandom(16).hex()
         result = {'action': 'stop', 'attempt_id': attempt, 'stopped': [], 'already_stopped': [],
                   'forced': [], 'graceful_shutdown_requested': [], 'instances': {},
@@ -995,6 +997,7 @@ class Platform:
 
     def prepare_board_shutdown(self, records, action, *, force=False, deadline=None):
         self.execution().quiesce(action)
+        ensure_quiet(self)  # 대기 drain은 CLI가 공통 잠금 밖에서 수행한다.
         self._shutdown_deadline = self.clock() + 90 if deadline is None else deadline
         try:
             result = self.stop_many(records, force=force, board=True, deadline=self._shutdown_deadline)
@@ -1008,6 +1011,10 @@ class Platform:
 
     def finish_board_shutdown(self, action):
         try:
+            barrier=self.execution().barrier()
+            if not barrier or barrier['state']!='quiescing':
+                raise PlatformError('host admission must remain closed before storage shutdown')
+            ensure_quiet(self)
             # 내부 CLI는 marker로 새 기동을 막는다. 외부 xl과 원자적인 배제는 아니다.
             self.confirm_board_empty(self._shutdown_deadline)
             self.command(['systemctl', 'stop', 'xenova-vms.service', 'xenova-vm-shutdown.service', 'xenova-dhcp.service'], timeout=110)
@@ -1017,7 +1024,7 @@ class Platform:
         except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
             (self.runtime / 'shutdown-requested').unlink(missing_ok=True)
             path = self.runtime / 'board-shutdown-result.json'
-            result = json.loads(path.read_text())
+            result = json.loads(path.read_text()) if path.exists() else {'board_action':action}
             result['final_check_error'] = str(exc)
             atomic_write(path, json.dumps(result, indent=2) + '\n')
             raise
@@ -1244,6 +1251,9 @@ def main(argv=None):
         return
     if args.action in ('host-init', 'host-quiesce'):
         value = p.execution().initialize_host() if args.action == 'host-init' else p.execution().quiesce('systemd-shutdown')
+        if args.action=='host-quiesce':
+            # host-admission unit의 기존 TimeoutStopSec=10s 안에서 반환 여유 1초를 남긴다.
+            drain(p,p.clock()+9)
         print(json.dumps(value))
         return
     if args.action == 'check-network':
@@ -1275,6 +1285,7 @@ def main(argv=None):
     if args.action in ('shutdown-all', 'poweroff', 'reboot-board'):
         shutdown_deadline = p.clock()+90
         p.execution().quiesce(args.action)
+        drain(p,shutdown_deadline)
     autostart_deadline = p.clock()+AUTOSTART_TIMEOUT if args.action == 'autostart' else None
     with operation_lock(p.runtime, deadline=shutdown_deadline, clock=p.clock, sleep=p.sleep):
         # 전체 신원/경로 검증과 실행 대상의 부팅 자산 검증은 수명을 달리한다.

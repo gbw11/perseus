@@ -527,11 +527,11 @@ class ManagementTest(unittest.TestCase):
         self.assertTrue((archive/'root.raw').is_file())
 
     def test_manager_itself_has_no_stdout_and_cli_execute_is_exactly_one_json(self):
-        import subprocess
+        from xenova_preparation import diagnostic, run
         original=self.m.preparer
         def noisy(op):
-            print('lower Python tool log')
-            subprocess.run(['python3','-c','print("lower process log")'],check=True)
+            diagnostic('lower Python tool log')
+            run(['python3','-c','print("lower process log")'],check=True)
             return original(op)
         self.m.preparer=noisy
         out=io.StringIO()
@@ -542,6 +542,8 @@ class ManagementTest(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue()),result)
         self.assertTrue(result['ok'],result)
         self.assertNotIn('lower',out.getvalue())
+        self.assertIn(b'lower Python tool log',self.m.last_output['bytes'])
+        self.assertIn(b'lower process log',self.m.last_output['bytes'])
 
 
     def test_uuid_collision_with_existing_vm_is_rejected_before_journal(self):
