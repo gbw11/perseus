@@ -158,25 +158,25 @@ class ManagementBudgetTest(unittest.TestCase):
                 result=self.call(action,{'vm_id':self.f.vm_id,'timeout_ms':1000} if action=='get' else {'timeout_ms':1000},budget=500)
             self.f.ok(result)
             self.assertEqual(seen,[10.5])
-            self.assertAlmostEqual(self.f.ticks,10.2)
+            # 목록의 대상 집합 재확인은 같은 남은 예산을 쓴다. get은 해당 VM만 최종 확인한다.
+            self.assertAlmostEqual(self.f.ticks,10.4 if action=='list' else 10.2)
 
     def test_list_observes_multiple_vms_with_the_same_deadline(self):
         other=foundation.record('debian-dev')
         foundation.fixture(self.p.data,other)
         self.f.start()
         seen=[]
-        original=self.p.domains
-        def capture(*,deadline=None):
+        original=self.p.removal_snapshot
+        def capture(deadline):
             seen.append(deadline)
             self.f.ticks+=.05
-            return original(deadline=deadline)
+            return original(deadline)
         self.f.ticks=10
-        with patch.object(self.p,'domains',capture):
+        with patch.object(self.p,'removal_snapshot',capture):
             result=self.f.ok(self.call('list',{'timeout_ms':500},budget=300))
         self.assertEqual(len(result['vms']),2)
         self.assertEqual({item['vm_id'] for item in result['vms']},{self.f.vm_id,other['uuid']})
-        self.assertTrue(seen)
-        self.assertTrue(all(item==10.3 for item in seen),seen)
+        self.assertEqual(seen,[10.3,10.3])
 
     def test_invalid_budget_and_selector_never_change_intent(self):
         before=copy.deepcopy(self.p.execution().intent(self.r))
