@@ -1,7 +1,8 @@
-"""Linux 준비의 단일 I/O 슬롯·원 실행 소유권·요청별 제한 출력.
+"""Linux 준비의 단일 I/O 슬롯·원 실행 소유권과 요청별 제한 출력/자식 FD 전달.
 
 새 작업 원장이나 실행기는 아니다. 실행 허가는 Manager의 기존 operation/gate가 결정한다.
 슬롯과 원 실행 잠금은 별개이며, 자식에 두 FD를 전달해 부모 종료를 자원 소멸로 오인하지 않는다.
+읽기 전용 관측 FD는 실행량 보호이며 Linux 준비 권한으로 취급하지 않는다.
 """
 import builtins
 from _thread import _local
@@ -32,6 +33,7 @@ class RequestOutput:
         self.dropped = 0
         self.stack = ExitStack()
         self.fds = ()
+        self.preparation_fds = ()
 
     def write(self, value):
         value = value.encode('utf-8',errors='replace') if isinstance(value,str) else value
@@ -65,7 +67,8 @@ def diagnostic(*values, sep=' ', end='\n', file=None, flush=False):
 
 def managed_preparation():
     current=_current()
-    return current is not None and len(current.fds)==2
+    return (current is not None and len(current.preparation_fds)==2
+            and set(current.preparation_fds).issubset(current.fds))
 
 
 def run(args, *, capture=False, **kwargs):
@@ -137,6 +140,17 @@ def run(args, *, capture=False, **kwargs):
         if check and proc.returncode:
             raise subprocess.CalledProcessError(proc.returncode,args,output=output,stderr=error)
         return subprocess.CompletedProcess(args,proc.returncode,output if capture else None,error)
+    except BaseException:
+        # EOF/관측 I/O 실패도 자식 종료 증거가 아니다. 기존 subprocess.run처럼 소유 자식만 회수한다.
+        try:
+            if proc.poll() is None:proc.kill()
+        except OSError:
+            pass
+        try:proc.wait(timeout=1)
+        except (OSError,subprocess.TimeoutExpired):
+            # 커널 대기 등으로 종료 미확정이면 상속된 슬롯 FD가 남는다. 원 오류를 성공으로 바꾸지 않는다.
+            current.write('owned command exit remains unconfirmed\n')
+        raise
     finally:
         for stream in (proc.stdout,proc.stderr,proc.stdin):
             if stream is not None:stream.close()
@@ -211,13 +225,16 @@ class LinuxSlot:
             os.replace(name,directory/('linux-owner-'+op['operation_id']+'.lock'))
             sync_directory(directory)
             _current().fds=(self.fd,fd)
+            _current().preparation_fds=(self.fd,fd)
         except BaseException:
             # 원장/임시 소유 흔적은 보존하고 fd만 요청 수명에서 회수한다.
             raise
 
     def __exit__(self,*args):
         current=_current()
-        if current is not None:current.fds=()
+        if current is not None:
+            current.fds=()
+            current.preparation_fds=()
         for fd in (self.owner_fd,self.fd):
             if fd is not None:os.close(fd)
 

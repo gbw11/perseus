@@ -4,6 +4,7 @@
 자동 재초기화/정리하지 않는다. root 권한의 외부 xl/파일 변경까지 원자적으로 통제하지 않는다.
 """
 from argparse import Namespace
+from _thread import allocate_lock
 from contextlib import contextmanager
 import hashlib
 import json
@@ -17,12 +18,12 @@ import sys
 from artifact_io import publish
 from first_install_contract import uuid4
 import xenova_catalog as catalog
-from xenova_runtime import PlatformError, OperationBusy, atomic_write, operation_lock, sync_directory
+from xenova_runtime import PlatformError, OperationBusy, atomic_write, operation_lock, sync_directory, observation_slot
 import xenova_vm as vm
 import xenova_zephyr as zephyr
-from xenova_execution import ExecutionError, short_lock
+from xenova_execution import ExecutionError, ReadChanged, short_lock
 from xenova_preparation import request_output, LinuxSlot, owner_state
-from xenova_trace import bind as trace_bind, traced
+from xenova_trace import bind as trace_bind, traced, span
 
 MUTATIONS = {'create', 'retire', 'restore', 'purge', 'update-resources', 'firmware-transition'}
 EXIT_CODES = {'success': 0, 'validation': 2, 'conflict': 3, 'execution': 4}
@@ -83,6 +84,70 @@ class PrivateCreate:
         self.operation=operation
 
 
+class ReadContext:
+    """한 조회 회차의 구성·실행 근거. 원자 파일을 검증하며 잠금 밖에서 외부 관측한다.
+
+    실제 제어에는 전달하지 않는다. 변경을 발견하면 호출자가 최대 한 번 새 회차를 만들며,
+    다른 요청·다른 host나 새 실행에 이 문맥을 복사하지 않는다.
+    """
+    def __init__(self, manager, action, spec, deadline):
+        self.m,self.action,self.spec,self.deadline=manager,action,spec,deadline
+        self.started_ms=int(manager.p.clock()*1000)
+        self.observed_ms={}
+        self.e=manager.p.execution()
+        self.check()
+        self.states,self.tombs=manager._read_states(action,spec,deadline)
+        self.by_id={s['vm_id']:s for s in self.states}
+        self.lifecycles={s['vm_id']:(s['lifecycle'],s['generation']) for s in self.states}
+        self.inputs={s['vm_id']:self.e.observation_inputs(s['record'],self.lifecycles[s['vm_id']]) for s in self.states}
+        self.check()
+
+    def check(self):
+        if self.m.p.clock()>=self.deadline:
+            fail('DEADLINE_EXCEEDED','read observation budget expired')
+        if self.m.p.boot_id_reader()!=self.e.host:raise ReadChanged()
+
+    @staticmethod
+    def revision(states):
+        return {s['vm_id']:(s['lifecycle'],s['generation'],s['record']) for s in states}
+
+    def optional(self, path):
+        try:path.lstat()
+        except FileNotFoundError:return None
+        return self.m._read(path)
+
+    def validate_one(self, identity):
+        """관측 게시 직전 해당 VM만 대조한다. 외부 helper나 전체 등록부 검색을 하지 않는다."""
+        self.check()
+        state=self.by_id[identity]
+        if self.optional(self.m.data/'tombstones'/(identity+'.json'))!=self.tombs.get(identity):
+            raise ReadChanged()
+        record=state['record']
+        if state['lifecycle']=='REGISTERED':
+            directory=self.m.data/'instances'/record['id']
+        elif state['lifecycle']=='RETIRED':
+            directory=self.m._archive(state)
+        else:directory=None
+        if directory is not None:
+            if self.optional(directory/'instance.json')!=record:raise ReadChanged()
+        creation=record.get('creation_operation_id')
+        if creation and state['lifecycle']=='REGISTERED':
+            op=self.optional(self.m.data/'operations'/(creation+'.json'))
+            if not op or op.get('vm_id')!=identity or op.get('status')!='SUCCEEDED':raise ReadChanged()
+        if self.e.observation_inputs(record,self.lifecycles[identity])!=self.inputs[identity]:
+            raise ReadChanged()
+        self.check()
+
+    def validate(self):
+        self.check()
+        if self.action=='list':
+            states,_=self.m._read_states(self.action,self.spec,self.deadline)
+            if self.revision(states)!=self.revision(self.states):raise ReadChanged()
+        # 각 항목은 바로 이어지는 관측 게시 잠금 안에서 한 번 대조한다. 같은 검사를 중복하지 않는다.
+
+
+
+
 class Manager:
     """call(action, spec, execute=False)는 envelope를 반환한다. 변경은 명시적 execute에서만 한다."""
     def __init__(self, platform=None, *, preparer=None, usage_check=None, checkpoint=None,
@@ -95,12 +160,13 @@ class Manager:
         self.checkpoint = checkpoint or (lambda phase, operation: None)
         self.trace_sink = trace_sink
         self.last_trace = None
+        self._request_lock=allocate_lock()
 
     def fork(self):
         """같은 저장소·잠금·guard를 쓰는 독립 요청 객체. 가변 예산/trace를 공유하지 않는다.
 
-        Linux private 준비와 다른 VM의 조회/제어를 병행할 수 있다. 같은 Manager 객체의
-        동시 사용이나 모든 물리 변경의 병렬 실행을 허용하는 계약은 아니다.
+        Linux private 준비·느린 조회와 다른 VM의 조회/제어를 병행할 수 있다. 같은 객체의
+        동시 call은 무대기 거절한다. 모든 물리 변경의 병렬 실행을 허용하는 계약은 아니다.
         """
         from copy import copy
         request_platform=copy(self.p)
@@ -207,9 +273,11 @@ class Manager:
         self._write(self.data / 'operations' / (op['operation_id'] + '.json'), op)
         self.checkpoint(op['phase'], op)
 
-    def _tombs(self):
+    def _tombs(self, *, deadline=None):
         try:
-            return vm.read_tombstones(self.data)
+            return vm.read_tombstones(self.data,deadline=deadline,clock=self.p.clock)
+        except ExecutionError:
+            raise
         except PlatformError as exc:
             fail('RECOVERY_REQUIRED', str(exc))
 
@@ -368,7 +436,7 @@ class Manager:
                 fail('RECOVERY_REQUIRED','registered VM directory is absent; inspect operation journal')
             return tomb
         # 이전 delete archive는 출처/UUID를 바꾸지 않고 명시적 restore/retire에서 수용한다.
-        for path in (self.data / 'instances').glob('.deleted-*'):
+        for path in self._legacy_paths():
             self._plain_dir(path)
             record = self._read(path / 'instance.json')
             vm.validate_identity(record)
@@ -382,7 +450,7 @@ class Manager:
 
     def _legacy_records(self):
         result=[]
-        for path in (self.data/'instances').glob('.deleted-*'):
+        for path in self._legacy_paths():
             self._plain_dir(path)
             record=self._read(path/'instance.json')
             vm.validate_identity(record)
@@ -390,6 +458,12 @@ class Manager:
                 fail('RECOVERY_REQUIRED','invalid legacy archive identity')
             result.append(record)
         return result
+
+    def _legacy_paths(self):
+        """glob이 숨길 수 있는 열람 실패를 VM/주소 부재로 해석하지 않는다."""
+        directory=self.data/'instances'
+        self._plain_dir(directory)
+        return [path for path in sorted(directory.iterdir()) if path.name.startswith('.deleted-')]
 
     def _archive(self, tomb):
         rel = Path(tomb.get('archive', ''))
@@ -1271,6 +1345,22 @@ class Manager:
         return self._create(op,context) if action=='create' else self._transition(op,records)
 
     def call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None):
+        """같은 요청 객체의 중첩/동시 사용은 무대기 거절한다. 병행 호출은 fork 객체를 사용한다."""
+        if not self._request_lock.acquire(False):
+            if action=='snapshot':
+                # 기존 lock-free 파생 snapshot 조회를 보존하되 진행 요청의 예산/진단은 공유하지 않는다.
+                return self.fork().call(action,spec,execute=execute,idempotency_key=idempotency_key,
+                                        request_id=request_id,budget_ms=budget_ms)
+            return {'schema_version':'1.0','ok':False,
+                'request_id':request_id if self._text_token(request_id) else uuid4(),
+                'operation_id':None,'replayed':False,'data':None,
+                'error':{'code':'OPERATION_IN_PROGRESS','message':'request object is already in use; use an independent fork',
+                         'retryable':True,'details':{}}}
+        try:
+            return self._request(action,spec,execute=execute,idempotency_key=idempotency_key,request_id=request_id,budget_ms=budget_ms)
+        finally:self._request_lock.release()
+
+    def _request(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None):
         """동기 envelope. budget_ms는 이번 호출의 잔여 기간이며 원 spec/기한을 갱신하지 않는다.
 
         생략 시 기존 예산을 유지한다. 부가 trace 저장 실패는 원 완료를 바꾸지 않는다.
@@ -1308,6 +1398,8 @@ class Manager:
         """기존 공통 잠금 안의 metadata/제어 dispatch. private Linux 준비 결과만 밖으로 돌려준다."""
         try:
             records=self.p.records(validate_assets=False)
+        except ExecutionError:
+            raise
         except (PlatformError,OSError,ValueError):
             fail('STORAGE_UNAVAILABLE','persistent storage or registry unavailable')
         if action == 'cpu-layout':
@@ -1326,30 +1418,6 @@ class Manager:
                                 records,context)
         elif action=='templates':
             result={'templates':catalog.entries(self.data)}
-        elif action in ('list','get'):
-            if action=='get':
-                states=[self._state(spec.get('vm_id'),records)]
-            else:
-                # This entire read holds operation_lock. Reuse its
-                # validated lifecycle snapshot only within this list.
-                list_tombs=self._tombs()
-                states=[self._state(r['uuid'],records,tombstones=list_tombs) for r in records.values()]
-                lifecycle=spec.get('lifecycle','REGISTERED')
-                if lifecycle in ('RETIRED','all'):
-                    for path in (self.data/'instances').glob('.deleted-*'):
-                        rec=self._read(path/'instance.json')
-                        if rec['uuid'] not in {s['vm_id'] for s in states}:
-                            states.append(self._state(rec['uuid'],records,tombstones=list_tombs))
-                states += [t for t in list_tombs.values() if t['vm_id'] not in {s['vm_id'] for s in states}]
-                states=[s for s in states if lifecycle=='all' or s['lifecycle']==lifecycle]
-            if action == 'get':
-                observation = self.p.execution().observe(states[0]['record'], deadline)
-                result = {'vm':self._view(states[0], observation=observation)}
-            else:
-                lifecycles={s['vm_id']:(s['lifecycle'],s['generation']) for s in states}
-                observations = self.p.execution().observe_many([s['record'] for s in states], deadline,
-                                                              _lifecycles=lifecycles)
-                result = {'vms':[self._view(s, observation=observations[s['vm_id']]) for s in states]}
         elif action in ('recover_once', 'recovery-operation', 'recovery-reconcile'):
             from xenova_recovery import Recovery
             recovery = Recovery(self)
@@ -1406,21 +1474,99 @@ class Manager:
             else:
                 observation = self.p.execution().observe(tomb['record'], deadline)
                 result = {'vm':self._view(tomb, observation=observation)}
-        elif action=='operation':
-            found=[o for o in self._operations(deadline=deadline) if
-                   (spec.get('operation_id') is not None and o['operation_id']==spec['operation_id']) or
-                   (spec.get('idempotency_key') is not None and o['idempotency_key']==spec['idempotency_key'])]
-            if self.p.clock()>=deadline:
-                fail('DEADLINE_EXCEEDED','asset operation lookup budget expired')
-            if len(found)>1:
-                fail('RECONCILE_REQUIRED','asset operation selector is ambiguous')
-            if not found:
-                fail('VM_NOT_FOUND','operation not found')
-            context['operation_id']=found[0]['operation_id']
-            result=self._operation_view(found[0],deadline)
         else:
             fail('INVALID_SPEC','unsupported management action')
         return result
+
+    def _read_states(self, action, spec, deadline):
+        """원자 등록부/수명 기록을 읽는다. 부분 등록을 정상 전체 목록으로 만들지 않으며 Xen은 호출하지 않는다."""
+        if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','registry read budget expired')
+        try:records=self.p.records(validate_assets=False)
+        except ExecutionError:
+            raise
+        except (PlatformError,OSError,ValueError):
+            fail('STORAGE_UNAVAILABLE','persistent storage or registry unavailable')
+        tombs=self._tombs(deadline=deadline)
+        # 전체 신원/디스크 중복은 위에서 검증했다. builder가 VM마다 같은 전체 dict를 재검색하지 않는다.
+        by_uuid={record['uuid']:{key:record} for key,record in records.items()}
+        if action=='get':
+            states=[self._state(spec['vm_id'],by_uuid.get(spec['vm_id'],{}),tombstones=tombs)]
+        else:
+            # 기존 정렬된 등록 경로의 표시 순서를 유지하고 과거 수명 항목만 뒤에 붙인다.
+            ids=list(dict.fromkeys([r['uuid'] for r in records.values()]+list(tombs)))
+            lifecycle=spec.get('lifecycle','REGISTERED')
+            if lifecycle in ('RETIRED','all'):
+                for path in self._legacy_paths():
+                    self._plain_dir(path)
+                    record=self._read(path/'instance.json')
+                    vm.validate_identity(record)
+                    if record['uuid'] not in ids:ids.append(record['uuid'])
+            states=[self._state(identity,by_uuid.get(identity,{}),tombstones=tombs) for identity in ids]
+            states=[state for state in states if lifecycle=='all' or state['lifecycle']==lifecycle]
+        if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','registry read budget expired')
+        return states,tombs
+
+    def _query(self, action, spec, context, deadline):
+        """읽기만 수행한다. 완료/소유권 관측은 재실행·정리·원 기한 갱신의 허가가 아니다."""
+        for attempt in range(2):
+            with span('read.round',count=attempt+1):
+                if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','query budget expired')
+                try:
+                    if action in ('get','list'):
+                        read=ReadContext(self,action,spec,deadline)
+                        records=[s['record'] for s in read.states]
+                        if action=='get':
+                            observed=read.e.observe(records[0],deadline,_read_context=read)
+                            result={'vm':self._view(read.states[0],observation=observed)}
+                        else:
+                            observed=read.e.observe_many(records,deadline,_read_context=read)
+                            # 빈 목록에서도 대상 집합·host 확인을 생략하지 않는다.
+                            if not records:read.validate()
+                            result={'vms':[self._view(s,observation=observed[s['vm_id']]) for s in read.states]}
+                    else:
+                        try:vm.storage_check(self.data)
+                        except (OSError,PlatformError,ValueError):
+                            fail('STORAGE_UNAVAILABLE','persistent storage unavailable')
+                        selector='operation_id' if 'operation_id' in spec else 'idempotency_key'
+                        selected=spec[selector]
+                        def search():
+                            if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','operation search budget expired')
+                            rows=(self._operations(deadline=deadline) if action=='operation' else
+                                  self.p.execution().requests(deadline=deadline))
+                            if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','operation search budget expired')
+                            found=[item for item in rows if item.get(selector)==selected]
+                            if len(found)>1:fail('RECONCILE_REQUIRED','operation selector is ambiguous')
+                            return found
+                        first=search()
+                        view=self._operation_view(first[0],deadline) if first and action=='operation' else None
+                        # 별도 회차의 완전한 재확인이다. 첫 일치로 검색을 중단하지 않는다.
+                        if search()!=first:raise ReadChanged()
+                        if first and action=='operation' and self._operation_view(first[0],deadline)!=view:
+                            raise ReadChanged()
+                        if not first or ('vm_id' in spec and first[0]['vm_id']!=spec['vm_id']):
+                            fail('VM_NOT_FOUND','operation not found')
+                        op=first[0]
+                        context['operation_id']=op['operation_id']
+                        trace_bind(operation_id=op['operation_id'],vm_id=op['vm_id'])
+                        if action=='operation':result=view
+                        else:
+                            try:host=self.p.boot_id_reader()
+                            except (OSError,PlatformError,ValueError):host=None
+                            same=(host==op['host_boot_id']) if host is not None else None
+                            sampled=int(self.p.clock()*1000)
+                            original_end=op.get('deadline_monotonic_ms')
+                            result={'operation':op,'deadline_observation':{'host_boot_id':host,
+                                'observed_monotonic_ms':sampled,'original_host_matches':same,
+                                'execution_deadline_expired':(sampled>=original_end) if same and type(original_end) is int else None}}
+                    if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','query completed after budget')
+                    return result
+                except ReadChanged:
+                    if attempt:raise
+                except ManagementError as error:
+                    if error.error['code']=='VM_NOT_FOUND' and self.p.clock()>=deadline:
+                        fail('DEADLINE_EXCEEDED','query absence was not verified within budget')
+                    raise
+        raise AssertionError('bounded query round exhausted')
 
     def _call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None, _output=None):
         """HTTP를 가정하지 않는다. 모든 응답은 동일 JSON envelope이고 stdout을 쓰지 않는다."""
@@ -1454,37 +1600,18 @@ class Manager:
                 self.p.response_deadline=float('inf')
             cpu_deadline = deadline
             trace_bind(deadline_monotonic_ms=int(deadline*1000))
+            if action in ('get','list','operation','control-operation'):
+                self.p.response_deadline=min(self.p.response_deadline,deadline)
+                if action in ('get','list'):
+                    with observation_slot(self.p.runtime,deadline=deadline,clock=self.p.clock) as fd:
+                        previous_fds=_output.fds
+                        _output.fds=(*previous_fds,fd)
+                        try:result=self._query(action,spec,context,deadline)
+                        finally:_output.fds=previous_fds
+                else:result=self._query(action,spec,context,deadline)
+                return {**response,'ok':True,'data':result,'operation_id':context['operation_id']}
             if action == 'stop':
                 self._accept_stop(spec,idempotency_key,deadline,context)
-            if action == 'control-operation':
-                # journal 조회는 새 실행을 하지 않으며 긴 execution flock을 기다리지 않는다.
-                with short_lock(self.p.runtime,'admission',deadline=deadline,
-                                clock=self.p.clock,sleep=self.p.sleep):
-                    try:vm.storage_check(self.data)
-                    except (OSError,PlatformError,ValueError):
-                        fail('STORAGE_UNAVAILABLE','persistent storage unavailable')
-                    selected='operation_id' if 'operation_id' in spec else 'idempotency_key'
-                    found=[q for q in self.p.execution().requests(deadline=deadline) if q.get(selected)==spec[selected]]
-                    if self.p.clock()>=deadline:
-                        fail('DEADLINE_EXCEEDED','control operation lookup budget expired')
-                    if len(found)>1:
-                        fail('RECONCILE_REQUIRED','control operation selector is ambiguous')
-                    if not found or ('vm_id' in spec and found[0]['vm_id']!=spec['vm_id']):
-                        fail('VM_NOT_FOUND','control operation not found')
-                    context['operation_id']=found[0]['operation_id']
-                    trace_bind(operation_id=found[0]['operation_id'],vm_id=found[0]['vm_id'])
-                    try:current_host=self.p.boot_id_reader()
-                    except (OSError,PlatformError,ValueError):current_host=None
-                    same_host=(current_host==found[0]['host_boot_id']) if current_host is not None else None
-                    sampled=int(self.p.clock()*1000)
-                    if self.p.clock()>=deadline:
-                        fail('DEADLINE_EXCEEDED','control operation metadata budget expired')
-                    original_end=found[0].get('deadline_monotonic_ms')
-                    expired=(sampled>=original_end) if same_host and type(original_end) is int else None
-                    response.update(ok=True,data={'operation':found[0], 'deadline_observation':{
-                        'host_boot_id':current_host,'observed_monotonic_ms':sampled,
-                        'original_host_matches':same_host,'execution_deadline_expired':expired}})
-                    return {**response,'operation_id':found[0]['operation_id']}
             while True:
                 try:
                     with operation_lock(self.p.runtime):

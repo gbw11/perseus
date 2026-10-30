@@ -8,6 +8,7 @@ import time
 from xenova_trace import span
 
 RUN = Path('/run/xenova')
+OBSERVATION_SLOTS = 4  # 초기 지원 상한. 보드 부하/QPS 수락과 별도로 검증한다.
 
 
 class PlatformError(RuntimeError):
@@ -16,6 +17,48 @@ class PlatformError(RuntimeError):
 
 class OperationBusy(PlatformError):
     """공통 작업 잠금의 미수락 또는 종료 drain 시간 초과."""
+
+
+@contextmanager
+def observation_slot(runtime, *, deadline, clock=time.monotonic):
+    """읽기 전용 외부 관측만 제한한다. 변경/원 작업 조회는 이 슬롯을 기다리지 않는다.
+
+    파일은 삭제하지 않는다. 호출자는 FD를 소유 helper에도 전달해 부모 소멸을 슬롯 회수로
+    오인하지 않는다. 신규 대기열/재시도는 없고 같은 runtime의 CLI/프로세스도 참여한다.
+    """
+    directory=ensure_runtime(runtime)/'locks'
+    directory.mkdir(mode=0o700,exist_ok=True)
+    if directory.is_symlink() or directory.resolve()!=directory:
+        raise PlatformError('invalid observation slot directory')
+    held=None
+    try:
+        for number in range(OBSERVATION_SLOTS):
+            if clock()>=deadline:
+                from xenova_execution import refuse
+                refuse('DEADLINE_EXCEEDED','observation admission deadline expired')
+            fd=os.open(directory/('observation-slot-'+str(number)+'.lock'),os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+            try:
+                info=os.fstat(fd)
+                if (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.geteuid()
+                        or stat.S_IMODE(info.st_mode)!=0o600):
+                    raise PlatformError('invalid observation slot file')
+                fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(fd)
+                continue
+            except BaseException:
+                os.close(fd)
+                raise
+            held=fd
+            break
+        if held is None:
+            raise OperationBusy('another observation operation is in progress; bounded capacity exhausted')
+        if clock()>=deadline:
+            from xenova_execution import refuse
+            refuse('DEADLINE_EXCEEDED','observation admitted after deadline')
+        yield held
+    finally:
+        if held is not None:os.close(held)
 
 
 def ensure_runtime(runtime=RUN):
@@ -28,7 +71,7 @@ def ensure_runtime(runtime=RUN):
 
 @contextmanager
 def operation_lock(runtime=RUN, *, blocking=False, deadline=None, clock=time.monotonic, sleep=time.sleep):
-    """모든 저장소/레지스트리 작업은 단일 잠금을 쓴다. unlock 때 파일을 지우지 않는다."""
+    """물리 변경·공유 예약의 단일 잠금. 조회는 별도 정합성을 확인한다. unlock 때 파일을 지우지 않는다."""
     directory = ensure_runtime(runtime) / 'locks'
     directory.mkdir(mode=0o700, exist_ok=True)
     if directory.is_symlink() or not directory.is_dir():

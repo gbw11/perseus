@@ -160,7 +160,7 @@ def validate_record(record, directory, *, allow_seed=False, allow_archive=False)
     return record
 
 
-def load_records(data, *, validate_assets=True):
+def load_records(data, *, validate_assets=True, deadline=None, clock=time.monotonic):
     """공통 신원·경로·디스크 중복 검증. validate_assets는 전체 부팅 자산 검사도 요청한다.
 
     CLI는 공통 검증 후 실행 대상만 자산을 검사한다. 누락된 비대상 부팅 자산은
@@ -171,6 +171,9 @@ def load_records(data, *, validate_assets=True):
         raise PlatformError('instance registry missing')
     records, identities, disks = {}, set(), set()
     for directory in sorted(registry.iterdir()):
+        if deadline is not None and clock()>=deadline:
+            from xenova_execution import refuse
+            refuse('DEADLINE_EXCEEDED','registry scan budget expired')
         if directory.name.startswith('.'):
             continue
         if directory.is_symlink() or not directory.is_dir() or directory.resolve() != directory:
@@ -258,7 +261,8 @@ class Platform:
     @traced('platform.registry')
     def records(self, *, validate_assets=True):
         storage_check(self.data)
-        return load_records(self.data, validate_assets=validate_assets)
+        return load_records(self.data, validate_assets=validate_assets,
+                            deadline=getattr(self,'response_deadline',None),clock=self.clock)
 
     def templates(self):
         """SD의 불변 템플릿 목록. 전체 root 해시는 실제 생성 직전에 검증한다."""
@@ -1147,7 +1151,7 @@ class Platform:
                                   idempotency_key=idempotency_key)
 
 
-def read_tombstones(data):
+def read_tombstones(data, *, deadline=None, clock=time.monotonic):
     """정식 UUID.json만 읽는다. atomic_write 잔여 파일은 검증 후 보존하고 채택하지 않는다."""
     from xenova_catalog import plain
     root = data / 'tombstones'
@@ -1156,6 +1160,9 @@ def read_tombstones(data):
     plain(root, directory=True)
     result = {}
     for path in sorted(root.iterdir()):
+        if deadline is not None and clock()>=deadline:
+            from xenova_execution import refuse
+            refuse('DEADLINE_EXCEEDED','lifecycle scan budget expired')
         suffix = re.fullmatch(r'(.+\.json)\.tmp-[0-9]+-[0-9a-f]{12}', path.name)
         if suffix and UUID.fullmatch(suffix[1][:-5]):
             plain(path)
