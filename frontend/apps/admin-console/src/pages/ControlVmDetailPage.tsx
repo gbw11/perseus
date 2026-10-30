@@ -173,7 +173,7 @@ export function ControlVmDetailPage() {
                 <small>MiB</small>
               </div>
               <div data-available={resources.data ? 'true' : 'false'}>
-                <span>CPU 핀닝</span>
+                <span>vCPU 핀닝</span>
                 <strong>{resources.data ? pinningSummary(resources.data.vcpu_pinning) : '—'}</strong>
                 <small>{resources.data ? 'Xen hard affinity' : '설정 미조회'}</small>
               </div>
