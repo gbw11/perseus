@@ -629,8 +629,10 @@ workspace 전 실패를 같은 요청으로 명시 재개할 때만 실행 전�
 원 error·신원·예약을 보존한다. 부분 workspace 실패는 계속 재복사 차단 대상이다.
 
 SUCCEEDED는 원 성공으로 유지한다. 부모가 사망한 잔존 자식/미완료 효과는
-RECOVERY_REQUIRED, 소유권 관측 오류는 OBSERVATION_UNAVAILABLE, 불완전 검색/예산 소진은
-DEADLINE_EXCEEDED로 구분한다. 신규 슬롯 미수락에만 accepted=false·operation_id=null을
+RECOVERY_REQUIRED, 소유권 관측 오류는 OBSERVATION_UNAVAILABLE이다. 예산 소진으로
+검색을 끝내지 못하면 DEADLINE_EXCEEDED이며, 원장 읽기·JSON 형식 실패는 ARTIFACT_INVALID,
+무결성 불일치는 RECOVERY_REQUIRED, 중복 key는 RECONCILE_REQUIRED로 구분한다.
+어느 오류도 정상 부재나 유일한 원 작업으로 확정하지 않는다. 신규 슬롯 미수락에만 accepted=false·operation_id=null을
 사용한다. 일반 503/timeout으로 이 값을 추정하지 않는다. asset operation과 control-operation은
 별개 원장이며 조회가 실행/청소를 하지 않는다.
 
@@ -707,3 +709,38 @@ Python manifest와 기존 전이 의존성을 `STDLIB_DEPENDENCIES.json`/설치 
 API cgroup의 guest backend 귀속 위험도 별도 미완료다. 단일 설치 후보의 모든 관련
 모듈·import 경로를 맞추기 전 임의 부분 배포로 제품 종단 수락을 닫지 않는다.
 이번 작업에서 보드·운영 상태·다른 담당자 제품·진행 중 이미지 빌드·commit/push는 변경하지 않았다.
+
+### 6. 3번 마감의 교차 경계 확인
+
+후속 검토의 두 항목은 `dc3861c`와 이번 시험·문서 diff를 기준으로 좁게 확인했다.
+3번 잠금 구조나 제품 코드를 다시 변경하지 않았다. 기존 481개 결과와 부분 설치 원자료는
+그대로 보존하고, 다음 assertion을 기존 시험 파일에 추가했다.
+
+| 확인 | 시험·실제 결과 |
+|---|---|
+| 같은 VM의 준비 중 복구 진입 | `test_S3_T04_debian_recovery_entries_do_not_reclaim_live_unpublished_preparation`, Ubuntu 대칭 시험. 실제 root 복사 첫 쓰기를 멈춘 동안 `recover_once` 계획/실행, `recovery-reconcile` 진단/실행과 `recovery-operation`을 호출. 미게시 VM은 아직 등록 실행/복구 attempt가 없으므로 VM_NOT_FOUND. 원 create를 중단 작업으로 수습하거나 대신 실행하지 않음 |
+| 원 작업과 자산 불변·정상 진행 | 위 호출 중 원 operation·owner 파일 및 workspace 파일의 inode/내용·집합 불변, 새 recovery attempt/control/public 자산·추가 Xen 호출 0. A는 release=false·thread alive·root 쓰기 1회, 원 key 조회는 RUNNING. 그 뒤 barrier를 해제하면 같은 operation으로 정상 생성 완료 |
+| 검색 실패 원인 구분 | `test_S3_T07_asset_scan_read_format_integrity_and_duplicate_errors_are_distinct`. 원장 읽기/부분 directory 열람·JSON 형식 실패는 ARTIFACT_INVALID, 무결성 불일치는 RECOVERY_REQUIRED, 중복 key는 RECONCILE_REQUIRED. 모두 data=null 오류이며 정상 부재나 유일한 원 작업으로 반환하지 않음. 주입을 해제하면 같은 원 준비는 RUNNING |
+| 예산·소유권 관측 실패 | 기존 `test_S3_T07_owner_read_failure_and_expired_lookup_do_not_change_the_origin`을 재실행. 예산 소진은 DEADLINE_EXCEEDED, 소유권 읽기 실패는 OBSERVATION_UNAVAILABLE. 원 작업 변경 0 |
+
+이 복구 교차 시험은 **신규 미게시 VM에 원 복구 attempt가 없는 경우**를 다룬다. 이를
+등록 VM의 전체 Recovery/Worker 종단이나 기존 uncertain attempt의 새로운 수습 기능으로
+확대하지 않는다. `Recovery.conditions`의 등록 수명·의도·미완료 자산 소유 확인과 기존
+복구 회귀는 유지한다. 추가 교차 시험에서 제품 결함은 확인되지 않았다.
+
+같은 PC 원자료 경로의 `io_checks.py stage3 candidate-closure`를 실행해 **31 passed /
+15.39초, skip 없음**을 확인했다. 기존 28개에 추가 3개를 포함한 한 suite 결과이며 선행
+481개에 합산하지 않는다. `CANDIDATE-CLOSURE_SOURCE.json`에 실행한 사본의 해시,
+`stage3-candidate-closure.json/.log`에 실제 명령·반환·출력, `STAGE3_CLOSURE.json`과
+`closure.diff`에 최종 추가 후보와 근거 대응을 보존한다. 두 OS의 복구 전 raw envelope와
+조회 오류는 `assertions-stage3-candidate-closure/S3-T04-*-recovery-before-release.json` 및
+`S3-T07-asset-lookup-errors.json`에 있다.
+
+정식 [자산 작업 조회 오류 설명](../platform/cli-manager-spec.md#cmd-operation)도 위 실제
+분기로 좁혔다. 기존 담당자 요청서의 key 조회 오류 구분은 유지하며 새 오류/응답 필드를
+추가하지 않았다. recipe 소유 29개 소스는 기존 부분 설치 manifest와 해시가 같아 패키지·
+ARM·전체 이미지를 다시 빌드하지 않았다. 문서 링크와 diff 공백 검사도 확인했다.
+
+3번은 **하위 구현·로컬 검증 마감**이다. 4번의 반복 polling 비용·공정성, 5번의 전체
+deadline·실패 자산 수습, 상위 연결·실제 설치본/보드·API cgroup 수락은 별도 미완료로
+유지한다. 이 후속 확인에서 보드 적용·다른 담당자 제품 수정·commit/push는 하지 않았다.

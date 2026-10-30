@@ -787,8 +787,11 @@ Linux의 확인된 원 준비 실행은 `effective_status=RUNNING`이다. 원 st
 **오류 응답**
 
 존재하지 않는 이력은 `VM_NOT_FOUND`(2), 비표준 선택자나 복수 선택자는 `INVALID_SPEC`(2).
-불완전한 검색·기한 소진은 `DEADLINE_EXCEEDED`, 중복 key는 `RECONCILE_REQUIRED`,
-원 실행 소유권을 확인하지 못하면 `OBSERVATION_UNAVAILABLE`이다. 이를 부재로 처리하지 않는다.
+예산 소진으로 검색을 마치지 못하면 `DEADLINE_EXCEEDED`, 원장 읽기·JSON 형식 실패는
+`ARTIFACT_INVALID`, 원장 무결성 불일치는 `RECOVERY_REQUIRED`, 중복 key는
+`RECONCILE_REQUIRED`, 원 실행 소유권 관측 실패는 `OBSERVATION_UNAVAILABLE`이다.
+어느 오류도 정상 부재나 유일한 원 작업으로 확정하지 않는다. 이 자산 원장 오류를 별도
+`control-operation`의 읽기 오류와 같은 계약으로 합치지 않는다.
 
 **확인 방법**
 
