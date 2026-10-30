@@ -17,7 +17,7 @@ import com.xenova.backend.agent.domain.NetworkInterface;
 import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.template.domain.GuestKind;
 import com.xenova.backend.vm.domain.CreateVmCommand;
-import com.xenova.backend.vm.domain.VmControlPort;
+import com.xenova.backend.vm.infrastructure.Dom0ManagerClient;
 import com.xenova.backend.vm.domain.VmRecord;
 import com.xenova.backend.vm.domain.VmRecordRepository;
 import com.xenova.backend.vm.domain.VmRuntime;
@@ -41,7 +41,7 @@ import org.springframework.test.web.servlet.ResultActions;
 class OsEvidenceReportApiIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"report-os-user","password":"password123!"}
+            {"username":"report-os-user","nickname":"OS 리포트 테스트","password":"password123!"}
             """;
     private static final List<CreateVmCommand> VMS = List.of(
             new CreateVmCommand("debian-01", "debian-13-arm64", "1.0.0", 1, 256),
@@ -64,7 +64,7 @@ class OsEvidenceReportApiIntegrationTest {
     private AgentHeartbeatRepository heartbeatRepository;
 
     @MockitoBean
-    private VmControlPort vmControlPort;
+    private Dom0ManagerClient vmControlPort;
 
     @Autowired
     private VmRecordRepository vmRecordRepository;

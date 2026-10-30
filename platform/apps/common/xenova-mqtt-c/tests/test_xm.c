@@ -3,7 +3,6 @@
  *   test_xm <vectors 디렉터리>
  */
 #include <errno.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -128,6 +127,7 @@ static int build(const char *fn, int args, char *out, size_t n)
 	}
 	if (!strcmp(fn, "vm")) return xm_topic_vm(out, n, a, b);
 	if (!strcmp(fn, "app_events")) return xm_topic_app_events(out, n, a);
+	if (!strcmp(fn, "vm_app_events")) return xm_topic_vm_app_events(out, n, a, b);
 	if (!strcmp(fn, "manual_input")) return xm_topic_manual_input(out, n);
 	if (!strcmp(fn, "vehicle_control")) return xm_topic_vehicle_control(out, n);
 	if (!strcmp(fn, "vehicle_status")) return xm_topic_vehicle_status(out, n);
@@ -340,39 +340,6 @@ static void test_payloads(void)
 	CHECK(xm_drive_input_parse(sp("{}"), &keys) == -EINVAL, "keys missing");
 }
 
-static void test_perception(void)
-{
-	char buf[128];
-	struct xm_perception_result r;
-
-	CHECK(xm_perception_result_parse(sp("{\"lane_offset_m\":0.05,\"heading_err_rad\":-1.5e-2,\"stop\":true,"
-					    "\"obstacles\":[{\"x\":0.6,\"y\":-0.02,\"w\":0.1},{\"x\":2,\"y\":0.5,\"w\":0.2}]}"),
-					 &r) == 0 &&
-		      fabsf(r.lane_offset_m - 0.05f) < 1e-6f && fabsf(r.heading_err_rad + 0.015f) < 1e-6f && r.stop &&
-		      r.n_obstacles == 2 && fabsf(r.obstacles[1].x - 2.0f) < 1e-6f,
-	      "perception.result");
-	/* 형식이 틀린 장애물(문자열 x, 숫자, 음수 폭)은 건너뛴다 */
-	CHECK(xm_perception_result_parse(sp("{\"lane_offset_m\":0,\"heading_err_rad\":0,\"stop\":false,"
-					    "\"obstacles\":[{\"x\":\"1\",\"y\":0,\"w\":0},3,{\"x\":1,\"y\":0,\"w\":-1},"
-					    "{\"x\":1,\"y\":0,\"w\":0.1}]}"),
-					 &r) == 0 &&
-		      r.n_obstacles == 1 && !r.stop,
-	      "bad obstacles skipped n=%d", r.n_obstacles);
-	const char *bad[] = {
-		"{\"heading_err_rad\":0,\"stop\":false,\"obstacles\":[]}",
-		"{\"lane_offset_m\":true,\"heading_err_rad\":0,\"stop\":false,\"obstacles\":[]}",
-		"{\"lane_offset_m\":0,\"heading_err_rad\":0,\"stop\":1,\"obstacles\":[]}",
-		"{\"lane_offset_m\":0,\"heading_err_rad\":0,\"stop\":false}",
-		"{\"lane_offset_m\":0,\"heading_err_rad\":\"0\",\"stop\":false,\"obstacles\":[]}",
-		"[]",
-	};
-	for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
-		CHECK(xm_perception_result_parse(sp(bad[i]), &r) == -EINVAL, "bad perception %s", bad[i]);
-	}
-	xm_perception_event_json(buf, sizeof(buf), "obstacle", "stop 0.62 m");
-	CHECK(!strcmp(buf, "{\"kind\":\"obstacle\",\"detail\":\"stop 0.62 m\"}"), "perception.event %s", buf);
-}
-
 static void test_uuid(void)
 {
 	uint8_t r[16];
@@ -393,7 +360,6 @@ int main(int argc, char **argv)
 	vectors_seq(dir);
 	test_encode_roundtrip();
 	test_payloads();
-	test_perception();
 	test_uuid();
 	printf("%d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;

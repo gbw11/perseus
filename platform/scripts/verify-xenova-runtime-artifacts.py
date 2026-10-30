@@ -12,7 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 FILES = ROOT / 'platform/yocto/meta-xenova/recipes-core/xenova-platform/files'
 sys.path[:0] = [str(FILES), str(ROOT / 'platform/first-install'), '/usr/lib/xenova']
-from xenova_vm import PlatformError, guest_kind, run
+from xenova_vm import PlatformError, guest_kind, has_network, run
 
 
 def parsed_config(record, parsed, directory):
@@ -35,9 +35,12 @@ def parsed_config(record, parsed, directory):
     else:
         active = record['active_firmware']
         kernel = directory / 'firmware' / active['revision'] / 'zephyr.bin'
-        if (disks or nics or build.get('kernel') != str(kernel) or build.get('ramdisk')
+        network=has_network(record)
+        if (disks or (len(nics)!=1 if network else bool(nics)) or build.get('kernel') != str(kernel) or build.get('ramdisk')
                 or build.get('arch_arm', {}).get('gic_version') != 'v2'):
             raise PlatformError('xl parsed Zephyr firmware/GIC/disk/VIF mismatch')
+        if network and (nics[0].get('mac')!=record['mac'] or nics[0].get('bridge')!='xenbr0'):
+            raise PlatformError('xl parsed Zephyr MAC/isolated bridge mismatch')
     return True
 
 

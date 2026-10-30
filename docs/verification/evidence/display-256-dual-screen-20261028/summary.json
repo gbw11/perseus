@@ -1,0 +1,36 @@
+{
+  "stage": "/opt/xenova-display-probe/20261028-dual-kms-063938",
+  "web_source": "252 uncommitted renderer build; source changes remain in separate 252 worktree",
+  "backend_source": "256 branch based on platform ef79127",
+  "web_sha256": "dd2d25c2ca17f5926e6aa0e99a56c17a7b49cb20b6cd497536fbeec5df8796ed",
+  "remote_exit": 0,
+  "remote_error": "",
+  "completed_dual_display_checks": true,
+  "physical_user_confirmation": "User confirmed both screens displayed correctly after 10-second replay, outputs/display-256/dual-kms-20261028-064930",
+  "checks": {
+    "framebuffer_restored": true,
+    "restoration_differing_bytes": 0,
+    "restored_active_vt": 1,
+    "feed_stopped": true
+  },
+  "final_bounds": {
+    "1": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720,
+      "windowState": "fullscreen"
+    },
+    "2": {
+      "left": 1280,
+      "top": 0,
+      "width": 1280,
+      "height": 720,
+      "windowState": "fullscreen"
+    }
+  },
+  "reload_checks": {
+    "other_output_title_unchanged": true,
+    "other_output_bounds_unchanged": true
+  }
+}

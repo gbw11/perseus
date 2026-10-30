@@ -3,6 +3,7 @@
 안전 규칙
 - 인자 리스트로만 실행한다. 문자열 명령·shell=True 금지.
 - 모든 호출에 타임아웃을 둔다. 타임아웃은 DriverTimeout 으로 바꿔 서비스 전체가 멈추지 않게 한다.
+  요청 예산(budget.py)이 있으면 자체 한도와 남은 예산 중 짧은 쪽이고, 남은 예산이 없으면 실행하지 않는다.
 - stderr 전체를 응답에 싣지 않는다. 잘라서 detail 에만 넣고 message 는 짧게 유지한다.
 """
 
@@ -14,6 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Protocol
 
+from .. import budget as request_budget
 from ..errors import DriverError, DriverTimeout
 from ..models import VmState
 from .base import HostInfo
@@ -31,6 +33,10 @@ class CommandRunner(Protocol):
     def run(self, args: Sequence[str], *, timeout_s: float) -> CommandResult: ...
 
 
+class CommandUnavailable(DriverError):
+    """실행 파일 자체를 못 찾거나 실행할 수 없음(OSError). xentop 처럼 선택적 도구는 503 으로 바꿔 낸다."""
+
+
 class SubprocessRunner:
     def run(self, args: Sequence[str], *, timeout_s: float) -> CommandResult:
         argv = [str(a) for a in args]
@@ -46,7 +52,7 @@ class SubprocessRunner:
         except subprocess.TimeoutExpired as exc:
             raise DriverTimeout(f"{' '.join(argv[:2])} timed out after {timeout_s:g}s") from exc
         except OSError as exc:
-            raise DriverError(f"cannot run {argv[0]}", detail=exc.strerror) from exc
+            raise CommandUnavailable(f"cannot run {argv[0]}", detail=exc.strerror) from exc
         return CommandResult(proc.returncode, proc.stdout, proc.stderr)
 
 
@@ -172,6 +178,7 @@ class Xl:
         self.command_timeout_s = command_timeout_s
 
     def _run(self, *args: str, timeout_s: float) -> str:
+        timeout_s = request_budget.clamp(timeout_s, f"xl {args[0]}")
         result = self._runner.run(["xl", *args], timeout_s=timeout_s)
         if result.returncode != 0:
             raise DriverError(
@@ -184,8 +191,9 @@ class Xl:
     def list(self) -> list[XlRow]:
         return parse_xl_list(self._run("list", timeout_s=self.query_timeout_s))
 
-    def list_long(self) -> list[dict[str, Any]]:
-        return parse_xl_list_long(self._run("list", "-l", timeout_s=self.query_timeout_s))
+    def list_long(self, *, timeout_s: float | None = None) -> list[dict[str, Any]]:
+        """timeout_s 는 상위 요청이 deadline 을 나눠 줄 때만 넘긴다(통계 수집)."""
+        return parse_xl_list_long(self._run("list", "-l", timeout_s=self.query_timeout_s if timeout_s is None else timeout_s))
 
     def info(self) -> HostInfo:
         return parse_xl_info(self._run("info", timeout_s=self.query_timeout_s))

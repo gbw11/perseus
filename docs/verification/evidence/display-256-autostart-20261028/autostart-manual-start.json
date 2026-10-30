@@ -1,0 +1,62 @@
+{
+  "unit_load": {
+    "xenova-display.target": "LoadState=loaded\nFragmentPath=/etc/systemd/system/xenova-display.target\nLoadError=\n",
+    "xenova-display-feed.service": "LoadState=loaded\nFragmentPath=/etc/systemd/system/xenova-display-feed.service\nLoadError=\n",
+    "xenova-display-graphics.service": "LoadState=loaded\nFragmentPath=/etc/systemd/system/xenova-display-graphics.service\nLoadError=\n",
+    "xenova-display-kiosk.service": "LoadState=loaded\nFragmentPath=/etc/systemd/system/xenova-display-kiosk.service\nLoadError=\n"
+  },
+  "boot_id": "98d7d22b-7484-49a2-a5f7-d660303e85fb",
+  "start": {
+    "code": 0,
+    "out": "",
+    "err": ""
+  },
+  "kiosk_status": {
+    "schema_version": 1,
+    "layout_epoch": "b0cfa319-fee8-48e6-a323-4417edc6ce7b",
+    "backend": "x11",
+    "updated_monotonic": 6894.557542574,
+    "outputs": {
+      "monitor-1": {
+        "status": "mapped",
+        "physical_verified": true,
+        "connector": "HDMI-1",
+        "rectangle": [
+          0,
+          0,
+          1280,
+          720
+        ],
+        "renderer_alive": true,
+        "applied_revision": 1,
+        "desired_render_revision": "3ddf5cd2006b7bbd2d00",
+        "render_revision": "3ddf5cd2006b7bbd2d00",
+        "dom_revision": 1
+      },
+      "monitor-2": {
+        "status": "mapped",
+        "physical_verified": true,
+        "connector": "HDMI-2",
+        "rectangle": [
+          1280,
+          0,
+          1280,
+          720
+        ],
+        "renderer_alive": true,
+        "applied_revision": 1,
+        "desired_render_revision": "3ddf5cd2006b7bbd2d00",
+        "render_revision": "3ddf5cd2006b7bbd2d00",
+        "dom_revision": 1
+      }
+    }
+  },
+  "ready": true,
+  "services": {
+    "xenova-display.target": "ActiveState=active\nSubState=active\n",
+    "xenova-display-feed.service": "ActiveState=active\nSubState=running\nMainPID=17176\nResult=success\nNRestarts=0\n",
+    "xenova-display-graphics.service": "ActiveState=active\nSubState=running\nMainPID=17178\nResult=success\nNRestarts=0\n",
+    "xenova-display-kiosk.service": "ActiveState=active\nSubState=running\nMainPID=17192\nResult=success\nNRestarts=0\n"
+  },
+  "journal": "Started Xenova local display feed (read-only Xen and existing MQTT).\nStarting Xenova dedicated KMS X11 session...\nStarted Xenova dedicated KMS X11 session.\nStarted Xenova vehicle two-monitor kiosk.\n"
+}

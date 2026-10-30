@@ -1,0 +1,76 @@
+// GitLab의 accepted MR webhook에서 source/target 브랜치를 읽어,
+// develop에 병합된 파트 브랜치만 최신 develop 커밋으로 fast-forward한다.
+pipeline {
+    agent any
+
+    options {
+        gitLabConnection('gitlab')
+        timeout(time: 10, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        GITLAB_SSH_CREDENTIALS_ID = 'xenova-gitlab-deploy-key'
+    }
+
+    stages {
+        stage('Sync merged part branch') {
+            when {
+                expression {
+                    env.gitlabTargetBranch == 'develop' &&
+                        ['platform', 'frontend', 'backend', 'vehicle'].contains(env.gitlabSourceBranch)
+                }
+            }
+            steps {
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: env.GITLAB_SSH_CREDENTIALS_ID,
+                    keyFileVariable: 'GITLAB_SSH_KEY'
+                )]) {
+                    sh '''
+                        set -eu
+
+                        source_branch="$gitlabSourceBranch"
+                        target_branch="$gitlabTargetBranch"
+
+                        case "$source_branch" in
+                            platform|frontend|backend|vehicle) ;;
+                            *)
+                                echo "Unsupported source branch: $source_branch" >&2
+                                exit 1
+                                ;;
+                        esac
+
+                        if [ "$target_branch" != 'develop' ]; then
+                            echo "Expected target branch develop, got $target_branch" >&2
+                            exit 1
+                        fi
+
+                        export GIT_SSH_COMMAND="ssh -i $GITLAB_SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+                        repository_url='git@lab.ssafy.com:s15-final/S15P31E110.git'
+                        git fetch --no-tags "$repository_url" \
+                          "+refs/heads/${target_branch}:refs/remotes/origin/${target_branch}" \
+                          "+refs/heads/${source_branch}:refs/remotes/origin/${source_branch}"
+
+                        target_tip="$(git rev-parse "origin/$target_branch")"
+                        source_tip="$(git rev-parse "origin/$source_branch")"
+
+                        if ! git merge-base --is-ancestor "$source_tip" "$target_tip"; then
+                            echo "origin/$source_branch is not contained in origin/$target_branch; refusing automatic sync." >&2
+                            exit 1
+                        fi
+
+                        git push -o ci.skip "$repository_url" \
+                          "${target_tip}:refs/heads/${source_branch}"
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        notBuilt {
+            echo "Skipping sync: source=${env.gitlabSourceBranch}, target=${env.gitlabTargetBranch}"
+        }
+    }
+}

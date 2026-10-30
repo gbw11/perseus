@@ -157,12 +157,16 @@ def platform_root(root):
                'usr/lib/xenova/xenova_zephyr.py': FILES / 'xenova_zephyr.py',
                'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
-    for name in ('xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
-                 'xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
+    for name in ('xenova_boot_status.py','xenova_boot_progress.py','xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
+                 'xenova_cpu.py','xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py',
+                 'xenova_resources.py','xenova_zephyr_transition.py','xenova_zephyr_control.py'):
         mapping['usr/lib/xenova/'+name] = FILES/name
     mapping['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
+    mapping['usr/sbin/xenova-boot-status'] = FILES/'xenova-boot-status'
     mapping['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
+    mapping['etc/modprobe.d/xenova-wifi.conf'] = FILES/'xenova-wifi-modprobe.conf'
     mapping['usr/sbin/xenova-domain-identity'] = FILES/'xenova-domain-identity'
+    mapping['etc/xenova/cpu-policy-preset.json'] = FILES/'cpu-policy-preset.json'
     mapping['etc/xenova/execution-policy.json'] = FILES/'execution-policy.json'
     mapping['usr/lib/xenova/update_guest_ssh.py'] = ROOT / 'platform/scripts/update-xenova-guest-ssh.py'
     for name in ('prepare_instance.py', 'prepare_rootfs.py', 'guest_identity.py'):
@@ -174,6 +178,7 @@ def platform_root(root):
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
+    (root/"etc/xenova/dom0-manager.env").chmod(0o600)
     for dependency in ('fastapi/__init__.py', 'uvicorn/__init__.py', 'paho/mqtt/client.py',
                        'pydantic/__init__.py', 'starlette/__init__.py', 'anyio/__init__.py'):
         target=root/'usr/lib/python3.14/site-packages'/dependency
@@ -195,8 +200,11 @@ def platform_root(root):
     checker.parent.mkdir(parents=True); checker.write_text('packaging fixture: not executed')
     wants = root / 'etc/systemd/system/multi-user.target.wants'
     wants.mkdir(exist_ok=True)
-    for name in ('xenova-dom0-manager.service', 'xenova-host-admission.service', 'xenova-first-boot.service', 'srv-xenova.mount', 'xenova-vms.service', 'xenova-vm-shutdown.service'):
+    for name in ('xenova-dom0-manager.service', 'xenova-recovery-worker.service', 'xenova-host-admission.service', 'xenova-first-boot.service', 'srv-xenova.mount', 'xenova-vms.service', 'xenova-vm-shutdown.service'):
         (wants / name).symlink_to('/usr/lib/systemd/system/' + name)
+    early = root/'etc/systemd/system/sysinit.target.wants'
+    early.mkdir(parents=True, exist_ok=True)
+    (early/'xenova-boot-status.service').symlink_to('/usr/lib/systemd/system/xenova-boot-status.service')
     tools = root / 'usr/bin'
     tools.mkdir(parents=True)
     for name in ('sfdisk', 'partx', 'blockdev', 'blkid', 'e2fsck', 'resize2fs', 'dumpe2fs', 'tune2fs', 'losetup', 'mount', 'umount', 'findmnt', 'cp', 'chroot', 'ssh-keygen', 'lsblk', 'ip', 'ss', 'timedatectl', 'qemu-system-i386', 'wpa_supplicant', 'wpa_cli', 'iw', 'networkctl', 'python3'):
@@ -207,9 +215,26 @@ def platform_root(root):
         target=root/'usr/lib/firmware'/relative
         target.parent.mkdir(parents=True,exist_ok=True)
         target.write_bytes(b'fixture: not real firmware')
+    for relative in ('brcmfmac.ko.xz', 'cyw/brcmfmac-cyw.ko.xz'):
+        target = root/'usr/lib/modules/6.18.33-v8/kernel/drivers/net/wireless/broadcom/brcm80211/brcmfmac'/relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b'packaging fixture: not a kernel module')
     for name, text in [('qemu-config-host.h', '#define CONFIG_VNC 1\n#define CONFIG_XEN_BACKEND 1\n'),
                        ('qemu-i386-config-target.h', '#define CONFIG_XEN 1\n')]:
         (root / 'usr/share/xenova' / name).write_text(text)
+    tailscale=ROOT/'platform/yocto/meta-xenova/recipes-connectivity/tailscale/files'
+    for relative,name in [('usr/sbin/xenova-tailscale-state','xenova-tailscale-state'),
+                          ('usr/lib/systemd/system/tailscaled.service.d/20-xenova-persistence.conf','20-xenova-persistence.conf')]:
+        target=root/relative;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes((tailscale/name).read_bytes())
+    for name in ('tailscale','tailscaled'):
+        target=root/('usr/bin/' if name=='tailscale' else 'usr/sbin/')/name
+        target.write_text('packaging fixture: not a Tailscale implementation');target.chmod(0o755)
+    (root/'usr/sbin/xenova-tailscale-state').chmod(0o755)
+    (root/'usr/lib/systemd/system/tailscaled.service').write_text('[Service]\nExecStart=/usr/sbin/tailscaled\n')
+    (wants/'tailscaled.service').symlink_to('/usr/lib/systemd/system/tailscaled.service')
+    for relative in ('kernel/drivers/net/tun.ko','kernel/net/ipv6/ipv6.ko'):
+        target=root/'usr/lib/modules/6.18.33-v8'/relative;target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_bytes(b'packaging fixture: not a kernel module')
     return root
 
 

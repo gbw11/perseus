@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""Tailscale의 영구 저장소와 같은 보드 전용 백업을 검사한다. 인증·VM 제어는 수행하지 않는다."""
+import argparse
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+
+DATA = Path('/srv/xenova')
+DEVICE = Path('/run/xenova/data-device')
+SERIAL = Path('/proc/device-tree/serial-number')
+FORMAT = 'xenova-tailscale-state-v1'
+MAX_FILES = 512
+MAX_BYTES = 16 * 1024 * 1024
+MAX_BUNDLE = 24 * 1024 * 1024
+
+
+class StateError(ValueError):
+    """인증 내용을 포함하지 않는 고정 진단 메시지."""
+
+
+def storage(data=DATA, device=DEVICE, mountinfo=Path('/proc/self/mountinfo')):
+    """기존 data-prepare가 검증한 block device와 실제 writable ext4 mount를 대조한다."""
+    info = data.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0:
+        raise StateError('data mount must be a root-owned directory')
+    expected = device.stat()
+    if not stat.S_ISBLK(expected.st_mode) or info.st_dev != expected.st_rdev:
+        raise StateError('data mount does not match the verified data device')
+    matches = []
+    for line in mountinfo.read_text().splitlines():
+        left, right = line.split(' - ', 1)
+        fields, fs = left.split(), right.split()
+        if fields[4] == str(data):
+            matches.append((fields, fs))
+    if len(matches) != 1:
+        raise StateError('persistent data partition is not mounted; no rootfs fallback')
+    fields, fs = matches[0]
+    if fs[0] != 'ext4' or 'rw' not in fields[5].split(',') or 'rw' not in fs[2].split(','):
+        raise StateError('persistent data partition must be writable ext4')
+    if fields[2] != f'{os.major(info.st_dev)}:{os.minor(info.st_dev)}':
+        raise StateError('data mount device changed')
+    return data / 'tailscale'
+
+
+def private_directory(path):
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0:
+        raise StateError('state directory must be root-owned and not a symlink')
+
+
+def prepare(data=DATA, **kwargs):
+    target = storage(data, **kwargs)
+    if any(data.glob('.tailscale-restore-*')):
+        raise StateError('interrupted restore is present; preserve and inspect it before starting')
+    if not target.exists() and not target.is_symlink():
+        target.mkdir(mode=0o700)
+    private_directory(target)
+    os.chmod(target, 0o700)
+    state = target / 'tailscaled.state'
+    if state.exists() or state.is_symlink():
+        info = state.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1:
+            raise StateError('state file must be a private root-owned regular file')
+        os.chmod(state, 0o600)
+    # Existing state is never parsed, regenerated or replaced by a startup helper.
+    return target
+
+
+def board_serial(path=SERIAL):
+    value = path.read_bytes().rstrip(b'\x00\n').decode('ascii').lower()
+    if len(value) != 16 or any(c not in '0123456789abcdef' for c in value) or int(value, 16) == 0:
+        raise StateError('Raspberry Pi hardware serial unavailable; cannot bind backup to this board')
+    return value
+
+
+def cleanup(data=DATA, daemon=('/usr/sbin/tailscaled',), **kwargs):
+    """상위 --cleanup도 기본 rootfs 상태 경로를 만들기 전에 영구 저장소를 검사한다."""
+    target = storage(data, **kwargs)
+    private_directory(target)
+    subprocess.run([*daemon, '--statedir='+str(target), '--state='+str(target/'tailscaled.state'), '--cleanup'],
+                   timeout=15, check=True)
+
+
+def stopped():
+    """Stop is an explicit operator action over LAN/UART, never an implicit backup side effect."""
+    p = subprocess.run(['systemctl', 'show', 'tailscaled.service', '--no-pager',
+                        '--property=LoadState,ActiveState,Job'], capture_output=True, text=True, timeout=5)
+    values = dict(row.split('=', 1) for row in p.stdout.splitlines() if '=' in row)
+    if (p.returncode or values.get('LoadState') != 'loaded' or
+            values.get('ActiveState') not in ('inactive', 'failed') or values.get('Job') != ''):
+        raise StateError('stop tailscaled explicitly over LAN/UART and wait for its job to finish')
+
+
+def safe_name(value):
+    if not isinstance(value, str) or not value or value in (".", "..") or len(value) > 1024:
+        raise StateError('invalid backup entry name')
+    p = PurePosixPath(value)
+    if (p.is_absolute() or str(p) != value or any(x in ('.', '..') for x in p.parts) or
+            '\\' in value or any(ord(c) < 32 or ord(c) == 127 for c in value)):
+        raise StateError('invalid backup entry name')
+    return p
+
+
+def backup(data=DATA, serial_path=SERIAL, guard=stopped, **kwargs):
+    guard()
+    target = storage(data, **kwargs)
+    private_directory(target)
+    files, total = [], 0
+    for parent, directories, names in os.walk(target, followlinks=False):
+        for name in directories:
+            private_directory(Path(parent) / name)
+        for name in sorted(names):
+            path = Path(parent) / name
+            relative = path.relative_to(target).as_posix()
+            safe_name(relative)
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1:
+                raise StateError('backup contains a link, special file or unexpected owner')
+            total += info.st_size
+            if total > MAX_BYTES or len(files) >= MAX_FILES:
+                raise StateError('state backup exceeds bounded size; do not silently omit files')
+            with path.open('rb') as stream:
+                content = stream.read(MAX_BYTES + 1)
+            after = path.stat()
+            if (len(content) != info.st_size or
+                    (info.st_ino, info.st_mtime_ns, info.st_size) != (after.st_ino, after.st_mtime_ns, after.st_size)):
+                raise StateError('state changed while reading; keep the daemon stopped')
+            files.append({'path': relative, 'sha256': hashlib.sha256(content).hexdigest(),
+                          'content': base64.b64encode(content).decode('ascii')})
+    if not any(x['path'] == 'tailscaled.state' for x in files):
+        raise StateError('no tailscaled.state to back up')
+    guard()
+    return {'format': FORMAT, 'board_serial': board_serial(serial_path), 'files': files}
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise StateError('duplicate backup JSON key')
+        result[key] = value
+    return result
+
+
+def decode_backup(raw, serial_path=SERIAL):
+    if len(raw) > MAX_BUNDLE:
+        raise StateError('state backup exceeds bounded size')
+    bundle = json.loads(raw, object_pairs_hook=unique_object)
+    if not isinstance(bundle, dict) or set(bundle) != {'format', 'board_serial', 'files'} or bundle['format'] != FORMAT:
+        raise StateError('unsupported state backup format')
+    if bundle['board_serial'] != board_serial(serial_path):
+        raise StateError('backup belongs to a different physical board; cloning is forbidden')
+    if not isinstance(bundle['files'], list) or len(bundle['files']) > MAX_FILES:
+        raise StateError('invalid state backup file list')
+    files, total = {}, 0
+    for entry in bundle['files']:
+        if not isinstance(entry, dict) or set(entry) != {'path', 'sha256', 'content'}:
+            raise StateError('invalid state backup entry')
+        name = str(safe_name(entry['path']))
+        if name in files or not isinstance(entry['content'], str):
+            raise StateError('duplicate or invalid state backup entry')
+        content = base64.b64decode(entry['content'], validate=True)
+        total += len(content)
+        if total > MAX_BYTES or hashlib.sha256(content).hexdigest() != entry['sha256']:
+            raise StateError('state backup checksum or size mismatch')
+        files[name] = content
+    if 'tailscaled.state' not in files or not files['tailscaled.state']:
+        raise StateError('state backup lacks tailscaled.state')
+    for name in files:
+        if any(str(p) in files for p in PurePosixPath(name).parents if str(p) != '.'):
+            raise StateError('state backup has a file/directory conflict')
+    return files
+
+
+def restore(raw, *, check=False, data=DATA, serial_path=SERIAL, guard=stopped, **kwargs):
+    guard()
+    target = storage(data, **kwargs)
+    files = decode_backup(raw, serial_path)
+    if check:
+        return {'checked': True, 'same_physical_board': True, 'files': len(files),
+                'target_exists': target.exists() or target.is_symlink()}
+    if target.exists() or target.is_symlink():
+        raise StateError('state directory already exists; preserve it explicitly before restore')
+    if any(data.glob('.tailscale-restore-*')):
+        raise StateError('interrupted restore is present; preserve and inspect it before retrying')
+    temporary = Path(tempfile.mkdtemp(prefix='.tailscale-restore-', dir=data))
+    try:
+        os.chmod(temporary, 0o700)
+        for name, content in files.items():
+            path = temporary / name
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        # Force directory entries before publishing; the daemon remains stopped.
+        for parent, _, _ in os.walk(temporary, topdown=False):
+            fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+            try: os.fsync(fd)
+            finally: os.close(fd)
+        guard()
+        storage(data, **kwargs)
+        if target.exists() or target.is_symlink():
+            raise StateError('state directory appeared during restore; refusing replacement')
+        os.rename(temporary, target)
+        fd = os.open(data, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(fd)
+        finally: os.close(fd)
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+    return {'restored': True, 'same_physical_board': True, 'files': len(files)}
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest='action', required=True)
+    sub.add_parser('prepare', help='internal service preflight; never authenticates')
+    sub.add_parser('cleanup', help='internal post-stop cleanup; never uses rootfs state')
+    export = sub.add_parser('backup', help='stream private state to an encrypted PC backup')
+    export.add_argument('--stdout', action='store_true', required=True)
+    load = sub.add_parser('restore', help='restore only onto the same physical board, with daemon stopped')
+    load.add_argument('--stdin', action='store_true', required=True)
+    load.add_argument('--check', action='store_true', help='validate without writing state')
+    args = parser.parse_args(argv)
+    try:
+        if os.geteuid() != 0:
+            raise StateError('root is required')
+        os.umask(0o077)
+        if args.action == 'prepare':
+            prepare()
+        elif args.action == 'cleanup':
+            cleanup()
+        elif args.action == 'backup':
+            if sys.stdout.isatty():
+                raise StateError('private state must be piped directly to PC encryption, never to a terminal')
+            sys.stdout.write(json.dumps(backup(), ensure_ascii=True, separators=(',', ':')) + '\n')
+        else:
+            raw = sys.stdin.buffer.read(MAX_BUNDLE + 1)
+            print(json.dumps(restore(raw, check=args.check)))
+    except StateError as error:
+        print("[xenova-tailscale-state] refused: " + str(error), file=sys.stderr)
+        return 1
+    except (OSError, ValueError, subprocess.SubprocessError):
+        print('[xenova-tailscale-state] refused: check mounted storage, stopped daemon, board identity and backup integrity', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

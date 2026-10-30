@@ -19,7 +19,7 @@ def fixture(root, *, cycle=False):
         (units / path.name).write_text(content)
     for name in ['sysinit.target', 'basic.target', 'local-fs.target', 'local-fs-pre.target', 'shutdown.target', 'umount.target', 'multi-user.target', 'sockets.target', 'slices.target', 'timers.target', 'paths.target']:
         (units / name).write_text('[Unit]\nDefaultDependencies=no\n')
-    for name in ['xenstored.service', 'xenconsoled.service', 'xen-init-dom0.service', 'systemd-udev-settle.service', 'systemd-udev-trigger.service', 'systemd-remount-fs.service']:
+    for name in ['xenstored.service', 'xenconsoled.service', 'xen-init-dom0.service', 'xen-qemu-dom0-disk-backend.service', 'systemd-udev-settle.service', 'systemd-udev-trigger.service', 'systemd-remount-fs.service']:
         (units / name).write_text('[Unit]\nDefaultDependencies=no\n[Service]\nType=oneshot\nExecStart=/bin/true\nRemainAfterExit=yes\n')
     for path in ('bin/true', 'bin/kill', 'usr/sbin/xenova-first-boot', 'usr/sbin/xenova-vm', 'usr/sbin/xenova-bridge-up', 'usr/bin/dnsmasq'):
         target = root / path

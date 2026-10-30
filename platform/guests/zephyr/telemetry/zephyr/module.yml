@@ -1,0 +1,4 @@
+name: xenova_telemetry
+build:
+  cmake: .
+  kconfig: Kconfig

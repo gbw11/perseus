@@ -170,7 +170,8 @@ class VmServiceTest {
     void startLaunchesTheRecordedSpecAgainWhenTheDomainIsAbsent() {
         when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
         when(vmControlPort.find("vm-1")).thenReturn(Optional.empty());
-        when(vmControlPort.launch("vm-1", ALPINE_SPEC)).thenReturn(new VmRuntime("vm-1", VmState.RUNNING, 1, 256));
+        when(vmControlPort.launch("vm-1", new VmLaunchSpec("alpine-1", "alpine", "1.2.0", 1, 256)))
+                .thenReturn(new VmRuntime("vm-1", VmState.RUNNING, 1, 256));
 
         assertThat(service.start("vm-1").state()).isEqualTo(VmState.RUNNING);
         verify(stateTracker).changedByUser("vm-1", VmState.STOPPED, VmState.RUNNING, "user_start");
@@ -192,7 +193,7 @@ class VmServiceTest {
         when(vmControlPort.find("vm-1"))
                 .thenReturn(Optional.empty())
                 .thenReturn(Optional.of(new VmRuntime("vm-1", VmState.RUNNING, 1, 256)));
-        when(vmControlPort.launch("vm-1", ALPINE_SPEC)).thenThrow(
+        when(vmControlPort.launch("vm-1", new VmLaunchSpec("alpine-1", "alpine", "1.2.0", 1, 256))).thenThrow(
                 new ApiException(HttpStatus.CONFLICT, "VM_ALREADY_EXISTS", "exists"));
 
         assertThat(service.start("vm-1").state()).isEqualTo(VmState.RUNNING);
@@ -235,12 +236,12 @@ class VmServiceTest {
     }
 
     @Test
-    void stopOfAVmThatIsAlreadyOffDoesNothing() {
+    void stopWithoutRuntimeStillForwardsTheStopIntent() {
         when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
         when(vmControlPort.find("vm-1")).thenReturn(Optional.empty());
 
         assertThat(service.stop("vm-1").state()).isEqualTo(VmState.STOPPED);
-        verify(vmControlPort, never()).stop(anyString());
+        verify(vmControlPort).stop("vm-1");
         verify(stateTracker, never()).changedByUser(anyString(), any(), any(), anyString());
     }
 

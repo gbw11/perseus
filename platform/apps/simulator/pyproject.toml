@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "xenova-simulator"
 version = "0.1.0"
-description = "Xenova 가상 RC카: 활성 앱 drive.command → vehicle.status 20 Hz, sim.pose·sim.world (S15P31E110-47·-261)"
+description = "Xenova 가상 RC카: 활성 앱 drive.command → vehicle.status 20 Hz (S15P31E110-47)"
 requires-python = ">=3.11"
 # xenova_mqtt 는 같은 저장소의 platform/services/vm-agent/mqtt-client 라 여기 선언하지 않는다 (수동 앱과 같은 방식)
 dependencies = [

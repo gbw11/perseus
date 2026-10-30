@@ -1,0 +1,17 @@
+[Unit]
+Description=Perseus local two-output X11 kiosk
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/xenova/display.env
+ExecStart=/opt/xenova-display/bin/python -m xenova_display.kiosk --config /etc/xenova/display-runtime.json --status %t/xenova/display-runtime.json --chromium /usr/bin/chromium --prevent-idle-blank
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target

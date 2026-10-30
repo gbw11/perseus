@@ -51,6 +51,14 @@
     "vm-1"
    ],
    "out": "xenova/v1/probes/vm-1/reply"
+  },
+  {
+   "fn": "vm_app_events",
+   "args": [
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "manual"
+   ],
+   "out": "xenova/v1/vms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/apps/manual/events"
   }
  ],
  "invalid": [
@@ -97,6 +105,20 @@
    "args": [
     "x/y"
    ]
+  },
+  {
+   "fn": "vm_app_events",
+   "args": [
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "#"
+   ]
+  },
+  {
+   "fn": "vm_app_events",
+   "args": [
+    "bad/path",
+    "manual"
+   ]
   }
  ],
  "parse": [
@@ -127,6 +149,16 @@
   },
   {
    "topic": "xenova/v1/vms/vm-1/heartbeat/extra",
+   "vm_id": null,
+   "app_id": null
+  },
+  {
+   "topic": "xenova/v1/vms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/apps/manual/events",
+   "vm_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+   "app_id": "manual"
+  },
+  {
+   "topic": "xenova/v1/vms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/apps/manual/events/extra",
    "vm_id": null,
    "app_id": null
   }

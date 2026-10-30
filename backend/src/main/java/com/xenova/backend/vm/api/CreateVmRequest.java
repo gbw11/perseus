@@ -1,6 +1,7 @@
 package com.xenova.backend.vm.api;
 
 import com.xenova.backend.vm.domain.CreateVmCommand;
+import com.xenova.backend.vm.domain.VmRole;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -31,9 +32,12 @@ public record CreateVmRequest(
         // min_memory_mib is the real lower bound (Linux templates stay at 256/512).
         @Min(value = 16, message = "memory_mib는 16~1024여야 합니다.")
         @Max(value = 1024, message = "memory_mib는 16~1024여야 합니다.")
-        Integer memoryMib) {
+        Integer memoryMib,
+        // Optional deployment binding. It is independent of autonomous/manual app ids within a drive VM.
+        @Pattern(regexp = VmRole.PATTERN, message = "role은 primary_drive, backup_drive, interaction 중 하나여야 합니다.")
+        String role) {
 
     CreateVmCommand toCommand() {
-        return new CreateVmCommand(name, templateId, templateVersion, vcpus, memoryMib);
+        return new CreateVmCommand(name, templateId, templateVersion, vcpus, memoryMib, VmRole.fromValue(role));
     }
 }

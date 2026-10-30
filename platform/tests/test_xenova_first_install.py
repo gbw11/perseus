@@ -138,6 +138,40 @@ class InputSafetyTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'growth tool missing'):
             assemble.platform_root_ok(root)
 
+    def test_boot_display_payload_and_enablement_are_required_in_new_images(self):
+        root = platform_root(self.base / 'boot-display-root')
+        self.assertIn('usr/lib/xenova/xenova_boot_status.py',assemble.platform_root_ok(root))
+        unit = root/'etc/systemd/system/sysinit.target.wants/xenova-boot-status.service'
+        unit.unlink()
+        with self.assertRaisesRegex(ValueError,'boot display unit not enabled'):
+            assemble.platform_root_ok(root)
+        unit.symlink_to('/usr/lib/systemd/system/xenova-boot-status.service')
+        (root/'usr/lib/xenova/xenova_boot_progress.py').write_text('stale')
+        with self.assertRaisesRegex(ValueError,'source/installed contract mismatch'):
+            assemble.platform_root_ok(root)
+
+    def test_tailscale_runtime_is_required_but_shared_auth_state_is_forbidden(self):
+        root = platform_root(self.base/'tailscale-root')
+        assemble.platform_root_ok(root)
+        (root/'var/lib/tailscale').mkdir(parents=True)
+        (root/'var/lib/tailscale/tailscaled.state').write_text('synthetic forbidden shared-state fixture')
+        with self.assertRaisesRegex(ValueError,'must not contain Tailscale runtime state'):
+            assemble.platform_root_ok(root)
+        (root/'var/lib/tailscale/tailscaled.state').unlink()
+        (root/'usr/lib/modules/6.18.33-v8/kernel/drivers/net/tun.ko').unlink()
+        with self.assertRaisesRegex(ValueError,'required Tailscale kernel module missing'):
+            assemble.platform_root_ok(root)
+
+    def test_shared_tailscale_state_is_rejected_behind_an_absolute_image_parent_symlink(self):
+        root = platform_root(self.base / 'aliased-state-root')
+        alias = root / 'image-private-var-lib'
+        (alias / 'tailscale').mkdir(parents=True)
+        (alias / 'tailscale/tailscaled.state').write_text('synthetic forbidden common-state fixture')
+        (root / 'var').mkdir(exist_ok=True)
+        (root / 'var/lib').symlink_to('/image-private-var-lib')
+        with self.assertRaisesRegex(ValueError, 'must not contain Tailscale runtime state'):
+            assemble.platform_root_ok(root)
+
     def test_assembler_rejects_old_root_before_guest_preparation_or_publication(self):
         root = self.base / 'old-root'
         root.mkdir()

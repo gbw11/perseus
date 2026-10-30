@@ -3,7 +3,11 @@
 cmake_minimum_required(VERSION 3.20.5)
 list(APPEND ZEPHYR_EXTRA_MODULES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../common/xenova-mqtt-c
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../guests/zephyr/xen-store)  # xenvm 에서 vm_id 읽기
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../common/xenova-drive-runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../guests/zephyr/xen-store
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../guests/zephyr/xen-runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../guests/zephyr/diagnostics
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../guests/zephyr/telemetry)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(xenova_autonomous)
 target_sources(app PRIVATE src/main.c src/autonomous.c)

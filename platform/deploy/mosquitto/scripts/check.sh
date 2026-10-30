@@ -68,22 +68,11 @@ delivered backend "$P/vms/$VM_B/heartbeat" "$VM_A" && bad "에이전트가 남�
 # 4. 백엔드·차량 쪽
 delivered "$VM_A" "$P/vms/$VM_A/command" backend && ok "백엔드 → 에이전트 command" || bad "백엔드 → 에이전트 command"
 delivered manual "$P/apps/manual/input" backend && ok "백엔드 → 수동 입력" || bad "백엔드 → 수동 입력"
-delivered gateway "$P/console/resume" backend && ok "백엔드 → 콘솔 재개 (MQTT-13)" || bad "백엔드 → 콘솔 재개 (MQTT-13)"
-delivered gateway "$P/console/resume" message-board && bad "앱이 콘솔 재개에 발행됨" || ok "앱 → 콘솔 재개 차단"
-# 카메라 AI 감지 결과 (MQTT-14): message-board 만 발행, backend 가 읽는다
-delivered backend "$P/apps/message-board/vision" message-board && ok "메시지 보드 → vision (MQTT-14)" || bad "메시지 보드 → vision (MQTT-14)"
-delivered backend "$P/apps/message-board/vision" autonomous && bad "다른 앱이 vision 에 발행됨" || ok "다른 앱 → vision 차단"
 # ESP32 는 MQTT 에 없다 (계약 v1.1). vehicle/status 도 게이트웨이가 낸다.
 delivered backend "$P/vehicle/status" gateway && ok "게이트웨이 → vehicle/status" || bad "게이트웨이 → vehicle/status"
 delivered backend "$P/vehicle/status" manual && bad "앱이 vehicle/status 에 발행됨" || ok "앱 → vehicle/status 차단"
 delivered manual "$P/vehicle/control" autonomous && bad "앱이 vehicle/control 에 발행됨" || ok "앱 → vehicle/control 차단"
 delivered manual "$P/vehicle/control" gateway && ok "게이트웨이 → vehicle/control" || bad "게이트웨이 → vehicle/control"
-# 시뮬레이터 전용 (계약 11장): 위치·트랙은 simulator, 조작은 backend
-delivered backend "$P/sim/pose" simulator && ok "시뮬레이터 → sim/pose (MQTT-15)" || bad "시뮬레이터 → sim/pose (MQTT-15)"
-delivered perception "$P/sim/world" simulator && ok "시뮬레이터 → sim/world (MQTT-16)" || bad "시뮬레이터 → sim/world (MQTT-16)"
-delivered simulator "$P/sim/command" backend && ok "백엔드 → sim/command (MQTT-17)" || bad "백엔드 → sim/command (MQTT-17)"
-delivered simulator "$P/sim/command" autonomous && bad "앱이 sim/command 에 발행됨" || ok "앱 → sim/command 차단"
-delivered backend "$P/sim/pose" gateway && bad "게이트웨이가 sim/pose 에 발행됨" || ok "게이트웨이 → sim/pose 차단"
 delivered gateway "$P/vehicle/control" observer && bad "observer 가 발행됨" || ok "observer 발행 차단 (읽기 전용)"
 
 # 5. 계약 §1 크기 상한 (64 KB 초과는 전달되지 않아야 한다)
@@ -101,11 +90,11 @@ for c in python3 python; do
   if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import paho.mqtt' >/dev/null 2>&1; then py="$c"; break; fi
 done
 if [[ -n "$py" ]]; then
-  if XENOVA_WS="$HOST:$WS_PORT" XENOVA_PW_OBS="$(pw observer)" XENOVA_PW_PUB="$(pw message-board)" "$py" - <<'PY'
+  if XENOVA_WS="$HOST:$WS_PORT" XENOVA_PW_OBS="$(pw observer)" XENOVA_PW_PUB="$(pw interaction)" "$py" - <<'PY'
 import os, queue, sys, time
 import paho.mqtt.client as mqtt
 host, port = os.environ["XENOVA_WS"].rsplit(":", 1)
-got, topic = queue.Queue(), "xenova/v1/apps/message-board/events"
+got, topic = queue.Queue(), "xenova/v1/apps/interaction/events"
 def client(user, pw):
     c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, transport="websockets")
     c.username_pw_set(user, pw)
@@ -115,7 +104,7 @@ def client(user, pw):
 sub = client("observer", os.environ["XENOVA_PW_OBS"])
 sub.on_message = lambda c, u, m: got.put(m.payload)
 sub.subscribe(topic, 1); time.sleep(1)
-pub = client("message-board", os.environ["XENOVA_PW_PUB"])
+pub = client("interaction", os.environ["XENOVA_PW_PUB"])
 pub.publish(topic, b'{"check":"ws"}', qos=1).wait_for_publish(5)
 try:
     got.get(timeout=5); sys.exit(0)

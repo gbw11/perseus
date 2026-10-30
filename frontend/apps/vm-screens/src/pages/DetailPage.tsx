@@ -1,13 +1,21 @@
-import { Button, StatusBadge } from '@xenova/ui';
-import { useEffect } from 'react';
+import { isCircuit, StatusBadge } from '@xenova/ui';
 import { Navigate, useParams } from 'react-router';
+import { ResumeState } from '../components/AppPanel';
 import { ModeBar } from '../components/ModeBar';
-import { mps, rad, seconds } from '../components/format';
+import { NavCamera } from '../components/NavCamera';
+import { SimDriverView } from '../components/SimPanel';
+import { SimJudgement, SimMiniMap, SimObstacles, SimRace } from '../components/SimDetail';
+import { TrackMap } from '../components/TrackMap';
+import { distText, rad, seconds, shownKeys, speedText } from '../components/format';
 import { useTelemetry } from '../telemetry/TelemetryProvider';
-import { APPS, APP_IDS, type AppId, type Telemetry } from '../telemetry/types';
+import { APPS, APP_IDS, simLive, type AppId, type Telemetry } from '../telemetry/types';
 import styles from '../components/screens.module.css';
 
 const obstacles = (t: Telemetry) => t.obstacleCount ?? t.perception.obstacles.length;
+/** 시뮬레이터 구성(계약 v1.4 실제 서킷)이고 위치가 1초 안에 왔나 */
+const onCircuit = (t: Telemetry) => simLive(t) && isCircuit(t.sim?.world?.track);
+/** 최고 속도 (모의 m/s) — 게이지 끝 */
+const MAX_V = 1.0;
 
 /** 모니터 2: 관리자가 고른 1개를 크게 (RC카 시나리오 §5) */
 export function DetailPage() {
@@ -35,7 +43,7 @@ function DetailHeader({ id }: { id: AppId }) {
     <div className={styles.detailHead} style={{ ['--accent' as string]: `var(--x-app-${id})` }}>
       <h1>{meta.title}</h1>
       <span className={styles.guest}>
-        {meta.guest === 'zephyr' ? 'Zephyr' : 'Debian'} · {meta.topicAppId} · {meta.role}
+        {meta.guest === 'zephyr' ? 'Zephyr' : 'Debian 13'} · {meta.role}
       </span>
       <StatusBadge
         health={status.health}
@@ -79,129 +87,123 @@ function AutonomousDetail() {
   return (
     <>
       <section className={styles.detailMain}>
-        <h2>인지 결과 (젯슨 perception.result 15 Hz)</h2>
-        <svg viewBox="0 0 400 400" className={styles.road} role="img" aria-label="차선과 장애물">
-          <rect x="50" y="0" width="300" height="400" className={styles.roadBg} />
-          <line x1="50" y1="0" x2="50" y2="400" className={styles.lane} />
-          <line x1="350" y1="0" x2="350" y2="400" className={styles.lane} />
-          <line x1="200" y1="0" x2="200" y2="400" className={styles.center} />
-          {t.perception.obstacles.map((o, i) => (
-            <rect
-              key={i}
-              x={x(o.x - o.w / 2)}
-              y={y(o.y) - 20}
-              width={o.w * 300}
-              height="40"
-              className={styles.obstacle}
-            />
-          ))}
-          <g transform={`translate(${x(t.perception.lane_offset_m)} 340) rotate(${steerDeg})`}>
-            <rect x="-22" y="-36" width="44" height="64" rx="8" className={styles.car} />
-          </g>
-        </svg>
+        {simLive(t) ? (
+          <>
+            <h2>시뮬레이터 1인칭 시점 — 자율주행</h2>
+            <SimDriverView id="autonomous" large />
+          </>
+        ) : (
+          <>
+            <h2>인지 결과 (젯슨 perception.result 15 Hz)</h2>
+            <svg viewBox="0 0 400 400" className={styles.road} role="img" aria-label="차선과 장애물">
+              <rect x="50" y="0" width="300" height="400" className={styles.roadBg} />
+              <line x1="50" y1="0" x2="50" y2="400" className={styles.lane} />
+              <line x1="350" y1="0" x2="350" y2="400" className={styles.lane} />
+              <line x1="200" y1="0" x2="200" y2="400" className={styles.center} />
+              {t.perception.obstacles.map((o, i) => (
+                <rect
+                  key={i}
+                  x={x(o.x - o.w / 2)}
+                  y={y(o.y) - 20}
+                  width={o.w * 300}
+                  height="40"
+                  className={styles.obstacle}
+                />
+              ))}
+              <g transform={`translate(${x(t.perception.lane_offset_m)} 340) rotate(${steerDeg})`}>
+                <rect x="-22" y="-36" width="44" height="64" rx="8" className={styles.car} />
+              </g>
+            </svg>
+          </>
+        )}
       </section>
-      <section className={styles.detailSide}>
-        <h2>주행 명령 (drive.command 50 Hz)</h2>
-        <Gauge
-          title="목표 속도"
-          value={alive ? (command?.v_mps ?? 0) : 0}
-          min={0}
-          max={0.5}
-          text={alive && command ? mps(command.v_mps) : '—'}
-        />
-        <Gauge
-          title="목표 조향"
-          value={alive ? (command?.steer_rad ?? 0) : 0}
-          min={-0.5}
-          max={0.5}
-          text={alive && command ? rad(command.steer_rad) : '—'}
-        />
-        <dl className={styles.kv}>
-          <dt>명령 주기</dt>
-          <dd className={styles.mono}>{alive ? `${t.apps.autonomous.commandHz} Hz` : '명령 없음'}</dd>
-          <dt>차선 오프셋</dt>
-          <dd className={styles.mono}>{t.perception.lane_offset_m.toFixed(3)} m</dd>
-          <dt>방향 오차</dt>
-          <dd className={styles.mono}>{t.perception.heading_err_rad.toFixed(3)} rad</dd>
-          <dt>장애물</dt>
-          <dd>{obstacles(t) ? `${obstacles(t)}개 — 감속` : '없음'}</dd>
-        </dl>
-      </section>
+      {onCircuit(t) ? (
+        <section className={styles.detailSide}>
+          <SimJudgement />
+          <h2>주행 명령 (drive.command 50 Hz)</h2>
+          <Gauge
+            title="목표 속도"
+            value={alive ? (command?.v_mps ?? 0) : 0}
+            min={0}
+            max={MAX_V}
+            text={alive && command ? speedText(t, command.v_mps) : '—'}
+          />
+          <Gauge
+            title="목표 조향"
+            value={alive ? (command?.steer_rad ?? 0) : 0}
+            min={-0.5}
+            max={0.5}
+            text={alive && command ? rad(command.steer_rad) : '—'}
+          />
+          <dl className={styles.kv}>
+            <dt>명령 주기</dt>
+            <dd className={styles.mono}>{alive ? `${t.apps.autonomous.commandHz} Hz` : '명령 없음'}</dd>
+            <dt>차선 오프셋</dt>
+            <dd className={styles.mono}>{distText(t, t.perception.lane_offset_m)}</dd>
+          </dl>
+          <SimObstacles />
+          <h2>출발 · 랩 · 노면</h2>
+          <SimRace />
+          <SimMiniMap />
+        </section>
+      ) : (
+        <section className={styles.detailSide}>
+          <h2>주행 명령 (drive.command 50 Hz)</h2>
+          <Gauge
+            title="목표 속도"
+            value={alive ? (command?.v_mps ?? 0) : 0}
+            min={0}
+            max={1}
+            text={alive && command ? speedText(t, command.v_mps) : '—'}
+          />
+          <Gauge
+            title="목표 조향"
+            value={alive ? (command?.steer_rad ?? 0) : 0}
+            min={-0.5}
+            max={0.5}
+            text={alive && command ? rad(command.steer_rad) : '—'}
+          />
+          <dl className={styles.kv}>
+            <dt>명령 주기</dt>
+            <dd className={styles.mono}>{alive ? `${t.apps.autonomous.commandHz} Hz` : '명령 없음'}</dd>
+            <dt>차선 오프셋</dt>
+            <dd className={styles.mono}>{t.perception.lane_offset_m.toFixed(3)} m</dd>
+            <dt>방향 오차</dt>
+            <dd className={styles.mono}>{t.perception.heading_err_rad.toFixed(3)} rad</dd>
+            <dt>장애물</dt>
+            <dd>{obstacles(t) ? `${obstacles(t)}개 — 감속` : '없음'}</dd>
+          </dl>
+        </section>
+      )}
     </>
   );
 }
 
-const KEY_OF: Record<string, string> = {
-  ArrowUp: 'up',
-  w: 'up',
-  ArrowDown: 'down',
-  s: 'down',
-  ArrowLeft: 'left',
-  a: 'left',
-  ArrowRight: 'right',
-  d: 'right',
-};
-
 function ManualDetail() {
-  const { telemetry: t, setManualKeys, source } = useTelemetry();
+  const { telemetry: t } = useTelemetry();
   const active = t.activeApp === 'manual';
-  // 실제 연결에서는 입력을 웹 시연 제어(W-07)가 보낸다. 모니터는 터치·키보드가 없다
-  const local = source === 'mock';
 
-  // 키보드 화살표·WASD → drive.input 흉내 (MQTT 계약 §7: 실제로는 콘솔 → 백엔드 → MQTT)
-  useEffect(() => {
-    if (!local) return;
-    const pressed = new Set<string>();
-    const sync = () => setManualKeys([...pressed]);
-    const down = (event: KeyboardEvent) => {
-      const key = KEY_OF[event.key];
-      if (key && !pressed.has(key)) {
-        pressed.add(key);
-        sync();
-      }
-    };
-    const up = (event: KeyboardEvent) => {
-      const key = KEY_OF[event.key];
-      if (key && pressed.delete(key)) sync();
-    };
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-    return () => {
-      window.removeEventListener('keydown', down);
-      window.removeEventListener('keyup', up);
-      setManualKeys([]);
-    };
-  }, [local, setManualKeys]);
-
-  const release = (key: string) => setManualKeys(t.manualKeys.filter((k) => k !== key));
-  const pad = (key: string, text: string) => (
-    <button
-      type="button"
-      className={[styles.key, t.manualKeys.includes(key) ? styles.keyOn : ''].join(' ')}
-      onPointerDown={() => setManualKeys([...new Set([...t.manualKeys, key])])}
-      onPointerUp={() => release(key)}
-      onPointerLeave={() => release(key)}
-    >
+  // 모니터는 보여 주기만 한다 (화면 정의서 §1) — 웹에서 들어온 눌린 키만 밝게
+  const cap = (key: string, text: string) => (
+    <span className={[styles.keyCap, shownKeys(t).includes(key) ? styles.keyCapOn : ''].join(' ')}>
       {text}
-    </button>
+    </span>
   );
 
   return (
     <>
       <section className={styles.detailMain}>
         <h2>{active ? '운영자 운전 중' : '대기 중 — 자율주행에 문제가 생기면 바로 이어받는다'}</h2>
-        <div className={styles.pad}>
-          <span />
-          {pad('up', '▲')}
-          <span />
-          {pad('left', '◀')}
-          {pad('down', '▼')}
-          {pad('right', '▶')}
+        {simLive(t) && <SimDriverView id="manual" large />}
+        <div className={styles.keys} style={{ ['--accent' as string]: 'var(--x-app-manual)' }}>
+          {cap('left', '◀')}
+          {cap('up', '▲')}
+          {cap('down', '▼')}
+          {cap('right', '▶')}
+          {cap('brake', '브레이크')}
         </div>
         <p className={styles.dim}>
-          {local
-            ? '화살표·WASD 또는 버튼. 입력이 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'
-            : '입력은 웹 시연 제어 화면에서 보낸다. 입력이 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.'}
+          입력은 관리 콘솔 시연 제어에서 들어온다. 200 ms 동안 없으면 정지 명령(v = 0)을 50 Hz 로 낸다.
         </p>
       </section>
       <section className={styles.detailSide}>
@@ -209,9 +211,9 @@ function ManualDetail() {
         <Gauge
           title="목표 속도"
           value={t.commands.manual?.v_mps ?? 0}
-          min={-0.15}
-          max={0.3}
-          text={t.commands.manual ? mps(t.commands.manual.v_mps) : '—'}
+          min={onCircuit(t) ? -0.2 : -0.15}
+          max={onCircuit(t) ? MAX_V : 0.3}
+          text={t.commands.manual ? speedText(t, t.commands.manual.v_mps) : '—'}
         />
         <Gauge
           title="목표 조향"
@@ -228,22 +230,44 @@ function ManualDetail() {
             {t.apps.manual.commandHz ? `${t.apps.manual.commandHz} Hz` : '명령 없음'}
           </dd>
         </dl>
+        {onCircuit(t) && (
+          <>
+            <p className={styles.dim}>
+              ▲ 를 꾹 누르면 최고 속도까지 서서히 붙고, 놓으면 천천히 준다. ▼ 는 브레이크, 서 있으면 후진.
+              빠를수록 덜 꺾인다.
+            </p>
+            <h2>출발 · 랩 · 노면</h2>
+            <SimRace />
+            <SimMiniMap />
+          </>
+        )}
       </section>
     </>
   );
 }
 
 function InteractionDetail() {
-  const { telemetry: t, resume, source } = useTelemetry();
+  const { telemetry: t } = useTelemetry();
   const down = t.apps.interaction.domain !== 'running' || t.apps.interaction.health === 'fault';
-  const buttonText =
-    t.mode === 'AUTO_READY' ? '자율주행 재개' : t.mode === 'AUTO' ? '자율주행 중' : '재개 대기';
   return (
     <>
       <section className={styles.detailMain}>
-        <h2>알림 타임라인 (drive.mode.changed · drive.fault.detected · message.posted)</h2>
+        <h2>카메라 · AI 장애물 감지</h2>
+        <NavCamera />
+      </section>
+      <section className={styles.detailSide}>
+        <h2>트랙 지도 · 추정 위치</h2>
+        {down ? <p className={styles.dim}>VM 이 내려가 있다 — 주행은 그대로 (격리).</p> : <TrackMap />}
+        <h2>자율주행 재개 상태</h2>
+        <ResumeState />
+        <p className={styles.dim}>
+          복구된 자율주행 VM 이 3초 연속 정상이면 AUTO_READY, 곧바로 3·2·1 을 센 뒤 자동으로 자율주행에
+          돌아간다 (계약 v1.5). 관리 콘솔에서 카운트다운을 취소하면 수동주행이 계속 몰고, 그 뒤에는 [재개]로만
+          돌아간다 — 모니터에는 버튼이 없다.
+        </p>
+        <h2>알림</h2>
         {down ? (
-          <p className={styles.dim}>인터랙션 VM 이 내려가 있다. 주행은 영향 없이 계속된다 (격리).</p>
+          <p className={styles.dim}>—</p>
         ) : (
           <ul className={styles.timeline}>
             {t.events.map((event) => (
@@ -255,15 +279,6 @@ function InteractionDetail() {
             ))}
           </ul>
         )}
-      </section>
-      <section className={styles.detailSide}>
-        <h2>자율주행 재개</h2>
-        <p className={styles.dim}>
-          복구된 자율주행 VM 의 명령이 3초 연속 신선하면 AUTO_READY. 그때만 재개를 받는다.
-        </p>
-        <Button size="lg" onClick={resume} disabled={down || source !== 'mock' || t.mode !== 'AUTO_READY'}>
-          {buttonText}
-        </Button>
       </section>
     </>
   );

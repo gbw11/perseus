@@ -22,15 +22,12 @@ static const struct xm_policy POLICIES[] = {
 	{"drive.mode.changed", 1, false, false},
 	{"drive.fault.detected", 1, false, false},
 	{"app.heartbeat", 0, false, false},
+	{"app.readiness", 0, false, true},
 	/* 7장 수동 입력 */
 	{"drive.input", 0, false, false},
 	/* 8장 지연 측정 */
 	{"probe.ping", 1, false, false},
 	{"probe.pong", 1, false, false},
-	/* 11장 시뮬레이터 전용 */
-	{"sim.pose", 0, false, true},
-	{"sim.world", 1, true, false},
-	{"sim.command", 1, false, false},
 };
 
 /* 계약 표에 없는 type. 유실보다 중복이 낫다고 보고 QoS 1 */

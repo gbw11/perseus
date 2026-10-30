@@ -1,6 +1,6 @@
 # xenova-mqtt — MQTT 계약 v1 클라이언트
 
-VM 에이전트와 RC카 앱 VM(자율주행·수동주행·메시지 보드)이 같이 쓰는 Python MQTT 클라이언트입니다.
+VM 에이전트와 RC카 앱 VM(자율주행·수동주행·인터랙션)이 같이 쓰는 Python MQTT 클라이언트입니다.
 [MQTT 메시지 계약 v1](../../../../docs/contracts/mqtt-contract-v1.md)의 봉투·토픽·QoS를 이 패키지가 맞춰 주므로, 쓰는 쪽은 `type`과 `payload`만 정하면 됩니다.
 
 | 계약 | 패키지가 하는 일 |
@@ -61,6 +61,40 @@ if control and perception and perception.age_ms() < 200:
         "generation": control.payload["generation"], "v_mps": 0.5, "steer_rad": 0.0,
     })
 ```
+
+### Linux 앱 — 앱 생존 신호와 systemd watchdog
+
+Linux VM 의 에이전트는 VM 자원과 에이전트 생존만 알립니다. 앱이 실제로 일하는지는 앱이 직접 `app.heartbeat`(계약 6.1)로 알립니다.
+`AppHeartbeat.beat()` 는 **처리 루프 안에서** 매 반복 부릅니다. MQTT 는 계약 주기 1초로 고정이고, 브로커와 끊겨 있으면 쌓지 않습니다.
+유닛에 `WatchdogSec=` 이 있으면 같은 호출이 그 절반마다 systemd 에 `WATCHDOG=1` 도 보냅니다(브로커 연결과 무관, 주기는 systemd 가
+넘겨 주는 값에서 읽어 유닛과 어긋나지 않음). 루프가 멈추면 통지가 끊겨 systemd 가 앱을 재시작합니다. 루프 한 바퀴가 `WatchdogSec`
+절반보다 길면 정상이어도 재시작되니 `WatchdogSec` 은 넉넉히 잡습니다. dom0 Recovery Worker 는 이 신호로 Linux VM 을 재시작하지 않습니다.
+이 기능은 xenova_mqtt 0.2.0 부터 있습니다.
+
+```python
+from xenova_mqtt import AppHeartbeat, Identity, XenovaClient, systemd, topics
+
+APP_ID = "my-app"                                # 예시 이름. 브로커에 이 계정은 없다(아래 참고)
+client = XenovaClient(Identity(vm_id=VM_ID, app_id=APP_ID), host=BROKER)
+client.start()
+heartbeat = AppHeartbeat(client, APP_ID)
+systemd.ready()                                  # Type=notify 유닛이면 준비 완료
+while not stopping:
+    handle_one_batch()                           # 앱의 실제 일
+    heartbeat.beat("idle")                       # active / standby / idle / error. 주행과 무관한 앱의 평상시는 idle
+```
+
+```ini
+[Service]
+Type=notify
+ExecStart=/usr/bin/python3 -m my_app
+Restart=on-failure
+WatchdogSec=10
+```
+
+`my-app` 은 예시일 뿐 등록된 app_id 가 아닙니다. 실제 앱은 계약 4장에 등록된 app_id 를 써야 하고, 그 이름이 브로커 계정·ACL
+(`platform/deploy/mosquitto/etc/accounts`·`acl`)과 백엔드 VM 역할에도 있어야 연결·발행이 됩니다. 지금 Linux 쪽에 등록된 것은
+`message-board` 하나이며, Linux 게스트에 어떤 앱을 올릴지와 그 역할 ID 는 아직 정해지지 않았습니다.
 
 ### VM이 아닌 발행자
 

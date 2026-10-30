@@ -105,6 +105,31 @@ class NativeCoreTest(unittest.TestCase):
                 builder.verify_elf(file)
 
 
+    def test_generated_dts_requires_g1_level_event_ppi(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)/"zephyr.dts"
+            def dts(cells):
+                return ('/dts-v1/; / { hypervisor: hypervisor@38000000 { '
+                        'compatible = "xen,xen"; interrupts = < '+cells+' >; }; };')
+            path.write_text(dts("0x1 0xf 0x2 0xa0"))
+            builder.verify_event_irq(path)
+            for cells in ("1 15 4 160", "1 15 8 160", "1 14 2 160", "1 15 invalid 160"):
+                with self.subTest(cells=cells):
+                    path.write_text(dts(cells))
+                    with self.assertRaisesRegex(ValueError, "G1 event PPI31"):
+                        builder.verify_event_irq(path)
+            path.write_text('/ { /* hypervisor@38000000 { interrupts = <1 15 2 160>; }; */ };')
+            with self.assertRaisesRegex(ValueError, "Xen hypervisor node"):
+                builder.verify_event_irq(path)
+
+    def test_app_overlay_is_in_builder_input_identity(self):
+        relative = "xenstore-test-app/app.overlay"
+        info = builder.inputs()[relative]
+        self.assertEqual(info["sha256"], hashlib.sha256((builder.BASE/relative).read_bytes()).hexdigest())
+        self.assertIn(b"IRQ_TYPE_LEVEL", (builder.BASE/relative).read_bytes())
+
+
+
 class CommandLogTest(unittest.TestCase):
     def run_failure(self, timeout):
         with tempfile.TemporaryDirectory() as temp:
@@ -236,7 +261,7 @@ class LabTest(unittest.TestCase):
 
     def test_platform_loader_fresh_process_with_published_dependency_layout(self):
         runtime=self.root/"runtime";runtime.mkdir()
-        for name in ("xenova_vm.py","xenova_runtime.py","xenova_zephyr.py"):
+        for name in ("xenova_vm.py","xenova_runtime.py","xenova_trace.py","xenova_zephyr.py"):
             shutil.copyfile(FILES/name,runtime/name)
         for name in ("first_install_contract.py","artifact_io.py"):
             shutil.copyfile(ROOT/"platform/first-install"/name,runtime/name)
@@ -334,6 +359,34 @@ class LabTest(unittest.TestCase):
                         "--path","/local/domain/42/data/xenova-g1-ab/control","--value","dom0-1")
         self.assertEqual(command.call_args_list[1].args[0],
                          ["xenstore-write","/local/domain/42/data/xenova-g1-ab/control","dom0-1"])
+
+    def test_signal_succeeds_when_guest_removes_node_immediately_after_write(self):
+        self.prepare();self.running()
+        present = True
+        def peer(argv, **kwargs):
+            nonlocal present
+            if argv[0] == "xenstore-read":
+                if not present:
+                    raise RuntimeError("guest already completed and removed its test node")
+                return "guest-initial"
+            self.assertEqual(argv, ["xenstore-write", "/local/domain/42/data/xenova-g1-ab/control", "dom0-1"])
+            present = False
+            return ""
+        with patch.object(lab, "run", side_effect=peer):
+            output = self.invoke("signal", "--directory", str(self.args.directory), "--execute",
+                                 "--path", "/local/domain/42/data/xenova-g1-ab/control", "--value", "dom0-1")
+        self.assertIn("written=dom0-1", output)
+        self.assertFalse(present)
+
+    def test_signal_write_failure_remains_an_error(self):
+        self.prepare();self.running()
+        def peer(argv, **kwargs):
+            if argv[0] == "xenstore-read":
+                return "guest-initial"
+            raise RuntimeError("XenStore write failed")
+        with patch.object(lab, "run", side_effect=peer), self.assertRaisesRegex(RuntimeError, "write failed"):
+            self.invoke("signal", "--directory", str(self.args.directory), "--execute",
+                        "--path", "/local/domain/42/data/xenova-g1-ab/control", "--value", "dom0-1")
 
     def test_cleanup_confirms_uuid_and_preserves_firmware(self):
         self.prepare();self.running()

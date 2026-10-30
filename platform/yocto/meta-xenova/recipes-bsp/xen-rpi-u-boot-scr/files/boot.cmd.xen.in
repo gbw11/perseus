@@ -21,6 +21,11 @@ fdt move ${fdtcontroladdr} ${fdt_addr_r} || exit 1
 fdt addr ${fdt_addr_r} || exit 1
 fdt resize 0x1000 || exit 1
 
+# Pi 4 Xen dom0의 무선 SDIO DMA 전송 실패를 피해 이 호스트만 PIO로 사용한다.
+# SD 카드 호스트와 DMA 컨트롤러, Control FDT는 그대로 유지한다.
+fdt rm /soc/mmcnr@7e300000 dmas || exit 1
+fdt rm /soc/mmcnr@7e300000 dma-names || exit 1
+
 # Set module load addresses (실보드 검증값 유지).
 setenv xen_loadaddr     "0x00200000"
 setenv kernel_loadaddr  "0x00400000"
@@ -47,6 +52,7 @@ echo Add boot arguments for dom0
 if test "${xenova_debug}" = "1"; then
     setenv xenova_logargs "earlycon=xenboot debug loglevel=7 systemd.log_level=debug systemd.log_target=console systemd.show_status=yes"
 else
+    # KERN_ERR(3)까지 콘솔에 보인다. 상세 기록은 dmesg/journal에서 조회한다.
     setenv xenova_logargs "loglevel=4 systemd.log_level=info systemd.log_target=journal-or-kmsg systemd.show_status=error"
 fi
 setenv dom0_bootargs "console=hvc0 ${xenova_logargs} root=PARTUUID=${rootfs_partuuid} rootwait"
@@ -64,7 +70,11 @@ echo Linux loaded, size: 0x$filesize
 fdt set /chosen/dom0 reg <${kernel_loadaddr} ${kernel_size}> || exit 1
 fdt set /chosen '#size-cells' <1> || exit 1
 fdt set /chosen '#address-cells' <1> || exit 1
-fdt print /chosen
+# chosen 전체에는 firmware가 전달한 난수 seed도 있다. 진단 부팅에서도 필요한 인자만 출력한다.
+if test "${xenova_debug}" = "1"; then
+    fdt print /chosen xen,xen-bootargs
+    fdt print /chosen xen,dom0-bootargs
+fi
 
 echo Boot Xen
 booti ${xen_loadaddr} - ${fdt_addr_r}

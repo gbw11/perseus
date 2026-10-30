@@ -1,0 +1,20 @@
+[Unit]
+Description=Xenova Linux guest or Jetson service log forwarder
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+EnvironmentFile=/etc/xenova/runtime-logs/source.env
+ExecStart=@PYTHON@ -m dom0_manager.log_shipper --endpoint @INGEST_URL@ --source @SOURCE_ID@ --unit @APP_UNIT@ --checkpoint /var/lib/xenova-log-shipper/cursor @INTERNAL_HTTP_OPTION@
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+StateDirectory=xenova-log-shipper
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/xenova-log-shipper
+[Install]
+WantedBy=multi-user.target

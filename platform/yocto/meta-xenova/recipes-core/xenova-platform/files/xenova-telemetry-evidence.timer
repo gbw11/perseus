@@ -1,0 +1,10 @@
+[Unit]
+Description=Bounded execution evidence archive
+
+[Timer]
+OnBootSec=10
+OnUnitInactiveSec=1
+Unit=xenova-telemetry-evidence.service
+
+[Install]
+WantedBy=timers.target

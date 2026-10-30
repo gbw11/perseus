@@ -1,0 +1,10 @@
+{
+  "environment": "local WSL systemd + real HTTP Manager mock driver; no real VM/board",
+  "unit": "xenova-log-http-probe-c08bb1d2.service",
+  "actual_http_ingestion": true,
+  "passed": false,
+  "error": "forwarded log missing: HTTP_FIRST",
+  "worker_logs": [
+    ""
+  ]
+}

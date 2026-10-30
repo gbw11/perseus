@@ -1,4 +1,4 @@
-"""공통 관리 결과를 단일 JSON 또는 사람용 JSON으로 출력하는 CLI 어댑터."""
+"""공통 관리 결과를 JSON 또는 VM 목록 요약표로 출력하는 CLI 어댑터."""
 import argparse
 import json
 from pathlib import Path
@@ -13,6 +13,17 @@ class Parser(argparse.ArgumentParser):
         raise ManagementError('INVALID_SPEC', message)
 
 
+def _short_list(vms):
+    """목록 응답의 다섯 필드만 줄임 없이 표시한다. Manager 응답은 변경하지 않는다."""
+    rows=['NAME | INTERNAL_NAME | UUID | STATE | IP']
+    for item in vms:
+        configuration=item.get('configuration') or {}
+        values=(item.get('name'),configuration.get('id'),item.get('vm_id'),
+                item.get('xen_state'),item.get('ipv4'))
+        rows.append(' | '.join('-' if value is None else str(value) for value in values))
+    return '\n'.join(rows)
+
+
 def main(argv=None, manager=None):
     args_list=list(sys.argv[1:] if argv is None else argv)
     request_id=uuid4()
@@ -21,11 +32,18 @@ def main(argv=None, manager=None):
     parser.add_argument('action')
     parser.add_argument('id',nargs='?')
     parser.add_argument('value',nargs='?')
-    parser.add_argument('--json',action='store_true')
+    output=parser.add_mutually_exclusive_group()
+    output.add_argument('--json',action='store_true')
+    output.add_argument('--short',action='store_true',help='list only: show NAME, INTERNAL_NAME, UUID, STATE and IP')
+    parser.add_argument('--bundle',type=Path)
+    parser.add_argument('--sha256')
+    parser.add_argument('--board-shutdown-policy')
     parser.add_argument('--name')
     parser.add_argument('--vm-id')
     parser.add_argument('--template-id','--template',dest='template_id')
     parser.add_argument('--template-version')
+    parser.add_argument('--expected-lifecycle-generation',type=int)
+    parser.add_argument('--expected-configuration-sha256')
     parser.add_argument('--vcpus',type=int)
     parser.add_argument('--memory-mib',type=int)
     ip = parser.add_mutually_exclusive_group()
@@ -37,31 +55,46 @@ def main(argv=None, manager=None):
     parser.add_argument('--lifecycle',default='REGISTERED')
     parser.add_argument('--execute',action='store_true')
     parser.add_argument('--force',action='store_true')
+    parser.add_argument('--restore',action='store_true',help='internal CPU host preparation rollback')
     parser.add_argument('--spec-file', type=Path)
     parser.add_argument('--recovery-attempt-id')
     parser.add_argument('--barrier-id')
     parser.add_argument('--max-age-ms', type=int)
     parser.add_argument('--timeout-ms', type=int, default=15000)
+    short=False
     try:
         args=parser.parse_args(args_list)
+        if args.short and args.action != 'list':
+            raise ManagementError('INVALID_SPEC', '--short is only supported for list')
+        short=args.short
         action='recover_once' if args.action == 'recover-once' else args.action
         spec={}
-        if action == 'recover_once':
+        if action in ('recover_once', 'cpu-policy-set'):
             if args.spec_file is None:
                 raise ManagementError('INVALID_SPEC', 'recover-once requires --spec-file')
             spec = json.loads(args.spec_file.read_text())
+        elif action == 'cpu-layout':
+            spec = {'timeout_ms':args.timeout_ms}
+            if args.vm_id or args.id:
+                spec['vm_id'] = args.vm_id or args.id
+        elif action == 'cpu-host-prepare':
+            spec = {'timeout_ms':args.timeout_ms, 'restore':args.restore}
         elif action == 'host-resume':
             spec = {'barrier_id':args.barrier_id}
         elif action == 'control-operation':
             spec = {'operation_id':args.operation_id}
         elif action == 'recovery-operation':
             spec = {'recovery_attempt_id':args.recovery_attempt_id}
+        elif action == 'recovery-reconcile':
+            if args.force:
+                raise ManagementError('INVALID_SPEC', 'recovery-reconcile never supports force')
+            spec = {'recovery_attempt_id':args.recovery_attempt_id, 'timeout_ms':args.timeout_ms}
         elif action=='create':
             spec={'vm_id':args.vm_id, 'name':args.name or args.id,'template_id':args.template_id,
                   'template_version':args.template_version,'vcpus':args.vcpus,'memory_mib':args.memory_mib}
             if args.ipv4 is not None:
                 spec['ipv4']=args.ipv4
-        elif action in ('get','retire','restore','purge','delete','start','stop','reboot','autostart-set','board-shutdown-set','config','destroy','snapshot','probe','execution-context'):
+        elif action in ('firmware-transition','update-resources','get','retire','restore','purge','delete','start','stop','reboot','autostart-set','board-shutdown-set','config','destroy','snapshot','probe','execution-context'):
             identity=args.vm_id or args.id
             if identity:
                 try:
@@ -73,6 +106,15 @@ def main(argv=None, manager=None):
                         raise ManagementError('VM_NOT_FOUND','registered internal name not found; use UUID for archived VMs')
                     identity=records[identity]['uuid']
             spec={'vm_id':identity}
+            if action == 'firmware-transition':
+                spec.update(bundle=str(args.bundle) if args.bundle else None,manifest_sha256=args.sha256,
+                            expected_lifecycle_generation=args.expected_lifecycle_generation,
+                            expected_configuration_sha256=args.expected_configuration_sha256,
+                            board_shutdown_policy=args.board_shutdown_policy)
+            if action == 'update-resources':
+                spec.update(vcpus=args.vcpus,memory_mib=args.memory_mib,
+                            expected_lifecycle_generation=args.expected_lifecycle_generation,
+                            expected_configuration_sha256=args.expected_configuration_sha256)
             if action == 'snapshot':
                 spec['max_age_ms']=args.max_age_ms
             if action == 'probe':
@@ -99,7 +141,10 @@ def main(argv=None, manager=None):
         result={'schema_version':'1.0','ok':False,'request_id':request_id,'operation_id':None,
                 'replayed':False,'data':None,'error':{'code':'STORAGE_UNAVAILABLE',
                 'message':'cannot resolve persistent VM identity','retryable':False,'details':{}}}
-    print(json.dumps(result,ensure_ascii=False,indent=None if '--json' in args_list else 2))
+    if short and result['ok']:
+        print(_short_list(result['data']['vms']))
+    else:
+        print(json.dumps(result,ensure_ascii=False,indent=None if '--json' in args_list else 2))
     code=exit_code(result)
     if code:
         raise SystemExit(code)

@@ -115,7 +115,8 @@ class FakeManager:
                     view["xen_state"] = "running"
             else:
                 if view["xen_state"] == "hang" and not spec.get("force"):
-                    return _err("ARTIFACT_INVALID", "guest operation deadline exceeded")
+                    # 복구 기반 control 경로: 정지 대기 만료는 XEN_EXECUTION_FAILED 에 메시지로만 실린다
+                    return _err("XEN_EXECUTION_FAILED", "graceful shutdown timed out; disks retained, no destroy")
                 view["domid"] = None
                 view["xen_state"] = "stopped"
             return _ok({"vm": view})
@@ -207,13 +208,62 @@ def test_health_requires_xl_and_registry_storage(driver, manager, tmp_path):
     assert broken.health() is False
 
 
-def test_platform_error_codes_map_to_http(client, manager):
+@pytest.mark.parametrize(
+    "code,status,name",
+    [
+        ("STORAGE_UNAVAILABLE", 503, "PlatformUnavailable"),
+        ("OPERATION_IN_PROGRESS", 503, "PlatformUnavailable"),
+        ("INVALID_SPEC", 400, "InvalidArgument"),
+        ("ARTIFACT_INVALID", 500, "DriverError"),
+        # 복구 기반(67b0e26) 오류 코드
+        ("HOST_QUIESCING", 409, "InvalidState"),
+        ("BOOT_ADMISSION_REQUIRED", 409, "InvalidState"),
+        ("INTENT_MISMATCH", 409, "InvalidState"),
+        ("RECOVERY_MODE_UNSUPPORTED", 501, "NotSupported"),
+        ("DEADLINE_EXCEEDED", 504, "DriverTimeout"),
+        ("OBSERVATION_UNAVAILABLE", 503, "PlatformUnavailable"),
+        ("RECONCILE_REQUIRED", 503, "PlatformUnavailable"),
+        ("INTENT_RECONCILIATION_REQUIRED", 503, "PlatformUnavailable"),
+        ("XEN_EXECUTION_FAILED", 500, "DriverError"),
+        ("SOME_FUTURE_CODE", 500, "DriverError"),  # 모르는 코드도 500 이되 원본은 보존
+    ],
+)
+def test_platform_error_codes_map_to_http_and_keep_platform_code(client, manager, code, status, name):
     manager.register(VM_A, running=True)
-    for code, status in [("STORAGE_UNAVAILABLE", 503), ("OPERATION_IN_PROGRESS", 503), ("INVALID_SPEC", 400), ("ARTIFACT_INVALID", 500)]:
-        manager.fail_next = {"code": code, "message": "x"}
-        assert client.get("/api/v1/vms").status_code == status, code
-    manager.fail_next = {"code": "ARTIFACT_INVALID", "message": "guest operation deadline exceeded"}
-    assert client.post(f"/api/v1/vms/{VM_A}/stop").status_code == 504
+    manager.fail_next = {"code": code, "message": "x"}
+    response = client.get("/api/v1/vms")
+    assert response.status_code == status, code
+    body = response.json()
+    assert (body["code"], body["platform_code"], body["detail"]) == (name, code, f"{code}: x")
+
+
+@pytest.mark.parametrize("code", ["XEN_EXECUTION_FAILED", "ARTIFACT_INVALID"])
+@pytest.mark.parametrize("message", ["graceful shutdown timed out; disks retained, no destroy", "guest operation deadline exceeded"])
+def test_stop_wait_expiry_without_dedicated_code_is_504(client, manager, code, message):
+    """플랫폼이 DEADLINE_EXCEEDED 를 내기 전까지는 두 코드의 메시지로 정지 대기 만료를 가린다. 다른 메시지는 그대로 500 이다."""
+    manager.register(VM_A, running=True)
+    manager.fail_next = {"code": code, "message": message}
+    timed_out = client.post(f"/api/v1/vms/{VM_A}/stop")
+    assert (timed_out.status_code, timed_out.json()["code"], timed_out.json()["platform_code"]) == (504, "DriverTimeout", code)
+    manager.fail_next = {"code": code, "message": "xl shutdown failed"}
+    assert client.post(f"/api/v1/vms/{VM_A}/stop").status_code == 500
+
+
+def test_non_platform_errors_have_no_platform_code(client, manager):
+    nil = client.get("/api/v1/vms/00000000-0000-0000-0000-000000000000")
+    assert nil.status_code == 400 and "platform_code" not in nil.json()
+    manager.fail_next = {"code": "IP_POOL_EXHAUSTED", "message": "no unreserved internal Linux address remains"}
+    manager.fail_create = manager.fail_next
+    manager.fail_next = None
+    exhausted = client.post("/api/v1/vms", json=create_body(VM_B), headers={"Idempotency-Key": "k-pool"})
+    assert (exhausted.status_code, exhausted.json()["platform_code"], exhausted.json()["resource"]["name"]) == (507, "IP_POOL_EXHAUSTED", "ipv4")
+
+
+def test_shutdown_sends_stop_without_any_wait_input(driver, manager):
+    """Manager stop 명세는 vm_id·force 뿐이다. grace_s 는 어떤 값이든 전달되지 않고 플랫폼 고정 대기(90초)가 적용된다."""
+    manager.register(VM_A, running=True)
+    driver.shutdown(VM_A, grace_s=30)
+    assert manager.calls[-1][:2] == ("stop", {"vm_id": str(VM_A), "force": False})
 
 
 # ---- API 끝에서 끝 (registry + start/stop/retire) ----

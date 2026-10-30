@@ -1,14 +1,19 @@
 [Unit]
+Wants=xenova-cpu-prepare.service
 Description=Start registered Xenova VMs once (OS/app readiness is separate)
 Requires=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenova-vm-shutdown.service
-After=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenova-vm-shutdown.service
+After=xenova-first-boot.service srv-xenova.mount xenova-xen-ready.service xenova-vm-shutdown.service xenova-cpu-prepare.service
 RequiresMountsFor=/srv/xenova
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# Persistent libxl/qdisk processes belong to per-execution scopes, not this batch.
+# The independent shutdown guard also covers a failed batch (whose ExecStop is skipped).
 ExecStart=/usr/sbin/xenova-vm autostart
+ExecStop=/usr/sbin/xenova-vm shutdown-all
 TimeoutStartSec=150s
+TimeoutStopSec=110s
 Restart=no
 
 [Install]

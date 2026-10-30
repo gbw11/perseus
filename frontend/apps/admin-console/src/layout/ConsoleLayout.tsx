@@ -1,37 +1,60 @@
 import { AppShell, Button } from '@xenova/ui';
-import { NavLink, Outlet, useNavigate } from 'react-router';
+import logo from '@xenova/ui/assets/xenova-logo.png';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router';
 import { useLogout } from '../api/queries';
 import { useSession } from '../auth';
+import { DriveProvider } from './DriveContext';
+import { ResumeNotice } from './ResumeNotice';
+import styles from './layout.module.css';
 
+/** 관리자 웹 공통 틀: 핵심 업무 4개 영역과 계정 동작. */
 export function ConsoleLayout() {
   const session = useSession();
   const logout = useLogout();
   const navigate = useNavigate();
+  const name = session?.user.nickname || session?.user.username || '';
   return (
-    <AppShell
-      brand="Xenova"
-      nav={
-        <>
-          <NavLink to="/vms">VM</NavLink>
-          <NavLink to="/demo">시연 제어</NavLink>
-          <NavLink to="/screens">모니터 화면</NavLink>
-          <NavLink to="/components">컴포넌트</NavLink>
-        </>
-      }
-      actions={
-        <>
-          <span style={{ color: 'var(--x-text-muted)', alignSelf: 'center' }}>{session?.user.username}</span>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => logout.mutate(undefined, { onSettled: () => navigate('/login') })}
+    <DriveProvider>
+      <AppShell
+        brand={
+          <Link
+            to="/dashboard/overview"
+            className={styles.brandLink}
+            aria-label="VM Dashboard Overview로 이동"
           >
-            로그아웃
-          </Button>
-        </>
-      }
-    >
-      <Outlet />
-    </AppShell>
+            <img src={logo} alt="Xenova" className={styles.logo} />
+            <small className={styles.brandText}>Admin Console</small>
+          </Link>
+        }
+        nav={
+          <>
+            <NavLink to="/dashboard">VM Dashboard</NavLink>
+            <NavLink to="/vision">Vision</NavLink>
+            <NavLink to="/control">VM Control</NavLink>
+            <NavLink to="/simulator">Simulator</NavLink>
+          </>
+        }
+        actions={
+          <>
+            <span className={styles.user}>
+              <span className={styles.avatar} aria-hidden="true">
+                {name.slice(0, 1).toUpperCase()}
+              </span>
+              {name}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => logout.mutate(undefined, { onSettled: () => navigate('/login') })}
+            >
+              로그아웃
+            </Button>
+          </>
+        }
+      >
+        <ResumeNotice />
+        <Outlet />
+      </AppShell>
+    </DriveProvider>
   );
 }

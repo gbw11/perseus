@@ -3,10 +3,12 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("g1_handoff", ROOT/"platform/scripts/package-xenova-xenstore-g1-handoff.py")
@@ -51,11 +53,16 @@ class HandoffTest(unittest.TestCase):
         self.package()
         manifest = handoff.verify(self.output)
         mapping = handoff.runtime_sources()
-        self.assertEqual(len(mapping), 20)
+        self.assertEqual(len(mapping), 28)
+        self.assertIn("xenova_boot_progress.py",mapping)
+        self.assertIn("xenova_boot_status.py",mapping)
+        self.assertIn("xenova_cpu.py",mapping)
+        self.assertIn("xenova_trace.py",mapping)
+        self.assertIn("xenova_guest_process.py",mapping)
         for target, source in mapping.items():
             with self.subTest(target=target):
                 self.assertEqual((self.output/"runtime"/target).read_bytes(), (ROOT/source).read_bytes())
-        for name in ("xenova_execution", "xenova_recovery", "xenova_management", "xenova_domain_identity", "xen_config"):
+        for name in ("xenova_execution", "xenova_recovery", "xenova_management", "xenova_domain_identity", "xenova_resources", "xenova_zephyr_control", "xenova_zephyr_transition", "xen_config"):
             self.assertTrue((self.output/"runtime"/(name+".py")).is_file())
         self.assertEqual(manifest["firmware_build_head"], "fixture-build-head")
         self.assertEqual((self.output/"firmware/g1-build.json").read_bytes(), (self.firmware/"g1-build.json").read_bytes())
@@ -79,6 +86,38 @@ class HandoffTest(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
         self.assertIn("isolated complete G1 runtime PASS", p.stdout)
 
+    def test_current_documents_and_their_local_links_are_bundled(self):
+        self.package()
+        manifest = handoff.verify(self.output)
+        self.assertEqual((self.output/"RUNBOOK.md").read_text(), handoff.RUNBOOK)
+        for name in handoff.DOCUMENTATION:
+            with self.subTest(document=name):
+                self.assertEqual((self.output/name).read_bytes(), (ROOT/name).read_bytes())
+                self.assertEqual(manifest["files"][name], handoff.file_info(ROOT/name))
+        for name in ("RUNBOOK.md", "docs/platform/build-guide.md",
+                     "platform/guests/zephyr/telemetry/README.md"):
+            document = self.output/name
+            for link in re.findall(r"\]\(([^)]+)\)", document.read_text()):
+                if "://" in link or link.startswith("#"):
+                    continue
+                target = (document.parent/unquote(link.split("#", 1)[0])).resolve()
+                self.assertTrue(target.is_relative_to(self.output))
+                self.assertTrue(target.is_file(), (name, link))
+        guide = (self.output/"docs/platform/build-guide.md").read_text()
+        self.assertIn("## 10. XenStore G1 시험 인계물", guide)
+        self.assertNotIn("docs/build-guides/xenova-zephyr-xenstore-g1.md", guide)
+        for name in ("README.md", "management-boundaries.md", "management-boot-boundaries.md", "cpu-layout.md"):
+            self.assertTrue((self.output/"docs/platform"/name).is_file())
+        self.assertTrue((self.output/"docs/verification/platform-management-boundaries-history.md").is_file())
+
+    def test_modified_document_is_rejected_by_handoff_verification(self):
+        self.package()
+        guide = self.output/"docs/platform/build-guide.md"
+        guide.chmod(0o644)
+        guide.write_text("# changed after packaging\n")
+        with self.assertRaisesRegex(ValueError, "handoff hash/size"):
+            handoff.verify(self.output)
+
     def test_changed_firmware_rejected_before_any_output(self):
         (self.firmware/"zephyr.bin").write_bytes(b"changed")
         with self.assertRaisesRegex(ValueError, "firmware hash"):
@@ -92,6 +131,19 @@ class HandoffTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different app/module"):
             self.package()
         self.assertEqual((self.firmware/"g1-build.json").read_bytes(), before)
+        self.assertFalse(self.output.exists())
+
+    def test_missing_overlay_in_old_firmware_source_manifest_is_rejected(self):
+        relative = "xenstore-test-app/app.overlay"
+        self.assertEqual(self.manifest["source_files"][relative],
+                         handoff.file_info(ROOT/"platform/guests/zephyr"/relative))
+        del self.manifest["source_files"][relative]
+        self.manifest["source_sha256"] = hashlib.sha256(
+            json.dumps(self.manifest["source_files"], sort_keys=True,
+                       separators=(",", ":")).encode()).hexdigest()
+        self.save_manifest()
+        with self.assertRaisesRegex(ValueError, "different app/module"):
+            self.package()
         self.assertFalse(self.output.exists())
 
     def test_stale_build_script_rejected(self):
