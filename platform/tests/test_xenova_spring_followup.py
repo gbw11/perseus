@@ -77,7 +77,8 @@ class FactoryReservationTest(FollowupFixture):
         self.board.p.register()
         self.xen = fixtures.FakeXen(self.board.data, {})
         self.p = vm.Platform(self.board.data, self.board.root/'run/xenova',
-                             command=self.xen, defaults_path=ROOT/'platform/tests/fixtures/legacy-defaults.json')
+                             command=self.xen, defaults_path=ROOT/'platform/tests/fixtures/legacy-defaults.json',
+                             creation_policy_path=self.f.p.creation_policy_path)
         network = patch.object(self.p, 'check_network')
         network.start()
         self.addCleanup(network.stop)

@@ -35,6 +35,10 @@ class ManagementTest(unittest.TestCase):
         self.run=Path(self.tmp.name)/'run'
         self.xen=FakeXen(self.data,{})
         self.p=vm.Platform(self.data,self.run,command=self.xen,defaults_path=FILES/'defaults.json')
+        # 명시적 로컬 시간 프로필. 생성 운영 기본값으로 설치하지 않는다.
+        self.p.creation_policy_path=self.data/'creation-policy.json'
+        self.p.creation_policy_path.write_text(json.dumps({'schema_version':'1.0','call_ms':3600000,
+                                                         'execution_ms':3500000,'cleanup_ms':5000}))
         self.storage=patch.object(vm,'storage_check');self.storage.start();self.addCleanup(self.storage.stop)
         self.m=management.Manager(self.p,preparer=self.prepare,usage_check=lambda *args:None, defaults_path=FILES/'defaults.json')
         network=patch.object(self.p,'check_network');network.start();self.addCleanup(network.stop)
