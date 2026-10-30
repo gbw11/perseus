@@ -128,8 +128,7 @@ export interface UpdateVcpusRequest {
 }
 
 export type VmResourceUpdate =
-  | { kind: 'memory'; body: UpdateMemoryRequest }
-  | { kind: 'vcpus'; body: UpdateVcpusRequest };
+  { kind: 'memory'; body: UpdateMemoryRequest } | { kind: 'vcpus'; body: UpdateVcpusRequest };
 
 /** §2.3 */
 export interface Template {
