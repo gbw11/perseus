@@ -13,7 +13,9 @@ import {
   type LoginRequest,
   type SignupRequest,
   type TokenResponse,
+  type UpdateMemoryRequest,
   type UpdateVcpuPinningRequest,
+  type UpdateVcpusRequest,
   type VcpuPinning,
   type Vm,
   type VmResources,
@@ -63,6 +65,10 @@ const defaultPinning = (vm: Vm): VcpuPinning[] =>
 function resourcesOf(vm: Vm): VmResources {
   const vcpuPinning = pinningByVm.get(vm.vm_id) ?? defaultPinning(vm);
   pinningByVm.set(vm.vm_id, vcpuPinning);
+  const template = TEMPLATES.find(
+    (item) => item.template_id === vm.template_id && item.version === vm.template_version,
+  );
+  const fixed = vm.guest_kind === 'zephyr';
   return {
     vm_id: vm.vm_id,
     vcpus: vm.vcpus,
@@ -76,6 +82,13 @@ function resourcesOf(vm: Vm): VmResources {
       { pcpu: 2, load_percent: 18.5 },
       { pcpu: 3, load_percent: 41.7 },
     ],
+    limits: {
+      vcpus_min: fixed ? vm.vcpus : 1,
+      vcpus_max: fixed ? vm.vcpus : 4,
+      memory_mib_min: fixed ? vm.memory_mib : (template?.min_memory_mib ?? 16),
+      memory_mib_max: fixed ? vm.memory_mib : 1024,
+      memory_mib_step: fixed ? 1 : 64,
+    },
     observed_at: new Date().toISOString(),
   };
 }
@@ -244,6 +257,63 @@ export const handlers = [
       body.mappings.map(({ vcpu, pcpus }) => ({ vcpu, pcpus: [...pcpus].sort((a, b) => a - b) })),
     );
     return HttpResponse.json(resourcesOf(vm) as unknown as JsonBodyType);
+  }),
+
+  http.put('*/api/v1/vms/:vmId/resources/vcpus', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    if (!vm) return vmNotFound();
+    if (vm.guest_kind === 'zephyr') {
+      return error(400, 'RESOURCE_UNSUPPORTED', 'Zephyr VM은 고정 리소스 프로필을 사용합니다.');
+    }
+    if (vm.state !== 'stopped') {
+      return error(409, 'INVALID_VM_STATE', 'vCPU 수는 정지된 VM에서만 변경할 수 있습니다.');
+    }
+    const body = (await request.json()) as Partial<UpdateVcpusRequest>;
+    if (!Number.isInteger(body.vcpus) || body.vcpus! < 1 || body.vcpus! > 4) {
+      return error(400, 'INVALID_ARGUMENT', 'vCPU 수는 1~4 정수여야 합니다.');
+    }
+    const currentPinning = pinningByVm.get(vm.vm_id) ?? defaultPinning(vm);
+    const fallback = currentPinning[0]?.pcpus ?? [0, 3];
+    pinningByVm.set(
+      vm.vm_id,
+      Array.from({ length: body.vcpus! }, (_, vcpu) => ({
+        vcpu,
+        pcpus: [...(currentPinning[vcpu]?.pcpus ?? fallback)],
+      })),
+    );
+    vms = vms.map((item) => (item.vm_id === vm.vm_id ? { ...item, vcpus: body.vcpus! } : item));
+    return HttpResponse.json(resourcesOf(find(vm.vm_id)!) as unknown as JsonBodyType);
+  }),
+
+  http.put('*/api/v1/vms/:vmId/resources/memory', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    if (!vm) return vmNotFound();
+    if (vm.guest_kind === 'zephyr') {
+      return error(400, 'RESOURCE_UNSUPPORTED', 'Zephyr VM은 고정 리소스 프로필을 사용합니다.');
+    }
+    if (vm.state !== 'stopped') {
+      return error(409, 'INVALID_VM_STATE', '메모리는 정지된 VM에서만 변경할 수 있습니다.');
+    }
+    const body = (await request.json()) as Partial<UpdateMemoryRequest>;
+    const limits = resourcesOf(vm).limits;
+    if (
+      !Number.isInteger(body.memory_mib) ||
+      body.memory_mib! < limits.memory_mib_min ||
+      body.memory_mib! > limits.memory_mib_max ||
+      body.memory_mib! % limits.memory_mib_step !== 0
+    ) {
+      return error(
+        400,
+        'INVALID_ARGUMENT',
+        `메모리는 ${limits.memory_mib_min}~${limits.memory_mib_max} MiB, ${limits.memory_mib_step} MiB 단위여야 합니다.`,
+      );
+    }
+    vms = vms.map((item) => (item.vm_id === vm.vm_id ? { ...item, memory_mib: body.memory_mib! } : item));
+    return HttpResponse.json(resourcesOf(find(vm.vm_id)!) as unknown as JsonBodyType);
   }),
 
   http.post('*/api/v1/vms', async ({ request }) => {

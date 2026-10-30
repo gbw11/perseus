@@ -2,11 +2,12 @@ import { Button, Card, Modal, useToast } from '@xenova/ui';
 import { useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../api/client';
-import { useVm, useVmAction, useVms, type VmAction } from '../api/queries';
+import { useVm, useVmAction, useVmResources, useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
 import { osLabel } from '../domain/roles';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
+import { ResourceAdjustmentPanel } from './ResourceAdjustmentPanel';
 import { VcpuPinningPanel } from './VcpuPinningPanel';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
@@ -18,10 +19,17 @@ const AGENT_LABEL: Record<NonNullable<Vm['agent_status']>, string> = {
   UNKNOWN: '상태 확인 대기',
 };
 
+function pinningSummary(mappings: { vcpu: number; pcpus: number[] }[]): string {
+  if (!mappings.length) return '조회 대기';
+  const labels = mappings.map((mapping) => mapping.pcpus.join(', '));
+  return labels.every((label) => label === labels[0]) ? `pCPU ${labels[0]}` : 'vCPU별 설정';
+}
+
 /** Dashboard의 관측 상세와 분리된 VM Control 전용 관리 상세. */
 export function ControlVmDetailPage() {
   const { vmId = '' } = useParams();
   const vm = useVm(vmId);
+  const resources = useVmResources(vmId);
   const vms = useVms();
   const action = useVmAction();
   const toast = useToast();
@@ -156,35 +164,24 @@ export function ControlVmDetailPage() {
             <div className={styles.controlResourceSummary}>
               <div data-available="true">
                 <span>vCPU</span>
-                <strong>{vm.data.vcpus}</strong>
+                <strong>{resources.data?.vcpus ?? vm.data.vcpus}</strong>
                 <small>개</small>
               </div>
               <div data-available="true">
                 <span>메모리</span>
-                <strong>{vm.data.memory_mib}</strong>
+                <strong>{resources.data?.memory_mib ?? vm.data.memory_mib}</strong>
                 <small>MiB</small>
               </div>
-              <div data-available="false">
+              <div data-available={resources.data ? 'true' : 'false'}>
                 <span>CPU 핀닝</span>
-                <strong>관리</strong>
-                <small>아래 매트릭스에서 설정</small>
+                <strong>{resources.data ? pinningSummary(resources.data.vcpu_pinning) : '—'}</strong>
+                <small>{resources.data ? 'Xen hard affinity' : '설정 미조회'}</small>
               </div>
-              <div data-available="false">
-                <span>스케줄러</span>
-                <strong>—</strong>
-                <small>가중치 미조회</small>
-              </div>
-            </div>
-            <div className={styles.resourceControlNotice}>
-              <div>
-                <strong>고급 자원 관리</strong>
-                <span>vCPU 핀닝은 아래에서 관리하고, vCPU·메모리·스케줄러 설정은 114번에서 연결합니다.</span>
-              </div>
-              <span>RESOURCE CONTROL</span>
             </div>
           </Card>
 
-          <VcpuPinningPanel vm={vm.data} accent={accent} />
+          <ResourceAdjustmentPanel key={`tuning-${vm.data.vm_id}`} vm={vm.data} accent={accent} />
+          <VcpuPinningPanel key={`pinning-${vm.data.vm_id}`} vm={vm.data} accent={accent} />
 
           <section className={styles.dangerZone} aria-labelledby="danger-zone-title">
             <div>

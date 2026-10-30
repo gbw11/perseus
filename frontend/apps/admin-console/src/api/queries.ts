@@ -17,6 +17,7 @@ import type {
   UpdateVcpuPinningRequest,
   Vm,
   VmListResponse,
+  VmResourceUpdate,
   VmResources,
 } from './types';
 
@@ -70,6 +71,22 @@ export function useUpdateVcpuPinning(vmId: string) {
         body,
       }),
     onSettled: () => client.invalidateQueries({ queryKey: keys.vmResources(vmId) }),
+  });
+}
+
+export function useUpdateVmResource(vmId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ kind, body }: VmResourceUpdate) =>
+      request<VmResources>(`/api/v1/vms/${encodeURIComponent(vmId)}/resources/${kind}`, {
+        method: 'PUT',
+        body,
+      }),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: keys.vmResources(vmId) });
+      void client.invalidateQueries({ queryKey: keys.vm(vmId) });
+      void client.invalidateQueries({ queryKey: keys.vms });
+    },
   });
 }
 
