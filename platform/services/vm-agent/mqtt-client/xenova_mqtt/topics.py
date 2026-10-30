@@ -69,6 +69,23 @@ def vehicle_status() -> str:
     return f"{PREFIX}/vehicle/status"
 
 
+def sim_pose() -> str:
+    """계약 12장 시뮬레이터 전용 (실차에는 없음)."""
+    return f"{PREFIX}/sim/pose"
+
+
+def sim_world() -> str:
+    return f"{PREFIX}/sim/world"
+
+
+def sim_command() -> str:
+    return f"{PREFIX}/sim/command"
+
+
+def sim_result() -> str:
+    return f"{PREFIX}/sim/result"
+
+
 def probe_request(target_vm_id: str) -> str:
     return f"{PREFIX}/probes/{_segment('target_vm_id', target_vm_id)}/request"
 

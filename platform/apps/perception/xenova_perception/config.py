@@ -19,7 +19,7 @@ DEFAULT_USERNAME = "perception"
 # 계약 5.3: perception.result 15 Hz
 RESULT_RATE_HZ = 15.0
 
-SOURCES = ("synthetic", "webcam", "video")
+SOURCES = ("synthetic", "webcam", "video", "stream")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 ENV_PREFIX = "XENOVA_PERCEPTION_"
 
@@ -70,6 +70,7 @@ class PerceptionSettings:
     source: str = "synthetic"
     device: int = 0                   # webcam 장치 번호
     video_path: str | None = None     # video 파일
+    url: str | None = None            # stream: MJPEG 주소 (시뮬레이터 전방 카메라 http://<PC>:8090/camera/stream.mjpg)
     scenario: str = "approach"        # synthetic 시나리오
     broker_host: str = "127.0.0.1"
     broker_port: int = 1883
@@ -77,7 +78,7 @@ class PerceptionSettings:
     password: str | None = None
     camera: Camera = Camera()
     stop_zone: StopZone = StopZone()
-    lane_width_m: float = 0.35        # 한쪽 차선만 보일 때 중심을 추정하는 차로 폭
+    lane_width_m: float = 0.6         # 한쪽 차선만 보일 때 중심을 추정하는 차로 폭 (시뮬레이터 서킷, MQTT 계약 v1.4 §11)
     max_obstacles: int = 8            # 가까운 순으로 이만큼만 싣는다
     # 이 시간보다 오래된 프레임 결과는 다시 내지 않는다. 카메라가 멈췄는데 옛 결과를 계속 내면
     # 자율주행 VM 이 젯슨 끊김(시나리오 F6)을 알아채지 못한다
@@ -92,6 +93,8 @@ class PerceptionSettings:
             raise ValueError(f"source must be one of {SOURCES}, got {self.source!r}")
         if self.source == "video" and not self.video_path:
             raise ValueError("source video needs a video file path")
+        if self.source == "stream" and not self.url:
+            raise ValueError("source stream needs a url")
         if not 1 <= self.broker_port <= 65535:
             raise ValueError(f"broker_port must be 1..65535, got {self.broker_port!r}")
         if not self.broker_host:

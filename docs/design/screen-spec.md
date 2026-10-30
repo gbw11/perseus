@@ -48,7 +48,7 @@
 | M-02 | 모니터 2 | 상세 — 자율주행              | `/detail/autonomous`         | 공병우 -128         | 〃                                          |
 | M-03 | 모니터 2 | 상세 — 수동주행              | `/detail/manual`             | 공병우 -128         | 〃                                          |
 | M-04 | 모니터 2 | 상세 — 인터랙션              | `/detail/interaction`        | 공병우 -128         | 〃                                          |
-| M-05 | 모니터 2 | 시뮬레이터 (시뮬레이터 구성) | `/sim`                       | 공병우 -262         | WS-06 `/ws/v1/sim` (-270, 지금은 콘솔 mock) |
+| M-05 | 모니터 2 | 시뮬레이터 (시뮬레이터 구성) | `/sim`                       | 공병우 -262         | WS-06 `/ws/v1/sim` (-270, MQTT 계약 12장) |
 
 웹 공통 틀: 위쪽 바에 [VM Dashboard · Vision · VM Control · Simulator] 메뉴, 사용자 이름, 로그아웃.
 VM Dashboard 안에는 [Overview · CPU · Memory · Console] 2차 탭을 둔다. 기존 `/vms`, `/resources`, `/demo`,
