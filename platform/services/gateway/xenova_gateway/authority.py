@@ -155,17 +155,22 @@ class AuthorityStore:
 
     def save(self,value):
         self.validate(value)
-        if len(json.dumps(value,separators=(',',':')).encode())>65536:
+        encoded=json.dumps(value,separators=(',',':'))
+        if len(encoded.encode())>65536:
             raise AuthorityError('authority record size limit; no write')
+        # 크기를 검사한 같은 JSON을 독립 사본으로 만든다. 호출자 가변 객체를 다시
+        # 직렬화하지 않으며 저장 성공 뒤 RAM도 실제 제출한 사본과 일치시킨다.
+        snapshot=json.loads(encoded)
+        del encoded
         with self._lock:
             # replace may have succeeded before parent fsync failed. Do not
             # overwrite that higher generation using our old memory snapshot.
             if self.error:raise AuthorityError(self.error)
-            try:atomic_json(self.path,value)
+            try:atomic_json(self.path,snapshot)
             except (OSError,ValueError) as exc:
                 self.error='AUTHORITY_STORAGE_UNCERTAIN'
                 raise AuthorityError(self.error) from exc
-            self.value=json.loads(json.dumps(value))
+            self.value=snapshot
         return self.value
 
     def verify(self):
