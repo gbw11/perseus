@@ -856,6 +856,16 @@ error/result를 수습 결과로 덮지 않는다. cleanup 오류는 별도 reco
 complete/release는 기록 내용이다. 예약을 실제 소비하는 writer는 기존 공통 잠금 안에서
 workspace 부재·동일 원 기록을 확인하고 파일/부모 fsync를 재확정한다. 실패하면 예약을
 소비하지 않는다. 일반 목록/operation 조회를 fsync 실행기로 바꾸지 않는다.
+
+신규 create의 같은 공통 잠금 구간에서, 원장을 아직 쓰거나 callback/준비에 진입하지
+않은 동안에는 이 writer가 확인한 동일 원장의 반환 판정을 주소/용량 helper에 전달할 수 있다.
+각 helper가 같은 내구 근거를 다시 만들 의무는 아니다. 잠금 해제·원장 변경·슬롯 대기·
+private 준비 뒤 또는 다른 호출/프로세스에는 그 결과를 넘기지 않고 다시 확인한다.
+DHCP lease·현재 등록 충돌과 실제 게시/실행 직전 guard는 별도의 현재 근거다.
+
+create/retire/restore/purge의 같은 key 재전달도 완전하게 읽은 원장 집합에서 유일한
+원 작업을 확인한다. 중복 key 기록은 첫 일치를 원 결과로 선택하지 않고 기존
+`RECONCILE_REQUIRED`로 거절한다. 이 경우 조회/재전달이 원장을 정리하거나 실행하지 않는다.
 계획 저장 실패에서는 삭제 0, 완료 저장 미확정에서는 반환 성공 0이며, 회복 후 같은 수습으로
 다시 확인한다. 기록/잠금 삭제·phase 수정·새 UUID로 차단을 우회하지 않는다.
 
@@ -1615,9 +1625,9 @@ VM별 reason/admission·의도 revision을 확인한다. 같은 host 재호출�
 
 hard affinity는 각 Xen vCPU가 실행될 수 있는 pCPU 집합이다. 기본 프리셋은 A→1, B→2, dom0·나머지 VM→{0,3}이다. 기존 vCPU 수·RAM·펌웨어는 유지하며 Linux 4-vCPU VM이면 네 vCPU 모두 {0,3}을 사용한다. `cpus = '0,3'`은 공통 집합이고 `cpus = ['0','3']`은 vCPU별 매핑이므로 서로 바꾸지 않는다.
 
-정책 원본은 `/srv/xenova/cpu-policy.json` 하나다. 전용 대상은 영구 UUID로 지정하며 template_id·표시 이름·domid·Spring role·AUTO/MANUAL로 역할을 추정하지 않는다. 최대 두 개의 등록된 1-vCPU Zephyr 전용 예약과 dom0·나머지 VM의 공통 공유 집합을 지원한다. 코어 교환·빈 전용 목록도 유효한 정책 입력이다. Xen에서 확인한 온라인 pCPU·단일 CPU pool·Credit2를 유지하고 자동 변경하지 않는다.
+정책 원본은 `/srv/xenova/cpu-policy.json` 하나다. Debian·Ubuntu·Zephyr 모두 영구 UUID별 정적 pinning·해제를 지원한다. template_id·표시 이름·domid·Spring role·AUTO/MANUAL로 배치 권한을 추정하지 않는다. 기본 공유 집합 안의 공유 pinning과 공유 집합/다른 전용 mask와 겹치지 않는 전용 배치를 구분한다. 전용 개수는 온라인 topology·비중복 조건으로 제한하며 A/B 두 개로 고정하지 않는다. Xen에서 확인한 RPi4 온라인 pCPU·단일 CPU pool·Credit2를 유지하고 자동 변경하지 않는다. 실행 중 guest repin·scheduler 변경·cpupool 이동은 모든 OS에서 미지원이다.
 
-운영자 작업은 **수량 변경 `update-resources` / 배치 정책 변경 `cpu-policy-set` / 실제 조회 `cpu-layout` / 기존 start·reboot·recover-once 사용**의 네 가지다. 별도 pin 명령은 필요 없다. CPU 정책은 vCPU 수·메모리를 바꾸지 않으며 `update-resources` 후에도 모든 구성 vCPU에 공유 집합을 적용한다.
+운영자 작업은 **수량 변경 `update-resources` / 배치 정책 변경 `cpu-policy-set` / 실제 조회 `cpu-layout` / 기존 start·reboot·recover-once 사용**의 네 가지다. 별도 pin 명령은 필요 없다. CPU 정책은 vCPU 수·메모리를 바꾸지 않으며 `update-resources` 후에도 모든 구성 vCPU에 현재 UUID의 같은 mask를 적용·검증한다. 개별 지정이 없으면 기본 공유 집합을 사용한다. Zephyr firmware의 고정 1-vCPU 프로필은 유지한다.
 
 stop/reboot/recovery·retire/restore/purge는 CPU 예약을 해제하지 않는다. purge한 UUID의 예약도 명시적 정책 변경으로만 해제·이전한다. CPU 정책 오류는 신원을 확인할 수 있는 대상의 기존 stop/shutdown을 막지 않으며 UUID/name/domid/xen_unique_id 검사를 생략하지도 않는다.
 
@@ -1632,13 +1642,33 @@ stop/reboot/recovery·retire/restore/purge는 CPU 예약을 해제하지 않는�
 
 **인자**
 
-필수 `--spec-file PATH`, `--idempotency-key KEY`. `--execute` 생략 시 계획, 지정 시 저장. `--json` 선택. spec은 아래 세 필드만 받는다.
+필수 `--spec-file PATH`, `--idempotency-key KEY`. `--execute` 생략 시 계획, 지정 시 저장. `--json` 선택. spec은 `expected_policy_revision`, `shared_pcpus`와 `placements` 또는 기존 `exclusive` 중 정확히 하나를 받는다. 두 목록의 혼합·추가 필드는 거절한다.
 
 | 입력 | 조건 |
 |---|---|
 | expected_policy_revision | 최초 null, 변경 시 `cpu-layout`에서 읽은 양의 정수 |
 | shared_pcpus | 0..3 중 중복 없는 비어 있지 않은 정수 배열 |
-| exclusive | 최대 2개의 `{vm_id: 정규 UUID, pcpu: 정수}`. UUID·전용 코어 중복 및 공유 집합과 겹침 거절 |
+| placements | `{vm_id: 정규 UUID, mode: shared 또는 exclusive, pcpus: 비어 있지 않은 정수 배열}` 목록. VM당 하나, 모든 구성 vCPU에 같은 mask 적용 |
+| exclusive | 기존 입력 호환: `{vm_id: 정규 UUID, pcpu: 정수}` 목록. OS 제한 없이 단일 core exclusive로 해석 |
+
+`shared` mask는 `shared_pcpus`의 부분집합이며 다른 공유 VM과 겹칠 수 있다.
+`exclusive` mask는 기본 공유 집합 및 다른 전용 mask와 겹치지 않는다.
+신규 지정/변경은 등록 UUID만 허용한다. retired/purged UUID의 기존 지정을 그대로 유지하거나
+목록에서 제거할 수 있으며, 제거 후 다른 등록 UUID에 명시 재할당할 수 있다.
+정책은 전체 목록 교체다. 개별 해제는 해당 UUID를 목록에서 빼고 유지할 다른 지정을 전달한다.
+다음 start부터 기본 공유 집합으로 복귀한다. 정지한 Linux 4-vCPU의 공유 pinning 예:
+
+```json
+{"expected_policy_revision":1,"shared_pcpus":[0,3],"placements":[{"vm_id":"550e8400-e29b-41d4-a716-446655440000","mode":"shared","pcpus":[3]}]}
+```
+
+새 publication의 policy/journal은 `schema_version=2.0`이며 `placements`를 저장한다.
+기존 `1.0`의 `exclusive` policy·완료/미완료 journal은 원래 바이트 구조·hash·revision으로
+검증/회수한다. 기존 미완료 publication은 같은 원 key/spec로 `1.0` 완료한다. 새 key는 `2.0`을
+저장하며 과거 key replay는 과거 결과와 현재 정책을 분리한다. 의미가 같은 두 입력 형식도
+같은 key에서 서로 교환하지 않는다. anchor·host receipt는 기존 `1.0`, 정책 fingerprint는
+실제 저장 policy 전체 기준이다. 구형 writer와의 혼합 배포는 지원하지 않는다. 새 버전을 읽지
+못하는 writer의 명시 거절을 legacy 최초 상태로 되돌리지 않는다.
 
 **사용 조건**
 
@@ -1677,7 +1707,7 @@ xenova-vm cpu-policy-set --spec-file "$REQUEST" --idempotency-key "$KEY" --execu
 
 **정상 응답**
 
-계획 data는 `{plan:true,policy:후보,host_preparation_required:true}`다. 파일·intent·affinity를 바꾸지 않고 계획 후보의 operation UUID도 저장 확정 ID가 아니다. 최초 실행 data는 `{policy:저장된_정책,host_preparation_required:true}`이며 envelope.operation_id가 publication journal을 가리킨다. 정책에는 schema_version, 단조 정수 policy_revision, operation_id, pool_name, shared_pcpus, exclusive가 저장된다.
+계획 data는 `{plan:true,policy:후보,host_preparation_required:true}`다. 파일·intent·affinity를 바꾸지 않고 계획 후보의 operation UUID도 저장 확정 ID가 아니다. 최초 실행 data는 `{policy:저장된_정책,host_preparation_required:true}`이며 envelope.operation_id가 publication journal을 가리킨다. 정책에는 schema_version, 단조 정수 policy_revision, operation_id, pool_name, shared_pcpus와 버전에 따른 exclusive 또는 placements가 저장된다.
 
 완료 key 재전달은 `replayed=true`, data의 policy·current_policy·historical=true로 과거 결과와 현재 정책을 구분한다. 과거 결과가 현재 정책을 덮어쓰지 않는다. 정책 저장 성공은 현재 dom0 적용 성공이 아니다.
 
@@ -1689,7 +1719,7 @@ xenova-vm cpu-policy-set --spec-file "$REQUEST" --idempotency-key "$KEY" --execu
 
 `cpu-layout --json`의 policy_revision·reservations를 확인한다. 현재 host 적용은 [내부 CPU 준비](#cmd-cpu-host-prepare)에서 별도로 수행한다. 새 정책은 새 key와 최신 revision, 중단된 동일 정책은 원 spec/key로 재전달한다. journal·anchor를 삭제해 우회하지 않는다.
 
-**Manager 매핑:** `cpu-policy-set / {expected_policy_revision,shared_pcpus,exclusive}`, `execute`·`idempotency_key`는 call 키워드 인자.
+**Manager 매핑:** `cpu-policy-set / {expected_policy_revision,shared_pcpus,placements}` 또는 기존 exclusive 입력. `execute`·`idempotency_key`는 call 키워드 인자.
 
 [명령어 색인으로](#command-index)
 
@@ -1733,6 +1763,7 @@ operation_id=null, replayed=false. **ok=true는 조회 성공**이며 배치 준
 | reservations | 명시적으로 유지되는 전용 UUID·코어. retire/purge 후에도 유지 |
 | vms[].vm_id / execution_id | 영구 UUID / 현재 Xen incarnation과 결합한 실행 ID. 미관리·부재는 null |
 | vms[].vcpus / allocation / desired_hard_affinity | 영구 수량 / exclusive·shared / 정책으로 계산한 각 vCPU 마스크 |
+| policy_schema_version / reservations | 정책 원본 버전. 1.0은 기존 `{vm_id,pcpu}` 전용 목록, 2.0은 `{vm_id,mode:exclusive,pcpus}` 전용 목록. 공유 지정은 각 VM desired_hard_affinity로 확인 |
 | vms[].observed | presence, domid, 문자열 xen_unique_id, 실제 vcpus·hard_affinity |
 | affinity_matches | 실제 수량·각 마스크가 예정 배치와 정확히 일치 |
 | exclusive_verified | 전용 VM의 마스크 일치 및 다른 모든 도메인 vCPU와 중복 없음 |
@@ -3765,7 +3796,7 @@ cpu_policy의 policy_sha256은 key 정렬·공백 없는 UTF-8 JSON(ensure_ascii
 
 | 필드 | 값·의미 |
 |---|---|
-| `effective_status` | `SUCCEEDED`: 원 결과 내구 확정. `RUNNING`: 같은 원 Linux 준비의 활성 실행 확인. `RECONCILING`: 원 작업에 결합된 명시 수습 실행 확인. `FAILED`: 원 생성 실패와 기록된 수습 완료. `RECOVERY_REQUIRED`: 미완료/미확정·실패의 재확인 필요 |
+| `effective_status` | `SUCCEEDED`: 원 결과 내구 확정. `RUNNING`: 같은 원 Linux 준비 또는 lifecycle의 활성 실행 확인. `RECONCILING`: 원 작업에 결합된 명시 private 수습 실행 확인. `FAILED`: 원 생성 실패와 기록된 수습 완료. `RECOVERY_REQUIRED`: 미완료/미확정·실패의 재확인 필요 |
 | `recovery_required` | effective_status가 RECOVERY_REQUIRED이면 true, 나머지는 false. 자동 복구 이행·출력 허가·할당자의 내구 확인 완료를 뜻하지 않음 |
 
 RUNNING은 응답 시점의 관측이며 VM 실행·생성 완료·기한 연장이 아니다. 원 작업/host/프로세스
@@ -3832,6 +3863,16 @@ update-resources는 instance.json의 vcpus/memory_mib만 바꾸며 initial_spec�
 ### C.5 보관·복원·purge 보호
 
 retire는 정지 자산을 숨김 archive로 이동하고 RETIRED/generation+1을 기록한다. restore는 RETIRED의 신원·주소·이름·자산·파일시스템 검사·용량을 확인해 REGISTERED/generation+1로 복원한다. 둘 다 원 실행 의도를 바꾸지 않으므로 lifecycle 세대가 바뀌면 기존 의도는 부적용일 수 있다. 필요한 새 사용자 제어로 의도를 수락한다.
+
+수락 전 검사부터 UUID별 실행 lease를 유지한다. 검사 lease만 얻은 단계는 미수락이다.
+최초 restore fsck 실패는 원 journal을 만들지 않는다. 긴 fsck/usage/inventory·purge 항목 삭제는
+공통 잠금 밖에서 수행하므로 다른 VM의 허용된 실제 stop도 진행할 수 있다. 같은 자산의
+start·설정/자원/CPU·복구·legacy writer는 대상 보호를 존중한다. 활성 원 작업의 같은 key
+재전달은 `operation/effective_status=RUNNING`을 회수하며 두 번째 실행을 시작하지 않는다.
+실행 종료·상속 FD 부재 확인 후에만 기존 원 key 재개를 허용한다. 원 결과 조회 자체가
+자동 실행기는 아니다. gate/세대/의도/원 기록/검사 root 변경은 옛 검사 채택을 막는다.
+[실제 잠금 순서](management-boundaries.md#lifecycle의-대상-소유와-공통-잠금)와
+[후속 수락](../verification/recovery-scenario-closure-20261030.md#stage55-followup)을 참조한다.
 
 purge는 RETIRED → PURGING → PURGED이며 완료 시 generation+1이다. 소유 inventory의 dev/inode/종류·단일 hardlink·symlink·Xen 연결·loop·mount·열린 프로세스를 확인하고 원본/타 VM/공유 자산을 보호한다. 중간 실패 후 같은 키로 잔여 자산을 판정하며 UUID tombstone·이력은 남긴다.
 

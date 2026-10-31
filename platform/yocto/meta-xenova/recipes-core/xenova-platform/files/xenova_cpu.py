@@ -38,28 +38,54 @@ def cpus(value):
 
 
 def validate_spec(spec):
-    if not isinstance(spec, dict) or set(spec) != {'expected_policy_revision', 'shared_pcpus', 'exclusive'}:
-        refuse('INVALID_SPEC', 'CPU policy requires expected_policy_revision, shared_pcpus and exclusive')
+    if not isinstance(spec, dict) or set(spec) not in (
+            {'expected_policy_revision', 'shared_pcpus', 'exclusive'},
+            {'expected_policy_revision', 'shared_pcpus', 'placements'}):
+        refuse('INVALID_SPEC', 'CPU policy requires expected_policy_revision, shared_pcpus and exclusive or placements')
     revision = spec['expected_policy_revision']
     if revision is not None and (type(revision) is not int or revision < 1):
         refuse('INVALID_SPEC', 'expected_policy_revision must be null or a positive integer')
     shared = cpus(spec['shared_pcpus'])
-    entries = spec['exclusive']
-    if not isinstance(entries, list) or len(entries) > 2:
-        refuse('RESOURCE_UNSUPPORTED', 'at most two dedicated 1-vCPU Zephyr reservations supported')
+    modern = 'placements' in spec
+    entries = spec['placements'] if modern else spec['exclusive']
+    if not isinstance(entries, list):
+        refuse('INVALID_SPEC', 'CPU placements must be a list')
     identities, cores, normalized = set(), set(), []
     for item in entries:
-        if (not isinstance(item, dict) or set(item) != {'vm_id', 'pcpu'} or
+        if (not isinstance(item, dict) or set(item) != ({'vm_id','mode','pcpus'} if modern else {'vm_id', 'pcpu'}) or
                 not isinstance(item['vm_id'], str) or not vm.UUID.fullmatch(item['vm_id']) or
                 item['vm_id'] == '00000000-0000-0000-0000-000000000000'):
             refuse('INVALID_SPEC', 'dedicated reservation requires a permanent canonical VM UUID and pcpu')
-        core = cpus([item['pcpu']])[0]
-        if item['vm_id'] in identities or core in cores or core in shared:
+        mask = cpus(item['pcpus']) if modern else cpus([item['pcpu']])
+        mode = item['mode'] if modern else 'exclusive'
+        if mode not in ('shared','exclusive'):
+            refuse('INVALID_SPEC', 'placement mode must be shared or exclusive')
+        if (item['vm_id'] in identities or (mode=='exclusive' and set(mask)&(cores|set(shared))) or
+                (mode=='shared' and not set(mask)<=set(shared))):
             refuse('INVALID_SPEC', 'duplicate or overlapping CPU reservation')
-        identities.add(item['vm_id']); cores.add(core)
-        normalized.append({'vm_id':item['vm_id'], 'pcpu':core})
+        identities.add(item['vm_id'])
+        if mode=='exclusive':cores.update(mask)
+        normalized.append({'vm_id':item['vm_id'], **({'mode':mode,'pcpus':mask} if modern else {'pcpu':mask[0]})})
     return {'expected_policy_revision':revision, 'shared_pcpus':shared,
-            'exclusive':sorted(normalized, key=lambda v:v['vm_id'])}
+            'placements' if modern else 'exclusive':sorted(normalized, key=lambda v:v['vm_id'])}
+
+
+def placements(value):
+    """과거 원본은 바꾸지 않고 소비 시에만 VM 전체의 동일 mask로 투영한다."""
+    if 'placements' in value:
+        return value['placements']
+    return [{'vm_id':v['vm_id'],'mode':'exclusive','pcpus':[v['pcpu']]} for v in value['exclusive']]
+
+
+def policy_candidate(request, opid, pool, *, legacy=False):
+    return {'schema_version':'1.0' if legacy else '2.0', 'operation_id':opid,
+            'policy_revision':(request['expected_policy_revision'] or 0)+1, 'pool_name':pool,
+            'shared_pcpus':request['shared_pcpus'],
+            **({'exclusive':request['exclusive']} if legacy else {'placements':placements(request)})}
+
+
+def selected_cpus(value):
+    return set(value['shared_pcpus']) | {c for item in placements(value) for c in item['pcpus']}
 
 
 def affinity_text(context):
@@ -99,7 +125,14 @@ class CPU:
 
     def read(self, path):
         try:
-            return self.e.read(path)
+            if not path.exists() and not path.is_symlink():return None
+            catalog.plain(path.parent,directory=True)
+            catalog.plain(path)
+            value=json.loads(path.read_text())
+            versions=('1.0','2.0') if path==self.policy_path or path.parent==self.journals else ('1.0',)
+            if not isinstance(value,dict) or value.get('schema_version') not in versions:
+                raise ValueError('unsupported CPU state schema')
+            return value
         except (PlatformError, OSError, ValueError) as error:
             refuse('CPU_POLICY_INVALID', 'CPU state is unreadable or corrupt', details={'file':path.name})
 
@@ -118,10 +151,10 @@ class CPU:
                 if (not vm.UUID.fullmatch(path.stem) or op['operation_id'] != path.stem or
                         op['phase'] not in ('prepared','completed') or op['base_revision'] != request['expected_policy_revision'] or
                         not isinstance(op['idempotency_key'],str) or not op['idempotency_key'] or
-                        candidate != {'schema_version':'1.0', 'operation_id':path.stem,
-                                      'policy_revision':(op['base_revision'] or 0)+1,
-                                      'pool_name':candidate['pool_name'], 'shared_pcpus':request['shared_pcpus'],
-                                      'exclusive':request['exclusive']}):
+                        candidate.get('schema_version') not in ('1.0','2.0') or
+                        op.get('schema_version') != candidate['schema_version'] or
+                        candidate != policy_candidate(request,path.stem,candidate['pool_name'],
+                                                      legacy=candidate['schema_version']=='1.0')):
                     raise ValueError('CPU journal mismatch')
                 values.append(op)
             if len({v['candidate']['policy_revision'] for v in values}) != len(values):
@@ -153,9 +186,11 @@ class CPU:
         try:
             if not activated or not vm.UUID.fullmatch(activated.get('activation_operation_id','')) or type(value['policy_revision']) is not int or value['policy_revision'] < 1:
                 raise ValueError('missing activation or revision')
-            normalized = validate_spec({k:value[k] for k in ('shared_pcpus', 'exclusive')} |
+            field = 'exclusive' if value['schema_version']=='1.0' else 'placements'
+            if value['schema_version'] not in ('1.0','2.0'):raise ValueError('unsupported policy schema')
+            normalized = validate_spec({k:value[k] for k in ('shared_pcpus', field)} |
                                        {'expected_policy_revision':value['policy_revision']})
-            if normalized['shared_pcpus'] != value['shared_pcpus'] or normalized['exclusive'] != value['exclusive']:
+            if normalized['shared_pcpus'] != value['shared_pcpus'] or normalized[field] != value[field]:
                 raise ValueError('noncanonical policy')
             operations = self.operations()
             op = next((v for v in operations if v['operation_id'] == value['operation_id']),None)
@@ -174,12 +209,10 @@ class CPU:
         policy = self.policy() if policy is None else policy
         if policy is None:
             return {'configured':False}
-        dedicated = next((v for v in policy['exclusive'] if v['vm_id'] == record['uuid']), None)
-        if dedicated and (vm.guest_kind(record) != 'zephyr' or record['vcpus'] != 1):
-            refuse('CPU_POLICY_INVALID', 'dedicated UUID no longer has the 1-vCPU Zephyr profile')
-        cores = [dedicated['pcpu']] if dedicated else policy['shared_pcpus']
+        placement = next((v for v in placements(policy) if v['vm_id'] == record['uuid']), None)
+        cores = placement['pcpus'] if placement else policy['shared_pcpus']
         return {'configured':True, 'policy_revision':policy['policy_revision'],
-                'policy_sha256':fingerprint(policy), 'allocation':'exclusive' if dedicated else 'shared',
+                'policy_sha256':fingerprint(policy), 'allocation':placement['mode'] if placement else 'shared',
                 'desired_hard_affinity':[{'vcpu':v, 'pcpus':cores} for v in range(record['vcpus'])]}
 
     def command(self, argv, deadline):
@@ -304,7 +337,7 @@ class CPU:
         desired = policy['shared_pcpus'] if policy else None
         host_matches = bool(policy and hardware['pool_name'] == policy['pool_name'] and
                             all(v['pcpus'] == desired for v in domains[0]['hard_affinity']) and
-                            set(desired + [v['pcpu'] for v in policy['exclusive']]) <= set(hardware['online_pcpus']))
+                            selected_cpus(policy) <= set(hardware['online_pcpus']))
         pending = [v['operation_id'] for v in self.operations() if v['phase'] != 'completed']
         ready = bool(not pending and host_matches and receipt and receipt.get('phase') == 'ready' and
                      receipt.get('host_boot_id') == self.e.host and receipt.get('policy_sha256') == fingerprint(policy) and
@@ -359,7 +392,9 @@ class CPU:
                 'host_boot_id':self.e.host, 'observed_monotonic_ms':int(self.p.clock()*1000),
                 'host':{**hardware, 'desired_dom0_pcpus':desired,
                         'observed_dom0_hard_affinity':domains[0]['hard_affinity'], 'ready':ready},
-                'reservations':policy['exclusive'] if policy else [],
+                'policy_schema_version':policy['schema_version'] if policy else None,
+                'reservations':([v for v in placements(policy) if v['mode']=='exclusive'] if policy and policy['schema_version']=='2.0'
+                                else policy['exclusive'] if policy else []),
                 'vms':[v for v in vms if vm_id is None or v['vm_id'] == vm_id], 'issues':all_issues}
 
     @traced('cpu.require')
@@ -462,25 +497,24 @@ class CPU:
         sample = self.observe(deadline)
         self.guard_stopped(records, sample, policy_operation=op['operation_id'] if op else None)
         available = set(sample['hardware']['online_pcpus'])
-        if not set(spec['shared_pcpus']+[v['pcpu'] for v in spec['exclusive']]) <= available:
+        if not selected_cpus(spec) <= available:
             refuse('RESOURCE_UNSUPPORTED', 'selected pCPU is not online in the existing Xen pool')
-        for entry in spec['exclusive']:
+        for entry in placements(spec):
             record = next((r for r in records.values() if r['uuid'] == entry['vm_id']), None)
             if record is None:
-                refuse('VM_NOT_FOUND', 'reservation requires an existing registered UUID')
-            if vm.guest_kind(record) != 'zephyr' or record['vcpus'] != 1:
-                refuse('RESOURCE_UNSUPPORTED', 'only 1-vCPU Zephyr can have a dedicated reservation')
+                if previous and entry in placements(previous):continue
+                refuse('VM_NOT_FOUND', 'new placement requires an existing registered UUID')
         self.check_unknown(records, sample, spec['shared_pcpus'])
         opid = op['operation_id'] if op else uuid4()
-        candidate = {'schema_version':'1.0', 'policy_revision':(revision or 0)+1, 'operation_id':opid,
-                     'pool_name':sample['hardware']['pool_name'], 'shared_pcpus':spec['shared_pcpus'], 'exclusive':spec['exclusive']}
+        candidate = policy_candidate(spec,opid,sample['hardware']['pool_name'],
+                                     legacy=bool(op and op['candidate']['schema_version']=='1.0'))
         if self.p.clock() >= deadline:
             refuse('DEADLINE_EXCEEDED', 'CPU policy validation exceeded the original deadline')
         if not execute:
             return {'plan':True, 'policy':candidate, 'host_preparation_required':True}
         if op and op['candidate'] != candidate:
             refuse('TARGET_CHANGED', 'pending CPU publication no longer fits the observed host')
-        op = op or {'schema_version':'1.0', 'operation_id':opid, 'idempotency_key':key, 'request':spec,
+        op = op or {'schema_version':'2.0', 'operation_id':opid, 'idempotency_key':key, 'request':spec,
                     'base_revision':revision, 'candidate':candidate, 'phase':'prepared'}
         context['operation_id'] = opid
         self.e.write(self.journals/(opid+'.json'), op)
@@ -533,7 +567,7 @@ class CPU:
         self.guard_stopped(records, sample)
         self.check_unknown(records, sample, policy['shared_pcpus'])
         if (sample['hardware']['pool_name'] != policy['pool_name'] or not
-                set(policy['shared_pcpus']+[v['pcpu'] for v in policy['exclusive']]) <= set(sample['hardware']['online_pcpus'])):
+                selected_cpus(policy) <= set(sample['hardware']['online_pcpus'])):
             refuse('CPU_NOT_READY', 'saved CPU policy does not fit the current Xen pool/topology')
         row = sample['domains'][0]
         receipt = self.read(self.receipt_path)
