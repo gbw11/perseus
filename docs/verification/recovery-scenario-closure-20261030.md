@@ -11,6 +11,7 @@
 | 실패 후 종결 | 5번 하위 후보에서 원 host/기한·명시 private 수습·동일 수습 재개·내구 예약 반환과 다음 신규 생성까지 로컬 검증. 운영 시간 정책과 상위 연결·설치본 수락은 별도 |
 | 3번 로컬 마감 | 단일 Linux 준비 슬롯·원 실행 소유권·private 준비/게시 분리·요청별 출력. 최종 관련 회귀 481개 통과, 두 OS 모두 A 복사 해제 전 B 조회/실제 stop 완료 원자료 확인. 부분 설치 29개 Python 파일·독립 import 일치 |
 | 4번 하위 로컬 마감 | 요청별 관측·공통 잠금 밖 조회·유한 재관측·관측 실행량/지연 표본 보호. 기존 541개 후 슬롯 부모 중단/정상 반환·파일 안전 검사 보완 후보로 22 suite 543개 통과. 두 중심 barrier·양 OS polling, 부분 설치 29개 바이트·6개 격리 import 재확인 |
+| 1번 최종 마감 | 5번 커밋 `4a585d4`와 원자료를 대조한 [기능별 기준선](platform-management-baseline.md). 생성/조회/제어/자산 수명·원 작업/수습/반환과 비용·담당 경계를 연결. 제공된 개념 원문은 0~11장 보존·12장 적용 상태 갱신 |
 | 남은 범위 | 운영 create 시간값 공급·보드 수락, 상위 제품 연결·실제 HTTP polling/정규 설치/보드 수락·API cgroup의 guest backend 문제는 미완료. 모든 부하/스케줄의 무기아나 지연 상한 수락은 아님 |
 
 아래는 후보별 이력이다. 과거 2회/439개/보드 적용 기록을 최종 1회/449개 이후 후보의
@@ -1089,7 +1090,7 @@ fsync(짧은 admission) → 진행 저장 → 잔여 사용/충돌 검사 → �
 공통 잠금을 점유하지 않으며 quiesce 뒤 다음 파괴적 단계를 차단한다. 재개는 같은 명시
 수습의 새 호출이고 옛 생성의 게시 허가를 부활시키지 않는다.
 
-`_reserve_space/_ip_inventory/_mutate/_control_view`, Execution.control, resource guards,
+`_reserve_space/_ip_inventory/_mutate/_accept_stop`, Execution.control, resource guards,
 Recovery.conditions, CPU.guard_stopped, Zephyr reboot가 동일 holds 판정을 사용한다.
 원 UUID 이력 충돌은 계속 막고 IP/활성 용량 예약은 완료 후 반환한다. CPU의 전역 guard가
 수습 전에는 차단하고 수습 뒤에는 통과하는 직접 시험도 포함한다. sparse 실제 블록 차감은
@@ -1185,3 +1186,39 @@ context·수습 ID 보존, 허용 응답 필드와 같은 시험의 실제 HTTP 
 실측, 동일 모듈 후보 설치, 실제 HTTP/Spring/화면 권한과 응답 유실/명시 삭제 수락,
 Xen·SD/전원 상실·실제 mount/loop·API cgroup/backend 소유는 별도 미완료다.
 이번에는 보드·서비스·운영 상태·전체 이미지·commit/push를 변경하지 않았으며 6·7번은 실행하지 않았다.
+
+## 1번 최종 마감
+
+2026-10-31, 5번을 커밋한 `4a585d49a25d12459000306ffa74c42d0d473dcb`의 깨끗한
+작업트리에서 [기본 관리 기준선](platform-management-baseline.md)을 작성했다.
+위 「4번 후속」의 대응표는 **당시 후보의 근거**로 보존하고 최신 표로 덮지 않았다.
+개념/책임·정식 계약·실제 소스·시험/후보·설치 범위를 구분하며 이번에는 문서만 수정했다.
+
+문서 착수 전 P5 최종 source map의 platform 915파일, 봉인 변경 25파일과 바이트가 일치했다.
+그 시점의 시험 snapshot 이후 차이는 최종 보고서 한 파일이며 봉인과 일치했다. 네 커밋의 대응은
+P5 COMMIT_MAPPING에 보존돼 있다. 현재 제품과 같은 696개 관련·별도 Manager 576개
+결과를 재사용하며 전체 suite/대용량 생성/ARM/부분 패키징을 다시 실행하지 않았다.
+P5 시험 log/JSON·S4/S5 raw assertion과 부분 tar/manifest 34항목을 실제 열어 대조했다.
+P4 3쌍 비용 원자료는 당시 두 VM/외부 Xen 대역 조건으로만 재사용한다.
+P5 회귀 argv에 없던 Network Zephyr의 신규 카탈로그 등록·협조 stop/reboot 두 기존 시험만
+같은 소스의 격리 fixture로 보충해 **2 passed**를 확인했다. 최초 pytest 도구 경로 누락은
+환경 실패로 보존하고 기존 고정 경로를 사용했으며 새 의존성을 설치하지 않았다.
+
+소스 대조로 관리 구조의 ‘HTTP stop 전체 미연결’을 key 있는 FastAPI 경로 제공과
+Spring/신규 소비 미연결로 분리했고, 위 5번 소비자 목록의 `_control_view`를 실제
+`_accept_stop`으로 교정했다. DEADLINE_EXCEEDED 오류 표도 이미 구현한 생성/수습 범위를
+반영했다. 제품 API/schema나 기대 계약을 바꾼 정정이 아니다.
+
+소유 범위 색인과 기능 카드, 정보 출처, 공통 잠금/저장/시간/예약, 비용의 반복 단위·
+상한/미측정, 불일치와 후속 담당/수락은 기준선 한곳에 둔다. 사용자 제공 개념 원문은
+[개념적 아키텍처](../platform/conceptual-architecture.md)에 0~11장을 보존하고 12장만
+현재 소스/계약·원자료에 맞춰 갱신했다. 이번 검증에서 원문 전반부 동일성을 확인한다.
+
+이번 읽기 비교·문서 검사 원자료는
+`C:/Users/SSAFY/Documents/Codex/2026-10-31/xenova-stage1-closure/`에 둔다.
+`check_documents.py`는 문서 7개의 로컬 링크/앵커 379개, 소스 정의 줄 11곳·기호 참조
+77개, 개념 원문 12장 이전 48,266자 동일성과 제품 915파일 불변을 검사한다. 오류 0이며
+`git diff --check`도 통과했다. 최종 문서 diff/해시는 P1 문서 마감 자료로 별도 보존한다.
+제품 코드·정책·보드/운영 상태·배포·commit/push는 변경하지 않았다. **1번의 현행 구조
+설명 범위는 마감**한다. 비용 의심은 5.5, 생산자/소비자와
+정책 공급은 6, 동일 후보 설치/보드/제품 종단은 7번으로 연결하되 실행하지 않았다.
