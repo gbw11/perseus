@@ -667,6 +667,8 @@ class Platform:
     @traced('platform.start')
     def start(self, record, *, _accept=None, _owner=None, deadline=None, _result=None):
         """Validated launch primitive; user intent enters through request_control."""
+        from xenova_preparation import guard_asset
+        guard_asset(self, record['uuid'])
         execution = self.execution()
         deadline = self.clock()+90 if deadline is None else deadline
         execution.gate()
@@ -866,6 +868,9 @@ class Platform:
     def stop_many(self, records, timeout=90, *, force=False, board=False, deadline=None,
                   _accept=None, _expected_runs=None, _observed=None, _result=None):
         """사전 안전 검사와 요청 후 신원 관측을 분리한다. 자동 강제 종료는 없다."""
+        from xenova_preparation import guard_asset
+        for record in records:
+            guard_asset(self, record['uuid'])
         ensure_runtime(self.runtime)
         if board:
             ensure_quiet(self)
@@ -1037,6 +1042,8 @@ class Platform:
     @traced('platform.reboot')
     def reboot(self, record, timeout=90, *, force=False, _accept=None, _observed=None,
                deadline=None, _result=None):
+        from xenova_preparation import guard_asset
+        guard_asset(self, record['uuid'])
         deadline = self.clock()+timeout if deadline is None else deadline
         validate_record(record, self.data / 'instances' / record['id'])
         rows = self.matching(record, self.domains(deadline=deadline))
@@ -1130,6 +1137,8 @@ class Platform:
             return {'synchronized': None, 'error': str(exc), 'interval_clock': 'monotonic'}
 
     def replace_firmware(self, record, source, expected, *, execute=False):
+        from xenova_preparation import guard_asset
+        guard_asset(self, record['uuid'])
         if guest_kind(record) != 'zephyr':
             raise PlatformError('firmware-replace requires a Zephyr instance')
         if self.matching(record, self.domains()):
@@ -1325,6 +1334,9 @@ def main(argv=None):
             if args.id not in records:
                 raise PlatformError('unknown instance id; create it explicitly')
             record = records[args.id]
+            if args.action in ('config','autostart-set','board-shutdown-set','firmware-replace'):
+                from xenova_preparation import guard_asset
+                guard_asset(p,record['uuid'])
             if args.action in ('start', 'stop', 'reboot'):
                 p.request_control(args.action, record, force=args.force, idempotency_key=args.idempotency_key)
             elif args.action == 'config':

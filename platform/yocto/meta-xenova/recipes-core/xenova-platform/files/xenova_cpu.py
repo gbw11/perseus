@@ -409,6 +409,8 @@ class CPU:
         return context
 
     def guard_stopped(self, records, sample, *, policy_operation=None):
+        from xenova_preparation import assets_quiet
+        assets_quiet(self.p)
         for record in records.values():
             if self.p.matching(record, [{'domid':v['domid'], 'config':{'c_info':{'uuid':v['vm_id'], 'name':v['name']}}} for v in sample['domains'].values()]):
                 refuse('VM_NOT_STOPPED', 'all managed guests must be stopped before CPU policy or host preparation')

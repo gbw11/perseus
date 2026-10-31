@@ -33,6 +33,8 @@ def validate(spec, normalize_uuid, fail):
 
 
 def mutate(m,spec,execute,key,records,context,fail):
+    from xenova_preparation import guard_asset
+    guard_asset(m.p, spec['vm_id'])
     ops=m._operations()
     op=next((q for q in ops if q["idempotency_key"]==key),None)
     if op:

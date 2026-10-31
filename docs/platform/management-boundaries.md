@@ -258,6 +258,34 @@ Worker의 원 결과 소비·Standby 재합류 종단 연결은 담당자 인수
 
 ## 현재 적용 상태
 
+### Lifecycle의 대상 소유와 공통 잠금
+
+`xenova_preparation.AssetLease`는 `locks/asset-<VM UUID>.lock`의 실제 flock을
+수락 전 검사부터 원 lifecycle 정산까지 유지한다. 미수락 검사 lease는 원 operation/예약이 아니다.
+획득 순서는 **대상 lease → lifecycle I/O 슬롯 → 공통 operation lock → 필요한 짧은 admission**이다.
+대상과 슬롯은 모두 무대기다. `lifecycle-io.lock`은 기존의 무거운 lifecycle 동시 1개만
+유지하며 조회/다른 VM stop은 이 슬롯을 사용하지 않는다. Linux create 준비 슬롯과도 별개다.
+공통/admission을 잡고 대상 lease를 기다리지 않는다. 다른 writer는 이 파일을 무대기 확인해
+같은 VM을 변경하지 않는다. 같은 thread의 중첩 공개 호출도 예외가 아니다.
+
+retire/restore/purge의 긴 usage/inventory·restore fsck·purge 항목 unlink/fsync는
+`Manager._lifecycle_io`에서 대상 보호를 유지한 채 공통 잠금 밖에서 수행한다.
+복귀할 때 해당 tombstone·의도·원 journal을 대조하고, restore의 주소/용량 판정에는
+현재 등록 집합을 새로 얻는다. 삭제 항목마다 전체 registry/Xen을 다시 스캔하지 않는다.
+이동·등록·필수 journal/DHCP 결과 확정은 공통 구간이다. 단일 rename/fsync 등 syscall의
+최악 지연이나 모든 물리 제어의 병렬화를 보장하지 않는다.
+
+원 journal을 기록한 뒤 lease에 operation/spec/세대를 결합한다. 활성 같은 key는 원 진행을
+반환하고 재검사·이동하지 않는다. 잠금이 실제 반환된 뒤에만 기존 journal 재개 규칙을 사용한다.
+helper에는 대상 FD를 상속한다. 부모 종료/함수 반환만으로 상속 자식의 FD를 회수하지 않는다.
+FD 잔존은 새 실행과 storage drain을 막으며 대상 보호/슬롯을 각각 확인한다.
+원장 삭제·자동 kill로 해소하지 않는다.
+
+정상 불변 root의 fsck는 1회다. 수락 전 최초 fsck 실패는 여전히 원 operation 미생성이다.
+소유·root revision·원 기록·host/gate가 달라지면 재검사/명시 거절하며 gate 닫기·재열기는
+옛 검사를 다시 허가하지 않는다. 게시 직전 admission 안에서 gate·metadata·검사한 root를
+대조한다. 실제 보호/비용과 양 OS barrier는 [5.5 후속 근거](../verification/recovery-scenario-closure-20261030.md#stage55-followup)를 따른다.
+
 5번까지 반영한 `4a585d4`의 기능별 권위 원본·호출·소유/잠금·비용·실패 종결은
 [기본 관리 기준선](../verification/platform-management-baseline.md)에서 대조한다.
 Linux 원 기한·명시 private 수습·내구 예약 반환은 하위 로컬/부분 패키징 범위다.

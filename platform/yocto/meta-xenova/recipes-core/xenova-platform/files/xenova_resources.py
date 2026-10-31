@@ -56,6 +56,8 @@ def guards(manager, tomb, operations, fail):
 
 
 def mutate(manager, spec, execute, key, records, context, fail):
+    from xenova_preparation import guard_asset
+    guard_asset(manager.p, spec['vm_id'])
     operations = manager._operations()
     previous = next((o for o in operations if o["idempotency_key"] == key), None)
     if previous:

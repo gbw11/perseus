@@ -4,6 +4,7 @@ import fcntl
 import os
 from pathlib import Path
 import stat
+import sys
 import time
 from xenova_trace import span
 
@@ -17,6 +18,41 @@ class PlatformError(RuntimeError):
 
 class OperationBusy(PlatformError):
     """공통 작업 잠금의 미수락 또는 종료 drain 시간 초과."""
+
+
+class _OperationLock:
+    """실제 flock 보유 구간만 trace한다. 대상 소유자를 가진 lifecycle만 suspend한다."""
+    def __init__(self, fd):
+        self.fd, self.scope = fd, None
+
+    def begin(self):
+        self.scope = span('lock.hold')
+        self.scope.__enter__()
+
+    def end(self, *error):
+        if self.scope is not None:
+            scope, self.scope = self.scope, None
+            scope.__exit__(*(error or (None,None,None)))
+
+    @contextmanager
+    def outside(self, platform):
+        self.end()
+        fcntl.flock(self.fd, fcntl.LOCK_UN)
+        try:
+            with span('lock.released.lifecycle'):
+                yield
+        finally:
+            end = platform.clock()+15
+            with span('lock.wait', blocking=True):
+                while True:
+                    try:
+                        fcntl.flock(self.fd, fcntl.LOCK_EX|fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        if platform.clock() >= end:
+                            raise OperationBusy('another platform operation is in progress; lifecycle result requires replay')
+                        platform.sleep(min(.02, max(0, end-platform.clock())))
+            self.begin()
 
 
 @contextmanager
@@ -90,8 +126,12 @@ def operation_lock(runtime=RUN, *, blocking=False, deadline=None, clock=time.mon
                     if deadline is None or clock() >= deadline:
                         raise OperationBusy('another platform operation is in progress; retry after it completes') from exc
                     sleep(min(0.1, max(0, deadline-clock())))
-        with span('lock.hold'):
-            yield
+        held = _OperationLock(fd)
+        held.begin()
+        try:
+            yield held
+        finally:
+            held.end(*sys.exc_info())
     finally:
         os.close(fd)
 

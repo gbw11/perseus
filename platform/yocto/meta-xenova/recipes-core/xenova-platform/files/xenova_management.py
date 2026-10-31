@@ -23,7 +23,7 @@ import xenova_vm as vm
 import xenova_zephyr as zephyr
 import xenova_creation as creation
 from xenova_execution import ExecutionError, ReadChanged, short_lock
-from xenova_preparation import request_output, LinuxSlot, owner_state
+from xenova_preparation import request_output, LinuxSlot, owner_state, AssetLease, guard_asset, asset_state, lifecycle_io, lifecycle_slot
 from xenova_trace import bind as trace_bind, traced, span
 
 MUTATIONS = {'create', 'retire', 'restore', 'purge', 'update-resources', 'firmware-transition'}
@@ -901,6 +901,17 @@ class Manager:
                 op=Recovery(self).read_attempt(spec['recovery_attempt_id'])
                 if not complete(op,spec):return None
             data={'attempt':op,'original_result':op['result'],'current_observation':None}
+        elif action in ('retire','restore','purge'):
+            matches=[q for q in self._operations(deadline=read_end) if q['idempotency_key']==key]
+            if len(matches)>1:fail('RECONCILE_REQUIRED','operation selector is ambiguous')
+            if not matches:return None
+            op=matches[0]
+            if op['request']!=spec or op['action']!=action:
+                fail('IDEMPOTENCY_CONFLICT','same key has a different action or request')
+            context.update(operation_id=op['operation_id'],replayed=True)
+            if op['status']=='SUCCEEDED':return {**op['result'],'operation':op,'original_result':op['result'],'current':None}
+            if asset_state(self.p,op)=='active':return self._operation_view(op,read_end)
+            return None
         else:return None
         context.update(operation_id=op['operation_id'],replayed=True)
         data['diagnostic_warnings']=[{'code':'DIAGNOSTIC_UNAVAILABLE',
@@ -920,6 +931,7 @@ class Manager:
                 if tomb['lifecycle'] != 'REGISTERED':
                     fail('VM_PURGED' if tomb['lifecycle']=='PURGED' else 'INVALID_SPEC','VM is not registered')
                 record = tomb['record']
+                guard_asset(self.p, record['uuid'])
                 if self.p.boot_id_reader() != execution.host:
                     fail('TARGET_CHANGED', 'stop acceptance host changed')
                 if any(q['vm_id']==record['uuid'] and creation.holds(self,q) for q in self._operations()):
@@ -1000,6 +1012,11 @@ class Manager:
         if (op['action']=='create' and op['status']!='SUCCEEDED' and effective!='FAILED'
                 and op['template']['guest_kind']=='linux' and self._owner_state(op)=='reconciling'):
             effective='RECONCILING'
+        if op['action'] in ('retire','restore','purge') and op['status']!='SUCCEEDED':
+            try:
+                if asset_state(self.p,op)=='active':effective='RUNNING'
+            except (OSError,ValueError,PlatformError):
+                fail('OBSERVATION_UNAVAILABLE','lifecycle execution owner cannot be verified')
         if deadline is not None and self.p.clock()>=deadline:
             fail('DEADLINE_EXCEEDED','asset operation ownership lookup budget expired')
         return {'operation':op,'recovery_required':effective=='RECOVERY_REQUIRED','effective_status':effective}
@@ -1125,7 +1142,33 @@ class Manager:
         info=catalog.plain(path).stat()
         return (str(path),info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
 
-    def _transition(self, op, records, *, filesystem_check=None):
+    @contextmanager
+    def _lifecycle_io(self, context, records):
+        """불변 대상 보호 아래 긴 I/O. 재진입 뒤 registry/의도/원 기록은 새로 대조한다."""
+        lease = context.get('asset_lease')
+        if lease is None:
+            yield
+            return
+        path = self.data/'tombstones'/(lease.identity+'.json')
+        before = self._read(path) if path.exists() or path.is_symlink() else None
+        record = before['record'] if before else next(r for r in records.values() if r['uuid']==lease.identity)
+        intent = self.p.execution().intent(record)
+        opid = context.get('operation_id')
+        original = self._read(self.data/'operations'/(opid+'.json')) if opid else None
+        with lifecycle_io(self.p, context['common_fd'], lease):
+            yield
+        after = self._read(path) if path.exists() or path.is_symlink() else None
+        if (after != before or self.p.execution().intent(record) != intent or
+                (opid and self._read(self.data/'operations'/(opid+'.json')) != original)):
+            fail('TARGET_CHANGED', 'lifecycle inputs changed during protected inspection')
+        if lease.action=='restore':
+            # 다음 주소/용량 채택에는 다른 VM의 최신 등록도 필요하다. purge 항목마다
+            # 전체 registry를 재열람할 이유는 없으며 대상 tomb/의도/원 기록만 대조한다.
+            current = self.p.records(validate_assets=False)
+            records.clear(); records.update(current)
+
+    def _transition(self, op, records, *, filesystem_check=None, context=None):
+        context = context or {}
         tomb = self._tombs().get(op['vm_id'], op['snapshot'])
         expected = op['expected_generation']
         action = op['action']
@@ -1152,7 +1195,7 @@ class Manager:
         source = self.data / op['source']
         target = self.data / op['target'] if action!='purge' else None
         if action == 'purge':
-            return self._purge(op, tomb)
+            return self._purge(op, tomb, records=records, context=context)
         if action == 'restore':
             directory = source if source.exists() or source.is_symlink() else target
             self._record_at(record, directory)
@@ -1162,7 +1205,9 @@ class Manager:
             if target.exists() or target.is_symlink():
                 fail('RECOVERY_REQUIRED', 'both lifecycle source and destination exist')
             self._record_at(record, source)
-            self.usage_check(source, self._stopped(record))
+            domains = self._stopped(record)
+            with self._lifecycle_io(context, records):
+                self.usage_check(source, domains)
             if action == 'restore':
                 for other in records.values():
                     if any(other.get(k)==record.get(k) for k in vm.identity_fields(record)):
@@ -1171,9 +1216,23 @@ class Manager:
                 # 같은 잠금 구간에서 이미 검사한 바로 그 파일만 재사용한다. 원장 저장 callback
                 # 등으로 내용/신원이 바뀌었거나 재전달로 들어오면 새 fsck가 필요하다.
                 if filesystem_check is None or self._filesystem_revision(source/'root.raw')!=filesystem_check:
-                    self.p.command(['e2fsck','-fn',str(source/'root.raw')],timeout=120)
+                    checked_revision = self._filesystem_revision(source/'root.raw')
+                    with self._lifecycle_io(context, records):
+                        self.p.command(['e2fsck','-fn',str(source/'root.raw')],timeout=120)
+                    if self._filesystem_revision(source/'root.raw')!=checked_revision:
+                        fail('TARGET_CHANGED','restore root changed during filesystem inspection')
+                    filesystem_check = checked_revision
+            self._stopped(record)
+            self._writable()
+            revision = filesystem_check if action=='restore' and vm.guest_kind(record)=='linux' else None
             self._save_op(op, 'moving')
-            publish(source, target, allow_hidden=action=='retire')
+            with short_lock(self.p.runtime,'admission'):
+                if context.get('asset_lease'):context['asset_lease'].guard()
+                self._writable()
+                self._record_at(record,source)
+                if revision is not None and self._filesystem_revision(source/'root.raw')!=revision:
+                    fail('TARGET_CHANGED','restore root changed before publication')
+                publish(source, target, allow_hidden=action=='retire')
         self._record_at(record, target)
         self._save_op(op, 'moved')
         tomb = self._save_tomb(tomb, op, desired, expected+1,
@@ -1181,13 +1240,17 @@ class Manager:
         self._apply_dhcp(op)
         return self._finish(op, tomb)
 
-    def _purge(self, op, tomb):
+    def _purge(self, op, tomb, *, records=None, context=None):
+        records, context = records or {}, context or {}
         directory = self.data / op['source']
         self._plain_dir(directory.parent)
         if op.get('inventory') is None:
             self._metadata_at(tomb['record'], directory)
-            self.usage_check(directory, self._stopped(tomb['record']))
-            op['inventory'] = self._ownership(directory)
+            domains = self._stopped(tomb['record'])
+            with self._lifecycle_io(context, records):
+                self.usage_check(directory, domains)
+                inventory = self._ownership(directory)
+            op['inventory'] = inventory
             stats = os.statvfs(self.data)
             op['space_before'] = {'free_bytes':stats.f_bavail*stats.f_frsize,
                 'logical_bytes':sum(v['logical_bytes'] for v in op['inventory'].values()),
@@ -1198,34 +1261,19 @@ class Manager:
             tomb = self._save_tomb(tomb, op, 'PURGING', tomb['generation'])
         if directory.exists() or directory.is_symlink():
             self._plain_dir(directory)
-            current = self._ownership(directory)
+            with self._lifecycle_io(context, records):
+                current = self._ownership(directory)
             if any(k not in op['inventory'] or any(v[x]!=op['inventory'][k][x] for x in ('dev','ino','directory'))
                    for k,v in current.items()):
                 fail('RECOVERY_REQUIRED', 'purge asset ownership changed')
-            self.usage_check(directory, self._stopped(tomb['record']))
+            domains = self._stopped(tomb['record'])
+            with self._lifecycle_io(context, records):
+                self.usage_check(directory, domains)
             op['remaining_assets'] = sorted(current)
             self._save_op(op, 'deleting')
             for relative in sorted(current, key=lambda x:(x.count('/'),x), reverse=True):
-                # 부모의 각 구성요소를 O_NOFOLLOW로 열어 외부 링크를 따라 unlink하지 않는다.
-                parts = Path(relative).parts
-                fd = os.open(directory, os.O_DIRECTORY|os.O_NOFOLLOW)
-                try:
-                    for part in parts[:-1]:
-                        child = os.open(part, os.O_DIRECTORY|os.O_NOFOLLOW, dir_fd=fd)
-                        os.close(fd); fd=child
-                    st = os.stat(parts[-1],dir_fd=fd,follow_symlinks=False)
-                    expected = op['inventory'][relative]
-                    if (st.st_dev,st.st_ino)!=(expected['dev'],expected['ino']) or stat.S_ISLNK(st.st_mode):
-                        fail('TARGET_CHANGED', 'purge target inode changed')
-                    if expected['directory']:
-                        os.rmdir(parts[-1],dir_fd=fd)
-                    else:
-                        if st.st_nlink!=1:
-                            fail('ASSET_IN_USE', 'purge target acquired another hardlink')
-                        os.unlink(parts[-1],dir_fd=fd)
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
+                with self._lifecycle_io(context, records):
+                    self._unlink_owned(directory, relative, op['inventory'][relative])
                 op['remaining_assets'] = [name for name in op['remaining_assets'] if name!=relative]
                 self._save_op(op)
                 self.checkpoint('asset-deleted',op)
@@ -1241,6 +1289,28 @@ class Manager:
         op['result']=result
         self._save_op(op)
         return result
+
+    @staticmethod
+    def _unlink_owned(directory, relative, expected):
+        """lease가 보호한 항목만 삭제한다. 부모마다 nofollow·마지막 inode/link를 재검사한다."""
+        parts = Path(relative).parts
+        fd = os.open(directory, os.O_DIRECTORY|os.O_NOFOLLOW)
+        try:
+            for part in parts[:-1]:
+                child = os.open(part, os.O_DIRECTORY|os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd); fd=child
+            st = os.stat(parts[-1],dir_fd=fd,follow_symlinks=False)
+            if (st.st_dev,st.st_ino)!=(expected['dev'],expected['ino']) or stat.S_ISLNK(st.st_mode):
+                fail('TARGET_CHANGED', 'purge target inode changed')
+            if expected['directory']:
+                os.rmdir(parts[-1],dir_fd=fd)
+            else:
+                if st.st_nlink!=1:
+                    fail('ASSET_IN_USE', 'purge target acquired another hardlink')
+                os.unlink(parts[-1],dir_fd=fd)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
     def _mutate(self, action, spec, execute, key, records, context):
         filesystem_check=None
@@ -1318,7 +1388,8 @@ class Manager:
                 if previous['template']['guest_kind']=='linux' and not target.exists():
                     with creation.work(self,previous,context):pass
                 return self._create(previous,context)
-            return self._transition(previous,records)
+            if context.get('asset_lease'):context['asset_lease'].bind(previous)
+            return self._transition(previous,records,context=context)
         if action=='create':
             # 이 공통 잠금 구간에서는 아직 원장을 쓰거나 callback/준비에 진입하지 않았다.
             # 반환 확인도 한 번 수행해 주소/용량 판정에 전달한다. 슬롯 대기·private 준비 뒤에는
@@ -1350,11 +1421,14 @@ class Manager:
                 self._metadata_at(tomb['record'],directory)
             else:
                 self._record_at(tomb['record'],directory)
-            self.usage_check(directory,self._stopped(tomb['record']))
+            domains = self._stopped(tomb['record'])
+            with self._lifecycle_io(context, records):
+                self.usage_check(directory, domains)
             if action=='restore':
                 if vm.guest_kind(tomb['record'])=='linux':
                     before=self._filesystem_revision(directory/'root.raw')
-                    self.p.command(['e2fsck','-fn',str(directory/'root.raw')],timeout=120)
+                    with self._lifecycle_io(context, records):
+                        self.p.command(['e2fsck','-fn',str(directory/'root.raw')],timeout=120)
                     if before==self._filesystem_revision(directory/'root.raw'):filesystem_check=before
                 for other in records.values():
                     if any(other.get(k)==tomb['record'].get(k) for k in vm.identity_fields(tomb['record'])):
@@ -1397,9 +1471,10 @@ class Manager:
         context['operation_id']=opid
         context['write_operation'] = True
         self._save_op(op)
+        if context.get('asset_lease'):context['asset_lease'].bind(op)
         if action=='create' and op['template']['guest_kind']=='linux':
             with creation.work(self,op,context):pass
-        return self._create(op,context) if action=='create' else self._transition(op,records,filesystem_check=filesystem_check)
+        return self._create(op,context) if action=='create' else self._transition(op,records,filesystem_check=filesystem_check,context=context)
 
     def call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None):
         """같은 요청 객체의 중첩/동시 사용은 무대기 거절한다. 병행 호출은 fork 객체를 사용한다."""
@@ -1453,6 +1528,9 @@ class Manager:
 
     def _dispatch_locked(self,action,spec,execute,idempotency_key,context,deadline,cpu_deadline,entered):
         """기존 공통 잠금 안의 metadata/제어 dispatch. private Linux 준비 결과만 밖으로 돌려준다."""
+        if spec.get('vm_id') and action not in ('probe','execution-context','recovery-operation'):
+            if context.get('asset_lease'):context['asset_lease'].guard()
+            else:guard_asset(self.p, spec['vm_id'])
         try:
             records=self.p.records(validate_assets=False)
         except ExecutionError:
@@ -1676,9 +1754,14 @@ class Manager:
                 return {**response,'ok':True,'data':result,'operation_id':context['operation_id']}
             if action == 'stop':
                 self._accept_stop(spec,idempotency_key,deadline,context)
+            if action in ('retire','restore','purge'):
+                context['asset_lease'] = _output.stack.enter_context(
+                    AssetLease(self.p, spec['vm_id'], action, idempotency_key))
+                _output.stack.enter_context(lifecycle_slot(self.p))
             while True:
                 try:
-                    with operation_lock(self.p.runtime):
+                    with operation_lock(self.p.runtime) as common_fd:
+                        context['common_fd'] = common_fd
                         result=self._dispatch_locked(action,spec,execute,idempotency_key,context,deadline,cpu_deadline,entered)
                     break
                 except NeedLinuxSlot:
@@ -1716,10 +1799,14 @@ class Manager:
         except PlatformError as exc:
             busy='operation is in progress' in str(exc)
             completed=None
+            replay_error=None
             if isinstance(exc,OperationBusy):
                 try:completed=self._completed_busy_replay(action,spec,idempotency_key,context)
+                except ManagementError as error:replay_error=error.error
                 except (PlatformError,OSError,ValueError,KeyError,TypeError):pass
-            if completed is not None:
+            if replay_error is not None:
+                response['error']=replay_error
+            elif completed is not None:
                 response.update(ok=True,data=completed,error=None)
             else:
                 response['error']={'code':'OPERATION_IN_PROGRESS' if busy else 'ARTIFACT_INVALID',

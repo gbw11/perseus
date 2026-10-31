@@ -278,6 +278,11 @@ guard의 backend/toolstack/mount 의존성은 guest 정리 동안 필요한 기�
 개별 scope 정리는 stop job의 역순 대기를 피하도록 신호와 최종 상태 확인을 사용한다.
 
 Linux 준비의 슬롯과 자식에게 전달된 원 실행 FD가 남아 있으면 저장소 해제를 진행하지 않는다.
+수락 전 lifecycle 검사도 `asset-<VM UUID>.lock` 대상 보호에 포함한다. `ensure_quiet/drain`은
+retire/restore/purge 실행자와 상속된 helper FD가 끝나기 전 저장소 해제를 거절한다.
+gate가 닫혔다 재열려도 검사 당시 barrier 사본과 달라진 실행은 늦게 게시하지 않는다.
+대상 lease → 공통 잠금 → 짧은 admission 순서와 실제 검증 범위는
+[lifecycle 소유 경계](management-boundaries.md#lifecycle의-대상-소유와-공통-잠금)를 따른다.
 슬롯이 풀려도 미완료 workspace의 자원 기록이 정리 미확정을 나타내면 거절한다.
 `xenova-vm poweroff/reboot-board/shutdown-all`의 준비 drain과 VM 정리는 같은 기존 90초
 예산을 사용한다. 준비 종료를 기다리며 공통 잠금을 계속 잡아 두지 않는다.

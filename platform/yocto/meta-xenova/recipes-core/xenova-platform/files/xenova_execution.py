@@ -309,6 +309,8 @@ class Execution:
         return unique
 
     def require_launch_available(self, record):
+        from xenova_preparation import guard_asset
+        guard_asset(self.p, record['uuid'])
         previous = self.run_record(record)
         if previous and previous.get("phase") in ("launching", "uncertain"):
             refuse("RECONCILE_REQUIRED", "an earlier launch may still exist; administrator reconciliation required")
@@ -749,6 +751,8 @@ class Execution:
                                        receipt=receipt, deadline=deadline)
 
     def _accept_locked(self, record, request, key=None, *, source="user", previous=None, receipt=None, deadline=None):
+        from xenova_preparation import guard_asset
+        guard_asset(self.p, record['uuid'])
         if deadline is not None and self.p.clock() >= deadline:
             refuse('DEADLINE_EXCEEDED', 'control deadline expired before intent acceptance')
         lifecycle, generation = self.lifecycle(record)
@@ -798,6 +802,8 @@ class Execution:
 
     @traced('execution.control')
     def control(self, action, record, *, force=False, key=None, deadline=None):
+        from xenova_preparation import guard_asset
+        guard_asset(self.p, record['uuid'])
         end = deadline if deadline is not None else self.p.clock()+90
         diagnostics = []
         def event(*args, **kwargs):

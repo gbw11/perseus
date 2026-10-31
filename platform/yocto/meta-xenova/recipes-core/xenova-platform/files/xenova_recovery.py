@@ -79,6 +79,8 @@ class Recovery:
         self.e.checkpoint("recovery-"+phase, op)
 
     def conditions(self, spec, deadline, *, target=True, gate=True):
+        from xenova_preparation import guard_asset
+        guard_asset(self.p, spec['vm_id'])
         if spec["expected_host_boot_id"] != self.e.host:
             refuse("TARGET_CHANGED", "recovery request belongs to another host boot", details={"reason":"HOST_BOOT_CHANGED"})
         if gate:

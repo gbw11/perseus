@@ -1,12 +1,14 @@
 """동일 잠금 구간의 실제 read/fsync 계수와 구간 밖 재검증을 확인한다."""
 import errno
 import copy
+import gc
 import json
 import os
 from pathlib import Path
 import threading
 from unittest.mock import patch
 import unittest
+import weakref
 
 from benchmark_management_cost import one
 import test_xenova_creation_reconcile as creation_fixtures
@@ -16,6 +18,24 @@ import xenova_runtime as runtime
 
 
 class ManagementCostTest(unittest.TestCase):
+    def test_validated_history_references_end_after_success_and_exception(self):
+        """임시 자료 전달이 요청 간 cache로 바뀌지 않는다. 원 정상/오류 결과도 함께 확인한다."""
+        case=creation_fixtures.CreationReconcileTest('runTest');case.setUp();self.addCleanup(case.doCleanups)
+        case.f.create();read=case.m._operations;references=[]
+        class Observed(dict):pass
+        def operations(*args,**kwargs):
+            rows=[Observed(value) for value in read(*args,**kwargs)]
+            references.extend(weakref.ref(value) for value in rows)
+            return rows
+        spec={**case.f.spec,'vm_id':'980e8400-e29b-41d4-a716-000000000001'};spec.pop('ipv4',None)
+        with patch.object(case.m,'_operations',operations):
+            for failed in (False,True,False):
+                with patch.object(case.m,'_selection',side_effect=runtime.PlatformError('owned failure')) if failed else patch.object(case.m,'_selection',wraps=case.m._selection):
+                    result=case.m.call('create',spec)
+                    self.assertEqual(result['ok'],not failed,result)
+                gc.collect()
+                self.assertTrue(references);self.assertTrue(all(value() is None for value in references))
+
     def test_duplicate_key_at_history_end_cannot_replay_the_first_origin(self):
         case=creation_fixtures.CreationReconcileTest('runTest');case.setUp();self.addCleanup(case.doCleanups)
         case.f.create();op=case.m._operations()[0];duplicate=copy.deepcopy(op)
@@ -88,8 +108,8 @@ class ManagementCostTest(unittest.TestCase):
             result=case.m.call('restore',{'vm_id':identity},execute=True,idempotency_key='cost-restore')
         self.assertTrue(result['ok'],result);self.assertEqual(len(calls),2)
 
-    def test_restore_barrier_exposes_remaining_physical_serialization(self):
-        """수정하지 않은 장기 잠금의 한계를 재현한다. pending을 정지 완료로 세지 않는다."""
+    def test_restore_barrier_allows_other_physical_stop(self):
+        """과거 P55 반례의 후속 수락: A fsck 해제 전에 B 실제 종료·원 결과가 완료된다."""
         case=read_fixtures.ReadProgressTest('runTest');case.setUp();self.addCleanup(case.doCleanups)
         first,second=case.pair()
         self.assertTrue(case.m.call('stop',{'vm_id':first},idempotency_key='retire-stop')['ok'])
@@ -112,16 +132,15 @@ class ManagementCostTest(unittest.TestCase):
                 self.assertTrue(case.m.fork().call('get',{'vm_id':second},budget_ms=2000)['ok'])
                 self.assertTrue(case.m.fork().call('operation',{'idempotency_key':'create:'+second},budget_ms=2000)['ok'])
                 pending=case.m.fork().call('stop',{'vm_id':second},idempotency_key='barrier-stop',budget_ms=2000)
-                self.assertFalse(pending['ok']);self.assertTrue(pending['error']['details']['accepted'])
-                self.assertEqual(pending['error']['details']['completion'],'pending')
+                self.assertTrue(pending['ok'],pending)
                 original=case.m.fork().call('control-operation',{'idempotency_key':'barrier-stop'},budget_ms=2000)
-                self.assertTrue(original['ok']);self.assertNotEqual(original['data']['operation']['phase'],'completed')
+                self.assertTrue(original['ok']);self.assertEqual(original['data']['operation']['phase'],'completed')
                 self.assertTrue(worker.is_alive());self.assertFalse(release.is_set())
                 folder=os.environ.get('XENOVA_STAGE4_EVIDENCE')
                 if folder:
-                    (Path(folder)/'P55-T06-remaining-restore-lock.json').write_text(json.dumps({'restore_released':False,'get_success':True,
+                    (Path(folder)/'F-T01-restore-independent-stop.json').write_text(json.dumps({'restore_released':False,'get_success':True,
                         'original_query_success':True,'stop':pending,'control_operation':original,
-                        'physical_stop_completed_before_release':False}))
+                        'physical_stop_completed_before_release':True}))
             finally:release.set();worker.join(10)
         self.assertFalse(worker.is_alive());self.assertTrue(responses[0]['ok'],responses)
         finished=case.m.fork().call('stop',{'vm_id':second},idempotency_key='barrier-stop',budget_ms=2000)
