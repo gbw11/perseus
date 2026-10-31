@@ -606,7 +606,7 @@ class Manager:
             result['confirm_vm_id'] = result['vm_id']
         return result
 
-    def _reserve_space(self, additional_bytes, records, *, restored=None):
+    def _reserve_space(self, additional_bytes, records, *, restored=None, pending=None):
         """기존 정책으로 복원 후 등록 집합과 미완료 생성의 남은 약정량을 함께 검사한다."""
         future = dict(records)
         disk_paths = {}
@@ -617,8 +617,10 @@ class Manager:
             if vm.guest_kind(record) == 'linux':
                 disk_paths[record['id']] = catalog.plain(directory / 'root.raw')
         active = {record['uuid'] for record in future.values()}
-        for op in self._operations():
-            if op['action'] != 'create' or not creation.holds(self,op) or op['vm_id'] in active:
+        if pending is None:
+            pending=[op for op in self._operations() if op['action']=='create' and creation.holds(self,op)]
+        for op in pending:
+            if op['action'] != 'create' or op['vm_id'] in active:
                 continue
             selected = catalog.describe(self.data, {key: op['template'][key] for key in (
                 'schema_version', 'template_id', 'template_version', 'guest_kind',
@@ -706,7 +708,7 @@ class Manager:
             return set()
         return {record['ipv4']}
 
-    def _ip_inventory(self, records, *, excluding=None):
+    def _ip_inventory(self, records, *, excluding=None, operations=None, pending=None):
         """현재 소유권만 예약으로 읽는다. 성공한 과거 create 이력은 주소를 점유하지 않는다."""
         settings = self._read(self.defaults_path)
         network = settings.get('network', {})
@@ -723,21 +725,26 @@ class Manager:
                 or int(pool[0].split('.')[-1]) > int(pool[1].split('.')[-1])
                 or not isinstance(reserved, list) or not all(self._valid_ip(ip) for ip in reserved)):
             fail('ARTIFACT_INVALID', 'invalid configured internal IP pool/reservations')
+        # 한 inventory는 같은 검증된 이력/보관 집합으로 조립한다. 외부 lease는 별도로 읽는다.
+        operations=self._operations() if operations is None else operations
+        tombs=self._tombs()
         held = set(reserved)
-        own_records = list(records.values()) + [t['record'] for t in self._tombs().values()]
+        own_records = list(records.values()) + [t['record'] for t in tombs.values()]
         own_record = next((r for r in own_records if r['uuid'] == excluding), None)
         own_mac = own_record.get('mac') if own_record else None
         if own_mac is None:
-            own_mac = next((o.get('assigned', {}).get('mac') for o in self._operations()
+            own_mac = next((o.get('assigned', {}).get('mac') for o in operations
                             if o['action'] in ('create','firmware-transition') and o['vm_id'] == excluding), None)
         held.update(r['ipv4'] for r in settings['instances'] if r.get('guest_kind', 'linux') == 'linux')
         if excluding:
             held -= self._factory_owned_ip(own_record, factory)
         owned = list(records.values()) + self._legacy_records()
-        owned += [t['record'] for t in self._tombs().values() if t['lifecycle'] != 'PURGED']
+        owned += [t['record'] for t in tombs.values() if t['lifecycle'] != 'PURGED']
         held.update(r['ipv4'] for r in owned if r['uuid'] != excluding and r.get('ipv4'))
-        for op in self._operations():
-            if op['action'] in ('create','firmware-transition') and creation.holds(self,op) and op['vm_id'] != excluding:
+        if pending is None:
+            pending=[op for op in operations if op['action'] in ('create','firmware-transition') and creation.holds(self,op)]
+        for op in pending:
+            if op['vm_id'] != excluding:
                 ip = op.get('assigned', {}).get('ipv4', op['initial_spec'].get('ipv4'))
                 if ip is not None:
                     if not self._valid_ip(ip):
@@ -776,8 +783,8 @@ class Manager:
                 self.p.prepare_dhcp(self.p.records(validate_assets=False))
             self._save_op(op, 'dhcp-applied')
 
-    def _allocate_ip(self, spec, records):
-        pool, held = self._ip_inventory(records)
+    def _allocate_ip(self, spec, records, *, operations=None, pending=None):
+        pool, held = self._ip_inventory(records,operations=operations,pending=pending)
         if 'ipv4' in spec:
             if spec['ipv4'] in held:
                 fail('IP_CONFLICT', 'IP is owned or reserved')
@@ -787,7 +794,7 @@ class Manager:
             fail('IP_POOL_EXHAUSTED', 'no unreserved internal Linux address remains')
         return chosen
 
-    def _conflicts(self, spec, records):
+    def _conflicts(self, spec, records, *, operations=None):
         identity = spec['vm_id']
         tomb = self._tombs().get(identity)
         if tomb and tomb['lifecycle'] != 'REGISTERED':
@@ -795,7 +802,7 @@ class Manager:
                  'VM UUID is retired/purged; restore or use a new UUID')
         if (any(r['uuid'] == identity for r in records.values()) or tomb
                 or any(r['uuid'] == identity for r in self._legacy_records())
-                or any(o['vm_id'] == identity for o in self._operations())):
+                or any(o['vm_id'] == identity for o in (self._operations() if operations is None else operations))):
             fail('IDEMPOTENCY_CONFLICT', 'UUID is already reserved by another origin/operation')
         key = internal_name(identity)
         if key in records or vm.retired_instance(self.data, key):
@@ -1113,7 +1120,12 @@ class Manager:
             self._save_op(op, 'dhcp-applied')
         return self._finish(op, tomb)
 
-    def _transition(self, op, records):
+    @staticmethod
+    def _filesystem_revision(path):
+        info=catalog.plain(path).stat()
+        return (str(path),info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+
+    def _transition(self, op, records, *, filesystem_check=None):
         tomb = self._tombs().get(op['vm_id'], op['snapshot'])
         expected = op['expected_generation']
         action = op['action']
@@ -1156,7 +1168,10 @@ class Manager:
                     if any(other.get(k)==record.get(k) for k in vm.identity_fields(record)):
                         fail('RESTORE_CONFLICT', 'identity/name/MAC/IP conflicts with a registered VM')
             if action=='restore' and vm.guest_kind(record)=='linux':
-                self.p.command(['e2fsck','-fn',str(source/'root.raw')],timeout=120)
+                # 같은 잠금 구간에서 이미 검사한 바로 그 파일만 재사용한다. 원장 저장 callback
+                # 등으로 내용/신원이 바뀌었거나 재전달로 들어오면 새 fsck가 필요하다.
+                if filesystem_check is None or self._filesystem_revision(source/'root.raw')!=filesystem_check:
+                    self.p.command(['e2fsck','-fn',str(source/'root.raw')],timeout=120)
             self._save_op(op, 'moving')
             publish(source, target, allow_hidden=action=='retire')
         self._record_at(record, target)
@@ -1228,13 +1243,19 @@ class Manager:
         return result
 
     def _mutate(self, action, spec, execute, key, records, context):
+        filesystem_check=None
         if action == 'firmware-transition':
             from xenova_zephyr_transition import mutate
             return mutate(self,spec,execute,key,records,context,fail)
         if action == 'update-resources':
             from xenova_resources import mutate
             return mutate(self,spec,execute,key,records,context,fail)
-        previous = next((o for o in self._operations() if o['idempotency_key']==key),None)
+        operations=self._operations()
+        matches=[o for o in operations if o['idempotency_key']==key]
+        if len(matches)>1:fail('RECONCILE_REQUIRED','operation selector is ambiguous')
+        previous=matches[0] if matches else None
+        # 새 create만 후속 판정에 전체 사본을 쓴다. 장기 restore/purge가 이력을 붙잡지 않는다.
+        if action!='create':operations=None
         if previous:
             context['operation_id']=previous['operation_id']
             if previous['action']!=action or previous['request']!=spec:
@@ -1299,16 +1320,20 @@ class Manager:
                 return self._create(previous,context)
             return self._transition(previous,records)
         if action=='create':
-            self._conflicts(spec,records)
+            # 이 공통 잠금 구간에서는 아직 원장을 쓰거나 callback/준비에 진입하지 않았다.
+            # 반환 확인도 한 번 수행해 주소/용량 판정에 전달한다. 슬롯 대기·private 준비 뒤에는
+            # 이 지역 사본을 넘기지 않고 새 잠금 구간에서 원장과 내구 근거를 다시 확보한다.
+            self._conflicts(spec,records,operations=operations)
             selected=self._selection(spec, full=False)
-            assigned_ip = self._allocate_ip(spec, records) if selected['capabilities'].get('dhcp') else None
+            pending=[o for o in operations if o['action'] in ('create','firmware-transition') and creation.holds(self,o)]
+            assigned_ip = self._allocate_ip(spec, records,operations=operations,pending=pending) if selected['capabilities'].get('dhcp') else None
             # 명백한 용량 부족은 payload 전체 읽기 전에 거절한다. 이 결과는 예약이 아니다.
-            self._reserve_space(sum(p.stat().st_size for p in Path(selected['directory']).iterdir()), records)
+            self._reserve_space(sum(p.stat().st_size for p in Path(selected['directory']).iterdir()), records,pending=pending)
             if selected['guest_kind']!='linux':
                 descriptor={k:selected[k] for k in ('schema_version','template_id','template_version',
                             'guest_kind','asset_directory','manifest_sha256','source_template_id')}
                 selected=catalog.describe(self.data,descriptor,full=True)
-                self._reserve_space(sum(p.stat().st_size for p in Path(selected['directory']).iterdir()), records)
+                self._reserve_space(sum(p.stat().st_size for p in Path(selected['directory']).iterdir()), records,pending=pending)
             # Linux 내용 검증은 원 작업/예약을 저장한 뒤 실제 복사 바이트에 대해 한 번 수행한다.
             tomb=None
         else:
@@ -1328,7 +1353,9 @@ class Manager:
             self.usage_check(directory,self._stopped(tomb['record']))
             if action=='restore':
                 if vm.guest_kind(tomb['record'])=='linux':
+                    before=self._filesystem_revision(directory/'root.raw')
                     self.p.command(['e2fsck','-fn',str(directory/'root.raw')],timeout=120)
+                    if before==self._filesystem_revision(directory/'root.raw'):filesystem_check=before
                 for other in records.values():
                     if any(other.get(k)==tomb['record'].get(k) for k in vm.identity_fields(tomb['record'])):
                         fail('RESTORE_CONFLICT','identity/name/MAC/IP already registered')
@@ -1344,7 +1371,7 @@ class Manager:
         operation_path=self.data/'operations'/(opid+'.json')
         if operation_path.exists() or operation_path.is_symlink():
             fail('TARGET_CHANGED','allocated operation ID already exists')
-        if action=='create' and (identity in self._tombs() or any(o['vm_id']==identity for o in self._operations())
+        if action=='create' and (identity in self._tombs() or any(o['vm_id']==identity for o in operations)
                                  or any(r['uuid']==identity for r in self._legacy_records())):
             fail('VM_NAME_CONFLICT','allocated UUID is already reserved')
         op={'schema_version':'1.0','operation_id':opid,'idempotency_key':key,'action':action,
@@ -1357,7 +1384,7 @@ class Manager:
             assigned_mac='02:'+':'.join(f'{b:02x}' for b in os.urandom(5))
             reserved_records=list(records.values())+[t['record'] for t in self._tombs().values()]+self._legacy_records()
             if any(r['uuid']==identity or r.get('mac')==assigned_mac for r in reserved_records) or any(
-                    o.get('assigned',{}).get('mac')==assigned_mac for o in self._operations()):
+                    o.get('assigned',{}).get('mac')==assigned_mac for o in operations):
                 fail('VM_NAME_CONFLICT','allocated identity collides; no assets created')
             op.update(template=selected,assigned={'internal_name':internal_name(identity), **({'mac':assigned_mac, 'ipv4':assigned_ip} if selected['capabilities'].get('dhcp') else {})},
                       owned_workspace='instances/.operation-'+opid)
@@ -1372,7 +1399,7 @@ class Manager:
         self._save_op(op)
         if action=='create' and op['template']['guest_kind']=='linux':
             with creation.work(self,op,context):pass
-        return self._create(op,context) if action=='create' else self._transition(op,records)
+        return self._create(op,context) if action=='create' else self._transition(op,records,filesystem_check=filesystem_check)
 
     def call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None):
         """같은 요청 객체의 중첩/동시 사용은 무대기 거절한다. 병행 호출은 fork 객체를 사용한다."""
