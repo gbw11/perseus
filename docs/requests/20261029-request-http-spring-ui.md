@@ -339,6 +339,35 @@ UUID를 대조하고, API 정상 재시작 때 기존 guest의 디스크 I/O·�
 살아 있는 기본 VM backend의 무단 강제 이동으로 우회하지 않는다. 원 execution·의도·
 CPU 정책은 보존한다. 이 항목은 미완료이며 D02·D08의 하위 수락을 다시 실패로 닫지 않는다.
 
+## 5.5번 로컬 비용 보완의 소비 범위
+
+하위 신규 create는 같은 공통 잠금 구간의 검증된 원장/반환 판정을 주소·용량 판정에
+전달한다. 슬롯 대기/private 준비 뒤에는 다시 확인한다. 새 공개 필드·key·상태·기한이나
+상위 cache 허가는 추가하지 않았다. 이 내부 사본을 HTTP 요청 간에 보관하거나 화면 조회로
+제출 직전 guard를 대신하지 않는다. [5.5번 근거](../verification/recovery-scenario-closure-20261030.md#stage55)를 참조한다.
+
+추가 반례로 확인한 중복 key 원장은 공통 create/retire/restore/purge 재전달에서도 기존
+`RECONCILE_REQUIRED`로 거절한다. 이전처럼 첫 기록을 골라 성공 replay로 취급하지 않는다.
+새 key 생성/원장 삭제로 우회하지 않고 원 기록의 모호성을 조사해야 한다. 새 응답 필드는 없다.
+
+restore의 중복 fsck는 같은 파일/같은 잠금 구간에서 줄였지만 긴 lifecycle 작업의 공통
+잠금은 남아 있다. barrier 중 다른 VM의 get/원 조회와 stop 의도 수락은 진행돼도 실제
+종료는 기다릴 수 있다. 기존 D02/D08의 accepted/pending·원 key/기한·후속 이행 책임은
+그대로다. 모든 busy를 accepted/완료로 바꾸거나 상위 timeout만 늘려 숨기지 않는다.
+하위의 장기 lifecycle 소유권/잠금 분리 미완료는 플랫폼이 따로 해결해야 할 범위다.
+이번 요청 갱신은 실제 FastAPI/Spring/화면 구현·설치 수락이 아니다.
+
 ## 진행 기록
+
+- 2026-10-31 5.5 후속: 위 긴 restore 대기는 과거 P55의 반례다. 하위 후보는 대상 lease 아래
+  긴 검사를 분리해 양 Linux restore/purge barrier 중 다른 VM의 실제 stop·원 결과 저장을
+  확인했다. 같은 원 lifecycle의 활성 재전달은 원 operation과 effective_status=RUNNING을
+  반환한다. 미수락 검사 경합과 구분하고 조회를 재실행기로 만들지 않는다.
+- CPU 정책은 OS 공통 정적 pinning/해제로 확장했다. 정식 spec의 새 placements 및 policy/journal
+  2.0·CPU 조회 policy_schema_version/버전별 reservations를 보존해야 한다. 기존 입력 exclusive도
+  지원하나 원 key의 입력 형식은 유지한다. live repin·scheduler/pool 변경과 자동 정지는 없다.
+  실제 FastAPI allowlist/Driver DTO·Spring/UI의 연결 위치와 기존 D02/D08 인수는 담당자 범위다.
+  [후속 계약·시험](../verification/recovery-scenario-closure-20261030.md#stage55-followup)을 따른다.
+  API cgroup/backend·운영 create 정책·동일 설치본의 HTTP 수락은 미완료로 유지한다.
 
 - 2026-10-29: 현재 HTTP 소스의 key stop/조회 제공을 확인했습니다. Spring의 `stop`은 void 호출이며 종단 연결은 별도 과제입니다. 운영 API·DB·env·서비스를 변경하지 않았습니다.

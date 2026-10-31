@@ -49,6 +49,15 @@ Gateway 자체는 타 담당자에게 넘기는 영역이 아닙니다. 현재 `
   실제 MQTT decoder/cache·Zephyr I/O thread·C adapter 회귀와 앱 교체 반례로 확인한다.
   중립을 여러 표본 동안 유지한 시험만으로 수락을 닫지 않으며, 실제 UI/WS 생산자·장치 수락은 별도다.
 
+## 5.5번 Authority 저장 비용 보완
+
+AuthorityStore.save는 크기를 검사한 JSON을 독립 사본으로 한 번 파싱해 실제 저장과
+성공 뒤 RAM 채택에 사용한다. 같은 입력의 중복 직렬화만 줄이며 file/parent fsync·저장
+미확정 잠금·기대 generation/원 전환·재무장·출력 보호를 유지한다. 새로운 wire 필드는 없다.
+[로컬 결과](../verification/recovery-scenario-closure-20261030.md#stage55)는 실제 장치 적용 수락이 아니다.
+Gateway의 문서상 `/opt/xenova/gateway` 소스 배치와 Python import 부분 대조는 정규
+Yocto recipe/unit·운영 설치 검증을 대신하지 않는다. 해당 배포 제공과 장치 수락은 남아 있다.
+
 ## 진행 기록
 
 - 2026-10-29: 최소 소비 연결을 구현·로컬 검증했습니다. Gateway 담당은 커밋 이력과 사용자 확인에 따라 박신영입니다. 계획 인계·Authority 수습은 후속 직접 구현이고 장치 적용은 ESP32 담당자와 공동 수락합니다. 앱 하나의 receipt 미확정이 정상 다른 앱의 바인딩·출력 근거를 철회하지 않는 반례도 연결했습니다.

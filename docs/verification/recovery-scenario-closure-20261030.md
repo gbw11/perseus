@@ -11,7 +11,8 @@
 | 실패 후 종결 | 5번 하위 후보에서 원 host/기한·명시 private 수습·동일 수습 재개·내구 예약 반환과 다음 신규 생성까지 로컬 검증. 운영 시간 정책과 상위 연결·설치본 수락은 별도 |
 | 3번 로컬 마감 | 단일 Linux 준비 슬롯·원 실행 소유권·private 준비/게시 분리·요청별 출력. 최종 관련 회귀 481개 통과, 두 OS 모두 A 복사 해제 전 B 조회/실제 stop 완료 원자료 확인. 부분 설치 29개 Python 파일·독립 import 일치 |
 | 4번 하위 로컬 마감 | 요청별 관측·공통 잠금 밖 조회·유한 재관측·관측 실행량/지연 표본 보호. 기존 541개 후 슬롯 부모 중단/정상 반환·파일 안전 검사 보완 후보로 22 suite 543개 통과. 두 중심 barrier·양 OS polling, 부분 설치 29개 바이트·6개 격리 import 재확인 |
-| 1번 최종 마감 | 5번 커밋 `4a585d4`와 원자료를 대조한 [기능별 기준선](platform-management-baseline.md). 생성/조회/제어/자산 수명·원 작업/수습/반환과 비용·담당 경계를 연결. 제공된 개념 원문은 0~11장 보존·12장 적용 상태 갱신 |
+| 1번 최종 마감 | **기능별 기준선·비용·소유권 대응 정리 완료**. 5번 커밋 `4a585d4`와 원자료를 대조한 [기준선](platform-management-baseline.md)에 관리 전체·실패 종결·비용/담당 근거를 연결. 후속 개념 서식 복원은 내용/12장 유지, 5.5번 실행과 구분 |
+| 5.5번 현재 범위 | 첫 [P55](#stage55)의 국소 개선·미해결 restore 반례를 보존한다. [후속](#stage55-followup)은 대상 소유 아래 긴 lifecycle 검사/삭제를 분리해 다른 VM 실제 stop을 확인하고 OS 공통 정적 pinning·해제와 정책 호환을 추가했다. 하위 로컬 수락이며 실보드/상위 제품 종단은 별도 |
 | 남은 범위 | 운영 create 시간값 공급·보드 수락, 상위 제품 연결·실제 HTTP polling/정규 설치/보드 수락·API cgroup의 guest backend 문제는 미완료. 모든 부하/스케줄의 무기아나 지연 상한 수락은 아님 |
 
 아래는 후보별 이력이다. 과거 2회/439개/보드 적용 기록을 최종 1회/449개 이후 후보의
@@ -1222,3 +1223,375 @@ Spring/신규 소비 미연결로 분리했고, 위 5번 소비자 목록의 `_c
 제품 코드·정책·보드/운영 상태·배포·commit/push는 변경하지 않았다. **1번의 현행 구조
 설명 범위는 마감**한다. 비용 의심은 5.5, 생산자/소비자와
 정책 공급은 6, 동일 후보 설치/보드/제품 종단은 7번으로 연결하되 실행하지 않았다.
+
+### 1번 편집 보완과 5.5번 계획
+
+1번 문서 마감의 네 커밋 `8e29c74`·`9abac05`·`5ba97c4`·`9b69cdf` 뒤,
+사용자 검토를 반영해 [개념 문서](../platform/conceptual-architecture.md)의 Markdown
+읽기 구조를 복원했다. 제목 단계, 관계/수명/파이프라인의 `text` 코드 블록,
+S01~S18 출처 링크와 실제 소스 링크만 편집했다. 전체 문장·흐름도 원문 및 12장 내용은
+서식 제거 후 이전 커밋과 동일하며, 12장도 제목 표식 외에는 변경하지 않았다.
+위의 48,266자 동일성 검사는 최초 문서 마감 당시 결과로 보존한다.
+이번에는 서식/링크를 포함한 문자 동일성이 아니라 내용 보존과 읽기 구조를 검증한다.
+
+**1번은 기능별 기준선·비용·소유권 대응 정리 완료로 마감한다.** 성능 최적화·운영 정책·
+설치본/제품 종단 완료로 확대하지 않는다. [기준선](platform-management-baseline.md)의
+후속 범위는 비용/대기 원인 추적과 직접 수정 권한을 구분하도록 명확히 했다.
+
+[5.5번 계획](platform-cost-concurrency-plan.md)은 남은 공통 실행 잠금, `creation.holds`의
+반복 내구 확인, registry/원장·수습 inventory 규모 증가를 우선으로 한다. 전체 소유
+플랫폼 색인을 따라 runtime/통신·Telemetry·Bootstrap/Gateway·콘솔·recipe/공유 기반도
+점검하며, 실제 의존의 타 담당자 원인은 기존 요청으로 인계한다. 같은 조건의 전후
+계수·barrier/지속 polling·정상 성공과 오류 보호·비용 회귀를 마감 조건으로 계획했다.
+
+이번 추가 변경은 문서 네 파일이다. 제품/시험·정책·보드/EC2·서비스·실데이터·배포·
+commit/push는 변경하지 않았고, 비용 실험·최적화 구현·5.5/6/7번 실행은 하지 않았다.
+서식/문서 링크·기호/제품 불변 확인의 후속 원자료는 P1의 `*FOLLOWUP*` 자료로 남긴다.
+
+기존 번들 `marked 17.0.5`로 개념 문서를 파싱해 제목 0→84개·코드 블록 0→14개와
+표 19개 유지를 확인했다. 읽기 문서 8개의 로컬 링크/앵커 560개·정의 줄 11곳·기호
+77개 검사 오류는 0이고, 5번 후보의 platform 915파일은 바이트가 같다.
+`git diff --check`와 새 계획 파일의 공백 검사도 통과했다. 서식 제거 후 전체 내용/12장
+동일성은 `MARKDOWN_FOLLOWUP.json`, 변경 범위·해시/제품 불변은
+`DOCUMENT_CHECK_FOLLOWUP.json`에 기록한다. 의존성 설치나 제품 회귀/비용 실험을 새로 수행한 결과가 아니다.
+
+<a id="stage55"></a>
+## 5.5번: 동일 근거의 비용 축소와 남은 공통 대기
+
+### 후보·판정과 실제로 줄인 일
+
+착수 HEAD는 `9b69cdf1df65408403e148868d19ab51cdaa9179`다. 1번 편집 후속의 문서
+네 파일 diff/untracked를 보존했다. 현재 후보는 그 HEAD+이번 diff/새 파일이며,
+원자료 P55는 `C:/Users/SSAFY/Documents/Codex/2026-10-31/xenova-stage55/`다.
+`ENTRY.json/.diff`, `BASELINE_SOURCE.json`, 후보별 `*_SOURCE.json`이 입력 바이트를 고정한다.
+보존한 baseline과 후보는 별도 WSL 소유 사본이다. 운영 `/srv`/`/run`, 보드/EC2는 사용하지 않았다.
+
+**현재 판정은 5.5번 부분 마감이다.** 중복 작업 네 곳의 하위 국소 수정·로컬 검증·부분
+포장을 수행했다. 전체 소유 영역의 조사 깊이와 미측정도 아래에 공개한다. 그러나 긴
+restore/lifecycle 공통 잠금 때문에 다른 VM의 **실제 stop**이 기다리는 문제는 재현만
+했고 해결하지 않았다. 이를 ‘필요한 대기’나 완료로 간주하지 않는다.
+
+| 실제 경로·변경 | 줄인 처리와 유지한 경계 |
+|---|---|
+| `Manager._mutate` 신규 create | 현재 공통 잠금에서 `_operations`의 완전 검증/파싱 결과를 재사용. 원장을 쓰거나 callback/준비에 진입하기 전의 주소·용량 판정에 같은 `pending` 결과 전달. 슬롯 대기 뒤 새 `_mutate`, private 완료/게시, 새 호출에는 다시 확인 |
+| `Manager._mutate` 원 key 완전성 | 별도 반례에서 조회는 중복 key를 거절하지만 create 재전달은 첫 기록을 골라 성공하는 기존 결함을 baseline에서 재현. 이미 읽은 집합에서 유일성을 검사해 공통 create/retire/restore/purge도 기존 `RECONCILE_REQUIRED`로 거절. 추가 I/O·원장 변경 없음 |
+| `Manager._ip_inventory` | 독립 호출도 한 번 검증한 원장·tombstone 집합에서 소유 MAC/예약을 조립. 현재 DHCP/lease는 별도 읽기. 외부/legacy 호출의 검증 기본 경로를 생략하지 않음 |
+| `Manager._mutate/_transition/_filesystem_revision` restore | 수락 전 read-only fsck는 유지. 같은 잠금 구간의 같은 root 경로/dev/inode/크기/mtime/ctime를 이동 전에 대조해 그대로일 때만 두 번째 fsck 생략. 원장 저장 callback 뒤 변경이면 다시 검사, 재전달에는 앞 호출의 결과를 전달하지 않음 |
+| `AuthorityStore.save` | 크기 검사한 JSON을 독립 사본으로 파싱해 실제 저장과 성공 뒤 RAM 채택에 함께 사용. 같은 입력의 두 번째 `json.dumps` 제거. 실제 `json.dump`·file/parent fsync는 유지. 호출자 가변 객체의 뒤늦은 변경과 저장 미확정 보호도 검사 |
+
+새 공개 필드/schema·원장·서비스·TTL cache·범용 검증 토큰은 없다. 현재 JSON 가시성만으로
+내구 반환을 확정하지 않으며 다른 프로세스는 자기 writer의 근거를 다시 확보한다.
+원 UUID/key/spec·기한·의도/실행·CPU/네트워크 정책·주기/품질·Linux 슬롯 상한은 바꾸지 않았다.
+
+### 같은 조건의 작업량과 메모리
+
+P55 `measure_mem.py`를 같은 도구/fixture·0/1/10/100 이력 축에 각각 실행했다.
+완료/수습 이력은 현재 원장 검증기를 통과하는 합성 과거 기록이며 UUID/MAC과 원 결과를
+함께 정규화했다. 추가 100개의 실행 VM이나 완전한 제품 DB를 뜻하지 않는다.
+각 표본은 새 fixture로 시작하며 setup 뒤 실제 Manager/파일/fsync를 계수한다.
+Xen/guest는 기존 외부 대역이다. 계수 hook+tracemalloc이 켜진 시간/peak이며 보드 성능이 아니다.
+
+아래 100은 **추가 이력 수**이고 원 기록 하나를 합쳐 총 101개다. `fsync`는 파일/부모를
+각각 센 실제 호출 횟수다. payload hash·물리 디스크 I/O·전체 생성시간과 합치지 않는다.
+
+| 경로·이력 상태 | 원장 read 전→후 | JSON parse 전→후 | fsync 전→후 |
+|---|---|---|---|
+| 독립 IP inventory·SUCCEEDED | 202→101 | 205→103 | 0→0 |
+| 신규 생성 계획·SUCCEEDED | 505→101 | 517→112 | 0→0 |
+| 독립 IP inventory·수습 complete | 303→202 | 304→203 | 202→202 |
+| 신규 생성 계획·수습 complete | 707→202 | 714→209 | 404→202 |
+| 원 asset key 조회·양 상태 | 202→202 | 202→202 | 0→0 |
+| Linux restore·불변 root | 14→14 | 36→34 | 17→17, fsck 2→1 |
+
+원 key의 두 완전 검색은 실행/소유 종료·늦은 중복 기록 교차를 검출하는 별도 관측이므로
+줄이지 않았다. callback 뒤 root 변경 시 fsck 2회, fsck 오류의 수락 전 거절도 유지한다.
+첫 후보의 ‘선행 fsck를 수락 뒤로 미루는’ 방식은 실패 수락 경계를 바꾸므로 채택하지 않았다.
+
+메모리 교환관계도 있다. 수습 complete 이력 100개의 생성 계획은 계측된 peak가
+**1,649,772→2,506,768 bytes**였다. 성공 이력은 **1,502,351→2,429,969 bytes**다.
+완전 검증된 이력을 현재 메타데이터 판정 동안 유지하는 임시 비용이며 영구 cache는 아니다.
+원장 수의 기존 O(N) 입력 비용을 없앴다고 하지 않는다. 이 측정 범위에서는 추가 임시
+메모리를 감수하고 반복 전체 파싱/내구 동기화를 줄였으며, 보드 여유/큰 이력 수락은 별도다.
+
+Gateway는 같은 0/32/128 request 프로필을 각 3회 실행했다. `json.dumps` **2→1**,
+`json.loads` 1·실제 `json.dump` 1·fsync 2는 유지했다. 128건의 계측 peak는
+**30,684~30,772→42,504~42,592 bytes** 범위다. 저장 전 독립 사본을 유지하는 비용이며 입력 64KiB 상한은
+그대로다. authority 갱신 경로의 비교이지 매 판정 주기의 비용이나 운영 지연 개선율이 아니다.
+
+`MEM-COST-BASELINE/FINAL6.json`, `GATEWAY-COST-BASELINE/FINAL3.json`에 원 표본을 둔다.
+wall time과 inclusive helper 시간을 합산하지 않고, 과거 P4/보드의 최솟값으로 개선율을 만들지 않았다.
+
+### 규모 증가와 남은 비용·대기의 구분
+
+`scale.py`는 실제 Manager로 정지된 **비네트워크 Zephyr** 자산을 0/1/10/100개 생성하고
+등록/retire 집합을 각각 조회했다. 주소 풀/실행 RAM을 위반하는 100 Linux running VM
+fixture를 만들지 않았다. 새 fixture와 같은 입력에서 baseline/후보 모두 정상 조회했다.
+등록 N=1/10/100의 단건 get read는 **17/35/215**, list는 **19/118/1108**이다.
+보관 N=1/10/100의 get은 **15/24/114**, list는 **16/88/808**이다. 두 후보의 해당 계수는 같다.
+단건 get의 초기 전체 중복 신원 확인, 목록의 외부 관측 뒤 집합 검증은 그대로 남긴 비용이다.
+원 key 이력 말단의 손상/중복·열람 실패 보호는 기존 S4 시험과 최종 회귀에 연결했다.
+
+수습 `creation.usage`에는 자기 시험 프로세스의 FD 관측만 제공했다. 무관한 소유 FD를
+0/1/10/100개 열면 열람 항목은 **4/5/14/104**로 증가했다. 실제 전역 `/proc`·다른 사용자
+프로세스의 비용은 측정하지 않았다. 삭제 계획은 정적이지만 사용 FD/mount/loop는 검사 사이
+새로 생길 수 있어 현재 사용 열람을 이전 표본으로 대체하지 않았다. `SCALE-*.json`에 조건을 둔다.
+
+`ManagementCostTest.test_restore_barrier_exposes_remaining_physical_serialization`은 실제
+공통 잠금을 거친 restore의 fsck만 막았다. 해제 전 B get/원 create 조회는 성공했고,
+B stop은 stopped 의도와 원 control key를 수락했지만 **pending**, 실제 종료는 미완료였다.
+A 해제 뒤 같은 stop key의 허용 이행은 정상 완료했다. `P55-T06-remaining-restore-lock.json`은
+이 한계를 통과한 독립 종료라고 포장하지 않는 반례다.
+
+단순 unlock은 해법이 아니다. 현재 `_mutate`의 같은 restore key는 미완료 journal을
+재개하며, create와 달리 활성 lifecycle 실행 소유를 조회하는 경계가 없다. 공통 잠금을
+해제하면 살아 있는 restore를 재개해 중복 효과를 제출할 수 있다. 다음 수정에는 원
+operation에 결합한 lifecycle 실행 소유·같은 key의 활성/재개 판정·관련 writer/legacy·
+host drain/자원 종료를 함께 확정해야 한다. 이는 현재 create/discard-private 소유 규칙의
+확장이므로 새 writer 규칙을 결정하지 않은 채 구현하지 않았다. 플랫폼 책임의 미완료이며
+상위 timeout 조정으로 넘기지 않는다.
+
+### 전체 소유·공유 영역의 점검 깊이
+
+아래는 [기준선 범위 색인](platform-management-baseline.md#scope)의 모든 행에 대한 이번
+대응이다. 소스에서 확인한 주기/상한과 실제 host assertion을 구별한다. guest IRQ/실제
+주기 worker·SD 성능을 host core 통과만으로 실측 완료 처리하지 않는다.
+
+| 영역·실제 경로/기호 | 평상시·실패 비용 확인과 근거 | 판정/남은 깊이 |
+|---|---|---|
+| `guests/common/prepare_instance.py`, `first-install` | `_copy_verified/_ranges`의 1MiB stream·chunk deadline, seed/조립의 별도 검증. `check_creation`은 요청별 문맥/시계만 읽고 chunk마다 원장/정책/host를 다시 읽지 않음. 양 Linux 선택·prehash0/root 복사1·sparse/독립 inode·ENOSPC/원 오류/재전달 시험 | 비용 보호 유지. 정상 create를 다른 helper의 full payload 재읽기로 바꾸지 않음. 고정 대용량/OS 시간7 |
+| `recipes-core/xenova-platform/files` Manager/Execution/creation/CPU/resources/recovery | 위 신규 수락·IP/restore 수정과 0~100 원장/자산 계수. 실제 제어·자원/firmware/CPU·복구 guard는 효과 경계 검사를 유지 | 국소 중복 수정. key 2회 검색/현재 guard는 필요한 재검증. 장기 공통 물리 대기는 위 미완료 |
+| `boot/network`, bringup·VM unit·`Platform.check_network/prepare_dhcp` | DHCP 준비는 start/is-active/reload와 bridge/IP 확인. registry 변경 뒤 hosts 게시·무관한 정적 예약 보존. boot/quiesce·unit graph·network fixture 회귀 | source/로컬 외부 대역. 실제 systemd/DHCP 대기는 운영 환경7. 하위 저장 대기 원인은 조사 범위에 포함 |
+| Zephyr `xen-runtime/src/runtime.c`, `xen-store`, netfront/grant | 실제 C의 공유 세션에서 1,000 concurrent reads·watch 소비자2·session open/close 각1, 보유 lock timeout 후 정상 재개. ASAN/UBSan·부분 초기화/잔존 grant 회귀 | 소유/공유 Store 비용은 현재 직렬 전송 계약. 세션을 호출마다 다시 만들지 않음. 실제 Xen ring/IRQ·전체 guest stack 비용7 |
+| `apps/drive`, 공통 runtime/MQTT | 실제 adapter/controller·health·상태/입력 벡터, 실제 C payload 120,000 concurrent parses. main의 독립 task/현재 준비·release를 source 대조 | 현재 host 알고리즘/파싱·원 수명 보호. 임의 idle 계산/주기 하향 없음. native kernel worker 전체 동적 비용은 이번 미측정 |
+| `diagnostics`, `telemetry/src/worker.c` | Core/histogram·생산 모델/직렬화·reset/잘림·오류 보존 host 시험. worker의 통상 200ms capture/20ms sleep, threads=false 기본 수집과 명시 thread snapshot 분리 확인. CONNACK 후 재수집은 새 inventory 근거 | source의 cadence와 host Core 확인. 실제 Zephyr port의 wakeup/stack/수집 CPU·burst 총부하는 미측정; 중복 결함으로 확정하지 않음 |
+| `xenova_drive_binding.py`, `provision-xenova-telemetry.py` | 관측 전후 state·receipt/Store 대조와 짧은 admission, busy의 제한 재시도·다른 오류 즉시 종결. 앱별 교체/uncertain 재주입 금지 시험 | 외부 관측 사이의 새 실행/의도 검사는 유지. 안정 binding의 실제 주기 총부하7, 옛 표본으로 lease 갱신 없음 |
+| `services/gateway` | Authority 직렬화 계수·같은 입력의 파일/RAM 독립성·sync 실패·상한 거절, actor/준비/전환·실패 DRIVE 철회/STOP 순서 전체 시험 | 소유 코드 수정. serial/device ACK·실제 actor tail 지연7. 부가 failure journal보다 STOP 시도가 먼저인 경계 유지 |
+| broker/Tailnet/SSH·Wi-Fi 공통 기반 | broker CLI 저장/미확정·root 경계와 policy/unit fixture, Wi-Fi status의 wpa/ip별 외부 호출, wrapper/native identity 선택의 source/회귀 | 공유 운영 제품/네트워크 변경 없음. 실제 broker/auth·Wi-Fi/Tailnet 대기/정책은 소유 확인·7. 환경 실패를 제품 수정으로 숨기지 않음 |
+| Xen console async·`xenova_telemetry_evidence.py`·trace/collector | 실제 pthread/eventfd queue의 stall/lock/failure/exit/unavailable, 64 job/32 file 상한. archive의 새 관측/회전 gap·retention 계획 저장·원 PTY 보호 시험 | 부가 I/O는 비대기 제출. 실제 pinned Xen PTY 결합 시험은 source 미지정으로 미수행. 원문 폐기/표본 품질 하향으로 개선하지 않음 |
+| Yocto recipe/wrapper·조립/scripts | 정규 하위 install 경로33 Python+비활성 example, 11 import·바이트/모드·archive 대조. unchanged native wrapper·RDEPENDS 유지 | 부분 포함 확인. Gateway는 README /opt source-layout 묶음이며 정규 recipe/unit 수락 아님. 전체 이미지/진행 중 빌드 건드리지 않음 |
+| dom0-manager/Worker/Agent·backend/frontend·장치 | 기존 소비자 576 회귀와 요청 위치 대조. 하위 get/list·원 key/stop 의도 소비와 남은 상위 mutex/선행 get/후속 이행을 구분 | 타 담당자 제품 무변경. [HTTP](../requests/20261029-request-http-spring-ui.md#55번-로컬-비용-보완의-소비-범위)·[Gateway](../requests/20261029-request-gateway.md#55번-authority-저장-비용-보완) 영향 누적. 6·7 자동 실행 안 함 |
+
+### 검증·실패 이력·부분 포장
+
+시험은 원장/파일/잠금을 실제로 실행하며 Xen/guest/mount/Store 외부 대역을 명시한다.
+`test_xenova_cost_progress.py`는 같은 구간의 계수, 독립 호출의 재동기화/EIO,
+fsck 수락 전 실패/중간 변경 재검사, 남은 restore barrier를 검사한다.
+`test_authority_cost.py`는 0/32/128 상태의 작업량·독립 사본·오류/상한 보호를 짝지었다.
+기존 S3/S4/S5의 양 Linux 장기 준비/polling 중 B 실제 stop·원 결과 확정, 같은 key의
+thread/process 재전달·owner/FD·quiesce·원 기한/수습 후 새 생성은 관련 회귀로 확인했다.
+
+실행 명령·rc·환경/경과는 P55 `run_checks.py`와 모드별 JSON/log, assertion은
+`assertions-*`, native stdout은 `native-*`에 둔다. 시험 수는 집중/포함 회귀를 합산하지 않는다.
+최종 결과/해시의 연결은 `FINAL_CANDIDATE.json`에 둔다.
+
+최종 `regression-final6`는 **704 passed**다. 정규화한 비용 fixture·중복 key 반례를 포함한
+하위 비용/보호 8개도 여기에 들어 있다. `focus-final-final3`의 **164 passed** 중 당시 하위
+7개는 최종 회귀로 갱신했고, Gateway 157개만 같은 제품/시험/공유 MQTT 바이트를 대조해 재사용한다.
+`coverage-final6`는 **134 passed, 2 skipped**(실제 root mount 경계와 pinned Xen PTY source
+미지정), 별도 `manager-final6`는 **576 passed, 기존 warning 1**이다. 관련 파일이
+최종 후보와 같은 범위만 재사용하며 개수를 합산하지 않는다.
+`HOST-CC-FINAL3`는 실제 C/ASAN·UBSan 다섯 실행 case가 모두 성공했다.
+
+중간 실패도 보존했다. 기존 Gateway helper의 import 경로 누락과 로그 출력 폴더 누락은
+소유 시험 runner만 보완했다. 넓힌 시험 두 건은 baseline에서도 실패했다. G1 독립 로더
+fixture에 현행 필수 `xenova_preparation.py`가 빠졌고, broker 저장/미확정 fixture는 non-root에서
+의도한 fault 주입 전 권한 거절로 끝났다. 각각 실제 의존 파일 추가와 인증 경계 주입만
+수정했다. broker/Agent/권한 제품 정책은 바꾸지 않았다. cmake 부재는 설치/환경 수리 없이
+기존 CMake 소스 목록을 기존 cc로 직접 빌드해 다섯 host case를 실행했으며 CTest 실행이라 하지 않는다.
+
+하위 부분 묶음은 `SUBSET_PACKAGE-FINAL6.json`의 **33 Python+비활성 example 1개**,
+독립 설치 import 11개다. archive SHA-256은
+`46e43ebe2fff9c5dc028427967a2cb64adc4ef5c25c6e666a4e359911cec3713`다.
+`GATEWAY-SOURCE-PACKAGE.json`은 문서상 `/opt/xenova/gateway`·MQTT dependency의
+소스 26파일과 import를 대조한 별도 묶음이다. Gateway archive SHA-256은
+`5ce77977120ecd0f59e95e09eab6f21ad7ae0ea5f649700d68b4c523aa41e06b`다.
+둘 다 source/staging/archive가 같고 mode를 확인했지만 RPM/전체 이미지/실제 설치본은 아니다.
+정규 Gateway recipe/unit은 이 저장소 범위에서 확인되지 않아 새로 만들거나 완료로 표시하지 않았다.
+
+### 남은 장애물과 다음 수락
+
+| 항목·현재 근거 | 필요한 다음 행동·책임 |
+|---|---|
+| restore/lifecycle의 B 실제 stop 대기: 재현된 미완료 | 플랫폼: 원 lifecycle 실행 소유/재개·관련 writer/legacy·host 종료 규칙을 먼저 확정하고, 같은 barrier에서 A 미완료 중 B 실제 종료까지 통과시킬 것. 단순 unlock/원장 삭제/timeout 상향 불가 |
+| registry/원 key·수습 사용 검사 성장: 계수는 확보, 필요한 전체 확인 유지 | 플랫폼: 현재 identity/완전 검색/외부 사용의 무효화 범위를 보존할 구체 대안이 있을 때만 추가 축소. 직접 조회 index/새 cache를 이번에 만들지 않음 |
+| guest port/실제 주기 총부하·콘솔 pinned PTY·SD 간섭: 미측정 | 7번 입력: 같은 후보/설정에서 collect·wake/queue·CPU/stack/drop/표본 나이, 동시 관리/주행, actual Xen/SD/mount/loop 단계별 비용. host Core 결과를 보드 보장으로 확대하지 않음 |
+| 운영 create 정책·상위 소비/권한·API cgroup/backend·Gateway 설치 | 기존 담당 요청과 6·7번 책임 유지. 비활성 example이나 소스 묶음만으로 사용 준비/VM 보존/실제 출력 수락을 선언하지 않음 |
+
+따라서 반복 비용의 확인된 국소 개선과 관련 로컬 보호는 제공하지만, **5.5번 전체의
+불필요한 대기 해소를 완료로 닫지 않는다.** 1번의 구조 마감·2~5번의 보호는 보존한다.
+보드/EC2·서비스·실제 VM/운영 자산·정책·배포·commit/push를 변경하지 않았고 6·7번은 실행하지 않았다.
+
+<a id="stage55-followup"></a>
+## 5.5번 후속: lifecycle 독립 진행·OS 공통 정적 pinning·동등 관리
+
+### 기준과 판정 범위
+
+사용자가 승인한 F1/F2/C1/E1/E2 후속이다. 첫 P55의 부분 마감·반례·후보별 실패를 위에
+보존한다. 출발 HEAD는 `feat/platform/recovery-scenario-closure / 9b69cdf1df65408403e148868d19ab51cdaa9179`이며
+기존 미커밋 14개 경로도 포함했다. 새 commit으로 후보를 가장하지 않는다.
+원자료는 `C:/Users/SSAFY/Documents/Codex/2026-10-31/xenova-stage55-followup/`의
+`ENTRY_SOURCE.json`, `FINAL7_SOURCE.json`, `FINAL_CANDIDATE.json`·diff에 고정한다.
+제품 최적화와 CPU 지원 확장은 다른 변경 묶음이다. 운영 정책/설치/실장치 수락은 아니다.
+
+### F1: 실행 소유를 대체한 뒤 긴 공통 대기를 분리
+
+`xenova_preparation.AssetLease`, `guard_asset/asset_state/assets_quiet`와
+`Manager._lifecycle_io/_transition/_purge`가 실제 경계다.
+
+| 구간 | 보호·확인과 실제 효과 |
+|---|---|
+| 검사 전 | UUID별 asset flock 무대기 획득. 아직 operation/예약 수락 아님. 공통 잠금 아래 원 key·대상·현재 세대 확인 |
+| 긴 검사 | 같은 대상 lease를 유지하고 fsck/usage/inventory는 공통 잠금 밖에서 실행. 최초 fsck 오류는 원 restore journal 생성 전 거절 |
+| 복귀·수락 | 해당 tomb·의도·원 journal·host/barrier를 대조. restore 주소/용량은 최신 registry 사용. 원 journal 기록 후 operation/spec/세대를 lease에 결합 |
+| 게시 | 검사 root revision·metadata·정지 상태·gate 재확인. 짧은 공통/admission 아래 moving→rename→moved→세대/DHCP/원 결과 확정 |
+| purge | 현재 소유 inventory/사용 확인은 유지. 항목별 nofollow/inode/link 검사와 unlink/fsync는 대상 소유 아래 공통 잠금 밖. 잔여 기록은 공통 구간 |
+| 반환·재전달 | 활성 같은 key는 원 RUNNING 진행 회수, 두 번째 효과 0. 실제 flock 반환 후만 기존 journal 재개. 부모 종료·상속 FD 잔존은 재개 가능한 부재가 아님 |
+
+획득은 **대상 lease → lifecycle I/O 슬롯 → 공통 → 짧은 admission**, 경쟁 writer와 슬롯은 무대기다.
+`lifecycle-io.lock`은 기존 lifecycle I/O 동시 1개를 유지하고 조회/다른 VM stop은 사용하지 않는다.
+Linux create 슬롯과 별개이며 소유자·상속 FD의 대상/슬롯 drain을 각각 확인한다. 무제한 I/O
+병렬화·자동 대기열은 추가하지 않았다.
+공통 잠금으로 lease 반환/자식 종료를 기다리지 않는다. 실제 보유 trace를 분리해
+`lock.hold`에 외부 검사 시간을 포함하지 않고 `lock.released.lifecycle`로 기록한다.
+자산 제어·자원/firmware·복구·CPU·legacy config/firmware·first-boot writer와 drain도 연결했다.
+같은 thread의 중첩 공개 호출은 내부 소유자로 승인하지 않는다. 구형 writer와 이 모듈 집합의
+혼합 설치는 지원하지 않는다. 대상 파일을 지우거나 lock을 교체해 반환시키지 않는다.
+
+`test_xenova_lifecycle_ownership.py`와 `test_xenova_cost_progress.py`는 다음을 직접 확인한다.
+
+- 실제 lock의 Debian/Ubuntu ID·version·source로 생성한 A의 fsck를 계속 막아둔 동안
+  두 poller의 정상 get 6회와 B의 실제 stop·control journal completed가 끝난다.
+  그 뒤 A도 같은 원 요청으로 성공하며 불변 root fsck는 1회다.
+- 미수락 검사 중 경쟁 요청은 원 restore journal을 만들지 않는다. 수락 뒤 같은 key는
+  thread 및 새 Python process에서 같은 operation/RUNNING을 회수하며 fsck/이동을 복제하지 않는다.
+- gate 닫기·재열기는 검사 결과를 무효화한다. 원 기록은 새 허가로 바꾸지 않는다.
+  root 변경은 필요한 재검사 또는 게시 전 거절, 최초 fsck 오류는 미수락이다.
+- purge unlink barrier 중 B 실제 stop 완료, 실제 unlink 후 오류는 CLEANUP_INCOMPLETE,
+  같은 원 key/inventory로 남은 항목을 확인해 정상 완료한다.
+- 상속 FD와 실제 소유 부모 SIGKILL·자식 잔존에서 새 실행/drain을 막고, 자식 종료 뒤 정상
+  보호 반환·다음 restore를 확인한다. 운영 PID/자산을 사용한 시험이 아니다.
+
+과거 `P55-T06-remaining-restore-lock.json`은 첫 P55 폴더에 그대로 남는다. 후속의
+`assertions-regression-final7/F-T01-{debian,ubuntu}.json`은 A 해제 전 실제 완료 증거다.
+조회 성공/stop 의도 수락만으로 통과시키지 않았다. 단일 게시·필수 저장 syscall의 지연,
+기존 물리 제어 자체의 공통 직렬화·모든 스케줄의 공정성은 해결/보장 범위가 아니다.
+
+옮기지 않은 연관 경로도 소스에서 구분했다. 아래 비용 의심을 필요한 배타성으로 확정하지 않는다.
+
+| 남긴 구간 | 현재 판정·근거 | 다음 확인 |
+|---|---|---|
+| 자원 변경 `xenova_resources.guards/mutate` | 정지·의도/구성 guard 후 작은 instance.json/원 결과 게시. 기존 usage 전역 열람은 공통 안에 남음. 게시 배타성은 필요, usage 전체 보유는 비용 의심 | 플랫폼: 큰 proc/FD 입력의 실제 대기 재현과 별도 대상 소유/수락 경계를 확인해야 추가 분리 가능. 이번 독립 진행 수락은 lifecycle 대상 |
+| firmware transition/legacy replace | `bundle_info/copy_revision/validate_instance`의 검증·복사와 DHCP가 공통 안에 남음. 새 lifecycle lease와 같은 자산 충돌은 거절하지만 firmware 자신의 긴 실행 분리는 미구현 | 플랫폼: 실제 bundle 크기/사용 열람/DHCP 단계별 계수·barrier 필요. 공통 저장 순서가 복사 전체 배타성의 증거는 아님 |
+| templates/probe/recovery-operation | 기존 공통 metadata/관측/원 기록 경로. 새 자동 재개·숨은 I/O queue 없음 | 원장/카탈로그 규모와 느린 helper 반례는 기존 비용 색인으로 유지. 이번에 전 경로 무대기를 선언하지 않음 |
+| CPU set/host prepare | 모든 관리 guest 정지 유지보수 창에서 정책/anchor/receipt·dom0 적용 정산을 직렬화 | 현 계약의 필수 직렬화 유지. 실행 중 정책 완화나 live repin으로 해결하지 않음 |
+
+### C1: CPU 지원 범위 변경과 호환
+
+`xenova_cpu.validate_spec/placements/policy_candidate/context/set_policy/prepare`를 대조했다.
+OS와 A/B 개수 조건을 제거하고, 기본 공유 mask·UUID별 shared/exclusive 동일-vCPU mask를
+지원한다. shared 지정은 기본 공유 집합의 부분집합, exclusive는 그 집합과 다른 전용 mask에
+비중복이다. 해제는 정식 전체 정책 교체에서 해당 UUID를 제거하는 요청이다.
+다중 vCPU Linux를 1-vCPU로 줄이지 않고 scalar cfg와 실제 모든 vCPU를 검증한다.
+Zephyr의 고정 firmware 1-vCPU 제약은 유지한다.
+
+새 policy/journal은 2.0 placements다. 기존 exclusive 입력도 받지만 새 publication은 2.0이다.
+1.0 policy·완료/미완료 journal은 원래 표현/hash로 읽고 같은 key 재개도 1.0을 유지한다.
+새 정책 이후 과거 key replay는 과거 결과와 current_policy를 구분한다. anchor/host receipt는
+기존 1.0이며 hash는 저장 policy 전체 기준이다. CPU 전용 reader만 버전을 확장했다.
+정확한 공개 입력·조회 확장은 [정식 계약](../platform/cli-manager-spec.md#cpu-contract)을 따른다.
+
+`test_xenova_cpu_pinning.py`는 양 Linux 실제 선택의 4-vCPU shared pinning→reboot/recover→
+정지→해제→기본 mask 실행, multi-vCPU exclusive {1,2}, 마지막 vCPU drift와 stop,
+겹치는 공유 pinning, 3개 전용 예약과 추가 공유 Zephyr, retired/purged 예약의 Linux 이전,
+Zephyr 없는 관리/host 준비, factory 과거 ticket의 현재 정책 무변경, old/new journal 회수를 확인한다.
+기대 mask는 렌더러와 독립된 상수로 실제 cfg·전체 관측과 비교한다.
+실행 중 변경·scheduler/pool 이동·미등록 대상 신규 지정은 거절한다. 전체 관리 guest 정지
+유지보수 창은 보존했으며 일반 start/get이 dom0/실행 guest를 몰래 repin하지 않는다.
+
+### E1: OS별 관리 대응과 근거 수준
+
+아래 공통 근거는 현재 소스/최종 회귀에 연결되며 실제 OS 부팅/장치 수락을 뜻하지 않는다.
+이름만 바꾼 세 벌의 공통 시험으로 직접 검증을 가장하지 않는다.
+
+| 기능 | Debian·Ubuntu | Zephyr | 실제 경계·남은 수락 |
+|---|---|---|---|
+| 선택/생성·실패 종결 | linux_template_paths의 고정 두 OS 입력·root copy/prehash, S5 양 OS 실패→수습→새 생성 | network_zephyr의 실제 카탈로그 신규 등록·별도 bundle, legacy seed/lifecycle | mount/chroot·Xen/Store는 대역. 고정 대용량/실부팅은 7 |
+| list/get/기본 정보 | read_progress 두 OS의 현재 관측·원 결과·부분 실패, 실제 selected Linux start/pinning | network/CPU mixed 등록·stopped 조회 | 등록/실행·설정 자원/실제 affinity·예약 IP/Agent IP 분리. 상위 조합은 6 |
+| start/autostart | C-T01 두 OS start/새 incarnation 직접, batch/중복 실행/부팅 의도는 공통 boot/CPU 회귀 | CPU의 autostart·협조 reboot 직접 및 batch 공통 보호 | 두 Linux의 template별 autostart 실부팅은 아님. 성공 VM 보존·미확인 앱 상태 유지 |
+| stop/reboot/destroy | F-T01 두 OS stop·CPU 양 OS toolstack reboot/recover, 명시 force·응답 유실 공통 회귀 | network_zephyr 협조 stop/reboot·legacy 명시 force | Agent 부재와 guest 협조 실패는 다름. 자동 force 없음 |
+| retire/restore/purge | 양 OS restore barrier 직접, 소유 unlink/오류 재개 및 기존 Linux tomb/inode 시험 | CPU/기존 lifecycle에서 retire/restore/purge·예약 보존 | 운영 삭제 미수행. 현재 미사용/부분 효과를 원 journal로 확인 |
+| 자원·CPU | 두 OS 4-vCPU pin/unpin 직접, 자원 변경 정지/hash·CPU 문맥 및 전체 vCPU 공통 보호 | 1-vCPU pin/unpin 공통 policy/context·정식 release, 추가 shared VM | 실제 Xen affinity 효과/부하 격리는 7. OS별 SMP 일반화 아님 |
+| 조건부 복구 | 양 OS 선택 C-T01 recover_once 직접, attempt/원 기한/의도·실행 공통 회귀 | network/CPU의 새 실행·정책/협조 경로 | Worker 건강/반복 정책·재합류·출력 허가는 별도 |
+| Agent 부재 | 선택 fixture에 Agent 프로세스/표본 없이 Xen 기반 start/get/stop/reboot/recover 진행 | Agent 없는 firmware 프로필 관리 | guest 기능 건강은 미확인. Agent 내부 collector/서비스 정책은 담당자 |
+| backend·저장·네트워크 | 실제 cfg·scope/CLI/boot source와 소유 자식·FD 로컬 회귀 | block 없는/네트워크 프로필·Store/grant 종료 로컬 회귀 | 실제 qemu/backend/vif 수명·API restart는 미수락. Agent 책임으로 넘기지 않음 |
+| 관리/host 종료 | lifecycle 검사/수락/상속 FD drain, gate 세대 무효화와 기존 boot 보호 | 같은 host drain·guest 협조 종료/잔존 보호 | API cgroup/backend는 기존 HTTP 담당 공동 수락. 실제 poweroff/unmount는 7 |
+| 실행 부하 | 정상 polling/관리 간섭·원장 규모·임시 메모리 | 실제 native worker 9개 + host runtime/Telemetry/콘솔 | CPU/memory/disk/network 공통 보드 간섭·주기 전체 비용/IRQ/SD는 미측정 |
+
+### F2/E2: 유지한 비용·추가 비용·검증과 포장
+
+동일 fixture의 후속 entry→최종 계수다. 최초 P55의 505→101 등의 개선과 혼합하지 않는다.
+
+| 입력/관측 | entry → 최종 | 해석 |
+|---|---|---|
+| 성공 이력 101개 create plan | 원장 read 101→101, parse 112→112 | 첫 국소 최적화 유지 |
+| 수습 complete 이력 101개 create plan | read 202→202, parse 209→209, fsync 202→202 | 다른 writer/새 호출의 내구 확인 유지 |
+| 같은 불변 root restore | fsck 1→1, fsync 17→17 | payload 해시 추가 0. 소유/재검증의 추가 metadata 비용은 별도 |
+| 같은 restore의 추가 확인 | text read 37→88, parse 34→51, 원장 read 14→16, Xen/helper 10→12 | unlock 전후 대상 tomb/의도/gate/원 기록·최신 자원·제출 직전 실행 guard. 전체 payload 재처리 아님. 대상 파일 open/flock/stat 전부의 계측을 뜻하지 않음 |
+| create plan 100 extra success/settled 계측 peak | 2,429,969→2,430,223 / 2,506,417→2,506,706 bytes | 계측 fixture 1표본, 운영 메모리 여유 판단 아님 |
+| 동시 원 작업 조회 1/2/4, 이력 101개·각 3회 | peak 최대 1,573,888 / 3,086,425 / 5,967,318 bytes, 반환 뒤 history 객체 참조 전부 0 | 첫 complete history를 barrier로 함께 유지한 상한 입력. 정상 조회 전부 성공. 실패/정상 plan의 참조 반환은 별도 weakref 회귀 |
+
+`MEM-COST-{ENTRY,FINAL7}.json`, `MEM-LIFETIME-FINAL7.json`은 원 표본을 보존한다.
+동시 create 계획은 기존 공통 수락 구간으로 직렬화되며 이를 동시 4건 성공 성능으로 포장하지 않는다.
+Gateway 0/32/128의 dumps 1·실제 dump 1·fsync 2와 오류/독립 사본 회귀도 유지한다.
+
+고정 Zephyr `684c9e8f32e4373a21098559f748f06915f950c9`와 API 10개를 확인하고 기존 도구의
+실제 경로로 native_sim/native/64 worker fixture를 빌드했다. `NATIVE-WORKERS-combined1*.json/log`:
+9개 실제 kernel 시나리오 전부 rc=0. queue 교체·지연·독립 진행·부분 시작·잔존/join·재시작
+실패 후 회수 assertion이다. host elapsed/CPU/RSS만 추가 측정했으며 전체 주기의 wakeup/queue
+분포·장기 idle·IRQ·SD 비용이나 실제 pinning 효과는 측정하지 않았다. kernel/guest source는 최종
+후보와 바이트 대조해 재사용한다. 새 패키지 설치·환경 수리는 하지 않았다.
+
+관리 전체·Gateway 집중·dom0-manager·runtime/소비자 suite의 실제 argv/rc/log는 최종
+manifest에 연결한다. 집중 회귀를 포함한 suite 숫자는 합산하지 않는다.
+
+| 최종 실행 | 결과 | 근거 범위 |
+|---|---|---|
+| `regression final7` | 721 passed, 236.38초, rc=0 | 양 Linux·Zephyr·생성/수습·자원/CPU·lifecycle 소유·부팅/복구·기존 비용 회귀 포함 |
+| `focus final7` | 220 passed, 88.45초, rc=0 | lifecycle 직접 반례/CPU pinning·기존 CPU/Gateway 집중. 위 회귀와 겹치는 시험을 합산하지 않음 |
+| `manager final7` | 576 passed, rc=0 | 기존 Starlette/httpx 경고 1. 타 담당자 제품 변경 없음 |
+| `coverage final7` | 134 passed, 2 skipped, rc=0 | runtime/Store/Telemetry/콘솔/binding/네트워크·직접 설치 경로 import |
+| native kernel worker | 9개 시나리오 rc=0 | 고정 소스/API·기존 실행기를 사용한 실제 native_sim kernel; 보드 성능 아님 |
+
+중간 `focus-f1b`의 purge 확인 UUID 누락 fixture 1건, `regression-f1c`의 종료 gate 오류 코드
+호환 3건, `focus-c1a`의 CPU 2.0을 일반 1.0 실행 reader로 읽던 실패 30건은 원 log/JSON에
+보존했다. fixture를 정식 입력으로 고치고 기존 종료 의미/CPU 전용 reader로 해결했다.
+실패 assertion을 제거하거나 시간값을 올려 통과시키지 않았다. final7 결과와 합산하지 않는다.
+
+최종 Markdown 링크/앵커 649개, 실제 정의 줄 11개와 기준선 기호 79개를 검사했다.
+개념 문서 0~11장 문장·14개 흐름 코드 블록·19개 표는 보존하고 적용 상태 장만 갱신했다.
+platform 920파일은 final7 시험 snapshot과 일치한다. 이 중 후속 변경 14개 파일과 기존 P55
+작업을 구분했고, 출발 P55 manifest의 14개 경로도 entry와 일치했다. `git diff --check` 통과,
+index/HEAD/branch는 불변이다. 정규 recipe/서비스·실데이터·운영 정책을 바꾸지 않았다.
+
+실제 root mount와 pinned Xen PTY source 미지정 시험은 여전히 미수행이다. 필요한 제공물은
+격리 root mount 환경과 고정 Xen PTY source/동일 revision이며 해당 OS/backend 담당과 7번에서
+실제 해제/원문 전달 assertion을 수락해야 한다.
+
+recipe Python 33개+비활성 creation example 1개의 최종 바이트/모드·11개 설치 경로 import를
+확인했다. `SUBSET_PACKAGE-FINAL7.json`, tar SHA256
+`405185a5ff49462bfd5bdd6443e8a0c00f3abc1f7ad9e0c8b1be163fe3fe49b8`.
+recipe/RDEPENDS는 불변이며 필요한 모듈은 이미 모두 포함돼 있다. Gateway의 이전 소스-layout
+묶음과 현 source 동일성을 확인해 재사용하며 정규 recipe/unit 설치로 승격하지 않는다.
+
+후속 인계는 기존 [기준선 표](platform-management-baseline.md#followups)와
+[HTTP D02/D08](../requests/20261029-request-http-spring-ui.md),
+[Worker D01/D03](../requests/20261029-request-recovery-worker.md),
+[Linux/Agent](../requests/20261029-request-linux-agent.md),
+[Gateway](../requests/20261029-request-gateway.md)를 유지한다. CPU 버전/입력/조회 소비,
+운영 create 정책 공급·권한·API backend 귀속·정규 Gateway 포장과 동일 후보의 실제 Xen/SD/
+설치/HTTP/화면·장치 부하 수락은 미완료다. 그 사실을 5.5 후속의 로컬 정상 진행과 혼동하지 않는다.
+6·7번은 실행하지 않았고 commit/push·보드·운영 정책·서비스·실데이터를 변경하지 않았다.
+
+판정은 **5.5 후속의 하위 구현·로컬 수락 마감**이다. 핵심 F1의 실제 독립 stop과 C1의
+OS 공통 정적 pinning/해제가 정상 완료되고, 같은 원 기록/신원/기한·실패/반환 보호를
+확인했다. 위 미수행과 상위/실설치·전체 주기/실보드 비용까지 완료로 확대하지 않는다.

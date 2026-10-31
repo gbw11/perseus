@@ -1087,7 +1087,7 @@ Store·netfront·watch·worker·grant의 확보/노출/종료/반환, 부분 초
 
 ### 12.1 이 장의 후보와 확인 범위
 
-현재 기준은 `feat/platform/recovery-scenario-closure`의 **4a585d49a25d12459000306ffa74c42d0d473dcb**다. 과거 `69387c1`은 5번 구현의 기반 HEAD이며 최종 구현 후보 자체가 아니다. 그 위의 제품 `1aa64ac`, 시험 `4334967`, 계약 `53c5077`, 보고 `4a585d4`를 P5 source/commit manifest와 대조했다. 착수 작업트리는 깨끗했고, 5번 시험 snapshot의 platform 915파일과 현재 바이트가 일치했다.
+1번 마감 당시 기준은 `feat/platform/recovery-scenario-closure`의 **4a585d49a25d12459000306ffa74c42d0d473dcb**다. 과거 `69387c1`은 5번 구현의 기반 HEAD이며 최종 구현 후보 자체가 아니다. 그 위의 제품 `1aa64ac`, 시험 `4334967`, 계약 `53c5077`, 보고 `4a585d4`를 P5 source/commit manifest와 대조했다. 당시 착수 작업트리는 깨끗했고, 5번 시험 snapshot의 platform 915파일과 바이트가 일치했다. 이후 작업트리의 적용 차이는 12.5절에 구분한다.
 
 현재 기능별 상세 대조는 [기본 관리 기준선](../verification/platform-management-baseline.md)에 한곳으로 모았다. [5번 검증 보고](../verification/recovery-scenario-closure-20261030.md#원-create-기한실패-종결과-예약-반환)의 실제 시험 JSON/log·assertion과 부분 tar/manifest를 열어 대응했다. 696개 관련 회귀·별도 dom0-manager 576개는 기존 결과를 재사용하며 집중 66개를 합산하지 않는다. P5 실행 목록에 없던 Network Zephyr의 카탈로그 신규 등록·협조 stop/reboot 기존 두 시험만 같은 소스의 격리 fixture에서 보충해 2 passed를 확인했다. Xen/Store·OS/장치 경계는 대역이며 제품 종단 수락이 아니다.
 
@@ -1131,5 +1131,13 @@ Store·netfront·watch·worker·grant의 확보/노출/종료/반환, 부분 초
 상태 있는 주행·장치, Worker host 보존 정책, 손상 Authority의 최신성 있는 복원, 기록 한도 이후 수습을 이번 문서로 결정하지 않는다. 과거 사건/원자료와 운영값·부분 포함/설치/실물 수락을 구분한다.
 
 [기능별 기준선의 후속 표](../verification/platform-management-baseline.md#followups)는 5.5에 현재 소유 플랫폼의 반복 비용/대기 점검, 6에 실제 생산자/소비자·정책 공급 연결, 7에 동일 후보 설치/보드/제품 종단을 배정한다. 이번 1번은 그 현재 구조를 설명하고 근거를 연결한 문서 마감이며 후속을 실행하지 않았다. 0~11장의 개념을 새 Entity/서비스/DB/원장/정책 도입 계획으로 바꾸지 않았다.
+
+### 12.5 5.5 후속의 적용 범위
+
+현재 후속은 `9b69cdf`와 보존 작업트리의 후보 manifest를 사용한다. [후속 보고](../verification/recovery-scenario-closure-20261030.md#stage55-followup)에 원자료·단일 후보·OS별 관리 수락을 연결한다. 첫 P55가 남긴 restore 공통 대기는 대상 실행 lease와 짧은 채택/정산으로 분리했다. 검사 중 소유와 내구 수락, 활성 재전달과 종료 뒤 재개, 상속 FD와 논리 예약은 여전히 별개다.
+
+CPU는 Debian·Ubuntu·Zephyr 모두 UUID별 정적 pinning·해제를 제공한다. 차량 A/B 전용 두 개는 초기 프리셋이며 플랫폼의 VM 개수/OS 권한 조건이 아니다. 공유 pinning과 전용 예약을 구별하고 다중 vCPU의 실제 mask를 모두 확인한다. 새 정책/journal 2.0과 구형 원본 1.0 회수는 [정식 CPU 계약](cli-manager-spec.md#cpu-contract)을 따른다. 실행 중 guest 재배치·scheduler·pool 변경은 미지원으로 유지한다.
+
+고정 Zephyr의 기존 native kernel worker 9개 시나리오도 격리 실행했지만 실보드 주기 총비용·Xen/IRQ/SD·API backend 귀속·운영 create 정책·상위 제품 연결·장치 종단은 완료가 아니다. 0~11장의 개념 본문은 이번 구현 이력으로 바꾸지 않았다.
 
 [맨 위로](#contents)

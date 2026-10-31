@@ -14,8 +14,16 @@
 이 기준선은 세 문서를 대체하거나 새로운 schema·정책을 정의하지 않는다.
 
 사용자가 본문으로 제공한 `XENOVA_CONCEPTUAL_ARCHITECTURE.md`는 위 개념 문서 경로에
-수록했다. 0~11장 원문은 보존하고 12장만 현재 5번 적용 상태와 근거로 갱신했다.
-P1의 USER_CONCEPT_ORIGINAL.md와 12장 전 본문 동일성을 확인하며 개념을 새 구현 계획으로 바꾸지 않는다.
+수록했다. 최초 마감은 0~11장 원문을 보존하고 12장만 현재 5번 적용 상태와 근거로 갱신했다.
+P1의 USER_CONCEPT_ORIGINAL.md와 12장 전 본문 동일성은 그때 확인한 근거다.
+후속 편집에서는 제목 단계·흐름도 text 블록·출처 링크를 복원했다. Markdown 표식을 제외한
+전체 문장과 12장 내용은 유지하며, 문자 동일성 대신 서식 제거 후 내용 동일성을 확인한다.
+개념을 새 구현 계획으로 바꾸지 않는다.
+
+1번의 최종 판정은 **기능별 기준선·비용·소유권 대응 정리 완료**다. 다음은
+[5.5번 비용·대기 경합 점검 계획](platform-cost-concurrency-plan.md)이며,
+1번의 편집 후속은 문서/계획 작성까지였다. 이후 승인된 5.5번의 실제 변경·계측과
+남은 공통 잠금은 [현재 결과](recovery-scenario-closure-20261030.md#stage55)에 구분한다.
 
 5번의 `69387c1`은 당시 기반 HEAD다. 실제 검증 입력은 그 HEAD+제품/시험 diff·새 파일이었다.
 현재 네 커밋 `1aa64ac`(제품) → `4334967`(시험) → `53c5077`(계약) → `4a585d4`(보고)와
@@ -40,12 +48,12 @@ snapshot 뒤 차이는 최종 검증 보고서 한 파일이며 봉인과는 일
 
 | 약칭 | 저장소 경로·기준 기호 |
 |---|---|
-| M | [xenova_management.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management.py#L1377): Manager.call/fork, ReadContext, _mutate/_query/_create |
+| M | [xenova_management.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management.py#L1479): Manager.call/fork, ReadContext, _mutate/_query/_create |
 | P | [xenova_vm.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_vm.py#L257): Platform.request_control/records/start/stop_many/reboot/autostart |
-| E | [xenova_execution.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_execution.py#L800): Execution.control/accept/observe_many/guard_launch/snapshot |
+| E | [xenova_execution.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_execution.py#L804): Execution.control/accept/observe_many/guard_launch/snapshot |
 | C | [xenova_creation.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_creation.py#L259): policy/accept/work/validate/reconcile/released/holds |
-| O | [xenova_preparation.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_preparation.py#L254): LinuxSlot/owner_state/ensure_quiet/drain, request_output/run |
-| R | [xenova_runtime.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_runtime.py#L73): operation_lock/observation_slot/atomic_write |
+| O | [xenova_preparation.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_preparation.py#L252): AssetLease/lifecycle_slot, LinuxSlot/owner_state/ensure_quiet/drain, request_output/run |
+| R | [xenova_runtime.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_runtime.py#L109): operation_lock/observation_slot/atomic_write |
 | L | [prepare_instance.py](../../platform/guests/common/prepare_instance.py#L322): make_instance/_copy_verified/PreparedInstance.publish/Workspace.close |
 | K | [xenova_catalog.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_catalog.py#L50): describe/entries |
 | Z | [xenova_zephyr.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_zephyr.py#L234): new_instance/bundle_info/copy_revision |
@@ -178,8 +186,10 @@ FastAPI/Worker/Agent/Spring/화면은 소비 경계이며 이번 수정 대상�
   record 상태 회수와 restore 뒤 고정 retire key 재사용은 담당자 수락 전이다.
 - **근거/비용:** `test_xenova_management.py`의 이동 중단·purge 오류/partial 재개·링크/사용 검사,
   `test_xenova_spring_followup.py:FactoryReservationTest`의 실제 factory MAC/IP·복원 검증을
-  읽고 P5 최종 실행 목록/통과를 대조했다. 이번에 삭제/이동/새 시험은 실행하지 않았다.
-  e2fsck·현재 사용 열람·unlink/fsync는 긴 공통 잠금 비용으로 남는다. [삭제 계약](../platform/cli-manager-spec.md#cmd-retire).
+  읽고 P5 최종 실행 목록/통과를 대조했다. 1번 당시에는 삭제/이동을 실행하지 않았다.
+  이후 [5.5 후속](recovery-scenario-closure-20261030.md#stage55-followup)은 격리 소유 fixture의
+  양 OS restore·purge unlink 중 다른 VM 실제 stop·동일 원 작업 재개를 직접 확인했다.
+  긴 검사는 대상 lease 아래 분리했고 필수 게시/정산의 공통 구간은 남는다. [삭제 계약](../platform/cli-manager-spec.md#cmd-retire).
 
 <a id="operations"></a>
 ### 3.5 원 작업 조회·재전달
@@ -232,7 +242,7 @@ FastAPI/Worker/Agent/Spring/화면은 소비 경계이며 이번 수정 대상�
 |---|---|---|
 | update-resources / RS.mutate | 정지한 Linux의 원 configuration hash/lifecycle·stopped intent·자산/복구/실행 충돌을 검사. instance.json 게시와 원 asset 결과, UUID/자산 세대 유지 | resource suite와 CP 정책 문맥 검증. 자원 수량≠실제 사용량, 실행 중 hotplug 아님 |
 | firmware-transition / xenova_zephyr_transition.mutate | 정지 Zephyr의 원 bundle/revision·IP/manifest/정책을 검사해 별도 firmware revision과 active metadata 게시. 원 UUID/lifecycle 보존 | Zephyr/lifecycle/recovery suite. 새 펌웨어의 앱/출력 준비는 별도 |
-| CPU policy / CP.guard_stopped·set_policy·prepare | 정책 revision/hash·공장 identity·실제 pool/affinity와 host 준비를 확인. 미완료 자산 guard는 C.holds 소비, VM 전용 pCPU 예약은 별도 정책 | cpu suite/S5-T16. 정책 단독 오류를 VM 사망으로 판정하지 않음. 실제 배치·IRQ/I/O 격리는 별도 |
+| CPU policy / CP.guard_stopped·set_policy·prepare | UUID별 OS 공통 정적 shared/exclusive mask·해제, 전체 vCPU 검증. 정책 revision/hash·실제 pool·host 준비·미수락 lifecycle lease도 확인. C.holds/CPU 예약은 별개 | cpu/pinning suite/S5-T16. 버전 1 원본 유지·새 publication 2.0, 모든 관리 guest 정지 창. 실제 Xen/IRQ/I/O 수락은 별도 |
 | host-init/autostart/quiesce/shutdown-all | E gate·새 boot/admission, P.autostart의 batch, O.drain/ensure_quiet와 guest별 종료. scope·backend/저장소를 보존할 단계 구별 | boot_boundaries/부모 중단·자식 FD·quiesce 회귀. 설치 unit·host 종료 실패/전원은 7번 |
 | recover_once / RC.conditions·once | 현재 running intent/host/lifecycle·원 expected execution·CPU·attempt/기한·자산 소유를 확인한 한 번의 물리 복구. Worker가 판단·정책/후속 attempt를 소유 | recovery_foundation/review/reconciliation·S3-T04. 새 실행 관측 완료≠Bootstrap/Standby. D01 정책은 대기 유지 |
 | recovery-reconcile / RC.reconcile | 원 attempt의 실제 효과·호출 종료·자기 scope·현재 실행을 확인한 범위만 종결. 진단/명시 execute 모두 새 물리 명령 0, 기한 재발급 0 | D03 정상/차단 사례 회귀. 증거 없는 stopping·다른 host는 private 폐기로 해결하지 않음 |
@@ -263,7 +273,9 @@ FastAPI/Worker/Agent/Spring/화면은 소비 경계이며 이번 수정 대상�
 | 보호·위치 | 획득/보유·수명과 정상 반환 | 중단/동시 요청에 대한 의미 |
 |---|---|---|
 | 요청 객체 `_request_lock` | 동일 M 객체의 동시 call은 무대기 거절. 별도 fork는 독립 가변 budget/trace, 동일 저장소/guard | thread/GIL만으로 보호하지 않음. fork는 새 프로세스 아님 |
-| R.operation_lock `/run/xenova/locks/platform.lock` | 프로세스 공통 flock. Linux 수락/게시·원장 갱신, 다른 물리 제어/자산 변경은 실행 구간 유지. fd close로 반납 | 일반 list/get/operation/control-operation은 획득하지 않음. templates/probe/recovery-operation·retire/restore/purge 등은 기존 공통 경로. 무한 병렬 관리 아님 |
+| R.operation_lock `/run/xenova/locks/platform.lock` | 프로세스 공통 flock. 수락/게시·원장 갱신과 기존 물리 제어를 보호. lifecycle의 긴 검사/항목 삭제에서는 대상 소유 아래 반환·재획득 | 일반 list/get/operation/control-operation은 획득하지 않음. templates/probe/recovery-operation·물리 제어 자체는 공통 경로. 무한 병렬 관리 아님 |
+| O.AssetLease asset-<UUID>.lock | 수락 전 검사부터 원 lifecycle 정산까지 대상 flock. 원 journal 뒤 op/spec/세대 결합. helper FD 상속 | 같은 VM의 모든 writer·중첩 공개 호출·새 process 재전달 확인. 실제 반환 후만 기존 재개, 종료 원장/부분 자산과 다른 수명 |
+| O.lifecycle_slot lifecycle-io.lock | 기존 lifecycle I/O 동시 1개 유지. 대상 lease 뒤·공통 잠금 전 무대기 획득. 원 요청 수락 아님 | 조회/다른 VM stop이 사용하지 않음. Linux 준비 슬롯은 별개. 대상/슬롯 모두 drain에서 확인하며 queue 추가 없음 |
 | E.short_lock admission.lock | 보통 공통 잠금→admission. 빠른 stop은 admission 해제 뒤 공통 잠금 시도. guest exec guard·gate·개별 private unlink와 직렬화 | 긴 자식/준비 종료를 admission 안에서 기다리는 역순을 만들지 않음. 호출별 deadline 없는 지점은 busy 즉시 거절, 있는 지점은 잔여 예산 대기 |
 | O.LinuxSlot linux-prepare.lock | Linux create+discard-private 한 개. 공통 잠금 밖 무대기 획득, 수락 시 원 owner 연결 | 새 경합은 미수락·숨은 queue 없음. 같은 key 확인은 슬롯 경합보다 우선. 자식이 상속 FD를 유지하면 부모 종료만으로 반납 아님 |
 | linux-owner-<op>.lock | 원 operation/spec/workspace/manifest·host/PID start_ticks·실제 FD inode를 결합. role=create/discard-private | active/residual/reconciling/absent와 관측 오류 구별. lock 파일 존재/임의 busy/PID만으로 소유 확정 금지 |
@@ -340,6 +352,17 @@ C.released(durable=True)는 workspace 부재·원 file/부모 fsync·동일 JSON
 
 아래 상한은 소스 조건/로컬 계수다. 현재 보드 성능을 새로 측정하지 않았고, 최적화는 5.5번이다.
 
+5.5번은 현재 `9b69cdf`+작업트리 후보에서 신규 create의 **한 공통 잠금 구간**에 한해
+원장 파싱과 내구 반환 판정을 주소/용량 helper에 전달한다. 원장 쓰기·callback 진입 전의
+지역 사본이며 슬롯 대기/private 준비/새 호출에는 재사용하지 않는다. 독립 `_ip_inventory`도
+한 검증된 원장·tombstone 집합으로 조립한다. 아래 원 key 완전 검색·현재 guard는 유지한다.
+첫 P55의 restore는 같은 공통 잠금 안의 불변 root에 fsck 1회를 사용했고 긴 공통 대기는
+남겼다. 후속 후보는 수락 전부터 대상 lease를 유지하면서 fsck/usage/inventory·purge 항목
+삭제를 공통 잠금 밖으로 옮겼다. 원 기록·tombstone·의도·host/gate를 재확인하고, 검사한
+root의 경로/dev/inode/크기/mtime/ctime가 같을 때만 fsck 근거를 재사용한다. 변경/재전달은
+재검사 또는 거절이다. 게시·필수 결과 저장의 공통 구간과 실제 syscall 지연은 남는다.
+[후속 검증](recovery-scenario-closure-20261030.md#stage55-followup)에서 과거 반례와 갱신 관계를 구분한다.
+
 | 단계·실제 작업 | 발생 단위·재사용/재검증 이유 | 확인한 범위·증가 요인/미측정 |
 |---|---|---|
 | K.describe/entries | descriptor마다 manifest hash+JSON·payload stat/boot 출처. 선택/준비/채택 경계에서 현재 manifest를 다시 대조 | Linux full=False: payload prehash 0, metadata hash는 있음. template 수/작업 수에 따라 스캔 증가. 조립의 full 검증·Zephyr bundle은 별개 |
@@ -350,9 +373,9 @@ C.released(durable=True)는 workspace 부재·원 file/부모 fsync·동일 JSON
 | M._query 원 key 검색 | 회차당 원장 전체 2회 검색, 뷰/소유 일관성 재검사. 늦은 중복 key·완료/소유 해제 교차를 검출 | 최대 2회차/4스캔, 원장 개수·JSON 크기에 비례. 첫 일치 중단 없음. recovery-operation은 별도 잠금 경로 |
 | 현재 효과 guard/CPU·helper | launch/제거·bind·정산 경계의 신원·의도/정책/실행 재확인. 화면 문맥은 재사용하지 않음 | 중간 외부 효과/의도가 바뀔 수 있어 회차 내 응답 조립 재사용과 다름. 실제 호출 수는 action/분기/활성 CPU 정책에 의존 |
 | R.atomic_write/필수 저장 | 각 journal/intent/자원 receipt·게시/완료 저장마다 file/parent fsync. 복사 chunk마다 journal fsync는 없음 | syscall은 엄밀히 선점 못 함. snapshot의 VM별 짧은 잠금도 저장 지연 가능. SD 내구·최악 지연 미측정 |
-| C.holds/released | 미완료 자산 소비 guard가 호출. complete이면 file/parent fsync+원 JSON 재읽기, SUCCEEDED는 short-circuit | 소비자/원장 수에 따라 반복. 새로운 전역 cache로 생략하지 않음. 5.5에서 동일 근거 재확정 비용과 필요한 내구 경계를 따로 계측 |
+| C.holds/released | 미완료 자산 소비 guard가 호출. complete이면 file/parent fsync+원 JSON 재읽기, SUCCEEDED는 short-circuit | 신규 create의 같은 잠금 구간에서 주소/용량이 같은 반환 판정을 재사용. 다른 호출/잠금 구간·다른 소비자는 다시 확인. 전역 cache 없음 |
 | C.inventory/usage/reconcile | 진단/수습 진입·각 삭제 전·최종 사용 확인. 현재 Xen disk·mountinfo·loop·/proc FD, 남은 계획/inode, 항목별 marker/진행 저장 | 계획 최대128항목/직렬화128KiB·고정 topology. 프로세스/FD 수·파일 수·저장 횟수 증가. 각 시점의 사용/교체가 바뀔 수 있음. 전역 proc 보드 비용 미측정 |
-| M._transition/_purge | stopped/usage·restore e2fsck·이동/삭제·DHCP·필수 저장을 공통 잠금 안에서 수행 | 긴 Linux private 분리와 별개로 남은 장기 소유 구간. 크기/파일/VM 수·장치 지연의 실제 비용은 5.5/7번 |
+| M._transition/_purge | stopped/usage·restore e2fsck·이동/삭제·DHCP·필수 저장을 공통 잠금 안에서 수행 | 불변 root의 restore fsck 2→1. source 변경 시 2회·원 요청 재전달 시 재검사. 장기 잠금의 B 실제 stop 지연은 아직 남음 |
 
 E.unique는 `xenova-domain-identity --domid`를 호출한다. 현재 recipe의 wrapper는 실행 가능한
 `/usr/libexec/xenova-domain-identity-native`가 있으면 그 파일로 exec하고, 없을 때만 기존
@@ -380,6 +403,8 @@ P4 `PAIRED_COST-FINAL.json`과 여섯 raw facts는 동일 두 VM fixture의 기�
 
 이 절은 5.5번의 누락 방지 색인이다. 아래 영역을 이번에 새로 성능 감사/변경한 것은 아니다.
 소유는 현재 문서의 책임과 이 작업의 승인 범위에 근거하며 폴더/과거 작성자만으로 확정하지 않는다.
+비용·대기의 원인 추적은 실제 호출·의존 경계를 따라간다. 직접 수정은 승인된 소유 코드에
+한정하고, 공유·타 담당자 영역에서 발견한 원인은 기존 담당 요청으로 인계한다.
 표의 `recipes-*`는 `platform/yocto/meta-xenova/` 아래, `guests/apps/services`는
 `platform/` 아래 경로다. 소스 기호 표의 Python 모듈도 같은 실제 파일을 참조한다.
 
@@ -387,7 +412,7 @@ P4 `PAIRED_COST-FINAL.json`과 여섯 raw facts는 동일 두 VM fixture의 기�
 |---|---|---|
 | `platform/guests/common`, `platform/first-install`·lock | [빌드](../platform/build-guide.md), [2~5번](recovery-scenario-closure-20261030.md): source/seed/UUID·게시 | 플랫폼 직접. 준비/조립/독립 seed 비용·중복과 정책 적용 범위 5.5 |
 | `recipes-core/xenova-platform/files`·wrapper/unit | [관리](../platform/management-boundaries.md)·[boot](../platform/management-boot-boundaries.md)·[CPU](../platform/cpu-layout.md): 저장/실행/host | 플랫폼 직접. 본문 전 경로와 legacy 진입·필수 저장·scope/identity 5.5 |
-| `platform/boot`, `platform/network`, `recipes-core/xenova-bringup` | [boot](../platform/management-boot-boundaries.md): Xen/bridge/DHCP와 guest 시작·종료 | 공유 플랫폼 기반. 세부 운영 소유는 개별 unit/변경 승인 확인; 하위 호출 경계만 5.5 |
+| `platform/boot`, `platform/network`, `recipes-core/xenova-bringup` | [boot](../platform/management-boot-boundaries.md): Xen/bridge/DHCP와 guest 시작·종료 | 공유 플랫폼 기반. 실제 의존을 따라 비용/대기 원인 추적5.5; 공유 내부 직접 수정은 개별 소유/승인 확인·담당 요청 |
 | `guests/zephyr/xen-runtime`, `xen-store`, netfront·DTS/config | [runtime](../../platform/guests/zephyr/xen-runtime/README.md), [대기 검증](zephyr-wait-separation-20261026.md): 실행/Bootstrap·부분 초기화/종료 | 플랫폼 직접. Store 대기·통신·반납·메모리 상한을 기존 자료와 점검 |
 | `apps/drive`, `apps/common/xenova-drive-runtime`, `xenova-mqtt-c` | [공통 펌웨어](../../platform/apps/drive/README.md)·[주행 설계](../platform/drive-pipeline-architecture.md)·[기반 검증](zephyr-drive-foundation-20261029.md) | 플랫폼 승인 공통 경계. 계산/준비/통신/종료 부하; 실제 planner/차량은 별도 |
 | `guests/zephyr/diagnostics`, `telemetry` | [Telemetry](../../platform/guests/zephyr/telemetry/README.md)·[건강](../contracts/health-evidence-v1.md): 실행별 계측/원자료 | 플랫폼 직접. 수집/페이지/발행/보존·공간/stack 비용 5.5, 실계상 수락7 |
@@ -396,7 +421,7 @@ P4 `PAIRED_COST-FINAL.json`과 여섯 raw facts는 동일 두 VM fixture의 기�
 | `platform/deploy/mosquitto`, `recipes-connectivity/xenova-mqtt-broker`, `mosquitto`, `tailscale`, `openssh`·xenova_wifi.py | [MQTT](../../platform/deploy/mosquitto/README.md)·[관리 사용법](../platform/cli-manager-spec.md): 인증/경로/부팅/영구 상태 | 플랫폼 패키지·공통 정책 연계, backend 도구 공동 원본. 실제 broker/Tailnet 정책 변경은 별도 승인 |
 | `recipes-extended/xen/files/0002-console-filter-xenova-evidence.patch`·`xenova_telemetry_evidence.py`·`xenova_trace.py`·console collector | [실행 로그](../contracts/runtime-logs-v1.md)·[원자료/운영 프로필](zephyr-drive-foundation-20261029.md): 실행 귀속/보존·관측 간섭 | 플랫폼 소유 추가 경로. 기존 PTY/VM 간 비차단·회전/trace 비용 5.5 |
 | `platform/yocto/meta-xenova`, `platform/scripts`·이미지 조립 | [빌드 가이드](../platform/build-guide.md)·[recipe](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/xenova-platform_1.0.bb) | 플랫폼 제공·공유 빌드 작업. source→패키지→설치/설정 단위; 진행 중 이미지 작업은 이번 비대상 |
-| `services/dom0-manager`·Worker·Agent, backend/frontend·Jetson/ESP32/display | [요청 색인](../requests/README.md)·[VM HTTP](../contracts/vm-api-contract-v1.md)·[화면](../contracts/display-source-bindings-v1.md) | 타 담당자/공동 연결. Gateway 외 제품 소유를 추정해 대리 수정하지 않음. 6·7번 연결/수락이며 5.5 직접 수정 범위 아님 |
+| `services/dom0-manager`·Worker·Agent, backend/frontend·Jetson/ESP32/display | [요청 색인](../requests/README.md)·[VM HTTP](../contracts/vm-api-contract-v1.md)·[화면](../contracts/display-source-bindings-v1.md) | 타 담당자/공동 연결. 의존 비용은 추적하되 대리 수정하지 않음. 6·7번 연결/수락이며 5.5 직접 수정 범위 아님 |
 
 <a id="evidence"></a>
 ## 8. 재사용한 보장과 근거 수준
@@ -419,6 +444,7 @@ P5 초기 실패·수정 전 audit·inode 오탐·fixture 정책/경계 실패�
 ## 9. 불일치와 후속 인계
 
 아래 한 표를 후속 기준으로 쓴다. ‘비용 의심’은 이번에 새 결함을 재현한 판정이 아니다.
+5.5번의 우선순위·계측/변경/수락 순서는 [후속 계획](platform-cost-concurrency-plan.md)에 둔다.
 
 | 구분·사실/근거 수준 | 영향·필요한 확인/수정 | 책임·단계·완료 근거 |
 |---|---|---|
