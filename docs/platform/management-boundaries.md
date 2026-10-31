@@ -268,11 +268,20 @@ Worker의 원 결과 소비·Standby 재합류 종단 연결은 담당자 인수
 공통/admission을 잡고 대상 lease를 기다리지 않는다. 다른 writer는 이 파일을 무대기 확인해
 같은 VM을 변경하지 않는다. 같은 thread의 중첩 공개 호출도 예외가 아니다.
 
-retire/restore/purge의 긴 usage/inventory·restore fsck·purge 항목 unlink/fsync는
+retire/restore/purge의 긴 usage/inventory·restore fsck·purge 항목 unlink/fsync와
+update-resources의 usage, firmware-transition의 bundle 검증·revision 복사/검증은
 `Manager._lifecycle_io`에서 대상 보호를 유지한 채 공통 잠금 밖에서 수행한다.
-복귀할 때 해당 tombstone·의도·원 journal을 대조하고, restore의 주소/용량 판정에는
+자원/firmware도 수락 전 lease와 기존 I/O 슬롯을 사용하고, 수락 뒤 원 journal에 결합한다.
+독립 firmware-replace CLI는 같은 대상 보호로 동일 프로필 준비를 분리하되 기존의
+비-journal 출력/교체 의미를 유지한다. 직접 Python replace_firmware의 기존 호출자는
+여전히 공통 잠금을 보유해야 한다. 일반 조회/다른 VM stop은 I/O 슬롯을 사용하지 않는다.
+복귀할 때 해당 tombstone·의도·원 journal·해당 configuration을 대조하고, 주소/용량 판정에는
 현재 등록 집합을 새로 얻는다. 삭제 항목마다 전체 registry/Xen을 다시 스캔하지 않는다.
-이동·등록·필수 journal/DHCP 결과 확정은 공통 구간이다. 단일 rename/fsync 등 syscall의
+이동·등록·필수 journal 결과 확정과 DHCP 예약 파일의 원자적 게시만 공통 구간이다.
+이 소유 경로의 DHCP start/network/is-active와 reload는 admission·공통 잠금 밖이다.
+서비스 확인 후 새 registry로 예약 파일을 구성하여 다른 VM의 새 예약을 덮지 않는다.
+reload 실패는 원 결과를 성공으로 만들지 않으며 같은 원 작업으로 회수한다.
+create/제어/복구의 기존 DHCP 호출을 전부 병렬화한 것은 아니다. 단일 rename/fsync 등 syscall의
 최악 지연이나 모든 물리 제어의 병렬화를 보장하지 않는다.
 
 원 journal을 기록한 뒤 lease에 operation/spec/세대를 결합한다. 활성 같은 key는 원 진행을
@@ -285,6 +294,8 @@ FD 잔존은 새 실행과 storage drain을 막으며 대상 보호/슬롯을 �
 소유·root revision·원 기록·host/gate가 달라지면 재검사/명시 거절하며 gate 닫기·재열기는
 옛 검사를 다시 허가하지 않는다. 게시 직전 admission 안에서 gate·metadata·검사한 root를
 대조한다. 실제 보호/비용과 양 OS barrier는 [5.5 후속 근거](../verification/recovery-scenario-closure-20261030.md#stage55-followup)를 따른다.
+그 이후 firmware/usage/DHCP의 실제 독립 stop과 CPU 교차·추가 비용은
+[좁은 교차 보완](../verification/recovery-scenario-closure-20261030.md#stage55-cross-boundaries)에 연결한다.
 
 5번까지 반영한 `4a585d4`의 기능별 권위 원본·호출·소유/잠금·비용·실패 종결은
 [기본 관리 기준선](../verification/platform-management-baseline.md)에서 대조한다.

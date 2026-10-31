@@ -371,3 +371,23 @@ restore의 중복 fsck는 같은 파일/같은 잠금 구간에서 줄였지만 
   API cgroup/backend·운영 create 정책·동일 설치본의 HTTP 수락은 미완료로 유지한다.
 
 - 2026-10-29: 현재 HTTP 소스의 key stop/조회 제공을 확인했습니다. Spring의 `stop`은 void 호출이며 종단 연결은 별도 과제입니다. 운영 API·DB·env·서비스를 변경하지 않았습니다.
+
+- 2026-10-31 5.5 교차 보완: firmware-transition·update-resources와 독립 firmware CLI의 긴
+  준비/사용 열람, lifecycle DHCP 서비스 대기를 같은 대상 lease 아래 분리했다. 별도 VM의
+  get·원 조회·stop 수락과 실제 completed를 구별한 [로컬 근거](../verification/recovery-scenario-closure-20261030.md#stage55-cross-boundaries)를 따른다.
+  HTTP 자체의 직렬화/threadpool/backend 수명을 수락한 결과는 아니다. D02/D08의 원 key·기한·
+  pending 후속 이행 책임과 권한 검사는 그대로다.
+
+### 같은 후보의 설치 집합과 프로세스 교체 인계 (6·7번 미실행)
+
+배포 담당자는 최신 보고서의 `SUBSET_PACKAGE-FINAL.json`을 기준으로 recipe Python 33개 전체의
+설치 바이트·모드·import 경로를 묶어서 확인해야 한다. 특히 Manager/Execution/Preparation,
+resources, zephyr/zephyr_transition, vm, CPU, creation, recovery, runtime/trace와 관련 CLI를
+부분적으로 구형 writer와 섞지 않는다. CPU policy/journal은 새 2.0과 보존 1.0의 원 hash/replay를
+읽으며 anchor·host receipt는 기존 1.0이다. 기존 정책을 초기화하거나 예전 형식으로 재해시하지 않는다.
+
+교체 계획에는 신규 수락 중지 → 기존 API/Worker/CLI의 원 작업·lease·상속 helper FD drain 확인
+→ 같은 모듈 집합 교체 → 이전 import를 보유한 장기 프로세스 교체 → 새 프로세스의 실제 import
+경로/버전·원 key 조회·현재 정책 확인을 포함한다. drain 미확정이면 설치를 강행하거나 lock/원장을
+삭제하지 않는다. 실제 gate/서비스/API/backend 수명과 guest 보존은 담당자 공동 수락이다.
+이번에는 이 절차를 실행하지 않았고 API 재시작·운영 파일/정책·설치본을 변경하지 않았다.

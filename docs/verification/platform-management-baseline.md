@@ -23,7 +23,9 @@ P1의 USER_CONCEPT_ORIGINAL.md와 12장 전 본문 동일성은 그때 확인한
 1번의 최종 판정은 **기능별 기준선·비용·소유권 대응 정리 완료**다. 다음은
 [5.5번 비용·대기 경합 점검 계획](platform-cost-concurrency-plan.md)이며,
 1번의 편집 후속은 문서/계획 작성까지였다. 이후 승인된 5.5번의 실제 변경·계측과
-남은 공통 잠금은 [현재 결과](recovery-scenario-closure-20261030.md#stage55)에 구분한다.
+남은 공통 잠금은 [첫 결과](recovery-scenario-closure-20261030.md#stage55),
+[lifecycle/CPU 후속](recovery-scenario-closure-20261030.md#stage55-followup),
+[firmware/usage/DHCP·CPU 교차 보완](recovery-scenario-closure-20261030.md#stage55-cross-boundaries)에 후보별로 구분한다.
 
 5번의 `69387c1`은 당시 기반 HEAD다. 실제 검증 입력은 그 HEAD+제품/시험 diff·새 파일이었다.
 현재 네 커밋 `1aa64ac`(제품) → `4334967`(시험) → `53c5077`(계약) → `4a585d4`(보고)와
@@ -48,7 +50,7 @@ snapshot 뒤 차이는 최종 검증 보고서 한 파일이며 봉인과는 일
 
 | 약칭 | 저장소 경로·기준 기호 |
 |---|---|
-| M | [xenova_management.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management.py#L1479): Manager.call/fork, ReadContext, _mutate/_query/_create |
+| M | [xenova_management.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management.py#L1501): Manager.call/fork, ReadContext, _mutate/_query/_create |
 | P | [xenova_vm.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_vm.py#L257): Platform.request_control/records/start/stop_many/reboot/autostart |
 | E | [xenova_execution.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_execution.py#L804): Execution.control/accept/observe_many/guard_launch/snapshot |
 | C | [xenova_creation.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_creation.py#L259): policy/accept/work/validate/reconcile/released/holds |
@@ -375,7 +377,8 @@ root의 경로/dev/inode/크기/mtime/ctime가 같을 때만 fsck 근거를 재�
 | R.atomic_write/필수 저장 | 각 journal/intent/자원 receipt·게시/완료 저장마다 file/parent fsync. 복사 chunk마다 journal fsync는 없음 | syscall은 엄밀히 선점 못 함. snapshot의 VM별 짧은 잠금도 저장 지연 가능. SD 내구·최악 지연 미측정 |
 | C.holds/released | 미완료 자산 소비 guard가 호출. complete이면 file/parent fsync+원 JSON 재읽기, SUCCEEDED는 short-circuit | 신규 create의 같은 잠금 구간에서 주소/용량이 같은 반환 판정을 재사용. 다른 호출/잠금 구간·다른 소비자는 다시 확인. 전역 cache 없음 |
 | C.inventory/usage/reconcile | 진단/수습 진입·각 삭제 전·최종 사용 확인. 현재 Xen disk·mountinfo·loop·/proc FD, 남은 계획/inode, 항목별 marker/진행 저장 | 계획 최대128항목/직렬화128KiB·고정 topology. 프로세스/FD 수·파일 수·저장 횟수 증가. 각 시점의 사용/교체가 바뀔 수 있음. 전역 proc 보드 비용 미측정 |
-| M._transition/_purge | stopped/usage·restore e2fsck·이동/삭제·DHCP·필수 저장을 공통 잠금 안에서 수행 | 불변 root의 restore fsck 2→1. source 변경 시 2회·원 요청 재전달 시 재검사. 장기 잠금의 B 실제 stop 지연은 아직 남음 |
+| M._transition/_purge·RS/firmware | 대상 lease·기존 I/O 슬롯을 유지하고 usage/fsck/삭제·bundle 검증/복사는 공통 잠금 밖. 이동·설정/예약 파일 게시·필수 저장은 공통 구간 | 첫 P55의 fsck 2→1과 지연 반례는 과거 근거. 후속의 restore 및 이번 firmware/usage/DHCP barrier에서 A 해제 전 B 실제 stop 확인. 실제 공유 저장 syscall 지연/모든 제어 병렬화는 미수락 |
+| CP.require/layout | 한 단계의 검증된 정책+전체 journal을 전달. 외부 CPU 관측 뒤 정책+전체 journal 재검증, 새 incarnation/효과 제출 경계의 검사 유지 | CPU 2.0 착수→이번 start 스캔24→18, reboot23→17, recovery29→20; 1/4-vCPU·기본/명시 mask 계수 동일. get은 CPU 정책 준수 판정 아님. [20조건 계수](recovery-scenario-closure-20261030.md#stage55-cross-boundaries) |
 
 E.unique는 `xenova-domain-identity --domid`를 호출한다. 현재 recipe의 wrapper는 실행 가능한
 `/usr/libexec/xenova-domain-identity-native`가 있으면 그 파일로 exec하고, 없을 때만 기존
@@ -456,7 +459,7 @@ P5 초기 실패·수정 전 audit·inode 오탐·fixture 정책/경계 실패�
 | 설계/운영 미정: 유한 생성 정책 공급·보드 시간값 | 예시만 설치됨. 현재 새 Linux 생성 활성 전제 명시. 임의 숫자로 활성화하지 않음 | 배포/운영 정책 소유자6, 같은 후보 보드 수락7 |
 | 비용 의심: holds의 소비자별 fsync/read, 반복 원장/registry·manifest/lease 스캔 | 내구 재확정/현재성 목적과 동일 근거 중복을 분리해 호출·parse/bytes/fsync/lock 계측. 지금 생략/최적화하지 않음 | 소유 플랫폼5.5. 동일 조건 정상 진행+오류 보호 비용 회귀 |
 | 비용 의심: 수습의 항목별 inventory·전역 proc/Xen/loop 사용 열람 | 현재 사용/대상 교체 보호는 유지. 프로세스/FD·항목 규모 증가와 필수 저장 비용 미측정 | 소유 플랫폼5.5, 실제 root 관측/SD 비용7 |
-| 비용 의심: templates/probe/recovery-operation·retire/restore/purge/CPU의 공통 잠금 | Linux private 분리 밖 장기 구간은 남음. 읽기·효과·작업 소유를 혼동하지 말고 전체 색인에서 점검 | 소유 플랫폼5.5, 정상 조합과 원 key·저장/중단 보장 회귀 필요 |
+| 이번 확인: restore 및 firmware/자원 usage/DHCP의 불필요한 공통 대기 | 대상 소유 아래 긴 I/O/서비스 호출 분리, 같은 자산·원 key 보호. DHCP 예약 파일은 최신 registry로 짧게 게시 | 소유 플랫폼5.5 로컬 수락. [최신 barrier/비용](recovery-scenario-closure-20261030.md#stage55-cross-boundaries). 공유 저장 syscall·templates/probe/recovery-operation의 기존 공통 경로를 전부 무대기로 선언하지 않음 |
 | 증거 부족: 현재 대용량 생성/제어/수습의 실제 시간·부하·공정성 | 이번 자료는 로컬 대역·제어 시계·과거 비용. 현재 후보의 단계별 보드/OS·Xen·SD 계측 필요 | 7, 사전 비용 질문/실험 설계는5.5. 무제한 병렬/최악 지연 주장 금지 |
 | 증거 부족: API cgroup/backend 귀속·host 종료 | 하위 GP.scope_command와 설치본 동작을 구별. API 재시작에서 guest 보존은 이번 통과 아님 | 기존 요청 ‘설치본 API 재시작과 VM backend 소유’,6·7 |
 | 기존 미완료: Linux 기능 건강·Worker episode/후속 이행·Standby·장치 적용 | D01-L01~L05/W01~W05·D03-W01~W04·G2/AO3·H1/H3 원 책임 유지 | 담당 요청/정책6·제품/장치7. Manager 생성/복구 수락으로 닫지 않음 |

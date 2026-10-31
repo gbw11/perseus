@@ -1140,4 +1140,6 @@ CPU는 Debian·Ubuntu·Zephyr 모두 UUID별 정적 pinning·해제를 제공한
 
 고정 Zephyr의 기존 native kernel worker 9개 시나리오도 격리 실행했지만 실보드 주기 총비용·Xen/IRQ/SD·API backend 귀속·운영 create 정책·상위 제품 연결·장치 종단은 완료가 아니다. 0~11장의 개념 본문은 이번 구현 이력으로 바꾸지 않았다.
 
+그 뒤의 [좁은 교차 보완](../verification/recovery-scenario-closure-20261030.md#stage55-cross-boundaries)은 firmware·자원 usage·lifecycle DHCP의 무관한 stop 대기를 분리하고, 정적 CPU 배치와 자원 수 변경·준비 오류·수습·새 host의 연쇄를 로컬 확인했다. 같은 단계의 정책/원장 재읽기는 줄였지만, 관측 후 새 journal과 효과 제출·새 실행의 검증은 유지한다. 책임/권한/식별자/수명의 개념 정의를 바꾼 작업이 아니다.
+
 [맨 위로](#contents)

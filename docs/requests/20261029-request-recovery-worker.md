@@ -115,3 +115,10 @@ recover_once 폭주 0·옛 intent/attempt 재적용 0·수습을 VM 복구/Stand
   D01/D03을 함께 사용한다. Worker의 건강·앱 재시작 정책/제품 연결을 구현한 것은 아니다.
 
 - 2026-10-29: 승인한 최소 소비 연결과 로컬 회귀를 완료했습니다. D01·D03 요청 전체나 실제 Xen/Store·설치본 수락을 완료한 것은 아닙니다. Worker가 앱 재초기화를 자동 선택·요청하는 정책은 구현하지 않았으며, 로컬 root 수동 경로와 별도로 D01-W03·W04에서 결정해야 합니다.
+
+- 2026-10-31 5.5 교차 보완: CPU 정책/receipt 손상·read EIO·준비 중 상태에서 근거 없는
+  start/recover를 차단하면서 정확한 Manager stop과 회복 후 start를 로컬 확인했다.
+  생성 실패 수습·내구 반환 뒤 실제 CPU writer와 정상 실행이 재개되고, journal 전 살아 있는
+  lifecycle lease는 writer가 계속 존중한다. [최신 근거](../verification/recovery-scenario-closure-20261030.md#stage55-cross-boundaries)를 연결하며
+  D01/D03 정책을 대신 구현하지 않는다. 하위 import 집합을 교체할 때 장기 Worker의 이전
+  import와 구형 writer를 혼합하지 않는 조건은 [배포 인계](20261029-request-http-spring-ui.md#같은-후보의-설치-집합과-프로세스-교체-인계-67번-미실행)를 따른다.

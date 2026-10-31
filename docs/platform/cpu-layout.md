@@ -277,3 +277,10 @@ CPU 오류 때문에 이 확인을 우회하거나 실행 불확실성을 임의
 host 재부팅 전후 검증에는 새 host_boot_id, cpu-layout, 준비 로그, 기존 UUID·자산 해시가
 필요하다. 특정 후보·실보드 결과와 남은 검증은
 [검증 이력](../verification/platform-management-boundaries-history.md)에 보존한다.
+
+동일 읽기 단계의 정책·전체 publication journal은 내부에서 함께 전달한다. CPU 관측 뒤에는
+정책과 전체 이력을 새로 검증하므로 정책 값이 그대로인 새 prepared journal도 준비 완료로
+읽지 않는다. 요청 간 cache는 없다. pinning된 Linux의 정지 2→4→2 변경·해제, 준비 오류 중
+정확한 Manager stop, 빈 placements·새 host·과거 factory ticket, 생성 수습 후 실제 정책
+변경의 로컬 assertion과 대표 20조건의 비용 계수는
+[5.5 교차 보완](../verification/recovery-scenario-closure-20261030.md#stage55-cross-boundaries)에 연결한다.
