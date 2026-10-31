@@ -1,9 +1,12 @@
 # HTTP·Spring·VM 관리 화면 연동 요청
 
 수신: dom0-manager FastAPI·Driver, Spring VM 관리, VM 관리 화면 담당자.
-**상태: D02·D08 하위 Manager 구현·로컬 회귀·부분 패키징 마감 / HTTP·Spring·화면 연동 미구현·종단 수락 전.**
+**상태: D02·D08 하위 Manager 마감 / FastAPI key stop·원 key 조회 제공 / 3~5번 소비 및 Spring·화면 후속 이행·종단 수락 대기.**
 현재 요청은 제품 담당자가 구현해야 할 연동이다. 하위에서 제공하는 기능과 HTTP/화면의
 제안 계약을 구분하며, 정상 VM 응답의 의미를 pending 접수 의미로 바꾸지 않는다.
+아래 최초 요청의 상세 표는 당시 이력이다. 현재 소스의 key stop/조회 제공 범위와 남은
+연결은 [기본 관리 기준선](../verification/platform-management-baseline.md#followups) 및
+[최신 담당 요청](../requests/20261029-request-http-spring-ui.md)을 먼저 대조한다.
 
 ## 현재 할 일
 

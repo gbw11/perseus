@@ -29,7 +29,9 @@ MQTT의 payload 2.1 지원, 실제 보드 수락과 제품 소비자의 저장·
 
 | 할 일 | 문서 |
 |---|---|
+| 책임·권한·식별자·생명주기의 큰 그림 복습 | [개념적 아키텍처](conceptual-architecture.md) |
 | 플랫폼 구조와 요청의 수명 이해 | [관리 구조·수명주기](management-boundaries.md) |
+| 기본 다섯 기능·원 작업·수습의 현재 구현/비용/근거 대조 | [기능별 기준선](../verification/platform-management-baseline.md) |
 | 자원·필수 작업·전달의 건강 근거와 행동 책임 | [건강 판정 계약](../contracts/health-evidence-v1.md) |
 | VM 조회·생성·시작·정지·복구·Wi-Fi 사용 | [CLI·Manager 명세](cli-manager-spec.md) |
 | pending·원 요청 조회·시간 예산의 제품 연동 담당 범위 | [FastAPI·Spring·화면 연동 요청서](management-integration-request.md) |

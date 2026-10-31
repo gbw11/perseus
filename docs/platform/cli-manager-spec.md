@@ -3566,7 +3566,7 @@ original_result의 내부 내용은 원 완료 기록 그대로다. 위 physical
 | `INSUFFICIENT_STORAGE` | 4 | 현재 준비와 기존 VM 증가 예약을 포함한 용량 부족 |
 | `IP_POOL_EXHAUSTED` | 4 | 사용 가능한 내부 예약 IP 없음 |
 | `OBSERVATION_UNAVAILABLE` | 4 | Xen/host/handler incarnation의 검증된 관측 실패 |
-| `DEADLINE_EXCEEDED` | 4 | probe/short lock/복구/협조형 reboot 기한 만료 |
+| `DEADLINE_EXCEEDED` | 4 | 호출/조회·short lock·제어/복구·Linux create/수습의 적용 기한 만료. 원 작업 기한을 새로 발급하지 않음 |
 | `XEN_EXECUTION_FAILED` | 4 | 수락 후 물리 제어 실패. accepted 상태·journal 확인 |
 | `RECOVERY_REQUIRED` | 4 | 자산 준비/부분 게시/journal 무결성·중단 복원 조사 |
 | `RECONCILE_REQUIRED` | 4 | launch/제어/복구/완료 저장의 실행 불확실성. 물리 요청 반복 없이 조사 |

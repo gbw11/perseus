@@ -216,9 +216,10 @@ create/reboot나 강제 종료를 제출할 수는 없다. 관측 실패는 정�
 
 ## 제품 서비스 연동과 지원 경계
 
-하위 Manager의 stop 수락은 구현돼 있다. 제품 HTTP는 VM별 mutex와 공유
-SerializedManager를 먼저 통과하며 pending details와 원 key의 전달도 연결돼 있지 않다.
-따라서 하위의 복구 중 stop 수락을 HTTP 종단 수락으로 해석하면 안 된다.
+하위 Manager의 stop 수락과 제품 FastAPI의 **key 있는 stop·원 key 조회**는 구현돼 있다.
+이 경로는 요청별 Manager로 선행 get·VM mutex·공유 직렬화를 우회해 pending/완료를 구분한다.
+key 없는 기존 stop은 VM mutex·SerializedManager 경로를 유지한다. Spring의 원 key 보존과
+조건부 후속 이행, 3~5번의 일반 조회/생성·수습 소비까지 종단 연결됐다는 뜻은 아니다.
 하위는 독립 요청 객체의 stop 수락, 원 key의 read-only 작업 조회와 호출별 잔여 예산을
 제공한다. FastAPI·Spring·VM 관리 화면의 연결 위치와 수락 조건은
 [관리 요청 연동 요청서](management-integration-request.md)에 정리돼 있다. 요청서는
@@ -254,3 +255,10 @@ Worker의 원 결과 소비·Standby 재합류 종단 연결은 담당자 인수
 검증 범위다. 실제 host 종료의 모든 실패 경로와 상위 종단 수락은 남아 있다.
 특정 후보 비교·측정 조건·원자료·과거 실패는
 [검증 이력](../verification/platform-management-boundaries-history.md)에 보존한다.
+
+## 현재 적용 상태
+
+5번까지 반영한 `4a585d4`의 기능별 권위 원본·호출·소유/잠금·비용·실패 종결은
+[기본 관리 기준선](../verification/platform-management-baseline.md)에서 대조한다.
+Linux 원 기한·명시 private 수습·내구 예약 반환은 하위 로컬/부분 패키징 범위다.
+운영 생성 시간 정책의 공급과 같은 후보 설치, HTTP·Spring·화면 및 실제 보드 수락은 별도다.
