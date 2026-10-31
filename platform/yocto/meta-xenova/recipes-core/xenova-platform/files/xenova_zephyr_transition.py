@@ -33,10 +33,11 @@ def validate(spec, normalize_uuid, fail):
 
 
 def mutate(m,spec,execute,key,records,context,fail):
-    from xenova_preparation import guard_asset
-    guard_asset(m.p, spec['vm_id'])
+    m._asset_guard(context,spec['vm_id'])
     ops=m._operations()
-    op=next((q for q in ops if q["idempotency_key"]==key),None)
+    matches=[q for q in ops if q['idempotency_key']==key]
+    if len(matches)>1:fail('RECONCILE_REQUIRED','operation selector is ambiguous')
+    op=matches[0] if matches else None
     if op:
         context.update(operation_id=op["operation_id"],replayed=True)
         if op["action"]!=ACTION or op["request"]!=spec:
@@ -52,7 +53,8 @@ def mutate(m,spec,execute,key,records,context,fail):
     before=op["snapshot"]["record"] if op else record
     if fingerprint(before)!=spec["expected_configuration_sha256"]:
         fail("TARGET_CHANGED","expected firmware configuration changed")
-    info=zephyr.bundle_info(Path(spec["bundle"]),spec["manifest_sha256"])
+    with m._lifecycle_io(context,records):
+        info=zephyr.bundle_info(Path(spec["bundle"]),spec["manifest_sha256"])
     network="hardware_profile" in info
     updated=copy.deepcopy(before)
     updated.update(active_firmware={k:info[k] for k in ("manifest","revision","version","sha256")},
@@ -71,17 +73,23 @@ def mutate(m,spec,execute,key,records,context,fail):
                 fail("IP_CONFLICT","allocated MAC collides; no publication")
             updated.update(mac=mac,ipv4=address,hostname=record["name"])
     vm.validate_identity(updated)
-    if updated.get("ipv4"):
-        _,held=m._ip_inventory(records,excluding=record["uuid"])
-        if updated["ipv4"] in held:
-            fail("IP_CONFLICT","recorded transition reservation conflicts with another owner")
     if op and updated!=op["updated_record"]:
         fail("RECOVERY_REQUIRED","transition journal/profile mismatch")
     if record not in (before,updated):
         fail("TARGET_CHANGED","configuration superseded")
     published=bool(op and record==updated and before!=updated)
     if not published:
-        guards(m,tomb,[q for q in ops if q is not op],fail)
+        guards(m,tomb,[q for q in ops if q is not op],fail,context,records)
+    if updated.get('ipv4'):
+        current_ops=m._operations()
+        _,held=m._ip_inventory(records,excluding=record['uuid'],operations=current_ops)
+        if updated['ipv4'] in held:
+            fail('IP_CONFLICT','recorded transition reservation conflicts with another owner')
+        others=[r for r in records.values() if r['uuid']!=record['uuid']]
+        others += [t['record'] for t in m._tombs().values() if t['vm_id']!=record['uuid']]
+        if (any(r.get('mac')==updated.get('mac') for r in others) or
+                any(q['vm_id']!=record['uuid'] and q.get('assigned',{}).get('mac')==updated.get('mac') for q in current_ops)):
+            fail('IP_CONFLICT','transition MAC conflicts with another current owner')
     if not execute:
         return {"plan":True,"action":ACTION,"before":before,"after":updated,
                 "address_reserved":False,"starts_guest":False}
@@ -97,17 +105,26 @@ def mutate(m,spec,execute,key,records,context,fail):
         m._save_op(op)
     else:
         context["write_operation"]=True
+    if context.get('asset_lease'):context['asset_lease'].bind(op)
     directory=m.data/"instances"/record["id"]
     if not published:
         m.p.reserve_space(info["logical_bytes"]*2,records)
-        zephyr.copy_revision(Path(spec["bundle"]),directory/"firmware",spec["manifest_sha256"])
+        with m._lifecycle_io(context,records):
+            zephyr.copy_revision(Path(spec["bundle"]),directory/"firmware",spec["manifest_sha256"])
+            zephyr.validate_instance(updated,directory)
         m.checkpoint("firmware-copied",op)
-        zephyr.validate_instance(updated,directory)
-        m._write(directory/"instance.json",updated)
+        m._asset_guard(context,record['uuid'])
+        m._stopped(record)
+        if m._read(directory/'instance.json')!=record:
+            fail('TARGET_CHANGED','configuration changed before firmware publication')
+        from xenova_execution import short_lock
+        with short_lock(m.p.runtime,'admission'):
+            m._writable()
+            m._write(directory/"instance.json",updated)
         m.checkpoint("profile-published",op)
     # A failed reload keeps this journal and its reservation; retry never selects a new address.
     with __import__("xenova_management").tool_output():
-        m.p.prepare_dhcp(m.p.records(validate_assets=False))
+        m._prepare_dhcp(context)
     result={"vm_id":record["uuid"],"generation":tomb["generation"],
             "previous_firmware":before["active_firmware"],"active_firmware":updated["active_firmware"],
             "configuration_sha256":fingerprint(updated),"starts_guest":False,

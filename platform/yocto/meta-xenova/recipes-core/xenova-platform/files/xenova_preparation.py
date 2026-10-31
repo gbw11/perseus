@@ -298,13 +298,14 @@ class AssetLease:
         from xenova_execution import refuse
         path = _owners(self.p.runtime)/('asset-'+self.identity+'.lock')
         info, current = _plain(self.fd), path.stat(follow_symlinks=False)
+        execution=self.p.execution()
         if ((info.st_dev, info.st_ino) != (current.st_dev, current.st_ino) or
-                self.p.boot_id_reader() != self.host or self.p.execution().barrier() != self.barrier):
+                execution.host != self.host or execution.barrier() != self.barrier):
             refuse('TARGET_CHANGED', 'lifecycle owner or host admission context changed')
         marker = self.p.runtime/'shutdown-requested'
         if marker.exists() or marker.is_symlink():
             raise OperationBusy('another platform operation is in progress: board shutdown')
-        self.p.execution().gate()
+        execution.gate()
 
     def __exit__(self, *args):
         current = _current()

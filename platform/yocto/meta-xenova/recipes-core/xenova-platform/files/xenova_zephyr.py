@@ -279,6 +279,13 @@ def new_instance(data, key, template, records, *, autostart=False, board_shutdow
 
 def replace_firmware(directory, record, source, expected):
     """호출자가 공통 잠금과 정지 상태를 확인한 뒤 호출한다. 실패 시 기존 참조를 보존한다."""
+    updated = prepare_replacement(directory, record, source, expected)
+    atomic_write(directory / 'instance.json', json.dumps(updated, indent=2) + '\n')
+    return updated
+
+
+def prepare_replacement(directory, record, source, expected):
+    """동일 프로필 revision만 준비한다. 호출자가 대상 소유를 유지하고 채택 직전 재검사한다."""
     if not DIGEST.fullmatch(expected or ''):
         raise PlatformError('firmware replacement requires --sha256 of the manifest')
     validate_instance(record, directory)
@@ -286,7 +293,6 @@ def replace_firmware(directory, record, source, expected):
     updated = copy.deepcopy(record)
     updated['active_firmware'] = {k: info[k] for k in ('manifest', 'revision', 'version', 'sha256')}
     validate_instance(updated, directory)
-    atomic_write(directory / 'instance.json', json.dumps(updated, indent=2) + '\n')
     return updated
 
 

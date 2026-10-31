@@ -292,6 +292,16 @@ class Manager:
             fail('OPERATION_IN_PROGRESS', 'board shutdown is in progress', retryable=True)
         self.p.execution().gate()
 
+    def _asset_guard(self, context, identity):
+        """내부 수행 문맥의 실제 lease만 사용한다. 독립/중첩 writer는 무대기 검사한다."""
+        lease=context.get('asset_lease')
+        if lease is None:
+            guard_asset(self.p,identity)
+        else:
+            if lease.p is not self.p or lease.identity!=identity:
+                fail('TARGET_CHANGED','asset execution context belongs to a different target')
+            lease.guard()
+
     @staticmethod
     def _text_token(value):
         if not isinstance(value, str) or any(ord(c) < 32 for c in value):
@@ -776,12 +786,19 @@ class Manager:
             if record['ipv4'] in held:
                 fail('RESTORE_CONFLICT', 'retained IP conflicts with another current reservation/lease')
 
-    def _apply_dhcp(self, op):
+    def _apply_dhcp(self, op, context=None):
         if vm.has_network(op['snapshot']['record']):
             self._save_op(op, 'dhcp-pending')
             with tool_output():
-                self.p.prepare_dhcp(self.p.records(validate_assets=False))
+                self._prepare_dhcp(context)
             self._save_op(op, 'dhcp-applied')
+
+    def _prepare_dhcp(self, context=None):
+        records=self.p.records(validate_assets=False)
+        # DHCP는 service 대기 뒤 직접 최신 registry를 얻는다. reload 뒤에는 더 소비하지 않는다.
+        outside=(lambda:self._lifecycle_io(context,records,refresh_records=False)) if context and context.get('asset_lease') else None
+        if outside is None:self.p.prepare_dhcp(records)
+        else:self.p.prepare_dhcp(records,_outside=outside)
 
     def _allocate_ip(self, spec, records, *, operations=None, pending=None):
         pool, held = self._ip_inventory(records,operations=operations,pending=pending)
@@ -901,7 +918,7 @@ class Manager:
                 op=Recovery(self).read_attempt(spec['recovery_attempt_id'])
                 if not complete(op,spec):return None
             data={'attempt':op,'original_result':op['result'],'current_observation':None}
-        elif action in ('retire','restore','purge'):
+        elif action in ('retire','restore','purge','update-resources','firmware-transition'):
             matches=[q for q in self._operations(deadline=read_end) if q['idempotency_key']==key]
             if len(matches)>1:fail('RECONCILE_REQUIRED','operation selector is ambiguous')
             if not matches:return None
@@ -909,7 +926,9 @@ class Manager:
             if op['request']!=spec or op['action']!=action:
                 fail('IDEMPOTENCY_CONFLICT','same key has a different action or request')
             context.update(operation_id=op['operation_id'],replayed=True)
-            if op['status']=='SUCCEEDED':return {**op['result'],'operation':op,'original_result':op['result'],'current':None}
+            if op['status']=='SUCCEEDED':
+                return {**(op['result'] if action in ('retire','restore','purge') else {}),
+                        'operation':op,'original_result':op['result'],'current':None}
             if asset_state(self.p,op)=='active':return self._operation_view(op,read_end)
             return None
         else:return None
@@ -1012,7 +1031,7 @@ class Manager:
         if (op['action']=='create' and op['status']!='SUCCEEDED' and effective!='FAILED'
                 and op['template']['guest_kind']=='linux' and self._owner_state(op)=='reconciling'):
             effective='RECONCILING'
-        if op['action'] in ('retire','restore','purge') and op['status']!='SUCCEEDED':
+        if op['action'] in ('retire','restore','purge','update-resources','firmware-transition') and op['status']!='SUCCEEDED':
             try:
                 if asset_state(self.p,op)=='active':effective='RUNNING'
             except (OSError,ValueError,PlatformError):
@@ -1143,7 +1162,7 @@ class Manager:
         return (str(path),info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
 
     @contextmanager
-    def _lifecycle_io(self, context, records):
+    def _lifecycle_io(self, context, records, *, refresh_records=True):
         """불변 대상 보호 아래 긴 I/O. 재진입 뒤 registry/의도/원 기록은 새로 대조한다."""
         lease = context.get('asset_lease')
         if lease is None:
@@ -1153,15 +1172,18 @@ class Manager:
         before = self._read(path) if path.exists() or path.is_symlink() else None
         record = before['record'] if before else next(r for r in records.values() if r['uuid']==lease.identity)
         intent = self.p.execution().intent(record)
+        configuration_path=self.data/'instances'/record['id']/'instance.json'
+        configuration=(self._read(configuration_path) if lease.action in ('update-resources','firmware-transition','firmware-replace') else None)
         opid = context.get('operation_id')
         original = self._read(self.data/'operations'/(opid+'.json')) if opid else None
         with lifecycle_io(self.p, context['common_fd'], lease):
             yield
         after = self._read(path) if path.exists() or path.is_symlink() else None
         if (after != before or self.p.execution().intent(record) != intent or
+                (configuration is not None and self._read(configuration_path)!=configuration) or
                 (opid and self._read(self.data/'operations'/(opid+'.json')) != original)):
             fail('TARGET_CHANGED', 'lifecycle inputs changed during protected inspection')
-        if lease.action=='restore':
+        if refresh_records and lease.action in ('restore','update-resources','firmware-transition','firmware-replace'):
             # 다음 주소/용량 채택에는 다른 VM의 최신 등록도 필요하다. purge 항목마다
             # 전체 registry를 재열람할 이유는 없으며 대상 tomb/의도/원 기록만 대조한다.
             current = self.p.records(validate_assets=False)
@@ -1181,7 +1203,7 @@ class Manager:
                     self._restore_ip(tomb['record'], records)
                     self._reserve_space(0, records, restored=(tomb['record'], directory))
                 if action in ('retire', 'restore'):
-                    self._apply_dhcp(op)
+                    self._apply_dhcp(op,context)
                 return self._finish(op, tomb)
         if tomb['generation'] != expected:
             fail('TARGET_CHANGED', 'lifecycle generation changed; stale operation cannot mutate assets')
@@ -1237,7 +1259,7 @@ class Manager:
         self._save_op(op, 'moved')
         tomb = self._save_tomb(tomb, op, desired, expected+1,
                               archive=op['target'] if action=='retire' else None)
-        self._apply_dhcp(op)
+        self._apply_dhcp(op,context)
         return self._finish(op, tomb)
 
     def _purge(self, op, tomb, *, records=None, context=None):
@@ -1529,8 +1551,7 @@ class Manager:
     def _dispatch_locked(self,action,spec,execute,idempotency_key,context,deadline,cpu_deadline,entered):
         """기존 공통 잠금 안의 metadata/제어 dispatch. private Linux 준비 결과만 밖으로 돌려준다."""
         if spec.get('vm_id') and action not in ('probe','execution-context','recovery-operation'):
-            if context.get('asset_lease'):context['asset_lease'].guard()
-            else:guard_asset(self.p, spec['vm_id'])
+            self._asset_guard(context,spec['vm_id'])
         try:
             records=self.p.records(validate_assets=False)
         except ExecutionError:
@@ -1754,7 +1775,7 @@ class Manager:
                 return {**response,'ok':True,'data':result,'operation_id':context['operation_id']}
             if action == 'stop':
                 self._accept_stop(spec,idempotency_key,deadline,context)
-            if action in ('retire','restore','purge'):
+            if action in ('retire','restore','purge','update-resources','firmware-transition'):
                 context['asset_lease'] = _output.stack.enter_context(
                     AssetLease(self.p, spec['vm_id'], action, idempotency_key))
                 _output.stack.enter_context(lifecycle_slot(self.p))

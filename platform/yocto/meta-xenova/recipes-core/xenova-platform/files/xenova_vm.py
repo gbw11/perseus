@@ -482,8 +482,16 @@ class Platform:
                    for link in links for a in link.get('addr_info', [])):
             raise PlatformError('xenbr0 must have 192.168.77.1/24')
 
-    @traced('platform.prepare-dhcp')
-    def prepare_dhcp(self, records, *, deadline=None):
+    def prepare_dhcp(self, records, *, deadline=None, _outside=None):
+        """예약 파일 게시는 공통 잠금 아래, 소유한 자산 호출의 서비스 대기만 밖에서 수행한다."""
+        if _outside is None:
+            with span('platform.prepare-dhcp'):
+                return self._prepare_dhcp(records,deadline=deadline)
+        # lock.hold를 끝내는 동안 그 안에 걸친 aggregate span을 열어두지 않는다.
+        # 이 경로는 개별 external.command와 lock.released.lifecycle로 계측한다.
+        return self._prepare_dhcp(records,deadline=deadline,_outside=_outside)
+
+    def _prepare_dhcp(self,records,*,deadline=None,_outside=None):
         def command(args, timeout=15):
             remaining = timeout if deadline is None else min(timeout, deadline-self.clock())
             if remaining <= 0:
@@ -491,12 +499,16 @@ class Platform:
                 refuse('DEADLINE_EXCEEDED', 'guest operation deadline exceeded')
             with span('external.command', command_kind='.'.join(args[:2]), timeout_seconds=remaining):
                 return self.command(args, timeout=remaining)
-        command(['systemctl', 'start', 'xenova-dhcp.service'], timeout=30)
-        if deadline is None:
-            self.check_network()
+        def service():
+            command(['systemctl', 'start', 'xenova-dhcp.service'], timeout=30)
+            if deadline is None:self.check_network()
+            else:self.check_network(deadline=deadline)
+            command(['systemctl', 'is-active', '--quiet', 'xenova-dhcp.service'])
+        if _outside is None:service()
         else:
-            self.check_network(deadline=deadline)
-        command(['systemctl', 'is-active', '--quiet', 'xenova-dhcp.service'])
+            with _outside():service()
+        # 서비스 대기 사이 새 VM이 게시될 수 있다. 이전 사본으로 최신 예약을 덮지 않는다.
+        if _outside is not None:records=self.records(validate_assets=False)
         ensure_runtime(self.runtime)
         known = {r.get('mac') for r in records.values()}
         known.update(t['record'].get('mac') for t in read_tombstones(self.data).values())
@@ -519,7 +531,9 @@ class Platform:
             f"{r['mac']},{r['ipv4']},{r['hostname']},infinite\n"
             for r in records.values() if has_network(r))
         atomic_write(self.runtime / 'dhcp-hosts', hosts, 0o644)
-        command(['systemctl', 'reload', 'xenova-dhcp.service'])
+        if _outside is None:command(['systemctl', 'reload', 'xenova-dhcp.service'])
+        else:
+            with _outside():command(['systemctl', 'reload', 'xenova-dhcp.service'])
 
     def cpu(self):
         from xenova_cpu import CPU
@@ -1136,20 +1150,35 @@ class Platform:
         except PlatformError as exc:
             return {'synchronized': None, 'error': str(exc), 'interval_clock': 'monotonic'}
 
-    def replace_firmware(self, record, source, expected, *, execute=False):
+    def replace_firmware(self, record, source, expected, *, execute=False, _context=None):
         from xenova_preparation import guard_asset
-        guard_asset(self, record['uuid'])
+        from xenova_management import Manager
+        manager=Manager(self)
+        if _context is None:guard_asset(self, record['uuid'])
+        else:manager._asset_guard(_context,record['uuid'])
         if guest_kind(record) != 'zephyr':
             raise PlatformError('firmware-replace requires a Zephyr instance')
         if self.matching(record, self.domains()):
             raise PlatformError('firmware replacement requires a stopped domain')
         directory = self.data / 'instances' / record['id']
-        info = zephyr.bundle_info(source, expected)
+        records=self.records(validate_assets=False)
+        with manager._lifecycle_io(_context or {},records):
+            info = zephyr.bundle_info(source, expected)
         if not expected:
             raise PlatformError('--sha256 of firmware manifest is required')
         if execute:
-            self.reserve_space(info['logical_bytes'] * 2, self.records(validate_assets=False))
-            zephyr.replace_firmware(directory, record, source, expected)
+            self.reserve_space(info['logical_bytes'] * 2, records)
+            if _context is None:zephyr.replace_firmware(directory, record, source, expected)
+            else:
+                with manager._lifecycle_io(_context,records):
+                    updated=zephyr.prepare_replacement(directory,record,source,expected)
+                manager._stopped(record)
+                if manager._read(directory/'instance.json')!=record:
+                    raise PlatformError('firmware configuration changed before publication')
+                from xenova_execution import short_lock
+                with short_lock(self.runtime,'admission'):
+                    manager._writable()
+                    atomic_write(directory/'instance.json',json.dumps(updated,indent=2)+'\n')
         print(json.dumps({'action': 'firmware-replace' if execute else 'plan-firmware-replace',
                           'id': record['id'], 'firmware': info, 'uuid': record['uuid'],
                           'starts_guest': False}, indent=2))
@@ -1292,6 +1321,23 @@ def main(argv=None):
     if args.action == 'check-xen':
         # xenova-xen-ready.service의 30초 상한 안에서 모든 xl 조회가 예산을 공유한다.
         p.check_xen(deadline=p.clock()+25)
+        return
+    if args.action == 'firmware-replace':
+        if args.bundle is None:
+            raise PlatformError('firmware-replace requires --bundle and --sha256')
+        from xenova_preparation import AssetLease, lifecycle_slot, request_output
+        records=p.records(validate_assets=False)
+        if args.id not in records:raise PlatformError('unknown instance id; create it explicitly')
+        identity=records[args.id]['uuid']
+        with request_output() as output:
+            lease=output.stack.enter_context(AssetLease(p,identity,'firmware-replace',None))
+            output.stack.enter_context(lifecycle_slot(p))
+            with operation_lock(p.runtime) as common:
+                record=p.records(validate_assets=False).get(args.id)
+                if not record or record['uuid']!=identity:raise PlatformError('firmware target changed')
+                lease.guard()
+                p.replace_firmware(record,args.bundle,args.sha256,execute=args.execute,
+                                   _context={'asset_lease':lease,'common_fd':common})
         return
     if args.action == 'diagnose':
         print(json.dumps({'time': p.time_status(), 'cmdline': Path('/proc/cmdline').read_text(),
