@@ -166,6 +166,10 @@ class CPU:
             refuse('CPU_POLICY_INVALID', 'CPU publication history is corrupt or unreadable')
 
     def policy(self, *, pending=None):
+        return self._policy_state(pending=pending)[0]
+
+    def _policy_state(self, *, pending=None):
+        """같은 읽기 단계에서 검증한 정책과 전체 이력을 함께 반환한다. 호출 간 보존하지 않는다."""
         value = self.read(self.policy_path)
         activated = self.read(self.anchor)
         try:
@@ -180,9 +184,9 @@ class CPU:
             if activated or history or self.journals.exists():
                 # Only the original interrupted first publication may finish activation.
                 if pending and len(history) == 1 and history[0].stem == pending['operation_id'] and pending['base_revision'] is None:
-                    return None
+                    return None, []
                 refuse('CPU_POLICY_INVALID', 'activated CPU policy is missing; explicit journal reconciliation required')
-            return None
+            return None, []
         try:
             if not activated or not vm.UUID.fullmatch(activated.get('activation_operation_id','')) or type(value['policy_revision']) is not int or value['policy_revision'] < 1:
                 raise ValueError('missing activation or revision')
@@ -203,10 +207,15 @@ class CPU:
                 raise ValueError('publication journal mismatch')
         except (KeyError, ValueError, TypeError, ExecutionError):
             refuse('CPU_POLICY_INVALID', 'CPU policy does not match its publication journal')
-        return value
+        return value, operations
 
     def context(self, record, policy=None):
         policy = self.policy() if policy is None else policy
+        return self._context(record,policy)
+
+    @staticmethod
+    def _context(record,policy):
+        """검증된 한 정책의 순수 투영. 미설정도 다시 디스크에서 읽지 않는다."""
         if policy is None:
             return {'configured':False}
         placement = next((v for v in placements(policy) if v['vm_id'] == record['uuid']), None)
@@ -329,6 +338,9 @@ class CPU:
     @traced('cpu.layout')
     def layout(self, records, deadline, vm_id=None):
         policy = self.policy()
+        return self._layout(records,deadline,vm_id,policy)
+
+    def _layout(self,records,deadline,vm_id,policy):
         if vm_id and not any(r['uuid'] == vm_id for r in records.values()):
             refuse('VM_NOT_FOUND', 'registered permanent VM UUID not found')
         sample = self.observe(deadline)
@@ -338,28 +350,20 @@ class CPU:
         host_matches = bool(policy and hardware['pool_name'] == policy['pool_name'] and
                             all(v['pcpus'] == desired for v in domains[0]['hard_affinity']) and
                             selected_cpus(policy) <= set(hardware['online_pcpus']))
-        pending = [v['operation_id'] for v in self.operations() if v['phase'] != 'completed']
-        ready = bool(not pending and host_matches and receipt and receipt.get('phase') == 'ready' and
-                     receipt.get('host_boot_id') == self.e.host and receipt.get('policy_sha256') == fingerprint(policy) and
-                     receipt.get('policy_revision') == policy['policy_revision'] and
-                     receipt.get('dom0_unique_id') == domains[0]['xen_unique_id'] and
-                     receipt.get('vcpus') == domains[0]['vcpus'])
-        all_issues = [{'code':'POLICY_PUBLICATION_PENDING', 'operation_id':v} for v in pending]
-        if policy and not ready:
-            all_issues.append({'code':'CPU_NOT_READY', 'domid':0})
+        all_issues = []
         managed = {r['uuid']:r for r in records.values()}
         for row in domains.values():
             if not policy or row['domid'] == 0:
                 continue
             record = managed.get(row['vm_id'])
-            expected = self.context(record, policy)['desired_hard_affinity'] if record else [
+            expected = self._context(record, policy)['desired_hard_affinity'] if record else [
                 {'vcpu':v, 'pcpus':desired} for v in range(row['vcpus'])]
             if row['hard_affinity'] != expected:
                 all_issues.append({'code':'AFFINITY_MISMATCH', 'domid':row['domid'], 'vm_id':row['vm_id'],
                                    'name':row['name'], 'expected':expected, 'actual':row['hard_affinity']})
         vms = []
         for record in records.values():
-            context = self.context(record, policy)
+            context = self._context(record, policy)
             row = next((v for v in domains.values() if v['vm_id'] == record['uuid']), None)
             if row and row['name'] != record['name']:
                 refuse('TARGET_CHANGED', 'managed UUID has an unexpected Xen name')
@@ -386,8 +390,19 @@ class CPU:
                         'observed':{'presence':'present' if row else 'absent',
                                     **{k:row[k] if row else None for k in ('domid', 'xen_unique_id', 'vcpus', 'hard_affinity')}},
                         'affinity_matches':matches, 'exclusive_verified':exclusive, 'issues':issues})
-        if self.policy() != policy:
+        current,operations=self._policy_state()
+        if current != policy:
             refuse('TARGET_CHANGED', 'CPU policy changed during observation')
+        # 정책 값이 그대로여도 관측 중 새 prepared journal이 생길 수 있다.
+        # 관측 이후의 완전 검증 이력으로 준비 여부를 판정한다.
+        pending = [v['operation_id'] for v in operations if v['phase'] != 'completed']
+        ready = bool(not pending and host_matches and receipt and receipt.get('phase') == 'ready' and
+                     receipt.get('host_boot_id') == self.e.host and receipt.get('policy_sha256') == fingerprint(policy) and
+                     receipt.get('policy_revision') == policy['policy_revision'] and
+                     receipt.get('dom0_unique_id') == domains[0]['xen_unique_id'] and
+                     receipt.get('vcpus') == domains[0]['vcpus'])
+        all_issues = ([{'code':'POLICY_PUBLICATION_PENDING', 'operation_id':v} for v in pending]+
+                      ([{'code':'CPU_NOT_READY','domid':0}] if policy and not ready else [])+all_issues)
         return {'configured':policy is not None, 'policy_revision':policy['policy_revision'] if policy else None,
                 'host_boot_id':self.e.host, 'observed_monotonic_ms':int(self.p.clock()*1000),
                 'host':{**hardware, 'desired_dom0_pcpus':desired,
@@ -402,16 +417,17 @@ class CPU:
         """전체 두 표본 검증. capture는 바로 중첩된 내부 호출에만 근거를 전달한다."""
         if self.p.clock() >= deadline:
             refuse('DEADLINE_EXCEEDED', 'CPU validation deadline expired')
-        context = self.context(record)
+        policy,operations=self._policy_state()
+        context = self._context(record,policy)
         if expected is not None and expected != context:
             refuse('TARGET_CHANGED', 'accepted CPU policy context changed')
         if not context['configured']:
             if capture is not None:
                 capture['evidence'] = _ValidationEvidence(self, record, deadline, context, None)
             return context
-        if any(v['phase'] != 'completed' for v in self.operations()):
+        if any(v['phase'] != 'completed' for v in operations):
             refuse('RECONCILE_REQUIRED', 'CPU policy publication is pending; finish the original operation')
-        layout = self.layout(self.p.records(validate_assets=False), deadline)
+        layout = self._layout(self.p.records(validate_assets=False), deadline,None,policy)
         if not layout['host']['ready']:
             refuse('CPU_NOT_READY', 'prepare this host boot and policy revision before starting guests',
                    details={'issues':layout['issues']})
