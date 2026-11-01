@@ -1,6 +1,8 @@
 # HTTP·Spring·VM 관리 연동의 상세 원문
 
 D02·D08의 현재 실행 지시는 [HTTP·Spring·화면 요청서](../requests/20261029-request-http-spring-ui.md)에 모았다.
+등록-only sender/수동 CLI와 제안 HTTP 수신 계약은 [VM 공급 계약](../contracts/vm-provisioning-v1.md)에 있다.
+기존 POST create의 역호출이 아니다. Spring 수신 합의·제품 구현·DB/운영 수락은 담당 작업으로 남는다.
 현재 구현 위치·하위 제공물·정상/실패 수락·선행조건·담당 회신은 그 본문을 따른다.
 이 문서의 기존 ID·예시·anchor는 배경과 당시 제안을 찾을 수 있도록 아래에 보존했다.
 

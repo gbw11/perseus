@@ -5,6 +5,30 @@
 
 ## 현재 담당자가 할 일
 
+### D02·D08 — 로컬 등록-only 통지의 수신 구현·계약 회신
+
+플랫폼은 자동 최대 1회 sender와 `xenova-vm registration-notify UUID --execute [--json]`를 제공한다.
+[정확한 JSON·응답·인증 계약안과 예제](../contracts/vm-provisioning-v1.md)를 먼저 확인한다.
+제공자 HTTP fixture 시험을 통과한 경로이며 **실제 Spring route의 구현·합의·DB 수락은 아직 없다**.
+
+현재 `vm/api/VmController.java:create`의 `POST /api/v1/vms`는
+`vm/application/VmService.java:create`가 UUID를 새로 만들고 Pi 생성/시작을 요청한다.
+등록 통지를 이 함수에 연결하지 않는다. 같은 계층에 계약안
+`POST /api/v1/vms/registrations`의 등록 전용 DTO·권한·저장 경계를 추가하는 것이 담당 작업이다.
+호스트 인증을 해당 UUID 등록 권한에 결합하고 전달 UUID를 그대로 사용한다.
+같은 UUID는 중복 행/재생성 없이 확인하되 다른 host/guest identity는 거절한다.
+늦은 등록이나 명시 재전송이 현재 자원·이름·의도·보관/삭제 상태를 옛 body로 덮지 않아야 한다.
+
+정상 수락은 Linux/Zephyr 일반 생성과 factory 등록→sender의 실제 POST→DB 확정 응답이다.
+서버 저장 뒤 응답 유실→**명시 CLI만** 재전송→동일 UUID 한 행도 확인한다.
+401/403/409·큰/무효 body·redirect·DNS/응답 정체에서는 거짓 확정·자동 retry/GET이 없어야 한다.
+Spring 생성→Pi 생성→등록 통지가 원 Spring 응답/DB transaction을 기다리는 순환도 시험한다.
+자동 통지 실패가 로컬 등록/원 응답/다른 VM stop을 실패로 만들지 않는 것은 플랫폼 제공자 시험에 있다.
+기존 full HTTP 201/409와 optional 자원 생략 의미 비교는 유지하며 이 통지를 새 create mode로 만들지 않는다.
+
+담당 회신: route/DTO/auth 합의 여부, 실제 수정 후보·명령·DB 중복/늦은 요청 시험 결과,
+운영 endpoint/token 공급 주체, 미수행 설치·EC2·보드 수락. 현재 endpoint/token은 배포 미공급 상태다.
+
 우선 기본 VM 관리와 원 작업 회수를 연결하고 자원 생략과 차량 입력은 각각 별도 작업으로 처리한다.
 FastAPI의 key stop·원 key 조회는 이미 있다. 이를 재구현하거나 기존 full create를 바꾸기 위한 새 API 버전을 만들 필요는 없다.
 

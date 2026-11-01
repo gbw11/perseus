@@ -511,3 +511,12 @@ P5 초기 실패·수정 전 audit·inode 오탐·fixture 정책/경계 실패�
 상태 사본 codec/적용과 serial feedback-1의 제공자 경계를 추가했다. 내부 actor·Authority·출력 guard를 재사용한다.
 lookup 추가 저장0·제한된 큐/사본·단일 device owner·원 단계 최초 저장 비용을 구분한다.
 Worker 제품·실제 planner/ESP32·운영/물리 수락은 로컬 제공과 별도이며 기존 관리 비용/동시성 근거를 대체하지 않는다.
+
+
+## VM 자격·등록 통지·현재 적용 신호 후속
+
+[공통 공급 계약](../contracts/vm-provisioning-v1.md)과 [같은 후보의 수락](recovery-scenario-closure-20261030.md#vm-provisioning-integration)이 현재 후속 원본이다.
+앞선 조사 대응표와 CLI intents를 재사용해 일반 생성/factory의 UUID별 자격 공급, 실행별 기존 receipt,
+등록-only 일회 sender/명시 CLI, 실제 drive template 선택을 연결했다. 선언·구성·실제 관측과 원 결과/현재 guard를 나눈다.
+기존 생성 검증 복사·기한·수습·CPU/동시성·오류 분류는 유지한다. Spring 수신 구현·Worker 소비·Jetson 계정과
+새 Linux rootfs/운영 설치·실보드 수락은 각각 별도다. 과거 절의 당시 미연결을 최신 결함으로 다시 등록하지 않는다.

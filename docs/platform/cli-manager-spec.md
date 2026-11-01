@@ -4,6 +4,12 @@ Xenova는 Raspberry Pi 4의 Xen dom0에서 VM 등록·실행·관측·복구·�
 
 구성 요소와 문서의 읽는 순서는 [플랫폼 안내](README.md)에 있다. 이 명세의 입력·기본값·반환은 현재 parser와 Manager 실행 경로를 기준으로 한다.
 
+VM 자격 공급과 적용 신호는 [공통 provisioning 계약](../contracts/vm-provisioning-v1.md)을 따른다.
+`provisioning UUID`는 비밀 없는 읽기, `provision UUID`는 계획이며 `--execute`로 명시 공급한다.
+`registration-notify UUID`도 계획이며 `--execute`가 등록-only sender를 한 번 실행한다.
+세 명령 모두 내부 이름/UUID 대상·human/JSON의 같은 실행 경로와 strict 옵션 검사를 사용한다.
+새 HTTP endpoint로 자동 노출된 기능은 아니다. 기존 full/optional create·동등 replay 계약은 그대로다.
+
 <a id="toc"></a>
 ## 목차
 
@@ -127,6 +133,8 @@ HTTP/WebSocket의 기존 DTO·상태 코드는 별도 계약이다. CLI 추가�
 | [`xenova-vm get`](#cmd-get) | VM 한 대의 현재 상태·설정 조회 |
 | [`xenova-vm status`](#cmd-status) | list와 같은 현재 상태 조회 |
 | [`xenova-vm intents`](#cmd-intents) | 저장된 관리 의도·lifecycle metadata |
+| [`xenova-vm provisioning / provision`](#cmd-provisioning) | 비밀 없는 공급·실행 프로필 조회 / 명시 재공급 |
+| [`xenova-vm registration-notify`](#cmd-registration-notify) | 등록-only 통지 계획 / 명시 1회 송신 |
 | [`xenova-vm create`](#cmd-create) | 독립 VM 등록 |
 | [`xenova-vm start`](#cmd-start) | 등록 VM 시작 |
 | [`xenova-vm stop`](#cmd-stop) | VM 협조형 정지 |
@@ -3507,7 +3515,7 @@ stderr `[xenova-first-boot] ERROR: …`, 비정상 종료. 자산 오류를 regi
 
 **확인 방법**
 
-서비스 로그·설치 영수증·현재 UUID/등록 목록을 대조한다. 기본 Debian 1대·Network Starter A/B 2대의 최초 신원은 보존한다.
+서비스 로그·설치 영수증·현재 UUID/등록 목록을 대조한다. 기본 Debian 1대·실제 drive A/B 2대의 최초 신원은 보존한다. 현재 선택은 warm-lattice-lab 시험 프로필이며 기존 Starter 설치의 신원을 바꾸지 않는다.
 
 **Manager 매핑:** 설치/서비스 진입점. 공통 Manager action 없음.
 
@@ -3759,6 +3767,7 @@ Template 객체는 다음 필드를 제공한다.
 | ubuntu-24.04-arm64 | 1.0.2 | 1 / 512 | 1..4 / 128..8192 |
 | debian-13-arm64 | 1.0.2 | 1 / 512 | 1..4 / 128..8192 |
 | zephyr-xenvm-starter-arm64 | 1.1.0 Network Starter | 1 / 16 | 1 / 16 고정 |
+| zephyr-drive-lattice-lab-arm64 | 1.0.0-lab.1 실제 AUTO/MANUAL 주행앱, 현재 factory 선택 | 1 / 16 | 1 / 16 고정. 차량 값은 명시 시험 프로필 |
 
 실제 설치 버전과 기능은 templates 결과를 우선한다.
 
@@ -4017,7 +4026,7 @@ shutdown-all은 guest를 정리하고 gate를 닫아 둔다. poweroff/reboot-boa
 
 서비스 순서는 `xenova-data-prepare.service → srv-xenova.mount → xenova-first-boot.service`와 Xen ready 완료 → `xenova-cpu-prepare.service` → `xenova-vms.service` autostart → 기존 host admission이다. CPU prepare는 Wants+After로 순서만 연결하며 Requires/PartOf/BindsTo·ExecStop으로 게스트 종료나 affinity 초기화를 전파하지 않는다. 수동 start·reboot·복구도 이번 boot 준비를 별도로 검사한다.
 
-신규 설치는 `/etc/xenova/cpu-policy-preset.json`을 첫 identity plan의 A/B UUID에 연결해 cpu_policy_activation ticket을 만든 뒤 같은 정책 저장 코드로 게시·적용한다. 기존 identity plan에는 소급 추가하지 않는다. 정책·anchor·history가 모두 없는 기존 설치는 과거 호환 모드다. 활성화는 승인된 정지 창에서 cpu-policy-set → cpu-host-prepare로 수행한다. 활성화 후 정책 유실·손상은 미설정과 구분해 새 시작을 차단한다. seed는 최초 등록 전 상태로 준비하고 데이터 확장·독립 UUID/MAC·Linux machine-id/SSH 신원을 보드에서 확정한다. 기본은 Debian Interaction 1대와 Network Starter A/B 2대다.
+신규 설치는 `/etc/xenova/cpu-policy-preset.json`을 첫 identity plan의 A/B UUID에 연결해 cpu_policy_activation ticket을 만든 뒤 같은 정책 저장 코드로 게시·적용한다. 기존 identity plan에는 소급 추가하지 않는다. 정책·anchor·history가 모두 없는 기존 설치는 과거 호환 모드다. 활성화는 승인된 정지 창에서 cpu-policy-set → cpu-host-prepare로 수행한다. 활성화 후 정책 유실·손상은 미설정과 구분해 새 시작을 차단한다. seed는 최초 등록 전 상태로 준비하고 데이터 확장·독립 UUID/MAC·Linux machine-id/SSH 신원을 보드에서 확정한다. 기본은 Debian Interaction 1대와 실제 drive A/B 2대다. 현재 선택은 warm-lattice-lab 시험 프로필이며 실제 차량 수락과 다르다.
 
 xenbr0=192.168.77.1/24는 격리된 내부망이다. 예약 .2..99, dnsmasq bringup 동적 풀 .100..150을 구분한다. DHCP에서 기본 라우터를 배포하지 않고 DNS는 port=0이다. eth0/wlan0를 편입하거나 외부 NAT를 자동 설정하지 않는다. Manager는 비밀 없는 dhcp-hosts를 **0644로 원자 게시**하고 dnsmasq HUP으로 예약을 반영한다.
 
@@ -4337,3 +4346,28 @@ DEADLINE_EXCEEDED로 거절한다. 검증 후 게시 직전 만료도 새 정책
 | [platform/tests](../../platform/tests) | Manager·복구·자원·네트워크 Zephyr·Wi-Fi 경계 회귀 |
 
 명령·필드·응답·오류·설치 경로가 바뀌면 이 명세와 대응 시험·HTTP 계약을 함께 대조한다. 새 빌드의 설치 결과와 실보드 수락은 [빌드 가이드](build-guide.md)의 이미지 해시 기준으로 확인한다.
+
+
+<a id="cmd-provisioning"></a>
+## VM 자격 공급과 적용 신호
+
+`xenova-vm provisioning TARGET [--timeout-ms MS] [--budget-ms MS] [--json]`는 등록/lifecycle,
+다음 기동 profile·초기 template 참조·현재 실행의 captured profile·비밀 없는 공급 단계를 반환한다.
+broker·Xen·Store를 새로 관측하거나 자격/receipt를 만들지 않는다. intents와 목적이 다른 조회다.
+`current_profile.status=captured-launch`는 이번 신호 수신이나 앱 READY가 아니다.
+
+`xenova-vm provision TARGET [--execute] [--timeout-ms MS] [--budget-ms MS] [--json]`는 같은 자격의
+지원 재공급이다. 생략은 계획이다. 실행 중 Linux root를 mount하지 않으며 현재 stopped/미사용·원 작업·
+대상 lease·host gate를 확인한다. Zephyr는 stopped intent이면 local 설정만 준비하고 VM을 시작하지 않는다.
+running intent이면 같은 실행의 기존 Bootstrap/receipt에 연결한다. 원 create replay와 재공급은 별개다.
+null/무효 옵션·새 key는 허용하지 않는다. 전체 계약/오류 단계는 [공급 계약](../contracts/vm-provisioning-v1.md)에 있다.
+
+<a id="cmd-registration-notify"></a>
+## 등록-only 통지
+
+`xenova-vm registration-notify TARGET [--execute] [--timeout-ms MS] [--budget-ms MS] [--json]`.
+현재 REGISTERED VM만 대상이다. 생략은 공개 body 계획, execute는 같은 sender의 명시 1회 송신이다.
+자격/VM/디스크·원 생성/실행·의도를 만들지 않는다. JSON은 포맷만 바꾼다.
+확인 응답은 exit 0, 미설정·거절·통신 미확인·포화는 결과의 상세 state와 exit 4,
+무효 입력/대상은 기존 validation exit 2다. force·lifecycle·원 key 등 무관한 옵션은 거절한다.
+자동 최대 1회와 수동 송신, Spring 계약안·배포 설정·응답 유실 의미는 [등록 통지 계약](../contracts/vm-provisioning-v1.md)을 따른다.

@@ -5,6 +5,34 @@
 
 ## 현재 담당자가 할 일
 
+### D01-W01·W02 / D03-W01·W02 — 제공된 VM별 자격과 적용 프로필 연결
+
+플랫폼은 일반 create와 factory UUID 계획 뒤 자격 공급을 연결했다.
+[제공 API·상태·실행 예제](../contracts/vm-provisioning-v1.md)를 사용한다. Worker 제품 코드는 이번에 수정하지 않았다.
+설치된 `/usr/lib/xenova/xenova_provisioning.py`의 `credential_file(data, vm_id, channel)`은
+root 전용 설정 Path를 반환하며 발급·reload하지 않는다. `channel`은 telemetry 또는 drive다.
+
+`recovery/rejoin.py:ProductionBootstrap.__call__/refresh`의 실제 입력은
+`config['credentials'][vm_id][channel]`과 `config['receipt_dir']`다. 이 경로를 provider가 반환한 파일과
+`/srv/xenova/drive-rejoin`으로 맞춘다. 플랫폼 start가 이미 만든 **같은** VM/execution receipt를
+소비한다. 별도 receipt_dir에서 boot/app 신원을 다시 만들지 않는다. 양 writer는 기존 receipt lock을 공유한다.
+기존 위치가 다르면 설치 교체 때 대조하고 자동 파일 이동·원장 변환 없이 담당자와 수락한다.
+정상 applied receipt는 `refresh(row)`로 회수할 수 있으며 새 공급과 원 결과 읽기를 구별한다.
+
+기대 신호는 `manager.call('provisioning', {'vm_id': vm_id}, budget_ms=remaining_ms)`의
+`profile`(다음 기동)·`current_profile`(실행에 캡처한 선언)·`supply`로 구별한다.
+읽기 조회는 자격/Store/POST를 만들지 않는다. `captured-launch`는 live 수신 관측이 아니며
+capture가 없는 구형 실행은 unknown이다. `observe.py:PlatformObserver`의 기대 입력과
+`rejoin.py:ProductionBootstrap.refresh`의 `app_state_models` 연결에서 이 차이를 유지한다.
+지금 제공된 lattice 프로필은 AUTO stateful, MANUAL stateless, warm Standby progress idle이다.
+
+정상 수락은 최초 공급→실제 앱 binding→Worker 재시작 뒤 같은 암호·receipt 회수→새 실행의 새 binding이다.
+반례는 공급 실패/첫 무수신/Starter false/미선언 null/형식 오류·옛 host/실행·Standby 대기다.
+declared true나 Store applied를 MQTT 인증·READY·복구 승인으로 바꾸지 않는다.
+원 시도/기한·현재 Manager guard는 그대로 필요하다. 제공자 시험은
+`test_xenova_provisioning.py`, `test_xenova_signal_profiles.py`, 기존 `tests/test_drive_rejoin.py`에 연결한다.
+담당 회신에는 Worker 후보·실제 설정 경로(비밀 제외)·정상/실패 명령·결과·설치/보드 미수행을 적는다.
+
 먼저 관측과 실제 행동을 연결하고 원 복구 결과·신원 공급·재합류를 따로 종결한다.
 warm-drive-1의 앱별 신원·대기/활성 준비 최소 소비는 이미 로컬 구현됐다. 이를 다시 만들거나 전체 D01 완료로 표시하지 않는다.
 
