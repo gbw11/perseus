@@ -120,6 +120,16 @@ class BindingCache:
                     **({'app_status':dict(row['app_status'])} if 'app_status' in row else {}),
                     **({'app_state_models':dict(row['app_state_models'])} if 'app_state_models' in row else {})}
 
+    def observation_status(self,vm: str,now: float | None=None) -> str:
+        """A bounded cache fact for reference retirement, never execution
+        permission. Missing/stale/failed observation remains unavailable."""
+        now=self.clock() if now is None else now
+        with self._lock:
+            value=self._value
+            if value is None or not value['observed_monotonic_ms']<=int(now*1000)<=value['expires_monotonic_ms']:
+                return 'unavailable'
+            return value['vms'].get(vm,{}).get('status','unavailable')
+
     def accepts(self,vm: str,boot: str,instance: str,now: float | None=None,*,app: str | None=None) -> bool:
         row=self.current(vm,now)
         expected=app_instance(row,app) if row else None

@@ -62,6 +62,31 @@ class DriveAppBootstrapTest(unittest.TestCase):
             f.module.provision(f.context,f.credential,f.source,self.path,store=self.store,observe=lambda:f.context,
                 channel='drive',guest_boot_receipt=f.directory/'telemetry.json',drive_profile='verified-drive-1')
 
+    def test_world_credentials_are_separate_and_only_flattened_for_warm_drive(self):
+        f=self.f;vm=f.context['vm_id']
+        world=dict(broker_ipv4='192.0.2.2',port=18885,username=vm,password='map-only-secret',
+                   profile='lattice-lab-1',trusted_internal_plaintext=True)
+        credential={**f.credential,'username':vm,'world':world}
+        path=f.directory/'world-credentials.json';path.write_text(json.dumps(credential));path.chmod(0o600)
+        parsed,source=f.module.credentials(path,vm,'drive')
+        payload=f.module.bootstrap_payload(f.context,parsed,self.initial,'drive')
+        for field in ('broker_ipv4','port','username','password','profile'):
+            self.assertEqual(payload['world_'+field],world[field])
+        self.assertEqual(payload['password'],f.credential['password'])
+        self.assertNotIn('world',payload)
+        self.assertNotIn(world['password'],self.path.read_text())
+        with self.assertRaisesRegex(ValueError,'VM/account mismatch'):
+            f.module.credentials(path,vm,'telemetry')
+        path.write_text(json.dumps({**credential,'username':'telemetry-'+vm}))
+        with self.assertRaisesRegex(ValueError,'explicit drive'):
+            f.module.credentials(path,vm,'telemetry')
+        for invalid in ({k:v for k,v in world.items() if k!='password'},
+                        {**world,'port':True},{**world,'trusted_internal_plaintext':False},
+                        {**world,'password':None},{**world,'profile':''}):
+            path.write_text(json.dumps({**credential,'world':invalid}))
+            with self.assertRaises((ValueError,TypeError)):
+                f.module.credentials(path,vm,'drive')
+
     def test_profile_selection_cannot_be_ignored_by_other_cli_modes(self):
         f=self.f
         args=['--channel','drive','--vm-id',f.context['vm_id'],'--credentials-file',str(f.directory/'private.json'),

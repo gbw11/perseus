@@ -15,6 +15,14 @@ config XENOVA_MQTT_BOUNDED_IO
 	  Separate socket state per client; reuses Publisher's Zephyr transport.
 	  Connect/send/read are bounded, including broker absence during quiesce.
 
+config XENOVA_MQTT_TCP_NODELAY
+	bool "Disable Nagle on bounded MQTT sockets"
+	depends on XENOVA_MQTT_BOUNDED_IO
+	default n
+	help
+	  Header and body are separate writes. For explicitly selected low-latency
+	  profiles, avoid waiting for an ACK before sending the small body.
+
 config XENOVA_MQTT_IO_MS
 	int "Maximum v1 socket operation budget (ms)"
 	depends on XENOVA_MQTT_BOUNDED_IO

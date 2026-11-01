@@ -51,7 +51,7 @@ const char *drive_adapter_qualify(const struct drive_adapter *adapter,struct xm_
 {
  if(!adapter||!adapter->qualify)return "STATE_PREPARING";
  if(adapter->requires_state_sync&&(!adapter->state_ready||
-    !drive_state_usable(adapter->prepared_state,adapter->state_context)))return "STATE_PREPARING";
+    !(adapter->state_usable?adapter->state_usable(adapter->context):drive_state_usable(adapter->prepared_state,adapter->state_context))))return "STATE_PREPARING";
  return adapter->qualify(adapter->context,input,age);
 }
 void drive_auto_adapter(struct drive_adapter *a,struct auto_cfg *cfg)
@@ -71,8 +71,14 @@ int drive_adapter_run(struct drive_adapter *a,struct xm_span control,struct xm_s
 int drive_adapter_run_observed(struct drive_adapter *a,struct xm_span control,struct xm_span input,
  int64_t age,const struct xd_manual_witness *w,const char *receiver,struct drive_sample *out)
 {
+ return drive_adapter_run_until(a,control,input,age,w,receiver,UINT64_MAX,out);
+}
+int drive_adapter_run_until(struct drive_adapter *a,struct xm_span control,struct xm_span input,
+ int64_t age,const struct xd_manual_witness *w,const char *receiver,uint64_t deadline,struct drive_sample *out)
+{
  memset(out,0,sizeof(*out));
- int rc=a->calculate?a->calculate(a->context,control,input,age,out):-ENOSYS;
+ int rc=a->calculate_until?a->calculate_until(a->context,control,input,age,deadline,out):
+  a->calculate?a->calculate(a->context,control,input,age,out):-ENOSYS;
  if(rc||a->progress==UINT64_MAX){out->reason="CALCULATION_FAILED";out->v_mps=out->steer_rad=0;return rc?rc:-EOVERFLOW;}
  ++a->progress;
  if(!__builtin_isfinite(out->v_mps)||!__builtin_isfinite(out->steer_rad)){
