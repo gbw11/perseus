@@ -40,6 +40,7 @@ MQTT의 payload 2.1 지원, 실제 보드 수락과 제품 소비자의 저장·
 | 외부 SSH 접속·최초 인증·SD 재설치 전 인증 상태 백업 | [Tailscale 사용법](cli-manager-spec.md#cmd-tailscale) |
 | MQTT 최초 계정 설정·접속 범위 | [MQTT 사용법](cli-manager-spec.md#cmd-mqtt-init) |
 | EC2에서 보드 MQTT·FastAPI 직접 접속 | [Tailnet 접속 설정](cli-manager-spec.md#cmd-tailscale-serve) |
+| 내부 모듈·Gateway 포장·설정 공급·교체와 7번 인수 | [배포 준비](deployment-readiness.md) |
 | 이미지 제작·템플릿/seed·조립·검증·전달 | [빌드 가이드](build-guide.md) |
 | 부팅 서비스·자동 시작·부분 실패·종료 조사 | [부팅·종료 구조](management-boot-boundaries.md) |
 | 전용·공유 CPU 배치 운영 | [CPU 배치](cpu-layout.md) |

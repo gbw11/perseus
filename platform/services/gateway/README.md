@@ -286,9 +286,15 @@ AUTO_READY ──재개 요청──▶ drive.resume.accepted {switch_in_ms: 300
 ## 실행
 
 Python 3.11 이상, paho-mqtt 1.6 또는 2.x. 시리얼은 pyserial(`python3-serial`)이 있어야 합니다.
+Yocto의 실제 provider는 `python3-pyserial`이다. 정규 `xenova-gateway` recipe는 공용 MQTT와
+Gateway를 target site-packages에 설치한다. 이 경로에서는 개발 소스의 PYTHONPATH가 필요 없다.
+unit은 기본 disable이고 `/usr/share/xenova/gateway.env.example`만 제공한다.
+승인한 root 전용 `/etc/xenova/gateway.env`·차량 한계·Authority/binding을 공급한 뒤 별도 설치 수락을 진행한다.
+설치가 Authority 초기화·재무장·출력 허가를 뜻하지 않는다.
+[배포 단위·교체·7번 입력표](../../../docs/platform/deployment-readiness.md)를 따른다.
 
 ```bash
-export PYTHONPATH=/opt/xenova/gateway:/opt/xenova/mqtt-client   # 개발 PC: platform/services/gateway 와 vm-agent/mqtt-client
+# 개발 PC에서만 각 프로젝트 경로를 PYTHONPATH로 연결한다. target은 site-packages를 사용한다.
 export XENOVA_GATEWAY_BROKER_PASSWORD=<비밀번호>                  # 저장소에 두지 않는다
 python3 -m xenova_gateway --sink serial --serial-port /dev/ttyUSB0
 ```
@@ -379,5 +385,5 @@ python tools/measure_failover.py --port 18832 --runs 10
 
 - vchan 중계 (S15P31E110-240): Zephyr 주행 VM 의 명령은 dom0 중계를 거쳐 브로커로 온다. 게이트웨이는 브로커만 본다
 - 실제 ESP32 연결, 프레임 확정·계약 v1.1 (S15P31E110-241), `vehicle.status` 중계
-- 코어 고정·실시간 우선순위, systemd unit, Yocto 레시피 (플랫폼·deploy)
+- 코어 고정·실시간 우선순위와 실제 서비스/장치 수락은 미완료다. 2026-11-01 정규 recipe·비활성 unit 포장은 추가했으며 실제 설치와 구분한다.
 - 시리얼 쓰기 연속 실패 시 처리 (지금은 로그·횟수만, 최종 정지는 ESP32 와치독)

@@ -1,3 +1,18 @@
+# HTTP·Spring·VM 관리 연동의 상세 원문
+
+D02·D08의 현재 실행 지시는 [HTTP·Spring·화면 요청서](../requests/20261029-request-http-spring-ui.md)에 모았다.
+현재 구현 위치·하위 제공물·정상/실패 수락·선행조건·담당 회신은 그 본문을 따른다.
+이 문서의 기존 ID·예시·anchor는 배경과 당시 제안을 찾을 수 있도록 아래에 보존했다.
+
+기존 full create는 그대로 지원한다. 자원 생략은 선택 확장이며 같은 원 확정값의 생략↔명시는 양방향으로 허용한다.
+일반 호출자의 journal 버전 선택/raw 파싱은 필요 없다. 기존 key stop/조회는 이미 제공됐고 Spring·화면과 신규 하위 기능 소비는 담당 수락 전이다.
+내부 reader/writer·helper의 교체는 [배포 원본](deployment-readiness.md#cohort), 실제 설치본 인수는 [7번 입력표](deployment-readiness.md#stage7)를 따른다.
+
+## 변경 이력
+
+<details>
+<summary>6번 정리 전 D02·D08 상세 원문과 당시 제안</summary>
+
 # HTTP·Spring·VM 관리 화면 연동 요청
 
 수신: dom0-manager FastAPI·Driver, Spring VM 관리, VM 관리 화면 담당자.
@@ -271,3 +286,5 @@ phase/result/error와 재조회 사유만 기존 DTO 연결 요청에 포함하�
 
 기존 `#linux-health` 링크는 호환을 위해 남긴다. Linux·Agent 담당자는
 [Linux·Agent 요청서의 현재 할 일과 읽는 순서](../requests/2026-10-27-linux-health-agent.md)에서 시작한다.
+
+</details>

@@ -1,5 +1,71 @@
 # Recovery Worker·Engine 후속 구현 요청
 
+담당: Worker·Engine. 상태: **6-A 인계 준비 / D01·D03의 정책·제품 연결 수락 전**.
+2026-11-01 현재 지시다. 기존 ID와 [상세 근거](2026-10-27-recovery-health-ctrl.md)는 유지한다.
+
+## 현재 담당자가 할 일
+
+먼저 관측과 실제 행동을 연결하고 원 복구 결과·신원 공급·재합류를 따로 종결한다.
+warm-drive-1의 앱별 신원·대기/활성 준비 최소 소비는 이미 로컬 구현됐다. 이를 다시 만들거나 전체 D01 완료로 표시하지 않는다.
+
+아래 위치는 `platform/services/dom0-manager/dom0_manager/` 기준이다. 제품 코드는 플랫폼에서 대신 수정하지 않는다.
+
+| ID·상태 | 수정 위치·무엇을 왜 고치는가 | 정상 수락·실패 보호 |
+|---|---|---|
+| D01-W01·W02 / 담당 구현 전 | `recovery/observe.py:PlatformObserver.__call__/_refresh_intents/_merge`, `watcher.py:_judge/_signal_age`, `heartbeats.py`. broker 연결과 대상 VM·현재 실행·신호 전달을 분리한다. 관측 실패 후 남은 intent cache는 현재 복구 허가가 아니다 | 정상 관측→첫 무수신/Agent만 장애/앱 정체/공통 broker 단절→회복을 구분. 다른 VM 수신으로 승인·관측 실패의 빈 목록/VM 사망 변환·오래된 stop 덮기 0 |
+| D01-W03·W04 / 정책 결정·구현 전 | `recovery/engine.py:_check_watcher/_attempt_failed/_close`, `policy.py`. 유효 자원·실제 기능 진행에서 행동 범위를 정하고 Linux 로컬 감독과 VM 복구 경합, 안정 구간·episode 회복·반복 예산을 연결한다 | 정상 기능 보존, 경고/로컬 수습/VM 복구를 구별. 잠깐 HEALTHY 후 예산 무제한 초기화·공통 경로 장애의 재시작 폭주·자동 force 0 |
+| D01-W05 / 저장·배포 공동 수락 전 | `recovery/state.py:RecoveryStore`, `engine.py:_commit/_flush_pending/_retry_pending`, `mqtt.py` 사건 경계. 실제 작은 state/pending/events의 S01/S02 보호와 같은 event ID를 유지한다 | 같은-host 재시작 후 pending 재전달·손상 차단·필수 저장 실패의 성공 승격 0. 새 host의 옛 단조 기한/실행 사용 0 |
+| D03-W01·W02 / 후속 소비 전 | `engine.py:_task_replay/_on_result`, `recovery/rejoin.py:ProductionBootstrap`, `RejoinCoordinator.completed/pump`. 원 attempt·receipt의 늦은 확정과 수습 결과를 기존 provisioning→binding 흐름으로 회수한다 | 새 attempt/key/deadline·재주입 0. 같은 applied receipt와 정당한 새 실행은 정상 합류하고 저장 미확정·옛 host/신원은 보류 |
+| D03-W03·W04 / 공동 수락 전 | 위 Engine/Coordinator와 readiness 소비. 기능 회복·episode 종결·Standby 재합류를 별도로 판단한다 | 복구 새 execution이 정상 후보로 합류하고 기존 Active 유지. Manager completed·Gateway COMMITTED·PUBACK을 장치 적용/출력 허가로 바꾸지 않음 |
+
+## 플랫폼 제공물과 지원 조건
+
+원 key·host/execution·의도 revision·원 deadline·pending/uncertain·receipt 재확인은
+[CLI·Manager 계약](../platform/cli-manager-spec.md), 건강 의미는 [건강 근거](../contracts/health-evidence-v1.md)를 사용한다.
+OS 공통 UUID 정적 CPU 배치와 새 incarnation 전체 vCPU guard, 정확한 기존 실행 stop, lifecycle lease 보호는 하위가 제공한다.
+[현재 검증 보고](../verification/recovery-scenario-closure-20261030.md#create-compatibility)의 근거는 로컬 제공 범위이며 실제 Worker 정책·설치 수락을 대신하지 않는다.
+
+asset RUNNING/RECONCILING/FAILED는 준비 실행/명시 수습/원 생성 실패 상태다. VM 건강·복구·앱 준비·출력권이 아니다.
+수습 완료 원 실패는 이력으로 남고 내구 반환된 예약만 해제된다. Worker에 자동 operation-reconcile·파일 삭제·새 UUID 생성기를 추가하지 않는다.
+생성 기본값은 설정 요청에만 적용하며 표본·신원·heartbeat 결측을 정상값으로 보충하지 않는다.
+공개 결과 소비자는 raw journal parser나 내부 버전 선택이 필요 없다. 기존 원 요청·조회 경로를 유지한다.
+
+## 정상 회복과 거절의 짝
+
+- 현재 실행의 유효 관측→정책상 허용 행동→동일 원 attempt 결과 회수→신원 공급/binding→기능 준비·Standby 합류를 확인한다.
+- 그 사이 사용자 stop, host/실행 교체, 중복·지연 결과, 관측 슬롯 경합·권한/경로 오류를 주입한다. 옛 intent/허가·새 deadline·자동 force·복구 폭주를 만들지 않는다.
+- 실패 private·잔존 helper·수습 중·완료·저장 미확정 입력을 구별하고 저장소 회복 뒤 정당한 새 실행은 정상 소비한다. 슬롯 파일 삭제/chmod로 우회하지 않는다.
+- `app_state_models`는 실제 firmware/adapter의 선언과 맞춘다. 누락/상태 있는 앱을 stateless로 승인하지 않는다. 정상 대기 자격과 활성 계산 준비를 혼합하지 않는다.
+
+기존 `test_recovery_watcher/engine/events/store/store_process/lock/drive_rejoin.py`의 관련 assertion을 재사용한다.
+모든 조합을 재시험했다는 주장은 피하고 후보와 실제 실행한 범위를 회신한다.
+
+## 선행조건·공동 결정
+
+Worker–Gateway 운영 요청/결과 전송은 두 제품 담당이 권한·원 key/spec·기한·실패/취소·적용 단계를 결정해야 한다.
+현재 submit_transition은 프로세스 내부 queue다. Authority 파일 읽기나 MQTT 상태를 보호 완료 ACK로 사용하지 않는다.
+미정인 동안 해당 보호를 요구하는 계획 정비·복구 종단 수락만 대기한다. 일반 관측·원 결과 회수는 별도로 진행한다.
+
+Agent/앱의 실제 필수 작업·idle·서비스 수명·로컬 감독 wire는 Linux/앱·Worker·계약 담당이 정한다.
+안정 구간·episode 간 예산의 수치는 Worker 정책 담당의 근거가 필요하다. 기존 단일 recovery 상한을 임의로 늘리지 않는다.
+기본 `/run/xenova/recovery`의 host 재부팅 보존은 별도 결정이며 영속 경로·SQLite 이관을 이번에 승인하지 않았다.
+
+## 수락·담당 회신
+
+D01-W01~W05·D03-W01~W04별로 후보(commit+diff), 실제 수정 기호, 사용 설정/자료 원천,
+정상·거절·오류 후 회복 명령/결과, 미수행 환경, 저장 경로·배포 상태, 남은 결정과 담당을 회신한다.
+[교체 단위](../platform/deployment-readiness.md#cohort)의 이전 import/drain을 확인하고
+[7번 입력표](../platform/deployment-readiness.md#stage7)의 실제 설치본 수락과 구분한다.
+
+## 변경 이력
+
+아래는 6번 정리 전 원문이다. 당시 소스·실패·측정·요청을 보존하며 현재 실행 지시는 위 본문을 따른다.
+
+<details>
+<summary>2026-11-01 이전 요청·진행 기록 원문</summary>
+
+# Recovery Worker·Engine 후속 구현 요청
+
 대상: Recovery Worker·Engine 담당자. **상태: 최소 소비 연결 구현·로컬 검증 완료 / 나머지 담당자 구현·종단 수락 전.**
 기존 D01-W01~W05·D03-W01~W04를 유지하며 새 티켓으로 재발급하지 않습니다.
 
@@ -134,3 +200,5 @@ recover_once 폭주 0·옛 intent/attempt 재적용 0·수습을 VM 복구/Stand
   lifecycle lease는 writer가 계속 존중한다. [최신 근거](../verification/recovery-scenario-closure-20261030.md#stage55-cross-boundaries)를 연결하며
   D01/D03 정책을 대신 구현하지 않는다. 하위 import 집합을 교체할 때 장기 Worker의 이전
   import와 구형 writer를 혼합하지 않는 조건은 [배포 인계](20261029-request-http-spring-ui.md#같은-후보의-설치-집합과-프로세스-교체-인계-67번-미실행)를 따른다.
+
+</details>

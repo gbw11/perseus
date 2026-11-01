@@ -1153,3 +1153,6 @@ CPU는 Debian·Ubuntu·Zephyr 모두 UUID별 정적 pinning·해제를 제공한
 일과 새 표현을 같은 요청으로 인정하는 일은 별개다. 일반 호출자는 내부 저장 버전을 선택하지 않는다.
 
 [맨 위로](#contents)
+
+
+6번의 현재 적용은 [배포 준비](deployment-readiness.md)와 [검증 결과](../verification/recovery-scenario-closure-20261030.md#stage6)에 연결했다. 담당자 현재 지시/이력과 내부 배포 단위를 정리하고 Gateway 정규 비활성 포장·로컬 target 검증을 보완했다. 이 사실은 운영 정책·실제 설치·제품 연결·7번 완료가 아니다. 앞 장의 개념·권한·수명은 바꾸지 않았다.

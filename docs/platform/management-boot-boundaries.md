@@ -136,6 +136,8 @@ unit 실행의 성공을 현재 것으로 사용하지 않는다. `/run/xenova/b
 `agetty --reload`를 실행한다. `/etc/issue`나 기존 로그인 설정은 건드리지 않는다.
 
 
+배포 파일·의존성·설정 공급·내부 reader/writer 교체와 Gateway의 비활성 unit은 [배포 준비](deployment-readiness.md)를 따른다.
+
 ## 플랫폼 서비스와 준비 의존성
 
 | 서비스·자원 | 역할과 시작 조건 |

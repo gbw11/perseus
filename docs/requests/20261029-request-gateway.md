@@ -1,3 +1,47 @@
+# Gateway 직접 구현·공동 연동
+
+담당: 박신영 / 플랫폼·Gateway. 상태: **기존 로컬 구현 보존 / 6-A 인계·6-B 포장 보완 / 제품 연결·장치 수락 전**.
+Gateway 자체를 타 담당자에게 위임하지 않는다. 아래가 2026-11-01 현재 작업이며 당시 원문은 이력에 보존한다.
+
+## 현재 작업과 제공물
+
+| 기존 ID·상태 | 수정 위치·이유 | 정상 수락·실패 보호 |
+|---|---|---|
+| DEC-11·16 / 공통 계약·stateless 로컬 제공 | `platform/services/gateway/xenova_gateway/planning.py`, `authority.py:commit_transition`, `warm.py`, `verified_runner.py`. 준비·권위 커밋·새 문맥 계산을 구분 | 원 요청·기한·generation 보존, 정상 A 유지·B 준비·조건부 커밋. 중단·늦은 응답·준비 실패의 무권한 승격 0 |
+| D03-G01·G03·G04 / 국소 제공, G02 결정 대기 | `authority_ops.py`, `authority.py`. 정상 원본 재확인과 손상 백업의 최신성 복원을 구분 | 같은 lease/hash·원 이력 보존, 명시 재무장. marker 삭제·옛 권위 초기화/자동 복원 0 |
+| DEC-12·18·ARCH-T16·18 / 실제 생산자 공동 수락 전 | Spring/UI 입력 생산자와 MQTT·C 수신 adapter. 실제 session/sample/action·원 나이를 이어야 함 | 같은 MANUAL 승계 유지, AUTO→MANUAL의 현재 중립 뒤 새 조작. 캐시 재발행·generation 교체만으로 새 행동 승인 0 |
+| DEC-13·ARCH-T25·26·38 / 장치 담당 공동 수락 전 | `sink.py`, `frame.py`, `output_guard.py`, 실제 장치 피드백. 시리얼 완전 쓰기와 장치 수락·적용·정지를 구분 | 실제 차량 한계/부분 쓰기/적용 피드백과 정지 수락. serial submit·COMMITTED·PUBACK만으로 물리 적용 주장 0 |
+| DEC-19·ARCH-T21~23·32·35 / stateful 연결 전 | 상태 사본 생산자·전송·앱 적용 경계. stateless 준비를 stateful 연속성으로 확대하지 않음 | 완전·현재 호환 사본의 정상 채택, 부분/옛 출처·권한 종료 뒤 갱신 거절. 실제 전송 계약부터 담당자 확정 |
+
+플랫폼의 [최신 로컬 검증](../verification/recovery-scenario-closure-20261030.md#create-compatibility)과
+[Gateway README](../../platform/services/gateway/README.md)가 제공 근거다.
+부가 진단은 제한된 queue로 분리됐고 최초/희귀 cause·필수 Authority 저장·STOP 순서는 보존한다.
+직접 ERROR/CRITICAL 경로의 실제 지연·Zephyr 총 로그 비용은 기존 근거 범위를 넘겨 완료로 표시하지 않는다.
+
+## 6-B 포장과 설치 전제
+
+새 `xenova-gateway` recipe는 현재 Python 진입점·공용 MQTT·고정 Paho/pyserial·하위 모듈을 연결한다.
+unit은 기본 disable, 설정은 비활성 example만 제공한다. package 설치는 Authority 초기화·재무장·출력 허가가 아니다.
+현재 파일·RPM·의존성·실행 경로와 검증 수준은 [배포 준비 원본](../platform/deployment-readiness.md)에 모은다.
+운영 설정·credential·차량 수치는 package hook에서 만들지 않는다.
+
+## 공동 결정과 담당 회신
+
+Worker–Gateway 별도 프로세스 요청/결과 전송은 두 제품 담당이 권한·원 key/spec·기한·실패/취소·권위/장치 적용 단계를 합의한다.
+`submit_transition`은 내부 queue이며 원격 API가 아니다. 새 topic/route를 합의된 것처럼 쓰거나 Authority 파일을 보호 ACK로 사용하지 않는다.
+미정인 동안 그 연결이 필요한 계획 정비·복구 보호의 종단만 대기한다. 기존 진단·포장·VM 관리는 별도로 진행한다.
+실제 차량 한계·장치 ACK는 Gateway/장치·차량, 상태 사본은 앱/입력 생산자와 Gateway, 백업 최신성은 권위 담당이 결정한다.
+
+각 ID별 후보(commit+diff), 변경 기호, 생산/소비 계약, 정상·실패·회복 명령/결과, 미측정 비용과 환경,
+설정 공급자·설치/재무장/장치 수락 상태를 회신한다. [7번 입력표](../platform/deployment-readiness.md#stage7)는 이번에 실행하지 않는다.
+
+## 변경 이력
+
+아래 당시 요청과 측정은 보존하며, 현재 작업은 위 본문을 따른다.
+
+<details>
+<summary>6번 정리 전 Gateway 원문</summary>
+
 # Gateway 직접 구현·공동 연동 목록
 
 담당: 박신영 / 플랫폼·Gateway. **상태: 최소 연결 구현·로컬 검증 근거 보존 / C 입력 수신 보완 로컬 검증 / 후속 확장·설치·장치 수락 전.**
@@ -63,3 +107,5 @@ Yocto recipe/unit·운영 설치 검증을 대신하지 않는다. 해당 배포
 - 2026-10-29: 최소 소비 연결을 구현·로컬 검증했습니다. Gateway 담당은 커밋 이력과 사용자 확인에 따라 박신영입니다. 계획 인계·Authority 수습은 후속 직접 구현이고 장치 적용은 ESP32 담당자와 공동 수락합니다. 앱 하나의 receipt 미확정이 정상 다른 앱의 바인딩·출력 근거를 철회하지 않는 반례도 연결했습니다.
 
 - 2026-10-30: 계획 AUTO의 재개 우회를 국소 차단하고 정상 재개/대칭 인계를 회귀했다. C 입력 최신 슬롯의 중립/원 sample 반례를 재현한 뒤 수신 단계 guard와 앱 instance에 묶인 근거 전달로 보완했다. 기존 이력·담당자 대기 상태는 유지한다.
+
+</details>

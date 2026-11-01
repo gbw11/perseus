@@ -1,5 +1,97 @@
 # HTTP·Spring·화면 종단 연결 요청
 
+담당: FastAPI·Spring·프론트. 상태: **6-A 인계 준비 / 담당 제품 구현·종단 수락 전**.
+기존 D02·D08을 유지한다. 아래가 2026-11-01 현재 지시다. 과거 소스·실패·요구는 마지막 이력에 보존했다.
+
+## 현재 담당자가 할 일
+
+우선 기본 VM 관리와 원 작업 회수를 연결하고 자원 생략과 차량 입력은 각각 별도 작업으로 처리한다.
+FastAPI의 key stop·원 key 조회는 이미 있다. 이를 재구현하거나 기존 full create를 바꾸기 위한 새 API 버전을 만들 필요는 없다.
+
+| ID·우선순위·담당 | 무엇을 왜 고치는가 | 실제 수정 위치 |
+|---|---|---|
+| D02·D08 / 우선 / Spring·화면 | 현재 void stop과 즉시 상태 변경은 접수·진행·완료를 표현하지 못한다. 원 key와 후속 결과를 연결한다 | `backend/src/main/java/com/xenova/backend/vm/infrastructure/Dom0ManagerClient.java:stop`, `vm/application/VmService.java:stop`, VM port/DTO, `frontend/apps/admin-console/src/pages/VmDetailPage.tsx` |
+| D02·D08 / 우선 / FastAPI | 긴 관리와 선행 get/list가 상위 직렬화를 통해 다른 VM stop을 다시 막지 않게 한다 | `platform/services/dom0-manager/dom0_manager/drivers/platform.py:SerializedManager.call/fork`, `PlatformDriver._views/_view/_request_manager`, `service.py:VmService.create/request_stop`, `api/vms.py` |
+| D02·D08 / 우선 / FastAPI·Spring | 등록 자산과 현재 domain, 생성 실패와 GET 부재, retire와 purge를 구분해 권한 있는 원 결과·명시 수습을 노출한다 | 위 service/route, `drivers/platform.py:PlatformProvisioner.ensure_instance`, Spring VM 조회·삭제, `VmListPage.tsx` |
+| D02·D08 / 선택 확장 / 세 담당 | 자원 생략을 DTO·serializer가 null/화면 숫자로 바꾸지 않고 하위로 전달한다 | `dom0_manager/models.py:CreateVmRequest`, `drivers/platform.py:PlatformProvisioner._spec_mismatch/ensure_instance`, Spring `vm/api/CreateVmRequest.java`, `vm/domain/CreateVmCommand.java`, `vm/infrastructure/Dom0LaunchRequest.java`, `VmService.create`, `VmCreatePage.tsx` |
+| D02·D08 / 기존 미연결 / FastAPI·Spring·화면 | OS 공통 CPU 정책을 정식 공개 계약대로 소비하고 계획·원 확정·구성·관측을 구분한다 | 같은 Driver/service·VM DTO·상세 화면. 실제 CPU HTTP 경로는 담당자가 현재 라우터와 권한을 대조해 확정 |
+| D02·D08 / 진단 / FastAPI·Spring | 원 body 기록과 중복 stack·느린 출력 비용을 실제 오류 경계에서 줄인다 | `dom0_manager/api/errors.py:on_validation_error`, `Dom0ManagerClient`의 decode·warning·예외 변환 |
+
+## 플랫폼 제공물과 지원 조건
+
+정식 원본은 [CLI·Manager](../platform/cli-manager-spec.md#cmd-create), [VM HTTP 계약](../contracts/vm-api-contract-v1.md),
+[기능별 기준선](../verification/platform-management-baseline.md)이다. [create 호환 검증](../verification/recovery-scenario-closure-20261030.md#create-compatibility)은
+기존 full CLI/Manager와 **변경하지 않은 실제 HTTP 어댑터**의 로컬 호환을 확인했다. 기존 HTTP 생성 201·응답 형태와 이미 실행 중 동일 POST의 409를 유지한다.
+하위 같은 작업 인정이 모든 HTTP POST의 응답 replay를 약속하는 것은 아니다.
+
+하위는 Debian·Ubuntu·Zephyr의 등록·제어·원 결과·명시 수습, OS 공통 정적 shared/exclusive pinning과 해제를 제공한다.
+긴 create/restore/firmware·usage·DHCP 중 다른 VM 진행의 로컬 근거가 있다. 모든 외부 장애의 제어 기한 보장은 아니다.
+실제 Spring·화면·배포본과 optional DTO는 아직 수락하지 않았다.
+
+<a id="defaults-errors"></a>
+## D02·D08 입력·오류 계약
+
+- 기존 완전 명시 요청은 변경 없이 지원한다. 생략은 추가 편의 기능이며 vcpus와 memory_mib는 각각 생략할 수 있다. 신규만 플랫폼 template/profile의 기본값을 사용한다.
+- 같은 원 key의 생략 자원은 원 initial_spec 값으로 비교한다. 생략↔동일 명시값은 양방향 허용하며 최초 비기본 명시값도 같다. 실제 다른 값은 충돌, null/bool/0/음수/잘못된 타입은 거절이다.
+- 원 body 저장은 계속 사용할 수 있다. byte/필드 존재 형태의 동일성을 유일한 재전달 규칙으로 강요하지 않는다. 현재 카탈로그나 현재 configuration으로 과거 create를 재작성하지 않는다.
+- 계획 request/spec, 원 initial_spec, 현재 configuration, 실제 Xen/Agent 관측을 따로 표시한다. 출력 전용 필드를 생성 body에 복사하지 않는다. 플랫폼 IP와 마지막 Agent IP도 구분한다.
+- 일반 호출자는 journal 버전을 선택하거나 raw journal을 파싱하지 않는다. 외부 full 호출 호환과 내부 writer의 [일관된 교체 단위](../platform/deployment-readiness.md#cohort)는 별개다.
+- `on_validation_error`의 `(await request.body())[:300]`는 전체 body를 먼저 읽는다. 로그용 원문 읽기를 없애고 허용된 코드·위치·원 요청 참조만 제한 길이로 기록한다. 오류 종류·원 cause·희귀 내부 stack은 보존한다.
+
+## D02·D08 정상 흐름과 실패 처리
+
+1. 최초 제출 전에 VM UUID·원 key·생성 의미를 보존한다. 하위 자산 create와 상위 create→start를 구분한다. 정상 생성→등록 조회→start→stop→retire를 세 guest 프로필에서 연결한다.
+2. 현재 key stop의 200/202와 `/vms/{vm_id}/control-operations?request_key={key}`를 소비한다. 경로의 정확한 URL encoding·인증·허용 응답은 [HTTP 계약](../contracts/vm-api-contract-v1.md)을 따른다. pending을 STOPPED로 저장하지 않는다.
+3. timeout·503·응답 유실은 취소/미수락의 증거가 아니다. 같은 key로 원 결과를 확인하고 기존 원 기한 안에서 지원되는 동일 이행만 한다. 새 key·UUID·deadline으로 우회하지 않는다.
+4. 미게시 생성은 VM GET이 없어도 인증된 원 요청 소유로 결과를 회수해야 한다. asset operation과 control-operation을 혼합하지 않는다. 진단 조회와 사용자의 명시 폐기는 다르다.
+5. 부분 열람·중복 key·저장 미확정·host 변경은 부재/빈 목록/정상으로 바꾸지 않는다. completed replay의 vm=null·warning도 보존하고 늦은 결과가 새 의도를 덮지 않게 한다.
+6. 조회·stop은 가능한 요청별 Manager 객체로 연결한다. 공용 inner를 여러 thread가 직접 공유하거나 임의 TTL cache로 guard를 대체하지 않는다. 기존 fork 없는 내부 버전의 배포 호환은 별도 확인한다.
+7. CPU 2.0의 placements·기본 공유·shared/exclusive·해제와 실제 전체 vCPU 관측을 표시한다. Linux 다중 vCPU를 1로 바꾸지 않으며 live repin·자동 정지는 제공하지 않는다.
+
+<a id="linux-준비-중-조회제어의-동시-연결"></a>
+<a id="반복-조회와-제어-진행성-연결"></a>
+## 공동 수락
+
+| 입력·주입 | 정상 진행과 실패 보호를 함께 확인 |
+|---|---|
+| 기존 full create / 선택 optional 각 자원 / 양방향 재전달 / 기본값 변경 | 기존 full HTTP 201 유지, 같은 원 operation·값·기한 유지, 실제 변경 충돌과 null 거절. 현재 구성 변경 뒤 과거 create가 구성을 되돌리지 않음 |
+| A 긴 copy/restore/firmware·usage·DHCP + B polling·stop | 같은 API 프로세스에서 정상 조회 성공, A 해제 전 B 허용 물리 종료·원 결과 저장. accepted만으로 성공 처리하지 않음 |
+| 응답 유실·API/Spring 재시작·202·원 결과 읽기 실패 | 같은 원 key 회수, 거짓 STOPPED/부재·자동 force/새 기한 0. 이후 지원되는 정상 이행 재개 |
+| 반복 invalid·큰/비밀 body·제어문자·느린 handler | 원 코드/detail과 희귀 cause 유지, 로그용 body 추가 읽기·민감 원문·재귀 로그·중복 stack 억제. 다른 VM 정상 조회·stop 진행 |
+| API 정상 종료·교체 / batch 일부 실패 | 실제 VM/execution scope와 backend 유지, 다른 VM disk/vif 보존. 운영 서비스 재시작은 7번 공동 승인 전 미실행 |
+
+## 차량 입력·표시의 별도 작업
+
+DEC-12·18·ARCH-T16·18은 Spring `drive/application/ManualInputRelay.java`,
+`drive/websocket/DriveInputWebSocketHandler.java`와 화면 입력 생산자를 연결한다.
+실제 session/sample/action·원 나이를 생산하고 AUTO/Standby에도 필요한 입력을 전달한다.
+서버 캐시 재발행은 새 세션 생존·새 행동이 아니다. 동일 MANUAL 승계는 불필요한 재조작 없이 이어지고
+AUTO→MANUAL은 현재 중립 후 새 조작을 요구한다. 재접속의 옛 비중립 자동 복원과 generation만 바꾼 승인은 거절한다.
+[MQTT 7.1절](../contracts/mqtt-contract-v1.md#71-명시적-세션-입력-manual-session-1)이 원본이다.
+DEC-16의 앱 lifecycle은 QUALIFIED·실제 준비·출력 허가를 분리하고 DEC-15·ARCH-T08 영상은 실제 프레임 진행·만료를 표시한다.
+Gateway 내부 submit_transition queue는 원격 API가 아니다. 새 모드/복귀·보호 요청 전송은 [공동 결정](../platform/deployment-readiness.md#decisions)을 먼저 따른다.
+
+## 선행조건과 담당 회신
+
+명시 자산 수습 HTTP의 공개 경로·인증/원 요청 소유는 FastAPI/Spring이 결정한다. 해당 UI 수습만 대기하며 기존 full 관리와 독립이다.
+운영 Linux 생성 시간값은 플랫폼·운영의 승인 자료가 필요하다. 차량 IPC·입력/장치 결정은 기본 조회·stop의 선행조건이 아니다.
+API backend 수명은 플랫폼/API 공동 수락이 필요하므로 아직 서비스 재시작 안전성을 선언하지 않는다.
+
+담당자는 D02·D08별로 **후보(commit+diff), 변경 파일/기호, 실제 명령·입력·정상/실패 결과, 미수행 사유, 설치 모듈 경로·배포 여부, 잔여 결정과 담당**을 회신한다.
+문서 준비·하위 로컬 수락·제품 구현·동일 설치본 종단 수락을 각각 적는다. [7번 입력표](../platform/deployment-readiness.md#stage7)는 이번에 실행하지 않는다.
+
+<a id="같은-후보의-설치-집합과-프로세스-교체-인계-67번-미실행"></a>
+내부 모듈 교체·drain·복구 절차의 현재 원본은 [배포 준비](../platform/deployment-readiness.md#replacement)다.
+
+## 변경 이력
+
+아래는 6번 정리 전 원문이다. 당시 소스·실패·측정·요청을 보존하며 현재 실행 지시는 위 본문을 따른다.
+
+<details>
+<summary>2026-11-01 이전 요청·진행 기록 원문</summary>
+
+# HTTP·Spring·화면 종단 연결 요청
+
 대상: FastAPI·Spring·프론트 담당자. **상태: 최신 하위/HTTP 제공 경로 대조 / Spring·화면 종단·새 입력 계약 수락 전.** 이번 최소 연결에서 이 제품 코드는 수정하지 않습니다. D02·D08과 원 key·deadline·후속 이행 책임을 유지합니다.
 
 ## 현재 할 일과 읽는 순서
@@ -44,7 +136,7 @@ Gateway의 로컬 `submit_transition` queue는 제품 HTTP API가 아니다. 관
 
 ## 관리 요청 종단 수락의 확인 순서
 
-<a id="defaults-errors"></a>
+<a id="history-defaults-errors"></a>
 ### 2026-11-01 현재 추가 작업: 입력 존재와 오류 진단 비용
 
 하위 제공물은 [create 계약](../platform/cli-manager-spec.md#cmd-create),
@@ -173,7 +265,7 @@ HTTP·Spring·화면 제품 코드는 이번에 대신 수정하지 않는다.
   수락은 종결/정리 중 중단·응답 유실에도 원 기록을 회수하고, 미종료 실행자·사용 중 자산·
   증거 불충분에서는 해제를 거절하며, 확인된 종결 뒤에만 후속 생성으로 진행하는 것이다.
 
-## Linux 준비 중 조회·제어의 동시 연결
+## [이력] Linux 준비 중 조회·제어의 동시 연결
 
 **D02·D08 후속 / 하위 3번 제공, FastAPI·Spring·화면 연결 및 설치 수락 전.**
 지원 기준은 [3번 검증 후보](../verification/recovery-scenario-closure-20261030.md#장기-linux-준비와-공통-잠금-분리)의
@@ -236,7 +328,7 @@ B key stop·실제 Xen 종료와 완료 조회가 A 해제 전에 끝나야 한�
 하위 로컬 통과와 위 제품 수락은 분리한다. 기존 기본 VM·CPU·네트워크·Tailscale을 보존하며,
 서비스 재시작의 backend cgroup 문제는 아래의 독립 미완료 항목으로 유지한다.
 
-## 반복 조회와 제어 진행성 연결
+## [이력] 반복 조회와 제어 진행성 연결
 
 **하위 4번 제공 후보 / 제품 HTTP·Spring·화면 수락 전.** 기존 D02·D08·3번 요청 ID와
 미완료 상태를 유지한다. 지원 근거는 [정식 조회 계약](../platform/cli-manager-spec.md#read-concurrency)과
@@ -403,7 +495,7 @@ restore의 중복 fsck는 같은 파일/같은 잠금 구간에서 줄였지만 
   HTTP 자체의 직렬화/threadpool/backend 수명을 수락한 결과는 아니다. D02/D08의 원 key·기한·
   pending 후속 이행 책임과 권한 검사는 그대로다.
 
-### 같은 후보의 설치 집합과 프로세스 교체 인계 (6·7번 미실행)
+### [이력] 같은 후보의 설치 집합과 프로세스 교체 인계 (6·7번 미실행)
 
 배포 담당자는 최신 보고서의 `SUBSET_PACKAGE-FINAL.json`을 기준으로 recipe Python 33개 전체의
 설치 바이트·모드·import 경로를 묶어서 확인해야 한다. 특히 Manager/Execution/Preparation,
@@ -416,3 +508,5 @@ resources, zephyr/zephyr_transition, vm, CPU, creation, recovery, runtime/trace�
 경로/버전·원 key 조회·현재 정책 확인을 포함한다. drain 미확정이면 설치를 강행하거나 lock/원장을
 삭제하지 않는다. 실제 gate/서비스/API/backend 수명과 guest 보존은 담당자 공동 수락이다.
 이번에는 이 절차를 실행하지 않았고 API 재시작·운영 파일/정책·설치본을 변경하지 않았다.
+
+</details>

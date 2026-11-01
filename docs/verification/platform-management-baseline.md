@@ -498,3 +498,8 @@ P5 초기 실패·수정 전 audit·inode 오탐·fixture 정책/경계 실패�
 5.5/6/7의 비용·연동·설치 수락과 기존 담당자 미완료는 위 표대로 남긴다.
 이번 변경은 문서와 P1의 읽기 검증 도구/결과뿐이다. 제품/정책/schema/API/시간값/잠금/
 운영 상태/배포/보드/commit/push를 바꾸지 않았고 5.5 이후 작업은 실행하지 않았다.
+
+
+## 6번 배포 준비 연결
+
+2026-11-01 [배포 원본](../platform/deployment-readiness.md)과 [6번 검증](recovery-scenario-closure-20261030.md#stage6)에 현재 담당 지시·내부 교체 단위·설정 공급·Gateway 정규 비활성 포장을 연결했다. 기존 하위 기능/비용·5.5 근거는 유지한다. RPM/QA·ARM import·로컬 loader 검증은 전체 이미지/실제 API backend·보드·제품 종단 수락과 구분한다.

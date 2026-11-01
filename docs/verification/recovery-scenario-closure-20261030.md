@@ -15,6 +15,7 @@
 | 5.5번 현재 범위 | 첫 [P55](#stage55)의 반례와 [lifecycle/CPU 후속](#stage55-followup)을 보존한다. 최신 [좁은 교차 보완](#stage55-cross-boundaries)은 firmware·자원 usage·lifecycle DHCP의 무관한 stop 대기를 분리하고 CPU 연쇄/오류 회복·추가 비용을 확인한다. 하위 로컬 수락이며 실보드/상위 제품 종단은 별도 |
 | 입력·진단 후속 | [2026-11-01 후속](#defaults-errors-review): CLI/Manager의 선택 자원 생략·원 입력 replay, 포화 trace/비활성 형식화/오프라인 예외·STOP 전 로그 대기 보완. 오류 구분·필수 내구 저장·기존 P55 보호 유지. HTTP/Spring/Agent/Worker 제품·보드·운영 정책은 미변경 |
 | create 입력 호환 보완 | [최신 의미 비교](#create-compatibility): 두 자원의 생략↔원 확정값 명시를 양방향 허용. 과거 형태 비교 선택을 대체하고 기존 완전 명시 호출·지원 원장 혼재를 유지. 내부 저장 버전 선택을 호출자에게 요구하지 않음 |
+| 6번 인계·배포 준비 | [현재 정리](#stage6): 담당자 현재 지시/이력 분리, Gateway 정규 recipe·비활성 unit·이미지 포함 연결, 고정 환경 RPM/QA·ARM Python import·systemd loader·영향 회귀 완료. 운영값·제품 연결·실제 설치와 7번은 별도 |
 | 남은 범위 | 운영 create 시간값 공급·보드 수락, 상위 제품 연결·실제 HTTP polling/정규 설치/보드 수락·API cgroup의 guest backend 문제는 미완료. 모든 부하/스케줄의 무기아나 지연 상한 수락은 아님 |
 
 아래는 후보별 이력이다. 과거 2회/439개/보드 적용 기록을 최종 1회/449개 이후 후보의
@@ -2100,3 +2101,109 @@ FINAL_CANDIDATE에 연결했다. 원본 오류 분류/진단 파일과 타 담�
 방지·모듈/process 교체, 운영 create 정책·실보드/동일 설치본 수락은 각각 미완료다.
 하위 원 공개 응답을 읽는 Worker/HTTP에 raw journal parser를 새로 요구하지 않는다.
 보드·운영 VM/CPU·실데이터·서비스·배포·commit/push·6/7번은 변경/실행하지 않았다.
+
+
+<a id="stage6"></a>
+## 2026-11-01 6번 — 현재 담당 지시와 플랫폼 배포 준비
+
+### 후보와 직접 마감 범위
+
+착수 branch는 `feat/platform/recovery-scenario-closure`, HEAD는 `8e3232a43045966d5e29bee31ae29c2a716704bb`다.
+착수 작업트리는 clean이었다. `2e48552` 진단, `f9a5720` 기본값/의미 비교, `8e3232a` 보고/인계의 바이트를 보존했다.
+이번 후보는 이 HEAD + 포장·문서·새 시험 diff와 `FINAL_CANDIDATE.json`의 파일 hash로 식별한다.
+운영 자산·서비스·설정·데이터·보드·배포·commit/push·7번은 변경/실행하지 않았다.
+
+**6-A 인계 준비 완료**, **6-B 소유 포장 보완·고정 환경 로컬 배포 준비 완료**로 판정한다.
+이는 미정 계약 결정·담당 제품 구현·전체 이미지/실제 설치·종단 수락을 포함하지 않는다.
+운영 create 정책·차량 설정·Agent 제공물은 해당 기능의 운영 준비 대기로 남는다.
+
+### 6-A — 무엇을 어떤 기준으로 바꿨는가
+
+| 원문·변경 위치 | 확인한 문제와 실제 개정 | 유지한 근거·완료 범위 |
+|---|---|---|
+| [HTTP·Spring·화면](../requests/20261029-request-http-spring-ui.md) | 기본 관리/원 결과/stop·동시성/optional 입력/CPU/진단의 수정 위치·이유·정상/실패 수락을 현재 본문에 모았다. 차량 입력/표시는 별도 절, 현재 선행조건과 담당 회신을 명시 | key stop·원 key 조회는 기존 제공으로 보존. 실제 라우터는 `/vms/{vm_id}/control-operations?request_key=...`. full HTTP 201·이미 실행 중 POST 409와 하위 동등 replay는 별개 |
+| [Worker](../requests/20261029-request-recovery-worker.md) | D01-W01~W05·D03-W01~W04별 observe/Engine/store/rejoin의 실제 기호, 관측 오류·원 attempt 회수·안정 구간/예산·제공물과 정책 대기를 연결 | warm-drive 최소 소비의 로컬 완료는 보존. raw journal parser·자동 수습/새 key/기한·SQLite/영속 이관·Worker–Gateway 원격 API를 만들지 않음 |
+| [Linux·Agent](../requests/20261029-request-linux-agent.md) | L01~L05의 계측·실제 앱 진행·전달·로컬 감독·설치 제공물을 나눴다. 실제 reporter 예외 경계·측정/회복 assertion과 후보/hash/entrypoint/의존성/unit/권한/일반 생성·seed별 smoke 회신을 요청 | host VM/CPU/backend는 플랫폼 책임. Agent 설정 기본값을 계측 결측에 적용하지 않으며 제품 코드는 미변경 |
+| [Gateway](../requests/20261029-request-gateway.md) | 직접 소유와 입력/Worker/장치 공동 연결을 구별하고 기존 DEC/ARCH·D03-G ID, 포장·전송 결정·수락/회신을 현재화 | stateless 준비/권위와 stateful 전송/물리 적용은 별개. 미측정 ERROR/CRITICAL·Zephyr 비용을 새 완료로 바꾸지 않음 |
+| [관리 연동 상세](../platform/management-integration-request.md), [상세 Worker](../requests/2026-10-27-recovery-health-ctrl.md), [상세 Linux](../requests/2026-10-27-linux-health-agent.md), [색인](../requests/README.md) | 현재 지시의 시작점을 하나로 연결했다. 구식 HTTP 미구현·형태 동일성·과거 대기는 현재 지시로 읽히지 않게 분리 | 기존 원문/ID/실패/측정은 이력으로 보존. 현재에 옮긴 anchor는 유지하고 중복 역사 anchor만 history 접두사로 구분 |
+
+기존 full 호출은 그대로 지원하고 optional DTO/serializer는 별도 확장이다.
+두 자원 생략↔원 확정값 명시를 양방향 허용하며 최초 비기본 명시도 같다. null/무효값·실제 차이는 여전히 거절한다.
+원 initial_spec과 현재 구성/카탈로그를 바꿔 쓰지 않고 원 기록/hash/신원/기한을 재작성하지 않는다.
+일반 호출자의 journal 버전 선택과 raw 해석 요구는 없다. 내부 writer cohort의 교체와 외부 호출 호환은 분리했다.
+
+요청한 `im not ai` 스킬은 로컬 skill catalog·파일 검색에서 찾지 못했다.
+대체 [humanize-korean SKILL.md](C:/Users/SSAFY/.codex/skills/humanize-korean/SKILL.md)를 네 현재 본문에 적용했다.
+기술 내용 개정 뒤 윤문을 별도로 수행했으며, 자동 low/light 판정·독립 monolith·공통 gate를 거쳤다.
+HTTP/Worker/Linux/Gateway 변경률은 각각 **0.03%/0.03%/0.02%/0%**, 모두 gate rc=0·자체검증 6/6·등급 B다.
+확인된 연결어미 뒤 쉼표만 삭제했고 이미 양호한 본문에는 추가 수사를 넣지 않았다. 과거 이력은 윤문 대상에서 제외했다.
+게이트 원본·입력/출력·summary와 경로는 원자료에 보존한다.
+
+### 6-B — 포장 변경과 판단 기준
+
+기존 배포 상세 원본이 부팅 설명·요청서·부분 tar 근거에 흩어져 있어
+[배포 준비](../platform/deployment-readiness.md)를 한 곳에 만들고 안내·부팅 문서에서 연결했다.
+여기에 source→recipe→설치 경로→로드 프로세스, 의존성, 설정 공급/권한, unit/scope,
+교체/drain/복구·공동 결정·7번 입력표를 모았다. 별도 운영 updater나 runtime 검증 프레임워크는 추가하지 않았다.
+
+| 실제 변경 | 이유·채택 기준 | 검증·남은 조건 |
+|---|---|---|
+| `recipes-core/xenova-gateway/xenova-gateway_0.1.0.bb` | 정규 Gateway recipe 부재를 확인. 기존 entrypoint와 runtime Python만 site-packages에 설치, 공용 MQTT·하위 플랫폼·실제 고정 Paho/pyserial·표준 분할 의존성 선언 | 실제 RPM 생성·package QA·pkgdata·payload/target import 확인. 개발 PYTHONPATH·시험 fixture를 제품 의존성으로 쓰지 않음 |
+| `files/xenova-gateway.service` | 기존 책임을 포장에 연결. root/UMask=0077·필수 env·기존 `python3 -m`·Restart=no·기본 disable | mount Requires, first-boot/broker/autostart After, admission Before. 초기 초안의 admission 뒤+shutdown 앞 순환 가능성을 발견해 수정했고 최종 loader로 정상/주입 순환을 검증 |
+| `files/gateway.env.example` | 선택 profile·실제 UUID·broker credential·device·차량 한계 공급 위치를 비활성 예시로 제시 | `/usr/share`에만 설치. 활성 `/etc/xenova/gateway.env`·Authority·재무장·차량 시간/한계는 생성하지 않음 |
+| bringup image의 `IMAGE_INSTALL` | 정규 패키지 포함을 실제 이미지 선택 경로에 연결 | 패키지 포함과 enable/출력 허가를 분리. 전체 이미지/rootfs 빌드·SD 적용은 미실행 |
+| Gateway README·pyproject 설명 | 옛 `/opt` 수동 경로와 새 정규 site-packages, 배포판 serial 명칭과 Yocto `python3-pyserial`, 아직 남은 설치 수락을 구분 | runtime 의존성 버전을 올리지 않았고 Gateway 제품 `.py`는 불변 |
+| `test_xenova_gateway_packaging.py` | 실제 recipe do_install을 fixture에서 실행해 파일·모드/활성 설정 부재·초기화 금지·기존 unit과의 ordering 회귀를 확인 | 새 3개 assertion 묶음 통과. source 문자열 검색만으로 package 성공을 대신하지 않음 |
+
+기존 xenova-platform·xenova-mqtt-client recipe는 필요한 최신 하위 파일을 포함해 불필요한 분해를 하지 않았다.
+실제 private Python은 **32개**, 확장자 없는 Python verifier/CLI·wrapper/native는 별도 경로다.
+과거 부분 묶음의 “33 Python”은 verifier를 포함한 수치여서 현재 private 모듈 개수의 목표로 사용하지 않았다.
+실제 RPM private 32개와 Gateway/MQTT 소스의 payload 바이트·0644 모드를 대조했다.
+creation-policy의 null example은 여전히 비활성이고 운영 승인값을 공급하지 않았다.
+기존 UUID/execution scope·최종 guard·host drain·상속 FD 보호를 그대로 사용하며 API unit의 KillMode를 완화하지 않았다.
+
+### 고정 환경의 실행 결과와 한계
+
+원자료 위치는 `C:/Users/SSAFY/Documents/Codex/2026-11-01/xenova-stage6/`다.
+착수 `ENTRY_SOURCE.json`, 최종 `FINAL_CANDIDATE.json`, `TASK_DIFF.patch`,
+`PACKAGES.json`, `LOCAL_CHECKS.json`, `UNIT_CHECKS.json`, `HUMANIZE_GATES.json`에 후보·명령·rc·원 로그를 연결한다.
+WSL 후보는 `/home/ssafy/xenova-stage6-20261101/source`, 기존 layer·cache를 사용한 별도 build다.
+6개 layer commit은 현재 layers.lock과 일치한다. 네트워크를 막은 `BB_NO_NETWORK=1`로 실행했다.
+
+- `bitbake xenova-platform xenova-mqtt-client xenova-gateway`의 설치·RPM·QA가 통과했고, 최종 unit을 반영한 runtime provider 부분 빌드도 통과했다. 최종 명령·대상 목록은 `build-runtime.sh`/`runtime-providers.json`, 원 로그는 `bitbake-final.log`다. 전체 이미지 빌드가 아니다.
+- 실제 target은 Python **3.14.7**, Paho **2.1.0**, pyserial **3.5**다. pkgdata에서 `python3-logging`의 handlers/pickle/io와 `python3-threading`의 queue, ctypes/libffi 등 의존성을 대조했다.
+- **39 RPM의 Python 의존성/플랫폼 payload**를 별도 root에 추출하고 기존 QEMU로 실제 ARM Python을 실행했다. Gateway/MQTT 하위 모듈 25개와 private 하위 32개, 합계 **57 모듈 import** 통과. TCP connect/bind audit 차단을 두었고 broker/serial·Authority 동작은 실행하지 않았다. 전체 이미지·Xen 도구·kernel 서비스 실행 성공을 뜻하지 않는다.
+- 기존 고정 ARM **systemd 259.5** loader에서 실제 unit을 읽는 정적 검증은 정상 rc=0, admission 순환 주입은 rc=1·cycle 검출이었다. 기반 unit/실행 파일 일부는 기존 unit fixture이며 서비스나 장치를 실행하지 않았다.
+- 같은 현재 소스의 포장/부팅·배포 payload/기본값/의미 비교 영향 회귀는 **60 passed**. 새 3개와 create 23개가 여기에 포함된다. 기존 799/171 결과를 다시 합산하지 않는다. 실제 unchanged HTTP 어댑터 assertion도 이 60개에 포함된다.
+- 기존 하위·Gateway 제품 소스와 타 담당자 제품 바이트가 착수 manifest와 일치한다. 그래서 무관한 전체 C/Zephyr/ARM 앱 빌드·회귀는 반복하지 않았다. 새 recipe는 실제 ARM target 의존성/import로 검증했다.
+
+초기 검증 실패도 구분해 보존한다. Windows에서 만든 검증용 셸의 CRLF 때문에 `set -e`/경로가 깨져 잘못된 작업 디렉터리에서 BitBake socket 생성이 실패했다.
+시험 셸을 LF로 고쳤고 그 시도에서 생긴 lock/log는 근거 폴더로 옮겼다. 기존 사용자 lock이나 운영 원장은 건드리지 않았다.
+초기 raw cpio 추출은 고정 RPM 형식과 맞지 않아 기존 libarchive 도구로 바꿨고 native sysroot 라이브러리를 지정했다.
+시험 socket 대역이 SSL 상속을 훼손한 경우는 connect/bind audit hook으로 고쳤다.
+Python closure의 ctypes/libffi 누락은 실제 하위 RDEPENDS를 fixture에 포함해 해결했다. 이 네 가지는 제품 입력/예외 결함으로 보고하지 않는다.
+WSL VHDX·host I/O accounting 경고와 기존 Starlette/httpx deprecation은 보존했고 이를 없애려고 도구/의존성을 업그레이드하지 않았다.
+
+### 공동 결정과 다음 수락
+
+[공동 결정표](../platform/deployment-readiness.md#decisions)는 Worker–Gateway 전송·Agent 서비스 wire·운영 생성 시간값·명시 수습 HTTP·실제 차량 한계/장치 피드백의 담당과 대기 기능을 분리한다.
+새 topic/route·운영 숫자를 만들지 않았다. 담당자 제품 코드는 미변경이며 요청서를 실제 전달/회신받거나 구현 완료로 표시하지 않는다.
+
+[7번 최소 입력표](../platform/deployment-readiness.md#stage7)에 CLI/보드 FastAPI와 EC2/Spring/화면의 시작점,
+OS별 정상 관리·입력 호환·동시 stop·원 결과/수습·CPU·Worker/Agent/Gateway·실제 교체·선택 차량의 입력/관측·실패·정리 owner를 적었다.
+실제 API backend/vif 수명·서비스 교체와 같은 후보 설치·전체 rootfs·실보드/장치·optional UI/DTO/제품 종단은 미수락이다.
+소스 원복과 저장 데이터 복구, 구형 writer downgrade도 같은 행동으로 취급하지 않는다.
+
+
+<a id="stage6-documents"></a>
+### 6번에서 수정한 문서 전체
+
+| 용도 | 문서 |
+|---|---|
+| 현재 담당 작업 | [HTTP·Spring·화면](../requests/20261029-request-http-spring-ui.md), [Worker](../requests/20261029-request-recovery-worker.md), [Linux·Agent](../requests/20261029-request-linux-agent.md), [Gateway](../requests/20261029-request-gateway.md) |
+| 기존 상세·진입 색인 | [관리 연동 상세](../platform/management-integration-request.md), [상세 Worker](../requests/2026-10-27-recovery-health-ctrl.md), [상세 Linux](../requests/2026-10-27-linux-health-agent.md), [요청 색인·회신 양식](../requests/README.md) |
+| 배포 원본·안내 | 새 [배포 준비](../platform/deployment-readiness.md), [플랫폼 안내](../platform/README.md), [부팅·종료](../platform/management-boot-boundaries.md), [Gateway README](../../platform/services/gateway/README.md) |
+| 근거·적용 상태 | 이 보고서의 6번 절, [기능별 기준선](platform-management-baseline.md), [개념 문서 마지막 적용 장](../platform/conceptual-architecture.md#s12) |
+
+문서 15개(신규 배포 원본 1개 포함)를 수정했다. 정식 create 의미·오류/wire schema는 바꾸지 않았다.
+별도 코드/메타데이터 변경은 Gateway recipe/unit/example, 이미지 포함 연결, pyproject 설명, 포장 시험에 한정했다.
