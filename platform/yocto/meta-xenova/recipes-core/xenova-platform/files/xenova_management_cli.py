@@ -91,8 +91,11 @@ def main(argv=None, manager=None):
                 raise ManagementError('INVALID_SPEC', 'recovery-reconcile never supports force')
             spec = {'recovery_attempt_id':args.recovery_attempt_id, 'timeout_ms':args.timeout_ms}
         elif action=='create':
-            spec={'vm_id':args.vm_id, 'name':args.name or args.id,'template_id':args.template_id,
-                  'template_version':args.template_version,'vcpus':args.vcpus,'memory_mib':args.memory_mib}
+            spec={'vm_id':args.vm_id, 'name':args.name if args.name is not None else args.id,'template_id':args.template_id,
+                  'template_version':args.template_version}
+            for key in ('vcpus','memory_mib'):
+                value=getattr(args,key)
+                if value is not None:spec[key]=value
             if args.ipv4 is not None:
                 spec['ipv4']=args.ipv4
         elif action in ('firmware-transition','update-resources','get','retire','restore','purge','delete','start','stop','reboot','autostart-set','board-shutdown-set','config','destroy','snapshot','probe','execution-context'):

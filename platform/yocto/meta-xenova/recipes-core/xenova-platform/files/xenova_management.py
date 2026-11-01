@@ -216,13 +216,27 @@ class Manager:
             op = self._read(entry)
             if deadline is not None and self.p.clock()>=deadline:
                 fail('DEADLINE_EXCEEDED','asset operation read budget expired')
-            if (op.get('operation_id') != entry.stem or op.get('schema_version') not in ('1.0','1.1')
+            if (op.get('operation_id') != entry.stem or op.get('schema_version') not in ('1.0','1.1','1.2')
                     or op.get('spec_hash') != digest(op.get('initial_spec'))):
                 fail('RECOVERY_REQUIRED', 'operation integrity mismatch')
             if not vm.UUID.fullmatch(op.get('vm_id','')) or op.get('action') not in MUTATIONS:
                 fail('RECOVERY_REQUIRED','invalid operation identity/action')
+            if op['schema_version']=='1.2' and op['action']!='create':
+                fail('RECOVERY_REQUIRED','optional-input journal version is only valid for create')
             if op['action']=='create':
                 creation.validate(op)
+                if op['schema_version']=='1.2':
+                    # 당시 저장한 작은 원천으로만 대조한다. 현재 카탈로그는 읽지 않는다.
+                    source=op['template']
+                    try:
+                        submitted=self._normalize('create',op['request'])
+                        if submitted!=op['request'] or {'vcpus','memory_mib'}<=set(submitted):
+                            raise ValueError('optional-input journal requires the original omitted keys')
+                        resolved=self._resolve_create(submitted,source)
+                        if self._creation_spec(resolved,source)!=op['initial_spec']:
+                            raise ValueError('resolved creation differs from its stored source')
+                    except (ManagementError,KeyError,TypeError,ValueError):
+                        fail('RECOVERY_REQUIRED','creation input/default resolution mismatch')
                 assigned = op.get('assigned', {})
                 initial = op['initial_spec']
                 if not isinstance(assigned, dict) or not isinstance(initial, dict):
@@ -592,9 +606,9 @@ class Manager:
             from xenova_resources import validate
             return validate(spec, normalize_uuid, fail)
         if action == 'create':
-            required = {'vm_id','name','template_id','template_version','vcpus','memory_mib'}
-            if set(spec) - (required | {'ipv4'}) or not required <= set(spec):
-                fail('INVALID_SPEC', 'vm_id, name, exact template ID/version and resources required')
+            required = {'vm_id','name','template_id','template_version'}
+            if set(spec) - (required | {'ipv4','vcpus','memory_mib'}) or not required <= set(spec):
+                fail('INVALID_SPEC', 'vm_id, name and exact template ID/version required')
             name = spec['name']
             if (not isinstance(name, str) or not name.strip() or len(name) > 63
                     or any(ord(c) < 32 or 0x7f <= ord(c) <= 0x9f or 0xd800 <= ord(c) <= 0xdfff for c in name)):
@@ -603,8 +617,10 @@ class Manager:
                 catalog.identity(spec['template_id'], spec['template_version'])
             except PlatformError:
                 fail('INVALID_SPEC', 'invalid template ID or explicit version')
-            if any(type(spec[k]) is not int or spec[k] <= 0 for k in ('vcpus','memory_mib')):
+            if any(k in spec and (type(spec[k]) is not int or spec[k] <= 0) for k in ('vcpus','memory_mib')):
                 fail('INVALID_SPEC', 'vcpus and memory_mib must be positive integers')
+            if 'ipv4' in spec and not self._valid_ip(spec['ipv4']):
+                fail('INVALID_SPEC','explicit IP must be 192.168.77.2..99')
             return {**{k:spec[k] for k in sorted(spec)}, 'vm_id':normalize_uuid(spec['vm_id'])}
         required = {'vm_id', 'confirm_vm_id'} if action == 'purge' else {'vm_id'}
         if set(spec) != required:
@@ -666,10 +682,6 @@ class Manager:
         selected = next((e for e in matches if e['template_version'] == spec['template_version']), None)
         if selected is None:
             fail('TEMPLATE_VERSION_NOT_FOUND', 'exact template version not published')
-        for k in ('vcpus','memory_mib'):
-            lo,hi = selected['resource_limits'][k]
-            if not lo <= spec[k] <= hi:
-                fail('RESOURCE_UNSUPPORTED', 'requested resources exceed template/platform limits')
         if selected['guest_kind'] == 'zephyr' and not selected['capabilities'].get('dhcp'):
             if 'ipv4' in spec:
                 fail('INVALID_SPEC', 'Zephyr has no IP field')
@@ -680,6 +692,43 @@ class Manager:
         descriptor = {k:selected[k] for k in ('schema_version','template_id','template_version','guest_kind',
                                              'asset_directory','manifest_sha256','source_template_id')}
         return catalog.describe(self.data, descriptor, full=full)
+
+    @staticmethod
+    def _resolve_create(submitted, selected):
+        """신규 선택/저장한 원천의 자원만 채운다. 생략과 명시값의 의미를 합치지 않는다."""
+        resolved=dict(submitted)
+        for key in ('vcpus','memory_mib'):
+            if key not in resolved:
+                defaults=selected.get('default_resources')
+                if not isinstance(defaults,dict) or type(defaults.get(key)) is not int or defaults[key]<=0:
+                    fail('ARTIFACT_INVALID','selected template resource defaults are unavailable or invalid')
+                resolved[key]=defaults[key]
+            lo,hi=selected['resource_limits'][key]
+            if not lo<=resolved[key]<=hi:
+                fail('RESOURCE_UNSUPPORTED' if key in submitted else 'ARTIFACT_INVALID',
+                     'resource selection exceeds template/platform limits')
+        return resolved
+
+    @staticmethod
+    def _creation_spec(resolved,selected):
+        return {**resolved,'guest_kind':selected['guest_kind'],'autostart':False,
+                'board_shutdown_policy':'graceful' if selected['capabilities'].get('graceful_shutdown') else 'refuse'}
+
+    @staticmethod
+    def _same_create_request(operation, submitted):
+        """검증한 원 생성의 두 자원만 보충한다. 현재 구성/카탈로그나 원 기록은 바꾸지 않는다."""
+        stored=operation.get('request');initial=operation['initial_spec']
+        if not isinstance(stored,dict):fail('RECOVERY_REQUIRED','invalid original creation request')
+        expected=dict(stored);incoming=dict(submitted)
+        for key in ('vcpus','memory_mib'):
+            value=initial.get(key)
+            if (type(value) is not int or value<=0
+                    or key in stored and (type(stored[key]) is not int or stored[key]!=value)
+                    or key not in stored and operation['schema_version']!='1.2'):
+                fail('RECOVERY_REQUIRED','original creation resources are inconsistent')
+            expected[key]=value
+            if key not in incoming:incoming[key]=value
+        return incoming==expected
 
     @staticmethod
     def _valid_ip(value):
@@ -1350,7 +1399,9 @@ class Manager:
         if action!='create':operations=None
         if previous:
             context['operation_id']=previous['operation_id']
-            if previous['action']!=action or previous['request']!=spec:
+            same_request=(previous['action']==action and
+                          (self._same_create_request(previous,spec) if action=='create' else previous['request']==spec))
+            if not same_request:
                 fail('IDEMPOTENCY_CONFLICT','same key has a different action or request')
             context['replayed']=True
             tomb = self._tombs().get(previous['vm_id'])
@@ -1418,6 +1469,7 @@ class Manager:
             # 이 지역 사본을 넘기지 않고 새 잠금 구간에서 원장과 내구 근거를 다시 확보한다.
             self._conflicts(spec,records,operations=operations)
             selected=self._selection(spec, full=False)
+            resolved=self._resolve_create(spec,selected)
             pending=[o for o in operations if o['action'] in ('create','firmware-transition') and creation.holds(self,o)]
             assigned_ip = self._allocate_ip(spec, records,operations=operations,pending=pending) if selected['capabilities'].get('dhcp') else None
             # 명백한 용량 부족은 payload 전체 읽기 전에 거절한다. 이 결과는 예약이 아니다.
@@ -1426,6 +1478,8 @@ class Manager:
                 descriptor={k:selected[k] for k in ('schema_version','template_id','template_version',
                             'guest_kind','asset_directory','manifest_sha256','source_template_id')}
                 selected=catalog.describe(self.data,descriptor,full=True)
+                if self._resolve_create(spec,selected)!=resolved:
+                    fail('TARGET_CHANGED','template defaults changed during selection; request not accepted')
                 self._reserve_space(sum(p.stat().st_size for p in Path(selected['directory']).iterdir()), records,pending=pending)
             # Linux 내용 검증은 원 작업/예약을 저장한 뒤 실제 복사 바이트에 대해 한 번 수행한다.
             tomb=None
@@ -1458,7 +1512,8 @@ class Manager:
                 self._restore_ip(tomb['record'], records)
                 self._reserve_space(0, records, restored=(tomb['record'], directory))
         if not execute:
-            return {'plan':True,'action':action,'spec':spec,'starts_guest':False,
+            return {'plan':True,'action':action,'spec':resolved if action=='create' else spec,
+                    **({'request':spec} if action=='create' else {}),'starts_guest':False,
                     'assets_deleted':False}
         if action=='create' and selected['guest_kind']=='linux' and 'linux_slot' not in context:
             raise NeedLinuxSlot()
@@ -1474,8 +1529,8 @@ class Manager:
             'vm_id':identity,'request':spec,'initial_spec':dict(spec),'spec_hash':digest(spec),
             'status':'RUNNING','phase':'recorded','result':None,'error':None}
         if action=='create':
-            effective={**spec,'guest_kind':selected['guest_kind'],'autostart':False,
-                       'board_shutdown_policy':'graceful' if selected['capabilities'].get('graceful_shutdown') else 'refuse'}
+            effective=self._creation_spec(resolved,selected)
+            if any(k not in spec for k in ('vcpus','memory_mib')):op['schema_version']='1.2'
             op.update(initial_spec=effective,spec_hash=digest(effective))
             assigned_mac='02:'+':'.join(f'{b:02x}' for b in os.urandom(5))
             reserved_records=list(records.values())+[t['record'] for t in self._tombs().values()]+self._legacy_records()

@@ -59,7 +59,7 @@ def accept(m,op,context):
     if int(end*1000)<=int(now*1000):fail('DEADLINE_EXCEEDED','no execution interval remains before acceptance')
     host=m.p.boot_id_reader()
     if not isinstance(host,str) or not UUID.fullmatch(host):fail('OBSERVATION_UNAVAILABLE','current host boot cannot be verified')
-    op['schema_version']='1.1'
+    if op['schema_version']!='1.2':op['schema_version']='1.1'
     op['creation']={'version':1,'host_boot_id':host,
         'accepted_monotonic_ms':int(now*1000),'deadline_monotonic_ms':int(end*1000),'limits':limits}
     context['create_call_deadline']=call_end
@@ -67,6 +67,10 @@ def accept(m,op,context):
 
 def validate(op):
     """알 수 없는 subtree/관계는 예약 0으로 해석하지 않는다."""
+    source=op.get('template')
+    if op.get('schema_version')=='1.2' and (not isinstance(source,dict)
+            or not isinstance(source.get('capabilities'),dict)):
+        fail('RECOVERY_REQUIRED','creation stored default source is invalid')
     timing=op.get('creation')
     if timing is not None:
         from xenova_vm import UUID
@@ -82,7 +86,8 @@ def validate(op):
             raise ValueError('creation deadline exceeds accepted finite limits')
     resolution=op.get('reconciliation')
     if resolution is None:
-        if op.get('schema_version')=='1.1' and timing is None:raise ValueError('missing creation context')
+        if (op.get('schema_version')=='1.1' or op.get('schema_version')=='1.2' and op.get('template',{}).get('guest_kind')=='linux') and timing is None:
+            raise ValueError('missing creation context')
         return
     from xenova_vm import UUID
     if op['status']=='SUCCEEDED' or not isinstance(op.get('error'),dict):raise ValueError('reconciliation must preserve an original failed create')

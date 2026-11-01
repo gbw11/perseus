@@ -363,7 +363,9 @@ xenova-vm status --json
 
 `xenova-vm create --vm-id UUID --name NAME --template-id ID --template-version VERSION --vcpus N --memory-mib M`
 
-이 형식은 계획이다. 실제 등록은 --execute를 추가한다. Linux IPv4 생략 시 자동 예약하며 버전·CPU·메모리는 명시한다. UUID가 생성 요청 키를 결정한다.
+이 형식은 계획이다. 실제 등록은 --execute를 추가한다. 정확한 템플릿 버전과 UUID는 명시한다.
+vCPU·메모리는 각각 생략할 수 있으며 선택한 카탈로그의 `default_resources`로 보충한다.
+Linux IPv4 생략은 기존 자동 예약이다. UUID가 생성 요청 키를 결정한다.
 
 **인자**
 
@@ -373,13 +375,54 @@ xenova-vm status --json
 | `--name TEXT` | 필수, 표시 이름 1..63문자. create 위치 이름도 허용 |
 | `--template-id ID` / `--template ID` | 공개 템플릿 ID |
 | `--template-version VERSION` | 정확한 게시 버전 |
-| `--vcpus N / --memory-mib M` | 둘 다 필수, 템플릿 범위의 정수 |
+| `--vcpus N / --memory-mib M` | 각각 선택, 생략만 카탈로그 기본값 사용. 명시값은 템플릿 범위의 정수 |
 | `--auto-ip` / `--ipv4 ADDRESS` | 상호 배타. 생략도 자동 할당 |
 | `--execute / --json` | 계획 확인 후 실행 |
 
 **사용 조건**
 
 카탈로그·저장 용량·UUID/이름/MAC/IP 소유권 검사를 통과해야 한다. [생성·주소 계약](#creation-contract)을 따른다.
+
+#### 자원 기본값과 재전달 (하위 CLI/Manager 제공, HTTP 소비는 별도)
+
+이번 규칙은 생략과 null/0/False/빈 값/잘못된 타입을 구별한다. 현재 공통 카탈로그는 지원
+Debian·Ubuntu에 1 vCPU/512 MiB, 고정 Zephyr에 1 vCPU/16 MiB를 제공한다. 최소 허용량을
+새 권장값으로 만든 것이 아니며, 설치/운영 자원·CPU 프리셋은 바꾸지 않는다. 자원 부족 시
+더 작은 값으로 낮추지 않는다. CPU 개별 지정을 create에 추가하지 않으며 다음 실행의 현재
+정식 배치 정책을 상속한다. 템플릿 ID/버전·신원·권한·원 생성 기한 규칙은 그대로다.
+
+CLI는 생략한 자원 key를 보내지 않는다. 직접 Manager도 같은 규칙으로 처리한다. 신규 요청만
+작은 카탈로그 메타데이터로 해석하고, 재전달은 그 전에 원 key의 유일성과 `request`를 확인한다.
+원 `request`는 최초 명시/생략 형태, `initial_spec`·`spec_hash`는 확정 명세, `template`은 선택
+버전/manifest 및 당시 `default_resources`, `assigned`는 원 주소/신원 예약이다. 원 기록의
+자기 정합성 검사와 새 재전달의 의미 비교는 별개다. 같은 key의 재전달에서 생략한 두 자원은
+원 `initial_spec` 값으로 보충하고 명시값은 그 값과 비교한다. **생략↔동일 명시값은 양방향으로
+같은 요청**이며, 최초 명시값이 당시 기본값과 달라도 적용한다. 다른 자원값·이름·템플릿 등은
+충돌이고 null/bool/0/잘못된 타입은 오류다. IP 등 다른 항목의 기존 비교 의미는 확대하지 않는다.
+
+기존 완전 명시 CLI/Manager/HTTP 호출은 새 옵션·header·mode 없이 유지한다. 저장 형식은
+하위 구현의 책임이며 일반 호출자가 버전을 고르거나 원장을 변환하지 않는다. 새 코드는 지원하는
+완전 명시 1.0/1.1과 생략 입력 1.2를 같은 저장소에서 읽는다. 1.2의 저장한 원 제출→당시 원천→
+확정 명세 검사는 유지하고, 표현이 다른 replay 때문에 원 request/hash/신원/기한을 다시 쓰지 않는다.
+구형 내부 writer가 모르는 새 형식과 혼합 설치하는 문제는 별도 배포 호환이며 기존 완전 명시
+호출자의 호환을 막는 근거가 아니다. 운영 원장의 일괄 이관/초기화는 하지 않는다.
+
+계획 `data.request`는 제출 형태, `data.spec`는 이번 계획의 완전한 자원 명세다. 계획은 예약이나
+수락이 아니다. 계획값으로 실행하려면 **최초 execute에 그 spec의 vCPU/메모리를 명시**하고 그
+선택을 첫 수락까지 유지한다. 원래의 생략 입력으로 새 execute를 요청하면 그 시점에 다시 계획하는
+것이다. 별도 plan-token 서비스는 없다. 수락 뒤에는 현재 기본값이 바뀌거나 사라져도 원 결정을
+재해석하지 않는다. 현재 실행의 정책·신원·자원 guard는 별도로 유지한다.
+
+예를 들어 원 메모리 768MiB를 명시해 수락했다면, 나중에 메모리를 생략해도 원 768을
+회수한다. 원 512에 대해 768을 명시하면 충돌이다. 현재 구성 변경으로 768이 되어도 과거
+create의 기준은 원 512이며 현재 구성을 되돌리지 않는다. 응답 전체를 create body에 복사하지
+않고 허용 입력 필드만 사용한다. 같은 요청 인정 뒤에도 활성 원 실행/실패/명시 수습/완료 회수는
+각 상태의 기존 규칙을 따른다. 새 복사·예약·기한 발급이나 실패 뒤 자동 재생성 허가는 아니다.
+
+확정값은 create/VMView의 `initial_spec` 및 `operation`의 원 기록에서, 변경된 현재 구성은
+`configuration`에서 확인한다. 실제 Xen 자원/CPU 적용은 관측과 `cpu-layout`의 현재 근거로
+확인하며 구성값을 실제 관측이나 Agent 건강으로 채우지 않는다. FastAPI/Spring/화면의 생략
+전달과 표시 연결은 담당 요청/공동 수락 전이다.
 
 새 Linux VM의 대화형 Bash에는 `[표시 이름] 사용자@vm-UUID앞8자리:경로` 형식의
 프롬프트를 준비한다. 실제 hostname·Xen 내부 이름·신원은 유지하며 Zephyr에는 적용하지 않는다.
@@ -426,7 +469,7 @@ Linux 복사 검증·준비 실패는 원 작업이 기록된 뒤의 `RECOVERY_R
 
 `get`에서 UUID·내부 이름·MAC/IP·자원을 확인한다. 완료는 등록만 뜻하며 `domid`가 없어도 정상이다. 작업 조회는 `xenova-vm operation --idempotency-key "create:$VM_ID" --json`.
 
-**Manager 매핑:** `create / {vm_id,name,template_id,template_version,vcpus,memory_mib,ipv4?}`. 키는 `create:<정규 UUID>`로 고정.
+**Manager 매핑:** `create / {vm_id,name,template_id,template_version,vcpus?,memory_mib?,ipv4?}`. 키는 `create:<정규 UUID>`로 고정.
 
 [명령어 색인으로](#command-index)
 
@@ -840,7 +883,7 @@ VM·진단 원본은 삭제하지 않는다. 계획은 고정 private topology, 
 실행하면 원 실패와 수습 기록을 error.details로 회수하며 새 복사/신원/기한을 발급하지 않는다.
 명시 신규 create는 새 key/VM 신원과 현재 IP/용량 검사로 수행한다. 원 UUID 이력은 계속 보존한다.
 
-수습 기록은 자산 journal `schema_version=1.1`의 `reconciliation.version=1`이다.
+수습 기록은 Linux 자산 journal `schema_version=1.1` 또는 선택 자원 생략을 수락한 `1.2`의 `reconciliation.version=1`이다. 1.2의 원 제출 key 존재와 저장된 확정 명세는 create 재전달 계약을 따르며 수습이 재해석하지 않는다.
 `request/context_sha256/plan/plan_sha256/phase/remaining/deleting/root_pending/error/release`를
 한 원자 JSON 단위로 저장한다. phase는 planned/cleaning/complete이며 원 spec_hash/최초
 error/result를 수습 결과로 덮지 않는다. cleanup 오류는 별도 reconciliation.error에 둔다.
@@ -3695,7 +3738,7 @@ Template 객체는 다음 필드를 제공한다.
 실제 설치 버전과 기능은 templates 결과를 우선한다.
 
 <a id="creation-contract"></a>
-create의 정확한 spec은 `vm_id,name,template_id,template_version,vcpus,memory_mib`와 선택 `ipv4`다. 자원은 bool이 아닌 양의 정수다. `--auto-ip`는 ipv4 생략을 표현하며 Manager 필드가 아니다.
+create의 필수 spec은 `vm_id,name,template_id,template_version`이고 `vcpus,memory_mib,ipv4`는 선택이다. 신규 자원 생략은 선택한 template의 `default_resources`로, 수락한 key의 재전달 생략은 원 `initial_spec`으로 해석한다. 명시 자원은 bool이 아닌 양의 정수여야 하며 null/0/False/문자열은 원 값이나 기본값으로 치환하지 않는다. `--auto-ip`는 ipv4 생략을 표현하며 Manager 필드가 아니다. [최소 입력·재전달](#cmd-create)의 의미 비교를 따른다.
 
 - Linux·Network Starter의 자동/명시 예약 IP는 `192.168.77.2..99`다. 자동은 사용 가능한 낮은 주소부터 선택한다.
 - 등록·보관 자산·미완료 작업·factory/운영 예약·DHCP hosts/lease를 함께 대조한다. 현재 운영 예약은 .10/.20이며 factory Debian .20은 그 소유권으로 유지한다.

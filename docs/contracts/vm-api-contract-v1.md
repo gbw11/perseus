@@ -37,7 +37,7 @@ Spring이 생성 전에 발급한 UUID 형식의 `vm_id`가 시스템 전체의 
 
 ### 1.4 플랫폼 공통 Manager와 HTTP 어댑터의 경계
 
-플랫폼 함수·JSON CLI의 원본 계약은 [VM 관리 가이드](../build-guides/xenova-vm-management.md)입니다.
+플랫폼 함수·JSON CLI의 원본 계약은 [CLI·Manager 정식 계약](../platform/cli-manager-spec.md)입니다.
 이 문서의 내부 HTTP 계약과 공통 Manager의 입출력은 서로 다른 인터페이스입니다.
 
 | 항목 | 공통 Manager / CLI | dom0-manager HTTP |
@@ -298,9 +298,18 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 - 디스크 경로는 `vm_id`에서 파생한다.
 - Xen에 같은 `vm_id`의 도메인이 이미 있으면 명세와 관계없이 `409 VMExists`로 거부한다. 실행 중인 도메인에 대해서는 dom0-manager가 명세를 비교하지 않으며, 동일 명세 재요청을 성공으로 바꾸는 것은 Spring이다(10.1절).
 - Linux IP는 Spring이 전달하지 않는다. 플랫폼이 전역 잠금 안에서 IP 풀과 registry를 확인해 빈 주소를 자동 할당한다.
-- 플랫폼 `create`에는 Spring 발급 `vm_id`, 표시 이름(dom0-manager가 `<template_id 정규화>-<vm_id 앞 12자리>`로 만든다), 템플릿 ID·버전, vcpus·memory_mib를 보낸다. 내부 실행 이름(`vm-<hex>`)·MAC·IP는 플랫폼이 발급하고, IP가 바닥나면 플랫폼 `IP_POOL_EXHAUSTED`를 `507 InsufficientResources`(`resource.name=ipv4`)로 낸다. 플랫폼 `INVALID_SPEC`은 `400 InvalidArgument`다.
+- 플랫폼 `create`에는 Spring 발급 `vm_id`, 요청의 표시 이름 `name`, 템플릿 ID·버전, vcpus·memory_mib를 보낸다. 내부 실행 이름(`vm-<hex>`)·MAC·IP는 플랫폼이 발급하고, IP가 바닥나면 플랫폼 `IP_POOL_EXHAUSTED`를 `507 InsufficientResources`(`resource.name=ipv4`)로 낸다. 플랫폼 `INVALID_SPEC`은 `400 InvalidArgument`다.
 
 **Spring 불변조건** — 동일한 `vm_id`에는 항상 동일한 생성 명세를 전송한다. 플랫폼은 registry의 기존 생성 명세와 비교해 위반을 거부한다.
+
+<a id="lower-create-compatibility"></a>
+2026-11-01 하위 호환 보완: 위 **기존 완전 명시 HTTP 요청은 그대로 유효**하며 endpoint·header·
+응답 모델을 추가로 요구하지 않는다. 하위 Manager의 선택적 자원 생략은 별도 기능이다.
+같은 원 create key에서 vcpus/memory_mib를 생략하면 원 생성 확정값으로 보충하고, 그 값의
+명시와 양방향으로 같은 요청으로 본다(최초 비기본 명시값 포함). 현재 설정/default로 원 값을
+다시 고르지 않는다. 실제 차이·무효 입력·기존 IP/대상 비교는 유지한다. 저장 형식은 하위가
+처리하고 호출자에게 journal 버전/파일 해석/변환을 요구하지 않는다. HTTP/화면의 선택적 생략
+지원은 아직 별도 담당 확장이다. 실행 중 VM의 기존 409와 등록 후 start 의미는 바꾸지 않는다.
 
 - 도메인이 없고 등록된 디스크만 있을 때(재시작)는 요청 명세가 기록된 최초 명세와 다르면 `409 VMExists`로 거부한다(1.4절 "다른 최초 명세는 충돌"). 같은 명세면 `201`로 재시작한다.
 
