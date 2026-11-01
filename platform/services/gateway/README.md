@@ -44,6 +44,9 @@ broker 주소·계정은 기존 `--host/--port/--username`과 `XENOVA_GATEWAY_BR
 (`/run/xenova/drive-bindings.json`)이다. `--start-mode`는 legacy 전용이다.
 실제 출력은 검증된 장치/복구 경로와 아래 차량 한계 파일을 준비한 뒤
 `--sink serial --serial-port /dev/ttyUSB0 --vehicle-limits /etc/xenova/vehicle-limits.json`로 선택한다.
+`--serial-port`는 pyserial URL도 받는다. `--serial-port socket://<PC>:7600`이면 같은 프레임
+바이트를 TCP로 PC 시뮬레이터(`--input frames --frame-listen 0.0.0.0:7600`)에 보낸다.
+연결 실패·끊김은 시리얼 오류와 같이 SinkError(출력 금지)로 처리된다. TCP 출력도 차량 한계 검증을 유지한다.
 Gateway의 정규 recipe/unit과 client subpackage가 제공된다. unit은 disable이며 활성 env·Authority 초기화·재무장을 만들지 않는다.
 현재 payload/의존성·설치 수준은 [배포 준비](../../../docs/platform/deployment-readiness.md)를 따른다.
 

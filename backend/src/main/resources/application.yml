@@ -115,6 +115,6 @@ xenova:
     service-token: ${DOM0_MANAGER_SERVICE_TOKEN:}
     connect-timeout: ${DOM0_MANAGER_CONNECT_TIMEOUT:2s}
     query-timeout: ${DOM0_MANAGER_QUERY_TIMEOUT:6s}
-    # Platform graceful stop can wait up to 90s; keep the outer HTTP budget longer.
-    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:100s}
+    # Keep long-running VM commands connected for up to 15 minutes.
+    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:15m}
     retry-backoff: ${DOM0_MANAGER_RETRY_BACKOFF:500ms}
