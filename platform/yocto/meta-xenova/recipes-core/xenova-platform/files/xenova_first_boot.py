@@ -243,8 +243,16 @@ class FirstBoot:
             raise ValueError('factory contract requires Zephyr firmware seeds')
         if current and (specs[0]['record'].get('template') != 'debian-13-20261015'
                         or specs[0]['record'].get('template_id') != 'debian-13-arm64'
-                        or any(s['record'].get('template_id') != 'zephyr-xenvm-starter-arm64' for s in firmware_specs)):
-            raise ValueError('current factory must use Debian Interaction and Zephyr Starter templates')
+                        or any(s['record'].get('template_id') not in ('zephyr-xenvm-starter-arm64','zephyr-drive-lattice-lab-arm64') for s in firmware_specs)):
+            raise ValueError('current factory requires verified Debian and supported Zephyr template profiles')
+        for item in firmware_specs:
+            r=item['record']
+            if r.get('template_id')=='zephyr-drive-lattice-lab-arm64' and (
+                    r.get('template')!='xenova-zephyr-drive-lattice-lab-1.0.0'
+                    or r.get('provisioning_profile',{}).get('apps')!={
+                        'autonomous':{'model':'stateful','standby_progress':'idle'},
+                        'manual':{'model':'stateless','standby_progress':'idle'}}):
+                raise ValueError('factory drive requires the actual bounded lattice/warm profile')
         if current and len({(s['record'].get('template'), s['record'].get('template_id'),
                              s['record'].get('template_version'), s['record'].get('creation_origin', {}).get('manifest_sha256'))
                             for s in firmware_specs}) != 1:

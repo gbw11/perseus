@@ -395,6 +395,31 @@ class ProvisioningHooksTest(unittest.TestCase):
             for server in servers:
                 server.terminate();server.wait(5)
 
+    def test_actual_arm_template_is_selected_copied_registered_and_supplied_to_distinct_factory_vms(self):
+        source=os.environ.get('XENOVA_ACTUAL_DRIVE_TEMPLATE')
+        if not source:self.skipTest('requires this candidate real ARM drive bundle; no synthetic fallback')
+        import test_xenova_default_deployment as deployment
+        import xenova_vm as vm
+        from xenova_runtime import operation_lock
+        from first_install_fixture import assemble
+        f=deployment.DefaultDeploymentTest('runTest');f.setUp();self.addCleanup(f.doCleanups)
+        board,factory=f.current_board()
+        for item in factory['firmware_instances']:
+            shutil.rmtree(board.data/'seeds'/item['record']['id'])  # owned tiny seed fixture only
+        shutil.rmtree(board.data/'rtos-templates')  # owned old Starter fixture, before the fresh assembly copy
+        entry=assemble.rtos.info(Path(source),assemble.sha(Path(source)/'firmware.json'))
+        factory['rtos_templates']=assemble.copy_rtos_templates(board.data,[entry])
+        factory['firmware_instances']=assemble.copy_rtos_seeds(board.data,[entry])
+        (board.data/'.xenova-install.json').write_text(json.dumps(factory))
+        with operation_lock(board.p.run) as common:board.p.register(common=common)
+        records=vm.load_records(board.data);a,b=(records[n] for n in ('zephyr-drive-a','zephyr-drive-b'))
+        self.assertEqual(a['active_firmware']['sha256'],entry['metadata']['files']['zephyr.bin']['sha256'])
+        self.assertEqual(a['active_firmware'],b['active_firmware']);self.assertNotEqual(a['uuid'],b['uuid'])
+        self.assertEqual(a['template_id'],'zephyr-drive-lattice-lab-arm64')
+        aa=json.loads(provision.credential_file(board.data,a['uuid'],'drive').read_text())
+        bb=json.loads(provision.credential_file(board.data,b['uuid'],'drive').read_text())
+        self.assertTrue(aa['password']!=bb['password'])
+        with patch.object(provision,'ensure',side_effect=AssertionError('completed factory repeated supply')):board.p.register()
 
 
 if __name__=='__main__':unittest.main()
