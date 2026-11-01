@@ -575,8 +575,9 @@ class FoundationTest(unittest.TestCase):
         self.assertEqual(self.p.execution().barrier()["state"], "quiescing")
 
     def test_host_barrier_published_before_bounded_operation_drain(self):
-        with operation_lock(self.p.runtime), patch.object(vm, "Platform", return_value=self.p), self.assertRaises(OperationBusy):
+        with operation_lock(self.p.runtime), patch.object(vm, "Platform", return_value=self.p), self.assertRaises(SystemExit) as caught:
             vm.main(["shutdown-all"])
+        self.assertEqual(caught.exception.code,3)
         self.assertEqual(self.p.execution().barrier()["state"], "quiescing")
         self.assertEqual(self.physical("shutdown"), [])
         self.assertGreaterEqual(self.ticks, 90)

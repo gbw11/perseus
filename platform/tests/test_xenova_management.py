@@ -376,7 +376,7 @@ class ManagementTest(unittest.TestCase):
             output=io.StringIO()
             with redirect_stdout(output):
                 vm.main(['create','custom','--vm-id',self.spec['vm_id'],'--template-id','ubuntu-24.04-arm64','--template-version','1.0.0',
-                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','cli','--json'])
+                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','create:'+self.spec['vm_id'],'--json'])
             result=json.loads(output.getvalue());self.assertTrue(result['ok'],result)
             self.assertFalse((self.data/'operations').exists())
             output=io.StringIO()
@@ -541,7 +541,7 @@ class ManagementTest(unittest.TestCase):
         out=io.StringIO()
         with redirect_stdout(out):
             result=cli.main(['create','custom','--vm-id',self.spec['vm_id'],'--template-id','ubuntu-24.04-arm64','--template-version','1.0.0',
-                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','cli',
+                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','create:'+self.spec['vm_id'],
                          '--execute','--json'],manager=self.m)
         self.assertEqual(json.loads(out.getvalue()),result)
         self.assertTrue(result['ok'],result)
