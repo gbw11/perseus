@@ -13,6 +13,9 @@ from unittest.mock import patch
 
 import test_xenova_read_progress as fixtures
 import xenova_preparation as ownership
+import xenova_management_cli as cli
+from contextlib import redirect_stdout
+import io
 from xenova_runtime import OperationBusy
 
 
@@ -101,6 +104,22 @@ class LifecycleOwnershipTest(unittest.TestCase):
                 with self.assertRaises(OperationBusy):
                     with ownership.lifecycle_slot(case.p):self.fail('second lifecycle I/O admitted')
         self.assertTrue(results[0]['ok'],results)
+
+    def test_public_cli_queries_and_key_lookup_finish_before_other_restore_barrier(self):
+        with self.held() as state:
+            case,identity,other,worker,release,_,results=state
+            for action,extra in (('intents',[]),('get',[other]),('probe',[other]),
+                                 ('execution-context',[other]),('templates',[])):
+                with redirect_stdout(io.StringIO()):
+                    reply=cli.main([action,*extra,'--json','--budget-ms=2000'],manager=case.m.fork())
+                self.assertTrue(reply['ok'],reply)
+            with redirect_stdout(io.StringIO()):
+                stopped=cli.main(['stop',other,'--idempotency-key','cli-barrier-stop','--budget-ms=2000'],manager=case.m.fork())
+                original=cli.main(['control-operation','--idempotency-key','cli-barrier-stop','--json'],manager=case.m.fork())
+            self.assertTrue(stopped['ok'],stopped)
+            self.assertEqual(original['data']['operation']['phase'],'completed')
+            self.assertTrue(worker.is_alive());self.assertFalse(release.is_set())
+            release.set();worker.join(10);self.assertTrue(results[0]['ok'],results)
 
     def test_accepted_active_replay_returns_original_progress_without_second_fsck(self):
         with self.held(accepted=True) as state:
