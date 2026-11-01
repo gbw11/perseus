@@ -141,6 +141,29 @@ int xm_app_readiness_json(char *out, size_t n, uint32_t applied_generation,
 int xm_app_lifecycle_json(char *out,size_t n,uint32_t generation,uint64_t check,
                          uint64_t progress,const char *phase,const char *readiness,const char *reason);
 
+/* drive-state-1 complete logical state. This is not vehicle output authority. */
+struct xm_state_context {
+ uint64_t frame,configuration,maneuver,road_revision,route_revision;
+ char odom_epoch[XM_UUID_LEN+1];
+};
+struct xm_state_snapshot {
+ char execution[XM_UUID_LEN+1];
+ uint64_t intent_revision,lifecycle_generation,state_revision;
+ uint32_t source_generation;
+ struct xm_state_context context;
+ char kind[8],side[8],phase[8],merge_segment[65];
+};
+struct xm_state_application {
+ char execution[XM_UUID_LEN+1],copy_message_id[XM_UUID_LEN+1];
+ uint64_t intent_revision,lifecycle_generation,state_revision;
+ struct xm_state_context context;
+ bool rebuilt,applied;
+};
+int xm_state_snapshot_json(char *,size_t,const struct xm_state_snapshot *);
+int xm_state_snapshot_parse(struct xm_span,struct xm_state_snapshot *);
+int xm_state_application_json(char *,size_t,const struct xm_state_application *);
+int xm_state_application_parse(struct xm_span,struct xm_state_application *);
+
 struct xm_vehicle_control {
 	uint32_t generation;
 	char mode[16];

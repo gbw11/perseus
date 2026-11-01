@@ -36,6 +36,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         queue=__import__('queue')
         self._provider_queues=[queue.Queue(maxsize=n) for n in (4,4,8)]
         self._provider_turn=0;self.provider_calls=0;self.provider_high_water=0
+        self._state_messages=queue.Queue(maxsize=4);self.state_message_dropped=0
 
     def submit_provider(self,call):
         import queue
@@ -107,7 +108,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         self._app_filters=[]
         for vm in self.pair:
             topic=f'{topics.PREFIX}/vms/{vm}/apps/+/events';self._app_filters.append(topic)
-            self._client.subscribe(topic,self._enqueue,qos=0)
+            self._client.subscribe(topic,self._enqueue,qos=1 if self.readiness_profile=='warm-drive-1' else 0)
         self._client.subscribe(CONSOLE_RESUME,self._enqueue,qos=1)
         self._client.subscribe(topics.app_events('message-board'),self._enqueue,qos=1)
         self._client.subscribe(topics.vehicle_control(),self._enqueue,qos=1)
@@ -115,7 +116,7 @@ class VerifiedGatewayRunner(GatewayRunner):
 
     def _enqueue(self,message):
         info=topics.parse(message.topic)
-        if message.type in ('drive.command','app.heartbeat','app.readiness','app.lifecycle'):
+        if message.type in ('drive.command','app.heartbeat','app.readiness','app.lifecycle','app.state.snapshot','app.state.applied'):
             if (info.vm_id not in self.pair or info.app_id not in DRIVE_APPS or
                 info.vm_id!=message.envelope.get('vm_id') or info.app_id!=message.envelope.get('app_id') or
                 getattr(message,'retained',False)):return
@@ -129,6 +130,11 @@ class VerifiedGatewayRunner(GatewayRunner):
                 key=(info.vm_id,info.app_id)
                 with self._command_lock:self._latest_commands[key]=(self._clock(),message)
                 return
+        if message.type in ('app.state.snapshot','app.state.applied'):
+            if self.readiness_profile!='warm-drive-1':return
+            try:self._state_messages.put_nowait(message)
+            except __import__('queue').Full:self.state_message_dropped+=1
+            return
         super()._enqueue(message)
 
     def _feed(self,t,message):
@@ -173,6 +179,10 @@ class VerifiedGatewayRunner(GatewayRunner):
         # queue or prevent this iteration's safety decision.
         with self._command_lock:commands=self._latest_commands;self._latest_commands={}
         for received,message in commands.values():self._feed(received,message)
+        if self.readiness_profile=='warm-drive-1':
+            try:state=self._state_messages.get_nowait()
+            except queue.Empty:pass
+            else:self.machine.states.receive(state)
         self._transition_once()
 
     def begin(self):

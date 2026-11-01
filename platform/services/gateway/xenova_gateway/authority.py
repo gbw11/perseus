@@ -149,7 +149,17 @@ class AuthorityStore:
                 for name in ('execution_id','boot_id','app_instance_id'):canonical(source[name])
                 for name in ('intent_revision','lifecycle_generation'):
                     if type(source[name]) is not int or source[name]<0:raise ValueError('source context revision')
-            if spec.get('state_model')!='stateless':raise ValueError('unsupported transition state model')
+            if spec.get('state_model') not in ('stateless','stateful'):raise ValueError('unsupported transition state model')
+            if spec['state_model']=='stateful' and row['phase'] in ('PREPARED','COMMITTED'):
+                from xenova_mqtt.handoff import context as state_context,counter
+                proof=row['evidence']
+                if proof.get('kind')!='state_applied' or proof.get('continuity') not in ('continuous','stop_then_resume'):
+                    raise ValueError('complete state preparation proof required')
+                state_context(proof['context']);counter(proof['state_revision'])
+                if proof['target']!=target or proof['origin'] not in ('handoff','rebuilt'):
+                    raise ValueError('state preparation target invalid')
+                if proof['origin']=='handoff':canonical(proof['copy_message_id'])
+                elif proof['copy_message_id'] is not None:raise ValueError('rebuilt copy reference')
             if row['phase']=='COMMITTED' and row.get('committed_generation')!=spec['generation']+1:
                 raise ValueError('transition commit result')
             if 'provider_request' in spec:

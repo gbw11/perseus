@@ -35,12 +35,13 @@ class PlannedTransition:
         source=m.bindings.current(expected_owner,now);target=m.bindings.current(target_vm,now)
         if not target or (source is None and (m.output_permitted or m.phase not in ('FAILED','DISARMED'))):
             raise AuthorityError('current execution binding required')
-        if target.get('app_state_models',{}).get(app)!='stateless':
-            raise AuthorityError('explicit stateless declaration required; stateful preparation transport not linked')
+        model=target.get('app_state_models',{}).get(app)
+        if model not in ('stateless','stateful'):
+            raise AuthorityError('explicit supported state model required')
         spec=dict(mode=mode.value,target_vm=target_vm,owner=expected_owner,generation=expected_generation,
                   deadline_ms=deadline_ms,app=app,target=context(target,app),
                   source=context(source,m.active_app or MANUAL_APP) if source else None,
-                  source_app=m.active_app or MANUAL_APP,state_model='stateless')
+                  source_app=m.active_app or MANUAL_APP,state_model=model)
         if provider_request is not None:spec['provider_request']=dict(provider_request)
         if mode is Mode.MANUAL:
             sample=m.manual_input.current(now)
@@ -57,10 +58,19 @@ class PlannedTransition:
             if sample is None or sample.session!=spec['manual_session'] or sample.generation!=m.generation:return False
         source_ok=(context(source,spec['source_app'])==spec['source']) if source else (
             spec['source'] is None and not m.output_permitted and m.phase in ('FAILED','DISARMED'))
+        state_ok=True
+        if spec['state_model']=='stateful':
+            proof=m.states.evidence(spec['target_vm'],app)
+            state_ok=proof is not None
+            saved=row.get('evidence')
+            if saved and state_ok:
+                state_ok=all(saved.get(k)==proof.get(k) for k in ('origin','copy_message_id','state_revision','target'))
+                state_ok=state_ok and all(saved['context'][k]==proof['context'][k] for k in
+                                         ('frame','configuration','maneuver','odom_epoch'))
         # Recheck persisted preparations as well: they may predate this
         # admission guard or have waited while the caller lost its response.
         return bool((spec['mode']!='AUTO' or m.mode is Mode.AUTO) and
-            source_ok and target and row['host_boot_id']==m.authority.host and
+            source_ok and state_ok and target and row['host_boot_id']==m.authority.host and
             target.get('app_state_models',{}).get(app)==spec['state_model'] and
             spec['owner']==m.active_vm and spec['generation']==m.generation and now*1000<spec['deadline_ms'] and
             context(target,app)==spec['target'] and m.transport_ok and not m.authority.error and
@@ -83,6 +93,12 @@ class PlannedTransition:
         check,received=m.checks[spec['target_vm'],spec['app']]
         evidence=dict(check_seq=str(check),received_monotonic_ms=int(received*1000),
             applied_generation=m.generation,kind='stateless_qualification')
+        if spec['state_model']=='stateful':
+            proof=m.states.evidence(spec['target_vm'],spec['app'])
+            copy=m.states.copies.get(proof['copy_message_id'])
+            continuous=bool(copy and copy['vm']==spec['owner'] and copy['source']==spec['source'])
+            evidence={**proof,'continuity':'continuous' if continuous else 'stop_then_resume',
+                      'check_seq':str(check),'received_monotonic_ms':int(received*1000)}
         return m.authority.finish_preparation(request_id,'PREPARED',evidence=evidence)
 
     def commit(self,request_id):
@@ -94,6 +110,7 @@ class PlannedTransition:
         # The actor serializes this guard with output selection. Only the
         # authoritative JSON update is atomic; guest/device application is not.
         armed=m.output_permitted and m._authorized
+        if row.get('evidence',{}).get('continuity')=='stop_then_resume':armed=False
         try:
             result=m.authority.commit_transition(request_id,int(m.clock()*1000),self.valid,arm=armed)
         except AuthorityError:
@@ -101,6 +118,7 @@ class PlannedTransition:
                 m.output_permitted=False;m._authorized=False;m.failure=m.authority.error
             raise
         spec=result['spec'];now=m.clock()
+        m._authorized=armed
         m.output_permitted=False;m._countdown=None;m._resume_requested.clear()
         actions=m._adopt_control(Mode(spec['mode']),spec['target_vm'],'planned_handoff',now)
         if 'manual_session' in spec:
