@@ -16,15 +16,19 @@ LEGACY = {'check-xen','check-network','dhcp-ready','autostart','shutdown-all','p
 TARGETS = {'get','intents','provision','provisioning','retire','restore','purge','start','stop','reboot','destroy',
            'autostart-set','board-shutdown-set','config','snapshot','probe','execution-context',
            'firmware-transition','update-resources','cpu-layout'}
+TARGETS.add('registration-notify')
 QUERIES = {'get','list','intents','provisioning','probe','execution-context','operation','control-operation','recovery-operation'}
 BUDGETED = QUERIES | {'provision','templates','create','operation-reconcile','start','stop','reboot','destroy','recovery-reconcile'}
+BUDGETED.add('registration-notify')
 PLANNED = {'create','retire','restore','purge','firmware-transition','update-resources','recover_once',
            'provision','cpu-policy-set','cpu-host-prepare','operation-reconcile','recovery-reconcile','firmware-replace'}
+PLANNED.add('registration-notify')
 # 생략한 기본값이 아니라 명시한 옵션의 허용 범위다.
 OPTIONS = {
     'create': {'vm_id','name','template_id','template_version','vcpus','memory_mib','ipv4','auto_ip','idempotency_key'},
     'list': {'lifecycle'}, 'get': {'vm_id'}, 'intents': {'vm_id','lifecycle'},
     'provision': {'vm_id'}, 'provisioning': {'vm_id'},
+    'registration-notify': {'vm_id'},
     'operation': {'operation_id','idempotency_key'},
     'control-operation': {'operation_id','idempotency_key','vm_id'},
     'recovery-operation': {'recovery_attempt_id'}, 'recovery-reconcile': {'recovery_attempt_id'},
@@ -87,7 +91,7 @@ def _validate(args):
     if action in ('autostart-set','board-shutdown-set'):allowed.add('value')
     if action in PLANNED:allowed.add('execute')
     if action in BUDGETED:allowed.add('budget_ms')
-    if action in QUERIES or action in ('provision','cpu-layout','cpu-host-prepare','recovery-reconcile'):allowed.add('timeout_ms')
+    if action in QUERIES or action in ('provision','registration-notify','cpu-layout','cpu-host-prepare','recovery-reconcile'):allowed.add('timeout_ms')
     unexpected=set(args)-allowed
     if unexpected:
         raise ManagementError('INVALID_SPEC','unsupported arguments for '+action+': '+', '.join(sorted(unexpected)))
@@ -169,7 +173,7 @@ def _spec(service, action, args, deadline):
         if action in ('autostart-set','board-shutdown-set'):spec['value']=args['value']
     for name in ('lifecycle','operation_id','recovery_attempt_id','confirm_vm_id','barrier_id','max_age_ms'):
         if name in args:spec[name]=args[name]
-    if action in QUERIES|{'provision'} and 'timeout_ms' in args:spec['timeout_ms']=args['timeout_ms']
+    if action in QUERIES|{'provision','registration-notify'} and 'timeout_ms' in args:spec['timeout_ms']=args['timeout_ms']
     if action=='control-operation' and 'vm_id' in args:spec['vm_id']=normalize_uuid(args['vm_id'])
     if action in ('operation','control-operation') and 'idempotency_key' in args:spec['idempotency_key']=args['idempotency_key']
     if action in ('stop','reboot','destroy'):spec['force']=args.get('force',False)
@@ -211,7 +215,7 @@ def main(argv=None, manager=None):
         deadline=entered+args.get('budget_ms',default)/1000
         spec=_spec(service,action,args,deadline)
         options={}
-        if action in BUDGETED and ('budget_ms' in args or action in QUERIES or action in ('provision','start','stop','reboot','destroy')):
+        if action in BUDGETED and ('budget_ms' in args or action in QUERIES or action in ('provision','registration-notify','start','stop','reboot','destroy')):
             left=int((deadline-clock())*1000)
             if left<=0:raise ManagementError('DEADLINE_EXCEEDED','CLI call budget expired before submission')
             options['budget_ms']=left
@@ -233,5 +237,7 @@ def main(argv=None, manager=None):
     except BrokenPipeError:
         raise SystemExit(1) from None  # 출력 실패로 원 작업을 재실행하거나 취소하지 않는다.
     code=exit_code(result)
+    if (not code and action=='registration-notify' and args.get('execute')
+            and not result['data']['notification']['confirmed']):code=4
     if code:raise SystemExit(code)
     return result

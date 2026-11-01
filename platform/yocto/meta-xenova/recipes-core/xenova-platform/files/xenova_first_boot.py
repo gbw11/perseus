@@ -386,6 +386,13 @@ class FirstBoot:
             for spec in specs:
                 current = read_json(self.data/'instances'/spec['record']['id']/'instance.json')
                 execution.initialize(current, 'running', 'factory')
+        notices=[]
+        if not completed:
+            consumed=state.setdefault('registration_notices',[])
+            for spec in specs:
+                current=read_json(self.data/'instances'/spec['record']['id']/'instance.json')
+                if current['uuid'] not in consumed:
+                    consumed.append(current['uuid']);notices.append(current)
         state['phase'] = 'complete'
         self.save(state_path, state)
         self.save(self.run / 'install-ready.json', {'factory_id': factory['factory_id'], 'dom0_machine_id': mid,
@@ -393,6 +400,10 @@ class FirstBoot:
         if asset_errors:
             print(json.dumps({'registration': 'complete', 'asset_errors': asset_errors}))
         print('installation verified; hand off to existing VM autostart service')
+        # 부팅은 HTTP 응답을 기다리지 않는다. complete 뒤 중단되면 송신 0회일 수 있다.
+        if notices:
+            from xenova_registration import automatic
+            for record in notices:automatic(self.data,self.run,record)
 
 
 def main():

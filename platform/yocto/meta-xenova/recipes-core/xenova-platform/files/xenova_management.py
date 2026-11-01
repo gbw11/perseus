@@ -169,6 +169,7 @@ class Manager:
         self.checkpoint = checkpoint or (lambda phase, operation: None)
         self.trace_sink = trace_sink
         self.last_trace = None
+        self._registration_events=[]
         self._request_lock=allocate_lock()
 
     def fork(self):
@@ -342,7 +343,7 @@ class Manager:
                                'reboot', 'destroy', 'autostart-set', 'board-shutdown-set', 'config',
                                'recover_once', 'recovery-operation', 'recovery-reconcile', 'control-operation', 'snapshot', 'probe',
                                'execution-context', 'host-resume', 'cpu-layout', 'cpu-policy-set', 'cpu-host-prepare'}
-        actions.update(('operation-reconcile','provision','provisioning'))
+        actions.update(('operation-reconcile','provision','provisioning','registration-notify'))
         if not isinstance(action, str) or action not in actions:
             fail('INVALID_SPEC', 'unsupported management action')
         if type(execute) is not bool:
@@ -355,7 +356,7 @@ class Manager:
             spec = {}
         if not isinstance(spec, dict):
             fail('INVALID_SPEC', 'request must be an object')
-        if action in ('provision','provisioning'):
+        if action in ('provision','provisioning','registration-notify'):
             if action=='provisioning' and execute:fail('INVALID_SPEC','provisioning is read-only')
             if set(spec)-{'vm_id','timeout_ms'} or 'vm_id' not in spec:
                 fail('INVALID_SPEC','provisioning requires a VM UUID and optional timeout_ms')
@@ -1075,8 +1076,11 @@ class Manager:
         result = self._view(tomb)
         if op['action']=='create' and op.get('error') is not None:
             op.setdefault('first_error',op['error'])
+        notice=op['action']=='create' and op.get('registration_notice') is None
+        if notice:op['registration_notice']='consumed'
         op.update(status='SUCCEEDED',result=result,error=None)
         self._save_op(op, 'complete')
+        if notice:self._registration_events.append(tomb['record'])
         return result
 
     def _save_tomb(self, tomb, op, lifecycle, generation, **extra):
@@ -1676,6 +1680,7 @@ class Manager:
         """
         from xenova_trace import Trace, span
         trace = Trace(clock=self.p.clock, context={'action':action, 'request_id':request_id})
+        self._registration_events=[]
         with trace.activate(), span('manager.call'), request_output() as output:
             had_budget=hasattr(self.p,'response_deadline')
             previous_budget=getattr(self.p,'response_deadline',None)
@@ -1686,6 +1691,11 @@ class Manager:
                 if had_budget:self.p.response_deadline=previous_budget
                 else:self.p.__dict__.pop('response_deadline',None)
             self.last_output={'bytes':bytes(output.content),'dropped':output.dropped}
+        # 원장 완료/관리·대상 FD 반환 뒤 공개 등록 자료만 넘긴다. HTTP를 기다리지 않는다.
+        if self._registration_events:
+            from xenova_registration import automatic
+            events,self._registration_events=self._registration_events,[]
+            for record in events:automatic(self.data,self.p.runtime,record)
         try:
             self.last_trace = trace.export()
             if self.trace_sink is not None:
@@ -1942,6 +1952,15 @@ class Manager:
                         supplied=bootstrap_execution(self.p,record,deadline=deadline)
         return {**result,'plan':False,'execute_required':False,'supply':supplied}
 
+    def _registration(self,spec,execute,deadline):
+        from xenova_registration import payload,launch
+        read=ReadContext(self,'intents',spec,deadline);read.validate_one(spec['vm_id'])
+        state=read.states[0]
+        if state['lifecycle']!='REGISTERED':fail('VM_NOT_FOUND','notification requires a currently registered VM')
+        body=payload(state['record'])
+        if not execute:return {'plan':True,'execute_required':True,'registration':body}
+        return {'plan':False,'execute_required':False,'vm_id':state['vm_id'],
+                'notification':launch(self.data,self.p.runtime,state['record'],automatic=False,budget=deadline-self.p.clock())}
 
     def _call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None, _output=None):
         """HTTP를 가정하지 않는다. 모든 응답은 동일 JSON envelope이고 stdout을 쓰지 않는다."""
@@ -1954,11 +1973,11 @@ class Manager:
         try:
             if budget_ms is not None and (type(budget_ms) is not int or not 0<budget_ms<=(creation.MAX_CALL_MS if action=='create' else 105000)):
                 fail('INVALID_SPEC','budget_ms must be 1..'+str(creation.MAX_CALL_MS if action=='create' else 105000))
-            if budget_ms is not None and action not in ('create','operation-reconcile','start','stop','reboot','destroy','get','list','intents','probe','execution-context','templates','operation','control-operation','recovery-operation','recovery-reconcile','provision','provisioning'):
+            if budget_ms is not None and action not in ('create','operation-reconcile','start','stop','reboot','destroy','get','list','intents','probe','execution-context','templates','operation','control-operation','recovery-operation','recovery-reconcile','provision','provisioning','registration-notify'):
                 fail('INVALID_SPEC','budget_ms is supported only for control and bounded reads')
             spec = self._validate_call(action, spec, execute, idempotency_key, request_id)
             trace_bind(vm_id=spec.get('vm_id'), recovery_attempt_id=spec.get('recovery_attempt_id'))
-            if action not in ('intents','provisioning'):
+            if action not in ('intents','provisioning','registration-notify'):
                 try:
                     trace_bind(host_boot_id=self.p.boot_id_reader())
                 except Exception:
@@ -1978,6 +1997,8 @@ class Manager:
                 self.p.response_deadline=entered+budget_ms/1000
             else:
                 self.p.response_deadline=float('inf')
+            if action=='registration-notify':
+                return {**response,'ok':True,'data':self._registration(spec,execute,deadline)}
             if action in ('provision','provisioning'):
                 self.p.response_deadline=min(getattr(self.p,'response_deadline',deadline),deadline)
                 try:result=self._provisioning(action,spec,execute,context,deadline)
