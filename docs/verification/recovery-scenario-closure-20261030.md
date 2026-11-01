@@ -16,6 +16,7 @@
 | 입력·진단 후속 | [2026-11-01 후속](#defaults-errors-review): CLI/Manager의 선택 자원 생략·원 입력 replay, 포화 trace/비활성 형식화/오프라인 예외·STOP 전 로그 대기 보완. 오류 구분·필수 내구 저장·기존 P55 보호 유지. HTTP/Spring/Agent/Worker 제품·보드·운영 정책은 미변경 |
 | create 입력 호환 보완 | [최신 의미 비교](#create-compatibility): 두 자원의 생략↔원 확정값 명시를 양방향 허용. 과거 형태 비교 선택을 대체하고 기존 완전 명시 호출·지원 원장 혼재를 유지. 내부 저장 버전 선택을 호출자에게 요구하지 않음 |
 | 6번 인계·배포 준비 | [현재 정리](#stage6): 담당자 현재 지시/이력 분리, Gateway 정규 recipe·비활성 unit·이미지 포함 연결, 고정 환경 RPM/QA·ARM Python import·systemd loader·영향 회귀 완료. 운영값·제품 연결·실제 설치와 7번은 별도 |
+| Gateway 제공자 후속 | [G1/G2/G3](#gateway-provider): 실제 별도 process/UDS client·원 결과/취소/보호 종결, stateful 공통 codec/적용·MQTT 수락, 명시 serial feedback-1·PTY 왕복을 구현. Worker·실제 planner·ESP32·운영/차량 수락과 구분 |
 | 남은 범위 | 운영 create 시간값 공급·보드 수락, 상위 제품 연결·실제 HTTP polling/정규 설치/보드 수락·API cgroup의 guest backend 문제는 미완료. 모든 부하/스케줄의 무기아나 지연 상한 수락은 아님 |
 
 아래는 후보별 이력이다. 과거 2회/439개/보드 적용 기록을 최종 1회/449개 이후 후보의
@@ -2207,3 +2208,127 @@ OS별 정상 관리·입력 호환·동시 stop·원 결과/수습·CPU·Worker/
 
 문서 15개(신규 배포 원본 1개 포함)를 수정했다. 정식 create 의미·오류/wire schema는 바꾸지 않았다.
 별도 코드/메타데이터 변경은 Gateway recipe/unit/example, 이미지 포함 연결, pyproject 설명, 포장 시험에 한정했다.
+
+<a id="gateway-provider"></a>
+## 2026-11-01 — Gateway 제공자 연결 G1/G2/G3
+
+### 실제 제공 상태와 후보
+
+착수는 `8e3232a43045966d5e29bee31ae29c2a716704bb` + 보존한 6번 diff/새 파일이다.
+최종 후보는 HEAD에 `FINAL_CANDIDATE.json`의 파일 hash·`CANDIDATE.diff`·새 파일을 합쳐 식별한다.
+원자료는 `C:/Users/SSAFY/Documents/Codex/2026-11-01/xenova-gateway-provider/`, 격리 source/build는
+`/home/ssafy/xenova-gateway-provider-20261101/`에 있다. 최초 파일 hash는 `ENTRY_SOURCE.json`이다.
+6번 결과를 되돌리지 않았고 commit/push·운영 배포·보드·서비스·실데이터·7번은 실행하지 않았다.
+
+| 구분 | 확인한 것 / 이번 제공 / 남은 수락 |
+|---|---|
+| 이미 제공 | warm actor·planning·단일 Authority·원 전환·내부 submit_transition, 출력 guard·진단 queue·6번 recipe/unit |
+| 이번 G1 | 별도 process용 실제 UDS/client/CLI, submit/get/commit/cancel/finish, 원 결과·지속 exclusion·정상 종결 |
+| 이번 G2 | 완전 ManeuverIntent Python/C codec·구체 적용 adapter·기존 준비/전환 연결, 실제 MQTT의 테스트 stateful adapter |
+| 이번 G3 | 명시 feedback-1·실제 serial RX/TX/codec·원 명령/session/만료·가상 ESP32의 실제 PTY 왕복 |
+| 상대 제품 | Worker Engine/rejoin의 소비, 실제 planner 상태 생산·기하/동역학 검증·계산, ESP32 firmware·센서 생산 |
+| 실물/결정 | 승인 ACK 기한·차량 한계, 실제 물리 정지·watchdog/E-stop, Worker 설치본·보드/차량 연속성 |
+
+### 이제 사용하는 방법
+
+`from xenova_gateway.client import GatewayClient, GatewayRejected, GatewayUnavailable`로 import한다.
+기본 endpoint는 `/run/xenova-gateway/control.sock`, 통신 budget은 1초다. 원 전환 기한과 다르다.
+같은 client를 사용하는 CLI는 `python3 -m xenova_gateway.client`다.
+설치 예제 `python3 /usr/share/xenova/gateway-examples/provider_roundtrip.py`는 별도 Gateway 자식과 실제 UDS/Authority로
+예비 B 보호→동등 replay→실제 intent 차이 충돌→원 조회→취소를 실행하고 소유 임시 자산을 정리한다.
+Xen·앱·출력만 fixture다. 실제 Worker/VM 복구를 수행한 예제가 아니다.
+정확한 함수·wire·제한·오류·결과 읽기는 [제공자 계약](../contracts/gateway-provider-v1.md)을 따른다.
+
+### 무엇을 어떤 기준으로 바꿨는가
+
+| 위치 | 수정 전·이유 | 구현·채택 기준 | 유지한 보호·추가 비용 |
+|---|---|---|---|
+| ipc_contract.py·ipc.py·client.py | 별도 Worker가 내부 queue를 부를 수 없었음 | bounded framing·selector·실제 peer/DAC·partial I/O·총 budget | Authority는 actor만 변경. 메시지8192 bytes·연결16·mailbox4/4/8. 연결·decode/encode 추가 |
+| provider.py·Authority/verified | 조회 직후 재선택 경합과 원 보호 종결 경로 필요 | 기존 Authority에 보호 최대16개, 실행 exclusion→새 binding finish/원 실행 cancel | 새 journal/DB/daemon 없음. 원 key/spec/기한·현재 host/대상·승인 유지. 수락/종결 각각 save1 |
+| planning.py·warm.py·state_transfer.py | stateless 준비만 전환에 연결됐음 | 수락 완전 사본·현재 대상 적용/lifecycle을 기존 준비에 채택. rebuilt는 stop_then_resume | 정상 A 유지, 적용≠계산≠출력. 사본8·적용4·수신4, 표본별 fsync0 |
+| 공용 handoff.py·xm_state_*·C adapter | 구체적인 생산/적용 codec·훅 필요 | merge segment/current context 확인 뒤 불변 preparation에 연결 | planner 구현 없음. 기본 C stateless 유지. copy568 bytes·ARM 적용 훅 직접 stack608 bytes |
+| feedback.py·output_owner.py·runner | write 성공만으로 장치 단계를 알 수 없었음 | 명시 profile·session/u64 sequence·legacy generation/counter 대응·센서 capability/null | write-only bytes 동일. serial owner1·pending32/events64/RX4096. 승인 기한 필수, RX/codec·참조 RAM 추가 |
+| runner 원 결과 view | 현재 관측과 원 작업 당시 단계 구별 필요 | 원 기한 안의 정확한 대상 앱/장치 단계만 원 기록에 최초 채택 | 현재/original 분리. 단계별 추가 save 필요, lookup에는 없음. 원 generation 재발급0 |
+| main 종료 | owner가 살아 있는데 lease 반환 시 다른 Gateway가 열 수 있음 | owner/IPC thread 종료 미확정이면 lease 유지, 실제 종료 뒤 후속 실행 정상 획득 | daemon thread를 성공 종료로 보지 않음. 실제 blocked write는 기반 한계 |
+| strict 수신 | 크기 한도 안의 깊은 JSON도 RecursionError 가능 | IPC/MQTT 개별 nesting 오류 거절과 다음 정상 입력 진행 | 내부 결함 전부를 입력 오류로 변환하지 않음. 원인/코드·stack 보존 |
+
+활성 보호는 RAM 출력 철회→STOP 시도→필수 저장이다. 예비 대상은 정상 Active의 STOP·새 generation 없이 배제한다.
+장치 만료는 같은 단일 device owner가 처리하므로 actor fsync/진단 대기 중에도 STOP을 시도한다.
+실제 write가 멈춘 장치의 물리 정지를 보장하지 않으며 live owner를 다른 writer로 교체하지 않는다.
+held·현재 host/target이 맞아도 Manager의 현재 intent/execution/소유·force guard는 계속 필요하다.
+lookup/replay는 새 효과·기한·승인 발급이 아니다.
+
+### 로컬 수락과 대역 범위
+
+실행 도구는 원자료의 `run_gateway.py LABEL [pytest paths]`, `c_checks.py`, `arm_compare.py`, `final_build.py`,
+`verify_packages.py`, `client_package.py`, `target_socket.py`, `peer_credentials.py`, `unit_check.py`다.
+실제 argv·환경·stdout/stderr·후보 hash는 각 JSON/log에 남겼다. 새 의존성 설치·운영 broker 사용은 없다.
+
+| 수락 | 직접 assertion·실행 경계 |
+|---|---|
+| C01~C05 | 별도 Gateway/CLI process·UDS/actor/Authority, 정상 A 유지·B 인계/준비 실패, active/standby 보호, 동등 생략/명시 동시 원 기록1, 실제 실행/intent 차이 충돌, 응답 유실 뒤 get |
+| C06~C08 | 실제 UDS 수락/커밋 뒤 소유 자식 SIGKILL·stale socket 회수·cold replay, 교체 전/후 EIO 미확정, cancel/commit 경쟁·rollback0, 새 binding finish→같은 B 정상 인계, stale 완료 거절 |
+| C09~C10 | partial/붙은/과대/중복 key/NaN/deep JSON, 응답 비소비·포화 뒤 회복, high-water<=16·FD/thread 반환, 실제 root 서버의 UID65534 거절 뒤 root 회복, 다른 파일/활성 lease·미종료 owner lease 보존 |
+| C11~C12 | StateReceiver+Gateway·C 실제 적용, 고정 ARM Mosquitto2.1.2/Paho loopback MQTT, 당시 수락 사본 유지·늦은 갱신/부분/혼합/retained/새 instance 거절, 재구축/연속 승계 분리 |
+| C13~C14 | 실제 pyserial/OutputOwner/PTY·가상 ESP32, CRC/overflow 재동기, 수락≠적용≠stationary·센서 부재null, 옛 ACK/session·reboot·u8 wrap/u64 sequence·만료 뒤 정상 STOP, 느린 critical handler/필수 저장 중 만료 STOP |
+| C15 | RPM/QA·설치 bytes/0644·inactive example/preset, client-only ARM import, ARM client→설치 Gateway Python UDS 왕복, 고정 systemd259.5 정상/주입 cycle 거절 |
+| C16 | create 의미 비교·기본값/원 replay·변경 없는 HTTP full adapter·CPU pin/unpin/교차·lifecycle/firmware/usage/DHCP 진행성과 포장 영향124개, 공용 MQTT149개, native3개 |
+
+Gateway 최종 전체220개는 `gateway-final-all.json`, 중간 결과218개·focused29개는 각각 `gateway-final.json`·`ipc-sigkill.json`이다. focused를 전체에 중복 합산하지 않는다.
+FastAPI/httpx 경고는 기존 테스트 도구의 deprecation이며 Spring/화면 optional DTO·실제 Worker·보드는 미수행이다.
+G2의 MQTT·binding guard·Gateway/Authority는 제품 코드, binding/Xen과 상태 계산기는 fixture다.
+C helper는 실제 preparation/적용을 실행하지만 실제 planner·kernel stateful worker 완성 시험이 아니다.
+G3의 가상 stationary=true도 contract 입력이며 실제 모터·제동 관측이 아니다.
+
+### 비용·자원과 유지한 저장
+
+원 보호 신규 수락의 실제 atomic_json은1회다. 동등 replay8회+lookup40회에 추가 save0이며
+조회 때문에 Xen/Store·전체 디스크·원장 재검색을 호출하지 않는다. 40개 wall/actor 시간·tracemalloc 원 표본은 `IPC_COST.json`에 있다.
+hook·tracemalloc·Lab selector 대기가 포함된 로컬 값이다. 운영 상한/p99나 개선율로 사용하지 않는다.
+원 app/device 단계는 최초 확인 때만 추가 저장한다. file/parent 동기화·저장 미확정 차단은 유지한다.
+IPC가 없던 기준선과 신규 IPC의 지연을 성능 개선율로 비교하지 않는다. warm 실행에 I/O thread1·device owner1이 추가됐다.
+입력/응답 각각8192 bytes·연결16·mailbox16이며 포화의 무거절을 보장하지 않는다. 24개 slow/partial/nonreading 연결 뒤 정상 회복과 FD/thread 반환을 확인했다.
+G2 상태 type만 중복 key/nonfinite 검증을 위해 작은 JSON을 추가 해석한다. drive/heartbeat의 파싱 횟수는 유지한다.
+PUBACK/수신으로 progress를 올리지 않으며 G3 ACK 표본마다 fsync하지 않는다.
+
+고정 Zephyr `684c9e8f32e4373a21098559f748f06915f950c9`/SDK로 warm-operations의 착수/최종 source를 따로 빌드했다.
+착수 C 네 파일은 Git blob과 ENTRY_SOURCE hash 일치를 먼저 확인했다.
+
+| ELF 후보 | text | data | bss |
+|---|---:|---:|---:|
+| 착수 | 414902 | 5880 | 659446 |
+| 최종 | 415075 | 5704 | 659446 |
+
+기본 stateless 구성의 정적 크기이며 stateful worker 동적 비용·차량 성능은 아니다.
+추가 적용 훅의 ARM object는 text2686/data0/bss0, 직접 stack608 bytes다. native 구조체는 snapshot248/application192/copy568 bytes다.
+시험 main stack7360 bytes를 제품 worker 요구량으로 바꾸어 쓰지 않는다. 실제 adapter 연결 때 호출 stack·불변 사본 수명은 해당 worker에서 수락해야 한다.
+ELF/map/설정/stack·firmware hash는 `ARM_COMPARISON.json`과 각 build receipt에 보존했다.
+
+### 포장·설치 수준
+
+고정 Yocto6.0.4/레이어·로컬 sstate·BB_NO_NETWORK에서 Gateway/MQTT/platform의 install/QA/RPM을 생성했다.
+기존 recipe의 client subpackage와 main/common 의존성을 사용한다. 새 중계 daemon·라이브러리 버전을 도입하지 않았다.
+RPM40개 의존성 root에서 ARM Python3.14.7의65개 import와 lower32개 모듈 bytes/모드를 대조했다.
+client와 선언 표준 런타임만 추출한 root에서도 서버/Paho/xenova_mqtt 부재 상태의 import가 통과했다.
+ARM client→설치 Gateway 코드(호스트 Python)의 실제 WSL UDS로 submit/get/cancel을 확인했다. ARM 보드 서버·실제 service 구동 수락과 다르다.
+unit은 RuntimeDirectory0700·root/UMask0077·disable이며 활성 env·운영 기한·Authority 초기화·재무장·설치는 수행하지 않았다.
+
+### 실패 기록과 다음 수락
+
+최초 pytest/cmake 탐색, glibc RPM 미복원, cold child PYTHONPATH/HTTP 경로 누락·systemd255 선택은 harness/environment 오류다.
+기존 고정 도구·pkgdata·경로를 공급해 수정했고 잘못 지정한 테스트 파일명까지 원 로그에 남겼다.
+실제 broker 예제의 callback 자기 PUBACK 대기는 비대기 publish_tracked로, 예제의 keyword-only cancel 호출은 실행 시험으로 찾아 수정했다.
+legacy Sink Mock의 가짜 thread 속성은 close-only spec으로 맞췄고 최초 cause·정리 순서 assertion은 보존했다.
+기존 stateful 일괄 미지원 assertion은 이번 승인된 기능에 맞춰 준비 가능·완전 적용 근거 없는 commit 불가로 교체했다.
+새 lease/중첩 JSON 결함은 제품 방어와 정상 회복 시험으로 닫았다. 오류 종류·희귀 cause/stack·필수 기록을 축소하지 않았다.
+
+Worker 현재 본문에 실제 client/import·원 요청·실패 처리와 Engine _task_attempt/_task_replay/_on_result,
+RejoinCoordinator.completed/pump·finish/cancel 연결을 지정했다. 과거 전송 미정/내부 queue 문장은 이력이다.
+Worker 장애 판단·attempt 예산·사용자 stop·Manager guard·재합류 정책은 제품 담당이며 제품 소스는 미변경이다.
+Gateway README/직접 요청·배포 원본과 기존 ESP32 요청, MQTT drive-state-1·serial 고정 vector를 함께 갱신했다. 중복 요청서는 만들지 않았다.
+Worker 새 본문은 humanize-korean light 게이트·자체검증6/6·변경률0.02%를 통과했다. 기술 내용은 별도 소스/시험으로 확인했다.
+
+G1은 실제 호출·원 회수·지속 보호/정상 종결·권한·포화·재시작·client 포장의 하위 로컬 제공이다.
+G2/G3는 구체 codec/적용/parser/I/O와 실제 통로의 제공자 로컬 수락이며 실제 planner·ESP32·물리 정지 완료는 아니다.
+다음은 Worker 소비→실제 앱 adapter→ESP32 생산/capability/vector·승인 차량값→같은 설치본의7번 공동 수락이다.
+D03-G02 백업 최신성, Agent L05/템플릿 후보, 상위 API/화면·운영 create 시간 정책의 기존 미완료는 그대로다.

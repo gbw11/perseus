@@ -69,7 +69,8 @@ DEC-12·18·ARCH-T16·18은 Spring `drive/application/ManualInputRelay.java`,
 AUTO→MANUAL은 현재 중립 후 새 조작을 요구한다. 재접속의 옛 비중립 자동 복원과 generation만 바꾼 승인은 거절한다.
 [MQTT 7.1절](../contracts/mqtt-contract-v1.md#71-명시적-세션-입력-manual-session-1)이 원본이다.
 DEC-16의 앱 lifecycle은 QUALIFIED·실제 준비·출력 허가를 분리하고 DEC-15·ARCH-T08 영상은 실제 프레임 진행·만료를 표시한다.
-Gateway 내부 submit_transition queue는 원격 API가 아니다. 새 모드/복귀·보호 요청 전송은 [공동 결정](../platform/deployment-readiness.md#decisions)을 먼저 따른다.
+Gateway 내부 submit_transition queue는 원격 API가 아니다. 별도 로컬 Worker에는 [실제 UDS/client](../contracts/gateway-provider-v1.md)가 제공된다.
+이 연결은 외부 HTTP endpoint가 아니며 Spring/화면의 기존 관리 API를 바꾸지 않는다. 화면의 모드/복귀 연결은 기존 권한·현재 route를 확인해 담당자가 수락한다.
 
 ## 선행조건과 담당 회신
 

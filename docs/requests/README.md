@@ -13,7 +13,7 @@
 
 | 현재 요청서 | 담당 | 이번 최소 연결 밖의 주요 작업 |
 |---|---|---|
-| [Gateway 직접 구현·공동 연동](20261029-request-gateway.md) | 박신영 / 플랫폼·Gateway | 직접 구현의 후속 계획과 ESP32·입력·Worker 공동 연결. 타 담당자에게 Gateway 전체를 위임하는 요청이 아님 |
+| [Gateway 직접 구현·공동 연동](20261029-request-gateway.md) | 박신영 / 플랫폼·Gateway | G1 client/UDS, G2 공통 상태 adapter, G3 feedback-1 제공. 실제 Worker·planner·장치 공동 수락 전 |
 | [Recovery Worker](20261029-request-recovery-worker.md) | Worker·Engine | D01 건강 분류·episode 회복, D03 원 결과 수습·전체 복구 연동 |
 | [Linux·Agent](20261029-request-linux-agent.md) | Linux 엔지니어·Agent | D01-L01~L05 자원·서비스 진행·로컬 감독·설치 |
 | [HTTP·Spring·화면](20261029-request-http-spring-ui.md) | FastAPI·Spring·프론트 | Linux 준비 중 조회/실제 정지 연결, 원 key·pending 종단 연결, 수동 입력 세션·명시적 모드/복귀 |

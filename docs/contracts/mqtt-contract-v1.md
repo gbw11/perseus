@@ -447,6 +447,44 @@ warm Gateway에 소비 경로가 있으며 Spring/UI의 실제 세션 생산·�
 MANUAL 커밋은 이 계약을 내구 선택하고 이후 세션 없는 입력으로 자동 하향하지 않는다.
 정규 벡터는 [C/Python 공통 자료](vectors/manual-session-1.jsonl)에 둔다.
 
+<a id="drive-state-1"></a>
+### 7.3 drive-state-1 완전 사본과 적용
+
+이번 제공자 구현에서 추가한 저빈도 상태 계약이다. 토픽은 기존 `xenova/v1/vms/{vm_id}/apps/{app_id}/events`,
+type은 `app.state.snapshot`과 `app.state.applied`, QoS 1·retain false다. 제어·지도·heartbeat의 wire를 바꾸지 않는다.
+전체 envelope는 최대 8192바이트, C payload parser는 4096바이트다. 미지/중복 key·혼합/부분 사본·비유한 수치는 거절한다.
+기존 공통 수신 검증 후 상태 type만 strict JSON을 한 번 더 해석한다. drive/heartbeat의 기존 파싱 비용은 늘리지 않는다.
+
+snapshot payload의 필수 필드는 다음과 같다. bool/문자열을 정수로 묵시 변환하지 않는다.
+
+| 필드 | 의미·형식 |
+|---|---|
+| `profile` | `drive-state-1` |
+| `execution_id`, `intent_revision`, `lifecycle_generation` | source의 현재 실행 UUID·의도/수명 revision(integer 0..2^63-1). envelope의 source VM/app/boot/instance와 현재 binding 대조 |
+| `source_generation` | 당시 출력 권위 generation(integer 1..2^32-1). 상태 적용 시 새 권위로 복사하지 않음 |
+| `state_revision` | 1 이상 canonical uint64 decimal string. 같은 source 문맥에서 증가 |
+| `context` | `frame`, `configuration`, `maneuver`, `road_revision`, `route_revision`의 canonical uint64 decimal string, `odom_epoch` UUID |
+| `maneuver` | `kind=FOLLOW|AVOID`, `side=NONE|LEFT|RIGHT`, `phase=FOLLOW|PASS|REJOIN`, `merge_segment` 1..64 identifier(alnum/`_.:-`) |
+
+FOLLOW는 side NONE·phase FOLLOW이며 AVOID는 LEFT/RIGHT·PASS/REJOIN이다.
+frame/configuration/maneuver/odom 문맥은 맞아야 한다. road/route revision의 기계적 동일성은 요구하지 않고,
+실제 앱 adapter가 현재 입력에서 merge segment·기하/동역학적 적합성을 확인한다.
+Gateway는 권한이 있을 때 수락한 완전 사본만 보관한다. 권한 종료 후 도착한 source 갱신은 현재 사본이 되지 않는다.
+당시 수락 사본은 현재 호환하면 사용 가능하며 source generation을 새 출력 허가로 사용하지 않는다.
+
+applied payload는 `profile`, 대상 `execution_id/intent_revision/lifecycle_generation`, `copy_message_id`,
+`state_revision`, `context`, `origin=handoff|rebuilt`, `phase=APPLIED|REJECTED`를 정확히 가진다.
+handoff의 copy_message_id는 source envelope UUID이며 Gateway의 실제 수락 사본과 일치해야 한다.
+현재 입력으로 최초 재구축하면 origin rebuilt·copy_message_id null이다. 없는 planner 상태를 기다리며 무한 정지하지 않는다.
+rebuilt는 연속 승계 증거가 아니므로 전환에서는 stop_then_resume로 구분한다.
+사본 적용과 현재 generation의 실제 새 계산·lifecycle READY·출력 허가는 서로 다르다.
+실제 source/target 제품은 자기 인증된 VM/app 토픽으로 발행해야 하며 PUBACK만으로 적용 완료를 만들지 않는다.
+
+Python `xenova_mqtt.handoff.StateReceiver`·`ManeuverAdapter`, C `xm_state_snapshot/application_*`와
+`drive_adapter_apply_maneuver`가 제공된다. 적용 훅은 불변 사본을 기존 preparation/join 수명에 묶으며 progress를 올리지 않는다.
+현재 기본 C 알고리즘은 stateless다. [실제 MQTT·C/Python 교차 시험](../verification/recovery-scenario-closure-20261030.md#gateway-provider)은
+테스트 stateful adapter의 경계 검증이며 실제 planner·차량 연속성 완료가 아니다.
+
 ## 8. 메시지 지연 측정
 
 VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이라고 표시하지 않는다.

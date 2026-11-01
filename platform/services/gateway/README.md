@@ -4,6 +4,14 @@ Gateway는 모드·owner·출력 허가를 구분하고, 현재 허용된 앱 �
 제출한다. VM 재시작은 기존 Recovery Engine, 최종 물리 정지는 장치 watchdog/E-stop의
 책임이다. PUBACK·준비 보고·시리얼 쓰기 수락은 장치의 적용 ACK가 아니다.
 
+현재 warm 제공자는 별도 프로세스용 `GatewayClient`·실제 UDS 수신부와 원 결과 조회·지원 취소/종결을 제공한다.
+[호출·상태·장치 계약](../../../docs/contracts/gateway-provider-v1.md), [Worker 연결 위치](../../../docs/requests/20261029-request-recovery-worker.md),
+[동일 후보 검증](../../../docs/verification/recovery-scenario-closure-20261030.md#gateway-provider)을 먼저 읽는다.
+설치 후보의 `python3 /usr/share/xenova/gateway-examples/provider_roundtrip.py`는 실제 별도 Gateway process/socket으로
+제출·동등 replay·값 충돌·조회·취소를 실행한다. 앱/Xen/output은 소유 fixture다.
+G2는 완전 ManeuverIntent codec·공통 C/Python 적용 adapter와 MQTT 수락 연결, G3는 명시 feedback-1/PTY 왕복까지 제공한다.
+실제 planner·ESP32·물리 정지·Worker 소비·운영 설치 수락은 별도다.
+
 ## verified 프로필 운영
 
 기본 프로필은 공통 A/B용 `verified`다. 먼저 같은 번들·서로 다른 UUID/인증정보와
@@ -36,8 +44,8 @@ broker 주소·계정은 기존 `--host/--port/--username`과 `XENOVA_GATEWAY_BR
 (`/run/xenova/drive-bindings.json`)이다. `--start-mode`는 legacy 전용이다.
 실제 출력은 검증된 장치/복구 경로와 아래 차량 한계 파일을 준비한 뒤
 `--sink serial --serial-port /dev/ttyUSB0 --vehicle-limits /etc/xenova/vehicle-limits.json`로 선택한다.
-Gateway 자체의 Yocto recipe·자동 시작 연결은 아직 없으므로 파일 존재를 이미지 포함으로
-간주하지 않는다. Worker/helper/common MQTT는 각 기존 recipe에서 설치한다.
+Gateway의 정규 recipe/unit과 client subpackage가 제공된다. unit은 disable이며 활성 env·Authority 초기화·재무장을 만들지 않는다.
+현재 payload/의존성·설치 수준은 [배포 준비](../../../docs/platform/deployment-readiness.md)를 따른다.
 
 정지/Standby에서도 앱 준비를 확인한다. 적합한 다른 VM이 있으면 선택할 수 있지만,
 재시작·신원 미확인·전환 중·transport 상실·시리얼 오류 때는 출력을 금지한다.
@@ -123,7 +131,8 @@ serial 출력에서는 필수이며, mock에서는 통제된 시험을 위해 �
 
 ## warm의 사전 준비와 조건부 커밋
 
-warm actor의 `submit_transition`은 로컬 연결부다. 운영 HTTP/MQTT 전환 API가 아니다.
+warm actor의 `submit_transition`은 기존 내부 연결부다. 별도 프로세스는 공개 `GatewayClient.submit/get/commit/cancel/finish`를 사용한다.
+아래 예제는 Gateway 내부 호출 설명이며 Worker SDK 사용법은 위 제공자 계약에 있다. 외부 HTTP/MQTT 전환 API를 추가하지 않았다.
 같은 원 요청 UUID와 예상 owner/generation·대상 VM·모드·절대 deadline을 보존한다.
 deadline은 같은 dom0 host boot의 단조 밀리초다. 외부 장치 시각을 전달하지 않는다.
 
@@ -155,12 +164,11 @@ Gateway는 기존 Authority JSON에 원 요청·고정 spec·준비 결과·커�
 기존 기록/정상 운행을 보존한다. 기록을 지워 차단을 해제하는 운영 절차는 제공하지 않는다.
 fsync 비용은 actor 지연에 포함되며 큐/틱 설정으로 worst-case를 보장하지 않는다.
 
-현재 계획 인계의 실제 연결은 root 바인딩에 `app_state_models`로 명시한 stateless 앱이다.
-root rejoin 설정은 고정한 실제 firmware/adapter의 선언과 일치해야 한다. 선언 누락이나
-stateful 앱은 일반 QUALIFIED를 요청별 상태 적용 확인으로 바꿔 쓰지 않고 계획 인계를
-거절한다. stateful의 로컬 어댑터 검증은 구현돼 있으나 실제 사본 전송·요청별 적용 보고는
-후속 생산자 연결이다. 현재 stateless 자격은 지속 관측을 원 요청에 채택한 것이며,
-게스트가 준비 요청을 ACK했다고 보고하지 않는다.
+root 바인딩의 `app_state_models`는 실제 firmware/adapter와 일치해야 하며 선언 누락은 거절한다.
+stateless는 기존 지속 자격을 사용하고 stateful은 실제로 수락한 완전 사본/현재 대상 적용과 계산 근거를 요구한다.
+`xenova_mqtt.handoff.StateReceiver`와 `state_transfer.py`가 실제 메시지 경계를 연결한다.
+재구축만 있는 target은 stop_then_resume이며 연속 승계로 표시하지 않는다. 기본 C 알고리즘은 stateless로 유지한다.
+테스트 stateful adapter·실제 broker의 성공은 실제 planner 연속성 완료가 아니다.
 
 계획 AUTO는 이미 AUTO인 상태의 동일 모드 인계에 사용한다. MANUAL·AUTO_READY에서
 AUTO로 복귀할 때는 위의 명시적 재개·준비 유지·카운트다운 경로를 사용하며 계획
@@ -381,7 +389,9 @@ python tools/measure_failover.py --port 18832 --runs 10
 - **브로커 `set_tcp_nodelay true`가 필요합니다.** 기본값(Nagle 켜짐)이면 브로커 → 게이트웨이 소켓에서 작은 메시지가 ACK를 기다리며 묶여, 전환 뒤 첫 수동 명령이 약 40 ms 늦게 옵니다 (브로커 단방향 지연 자체는 1.3 ms). dom0 브로커 설정(`platform/deploy/mosquitto/etc/mosquitto.conf`)에 넣어야 합니다.
 - Windows 수치입니다. 실보드(Linux, 코어 고정)에서 다시 잽니다.
 
-## 아직 안 한 것
+## 2026-10-21 당시 미완료 기록
+
+아래는 당시 이력이다. 현재 제공 상태는 문서 첫머리와 최신 검증을 따른다.
 
 - vchan 중계 (S15P31E110-240): Zephyr 주행 VM 의 명령은 dom0 중계를 거쳐 브로커로 온다. 게이트웨이는 브로커만 본다
 - 실제 ESP32 연결, 프레임 확정·계약 v1.1 (S15P31E110-241), `vehicle.status` 중계

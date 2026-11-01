@@ -8,6 +8,42 @@
 먼저 관측과 실제 행동을 연결하고 원 복구 결과·신원 공급·재합류를 따로 종결한다.
 warm-drive-1의 앱별 신원·대기/활성 준비 최소 소비는 이미 로컬 구현됐다. 이를 다시 만들거나 전체 D01 완료로 표시하지 않는다.
 
+### D03 — 제공된 Gateway client를 복구 단계에 연결
+
+이 후보에는 실행 중인 Gateway에 요청하는 클라이언트와 수신부가 제공된다.
+`from xenova_gateway.client import GatewayClient, GatewayRejected, GatewayUnavailable`로 사용한다.
+설치 패키지는 `xenova-gateway-client`, 기본 endpoint는 `/run/xenova-gateway/control.sock`이다.
+현재 root Worker/Gateway 배치에서 같은 host·namespace의 private socket에 접근한다. Authority 파일이나 shell 출력은 읽지 않는다.
+[실제 호출·결과 계약](../contracts/gateway-provider-v1.md)과 [실행·실패 시험 근거](../verification/recovery-scenario-closure-20261030.md#gateway-provider)를 따른다.
+후보는 `8e3232a`+후속 diff/manifest이며 실제 운영 설치·Worker 연결은 아직 수행하지 않았다.
+
+Worker 담당자는 `recovery/engine.py:_task_attempt`의 **Manager recover_once 호출 전**에 보호 단계를 연결한다.
+긴 복구 executor 안에서 원 요청을 보존하고 submit/get을 각각 유한 budget으로 호출한다.
+`_task_replay`는 응답 유실 뒤 같은 Gateway key를 조회하고 `_on_result`는 접수·보호·복구 결과를 따로 소비해야 한다.
+주 판단 루프를 전환 완료 polling으로 막지 않는다. 기존 attempt/대상/의도·부모 기한에서 Gateway spec을 만들고 최초 송신 전에 보존한다.
+client가 key·기한·generation을 만들거나 재발급하지 않는다. 다른 실행/승인으로 spec을 덮지 않는다.
+
+보호 `PROTECTED`의 durable 수락·held/owner_excluded와 현재 host/대상 일치를 확인한다.
+필요한 장치 증거는 실제 profile과 목적에 따라 별도로 확인하고 없는 feedback을 물리 정지 성공으로 해석하지 않는다.
+그 다음에도 Manager의 현재 intent/execution·원 deadline·소유·force guard를 통과해야 한다.
+한 번의 get을 영구 복구 허가로 보관하지 않는다. Gateway가 해당 VM의 재선택을 차단한 동안만 보호 근거가 유지된다.
+
+복구가 새 execution으로 완료되면 `rejoin.py:RejoinCoordinator.completed/pump`의 현재 Bootstrap→binding과 연결해
+`finish(request_id, {host_boot_id, expected_generation, target_execution_id})`로 보호를 종결한다.
+복구 전 정당한 취소라면 같은 원 execution을 확인해 `cancel`한다. 종결 승인 경합은 AUTHORITY_CHANGED로 재판단한다.
+cancel/finish는 재무장·자동 AUTO 복귀가 아니며 새 binding·계산과 기존 재합류/명시 재개 조건은 계속 필요하다.
+계획 정비는 `purpose=handoff`의 submit→준비→commit→앱/필요 장치 결과로 별도 연결한다. 준비 실패 시 정상 A를 유지한다.
+
+`GatewayUnavailable`의 OUTCOME_UNKNOWN은 효과 없음/취소가 아니다. 같은 key로 회수하고 조회도 불가하면 미확정으로 남긴다.
+`GatewayRejected.code`의 INVALID_INPUT, 실제 충돌, TARGET/HOST/AUTHORITY_CHANGED, 만료, STORAGE_UNCERTAIN을 구별한다.
+BUSY_NOT_ACCEPTED는 그 메시지의 queue 미접수이며 과거 같은 key 부재를 보장하지 않는다.
+현재/원 결과의 필드와 [정상 예제](../../platform/services/gateway/examples/provider_roundtrip.py)를 사용한다. 임의 `.is_safe()` 같은 판정은 없다.
+
+설치 후보에서는 `python3 /usr/share/xenova/gateway-examples/provider_roundtrip.py`로 별도 process/socket의 정상·동등 replay·실제 충돌·조회·취소를 실행할 수 있다.
+소스 시험은 `pytest -o addopts= -q platform/services/gateway/tests/test_provider_ipc.py`다.
+앱/Xen/output fixture를 사용하며 Gateway actor·Authority·UDS/client는 제품 코드다. 실제 Worker/VM 제어 완료를 뜻하지 않는다.
+Worker 담당 수락은 보호→원 Manager 복구→새 binding→finish의 정상 진행과 user stop·응답 유실·host/실행 교체·늦은 취소를 짝지어야 한다.
+
 아래 위치는 `platform/services/dom0-manager/dom0_manager/` 기준이다. 제품 코드는 플랫폼에서 대신 수정하지 않는다.
 
 | ID·상태 | 수정 위치·무엇을 왜 고치는가 | 정상 수락·실패 보호 |
@@ -42,9 +78,9 @@ asset RUNNING/RECONCILING/FAILED는 준비 실행/명시 수습/원 생성 실�
 
 ## 선행조건·공동 결정
 
-Worker–Gateway 운영 요청/결과 전송은 두 제품 담당이 권한·원 key/spec·기한·실패/취소·적용 단계를 결정해야 한다.
-현재 submit_transition은 프로세스 내부 queue다. Authority 파일 읽기나 MQTT 상태를 보호 완료 ACK로 사용하지 않는다.
-미정인 동안 해당 보호를 요구하는 계획 정비·복구 종단 수락만 대기한다. 일반 관측·원 결과 회수는 별도로 진행한다.
+Worker–Gateway의 로컬 전송은 위 client/UDS로 제공된다. 남은 것은 Worker의 원 attempt 저장·단계 소비·현재 Manager guard와
+정당한 finish/cancel 연결이다. 내부 submit_transition을 별도 프로세스에서 부르거나 Authority 파일을 보호 ACK로 쓰지 않는다.
+Worker 정책·실제 설치본과 이 제공물을 함께 연결하는 7번 종단 수락은 대기한다. 일반 관측·원 결과 회수는 별도로 진행한다.
 
 Agent/앱의 실제 필수 작업·idle·서비스 수명·로컬 감독 wire는 Linux/앱·Worker·계약 담당이 정한다.
 안정 구간·episode 간 예산의 수치는 Worker 정책 담당의 근거가 필요하다. 기존 단일 recovery 상한을 임의로 늘리지 않는다.

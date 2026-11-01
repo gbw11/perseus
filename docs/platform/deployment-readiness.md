@@ -20,6 +20,7 @@ OS 공통 정적 CPU 배치는 이전 검증 범위를 유지한다. 기존 full
 | 하위 Manager·CLI·Execution·creation/preparation·lifecycle·CPU·resources·관측·trace | `recipes-core/xenova-platform/xenova-platform_1.0.bb` → `/usr/lib/xenova/*.py`, `/usr/sbin/xenova-vm`, `/usr/sbin/xenova-domain-identity`, `/usr/libexec/xenova-domain-identity-native` | 같은 저장·잠금·owner를 쓰는 CLI, first-boot/CPU/admission/autostart, FastAPI가 import한 Manager, Worker·Bootstrap의 하위 호출. wrapper·native helper·Python 모듈을 같은 후보로 교체하고 장기 프로세스의 import를 확인 |
 | 공용 Python MQTT | `services/vm-agent/mqtt-client/xenova_mqtt` → `recipes-core/xenova-mqtt-client` → target Python site-packages | Gateway·dom0-manager/Worker가 정식 envelope/binding/세션 계약을 공유. 개발 PC PYTHONPATH 없이 설치 경로에서 해석돼야 함. guest Agent의 `/opt` 설치는 별도 template 경로 |
 | Gateway | `services/gateway/xenova_gateway` → 새 `recipes-core/xenova-gateway/xenova-gateway_0.1.0.bb` → Python site-packages, `/usr/lib/systemd/system/xenova-gateway.service` | 기존 `python3 -m xenova_gateway` 사용. pyproject·비활성 env 예시는 `/usr/share/xenova/`. unit은 disable preset, 활성 설정·Authority·재무장은 생성하지 않음 |
+| Gateway client | 같은 recipe의 `xenova-gateway-client` subpackage → site-packages `xenova_gateway/{__init__,client,ipc_contract}.py` | 표준 라이브러리만 요구. 외부 client wire v1과 내부 Authority writer 배포는 별개. Worker 제품의 구현/재시작은 아직 미수행 |
 | FastAPI·Worker | 기존 `recipes-core/xenova-dom0-manager` → site-packages의 `dom0_manager`, API·Worker unit | 제품 소스는 이번에 미변경. 기본 API/Worker RDEPENDS와 현재 환경 공급을 대조. 일반 full HTTP 호출자와 구형 내부 모듈을 계속 import하는 프로세스는 다른 호환 문제 |
 | Linux Agent·guest MQTT | `services/vm-agent/agent/deploy/install_into_rootfs.py` → guest `/opt/xenova/agent`, `/opt/xenova/mqtt-client`, Agent unit | Agent 담당이 후보·의존성·smoke를 제공. `guests/common/guest_agent_template.py:prepare`가 다음 template에 포함하고 receipt 기록. 일반 `prepare_instance`와 seed `prepare_deployment_seed`의 identity/drop-in을 구분 |
 
@@ -36,7 +37,15 @@ Gateway의 `RDEPENDS`는 실제 provider `python3-paho-mqtt`, `python3-pyserial`
 `xenova-mqtt-client`, `xenova-platform`을 선언한다. Python의 logging.handlers/copy/queue/threading은 실제 pkgdata 및 target import로 대조한다.
 README의 배포판 명칭 `python3-serial`과 Yocto recipe 이름 `python3-pyserial`을 혼동하지 않는다.
 
-Gateway 소스는 site-packages에 설치하며 테스트·개발 도구는 runtime payload에 넣지 않는다.
+Gateway 소스는 site-packages에 설치하며 tests는 runtime payload에 넣지 않는다. 소유 fixture임을 표시한 실행 예제는 `/usr/share/xenova/gateway-examples`에 설치한다.
+warm 진입점이 실제 UDS 수신부를 실행한다. unit은 RuntimeDirectory=xenova-gateway/0700, root·socket0600을 사용한다.
+이 임시 디렉터리에는 socket만 두고 내구 Authority·원 요청 기록을 넣지 않는다. 두 번째 Gateway는 기존 lease/활성 endpoint를 침범하지 않는다.
+기본 serial profile은 write-only다. feedback-1은 호환 firmware와 승인한 기한·차량 설정을 명시 공급해야 한다.
+서버·공용 MQTT·기존 Authority/lifecycle 모듈은 같은 내부 후보로 교체하고 client는 wire 계약으로 호환한다.
+새 Authority optional 기록을 모르는 구형 내부 writer와 혼합 설치하거나 자동 downgrade하지 않는다.
+현재 Worker unit은 root·AF_UNIX 허용이며 PrivateTmp/ProtectSystem을 사용한다. endpoint는 `/tmp`가 아닌 `/run/xenova-gateway`다.
+수신부의 0700/0600·peer UID 조건과 container/namespace의 동일 pathname을 실제 설치본에서 확인한다.
+Worker가 없어도 Gateway 보호는 진행하고 Gateway가 없으면 client는 유한 unavailable/unknown을 반환한다.
 하위 플랫폼의 private 모듈은 `/usr/lib/xenova`에 설치하고 기존 entrypoint가 그 경로를 사용한다.
 native identity helper는 기존 `${CC}`로 빌드하는 ABI 경계를 유지한다.
 bringup 이미지에는 Gateway 패키지를 포함하도록 연결하지만, 이번에 전체 이미지/rootfs를 만들거나 서비스 enable을 실행하지 않는다.
@@ -91,7 +100,7 @@ hash/import 검사는 설치·시험 경계에서 수행한다. 매 요청 전�
 
 | 결정·담당 | 필요한 제공물 | 이것 때문에 대기하는 기능 |
 |---|---|---|
-| Worker–Gateway / 두 제품 담당 | 원 요청/권한·기한·실패/취소·권위/장치 단계의 실제 전송·조회 계약 | 그 경로가 필요한 계획 정비·복구 전 보호 종단. 내부 queue를 원격 API로 쓰지 않음 |
+| Worker–Gateway / Worker 소비 담당 | 제공된 client/UDS와 Engine 원 attempt 저장·조회·현재 Manager guard·finish/cancel 연결 | 실제 Worker 보호→복구→새 binding→종결의 제품/설치본 수락. 전송 미구현 대기는 해소 |
 | Agent/앱·Worker·계약 담당 | 필수 업무 완료·idle·서비스 수명·로컬 복구 wire | 해당 서비스 건강·승격 판정 |
 | 플랫폼·운영 | 지원 템플릿/SD 측정에 따른 승인 create 시간 정책 | 신규 Linux create의 운영 수락 |
 | FastAPI·Spring | 실제 인증·원 요청 소유·허용 결과를 갖춘 명시 수습 공개 경로 | 제품 UI/HTTP 수습 노출 |

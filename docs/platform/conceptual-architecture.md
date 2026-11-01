@@ -1156,3 +1156,6 @@ CPU는 Debian·Ubuntu·Zephyr 모두 UUID별 정적 pinning·해제를 제공한
 
 
 6번의 현재 적용은 [배포 준비](deployment-readiness.md)와 [검증 결과](../verification/recovery-scenario-closure-20261030.md#stage6)에 연결했다. 담당자 현재 지시/이력과 내부 배포 단위를 정리하고 Gateway 정규 비활성 포장·로컬 target 검증을 보완했다. 이 사실은 운영 정책·실제 설치·제품 연결·7번 완료가 아니다. 앞 장의 개념·권한·수명은 바꾸지 않았다.
+
+[Gateway 제공자 후속](../verification/recovery-scenario-closure-20261030.md#gateway-provider)은 실제 로컬 호출·지속 보호/종결과 상태 사본/장치 피드백의 제공자 경계를 구현했다.
+원 결과·현재 보호·앱 적용·장치 보고·물리 관측을 구분하며 Worker·실제 planner/장치와 설치본 수락은 별도다.

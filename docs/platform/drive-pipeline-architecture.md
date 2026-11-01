@@ -20,6 +20,11 @@
 
 이 문서는 **설계의 통합본**이다. 제품 구현 완료 보고, 현시점 저장소 전체 감사, 실보드 성능 보증, 차량 안전 인증 또는 배포 승인서가 아니다. 기존 소스에서 확인한 사실과 새로운 설계 목표를 구분한다. 미확정인 상한·주기·차량 제원은 [20절](#s20)에서 공동 계약, 초기 시험·보정값, 후순위 기능으로 나누고 결정 시점과 근거를 정리했다.
 
+2026-11-01 제공 상태: [Gateway 제공자 계약](../contracts/gateway-provider-v1.md)에서 실제 Worker용 UDS/client,
+drive-state-1 공통 codec·적용/전환, 명시 feedback-1 serial 연결을 제공한다.
+[로컬 시험](../verification/recovery-scenario-closure-20261030.md#gateway-provider)은 테스트 stateful adapter·가상 장치와 실제 전송 경계의 수락이다.
+실제 planner·ESP32 firmware·물리 정지·차량 연속성은 이 설계의 공동 수락으로 남는다. 본문을 구현 이력으로 대체하지 않는다.
+
 ---
 
 ## 목차
@@ -1186,7 +1191,7 @@ encoder가 실제로 사용 가능하면 로컬 속도 폐루프 제어와 피�
 | E-stop·watchdog·구동 fault·가능한 전압 | 실제 관측 범위만 제공. 미지원/수집 실패를 false/0으로 만들지 않음 |
 | steering 상태 | 측정·추정·명령을 구별 |
 
-**시리얼 write 성공은 장치 적용 ACK가 아니다. ACK도 실제 바퀴 이동의 증거와 다르다.** Gateway가 원 명령과 ESP32의 session/counter를 대응시켜 확인한 만큼만 표시한다. 기존에 미연결인 적용 피드백은 이 설계의 구현 대상이며 이미 완성된 것으로 쓰지 않는다. [P0][B1]
+**시리얼 write 성공은 장치 적용 ACK가 아니다. ACK도 실제 바퀴 이동의 증거와 다르다.** Gateway가 원 명령과 ESP32의 session/counter를 대응시켜 확인한 만큼만 표시한다. Pi 제공자는 명시 feedback-1 parser/RX/TX·PTY 수락을 제공하며 실제 ESP32 생산·차량 측정은 미완료다. 구형 write-only에서 피드백을 만들어내지 않는다. [P0][B1]
 
 ### 14.4 독립성의 한계
 

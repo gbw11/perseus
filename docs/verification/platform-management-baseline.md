@@ -503,3 +503,10 @@ P5 초기 실패·수정 전 audit·inode 오탐·fixture 정책/경계 실패�
 ## 6번 배포 준비 연결
 
 2026-11-01 [배포 원본](../platform/deployment-readiness.md)과 [6번 검증](recovery-scenario-closure-20261030.md#stage6)에 현재 담당 지시·내부 교체 단위·설정 공급·Gateway 정규 비활성 포장을 연결했다. 기존 하위 기능/비용·5.5 근거는 유지한다. RPM/QA·ARM import·로컬 loader 검증은 전체 이미지/실제 API backend·보드·제품 종단 수락과 구분한다.
+
+## Gateway 제공자 연결
+
+[G1/G2/G3 후속](recovery-scenario-closure-20261030.md#gateway-provider)은 실제 UDS/client·원 결과/취소·지속 보호/종결,
+상태 사본 codec/적용과 serial feedback-1의 제공자 경계를 추가했다. 내부 actor·Authority·출력 guard를 재사용한다.
+lookup 추가 저장0·제한된 큐/사본·단일 device owner·원 단계 최초 저장 비용을 구분한다.
+Worker 제품·실제 planner/ESP32·운영/물리 수락은 로컬 제공과 별도이며 기존 관리 비용/동시성 근거를 대체하지 않는다.
