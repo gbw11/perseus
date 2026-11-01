@@ -13,6 +13,8 @@
 | 4번 하위 로컬 마감 | 요청별 관측·공통 잠금 밖 조회·유한 재관측·관측 실행량/지연 표본 보호. 기존 541개 후 슬롯 부모 중단/정상 반환·파일 안전 검사 보완 후보로 22 suite 543개 통과. 두 중심 barrier·양 OS polling, 부분 설치 29개 바이트·6개 격리 import 재확인 |
 | 1번 최종 마감 | **기능별 기준선·비용·소유권 대응 정리 완료**. 5번 커밋 `4a585d4`와 원자료를 대조한 [기준선](platform-management-baseline.md)에 관리 전체·실패 종결·비용/담당 근거를 연결. 후속 개념 서식 복원은 내용/12장 유지, 5.5번 실행과 구분 |
 | 5.5번 현재 범위 | 첫 [P55](#stage55)의 반례와 [lifecycle/CPU 후속](#stage55-followup)을 보존한다. 최신 [좁은 교차 보완](#stage55-cross-boundaries)은 firmware·자원 usage·lifecycle DHCP의 무관한 stop 대기를 분리하고 CPU 연쇄/오류 회복·추가 비용을 확인한다. 하위 로컬 수락이며 실보드/상위 제품 종단은 별도 |
+| 입력·진단 후속 | [2026-11-01 후속](#defaults-errors-review): CLI/Manager의 선택 자원 생략·원 입력 replay, 포화 trace/비활성 형식화/오프라인 예외·STOP 전 로그 대기 보완. 오류 구분·필수 내구 저장·기존 P55 보호 유지. HTTP/Spring/Agent/Worker 제품·보드·운영 정책은 미변경 |
+| create 입력 호환 보완 | [최신 의미 비교](#create-compatibility): 두 자원의 생략↔원 확정값 명시를 양방향 허용. 과거 형태 비교 선택을 대체하고 기존 완전 명시 호출·지원 원장 혼재를 유지. 내부 저장 버전 선택을 호출자에게 요구하지 않음 |
 | 남은 범위 | 운영 create 시간값 공급·보드 수락, 상위 제품 연결·실제 HTTP polling/정규 설치/보드 수락·API cgroup의 guest backend 문제는 미완료. 모든 부하/스케줄의 무기아나 지연 상한 수락은 아님 |
 
 아래는 후보별 이력이다. 과거 2회/439개/보드 적용 기록을 최종 1회/449개 이후 후보의
@@ -1740,3 +1742,361 @@ Markdown 링크/앵커 663개와 실제 정의 줄/기호를 확인하고, 개�
 templates/probe 등 미측정 경로의 대기 제거로 확대하지 않는다. 기존 final7 성과/원자료를
 보존했고, 큰 설계·공개 schema·운영 정책·타 담당자 제품·보드·배포·commit/push·6/7은 바꾸거나
 실행하지 않았다.
+
+<a id="defaults-errors-review"></a>
+## 2026-11-01 입력 기본값·재전달과 오류·진단 비용
+
+이 절은 당시 후보의 이력이다. 아래의 최초 입력 형태 일치/동일 명시값 충돌 선택은 이후
+사용자 결정과 [create 호환 보완](#create-compatibility)으로 대체됐다. 과거 시험 결과와
+측정은 보존하되 현재 입력 지시로 사용하지 않는다. 나머지 진단·내구성 보호는 유지한다.
+
+### 후보·판정 기준과 실제 사용
+
+착수는 `feat/platform/recovery-scenario-closure` / **23858bc19753904c69ed5ce60463206ea3238a3c**,
+tracked diff/untracked 모두 없는 상태다. 앞 절의 P55 교차 보완을 보존했다. 제품은 하위
+Manager/creation/CLI/trace와 기존 소유 Gateway만 변경했다. 타 담당자 제품, 운영 정책·
+자산·서비스·CPU affinity·보드·commit/push·6/7번은 변경/실행하지 않았다.
+
+이번 완료 기준은 **정상 생략이 실제 생성으로 이어지고, 수락한 원 결정은 replay에서
+유지되며, 불필요한 계산/출력 대기는 줄어도 오류의 원인·코드·사유·수습 구분과 필수
+저장이 보존되는가**다. 오류 코드 수나 로그 건수 감소를 개선 지표로 삼지 않는다.
+
+```bash
+# ID와 버전은 실제 게시 목록에서 선택하고, UUID는 최초 요청 때 한 번 발급·보관한다.
+xenova-vm create --vm-id "$VM_ID" --name example \
+  --template-id "$TEMPLATE_ID" --template-version "$VERSION" --execute --json
+# 응답을 잃었다면 위 최초 제출 그대로 재전달한다. 출력의 확정값으로 body를 다시 만들지 않는다.
+```
+
+vCPU·메모리를 각각 생략하면 **기존** K.describe의 default_resources가 원천이다.
+현재 지원 프로필은 Debian/Ubuntu 1-vCPU·512MiB, Zephyr 고정 1-vCPU·16MiB다.
+새 운영 숫자·minimum→recommended 추정·latest 버전·create pinning 필드를 추가하지 않았다.
+전체 명시 요청은 계속 지원한다. 생략→명시 동일 숫자로 최초 입력 형태를 바꾸면
+IDEMPOTENCY_CONFLICT다. 정확한 호출·출력은 [정식 create](../platform/cli-manager-spec.md#cmd-create)를 따른다.
+
+### B: 무엇을 어떻게 바꿨는가 — 입력과 수락
+
+| 항목·선택 종류 | 생략/명시 검사와 원천 | 확정·저장·replay·표시 |
+|---|---|---|
+| vcpus/memory_mib: 사용자 선택·프로필 기본값 | M._normalize는 key 존재를 유지. 명시값은 정확한 int>0, bool/null/0/음수/문자열/NaN/Inf 거절. 신규만 M._selection→_resolve_create로 기존 selected.default_resources·limits 대조 | op.request는 최초 정규화 입력의 key 존재, initial_spec/spec_hash는 확정 자원과 기존 guest 설정, op.template은 당시 작은 원천. 완료 replay는 현재 catalog를 읽거나 다시 복사하지 않음 |
+| IPv4: 사용자 선택/자동 할당 | dhcp profile에서 생략은 기존 자동 예약, 명시는 플랫폼 주소 범위 검사. null/빈 문자열은 자동 할당으로 바꾸지 않고 metadata/복사 전 INVALID_SPEC. dhcp capability 없는 Zephyr profile의 IP 미지원 유지 | assigned의 원 MAC/IP와 신원·원 기한 보존. 현재 Agent IP와 구별 |
+| template ID/version | 정확한 ID/명시 version 필수, 정식 catalog 선택. 기본 버전/latest 계약을 새로 만들지 않음 | 저장된 op.template 출처로 원 입력/확정값 관계 확인. 현재 원천 부재도 완료 이력 회수를 막지 않음 |
+| CPU 개별 배치 | create에 override 필드를 추가하지 않음. 미지정은 현재 플랫폼 정책 상속, CPU 2.0의 정지 변경/OS 공통 배치 유지 | create 자원 결정과 다음 실행의 현재 mask는 별개. 새 incarnation·효과 guard는 재확인, live repin 없음 |
+| UUID/key·권한 | 기존 정규 UUID와 `create:<UUID>` 규약 유지. 이름/대상/명시값·존재 형태 변경은 충돌 | 새 UUID/key/기한을 replay에서 발급하지 않음. force/purge/수습 실행 승인 확대 없음 |
+| 호출/조회 예산·운영 시간 정책 | 기존 생략 상한과 원 deadline 구분. 운영 create 정책 부재에 임의 fallback 숫자 추가 없음 | 원 수락 host/deadline과 이번 호출 잔여 예산 유지 |
+| Wi-Fi·부팅/설치 | 기존 parser의 wlan0/KR 등 별도 선택 계약, 비밀 입력·기존 설치 identity plan 유지 | 이번 create 공통화를 다른 명령에 복제/확대하지 않음 |
+
+**변경 이유와 경계:** CLI는 default=None인 두 resource를 늘 dict에 넣어 null로 전달했으며,
+Manager는 둘을 필수로 요구했다. parser 숫자 기본값을 추가하지 않고 실제 입력된 key만
+전달하도록 고쳤다. 공통 resolver는 I/O 없는 작은 계산이며, 처음 수락하기 전 선택/슬롯
+대기 후 재확인 때만 현재 metadata를 쓴다. 수락된 key 검색·유일성은 이 해석보다 먼저다.
+슬롯 대기 동안 기본값이 바뀌면 아직 미수락인 요청만 새 값을 선택한다. 패자는 원 진행/
+미수락 경합을 확인하며 원 값을 덮거나 두 번째 복사를 시작하지 않는다.
+
+계획은 `data.request`(제출 선택)와 `data.spec`(이번 계획 해석값)을 구분하고 저장/예약하지
+않는다. 계획을 확인한 숫자로 실행하려면 **새 실행의 첫 제출부터 plan.spec을 완전 명시**한다.
+계획 뒤 생략 입력으로 실행하면 그때 신규 선택이며 앞 계획이 예약된 것으로 해석하지 않는다.
+수락 뒤에는 첫 body를 유지한다. 원 initial_spec, update-resources 이후 configuration,
+Xen 관측의 domid/state 및 CPU-layout의 모든 vCPU affinity는 서로 바꾸어 쓰지 않는다.
+현재 메모리 실측은 별도 Xen stats 소비 경로의 관측이며 lower 구성값으로 가짜 실측을
+만들지 않았다. Agent 미보고는 여전히 미확인이다.
+
+**호환:** 자원을 하나라도 생략한 create만 journal **1.2**다. 원 request·당시 template·
+initial_spec의 관계를 매 완전 원장 검사에서 대조한다. mismatch는 RECOVERY_REQUIRED이며
+현재 기본값으로 복구하지 않는다. 저장 template/capabilities가 잘못된 타입인 경우도
+creation.validate에서 사용 전에 RECOVERY_REQUIRED로 거절한다. 일반 AttributeError로
+빠지거나 예약 반환으로 해석하지 않는다. Manager에 같은 타입 검사를 중복하지 않았다.
+완전 명시 Linux 1.1/Zephyr 1.0 및 그 hash/완료 replay는
+그대로다. Linux timing/수습 구조와 schema_version은 함께 검증하고, 1.2를 다른 action에
+허용하지 않는다. 새 writer와 구형 optional-input 미지원 reader/writer의 혼합 설치는
+지원하지 않는다. 기존 원장을 일괄 변환하지 않았다.
+
+### C: 오류·출력별 실제 경로와 판정
+
+| 경로·빈도·문맥 | 확인한 사실과 판정 | 수정/보존 기준과 종료 책임 |
+|---|---|---|
+| Manager 입력/저장/효과 실패: 관리 요청 | 전용 ManagementError와 envelope가 입력·관측·저장 오류를 구별. 이미 충족 | if→전용 예외→호출 경계를 유지. 내부 TypeError를 INVALID_SPEC으로 합치지 않음. 최초 원 오류·원 작업/의도/수습 저장·finally 유지 |
+| NeedLinuxSlot·ReadChanged: 준비 경합/조회 변화 | 슬롯 획득은 잠금 밖, read 회차 최대 2. 이미 의도된 제어 | 같은 함수명이 예외라는 이유로 Result 체계로 전환하지 않음. writer/실행 교체의 필요한 재확인 유지 |
+| Queue.Empty·idle/pending: loop/수신 | 표준 queue 대기/일시 부재, 원래 full stack 없음. 이미 충족 | empty() 선검사로 바꾸어 producer 경쟁을 만들거나 polling 주기를 낮추지 않음 |
+| Trace.event/span: 요청별 상세 512개(최대 4096) 포화 뒤 반복 | 폐기할 event도 _fields/context/시각을 생성했고 span도 버릴 row를 만들었음. 확인된 낭비 | event는 포화 판정 후 dropped만 증가. span은 summary·command_summary/기한용 업무는 유지하고 상세 row만 생략. 필수 저장 경로 변경 없음 |
+| Gateway MEASURE: actor/전환·출력 | INFO 비활성에도 필드 join/f-string 실행. 확인된 낭비 | isEnabledFor 뒤에만 형식화. INFO 수준·MEASURE 형식/도구 소비·주기는 유지 |
+| SerialSink.write 실패: 출력 actor | log.error의 동기 handler가 SinkError 반환 전에 기다려 같은 turn의 STOP을 붙잡음. 실제 결함 | 첫 cause_type/errno·원 SinkError from cause 보존 후 즉시 반환. actor의 fence·실제 STOP 제출이 먼저. 각 제출의 failure_cause는 현재 type/errno를 보존하고 메시지/희귀 내부 스택은 STOP 시도 뒤 구성. EIO→STOP ENOSPC도 두 원인을 구분. 진입점 fatal은 소유 종료 뒤 full cause/stack 출력 |
+| Gateway 진입점 종료 오류: 희귀 종료 | client.stop 예외가 순차 finally의 sink/lease/새 진단 worker 정리를 건너뛰고 먼저 잡힌 실행 오류도 가릴 수 있었음. 실제 코드/주입으로 확인한 결함 | 개별 종료를 끝까지 시도하고 최초 실행 오류와 각 정리 오류를 별도 full cause/stack으로 종료 뒤 보고. 전파 중인 내부 결함은 정리 오류를 note로 연결하고 그대로 전파. client ENOSPC 주입으로 나머지 close와 첫 ValueError 보존 확인 |
+| Gateway 부가 warning/INFO: MQTT callback/actor | root StreamHandler의 write/flush가 생산자에 동기 결합. 느린 sink 반례 확인 | 기존 stdlib QueueHandler 기반 Gateway 전용 128개 사본 worker. 메타데이터/할당·prepare는 생산자 비용이며 포화 전 검사로 불필요한 prepare 생략. 권위/receipt/명령/필수 사건 저장은 이 queue와 분리 |
+| invalid/queue overflow·aux offline: 반복 가능한 수신/단절 | raw topic 경고·오프라인마다 인위적 ConnectionError 생성. 개선 | 누적 거절/drop과 1,2,4… 경고. offline은 예외 없이 별도 aux_offline. 일반 warning에 raw body/topic/credential 없음. 정상 연결 회복과 출력 보호 유지 |
+| aux 실제 publish 예외/내부 결함 | 기존은 action type warning만 남겨 원 내부 원인이 부족했음. 진단 보완 | type/errno/event/message가 다른 transport는 별도 private 사본, 내부 결함은 첫 full stack+최근 16개. 같은 type/message/위치의 연속 반복만 재형식화 생략, nested cause는 매번 보존. 오류를 offline으로 합치지 않음 |
+| CLI/helper stdout·RequestOutput | JSON/marker/콘솔 증거의 소비자와 요청별 64KiB 제한 존재. 이미 충족 | print→logger 일괄 치환 없음. exit code/JSON/비밀 입력/원 stdout 유지, 전역 FD redirect 없음. 느린 opt-in trace_sink는 자기 반환을 늦출 수 있으나 공통 잠금 밖, 다른 실제 stop 진행 확인 |
+| Zephyr drive/runtime/Store/netfront/Telemetry·native helper | 설정 원문은 LOG_MODE_DEFERRED=y, PRINTK/CONSOLE=y. XD_READY/XDIAG_BIND·shell·종료 요약/JSON은 소비되는 프로토콜/희귀 진단. source/기존 시험 근거 | C/ABI/주기/formatter·config 변경 없음. printk를 deferred logging과 같다고 단정하지 않음. MQTT decoder의 반복 LOG_WRN은 고정 backend/worker 총비용 미측정으로 분류하고 임의로 삭제하지 않음 |
+| 콘솔 archive·원자료 | 기존 bounded async 사본과 포화/PTY 보호 시험 존재. 이미 충족, 이번 source 불변 | 원 PTY/실행 binding·gap/손실을 보존. 부가 사본 폐기를 원 콘솔 폐기로 확대하지 않음 |
+| HTTP/Java/Agent | 입력 필수 DTO/상위 재조립, 검증 body 읽기·동기 warning, Reporter 반복 stack 위치를 읽기로 확인. 담당 인계 | 외부 제품은 미수정. 구체 수정 위치·측정·정상/실패 수락은 기존 요청에 누적. Java/Python/C 비용을 동일 배수로 가정하지 않음 |
+
+**queue의 교환관계:** 실행 진입점에 daemon thread 하나와 유한 queue가 추가된다. 일반
+메시지는 4096문자에서 자른 뒤 제어문자를 escape하여 최대 16384문자이고 mutable 인자/
+traceback frame을 나중에 참조하지 않는다. 포화/실패/잘림·첫/최근 errno·worker_alive를
+snapshot으로 구분한다. ERROR/CRITICAL·exc_info는 포화/drop/자르기 대상이 아니고 직접
+전달하며 최근 critical 원문도 보존한다. 이 희귀 full stack과 private 내부 원인 사본의
+바이트를 임의로 잘라 원인을 지우지 않았으므로 모든 오류의 메모리 상한은 주장하지 않는다.
+close는 0.25초 join, 막힌 worker는 미확정으로 표시한다. sink 회복 뒤 실제 종료 확인,
+같은 실패 sink로 재귀 출력하지 않음. 임의 callback·shared logger·OS I/O·프로세스 종료 전체
+대기까지 제거한 보장은 아니다. [Gateway 상세](../../platform/services/gateway/README.md#수신출력-진단).
+
+### 같은 조건의 비용과 남긴 비용
+
+원자료 폴더는 `C:/Users/SSAFY/Documents/Codex/2026-11-01/xenova-defaults-errors/`다.
+`review_cost.py`, `review-cost3-entry-counts.json`, `review-cost-release-counts.json`은 실제
+선택 모듈 경로/Python 3.12.3까지 남긴다. 같은 소형 template/Manager/real file·fsync와
+fake Xen·guest fixture, 같은 logging level/계수 hook의 논리 작업량 비교다. 물리 SD I/O나
+운영 지연 감소율이 아니다. 단일 계수 실행을 p99/운영 상한으로 해석하지 않는다.
+
+| 고정 입력·primitive | entry→final | 보존/추가 비용 |
+|---|---|---|
+| 완전 명시 plan text read/parse/describe | 8/7/2→8/7/2 | 새 복사/예약 0 |
+| 완전 명시 accept read/parse/describe/fsync/copy | 33/23/4/23/1→동일 | 기존 수락·필수 저장·작업 소유 유지 |
+| 완료 replay read/parse/describe/copy | 11/8/0/0→동일 | 원 완료 회수·현재 원장 검증 유지 |
+| 새 생략 plan/accept/replay | final의 위 완전 명시 계수와 동일 | resolver는 저장/현재 metadata에서 순수 계산. 옛 후보의 미지원 입력을 속도 비교로 만들지 않음 |
+| cap=0 event 1000회 _fields/clock | 1000/1001→0/1 | drop=1000 유지, 생성자 clock 1 유지 |
+| cap=0 span 100회 상세 row append | 100→0 | summary/command calls 각각 100, drop=100 유지 |
+| INFO off MEASURE 100회 fields.items | 100→0 | 활성 MEASURE 문법/의미 보존 |
+| offline aux 100회 ConnectionError | 100→0 | 실패 총계 100, 내부 결함/transport 원인은 별도 |
+| 첫 내부 TypeError와 동일 위치 100회 | final full stack 형식화 1·반복 99 | 옛 코드는 full stack이 0이었음. **100→1 개선으로 꾸미지 않음**. 첫 원인 보존을 위해 새 진단 비용 추가 |
+| 느린 sink 1001 warning | release prepare 129 / queue max128 / drop872 | 계측 peak303693 bytes, 종료 때 worker 미확정→sink 회복 후 false, FD4→4. 계측/Mock 보관 비용 포함, dom0 용량 보장 아님 |
+| 실제 serial 첫 EIO→STOP | entry는 handler 해제 전 STOP 없음→final은 해제 전 두 번째 실제 write·STOP 제출 성공 | 출력 fence·원 errno·원 cause 유지, 장치 ACK 아님 |
+
+시리얼의 서로 다른 현재 원인은 기존 8192개 private submissions ring에도 보존한다.
+failure_reason/출력 차단 의미를 바꾸지 않고 failure_cause의 type/errno/message를 추가했다.
+예상된 OSError·부분 쓰기 SinkError는 full stack을 만들지 않는다. 내부 TypeError 등은
+STOP 뒤 failure_traceback 문자열을 보존한다. 이 드문 원인 사본의 메모리/형식화는 추가한
+진단 비용이며 없앤 비용으로 세지 않는다. live traceback/frame이나 새 영구 원장은 없다.
+메시지/스택은 private 진단이고 새로운 MQTT/HTTP 응답 필드가 아니다.
+
+Gateway Authority serialize/필수 fsync, create history 101개·restore fsck1, 현재 CPU
+guard와 실제 vCPU 검증은 기존 비용/교차 시험을 같은 제품 후보에서 회귀했다. 이번 변경은
+새 root 해시/fsck·로그용 Xen/Store 재관측·원장 재스캔을 추가하지 않는다. 새 optional journal
+1.2의 저장된 입력/확정값 관계 검사는 순수 계산으로 추가되어 원장 수에 비례한다. request 간
+cache나 default DB가 없고, 원천/작업 소유/정책·실행이 바뀌는 경계의 재확인은 남긴다.
+
+### 수락 대응과 검증의 한계
+
+아래 추적 ID는 새 공개 enum/티켓이 아니다. 신규 두 하위 시험과 Gateway 진단 시험을
+기존 S3/S4/S5/P55/CPU/주행 시험에 연결한다. 같은 시험을 다른 이름으로 합산하지 않는다.
+
+| ID | 이번 직접 assertion·기존 근거 |
+|---|---|
+| DE-T01/02 | `test_xenova_input_defaults.py`: 최소 Manager/CLI 존재 정보, 각 resource 독립 생략, 실제 Debian Manager/Ubuntu CLI 검증 복사와 Zephyr CLI bundle. invalid/null/False/IP는 catalog·예약·복사 전 거절, 원 unknown/범위 검증은 기존 ManagementTest |
+| DE-T03/04/06 | defaults 시험의 partial/legacy replay·보존 bytes, cold process+template 부재+catalog 조회 실패 hook, 생략→명시 충돌, 저장 입력/확정값 mismatch RECOVERY_REQUIRED. 원 hash·신원·원 deadline 재발급 없음 |
+| DE-T05 | 원 수락 write 뒤 EIO는 false, 같은 요청 정상 회수·copy1. 수락 전 slot barrier에서 defaults revision 변경+같은 key 경쟁: journal0→원 수락1, 패자 미수락, winner 최신 선택. 저장 미확정을 성공으로 치환하지 않음 |
+| DE-T07 | plan/request/spec 무저장, 계획 숫자 명시 실행 vs 새 생략 신규 선택. 현재 구성/CPU 상속은 기존 CPU cross의 pin/resource/unpin·새 host·정책 회수 시험 재사용 |
+| DE-T08/12 | lower `test_xenova_diagnostic_cost.py`: 내부 TypeError≠INVALID_SPEC, required write ENOSPC≠optional diagnostic warning. 기존 trace clock/collector 실패·atomic fsync/dir fsync, create child timeout/수습/상속 FD/lease·원 오류 보호 재사용 |
+| DE-T09 | cap=0 event/span 상세 구성 0·summary 유지, INFO off Expensive.items 실패 hook이 실행되지 않음. 로그용 업무 관측 추가 없음 |
+| DE-T10/11 | Gateway `test_diagnostic_cost.py`: 실제 bounded queue 포화·snapshot 불변·회복/worker 종료, real StreamHandler ENOSPC50의 별도 errno·재귀 stderr0, custom sink 실패·worker start 실패. offline100/internal100/서로 다른 errno·TypeError·KeyError·nested cause 구별, 희귀 full stack 보존 |
+| DE-T13 | 실제 CLI JSON 파싱/exit·제어 stdout 격리, Gateway raw topic/body 제거·기존 MEASURE 소비 형식. 기존 TraceTest의 payload/argv/path 제외와 console 원 PTY·gap 시험 재사용. private 결함 stack을 제품 응답에 추가하지 않음 |
+| DE-T14 | `test_same_key_default_change_error_burst_and_slow_sink_preserve_real_other_stop`: Debian copy barrier+default 변경+64 invalid+정지한 부가 sink, 같은 원 active replay 값 보존·원장1·B 실제 stop/결과 완료가 A 해제 전. 다른 긴 lifecycle/수습·두 Linux polling/CPU 교차는 기존 시험 회귀 |
+| DE-T15 | C/Zephyr/native source/config 미변경으로 새 ARM/ELF 재빌드 해당 없음. 고정 SDK native worker9의 선행 근거는 source 불변으로 연결, 이번 coverage의 host core/PTY/계측 시험과 실보드 주기 총비용을 구분 |
+
+하위 제품/시험은 `SEALED2_SOURCE.json`으로 `run_checks.py regression sealed2`를 실행했다.
+시리얼 원인 보완 뒤 `RELEASE_SOURCE.json`으로 `gateway release`, `coverage release`,
+`diagnostics release`를 실행했다. 두 후보 사이 변경은 Gateway verified_runner와 그 시험뿐이며
+하위 모듈/시험·직접 의존 Gateway diagnostics/authority 등 바이트 일치를 확인했다. 최종 rc·실행
+argv/시간·raw log와 합산하지 않은 범위는 `FINAL_CANDIDATE.json`에 모았다. 문서만 후속
+편집한 내용은 최종 작업트리 manifest로 다시 대조했다. 수행하지 않은 보드/전원/실제
+broker/서비스 조작은 fixture 시험으로 대체
+완료한 것으로 표시하지 않는다.
+
+하위 최종 회귀는 **790 passed**, Gateway 전체는 **171 passed**, diagnostics는 **18 passed**,
+나머지 소유 영역 coverage는 **163 passed, 2 skipped**다. 겹치는 시험은 합산하지 않는다.
+coverage의 root 전용 mountinfo 시험은 root Python에 pytest를 설치하지 않고 기존 unittest
+한 건만 실제 root/소유 TemporaryDirectory에서 실행해 **1 passed**로 보완했다.
+나머지 skip은 pinned Xen console source 미지정으로 실제 patched PTY 결합이 미수행인 것이다.
+해당 제공물/담당·대체할 수 없는 assertion은 기존 7번 콘솔 수락에 남긴다. 실제 mount나
+운영 broker를 조작하지 않았다.
+
+중간 FINAL_SOURCE/FINAL2_SOURCE/SEALED2_SOURCE의 결과도 보존한다. 진입점 정리 예외·
+optional 원장 원천 검사를 보완한 뒤, 마지막에 actor가 서로 다른 시리얼 실패를 공통 사유만
+남기던 경계를 추가 보완했다. 첫 SerialSink 정보만 남기거나 느린 로그로 돌아가지 않고 각
+제출 원인을 보존했다. 서로 다른 errno·내부 결함·부분 쓰기의 네 조합과 최초 STOP 순서를 같은 시험으로
+확인한다. diagnostics의 Gateway 사례는 전체 171개에 포함된다. 이전 suite 시간/개수를
+합산하지 않으며 변경 없는 하위 790개는 source 바이트 일치로 재사용한다.
+
+**중간 실패도 보존:** old defaults-before의 두 positive assertion 실패는 옛 필수 입력/
+CLI null의 재현이다. 첫 진단 before 실행은 Gateway pyproject의 pythonpath로 작업트리
+소스가 섞여 해당 Gateway 결과를 전후 근거에서 제외했다. 독립 config/rootdir로 old
+사본을 선택한 `diagnostics-before-isolated2-entry`는 네 중심 assertion이 예상대로 실패한다.
+중간 slow-handler fixture가 Handler.release를 Event로 가린 결함을 resume으로 바로잡고
+반례를 재실행했다. 처음 cost trace callback의 return 누락/activate 오타는 도구 결함이며
+정정된 review-cost3만 사용한다. raw 기록을 덮어쓰지 않았다.
+
+통합 중 예산 시험 하나는 entry에서도 실패했다. list의 관측 전후 registry2회는
+ReadContext.validate의 대상 집합 보호였으므로 제품은 바꾸지 않았다.
+`test_registry_cost_consumes_get_and_list_original_fifteen_second_budget`는 get1/list2회와
+그 모든 비용이 최초 15초에 포함됨을 검사하도록 오래된 호출 횟수 기대만 정정했다.
+공개 오류/기한·정상 진행 assertion을 완화하지 않았다. optional 원천 손상 시험은
+`defaults-source-before-final2`에서 AttributeError가 재현됐다. 첫 sealed 후보에서는 Manager
+검사보다 앞선 creation.validate의 metadata 접근이 남아 있어 같은 실패가 났다. 타입 검사를
+공통 creation 검증의 접근 전으로 옮기고 Manager 중복 검사는 제거했다. final의 잘못된
+원 입력 관계/원천 null/capabilities null은 모두 RECOVERY_REQUIRED이며 현재 catalog 조회 0이다.
+
+### 계약·부분 포장·담당 인계와 미완료
+
+하위 recipe Python33+비활성 예시1의 실제 설치 경로/모드/바이트·독립 import11을 확인했다.
+`SUBSET_PACKAGE-SEALED2.json` tar SHA256은
+`74b2c45c74f27b90ad75c07e7e6c8fda247f9318ed3ba0e2c2c9dfb06ac1f2b0`다.
+recipe/RDEPENDS·원활성정책·고정 guest/native helper는 바꾸지 않았다.
+Gateway는 16 Python+README/pyproject의 **소스 묶음**이며 새 diagnostics.py가 자동 package
+검색 범위에 포함된다. 새 진단 모듈은 실제 stdlib import 통과. 완전 entrypoint 단독 import는
+시험 host Python에 기존 선언 의존성 paho가 없어 미수행 범위로 남겼다(GATEWAY_IMPORT_FINAL2).
+Gateway 시험은 기존 명시 dependency fixture를 사용한다. 새 패키지를 설치하거나 의존성을
+추가하지 않았다. Gateway 소스 tar SHA256은
+`eef2ae723af10b1113f03b40989c4ed02d687167e90541b5d62e0a86246e20bb`다
+(`GATEWAY_SOURCE_PACKAGE_RELEASE.json`, 시리얼 원인·진입점 정리 보완과 현재 README 포함).
+BitBake/RPM/wheel·정규 Gateway recipe/unit·이미지·실설치 완료가 아니다.
+
+| 후속·담당 | 현재 제공물·구체 수락 |
+|---|---|
+| HTTP/Spring/UI D02·D08 | [현재 요청](../requests/20261029-request-http-spring-ui.md#defaults-errors): 필드 존재 보존, nullable/primitive DTO의 생략 손실 방지, 최초 body 저장, 계획/확정/현재/실측 표시. 상위는 현재 resource 필수이며 하위 생략 종단 제공 전. invalid body 원문 읽기/동기 warning·Java 중복 포장은 실제 비용/민감 정보/다른 stop 진행으로 담당 수락 |
+| Worker D01/D03 | [현재 소비 요청](../requests/20261029-request-recovery-worker.md): optional journal1.2/원 request·initial_spec 구분, 실패 수습→예약 반환→현재 attempt/CPU guard 정상 진행. 상태/표본 결측에 create 기본값 적용 금지 |
+| Linux/Agent D01-L01~L05 | [현재 요청](../requests/20261029-request-linux-agent.md): Reporter 반복 stack·sink 비용을 collector/transport/내부 결함별 계수. 최초 cause·표본 unavailable·필수 종료/회복 보존, 실측 없이 최적화 완료 선언 금지 |
+| 배포·6/7 | Manager/creation/CLI/기존 writer 전체 같은 후보와 journal1.2·CPU2.0 호환을 함께 배포. 기존 실행자/helper drain·프로세스 교체·import/hash 대조. Gateway diagnostics.py의 logging.handlers/copy/queue/threading 등 고정 target stdlib closure, 기존 paho/serial 의존성·정규 recipe/unit·실제 backend/API restart는 공동 수락 |
+| 운영/실보드 | create 시간 정책의 승인 값, 실제 Xen affinity·Linux 부하·SD/IRQ/콘솔/장치 출력·물리 정지는 기존 7번. 이번에 숫자나 정책을 결정/적용하지 않음 |
+
+하위 로컬 제공은 생략 입력/원 결정 보존과 확인된 진단 낭비 수정까지다. 모든 예외/출력을
+제거하거나 원인 분류를 축소한 작업이 아니다. 필요한 metadata 재확인·필수 fsync·희귀
+cause/stack 비용은 남기며, 위 상위 소비/설치·실물 수락을 같은 완료로 세지 않는다.
+
+<a id="create-compatibility"></a>
+## 2026-11-01 create 호환 보완 — 원 확정값의 의미 비교
+
+### 기존 호출과 새로 허용하는 교차
+
+기존 완전 명시 사용법은 그대로다. UUID/이름/정확한 템플릿 ID·버전과 명시값을 제출하면
+같은 생성 경로를 사용한다. 다음은 지원 Linux 프로필에서 같은 VM/key·나머지 명세라는 전제다.
+
+```bash
+xenova-vm create --vm-id "$VM_ID" --name example \
+  --template-id "$TEMPLATE_ID" --template-version "$VERSION" \
+  --vcpus 2 --memory-mib 768 --execute --json
+# 응답 유실 뒤 아래처럼 두 자원을 생략해도 원 2/768로 같은 작업을 확인한다.
+xenova-vm create --vm-id "$VM_ID" --name example \
+  --template-id "$TEMPLATE_ID" --template-version "$VERSION" --execute --json
+```
+
+반대로 생략 수락→원 확정값 명시도 허용한다. 최초 명시 768이 당시 기본값 512와 달라도
+원 768을 유지한다. 원 512에 768을 명시하면 여전히 충돌이고 null/bool/0/음수/문자열 등은
+원 값으로 보충하지 않는다. 원 create key는 기존처럼 정규 UUID에서 정한다. UUID 변경은
+별도 key/새 요청이지 임의 전달 key로 과거 VM과 합치는 행위가 아니다. IP·이름·템플릿 등은
+기존 비교 의미를 유지한다. 응답 전체를 create 입력에 복사하지 않는다.
+
+### 수정 전 반례와 최소 변경
+
+착수 branch/HEAD는 `feat/platform/recovery-scenario-closure` /
+**23858bc19753904c69ed5ce60463206ea3238a3c**다. 직전 작업의 미커밋 22파일을 보존했다.
+원자료는 `C:/Users/SSAFY/Documents/Codex/2026-11-01/xenova-create-compatibility/`에 있다.
+`ENTRY_SOURCE.json`은 그 작업트리이며 이전 작업의 FINAL_CANDIDATE 해시와 대조한다.
+HEAD만으로 새 제품 후보를 식별하지 않고 READY_SOURCE + 현재 문서 해시를 사용한다.
+
+수정 전 `compatibility-before-entry`의 정상 요청 assertion은 IDEMPOTENCY_CONFLICT로
+실패했다. `_mutate`가 key의 유일한 원 기록을 얻은 뒤 `previous.request != spec`으로
+존재 형태를 비교하던 결과다. 이 반례와 과거 형식 충돌 시험 결과는 지우지 않았다.
+
+이번 제품 변경은 **xenova_management.py 한 파일**이다.
+
+| 위치 | 바꾼 일·기준 | 유지한 경계 |
+|---|---|---|
+| `_same_create_request` | 이미 읽고 검증한 특정 원 operation의 initial_spec에서 두 자원만 가져옴. incoming의 생략만 보충하고 명시값은 원 값과 비교. 다른 필드는 원 request 그대로 비교 | 원/입력 dict를 변경하지 않는 작은 사본 두 개. 현재 catalog/config/관측 조회 0. 원 자원이나 지원 legacy request가 자기 모순이면 RECOVERY_REQUIRED |
+| `_mutate`의 previous 분기 | create만 위 의미 비교로 바꾸고 action/다른 mutation 비교는 그대로. LinuxSlot 전후 재진입도 같은 분기를 사용 | 기존 완전 검색/중복 key 거절·짧은 수락 경계·owner/상속 FD·원 deadline·실패/수습/완료 경로 |
+| `_operations`/creation/CLI/진단 | **제품 코드 미변경**. 원 1.2 request→당시 template→initial_spec 자기 검증과 explicit 입력 strict 검사 유지 | 새 body의 형태와 저장 원본의 무결성을 분리. source 손상을 새 기본값으로 채우지 않음. 새 실행기·저장 형식·전체 재검색·전역 잠금·fsync·payload 검증 추가 없음 |
+
+동등성 판정은 실행 허가가 아니다. 활성 작업은 원 진행을 반환하며 partial 실패와 수습
+완료는 실패 원인을 유지한다. 수습 완료의 내구 예약 반환도 기존 경로다. 완료 replay는
+원 결과/현재 구성을 구분하고 현재 update-resources 값을 되돌리지 않는다.
+
+### 저장·호출 호환을 구분한 수락
+
+| 조합 | 제공/제한과 직접 확인 |
+|---|---|
+| 기존 완전 명시 CLI/Manager → 새 하위 | 새 옵션/버전 선택 없음. 실제 CLI 2-vCPU/768 최초 수락→생략 CLI로 같은 operation/원 값 회수. 기존 Manager/CLI 회귀 재실행 |
+| 기존 완전 명시 HTTP 생산자 → 새 하위 | 변경 없는 CreateVmRequest/서비스/Driver/Provisioner/SerializedManager/HTTP app을 기존 FakeXen fixture로 실행. 새 필수 header/mode/endpoint 없음. 기존 integration 파일도 entry/ready 각각 13 passed |
+| 생략 입력 → 새 하위 | 각 자원/둘 모두 독립 선택. 신규는 기존 정식 기본값, 수락 뒤는 원 값. 상위 DTO/화면의 optional 전송은 여전히 별도 확장 |
+| 새 reader/writer → 지원 1.0/1.1/1.2 혼재 | 실제 Zephyr 완전 명시 1.0, Linux 완전 명시 1.1/생략 1.2를 한 저장소에서 만들고 모두 교차 replay. 원 byte/hash/출처 유지, 변환 0 |
+| 옛 내부 writer → 모르는 새 형식 | 별도 설치 호환 문제. 같은 후보 모듈 집합·기존 실행자 drain/import 교체를 배포 담당자가 수락. 이를 완전 명시 HTTP caller의 부호환으로 설명하지 않음 |
+
+일반 caller는 raw journal의 버전 분기/직접 해석/변환을 하지 않는다. 기존 최초 body 저장은
+계속 사용할 수 있지만 그것만을 유일한 replay 방식으로 강요하지 않는다. 확인한 원 값 또는
+생략을 전송하며 현재 화면 숫자/최신 기본값을 임의로 다시 넣지 않는다.
+
+### 정상·충돌·중단·진행성 근거
+
+`test_xenova_create_compatibility.py`와 기존 `test_xenova_input_defaults.py`의 합계는
+23개다. 공통 시험을 OS 이름만 바꾸어 세 벌 만들지 않았다.
+
+| 조건 | 실제 assertion |
+|---|---|
+| 자원 존재 4×4 교차 | vCPU/메모리 각각·둘 모두·부분 명시의 origin 4형태×replay 4형태. key 순서 반전도 같은 operation, 원 byte 동일·copy1·replay catalog0. 비기본 2/768 포함 |
+| 실제 차이/무효값 | 다른 유효 resource·name·template ID/version은 IDEMPOTENCY_CONFLICT. IP key 제거도 기존 충돌 유지. null/True/False/0/음수/string/list/dict는 INVALID_SPEC·원 기록 불변 |
+| 현재 구성 변경 | 원 1/512 create→정지 자원 변경 2/768→생략 또는 원 명시 replay. original initial_spec512와 current configuration768 분리, 원장 불변·현재값 rollback0. 현재768을 원 값으로 제출하면 충돌 |
+| cold/원천 부재 | 실제 별도 Python process에서 생략→동일 명시 및 비기본 완전 명시→생략. template directory를 소유 fixture에서 옮기고 catalog 실패 hook을 둬도 원 결과·ID·hash·기한·bytes 유지 |
+| 활성/후속 진행 | Ubuntu의 비기본 full 원 copy를 막은 중 omitted replay는 같은 RUNNING/원 값/기한. Debian의 omitted 원 copy+default 변경+invalid 폭주+느린 sink 중 full 동등 replay와 B 실제 stop 완료가 A 해제 전. 원 대상 journal1 |
+| 수락 경쟁 | omitted A가 slot 획득 전 멈춘 동안 full 비기본 B가 먼저 수락/완료. A 재진입은 임시 default 대신 B의 원 값을 사용, 원 작업/예약/prepare1·추가 복사0. slot 보유·미수락 경쟁도 기존 의미 유지 |
+| 실패/수습 | 실제 검증 복사 EIO→omitted 동등 replay는 원 실패. 정식 discard-private 뒤도 원 실패/동일 op/원 bytes를 유지하고 새 prepare0. 거짓 성공·자동 재생성0 |
+| HTTP 응답 유실 교차 | 일부 생략 원 수락 파일 write 뒤 EIO, prepare0. 기존 HTTP가 만든 full1/256 요청은 같은 op로 등록/시작201, prepare1, 원 request/hash/creation/할당 유지. 이미 실행 중 같은 POST는 기존409, 응답은 기존 네 필드 |
+| 저장 자기 검증/기존 보호 | 1.2 request/initial mismatch·source/capabilities null 거절, 기존 저장 EIO/child·owner/lease·기한·수습·양 Linux prehash0/root 검증 복사1을 관련 회귀에 연결 |
+
+기존 입력 시험의 “동일 명시도 충돌”만 승인된 성공 assertion으로 바꿨고, 실제 다른 값의
+충돌을 유지했다. 이 작업의 비교 함수 자체를 mock하지 않았다. HTTP 제품/테스트 소스도
+바꾸지 않았다. 외부 Xen/guest/이미지 크기/실물 I/O는 기존 fixture 범위다.
+
+기본 host Python만으로는 FastAPI가 없었지만 기존 `test-tools` 경로에 프로젝트 요구 범위의
+실제 FastAPI/Pydantic/httpx가 있었다. 새 의존성을 설치하지 않았다. pytest importlib 모드가
+저장소 `platform` namespace로 stdlib를 가려 Rich/HTTP import가 실패한 이력은 보존했다.
+실제 stdlib platform 파일과 기본 pytest import 모드를 사용해 해결했으며 제품은 바꾸지 않았다.
+Starlette/httpx deprecation warning은 남겼고 이를 없애려고 httpx2를 설치하지 않았다.
+초기 fixture의 c.data 대신 실제 c.m.data, A journal 개수는 B를 포함한 전체2 대신 대상1로
+정정했다. 보호/실행 assertion을 삭제하지 않았다.
+
+### 작업량·부분 포장과 최종 후보
+
+`review-cost-locks-entry-counts.json`/`review-cost-locks-ready-counts.json`은 같은 작은 실제 file/Manager/
+fsync, fake Xen·preparer, 같은 계수 hook·Python 3.12.3에서 비교했다. explicit와 omitted를
+각각 새 동등 fixture로 실행했으며 아래 계수는 전후/두 입력 모두 같다.
+
+| 정상 경로 | text read / JSON parse / catalog describe / fsync / prepare |
+|---|---|
+| plan | 8 / 7 / 2 / 0 / 0 |
+| 최초 수락·완료 | 33 / 23 / 4 / 23 / 1 |
+| 완료 replay | 11 / 8 / 0 / 3 / 0 |
+
+같은 trace에서 lock.wait/lock.hold 회차도 plan1/1·수락2/2·replay1/1로 전후 동일했다.
+잠금 대기의 운영 시간 상한이나 미세 CPU 증가율을 이 단일 계수 실행으로 주장하지 않는다.
+
+새 비교는 두 작은 dict의 일시 사본과 두 정수의 순수 비교 비용을 추가한다. 요청 밖 cache나
+추가 보존 객체는 없다. 원장 스캔/잠금 회차·payload read/hash/copy·helper·필수 저장은 추가하지
+않았다. 같은 성공 결과의 primitive를 비교했으며, 옛 형태 충돌의 빠른 실패와 새 정상 성공을
+개선율로 비교하지 않는다. 물리 I/O·SD latency·운영 상한은 미측정이다. 기존 trace/MEASURE/
+offline/시리얼 원인 보존은 source 불변과 동일 후보의 진단/Gateway 시험으로 확인한다.
+
+recipe Python33+비활성 예시1, 설치 경로/모드/바이트·독립 import11을 대조했다.
+`SUBSET_PACKAGE-READY.json` tar SHA256:
+`8899bb3a5f3866bf0f44e695ef08527d61f487f439da5f1ed7b016c7fda480c7`.
+새 모듈/runtime 의존성·recipe 변경·설치 버전 선택을 추가하지 않았다. BitBake/RPM/전체 이미지·
+운영 설치가 아니다. READY_SOURCE의 제품/시험과 최종 문서 해시·작업별 delta·명령/rc·전후 비용은
+`FINAL_CANDIDATE.json`/`TASK_DELTA.diff`에 모은다. 새 코드가 없는 Gateway 묶음을 재포장하거나
+C/Zephyr/ARM을 형식적으로 재빌드하지 않는다.
+
+최종 같은 후보의 통합 회귀는 **799 passed**, 중심 23개는 여기에 포함된다. 변경 없는
+HTTP integration은 entry/ready 각각 **13 passed**, 진단 **18 passed**, Gateway 전체
+**171 passed**다. 서로 겹치는 시험을 합산하지 않는다. 각 실행 argv/시간/rc와 원 log는
+FINAL_CANDIDATE에 연결했다. 원본 오류 분류/진단 파일과 타 담당자 제품의 바이트 불변도
+대조한다. 문서의 사라진 VM 가이드 링크는 실제 CLI·Manager 계약 경로로 정정했고,
+표시 이름을 임의 생성한다고 적힌 과거 문장도 실제 unchanged HTTP가 전달하는 name에 맞췄다.
+
+### 현재 담당 지시와 실제 미수행
+
+[CLI·Manager](../platform/cli-manager-spec.md#cmd-create), [VM API](../contracts/vm-api-contract-v1.md#lower-create-compatibility),
+[HTTP/Spring/UI](../requests/20261029-request-http-spring-ui.md#defaults-errors),
+[관리 연동](../platform/management-integration-request.md), [Worker](../requests/20261029-request-recovery-worker.md)의
+현재 본문을 개정했다. 이전 원 body의 존재 형태를 유일한 허용 방식으로 요구하지 않는다.
+기존 D01/D02/D03/D08·CPU/예산·pending/표본 의미와 다른 미완료는 유지한다.
+
+상위의 **선택적 생략 UI/DTO/serializer**, 실제 Spring 종단, 구형 내부 writer와 새 저장의 혼합
+방지·모듈/process 교체, 운영 create 정책·실보드/동일 설치본 수락은 각각 미완료다.
+하위 원 공개 응답을 읽는 Worker/HTTP에 raw journal parser를 새로 요구하지 않는다.
+보드·운영 VM/CPU·실데이터·서비스·배포·commit/push·6/7번은 변경/실행하지 않았다.

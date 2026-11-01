@@ -4,6 +4,18 @@
 
 ## 현재 할 일과 읽는 순서
 
+2026-11-01 진단 인계(D01-L01~L05 유지):
+`agent/xenova_agent/reporter.py`의 inventory/metrics 수집 예외와 `_loop`의
+`log.exception("reporter tick failed")`를 실제 주기·설정·handler에서 계수한다.
+일부 수집/발행 오류는 이미 경고·unavailable로 구별하므로 이를 합치지 않는다.
+지속 오류가 상위 tick까지 전파될 때 같은 cause의 중복 stack/형식화·동기 sink 대기가
+발생하는지만 확인한다. 확인된 반복은 유한 요약/손실 계수로 제한하되 최초·서로 다른
+내부 결함의 cause/stack, 원 표본의 오류/구간·신원은 보존한다. 신규 create의 설정 기본값을
+계측 결측·미지원·0·앱 준비에 적용하지 않는다. Agent 제품은 이번에 수정하지 않았다.
+수락은 collector 읽기 실패·transport 단절·서로 다른 내부 결함·느린 sink를 각각 주입하고,
+collector/보고 진행·unavailable/누락 표시·필수 종료·회복 후 실제 새 표본과 stack 횟수/큐·FD
+잔존을 확인하는 것이다. 실제 비용을 재지 않은 경로를 최적화 완료로 표시하지 않는다.
+
 1. [기존 Linux·Agent 요청](2026-10-27-linux-health-agent.md)의 D01-L01~L05를 읽습니다. 상세 정의와 원 수락 assertion은 이 원문을 따릅니다.
 2. [건강 근거](../contracts/health-evidence-v1.md)와 [Worker 요청](20261029-request-recovery-worker.md)을 읽어 판정·행동 소비자를 확인합니다.
 3. 아래 실제 소스·unit과 해당 guest 설치본을 대조한 뒤 변경·시험 결과를 연결합니다.

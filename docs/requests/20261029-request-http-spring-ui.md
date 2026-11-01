@@ -44,6 +44,31 @@ Gateway의 로컬 `submit_transition` queue는 제품 HTTP API가 아니다. 관
 
 ## 관리 요청 종단 수락의 확인 순서
 
+<a id="defaults-errors"></a>
+### 2026-11-01 현재 추가 작업: 입력 존재와 오류 진단 비용
+
+하위 제공물은 [create 계약](../platform/cli-manager-spec.md#cmd-create),
+[이번 검증](../verification/recovery-scenario-closure-20261030.md#defaults-errors-review)이다.
+기존 완전 명시 HTTP/Spring 호출은 변경 없이 새 하위에서 지원한다. CLI/Manager의 선택적
+생략 기능과 상위 DTO/화면의 생략 지원 확장은 구별하며 후자는 아직 종단 제공 전이다.
+아래 위치는 읽기로 확인했고 타 담당자 제품은 수정하지 않았다. 기존 D02·D08에 누적한다.
+
+| 실제 수정 위치 | 해야 할 일·이유 | 실행 가능한 수락 |
+|---|---|---|
+| `dom0_manager/models.py:CreateVmRequest`, `drivers/platform.py:Provisioner.ensure_instance/_spec_mismatch`, 생성 service/route | 현재 완전 명시 생산자는 변경 없이 지원한다. 선택적 optional 모델은 필드 존재(`model_fields_set`, `exclude_unset` 등)를 보존하되 명시 null/bool/0은 거절하고 값 해석은 플랫폼에 맡긴다. 원 요청 조회 전에 현재 구성/default로 body를 재구성하지 않는다 | 신규 누락은 원 request에 key가 없고 명시 invalid는 400·하위 생성 0. 응답 유실 뒤 기본값 변경/원천 부재에도 같은 UUID/key·원 값 회수. 수락 뒤 생략↔원 값 명시는 허용하며 저장된 원 request는 다시 쓰지 않음 |
+| Spring `vm/api/CreateVmRequest`, `vm/domain/CreateVmCommand`, `vm/infrastructure/Dom0LaunchRequest`, `VmService.create`; 화면 생성 form | 현재 완전 명시 흐름은 유지한다. 생략 확장은 Integer 필수 validator→int 전달의 존재 정보 손실을 별도 해결한다. 추천 표시와 실제 선택, 계획 `request/spec`·원 `initial_spec`·현재 `configuration`을 구분한다. 최초 body를 저장해도 되지만 형태 고정만을 강요하지 않는다 | 추천값 변경 뒤에도 원 생성값 보존. 두 자원의 생략↔원 확정값 명시는 양방향 같은 작업(최초 비기본 명시 포함), 실제 다른 값은 IDEMPOTENCY_CONFLICT. 계획 숫자를 보장할 새 실행은 그 값을 명시; 출력 전용 필드를 body에 복사하지 않고 가짜 실측/Agent 정상값 없음 |
+| `dom0_manager/api/errors.py:on_validation_error` | 현재 `(await request.body())[:300]`는 먼저 전체 body를 읽고 원문 일부를 동기 warning에 넣는다. 로그용 원 body 읽기·비밀 노출을 없애고 검증 위치·코드·원 request 참조의 허용 목록을 사용한다. 요청마다 전체 stack/handler를 만들지 않는다. `%r`의 escape는 유지하거나 동등하게 보존한다 | 비밀·제어문자·대형 body·반복 invalid+느린 handler를 주입. 오류 코드/detail 의미 유지, 로그 목적으로 body 추가 읽기 0·비밀 원문 0·로그 재귀 0. 다른 VM stop 수락/실제 완료와 정상 조회가 진행. 희귀 내부 결함은 입력 오류로 바꾸지 않고 cause/stack 유지 |
+| `vm/infrastructure/Dom0ManagerClient` 오류 decode·warning과 기존 예외 변환 경계 | 이미 알려진 upstream 오류와 decode/내부 결함을 구분하고 같은 cause의 반복 포장·중복 stack만 계측해 제거한다. Java Throwable 비용을 Python 계수로 추정하지 않는다 | JVM에서 정상/400/관측 실패/비정상 body/내부 결함을 구분. 원 코드·cause·응답 유실 의미 보존, 중복 stack/형식화/handler 대기 전후와 회복 후 성공을 기록. 미측정을 결함으로 단정하지 않음 |
+
+공개 Manager 응답만 소비하는 일반 호출자는 내부 journal 버전을 선택/분기/변환하지 않는다.
+기존 완전 명시 호출에 새 endpoint/header/mode를 요구하지 않는다. 재시도는 생략을 그대로
+전달하거나 확인한 원 생성값을 쓰며 현재 화면/default 숫자로 다시 채우지 않는다.
+배포 담당자는 내부 저장을 읽고 쓰는 새 Manager/creation/CLI와 같은 후보 모듈 집합을
+교체해야 한다. 지원 1.0/1.1/1.2 혼재 읽기는 하위가 담당한다. 이전 실행자/helper drain·수락 중지·새 import 경로/해시
+확인을 설치 계획에 넣는다. 이번에 서비스 재시작·운영 원장 변환을 실행하지 않았다.
+CPU 2.0 소비와 D02/D08의 기존 미완료는 그대로 남는다. 기본값 규칙을 표본/신원/heartbeat
+누락의 정상 대체값으로 확대하지 않는다.
+
 1. `Dom0ManagerClient.stop`·`VmService.stop`의 선행 find/key 없는 호출을 실제 key 있는
    `request_stop` 경로에 연결한다. Driver/HTTP에 이미 있는 fork·예산·200/202를 다시 만들지 않는다.
 2. 최초 전송 전 key를 보존하고 timeout·응답 유실·Spring 재시작 뒤 원 key 조회로 회수한다.

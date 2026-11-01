@@ -5,6 +5,18 @@
 
 ## 현재 할 일과 읽는 순서
 
+2026-11-01 소비 경계(D01/D03 ID 유지): create의 선택 resource 생략은 설정 요청 계약이고,
+journal 1.2는 하위 내부 저장이다. Worker의 heartbeat·앱 readiness·관측 누락에 기본값을 주입하지 않는다.
+원 create/수습 결과는 최초 선택과 확정 `initial_spec`을 구분한다. 공개 Manager 응답만 읽는
+Worker에 raw journal 버전별 분기/파일 해석을 새로 요구하지 않는다. 하위가 지원 1.0/1.1/1.2
+혼재를 처리한다. create를 재전달하는 실제 adapter가 있다면 같은 key에서 두 자원의 생략↔
+원 확정값 명시를 허용하되 최신 기본값/현재 구성으로 다시 선택하지 않는다. 복구의 원 attempt/기한·
+CPU 정책 2.0·새 incarnation 검증은 그대로다. 이번에 Worker 제품은 수정하지 않았다.
+공동 수락: 생략 생성의 실패→같은 원 수습→내구 예약 반환→조건부 recovery 정상 진행;
+원 표본 부재/관측 실패는 미확인, 기본값 변경은 과거 확정값/attempt/deadline을 바꾸지 않음.
+오류/진단 비용 변경은 실제 반복 포장·stack·handler 대기가 확인된 부분만 담당 구현으로
+진행하고 episode 필수 사건/pending 저장을 부가 로그로 낮추지 않는다.
+
 1. 아래 최소 연결/확장 범위와 [기존 Worker 요청](2026-10-27-recovery-health-ctrl.md)의 현재 할 일을 읽습니다.
 2. [건강 근거](../contracts/health-evidence-v1.md), [주행 설계](../platform/drive-pipeline-architecture.md) 9·13·16·19절을 읽습니다.
 3. [복구 시나리오](../platform/recovery-scenarios.md)의 A1·E1·E4·D1~D4·F2·F4·G1·G2와 [관리 계약](../platform/management-boundaries.md)을 대조합니다.

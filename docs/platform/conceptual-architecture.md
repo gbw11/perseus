@@ -1142,4 +1142,14 @@ CPU는 Debian·Ubuntu·Zephyr 모두 UUID별 정적 pinning·해제를 제공한
 
 그 뒤의 [좁은 교차 보완](../verification/recovery-scenario-closure-20261030.md#stage55-cross-boundaries)은 firmware·자원 usage·lifecycle DHCP의 무관한 stop 대기를 분리하고, 정적 CPU 배치와 자원 수 변경·준비 오류·수습·새 host의 연쇄를 로컬 확인했다. 같은 단계의 정책/원장 재읽기는 줄였지만, 관측 후 새 journal과 효과 제출·새 실행의 검증은 유지한다. 책임/권한/식별자/수명의 개념 정의를 바꾼 작업이 아니다.
 
+이후 [입력·진단 보완](../verification/recovery-scenario-closure-20261030.md#defaults-errors-review)은
+신규 create의 선택 자원을 공통 카탈로그에서 해석하고 원 제출/확정값을 보존한다.
+재전달은 현재 기본값으로 과거 결정을 바꾸지 않는다. 부가 진단의 반복 처리·출력 대기는
+줄이되 오류 원인·코드·수습 구분과 필수 저장은 보존한다. 하위 CLI/Manager·Gateway의
+로컬 범위이며 HTTP/Spring 연결·운영 정책·설치본/보드 수락을 완료한 것은 아니다.
+
+그 뒤 [create 입력 호환 보완](../verification/recovery-scenario-closure-20261030.md#create-compatibility)은
+같은 원 생성값의 자원 생략/명시를 양방향 동등하게 처리한다. 원장에 최초 선택을 보존하는
+일과 새 표현을 같은 요청으로 인정하는 일은 별개다. 일반 호출자는 내부 저장 버전을 선택하지 않는다.
+
 [맨 위로](#contents)

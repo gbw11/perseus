@@ -27,6 +27,27 @@ P1의 USER_CONCEPT_ORIGINAL.md와 12장 전 본문 동일성은 그때 확인한
 [lifecycle/CPU 후속](recovery-scenario-closure-20261030.md#stage55-followup),
 [firmware/usage/DHCP·CPU 교차 보완](recovery-scenario-closure-20261030.md#stage55-cross-boundaries)에 후보별로 구분한다.
 
+그 뒤 승인된 [입력·진단 보완](recovery-scenario-closure-20261030.md#defaults-errors-review)은
+create의 선택 자원을 K.describe의 기존 default_resources로 신규 수락 때만 해석한다.
+M._normalize는 명시/생략을 보존하고 M._resolve_create는 작은 선택 결과만 계산한다.
+원 request와 initial_spec/저장 template 근거는 journal 1.2에 결합하며 기존 완료 replay는
+현재 default/catalog를 읽지 않는다. CLI는 생략 key를 null로 바꾸지 않는다. 계획의 request와
+확정 spec, 원 initial_spec, 현재 configuration, 실제 Xen 관측은 서로 다른 수명이다.
+입력 예시/호환은 [정식 create 계약](../platform/cli-manager-spec.md#creation-contract)을 따른다.
+선택 생략이 새 payload 해시·복사·운영 기본 숫자·CPU override를 추가하지 않는다.
+
+최신 [create 호환 보완](recovery-scenario-closure-20261030.md#create-compatibility)은
+M._same_create_request로 이미 검증한 원 operation의 두 자원만 보충해 의미를 비교한다.
+생략↔동일 명시값은 양방향 지원하고 최초 비기본 값도 유지한다. 원 request의 자기 정합성
+검사와 입력 형태 비교를 혼동하지 않는다. 기존 완전 명시 HTTP 호출과 내부 저장 혼재 지원은
+유지하며, 상위의 선택적 생략 확장·구형 내부 writer 혼합 배포는 별도 문제다.
+
+비용 변경은 포화 trace의 폐기 상세 생성, 비활성 Gateway MEASURE 형식화, 오프라인의
+인위적 예외 생성, 시리얼 오류 뒤 STOP 전 동기 로그 대기를 대상으로 한다. 오류 코드·
+원인/수습 구분·필수 저장·RequestOutput·관측/수명 guard는 유지한다. Gateway 일반 로그의
+유한 사본 queue는 권위/원 사건 저장과 별개이며 rare ERROR/stack과 종료 미확정은 보존한다.
+구체 계수/교환관계/타 담당자 미완료는 위 후속 보고에 둔다. 1번 구조 감사를 다시 열지 않는다.
+
 5번의 `69387c1`은 당시 기반 HEAD다. 실제 검증 입력은 그 HEAD+제품/시험 diff·새 파일이었다.
 현재 네 커밋 `1aa64ac`(제품) → `4334967`(시험) → `53c5077`(계약) → `4a585d4`(보고)와
 P5 `COMMIT_MAPPING.json/FINAL_CANDIDATE.json/CANDIDATE-FINAL_SOURCE.json`을 대조했다.
@@ -50,10 +71,10 @@ snapshot 뒤 차이는 최종 검증 보고서 한 파일이며 봉인과는 일
 
 | 약칭 | 저장소 경로·기준 기호 |
 |---|---|
-| M | [xenova_management.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management.py#L1501): Manager.call/fork, ReadContext, _mutate/_query/_create |
+| M | [xenova_management.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management.py#L1556): Manager.call/fork, ReadContext, _mutate/_query/_create |
 | P | [xenova_vm.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_vm.py#L257): Platform.request_control/records/start/stop_many/reboot/autostart |
 | E | [xenova_execution.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_execution.py#L804): Execution.control/accept/observe_many/guard_launch/snapshot |
-| C | [xenova_creation.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_creation.py#L259): policy/accept/work/validate/reconcile/released/holds |
+| C | [xenova_creation.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_creation.py#L264): policy/accept/work/validate/reconcile/released/holds |
 | O | [xenova_preparation.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_preparation.py#L252): AssetLease/lifecycle_slot, LinuxSlot/owner_state/ensure_quiet/drain, request_output/run |
 | R | [xenova_runtime.py](../../platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_runtime.py#L109): operation_lock/observation_slot/atomic_write |
 | L | [prepare_instance.py](../../platform/guests/common/prepare_instance.py#L322): make_instance/_copy_verified/PreparedInstance.publish/Workspace.close |
