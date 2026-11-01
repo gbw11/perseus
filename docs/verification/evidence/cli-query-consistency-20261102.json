@@ -1,0 +1,1209 @@
+{
+  "schema_version": "1.0",
+  "kind": "cli-query-consistency-local-closure",
+  "date": "2026-11-02",
+  "source_head": "f8a866389e19b6f688459ff26775e5c55fd7668f",
+  "source_branch": "feat/platform/gateway-history-driving-app",
+  "candidate": "source_head + current tracked diff + the two listed new test/measurement files",
+  "report": "../recovery-scenario-closure-20261030.md#cli-query-consistency",
+  "stage0_reused": "../vm-registration-signal-mapping-20261102.md",
+  "instruction_sha256": "f09e927f38a34d8ca4aac244f60df8d4af8d37261cab402119dea55d0e42a445",
+  "task_directory": "C:/Users/SSAFY/Documents/Codex/2026-11-02/cli-query-consistency",
+  "linux_candidate": "/home/ssafy/xenova-cli-query-20261102/candidate-final2",
+  "source_diff_sha256": "c7f37d9f23df208c2517cc5dd1d2c92b0d8a91af57facbcec2a1f2e1c6f01f41",
+  "files": {
+    "docs/platform/README.md": {
+      "sha256": "c381d04852da76c12e2aa4d45467d71d9ad7315e075d0140e972ea5981c28146",
+      "git_lf_sha256": "c381d04852da76c12e2aa4d45467d71d9ad7315e075d0140e972ea5981c28146",
+      "bytes": 5646
+    },
+    "docs/platform/cli-manager-spec.md": {
+      "sha256": "28bdc5c192dc702eefbe31978ef0d2215499ac499d90b262d6a2d4288763f290",
+      "git_lf_sha256": "28bdc5c192dc702eefbe31978ef0d2215499ac499d90b262d6a2d4288763f290",
+      "bytes": 250574
+    },
+    "docs/platform/deployment-readiness.md": {
+      "sha256": "a808ed0450f7c5ff4412a5d8e90809331491712f52d60ecec9d74208b7d5c7df",
+      "git_lf_sha256": "a808ed0450f7c5ff4412a5d8e90809331491712f52d60ecec9d74208b7d5c7df",
+      "bytes": 21667
+    },
+    "docs/platform/management-boundaries.md": {
+      "sha256": "7e41376a9db7e7f44dcf100b3407e51672227f4b49e0814dac39c6f13339385a",
+      "git_lf_sha256": "7e41376a9db7e7f44dcf100b3407e51672227f4b49e0814dac39c6f13339385a",
+      "bytes": 26713
+    },
+    "docs/platform/management-integration-request.md": {
+      "sha256": "2dbef41218d0729d8c6cfa559f08bc7226b221448d70b7cd0ddf877aa34e4dfe",
+      "git_lf_sha256": "2dbef41218d0729d8c6cfa559f08bc7226b221448d70b7cd0ddf877aa34e4dfe",
+      "bytes": 25719
+    },
+    "docs/requests/20261029-request-http-spring-ui.md": {
+      "sha256": "34298c18bd3d5cc1352ba104308ed77c2082d15da0dfbfd862c92546e0ece827",
+      "git_lf_sha256": "34298c18bd3d5cc1352ba104308ed77c2082d15da0dfbfd862c92546e0ece827",
+      "bytes": 63237
+    },
+    "docs/requests/20261029-request-recovery-worker.md": {
+      "sha256": "4f9f76d88f152fba492542482fa097ebe75fe4eb81d900a13beaac5f52cf2ded",
+      "git_lf_sha256": "6e231d1d164bf5828c5662f60fa3c77cc4a51e3393f2aae610922b5fab78593c",
+      "bytes": 30010
+    },
+    "docs/verification/platform-management-baseline.md": {
+      "sha256": "4b582a6f34ee8e060d0afeef0d104143746a659a0ce4762fc2e6e704ef015ace",
+      "git_lf_sha256": "4b582a6f34ee8e060d0afeef0d104143746a659a0ce4762fc2e6e704ef015ace",
+      "bytes": 61464
+    },
+    "docs/verification/recovery-scenario-closure-20261030.md": {
+      "sha256": "4bad6a9446a74b56fcb89b3db9bf7f624a78b49828134ea5c0ae64023ffedebc",
+      "git_lf_sha256": "8df6f0be8bcda73a12275617266fc7f393435104a5f27c364e8e305b9a34b386",
+      "bytes": 295168
+    },
+    "platform/tests/benchmark_query_cost.py": {
+      "sha256": "6d6bd2a53e3e1ea2e44137fda8507d03b844c08e1111b8f5967c483e9c175e0c",
+      "git_lf_sha256": "6d6bd2a53e3e1ea2e44137fda8507d03b844c08e1111b8f5967c483e9c175e0c",
+      "bytes": 5594
+    },
+    "platform/tests/test_xenova_lifecycle_ownership.py": {
+      "sha256": "ed30f82518b3b9975e870609292dcab2f834097e07366e8d1f30b49989e81237",
+      "git_lf_sha256": "ed30f82518b3b9975e870609292dcab2f834097e07366e8d1f30b49989e81237",
+      "bytes": 15907
+    },
+    "platform/tests/test_xenova_management.py": {
+      "sha256": "c3b5cf52c9c4b575a0b0d5defb9b52ecc40a38e5294b6894f6f5969a348a39ff",
+      "git_lf_sha256": "c3b5cf52c9c4b575a0b0d5defb9b52ecc40a38e5294b6894f6f5969a348a39ff",
+      "bytes": 36050
+    },
+    "platform/tests/test_xenova_management_budget.py": {
+      "sha256": "30ce1e029466b9d63beedadd18cab18f642fe47e53672b9a4e8a1dea4f269d02",
+      "git_lf_sha256": "30ce1e029466b9d63beedadd18cab18f642fe47e53672b9a4e8a1dea4f269d02",
+      "bytes": 18444
+    },
+    "platform/tests/test_xenova_query_consistency.py": {
+      "sha256": "d4ea41e7dad5609d4374241d9451abc755d4b1d3da0babeb26dab9a9fbb0ee76",
+      "git_lf_sha256": "d4ea41e7dad5609d4374241d9451abc755d4b1d3da0babeb26dab9a9fbb0ee76",
+      "bytes": 20174
+    },
+    "platform/tests/test_xenova_recovery_foundation.py": {
+      "sha256": "a67ad0834b8acc196bd34b1ad3b99949178195fb242935bda39d8caad8e489ce",
+      "git_lf_sha256": "a67ad0834b8acc196bd34b1ad3b99949178195fb242935bda39d8caad8e489ce",
+      "bytes": 46595
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_catalog.py": {
+      "sha256": "733a2cd7881fa20fe54e12f5cffb53c2bc9015634da23a1f1dbc68c339d394d0",
+      "git_lf_sha256": "733a2cd7881fa20fe54e12f5cffb53c2bc9015634da23a1f1dbc68c339d394d0",
+      "bytes": 8169
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_execution.py": {
+      "sha256": "982f4d42caf85bb179c9cffb4823a98e9a92b3f418849c71b1064680c5cc90f7",
+      "git_lf_sha256": "982f4d42caf85bb179c9cffb4823a98e9a92b3f418849c71b1064680c5cc90f7",
+      "bytes": 64391
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management.py": {
+      "sha256": "bac2603ebcb595ae6c2fae3a62bd6d21251f0c5b47e694166a4965ad2a7e94e1",
+      "git_lf_sha256": "bac2603ebcb595ae6c2fae3a62bd6d21251f0c5b47e694166a4965ad2a7e94e1",
+      "bytes": 127404
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management_cli.py": {
+      "sha256": "6268563fca7bccb093ed291ce7c5fc647f07da7ff0dc9a7e98b603ebc139155a",
+      "git_lf_sha256": "6268563fca7bccb093ed291ce7c5fc647f07da7ff0dc9a7e98b603ebc139155a",
+      "bytes": 15637
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_recovery.py": {
+      "sha256": "490b2698b6bb36ce0dc3025180229a3382b441f77e2115ac71073fe55813942c",
+      "git_lf_sha256": "490b2698b6bb36ce0dc3025180229a3382b441f77e2115ac71073fe55813942c",
+      "bytes": 32403
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_vm.py": {
+      "sha256": "2c426d5da0704815cb96bc6bd0c51b5b884c00b032b43d21c5255813af54966c",
+      "git_lf_sha256": "2c426d5da0704815cb96bc6bd0c51b5b884c00b032b43d21c5255813af54966c",
+      "bytes": 76918
+    }
+  },
+  "manifest_self_excluded": true,
+  "static_validation": {
+    "python_ast_files": 12,
+    "new_local_links": 20,
+    "failures": [],
+    "source_scope_matches": true,
+    "head_unchanged": true,
+    "staged_changes": false
+  },
+  "current_git_lf_bytes_match_installed_payload": true,
+  "tests": {
+    "regression": {
+      "command": "bash regression.sh candidate-final2",
+      "tests_run": 296,
+      "skipped": 1,
+      "result": "OK",
+      "seconds": 231.439,
+      "skip": "unchanged HTTP adapter test: FastAPI/Pydantic/httpx absent"
+    },
+    "focused": {
+      "command": "python3 -B -m unittest -q test_xenova_query_consistency",
+      "tests_run": 22,
+      "result": "OK",
+      "overlaps_regression": true,
+      "additional_assertion": "same internal name registered under a new UUID does not inherit old intent"
+    },
+    "unchanged_unit_suite_not_rerun": "PackagingAndUnitsTest requires the fixed systemd259 loader environment; units unchanged"
+  },
+  "cost": {
+    "fixture": "one Linux and valid cloned Zephyr metadata, only one explicit intent; not physical runtime/admission scale",
+    "sizes": [
+      1,
+      10,
+      100
+    ],
+    "samples_per_point": 1,
+    "baseline": [
+      {
+        "metadata_vms": 1,
+        "action": "list",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 9,
+          "registry_reads": 3,
+          "json_parses": 9,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00019156799999109353,
+          "observation_slot_hold": 0.048250370000005205
+        },
+        "elapsed_seconds": 0.04865209199999754
+      },
+      {
+        "metadata_vms": 1,
+        "action": "get",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 7,
+          "registry_reads": 2,
+          "json_parses": 7,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00036110400003508403,
+          "observation_slot_hold": 0.0436748219999572
+        },
+        "elapsed_seconds": 0.04424062900000081
+      },
+      {
+        "metadata_vms": 1,
+        "action": "probe",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 4,
+          "common_lock_attempts": 1,
+          "text_reads": 4,
+          "registry_reads": 1,
+          "json_parses": 5,
+          "external_commands": 4,
+          "intent_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.00024699499999769614,
+          "common_lock_hold": 0.04352684399998452
+        },
+        "elapsed_seconds": 0.044127800000012485
+      },
+      {
+        "metadata_vms": 1,
+        "action": "execution-context",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 4,
+          "common_lock_attempts": 1,
+          "text_reads": 4,
+          "registry_reads": 1,
+          "json_parses": 5,
+          "external_commands": 4,
+          "intent_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.0002169480000020485,
+          "common_lock_hold": 0.039942364000012276
+        },
+        "elapsed_seconds": 0.04041080100000727
+      },
+      {
+        "metadata_vms": 1,
+        "action": "templates",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 1,
+          "common_lock_attempts": 1,
+          "text_reads": 4,
+          "registry_reads": 1,
+          "json_parses": 4,
+          "template_reads": 1
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.00014463599995906407,
+          "common_lock_hold": 0.0008303240000486767
+        },
+        "elapsed_seconds": 0.0011315659999695526
+      },
+      {
+        "metadata_vms": 1,
+        "action": "control-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 4,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.001185440999961429
+      },
+      {
+        "metadata_vms": 1,
+        "action": "recovery-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 2,
+          "common_lock_attempts": 1,
+          "text_reads": 2,
+          "registry_reads": 1,
+          "json_parses": 2,
+          "journal_reads": 1
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.00013963100002456486,
+          "common_lock_hold": 0.00043513800000027913
+        },
+        "elapsed_seconds": 0.0007127169999989746
+      },
+      {
+        "metadata_vms": 1,
+        "action": "status",
+        "ok": true,
+        "counts": {
+          "common_lock_attempts": 1,
+          "text_reads": 6,
+          "registry_reads": 1,
+          "json_parses": 8,
+          "external_commands": 7,
+          "host_identity_reads": 3,
+          "intent_reads": 2,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.00010616200000868048,
+          "common_lock_hold": 0.04706398700000136
+        },
+        "elapsed_seconds": 0.048207632000014655
+      },
+      {
+        "metadata_vms": 10,
+        "action": "list",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 27,
+          "observation_slot_attempts": 1,
+          "text_reads": 36,
+          "registry_reads": 30,
+          "json_parses": 36,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 21,
+          "journal_reads": 1
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00020468399998208042,
+          "observation_slot_hold": 0.3149865270000305
+        },
+        "elapsed_seconds": 0.31548527500001455
+      },
+      {
+        "metadata_vms": 10,
+        "action": "get",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 16,
+          "registry_reads": 11,
+          "json_parses": 16,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00012673999998469299,
+          "observation_slot_hold": 0.0417508590000466
+        },
+        "elapsed_seconds": 0.04206314099997144
+      },
+      {
+        "metadata_vms": 10,
+        "action": "probe",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 4,
+          "common_lock_attempts": 1,
+          "text_reads": 13,
+          "registry_reads": 10,
+          "json_parses": 14,
+          "external_commands": 4,
+          "intent_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.00010483800002702992,
+          "common_lock_hold": 0.04180646599996862
+        },
+        "elapsed_seconds": 0.04206978799999206
+      },
+      {
+        "metadata_vms": 10,
+        "action": "execution-context",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 4,
+          "common_lock_attempts": 1,
+          "text_reads": 13,
+          "registry_reads": 10,
+          "json_parses": 14,
+          "external_commands": 4,
+          "intent_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.00014008799996645394,
+          "common_lock_hold": 0.04483640400002287
+        },
+        "elapsed_seconds": 0.04521530400000984
+      },
+      {
+        "metadata_vms": 10,
+        "action": "templates",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 1,
+          "common_lock_attempts": 1,
+          "text_reads": 13,
+          "registry_reads": 10,
+          "json_parses": 13,
+          "template_reads": 1
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.00010571900003242263,
+          "common_lock_hold": 0.0015782069999659143
+        },
+        "elapsed_seconds": 0.0018237099999964812
+      },
+      {
+        "metadata_vms": 10,
+        "action": "control-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 4,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0005796379999765122
+      },
+      {
+        "metadata_vms": 10,
+        "action": "recovery-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 2,
+          "common_lock_attempts": 1,
+          "text_reads": 11,
+          "registry_reads": 10,
+          "json_parses": 11,
+          "journal_reads": 1
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.00013717799998858027,
+          "common_lock_hold": 0.0015889030000266757
+        },
+        "elapsed_seconds": 0.0018859429999906752
+      },
+      {
+        "metadata_vms": 10,
+        "action": "status",
+        "ok": true,
+        "counts": {
+          "common_lock_attempts": 1,
+          "text_reads": 33,
+          "registry_reads": 10,
+          "json_parses": 35,
+          "external_commands": 7,
+          "host_identity_reads": 3,
+          "fsync": 21,
+          "intent_reads": 2
+        },
+        "lock_seconds": {
+          "common_lock_wait": 9.924099998670499e-05,
+          "common_lock_hold": 0.32006220100004157
+        },
+        "elapsed_seconds": 0.321009054000001
+      },
+      {
+        "metadata_vms": 100,
+        "action": "list",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 207,
+          "observation_slot_attempts": 1,
+          "text_reads": 306,
+          "registry_reads": 300,
+          "json_parses": 306,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 201,
+          "journal_reads": 1
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00038118800000574993,
+          "observation_slot_hold": 2.8647389230000044
+        },
+        "elapsed_seconds": 2.8676916180000376
+      },
+      {
+        "metadata_vms": 100,
+        "action": "get",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 106,
+          "registry_reads": 101,
+          "json_parses": 106,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00014322599997740326,
+          "observation_slot_hold": 0.04983114200001637
+        },
+        "elapsed_seconds": 0.050183066999977655
+      },
+      {
+        "metadata_vms": 100,
+        "action": "probe",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 4,
+          "common_lock_attempts": 1,
+          "text_reads": 103,
+          "registry_reads": 100,
+          "json_parses": 104,
+          "external_commands": 4,
+          "intent_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.0001233650000358466,
+          "common_lock_hold": 0.04986865999995871
+        },
+        "elapsed_seconds": 0.050185305000013614
+      },
+      {
+        "metadata_vms": 100,
+        "action": "execution-context",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 4,
+          "common_lock_attempts": 1,
+          "text_reads": 103,
+          "registry_reads": 100,
+          "json_parses": 104,
+          "external_commands": 4,
+          "intent_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.00012747300002047268,
+          "common_lock_hold": 0.05261495100000957
+        },
+        "elapsed_seconds": 0.052939925999965
+      },
+      {
+        "metadata_vms": 100,
+        "action": "templates",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 1,
+          "common_lock_attempts": 1,
+          "text_reads": 103,
+          "registry_reads": 100,
+          "json_parses": 103,
+          "template_reads": 1
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.00020458599999528815,
+          "common_lock_hold": 0.012368891999983589
+        },
+        "elapsed_seconds": 0.0127339819999861
+      },
+      {
+        "metadata_vms": 100,
+        "action": "control-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 4,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0006220149999762725
+      },
+      {
+        "metadata_vms": 100,
+        "action": "recovery-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 2,
+          "common_lock_attempts": 1,
+          "text_reads": 101,
+          "registry_reads": 100,
+          "json_parses": 101,
+          "journal_reads": 1
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.000149668999995356,
+          "common_lock_hold": 0.01110987900000282
+        },
+        "elapsed_seconds": 0.011434116999964772
+      },
+      {
+        "metadata_vms": 100,
+        "action": "status",
+        "ok": true,
+        "counts": {
+          "common_lock_attempts": 1,
+          "text_reads": 303,
+          "registry_reads": 100,
+          "json_parses": 305,
+          "external_commands": 7,
+          "host_identity_reads": 3,
+          "fsync": 201,
+          "intent_reads": 2
+        },
+        "lock_seconds": {
+          "common_lock_wait": 0.0003870869999786919,
+          "common_lock_hold": 3.115001494000012
+        },
+        "elapsed_seconds": 3.1162925489999793
+      }
+    ],
+    "candidate": [
+      {
+        "metadata_vms": 1,
+        "action": "list",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 9,
+          "registry_reads": 3,
+          "json_parses": 9,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00015203399999563771,
+          "observation_slot_hold": 0.05279497599997285
+        },
+        "elapsed_seconds": 0.05313557699997773
+      },
+      {
+        "metadata_vms": 1,
+        "action": "get",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 7,
+          "registry_reads": 2,
+          "json_parses": 7,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00017399000000750675,
+          "observation_slot_hold": 0.0535726230000364
+        },
+        "elapsed_seconds": 0.05392597999997406
+      },
+      {
+        "metadata_vms": 1,
+        "action": "probe",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 7,
+          "registry_reads": 2,
+          "json_parses": 7,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00014958700000988756,
+          "observation_slot_hold": 0.05076767299999574
+        },
+        "elapsed_seconds": 0.05109512899997526
+      },
+      {
+        "metadata_vms": 1,
+        "action": "execution-context",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 7,
+          "registry_reads": 2,
+          "json_parses": 7,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.0001440820000198073,
+          "observation_slot_hold": 0.04625136999999313
+        },
+        "elapsed_seconds": 0.046568147000016324
+      },
+      {
+        "metadata_vms": 1,
+        "action": "templates",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 1,
+          "text_reads": 6,
+          "json_parses": 6,
+          "template_reads": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0012517799999613999
+      },
+      {
+        "metadata_vms": 1,
+        "action": "control-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 2,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0006032890000255975
+      },
+      {
+        "metadata_vms": 1,
+        "action": "recovery-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 1,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0005275780000033592
+      },
+      {
+        "metadata_vms": 1,
+        "action": "status",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 9,
+          "registry_reads": 3,
+          "json_parses": 9,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00013973699998359734,
+          "observation_slot_hold": 0.044056197000031716
+        },
+        "elapsed_seconds": 0.046297602000038296
+      },
+      {
+        "metadata_vms": 1,
+        "action": "intents",
+        "ok": true,
+        "counts": {
+          "text_reads": 9,
+          "registry_reads": 3,
+          "json_parses": 9,
+          "intent_reads": 2,
+          "journal_reads": 1
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0013397570000392989
+      },
+      {
+        "metadata_vms": 10,
+        "action": "list",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 27,
+          "observation_slot_attempts": 1,
+          "text_reads": 36,
+          "registry_reads": 30,
+          "json_parses": 36,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 21,
+          "journal_reads": 1
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00012574900000572597,
+          "observation_slot_hold": 0.3222834999999691
+        },
+        "elapsed_seconds": 0.32272656300000335
+      },
+      {
+        "metadata_vms": 10,
+        "action": "get",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 16,
+          "registry_reads": 11,
+          "json_parses": 16,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00011700000004566391,
+          "observation_slot_hold": 0.04963851700000532
+        },
+        "elapsed_seconds": 0.049922064000043065
+      },
+      {
+        "metadata_vms": 10,
+        "action": "probe",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 16,
+          "registry_reads": 11,
+          "json_parses": 16,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.0001375389999793697,
+          "observation_slot_hold": 0.04480631600000606
+        },
+        "elapsed_seconds": 0.04511574199995039
+      },
+      {
+        "metadata_vms": 10,
+        "action": "execution-context",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 16,
+          "registry_reads": 11,
+          "json_parses": 16,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.0001241049999975985,
+          "observation_slot_hold": 0.04115454700001919
+        },
+        "elapsed_seconds": 0.04143573099997866
+      },
+      {
+        "metadata_vms": 10,
+        "action": "templates",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 1,
+          "text_reads": 6,
+          "json_parses": 6,
+          "template_reads": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0011391299999559124
+      },
+      {
+        "metadata_vms": 10,
+        "action": "control-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 2,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0007025639999937994
+      },
+      {
+        "metadata_vms": 10,
+        "action": "recovery-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 1,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0008470280000096864
+      },
+      {
+        "metadata_vms": 10,
+        "action": "status",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 27,
+          "observation_slot_attempts": 1,
+          "text_reads": 36,
+          "registry_reads": 30,
+          "json_parses": 36,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 21,
+          "journal_reads": 1
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00012343399998826499,
+          "observation_slot_hold": 0.33651253300001827
+        },
+        "elapsed_seconds": 0.3385479400000122
+      },
+      {
+        "metadata_vms": 10,
+        "action": "intents",
+        "ok": true,
+        "counts": {
+          "text_reads": 36,
+          "registry_reads": 30,
+          "json_parses": 36,
+          "intent_reads": 2,
+          "journal_reads": 1
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0044419760000096176
+      },
+      {
+        "metadata_vms": 100,
+        "action": "list",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 207,
+          "observation_slot_attempts": 1,
+          "text_reads": 306,
+          "registry_reads": 300,
+          "json_parses": 306,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 201,
+          "journal_reads": 1
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00012061600000379258,
+          "observation_slot_hold": 3.345390199999997
+        },
+        "elapsed_seconds": 3.347568306000028
+      },
+      {
+        "metadata_vms": 100,
+        "action": "get",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 106,
+          "registry_reads": 101,
+          "json_parses": 106,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00013663999999380394,
+          "observation_slot_hold": 0.05876654100001133
+        },
+        "elapsed_seconds": 0.05907935200002612
+      },
+      {
+        "metadata_vms": 100,
+        "action": "probe",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 106,
+          "registry_reads": 101,
+          "json_parses": 106,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.0001707040000269444,
+          "observation_slot_hold": 0.05487381299997196
+        },
+        "elapsed_seconds": 0.055244565000009516
+      },
+      {
+        "metadata_vms": 100,
+        "action": "execution-context",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 106,
+          "registry_reads": 101,
+          "json_parses": 106,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00015907199997400312,
+          "observation_slot_hold": 0.059102826000014375
+        },
+        "elapsed_seconds": 0.059432490000006055
+      },
+      {
+        "metadata_vms": 100,
+        "action": "templates",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 1,
+          "text_reads": 6,
+          "json_parses": 6,
+          "template_reads": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0011908090000360971
+      },
+      {
+        "metadata_vms": 100,
+        "action": "control-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 2,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.000572786000020642
+      },
+      {
+        "metadata_vms": 100,
+        "action": "recovery-operation",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 1,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.0007320639999761624
+      },
+      {
+        "metadata_vms": 100,
+        "action": "status",
+        "ok": true,
+        "counts": {
+          "host_identity_reads": 207,
+          "observation_slot_attempts": 1,
+          "text_reads": 306,
+          "registry_reads": 300,
+          "json_parses": 306,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 201,
+          "journal_reads": 1
+        },
+        "lock_seconds": {
+          "observation_slot_wait": 0.00013847700000724217,
+          "observation_slot_hold": 3.3879951619999815
+        },
+        "elapsed_seconds": 3.3972666310000363
+      },
+      {
+        "metadata_vms": 100,
+        "action": "intents",
+        "ok": true,
+        "counts": {
+          "text_reads": 306,
+          "registry_reads": 300,
+          "json_parses": 306,
+          "intent_reads": 2,
+          "journal_reads": 1
+        },
+        "lock_seconds": {},
+        "elapsed_seconds": 0.03463235200001691
+      }
+    ],
+    "clock_and_io_limit": "local WSL samples, not board worst-case bounds"
+  },
+  "package": {
+    "command": "BB_NO_NETWORK=1 bitbake xenova-platform",
+    "tasks": 3863,
+    "reused": 3845,
+    "install_package_qa_rpm": "PASS",
+    "recipe_changed": false,
+    "warnings": [
+      "WARNING: You are running bitbake under WSLv2, this works properly but you should optimize your VHDX file eventually to avoid running out of storage space",
+      "WARNING: The Linux kernel on your build host was not configured to provide process I/O statistics. (CONFIG_TASK_IO_ACCOUNTING is not set)"
+    ],
+    "rpm": {
+      "name": "xenova-platform-1.0-r0.cortexa72.rpm",
+      "sha256": "59573ebdef9257aacf713d98f0b8653ffb7172c73fcbb4278d97e0389969a988",
+      "bytes": 207375
+    },
+    "source_image_rpm_verification": {
+      "source_package_bytes_match": true,
+      "files": {
+        "xenova_vm.py": {
+          "sha256": "2c426d5da0704815cb96bc6bd0c51b5b884c00b032b43d21c5255813af54966c",
+          "mode": "0o644",
+          "installed": "usr/lib/xenova/xenova_vm.py"
+        },
+        "xenova_management.py": {
+          "sha256": "bac2603ebcb595ae6c2fae3a62bd6d21251f0c5b47e694166a4965ad2a7e94e1",
+          "mode": "0o644",
+          "installed": "usr/lib/xenova/xenova_management.py"
+        },
+        "xenova_management_cli.py": {
+          "sha256": "6268563fca7bccb093ed291ce7c5fc647f07da7ff0dc9a7e98b603ebc139155a",
+          "mode": "0o644",
+          "installed": "usr/lib/xenova/xenova_management_cli.py"
+        },
+        "xenova_execution.py": {
+          "sha256": "982f4d42caf85bb179c9cffb4823a98e9a92b3f418849c71b1064680c5cc90f7",
+          "mode": "0o644",
+          "installed": "usr/lib/xenova/xenova_execution.py"
+        },
+        "xenova_recovery.py": {
+          "sha256": "490b2698b6bb36ce0dc3025180229a3382b441f77e2115ac71073fe55813942c",
+          "mode": "0o644",
+          "installed": "usr/lib/xenova/xenova_recovery.py"
+        },
+        "xenova_catalog.py": {
+          "sha256": "733a2cd7881fa20fe54e12f5cffb53c2bc9015634da23a1f1dbc68c339d394d0",
+          "mode": "0o644",
+          "installed": "usr/lib/xenova/xenova_catalog.py"
+        },
+        "xenova-vm": {
+          "sha256": "e5e136ee6fec721f1b458b82d795925c96665ddc7ee5924f51bda1358eb6e657",
+          "mode": "0o755",
+          "installed": "usr/sbin/xenova-vm"
+        }
+      },
+      "rpm_payload_bytes_modes_match": true
+    },
+    "native_python": {
+      "python": "3.12.3",
+      "module": "/home/ssafy/xenova-cli-query-20261102/native-candidate-final2/usr/lib/xenova/xenova_vm.py",
+      "intent": {
+        "vm_id": "850e8400-e29b-41d4-a716-446655440001",
+        "name": "smoke-vm",
+        "guest_kind": "linux",
+        "template_id": null,
+        "template_version": null,
+        "autostart": false,
+        "lifecycle": "REGISTERED",
+        "generation": 0,
+        "desired_state": "stopped",
+        "intent_revision": 2,
+        "intent_lifecycle_generation": 0,
+        "intent_source": "user",
+        "intent_applicable": true
+      },
+      "key_phase": "accepted",
+      "external_calls": 0,
+      "original_record_unchanged": true
+    },
+    "arm_python_qemu": {
+      "python": "3.14.7",
+      "module": "/home/ssafy/xenova-cli-query-20261102/target-candidate-final2/usr/lib/xenova/xenova_vm.py",
+      "intent": {
+        "vm_id": "850e8400-e29b-41d4-a716-446655440001",
+        "name": "smoke-vm",
+        "guest_kind": "linux",
+        "template_id": null,
+        "template_version": null,
+        "autostart": false,
+        "lifecycle": "REGISTERED",
+        "generation": 0,
+        "desired_state": "stopped",
+        "intent_revision": 2,
+        "intent_lifecycle_generation": 0,
+        "intent_source": "user",
+        "intent_applicable": true
+      },
+      "key_phase": "accepted",
+      "external_calls": 0,
+      "original_record_unchanged": true
+    },
+    "qemu_version": "8.2.2",
+    "actual_wrapper": "PASS: private mount namespace/chroot, real installed /usr/sbin/xenova-vm, no source PYTHONPATH",
+    "arm_storage_guard": "fixture mount guard only; native wrapper separately used an actual private fixture mount"
+  },
+  "not_performed": [
+    "commit/push",
+    "board/live VM/service/broker/real state changes",
+    "full image or guest firmware rebuild",
+    "Worker/FastAPI/Spring product changes",
+    "MQTT auto-supply",
+    "Spring registration notification",
+    "new firmware/signal selection connection",
+    "stage7 acceptance"
+  ],
+  "delivery": {
+    "tracked.diff": "c7f37d9f23df208c2517cc5dd1d2c92b0d8a91af57facbcec2a1f2e1c6f01f41",
+    "source-changes.tar.gz": "0da5587dd72b137bf2a6e51992055c50fe97ecded83af7a3087841ac16b5d307",
+    "xenova-platform-1.0-r0.cortexa72.rpm": "59573ebdef9257aacf713d98f0b8653ffb7172c73fcbb4278d97e0389969a988"
+  }
+}

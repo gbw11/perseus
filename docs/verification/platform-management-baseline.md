@@ -158,6 +158,7 @@ FastAPI/Worker/Agent/Spring/화면은 소비 경계이며 이번 수정 대상�
   records/tombstone을 읽고 ReadContext가 요청별 문맥을 소유한다. E.observe_many가 현재 Xen
   목록 전후·대상 unique 두 확인을 수행하고 해당 VM의 파생 snapshot을 게시한다. M._view는
   검증 결과 조립이며 Xen을 재호출하지 않는다. Reader/화면은 실행 허가자가 아니다.
+- **목적별 조회 후속:** intents는 같은 등록/lifecycle 원본과 저장 intent만 읽으며 host 실행 문맥·Xen·관측 슬롯/cache 저장을 요구하지 않는다. get/probe/execution-context는 ReadContext 관측 엔진을 공유하고 기존 반환 형태를 유지한다. templates/recovery-operation도 공통 실행 잠금 밖의 제한 재대조로 읽는다. [정식 선택표](../platform/cli-manager-spec.md#usage).
 - **대기/변경 경계:** 공통 platform.lock 없이 네 관측 슬롯 중 하나로 외부 관측에 진입한다.
   같은 회차 목록·메타데이터를 재사용하되 게시 직전에 host/lifecycle/구성/원 create 성공/
   intent/run/admission을 대조한다. 변경이면 최대 2회차, 계속 변하면 오류다. 부분 열람·
@@ -296,13 +297,13 @@ FastAPI/Worker/Agent/Spring/화면은 소비 경계이며 이번 수정 대상�
 | 보호·위치 | 획득/보유·수명과 정상 반환 | 중단/동시 요청에 대한 의미 |
 |---|---|---|
 | 요청 객체 `_request_lock` | 동일 M 객체의 동시 call은 무대기 거절. 별도 fork는 독립 가변 budget/trace, 동일 저장소/guard | thread/GIL만으로 보호하지 않음. fork는 새 프로세스 아님 |
-| R.operation_lock `/run/xenova/locks/platform.lock` | 프로세스 공통 flock. 수락/게시·원장 갱신과 기존 물리 제어를 보호. lifecycle의 긴 검사/항목 삭제에서는 대상 소유 아래 반환·재획득 | 일반 list/get/operation/control-operation은 획득하지 않음. templates/probe/recovery-operation·물리 제어 자체는 공통 경로. 무한 병렬 관리 아님 |
+| R.operation_lock `/run/xenova/locks/platform.lock` | 프로세스 공통 flock. 수락/게시·원장 갱신과 기존 물리 제어를 보호. lifecycle의 긴 검사/항목 삭제에서는 대상 소유 아래 반환·재획득 | intents/list/get/probe/execution-context/templates/operation/control-operation/recovery-operation은 획득하지 않음. CPU의 정책·적용 관측, 명시 종합 진단·물리 제어는 기존 경계를 유지 |
 | O.AssetLease asset-<UUID>.lock | 수락 전 검사부터 원 lifecycle 정산까지 대상 flock. 원 journal 뒤 op/spec/세대 결합. helper FD 상속 | 같은 VM의 모든 writer·중첩 공개 호출·새 process 재전달 확인. 실제 반환 후만 기존 재개, 종료 원장/부분 자산과 다른 수명 |
 | O.lifecycle_slot lifecycle-io.lock | 기존 lifecycle I/O 동시 1개 유지. 대상 lease 뒤·공통 잠금 전 무대기 획득. 원 요청 수락 아님 | 조회/다른 VM stop이 사용하지 않음. Linux 준비 슬롯은 별개. 대상/슬롯 모두 drain에서 확인하며 queue 추가 없음 |
 | E.short_lock admission.lock | 보통 공통 잠금→admission. 빠른 stop은 admission 해제 뒤 공통 잠금 시도. guest exec guard·gate·개별 private unlink와 직렬화 | 긴 자식/준비 종료를 admission 안에서 기다리는 역순을 만들지 않음. 호출별 deadline 없는 지점은 busy 즉시 거절, 있는 지점은 잔여 예산 대기 |
 | O.LinuxSlot linux-prepare.lock | Linux create+discard-private 한 개. 공통 잠금 밖 무대기 획득, 수락 시 원 owner 연결 | 새 경합은 미수락·숨은 queue 없음. 같은 key 확인은 슬롯 경합보다 우선. 자식이 상속 FD를 유지하면 부모 종료만으로 반납 아님 |
 | linux-owner-<op>.lock | 원 operation/spec/workspace/manifest·host/PID start_ticks·실제 FD inode를 결합. role=create/discard-private | active/residual/reconciling/absent와 관측 오류 구별. lock 파일 존재/임의 busy/PID만으로 소유 확정 금지 |
-| observation-slot-0..3.lock | 일반 list/get 외부 관측 4개, 무대기. 소유 helper에 FD 상속. 정상 종료 뒤 같은 안정 inode 재사용 | 원장 조회/제어/Linux 슬롯과 별개. 모든 조회를 거절해 제어 시험을 통과한 것이 아님 |
+| observation-slot-0..3.lock | list/get/probe/execution-context 외부 관측 4개, 무대기. 소유 helper에 FD 상속. 정상 종료 뒤 같은 안정 inode 재사용 | intents·원장 조회/제어/Linux 슬롯과 별개. 모든 조회를 거절해 제어 시험을 통과한 것이 아님 |
 | observation-<UUID>.lock | E.publish_observation/probe_error의 해당 VM 파생본 채택·필수 저장. registry/Xen/helper 대기는 밖 | 늦은 성공/실패가 최신 관측을 덮지 않음. 필수 저장 I/O 자체의 짧은 잠금 지연은 남음 |
 | 논리 예약 | 원 operation 할당/미복사 약정량·공장/등록/보관/lease·CPU policy에서 각자 도출 | 물리 flock과 별개. deadline/FAILED/슬롯 반납만으로 반환 아님. C.holds는 해당 create 활성 예약만 판단 |
 | host quiesce | E.quiesce가 gate를 닫고 O.drain은 공통 잠금 밖에서 같은 종료 예산으로 준비를 확인 | 슬롯 부재여도 workspace 자원 receipt 미확정이면 unmount 금지. 이력 파일만으로 영구 실행 잠금 보유는 아님 |

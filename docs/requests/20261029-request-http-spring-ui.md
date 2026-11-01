@@ -28,6 +28,28 @@ FastAPI의 key stop·원 key 조회는 이미 있다. 이를 재구현하거나 
 긴 create/restore/firmware·usage·DHCP 중 다른 VM 진행의 로컬 근거가 있다. 모든 외부 장애의 제어 기한 보장은 아니다.
 실제 Spring·화면·배포본과 optional DTO는 아직 수락하지 않았다.
 
+### D02·D08 — CLI·조회 정합화 제공물 소비
+
+하위 `intents`는 등록/의도 metadata만 반환한다. [사용법과 필드](../platform/cli-manager-spec.md#cmd-intents)를
+필요한 운영·Worker 질문에 사용하고 현재 domain/Xen/Agent·앱 건강 조회를 대체하지 않는다.
+기존 get/list·execution-context 전체 VMView, probe observation, HTTP DTO/201/409는 유지한다.
+새 HTTP version/header나 내부 journal 선택·직접 파일 파싱은 필요 없다.
+
+하위 CLI `status`는 JSON 유무와 무관하게 list다. 옛 자산/시각 종합 진단 소비는
+`diagnose --details`로 전환한다. `control-operation --idempotency-key KEY [--vm-id UUID]`는
+첫 응답의 operation ID가 없어도 원 기록을 회수하며 선행 live get이 필요 없다.
+원 key/기한 재발급, 부재=미수락 확정, pending=STOPPED 변환은 하지 않는다.
+
+FastAPI 담당 수정 위치는 `drivers/platform.py:SerializedManager.call/fork`와
+`_BUDGET_ACTIONS/call_with_budget`다. 실제 사용하는 intents/probe/execution-context/
+templates/recovery-operation도 독립 request fork로 연결하고 잔여 budget을 전달한다.
+timeout_ms를 지원하는 조회와 budget만 지원하는 templates를 구분한다. 지원하지 않는 필드를 일괄 추가하지 않는다.
+상위 공용 mutex/threadpool 대기로 하위의 독립 조회·짧은 stop 수락을 다시 직렬화하지 않는다.
+
+정상 수락: 같은 API 프로세스에서 A 긴 restore/생성 동안 B 정상 조회·원 key 회수·실제 stop 완료.
+실패 수락: 부분 열람/원장 손상/슬롯 경합·예산 만료를 빈 목록·삭제·성공으로 바꾸지 않고 이후 정상 회복.
+하위 제공 시험과 상위 제품 연결을 구분한다. 이번에 FastAPI/Spring/화면 제품은 수정하지 않았다.
+
 <a id="defaults-errors"></a>
 ## D02·D08 입력·오류 계약
 

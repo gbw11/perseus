@@ -8,6 +8,12 @@ D02·D08의 현재 실행 지시는 [HTTP·Spring·화면 요청서](../requests
 일반 호출자의 journal 버전 선택/raw 파싱은 필요 없다. 기존 key stop/조회는 이미 제공됐고 Spring·화면과 신규 하위 기능 소비는 담당 수락 전이다.
 내부 reader/writer·helper의 교체는 [배포 원본](deployment-readiness.md#cohort), 실제 설치본 인수는 [7번 입력표](deployment-readiness.md#stage7)를 따른다.
 
+현재 CLI·조회 보완은 [질문별 선택표](cli-manager-spec.md#usage)와
+[intents](cli-manager-spec.md#cmd-intents)를 제공한다. status는 출력 형식과 무관하게 list,
+옛 종합 진단은 diagnose --details다. 원 key 조회는 control-operation의 정식 CLI로 가능하다.
+상위 fork/budget 소비와 남은 제품 수락은 위 현재 요청서 D02·D08 본문을 따른다.
+아래 이력의 전역 직렬화·과거 CLI 설명을 현 기능 제한으로 재적용하지 않는다.
+
 ## 변경 이력
 
 <details>

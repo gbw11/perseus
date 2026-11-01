@@ -5,6 +5,10 @@
 실제 실행 결과·파일 hash는 [최신 검증 보고](../verification/recovery-scenario-closure-20261030.md#history-drive-final)에 연결한다.
 이번 작업은 운영 설치·서비스 교체·7번 수락을 실행하지 않는다.
 
+2026-11-02 CLI·조회 후속은 위 제공물 위에 `f8a8663` + 현재 diff/새 파일로 식별한다.
+현재 조회/원 기록 reader의 검증·패키지 근거는 [CLI·조회 마감](../verification/recovery-scenario-closure-20261030.md#cli-query-consistency)이다.
+앞선 Gateway/firmware 제공 archive를 제자리 수정하거나 그 시험을 이번 모듈의 설치 증거로 쓰지 않는다.
+
 ## 제공 수준
 
 담당자 현재 지시는 [요청 색인](../requests/README.md)에서 읽는다. 하위 create의 의미 비교·기한·소유·수습과
@@ -52,6 +56,28 @@ Worker가 없어도 Gateway 보호는 진행하고 Gateway가 없으면 client�
 하위 플랫폼의 private 모듈은 `/usr/lib/xenova`에 설치하고 기존 entrypoint가 그 경로를 사용한다.
 native identity helper는 기존 `${CC}`로 빌드하는 ABI 경계를 유지한다.
 bringup 이미지에는 Gateway 패키지를 포함하도록 연결하지만, 이번에 전체 이미지/rootfs를 만들거나 서비스 enable을 실행하지 않는다.
+
+### CLI·조회 모듈의 부분 교체
+
+`xenova-platform`의 기존 SRC_URI/install 목록은 이번 변경의 `xenova_vm`, `xenova_management`,
+`xenova_management_cli`, `xenova_execution`, `xenova_recovery`, `xenova_catalog`와 wrapper를 이미 포함한다.
+신규 runtime 모듈·의존성·unit·설정·저장 형식을 추가하지 않아 recipe는 변경하지 않았다.
+`intents`와 원 key CLI, 독립 probe/execution-context/templates/recovery-operation reader는 이 모듈 집합으로 제공한다.
+같은 내부 helper를 import하는 프로세스는 기존 drain/import 교체 절차를 따른다. 외부 HTTP DTO의 동시 변경은 필수가 아니다.
+
+고정 환경에서 이 recipe만 빌드해 do_install·package QA·정규 RPM 생성을 수행하고 변경 파일의
+source→image→RPM payload 바이트와 Python0644/wrapper0755 모드를 대조했다.
+target Python3.14.7/QEMU에서 설치 경로의 help·metadata 의도 조회·원 key 회수를 실행했다.
+별도 native private mount namespace/chroot에서는 실제 `/usr/sbin/xenova-vm` wrapper를 빈 환경으로
+실행했다. task 소유 fixture만 `/srv/xenova`와 `/run/xenova`에 보이게 했으며 host의 실제 경로는 조작하지 않았다.
+QEMU smoke의 mount guard 대역과 native wrapper의 실제 fixture mount 검사는 보고서에서 구분한다.
+이 결과는 전체 이미지·실제 Xen/보드·API 서비스 교체 수락이 아니다.
+
+Worker는 `PlatformObserver._refresh_intents`의 live list 의도 취득을 `intents`로 연결하고,
+FastAPI의 `SerializedManager.call/fork`, `_BUDGET_ACTIONS/call_with_budget`는 실제 소비 action의
+독립 요청 객체·잔여 예산을 연결해야 한다. 해당 제품 코드는 이번에 수정하지 않았다.
+CLI `status`를 자산/시각 종합 진단으로 쓰던 소비자는 `diagnose --details`로 전환한다.
+새 경량 응답이나 과거 원 key 결과는 현재 VM 변경/복구의 승인 토큰이 아니다.
 
 <a id="history-drive-install"></a>
 ### 실제 지도형 제공물과 고정 설치 검증
