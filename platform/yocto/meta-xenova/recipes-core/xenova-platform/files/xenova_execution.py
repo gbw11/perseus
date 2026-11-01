@@ -43,6 +43,36 @@ def fingerprint(value):
     return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
+def read_record(path):
+    """원자 JSON을 검증해 읽는다. host 관측·초기화·저장 없이 부재와 손상을 구분한다."""
+    if not path.exists() and not path.is_symlink():
+        return None
+    try:
+        catalog.plain(path.parent, directory=True)
+        catalog.plain(path)
+        value = json.loads(path.read_text())
+    except (OSError, ValueError):
+        refuse('RECONCILE_REQUIRED', 'invalid execution record', details={'record':path.name})
+    if not isinstance(value, dict) or value.get('schema_version') != '1.0':
+        refuse('RECONCILE_REQUIRED', 'execution record schema mismatch')
+    return value
+
+
+def read_intent(data, identity, *, reader=read_record):
+    """영구 UUID의 저장 의도만 읽는다. 현재 lifecycle 적용 여부는 호출자가 대조한다."""
+    if not isinstance(identity, str) or not vm.UUID.fullmatch(identity):
+        refuse('INVALID_SPEC', 'canonical UUID required')
+    value = reader(data/'control'/(identity+'.json'))
+    if value is not None and (
+            value.get('vm_id') != identity or value.get('desired_state') not in ('running', 'stopped')
+            or type(value.get('intent_revision')) is not int or value['intent_revision'] < 1
+            or type(value.get('lifecycle_generation')) is not int or value['lifecycle_generation'] < 0
+            or not isinstance(value.get('accepted_operation_id'), str)
+            or not vm.UUID.fullmatch(value['accepted_operation_id'])):
+        refuse('RECONCILE_REQUIRED', 'intent identity/revision mismatch')
+    return value
+
+
 def host_boot_id():
     value = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     if not vm.UUID.fullmatch(value):
@@ -80,6 +110,57 @@ def short_lock(runtime, name, *, deadline=None, clock=time.monotonic, sleep=time
         os.close(fd)
 
 
+def read_requests(data, *, deadline=None, clock=time.monotonic, reader=None):
+    """Complete journal scan within the caller's existing observation budget.
+
+    A partial scan never proves absence or uniqueness. This deadline is not
+    written into any original operation and grants no physical execution.
+    """
+    reader = read_record if reader is None else reader
+    from xenova_management import Manager
+    def check():
+        if deadline is not None and clock()>=deadline:
+            refuse('DEADLINE_EXCEEDED','control request scan budget expired')
+    check()
+    root = data/"control-requests"
+    try:
+        root.lstat()
+    except FileNotFoundError:
+        check()
+        return []
+    except OSError:
+        refuse('OBSERVATION_UNAVAILABLE', 'control request directory could not be inspected')
+    catalog.plain(root, directory=True)
+    # Path.glob suppresses enumeration OSError on supported Python versions.
+    # A partially read directory cannot establish absence or uniqueness.
+    try:
+        with os.scandir(root) as entries:
+            names=[]
+            for entry in entries:
+                check()
+                if entry.name.endswith('.json'):names.append(entry.name)
+    except OSError:
+        refuse('OBSERVATION_UNAVAILABLE', 'control request enumeration is incomplete')
+    result = []
+    check()
+    for name in sorted(names):
+        check()
+        path = root/name
+        if not vm.UUID.fullmatch(path.stem):
+            refuse("RECONCILE_REQUIRED", "invalid control request filename")
+        value = reader(path)
+        check()
+        if value is None:
+            refuse('OBSERVATION_UNAVAILABLE', 'enumerated control request disappeared')
+        if (value.get("operation_id") != path.stem or value.get("request_hash") != fingerprint(value.get("request"))
+                or not vm.UUID.fullmatch(value.get("vm_id", "")) or 'idempotency_key' not in value
+                or value['idempotency_key'] is not None and not Manager._text_token(value['idempotency_key'])):
+            refuse("RECONCILE_REQUIRED", "invalid control request identity")
+        result.append(value)
+    check()
+    return result
+
+
 class Execution:
     def __init__(self, platform):
         self.p = platform
@@ -94,17 +175,7 @@ class Execution:
         return root/folder/(key+".json")
 
     def read(self, path):
-        if not path.exists() and not path.is_symlink():
-            return None
-        try:
-            catalog.plain(path.parent, directory=True)
-            catalog.plain(path)
-            value = json.loads(path.read_text())
-        except (OSError, ValueError) as error:
-            refuse("RECONCILE_REQUIRED", "invalid execution record", details={"record":path.name})
-        if not isinstance(value, dict) or value.get("schema_version") != "1.0":
-            refuse("RECONCILE_REQUIRED", "execution record schema mismatch")
-        return value
+        return read_record(path)
 
     def write(self, path, value):
         # Never make a replacement /srv data root. Callers already checked its mount.
@@ -125,15 +196,7 @@ class Execution:
         return (tomb["lifecycle"], tomb["generation"]) if tomb else ("REGISTERED", 0)
 
     def intent(self, record):
-        value = self.read(self._path(self.data, "control", record["uuid"]))
-        if value is not None and (
-                value.get("vm_id") != record["uuid"] or value.get("desired_state") not in ("running", "stopped")
-                or type(value.get("intent_revision")) is not int or value["intent_revision"] < 1
-                or type(value.get("lifecycle_generation")) is not int or value["lifecycle_generation"] < 0
-                or not isinstance(value.get("accepted_operation_id"), str)
-                or not vm.UUID.fullmatch(value["accepted_operation_id"])):
-            refuse("RECONCILE_REQUIRED", "intent identity/revision mismatch")
-        return value
+        return read_intent(self.data, record['uuid'], reader=self.read)
 
     def initialize(self, record, desired, source, operation_id=None):
         with short_lock(self.runtime, 'admission'):
@@ -679,53 +742,7 @@ class Execution:
                 "observation_revision":observation["observation_revision"] if observation else None}
 
     def requests(self, *, deadline=None):
-        """Complete journal scan within the caller's existing observation budget.
-
-        A partial scan never proves absence or uniqueness. This deadline is not
-        written into any original operation and grants no physical execution.
-        """
-        from xenova_management import Manager
-        def check():
-            if deadline is not None and self.p.clock()>=deadline:
-                refuse('DEADLINE_EXCEEDED','control request scan budget expired')
-        check()
-        root = self.data/"control-requests"
-        try:
-            root.lstat()
-        except FileNotFoundError:
-            check()
-            return []
-        except OSError:
-            refuse('OBSERVATION_UNAVAILABLE', 'control request directory could not be inspected')
-        catalog.plain(root, directory=True)
-        # Path.glob suppresses enumeration OSError on supported Python versions.
-        # A partially read directory cannot establish absence or uniqueness.
-        try:
-            with os.scandir(root) as entries:
-                names=[]
-                for entry in entries:
-                    check()
-                    if entry.name.endswith('.json'):names.append(entry.name)
-        except OSError:
-            refuse('OBSERVATION_UNAVAILABLE', 'control request enumeration is incomplete')
-        result = []
-        check()
-        for name in sorted(names):
-            check()
-            path = root/name
-            if not vm.UUID.fullmatch(path.stem):
-                refuse("RECONCILE_REQUIRED", "invalid control request filename")
-            value = self.read(path)
-            check()
-            if value is None:
-                refuse('OBSERVATION_UNAVAILABLE', 'enumerated control request disappeared')
-            if (value.get("operation_id") != path.stem or value.get("request_hash") != fingerprint(value.get("request"))
-                    or not vm.UUID.fullmatch(value.get("vm_id", "")) or 'idempotency_key' not in value
-                    or value['idempotency_key'] is not None and not Manager._text_token(value['idempotency_key'])):
-                refuse("RECONCILE_REQUIRED", "invalid control request identity")
-            result.append(value)
-        check()
-        return result
+        return read_requests(self.data,deadline=deadline,clock=self.p.clock,reader=self.read)
 
     @traced('execution.save_request')
     def save_request(self, op, phase):
