@@ -16,7 +16,7 @@ def context(row,app):
 class PlannedTransition:
     def __init__(self,machine):self.machine=machine
 
-    def begin(self,request_id,mode,target_vm,*,expected_owner,expected_generation,deadline_ms):
+    def begin(self,request_id,mode,target_vm,*,expected_owner,expected_generation,deadline_ms,provider_request=None):
         m=self.machine;now=m.clock();mode=Mode(mode)
         if mode not in (Mode.AUTO,Mode.MANUAL) or target_vm not in m.vm_ids:
             raise AuthorityError('unsupported planned target/mode')
@@ -41,6 +41,7 @@ class PlannedTransition:
                   deadline_ms=deadline_ms,app=app,target=context(target,app),
                   source=context(source,m.active_app or MANUAL_APP) if source else None,
                   source_app=m.active_app or MANUAL_APP,state_model='stateless')
+        if provider_request is not None:spec['provider_request']=dict(provider_request)
         if mode is Mode.MANUAL:
             sample=m.manual_input.current(now)
             if sample is None or sample.generation!=m.generation:raise AuthorityError('current driver session required')

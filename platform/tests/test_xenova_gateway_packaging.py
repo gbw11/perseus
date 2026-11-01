@@ -21,6 +21,8 @@ class GatewayPackagingTest(unittest.TestCase):
             project = ROOT / 'platform/services/gateway'
             shutil.copytree(project / 'xenova_gateway', source / 'xenova_gateway',
                             ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            shutil.copytree(project / 'examples', source / 'examples',
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
             shutil.copyfile(project / 'pyproject.toml', source / 'pyproject.toml')
             recipe = RECIPES / 'xenova-gateway/xenova-gateway_0.1.0.bb'
             for item in (recipe.parent / 'files').iterdir():

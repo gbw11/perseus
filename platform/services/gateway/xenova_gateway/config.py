@@ -39,6 +39,7 @@ class GatewaySettings:
     authority_dir: str = "/srv/xenova/drive-control"
     binding_file: str = "/run/xenova/drive-bindings.json"
     initialize_control_state: bool = False
+    ipc_socket: str = '/run/xenova-gateway/control.sock'
 
 
 def _env(env: Mapping[str, str], name: str) -> str | None:
@@ -70,6 +71,7 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
     p.add_argument("--profile",choices=("verified","warm","legacy"),default=_env(env,"PROFILE") or d.profile)
     p.add_argument("--authority-dir",default=_env(env,"AUTHORITY_DIR") or d.authority_dir)
     p.add_argument("--binding-file",default=_env(env,"BINDING_FILE") or d.binding_file)
+    p.add_argument('--ipc-socket',default=_env(env,'IPC_SOCKET') or d.ipc_socket)
     p.add_argument("--initialize-control-state",action="store_true",help="확인한 최초 설치에서만 정지 상태 원본을 생성")
     a = p.parse_args(argv)
     if a.sink=='serial' and not a.vehicle_limits:p.error('serial output requires --vehicle-limits')
@@ -93,5 +95,5 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
         start_mode=Mode(a.start_mode or d.start_mode), retained_wait_s=max(0.0, a.retained_wait_s), log_level=a.log_level,
         vm_a=a.vm_a, vm_b=a.vm_b, initial_active_vm=a.initial_active_vm,
         profile=a.profile,authority_dir=a.authority_dir,binding_file=a.binding_file,
-        initialize_control_state=a.initialize_control_state,
+        initialize_control_state=a.initialize_control_state,ipc_socket=a.ipc_socket,
     )

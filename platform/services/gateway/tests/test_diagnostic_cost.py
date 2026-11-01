@@ -211,7 +211,7 @@ def test_entrypoint_cleanup_failure_preserves_first_cause_and_closes_other_owner
     from types import SimpleNamespace
     from unittest.mock import Mock
     import xenova_gateway.__main__ as entry
-    order=[];sink=Mock();sink.close.side_effect=lambda:order.append('sink closed')
+    order=[];sink=Mock(spec=['close']);sink.close.side_effect=lambda:order.append('sink closed')
     lease=Mock();lease.close.side_effect=lambda:order.append('lease closed')
     channel=Mock();channel.close.side_effect=lambda:order.append('diagnostic drain')
     client=Mock();client.stop.side_effect=OSError(28,'specific client cleanup failure')

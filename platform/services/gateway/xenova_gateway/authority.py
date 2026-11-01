@@ -152,6 +152,22 @@ class AuthorityStore:
             if spec.get('state_model')!='stateless':raise ValueError('unsupported transition state model')
             if row['phase']=='COMMITTED' and row.get('committed_generation')!=spec['generation']+1:
                 raise ValueError('transition commit result')
+            if 'provider_request' in spec:
+                from .provider import normalize,validate_result
+                submitted=spec['provider_request']
+                if normalize(submitted,mode=spec['mode'])!=submitted or submitted['purpose']!='handoff':
+                    raise ValueError('provider transition spec invalid')
+                if any(submitted[a]!=spec[b] for a,b in (
+                        ('expected_generation','generation'),('expected_owner','owner'),
+                        ('deadline_ms','deadline_ms'),('target_vm','target_vm'),('mode','mode'))):
+                    raise ValueError('provider transition identity mismatch')
+                if (submitted['host_boot_id']!=row['host_boot_id'] or
+                        submitted['target_execution_id']!=target['execution_id'] or
+                        any(submitted[k]!=target[k] for k in ('intent_revision','lifecycle_generation'))):
+                    raise ValueError('provider transition target mismatch')
+                validate_result(row,submitted,row.get('committed_generation'))
+        from .provider import validate_records
+        validate_records(value)
 
     def save(self,value):
         self.validate(value)
@@ -190,6 +206,8 @@ class AuthorityStore:
     def issue(self,mode: Mode,owner: str,reason: str,now: float,timeout: float,*,arm: bool,manual=None):
         if self.error:raise AuthorityError(self.error)
         canonical(owner)
+        if mode is not Mode.SAFE_STOP and self.protected(owner):
+            raise AuthorityError('target execution remains protected')
         if self.value['generation']==0xffffffff:raise AuthorityError('generation exhausted; no wrap/reset')
         generation=self.value['generation']+1
         return self.update(generation=generation,mode=mode.value,owner=owner,reason=reason,phase='PENDING',
@@ -211,6 +229,10 @@ class AuthorityStore:
             if self.error and (row is None or row['phase']!='COMMITTED'):
                 raise AuthorityError(self.error)
             return json.loads(json.dumps(row)) if row is not None else None
+
+    def protected(self,vm_id):
+        return any(row['phase']=='PROTECTED' and row['spec']['target_vm']==vm_id
+                   for row in self.value.get('protections',[]))
 
     def begin_transition(self,request_id,spec,now_ms):
         """Actor entry: persist fixed intent/target/deadline before preparation."""

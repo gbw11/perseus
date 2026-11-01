@@ -31,6 +31,51 @@ class VerifiedGatewayRunner(GatewayRunner):
         # Local integration seam, deliberately not an HTTP/MQTT API. Enqueue is
         # nonblocking; durable acceptance is reported later by the actor.
         self._transitions=__import__('queue').Queue(maxsize=8)
+        from .provider import GatewayProvider
+        self.provider=GatewayProvider(self)
+        queue=__import__('queue')
+        self._provider_queues=[queue.Queue(maxsize=n) for n in (4,4,8)]
+        self._provider_turn=0;self.provider_calls=0;self.provider_high_water=0
+
+    def submit_provider(self,call):
+        import queue
+        if self.readiness_profile!='warm-drive-1':raise ValueError('provider requires warm profile')
+        lane=0 if call['action'] in ('cancel','finish') else 1 if call['action'] in ('get','context') else 2
+        result=queue.Queue(maxsize=1)
+        self._provider_queues[lane].put_nowait((call,result))
+        self.provider_high_water=max(self.provider_high_water,sum(q.qsize() for q in self._provider_queues))
+        return result
+
+    def device_view(self):
+        view=getattr(self._sink,'device_view',None)
+        if callable(view):return view()
+        return {'feedback_supported':False,'accepted':None,'applied':None,'physical_stop':None}
+
+    def _provider_once(self):
+        import queue
+        from .provider import ProviderError
+        from .ipc_contract import VERSION
+        for offset in range(3):
+            lane=(self._provider_turn+offset)%3
+            try:call,result=self._provider_queues[lane].get_nowait()
+            except queue.Empty:continue
+            self._provider_turn=(lane+1)%3;self.provider_calls+=1
+            try:response=dict(version=VERSION,ok=True,data=self.provider.handle(call))
+            except ProviderError as exc:response=dict(version=VERSION,ok=False,error={'code':exc.code})
+            except ValueError:response=dict(version=VERSION,ok=False,error={'code':'INVALID_INPUT'})
+            except AuthorityError as exc:
+                code='STORAGE_UNCERTAIN' if self.authority.error else 'TRANSITION_REJECTED'
+                response=dict(version=VERSION,ok=False,error={'code':code,'reason':str(exc)[:192]})
+            except Exception as exc:
+                self.machine.output_permitted=False;self.machine._authorized=False
+                self._submit(ForwardStop(self.machine.generation))
+                import traceback
+                detail={'cause_type':type(exc).__name__,'traceback':''.join(traceback.format_exception(exc))}
+                if self.aux_first_exception is None:self.aux_first_exception=detail
+                self.aux_internal_errors.append(detail)
+                response=dict(version=VERSION,ok=False,error={'code':'INTERNAL_ERROR'})
+            result.put_nowait(response)
+            return
 
     def submit_transition(self,action,request_id,**arguments):
         import queue
@@ -194,6 +239,9 @@ class VerifiedGatewayRunner(GatewayRunner):
         try:
             accepted=self._sink.write(frame,now)
             if accepted!=len(data):raise SinkError('serial acceptance length unavailable/partial')
+            if hasattr(accepted,'frame'):
+                actual=accepted.frame
+                record.update(frame_counter=actual.counter,encoded_hex=encode(actual).hex())
             self.serial_accepted+=1;record['serial_result']='accepted';record['accepted_bytes']=accepted
         except (SinkError,OSError) as error:
             serial_error=error;cause=error.__cause__ or error
@@ -262,8 +310,14 @@ class VerifiedGatewayRunner(GatewayRunner):
         import queue
         try:first=self._queue.get(timeout=timeout_s) if timeout_s>0 else self._queue.get_nowait()
         except queue.Empty:first=None
+        self._provider_once()
         self._delivery(self._clock());self._drain(first)
         self._emit(self.machine.step(self._clock()))
+        events=getattr(self._sink,'feedback_events',lambda:[])()
+        try:self.provider.capture(events)
+        except AuthorityError:
+            self.machine.output_permitted=False;self.machine._authorized=False
+            self._submit(ForwardStop(self.machine.generation))
 
     def run(self,stop,*,connect_wait_s=5):
         try:
