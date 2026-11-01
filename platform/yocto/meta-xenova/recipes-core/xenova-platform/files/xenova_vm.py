@@ -701,6 +701,7 @@ class Platform:
             state = started_state(record, observation)
             self.cpu().require(record, deadline, expected=cpu_context, present=True,
                                expected_identity=observation)
+            self.supply_execution(record,deadline)
             if _result is not None:
                 _result['observation'] = observation
             print(f"{record['id']}: already {state}; no duplicate create; app_readiness=unknown")
@@ -771,10 +772,17 @@ class Platform:
         current = self._settle_created_domain(record, created[0], deadline)
         state = started_state(record, current)
         bound = execution.bind_launch(record, launch, current, deadline)
+        self.supply_execution(record,deadline)
         if _result is not None:
             _result['observation'] = bound['observation']
         print(f"{record['id']}: Xen domain created ({state}); guest OS/app readiness is not asserted")
         return state
+
+    def supply_execution(self,record,deadline):
+        """검증된 새 실행에 기존 영구 자격을 게시한다. guest 인증/준비 성공은 별개다."""
+        if guest_kind(record)=='zephyr' and record.get('provisioning_profile',{}).get('channels'):
+            from xenova_provisioning import bootstrap_execution
+            bootstrap_execution(self,record,deadline=deadline)
 
     def autostart(self, records, required_ids, *, deadline=None):
         """한 부팅 호출의 전체 예산을 공유하고 이미 시작한 guest를 롤백하지 않는다.

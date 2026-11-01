@@ -403,12 +403,16 @@ class Execution:
                  'intent_sha256':fingerprint(intent), 'record_sha256':fingerprint(record),
                  "phase":"launching", "owner":owner, "prepared_monotonic_ms":int(self.p.clock()*1000),
                  "configuration_sha256":fingerprint(self.p.config(record)), "domid":None, "xen_unique_id":None}
+        value['signal_profile']=record.get('provisioning_profile')
         if vm.guest_kind(record) == 'zephyr':
             # Capture the verified loader input before submission, never hash the
             # latest file later and label it as an already running execution.
             from xenova_zephyr import active_directory, bundle_info
             directory=self.data/'instances'/record['id']
             info=bundle_info(active_directory(directory,record),record['active_firmware']['revision'])
+            if record.get('provisioning_profile') is not None and record['provisioning_profile']!=info['provisioning_profile']:
+                refuse('ARTIFACT_INVALID','selected communication declaration differs from verified loader input')
+            value['signal_profile']=info['provisioning_profile']
             value['loaded_artifact']={'file':'zephyr.bin','artifact_sha256':info['sha256'],
                 'manifest_sha256':info['revision'],'build_id':info['source'].get('build_id'),
                 'display_name':record.get('display_name'),'hostname':record.get('hostname'),

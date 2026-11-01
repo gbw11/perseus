@@ -47,8 +47,14 @@ def credentials(path, vm_id, channel=None, *, for_reconciliation=False):
     trusted Store channel. Parsing an account does not grant broker permission.
     """
     value, identity = private_json(path)
+    validate_credentials(value,vm_id,channel,for_reconciliation=for_reconciliation)
+    return value,identity
+
+
+def validate_credentials(value,vm_id,channel=None,*,for_reconciliation=False):
+    """동일 private codec의 메모리 검사. 별도 broker 자격을 합칠 때도 검사 규칙을 재사용한다."""
     required={"vm_id", "broker_ipv4", "port", "username", "password", "trusted_internal_plaintext"}
-    if set(value) not in (required,required|{'world'}):
+    if not isinstance(value,dict) or set(value) not in (required,required|{'world'}):
         raise ValueError("credential input fields invalid")
     if channel not in (None, "telemetry", "drive"):
         raise ValueError("unsupported bootstrap channel")
@@ -82,7 +88,7 @@ def credentials(path, vm_id, channel=None, *, for_reconciliation=False):
         secret=world['password']
         if not isinstance(secret,str) or not 1<=len(secret)<=128 or any(not 33<=ord(c)<=126 or c in '\\"' for c in secret):raise ValueError('world password encoding')
         if not isinstance(world['profile'],str) or not 1<=len(world['profile'])<=64 or any(not (c.isascii() and (c.isalnum() or c in '-_.')) for c in world['profile']):raise ValueError('world profile')
-    return value, identity
+    return value
 
 
 def current(vm_id, *, deadline=None, guard=None):

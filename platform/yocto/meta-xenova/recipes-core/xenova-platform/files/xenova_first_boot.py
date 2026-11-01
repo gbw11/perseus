@@ -203,7 +203,25 @@ class FirstBoot:
             if self.command(['sha256sum', directory / name]).split()[0] != spec['boot'][key]:
                 raise ValueError(f'factory boot asset mismatch: {name}')
 
-    def register(self):
+    def supply(self,record,common):
+        """UUID 계획 뒤 대상만 보호한다. 해시/guest I/O 동안 공통 관리 잠금은 반환한다."""
+        from contextlib import nullcontext
+        from xenova_vm import Platform
+        from xenova_preparation import request_output,AssetLease
+        from xenova_provisioning import ensure,apply_stopped_linux
+        platform=Platform(self.data,self.run)
+        path=self.data/'instances'/record['id']/'instance.json'
+        progress=self.data/'.first-install-state.json';before=read_json(progress)
+        with request_output(),AssetLease(platform,record['uuid'],'provision',None) as lease:
+            lease.guard()
+            with common.outside(platform) if common is not None else nullcontext():
+                if guest_kind(record)=='linux':apply_stopped_linux(platform,record,factory=True)
+                else:ensure(self.data,record)
+            lease.guard()
+            if read_json(path)!=record or read_json(progress)!=before:
+                raise ValueError('factory registration target changed during supply')
+
+    def register(self,*,common=None):
         self.verify_mount()
         factory = read_json(self.data / '.xenova-install.json')
         if factory.get('features') not in (FEATURES, LEGACY_FEATURES) or factory.get('schema') != 1:
@@ -348,6 +366,8 @@ class FirstBoot:
                     raise ValueError('factory VMs share a writable disk')
                 inodes.add(inode)
             if key not in state['registered']:
+                if current.get('provisioning_profile',{}).get('channels'):
+                    self.supply(current,common)
                 state['registered'].append(key)
                 state['phase'] = 'registering'
                 self.save(state_path, state)
@@ -379,7 +399,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['grow', 'register'])
     args = parser.parse_args()
-    with operation_lock():
+    from xenova_preparation import request_output
+    with request_output(),operation_lock() as common:
         boot = FirstBoot()
         from xenova_runtime import boot_progress
         display = boot_progress('storage' if args.action == 'grow' else 'registration', boot.run)
@@ -388,7 +409,7 @@ def main():
         if args.action == 'grow':
             boot.grow()
         else:
-            boot.register()
+            boot.register(common=common)
         # 성공 근거는 기존 필수 저장과 unit 결과다. 이 파일은 표시 보조 정보뿐이다.
         display('complete', mode=getattr(boot, 'display_mode', 'storage-verification'))
 
