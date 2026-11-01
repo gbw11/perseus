@@ -8,7 +8,7 @@ import stat
 import struct
 import time
 
-from .ipc_contract import ENDPOINT, HEADER, MAX_BYTES, VERSION, decode, encode, request, seconds
+from .ipc_contract import ENDPOINT, HEADER, MAX_BYTES, VERSION, decode, encode, request, seconds, new_request_id
 
 
 class GatewayUnavailable(RuntimeError):
@@ -103,6 +103,10 @@ class GatewayClient:
     def context(self):
         return self._call('context')
 
+    def history(self):
+        """Read-only bounded capacity/retention view; never performs cleanup."""
+        return self._call('history')
+
     def submit(self, request_id, spec):
         return self._call('submit', request_id, spec)
 
@@ -121,7 +125,7 @@ class GatewayClient:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('context', 'submit', 'get', 'commit', 'cancel', 'finish'))
+    parser.add_argument('action', choices=('context', 'history', 'submit', 'get', 'commit', 'cancel', 'finish'))
     parser.add_argument('--request-id')
     parser.add_argument('--spec-file', type=Path)
     parser.add_argument('--endpoint', default=ENDPOINT)

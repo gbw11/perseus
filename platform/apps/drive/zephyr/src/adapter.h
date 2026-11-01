@@ -11,13 +11,16 @@
 #include "state_transfer.h"
 #include <xenova/manual_input.h>
 
-struct drive_sample { float v_mps,steer_rad,nearest_m; enum auto_reason auto_reason; const char *reason; };
+struct drive_sample { float v_mps,steer_rad,nearest_m; enum auto_reason auto_reason; const char *reason;
+ bool binary_input;int64_t input_sequence,input_received_ms,valid_until_ms;
+ char map_epoch[37];uint64_t reference_revision,observation_sequence;uint32_t path_generation,tracker_index,maneuver_phase; };
 typedef int (*drive_calculate)(void *context,struct xm_span control,struct xm_span input,
                                int64_t age_ms,struct drive_sample *out);
 /* Bounded validation of immutable configuration/input, no work progress or I/O. */
 typedef const char *(*drive_qualify)(const void *context,struct xm_span input,int64_t age_ms);
 struct drive_adapter {
  drive_calculate calculate;
+ int (*calculate_until)(void *,struct xm_span,struct xm_span,int64_t,uint64_t,struct drive_sample *);
  void *context;
  uint32_t input_timeout_ms;
  uint64_t progress;
@@ -31,6 +34,7 @@ struct drive_adapter {
  bool manual_input;
  struct drive_manual_gate movement;
  drive_qualify qualify;
+ bool (*state_usable)(const void *);
 };
 /* Successful application is preparation, not calculation progress or READY.
  * The adapter owner must already have joined any previous state consumer. */
@@ -53,5 +57,7 @@ int drive_adapter_run(struct drive_adapter *,struct xm_span control,struct xm_sp
  * It does not grant movement; the latest fresh sample must still pass the gate. */
 int drive_adapter_run_observed(struct drive_adapter *,struct xm_span control,struct xm_span input,
  int64_t age_ms,const struct xd_manual_witness *,const char *receiver,struct drive_sample *out);
+int drive_adapter_run_until(struct drive_adapter *,struct xm_span control,struct xm_span input,
+ int64_t age_ms,const struct xd_manual_witness *,const char *receiver,uint64_t deadline_us,struct drive_sample *out);
 const char *drive_adapter_qualify(const struct drive_adapter *,struct xm_span input,int64_t age_ms);
 #endif

@@ -48,11 +48,11 @@ def unpack(wire):
     return kind,raw[3:-2]
 
 
-def hello(pi_session):return packet(HELLO,HELLO_PAYLOAD.pack(1,UUID(pi_session).bytes))
+def hello(pi_session,version=1):return packet(HELLO,HELLO_PAYLOAD.pack(version,UUID(pi_session).bytes))
 
 
-def hello_ack(pi_session,device_session,capabilities=CAP_ACCEPT|CAP_APPLY):
-    return packet(HELLO_ACK,ACK_PAYLOAD.pack(1,UUID(pi_session).bytes,UUID(device_session).bytes,capabilities))
+def hello_ack(pi_session,device_session,capabilities=CAP_ACCEPT|CAP_APPLY,*,version=1):
+    return packet(HELLO_ACK,ACK_PAYLOAD.pack(version,UUID(pi_session).bytes,UUID(device_session).bytes,capabilities))
 
 
 def command(pi_session,device_session,sequence,frame):
@@ -99,12 +99,13 @@ class Framer:
 
 class FeedbackSerialSink(SerialSink):
     """One serial handle, polled only by OutputOwner; no RX thread/second writer."""
-    def __init__(self,port,baudrate=115200,*,timeout_ms,clock=time.monotonic):
+    def __init__(self,port,baudrate=115200,*,timeout_ms,clock=time.monotonic,odometry=None):
         if type(timeout_ms) is not int or not 1<=timeout_ms<=2**31-1:
             raise ValueError('approved feedback timeout_ms required')
         super().__init__(port,baudrate)
         self.clock=clock;self.timeout=timeout_ms/1000
         self.pi_session=str(uuid4());self.device_session=None;self.capabilities=0
+        self.odometry=odometry;self.protocol_version=2 if odometry is not None else 1
         self.started=None;self.ready=False;self.fault=None
         self.framer=Framer();self.pending=OrderedDict();self.sequence=0
         self.last_sample=0;self.last_report=None;self.latest_command=None
@@ -122,6 +123,8 @@ class FeedbackSerialSink(SerialSink):
                     stale_or_invalid=self.rejected,pending=len(self.pending))
         if self.last_report is not None:result.update(self.last_report)
         result['latest_command_sequence']=self.latest_command
+        if self.odometry is not None:
+            result['vehicle_sample']=None if self.fault else self.odometry.current(int(self.clock()*1000000))
         result['report_is_latest']=bool(self.last_report and result['command_sequence']==self.latest_command)
         if (self.fault or not result['report_is_latest'] or
                 (result['observed_monotonic'] is not None and self.clock()-result['observed_monotonic']>self.timeout)):
@@ -130,7 +133,7 @@ class FeedbackSerialSink(SerialSink):
         return result
 
     def _send(self,data):
-        accepted=self._serial.write(data)
+        accepted=self._write_bytes(data)
         if accepted!=len(data):raise SinkError('partial feedback-profile serial write')
         return accepted
 
@@ -151,13 +154,13 @@ class FeedbackSerialSink(SerialSink):
         self.snapshot=self._view()
         from .output_owner import SubmissionReceipt
         result=SubmissionReceipt(len(legacy_encode(frame)),frame)
-        result.metadata=dict(wire_bytes=len(wire),wire_hex=wire.hex(),command_sequence=self.sequence,
+        result.metadata=dict(serial_profile='feedback-'+str(self.protocol_version),wire_bytes=len(wire),wire_hex=wire.hex(),command_sequence=self.sequence,
                              pi_session=self.pi_session,device_session=self.device_session)
         return result
 
     def poll(self,now):
         if self.started is None:
-            self.started=now;self._send(hello(self.pi_session))
+            self.started=now;self._send(hello(self.pi_session,self.protocol_version))
         data=self._serial.read(min(4096,self._serial.in_waiting))
         for kind,payload in self.framer.feed(data):
             self.received+=1
@@ -168,13 +171,17 @@ class FeedbackSerialSink(SerialSink):
         for row in self.pending.values():
             if now>=row['deadline'] and not row['applied']:
                 self.fault=self.fault or 'DEVICE_APPLY_TIMEOUT'
+        if self.ready and self.odometry is not None and not self.fault:
+            from .odometry import ODOM_PROBE
+            probe=self.odometry.probe(self.pi_session,int(now*1000000))
+            if probe is not None:self._send(packet(ODOM_PROBE,probe))
         self.snapshot=self._view()
 
     def _receive(self,kind,payload,now):
         if kind==HELLO_ACK:
             version,pi,device,caps=ACK_PAYLOAD.unpack(payload)
             device=str(UUID(bytes=device))
-            if version!=1 or str(UUID(bytes=pi))!=self.pi_session or UUID(device).int==0:
+            if version!=self.protocol_version or str(UUID(bytes=pi))!=self.pi_session or UUID(device).int==0:
                 raise FeedbackError('handshake session mismatch')
             if caps&(CAP_ACCEPT|CAP_APPLY)!=(CAP_ACCEPT|CAP_APPLY):
                 self.fault=self.fault or 'DEVICE_CAPABILITY_UNSUPPORTED';return
@@ -182,7 +189,16 @@ class FeedbackSerialSink(SerialSink):
                 self.fault=self.fault or 'DEVICE_RESTARTED'
                 self.pending.clear();self.last_report=None;self.last_sample=0
             self.device_session=device;self.capabilities=caps;self.ready=True
+            if self.odometry is not None:
+                from .odometry import CAP_ODOMETRY
+                if not caps&CAP_ODOMETRY:
+                    self.fault=self.fault or 'DEVICE_ODOMETRY_UNSUPPORTED';return
+                self.odometry.device_session(device)
             return
+        if self.odometry is not None:
+            from .odometry import ODOM_REPORT
+            if kind==ODOM_REPORT and self.ready:
+                self.odometry.receive(self.pi_session,payload,int(now*1000000));return
         if kind!=FEEDBACK or not self.ready:raise FeedbackError('unexpected device frame')
         pi,device,sequence,generation,counter,status,sample,flags,velocity,steering,stationary=REPORT.unpack(payload)
         if str(UUID(bytes=pi))!=self.pi_session or str(UUID(bytes=device))!=self.device_session:

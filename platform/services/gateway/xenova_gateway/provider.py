@@ -5,7 +5,7 @@ or cancellation, not a cached permission to restart it. Manager guards remain
 necessary. Historical results and current protection are returned separately.
 """
 from .authority import AuthorityError
-from .ipc_contract import integer, uuid
+from .ipc_contract import integer, uuid, request_key
 from .machine import Mode, ForwardStop
 
 PROTECTION_LIMIT = 16
@@ -20,7 +20,7 @@ class ProviderError(RuntimeError):
 
 
 def normalize(spec, *, original=None, mode=None):
-    if set(spec) - (REQUIRED | {'purpose', 'mode', 'parent_deadline_ms'}) or REQUIRED - set(spec):
+    if set(spec) - (REQUIRED | {'purpose', 'mode', 'parent_deadline_ms','manual_hold'}) or REQUIRED - set(spec):
         raise ValueError('Gateway request fields invalid')
     result = dict(spec)
     purpose = result.setdefault('purpose', original['purpose'] if original else 'protect')
@@ -42,6 +42,11 @@ def normalize(spec, *, original=None, mode=None):
             raise ValueError('planned mode required')
     elif 'mode' in result:
         raise ValueError('protection does not select a mode')
+    if 'manual_hold' in result:
+        if type(result['manual_hold']) is not bool or purpose!='handoff' or result['mode']!='MANUAL':
+            raise ValueError('manual_hold is a MANUAL handoff choice')
+        if not result['manual_hold']:result.pop('manual_hold')
+    elif original and original.get('manual_hold'):result['manual_hold']=True
     return result
 
 
@@ -52,7 +57,7 @@ def validate_records(value):
     seen = {row['request_id'] for row in value.get('transitions', [])}
     held = set()
     for row in rows:
-        uuid(row['request_id']); uuid(row['host_boot_id'])
+        request_key(row['request_id']); uuid(row['host_boot_id'])
         if row['request_id'] in seen or row['phase'] not in ('PROTECTED', 'RELEASED', 'CANCELLED'):
             raise ValueError('protection record invalid')
         seen.add(row['request_id'])
@@ -156,12 +161,25 @@ class GatewayProvider:
                 ('execution_id', 'boot_id', 'intent_revision', 'lifecycle_generation')}
         return dict(host_boot_id=self.a.host, owner=m.active_vm, generation=m.generation,
                     mode=m.mode.value, phase=m.phase, output_permitted=m.output_permitted,
-                    storage_uncertain=bool(self.a.error), targets=rows)
+                    manual_hold=bool(self.a.value.get('manual_hold',False)),
+                    output_wait=dict(rate_pending=self.runner._deferred_drive is not None,
+                                     rate_deferred=self.runner.serial_deferred,manual_withheld=self.runner.manual_withheld,
+                                     manual_activation=None if self.runner._manual_activation is None else
+                                         {k:self.runner._manual_activation[k] for k in ('generation','ready','kind','deadline_ms')}),
+                    storage_uncertain=bool(self.a.error), targets=rows,
+                    **({'drive_input':self.runner.drive_link.status()} if self.runner.drive_link is not None else {}))
 
     def view(self, request_id):
         row, spec = self.find(request_id)
         if row is None:
-            raise ProviderError('OUTCOME_UNKNOWN' if self.a.error else 'NOT_FOUND')
+            if self.a.error:raise ProviderError('OUTCOME_UNKNOWN')
+            key=request_key(request_id)
+            if key and key[0]!=self.a.host:raise ProviderError('HOST_CHANGED')
+            fence=self.a.value.get('history',{})
+            if key and fence.get('host_boot_id')==self.a.host and key[1]<=fence['floor_ms']:
+                raise ProviderError('RESULT_NOT_RETAINED_OR_UNKNOWN')
+            if not key and fence:raise ProviderError('RESULT_NOT_RETAINED_OR_UNKNOWN')
+            raise ProviderError('NOT_FOUND')
         m = self.m
         binding = m.bindings.current(spec['target_vm'], m.clock())
         same = bool(binding and binding['execution_id'] == spec['target_execution_id'] and
@@ -179,6 +197,8 @@ class GatewayProvider:
                     acceptance='durable', host_boot_id=row['host_boot_id'], target_vm=spec['target_vm'],
                     target_execution_id=spec['target_execution_id'], intent_revision=spec['intent_revision'],
                     lifecycle_generation=spec['lifecycle_generation'], deadline_ms=spec['deadline_ms'],
+                    retry_until_ms=row.get('retry_until_ms',spec['deadline_ms']),
+                    retained_through_ms=row.get('retain_until_ms'),
                     accepted_generation=row.get('accepted_generation', spec['expected_generation']),
                     committed_generation=generation, reason=row.get('reason'), app_applied=applied,
                     protection=dict(held=held, owner_excluded=held and not m.output_permitted if m.active_vm==spec['target_vm'] else held,
@@ -201,6 +221,11 @@ class GatewayProvider:
                 request_id in self.a.value['requests']):
             raise ProviderError('IDEMPOTENCY_CONFLICT')
         self.current(spec)
+        from .history import candidate,admission,room,stamp
+        now_ms=int(self.m.clock()*1000)
+        history=candidate(self.a,now_ms)
+        error=admission(self.a,request_id,spec,now_ms,history)
+        if error:raise ProviderError(error)
         if spec['target_vm'] not in self.m.vm_ids:
             raise ProviderError('TARGET_NOT_MANAGED')
         self.target(spec)
@@ -209,11 +234,18 @@ class GatewayProvider:
                 expected_owner=spec['expected_owner'], expected_generation=spec['expected_generation'],
                 deadline_ms=spec['deadline_ms'], provider_request=spec)
         else:
-            if len(self.a.value.get('protections', [])) >= PROTECTION_LIMIT:
+            rows=history.get('protections',self.a.value.get('protections',[]))
+            if len(rows) >= PROTECTION_LIMIT:
                 raise ProviderError('HISTORY_FULL')
             if self.a.protected(spec['target_vm']):
                 raise ProviderError('TARGET_ALREADY_PROTECTED')
             active = self.m.active_vm == spec['target_vm']
+            # Capacity is checked before revoking the current output/effect.
+            row = dict(request_id=request_id, host_boot_id=self.a.host, spec=spec,
+                       phase='PROTECTED', accepted_generation=self.m.generation+int(active))
+            row=stamp(self.a,row)
+            fields={**history,'protections':[*rows,row]}
+            if not room({**self.a.value,**fields}):raise ProviderError('HISTORY_BYTES_RESERVED')
             if active:
                 # Protection/STOP happens before any required slow storage or
                 # response. The durable exclusion and generation publish once.
@@ -225,7 +257,8 @@ class GatewayProvider:
                 raise ProviderError('GENERATION_EXHAUSTED')
             row = dict(request_id=request_id, host_boot_id=self.a.host, spec=spec,
                        phase='PROTECTED', accepted_generation=generation)
-            fields = dict(protections=[*self.a.value.get('protections', []), row])
+            row=stamp(self.a,row)
+            fields['protections']=[*rows,row]
             if active:
                 fields.update(generation=generation, mode='SAFE_STOP', phase='PENDING', rearm_required=True,
                     reason='recovery_protection', requests=[], pending=dict(generation=generation,
@@ -282,6 +315,9 @@ class GatewayProvider:
         if self.m is None:
             raise ProviderError('NOT_READY')
         action = call['action']; request_id = call.get('request_id'); spec = call.get('spec', {})
+        if action == 'history':
+            from .history import status
+            return status(self.a,int(self.m.clock()*1000))
         if action == 'context':
             return self.context()
         if action == 'submit':

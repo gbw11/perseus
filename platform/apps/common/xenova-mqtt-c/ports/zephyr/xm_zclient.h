@@ -31,6 +31,12 @@ struct xm_zpub {
 	char topic[XM_TOPIC_MAX];
 	uint32_t seq;
 };
+/* Exact topic opt-in. Buffer and callback belong to this transport owner.
+ * Binary payloads never enter the JSON latest cache or its sequence tracker. */
+struct xm_zbinary {
+ const char *topic;uint8_t *buffer;size_t capacity;
+ int (*receive)(void *,const uint8_t *,size_t,int64_t);void *context;
+};
 
 struct xm_zclient {
 	struct mqtt_client mqtt;
@@ -57,6 +63,7 @@ struct xm_zclient {
 	 * Nonzero rejects only this cache update. Must not block or perform I/O. */
 	int (*accept_input)(void *, const char *, const struct xm_envelope *, int64_t);
 	void *accept_context;
+	struct xm_zbinary binary;
 
 	bool socket_open;
 	bool connected;

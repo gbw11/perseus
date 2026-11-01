@@ -92,6 +92,19 @@ static void on_publish(struct xm_zclient *c, const struct mqtt_publish_param *p)
 	char topic[XM_TOPIC_MAX];
 	size_t len = p->message.payload.len;
 	size_t tlen = p->message.topic.topic.size;
+	if(c->binary.topic&&tlen==strlen(c->binary.topic)&&!memcmp(p->message.topic.topic.utf8,c->binary.topic,tlen)){
+		/* An oversized declaration closes only this connection, rather than
+		 * draining an attacker-controlled unbounded body before control work. */
+		if(!c->binary.buffer||len>c->binary.capacity){c->payload_rc=-EMSGSIZE;return;}
+		if((c->payload_rc=mqtt_readall_publish_payload(&c->mqtt,c->binary.buffer,len))<0)return;
+		c->received++;
+		if(p->message.topic.qos==MQTT_QOS_1_AT_LEAST_ONCE){
+			struct mqtt_puback_param ack={.message_id=p->message_id};(void)mqtt_publish_qos1_ack(&c->mqtt,&ack);
+		}
+		if(p->retain_flag||p->message.topic.qos!=MQTT_QOS_0_AT_MOST_ONCE||!c->binary.receive||
+		   c->binary.receive(c->binary.context,c->binary.buffer,len,k_uptime_get()))c->dropped++;
+		return;
+	}
 	bool fits = len <= sizeof(c->payload) && tlen < sizeof(topic);
 
 	/* 큰 메시지도 소켓에서 끝까지 읽어 내야 다음 패킷을 읽을 수 있다 */
@@ -179,6 +192,7 @@ static void on_event(struct mqtt_client *m, const struct mqtt_evt *evt)
 		LOG_INF("MQTT 연결 (구독 %d개 복구)", c->nsubs);
 		break;
 	case MQTT_EVT_DISCONNECT:
+		if(evt->result)c->last_io_rc=evt->result;
 		LOG_WRN("MQTT 연결 끊김, 재연결 대기");
 		schedule_retry(c);
 		break;
@@ -330,6 +344,7 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 		c->payload_rc = 0;
 		rc = mqtt_input(&c->mqtt);
 		if (c->payload_rc) { rc = c->payload_rc; }
+		if(rc<0)c->last_io_rc=rc;
 		if (rc < 0 && c->socket_open) {
 			c->last_io_rc = rc;
 			LOG_WRN("MQTT 수신 오류 %d", rc);

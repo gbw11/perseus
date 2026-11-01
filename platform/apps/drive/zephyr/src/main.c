@@ -8,6 +8,9 @@
 #include <stdio.h>
 #include "controller.h"
 #include "workers.h"
+#if defined(CONFIG_XENOVA_DRIVE_LATTICE)
+#include "lattice_app.h"
+#endif
 
 static struct xm_zclient client;
 static struct drive_controller controller;
@@ -20,8 +23,8 @@ static uint64_t assessed_revision[DRIVE_TASK_COUNT], assessed_connection[DRIVE_T
 static int64_t next_beat[DRIVE_TASK_COUNT], next_readiness[DRIVE_TASK_COUNT];
 #if defined(CONFIG_XENOVA_DRIVE_WARM)
 struct app_lifecycle {
- char instance[XM_UUID_LEN+1],last_phase[16],last_state[16],last_reason[32];
- uint64_t check;uint32_t generation;int64_t due;
+ char instance[XM_UUID_LEN+1],last_phase[16],last_state[16],last_reason[65];
+ uint64_t check;uint32_t generation;int64_t due,stop_due;
  bool rotating,failed,residual_reported;
 };
 static struct app_lifecycle lifecycle[DRIVE_TASK_COUNT];
@@ -37,7 +40,8 @@ static bool warm_prepare(enum drive_task task)
  struct drive_task_status status;
  if(drive_workers_status(task,&status))return false;
  if(!a->rotating){
-  int rc=drive_task_cancel(task,status.lifetime,k_uptime_get()+CONFIG_XENOVA_DRIVE_APP_STOP_MS);
+  a->stop_due=k_uptime_get()+CONFIG_XENOVA_DRIVE_APP_STOP_MS;
+  int rc=drive_task_cancel(task,status.lifetime,a->stop_due);
   if(rc)return false;
   xd_health_task_clear(task);
   a->rotating=true;
@@ -48,8 +52,13 @@ static bool warm_prepare(enum drive_task task)
   return false;
  }
  struct drive_adapter *adapter=task==DRIVE_TASK_AUTO?&controller.automatic:&controller.manual;
+#if defined(CONFIG_XENOVA_DRIVE_LATTICE)
+ if(task==DRIVE_TASK_AUTO){int ready=drive_lattice_reset_poll(a->stop_due);if(ready)return false;}
+ drive_lattice_adapter(adapter,task==DRIVE_TASK_MANUAL);
+#else
  if(task==DRIVE_TASK_AUTO)drive_auto_adapter(adapter,&controller.auto_cfg);
  else drive_manual_adapter(adapter,&controller.manual_cfg);
+#endif
  rc=drive_task_restart(task,status.lifetime,adapter);
  if(rc){strcpy(a->instance,expected);a->rotating=false;a->failed=true;(void)xdiag_error("app-reinit-start",rc);return false;}
  strcpy(a->instance,expected);a->rotating=false;a->check=0;a->due=0;a->residual_reported=false;
@@ -116,6 +125,11 @@ static int finish(int result)
  drive_workers_stop();
  int cleanup=drive_workers_join(xd_cleanup_deadline_ms());
  if(cleanup)xd_app_cleanup_error(cleanup);
+#if defined(CONFIG_XENOVA_DRIVE_LATTICE)
+ int input_cleanup=drive_lattice_join(xd_cleanup_deadline_ms());
+ if(input_cleanup){xd_app_cleanup_error(input_cleanup);if(!cleanup)cleanup=input_cleanup;}
+ if(!input_cleanup&&!cleanup)drive_lattice_report();
+#endif
  return xd_finish(&client,result?result:cleanup);
 }
 static void provenance(const struct drive_completion *work,enum drive_task task)
@@ -161,6 +175,9 @@ int main(void)
  drive_controller_init(&controller);
  int rc=xd_start("drive-controller",20);
  if(rc)return finish(rc);
+#if defined(CONFIG_XENOVA_DRIVE_LATTICE)
+ rc=drive_lattice_start(&controller);if(rc)return finish(rc);
+#endif
  rc=drive_workers_start(&controller.automatic,&controller.manual);
  if(rc)return finish(rc);
  uint64_t origin=xd_next_release_us(),next=origin;
@@ -171,6 +188,9 @@ int main(void)
   if(io&&io!=-EAGAIN&&io!=-EBUSY){rc=io;break;}
   if((rc=xd_iteration_begin()))break;
   xd_inputs_copy(&inputs);
+#if defined(CONFIG_XENOVA_DRIVE_LATTICE)
+  drive_lattice_context(&inputs);
+#endif
   struct xm_span cp={inputs.control.payload,inputs.control.length};
   if(inputs.control.error)cp=(struct xm_span){0};
   struct drive_result selected;drive_controller_select(&controller,inputs.vm_id,cp,&selected);
@@ -207,6 +227,9 @@ int main(void)
    if(!work->performed||!selected.control_valid||
       work->source.connection_revision!=inputs.connection_revision||strcmp(work->source.vm_id,inputs.vm_id))continue;
    health[task]=work->health;
+#if defined(CONFIG_XENOVA_DRIVE_LATTICE)
+   drive_lattice_completed(work);
+#endif
    assessed_revision[task]=work->context_revision;
    assessed_connection[task]=work->source.connection_revision;
    provenance(work,task);
@@ -239,10 +262,12 @@ int main(void)
     xd_health_record(&health[DRIVE_TASK_AUTO],&health[DRIVE_TASK_MANUAL]);
    if(IS_ENABLED(CONFIG_XENOVA_DRIVE_WARM))xd_health_task_record(task,&work->health);
    if(selected.mode!=DRIVE_STOP){
-    if((rc=xd_command_input(automatic?"perception.result":"drive.input")))break;
+    if((rc=xd_command_input(work->sample.binary_input?"world.track":automatic?"perception.result":"drive.input")))break;
+    if(work->sample.valid_until_ms>0&&(rc=xd_command_bound(work->sample.valid_until_ms)))break;
     int encoded=xm_drive_command_json(json,sizeof(json),selected.generation,work->sample.v_mps,work->sample.steer_rad);
     xd_command(&client,events,json,encoded,selected.generation,work->sample.v_mps,work->sample.steer_rad,
-     work->source.input_seq,work->source.control_seq,tick-work->source.input_received_ms,
+     work->sample.binary_input?work->sample.input_sequence:work->source.input_seq,work->source.control_seq,
+     tick-(work->sample.binary_input?work->sample.input_received_ms:work->source.input_received_ms),
      automatic?controller.auto_cfg.perception_timeout_ms:controller.manual_cfg.input_timeout_ms);
    }
    if(automatic&&work->sample.auto_reason!=last_reason){

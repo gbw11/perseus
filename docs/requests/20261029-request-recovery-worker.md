@@ -1,7 +1,7 @@
 # Recovery Worker·Engine 후속 구현 요청
 
 담당: Worker·Engine. 상태: **6-A 인계 준비 / D01·D03의 정책·제품 연결 수락 전**.
-2026-11-01 현재 지시다. 기존 ID와 [상세 근거](2026-10-27-recovery-health-ctrl.md)는 유지한다.
+2026-11-02 현재 지시다. 기존 ID와 [상세 근거](2026-10-27-recovery-health-ctrl.md)는 유지한다.
 
 ## 현재 담당자가 할 일
 
@@ -15,13 +15,22 @@ warm-drive-1의 앱별 신원·대기/활성 준비 최소 소비는 이미 로�
 설치 패키지는 `xenova-gateway-client`, 기본 endpoint는 `/run/xenova-gateway/control.sock`이다.
 현재 root Worker/Gateway 배치에서 같은 host·namespace의 private socket에 접근한다. Authority 파일이나 shell 출력은 읽지 않는다.
 [실제 호출·결과 계약](../contracts/gateway-provider-v1.md)과 [실행·실패 시험 근거](../verification/recovery-scenario-closure-20261030.md#gateway-provider)를 따른다.
-후보는 `8e3232a`+후속 diff/manifest이며 실제 운영 설치·Worker 연결은 아직 수행하지 않았다.
+현재 후속 후보는 `cdcb619`+`feat/platform/gateway-history-driving-app`의 diff/manifest다.
+과거 G1 제공 후보 `8e3232a`의 근거는 보존하며 실제 운영 설치·Worker 연결은 아직 수행하지 않았다.
 
 Worker 담당자는 `recovery/engine.py:_task_attempt`의 **Manager recover_once 호출 전**에 보호 단계를 연결한다.
 긴 복구 executor 안에서 원 요청을 보존하고 submit/get을 각각 유한 budget으로 호출한다.
 `_task_replay`는 응답 유실 뒤 같은 Gateway key를 조회하고 `_on_result`는 접수·보호·복구 결과를 따로 소비해야 한다.
 주 판단 루프를 전환 완료 polling으로 막지 않는다. 기존 attempt/대상/의도·부모 기한에서 Gateway spec을 만들고 최초 송신 전에 보존한다.
-client가 key·기한·generation을 만들거나 재발급하지 않는다. 다른 실행/승인으로 spec을 덮지 않는다.
+시간 포함 key를 선택한 설치에서는 `from xenova_gateway.client import new_request_id`를 사용해
+최초 송신 전에 `new_request_id(host_boot_id)`를 한 번 호출하고 원 attempt에 저장한다.
+client의 submit/get은 key·기한·generation을 재발급하지 않는다. 다른 실행/승인으로 spec을 덮지 않는다.
+기존 저장 UUID 요청은 변환 없이 회수한다. 이력 정책 선택 후 새 opaque UUID 수락은 제한된다.
+`retry_until_ms`는 신규 수락 가능 기간, `retained_through_ms`는 원 상세 결과의 최소 보존 기간이며 작업 기한·보호 수명과 다르다.
+`REQUEST_WINDOW_EXPIRED`와 `RESULT_NOT_RETAINED_OR_UNKNOWN`에서 과거 성공/미수락을 추측하지 않는다.
+`history()`는 읽기 전용 용량/정리 가능 수다. 활성 보호와 저장 미확정은 자동 정리되지 않으며
+정당한 finish/cancel·고정 보존 만료 뒤 신규 수락과 같은 내구 저장에서만 종결 이력을 정리한다.
+정확한 설정 공급·호환·오류는 제공자 계약의 「이력 수명과 반복 운영」을 따른다.
 
 보호 `PROTECTED`의 durable 수락·held/owner_excluded와 현재 host/대상 일치를 확인한다.
 필요한 장치 증거는 실제 profile과 목적에 따라 별도로 확인하고 없는 feedback을 물리 정지 성공으로 해석하지 않는다.
@@ -72,6 +81,19 @@ asset RUNNING/RECONCILING/FAILED는 준비 실행/명시 수습/원 생성 실�
 - 그 사이 사용자 stop, host/실행 교체, 중복·지연 결과, 관측 슬롯 경합·권한/경로 오류를 주입한다. 옛 intent/허가·새 deadline·자동 force·복구 폭주를 만들지 않는다.
 - 실패 private·잔존 helper·수습 중·완료·저장 미확정 입력을 구별하고 저장소 회복 뒤 정당한 새 실행은 정상 소비한다. 슬롯 파일 삭제/chmod로 우회하지 않는다.
 - `app_state_models`는 실제 firmware/adapter의 선언과 맞춘다. 누락/상태 있는 앱을 stateless로 승인하지 않는다. 정상 대기 자격과 활성 계산 준비를 혼합하지 않는다.
+
+신규 지도형 후보 `warm-lattice-lab`은 Bootstrap `drive_profile=warm-drive-1`과
+`app_state_models={"autonomous":"stateful","manual":"stateless"}`를 사용한다.
+실제 연결 위치는 `recovery/rejoin.py:ProductionBootstrap.refresh`가 읽는
+`self.config['app_state_models']`다. 최종 `BUILD_RECEIPT.json`의 firmware/schema/primitive
+hash와 대응해 설치 설정으로 공급해야 한다. 기존 stateless firmware 설치를 이 값으로 몰래 바꾸지 않는다.
+별도 world broker credential은 root provisioning의 선택 `world` 객체로 공급하고
+일반 HTTP/Worker 메시지로 secret·raw Bootstrap을 전달하지 않는다.
+
+실제 full path 생산/적용/target tracker는 [drive-world-1](../contracts/drive-world/README.md)에
+연결돼 있다. G1 결과·AUTO 앱 사본 적용·활성화 계산·장치 ACK는 계속 다른 사실이다.
+MANUAL 명시 선택의 `manual_hold`와 기존 resume/countdown은 사용자 입력 소유 경로에서만
+연결한다. Worker의 건강 회복이 AUTO 복귀·재무장을 대신 승인하지 않는다.
 
 기존 `test_recovery_watcher/engine/events/store/store_process/lock/drive_rejoin.py`의 관련 assertion을 재사용한다.
 모든 조합을 재시험했다는 주장은 피하고 후보와 실제 실행한 범위를 회신한다.

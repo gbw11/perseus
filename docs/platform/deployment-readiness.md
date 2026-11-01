@@ -1,7 +1,8 @@
 # 플랫폼 배포 준비와 7번 인수
 
-2026-11-01, 6-A/6-B의 배포 원본이다. 기준은 `8e3232a`와 이번 포장·문서 diff다.
-실제 실행 결과·파일 hash는 [검증 보고](../verification/recovery-scenario-closure-20261030.md#stage6)에 연결한다.
+6-A/6-B의 배포 원본이다. 당시 기준 `8e3232a`는 이력으로 보존한다. Gateway 이력/실제 주행앱의
+현재 후보는 platform `cdcb619` + `feat/platform/gateway-history-driving-app` diff/manifest다.
+실제 실행 결과·파일 hash는 [최신 검증 보고](../verification/recovery-scenario-closure-20261030.md#history-drive-final)에 연결한다.
 이번 작업은 운영 설치·서비스 교체·7번 수락을 실행하지 않는다.
 
 ## 제공 수준
@@ -33,7 +34,7 @@ OS 공통 정적 CPU 배치는 이전 검증 범위를 유지한다. 기존 full
 
 고정 layer는 [layers.lock](../../platform/yocto/layers.lock)을 따른다. 현재 target은 Python 3.14.7,
 Paho 2.1.0, pyserial 3.5다. 새 라이브러리 버전이나 pip 설치를 도입하지 않는다.
-Gateway의 `RDEPENDS`는 실제 provider `python3-paho-mqtt`, `python3-pyserial`, 표준 모듈 분할 패키지와
+Gateway의 `RDEPENDS`는 실제 provider `python3-paho-mqtt`, `python3-pyserial`, `python3-protobuf`, 표준 모듈 분할 패키지와
 `xenova-mqtt-client`, `xenova-platform`을 선언한다. Python의 logging.handlers/copy/queue/threading은 실제 pkgdata 및 target import로 대조한다.
 README의 배포판 명칭 `python3-serial`과 Yocto recipe 이름 `python3-pyserial`을 혼동하지 않는다.
 
@@ -41,6 +42,8 @@ Gateway 소스는 site-packages에 설치하며 tests는 runtime payload에 넣�
 warm 진입점이 실제 UDS 수신부를 실행한다. unit은 RuntimeDirectory=xenova-gateway/0700, root·socket0600을 사용한다.
 이 임시 디렉터리에는 socket만 두고 내구 Authority·원 요청 기록을 넣지 않는다. 두 번째 Gateway는 기존 lease/활성 endpoint를 침범하지 않는다.
 기본 serial profile은 write-only다. feedback-1은 호환 firmware와 승인한 기한·차량 설정을 명시 공급해야 한다.
+지도형 차량 입력을 쓰는 feedback-2 역시 capability·누적 encoder/장치 시계·보정값의 명시 공급이
+필요하다. 구형 firmware에 새 프레임을 자동 전송하거나 package 설치만으로 선택하지 않는다.
 서버·공용 MQTT·기존 Authority/lifecycle 모듈은 같은 내부 후보로 교체하고 client는 wire 계약으로 호환한다.
 새 Authority optional 기록을 모르는 구형 내부 writer와 혼합 설치하거나 자동 downgrade하지 않는다.
 현재 Worker unit은 root·AF_UNIX 허용이며 PrivateTmp/ProtectSystem을 사용한다. endpoint는 `/tmp`가 아닌 `/run/xenova-gateway`다.
@@ -49,6 +52,35 @@ Worker가 없어도 Gateway 보호는 진행하고 Gateway가 없으면 client�
 하위 플랫폼의 private 모듈은 `/usr/lib/xenova`에 설치하고 기존 entrypoint가 그 경로를 사용한다.
 native identity helper는 기존 `${CC}`로 빌드하는 ABI 경계를 유지한다.
 bringup 이미지에는 Gateway 패키지를 포함하도록 연결하지만, 이번에 전체 이미지/rootfs를 만들거나 서비스 enable을 실행하지 않는다.
+
+<a id="history-drive-install"></a>
+### 실제 지도형 제공물과 고정 설치 검증
+
+같은 Gateway recipe가 `apps/drive/world/python/xenova_drive_world`의 codec/generated schema를
+site-packages에 설치한다. source tree의 PYTHONPATH로만 해석되는 상태를 제품 설치로 세지 않는다.
+고정 target Python 3.14.7·Paho 2.1.0·protobuf 6.33.6(upb)·pyserial 3.5를 사용하며
+큰 binary 수신 경계는 이 Paho 구현을 기준으로 검증한다. 기본 Gateway와 최소 client의
+외부 wire 호환은 별개다. client subpackage가 server/Authority/Paho/protobuf를 요구하지 않는다.
+
+`build-xenova-drive-app.py --app drive --profile warm-lattice-lab`은 고정 SDK의 실제
+planner/tracker·nanopb를 ARM ELF에 링크한다. 같은 output에 `.config`·ELF/map·stack audit·
+firmware 번들과 `BUILD_RECEIPT.json`을 남긴다. receipt의 schema/primitive/source hash,
+AUTO stateful/MANUAL stateless와 실제 16MiB 배치를 대조한다. Nanopb zlib와 Zephyr 라이선스를
+번들에 포함한다. 합성 `lattice-lab-1`은 운영 차량값이 아니다. A/B는 이 번들을 공유하되
+UUID·boot/execution/app instance·MAC·계정·승인 CPU 배치는 각각 유지한다.
+
+world 입력은 root provisioning credential의 선택 `world` 객체에서 다섯 평면 Bootstrap 필드로
+전달한다. Pi/Jetson 주소·계정은 독립이다. 일부만 공급하거나 실행 중 다른 source/credential로
+바꾸면 무효이며 앱 instance 교체만으로 조용히 새 broker를 채택하지 않는다.
+Gateway의 `--drive-link`, `--world-trust`, `--odometry-config`, `--history-policy`는 비활성
+env example의 선택 입력이다. 파일/차량/시간 승인값은 설치 담당이 별도로 공급한다.
+없거나 잘못된 mapper trust는 AUTO만 제한하며 일반 VM 관리·정상 MANUAL에 전역 gate를 추가하지 않는다.
+
+이 후속에서 정규 Gateway/runtime RPM 생성·package QA, RPM payload 바이트/0644 모드·
+비활성 unit/preset과 ARM Python/QEMU installed import를 대조한다. 최소 client 설치와
+설치된 client→실제 UDS→설치 Gateway 코드의 submit/get/cancel도 구분해 검증한다.
+전체 이미지 부팅·Zephyr ARM 실행·실제 Xen/USB/장치·운영 enable을 의미하지 않는다.
+각 최종 해시·명령·직접 수행/미수행은 [동일 후보 보고](../verification/recovery-scenario-closure-20261030.md#history-driving-app)가 원본이다.
 
 ## 설정 공급과 기능별 준비
 

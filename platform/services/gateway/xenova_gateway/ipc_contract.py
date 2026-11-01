@@ -3,6 +3,8 @@ import json
 import math
 import struct
 from uuid import UUID
+import time
+from uuid import uuid4
 
 VERSION = 1
 ENDPOINT = '/run/xenova-gateway/control.sock'
@@ -14,6 +16,26 @@ def uuid(value):
     if not isinstance(value, str) or str(UUID(value)) != value:
         raise ValueError('canonical UUID required')
     return value
+
+
+def request_key(value):
+    """Legacy UUID or host-bound monotonic issuance key; never mint on replay."""
+    if isinstance(value, str) and value.startswith('g1:'):
+        parts = value.split(':')
+        if len(parts) != 4 or len(value) > 100:
+            raise ValueError('Gateway request key invalid')
+        uuid(parts[1]); uuid(parts[3])
+        if not parts[2].isascii() or not parts[2].isdigit() or str(int(parts[2])) != parts[2]:
+            raise ValueError('canonical issuance time required')
+        integer(int(parts[2]))
+        return parts[1], int(parts[2])
+    uuid(value)
+    return None
+
+
+def new_request_id(host_boot_id):
+    """Call once before first submit, persist with the original request/budget."""
+    return f'g1:{uuid(host_boot_id)}:{time.monotonic_ns() // 1000000}:{uuid4()}'
 
 
 def integer(value, *, minimum=0, maximum=2**63-1):
@@ -62,10 +84,10 @@ def request(value):
             type(value.get('version')) is not int or value['version'] != VERSION):
         raise ValueError('unsupported Gateway call envelope')
     action = value.get('action')
-    if action not in ('context', 'submit', 'get', 'commit', 'cancel', 'finish'):
+    if action not in ('context', 'history', 'submit', 'get', 'commit', 'cancel', 'finish'):
         raise ValueError('unknown Gateway action')
-    if action != 'context':
-        uuid(value.get('request_id'))
+    if action not in ('context', 'history'):
+        request_key(value.get('request_id'))
     elif set(value) != {'version', 'action'}:
         raise ValueError('context accepts no request arguments')
     spec = value.get('spec', {})

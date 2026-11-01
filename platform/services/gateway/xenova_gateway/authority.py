@@ -31,9 +31,10 @@ class GatewayLease:
         if self.fd is not None:os.close(self.fd);self.fd=None
 
 class AuthorityStore:
-    def __init__(self,directory: Path,host_boot_id: str,*,uid=0,mountpoint: Path | None=Path('/srv/xenova')):
+    def __init__(self,directory: Path,host_boot_id: str,*,uid=0,mountpoint: Path | None=Path('/srv/xenova'),history_policy=None):
         self.directory=Path(directory);self.host=canonical(host_boot_id);self.uid=uid;self.error=None
         self._lock=threading.RLock()
+        self.history_policy=history_policy
         self.check_storage(self.directory,mountpoint)
         self.directory.mkdir(parents=True,exist_ok=True,mode=0o700)
         s=self.directory.lstat()
@@ -106,6 +107,8 @@ class AuthorityStore:
 
     @staticmethod
     def validate(value):
+        from .history import validate as validate_history
+        validate_history(value)
         if value.get('schema_version')!='1.0-drive-authority':raise ValueError('authority schema invalid')
         if type(value['generation']) is not int or not 1<=value['generation']<=0xffffffff:raise ValueError('generation invalid')
         Mode(value['mode']);canonical(value['owner'])
@@ -115,6 +118,7 @@ class AuthorityStore:
         if len(set(value['requests']))!=len(value['requests']):raise ValueError('duplicate request identity')
         for request in value['requests']:canonical(request)
         if not isinstance(value['reason'],str) or len(value['reason'])>128:raise ValueError('invalid authority reason')
+        if 'manual_hold' in value and type(value['manual_hold']) is not bool:raise ValueError('invalid manual selection')
         pending=value['pending']
         if pending is not None:
             canonical(pending['host_boot_id'])
@@ -129,7 +133,8 @@ class AuthorityStore:
         if not isinstance(transitions,list) or len(transitions)>TRANSITION_LIMIT:raise ValueError('transition limit')
         identities=set()
         for row in transitions:
-            canonical(row['request_id'])
+            from .ipc_contract import request_key
+            request_key(row['request_id'])
             if row['request_id'] in identities:raise ValueError('duplicate transition request')
             identities.add(row['request_id']);canonical(row['host_boot_id'])
             if row['phase'] not in TRANSITION_PHASES:raise ValueError('transition phase')
@@ -221,6 +226,7 @@ class AuthorityStore:
         if self.value['generation']==0xffffffff:raise AuthorityError('generation exhausted; no wrap/reset')
         generation=self.value['generation']+1
         return self.update(generation=generation,mode=mode.value,owner=owner,reason=reason,phase='PENDING',
+            manual_hold=False if mode is Mode.AUTO else self.value.get('manual_hold',False),
             pending={'generation':generation,'host_boot_id':self.host,'deadline_ms':int((now+timeout)*1000),
                      'arm_after_apply':arm,**(manual or {})},requests=[])
 
@@ -233,7 +239,8 @@ class AuthorityStore:
 
     def transition(self,request_id):
         """Original result only. Reading a record never executes or renews it."""
-        canonical(request_id)
+        from .ipc_contract import request_key
+        request_key(request_id)
         with self._lock:
             row=next((r for r in self.value.get('transitions',[]) if r['request_id']==request_id),None)
             if self.error and (row is None or row['phase']!='COMMITTED'):
@@ -246,7 +253,9 @@ class AuthorityStore:
 
     def begin_transition(self,request_id,spec,now_ms):
         """Actor entry: persist fixed intent/target/deadline before preparation."""
-        canonical(request_id)
+        from .ipc_contract import request_key
+        from .history import candidate,admission,room,stamp
+        request_key(request_id)
         with self._lock:
             old=self.transition(request_id)
             if old is not None:
@@ -254,10 +263,17 @@ class AuthorityStore:
                 return old
             if (spec['owner']!=self.value['owner'] or spec['generation']!=self.value['generation'] or
                     now_ms>=spec['deadline_ms']):raise AuthorityError('transition context expired/changed')
-            rows=self.value.get('transitions',[])
+            fields=candidate(self,now_ms)
+            submitted=spec.get('provider_request',spec)
+            error=admission(self,request_id,submitted,now_ms,fields)
+            if error:raise AuthorityError(error)
+            rows=fields.get('transitions',self.value.get('transitions',[]))
             if len(rows)>=TRANSITION_LIMIT:raise AuthorityError('transition history full; no eviction')
             row=dict(request_id=request_id,host_boot_id=self.host,spec=spec,phase='PREPARING',reason=None)
-            self.update(transitions=[*rows,row]);return self.transition(request_id)
+            row=stamp(self,row)
+            fields['transitions']=[*rows,row]
+            if not room({**self.value,**fields}):raise AuthorityError('HISTORY_BYTES_RESERVED')
+            self.update(**fields);return self.transition(request_id)
 
     def finish_preparation(self,request_id,phase,*,evidence=None,reason=None):
         with self._lock:
@@ -298,6 +314,8 @@ class AuthorityStore:
             generation=self.value['generation']+1
             row.update(phase='COMMITTED',committed_generation=generation)
             self.update(generation=generation,mode=spec['mode'],owner=spec['target_vm'],reason='planned_handoff',
+                manual_hold=(spec.get('provider_request',{}).get('manual_hold',self.value.get('manual_hold',False))
+                             if spec['mode']=='MANUAL' else False),
                 phase='PENDING',rearm_required=not arm,requests=[],
                 **({'manual_input_profile':'manual-session-1'} if 'manual_session' in spec else {}),
                 pending=dict(generation=generation,host_boot_id=self.host,

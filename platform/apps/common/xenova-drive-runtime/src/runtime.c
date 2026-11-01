@@ -87,6 +87,7 @@ static struct xd_delivery deliveries[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
 #endif
 static struct xd_inputs cycle_inputs;
 static const struct xd_received *command_input=&cycle_inputs.input;
+static int64_t command_valid_until;
 static struct xd_candidate candidate;
 static size_t delivery_count;
 static uint64_t delivery_overflow;
@@ -228,6 +229,13 @@ bool xd_stopping(void)
 		requested = xt_snapshot_request(true) == 0;
 	}
 	const char *duration = getenv("XD_TEST_DURATION_MS");
+	/* Native fixture only: request the same cooperative cleanup before its
+	 * outer test timeout. Never used by a target/operating VM. */
+	const char *stop_file = getenv("XD_TEST_STOP_FILE");
+	if (stop_file) {
+		FILE *request = fopen(stop_file, "r");
+		if (request) { fclose(request); stop_request(); }
+	}
 	if (duration && k_uptime_get() - app_start_ms >= strtoll(duration, NULL, 10)) {
 		atomic_set(&stopping, 1);
 	}
@@ -286,7 +294,7 @@ void xd_owner_context(struct xd_inputs *out)
  if(!xd_context_get(&value)){
   strcpy(out->app_instances[0],value.auto_instance_id);strcpy(out->app_instances[1],value.manual_instance_id);
  }
- memset(value.password,0,sizeof(value.password));
+ memset(value.password,0,sizeof(value.password));memset(value.world_password,0,sizeof(value.world_password));
 #else
  ARG_UNUSED(out);
 #endif
@@ -301,7 +309,7 @@ bool xd_owner_instance(int index,const char *instance)
  struct xt_bootstrap value;
  if(index<0||index>1||!instance||!instance[0]||xd_context_get(&value))return false;
  bool matches=!strcmp(instance,index?value.manual_instance_id:value.auto_instance_id);
- memset(value.password,0,sizeof(value.password));return matches;
+ memset(value.password,0,sizeof(value.password));memset(value.world_password,0,sizeof(value.world_password));return matches;
 #else
  ARG_UNUSED(index);ARG_UNUSED(instance);return true;
 #endif
@@ -313,10 +321,16 @@ int xd_client_prepare_dual(struct xm_zclient *client,const char *control,const c
 const char *xd_vm_id(void) { return cycle_inputs.vm_id; }
 int xd_command_input(const char *type)
 {
+	command_valid_until=0;
 	if (!strcmp(type,"drive.input")) { command_input=&cycle_inputs.input; }
 	else if (!strcmp(type,"perception.result") && cycle_inputs.dual_mode) { command_input=&cycle_inputs.perception; }
+	else if (!strcmp(type,"world.track") && cycle_inputs.dual_mode) { command_input=NULL; }
 	else { return -EINVAL; }
 	return 0;
+}
+int xd_command_bound(int64_t valid_until_ms){
+ if(valid_until_ms<=0)return -EINVAL;
+ command_valid_until=valid_until_ms;return 0;
 }
 int xd_publish(struct xm_zclient *client,const char *topic,const char *type,const char *payload)
 {
@@ -333,7 +347,7 @@ int xd_iteration_begin(void)
 {
 	memset(&current, 0, sizeof(current));
 	current.iteration_begin = now_us();
- command_input=&cycle_inputs.input;
+ command_input=&cycle_inputs.input;command_valid_until=0;
 	int rc = xd_io_snapshot(&cycle_inputs);
 	if (rc) {
 		/* Do not wait or mix generations. Missing input follows the existing
@@ -382,7 +396,7 @@ int xd_completed_work(uint64_t release,uint64_t begin,uint64_t end,
  current.release=release;current.completed=next.loop_seq;
  current.missed=next.deadline_miss_count-misses;current.skipped=next.skipped_release_count-skips;
  work_finished_ms=finished_ms;
- cycle_inputs=*source;command_input=&cycle_inputs.input;
+ cycle_inputs=*source;command_input=&cycle_inputs.input;command_valid_until=0;
  return 0;
 }
 
@@ -440,7 +454,8 @@ void xd_command(struct xm_zclient *client, const char *topic, const char *json, 
 		strcpy(candidate.app_instance,cycle_inputs.app_instances[!strcmp(info.app_id,"manual")?1:0]);
 #endif
 		candidate.expires_ms=work_finished_ms+CONFIG_XENOVA_DRIVE_COMMAND_MAX_AGE_MS;
-		if ((v_mps!=0.0f||steer_rad!=0.0f) && !command_input->error)
+		if(command_valid_until)candidate.expires_ms=MIN(candidate.expires_ms,command_valid_until);
+		if ((v_mps!=0.0f||steer_rad!=0.0f) && command_input && !command_input->error)
 			candidate.expires_ms=MIN(candidate.expires_ms,command_input->received_ms+input_timeout_ms+1);
 		if (strlen(topic)>=sizeof(candidate.topic)||strlen(json)>=sizeof(candidate.json)) current.rc=-EMSGSIZE;
 		else { strcpy(candidate.topic,topic);strcpy(candidate.json,json);current.rc=xd_io_command(&candidate); }

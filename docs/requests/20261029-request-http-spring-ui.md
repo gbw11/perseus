@@ -1,7 +1,7 @@
 # HTTP·Spring·화면 종단 연결 요청
 
 담당: FastAPI·Spring·프론트. 상태: **6-A 인계 준비 / 담당 제품 구현·종단 수락 전**.
-기존 D02·D08을 유지한다. 아래가 2026-11-01 현재 지시다. 과거 소스·실패·요구는 마지막 이력에 보존했다.
+기존 D02·D08을 유지한다. 아래가 2026-11-02 현재 지시다. 과거 소스·실패·요구는 마지막 이력에 보존했다.
 
 ## 현재 담당자가 할 일
 
@@ -71,6 +71,17 @@ AUTO→MANUAL은 현재 중립 후 새 조작을 요구한다. 재접속의 옛 
 DEC-16의 앱 lifecycle은 QUALIFIED·실제 준비·출력 허가를 분리하고 DEC-15·ARCH-T08 영상은 실제 프레임 진행·만료를 표시한다.
 Gateway 내부 submit_transition queue는 원격 API가 아니다. 별도 로컬 Worker에는 [실제 UDS/client](../contracts/gateway-provider-v1.md)가 제공된다.
 이 연결은 외부 HTTP endpoint가 아니며 Spring/화면의 기존 관리 API를 바꾸지 않는다. 화면의 모드/복귀 연결은 기존 권한·현재 route를 확인해 담당자가 수락한다.
+
+현재 지도형 앱 제공물은 [drive-world-1](../contracts/drive-world/README.md)과
+[같은 후보의 검증 기록](../verification/recovery-scenario-closure-20261030.md#history-driving-app)에 있다.
+화면에서는 사용자 MANUAL 선택과 자동 장애 대체를 구별한다. 제공자 계약의 `manual_hold=true`로
+선택한 MANUAL은 지도 입력이 회복됐다는 이유만으로 AUTO로 바뀌지 않는다. 기존 resume/countdown의
+권한 있는 명시 요청으로 복귀한다. 이 선택을 Worker의 장애 판단이나 일반 VM 제어에 추가하지 않는다.
+AUTO→MANUAL의 장치 STOP/APPLIED·정지 관측 대기와 원 세션의 중립/새 조작도 별도로 표시한다.
+시리얼 write·앱 준비·권위 커밋을 물리 정지로 표시하지 않는다. 같은 MANUAL 세션의 A/B 승계는
+이미 유효한 조작을 이어가며, 화면이 새 조작이나 새 세션을 합성할 필요가 없다.
+이 결과를 노출할 HTTP/WebSocket 위치는 위 실제 입력 생산 경로와 현재 인증을 대조해 연결한다.
+로컬 UDS가 있다는 이유로 새로운 외부 route가 제공됐다고 안내하지 않는다.
 
 ## 선행조건과 담당 회신
 
