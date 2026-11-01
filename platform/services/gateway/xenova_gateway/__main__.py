@@ -15,6 +15,7 @@ from .runner import GatewayRunner
 from .sink import MockSink, SerialSink, Sink, SinkError
 from .authority import AuthorityStore,GatewayLease,AuthorityError,GATEWAY_LOCK
 from .verified_runner import VerifiedGatewayRunner
+from .diagnostics import GatewayDiagnostics
 
 log = logging.getLogger("xenova_gateway")
 
@@ -48,7 +49,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     stop = threading.Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stop.set())
-    lease=None;client=None;monitor=None;runner=None;sink=None
+    diagnostics=GatewayDiagnostics(log)
+    lease=None;client=None;monitor=None;runner=None;sink=None;failure=None;cleanup_errors=[]
     try:
         from xenova_mqtt import Identity,XenovaClient
         from xenova_mqtt.drive_binding import BindingFile
@@ -81,13 +83,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         log.info('Gateway profile=%s sink=%s',settings.profile,settings.sink)
         runner.run(stop)
     except (AuthorityError,SinkError,OSError,ValueError) as exc:
-        log.error('Gateway stopped: %s',exc);return 2
+        failure=exc
     finally:
+        active_failure=sys.exc_info()[1]
         stop.set()
-        if client:client.stop()
-        if sink and runner is None:sink.close()
-        if monitor:monitor.join(timeout=1)
-        if lease:lease.close()
+        # 한 보조 종료 실패가 나머지 소유 반환이나 최초 실행 오류를 덮지 않게 한다.
+        for finish in (client.stop if client else None,
+                       sink.close if sink and runner is None else None,
+                       (lambda:monitor.join(timeout=1)) if monitor else None,
+                       lease.close if lease else None,diagnostics.close):
+            if finish is not None:
+                try:finish()
+                except Exception as error:cleanup_errors.append(error)
+        if active_failure is not None:
+            import traceback
+            for error in cleanup_errors:
+                active_failure.add_note('Gateway cleanup also failed:\n'+''.join(traceback.format_exception(error)))
+    if failure is not None:
+        log.error('Gateway stopped: %s',failure,exc_info=(type(failure),failure,failure.__traceback__))
+    for error in cleanup_errors:
+        log.error('Gateway cleanup failed: %s',type(error).__name__,exc_info=(type(error),error,error.__traceback__))
+    if failure is not None or cleanup_errors:return 2
     if monitor and monitor.is_alive():log.error('trust reader did not finish');return 2
     return 0
 

@@ -24,6 +24,10 @@ class VerifiedGatewayRunner(GatewayRunner):
         self._control=None;self._control_message_id=None;self._connection=None;self._output_broken=False
         self.submissions=deque(maxlen=8192);self.serial_accepted=0;self.serial_failed=0;self.serial_context_rejected=0
         self._latest_commands={};self._command_lock=__import__('threading').Lock();self.aux_publish_failures=0
+        self.aux_offline=0;self.aux_publish_exceptions=0;self.aux_first_exception=None
+        self.aux_transport_errors=0;self.aux_internal_errors=deque(maxlen=16)
+        self.aux_internal_repeated=0;self.aux_internal_dropped=0;self._aux_last_internal=None;self._aux_last_transport=None
+        self.aux_transport_details=deque(maxlen=16);self.aux_first_transport=None;self.aux_transport_dropped=0
         # Local integration seam, deliberately not an HTTP/MQTT API. Enqueue is
         # nonblocking; durable acceptance is reported later by the actor.
         self._transitions=__import__('queue').Queue(maxsize=8)
@@ -186,11 +190,14 @@ class VerifiedGatewayRunner(GatewayRunner):
         record={'source':source,'frame_counter':frame.counter,'generation':frame.generation,
                 'encoded_hex':data.hex(),'submitted_monotonic':now,'device_applied':None}
         if isinstance(action,ForwardDrive):record.update(v_mps=action.v_mps,steer_rad=action.steer_rad)
+        serial_error=None
         try:
             accepted=self._sink.write(frame,now)
             if accepted!=len(data):raise SinkError('serial acceptance length unavailable/partial')
             self.serial_accepted+=1;record['serial_result']='accepted';record['accepted_bytes']=accepted
-        except (SinkError,OSError):
+        except (SinkError,OSError) as error:
+            serial_error=error;cause=error.__cause__ or error
+            record['failure_cause']={'cause_type':type(cause).__name__,'errno':getattr(cause,'errno',None)}
             self.serial_failed+=1;record['serial_result']='failed';self._output_broken=True
             record['failure_reason']=getattr(self._sink,'failed_reason',None) or 'OUTPUT_SUBMISSION_FAILED'
             self.machine.output_permitted=False;self.machine._authorized=False
@@ -200,6 +207,12 @@ class VerifiedGatewayRunner(GatewayRunner):
                 # Fence in RAM, then attempt STOP before failure-journal fsync.
                 # A failed STOP does not recurse; device application stays unknown.
                 self._submit(ForwardStop(action.generation))
+            if serial_error is not None:
+                cause=serial_error.__cause__ or serial_error
+                record['failure_cause']['message']=str(cause)
+                if not isinstance(cause,(OSError,SinkError)):
+                    import traceback
+                    record['failure_traceback']=''.join(traceback.format_exception(serial_error))
             self.machine._fail('OUTPUT_PATH_FAILED',now)
 
     def _emit(self,actions):
@@ -207,12 +220,42 @@ class VerifiedGatewayRunner(GatewayRunner):
             if isinstance(action,(ForwardDrive,ForwardStop)):self._submit(action)
             elif isinstance(action,PublishControl):self._publish_control(action.payload,self._clock())
             elif isinstance(action,PublishEvent):
+                if not self._client.connected:
+                    self.aux_publish_failures+=1;self.aux_offline+=1
+                    if self.aux_offline & (self.aux_offline-1)==0:
+                        __import__('logging').getLogger(__name__).warning('auxiliary event unavailable reason=OFFLINE count=%d',self.aux_offline)
+                    continue  # 정상 오프라인은 예외를 만들어 잡는 경로가 아니다.
                 try:
-                    if not self._client.connected:raise ConnectionError('auxiliary publisher offline')
                     super()._emit([action])
-                except Exception:
-                    self.aux_publish_failures+=1
-                    __import__('logging').getLogger(__name__).warning('auxiliary event submission unavailable type=%s',action.type)
+                except Exception as error:
+                    self.aux_publish_failures+=1;self.aux_publish_exceptions+=1
+                    chain=error.__cause__ or (error.__context__ if not error.__suppress_context__ else None)
+                    if isinstance(error,OSError) and chain is None:
+                        self.aux_transport_errors+=1
+                        signature=(type(error).__name__,error.errno,action.type,str(error))
+                        if signature!=self._aux_last_transport or self.aux_transport_errors & (self.aux_transport_errors-1)==0:
+                            __import__('logging').getLogger(__name__).warning('auxiliary event unavailable reason=TRANSPORT_ERROR cause=%s errno=%s event=%s count=%d',
+                                signature[0],signature[1],signature[2],self.aux_transport_errors)
+                        if signature!=self._aux_last_transport:
+                            detail={'cause_type':signature[0],'errno':signature[1],'event':signature[2],'message':signature[3]}
+                            if self.aux_first_transport is None:self.aux_first_transport=detail
+                            if len(self.aux_transport_details)==self.aux_transport_details.maxlen:self.aux_transport_dropped+=1
+                            self.aux_transport_details.append(detail)
+                        self._aux_last_transport=signature
+                        continue
+                    # 서로 다른 내부 결함을 transport/pending으로 합치지 않는다.
+                    # 같은 cause/type/message/발생 위치의 연속 반복만 stack 재구성을 생략한다.
+                    import traceback
+                    location=tuple((f.f_code.co_filename,n,f.f_code.co_name) for f,n in traceback.walk_tb(error.__traceback__))
+                    signature=(type(error).__name__,str(error),location) if chain is None else object()
+                    if signature==self._aux_last_internal:self.aux_internal_repeated+=1
+                    else:
+                        detail={'cause_type':type(error).__name__,'traceback':''.join(traceback.format_exception(type(error),error,error.__traceback__))}
+                        if self.aux_first_exception is None:self.aux_first_exception=detail
+                        if len(self.aux_internal_errors)==self.aux_internal_errors.maxlen:self.aux_internal_dropped+=1
+                        self.aux_internal_errors.append(detail);self._aux_last_internal=signature
+                        __import__('logging').getLogger(__name__).warning('auxiliary event unavailable reason=PUBLISH_EXCEPTION cause=%s count=%d',
+                            type(error).__name__,self.aux_publish_exceptions)
             else:super()._emit([action])
 
     def run_once(self,timeout_s=.005):

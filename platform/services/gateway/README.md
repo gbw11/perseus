@@ -175,6 +175,40 @@ AUTO로 복귀할 때는 위의 명시적 재개·준비 유지·카운트다운
 
 ## 수신·출력 진단
 
+### 2026-11-01 부가 진단의 실행 경계
+
+실행 진입점은 Gateway logger에 `GatewayDiagnostics` 하나를 소유한다. INFO/WARNING은
+128개 queue에 표준 QueueHandler의 사본으로 전달한다. 일반 메시지는 4096문자에서
+자른 뒤 제어문자를 escape한다(최대 16384문자). 포화/종료 뒤 제출은 기다리지 않고
+drop 계수를 올린다. mutable 인자나 traceback frame을 queue에 남기지 않는다.
+기존 StreamHandler는 별도 잠금의 사본을 쓰고 ENOSPC 등 sink 실패를 같은 stderr에
+다시 출력하지 않는다. 권위/원 전환/receipt/필수 사건/시리얼 명령은 이 queue에 없다.
+
+`snapshot()`의 submitted/dropped/truncated/failed, 첫·최근 sink의 cause_type/errno,
+pending/worker_alive/closing은 내부 점검용이다. 새로운 HTTP/제어 API가 아니다.
+`close()`는 기존 handler를 복구하고 최대 0.25초 join한다. 막힌 worker는 강제 중단하거나
+재시작하지 않으며 worker_alive=true는 종료 미확정이다. handler가 회복한 뒤 실제 종료를
+확인한다. 임의 외부 handler/OS I/O나 Python 종료 전체의 지연 상한을 보장하지 않는다.
+
+ERROR/CRITICAL와 exc_info는 queue 포화·자르기·반복 억제 대상에서 제외하고 기존 sink로
+직접 전달한다. 최근 critical 원문/stack은 객체의 last_critical에도 보존한다. fatal 출력은
+진입점의 자원 종료 뒤 수행한다. SerialSink는 첫 write 오류의 cause_type/errno와 원
+SinkError의 cause를 남긴 후 즉시 반환하여 actor가 출력 철회/STOP을 먼저 시도한다.
+장치 적용 ACK나 물리 정지 완료라는 뜻은 아니다.
+
+정상 오프라인은 예외를 만들지 않고 aux_offline으로 센다. 실제 publish 오류는
+transport(type/errno/event/message)와 내부 결함의 첫 원인·최근 16개 사본을 구별한다.
+동일 type/message/위치의 연속 반복만 stack 재형식화를 생략한다. nested cause는 생략하지
+않으며 원 frame을 보관하지 않는다. 사본 한도 초과·반복은 별도 계수다. 상세 사본은 private
+진단이고 원 payload·credential을 일반 warning에 넣지 않는다. 드문 full stack은 크기를
+임의로 잘라 원인을 없애지 않으므로 모든 결함의 메모리 바이트 상한을 주장하지 않는다.
+
+MEASURE 형식과 INFO 기본 수준은 유지한다. 비활성 INFO에서는 필드 join/형식화를
+하지 않는다. `tools/measure_failover.py`가 MEASURE를 소비하므로 수준·누락 계수와
+포화 여부를 함께 기록한다. 포화 측정에서 누락된 행을 정상 측정값으로 채우지 않는다.
+큐/invalid 반복 경고는 누적 횟수 1,2,4,8…에 요약하며 rejected_commands/dropped_queue_full을
+계속 센다. 실행 주기·필수 출력·오류 코드·공개 거절 사유는 바꾸지 않는다.
+
 수신 판정은 매 회 최대 64건 또는 1ms 처리 뒤 진행한다. 명령은 허용된 실행/현재
 세대/VM/앱의 최신 네 칸으로 분리한다. 큐 상한이나 tick 5ms는 전체 최악 지연 보장이 아니다.
 필수 원본 fsync·serial I/O·호스트 스케줄링 비용은 따로 측정해야 한다.
