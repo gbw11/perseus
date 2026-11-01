@@ -46,13 +46,13 @@ class FixtureTransport:
 
 
 class Lab:
-    def __init__(self, directory):
+    def __init__(self, directory, *, history_policy=None):
         self.root = Path(directory)
         if not self.root.name.startswith('xenova-gateway-lab'):
             raise ValueError('owned xenova-gateway-lab directory required')
         self.root.mkdir(mode=0o700, exist_ok=True)
         self.lease = GatewayLease(self.root/'gateway.lock').acquire()
-        self.auth = AuthorityStore(self.root/'authority', HOST, uid=os.geteuid(), mountpoint=None)
+        self.auth = AuthorityStore(self.root/'authority', HOST, uid=os.geteuid(), mountpoint=None,history_policy=history_policy)
         fresh = not self.auth.marker.exists()
         if fresh:
             self.auth.initialize(A)
@@ -132,8 +132,12 @@ class Lab:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', type=Path, required=True)
+    parser.add_argument('--history-retry-ms',type=int)
+    parser.add_argument('--history-retention-ms',type=int)
     args = parser.parse_args(argv)
-    lab = Lab(args.directory)
+    from xenova_gateway.history import HistoryPolicy
+    policy=None if args.history_retry_ms is None else HistoryPolicy(args.history_retry_ms,args.history_retention_ms)
+    lab = Lab(args.directory,history_policy=policy)
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT): signal.signal(sig, lambda *_: stop.set())
     print(json.dumps({'endpoint':str(lab.server.path), 'uid':os.geteuid(), 'fixture':True}), flush=True)
