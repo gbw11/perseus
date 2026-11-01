@@ -1347,6 +1347,12 @@ Jetson 누적 지도의 SQLite 저장 검토와 Worker 복구 상태의 저장 �
 
 ### 17.1 기준선의 해석
 
+2026-11 후속의 현재 소스는 `docs/contracts/drive-world/`의 정식 wire와
+`platform/apps/drive/world/`, `planner/`, `zephyr/src/lattice_{app,input}.c`를 연결한다.
+이 문서 6~14·19절을 해당 구현의 수락 기준으로 사용한다. 아래 2026-10 기준선은
+당시 상태를 보존한 비교 자료다. 최신 코드·native/ARM·패키지·실물의 확인 수준은
+[현재 후속 기록](../verification/recovery-scenario-closure-20261030.md#history-driving-app)에서 구분한다.
+
 설계 비교 기준은 **`4bbdef0cb1fa0f11366c7b284014dc9e2c0a9c8e`**와 첨부 보고서다. 현재 구현 범위는 [주행 모듈 설명](../../platform/apps/drive/README.md)과 [기반 검증의 후속 결과](../verification/zephyr-drive-foundation-20261029.md#후속-앱별-수명과-warm-준비-연결)를 함께 확인한다. 독립 계산·앱별 취소/join/재초기화와 명시적 warm 기반 프로필은 로컬/native·ARM으로 검증했다. 원 요청의 준비/조건부 권위 커밋과 세션 입력 소비는 [공통 계약 후속](../verification/zephyr-drive-foundation-20261029.md#후속-요청별-사전-준비와-조건부-권위-커밋)을 따른다. 새 planner·바이너리 지도·실제 상태 전송·입력 생산자·장치·설치본 수락은 별도다. 기반 프로필의 지원을 이 문서 전체의 구현 완료로 확대하지 않는다. D03 수습 상태도 최신 구현 보고와 소스로 대조한다.
 
 | 영역 | 유지할 것 | 바꿀 것 또는 추가할 것 |
@@ -1393,7 +1399,7 @@ D02/D08의 원 key·pending/unknown/completed 구분, fork와 물리 잠금의 �
 | Jetson 인지·지도 담당 | 센서 보정/진행, 공간 누적·도로 모델·snapshot, Python encoder, mapper/health·broker·odom subscriber | C/Python 공통 벡터, 원 센서→지도 의미, 지연·부분 센서·재시작 시험 |
 | Jetson 영상 담당 | HTTP MJPEG/snapshot, 단일 camera 소유 연계, bounded viewer/encoder | viewer 정체·다중 접속 중 mapper 독립, stale frame 표시·실제 대역폭 |
 | ESP32/차량 담당 | encoder·모터/서보 제어, framing/session·명령 만료·적용 feedback·실제 정지 | 실제 구동·반응·제동·reset/timeout·E-stop 시험 |
-| Gateway 담당 | mode/owner/generation·stateful 승계·maneuver 수락·새 앱 binding·device 적용 대응 | 단일 출력·옛 문맥 거절·정상 새 신원 수락·장치 연결 |
+| 박신영 / 플랫폼·Gateway | mode/owner/generation·stateful 승계·maneuver 수락·새 앱 binding·device 적용 대응 | 단일 출력·옛 문맥 거절·정상 새 신원 수락·장치 연결 |
 | Worker 담당 | 앱/Jetson/전달 근거 분리, 로컬 복구와 VM 복구 경합, 준비·재합류 | D01-W 요청 및 새로운 앱 문맥 공동 수락 |
 | Linux/Agent 담당 | 기존 L01~L05·로컬 감독·설치, 필요 시 Jetson Linux service 상태 연결 | Agent 생존≠mapper 진행, 실제 unit·원천·수명·복구 경합 |
 | Spring/프론트 담당 | 필요한 broker 직접 구독·실제 manual input·현재 resume·영상 표시 | bridge 없이 연결, 입력/권한/실제 상태 구분, 영상 단절 표시 |
@@ -1579,12 +1585,16 @@ jetson/
 platform/apps/
   common/xenova-drive-runtime/  # 공통 제어·진행·준비·계산/통신 수명
   common/xenova-mqtt-c/         # 기존 MQTT 전송과 원 메시지 문맥
-  drive/zephyr/                # 공통 펌웨어·앱 어댑터·향후 지도/계획 연결
+  drive/zephyr/                # 공통 펌웨어·lattice_app/input·앱별 worker
+  drive/world/                 # bounded nanopb decoder·map/odom 참조
+  drive/planner/               # 실제 lattice·swept collision·RPP tracker·engine
+  drive/profiles/              # 명시적인 시험 차량·자원 프로필
+  drive/tools/                 # 고정 schema·primitive 생성
   autonomous/                  # 기존 AUTO 계산·관련 시험
   manual/                      # 기존 MANUAL 계산·관련 시험
 
-# 추가할 책임: 지도/path pool, planner/tracker, 앱 감독·상태 동기화
-# 각각의 실제 위치는 위 기존 모듈의 소유·실행 경계를 기준으로 정한다.
+# schema 원본: docs/contracts/drive-world/world.proto와 world.options
+# 실제 구현/시험 수준: recovery-scenario-closure-20261030.md#history-driving-app
 
 esp32/
   protocol/ control/ feedback/ safety/ tests/
@@ -1681,6 +1691,24 @@ commit: `4bbdef0cb1fa0f11366c7b284014dc9e2c0a9c8e`
 | R27 | [Luxonis — RVC2](https://docs.luxonis.com/hardware/platform/rvc/rvc2), [VideoEncoder](https://docs.luxonis.com/software-v3/depthai/depthai-components/nodes/video_encoder) | 온디바이스 깊이·추론·MJPEG의 배치 참고. 기능 지원과 Nano 설치 조합·동시 처리량은 구분하며 v3 문서가 채택 API 버전을 확정하지 않음 |
 | R28 | [Luxonis — Device·host clock syncing](https://docs.luxonis.com/software-v3/depthai/depthai-components/device) | device/host timestamp와 시계 대응. 문서의 통계 오차를 절대 상한으로 쓰지 않고 Jetson↔Pi·ESP32↔Pi와 별도로 검증 |
 | R29 | [Nav2 Jazzy — RPP regulation functions](https://raw.githubusercontent.com/ros-navigation/navigation2/jazzy/nav2_regulated_pure_pursuit_controller/include/nav2_regulated_pure_pursuit_controller/regulation_functions.hpp) | `costConstraint()`의 inflation 계수·inscribed radius를 이용한 거리 환산. Xenova 종합 cost에 그대로 적용하지 않으며 채택 구현은 revision 고정 |
+
+#### 후속 제품 구현에 적용한 원리와 차이
+
+Nav2 공식 구현은 Jazzy commit `d5d768b7b38a05e7cfd2b6c693b786b402161bed`의
+`nav2_smac_planner/src/node_lattice.cpp`와 RPP controller·`regulation_functions.hpp`를
+대조했다. ROS/Nav2 코드를 이식하지 않고 아래 원리를 고정 자원 C 구현으로 작성했다.
+원 구현의 benchmark·최적성·실시간 보장을 Xenova의 보장으로 인용하지 않는다.
+
+| 설계·원문 | 제품 위치·차이 | 직접 연결한 로컬 시험 |
+|---|---|---|
+| 10.4·R16/R17/R26, 운동 primitive·격자 탐색 | `tools/generate_primitives.py`, `planner/lattice.c:lp_start/lp_advance`. 실제 초기 steering 연결, 제한 heap/hash·장애물 heuristic·취소/원 기한 | `test_lattice.py`의 좌/우 우회·곡선·비명목 heading/steering·node/work/deadline 소진 뒤 정상 작업 |
+| 10.5·R6, 차체와 unknown의 의미 | `lp_footprint/lp_validate_path`. 64-row collision index, OBB/SAT·도로·표본 사이 여유. cost 값을 실제 거리로 오인하지 않음 | 독립 footprint 계산·회전 원점·unknown·좁은 통로·새 장애물 |
+| 10.7·R18/R19/R24/R29, 실제 목표 거리의 pure pursuit | `lp_track`. 목표 거리 제곱·Ackermann steering·곡률/종단 속도 제한 후 반응/제동 궤적 확인. 제자리 회전 없음 | 실제 반환 명령을 별도 bicycle 모델로 적분한 우회·복귀·종단 방향 |
+| 12.3~12.4·R23, 완전 사본과 적용 | `engine.c:de_apply/de_prepare`, `lattice_app.c`, Gateway `drive_link.py`. 최대 512점의 실제 path와 현재 target 계산. 옛 명령·허가 복제 없음 | `test_engine.py`, 실제 MQTT G2 교차·거절 후보 뒤 마지막 완전 적용 보존 |
+| 6~7·R4/R7/R8/R9, bounded wire·좌표·시각 | `world.c`, `world.proto/.options`, `odometry.py`. exact odom anchor·명시 offset 구간과 원 관측 나이 | C/Python 교차·NUL/중복/비유한 입력·map/anchor 역순·만료/epoch 교체 뒤 회복 |
+
+제품 `warm-lattice-lab`과 `lattice-lab-1`은 합성 시험 프로필이다. 센서 지도 생산·실제 차량
+보정·ESP32 물리 반응과 고정 Xen 설치본 수락은 위 시험으로 대체하지 않는다.
 
 ### 22.3 이 기준본의 최종 해석
 

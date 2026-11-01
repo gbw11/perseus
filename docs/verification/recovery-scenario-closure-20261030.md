@@ -16,7 +16,8 @@
 | 입력·진단 후속 | [2026-11-01 후속](#defaults-errors-review): CLI/Manager의 선택 자원 생략·원 입력 replay, 포화 trace/비활성 형식화/오프라인 예외·STOP 전 로그 대기 보완. 오류 구분·필수 내구 저장·기존 P55 보호 유지. HTTP/Spring/Agent/Worker 제품·보드·운영 정책은 미변경 |
 | create 입력 호환 보완 | [최신 의미 비교](#create-compatibility): 두 자원의 생략↔원 확정값 명시를 양방향 허용. 과거 형태 비교 선택을 대체하고 기존 완전 명시 호출·지원 원장 혼재를 유지. 내부 저장 버전 선택을 호출자에게 요구하지 않음 |
 | 6번 인계·배포 준비 | [현재 정리](#stage6): 담당자 현재 지시/이력 분리, Gateway 정규 recipe·비활성 unit·이미지 포함 연결, 고정 환경 RPM/QA·ARM Python import·systemd loader·영향 회귀 완료. 운영값·제품 연결·실제 설치와 7번은 별도 |
-| Gateway 제공자 후속 | [G1/G2/G3](#gateway-provider): 실제 별도 process/UDS client·원 결과/취소/보호 종결, stateful 공통 codec/적용·MQTT 수락, 명시 serial feedback-1·PTY 왕복을 구현. Worker·실제 planner·ESP32·운영/차량 수락과 구분 |
+| Gateway 제공자 후속 | [G1/G2/G3](#gateway-provider)의 실제 process/UDS·원 결과·보호 종결·codec·PTY 기반을 유지한다. 실제 지도형 planner·반복 이력·feedback-2는 아래 최신 후속에서 추가했다. 상대 제품·실물 수락은 별도 |
+| 이력·실제 주행앱 최신 후속 | [2026-11-02 결과](#history-drive-final): 원 관측 시각을 보존하는 bounded lattice/충돌 검사/tracker·상태 적용, 독립 MANUAL, 최대 지도·대칭 실행 교체/재합류·동일 Authority 40회 운영을 로컬 확인. 고정 ARM·정규 RPM/QA·설치 ARM codec/client를 검증. 합성 입력/차량·실제 입력 생산자·운영 수락을 구분 |
 | 남은 범위 | 운영 create 시간값 공급·보드 수락, 상위 제품 연결·실제 HTTP polling/정규 설치/보드 수락·API cgroup의 guest backend 문제는 미완료. 모든 부하/스케줄의 무기아나 지연 상한 수락은 아님 |
 
 아래는 후보별 이력이다. 과거 2회/439개/보드 적용 기록을 최종 1회/449개 이후 후보의
@@ -2332,3 +2333,398 @@ G1은 실제 호출·원 회수·지속 보호/정상 종결·권한·포화·�
 G2/G3는 구체 codec/적용/parser/I/O와 실제 통로의 제공자 로컬 수락이며 실제 planner·ESP32·물리 정지 완료는 아니다.
 다음은 Worker 소비→실제 앱 adapter→ESP32 생산/capability/vector·승인 차량값→같은 설치본의7번 공동 수락이다.
 D03-G02 백업 최신성, Agent L05/템플릿 후보, 상위 API/화면·운영 create 시간 정책의 기존 미완료는 그대로다.
+
+<a id="history-driving-app"></a>
+## Gateway 이력 수명과 실제 주행앱 — 2026-11-01 후속
+
+착수 후보는 platform `cdcb61977ceca630dd9862b7cecd3bf04bf29e1c`다.
+MR !314 병합과 원격 feature 삭제를 확인한 뒤 이전 로컬 feature만 정리하고
+`feat/platform/gateway-history-driving-app`을 생성했다. 이후 commit/push·운영 상태는 변경하지 않는다.
+첨부 구현 지시 SHA-256은 `24a1e5ca61e0d6031e94a35d17aa7c435bae54ecb3815108c95768527bb13c1a`다.
+원자료는 PC `C:/Users/SSAFY/Documents/Codex/2026-11-01/xenova-history-drive`에 둔다.
+
+| 설계/수락 | 착수 실제 경로·상태 | 이번 구현/확인 | 외부 경계 |
+|---|---|---|---|
+| A/H01~11 | `provider.py`·`authority.py`: 보호16/전환32·64KiB, 종결 정리 없음 | 시간 포함 key·고정 보존·내구 수락 시 종결 수거·증거 공간 예약 | 운영 retry/retention 승인 |
+| B0/ARCH-T01~09·36 | 기존 v1/v2·G2 codec/runtime 있음. WorldSnapshot protobuf·Pi 공통 odom은 미연결 | 정식 schema·고정 decoder/pool·좌표/시간/odom | Jetson mapper·MCU 센서 생산 |
+| B1/ARCH-T13~15·37 | `adapter.c:automatic`→`auto_step`: 차선편차/전방거리 계산, lattice/RPP 아님 | 실제 bounded primitive 탐색·차체/최종 명령 검사·tracker | 승인 차량 제원/실측 |
+| B2/ARCH-T10~12·16~23·31~35·38 | 실제 독립 worker·join/취소·manual-session·G2 준비/상태 통로 있음. 실제 path 상태는 착수 때 없음 | 실제 firmware 두 개의 path 생산/적용·MANUAL 독립·양방향 재합류를 아래 최종 후보로 확인 | Worker 제품/신뢰 binding·실장치 |
+| C/ARCH-T28~30·34 | 고정 ARM/Yocto/client package 경로 있음 | 최종 ARM 링크·정규 RPM/QA·격리 설치·실제 socket 대조. 상세 범위는 최신 종결표 | 운영 설치·7번·차량 |
+
+### A — 채택한 수명 모델과 변경 기준
+
+사용자가 시간 포함 key와 기존 요청 호환을 승인했다. `ipc_contract.new_request_id`는
+host/단조 발급시각/UUID를 결합한다. 임의 UUID만으로 무기한 정확한 중복 판별을 약속하지 않는다.
+기존 원 기록 자기 검증·동등 spec 비교·원 신원/기한은 유지하고 신규 수락에만 현재 기간/fence를 적용한다.
+
+`history.py:candidate/admission/stamp/room`은 정책·종결/참조·원 기한·고정 보존과 최대 증거 공간을 확인한다.
+긴 별도 정리나 daemon 대신 기존 actor의 단일 수락 저장에 수거/fence를 결합했다.
+활성 exclusion·준비·pending 전환 참조와 저장 미확정은 수거하지 않는다.
+file/parent fsync 성공 전 RAM 교체·공간 반환은 없다. 같은 generation의 예비 VM 보호/취소 반복은 새 generation을 만들지 않는다.
+정책 변경 뒤 원 key 재활성화는 저장 fence로 차단하고 host 변경은 시각 교차 비교 전에 거절한다.
+원 결과 보존과 현재 복구/출력 허가는 별도이며 과거 결과를 성공으로 재구성하지 않는다.
+
+`tests/test_history.py`는 실제 client/UDS/actor/Authority에서 100회 반복·cold 재시작,
+활성 보호·pending 참조·동등 재전달/실제 충돌·EIO·용량 예약/회복·정책/host 변경·과거 UUID 호환을 검사한다.
+첫 국소 실행 `history-first.json/.log`: 39 passed. 대역은 기존 lab의 Xen/app/MQTT/device 경계이며
+이력 구현·socket·파일 저장은 제품 코드다. 180/30ms 등은 로컬 수명 시험값으로 운영 기본값이 아니다.
+전체 회귀와 이후 단계의 최종 후보/제공물은 아래에 이어 기록한다.
+
+A의 전체 Gateway 회귀 `history-regression.json/.log`는 236 passed다. 이후 B0/B2 변경을 포함한
+최종 전체 회귀를 대신하지 않는다. `test_provider_ipc.py`의 기존 저장 중단 시험은 replace 전/후
+미확정과 cold 회수를 직접 검사하므로 같은 시험을 새 ID로 복제하지 않았다.
+
+### B0/B1 — 실제 입력·계산과 변경 판단 근거
+
+`docs/contracts/drive-world/world.proto/.options`를 공통 원본으로 두고 protoc 3.20.3·nanopb 0.4.9.1로
+Python/C를 생성했다. 고정 도구는 작업 전용 디렉터리에만 공급했고 SDK·전역 pip는 바꾸지 않았다.
+`world/dependencies.lock.json`은 실제 사용한 runtime 원문과 도구 archive hash를 보존한다.
+전체 map은 uncompressed 단일 PUBLISH·최대 64×64와 32KiB wire, 별도 3-slot pool로 수신한다.
+보관 셀의 원 age는 유지한다. 출처·epoch·배열·유한 좌표·원 시각/명시 clock interval을 확인하며,
+현재 pose는 지도가 지정한 정확한 odom 표본과 최신 표본의 상대 변환으로 계산한다. 최신 표본으로 anchor를 대체하지 않는다.
+reader lease와 generation을 분리해 이중 반환/ABA가 다른 독자의 참조를 해제하지 않게 했다.
+
+`odometry.py`와 opt-in `feedback-2`는 기존 single serial owner에서 누적 좌우 encoder를 적분한다.
+별도 장치 시계에서 Pi 시간을 빼지 않고 probe send/receive 구간으로 측정 시각 오차를 제한한다.
+첫 표본에서 속도를 추측해 발행하지 않으며, 회전으로 추정한 steering과 측정 steering을 구별한다.
+기존 write-only/feedback-1에 새 프레임을 자동 전송하지 않는다. `odometry-first`: 13 passed로
+실제 PTY/partial frame·wrap·reset·불확실 clock 거절과 정상 회복을 확인했다. 실제 ESP32 생산/보정 수락은 아니다.
+
+`planner/lattice.c`는 현재 heading/steering에서 곡률 변화율을 지킨 Ackermann primitive를 실제 탐색한다.
+고정 정답 경로를 생성물에 넣지 않는다. root는 9개 연결 제어, 내부는 5개 제어를 쓰며 32 heading bin,
+map 해상도의 위치 bin으로 중복을 제한한다. sparse node 8192·heap decrease-key·hash 16384와 최대 probe,
+expansion/충돌/원 deadline/cancel을 각각 제한한다. 이 양자화·가중 heuristic을 완전성·최적성 보장이라고 부르지 않는다.
+`lattice-lab-1.json`은 명시적 test profile이며 차량 운영값이 아니다.
+
+초기 Euclidean 탐색은 정상 우회에서 충돌 연산 한도에 도달했다. 단순 한도 상향 대신 map당
+64-row occupied bit index와 4096-cell 장애물 heuristic을 한 번 구성하고 재사용했다.
+계수의 `cells`는 row probe와 실제 occupied SAT를 세며 전체 bbox 셀 읽기 수인 것처럼 비교하지 않는다.
+heuristic 구성량·메모리는 별도 비용이다. root의 실제 비명목 steering 연결은 9개로 유지하고
+내부의 근접 중복 분기는 5개로 제한했다. 생성 manifest에 두 제어 집합을 모두 기록한다.
+
+초기 tracker는 장애물 corner를 지나지 못하거나 종단 방향을 만족하지 못했다. planner가 tracker의
+명시 편차 여유를 예약하고 실제 충돌 검사한 직선 종단 연결을 추가했다. 경로 목표를 완화하거나
+차량 위치를 경로점으로 옮겨 시험을 통과시키지 않았다. 최종 명령의 steering/rate/accel/brake 제한 뒤
+반응·제동 궤적을 다시 계산하고 차체·표본 사이 간격·위치/방향 불확실성을 검사한다.
+lookahead 상수 대신 실제 target 거리 제곱으로 curvature를 계산한다. cost를 물리 clearance로 환산하지 않는다.
+
+`tracker-uncertainty`: 11 passed, `lattice-frames`: 15 passed다. 후자는 곡선 reference/도로,
+회전 원점, 좌/우 우회·복귀, 비명목 초기 heading/steering, 연산/노드/deadline/cancel 거절 후 정상 새 작업,
+unknown·좁은 통로·새 장애물의 최종 STOP, 실제 tracker 명령을 독립 bicycle 모델에 적분한 진행을 포함한다.
+`engine-first`: world·lattice·engine 28 passed. 실제 C 경로를 전송 상태로 만들고 수신 쪽이
+전체 경로·현재 geometry·tracker 계산을 통과한 경우만 채택하며 잘못된 사본은 기존 유효 경로를 덮지 않는다.
+이 시점의 core 시험은 Zephyr firmware·Gateway가 제출한 최종 명령의 전체 통합 수락을 대신하지 않는다.
+실패한 탐색/시험 harness 실행도 원자료에서 보존하며 이후 변경의 최종 회귀를 아래에 이어 기록한다.
+
+### B2 연결 중 확인한 경계와 보완 기록
+
+`lattice_input.c`의 전용 map/state 수신자와 기존 Pi 제어 수신자를 연결하고,
+`lattice_app.c`에서 실제 planner·tracker·완전 경로 적용을 독립 worker에 연결했다.
+`DriveLinkIO/DriveLinkProvider`는 실제 binary MQTT와 기존 actor/G2를 잇는다.
+full path encode/decode는 별도 I/O 소유자가 수행하며 actor가 또 planner를 구현하지 않는다.
+현재 적용/전달 중 사본을 고정하고, 관측 실패에는 bytes만 보존하며 새 허가는 부여하지 않는다.
+새 binding/app 신원이나 확인된 종료 뒤에만 이전 참조를 반환한다.
+
+호스트 core의 `world-pending-map`은 32 passed다. 이 중 새 교차 시험은 지도→odom 역순에서
+기존 유효 map/명령 보존, 정확한 anchor 도착 뒤 실제 장애물 채택·제한, 정상 새 입력 뒤 진행 회복을
+제품 C 코드로 확인한다. 새 후보는 기존 3-slot pool의 한 writer slot만 사용한다.
+재수신·재파싱 없이 원 관측 나이와 source revision을 유지하고, 교체/만료/종료 때 소유자가 반환한다.
+정상 준비를 위해 무효 anchor를 최신 표본으로 대체하거나 READY 유지 시간을 줄이지 않았다.
+
+초기 통합 실패는 숨기지 않는다. `pair-input`~`pair-tap` 원자료에서 다음을 구분했다.
+
+| 확인 사실 | 수정/판단 | 보존한 조건 |
+|---|---|---|
+| 작은 메시지용 기본 네트워크 예산에서 13KiB map 수신 `-ETIMEDOUT` | 신규 시험 프로필에 두 bounded 큰 본문과 작은 제어용 TCP/window·packet/fragment reserve 명시 | 기존 250ms I/O 기한 상향 없음, 크기 초과는 해당 연결에서 차단 |
+| 고정 native 기본 tick 100Hz, 실제 고정 ARM 10,000Hz | native overlay를 ARM과 같은 해상도로 설정 | 기존 20ms worker/clock 예산 유지 |
+| 원 probe/reply trace의 40~50ms 지연. 고정 SDK `eth_native_tap.c:eth_rx` 기본 RX poll 50ms 확인 | native 전용 TAP poll 1ms. Xen IRQ/실차 수락 근거로 확대하지 않음 | 시계 구간 검증·원 시각·만료 유지 |
+| Paho 2.1에 TCP_NODELAY 기본 설정 없음, header/body가 작은 write로 나뉨 | 선택한 binary 연결과 신규 firmware 프로필에서만 명시 설정 | 구형 firmware 프로필·원 기한·오류 종류 유지 |
+| 새 map이 다른 broker의 정확한 odom보다 먼저 도착해 현재 map을 잠시 쓸 수 없음 | 위의 bounded writer 대기 후 게시 | 이전 map의 원 유효기간까지만 사용, 새 장애물은 기준 표본 뒤 실제 채택 |
+| MQTT 내부 abort가 먼저 socket을 닫으면 기존 마지막 오류 기록을 놓침 | disconnect/input의 원 오류를 보존 | 상세 오류 분류 축소 없음, 종료 뒤 유한 진단만 출력 |
+
+`native-pair-*`는 같은 제품 CMake/main/runtime을 고정 Zephyr로 빌드한 개별 후보다.
+첫 ARM `arm-lattice-picolibc` 성공은 뒤의 위 변경을 포함한 최종 ARM 증거가 아니다.
+minimal libc에 없는 수학 함수를 고정 SDK의 실제 picolibc로 연결했다. 최초 NEWLIB 선택 오류와
+정확한 `ZSOCK_TCP_NODELAY` 심볼 수정 전 빌드 실패도 보존한다. SDK/라이브러리 버전은 올리지 않았다.
+
+현재 전체 통합 수락은 계속 진행 중이다. `pair-anchor`는 두 실제 firmware의 초기
+READY/QUALIFIED를 동시에 확인한 뒤 명시 resume·실제 출력·인계 단계로 진행한다.
+아직 그 이후의 정상 주행/반복 운영 전체 성공으로 보고하지 않는다.
+
+패키지 준비 시 `xenova-gateway` recipe에 실제 `xenova_drive_world` payload와 고정
+`python3-protobuf` 의존성을 연결했다. 별도 Yocto build에서 정규 package 생성을 시도했지만
+고정 `jsoncpp 1.9.7` 소스가 download cache에 없어 `BB_NO_NETWORK=1`의 do_fetch가 실패했다.
+로그는 `/home/ssafy/xenova-history-drive-package-20261101/build/tmp/work/cortexa72-poky-linux/jsoncpp/1.9.7/temp/log.do_fetch.8799`다.
+이것을 source tar/import 또는 RPM 성공으로 바꾸어 기록하지 않는다. 최종 payload 대조·가능한
+install/QA와 동일 후보의 ARM 재빌드 결과는 후속 기록으로 연결한다.
+
+### 2026-11-02 통합 단계의 확인과 남은 반례
+
+`world-scope-validation`은 최신 문자열 NUL/ASCII·중첩 차량 표본 검사를 포함한 제품 C
+시험 32 passed다. `native-validated`의 실제 Zephyr binary SHA-256은
+`47ef8cddf2a290a16c7b86a143cff4d9fb07e5acfef7dd358a1572ed831a5df9`다.
+`pair-posix-validated`는 그 동일 펌웨어 두 개·broker J/P·제품 Gateway actor/Authority·
+별도 프로세스 G1 client·실제 serial codec/PTY를 연결했다. 실제 시리얼 제출 명령만으로
+가상 차량이 이동하고, A→B 적용/새 계산·장애물 우회·reference 복귀·B→A 적용이 진행했다.
+이 회차의 복귀 조건은 위치 편차였으므로 후속에서는 종단 방향도 검사한다.
+정답 path로 차량 pose를 덮지 않았으며 mapper·encoder/차량·Xen/Store binding만 대역이다.
+
+PTY 포화 시험은 `write_timeout=0`인 pyserial 3.5의 EAGAIN 반복 대기를 드러냈다.
+그 시도는 폐기하고 POSIX fd에서 단일 nonblocking `os.write`로 정확히 수락한 바이트를
+반환하도록 고쳤다. EAGAIN/부분 쓰기는 원 실패로 남고 소유자가 종료한 뒤 새 owner의 정상
+쓰기까지 시험한다. fd 없는 URL backend의 기존 유한 쓰기 계약은 별도로 유지한다.
+임의 재시도·기한 연장·시리얼 writer 추가로 해결하지 않았다.
+
+신규 binary 프로필의 계획 인계는 이미 제출한 원 명령의 남은 유효시간만 연속 구간으로
+사용한다. 새 target의 실제 계산·현재 binding/신선도는 여전히 필요하며 원 command expiry와
+독립 OutputOwner의 STOP은 연장하지 않는다. 네트워크에서 붙어 도착한 목표는 실제 차량
+목표 변화율을 어기며 제출하지 않고 정확한 원 목표 하나만 보류한다. 새 입력·STOP·원 나이·
+실제 제출 guard로 대체/폐기하며 범용 큐나 보간 명령을 만들지 않는다.
+
+`manual-hold-posix` 45 passed, `manual-stop-guard` 52 passed는 각각의 당시 후보 결과다.
+G1 선택 `manual_hold=true`는 정상 MANUAL 선택을 내구 보존하고 AUTO 회복만으로 복귀하지
+않는다. 명시 resume/countdown으로만 AUTO로 돌아간다. 새 MANUAL 제어는 같은 Pi/device
+session·generation의 실제 STOP/APPLIED·stationary 보고를 요구한다. 타이머·write 성공을
+물리 정지로 바꾸지 않으며 같은 운전자 MANUAL A/B의 정당한 연속은 별도로 취급한다.
+
+확장 통합 시험의 실패도 보존한다. `pair-modes-idle`의 첫 MANUAL 진행 실패는 준비된 예비가
+없는 시점의 SAFE_STOP→disarmed MANUAL에 시험 호출자가 재무장하지 않았기 때문이다.
+`pair-manual-session`은 현재 generation의 준비 유지 구간 전에 resume를 보낸 시험 오류였다.
+`pair-manual-qualified`는 이를 맞춰 실제 지도 단절→정지 확인→명시 재무장→중립/새 행동→
+MANUAL 주행→현재 키의 MANUAL B 승계까지 진행했다. 이후 AUTO instance 재합류는 아직
+통과하지 않았다. 해당 회차의 `OUTPUT_PATH_FAILED` 최초 cause는 기존 10ms 제출 결과
+미확정이며 원자료에 남긴다. 정상 C/native 단위 통과만으로 이 미완료를 닫지 않는다.
+
+종료 후 자원 계수 후보 `native-resources`의 binary는
+`2fdf4f98c8fbb9b46780528996c08e44f70926b7068d915e0cec17b72fd36f0d`다.
+그 회차의 engine 644,664 bytes 중 map 81,208·search 475,872·path 31,560·odom 55,320은
+포함 항목이며 다시 합산하지 않는다. 두 guest의 종료 보고에서 path lease/writer와 map
+reader/writer는 모두 0이었다. ELF/BSS·network/stack·임시 encode 자원은 별도 집계 대상이다.
+
+패키지 빌드는 미뤄 둔 결과로 마감하지 않고 재개했다. 고정 recipe의 jsoncpp 1.9.7
+`3455302847cf1e4671f1d8f5fa953fd46a7b1404`, abseil-cpp 20260107.1 archive SHA-256
+`4314e2a7cbac89cac25a2f2322870f343d81579756ceff7f431803c2c9090195`, protobuf 6.33.6
+`6e1998413a5bca7c058b85999667893f167434bc`를 작업 전용 download cache에 공급했다.
+Python protobuf sdist도 recipe checksum으로 공급 중이다. 네트워크는 지정 source fetch에만
+허용하고 실제 build는 `BB_NO_NETWORK=1`로 수행한다. 버전·의존성·고정 layer를 바꾸지 않았고
+다른 진행 build나 운영 rootfs를 교체하지 않았다. 아직 최신 정규 RPM 완료 증거는 아니다.
+
+### 실제 재합류 계산 결함과 고정 target 후속
+
+`pair-rejoin-heading`은 위치와 방향의 원 reference 복귀, 지도 단절→현재 세션의 명시
+재무장→중립/새 행동→실제 MANUAL 출력→같은 키의 B MANUAL 출력까지 진행했다.
+그 뒤 A의 새 AUTO instance는 준비되지 않았고, 이번 회차에는 Gateway 출력/내구 실패가
+없었다. 실제 pose `(4.5282, 1.5311, 0.0051)`를 제품 C 시험으로 옮겨 국소 재현했다.
+
+두 원인을 나눠 고쳤다. 기존 합류 목표가 가까워도 종단 직선 0.64m를 새로 확보하도록
+요구하던 조건은, 이미 그 구간 안에서 재구축하는 root에 한해 짧은 정방향 연결을 허용한다.
+각 점·sweep·steering/heading·실제 tracker 검사는 유지한다. 이미 도착한 root는 현재
+차체와 실제 정지 투영을 확인한 stationary 경로로 표현하며 타이머 READY를 만들지 않는다.
+다른 장거리 탐색 노드까지 도착 조건을 풀었던 첫 시도는 기존 closed-loop 회귀에서
+실패해 채택하지 않았다. 같은 정상 우회·실제 종단 도달 assertion을 유지한 채 범위를 좁혔다.
+
+도로 끝 goal은 전면 길이만 빼면 회전 차체 corner와 마지막 반 표본 sweep가 도로 밖으로
+나갔다. `engine.c:de_plan_start`가 해당 margin/guard/sweep를 포함한 차체 corner 반경을
+예약하도록 수정했다. 충돌 검사·goal 거리/방향 허용량·노드/충돌 한도는 완화하지 않았다.
+`short-connection-before`의 원 실패와 중간 두 회귀 실패는 보존한다.
+최종 국소 `terminal-corner-fixed`는 world/lattice/engine 36 passed다. 독립 fixture 기하로
+예상한 endpoint와 실제 제품 goal, 양의 정상 tracker 명령을 함께 검사한다.
+
+ARM `arm-resources-v2`에서는 `.tbss.errno` orphan 경고를 확인했다. 고정 cross toolchain의
+TLS 지원이 Zephyr에 전달되지 않은 상태였으므로 ARM builder가 정식
+`CONFIG_TOOLCHAIN_CROSS_COMPILE_SUPPORTS_THREAD_LOCAL_STORAGE=y`를 전달하고 최종
+`CONFIG_THREAD_LOCAL_STORAGE=y`를 필수 확인한다. `arm-tls`는 경고 없이 빌드·포장했다.
+native host toolchain에는 그 cross 전용 Kconfig symbol이 없으므로 공통 프로필에 넣지 않는다.
+native configure의 중간 실패도 보존한다. 이 ARM 후보는 위 종단 수정 전이므로 최종 재빌드가 필요하다.
+
+Yocto `resume-package.log`의 오프라인 정규 빌드는 2,937 task 완료, Gateway와
+Python protobuf의 package QA·RPM 생성을 통과했다. 기존 kernel I/O-accounting 경고는
+환경 제약으로 남겼다. 이후 수정분은 `package-provider-current`에서 별도로 반영한다.
+source·RPM bytes/mode·target import와 최소 client 설치 검증은 최종 후보에 다시 연결한다.
+
+<a id="history-drive-final"></a>
+### 2026-11-02 최종 후보 — 실제 변경과 수락 기준
+
+위 소제목들은 실패와 수정 과정의 이력이다. `jsoncpp` fetch 부재·planner 재합류 미수락·
+ARM 재빌드 필요라는 당시 판정을 현재 미완료로 읽지 않는다. 착수 HEAD `cdcb61977ceca630dd9862b7cecd3bf04bf29e1c`와
+브랜치는 유지했고 commit/push는 하지 않았다. 최종 변경 파일·해시·diff와 제공 archive는
+PC 원자료 디렉터리의 `delivery-final/CANDIDATE.json`을 기준으로 한다.
+
+| 변경 위치 | 왜 바꿨는가·채택 기준 | 유지한 경계·실제 근거 |
+|---|---|---|
+| `history.py`, `authority.py`, `provider.py`, client | 유한 이력을 삭제/초기화 없이 반복 사용한다. 원 key 발급 시각과 원 deadline에 retry/retention 약속을 고정하고 신규 내구 수락에 종결 수거를 결합 | 활성 exclusion·미확정·PREPARING/PREPARED·pending 참조는 보존. 원 deadline/hash/신원 불변, host/floor fence로 정리한 key의 deadline 변경 재실행 차단. 별도 DB/tombstone 없음 |
+| `world.c`, `lattice_input.c`, 공통 Bootstrap | 실제 정식 binary 입력·exact odom anchor·출처/시계/좌표·고정 pool을 연결. map이 먼저 도착하면 기존 writer slot에서 anchor를 기다림 | 이전 유효 map과 원 age 유지. 잘못된 출처·unknown/부분 배열·NUL·과거 epoch/표본을 정상값으로 합성하지 않음. `test_world.py`·`test_engine.py` |
+| `lattice.c`, `engine.c`, 생성 primitive | 현재 pose/steering에서 실제 탐색·연속 primitive·swept footprint·도로/cell 검사·RPP·최종 반응/제동 경로 검사 | 정답 path·상수 명령·타이머 progress 없음. node/index/heap/연산/기한/취소 상한과 실패 후 새 정상 작업을 검사. 무제한 탐색이나 한도 상향으로 해결하지 않음 |
+| `lattice_app.c`, workers/runtime | 선택된 실제 계산의 채택·준비·progress·상태 생산을 연결하고 AUTO instance 교체에서 실제 cancel/join/참조 반환 | MANUAL·I/O는 AUTO join을 기다리지 않음. 대기 자격·적용·새 계산·출력 허가는 별개. 동일 두 firmware의 양방향 인계·새 실행 합류 |
+| `drive_link.py`, `state_transfer.py` | 현재 owner의 완전 path 사본과 target의 실제 적용/계산을 기존 G2에 연결. 큰 body decode/encode는 별도 I/O owner에서 수행 | full copy 4·metadata 8·target별 inflight 1, 적용/전달 중 참조 고정. 이전 유효 사본과 권한 종료 뒤 늦은 갱신 구분. PUBACK으로 적용 판정하지 않음 |
+| `sink.py`, `output_guard.py`, `verified_runner.py` | 실제 nonblocking 단일 write·원 목표 변화율 대기·MANUAL 유지/정지 관측을 연결 | EAGAIN/부분 write는 실패. command 만료·10ms 제출 확인은 그대로. 원 나이를 늘리지 않는 보류 한 칸, STOP은 즉시 폐기/보호. 희귀 최초 cause 보존 |
+
+#### 마지막에 확인한 시간 판정 결함
+
+guest→Pi clock은 점 값이 아니라 구간이다. 구간을 좁히면 현재 시각의 상한 추정이
+이전 map 수신 시각의 상한보다 조금 낮아질 수 있다. 기존 `now < received_us` 판정은
+이 경우에도 `OBSERVATION_EXPIRED`로 만들었다. `clock-upper-original`은 실제 engine에서
+원 관측 Pi 하한 1,100,000us·원 만료 1,400,000us인 map을 1,220,000us에 수신한 뒤,
+유효한 현재 상한 1,215,000us로 추종하면 DE_EXPIRED가 되는 반례를 재현했다.
+그 이전 `clock-upper-before`는 시험 odom 순서부터 잘못돼 거절됐으므로 결함 재현 근거로 쓰지 않는다.
+
+`dw_snapshot_time`이 원 관측 하한과 원 publication 하한으로 절대 만료를 계산하도록 바꾸고
+engine 입력·qualifier·명령 만료가 같은 판정을 사용하게 했다. 수신 나이 clamp·새 TTL·기한 연장은 없다.
+1,215,000us에서는 실제 양의 tracker 명령, 1,400,001us에서는 기존 만료 거절을 직접 검사한다.
+원 수신/관측 값 불변·미래 publication·trust 만료도 검사한다. `clock-bound-final`은 제품
+world/lattice/engine **40 passed**다. 고정 생성기 3.20.3의 deprecation 경고는 도구 이력이며 런타임 결함으로 바꾸지 않는다.
+
+#### 같은 후보의 실제 통합과 자원 수명
+
+`pair-clock-final`은 고정 `native-clock-bound-final` binary
+`c2bdd792bc615f764bd078ae5b1d6f4767f5618ab725b5bf030ca3b4ad00ff45` 두 개를 실행했다.
+운영과 분리한 새 network namespace의 broker J/P·제품 Paho/MQTT·Gateway actor/Authority·
+별도 process G1 client·single-owner serial/PTY를 사용했다. mapper·rear-axle 물리/encoder·
+root 신뢰 binding/Xen/Store만 fixture다. planner/tracker/충돌/상태 적용은 제품 C다.
+
+최대 64×64 입력에서 실제 양의 진행→장애물 우회→위치·방향 복귀→A/B stateful 승계,
+지도 단절→실제 STOP/APPLIED·정지 표본→명시 재무장·중립/새 행동→MANUAL 진행,
+같은 세션의 B MANUAL 진행→AUTO instance cancel/join·새 계산→사용자 명시 AUTO 복귀,
+양방향 실행 SIGKILL→현재 새 binding·실제 Standby 재합류를 수행했다.
+그 뒤 명시적으로 유지한 중립 MANUAL에서 최대 map을 계속 수신하며 같은 Authority에
+40개의 protect→동등 replay→cancel→보존 만료/수거를 진행했다. 생성마다 빈 Authority를 만들지 않았다.
+마지막에 정리된 key 조회의 `RESULT_NOT_RETAINED_OR_UNKNOWN`, deadline 변경 submit의
+`REQUEST_WINDOW_EXPIRED`, 새 정상 요청/Standby를 확인했다. MANUAL 40회의 중립도 실제 계산이며 타이머 progress가 아니다.
+
+이 실행은 rc0·error 없음, 시리얼 제출 **4,688건 모두 수락**·실패0이었다.
+독립 물리 OBB/SAT 대조는 9,000 표본에서 도로 이탈/장애물 충돌 없이 최소 분리 투영
+0.09669m를 확인했다. 이는 정확한 Euclidean 최소 거리나 실차 여유 보장이 아니다.
+정상 guest는 원 join에서 rc0, map reader/writer·path lease/writer0으로 끝났다.
+의도한 두 SIGKILL의 -9는 정상 cleanup 성공으로 세지 않는다. 그 다음의 새 guest가 실제로 진행했다.
+FD는 scenario 객체 내부에서 5→9였지만 모든 client/callback 객체 수명 종료 뒤 **5→5**,
+잔존 thread·정리 오류·예상 밖 자식 종료는 모두0이다. Paho 재사용 wakeup FD가 살아 있는
+client 객체에 남는 시점과 객체 해제 후를 분리했으며 live FD를 강제로 닫아 통과시키지 않았다.
+
+별도 `pair-support-armed-final`은 같은 firmware·Gateway·최대 map에서 실제 양의 DRIVE를
+확인한 다음, 원 보호 수락의 `atomic_json`과 CRITICAL 진단 handler를 함께 막았다.
+두 호출자가 아직 대기 중일 때 독립 owner의 watchdog STOP1과 실제 PTY의 STOP 수신을
+확인하고 나서 sink를 해제했다. 원 보호는 PROTECTED로 내구 수락됐고 정당한 cancel 뒤
+현재 출력이 다시 진행했다. 희귀 진단의 원 문구도 남았다. rc0·제출917건 모두 수락,
+독립 기하 표본1,865개·FD5→5·잔존 thread0·네 자식 정상 종료다.
+이는 STOP 제출/가상 장치의 목표 철회 근거이며 실제 물리 정지나 모든 fatal 경로의 무대기를
+의미하지 않는다. 첫 `pair-support-final`은 인계 직후 아직 DRIVE가 아닌 STOP 상태에서
+watchdog 증가를 기다린 시험 선행조건 오류였다. 실패를 보존하고 실제 DRIVE/원 expiry를
+확인한 뒤 지연시키도록 고쳤으며 watchdog 기한은 바꾸지 않았다.
+
+이전 `pair-maximum-final`·`pair-maximum-cleanup`은 기능 진행 뒤 자원 계측 위치 때문에
+전체 rc1이었으므로 최종 성공에 합산하지 않는다. `pair-final-scope`의 10ms 제출 미확정은
+실제 `OUTPUT_PATH_FAILED`로 남겼다. `pair-final-scope-2`·`pair-final-resource`·
+`pair-final-manual-history`의 관측 만료/전환 중단도 보존한다. 일부는 위 시각 판정 반례와
+같은 잘못된 만료 조건의 영향을 받았으며 모든 지연을 그 결함 하나로 단정하지 않는다.
+오프라인 물리 대조는 owner 종료 뒤 실행한다. 대조 자체의 Python GIL 비용을 살아 있는
+10ms 제출 경로에 주입했던 이전 계측과 제품 지연을 구분한다.
+
+#### 실제 비용·자원과 계측 범위
+
+| 경로 | 실제 계수/상한 | 해석 |
+|---|---|---|
+| 종결 수거+새 보호 수락 | `history-cost-final`: 필수 atomic save1·file/parent fsync2·1,096 bytes | 같은 수락 저장에 수거 포함. 5회씩 get/replay/history의 추가 save/fsync0. 필수 저장을 best effort로 바꾸지 않음 |
+| 원 보호 get/replay | `IPC_COST.json`: 40 get·8 replay, 추가 save0 | 당시 전체 Gateway 회귀의 실제 UDS/actor/store. lookup actor 44.8~71.9us, 호출 10.83~13.66ms는 fixture 표본이며 운영 상한 아님 |
+| engine 저장 | 677,488 bytes | map81,208·search508,640·path31,560·odom55,320은 포함 항목. 여기에 다시 더하지 않음 |
+| 최대 입력 실제 우회 탐색 | 확장1,395·primitive6,974·footprint118,523·cell/row/SAT886,620·취소 확인353,966 | `pair-support-armed-final`의 한 firmware/한 실제 탐색. node high-water2,194·open1,359·index probe5. A/B 값을 중복 합산하지 않음 |
+| 종단 연결 보완 | node별 실제 최대 lateral offset 32KiB 추가 | 단순 near-reference 연결과 실제 우회 뒤 settling을 구분. 연산/goal/collision 한도는 유지. 임시 메모리를 숨긴 비용 감소 주장 없음 |
+| 별도 I/O/보관 | map3·path3·odom128, wire32KiB, map/state MQTT 분리, 네트워크 fragment512×256B | decoder/encode·상태 사본·thread stack은 engine 외부. 전체 정적 배치는 ARM ELF/BSS로 대조 |
+| 진단 | 첫 cause·8개의 최근 서로 다른 decode 사유·누락 계수 | invalid마다 stack/출력하지 않되 오류 종류·희귀 내부 결함을 합치지 않음. 기존 slow CRITICAL/저장 대기 중 독립 명령 만료 STOP 회귀 유지 |
+
+신규 planner에 과거의 같은 알고리즘 기준선은 없다. 기존 단순 AUTO 대비 속도 개선률을 만들지 않는다.
+취소 확인·node/open/index high-water는 epoch별 실제 카운터다. SIGKILL한 첫 epoch의 종료
+카운터를 새 실행의 값으로 채우지 않는다. compiler direct frame과 실제 전체 call-chain
+stack peak, host 관측 최대와 Xen WCET도 구분한다. 실제 lock wait 분포·Xen wakeup/IRQ·
+SD/USB·실차 부하의 상한은 이번 자료로 수락하지 않는다.
+
+#### 소스·ARM·정규 패키지 제공 수준
+
+고정 Zephyr `684c9e8f32e4373a21098559f748f06915f950c9`·SDK GCC14.3.0/picolibc의
+`arm-clock-bound-final`은 rc0, source digest
+`f02eb94420424b088162cbcc4b7dd64310058dfb411fae3bb6084357d7555b6f`, firmware SHA-256
+`8b79b56428126601cd1e0dd5c3788d7107ba0ee1427a207386a8a34961459631`이다.
+ELF/map에서 `lp_advance/lp_track/lp_footprint/de_track/dw_snapshot_time/drive_lattice_start`의
+실제 링크, TLS/stack sentinel·16MiB, Zephyr+nanopb license와 receipt/source bytes를 확인했다.
+사용 RAM은 **2,176KiB/16MiB**다. 전체 RAM을 늘려 planner를 수락하지 않았다.
+`BUILD_RECEIPT.json`의 direct stack frame audit는 호출 사슬 전체 peak 측정을 대신하지 않는다.
+이 ARM 바이너리를 native 또는 qemu-user로 실행했다고 쓰지 않는다.
+
+`package-history-drive-final`의 실제 정규 빌드/QA·`RUNTIME_PACKAGE_BUILD`가 성공했다.
+`PACKAGES.json`의 **46개 runtime RPM closure**, 하위32개 payload와 Gateway/MQTT/world
+Python 바이트·0644 모드, disabled unit/preset·활성 설정 미생성을 대조했다.
+실제 ARM Linux Python3.14.7/QEMU에서 설치 모듈68개 import와 socket side effect 부재를 확인했다.
+`TARGET_CODEC.json`은 source PYTHONPATH 없이 설치된 protobuf6.33.6/upb가 독립 protoc golden
+623 bytes와 최대 25,305 bytes/64×64를 decode/encode하고 중복·부분·oversize를 거절한 결과다.
+`CLIENT_PACKAGE`는 서버/Paho/protobuf 없는 최소 client root의 ARM import,
+`TARGET_SOCKET`은 설치 ARM client→실제 UDS→설치된 Gateway 코드의 submit/get/cancel이다.
+후자는 Gateway 전체 ARM 실행·실제 앱/Xen/장치 시험은 아니다.
+
+Gateway 전체 `gateway-current-final`: **254 passed**, 추가 저장 계수 시험 `history-cost-final`: **1 passed**.
+같은 시험을 중복 합산한 총 회귀 수로 표시하지 않는다. 공용 C `COMMON_C_BUILD`: ASan/UBSan
+6 suite·120,000 동시 payload parse 포함 통과. `platform-current-final`: **68 passed**로
+기존 full/optional create 의미 비교·변경 없는 HTTP 어댑터·기본값·CPU 교차·lifecycle 소유·binding·진단을 확인했다.
+bootstrap 별도6개 결과는 중복 가능성이 있어 합산하지 않는다. 고정 FastAPI 테스트 도구의
+httpx 안내 경고와 protobuf 생성기 경고 때문에 runtime 의존성을 올리지는 않았다.
+
+재현 도구는 `run_lattice_pair.py --help`, core 시험 `pytest -o addopts= -q platform/apps/drive/tests/test_{world,lattice,engine}.py`,
+Gateway `pytest -o addopts= -q platform/services/gateway/tests`다. 정확한 도구 경로·환경·명령·rc와
+원 로그는 위 PC 자료의 JSON/log 및 통합 source snapshot에 있다. Linux의 새 root network
+namespace에서만 실행하는 통합 도구이며 운영 broker/VM에 연결하는 예제가 아니다.
+
+#### 현재 제공물과 담당자에게 남기는 일
+
+현재 원본은 [world 계약/codec/golden](../contracts/drive-world/README.md),
+[Gateway key·보존·MANUAL·결과 계약](../contracts/gateway-provider-v1.md),
+[앱 빌드/실행](../../platform/apps/drive/README.md),
+[설치 단위](../platform/deployment-readiness.md#history-drive-install)다.
+[주행 설계 22절](../platform/drive-pipeline-architecture.md#s22)에 Nav2 Jazzy 원 revision
+`d5d768b7b38a05e7cfd2b6c693b786b402161bed`·CMU/추종 원리→제품 함수→시험을 연결했다.
+ROS/Nav2 전체 이식·원 구현의 성능/최적성 보장은 하지 않았다.
+
+Worker는 제공 client의 시간 key를 원 attempt에 한 번 보존하고 실제 Engine의 보호→현재
+Manager guard→새 Bootstrap/binding→finish/cancel에 연결한다. Jetson은 제공 encoder/schema와
+원 odom/clock 계약으로 실제 sensor→mapper를 생산한다. ESP32는 feedback-2의 session/counter·
+누적 encoder·원 시각/품질을 실제 firmware에서 생산하고 watchdog/물리 정지를 수락한다.
+HTTP/Spring/화면은 기존 관리 호출을 유지하고 MANUAL 유지·명시 복귀·관측 단계를 실제 route에
+연결한다. 이 UDS가 외부 HTTP API라고 안내하지 않는다. Linux L05 새 Agent 후보를 받은
+다음 일반 생성/factory seed의 template receipt와 실제 guest smoke를 갱신한다.
+각 기존 요청서의 현재 본문을 수정했고 타 담당자 제품 코드는 대신 바꾸지 않았다.
+
+본인 소유의 planner/tracker·공통 codec·Gateway 제공자 경로를 외부 담당 대기로 넘기지 않았다.
+다만 선택 프로필은 **합성 시험 차량**이다. 실제 센서·차량 제원/보정·mapper clock/trust·
+운영 retry/retention·승인 create 시간값은 실제 제공/승인을 받아야 한다.
+운영 이미지·새 Agent 템플릿·실제 Xen/USB/SD·물리 정지·연속 승계·7번은 미수행이다.
+D03-G02의 손상 backup 최신성 복원은 이번 이력 수거로 닫지 않았다.
+
+최종 제공 디렉터리는 PC 원자료의 `delivery-final`이다. `source-changes.tar.gz`·`tracked.diff`는
+위 base에 적용할 변경, `drive-firmware.tar.gz`는 ARM 번들/receipt와 재현용 native binary,
+`runtime-rpms.tar.gz`는 검증한46개 runtime closure, `local-evidence.tar.gz`는 정상/실패
+결과와 재현 명령이다. private fixture credential·Authority 파일은 evidence archive에서 제외했다.
+각 archive SHA-256·변경 파일·정확한 패키지 목록은 `CANDIDATE.json`에 모았다.
+현재 수정 문서는 이 보고서, 주행 설계·배포 준비, Gateway/주행앱 README, Gateway/world 계약·
+벡터, 기존 Gateway·Worker·Jetson·ESP32·HTTP/Spring·Linux 요청서와 요청 색인이다.
+
+### 2026-11-02 커밋·MR 전 소스와 런타임 대조
+
+후속 사용자 요청에 따라 위 작업을 작업 단위로 커밋하고 현재 feature에서 platform으로
+MR을 준비한다. 앞선 절의 commit/push 미수행은 당시 작업 범위이며 이 후속 요청과 구분한다.
+새 기능·운영 변경이나 7번 실행을 추가하지 않았다.
+
+제공 manifest의110개 소스 파일은 대조 시작 때 모두 일치했다. 고정 ARM receipt의307개
+빌드 입력과 실제 링크·TLS/stack sentinel/license, 설치 ARM codec의623/25,305-byte
+정상 roundtrip·중복/부분/oversize 거절을 다시 확인했다. 제품 C의 `pre-mr-drive`40개,
+Gateway 전체 `pre-mr-gateway`255개가 모두 통과했다. 시간 상한 갱신의 원 만료 보존,
+내구 수락/수거·동등 replay·상태 적용·장치 세션·출력/진단 보호를 포함한다.
+ARM firmware hash와 검증된 runtime payload는 위 후보 그대로다. 이번 문서의 공개 준비
+기록 추가는 기존 firmware/패키지 재생성이나 앞선 제공 archive의 제자리 변경이 아니다.
+
+`git fetch origin --prune` 후 `origin/platform`은 착수 HEAD `cdcb619`와 같았다.
+커밋 직전 상대 변경이 없으므로 충돌 해결용 merge/rebase는 필요하지 않았다.
+공개 후 후보는 실제 Git commit과 MR diff로 식별하고, 소스 archive·빌드 receipt의
+당시 후보 식별자를 새 HEAD로 고쳐 쓰지 않는다. 최종 push/원격 ref·MR 생성 결과는
+PC `2026-11-02/gateway-history-mr`에 남긴다. squash·자동 merge는 사용하지 않는다.
+
+새 파일을 stage한 뒤 확인된 nanopb 원문·라이선스의 trailing space와 고정 생성 C의
+마지막 빈 줄은 원문/hash 재현성을 위해 보존했다. whitespace 검사는 이 두 디렉터리만
+제외하고 수행하며, 제외한 vendor 파일은 `dependencies.lock.json`의 원문 해시로 대조한다.
+검사를 맞추기 위해 vendored/generated 소스를 임의 윤문하거나 firmware를 바꾸지 않았다.

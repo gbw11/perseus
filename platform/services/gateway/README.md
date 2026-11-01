@@ -9,8 +9,29 @@ Gateway는 모드·owner·출력 허가를 구분하고, 현재 허용된 앱 �
 [동일 후보 검증](../../../docs/verification/recovery-scenario-closure-20261030.md#gateway-provider)을 먼저 읽는다.
 설치 후보의 `python3 /usr/share/xenova/gateway-examples/provider_roundtrip.py`는 실제 별도 Gateway process/socket으로
 제출·동등 replay·값 충돌·조회·취소를 실행한다. 앱/Xen/output은 소유 fixture다.
-G2는 완전 ManeuverIntent codec·공통 C/Python 적용 adapter와 MQTT 수락 연결, G3는 명시 feedback-1/PTY 왕복까지 제공한다.
-실제 planner·ESP32·물리 정지·Worker 소비·운영 설치 수락은 별도다.
+G2의 기존 JSON adapter는 유지하며 신규 실제 path/계산은
+[drive-world-1](../../../docs/contracts/drive-world/README.md)에 연결한다. G3는 feedback-1과
+명시 feedback-2/누적 encoder odom·PTY를 제공한다. 실제 ESP32·물리 정지·Worker 소비·운영 설치는 별도다.
+
+## 신규 지도형 주행과 이력 설정
+
+선택한 `warm-lattice-lab` 펌웨어·root binding을 사용할 때 warm Gateway에 `--drive-link`를
+명시한다. Pi 작은 차량 표본과 전체 path는 별도 bounded binary I/O로 처리한다.
+`--world-trust <private-file>`은 승인한 mapper/frame/clock/configuration 문맥을 공급한다.
+없거나 손상되면 원 오류를 남기고 AUTO 입력을 제한하며 Pi 차량 상태/MANUAL까지
+Jetson 연결 대기로 묶지 않는다. 이 파일의 시험값을 운영 설정으로 복사하지 않는다.
+
+장치 쪽은 지원 firmware와 승인값을 갖춘 경우에만
+`--serial-profile feedback-2 --odometry-config <private-file>`로 선택한다.
+기존 차량 출력 한계·ACK 기한·현재 session 검증은 그대로다. 새 MANUAL의 실제 정지 확인,
+같은 운전자 MANUAL A/B 연속, 사용자 `manual_hold`, 명시 AUTO 복귀를 구분한다.
+
+이력은 `--history-policy <private-file>`의 `retry_ms`와 `retention_ms`를 명시 공급할 때
+정당하게 종결하고 보존 약속·참조를 해소한 기록만 새 내구 수락에서 정리한다.
+`GatewayClient.history()`는 읽기 전용이다. `new_request_id(host_boot_id)`는 최초 송신 전에
+한 번 생성해 보존한다. 옛 저장 UUID는 변환하지 않고 원 결과를 회수한다. 과거 요청의
+기한 변경·정리 후 재도착으로 새 실행을 만들지 않는다. 설정·경계·오류는
+[제공자 계약](../../../docs/contracts/gateway-provider-v1.md#이력-수명과-반복-운영)이 원본이다.
 
 ## verified 프로필 운영
 
@@ -336,9 +357,10 @@ MEASURE event=first_output gen=12 mode=MANUAL reason=command_timeout t=… since
 
 `gap_ms` = 마지막 활성 명령 수신 → 판정, `since_last_active_ms` = 마지막 활성 명령 수신 → 새 세대 첫 프레임(수동 명령 또는 정지) 전달.
 
-## ESP32 시리얼 프레임 (초안)
+## 기존 write-only 프레임과 당시 초안
 
-> **초안입니다.** S15P31E110-241 에서 계약 v1.1 로 옮겨 확정합니다. 옛 [차량 제어 명세](../../../docs/design/vehicle-control-spec.md) 5.2 USB 시리얼 형식을 따랐습니다.
+> 아래는 write-only의 기존 bytes와 당시 설계 이력입니다. 현재 선택 feedback-1/feedback-2의
+> frame·session·ACK·센서 계약은 [제공자 원본](../../../docs/contracts/gateway-provider-v1.md)을 따릅니다.
 
 ```text
 본문   = [id:u16 LE][len:u8][payload][crc:u16 LE]      CRC-16/CCITT-FALSE (0x1021, 초기 0xFFFF), 범위 id·len·payload

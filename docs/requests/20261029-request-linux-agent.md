@@ -1,7 +1,7 @@
 # Linux·Agent 후속 구현 요청
 
 담당: Linux 엔지니어·Guest Agent. 상태: **6-A 인계 준비 / 담당 제품·설치본 수락 전**.
-2026-11-01 현재 지시다. D01-L01~L05와 [상세 정의](2026-10-27-linux-health-agent.md)를 유지한다.
+2026-11-02 현재 지시다. D01-L01~L05와 [상세 정의](2026-10-27-linux-health-agent.md)를 유지한다.
 
 ## 현재 담당자가 할 일
 
@@ -27,6 +27,13 @@ OS 공통 정적 CPU 배치를 제공한다. [공개 관리 계약](../platform/
 `prepare_deployment_seed`→identity unit/drop-in 연결을 따른다. 기존 Agent 설치 검증과
 [배포 단위표](../platform/deployment-readiness.md#cohort)를 재사용하며 이미 게시한 template/hash를 제자리 수정하지 않는다.
 패키지 갱신으로 guest UUID·MAC/IP·hostname·credential을 재발급하지 않는다.
+
+이번 Gateway·Zephyr 지도형 제공물의 RPM/ARM 검증은
+[별도 배포 항목](../platform/deployment-readiness.md#history-drive-install)에 연결했다.
+이는 새 Agent가 포함된 Linux 템플릿을 재생성하거나 guest에서 건강 판정을 수락한 결과가 아니다.
+L05 후보를 받으면 위 일반 생성·factory seed 경로의 빌드 입력과 설치 receipt를 갱신하고,
+각 guest의 실제 수집·보고 smoke를 확인한다. Agent가 새 지도/주행 프로토콜을 소비하거나
+플랫폼 대신 affinity·출력 권한을 보정하도록 요구하지 않는다.
 
 ## 오류·진단 비용의 담당 작업
 
