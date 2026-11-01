@@ -217,6 +217,11 @@ factory seed·초기화/grow 정책은 이 통합으로 바꾸지 않는다.
 
 ## 최초 등록과 매 부팅 준비
 
+일반 생성과 factory의 자격/등록-only 통지는 [공급 계약](../contracts/vm-provisioning-v1.md)을 따른다.
+factory의 UUID 계획 뒤 대상 lease를 유지하고 해시/guest I/O 동안 공통 관리 잠금을 반환한다.
+local 등록 완료 뒤 선택 통지 프로세스를 시작하며 HTTP 응답을 부팅/다른 VM 제어의 선행조건으로 두지 않는다.
+완료 boot/replay는 자동 통지 기회를 보충하지 않는다. broker는 첫 등록 뒤 기존 bridge/mount 조건으로 기동한다.
+
 최초 설치는 seed·카탈로그·identity plan으로 UUID/MAC와 자산을 확정한다. 중단 후에는
 같은 plan을 재개한다. 서비스 재시도나 최신 코드 설치를 이유로 신원을 다시 발급하거나
 기존 템플릿·자산·사용자 의도를 덮어쓰지 않는다.

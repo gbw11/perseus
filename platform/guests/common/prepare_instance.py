@@ -354,6 +354,8 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
     for filename in ('root.raw', 'template.json', 'boot.json', 'Image', 'initrd', 'kernel.config'):
         vm.regular_asset(template, filename)
     meta, manifest_digest, manifest_identity = _metadata(template / 'template.json')
+    from xenova_guest_profile import from_manifest
+    record['provisioning_profile']=from_manifest(meta)
     if ('template_manifest_sha256' in record
             and record['template_manifest_sha256'] != manifest_digest):
         raise ValueError('selected template manifest differs from bundle')
@@ -427,6 +429,9 @@ def make_instance(args, *, vm, defaults_path, record_override=None, identity=Non
             prepare_deployment_seed(root, record)
         else:
             prepare_instance(root, record, command=command)
+            if private and managed_preparation() and record['provisioning_profile']['channels']:
+                from xenova_provisioning import apply_linux
+                apply_linux(args.data_root,record,root)
         with guest_runtime(work, root):
             check_creation()
             verify_guest_ssh(root, seed=seed)

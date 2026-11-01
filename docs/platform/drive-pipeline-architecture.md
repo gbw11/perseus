@@ -1712,6 +1712,12 @@ Nav2 공식 구현은 Jazzy commit `d5d768b7b38a05e7cfd2b6c693b786b402161bed`의
 
 ### 22.3 이 기준본의 최종 해석
 
+2026-11-02 배포 연결은 [VM 공급 계약](../contracts/vm-provisioning-v1.md)과
+[같은 후보의 검증](../verification/recovery-scenario-closure-20261030.md#vm-provisioning-integration)에 둔다.
+실제 warm-lattice-lab ARM 번들이 공개 catalog와 A/B factory 입력으로 선택되고 UUID별 자격은
+등록 시점에 공급된다. 신호 선언·Store 게시·앱 계산·READY·출력/장치 적용은 계속 다른 사실이다.
+선택한 차량 수치는 시험 프로필이며 전체 이미지·실제 Xen/차량 수락을 의미하지 않는다.
+
 **현재 구조를 유지할 부분:** Pi의 Xen·netfront·dom0 네트워크·단일 Gateway·ESP32 USB 시리얼, 관리 원본과 복구 보호.  
 **구현·보완할 중심:** Jetson 누적 지도 생산·영구 저장/복원·별도 broker·binary full snapshot·GET 영상, 기존 runtime을 활용한 AUTO/MANUAL의 실행·자원 경계, 지도 기반 계획·추종, 상태 동기화와 Standby·승계.  
 **현재 하지 않는 것:** bridge, Pi 자체 지도 재구축, 통신 원문 전량 저장, 전면 SQLite화, UDP/UART/장치 할당 재설계, dom0 장애 후 주행 지속 보장.

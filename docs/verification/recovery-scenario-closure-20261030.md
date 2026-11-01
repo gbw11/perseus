@@ -18,6 +18,8 @@
 | 6번 인계·배포 준비 | [현재 정리](#stage6): 담당자 현재 지시/이력 분리, Gateway 정규 recipe·비활성 unit·이미지 포함 연결, 고정 환경 RPM/QA·ARM Python import·systemd loader·영향 회귀 완료. 운영값·제품 연결·실제 설치와 7번은 별도 |
 | Gateway 제공자 후속 | [G1/G2/G3](#gateway-provider)의 실제 process/UDS·원 결과·보호 종결·codec·PTY 기반을 유지한다. 실제 지도형 planner·반복 이력·feedback-2는 아래 최신 후속에서 추가했다. 상대 제품·실물 수락은 별도 |
 | 이력·실제 주행앱 최신 후속 | [2026-11-02 결과](#history-drive-final): 원 관측 시각을 보존하는 bounded lattice/충돌 검사/tracker·상태 적용, 독립 MANUAL, 최대 지도·대칭 실행 교체/재합류·동일 Authority 40회 운영을 로컬 확인. 고정 ARM·정규 RPM/QA·설치 ARM codec/client를 검증. 합성 입력/차량·실제 입력 생산자·운영 수락을 구분 |
+| CLI·조회 후속 | [2026-11-02 구현](#cli-query-consistency): 0단계 조사 재사용, Xen 없는 등록/의도 조회·출력과 실행 분리·원 key CLI·독립 조회 연결. 실제 CLI/barrier·고정 recipe RPM/QA·ARM Python/QEMU·격리 설치 wrapper 확인. Worker/API 소비 변경과 실보드 수락은 별도 |
+| VM 공급·등록·신호 후속 | [2026-11-02 제공자 구현](#vm-provisioning-integration): 일반 생성/factory의 영구 자격 공급·실행별 Store/receipt, 독립 1회 등록 통지와 CLI, 초기/다음/현재 프로필, 실제 ARM drive template 선택을 연결. Spring 등록-only 수신 구현·운영 설정·새 Linux 전체 rootfs·실보드 수락은 별도 |
 | 남은 범위 | 운영 create 시간값 공급·보드 수락, 상위 제품 연결·실제 HTTP polling/정규 설치/보드 수락·API cgroup의 guest backend 문제는 미완료. 모든 부하/스케줄의 무기아나 지연 상한 수락은 아님 |
 
 아래는 후보별 이력이다. 과거 2회/439개/보드 적용 기록을 최종 1회/449개 이후 후보의
@@ -2728,3 +2730,378 @@ PC `2026-11-02/gateway-history-mr`에 남긴다. squash·자동 merge는 사용�
 마지막 빈 줄은 원문/hash 재현성을 위해 보존했다. whitespace 검사는 이 두 디렉터리만
 제외하고 수행하며, 제외한 vendor 파일은 `dependencies.lock.json`의 원문 해시로 대조한다.
 검사를 맞추기 위해 vendored/generated 소스를 임의 윤문하거나 firmware를 바꾸지 않았다.
+
+<a id="cli-query-consistency"></a>
+## 2026-11-02 — OS 공통 경량 의도 조회·CLI 경로 정합화
+
+### 후보와 0단계 재사용
+
+착수 branch는 `feat/platform/gateway-history-driving-app`, HEAD는
+`f8a866389e19b6f688459ff26775e5c55fd7668f`이며 당시 worktree는 깨끗했다.
+최종 후보는 이 HEAD + 이번 diff/새 파일이다. [소스·시험·비용 manifest](evidence/cli-query-consistency-20261102.json)와
+PC `C:/Users/SSAFY/Documents/Codex/2026-11-02/cli-query-consistency`의 원 로그/재현 script로 식별한다.
+WSL 작업본은 `/home/ssafy/xenova-cli-query-20261102/candidate-final2`다. commit/push는 하지 않았다.
+
+필수 0단계는 [생성·factory·신호/공급 조사](vm-registration-signal-mapping-20261102.md)와
+[당시 소스 manifest](evidence/vm-registration-signal-mapping-20261102.json)를 재사용했다.
+조사 후보 `206361b` 이후 착수까지의 차이는 보고서 커밋뿐이었다. 이번에는 그 표를 다시
+작성하지 않고 구현에 필요한 등록/intent reader·조회 호출과 소비자의 현 위치만 대조했다.
+
+| 앞선 조사에서 채택한 근거 | 이번 사용과 제외 |
+|---|---|
+| 일반 Linux·Zephyr create의 등록과 초기 stopped 의도 | `Manager._read_states`와 Execution의 저장 intent 검증을 재사용. 새 기본 의도를 저장하지 않음 |
+| factory 빌드/seed와 `FirstBoot.register`의 보드별 신원·등록·running 의도 | registry와 tombstone을 등록 원본으로 사용. 일반 create journal이 없는 factory도 포함 |
+| autostart 설정·명시 의도·과거 lifecycle intent | 별도 필드로 반환. 누락은 unknown/null, 과거 세대는 적용 불가로 표시하고 자동 정정하지 않음 |
+| template 선언·다음 기동 자산·현재 binding/신호 수신의 서로 다른 수명 | intents에는 저장 template 식별만 제공. 현재 firmware 적용·Agent/앱 건강·수신을 추측하지 않음 |
+| 자격 확보/export·Linux private 설정·Zephyr 실행별 provisioning/receipt | 조사 표의 재사용 지점 유지. MQTT 자동 공급·Spring 통지·실제 firmware/신호 신규 연결은 미구현/이번 범위 밖 |
+
+### 확인한 문제와 실제 수정
+
+제품 수정은 기존 `xenova-platform` recipe의 여섯 Python 모듈에 한정했다.
+Gateway·planner·guest·타 담당 제품과 기존 데이터 형식은 변경하지 않았다.
+
+| 현상·분류 | 원인 → 수정 또는 유지 이유 | 직접 근거 |
+|---|---|---|
+| `--json`이 실행 경로를 고름 / 인터페이스 불일치 | `xenova_vm.main`의 raw argv 분기를 제거. 파싱한 action/명시 인자로 한 handler를 호출하고 결과만 렌더링 | 기본/JSON/short의 동일 action·관측 결과, literal `--json` key, `--`·equals 옵션 시험 |
+| status의 두 의미 / 명시적인 호환 변경 | status는 모든 형식에서 list. 옛 자산/hash/시각 종합 진단은 `diagnose --details`로 보존 | 두 형식에서 같은 handler, 명시 진단의 기존 instances/domains/time 출력 |
+| 옵션 수락 후 유실 / 확인된 결함 | argparse SUPPRESS와 action별 허용표. timeout/budget/lifecycle 등을 실제 spec에 전달. 무관한 force/execute/restore·초과 인자는 효과 전에 거절 | 실제 CLI→Manager 전달·거절, 다른 UUID/반복 옵션 충돌과 동일 대상 허용 |
+| 원 key CLI 누락 / 미연결 | control-operation의 ID/key 중 정확히 하나를 선택자로 전달. 선택적 UUID 대조, 선행 live get 없음 | 한글/공백 key·retired 대상·원 deadline/operation 불변 회수 |
+| probe/context·templates/recovery 조회가 긴 공통 잠금 대기 / 확인된 결합 | 현재 관측은 get과 같은 ReadContext·관측 슬롯으로 이동. catalog/원 attempt는 작은 원본을 두 회차 대조 | 공통 잠금 보유 중 정상 조회, restore fsck barrier 이전 B 실제 stop·원 완료 |
+| 현재 host 읽기 실패가 유효 원 제어 기록까지 차단 / 확인된 결합 | Execution 생성 없이 `read_requests`·`read_attempt`로 원 무결성 확인. 현재 host/기한 비교만 unknown과 제한된 원인 경고로 분리 | 수정 전 boot reader OSError의 ARTIFACT_INVALID 재현. 수정 후 OSError/잘못된 host ID에서 원 결과 회수·원 기록 불변 |
+| 이름 해석이 예산 밖, 두 대상 중 하나를 조용히 선택 / 확인된 결함 | CLI 진입부터 소모한 기간 차감. UUID는 바로 사용, 이름은 한 metadata 검색. 두 표현은 같은 UUID여야 함 | 작은 예산 거절 후 정상 회복, 같은 이름/UUID 성공·다른 대상 거절 |
+| Python create helper가 생략을 None으로 전달 / 확인된 결함 | 존재하는 자원 속성만 공통 create spec에 전달. 명시 None은 계속 거절 | 생략 계획 정상값과 명시 null 오류, 기존 full/optional 의미 비교 회귀 |
+| spec JSON 오류를 저장 오류로 혼합 / 오류 경계 정정 | 잘못된 UTF-8/JSON·중복 필드·비유한 수는 INVALID_SPEC, 파일 I/O는 STORAGE_UNAVAILABLE. 내부 결함은 입력 오류로 숨기지 않음 | 잘못된 JSON/파일 부재·내부 TypeError·필수 저장 오류의 기존 분류 시험 |
+| `get --json -- UUID` 거절 / 추가 발견 | 표준 argparse의 intermixed 파싱으로 옵션 뒤 위치 인자도 처리 | 공개 entrypoint의 separator/equals·key 문자열 시험. 별도 CLI 프레임워크 없음 |
+
+`read_record/read_intent`는 기존 `Execution.read/intent`의 파일·schema·신원 검증을 분리한 순수 reader다.
+제어 writer는 기존 메서드와 주입 reader를 그대로 사용한다. `read_requests`의 완전 검색·유일성,
+원 hash·UUID·파일 경로·예산 검사는 유지했다. `read_attempt`도 기존 원 시도 무결성 검사를 유지한다.
+저장 검증과 현재 host 관측 분리는 현재 제어/복구 guard를 생략하는 허가가 아니다.
+
+### 명령·근거·보호 선택표
+
+상세 인자/오류와 실제 사용 예제의 원본은 [정식 CLI 명세](../platform/cli-manager-spec.md#usage)다.
+전체 parser의 action/명시 옵션 허용표는 `xenova_management_cli.OPTIONS`이며 새 runtime schema가 아니다.
+
+| 명령·canonical action | 읽는 근거·부작용 | 보호/예산·현재 판정 |
+|---|---|---|
+| intents 단건/목록 | registry+tombstone+저장 intent. 일반 등록의 게시 완료 guard만 읽음 | 공통 잠금·관측 슬롯·Xen·host ID·hash·쓰기 0. 최대 두 metadata 회차, timeout/budget |
+| list/status/get/probe/execution-context | 현재 Xen+등록/실행/의도 결합. cache 게시 | 공통 mutation lock 없음. 기존 제한 관측 슬롯·게시 전 guard 유지. probe observation, 나머지 기존 VMView |
+| snapshot | 과거 관측 cache와 나이 | UUID는 registry/Xen/새 게시 없음. 내부 이름은 별도 등록부 해석. max-age는 관측 예산과 다름 |
+| operation/control-operation/recovery-operation | 자산/control/복구의 각 원본, 필요한 원 owner 근거 | 원 key 완전 검색·두 회차 검증 유지. 내구 재확정/reconcile/재실행 없음. timeout/budget |
+| templates | catalog descriptor·작은 manifest full=False | registry/공통 잠금 제거, 완전 결과 재대조. root payload 전체 hash 없음. budget |
+| create, retire/delete, restore, purge, update-resources, firmware-transition | 원 명세·자산·lifecycle·현재 사용/예약 | 기존 계획/execute·대상 lease/원 owner·효과 직전 guard 유지. 생성 단일 검증 복사 유지 |
+| start/stop/reboot/destroy | 원 intent/control·현재 신원·CPU/host guard | UUID/이름·형식과 관계없이 같은 Manager. 즉시 동작, destroy의 명시 force 유지. CLI 이름 해석도 호출 budget 차감 |
+| autostart-set/board-shutdown-set/config/host-resume | 저장 정책/런타임 cfg/gate | 즉시 변경이라는 기존 의미. config는 단순 조회가 아님. 무의미한 execute 거절 |
+| cpu-layout/cpu-policy-set/cpu-host-prepare | 정책/anchor/receipt와 실제 affinity | 기존 CPU 보호·정지 변경 조건 유지. 조회의 live repin/자동 정지 없음 |
+| recover-once/recover_once, operation-reconcile/recovery-reconcile | 원 attempt·원 수습 대상과 현재 guard | 기존 권한/원 기한·진단/execute 구분 유지. 조회와 수습을 합치지 않음 |
+| diagnose, diagnose --details | 시각/boot 인자 또는 옛 status의 자산·시각 종합 진단 | details의 기존 공통 잠금·자산 해시 비용 유지. 반환 결과 렌더링은 잠금 밖 |
+| check-xen/check-network/dhcp-ready, host-init/host-quiesce, autostart/shutdown-all/poweroff/reboot-board, console/firmware-replace | 기존 부팅·종료·PTY·동일 프로필 운영 handler | 기존 효과/성공 출력·대상 보호 유지. JSON 미지원은 실행 전 거절. firmware-replace는 계획/execute |
+| xenova-boot-status, xenova-wifi status, xenova-broker list/check | systemd+runtime 사본 / wpa_cli+ip / 보호된 계정 세대 | 별도 도구의 의도된 계약. boot --watch만 안내 사본 게시, Wi-Fi 조회는 연결 변경 안 함, broker 목록은 비밀 비공개. 새 기능/자동 공급 미구현 |
+
+설치 script/unit·first-install에서 `xenova-vm status`의 옛 종합 JSON을 파싱하는 호출은 찾지 못했다.
+기존 운영 문서의 상태 확인 예제는 새 list 의미로 유효하다. 외부 미제공 자동화는 미확인이다.
+소스 조사만 한 Wi-Fi/broker/boot 도구를 이번에 실서비스에서 실행했다고 하지 않는다.
+
+최소 사용 예제(운영에서 이번에 실행한 명령이 아님):
+
+```sh
+xenova-vm list --short
+xenova-vm intents --lifecycle all --json
+xenova-vm intents UUID --timeout-ms 1000 --json
+xenova-vm execution-context UUID --json
+xenova-vm snapshot UUID --max-age-ms 1000 --json
+xenova-vm control-operation --idempotency-key '원 key 한글' --vm-id UUID --json
+xenova-vm diagnose --details --json
+```
+
+intents의 최소 반환은 VM UUID/name/guest kind/template 식별, autostart, lifecycle/generation,
+desired_state/intent_revision/intent_lifecycle_generation/source/applicable다. 신호·실제 실행·CPU
+관측 필드를 채워 넣지 않는다. 누락 의도는 unknown/null/false이며 source도 추측하지 않는다.
+목록은 기본 REGISTERED, lifecycle all/RETIRED/PURGED filter와 단건 UUID를 지원한다.
+단건과 lifecycle filter의 동시 지정은 거절한다. 등록/intent 오류를 빈 목록으로 바꾸지 않는다.
+같은 이름이 다른 UUID로 재등록되면 과거 의도를 승계하지 않는다.
+
+### 호환과 소비자 전환
+
+| 사용 | 현재 의미와 전환 |
+|---|---|
+| 기존 full create, 생략↔원 값 명시, Manager/HTTP DTO | 기존 의미 유지. 원 UUID/key/spec/hash/기한·저장 형식 불변. 외부 API/header 변경 없음 |
+| get/list/probe/execution-context | 기존 반환 shape·관측 cache 유지. probe/context는 더 강한 읽기 전후 정합성 대조를 공유 |
+| status --json / 기본 status | 모두 list. 기본 status의 옛 종합 결과 소비만 diagnose --details로 전환 |
+| no-JSON VM 제어/설정 | Manager envelope와 원 operation 참조를 일관되게 출력. 예전 raw 결과/무출력에 의존한 소비자는 envelope 처리 필요 |
+| 명시했지만 무시되던 옵션·임의 create CLI key | 조용한 성공 대신 INVALID_SPEC. create key는 생략 또는 정확한 create:UUID. Manager/HTTP 기존 full 호출의 사용법은 변경하지 않음 |
+| 기존 부팅/PTY 운영 명령 | 정상 출력/동작 유지. parser·실행 실패는 공통 오류 envelope/2·3·4 종료 대응으로 정리. 기존 stderr/1만 가정한 자동화는 조정 필요 |
+| 일반 호출자·내부 설치 | journal 선택/raw 파일 해석 불필요. 내부 reader 공유 모듈·실제 import는 같은 설치 후보로 교체 |
+
+Worker의 `PlatformObserver._refresh_intents`는 여전히 live list에서 의도를 취득한다.
+[기존 D01-W01/W02 현재 본문](../requests/20261029-request-recovery-worker.md)에 실제 intents
+호출/필드/오류·별도 Xen 확인·recover_once guard·회복 수락을 적었다. 실패 시 이전 cache를
+현재 복구 허가로 쓰지 않아야 한다. 제품 코드는 대신 수정하지 않았다.
+[HTTP D02/D08](../requests/20261029-request-http-spring-ui.md)에는 SerializedManager의 독립 fork,
+_BUDGET_ACTIONS/call_with_budget의 실제 action·잔여 예산 연결과 상위 경합 수락을 남겼다.
+관리 연동 문서·기준선·배포 원본도 현재 조회 범위만 갱신했다.
+
+### 비용: 줄인 관측·대기와 추가 검증
+
+`benchmark_query_cost.py`를 entry와 candidate-final2에 같은 fixture로 실행했다.
+1/10/100은 **등록 metadata 규모**이며 동시 VM 실행 수가 아니다. Linux 한 개와 유효한
+Zephyr 등록 metadata를 사용하고 intent는 한 개만 명시돼 있다. kernel/root 파일은 작은
+fixture다. 각 점은 한 호출의 primitive 계수·로컬 시간이며 운영 성능/최악시간 표본이 아니다.
+원 표본에는 common lock/observation slot 시도 수·실제 대기/보유 시간도 포함한다.
+
+| 같은 질문·조건 | entry → 현재 실제 계수 | 보존/증가 이유 |
+|---|---|---|
+| get/list | 1개 get read/parse7, registry2, helper2, fsync3로 동일. 100개 list registry300/helper2/fsync201로 동일 | 기존 관측 정합성·사본 게시 비용 유지 |
+| probe/context, 단건 | helper4→2, registry1→2, read4→7, parse5→7, host read4→9, journal0→1. fsync3 유지 | 공통 잠금1→0·관측 슬롯0→1. get과 같은 원 게시/현재 intent·incarnation/게시 guard를 공유하는 비용 증가 |
+| templates, metadata100 | registry100→0, read/parse103→6, manifest1→2. helper/hash/fsync0 | 긴 잠금 대신 작은 catalog 전체 결과를 두 번 대조. metadata1에서는 read4→6 증가 |
+| recovery-operation, metadata100 | registry100→0, read/parse101→2, 원 attempt1→2, host read2→1 | 단일 원 기록 변경 대조. 현재 host context 생성은 불필요. 원 hash 검증 유지 |
+| control-operation | 원 journal2·read/parse2 유지, host read4→2 | 완전 검색/유일성·두 회차 유지. 읽기 전용 원 결과와 현재 host 관측 분리 |
+| intents, 신설 | metadata1/100: registry3/300·read/parse9/306, intent2, 게시 성공 guard journal1. helper/hash/host read/fsync·공통 잠금·관측 슬롯 모두0 | 전체 등록 완전성·세대 대조 비용은 O(N)으로 남음. 이력 전체 검색이 아니라 해당 등록의 원 게시 guard |
+| status | 옛 진단 helper7→새 list2. metadata1 read6→9, metadata100 read303→306 | **질문 자체의 명시적 변경**이다. 같은 진단을 빨리 했다는 성과로 계산하지 않음. 진단은 details에 보존 |
+
+intents는 live list를 빠르게 위장하는 cache가 아니다. 필요한 Xen 관측을 요청하면 기존 비용을
+지불한다. catalog 두 회차·probe/context의 guard 증가를 숨기지 않았고 대용량 해시·fsck·새
+fsync·전역 잠금·등록 mirror·TTL cache를 추가하지 않았다. 원 helper/관측 슬롯과 자원 종료는
+기존 소유 경계다. 로컬 비용표의0은 그 경로에서 계측한0이며 파일 I/O 전체가 없다는 뜻은 아니다.
+
+### 수락·원 로그·실패와 재실행
+
+native Python3.12.3, WSL Ubuntu24.04의 task 사본에서 다음을 실행했다.
+`regression.sh candidate-final2`의 PYTHONPATH는 시험/first-install/guest 공통·플랫폼·기존
+Gateway/MQTT/dom0-manager 소스를 명시한다. 제품 설치 검증에서는 이 source PYTHONPATH를 쓰지 않았다.
+
+- 관련 회귀 `unittest -q`: 296개 실행, 1개 skip, 나머지 통과. 생성/기본값·의미 비교·CPU·lifecycle owner·조회/예산·진단·종료/부팅 회귀를 포함한다.
+- 최종 집중 `test_xenova_query_consistency`: 22개 통과. 위 회귀와 대부분 겹치며 합산하지 않는다. 마지막 동일 이름 재등록 assertion은 별도 집중 실행에 추가됐다.
+- Q04는 `test_public_cli_queries_and_key_lookup_finish_before_other_restore_barrier`: 실제 CLI→Manager→reader, A fsck 해제 전에 B 조회와 stop 원 phase completed. 이후 A도 성공.
+- Q13은 느린 renderer를 멈춘 동안 다른 요청의 실제 shutdown 완료와 깨진 pipe 후 원 완료 replay를 함께 확인했다. Python Manager 출력/trace 격리는 기존 회귀를 재사용했다.
+
+| Q 수락 | 연결한 실제 assertion |
+|---|---|
+| Q01·Q02 | FactoryQueryTest 실제 grow/factory/register의 두 Linux, 일반 Zephyr bundle/create, 저장 의도 누락/손상, Xen/host/자산 validator 호출 실패 hook·전후 파일 불변 |
+| Q03 | intent 변경 유한 재회차, retire 중 목록 변경, 동일 내부 이름 새 UUID 등록에서 과거 intent 미승계. 계속 변경되면 TARGET_CHANGED, 이후 정상 조회 |
+| Q04·Q10 | 위 lifecycle CLI barrier와 공통 lock 보유 조회, 기존 read-progress의 느린 get/list·다른 VM stop·슬롯 포화 후 회복 |
+| Q05·Q06·Q07 | 기본/compact/short 동일 결과·handler, 명시 details, 옵션 전달/금지·같은/다른 대상·반복 옵션·separator/equals/literal key |
+| Q08·Q09 | 원 key/ID 선택자, retired 회수·원 기한 불변, ManagementBudgetTest의 중복/부분 열람/손상/다른 대상/부재/host/예산. 현재 host 실패도 원 결과 회수 |
+| Q11·Q12 | snapshot UUID의 registry/Xen 금지·나이 불변과 기존 관측 역전/옛 execution guard. 이름 해석·목록/원장 순회·슬롯 예산 만료/잔존 helper 회수 후 정상 재시도 |
+| Q13·Q14 | 느린/깨진 출력에서 다른 stop 진행·원 결과 유지, 요청별 fork 예산/trace, Manager 생성 금지 hook의 help·인자 오류 |
+| Q15 | 기존 create compatibility의 양방향 자원 조합·비기본 원 값·기본값/현재 구성 변경·지원 journal 혼재·실패/수습/활성 replay |
+| Q16 | 아래 정규 RPM·설치 ARM Python·실제 native wrapper의 help/intents/key |
+
+현재 native 환경에 FastAPI/Pydantic/httpx가 없어 변경 없는 HTTP adapter 시험 1개는 skip이다.
+과거 create-compatibility의 실제 HTTP 근거를 보존하되 이번 후보의 재실행이라고 하지 않는다.
+현재 full CLI/Manager는 직접 회귀했고 HTTP 제품 소스/DTO는 바꾸지 않았다.
+
+초기 실패도 보존했다. Windows mount에서 권한 시험이 성립하지 않아 ext4 사본으로 옮겼고,
+child import 환경에 기존 Gateway/MQTT 경로를 보충했다. 변경 없는 systemd unit 전체 시험은
+고정259 loader 지정 없이는 실행되지 않아 이번 회귀에서 해당 PackagingAndUnitsTest를 제외했다.
+unit 미변경이며 과거6번 근거를 이번 재실행으로 세지 않는다.
+reader 분리 후 예전 Execution.requests와 세 번째 host read에 지연을 넣던 두 시험은 실패했다.
+주입점을 현재 순수 reader/두 번째 host read로 옮기고 deadline·오류·정상 회복 assertion을 유지했다.
+separator 반례는 제품 parser를 고쳐 재실행했고, 새 이름 재등록 시험의 잘못된 fixture key는
+fixture를 수정했다. 초기 로그·실패 사본은 PC 자료에 남겼다.
+
+### 부분 포장·설치 수준과 종료 판정
+
+기존 고정 Yocto 설정·cache를 복사한 task 전용 build에서 `BB_NO_NETWORK=1 bitbake xenova-platform`을 실행했다.
+3863 task 중3845는 재사용, 영향 recipe의 install/package/QA/RPM 모두 성공했다.
+WSLv2 VHDX 권고와 host kernel CONFIG_TASK_IO_ACCOUNTING 부재 경고 두 개는 남겼다.
+신규 의존성·recipe/unit 변경은 필요하지 않았다. 전체 이미지·guest/ARM planner 재빌드는 하지 않았다.
+
+변경 여섯 모듈과 기존 wrapper의 source→do_install→실제 RPM payload 바이트·0644/0755 모드가 일치했다.
+고정 native RPM 도구의 shared-library 경로 누락, gzip tar 출력에 cpio를 적용한 검증 script 오류,
+`/dev/null` 절대 symlink에 대한 안전 extraction 거절은 각각 도구 경로/형식 확인·필요한 일반 파일만
+추출하는 방식으로 정정했다. 빌드 결과를 바꾸거나 설치 symlink를 없애서 통과시키지 않았다.
+
+ARM Linux Python3.14.7/QEMU8.2.2는 실제 설치 모듈의 help/intents/key와 원 기록 불변을 확인했다.
+이 smoke의 storage mount guard만 fixture로 대체했고, Xen 명령은0이었다.
+별도 native private mount namespace/chroot에서는 실제 설치 `/usr/sbin/xenova-vm`을 빈 env·source
+PYTHONPATH 없이 실행했다. task 소유 ext4 fixture를 private `/srv/xenova`·`/run/xenova`에 bind해
+실제 mount 확인도 통과했다. host의 실제 /srv/run·서비스·VM은 변경하지 않았다.
+
+마지막으로 변경 Python12개 AST, 새로 연결한 로컬 문서 링크/anchor20개와 diff whitespace를 확인했다.
+기존 CRLF 정규화 안내는 남기고 무관한 generated/vendor 파일을 고치지 않았다. HEAD·stage 상태를
+대조해 commit/push 미수행과 이번 소유 파일 범위를 확인했다.
+
+현재 하위 로컬 구현·관련 회귀·부분 RPM/설치 경로 수락은 마쳤다. Worker/API의 실제 소비 연결,
+optional HTTP/UI·Spring, 운영 정책 공급·전체 설치본·실제 Xen/보드/SD·7번 수락은 미수행이다.
+MQTT 자동 공급·Spring 등록 통지·실제 firmware/신호 선택의 신규 연결은 앞선 조사 위치에 남긴다.
+이번 조회 완료를 그 기능의 완료나 모든 외부 장애에서의 제어 기한 보장으로 확대하지 않는다.
+
+
+<a id="vm-provisioning-integration"></a>
+## 2026-11-02 OS 공통 VM 자격 공급·등록 통지·신호/배포 연결
+
+이 절은 앞선 연결 조사·CLI 정합화 뒤 승인받은 A~D 제공자 구현이다. 시작 후보는
+`feat/platform/gateway-history-driving-app`, HEAD `8a23b8a700ebf7093e35e1c07dbd8f1864d16260`이며
+착수 diff/untracked는 없었다. HEAD를 바꾸지 않고 소유 파일을 수정했다. 실제 소스·시험·산출물을 근거로
+아래 상태를 정리하며 지시문 자체를 완료 증거로 사용하지 않았다. 최종 source/hash·원자료·명령·package는
+[evidence JSON](evidence/vm-provisioning-integration-20261102.json)에 모은다.
+
+### 이제 가능한 정상 사용과 원본
+
+기존 full/optional create와 생략↔원 확정값 명시의 동등 replay는 그대로다.
+신규 Debian/Ubuntu는 private 검증 복사 안에서 실제 Agent env를 받는다. factory는 공용 seed에 비밀을
+넣지 않고 host UUID 계획 뒤 같은 공급부를 호출한다. Zephyr는 같은 UUID 암호를 준비하고 실제 start의
+새 execution에 기존 Store/receipt를 적용한다. create 완료 replay는 이 일을 다시 실행하지 않는다.
+
+```sh
+xenova-vm provisioning 850e8400-e29b-41d4-a716-446655440001 --json
+xenova-vm provision 850e8400-e29b-41d4-a716-446655440001 --execute --timeout-ms 10000 --json
+xenova-vm registration-notify 850e8400-e29b-41d4-a716-446655440001
+# 아래만 명시적인 HTTP 1회 송신이다. 설정·등록 대상·권한이 필요하다.
+xenova-vm registration-notify 850e8400-e29b-41d4-a716-446655440001 --execute --json
+```
+
+기존 full HTTP adapter는 제품 코드를 바꾸지 않고 201/응답 필드·동일 POST 409 회귀를 확인했다.
+새 registration-only 경로는 현재 Spring 제품에 없으므로 제공자 계약안·실제 sender·HTTP fixture로
+구현했다. **Spring 합의·수신 구현·DB 종단 수락과 하위 로컬 제공 완료는 다르다.**
+정확한 입력·응답·private 파일·설치/API 예제는 [VM 공급 계약](../contracts/vm-provisioning-v1.md)이 원본이다.
+
+### 무엇을 어떤 기준으로 수정했는가
+
+| 묶음·확인한 문제/누락 | 실제 변경과 기준 | 보존한 보호/비용 |
+|---|---|---|
+| A / 계정 helper가 생성/factory에 연결되지 않음 | `xenova_provisioning.ensure/apply_linux`를 Linux private root와 FirstBoot UUID 계획 뒤에 연결. Zephyr는 default preparer의 private firmware·기존 대상 lease 아래 공급한 뒤 등록 | broker가 암호/해시 원본. 공용 template·seed·firmware에 비밀 없음. root 0700/0600 adapter 사본, 같은 UUID 재사용 |
+| A / 네트워크 능력·역할·현재 신호 혼동 위험 | `xenova_guest_profile.from_manifest/validate`의 한 원천. 검증 Agent receipt와 source/config로 채널·기대 신호·state model 해석. 명시 false/미선언 null/무효 형식과 지원 adapter 불일치를 나눔 | OS 이름으로 권한 확대 없음. Agent/Publisher 생존과 앱 진행/READY 분리. 미선언 stateless 승인 없음 |
+| A / interrupted hash 입력을 hash로 오인 | 기존 `xenova_broker.hash_new`가 원 plaintext staging과 완료된 실제 Mosquitto hash를 구별해 같은 암호로 재개. generation 게시/원 기록·부모 fsync는 유지 | 평문/해시 값을 출력하지 않음. 혼합·손상/원문 소실을 정상 부재나 새 암호로 보정하지 않음 |
+| A / 명시 제거와 단순 부재의 구별 | 현재 manifest의 revoked fence와 `CredentialRevoked`. 자동 ensure는 `CREDENTIAL_REVOKED`, 다른 원본 오류는 안전한 원인/chain을 가진 `CREDENTIAL_SOURCE_UNAVAILABLE` | 회전/복원은 기존 명시 broker 절차. 삭제한 자격 자동 부활 없음. 기존 오류 종류/코드를 합치지 않음 |
+| A / 실제 송신과 ACL 불일치 | Agent의 기존 UUID client가 쓰는 자기 VM v2와 drive/link out·승인 Gateway in을 정책에 추가. 기존 generator로 비밀 없는 개발 ACL 재생성 | VM의 vehicle.control/다른 VM 신호 쓰기 추가 없음. 실제 두 broker의 자기 v1/v2 정상 송신과 타 VM 사칭 거절 |
+| A / 실행별 신원의 이중 발급 위험 | `Platform.start` binding 뒤 기존 Bootstrap·`/srv/xenova/drive-rejoin/UUID/execution` receipt/lock 공유. `credential_file/receipt_directory` 제공. 변경 없는 Worker `ProductionBootstrap.refresh`로 원 신원 소비 | 영구 암호 유지. 새 incarnation만 새 boot/app/publisher. Store applied는 guest 소비/건강 증명이 아님. 옛/uncertain receipt 자동 덮기 없음 |
+| A / private Zephyr 공급 실패 뒤 진행 막힘 | 완성된 원 private firmware만 대상 lease를 다시 잡고 원 key/명세/자산을 검증해 공급/게시 재개. 명세는 공급 전과 현재 원장 확인 뒤 동일 규칙으로 대조 | 원 operation/첫 오류/예약 유지. 복사 1회·같은 원 암호, 손상/불완전 파일 삭제·재복사 없음. Linux 명시 실패 수습은 별개 |
+| B / 기존 Spring create는 UUID 발급+Pi create/start | 별도 등록-only 계약안, 실제 codec/sender·같은 수동 CLI·HTTP 수신 fixture 구현. 기존 `/api/v1/vms`를 역호출하지 않음 | 기존 HTTP full 호출/201/409 유지. token은 root private 설정, body에는 공개 등록 구성만 포함 |
+| B / 응답 유실·재부팅의 자동 중복 위험 | create 완료 journal/factory complete progress에 자동 기회를 먼저 소비. 이후 독립 유한 프로세스에 공개 body 전달 | 자동 최대 1회. 기록 직후 중단하면 0회 가능. replay/boot/restore/복구로 보충하지 않음. redirect/retry/후속 GET 없음 |
+| B / HTTP·DNS·부가 저장의 원 응답 간섭 | 공통/대상 FD를 넘기지 않는 짧은 PIPE_BUF 이하 body 전달. optional 결과 fsync도 자식 소유. slot 4개, 실제 resolver 정체를 감독자가 기한에 종료·회수 | 새 daemon/outbox/무제한 thread 없음. 느린 sink 중 B 실제 stop·원 결과 완료. 필수 등록 journal fsync는 그대로 |
+| C / 다음 선택과 살아 있는 이전 실행 혼동 | `Execution.prepare_launch`가 검증 loader의 `signal_profile`을 캡처. 공개 provisioning은 초기 template 참조/다음 profile/현재 capture·supply를 나눔 | 순수 intents에는 Xen/Store/발급 추가 없음. 새 source를 옛 실행에 붙이지 않고 capture 부재는 unknown |
+| C / 실제 planner가 factory 선택에 없음 | 실제 고정 ARM warm-lattice-lab build→`package-xenova-drive-template.py`→catalog lock/defaults/assembly/FirstBoot strict 지원 프로필 연결 | Starter의 과거 입력/일반 호출 보존. 가짜 hash/Starter/시험 adapter로 제품 firmware를 대체하지 않음. 차량 값은 명시 lab |
+| C / 코드 생성의 Windows/LF 해시 불일치 재현 | generator UTF-8/LF를 고정하고 같은 도구로 재생성. 원 protoc golden은 보존하고 새 primitive와의 configuration 거절/현재 참조 정상 수락을 짝지음 | planner/tracker/충돌 계산은 바꾸지 않음. 새 asset hash와 실제 ARM/C 테스트를 연결하고 옛 사본을 현재 구성으로 승인하지 않음 |
+| D / 설치 모듈·정책 의존/검증 누락 | 플랫폼 recipe에 새 모듈·helper·비활성 설정 포함. broker library subpackage로 기존 bringup 의존 순환 회피. assembly의 설치 바이트 검증 목록도 확장 | 별도 중계/범용 서비스 없음. 같은 내부 writer cohort 교체와 외부 HTTP 호환을 분리. 운영 설정/서비스는 미변경 |
+
+### 지원 프로필과 전달/소비 대응
+
+| 입력·자산 | 일반 생성 / factory | 실행·소비와 기대의 한계 |
+|---|---|---|
+| Debian·Ubuntu의 실제 Agent 설치 receipt | 같은 supplier→private `/etc/xenova/agent.env`; factory는 host UUID를 `platform-identity.json`으로 주고 새 guest identity helper/unit 뒤 Agent 시작 | 변경 없는 AgentSettings/build_client/TelemetryPublisher 사용. Agent heartbeat/v2 지원이며 앱 heartbeat/업무 정상은 미확인 |
+| actual drive warm-lattice-lab | 작은 firmware private 준비·원 UUID 자격 / 같은 실제 ARM template A/B의 서로 다른 UUID·계정 | start/restart/recover의 실제 binding→기존 Bootstrap codec·Store. AUTO stateful·MANUAL stateless·Standby progress idle |
+| 알려진 Starter / 미선언 자산 | 검증한 선언만 해석. MQTT 선택이 없으면 공급 skip | Starter app heartbeat false, 미선언 null, malformed는 오류. 관리 가능한 VM을 Agent/Gateway 부재 때문에 전역 차단하지 않음 |
+| 별도 world broker | root private world 입력→실제 codec 검사→기존 drive 설정에 world만 설치 | Pi 암호를 Jetson에 전달/재사용하지 않음. 원 broker/mapper 설치·ACL 승인은 Jetson 담당. world 부재는 AUTO 입력 unavailable이며 MANUAL/VM 관리와 독립 |
+
+### 28개 수락 묶음과 실제 경계
+
+제품 test entrypoint는 `platform/tests/` 기준이며 표의 기존 회귀는 이름만 바꿔 복제하지 않았다.
+Store·mount/guest OS·Spring DB는 외부 fixture다. 네이티브 hash·broker/socket/process·Agent/Worker
+소비 parser·C decoder·실제 ARM 컴파일/패키지는 각기 실제 코드를 실행했다. 설치/실보드 수락으로 확대하지 않는다.
+
+| ID | 재사용/추가 assertion과 정상 회복 |
+|---|---|
+| A01 | `ProvisioningHooksTest.test_both_linux_create_hooks_use_real_preparation_supplier_and_agent_parser`, Zephyr create hash barrier. 두 Linux 분기·private root·원 replay |
+| A02 | 실제 `FirstBoot.register` UUID 계획 뒤 Linux 공급·완료 boot skip, 실제 ARM template의 A/B 독립 복사/등록/공급. Linux mount/OS는 명시 fixture |
+| A03 | 기존 `CreateCompatibilityTest` 양방향 자원 표현/동시 key/응답 유실 + 완료 replay 공급/새 hash 없음 |
+| A04 | 실제 Platform start→stop/start→recover_once의 세 실행·원 암호 유지·새 receipt; 기존 reboot/autostart/host 변경 guard 회귀 |
+| A05 | unknown/false/invalid·guest adapter 불일치와 원 role ACL. 실제 Agent v1/v2 정상 송신·다른 VM 쓰기 거절 |
+| A06 | hash launch EIO·hash 후 ENOSPC·기존 generation rename/process kill·post-pointer fsync 실패. 같은 plaintext/기존 hash로 지원 재개 |
+| A07 | broker 기존 권한/symlink/손상/원본 소실 차단, revoked 명시 복원 뒤 정상 공급. 새 암호 fallback 없음 |
+| A08 | reload/offline은 unconfirmed·next_start, 저장 오류와 분리. 격리 실제 broker 회복·다음 정상 인증 |
+| A09 | 같은 VM supply의 새 generation/hash/reload 0, public status의 한 read/parse·쓰기 0. 기존 내구 재확인 fsync 1 유지 |
+| A10 | 실제 private env→AgentSettings→Agent client/v2, Bootstrap→제품 native Zephyr C decoder. Store는 외부 대역이며 실제 guest 수락 아님 |
+| A11 | 격리 Pi/world 두 broker의 독립 인증 영역·동시 다른 Client ID. world import는 실제 codec, Jetson 제품 설치는 미수행 |
+| B01 | 실제 일반 create 완료/factory complete hook→별도 sender process→실제 HTTP fixture, 동일 등록 UUID |
+| B02 | slow response·실제 resolver LD_PRELOAD 정체→supervisor의 자식 종료/회수. 이후 정상 명시 송신 |
+| B03 | 서버 저장 뒤 EOF→delivery-unknown, 자동 후속 0, 명시 동일 UUID 재송신→중복 행 0의 수신 계약 fixture |
+| B04 | 완료 journal 소비 뒤 launch 미수행→replay/완료 boot가 보충하지 않음. 원 등록 유지 |
+| B05 | 4 slot 포화/다섯 번째 skip·회복 뒤 정상 manual, 두 factory 등록·일부 실패 분리 |
+| B06 | 등록-only route만 실제 POST. 기존 Spring create 소스는 UUID 발급/Pi 호출임을 대조. 실제 Spring DB transaction 교차는 담당 제품 미수락 |
+| B07 | config 권한·부재, 403/redirect·duplicate JSON·oversize·접수 응답을 확정으로 처리하지 않음. 운영 TLS/token은 미공급 |
+| B08 | 실제 human/JSON CLI·무관한 force 옵션 거절·retired 대상 거절·same sender. VM/암호/디스크 생성 없음 |
+| C01 | Starter false·Agent true/없음 false·미선언 null·malformed 오류, app_health_asserted=false의 실제 Agent v2 |
+| C02 | verified loader capture와 다음 profile을 다르게 읽고 원 실행 불변. transition/실패/새 실행 기존 회귀 |
+| C03 | actual warm AUTO stateful/MANUAL stateless·Standby idle 선언과 이전 planner/Gateway 준비/계산 보호 재사용. 선언만으로 READY 없음 |
+| C04 | 실제 ARM source/BUILD_RECEIPT→새 template envelope→lock→factory strict validator·A/B seed→등록/공급 |
+| X01 | A hasher barrier 유지 중 B intents/원 operation과 물리 stop·원 결과 완료. 기존 restore/firmware/usage/DHCP barrier 재사용 |
+| X02 | A 등록 통지 HTTP 대기 중 원 create 응답·B 실제 stop/원 결과 완료. caller optional fsync 금지 hook·slow resolver/자식 회수 |
+| X03 | 기존 CLI·Manager·기본값/동등 요청·CPU/lifecycle·실패 수습 회귀와 변경 없는 실제 HTTP adapter 201/409 |
+| X04 | 고정 recipe QA/RPM→설치 바이트/모드·독립 target 모듈→ARM Python/QEMU의 실제 HTTP fixture 송신. 전체 이미지/실설치는 별도 |
+| X05 | source/제공 archive의 비밀 배제, 실제 실패 뒤 정상 회복. 테스트 임시 credential/Authority/환경 파일은 제공 archive에 넣지 않음 |
+
+### 비용·검증과 포장 수준
+
+최종 검증 사본은 WSL `/home/ssafy/xenova-provisioning-20261102/release3`다. 아래 결과는
+중복 합산하지 않으며 `release2`의 drive/C 입력은 최종 사본과 같은 소스임을 지문으로 대조했다.
+
+| 실제 실행 | 결과·수락 범위 |
+|---|---|
+| `test-a.sh release3` | 149개 통과, skip 없음. 실제 발급/해시·일반 준비/factory hook·두 격리 broker·Agent parser·새 실행 Bootstrap/C decoder·HTTP/CLI·중단/회복 |
+| `regression.sh release3` | 297개 실행·실패 0·skip 1. CLI/의미 비교·CPU·lifecycle·실제 stop·비용/진단/수습 보호. native FastAPI 환경이 없는 이 실행의 HTTP skip은 아래 별도 실행으로 확인 |
+| `http-compatibility.sh release3` | 변경 없는 실제 HTTP adapter 9개 통과. 기존 full 호출의 201·동일 POST 409, 새 하위 의미 비교와 저장 혼재 |
+| `gateway.sh release3` | 252개 통과·3개 skip·기존 protobuf 경고 1. Gateway 소스는 이번에 미변경. 이력·IPC·출력 보호·취소·상태/feedback 회귀이며 skip은 이번 통과에 포함하지 않음 |
+| `test-drive.sh release2` | 실제 planner/tracker/world 40개 통과·기존 protobuf 경고 1, native CTest 6개 통과. 알고리즘 대역·고정 정답으로 교체하지 않음 |
+| `verify-firmware.py release3` | 현재 입력 308개의 ARM BUILD_RECEIPT 지문 일치. 실제 firmware `11f4a75c…e29e87`, 선택 manifest `893b3e6f…bb5d87f`, 전체 hash는 evidence |
+| 정규 BitBake·payload 검증 | `bitbake xenova-platform xenova-mqtt-broker`: 3990 task 성공. 정규 RPM 3종과 설치 파일 36개의 바이트·모드 일치. 캐시가 생략한 broker install image는 실제 `-c install`로 만든 뒤 대조 |
+| target ARM/QEMU | 제품 source PYTHONPATH 없이 Python 3.14.7/OpenSSL 3.5.8 import·provisioning/통지 plan·실제 HTTP 1회. 격리 chroot의 설치 Python entry/help 확인. `xenova-vm` shell wrapper는 바이트/모드·고정 전달 argv를 대조하고 그 Python entry를 실행 |
+
+BitBake 경고는 WSL VHDX 안내와 host kernel의 process I/O accounting 미설정 두 가지다.
+경고를 숨기거나 라이브러리를 올리지 않았다. 동일한 Gateway 전체 시험의 앞선 병행 실행에서는 짧은
+이력 창을 쓰는 두 assertion이 실패했으며 원 로그를 보존한다. 다른 빌드/회귀가 끝난 뒤 같은 Gateway
+소스·timeout·시험으로 위 252/3 결과를 얻었다. 이를 모든 저장장치/부하에서의 지연 보장으로 해석하지 않는다.
+
+신규 공급 기능의 비용을 과거 무공급 경로의 속도와 나누지 않았다. 실제 native Mosquitto hash 도구와
+같은 tmp fixture를 사용한 한 표본에서 최초 공급은 text read 13·JSON parse 6·hash batch 1·generation 1·
+reload 요청 1·필수 fsync 32였다. 같은 VM 재확인은 read 15·parse 7·hash/generation/reload 0·fsync 1,
+공개 status는 read 1·parse 1·쓰기/hash/reload 0이었다. repeat의 fsync 1은 기존 writer의 원 게시
+내구 재확인이라 유지했다. 시간 표본은 evidence에 남기며 실제 SD/운영 상한으로 쓰지 않는다.
+기존 조회 benchmark의 1/10/100 metadata × 9개 action, 총 27조건은 착수 HEAD 사본과 최종 사본의
+read/parse/외부 호출/fsync/잠금 계수가 모두 같았다. JSON 출력이나 이번 공개 profile 조회를 이유로
+기존 조회에 새로운 자격 발급·전체 payload 검증·Xen 호출을 붙이지 않았다.
+
+등록 통지의 기회 표시는 기존 완료 저장과 합쳐 별도 outbox를 만들지 않았다. 공개 body는 한 번의
+4096-byte 이하 pipe로 보내고 optional 결과 저장·HTTP는 자식 소유다. 실제 resolver 정체·slow reader와
+slot 포화 뒤 정상 요청 진행을 검사했다. 모든 커널/공유 저장장치 장애에 대한 hard deadline 보장은 아니다.
+원 create의 prehash 0·검증 root copy 1, 원 결과 replay의 새 물리 효과 0과 오류·최초 원인/수습 보호는
+기존 비용/기능 회귀에 연결했다. 오류 코드/로그 개수 감소를 개선 지표로 사용하지 않았다.
+
+ARM firmware는 고정 Zephyr 4.4.0·SDK/toolchain과 실제 warm-lattice-lab을 새로 빌드했다.
+공개 선택은 `zephyr-drive-lattice-lab-arm64`, 배포 버전 `1.0.0-lab.1`이다. 실제 binary/manifest/source hash는
+lock·evidence·BUILD_RECEIPT에 연결한다. 아직 없는 image/template를 가짜 hash로 채우지 않았다.
+Linux 선택 1.0.2의 immutable hash는 유지하고 다음 template builder의 profile/seed helper 입력만 연결했다.
+
+부분 포장은 `xenova-platform`, `xenova-mqtt-broker`, `xenova-mqtt-broker-provider` 정규 recipe를 고정 환경에서
+빌드·QA·RPM 생성해 source→image→RPM payload/모드를 대조한다. `/usr/lib/xenova`의 제공 모듈과 wrapper,
+공통 정책·비활성 config 예시를 실제 target root에 설치해 ARM Python 3.14.7/QEMU로 조회/계획·HTTP 송신을
+실행한다. 개발 제품 source PYTHONPATH를 주입하지 않는다. target의 실제 서비스/하드웨어·전체 이미지와 다르다.
+
+### 실패 기록과 보완 기준
+
+초기 native fixture의 plaintext/hash 판정 실패·완료 hash 재입력 방지, private Zephyr를 너무 일찍 게시해
+intents가 실패한 반례, original workspace 재개 차단을 보존했다. 완성 private 검증 뒤 공급/게시, 같은 원
+암호/작업·복사 1회로 보완했다. 한도 증가/파일 삭제/새 key로 시험을 통과시키지 않았다.
+CLI 새 action의 budget allowlist 누락과 새 분기에서 control response_deadline을 inf로 덮은 회귀도
+기존 budget assertion으로 발견해 수정했다. 기본값/기한 보호 시험을 완화하지 않았다.
+최종 동시 빌드 중에는 잘못된 통지 설정을 0.1초 자식 대기로 다시 판정하던 경로가
+`configuration-invalid`를 `delivery-unknown`으로 바꾸는 반례를 발견했다. supervisor가 확인한
+설정 오류는 송신 자식을 만들지 않고 그대로 기록하도록 고쳤다. 실제 수동 호출과 fork 금지 assertion을
+함께 통과시켰으며 오류 종류를 줄이거나 대기 시간을 늘려 통과시키지 않았다.
+
+ARM 첫 검증은 CRLF로 인한 primitive manifest 불일치를 실제 재현해 실패했고 생성기를 고쳤다.
+Yocto의 미존재 python3-ssl 의존성과 broker wrapper의 직접 python3-core QA 실패는 고정 manifest/pkgdata에
+맞춰 수정했다. host CMake/pytest 경로 누락은 기존 고정 도구 경로로 해결했으며 새 설치/pip 업그레이드는 없었다.
+이전 후보·실패 로그는 원자료에 보존하며 이후 통과 수치와 중복 합산하지 않는다.
+
+### 인계·미수행·다음 수락
+
+- Worker: 현재 요청서 D01/D03의 `ProductionBootstrap.__call__/refresh`와 VM별 credential 경로·같은 receipt_dir,
+  기대 신호 소비를 연결한다. 원 attempt·Manager guard·Gateway 보호·재합류 정책은 기존 책임이다.
+- Spring/HTTP: 등록-only route/DTO/auth·DB 중복/늦은 요청 계약을 합의/구현한다. 운영 endpoint/token을 공급하고
+  원 Spring 생성 transaction 교차를 실제 제품으로 수락한다. 기존 full 호출은 새 버전/header 없이 유지한다.
+- Linux Agent: 실제 두 OS guest에서 identity/env/unit→v1/v2·collector/앱 차이를 수락한다. Agent 내부 제품은 미변경이다.
+- Jetson: 별도 broker 계정/ACL·private world 입력을 제공하고 실제 mapper/두 연결의 장애·회복을 수락한다.
+- 플랫폼 설치: 같은 내부 provider/Manager/Bootstrap/guest helper cohort를 drain/import 대조해 설치한다.
+  새 정책과 기존 broker store hash가 다르면 기존 initialize 계획/명시 승인으로 정책만 반영한다. 자동 암호 회전/이관은 없다.
+
+현재 담당자 요청서·공통 계약·CLI/부팅/배포/빌드 문서를 개정했다. 원 상세 ID/이력은 보존했고 상대 제품 코드는
+대신 수정하지 않았다. 실제 Spring 수신/Worker 소비/Jetson 계정·새 대형 Linux rootfs·전체 이미지·보드/VM/EC2·
+운영 broker/DB/서비스·실차/재무장·7번 수락·commit/push는 수행하지 않았다.
+
+공개 제공물·재현 스크립트·정규 RPM·실제 drive template·빌드 receipt·원자료 manifest는 PC
+`C:/Users/SSAFY/Documents/Codex/2026-11-02/vm-provisioning/delivery-release3/`에 모았다.
+임시 VM root·credential/token·Authority·raw bootstrap 파일은 이 묶음에서 제외했다.
+source changes는 위 HEAD에 적용하는 변경 묶음이며 전체 이미지나 운영 설치 완료본이 아니다.

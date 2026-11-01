@@ -1,12 +1,20 @@
 # HTTP·Spring·VM 관리 연동의 상세 원문
 
 D02·D08의 현재 실행 지시는 [HTTP·Spring·화면 요청서](../requests/20261029-request-http-spring-ui.md)에 모았다.
+등록-only sender/수동 CLI와 제안 HTTP 수신 계약은 [VM 공급 계약](../contracts/vm-provisioning-v1.md)에 있다.
+기존 POST create의 역호출이 아니다. Spring 수신 합의·제품 구현·DB/운영 수락은 담당 작업으로 남는다.
 현재 구현 위치·하위 제공물·정상/실패 수락·선행조건·담당 회신은 그 본문을 따른다.
 이 문서의 기존 ID·예시·anchor는 배경과 당시 제안을 찾을 수 있도록 아래에 보존했다.
 
 기존 full create는 그대로 지원한다. 자원 생략은 선택 확장이며 같은 원 확정값의 생략↔명시는 양방향으로 허용한다.
 일반 호출자의 journal 버전 선택/raw 파싱은 필요 없다. 기존 key stop/조회는 이미 제공됐고 Spring·화면과 신규 하위 기능 소비는 담당 수락 전이다.
 내부 reader/writer·helper의 교체는 [배포 원본](deployment-readiness.md#cohort), 실제 설치본 인수는 [7번 입력표](deployment-readiness.md#stage7)를 따른다.
+
+현재 CLI·조회 보완은 [질문별 선택표](cli-manager-spec.md#usage)와
+[intents](cli-manager-spec.md#cmd-intents)를 제공한다. status는 출력 형식과 무관하게 list,
+옛 종합 진단은 diagnose --details다. 원 key 조회는 control-operation의 정식 CLI로 가능하다.
+상위 fork/budget 소비와 남은 제품 수락은 위 현재 요청서 D02·D08 본문을 따른다.
+아래 이력의 전역 직렬화·과거 CLI 설명을 현 기능 제한으로 재적용하지 않는다.
 
 ## 변경 이력
 

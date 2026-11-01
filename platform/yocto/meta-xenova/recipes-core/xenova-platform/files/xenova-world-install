@@ -1,0 +1,40 @@
+#!/usr/bin/python3
+"""root 전용 승인 world 자격 파일을 기존 drive 설정에 설치한다. 계정/VM 생성은 없다."""
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+sys.path.insert(0,'/usr/lib/xenova')
+from xenova_management import Manager,ReadContext,normalize_uuid,ManagementError
+from xenova_provisioning import install_world
+from xenova_preparation import AssetLease,request_output
+import xenova_vm as vm
+
+def main(argv=None):
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--vm-id',required=True);p.add_argument('--file',type=Path,required=True)
+    args=p.parse_args(argv)
+    if os.geteuid()!=0:p.error('root required')
+    try:args.vm_id=normalize_uuid(args.vm_id)
+    except ManagementError:p.error('valid VM UUID required')
+    manager=Manager();deadline=manager.p.clock()+15
+    # 등록/정지·대상 소유는 기존 관리 계약을 쓴다. 실행 중 파일 교체를 허가하지 않는다.
+    with request_output(),AssetLease(manager.p,args.vm_id,'provision',None) as lease:
+        read=ReadContext(manager,'intents',{'vm_id':args.vm_id},deadline);read.validate_one(args.vm_id)
+        state=read.states[0]
+        if state['lifecycle']!='REGISTERED' or vm.guest_kind(state['record'])!='zephyr':raise ValueError('registered Zephyr target required')
+        from xenova_resources import guards
+        from xenova_runtime import operation_lock
+        from xenova_management import fail
+        with operation_lock(manager.p.runtime) as fd:
+            manager._writable();lease.guard();read.validate_one(args.vm_id)
+            guards(manager,state,manager._operations(),fail,{'asset_lease':lease,'common_fd':fd},manager.p.records(validate_assets=False))
+            result=install_world(manager.data,args.vm_id,args.file)
+    print(json.dumps(result))
+
+if __name__=='__main__':
+    try:main()
+    except (OSError,ValueError,vm.PlatformError):
+        print('world credential installation failed; original VM and Pi credentials retained',file=sys.stderr)
+        raise SystemExit(4)

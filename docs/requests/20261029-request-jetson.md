@@ -20,6 +20,23 @@
 
 ## 플랫폼 제공물과 선행 결정
 
+### DEC-14·ARCH-T07·28 — 별도 broker 자격의 실제 Pi 제공물
+
+Pi의 `xenova_provisioning.install_world`와 설치 CLI `xenova-world-install --vm-id UUID --file /private/approved-world.json`를 제공한다.
+[필드·private 권한·실행 예제](../contracts/vm-provisioning-v1.md)를 따른다.
+입력에는 해당 UUID의 world 자격만 넣는다. Pi 비밀번호를 Jetson에 전달할 필요가 없다.
+공통 Bootstrap codec으로 검사한 뒤 기존 drive private 설정에 world 부분만 설치하며 새 실행에 적용한다.
+이 호출은 Jetson 계정을 만들거나 broker/bridge/mapper를 변경하지 않는다.
+
+Jetson broker 담당자는 VM별 UUID 인증·`xenova/v1/world/snapshot.pb`의 필요한 읽기 권한을 승인하고
+별도 broker IPv4/port·profile·private credential 파일을 제공해야 한다. Pi 계정으로 인증됐다는 이유로
+Jetson 인증을 완료로 표시하지 않는다. 운영 계정/ACL 발급 위치는 담당자가 실제 소스와 설치본으로 회신한다.
+제공자 쪽은 격리된 두 broker·동시 Agent client의 실제 인증과 자기 VM 외 보고 쓰기 거절을 시험했다.
+실제 Jetson broker ACL·mapper 구독/바이너리 송신·두 연결 중 하나의 장애/회복은 공동 수락이다.
+world가 없거나 손상돼도 MANUAL/Pi VM 관리를 전역 차단하지 않는다.
+생성기 LF/UTF-8 보완으로 새 primitive asset hash가 생겼다. 실제 `primitive-manifest.json`의 hash를 소비하고,
+보존된 과거 golden의 hash를 새 firmware에 맞는 현재 구성으로 가정하지 않는다.
+
 정식 원본은 `docs/contracts/drive-world/world.proto`와 `world.options`입니다.
 Python은 `from xenova_drive_world import schema, encode, decode`로 사용합니다.
 `encode(WorldSnapshot)`의 bytes를 broker J의 `xenova/v1/world/snapshot.pb`에

@@ -10,6 +10,7 @@ from unittest.mock import patch
 import test_xenova_recovery_foundation as foundation
 from xenova_runtime import operation_lock
 from xenova_execution import Execution, short_lock
+import xenova_execution as execution
 
 
 class ManagementBudgetTest(unittest.TestCase):
@@ -92,9 +93,9 @@ class ManagementBudgetTest(unittest.TestCase):
         with patch('xenova_execution.os.scandir',side_effect=PermissionError('injected unreadable directory')):
             self.assertFalse(self.lookup('existing')['ok'])
         # A file listed then lost is not equivalent to an absent directory.
-        read=Execution.read
-        def missing(execution,path):return None if path.parent==root else read(execution,path)
-        with patch.object(Execution,'read',missing):
+        read=execution.read_record
+        def missing(path):return None if path.parent==root else read(path)
+        with patch.object(execution,'read_record',missing):
             self.f.fails(self.lookup('existing'),'OBSERVATION_UNAVAILABLE')
         self.f.ok(self.lookup('existing'))
 
@@ -136,12 +137,12 @@ class ManagementBudgetTest(unittest.TestCase):
 
     def test_query_error_and_budget_exhaustion_are_not_empty_success(self):
         self.f.start('start')
-        original=Execution.requests
-        def slow(e,**kwargs):
-            rows=original(e,**kwargs);self.f.ticks+=1;return rows
-        with patch.object(Execution,'requests',slow):
+        original=execution.read_requests
+        def slow(data,**kwargs):
+            rows=original(data,**kwargs);self.f.ticks+=1;return rows
+        with patch('xenova_management.read_requests',slow):
             self.f.fails(self.lookup('start',budget=100),'DEADLINE_EXCEEDED')
-        with patch.object(Execution,'requests',side_effect=OSError('injected read failure')):
+        with patch('xenova_management.read_requests',side_effect=OSError('injected read failure')):
             self.assertFalse(self.lookup('start')['ok'])
         self.f.ok(self.lookup('start'))
 
@@ -270,7 +271,7 @@ class ManagementBudgetTest(unittest.TestCase):
         calls=[]
         def host():
             calls.append(1)
-            if len(calls)==3:self.f.ticks+=1
+            if len(calls)==2:self.f.ticks+=1
             return self.f.host
         self.p.boot_id_reader=host
         self.f.fails(self.lookup('original',budget=100),'DEADLINE_EXCEEDED')

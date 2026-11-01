@@ -5,8 +5,67 @@
 
 ## 현재 담당자가 할 일
 
+### D01-W01·W02 / D03-W01·W02 — 제공된 VM별 자격과 적용 프로필 연결
+
+플랫폼은 일반 create와 factory UUID 계획 뒤 자격 공급을 연결했다.
+[제공 API·상태·실행 예제](../contracts/vm-provisioning-v1.md)를 사용한다. Worker 제품 코드는 이번에 수정하지 않았다.
+설치된 `/usr/lib/xenova/xenova_provisioning.py`의 `credential_file(data, vm_id, channel)`은
+root 전용 설정 Path를 반환하며 발급·reload하지 않는다. `channel`은 telemetry 또는 drive다.
+
+`recovery/rejoin.py:ProductionBootstrap.__call__/refresh`의 실제 입력은
+`config['credentials'][vm_id][channel]`과 `config['receipt_dir']`다. 이 경로를 provider가 반환한 파일과
+`/srv/xenova/drive-rejoin`으로 맞춘다. 플랫폼 start가 이미 만든 **같은** VM/execution receipt를
+소비한다. 별도 receipt_dir에서 boot/app 신원을 다시 만들지 않는다. 양 writer는 기존 receipt lock을 공유한다.
+기존 위치가 다르면 설치 교체 때 대조하고 자동 파일 이동·원장 변환 없이 담당자와 수락한다.
+정상 applied receipt는 `refresh(row)`로 회수할 수 있으며 새 공급과 원 결과 읽기를 구별한다.
+
+기대 신호는 `manager.call('provisioning', {'vm_id': vm_id}, budget_ms=remaining_ms)`의
+`profile`(다음 기동)·`current_profile`(실행에 캡처한 선언)·`supply`로 구별한다.
+읽기 조회는 자격/Store/POST를 만들지 않는다. `captured-launch`는 live 수신 관측이 아니며
+capture가 없는 구형 실행은 unknown이다. `observe.py:PlatformObserver`의 기대 입력과
+`rejoin.py:ProductionBootstrap.refresh`의 `app_state_models` 연결에서 이 차이를 유지한다.
+지금 제공된 lattice 프로필은 AUTO stateful, MANUAL stateless, warm Standby progress idle이다.
+
+정상 수락은 최초 공급→실제 앱 binding→Worker 재시작 뒤 같은 암호·receipt 회수→새 실행의 새 binding이다.
+반례는 공급 실패/첫 무수신/Starter false/미선언 null/형식 오류·옛 host/실행·Standby 대기다.
+declared true나 Store applied를 MQTT 인증·READY·복구 승인으로 바꾸지 않는다.
+원 시도/기한·현재 Manager guard는 그대로 필요하다. 제공자 시험은
+`test_xenova_provisioning.py`, `test_xenova_signal_profiles.py`, 기존 `tests/test_drive_rejoin.py`에 연결한다.
+담당 회신에는 Worker 후보·실제 설정 경로(비밀 제외)·정상/실패 명령·결과·설치/보드 미수행을 적는다.
+
 먼저 관측과 실제 행동을 연결하고 원 복구 결과·신원 공급·재합류를 따로 종결한다.
 warm-drive-1의 앱별 신원·대기/활성 준비 최소 소비는 이미 로컬 구현됐다. 이를 다시 만들거나 전체 D01 완료로 표시하지 않는다.
+
+### D01-W01·W02 — 의도 수집을 제공된 metadata 조회로 연결
+
+하위 `intents`는 일반 생성·factory의 등록부/lifecycle/저장 의도를 읽는다. Xen·Store 관측,
+observation cache 저장, intent 초기화를 하지 않는다. [정식 계약](../platform/cli-manager-spec.md#cmd-intents)을 사용한다.
+
+```python
+# 요청별 Manager/fork, remaining_ms는 호출자의 남은 예산이다.
+reply = manager.call('intents', {'lifecycle': 'REGISTERED'}, budget_ms=remaining_ms)
+```
+
+CLI는 `xenova-vm intents --json`, 단건은 `xenova-vm intents UUID --json`이다.
+목록 `data.vms`/단건 `data.vm`의 desired_state·intent_revision·intent_applicable·
+intent_lifecycle_generation·generation과 이름/guest_kind/template 식별을 소비한다.
+intent가 없으면 unknown/null/applicable=false다. autostart나 실제 running으로 보충하지 않는다.
+
+수정 위치는 `recovery/observe.py:PlatformObserver._refresh_intents`의 현재 `list` 호출이다.
+의도 수집만 전환하고 `__call__`의 별도 Xen 목록, `confirm`의 현재 재확인, rejoin binding과
+recover_once 직전의 원 host/실행/의도/기한 guard는 유지한다. 실패한 조회를 빈 목록이나
+과거 cache의 현재 의도로 바꾸지 않는다. 이 응답은 복구 승인 토큰이 아니다.
+
+`drivers/platform.py:SerializedManager.call/fork`, `_BUDGET_ACTIONS/call_with_budget`도 연결 대상이다.
+공유 inner를 직접 동시에 호출하지 말고 요청별 fork와 잔여 budget 전달을 사용한다.
+현 제품 wrapper는 새 action의 독립 호출·budget 지원을 아직 완료하지 않았다.
+get/list/probe/execution-context는 하위에서 같은 관측 엔진·제한 슬롯을 사용한다.
+templates/recovery-operation/원 key 조회도 긴 물리 실행 잠금 밖이며, 상위 mutex 대기는 별도다.
+
+담당 수락은 정상 D/U/Z·factory 조회→metadata 오류/동시 stop·retire→정상 회복이다.
+긴 A restore 중 B intents/현재 조회/key 조회·실제 stop 완료를 함께 확인한다.
+하위 시험은 `test_xenova_query_consistency.py`와 `test_xenova_lifecycle_ownership.py`의 CLI barrier다.
+이번에는 Worker 제품을 수정하지 않았다. 담당 연결·운영 수락은 미완료다.
 
 ### D03 — 제공된 Gateway client를 복구 단계에 연결
 

@@ -168,9 +168,8 @@ class Accounts(unittest.TestCase):
             with self.assertRaises(broker.SetupError):
                 self.run_change()
         secrets = next(self.target.glob('.pending-*/credentials.json')).read_bytes()
-        with self.assertRaises(broker.SetupError):
-            self.run_change()
-        self.assertEqual(next(self.target.glob('.pending-*/credentials.json')).read_bytes(), secrets)
+        self.run_change()
+        self.assertEqual((self.load()['path']/'credentials.json').read_bytes(), secrets)
 
     def test_storage_failure_before_publication_preserves_current_and_same_retry_secrets(self):
         self.run_change()

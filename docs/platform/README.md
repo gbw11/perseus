@@ -34,6 +34,7 @@ MQTT의 payload 2.1 지원, 실제 보드 수락과 제품 소비자의 저장·
 | 기본 다섯 기능·원 작업·수습의 현재 구현/비용/근거 대조 | [기능별 기준선](../verification/platform-management-baseline.md) |
 | 자원·필수 작업·전달의 건강 근거와 행동 책임 | [건강 판정 계약](../contracts/health-evidence-v1.md) |
 | VM 조회·생성·시작·정지·복구·Wi-Fi 사용 | [CLI·Manager 명세](cli-manager-spec.md) |
+| Xen 없이 등록·관리 의도 조회, 원 key 회수, status/진단 구분 | [조회 선택표](cli-manager-spec.md#usage)·[intents](cli-manager-spec.md#cmd-intents) |
 | pending·원 요청 조회·시간 예산의 제품 연동 담당 범위 | [FastAPI·Spring·화면 연동 요청서](management-integration-request.md) |
 | Linux·Agent의 자원·앱 진행·로컬 감독 연결 | [Linux·Agent 요청서](../requests/2026-10-27-linux-health-agent.md) |
 | Worker의 전달 분류·건강 판단·복구/재합류 연결 | [Worker 요청서](../requests/2026-10-27-recovery-health-ctrl.md) |

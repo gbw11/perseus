@@ -159,8 +159,13 @@ def platform_root(root):
                'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
     for name in ('xenova_boot_status.py','xenova_boot_progress.py','xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
                  'xenova_cpu.py','xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py','xenova_preparation.py',
-                 'xenova_resources.py','xenova_zephyr_transition.py','xenova_zephyr_control.py'):
+                 'xenova_resources.py','xenova_zephyr_transition.py','xenova_zephyr_control.py',
+                 'xenova_provisioning.py','xenova_guest_profile.py','xenova_registration.py'):
         mapping['usr/lib/xenova/'+name] = FILES/name
+    mapping['usr/lib/xenova/xenova_broker.py']=ROOT/'platform/deploy/mosquitto/scripts/xenova_broker.py'
+    mapping['usr/share/xenova/mqtt/policy.json']=ROOT/'platform/deploy/mosquitto/etc/policy.json'
+    mapping['usr/lib/xenova/provision_xenova_telemetry.py']=ROOT/'platform/scripts/provision-xenova-telemetry.py'
+    mapping['usr/sbin/xenova-world-install']=FILES/'xenova-world-install'
     mapping['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
     mapping['usr/sbin/xenova-boot-status'] = FILES/'xenova-boot-status'
     mapping['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'

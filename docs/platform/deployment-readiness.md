@@ -5,7 +5,16 @@
 실제 실행 결과·파일 hash는 [최신 검증 보고](../verification/recovery-scenario-closure-20261030.md#history-drive-final)에 연결한다.
 이번 작업은 운영 설치·서비스 교체·7번 수락을 실행하지 않는다.
 
+2026-11-02 CLI·조회 후속은 위 제공물 위에 `f8a8663` + 현재 diff/새 파일로 식별한다.
+현재 조회/원 기록 reader의 검증·패키지 근거는 [CLI·조회 마감](../verification/recovery-scenario-closure-20261030.md#cli-query-consistency)이다.
+앞선 Gateway/firmware 제공 archive를 제자리 수정하거나 그 시험을 이번 모듈의 설치 증거로 쓰지 않는다.
+
 ## 제공 수준
+
+2026-11-02 자격/등록/신호 후속은 `8a23b8a` + 현재 diff/새 파일 후보다.
+[제공자 계약](../contracts/vm-provisioning-v1.md)과 [검증 보고](../verification/recovery-scenario-closure-20261030.md#vm-provisioning-integration)를 따른다.
+`xenova-platform`의 provisioning/profile/registration·Bootstrap·first-boot와 broker provider를 같은 내부 후보로 설치한다.
+일반 full HTTP 호출자까지 새 journal 선택이나 동일 commit 교체를 요구하지 않는다.
 
 담당자 현재 지시는 [요청 색인](../requests/README.md)에서 읽는다. 하위 create의 의미 비교·기한·소유·수습과
 OS 공통 정적 CPU 배치는 이전 검증 범위를 유지한다. 기존 full HTTP 호출은 그대로 지원하고 optional 상위 DTO는 담당 제품 확장으로 남는다.
@@ -32,6 +41,32 @@ OS 공통 정적 CPU 배치는 이전 검증 범위를 유지한다. 기존 full
 
 ## 의존성과 포장
 
+### VM provisioning 후속 설치 단위
+
+| 제공물 | 실제 package/경로·교체 조건 |
+|---|---|
+| 공급·선언·통지·기존 Bootstrap | `xenova-platform`: `/usr/lib/xenova/xenova_{provisioning,guest_profile,registration}.py`, 기존 `provision_xenova_telemetry.py`와 Manager/CLI/Execution/VM/first-boot/guest 준비 모듈. 같은 후보로 교체하고 장기 프로세스의 import 경로 확인 |
+| 원 계정 writer·정책 | broker recipe의 `xenova-mqtt-broker-provider`: `/usr/lib/xenova/xenova_broker.py`, `/usr/share/xenova/mqtt/policy.json`. native mosquitto_passwd·Python 의존 포함. 플랫폼→broker→bringup→플랫폼 순환을 피하려고 library payload를 분리했으며 별도 daemon은 없음 |
+| broker 서비스 | 기존 `xenova-mqtt-broker`: 제공자 package와 bringup에 의존. 기존 활성화/bridge/mount 조건 유지, 첫 등록 뒤 기동해 최초 계정 준비와 순환 대기를 만들지 않음 |
+| 명시 world 설치 | `/usr/sbin/xenova-world-install`; root private 입력만 읽고 현재 등록/정지/소유 guard 뒤 world 부분 적용. broker/VM 생성 없음 |
+| 선택 Spring 통지 | 비활성 `/usr/share/xenova/registration-notification.json.example`만 설치. 활성 root 0600 endpoint/token 설정은 운영/Spring 담당 공급. 별도 unit/timer/retry daemon 없음 |
+| 실제 drive template | `package-xenova-drive-template.py --build-root ... --output NEW`가 현재 소스와 실제 ARM BUILD_RECEIPT·payload를 대조해 새 immutable envelope 생성. `default-templates.lock.json`·defaults·assembly example이 실제 hash 선택. lab 차량 프로필이며 실제 차량 승인값 아님 |
+| Linux template/seed | 기존 1.0.2 선택 자산 유지. 다음 template builder는 실제 Agent receipt에서 profile 생성. 새 seed는 현재 guest_identity helper를 포함하고 host UUID 계획 뒤 private env 공급. 전체 Linux rootfs를 이번에 재제작하지 않음 |
+
+고정 Yocto Python 3.14의 `ssl.py`/`_ssl`은 `python3-io`, HTTP client는 `python3-netclient`,
+urllib.parse/threading 등은 해당 manifest의 core/dependency로 확인한다. 미존재 `python3-ssl`은 사용하지 않는다.
+HTTPS의 신뢰 CA와 host 한정 token은 실제 설치본에서 확인한다. 인증서 검증을 끄는 fallback은 없다.
+provider만 설치해 broker 서비스를 새로 활성화하지 않는다. 기존 image의 main broker package 활성화와 구분한다.
+
+VM별 비밀은 template·seed·firmware·RPM·예제에 포함하지 않는다. `/run`의 통지 slot과
+`/srv/xenova`의 자격/receipt/원 등록 기록은 수명과 정리 주체가 다르다. package hook으로
+암호 회전·Authority 초기화·원장 이관/삭제를 실행하지 않는다.
+기존 broker writer가 revoked fence를 모르거나, 구형 guest identity helper/별도 receipt_dir가
+새 공급부와 섞이는 설치는 먼저 drain/import/파일 경로를 대조한다. 일반 HTTP full 호출은 변경하지 않는다.
+이미 운영 중인 broker의 policy hash가 새 설치 정책과 다르면 자동 공급은 거절한다.
+승인된 설치 창에서 기존 `xenova-broker initialize` 계획의 policy_changed/추가·제거를 검토하고
+명시 execute로 정책만 반영한 뒤 공급을 수락한다. 원 암호·기존 해시는 보존하며 이번 작업에서는 이 운영 명령을 실행하지 않았다.
+
 고정 layer는 [layers.lock](../../platform/yocto/layers.lock)을 따른다. 현재 target은 Python 3.14.7,
 Paho 2.1.0, pyserial 3.5다. 새 라이브러리 버전이나 pip 설치를 도입하지 않는다.
 Gateway의 `RDEPENDS`는 실제 provider `python3-paho-mqtt`, `python3-pyserial`, `python3-protobuf`, 표준 모듈 분할 패키지와
@@ -52,6 +87,28 @@ Worker가 없어도 Gateway 보호는 진행하고 Gateway가 없으면 client�
 하위 플랫폼의 private 모듈은 `/usr/lib/xenova`에 설치하고 기존 entrypoint가 그 경로를 사용한다.
 native identity helper는 기존 `${CC}`로 빌드하는 ABI 경계를 유지한다.
 bringup 이미지에는 Gateway 패키지를 포함하도록 연결하지만, 이번에 전체 이미지/rootfs를 만들거나 서비스 enable을 실행하지 않는다.
+
+### CLI·조회 모듈의 부분 교체
+
+`xenova-platform`의 기존 SRC_URI/install 목록은 이번 변경의 `xenova_vm`, `xenova_management`,
+`xenova_management_cli`, `xenova_execution`, `xenova_recovery`, `xenova_catalog`와 wrapper를 이미 포함한다.
+신규 runtime 모듈·의존성·unit·설정·저장 형식을 추가하지 않아 recipe는 변경하지 않았다.
+`intents`와 원 key CLI, 독립 probe/execution-context/templates/recovery-operation reader는 이 모듈 집합으로 제공한다.
+같은 내부 helper를 import하는 프로세스는 기존 drain/import 교체 절차를 따른다. 외부 HTTP DTO의 동시 변경은 필수가 아니다.
+
+고정 환경에서 이 recipe만 빌드해 do_install·package QA·정규 RPM 생성을 수행하고 변경 파일의
+source→image→RPM payload 바이트와 Python0644/wrapper0755 모드를 대조했다.
+target Python3.14.7/QEMU에서 설치 경로의 help·metadata 의도 조회·원 key 회수를 실행했다.
+별도 native private mount namespace/chroot에서는 실제 `/usr/sbin/xenova-vm` wrapper를 빈 환경으로
+실행했다. task 소유 fixture만 `/srv/xenova`와 `/run/xenova`에 보이게 했으며 host의 실제 경로는 조작하지 않았다.
+QEMU smoke의 mount guard 대역과 native wrapper의 실제 fixture mount 검사는 보고서에서 구분한다.
+이 결과는 전체 이미지·실제 Xen/보드·API 서비스 교체 수락이 아니다.
+
+Worker는 `PlatformObserver._refresh_intents`의 live list 의도 취득을 `intents`로 연결하고,
+FastAPI의 `SerializedManager.call/fork`, `_BUDGET_ACTIONS/call_with_budget`는 실제 소비 action의
+독립 요청 객체·잔여 예산을 연결해야 한다. 해당 제품 코드는 이번에 수정하지 않았다.
+CLI `status`를 자산/시각 종합 진단으로 쓰던 소비자는 `diagnose --details`로 전환한다.
+새 경량 응답이나 과거 원 key 결과는 현재 VM 변경/복구의 승인 토큰이 아니다.
 
 <a id="history-drive-install"></a>
 ### 실제 지도형 제공물과 고정 설치 검증
