@@ -60,6 +60,20 @@ class StateWorld(WarmWorld):
         return self.deliver(B,'app.state.applied',value)
 
 
+def test_live_application_reference_survives_source_rotation_then_releases_on_binding_change(tmp_path):
+    w=StateWorld(tmp_path/'authority');original=w.snapshot.envelope['message_id'];w.apply()
+    for revision in range(2,25):w.produce(str(revision))
+    assert len(w.m.states.copies)==8 and original in w.m.states.copies
+    assert w.m.states.evidence(B,'autonomous')['copy_message_id']==original
+    w.cache.invalidate()
+    assert original in w.m.states.referenced() and w.m.states.evidence(B,'autonomous') is None
+    w.bind()
+    w.ids[B]['autonomous']=str(uuid4());w.bind()
+    assert w.m.states.evidence(B,'autonomous') is None
+    for revision in range(25,45):w.produce(str(revision))
+    assert original not in w.m.states.copies and len(w.m.states.copies)==8
+
+
 def test_c11_complete_application_then_new_calculation_is_required(tmp_path):
     w=StateWorld(tmp_path/'authority');request=str(uuid4())
     args=dict(mode='AUTO',target_vm=B,expected_owner=A,expected_generation=w.m.generation,deadline_ms=int(w.t*1000)+2000)
@@ -78,6 +92,24 @@ def test_c11_complete_application_then_new_calculation_is_required(tmp_path):
     assert result['phase']=='COMMITTED' and not w.m.output_permitted
     w.tick(.2)
     assert w.m.output_permitted and w.m.active_vm==B
+
+
+def test_binary_continuous_handoff_keeps_only_original_command_remainder(tmp_path):
+    from xenova_gateway.machine import ForwardStop
+    w=StateWorld(tmp_path/'authority');w.apply();w.tick(.02);w.m.continuous_handoff=True
+    identity=str(uuid4());deadline=w.t+2
+    w.m.planning.begin(identity,'AUTO',B,expected_owner=A,expected_generation=w.m.generation,deadline_ms=int(deadline*1000))
+    assert w.m.planning.refresh(identity)['evidence']['continuity']=='continuous'
+    original=w.m.nodes[A]['autonomous'].last_command_t+w.m.timing.command_timeout_s
+    row,actions=w.m.planning.commit(identity)
+    assert row['phase']=='COMMITTED' and not w.m.output_permitted
+    assert not any(isinstance(a,ForwardStop) for a in actions)
+    assert w.m._handoff_grace_until==original
+    assert not any(isinstance(a,ForwardStop) for a in w.m._output(w.t))
+    assert w.m.planning.commit(identity)==(row,[]) and w.m._handoff_grace_until==original
+    # No target completion is injected: expiry must still produce STOP.
+    w.t=original+.001;w.m._last_stop_t=None
+    assert any(isinstance(a,ForwardStop) for a in w.m._output(w.t))
 
 
 def test_c12_accepted_old_owner_copy_remains_usable_but_late_update_is_rejected(tmp_path):

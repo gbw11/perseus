@@ -41,7 +41,7 @@ def test_serial_failure_attempts_actual_runner_stop_before_log_sink(tmp_path,fai
             stopped.set()
             if stop_fails:raise OSError(28,'owned STOP storage error')
             return len(data)
-    serial=SerialSink.__new__(SerialSink);serial._serial=Port();serial.failures=0;serial.first_failure=None
+    serial=SerialSink.__new__(SerialSink);serial._serial=Port();serial._write_fd=None;serial.failures=0;serial.first_failure=None
     runner._sink=serial;logger=logging.getLogger('xenova_gateway');handler=SlowHandler();logger.addHandler(handler)
     worker=threading.Thread(target=lambda:runner._submit(ForwardDrive('autonomous',w.m.generation,.1,0,source=source)))
     worker.start()

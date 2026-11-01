@@ -97,3 +97,18 @@ class LimitedSink:
         return accepted
 
     def close(self):self.sink.close()
+
+    def drive_ready_at(self,frame):
+        """Read-only preview; the device owner still performs the final check.
+
+        A compressed network burst can arrive sooner than the original control
+        periods. Keep the exact target pending rather than submitting it early.
+        No target/clock/storage state is changed by this calculation.
+        """
+        if self.failed_reason:return 0.
+        c=self.limits
+        if (not math.isfinite(frame.v_mps) or not math.isfinite(frame.steer_rad) or
+            not c.min_v_mps<=frame.v_mps<=c.max_v_mps or not c.min_steer_rad<=frame.steer_rad<=c.max_steer_rad):return 0.
+        target=decode(encode(frame));v,steer,at=self.previous
+        interval=max(abs(target.v_mps-v)/c.max_accel_mps2,abs(target.steer_rad-steer)/c.max_steer_rate_rad_s)
+        return math.inf if interval>.100 else at+interval

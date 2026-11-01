@@ -17,6 +17,36 @@ from xenova_gateway.sink import MockSink
 from test_verified import A,B,HOST,Client
 from test_warm import WarmWorld
 
+
+def test_explicit_manual_hold_survives_auto_recovery_replay_and_cold_read(tmp_path):
+    from xenova_gateway.provider import ProviderError
+    w=WarmWorld(tmp_path/'authority',mode='MANUAL');w.perception=False;w.arm()
+    session=str(uuid4());sequence=0;before=w.bind
+    def bind():
+        nonlocal sequence
+        before();sequence+=1
+        assert w.m.on_manual_input(dict(profile='manual-session-1',session_id=session,sample_seq=str(sequence),
+            action_seq='1',generation=w.m.generation,keys=[],valid=True,age_ms=0),w.t)
+    w.bind=bind;bind()
+    runner=VerifiedGatewayRunner(Client(),MockSink(),authority=w.auth,bindings=w.cache,
+        vm_ids=(A,B),clock=lambda:w.t,readiness_profile='warm-drive-1');runner.machine=w.m
+    key=str(uuid4());spec=dict(purpose='handoff',mode='MANUAL',manual_hold=True,host_boot_id=HOST,
+        target_vm=B,target_execution_id=w.executions[B],intent_revision=1,lifecycle_generation=1,
+        expected_owner=A,expected_generation=w.m.generation,deadline_ms=int(w.t*1000)+2000)
+    runner.provider.submit(key,spec);runner.provider.handle(dict(action='commit',request_id=key))
+    w.tick(.2);assert w.m.mode is Mode.MANUAL and w.auth.value['manual_hold']
+    generation=w.m.generation
+    omitted={k:v for k,v in spec.items() if k!='manual_hold'}
+    assert runner.provider.submit(key,omitted)['committed_generation']==generation
+    with pytest.raises(ProviderError,match='CONFLICT'):runner.provider.submit(key,{**spec,'manual_hold':False})
+    with pytest.raises(ValueError):runner.provider.submit(key,{**spec,'manual_hold':0})
+    w.perception=True;w.tick(4.)
+    assert w.m.mode is Mode.MANUAL and w.m.generation==generation and w.m.output_permitted
+    cold=AuthorityStore(tmp_path/'authority',HOST,uid=os.geteuid(),mountpoint=None)
+    assert cold.load()['manual_hold'] is True
+    assert w.resume();w.tick(3.4)
+    assert w.m.mode is Mode.AUTO and not w.auth.value['manual_hold'] and w.m.output_permitted
+
 def prepare(w,request=None):
     request=request or str(uuid4())
     args=dict(mode='AUTO',target_vm=B,expected_owner=A,expected_generation=w.m.generation,

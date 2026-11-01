@@ -40,6 +40,7 @@ class VerifiedDriveMachine(ControlMachine):
         self.sessions={};self.streams={};self.references={}
         self.output_permitted=False;self._authorized=False;self.transport_ok=False;self.delivered=False
         self.failure=None;self._resume_authorized=False
+        self.continuous_handoff=False;self._handoff_grace_until=0.;self._resume_auto=False
         self._resume_vm=self.active_vm
         # Restart restores preference, never output permission, even if the last
         # process persisted an in-flight command with arm_after_apply=true.
@@ -173,6 +174,8 @@ class VerifiedDriveMachine(ControlMachine):
     def _adopt_control(self,mode,vm,reason,now,cancelled=()):
         """Adopt an already durable authority change; never issues another generation."""
         old_mode,old_vm=self.mode,self.active_vm
+        self._handoff_grace_until=0.
+        self._resume_auto=False
         self.mode=mode;self.active_vm=vm;self.apps=self.nodes[vm];self.generation=self.authority.value['generation']
         self.delivered=False;self.failure=None;self.transitions+=1
         for tracks in self.nodes.values():
@@ -187,17 +190,19 @@ class VerifiedDriveMachine(ControlMachine):
 
     def on_resume(self,t,requested_by=None,*,expected_generation=None,message_id=None):
         target=self.active_vm
+        auto_return=self.mode is Mode.MANUAL and self.authority.value.get('manual_hold',False) and self.output_permitted
         if self.mode is Mode.SAFE_STOP:
             target=next((vm for vm in self.vm_ids if self._qualified(vm,MANUAL_APP,t,held=True)),None)
         if not target or not self.transport_ok or not self._qualified(target,self.active_app or MANUAL_APP,t,held=True):return False
-        if self.mode is Mode.AUTO_READY and not self._qualified(self.active_vm,AUTONOMOUS,t,held=True):return False
-        if self.output_permitted and self.mode is not Mode.AUTO_READY:return False
+        if (self.mode is Mode.AUTO_READY or auto_return) and not self._qualified(self.active_vm,AUTONOMOUS,t,held=True):return False
+        if self.output_permitted and self.mode is not Mode.AUTO_READY and not auto_return:return False
         if self._countdown is not None:return False
         try:
             if not self.authority.consume_request(message_id,expected_generation):return False
         except (ValueError,AuthorityError):return False
         # Reuse the existing countdown implementation; rearm of a restored
         # AUTO/MANUAL preference is an explicit verified-profile operation.
+        self._resume_auto=auto_return
         self._resume_requested.append((t,requested_by));self._resume_authorized=True;self._resume_vm=target;return True
 
     def _resume(self,now):
@@ -220,7 +225,9 @@ class VerifiedDriveMachine(ControlMachine):
             ref=self.references[self.active_vm,self.active_app]
             self.forwarded+=1
             return [ForwardDrive(self.active_app,self.generation,pending[1],pending[2],source=ref)]
-        if not self.output_permitted and (self._last_stop_t is None or now-self._last_stop_t>=self.timing.stop_resend_s):
+        grace=(self.continuous_handoff and self.phase=='PENDING' and self._authorized and self.transport_ok and
+               not self.failure and not self.authority.error and now<self._handoff_grace_until)
+        if not self.output_permitted and not grace and (self._last_stop_t is None or now-self._last_stop_t>=self.timing.stop_resend_s):
             self._last_stop_t=now;return [ForwardStop(self.generation)]
         return []
 
@@ -254,7 +261,7 @@ class VerifiedDriveMachine(ControlMachine):
         if (self.phase=='FAILED' or self.failure) and not (self._resume_requested or self._countdown):return self._output(now)
         if app and self.output_permitted:
             p=self.prepared[self.active_vm,app]
-            if self.mode is Mode.AUTO and p.state!='READY' and p.reason in ('INPUT_UNAVAILABLE','INPUT_STALE','INPUT_INVALID') and self._qualified(self.active_vm,MANUAL_APP,now,held=True):
+            if self.mode is Mode.AUTO and p.state!='READY' and p.reason in ('INPUT_UNAVAILABLE','INPUT_STALE','INPUT_INVALID','MAP_UNAVAILABLE','OBSERVATION_EXPIRED') and self._qualified(self.active_vm,MANUAL_APP,now,held=True):
                 actions=self._change(Mode.MANUAL,self.active_vm,'autonomous_lost',now,arm=True)
             elif not self._ready(self.active_vm,app,now) or not self._command_fresh(now):
                 track=self.apps[app];p=self.prepared[self.active_vm,app]
@@ -264,7 +271,7 @@ class VerifiedDriveMachine(ControlMachine):
                     'command_age_ms':None if track.last_command_t is None else (now-track.last_command_t)*1000}))
                 if self._qualified(other,app,now,held=True):actions+=self._change(self.mode,other,'command_timeout',now,arm=True)
                 else:actions+=self._change(Mode.SAFE_STOP,self.active_vm,'no_fresh_standby',now);self._authorized=False
-            elif self.mode is Mode.MANUAL and self._qualified(self.active_vm,AUTONOMOUS,now,held=True):
+            elif self.mode is Mode.MANUAL and not self.authority.value.get('manual_hold',False) and self._qualified(self.active_vm,AUTONOMOUS,now,held=True):
                 actions=self._change(Mode.AUTO_READY,self.active_vm,'autonomous_ready',now,arm=True)
             elif self.mode is Mode.AUTO_READY and not self._qualified(self.active_vm,AUTONOMOUS,now):
                 actions=self._change(Mode.MANUAL,self.active_vm,'autonomous_lost',now,arm=True)
@@ -272,12 +279,12 @@ class VerifiedDriveMachine(ControlMachine):
             candidate=next((vm for vm in (self.active_vm,other) if self._qualified(vm,MANUAL_APP,now,held=True)),None)
             if candidate:actions=self._change(Mode.MANUAL,candidate,'manual_fresh',now,arm=False)
         if self._countdown:
-            expected_app=AUTONOMOUS if self.mode is Mode.AUTO_READY else app or MANUAL_APP
+            expected_app=AUTONOMOUS if self.mode is Mode.AUTO_READY or self._resume_auto else app or MANUAL_APP
             if self._countdown.generation!=self.generation or not self._qualified(self._resume_vm,expected_app,now,held=True):
                 actions+=self._cancel_countdown('readiness_lost',now)
             elif now-self._countdown.start_t>=self.timing.resume_countdown_s:
                 self._authorized=True
-                target_mode=Mode.AUTO if self.mode is Mode.AUTO_READY else Mode.MANUAL if self.mode is Mode.SAFE_STOP else self.mode
+                target_mode=Mode.AUTO if self.mode is Mode.AUTO_READY or self._resume_auto else Mode.MANUAL if self.mode is Mode.SAFE_STOP else self.mode
                 actions=self._change(target_mode,self._resume_vm,'resume_requested',now,arm=True)
         if not actions:actions+=self._resume(now)
         return actions+self._output(now)

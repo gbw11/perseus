@@ -52,6 +52,10 @@ class OutputOwner:
 
     def device_view(self):return dict(self._device_view)
 
+    def drive_ready_at(self,frame):
+        if self.first_failure is not None:return 0.
+        return getattr(self.sink,'drive_ready_at',lambda f:0.)(frame)
+
     def feedback_events(self):
         import queue
         result=[]

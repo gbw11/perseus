@@ -14,6 +14,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+world = [
+    # New binary receive bounds depend on the tested Paho parser boundary.
+    # Yocto installs the common xenova_drive_world module from its one source;
+    # source development also needs that module's documented Python path.
+    "paho-mqtt==2.1.0",
+    "protobuf==6.33.6",
+]
 serial = [
     "pyserial>=3.5",
 ]
@@ -26,5 +33,5 @@ include = ["xenova_gateway*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "../vm-agent/mqtt-client"]
+pythonpath = [".", "../vm-agent/mqtt-client", "../../apps/drive/world/python"]
 addopts = "-q"

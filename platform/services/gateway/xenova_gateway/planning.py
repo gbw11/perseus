@@ -61,6 +61,13 @@ class PlannedTransition:
         state_ok=True
         if spec['state_model']=='stateful':
             proof=m.states.evidence(spec['target_vm'],app)
+            if proof and proof['origin']=='handoff' and source:
+                from xenova_mqtt import handoff
+                saved=m.states.copies.get(proof['copy_message_id'])
+                latest=m.states.latest_for(spec['owner'],spec['source_app'],context(source,spec['source_app']))
+                if (saved and saved['vm']==spec['owner'] and latest and not
+                        handoff.compatible(latest['payload']['context'],proof['context'],latest['payload']['maneuver'])):
+                    proof=None
             state_ok=proof is not None
             saved=row.get('evidence')
             if saved and state_ok:
@@ -111,6 +118,12 @@ class PlannedTransition:
         # authoritative JSON update is atomic; guest/device application is not.
         armed=m.output_permitted and m._authorized
         if row.get('evidence',{}).get('continuity')=='stop_then_resume':armed=False
+        old_app=m.active_app;last=m.nodes[m.active_vm][old_app].last_command_t if old_app else None
+        continuous=(getattr(m,'continuous_handoff',False) and armed and
+            row['spec']['mode']==m.mode.value and row['spec']['target_vm']!=m.active_vm and
+            (row.get('evidence',{}).get('continuity')=='continuous' or row['spec'].get('manual_policy')=='CONTINUE_SESSION') and
+            last is not None and m._command_fresh(m.clock()) and m._ready(m.active_vm,old_app,m.clock()))
+        original_expiry=last+m.timing.command_timeout_s if continuous else 0.
         try:
             result=m.authority.commit_transition(request_id,int(m.clock()*1000),self.valid,arm=armed)
         except AuthorityError:
@@ -121,6 +134,12 @@ class PlannedTransition:
         m._authorized=armed
         m.output_permitted=False;m._countdown=None;m._resume_requested.clear()
         actions=m._adopt_control(Mode(spec['mode']),spec['target_vm'],'planned_handoff',now)
+        if continuous and now<original_expiry:
+            # Preserve only the previously submitted command's remaining age.
+            # The device owner independently expires it; neither this commit
+            # nor a lookup refreshes it. New output still requires new work.
+            m._handoff_grace_until=original_expiry
+            actions=[a for a in actions if not isinstance(a,ForwardStop)]
         if 'manual_session' in spec:
             from xenova_mqtt.manual_session import MovementGate
             m.movement=MovementGate(result['committed_generation'],spec['manual_session'],spec['manual_policy'])
