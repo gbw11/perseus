@@ -27,7 +27,10 @@ def open_sink(settings: GatewaySettings) -> Sink:
     limits=VehicleLimits.load(Path(settings.vehicle_limits)) if settings.vehicle_limits else None
     if settings.sink=='serial' and limits is None:raise SinkError('serial output requires vehicle limits')
     if settings.sink == "serial":
-        sink=SerialSink(settings.serial_port, settings.serial_baud)
+        if settings.serial_profile=='feedback-1':
+            from .feedback import FeedbackSerialSink
+            sink=FeedbackSerialSink(settings.serial_port,settings.serial_baud,timeout_ms=settings.feedback_timeout_ms)
+        else:sink=SerialSink(settings.serial_port, settings.serial_baud)
     elif settings.frame_log == "-":sink=MockSink(sys.stdout)
     elif settings.frame_log:sink=MockSink(open(settings.frame_log, "a", encoding="utf-8"))
     else:sink=MockSink()

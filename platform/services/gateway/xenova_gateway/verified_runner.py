@@ -231,6 +231,13 @@ class VerifiedGatewayRunner(GatewayRunner):
 
     def _submit(self,action):
         now=self._clock();source=action.source if isinstance(action,ForwardDrive) else None
+        device=self.device_view()
+        if device['feedback_supported'] and not device['ready']:
+            self.submissions.append(dict(source=source,generation=action.generation,device_applied=None,
+                serial_result='not_submitted',failure_reason='DEVICE_NOT_READY',submitted_monotonic=now))
+            if isinstance(action,ForwardDrive):
+                self.machine.output_permitted=False;self.machine._authorized=False
+            return
         if isinstance(action,ForwardDrive):
             if not self.machine.output_permitted or action.generation!=self.machine.generation or not source:return
             row=self.bindings.current(source['vm_id'],now)
@@ -252,6 +259,7 @@ class VerifiedGatewayRunner(GatewayRunner):
             if hasattr(accepted,'frame'):
                 actual=accepted.frame
                 record.update(frame_counter=actual.counter,encoded_hex=encode(actual).hex())
+                if accepted.metadata:record.update(serial_profile='feedback-1',**accepted.metadata)
             self.serial_accepted+=1;record['serial_result']='accepted';record['accepted_bytes']=accepted
         except (SinkError,OSError) as error:
             serial_error=error;cause=error.__cause__ or error
@@ -321,6 +329,12 @@ class VerifiedGatewayRunner(GatewayRunner):
         try:first=self._queue.get(timeout=timeout_s) if timeout_s>0 else self._queue.get_nowait()
         except queue.Empty:first=None
         self._provider_once()
+        device=self.device_view()
+        if device['feedback_supported'] and device['fault'] and not self._output_broken:
+            self._output_broken=True
+            self.machine.output_permitted=False;self.machine._authorized=False
+            self._submit(ForwardStop(self.machine.generation))
+            self.machine._fail(device['fault'],self._clock())
         self._delivery(self._clock());self._drain(first)
         self._emit(self.machine.step(self._clock()))
         events=getattr(self._sink,'feedback_events',lambda:[])()

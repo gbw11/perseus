@@ -40,6 +40,8 @@ class GatewaySettings:
     binding_file: str = "/run/xenova/drive-bindings.json"
     initialize_control_state: bool = False
     ipc_socket: str = '/run/xenova-gateway/control.sock'
+    serial_profile: str = 'write-only'
+    feedback_timeout_ms: int | None = None
 
 
 def _env(env: Mapping[str, str], name: str) -> str | None:
@@ -72,8 +74,13 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
     p.add_argument("--authority-dir",default=_env(env,"AUTHORITY_DIR") or d.authority_dir)
     p.add_argument("--binding-file",default=_env(env,"BINDING_FILE") or d.binding_file)
     p.add_argument('--ipc-socket',default=_env(env,'IPC_SOCKET') or d.ipc_socket)
+    p.add_argument('--serial-profile',choices=('write-only','feedback-1'),default=_env(env,'SERIAL_PROFILE') or d.serial_profile)
+    p.add_argument('--feedback-timeout-ms',type=int,default=_env(env,'FEEDBACK_TIMEOUT_MS'))
     p.add_argument("--initialize-control-state",action="store_true",help="확인한 최초 설치에서만 정지 상태 원본을 생성")
     a = p.parse_args(argv)
+    if a.serial_profile=='feedback-1' and (a.sink!='serial' or a.profile!='warm' or
+            type(a.feedback_timeout_ms) is not int or not 0<a.feedback_timeout_ms<=2**31-1):
+        p.error('feedback-1 requires warm serial profile and an approved feedback timeout')
     if a.sink=='serial' and not a.vehicle_limits:p.error('serial output requires --vehicle-limits')
     if a.profile in ("verified","warm") and not (a.vm_a and a.vm_b):p.error("verified/warm profile requires --vm-a and --vm-b")
     if a.profile=="legacy" and (a.vm_a or a.vm_b or a.initialize_control_state):p.error("legacy profile is for separate apps; no paired authority fallback")
@@ -96,4 +103,5 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
         vm_a=a.vm_a, vm_b=a.vm_b, initial_active_vm=a.initial_active_vm,
         profile=a.profile,authority_dir=a.authority_dir,binding_file=a.binding_file,
         initialize_control_state=a.initialize_control_state,ipc_socket=a.ipc_socket,
+        serial_profile=a.serial_profile,feedback_timeout_ms=a.feedback_timeout_ms,
     )

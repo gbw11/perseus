@@ -32,6 +32,12 @@ class OutputOwner:
         self.last = None
         self.watchdog_stops = 0
         self.first_failure = None
+        device=sink
+        while hasattr(device,'sink'):device=device.sink
+        self.device=device if callable(getattr(device,'poll',None)) else None
+        self._device_view={'feedback_supported':False,'ready':True,'fault':None,
+                           'accepted':None,'applied':None,'physical_stop':None}
+        if self.device is not None:self._device_view=dict(self.device.snapshot)
         self.thread = threading.Thread(target=self._loop, name='gateway-device-owner', daemon=True)
         self.thread.start()
 
@@ -43,6 +49,17 @@ class OutputOwner:
             raise SinkError('partial owned serial submission')
         self.last = frame
         return SubmissionReceipt(count,frame,getattr(count,'metadata',None))
+
+    def device_view(self):return dict(self._device_view)
+
+    def feedback_events(self):
+        import queue
+        result=[]
+        if self.device is not None:
+            for _ in range(8):
+                try:result.append(self.device.events.get_nowait())
+                except queue.Empty:break
+        return result
 
     def write(self, frame, now):
         if isinstance(frame,DriveFrame) and self.first_failure is not None:
@@ -86,6 +103,13 @@ class OutputOwner:
     def _loop(self):
         try:
             while True:
+                if self.device is not None:
+                    try:
+                        self.device.poll(self.clock());self._device_view=dict(self.device.snapshot)
+                    except (OSError,SinkError) as exc:
+                        if self.first_failure is None:self.first_failure=exc
+                        self._device_view={**self._device_view,'ready':False,'fault':'DEVICE_LINK_UNAVAILABLE',
+                                           'accepted':None,'applied':None,'physical_stop':None}
                 with self.condition:
                     now = self.clock()
                     expired = self.expiry is not None and now >= self.expiry
