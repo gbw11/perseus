@@ -27,6 +27,7 @@ class GatewaySettings:
     sink: str = "mock"                  # mock | serial
     serial_port: str = "/dev/ttyUSB0"
     serial_baud: int = 115200
+    vehicle_limits: str | None = None  # root-owned measured vehicle limits, mandatory for serial
     frame_log: str | None = None        # 목 싱크 기록 파일. "-" 는 표준출력, 없으면 메모리에만
     start_mode: Mode = Mode.AUTO
     retained_wait_s: float = 1.0        # 시작 시 이전 vehicle/control(retained) 을 기다리는 시간
@@ -38,6 +39,9 @@ class GatewaySettings:
     authority_dir: str = "/srv/xenova/drive-control"
     binding_file: str = "/run/xenova/drive-bindings.json"
     initialize_control_state: bool = False
+    ipc_socket: str = '/run/xenova-gateway/control.sock'
+    serial_profile: str = 'write-only'
+    feedback_timeout_ms: int | None = None
 
 
 def _env(env: Mapping[str, str], name: str) -> str | None:
@@ -58,6 +62,8 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
     p.add_argument("--serial-port", default=_env(env, "SERIAL_PORT") or d.serial_port,
                    help="장치 경로(/dev/ttyUSB0) 또는 pyserial URL. socket://<PC>:7600 이면 같은 프레임을 TCP 로 시뮬레이터에 보낸다")
     p.add_argument("--serial-baud", type=int, default=int(_env(env, "SERIAL_BAUD") or d.serial_baud))
+    p.add_argument("--vehicle-limits",default=_env(env,"VEHICLE_LIMITS"),
+                   help="root-owned private vehicle limit JSON; required for serial output")
     p.add_argument("--frame-log", default=_env(env, "FRAME_LOG"))
     p.add_argument("--start-mode", choices=("AUTO", "SAFE_STOP"), default=_env(env, "START_MODE"),help="legacy profile only")
     p.add_argument("--retained-wait-s", type=float, default=float(_env(env, "RETAINED_WAIT_S") or d.retained_wait_s))
@@ -68,8 +74,15 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
     p.add_argument("--profile",choices=("verified","warm","legacy"),default=_env(env,"PROFILE") or d.profile)
     p.add_argument("--authority-dir",default=_env(env,"AUTHORITY_DIR") or d.authority_dir)
     p.add_argument("--binding-file",default=_env(env,"BINDING_FILE") or d.binding_file)
+    p.add_argument('--ipc-socket',default=_env(env,'IPC_SOCKET') or d.ipc_socket)
+    p.add_argument('--serial-profile',choices=('write-only','feedback-1'),default=_env(env,'SERIAL_PROFILE') or d.serial_profile)
+    p.add_argument('--feedback-timeout-ms',type=int,default=_env(env,'FEEDBACK_TIMEOUT_MS'))
     p.add_argument("--initialize-control-state",action="store_true",help="확인한 최초 설치에서만 정지 상태 원본을 생성")
     a = p.parse_args(argv)
+    if a.serial_profile=='feedback-1' and (a.sink!='serial' or a.profile!='warm' or
+            type(a.feedback_timeout_ms) is not int or not 0<a.feedback_timeout_ms<=2**31-1):
+        p.error('feedback-1 requires warm serial profile and an approved feedback timeout')
+    if a.sink=='serial' and not a.vehicle_limits:p.error('serial output requires --vehicle-limits')
     if a.profile in ("verified","warm") and not (a.vm_a and a.vm_b):p.error("verified/warm profile requires --vm-a and --vm-b")
     if a.profile=="legacy" and (a.vm_a or a.vm_b or a.initialize_control_state):p.error("legacy profile is for separate apps; no paired authority fallback")
     if a.profile in ("verified","warm") and a.start_mode:p.error("verified mode/owner come from the durable authority, not --start-mode")
@@ -86,9 +99,10 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
         p.error(f"--port 범위 밖: {a.port}")
     return GatewaySettings(
         broker_host=a.host, broker_port=a.port, username=a.username or None, password=a.password,
-        sink=a.sink, serial_port=a.serial_port, serial_baud=a.serial_baud, frame_log=a.frame_log,
+        sink=a.sink, serial_port=a.serial_port, serial_baud=a.serial_baud,vehicle_limits=a.vehicle_limits,frame_log=a.frame_log,
         start_mode=Mode(a.start_mode or d.start_mode), retained_wait_s=max(0.0, a.retained_wait_s), log_level=a.log_level,
         vm_a=a.vm_a, vm_b=a.vm_b, initial_active_vm=a.initial_active_vm,
         profile=a.profile,authority_dir=a.authority_dir,binding_file=a.binding_file,
-        initialize_control_state=a.initialize_control_state,
+        initialize_control_state=a.initialize_control_state,ipc_socket=a.ipc_socket,
+        serial_profile=a.serial_profile,feedback_timeout_ms=a.feedback_timeout_ms,
     )

@@ -431,8 +431,19 @@ class XenovaClient:
         try:
             envelope = json.loads(msg.payload.decode("utf-8"))
             env.validate(msg.topic, envelope)
+            if envelope['type'] in ('app.state.snapshot','app.state.applied'):
+                from .handoff import decode_complete,snapshot,applied
+                try:
+                    envelope=decode_complete(msg.payload)
+                    (snapshot if envelope['type']=='app.state.snapshot' else applied)(envelope['payload'])
+                except ValueError:
+                    log.warning('state message rejected: invalid complete state')
+                    return
         except (UnicodeDecodeError, json.JSONDecodeError):
             log.warning("버림 %s: PAYLOAD_INVALID JSON 아님", msg.topic)
+            return
+        except RecursionError:
+            log.warning('버림 %s: PAYLOAD_INVALID JSON nesting limit',msg.topic)
             return
         except env.EnvelopeError as error:
             log.warning("버림 %s: %s", msg.topic, error)

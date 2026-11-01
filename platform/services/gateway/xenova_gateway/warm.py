@@ -16,6 +16,8 @@ class WarmDriveMachine(VerifiedDriveMachine):
         self.evidence_not_before=0.
         from .planning import PlannedTransition
         self.planning=PlannedTransition(self)
+        from .state_transfer import StateCopies
+        self.states=StateCopies(self)
         from xenova_mqtt.manual_session import SessionEvidence
         self.manual_input=SessionEvidence();self.movement=None
 
@@ -47,6 +49,9 @@ class WarmDriveMachine(VerifiedDriveMachine):
         return super()._bound(vm,self.clock(),app)
 
     def _ready(self,vm,app,now,held=False):
+        binding=self.bindings.current(vm,self.clock())
+        if (binding and binding.get('app_state_models',{}).get(app)=='stateful' and
+                self.states.evidence(vm,app) is None):return False
         pending=self.authority.value.get('pending') or {}
         if vm==self.active_vm and app=='manual' and self.movement:
             sample=self.manual_input.current(now)
@@ -106,6 +111,7 @@ class WarmDriveMachine(VerifiedDriveMachine):
         if not super().accept_session(vm,boot,instance,now,app=app):return False
         if before!=self.sessions.get((vm,app)):
             self.checks.pop((vm,app),None);self.qualification.pop((vm,app),None)
+            self.states.invalidate(vm,app)
         return True
 
     def on_readiness(self,*args):return False  # no legacy READY fallback
@@ -132,9 +138,13 @@ class WarmDriveMachine(VerifiedDriveMachine):
         elif value.readiness!='READY':p.observed=None;p.since=None
         p.progress=value.progress;p.generation=value.generation
         p.state='READY' if value.readiness=='READY' else 'NOT_READY';p.reason=value.reason
+        if value.readiness=='NOT_READY':self.states.invalidate(vm,app)
         return True
 
     def _qualified(self,vm,app,now,held=False):
+        binding=self.bindings.current(vm,self.clock())
+        if (binding and binding.get('app_state_models',{}).get(app)=='stateful' and
+                self.states.evidence(vm,app) is None):return False
         if app=='manual' and self.authority.value.get('manual_input_profile')=='manual-session-1':
             sample=self.manual_input.current(now)
             if sample is None or sample.generation!=self.generation:return False

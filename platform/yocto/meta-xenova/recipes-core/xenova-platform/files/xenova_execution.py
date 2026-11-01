@@ -25,6 +25,12 @@ class ExecutionError(PlatformError):
         super().__init__(message)
 
 
+class ReadChanged(ExecutionError):
+    """요청 안에서 한 번만 새 관측 회차로 재확인할 수 있는 메타데이터 변경."""
+    def __init__(self):
+        super().__init__('TARGET_CHANGED','read configuration or execution changed during observation')
+
+
 def refuse(code, message, **kwargs):
     raise ExecutionError(code, message, **kwargs)
 
@@ -303,6 +309,8 @@ class Execution:
         return unique
 
     def require_launch_available(self, record):
+        from xenova_preparation import guard_asset
+        guard_asset(self.p, record['uuid'])
         previous = self.run_record(record)
         if previous and previous.get("phase") in ("launching", "uncertain"):
             refuse("RECONCILE_REQUIRED", "an earlier launch may still exist; administrator reconciliation required")
@@ -449,27 +457,30 @@ class Execution:
             self.write(self._path(self.runtime, "executions", record["uuid"]),
                        {**value, "phase":phase, "stopped_monotonic_ms":int(self.p.clock()*1000)})
 
-    def note_probe_error(self, identity, error):
+    def note_probe_error(self, identity, error, *, _started_ms=None):
         """진단 sink의 실패는 원래 오류를 가리지 않는다. 추가 잠금 대기는 하지 않는다."""
         try:
-            self.probe_error(identity, error["code"])
+            if _started_ms is None:self.probe_error(identity, error["code"])
+            else:self.probe_error(identity,error['code'],_started_ms=_started_ms)
         except (PlatformError, OSError, ValueError) as diagnostic:
             error["details"].setdefault("diagnostic_warnings", []).append(
                 {"code":"DIAGNOSTIC_UNAVAILABLE", "sink":"observations", "cause_type":type(diagnostic).__name__})
 
     @traced('execution.observe')
-    def observe(self, record, deadline):
+    def observe(self, record, deadline, *, _read_context=None):
         """실패를 보존하고 두 목록/unique_id를 대조한다. 실패는 부재가 아니다."""
         try:
-            return self._observe(record, deadline)
+            return self._observe(record, deadline) if _read_context is None else self._observe_many([record],deadline,_read_context=_read_context)[record['uuid']]
         except ExecutionError as error:
             failure = error
         except vm.DomainIdentityError as error:
             failure = ExecutionError("TARGET_CHANGED", str(error))
         except (PlatformError, OSError, ValueError) as error:
-            failure = ExecutionError("OBSERVATION_UNAVAILABLE", "Xen observation could not be verified",
+            expired=_read_context is not None and self.p.clock()>=deadline
+            failure = ExecutionError('DEADLINE_EXCEEDED' if expired else "OBSERVATION_UNAVAILABLE", "Xen observation could not be verified",
                                      details={"cause_type":type(error).__name__})
-        self.note_probe_error(record["uuid"], failure.error)
+        if _read_context is None:self.note_probe_error(record['uuid'],failure.error)
+        else:self.note_probe_error(record['uuid'],failure.error,_started_ms=_read_context.started_ms)
         failure.observation_error_handled = True
         raise failure
 
@@ -477,28 +488,30 @@ class Execution:
         return self._observe_many([record], deadline)[record['uuid']]
 
     @traced('execution.observe_many')
-    def observe_many(self, records, deadline, *, _lifecycles=None):
+    def observe_many(self, records, deadline, *, _lifecycles=None, _read_context=None):
         """명시 목록 조회의 전체 예산과 두 목록을 공유한다. 부분 성공은 반환하지 않는다."""
         records = list(records)
         try:
-            return self._observe_many(records, deadline, _lifecycles=_lifecycles)
+            return self._observe_many(records, deadline, _lifecycles=_lifecycles,_read_context=_read_context)
         except ExecutionError as error:
             failure = error
         except vm.DomainIdentityError as error:
             failure = ExecutionError('TARGET_CHANGED', str(error))
         except (PlatformError, OSError, ValueError) as error:
-            failure = ExecutionError('OBSERVATION_UNAVAILABLE', 'Xen list observation could not be verified',
+            expired=_read_context is not None and self.p.clock()>=deadline
+            failure = ExecutionError('DEADLINE_EXCEEDED' if expired else 'OBSERVATION_UNAVAILABLE', 'Xen list observation could not be verified',
                                      details={'cause_type':type(error).__name__})
         for record in records:
-            self.note_probe_error(record['uuid'], failure.error)
+            if _read_context is None:self.note_probe_error(record['uuid'],failure.error)
+            else:self.note_probe_error(record['uuid'],failure.error,_started_ms=_read_context.started_ms)
         failure.observation_error_handled = True
         raise failure
 
-    def _observe_many(self, records, deadline, *, _lifecycles=None):
+    def _observe_many(self, records, deadline, *, _lifecycles=None, _read_context=None):
         if not records:
             return {}
-        # Only Manager.list supplies this snapshot while holding operation_lock.
-        # Single-domain/control paths still read their lifecycle at publication.
+        # 기존 내부 호출의 명시 수명 근거를 검증한다. 일반 조회는 별도 ReadContext를 사용하며,
+        # 제어 경로는 조회 문맥을 받지 않고 현재 수명/실행 guard를 유지한다.
         if _lifecycles is not None and (not isinstance(_lifecycles, dict)
                 or set(_lifecycles) != {r['uuid'] for r in records}
                 or any(not isinstance(v, tuple) or len(v) != 2
@@ -508,13 +521,16 @@ class Execution:
         if self.p.boot_id_reader() != self.host:
             refuse('TARGET_CHANGED', 'observation belongs to a previous host boot')
         before = self.p.removal_snapshot(deadline)
-        domains = self.p.domains(deadline=deadline)
+        # 화면 조회는 완전한 UUID/name/state 목록을 공유한다. 효과 제출 guard의 domains는 별개다.
+        domains = ([{**row,'config':{'c_info':{'uuid':row['uuid'],'name':row['name']}}}
+                    for row in before.values()] if _read_context is not None else self.p.domains(deadline=deadline))
         targets = []
         for record in records:
             rows = self.p.matching(record, domains)
             row = rows[0] if rows else None
             targets.append((record, row, self.unique(row, deadline) if row else None))
         after = self.p.removal_snapshot(deadline)
+        absence_verified_ms=int(self.p.clock()*1000) if _read_context is not None else None
         verified = []
         for record, row, unique in targets:
             expected = (row['domid'], record['uuid'], record['name']) if row else None
@@ -528,9 +544,16 @@ class Execution:
             if row:
                 row = {**row, 'xen_state':after[row['domid']]['xen_state'],
                        'xen_state_flags':after[row['domid']]['xen_state_flags']}
+            if _read_context is not None:
+                _read_context.observed_ms[record['uuid']]=int(self.p.clock()*1000) if row else absence_verified_ms
             verified.append((record, row, unique))
         if self.p.boot_id_reader() != self.host:
             refuse('TARGET_CHANGED', 'host boot changed during observation')
+        if _read_context is not None:
+            _read_context.validate()
+            return {record['uuid']:self.publish_observation(record,row,unique,deadline,
+                    _lifecycle=_read_context.lifecycles[record['uuid']],_read_context=_read_context)
+                    for record,row,unique in verified}
         if _lifecycles is None:
             return {record['uuid']:self.publish_observation(record, row, unique, deadline)
                     for record, row, unique in verified}
@@ -539,15 +562,22 @@ class Execution:
                 for record, row, unique in verified}
 
     @traced('execution.publish_observation')
-    def publish_observation(self, record, row, unique, deadline, *, _lifecycle=None):
+    def observation_inputs(self, record, lifecycle):
+        """외부 관측과 분리한 원자 JSON 입력. 공유 memo나 새 권위 원본이 아니다."""
+        return {'lifecycle':lifecycle,'run':self.run_record(record),'intent':self.intent(record),
+                'admission':self.admission(record),'barrier':self.barrier(),
+                'shutdown_requested':(self.runtime/'shutdown-requested').exists()}
+
+    def publish_observation(self, record, row, unique, deadline, *, _lifecycle=None, _read_context=None):
         """확인된 한 단계의 사실을 게시한다. 이 함수는 Xen을 조회하지 않는다."""
         lifecycle, generation = self.lifecycle(record) if _lifecycle is None else _lifecycle
-        run = self.run_record(record)
+        inputs=_read_context.inputs[record['uuid']] if _read_context is not None else None
+        run = inputs['run'] if inputs is not None else self.run_record(record)
         managed = bool(row and run and run.get("phase") == "observed" and
                        run.get("domid") == row["domid"] and run.get("xen_unique_id") == unique and
                        run.get("lifecycle_generation") == generation and lifecycle == "REGISTERED")
-        intent = self.intent(record)
-        admission = self.admission(record)
+        intent = inputs['intent'] if inputs is not None else self.intent(record)
+        admission = inputs['admission'] if inputs is not None else self.admission(record)
         observation = {"configuration_revision":fingerprint(record),
                        "desired_state":intent["desired_state"] if intent else "unknown",
                        "intent_revision":intent["intent_revision"] if intent else None,
@@ -561,17 +591,28 @@ class Execution:
         path = self._path(self.runtime, "observations", record["uuid"])
         with short_lock(self.runtime, "observation-"+record["uuid"], deadline=deadline,
                         clock=self.p.clock, sleep=self.p.sleep):
+            if _read_context is not None:
+                _read_context.validate_one(record['uuid'])
             previous = self.read(path)
             last = previous.get("last_success") if previous and previous.get("host_boot_id") == self.host else None
             revision = previous["observation_revision"] if last else 0
+            sampled=_read_context.observed_ms.get(record['uuid']) if _read_context is not None else int(self.p.clock()*1000)
+            if type(sampled) is not int:raise ValueError('verified observation clock missing')
+            newer=False
+            if _read_context is not None and previous and previous.get('host_boot_id')==self.host:
+                point=(previous.get('last_attempt_monotonic_ms') if previous.get('last_error') is not None
+                       else last.get('monotonic_ms') if last else None)
+                newer=type(point) is int and point>sampled
+                if newer and (not last or last['value']!=observation or previous.get('last_error') is not None):
+                    raise ReadChanged()
             if last is None or fingerprint(last["value"]) != fingerprint(observation):
                 revision += 1
             value = {"schema_version":"1.0", "vm_id":record["uuid"], "host_boot_id":self.host,
-                     "observation_revision":revision, "last_success":{"monotonic_ms":int(self.p.clock()*1000),
+                     "observation_revision":revision, "last_success":{"monotonic_ms":sampled,
                      "value":observation}, "last_error":None, "last_attempt_monotonic_ms":int(self.p.clock()*1000)}
             if self.p.clock() >= deadline:
                 refuse("DEADLINE_EXCEEDED", "observation publication deadline expired")
-            self.write(path, value)
+            if not newer:self.write(path, value)
         if self.p.clock() >= deadline:
             refuse("DEADLINE_EXCEEDED", "observation completed after deadline")
         description = {"desired_state":intent['desired_state'] if intent else 'unknown',
@@ -579,17 +620,22 @@ class Execution:
                        'intent_applicable':observation['intent_applicable'],
                        'intent_lifecycle_generation':intent['lifecycle_generation'] if intent else None,
                        'host_boot_id':self.host, 'boot_admission':admission,
-                       'host_admission':self.barrier(),
-                       'shutdown_requested':(self.runtime/'shutdown-requested').exists(),
+                       'host_admission':inputs['barrier'] if inputs is not None else self.barrier(),
+                       'shutdown_requested':inputs['shutdown_requested'] if inputs is not None else (self.runtime/'shutdown-requested').exists(),
                        'execution_id':observation['execution_id'],
                        'execution_context':run if managed else None, 'observation_revision':revision}
         return {**observation, "observation_revision":revision, "host_boot_id":self.host,
                 "observed_monotonic_ms":value["last_success"]["monotonic_ms"], '_description':description}
 
-    def probe_error(self, identity, code):
+    def probe_error(self, identity, code, *, _started_ms=None):
         path = self._path(self.runtime, "observations", identity)
         with short_lock(self.runtime, "observation-"+identity):
             previous = self.read(path)
+            if previous and previous.get('host_boot_id')==self.host and _started_ms is not None:
+                last=previous.get('last_success')
+                point=(previous.get('last_attempt_monotonic_ms') if previous.get('last_error') is not None
+                       else last.get('monotonic_ms') if last else None)
+                if type(point) is int and point>_started_ms:return
             value = previous if previous and previous.get("host_boot_id") == self.host else {
                 "schema_version":"1.0", "vm_id":identity, "host_boot_id":self.host,
                 "observation_revision":0, "last_success":None}
@@ -632,12 +678,22 @@ class Execution:
                 "execution_context":run if observation and observation["execution_status"] == "managed" else None,
                 "observation_revision":observation["observation_revision"] if observation else None}
 
-    def requests(self):
+    def requests(self, *, deadline=None):
+        """Complete journal scan within the caller's existing observation budget.
+
+        A partial scan never proves absence or uniqueness. This deadline is not
+        written into any original operation and grants no physical execution.
+        """
         from xenova_management import Manager
+        def check():
+            if deadline is not None and self.p.clock()>=deadline:
+                refuse('DEADLINE_EXCEEDED','control request scan budget expired')
+        check()
         root = self.data/"control-requests"
         try:
             root.lstat()
         except FileNotFoundError:
+            check()
             return []
         except OSError:
             refuse('OBSERVATION_UNAVAILABLE', 'control request directory could not be inspected')
@@ -646,15 +702,21 @@ class Execution:
         # A partially read directory cannot establish absence or uniqueness.
         try:
             with os.scandir(root) as entries:
-                names = sorted(entry.name for entry in entries if entry.name.endswith('.json'))
+                names=[]
+                for entry in entries:
+                    check()
+                    if entry.name.endswith('.json'):names.append(entry.name)
         except OSError:
             refuse('OBSERVATION_UNAVAILABLE', 'control request enumeration is incomplete')
         result = []
-        for name in names:
+        check()
+        for name in sorted(names):
+            check()
             path = root/name
             if not vm.UUID.fullmatch(path.stem):
                 refuse("RECONCILE_REQUIRED", "invalid control request filename")
             value = self.read(path)
+            check()
             if value is None:
                 refuse('OBSERVATION_UNAVAILABLE', 'enumerated control request disappeared')
             if (value.get("operation_id") != path.stem or value.get("request_hash") != fingerprint(value.get("request"))
@@ -662,6 +724,7 @@ class Execution:
                     or value['idempotency_key'] is not None and not Manager._text_token(value['idempotency_key'])):
                 refuse("RECONCILE_REQUIRED", "invalid control request identity")
             result.append(value)
+        check()
         return result
 
     @traced('execution.save_request')
@@ -688,6 +751,8 @@ class Execution:
                                        receipt=receipt, deadline=deadline)
 
     def _accept_locked(self, record, request, key=None, *, source="user", previous=None, receipt=None, deadline=None):
+        from xenova_preparation import guard_asset
+        guard_asset(self.p, record['uuid'])
         if deadline is not None and self.p.clock() >= deadline:
             refuse('DEADLINE_EXCEEDED', 'control deadline expired before intent acceptance')
         lifecycle, generation = self.lifecycle(record)
@@ -737,6 +802,8 @@ class Execution:
 
     @traced('execution.control')
     def control(self, action, record, *, force=False, key=None, deadline=None):
+        from xenova_preparation import guard_asset
+        guard_asset(self.p, record['uuid'])
         end = deadline if deadline is not None else self.p.clock()+90
         diagnostics = []
         def event(*args, **kwargs):
@@ -746,8 +813,10 @@ class Execution:
         if action not in ("start", "stop", "reboot", "destroy"):
             refuse("INVALID_SPEC", "invalid control action")
         from xenova_management import Manager
-        if any(q["vm_id"] == record["uuid"] and q["status"] != "SUCCEEDED"
-               for q in Manager(self.p)._operations()):
+        from xenova_creation import holds
+        manager=Manager(self.p)
+        if any(q["vm_id"] == record["uuid"] and holds(manager,q)
+               for q in manager._operations()):
             refuse("OPERATION_IN_PROGRESS", "an incomplete asset operation owns this VM", retryable=True)
         if action == "reboot" and vm.guest_kind(record) == "zephyr" and vm.cooperative(record) and not force:
             from xenova_zephyr_control import reboot

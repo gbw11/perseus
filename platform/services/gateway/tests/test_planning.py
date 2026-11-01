@@ -180,8 +180,15 @@ def test_no_stateless_fallback_for_unknown_or_stateful_application(tmp_path,mode
     if model is None:value['vms'][B].pop('app_state_models')
     else:value['vms'][B]['app_state_models']['autonomous']=model
     w.cache.install(value)
-    with pytest.raises(AuthorityError,match='stateless declaration'):prepare(w)
-    assert w.m.output_permitted and not w.auth.value.get('transitions')
+    if model is None:
+        with pytest.raises(AuthorityError,match='supported state model'):prepare(w)
+        assert not w.auth.value.get('transitions')
+    else:
+        request,_,row=prepare(w)
+        assert row['phase']=='PREPARING'
+        assert w.m.planning.refresh(request)['phase']=='PREPARING'
+        with pytest.raises(AuthorityError,match='not prepared'):w.m.planning.commit(request)
+    assert w.m.output_permitted
 
 def test_competing_preparations_are_abandoned_in_same_commit(tmp_path):
     w=WarmWorld(tmp_path/'authority');w.arm()

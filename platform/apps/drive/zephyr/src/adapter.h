@@ -8,6 +8,7 @@
 #include "manual.h"
 #include "preparation.h"
 #include "manual_session.h"
+#include "state_transfer.h"
 #include <xenova/manual_input.h>
 
 struct drive_sample { float v_mps,steer_rad,nearest_m; enum auto_reason auto_reason; const char *reason; };
@@ -31,6 +32,19 @@ struct drive_adapter {
  struct drive_manual_gate movement;
  drive_qualify qualify;
 };
+/* Successful application is preparation, not calculation progress or READY.
+ * The adapter owner must already have joined any previous state consumer. */
+static inline int drive_adapter_apply_maneuver(struct drive_adapter *adapter,
+ struct drive_maneuver_copy *copy,const struct xm_envelope *envelope,struct xm_span payload,
+ const struct xm_vehicle_control *control,const char *receiver_vm,
+ const struct drive_state_context *target,const struct xm_state_context *current,
+ const char *const *segments,size_t count,uint64_t now,uint64_t deadline)
+{
+ if(!adapter||!adapter->requires_state_sync||adapter->state_ready)return -EINVAL;
+ int rc=drive_apply_maneuver(copy,envelope,payload,control,receiver_vm,target,current,segments,count,now,deadline);
+ if(!rc){adapter->prepared_state=&copy->prepared;adapter->state_context=target;adapter->state_ready=true;}
+ return rc;
+}
 void drive_auto_adapter(struct drive_adapter *,struct auto_cfg *);
 void drive_manual_adapter(struct drive_adapter *,struct manual_cfg *);
 int drive_adapter_run(struct drive_adapter *,struct xm_span control,struct xm_span input,

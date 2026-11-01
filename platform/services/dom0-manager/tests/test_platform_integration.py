@@ -100,6 +100,10 @@ class Board:
         self.xen.rows.append(domain(ubuntu, ubuntu_dir / "root.raw", 1))
         _publish_template(self.data)
         self.platform = vm.Platform(self.data, self.run, command=self.xen, defaults_path=DEFAULTS)
+        # 명시적 로컬 시험 프로필이며 서비스/운영 기본 정책으로 배포하지 않는다.
+        self.platform.creation_policy_path=self.data/'creation-policy-test.json'
+        self.platform.creation_policy_path.write_text(json.dumps({'schema_version':'1.0','call_ms':3600000,
+                                                                 'execution_ms':3500000,'cleanup_ms':5000}))
         self.manager = management.Manager(self.platform, preparer=self._prepare, usage_check=lambda *a: None, defaults_path=DEFAULTS)
 
     def _prepare(self, op):
@@ -290,11 +294,11 @@ def test_spring_dto_name_uses_actual_manager_metadata_preparer(client, board, na
     def copy_disk_boundary(args, **kwargs):
         record = kwargs["record_override"]
         assert record["display_name"] == body["name"]
-        directory = fixture(board.data, record)
-        with (directory / "root.raw").open("r+b") as stream:
-            stream.seek(1080)
-            stream.write(b"\x53\xef")
+        from test_xenova_platform import private_fixture
+        assert kwargs['private'] is True
+        prepared=private_fixture(board.data,record,kwargs['workspace_path'])
         board.records[record["id"]] = record
+        return prepared
     with patch.object(prepare_instance, "make_instance", side_effect=copy_disk_boundary) as copy:
         response = client.post("/api/v1/vms", json=body)
     assert response.status_code == 201, response.text

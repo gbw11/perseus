@@ -67,6 +67,7 @@ class VerifiedDriveMachine(ControlMachine):
 
     def _bound(self,vm,now,app=None):
         from xenova_mqtt.drive_binding import app_instance
+        if self.authority.protected(vm):return False
         row=self.bindings.current(vm,now)
         if not row:return False
         return all(self.sessions.get((vm,target))==(row['execution_id'],row['boot_id'],app_instance(row,target))

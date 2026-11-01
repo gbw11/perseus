@@ -26,9 +26,12 @@ Xen cfg의 scalar `cpus = '0,3'`은 전체 vCPU에 같은 마스크를 적용한
 
 운영 정책 원본은 `/srv/xenova/cpu-policy.json` 하나다. 전용 예약은 영구 UUID로 지정한다.
 표시 이름, domid, template_id, Spring role, AUTO/MANUAL, ACTIVE/STANDBY를 배치 입력으로 해석하지 않는다.
-전용 예약은 최대 두 개이며, 등록된 1-vCPU Zephyr만 신규 지정할 수 있다.
-공유 집합·전용 코어는 운영자가 정지 조건에서 바꿀 수 있다. 빈 전용 예약 목록도 허용한다.
-코어 교환은 정책 변경으로 처리한다. VM별 혼합 예외나 실행 중 재배치는 지원하지 않는다.
+Debian·Ubuntu·Zephyr 모두 UUID별 공유 pinning·전용 mask·지정 해제를 지원한다.
+공유 pinning은 기본 공유 집합의 부분집합이며 서로 겹칠 수 있다. 전용 mask는 기본 공유 집합과
+다른 전용 mask에 겹치지 않아야 한다. 개수 제한은 실제 topology와 이 조건에서 나온다.
+빈 지정 목록도 유효하며 Zephyr가 0개/1개/추가 공유 VM인 구성도 같은 관리 경로를 사용한다.
+기본 차량 A/B는 최초 설치 프리셋이다. 현재 registry의 필수 구성이나 CPU 권한 조건이 아니다.
+실행 중 guest repin·scheduler 변경·cpupool 이동은 모든 OS에서 지원하지 않는다.
 
 Xen `xl info`의 `nr_cpus`, `max_cpu_id`와 CPU pool의 실제 CPU 집합을 대조한다.
 첫 버전은 max_cpu_id=3인 RPi4, 모든 온라인 CPU가 속한 단일 Credit2 pool을 지원한다.
@@ -62,9 +65,15 @@ xenova-vm update-resources "$VM_UUID" --vcpus 4 --memory-mib 512 \
 ```
 
 CPU 정책이 활성화돼 있으면 저장할 자원 수량과 정책 문맥의 조합을 검사한다.
-정책이 Linux의 vCPU 수·메모리·UUID를 바꾸지 않으며, 다음 시작 시 모든 구성 vCPU에 공유 마스크를 적용한다.
+정책이 Linux의 vCPU 수·메모리·UUID를 바꾸지 않으며, 다음 시작 시 모든 구성 vCPU에 해당 UUID의 mask를 적용한다. 미지정 VM은 기본 공유 mask를 사용한다.
 
 ### 2. CPU 정책 변경: cpu-policy-set 하나
+
+아래 기존 단일 core 전용 입력은 호환용이며 새 저장은 버전 2다. 일반 지정은
+`exclusive` 대신 `placements=[{"vm_id":"<등록 UUID>","mode":"shared","pcpus":[3]}]`처럼
+전달한다. shared는 기본 공유 집합 안의 mask, exclusive는 그 밖의 비중복 mask다.
+해제는 전체 정책 목록에서 대상 UUID를 제거하는 명시 변경이다. 다른 지정을 보존하고
+조회한 revision을 전달한다. 구형 원장 replay·혼합 writer 제한은 [정식 계약](cli-manager-spec.md#cmd-cpu-policy-set)을 따른다.
 
 Manager 호출:
 
@@ -268,3 +277,10 @@ CPU 오류 때문에 이 확인을 우회하거나 실행 불확실성을 임의
 host 재부팅 전후 검증에는 새 host_boot_id, cpu-layout, 준비 로그, 기존 UUID·자산 해시가
 필요하다. 특정 후보·실보드 결과와 남은 검증은
 [검증 이력](../verification/platform-management-boundaries-history.md)에 보존한다.
+
+동일 읽기 단계의 정책·전체 publication journal은 내부에서 함께 전달한다. CPU 관측 뒤에는
+정책과 전체 이력을 새로 검증하므로 정책 값이 그대로인 새 prepared journal도 준비 완료로
+읽지 않는다. 요청 간 cache는 없다. pinning된 Linux의 정지 2→4→2 변경·해제, 준비 오류 중
+정확한 Manager stop, 빈 placements·새 host·과거 factory ticket, 생성 수습 후 실제 정책
+변경의 로컬 assertion과 대표 20조건의 비용 계수는
+[5.5 교차 보완](../verification/recovery-scenario-closure-20261030.md#stage55-cross-boundaries)에 연결한다.

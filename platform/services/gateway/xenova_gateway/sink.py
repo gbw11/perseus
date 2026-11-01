@@ -69,6 +69,7 @@ class SerialSink:
         except Exception as exc:  # serial.SerialException
             raise SinkError(f"시리얼 포트 {port} 열기 실패: {exc}") from exc
         self.failures = 0
+        self.first_failure = None
 
     def write(self, frame: Frame, t: float) -> int:
         try:
@@ -77,7 +78,9 @@ class SerialSink:
             return accepted
         except Exception as exc:  # serial.SerialTimeoutException 등
             self.failures += 1
-            log.error("시리얼 쓰기 실패 (%d회): %s", self.failures, exc)
+            if self.first_failure is None:
+                self.first_failure={'cause_type':type(exc).__name__,'errno':getattr(exc,'errno',None)}
+            # caller가 즉시 출력 철회/STOP을 수행해야 한다. handler I/O를 먼저 기다리지 않는다.
             raise SinkError('serial submission failed; device application unknown') from exc
 
     def close(self) -> None:

@@ -106,7 +106,9 @@ def cobs_decode(data: bytes) -> bytes:
 def _scaled(value: float, scale: float) -> int:
     if not math.isfinite(value):
         raise ValueError(f"유한한 값이 아니다: {value!r}")
-    return max(_I16_MIN, min(_I16_MAX, round(value * scale)))
+    # Saturate before scaling: a finite extreme value can overflow when
+    # multiplied, before the old integer clamp ever runs.
+    return round(max(_I16_MIN / scale, min(_I16_MAX / scale, value)) * scale)
 
 
 def encode(frame: Frame) -> bytes:

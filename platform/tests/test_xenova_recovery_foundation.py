@@ -71,16 +71,20 @@ class FoundationTest(unittest.TestCase):
         self.assertEqual(row['xen_unique_id'], stored['last_success']['value']['xen_unique_id'])
         self.assertEqual(row['host_boot_id'], self.host)
 
-    def test_lifecycle_reuse_is_scoped_to_one_locked_list_not_get(self):
+    def test_lifecycle_reuse_is_scoped_to_read_round_not_next_request_or_control(self):
         self.start()
         with patch.object(self.m, '_tombs', wraps=self.m._tombs) as reads:
             self.ok(self.m.call('list', {'lifecycle': 'REGISTERED'}))
-            self.assertEqual(reads.call_count, 1)
+            self.assertEqual(reads.call_count, 2)  # 구성 집합 확보와 외부 관측 뒤 재확인
             self.ok(self.m.call('list', {'lifecycle': 'REGISTERED'}))
-            self.assertEqual(reads.call_count, 2)  # no persistent metadata cache
+            self.assertEqual(reads.call_count, 4)  # 요청 사이에 metadata cache가 없음
+            self.ok(self.call('get'))
+            self.assertEqual(reads.call_count, 5)  # 단건은 한 전체 수명 조회와 해당 파일 guard 사용
         original = execution.Execution.lifecycle
         with patch.object(execution.Execution, 'lifecycle', autospec=True, side_effect=original) as fresh:
             self.ok(self.call('get'))
+            self.assertEqual(fresh.call_count, 0)
+            self.ok(self.call('stop',key='fresh-control-lifecycle'))
             self.assertGreaterEqual(fresh.call_count, 1)
 
     def test_incomplete_internal_list_lifecycle_is_rejected(self):
