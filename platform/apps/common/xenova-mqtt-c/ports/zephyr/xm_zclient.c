@@ -144,11 +144,16 @@ static void on_publish(struct xm_zclient *c, const struct mqtt_publish_param *p)
 	}
 	for (int i = 0; i < c->nsubs; i++) {
 		if (xm_topic_matches(c->subs[i].filter, topic)) {
+			int64_t received = k_uptime_get();
+			if (c->accept_input && c->accept_input(c->accept_context, topic, &env, received)) {
+				c->dropped++;
+				return;
+			}
 			struct xm_zlatest *slot = latest_slot(c, topic, true);
 
 			memcpy(slot->data, c->payload, len);
 			slot->len = len;
-			slot->rx_ms = k_uptime_get();
+			slot->rx_ms = received;
 			break;
 		}
 	}
@@ -345,7 +350,8 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 	return 0;
 }
 
-int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type, const char *payload_json)
+static int publish_as(struct xm_zclient *c,const char *topic,const char *type,const char *payload_json,
+                      const struct xm_identity *identity)
 {
 	struct xm_zpub *pub = NULL;
 	char message_id[12], at[32];
@@ -367,7 +373,7 @@ int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type
 	/* message_id 는 seq 와 별개인 단조 카운터 (계약 §2 펌웨어 예외, 설계 §6 D3) */
 	snprintf(message_id, sizeof(message_id), "%u", ++c->message_counter);
 	sent_at(at);
-	int len = xm_envelope_encode(c->out, sizeof(c->out), &c->id, topic, type, pub->seq + 1, message_id, at,
+	int len = xm_envelope_encode(c->out, sizeof(c->out), identity, topic, type, pub->seq + 1, message_id, at,
 				     payload_json);
 
 	if (len < 0) {
@@ -398,6 +404,20 @@ int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type
 		schedule_retry(c);
 	}
 	return rc;
+}
+
+int xm_zclient_publish(struct xm_zclient *c,const char *topic,const char *type,const char *payload)
+{ return publish_as(c,topic,type,payload,&c->id); }
+
+int xm_zclient_publish_as_until(struct xm_zclient *c,const char *topic,const char *type,
+ const char *payload,const char *instance,int64_t end)
+{
+ if(end<=k_uptime_get())return -ETIMEDOUT;
+ struct xm_identity identity;
+ int rc=xm_identity_init(&identity,c->id.vm_id,c->id.source_id,c->id.app_id,c->id.boot_id,instance);
+ if(rc)return rc;
+ int64_t previous=c->publish_deadline_ms;c->publish_deadline_ms=end;
+ rc=publish_as(c,topic,type,payload,&identity);c->publish_deadline_ms=previous;return rc;
 }
 
 int xm_zclient_publish_until(struct xm_zclient *c,const char *topic,const char *type,

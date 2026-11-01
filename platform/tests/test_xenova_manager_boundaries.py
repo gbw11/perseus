@@ -79,12 +79,15 @@ class ManagerBoundaryTest(unittest.TestCase):
             entered = self.ticks
             method = 'observe' if action == 'get' else 'observe_many'
             e = self.p.execution()
-            with patch.object(self.p, 'records', side_effect=delayed), \
+            with patch.object(self.p, 'records', side_effect=delayed) as reads, \
                  patch.object(execution.Execution, method, autospec=True,
                               side_effect=getattr(execution.Execution, method)) as observe:
                 self.ok(self.m.call(action, spec))
             self.assertEqual(observe.call_args.args[2], entered + 15)
-            self.assertEqual(self.ticks, entered + 5)
+            # list는 관측 전후 대상 집합을 대조한다. 같은 원 15초 예산에 두 읽기를 모두 넣는다.
+            expected_reads=1 if action=='get' else 2
+            self.assertEqual(reads.call_count,expected_reads)
+            self.assertEqual(self.ticks, entered + 5*expected_reads)
 
     def test_query_observation_failure_remains_error_never_empty_or_absent_success(self):
         e = self.p.execution()

@@ -1,0 +1,12 @@
+{
+  "sample_seconds": 47.7757810460007,
+  "mean_cpu_percent": {
+    "sender": 24.845224379630807,
+    "encoder": 140.76169667482492,
+    "browser": 47.09499145254365,
+    "xorg": 15.4890194110588
+  },
+  "sender_encoder_cores": 1.6560692105445571,
+  "min_available_mib": 1919.515625,
+  "combined_jpeg_mbps": 2.2016286369865856
+}

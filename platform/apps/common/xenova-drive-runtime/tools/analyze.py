@@ -43,6 +43,8 @@ def source(path):
     if any(len(row) != len(FIELDS) or any(type(v) not in (str, int) for v in row) for row in decoded):
         raise ValueError("source row version/type mismatch")
     rows = [dict(zip(FIELDS, map(int, row))) for row in decoded]
+    if len({row['completed'] for row in rows}) != len(rows):
+        raise ValueError("duplicate source completion")
     sessions = [json.loads(line) for line in re.findall(r"XD_SESSION (\{[^\r\n]*\})", text)]
     summaries = [json.loads(line) for line in re.findall(r"XD_SUMMARY (\{[^\r\n]*\})", text)]
     send_rows = [json.loads(line) for line in re.findall(r"XD_SEND (\[[^\r\n]*\])", text)]
@@ -66,7 +68,7 @@ def source(path):
         if len({v["id"] for v in sends}) != len(sends):
             raise ValueError("duplicate candidate terminal result")
         by_id = {v["id"]: v for v in sends}
-        if set(by_id) != {v["completed"] for v in rows if v["rc"] == 0}:
+        if set(by_id) != {v["completed"] for v in rows if v["attempted"] and v["rc"] == 0}:
             raise ValueError("accepted candidates and terminal results disagree")
         for row in rows:
             row["mailbox_rc"] = row["rc"]
@@ -74,7 +76,7 @@ def source(path):
             row["mailbox_end"] = row["submit_end"]
             row["mailbox_offered"] = row["attempted"]
             delivery = by_id.get(row["completed"])
-            if row["mailbox_rc"] == 0 and delivery is None:
+            if row["mailbox_offered"] and row["mailbox_rc"] == 0 and delivery is None:
                 raise ValueError("accepted candidate has no terminal result")
             if delivery and (delivery["created_us"] != row["step_end"] or
                              delivery["queued_us"] != row["mailbox_end"]):

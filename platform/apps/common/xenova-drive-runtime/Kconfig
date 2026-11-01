@@ -21,8 +21,18 @@ config XENOVA_DRIVE_COMMAND_MAX_AGE_MS
 	  timeout. Fresh-input motion also expires at the original input deadline.
 	  Final Gateway control/generation validation remains necessary.
 
+config XENOVA_DRIVE_RECORDER
+	bool "Optional bounded experiment recorder and console pages"
+	default y if XENOVA_DRIVE_NATIVE_TEST
+	default n
+	help
+	  Keep source and transmission rows only for an explicitly selected
+	  experiment build. Runtime health, timing and shutdown remain available
+	  without these arrays. This does not enable periodic console output.
+
 config XENOVA_DRIVE_CAPTURE_ROWS
 	int "Bounded source measurement rows (never overwrite)"
+	depends on XENOVA_DRIVE_RECORDER
 	range 128 16384
 	default 12288
 	help
@@ -33,4 +43,45 @@ config XENOVA_DRIVE_NATIVE_TEST
 	bool "Runtime-file bootstrap and bounded native test exit"
 	depends on ARCH_POSIX
 	default n
+
+config XENOVA_DRIVE_WORKERS
+	bool "Independent app calculation-owner foundation"
+	default n
+	help
+	  Local app execution building block. This does not change the verified
+	  MQTT readiness profile or activate warm Standby automatically.
+
+config XENOVA_DRIVE_WARM
+	bool "Explicit warm-drive-1 app lifecycle profile"
+	depends on XENOVA_DRIVE_WORKERS
+	default n
+	help
+	  Requires matching root Bootstrap, per-app binding and Gateway/Worker
+	  consumers. Waiting qualification is not calculation or output permission.
+	  The 100ms supervisor/300ms lease are bounded foundation test settings,
+	  not acceptance of a future stateful driving algorithm or vehicle timing.
+
+config XENOVA_DRIVE_APP_STOP_MS
+	int "Warm profile local app cleanup allowance (ms)"
+	depends on XENOVA_DRIVE_WARM
+	range 20 1000
+	default 500
+	help
+	  Foundation test allowance for a root-requested app reset. Expiry retains
+	  resources and reports failure; it never grants abort or another attempt.
+
+if XENOVA_DRIVE_WORKERS
+config XENOVA_DRIVE_WORKER_STACK_SIZE
+	int "Reserved stack bytes per calculation owner"
+	range 4096 32768
+	default 8192
+config XENOVA_DRIVE_AUTO_PRIORITY
+	int "Preemptible AUTO calculation priority"
+	range 0 14
+	default 10
+config XENOVA_DRIVE_MANUAL_PRIORITY
+	int "Preemptible MANUAL calculation priority"
+	range 0 14
+	default 6
+endif
 endif

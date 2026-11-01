@@ -13,7 +13,7 @@ from dom0_manager.config import Settings
 from dom0_manager.console import ConsoleError, ConsoleExited
 from dom0_manager.drivers.base import Domain
 from dom0_manager.drivers.mock import MockDriver, MockProvisioner
-from dom0_manager.errors import DriverTimeout, VMNotFound
+from dom0_manager.errors import DriverTimeout, PlatformUnavailable, VMNotFound
 from dom0_manager.main import create_app
 from dom0_manager.models import VmState
 
@@ -269,6 +269,50 @@ def test_driver_timeout_does_not_expose_detail(setup):
         assert exc.value.code == 1011
         assert 'sensitive' not in exc.value.reason
     assert not sessions
+
+
+@pytest.mark.parametrize('platform_code,logged_code', [
+    ('OPERATION_IN_PROGRESS', 'OPERATION_IN_PROGRESS'),
+    ('OBSERVATION_UNAVAILABLE', 'OBSERVATION_UNAVAILABLE'),
+    (None, 'unspecified'),
+    ('Bearer private-test-token', 'unspecified'),
+    ('a' * 64, 'unspecified'),
+])
+def test_console_failure_logs_only_error_type_and_bounded_code(setup, caplog, platform_code, logged_code):
+    client, driver, sessions = setup
+    driver.failure = PlatformUnavailable('private-test-message', detail='private-test-detail',
+                                         platform_code=platform_code)
+    with caplog.at_level('WARNING', logger='dom0_manager.api.console'):
+        with client.websocket_connect(path(), headers=AUTH) as ws:
+            with pytest.raises(WebSocketDisconnect) as exc:
+                ws.receive_bytes()
+            assert exc.value.code == 1011
+            assert exc.value.reason == 'console unavailable'
+    assert not sessions
+    assert 'error_type=PlatformUnavailable' in caplog.text
+    assert f'platform_code={logged_code}' in caplog.text
+    for secret in ('private-test-message', 'private-test-detail', 'private-test-token', 'test-console-token'):
+        assert secret not in caplog.text
+
+
+def test_busy_recheck_deadline_releases_real_console_lock_for_manual_reconnect(setup, monkeypatch):
+    from dom0_manager.api import console as api
+    monkeypatch.setattr(api, 'WATCH_INTERVAL_SECONDS', 0.01)
+    monkeypatch.setattr(api, 'BUSY_RECHECK_SECONDS', 0.2)
+    monkeypatch.setattr(api, 'BUSY_RECHECK_DELAY_SECONDS', 0.01)
+    client, driver, sessions = setup
+    with client.websocket_connect(path(), headers=AUTH) as ws:
+        ws.receive_bytes()
+        driver.failure = PlatformUnavailable('busy', platform_code='OPERATION_IN_PROGRESS', retryable=True)
+        closed(ws, 1011)
+    assert sessions[0].closed.wait(2)
+    driver.failure = None
+    with client.websocket_connect(path(), headers=AUTH) as ws:
+        assert ws.receive_bytes() == b'READY:5'
+        ws.send_text('{"type":"disconnect"}')
+        closed(ws, 1000)
+    assert not sessions[0].written
+    assert not sessions[1].written
 
 
 def test_cross_worker_lock_rejects_second_owner(tmp_path):

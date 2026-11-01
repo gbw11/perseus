@@ -4,10 +4,14 @@ generation from MQTT absence. Stored preference does not restore output power.
 from __future__ import annotations
 import json,os,stat,threading
 from pathlib import Path
-from xenova_mqtt.drive_binding import atomic_json,private_json,canonical
+from xenova_mqtt.drive_binding import atomic_json,canonical
 from .machine import Mode,ACTIVE_APP
 
 class AuthorityError(RuntimeError):pass
+
+TRANSITION_LIMIT=32  # Bounded private records; never silently evict dedup evidence.
+TRANSITION_PHASES={'PREPARING','PREPARED','COMMITTED','CANCELLED','FAILED','ABANDONED'}
+GATEWAY_LOCK=Path('/run/lock/xenova-drive-gateway.lock')
 
 class GatewayLease:
     """The Worker's nonblocking flock ownership pattern, scoped to drive output."""
@@ -30,16 +34,7 @@ class AuthorityStore:
     def __init__(self,directory: Path,host_boot_id: str,*,uid=0,mountpoint: Path | None=Path('/srv/xenova')):
         self.directory=Path(directory);self.host=canonical(host_boot_id);self.uid=uid;self.error=None
         self._lock=threading.RLock()
-        if not self.directory.is_absolute() or self.directory.resolve()!=self.directory:
-            raise AuthorityError('canonical absolute authority directory required')
-        if mountpoint is not None and (not os.path.ismount(mountpoint) or not self.directory.is_relative_to(mountpoint)):
-            raise AuthorityError('mounted persistent Xenova data required')
-        if mountpoint is not None:
-            try:
-                from xenova_vm import storage_check
-                storage_check(Path(mountpoint))
-            except (ImportError,RuntimeError,OSError,ValueError) as exc:
-                raise AuthorityError('verified Xenova ext4 storage/installation required') from exc
+        self.check_storage(self.directory,mountpoint)
         self.directory.mkdir(parents=True,exist_ok=True,mode=0o700)
         s=self.directory.lstat()
         if not stat.S_ISDIR(s.st_mode) or s.st_uid!=uid or s.st_mode&0o077:
@@ -47,9 +42,33 @@ class AuthorityStore:
         self.path=self.directory/'control.json';self.marker=self.directory/'initialized'
         self.value=None
 
+    @staticmethod
+    def check_storage(directory,mountpoint):
+        """Check the existing storage boundary without creating an authority."""
+        directory=Path(directory)
+        if not directory.is_absolute() or directory.resolve()!=directory:
+            raise AuthorityError('canonical absolute authority directory required')
+        if mountpoint is not None and (not os.path.ismount(mountpoint) or not directory.is_relative_to(mountpoint)):
+            raise AuthorityError('mounted persistent Xenova data required')
+        if mountpoint is not None:
+            try:
+                from xenova_vm import storage_check
+                storage_check(Path(mountpoint))
+            except (ImportError,RuntimeError,OSError,ValueError) as exc:
+                raise AuthorityError('verified Xenova ext4 storage/installation required') from exc
+
+    def check_marker(self):
+        """The first-install marker is private evidence, never a followed link."""
+        fd=os.open(self.marker,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        with os.fdopen(fd,'rb') as stream:
+            info=os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid!=self.uid or
+                    info.st_mode&0o077 or info.st_size!=2 or stream.read(3)!=b'1\n'):
+                raise AuthorityError('private initialized marker invalid')
+
     def initialize(self,owner: str):
         canonical(owner)
-        if self.path.exists() or self.path.is_symlink() or self.marker.exists() or self.marker.is_symlink():
+        if next(self.directory.iterdir(),None) is not None:
             raise AuthorityError('authority already initialized; no overwrite')
         fd=os.open(self.marker,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
         with os.fdopen(fd,'w') as stream:stream.write('1\n');stream.flush();os.fsync(stream.fileno())
@@ -60,10 +79,30 @@ class AuthorityStore:
             'reason':'first_install','phase':'DISARMED','pending':None,'rearm_required':True,'requests':[]})
 
     def load(self):
-        if not self.marker.is_file():raise AuthorityError('explicit first-install initialization required')
-        try:self.value=private_json(self.path,self.uid);self.validate(self.value)
-        except (OSError,ValueError,KeyError,TypeError) as exc:raise AuthorityError('authority missing/corrupt; output forbidden') from exc
+        try:
+            self.check_marker()
+            value=self.read_current();self.validate(value)
+        except FileNotFoundError as exc:
+            if next(self.directory.iterdir(),None) is None:
+                raise AuthorityError('explicit first-install initialization required') from exc
+            raise AuthorityError('authority missing/corrupt; output forbidden') from exc
+        except (OSError,ValueError,KeyError,TypeError,AuthorityError) as exc:
+            raise AuthorityError('authority missing/corrupt; output forbidden') from exc
+        self.value=value
         return self.value
+
+    def read_current(self):
+        """A corrupt path must not turn a FIFO/device open into an unbounded wait."""
+        fd=os.open(self.path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        with os.fdopen(fd) as stream:
+            info=os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid!=self.uid or info.st_mode&0o077 or info.st_size>65536:
+                raise AuthorityError('private bounded authority record required')
+            raw=stream.read(65537)
+            if len(raw.encode())>65536:raise AuthorityError('authority record too large')
+            value=json.loads(raw)
+            if not isinstance(value,dict):raise AuthorityError('authority record object required')
+            return value
 
     @staticmethod
     def validate(value):
@@ -82,40 +121,108 @@ class AuthorityStore:
             if (type(pending['generation']) is not int or pending['generation']!=value['generation'] or type(pending['deadline_ms']) is not int or
                 pending['deadline_ms']<0 or type(pending['arm_after_apply']) is not bool):raise ValueError('pending context invalid')
         if value['phase']=='PENDING' and pending is None:raise ValueError('pending deadline required')
+        if value.get('manual_input_profile') not in (None,'manual-session-1'):raise ValueError('manual input profile')
+        if pending and ('manual_policy' in pending or 'manual_session' in pending):
+            canonical(pending['manual_session'])
+            if pending['manual_policy'] not in ('CONTINUE_SESSION','NEUTRAL_THEN_ACTION'):raise ValueError('manual policy')
+        transitions=value.get('transitions',[])
+        if not isinstance(transitions,list) or len(transitions)>TRANSITION_LIMIT:raise ValueError('transition limit')
+        identities=set()
+        for row in transitions:
+            canonical(row['request_id'])
+            if row['request_id'] in identities:raise ValueError('duplicate transition request')
+            identities.add(row['request_id']);canonical(row['host_boot_id'])
+            if row['phase'] not in TRANSITION_PHASES:raise ValueError('transition phase')
+            spec=row['spec'];Mode(spec['mode']);canonical(spec['owner']);canonical(spec['target_vm'])
+            if type(spec['generation']) is not int or not 1<=spec['generation']<=0xffffffff:raise ValueError('transition generation')
+            if type(spec['deadline_ms']) is not int or spec['deadline_ms']<0:raise ValueError('transition deadline')
+            target=spec['target']
+            if spec['app'] not in ('autonomous','manual'):raise ValueError('transition app')
+            if 'manual_session' in spec:
+                canonical(spec['manual_session'])
+                if spec['manual_policy'] not in ('CONTINUE_SESSION','NEUTRAL_THEN_ACTION'):raise ValueError('transition manual policy')
+            for name in ('execution_id','boot_id','app_instance_id'):canonical(target[name])
+            for name in ('intent_revision','lifecycle_generation'):
+                if type(target[name]) is not int or target[name]<0:raise ValueError('transition context revision')
+            source=spec.get('source')
+            if source is not None:
+                for name in ('execution_id','boot_id','app_instance_id'):canonical(source[name])
+                for name in ('intent_revision','lifecycle_generation'):
+                    if type(source[name]) is not int or source[name]<0:raise ValueError('source context revision')
+            if spec.get('state_model') not in ('stateless','stateful'):raise ValueError('unsupported transition state model')
+            if spec['state_model']=='stateful' and row['phase'] in ('PREPARED','COMMITTED'):
+                from xenova_mqtt.handoff import context as state_context,counter
+                proof=row['evidence']
+                if proof.get('kind')!='state_applied' or proof.get('continuity') not in ('continuous','stop_then_resume'):
+                    raise ValueError('complete state preparation proof required')
+                state_context(proof['context']);counter(proof['state_revision'])
+                if proof['target']!=target or proof['origin'] not in ('handoff','rebuilt'):
+                    raise ValueError('state preparation target invalid')
+                if proof['origin']=='handoff':canonical(proof['copy_message_id'])
+                elif proof['copy_message_id'] is not None:raise ValueError('rebuilt copy reference')
+            if row['phase']=='COMMITTED' and row.get('committed_generation')!=spec['generation']+1:
+                raise ValueError('transition commit result')
+            if 'provider_request' in spec:
+                from .provider import normalize,validate_result
+                submitted=spec['provider_request']
+                if normalize(submitted,mode=spec['mode'])!=submitted or submitted['purpose']!='handoff':
+                    raise ValueError('provider transition spec invalid')
+                if any(submitted[a]!=spec[b] for a,b in (
+                        ('expected_generation','generation'),('expected_owner','owner'),
+                        ('deadline_ms','deadline_ms'),('target_vm','target_vm'),('mode','mode'))):
+                    raise ValueError('provider transition identity mismatch')
+                if (submitted['host_boot_id']!=row['host_boot_id'] or
+                        submitted['target_execution_id']!=target['execution_id'] or
+                        any(submitted[k]!=target[k] for k in ('intent_revision','lifecycle_generation'))):
+                    raise ValueError('provider transition target mismatch')
+                validate_result(row,submitted,row.get('committed_generation'))
+        from .provider import validate_records
+        validate_records(value)
 
     def save(self,value):
         self.validate(value)
+        encoded=json.dumps(value,separators=(',',':'))
+        if len(encoded.encode())>65536:
+            raise AuthorityError('authority record size limit; no write')
+        # 크기를 검사한 같은 JSON을 독립 사본으로 만든다. 호출자 가변 객체를 다시
+        # 직렬화하지 않으며 저장 성공 뒤 RAM도 실제 제출한 사본과 일치시킨다.
+        snapshot=json.loads(encoded)
+        del encoded
         with self._lock:
             # replace may have succeeded before parent fsync failed. Do not
             # overwrite that higher generation using our old memory snapshot.
             if self.error:raise AuthorityError(self.error)
-            try:atomic_json(self.path,value)
+            try:atomic_json(self.path,snapshot)
             except (OSError,ValueError) as exc:
                 self.error='AUTHORITY_STORAGE_UNCERTAIN'
                 raise AuthorityError(self.error) from exc
-            self.value=json.loads(json.dumps(value))
+            self.value=snapshot
         return self.value
 
     def verify(self):
         """Background read: loss or uncoordinated replacement blocks output."""
         with self._lock:
             try:
-                current=private_json(self.path,self.uid);self.validate(current)
-                if current!=self.value or not self.marker.is_file():raise ValueError('authority replaced/lost')
-            except (OSError,ValueError,KeyError,TypeError):self.error='AUTHORITY_STORAGE_UNCERTAIN'
+                current=self.read_current();self.validate(current)
+                self.check_marker()
+                if current!=self.value:raise ValueError('authority replaced/lost')
+            except (OSError,ValueError,KeyError,TypeError,AuthorityError):self.error='AUTHORITY_STORAGE_UNCERTAIN'
         return self.error is None
 
     def update(self,**fields):
-        value={**self.value,**fields};return self.save(value)
+        with self._lock:
+            value={**self.value,**fields};return self.save(value)
 
-    def issue(self,mode: Mode,owner: str,reason: str,now: float,timeout: float,*,arm: bool):
+    def issue(self,mode: Mode,owner: str,reason: str,now: float,timeout: float,*,arm: bool,manual=None):
         if self.error:raise AuthorityError(self.error)
         canonical(owner)
+        if mode is not Mode.SAFE_STOP and self.protected(owner):
+            raise AuthorityError('target execution remains protected')
         if self.value['generation']==0xffffffff:raise AuthorityError('generation exhausted; no wrap/reset')
         generation=self.value['generation']+1
         return self.update(generation=generation,mode=mode.value,owner=owner,reason=reason,phase='PENDING',
             pending={'generation':generation,'host_boot_id':self.host,'deadline_ms':int((now+timeout)*1000),
-                     'arm_after_apply':arm},requests=[])
+                     'arm_after_apply':arm,**(manual or {})},requests=[])
 
     def consume_request(self,message_id: str,expected_generation: int):
         canonical(message_id)
@@ -124,15 +231,98 @@ class AuthorityStore:
         if message_id in self.value['requests'] or len(self.value['requests'])>=128:return False
         self.update(requests=[*self.value['requests'],message_id]);return True
 
+    def transition(self,request_id):
+        """Original result only. Reading a record never executes or renews it."""
+        canonical(request_id)
+        with self._lock:
+            row=next((r for r in self.value.get('transitions',[]) if r['request_id']==request_id),None)
+            if self.error and (row is None or row['phase']!='COMMITTED'):
+                raise AuthorityError(self.error)
+            return json.loads(json.dumps(row)) if row is not None else None
+
+    def protected(self,vm_id):
+        return any(row['phase']=='PROTECTED' and row['spec']['target_vm']==vm_id
+                   for row in self.value.get('protections',[]))
+
+    def begin_transition(self,request_id,spec,now_ms):
+        """Actor entry: persist fixed intent/target/deadline before preparation."""
+        canonical(request_id)
+        with self._lock:
+            old=self.transition(request_id)
+            if old is not None:
+                if old['spec']!=spec:raise AuthorityError('transition request content differs')
+                return old
+            if (spec['owner']!=self.value['owner'] or spec['generation']!=self.value['generation'] or
+                    now_ms>=spec['deadline_ms']):raise AuthorityError('transition context expired/changed')
+            rows=self.value.get('transitions',[])
+            if len(rows)>=TRANSITION_LIMIT:raise AuthorityError('transition history full; no eviction')
+            row=dict(request_id=request_id,host_boot_id=self.host,spec=spec,phase='PREPARING',reason=None)
+            self.update(transitions=[*rows,row]);return self.transition(request_id)
+
+    def finish_preparation(self,request_id,phase,*,evidence=None,reason=None):
+        with self._lock:
+            row=self.transition(request_id)
+            if row is None:raise AuthorityError('unknown transition request')
+            if row['phase'] not in ('PREPARING','PREPARED'):return row
+            if phase not in ('PREPARED','CANCELLED','FAILED','ABANDONED'):raise AuthorityError('invalid preparation result')
+            row.update(phase=phase,reason=reason)
+            if evidence is not None:row['evidence']=evidence
+            self.update(transitions=[row if r['request_id']==request_id else r for r in self.value['transitions']])
+            return self.transition(request_id)
+
+    def abandon_preparations(self,reason):
+        """Restart/cancel invalidates approvals, never the original commit result."""
+        with self._lock:
+            rows=self.value.get('transitions',[])
+            changed=[{**r,'phase':'ABANDONED','reason':reason} if r['phase'] in ('PREPARING','PREPARED') else r for r in rows]
+            if changed!=rows:self.update(transitions=changed)
+
+    def commit_transition(self,request_id,now_ms,guard,*,arm,timeout_ms=1000):
+        """Conditional single commit. guard is actor-owned, bounded memory-only work.
+
+        Persistence and result are one replace. A failed sync remains uncertain;
+        callers must not infer that the old owner still has authority.
+        """
+        with self._lock:
+            if type(timeout_ms) is not int or not 0<timeout_ms<=1000:raise AuthorityError('invalid application budget')
+            row=self.transition(request_id)
+            if row is None:raise AuthorityError('unknown transition request')
+            if row['phase']=='COMMITTED':return row
+            if row['phase']!='PREPARED':raise AuthorityError('transition not prepared')
+            spec=row['spec']
+            if (row['host_boot_id']!=self.host or now_ms>=spec['deadline_ms'] or
+                    spec['generation']!=self.value['generation'] or spec['owner']!=self.value['owner'] or not guard(row)):
+                self.finish_preparation(request_id,'FAILED',reason='COMMIT_GUARD_REJECTED')
+                raise AuthorityError('transition commit guard rejected')
+            if self.value['generation']==0xffffffff:raise AuthorityError('generation exhausted; no wrap/reset')
+            generation=self.value['generation']+1
+            row.update(phase='COMMITTED',committed_generation=generation)
+            self.update(generation=generation,mode=spec['mode'],owner=spec['target_vm'],reason='planned_handoff',
+                phase='PENDING',rearm_required=not arm,requests=[],
+                **({'manual_input_profile':'manual-session-1'} if 'manual_session' in spec else {}),
+                pending=dict(generation=generation,host_boot_id=self.host,
+                    deadline_ms=min(spec['deadline_ms'],now_ms+timeout_ms),arm_after_apply=arm,
+                    transition_id=request_id,target=spec['target'],
+                    **{k:spec[k] for k in ('manual_session','manual_policy') if k in spec}),
+                transitions=[row if r['request_id']==request_id else (
+                    {**r,'phase':'ABANDONED','reason':'AUTHORITY_CHANGED'} if r['phase'] in ('PREPARING','PREPARED') else r)
+                    for r in self.value['transitions']])
+            return self.transition(request_id)
+
     def payload(self):
         mode=Mode(self.value['mode'])
-        return {'generation':self.value['generation'],'mode':mode.value,'active_app':ACTIVE_APP[mode],
+        payload={'generation':self.value['generation'],'mode':mode.value,'active_app':ACTIVE_APP[mode],
                 'active_vm_id':self.value['owner'] if ACTIVE_APP[mode] else None,'reason':self.value['reason']}
+        pending=self.value.get('pending') or {}
+        if mode in (Mode.MANUAL,Mode.AUTO_READY):
+            payload.update({k:pending[k] for k in ('manual_session','manual_policy') if k in pending})
+        return payload
 
     def reconcile(self,payload: dict):
         """An older delivery can be republished from the ledger; conflict cannot issue authority."""
         value=payload.get('generation')
         if type(value) is not int or not 1<=value<=self.value['generation']:
             raise AuthorityError('retained generation conflicts with authority')
-        if value==self.value['generation'] and any(payload.get(k)!=self.payload()[k] for k in ('mode','active_app','active_vm_id')):
+        if value==self.value['generation'] and any(payload.get(k)!=self.payload().get(k) for k in
+                ('mode','active_app','active_vm_id','manual_session','manual_policy')):
             raise AuthorityError('retained selection conflicts with authority')

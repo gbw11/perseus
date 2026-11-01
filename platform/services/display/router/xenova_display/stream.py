@@ -51,7 +51,8 @@ def capture_command(config, output):
         "-filter_threads", "1", "-vf",
         f"scale={config.stream_width}:{config.stream_height}:flags=fast_bilinear:force_original_aspect_ratio=decrease:force_divisible_by=2,"
         f"pad={config.stream_width}:{config.stream_height}:(ow-iw)/2:(oh-ih)/2,format=yuvj420p",
-        "-c:v", "mjpeg", "-q:v", str(config.jpeg_quality), "-threads", "1", "-f", "mjpeg", "pipe:1"]
+        "-c:v", "mjpeg", "-q:v", str(config.jpeg_quality), "-threads", "1",
+        "-flush_packets", "1", "-f", "mjpeg", "pipe:1"]
 
 
 class Capture:

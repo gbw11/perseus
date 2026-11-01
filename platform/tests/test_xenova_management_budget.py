@@ -137,8 +137,8 @@ class ManagementBudgetTest(unittest.TestCase):
     def test_query_error_and_budget_exhaustion_are_not_empty_success(self):
         self.f.start('start')
         original=Execution.requests
-        def slow(e):
-            rows=original(e);self.f.ticks+=1;return rows
+        def slow(e,**kwargs):
+            rows=original(e,**kwargs);self.f.ticks+=1;return rows
         with patch.object(Execution,'requests',slow):
             self.f.fails(self.lookup('start',budget=100),'DEADLINE_EXCEEDED')
         with patch.object(Execution,'requests',side_effect=OSError('injected read failure')):
@@ -158,25 +158,25 @@ class ManagementBudgetTest(unittest.TestCase):
                 result=self.call(action,{'vm_id':self.f.vm_id,'timeout_ms':1000} if action=='get' else {'timeout_ms':1000},budget=500)
             self.f.ok(result)
             self.assertEqual(seen,[10.5])
-            self.assertAlmostEqual(self.f.ticks,10.2)
+            # 목록의 대상 집합 재확인은 같은 남은 예산을 쓴다. get은 해당 VM만 최종 확인한다.
+            self.assertAlmostEqual(self.f.ticks,10.4 if action=='list' else 10.2)
 
     def test_list_observes_multiple_vms_with_the_same_deadline(self):
         other=foundation.record('debian-dev')
         foundation.fixture(self.p.data,other)
         self.f.start()
         seen=[]
-        original=self.p.domains
-        def capture(*,deadline=None):
+        original=self.p.removal_snapshot
+        def capture(deadline):
             seen.append(deadline)
             self.f.ticks+=.05
-            return original(deadline=deadline)
+            return original(deadline)
         self.f.ticks=10
-        with patch.object(self.p,'domains',capture):
+        with patch.object(self.p,'removal_snapshot',capture):
             result=self.f.ok(self.call('list',{'timeout_ms':500},budget=300))
         self.assertEqual(len(result['vms']),2)
         self.assertEqual({item['vm_id'] for item in result['vms']},{self.f.vm_id,other['uuid']})
-        self.assertTrue(seen)
-        self.assertTrue(all(item==10.3 for item in seen),seen)
+        self.assertEqual(seen,[10.3,10.3])
 
     def test_invalid_budget_and_selector_never_change_intent(self):
         before=copy.deepcopy(self.p.execution().intent(self.r))
@@ -296,6 +296,42 @@ class ManagementBudgetTest(unittest.TestCase):
         self.assertNotIn('accepted',failed['error']['details'])
         self.assertEqual(before,self.p.execution().intent(self.r))
         self.f.fails(self.lookup('timed-out-before-admission'),'VM_NOT_FOUND')
+
+    def test_lookup_interrupts_enumeration_without_false_absence_or_uniqueness(self):
+        self.f.start('existing')
+        original=self.f.ok(self.lookup('existing'))['operation']
+        root=self.p.data/'control-requests';scandir=os.scandir;seen=[]
+        class Slow:
+            def __enter__(owner):return owner
+            def __exit__(owner,*args):return False
+            def __iter__(owner):
+                with scandir(root) as entries:
+                    for entry in entries:
+                        seen.append(entry.name);self.f.ticks+=.2;yield entry
+                raise AssertionError('scan must stop before requesting another entry')
+        for key in ('existing','not-found'):
+            with patch('xenova_execution.os.scandir',lambda path:Slow() if Path(path)==root else scandir(path)):
+                self.f.fails(self.lookup(key,budget=100),'DEADLINE_EXCEEDED')
+        self.assertEqual(len(seen),2)
+        latest=self.f.ok(self.lookup('existing'))['operation']
+        self.assertEqual(latest,original)
+
+    def test_stop_scan_budget_does_not_accept_or_shorten_original_execution(self):
+        self.f.start('running')
+        before=copy.deepcopy(self.p.execution().intent(self.r));read=Execution.read
+        def delayed(execution,path):
+            value=read(execution,path)
+            if path.parent==self.p.data/'control-requests':self.f.ticks+=2.1
+            return value
+        with patch.object(Execution,'read',delayed):
+            self.f.fails(self.call('stop',key='scan-expired-stop',budget=90000),'DEADLINE_EXCEEDED')
+        self.assertEqual(self.p.execution().intent(self.r),before)
+        self.f.fails(self.lookup('scan-expired-stop'),'VM_NOT_FOUND')
+        with operation_lock(self.p.runtime):
+            accepted=self.call('stop',key='scan-expired-stop',budget=90000)
+        self.assertTrue(accepted['error']['details']['accepted'])
+        op=self.f.ok(self.lookup('scan-expired-stop'))['operation']
+        self.assertGreater(op['deadline_monotonic_ms']-int(self.f.ticks*1000),88000)
 
 
 if __name__=='__main__':unittest.main()

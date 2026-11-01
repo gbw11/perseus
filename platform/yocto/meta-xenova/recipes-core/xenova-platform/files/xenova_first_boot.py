@@ -307,6 +307,8 @@ class FirstBoot:
                 raise ValueError('invalid factory instance path')
             seed, target = self.data / 'seeds' / key, self.data / 'instances' / key
             expected = {**spec['record'], **state['identities'][key], 'identity_state': 'ready'}
+            from xenova_preparation import guard_asset
+            guard_asset(argparse.Namespace(runtime=self.run), expected['uuid'])
             if (not target.exists() and not target.is_symlink() and state['phase'] == 'complete'
                     and retired_instance(self.data, key, expected['uuid'])):
                 continue

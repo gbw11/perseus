@@ -40,7 +40,10 @@ def main():
     p.add_argument('--output',type=Path,required=True)
     p.add_argument('--initial',choices=('a','b'),default='a')
     p.add_argument('--run-label',default='')
+    p.add_argument('--readiness-profile',choices=('verified-drive-1','warm-drive-1'),default='verified-drive-1')
+    p.add_argument('--manual-session-contract',action='store_true',help='controlled source for manual-session-1; not a Spring acceptance')
     args=p.parse_args()
+    if args.manual_session_contract and args.readiness_profile!='warm-drive-1':p.error('session contract requires warm profile')
     logging.basicConfig(level=logging.INFO)
     if os.geteuid() or os.readlink('/proc/self/ns/net')==os.readlink('/proc/1/ns/net'):
         p.error('root in a new isolated network namespace required')
@@ -52,7 +55,9 @@ def main():
     records=[];wire_lock=threading.Lock();sessions=[];inputs_enabled=threading.Event();inputs_enabled.set()
     vms={label:str(uuid.uuid4()) for label in ('a','b')}
     passwords={key:secrets.token_urlsafe(32) for key in ('a','b','gateway','input','subscriber','telemetry-a','telemetry-b')}
-    guests={}
+    guests={};bootstrap_paths={}
+    fixture_host_boot=str(uuid.uuid4())
+    driver_session=str(uuid.uuid4());driver_state=(['up'],1)
     def write_private(name,value):
         fd=os.open(private/name,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
         with os.fdopen(fd,'w') as stream:stream.write(value if isinstance(value,str) else json.dumps(value))
@@ -86,13 +91,21 @@ def main():
                 'broker_ipv4':'192.0.2.1','username':vms[label],'password':passwords[label],'trusted_internal_plaintext':True}
         paths={}
         entry={'label':label,'vm_id':vms[label],'boot_id':boot,'binary_sha256':digest,'execution_id':str(uuid.uuid4())}
+        # Synthetic native execution context, not a Manager/receipt acceptance
+        # test. Let the actual guest source retain the same explicit identity.
+        common.update(host_boot_id=fixture_host_boot,execution_id=entry['execution_id'])
         for channel,port in (('drive',18884),('telemetry',18883)):
             instance=str(uuid.uuid4());entry[channel+'_instance']=instance
             account=vms[label] if channel=='drive' else 'telemetry-'+vms[label]
             password=passwords[label] if channel=='drive' else passwords['telemetry-'+label]
-            paths[channel]=write_private(f'{label}-{count}-{channel}.json',
-                {**common,'publisher_id':instance,'port':port,'username':account,'password':password})
+            payload={**common,'publisher_id':instance,'receipt_id':str(uuid.uuid4()),'port':port,'username':account,'password':password}
+            if channel=='drive' and args.readiness_profile=='warm-drive-1':
+                entry['app_instances']={app:str(uuid.uuid4()) for app in ('autonomous','manual')}
+                payload.update(drive_profile=args.readiness_profile,auto_instance_id=entry['app_instances']['autonomous'],
+                               manual_instance_id=entry['app_instances']['manual'])
+            paths[channel]=write_private(f'{label}-{count}-{channel}.json',payload)
         sessions.append(entry)
+        bootstrap_paths[label]=paths['drive']
         child_env=dict(env,XT_TEST_BOOTSTRAP=str(paths['telemetry']),XD_TEST_APP_BOOTSTRAP=str(paths['drive']),
                        XT_TEST_INSTANCE_ID=vms[label],XD_TEST_DURATION_MS='120000')
         i=0 if label=='a' else 1
@@ -160,7 +173,8 @@ def main():
         # Test fixture: restoring a previous AUTO preference must still rearm.
         authority.update(mode='AUTO',reason='isolated_restore_fixture')
         bindings=BindingCache(host)
-        runner=VerifiedGatewayRunner(gw,sink,authority=authority,bindings=bindings,vm_ids=(vms['a'],vms['b']))
+        runner=VerifiedGatewayRunner(gw,sink,authority=authority,bindings=bindings,vm_ids=(vms['a'],vms['b']),
+                                     readiness_profile=args.readiness_profile)
         def bind_current():
             while not stop.wait(.05):
                 now=int(time.monotonic()*1000);rows={}
@@ -172,12 +186,24 @@ def main():
                         'boot_id':session['boot_id'],'app_instance_id':session['drive_instance'],
                         'intent_revision':1,'lifecycle_generation':0,'domid':1 if label=='a' else 2,
                         'xen_unique_id':'1','observed_monotonic_ms':now}
+                    if args.readiness_profile=='warm-drive-1':
+                        rows[vms[label]].update(profile=args.readiness_profile,app_instances=session['app_instances'],
+                            app_state_models={'autonomous':'stateless','manual':'stateless'})
                 bindings.install({'schema_version':'1.0-drive-bindings','host_boot_id':host,
                     'observed_monotonic_ms':now,'expires_monotonic_ms':now+3000,'vms':rows})
         th=threading.Thread(target=worker,args=(bind_current,),daemon=True);th.start();threads.append(th)
         def send_inputs():
+            sample=0
             while not stop.wait(.05):
-                sender.publish(topics.manual_input(),'drive.input',{'keys':['up']})
+                keys,action=driver_state;payload={'keys':keys}
+                if args.manual_session_contract:
+                    # This fixture genuinely samples its controlled input state.
+                    # It is not evidence of a live product browser/WS session.
+                    sample+=1
+                    generation=runner.machine.generation if runner.machine else authority.value['generation']
+                    payload.update(profile='manual-session-1',session_id=driver_session,sample_seq=str(sample),
+                        action_seq=str(action),generation=generation,valid=True,age_ms=0)
+                sender.publish(topics.manual_input(),'drive.input',payload)
                 if inputs_enabled.is_set():
                     sender.publish(topics.app_events('perception'),'perception.result',
                         {'lane_offset_m':0,'heading_err_rad':0,'stop':False,'obstacles':[]})
@@ -198,24 +224,104 @@ def main():
         until('initial-active-auto',lambda:runner.machine.mode is Mode.AUTO and runner.machine.active_vm==vms[first] and
             runner.machine.node_status(vms[first],time.monotonic())=='active')
         until('standby-prepared',lambda:runner.machine.node_status(vms[other],time.monotonic())=='standby')
+        def drive_seen(generation,owner,*,moving):
+            return any(r.get('serial_result')=='accepted' and r.get('source') and r['generation']==generation and
+                r['source']['vm_id']==owner and (r.get('v_mps',0)>0 if moving else r.get('v_mps')==0)
+                for r in list(runner.submissions))
+        def neutral_then_action(label):
+            nonlocal driver_state
+            generation=runner.machine.generation;owner=runner.machine.active_vm
+            until(label+'-held-key-stays-stopped',lambda:runner.machine.output_permitted and drive_seen(generation,owner,moving=False))
+            assert not drive_seen(generation,owner,moving=True)
+            driver_state=([],driver_state[1]+1)
+            until(label+'-current-neutral',lambda:runner.machine.movement and runner.machine.movement.neutral_action is not None)
+            driver_state=(['up'],driver_state[1]+1)
+            until(label+'-new-action-moves',lambda:drive_seen(generation,owner,moving=True))
+        if args.manual_session_contract:
+            request=str(uuid.uuid4());generation=runner.machine.generation
+            for action,arguments in [('prepare',dict(mode='MANUAL',target_vm=vms[first],expected_owner=vms[first],
+                    expected_generation=generation,deadline_ms=int(time.monotonic()*1000)+5000)),('refresh',{}),('commit',{})]:
+                response=runner.submit_transition(action,request,**arguments)
+                until('session-'+action,lambda:not response.empty())
+                result=response.get_nowait();assert result['ok'],result
+            neutral_then_action('planned-auto-manual')
+            until('session-auto-ready',lambda:runner.machine.mode is Mode.AUTO_READY and all(
+                runner.machine._qualified(vms[first],app,time.monotonic(),held=True) for app in ('autonomous','manual')))
+            resume();until('session-back-auto',lambda:runner.machine.mode is Mode.AUTO and runner.machine.output_permitted)
+            until('session-new-context-standby',lambda:runner.machine.node_status(vms[other],time.monotonic())=='standby')
+        if args.readiness_profile=='warm-drive-1':
+            # Actual actor + durable Authority; guest uses current stateless
+            # qualification, then calculates anew after each committed control.
+            for label in (other,first):
+                request=str(uuid.uuid4());generation=runner.machine.generation;owner=runner.machine.active_vm
+                def transition(action,**arguments):
+                    response=runner.submit_transition(action,request,**arguments)
+                    until('planned-'+label+'-'+action,lambda:not response.empty())
+                    result=response.get_nowait();assert result['ok'],result
+                    return result['record']
+                row=transition('prepare',mode='AUTO',target_vm=vms[label],expected_owner=owner,
+                    expected_generation=generation,deadline_ms=int(time.monotonic()*1000)+5000)
+                assert row['phase']=='PREPARING' and runner.machine.generation==generation
+                assert runner.machine.output_permitted and runner.machine.active_vm==owner
+                def owner_outputs():return sum(1 for r in list(runner.submissions) if r.get('serial_result')=='accepted' and
+                    r.get('source') and r['source']['vm_id']==owner and r.get('generation')==generation)
+                before=owner_outputs()
+                until('planned-'+label+'-old-owner-progress',lambda:owner_outputs()>=before+3)
+                assert runner.machine.generation==generation and runner.machine.active_vm==owner
+                assert transition('refresh')['phase']=='PREPARED'
+                row=transition('commit');assert row['committed_generation']==generation+1
+                assert transition('commit')==row
+                until('planned-'+label+'-active',lambda:runner.machine.active_vm==vms[label] and runner.machine.output_permitted)
+                until('planned-'+label+'-standby',lambda:runner.machine.node_status(
+                    vms[first if label==other else other],time.monotonic())=='standby')
         inputs_enabled.clear()
         until('perception-loss-same-vm-manual',lambda:runner.machine.mode is Mode.MANUAL and runner.machine.active_vm==vms[first])
+        if args.manual_session_contract:neutral_then_action('fallback-auto-manual')
         until('manual-standby-prepared',lambda:runner.machine.node_status(vms[other],time.monotonic())=='standby')
         guests[first].terminate();guests[first].wait(timeout=5)
         until('other-active-manual',lambda:runner.machine.mode is Mode.MANUAL and runner.machine.active_vm==vms[other])
+        if args.manual_session_contract:
+            action=driver_state[1];generation=runner.machine.generation
+            until('manual-takeover-held-key',lambda:drive_seen(generation,vms[other],moving=True))
+            assert driver_state[1]==action and runner.authority.payload()['manual_policy']=='CONTINUE_SESSION'
         inputs_enabled.set()
         until('recovered-perception-auto-ready',lambda:runner.machine.mode is Mode.AUTO_READY and runner.machine.active_vm==vms[other])
         # Merely becoming ready must not drive AUTO.
         time.sleep(.3);assert runner.machine.mode is Mode.AUTO_READY
-        until('auto-ready-held',lambda:runner.machine._ready(vms[other],'autonomous',time.monotonic(),held=True))
+        until('auto-ready-held',lambda:all(runner.machine._qualified(vms[other],app,time.monotonic(),held=True)
+                                         for app in ('autonomous','manual')))
         resume()
         until('other-active-auto',lambda:runner.machine.mode is Mode.AUTO and runner.machine.active_vm==vms[other] and
             runner.machine.node_status(vms[other],time.monotonic())=='active')
         start_guest(first)
         until('rejoined-standby',lambda:runner.machine.node_status(vms[first],time.monotonic())=='standby',15)
         assert runner.machine.active_vm==vms[other] and runner.machine.mode is Mode.AUTO
+        if args.readiness_profile=='warm-drive-1':
+            # Native fixture replaces only the root/Store boundary. Exercise real
+            # refresh -> cancel/join -> new envelope -> Gateway without reboot.
+            session=next(s for s in reversed(sessions) if s['label']==first)
+            manual=runner.machine.prepared[vms[first],'manual'];manual_identity=session['app_instances']['manual']
+            old_auto=session['app_instances']['autonomous'];new_auto=str(uuid.uuid4())
+            payload=json.loads(bootstrap_paths[first].read_text());payload['auto_instance_id']=new_auto
+            session['app_instances']['autonomous']=new_auto
+            from xenova_mqtt.drive_binding import atomic_json
+            atomic_json(bootstrap_paths[first],payload)
+            until('app-reinitialized-standby',lambda:runner.machine.sessions.get((vms[first],'autonomous'),(None,None,None))[2]==new_auto and
+                runner.machine.node_status(vms[first],time.monotonic())=='standby')
+            assert runner.machine.prepared[vms[first],'manual'] is manual and session['app_instances']['manual']==manual_identity
+            assert runner.machine.active_vm==vms[other] and runner.machine.output_permitted
+            delayed=XenovaClient(Identity(vm_id=vms[first],app_id='autonomous',boot_id=session['boot_id'],agent_instance_id=old_auto),
+                host='192.0.2.1',port=18884,username=vms[first],password=passwords[first],client_id='delayed-old-app')
+            clients.append(delayed);assert delayed.start(wait_s=3)
+            delayed.publish(topics.vm_app_events(vms[first],'autonomous'),'app.lifecycle',dict(profile='warm-drive-1',
+                applied_generation=runner.machine.generation,check_seq='999999',progress_seq='999999',phase='EXECUTING',readiness='READY',reason=None))
+            time.sleep(.15);delayed.stop()
+            assert runner.machine.sessions[vms[first],'autonomous'][2]==new_auto
         old=sessions[0 if first=='a' else 1]
-        assert not runner.machine.accept_session(vms[first],old['boot_id'],old['drive_instance'])
+        if args.readiness_profile=='warm-drive-1':
+            for app,instance in old['app_instances'].items():
+                assert not runner.machine.accept_session(vms[first],old['boot_id'],instance,app=app)
+        else:assert not runner.machine.accept_session(vms[first],old['boot_id'],old['drive_instance'])
         guests[other].terminate();guests[other].wait(timeout=5)
         until('rejoined-active-auto',lambda:runner.machine.mode is Mode.AUTO and runner.machine.active_vm==vms[first] and
             runner.machine.node_status(vms[first],time.monotonic())=='active')
@@ -260,7 +366,8 @@ def main():
                 except subprocess.TimeoutExpired:child.kill();child.wait(timeout=5)
         for h in handles:h.close()
         (args.output/'wire.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in records))
-        (args.output/'result.json').write_text(json.dumps({'passed':passed,'initial':args.initial,
+        (args.output/'result.json').write_text(json.dumps({'passed':passed,'initial':args.initial,'readiness_profile':args.readiness_profile,
+            'manual_session_contract':args.manual_session_contract,
             'same_binary_sha256':digest,'stages':stages,'sessions':sessions,'errors':errors,
             'scope':'native TCP/MQTT and mock serial only; no Xen/board/image/performance acceptance'},indent=2))
     if not passed:raise RuntimeError('native pair acceptance failed')

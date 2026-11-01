@@ -9,9 +9,10 @@ Diagnostics Core·Telemetry 2.0·Xen netfront·협조형 종료를 연결한다.
 A/B가 같은 펌웨어에서 두 계산을 실행하는 구성은
 [공통 주행 펌웨어](../../drive/README.md)를 사용한다. 기존 개별 앱과 같은 runtime을
 재사용하며, `xd_client_prepare_dual()`은 세 입력을 한 owner에 연결한다.
-공통 drive의 건강 hook은 `xd_completion_deadline_us/xd_step_deadline_missed`로 같은 release
-기한을 사용하고 `xd_health_record`로 최신 두 모드의 평가만 복사한다. 조회·기록은 새 계산 진행·
-heartbeat를 만들지 않는다. [건강 근거·행동 책임](../../../../docs/contracts/health-evidence-v1.md)을 따른다.
+개별 앱의 직렬 hook과 공통 drive의 독립 계산 완료 hook은 같은 release 원점·기한을 사용한다.
+공통 drive는 `xd_completed_work`에 선택된 계산의 실제 시각과 원 입력 문맥을 전달한다.
+`xd_health_record`는 최신 모드별 평가를 복사할 뿐 진행·heartbeat를 만들지 않는다.
+[건강 근거·행동 책임](../../../../docs/contracts/health-evidence-v1.md)을 따른다.
 매 iteration의 입력 사본에는 두 계산의 입력과 로컬 VM UUID가 함께 들어간다.
 `xd_command_input()`으로 선택 모드의 원 입력을 지정해 명령 만료를 계산한다.
 v1 heartbeat는 고정된 두 앱별 칸을 사용하므로 서로 덮어쓰지 않으며,
@@ -19,9 +20,10 @@ v1 heartbeat는 고정된 두 앱별 칸을 사용하므로 서로 덮어쓰지 
 
 ## 실행·신원 계약
 
-- 계산 main은 입력 사본·기존 payload parser·`auto_step`/`manual_step`을 소유한다.
+- 개별 앱 main 또는 공통 drive의 AUTO/MANUAL 계산 소유자가 입력 사본·실제 계산을 소유한다.
   별도 `drive-v1` worker만 Bootstrap·v1 client·envelope decoder·socket·봉투 순번을 사용한다.
-  두 스레드는 같은 정적 parser를 동시에 호출하지 않는다.
+  envelope decoder의 정적 작업 메모리는 이 I/O 소유자만 사용한다. payload parser는
+  호출별 제한된 작업 메모리를 사용해 계산·제어 확인 사이에 공유하지 않는다.
 - v2는 기존 Publisher worker와 자체 parser/socket/buffer를 사용한다.
   v1 client ID는 `<VM UUID>-<app session 앞 8자리>`, v2는 `xt2-<VM UUID에서 하이픈 제거>`다.
 - Xen은 `xshutdown_start → xnet_start → Diagnostics loop → xt_start` 순서다.
@@ -34,8 +36,9 @@ v1 heartbeat는 고정된 두 앱별 칸을 사용하므로 서로 덮어쓰지 
   app instance와 Publisher instance는 서로 다르다. 새 Xen 실행에는 새 receipt가 필요하다.
 - v1 봉투·토픽·QoS·payload는 유지한다. v1 `sent_at`은 기존 업타임 기반 1970년 표기여서
   UTC나 편도 지연 근거로 쓰지 않는다. v2 UTC는 기존 nullable 계약을 유지한다.
-- 펌웨어에는 VM UUID·계정·비밀번호를 넣지 않는다. bootstrap 부재 시 계산·로컬 계측은
-  계속되지만 인증되지 않은 발행은 하지 않는다. Xen에 Kconfig 신원 fallback은 없다.
+- 펌웨어에는 VM UUID·계정·비밀번호를 넣지 않는다. bootstrap 부재 시 로컬 진단은
+  계속되지만 인증되지 않은 발행은 하지 않는다. 공통 drive는 유효한 VM·제어 문맥을
+  얻기 전 계산 작업을 제출하지 않는다. Xen에 Kconfig 신원 fallback은 없다.
 
 ## 계산과 통신 사이의 전달
 
@@ -100,6 +103,8 @@ heartbeat가 대기 중이면 사건 보고를 최대 한 개 먼저 처리한 �
 [준비 계약](../../../../docs/contracts/mqtt-contract-v1.md#62-앱-준비-보고-appreadiness)을 따른다.
 
 quiesce는 새 출력 수락을 차단하고 계산 종료와 v1 worker의 실제 join을 확인한다.
+공통 drive의 계산 스레드도 같은 guest 정리 deadline으로 먼저 join한다. 반환하지 않은
+계산 callback과 그 stack·문맥은 잔존으로 보존하며 shared 자원 종료 성공으로 바꾸지 않는다.
 worker가 자신의 socket을 abort한 뒤 Publisher를 정지하고, 기존 coordinator가
 netfront·Store를 정리한다. join은 같은 guest 정리 기한을 공유한다. 미종료 thread,
 불확정 close 또는 grant를 성공으로 바꾸거나 강제 thread abort로 숨기지 않는다.
@@ -118,6 +123,9 @@ netfront·Store를 정리한다. join은 같은 guest 정리 기한을 공유한
 
 `xd_step_begin/end`는 실제 계산 함수 앞뒤에 있다. elapsed는 경과시간이며 CPU time이 아니다.
 `loop_seq`는 계산 완료 때만 증가한다. app heartbeat도 계산 루프에서만 발행한다.
+공통 drive에서는 선택 계산의 실제 완료를 의미하며, 앱별 progress는 별도 어댑터의 실제
+완료 근거다. poll·송신·대기는 계산 완료가 아니다. 보고와 후보의 만료도 원 생산 시각과
+입력 수신 시각을 보존하여 coordinator가 늦게 읽었다고 새 기한을 주지 않는다.
 telemetry heartbeat는 독립 worker의 상태이며 앱 생존을 대신 판정하지 않는다.
 
 기존 `now + period` 재동기화 대신 Core의 고정 origin/next release를 스케줄 원본으로 사용한다.
@@ -178,6 +186,46 @@ native 시험의 종료 후 파일 출력은 완전한 원자료를 한 번에 �
 기존 schema 1 분석은 유지하지만 출력함 수락을 MQTT 제출로 재해석하지 않는다.
 QoS0 로컬 성공과 독립 수신 성공은 다르다. 종료는 offline flush나 수신 ACK를
 기다리지 않으므로 종료 경계의 미수신도 원자료와 함께 별도 보고한다.
+
+### 같은 실행의 페이지 회수
+
+recorder가 있는 실험 구성에서 측정 창과 송신 결과가 모두 확정된 뒤 회수한다.
+`tools/collect_console.py`는 기존 명령·출력만 사용한다. 매 페이지의 전후에 `records 0 1`의
+VM/boot/app instance/execution과 capture 시작·종료·행 수를 대조하고, 페이지를 두 번 읽어
+동일한 offset/next/total·내용·행 수를 확인한다. 신원·창 확인은 기존 CLI의 1행 조회로
+불필요한 반복 출력을 줄이고, 실제 데이터 페이지는 기존 4행씩 두 번 읽는다.
+실행·창·total이 바뀌면 혼합하지 않고 실패한다.
+한 페이지 최대 3회, 전체 기본 300초이며 조회 재시도로 전체 기한을 갱신하지 않는다.
+
+```sh
+python3 platform/apps/common/xenova-drive-runtime/tools/collect_console.py \
+  --console /dev/pts/OWNED --output /absolute/new-capture --timeout 300
+```
+
+`/dev/pts/OWNED`는 운영자가 마련한 전용 raw PTY의 실제 경로로 바꾼다. 로그인·콘솔 lease를
+얻거나 다른 사용자의 콘솔을 빼앗는 도구가 아니다. 초기 prompt가 관측돼야 명령을 제출하며,
+응답 prompt를 잃으면 이를 되찾기 전 추가 명령을 쓰지 않는다. flush/reset·capture 재설정·
+VM 제어는 하지 않는다. advisory lock은 협조하는 수집기 사이의 잠금이며 다른 콘솔을 강제로
+배제하지 않는다. 동시 사용은 지원하지 않는다. prompt가 다르면 `--prompt`로 정확히 지정한다.
+
+완료하면 `source.stdout`과 `collection.json`, 실패하면 `source.partial`과 실패 이유를 남긴다.
+페이지 회수 완료는 계산 내용·전달·성능 수락이 아니다. 기존 `analyze.py`의 원자료 구조·
+수락 후보/terminal 일대일 대조를 추가로 통과해야 한다. 미제출 STOP과 QoS0 유실도 구분한다.
+기존 분석기의 최종 비교 명령은 standalone manual/autonomous 시험 입력을 기준으로 하며,
+공통 drive의 모드 혼합 자료를 같은 두 앱 성능 표본으로 자동 해석하지 않는다.
+
+기존 출력에는 페이지 자체의 실행 토큰/checksum이 없다. 따라서 이 절차는 신뢰된 단일
+콘솔의 직렬 prompt/echo 경계와 불변 측정 창을 전제로 한다. 외부 root 조작까지 원자적으로
+통제하거나 두 번 모두 같은 방식으로 변조된 자료를 암호학적으로 검출한다고 주장하지 않는다.
+PV ring 유실·정체는 제한된 재조회와 기한 실패로 드러내며, 물리 PV 전달 수락은 별도다.
+
+### 운영 구성과 선택 계측
+
+`XENOVA_DRIVE_RECORDER=n`이면 큰 source/transmission 배열을 링크하지 않는다. 실제 건강·
+기한·CPU 계상·기본 오류 기록은 유지된다. 빌드 도구의 `operations`는 이 구성과 상세 stack
+scan 비활성화를 선택하며 `experiment`는 둘을 명시적으로 활성화한다. stack sentinel과
+계산 소유권·정리 규칙은 두 구성에 공통이다. native 시험의 기본 recorder 사용과 제품 운영
+기본값을 혼동하지 않는다. 전체 호출 스택의 여유와 실제 Xen 성능은 빌드 크기와 별도로 확인한다.
 `analyze.py`의 `accepted`는 기능·자료 정합성 수락이다. 성능 개선 판정은 별도다.
 계산 시작·후보 생성/수락·실제 송신 시작/소요시간·독립 수신 간격을 각각의 단조 시계에서
 분석한다. Mailbox 교체/만료, QoS0 성공 후 미수신, 긴 간격 뒤 짧은 간격이 이어지는 뭉침은

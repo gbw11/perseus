@@ -12,6 +12,7 @@ struct raw_bootstrap {
 	bool persistent_crash;
 	int port;
 	bool trusted_internal_plaintext;
+	char drive_profile[24],auto_instance_id[37],manual_instance_id[37];
 };
 #define FIELD(name) JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,name,JSON_TOK_STRING)
 static const struct json_obj_descr fields[]={
@@ -23,7 +24,10 @@ static const struct json_obj_descr fields[]={
 	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,display_name,JSON_TOK_STRING_BUF),
 	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,artifact_sha256,JSON_TOK_STRING_BUF),
 	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,build_id,JSON_TOK_STRING_BUF),
-	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,persistent_crash,JSON_TOK_TRUE)
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,persistent_crash,JSON_TOK_TRUE),
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,drive_profile,JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,auto_instance_id,JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,manual_instance_id,JSON_TOK_STRING_BUF)
 };
 #undef FIELD
 static int copy(char *out,size_t capacity,const char *in)
@@ -76,6 +80,9 @@ int xt_bootstrap_decode_channel(char *json,size_t bytes,const char *own_vm_id,
 	if (!xt_uuid_valid(raw.boot_id) || !xt_uuid_valid(raw.publisher_id)) { return -EINVAL; }
 	bool bound=raw.host_boot_id[0] || raw.execution_id[0] || raw.receipt_id[0];
 	if (bound && (!xt_uuid_valid(raw.host_boot_id) || !xt_uuid_valid(raw.execution_id) || !xt_uuid_valid(raw.receipt_id))) { return -EINVAL; }
+	bool apps=raw.drive_profile[0]||raw.auto_instance_id[0]||raw.manual_instance_id[0];
+	if(apps&&(strcmp(raw.drive_profile,"warm-drive-1")||!xt_uuid_valid(raw.auto_instance_id)||
+	   !xt_uuid_valid(raw.manual_instance_id)||!strcmp(raw.auto_instance_id,raw.manual_instance_id)))return -EINVAL;
 	int rc;
 #define COPY(dst,src) do { rc=copy(dst,sizeof(dst),src);if (rc) { memset(out,0,sizeof(*out));return rc; } } while (0)
 	COPY(out->identity.vm_id,raw.vm_id);COPY(out->identity.boot_id,raw.boot_id);
@@ -85,6 +92,8 @@ int xt_bootstrap_decode_channel(char *json,size_t bytes,const char *own_vm_id,
 	COPY(out->hostname,raw.hostname);COPY(out->display_name,raw.display_name);
 	COPY(out->artifact_sha256,raw.artifact_sha256);COPY(out->build_id,raw.build_id);
 	out->persistent_crash=raw.persistent_crash;
+	COPY(out->drive_profile,raw.drive_profile);COPY(out->auto_instance_id,raw.auto_instance_id);
+	COPY(out->manual_instance_id,raw.manual_instance_id);
 #undef COPY
 	out->port=(uint16_t)raw.port;out->trusted_internal_plaintext=true;return 0;
 }

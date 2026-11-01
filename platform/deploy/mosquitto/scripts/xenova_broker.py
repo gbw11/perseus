@@ -565,6 +565,13 @@ def export(value, name, form, output, execute=False):
         if name != 'backend':
             raise SetupError('backend export requires backend account')
         content = f'MQTT_USERNAME={name}\nMQTT_PASSWORD={password}\n'
+    elif form == 'display-env':
+        if name != 'observer' or value['profiles'].get(name) != 'service':
+            raise SetupError('display export requires the existing read-only observer account')
+        if grants((value['path'] / 'acl').read_text()).get(name) != {'topic read xenova/v1/#'}:
+            raise SetupError('observer must have exactly the expected read-only ACL')
+        content = ('XENOVA_DISPLAY_MQTT_HOST=127.0.0.1\nXENOVA_DISPLAY_MQTT_PORT=1883\n'
+                   f'XENOVA_DISPLAY_MQTT_USERNAME=observer\nXENOVA_DISPLAY_MQTT_PASSWORD={password}\n')
     else:
         expected = 'telemetry' if form == 'telemetry' else 'vm'
         if value['profiles'][name] != expected:
@@ -597,7 +604,7 @@ def main(argv=None):
     check.add_argument('--runtime', action='store_true', help='require current configuration-compatible generation')
     command = commands.add_parser('export-account')
     command.add_argument('name')
-    command.add_argument('--format', choices=('agent-env', 'backend-env', 'credentials', 'drive', 'telemetry'), required=True)
+    command.add_argument('--format', choices=('agent-env', 'backend-env', 'display-env', 'credentials', 'drive', 'telemetry'), required=True)
     command.add_argument('--output', type=Path, required=True)
     command.add_argument('--execute', action='store_true')
     args = parser.parse_args(argv)

@@ -61,6 +61,7 @@ def main(argv=None, manager=None):
     parser.add_argument('--barrier-id')
     parser.add_argument('--max-age-ms', type=int)
     parser.add_argument('--timeout-ms', type=int, default=15000)
+    parser.add_argument('--budget-ms',type=int)
     short=False
     try:
         args=parser.parse_args(args_list)
@@ -69,7 +70,7 @@ def main(argv=None, manager=None):
         short=args.short
         action='recover_once' if args.action == 'recover-once' else args.action
         spec={}
-        if action in ('recover_once', 'cpu-policy-set'):
+        if action in ('recover_once', 'cpu-policy-set','operation-reconcile'):
             if args.spec_file is None:
                 raise ManagementError('INVALID_SPEC', 'recover-once requires --spec-file')
             spec = json.loads(args.spec_file.read_text())
@@ -90,8 +91,11 @@ def main(argv=None, manager=None):
                 raise ManagementError('INVALID_SPEC', 'recovery-reconcile never supports force')
             spec = {'recovery_attempt_id':args.recovery_attempt_id, 'timeout_ms':args.timeout_ms}
         elif action=='create':
-            spec={'vm_id':args.vm_id, 'name':args.name or args.id,'template_id':args.template_id,
-                  'template_version':args.template_version,'vcpus':args.vcpus,'memory_mib':args.memory_mib}
+            spec={'vm_id':args.vm_id, 'name':args.name if args.name is not None else args.id,'template_id':args.template_id,
+                  'template_version':args.template_version}
+            for key in ('vcpus','memory_mib'):
+                value=getattr(args,key)
+                if value is not None:spec[key]=value
             if args.ipv4 is not None:
                 spec['ipv4']=args.ipv4
         elif action in ('firmware-transition','update-resources','get','retire','restore','purge','delete','start','stop','reboot','autostart-set','board-shutdown-set','config','destroy','snapshot','probe','execution-context'):
@@ -133,7 +137,8 @@ def main(argv=None, manager=None):
             spec={'operation_id':args.operation_id,'idempotency_key':args.idempotency_key}
         elif action=='status':
             action='list'
-        result=service.call(action,spec,execute=args.execute,idempotency_key=args.idempotency_key,request_id=request_id)
+        options={'budget_ms':args.budget_ms} if args.budget_ms is not None else {}
+        result=service.call(action,spec,execute=args.execute,idempotency_key=args.idempotency_key,request_id=request_id,**options)
     except ManagementError as exc:
         result={'schema_version':'1.0','ok':False,'request_id':request_id,'operation_id':None,
                 'replayed':False,'data':None,'error':exc.error}

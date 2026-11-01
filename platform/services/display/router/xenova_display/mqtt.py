@@ -23,11 +23,12 @@ class MqttSource:
         self.topics = tuple(dict.fromkeys([
             *[topic for b in self.settings.bindings if b.agent_supported for topic in
               (f"xenova/v1/vms/{b.vm_id}/heartbeat", f"xenova/v1/vms/{b.vm_id}/inventory")],
-            *[f"xenova/v1/apps/{b.app_id}/events" for b in self.settings.bindings], DISPLAY_DRIVE_TOPIC]))
+            *[b.app_topic(app) for b in self.settings.bindings for app in b.report_app_ids], DISPLAY_DRIVE_TOPIC]))
         self.pending = {}
         self.early = {}
         self.subscribing = False
         self.generation = 0
+        self.inventory_requested = {}
         self.client.reconnect_delay_set(1, 10)
         # Reading from a broker on loopback is the default; TLS on remote brokers is configured externally.
 
@@ -44,26 +45,32 @@ class MqttSource:
             self.generation += 1
             generation = self.generation
             self.pending.clear(); self.early.clear()
+            self.inventory_requested.clear()
             self.store.mqtt_connection(not reason_code.is_failure, self.topics)
             if reason_code.is_failure:
                 return
             for topic in self.topics:
-                self.subscribing = True
-                try:
-                    result, mid = client.subscribe(topic, qos=1)
-                    if generation != self.generation or not self.store.mqtt_connected:
-                        return
-                    if result != mqtt.MQTT_ERR_SUCCESS:
-                        self.store.subscription(topic, "error")
-                    elif mid in self.early:
-                        self.store.subscription(topic, self.early.pop(mid))
-                    else:
-                        self.pending[mid] = topic
-                except (OSError, RuntimeError, ValueError, TypeError):
-                    self.store.subscription(topic, "error")
-                finally:
-                    self.subscribing = False
-                    self.early.clear()
+                if not self._subscribe(client, topic, generation):
+                    return
+
+    def _subscribe(self, client, topic, generation):
+        self.subscribing = True
+        try:
+            result, mid = client.subscribe(topic, qos=1)
+            if generation != self.generation or not self.store.mqtt_connected:
+                return False
+            if result != mqtt.MQTT_ERR_SUCCESS:
+                self.store.subscription(topic, "error")
+            elif mid in self.early:
+                self.store.subscription(topic, self.early.pop(mid))
+            else:
+                self.pending[mid] = topic
+        except (OSError, RuntimeError, ValueError, TypeError):
+            self.store.subscription(topic, "error")
+        finally:
+            self.subscribing = False
+            self.early.clear()
+        return True
 
     def on_subscribe(self, client, userdata, mid, reason_codes, properties=None):
         with self.store.lock:
@@ -82,6 +89,7 @@ class MqttSource:
         with self.store.lock:
             self.generation += 1
             self.pending.clear(); self.early.clear()
+            self.inventory_requested.clear()
             self.store.mqtt_connection(False, self.topics)
 
     def on_message(self, client, userdata, message):
@@ -89,6 +97,26 @@ class MqttSource:
             return
         try:
             envelope = json.loads(message.payload.decode("utf-8"))
-            self.store.ingest(message.topic, envelope, retained=message.retain)
+            accepted = self.store.ingest(message.topic, envelope, retained=message.retain,
+                                         qos=getattr(message, "qos", None), wire_size=len(message.payload))
+            if accepted and client is not None and envelope['type'] == 'agent.heartbeat':
+                with self.store.lock:
+                    vm_id = envelope['vm_id']
+                    guest = self.store.guests[vm_id]
+                    agent_epoch = (envelope['boot_id'], envelope['agent_instance_id'])
+                    epoch = (self.generation, guest['run_id'], *agent_epoch)
+                    if self.inventory_requested.get(vm_id) == epoch:
+                        return
+                    self.inventory_requested[vm_id] = epoch
+                    inventory = guest['channels'].get('agent.inventory')
+                    if (inventory and inventory['source_epoch'] == list(agent_epoch)
+                            and inventory.get('_mqtt_generation') == self.store.mqtt_generation):
+                        return
+                    # Initial retained inventory can precede the first verified
+                    # Xen observation. Request its replay once after a live Agent
+                    # is accepted; no command or publish permission is needed.
+                    topic = f'xenova/v1/vms/{vm_id}/inventory'
+                    self.store.subscription(topic, 'pending')
+                    self._subscribe(client, topic, self.generation)
         except (ValueError, TypeError, KeyError, UnicodeError):
             log.debug("Rejected malformed display observation")

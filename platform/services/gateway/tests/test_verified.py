@@ -212,7 +212,9 @@ def test_runner_bounded_drain_source_identity_and_serial_failure(tmp_path):
     class Broken:
         def write(self,*_):raise SinkError('injected')
     runner._sink=Broken();runner._submit(ForwardDrive('autonomous',w.m.generation,.2,0,source=row['source']))
-    assert not w.m.output_permitted and runner.serial_failed==1 and w.m.failure=='OUTPUT_PATH_FAILED'
+    # The failed drive and same-turn best-effort STOP are separate submissions.
+    assert not w.m.output_permitted and runner.serial_failed==2 and w.m.failure=='OUTPUT_PATH_FAILED'
+    assert all(row['device_applied'] is None for row in list(runner.submissions)[-2:])
 
 def test_runner_rejects_retained_and_stale_causation_resume(tmp_path):
     w=World(tmp_path/'authority');client=Client()
