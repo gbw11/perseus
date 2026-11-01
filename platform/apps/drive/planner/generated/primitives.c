@@ -51,7 +51,7 @@ const struct lp_config lp_selected_config={
  .state_period_us=500000,
 };
 const struct lp_assets lp_selected_assets={
- .id="lattice-lab-1",.sha256="0554319af8a84297547c4248f7eae1e7b85d927980219928ae226ff0edff8010",
+ .id="lattice-lab-1",.sha256="61531ae8ec6f59a55b981e504f3ea29a5bc1e4b98e8f3cd83e9354b143e1e1df",
  .resolution=1.000000000e-01f,
  .wheelbase=2.500000000e-01f,
  .max_steer=5.500000000e-01f,

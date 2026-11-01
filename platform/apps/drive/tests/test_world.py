@@ -47,7 +47,12 @@ def test_frozen_protoc_golden_to_python_and_nanopb(probe):
     assert (message.width,message.height,message.sequence)==(4,4,2)
     assert message.occupancy==bytes(16) and message.cell_flags==bytes([3])*16
     assert message.age_le32==b'\x80\xee\x36\x00'*16
-    assert encode(message)==wire and product(probe,wire)['result']=='OK'
+    assert encode(message)==wire
+    # 보존한 protoc golden은 당시 primitive revision이다. 새 생성기 산출물의
+    # 호환성을 임의 허용하지 않고 현재 asset 참조만 바꾼 정상 입력과 짝지어 확인한다.
+    assert product(probe,wire)['result']==('OK' if message.primitive==fixture.PRIMITIVE else 'CONFIGURATION')
+    message.primitive=fixture.PRIMITIVE
+    assert product(probe,encode(message))['result']=='OK'
     with pytest.raises(ValueError):decode(wire+b'\x08\x01')
     assert product(probe,wire+b'\x08\x01')['result']=='DECODE'
 
