@@ -26,7 +26,8 @@
 `xenova-platform`은 `/usr/lib/xenova`의 순수 `xenova_registration`, 로컬 `xenova_registration_hook`,
 Manager/CLI/first-boot를 설치한다. `assemble.py`의 source gate도 새 hook을 요구한다.
 `xenova-dom0-manager`는 site-packages의 `api/registrations.py`, `registration_sender.py`, settings·driver·app을
-기존 패키지에 함께 설치한다. 새 daemon/unit이나 CLI 통지 proxy는 없다. netclient/io/ctypes/sqlite3 등 실제 target 분할 의존성을 대조한다.
+기존 패키지에 함께 설치한다. 새 상주 daemon이나 CLI 통지 proxy는 없다. factory 사건만 일시 systemd job을 만든다.
+netclient/io/ctypes/sqlite3 등 실제 target 분할 의존성을 대조한다.
 `sqlite3`는 기존 runtime_logs의 앱 import에 필요하다. 실제 ARM import에서 누락을 확인해 의존성에 명시했으며 DB/Worker 저장 정책을 바꾸지 않는다.
 
 Spring 송신은 API 프로세스 소유다. unit은 선택 `/etc/xenova/spring-registration.env`를 읽으며
@@ -36,8 +37,13 @@ Spring 송신은 API 프로세스 소유다. unit은 선택 `/etc/xenova/spring-
 Spring 전용 파일에 이 변수를 덮어쓰지 않는다. helper는 API bind/port와 API token만 읽으며 Spring 전용 파일을 읽지 않는다.
 
 자동 기회 소비→잠금/대상 FD 반환→로컬 후속의 순서다. factory의 first-boot main은 complete 뒤
-잠금을 반환하고 별도 helper를 띄운다. RemainAfterExit의 기존 cgroup 안에서 최대 15초 준비/호출을 소유하며
-first-boot 완료·autostart는 HTTP를 기다리지 않는다. API는 기존 부팅 순서를 유지하며 준비 확인이 first-boot 종료를 막지 않는다.
+잠금을 반환하고 별도 helper로 일시 job을 `--no-block` 예약한다. job은 API를 Requires/After로 참조하고
+API의 `Type=notify` 준비 완료 뒤 실행된다. `dom0_manager.__main__.ReadyServer`가 ASGI startup과
+listen 성공 뒤에만 `READY=1`을 보낸다. first-boot 완료·autostart는 API/HTTP를 기다리지 않는다.
+API는 기존 host-admission 이후 순서를 유지한다. 송신의 기존 15초 예산과 runtime 상한은 job 실행 때 시작한다.
+job은 일반 큐/영속 spool이 아니며 현재 factory의 새 등록 UUID에만 만들어진다. API 실패·다음 부팅에서 재예약하지 않는다.
+명시 API restart가 남은 dependent를 다시 실행해도 `/run/xenova/registration-notices/factory-started-UUID`의
+배타 표식이 같은 boot의 두 번째 송신을 차단한다. 이 표식은 API startup/종료에서 삭제하지 않는다.
 POST를 시도한 뒤에는 retry/GET이 없다. API startup/multi-worker·다음 boot가 과거 대상을 순회해 보충하지 않는다.
 API sender는 worker 공통 4 slot과 자체 deadline을 가지며 종료 때 자식을 kill/wait한다.
 helper도 4 slot이고 관리 FD는 상속하지 않는다. 커널/필수 저장의 모든 정체를 선점하는 보장은 아니다.
@@ -47,6 +53,8 @@ helper도 4 slot이고 관리 FD는 상속하지 않는다. 커널/필수 저장
 1. 기존 내부 writer/helper를 기존 admission/drain 경로로 정지하고 활성 작업·상속 FD의 종결을 확인한다.
    이미 시작한 옛 통지 helper는 재송신하지 말고 종결/소유를 확인한다. API backend 수명의 기존 공동 수락은 계속 필요하다.
 2. 두 새 RPM과 필요한 target Python 의존성, 실제 로드하는 하위 모듈을 일관되게 교체한다.
+   특히 API `__main__.py`·`Type=notify/NotifyAccess=main` unit·하위 hook을 같은 후보로 교체한다.
+   구형 entrypoint에 notify unit만 설치하면 READY를 보내지 못한다. unit 변경의 daemon-reload/서비스 교체는 승인된 운영 절차에서 수행한다.
    옛 `registration-notification.json.example`은 새 RPM payload에서 제거됐다. 운영의 옛 JSON/token 파일은
    실행자가 사용 중인지 확인한 뒤 승인된 운영 절차로 비활성화/보관한다. 이번 작업은 기존 파일을 삭제하지 않았다.
 3. 새 FastAPI URL/token을 공급하고 설치 경로의 import·OpenAPI·GET 배열을 확인한다.

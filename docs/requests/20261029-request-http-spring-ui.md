@@ -11,6 +11,9 @@
 현재 등록 목록을 읽고, 인증된 POST `/api/v1/vm-registrations/{vm_id}/notify`에 UUID만 주면
 FastAPI가 Spring 등록 POST를 한 번 보내 결과를 반환한다. 일반 생성·최초 설치의 자동 최대 1회 후속도 같은 경로다.
 이 제공자 API를 상대 담당자가 다시 만들 필요는 없다.
+factory 자동 통지는 API의 실제 listen/`READY=1` 뒤 실행되는 일시 systemd job으로 연결했다.
+first-boot/autostart는 이 job을 기다리지 않고, API restart의 dependent 재진입도 같은 boot의 실행 표식으로 차단한다.
+운영 설치에서는 API entrypoint·notify unit·하위 hook을 함께 교체하고, 지연 기동→대상별 1회 및 restart→추가 0회를 수락한다.
 [정식 계약·curl·오류·설정](../contracts/vm-provisioning-v1.md), [시험·설치 산출물](../verification/vm-registration-api-20261102.md)을 사용한다.
 
 | 담당·상태 | 다음 할 일과 이유 | 실제 위치·제공물 | 정상·실패 수락 및 회신 |

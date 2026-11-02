@@ -9,6 +9,9 @@
 - Spring 확인 후보: `origin/backend`의 `800d584`. 등록 `5a99857`, 동기화 `0565b5d`와 bean/auth 후속 수정이 포함돼 있다. 제품 소스는 수정하지 않는다.
 - 운영·실데이터·실제 토큰·전체 이미지/firmware·7번·commit/push는 실행하지 않는다.
 
+부팅 통지의 현재 구현·설치 근거는 마지막 **FastAPI 준비 이후 부팅 통지** 절을 따른다.
+앞선 15초 준비 polling과 pre-merge 포장 결과는 그 후보의 이력으로 보존한다.
+
 ## 계약 대조와 구현 순서
 
 1. 기존 registry/lifecycle reader로 읽기 전용 `registrations` 단건/목록을 제공한다. 표시 이름이 같은 UUID들을 유지하고 저장 IPv4를 OS별로 보정하지 않는다.
@@ -224,3 +227,86 @@ LF 기준 대조해 차이가 없었다. 두 실패 기록은 삭제하지 않�
 native 소스 통합 회귀이며, 새 RPM·ARM 설치 검증을 수행했다고 확대하지 않는다.
 fetch에서 `origin/backend`가 `ca9a2a3`으로 진행한 사실은 확인했지만, 기존 Spring 소스 대조 후보
 `800d584`를 새 후보 검증으로 바꾸지 않는다. 운영 설치·Spring/DB 공동 수락은 계속 별도다.
+
+## FastAPI 준비 이후 부팅 통지
+
+후속 기준은 MR !335의 `bfa5bb4`다. 실제 API unit은 autostart/host admission 뒤인데
+first-boot helper는 그보다 먼저 15초를 소모했다. 짧은 지연 fixture는 통과했지만,
+API 활성화 전에 통지 기회가 끝날 수 있어 사용자 승인에 따라 연결 시점을 수정했다.
+구현·시험은 `50e1aba`, 설치 검증 도구는 `a5c734a`에 나눴다. 이번 후속은 commit/push와 기존 MR 갱신까지 승인받았다.
+
+### 무엇을 어떤 기준으로 바꿨는가
+
+1. `dom0_manager.__main__.ReadyServer.startup`은 고정 Uvicorn의 `Server.startup`을 먼저 실행한다.
+   ASGI startup·bind/listen 성공과 `started`를 확인한 뒤 작은 비차단 AF_UNIX datagram으로 `READY=1`을 보낸다.
+   `xenova-dom0-manager.service`는 `Type=notify`, `NotifyAccess=main`으로 바꿨다.
+   앱 import/프로세스 존재나 Xen health를 API listen 준비로 대신하지 않는다. bind 실패에는 READY가 없다.
+2. `xenova_registration_hook.automatic(wait_ready=True)`는 기존 소비된 factory 사건의 UUID만
+   `defer_factory`에 넘긴다. `systemd-run --no-block --collect`의 일시 job은 API를 Requires/After로 참조한다.
+   first-boot의 공통/대상 FD는 이미 반환했고 API를 기다리지 않는다. 기존 autostart→host admission→API 순서는 유지한다.
+   실제 `after_api` 실행 때만 기존 15초 송신 예산을 시작한다. API 기동 시간으로 송신 예산을 소모하거나 timeout 수치를 늘리지 않는다.
+3. 첫 실제 systemd 시험에서 **API restart가 아직 남은 dependent를 다시 실행해 3번째 POST를 만드는 결함**을 확인했다.
+   `/run/xenova/registration-notices/factory-started-UUID`를 `O_CREAT|O_EXCL`로 먼저 생성해 같은 boot의 재진입을 막았다.
+   이 일시 표식은 큐/등록 원본/성공 증거가 아니다. 생성 뒤 중단되면 송신 0회일 수 있다.
+   reboot에는 job/표식이 사라지고 원 progress의 내구 소비가 재예약을 막는다. API startup에서 목록을 훑거나 표식을 지우지 않는다.
+4. API 실패·취소 뒤 자동 재예약, POST retry·후속 GET, 부팅 시 미송신 보충은 없다.
+   job의 의존 실패 때문에 결과 파일이 없을 수 있으며 confirmed로 간주하지 않는다. 필요하면 기존 인증된 수동 API를 사용한다.
+   Spring envelope·토큰 분리·200/201/대상 confirmed 검증과 일반 create의 후속 경계는 그대로다.
+
+### 실제 정상·실패·회복
+
+- **집중 14 passed**, **확대 667 passed / 1 skipped**. 두 묶음은 중복 합산하지 않는다.
+  확대 묶음은 하위 등록/새 부팅 시험/별도 프로세스 HTTP/dom0-manager 전체이며,
+  skip은 root에서 성립하지 않는 기존 파일 권한 시험이다.
+- `test_factory_ready_after_old_budget_then_once_and_api_restart_does_not_requeue`:
+  실제 WSL systemd 255.4의 시험 전용 transient API unit을 activating 상태로 유지한다.
+  first-boot main은 5초 이내 반환하고 16초 뒤에도 통지 job은 대기·Spring POST는 0이다.
+  barrier를 해제한 실제 FastAPI가 READY를 보내면 factory 두 UUID 각각 confirmed로 끝난다.
+  API unit restart 뒤 추가 POST는 0이며 완료 factory 재등록의 새 기회도 없다.
+- API 기동 실패의 종속 job 종결→자동 보충 0→동일 UUID의 수동 confirmed를 확인했다.
+  실제 `automatic`→별도 defer 프로세스는 별도 시험에서 실행했고, scheduler command 경계만 기록 대역으로 대체해
+  `--no-block`/Requires/After/Restart=no와 Spring 비밀 환경의 부재를 확인했다.
+- 기존 실제 API create→하위→자동 callback, 원 201/409·조회·실제 stop·느린 송신/종료 시험을 함께 통과했다.
+  systemd 실행 시험에서 대역은 guest/mount/Xen의 기존 Board와 Spring 계약 receiver다.
+  production API unit명만 시험 전용 이름으로 치환했고, 수신부·READY·job 실행·local HTTP·sender는 제품 코드다.
+- 집중 1차의 13 passed / 1 failed 기록은 `boot-ready-focused.xml`에 보존했다.
+  수정 후 `boot-ready-focused2.xml`, 최종 `boot-ready-regression.xml`을 사용한다.
+  시험 종료 뒤 이 시험이 만든 systemd job/unit 잔존은 각각 0이었다.
+
+재현은 기존 고정 native PYTHONPATH에서 다음을 실행한다. systemd opt-in은 소유 격리 환경에서만 사용한다.
+
+```sh
+XENOVA_TEST_SYSTEMD_BOOT=1 python3 -m pytest -o addopts= -q \
+  platform/tests/test_xenova_registration.py platform/tests/test_xenova_registration_boot.py \
+  platform/tests/test_registration_api_process.py platform/services/dom0-manager/tests
+```
+
+### 포장·비용·남은 수락
+
+두 정규 recipe의 `package_write_rpm`/`package_qa`를 새 고정 source로 다시 통과했다.
+경고는 빌드 host의 `CONFIG_TASK_IO_ACCOUNTING` 부재 1건이며 제품 package QA 실패가 아니다.
+80 RPM 의존성 설치, 제공 파일 59개의 byte/mode 일치, ARM/QEMU Python 3.14.7·FastAPI 0.135.3·
+Pydantic 2.12.5·Uvicorn 0.44.0에서 import/등록 조회/OpenAPI와 실제 listen 후 READY datagram을 확인했다.
+native Uvicorn은 0.54.0이며 두 고정 버전의 startup 경계와 실제 실행을 각각 확인했다.
+
+RPM만 추출한 최소 root의 unit verify는 `sysinit.target` 부재로 실패했다.
+이 기록을 보존하고 기존 전체 dom0 unit fixture에 실제 새 RPM의 API unit과 플랫폼 recipe를 연결했다.
+고정 target systemd 259의 정적 전체 graph verify는 exit 0이었다. 없는 선택 mount/unit의 debug 진단은 보존한다.
+명령 존재 확인용 stub을 실행하지 않았으며 실제 target PID1/보드 기동 시험으로 확대하지 않는다.
+
+추가 비용은 API 기동당 READY datagram 1개, 새 factory UUID당 일시 systemd job과 `/run` 배타 생성 1회다.
+관리 요청마다 새 스캔/해시/원장 fsync를 추가하지 않았고, factory 준비의 반복 OpenAPI GET은 실제 송신 경로에서 제거했다.
+일시 표식에 내구 fsync는 하지 않는다. 재부팅 뒤 at-most-once 근거는 기존 factory progress의 필수 내구 저장이다.
+활성 송신 slot은 기존 4개이며 job은 등록 사건의 새 UUID 집합에만 한정된다. 별도 daemon/영속 큐는 없다.
+
+새 source·RPM·설치 manifest와 원 로그는 `artifacts/registration-api/delivery-boot-ready/`에 둔다.
+API entrypoint·notify unit·하위 hook을 함께 교체해야 한다. 정규 제품 단일 서버 entrypoint 기준의 수락이며,
+외부 `uvicorn` launcher를 notify unit의 준비 신호 생산자로 간주하지 않는다.
+실제 보드의 전체 기동·autostart·서비스 교체, Spring/DB 종단·운영 설정 공급은 미수행이다.
+운영 서비스/보드/VM/실데이터 변경이나 squash/Merge는 하지 않는다.
+마감 중 CI 담당자의 요청을 전달받아 **push와 MR !335 갱신은 보류**했다. 이번 후속은 로컬 커밋만 남기며,
+원격 MR의 기존 후보를 새 설치/실행 검증이 반영된 후보라고 표시하지 않는다.
+
+기준 의미는 고정 [systemd v259 service](https://github.com/systemd/systemd/blob/v259/man/systemd.service.xml)와
+[systemd-run](https://github.com/systemd/systemd/blob/v259/man/systemd-run.xml)의 notify/After 및 비동기 transient 실행이다.
+실제 제공 여부는 위 소스·실행·설치 시험으로 판단한다.

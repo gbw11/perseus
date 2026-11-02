@@ -176,12 +176,20 @@ async 경계에서 느린 경고 sink·원 본문 수집을 기다리지 않는�
 자동 기회는 기존 create 완료 journal `registration_notice=consumed`, factory complete의 `registration_notices`가 소유한다.
 실제 송신 전 소비를 내구 확정하며, 이미 소비된 기회·과거 결과는 그대로 읽는다. 중단 직후 송신 0회도 가능하다.
 공통/대상 FD와 lease 반환 뒤 `xenova_registration_hook.automatic`이 로컬 FastAPI에만 1회 요청한다.
-factory는 first-boot main의 잠금 반환 후 별도 유한 helper를 띄운다. 최대 15초 안에서 `/openapi.json` 준비만 확인한 뒤 POST 1회다.
+factory는 first-boot main의 잠금 반환 후 `systemd-run --no-block`으로 원 UUID별 일시 job을 예약한다.
+job은 `Requires/After=xenova-dom0-manager.service`이며, API는 ASGI startup과 실제 listen 뒤
+`READY=1`을 보내는 `Type=notify`다. API보다 앞선 first-boot/autostart 구간에서 송신 예산을 소비하지 않는다.
+실제 job 실행 때 기존 15초 예산을 시작해 같은 UUID notify POST를 1회 시도한다. timeout 수치를 늘리지 않았다.
 등록/원 응답/autostart는 이를 기다리지 않는다. POST 뒤 조회·retry·다음 부팅 보충은 없다.
+job은 현재 등록 사건만 만들고, timer/enable/영속 spool이나 API startup의 등록 목록 순회는 없다.
+API 기동 실패·job 취소는 자동 재예약하지 않는다. 같은 boot의 dependency restart 재진입은
+`/run/xenova/registration-notices/factory-started-UUID`의 배타 생성으로 차단한다.
+이 일시 표식은 결과/등록 원본이 아니다. 재부팅에서 사라져도 원 factory progress의 내구 소비가 재송신을 막는다.
+API 부재·중단으로 결과 파일이 없으면 confirmed가 아니며, 필요하면 인증된 수동 POST로 확인한다.
 helper는 `/etc/xenova/dom0-manager.env`의 bind 주소/port와 기존 API token 공급만 사용한다.
 token의 unit 우선순위(manager.env가 token.env를 override)를 따르며 Spring 전용 파일은 읽지 않는다.
 API 프로세스 안의 create에서도 helper에 Spring token/URL이나 다른 서비스 자격을 환경으로 넘기지 않는다.
-helper도 4 slot으로 제한하며 결과는 기존 root-private `registration-notices/UUID.json`에 부가 기록한다.
+helper도 실행 시 4 slot으로 제한하며 결과는 기존 root-private `registration-notices/UUID.json`에 부가 기록한다.
 launch/기록 실패·start 실패·API 부재가 로컬 등록을 rollback하지 않는다.
 
 구형 `registration-notify` 명령은 계획/실행/JSON/별칭까지 제거했다. 하위 직접 Spring sender와
