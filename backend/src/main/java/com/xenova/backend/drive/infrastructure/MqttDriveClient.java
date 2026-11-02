@@ -80,6 +80,7 @@ public class MqttDriveClient implements SmartLifecycle, MqttCallbackExtended, Dr
         try {
             client.connect(connectOptions());
         } catch (MqttException exception) {
+            tracker.mqttDisconnected();
             log.warn("MQTT broker {} unavailable for the drive relay ({}), retrying in {}",
                     properties.brokerUrl(), exception.getMessage(), properties.reconnectInterval());
             scheduler.schedule(this::connect, properties.reconnectInterval().toMillis(), TimeUnit.MILLISECONDS);
@@ -107,9 +108,12 @@ public class MqttDriveClient implements SmartLifecycle, MqttCallbackExtended, Dr
         log.info("MQTT drive relay {} to {}", reconnect ? "reconnected" : "connected", serverUri);
         scheduler.execute(() -> {
             try {
+                // Advance the receive generation before SUBSCRIBE: retained control may arrive before it returns.
+                tracker.mqttConnected();
                 client.subscribe(TOPICS, QOS);
                 log.info("MQTT drive relay subscribed to {} topic filters", TOPICS.length);
             } catch (MqttException exception) {
+                tracker.mqttDisconnected();
                 log.error("MQTT drive subscribe failed", exception);
             }
         });
@@ -117,6 +121,7 @@ public class MqttDriveClient implements SmartLifecycle, MqttCallbackExtended, Dr
 
     @Override
     public void connectionLost(Throwable cause) {
+        tracker.mqttDisconnected();
         log.warn("MQTT drive relay connection lost: {}", cause == null ? "unknown" : cause.getMessage());
     }
 
@@ -150,6 +155,7 @@ public class MqttDriveClient implements SmartLifecycle, MqttCallbackExtended, Dr
     @Override
     public void stop() {
         running = false;
+        tracker.mqttDisconnected();
         scheduler.shutdownNow();
         recorder.shutdown();
         MqttClient current = client;
