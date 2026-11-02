@@ -50,7 +50,7 @@ public class SecurityConfig {
                             objectMapper.writeValue(response.getOutputStream(),
                                     ErrorResponse.of("FORBIDDEN", "접근 권한이 없습니다."));
                         }))
-                .addFilterBefore(vmRegistrationAuthenticationFilter, JwtAuthenticationFilter.class)
+                .addFilterBefore(vmRegistrationAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
