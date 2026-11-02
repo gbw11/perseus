@@ -1,18 +1,19 @@
 /**
- * VM 역할은 배포자가 확정한 UUID로만 붙인다. 기존 app_id 키는 통신 호환용이며 역할의 근거가 아니다.
+ * VM 역할은 백엔드가 주는 vm.role(DB vms.role, 배포자가 VM 등록·수정 때 지정)로만 붙인다.
+ * VM 이름·app_id 로 추정하지 않는다. 기존 app_id 키는 통신 호환용이며 역할의 근거가 아니다.
  * 두 Zephyr는 주 구동·백업으로 구분하고 AUTO/MANUAL 모드와 분리한다.
+ * 화면은 VM 을 고정 칸(VM A·B·C)이 아니라 API 목록 그대로 VM 이름으로 보여 준다.
  */
 import type { Health } from '@xenova/ui';
 import type { DriveApp, DriveMode, DriveState } from '../api/drive';
-import type { Vm } from '../api/types';
+import type { Vm, VmRole } from '../api/types';
 import { STATE_HEALTH } from '../format';
-import { configuredBindings } from './vmBindings';
 
 export type AppId = 'autonomous' | 'manual' | 'message-board';
 
 export interface Role {
   app: AppId;
-  vmLabel: string;
+  vmRole: VmRole;
   title: string;
   short: string;
   color: string;
@@ -20,50 +21,60 @@ export interface Role {
   driving: boolean;
 }
 
-const bound = configuredBindings();
 export const ROLES: Record<AppId, Role> = {
   autonomous: {
     app: 'autonomous',
-    title: bound.primary_drive ? 'VM1 · 주 구동' : 'autonomous 앱 · VM 역할 미확인',
-    short: bound.primary_drive ? '주 구동' : 'autonomous 앱',
+    vmRole: 'primary_drive',
+    title: '주 구동 VM',
+    short: '주 구동',
     color: 'var(--x-app-autonomous)',
     driving: true,
-    vmLabel: 'VM A',
   },
   manual: {
     app: 'manual',
-    title: bound.backup_drive ? 'VM2 · 백업' : 'manual 앱 · VM 역할 미확인',
-    short: bound.backup_drive ? '백업' : 'manual 앱',
+    vmRole: 'backup_drive',
+    title: '백업 VM',
+    short: '백업',
     color: 'var(--x-app-manual)',
     driving: true,
-    vmLabel: 'VM B',
   },
   'message-board': {
     app: 'message-board',
-    title: bound.interaction ? 'VM3 · Debian 인터랙션' : 'message-board 앱 · VM 역할 미확인',
-    short: bound.interaction ? '인터랙션' : 'message-board 앱',
+    vmRole: 'interaction',
+    title: '인터랙션 VM',
+    short: '인터랙션',
     color: 'var(--x-app-interaction)',
     driving: false,
-    vmLabel: 'VM C',
   },
 };
 
 export const ROLE_ORDER: AppId[] = ['autonomous', 'manual', 'message-board'];
 
-/** Explicit UUID role bindings only; legacy app IDs remain unchanged on the wire. */
-export function roleOf(vm: Vm, _drive: DriveState | null): Role | null {
-  const bindings = configuredBindings();
-  const app = ROLE_ORDER.find((id) => bindingId(id, bindings) === vm.vm_id.toLowerCase());
-  if (app) return ROLES[app];
-  return null;
+/** 역할 미지정 VM 의 카드 색 */
+export const UNASSIGNED_COLOR = 'var(--x-text-muted)';
+
+/** vm.role 로만 역할을 붙인다. 미지정(null)이면 null */
+export function roleOf(vm: Vm, _drive?: DriveState | null): Role | null {
+  if (!vm.role) return null;
+  return ROLE_ORDER.map((app) => ROLES[app]).find((role) => role.vmRole === vm.role) ?? null;
 }
 
-function bindingId(app: AppId, bindings = configuredBindings()): string | undefined {
-  return bindings[app === 'autonomous' ? 'primary_drive' : app === 'manual' ? 'backup_drive' : 'interaction'];
+export function vmOf(app: AppId, vms: Vm[] | undefined, _drive?: DriveState | null): Vm | undefined {
+  return vms?.find((vm) => vm.role === ROLES[app].vmRole);
 }
 
-export function vmOf(app: AppId, vms: Vm[] | undefined, drive: DriveState | null): Vm | undefined {
-  return vms?.find((vm) => roleOf(vm, drive)?.app === app);
+/** 화면 표시 순서: 주 구동 → 백업 → 인터랙션 → 역할 미지정(이름순) */
+export function sortVms(vms: Vm[]): Vm[] {
+  const rank = (vm: Vm) => {
+    const role = roleOf(vm);
+    return role ? ROLE_ORDER.indexOf(role.app) : ROLE_ORDER.length;
+  };
+  return [...vms].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+
+/** 앱 보고(drive.apps)는 app_id 키라서 vm_id 로 이 VM 의 보고를 찾는다 */
+export function appReportOf(vm: Vm, drive: DriveState | null): DriveApp | undefined {
+  return Object.values(drive?.apps ?? {}).find((app) => app?.vm_id === vm.vm_id);
 }
 
 export const MODE_LABEL: Record<DriveMode, string> = {
@@ -85,7 +96,7 @@ export const MODE_HEALTH: Record<DriveMode, Health> = {
  * 앱 칸 상태 배지 (화면 정의서 §3 배지 4종).
  * Xen 상태와 동일 UUID의 앱 heartbeat를 구분한다. 미수신은 경고색이며 라벨은 미확인으로 표시한다.
  */
-export function appHealth(_role: Role, vm: Vm | undefined, app: DriveApp | undefined): Health {
+export function appHealth(_role: Role | null, vm: Vm | undefined, app: DriveApp | undefined): Health {
   if (vm && vm.state !== 'running') return STATE_HEALTH[vm.state];
   if (!app) return vm ? 'recovering' : 'stopped';
   if (!vm || app.vm_id !== vm.vm_id) return 'recovering';
@@ -103,10 +114,10 @@ export function appHealthLabel(vm: Vm | undefined, app: DriveApp | undefined): s
 }
 
 /** "▶ 차량 제어 중" / "예비 — 준비됨" (화면 정의서 §3 준비 ≠ 제어권) */
-export function controlLabel(role: Role, drive: DriveState | null): string | null {
+export function controlLabel(role: Role, vm: Vm | undefined, drive: DriveState | null): string | null {
   const control = drive?.control;
   if (!role.driving || !control) return null;
-  const vmId = bindingId(role.app);
+  const vmId = vm?.vm_id.toLowerCase();
   if (!vmId || !control.active_vm_id || control.received_ago_ms >= 3000) return '활성 구동 VM 미확인';
   if (control.active_vm_id.toLowerCase() === vmId) return '▶ 활성 구동 · 주행 모드는 별도 표시';
   const app = drive.apps[role.app];

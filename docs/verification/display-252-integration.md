@@ -9,6 +9,7 @@
 - HDMI: dom0 수집기 → 254 정책 → `/display/monitor-1` 전체 상태 / `/display/monitor-2` UUID 상세 화면. 공통 Xenova 로고·디자인 토큰·상태 배지를 재사용한다.
 - VM 역할: VM1 주 구동(AUTO/MANUAL 모두), VM2 동일 Zephyr 백업, VM3 Debian 인터랙션. AI/인식은 Jetson이다. 역할·모드·앱 생존·Xen 실행 상태를 분리한다.
 - 기본/`display` 빌드는 Spring 로그인·주행 텔레메트리 Provider를 시작하지 않는다. `/split`·`/detail/:app`은 canonical 화면으로 이동하며 URL app 이름으로 선택 대상을 바꾸지 않는다. 실서버 Docker의 `live`/`legacy-live` 앱 미리보기는 명시적 설정으로 유지하고 안내문을 표시한다.
+- (2026-11-02 변경) 관리 콘솔은 이제 `VITE_VM_ROLE_BINDINGS` 대신 백엔드 VM 응답의 `role`(DB `vms.role`)로만 역할을 붙이고, VM 카드는 VM 이름으로 표시한다. 아래는 당시 기록이다.
 - 관리 콘솔은 `VITE_VM_ROLE_BINDINGS`의 명시적 UUID가 있을 때만 역할을 붙인다. 값이 없거나 잘못되면 VM 이름과 역할 미확인으로 남긴다. `autonomous`·`manual` 앱/이름으로 주·백업을 추측하지 않는다. mock은 별도 합성 UUID만 사용한다.
 - 활성 구동 표시는 `active_vm_id`와 유효기간을 사용한다. 앱 생존은 일치하는 VM UUID의 heartbeat로 확인하며, 명령이 없다는 이유만으로 백업 VM을 오류/복구 중이라고 판단하지 않는다. 앱 생존을 미러링 완료·주행 준비로 표시하지 않는다.
 - Spring 이벤트 타입 및 프론트 분류에 recovery.recovered/cancelled를 추가했다. completed는 새 Xen 실행 관측으로 표현하고 앱 준비·주행권은 별도 확인한다. 종료 이벤트는 오래된 복구 표시 마커만 해제하고 주행 모드를 변경하거나 정상 상태를 만들어내지 않는다.
