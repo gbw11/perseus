@@ -64,19 +64,19 @@ xenova:
   template-catalog:
     templates:
       - template-id: ubuntu-24.04-arm64
-        version: "1.0.0"
+        version: "1.0.2"
         display-name: Ubuntu 24.04
         min-memory-mib: 512
         guest-kind: linux
       - template-id: debian-13-arm64
-        version: "1.0.0"
+        version: "1.0.2"
         display-name: Debian 13
         min-memory-mib: 256
         guest-kind: linux
       - template-id: zephyr-xenvm-starter-arm64
-        version: "1.0.0"
-        display-name: Zephyr Starter 1.0.0
-        # 플랫폼 starter 1.0.0은 1 vCPU / 16MiB 고정 프로필이다.
+        version: "1.1.0"
+        display-name: Zephyr Network Starter 1.1.0
+        # 플랫폼 Network Starter 1.1.0은 1 vCPU / 16MiB 고정 프로필이다.
         min-memory-mib: 16
         guest-kind: zephyr
   agent:
@@ -115,6 +115,9 @@ xenova:
     service-token: ${DOM0_MANAGER_SERVICE_TOKEN:}
     connect-timeout: ${DOM0_MANAGER_CONNECT_TIMEOUT:2s}
     query-timeout: ${DOM0_MANAGER_QUERY_TIMEOUT:6s}
-    # Platform graceful stop can wait up to 90s; keep the outer HTTP budget longer.
-    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:100s}
+    # Keep long-running VM commands connected for up to 15 minutes.
+    command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:15m}
     retry-backoff: ${DOM0_MANAGER_RETRY_BACKOFF:500ms}
+  vm-registration:
+    # Platform registration sender authentication; separate from user JWT and dom0-manager credentials.
+    service-token: ${VM_REGISTRATION_SERVICE_TOKEN:}

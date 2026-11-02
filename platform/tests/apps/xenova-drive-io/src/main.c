@@ -191,6 +191,16 @@ int main(void) {
     assert(!xd_io_report("events","app.readiness","{\"progress_seq\":\"2\"}",2,&snapshot));
     if(is("readiness-expire"))k_sleep(K_MSEC(350));
    }
+   if(is("producer-readiness")||is("producer-heartbeat")){
+    bool ready=is("producer-readiness");int64_t lifetime=ready?300:1000;
+    const char *type=ready?"app.readiness":"app.heartbeat";
+    /* Receipt by the coordinator must not renew the actual producer's age. */
+    k_sleep(K_MSEC(lifetime+1));int64_t now=k_uptime_get();
+    assert(xd_io_report_at("events",type,"{}",1,&snapshot,now+1)==-EINVAL);
+    assert(xd_io_report_at("events",type,"{}",1,&snapshot,now-lifetime)==-ETIME);
+    assert(!xd_io_report_at("events",type,"{}",1,&snapshot,now-lifetime+50));
+    k_sleep(K_MSEC(70));
+   }
    if(is("expire"))k_sleep(K_MSEC(20));
    unfreeze();k_sleep(K_MSEC(120));
    if(is("heartbeat")){assert(beats==1);k_sleep(K_MSEC(100));assert(beats==1);}
@@ -210,6 +220,8 @@ int main(void) {
  if(is("heartbeat-expire"))assert(!beats&&!stats.event_dropped&&stats.heartbeat_dropped==1&&stats.heartbeat_expired==1);
  if(is("readiness"))assert(readies==1&&stats.readiness_replaced==1&&!stats.heartbeat_replaced);
  if(is("readiness-expire"))assert(!readies&&stats.readiness_dropped==1&&stats.readiness_expired==1&&!stats.heartbeat_dropped&&!stats.event_dropped);
+ if(is("producer-readiness"))assert(!readies&&stats.readiness_expired==1&&!stats.event_dropped);
+ if(is("producer-heartbeat"))assert(!beats&&stats.heartbeat_expired==1&&!stats.event_dropped);
  if(is("reconnect-input-first"))assert(sends==1);
  candidate(9);assert(xd_io_command(&command)==-ESHUTDOWN);
  assert(xd_io_start(&client,"control","input")==-ESHUTDOWN);

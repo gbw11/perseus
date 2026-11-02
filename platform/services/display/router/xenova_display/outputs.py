@@ -31,6 +31,8 @@ class RuntimeConfig(BaseModel):
     feed_origin: str = "http://127.0.0.1:8082"
     outputs: list[Output] = Field(min_length=2, max_length=2)
     fps: int = Field(default=5, ge=1, le=15)
+    stream_width: int = Field(default=1280, ge=640, le=1920, multiple_of=2)
+    stream_height: int = Field(default=720, ge=480, le=1080, multiple_of=2)
     jpeg_quality: int = Field(default=7, ge=2, le=20)
 
     @model_validator(mode="after")

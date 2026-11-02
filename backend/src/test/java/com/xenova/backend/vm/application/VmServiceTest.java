@@ -236,12 +236,12 @@ class VmServiceTest {
     }
 
     @Test
-    void stopOfAVmThatIsAlreadyOffDoesNothing() {
+    void stopWithoutRuntimeStillForwardsTheStopIntent() {
         when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
         when(vmControlPort.find("vm-1")).thenReturn(Optional.empty());
 
         assertThat(service.stop("vm-1").state()).isEqualTo(VmState.STOPPED);
-        verify(vmControlPort, never()).stop(anyString());
+        verify(vmControlPort).stop("vm-1");
         verify(stateTracker, never()).changedByUser(anyString(), any(), any(), anyString());
     }
 

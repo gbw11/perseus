@@ -7,6 +7,14 @@ Mosquitto를 dom0 이미지에 포함하고, 계정·ACL은 데이터 파티션�
 
 ## 구성과 원본
 
+일반 VM 생성·factory 등록의 실제 공급은 [VM 공통 provisioning 계약](../../../docs/contracts/vm-provisioning-v1.md)에 연결했다.
+`ensure_accounts`는 같은 UUID 자격을 보존하고 필요한 신규 계정만 기존 writer로 준비한다.
+명시 폐기한 계정은 revoked fence로 자동 부활을 막는다. 구형 writer와 새 fence를 혼합하지 않는다.
+해시 전/후의 staging을 원 암호로 재개하며 손상/소실을 빈 저장소로 취급하지 않는다.
+Linux Agent의 실제 v2 송신과 drive/link 생산·소비를 자기 VM/승인 Gateway ACL에 연결했다.
+자격 확보·broker 반영·guest 전달·인증·건강은 다른 상태다. package library는
+`xenova-mqtt-broker-provider`, 기존 서비스·활성화는 main package가 소유한다.
+
 | 파일·구성 | 역할 |
 |---|---|
 | `etc/policy.json` | 계정 프로필과 허용 토픽의 공통 원본. 비밀번호 없음 |
@@ -140,6 +148,26 @@ bash scripts/make-passwd.sh
 docker compose -f local/docker-compose.yml --env-file local/.env up -d
 bash scripts/check.sh
 ```
+
+로컬 개발 계정의 비밀번호는 `local/.env`의 `XENOVA_MQTT_DEV_PASSWORD`입니다.
+보드에서 발급한 계정·비밀번호와는 별개이며, 포트를 변경했다면 아래 기본값도 바꿉니다.
+
+| 소비자 | 기본 접속 주소 | 계정·설정 |
+|---|---|---|
+| 백엔드 | `tcp://127.0.0.1:1883` | `MQTT_BROKER_URL`, `MQTT_USERNAME=backend`, `MQTT_PASSWORD` |
+| VM Agent | `127.0.0.1:1883` | username은 VM UUID. `XENOVA_AGENT_BROKER_HOST/PORT/USERNAME/PASSWORD` |
+| legacy 앱·Jetson | `127.0.0.1:1883` | 앱 계정 `autonomous`·`manual`·`interaction`, Jetson 계정 `perception` |
+| 공통 Zephyr 주행 앱 | 내부 브리지의 `192.168.77.1:1883` | netfront 직접 MQTT, username은 VM UUID. 로컬 시험에서는 broker 주소를 별도 지정 |
+| v2 Publisher | 시험·실행 환경의 broker 주소 | `telemetry-UUID`, v1 계정과 구분 |
+| Gateway / Recovery Worker | `127.0.0.1:1883` | 각각 `gateway` / `dom0-server` |
+| 확인·모니터링 | `127.0.0.1:1883` | `observer`는 v1 읽기, `telemetry-reference-subscriber`는 v2 읽기 전용 |
+| 브라우저 | 백엔드 중계 | `ws://127.0.0.1:9001`은 개발 확인용 |
+
+Recovery Worker의 보드별 인증정보는 `/etc/xenova/recovery-worker.env`에 적용합니다.
+설정 항목과 서비스 사용법은 [dom0-manager 안내](../../services/dom0-manager/README.md)를 따릅니다.
+로컬 계정·ACL을 변경할 때는 `policy.json`을 수정한 뒤 생성·검사·passwd 재생성 순서로
+반영하며 `etc/accounts`를 별도로 편집하지 않습니다. 로컬 broker 종료는
+`docker compose -f local/docker-compose.yml --env-file local/.env down`입니다.
 
 로컬 예시 UUID 두 개는 개발용 생성물에만 포함됩니다. WebSocket 9001은 개발 경로입니다.
 실제 인증·구독·독립 수신은 서비스 active나 SUBACK/PUBACK만으로 대체하지 않습니다.

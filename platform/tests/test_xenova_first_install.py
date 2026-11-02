@@ -654,16 +654,17 @@ class NativeCreateTest(unittest.TestCase):
     def test_native_execute_delegates_once_to_shared_creator_without_starting_guest(self):
         case=self.scenario()
         import prepare_instance as backend
-        def create(args,**kwargs):
-            r=kwargs['record_override']
-            fixture(case.data,r)
-        with patch.object(backend,'make_instance',side_effect=create) as creator,patch.object(case.p,'start') as start:
+        from test_xenova_spring_followup import FollowupFixture
+        boundary=FollowupFixture()
+        boundary.m=case.m
+        with boundary.linux_boundaries(),patch.object(backend,'make_instance',wraps=backend.make_instance) as creator,patch.object(case.p,'start') as start:
             result=case.p.create(self.arguments(case,True),{})
         self.assertTrue(result['ok'],result);creator.assert_called_once();start.assert_not_called()
         record_override=creator.call_args.kwargs['record_override']
         self.assertEqual(record_override['template'],'source')
         self.assertFalse(record_override['autostart'])
         self.assertEqual(record_override['uuid'],result['data']['vm_id'])
+        self.assertIs(creator.call_args.kwargs['private'],True)
 
     def test_shared_creator_refuses_linked_output_parent_before_storage_or_copy(self):
         temp = tempfile.TemporaryDirectory()

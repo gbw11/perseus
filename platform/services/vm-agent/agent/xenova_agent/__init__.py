@@ -5,4 +5,4 @@ metrics(MQTT-03)를 dom0 Mosquitto 로 보낸다. 봉투·토픽·QoS·재연결
 이 패키지는 수집과 주기·수명을 정한다.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

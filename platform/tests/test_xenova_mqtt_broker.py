@@ -101,6 +101,7 @@ class Contracts(unittest.TestCase):
         for stored in (True, None):
             errors = io.StringIO()
             response = {'stored': True, 'configured': True} if stored else OSError('injected storage failure')
+            # 실제 root 실행 권한은 별도 시험 경계다. 여기서는 저장/재적용 결과만 주입한다.
             with patch.object(broker.os, 'geteuid', return_value=0), \
                  patch.object(broker, 'change', side_effect=response if stored is None else None,
                               return_value=response), patch.object(broker, 'reload_broker',

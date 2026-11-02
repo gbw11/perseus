@@ -12,8 +12,8 @@
   },
   "rtos_templates": [
     {
-      "template_dir": "/absolute/xenova-template-releases/zephyr/xenova-zephyr-drive-common/1.2.0-drive-fbb73530ac84",
-      "template_manifest_sha256": "REPLACE_WITH_COMMON_DRIVE_FIRMWARE_JSON_SHA256"
+      "template_dir": "/absolute/xenova-template-releases/zephyr/xenova-zephyr-drive-lattice-lab-1.0.0/1.0.0-lab.1",
+      "template_manifest_sha256": "893b3e6ff2298d87dc41f1456bfbcb1ed9b30c21b97d929a6403a2e23bb5d87f"
     }
   ],
   "linux_templates": [

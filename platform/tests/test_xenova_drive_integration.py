@@ -174,6 +174,39 @@ class DriveAnalysisTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "terminal result"):
             self.analyzer.analyze(self.root)
 
+    def test_unoffered_stop_completion_does_not_require_a_transmission(self):
+        self.async_fixture()
+        path = self.root / 'manual.stdout'
+        lines = []
+        for line in path.read_text().splitlines():
+            if line.startswith('XD_ROW '):
+                row = json.loads(line[7:])
+                if row[6] == 10:
+                    row[20] = 0
+                line = 'XD_ROW ' + json.dumps(row)
+            elif line.startswith('XD_SEND ') and json.loads(line[8:])[0] == 10:
+                continue
+            elif line.startswith('XD_IO '):
+                io = json.loads(line[6:]);io['delivery_rows'] -= 1
+                line = 'XD_IO ' + json.dumps(io)
+            lines.append(line)
+        path.write_text('\n'.join(lines))
+        _, _, rows = self.analyzer.source(path)
+        self.assertFalse(rows[9]['mailbox_offered'])
+        self.assertIsNone(rows[9]['delivery'])
+
+    def test_duplicate_page_rows_cannot_satisfy_full_source_capture(self):
+        path = self.root / 'manual.stdout'
+        lines = path.read_text().splitlines()
+        first = next(line for line in lines if line.startswith('XD_ROW '))
+        for index, line in enumerate(lines):
+            if line.startswith('XD_ROW ') and json.loads(line[7:])[6] == 10:
+                lines[index] = first
+                break
+        path.write_text('\n'.join(lines))
+        with self.assertRaisesRegex(ValueError, 'duplicate source completion'):
+            self.analyzer.source(path)
+
     def test_calculation_complete_does_not_hide_unconfirmed_transmissions(self):
         self.async_fixture()
         path = self.root / "manual.stdout"

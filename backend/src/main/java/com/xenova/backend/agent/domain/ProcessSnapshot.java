@@ -11,7 +11,7 @@ import java.util.List;
 
 // Latest top-process list sent with the metrics, served later by REST-13. One row per VM.
 @Entity
-@Table(name = "process_snapshots")
+@Table(name = "vm_process_snapshots")
 public class ProcessSnapshot {
 
     @Id

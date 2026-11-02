@@ -1,0 +1,48 @@
+{
+  "observed_at": "2026-10-27T08:25:44.713045+00:00",
+  "scope": "temporary fbdev pixel path diagnostic, not Chromium or actual product UI",
+  "device": "/dev/fb1",
+  "vm_changed": false,
+  "vt_changed": false,
+  "service_restarted": false,
+  "driver_changed": false,
+  "packages_installed": false,
+  "original_sha256": "51b4477270a53a7e4a2c2e830008df633b9d317d14ad2f64f095eabee9fcac13",
+  "written_sha256": "24904ac60f677a3e4a21b84485686df09b8827343ec401d3d3ee6deeed0293de",
+  "readback_sha256": "24904ac60f677a3e4a21b84485686df09b8827343ec401d3d3ee6deeed0293de",
+  "readback_matches_written": true,
+  "capture_metadata": {
+    "xres": 1824,
+    "yres": 984,
+    "xoffset": 0,
+    "yoffset": 0,
+    "line_length": 7296,
+    "channels": {
+      "red": {
+        "offset": 16,
+        "length": 8,
+        "msb_right": 0
+      },
+      "green": {
+        "offset": 8,
+        "length": 8,
+        "msb_right": 0
+      },
+      "blue": {
+        "offset": 0,
+        "length": 8,
+        "msb_right": 0
+      },
+      "transp": {
+        "offset": 24,
+        "length": 8,
+        "msb_right": 0
+      }
+    }
+  },
+  "hold_seconds": 45,
+  "restored_sha256": "51b4477270a53a7e4a2c2e830008df633b9d317d14ad2f64f095eabee9fcac13",
+  "restored_original_pixels": true,
+  "local_capture": "C:\\Users\\SSAFY\\Desktop\\자율프로젝트\\outputs\\display-253\\board-framebuffer-pattern-20261027.png",
+  "physical_monitor_confirmation": "pending human observation; framebuffer readback alone is not physical proof"
+}

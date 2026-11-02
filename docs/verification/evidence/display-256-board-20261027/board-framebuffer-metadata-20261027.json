@@ -1,0 +1,86 @@
+{
+  "devices": [
+    {
+      "device": "/dev/fb0",
+      "id": "BCM2708 FB",
+      "smem_start": 1045508096,
+      "smem_len": 7179264,
+      "visual": 2,
+      "line_length": 7296,
+      "xres": 1824,
+      "yres": 984,
+      "xres_virtual": 1824,
+      "yres_virtual": 984,
+      "xoffset": 0,
+      "yoffset": 0,
+      "bits_per_pixel": 32,
+      "grayscale": 0,
+      "channels": {
+        "red": {
+          "offset": 0,
+          "length": 8,
+          "msb_right": 0
+        },
+        "green": {
+          "offset": 8,
+          "length": 8,
+          "msb_right": 0
+        },
+        "blue": {
+          "offset": 16,
+          "length": 8,
+          "msb_right": 0
+        },
+        "transp": {
+          "offset": 24,
+          "length": 8,
+          "msb_right": 0
+        }
+      },
+      "tty1_framebuffer": 0
+    },
+    {
+      "device": "/dev/fb1",
+      "id": "simple",
+      "smem_start": 1045508096,
+      "smem_len": 7179264,
+      "visual": 2,
+      "line_length": 7296,
+      "xres": 1824,
+      "yres": 984,
+      "xres_virtual": 1824,
+      "yres_virtual": 984,
+      "xoffset": 0,
+      "yoffset": 0,
+      "bits_per_pixel": 32,
+      "grayscale": 0,
+      "channels": {
+        "red": {
+          "offset": 16,
+          "length": 8,
+          "msb_right": 0
+        },
+        "green": {
+          "offset": 8,
+          "length": 8,
+          "msb_right": 0
+        },
+        "blue": {
+          "offset": 0,
+          "length": 8,
+          "msb_right": 0
+        },
+        "transp": {
+          "offset": 24,
+          "length": 8,
+          "msb_right": 0
+        }
+      },
+      "tty1_framebuffer": 0,
+      "capture_sha256": "139dba3d9374ff241efe61fc19d406273db3aeed16ee056546f076058562124a"
+    }
+  ],
+  "writes": false,
+  "same_backing_address": true,
+  "local_capture": "C:\\Users\\SSAFY\\Desktop\\자율프로젝트\\outputs\\display-253\\board-framebuffer-before-20261027.png"
+}

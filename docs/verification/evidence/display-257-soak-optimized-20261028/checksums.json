@@ -1,0 +1,13 @@
+{
+  "idle-settings.json": "acedacd158abd6761cae485a2535464b8a23b053858221ff00a494adf1d08273",
+  "monitor-1-first.jpg": "7d7e7e785412dfd9e4d37622bf2edbf6d406d38a903658487d9978080ff697c0",
+  "monitor-1-last.jpg": "7d7e7e785412dfd9e4d37622bf2edbf6d406d38a903658487d9978080ff697c0",
+  "monitor-2-first.jpg": "9069d0b8ae78053dee23865947efe251edc6e0da3a0d29c1d63988e7af2c8843",
+  "monitor-2-last.jpg": "9069d0b8ae78053dee23865947efe251edc6e0da3a0d29c1d63988e7af2c8843",
+  "postflight.json": "0849f1898e9f5d5901a78ebf8edb97527ba52620120996d17aaa0453618e121d",
+  "remote-source.py.gz": "0f0bf3b4717e683428f893422d5cedc16a67c414f4180b46550f832b9b97413f",
+  "samples.json.gz": "0c3cb13abc2851741f875ea6520aca090be0cfc5fa4a619c7dc549c5e5fab366",
+  "summary.json": "f96fe70790e8f41df9fcdedd2739abc12a189d092476475cfdbc96a94d5f83fa",
+  "tested-source-sha256.json": "b68d0125f82ecb295cf80c1e5a01e33857d08300b90ec53181ebd500d22bf9d9",
+  "visual-review.json": "25dfd9a134f52ba858dfab461c8daf72a09bd6d993b639b8c7e6ac4e4e4ae293"
+}

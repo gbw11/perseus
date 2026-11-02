@@ -81,6 +81,7 @@ class GatewayRunner:
         self._encoder = FrameEncoder()
         self.machine: ControlMachine | None = None
         self.dropped_queue_full = 0
+        self.rejected_commands = 0
 
     # --- 입력 -----------------------------------------------------------------
 
@@ -98,7 +99,8 @@ class GatewayRunner:
             self._queue.put_nowait((self._clock(), message))
         except queue.Full:
             self.dropped_queue_full += 1
-            log.warning("입력 큐 가득 참, 버림 %s", message.topic)
+            if self.dropped_queue_full & (self.dropped_queue_full-1)==0:
+                log.warning("입력 큐 가득 참, 누적 버림=%d", self.dropped_queue_full)
 
     def _feed(self, t: float, message: Any) -> None:
         machine = self.machine
@@ -113,14 +115,16 @@ class GatewayRunner:
                     return
             if message.type == "drive.command":
                 if not machine.on_command(app_id, vm_id, message.payload, t):
-                    log.warning("버림 %s drive.command: payload 형식 %s", app_id, message.payload)
+                    self.rejected_commands+=1
+                    if self.rejected_commands & (self.rejected_commands-1)==0:
+                        log.warning("버림 %s drive.command: invalid payload 누적=%d", app_id, self.rejected_commands)
             elif message.type == "app.heartbeat":
                 machine.on_heartbeat(app_id, vm_id, message.payload, t)
         elif message.type == RESUME_REQUESTED and (app_id == MESSAGE_BOARD or message.topic == CONSOLE_RESUME):
             # 메시지 보드(MQTT-06)와 운영자 콘솔(MQTT-13) 어느 쪽에서 와도 같다
             requested_by = message.payload.get("requested_by")
             requested_by = requested_by if isinstance(requested_by, str) else None
-            log.info("재개 요청 수신 %s requested_by=%s", message.topic, requested_by)
+            log.info("재개 요청 수신 requested_by=%s", requested_by[:96] if requested_by else None)
             machine.on_resume(t, requested_by)
 
     def _drain(self, first: tuple[float, Any] | None = None) -> None:
@@ -151,9 +155,10 @@ class GatewayRunner:
                     payload["detected_at"] = utc_now()
                 self._client.publish(topics.app_events(EVENT_APP_ID), action.type, payload)
             elif isinstance(action, Measure):
-                log.info("MEASURE event=%s %s", action.event, " ".join(
-                    f"{k}={v:.6f}" if isinstance(v, float) and k.endswith("t") else f"{k}={v}"
-                    for k, v in action.fields.items()))
+                if log.isEnabledFor(logging.INFO):
+                    log.info("MEASURE event=%s %s", action.event, " ".join(
+                        f"{k}={v:.6f}" if isinstance(v, float) and k.endswith("t") else f"{k}={v}"
+                        for k, v in action.fields.items()))
 
     # --- 루프 -----------------------------------------------------------------
 

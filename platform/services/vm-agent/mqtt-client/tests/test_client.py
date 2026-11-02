@@ -64,6 +64,38 @@ def client(monkeypatch):
     c._fake = fake
     return c
 
+def test_trusted_app_guard_precedes_seq_and_latest_mutation(client):
+    from uuid import uuid4
+    from xenova_mqtt.drive_binding import BindingCache
+    from xenova_mqtt import topics
+    vm,host,boot,transport,automatic,manual=[str(uuid4()) for _ in range(6)]
+    cache=BindingCache(host,clock=lambda:100.)
+    row=dict(status='observed',profile='warm-drive-1',execution_id=str(uuid4()),boot_id=boot,
+        app_instance_id=transport,app_instances={'autonomous':automatic,'manual':manual},
+        intent_revision=1,lifecycle_generation=1,domid=1,xen_unique_id='1',observed_monotonic_ms=100000)
+    cache.install(dict(schema_version='1.0-drive-bindings',host_boot_id=host,
+        observed_monotonic_ms=100000,expires_monotonic_ms=103000,vms={vm:row}))
+    client.set_receive_guard(cache.guard((vm,)))
+    topic=topics.vm_app_events(vm,'autonomous');received=[];client.subscribe(topic,received.append,qos=0)
+    def deliver(instance,seq,retained=False):
+        envelope=env.build(Identity(vm_id=vm,app_id='autonomous',boot_id=boot,agent_instance_id=instance),
+            'drive.command',dict(generation=42,v_mps=.1,steer_rad=0),seq)
+        client._on_message(client._fake,None,SimpleNamespace(topic=topic,payload=json.dumps(envelope).encode(),retain=retained))
+    deliver(automatic,10);assert len(received)==1
+    # An unseen old session must not reset seq, permitting a duplicate of the
+    # accepted current command to appear as freshly received work.
+    deliver(str(uuid4()),1);deliver(automatic,10);assert len(received)==1
+    deliver(automatic,999,True);deliver(automatic,11);assert len(received)==2
+    assert client.latest(topic).envelope['seq']==11
+    current=cache.current(vm);current['app_instances']['autonomous']=str(uuid4())
+    assert cache.accepts(vm,boot,automatic,100.,app='autonomous')  # immutable cache copy
+    row['app_instances']['autonomous']=str(uuid4())
+    cache.install(dict(schema_version='1.0-drive-bindings',host_boot_id=host,
+        observed_monotonic_ms=100000,expires_monotonic_ms=103000,vms={vm:row}))
+    deliver(automatic,1000);deliver(row['app_instances']['autonomous'],1)
+    assert len(received)==3 and received[-1].envelope['agent_instance_id']==row['app_instances']['autonomous']
+    assert not cache.accepts(vm,boot,None,100.)
+
 
 def test_subscribed_requires_connack_and_suback(client):
     client.subscribe("xenova/v1/vms/+/heartbeat", qos=1)
@@ -259,3 +291,21 @@ def test_connections_counts_successful_connects_so_a_fast_reconnect_is_visible(c
     assert client.connections == 2 and client.connected
     client._on_connect(client._fake, None, {}, 135)  # 거부된 CONNACK 은 세지 않는다
     assert client.connections == 2
+
+
+def test_connection_attempts_counts_every_connack_including_refusals(client):
+    assert client.connection_attempts == 0
+    client._on_connect(client._fake, None, {}, 0)
+    client._on_connect(client._fake, None, {}, 135)
+    assert client.connection_attempts == 2 and client.connections == 1
+
+
+def test_publish_raw_sends_the_bytes_as_given_without_a_v1_envelope(client):
+    topic = "xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/heartbeat"
+    client.publish_raw(topic, b'{"schema_version":"2.1"}', qos=0, retain=False, wait_s=0)
+    assert client._fake.published[-1] == (topic, b'{"schema_version":"2.1"}', 0, False)
+    with pytest.raises(TypeError):
+        client.publish_raw(topic, {"schema_version": "2.1"}, qos=0, retain=False)
+    client._fake.publish_rc = 4  # MQTT_ERR_NO_CONN
+    with pytest.raises(PublishError):
+        client.publish_raw(topic, b"{}", qos=1, retain=True, wait_s=0)

@@ -1,0 +1,13 @@
+{
+  "board_dual_latency.py.gz": "e0b1b47af64eedaa6ed5c6ba35fee0a75a5cb594b1920d54635818af873d86ef",
+  "monitor-1-first.jpg": "9069d0b8ae78053dee23865947efe251edc6e0da3a0d29c1d63988e7af2c8843",
+  "monitor-1-last.jpg": "4a05da9acfb0c0bed6d940953006478e4ecb9072264c476fe81de2068aeca45f",
+  "monitor-2-first.jpg": "9069d0b8ae78053dee23865947efe251edc6e0da3a0d29c1d63988e7af2c8843",
+  "monitor-2-last.jpg": "4a05da9acfb0c0bed6d940953006478e4ecb9072264c476fe81de2068aeca45f",
+  "postflight.json": "818538bf3d4907875986f13a5f0bc92a0edb43c415c255187bc47daa73dbc811",
+  "remote-source.py.gz": "7cd4972d6589573f8e6bfd949e1a5e3117a1a8b1d72f610f129b5c422486bcf4",
+  "samples.json.gz": "75e8ad64fb7a4426aa92fa9ea434ce7f704fd24a91a4896eacd10d8fd522e218",
+  "summarize_dual_latency.py.gz": "8a99c0fb599faa8a08928dace0beefe0931c0241b381ee55c6611223dd896eca",
+  "summary.json": "9366937edc1b732b7cd277198d363095f344334088b7c218c3c5766d888db98f",
+  "tested-source-sha256.json": "ee74d5c3109d8c151dc3fd38611cd579d6473f6e6958b0ca3ff5ba981ecc4718"
+}

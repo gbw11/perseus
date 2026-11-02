@@ -18,7 +18,9 @@ import java.util.Map;
 @Entity
 @Table(name = "vm_events", indexes = {
         @Index(name = "idx_vm_events_vm_id", columnList = "vm_id"),
-        @Index(name = "idx_vm_events_recorded_at", columnList = "recorded_at")})
+        @Index(name = "idx_vm_events_recorded_at", columnList = "recorded_at"),
+        @Index(name = "idx_vm_events_operation_id", columnList = "operation_id"),
+        @Index(name = "idx_vm_events_correlation_id", columnList = "correlation_id")})
 public class VmEvent {
 
     // Insertion order. after_event_id resumes from it, because recorded_at can repeat.
@@ -40,9 +42,11 @@ public class VmEvent {
     @Column(name = "vm_id", length = 36)
     private String vmId;
 
-    // Reserved: VM operations are synchronous for now, so no operation id exists yet.
     @Column(name = "operation_id", length = 36)
     private String operationId;
+
+    @Column(name = "correlation_id", length = 36)
+    private String correlationId;
 
     @Column(name = "occurred_at", nullable = false)
     private Instant occurredAt;
@@ -62,6 +66,8 @@ public class VmEvent {
             EventType type,
             EventSeverity severity,
             String vmId,
+            String operationId,
+            String correlationId,
             Instant occurredAt,
             Instant recordedAt,
             Map<String, Object> payload) {
@@ -69,6 +75,8 @@ public class VmEvent {
         this.type = type;
         this.severity = severity;
         this.vmId = vmId;
+        this.operationId = operationId;
+        this.correlationId = correlationId;
         this.occurredAt = occurredAt;
         this.recordedAt = recordedAt;
         this.payload = payload;
@@ -96,6 +104,10 @@ public class VmEvent {
 
     public String getOperationId() {
         return operationId;
+    }
+
+    public String getCorrelationId() {
+        return correlationId;
     }
 
     public Instant getOccurredAt() {

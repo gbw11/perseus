@@ -92,6 +92,19 @@ static void on_publish(struct xm_zclient *c, const struct mqtt_publish_param *p)
 	char topic[XM_TOPIC_MAX];
 	size_t len = p->message.payload.len;
 	size_t tlen = p->message.topic.topic.size;
+	if(c->binary.topic&&tlen==strlen(c->binary.topic)&&!memcmp(p->message.topic.topic.utf8,c->binary.topic,tlen)){
+		/* An oversized declaration closes only this connection, rather than
+		 * draining an attacker-controlled unbounded body before control work. */
+		if(!c->binary.buffer||len>c->binary.capacity){c->payload_rc=-EMSGSIZE;return;}
+		if((c->payload_rc=mqtt_readall_publish_payload(&c->mqtt,c->binary.buffer,len))<0)return;
+		c->received++;
+		if(p->message.topic.qos==MQTT_QOS_1_AT_LEAST_ONCE){
+			struct mqtt_puback_param ack={.message_id=p->message_id};(void)mqtt_publish_qos1_ack(&c->mqtt,&ack);
+		}
+		if(p->retain_flag||p->message.topic.qos!=MQTT_QOS_0_AT_MOST_ONCE||!c->binary.receive||
+		   c->binary.receive(c->binary.context,c->binary.buffer,len,k_uptime_get()))c->dropped++;
+		return;
+	}
 	bool fits = len <= sizeof(c->payload) && tlen < sizeof(topic);
 
 	/* 큰 메시지도 소켓에서 끝까지 읽어 내야 다음 패킷을 읽을 수 있다 */
@@ -144,11 +157,16 @@ static void on_publish(struct xm_zclient *c, const struct mqtt_publish_param *p)
 	}
 	for (int i = 0; i < c->nsubs; i++) {
 		if (xm_topic_matches(c->subs[i].filter, topic)) {
+			int64_t received = k_uptime_get();
+			if (c->accept_input && c->accept_input(c->accept_context, topic, &env, received)) {
+				c->dropped++;
+				return;
+			}
 			struct xm_zlatest *slot = latest_slot(c, topic, true);
 
 			memcpy(slot->data, c->payload, len);
 			slot->len = len;
-			slot->rx_ms = k_uptime_get();
+			slot->rx_ms = received;
 			break;
 		}
 	}
@@ -174,6 +192,7 @@ static void on_event(struct mqtt_client *m, const struct mqtt_evt *evt)
 		LOG_INF("MQTT 연결 (구독 %d개 복구)", c->nsubs);
 		break;
 	case MQTT_EVT_DISCONNECT:
+		if(evt->result)c->last_io_rc=evt->result;
 		LOG_WRN("MQTT 연결 끊김, 재연결 대기");
 		schedule_retry(c);
 		break;
@@ -325,6 +344,7 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 		c->payload_rc = 0;
 		rc = mqtt_input(&c->mqtt);
 		if (c->payload_rc) { rc = c->payload_rc; }
+		if(rc<0)c->last_io_rc=rc;
 		if (rc < 0 && c->socket_open) {
 			c->last_io_rc = rc;
 			LOG_WRN("MQTT 수신 오류 %d", rc);
@@ -345,7 +365,8 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 	return 0;
 }
 
-int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type, const char *payload_json)
+static int publish_as(struct xm_zclient *c,const char *topic,const char *type,const char *payload_json,
+                      const struct xm_identity *identity)
 {
 	struct xm_zpub *pub = NULL;
 	char message_id[12], at[32];
@@ -367,7 +388,7 @@ int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type
 	/* message_id 는 seq 와 별개인 단조 카운터 (계약 §2 펌웨어 예외, 설계 §6 D3) */
 	snprintf(message_id, sizeof(message_id), "%u", ++c->message_counter);
 	sent_at(at);
-	int len = xm_envelope_encode(c->out, sizeof(c->out), &c->id, topic, type, pub->seq + 1, message_id, at,
+	int len = xm_envelope_encode(c->out, sizeof(c->out), identity, topic, type, pub->seq + 1, message_id, at,
 				     payload_json);
 
 	if (len < 0) {
@@ -398,6 +419,20 @@ int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type
 		schedule_retry(c);
 	}
 	return rc;
+}
+
+int xm_zclient_publish(struct xm_zclient *c,const char *topic,const char *type,const char *payload)
+{ return publish_as(c,topic,type,payload,&c->id); }
+
+int xm_zclient_publish_as_until(struct xm_zclient *c,const char *topic,const char *type,
+ const char *payload,const char *instance,int64_t end)
+{
+ if(end<=k_uptime_get())return -ETIMEDOUT;
+ struct xm_identity identity;
+ int rc=xm_identity_init(&identity,c->id.vm_id,c->id.source_id,c->id.app_id,c->id.boot_id,instance);
+ if(rc)return rc;
+ int64_t previous=c->publish_deadline_ms;c->publish_deadline_ms=end;
+ rc=publish_as(c,topic,type,payload,&identity);c->publish_deadline_ms=previous;return rc;
 }
 
 int xm_zclient_publish_until(struct xm_zclient *c,const char *topic,const char *type,

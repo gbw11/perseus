@@ -11,6 +11,7 @@
   height: 64px;
   background: var(--x-surface-sunken);
   border-bottom: 1px solid var(--x-border);
+  box-shadow: 0 8px 28px rgb(2 7 14 / 18%);
 }
 .brand {
   display: flex;
@@ -38,8 +39,8 @@
 }
 .nav a[aria-current='page'] {
   color: var(--x-primary);
-  background: var(--x-surface-2);
-  border-color: var(--x-border);
+  background: color-mix(in srgb, var(--x-primary) 10%, var(--x-surface-2));
+  border-color: color-mix(in srgb, var(--x-primary) 36%, var(--x-border));
 }
 .actions {
   display: flex;
@@ -63,6 +64,7 @@
 .main {
   flex: 1;
   padding: var(--x-space-5);
+  background: radial-gradient(circle at 78% -20%, rgb(192 225 225 / 7%), transparent 38%), var(--x-bg);
 }
 
 @media (max-width: 1080px) {

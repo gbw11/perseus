@@ -1,0 +1,19 @@
+[Unit]
+Description=Xenova execution log journal collector
+After=systemd-journald.service
+[Service]
+Type=simple
+EnvironmentFile=/etc/xenova/runtime-logs/collector.env
+ExecStart=@PYTHON@ -m dom0_manager.log_collector
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+StateDirectory=xenova-runtime-logs
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/xenova-runtime-logs
+[Install]
+WantedBy=multi-user.target

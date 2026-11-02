@@ -12,6 +12,7 @@ export type AppId = 'autonomous' | 'manual' | 'message-board';
 
 export interface Role {
   app: AppId;
+  vmLabel: string;
   title: string;
   short: string;
   color: string;
@@ -27,6 +28,7 @@ export const ROLES: Record<AppId, Role> = {
     short: bound.primary_drive ? '주 구동' : 'autonomous 앱',
     color: 'var(--x-app-autonomous)',
     driving: true,
+    vmLabel: 'VM A',
   },
   manual: {
     app: 'manual',
@@ -34,6 +36,7 @@ export const ROLES: Record<AppId, Role> = {
     short: bound.backup_drive ? '백업' : 'manual 앱',
     color: 'var(--x-app-manual)',
     driving: true,
+    vmLabel: 'VM B',
   },
   'message-board': {
     app: 'message-board',
@@ -41,6 +44,7 @@ export const ROLES: Record<AppId, Role> = {
     short: bound.interaction ? '인터랙션' : 'message-board 앱',
     color: 'var(--x-app-interaction)',
     driving: false,
+    vmLabel: 'VM C',
   },
 };
 

@@ -15,7 +15,7 @@
 | 기본 CPU 배치 | Zephyr A→pCPU 1, B→2, dom0·일반 VM의 모든 vCPU→{0,3}. Credit2·기존 vCPU 수 유지 |
 | 외부 레이어 | [layers.lock](../../platform/yocto/layers.lock)의 8개 URL·commit |
 | Linux 원본 | [sources.lock.json](../../platform/guests/sources.lock.json)의 Ubuntu·Debian cloud image |
-| 기본 선택 | [default-templates.lock.json](../../platform/guests/default-templates.lock.json): Ubuntu·Debian 1.0.3, A/B 공통 주행 firmware |
+| 기본 선택 | [default-templates.lock.json](../../platform/guests/default-templates.lock.json): Ubuntu·Debian 1.0.3, 실제 drive warm-lattice-lab 1.0.0-lab.1. Network Starter는 과거 지원 입력으로 유지 |
 | 기본 VM | Debian Interaction 1대 + Zephyr A/B 2대 |
 | Linux 게스트 | Paho·공용 MQTT 클라이언트·Agent, 8GiB root 디스크 |
 | Zephyr 게스트 | 1 vCPU·16MiB·GICv2, Xen Ethernet·DHCP·ICMP·협조형 stop/reboot |
@@ -269,7 +269,7 @@ PYTHONPATH="$ZEPHYR_TOOLS/python" \
 
 ## 3. Linux·Network Starter 템플릿 준비
 
-현재 선택한 게시본이 `RELEASE_ROOT`에 준비돼 있으면 아래 검증·선택 확정으로 이어간다. 새 게시본을 만드는 실행은 새 출력 경로를 사용한다. Linux의 준비 버전은 각 `recipe.json`, Zephyr의 앱 출처는 `network-starter.lock.json`을 따른다.
+현재 선택한 게시본이 `RELEASE_ROOT`에 준비돼 있으면 아래 검증·선택 확정으로 이어간다. 새 게시본은 새 출력 경로를 사용한다. Linux의 준비 버전은 각 `recipe.json`, 현재 drive 출처는 실제 `BUILD_RECEIPT.json`과 검증한 새 template manifest를 따른다. network-starter.lock은 과거 Starter 재현용이다.
 
 ### Ubuntu·Debian 준비
 
@@ -300,27 +300,36 @@ done
 ### A/B 공통 Zephyr 주행 firmware
 
 두 VM에는 같은 공통 firmware를 선택한다. AUTO/MANUAL은 firmware 내부 모드이고,
-UUID·MAC·인증정보·CPU 정책은 VM별로 유지한다.
+UUID·MAC·인증정보·CPU 정책은 VM별로 유지한다. 현재 factory 선택은
+`zephyr-drive-lattice-lab-arm64`의 `warm-lattice-lab` 프로필이다.
 
 ```bash
 run drive-build python3 -B "$REPO/platform/scripts/build-xenova-drive-app.py" \
-  --app drive --zephyr-source "$ZEPHYR_SOURCE" --tools "$ZEPHYR_TOOLS" \
+  --app drive --profile warm-lattice-lab \
+  --zephyr-source "$ZEPHYR_SOURCE" --tools "$ZEPHYR_TOOLS" \
   --output "$RUN/drive-build" --execute
+
+run drive-template-package python3 -B \
+  "$REPO/platform/scripts/package-xenova-drive-template.py" \
+  --build-root "$RUN/drive-build" --output "$RUN/drive-candidate"
 ```
 
-drive-build/firmware의 firmware.json은 원본 ID xenova-zephyr-drive-common을 사용한다.
-기존 공개 template ID zephyr-xenvm-starter-arm64는 유지하고 새 배포 version으로 구분한다.
-전체 번들을 xenova_zephyr.bundle_info()로 검증한 뒤
-RELEASE_ROOT/zephyr/<id>/<template_version>/의 새 경로에 복사한다.
-파일 0444·디렉터리 0555로 고정하고 실제 manifest SHA-256과 version을
-default-templates.lock.json 및 A/B의 defaults.json에 맞춘다.
-이전 게시본은 덮어쓰지 않는다. A/B seed와 보관 원본의 zephyr.bin 해시가 같아야 한다.
-고정 Zephyr·SDK, ELF/DTS·RAM·스택 검사와 source digest를 함께 보관한다.
+포장 도구는 현재 source fingerprint·ARM payload·실제 앱 profile과
+`BUILD_RECEIPT.json`을 검사하고 새 manifest hash를 반환한다. 검증한 번들은
+`RELEASE_ROOT/zephyr/<id>/<template_version>/`의 새 경로에 복사하고 파일
+0444·디렉터리 0555로 보존한다. 기존 게시본은 덮어쓰지 않는다.
+실제 manifest와 version은 아래 선택 확정 절차로 기본 lock·A/B 설정에 반영한다.
+A/B seed와 보관 원본의 `zephyr.bin` 해시가 같아야 한다.
 
-Network Starter는 네트워크·진단을 따로 시험하는 별도 firmware다.
-아래 절차로 만든 번들을 공통 주행 이미지의 기본 A/B 선택으로 대체하지 않는다.
+공용 seed/firmware에는 VM 암호가 없고 host 첫 등록에서 UUID별로 공급한다.
+`lattice-lab-1`은 시험 차량 프로필이다. ARM 빌드·패키징과 실제 보드·실차 수락은
+구분하며 고정 Zephyr·SDK, ELF/DTS·RAM·스택 검사와 source digest를 함께 보관한다.
 
 ### 별도 Network Starter 빌드·게시
+
+Network Starter는 네트워크·진단을 따로 시험하는 별도 firmware다.
+아래 절차는 기존 지원 자산의 재현/호환용이며 현재 공통 주행 앱의 기본 A/B
+선택을 Starter로 대체하는 방법이 아니다.
 
 ```bash
 run network-starter-build python3 -B \
@@ -402,11 +411,12 @@ for entry in lock["templates"]:
         directory = Path("linux")/entry["id"]/version
         manifest = release/directory/"template.json"
     else:
-        z = json.loads((repo/"platform/guests/zephyr/network-starter.lock.json").read_text())
-        version = z["version"]
-        directory = Path("zephyr")/z["id"]/version
+        directory = Path(entry["directory"])
         manifest = release/directory/"firmware.json"
-        entry["id"] = z["id"]
+        meta = json.loads(manifest.read_text())
+        assert meta["id"] == entry["id"] and meta["template_id"] == entry["template_id"]
+        assert meta["source"]["app"] == "xenova-drive" and meta["source"]["drive_profile"] == "warm-lattice-lab"
+        version = meta["template_version"]
     entry.update(version=version, directory=str(directory),
                  manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest())
     versions[entry["template_id"]] = version

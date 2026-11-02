@@ -67,8 +67,8 @@ class TemplateRecipeTest(unittest.TestCase):
         self.assertEqual(len(entries), 3)
         self.assertEqual(len({e['template_id'] for e in entries}), 3)
         selected = next(e for e in entries if e['guest_kind'] == 'zephyr')
-        self.assertEqual(selected['id'], 'xenova-zephyr-drive-common')
-        self.assertRegex(selected['version'], r'^1\.2\.0-drive-[0-9a-f]{12}$')
+        self.assertEqual(selected['id'], 'xenova-zephyr-drive-lattice-lab-1.0.0')
+        self.assertEqual(selected['version'], '1.0.0-lab.1')
         self.assertTrue((ROOT / 'platform/guests/zephyr/starter.lock.json').is_file())
 
     def test_default_catalog_rejects_legacy_duplicate_or_escaping_selection(self):

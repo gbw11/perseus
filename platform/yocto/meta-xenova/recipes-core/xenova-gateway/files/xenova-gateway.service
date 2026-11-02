@@ -1,18 +1,18 @@
 [Unit]
-Description=Xenova verified drive authority and serial gateway
-After=network.target srv-xenova.mount
-RequiresMountsFor=/srv/xenova
-ConditionPathExists=/etc/xenova/gateway.env
-ConditionPathIsMountPoint=/srv/xenova
+Description=Xenova Gateway authority and output
+Requires=srv-xenova.mount
+After=srv-xenova.mount xenova-first-boot.service mosquitto.service xenova-vms.service
+Before=xenova-host-admission.service
 
 [Service]
 Type=simple
+User=root
+UMask=0077
+RuntimeDirectory=xenova-gateway
+RuntimeDirectoryMode=0700
 EnvironmentFile=/etc/xenova/gateway.env
 ExecStart=/usr/bin/python3 -m xenova_gateway
-Restart=on-failure
-RestartSec=3
-TimeoutStopSec=15
-UMask=0077
+Restart=no
 
 [Install]
 WantedBy=multi-user.target

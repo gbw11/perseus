@@ -1,7 +1,7 @@
 """MQTT-03 metrics 의 values[]: /proc 기반 CPU·메모리·디스크·네트워크.
 
 - cpu_percent_allocated: /proc/stat 의 cpu 합계 줄. 두 표본 사이 (busy 증가 ÷ 전체 증가) × 100 이라 할당된 vCPU 전체를 100% 로
-  정규화한다. 첫 표본은 null + first_sample
+  정규화한다. 첫 표본은 null + first_sample, 누적 카운터가 되돌아간 표본은 null + counter_reset(그 값이 새 기준)
 - memory_*: /proc/meminfo 의 MemTotal − MemAvailable, MemAvailable (kB × 1024)
 - disk_*_bytes_total: /proc/diskstats 의 섹터 × 512. /sys/block 에 있는 디스크 단위만 세어 파티션(xvda1)을 겹쳐 세지 않는다.
   loop·ram 장치는 뺀다. 디스크가 없으면 null + device_not_found. /sys/block 을 읽지 못하면 디스크와 파티션을 가를 수 없어 겹쳐 셀 수
@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .procfs import DEVICE_NOT_FOUND, FIRST_SAMPLE, NOT_SUPPORTED, PARSE_ERROR, READ_FAILED, Roots, read_text
+from .procfs import COUNTER_RESET, DEVICE_NOT_FOUND, FIRST_SAMPLE, NOT_SUPPORTED, PARSE_ERROR, READ_FAILED, Roots, read_text
 
 log = logging.getLogger("xenova_agent.metrics")
 
@@ -68,7 +68,9 @@ class MetricsCollector:
             return [value(name, None, "percent", reason=FIRST_SAMPLE)]
         d_total = total - previous[1]
         d_busy = busy - previous[0]
-        if d_total <= 0 or d_busy < 0:  # 같은 틱이거나 카운터가 되돌아감: 이번 구간은 계산하지 않는다
+        if d_total < 0 or d_busy < 0:  # 카운터가 되돌아감: 첫 표본과 구별한다. 이번 값이 새 기준이다
+            return [value(name, None, "percent", reason=COUNTER_RESET)]
+        if d_total == 0:  # 같은 틱: 아직 구간이 없다
             return [value(name, None, "percent", reason=FIRST_SAMPLE)]
         return [value(name, round(min(100.0, 100.0 * d_busy / d_total), 2), "percent")]
 

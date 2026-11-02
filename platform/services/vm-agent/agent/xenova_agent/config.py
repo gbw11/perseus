@@ -48,6 +48,8 @@ class AgentSettings:
     metrics_interval_s: float = DEFAULT_METRICS_INTERVAL_S
     top_processes: int = DEFAULT_TOP_PROCESSES
     inventory_refresh_s: float = DEFAULT_INVENTORY_REFRESH_S
+    # v2 Telemetry(에이전트 자체 상태, xenova_agent.telemetry) 발행. 브로커 ACL 이 v2 쓰기를 막으면 조용히 버려질 뿐 v1 에는 영향이 없다
+    telemetry_enabled: bool = True
     log_level: str = "INFO"
 
     def __post_init__(self) -> None:
@@ -95,5 +97,15 @@ class AgentSettings:
             password=read("XENOVA_AGENT_BROKER_PASSWORD", None, str),
             metrics_interval_s=read("XENOVA_AGENT_METRICS_INTERVAL", cls.metrics_interval_s, float),
             top_processes=read("XENOVA_AGENT_TOP_PROCESSES", cls.top_processes, int),
+            telemetry_enabled=read("XENOVA_AGENT_TELEMETRY", cls.telemetry_enabled, _as_bool),
             log_level=read("XENOVA_AGENT_LOG_LEVEL", cls.log_level, str).upper(),
         )
+
+
+def _as_bool(raw: str) -> bool:
+    value = raw.strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"expected a boolean (1/0, true/false, yes/no, on/off), got {raw!r}")

@@ -8,6 +8,9 @@ export interface ConsoleCallbacks {
 
 const MAX_MESSAGE = 65536;
 const MAX_PENDING_INPUT = 262144;
+const CONNECT_TIMEOUT_MS = 15000;
+// Spring waits up to 8 seconds for upstream PTY/lease cleanup.
+const DISCONNECT_TIMEOUT_MS = 10000;
 const encoder = new TextEncoder();
 
 export function consoleUrl(vmId: string): string {
@@ -47,6 +50,7 @@ export class ConsoleTransport {
   private ready = false;
   private closing = false;
   private authenticated = false;
+  private waitTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly vmId: string,
@@ -58,14 +62,24 @@ export class ConsoleTransport {
     const generation = ++this.generation;
     this.stopSocket();
     this.callbacks.state('connecting', '콘솔에 연결하는 중…');
+    this.waitFor(
+      generation,
+      CONNECT_TIMEOUT_MS,
+      '콘솔 연결 시간이 초과되었습니다. 서버와 VM 상태를 확인한 뒤 다시 연결해 주세요.',
+    );
     let session = getSession();
-    if (!session || Date.parse(session.expires_at) <= Date.now()) {
-      await refreshSession();
-      session = getSession();
+    try {
+      if (!session || !(Date.parse(session.expires_at) > Date.now())) {
+        await refreshSession();
+        session = getSession();
+      }
+    } catch {
+      this.fail(generation, consoleCloseMessage(4401));
+      return;
     }
     if (generation !== this.generation) return;
-    if (!session) {
-      this.callbacks.state('error', consoleCloseMessage(4401));
+    if (!session || !(Date.parse(session.expires_at) > Date.now())) {
+      this.fail(generation, consoleCloseMessage(4401));
       return;
     }
     const token = session.access_token;
@@ -73,16 +87,20 @@ export class ConsoleTransport {
     try {
       ws = new WebSocket(consoleUrl(this.vmId));
     } catch {
-      this.callbacks.state('error', consoleCloseMessage(1006));
+      this.fail(generation, consoleCloseMessage(1006));
       return;
     }
     this.socket = ws;
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       if (generation !== this.generation) return;
-      ws.send(JSON.stringify({ type: 'auth', access_token: token }));
-      this.authenticated = true;
-      if (this.closing) ws.send(JSON.stringify({ type: 'disconnect' }));
+      try {
+        ws.send(JSON.stringify({ type: 'auth', access_token: token }));
+        this.authenticated = true;
+        if (this.closing) ws.send(JSON.stringify({ type: 'disconnect' }));
+      } catch {
+        this.fail(generation, consoleCloseMessage(1006));
+      }
     };
     ws.onmessage = (event: MessageEvent<unknown>) => {
       if (generation !== this.generation) return;
@@ -95,6 +113,7 @@ export class ConsoleTransport {
         try {
           const frame = JSON.parse(event.data) as { type?: string; vm_id?: string };
           if (frame.type === 'connected' && frame.vm_id === this.vmId) {
+            this.clearWait();
             this.ready = true;
             this.callbacks.state('connected', '콘솔이 연결되었습니다.');
             return;
@@ -103,10 +122,12 @@ export class ConsoleTransport {
           // A malformed control frame must never be rendered as terminal output.
         }
       }
-      ws.close(4003, 'unexpected console frame');
+      this.fail(generation, '콘솔 응답 형식이 올바르지 않아 연결을 종료했습니다.', 4003);
     };
     ws.onclose = (event) => {
       if (generation !== this.generation) return;
+      ++this.generation;
+      this.clearWait();
       this.socket = null;
       this.ready = false;
       this.closing = false;
@@ -145,8 +166,17 @@ export class ConsoleTransport {
     this.ready = false;
     this.closing = true;
     this.callbacks.state('closing', '콘솔 연결을 정리하는 중…');
+    this.waitFor(
+      this.generation,
+      DISCONNECT_TIMEOUT_MS,
+      '연결 정리 응답이 없어 브라우저 연결을 닫았습니다. 서버 점유 해제는 확인되지 않았습니다. 잠시 후 다시 연결해 주세요.',
+    );
     if (this.authenticated && this.socket.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ type: 'disconnect' }));
+      try {
+        this.socket.send(JSON.stringify({ type: 'disconnect' }));
+      } catch {
+        this.fail(this.generation, consoleCloseMessage(1006));
+      }
     }
   }
 
@@ -155,7 +185,8 @@ export class ConsoleTransport {
     this.stopSocket();
   }
 
-  private stopSocket(): void {
+  private stopSocket(code?: number): void {
+    this.clearWait();
     this.ready = false;
     this.closing = false;
     this.authenticated = false;
@@ -165,7 +196,26 @@ export class ConsoleTransport {
       ws.onopen = null;
       ws.onmessage = null;
       ws.onclose = null;
-      ws.close();
+      if (code === undefined) ws.close();
+      else ws.close(code, 'unexpected console frame');
     }
+  }
+
+  private clearWait(): void {
+    if (this.waitTimer !== null) clearTimeout(this.waitTimer);
+    this.waitTimer = null;
+  }
+
+  private waitFor(generation: number, milliseconds: number, message: string): void {
+    this.clearWait();
+    this.waitTimer = setTimeout(() => this.fail(generation, message), milliseconds);
+  }
+
+  private fail(generation: number, message: string, code?: number): void {
+    if (generation !== this.generation) return;
+    ++this.generation;
+    // Invalidate callbacks before closing: a late frame/close must not undo the error.
+    this.stopSocket(code);
+    this.callbacks.state('error', message);
   }
 }

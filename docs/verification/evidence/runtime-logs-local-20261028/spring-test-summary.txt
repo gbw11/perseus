@@ -1,0 +1,5 @@
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 28.37 s -- in com.xenova.backend.logs.RuntimeLogApiIntegrationTest
+[INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 4.180 s -- in com.xenova.backend.vm.infrastructure.Dom0ManagerClientTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+[INFO] Total time:  01:30 min

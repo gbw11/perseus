@@ -1,0 +1,8 @@
+{
+  "visual_acceptance_passed": true,
+  "visual_review": "First and last JPEG of each phase manually inspected. All four show the expected complete vehicle UI; final infotainment frame is not black. Intermediate frames were not all decoded.",
+  "all_transport_checks_passed": true,
+  "performance_accepted": false,
+  "performance_scope": "Single-output sequential average CPU target passed; concurrent dual output and end-to-end latency unverified.",
+  "full_cleanup_pixel_match": false
+}

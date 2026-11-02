@@ -19,11 +19,11 @@
     },
     {
       "guest_kind": "zephyr",
-      "id": "xenova-zephyr-drive-common",
-      "version": "1.2.0-drive-8ac7253967da",
-      "directory": "zephyr/xenova-zephyr-drive-common/1.2.0-drive-8ac7253967da",
-      "manifest_sha256": "721ef2b0adf39a570ab38b3e70e4d7c438f2aa84b42c3e174a92e6386e2a854c",
-      "template_id": "zephyr-xenvm-starter-arm64"
+      "id": "xenova-zephyr-drive-lattice-lab-1.0.0",
+      "version": "1.0.0-lab.1",
+      "directory": "zephyr/xenova-zephyr-drive-lattice-lab-1.0.0/1.0.0-lab.1",
+      "manifest_sha256": "893b3e6ff2298d87dc41f1456bfbcb1ed9b30c21b97d929a6403a2e23bb5d87f",
+      "template_id": "zephyr-drive-lattice-lab-arm64"
     }
   ]
 }

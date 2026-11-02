@@ -54,7 +54,8 @@ def reboot(e,record,key,*,deadline=None):
                 intent["intent_revision"]!=op["intent_revision"] or
                 intent["accepted_operation_id"]!=op["operation_id"]):
             refuse("INTENT_MISMATCH","accepted reboot intent was superseded")
-        if any(q["vm_id"]==record["uuid"] and q["status"]!="SUCCEEDED" for q in m._operations()):
+        from xenova_creation import holds
+        if any(q["vm_id"]==record["uuid"] and holds(m,q) for q in m._operations()):
             refuse("OPERATION_IN_PROGRESS","asset operation owns reboot target",retryable=True)
         m._record_at(record,p.data/"instances"/record["id"])
         if check_deadline and p.clock()>=end:refuse("DEADLINE_EXCEEDED","original reboot deadline expired")

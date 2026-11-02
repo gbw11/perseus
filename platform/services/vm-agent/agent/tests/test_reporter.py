@@ -6,13 +6,14 @@ import json
 
 from xenova_mqtt import Identity, envelope
 
-from xenova_agent.reporter import Reporter
+from xenova_agent.processes import ProcessSample
+from xenova_agent.reporter import Reporter, payload_size
 
 VM_ID = "11111111-1111-4111-8111-111111111111"
 INVENTORY = {"os": {"id": "debian", "version_id": "13", "pretty_name": "Debian 13"}, "kernel_release": "6.12", "hostname": "d",
              "interfaces": [], "agent_version": "0.2.0", "capabilities": {"commands": [], "metrics": []}}
 VALUES = [{"name": "cpu_percent_allocated", "value": 12.5, "unit": "percent", "labels": {}, "unavailable_reason": None},
-          {"name": "memory_used_bytes", "value": None, "unit": "bytes", "labels": {}, "unavailable_reason": "read_failed"}]
+          {"name": "disk_read_bytes_total", "value": None, "unit": "bytes", "labels": {}, "unavailable_reason": "read_failed"}]  # 장치별 값의 실패는 틱 실패가 아니다
 
 
 class FakeClient:
@@ -28,14 +29,19 @@ class FakeClient:
         return [p[1] for p in self.published]
 
 
-def make(client, *, inventory=None, processes=None, clock=None, **kwargs):
+def ok_sample(rows):
+    rows = list(rows or [])
+    return ProcessSample("ok", rows, discovered=len(rows), read_ok=len(rows), candidates=len(rows))
+
+
+def make(client, *, inventory=None, processes=None, sample=None, clock=None, **kwargs):
     state = {"inventory": dict(inventory or INVENTORY)}
     t = clock or [100.0]
     reporter = Reporter(
         client, VM_ID,
         collect_inventory=lambda: dict(state["inventory"]),
         collect_metrics=lambda: [dict(v) for v in VALUES],
-        collect_processes=lambda: list(processes or []),
+        collect_processes=lambda: sample if sample is not None else ok_sample(processes),
         interval_s=2.0, inventory_refresh_s=60.0, clock=lambda: t[0], **kwargs,
     )
     return reporter, state, t
@@ -91,7 +97,27 @@ def test_oversized_payload_drops_processes_from_the_tail():
     reporter.tick()
     sent = client.published[-1][2]["processes"]
     assert 0 < len(sent) < 40 and sent == processes[: len(sent)]
-    assert len(json.dumps(client.published[-1][2]).encode()) <= 3000
+    assert payload_size(client.published[-1][2]) <= 3000  # Reporter 가 재는 compact 직렬화 기준
+    assert client.published[-1][2]["process_collection"]["truncated"] is True  # 크기 상한으로 줄인 것도 잘림이다
+
+
+def test_process_collection_tells_why_the_list_is_empty():
+    client = FakeClient()
+    failed = ProcessSample("read_failed", error="PermissionError(EACCES)")
+    reporter, _, _ = make(client, sample=failed)
+    reporter.tick()
+    metrics = client.published[-1][2]
+    assert metrics["processes"] == []
+    assert metrics["process_collection"] == {"status": "read_failed", "discovered": 0, "read_ok": 0, "vanished": 0, "failed": 0,
+                                             "truncated": False, "error": "PermissionError(EACCES)"}
+
+    client2 = FakeClient()
+    partial = ProcessSample("partial", [{"pid": 1, "name": "a", "cpu_percent": 1.0, "rss_bytes": 1}], discovered=5, read_ok=3,
+                            vanished=1, failed=1, candidates=3)
+    reporter2, _, _ = make(client2, sample=partial)
+    reporter2.tick()
+    collection = client2.published[-1][2]["process_collection"]
+    assert (collection["status"], collection["failed"], collection["truncated"], collection["error"]) == ("partial", 1, True, None)
 
 
 def test_collection_or_publish_errors_skip_the_tick_without_stopping():
@@ -121,7 +147,9 @@ def test_payloads_follow_the_spring_receiver_rules():
     inv = client.published[0][2]
     assert inv["os"]["id"] and inv["kernel_release"] and inv["hostname"]
     metrics = client.published[1][2]
-    assert set(metrics) == {"window_ms", "values", "processes"}
+    assert set(metrics) == {"window_ms", "values", "processes", "process_collection"}
+    assert set(metrics["process_collection"]) == {"status", "discovered", "read_ok", "vanished", "failed", "truncated", "error"}
+    assert metrics["process_collection"]["status"] in ("first_sample", "ok", "partial", "read_failed", "disabled")
     for v in metrics["values"]:
         assert v["name"] and v["unit"] in ("percent", "bytes") and set(v) == {"name", "value", "unit", "labels", "unavailable_reason"}
         assert (v["value"] is None) == (v["unavailable_reason"] is not None)
@@ -171,3 +199,86 @@ def test_values_alone_over_the_limit_are_not_published():
     reporter, _, _ = make(client, processes=[{"pid": 1, "name": "p", "cpu_percent": 1.0, "rss_bytes": 1}], payload_limit=200)
     reporter.tick()
     assert client.types() == ["agent.inventory"] and reporter.oversized == 1
+
+
+def test_status_snapshot_tracks_ticks_collection_and_publish_outcomes():
+    """telemetry.py 가 publisher_state 를 정하는 근거. metrics 수집 실패만 틱 실패이고 inventory 실패는 수집 오류로만 센다."""
+    client = FakeClient()
+    t = [100.0]
+    state = {"metrics": None, "inventory": None}
+
+    def collect(kind, value):
+        def fn():
+            if state[kind] is not None:
+                raise state[kind]
+            return value()
+        return fn
+
+    reporter = Reporter(
+        client, VM_ID,
+        collect_inventory=collect("inventory", lambda: dict(INVENTORY)),
+        collect_metrics=collect("metrics", lambda: [dict(v) for v in VALUES]),
+        collect_processes=lambda: ok_sample([]),
+        interval_s=2.0, inventory_refresh_s=4.0, clock=lambda: t[0],
+    )
+    s = reporter.status()
+    assert (s.interval_s, s.last_tick_at, s.last_tick_ok, s.last_collect_ok_at, s.last_publish_ok_at) == (2.0, None, None, None, None)
+    reporter.tick()
+    s = reporter.status()
+    assert (s.last_tick_at, s.last_tick_ok, s.last_collect_ok_at, s.last_publish_ok_at) == (100.0, True, 100.0, 100.0)
+    t[0] += 2
+    state["metrics"] = OSError("proc gone")
+    reporter.tick()
+    s = reporter.status()
+    assert (s.last_tick_at, s.last_tick_ok, s.last_collect_ok_at, s.collect_errors, s.last_error) == (102.0, False, 100.0, 1, "OSError")
+    t[0] += 2
+    state["metrics"] = None
+    state["inventory"] = PermissionError("denied")  # 4초 지나 inventory 를 다시 읽다 실패: 틱은 성공이다
+    reporter.tick()
+    s = reporter.status()
+    assert (s.last_tick_ok, s.last_collect_ok_at, s.collect_errors, s.last_error) == (True, 104.0, 2, "PermissionError")
+    t[0] += 2
+    client.publish = _broken_publish
+    reporter.tick()
+    s = reporter.status()
+    assert (s.last_tick_ok, s.last_collect_ok_at, s.last_publish_ok_at, s.publish_errors, s.last_error) == (True, 106.0, 104.0, 1, "ValueError")
+
+
+def _broken_publish(topic, message_type, payload, **kwargs):
+    raise ValueError("bad envelope")
+
+
+def test_tick_validity_is_judged_from_returned_values_not_only_exceptions():
+    """수집기는 /proc 실패를 예외가 아니라 null + 사유와 ProcessSample.status 로 돌려준다. 필수 원천(CPU·메모리·프로세스 목록)의
+    read_failed·parse_error 만 틱 실패이고, first_sample·counter_reset·partial·디스크/네트워크 사유는 아니다. 실패한 표본도 보낸다."""
+    client = FakeClient()
+    t = [100.0]
+    state = {"values": [], "sample": ok_sample([])}
+    reporter = Reporter(
+        client, VM_ID,
+        collect_inventory=lambda: dict(INVENTORY),
+        collect_metrics=lambda: [dict(v) for v in state["values"]],
+        collect_processes=lambda: state["sample"],
+        interval_s=2.0, clock=lambda: t[0],
+    )
+
+    def tick(values, sample=None):
+        state["values"] = values
+        state["sample"] = sample if sample is not None else ok_sample([])
+        t[0] += 2
+        reporter.tick()
+        s = reporter.status()
+        return s.last_tick_ok, s.last_collect_ok_at, s.collect_errors, s.last_error
+
+    def value(name, reason, unit="bytes"):
+        return {"name": name, "value": None, "unit": unit, "labels": {}, "unavailable_reason": reason}
+
+    assert tick([value("cpu_percent_allocated", "first_sample", "percent")]) == (True, 102.0, 0, None)
+    assert tick([value("cpu_percent_allocated", "counter_reset", "percent")]) == (True, 104.0, 0, None)
+    assert tick([value("cpu_percent_allocated", "read_failed", "percent")]) == (False, 104.0, 1, "cpu_percent_allocated:read_failed")
+    assert tick([value("memory_used_bytes", "parse_error"), value("memory_available_bytes", "parse_error")]) == (False, 104.0, 2, "memory_used_bytes:parse_error")
+    assert tick([value("disk_read_bytes_total", "read_failed"), value("net_rx_bytes_total", "device_not_found")]) == (True, 110.0, 2, "memory_used_bytes:parse_error")
+    assert tick([], ProcessSample("read_failed", error="PermissionError(EACCES)")) == (False, 110.0, 3, "processes:PermissionError(EACCES)")
+    assert tick([], ProcessSample("partial", discovered=3, read_ok=2, failed=1, candidates=3)) == (True, 114.0, 3, "processes:PermissionError(EACCES)")
+    assert tick([], ProcessSample("disabled")) == (True, 116.0, 3, "processes:PermissionError(EACCES)")
+    assert client.types().count("agent.metrics") == 8  # 실패한 표본도 null + 사유로 나간다

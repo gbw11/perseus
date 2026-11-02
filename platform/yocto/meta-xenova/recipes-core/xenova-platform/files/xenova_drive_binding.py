@@ -27,6 +27,7 @@ def observe(platform,identity,*,timeout_s=2.0):
     if (not context or context.get('phase')!='observed' or observation['execution_status']!='managed' or
         observation['xen_state'] not in ('running','blocked')):raise PlatformError('managed live execution required')
     return {'vm_id':identity,'status':'observed','host_boot_id':execution.host,'execution_id':context['execution_id'],
+        'signal_profile':context.get('signal_profile'),
         'domid':context['domid'],'xen_unique_id':str(context['xen_unique_id']),
         'intent_revision':intent['intent_revision'],'lifecycle_generation':life[1],
         'observed_monotonic_ms':int(platform.clock()*1000),
