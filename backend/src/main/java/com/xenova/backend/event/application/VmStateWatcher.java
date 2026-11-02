@@ -1,6 +1,7 @@
 package com.xenova.backend.event.application;
 
 import com.xenova.backend.common.error.ApiException;
+import com.xenova.backend.vm.application.VmRuntimeCache;
 import com.xenova.backend.vm.application.VmService;
 import com.xenova.backend.vm.domain.Vm;
 import java.util.List;
@@ -18,20 +19,30 @@ public class VmStateWatcher {
 
     private final VmService vmService;
     private final VmStateTracker tracker;
+    private final VmRuntimeCache runtimeCache;
 
-    public VmStateWatcher(VmService vmService, VmStateTracker tracker) {
+    public VmStateWatcher(VmService vmService, VmStateTracker tracker, VmRuntimeCache runtimeCache) {
         this.vmService = vmService;
         this.tracker = tracker;
+        this.runtimeCache = runtimeCache;
     }
 
+    // With the runtime cache enabled, VmRuntimeRefresher runs check() in a loop on its own thread instead.
     @Scheduled(
             initialDelayString = "${xenova.event.vm-state-check-interval-ms:5000}",
             fixedDelayString = "${xenova.event.vm-state-check-interval-ms:5000}")
+    public void scheduledCheck() {
+        if (!runtimeCache.enabled()) {
+            check();
+        }
+    }
+
+    // Also refreshes the runtime cache: this is the one regular dom0-manager list call.
     public void check() {
         long mark = tracker.mark();
         List<Vm> vms;
         try {
-            vms = vmService.list();
+            vms = vmService.listLive();
         } catch (ApiException exception) {
             // Without dom0-manager the real state is unknown; reporting every VM as stopped would be wrong.
             log.debug("VM state check skipped: {}", exception.getMessage());
