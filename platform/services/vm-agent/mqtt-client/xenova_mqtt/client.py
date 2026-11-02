@@ -139,6 +139,7 @@ class XenovaClient:
         self._pending_infos: list[Any] = []  # PUBACK 을 아직 받지 못한 QoS>0 발행. stop() 이 끊기 전에 기다린다
         self._latest: dict[str, Message] = {}
         self._tracker = env.SeqTracker()
+        self._receive_guard = None
         self._lock = threading.Lock()
         self._connected = threading.Event()
         self._stopping = False
@@ -411,6 +412,16 @@ class XenovaClient:
         with self._lock:
             return self._latest.get(topic)
 
+    def set_receive_guard(self,guard) -> None:
+        """Install once before start. Memory-only guard runs before seq/latest mutation.
+
+        This does not authenticate credentials; trusted consumers use it to bind
+        an authenticated VM topic to the platform's current allowed execution.
+        """
+        with self._lock:
+            if self._connected.is_set() or self._receive_guard is not None:raise ValueError('receive guard already active')
+            self._receive_guard=guard
+
     def _on_message(self, client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
         if not msg.payload:
             return  # retained 삭제 알림
@@ -420,8 +431,19 @@ class XenovaClient:
         try:
             envelope = json.loads(msg.payload.decode("utf-8"))
             env.validate(msg.topic, envelope)
+            if envelope['type'] in ('app.state.snapshot','app.state.applied'):
+                from .handoff import decode_complete,snapshot,applied
+                try:
+                    envelope=decode_complete(msg.payload)
+                    (snapshot if envelope['type']=='app.state.snapshot' else applied)(envelope['payload'])
+                except ValueError:
+                    log.warning('state message rejected: invalid complete state')
+                    return
         except (UnicodeDecodeError, json.JSONDecodeError):
             log.warning("버림 %s: PAYLOAD_INVALID JSON 아님", msg.topic)
+            return
+        except RecursionError:
+            log.warning('버림 %s: PAYLOAD_INVALID JSON nesting limit',msg.topic)
             return
         except env.EnvelopeError as error:
             log.warning("버림 %s: %s", msg.topic, error)
@@ -429,6 +451,12 @@ class XenovaClient:
         if len(msg.payload) > policy.for_type(envelope["type"]).max_bytes:
             log.warning("버림 %s: PAYLOAD_TOO_LARGE %s %d bytes", msg.topic, envelope["type"], len(msg.payload))
             return
+        guard=self._receive_guard
+        if guard is not None:
+            try:
+                if not guard(msg.topic,envelope,bool(getattr(msg,'retain',False))):return
+            except Exception:
+                log.warning('receive binding guard unavailable; message rejected');return
         if not self._tracker.accept(msg.topic, envelope):
             log.debug("버림 %s: seq %s 중복·역전", msg.topic, envelope.get("seq"))
             return

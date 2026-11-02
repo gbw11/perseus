@@ -77,11 +77,9 @@ def run(requests):
     def copy_linux(args, **kwargs):
         f.copies += 1
         record = kwargs['record_override']
-        directory = fixtures.fixture(f.data, record)
-        with (directory/'root.raw').open('wb') as stream:
-            stream.seek(1080)
-            stream.write(bytes.fromhex('53ef'))
-        (directory/'saved-user-file').write_text('keep me')
+        from test_xenova_platform import private_fixture
+        assert kwargs['private'] is True
+        return private_fixture(f.data,record,kwargs['workspace_path'],saved_user_file=True)
     f.m.preparer = f.m._prepare
     copy = patch.object(prepare_instance, 'make_instance', side_effect=copy_linux)
     copy.start()

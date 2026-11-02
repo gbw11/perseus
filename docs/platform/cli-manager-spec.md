@@ -4,6 +4,12 @@ Xenova는 Raspberry Pi 4의 Xen dom0에서 VM 등록·실행·관측·복구·�
 
 구성 요소와 문서의 읽는 순서는 [플랫폼 안내](README.md)에 있다. 이 명세의 입력·기본값·반환은 현재 parser와 Manager 실행 경로를 기준으로 한다.
 
+VM 자격 공급과 적용 신호는 [공통 provisioning 계약](../contracts/vm-provisioning-v1.md)을 따른다.
+`provisioning UUID`는 비밀 없는 읽기, `provision UUID`는 계획이며 `--execute`로 명시 공급한다.
+`registration-notify UUID`도 계획이며 `--execute`가 등록-only sender를 한 번 실행한다.
+세 명령 모두 내부 이름/UUID 대상·human/JSON의 같은 실행 경로와 strict 옵션 검사를 사용한다.
+새 HTTP endpoint로 자동 노출된 기능은 아니다. 기존 full/optional create·동등 replay 계약은 그대로다.
+
 <a id="toc"></a>
 ## 목차
 
@@ -39,41 +45,51 @@ Xenova는 Raspberry Pi 4의 Xen dom0에서 VM 등록·실행·관측·복구·�
 ### 대상과 작업 키
 
 - `TARGET`은 영구 UUID 또는 **등록된 내부 이름**이다. 표시 이름으로 검색하지 않는다. 보관된 VM과 자동 연동에는 UUID를 사용한다.
-- 공통 CLI에서 위치 TARGET 대신 `--vm-id UUID`를 쓸 수 있다. 둘 다 주면 `--vm-id`가 우선한다.
+- 공통 CLI에서 위치 TARGET 대신 `--vm-id UUID`를 쓸 수 있다. 둘 다 주면 같은 UUID로 해석돼야 한다. 서로 다른 대상이나 서로 다른 값을 반복한 옵션은 `INVALID_SPEC`이다.
 - 새 작업의 `KEY`는 예시에서 UUID로 한 번 발급한다. **같은 작업 재전달은 원 KEY·인자 전체를 유지**하고, 새 작업은 새 키를 사용한다. 원 키와 응답의 `operation_id`를 작업 기록에 보관한다. 셸을 다시 열어 키를 새로 발급하는 것은 재전달이 아니다.
 - create는 별도 규칙으로 `create:<정규화한 VM UUID>`를 사용한다. 복구는 `recovery_attempt_id`와 원 요청 파일로 중복을 판정한다.
 - `request_id`는 호출 추적용이며 중복 실행 방지 키가 아니다. CLI가 자동 발급하고 Python 호출자는 지정할 수 있다.
 
 ### 출력과 실제 변경
 
-`--json`은 출력 형식뿐 아니라 **공통 Manager 경로를 선택하는 옵션**이다.
-`list/get/create` 등 공통 전용 명령은 생략해도 Manager를 사용한다. `start/reboot` 등의
-기존 운영 명령은 내부 이름으로 쓸 때 생략할 수 있지만, 영구 UUID를 대상으로 하거나
-단일 envelope가 필요하면 `--json`을 사용한다. `firmware-replace`처럼 공통 Manager에
-없는 운영 명령에는 이 옵션을 붙이지 않는다.
+`--json`은 같은 결과를 한 줄 JSON으로, 생략은 들여쓴 JSON으로 표시한다.
+출력 형식·TTY 여부는 handler·권한·실행 의도·관측 여부를 선택하지 않는다.
+`list/status --short`는 같은 관측 결과의 열만 줄인다. `--json`과 함께 쓸 수 없다.
+공통 VM 제어·설정은 내부 이름/UUID와 출력 형식에 관계없이 Manager를 한 번 호출한다.
+부팅·console·firmware-replace는 별도 운영 목적이다. 이들은 `--json`을 지원하지 않으며
+잘못 붙이면 실행 전에 거절한다. `diagnose`는 자체 진단 JSON의 들여쓰기만 바꾼다.
 
-`--execute`는 공통 자산/정책 변경의 계획을 실제 저장으로 전환한다. `start/stop/reboot`는
-이 옵션 없이 실행하므로 계획 조회로 사용하면 안 된다. `--idempotency-key`는 제어 명령에서
-선택이지만 응답 유실·재전달 관리에는 권장하며, 자산/CPU 정책 변경에서는 명세대로 필수다.
-`--timeout-ms`는 probe·cpu-layout·cpu-host-prepare의 입력이다. get/list나 control의
-예산을 바꾸는 옵션은 아니며, `--max-age-ms`는 snapshot의 캐시 나이 제한이다.
+`--execute`는 계획 기본 action에서만 쓴다. 즉시 제어의 `--execute`와 조회의 `--force`
+같은 무의미한 명시 옵션은 `INVALID_SPEC`이다. `--idempotency-key`는 제어의 원 key이며
+`control-operation`에서는 조회 선택자다. create는 `create:<정규화한 VM UUID>`로 고정된다.
+CLI에 다른 create key를 명시하면 거절하며, 이 옵션을 생략하는 기존 사용은 유지한다.
 
-| 인터페이스 | 출력·주의점 |
-|---|---|
-| `xenova-vm … --json` | stdout에 Manager envelope 하나. 하위 도구 출력은 stderr |
-| `xenova-vm list --short` | 표시 이름·내부 이름·UUID·관측 상태·IP의 다섯 열 표. `--json`과 함께 사용하지 않음 |
-| Manager 전용 명령 | `--json` 없이도 Manager로 호출하며 JSON을 들여써 출력 |
-| 운영 CLI 전용 명령 | 자체 JSON·문자열·도구 로그·대화형 콘솔. **`--json`을 붙이지 않음** |
-| `xenova-wifi` | 자체 JSON/오류·종료 코드. `--json` 옵션 없음 |
-| Python `Manager.call` | 동기 dict 반환. stdout에 쓰지 않음 |
-| HTTP/WebSocket | 별도 모델과 상태 코드. Manager envelope와 다름 |
+`--timeout-ms`는 `get/list/intents/probe/execution-context/operation/control-operation/
+recovery-operation`의 조회 예산(1..15000), CPU 조회/준비와 recovery-reconcile의 기존 단계
+예산이다. `--budget-ms`는 지원 action의 CLI 진입·이름 해석을 포함한 호출 예산이다.
+둘 다 있으면 더 이른 기한을 사용하고, 원 operation의 물리 기한을 연장하지 않는다.
+`--max-age-ms`는 snapshot의 과거 관측 허용 나이이며 새 관측 timeout이 아니다.
 
-Manager 전용 명령은 `templates, list, get, create, retire, delete, restore, purge, operation, update-resources, firmware-transition, recover-once, recover_once, recovery-operation, control-operation, probe, snapshot, execution-context, host-resume, cpu-policy-set, cpu-layout, cpu-host-prepare`다. `status --json`은 `list` 별칭이다. 나머지 공통 제어·설정은 `--json`으로 Manager를 선택한다.
+| 질문·소비자 | 권장 명령 | 원본·Xen 관측 | 저장/예산 |
+|---|---|---|---|
+| 등록 VM의 관리 의도 / Worker | `intents [UUID]` | instance+tombstone+intent, Xen 없음 | 상태/cache 쓰기 없음. timeout/budget, 최대 두 metadata 회차 |
+| 현재 등록·실행 / 운영·API | `list/status`, `get TARGET` | registry+현재 Xen·incarnation | 관측 cache 게시. timeout/budget |
+| 현재 관측·실행 binding / Bootstrap | `probe TARGET`, `execution-context TARGET` | get과 같은 관측·정합성 엔진 | cache 게시. observation/기존 전체 VMView 반환을 각각 유지 |
+| 마지막 관측 / 운영·API | `snapshot UUID --max-age-ms MS` | cache만 읽음 | 새 관측/시각 갱신 없음. 이름은 별도 registry 해석 필요 |
+| 원 요청 결과 / CLI·API | `operation`, `control-operation`, `recovery-operation` | 해당 종류의 journal 및 필요한 소유 근거 | 재실행·수습·내구 재확정 없음. timeout/budget |
+| 선택 가능한 template / UI·운영 | `templates` | catalog/작은 manifest 검증, Xen 없음 | payload 전체 hash 없음. budget, 완전 목록 재대조 |
+| 실제 CPU 배치 / 운영 | `cpu-layout [UUID]` | 정책/receipt+실제 전체 vCPU 관측 | 정책 수정·repin 없음. 기존 CPU 정합성 잠금/timeout 유지 |
+| 자산·시각 종합 진단 / 운영 | `diagnose --details` | 기존 status의 boot 자산 검사·hash·Xen·시각 | 명시적인 고비용 진단, 기존 실행 잠금 유지 |
+| 부팅 인자·시각 / 운영 | `diagnose` | /proc·시각 도구 | 자체 JSON, 실행 제어 없음 |
+
+Python `Manager.call`은 stdout을 사용하지 않는다. CLI가 반환된 한 결과를 잠금 밖에서
+표시한다. stdout의 느린 reader/깨진 pipe는 원 작업 취소나 재실행 허가가 아니다.
+HTTP/WebSocket의 기존 DTO·상태 코드는 별도 계약이다. CLI 추가가 새 HTTP endpoint를 뜻하지 않는다.
 
 | 변경 구분 | 명령 |
 |---|---|
 | `--execute` 생략 시 계획, 지정 시 실행 | `create, retire/delete, restore, purge, update-resources, firmware-transition, recover-once, cpu-policy-set, cpu-host-prepare`. 운영 `firmware-replace`도 자체 계획 옵션 사용 |
-| **`--execute`와 무관하게 즉시 실행** | `start, stop, reboot, destroy, autostart-set, board-shutdown-set, config, host-resume` |
+| **`--execute` 없이 즉시 실행** | `start, stop, reboot, destroy, autostart-set, board-shutdown-set, config, host-resume` |
 | **즉시 운영 동작** | `autostart, host-init, host-quiesce, shutdown-all, poweroff, reboot-board` 및 Wi-Fi configure/activate |
 | 읽기 전용 실제 CPU 조회 | `cpu-layout`. 정책·affinity·VM 상태를 변경하지 않음 |
 | Xen 조회·runtime 관측 게시 | `get, list, probe, execution-context` |
@@ -115,7 +131,10 @@ Manager 전용 명령은 `templates, list, get, create, retire, delete, restore,
 | [`xenova-vm templates`](#cmd-templates) | 게시 템플릿 조회 |
 | [`xenova-vm list`](#cmd-list) | 등록·보관 VM 목록 |
 | [`xenova-vm get`](#cmd-get) | VM 한 대의 현재 상태·설정 조회 |
-| [`xenova-vm status`](#cmd-status) | 운영 상태와 Manager 목록 별칭 |
+| [`xenova-vm status`](#cmd-status) | list와 같은 현재 상태 조회 |
+| [`xenova-vm intents`](#cmd-intents) | 저장된 관리 의도·lifecycle metadata |
+| [`xenova-vm provisioning / provision`](#cmd-provisioning) | 비밀 없는 공급·실행 프로필 조회 / 명시 재공급 |
+| [`xenova-vm registration-notify`](#cmd-registration-notify) | 등록-only 통지 계획 / 명시 1회 송신 |
 | [`xenova-vm create`](#cmd-create) | 독립 VM 등록 |
 | [`xenova-vm start`](#cmd-start) | 등록 VM 시작 |
 | [`xenova-vm stop`](#cmd-stop) | VM 협조형 정지 |
@@ -125,6 +144,7 @@ Manager 전용 명령은 `templates, list, get, create, retire, delete, restore,
 | [`xenova-vm probe`](#cmd-probe) | 제한시간을 둔 실제 Xen 관측 |
 | [`xenova-vm snapshot`](#cmd-snapshot) | 공통 작업을 기다리지 않는 캐시 조회 |
 | [`xenova-vm operation`](#cmd-operation) | 자산 작업 이력 |
+| [`xenova-vm operation-reconcile`](#cmd-operation-reconcile) | 실패한 Linux private 자산의 진단·명시 수습 |
 | [`xenova-vm control-operation`](#cmd-control-operation) | 사용자 제어 이력 |
 | [`xenova-vm recovery-operation`](#cmd-recovery-operation) | 조건부 복구 이력 |
 | [`xenova-vm recovery-reconcile`](#cmd-recovery-reconcile) | 원 복구 시도의 진단·증거 기반 종결 |
@@ -169,7 +189,7 @@ Manager 전용 명령은 `templates, list, get, create, retire, delete, restore,
 | [`xenova-vm dhcp-ready`](#cmd-dhcp-ready) | dnsmasq의 UDP/67 준비 확인 |
 | [`xenova-first-boot grow/register`](#cmd-first-boot) | 저장소 확장·factory 등록 |
 
-별칭: [`delete → retire`](#cmd-retire) · [`recover_once → recover-once`](#cmd-recover-once) · [`status --json → list`](#cmd-status). `xenova-first-boot` 항목은 grow/register를 함께 설명한다.
+별칭: [`delete → retire`](#cmd-retire) · [`recover_once → recover-once`](#cmd-recover-once) · [`status → list`](#cmd-status). `xenova-first-boot` 항목은 grow/register를 함께 설명한다.
 
 
 <a id="registration"></a>
@@ -229,7 +249,7 @@ xenova-vm templates --json
 
 선택: `--lifecycle REGISTERED|RETIRED|PURGING|PURGED|all`, 기본 `REGISTERED`.
 `--short`는 요약표, `--json`은 단일 JSON을 선택하며 둘은 함께 사용할 수 없다.
-둘 다 생략하면 기존 들여쓴 JSON을 출력한다. `--short`는 `list`에만 허용한다.
+둘 다 생략하면 기존 들여쓴 JSON을 출력한다. `--short`는 `list/status`에만 허용한다.
 
 **사용 조건**
 
@@ -315,45 +335,52 @@ xenova-vm get "$VM_ID" --json
 
 [명령어 색인으로](#command-index)
 
-<a id="cmd-status"></a>
-### `xenova-vm status` — 운영 상태와 Manager 목록 별칭
-
-**기본 사용**
-
-`xenova-vm status`
-
-기존 운영 상태 출력이다. status --json은 Manager list로 전환된다.
-
-**인자**
-
-인자 없음. `--json` 유무에 따라 반환 모델이 다르다.
-
-**사용 조건**
-
-운영 상태·자산 검사와 시각 진단을 읽는다.
-
-**실행 예시**
+<a id="cmd-intents"></a>
+### `xenova-vm intents` — 저장된 관리 의도
 
 ```bash
-xenova-vm status
-xenova-vm status --json
+xenova-vm intents --json
+xenova-vm intents --lifecycle all --timeout-ms 1000 --budget-ms 2000
+read -r -p "등록 또는 보관 VM UUID: " VM_ID
+xenova-vm intents "$VM_ID" --json
 ```
 
-**정상 응답**
+`Manager.call('intents', {})`의 `data.vms`는 기본 REGISTERED 목록이다. 단건은
+`Manager.call('intents', {'vm_id': VM_ID})`로 `data.vm`을 얻는다. 단건에는 lifecycle
+filter를 함께 지정하지 않는다. 목록 filter는 `REGISTERED/RETIRED/PURGING/PURGED/all`이다.
+단건 UUID는 보관 VM에도 사용할 수 있다. 내부 이름은 현재 등록부에서만 해석한다.
 
-옵션 없음: 자체 JSON `{"instances":[],"domains":[],"time":{}}` 형태이며 각 instance의 자산 오류·Xen flags·graceful 지원·유효 종료 정책을 포함한다. `--json`: `list / {}`의 `data.vms`.
+각 항목은 `vm_id/name/guest_kind/template_id/template_version/autostart/lifecycle/generation`,
+`desired_state/intent_revision/intent_lifecycle_generation/intent_source/intent_applicable`을 담는다.
+일반 create와 factory 모두 공개 instance 등록을 읽는다. factory에 create journal을 요구하지 않는다.
+명시 intent가 없으면 desired_state는 `unknown`, revision/source/intent generation은 null,
+applicable은 false다. autostart 설정으로 running/stopped를 보충하거나 새 intent를 쓰지 않는다.
+과거 lifecycle intent도 원 값을 표시하되 applicable=false를 유지한다.
 
-**오류 응답**
+Xen/Store/HTTP/guest/실행 cache/CPU 준비를 호출하지 않고, business·intent·observation을 저장하지 않는다.
+registry의 신원/경로·디스크 alias 검사와 대상 원 create의 완료 확인은 유지한다.
+등록 집합·instance/tombstone/intent를 재대조하며 변화 시 한 회차만 더 읽는다.
+이는 모든 VM의 한 시점 전역 snapshot이나 복구 허가가 아니다.
 
-운영 경로 실패: stderr `[xenova] ERROR: …`, 종료 `1`. `--json` 경로는 Manager 오류 envelope/종료 코드.
+손상은 `RECONCILE_REQUIRED`, 저장소/등록부 접근 실패는 `STORAGE_UNAVAILABLE`, 확인된
+단건 부재는 `VM_NOT_FOUND`, 지속 변경은 `TARGET_CHANGED`, 예산 만료는 `DEADLINE_EXCEEDED`다.
+부분 실패를 빈 목록으로 바꾸지 않는다. 원 실행 제어의 현재 intent/신원/기한 guard는 그대로 필요하다.
 
-**확인 방법**
+<a id="cmd-status"></a>
+### `xenova-vm status` — list 별칭
 
-전체 등록 목록은 `list`, 개별 실행 신원은 `get/probe`로 확인한다. `status --json --lifecycle …`의 lifecycle은 별칭 경로에 전달되지 않으므로 필터가 필요하면 `list`를 쓴다.
+`status`, `status --json`, `status --short`는 모두 `list`를 실행한다. `--lifecycle`,
+`--timeout-ms`, `--budget-ms`도 list와 똑같이 전달한다. `data.vms`와 Manager 오류/종료 코드를 사용한다.
 
-**Manager 매핑:** `status --json`만 `list / {}`로 매핑. Python action `status`는 없음.
+| 예전 호출 | 현재 호출·의미 | 영향 |
+|---|---|---|
+| `status --json` | 그대로 list/envelope | 기존 목록 소비 유지, lifecycle/timeout도 적용 |
+| `status`의 instances/domains/time | `diagnose --details` | 의도적으로 변경. 자산 검사·시각 종합 진단을 명시 선택 |
+| `start/stop/reboot TARGET`와 `… --json` | 같은 Manager 제어/envelope | 내부 이름도 동일 수락·원 결과·pending 의미. 무출력을 성공으로 해석하지 않음 |
 
-[명령어 색인으로](#command-index)
+종합 진단은 삭제하지 않았다. `diagnose --details [--json]`은 기존 status의
+`instances/domains/time`과 자산 오류를 반환한다. 이 옵션은 출력 요약이 아니라 고비용 진단 목적이다.
+Python `Platform.status()`는 이 진단용 기존 의미를 유지한다.
 
 <a id="cmd-create"></a>
 ### `xenova-vm create` — 독립 VM 등록
@@ -362,7 +389,9 @@ xenova-vm status --json
 
 `xenova-vm create --vm-id UUID --name NAME --template-id ID --template-version VERSION --vcpus N --memory-mib M`
 
-이 형식은 계획이다. 실제 등록은 --execute를 추가한다. Linux IPv4 생략 시 자동 예약하며 버전·CPU·메모리는 명시한다. UUID가 생성 요청 키를 결정한다.
+이 형식은 계획이다. 실제 등록은 --execute를 추가한다. 정확한 템플릿 버전과 UUID는 명시한다.
+vCPU·메모리는 각각 생략할 수 있으며 선택한 카탈로그의 `default_resources`로 보충한다.
+Linux IPv4 생략은 기존 자동 예약이다. UUID가 생성 요청 키를 결정한다.
 
 **인자**
 
@@ -372,13 +401,54 @@ xenova-vm status --json
 | `--name TEXT` | 필수, 표시 이름 1..63문자. create 위치 이름도 허용 |
 | `--template-id ID` / `--template ID` | 공개 템플릿 ID |
 | `--template-version VERSION` | 정확한 게시 버전 |
-| `--vcpus N / --memory-mib M` | 둘 다 필수, 템플릿 범위의 정수 |
+| `--vcpus N / --memory-mib M` | 각각 선택, 생략만 카탈로그 기본값 사용. 명시값은 템플릿 범위의 정수 |
 | `--auto-ip` / `--ipv4 ADDRESS` | 상호 배타. 생략도 자동 할당 |
 | `--execute / --json` | 계획 확인 후 실행 |
 
 **사용 조건**
 
 카탈로그·저장 용량·UUID/이름/MAC/IP 소유권 검사를 통과해야 한다. [생성·주소 계약](#creation-contract)을 따른다.
+
+#### 자원 기본값과 재전달 (하위 CLI/Manager 제공, HTTP 소비는 별도)
+
+이번 규칙은 생략과 null/0/False/빈 값/잘못된 타입을 구별한다. 현재 공통 카탈로그는 지원
+Debian·Ubuntu에 1 vCPU/512 MiB, 고정 Zephyr에 1 vCPU/16 MiB를 제공한다. 최소 허용량을
+새 권장값으로 만든 것이 아니며, 설치/운영 자원·CPU 프리셋은 바꾸지 않는다. 자원 부족 시
+더 작은 값으로 낮추지 않는다. CPU 개별 지정을 create에 추가하지 않으며 다음 실행의 현재
+정식 배치 정책을 상속한다. 템플릿 ID/버전·신원·권한·원 생성 기한 규칙은 그대로다.
+
+CLI는 생략한 자원 key를 보내지 않는다. 직접 Manager도 같은 규칙으로 처리한다. 신규 요청만
+작은 카탈로그 메타데이터로 해석하고, 재전달은 그 전에 원 key의 유일성과 `request`를 확인한다.
+원 `request`는 최초 명시/생략 형태, `initial_spec`·`spec_hash`는 확정 명세, `template`은 선택
+버전/manifest 및 당시 `default_resources`, `assigned`는 원 주소/신원 예약이다. 원 기록의
+자기 정합성 검사와 새 재전달의 의미 비교는 별개다. 같은 key의 재전달에서 생략한 두 자원은
+원 `initial_spec` 값으로 보충하고 명시값은 그 값과 비교한다. **생략↔동일 명시값은 양방향으로
+같은 요청**이며, 최초 명시값이 당시 기본값과 달라도 적용한다. 다른 자원값·이름·템플릿 등은
+충돌이고 null/bool/0/잘못된 타입은 오류다. IP 등 다른 항목의 기존 비교 의미는 확대하지 않는다.
+
+기존 완전 명시 CLI/Manager/HTTP 호출은 새 옵션·header·mode 없이 유지한다. 저장 형식은
+하위 구현의 책임이며 일반 호출자가 버전을 고르거나 원장을 변환하지 않는다. 새 코드는 지원하는
+완전 명시 1.0/1.1과 생략 입력 1.2를 같은 저장소에서 읽는다. 1.2의 저장한 원 제출→당시 원천→
+확정 명세 검사는 유지하고, 표현이 다른 replay 때문에 원 request/hash/신원/기한을 다시 쓰지 않는다.
+구형 내부 writer가 모르는 새 형식과 혼합 설치하는 문제는 별도 배포 호환이며 기존 완전 명시
+호출자의 호환을 막는 근거가 아니다. 운영 원장의 일괄 이관/초기화는 하지 않는다.
+
+계획 `data.request`는 제출 형태, `data.spec`는 이번 계획의 완전한 자원 명세다. 계획은 예약이나
+수락이 아니다. 계획값으로 실행하려면 **최초 execute에 그 spec의 vCPU/메모리를 명시**하고 그
+선택을 첫 수락까지 유지한다. 원래의 생략 입력으로 새 execute를 요청하면 그 시점에 다시 계획하는
+것이다. 별도 plan-token 서비스는 없다. 수락 뒤에는 현재 기본값이 바뀌거나 사라져도 원 결정을
+재해석하지 않는다. 현재 실행의 정책·신원·자원 guard는 별도로 유지한다.
+
+예를 들어 원 메모리 768MiB를 명시해 수락했다면, 나중에 메모리를 생략해도 원 768을
+회수한다. 원 512에 대해 768을 명시하면 충돌이다. 현재 구성 변경으로 768이 되어도 과거
+create의 기준은 원 512이며 현재 구성을 되돌리지 않는다. 응답 전체를 create body에 복사하지
+않고 허용 입력 필드만 사용한다. 같은 요청 인정 뒤에도 활성 원 실행/실패/명시 수습/완료 회수는
+각 상태의 기존 규칙을 따른다. 새 복사·예약·기한 발급이나 실패 뒤 자동 재생성 허가는 아니다.
+
+확정값은 create/VMView의 `initial_spec` 및 `operation`의 원 기록에서, 변경된 현재 구성은
+`configuration`에서 확인한다. 실제 Xen 자원/CPU 적용은 관측과 `cpu-layout`의 현재 근거로
+확인하며 구성값을 실제 관측이나 Agent 건강으로 채우지 않는다. FastAPI/Spring/화면의 생략
+전달과 표시 연결은 담당 요청/공동 수락 전이다.
 
 새 Linux VM의 대화형 Bash에는 `[표시 이름] 사용자@vm-UUID앞8자리:경로` 형식의
 프롬프트를 준비한다. 실제 hostname·Xen 내부 이름·신원은 유지하며 Zephyr에는 적용하지 않는다.
@@ -403,17 +473,29 @@ xenova-vm get "$VM_ID" --json
 
 **정상 응답**
 
-계획은 `data.plan`을 포함한다. 최초 완료 `data`는 **VMView 자체**: `{"vm_id":"22222222-2222-4222-8222-222222222222","lifecycle":"REGISTERED","generation":0,"desired_state":"stopped","intent_revision":1}`. `{vm:…}`로 감싸지 않는다.
+계획은 `data.plan`을 포함한다. Linux 계획은 metadata·용량·소유권 검사의 결과이며 payload 전체 검증이나 실제 등록 완료를 뜻하지 않는다. 기존 실패 작업의 계획 재조회도 `ok=true`일 수 있으므로 포함된 `operation.status/error`를 확인한다. 최초 완료 `data`는 **VMView 자체**: `{"vm_id":"22222222-2222-4222-8222-222222222222","lifecycle":"REGISTERED","generation":0,"desired_state":"stopped","intent_revision":1}`. `{vm:…}`로 감싸지 않는다.
+
+같은 원 요청의 Linux 준비 실행이 확인되면 재전달은 `data.operation`, `recovery_required=false`,
+`effective_status=RUNNING`을 반환한다. 이 `ok=true`는 원 작업 확인 성공이며 등록 완료나
+VM 실행 성공이 아니다. 완료 재전달에서 현재 관측만 실패하면 원 결과와
+`current=null`·`diagnostic_warnings`를 반환하고 원 성공을 유지한다.
 
 **오류 응답**
 
 같은 UUID의 다른 명세는 `IDEMPOTENCY_CONFLICT`(3). 버전 없음은 `TEMPLATE_VERSION_NOT_FOUND`(2), 주소 충돌 `IP_CONFLICT`(3), 용량 부족 `INSUFFICIENT_STORAGE`(4).
 
+Linux 복사 검증·준비 실패는 원 작업이 기록된 뒤의 `RECOVERY_REQUIRED`(4)일 수 있다. `operation_id`와 [부분 준비·원 요청 재확인 규칙](#creation-contract)을 확인한다. 실패나 응답 유실을 미수락으로 단정해 새 UUID로 다시 생성하지 않는다.
+
+다른 Linux 준비가 슬롯을 점유하여 **신규 요청 미수락을 확인한 경우**에는
+`OPERATION_IN_PROGRESS`(3), `operation_id=null`, `error.details.accepted=false`다.
+새 예약·workspace·대기열은 만들지 않는다. 일반 잠금 경합·timeout에 이 미수락 의미를
+일괄 적용하지 않는다. 기존 원 작업 조회·완료 재전달은 신규 슬롯 경합보다 먼저 확인한다.
+
 **확인 방법**
 
 `get`에서 UUID·내부 이름·MAC/IP·자원을 확인한다. 완료는 등록만 뜻하며 `domid`가 없어도 정상이다. 작업 조회는 `xenova-vm operation --idempotency-key "create:$VM_ID" --json`.
 
-**Manager 매핑:** `create / {vm_id,name,template_id,template_version,vcpus,memory_mib,ipv4?}`. 키는 `create:<정규 UUID>`로 고정.
+**Manager 매핑:** `create / {vm_id,name,template_id,template_version,vcpus?,memory_mib?,ipv4?}`. 키는 `create:<정규 UUID>`로 고정.
 
 [명령어 색인으로](#command-index)
 
@@ -755,7 +837,7 @@ xenova-vm snapshot "$VM_ID" --max-age-ms 3000 --json
 
 **사용 조건**
 
-조회할 작업이 존재해야 한다. `ls`에 파일이 없으면 아직 이력이 없는 것이다.
+원 operation ID 또는 제출 전 보존한 create key로 조회한다. 조회는 재실행·청소·예약 해제를 하지 않는다.
 
 **실행 예시**
 
@@ -769,9 +851,17 @@ xenova-vm operation --operation-id "$OP_ID" --json
 
 `data` 예: `{"operation":{"action":"create","status":"SUCCEEDED","phase":"complete"},"recovery_required":false,"effective_status":"SUCCEEDED"}`.
 
+Linux의 확인된 원 준비 실행은 `effective_status=RUNNING`이다. 원 status/phase와
+관측 의미는 [작업 원장 계약](#operation-fields)을 따른다. VM의 RUNNING 상태와 구별한다.
+
 **오류 응답**
 
 존재하지 않는 이력은 `VM_NOT_FOUND`(2), 비표준 선택자나 복수 선택자는 `INVALID_SPEC`(2).
+예산 소진으로 검색을 마치지 못하면 `DEADLINE_EXCEEDED`, 원장 읽기·JSON 형식 실패는
+`ARTIFACT_INVALID`, 원장 무결성 불일치는 `RECOVERY_REQUIRED`, 중복 key는
+`RECONCILE_REQUIRED`, 원 실행 소유권 관측 실패는 `OBSERVATION_UNAVAILABLE`이다.
+어느 오류도 정상 부재나 유일한 원 작업으로 확정하지 않는다. 이 자산 원장 오류를 별도
+`control-operation`의 읽기 오류와 같은 계약으로 합치지 않는다.
 
 **확인 방법**
 
@@ -780,6 +870,111 @@ xenova-vm operation --operation-id "$OP_ID" --json
 **Manager 매핑:** `operation / {operation_id} 또는 {idempotency_key}`
 
 [명령어 색인으로](#command-index)
+
+<a id="cmd-operation-reconcile"></a>
+### `xenova-vm operation-reconcile` — 원 create의 private 실패 종결
+
+기본 호출은 읽기 전용 진단이다. 등록 VM의 retire/purge나 VM recovery-reconcile와 다르다.
+운영 자산을 임의 삭제하는 명령이 아니며, 원 기록에서 도출한 미게시 Linux workspace만 다룬다.
+
+`xenova-vm operation-reconcile --spec-file REQUEST.json [--execute] [--budget-ms MS] --json`
+
+Manager 매핑은 `call("operation-reconcile", spec, execute=False, budget_ms=...)`다.
+`execute=True`는 해당 원 작업의 `discard-private` 목적을 명시 확인한 호출이다.
+외부 HTTP는 자동 노출하지 않으며 소유자 권한·확인·허용 응답 필드는 담당자 연결 사항이다.
+
+| spec 필드 | 범위·의미 |
+|---|---|
+| `operation_id` 또는 `idempotency_key` | 정확히 하나의 원 create 선택자. 중복 key는 부재/유일성으로 추정하지 않음 |
+| `vm_id` | 원 create의 소문자 표준 UUID. ID를 안다는 사실은 사용자 접근권한이 아님 |
+| `expected_spec_sha256` | 원 operation.spec_hash의 소문자 SHA-256. 호출 timeout을 VM 명세에 넣지 않음 |
+| `purpose` | `discard-private`만 허용. 임의 경로/PID/device/force 입력은 없음 |
+| `timeout_ms` | 선택 1..105000, 생략 15000. 이번 진단/수습 기한이며 원 create 기한이 아님 |
+| `expected_context_sha256` | 명시 적용 시 진단 data.context_sha256. 대상/자산/gate가 바뀌면 재진단. 진단 자체가 삭제 권한 토큰은 아님 |
+| `reconciliation_id` | 명시 적용 시 안정적인 소문자 표준 UUID. 같은 수습의 재전달에는 같은 ID/목적/원 spec/진단 문맥을 사용 |
+
+진단 data는 `operation_id/vm_id/spec_sha256/purpose/context_sha256/private_items/private_absent/
+reservation_released=false`를 반환한다. 실행자 active/residual·다른 수습·관측 실패·public/등록
+충돌에서는 오류로 종결하며 준비 실행을 탈취하지 않는다. 빈 workspace도 원 효과/사용 부재를
+확인한 명시 종결 대상이며, 진단/일반 operation 조회는 삭제나 예약 반환을 수행하지 않는다.
+
+명시 수습은 기존 Linux 준비 슬롯 밖에서 대기열을 만들지 않는다. 슬롯을 확보하고 원 작업에
+`discard-private` 소유를 연결한 뒤 계획을 저장한다. 긴 열거/사용 검사/정리는 공통 잠금 밖이고
+각 삭제 직전에는 gate와 계획 inode를 재확인한다. 계획·기록·완료의 짧은 변경은 공통 잠금,
+실제 개별 unlink는 짧은 admission으로 gate와 직렬화한다. 안정 lock·원 journal·template·public
+VM·진단 원본은 삭제하지 않는다. 계획은 고정 private topology, 최대 128항목/직렬화 128KiB로 제한한다.
+
+적용 data는 원 `operation`, `effective_status=FAILED`, `recovery_required=false`,
+`reconciliation`을 반환한다. **수습 완료는 원 create 성공이 아니다.** 같은 create key를 다시
+실행하면 원 실패와 수습 기록을 error.details로 회수하며 새 복사/신원/기한을 발급하지 않는다.
+명시 신규 create는 새 key/VM 신원과 현재 IP/용량 검사로 수행한다. 원 UUID 이력은 계속 보존한다.
+
+수습 기록은 Linux 자산 journal `schema_version=1.1` 또는 선택 자원 생략을 수락한 `1.2`의 `reconciliation.version=1`이다. 1.2의 원 제출 key 존재와 저장된 확정 명세는 create 재전달 계약을 따르며 수습이 재해석하지 않는다.
+`request/context_sha256/plan/plan_sha256/phase/remaining/deleting/root_pending/error/release`를
+한 원자 JSON 단위로 저장한다. phase는 planned/cleaning/complete이며 원 spec_hash/최초
+error/result를 수습 결과로 덮지 않는다. cleanup 오류는 별도 reconciliation.error에 둔다.
+알 수 없는 subtree·손상·관측 실패는 반환 가능한 예약 0으로 해석하지 않는다.
+
+삭제 전에 계획과 다음 삭제 항목을 저장한다. unlink/부모 fsync 뒤 중단되면 동일 수습으로
+해당 항목의 부재와 남은 계획을 확인한다. 원인 모를 부재·다른 inode·링크·특수 파일·mount·
+사용 FD는 거절한다. 새 프로세스의 소유 파일에 재사용된 inode와 아직 열린 private inode는
+현재 FD 경로/링크 상태도 대조하여 구별한다. 원 source 손상은 게시를 막지만 소유가 확인된
+실패 사본 폐기를 무조건 막지는 않으며, 폐기를 위해 payload 전체를 다시 해시하지 않는다.
+
+완료 JSON이 보인다는 사실만으로 과거 fsync 성공을 추정하지 않는다. 일반 조회가 표시하는
+complete/release는 기록 내용이다. 예약을 실제 소비하는 writer는 기존 공통 잠금 안에서
+workspace 부재·동일 원 기록을 확인하고 파일/부모 fsync를 재확정한다. 실패하면 예약을
+소비하지 않는다. 일반 목록/operation 조회를 fsync 실행기로 바꾸지 않는다.
+
+신규 create의 같은 공통 잠금 구간에서, 원장을 아직 쓰거나 callback/준비에 진입하지
+않은 동안에는 이 writer가 확인한 동일 원장의 반환 판정을 주소/용량 helper에 전달할 수 있다.
+각 helper가 같은 내구 근거를 다시 만들 의무는 아니다. 잠금 해제·원장 변경·슬롯 대기·
+private 준비 뒤 또는 다른 호출/프로세스에는 그 결과를 넘기지 않고 다시 확인한다.
+DHCP lease·현재 등록 충돌과 실제 게시/실행 직전 guard는 별도의 현재 근거다.
+
+create/retire/restore/purge의 같은 key 재전달도 완전하게 읽은 원장 집합에서 유일한
+원 작업을 확인한다. 중복 key 기록은 첫 일치를 원 결과로 선택하지 않고 기존
+`RECONCILE_REQUIRED`로 거절한다. 이 경우 조회/재전달이 원장을 정리하거나 실행하지 않는다.
+계획 저장 실패에서는 삭제 0, 완료 저장 미확정에서는 반환 성공 0이며, 회복 후 같은 수습으로
+다시 확인한다. 기록/잠금 삭제·phase 수정·새 UUID로 차단을 우회하지 않는다.
+
+용량 검사는 기존의 VM 증가분과 2GiB 여유를 유지한다. 수습 메타데이터 상한 128KiB는
+정리 기록의 별도 물리 공간 예약이 아니다. 외부 쓰기로 여유가 소진되거나 매체 EIO가 생기면
+계획/완료 저장을 실패로 반환하며, 저장소가 회복된 뒤 같은 수습을 명시 재전달한다.
+다른 VM·원장·로그를 지워 기록 공간을 자동 확보하지 않는다.
+
+<a id="creation-deadline"></a>
+#### Linux 생성의 세 시간과 호환
+
+새 Linux create는 `/etc/xenova/creation-policy.json`의 유한 정책을 요구한다.
+정확한 key는 `schema_version="1.0", call_ms, execution_ms, cleanup_ms`다. 정수 양수이며
+call_ms>cleanup_ms여야 한다. call/실행의 직렬화 입력 상한은 86460000ms,
+cleanup_ms 상한은 60000ms다. 이는 운영 기본값·보드 지연 보장이 아니다.
+recipe는 값이 null인 예시를 `/usr/share/xenova/creation-policy.json.example`로만 설치한다.
+승인된 보드 정책을 별도로 공급하기 전 새 Linux create는 수락 전 RECONCILE_REQUIRED,
+accepted=false다. 완료 replay·조회·기한 불명 작업의 명시 수습은 이 설정 부재로 막지 않는다.
+Zephyr의 기존 bundle·독립 factory seed 준비 계약은 유지한다.
+
+| 시간 | 현재 의미 |
+|---|---|
+| 이번 호출 | 진입부터 registry/슬롯/잠금/준비/반환의 잔여 예산. create budget_ms는 이 정책의 call_ms 이하로 제한 |
+| 원 생성 | 수락 시 `min(t_accept+execution_ms, D_call-cleanup_ms)`를 host boot와 함께 내구 기록. 재전달/조회/재시작으로 연장하지 않음 |
+| 종료·수습 | 소유 자식/FD·mount/loop 종료와 기록 또는 명시 수습의 유한 예산. 만료된 생성의 새 복사/게시/launch를 허가하지 않음 |
+
+새 Linux journal의 `creation`에는 version=1·host_boot_id·accepted_monotonic_ms·
+deadline_monotonic_ms·limits를 둔다. schema 1.0 완료 기록은 replay하고, 원 기한 없는
+미완료나 다른 host 기록을 새 생성 기한으로 자동 재개하지 않는다. 현재 host의 별도 수습은
+가능하다. 새 의미를 모르는 구형 writer/일부 모듈 혼합 배포는 지원하지 않는다.
+
+실제 복사의 읽기/extent/부분 write, 다음 payload, guest 명령 제출/반환과 source/public
+게시 직전에 원 기한을 검사한다. 자기 일시 자원의 정상 종료와 실패 이미지의 명시 폐기를
+구별한다. fsync/커널 I/O의 즉시 선점을 보장하지 않는다. 파일과 부모 동기화는 각각 필요하다.
+([fsync(2)](https://man7.org/linux/man-pages/man2/fsync.2.html))
+
+public 게시 뒤에는 원 자산 검증·등록/결과 기록과 DHCP 같은 외부 효과를 구별한다.
+dhcp-applied가 확인된 원 작업의 결과는 원 생성 기한 뒤에도 이번 조회/정산 예산으로
+회수할 수 있다. 최신 stopped 의도를 초기 값으로 덮거나 Xen launch하지 않는다.
+확인되지 않은 DHCP를 만료 후 다시 제출하며 결과 회수라고 부르지 않는다.
 
 <a id="cmd-control-operation"></a>
 ### `xenova-vm control-operation` — 사용자 제어 이력
@@ -792,7 +987,7 @@ xenova-vm operation --operation-id "$OP_ID" --json
 
 **인자**
 
-`--operation-id UUID` 필수. `--json`. 선택자 UUID는 소문자 하이픈 표준형.
+`--operation-id UUID` 또는 `--idempotency-key KEY` 중 정확히 하나. 선택 `--vm-id UUID`, `--timeout-ms 1..15000`, `--budget-ms`, `--json`. 선택자 UUID는 소문자 하이픈 표준형이다. 대상 확인을 위해 선행 live get을 하지 않는다.
 
 **사용 조건**
 
@@ -802,8 +997,11 @@ xenova-vm operation --operation-id "$OP_ID" --json
 **실행 예시**
 
 ```bash
-ls /srv/xenova/control-requests/*.json
-read -r -p "조회할 operation UUID(파일명에서 .json 제외): " OP_ID
+read -r -p "최초 제출 때 보존한 key: " KEY
+read -r -p "대상 VM UUID: " VM_ID
+xenova-vm control-operation --idempotency-key "$KEY" --vm-id "$VM_ID" --json
+# 최초 응답의 operation_id를 보관했다면 대신 그 ID를 선택한다.
+read -r -p "원 operation UUID: " OP_ID
 xenova-vm control-operation --operation-id "$OP_ID" --json
 ```
 
@@ -821,6 +1019,9 @@ xenova-vm control-operation --operation-id "$OP_ID" --json
 
 이 비교는 조회 시점의 정보이며 새 실행 승인 토큰이 아니다. 원 기록 읽기 자체가 실패하면
 정상 응답이나 빈 기록으로 대체하지 않는다.
+현재 host ID가 읽히지 않거나 무효여도 유효한 원 기록은 회수한다. host/기한 비교는 null이며
+data.diagnostic_warnings의 host-identity 범위에 OSError 등 cause_type 또는 InvalidHostIdentity를 남긴다.
+복구 원 기록 조회도 현재 host 관측이 선행조건은 아니다. 실제 제어의 현재 host guard는 유지한다.
 
 **오류 응답**
 
@@ -838,10 +1039,10 @@ xenova-vm control-operation --operation-id "$OP_ID" --json
 **Manager 매핑:** `control-operation / {operation_id?,idempotency_key?,vm_id?,timeout_ms?}`.
 `operation_id`와 `idempotency_key` 중 정확히 하나가 필수다. key는 기존 요청 키와 같은
 1..200 UTF-8 byte 토큰이며, `vm_id`를 지정하면 대상 UUID도 대조한다. `timeout_ms`는
-1..15000ms, 기본 15000ms다. CLI는 기존 `--operation-id`만 지원한다.
+1..15000ms, 기본 15000ms다. CLI도 두 선택자를 지원한다. 사람이 원 key를 회수할 때는 위 CLI 예제를 사용한다.
 
-Python 호출자가 최초 응답을 잃어 operation ID를 받지 못했다면 제출 전 보존한 key로 조회한다.
-dom0 root 셸에서 실행하는 다음 예는 원 요청의 UUID·key를 입력받는다. 새 key를 발급하지 않는다.
+프로그램 호출자는 다음과 같이 같은 공개 Manager 기능을 사용할 수 있다.
+원 요청 UUID·key를 보존하며 새 key를 발급하지 않는다. CLI 사용에 이 Python 예제가 필수인 것은 아니다.
 
 ```bash
 read -r -p "원 요청의 VM UUID: " VM_ID
@@ -996,8 +1197,10 @@ VM 복구 성공으로 바꾸지 않는다. 수습한 terminal 기록의 재요�
 다시 조회한다. 종결 후 별도 동작이 필요하면 현재 건강·의도·신원·허가로 일반 요청을 새로 검토한다.
 stopped 의도에서 수습 성공을 이유로 VM을 시작하지 않는다. 지원 근거가 없으면 원 기록과
 진단 사유를 보존해 플랫폼 담당자에게 전달한다. host reboot를 일반 해제 수단으로 쓰지 않는다.
-Worker의 final 결과 재확인·Coordinator 바인딩 연결과 Gateway Authority 복원은
-[담당자 인수 요청](../requests/2026-10-27-recovery-health-ctrl.md#d03-worker)이며 자동 제공되지 않는다.
+Worker의 final 결과 재확인·Coordinator 바인딩 종단 연결은
+[담당자 인수 요청](../requests/2026-10-27-recovery-health-ctrl.md#d03-worker)이다.
+Gateway의 정상 권위 원본은 별도 [로컬 진단·재확인](../../platform/services/gateway/README.md#권위-원본-진단과-재확인)을
+사용한다. 이는 Manager/Worker가 Authority를 쓰는 경로나 손상 backup의 자동 복원이 아니다.
 
 **Manager 매핑:** `recovery-reconcile / {recovery_attempt_id, timeout_ms?}`,
 `execute=False` 기본. `budget_ms`는 기존 1..105000ms 입력 범위 안에서 이번 timeout을
@@ -1296,7 +1499,7 @@ xenova-vm firmware-replace "$INTERNAL_NAME" --bundle "$BUNDLE" --sha256 "$MANIFE
 
 **오류 응답**
 
-프로필 불일치·자산 검사 실패는 stderr `[xenova] ERROR: …`와 종료 `1`. Manager 오류 envelope가 아니다.
+프로필 불일치·자산 검사 실패는 공통 오류 envelope의 `ARTIFACT_INVALID`(4), 소유 경합은 `OPERATION_IN_PROGRESS`(3)다. 계획/실행의 정상 자체 JSON은 유지한다.
 
 **확인 방법**
 
@@ -1322,7 +1525,7 @@ status/get에서 활성 revision만 변경됐는지 확인한다. UUID·creation
 
 **인자**
 
-`TARGET`와 `VALUE=on|off` 필수. `--json` 선택. `--execute`와 무관하게 저장.
+`TARGET`와 `VALUE=on|off` 필수. `--json` 선택. 즉시 저장하며 CLI의 불필요한 `--execute`는 거절한다.
 
 **사용 조건**
 
@@ -1364,7 +1567,7 @@ get의 `configuration`에서 설정을 읽고 `desired_state/intent_revision/dom
 
 **인자**
 
-`TARGET`와 `VALUE=graceful|refuse|force-allowed` 필수. `--json` 선택. `--execute`와 무관하게 저장.
+`TARGET`와 `VALUE=graceful|refuse|force-allowed` 필수. `--json` 선택. 즉시 저장하며 CLI의 불필요한 `--execute`는 거절한다.
 
 **사용 조건**
 
@@ -1427,7 +1630,7 @@ Manager: `{vm:VMView}`. 운영 `config INTERNAL_NAME`: `/run/xenova/INTERNAL_NAM
 
 **오류 응답**
 
-잘못된 자산은 `ARTIFACT_INVALID`(4). 운영 경로는 stderr/종료 1. 생성 cfg를 임의 수정해 검증을 우회하지 않는다.
+잘못된 자산은 `ARTIFACT_INVALID`(4). UUID/이름·출력 형식과 무관하게 같은 Manager 오류를 반환한다. 생성 cfg를 임의 수정해 검증을 우회하지 않는다.
 
 **확인 방법**
 
@@ -1482,7 +1685,7 @@ xenova-vm status
 
 **오류 응답**
 
-사전 실패는 stderr/종료 `1`. 개별 결과의 failed·error도 읽는다. 정책 null의 `BOOT_POLICY_PENDING`은 승인 누락 진단이며 임의 정책 선택을 뜻하지 않는다.
+사전 실패는 공통 오류 envelope와 종료 3/4다. 개별 결과의 failed·error도 읽는다. 정책 null의 `BOOT_POLICY_PENDING`은 승인 누락 진단이며 임의 정책 선택을 뜻하지 않는다.
 
 **확인 방법**
 
@@ -1497,9 +1700,9 @@ VM별 reason/admission·의도 revision을 확인한다. 같은 host 재호출�
 
 hard affinity는 각 Xen vCPU가 실행될 수 있는 pCPU 집합이다. 기본 프리셋은 A→1, B→2, dom0·나머지 VM→{0,3}이다. 기존 vCPU 수·RAM·펌웨어는 유지하며 Linux 4-vCPU VM이면 네 vCPU 모두 {0,3}을 사용한다. `cpus = '0,3'`은 공통 집합이고 `cpus = ['0','3']`은 vCPU별 매핑이므로 서로 바꾸지 않는다.
 
-정책 원본은 `/srv/xenova/cpu-policy.json` 하나다. 전용 대상은 영구 UUID로 지정하며 template_id·표시 이름·domid·Spring role·AUTO/MANUAL로 역할을 추정하지 않는다. 최대 두 개의 등록된 1-vCPU Zephyr 전용 예약과 dom0·나머지 VM의 공통 공유 집합을 지원한다. 코어 교환·빈 전용 목록도 유효한 정책 입력이다. Xen에서 확인한 온라인 pCPU·단일 CPU pool·Credit2를 유지하고 자동 변경하지 않는다.
+정책 원본은 `/srv/xenova/cpu-policy.json` 하나다. Debian·Ubuntu·Zephyr 모두 영구 UUID별 정적 pinning·해제를 지원한다. template_id·표시 이름·domid·Spring role·AUTO/MANUAL로 배치 권한을 추정하지 않는다. 기본 공유 집합 안의 공유 pinning과 공유 집합/다른 전용 mask와 겹치지 않는 전용 배치를 구분한다. 전용 개수는 온라인 topology·비중복 조건으로 제한하며 A/B 두 개로 고정하지 않는다. Xen에서 확인한 RPi4 온라인 pCPU·단일 CPU pool·Credit2를 유지하고 자동 변경하지 않는다. 실행 중 guest repin·scheduler 변경·cpupool 이동은 모든 OS에서 미지원이다.
 
-운영자 작업은 **수량 변경 `update-resources` / 배치 정책 변경 `cpu-policy-set` / 실제 조회 `cpu-layout` / 기존 start·reboot·recover-once 사용**의 네 가지다. 별도 pin 명령은 필요 없다. CPU 정책은 vCPU 수·메모리를 바꾸지 않으며 `update-resources` 후에도 모든 구성 vCPU에 공유 집합을 적용한다.
+운영자 작업은 **수량 변경 `update-resources` / 배치 정책 변경 `cpu-policy-set` / 실제 조회 `cpu-layout` / 기존 start·reboot·recover-once 사용**의 네 가지다. 별도 pin 명령은 필요 없다. CPU 정책은 vCPU 수·메모리를 바꾸지 않으며 `update-resources` 후에도 모든 구성 vCPU에 현재 UUID의 같은 mask를 적용·검증한다. 개별 지정이 없으면 기본 공유 집합을 사용한다. Zephyr firmware의 고정 1-vCPU 프로필은 유지한다.
 
 stop/reboot/recovery·retire/restore/purge는 CPU 예약을 해제하지 않는다. purge한 UUID의 예약도 명시적 정책 변경으로만 해제·이전한다. CPU 정책 오류는 신원을 확인할 수 있는 대상의 기존 stop/shutdown을 막지 않으며 UUID/name/domid/xen_unique_id 검사를 생략하지도 않는다.
 
@@ -1514,13 +1717,33 @@ stop/reboot/recovery·retire/restore/purge는 CPU 예약을 해제하지 않는�
 
 **인자**
 
-필수 `--spec-file PATH`, `--idempotency-key KEY`. `--execute` 생략 시 계획, 지정 시 저장. `--json` 선택. spec은 아래 세 필드만 받는다.
+필수 `--spec-file PATH`, `--idempotency-key KEY`. `--execute` 생략 시 계획, 지정 시 저장. `--json` 선택. spec은 `expected_policy_revision`, `shared_pcpus`와 `placements` 또는 기존 `exclusive` 중 정확히 하나를 받는다. 두 목록의 혼합·추가 필드는 거절한다.
 
 | 입력 | 조건 |
 |---|---|
 | expected_policy_revision | 최초 null, 변경 시 `cpu-layout`에서 읽은 양의 정수 |
 | shared_pcpus | 0..3 중 중복 없는 비어 있지 않은 정수 배열 |
-| exclusive | 최대 2개의 `{vm_id: 정규 UUID, pcpu: 정수}`. UUID·전용 코어 중복 및 공유 집합과 겹침 거절 |
+| placements | `{vm_id: 정규 UUID, mode: shared 또는 exclusive, pcpus: 비어 있지 않은 정수 배열}` 목록. VM당 하나, 모든 구성 vCPU에 같은 mask 적용 |
+| exclusive | 기존 입력 호환: `{vm_id: 정규 UUID, pcpu: 정수}` 목록. OS 제한 없이 단일 core exclusive로 해석 |
+
+`shared` mask는 `shared_pcpus`의 부분집합이며 다른 공유 VM과 겹칠 수 있다.
+`exclusive` mask는 기본 공유 집합 및 다른 전용 mask와 겹치지 않는다.
+신규 지정/변경은 등록 UUID만 허용한다. retired/purged UUID의 기존 지정을 그대로 유지하거나
+목록에서 제거할 수 있으며, 제거 후 다른 등록 UUID에 명시 재할당할 수 있다.
+정책은 전체 목록 교체다. 개별 해제는 해당 UUID를 목록에서 빼고 유지할 다른 지정을 전달한다.
+다음 start부터 기본 공유 집합으로 복귀한다. 정지한 Linux 4-vCPU의 공유 pinning 예:
+
+```json
+{"expected_policy_revision":1,"shared_pcpus":[0,3],"placements":[{"vm_id":"550e8400-e29b-41d4-a716-446655440000","mode":"shared","pcpus":[3]}]}
+```
+
+새 publication의 policy/journal은 `schema_version=2.0`이며 `placements`를 저장한다.
+기존 `1.0`의 `exclusive` policy·완료/미완료 journal은 원래 바이트 구조·hash·revision으로
+검증/회수한다. 기존 미완료 publication은 같은 원 key/spec로 `1.0` 완료한다. 새 key는 `2.0`을
+저장하며 과거 key replay는 과거 결과와 현재 정책을 분리한다. 의미가 같은 두 입력 형식도
+같은 key에서 서로 교환하지 않는다. anchor·host receipt는 기존 `1.0`, 정책 fingerprint는
+실제 저장 policy 전체 기준이다. 구형 writer와의 혼합 배포는 지원하지 않는다. 새 버전을 읽지
+못하는 writer의 명시 거절을 legacy 최초 상태로 되돌리지 않는다.
 
 **사용 조건**
 
@@ -1559,7 +1782,7 @@ xenova-vm cpu-policy-set --spec-file "$REQUEST" --idempotency-key "$KEY" --execu
 
 **정상 응답**
 
-계획 data는 `{plan:true,policy:후보,host_preparation_required:true}`다. 파일·intent·affinity를 바꾸지 않고 계획 후보의 operation UUID도 저장 확정 ID가 아니다. 최초 실행 data는 `{policy:저장된_정책,host_preparation_required:true}`이며 envelope.operation_id가 publication journal을 가리킨다. 정책에는 schema_version, 단조 정수 policy_revision, operation_id, pool_name, shared_pcpus, exclusive가 저장된다.
+계획 data는 `{plan:true,policy:후보,host_preparation_required:true}`다. 파일·intent·affinity를 바꾸지 않고 계획 후보의 operation UUID도 저장 확정 ID가 아니다. 최초 실행 data는 `{policy:저장된_정책,host_preparation_required:true}`이며 envelope.operation_id가 publication journal을 가리킨다. 정책에는 schema_version, 단조 정수 policy_revision, operation_id, pool_name, shared_pcpus와 버전에 따른 exclusive 또는 placements가 저장된다.
 
 완료 key 재전달은 `replayed=true`, data의 policy·current_policy·historical=true로 과거 결과와 현재 정책을 구분한다. 과거 결과가 현재 정책을 덮어쓰지 않는다. 정책 저장 성공은 현재 dom0 적용 성공이 아니다.
 
@@ -1571,7 +1794,7 @@ xenova-vm cpu-policy-set --spec-file "$REQUEST" --idempotency-key "$KEY" --execu
 
 `cpu-layout --json`의 policy_revision·reservations를 확인한다. 현재 host 적용은 [내부 CPU 준비](#cmd-cpu-host-prepare)에서 별도로 수행한다. 새 정책은 새 key와 최신 revision, 중단된 동일 정책은 원 spec/key로 재전달한다. journal·anchor를 삭제해 우회하지 않는다.
 
-**Manager 매핑:** `cpu-policy-set / {expected_policy_revision,shared_pcpus,exclusive}`, `execute`·`idempotency_key`는 call 키워드 인자.
+**Manager 매핑:** `cpu-policy-set / {expected_policy_revision,shared_pcpus,placements}` 또는 기존 exclusive 입력. `execute`·`idempotency_key`는 call 키워드 인자.
 
 [명령어 색인으로](#command-index)
 
@@ -1586,7 +1809,7 @@ xenova-vm cpu-policy-set --spec-file "$REQUEST" --idempotency-key "$KEY" --execu
 
 **인자**
 
-선택 `TARGET` 또는 `--vm-id UUID`, `--timeout-ms N`(기본 15000, 1..15000), `--json`. TARGET은 정규 UUID이며 이 명령은 내부 이름을 변환하지 않는다. 생략하면 전체 등록 VM을 조회한다.
+선택 `TARGET` 또는 `--vm-id UUID`, `--timeout-ms N`(기본 15000, 1..15000), `--json`. TARGET은 UUID 또는 등록 내부 이름이다. 이름은 metadata에서 UUID로 해석하며 Manager에는 UUID를 전달한다. 생략하면 전체 등록 VM을 조회한다.
 
 **사용 조건**
 
@@ -1615,6 +1838,7 @@ operation_id=null, replayed=false. **ok=true는 조회 성공**이며 배치 준
 | reservations | 명시적으로 유지되는 전용 UUID·코어. retire/purge 후에도 유지 |
 | vms[].vm_id / execution_id | 영구 UUID / 현재 Xen incarnation과 결합한 실행 ID. 미관리·부재는 null |
 | vms[].vcpus / allocation / desired_hard_affinity | 영구 수량 / exclusive·shared / 정책으로 계산한 각 vCPU 마스크 |
+| policy_schema_version / reservations | 정책 원본 버전. 1.0은 기존 `{vm_id,pcpu}` 전용 목록, 2.0은 `{vm_id,mode:exclusive,pcpus}` 전용 목록. 공유 지정은 각 VM desired_hard_affinity로 확인 |
 | vms[].observed | presence, domid, 문자열 xen_unique_id, 실제 vcpus·hard_affinity |
 | affinity_matches | 실제 수량·각 마스크가 예정 배치와 정확히 일치 |
 | exclusive_verified | 전용 VM의 마스크 일치 및 다른 모든 도메인 vCPU와 중복 없음 |
@@ -2453,7 +2677,7 @@ xenova-vm console "$INTERNAL_NAME"
 
 **오류 응답**
 
-부재·신원 변경·잘못된 대상은 stderr `[xenova] ERROR: …`, 종료 1. 도메인 번호를 고정해 다른 VM 콘솔에 접속하지 않는다.
+부재·신원 변경은 공통 오류 envelope(실행 검증 실패 4), 잘못된 문법은 `INVALID_SPEC`(2)다. 도메인 번호를 고정해 다른 VM 콘솔에 접속하지 않는다.
 
 **확인 방법**
 
@@ -2549,7 +2773,7 @@ printf "check-xen rc=%s\n" "$?"
 
 **오류 응답**
 
-stderr `[xenova] ERROR: …`, 종료 1. 단순 xl 바이너리 존재만으로 통과시키지 않는다.
+공통 오류 envelope의 실행 오류(4)다. 단순 xl 바이너리 존재만으로 통과시키지 않는다.
 
 **확인 방법**
 
@@ -2591,7 +2815,7 @@ ls -l /run/xenova/dhcp-hosts
 
 **오류 응답**
 
-물리 NIC 편입·주소/브리지 위반은 stderr `[xenova] ERROR: …`, 종료 1.
+물리 NIC 편입·주소/브리지 위반은 공통 오류 envelope의 실행 오류(4)다.
 
 **확인 방법**
 
@@ -2685,16 +2909,17 @@ systemd 전체 조회 자체가 실패하면 `issues`와 unknown 행을 반환�
 
 **인자**
 
-인자·`--json` 없음.
+선택 `--details`, `--json`. 기본은 부팅 인자·가동 시간·시각, details는 기존 status의 자산·domain 종합 진단이다.
 
 **사용 조건**
 
-dom0의 /proc와 timedatectl 정보를 읽는다.
+기본은 dom0의 /proc와 timedatectl을 읽는다. details는 저장소·Xen·각 VM boot 자산을 검증하며 Image/initrd hash와 관측 cache 저장 비용, 기존 실행 잠금을 포함한다. 출력 형식만으로 이 비용을 선택하지 않는다.
 
 **실행 예시**
 
 ```bash
 xenova-vm diagnose
+xenova-vm diagnose --details --json
 timedatectl
 systemctl is-active xenova-vms.service xenova-host-admission.service xenova-dom0-manager.service
 journalctl -b -u xenova-vms.service -u xenova-dom0-manager.service --no-pager
@@ -2706,7 +2931,7 @@ journalctl -b -u xenova-vms.service -u xenova-dom0-manager.service --no-pager
 
 **오류 응답**
 
-timedatectl 실패는 time의 `synchronized=null,error`로 진단될 수 있다. 외부 명령/파일의 처리되지 않은 오류는 stderr/종료 1. 이 응답에는 Manager ok가 없다.
+timedatectl 실패는 time의 `synchronized=null,error`로 진단될 수 있다. 정상 자체 JSON에는 Manager ok가 없다. CLI가 처리하는 저장소·플랫폼 오류는 같은 오류 envelope/종료 4, 잠금 경합은 종료 3이다. 내부 결함을 입력 오류로 합치지는 않는다.
 
 **확인 방법**
 
@@ -2934,7 +3159,7 @@ cat /run/xenova/admission/host.json
 
 **오류 응답**
 
-저장/잠금 오류는 stderr `[xenova] ERROR: …`, 종료 1.
+저장은 `STORAGE_UNAVAILABLE`(4), 잠금 경합은 `OPERATION_IN_PROGRESS`(3)의 공통 오류 envelope다.
 
 **확인 방법**
 
@@ -2974,7 +3199,7 @@ cat /run/xenova/admission/host.json
 
 **오류 응답**
 
-잠금/저장 실패는 stderr/종료 1. 반환 후에는 start/recovery가 HOST_QUIESCING으로 거절될 수 있다.
+잠금 경합은 `OPERATION_IN_PROGRESS`(3), 저장 실패는 `STORAGE_UNAVAILABLE`(4)의 공통 오류 envelope다. 반환 후에는 start/recovery가 HOST_QUIESCING으로 거절될 수 있다.
 
 **확인 방법**
 
@@ -3056,7 +3281,7 @@ xenova-vm shutdown-all
 
 **오류 응답**
 
-stderr `[xenova] ERROR: …`, 종료 1. 원인별 VM method/stage/xen_state/error와 종료 기록을 읽는다. timeout을 자동 force로 승격하지 않는다.
+실패는 공통 오류 envelope와 종료 3/4다. 원인별 VM method/stage/xen_state/error와 종료 기록을 읽는다. timeout을 자동 force로 승격하지 않는다.
 
 **확인 방법**
 
@@ -3097,7 +3322,7 @@ xenova-vm poweroff
 
 **오류 응답**
 
-stderr `[xenova] ERROR: …`, 종료 1. 원인별 VM method/stage/xen_state/error와 종료 기록을 읽는다. timeout을 자동 force로 승격하지 않는다.
+실패는 공통 오류 envelope와 종료 3/4다. 원인별 VM method/stage/xen_state/error와 종료 기록을 읽는다. timeout을 자동 force로 승격하지 않는다.
 
 **확인 방법**
 
@@ -3138,7 +3363,7 @@ xenova-vm reboot-board
 
 **오류 응답**
 
-stderr `[xenova] ERROR: …`, 종료 1. 원인별 VM method/stage/xen_state/error와 종료 기록을 읽는다. timeout을 자동 force로 승격하지 않는다.
+실패는 공통 오류 envelope와 종료 3/4다. 원인별 VM method/stage/xen_state/error와 종료 기록을 읽는다. timeout을 자동 force로 승격하지 않는다.
 
 **확인 방법**
 
@@ -3216,9 +3441,9 @@ check-network와 주소를 확인한다. 이미 구성된 관리 연결의 재�
 
 **기본 사용**
 
-`xenova-vm dhcp-ready 5`
+`xenova-vm dhcp-ready PID`
 
-위치 인자는 대기 초로 필수다. 생략 기본값은 없다. 예시는 5초 동안 준비를 확인한다.
+위치 인자는 dnsmasq의 현재 PID로 필수다. 대기 시간은 기존 5초이며 위치 인자로 바꾸지 않는다.
 
 **인자**
 
@@ -3242,7 +3467,7 @@ printf "dhcp-ready rc=%s\n" "$?"
 
 **오류 응답**
 
-프로세스 종료·UDP/67 미준비는 stderr `[xenova] ERROR: …`, 종료 1.
+프로세스 종료·UDP/67 미준비는 공통 오류 envelope의 실행 오류(4)다.
 
 **확인 방법**
 
@@ -3290,7 +3515,7 @@ stderr `[xenova-first-boot] ERROR: …`, 비정상 종료. 자산 오류를 regi
 
 **확인 방법**
 
-서비스 로그·설치 영수증·현재 UUID/등록 목록을 대조한다. 기본 Debian 1대·Network Starter A/B 2대의 최초 신원은 보존한다.
+서비스 로그·설치 영수증·현재 UUID/등록 목록을 대조한다. 기본 Debian 1대·실제 drive A/B 2대의 최초 신원은 보존한다. 현재 선택은 warm-lattice-lab 시험 프로필이며 기존 Starter 설치의 신원을 바꾸지 않는다.
 
 **Manager 매핑:** 설치/서비스 진입점. 공통 Manager action 없음.
 
@@ -3332,7 +3557,7 @@ stderr `[xenova-first-boot] ERROR: …`, 비정상 종료. 자산 오류를 regi
 }
 ```
 
-CLI 어댑터의 spec-file 읽기·JSON 해석·내부 이름 해석 도중 OSError/ValueError/PlatformError는 `STORAGE_UNAVAILABLE`로 정규화될 수 있다. 모든 잘못된 JSON이 INVALID_SPEC으로 반환된다고 가정하지 않는다. 운영 CLI는 argparse 오류 2, 일반 stderr `[xenova] ERROR: …`와 실행 오류 1을 사용한다. Wi-Fi/설치 보조 도구는 각 절의 자체 계약을 따른다.
+CLI의 잘못된 UTF-8/JSON·중복 필드·비유한 수는 `INVALID_SPEC`(2), spec-file I/O는 `STORAGE_UNAVAILABLE`(4)다. 내부 TypeError/KeyError를 사용자 입력 오류로 숨기지 않는다. xenova-vm의 명시 옵션/실행 오류는 공통 envelope와 원 코드/종료 대응을 사용한다. 부팅·PTY 명령의 정상 자체 출력은 유지하며 --json은 지원하지 않는다. Wi-Fi/설치 보조 도구는 각 절의 자체 계약을 따른다.
 
 <a id="acceptance-contract"></a>
 ### A.2 수락·키·현재 결과
@@ -3448,7 +3673,7 @@ original_result의 내부 내용은 원 완료 기록 그대로다. 위 physical
 | `INSUFFICIENT_STORAGE` | 4 | 현재 준비와 기존 VM 증가 예약을 포함한 용량 부족 |
 | `IP_POOL_EXHAUSTED` | 4 | 사용 가능한 내부 예약 IP 없음 |
 | `OBSERVATION_UNAVAILABLE` | 4 | Xen/host/handler incarnation의 검증된 관측 실패 |
-| `DEADLINE_EXCEEDED` | 4 | probe/short lock/복구/협조형 reboot 기한 만료 |
+| `DEADLINE_EXCEEDED` | 4 | 호출/조회·short lock·제어/복구·Linux create/수습의 적용 기한 만료. 원 작업 기한을 새로 발급하지 않음 |
 | `XEN_EXECUTION_FAILED` | 4 | 수락 후 물리 제어 실패. accepted 상태·journal 확인 |
 | `RECOVERY_REQUIRED` | 4 | 자산 준비/부분 게시/journal 무결성·중단 복원 조사 |
 | `RECONCILE_REQUIRED` | 4 | launch/제어/복구/완료 저장의 실행 불확실성. 물리 요청 반복 없이 조사 |
@@ -3542,18 +3767,26 @@ Template 객체는 다음 필드를 제공한다.
 | ubuntu-24.04-arm64 | 1.0.2 | 1 / 512 | 1..4 / 128..8192 |
 | debian-13-arm64 | 1.0.2 | 1 / 512 | 1..4 / 128..8192 |
 | zephyr-xenvm-starter-arm64 | 1.1.0 Network Starter | 1 / 16 | 1 / 16 고정 |
+| zephyr-drive-lattice-lab-arm64 | 1.0.0-lab.1 실제 AUTO/MANUAL 주행앱, 현재 factory 선택 | 1 / 16 | 1 / 16 고정. 차량 값은 명시 시험 프로필 |
 
 실제 설치 버전과 기능은 templates 결과를 우선한다.
 
 <a id="creation-contract"></a>
-create의 정확한 spec은 `vm_id,name,template_id,template_version,vcpus,memory_mib`와 선택 `ipv4`다. 자원은 bool이 아닌 양의 정수다. `--auto-ip`는 ipv4 생략을 표현하며 Manager 필드가 아니다.
+create의 필수 spec은 `vm_id,name,template_id,template_version`이고 `vcpus,memory_mib,ipv4`는 선택이다. 신규 자원 생략은 선택한 template의 `default_resources`로, 수락한 key의 재전달 생략은 원 `initial_spec`으로 해석한다. 명시 자원은 bool이 아닌 양의 정수여야 하며 null/0/False/문자열은 원 값이나 기본값으로 치환하지 않는다. `--auto-ip`는 ipv4 생략을 표현하며 Manager 필드가 아니다. [최소 입력·재전달](#cmd-create)의 의미 비교를 따른다.
 
 - Linux·Network Starter의 자동/명시 예약 IP는 `192.168.77.2..99`다. 자동은 사용 가능한 낮은 주소부터 선택한다.
 - 등록·보관 자산·미완료 작업·factory/운영 예약·DHCP hosts/lease를 함께 대조한다. 현재 운영 예약은 .10/.20이며 factory Debian .20은 그 소유권으로 유지한다.
 - Network Starter는 MAC/IP/hostname을 갖고, legacy 비네트워크 Starter는 ipv4 입력을 거절한다.
 - MAC은 플랫폼이 생성하는 `02:xx:xx:xx:xx:xx`다. UUID·MAC·IP·내부 이름 예약은 공통 operation lock 안에서 대조한다.
 - create 완료는 REGISTERED/generation=0/autostart=false/의도 stopped/revision=1. 기본 board policy는 협조형 graceful, legacy refuse다.
-- 용량 검사는 현재 할당뿐 아니라 기존·미완료 VM의 향후 디스크 증가 예약을 포함한다. 부분 준비본은 journal/workspace를 보존하며 자동 디스크 재초기화를 하지 않는다.
+- 용량 검사는 현재 할당뿐 아니라 기존·미완료 VM의 향후 디스크 증가 예약을 포함한다. 카탈로그 metadata·manifest 신원·자산 크기·불변성과 소유권을 확인한 뒤 용량을 검사하므로, 이 단계의 용량 부족은 payload 전체를 읽기 전에 거절한다. 사전 검사는 자원 예약이 아니다. 실제 Linux 준비 전에 원 operation·명세·템플릿 manifest·UUID/MAC/IP·작업 경로를 기록하며, 미완료 작업의 예약은 이후 요청의 용량·신원 검사에도 포함한다.
+- Linux 신규 생성은 별도의 사전 전체 payload 해시를 수행하지 않는다. 계획은 metadata·용량 검사까지이며, 실제 준비는 선택된 manifest를 다시 대조하고 신규 private 파일로 복사하는 바이트 전체를 기대 해시·크기와 비교한다. `files["root.raw"]["sha256"]`와 `root_sha256`의 일치를 먼저 확인하고 같은 복사 digest로 검증하므로 두 필드의 검증도 유지한다. 모든 payload 복사가 검증된 뒤 게스트 설정을 수행하며, 게시 직전 원본 경로·파일 신원·변경 여부를 다시 확인한다. 이전 요청이나 프로세스의 검증 cache는 사용하지 않는다. Zephyr의 기존 bundle 검증은 유지한다.
+- Debian·Ubuntu의 실제 Linux 준비는 단일 슬롯을 사용한다. 원 요청/예약 확정과 게시 채택은 공통 잠금 안에서, 검증 복사·guest 설정·자원 정리는 그 밖의 private 경로에서 수행한다. 게시 때 현재 등록부·원 manifest·신원/주소 예약·host gate/의도를 다시 확인하고 해당 VM의 변경만 반영한다. 준비 전의 공통 등록부 사본으로 다른 VM의 변경을 덮지 않는다.
+- 검증 결합 복사는 sparse hole도 논리적인 0 바이트로 해시에 포함한다. 파일시스템이 hole 조회를 지원하지 않아도 전체 스트림 검증을 유지한다. 복사·동기화·해시 실패나 원본 교체 시 부분 workspace를 보존하고 게시하지 않는다. 외부 root 변경을 원자적으로 통제하거나 저장 매체의 전원 상실을 보장하는 계약은 아니다.
+- 수락 뒤 Linux 준비 실패는 원 operation의 `status=RECOVERY_REQUIRED`·진행 `phase`·`error`로 남긴다. 검증 이유와 I/O errno를 보존한다. 실패 기록의 저장도 실패하면 응답에 내구 저장 미확정을 밝힌다. 부분 파일이나 원 작업을 지워 정상 최초 상태로 만들지 않는다.
+- 같은 UUID·명세는 정규 `create:UUID`로 재확인한다. 별도 key 인자가 이 원 key를 바꾸지 않는다. [자산 작업 조회](#cmd-operation)는 원 작업과 `effective_status`를 반환한다. 부분 workspace를 재초기화/재복사하지 않는다. workspace 전 실패는 같은 host·유효한 원 기한·원 manifest/예약에서만 재개한다. 게시 후 원 결과 회수도 재복사하지 않으며, 확인된 DHCP/메타데이터 정산과 새 외부 효과를 구별한다. 미게시 VM의 get 부재는 원 작업·부분 자산의 부재가 아니다.
+- 실패 private의 명시 종결은 [operation-reconcile](#cmd-operation-reconcile)을 사용한다. retire는 REGISTERED, purge는 RETIRED 자산의 별도 수명 계약이며 미게시 정리에 적용하지 않는다. 실행·자산·사용 상태와 완료 내구성을 확인하기 전 예약을 반환하지 않는다. 수습 뒤 같은 원 key는 원 실패를 유지하고, 별도 신규 생성은 새 VM 신원과 현재 자원 검사를 거친다. 파일/원장 삭제·phase 수정·새 UUID 우회는 지원 수습이 아니다.
+- 슬롯 해제는 자식·mount/loop 정리 완료의 증거가 아니다. 작업 경로의 자원 기록이 미확정이면 host 종료의 저장소 해제를 거절한다. host gate가 닫히거나 준비 중 admission 문맥이 교체되면 뒤늦은 게시를 허가하지 않는다. 새 준비 소유권/출력 모듈을 포함한 단일 설치 후보와 요청별 Manager 객체를 사용해야 한다. 일부 파일만 섞은 설치본의 동시 호출을 지원한다고 간주하지 않는다.
 
 <a id="observation-fields"></a>
 ### B.4 Observation·Snapshot
@@ -3635,7 +3868,19 @@ cpu_policy의 policy_sha256은 key 정렬·공백 없는 UTF-8 JSON(ensure_ascii
 | 사용자 제어 | schema_version, operation_id, vm_id, request, request_hash, idempotency_key, host_boot_id, lifecycle_generation, base_revision, intent_revision, desired_state, source, result, error, events | prepared/accepted/executing/completed/failed/uncertain |
 | 복구 | schema_version, recovery_attempt_id, operation_id, request, request_hash, host_boot_id, accepted_monotonic_ms, result, error, events, phase | accepted/stopping/removed/launching/observed/completed/failed/uncertain |
 
-자산 journal phase는 preparing/published/dhcp-pending/dhcp-applied/moving/moved/purge-inventory/deleting/complete 등 물리 진행 경계다. operation 조회의 effective_status는 SUCCEEDED이면 SUCCEEDED, 나머지는 RECOVERY_REQUIRED다. 이는 별도의 자동 복구 실행 성공을 뜻하지 않는다.
+<a id="operation-fields"></a>
+자산 journal phase는 preparing/published/dhcp-pending/dhcp-applied/moving/moved/purge-inventory/deleting/complete 등 물리 진행 경계다. 자산 `operation` 조회와 활성 create 재전달의 관측 필드는 다음과 같다.
+
+| 필드 | 값·의미 |
+|---|---|
+| `effective_status` | `SUCCEEDED`: 원 결과 내구 확정. `RUNNING`: 같은 원 Linux 준비 또는 lifecycle의 활성 실행 확인. `RECONCILING`: 원 작업에 결합된 명시 private 수습 실행 확인. `FAILED`: 원 생성 실패와 기록된 수습 완료. `RECOVERY_REQUIRED`: 미완료/미확정·실패의 재확인 필요 |
+| `recovery_required` | effective_status가 RECOVERY_REQUIRED이면 true, 나머지는 false. 자동 복구 이행·출력 허가·할당자의 내구 확인 완료를 뜻하지 않음 |
+
+RUNNING은 응답 시점의 관측이며 VM 실행·생성 완료·기한 연장이 아니다. 원 작업/host/프로세스
+시작 신원·실제 소유 FD/잠금을 대조한다. 소유권 관측 실패는 오류로 반환하며 RUNNING이나
+부재를 추정하지 않는다. 조회는 원 status·phase·key·기한을 쓰지 않는다. workspace 생성 전
+실패를 명시적으로 같은 요청으로 재개할 때는 실제 실행 전이를 RUNNING으로 기록하고,
+원 ID·할당과 이전 error를 보존한다. 부분 workspace가 있는 실패는 이 재개 대상이 아니다.
 
 최초 create/retire/restore 완료의 data는 VMView 자체다. 완료 재전달은 이 필드에 operation/original_result/current을 추가한다. 자원/firmware 전환 완료는 처음부터 operation/original_result/current으로 감싼다. 제어 응답의 vm은 현재 관측이며 원 제어 결과는 control-operation.result다. 이 차이를 응답 parser에서 유지한다.
 
@@ -3695,6 +3940,16 @@ update-resources는 instance.json의 vcpus/memory_mib만 바꾸며 initial_spec�
 ### C.5 보관·복원·purge 보호
 
 retire는 정지 자산을 숨김 archive로 이동하고 RETIRED/generation+1을 기록한다. restore는 RETIRED의 신원·주소·이름·자산·파일시스템 검사·용량을 확인해 REGISTERED/generation+1로 복원한다. 둘 다 원 실행 의도를 바꾸지 않으므로 lifecycle 세대가 바뀌면 기존 의도는 부적용일 수 있다. 필요한 새 사용자 제어로 의도를 수락한다.
+
+수락 전 검사부터 UUID별 실행 lease를 유지한다. 검사 lease만 얻은 단계는 미수락이다.
+최초 restore fsck 실패는 원 journal을 만들지 않는다. 긴 fsck/usage/inventory·purge 항목 삭제는
+공통 잠금 밖에서 수행하므로 다른 VM의 허용된 실제 stop도 진행할 수 있다. 같은 자산의
+start·설정/자원/CPU·복구·legacy writer는 대상 보호를 존중한다. 활성 원 작업의 같은 key
+재전달은 `operation/effective_status=RUNNING`을 회수하며 두 번째 실행을 시작하지 않는다.
+실행 종료·상속 FD 부재 확인 후에만 기존 원 key 재개를 허용한다. 원 결과 조회 자체가
+자동 실행기는 아니다. gate/세대/의도/원 기록/검사 root 변경은 옛 검사 채택을 막는다.
+[실제 잠금 순서](management-boundaries.md#lifecycle의-대상-소유와-공통-잠금)와
+[후속 수락](../verification/recovery-scenario-closure-20261030.md#stage55-followup)을 참조한다.
 
 purge는 RETIRED → PURGING → PURGED이며 완료 시 generation+1이다. 소유 inventory의 dev/inode/종류·단일 hardlink·symlink·Xen 연결·loop·mount·열린 프로세스를 확인하고 원본/타 VM/공유 자산을 보호한다. 중간 실패 후 같은 키로 잔여 자산을 판정하며 UUID tombstone·이력은 남긴다.
 
@@ -3771,7 +4026,7 @@ shutdown-all은 guest를 정리하고 gate를 닫아 둔다. poweroff/reboot-boa
 
 서비스 순서는 `xenova-data-prepare.service → srv-xenova.mount → xenova-first-boot.service`와 Xen ready 완료 → `xenova-cpu-prepare.service` → `xenova-vms.service` autostart → 기존 host admission이다. CPU prepare는 Wants+After로 순서만 연결하며 Requires/PartOf/BindsTo·ExecStop으로 게스트 종료나 affinity 초기화를 전파하지 않는다. 수동 start·reboot·복구도 이번 boot 준비를 별도로 검사한다.
 
-신규 설치는 `/etc/xenova/cpu-policy-preset.json`을 첫 identity plan의 A/B UUID에 연결해 cpu_policy_activation ticket을 만든 뒤 같은 정책 저장 코드로 게시·적용한다. 기존 identity plan에는 소급 추가하지 않는다. 정책·anchor·history가 모두 없는 기존 설치는 과거 호환 모드다. 활성화는 승인된 정지 창에서 cpu-policy-set → cpu-host-prepare로 수행한다. 활성화 후 정책 유실·손상은 미설정과 구분해 새 시작을 차단한다. seed는 최초 등록 전 상태로 준비하고 데이터 확장·독립 UUID/MAC·Linux machine-id/SSH 신원을 보드에서 확정한다. 기본은 Debian Interaction 1대와 Network Starter A/B 2대다.
+신규 설치는 `/etc/xenova/cpu-policy-preset.json`을 첫 identity plan의 A/B UUID에 연결해 cpu_policy_activation ticket을 만든 뒤 같은 정책 저장 코드로 게시·적용한다. 기존 identity plan에는 소급 추가하지 않는다. 정책·anchor·history가 모두 없는 기존 설치는 과거 호환 모드다. 활성화는 승인된 정지 창에서 cpu-policy-set → cpu-host-prepare로 수행한다. 활성화 후 정책 유실·손상은 미설정과 구분해 새 시작을 차단한다. seed는 최초 등록 전 상태로 준비하고 데이터 확장·독립 UUID/MAC·Linux machine-id/SSH 신원을 보드에서 확정한다. 기본은 Debian Interaction 1대와 실제 drive A/B 2대다. 현재 선택은 warm-lattice-lab 시험 프로필이며 실제 차량 수락과 다르다.
 
 xenbr0=192.168.77.1/24는 격리된 내부망이다. 예약 .2..99, dnsmasq bringup 동적 풀 .100..150을 구분한다. DHCP에서 기본 라우터를 배포하지 않고 DNS는 port=0이다. eth0/wlan0를 편입하거나 외부 NAT를 자동 설정하지 않는다. Manager는 비밀 없는 dhcp-hosts를 **0644로 원자 게시**하고 dnsmasq HUP으로 예약을 반영한다.
 
@@ -3848,11 +4103,17 @@ PY
 
 정식 Python 진입점은 `xenova_management.Manager.call`이다. 서명은 `Manager.call(action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None)`다. spec은 JSON 표현 가능한 dict이며 허용 필드 외 입력은 거절한다. execute는 bool이다. 정확한 action/spec은 각 명령의 Manager 매핑을 따른다. execute=False도 start/stop/설정 변경에는 dry-run이 아니다.
 
-`get/list`는 선택 spec `timeout_ms`로 1..15000ms의 전체 조회 예산을 받는다. 생략 시 기존
-15000ms이며 CLI에는 이에 대응하는 새 옵션이 없다. 목록의 모든 VM과 registry 비용이 같은
-기한을 공유한다.
+`get/list/intents/probe/execution-context/operation/control-operation/recovery-operation`은
+선택 spec `timeout_ms` 1..15000ms를 사용한다. CLI의 `--timeout-ms`도 같은 값으로 전달한다.
+probe의 직접 Manager 호출은 기존대로 timeout_ms를 요구하며 CLI 생략 기본은 15000ms다.
+목록의 모든 대상·registry 비용은 같은 호출 예산 안에서 처리한다.
 
-`budget_ms`는 `start/stop/reboot/destroy/get/list/control-operation`의 선택 호출 인자다.
+원 `control-operation` 검색도 전달된 조회 기한을 journal 열거·파일 읽기 사이에서 검사한다.
+순회를 끝내지 못하면 만료/관측 실패이며 부재나 유일한 원 작업을 확정하지 않는다. 짧은
+stop 수락의 검색 예산과 원 stop의 물리 실행 deadline은 구별하며 검색 예산으로 원 기한을
+축소·연장하지 않는다. 개별 filesystem syscall을 선점하는 hard realtime 보장은 아니다.
+
+`budget_ms`는 `start/stop/reboot/destroy/get/list/intents/probe/execution-context/templates/operation/control-operation/recovery-operation/recovery-reconcile/operation-reconcile`의 선택 호출 인자다.
 정수 1..105000ms만 허용하며 bool은 거절한다. 상위 대기 후 남은 기간을 전달하는 용도이며
 원 spec/hash에 포함하지 않는다. 물리 실행 기한은 기존 90초와 전달 예산 중 짧은 값이다.
 기존 원 작업 재전달은 저장된 원 기한을 연장하지 않는다. 제한된 결과 재확인도 이번 호출의
@@ -3861,10 +4122,59 @@ Worker 동작을 유지한다. 105000ms는 입력 상한이며 HTTP 대기시간
 
 `Manager.fork()`는 동일 저장소·실행 잠금을 사용하는 독립 Python 요청 객체를 반환한다.
 실행 중인 원 객체의 이번 호출 `response_deadline`도 새 요청에 복사하지 않는다.
-긴 작업 중 stop 수락·원 기록 조회를 연결할 때 사용한다. OS 프로세스를 만들지 않으며,
-공유 Manager를 임의로 동시 호출하거나 모든 action의 상위 직렬화를 제거해도 된다는 뜻이 아니다.
+Linux private 준비와 다른 등록 VM의 get/list·operation 조회·허용된 stop을 병행할 때도
+요청마다 fork 객체를 사용한다. 기본 준비/사용 확인 메서드도 새 Platform 객체에 결합한다.
+OS 프로세스를 만들지 않으며, 공유 Manager를 임의로 동시 호출하거나 모든 action의
+상위 직렬화를 제거해도 된다는 뜻이 아니다. 실제 변경/관측의 공통 잠금과 같은 VM의
+소유·신원·의도 검증은 유지된다. 같은 요청 객체의 동시 call은 무대기 OPERATION_IN_PROGRESS로
+거절하며 진행 중 요청의 예산·진단 상태를 덮지 않는다. Python/외부 명령 진단은 요청별 64KiB sink로 수집한다.
+기존 파생 `snapshot`의 동시 조회는 내부 fork로 격리해 유지하며 Xen이나 실행 잠금을 호출하지 않는다.
+명령 데이터 stdout의 한도 64KiB 초과는 잘린 정상값 대신 오류다. sink의 초과 분량은
+누락 수로 남기며 프로세스 전역 FD/stdout·cwd/env는 바꾸지 않는다.
+`operation`은 기본 15초 조회 예산과 전달한 budget_ms 중 짧은 잔여 기간을 사용한다.
+Linux create의 budget_ms는 [별도 유한 생성 정책](#creation-deadline)의 call_ms 상한 안에서
+전달한다. 상위 HTTP timeout을 취소로 간주하지 않는다. 새 슬롯 시도는 무대기이고
+수락 재검사 전에 이번 호출의 초기 잔여 예산을 확인한다.
 HTTP의 VM mutex·직렬화 분리는 아직 연결되지 않았다. 구체적인 담당 범위는
 [관리 요청 연동 요청서](management-integration-request.md)를 따른다.
+
+<a id="read-concurrency"></a>
+#### 일반 조회의 동시 실행과 정합성
+
+`list/get/intents/probe/execution-context/templates/operation/control-operation/recovery-operation`은 공통 물리 실행 잠금을 획득하지 않는다.
+변경 action과 복구의 기존 실행·수락·효과 제출 guard는 유지한다. 각 호출은 새 fork 객체와
+그 진입에서 정한 잔여 예산을 쓰며, 이전 조회 결과를 start/stop/retire/recover의 승인에 쓰지 않는다.
+
+- list/get의 요청별 문맥은 등록 구성·수명·현재 host/실행/의도 근거와 한 관측 회차만 묶는다.
+  완전한 UUID/name/state 목록을 회차 전후로 확인하고 각 대상의 incarnation을 두 번 대조한다.
+  화면 조회에서는 쓰기 디스크 설정용 `xl list -l`·짧은 목록을 추가로 수집하지 않는다.
+  실제 제어의 상세 자산·실행 검증은 별도로 수행한다.
+  `observed_monotonic_ms`는 이 Xen 관측의 검증 완료 시각이다. 뒤따르는 metadata 대조/게시나
+  늦은 응답 시각으로 갱신하지 않는다. 늦은 이전 성공/실패가 더 새 파생 표본을 덮지 않으며,
+  같은 내용의 이전 응답도 자기 관측 시각을 유지한다.
+- 등록부/수명 JSON은 기존 원자 게시 규칙으로 읽는다. list는 외부 관측 뒤 전체 대상 집합과
+  구성을 대조하고, get은 해당 대상만 대조한다. 관측 snapshot 게시 직전 해당 VM의 구성·
+  수명·실행/의도/host를 다시 확인한다. 서로 다른 모든 원천의 동시 원자 관측 보장은 아니다.
+  미완료 신규 등록이나 변경된 근거를 정상 전체 목록으로 조립하지 않는다.
+- 결합 근거가 바뀌면 남은 예산으로 최대 한 번 새 회차를 수행한다. 다시 바뀌면
+  TARGET_CHANGED로 끝낸다. 실패한 helper를 각 응답 builder에서 새로 호출하지 않으며,
+  Xen 신원 불일치는 기존 TARGET_CHANGED로 즉시 종결할 수도 있다.
+  실패/부분 열람은 빈 목록·VM 부재·정상 snapshot으로 바꾸지 않는다.
+- asset/control 원장 조회는 서로 다른 원본의 완전 검색·유일성/현재 소유 확인을 유지한다.
+  원자 기록을 두 회차에 대조하며 변경이 있으면 위 유한 재확인만 한다. 긴 원장 열람 중
+  admission을 보유하지 않는다. 조회는 raw phase·원 key/기한·예약을 쓰거나 작업을 이행하지 않는다.
+- 외부 list/get 관측은 같은 runtime의 네 슬롯으로 제한한다. 초기 로컬 수락 상한이며 보드의
+  허용 QPS나 최악 지연 보장은 아니다. 슬롯 경합은 OPERATION_IN_PROGRESS이며 숨은 큐는 없다.
+  asset/control 원장 조회와 실제 제어는 이 슬롯을 사용하지 않는다. helper는 요청 소유 FD를
+  상속하며 timeout/I/O 실패 때 해당 자식만 제한적으로 회수한다. 종료 미확정은 성공이 아니다.
+  조회 부모가 중단돼도 helper의 FD가 살아 있으면 슬롯을 재사용하지 않으며 실제 종료 뒤 반환한다.
+  슬롯은 canonical/unlinked runtime·locks 경로의 소유자 일치·단일 링크·0600 일반 파일이어야 한다.
+  비정상 파일은 오류로 거절하고 삭제·chmod·다른 슬롯으로 우회하여 정상으로 취급하지 않는다.
+
+기존 `snapshot`은 마지막 성공/오류와 나이를 가진 파생 관측이다. 새 TTL cache·관측 daemon·DB는
+추가하지 않았다. 구성의 ipv4는 설정/예약 주소이고 app_readiness=unknown은 앱 준비 미확인이다.
+Xen 상태를 Agent 정상이나 장치 출력 허가로 승격하지 않는다. 제품 HTTP의 threadpool·직렬화·
+polling 및 응답 역전 연결은 [담당자 요청서](../requests/20261029-request-http-spring-ui.md#반복-조회와-제어-진행성-연결)의 별도 수락이다.
 
 정상/오류는 [envelope](#contract-response)를 반환한다. Python에서는 dict의 ok/data/error를 확인하며 CLI 종료 코드는 별도로 적용하지 않는다. CLI delete/status/recover-once 별칭을 그대로 Python action으로 옮기지 않고 각각 retire/list/recover_once를 호출한다.
 
@@ -3967,11 +4277,11 @@ Spring은 소스 기본값만 확인했으며 운영 배포 override는 별도 �
 
 | 경로·적용 위치 | 현재 적용값·계산 시작점 | 포함·제외와 현재 상태 |
 |---|---|---|
-| Manager get/list (`xenova_management.Manager._call`) | 진입 시점부터 기본 15초 | 선택 spec timeout_ms 1..15000ms와 선택 호출 budget_ms 중 짧은 기한을 L·registry·전체 관측이 공유. CLI --timeout-ms는 추가하지 않음 |
+| Manager get/list/intents/probe/execution-context 및 원 기록 조회 (`xenova_management.Manager._query`) | 진입 시점부터 기본 15초 | spec timeout_ms 1..15000ms와 호출 budget_ms 중 짧은 기한을 registry·관측 슬롯·재확인에서 공유. CLI도 두 인자를 전달. intents는 슬롯/Xen 관측 없음 |
 | probe / cpu-layout / cpu-host-prepare | timeout_ms 기본 15000, 1..15000ms. Manager 진입부터 | 선택한 잔여 기한이 하위 명령에도 적용. CPU factory 정책 등록도 같은 기한 사용 |
 | cpu-policy-set | Manager 진입부터 기본 15초 | registry·정책 검증·관측이 공유. 별도 내부 15초 재발급 없음. 공개 timeout 입력 추가 없음 |
 | start/stop/reboot/destroy | Manager 진입부터 기본 90초 | 선택 budget_ms는 물리 기한을 줄이고 R의 잔여 예산도 제한. 원 요청의 기한은 재발급하지 않음. fsync 등 필수 P를 선점하는 엄밀한 반환 상한은 아님 |
-| 기존 내부 이름 start/reboot/destroy CLI | Execution.control 진입부터 기본 90초 | 공통 Manager 진입과 다르며 앞선 registry 조회는 별도다. 내부 이름 stop도 사전 이름 해석 뒤 Manager를 호출하므로 CLI 시작 전체를 90초로 보장하지 않음 |
+| UUID/내부 이름 start/stop/reboot/destroy CLI | CLI 진입부터 기본 90초 | 같은 Manager 제어 경로. 파싱·이름 해석 비용을 차감한 budget_ms를 전달하며 원 실행 기한을 재발급하지 않음. syscall·필수 저장의 선점 상한은 아님 |
 | recover_once | 요청의 deadline_monotonic_ms | 최초 수락 시 미래 120초 이내, 원 host에 결합. 재전달로 갱신하지 않음. 만료 뒤 R 최대 15초는 새 실행 권한이 아님 |
 | autostart / unit | batch 전체 140초 / TimeoutStartSec 150초 | 모든 VM이 공유. 전원 부팅 전체의 상한은 아님 |
 | FastAPI `SerializedManager.call` | S 기본 5초 | 하위 Manager 진입 전이며 하위 15/90초에 포함되지 않음. 배포 관측값도 5초 |
@@ -4003,7 +4313,7 @@ DEADLINE_EXCEEDED로 거절한다. 검증 후 게시 직전 만료도 새 정책
 | 일반 HTTP control | 기본 E 90초 + 기존 R 최대 15초 + P, S 최대 5초. Spring command 기본 100초 | 하위 budget_ms로 물리/재확인 잔여 예산을 제한할 수 있지만 FastAPI 전달은 미연결. 상위 Q가 무기한이면 유한 종단 보장 불가 | Q/S 소모와 반환 여유를 뺀 실제 잔여값 전달. 물리 원 기한은 연장하지 않음. 100초 caller 안에서 수습 관측이 충분한지는 제품 조건별 수락 필요 |
 | 복구 중 stop HTTP | VM Q와 S가 하위 수락보다 앞섬. 오류 details·원 key도 현재 경로에서 보존하지 않음 | 하위의 짧은 durable 수락만으로 상위 잠금을 우회할 수 없음 | 기존 stop 경로의 짧은 수락/긴 실행 분리와 요청별 Manager 상태 보호, pending/completed 응답 구분 필요. 새 HTTP API를 임의 구현하지 않음 |
 | Worker recover_once 실행 | 현재 Engine이 실행 슬롯·현재 view에서 기본 110초 spec을 선저장한 뒤 호출 | 실행 전 판단 큐/직렬화 대기는 이 실행 예산과 별도. 응답 유실은 원 attempt journal로 확인 | 같은 attempt의 원 host·절대 D를 재사용. 원 D 뒤 기존 verify_timeout_s(기본 150초)까지 결과 조회가 계속 실패하면 final RECONCILE_REQUIRED로 조정 요구. 이 확인 예산은 새 물리 실행 허가가 아님 |
-| 자산 등록 create | cloud root 디스크의 원본/복사본 해시·복사·준비와 후속 start를 포함 | 단일 control 90초나 개별 sha256sum 900초가 등록 전체 기한은 아님 | 전체 생성 요청·하위 단계별 예산과 중복 I/O는 별도 후속 과제. 무결성 검사 축소나 timeout 확대를 해결로 적용하지 않음 |
+| 자산 등록 create | metadata·용량 후 검증 root 복사 1회·guest 준비·조건부 게시/등록. 후속 start는 별도 제어 | 하위는 유한 생성 정책/원 host·기한을 제공. 제어 90초·조회 15초를 생성 운영값으로 쓰지 않음 | 승인된 생성 정책 공급·잔여 호출 예산과 원 결과 회수·명시 수습을 상위에서 연결. 실제 운영 시간/HTTP/보드 수락은 별도 |
 
 25초·120초 HTTP 대기는 합의·적용된 계약이 아니다. 관측 최대 시간은 보장 상한이
 아니며, 특정 후보의 표본 수·정책·firmware·domain·저장소 조건은
@@ -4036,3 +4346,28 @@ DEADLINE_EXCEEDED로 거절한다. 검증 후 게시 직전 만료도 새 정책
 | [platform/tests](../../platform/tests) | Manager·복구·자원·네트워크 Zephyr·Wi-Fi 경계 회귀 |
 
 명령·필드·응답·오류·설치 경로가 바뀌면 이 명세와 대응 시험·HTTP 계약을 함께 대조한다. 새 빌드의 설치 결과와 실보드 수락은 [빌드 가이드](build-guide.md)의 이미지 해시 기준으로 확인한다.
+
+
+<a id="cmd-provisioning"></a>
+## VM 자격 공급과 적용 신호
+
+`xenova-vm provisioning TARGET [--timeout-ms MS] [--budget-ms MS] [--json]`는 등록/lifecycle,
+다음 기동 profile·초기 template 참조·현재 실행의 captured profile·비밀 없는 공급 단계를 반환한다.
+broker·Xen·Store를 새로 관측하거나 자격/receipt를 만들지 않는다. intents와 목적이 다른 조회다.
+`current_profile.status=captured-launch`는 이번 신호 수신이나 앱 READY가 아니다.
+
+`xenova-vm provision TARGET [--execute] [--timeout-ms MS] [--budget-ms MS] [--json]`는 같은 자격의
+지원 재공급이다. 생략은 계획이다. 실행 중 Linux root를 mount하지 않으며 현재 stopped/미사용·원 작업·
+대상 lease·host gate를 확인한다. Zephyr는 stopped intent이면 local 설정만 준비하고 VM을 시작하지 않는다.
+running intent이면 같은 실행의 기존 Bootstrap/receipt에 연결한다. 원 create replay와 재공급은 별개다.
+null/무효 옵션·새 key는 허용하지 않는다. 전체 계약/오류 단계는 [공급 계약](../contracts/vm-provisioning-v1.md)에 있다.
+
+<a id="cmd-registration-notify"></a>
+## 등록-only 통지
+
+`xenova-vm registration-notify TARGET [--execute] [--timeout-ms MS] [--budget-ms MS] [--json]`.
+현재 REGISTERED VM만 대상이다. 생략은 공개 body 계획, execute는 같은 sender의 명시 1회 송신이다.
+자격/VM/디스크·원 생성/실행·의도를 만들지 않는다. JSON은 포맷만 바꾼다.
+확인 응답은 exit 0, 미설정·거절·통신 미확인·포화는 결과의 상세 state와 exit 4,
+무효 입력/대상은 기존 validation exit 2다. force·lifecycle·원 key 등 무관한 옵션은 거절한다.
+자동 최대 1회와 수동 송신, Spring 계약안·배포 설정·응답 유실 의미는 [등록 통지 계약](../contracts/vm-provisioning-v1.md)을 따른다.

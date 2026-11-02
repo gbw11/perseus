@@ -114,6 +114,7 @@ class PlatformObserver:
             execution_id=binding['execution_id'] if binding else None,
             expected_app_boot_id=binding['boot_id'] if binding else None,
             expected_app_instance_id=binding['app_instance_id'] if binding else None,
+            expected_app_instances=binding.get('app_instances') if binding else None,
             **fields,
         )
 

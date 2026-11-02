@@ -81,3 +81,5 @@ xenova:
     query-timeout: 2s
     command-timeout: 3s
     retry-backoff: 10ms
+  vm-registration:
+    service-token: test-registration-token

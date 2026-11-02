@@ -54,7 +54,8 @@ def source_info(recipe, source_id):
     common = [ROOT / 'platform/scripts/prepare-xenova-guests.py',
               ROOT / 'platform/guests/common/prepare_rootfs.py',
               ROOT / 'platform/guests/common/guest_identity.py',
-              ROOT / 'platform/guests/common/prepare_instance.py', Path(__file__).resolve()]
+              ROOT / 'platform/guests/common/prepare_instance.py',
+              ROOT / 'platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_guest_profile.py', Path(__file__).resolve()]
     if 'guest_agent' in meta:
         common += [Path(guest_agent_template.__file__).resolve(), *guest_agent_template.source_files()]
     preparation = {'platform': 'xenova', 'recipe': meta, 'recipe_files': sources,

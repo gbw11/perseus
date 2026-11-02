@@ -201,6 +201,8 @@ def make_template(args, source):
                     'preparation': preparation, 'guest_agent': agent,
                     'files': {name: {'sha256': digest(stage / name), 'bytes': (stage / name).stat().st_size}
                               for name in ('root.raw', 'Image', 'initrd', 'kernel.config', 'boot.json')}}
+        from xenova_guest_profile import from_manifest
+        metadata['provisioning_profile']=from_manifest(metadata)
         if template_recipe.source_info(recipe, args.source) != preparation:
             raise ValueError('template source changed during preparation; output not published')
         (stage / 'template.json').write_text(json.dumps(metadata, indent=2) + '\n')

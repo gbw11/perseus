@@ -4,10 +4,12 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 import hmac
 import logging
+import os
 import secrets
 import time
 from pathlib import Path
 
+from dom0_manager.observations import ObservationFile
 from dom0_manager.config import Settings
 from dom0_manager.drivers import build_driver
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
@@ -24,19 +26,30 @@ log = logging.getLogger(__name__)
 
 def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSource, web_root=None):
     settings = settings or FeedSettings.from_env()
-    driver = driver or build_driver(Settings.from_env())
+    if driver is None:
+        shared_path = os.environ.get("XENOVA_OBSERVATIONS_PATH")
+        driver = ObservationFile(shared_path) if shared_path else build_driver(Settings.from_env())
     store = store or StateStore(settings)
     policy = DisplayPolicy(settings, store.epoch, clock=store.clock)
     sessions = {}
 
     async def poll():
+        unavailable = False
         while True:
             try:
-                domains = await asyncio.to_thread(driver.list_domains)
-                store.poll_success(domains)
+                if isinstance(driver, ObservationFile):
+                    domains, observed = await asyncio.to_thread(driver.read)
+                    store.poll_success(domains, observed_mono=observed)
+                else:
+                    # Explicitly injected test/probe adapters only.
+                    domains = await asyncio.to_thread(driver.list_domains)
+                    store.poll_success(domains)
+                unavailable = False
             except Exception as error:
                 store.poll_failure()
-                log.warning("Xen display query unavailable (%s)", type(error).__name__)
+                if not unavailable:
+                    log.warning("Shared VM display observation unavailable (%s)", type(error).__name__)
+                unavailable = True
             await asyncio.sleep(1)
 
     @asynccontextmanager
@@ -117,7 +130,6 @@ def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSourc
             raise HTTPException(409, str(error)) from error
 
     if web_root is None:
-        import os
         web_root = os.environ.get("XENOVA_DISPLAY_WEB_ROOT")
     if web_root:
         root = Path(web_root).resolve()

@@ -1,6 +1,6 @@
 """조건을 다시 확인하는 일회성 복구 실행. 감시·정책·반복 실행 서비스는 아니다."""
 from first_install_contract import uuid4
-from xenova_execution import ExecutionError, fingerprint, refuse, short_lock
+from xenova_execution import ExecutionError, fingerprint, refuse, short_lock, read_record
 from xenova_runtime import PlatformError
 import xenova_catalog as catalog
 import xenova_vm as vm
@@ -34,6 +34,18 @@ def validate_request(spec):
     return spec
 
 
+def read_attempt(data, identity, *, reader=read_record):
+    """원 시도의 무결성만 확인한다. 현재 host·실행·복구 허가는 조회하지 않는다."""
+    if not isinstance(identity,str) or not vm.UUID.fullmatch(identity):
+        refuse('INVALID_SPEC','canonical recovery attempt required')
+    value=reader(data/'recovery-attempts'/(identity+'.json'))
+    if value is None:refuse('VM_NOT_FOUND','recovery attempt not found')
+    if (value.get('recovery_attempt_id')!=identity or value.get('request_hash')!=fingerprint(value.get('request'))
+            or not vm.UUID.fullmatch(value.get('operation_id',''))):
+        refuse('RECONCILE_REQUIRED','recovery attempt integrity mismatch')
+    return value
+
+
 class Recovery:
     def __init__(self, manager):
         self.m = manager
@@ -45,13 +57,7 @@ class Recovery:
         return self.e._path(self.p.data, "recovery-attempts", identity)
 
     def read_attempt(self, identity):
-        value = self.e.read(self.path(identity))
-        if value is None:
-            refuse("VM_NOT_FOUND", "recovery attempt not found")
-        if (value.get("recovery_attempt_id") != identity or value.get("request_hash") != fingerprint(value.get("request"))
-                or not vm.UUID.fullmatch(value.get("operation_id", ""))):
-            refuse("RECONCILE_REQUIRED", "recovery attempt integrity mismatch")
-        return value
+        return read_attempt(self.p.data,identity,reader=self.e.read)
 
     def attempts(self):
         root = self.p.data/"recovery-attempts"
@@ -79,6 +85,8 @@ class Recovery:
         self.e.checkpoint("recovery-"+phase, op)
 
     def conditions(self, spec, deadline, *, target=True, gate=True):
+        from xenova_preparation import guard_asset
+        guard_asset(self.p, spec['vm_id'])
         if spec["expected_host_boot_id"] != self.e.host:
             refuse("TARGET_CHANGED", "recovery request belongs to another host boot", details={"reason":"HOST_BOOT_CHANGED"})
         if gate:
@@ -96,7 +104,8 @@ class Recovery:
         if (not admission or not admission["allowed"] or admission["intent_revision"] != intent["intent_revision"]
                 or admission["lifecycle_generation"] != tomb["generation"]):
             refuse("BOOT_ADMISSION_REQUIRED", "this host boot has not admitted this intent")
-        if any(q["vm_id"] == record["uuid"] and q["status"] != "SUCCEEDED" for q in self.m._operations()):
+        from xenova_creation import holds
+        if any(q["vm_id"] == record["uuid"] and holds(self.m,q) for q in self.m._operations()):
             refuse("OPERATION_IN_PROGRESS", "an incomplete asset operation owns this VM", retryable=True)
         self.m._record_at(record, self.p.data/"instances"/record["id"])
         if self.p.clock() >= deadline:

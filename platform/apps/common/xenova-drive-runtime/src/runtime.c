@@ -3,6 +3,9 @@
  * local and on-demand AFTER a bounded window; nothing prints on the hot path. */
 #include <xenova/drive_runtime.h>
 #include <xenova/telemetry.h>
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+#include <xenova/drive_context.h>
+#endif
 #include <zephyr/shell/shell.h>
 #include <zephyr/version.h>
 #include <zephyr/sys/atomic.h>
@@ -76,11 +79,16 @@ struct row {
 	int rc, encoded;
 	bool attempted;
 };
-static struct row current, rows[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
+static struct row current;
+static int64_t work_finished_ms;
+#if defined(CONFIG_XENOVA_DRIVE_RECORDER)
+static struct row rows[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
+static struct xd_delivery deliveries[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
+#endif
 static struct xd_inputs cycle_inputs;
 static const struct xd_received *command_input=&cycle_inputs.input;
+static int64_t command_valid_until;
 static struct xd_candidate candidate;
-static struct xd_delivery deliveries[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
 static size_t delivery_count;
 static uint64_t delivery_overflow;
 static uint64_t generated, attempted, accepted, failed, dropped;
@@ -94,8 +102,8 @@ static bool transmissions_complete;
 static uint64_t capture_admitted, capture_terminal;
 static struct k_spinlock capture_lock;
 static struct xdh_health auto_health,manual_health;
-static bool health_observed;
-static uint64_t health_completed,health_step_end;
+static bool health_observed[2];
+static uint64_t health_completed[2],health_step_end[2];
 K_MUTEX_DEFINE(xd_output_lock);
 
 static uint64_t now_us(void)
@@ -201,7 +209,7 @@ int xd_start(const char *app_id, uint32_t period_ms)
 	if (!result && admit()) { result = xt_start(bootstrap_load, NULL, &inventory); }
 	if (!result && atomic_get(&stopping)) { result = -ECANCELED; }
 	(void)xdiag_boot("drive-ready", result);
-#if defined(CONFIG_XENOVA_DRIVE_NATIVE_TEST)
+#if defined(CONFIG_XENOVA_DRIVE_NATIVE_TEST) && defined(CONFIG_XENOVA_DRIVE_RECORDER)
 	k_spinlock_key_t key = k_spin_lock(&capture_lock);
 	capture_start = now_us(); capture_end = UINT64_MAX;
 	k_spin_unlock(&capture_lock, key);
@@ -221,6 +229,13 @@ bool xd_stopping(void)
 		requested = xt_snapshot_request(true) == 0;
 	}
 	const char *duration = getenv("XD_TEST_DURATION_MS");
+	/* Native fixture only: request the same cooperative cleanup before its
+	 * outer test timeout. Never used by a target/operating VM. */
+	const char *stop_file = getenv("XD_TEST_STOP_FILE");
+	if (stop_file) {
+		FILE *request = fopen(stop_file, "r");
+		if (request) { fclose(request); stop_request(); }
+	}
 	if (duration && k_uptime_get() - app_start_ms >= strtoll(duration, NULL, 10)) {
 		atomic_set(&stopping, 1);
 	}
@@ -245,7 +260,13 @@ int xd_owner_prepare(struct xm_zclient *client, const char *control, const char 
 	if (client_ready) { return 0; }
 	if (k_uptime_get() < retry_at) { return -EAGAIN; }
 	retry_at = k_uptime_get() + 1000;
-	int rc = bootstrap_load(&app_bootstrap, k_uptime_get() + 500, "xenova-drive");
+	int rc;
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+	rc=xd_context_start(bootstrap_load);
+	if(!rc)rc=xd_context_get(&app_bootstrap);
+#else
+	rc = bootstrap_load(&app_bootstrap, k_uptime_get() + 500, "xenova-drive");
+#endif
 	if (rc) { return rc; }
 	if (!admit()) { return -ESHUTDOWN; }
 	struct xm_zconfig config = {.host = app_bootstrap.broker_ipv4, .port = app_bootstrap.port,
@@ -265,9 +286,33 @@ int xd_owner_prepare(struct xm_zclient *client, const char *control, const char 
 	}
 	return rc;
 }
+void xd_owner_context(struct xd_inputs *out)
+{
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+ struct xt_bootstrap value;
+ memset(out->app_instances,0,sizeof(out->app_instances));
+ if(!xd_context_get(&value)){
+  strcpy(out->app_instances[0],value.auto_instance_id);strcpy(out->app_instances[1],value.manual_instance_id);
+ }
+ memset(value.password,0,sizeof(value.password));memset(value.world_password,0,sizeof(value.world_password));
+#else
+ ARG_UNUSED(out);
+#endif
+}
 int xd_client_prepare(struct xm_zclient *client,const char *control,const char *input)
 {
-	return admit() ? xd_io_start(client,control,input) : -ESHUTDOWN;
+ return admit() ? xd_io_start(client,control,input) : -ESHUTDOWN;
+}
+bool xd_owner_instance(int index,const char *instance)
+{
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+ struct xt_bootstrap value;
+ if(index<0||index>1||!instance||!instance[0]||xd_context_get(&value))return false;
+ bool matches=!strcmp(instance,index?value.manual_instance_id:value.auto_instance_id);
+ memset(value.password,0,sizeof(value.password));memset(value.world_password,0,sizeof(value.world_password));return matches;
+#else
+ ARG_UNUSED(index);ARG_UNUSED(instance);return true;
+#endif
 }
 int xd_client_prepare_dual(struct xm_zclient *client,const char *control,const char *input,const char *perception)
 {
@@ -276,10 +321,16 @@ int xd_client_prepare_dual(struct xm_zclient *client,const char *control,const c
 const char *xd_vm_id(void) { return cycle_inputs.vm_id; }
 int xd_command_input(const char *type)
 {
+	command_valid_until=0;
 	if (!strcmp(type,"drive.input")) { command_input=&cycle_inputs.input; }
 	else if (!strcmp(type,"perception.result") && cycle_inputs.dual_mode) { command_input=&cycle_inputs.perception; }
+	else if (!strcmp(type,"world.track") && cycle_inputs.dual_mode) { command_input=NULL; }
 	else { return -EINVAL; }
 	return 0;
+}
+int xd_command_bound(int64_t valid_until_ms){
+ if(valid_until_ms<=0)return -EINVAL;
+ command_valid_until=valid_until_ms;return 0;
 }
 int xd_publish(struct xm_zclient *client,const char *topic,const char *type,const char *payload)
 {
@@ -296,7 +347,7 @@ int xd_iteration_begin(void)
 {
 	memset(&current, 0, sizeof(current));
 	current.iteration_begin = now_us();
- command_input=&cycle_inputs.input;
+ command_input=&cycle_inputs.input;command_valid_until=0;
 	int rc = xd_io_snapshot(&cycle_inputs);
 	if (rc) {
 		/* Do not wait or mix generations. Missing input follows the existing
@@ -305,6 +356,48 @@ int xd_iteration_begin(void)
 		cycle_inputs.perception.error = cycle_inputs.input.error = cycle_inputs.control.error = rc;
 	}
 	return current.iteration_begin == UINT64_MAX ? -EIO : 0;
+}
+void xd_inputs_copy(struct xd_inputs *out) { if (out) { *out = cycle_inputs; } }
+int xd_publish_completed(const char *topic,const char *type,const char *payload,
+ uint64_t progress,int64_t produced_ms,const struct xd_inputs *source)
+{
+ return admit() ? xd_io_report_at(topic,type,payload,progress,source,produced_ms) : -ESHUTDOWN;
+}
+int64_t xd_cleanup_deadline_ms(void) { return cleanup_end(); }
+int xd_publish_supervision(const char *topic,const char *payload,uint64_t check,int64_t at,const struct xd_inputs *context)
+{return admit()?xd_io_report_at(topic,"app.lifecycle",payload,check,context,at):-ESHUTDOWN;}
+void xd_app_cleanup_error(int error)
+{
+ if(error){atomic_set(&app_close_error,error);(void)xdiag_error("drive-app-cleanup",error);}
+}
+int xd_completed_work(uint64_t release,uint64_t begin,uint64_t end,
+ uint64_t iteration_begin,int64_t finished_ms,const struct xd_inputs *source)
+{
+ uint64_t observed=now_us();
+ if(observed==UINT64_MAX)return -EIO;
+ if(!source||iteration_begin>begin||begin>end||end>observed||release>begin||
+    finished_ms<0||finished_ms>k_uptime_get())return -EINVAL;
+ k_spinlock_key_t key=k_spin_lock(&loop.lock);
+ struct xdiag_timing next=loop.timing;
+ int rc=0;
+ if(!next.initialized||next.in_flight)rc=-EINVAL;
+ else if(release<next.next_release_us)rc=-EALREADY;
+ else if(release<next.origin_us||(release-next.origin_us)%next.period_us)rc=-EINVAL;
+ uint64_t missing=rc?0:(release-next.next_release_us)/next.period_us;
+ if(!rc&&UINT64_MAX-next.skipped_release_count<missing)rc=-EOVERFLOW;
+ if(!rc){next.next_release_us=release;next.skipped_release_count+=missing;rc=xdiag_timing_begin(&next,begin);}
+ uint64_t misses=next.deadline_miss_count,skips=loop.timing.skipped_release_count;
+ if(!rc)rc=xdiag_timing_end(&next,end);
+ if(!rc)loop.timing=next;
+ k_spin_unlock(&loop.lock,key);
+ if(rc)return rc;
+ memset(&current,0,sizeof(current));
+ current.iteration_begin=iteration_begin;current.begin=begin;current.step_end=end;
+ current.release=release;current.completed=next.loop_seq;
+ current.missed=next.deadline_miss_count-misses;current.skipped=next.skipped_release_count-skips;
+ work_finished_ms=finished_ms;
+ cycle_inputs=*source;command_input=&cycle_inputs.input;command_valid_until=0;
+ return 0;
 }
 
 int xd_step_begin(void)
@@ -323,6 +416,7 @@ int xd_step_end(void)
 {
 	int rc = xdiag_loop_end(&loop);
 	if (!rc) {
+		work_finished_ms = k_uptime_get();
 		current.step_end = loop.timing.last_completion_us;
 		current.completed = loop.timing.loop_seq;
 		/* Per-completion increments remain valid for an arbitrary capture window. */
@@ -354,8 +448,14 @@ void xd_command(struct xm_zclient *client, const char *topic, const char *json, 
 		candidate.capture_us=current.begin;
 		candidate.control_revision=cycle_inputs.control_revision;
 		candidate.connection_revision=cycle_inputs.connection_revision;
-		candidate.expires_ms=k_uptime_get()+CONFIG_XENOVA_DRIVE_COMMAND_MAX_AGE_MS;
-		if ((v_mps!=0.0f||steer_rad!=0.0f) && !command_input->error)
+		candidate.app_instance[0]=0;
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+		struct xm_topic_info info;xm_topic_parse(topic,&info);
+		strcpy(candidate.app_instance,cycle_inputs.app_instances[!strcmp(info.app_id,"manual")?1:0]);
+#endif
+		candidate.expires_ms=work_finished_ms+CONFIG_XENOVA_DRIVE_COMMAND_MAX_AGE_MS;
+		if(command_valid_until)candidate.expires_ms=MIN(candidate.expires_ms,command_valid_until);
+		if ((v_mps!=0.0f||steer_rad!=0.0f) && command_input && !command_input->error)
 			candidate.expires_ms=MIN(candidate.expires_ms,command_input->received_ms+input_timeout_ms+1);
 		if (strlen(topic)>=sizeof(candidate.topic)||strlen(json)>=sizeof(candidate.json)) current.rc=-EMSGSIZE;
 		else { strcpy(candidate.topic,topic);strcpy(candidate.json,json);current.rc=xd_io_command(&candidate); }
@@ -385,10 +485,12 @@ void xd_iteration_end(void)
 		increment(&attempted);
 		increment(current.rc ? &failed : &accepted);
 	} else { increment(&dropped); }
+#if defined(CONFIG_XENOVA_DRIVE_RECORDER)
 	if (capture_end && current.begin >= capture_start && current.begin < capture_end) {
 		if (current.attempted && !current.rc) { increment(&capture_admitted); }
 		if (count < ARRAY_SIZE(rows)) { rows[count++] = current; } else { increment(&overflow); }
 	}
+#endif
 	if (capture_end && current.iteration_end >= capture_end) { capture_complete = true; }
 	seal_transmissions();
 	k_spin_unlock(&capture_lock, key);
@@ -405,9 +507,22 @@ void xd_health_record(const struct xdh_health *automatic,const struct xdh_health
 {
  if(!automatic||!manual)return;
  k_spinlock_key_t key=k_spin_lock(&capture_lock);
- auto_health=*automatic;manual_health=*manual;health_observed=true;
- health_completed=current.completed;health_step_end=current.step_end;
+ auto_health=*automatic;manual_health=*manual;
+ for(unsigned i=0;i<2;i++){health_observed[i]=true;health_completed[i]=current.completed;health_step_end[i]=current.step_end;}
  k_spin_unlock(&capture_lock,key);
+}
+void xd_health_task_record(unsigned task,const struct xdh_health *value)
+{
+ if(task>=2||!value)return;
+ k_spinlock_key_t key=k_spin_lock(&capture_lock);
+ if(task)manual_health=*value;else auto_health=*value;
+ health_observed[task]=true;health_completed[task]=current.completed;health_step_end[task]=current.step_end;
+ k_spin_unlock(&capture_lock,key);
+}
+void xd_health_task_clear(unsigned task)
+{
+ if(task>=2)return;
+ k_spinlock_key_t key=k_spin_lock(&capture_lock);health_observed[task]=false;k_spin_unlock(&capture_lock,key);
 }
 
 void xd_latest(struct xm_zclient *client, const char *topic, const char *type,
@@ -425,6 +540,7 @@ void xd_latest(struct xm_zclient *client, const char *topic, const char *type,
 
 void xd_delivery_record(const struct xd_delivery *d)
 {
+#if defined(CONFIG_XENOVA_DRIVE_RECORDER)
 	k_spinlock_key_t key=k_spin_lock(&capture_lock);
 	if(capture_end&&d->capture_us>=capture_start&&d->capture_us<capture_end) {
 		if (transmissions_complete) { increment(&delivery_overflow); }
@@ -436,10 +552,14 @@ void xd_delivery_record(const struct xd_delivery *d)
 		}
 	}
 	k_spin_unlock(&capture_lock,key);
+#else
+	ARG_UNUSED(d);
+#endif
 }
 
 #define emit(sh, ...) do { if (sh) { shell_print(sh, __VA_ARGS__); } else { printf(__VA_ARGS__); printf("\n"); } } while (0)
 
+#if defined(CONFIG_XENOVA_DRIVE_RECORDER)
 static void output_row(const struct shell *sh, const struct row *r)
 {
 	emit(sh, "XD_ROW [\"%" PRIu64 "\",\"%" PRIu64 "\",\"%" PRIu64 "\","
@@ -452,28 +572,32 @@ static void output_row(const struct shell *sh, const struct row *r)
 		r->generation, r->message, r->topic_seq, r->rc, r->encoded, r->v_bits, r->steer_bits, r->input_age_ms, r->iteration_begin,
 		r->attempted ? 1U : 0U);
 }
+#endif
 
 static int drive_cmd_inner(const struct shell *sh, size_t argc, char **argv)
 {
  if(argc==2&&!strcmp(argv[1],"health")){
   struct xdh_health health[2];
   k_spinlock_key_t key=k_spin_lock(&capture_lock);
-  bool available=health_observed;health[0]=auto_health;health[1]=manual_health;
-  uint64_t completed=health_completed,step_end=health_step_end;
+  bool available[2]={health_observed[0],health_observed[1]};health[0]=auto_health;health[1]=manual_health;
+  uint64_t completed[2]={health_completed[0],health_completed[1]},step_end[2]={health_step_end[0],health_step_end[1]};
   k_spin_unlock(&capture_lock,key);
-  if(!available)return -ENODATA;
+  if(!available[0]&&!available[1])return -ENODATA;
   for(size_t i=0;i<ARRAY_SIZE(health);i++){
+   if(!available[i]){emit(sh,"XD_HEALTH {\"mode\":\"%s\",\"rc\":%d}",i?"MANUAL":"AUTO",-ENODATA);continue;}
    char cpu[16]="null";
    if(health[i].cpu_valid)snprintf(cpu,sizeof(cpu),"%u",health[i].cpu_percent_milli);
    emit(sh,"XD_HEALTH {\"mode\":\"%s\",\"failure\":%u,\"restrict_function\":%s,\"warnings\":%u,\"work_rc\":%d,\"cpu_rc\":%d,\"cpu_valid\":%s,\"cpu_percent_milli\":%s,\"resource_sample\":\"%" PRIu64 "\",\"completed\":\"%" PRIu64 "\",\"step_end_us\":\"%" PRIu64 "\",\"stopping\":%s}",
     i?"MANUAL":"AUTO",(unsigned)health[i].failure,health[i].restrict_function?"true":"false",
     health[i].warnings,health[i].work_rc,health[i].cpu_rc,health[i].cpu_valid?"true":"false",
-    cpu,health[i].resource_sample,completed,step_end,xd_stopping()?"true":"false");
+    cpu,health[i].resource_sample,completed[i],step_end[i],xd_stopping()?"true":"false");
   }
   return 0;
  }
 	bool sends = argc >= 2 && !strcmp(argv[1], "transmissions");
 	bool records = sends || (argc >= 2 && !strcmp(argv[1], "records"));
+	if (!IS_ENABLED(CONFIG_XENOVA_DRIVE_RECORDER) &&
+	    (records || (argc >= 2 && !strcmp(argv[1], "capture")))) { return -ENOTSUP; }
 	if (argc == 4 && !strcmp(argv[1], "capture")) {
 		char *tail;
 		unsigned long delay = strtoul(argv[2], &tail, 10); if (!*argv[2] || *tail || delay > 60000) { return -EINVAL; }
@@ -524,12 +648,14 @@ static int drive_cmd_inner(const struct shell *sh, size_t argc, char **argv)
 				app_bootstrap.identity.execution_id);
 		}
 		size_t next = MIN(size, offset + limit);
+#if defined(CONFIG_XENOVA_DRIVE_RECORDER)
 		for (size_t i = offset; i < next; ++i) {
 			if (!sends) { output_row(sh, &rows[i]); continue; }
 			const struct xd_delivery *t=&deliveries[i];
 			emit(sh,"XD_SEND [\"%" PRIu64 "\",\"%" PRIu64 "\",\"%" PRIu64 "\",\"%" PRIu64 "\",\"%" PRIu64 "\",\"%" PRIu64 "\",%u,%u,%d,%d]",
 			 t->id,t->created_us,t->queued_us,t->taken_us,t->send_begin_us,t->send_end_us,t->message,t->topic_seq,t->rc,t->disposition);
 		}
+#endif
 		if (sh) { emit(sh, "XD_PAGE {\"offset\":%zu,\"next\":%zu,\"total\":%zu}", offset, next, size); }
 	}
 	struct xd_io_stats io;
@@ -566,6 +692,10 @@ int xd_finish(struct xm_zclient *client, int app_result)
 	 * Join shares the same cleanup deadline with Publisher/netfront/Store. */
 	int64_t io_end = cleanup_end();
 	int io_rc = xd_io_join(io_end);
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+	int context_rc=xd_context_join(io_end);
+	if(context_rc&&!io_rc)io_rc=context_rc;
+#endif
 	if (io_rc) { atomic_set(&app_close_error, io_rc); }
 	if (app_running) {
 		atomic_set(&app_quiesced, 1);
@@ -590,10 +720,14 @@ int xd_finish(struct xm_zclient *client, int app_result)
 	(void)xdiag_boot("drive-cleanup", cleanup);
 #endif
 #if defined(CONFIG_XENOVA_DRIVE_NATIVE_TEST)
+#if defined(CONFIG_XENOVA_DRIVE_RECORDER)
 	k_spinlock_key_t key = k_spin_lock(&capture_lock);
-	capture_end = now_us(); capture_complete = true;
+	uint64_t closed = now_us();
+	if (capture_end == UINT64_MAX) { capture_end = closed; }
+	capture_complete = capture_end && closed >= capture_end;
 	seal_transmissions();
 	k_spin_unlock(&capture_lock, key);
+#endif
 	uint64_t before = now_us();
 	int rc = xt_stop(io_end);
 	struct xt_status state;

@@ -40,6 +40,8 @@ int main(void)
 		.instance_id="22222222-2222-4222-8222-222222222222"};
 	assert(!xm_zclient_init(&test_client,"33333333-3333-4333-8333-333333333333",NULL,app,&cfg));
 	test_client.connected = true; client_ready = true; app_client = &test_client;
+	strcpy(app_bootstrap.identity.vm_id,"33333333-3333-4333-8333-333333333333");
+	strcpy(app_bootstrap.identity.execution_id,"44444444-4444-4444-8444-444444444444");
 	assert(!xdiag_loop_init(&loop, 20000, 20000));
 	assert(!xd_client_prepare(&test_client,"control","input"));
 	for (unsigned i=0; i<20; i++) {
@@ -73,6 +75,13 @@ int main(void)
 		assert(bytes && strstr(output,"XD_PAGE {\"offset\":0,\"next\":1,\"total\":1}"));
 		assert(strstr(output,"\"transmissions_complete\":true"));
 		printf("PAGE_EVIDENCE %.*s\n",(int)bytes,output);
+	}
+	const char *streams[]={"records","transmissions"};
+	for(unsigned i=0;i<ARRAY_SIZE(streams);i++){
+		char command[64];snprintf(command,sizeof(command),"xenova drive %s 0 4",streams[i]);
+		shell_backend_dummy_clear_output(sh);assert(!shell_execute_cmd(sh,command));
+		size_t bytes;const char *output=shell_backend_dummy_get_output(sh,&bytes);
+		printf("COLLECT_BEGIN %s\n%.*s\nCOLLECT_END %s\n",streams[i],(int)bytes,output,streams[i]);
 	}
 	puts("PASS window ended before socket completion; no premature pages/reset; sealed transmission total stable");
 	exit(0);

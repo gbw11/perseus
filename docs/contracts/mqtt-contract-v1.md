@@ -1,6 +1,6 @@
 # MQTT 메시지 계약 v1
 
-**현행 프로필** v1 공통 봉투 + verified-drive-1 (공통 A/B, 직접 MQTT·현재 실행 바인딩·준비 보고). Legacy 분리 앱과 v2 Telemetry는 별도 계약이다.
+**현행 프로필** v1 공통 봉투 + verified-drive-1. 명시적으로 선택하는 warm-drive-1 기반 시험 구성은 6.3절을 따른다. 두 프로필 모두 공통 A/B·직접 MQTT·현재 실행 바인딩을 사용한다. Legacy 분리 앱과 v2 Telemetry는 별도 계약이다.
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼, RC카 시나리오
 **브로커** dom0 Mosquitto
 
@@ -220,6 +220,12 @@ Spring/표시 소비자의 새 토픽·재개 문맥·정지 중 입력 공급�
 | `active_app` | string \| null | `autonomous` / `manual` / null (`SAFE_STOP`) |
 | `active_vm_id` | string \| null | 활성 앱의 VM |
 | `reason` | string | 전환 사유 (`start`, `command_timeout`, `resume_requested`, `no_fresh_standby`) |
+| `manual_policy` | 선택 string | 세션 입력 계약의 `CONTINUE_SESSION` / `NEUTRAL_THEN_ACTION`. MANUAL·AUTO_READY에서 `manual_session`과 함께 사용 |
+| `manual_session` | 선택 UUID string | 현재 운전자 세션. 앱 execution·instance와 별개. §7.1의 입력과 대조 |
+
+선택 필드 쌍은 같은 generation에서 변경할 수 없다. 세션 계약을 선택한 실행은 필드가
+없거나 세션 근거가 없다고 keys-only 입력으로 되돌아가지 않는다. 저장된 세션 계약과
+동일 세대 retained의 선택 필드가 다르면 권위 충돌이다. 기존 필드·QoS·retain은 유지한다.
 
 **`vehicle.status`** (게이트웨이, `source_id: dom0-gateway`)
 
@@ -320,6 +326,65 @@ READY는 출력 권한이 아니다. Standby·SAFE_STOP에서도 허용되며, G
 mode를 발급하면 해당 새 세대 적용을 다시 확인한다. 상태 있는 앱은 계산 완료 외에
 별도 warm-up/상태 준비가 필요하다. 앱 메모리 전체 복제를 뜻하지 않는다.
 
+### 6.3 대기·활성화 보고 `app.lifecycle`
+
+`warm-drive-1`을 선택한 공통 펌웨어·root Bootstrap·Gateway·Worker가 함께 사용한다.
+기본 `verified-drive-1`의 `app.readiness` 필드나 READY 의미는 바꾸지 않는다. 프로필이
+다르거나 앱별 바인딩이 없으면 새 자격을 승인하지 않는다. Legacy READY를 새 프로필의
+대기 자격으로 대신 쓰지 않는다. v2 Telemetry namespace와는 독립적이다.
+
+토픽은 기존 `xenova/v1/vms/{vm_id}/apps/{app_id}/events`이며 공통 봉투를 재사용한다.
+**QoS 0, retain false, 전체 envelope 1024 bytes 이하**다. 기존 자기 VM·앱 경로 ACL을 사용한다.
+
+| 필드 | 타입·범위 | 의미 |
+|---|---|---|
+| `profile` | `warm-drive-1` | 소비자가 명시적으로 선택한 준비 프로필 |
+| `applied_generation` | JSON integer, 0..4294967295 | 검증한 현재 제어 문맥. 미적용은 0 |
+| `check_seq` | 정규 uint64 십진 string, 1..18446744073709551615 | supervisor의 실제 입력·설정·소유 상태 확인 순번. 계산·송신 횟수 아님 |
+| `progress_seq` | 정규 uint64 십진 string, 0..18446744073709551615 | 앱 instance의 실제 계산 완료 순번. 무업무 대기 중 증가하지 않음 |
+| `phase` | WAITING / ACTIVATING / EXECUTING / STOPPING / RESIDUAL | 무업무 대기 / 현재 문맥의 계산 대기 / 계산 실행·결과 관측 / 종료 중 / 정리 미확정 |
+| `readiness` | QUALIFIED / READY / NOT_READY | 사전 대기 자격 / 실제 계산을 확인한 활성화 준비 / 제한 상태 |
+| `reason` | QUALIFIED·READY는 null, NOT_READY는 제한 코드 | 6.2절 코드와 APP_STOPPING·RESOURCE_RETAINED |
+
+앞자리 0은 값 0 외에는 허용하지 않는다. 알 수 없는 필드·프로필·enum·이유·자료형은
+거절한다. QUALIFIED는 WAITING과 1 이상의 generation이 필요하다. READY는 EXECUTING과
+1 이상의 generation·실제 progress가 필요하다. 다음은 계산 0회의 정당한 대기다.
+
+```json
+{"profile":"warm-drive-1","applied_generation":42,"check_seq":"15","progress_seq":"0","phase":"WAITING","readiness":"QUALIFIED","reason":null}
+```
+
+main의 실제 검사를 100ms마다 보고하며 phase·자격·이유·generation 변경은 다음 정기
+보고를 기다리지 않는다. 앱별 최신 보고 칸·원 관측 시각을 사용하고 송신 대기는 300ms다.
+이 값은 기반 시험 프로필 설정이며 미래 상태 있는 앱·차량의 운영 상한으로 확대하지 않는다.
+송신 worker는 check/progress/관측 시각을 새로 만들지 않는다. 재연결·새 문맥에서는 새 검사와
+제어 확인이 필요하다. 감독 주기를 활성화의 최소 대기로 사용하지 않는다.
+
+Gateway 수신 lease는 300ms, 자격 유지는 3초다. 같은/역전 check·이전 generation은
+갱신 근거가 아니다. 새 check만 있는 READY는 실제 계산 lease를 갱신하지 않는다.
+새 제어로 대상을 선택하면 해당 문맥의 새 계산 READY와 기존 출력 보호를 다시 확인한다.
+QUALIFIED는 계산 실행·출력 허가가 아니며 READY도 출력 허가가 아니다. AUTO_READY의
+명시적 복귀 요청·기존 카운트다운·100ms 명령 신선도는 유지한다. 정상 A 출력을 유지하면서
+B에 다른 준비 generation을 배포하는 계획 인계는 이 프로필의 지원 범위가 아니다.
+
+root 바인딩은 현재 execution과 앱별 instance를 연결한다. 수신기는 **seq/latest 갱신 이전에도**
+이를 검사해 옛 실행이 현재 실행의 중복 검사 기준을 바꾸지 못하게 한다. 앱 신원 교체는 대상
+앱의 근거만 철회하며 다른 앱·guest boot·별도 Publisher를 교체하지 않는다. 게스트가 신원을
+스스로 발급하지 않는다. root receipt의 갱신·Store 적용과 게스트의 종료 확인·새 계산 준비는
+별도 단계다. receipt 적용 성공만으로 앱 재초기화 완료를 뜻하지 않는다. 바인딩은 관측 시점의
+사본이며 외부 root 변경과 원자적이라는 보장은 없다.
+
+기존 적용 상태에서 앱 하나만 바꾼 receipt가 prepared/uncertain이면, 변경 전 앱별 신원과
+변경 대상이 보존된 경우에만 대상 앱을 provisioning으로 차단하고 영향 없는 앱의 바인딩을
+유지한다. 최초 provisioning·검증 불가 원본·다른 앱까지 바뀐 기록은 이 예외에 해당하지
+않는다. Store 미확정 앱의 옛 신원과 새 신원은 모두 준비 근거로 승인하지 않는다.
+
+Worker는 현재 AUTO/MANUAL 두 instance의 감독 근거를 각각 보관한다. 한 앱이 다른 앱의
+부재·만료를 덮지 않는다. 무업무 대기를 계산 정체로 분류하지 않고, 신선한 기능/입력 제한이나
+정리 잔존을 VM 사망으로 바꾸지 않는다. 기능 근거가 부적합하면 UNKNOWN이며 출력 판단은
+Gateway가 맡는다. 300ms 보고 만료와 기존 VM 손실 유예·부팅 유예·관측 경로 보호는 별도다.
+Xen crash/absent, Engine 원 attempt·예산·force 승인 경계는 유지한다.
+
 ## 7. 수동주행 입력
 
 아래 표는 현재 제품 backend의 공급 동작이다. verified의 정지/Standby 준비에 필요한
@@ -343,6 +408,82 @@ mode를 발급하면 해당 새 세대 적용을 다시 확인한다. 상태 있
 | `keys` | string[] | 눌린 키. `up` `down` `left` `right` `brake`만 쓴다. 브라우저 키 이름(`ArrowUp`, `w` 등)은 콘솔이 바꿔서 보낸다. 모르는 키는 무시한다 |
 
 - 수동 VM의 변환: `up` 전진, `down` 후진, `left` 왼쪽(`steer_rad` +), `right` 오른쪽(`steer_rad` −). 반대 키가 같이 눌리면 그 축은 0, `brake`가 있으면 속도 0. 최대 속도·조향각은 수동 VM 설정이다.
+
+### 7.1 명시적 세션 입력 `manual-session-1`
+
+현재 backend의 keys-only 생산 경로와 구분하는 선택 계약이다. 공통 C decoder/어댑터와
+warm Gateway에 소비 경로가 있으며 Spring/UI의 실제 세션 생산·모드 독립 공급은 아직
+연결되지 않았다. 기존 `drive.input` type·토픽·QoS 0·retain false·1024 bytes 상한을
+재사용한다. 아래 필드를 모두 사용하고 추가 필드는 거절한다.
+
+| 필드 | 타입·범위 | 의미 |
+|---|---|---|
+| `profile` | `manual-session-1` | 명시적으로 선택한 입력 계약 |
+| `session_id` | 정규 소문자·0이 아닌 UUID | 입력 생산자가 확인한 운전자 세션. A/B 승계만으로 교체하지 않음 |
+| `sample_seq` | 정규 uint64 십진 string, 1 이상 | 그 세션의 실제 입력/생존 확인 순번. 단순 MQTT 재발행마다 올리지 않음 |
+| `action_seq` | 정규 uint64 십진 string, 0 이상 | 실제 사용자 조작 변경 순번. 같은 키의 정상 유지 확인은 이 값을 올리지 않음 |
+| `generation` | JSON integer, 1..4294967295 | 생산자가 확인한 현재 제어 문맥. generation 교체는 새 사용자 조작을 뜻하지 않음 |
+| `keys` | string[], 최대 5개 | 기존 다섯 키. 중복·미지원 키는 이 프로필에서 거절 |
+| `valid` | JSON boolean | 실제 입력 세션의 유효성. 세션 단절을 합성 중립으로 숨기지 않음 |
+| `age_ms` | JSON integer, 0..2147483647 | 발행 시 원 입력/세션 확인 표본의 실제 나이. 통신 재전달로 0으로 갱신하지 않음 |
+
+수신기는 원 `age_ms`에 자기 시계의 수신 후 경과시간을 더해 기존 200ms 입력 신선도를
+검사한다. 서로 다른 장치의 단조 시각을 빼지 않는다. 같은 sample은 현재성을 갱신하지
+않으며 역전 sample/action은 거절한다. 같은 action에서 키가 바뀐 자료도 거절한다.
+정상 세션을 실제로 재확인한 새 sample은 같은 키/action으로 갱신할 수 있다.
+
+`CONTINUE_SESSION`은 같은 MANUAL 승계에서 현재 유효 세션의 누른 키를 이어 처리한다.
+`NEUTRAL_THEN_ACTION`은 해당 generation·session에서 유효한 현재 중립을 확인하고,
+그보다 큰 원 action의 조작이 온 뒤 이동을 허가한다. 중립 확인은 최신값 슬롯과 별도로
+보관한다. 중립 전에도 정상 정지 계산/준비는 가능하지만 이동은 허가하지 않는다.
+만료·세션 상실은 이동을 차단하며 재시작 전 중립/승인을 새 전환에 재사용하지 않는다.
+활성 MANUAL에서 세션이 바뀌거나 만료되면 기존 SAFE_STOP·재무장 경계로 들어간다.
+입력 근거가 없는 동안 대기 보고만으로 MANUAL을 반복 선택하거나 generation을 계속
+발급하지 않는다. 새 세션의 정상 준비는 가능하지만 출력은 명시적 재무장 전 금지다.
+
+새 제어 generation을 반영할 때 생산자는 현재 세션을 실제 확인한 sample을 제공한다.
+옛 입력 사본의 generation·MQTT seq만 바꾸는 것은 현재 확인이 아니다. 이 생산자 보장은
+소비자 parser만으로 입증되지 않으며 담당자 종단 수락이 필요하다. Gateway의 계획
+MANUAL 커밋은 이 계약을 내구 선택하고 이후 세션 없는 입력으로 자동 하향하지 않는다.
+정규 벡터는 [C/Python 공통 자료](vectors/manual-session-1.jsonl)에 둔다.
+
+<a id="drive-state-1"></a>
+### 7.3 drive-state-1 완전 사본과 적용
+
+이번 제공자 구현에서 추가한 저빈도 상태 계약이다. 토픽은 기존 `xenova/v1/vms/{vm_id}/apps/{app_id}/events`,
+type은 `app.state.snapshot`과 `app.state.applied`, QoS 1·retain false다. 제어·지도·heartbeat의 wire를 바꾸지 않는다.
+전체 envelope는 최대 8192바이트, C payload parser는 4096바이트다. 미지/중복 key·혼합/부분 사본·비유한 수치는 거절한다.
+기존 공통 수신 검증 후 상태 type만 strict JSON을 한 번 더 해석한다. drive/heartbeat의 기존 파싱 비용은 늘리지 않는다.
+
+snapshot payload의 필수 필드는 다음과 같다. bool/문자열을 정수로 묵시 변환하지 않는다.
+
+| 필드 | 의미·형식 |
+|---|---|
+| `profile` | `drive-state-1` |
+| `execution_id`, `intent_revision`, `lifecycle_generation` | source의 현재 실행 UUID·의도/수명 revision(integer 0..2^63-1). envelope의 source VM/app/boot/instance와 현재 binding 대조 |
+| `source_generation` | 당시 출력 권위 generation(integer 1..2^32-1). 상태 적용 시 새 권위로 복사하지 않음 |
+| `state_revision` | 1 이상 canonical uint64 decimal string. 같은 source 문맥에서 증가 |
+| `context` | `frame`, `configuration`, `maneuver`, `road_revision`, `route_revision`의 canonical uint64 decimal string, `odom_epoch` UUID |
+| `maneuver` | `kind=FOLLOW|AVOID`, `side=NONE|LEFT|RIGHT`, `phase=FOLLOW|PASS|REJOIN`, `merge_segment` 1..64 identifier(alnum/`_.:-`) |
+
+FOLLOW는 side NONE·phase FOLLOW이며 AVOID는 LEFT/RIGHT·PASS/REJOIN이다.
+frame/configuration/maneuver/odom 문맥은 맞아야 한다. road/route revision의 기계적 동일성은 요구하지 않고,
+실제 앱 adapter가 현재 입력에서 merge segment·기하/동역학적 적합성을 확인한다.
+Gateway는 권한이 있을 때 수락한 완전 사본만 보관한다. 권한 종료 후 도착한 source 갱신은 현재 사본이 되지 않는다.
+당시 수락 사본은 현재 호환하면 사용 가능하며 source generation을 새 출력 허가로 사용하지 않는다.
+
+applied payload는 `profile`, 대상 `execution_id/intent_revision/lifecycle_generation`, `copy_message_id`,
+`state_revision`, `context`, `origin=handoff|rebuilt`, `phase=APPLIED|REJECTED`를 정확히 가진다.
+handoff의 copy_message_id는 source envelope UUID이며 Gateway의 실제 수락 사본과 일치해야 한다.
+현재 입력으로 최초 재구축하면 origin rebuilt·copy_message_id null이다. 없는 planner 상태를 기다리며 무한 정지하지 않는다.
+rebuilt는 연속 승계 증거가 아니므로 전환에서는 stop_then_resume로 구분한다.
+사본 적용과 현재 generation의 실제 새 계산·lifecycle READY·출력 허가는 서로 다르다.
+실제 source/target 제품은 자기 인증된 VM/app 토픽으로 발행해야 하며 PUBACK만으로 적용 완료를 만들지 않는다.
+
+Python `xenova_mqtt.handoff.StateReceiver`·`ManeuverAdapter`, C `xm_state_snapshot/application_*`와
+`drive_adapter_apply_maneuver`가 제공된다. 적용 훅은 불변 사본을 기존 preparation/join 수명에 묶으며 progress를 올리지 않는다.
+현재 기본 C 알고리즘은 stateless다. [실제 MQTT·C/Python 교차 시험](../verification/recovery-scenario-closure-20261030.md#gateway-provider)은
+테스트 stateful adapter의 경계 검증이며 실제 planner·차량 연속성 완료가 아니다.
 
 ## 8. 메시지 지연 측정
 
