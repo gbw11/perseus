@@ -1,0 +1,20 @@
+{
+  "original_sha256": "fa00da2fa4bc677ee572e9d2f325a7fb2b381f74e3cd0f997e0ceca8059bad60",
+  "candidate_sha256": "08c14e3dc82ce0f5b5107ac1a62bb56e2be49b8913699800415c4fc2ad16be35",
+  "paths": [
+    "/opt/xenova-display/current/lib/xenova_display/kiosk.py",
+    "/opt/xenova-graphics-probe/20261027-1ddf34f25d30/rootfs/opt/xenova-kiosk-runtime/20261028/lib/xenova_display/kiosk.py"
+  ],
+  "changes": [
+    "per-output supervision",
+    "independent geometry observations and status publication",
+    "per-output verified renderer freshness"
+  ],
+  "preserved": [
+    "original Chromium launch arguments",
+    "original per-output persistent profile",
+    "sandbox",
+    "authentication",
+    "existing service unit and environment"
+  ]
+}

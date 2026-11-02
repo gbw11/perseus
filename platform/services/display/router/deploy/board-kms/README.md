@@ -1,5 +1,7 @@
 # Pi4 KMS 상시 HDMI 실행 프로파일
 
+2026-11-02 후속 선택형 native 영상 송신기는 [STREAM.md](STREAM.md)를 따른다. 출력별 복구 격리·상태 파일 공유를 포함한 [최종 실제 viewer·HDMI 검증과 제한](../../../../../../docs/verification/display-257-browser-acceptance-20261102.md)을 추가했다. 기존 기본 FFmpeg와 HDMI 배포 프로파일을 유지하며 선택형 native 서비스는 아직 보드에 상시 설치하지 않았다.
+
 실보드에서 검증한 전용 graphics rootfs를 사용하는 프로파일이다. 호스트 패키지 설치나 VM 제어를 하지 않는다. 다른 보드/이미지의 임의 경로에 그대로 복사하지 말고 rootfs·Python ABI·Chromium sandbox·실제 EDID·UUID를 먼저 확인한다.
 
 ## 구성
