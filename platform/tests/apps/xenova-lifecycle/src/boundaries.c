@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 const struct ethernet_api *xl_api;
 const char *xl_case;
 unsigned xl_hypercalls,xl_grants,xl_revokes,xl_opened,xl_closed,xl_features;
@@ -39,7 +40,10 @@ k_tid_t __wrap_z_impl_k_thread_create(struct k_thread *t,k_thread_stack_t *stack
  return __real_z_impl_k_thread_create(t,stack,size,entry,a,b,c,priority,options,delay);
 }
 int xsr_open(void) { xl_opened++;return is("net-store")||is("shutdown-store")?-EIO:0; }
-struct xs_client *xsr_acquire(int64_t end) { return end>k_uptime_get()?&client:NULL; }
+struct xs_client *xsr_acquire(int64_t end) {
+ if(xl_wait_enabled&&front==4&&is("wait-lock")){k_sem_give(&xl_store_wait);return NULL;}
+ return end>k_uptime_get()?&client:NULL;
+}
 void xsr_release(void) { }
 int xs_read_text(struct xs_client *c,uint32_t tx,const char *p,char *v,size_t n,int ms) {
  ARG_UNUSED(c);ARG_UNUSED(tx);ARG_UNUSED(p);ARG_UNUSED(ms);snprintf(v,n,"42");return 0;
@@ -49,7 +53,18 @@ int xs_watch(struct xs_client *c,const char *p,uint32_t *id,int ms) {
  return is("shutdown-watch")||is("net-watch")?-ETIMEDOUT:0;
 }
 int xsr_unwatch(uint32_t id,int64_t end) { assert(id);return end<=k_uptime_get()?-ETIMEDOUT:0; }
-int xsr_watch_next(uint32_t id,int ms) { ARG_UNUSED(id);k_sleep(K_MSEC(ms));return -ETIMEDOUT; }
+int xsr_watch_next(uint32_t id,int ms) {
+ ARG_UNUSED(id);k_sleep(K_MSEC(ms));
+ if(xl_wait_enabled&&front==4){
+  if(is("wait-watch-busy")){k_sem_give(&xl_store_wait);return -EBUSY;}
+  if(is("wait-watch-poison")){client.poisoned=true;client.fatal_error=-ETIMEDOUT;k_sem_give(&xl_store_wait);}
+  if(getenv("XL_WATCH_FLOOD"))return 0;
+ }
+ return client.poisoned?client.fatal_error:-ETIMEDOUT;
+}
+int xsr_watch_next_status(uint32_t id,int ms,bool *unusable) {
+ int rc=xsr_watch_next(id,ms);*unusable=client.poisoned||client.closed;return rc;
+}
 int xsr_read(const char *p,char *v,size_t n,int ms) {
  if(ms<=0)return -ETIMEDOUT;
  if(strstr(p,"control/shutdown")) {
@@ -59,6 +74,7 @@ int xsr_read(const char *p,char *v,size_t n,int ms) {
 }
 int xsr_write(const char *p,const char *v,int ms) {
  if(ms<=0)return -ETIMEDOUT;
+ if(client.poisoned)return client.fatal_error;
  if(strstr(p,"feature-")) {
   if(!strcmp(v,"1")) {
    xl_features++;
@@ -90,14 +106,20 @@ int xvif_watch_backend(struct xs_client *c,const struct xvif *v,uint32_t *id,int
  ARG_UNUSED(v);return xs_watch(c,"/backend",id,ms);
 }
 int xvif_refresh(struct xs_client *c,struct xvif *v,int ms) {
- ARG_UNUSED(c);if(ms<=0)return -ETIMEDOUT;
- if(xl_wait_enabled&&front==4) {
+ if(ms<=0)return -ETIMEDOUT;
+ if(c->poisoned)return c->fatal_error;
+ if(xl_wait_enabled&&(front==4||getenv("XL_CLOSE_UNAVAILABLE"))) {
   k_sem_give(&xl_store_wait);
   if(is("wait-delay"))k_sleep(K_MSEC(35));
   if(is("wait-timeout"))return -ETIMEDOUT;
+  if(is("wait-busy"))return -EBUSY;
+  if(is("wait-again"))return -EAGAIN;
+  if(is("wait-poison")){c->poisoned=true;c->fatal_error=-ETIMEDOUT;return c->fatal_error;}
+  if(is("wait-stop-race")){k_sem_give(&xl_acquired);assert(!k_sem_take(&xl_release,K_SECONDS(1)));}
   if(is("wait-identity"))return -EXDEV;
   if(is("wait-protocol"))return -EPROTO;
   if(is("wait-closing")){v->backend_state=XenbusStateClosing;return 0;}
+  if(is("wait-closed")){v->backend_state=XenbusStateClosed;return 0;}
  }
  if((is("net-backend")&&!xl_retry)||is("net-init-wait"))return -ETIMEDOUT;
  v->backend_state=front==6?XenbusStateClosed:front==5?XenbusStateClosing:advertised?XenbusStateConnected:XenbusStateInitWait;
