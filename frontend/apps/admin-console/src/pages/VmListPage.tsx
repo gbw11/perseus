@@ -46,7 +46,13 @@ export function VmListPage() {
           <p className={styles.headingDescription}>VM 생성과 생명주기, 할당 자원을 관리합니다.</p>
         </div>
         <div className={styles.controlHeadingActions}>
-          {vms.data && <ObservedClock at={vms.dataUpdatedAt} />}
+          {vms.data && (
+            <ObservedClock
+              at={observedAt(vms.data.observed_at, vms.dataUpdatedAt)}
+              receivedAt={vms.dataUpdatedAt}
+              refreshing={!vms.isFetchedAfterMount}
+            />
+          )}
           <Button onClick={() => navigate('/control/vms/new')}>+ VM 생성</Button>
         </div>
       </header>
@@ -197,14 +203,31 @@ function SummaryItem({ label, value, tone }: { label: string; value: string; ton
   );
 }
 
-function ObservedClock({ at }: { at: number }) {
+/** 서버가 dom0 목록을 받은 시각(observed_at). 읽을 수 없으면 화면이 응답을 받은 시각 */
+function observedAt(iso: string | undefined, fallback: number): number {
+  const parsed = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/** at: 서버가 dom0 목록을 받은 시각, receivedAt: 화면이 그 응답을 받은 시각 (둘의 차이가 서버 목록의 나이) */
+function ObservedClock({
+  at,
+  receivedAt,
+  refreshing,
+}: {
+  at: number;
+  receivedAt: number;
+  refreshing: boolean;
+}) {
   const time = new Date(at).toTimeString().slice(0, 8);
+  const ageSeconds = Math.max(0, Math.round((receivedAt - at) / 1000));
   return (
     <span className={styles.observedTime}>
-      마지막 갱신
+      마지막 확인
       <b key={time} className={styles.tick}>
         {time}
       </b>
+      {refreshing ? ' · 갱신 중' : ageSeconds >= 3 ? ` · ${ageSeconds}초 전` : ''}
     </span>
   );
 }
