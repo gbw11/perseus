@@ -6,7 +6,7 @@
 
 아래 `/split`·`/detail`·`/sim` 설명은 **명시적 앱 미리보기 모드**(`console`/`scenario`/`live`/`legacy-live`)에 해당한다. 기본을 console mock으로 가정하지 않는다. 외부 Docker screens는 Spring 앱 미리보기를 명시적으로 유지한다. 앱 ID autonomous/manual은 VM의 주·백업 역할과 동의어가 아니다. 실제 HDMI 캡처와 외부 앱 미리보기를 같은 출력 증거로 취급하지 않는다.
 
-관리 콘솔은 `VITE_VM_ROLE_BINDINGS` JSON에 합의한 UUID 세 개를 설정해야 주·백업 역할을 표시한다. 미설정 시 역할 미확인/VM 이름을 사용한다. 값은 빌드 시 반영하며 Docker build arg/Compose build args를 지원한다. 기존 명령·앱 ID는 변경하지 않는다.
+관리 콘솔은 API VM 목록(`GET /api/v1/vms`)을 그대로 카드로 그리고 VM 이름으로 부른다. 주 구동·백업·인터랙션 역할은 백엔드가 주는 `role`(DB `vms.role`, VM 등록·수정 때 지정)로만 표시하고, 없으면 "역할 미지정"으로 둔다. VM 이름·앱 ID로 역할을 추측하지 않는다. 역할은 재빌드 없이 VM 수정 API로 바꾼다. 기존 명령·앱 ID는 변경하지 않는다.
 
 실제/미연결 경계는 [표시 경로 계약](../docs/contracts/display-route-v1.md), [카메라 계약](../docs/contracts/camera-stream-v1.md), [통합 검증 기록](../docs/verification/display-252-integration.md)을 따른다.
 

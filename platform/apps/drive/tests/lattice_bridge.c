@@ -48,6 +48,7 @@ int probe_plan(void *pointer,float x,float y,float yaw,float steer,float gx,floa
  return rc;
 }
 unsigned probe_count(void *pointer) { return (unsigned)((struct probe *)pointer)->path.count; }
+int probe_direction(void *pointer) { return ((struct probe *)pointer)->path.direction; }
 int probe_point(void *pointer,unsigned index,float *out) {
  struct probe *p=pointer;if(index>=p->path.count)return -1;
  const xenova_drive_PathPoint *v=&p->path.points[index];
@@ -128,8 +129,13 @@ int engine_state(void *pointer,uint8_t *out,size_t cap){
  strcpy(s->source_execution,"88888888-8888-4888-8888-888888888888");strcpy(s->source_app_instance,"99999999-9999-4999-8999-999999999999");
  s->source_generation=1;s->state_revision=1;strcpy(s->frame_epoch,p->frame);strcpy(s->odom_epoch,p->odom);
  strcpy(s->configuration,p->configuration);strcpy(s->primitive,e->assets->sha256);strcpy(s->reference_id,p->reference);
- s->reference_revision=1;s->path_revision=p->revision;s->maneuver_revision=p->maneuver_revision;
- s->direction=p->direction;s->maneuver_phase=p->phase;s->merge_goal=p->goal;
+ s->reference_revision=e->last_track_world.reference_revision?e->last_track_world.reference_revision:1;
+ s->path_revision=p->revision;s->maneuver_revision=p->maneuver_revision;
+ s->has_world_features=true;s->world_features=p->world_features;
+ s->direction=p->direction;s->maneuver_phase=p->phase;s->merge_goal=p->merge_goal;
+ if(p->merge_passed_reference_revision&&p->merge_passed_reference_revision==s->reference_revision){
+  s->has_merge_passed_reference_revision=true;s->merge_passed_reference_revision=p->merge_passed_reference_revision;
+ }
  s->vehicle_sequence=2;s->calculation_sequence=e->completed;s->tracker_index=e->tracker.index;s->complete=true;
  strcpy(s->message_id,"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");strcpy(s->calibration,"encoder-lab-1");
  strcpy(s->map_epoch,"33333333-3333-4333-8333-333333333333");s->observation_seq=1;

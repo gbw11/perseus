@@ -1,0 +1,140 @@
+{
+  "trial": "xenova-257-browser-450907c8",
+  "error": null,
+  "browser_version": "156.0.8078.74",
+  "measurement_scope": "PC browser request -> real X11 pixels -> JPEG -> product viewer canvas draw -> two requestAnimationFrame callbacks; includes outbound control; not physical LCD scanout",
+  "soak_seconds_browser_clock": 604.1136999999881,
+  "soak_seconds_controller": 600.2864424000145,
+  "streams": {
+    "monitor-1": {
+      "frames": 2927,
+      "first": 21727.69999998808,
+      "last": 625460.1999999881,
+      "maxGap": 899.2000000476837,
+      "gapsOver1s": 0,
+      "fps": 4.845114421341641
+    },
+    "monitor-2": {
+      "frames": 2933,
+      "first": 21848.599999964237,
+      "last": 625548.0999999642,
+      "maxGap": 773.8999999761581,
+      "gapsOver1s": 0,
+      "fps": 4.8550463265442545
+    }
+  },
+  "browser_latency": {
+    "monitor-1": {
+      "requested": 30,
+      "matched": 30,
+      "p50_ms": 332.19999998807907,
+      "p95_ms": 559.5,
+      "max_ms": 583.5
+    },
+    "monitor-2": {
+      "requested": 30,
+      "matched": 30,
+      "p50_ms": 319.5,
+      "p95_ms": 543,
+      "max_ms": 599.5
+    }
+  },
+  "proxy": {
+    "monitor-1": {
+      "connections": 1,
+      "bytes": 145895644,
+      "errors": []
+    },
+    "monitor-2": {
+      "connections": 1,
+      "bytes": 200557540,
+      "errors": []
+    }
+  },
+  "browser_latency_phases": {
+    "browser_latency": {
+      "monitor-1": {
+        "requested": 30,
+        "matched": 30,
+        "p95_ms": 559.5,
+        "max_ms": 583.5
+      },
+      "monitor-2": {
+        "requested": 30,
+        "matched": 30,
+        "p95_ms": 543,
+        "max_ms": 599.5
+      }
+    },
+    "browser_latency_post_soak": {
+      "monitor-1": {
+        "requested": 30,
+        "matched": 30,
+        "p95_ms": 524.1999999880791,
+        "max_ms": 572.4000000357628
+      },
+      "monitor-2": {
+        "requested": 30,
+        "matched": 30,
+        "p95_ms": 588.9000000357628,
+        "max_ms": 625.3000000119209
+      }
+    }
+  },
+  "browser_latency_same_trial_pooled": {
+    "monitor-1": {
+      "matched": 60,
+      "requested": 60,
+      "p95_ms": 533.3999999761581,
+      "max_ms": 583.5
+    },
+    "monitor-2": {
+      "matched": 60,
+      "requested": 60,
+      "p95_ms": 543,
+      "max_ms": 625.3000000119209
+    }
+  },
+  "additional_stream_connections_in_soak": {
+    "monitor-1": 0,
+    "monitor-2": 0
+  },
+  "additional_proxy_errors_in_soak": {
+    "monitor-1": 0,
+    "monitor-2": 0
+  },
+  "multipart_body_mbps": 4.427995511441063,
+  "cpu_mean_cores": {
+    "sender": 0.2197863788870456,
+    "native_worker": 0.5180786172839532,
+    "other_pipeline": 0.0,
+    "browser": 0.4008036082838832,
+    "xorg": 0.17749731091902587,
+    "other_system": 0.2107113284039675
+  },
+  "cpu_sample_seconds": 599.4457011720006,
+  "jpeg_capture_mbps": 4.442940962934713,
+  "jpeg_rate_note": "encoded source bytes, not wire bytes; interval spans adjacent API snapshots",
+  "cleanup": {
+    "services": {
+      "xenova-display-kiosk.service": "active",
+      "xenova-display-graphics.service": "active",
+      "xenova-display-feed.service": "active",
+      "xenova-dom0-manager.service": "active",
+      "mosquitto.service": "active",
+      "tailscaled.service": "active"
+    },
+    "ssh_policy_restored": true,
+    "graphics_source_restored": true,
+    "graphics_source_unchanged": true,
+    "domains_unchanged": true,
+    "temporary_files_removed": true,
+    "sender_journal": "Started [systemd-run] /usr/bin/python3 /run/xenova-257-browser-450907c8/stream-host.py.\nINFO:     Started server process [51736]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://127.0.0.1:8083 (Press CTRL+C to quit)\nStopping [systemd-run] /usr/bin/python3 /run/xenova-257-browser-450907c8/stream-host.py...\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [51736]\nxenova-257-browser-450907c8.service: Deactivated successfully.\nStopped [systemd-run] /usr/bin/python3 /run/xenova-257-browser-450907c8/stream-host.py.\nxenova-257-browser-450907c8.service: Consumed 8min 22.265s CPU time over 11min 17.419s wall clock time, 59.8M memory peak.\n"
+  },
+  "hotplug_freshness": null,
+  "available_min_mib": 1989.62109375,
+  "pipeline_rss_first_last_mib": [
+    94.125,
+    94.5
+  ]
+}

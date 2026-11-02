@@ -14,13 +14,17 @@ import type {
   SignupResponse,
   Template,
   TokenResponse,
+  UpdateVcpuPinningRequest,
   Vm,
   VmListResponse,
+  VmResourceUpdate,
+  VmResources,
 } from './types';
 
 export const keys = {
   vms: ['vms'] as const,
   vm: (id: string) => ['vms', id] as const,
+  vmResources: (id: string) => ['vms', id, 'resources'] as const,
   templates: ['templates'] as const,
   events: (query: string) => ['events', query] as const,
   metrics: (id: string, minutes = 5) => ['vms', id, 'metrics', minutes] as const,
@@ -45,6 +49,44 @@ export function useVm(vmId: string) {
     queryKey: keys.vm(vmId),
     queryFn: ({ signal }) => request<Vm>(`/api/v1/vms/${encodeURIComponent(vmId)}`, { signal }),
     refetchInterval: POLL_MS,
+  });
+}
+
+export function useVmResources(vmId: string) {
+  return useQuery({
+    queryKey: keys.vmResources(vmId),
+    queryFn: ({ signal }) =>
+      request<VmResources>(`/api/v1/vms/${encodeURIComponent(vmId)}/resources`, { signal }),
+    enabled: Boolean(vmId),
+    refetchInterval: POLL_MS,
+  });
+}
+
+export function useUpdateVcpuPinning(vmId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateVcpuPinningRequest) =>
+      request<VmResources>(`/api/v1/vms/${encodeURIComponent(vmId)}/resources/vcpu-pinning`, {
+        method: 'PUT',
+        body,
+      }),
+    onSettled: () => client.invalidateQueries({ queryKey: keys.vmResources(vmId) }),
+  });
+}
+
+export function useUpdateVmResource(vmId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ kind, body }: VmResourceUpdate) =>
+      request<VmResources>(`/api/v1/vms/${encodeURIComponent(vmId)}/resources/${kind}`, {
+        method: 'PUT',
+        body,
+      }),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: keys.vmResources(vmId) });
+      void client.invalidateQueries({ queryKey: keys.vm(vmId) });
+      void client.invalidateQueries({ queryKey: keys.vms });
+    },
   });
 }
 

@@ -211,8 +211,8 @@ class RecoveryEngine:
     def _watch_in_flight(self, record: RecoveryRecord) -> None:
         """결과를 모르는 시도: 닫지 않는다. 사용자가 끈 것만 취소 요청으로 적어 둔다."""
         health = self._watcher.health(record.vm_id)
-        if health is None or record.cancel_requested:
-            return
+        if health is None or record.cancel_requested or not health.intent_known:
+            return  # 의도를 못 읽은 주기의 desired_state 는 마지막으로 읽은 값이다. 취소 근거가 아니다
         if health.state == HealthState.STOPPED or health.desired_state != "running":
             record.cancel_requested = True
             self._save()
@@ -220,8 +220,8 @@ class RecoveryEngine:
 
     def _check_watcher(self, record: RecoveryRecord, now: float) -> None:
         health = self._watcher.health(record.vm_id)
-        if health is None:
-            return
+        if health is None or not health.intent_known:
+            return  # 의도를 못 읽었다: 오래된 desired_state 로 닫지 않고 다음 주기를 기다린다
         if health.state == HealthState.HEALTHY:
             # 우리 시도가 완료되지 않았는데 건강해졌다(사용자 조작·플랫폼 쪽 재시작·신호 복귀). 더 시도하지 않고 닫되,
             # completed(이 시도로 새 Xen 실행을 관측, 계약 2.5)로 보고하지 않는다
@@ -312,8 +312,9 @@ class RecoveryEngine:
                 health = self._watcher.health(record.vm_id)
             if health is not None and health.state == HealthState.HEALTHY:
                 raise _Recovered(f"VM became healthy before the platform accepted attempt {record.attempt}")
-            if health is not None and (health.state == HealthState.STOPPED or health.desired_state != "running"):
+            if health is not None and health.intent_known and (health.state == HealthState.STOPPED or health.desired_state != "running"):
                 raise _NotEligible(f"desired_state={health.desired_state}, state={health.state.value}")
+        # 의도를 못 읽은 건강 스냅샷으로는 취소하지 않는다. 원 spec 의 expected_intent_revision 을 플랫폼이 다시 확인한다
         return self._platform.recover_once(spec, execute=True)  # 진행 중·불확실·미도달: 플랫폼이 멱등하게 이어 가거나 RECONCILE_REQUIRED
 
     def _submit(self, record: RecoveryRecord, work: Callable[[], dict[str, Any]], now: float) -> None:

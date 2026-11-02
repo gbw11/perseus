@@ -16,6 +16,9 @@
 - 키 있는 stop 과 원 작업 조회(control-operation)는 Manager.fork() 의 요청별 객체로 부른다. 긴 start 가 공유 Manager 를 쥐어도
   stop 은 짧은 admission 잠금으로 정지 의도를 내구 수락하고, 실행 잠금이 잡혀 있으면 기다리지 않고 pending 으로 돌아온다.
   나머지 action 은 지금처럼 SerializedManager 로 직렬화한다. fork 가 없는 옛 Manager 는 직렬화된 경로를 그대로 쓴다
+- 일반 조회(_READ_ACTIONS)는 read_fork(XENOVA_PLATFORM_READ_FORK)일 때 호출마다 새 fork 로 부른다. 하위가 이 조회를 공통 실행
+  잠금 없이 처리하는 후보(cli-manager-spec "일반 조회의 동시 실행과 정합성")에서만 켠다. fork 가 있어도 조회가 공통 잠금을 쓰는
+  옛·혼합 설치본에서는 직렬화 대기(busy timeout 503) 대신 하위 잠금 대기로 바뀔 뿐이라 기본은 끈다
 - 요청 예산(budget.py)이 있으면 직렬화 대기를 남은 예산으로 줄이고, 하위에는 budget_ms(get/list/control-operation 은 timeout_ms 도)로
   남은 값만 준다. 남은 값이 없으면 제출하지 않는다
 """
@@ -74,8 +77,26 @@ class ManagerLike(Protocol):
 # 요청 예산 전달
 # ---------------------------------------------------------------------------
 
-_BUDGET_ACTIONS = frozenset({"start", "stop", "reboot", "destroy", "get", "list", "control-operation"})  # 하위 budget_ms 허용 action
-_TIMEOUT_ACTIONS = frozenset({"get", "list", "control-operation"})  # spec timeout_ms(1..15000) 를 받는 조회
+# 하위 budget_ms 를 넘기는 action (cli-manager-spec Python Manager 호출).
+# 미해결(S15P31E110-334): create 는 아직 넘기지 않아 요청 예산이 지나도 원 생성이 계속된다. 하위는 create 예산이 생성 정책
+# call_ms 보다 크면 INVALID_SPEC 이고 원 생성 기한을 진입+budget_ms−cleanup_ms 로 줄이므로, HTTP 예산 상한(105초)을 그대로
+# 넘기면 Linux 생성이 끝나지 못한다. 헤더 상한·정책 값·Spring timeout 을 정한 뒤 연결한다
+_BUDGET_ACTIONS = frozenset({
+    "start", "stop", "reboot", "destroy", "get", "list", "intents", "probe", "execution-context", "templates", "operation",
+    "control-operation", "recovery-operation", "recovery-reconcile", "operation-reconcile",
+    "provision", "provisioning", "registrations",
+})
+# spec timeout_ms(1..15000) 를 받는 action. templates 는 받지 않는다
+_TIMEOUT_ACTIONS = frozenset({
+    "get", "list", "intents", "probe", "execution-context", "operation", "control-operation", "recovery-operation", "recovery-reconcile",
+    "provision", "provisioning", "registrations",
+})
+# 하위가 공통 실행 잠금 없이 처리하는 일반 조회. read_fork 일 때 직렬화하지 않고 호출마다 새 fork 로 부른다.
+# provisioning·registrations는 metadata 조회다. provision은 공급 변경이므로 직렬화한다.
+_READ_ACTIONS = frozenset({
+    "list", "get", "intents", "probe", "execution-context", "templates", "operation", "control-operation", "recovery-operation",
+    "provisioning", "registrations",
+})
 _READ_TIMEOUT_MS = 15_000  # 하위 조회의 기본·상한
 
 
@@ -138,18 +159,26 @@ class SerializedManager:
     가득 차 서비스 전체가 멈춘 것처럼 보인다. 그래서 대기 시간을 넘기면 플랫폼의 파일 잠금 충돌과 같은 모양의
     OPERATION_IN_PROGRESS(retryable) 봉투를 돌려주고, 호출자는 그것을 503 PlatformUnavailable 로 낸다.
     요청 예산이 있으면 대기 한도는 남은 예산과 busy_timeout_s 중 짧은 쪽이고, 차례가 왔을 때 예산이 다 썼으면 제출하지 않는다.
+
+    read_fork 이면 일반 조회는 이 직렬화를 거치지 않고 호출마다 새 요청 객체(inner.fork())로 부른다. 같은 fork 객체를 두 호출이
+    공유하지 않고, 공유 inner 를 잠금 없이 부르지도 않는다. fork 가 없으면 조회도 직렬화된다.
     """
 
-    def __init__(self, inner: ManagerLike, *, busy_timeout_s: float = 5.0) -> None:
+    def __init__(self, inner: ManagerLike, *, busy_timeout_s: float = 5.0, read_fork: bool = False) -> None:
         self._inner = inner
         self._lock = threading.Lock()
         self.busy_timeout_s = busy_timeout_s
+        self.read_fork = read_fork
 
     @property
     def data(self) -> Path:
         return self._inner.data
 
     def call(self, action: str, spec: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+        if self.read_fork and action in _READ_ACTIONS:
+            forked = self.fork()
+            if forked is not None:
+                return call_with_budget(forked, action, spec, **kwargs)
         budget = request_budget.current()
         wait = self.busy_timeout_s if budget is None else budget.wait_s(self.busy_timeout_s)
         if not self._lock.acquire(timeout=wait):
@@ -189,7 +218,7 @@ def _busy_envelope(action: str, waited_s: float, request_id: Any) -> dict[str, A
     }
 
 
-def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0) -> ManagerLike:
+def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0, read_fork: bool = False) -> ManagerLike:
     """XENOVA_PLATFORM_LIB 의 디렉터리들을 sys.path 에 넣고 xenova_management.Manager() 를 만든다."""
     for entry in [p for p in platform_lib.split(os.pathsep) if p]:
         if entry not in sys.path:
@@ -200,7 +229,7 @@ def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0) -> ManagerLi
         raise PlatformUnavailable(
             "xenova_management not importable; set XENOVA_PLATFORM_LIB (board: /usr/lib/xenova)", detail=str(exc)
         ) from exc
-    return SerializedManager(module.Manager(), busy_timeout_s=busy_timeout_s)
+    return SerializedManager(module.Manager(), busy_timeout_s=busy_timeout_s, read_fork=read_fork)
 
 
 RecordsLoader = Callable[[], Mapping[str, Mapping[str, Any]]]
@@ -522,6 +551,14 @@ class PlatformDriver(Driver):
 
     # ---- 조회 ----
 
+    def registrations(self, vm_id: UUID | None = None):
+        """공개 metadata action을 요청별 객체로 호출한다. live list/get을 앞세우지 않는다."""
+        spec = {"timeout_ms": 5000}
+        if vm_id is not None:
+            spec["vm_id"] = str(vm_id)
+        data = raise_for_envelope(call_with_budget(self._request_manager(), "registrations", spec), context="registrations")
+        return data["registration" if vm_id is not None else "registrations"]
+
     def _views(self, lifecycle: str = "REGISTERED") -> list[dict[str, Any]]:
         data = raise_for_envelope(call_with_budget(self.manager, "list", {"lifecycle": lifecycle}), context="list")
         return list(data.get("vms") or [])
@@ -582,10 +619,10 @@ class PlatformDriver(Driver):
             return  # 멱등: 등록 자체가 없어도 목표 상태(도메인 부재)는 달성
         raise_for_envelope(envelope, context=f"stop {vm_id}")
 
-    # ---- 정지 요청 추적 (S15P31E110-305) ----
+    # ---- 요청별 등록 조회·정지 추적 (S15P31E110-305) ----
 
     def _request_manager(self) -> ManagerLike:
-        """stop 수락·원 작업 조회용 요청별 Manager. fork 가 없으면 공유(직렬화된) Manager 를 그대로 쓴다."""
+        """등록 조회·stop 수락·원 작업 조회용 객체. 구형 fork 부재는 공유 직렬화를 유지한다."""
         fork = getattr(self.manager, "fork", None)
         forked = fork() if callable(fork) else None
         return forked if forked is not None else self.manager
@@ -765,7 +802,8 @@ class PlatformProvisioner(Provisioner):
         }
         # ipv4 는 보내지 않는다. 플랫폼이 registry·tombstone·진행 중 작업·공장 예약·DHCP lease 를 전역 잠금 안에서 보고 고르며,
         # 바닥나면 IP_POOL_EXHAUSTED → 507 InsufficientResources(ipv4). 명세 오류(INVALID_SPEC·템플릿 없음)는 400 이다.
-        # create 는 하위 budget_ms 를 받지 않지만, 앞의 잠금·조회에서 요청 예산을 다 썼으면 등록을 제출하지 않는다
+        # 미해결(S15P31E110-334): create 에는 아직 하위 budget_ms 를 넘기지 않는다(_BUDGET_ACTIONS 주석). 지금은 앞의 잠금·조회에서
+        # 요청 예산을 다 썼을 때 등록을 제출하지 않는 것만 지킨다
         envelope = call_with_budget(self.manager, "create", spec, execute=True, idempotency_key=f"create-{vm_id}")
         data = raise_for_envelope(envelope, context=f"create {name}")
         view = (data.get("vm") or data.get("current") or data.get("original_result") or {}) if isinstance(data, dict) else {}

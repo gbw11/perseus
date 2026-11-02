@@ -8,6 +8,7 @@ from pathlib import Path
 import secrets
 import select
 import subprocess
+import sys
 import threading
 import time
 from uuid import uuid4
@@ -18,9 +19,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .outputs import RuntimeConfig
-
-
-MAX_JPEG = 2 * 1024 * 1024
+from .capture_limits import MAX_JPEG
+from .runtime_status import RuntimeStatus
 
 
 class FrameSignal:
@@ -62,6 +62,12 @@ class JpegParser:
 
 
 def capture_command(config, output):
+    if config.encoder == 'native_jpeg':
+        return [sys.executable, '-m', 'xenova_display.native_capture',
+                '--library', config.native_jpeg_library, '--display', config.display,
+                '--width',str(output.width),'--height',str(output.height),
+                '--x',str(output.x),'--y',str(output.y),'--fps',str(config.fps),
+                '--quality',str(config.native_jpeg_quality)]
     return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
         "-f", "x11grab", "-draw_mouse", "0", "-framerate", str(config.fps),
         "-video_size", f"{output.width}x{output.height}",
@@ -87,10 +93,11 @@ class Capture:
         self.process = None
         self.thread = None
         self.changed = None
+        self.status_source = None
 
     def layout(self):
         try:
-            status = json.loads(self.status_path.read_text())
+            status = self.status_source.read() if self.status_source is not None else json.loads(self.status_path.read_text())
             if not 0 <= time.monotonic() - status["updated_monotonic"] < 6:
                 return None
             output = status["outputs"][self.output.output_id]
@@ -196,6 +203,9 @@ def create_stream_app(config=None, status_path=None, token=None, *, allow_virtua
     if config.backend == "virtual_x11" and not (allow_virtual or os.environ.get("XENOVA_STREAM_ALLOW_VIRTUAL") == "1"):
         raise ValueError("virtual capture must be explicitly enabled for testing")
     captures = {o.output_id: capture_factory(config,o,status_path) for o in config.outputs}
+    if capture_factory is Capture:
+        status_source = RuntimeStatus(status_path)
+        for capture in captures.values(): capture.status_source = status_source
     sessions = {}
 
     @asynccontextmanager

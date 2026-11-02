@@ -161,6 +161,7 @@ bash scripts/check.sh
 | v2 Publisher | 시험·실행 환경의 broker 주소 | `telemetry-UUID`, v1 계정과 구분 |
 | Gateway / Recovery Worker | `127.0.0.1:1883` | 각각 `gateway` / `dom0-server` |
 | 확인·모니터링 | `127.0.0.1:1883` | `observer`는 v1 읽기, `telemetry-reference-subscriber`는 v2 읽기 전용 |
+| 시뮬레이터 (시뮬레이터 구성만) | 개발 PC → 브로커 | `gateway`(vehicle.status)와 `simulator`(sim/pose·world·result 쓰기, sim/command 읽기) 두 계정. Jetson 계정 `perception`은 `xenova/v1/sim/#`를 읽지 못한다 — 젯슨은 시뮬레이터 카메라 화면만 본다 (MQTT 계약 12장) |
 | 브라우저 | 백엔드 중계 | `ws://127.0.0.1:9001`은 개발 확인용 |
 
 Recovery Worker의 보드별 인증정보는 `/etc/xenova/recovery-worker.env`에 적용합니다.

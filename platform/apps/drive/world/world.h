@@ -11,6 +11,8 @@
 #define DW_WIRE_MAX 32768u
 #define DW_MAP_SLOTS 3
 #define DW_ODOM_SLOTS 128
+#define DW_ROAD_PRIORITY 1u
+#define DW_CELL_ROAD 8u
 typedef xenova_drive_Pose dw_pose;
 typedef xenova_drive_Point dw_point;
 typedef xenova_drive_WorldSnapshot dw_world;

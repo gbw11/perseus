@@ -28,6 +28,7 @@ struct drive_engine {
  struct de_reference last_track_path;
  struct de_witness last_track_world;
  bool maneuver_active;dw_pose maneuver_goal;int maneuver_direction;uint64_t maneuver_revision;
+ uint64_t merge_passed_reference_revision;
  char maneuver_frame[37],maneuver_odom[37],maneuver_configuration[65],maneuver_reference[65];
  atomic_int search_reason,last_state_result,last_world_result;struct lp_budget budget;
  unsigned search_outcomes[LP_CLOCK+1];enum lp_result first_search_failure;
