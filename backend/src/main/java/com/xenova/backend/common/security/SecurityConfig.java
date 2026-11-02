@@ -3,6 +3,7 @@ package com.xenova.backend.common.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.auth.infrastructure.AuthProperties;
 import com.xenova.backend.common.error.ErrorResponse;
+import com.xenova.backend.vm.infrastructure.VmRegistrationAuthenticationFilter;
 import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -23,6 +24,7 @@ public class SecurityConfig {
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             JwtAuthenticationFilter jwtAuthenticationFilter,
+            VmRegistrationAuthenticationFilter vmRegistrationAuthenticationFilter,
             ObjectMapper objectMapper) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
@@ -30,6 +32,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/api/v1/auth/**", "/actuator/health").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                        .requestMatchers(VmRegistrationAuthenticationFilter.PATH)
+                        .hasAuthority(VmRegistrationAuthenticationFilter.AUTHORITY)
                         // WebSocket clients authenticate with their first message (see MetricsWebSocketHandler).
                         .requestMatchers("/ws/**").permitAll()
                         .anyRequest().authenticated())
@@ -46,6 +50,7 @@ public class SecurityConfig {
                             objectMapper.writeValue(response.getOutputStream(),
                                     ErrorResponse.of("FORBIDDEN", "접근 권한이 없습니다."));
                         }))
+                .addFilterBefore(vmRegistrationAuthenticationFilter, JwtAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
