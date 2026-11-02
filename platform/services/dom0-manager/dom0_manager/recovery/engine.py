@@ -30,7 +30,8 @@
   근거가 부족하면 attempt 를 소비하지 않고 recovery.started 도 내지 않은 채 잠시 뒤 다시 본다. 플랫폼 per-VM force 승인은 플랫폼이 최종 확인한다
 - 주행 VM 의 Gateway 보호 수명주기(S15P31E110-346, protection.py): 키·원 spec 을 저장한 뒤 submit 하고, 같은 실행에 대해 PROTECTED 가
   확인된 뒤에만 attempt 를 시작한다. 응답을 잃으면 같은 키로 다시 묻는다. 보호를 더 쓰지 않게 되면(완료·취소·회복·다른 실행) 새 실행
-  binding 이 보이면 finish, 원 실행 그대로이고 취소·회복으로 닫혔으면 cancel 한다. 실패로 닫힌 복구는 cancel 하지 않는다(고장 난 실행의
+  binding 이 보이면 finish, 원 실행 그대로이고 취소·회복으로 닫혔으면 cancel 한다. 열린 복구에서 같은 실행의 의도 revision·lifecycle
+  generation 만 바뀌었으면 옛 보호를 cancel 한 뒤 지금 의도로 새 보호를 받는다. 실패로 닫힌 복구는 cancel 하지 않는다(고장 난 실행의
   재선택 차단을 풀지 않음). 정산이 남은 기록은 닫혀도 지우지 않고 Worker 재시작 뒤에도 이어 간다. 이전 host 의 보호는 정산하지 않는다
 """
 
@@ -518,14 +519,15 @@ class RecoveryEngine:
             return "drive VM without a Gateway protection provider"
         with self._lock:
             entry = None if record.protection is None else dict(record.protection)
-        if entry is not None and entry["phase"] in LIVE and not self._same_execution(entry, view):
-            # 이전 실행·host 의 보호: 새 보호(Gateway 는 VM 당 활성 보호 하나)보다 정산이 먼저다
+        if entry is not None and entry["phase"] in LIVE and not self._same_target(entry, view):
+            # 이전 host·실행·의도의 보호: 새 보호(Gateway 는 VM 당 활성 보호 하나)보다 정산이 먼저다. 다른 실행이면 새 binding 으로 finish,
+            # 같은 실행에서 의도·lifecycle generation 만 바뀌었으면 원 실행에 cancel. 결과를 모르면 새 키 없이 다음 차례에 같은 키로 다시 본다
             if entry["spec"]["host_boot_id"] != view.get("host_boot_id"):
                 outcome = Outcome(HISTORICAL, "protection was issued on an earlier host boot; not settled")
             else:
-                outcome = protector.settle(entry, allow_cancel=False)
+                outcome = protector.settle(entry, allow_cancel=entry["spec"]["target_execution_id"] == view.get("execution_id"))
             if self._note_protection(record, entry, outcome) in LIVE:
-                return f"protection {entry['request_id']} for an earlier execution is not settled yet: {outcome.note}"
+                return f"protection {entry['request_id']} for an earlier execution or intent is not settled yet: {outcome.note}"
             entry = None
         if entry is None or entry["phase"] not in LIVE:
             if record.protection_requests >= self._policy.max_attempts:
@@ -553,15 +555,15 @@ class RecoveryEngine:
         return None if outcome.ready else outcome.note
 
     @staticmethod
-    def _same_execution(entry: dict[str, Any], view: dict[str, Any]) -> bool:
+    def _same_target(entry: dict[str, Any], view: dict[str, Any]) -> bool:
+        """보호의 대상 신원(host·실행·의도 revision·lifecycle generation)이 지금 view 와 같은가."""
         spec = entry["spec"]
-        return spec["host_boot_id"] == view.get("host_boot_id") and spec["target_execution_id"] == view.get("execution_id")
+        return ((spec["host_boot_id"], spec["target_execution_id"], spec["intent_revision"], spec["lifecycle_generation"])
+                == (view.get("host_boot_id"), view.get("execution_id"), view.get("intent_revision"), view.get("generation")))
 
     def _protected_for(self, record: RecoveryRecord, view: dict[str, Any]) -> bool:
-        """기록된 보호가 지금 view 의 실행·의도·lifecycle generation 에 대한 PROTECTED 인가."""
         entry = record.protection
-        return (entry is not None and entry["phase"] == PROTECTED and self._same_execution(entry, view)
-                and (entry["spec"]["intent_revision"], entry["spec"]["lifecycle_generation"]) == (view.get("intent_revision"), view.get("generation")))
+        return entry is not None and entry["phase"] == PROTECTED and self._same_target(entry, view)
 
     def _note_protection(self, record: RecoveryRecord, entry: dict[str, Any], outcome: Outcome) -> str:
         """Gateway 결과를 기록에 적는다(같은 키일 때만). 적은 단계를 돌려준다."""

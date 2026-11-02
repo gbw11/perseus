@@ -468,6 +468,32 @@ def test_unsettled_earlier_protection_is_kept_and_holds_the_new_execution(tmp_pa
     assert w.gateway.phase(first) == "RELEASED" and entry(w)["request_id"] != first and len(w.platform.recover_calls()) == 2
 
 
+@pytest.mark.parametrize("cancel_lost", [False, True])
+def test_intent_change_on_the_same_execution_cancels_the_old_protection_then_protects_again(tmp_path, cancel_lost):
+    """의도 변경 → 옛 보호 cancel → 새 키로 보호 → force. cancel 결과를 모르면 새 키 없이 같은 키로 다시 본다."""
+    w = drive(tmp_path)
+    w.platform.results = [platform_down(), {"attempt": {}, "original_result": {"execution_id": NEW}}]
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    first = entry(w)["request_id"]
+    w.platform.views[VM] = view(revision=4)  # 같은 실행 EXEC, 의도 revision 만 바뀜
+    w.gateway.bind(str(VM), EXEC, revision=4)
+    if cancel_lost:
+        w.gateway.fail("cancel", lost(), when="after")  # 취소됐지만 응답을 잃었다
+        w.advance(5)
+        w.tick()
+        assert entry(w)["request_id"] == first and w.gateway.issued == 1 and len(w.platform.recover_calls()) == 1
+        assert w.gateway.phase(first) == "CANCELLED" and entry(w)["phase"] == "PROTECTED"
+    w.advance(5)
+    w.tick()
+    assert w.gateway.phase(first) == "CANCELLED" and w.gateway.count("cancel") == 1
+    (_, (_, context)), = [c for c in w.gateway.calls if c[0] == "cancel"]
+    assert context["target_execution_id"] == EXEC  # 원 실행에 대한 취소
+    assert entry(w)["request_id"] != first and entry(w)["spec"]["intent_revision"] == 4 and w.gateway.issued == 2
+    (_, spec, _) = w.platform.recover_calls()[-1]
+    assert spec["mode"] == "force-restart" and spec["expected_intent_revision"] == 4 and len(w.platform.recover_calls()) == 2
+
+
 def test_protection_from_an_earlier_host_boot_is_left_as_history(tmp_path):
     w = drive(tmp_path)
     w.platform.results = [platform_down()]
