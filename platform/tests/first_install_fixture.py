@@ -160,7 +160,7 @@ def platform_root(root):
     for name in ('xenova_boot_status.py','xenova_boot_progress.py','xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
                  'xenova_cpu.py','xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py','xenova_preparation.py',
                  'xenova_resources.py','xenova_zephyr_transition.py','xenova_zephyr_control.py',
-                 'xenova_provisioning.py','xenova_guest_profile.py','xenova_registration.py'):
+                 'xenova_provisioning.py','xenova_guest_profile.py','xenova_registration.py','xenova_registration_hook.py'):
         mapping['usr/lib/xenova/'+name] = FILES/name
     mapping['usr/lib/xenova/xenova_broker.py']=ROOT/'platform/deploy/mosquitto/scripts/xenova_broker.py'
     mapping['usr/share/xenova/mqtt/policy.json']=ROOT/'platform/deploy/mosquitto/etc/policy.json'
