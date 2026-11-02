@@ -5,7 +5,6 @@ import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.vm.domain.VmControlPort;
 import com.xenova.backend.vm.domain.VmLaunchSpec;
 import com.xenova.backend.vm.domain.VmRegistrationInventory;
-import com.xenova.backend.vm.domain.VmRegistrationInventoryPort;
 import com.xenova.backend.vm.domain.VmRuntime;
 import java.io.IOException;
 import java.net.ConnectException;
@@ -32,7 +31,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 @Component
-public class Dom0ManagerClient implements VmControlPort, VmRegistrationInventoryPort {
+public class Dom0ManagerClient implements VmControlPort {
 
     private static final Logger log = LoggerFactory.getLogger(Dom0ManagerClient.class);
 
@@ -60,7 +59,6 @@ public class Dom0ManagerClient implements VmControlPort, VmRegistrationInventory
         return response == null ? List.of() : Arrays.asList(response);
     }
 
-    @Override
     public List<VmRegistrationInventory> listRegistrations() {
         VmRegistrationInventory[] response = executeQuery(() -> queryClient.get()
                 .uri("/api/v1/vm-registrations")
