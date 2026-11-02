@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.auth.infrastructure.AuthProperties;
 import com.xenova.backend.common.error.ErrorResponse;
 import com.xenova.backend.vm.infrastructure.VmRegistrationAuthenticationFilter;
+import com.xenova.backend.vm.infrastructure.VmRegistrationProperties;
 import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -17,7 +18,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
-@EnableConfigurationProperties(AuthProperties.class)
+@EnableConfigurationProperties({AuthProperties.class, VmRegistrationProperties.class})
 public class SecurityConfig {
 
     @Bean
