@@ -5,6 +5,8 @@ from . import world_pb2 as schema
 
 MAX_BYTES=32768
 MAX_CELLS=4096
+ROAD_PRIORITY=1
+CELL_ROAD=8
 
 def _repeated(field):
     # 6.x deprecates label access; 3.20 remains the fixed generator/test reader.
@@ -31,14 +33,20 @@ def validate(message):
         n=message.width*message.height
         if not 2<=message.width<=64 or not 2<=message.height<=64 or n>MAX_CELLS:raise ValueError('grid dimensions')
         if (len(message.occupancy),len(message.cell_flags),len(message.age_le32))!=(n,n,n*4):raise ValueError('grid arrays incomplete')
-        if not message.complete or message.truncated or message.required_features or message.inflation_policy:raise ValueError('unsupported map features')
+        if not message.complete or message.truncated or message.required_features&~ROAD_PRIORITY or message.inflation_policy:raise ValueError('unsupported map features')
         if not 2<=len(message.reference)<=64 or len(message.left_boundary)!=len(message.reference) or len(message.right_boundary)!=len(message.reference):raise ValueError('road arrays')
         if message.resolution_m<.001 or message.resolution_m>10:raise ValueError('resolution')
         if message.observed_us>message.completed_us or message.completed_us>message.published_us:raise ValueError('source time ordering')
-        if any(v>100 and v!=255 for v in message.occupancy) or any(v&~7 for v in message.cell_flags):raise ValueError('cell encoding')
+        allowed=15 if message.required_features&ROAD_PRIORITY else 7
+        if any(v>100 and v!=255 for v in message.occupancy) or any(v&~allowed for v in message.cell_flags):raise ValueError('cell encoding')
+        if message.required_features&ROAD_PRIORITY and not any(v&CELL_ROAD for v in message.cell_flags):raise ValueError('missing preferred road')
     elif isinstance(message,schema.DriveState):
+        if message.world_features&~ROAD_PRIORITY:raise ValueError('unsupported state world features')
         if not message.complete or not 2<=len(message.path)<=512 or message.tracker_index>=len(message.path):raise ValueError('incomplete path state')
         if message.direction not in (-1,0,1) or message.maneuver_phase>2:raise ValueError('maneuver')
+        if message.HasField('merge_passed_reference_revision') and (not message.direction or
+                not message.merge_passed_reference_revision or message.merge_passed_reference_revision!=message.reference_revision):
+            raise ValueError('merge passage reference')
     elif isinstance(message,schema.DriveLink):
         kind=message.WhichOneof('payload')
         if kind is None:raise ValueError('missing link payload')

@@ -54,9 +54,49 @@ Pi 제어·차량 상태 연결까지 막는 전역 readiness gate가 아니다.
 
 모든 required field는 실제 존재해야 한다. decode 전 wire 크기와 중복 singular/oneof,
 문자열·repeated 수·부분 frame을 검사하고 decode 후 유한값·배열·의미를 검사한다.
-알 수 없는 optional field는 무시하지만 `required_features`가 0이 아니면 거절한다.
+알 수 없는 optional field는 무시하지만 지원하지 않는 `required_features` bit는 거절한다.
+현재 지원 값은 과거 의미 0과 아래 도로 우선 의미 1이다.
 Python은 검사하지 않은 unknown bytes를 사본 fingerprint에 넣거나 다시 relay하지 않는다.
 문자열 식별자는 공통 ASCII 범위이며 C 문자열의 NUL 뒤 suffix로 신원을 다르게 표현할 수 없다.
+
+## 도로 우선 입력 — feature bit 0
+
+도로 우선 운용은 `WorldSnapshot.required_features=1`과 cell flag bit3(`8`)을 함께 사용한다.
+bit3은 **cell 중심이 선호 도로 안에 있음**을 뜻한다. 기존 left/right boundary는 확장 통행
+가능 영역의 hard 경계이며, 그 안의 도로와 여유 구역을 같은 선호도로 취급하지 않는다.
+unknown/무효/만료/점유는 도로 flag가 있어도 계속 통행 불가다. feature 없이 bit3을 쓰거나
+feature를 선언하고 도로 cell이 하나도 없는 입력은 거절한다. 미지원 feature bit도 거절한다.
+
+생산자는 실제 도로 구분을 공급한다. 공통 제공물은 다음과 같다.
+
+```python
+from xenova_drive_world import mark_road, encode
+
+# left/right는 같은 frame의 실제 선호 도로 Point 점열이다. 폭 기본값을 만들지 않는다.
+mark_road(snapshot, road_left, road_right)
+payload = encode(snapshot)
+```
+
+`mark_road`는 bounded scanline으로 기존 cell_flags를 채운다. 점유/유효성·age·시각·출처·
+바깥 boundary는 바꾸지 않는다. 실제 지형의 통행 가능성·원 geometry 품질은 생산자의 책임이다.
+0.72m 도로는 저장소 시뮬레이터 시험값이며 운영 폭으로 복사하지 않는다.
+
+탐색은 같은 node pool/heap에서 차체와 여유가 도로 밖을 사용하는 거리를 길이·곡률 비용보다
+먼저 비교한다. 기존 4096칸 유도값 작업 공간은 이 우선 비용의 2D 유도값으로 재사용한다.
+차체의 inscribed disk를 반영해 중심점만 도로 안인 경우를 유도값에서 구분한다. 추가된 고정
+shoulder 색인은 64개 uint64(512B)이며 node는 기존 48B 이하를 유지한다. node 수·확장·cell·
+원 기한은 늘리지 않는다. 유도값과 양자화는 여전히 bounded guidance이며 전역 최적성은 주장하지 않는다.
+analytic 직선 종단이 도로 밖을 가르면 그 연결을 채택하지 않고 실제 primitive 탐색을 계속한다.
+
+`DriveState.world_features`(선택 tag 28)와 불변 path는 생성 당시 의미를 보존한다. 생략은
+과거 의미 0이다. 현재 지도와 다르면 인계를 설정 불일치로 거절하고, 기존 path의 제출도
+차단한다. 원 snapshot/AcceptedState와 실제 target 검증을 거친 같은 의미만 사용한다.
+구형 reader는 새 feature map을 VERSION으로 거절하므로 조용한 의미 하향을 허용하지 않는다.
+feature=0은 과거 hard-corridor 호환 모드이며 도로 우선 품질 수락으로 쓰지 않는다.
+
+원 최대 wire·map/path/odom slot·배열 상한은 같다. 새 firmware와 생성 C/Python·`road.py`를
+포함한 codec 및 그것을 로드한 Gateway를 같은 지원 후보로 설치한다. 기존 Gateway recipe는
+공용 package의 모든 `.py`를 설치하므로 새 helper도 같은 경로로 포함한다.
 
 ## 불변 자료와 계산 수명
 
@@ -78,6 +118,33 @@ tracker 계산을 구분하며 selected worker의 건강/기한을 통과한 완
 당시 generation·state/path/maneuver revision·현재 frame/odom/configuration/calibration/asset,
 reference·실제 계산/차량 표본·tracker index·merge goal을 함께 보낸다.
 원 명령, 과거 유효기간, 출력 승인은 복제하지 않는다.
+
+`merge_goal`은 지속하는 우회 의도의 목표다. 실제 추종할 국소 경로가 그 지점을 지나 앞쪽으로
+갱신돼도 원 목표를 새 path 끝점으로 바꾸지 않는다. 수신 앱은 실행 경로의 끝을 `path`의 마지막
+자세에서 복원하고, 우회 방향·목표·maneuver revision은 별도로 유지한다. 국소 path 변경은
+path revision, 우회 의도의 변경·종결은 maneuver revision으로 구분한다. 종단 위치에 가까워진
+것만으로 실제 재합류나 출력 승인을 확정하지 않는다.
+
+`merge_passed_reference_revision`은 이 maneuver의 목표 구간을 실제로 통과했음을 확인한
+reference revision이다. 선택 필드(tag 27)이며 생략은 통과 근거 없음이다. 목표가 현재
+reference에 실제로 속하고, 현재 위치 오차를 포함해 그 구간을 지난 경우에만 기록한다.
+목표가 rolling window에서 빠져도 같은 frame·odom·설정·reference revision의 근거는 유지한다.
+같은 합류 목표를 유지한 우회 방향 변경은 이 통과 사실을 무효화하지 않는다. 방향 변경의
+maneuver revision은 증가시키고, 사본에는 보존한 목표·통과 근거와 현재 방향을 함께 담는다.
+실제 도로 기준의 위치·방향·조향 조건까지 충족해야 재합류를 종결하며, 통과 자체는 완료나
+출력 승인이 아니다. reference revision이 달라지면 기존 근거를 재사용하지 않는다.
+
+필드가 있으면 0이 아니고, 활성 우회 방향과 사본의 reference revision에 맞아야 한다.
+C/Python reader는 불일치·중복을 거절한다. 필드가 없는 과거 완전 사본은 현재 지도·기구학·
+실제 계산으로 계속 검증하며 통과를 추측하지 않는다. snapshot과 AcceptedState의 같은 필드를
+Gateway binary relay가 보존하고, target은 경로 채택 후에만 근거를 자기 실행에 적용한다.
+다른 도로 revision에서 경로 자체가 검증돼도 과거 revision의 통과 근거는 가져오지 않는다.
+
+wire major는 1을 유지한다. A/B의 `lattice`·`engine`·`lattice_app`과 C/Python 생성물·공용 codec,
+이를 실제로 로드한 Gateway binary 수신 프로세스를 같은 지원 후보로 맞춘다. 옛 Gateway는
+모르는 선택 필드를 버리므로 새 통과 근거를 보존하는 혼합 실행은 지원하지 않는다.
+Worker는 raw 사본이나 이 필드를 직접 읽을 필요가 없다. Gateway의 출처·권위 검사는
+계속 필요하며, 설치만으로 재무장하지 않는다.
 
 Gateway는 당시 현재 owner의 완전 사본만 G2로 채택한다. 권한 종료 뒤 늦게 도착한 source
 갱신은 거절한다. 이미 유효할 때 받은 사본은 현재 호환성·target의 실제 적용을 거쳐 사용할 수 있다.

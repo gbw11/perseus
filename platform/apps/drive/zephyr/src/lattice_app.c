@@ -329,7 +329,11 @@ int drive_lattice_snapshot(dw_state *out){
   strcpy(out->frame_epoch,path->frame);strcpy(out->odom_epoch,path->odom);strcpy(out->configuration,path->configuration);
   strcpy(out->calibration,lp_selected_config.calibration);strcpy(out->primitive,lp_selected_assets.sha256);strcpy(out->reference_id,path->reference);
   out->reference_revision=work.world.reference_revision;out->path_revision=path->revision;out->maneuver_revision=path->maneuver_revision;
-  out->direction=path->direction;out->maneuver_phase=work.maneuver_phase;out->merge_goal=path->goal;out->vehicle_sequence=work.vehicle_sequence;
+  out->direction=path->direction;out->maneuver_phase=work.maneuver_phase;out->merge_goal=path->merge_goal;out->vehicle_sequence=work.vehicle_sequence;
+  out->has_world_features=true;out->world_features=path->world_features;
+  if(path->merge_passed_reference_revision&&path->merge_passed_reference_revision==out->reference_revision){
+   out->has_merge_passed_reference_revision=true;out->merge_passed_reference_revision=path->merge_passed_reference_revision;
+  }
   out->calculation_sequence=work.sequence;out->tracker_index=work.tracker_index;out->complete=true;
   out->path_count=path->count;memcpy(out->path,path->points,path->count*sizeof(*path->points));
   uint8_t random[16];sys_rand_get(random,sizeof(random));xm_uuid4_format(out->message_id,random);
