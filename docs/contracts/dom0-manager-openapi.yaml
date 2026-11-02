@@ -507,6 +507,138 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Health'
+  /api/v1/vm-registrations:
+    get:
+      tags:
+      - VM registrations
+      summary: Registrations
+      operationId: listVmRegistrations
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Registration'
+                type: array
+                title: Response Listvmregistrations
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '501':
+          description: Not Implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - $ref: '#/components/parameters/RequestBudget'
+  /api/v1/vm-registrations/{vm_id}/notify:
+    post:
+      tags:
+      - VM registrations
+      summary: Notify
+      description: 조회와 송신이 같은 호출 예산을 쓴다. 응답 유실 후 자동 재송신하지 않는다.
+      operationId: notifyVmRegistration
+      parameters:
+      - name: vm_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Vm Id
+      - $ref: '#/components/parameters/RequestBudget'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Not Found
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal Server Error
+        '501':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Not Implemented
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: Bad Gateway
+        '503':
+          content:
+            application/json:
+              schema:
+                anyOf:
+                - $ref: '#/components/schemas/Notification'
+                - $ref: '#/components/schemas/Error'
+                title: Response 503 Notifyvmregistration
+          description: Service Unavailable
+        '504':
+          content:
+            application/json:
+              schema:
+                anyOf:
+                - $ref: '#/components/schemas/Notification'
+                - $ref: '#/components/schemas/Error'
+                title: Response 504 Notifyvmregistration
+          description: Gateway Timeout
+
 components:
   securitySchemes:
     LogProducerToken:
@@ -542,6 +674,87 @@ components:
         type: string
         format: uuid
   schemas:
+    Registration:
+      properties:
+        vm_id:
+          type: string
+          title: Vm Id
+        name:
+          type: string
+          title: Name
+        guest_kind:
+          type: string
+          enum:
+          - linux
+          - zephyr
+          title: Guest Kind
+        template_id:
+          type: string
+          title: Template Id
+        template_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Template Version
+        vcpus:
+          type: integer
+          title: Vcpus
+        memory_mib:
+          type: integer
+          title: Memory Mib
+        assigned_ipv4:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assigned Ipv4
+      additionalProperties: false
+      type: object
+      required:
+      - vm_id
+      - name
+      - guest_kind
+      - template_id
+      - template_version
+      - vcpus
+      - memory_mib
+      - assigned_ipv4
+      title: Registration
+    Notification:
+      properties:
+        vm_id:
+          type: string
+          title: Vm Id
+        request_id:
+          type: string
+          title: Request Id
+        state:
+          type: string
+          title: State
+        confirmed:
+          type: boolean
+          title: Confirmed
+        http_status:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Http Status
+        upstream_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Upstream Code
+        cause_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cause Type
+      type: object
+      required:
+      - vm_id
+      - request_id
+      - state
+      - confirmed
+      title: Notification
     VmState:
       type: string
       description: >-

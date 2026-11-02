@@ -1,0 +1,20 @@
+{
+  "cpu": {
+    "Name": "Intel(R) Core(TM) Ultra 9 185H",
+    "NumberOfCores": 16,
+    "NumberOfLogicalProcessors": 22
+  },
+  "memory": {
+    "TotalPhysicalMemory": 68186861568
+  },
+  "os": {
+    "Caption": "Microsoft Windows 11 Enterprise",
+    "Version": "10.0.26300"
+  },
+  "lan": [
+    {
+      "InterfaceAlias": "Wi-Fi",
+      "IPv4": "192.168.30.158"
+    }
+  ]
+}

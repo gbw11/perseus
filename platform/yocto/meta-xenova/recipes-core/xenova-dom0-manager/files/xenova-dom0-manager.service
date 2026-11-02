@@ -3,9 +3,11 @@ Description=Xenova dom0 management API
 After=network.target srv-xenova.mount xenova-host-admission.service xenova-xen-ready.service xenova-vm-shutdown.service
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 EnvironmentFile=-/etc/xenova/dom0-manager-token.env
 EnvironmentFile=/etc/xenova/dom0-manager.env
+EnvironmentFile=-/etc/xenova/spring-registration.env
 ExecStartPre=/usr/bin/python3 -m dom0_manager.service_token
 ExecStart=/usr/bin/python3 -m dom0_manager
 Restart=on-failure

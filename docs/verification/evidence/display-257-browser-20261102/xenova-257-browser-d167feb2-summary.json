@@ -1,0 +1,96 @@
+{
+  "trial": "xenova-257-browser-d167feb2",
+  "error": null,
+  "browser_version": "156.0.8078.74",
+  "measurement_scope": "PC browser request -> real X11 pixels -> JPEG -> product viewer canvas draw -> two requestAnimationFrame callbacks; includes outbound control; not physical LCD scanout",
+  "soak_seconds_browser_clock": 32.486,
+  "soak_seconds_controller": 30.497956099978182,
+  "streams": {
+    "monitor-1": {
+      "frames": 161,
+      "first": 17197,
+      "last": 49575.19999998808,
+      "maxGap": 501.10000002384186,
+      "gapsOver1s": 0,
+      "fps": 4.955981037985595
+    },
+    "monitor-2": {
+      "frames": 161,
+      "first": 17237.69999998808,
+      "last": 49531.69999998808,
+      "maxGap": 488.5,
+      "gapsOver1s": 0,
+      "fps": 4.955981037985595
+    }
+  },
+  "browser_latency": {
+    "monitor-1": {
+      "requested": 30,
+      "matched": 30,
+      "p50_ms": 223.5999999642372,
+      "p95_ms": 412.80000001192093,
+      "max_ms": 485
+    },
+    "monitor-2": {
+      "requested": 30,
+      "matched": 30,
+      "p50_ms": 234.19999998807907,
+      "p95_ms": 342.5,
+      "max_ms": 355
+    }
+  },
+  "proxy": {
+    "monitor-1": {
+      "connections": 1,
+      "bytes": 11827329,
+      "errors": [
+        {
+          "at": 419460.8700884,
+          "type": "ConnectionAbortedError"
+        }
+      ]
+    },
+    "monitor-2": {
+      "connections": 1,
+      "bytes": 16178365,
+      "errors": [
+        {
+          "at": 419460.8569172,
+          "type": "ConnectionAbortedError"
+        }
+      ]
+    }
+  },
+  "cpu_mean_cores": {
+    "sender": 0.19253711793688968,
+    "native_worker": 0.4707600809130688,
+    "other_pipeline": 0.0,
+    "browser": 0.3273813760664489,
+    "xorg": 0.13894079255374842
+  },
+  "cpu_sample_seconds": 29.293052998999883,
+  "jpeg_capture_mbps": null,
+  "jpeg_rate_note": "encoded source bytes, not wire bytes; interval spans adjacent API snapshots",
+  "cleanup": {
+    "services": {
+      "xenova-display-kiosk.service": "active",
+      "xenova-display-graphics.service": "active",
+      "xenova-display-feed.service": "active",
+      "xenova-dom0-manager.service": "active",
+      "mosquitto.service": "active",
+      "tailscaled.service": "active"
+    },
+    "ssh_policy_restored": true,
+    "graphics_source_restored": true,
+    "graphics_source_unchanged": true,
+    "domains_unchanged": true,
+    "temporary_files_removed": true,
+    "sender_journal": "Started [systemd-run] /usr/bin/python3 /run/xenova-257-browser-d167feb2/stream-host.py.\nINFO:     Started server process [26712]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://127.0.0.1:8083 (Press CTRL+C to quit)\nStopping [systemd-run] /usr/bin/python3 /run/xenova-257-browser-d167feb2/stream-host.py...\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [26712]\nxenova-257-browser-d167feb2.service: Deactivated successfully.\nStopped [systemd-run] /usr/bin/python3 /run/xenova-257-browser-d167feb2/stream-host.py.\nxenova-257-browser-d167feb2.service: Consumed 52.754s CPU time over 1min 14.989s wall clock time, 59.4M memory peak.\n"
+  },
+  "hotplug_freshness": null,
+  "available_min_mib": 1638.56640625,
+  "pipeline_rss_first_last_mib": [
+    94.27734375,
+    94.40234375
+  ]
+}

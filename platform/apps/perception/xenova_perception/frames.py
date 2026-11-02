@@ -1,7 +1,9 @@
-"""webcam·video 프레임 루프. 메인 스레드에서 돈다 (OpenCV 미리보기 창은 메인 스레드에서만 안전하다).
+"""webcam·video·stream 프레임 루프. 메인 스레드에서 돈다 (OpenCV 미리보기 창은 메인 스레드에서만 안전하다).
 
 - webcam: 장치 번호로 연다. 프레임을 못 읽으면 잠깐 쉬고 다시 시도한다 (그동안 결과가 오래돼 발행이 멈춘다).
 - video: 파일 끝에서 처음으로 돌아가 반복한다. 파일 FPS 에 맞춰 재생해 실제 시간보다 빨리 돌지 않게 한다.
+- stream: HTTP MJPEG (시뮬레이터 전방 카메라 등). 온 프레임을 바로 처리하고 따로 속도를 맞추지 않는다 (지연이 쌓이지 않게).
+  끊기면 0.5 s 뒤 다시 연결한다. 그동안 결과가 오래돼 발행이 멈춘다 → 자율 앱은 인지 끊김으로 정지한다.
 """
 
 from __future__ import annotations
@@ -25,6 +27,9 @@ def open_capture(settings: PerceptionSettings):
     if settings.source == "webcam":
         capture = cv2.VideoCapture(settings.device)
         what = f"webcam {settings.device}"
+    elif settings.source == "stream":
+        capture = cv2.VideoCapture(settings.url)
+        what = f"stream {settings.url}"
     else:
         capture = cv2.VideoCapture(settings.video_path)
         what = f"video {settings.video_path}"
@@ -58,6 +63,12 @@ def run_frames(
             if not ok:
                 if settings.source == "video" and frames > 0:
                     capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    continue
+                if settings.source == "stream":
+                    log.warning("%s 끊김, 0.5 s 뒤 다시 연결", what)
+                    capture.release()
+                    stop.wait(0.5)
+                    capture = cv2.VideoCapture(settings.url)
                     continue
                 log.warning("%s 프레임 읽기 실패, 0.2 s 뒤 다시", what)
                 time.sleep(0.2)
