@@ -9,7 +9,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.xenova.backend.vm.infrastructure.Dom0ManagerClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,7 +30,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class RuntimeLogApiIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
-    @MockitoBean Dom0ManagerClient client;
+    @MockitoBean RuntimeLogPort runtimeLogs;
     @MockitoBean JwtTokenService jwtTokens;
     @MockitoBean AccessTokenRevocationStore revoked;
     String token;
@@ -47,7 +46,7 @@ class RuntimeLogApiIntegrationTest {
     @Test
     void logsAreAuthenticatedAndKeepCursorMetadata() throws Exception {
         mvc.perform(get("/api/v1/logs")).andExpect(status().isUnauthorized());
-        when(client.runtimeLogs(anyMap(), eq(false))).thenReturn(json.readTree("""
+        when(runtimeLogs.read(anyMap(), eq(false))).thenReturn(json.readTree("""
             {"epoch":"log-store-one","items":[{"id":8,"source_id":"dom0","message":"service started"}],
              "next_cursor":8,"has_more":false,"history_truncated":true}
             """));

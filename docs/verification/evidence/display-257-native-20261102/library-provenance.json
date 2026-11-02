@@ -1,0 +1,20 @@
+{
+  "package_url": "https://deb.debian.org/debian/pool/main/libj/libjpeg-turbo/libturbojpeg0_2.1.5-4_arm64.deb",
+  "package_sha256": "bfce9b617b7de2e313b701de3ad3611b764613820d690592e3e96f3a62f02cdf",
+  "checksum_source": "https://packages.debian.org/trixie/arm64/libturbojpeg0/download",
+  "architecture": "arm64",
+  "package_version": "2.1.5-4",
+  "files": [
+    {
+      "name": "libturbojpeg.so.0.2.0",
+      "sha256": "d8e4a12770bcdbcf027a401836f062c8596336082103543b1ecdb97c763037e4",
+      "bytes": 461120
+    },
+    {
+      "name": "copyright",
+      "sha256": "3821184e23385bf2cdc01f56bd999b34036fc3aa03d5135d41680374eb81bf8a",
+      "bytes": 38846
+    }
+  ],
+  "package_installed": false
+}

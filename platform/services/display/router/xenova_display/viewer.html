@@ -1,7 +1,7 @@
 <!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Perseus 원격 시연 화면</title><style>
 body{margin:0;padding:24px;background:#0b1019;color:#e8eef9;font:16px system-ui}h1{font-size:24px}form{display:flex;gap:12px;margin:24px 0}input,button{font:inherit;padding:10px}main{display:grid;grid-template-columns:1fr 1fr;gap:20px}canvas{width:100%;background:#172233}p{color:#afbdd3}.bad,#message{color:#ffd18a}[hidden]{display:none!important}@media(max-width:900px){main{grid-template-columns:1fr}}
-</style><h1>Perseus 원격 시연 화면</h1><p>모니터 1 · 전체 상태 / 모니터 2 · 상세 화면</p>
+</style><h1>Perseus 원격 시연 화면</h1><p>HDMI 1 · 드라이버 계기판 / HDMI 2 · 인포테인먼트 · 게스트 데이터</p>
 <form id="login"><input id="key" type="password" autocomplete="off" placeholder="시연 접속 키" required><button>화면 연결</button></form><p id="message" role="status">접속 키를 입력해 주세요.</p>
 <main hidden id="screens"><article><h2>모니터 1</h2><p id="monitor-1-status">수신 대기</p><canvas id="monitor-1" width="1280" height="720" aria-label="모니터 1 전송 화면"></canvas></article><article><h2>모니터 2</h2><p id="monitor-2-status">수신 대기</p><canvas id="monitor-2" width="1280" height="720" aria-label="모니터 2 전송 화면"></canvas></article></main>
 <script>

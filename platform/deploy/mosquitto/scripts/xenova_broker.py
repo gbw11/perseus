@@ -32,6 +32,10 @@ class SetupError(ValueError):
     """비밀값과 외부 명령의 원문 출력을 포함하지 않는 진단."""
 
 
+class CredentialRevoked(SetupError):
+    """명시 폐기된 계정은 자동 공급이 복원할 수 없다."""
+
+
 def unique(pairs):
     value = {}
     for key, item in pairs:
@@ -257,6 +261,10 @@ def check_bundle(path, gid, rules, *, legacy=False, allow_policy_change=False):
         if manifest.get('schema_version') != 2 or type(manifest.get('revision')) is not int or manifest['revision'] < 1:
             raise SetupError('invalid account generation')
         records = manifest['profiles']
+        revoked=manifest.get('revoked_accounts',[])
+        if (not isinstance(revoked,list) or len(set(revoked))!=len(revoked)
+                or any(not isinstance(n,str) or not NAMES.fullmatch(n) or n in records for n in revoked)):
+            raise SetupError('invalid revoked account fence')
         if not isinstance(records, dict) or any(not isinstance(n, str) or kind not in ('service', 'vm', 'telemetry')
                                                 for n, kind in records.items()):
             raise SetupError('invalid account profile manifest')
@@ -330,20 +338,30 @@ def atomic_json(path, value):
     sync_directory(path.parent)
 
 
-def hash_new(path, values, gid):
+def hash_new(path, values, gid, *, pass_fds=(), timeout=20):
     """기존 해시는 재생성하지 않고 새 비밀번호도 argv에 넣지 않는다."""
     raw = path / 'new-passwords'
     if not raw.exists():
         write(raw, ''.join(name + ':' + value + '\n' for name, value in sorted(values.items())))
+    private_file(raw, 0o600)
+    text=raw.read_text()
+    if text == ''.join(name+':'+value+'\n' for name,value in sorted(values.items())):
         result = subprocess.run(['mosquitto_passwd', '-H', 'sha512-pbkdf2', '-U', str(raw)],
-                                capture_output=True, timeout=20)
+                                capture_output=True, timeout=timeout, pass_fds=pass_fds)
         if result.returncode:
             raise SetupError('password hashing failed; preserve pending generation')
-    private_file(raw, 0o600)
-    return password_lines(raw.read_text())
+    else:
+        existing=password_lines(text)
+        if set(existing)!=set(values) or any(not v.startswith('$7$') for v in existing.values()):
+            raise SetupError('interrupted password conversion is not a complete hash set')
+    hashed=password_lines(raw.read_text())
+    if set(hashed)!=set(values) or any(not v.startswith('$7$') for v in hashed.values()):
+        raise SetupError('password conversion did not produce supported hashes')
+    with raw.open('rb') as stream:os.fsync(stream.fileno())
+    return hashed
 
 
-def publish(target, old, records, spec, rules, gid, data):
+def publish(target, old, records, spec, rules, gid, data, *, pass_fds=(), timeout=20):
     """current 포인터로 저장 세대를 확정한다. broker 내부 반영은 별도 경계다."""
     base = old['revision'] if old else -1
     transaction = target / 'transaction.json'
@@ -391,7 +409,7 @@ def publish(target, old, records, spec, rules, gid, data):
         new = {n: v for n, v in values.items() if not old or n not in old['hashes']}
         hashes = {n: old['hashes'][n] for n in records if old and n in old['hashes']}
         if new:
-            hashes.update(hash_new(stage, new, gid))
+            hashes.update(hash_new(stage, new, gid,pass_fds=pass_fds,timeout=timeout))
         contents = {'passwd': ''.join(n + ':' + hashes[n] + '\n' for n in sorted(records)),
                     'acl': acl(records, rules)}
         config = stage / 'config.d'
@@ -404,7 +422,11 @@ def publish(target, old, records, spec, rules, gid, data):
                 write(file, content, 0o640, gid)
             elif file.read_text() != content:
                 raise SetupError('partial or mismatched pending file; preserve for investigation')
+        revoked=set(old['manifest'].get('revoked_accounts',())) if old else set()
+        revoked.update(set(old['profiles'])-set(records) if old else ())
+        revoked.difference_update(records)
         manifest = {'schema_version': 2, 'revision': tx['revision'], 'transaction_id': tx['id'], 'profiles': records,
+                    'revoked_accounts':sorted(revoked),
                     'policy_sha256': hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest(),
                     'sha256': {name: sha(stage / name) for name in ('passwd', 'acl', 'credentials.json', 'config.d/accounts.conf')}}
         if not (stage / 'manifest.json').exists():
@@ -444,17 +466,20 @@ def inspect(data=DATA, gid=None, rules=None, runtime=False):
     return value
 
 
-def change(action, name=None, *, vms=(), execute=False, data=DATA, gid=None, rules=None, source=None,
-           legacy_source=Path('/etc/mosquitto')):
+def change(action, name=None, *, vms=(), accounts=(), execute=False, data=DATA, gid=None, rules=None, source=None,
+           legacy_source=Path('/etc/mosquitto'), _private_result=False, _pass_fds=(), _hash_timeout=20):
     rules = rules or policy()
     vms = vm_ids(vms)
+    accounts=tuple(sorted(set(accounts)))
+    for account in accounts:profile(account,rules)
+    if accounts and action!='ensure-accounts':raise SetupError('accounts are only supported by automatic ensure')
     gid = grp.getgrnam('mosquitto').gr_gid if gid is None else gid
     target = storage(data)
     if name is not None:
         kind = profile(name, rules)
     old = load(target, gid, rules, allow_initial_pending=True, allow_policy_change=True) if target.exists() or target.is_symlink() else None
     mounted_old = old
-    if old is None and action == 'initialize' and (legacy_source / 'passwd').exists():
+    if old is None and action in ('initialize','ensure-accounts') and (legacy_source / 'passwd').exists():
         raise SetupError('older broker credentials exist; use explicit import-legacy instead of issuing replacements')
     if action == 'import-legacy':
         imported = import_source(source, gid, rules)
@@ -466,7 +491,7 @@ def change(action, name=None, *, vms=(), execute=False, data=DATA, gid=None, rul
             old = imported
     if old and not old['legacy'] and not old['policy_matches'] and action != 'initialize':
         raise SetupError('installed policy changed; review an initialize plan before account changes')
-    if old is None and (action != 'initialize' or any(data.glob('.mqtt-initialize-*')) or
+    if old is None and (action not in ('initialize','ensure-accounts') or any(data.glob('.mqtt-initialize-*')) or
                         (not target.exists() and (data / '.mqtt-initialize.lock').exists() and
                          (data / '.mqtt-initialize.lock').stat().st_size)):
         raise SetupError('missing or interrupted state; initialize only on a verified fresh installation')
@@ -478,6 +503,10 @@ def change(action, name=None, *, vms=(), execute=False, data=DATA, gid=None, rul
         pass
     elif action == 'add-account':
         records[name] = kind
+    elif action == 'ensure-accounts':
+        if old and set(accounts)&set(old['manifest'].get('revoked_accounts',())):
+            raise CredentialRevoked('revoked account requires explicit operator restoration')
+        records.update({account:profile(account,rules) for account in accounts})
     elif action == 'remove-account':
         records.pop(name, None)
     else:
@@ -493,6 +522,7 @@ def change(action, name=None, *, vms=(), execute=False, data=DATA, gid=None, rul
     if not execute:
         return result
     spec = {'action': action, 'name': name, 'vms': vms, 'source': str(source) if source else None}
+    if action=='ensure-accounts':spec['accounts']=list(accounts)
     with locked(data) as fd:
         storage(data)
         # Re-read after admission; no overwrite based on a pre-lock snapshot.
@@ -500,7 +530,7 @@ def change(action, name=None, *, vms=(), execute=False, data=DATA, gid=None, rul
         if (current['revision'] if current else -1) != (mounted_old['revision'] if mounted_old else -1):
             raise SetupError('account revision changed; repeat the plan')
         if not target.exists():
-            if action == 'initialize' and (legacy_source / 'passwd').exists():
+            if action in ('initialize','ensure-accounts') and (legacy_source / 'passwd').exists():
                 raise SetupError('older broker credentials appeared; use explicit import-legacy')
             if os.fstat(fd).st_size or any(data.glob('.mqtt-initialize-*')):
                 raise SetupError('interrupted initialization; refusing credential reissue')
@@ -517,7 +547,8 @@ def change(action, name=None, *, vms=(), execute=False, data=DATA, gid=None, rul
             sync_directory(target)
             value = old
         else:
-            value = publish(target, old, records, spec, rules, gid, data)
+            value = publish(target, old, records, spec, rules, gid, data,
+                            pass_fds=tuple(set((*_pass_fds,fd))),timeout=_hash_timeout)
         published = {'generation': value['path'].name, 'revision': value['revision']}
         # A completed publication remains distinguishable from a fresh install
         # even if current is subsequently lost. This fence never issues accounts.
@@ -527,7 +558,12 @@ def change(action, name=None, *, vms=(), execute=False, data=DATA, gid=None, rul
             atomic_json(target / 'published.json', published)
     result.update(configured=True, execute_required=False, revision=value['revision'],
                   reused=bool(old and old['profiles'] == records and not old['legacy']), stored=True)
-    return result
+    return (result,value) if _private_result else result
+
+
+def ensure_accounts(accounts, **kwargs):
+    """특권 공급 adapter용. 원문을 반환하므로 공개 응답/진단에 직렬화하지 않는다."""
+    return change('ensure-accounts',accounts=accounts,execute=True,_private_result=True,**kwargs)
 
 
 def reload_broker():
@@ -565,6 +601,13 @@ def export(value, name, form, output, execute=False):
         if name != 'backend':
             raise SetupError('backend export requires backend account')
         content = f'MQTT_USERNAME={name}\nMQTT_PASSWORD={password}\n'
+    elif form == 'display-env':
+        if name != 'observer' or value['profiles'].get(name) != 'service':
+            raise SetupError('display export requires the existing read-only observer account')
+        if grants((value['path'] / 'acl').read_text()).get(name) != {'topic read xenova/v1/#'}:
+            raise SetupError('observer must have exactly the expected read-only ACL')
+        content = ('XENOVA_DISPLAY_MQTT_HOST=127.0.0.1\nXENOVA_DISPLAY_MQTT_PORT=1883\n'
+                   f'XENOVA_DISPLAY_MQTT_USERNAME=observer\nXENOVA_DISPLAY_MQTT_PASSWORD={password}\n')
     else:
         expected = 'telemetry' if form == 'telemetry' else 'vm'
         if value['profiles'][name] != expected:
@@ -597,7 +640,7 @@ def main(argv=None):
     check.add_argument('--runtime', action='store_true', help='require current configuration-compatible generation')
     command = commands.add_parser('export-account')
     command.add_argument('name')
-    command.add_argument('--format', choices=('agent-env', 'backend-env', 'credentials', 'drive', 'telemetry'), required=True)
+    command.add_argument('--format', choices=('agent-env', 'backend-env', 'display-env', 'credentials', 'drive', 'telemetry'), required=True)
     command.add_argument('--output', type=Path, required=True)
     command.add_argument('--execute', action='store_true')
     args = parser.parse_args(argv)

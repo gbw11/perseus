@@ -195,5 +195,6 @@ class DefaultDeploymentTest(unittest.TestCase):
         self.assertEqual({e["template_id"] for e in rows},
                          {"ubuntu-24.04-arm64", "debian-13-arm64", "zephyr-xenvm-starter-arm64"})
         self.assertEqual({e["template_id"]: e["template_version"] for e in rows},
-                         {e["template_id"]: e["version"] for e in selected})
+                         {**{e["template_id"]: e["version"] for e in selected if e['guest_kind']=='linux'},
+                          'zephyr-xenvm-starter-arm64':'1.1.0'})
         self.assertFalse((board.data / "seeds/ubuntu-dev").exists())

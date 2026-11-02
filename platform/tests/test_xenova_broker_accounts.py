@@ -35,6 +35,30 @@ def fixture_hash(argv, **kwargs):
 
 
 class Accounts(unittest.TestCase):
+    def test_display_export_reuses_only_observer_without_mutating_broker(self):
+        self.run_change()
+        value = self.load()
+        before = {str(p): p.read_bytes() for p in value['path'].rglob('*') if p.is_file()}
+        folder = self.data / 'display'
+        folder.mkdir(mode=0o700)
+        output = folder / 'mqtt.env'
+        plan = broker.export(value, 'observer', 'display-env', output)
+        self.assertTrue(plan['execute_required'])
+        self.assertFalse(output.exists())
+        broker.export(value, 'observer', 'display-env', output, execute=True)
+        self.assertIn('XENOVA_DISPLAY_MQTT_PASSWORD=' + value['secrets']['observer'], output.read_text())
+        self.assertNotIn('MQTT_USERNAME=backend', output.read_text())
+        self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(before, {str(p): p.read_bytes() for p in value['path'].rglob('*') if p.is_file()})
+        with self.assertRaises(broker.SetupError):
+            broker.export(value, 'backend', 'display-env', folder / 'wrong.env')
+        acl_path = value['path'] / 'acl'
+        acl_path.write_text(acl_path.read_text().replace(
+            'user observer\ntopic read xenova/v1/#',
+            'user observer\ntopic read xenova/v1/#\ntopic write xenova/v1/#'))
+        with self.assertRaises(broker.SetupError):
+            broker.export(value, 'observer', 'display-env', folder / 'unsafe.env')
+
     def setUp(self):
         if os.geteuid() != 0:
             self.skipTest('root in an owned Linux fixture is required for ownership assertions')
@@ -144,9 +168,8 @@ class Accounts(unittest.TestCase):
             with self.assertRaises(broker.SetupError):
                 self.run_change()
         secrets = next(self.target.glob('.pending-*/credentials.json')).read_bytes()
-        with self.assertRaises(broker.SetupError):
-            self.run_change()
-        self.assertEqual(next(self.target.glob('.pending-*/credentials.json')).read_bytes(), secrets)
+        self.run_change()
+        self.assertEqual((self.load()['path']/'credentials.json').read_bytes(), secrets)
 
     def test_storage_failure_before_publication_preserves_current_and_same_retry_secrets(self):
         self.run_change()

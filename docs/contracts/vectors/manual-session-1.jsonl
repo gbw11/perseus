@@ -1,0 +1,12 @@
+{"accepted":true,"payload":{"profile":"manual-session-1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sample_seq":"1","action_seq":"0","generation":1,"keys":[],"valid":true,"age_ms":0}}
+{"accepted":true,"payload":{"profile":"manual-session-1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sample_seq":"18446744073709551615","action_seq":"18446744073709551615","generation":4294967295,"keys":["up"],"valid":true,"age_ms":199}}
+{"accepted":true,"payload":{"profile":"manual-session-1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sample_seq":"2","action_seq":"1","generation":1,"keys":[],"valid":false,"age_ms":0}}
+{"accepted":false,"payload":{"profile":"manual-session-1","session_id":"00000000-0000-0000-0000-000000000000","sample_seq":"1","action_seq":"0","generation":1,"keys":[],"valid":true,"age_ms":0}}
+{"accepted":false,"payload":{"profile":"manual-session-1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sample_seq":"01","action_seq":"0","generation":1,"keys":[],"valid":true,"age_ms":0}}
+{"accepted":false,"payload":{"profile":"manual-session-1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sample_seq":"18446744073709551616","action_seq":"0","generation":1,"keys":[],"valid":true,"age_ms":0}}
+{"accepted":false,"payload":{"profile":"manual-session-1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sample_seq":"1","action_seq":"0","generation":true,"keys":[],"valid":true,"age_ms":0}}
+{"accepted":false,"payload":{"profile":"manual-session-1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sample_seq":"1","action_seq":"0","generation":1,"keys":["up","up"],"valid":true,"age_ms":0}}
+{"accepted":false,"payload":{"profile":"manual-session-1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sample_seq":"1","action_seq":"0","generation":1,"keys":["unknown"],"valid":true,"age_ms":0}}
+{"accepted":false,"payload":{"profile":"manual-session-1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sample_seq":"1","action_seq":"0","generation":1,"keys":[],"valid":"true","age_ms":0}}
+{"accepted":false,"payload":{"profile":"manual-session-1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sample_seq":"1","action_seq":"0","generation":1,"keys":[],"valid":true,"age_ms":-1}}
+{"accepted":false,"payload":{"profile":"manual-session-1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sample_seq":"1","action_seq":"0","generation":1,"keys":[],"valid":true,"age_ms":0,"extra":1}}

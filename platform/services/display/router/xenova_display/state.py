@@ -10,6 +10,7 @@ from uuid import uuid4
 from xenova_mqtt.envelope import EnvelopeError, validate
 
 from .config import DISPLAY_DRIVE_TOPIC, DISPLAY_DRIVE_TYPE, FeedSettings
+from .app_reports import report_app
 
 
 def utc_now():
@@ -30,7 +31,9 @@ class StateStore:
         self.mqtt_generation = 0
         self.guests = {str(b.vm_id): {
             "binding": b, "domid": None, "xen_state": None, "run_id": None,
+            "observation_id": None,
             "boot_id": None, "retired_boots": set(), "channels": {}, "retired_epochs": set(),
+            "app_instances": {}, "retired_apps": set(), "app_sequences": {}, "pending_inventory": {},
         } for b in settings.bindings}
         self.control = None
         self.control_epoch = None
@@ -51,6 +54,8 @@ class StateStore:
         with self.lock:
             self.mqtt_connected = connected
             self.mqtt_generation += 1
+            for guest in self.guests.values():
+                guest["pending_inventory"].clear()
             self.subscriptions = {topic: "pending" if connected else "unavailable" for topic in topics}
 
     def subscription(self, topic, status):
@@ -68,19 +73,27 @@ class StateStore:
         return {**self.source(observation, ttl, connected=supported and self.topic_available(topic) and current),
                 "subscription_status": subscription}
 
-    def poll_success(self, domains):
+    def poll_success(self, domains, *, observed_mono=None):
         with self.lock:
             rows = {str(d.vm_id): d for d in domains}
             for vm_id, g in self.guests.items():
                 d = rows.get(vm_id)
                 domid = d.domid if d else None
-                if domid != g["domid"]:
-                    if g["boot_id"]:
+                identity = getattr(d, "observation_id", None) if d else None
+                if domid != g["domid"] or identity != g["observation_id"]:
+                    old_execution = (g['observation_id'] or '').partition(':')[2]
+                    new_execution = (identity or '').partition(':')[2]
+                    # Restarting the observer alone does not reboot the guest.
+                    # Clear display evidence, but allow its next live report.
+                    changed_run = domid != g['domid'] or old_execution != new_execution
+                    if g["boot_id"] and changed_run:
                         g["retired_boots"].add(g["boot_id"])
-                    g.update(boot_id=None, channels={}, retired_epochs=set())
-                g.update(domid=domid, xen_state=d.state.value if d else "stopped",
-                         run_id=f"{self.epoch}:{domid}" if domid is not None else None)
+                    g.update(boot_id=None, channels={}, retired_epochs=set(), app_instances={}, retired_apps=set(), app_sequences={}, pending_inventory={})
+                g.update(domid=domid, xen_state=d.state.value if d else "stopped", observation_id=identity,
+                         run_id=f"{self.epoch}:{identity or domid}" if domid is not None else None)
             self.xen = self.observation("ok")
+            if observed_mono is not None:
+                self.xen["received_mono"] = observed_mono
 
     def poll_failure(self):
         # Preserve last observations but explicitly mark the transport unavailable.
@@ -88,7 +101,7 @@ class StateStore:
             if self.xen is not None:
                 self.xen["value"] = "unavailable"
 
-    def ingest(self, topic, env, *, retained=False):
+    def ingest(self, topic, env, *, retained=False, qos=None, wire_size=None):
         try:
             validate(topic, env)
         except (EnvelopeError, TypeError, ValueError):
@@ -115,35 +128,91 @@ class StateStore:
             allowed = {
                 f"xenova/v1/vms/{vm_id}/heartbeat": "agent.heartbeat",
                 f"xenova/v1/vms/{vm_id}/inventory": "agent.inventory",
-                f"xenova/v1/apps/{b.app_id}/events": "app.heartbeat",
             }
-            if allowed.get(topic) != kind or (kind.startswith("agent.") and not b.agent_supported):
-                return False
-            if kind == "app.heartbeat" and env["payload"].get("state") not in ("active", "standby", "idle", "error"):
+            app_id = None
+            if kind.startswith("app."):
+                app_id = report_app(b, topic, env, retained=retained, qos=qos, wire_size=wire_size)
+                if app_id is None:
+                    return False
+            elif allowed.get(topic) != kind or not b.agent_supported:
                 return False
             if kind == "agent.inventory":
                 os_info = env["payload"].get("os")
                 if (not isinstance(os_info, dict) or not isinstance(os_info.get("id"), str)
                         or not 1 <= len(os_info["id"]) <= 64):
                     return False
+                epoch = (env["boot_id"], env["agent_instance_id"])
+                if epoch[0] in g["retired_boots"] or ("agent.heartbeat", epoch) in g["retired_epochs"]:
+                    return False
+                heartbeat = g["channels"].get("agent.heartbeat")
+                heartbeat_topic = f"xenova/v1/vms/{vm_id}/heartbeat"
+                if (heartbeat is None or heartbeat["source_epoch"] != list(epoch)
+                        or self.mqtt_source(heartbeat, 15, heartbeat_topic)["status"] != "fresh"):
+                    # Inventory is not liveness. Hold only a bounded OS observation
+                    # until this exact Agent session reports on the same connection.
+                    pending = g["pending_inventory"]
+                    previous = pending.get(epoch)
+                    if previous and env["seq"] <= previous["sequence"]:
+                        return False
+                    for key in list(pending):
+                        if self.clock() - pending[key]["received_mono"] >= 15:
+                            del pending[key]
+                    if epoch not in pending and len(pending) >= 4:
+                        return False
+                    pending[epoch] = self.observation({"os": {"id": os_info["id"]}},
+                        observed_at=env["sent_at"], source_id=topic, source_epoch=list(epoch),
+                        sequence=env["seq"], retained=retained, _mqtt_generation=self.mqtt_generation)
+                    return False  # Deferred; not yet accepted as displayed OS evidence.
             # Only a non-retained heartbeat establishes a boot, not historical inventory.
             boot = env["boot_id"]
             if boot != g["boot_id"]:
-                if retained or kind == "agent.inventory" or boot in g["retired_boots"] or len(g["retired_boots"]) >= 128:
+                if retained or kind in ("agent.inventory", "app.readiness") or boot in g["retired_boots"] or len(g["retired_boots"]) >= 128:
                     return False
                 if g["boot_id"]:
                     g["retired_boots"].add(g["boot_id"])
-                g.update(boot_id=boot, channels={}, retired_epochs=set())
+                pending = {k: v for k, v in g["pending_inventory"].items() if k[0] == boot}
+                g.update(boot_id=boot, channels={}, retired_epochs=set(), app_instances={}, retired_apps=set(), app_sequences={}, pending_inventory=pending)
             if retained and kind != "agent.inventory":
                 return False
             epoch = (boot, env["agent_instance_id"])
-            key = kind
+            scoped = app_id is not None and b.app_topic_scope == "vm_scoped"
+            key = (app_id, kind) if scoped else kind
+            if scoped:
+                if (app_id, epoch) in g["retired_apps"]:
+                    return False
+                current = g["app_instances"].get(app_id)
+                if kind == "app.readiness":
+                    heartbeat = g["channels"].get((app_id, "app.heartbeat"))
+                    if (current != epoch or self.mqtt_source(heartbeat, 3, topic)["status"] != "fresh"):
+                        return False
+                elif current != epoch:
+                    if current is not None:
+                        if len(g["retired_apps"]) >= 128:
+                            return False
+                        g["retired_apps"].add((app_id, current))
+                    # A publisher restart invalidates only this app's readiness.
+                    for app_kind in ("app.heartbeat", "app.readiness"):
+                        g["channels"].pop((app_id, app_kind), None)
+                    g["app_instances"][app_id] = epoch
+                    g["app_sequences"].pop(app_id, None)
+                # The firmware shares one sequence across report types on each app topic.
+                if env["seq"] <= g["app_sequences"].get(app_id, -1):
+                    return False
+                # A valid but non-progressing report cannot refresh state, but still
+                # prevents a delayed older heartbeat from renewing that app's liveness.
+                g["app_sequences"][app_id] = env["seq"]
             previous = g["channels"].get(key)
             if (key, epoch) in g["retired_epochs"]:
                 return False
             if previous:
                 if previous["source_epoch"] == list(epoch) and env["seq"] <= previous["sequence"]:
                     return False
+                if scoped and kind == "app.readiness":
+                    old, new = previous["value"], env["payload"]
+                    if (new["applied_generation"] < old["applied_generation"]
+                            or int(new["progress_seq"]) < int(old["progress_seq"])
+                            or (new["readiness"] == "READY" and int(new["progress_seq"]) == int(old["progress_seq"]))):
+                        return False
                 if previous["source_epoch"] != list(epoch):
                     if len(g["retired_epochs"]) >= 128:
                         return False
@@ -151,7 +220,56 @@ class StateStore:
             g["channels"][key] = self.observation(env["payload"], observed_at=env["sent_at"],
                 source_id=topic, source_epoch=list(epoch), sequence=env["seq"], retained=retained,
                 _mqtt_generation=self.mqtt_generation)
+            if kind == "agent.heartbeat":
+                inventory = g["channels"].get("agent.inventory")
+                if inventory and inventory["source_epoch"] != list(epoch):
+                    del g["channels"]["agent.inventory"]
+                    inventory = None
+                pending = g["pending_inventory"].pop(epoch, None)
+                g["pending_inventory"].clear()
+                inventory_topic = f"xenova/v1/vms/{vm_id}/inventory"
+                if (pending and self.clock() - pending["received_mono"] < 15
+                        and pending["_mqtt_generation"] == self.mqtt_generation
+                        and self.topic_available(inventory_topic)
+                        and (inventory is None or pending["sequence"] > inventory["sequence"])):
+                    # Keep the original inventory receive time, never rejuvenate it.
+                    g["channels"]["agent.inventory"] = pending
             return True
+
+    def app_snapshot(self, g, b, app_id, xen_source):
+        topic = b.app_topic(app_id)
+        scoped = b.app_topic_scope == "vm_scoped"
+        heartbeat = g["channels"].get((app_id, "app.heartbeat") if scoped else "app.heartbeat")
+        source = self.mqtt_source(heartbeat, 3, topic)
+        state = "unknown"
+        xen_live = xen_source["status"] == "fresh" and g["xen_state"] == "running"
+        if xen_live and source["status"] == "fresh":
+            state = "failed" if heartbeat["value"]["state"] == "error" else "ready"
+        observation = g["channels"].get((app_id, "app.readiness")) if scoped else None
+        readiness_source = self.mqtt_source(observation, .3, topic, supported=scoped)
+        current = (xen_live and state == "ready" and readiness_source["status"] == "fresh")
+        return {"app_id": app_id, "topic": topic, "app_state": state,
+                "reported_app_state": heartbeat["value"]["state"] if heartbeat else None,
+                "source": source,
+                "readiness": {"reported": deepcopy(observation["value"]) if observation else None,
+                    "current": deepcopy(observation["value"]) if current else None,
+                    "source": readiness_source, "execution_verified": False, "authority_verified": False}}
+
+    @staticmethod
+    def app_summary(apps):
+        """Conservative old VM-level summary; never infer mode/owner from an app."""
+        rows = list(apps.values())
+        sources = [a["source"] for a in rows]
+        status = next((s for s in ("disconnected", "unknown", "stale")
+                       if any(r["status"] == s for r in sources)), "fresh")
+        subscription = next((s for s in ("denied", "error", "unavailable", "pending", "unsupported", "untracked")
+                             if any(r["subscription_status"] == s for r in sources)), "granted")
+        ages = [r["age_ms"] for r in sources]
+        source = {"status": status, "subscription_status": subscription,
+                  "age_ms": max(ages) if all(a is not None for a in ages) else None}
+        state = ("failed" if any(a["app_state"] == "failed" for a in rows)
+                 else "ready" if all(a["app_state"] == "ready" for a in rows) else "unknown")
+        return source, state
 
     def _control(self, env, retained):
         p = env["payload"]
@@ -190,21 +308,25 @@ class StateStore:
             for vm_id, g in self.guests.items():
                 b = g["binding"]
                 channels = g["channels"]
-                app = channels.get("app.heartbeat")
-                app_source = self.mqtt_source(app, 3, f"xenova/v1/apps/{b.app_id}/events")
+                apps = {app_id: self.app_snapshot(g, b, app_id, xen_source) for app_id in b.report_app_ids}
+                if b.app_topic_scope == "legacy":
+                    app_source = apps[b.app_id]["source"]
+                    app_state = apps[b.app_id]["app_state"]
+                    reported_app_state = apps[b.app_id]["reported_app_state"]
+                else:
+                    app_source, app_state = self.app_summary(apps)
+                    reported_app_state = None
                 inv = channels.get("agent.inventory")
                 observed_os = inv["value"]["os"]["id"] if inv else None
-                app_state = "unknown"
-                if xen_source["status"] == "fresh" and g["xen_state"] == "running" and app_source["status"] == "fresh":
-                    app_state = "failed" if app["value"]["state"] == "error" else "ready"
                 guests.append({"vm_id": vm_id, "role": b.role, "app_id": b.app_id,
+                    "app_topic_scope": b.app_topic_scope, "apps": apps,
                     "run_id": g["run_id"], "guest_boot_id": g["boot_id"],
                     "xen_state": g["xen_state"], "operation": None,
                     "os": {"expected": b.expected_os, "observed": observed_os,
                            "match": observed_os == b.expected_os if observed_os else None,
                            "evidence": "agent.inventory" if inv else None,
                            "current_run_verified": False},
-                    "app_state": app_state, "reported_app_state": app["value"].get("state") if app else None,
+                    "app_state": app_state, "reported_app_state": reported_app_state,
                     "agent_supported": b.agent_supported,
                     "sources": {"xen": xen_source, "app": app_source,
                         "agent": self.mqtt_source(channels.get("agent.heartbeat"), 15,

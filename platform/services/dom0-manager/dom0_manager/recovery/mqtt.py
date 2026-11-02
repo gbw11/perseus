@@ -146,13 +146,22 @@ def subscribe_liveness(client: ClientLike, heartbeats: HeartbeatTable, app_heart
     client.subscribe(HEARTBEAT_FILTER, heartbeat_handler(heartbeats), qos=1)
     client.subscribe(APP_EVENTS_FILTER, app_heartbeat_handler(app_heartbeats,vm_ids=rejoin.vm_ids if rejoin else ()), qos=0)
     if rejoin is not None:
+        if hasattr(client,'set_receive_guard'):client.set_receive_guard(rejoin.cache.guard(rejoin.vm_ids))
+        elif getattr(rejoin,'config',{}).get('readiness_profile')=='warm-drive-1':raise ValueError('warm profile requires pre-sequence binding guard')
         def verified(message):
             from xenova_mqtt import topics
             info=topics.parse(message.topic);env=message.envelope
             if (getattr(message,'retained',False) or info.vm_id not in rejoin.vm_ids or
                 info.app_id!=env.get('app_id') or info.vm_id!=env.get('vm_id') or
-                not rejoin.cache.accepts(info.vm_id,env.get('boot_id'),env.get('agent_instance_id'),message.received_monotonic)):return
-            if message.type=='app.readiness':rejoin.on_readiness(message)
+                not rejoin.cache.accepts(info.vm_id,env.get('boot_id'),env.get('agent_instance_id'),message.received_monotonic,app=info.app_id)):return
+            warm=getattr(rejoin,'config',{}).get('readiness_profile')=='warm-drive-1'
+            if message.type=='app.lifecycle' and warm:
+                from xenova_mqtt.lifecycle import parse
+                try:value=parse(message.payload)
+                except (ValueError,TypeError):return
+                rejoin.on_readiness(message)
+                app_heartbeats.record_lifecycle(UUID(info.vm_id),info.app_id,env['boot_id'],env['agent_instance_id'],value,message.received_monotonic)
+            elif message.type=='app.readiness' and not warm:rejoin.on_readiness(message)
             elif message.type=='app.heartbeat':
                 state=_valid_app_payload(message.payload)
                 if state:app_heartbeats.record(UUID(info.vm_id),info.app_id,state,env['boot_id'],env['seq'],

@@ -66,8 +66,22 @@ finally:
         except subprocess.TimeoutExpired:
             os.killpg(child.pid, signal.SIGKILL)
             child.wait(timeout=5)
-    lib = root / "usr/lib/aarch64-linux-gnu"
-    subprocess.run([str(lib / "ld-linux-aarch64.so.1"), "--library-path", str(lib), str(root / "usr/bin/chvt"), str(prior_vt)], check=True, timeout=5)
+    # Restore through the host VT API; the isolated graphics bundle need not
+    # contain the optional kbd/chvt executable.
+    tty = os.open("/dev/tty0", os.O_RDONLY)
+    try:
+        fcntl.ioctl(tty, 0x5606, prior_vt)  # VT_ACTIVATE
+        deadline = time.monotonic() + 5
+        while True:
+            state = bytearray(6)
+            fcntl.ioctl(tty, 0x5603, state, True)  # VT_GETSTATE
+            if struct.unpack("3H", state)[0] == prior_vt:
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError("console VT restoration timed out")
+            time.sleep(.05)
+    finally:
+        os.close(tty)
     current = bytearray(160)
     fcntl.ioctl(fb, 0x4600, current, True)
     restored = False

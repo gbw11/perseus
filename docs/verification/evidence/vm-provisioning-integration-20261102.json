@@ -1,0 +1,1511 @@
+{
+  "schema": "xenova-verification-evidence-1",
+  "date": "2026-11-02",
+  "task": "VM provisioning, one-shot registration notification, applied signal declaration and deployment integration",
+  "candidate": {
+    "head": "8a23b8a700ebf7093e35e1c07dbd8f1864d16260",
+    "branch": "feat/platform/gateway-history-driving-app",
+    "snapshot": "/home/ssafy/xenova-provisioning-20261102/release3",
+    "source_manifest": {
+      "platform/apps/drive/planner/generated/primitive-manifest.json": {
+        "sha256": "c7237a6407fd8cd9842d799f06f0ce3f51e37d69b90db715d7e1d5f5cf236d5a",
+        "bytes": 2055,
+        "worktree_sha256": "c7237a6407fd8cd9842d799f06f0ce3f51e37d69b90db715d7e1d5f5cf236d5a"
+      },
+      "platform/apps/drive/planner/generated/primitives.c": {
+        "sha256": "33e7ed7167ed5307288b683b89f670aa5109441e5c6295c18ead97c3d173d3d3",
+        "bytes": 100880,
+        "worktree_sha256": "33e7ed7167ed5307288b683b89f670aa5109441e5c6295c18ead97c3d173d3d3"
+      },
+      "platform/apps/drive/tests/test_world.py": {
+        "sha256": "f97f41d061c2a64b46d0927545a7fb4ba599e6f81391392eb0bb6afee97c38f8",
+        "bytes": 5055,
+        "worktree_sha256": "f97f41d061c2a64b46d0927545a7fb4ba599e6f81391392eb0bb6afee97c38f8"
+      },
+      "platform/apps/drive/tools/generate_primitives.py": {
+        "sha256": "7f0b0dce5611261a811cab43261258ac7df657392aedfddcd511765dc4df85f4",
+        "bytes": 5623,
+        "worktree_sha256": "7f0b0dce5611261a811cab43261258ac7df657392aedfddcd511765dc4df85f4"
+      },
+      "platform/deploy/mosquitto/README.md": {
+        "sha256": "37d38fd23538e5e5c6bf077bf2c9f9979763ccec2a7ed877b9c4580ffe94c6bc",
+        "bytes": 11365,
+        "worktree_sha256": "37d38fd23538e5e5c6bf077bf2c9f9979763ccec2a7ed877b9c4580ffe94c6bc"
+      },
+      "platform/deploy/mosquitto/etc/acl": {
+        "sha256": "2c1a759b3b9d42675b43ff0306bf4b0f213a763ab4425cf08821f88b9e471402",
+        "bytes": 4166,
+        "worktree_sha256": "2c1a759b3b9d42675b43ff0306bf4b0f213a763ab4425cf08821f88b9e471402"
+      },
+      "platform/deploy/mosquitto/etc/policy.json": {
+        "sha256": "844cdadce0801da8959f01e569f5af7f8492fbc5a5dd2094adba9d533a7a7edc",
+        "bytes": 2350,
+        "worktree_sha256": "844cdadce0801da8959f01e569f5af7f8492fbc5a5dd2094adba9d533a7a7edc"
+      },
+      "platform/deploy/mosquitto/scripts/xenova_broker.py": {
+        "sha256": "56dd72570b8b96d8d04b8e652ec69ea0d5ecf9c0797fe89786722492fdd07329",
+        "bytes": 34121,
+        "worktree_sha256": "56dd72570b8b96d8d04b8e652ec69ea0d5ecf9c0797fe89786722492fdd07329"
+      },
+      "platform/first-install/assemble.py": {
+        "sha256": "ad147a4a565b44eca7d3aeeafd27a6eda60ed1e4f9f092b333948b555ecab479",
+        "bytes": 49297,
+        "worktree_sha256": "58bd59dda0ea8926ae948c6d33630ecb6e4f18ac34d60ca4da2e238cb33bf21b"
+      },
+      "platform/first-install/example.config.json": {
+        "sha256": "08e46e45843c182a0725e2c8d5017a8f3e120d060bed3ef2e4208e9f29c21eb9",
+        "bytes": 1365,
+        "worktree_sha256": "08e46e45843c182a0725e2c8d5017a8f3e120d060bed3ef2e4208e9f29c21eb9"
+      },
+      "platform/guests/common/README.md": {
+        "sha256": "c647ddeb155e1ad2c82b38209bd071662e8aee365f5bd1c8fdd8cd3c572341f2",
+        "bytes": 12842,
+        "worktree_sha256": "c647ddeb155e1ad2c82b38209bd071662e8aee365f5bd1c8fdd8cd3c572341f2"
+      },
+      "platform/guests/common/guest_identity.py": {
+        "sha256": "1f7719d1ab54798d284c661d62a31bb3ef1c8e56aa0213cb28bd7555dd6e8b44",
+        "bytes": 3904,
+        "worktree_sha256": "1f7719d1ab54798d284c661d62a31bb3ef1c8e56aa0213cb28bd7555dd6e8b44"
+      },
+      "platform/guests/common/prepare_instance.py": {
+        "sha256": "4b88828f3a85dcfbd4a661598cb09d01ab856671eac58f529721b8324ffcde69",
+        "bytes": 23154,
+        "worktree_sha256": "4b88828f3a85dcfbd4a661598cb09d01ab856671eac58f529721b8324ffcde69"
+      },
+      "platform/guests/common/template_recipe.py": {
+        "sha256": "03c7b35eee07353733bb5650893c4bb22482456127d0644d69668b66c08f7a2f",
+        "bytes": 4463,
+        "worktree_sha256": "03c7b35eee07353733bb5650893c4bb22482456127d0644d69668b66c08f7a2f"
+      },
+      "platform/guests/default-templates.lock.json": {
+        "sha256": "3d1ff2054fedb12115cdc2a8943f34fcf54044408078f715dc702f26e5df84b6",
+        "bytes": 976,
+        "worktree_sha256": "3d1ff2054fedb12115cdc2a8943f34fcf54044408078f715dc702f26e5df84b6"
+      },
+      "platform/guests/zephyr/template.py": {
+        "sha256": "7614455361db717e6c1e3b432fe9877b25f47b0f5e154665a345af5a0b4b5ffe",
+        "bytes": 6808,
+        "worktree_sha256": "7614455361db717e6c1e3b432fe9877b25f47b0f5e154665a345af5a0b4b5ffe"
+      },
+      "platform/scripts/build-xenova-drive-app.py": {
+        "sha256": "fcf73c777f2dfb83f65e6398ea9560b48a642867ea435084995ec8655445ce0a",
+        "bytes": 14959,
+        "worktree_sha256": "fcf73c777f2dfb83f65e6398ea9560b48a642867ea435084995ec8655445ce0a"
+      },
+      "platform/scripts/package-xenova-drive-template.py": {
+        "sha256": "17a749db2f2949af81aa98d67c1afcef0318fb37daffae1ad2e4fb47a1844972",
+        "bytes": 3121,
+        "worktree_sha256": "17a749db2f2949af81aa98d67c1afcef0318fb37daffae1ad2e4fb47a1844972"
+      },
+      "platform/scripts/package-xenova-firmware.py": {
+        "sha256": "ca8087fe83d05a745ce8f19376e14aee9d02bc8740dba36980020f54d6ea43b6",
+        "bytes": 8917,
+        "worktree_sha256": "ca8087fe83d05a745ce8f19376e14aee9d02bc8740dba36980020f54d6ea43b6"
+      },
+      "platform/scripts/prepare-xenova-guests.py": {
+        "sha256": "4bf4e5c06097973f8e4694df8ccf0a724555424780d17c55a8007af0ba5aecee",
+        "bytes": 15607,
+        "worktree_sha256": "4bf4e5c06097973f8e4694df8ccf0a724555424780d17c55a8007af0ba5aecee"
+      },
+      "platform/scripts/provision-xenova-telemetry.py": {
+        "sha256": "93955ea6983f0d54ac72f49edc57645006d8ea1b21de881eccc8b8d6422d1923",
+        "bytes": 38562,
+        "worktree_sha256": "93955ea6983f0d54ac72f49edc57645006d8ea1b21de881eccc8b8d6422d1923"
+      },
+      "platform/tests/benchmark_provisioning_cost.py": {
+        "sha256": "6de15d52a8983a595883a63339716cf540cad3cc5b2864dc43dc7d6e14c8ae6e",
+        "bytes": 2513,
+        "worktree_sha256": "6de15d52a8983a595883a63339716cf540cad3cc5b2864dc43dc7d6e14c8ae6e"
+      },
+      "platform/tests/first_install_fixture.py": {
+        "sha256": "b82ae6f555f39335c823a33c8aa1d3ec66396bfce97d4ecbb21ce629c5c3ab78",
+        "bytes": 16282,
+        "worktree_sha256": "18d87b74713ef1c0af0d2b729b1fb626dcc805227e77e246c32fd76391cb7bff"
+      },
+      "platform/tests/test_xenova_broker_accounts.py": {
+        "sha256": "94000bb35f9d630c370d7bab3c31f2d36a7869cd2427f377be5a33081d97029b",
+        "bytes": 17560,
+        "worktree_sha256": "94000bb35f9d630c370d7bab3c31f2d36a7869cd2427f377be5a33081d97029b"
+      },
+      "platform/tests/test_xenova_default_deployment.py": {
+        "sha256": "c597349867095cc0ed566dc52ff70224bb93ec84587ede337eaeedbb55c76e0c",
+        "bytes": 12371,
+        "worktree_sha256": "c597349867095cc0ed566dc52ff70224bb93ec84587ede337eaeedbb55c76e0c"
+      },
+      "platform/tests/test_xenova_provisioning.py": {
+        "sha256": "374909e1b06ab72dffbc503202008ed530622c065b708fd620f624423ec02de2",
+        "bytes": 29979,
+        "worktree_sha256": "374909e1b06ab72dffbc503202008ed530622c065b708fd620f624423ec02de2"
+      },
+      "platform/tests/test_xenova_registration.py": {
+        "sha256": "5d2f069b87204b800bef9a10850573aa50d9b9d63d2040c322b2613247bfc7e6",
+        "bytes": 13483,
+        "worktree_sha256": "5d2f069b87204b800bef9a10850573aa50d9b9d63d2040c322b2613247bfc7e6"
+      },
+      "platform/tests/test_xenova_signal_profiles.py": {
+        "sha256": "dd897d2aaf352e28ff80d6ba71b016c34d01e541180eb5e259d525ecc516e5cc",
+        "bytes": 5161,
+        "worktree_sha256": "dd897d2aaf352e28ff80d6ba71b016c34d01e541180eb5e259d525ecc516e5cc"
+      },
+      "platform/yocto/meta-xenova/recipes-connectivity/xenova-mqtt-broker/files/20-xenova-broker.conf": {
+        "sha256": "8f1fdd47709e9d537989903a70e567f8d47ece6e1ff3892a24ec24cd6120de0c",
+        "bytes": 495,
+        "worktree_sha256": "8f1fdd47709e9d537989903a70e567f8d47ece6e1ff3892a24ec24cd6120de0c"
+      },
+      "platform/yocto/meta-xenova/recipes-connectivity/xenova-mqtt-broker/xenova-mqtt-broker_1.0.bb": {
+        "sha256": "7a3fc9d0c0ea65aa7f1d74dc983cc6248adefd5390e93c32a5b26bb431148444",
+        "bytes": 2680,
+        "worktree_sha256": "7a3fc9d0c0ea65aa7f1d74dc983cc6248adefd5390e93c32a5b26bb431148444"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/defaults.json": {
+        "sha256": "c1a671dbbdd362ee12cec1ecc4e84c97eb9aeab2672869dbc750e4920c225dcf",
+        "bytes": 1235,
+        "worktree_sha256": "c1a671dbbdd362ee12cec1ecc4e84c97eb9aeab2672869dbc750e4920c225dcf"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/registration-notification.json.example": {
+        "sha256": "bf5c8be8dcc85e894308969f0e2ed0f77800968f4788de4dae47706830478bf1",
+        "bytes": 186,
+        "worktree_sha256": "bf5c8be8dcc85e894308969f0e2ed0f77800968f4788de4dae47706830478bf1"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova-world-install": {
+        "sha256": "b3196cece704c815cac3abff8cd1772dca172de091bbde9172f5589e8eb9629d",
+        "bytes": 2068,
+        "worktree_sha256": "b3196cece704c815cac3abff8cd1772dca172de091bbde9172f5589e8eb9629d"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_catalog.py": {
+        "sha256": "f8beb105906d08db89ce3937e7c551256728bbeb311b3be7bb78b15799e3aac4",
+        "bytes": 8351,
+        "worktree_sha256": "f8beb105906d08db89ce3937e7c551256728bbeb311b3be7bb78b15799e3aac4"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_drive_binding.py": {
+        "sha256": "f8f79e32bcaeaee56180b4c71dde23a476c4acd72124cbbcf32a5c7c0b873b8d",
+        "bytes": 2413,
+        "worktree_sha256": "f8f79e32bcaeaee56180b4c71dde23a476c4acd72124cbbcf32a5c7c0b873b8d"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_execution.py": {
+        "sha256": "a0656823b1f2c97b6b17d4cf94dcf8f522ca19c1a1440d74ab67ebf9a217417a",
+        "bytes": 64766,
+        "worktree_sha256": "a0656823b1f2c97b6b17d4cf94dcf8f522ca19c1a1440d74ab67ebf9a217417a"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_first_boot.py": {
+        "sha256": "2f6ba7c651fa678980cd027f600c045c51ee3721f70c6ead42859b30bedf94f9",
+        "bytes": 25755,
+        "worktree_sha256": "2f6ba7c651fa678980cd027f600c045c51ee3721f70c6ead42859b30bedf94f9"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_guest_profile.py": {
+        "sha256": "6caef703789c865d212cc0ea294026a9ee49da9d4a7375d972077db38fa65939",
+        "bytes": 4107,
+        "worktree_sha256": "6caef703789c865d212cc0ea294026a9ee49da9d4a7375d972077db38fa65939"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management.py": {
+        "sha256": "40bcfa66fe88e4c807a642a481b4153a98abe169126fa04d07fe13a2953f0e84",
+        "bytes": 139155,
+        "worktree_sha256": "40bcfa66fe88e4c807a642a481b4153a98abe169126fa04d07fe13a2953f0e84"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management_cli.py": {
+        "sha256": "3e3e1758e20472e2d371c6c3bd4dc15a27db72a2354a43ad403473d55767d1a1",
+        "bytes": 16153,
+        "worktree_sha256": "3e3e1758e20472e2d371c6c3bd4dc15a27db72a2354a43ad403473d55767d1a1"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_provisioning.py": {
+        "sha256": "bf9783f4c92d84c5d7b193093f2b0c97ba20ae52727cdb7b5c588b2b0a5df4bb",
+        "bytes": 12878,
+        "worktree_sha256": "bf9783f4c92d84c5d7b193093f2b0c97ba20ae52727cdb7b5c588b2b0a5df4bb"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_registration.py": {
+        "sha256": "d8783417fe3af37a73ea2e124ede68c7de49ecaef458310488e499f9261adb49",
+        "bytes": 12168,
+        "worktree_sha256": "d8783417fe3af37a73ea2e124ede68c7de49ecaef458310488e499f9261adb49"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_vm.py": {
+        "sha256": "9f2ddbcbd7d15d90dc43eba2a3bd083894b7b80cea605cdc632a34a2a2dd7d59",
+        "bytes": 77408,
+        "worktree_sha256": "9f2ddbcbd7d15d90dc43eba2a3bd083894b7b80cea605cdc632a34a2a2dd7d59"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_zephyr.py": {
+        "sha256": "d8dfcc43201ecdee9e3745667116bbb131f4727396755c7db6b46ab12271411d",
+        "bytes": 19124,
+        "worktree_sha256": "d8dfcc43201ecdee9e3745667116bbb131f4727396755c7db6b46ab12271411d"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_zephyr_transition.py": {
+        "sha256": "da2e2084cbd58297501d951059536ba499de52e181e19d2ae1ac2a19b00030d3",
+        "bytes": 7735,
+        "worktree_sha256": "da2e2084cbd58297501d951059536ba499de52e181e19d2ae1ac2a19b00030d3"
+      },
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/xenova-platform_1.0.bb": {
+        "sha256": "e03c466dd8511dcd40e27c717f5b600be4c88eb274d8e06753cdcf3ea722df3b",
+        "bytes": 11147,
+        "worktree_sha256": "e03c466dd8511dcd40e27c717f5b600be4c88eb274d8e06753cdcf3ea722df3b"
+      }
+    },
+    "uncommitted": true,
+    "source_line_endings": "Linux snapshot hashes; worktree hashes also recorded; LF equivalent checked"
+  },
+  "baseline_reused": [
+    "docs/verification/vm-registration-signal-mapping-20261102.md",
+    "docs/verification/recovery-scenario-closure-20261030.md#cli-query-consistency",
+    "docs/verification/recovery-scenario-closure-20261030.md#history-drive-final"
+  ],
+  "acceptance": {
+    "A01": "`ProvisioningHooksTest.test_both_linux_create_hooks_use_real_preparation_supplier_and_agent_parser`, Zephyr create hash barrier. 두 Linux 분기·private root·원 replay",
+    "A02": "실제 `FirstBoot.register` UUID 계획 뒤 Linux 공급·완료 boot skip, 실제 ARM template의 A/B 독립 복사/등록/공급. Linux mount/OS는 명시 fixture",
+    "A03": "기존 `CreateCompatibilityTest` 양방향 자원 표현/동시 key/응답 유실 + 완료 replay 공급/새 hash 없음",
+    "A04": "실제 Platform start→stop/start→recover_once의 세 실행·원 암호 유지·새 receipt; 기존 reboot/autostart/host 변경 guard 회귀",
+    "A05": "unknown/false/invalid·guest adapter 불일치와 원 role ACL. 실제 Agent v1/v2 정상 송신·다른 VM 쓰기 거절",
+    "A06": "hash launch EIO·hash 후 ENOSPC·기존 generation rename/process kill·post-pointer fsync 실패. 같은 plaintext/기존 hash로 지원 재개",
+    "A07": "broker 기존 권한/symlink/손상/원본 소실 차단, revoked 명시 복원 뒤 정상 공급. 새 암호 fallback 없음",
+    "A08": "reload/offline은 unconfirmed·next_start, 저장 오류와 분리. 격리 실제 broker 회복·다음 정상 인증",
+    "A09": "같은 VM supply의 새 generation/hash/reload 0, public status의 한 read/parse·쓰기 0. 기존 내구 재확인 fsync 1 유지",
+    "A10": "실제 private env→AgentSettings→Agent client/v2, Bootstrap→제품 native Zephyr C decoder. Store는 외부 대역이며 실제 guest 수락 아님",
+    "A11": "격리 Pi/world 두 broker의 독립 인증 영역·동시 다른 Client ID. world import는 실제 codec, Jetson 제품 설치는 미수행",
+    "B01": "실제 일반 create 완료/factory complete hook→별도 sender process→실제 HTTP fixture, 동일 등록 UUID",
+    "B02": "slow response·실제 resolver LD_PRELOAD 정체→supervisor의 자식 종료/회수. 이후 정상 명시 송신",
+    "B03": "서버 저장 뒤 EOF→delivery-unknown, 자동 후속 0, 명시 동일 UUID 재송신→중복 행 0의 수신 계약 fixture",
+    "B04": "완료 journal 소비 뒤 launch 미수행→replay/완료 boot가 보충하지 않음. 원 등록 유지",
+    "B05": "4 slot 포화/다섯 번째 skip·회복 뒤 정상 manual, 두 factory 등록·일부 실패 분리",
+    "B06": "등록-only route만 실제 POST. 기존 Spring create 소스는 UUID 발급/Pi 호출임을 대조. 실제 Spring DB transaction 교차는 담당 제품 미수락",
+    "B07": "config 권한·부재, 403/redirect·duplicate JSON·oversize·접수 응답을 확정으로 처리하지 않음. 운영 TLS/token은 미공급",
+    "B08": "실제 human/JSON CLI·무관한 force 옵션 거절·retired 대상 거절·same sender. VM/암호/디스크 생성 없음",
+    "C01": "Starter false·Agent true/없음 false·미선언 null·malformed 오류, app_health_asserted=false의 실제 Agent v2",
+    "C02": "verified loader capture와 다음 profile을 다르게 읽고 원 실행 불변. transition/실패/새 실행 기존 회귀",
+    "C03": "actual warm AUTO stateful/MANUAL stateless·Standby idle 선언과 이전 planner/Gateway 준비/계산 보호 재사용. 선언만으로 READY 없음",
+    "C04": "실제 ARM source/BUILD_RECEIPT→새 template envelope→lock→factory strict validator·A/B seed→등록/공급",
+    "X01": "A hasher barrier 유지 중 B intents/원 operation과 물리 stop·원 결과 완료. 기존 restore/firmware/usage/DHCP barrier 재사용",
+    "X02": "A 등록 통지 HTTP 대기 중 원 create 응답·B 실제 stop/원 결과 완료. caller optional fsync 금지 hook·slow resolver/자식 회수",
+    "X03": "기존 CLI·Manager·기본값/동등 요청·CPU/lifecycle·실패 수습 회귀와 변경 없는 실제 HTTP adapter 201/409",
+    "X04": "고정 recipe QA/RPM→설치 바이트/모드·독립 target 모듈→ARM Python/QEMU의 실제 HTTP fixture 송신. 전체 이미지/실설치는 별도",
+    "X05": "source/제공 archive의 비밀 배제, 실제 실패 뒤 정상 회복. 테스트 임시 credential/Authority/환경 파일은 제공 archive에 넣지 않음"
+  },
+  "tests": [
+    {
+      "scope": "focused",
+      "command": "bash test-a.sh release3",
+      "rc": 0,
+      "log": "release3-A.log",
+      "sha256": "73de53002e751ee6c0d6282dbd0649ade0c170841e80327559e53cdfab4f17c7",
+      "candidate": "release3",
+      "matching_source": "release3"
+    },
+    {
+      "scope": "management-regression",
+      "command": "bash regression.sh release3",
+      "rc": 0,
+      "log": "release3-regression.log",
+      "sha256": "d2d0b8699623a2c6921bd2b524cab672ced6977381a0fead1db9c17fae133e01",
+      "candidate": "release3",
+      "matching_source": "release3"
+    },
+    {
+      "scope": "unchanged-http-adapter",
+      "command": "bash http-compatibility.sh release3",
+      "rc": 0,
+      "log": "release3-http-compatibility.log",
+      "sha256": "6e87c5e010dcc50f39d77923a682ce69476efa92d6c07f3bdc1d5a4f931962a3",
+      "candidate": "release3",
+      "matching_source": "release3"
+    },
+    {
+      "scope": "gateway",
+      "command": "bash gateway.sh release3",
+      "rc": 0,
+      "log": "release3-gateway.log",
+      "sha256": "715cdcdb31a47e9c6433c38f28d5f397a3ae30cb422fa03ce667d605b0933688",
+      "candidate": "release3",
+      "matching_source": "release3"
+    },
+    {
+      "scope": "drive",
+      "command": "bash test-drive.sh release2",
+      "rc": 0,
+      "log": "release2-drive.log",
+      "sha256": "aa587267e46768488a532cc86b5a5ad62854229d0294cac9e8e02063069839a8",
+      "candidate": "release2",
+      "matching_source": "release2 drive/C inputs equal release3; firmware source fingerprint validated"
+    },
+    {
+      "scope": "native-test",
+      "command": "bash test-drive.sh release2",
+      "rc": 0,
+      "log": "release2-native-test.log",
+      "sha256": "7addda988351cf95ab1ce1a6388e09fc0dde2a7c02b7cb489d5d6195a07ecadb",
+      "candidate": "release2",
+      "matching_source": "release2 drive/C inputs equal release3; firmware source fingerprint validated"
+    }
+  ],
+  "skip_boundaries": {
+    "management": "one actual FastAPI environment skip; separately unchanged HTTP adapter 9/9 with existing native dependencies",
+    "gateway": "3 source-suite skips; excluded from passes; Gateway product unchanged, previous target/state transport evidence retained separately"
+  },
+  "runtime_connections": [
+    {
+      "entry": "prepare_instance.make_instance",
+      "hook": "xenova_provisioning.apply_linux",
+      "store": "private root /etc/xenova/agent.env",
+      "consumer": "unchanged AgentSettings.from_env/build_client and Agent unit",
+      "external_fixture": "small rootfs/mount; real parser and native MQTT"
+    },
+    {
+      "entry": "FirstBoot.register",
+      "hook": "FirstBoot.supply / xenova_provisioning.ensure",
+      "store": "UUID plan then private configuration and factory registration",
+      "consumer": "guest_identity + registered record; real ARM A/B bundle",
+      "external_fixture": "board filesystem/mount and Xen"
+    },
+    {
+      "entry": "Platform.start after actual execution binding",
+      "hook": "bootstrap_execution",
+      "store": "existing drive-rejoin UUID/execution/channel receipt lock and own-domain Store",
+      "consumer": "existing Bootstrap codec + actual native Zephyr decoder + unchanged ProductionBootstrap.refresh",
+      "external_fixture": "Xen/Store I/O boundary only"
+    },
+    {
+      "entry": "Manager._finish / FirstBoot complete progress",
+      "hook": "xenova_registration.automatic / launch / supervise / send",
+      "store": "consumed opportunity in original completion, optional result in child",
+      "consumer": "real registration-only HTTP contract fixture; manual CLI same sender",
+      "external_fixture": "Spring receiver/DB, no Spring product modified"
+    },
+    {
+      "entry": "Execution.prepare_launch and Manager provisioning",
+      "hook": "xenova_guest_profile from verified metadata",
+      "store": "loader capture vs next profile vs initial reference",
+      "consumer": "public query and future Worker expectations",
+      "external_fixture": "live domain observation remains separate"
+    },
+    {
+      "entry": "actual ARM build",
+      "hook": "package-xenova-drive-template.py / zephyr.template / FirstBoot / assemble",
+      "store": "immutable new lab template, real selected manifest hash",
+      "consumer": "general catalog and factory A/B selection",
+      "external_fixture": "no full image or physical board"
+    }
+  ],
+  "cost": {
+    "scope": "native local tmp; hash tool real, service/mount external fixtures; no storage timing guarantee",
+    "samples_per_case": 1,
+    "rows": [
+      {
+        "case": "first-supply",
+        "counts": {
+          "required_fsync": 32,
+          "broker_generation_publish": 1,
+          "text_read": 13,
+          "json_parse": 6,
+          "password_hash_batch": 1,
+          "broker_reload": 1
+        },
+        "seconds": 0.34613455900000645,
+        "credential_state": "stored",
+        "authentication": "unobserved"
+      },
+      {
+        "case": "same-vm-supply",
+        "counts": {
+          "text_read": 15,
+          "json_parse": 7,
+          "required_fsync": 1
+        },
+        "seconds": 0.0153832990000069,
+        "credential_state": "stored",
+        "authentication": "unobserved"
+      },
+      {
+        "case": "public-status",
+        "counts": {
+          "text_read": 1,
+          "json_parse": 1
+        },
+        "seconds": 9.545599999682963e-05,
+        "credential_state": "stored",
+        "authentication": "unobserved"
+      }
+    ]
+  },
+  "query_cost_before_after": {
+    "conditions": "same frozen benchmark; metadata sizes 1/10/100; Xen/command fixture; one timing sample not performance guarantee",
+    "queries": [
+      {
+        "metadata_vms": 1,
+        "action": "list",
+        "before": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 9,
+          "registry_reads": 3,
+          "json_parses": 9,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "after": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 9,
+          "registry_reads": 3,
+          "json_parses": 9,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 1,
+        "action": "get",
+        "before": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 7,
+          "registry_reads": 2,
+          "json_parses": 7,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "after": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 7,
+          "registry_reads": 2,
+          "json_parses": 7,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 1,
+        "action": "probe",
+        "before": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 7,
+          "registry_reads": 2,
+          "json_parses": 7,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "after": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 7,
+          "registry_reads": 2,
+          "json_parses": 7,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 1,
+        "action": "execution-context",
+        "before": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 7,
+          "registry_reads": 2,
+          "json_parses": 7,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "after": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 7,
+          "registry_reads": 2,
+          "json_parses": 7,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 1,
+        "action": "templates",
+        "before": {
+          "host_identity_reads": 1,
+          "text_reads": 6,
+          "json_parses": 6,
+          "template_reads": 2
+        },
+        "after": {
+          "host_identity_reads": 1,
+          "text_reads": 6,
+          "json_parses": 6,
+          "template_reads": 2
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 1,
+        "action": "control-operation",
+        "before": {
+          "host_identity_reads": 2,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "after": {
+          "host_identity_reads": 2,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 1,
+        "action": "recovery-operation",
+        "before": {
+          "host_identity_reads": 1,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "after": {
+          "host_identity_reads": 1,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 1,
+        "action": "status",
+        "before": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 9,
+          "registry_reads": 3,
+          "json_parses": 9,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "after": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 9,
+          "registry_reads": 3,
+          "json_parses": 9,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 1,
+        "action": "intents",
+        "before": {
+          "text_reads": 9,
+          "registry_reads": 3,
+          "json_parses": 9,
+          "intent_reads": 2,
+          "journal_reads": 1
+        },
+        "after": {
+          "text_reads": 9,
+          "registry_reads": 3,
+          "json_parses": 9,
+          "intent_reads": 2,
+          "journal_reads": 1
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 10,
+        "action": "list",
+        "before": {
+          "host_identity_reads": 27,
+          "observation_slot_attempts": 1,
+          "text_reads": 36,
+          "registry_reads": 30,
+          "json_parses": 36,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 21,
+          "journal_reads": 1
+        },
+        "after": {
+          "host_identity_reads": 27,
+          "observation_slot_attempts": 1,
+          "text_reads": 36,
+          "registry_reads": 30,
+          "json_parses": 36,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 21,
+          "journal_reads": 1
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 10,
+        "action": "get",
+        "before": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 16,
+          "registry_reads": 11,
+          "json_parses": 16,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "after": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 16,
+          "registry_reads": 11,
+          "json_parses": 16,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 10,
+        "action": "probe",
+        "before": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 16,
+          "registry_reads": 11,
+          "json_parses": 16,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "after": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 16,
+          "registry_reads": 11,
+          "json_parses": 16,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 10,
+        "action": "execution-context",
+        "before": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 16,
+          "registry_reads": 11,
+          "json_parses": 16,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "after": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 16,
+          "registry_reads": 11,
+          "json_parses": 16,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 10,
+        "action": "templates",
+        "before": {
+          "host_identity_reads": 1,
+          "text_reads": 6,
+          "json_parses": 6,
+          "template_reads": 2
+        },
+        "after": {
+          "host_identity_reads": 1,
+          "text_reads": 6,
+          "json_parses": 6,
+          "template_reads": 2
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 10,
+        "action": "control-operation",
+        "before": {
+          "host_identity_reads": 2,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "after": {
+          "host_identity_reads": 2,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 10,
+        "action": "recovery-operation",
+        "before": {
+          "host_identity_reads": 1,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "after": {
+          "host_identity_reads": 1,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 10,
+        "action": "status",
+        "before": {
+          "host_identity_reads": 27,
+          "observation_slot_attempts": 1,
+          "text_reads": 36,
+          "registry_reads": 30,
+          "json_parses": 36,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 21,
+          "journal_reads": 1
+        },
+        "after": {
+          "host_identity_reads": 27,
+          "observation_slot_attempts": 1,
+          "text_reads": 36,
+          "registry_reads": 30,
+          "json_parses": 36,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 21,
+          "journal_reads": 1
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 10,
+        "action": "intents",
+        "before": {
+          "text_reads": 36,
+          "registry_reads": 30,
+          "json_parses": 36,
+          "intent_reads": 2,
+          "journal_reads": 1
+        },
+        "after": {
+          "text_reads": 36,
+          "registry_reads": 30,
+          "json_parses": 36,
+          "intent_reads": 2,
+          "journal_reads": 1
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 100,
+        "action": "list",
+        "before": {
+          "host_identity_reads": 207,
+          "observation_slot_attempts": 1,
+          "text_reads": 306,
+          "registry_reads": 300,
+          "json_parses": 306,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 201,
+          "journal_reads": 1
+        },
+        "after": {
+          "host_identity_reads": 207,
+          "observation_slot_attempts": 1,
+          "text_reads": 306,
+          "registry_reads": 300,
+          "json_parses": 306,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 201,
+          "journal_reads": 1
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 100,
+        "action": "get",
+        "before": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 106,
+          "registry_reads": 101,
+          "json_parses": 106,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "after": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 106,
+          "registry_reads": 101,
+          "json_parses": 106,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 100,
+        "action": "probe",
+        "before": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 106,
+          "registry_reads": 101,
+          "json_parses": 106,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "after": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 106,
+          "registry_reads": 101,
+          "json_parses": 106,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 100,
+        "action": "execution-context",
+        "before": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 106,
+          "registry_reads": 101,
+          "json_parses": 106,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "after": {
+          "host_identity_reads": 9,
+          "observation_slot_attempts": 1,
+          "text_reads": 106,
+          "registry_reads": 101,
+          "json_parses": 106,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "journal_reads": 1,
+          "fsync": 3
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 100,
+        "action": "templates",
+        "before": {
+          "host_identity_reads": 1,
+          "text_reads": 6,
+          "json_parses": 6,
+          "template_reads": 2
+        },
+        "after": {
+          "host_identity_reads": 1,
+          "text_reads": 6,
+          "json_parses": 6,
+          "template_reads": 2
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 100,
+        "action": "control-operation",
+        "before": {
+          "host_identity_reads": 2,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "after": {
+          "host_identity_reads": 2,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 100,
+        "action": "recovery-operation",
+        "before": {
+          "host_identity_reads": 1,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "after": {
+          "host_identity_reads": 1,
+          "text_reads": 2,
+          "journal_reads": 2,
+          "json_parses": 2
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 100,
+        "action": "status",
+        "before": {
+          "host_identity_reads": 207,
+          "observation_slot_attempts": 1,
+          "text_reads": 306,
+          "registry_reads": 300,
+          "json_parses": 306,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 201,
+          "journal_reads": 1
+        },
+        "after": {
+          "host_identity_reads": 207,
+          "observation_slot_attempts": 1,
+          "text_reads": 306,
+          "registry_reads": 300,
+          "json_parses": 306,
+          "intent_reads": 2,
+          "external_commands": 2,
+          "fsync": 201,
+          "journal_reads": 1
+        },
+        "differences": {},
+        "same_success": true
+      },
+      {
+        "metadata_vms": 100,
+        "action": "intents",
+        "before": {
+          "text_reads": 306,
+          "registry_reads": 300,
+          "json_parses": 306,
+          "intent_reads": 2,
+          "journal_reads": 1
+        },
+        "after": {
+          "text_reads": 306,
+          "registry_reads": 300,
+          "json_parses": 306,
+          "intent_reads": 2,
+          "journal_reads": 1
+        },
+        "differences": {},
+        "same_success": true
+      }
+    ],
+    "primitive_counts_equal": true,
+    "all_same_success": true
+  },
+  "packaging": {
+    "command": "bitbake xenova-platform xenova-mqtt-broker",
+    "rc": 0,
+    "tasks": 3990,
+    "warnings": "WSL VHDX advisory and host CONFIG_TASK_IO_ACCOUNTING missing, retained in log",
+    "install_materialization": "bitbake -c install xenova-mqtt-broker: cached RPM had no do_install image; actual install task materialized for byte comparison",
+    "install": {
+      "source_package_bytes_modes_match": true,
+      "files": {
+        "usr/lib/xenova/xenova_telemetry_support.py": {
+          "sha256": "3d6070f11203fff6ab7ab6a6bee0176ca0e42a29b674686314cdd4dca37a12a7",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_guest_profile.py": {
+          "sha256": "6caef703789c865d212cc0ea294026a9ee49da9d4a7375d972077db38fa65939",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_telemetry_evidence.py": {
+          "sha256": "2f7fbad98cba7a8b245507aa59e8c12ec0da61f23f37897f70d11d6c7757c94f",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_zephyr_transition.py": {
+          "sha256": "da2e2084cbd58297501d951059536ba499de52e181e19d2ae1ac2a19b00030d3",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_recovery.py": {
+          "sha256": "490b2698b6bb36ce0dc3025180229a3382b441f77e2115ac71073fe55813942c",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_domain_identity.py": {
+          "sha256": "775c79269516e7c28698d49d181ef3c062d8fd0b6db5bff9538a9ea95c92fbb1",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_provisioning.py": {
+          "sha256": "bf9783f4c92d84c5d7b193093f2b0c97ba20ae52727cdb7b5c588b2b0a5df4bb",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_catalog.py": {
+          "sha256": "f8beb105906d08db89ce3937e7c551256728bbeb311b3be7bb78b15799e3aac4",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_management.py": {
+          "sha256": "40bcfa66fe88e4c807a642a481b4153a98abe169126fa04d07fe13a2953f0e84",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_boot_progress.py": {
+          "sha256": "f059eb9ca993b01de276fa75c84a932b90301a81586373e7ec7873dadd7da41a",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_zephyr.py": {
+          "sha256": "d8dfcc43201ecdee9e3745667116bbb131f4727396755c7db6b46ab12271411d",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_execution.py": {
+          "sha256": "a0656823b1f2c97b6b17d4cf94dcf8f522ca19c1a1440d74ab67ebf9a217417a",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_drive_binding.py": {
+          "sha256": "f8f79e32bcaeaee56180b4c71dde23a476c4acd72124cbbcf32a5c7c0b873b8d",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_preparation.py": {
+          "sha256": "bf6290527242c490a78c73babcdbd14aeede733cb986c62cb20a769a2667c7ca",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_cpu.py": {
+          "sha256": "f63038132c4309535b69095767eaea6ba147bac4b1c813e242c304e653750b58",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_registration.py": {
+          "sha256": "d8783417fe3af37a73ea2e124ede68c7de49ecaef458310488e499f9261adb49",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_resources.py": {
+          "sha256": "3c03ec325e8636f947007a90a6e3ab95e8d6d3833db3cd962b7ccd79098d6ea4",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_creation.py": {
+          "sha256": "c56d87d41a226f0807f566463d1c6eb26ddee45a18962026eefc684c97463c01",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_runtime.py": {
+          "sha256": "eb7c4ee59aad54a31fefb95a8cac1277b4bc4a04ea1a85998e14bc2b224d44b4",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_management_cli.py": {
+          "sha256": "3e3e1758e20472e2d371c6c3bd4dc15a27db72a2354a43ad403473d55767d1a1",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_first_boot.py": {
+          "sha256": "2f6ba7c651fa678980cd027f600c045c51ee3721f70c6ead42859b30bedf94f9",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_vm.py": {
+          "sha256": "9f2ddbcbd7d15d90dc43eba2a3bd083894b7b80cea605cdc632a34a2a2dd7d59",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_boot_status.py": {
+          "sha256": "f7db23600f0ffbb7887b4a18dc5cf59432fa6139825fd25986773b52a8a56f6b",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_zephyr_control.py": {
+          "sha256": "cac01b745c3fd13465c1ebeffa0d19a902807b8d0bf1f9fea79b907cd8bd2ac8",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_wifi.py": {
+          "sha256": "7fa6adb8d5f679d8800766bfdf61526aaeb8e53167404fa764b2120a64fc87dd",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_trace.py": {
+          "sha256": "3ef09edb0193285d3338a0fa3b509d5fd55d7628455c40b4a591a0f65118c5a3",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_guest_process.py": {
+          "sha256": "98c1397a5cb07ce9b545392376e5d6e1e2598171024b08a0e60514e4467aa0b4",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/prepare_instance.py": {
+          "sha256": "4b88828f3a85dcfbd4a661598cb09d01ab856671eac58f529721b8324ffcde69",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/prepare_rootfs.py": {
+          "sha256": "2a671c0d4e59391786cc0a412717d59e87f8b8310c28457874e4f66e59ebc5f6",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/guest_identity.py": {
+          "sha256": "1f7719d1ab54798d284c661d62a31bb3ef1c8e56aa0213cb28bd7555dd6e8b44",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/first_install_contract.py": {
+          "sha256": "38905cafe0cf7cade9ee555cc53f9043daa3d205877c5336343474d4d1e11e1c",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/artifact_io.py": {
+          "sha256": "f381142e4b5865e6aec4f4fe1fda1eca709f162a4fa8681f24fd2ceff9c09408",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/provision_xenova_telemetry.py": {
+          "sha256": "93955ea6983f0d54ac72f49edc57645006d8ea1b21de881eccc8b8d6422d1923",
+          "mode": "0o644"
+        },
+        "usr/lib/xenova/xenova_broker.py": {
+          "sha256": "56dd72570b8b96d8d04b8e652ec69ea0d5ecf9c0797fe89786722492fdd07329",
+          "mode": "0o644"
+        },
+        "usr/sbin/xenova-vm": {
+          "sha256": "e5e136ee6fec721f1b458b82d795925c96665ddc7ee5924f51bda1358eb6e657",
+          "mode": "0o755"
+        },
+        "usr/sbin/xenova-world-install": {
+          "sha256": "b3196cece704c815cac3abff8cd1772dca172de091bbde9172f5589e8eb9629d",
+          "mode": "0o755"
+        }
+      },
+      "rpms": {
+        "xenova-platform": {
+          "sha256": "83cc37046d9de49010ea9453bb63cc13dab1a8bbde7abe0000dce4fc79cd1d65",
+          "bytes": 221284
+        },
+        "xenova-mqtt-broker": {
+          "sha256": "ca62b7cd615c162eda3b480b23c149a849ee8fcc578e0f9184bfddb19bd62af5",
+          "bytes": 9933
+        },
+        "xenova-mqtt-broker-provider": {
+          "sha256": "3bb7d31f1297c2c2259ce568292f3cc115247da1bdcd904baead48c94620f491",
+          "bytes": 18115
+        }
+      },
+      "active_notification_config_installed": false
+    },
+    "arm": {
+      "python": "3.14.7",
+      "modules": {
+        "xenova_vm": "/home/ssafy/xenova-provisioning-20261102/target-release3/usr/lib/xenova/xenova_vm.py",
+        "xenova_provisioning": "/home/ssafy/xenova-provisioning-20261102/target-release3/usr/lib/xenova/xenova_provisioning.py",
+        "xenova_guest_profile": "/home/ssafy/xenova-provisioning-20261102/target-release3/usr/lib/xenova/xenova_guest_profile.py",
+        "xenova_registration": "/home/ssafy/xenova-provisioning-20261102/target-release3/usr/lib/xenova/xenova_registration.py",
+        "xenova_management_cli": "/home/ssafy/xenova-provisioning-20261102/target-release3/usr/lib/xenova/xenova_management_cli.py"
+      },
+      "ssl": "OpenSSL 3.5.8 25 Aug 2026",
+      "read_only_external_calls": 0,
+      "http_sender": {
+        "state": "confirmed",
+        "confirmed": true,
+        "http_status": 201
+      },
+      "create_or_account_effects": 0,
+      "command": [
+        "/home/ssafy/perseus-stop-ssh-review-20261018-223833/sshd-binary-root-v2/qemu-aarch64-static",
+        "-L",
+        "/home/ssafy/xenova-provisioning-20261102/target-release3",
+        "/home/ssafy/xenova-provisioning-20261102/target-release3/usr/bin/python3",
+        "-B",
+        "/mnt/c/Users/SSAFY/Documents/Codex/2026-11-02/vm-provisioning/target-smoke.py",
+        "/home/ssafy/xenova-provisioning-20261102/target-release3",
+        "/home/ssafy/xenova-provisioning-20261102/target-release3/fixture-http/config.json"
+      ],
+      "source_paths_injected": false,
+      "http_requests": 1,
+      "qemu": true,
+      "board": false
+    },
+    "wrapper_entries": {
+      "installed_entries": [
+        {
+          "command": [
+            "chroot",
+            "/home/ssafy/xenova-provisioning-20261102/target-release3",
+            "/qemu-wrapper-test",
+            "/usr/bin/python3",
+            "-B",
+            "/usr/lib/xenova/xenova_vm.py",
+            "--help"
+          ],
+          "mode": "installed-shell-forwarded-python-entry",
+          "rc": 0,
+          "stdout_bytes": 3491
+        },
+        {
+          "command": [
+            "chroot",
+            "/home/ssafy/xenova-provisioning-20261102/target-release3",
+            "/qemu-wrapper-test",
+            "/usr/bin/python3",
+            "-B",
+            "/usr/sbin/xenova-world-install",
+            "--help"
+          ],
+          "mode": "installed-python-script",
+          "rc": 0,
+          "stdout_bytes": 256
+        }
+      ],
+      "source_paths_injected": false,
+      "qemu_chroot": true,
+      "operational_command_executed": false
+    },
+    "firmware": {
+      "current_source_matches_actual_arm_build": true,
+      "source_sha256": "b71ae9bf87699314fa327ea83cd38fdb2ff9c186014034edfad3d3d84763c53d",
+      "source_files": 308,
+      "receipt_sha256": "6ecdc52a0743e01b78942df135ebb996a540a8c0aefae9a741fee9418236b6b7",
+      "template": "/home/ssafy/xenova-provisioning-20261102/drive-template-release1",
+      "profile": "warm-lattice-lab",
+      "board_tested": false,
+      "firmware.json_sha256": "893b3e6ff2298d87dc41f1456bfbcb1ed9b30c21b97d929a6403a2e23bb5d87f",
+      "manifest_sha256": "893b3e6ff2298d87dc41f1456bfbcb1ed9b30c21b97d929a6403a2e23bb5d87f",
+      "firmware_sha256": "11f4a75c69ad310528e3278b112d018a023503dc866c11beb754079e58e29e87",
+      "selected": {
+        "guest_kind": "zephyr",
+        "id": "xenova-zephyr-drive-lattice-lab-1.0.0",
+        "version": "1.0.0-lab.1",
+        "directory": "zephyr/xenova-zephyr-drive-lattice-lab-1.0.0/1.0.0-lab.1",
+        "manifest_sha256": "893b3e6ff2298d87dc41f1456bfbcb1ed9b30c21b97d929a6403a2e23bb5d87f",
+        "template_id": "zephyr-drive-lattice-lab-arm64"
+      }
+    },
+    "full_image_built": false
+  },
+  "review": {
+    "head": "8a23b8a700ebf7093e35e1c07dbd8f1864d16260",
+    "branch": "feat/platform/gateway-history-driving-app",
+    "candidate": "release3",
+    "python_ast_checked": [
+      "platform/apps/drive/tests/test_world.py",
+      "platform/apps/drive/tools/generate_primitives.py",
+      "platform/deploy/mosquitto/scripts/xenova_broker.py",
+      "platform/first-install/assemble.py",
+      "platform/guests/common/guest_identity.py",
+      "platform/guests/common/prepare_instance.py",
+      "platform/guests/common/template_recipe.py",
+      "platform/guests/zephyr/template.py",
+      "platform/scripts/build-xenova-drive-app.py",
+      "platform/scripts/package-xenova-drive-template.py",
+      "platform/scripts/package-xenova-firmware.py",
+      "platform/scripts/prepare-xenova-guests.py",
+      "platform/scripts/provision-xenova-telemetry.py",
+      "platform/tests/benchmark_provisioning_cost.py",
+      "platform/tests/first_install_fixture.py",
+      "platform/tests/test_xenova_broker_accounts.py",
+      "platform/tests/test_xenova_default_deployment.py",
+      "platform/tests/test_xenova_provisioning.py",
+      "platform/tests/test_xenova_registration.py",
+      "platform/tests/test_xenova_signal_profiles.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_catalog.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_drive_binding.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_execution.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_first_boot.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_guest_profile.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management_cli.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_provisioning.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_registration.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_vm.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_zephyr.py",
+      "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_zephyr_transition.py"
+    ],
+    "new_document_links": [
+      {
+        "from": "docs/contracts/vm-api-contract-v1.md",
+        "target": "vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/contracts/vm-provisioning-v1.md",
+        "target": "../verification/recovery-scenario-closure-20261030.md#vm-provisioning-integration"
+      },
+      {
+        "from": "docs/platform/build-guide.md",
+        "target": "../../platform/guests/default-templates.lock.json"
+      },
+      {
+        "from": "docs/platform/cli-manager-spec.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/platform/cli-manager-spec.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/platform/cli-manager-spec.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/platform/deployment-readiness.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/platform/deployment-readiness.md",
+        "target": "../verification/recovery-scenario-closure-20261030.md#vm-provisioning-integration"
+      },
+      {
+        "from": "docs/platform/drive-pipeline-architecture.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/platform/drive-pipeline-architecture.md",
+        "target": "../verification/recovery-scenario-closure-20261030.md#vm-provisioning-integration"
+      },
+      {
+        "from": "docs/platform/management-boot-boundaries.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/platform/management-integration-request.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/requests/20261029-request-http-spring-ui.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/requests/20261029-request-jetson.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/requests/20261029-request-linux-agent.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/requests/20261029-request-recovery-worker.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/requests/README.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/requests/README.md",
+        "target": "../verification/recovery-scenario-closure-20261030.md#vm-provisioning-integration"
+      },
+      {
+        "from": "docs/verification/platform-management-baseline.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "docs/verification/platform-management-baseline.md",
+        "target": "recovery-scenario-closure-20261030.md#vm-provisioning-integration"
+      },
+      {
+        "from": "docs/verification/recovery-scenario-closure-20261030.md",
+        "target": "evidence/vm-provisioning-integration-20261102.json"
+      },
+      {
+        "from": "docs/verification/recovery-scenario-closure-20261030.md",
+        "target": "../contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "platform/deploy/mosquitto/README.md",
+        "target": "../../../docs/contracts/vm-provisioning-v1.md"
+      },
+      {
+        "from": "platform/guests/common/README.md",
+        "target": "../../../docs/contracts/vm-provisioning-v1.md"
+      }
+    ],
+    "teammate_products_unchanged": true,
+    "gateway_product_unchanged": true,
+    "commit_push": false,
+    "operational_changes": false
+  },
+  "failures_preserved": [
+    {
+      "log": "release2-A.log",
+      "finding": "invalid local configuration could become delivery-unknown when a 0.1s child timed out",
+      "fix": "supervisor records established configuration error without launching HTTP child; actual call and no-fork assertion pass in release3"
+    },
+    {
+      "log": "release2-gateway.log",
+      "finding": "2 unchanged short history-window tests failed during concurrent package/regression execution",
+      "followup": "unchanged complete Gateway suite rerun after other jobs: 252 passed / 3 environment skips; no Gateway source or timeout changed; not a device/storage latency guarantee"
+    },
+    {
+      "scope": "earlier iteration logs in task root",
+      "finding": "plaintext/hash interruption, private Zephyr early publication/resume guard, budget allowlist/deadline, LF primitive provenance, nonexistent python3-ssl and broker direct python3-core QA",
+      "fix": "criteria and exact repair recorded in central report; original failed logs retained, not summed as passing tests"
+    }
+  ],
+  "limits": [
+    "registration-only Spring route/auth/DB agreement and real receiver implementation pending",
+    "existing full HTTP remains compatible; optional upper-layer inputs are separate work",
+    "Jetson broker credentials/ACL/mapper product and actual two-realm drive consumption pending",
+    "next Linux template/seed builder connected; immutable 1.0.2 unchanged, no new full Linux rootfs",
+    "ARM Python/QEMU and regular RPM are not installed-board/whole-image/actual guest/vehicle acceptance",
+    "lab vehicle/world profiles are test inputs, not approved operating constants",
+    "mandatory broker/journal durability preserved; arbitrary kernel/storage stalls have no hard deadline guarantee"
+  ],
+  "secrets": "only source, public test logs and public build artifacts delivered; no runtime credentials/tokens/Authority/VM private roots archived; public fixture values are marked fixture",
+  "operational_actions": {
+    "board": false,
+    "services": false,
+    "real_vm": false,
+    "broker_db": false,
+    "deployment": false,
+    "stage7": false,
+    "commit": false,
+    "push": false
+  },
+  "artifacts_directory": "C:/Users/SSAFY/Documents/Codex/2026-11-02/vm-provisioning/delivery-release3"
+}

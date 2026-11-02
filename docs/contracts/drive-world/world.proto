@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: Apache-2.0
+// Provider contract 1.0. Required presence is deliberate; zero is not omission.
+syntax = "proto2";
+package xenova.drive;
+
+message Pose { required float x = 1; required float y = 2; required float yaw = 3; }
+message Point { required float x = 1; required float y = 2; }
+message PathPoint {
+  required Pose pose = 1;
+  required float steering_rad = 2;
+  required float velocity_mps = 3;
+}
+message WorldSnapshot {
+  required uint32 major = 1;
+  required uint32 minor = 2;
+  required uint32 required_features = 3;
+  required string vehicle = 4;
+  required string mapper_boot = 5;
+  required string mapper_instance = 6;
+  required string map_epoch = 7;
+  required string frame_epoch = 8;
+  required string odom_epoch = 9;
+  required uint64 sequence = 10;
+  required string configuration = 11;
+  required string calibration = 12;
+  required string primitive = 13;
+  required string reference_id = 14;
+  required uint64 reference_revision = 15;
+  required Pose origin = 16;
+  required float resolution_m = 17;
+  required uint32 width = 18;
+  required uint32 height = 19;
+  required uint64 reference_odom_seq = 20;
+  required Pose reference_vehicle_pose = 21;
+  required uint64 observed_us = 22;
+  required uint64 completed_us = 23;
+  required uint64 published_us = 24;
+  required uint64 observation_seq = 25;
+  required string clock_epoch = 26;
+  // row-major: occupancy 0..100 or 255 unknown. Flags bit0 valid, bit1
+  // statically retained, bit2 expired. age_le32 is original age in milliseconds.
+  required bytes occupancy = 27;
+  required bytes cell_flags = 28;
+  required bytes age_le32 = 29;
+  repeated Point reference = 30;
+  repeated Point left_boundary = 31;
+  repeated Point right_boundary = 32;
+  required bool complete = 33;
+  required bool truncated = 34;
+  required uint32 inflation_policy = 35; // 0: raw occupied cells; Pi adds footprint/margin.
+}
+message VehicleSample {
+  required uint32 major = 1;
+  required string vehicle = 2;
+  required string host_boot = 3;
+  required string device_session = 4;
+  required string odom_epoch = 5;
+  required uint64 sequence = 6;
+  required uint64 source_sample = 7;
+  required uint64 source_us = 8;
+  required uint64 pi_sample_us = 9;
+  required uint32 clock_error_us = 10;
+  required sint64 left_ticks = 11;
+  required sint64 right_ticks = 12;
+  required Pose odom_pose = 13;
+  required float velocity_mps = 14;
+  optional float measured_steering_rad = 15;
+  optional float estimated_steering_rad = 16;
+  required float position_error_m = 17;
+  required float heading_error_rad = 18;
+  required uint32 quality = 19; // bit0 encoder valid, bit1 clock valid; other bits unsupported.
+  required string calibration = 20;
+  optional float steering_error_rad = 21;
+  optional string gateway_instance = 22;
+  optional string pi_session = 23;
+}
+message DriveState {
+  required uint32 major = 1;
+  required string source_vm = 2;
+  required string source_execution = 3;
+  required string source_app_instance = 4;
+  required uint32 source_generation = 5;
+  required uint64 state_revision = 6;
+  required string frame_epoch = 7;
+  required string odom_epoch = 8;
+  required string configuration = 9;
+  required string primitive = 10;
+  required string reference_id = 11;
+  required uint64 reference_revision = 12;
+  required uint64 path_revision = 13;
+  required uint64 maneuver_revision = 14;
+  required sint32 direction = 15; // -1/right, 0/reference, +1/left
+  required uint32 maneuver_phase = 16; // 0/reference, 1/bypass, 2/rejoin
+  required Pose merge_goal = 17;
+  required uint64 vehicle_sequence = 18;
+  required uint64 calculation_sequence = 19;
+  required uint32 tracker_index = 20;
+  required bool complete = 21;
+  repeated PathPoint path = 22;
+  required string message_id = 23;
+  required string calibration = 24;
+  required string map_epoch = 25;
+  required uint64 observation_seq = 26;
+}
+// Separate Pi state connection. These bounded management/state messages are
+// not part of the small command/control JSON socket or the Jetson map client.
+message ClockProbe {
+  required string vm = 1;
+  required string execution = 2;
+  required string app_instance = 3;
+  required uint64 sequence = 4;
+  required uint64 guest_send_us = 5;
+}
+message WorldTrust {
+  required string vehicle = 1;
+  required string mapper_boot = 2;
+  required string mapper_instance = 3;
+  required string map_epoch = 4;
+  required string frame_epoch = 5;
+  required string odom_epoch = 6;
+  required string configuration = 7;
+  required string calibration = 8;
+  required string primitive = 9;
+  required string clock_epoch = 10;
+  required sint64 lower_offset_us = 11; // mapper -> Pi clock interval
+  required sint64 upper_offset_us = 12;
+  required uint64 expires_pi_us = 13;
+  required uint32 max_error_us = 14;
+}
+message ClockReply {
+  required ClockProbe probe = 1;
+  required string host_boot = 2;
+  required string gateway_instance = 3;
+  required uint64 pi_receive_us = 4;
+  required uint64 pi_send_us = 5;
+  optional WorldTrust trust = 6;
+  required VehicleSample vehicle = 7;
+}
+message AcceptedState {
+  required string host_boot = 1;
+  required string gateway_instance = 2;
+  required DriveState state = 3;
+}
+message AppliedState {
+  required string vm = 1;
+  required string execution = 2;
+  required string app_instance = 3;
+  required string host_boot = 4;
+  required string gateway_instance = 5;
+  optional string copy_message_id = 6;
+  required uint64 state_revision = 7;
+  required string frame_epoch = 8;
+  required string odom_epoch = 9;
+  required string configuration = 10;
+  required string calibration = 11;
+  required string primitive = 12;
+  required string reference_id = 13;
+  required uint64 reference_revision = 14;
+  required uint64 path_revision = 15;
+  optional uint64 vehicle_sequence = 16;
+  optional uint64 calculation_sequence = 17;
+  required bool rebuilt = 18;
+  required bool applied = 19;
+  required uint64 maneuver_revision = 20;
+  optional string reason = 21;
+  required uint64 application_sequence = 22;
+}
+message DriveLink {
+  required uint32 major = 1;
+  oneof payload {
+    ClockProbe probe = 2;
+    ClockReply clock = 3;
+    DriveState snapshot = 4;
+    AcceptedState accepted = 5;
+    AppliedState applied = 6;
+  }
+}

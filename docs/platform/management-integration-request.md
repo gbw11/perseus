@@ -1,11 +1,49 @@
+# HTTP·Spring·VM 관리 연동의 상세 원문
+
+D02·D08의 현재 실행 지시는 [HTTP·Spring·화면 요청서](../requests/20261029-request-http-spring-ui.md)에 모았다.
+등록-only sender/수동 CLI와 제안 HTTP 수신 계약은 [VM 공급 계약](../contracts/vm-provisioning-v1.md)에 있다.
+기존 POST create의 역호출이 아니다. Spring 수신 합의·제품 구현·DB/운영 수락은 담당 작업으로 남는다.
+현재 구현 위치·하위 제공물·정상/실패 수락·선행조건·담당 회신은 그 본문을 따른다.
+이 문서의 기존 ID·예시·anchor는 배경과 당시 제안을 찾을 수 있도록 아래에 보존했다.
+
+기존 full create는 그대로 지원한다. 자원 생략은 선택 확장이며 같은 원 확정값의 생략↔명시는 양방향으로 허용한다.
+일반 호출자의 journal 버전 선택/raw 파싱은 필요 없다. 기존 key stop/조회는 이미 제공됐고 Spring·화면과 신규 하위 기능 소비는 담당 수락 전이다.
+내부 reader/writer·helper의 교체는 [배포 원본](deployment-readiness.md#cohort), 실제 설치본 인수는 [7번 입력표](deployment-readiness.md#stage7)를 따른다.
+
+현재 CLI·조회 보완은 [질문별 선택표](cli-manager-spec.md#usage)와
+[intents](cli-manager-spec.md#cmd-intents)를 제공한다. status는 출력 형식과 무관하게 list,
+옛 종합 진단은 diagnose --details다. 원 key 조회는 control-operation의 정식 CLI로 가능하다.
+상위 fork/budget 소비와 남은 제품 수락은 위 현재 요청서 D02·D08 본문을 따른다.
+아래 이력의 전역 직렬화·과거 CLI 설명을 현 기능 제한으로 재적용하지 않는다.
+
+## 변경 이력
+
+<details>
+<summary>6번 정리 전 D02·D08 상세 원문과 당시 제안</summary>
+
 # HTTP·Spring·VM 관리 화면 연동 요청
 
 수신: dom0-manager FastAPI·Driver, Spring VM 관리, VM 관리 화면 담당자.
-**상태: D02·D08 하위 Manager 구현·로컬 회귀·부분 패키징 마감 / HTTP·Spring·화면 연동 미구현·종단 수락 전.**
+**상태: D02·D08 하위 Manager 마감 / FastAPI key stop·원 key 조회 제공 / 3~5번 소비 및 Spring·화면 후속 이행·종단 수락 대기.**
 현재 요청은 제품 담당자가 구현해야 할 연동이다. 하위에서 제공하는 기능과 HTTP/화면의
 제안 계약을 구분하며, 정상 VM 응답의 의미를 pending 접수 의미로 바꾸지 않는다.
+아래 최초 요청의 상세 표는 당시 이력이다. 현재 소스의 key stop/조회 제공 범위와 남은
+연결은 [기본 관리 기준선](../verification/platform-management-baseline.md#followups) 및
+[최신 담당 요청](../requests/20261029-request-http-spring-ui.md)을 먼저 대조한다.
 
 ## 현재 할 일
+
+2026-11-01 입력 보완: 하위 create는 template의 `default_resources`를 공통 원천으로
+자원 생략을 지원한다. HTTP/Driver/Spring은 아직 완전 명시 계약이다.
+[최신 입력·오류 인계](../requests/20261029-request-http-spring-ui.md#defaults-errors)를
+현재 작업으로 함께 적용한다. **기존 완전 명시 HTTP/Driver/Spring 사용은 그대로 지원**하고
+상위의 생략 전송은 별도 선택적 확장이다. 누락을 null/화면 숫자로 바꾸지 않고 최초 선택과
+확정값을 구분한다. 같은 원 key의 두 자원은 생략↔원 확정값 명시를 양방향 허용한다.
+최초 body 저장은 사용할 수 있지만 필드 존재 형태까지 고정할 의무는 없다. 다른 필드는
+기존 계약대로 비교하고 최신 기본값/현재 구성으로 원 값을 다시 고르지 않는다.
+공개 Manager 응답 소비자에게 원장 버전 분기/변환을 요구하지 않는다. 하위 내부는 지원
+1.0/1.1/1.2 혼재를 읽으며 미지원 구형 writer 혼합 설치는 별도 배포 문제다.
+아래 완전 명시 HTTP 예시는 현재도 유효하다. 원 결과·hash를 다시 쓰지 않는다.
 
 | 담당·읽을 절 | 구현할 일 | 완료를 확인할 근거 |
 |---|---|---|
@@ -38,7 +76,7 @@ D03 수습·차량 입력/resume·전체 Telemetry 화면과 SQLite 도입은 �
 
 | 현재 위치·동작 | 요청할 최소 변경 |
 |---|---|
-| `dom0_manager/drivers/platform.py:SerializedManager.call/load_manager` | 긴 작업의 기존 직렬화를 유지한다. stop 수락과 `control-operation` 조회만 `inner.fork()`의 독립 요청 객체로 호출하는 경로를 연결한다. 공유 inner를 동시 호출하거나 모든 action의 mutex를 없애지 않는다 |
+| `dom0_manager/drivers/platform.py:SerializedManager.call/load_manager` | 구형/혼합 설치본과 미확인 action은 기존 직렬화를 유지한다. 3번 단일 하위 후보가 확인된 경우에 한해 Linux create와 get/list/asset operation·다른 VM stop을 요청별 `inner.fork()`로 연결한다. 공유 inner를 동시 호출하거나 모든 action의 mutex를 없애지 않는다 |
 | `service.py:VmService._vm_lock/create/stop` | 같은 VM의 긴 start/reboot 때문에 stop이 수락 전에 막히지 않게 한다. platform stop의 admission 경로 앞에 VM mutex·선행 get을 두지 않는다. mock/xen 및 긴 실행의 기존 보호는 유지한다 |
 | `drivers/platform.py:raise_for_envelope`, `errors.py`, `models.py`, `api/errors.py` | `operation_id/replayed`, 원 error.code/retryable, 허용된 details를 구조적으로 보존한다. 문자열 detail 파싱은 하지 않는다. private 경로·raw journal·credential은 반환하지 않는다 |
 | `api/vms.py`, 요청 진입/서비스 예산 | 인증된 호출의 남은 기간을 받되 로컬 monotonic으로 요청 deadline을 만든다. threadpool·VM/resource 대기·직렬화·하위 제출·반환을 같은 예산으로 처리한다. 획득/실행 직후 만료 재검사, 만료 대기자의 뒤늦은 제출 금지 |
@@ -48,9 +86,18 @@ D03 수습·차량 입력/resume·전체 Telemetry 화면과 SQLite 도입은 �
 `Manager.fork()`는 Python 요청 객체 분리이며 새 프로세스·실행기·daemon이 아니다.
 fork만으로 상위 VM mutex가 없어지지는 않는다. CPU·신원·의도·물리 실행 guard와
 execution flock은 하위에 남긴다. stop은 이미 다른 작업이 flock을 보유했다면 내구 수락 후
-pending을 반환하고, 기록 조회는 admission 잠금만 사용한다.
+pending을 반환한다. 3번 후보의 control-operation은 admission, asset operation은 공통
+잠금의 경로였다. [4번 후보](cli-manager-spec.md#read-concurrency)는 두 원장 조회를 모두
+긴 잠금/긴 admission 열람에서 분리하고 원자 기록·실행 소유권을 제한된 회차로 대조한다. 새 하위의
+Linux private 준비는 이 공통 실행 잠금을 계속 보유하지 않으므로 다른 VM의 실제 stop도
+진행할 수 있다. 긴 복구 등 다른 경로의 직렬화까지 제거됐다는 의미는 아니다.
 현재 `ManagerLike` protocol에는 fork 선언이 없으므로 platform 전용 어댑터의 지원 확인도
 연결한다. 미지원 설치본에서 공유 inner를 잠금 없이 호출하는 fallback으로 우회하지 않는다.
+
+4번의 action별 요청 객체·실행량·threadpool/선행 get·polling 연결은 최신
+[담당자 요청서](../requests/20261029-request-http-spring-ui.md#반복-조회와-제어-진행성-연결)에
+누적한다. D02·D08의 원 key·원 기한·pending/uncertain 및 후속 이행 책임은 그대로다.
+기존 소비자에 필요한 실제 변경 위치·공동 수락도 그 절을 사용하며 이 문서에 별도 정책을 복제하지 않는다.
 
 ### 하위에서 실제 제공하는 호출
 
@@ -68,15 +115,19 @@ def read_original(manager, vm_id, original_key, remaining_ms):
         request_id="lookup-original", budget_ms=remaining_ms)
 
 def read_current(manager, vm_id, remaining_ms):
-    # get/list는 현행 긴 호출 직렬화 연결을 유지해야 하며 stop 전 선행 호출이 아니다.
-    one = manager.call("get", {"vm_id": vm_id, "timeout_ms": min(remaining_ms, 15000)},
+    # 3번 단일 하위 후보 확인 후 요청별 fork를 사용한다. stop 전 필수 선행 조회는 아니다.
+    one = manager.fork().call("get", {"vm_id": vm_id, "timeout_ms": min(remaining_ms, 15000)},
                        budget_ms=remaining_ms)
     return one
 
 def read_all(manager, remaining_ms):
-    return manager.call("list", {"lifecycle": "REGISTERED",
+    return manager.fork().call("list", {"lifecycle": "REGISTERED",
                                 "timeout_ms": min(remaining_ms, 15000)},
                         budget_ms=remaining_ms)
+
+def read_creation(manager, vm_id, remaining_ms):
+    return manager.fork().call("operation", {"idempotency_key": "create:" + vm_id},
+                               budget_ms=remaining_ms)
 ```
 
 인자는 앞선 대기·호출 비용과 반환 여유를 뺀 **양수 정수 잔여 ms**다. 같은 예산을 두 함수를
@@ -84,6 +135,15 @@ def read_all(manager, remaining_ms):
 budget_ms는 1..105000ms지만 원 control의 물리 deadline은 기존 90초와 최초 잔여 예산으로
 고정한다. 후속 조회의 새 예산은 원 deadline을 재발급하지 않는다. 최초 사용자 control의 key/spec를
 Spring 관리 흐름이 제출 전 보존하고, 허용되는 동일 요청 이행 때 같은 값으로 전달해야 한다.
+
+위 fork의 새 지원 범위는 [현재 HTTP 담당 요청의 3번 연결](../requests/20261029-request-http-spring-ui.md#linux-준비-중-조회제어의-동시-연결)에
+조건·실제 소비 위치·제품 수락을 정리했다. 이 조건부 개정은 이전 D02·D08의 하위 완료나
+상위 미연결 상태를 덮어쓰지 않는다. asset operation의 RUNNING은 VM 실행 상태가 아니며,
+create의 `ok=true`만으로 `_paths`/start를 호출하지 않는다. 5번은 조회 예산과 별개인
+[원 create 기한·명시 수습](cli-manager-spec.md#cmd-operation-reconcile)을 제공한다.
+실제 제공 필드·운영 정책/모듈 버전·권한·상위 후속 책임은
+[담당자 요청](../requests/20261029-request-http-spring-ui.md#원-create-기한과-실패-자산-수습-연결)을 따른다.
+알려진 실제 source/installed hash의 일치를 먼저 확인하며 구버전에 새 호출을 보내지 않는다.
 
 조회는 `data.operation`에 원 record를 반환한다. `data.deadline_observation`은 현재 host의
 단조 시각과 원 host 일치/원 실행 기한 만료 여부를 반환한다. host가 다르거나 기한 근거가
@@ -234,3 +294,5 @@ phase/result/error와 재조회 사유만 기존 DTO 연결 요청에 포함하�
 
 기존 `#linux-health` 링크는 호환을 위해 남긴다. Linux·Agent 담당자는
 [Linux·Agent 요청서의 현재 할 일과 읽는 순서](../requests/2026-10-27-linux-health-agent.md)에서 시작한다.
+
+</details>

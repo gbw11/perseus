@@ -487,6 +487,7 @@ def view_to_domain(view: dict[str, Any]) -> Domain | None:
             memory_mib=int(configuration["memory_mib"]),
             domid=int(view["domid"]),
             name=view.get("name"),
+            observation_id=view.get("execution_id"),
         )
     except (KeyError, ValueError, TypeError) as exc:
         raise DriverError("platform view is missing vm_id/vcpus/memory_mib", detail=str(view)[:200]) from exc

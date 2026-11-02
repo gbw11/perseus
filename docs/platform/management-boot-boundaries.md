@@ -136,6 +136,8 @@ unit 실행의 성공을 현재 것으로 사용하지 않는다. `/run/xenova/b
 `agetty --reload`를 실행한다. `/etc/issue`나 기존 로그인 설정은 건드리지 않는다.
 
 
+배포 파일·의존성·설정 공급·내부 reader/writer 교체와 Gateway의 비활성 unit은 [배포 준비](deployment-readiness.md)를 따른다.
+
 ## 플랫폼 서비스와 준비 의존성
 
 | 서비스·자원 | 역할과 시작 조건 |
@@ -215,6 +217,11 @@ factory seed·초기화/grow 정책은 이 통합으로 바꾸지 않는다.
 
 ## 최초 등록과 매 부팅 준비
 
+일반 생성과 factory의 자격/등록-only 통지는 [공급 계약](../contracts/vm-provisioning-v1.md)을 따른다.
+factory의 UUID 계획 뒤 대상 lease를 유지하고 해시/guest I/O 동안 공통 관리 잠금을 반환한다.
+local 등록 완료 뒤 선택 통지 프로세스를 시작하며 HTTP 응답을 부팅/다른 VM 제어의 선행조건으로 두지 않는다.
+완료 boot/replay는 자동 통지 기회를 보충하지 않는다. broker는 첫 등록 뒤 기존 bridge/mount 조건으로 기동한다.
+
 최초 설치는 seed·카탈로그·identity plan으로 UUID/MAC와 자산을 확정한다. 중단 후에는
 같은 plan을 재개한다. 서비스 재시도나 최신 코드 설치를 이유로 신원을 다시 발급하거나
 기존 템플릿·자산·사용자 의도를 덮어쓰지 않는다.
@@ -268,7 +275,7 @@ Zephyr 협조 reboot의 새 create는 새 실행 scope를 사용한다. 구형 �
 
 동시에 stop되는 unit은 시작 ordering의 역순으로 종료된다.
 
-1. host-admission의 host-quiesce가 새 시작·복구를 차단한다.
+1. host-admission의 host-quiesce가 새 시작·복구·Linux 준비 채택을 차단하고, 공통 실행 잠금 밖에서 활성 준비를 drain한다.
 2. 정상 활성 vms unit의 ExecStop이 shutdown-all로 기존 VM별 종료 정책을 적용한다.
 3. 독립 vm-shutdown guard가 guest 정리 경계를 유지한다.
 4. 실행 scope·backend/toolstack·저장소의 후속 정리가 진행된다.
@@ -276,6 +283,17 @@ Zephyr 협조 reboot의 새 create는 새 실행 scope를 사용한다. 구형 �
 scope의 `Before=xenova-vm-shutdown.service`는 종료 때 guard가 먼저 실행되게 한다.
 guard의 backend/toolstack/mount 의존성은 guest 정리 동안 필요한 기반을 유지한다.
 개별 scope 정리는 stop job의 역순 대기를 피하도록 신호와 최종 상태 확인을 사용한다.
+
+Linux 준비의 슬롯과 자식에게 전달된 원 실행 FD가 남아 있으면 저장소 해제를 진행하지 않는다.
+수락 전 lifecycle 검사도 `asset-<VM UUID>.lock` 대상 보호에 포함한다. `ensure_quiet/drain`은
+retire/restore/purge 실행자와 상속된 helper FD가 끝나기 전 저장소 해제를 거절한다.
+gate가 닫혔다 재열려도 검사 당시 barrier 사본과 달라진 실행은 늦게 게시하지 않는다.
+대상 lease → 공통 잠금 → 짧은 admission 순서와 실제 검증 범위는
+[lifecycle 소유 경계](management-boundaries.md#lifecycle의-대상-소유와-공통-잠금)를 따른다.
+슬롯이 풀려도 미완료 workspace의 자원 기록이 정리 미확정을 나타내면 거절한다.
+`xenova-vm poweroff/reboot-board/shutdown-all`의 준비 drain과 VM 정리는 같은 기존 90초
+예산을 사용한다. 준비 종료를 기다리며 공통 잠금을 계속 잡아 두지 않는다.
+이 guard는 미게시 자산을 자동 정리하거나 실패 operation을 종결하는 기능이 아니다.
 
 | 상황 | 종료 계약 |
 |---|---|
@@ -299,7 +317,7 @@ systemd 종료는 계속될 수 있어 남은 backend가 정리될 수 있다. �
 | DHCP | 15초 | service 준비와 호출자의 관리 deadline도 적용 |
 | autostart | 150초 | batch 전체 140초 |
 | vms/vm-shutdown 종료 | 각각 110초 | guest 정리 전체 90초 |
-| admission 종료 | 10초 | 새 시작·복구 차단 |
+| admission 종료 | 10초 | gate 차단과 Linux 준비 drain. 내부 9초로 반환 여유 1초를 남기며 unit 상한을 늘리지 않음 |
 
 unit 상한은 모든 선행 unit을 포함한 전원 부팅 상한이 아니다. fsync·커널 I/O를
 엄밀하게 선점하는 보장도 아니다. 개별 호출의 상위 대기/반환 예산은
