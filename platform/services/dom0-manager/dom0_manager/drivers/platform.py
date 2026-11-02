@@ -74,8 +74,8 @@ class ManagerLike(Protocol):
 # 요청 예산 전달
 # ---------------------------------------------------------------------------
 
-_BUDGET_ACTIONS = frozenset({"start", "stop", "reboot", "destroy", "get", "list", "control-operation"})  # 하위 budget_ms 허용 action
-_TIMEOUT_ACTIONS = frozenset({"get", "list", "control-operation"})  # spec timeout_ms(1..15000) 를 받는 조회
+_BUDGET_ACTIONS = frozenset({"start", "stop", "reboot", "destroy", "get", "list", "registrations", "control-operation"})
+_TIMEOUT_ACTIONS = frozenset({"get", "list", "registrations", "control-operation"})
 _READ_TIMEOUT_MS = 15_000  # 하위 조회의 기본·상한
 
 
@@ -522,6 +522,14 @@ class PlatformDriver(Driver):
 
     # ---- 조회 ----
 
+    def registrations(self, vm_id: UUID | None = None):
+        """공개 metadata action을 요청별 객체로 호출한다. live list/get을 앞세우지 않는다."""
+        spec = {"timeout_ms": 5000}
+        if vm_id is not None:
+            spec["vm_id"] = str(vm_id)
+        data = raise_for_envelope(call_with_budget(self._request_manager(), "registrations", spec), context="registrations")
+        return data["registration" if vm_id is not None else "registrations"]
+
     def _views(self, lifecycle: str = "REGISTERED") -> list[dict[str, Any]]:
         data = raise_for_envelope(call_with_budget(self.manager, "list", {"lifecycle": lifecycle}), context="list")
         return list(data.get("vms") or [])
@@ -582,10 +590,10 @@ class PlatformDriver(Driver):
             return  # 멱등: 등록 자체가 없어도 목표 상태(도메인 부재)는 달성
         raise_for_envelope(envelope, context=f"stop {vm_id}")
 
-    # ---- 정지 요청 추적 (S15P31E110-305) ----
+    # ---- 요청별 등록 조회·정지 추적 (S15P31E110-305) ----
 
     def _request_manager(self) -> ManagerLike:
-        """stop 수락·원 작업 조회용 요청별 Manager. fork 가 없으면 공유(직렬화된) Manager 를 그대로 쓴다."""
+        """등록 조회·stop 수락·원 작업 조회용 객체. 구형 fork 부재는 공유 직렬화를 유지한다."""
         fork = getattr(self.manager, "fork", None)
         forked = fork() if callable(fork) else None
         return forked if forked is not None else self.manager

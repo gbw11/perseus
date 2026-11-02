@@ -49,6 +49,11 @@ class Settings:
     # Separate bounded execution-log database; empty means the log collector is not deployed.
     runtime_log_db: str = ""
     runtime_log_ingest_config: str = ""
+    # Spring 전용 송신 설정. 누락은 notify에만 영향을 주며 GET/일반 관리는 유지한다.
+    registration_url: str = ""
+    registration_token: str = ""
+    registration_timeout_s: float | str = 5.0
+    registration_slot_dir: str = "/run/xenova/registration-sender"
 
     def __post_init__(self) -> None:
         if self.console_enabled and not self.service_token:
@@ -107,4 +112,8 @@ class Settings:
             log_level=read("XENOVA_LOG_LEVEL", cls.log_level, str).upper(),
             runtime_log_db=read("XENOVA_RUNTIME_LOG_DB", cls.runtime_log_db, str),
             runtime_log_ingest_config=read("XENOVA_RUNTIME_LOG_INGEST_CONFIG", cls.runtime_log_ingest_config, str),
+            registration_url=read("XENOVA_REGISTRATION_URL", cls.registration_url, str),
+            registration_token=read("VM_REGISTRATION_SERVICE_TOKEN", cls.registration_token, str),
+            registration_timeout_s=read("XENOVA_REGISTRATION_TIMEOUT", cls.registration_timeout_s, str),
+            registration_slot_dir=read("XENOVA_REGISTRATION_SLOT_DIR", cls.registration_slot_dir, str),
         )
