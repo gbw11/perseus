@@ -1,0 +1,40 @@
+{
+  "trial": "xenova-257-runtime-873930a6",
+  "duration_target_s": 60,
+  "markers_requested": true,
+  "product_native_worker": true,
+  "setup": {
+    "prior": {
+      "xenova-display-kiosk.service": true,
+      "xenova-display-graphics.service": true
+    }
+  },
+  "prepared": {
+    "native_dependency_check": true,
+    "started": true
+  },
+  "unauthenticated_http": 401,
+  "error": "TimeoutError: ",
+  "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\SSAFY\\AppData\\Roaming\\Python\\Python311\\site-packages\\paramiko\\channel.py\", line 697, in recv\n    out = self.in_buffer.read(nbytes, self.timeout)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\SSAFY\\AppData\\Roaming\\Python\\Python311\\site-packages\\paramiko\\buffered_pipe.py\", line 154, in read\n    raise PipeTimeout()\nparamiko.buffered_pipe.PipeTimeout\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"C:\\Users\\SSAFY\\Desktop\\\uc790\uc728\ud504\ub85c\uc81d\ud2b8\\outputs\\display-257\\runtime_probe_20261102.py\", line 185, in <module>\n    if not json.loads(marker_reader.readline()).get('ready'):raise RuntimeError('marker did not start')\n                      ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\SSAFY\\AppData\\Roaming\\Python\\Python311\\site-packages\\paramiko\\file.py\", line 275, in readline\n    new_data = self._read(n)\n               ^^^^^^^^^^^^^\n  File \"C:\\Users\\SSAFY\\AppData\\Roaming\\Python\\Python311\\site-packages\\paramiko\\channel.py\", line 1359, in _read\n    return self.channel.recv(size)\n           ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\SSAFY\\AppData\\Roaming\\Python\\Python311\\site-packages\\paramiko\\channel.py\", line 699, in recv\n    raise socket.timeout()\nTimeoutError\n",
+  "cleanup": {
+    "services": {
+      "xenova-display-kiosk.service": "active",
+      "xenova-display-graphics.service": "active",
+      "xenova-display-feed.service": "active",
+      "xenova-dom0-manager.service": "active",
+      "mosquitto.service": "active",
+      "tailscaled.service": "active"
+    },
+    "ssh_policy_restored": true,
+    "graphics_source_restored": true,
+    "graphics_source_unchanged": true,
+    "domains_unchanged": true,
+    "temporary_files_removed": true,
+    "sender_journal": "Started [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-873930a6/stream-host.py.\nINFO:     Started server process [20010]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://127.0.0.1:8083 (Press CTRL+C to quit)\nStopping [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-873930a6/stream-host.py...\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [20010]\nxenova-257-runtime-873930a6.service: Deactivated successfully.\nStopped [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-873930a6/stream-host.py.\nxenova-257-runtime-873930a6.service: Consumed 19.684s CPU time over 23.479s wall clock time, 58.4M memory peak.\n"
+  },
+  "streams": {},
+  "latency": {},
+  "sample_window_s": 0,
+  "cpu_mean_cores": {},
+  "cpu_scope": "service cgroups; process birth/exit intervals undercount startup/exit CPU; Chromium/Xorg excluded from pipeline"
+}

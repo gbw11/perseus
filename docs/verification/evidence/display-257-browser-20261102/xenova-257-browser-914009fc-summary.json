@@ -1,0 +1,475 @@
+{
+  "trial": "xenova-257-browser-914009fc",
+  "error": null,
+  "browser_version": "156.0.8078.74",
+  "measurement_scope": "PC browser request -> real X11 pixels -> JPEG -> product viewer canvas draw -> two requestAnimationFrame callbacks; includes outbound control; not physical LCD scanout",
+  "soak_seconds_browser_clock": 604.379,
+  "soak_seconds_controller": 600.3091323999688,
+  "streams": {
+    "monitor-1": {
+      "frames": 2935,
+      "first": 306096.8000000119,
+      "last": 910396.5,
+      "maxGap": 788.1999999880791,
+      "gapsOver1s": 0,
+      "fps": 4.8562243228173045
+    },
+    "monitor-2": {
+      "frames": 2931,
+      "first": 306184,
+      "last": 910361.5,
+      "maxGap": 827.3000000119209,
+      "gapsOver1s": 0,
+      "fps": 4.849605959174624
+    }
+  },
+  "browser_latency": {
+    "monitor-1": {
+      "requested": 30,
+      "matched": 30,
+      "p50_ms": 234.20000004768372,
+      "p95_ms": 413.39999997615814,
+      "max_ms": 444
+    },
+    "monitor-2": {
+      "requested": 30,
+      "matched": 30,
+      "p50_ms": 238.60000002384186,
+      "p95_ms": 508.60000002384186,
+      "max_ms": 521
+    }
+  },
+  "proxy": {
+    "monitor-1": {
+      "connections": 8,
+      "bytes": 202305191,
+      "errors": [
+        {
+          "at": 421148.3906314,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421154.4824011,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421160.5654714,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421166.6728652,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421172.7904237,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421178.8729722,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421184.9742695,
+          "type": "TimeoutError"
+        }
+      ]
+    },
+    "monitor-2": {
+      "connections": 8,
+      "bytes": 275023162,
+      "errors": [
+        {
+          "at": 421248.431363,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421254.489564,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421260.5747406,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421266.7037921,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421272.8386496,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421279.0150478,
+          "type": "TimeoutError"
+        },
+        {
+          "at": 421285.15721,
+          "type": "TimeoutError"
+        }
+      ]
+    }
+  },
+  "additional_stream_connections_in_soak": {
+    "monitor-1": 0,
+    "monitor-2": 0
+  },
+  "multipart_body_mbps": 4.417860501440321,
+  "cpu_mean_cores": {
+    "sender": 0.21689731731115566,
+    "native_worker": 0.5171730838376816,
+    "other_pipeline": 0.0,
+    "browser": 0.40390707775642565,
+    "xorg": 0.177208375371572,
+    "other_system": 0.20926290512790097
+  },
+  "cpu_sample_seconds": 599.9152115529996,
+  "jpeg_capture_mbps": 4.430886632394573,
+  "jpeg_rate_note": "encoded source bytes, not wire bytes; interval spans adjacent API snapshots",
+  "cleanup": {
+    "services": {
+      "xenova-display-kiosk.service": "active",
+      "xenova-display-graphics.service": "active",
+      "xenova-display-feed.service": "active",
+      "xenova-dom0-manager.service": "active",
+      "mosquitto.service": "active",
+      "tailscaled.service": "active"
+    },
+    "ssh_policy_restored": true,
+    "graphics_source_restored": true,
+    "graphics_source_unchanged": true,
+    "domains_unchanged": true,
+    "temporary_files_removed": true,
+    "sender_journal": "Started [systemd-run] /usr/bin/python3 /run/xenova-257-browser-914009fc/stream-host.py.\nINFO:     Started server process [34438]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://127.0.0.1:8083 (Press CTRL+C to quit)\nStopping [systemd-run] /usr/bin/python3 /run/xenova-257-browser-914009fc/stream-host.py...\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [34438]\nxenova-257-browser-914009fc.service: Deactivated successfully.\nStopped [systemd-run] /usr/bin/python3 /run/xenova-257-browser-914009fc/stream-host.py.\nxenova-257-browser-914009fc.service: Consumed 11min 5.259s CPU time over 15min 39.015s wall clock time, 59.9M memory peak.\n"
+  },
+  "hotplug_freshness": [
+    {
+      "phase": "monitor-1",
+      "rows": [
+        {
+          "id": 31,
+          "sent": 139690.80000001192,
+          "matches": {
+            "monitor-1": {
+              "drawn": 139882.80000001192,
+              "rgb": [
+                200,
+                200,
+                88,
+                255
+              ],
+              "afterTwoRAF": 141096.90000003576,
+              "milliseconds": 1406.1000000238419
+            },
+            "monitor-2": {
+              "drawn": 139980.20000004768,
+              "rgb": [
+                200,
+                200,
+                88,
+                255
+              ],
+              "afterTwoRAF": 141097,
+              "milliseconds": 1406.199999988079
+            }
+          }
+        },
+        {
+          "id": 32,
+          "sent": 141363.30000001192,
+          "matches": {
+            "monitor-1": {
+              "drawn": 141759.40000003576,
+              "rgb": [
+                32,
+                32,
+                144,
+                255
+              ],
+              "afterTwoRAF": 143113.60000002384,
+              "milliseconds": 1750.300000011921
+            },
+            "monitor-2": {
+              "drawn": 141700,
+              "rgb": [
+                32,
+                32,
+                144,
+                255
+              ],
+              "afterTwoRAF": 143113.5,
+              "milliseconds": 1750.199999988079
+            }
+          }
+        },
+        {
+          "id": 33,
+          "sent": 143371.10000002384,
+          "matches": {
+            "monitor-1": {
+              "drawn": 143474.30000001192,
+              "rgb": [
+                89,
+                32,
+                145,
+                255
+              ],
+              "afterTwoRAF": 145130.30000001192,
+              "milliseconds": 1759.199999988079
+            },
+            "monitor-2": {
+              "drawn": 143628,
+              "rgb": [
+                89,
+                32,
+                145,
+                255
+              ],
+              "afterTwoRAF": 145130.30000001192,
+              "milliseconds": 1759.199999988079
+            }
+          }
+        },
+        {
+          "id": 34,
+          "sent": 145386.70000004768,
+          "matches": {
+            "monitor-1": {
+              "drawn": 145634.40000003576,
+              "rgb": [
+                144,
+                32,
+                144,
+                255
+              ],
+              "afterTwoRAF": 147130.10000002384,
+              "milliseconds": 1743.3999999761581
+            },
+            "monitor-2": {
+              "drawn": 145609.70000004768,
+              "rgb": [
+                144,
+                32,
+                144,
+                255
+              ],
+              "afterTwoRAF": 147130.10000002384,
+              "milliseconds": 1743.3999999761581
+            }
+          }
+        },
+        {
+          "id": 35,
+          "sent": 147396.40000003576,
+          "matches": {
+            "monitor-1": {
+              "drawn": 147733.80000001192,
+              "rgb": [
+                200,
+                32,
+                145,
+                255
+              ],
+              "afterTwoRAF": 149138.70000004768,
+              "milliseconds": 1742.300000011921
+            },
+            "monitor-2": {
+              "drawn": 147727.90000003576,
+              "rgb": [
+                200,
+                32,
+                145,
+                255
+              ],
+              "afterTwoRAF": 149138.70000004768,
+              "milliseconds": 1742.300000011921
+            }
+          }
+        }
+      ]
+    },
+    {
+      "phase": "monitor-2",
+      "rows": [
+        {
+          "id": 36,
+          "sent": 252766.5,
+          "matches": {
+            "monitor-1": {
+              "drawn": 253130.60000002384,
+              "rgb": [
+                32,
+                89,
+                144,
+                255
+              ],
+              "afterTwoRAF": 255030.30000001192,
+              "milliseconds": 2263.800000011921
+            },
+            "monitor-2": {
+              "drawn": 253133,
+              "rgb": [
+                32,
+                89,
+                144,
+                255
+              ],
+              "afterTwoRAF": 255030.30000001192,
+              "milliseconds": 2263.800000011921
+            }
+          }
+        },
+        {
+          "id": 37,
+          "sent": 255303.20000004768,
+          "matches": {
+            "monitor-1": {
+              "drawn": 255598.60000002384,
+              "rgb": [
+                87,
+                88,
+                144,
+                255
+              ],
+              "afterTwoRAF": 257038.70000004768,
+              "milliseconds": 1735.5
+            },
+            "monitor-2": {
+              "drawn": 255594.70000004768,
+              "rgb": [
+                87,
+                88,
+                144,
+                255
+              ],
+              "afterTwoRAF": 257038.70000004768,
+              "milliseconds": 1735.5
+            }
+          }
+        },
+        {
+          "id": 38,
+          "sent": 257296.30000001192,
+          "matches": {
+            "monitor-1": {
+              "drawn": 257535.30000001192,
+              "rgb": [
+                143,
+                88,
+                145,
+                255
+              ],
+              "afterTwoRAF": 259048.20000004768,
+              "milliseconds": 1751.9000000357628
+            },
+            "monitor-2": {
+              "drawn": 257533.30000001192,
+              "rgb": [
+                143,
+                88,
+                145,
+                255
+              ],
+              "afterTwoRAF": 259048.20000004768,
+              "milliseconds": 1751.9000000357628
+            }
+          }
+        },
+        {
+          "id": 39,
+          "sent": 259322,
+          "matches": {
+            "monitor-1": {
+              "drawn": 259787.70000004768,
+              "rgb": [
+                200,
+                88,
+                144,
+                255
+              ],
+              "afterTwoRAF": 261054.80000001192,
+              "milliseconds": 1732.800000011921
+            },
+            "monitor-2": {
+              "drawn": 259828.80000001192,
+              "rgb": [
+                200,
+                88,
+                144,
+                255
+              ],
+              "afterTwoRAF": 261054.80000001192,
+              "milliseconds": 1732.800000011921
+            }
+          }
+        },
+        {
+          "id": 40,
+          "sent": 261315.30000001192,
+          "matches": {
+            "monitor-1": {
+              "drawn": 261766.10000002384,
+              "rgb": [
+                32,
+                144,
+                145,
+                255
+              ],
+              "afterTwoRAF": 263055.8000000119,
+              "milliseconds": 1740.5
+            },
+            "monitor-2": {
+              "drawn": 261871.90000003576,
+              "rgb": [
+                32,
+                144,
+                145,
+                255
+              ],
+              "afterTwoRAF": 263055.90000003576,
+              "milliseconds": 1740.6000000238419
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "available_min_mib": 2023.90625,
+  "pipeline_rss_first_last_mib": [
+    94.32421875,
+    94.32421875
+  ],
+  "hotplug_phases": {
+    "monitor-1": {
+      "samples": 46,
+      "disconnected_samples": 12,
+      "peer": "monitor-2",
+      "peer_unavailable_samples": 0,
+      "peer_new_gaps_over_1s": 0,
+      "max_runtime_age_s": 0.5688356090004163,
+      "target_unavailable_samples": 12,
+      "peer_draws_during_observed_disconnect": 109,
+      "final_states": {
+        "monitor-1": "live",
+        "monitor-2": "live"
+      }
+    },
+    "waiting": {
+      "samples": 3,
+      "disconnected_samples": 0
+    },
+    "monitor-2": {
+      "samples": 59,
+      "disconnected_samples": 12,
+      "peer": "monitor-1",
+      "peer_unavailable_samples": 0,
+      "peer_new_gaps_over_1s": 0,
+      "max_runtime_age_s": 0.6255381540004237,
+      "target_unavailable_samples": 12,
+      "peer_draws_during_observed_disconnect": 96,
+      "final_states": {
+        "monitor-1": "live",
+        "monitor-2": "live"
+      }
+    }
+  }
+}
