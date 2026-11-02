@@ -74,17 +74,26 @@ public class AgentDataService {
     // Redelivered MQTT messages (QoS 1) keep their message_id, so a known sample_id is skipped.
     @Transactional
     public boolean recordMetrics(MetricSample sample, List<ProcessInfo> processes) {
-        if (metricSampleRepository.existsById(sample.getSampleId())) {
+        if (!recordMetrics(sample)) {
             return false;
         }
-        metricSampleRepository.save(sample);
-        eventPublisher.publishEvent(new MetricSampleRecorded(sample));
         ProcessSnapshot snapshot = processSnapshotRepository.findById(sample.getVmId())
                 .orElseGet(() -> new ProcessSnapshot(sample.getVmId()));
         if (snapshot.getObservedAt() == null || !sample.getObservedAt().isBefore(snapshot.getObservedAt())) {
             snapshot.update(sample.getBootId(), processes, sample.getObservedAt(), sample.getReceivedAt());
             processSnapshotRepository.save(snapshot);
         }
+        return true;
+    }
+
+    // Samples without a process list (Zephyr telemetry) leave the process snapshot untouched.
+    @Transactional
+    public boolean recordMetrics(MetricSample sample) {
+        if (metricSampleRepository.existsById(sample.getSampleId())) {
+            return false;
+        }
+        metricSampleRepository.save(sample);
+        eventPublisher.publishEvent(new MetricSampleRecorded(sample));
         return true;
     }
 
