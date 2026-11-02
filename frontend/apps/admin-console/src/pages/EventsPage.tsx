@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { useEvents, useVms } from '../api/queries';
 import type { EventSeverity } from '../api/types';
 import { CATEGORY_LABEL, categoryOf, clock, describe, type EventCategory } from '../domain/events';
-import { plain, ROLE_ORDER, ROLES, roleOf, vmOf, type AppId } from '../domain/roles';
+import { plain, roleOf, sortVms } from '../domain/roles';
 import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
 
@@ -18,10 +18,9 @@ export function EventsPage() {
   const { drive } = useDrive();
   const vms = useVms();
   const [category, setCategory] = useState<EventCategory | null>(null);
-  const [target, setTarget] = useState<AppId | null>(null);
+  const [target, setTarget] = useState<string | null>(null);
   const [severity, setSeverity] = useState<EventSeverity | null>(null);
-  const targetVm = target ? vmOf(target, vms.data?.items, drive) : undefined;
-  const events = useEvents({ vm_id: targetVm?.vm_id, severity: severity ?? undefined, limit: 100 });
+  const events = useEvents({ vm_id: target ?? undefined, severity: severity ?? undefined, limit: 100 });
 
   const items = useMemo(
     () => (events.data?.items ?? []).filter((e) => !category || categoryOf(e) === category),
@@ -29,7 +28,7 @@ export function EventsPage() {
   );
   const vmName = (vmId: string | null) => {
     const vm = vms.data?.items.find((v) => v.vm_id === vmId);
-    return vm ? (roleOf(vm, drive)?.title ?? vm.name) : (vmId ?? '시스템');
+    return vm ? vm.name : (vmId ?? '시스템');
   };
   const lastHandoff = (events.data?.items ?? []).find(
     (e) => e.type === 'drive.mode.changed' && e.payload.handoff_ms != null,
@@ -69,7 +68,9 @@ export function EventsPage() {
         <div className={styles.chips}>
           <span className={styles.eyebrow}>대상</span>
           {chip(null, target, () => setTarget(null), '전체 VM')}
-          {ROLE_ORDER.map((app) => chip(app, target, setTarget, ROLES[app].title, ROLES[app].color))}
+          {sortVms(vms.data?.items ?? []).map((vm) =>
+            chip(vm.vm_id, target, setTarget, vm.name, roleOf(vm, drive)?.color),
+          )}
         </div>
         <div className={styles.chips}>
           <span className={styles.eyebrow}>심각도</span>
@@ -114,9 +115,7 @@ export function EventsPage() {
                 <span className={`${styles.sev} ${styles[`sev${event.severity}`]}`}>{event.severity}</span>
               </span>
               <span className={styles.chip}>{CATEGORY_LABEL[categoryOf(event)]}</span>
-              <span style={{ color: role?.color }}>
-                {role?.short ?? (event.vm_id ? vmName(event.vm_id) : '게이트웨이')}
-              </span>
+              <span style={{ color: role?.color }}>{event.vm_id ? vmName(event.vm_id) : '게이트웨이'}</span>
               <span>
                 <b>{title}</b>
                 {detail && <div className={styles.dim}>{detail}</div>}

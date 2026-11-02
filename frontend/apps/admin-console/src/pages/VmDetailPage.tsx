@@ -325,11 +325,11 @@ export function VmDetailPage() {
       <section className={styles.vmDetailHero}>
         <div>
           <div className={styles.eyebrow}>
-            <Link to="/dashboard/overview">VM Dashboard</Link> / {role?.vmLabel ?? vm.data?.name ?? vmId}
+            <Link to="/dashboard/overview">VM Dashboard</Link> / {vm.data?.name ?? vmId}
           </div>
-          <h1>{role?.vmLabel ?? vm.data?.name ?? 'VM Detail'}</h1>
+          <h1>{vm.data?.name ?? 'VM Detail'}</h1>
           <p>
-            {role?.title ?? 'Virtual Machine'} · {vm.data ? osLabel(vm.data) : 'Loading'}
+            {role?.title ?? '역할 미지정'} · {vm.data ? osLabel(vm.data) : 'Loading'}
           </p>
         </div>
         <div className={styles.vmDetailBadges}>
@@ -441,7 +441,7 @@ export function VmDetailPage() {
           <Card title="Recent lifecycle & recovery events">
             <div className={styles.detailEvents}>
               {(events.data?.items ?? []).map((event) => {
-                const summary = describe(event, () => role?.vmLabel ?? vm.data.name);
+                const summary = describe(event, () => vm.data.name);
                 return (
                   <div key={event.event_id}>
                     <span className={styles.mono}>{clock(event.occurred_at)}</span>
