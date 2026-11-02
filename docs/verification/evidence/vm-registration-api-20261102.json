@@ -423,5 +423,53 @@
     "arm": "fixed ARM/QEMU installed imports + metadata + OpenAPI; mount/Xen fixture; no ARM HTTP child/board claim",
     "operational_changes": false,
     "commit_push": false
+  },
+  "mr_integration": {
+    "implementation_commits": [
+      "0a65791",
+      "004abef",
+      "9cf161a",
+      "d814bc2"
+    ],
+    "target": "1659e3f0a3b78f46bbe3e89b5041fc1addeb0ed1",
+    "conflict": "platform/services/dom0-manager/dom0_manager/drivers/platform.py",
+    "integration": "Preserve target read_fork/budget and Worker HTTP settings isolation; replace removed registration-notify with registrations.",
+    "artifacts": [
+      {
+        "file": "mr-integration.xml",
+        "sha256": "ceb8d2c22c7bfb57e8f23f294254d58cd524d2a26bb8e328fab8794b9ee82fbf",
+        "passed": 662,
+        "failed": 2,
+        "skipped": 1,
+        "seconds": 406.031,
+        "context": "Windows /mnt/c source"
+      },
+      {
+        "file": "mr-sender-recheck.xml",
+        "sha256": "e5c5071886ed8f90a63d61ce0e5203ef1b19af4c0d912cff69e86f48653b50a4",
+        "passed": 8,
+        "failed": 2,
+        "skipped": 0,
+        "seconds": 3.398,
+        "context": "same Windows source sender reproduction"
+      },
+      {
+        "file": "mr-integration-native.xml",
+        "sha256": "d0c90e2ccd84c27f615e5c9fff4ecd944e64031223a467924f0b96d0e9de03ac",
+        "passed": 664,
+        "failed": 0,
+        "skipped": 1,
+        "seconds": 83.131,
+        "context": "WSL native snapshot, unchanged fixture/product timeout"
+      },
+      {
+        "file": "mr-integration-source-sha256.json",
+        "sha256": "baab60542dc8404503584ad6fe64aa42914bbbaed8a1b863206d0149289ff503",
+        "api_source_and_test_byte_matches": 100,
+        "lower_python_lf_matches": 146
+      }
+    ],
+    "packaging_scope": "Existing RPM/ARM evidence is the pre-merge implementation candidate through d814bc2. Post-merge native regression does not establish rebuilt target packages.",
+    "spring_scope": "Reviewed source remains 800d584; fetched backend ca9a2a3 was not independently tested."
   }
 }

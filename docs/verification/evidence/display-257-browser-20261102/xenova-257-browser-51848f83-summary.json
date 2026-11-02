@@ -1,0 +1,630 @@
+{
+  "trial": "xenova-257-browser-51848f83",
+  "error": null,
+  "browser_version": "156.0.8078.74",
+  "configured_fps": 5,
+  "measurement_scope": "PC browser request -> real X11 pixels -> JPEG -> product viewer canvas draw -> two requestAnimationFrame callbacks; includes outbound control; not physical LCD scanout",
+  "soak_seconds_browser_clock": 7.896,
+  "soak_seconds_controller": 5.1012898000190035,
+  "streams": {
+    "monitor-1": {
+      "frames": 38,
+      "first": 2220,
+      "last": 9897.299999952316,
+      "maxGap": 453.10000002384186,
+      "gapsOver1s": 0,
+      "fps": 4.812563323201621
+    },
+    "monitor-2": {
+      "frames": 38,
+      "first": 2329.399999976158,
+      "last": 9893.099999964237,
+      "maxGap": 410.5999999642372,
+      "gapsOver1s": 0,
+      "fps": 4.812563323201621
+    }
+  },
+  "browser_latency": {
+    "monitor-1": {
+      "requested": 0,
+      "matched": 0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null
+    },
+    "monitor-2": {
+      "requested": 0,
+      "matched": 0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null
+    }
+  },
+  "proxy": {
+    "monitor-1": {
+      "connections": 1,
+      "bytes": 2211784,
+      "errors": []
+    },
+    "monitor-2": {
+      "connections": 1,
+      "bytes": 3084716,
+      "errors": []
+    }
+  },
+  "browser_latency_phases": {
+    "browser_latency": {
+      "monitor-1": {
+        "requested": 0,
+        "matched": 0,
+        "p95_ms": null,
+        "max_ms": null
+      },
+      "monitor-2": {
+        "requested": 0,
+        "matched": 0,
+        "p95_ms": null,
+        "max_ms": null
+      }
+    },
+    "browser_latency_post_soak": {
+      "monitor-1": {
+        "requested": 0,
+        "matched": 0,
+        "p95_ms": null,
+        "max_ms": null
+      },
+      "monitor-2": {
+        "requested": 0,
+        "matched": 0,
+        "p95_ms": null,
+        "max_ms": null
+      }
+    }
+  },
+  "browser_latency_same_trial_pooled": {
+    "monitor-1": {
+      "matched": 0,
+      "requested": 0,
+      "p95_ms": null,
+      "max_ms": null
+    },
+    "monitor-2": {
+      "matched": 0,
+      "requested": 0,
+      "p95_ms": null,
+      "max_ms": null
+    }
+  },
+  "additional_stream_connections_in_soak": {
+    "monitor-1": 0,
+    "monitor-2": 0
+  },
+  "additional_proxy_errors_in_soak": {
+    "monitor-1": 0,
+    "monitor-2": 0
+  },
+  "multipart_body_mbps": 4.378070921985815,
+  "cpu_mean_cores": {
+    "sender": 0.14531601673098168,
+    "native_worker": 0.44785919910532057,
+    "other_pipeline": 0.0,
+    "browser": 0.3525700078063162,
+    "xorg": 0.15008047629593188,
+    "other_system": 0.18581392303305855
+  },
+  "cpu_sample_seconds": 4.197747872000036,
+  "jpeg_capture_mbps": 4.371578520770011,
+  "jpeg_rate_note": "encoded source bytes, not wire bytes; interval spans adjacent API snapshots",
+  "cleanup": {
+    "services": {
+      "xenova-display-kiosk.service": "active",
+      "xenova-display-graphics.service": "active",
+      "xenova-display-feed.service": "active",
+      "xenova-dom0-manager.service": "active",
+      "mosquitto.service": "active",
+      "tailscaled.service": "active"
+    },
+    "ssh_policy_restored": true,
+    "graphics_source_restored": true,
+    "graphics_source_unchanged": true,
+    "domains_unchanged": true,
+    "temporary_files_removed": true,
+    "sender_journal": "Started [systemd-run] /usr/bin/python3 /run/xenova-257-browser-51848f83/stream-host.py.\nINFO:     Started server process [99659]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://127.0.0.1:8083 (Press CTRL+C to quit)\nStopping [systemd-run] /usr/bin/python3 /run/xenova-257-browser-51848f83/stream-host.py...\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [99659]\nxenova-257-browser-51848f83.service: Deactivated successfully.\nStopped [systemd-run] /usr/bin/python3 /run/xenova-257-browser-51848f83/stream-host.py.\nxenova-257-browser-51848f83.service: Consumed 2min 39.280s CPU time over 4min 15.522s wall clock time, 59.7M memory peak.\n"
+  },
+  "hotplug_freshness": [
+    {
+      "phase": "monitor-1",
+      "rows": [
+        {
+          "id": 31,
+          "sent": 109954.19999998808,
+          "ack_received": 109996.79999995232,
+          "board_draw_request_s": 18872.065969482,
+          "board_draw_done_s": 18872.074432157,
+          "matches": {
+            "monitor-1": {
+              "drawn": 110382.5,
+              "rgb": [
+                200,
+                200,
+                88,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 110388.69999998808,
+              "milliseconds": 434.5,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            },
+            "monitor-2": {
+              "drawn": 110183.39999997616,
+              "rgb": [
+                200,
+                200,
+                88,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 110188.79999995232,
+              "milliseconds": 234.69999998807907,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            }
+          }
+        },
+        {
+          "id": 32,
+          "sent": 110772.29999995232,
+          "ack_received": 110802.59999996424,
+          "board_draw_request_s": 18872.881019139,
+          "board_draw_done_s": 18872.882136792,
+          "matches": {
+            "monitor-1": {
+              "drawn": 111067.59999996424,
+              "rgb": [
+                32,
+                32,
+                144,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 111072.19999998808,
+              "milliseconds": 299.9000000357628,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            },
+            "monitor-2": {
+              "drawn": 110882.39999997616,
+              "rgb": [
+                32,
+                32,
+                144,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 110888.79999995232,
+              "milliseconds": 116.5,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            }
+          }
+        },
+        {
+          "id": 33,
+          "sent": 111470.79999995232,
+          "ack_received": 111496.19999998808,
+          "board_draw_request_s": 18873.573046246,
+          "board_draw_done_s": 18873.574163992,
+          "matches": {
+            "monitor-1": {
+              "drawn": 111629,
+              "rgb": [
+                89,
+                32,
+                145,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 111640,
+              "milliseconds": 169.20000004768372,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            },
+            "monitor-2": {
+              "drawn": 111926,
+              "rgb": [
+                89,
+                32,
+                145,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 111938.29999995232,
+              "milliseconds": 467.5,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            }
+          }
+        },
+        {
+          "id": 34,
+          "sent": 112307.09999996424,
+          "ack_received": 112327.29999995232,
+          "board_draw_request_s": 18874.403996384,
+          "board_draw_done_s": 18874.405220813,
+          "matches": {
+            "monitor-1": {
+              "drawn": 112411.5,
+              "rgb": [
+                144,
+                32,
+                144,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 112415.09999996424,
+              "milliseconds": 108,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            },
+            "monitor-2": {
+              "drawn": 112467.69999998808,
+              "rgb": [
+                144,
+                32,
+                144,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 112471.59999996424,
+              "milliseconds": 164.5,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            }
+          }
+        },
+        {
+          "id": 35,
+          "sent": 112894.79999995232,
+          "ack_received": 112928.5,
+          "board_draw_request_s": 18874.999810838,
+          "board_draw_done_s": 18875.000949898,
+          "matches": {
+            "monitor-1": {
+              "drawn": 113142.19999998808,
+              "rgb": [
+                200,
+                32,
+                145,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 113147.29999995232,
+              "milliseconds": 252.5,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            },
+            "monitor-2": {
+              "drawn": 113159.89999997616,
+              "rgb": [
+                200,
+                32,
+                145,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 113163.69999998808,
+              "milliseconds": 268.9000000357628,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "phase": "monitor-2",
+      "rows": [
+        {
+          "id": 36,
+          "sent": 213069.19999998808,
+          "ack_received": 213101.09999996424,
+          "board_draw_request_s": 18975.169236025,
+          "board_draw_done_s": 18975.170768322,
+          "matches": {
+            "monitor-1": {
+              "drawn": 213469.5,
+              "rgb": [
+                32,
+                89,
+                144,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 213480.19999998808,
+              "milliseconds": 411,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            },
+            "monitor-2": {
+              "drawn": 213468.29999995232,
+              "rgb": [
+                32,
+                89,
+                144,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 213471.19999998808,
+              "milliseconds": 402,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            }
+          }
+        },
+        {
+          "id": 37,
+          "sent": 213858.89999997616,
+          "ack_received": 213882.5,
+          "board_draw_request_s": 18975.958418051,
+          "board_draw_done_s": 18975.960795339,
+          "matches": {
+            "monitor-1": {
+              "drawn": 214121,
+              "rgb": [
+                87,
+                88,
+                144,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 214129.89999997616,
+              "milliseconds": 271,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            },
+            "monitor-2": {
+              "drawn": 214084.89999997616,
+              "rgb": [
+                87,
+                88,
+                144,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 214088.69999998808,
+              "milliseconds": 229.80000001192093,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            }
+          }
+        },
+        {
+          "id": 38,
+          "sent": 214520.79999995232,
+          "ack_received": 214582.79999995232,
+          "board_draw_request_s": 18976.649503145,
+          "board_draw_done_s": 18976.653716262,
+          "matches": {
+            "monitor-1": {
+              "drawn": 214810.69999998808,
+              "rgb": [
+                143,
+                88,
+                145,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 214820.59999996424,
+              "milliseconds": 299.80000001192093,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            },
+            "monitor-2": {
+              "drawn": 214779.5,
+              "rgb": [
+                143,
+                88,
+                145,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 214787.59999996424,
+              "milliseconds": 266.80000001192093,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            }
+          }
+        },
+        {
+          "id": 39,
+          "sent": 215167.5,
+          "ack_received": 215187.69999998808,
+          "board_draw_request_s": 18977.265407056,
+          "board_draw_done_s": 18977.266171084,
+          "matches": {
+            "monitor-1": {
+              "drawn": 215360.5,
+              "rgb": [
+                200,
+                88,
+                144,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 215371,
+              "milliseconds": 203.5,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            },
+            "monitor-2": {
+              "drawn": 215331.09999996424,
+              "rgb": [
+                200,
+                88,
+                144,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 215338.79999995232,
+              "milliseconds": 171.29999995231628,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            }
+          }
+        },
+        {
+          "id": 40,
+          "sent": 215747.5,
+          "ack_received": 215765.09999996424,
+          "board_draw_request_s": 18977.845104872,
+          "board_draw_done_s": 18977.845943473,
+          "matches": {
+            "monitor-1": {
+              "drawn": 215915.09999996424,
+              "rgb": [
+                32,
+                144,
+                145,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 215921,
+              "milliseconds": 173.5,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            },
+            "monitor-2": {
+              "drawn": 215854.09999996424,
+              "rgb": [
+                32,
+                144,
+                145,
+                255
+              ],
+              "visibilityAtDraw": "visible",
+              "focusedAtDraw": true,
+              "afterTwoRAF": 215862.39999997616,
+              "milliseconds": 114.89999997615814,
+              "visibilityAfterRAF": "visible",
+              "focusedAfterRAF": true
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "available_min_mib": 2066.9296875,
+  "pipeline_rss_first_last_mib": [
+    93.8828125,
+    94.1328125
+  ],
+  "causal_video_latency_bounds": {
+    "clock-latency-bounds-1.json": {
+      "method": "causal echo bounds, source draw bracket -> product canvas + two RAF callbacks",
+      "rate_envelope": [
+        0.99,
+        1.01
+      ],
+      "assumption": "clock rate envelope over this <=120s batch; not certified physical scanout timing",
+      "echoes": 25,
+      "echo_constraints_consistent": true,
+      "streams": {
+        "monitor-1": {
+          "requested": 5,
+          "matched": 5,
+          "p95_lower_ms": 393.36972960218554,
+          "p95_upper_ms": 421.03724235088157,
+          "max_source_clock_uncertainty_ms": 27.667512748696026
+        },
+        "monitor-2": {
+          "requested": 5,
+          "matched": 5,
+          "p95_lower_ms": 442.4125150417385,
+          "p95_upper_ms": 464.4554694099643,
+          "max_source_clock_uncertainty_ms": 27.667512748696026
+        }
+      }
+    },
+    "clock-latency-bounds-2.json": {
+      "method": "causal echo bounds, source draw bracket -> product canvas + two RAF callbacks",
+      "rate_envelope": [
+        0.99,
+        1.01
+      ],
+      "assumption": "clock rate envelope over this <=120s batch; not certified physical scanout timing",
+      "echoes": 25,
+      "echo_constraints_consistent": true,
+      "streams": {
+        "monitor-1": {
+          "requested": 5,
+          "matched": 5,
+          "p95_lower_ms": 390.1393390875892,
+          "p95_upper_ms": 407.19737814736436,
+          "max_source_clock_uncertainty_ms": 25.343474258494098
+        },
+        "monitor-2": {
+          "requested": 5,
+          "matched": 5,
+          "p95_lower_ms": 381.1393390875892,
+          "p95_upper_ms": 398.19737814736436,
+          "max_source_clock_uncertainty_ms": 25.343474258494098
+        }
+      }
+    }
+  },
+  "hotplug_phases": {
+    "monitor-1": {
+      "samples": 59,
+      "disconnected_samples": 9,
+      "peer": "monitor-2",
+      "peer_unavailable_samples": 0,
+      "peer_new_gaps_over_1s": 1,
+      "max_runtime_age_s": 1.0706277130011586,
+      "target_unavailable_samples": 9,
+      "peer_draws_during_observed_disconnect": 67,
+      "final_states": {
+        "monitor-1": "live",
+        "monitor-2": "live"
+      }
+    },
+    "waiting": {
+      "samples": 8,
+      "disconnected_samples": 0
+    },
+    "monitor-2": {
+      "samples": 36,
+      "disconnected_samples": 8,
+      "peer": "monitor-1",
+      "peer_unavailable_samples": 0,
+      "peer_new_gaps_over_1s": 0,
+      "max_runtime_age_s": 1.0263446209974063,
+      "target_unavailable_samples": 7,
+      "peer_draws_during_observed_disconnect": 60,
+      "final_states": {
+        "monitor-1": "live",
+        "monitor-2": "live"
+      }
+    }
+  }
+}

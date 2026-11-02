@@ -277,6 +277,48 @@ def test_real_budget_exhausted_submits_nothing(board):
     assert shutdowns(board) == []
     assert list((board.data / "control-requests").glob("*.json")) == []  # 의도 수락 기록도 없다
 
+def test_real_reads_do_not_wait_for_a_long_mutation_with_read_fork(board):
+    """S15P31E110-333: 같은 프로세스의 긴 변경이 공유 Manager 직렬화와 플랫폼 실행 잠금을 쥔 동안, read_fork 면 목록·상세는
+    실제 Manager.fork() 로 200 이고 남은 예산을 budget_ms·timeout_ms 로 받는다. 변경(키 없는 stop)은 직렬화 대기 끝에 503 이다."""
+    from xenova_runtime import operation_lock
+
+    seen = []
+    original_fork = board.manager.fork
+
+    def fork():
+        forked = original_fork()
+        call = forked.call
+
+        def recorded(action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None):
+            seen.append((action, budget_ms, (spec or {}).get("timeout_ms")))
+            return call(action, spec, execute=execute, idempotency_key=idempotency_key, request_id=request_id, budget_ms=budget_ms)
+
+        forked.call = recorded
+        return forked
+
+    board.manager.fork = fork
+    manager = SerializedManager(board.manager, busy_timeout_s=0.2, read_fork=True)
+    driver = PlatformDriver(manager, Xl(FakeRunner({("xl", "info"): XL_INFO})))
+    client = TestClient(create_app(Settings(driver="platform", log_level="WARNING", response_reserve_s=0), driver=driver,
+                                   provisioner=PlatformProvisioner(manager)))
+    budget = {"X-Request-Budget-Ms": "4000"}
+    assert manager._lock.acquire(timeout=1)  # 긴 create 가 공유 Manager 를 쥐고 있다
+    try:
+        with operation_lock(board.manager.p.runtime):  # 플랫폼 실행 잠금도 쥐고 있다
+            listed = client.get("/api/v1/vms", headers=budget)
+            assert listed.status_code == 200, listed.text
+            assert str(UBUNTU) in {vm["vm_id"] for vm in listed.json()}
+            single = client.get(f"/api/v1/vms/{UBUNTU}", headers=budget)
+            assert single.status_code == 200, single.text
+            stopped = client.post(f"/api/v1/vms/{DEBIAN}/stop")
+            assert stopped.status_code == 503 and stopped.json()["platform_code"] == "OPERATION_IN_PROGRESS"
+    finally:
+        manager._lock.release()
+    assert shutdowns(board) == []
+    assert [action for action, _, _ in seen] == ["list", "get"]  # 변경은 fork 로 가지 않았다
+    assert all(budget_ms is not None and 0 < budget_ms <= 4000 and timeout_ms == budget_ms for _, budget_ms, timeout_ms in seen)
+
+
 @pytest.mark.parametrize("name", ["개발용 Ubuntu", "\u00a0VM", "VM\u3000", "\u2003주행 A VM\u202f"])
 def test_spring_dto_name_uses_actual_manager_metadata_preparer(client, board, name):
     """DTO 필드·실제 HTTP·Manager 메타데이터를 연결하고 Linux 디스크 복사 경계만 대체한다."""

@@ -12,6 +12,11 @@ DRIVERS = ("mock", "xen", "platform")
 # timeout=90 이며 제거 관측도 같은 deadline 을 공유하므로 Manager 호출은 이 시간 안팎에서 끝난다. platform 모드의 shutdown_grace_s 는
 # 이 값과 같아야 한다. xl_command_timeout_s 는 xl 서브프로세스에만 걸리고 Manager 호출을 제한하지 않는다
 PLATFORM_STOP_WAIT_S = 90.0
+# HTTP 프로세스만 쓰는 값. platform_from_env 는 이 값을 읽지 않는다
+HTTP_ONLY_ENV = (
+    "XENOVA_HOST", "XENOVA_PORT", "XENOVA_SERVICE_TOKEN", "XENOVA_CONSOLE_ENABLED", "XENOVA_CONSOLE_LOCK_DIR",
+    "XENOVA_REGISTRATION_URL", "VM_REGISTRATION_SERVICE_TOKEN", "XENOVA_REGISTRATION_TIMEOUT", "XENOVA_REGISTRATION_SLOT_DIR",
+)
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,9 @@ class Settings:
     # platform 드라이버: 다른 요청이 Manager 를 쓰는 동안 기다릴 최대 초. 넘으면 503 PlatformUnavailable(재시도 가능).
     # 정지가 최대 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다. 조회 드라이버 한도 5초와 맞춘다
     platform_busy_timeout_s: float = 5.0
+    # platform 드라이버: 일반 조회(get·list 등)를 직렬화하지 않고 요청별 Manager(fork)로 부른다. 하위가 조회를 공통 실행 잠금 없이
+    # 처리하는 설치본을 확인한 뒤에만 켠다(drivers/platform.py 머리말)
+    platform_read_fork: bool = False
     # 호출자가 X-Request-Budget-Ms 로 남은 대기 시간을 줄 때, 하위 호출에 넘기기 전에 응답을 돌려줄 몫으로 남겨 둘 초.
     # 실측 전 임시값이다. 0 이면 남은 예산을 전부 하위에 준다
     response_reserve_s: float = 0.5
@@ -106,6 +114,7 @@ class Settings:
             instance_root=read("XENOVA_INSTANCE_ROOT", cls.instance_root, str),
             platform_lib=read("XENOVA_PLATFORM_LIB", cls.platform_lib, str),
             platform_busy_timeout_s=read("XENOVA_PLATFORM_BUSY_TIMEOUT", cls.platform_busy_timeout_s, float),
+            platform_read_fork=read("XENOVA_PLATFORM_READ_FORK", cls.platform_read_fork, as_bool),
             response_reserve_s=read("XENOVA_RESPONSE_RESERVE", cls.response_reserve_s, float),
             recovery_state_dir=read("XENOVA_RECOVERY_STATE_DIR", cls.recovery_state_dir, str),
             mock_samples=read("XENOVA_MOCK_SAMPLES", cls.mock_samples, as_bool),
@@ -117,3 +126,12 @@ class Settings:
             registration_timeout_s=read("XENOVA_REGISTRATION_TIMEOUT", cls.registration_timeout_s, str),
             registration_slot_dir=read("XENOVA_REGISTRATION_SLOT_DIR", cls.registration_slot_dir, str),
         )
+
+    @classmethod
+    def platform_from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
+        """HTTP 를 열지 않는 프로세스(Recovery Worker)용. 플랫폼·xl 값만 읽고 HTTP_ONLY_ENV 는 기본값으로 둔다.
+
+        같은 env 파일에 콘솔 설정이 있어도 HTTP 콘솔 검증(토큰 필수·로컬 dom0)에 걸리지 않는다. 그 검증은 from_env 에 그대로 있다.
+        """
+        env = os.environ if env is None else env
+        return cls.from_env({k: v for k, v in env.items() if k not in HTTP_ONLY_ENV})

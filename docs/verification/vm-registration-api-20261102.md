@@ -191,3 +191,36 @@ source 검토/receiver를 실제 DB 저장이나 관리자 동기화 성공으�
 단건 201/200·충돌/퇴역·응답 유실·관리자 동기화, 보드 first-boot/autostart/서비스 교체의 공동 수락이다.
 이번에는 운영 설정·서비스·실데이터·보드/EC2/VM/broker/DB/SD·전체 이미지·실차·7번·commit/push를 수행하지 않았다.
 다음 담당자가 새 FastAPI 수신부나 하위 sender를 다시 구현할 요청은 남기지 않았다.
+
+## MR 준비: 최신 platform 통합과 재검증
+
+위 구현·포장 단계 뒤 사용자가 작업 단위 커밋, origin push와 `platform` 대상 MR 생성을 승인했다.
+구현은 `0a65791`(하위 조회·로컬 후속), `004abef`(FastAPI·Spring 송신),
+`9cf161a`(교차·설치 검증), `d814bc2`(계약·인계)로 나눴다.
+`origin/platform`의 `1659e3f0a3b78f46bbe3e89b5041fc1addeb0ed1`을 merge하며
+`dom0_manager/drivers/platform.py` 한 파일의 충돌을 해결했다.
+
+- 최신 target의 일반 조회 `read_fork`, action별 예산·timeout 전달과 Worker 설정 경계를 유지했다.
+  삭제한 `registration-notify`를 allowlist에 되살리지 않고 `registrations`를 연결했다.
+- HTTP 전용 Spring 설정은 `HTTP_ONLY_ENV`에도 추가했다. Worker가 송신 자격을 읽지 않는 assertion과
+  새 조회의 예산 전달 assertion을 추가하고, 무관한 Worker 정책은 수정하지 않았다.
+- 통합 후 `test_xenova_registration.py`, `test_registration_api_process.py`,
+  `platform/services/dom0-manager/tests` 전체를 실행했다. 최종 결과는 **664 passed / 1 skipped**,
+  83.14초다. skip은 root가 파일 권한을 무시하는 기존 저장 시험이다.
+
+첫 실행(`/mnt/c` 작업트리)은 662 passed / 2 failed / 1 skipped였고, sender 단독 재검사에서도
+두 실패가 재현됐다. 0.4초 fixture 예산 안에 자식 import가 끝나지 않았으며, 같은 경로에서
+직접 실행한 정상 자식은 0.683초 뒤 confirmed를 반환했다. 제품 timeout이나 assertion을 늘리지 않고,
+기존 native 검증과 같은 WSL 내부 소유 snapshot에서 전체 묶음을 재실행했다.
+API source·시험 100개는 바이트 대조했고, 하위·first-install·common·플랫폼 시험 Python 146개는
+LF 기준 대조해 차이가 없었다. 두 실패 기록은 삭제하지 않는다.
+
+원자료는 `/home/ssafy/xenova-registration-api-20261102/`의 `mr-integration.xml`,
+`mr-sender-recheck.xml`, `mr-integration-native.xml`, `mr-integration-source-sha256.json`이며,
+해시는 같은 보고서의 evidence JSON에 기록했다.
+재실행 명령은 위 세 시험 경로를 `python3 -m pytest -o addopts= -q`로 지정한 것이다.
+
+기존 RPM·ARM 설치 근거는 `d814bc2`까지의 포장 후보 근거다. 이번 target merge 뒤 확인한 것은
+native 소스 통합 회귀이며, 새 RPM·ARM 설치 검증을 수행했다고 확대하지 않는다.
+fetch에서 `origin/backend`가 `ca9a2a3`으로 진행한 사실은 확인했지만, 기존 Spring 소스 대조 후보
+`800d584`를 새 후보 검증으로 바꾸지 않는다. 운영 설치·Spring/DB 공동 수락은 계속 별도다.
