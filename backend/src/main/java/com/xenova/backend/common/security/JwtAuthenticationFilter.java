@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.auth.domain.AccessTokenRevocationStore;
 import com.xenova.backend.auth.infrastructure.JwtTokenService;
 import com.xenova.backend.common.error.ErrorResponse;
+import com.xenova.backend.vm.infrastructure.VmRegistrationAuthenticationFilter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -66,7 +67,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return request.getRequestURI().startsWith("/api/v1/auth/");
+        return request.getRequestURI().startsWith("/api/v1/auth/")
+                || VmRegistrationAuthenticationFilter.PATH.equals(request.getRequestURI());
     }
 
     private String extractBearerToken(HttpServletRequest request) {
