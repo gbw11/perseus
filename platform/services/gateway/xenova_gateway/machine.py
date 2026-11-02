@@ -125,8 +125,11 @@ def valid_command(payload: Any) -> tuple[int, float, float] | None:
     if isinstance(generation, bool) or not isinstance(generation, int) or not 0 <= generation <= 0xFFFFFFFF:
         return None
     for value in (v, steer):
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None
+        try:
+            if not math.isfinite(value):return None
+        except OverflowError:return None
     return generation, float(v), float(steer)
 
 

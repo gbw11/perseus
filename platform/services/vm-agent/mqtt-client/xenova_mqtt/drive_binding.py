@@ -9,6 +9,14 @@ import json,os,stat,threading,time
 from pathlib import Path
 from uuid import UUID,uuid4
 
+DRIVE_APPS=('autonomous','manual')
+
+def app_instance(row: dict, app: str | None=None) -> str | None:
+    """New bindings require an explicit app. No shared-ID fallback for that profile."""
+    if 'app_instances' in row:
+        return row['app_instances'].get(app) if app in DRIVE_APPS and row.get('app_status',{}).get(app,'observed')=='observed' else None
+    return row.get('app_instance_id')
+
 def canonical(value: object) -> str:
     if not isinstance(value,str) or str(UUID(value))!=value or not UUID(value).int:
         raise ValueError('canonical nonzero UUID required')
@@ -54,8 +62,26 @@ class BindingCache:
                 raise ValueError('binding lease invalid')
             for vm,row in value['vms'].items():
                 canonical(vm)
+                if not isinstance(row,dict):raise ValueError('binding row object required')
                 if row.get('status')=='observed':
                     for key in ('execution_id','boot_id','app_instance_id'):canonical(row[key])
+                    if row.get('profile','verified-drive-1') not in ('verified-drive-1','warm-drive-1'):
+                        raise ValueError('unknown binding profile')
+                    if row.get('profile')=='warm-drive-1' and 'app_instances' not in row:
+                        raise ValueError('warm app bindings missing')
+                    if 'app_instances' in row:
+                        if row.get('profile')!='warm-drive-1' or not isinstance(row['app_instances'],dict) or set(row['app_instances'])!=set(DRIVE_APPS):
+                            raise ValueError('explicit warm app bindings required')
+                        for identity in row['app_instances'].values():canonical(identity)
+                        if len(set(row['app_instances'].values()))!=2:raise ValueError('distinct app instances required')
+                        if 'app_status' in row and (not isinstance(row['app_status'],dict) or set(row['app_status'])!=set(DRIVE_APPS) or
+                            any(v not in ('observed','provisioning','unavailable') for v in row['app_status'].values())):
+                            raise ValueError('invalid per-app binding status')
+                    elif 'app_status' in row:raise ValueError('per-app status requires app identities')
+                    if 'app_state_models' in row and (not isinstance(row['app_state_models'],dict) or
+                        set(row['app_state_models'])!=set(DRIVE_APPS) or
+                        any(v not in ('stateless','stateful') for v in row['app_state_models'].values())):
+                        raise ValueError('explicit app state models required')
                     for key in ('intent_revision','lifecycle_generation','domid'):
                         if type(row[key]) is not int or row[key]<0:raise ValueError('binding integer invalid')
                     if type(row['observed_monotonic_ms']) is not int or row['observed_monotonic_ms']<0:
@@ -70,18 +96,44 @@ class BindingCache:
     def invalidate(self):
         with self._lock:self._value=None;self.error='BINDING_UNAVAILABLE'
 
+    def guard(self,vm_ids):
+        """Reject old/mismatched app traffic before generic seq/latest admission."""
+        from . import topics
+        identities=frozenset(vm_ids)
+        def check(topic,envelope,retained):
+            info=topics.parse(topic)
+            if info.app_id in DRIVE_APPS and (info.vm_id in identities or envelope.get('vm_id') in identities):
+                return bool(not retained and info.vm_id in identities and info.vm_id==envelope.get('vm_id') and
+                    info.app_id==envelope.get('app_id') and self.accepts(info.vm_id,envelope.get('boot_id'),
+                        envelope.get('agent_instance_id'),app=info.app_id))
+            return True
+        return check
+
     def current(self,vm: str,now: float | None=None) -> dict | None:
         now=self.clock() if now is None else now
         with self._lock:
             v=self._value
             if v is None or not v['observed_monotonic_ms']<=int(now*1000)<=v['expires_monotonic_ms']:return None
             row=v['vms'].get(vm)
-            return dict(row) if (row and row['status']=='observed' and
-                0<=int(now*1000)-row['observed_monotonic_ms']<=3000) else None
+            if not (row and row['status']=='observed' and 0<=int(now*1000)-row['observed_monotonic_ms']<=3000):return None
+            return {**row,**({'app_instances':dict(row['app_instances'])} if 'app_instances' in row else {}),
+                    **({'app_status':dict(row['app_status'])} if 'app_status' in row else {}),
+                    **({'app_state_models':dict(row['app_state_models'])} if 'app_state_models' in row else {})}
 
-    def accepts(self,vm: str,boot: str,instance: str,now: float | None=None) -> bool:
+    def observation_status(self,vm: str,now: float | None=None) -> str:
+        """A bounded cache fact for reference retirement, never execution
+        permission. Missing/stale/failed observation remains unavailable."""
+        now=self.clock() if now is None else now
+        with self._lock:
+            value=self._value
+            if value is None or not value['observed_monotonic_ms']<=int(now*1000)<=value['expires_monotonic_ms']:
+                return 'unavailable'
+            return value['vms'].get(vm,{}).get('status','unavailable')
+
+    def accepts(self,vm: str,boot: str,instance: str,now: float | None=None,*,app: str | None=None) -> bool:
         row=self.current(vm,now)
-        return bool(row and row['boot_id']==boot and row['app_instance_id']==instance)
+        expected=app_instance(row,app) if row else None
+        return bool(row and expected is not None and row['boot_id']==boot and expected==instance)
 
 class BindingFile(BindingCache):
     """A small file reader thread; Manager/receipt I/O never runs per drive message."""

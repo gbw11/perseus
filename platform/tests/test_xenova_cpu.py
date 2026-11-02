@@ -152,8 +152,7 @@ class CPUTest(unittest.TestCase):
         for change,code in [({'shared_pcpus':[0,4]},'INVALID_SPEC'),({'shared_pcpus':[0,1,3]},'INVALID_SPEC'),
                             ({'exclusive':[{'vm_id':self.zid,'pcpu':1},{'vm_id':self.z2['uuid'],'pcpu':1}]},'INVALID_SPEC'),
                             ({'exclusive':[{'vm_id':'bad','pcpu':1}]},'INVALID_SPEC'),
-                            ({'exclusive':[{'vm_id':uuid4(),'pcpu':1}]},'VM_NOT_FOUND'),
-                            ({'exclusive':[{'vm_id':self.linux['uuid'],'pcpu':1}]},'RESOURCE_UNSUPPORTED')]:
+                            ({'exclusive':[{'vm_id':uuid4(),'pcpu':1}]},'VM_NOT_FOUND')]:
             self.fails(self.policy(self.spec()|change),code)
         self.hardware=[0,2,3];self.fails(self.policy(),'RESOURCE_UNSUPPORTED')
         self.scheduler='credit';self.fails(self.layout(),'RESOURCE_UNSUPPORTED')

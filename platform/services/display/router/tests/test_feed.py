@@ -91,7 +91,9 @@ def test_inventory_cannot_establish_liveness_and_is_marked_unverified(store):
     assert not store.ingest(topic, inv, retained=True)
     hb = message(VM3, kind="agent.heartbeat")
     assert store.ingest(f"xenova/v1/vms/{VM3}/heartbeat", hb)
-    assert store.ingest(topic, inv, retained=True)
+    # Matching live heartbeat promotes the provisional inventory; replaying it
+    # again must not reset its age or sequence.
+    assert not store.ingest(topic, inv, retained=True)
     vm = store.snapshot()["vms"][2]
     assert vm["os"]["observed"] == "debian"
     assert vm["os"]["match"] is True

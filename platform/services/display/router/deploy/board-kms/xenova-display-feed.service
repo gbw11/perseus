@@ -1,10 +1,11 @@
 [Unit]
-Description=Xenova local display feed (read-only Xen and existing MQTT)
+Description=Xenova local display feed (existing MQTT and opt-in shared observations)
 After=network.target xenova-vms.service
 PartOf=xenova-display.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/xenova/display-256/feed.env
+EnvironmentFile=-/etc/xenova/display-253/mqtt.env
 ExecStart=/usr/bin/python3 /opt/xenova-display/current/bin/feed.py
 Restart=on-failure
 RestartSec=3

@@ -35,6 +35,10 @@ class ManagementTest(unittest.TestCase):
         self.run=Path(self.tmp.name)/'run'
         self.xen=FakeXen(self.data,{})
         self.p=vm.Platform(self.data,self.run,command=self.xen,defaults_path=FILES/'defaults.json')
+        # 명시적 로컬 시간 프로필. 생성 운영 기본값으로 설치하지 않는다.
+        self.p.creation_policy_path=self.data/'creation-policy.json'
+        self.p.creation_policy_path.write_text(json.dumps({'schema_version':'1.0','call_ms':3600000,
+                                                         'execution_ms':3500000,'cleanup_ms':5000}))
         self.storage=patch.object(vm,'storage_check');self.storage.start();self.addCleanup(self.storage.stop)
         self.m=management.Manager(self.p,preparer=self.prepare,usage_check=lambda *args:None, defaults_path=FILES/'defaults.json')
         network=patch.object(self.p,'check_network');network.start();self.addCleanup(network.stop)
@@ -257,7 +261,7 @@ class ManagementTest(unittest.TestCase):
         self.assertEqual(result['error']['code'],'IP_CONFLICT')
 
     def test_manifest_content_and_parent_links_cannot_select_another_artifact(self):
-        source=self.data/'templates/source/Image';source.chmod(0o644);source.write_bytes(b'changed');source.chmod(0o444)
+        source=self.data/'templates/source/template.json';source.chmod(0o644);source.write_bytes(b'changed');source.chmod(0o444)
         result=self.call('create',self.spec)
         self.assertEqual(result['error']['code'],'ARTIFACT_INVALID')
         self.assertFalse((self.data/'operations').exists())
@@ -372,7 +376,7 @@ class ManagementTest(unittest.TestCase):
             output=io.StringIO()
             with redirect_stdout(output):
                 vm.main(['create','custom','--vm-id',self.spec['vm_id'],'--template-id','ubuntu-24.04-arm64','--template-version','1.0.0',
-                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','cli','--json'])
+                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','create:'+self.spec['vm_id'],'--json'])
             result=json.loads(output.getvalue());self.assertTrue(result['ok'],result)
             self.assertFalse((self.data/'operations').exists())
             output=io.StringIO()
@@ -527,21 +531,23 @@ class ManagementTest(unittest.TestCase):
         self.assertTrue((archive/'root.raw').is_file())
 
     def test_manager_itself_has_no_stdout_and_cli_execute_is_exactly_one_json(self):
-        import subprocess
+        from xenova_preparation import diagnostic, run
         original=self.m.preparer
         def noisy(op):
-            print('lower Python tool log')
-            subprocess.run(['python3','-c','print("lower process log")'],check=True)
+            diagnostic('lower Python tool log')
+            run(['python3','-c','print("lower process log")'],check=True)
             return original(op)
         self.m.preparer=noisy
         out=io.StringIO()
         with redirect_stdout(out):
             result=cli.main(['create','custom','--vm-id',self.spec['vm_id'],'--template-id','ubuntu-24.04-arm64','--template-version','1.0.0',
-                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','cli',
+                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','create:'+self.spec['vm_id'],
                          '--execute','--json'],manager=self.m)
         self.assertEqual(json.loads(out.getvalue()),result)
         self.assertTrue(result['ok'],result)
         self.assertNotIn('lower',out.getvalue())
+        self.assertIn(b'lower Python tool log',self.m.last_output['bytes'])
+        self.assertIn(b'lower process log',self.m.last_output['bytes'])
 
 
     def test_uuid_collision_with_existing_vm_is_rejected_before_journal(self):

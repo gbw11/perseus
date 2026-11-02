@@ -43,6 +43,21 @@ def info(directory, expected_manifest):
         import xenova_zephyr as zephyr
         info = zephyr.bundle_info(directory, expected_manifest)
         meta = json.loads((directory / 'firmware.json').read_text())
+        if meta.get('id')=='xenova-zephyr-drive-lattice-lab-1.0.0':
+            selected=json.loads((HERE.parent/'default-templates.lock.json').read_text())['templates']
+            matches=[item for item in selected if item['id']==meta['id']]
+            if (len(matches)!=1 or matches[0]['manifest_sha256']!=expected_manifest
+                    or meta.get('template_id')!=matches[0]['template_id']
+                    or meta.get('template_version')!=matches[0]['version']
+                    or meta['source'].get('app')!='xenova-drive'
+                    or meta['source'].get('drive_profile')!='warm-lattice-lab'
+                    or info['provisioning_profile']['apps']!={
+                        'autonomous':{'model':'stateful','standby_progress':'idle'},
+                        'manual':{'model':'stateless','standby_progress':'idle'}}):
+                raise ValueError('actual selected drive build/provenance required')
+            return {'id':meta['id'],'kind':'zephyr-xen-firmware','template':str(directory),
+                    'template_manifest_sha256':expected_manifest,'metadata':meta,
+                    'logical_bytes':info['logical_bytes'],'payloads':info['payloads'],'bundle_manifest':'firmware.json'}
         lock_file = 'network-starter.lock.json' if meta.get('hardware_profile') == zephyr.NET_PROFILE else 'starter.lock.json'
         lock = json.loads((HERE / lock_file).read_text())
         if (meta.get('id') != lock['id'] or meta.get('kind') != 'zephyr-xen-firmware'

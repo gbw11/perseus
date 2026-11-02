@@ -37,7 +37,8 @@ def fixture():
     finally:f.doCleanups()
 
 @pytest.mark.parametrize('present',[False,True])
-def test_engine_completion_provisions_current_execution_then_standby_readiness(fixture,tmp_path,monkeypatch,present):
+@pytest.mark.parametrize('warm',[False,True])
+def test_engine_completion_provisions_current_execution_then_standby_readiness(fixture,tmp_path,monkeypatch,present,warm):
     f=fixture;vm=f.zid;other=str(uuid4());before=f.state()['execution_id']
     # External Xen boundary: the original domain has crashed/disappeared.
     if not present:f.xen.rows=[]
@@ -62,7 +63,7 @@ def test_engine_completion_provisions_current_execution_then_standby_readiness(f
     applied=[]
     class Store:
         def __init__(self,channel):self.channel=channel
-        def apply(self,context,bootstrap,previous):applied.append((self.channel,dict(context),dict(bootstrap)))
+        def apply(self,context,bootstrap,previous=None):applied.append((self.channel,dict(context),dict(bootstrap)))
         def close(self):pass
     monkeypatch.setattr(api,'XenStore',Store)
     # Keep the production provenance loader; route its filesystem boundary to
@@ -78,6 +79,9 @@ def test_engine_completion_provisions_current_execution_then_standby_readiness(f
     authority=tmp_path/'control.json';atomic_json(authority,{'generation':42,'mode':'AUTO'})
     config={'vm_ids':[vm,other],'receipt_dir':str(tmp_path/'receipts'),'binding_file':str(tmp_path/'binding.json'),
         'authority_file':str(authority),'credentials':credentials}
+    if warm:
+        config['readiness_profile']='warm-drive-1'
+        config['app_state_models']={'autonomous':'stateless','manual':'stateless'}
     def current(identity):return observe(f.p,identity) if identity==vm else {'status':'stopped'}
     coordinator=RejoinCoordinator(config,current,ProductionBootstrap(config,current,uid=os.geteuid()),
         observed['host_boot_id'],clock=lambda:f.ticks,uid=os.geteuid())
@@ -88,22 +92,66 @@ def test_engine_completion_provisions_current_execution_then_standby_readiness(f
         while coordinator.cache.current(vm) is None:
             assert time.monotonic()<end;time.sleep(.01);coordinator.pump()
         binding=coordinator.cache.current(vm)
+        if warm:assert binding['app_state_models']==config['app_state_models']
         assert binding['execution_id']==record.execution_id and len(applied)==2
         assert applied[0][2]['boot_id']==applied[1][2]['boot_id']
         assert applied[0][2]['publisher_id']!=applied[1][2]['publisher_id']
         for i in range(34):
             f.ticks+=.1;coordinator._rows[vm]={**binding,'observed_monotonic_ms':int(f.ticks*1000)}
             coordinator._due={vm:f.ticks+1,other:f.ticks+1};coordinator.pump()
-            identity=Identity(vm_id=vm,app_id='autonomous',boot_id=binding['boot_id'],agent_instance_id=binding['app_instance_id'])
-            env=build(identity,'app.readiness',{'applied_generation':42,'progress_seq':str(i+1),'readiness':'READY','reason':None},i+1)
-            coordinator.on_readiness(Message(topics.vm_app_events(vm,'autonomous'),env,f.ticks));coordinator.pump()
-        assert coordinator.records[vm]['stage']=='READY_OBSERVED'
+            identity=Identity(vm_id=vm,app_id='autonomous',boot_id=binding['boot_id'],
+                agent_instance_id=binding['app_instances']['autonomous'] if warm else binding['app_instance_id'])
+            payload={'applied_generation':42,'progress_seq':str(i+1),'readiness':'READY','reason':None}
+            if warm:payload.update(profile='warm-drive-1',check_seq=str(i+1),progress_seq='0',phase='WAITING',readiness='QUALIFIED')
+            env=build(identity,'app.lifecycle' if warm else 'app.readiness',payload,i+1)
+            coordinator.on_readiness(Message(topics.vm_app_events(vm,'autonomous'),env,f.ticks))
+            f.ticks+=.02  # actual asynchronous queue: binding refresh occurs after receive
+            coordinator.pump()
+        assert coordinator.records[vm]['stage']==('QUALIFIED_OBSERVED' if warm else 'READY_OBSERVED')
         assert record.status is RecoveryStatus.COMPLETED  # meaning did not become app/ownership completion
         assert 'active_vm' not in coordinator.records[vm]
+        # A valid negative observation must revoke readiness even without a
+        # new calculation. Warm uses a new real supervision check instead.
+        f.ticks+=.01;payload.update(readiness='NOT_READY',reason='INPUT_STALE')
+        if warm:payload['check_seq']='35'
+        env=build(identity,'app.lifecycle' if warm else 'app.readiness',payload,35)
+        coordinator.on_readiness(Message(topics.vm_app_events(vm,'autonomous'),env,f.ticks));coordinator.pump()
+        assert coordinator.records[vm]['stage']=='PREPARING'
         f.ticks+=.31;coordinator.pump();assert coordinator.records[vm]['stage']=='PREPARING'
+        if warm:
+            home=Path(config['receipt_dir'])/vm/record.execution_id
+            receipt,_=api.private_json(home/'drive.json')
+            credential,source=api.credentials(Path(credentials[vm]['drive']),vm)
+            with api.receipt_lock(home/'drive.json'):
+                rotated=api.reinitialize_app(receipt['context'],credential,source,home/'drive.json',
+                    app='autonomous',expected_instance=binding['app_instances']['autonomous'],request_id=str(uuid4()),
+                    store=Store('drive'),observe=lambda:{k:current(vm)[k] for k in receipt['context']})
+            refreshed=coordinator._work(vm)
+            assert refreshed['app_instances']['autonomous']==rotated['instance_id']
+            assert refreshed['app_instances']['manual']==binding['app_instances']['manual']
+            assert refreshed['execution_id']==binding['execution_id'] and len(applied)==3
+            class Broken(Store):
+                quiescent=True
+                def apply(self,*args):raise OSError('uncertain app-only Store update')
+            try:
+                with api.receipt_lock(home/'drive.json'):
+                    api.reinitialize_app(receipt['context'],credential,source,home/'drive.json',app='autonomous',
+                        expected_instance=rotated['instance_id'],request_id=str(uuid4()),store=Broken('drive'),
+                        observe=lambda:{k:current(vm)[k] for k in receipt['context']})
+            except OSError:pass
+            else:raise AssertionError('uncertain effect must be reported')
+            partial=coordinator._work(vm)
+            assert partial['status']=='observed' and partial['app_status']=={'autonomous':'provisioning','manual':'observed'}
+            assert partial['app_instances']['manual']==binding['app_instances']['manual']
+            cold=ProductionBootstrap(config,current,uid=os.geteuid())(current(vm))
+            assert cold['app_status']==partial['app_status'] and cold['app_instances']==partial['app_instances']
+            assert len(applied)==3  # no Store replay on Worker restart
+            coordinator._rows[vm]=partial;coordinator._due={vm:f.ticks+1,other:f.ticks+1};coordinator.pump()
+            assert coordinator.cache.accepts(vm,partial['boot_id'],partial['app_instances']['manual'],app='manual')
+            assert not coordinator.cache.accepts(vm,partial['boot_id'],rotated['instance_id'],app='autonomous')
         with patch.object(xenova_vm.os,'sync'):f.control('stop')
         assert coordinator._work(vm)['status']=='stopped'
-        assert len(applied)==2  # no re-provision/restart just because input/readiness expires
+        assert len(applied)==(3 if warm else 2)  # only the explicit root app update adds one Store write
     finally:coordinator.stop();engine.shutdown()
 
 def test_missing_mount_is_rejected_before_receipt_creation(tmp_path,monkeypatch):

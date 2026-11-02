@@ -1,0 +1,55 @@
+{
+  "trial": "xenova-257-d34726eb",
+  "backend": "experimental_xshm_turbojpeg_quality_85",
+  "sample_seconds": 40.4954579969999,
+  "mean_cpu_percent": {
+    "sender": 16.569759503638924,
+    "encoder": 0.0,
+    "native_worker": 47.75844244416942,
+    "other_pipeline": 0.0,
+    "browser": 33.18890726213221,
+    "xorg": 14.371982162619751
+  },
+  "pipeline_cores": 0.6432820194780834,
+  "minimum_available_mib": 1923.08203125,
+  "streams": {
+    "monitor-1": {
+      "duration_s": 60.07900000002701,
+      "frames": 298,
+      "fps": 4.960135821166564,
+      "jpeg_mbps": 1.9046127931548222,
+      "error": null
+    },
+    "monitor-2": {
+      "duration_s": 60.18800000002375,
+      "frames": 300,
+      "fps": 4.984382268888842,
+      "jpeg_mbps": 2.6137303116890065,
+      "error": null
+    },
+    "monitor-1-reconnect": {
+      "duration_s": 10.155999999959022,
+      "frames": 51,
+      "fps": 5.021662071702027,
+      "jpeg_mbps": 1.928237888940431,
+      "error": null
+    }
+  },
+  "combined_jpeg_mbps": 4.5183431048438285,
+  "unauthenticated_http": 401,
+  "cleanup": {
+    "services": {
+      "xenova-display-kiosk.service": "active",
+      "xenova-display-graphics.service": "active",
+      "xenova-display-feed.service": "active",
+      "xenova-dom0-manager.service": "active",
+      "mosquitto.service": "active",
+      "tailscaled.service": "active"
+    },
+    "ssh_policy_restored": true,
+    "graphics_source_restored": true,
+    "graphics_source_unchanged": true,
+    "domains_unchanged": true,
+    "temporary_files_removed": true
+  }
+}

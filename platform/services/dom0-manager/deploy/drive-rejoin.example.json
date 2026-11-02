@@ -1,5 +1,7 @@
 {
   "schema_version": "1.0-drive-rejoin-config",
+  "readiness_profile": "verified-drive-1",
+  "app_state_models": {"autonomous": "stateless", "manual": "stateless"},
   "vm_ids": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
   "binding_file": "/run/xenova/drive-bindings.json",
   "authority_file": "/srv/xenova/drive-control/control.json",

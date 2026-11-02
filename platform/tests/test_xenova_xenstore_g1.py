@@ -261,7 +261,7 @@ class LabTest(unittest.TestCase):
 
     def test_platform_loader_fresh_process_with_published_dependency_layout(self):
         runtime=self.root/"runtime";runtime.mkdir()
-        for name in ("xenova_vm.py","xenova_runtime.py","xenova_trace.py","xenova_zephyr.py"):
+        for name in ("xenova_vm.py","xenova_runtime.py","xenova_trace.py","xenova_zephyr.py","xenova_preparation.py"):
             shutil.copyfile(FILES/name,runtime/name)
         for name in ("first_install_contract.py","artifact_io.py"):
             shutil.copyfile(ROOT/"platform/first-install"/name,runtime/name)

@@ -27,6 +27,17 @@ class ProductionBootstrap:
             now=self.observe(vm)
             if now['status']!='observed':raise ValueError('execution not eligible')
             return {k:now[k] for k in CONTEXT}
+        # A Worker restart must not turn an app-only uncertain update into an
+        # automatic Store retry or discard the other app's verified baseline.
+        if (home/'drive.json').exists() and (home/'telemetry.json').exists():
+            saved=private_json(home/'drive.json',self.uid)
+            if (saved.get('drive_profile')=='warm-drive-1' and saved.get('phase') in ('prepared','uncertain') and
+                saved.get('pending_app') in ('autonomous','manual')):
+                for channel in ('drive','telemetry'):
+                    _,source=self.api.credentials(Path(self.config['credentials'][vm][channel]),vm)
+                    if private_json(home/(channel+'.json'),self.uid).get('credential_source')!=source:
+                        raise ValueError('credential source changed during partial rejoin')
+                return self.refresh(row)
         for channel in ('telemetry','drive'):
             credential,identity=self.api.credentials(Path(self.config['credentials'][vm][channel]),vm)
             receipt=home/(channel+'.json')
@@ -38,14 +49,43 @@ class ProductionBootstrap:
                 fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 store=self.api.XenStore(channel)
                 self.api.provision(context,credential,identity,receipt,store=store,observe=current,
-                    channel=channel,guest_boot_receipt=home/'telemetry.json' if channel=='drive' else None)
+                    channel=channel,guest_boot_receipt=home/'telemetry.json' if channel=='drive' else None,
+                    drive_profile=self.config.get('readiness_profile') if channel=='drive' else None)
             finally:
                 if store:store.close()
                 os.close(lock)
+        return self.refresh(row)
+
+    def refresh(self,row):
+        """Read only current applied receipt identities; no reinjection or UUID minting."""
+        context={k:row[k] for k in CONTEXT}
+        home=Path(self.config['receipt_dir'])/row['vm_id']/row['execution_id']
         telemetry=private_json(home/'telemetry.json',self.uid);drive=private_json(home/'drive.json',self.uid)
-        if (telemetry['phase']!='applied' or drive['phase']!='applied' or telemetry['context']!=context or
+        if (telemetry['phase']!='applied' or telemetry['context']!=context or
             drive['context']!=context or telemetry['boot_id']!=drive['boot_id']):raise ValueError('applied receipt mismatch')
-        return {'boot_id':canonical(drive['boot_id']),'app_instance_id':canonical(drive['publisher_id'])}
+        value={'boot_id':canonical(drive['boot_id']),'app_instance_id':canonical(drive['publisher_id'])}
+        if drive['phase']!='applied' and drive.get('drive_profile')!='warm-drive-1':raise ValueError('applied receipt required')
+        if drive.get('drive_profile')=='warm-drive-1':
+            apps=drive['drive_apps']
+            if set(apps)!={'autonomous','manual'}:raise ValueError('warm app set mismatch')
+            value.update(profile='warm-drive-1',app_instances={k:canonical(v) for k,v in apps.items()})
+            models=self.config.get('app_state_models')
+            if models is not None:
+                if (not isinstance(models,dict) or set(models)!=set(apps) or
+                    any(v not in ('stateless','stateful') for v in models.values())):raise ValueError('app state model configuration')
+                value['app_state_models']=dict(models)
+            if drive['phase']!='applied':
+                target=drive.get('pending_app');base=drive.get('app_update_base',{})
+                change=drive.get('app_changes',{}).get(target,{})
+                if (drive['phase'] not in ('prepared','uncertain') or target not in apps or set(base)!=set(apps) or
+                    change.get('app')!=target or change.get('expected_instance')!=base.get(target) or
+                    any(apps[app]!=base[app] for app in apps if app!=target)):
+                    raise ValueError('no verified unaffected app baseline')
+                for instance in base.values():canonical(instance)
+                value['app_status']={app:'provisioning' if app==target else 'observed' for app in apps}
+        if self.config.get('readiness_profile','verified-drive-1')!=value.get('profile','verified-drive-1'):
+            raise ValueError('configured/receipt readiness profile differs')
+        return value
 
 class RejoinCoordinator:
     def __init__(self,config,observe,provision,host_boot_id,*,clock=time.monotonic,uid=0):
@@ -90,7 +130,7 @@ class RejoinCoordinator:
         if row.get('execution_owner_kind')=='recovery' and not (
             (completed and completed['execution_id']==execution and completed['recovery_attempt_id']==row.get('recovery_attempt_id')) or
             (previous.get('execution_id')==execution and previous.get('recovery_attempt_id')==row.get('recovery_attempt_id') and
-             previous.get('stage') in ('PROVISIONED','PREPARING','READY_OBSERVED'))):
+             previous.get('stage') in ('PROVISIONED','PREPARING','READY_OBSERVED','QUALIFIED_OBSERVED'))):
             return {**row,'status':'provisioning','reason':'ENGINE_COMPLETION_PENDING'}
         if old.get('execution_id')!=execution or not old.get('app_instance_id'):
             source={'execution_id':execution,'stage':'PROVISIONING',
@@ -103,7 +143,12 @@ class RejoinCoordinator:
             if self._stop.is_set():raise RuntimeError('rejoin stopped after provisioning; no binding')
             self._record(vm,{**source,'stage':'PROVISIONED',**identity})
             return {**after,**identity}
-        return {**row,**{k:old[k] for k in ('boot_id','app_instance_id')}}
+        identity=self.provision.refresh(row) if hasattr(self.provision,'refresh') else {
+            k:old[k] for k in ('boot_id','app_instance_id','profile','app_instances','app_status') if k in old}
+        after=self.observe(vm)
+        if any(after.get(k)!=row.get(k) for k in (*CONTEXT,'intent_revision','lifecycle_generation','status')):
+            raise ValueError('execution/intent changed during identity refresh')
+        return {**after,**identity}
 
     def pump(self):
         now=self.clock()
@@ -133,7 +178,7 @@ class RejoinCoordinator:
                 if now-progress[1]>.3 or self.cache.current(key[0],now) is None:
                     del self._progress[key]
                     entry=self.records.get(key[0],{})
-                    if entry.get('stage')=='READY_OBSERVED':
+                    if entry.get('stage') in ('READY_OBSERVED','QUALIFIED_OBSERVED'):
                         self._record(key[0],{**entry,'stage':'PREPARING','reason':'READINESS_EXPIRED'})
 
     def on_readiness(self,message):
@@ -143,31 +188,42 @@ class RejoinCoordinator:
 
     def _apply_readiness(self,message):
         from xenova_mqtt import topics
-        info=topics.parse(message.topic);env=message.envelope;t=message.received_monotonic
-        if (getattr(message,'retained',False) or message.type!='app.readiness' or info.app_id not in ('autonomous','manual') or
-            info.vm_id!=env.get('vm_id') or not self.cache.accepts(info.vm_id,env.get('boot_id'),env.get('agent_instance_id'),t)):return
-        try:ready=parse_readiness(message.payload);authority=private_json(Path(self.config['authority_file']),self.uid)
+        info=topics.parse(message.topic);env=message.envelope;t=message.received_monotonic;now=self.clock()
+        if (getattr(message,'retained',False) or message.type not in ('app.readiness','app.lifecycle') or info.app_id not in ('autonomous','manual') or
+            not 0<=now-t<=.3 or info.vm_id!=env.get('vm_id') or
+            not self.cache.accepts(info.vm_id,env.get('boot_id'),env.get('agent_instance_id'),now,app=info.app_id)):return
+        warm=self.config.get('readiness_profile')=='warm-drive-1'
+        if warm!=(message.type=='app.lifecycle'):return
+        try:
+            if warm:
+                from xenova_mqtt.lifecycle import parse
+                ready=parse(message.payload)
+            else:ready=parse_readiness(message.payload)
+            authority=private_json(Path(self.config['authority_file']),self.uid)
         except (ValueError,OSError,KeyError,TypeError):return
         if ready.generation!=authority.get('generation'):return
         mode=authority.get('mode')
         if mode not in ('SAFE_STOP','MANUAL','AUTO_READY','AUTO'):return
         app='manual' if mode in ('SAFE_STOP','MANUAL','AUTO_READY') else 'autonomous'
         if info.app_id!=app:return
-        row=self.cache.current(info.vm_id,t)
+        row=self.cache.current(info.vm_id,now)
         if row is None:return
-        key=(info.vm_id,row['execution_id'],app,ready.generation)
+        key=(info.vm_id,row['execution_id'],app,env.get('agent_instance_id'),ready.generation)
         with self._lock:
             for old_key in list(self._progress):
-                if old_key[0]==info.vm_id and old_key!=key:del self._progress[old_key]
+                if old_key[0]==info.vm_id and old_key[2]==app and old_key!=key:del self._progress[old_key]
             old=self._progress.get(key)
-            if old and ready.progress<old[0]:return
-            if old and ready.progress==old[0] and ready.state=='READY':return
+            sequence=ready.check if warm else ready.progress
+            state=ready.readiness if warm else ready.state
+            if old and sequence<old[0]:return
+            if old and sequence==old[0] and (warm or state=='READY'):return
+            if warm and state=='READY' and old and ready.progress<=old[3]:return
             since=old[2] if old and 0<=t-old[1]<=.3 and old[2] is not None else t
-            if ready.state!='READY':since=None
-            self._progress[key]=(ready.progress,t,since)
+            if state not in ('READY','QUALIFIED'):since=None
+            self._progress[key]=(sequence,t,since,ready.progress)
             entry=self.records.get(info.vm_id,{})
             if entry.get('execution_id')!=row['execution_id']:return
-            stage='READY_OBSERVED' if since is not None and t-since>=3 else 'PREPARING'
+            stage=('QUALIFIED_OBSERVED' if warm and state=='QUALIFIED' else 'READY_OBSERVED') if since is not None and t-since>=3 else 'PREPARING'
             if entry.get('stage')!=stage:self._record(info.vm_id,{**entry,'stage':stage,'applied_generation':ready.generation,
                 'reason':ready.reason})
 

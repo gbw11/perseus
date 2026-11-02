@@ -23,6 +23,24 @@ from .outputs import RuntimeConfig
 MAX_JPEG = 2 * 1024 * 1024
 
 
+class FrameSignal:
+    """Broadcast a new latest frame without a frame queue or per-client polling."""
+    def __init__(self, loop):
+        self.loop = loop
+        self.event = asyncio.Event()
+
+    def notify(self):
+        try:
+            self.loop.call_soon_threadsafe(self._publish)
+        except RuntimeError:
+            # A late capture notification must not revive a closed event loop.
+            pass
+
+    def _publish(self):
+        previous, self.event = self.event, asyncio.Event()
+        previous.set()
+
+
 class JpegParser:
     def __init__(self): self.buffer = bytearray()
     def push(self, data):
@@ -51,7 +69,8 @@ def capture_command(config, output):
         "-filter_threads", "1", "-vf",
         f"scale={config.stream_width}:{config.stream_height}:flags=fast_bilinear:force_original_aspect_ratio=decrease:force_divisible_by=2,"
         f"pad={config.stream_width}:{config.stream_height}:(ow-iw)/2:(oh-ih)/2,format=yuvj420p",
-        "-c:v", "mjpeg", "-q:v", str(config.jpeg_quality), "-threads", "1", "-f", "mjpeg", "pipe:1"]
+        "-c:v", "mjpeg", "-q:v", str(config.jpeg_quality), "-threads", "1",
+        "-flush_packets", "1", "-f", "mjpeg", "pipe:1"]
 
 
 class Capture:
@@ -67,6 +86,7 @@ class Capture:
         self.error = "waiting"
         self.process = None
         self.thread = None
+        self.changed = None
 
     def layout(self):
         try:
@@ -85,6 +105,8 @@ class Capture:
             return None
 
     def start(self):
+        try: self.changed = FrameSignal(asyncio.get_running_loop())
+        except RuntimeError: pass  # Existing synchronous diagnostic callers.
         self.thread = threading.Thread(target=self.run, daemon=True, name=f"capture-{self.output.output_id}")
         self.thread.start()
 
@@ -119,6 +141,7 @@ class Capture:
                             self.sequence += 1
                             self.bytes_total += len(frame)
                             self.error = None
+                        if self.changed: self.changed.notify()
             except OSError:
                 self.error = "encoder_unavailable"
             finally:
@@ -131,6 +154,7 @@ class Capture:
                 with self.lock:
                     self.frame = None
                     if self.error is None: self.error = "encoder_stopped"
+                if self.changed: self.changed.notify()
             self.stop_event.wait(1)
 
     def stop(self):
@@ -227,13 +251,23 @@ def create_stream_app(config=None, status_path=None, token=None, *, allow_virtua
             last = None
             while not app.state.stopping.is_set() and not await request.is_disconnected():
                 if not authenticated(request): return
+                signal = getattr(capture, "changed", None)
+                # Subscribe before reading the frame: publishing between these
+                # operations then cannot leave the receiver waiting on a new event.
+                pending = signal.event if signal is not None else None
                 metadata, frame = capture.snapshot()
                 identity = (metadata["capture_epoch"],metadata["frame_sequence"])
                 if frame is not None and identity != last:
                     last = identity
                     yield (b"--frame\r\nContent-Type: image/jpeg\r\n" +
                            f"Content-Length: {len(frame)}\r\nX-Frame-Sequence: {metadata['frame_sequence']}\r\n\r\n".encode() + frame + b"\r\n")
-                await asyncio.sleep(0.05)
+                if pending is None:
+                    await asyncio.sleep(0.05)
+                else:
+                    # Even without new frames, recheck auth, disconnect and output
+                    # freshness periodically. A notification does not bypass checks.
+                    try: await asyncio.wait_for(pending.wait(), timeout=0.5)
+                    except asyncio.TimeoutError: pass
         return StreamingResponse(latest(), media_type="multipart/x-mixed-replace; boundary=frame",
                                  headers={"X-Accel-Buffering":"no"})
 

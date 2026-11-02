@@ -1,0 +1,310 @@
+{
+  "schema_version": "1.0",
+  "kind": "static-source-mapping",
+  "investigated_at": "2026-11-02",
+  "source_head": "206361b1b74994dccf26a3dccb32998ee8164487",
+  "source_branch": "feat/platform/gateway-history-driving-app",
+  "report": "../vm-registration-signal-mapping-20261102.md",
+  "instruction_sha256": "1739db17eaaa565e3d2956b3f35bf9ea109cd5555223bf1fd5e57dfb490ce603",
+  "references": 113,
+  "source_document_files": 59,
+  "source_changes_since_investigation": [],
+  "product_execution_tests_run": false,
+  "files": {
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management.py": {
+      "sha256": "45edd44a1feb290f774afaf867860f5ac1bbf37ba3967a772f28de2c6cecfaf5",
+      "lines": 1973,
+      "bytes": 123915
+    },
+    "platform/services/vm-agent/agent/xenova_agent/config.py": {
+      "sha256": "66cd5053948d7617c68230adb36201da90fd4bed36e5d4bcee5ed81643393b76",
+      "lines": 111,
+      "bytes": 6014
+    },
+    "platform/services/vm-agent/agent/xenova_agent/heartbeat.py": {
+      "sha256": "cd39b8f073953142d41ad7d93f64556e724e0c44893ae0d3b49bde4ea2ef91cf",
+      "lines": 103,
+      "bytes": 4571
+    },
+    "platform/guests/common/prepare_rootfs.py": {
+      "sha256": "2a671c0d4e59391786cc0a412717d59e87f8b8310c28457874e4f66e59ebc5f6",
+      "lines": 428,
+      "bytes": 22315
+    },
+    "platform/services/vm-agent/agent/deploy/install_into_rootfs.py": {
+      "sha256": "6cf823ecd2a2f480f14e4e54bf53610f601d84a1b2610aec8cdecd97563feb1a",
+      "lines": 152,
+      "bytes": 8018
+    },
+    "platform/guests/common/guest_agent_template.py": {
+      "sha256": "1ff98c0e418d4eeedb8d81206c84d59167074fad481da798ed4f5b347d9a0d91",
+      "lines": 146,
+      "bytes": 6974
+    },
+    "platform/services/vm-agent/agent/deploy/xenova-agent.service": {
+      "sha256": "3f499d0e2e00b4d5cbe6aead15921de85f4ea787332896b33ade2374aa8951f2",
+      "lines": 39,
+      "bytes": 1950
+    },
+    "platform/first-install/assemble.py": {
+      "sha256": "e69576650ffe6629ed3f28a51c9070b54de1c9274dbcc68f9baf18af6375f700",
+      "lines": 767,
+      "bytes": 48740
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_vm.py": {
+      "sha256": "0b8c806e549cbbe75f0621f6ac5769d798e1b0c0d429b8ca5e2222174e913411",
+      "lines": 1430,
+      "bytes": 81961
+    },
+    "docs/verification/platform-management-baseline.md": {
+      "sha256": "3e46ab52281daaececbebc165096c8801f716673ab8de96be92a1530e7531af7",
+      "lines": 512,
+      "bytes": 60951
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_drive_binding.py": {
+      "sha256": "a2a7e4e70b9ea57fbb7591ad10c5d833d9273c082a95e88d93a3d10cb967de2a",
+      "lines": 34,
+      "bytes": 2357
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_execution.py": {
+      "sha256": "7d771393d20e54e89c1aa6ed814eaa682c681a962d6fe64dffe3ba75a5e38e57",
+      "lines": 979,
+      "bytes": 63923
+    },
+    "docs/platform/management-boot-boundaries.md": {
+      "sha256": "10869fb72c56d9d9b4fecefa5f7a8473fd59b20f3f7916b8caf926a9f4af04dd",
+      "lines": 334,
+      "bytes": 25594
+    },
+    "platform/scripts/provision-xenova-telemetry.py": {
+      "sha256": "e9dce17a44cb0ce0a12413614e373d90148247b8b87b6b87d312c0165f38a653",
+      "lines": 642,
+      "bytes": 38227
+    },
+    "platform/deploy/mosquitto/scripts/xenova_broker.py": {
+      "sha256": "e4739282cd37e628c33cb3203a5b5be08f92ad22a71fc566416fcc538441de09",
+      "lines": 640,
+      "bytes": 31664
+    },
+    "platform/tests/test_xenova_broker_accounts.py": {
+      "sha256": "2ffb7c70b5f187ebc22fe2c106faf7684948a2de3a5dd3db4d7c7fedd5175dc7",
+      "lines": 348,
+      "bytes": 17628
+    },
+    "platform/yocto/meta-xenova/recipes-connectivity/xenova-mqtt-broker/files/20-xenova-broker.conf": {
+      "sha256": "97b2e4ec586f5345532c31ee7059977393e47e8755bb37c83a10635453ea7fa9",
+      "lines": 15,
+      "bytes": 463
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_catalog.py": {
+      "sha256": "2987e3cd3829f0eaf8eb3b1a34710963c4128a55f4458b75d041d6ef95cbb10f",
+      "lines": 143,
+      "bytes": 7867
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management_cli.py": {
+      "sha256": "436fac6bdacdea959b6688f3de2f7a024dfde7376607458afc0a7cbfdb75aca5",
+      "lines": 156,
+      "bytes": 8173
+    },
+    "docs/platform/cli-manager-spec.md": {
+      "sha256": "54cef38abd048778a1000a1f258975e32efef62f789d7061bdc4d1361d0cef57",
+      "lines": 4313,
+      "bytes": 245044
+    },
+    "platform/guests/linux/debian-13-20261015/recipe.json": {
+      "sha256": "ca116bf9b375a7cbe5535ae38ef867cdf3e5aa459528d4b3c4dcd21bbedd0f48",
+      "lines": 17,
+      "bytes": 257
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/defaults.json": {
+      "sha256": "467d6002b739eb99af194e09258dfbd651c1974fe64b20f34e6ad48ebfcdea07",
+      "lines": 49,
+      "bytes": 1211
+    },
+    "docs/platform/deployment-readiness.md": {
+      "sha256": "ce87c177c33de70487d50f07ebe4f710e51068439733ad932c0d580edd013039",
+      "lines": 161,
+      "bytes": 19268
+    },
+    "platform/apps/common/xenova-drive-runtime/src/runtime.c": {
+      "sha256": "3d511db9039057fcf95f27f16acaa83bafdea6c678c46a0ce3962bc339c6d4d5",
+      "lines": 756,
+      "bytes": 34150
+    },
+    "docs/platform/drive-pipeline-architecture.md": {
+      "sha256": "cdda6e43532cf6693153b34b0818a09e06fc085b6c8001e3e336245fbbf722b3",
+      "lines": 1719,
+      "bytes": 198605
+    },
+    "platform/scripts/build-xenova-drive-app.py": {
+      "sha256": "84a1a1ab921ee9424a86aaffc7ee0f5ebd13c83d36fb86c4bdc00d6457e5d01f",
+      "lines": 223,
+      "bytes": 14862
+    },
+    "platform/first-install/example.config.json": {
+      "sha256": "4c631d12b65b5de4142c34c96c663c7bdc4f684977467e19d5a8e4839a521a63",
+      "lines": 33,
+      "bytes": 1342
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_first_boot.py": {
+      "sha256": "70967d5a11d2d2bbab8acd1f1ebf6005028cbaa7c1aa392016e2422935e6c10c",
+      "lines": 401,
+      "bytes": 23214
+    },
+    "platform/scripts/package-xenova-firmware.py": {
+      "sha256": "a587f65bcd1579005b32f36bf4682ac7a42f29428419326931474575e15d6d20",
+      "lines": 136,
+      "bytes": 8767
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_zephyr_transition.py": {
+      "sha256": "4c8a2bf762300b8370d137ff0fc746993bae4f3f83ced7739788336120f94a95",
+      "lines": 133,
+      "bytes": 7676
+    },
+    "platform/tests/test_xenova_first_install.py": {
+      "sha256": "358b00fbfe31a5f1dc6e1d7aa91c218d21da9686428e77ccb8d287f00381201b",
+      "lines": 645,
+      "bytes": 34683
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova-first-boot.service": {
+      "sha256": "31ea94f8ed340adbb983751ad06905ab13c43201572865334879a446680fe536",
+      "lines": 15,
+      "bytes": 364
+    },
+    "platform/guests/common/guest_identity.py": {
+      "sha256": "d82aa89380aeed1d3fc518d4dac11ea2c3d2b59f659f82ee746d008ccfc8cd70",
+      "lines": 76,
+      "bytes": 3254
+    },
+    "platform/services/dom0-manager/dom0_manager/api/vms.py": {
+      "sha256": "ef738818822c320da268feaf72832fc98698cfd8eb5fe6ee850f6510e8fe502f",
+      "lines": 116,
+      "bytes": 5035
+    },
+    "docs/requests/20261029-request-http-spring-ui.md": {
+      "sha256": "6e2d0e73dcd520e1a2dc88383a9601d9349e5a0e133f0fc8dd641f9315f37cac",
+      "lines": 524,
+      "bytes": 61393
+    },
+    "platform/services/dom0-manager/dom0_manager/service.py": {
+      "sha256": "928931e56978d579cf87a5ff4b02cb56363b14fadcf851e804b094958759c6e6",
+      "lines": 149,
+      "bytes": 6928
+    },
+    "docs/verification/recovery-scenario-closure-20261030.md": {
+      "sha256": "32eac9e9e2d43ec574e71cc771848e8eb2e2f27d8e13355aee725158aad0f674",
+      "lines": 2730,
+      "bytes": 273160
+    },
+    "platform/services/vm-agent/mqtt-client/xenova_mqtt/lifecycle.py": {
+      "sha256": "3b1035ee2a9140a6d0a3df42f7baca3ebeb223398fe6055b2875cc91ea182fc7",
+      "lines": 47,
+      "bytes": 2539
+    },
+    "platform/guests/common/prepare_instance.py": {
+      "sha256": "711005a58eaca6442b13f9324df546c41ec3811ad505515b8d0636504035d60e",
+      "lines": 457,
+      "bytes": 22835
+    },
+    "docs/requests/20261029-request-linux-agent.md": {
+      "sha256": "97cac5bc7dfe6e792a75e3dac136d1966f4a7b804f4d76e70892c5c70f3e4289",
+      "lines": 111,
+      "bytes": 10216
+    },
+    "docs/contracts/mqtt-contract-v1.md": {
+      "sha256": "04d05a527b457aa3596f395934f0862b799c83f87a9b078e5a59e5e3b2d53fdb",
+      "lines": 600,
+      "bytes": 55540
+    },
+    "platform/services/dom0-manager/dom0_manager/recovery/rejoin.py": {
+      "sha256": "d8bb7cbbf9970beb3b761f6e183ea197984c885dbad708bfbf311bdaec7a8035",
+      "lines": 270,
+      "bytes": 16776
+    },
+    "platform/services/dom0-manager/dom0_manager/drivers/platform.py": {
+      "sha256": "5aa432a26679a71ef33818decc8ed8787170deacd272c310d896e6583ed7da0a",
+      "lines": 785,
+      "bytes": 41881
+    },
+    "platform/services/dom0-manager/tests/test_drive_rejoin.py": {
+      "sha256": "8d724e2186a2011fea66b59c835b6adcfde26475f2625f17dd4a861e35d0725a",
+      "lines": 162,
+      "bytes": 10506
+    },
+    "backend/src/main/java/com/xenova/backend/vm/api/VmController.java": {
+      "sha256": "13705af4be2fc16f2cead80c055b53a88ff3a1ae2be41e7cdd312f2e471cdb73",
+      "lines": 85,
+      "bytes": 3348
+    },
+    "backend/src/main/java/com/xenova/backend/vm/application/VmService.java": {
+      "sha256": "0cb2be9d089bb93480c24835fed01075a6e901dd6afdd252ab410e587bd6a0f5",
+      "lines": 229,
+      "bytes": 10269
+    },
+    "platform/scripts/prepare-xenova-guests.py": {
+      "sha256": "bcb8c0322a6156cc1153c7fbde074a4bba9b883faaeec1b11bf41d40f4c7cf36",
+      "lines": 296,
+      "bytes": 15487
+    },
+    "platform/guests/default-templates.lock.json": {
+      "sha256": "4593c70a08af6076d8f9bf61c9ef62f97d70dc0b6733770632c95aef6597d0a5",
+      "lines": 29,
+      "bytes": 956
+    },
+    "platform/guests/linux/ubuntu-24.04-20260926/recipe.json": {
+      "sha256": "51394985de6490fa9787433d1eba7a6c02dc5450eac0b6b699224498e253494f",
+      "lines": 17,
+      "bytes": 260
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova-vms.service": {
+      "sha256": "fd914b526fc519c5941516b064c22b3a3b398469985519793d44582fe910aae2",
+      "lines": 20,
+      "bytes": 766
+    },
+    "platform/apps/drive/zephyr/src/main.c": {
+      "sha256": "668aac0bd1744eab187fd06ca29e8ab39dd27bc57b0d7173fd3c06d6ff10908b",
+      "lines": 288,
+      "bytes": 15141
+    },
+    "platform/services/dom0-manager/tests/test_warm_liveness.py": {
+      "sha256": "4f1f612bbb91de15b97cae2f62ca43a6ce9ce5a72a3aefc9537d497f86ac84a2",
+      "lines": 59,
+      "bytes": 3281
+    },
+    "platform/services/dom0-manager/dom0_manager/recovery/watcher.py": {
+      "sha256": "3bc3a264217973bdbc14ab2ec97bb2ffc71309e2fcb12461c53676c0d8c3fe52",
+      "lines": 425,
+      "bytes": 26084
+    },
+    "platform/services/dom0-manager/dom0_manager/recovery/observe.py": {
+      "sha256": "a5435c277f04d8cd93c2c6a29d9f63e3d715e1ce5b1309b8bf012066e5efa002",
+      "lines": 135,
+      "bytes": 7423
+    },
+    "platform/services/dom0-manager/dom0_manager/recovery/__main__.py": {
+      "sha256": "3f59f7edb00392ccd252e06dda4d32b5a7e2ef7932f38e5443a8d7eec09bc5af",
+      "lines": 110,
+      "bytes": 5763
+    },
+    "platform/services/dom0-manager/dom0_manager/recovery/mqtt.py": {
+      "sha256": "bd25417708f7e5964f751b3d8dea1e30d448fcb2b4b8cb7195bc41a5f384b65a",
+      "lines": 253,
+      "bytes": 13339
+    },
+    "docs/requests/20261029-request-recovery-worker.md": {
+      "sha256": "fb79253825304592ae7fc7e0c776ddd4f09d2bad1e6814eb92883efbfafabb53",
+      "lines": 262,
+      "bytes": 27704
+    },
+    "docs/contracts/drive-world/README.md": {
+      "sha256": "5536687208e4f613263459fe818d99846b2480d519956138acd79d2b7f094533",
+      "lines": 124,
+      "bytes": 10373
+    },
+    "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_zephyr.py": {
+      "sha256": "1c3d37ad7f8baf49cc9d71127c9c0cc1588da82ea23239b7157b8c30e333042b",
+      "lines": 310,
+      "bytes": 17843
+    }
+  }
+}
