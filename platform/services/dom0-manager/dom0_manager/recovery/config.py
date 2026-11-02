@@ -10,6 +10,7 @@ from dataclasses import dataclass
 HEARTBEAT_PERIOD_S = 5.0  # MQTT-01 agent.heartbeat 주기(고정). 판정 시간은 이 배수여야 의미가 있다
 APP_HEARTBEAT_PERIOD_S = 1.0  # MQTT-06 app.heartbeat 주기. 받는 쪽 끊김 표시는 3초(6.1장)
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+SOLE_PUBLISHER_POLICIES = ("hold", "trust")
 HEALTH_LEASE_PERIODS = 3  # vm.health 수명 = 재발행 주기 × 3 (MQTT 계약 11.1). 받는 쪽은 이 안에 못 받으면 관측 불가로 본다
 
 
@@ -30,6 +31,16 @@ class RecoverySettings:
     zephyr_boot_grace_s: float = 30.0
     # desired_state 가 running 인데 도메인이 없을 때 이 시간이 지나야 DOMAIN_ABSENT. 플랫폼 start·복구가 진행 중일 수 있다
     absent_grace_s: float = 60.0
+    # 같은 채널에 신호를 보내는 동료 VM 이 없을 때(단독 발행자) 신호 손실을 판정할지. 채널마다 따로 정한다. hold 는 보류한다: 동료가
+    # 없으면 VM 장애와 브로커·브리지·ACL 같은 공통 경로 장애를 구별할 수 없다. trust 는 채널 전달 증거만으로 판정한다.
+    # Linux VM 이 하나뿐인 보드에서는 agent 만 trust 로 연다. app 을 열면 남은 주행 VM 하나를 공통 경로 장애 중에 force-restart 할 수 있다
+    agent_sole_publisher: str = "hold"
+    app_sole_publisher: str = "hold"
+    # 동료 발행자가 "지금 전달 중"이라고 볼 신선도 창. 손실 판정 창과 따로 둔다: 공통 경로가 끊기면 VM 마다 마지막 수신이 최대 한
+    # 주기씩 어긋나므로, 손실 창을 그대로 쓰면 늦게 받은 동료가 아직 신선해 보여 먼저 받은 VM 을 개별 장애로 오판한다.
+    # 손실 창 − 주기 이하면 이 어긋남으로는 오판하지 않는다. None 이면 agent min(15, 손실−5)·app min(5, 손실−1)
+    agent_peer_fresh_s: float | None = None
+    app_peer_fresh_s: float | None = None
     # 건강 스냅샷(vm.health)을 내용이 같아도 다시 내는 주기. retained 값이 오래된 채 남지 않도록 받는 쪽 lease 를 갱신한다
     health_refresh_s: float = 15.0
     # dom0 Mosquitto. Worker 는 dom0 안에서 돌므로 기본 loopback
@@ -62,6 +73,17 @@ class RecoverySettings:
             raise ValueError(f"intent_refresh_s must be at least {3 * HEARTBEAT_PERIOD_S:g}s; Manager.list holds the platform lock and observes every VM")
         if not 0 < self.broker_port < 65536:
             raise ValueError(f"broker_port out of range: {self.broker_port!r}")
+        for name, lost, period, default in (("agent_peer_fresh_s", self.heartbeat_lost_s, HEARTBEAT_PERIOD_S, 15.0),
+                                            ("app_peer_fresh_s", self.app_heartbeat_lost_s, APP_HEARTBEAT_PERIOD_S, 5.0)):
+            value = getattr(self, name)
+            if value is None:
+                value = min(default, lost - period)
+                object.__setattr__(self, name, value)
+            if not (math.isfinite(value) and 2 * period <= value <= lost - period):
+                raise ValueError(f"{name} must be between {2 * period:g}s (2 periods) and {lost - period:g}s (loss window - 1 period), got {value!r}")
+        for name in ("agent_sole_publisher", "app_sole_publisher"):
+            if getattr(self, name) not in SOLE_PUBLISHER_POLICIES:
+                raise ValueError(f"{name} must be one of {SOLE_PUBLISHER_POLICIES}, got {getattr(self, name)!r}")
         if self.log_level not in LOG_LEVELS:
             raise ValueError(f"log_level must be one of {LOG_LEVELS}, got {self.log_level!r}")
         if not self.source_id or any(c in self.source_id for c in "/+# \t"):
@@ -89,6 +111,10 @@ class RecoverySettings:
             boot_grace_s=read("XENOVA_RECOVERY_BOOT_GRACE", cls.boot_grace_s, float),
             zephyr_boot_grace_s=read("XENOVA_RECOVERY_ZEPHYR_BOOT_GRACE", cls.zephyr_boot_grace_s, float),
             absent_grace_s=read("XENOVA_RECOVERY_ABSENT_GRACE", cls.absent_grace_s, float),
+            agent_sole_publisher=read("XENOVA_RECOVERY_AGENT_SOLE_PUBLISHER", cls.agent_sole_publisher, str).strip().lower(),
+            app_sole_publisher=read("XENOVA_RECOVERY_APP_SOLE_PUBLISHER", cls.app_sole_publisher, str).strip().lower(),
+            agent_peer_fresh_s=read("XENOVA_RECOVERY_AGENT_PEER_FRESH", None, float),
+            app_peer_fresh_s=read("XENOVA_RECOVERY_APP_PEER_FRESH", None, float),
             health_refresh_s=read("XENOVA_RECOVERY_HEALTH_REFRESH", cls.health_refresh_s, float),
             broker_host=read("XENOVA_RECOVERY_BROKER_HOST", cls.broker_host, str),
             broker_port=read("XENOVA_RECOVERY_BROKER_PORT", cls.broker_port, int),

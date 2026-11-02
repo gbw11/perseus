@@ -62,6 +62,8 @@ class LinkState:
 
     agent: bool  # xenova/v1/vms/+/heartbeat 구독 승인
     app: bool  # xenova/v1/apps/+/events 구독 승인
+    # 연결에 성공한 횟수(공용 클라이언트 connections). 두 주기 사이에 끊겼다 다시 붙으면 승인이 그대로여도 값이 바뀐다. None 은 모름
+    connection: int | None = None
 
     @classmethod
     def up(cls) -> "LinkState":
@@ -76,7 +78,9 @@ def link_state(client: Any,*,verified=False) -> LinkState:
     subscribed = getattr(client, "subscribed", None)
     if not callable(subscribed):
         return LinkState.down()  # 승인 여부를 알 수 없는 클라이언트는 관측 경로를 믿지 않는다
-    return LinkState(agent=bool(subscribed(HEARTBEAT_FILTER)), app=bool(subscribed(VERIFIED_APP_EVENTS_FILTER if verified else APP_EVENTS_FILTER)))
+    connection = getattr(client, "connections", None)
+    return LinkState(agent=bool(subscribed(HEARTBEAT_FILTER)), app=bool(subscribed(VERIFIED_APP_EVENTS_FILTER if verified else APP_EVENTS_FILTER)),
+                     connection=connection if isinstance(connection, int) else None)
 
 
 def _identity(envelope: dict[str, Any]) -> tuple[UUID, str, int] | None:
