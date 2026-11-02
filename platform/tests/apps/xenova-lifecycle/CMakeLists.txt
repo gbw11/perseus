@@ -12,7 +12,11 @@ target_sources(app PRIVATE src/boundaries.c
   ${BASE}/xen-runtime/src/netfront.c ${BASE}/xen-runtime/src/netfront_ring.c
   ${BASE}/xen-runtime/src/shutdown.c ${BASE}/xen-runtime/src/shutdown_flow.c
   ${BASE}/xen-runtime/src/grant_pool.c)
-if(XL_STARTER)
+if(XL_NETFRONT_POLICY)
+  target_sources(app PRIVATE src/net_policy.c)
+elseif(XL_WAIT_TEST)
+  target_sources(app PRIVATE src/wait.c)
+elseif(XL_STARTER)
   target_compile_definitions(app PRIVATE CONFIG_XENOVA_DIAGNOSTICS_EXERCISE=1)
   set_source_files_properties(${BASE}/network-starter-app/src/main.c PROPERTIES COMPILE_DEFINITIONS main=xl_starter_main)
   target_sources(app PRIVATE src/starter.c ${BASE}/network-starter-app/src/main.c ${BASE}/network-starter-app/src/exercise.c)
