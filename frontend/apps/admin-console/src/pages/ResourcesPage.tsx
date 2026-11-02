@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import type { DriveState } from '../api/drive';
 import { useMetrics, useVms } from '../api/queries';
 import { VM_CPU_PERCENT_METRIC, type MetricSample, type Vm } from '../api/types';
+import { buildCpuChartScale, cpuChartY, formatCpuTick } from '../domain/cpuChart';
 import { buildMemoryPoolSeries, bytesToKiB, type PoolSnapshot } from '../domain/memoryPools';
 import {
   ago,
@@ -608,12 +609,13 @@ function CpuVmChart({ role, vm }: { role: Role | null; vm: Vm }) {
   const samples = metrics.data?.items ?? [];
   const values = samples.map((sample) => cpuValue(sample)).filter((value): value is number => value != null);
   const current = values.at(-1) ?? null;
+  const scale = buildCpuChartScale(values);
   const points = samples
     .map((sample, index) => {
       const value = cpuValue(sample);
       if (value == null) return null;
       const x = samples.length <= 1 ? 100 : (index / (samples.length - 1)) * 100;
-      const y = 100 - Math.max(0, Math.min(100, value));
+      const y = cpuChartY(value, scale.max);
       return `${x},${y}`;
     })
     .filter((point): point is string => point != null)
@@ -637,24 +639,27 @@ function CpuVmChart({ role, vm }: { role: Role | null; vm: Vm }) {
     >
       <div className={styles.cpuChart}>
         {points ? (
-          <svg
-            viewBox="0 0 100 100"
-            preserveAspectRatio="none"
-            role="img"
-            aria-label={`${vm.name} CPU 사용률 최근 5분 그래프`}
-          >
-            {[0, 25, 50, 75, 100].map((value) => (
-              <line
-                key={value}
-                x1="0"
-                x2="100"
-                y1={100 - value}
-                y2={100 - value}
-                className={styles.cpuGridLine}
-              />
-            ))}
-            <polyline points={points} className={styles.cpuLine} vectorEffect="non-scaling-stroke" />
-          </svg>
+          <div className={styles.cpuPlot}>
+            <div className={styles.cpuYAxis} aria-hidden="true">
+              {scale.ticks.map((value) => (
+                <span key={value} style={{ top: `${100 - (value / scale.max) * 100}%` }}>
+                  {formatCpuTick(value)}%
+                </span>
+              ))}
+            </div>
+            <svg
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              role="img"
+              aria-label={`${vm.name} CPU 사용률 최근 5분 그래프, 세로축 최대 ${scale.max}%`}
+            >
+              {scale.ticks.map((value) => {
+                const y = 100 - (value / scale.max) * 100;
+                return <line key={value} x1="0" x2="100" y1={y} y2={y} className={styles.cpuGridLine} />;
+              })}
+              <polyline points={points} className={styles.cpuLine} vectorEffect="non-scaling-stroke" />
+            </svg>
+          </div>
         ) : (
           <div className={styles.cpuEmpty}>
             <strong>{metrics.isPending ? '메트릭 수신 대기 중' : 'CPU 데이터 없음'}</strong>
