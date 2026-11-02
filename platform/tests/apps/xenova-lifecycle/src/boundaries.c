@@ -23,11 +23,24 @@ static bool advertised;
 static struct xnf_tx_ring *tx_ring;
 static bool event_bound;
 atomic_uint xl_polls;
+atomic_uint xl_tx_done;
+atomic_int xl_poll_error;
 atomic_bool xl_wait_enabled;
+#if defined(XL_PACKET_LOCK_TEST)
+atomic_int xl_packet_lock_error;
+static k_tid_t packet_thread;
+int __real_z_impl_k_mutex_lock(struct k_mutex *,k_timeout_t);
+int __wrap_z_impl_k_mutex_lock(struct k_mutex *m,k_timeout_t timeout) {
+ int rc=k_current_get()==packet_thread?atomic_exchange(&xl_packet_lock_error,0):0;
+ return rc?rc:__real_z_impl_k_mutex_lock(m,timeout);
+}
+#endif
 K_SEM_DEFINE(xl_store_wait,0,1);
 int __real_xnf_poll(struct xnf *);
 int __wrap_xnf_poll(struct xnf *n) {
- atomic_fetch_add(&xl_polls,1);return __real_xnf_poll(n);
+ atomic_fetch_add(&xl_polls,1);int rc=__real_xnf_poll(n);
+ atomic_store(&xl_tx_done,n->stats.tx);
+ if(rc){int empty=0;atomic_compare_exchange_strong(&xl_poll_error,&empty,rc);}return rc;
 }
 static bool is(const char *s) { return !strcmp(xl_case,s); }
 k_tid_t __real_z_impl_k_thread_create(struct k_thread *,k_thread_stack_t *,size_t,k_thread_entry_t,void *,void *,void *,int,uint32_t,k_timeout_t);
@@ -35,6 +48,9 @@ k_tid_t __wrap_z_impl_k_thread_create(struct k_thread *t,k_thread_stack_t *stack
  static unsigned created;
  if(xl_case) {
   created++;
+#if defined(XL_PACKET_LOCK_TEST)
+  if(created==2)packet_thread=t;
+#endif
   if((is("net-monitor-thread")&&created==1)||(is("net-packet-thread")&&created==2))return NULL;
  }
  return __real_z_impl_k_thread_create(t,stack,size,entry,a,b,c,priority,options,delay);
@@ -169,13 +185,18 @@ void net_pkt_unref(struct net_pkt *p) { ARG_UNUSED(p); }
 size_t net_pkt_get_len(struct net_pkt *p) { return p->length; }
 int net_pkt_read(struct net_pkt *p,void *out,size_t n) {
  if(is("net-send-race")){k_sem_give(&xl_acquired);k_sem_take(&xl_release,K_FOREVER);}
+ else if(!strncmp(xl_case,"packet-",7)){
+  k_sem_give(&xl_acquired);assert(!k_sem_take(&xl_release,K_SECONDS(3)));
+ }
  memcpy(out,p->bytes,n);return 0;
 }
-void xl_complete_tx(void) {
+static void complete_tx(bool corrupt) {
  uint32_t end=__atomic_load_n(&tx_ring->h.req_prod,__ATOMIC_ACQUIRE);
  for(uint32_t i=tx_ring->h.rsp_prod;i<end;i++) {
   uint16_t id=tx_ring->ring[i&(XNF_RING_SIZE-1)].req.id;
-  tx_ring->ring[i&(XNF_RING_SIZE-1)].rsp=(struct xnf_tx_response){.id=id,.status=0};
+  tx_ring->ring[i&(XNF_RING_SIZE-1)].rsp=(struct xnf_tx_response){.id=corrupt?UINT16_MAX:id,.status=0};
  }
  __atomic_store_n(&tx_ring->h.rsp_prod,end,__ATOMIC_RELEASE);
 }
+void xl_complete_tx(void) { complete_tx(false); }
+void xl_corrupt_tx(void) { complete_tx(true); }

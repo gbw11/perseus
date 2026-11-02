@@ -28,6 +28,9 @@ struct xnet_status {
 struct xnet_waits {
  uint64_t packet_polls, pending_batches, packet_gap_max_us;
  uint64_t packet_lock_wait_max_us, packet_lock_hold_max_us;
+ /* Worker mutex attempts only; timeout is not a link-health decision. */
+ uint64_t packet_lock_timeouts, packet_last_poll_ms;
+ int packet_lock_first_error;
  uint64_t store_observations, store_lock_wait_max_us, store_response_max_us;
  uint64_t store_unavailable, store_recoveries, last_backend_success_ms;
  bool cycle_clock; /* false: kernel-tick granularity, not sub-tick precision */
