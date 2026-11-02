@@ -51,7 +51,9 @@ def main() -> int:
         log.error("xenova-recovery-worker not started: %s", exc)
         return EXIT_LOCKED
 
-    manager = load_manager(platform_settings.platform_lib, busy_timeout_s=platform_settings.platform_busy_timeout_s)
+    manager = load_manager(
+        platform_settings.platform_lib, busy_timeout_s=platform_settings.platform_busy_timeout_s, read_fork=platform_settings.platform_read_fork
+    )
     rejoin=None
     if os.environ.get('XENOVA_RECOVERY_DRIVE_CONFIG'):
         from .rejoin import production

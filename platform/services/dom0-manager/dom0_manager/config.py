@@ -41,6 +41,9 @@ class Settings:
     # platform 드라이버: 다른 요청이 Manager 를 쓰는 동안 기다릴 최대 초. 넘으면 503 PlatformUnavailable(재시도 가능).
     # 정지가 최대 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다. 조회 드라이버 한도 5초와 맞춘다
     platform_busy_timeout_s: float = 5.0
+    # platform 드라이버: 일반 조회(get·list 등)를 직렬화하지 않고 요청별 Manager(fork)로 부른다. 하위가 조회를 공통 실행 잠금 없이
+    # 처리하는 설치본을 확인한 뒤에만 켠다(drivers/platform.py 머리말)
+    platform_read_fork: bool = False
     # 호출자가 X-Request-Budget-Ms 로 남은 대기 시간을 줄 때, 하위 호출에 넘기기 전에 응답을 돌려줄 몫으로 남겨 둘 초.
     # 실측 전 임시값이다. 0 이면 남은 예산을 전부 하위에 준다
     response_reserve_s: float = 0.5
@@ -103,6 +106,7 @@ class Settings:
             instance_root=read("XENOVA_INSTANCE_ROOT", cls.instance_root, str),
             platform_lib=read("XENOVA_PLATFORM_LIB", cls.platform_lib, str),
             platform_busy_timeout_s=read("XENOVA_PLATFORM_BUSY_TIMEOUT", cls.platform_busy_timeout_s, float),
+            platform_read_fork=read("XENOVA_PLATFORM_READ_FORK", cls.platform_read_fork, as_bool),
             response_reserve_s=read("XENOVA_RESPONSE_RESERVE", cls.response_reserve_s, float),
             recovery_state_dir=read("XENOVA_RECOVERY_STATE_DIR", cls.recovery_state_dir, str),
             mock_samples=read("XENOVA_MOCK_SAMPLES", cls.mock_samples, as_bool),

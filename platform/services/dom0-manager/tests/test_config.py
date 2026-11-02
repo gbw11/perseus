@@ -52,3 +52,10 @@ def test_worker_settings_keep_platform_validation():
         Settings.platform_from_env({"XENOVA_DRIVER": "platform", "XENOVA_CONSOLE_ENABLED": "1", "XENOVA_SHUTDOWN_GRACE": "30"})
     with pytest.raises(ValueError):
         Settings.platform_from_env({"XENOVA_DRIVER": "platform", "XENOVA_PLATFORM_BUSY_TIMEOUT": "0"})
+
+
+def test_worker_settings_keep_the_read_fork_flag():
+    """Worker 도 manager 와 같은 env 의 조회 fork 설정을 따른다."""
+    env = {"XENOVA_DRIVER": "platform", "XENOVA_CONSOLE_ENABLED": "1", "XENOVA_PLATFORM_READ_FORK": "1"}
+    assert Settings.platform_from_env(env).platform_read_fork is True
+    assert Settings.platform_from_env({"XENOVA_DRIVER": "platform"}).platform_read_fork is False
