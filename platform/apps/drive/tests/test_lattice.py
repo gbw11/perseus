@@ -35,6 +35,7 @@ def library(tmp_path_factory):
     lib.probe_decoded.argtypes=[C.c_void_p]
     lib.probe_plan.argtypes=[C.c_void_p,*([C.c_float]*7),C.c_uint,C.c_uint,C.c_uint64,C.c_uint,C.c_float]
     lib.probe_count.argtypes=[C.c_void_p];lib.probe_count.restype=C.c_uint
+    lib.probe_direction.argtypes=[C.c_void_p]
     lib.probe_point.argtypes=[C.c_void_p,C.c_uint,C.POINTER(C.c_float)]
     lib.probe_track.argtypes=[C.c_void_p,*([C.c_float]*6),C.POINTER(C.c_float)]
     lib.probe_metrics.argtypes=[C.c_void_p,C.POINTER(C.c_uint64)]
@@ -112,6 +113,7 @@ def test_actual_search_straight_left_right_bypass_and_rejoin(library,side):
         assert math.dist(path[-1][:2],(4.8,1.6))<=CFG['goal_distance']+.001
         assert abs(path[-1][2])<=CFG['goal_heading']+.001
         if side:
+            assert library.probe_direction(product.handle)==side
             offsets=[p[1]-1.6 for p in path]
             assert (max(offsets) if side>0 else min(offsets))*side>.35
             assert abs(path[-1][1]-1.6)<.12
@@ -132,6 +134,33 @@ def test_current_heading_and_non_nominal_curvature_are_connected(library):
         path=product.path()
         assert path[0][2]==pytest.approx(.15) and path[0][3]==pytest.approx(.13)
         assert abs(path[1][3]-.13)<.1
+    finally:product.close()
+
+
+def test_unrelated_obstacle_does_not_turn_a_follow_correction_into_bypass(library):
+    world=fixture.world();obstacle(world,10,12,27,29)
+    product=Product(library,world)
+    try:
+        assert product.plan(start=(.3,1.45,0,0))==FOUND
+        assert library.probe_direction(product.handle)==0
+        assert library.probe_valid(product.handle)==FOUND
+    finally:product.close()
+
+
+def test_terminal_heading_errors_share_one_total_allowance(library):
+    product=Product(library,fixture.world())
+    try:
+        goal=(4.8,1.6,.12)
+        assert product.plan(goal=goal)==FOUND
+        end=product.path()[-1]
+        # Individually the actual heading is within goal_heading, but its
+        # deviation from the planned terminal state must also be accounted for.
+        sign=1 if end[2]>=goal[2] else -1
+        yaw=goal[2]-sign*.20
+        total=abs(end[2]-goal[2])+abs(yaw-end[2])+.01
+        assert abs(yaw-goal[2])<CFG['goal_heading']<total
+        rc,cmd=product.track((goal[0],goal[1],yaw),0,end[3])
+        assert rc!=STOP and cmd[0]==0
     finally:product.close()
 
 
@@ -175,6 +204,78 @@ def test_curved_reference_and_road_corridor_use_actual_geometry(library):
         assert path[-1][1]-path[0][1]>.7 and path[-1][2]>.2
         assert math.dist(path[-1][:2],goal[:2])<CFG['goal_distance']+.001
         assert library.probe_valid(product.handle)==FOUND
+    finally:product.close()
+
+
+@pytest.mark.parametrize('side',[-1,1])
+@pytest.mark.parametrize('priority',[False,True])
+def test_tight_curve_reaches_goal_with_continuous_nonzero_steering(library,side,priority):
+    world=fixture.world(height=64);radius=1.2;cx=cy=2.7;half_road=.4
+    for group in (world.reference,world.left_boundary,world.right_boundary):del group[:]
+    road_left=[];road_right=[]
+    for k in range(61):
+        angle=-.5+k*.05;x=cx+radius*math.sin(angle);y=cy-side*radius*math.cos(angle)
+        nx,ny=-side*math.sin(angle),math.cos(angle)
+        world.reference.add(x=x,y=y)
+        hard=.9 if priority else half_road
+        world.left_boundary.add(x=x+nx*hard,y=y+ny*hard)
+        world.right_boundary.add(x=x-nx*hard,y=y-ny*hard)
+        road_left.append(fixture.schema.Point(x=x+nx*half_road,y=y+ny*half_road))
+        road_right.append(fixture.schema.Point(x=x-nx*half_road,y=y-ny*half_road))
+    if priority:
+        from xenova_drive_world import mark_road
+        mark_road(world,road_left,road_right)
+    steering=side*math.atan(CFG['wheelbase']/radius)
+    start=(cx,cy-side*radius,0,steering);angle=1.8
+    goal=(cx+radius*math.sin(angle),cy-side*radius*math.cos(angle),side*angle)
+    product=Product(library,world)
+    try:
+        assert product.plan(start=start,goal=goal)==FOUND,product.metrics()
+        path=product.path()
+        assert library.probe_direction(product.handle)==0
+        assert math.dist(path[-1][:2],goal[:2])<=CFG['goal_distance']
+        assert abs(math.remainder(path[-1][2]-goal[2],2*math.pi))<=CFG['goal_heading']
+        assert path[-1][3]*side>.1 # The curved road must not require a straight tail.
+        assert library.probe_valid(product.handle)==FOUND
+        for k,p in enumerate(path):
+            # Independent annulus geometry, including all four actual body corners.
+            cs,sn=math.cos(p[2]),math.sin(p[2])
+            for u in (-CFG['rear']-CFG['margin'],CFG['front']+CFG['margin']):
+                for v in (-CFG['half_width']-CFG['margin'],CFG['half_width']+CFG['margin']):
+                    r=math.hypot(p[0]+cs*u-sn*v-cx,p[1]+sn*u+cs*v-cy)
+                    assert radius-half_road-.002<=r<=radius+half_road+.002
+            if k:
+                dt=math.dist(p[:2],path[k-1][:2])/CFG['primitive_speed']
+                assert abs(p[3]-path[k-1][3])<=CFG['steer_rate']*dt+.001
+        rc,command=product.track(start[:3],0,steering)
+        assert rc==FOUND and command[0]>0
+    finally:product.close()
+
+
+@pytest.mark.parametrize('half_road',[.36,1.0])
+def test_road_priority_uses_shoulder_only_for_blocked_narrow_road_and_returns(library,half_road):
+    from xenova_drive_world import mark_road
+    world=fixture.world();obstacle(world,19,24,13,19)
+    mark_road(world,[fixture.schema.Point(x=p.x,y=1.6+half_road) for p in world.reference],
+                    [fixture.schema.Point(x=p.x,y=1.6-half_road) for p in world.reference])
+    product=Product(library,world)
+    try:
+        assert product.plan(budget_ms=2000)==FOUND,product.metrics()
+        path=product.path()
+        corners=[]
+        for point in path:
+            assert independent_footprint(world,point)
+            x,y,yaw=point[:3]
+            corners.append(max(abs(y+math.sin(yaw)*u+math.cos(yaw)*v-1.6)
+                for u in (-CFG['rear'],CFG['front']) for v in (-CFG['half_width'],CFG['half_width'])))
+        assert (max(corners)>half_road)==(half_road<.5)
+        assert corners[-1]<half_road
+        assert product.metrics()[3]<=CFG['collision_limit'] and product.metrics()[4]<=CFG['node_limit']
+        blocked_world=fixture.world(sequence=2);mark_road(blocked_world,list(world.left_boundary),list(world.right_boundary))
+        blocked_world.occupancy=bytes([255])*len(blocked_world.occupancy)
+        product.update(blocked_world)
+        assert library.probe_valid(product.handle)==10
+        assert product.track((.3,1.6,0),0,0)[0]==10
     finally:product.close()
 
 
