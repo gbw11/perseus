@@ -3,12 +3,12 @@
 import json
 import threading
 import time
-from dataclasses import FrozenInstanceError, fields
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+from fake_gateway import FakeGateway
 
 from dom0_manager.errors import DriverError, DriverTimeout, InvalidState, NotSupportedByPlatform, PlatformUnavailable, VMNotFound
 from dom0_manager.models import VmState
@@ -16,6 +16,7 @@ from dom0_manager.recovery.engine import RecoveryEngine
 from dom0_manager.recovery.events import EventLog
 from dom0_manager.recovery.model import FailureReason, HealthState, Judgment, VmHealth
 from dom0_manager.recovery.policy import RecoveryPolicy
+from dom0_manager.recovery.protection import GatewayProtection
 from dom0_manager.recovery.state import RecoveryRecord, RecoveryStatus, RecoveryStore
 
 VM = UUID("4be41d5f-b8ef-408b-9709-7fe5ac11231f")
@@ -945,6 +946,19 @@ def zephyr_judgment():
     return judgment(reason=APP, kind="zephyr")
 
 
+def protector(root):
+    """현재 binding 이 없는 가짜 Gateway 의 보호 제공자. 이 시험들은 보호 전에 증거 단계에서 보류된다."""
+    return GatewayProtection(FakeGateway(HOST, time.monotonic), deadline_s=5.0, call_budget_s=1.0)
+
+
+def bound_gateway(w):
+    """VM 의 binding 이 EXEC 인 가짜 Gateway 를 이 엔진의 보호 제공자로 붙인다."""
+    gateway = FakeGateway(HOST, lambda: w.clock[0])
+    gateway.bind(str(VM), EXEC)
+    w.engine._protection = GatewayProtection(gateway, deadline_s=5.0, call_budget_s=1.0, clock=lambda: w.clock[0])  # noqa: SLF001
+    return gateway
+
+
 def held(w):
     """보류: 플랫폼 호출·attempt·이벤트 0, 복구는 열려 있고 잠시 뒤 다시 본다."""
     record = w.record()
@@ -1004,15 +1018,7 @@ def test_drive_vm_force_needs_current_gateway_protection(tmp_path):
     w.watcher.failing(VM, APP, execution_id=EXEC)
     w.engine.on_judgment(zephyr_judgment())
     w.tick()
-    assert held(w)  # 보호 수명주기(346) 전에는 근거 공급자가 없다
-
-    seen = []
-    protected = make(tmp_path / "with", drive_vm_ids=[VM], protection=lambda query: seen.append(query.execution_id) or True) \
-        if (tmp_path / "with").mkdir() is None else None
-    protected.watcher.failing(VM, APP, execution_id=EXEC)
-    protected.engine.on_judgment(zephyr_judgment())
-    protected.tick()
-    assert protected.platform.recover_calls()[0][1]["mode"] == "force-restart" and seen == [EXEC]
+    assert held(w)  # Gateway 보호 제공자가 없다. 보호를 받은 뒤의 force 는 test_recovery_protection.py
 
 
 def test_non_drive_vm_and_graceful_or_absent_paths_are_not_gated(tmp_path):
@@ -1049,7 +1055,7 @@ def test_held_force_is_still_cancelled_by_a_user_stop(tmp_path):
 
 def test_unknown_drive_classification_holds_every_zephyr_force(tmp_path):
     """drive config 가 없어 주행 VM 이 어느 것인지 모르면 Zephyr force 는 모두 보류한다(fail-closed)."""
-    w = make(tmp_path, drive_vm_ids=None, protection=lambda query: True)
+    w = make(tmp_path, drive_vm_ids=None, protection=protector(tmp_path))
     w.watcher.failing(VM, APP, execution_id=EXEC)
     w.engine.on_judgment(zephyr_judgment())
     w.tick()
@@ -1085,7 +1091,7 @@ def test_drive_vm_evidence_must_name_the_platform_execution(tmp_path):
     for execution_id in (None, "other-execution"):
         root = tmp_path / str(execution_id)
         root.mkdir()
-        w = make(root, drive_vm_ids=[VM], protection=lambda query: True)
+        w = make(root, drive_vm_ids=[VM], protection=protector(root))
         w.watcher.failing(VM, APP, execution_id=execution_id)
         w.engine.on_judgment(zephyr_judgment())
         w.tick()
@@ -1097,19 +1103,18 @@ def test_protection_is_read_outside_the_engine_lock_and_rechecked(tmp_path):
     w.watcher.failing(VM, APP, execution_id=EXEC)
     record = w.engine.on_judgment(zephyr_judgment())
     lock_free = threading.Event()
+    gateway = bound_gateway(w)
+    submit = gateway.submit
 
-    def protection(query):
-        if not w.engine._lock._is_owned():  # noqa: SLF001 - 이 조회 스레드는 Gateway I/O 동안 엔진 잠금을 쥐지 않는다
+    def stop_meanwhile(request_id, spec):
+        if not w.engine._lock._is_owned():  # noqa: SLF001 - 이 스레드는 Gateway I/O 동안 엔진 잠금을 쥐지 않는다
             lock_free.set()
-        with pytest.raises(FrozenInstanceError):
-            query.execution_id = "changed"  # 읽기 전용 사본이다
-        assert all(isinstance(getattr(query, f.name), (str, int, UUID, type(None))) for f in fields(query))  # 스칼라만: 중첩 변경 경로 없음
-        assert (query.vm_id, query.execution_id, query.domid, query.xen_state, query.lifecycle_generation) == (VM, EXEC, 5, "running", 0)
-        with w.engine._lock:  # noqa: SLF001 - 조회하는 사이 사용자 stop 이 엔진 잠금 안에서 기록됐다
+        result = submit(request_id, spec)
+        with w.engine._lock:  # noqa: SLF001 - 보호를 받는 사이 사용자 stop 이 엔진 잠금 안에서 기록됐다
             record.cancel_requested = True
-        return True
+        return result
 
-    w.engine._protection = protection  # noqa: SLF001
+    gateway.submit = stop_meanwhile
     w.tick()
     wait_until(lambda: all(f.done() for f in w.engine._futures.values()))  # noqa: SLF001
     w.engine.collect(w.clock[0])
@@ -1120,12 +1125,14 @@ def test_protection_is_read_outside_the_engine_lock_and_rechecked(tmp_path):
     changed = make(tmp_path / "changed", drive_vm_ids=[VM]) if (tmp_path / "changed").mkdir() is None else None
     changed.watcher.failing(VM, APP, execution_id=EXEC)
     changed.engine.on_judgment(zephyr_judgment())
+    gateway = bound_gateway(changed)
+    submit = gateway.submit
 
-    def evidence_changes(query):
-        changed.watcher.set(VM, HealthState.OBSERVATION_UNAVAILABLE)  # 조회하는 사이 채널 증거가 사라졌다
-        return True
+    def evidence_changes(request_id, spec):
+        changed.watcher.set(VM, HealthState.OBSERVATION_UNAVAILABLE)  # 보호를 받는 사이 채널 증거가 사라졌다
+        return submit(request_id, spec)
 
-    changed.engine._protection = evidence_changes  # noqa: SLF001
+    gateway.submit = evidence_changes
     changed.tick()
     assert held(changed)
 
