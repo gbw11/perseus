@@ -3,6 +3,7 @@
 import json
 import threading
 import time
+from dataclasses import FrozenInstanceError, fields
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import UUID
@@ -83,9 +84,13 @@ class FakeWatcher:
     def health(self, vm_id):
         return self.healths.get(vm_id)
 
-    def set(self, vm_id, state, *, desired="running", reason=None, intent_known=True):
+    def set(self, vm_id, state, *, desired="running", reason=None, intent_known=True, domid=5, execution_id=None):
         self.healths[vm_id] = VmHealth(vm_id=vm_id, state=state, desired_state=desired, xen_state="running", heartbeat_age_s=None, reason=reason,
-                                       manager_seq=1, intent_known=intent_known)
+                                       manager_seq=1, intent_known=intent_known, domid=domid, execution_id=execution_id)
+
+    def failing(self, vm_id, reason, **kwargs):
+        """지금 실행(가짜 플랫폼 view 의 domid 5)에 대한 지금의 장애 증거."""
+        self.set(vm_id, HealthState.UNHEALTHY, reason=reason, **kwargs)
 
 
 def judgment(vm_id=VM, reason=FailureReason.HEARTBEAT_LOST, recovery_id=REC, kind="linux"):
@@ -93,7 +98,7 @@ def judgment(vm_id=VM, reason=FailureReason.HEARTBEAT_LOST, recovery_id=REC, kin
                     desired_state="running", intent_revision=3, domid=5, xen_state=VmState.running, heartbeat_age_s=35.0)
 
 
-def make(tmp_path, policy=None, store=None, *, inline=True, outbox=None, id_start=100):
+def make(tmp_path, policy=None, store=None, *, inline=True, outbox=None, id_start=100, **engine_options):
     """outbox 를 주면 진짜 EventLog 에 저장한다. 재시작을 흉내 낼 때는 id_start 를 달리해 새 프로세스의 UUID 가 겹치지 않게 한다."""
     store = store or RecoveryStore(tmp_path / "recoveries.json")
     clock = [1000.0]
@@ -114,9 +119,10 @@ def make(tmp_path, policy=None, store=None, *, inline=True, outbox=None, id_star
         world.events.append(event)
         return True
 
+    engine_options.setdefault("drive_vm_ids", ())  # 주행 VM 이 없는 것이 확인된 Worker. 분류를 모르는 경우는 None 을 따로 준다
     world.engine = RecoveryEngine(
         policy or RecoveryPolicy(backoff_s=(5.0, 15.0, 30.0)), world.platform, world.watcher, store,
-        on_event=sink, clock=lambda: clock[0], wall=lambda: WALL, new_id=new_id, inline=inline,
+        on_event=sink, clock=lambda: clock[0], wall=lambda: WALL, new_id=new_id, inline=inline, **engine_options,
     )
     world.tick = lambda: world.engine.tick(clock[0])
     world.advance = lambda s: clock.__setitem__(0, clock[0] + s)
@@ -287,7 +293,8 @@ def test_explicit_graceful_failure_escalates_the_next_attempt_to_force_only_when
     w.platform.results = [error]
     w.engine.on_judgment(judgment())
     w.tick()
-    assert w.record().status == RecoveryStatus.BACKOFF and w.record().graceful_failed is True
+    assert w.record().status == RecoveryStatus.BACKOFF and w.record().graceful_failed_execution_id == EXEC
+    w.watcher.failing(VM, FailureReason.HEARTBEAT_LOST)  # 같은 실행이 여전히 장애다: force 근거
     w.advance(5)
     w.tick()
     assert w.platform.recover_calls()[1][1]["mode"] == "force-restart"
@@ -299,7 +306,7 @@ def test_lost_adapter_result_rechecks_original_journal_without_force_escalation(
     w.engine.on_judgment(judgment())
     w.tick()
     record = w.record()
-    assert record.status == RecoveryStatus.EXECUTING and record.replay and record.graceful_failed is False
+    assert record.status == RecoveryStatus.EXECUTING and record.replay and record.graceful_failed_execution_id is None
     spec=dict(record.request)
     w.platform.journal[spec['recovery_attempt_id']]={'phase':'completed','result':{'execution_id':'confirmed-new'}}
     w.advance(5)
@@ -317,7 +324,7 @@ def test_stop_during_lost_response_is_not_false_cancellation_or_new_attempt(tmp_
     assert record.cancel_requested and record.status==RecoveryStatus.EXECUTING
     w.advance(260);w.tick()
     assert record.status==RecoveryStatus.FAILED and record.final
-    assert record.last_error['code']=='RECONCILE_REQUIRED' and not record.graceful_failed
+    assert record.last_error['code']=='RECONCILE_REQUIRED' and record.graceful_failed_execution_id is None
     assert record.request==spec and len(w.platform.recover_calls())==1
 
 
@@ -358,6 +365,9 @@ def test_absent_domain_uses_start_if_absent_with_observation_revision(tmp_path):
 @pytest.mark.parametrize("reason, kind", [(FailureReason.APP_HEARTBEAT_LOST, "zephyr"), (FailureReason.DOMAIN_CRASHED, "linux")])
 def test_zephyr_and_crashed_domains_use_force_restart(tmp_path, reason, kind):
     w = make(tmp_path)
+    w.watcher.failing(VM, reason)
+    if reason == FailureReason.DOMAIN_CRASHED:
+        w.platform.views[VM] = crashed_view()
     w.engine.on_judgment(judgment(reason=reason, kind=kind))
     w.tick()
     assert w.platform.recover_calls()[0][1]["mode"] == "force-restart"
@@ -369,7 +379,7 @@ def test_force_escalation_is_off_by_default(tmp_path):
     w.platform.results = [DriverTimeout("stop deadline", platform_code="DEADLINE_EXCEEDED")]
     w.engine.on_judgment(judgment())
     w.tick()
-    assert w.record().status == RecoveryStatus.BACKOFF and w.record().graceful_failed is False
+    assert w.record().status == RecoveryStatus.BACKOFF and w.record().graceful_failed_execution_id is None
     w.advance(5)
     w.tick()
     assert [c[1]["mode"] for c in w.platform.recover_calls()] == ["graceful-restart", "graceful-restart"]  # 운영자가 켜지 않으면 파괴적 재시작으로 올리지 않는다
@@ -919,3 +929,241 @@ def test_replay_is_not_cancelled_by_a_stale_stopped_intent(tmp_path):
     assert record.status != RecoveryStatus.CANCELLED
     calls = w.platform.recover_calls()
     assert len(calls) == 2 and calls[-1][1] == spec  # 같은 원 spec 재전달(플랫폼이 expected_intent_revision 을 다시 본다)
+
+
+
+# ---- force-restart 증거 게이트 (S15P31E110-347) ----
+
+APP = FailureReason.APP_HEARTBEAT_LOST
+
+
+def crashed_view():
+    return {**view(), "xen_state": "crashed"}
+
+
+def zephyr_judgment():
+    return judgment(reason=APP, kind="zephyr")
+
+
+def held(w):
+    """보류: 플랫폼 호출·attempt·이벤트 0, 복구는 열려 있고 잠시 뒤 다시 본다."""
+    record = w.record()
+    return (w.platform.recover_calls() == [] and record.attempt == 0 and record.open and w.events == []
+            and record.due_monotonic is not None)
+
+
+@pytest.mark.parametrize("health", [
+    None,  # 건강 스냅샷 없음
+    dict(state=HealthState.OBSERVATION_UNAVAILABLE),  # 동료 채널 증거 없음(335) 등
+    dict(state=HealthState.UNHEALTHY, reason=APP, intent_known=False),  # 의도를 못 읽음
+    dict(state=HealthState.UNHEALTHY, reason=FailureReason.DOMAIN_ABSENT),  # 다른 사유
+    dict(state=HealthState.HEALTHY),
+    dict(state=HealthState.UNHEALTHY, reason=APP, domid=9),  # 다른 실행의 증거
+    dict(state=HealthState.UNHEALTHY, reason=APP, execution_id="other-execution"),
+])
+def test_zephyr_force_is_held_without_current_evidence_for_the_current_execution(tmp_path, health):
+    w = make(tmp_path)
+    if health is not None:
+        w.watcher.set(VM, health.pop("state"), **health)
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    if health is not None and w.record().status == RecoveryStatus.RECOVERED:
+        assert w.platform.recover_calls() == []  # HEALTHY 는 기존 규칙대로 시도 전에 회복으로 닫힌다(재시작 0)
+        return
+    assert held(w)
+
+
+def test_held_force_starts_normally_once_the_evidence_appears(tmp_path):
+    w = make(tmp_path)
+    w.watcher.set(VM, HealthState.OBSERVATION_UNAVAILABLE)
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    assert held(w)
+    w.advance(5)
+    w.tick()
+    assert held(w)  # 아직 근거 없음: 다시 봐도 시도 0
+    w.watcher.failing(VM, APP, execution_id=EXEC)
+    w.advance(5)
+    w.tick()
+    (_, spec, _), = w.platform.recover_calls()
+    assert spec["mode"] == "force-restart" and w.record().attempt == 1
+    assert [e["type"] for e in w.events] == ["recovery.started", "recovery.completed"]
+
+
+def test_crash_force_needs_xen_evidence_on_the_same_execution_not_the_app_channel(tmp_path):
+    w = make(tmp_path)
+    w.watcher.failing(VM, FailureReason.DOMAIN_CRASHED)
+    w.platform.views[VM] = crashed_view()
+    w.engine.on_judgment(judgment(reason=FailureReason.DOMAIN_CRASHED, kind="zephyr"))
+    w.tick()
+    assert w.platform.recover_calls()[0][1]["mode"] == "force-restart"
+
+
+def test_drive_vm_force_needs_current_gateway_protection(tmp_path):
+    w = make(tmp_path, drive_vm_ids=[VM])
+    w.watcher.failing(VM, APP, execution_id=EXEC)
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    assert held(w)  # 보호 수명주기(346) 전에는 근거 공급자가 없다
+
+    seen = []
+    protected = make(tmp_path / "with", drive_vm_ids=[VM], protection=lambda query: seen.append(query.execution_id) or True) \
+        if (tmp_path / "with").mkdir() is None else None
+    protected.watcher.failing(VM, APP, execution_id=EXEC)
+    protected.engine.on_judgment(zephyr_judgment())
+    protected.tick()
+    assert protected.platform.recover_calls()[0][1]["mode"] == "force-restart" and seen == [EXEC]
+
+
+def test_non_drive_vm_and_graceful_or_absent_paths_are_not_gated(tmp_path):
+    w = make(tmp_path, drive_vm_ids=[VM2])  # 이 VM 은 주행 VM 이 아니다
+    w.watcher.failing(VM, APP)
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    assert w.platform.recover_calls()[0][1]["mode"] == "force-restart"
+
+    linux = make(tmp_path / "linux", drive_vm_ids=[VM]) if (tmp_path / "linux").mkdir() is None else None
+    linux.engine.on_judgment(judgment())  # 건강 스냅샷 없음: graceful 은 게이트 대상이 아니다
+    linux.tick()
+    assert linux.platform.recover_calls()[0][1]["mode"] == "graceful-restart"
+
+    absent = make(tmp_path / "absent", drive_vm_ids=[VM]) if (tmp_path / "absent").mkdir() is None else None
+    absent.platform.views[VM] = view(present=False)
+    absent.engine.on_judgment(zephyr_judgment())
+    absent.tick()
+    assert absent.platform.recover_calls()[0][1]["mode"] == "start-if-absent"
+
+
+def test_held_force_is_still_cancelled_by_a_user_stop(tmp_path):
+    w = make(tmp_path)
+    w.watcher.set(VM, HealthState.OBSERVATION_UNAVAILABLE)
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    assert held(w)
+    w.watcher.set(VM, HealthState.STOPPED, desired="stopped")
+    w.advance(5)
+    w.tick()
+    assert w.record().status == RecoveryStatus.CANCELLED and w.platform.recover_calls() == []
+
+
+
+def test_unknown_drive_classification_holds_every_zephyr_force(tmp_path):
+    """drive config 가 없어 주행 VM 이 어느 것인지 모르면 Zephyr force 는 모두 보류한다(fail-closed)."""
+    w = make(tmp_path, drive_vm_ids=None, protection=lambda query: True)
+    w.watcher.failing(VM, APP, execution_id=EXEC)
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    assert held(w)
+    linux = make(tmp_path / "linux", drive_vm_ids=None) if (tmp_path / "linux").mkdir() is None else None
+    linux.watcher.failing(VM, FailureReason.DOMAIN_CRASHED)
+    linux.platform.views[VM] = crashed_view()
+    linux.engine.on_judgment(judgment(reason=FailureReason.DOMAIN_CRASHED))
+    linux.tick()
+    assert linux.platform.recover_calls()[0][1]["mode"] == "force-restart"  # Linux 는 주행 VM 이 아니다
+
+
+@pytest.mark.parametrize("first, kind", [(APP, "zephyr"), (FailureReason.HEARTBEAT_LOST, "linux")])
+def test_crash_after_another_failure_is_stronger_evidence_for_force(tmp_path, first, kind):
+    """최초 사유가 생존 신호 손실이어도 같은 실행이 지금 crashed 면 그 증거로 force 한다(사유가 바뀌어도 영구 보류하지 않음)."""
+    w = make(tmp_path)
+    w.watcher.failing(VM, FailureReason.DOMAIN_CRASHED)
+    w.platform.views[VM] = crashed_view()
+    w.engine.on_judgment(judgment(reason=first, kind=kind))
+    w.tick()
+    assert w.platform.recover_calls()[0][1]["mode"] == "force-restart"
+
+
+def test_crash_evidence_is_held_when_the_platform_no_longer_sees_a_crash(tmp_path):
+    w = make(tmp_path)
+    w.watcher.failing(VM, FailureReason.DOMAIN_CRASHED)  # 감시기는 crashed 를 봤지만 플랫폼 재조회는 running
+    w.engine.on_judgment(judgment(reason=FailureReason.DOMAIN_CRASHED, kind="zephyr"))
+    w.tick()
+    assert held(w)
+
+
+def test_drive_vm_evidence_must_name_the_platform_execution(tmp_path):
+    for execution_id in (None, "other-execution"):
+        root = tmp_path / str(execution_id)
+        root.mkdir()
+        w = make(root, drive_vm_ids=[VM], protection=lambda query: True)
+        w.watcher.failing(VM, APP, execution_id=execution_id)
+        w.engine.on_judgment(zephyr_judgment())
+        w.tick()
+        assert held(w), execution_id
+
+
+def test_protection_is_read_outside_the_engine_lock_and_rechecked(tmp_path):
+    w = make(tmp_path, drive_vm_ids=[VM], inline=False)  # 실제 Worker 처럼 실행 스레드에서 시도한다
+    w.watcher.failing(VM, APP, execution_id=EXEC)
+    record = w.engine.on_judgment(zephyr_judgment())
+    lock_free = threading.Event()
+
+    def protection(query):
+        if not w.engine._lock._is_owned():  # noqa: SLF001 - 이 조회 스레드는 Gateway I/O 동안 엔진 잠금을 쥐지 않는다
+            lock_free.set()
+        with pytest.raises(FrozenInstanceError):
+            query.execution_id = "changed"  # 읽기 전용 사본이다
+        assert all(isinstance(getattr(query, f.name), (str, int, UUID, type(None))) for f in fields(query))  # 스칼라만: 중첩 변경 경로 없음
+        assert (query.vm_id, query.execution_id, query.domid, query.xen_state, query.lifecycle_generation) == (VM, EXEC, 5, "running", 0)
+        with w.engine._lock:  # noqa: SLF001 - 조회하는 사이 사용자 stop 이 엔진 잠금 안에서 기록됐다
+            record.cancel_requested = True
+        return True
+
+    w.engine._protection = protection  # noqa: SLF001
+    w.tick()
+    wait_until(lambda: all(f.done() for f in w.engine._futures.values()))  # noqa: SLF001
+    w.engine.collect(w.clock[0])
+    assert lock_free.is_set()
+    assert record.status == RecoveryStatus.CANCELLED and w.platform.recover_calls() == []
+    w.engine.shutdown()
+
+    changed = make(tmp_path / "changed", drive_vm_ids=[VM]) if (tmp_path / "changed").mkdir() is None else None
+    changed.watcher.failing(VM, APP, execution_id=EXEC)
+    changed.engine.on_judgment(zephyr_judgment())
+
+    def evidence_changes(query):
+        changed.watcher.set(VM, HealthState.OBSERVATION_UNAVAILABLE)  # 조회하는 사이 채널 증거가 사라졌다
+        return True
+
+    changed.engine._protection = evidence_changes  # noqa: SLF001
+    changed.tick()
+    assert held(changed)
+
+
+def test_held_reason_is_forgotten_when_the_recovery_closes(tmp_path):
+    w = make(tmp_path)
+    w.watcher.set(VM, HealthState.OBSERVATION_UNAVAILABLE)
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    assert w.engine._held  # noqa: SLF001
+    w.watcher.set(VM, HealthState.STOPPED, desired="stopped")
+    w.advance(5)
+    w.tick()
+    assert w.record().status == RecoveryStatus.CANCELLED and w.engine._held == {}  # noqa: SLF001
+
+
+
+def test_old_crash_does_not_force_a_new_execution_with_a_heartbeat_loss(tmp_path):
+    """E1 이 crashed 로 열린 복구 → 밖에서 E2 가 시작됨 → E2 heartbeat 손실: 지금 증거대로 E2 에 graceful 이다(영구 보류도 force 도 아님)."""
+    w = make(tmp_path)
+    w.engine.on_judgment(judgment(reason=FailureReason.DOMAIN_CRASHED))
+    w.watcher.failing(VM, FailureReason.HEARTBEAT_LOST, domid=5)
+    w.tick()  # 가짜 view 는 running E(EXEC) — E2
+    (_, spec, _), = w.platform.recover_calls()
+    assert spec["mode"] == "graceful-restart" and spec["expected_execution"] == {"execution_id": EXEC}
+
+
+@pytest.mark.parametrize("still_same_execution", [True, False])
+def test_graceful_failure_escalates_only_on_the_execution_that_failed(tmp_path, still_same_execution):
+    w = make(tmp_path, policy=RecoveryPolicy(escalate_to_force=True))
+    w.platform.results = [DriverTimeout("graceful shutdown timed out", platform_code="XEN_EXECUTION_FAILED")]
+    w.engine.on_judgment(judgment())
+    w.tick()
+    assert w.record().graceful_failed_execution_id == EXEC
+    if not still_same_execution:
+        w.platform.views[VM] = {**view(), "execution_id": "exec-2", "domid": 6}  # 그 사이 다른 경로로 새 실행
+    w.watcher.failing(VM, FailureReason.HEARTBEAT_LOST, domid=w.platform.views.get(VM, view())["domid"])
+    w.advance(5)
+    w.tick()
+    mode = w.platform.recover_calls()[1][1]["mode"]
+    assert mode == ("force-restart" if still_same_execution else "graceful-restart")

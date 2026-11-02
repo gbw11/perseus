@@ -81,7 +81,8 @@ class RecoveryRecord:
     cancel_requested: bool = False  # 실행 중에 사용자가 껐다. 실행 결과를 회수한 뒤 취소로 닫는다
     execution_id: str | None = None  # 플랫폼이 결합한 새 실행 ID
     last_error: dict[str, Any] | None = None  # {code, platform_code, message}
-    graceful_failed: bool = False  # graceful-restart 가 정상 종료 실패로 끝나 force-restart 로 올렸다
+    # graceful-restart 가 정상 종료에 실패한 실행. 같은 실행이 지금도 돌 때만 다음 시도를 force-restart 로 올린다(다른 실행에 옛 실패를 쓰지 않음)
+    graceful_failed_execution_id: str | None = None
     attempt_closed: bool = False  # 현재 attempt 의 종료 이벤트(재시도 실패)를 이미 냈다. 그 뒤의 recovered·cancelled 는 시도에 붙이지 않는다
     final: bool = False
     closed_monotonic: float | None = None
@@ -106,6 +107,13 @@ class RecoveryRecord:
         if not isinstance(data, dict):
             raise ValueError("recovery record must be an object")
         fields = dict(data)
+        if "graceful_failed" in fields:
+            # 실행을 적기 전의 상태 파일: 승격 근거를 그 시도가 겨냥한 원 실행으로 옮긴다. 원 실행을 모르면 승격하지 않는다
+            legacy = fields.pop("graceful_failed")
+            if type(legacy) is not bool:
+                raise ValueError(f"graceful_failed must be a boolean, got {legacy!r}")
+            expected = ((fields.get("request") or {}).get("expected_execution") or {}) if isinstance(fields.get("request"), dict) else {}
+            fields.setdefault("graceful_failed_execution_id", expected.get("execution_id") if legacy is True else None)
         known = set(cls.__dataclass_fields__)
         unknown = set(fields) - known
         if unknown:
@@ -142,7 +150,9 @@ class RecoveryRecord:
                 raise ValueError(f"{name} must be a finite number or null")
         if self.mode is not None and self.mode not in MODES:
             raise ValueError(f"unknown mode {self.mode!r}")
-        for name in ("replay", "cancel_requested", "graceful_failed", "final", "attempt_closed"):
+        if self.graceful_failed_execution_id is not None and (not isinstance(self.graceful_failed_execution_id, str) or not self.graceful_failed_execution_id):
+            raise ValueError("graceful_failed_execution_id must be a non-empty string or null")
+        for name in ("replay", "cancel_requested", "final", "attempt_closed"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a boolean")
         if not isinstance(self.pending_events, list):

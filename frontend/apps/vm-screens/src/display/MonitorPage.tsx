@@ -55,9 +55,23 @@ export function MonitorPage() {
   const mapped = output?.screen === (instrument ? 'instrument' : 'infotainment');
   const fresh = connected && mapped && p?.state.drive.source.status === 'fresh';
   const mode = fresh ? p.state.drive.mode : 'unknown';
-  const modeLabel = MODES[mode] ?? '주행 모드 미확인';
+  const authority = fresh ? p.state.drive.authority : null;
+  const preparing =
+    authority &&
+    mode !== 'unknown' &&
+    ['AUTO', 'MANUAL'].includes(mode) &&
+    (authority.phase !== 'APPLIED' || !authority.output_permitted || !p?.state.drive.active_vm_id);
+  const modeLabel = preparing
+    ? `${mode === 'AUTO' ? '자율' : '수동'} 모드 선택 · ${authority.phase === 'FAILED' ? '구동 확인 필요' : '구동 준비 중'}`
+    : authority && mode === 'SAFE_STOP'
+      ? '안전 정지 모드'
+      : (MODES[mode] ?? '주행 모드 미확인');
   const selected = p?.state.vms.find((v) => v.vm_id === output?.vm_id);
   const active = fresh ? p.state.vms.find((v) => v.vm_id === p.state.drive.active_vm_id) : null;
+  const selectedDrive =
+    authority && !authority.storage_uncertain
+      ? p?.state.vms.find((v) => v.vm_id === authority.selected_vm_id)
+      : null;
   return (
     <main className={styles.screen} data-theme="dark" data-testid={outputId} data-connected={connected}>
       <header className={styles.header}>
@@ -100,7 +114,7 @@ export function MonitorPage() {
               <span className={styles.caption}>DRIVE MODE</span>
               <strong>{modeLabel}</strong>
               <span className={styles.modeCode}>{mode === 'unknown' ? '—' : mode}</span>
-              <p>확정된 주행 모드를 표시합니다.</p>
+              <p>{authority ? '제어 상태 표시 · 실제 차량 이동과 구분' : '확정된 주행 모드를 표시합니다.'}</p>
             </article>
             <article className={styles.battery} aria-label="차량 배터리">
               <div>
@@ -119,7 +133,11 @@ export function MonitorPage() {
         <>
           <section className={styles.modeStrip} aria-label="주행 안내">
             <strong>{modeLabel}</strong>
-            <span>현재 구동 {active ? ROLE[active.role].name : '미확인'}</span>
+            <span>
+              {preparing && selectedDrive
+                ? `선택 ${ROLE[selectedDrive.role].name} · 구동 준비 중`
+                : `현재 구동 ${active ? ROLE[active.role].name : '미확인'}`}
+            </span>
           </section>
           <section className={styles.vmStrip} aria-label="현재 켜진 VM">
             {p?.state.vms.map((v) => {

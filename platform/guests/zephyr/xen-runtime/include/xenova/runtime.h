@@ -12,6 +12,9 @@ int xsr_close(int64_t deadline);
 /* Body uses the supplied client under the session lock; do not nest xsr_* calls. */
 int xsr_transaction(int timeout_ms, xs_transaction_fn body, void *context);
 int xsr_watch_next(uint32_t watch, int timeout_ms);
+/* Same watch operation; snapshot session health under the existing lock.
+ * Preserve rc even when a partial send poisoned the session with ETIMEDOUT. */
+int xsr_watch_next_status(uint32_t watch, int timeout_ms, bool *unusable);
 /* Remove only the caller's watch; does not close other users' shared session. */
 int xsr_unwatch(uint32_t watch, int64_t deadline);
 int xsr_read(const char *path, char *value, size_t capacity, int timeout_ms);

@@ -1,0 +1,77 @@
+{
+  "environment": "local headless Chrome / synthetic API / real production build",
+  "results": [
+    {
+      "output": "monitor-1",
+      "phase": "preparing",
+      "label": "자율 모드 선택 · 구동 준비 중",
+      "dimensions": {
+        "width": 1280,
+        "height": 720,
+        "headerTop": 16,
+        "footerBottom": 681.921875
+      },
+      "screenshot": "monitor-1-preparing.png"
+    },
+    {
+      "output": "monitor-2",
+      "phase": "preparing",
+      "label": "자율 모드 선택 · 구동 준비 중",
+      "dimensions": {
+        "width": 1280,
+        "height": 720,
+        "headerTop": 16,
+        "footerBottom": 669.921875
+      },
+      "screenshot": "monitor-2-preparing.png"
+    },
+    {
+      "output": "monitor-1",
+      "phase": "applied",
+      "label": "자율주행",
+      "dimensions": {
+        "width": 1280,
+        "height": 720,
+        "headerTop": 16,
+        "footerBottom": 681.921875
+      },
+      "screenshot": "monitor-1-applied.png"
+    },
+    {
+      "output": "monitor-2",
+      "phase": "applied",
+      "label": "자율주행",
+      "dimensions": {
+        "width": 1280,
+        "height": 720,
+        "headerTop": 16,
+        "footerBottom": 669.921875
+      },
+      "screenshot": "monitor-2-applied.png"
+    },
+    {
+      "output": "monitor-1",
+      "phase": "uncertain",
+      "label": "주행 모드 미확인",
+      "dimensions": {
+        "width": 1280,
+        "height": 720,
+        "headerTop": 16,
+        "footerBottom": 681.921875
+      },
+      "screenshot": "monitor-1-uncertain.png"
+    },
+    {
+      "output": "monitor-2",
+      "phase": "uncertain",
+      "label": "주행 모드 미확인",
+      "dimensions": {
+        "width": 1280,
+        "height": 720,
+        "headerTop": 16,
+        "footerBottom": 669.921875
+      },
+      "screenshot": "monitor-2-uncertain.png"
+    }
+  ]
+}

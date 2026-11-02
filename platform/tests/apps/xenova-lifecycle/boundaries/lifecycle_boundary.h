@@ -4,6 +4,8 @@
 #include <zephyr/kernel.h>
 #include <stdatomic.h>
 extern atomic_uint xl_polls;
+extern atomic_uint xl_tx_done;
+extern atomic_int xl_poll_error;
 extern atomic_bool xl_wait_enabled;
 extern struct k_sem xl_store_wait;
 #include <stdint.h>
@@ -60,5 +62,9 @@ extern const char *xl_case;
 extern unsigned xl_hypercalls,xl_grants,xl_revokes,xl_opened,xl_closed,xl_features;
 extern bool xl_retry,xl_race;
 void xl_complete_tx(void);
+void xl_corrupt_tx(void);
+#if defined(XL_PACKET_LOCK_TEST)
+extern atomic_int xl_packet_lock_error;
+#endif
 extern struct k_sem xl_acquired,xl_release;
 #endif
