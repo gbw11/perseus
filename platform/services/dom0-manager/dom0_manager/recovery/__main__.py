@@ -1,6 +1,6 @@
 """`python -m dom0_manager.recovery`: Recovery Worker 프로세스. dom0-manager HTTP 와 별도 systemd 유닛으로 돈다.
 
-플랫폼·xl 설정은 XENOVA_*(dom0_manager.config.Settings), Worker 설정은 XENOVA_RECOVERY_* 다. XENOVA_DRIVER 는 platform 이어야 한다
+플랫폼·xl 설정은 XENOVA_*(dom0_manager.config.Settings.platform_from_env, HTTP 전용 값은 읽지 않음), Worker 설정은 XENOVA_RECOVERY_* 다. XENOVA_DRIVER 는 platform 이어야 한다
 (desired_state 는 플랫폼 registry 에만 있다). SIGTERM·SIGINT 로 멈춘다. 종료 코드: 설정 오류 2, 정상 0.
 """
 
@@ -36,7 +36,7 @@ log = logging.getLogger("dom0_manager.recovery")
 def main() -> int:
     try:
         settings = RecoverySettings.from_env()
-        platform_settings = Settings.from_env()
+        platform_settings = Settings.platform_from_env()
         policy = RecoveryPolicy.from_env()
     except ValueError as exc:
         print(f"xenova-recovery-worker: {exc}", file=sys.stderr)
