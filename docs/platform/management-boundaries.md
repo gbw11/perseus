@@ -249,7 +249,10 @@ Worker의 원 결과 소비·Standby 재합류 종단 연결은 담당자 인수
 
 증상을 조사할 때는 UUID·현재 host_boot_id·intent revision·operation/attempt·execution을
 함께 기록한다. 현재 domain과 원 journal을 구분하고 비밀 설정 전체를 출력하지 않는다.
-`get/probe`는 실제 관측, `snapshot`은 유효기간이 있는 캐시, 작업 이력 명령은 원 기록 조회다.
+`intents`는 등록/lifecycle/저장 의도 metadata만 읽고 실행을 관측하지 않는다.
+`get/probe/execution-context`는 같은 정합성 엔진의 현재 관측이며 snapshot을 게시한다.
+`snapshot`은 유효기간이 있는 과거 관측, 작업 이력 명령은 원 기록 조회다.
+status는 출력 형식과 무관하게 list이며 옛 자산/시각 종합 점검은 diagnose --details로 요청한다.
 
 로컬 FakeXen/실제 systemd 격리, 실보드 개별 제어, 제품 HTTP·host 전원 부팅은 서로 다른
 검증 범위다. 실제 host 종료의 모든 실패 경로와 상위 종단 수락은 남아 있다.

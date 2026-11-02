@@ -59,8 +59,8 @@ static void run(void *argument, void *unused1, void *unused2)
    struct xm_span control = {t->running.control, t->running.control_length};
    struct xm_span input = {t->running.input, t->running.input_length};
    if (!t->running.input_length) { input.p = NULL; }
-   result.rc = drive_adapter_run_observed(&t->adapter, control, input, age,
-     &t->running.manual_witness,t->running.app_instance,&result.sample);
+   result.rc = drive_adapter_run_until(&t->adapter, control, input, age,
+     &t->running.manual_witness,t->running.app_instance,t->running.deadline_us,&result.sample);
   }
   int end_rc = xdiag_clock_us(&result.end_us);
   result.finished_ms = k_uptime_get();
@@ -89,7 +89,7 @@ static void run(void *argument, void *unused1, void *unused2)
 
 int drive_workers_start(const struct drive_adapter *automatic, const struct drive_adapter *manual)
 {
- if (!automatic || !manual || !automatic->calculate || !manual->calculate) return -EINVAL;
+ if (!automatic || !manual || (!automatic->calculate&&!automatic->calculate_until) || (!manual->calculate&&!manual->calculate_until)) return -EINVAL;
  if (k_mutex_lock(&workers_lifecycle, K_NO_WAIT)) return -EBUSY;
  if (attempted || atomic_get(&stopping)) { k_mutex_unlock(&workers_lifecycle); return -EALREADY; }
  attempted = true;
@@ -252,13 +252,13 @@ int drive_task_join_poll(enum drive_task task,uint64_t lifetime)
 
 int drive_task_restart(enum drive_task task,uint64_t lifetime,const struct drive_adapter *fresh)
 {
- if(!valid(task)||!lifetime||!fresh||!fresh->calculate||fresh->progress)return -EINVAL;
+ if(!valid(task)||!lifetime||!fresh||(!fresh->calculate&&!fresh->calculate_until)||fresh->progress)return -EINVAL;
  if(k_mutex_lock(&workers_lifecycle,K_NO_WAIT))return -EBUSY;
  struct task *t=&tasks[task];int rc=0;
  if(atomic_get(&stopping))rc=-ESHUTDOWN;
  else if(t->status.lifetime!=lifetime){
   rc=t->restart_from==lifetime&&t->status.lifetime==lifetime+1&&
-   t->adapter.calculate==fresh->calculate&&t->adapter.context==fresh->context?t->restart_rc:-EXDEV;
+   t->adapter.calculate==fresh->calculate&&t->adapter.calculate_until==fresh->calculate_until&&t->adapter.context==fresh->context?t->restart_rc:-EXDEV;
  }else if(!atomic_get(&t->cancelled)||(t->status.started&&!t->status.joined)||t->status.joining)rc=-EBUSY;
  else if(lifetime==UINT64_MAX)rc=-EOVERFLOW;
  else{

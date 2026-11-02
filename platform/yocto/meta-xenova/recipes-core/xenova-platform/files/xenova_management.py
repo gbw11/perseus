@@ -22,7 +22,7 @@ from xenova_runtime import PlatformError, OperationBusy, atomic_write, operation
 import xenova_vm as vm
 import xenova_zephyr as zephyr
 import xenova_creation as creation
-from xenova_execution import ExecutionError, ReadChanged, short_lock
+from xenova_execution import ExecutionError, ReadChanged, short_lock, read_intent, read_requests
 from xenova_preparation import request_output, LinuxSlot, owner_state, AssetLease, guard_asset, asset_state, lifecycle_io, lifecycle_slot
 from xenova_trace import bind as trace_bind, traced, span
 
@@ -85,6 +85,11 @@ class PrivateCreate:
         self.operation=operation
 
 
+class PrivateProvision:
+    def __init__(self, operation, *, resume=False):
+        self.operation,self.resume=operation,resume
+
+
 class ReadContext:
     """한 조회 회차의 구성·실행 근거. 원자 파일을 검증하며 잠금 밖에서 외부 관측한다.
 
@@ -95,18 +100,19 @@ class ReadContext:
         self.m,self.action,self.spec,self.deadline=manager,action,spec,deadline
         self.started_ms=int(manager.p.clock()*1000)
         self.observed_ms={}
-        self.e=manager.p.execution()
+        self.e=None if action=='intents' else manager.p.execution()
         self.check()
         self.states,self.tombs=manager._read_states(action,spec,deadline)
         self.by_id={s['vm_id']:s for s in self.states}
         self.lifecycles={s['vm_id']:(s['lifecycle'],s['generation']) for s in self.states}
-        self.inputs={s['vm_id']:self.e.observation_inputs(s['record'],self.lifecycles[s['vm_id']]) for s in self.states}
+        self.inputs={s['vm_id']:(read_intent(manager.data,s['vm_id']) if self.e is None else
+                     self.e.observation_inputs(s['record'],self.lifecycles[s['vm_id']])) for s in self.states}
         self.check()
 
     def check(self):
         if self.m.p.clock()>=self.deadline:
             fail('DEADLINE_EXCEEDED','read observation budget expired')
-        if self.m.p.boot_id_reader()!=self.e.host:raise ReadChanged()
+        if self.e is not None and self.m.p.boot_id_reader()!=self.e.host:raise ReadChanged()
 
     @staticmethod
     def revision(states):
@@ -135,13 +141,15 @@ class ReadContext:
         if creation and state['lifecycle']=='REGISTERED':
             op=self.optional(self.m.data/'operations'/(creation+'.json'))
             if not op or op.get('vm_id')!=identity or op.get('status')!='SUCCEEDED':raise ReadChanged()
-        if self.e.observation_inputs(record,self.lifecycles[identity])!=self.inputs[identity]:
+        current=(read_intent(self.m.data,identity) if self.e is None else
+                 self.e.observation_inputs(record,self.lifecycles[identity]))
+        if current!=self.inputs[identity]:
             raise ReadChanged()
         self.check()
 
     def validate(self):
         self.check()
-        if self.action=='list':
+        if self.action=='list' or self.action=='intents' and 'vm_id' not in self.spec:
             states,_=self.m._read_states(self.action,self.spec,self.deadline)
             if self.revision(states)!=self.revision(self.states):raise ReadChanged()
         # 각 항목은 바로 이어지는 관측 게시 잠금 안에서 한 번 대조한다. 같은 검사를 중복하지 않는다.
@@ -161,6 +169,7 @@ class Manager:
         self.checkpoint = checkpoint or (lambda phase, operation: None)
         self.trace_sink = trace_sink
         self.last_trace = None
+        self._registration_events=[]
         self._request_lock=allocate_lock()
 
     def fork(self):
@@ -256,7 +265,10 @@ class Manager:
                 vm.validate_identity(after)
                 allowed=('vcpus','memory_mib') if op['action']=='update-resources' else (
                     'active_firmware','hardware_profile','capabilities','shutdown_policy',
-                    'board_shutdown_policy','mac','ipv4','hostname')
+                    'board_shutdown_policy','mac','ipv4','hostname','provisioning_profile')
+                if op['action']=='firmware-transition' and 'provisioning_profile' in after:
+                    from xenova_guest_profile import validate
+                    validate(after['provisioning_profile'])
                 if (snap.get('vm_id')!=op['vm_id'] or snap.get('generation')!=op.get('expected_generation')
                         or before['uuid']!=op['vm_id']
                         or {**before,**{k:after[k] for k in allowed if k in after}}!=after
@@ -327,11 +339,11 @@ class Manager:
 
     def _validate_call(self, action, spec, execute, key, request_id):
         """외부 호출의 타입/허용 필드를 읽기 전에 검사한다. 내부 예외는 입력 오류로 덮지 않는다."""
-        actions = MUTATIONS | {'templates', 'list', 'get', 'operation', 'start', 'stop',
+        actions = MUTATIONS | {'templates', 'list', 'get', 'intents', 'operation', 'start', 'stop',
                                'reboot', 'destroy', 'autostart-set', 'board-shutdown-set', 'config',
                                'recover_once', 'recovery-operation', 'recovery-reconcile', 'control-operation', 'snapshot', 'probe',
                                'execution-context', 'host-resume', 'cpu-layout', 'cpu-policy-set', 'cpu-host-prepare'}
-        actions.add('operation-reconcile')
+        actions.update(('operation-reconcile','provision','provisioning','registration-notify'))
         if not isinstance(action, str) or action not in actions:
             fail('INVALID_SPEC', 'unsupported management action')
         if type(execute) is not bool:
@@ -344,6 +356,14 @@ class Manager:
             spec = {}
         if not isinstance(spec, dict):
             fail('INVALID_SPEC', 'request must be an object')
+        if action in ('provision','provisioning','registration-notify'):
+            if action=='provisioning' and execute:fail('INVALID_SPEC','provisioning is read-only')
+            if set(spec)-{'vm_id','timeout_ms'} or 'vm_id' not in spec:
+                fail('INVALID_SPEC','provisioning requires a VM UUID and optional timeout_ms')
+            timeout=spec.get('timeout_ms',15000)
+            if type(timeout) is not int or not 0<timeout<=15000:fail('INVALID_SPEC','timeout_ms must be 1..15000')
+            if key is not None:fail('INVALID_SPEC','provisioning uses the original VM identity, not a new operation key')
+            return {**spec,'vm_id':normalize_uuid(spec['vm_id']),'timeout_ms':timeout}
         if action=='operation-reconcile':return creation.validate_request(self,spec,key)
         if action in MUTATIONS:
             if action != 'create' and not self._text_token(key):
@@ -400,29 +420,36 @@ class Manager:
             return {**spec, 'timeout_ms':timeout}
         elif action == 'recovery-operation':
             field = 'recovery_attempt_id'
-            if set(spec) != {field} or not isinstance(spec[field], str) or not vm.UUID.fullmatch(spec[field]):
+            if (set(spec)-{field,'timeout_ms'} or field not in spec or
+                    not isinstance(spec[field], str) or not vm.UUID.fullmatch(spec[field])):
                 fail('INVALID_SPEC', 'canonical operation selector required')
-            return spec
-        elif action == 'list':
-            allowed = {'lifecycle'}
+            timeout=spec.get('timeout_ms',15000)
+            if type(timeout) is not int or not 0<timeout<=15000:
+                fail('INVALID_SPEC','timeout_ms must be 1..15000')
+            return {**spec,'timeout_ms':timeout}
+        elif action in ('list','intents'):
+            allowed = {'lifecycle'} | ({'vm_id'} if action=='intents' else set())
         elif action == 'operation':
-            allowed = {'operation_id', 'idempotency_key'}
+            allowed = {'operation_id', 'idempotency_key', 'timeout_ms'}
         else:
             allowed = {'vm_id'} | ({'force'} if action in ('stop', 'reboot', 'destroy')
                                   else {'value'} if action.endswith('-set') else set())
         if action in ('snapshot', 'probe'):
             allowed |= {'max_age_ms'} if action == 'snapshot' else {'timeout_ms'}
-        if action in ('get','list'):
+        if action in ('get','list','intents','execution-context','operation'):
             allowed.add('timeout_ms')
             if 'timeout_ms' in spec and (type(spec['timeout_ms']) is not int or not 0<spec['timeout_ms']<=15000):
                 fail('INVALID_SPEC','timeout_ms must be 1..15000')
         if set(spec) - allowed:
             fail('INVALID_SPEC', 'unexpected specification fields')
-        if action == 'list':
+        if action in ('list','intents'):
             if spec.get('lifecycle', 'REGISTERED') not in ('REGISTERED', 'RETIRED', 'PURGING', 'PURGED', 'all'):
                 fail('INVALID_SPEC', 'invalid lifecycle filter')
+            if 'vm_id' in spec:
+                if 'lifecycle' in spec:fail('INVALID_SPEC','single intent lookup does not accept a lifecycle filter')
+                spec={**spec,'vm_id':normalize_uuid(spec['vm_id'])}
         elif action == 'operation':
-            selected = [name for name in allowed if spec.get(name) is not None]
+            selected = [name for name in ('operation_id','idempotency_key') if spec.get(name) is not None]
             if len(selected) != 1:
                 fail('INVALID_SPEC', 'exactly one operation_id or idempotency_key selector required')
             name = selected[0]
@@ -889,9 +916,9 @@ class Manager:
         if selected['guest_kind'] == 'zephyr':
             if selected['capabilities'].get('dhcp'):
                 metadata.update(mac=op['assigned']['mac'],ipv4=op['assigned']['ipv4'],hostname=name)
-            zephyr.new_instance(self.data, name, Path(selected['directory']), records,
+            return zephyr.new_instance(self.data, name, Path(selected['directory']), records,
                                 identity=op['vm_id'], workspace_path=workspace, metadata=metadata,
-                                autostart=spec['autostart'], board_shutdown_policy=spec['board_shutdown_policy'])
+                                autostart=spec['autostart'], board_shutdown_policy=spec['board_shutdown_policy'],private=private)
         else:
             from prepare_instance import make_instance
             boot = json.loads((Path(selected['directory']) / 'boot.json').read_text())
@@ -1049,8 +1076,11 @@ class Manager:
         result = self._view(tomb)
         if op['action']=='create' and op.get('error') is not None:
             op.setdefault('first_error',op['error'])
+        notice=op['action']=='create' and op.get('registration_notice') is None
+        if notice:op['registration_notice']='consumed'
         op.update(status='SUCCEEDED',result=result,error=None)
         self._save_op(op, 'complete')
+        if notice:self._registration_events.append(tomb['record'])
         return result
 
     def _save_tomb(self, tomb, op, lifecycle, generation, **extra):
@@ -1077,6 +1107,11 @@ class Manager:
         if (op['action']=='create' and op['template']['guest_kind']=='linux' and op['status']=='RUNNING'
                 and self._owner_state(op)=='active'):
             effective='RUNNING'
+        if (op['action']=='create' and op['template']['guest_kind']=='zephyr' and op['status']=='RUNNING'):
+            try:
+                if asset_state(self.p,{**op,'expected_generation':0})=='active':effective='RUNNING'
+            except (PlatformError,OSError,ValueError,KeyError):
+                fail('OBSERVATION_UNAVAILABLE','original firmware preparation ownership cannot be verified')
         if (op['action']=='create' and op['status']!='SUCCEEDED' and effective!='FAILED'
                 and op['template']['guest_kind']=='linux' and self._owner_state(op)=='reconciling'):
             effective='RECONCILING'
@@ -1158,7 +1193,10 @@ class Manager:
         target = self.data / 'instances' / op.get('assigned', {}).get('internal_name', op['initial_spec']['name'])
         if not target.exists() and not target.is_symlink():
             workspace = self.data / op['owned_workspace']
-            if workspace.exists() or workspace.is_symlink():
+            resume=workspace.exists() or workspace.is_symlink()
+            private_zephyr=(op['template']['guest_kind']=='zephyr'
+                            and getattr(self.preparer,'__func__',None) is type(self)._prepare)
+            if resume and not private_zephyr:
                 fail('RECOVERY_REQUIRED', 'partial preparation retained; no automatic disk reset',
                      details={'operation_id':op['operation_id'],'owned_workspace':op['owned_workspace']})
             if op['template']['guest_kind']=='linux':
@@ -1168,10 +1206,18 @@ class Manager:
                 context['linux_barrier']=self.p.execution().barrier()
                 # workspace 전 실패의 명시적 재개다. 조회가 상태를 바꾸는 것은 아니다.
                 op['status']='RUNNING'
+            if private_zephyr:op['status']='RUNNING'
             self._save_op(op, 'preparing')
             if (op['template']['guest_kind']=='linux'
                     and getattr(self.preparer,'__func__',None) is type(self)._prepare):
                 return PrivateCreate(op)
+            if (op['template']['guest_kind']=='zephyr'
+                    and getattr(self.preparer,'__func__',None) is type(self)._prepare):
+                context['asset_lease']=context['output_stack'].enter_context(
+                    AssetLease(self.p,op['vm_id'],'create',op['idempotency_key']))
+                context['asset_lease'].bind({**op,'expected_generation':0})
+                context['output_stack'].enter_context(lifecycle_slot(self.p))
+                return PrivateProvision(op,resume=resume)
             try:
                 with tool_output():
                     self.preparer(op)
@@ -1189,6 +1235,61 @@ class Manager:
                 or any(record.get(key) != op['template'][key] for key in ('template_id', 'template_version', 'guest_kind'))):
             fail('RECOVERY_REQUIRED', 'published instance does not match recorded creation identity')
         vm.validate_record(record, target)
+        return self._register_created(op,record,context,dhcp_applied)
+
+    def _firmware_prepared(self,prepared,op):
+        """원 수락과 결합한 작은 명세 대조. 공급 전과 현재 원장 재확인 뒤 같은 규칙을 쓴다."""
+        record=prepared.record;spec=op['initial_spec'];name=op['assigned']['internal_name']
+        return (record.get('uuid')==op['vm_id'] and record.get('id')==name and record.get('name')==name
+                and record.get('display_name')==spec['name'] and record.get('creation_spec')==spec
+                and record.get('creation_operation_id')==op['operation_id']
+                and record.get('template')==op['template']['source_template_id']
+                and record.get('template_manifest_sha256')==op['template']['manifest_sha256']
+                and all(record.get(k)==op['template'][k] for k in ('template_id','template_version','guest_kind'))
+                and all(record.get(k)==spec[k] for k in ('autostart','board_shutdown_policy'))
+                and all(record.get(k)==op['assigned'][k] for k in ('mac','ipv4') if k in op['assigned'])
+                and prepared.stage==self.data/op['owned_workspace']/name
+                and prepared.output==self.data/'instances'/name)
+
+    def _complete_provision(self, pending, context):
+        op=pending.operation
+        context['asset_lease'].guard()
+        if pending.resume:
+            # 새 소유 구간이므로 완성된 작은 firmware를 재검증한다. 불완전 복사를
+            # 삭제/재복사하지 않으며 원 Linux 실패 수습의 별도 계약은 바꾸지 않는다.
+            workspace=self.data/op['owned_workspace'];self._plain_dir(workspace)
+            stage=workspace/op['assigned']['internal_name'];self._plain_dir(stage)
+            record=self._read(stage/'instance.json');zephyr.validate_instance(record,stage)
+            from xenova_guest_profile import from_manifest
+            active=zephyr.active_directory(stage,record)
+            meta=self._read(active/record['active_firmware']['manifest'])
+            if (record.get('creation_operation_id')!=op['operation_id']
+                    or record['active_firmware']['revision']!=op['template']['manifest_sha256']
+                    or record.get('provisioning_profile')!=from_manifest(meta,config=(active/'zephyr.config').read_text())):
+                fail('RECOVERY_REQUIRED','private firmware is not the original verified preparation')
+            prepared=zephyr.PreparedFirmware(record,stage,self.data/'instances'/op['assigned']['internal_name'])
+        else:prepared=self._prepare(op,private=True)
+        if not isinstance(prepared,zephyr.PreparedFirmware):fail('RECOVERY_REQUIRED','private firmware preparation returned no result')
+        if not self._firmware_prepared(prepared,op):fail('TARGET_CHANGED','private firmware does not match the original accepted request')
+        record=prepared.record
+        if record.get('provisioning_profile',{}).get('channels'):
+            from xenova_provisioning import ensure
+            ensure(self.data,record,deadline=self.p.response_deadline,clock=self.p.clock)
+        with operation_lock(self.p.runtime):
+            context['asset_lease'].guard()
+            if (self._read(self.data/'operations'/(op['operation_id']+'.json'))!=op or not self._firmware_prepared(prepared,op)):
+                fail('TARGET_CHANGED','original provisioning target changed')
+            records=self.p.records(validate_assets=False)
+            _,held=self._ip_inventory(records,excluding=record['uuid'])
+            if record.get('ipv4') in held:fail('IP_CONFLICT','recorded address is no longer exclusively reserved')
+            descriptor={k:op['template'][k] for k in ('schema_version','template_id','template_version','guest_kind','asset_directory','manifest_sha256','source_template_id')}
+            catalog.describe(self.data,descriptor,full=False)
+            with short_lock(self.p.runtime,'admission'):
+                self._writable();context['asset_lease'].guard();prepared.publish()
+            self._save_op(op,'published')
+            return self._register_created(op,record,context,False)
+
+    def _register_created(self,op,record,context,dhcp_applied):
         tomb = {'schema_version':'1.0','vm_id':record['uuid'],'name':record['name'],'generation':0,
                 'lifecycle':'REGISTERED','record':record,'history':[]}
         tomb = self._save_tomb(tomb, op, 'REGISTERED', 0)
@@ -1432,7 +1533,10 @@ class Manager:
             if action=='create' and previous['status']=='RECOVERY_REQUIRED':
                 target=self.data/'instances'/previous.get('assigned',{}).get('internal_name',previous['initial_spec']['name'])
                 workspace=self.data/previous['owned_workspace']
-                if not target.exists() and not target.is_symlink() and (workspace.exists() or workspace.is_symlink()):
+                resumable_firmware=(previous['template']['guest_kind']=='zephyr'
+                    and getattr(self.preparer,'__func__',None) is type(self)._prepare)
+                if (not resumable_firmware and not target.exists() and not target.is_symlink()
+                        and (workspace.exists() or workspace.is_symlink())):
                     # 실패가 확정된 부분 준비의 재전달은 최초 오류·부분 파일을 다시 쓰지 않는다.
                     if not execute:
                         return {'plan':True,'operation':previous}
@@ -1576,6 +1680,7 @@ class Manager:
         """
         from xenova_trace import Trace, span
         trace = Trace(clock=self.p.clock, context={'action':action, 'request_id':request_id})
+        self._registration_events=[]
         with trace.activate(), span('manager.call'), request_output() as output:
             had_budget=hasattr(self.p,'response_deadline')
             previous_budget=getattr(self.p,'response_deadline',None)
@@ -1586,6 +1691,11 @@ class Manager:
                 if had_budget:self.p.response_deadline=previous_budget
                 else:self.p.__dict__.pop('response_deadline',None)
             self.last_output={'bytes':bytes(output.content),'dropped':output.dropped}
+        # 원장 완료/관리·대상 FD 반환 뒤 공개 등록 자료만 넘긴다. HTTP를 기다리지 않는다.
+        if self._registration_events:
+            from xenova_registration import automatic
+            events,self._registration_events=self._registration_events,[]
+            for record in events:automatic(self.data,self.p.runtime,record)
         try:
             self.last_trace = trace.export()
             if self.trace_sink is not None:
@@ -1627,15 +1737,10 @@ class Manager:
             result=self._mutate(action,spec,execute,
                                 'create:'+spec['vm_id'] if action=='create' else idempotency_key,
                                 records,context)
-        elif action=='templates':
-            result={'templates':catalog.entries(self.data)}
-        elif action in ('recover_once', 'recovery-operation', 'recovery-reconcile'):
+        elif action in ('recover_once', 'recovery-reconcile'):
             from xenova_recovery import Recovery
             recovery = Recovery(self)
-            if action == 'recovery-operation':
-                result = {'attempt':recovery.read_attempt(spec['recovery_attempt_id'])}
-                context['operation_id'] = result['attempt']['operation_id']
-            elif action == 'recovery-reconcile':
+            if action == 'recovery-reconcile':
                 if execute:
                     self._writable()
                 result = recovery.reconcile(spec['recovery_attempt_id'], execute=execute,
@@ -1645,14 +1750,6 @@ class Manager:
                     result = recovery.once(spec, execute=execute, context=context)
         elif action == 'host-resume':
             result = {'host_admission':self.p.execution().resume_host(spec['barrier_id'])}
-        elif action in ('probe', 'execution-context'):
-            tomb = self._state(spec['vm_id'], records)
-            if action == 'probe':
-                observation = self.p.execution().observe(tomb['record'], deadline)
-                result = {'observation':observation}
-            else:
-                observation = self.p.execution().observe(tomb['record'], deadline)
-                result = {'vm':self._view(tomb, observation=observation)}
         elif action in ('start','stop','reboot','destroy','autostart-set','board-shutdown-set','config'):
             tomb=self._state(spec.get('vm_id'),records)
             if tomb['lifecycle']!='REGISTERED':
@@ -1700,7 +1797,7 @@ class Manager:
         tombs=self._tombs(deadline=deadline)
         # 전체 신원/디스크 중복은 위에서 검증했다. builder가 VM마다 같은 전체 dict를 재검색하지 않는다.
         by_uuid={record['uuid']:{key:record} for key,record in records.items()}
-        if action=='get':
+        if action in ('get','probe','execution-context') or action=='intents' and 'vm_id' in spec:
             states=[self._state(spec['vm_id'],by_uuid.get(spec['vm_id'],{}),tombstones=tombs)]
         else:
             # 기존 정렬된 등록 경로의 표시 순서를 유지하고 과거 수명 항목만 뒤에 붙인다.
@@ -1717,23 +1814,55 @@ class Manager:
         if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','registry read budget expired')
         return states,tombs
 
+    @staticmethod
+    def _intent_view(state, intent):
+        """저장 의도와 적용 세대만 표시한다. 실행·건강·부팅 허가를 추정하지 않는다."""
+        record=state['record']
+        return {'vm_id':state['vm_id'],'name':record.get('display_name',state['name']),
+                'guest_kind':vm.guest_kind(record),'template_id':record.get('template_id'),
+                'template_version':record.get('template_version'),'autostart':record['autostart'],
+                'lifecycle':state['lifecycle'],'generation':state['generation'],
+                'desired_state':intent['desired_state'] if intent else 'unknown',
+                'intent_revision':intent['intent_revision'] if intent else None,
+                'intent_lifecycle_generation':intent['lifecycle_generation'] if intent else None,
+                'intent_source':intent.get('source') if intent else None,
+                'intent_applicable':bool(intent and state['lifecycle']=='REGISTERED' and
+                                         intent['lifecycle_generation']==state['generation'])}
+
     def _query(self, action, spec, context, deadline):
         """읽기만 수행한다. 완료/소유권 관측은 재실행·정리·원 기한 갱신의 허가가 아니다."""
         for attempt in range(2):
             with span('read.round',count=attempt+1):
                 if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','query budget expired')
                 try:
-                    if action in ('get','list'):
+                    if action in ('get','list','probe','execution-context','intents'):
                         read=ReadContext(self,action,spec,deadline)
                         records=[s['record'] for s in read.states]
-                        if action=='get':
+                        if action=='intents':
+                            read.validate()
+                            for state in read.states:read.validate_one(state['vm_id'])
+                            views=[self._intent_view(s,read.inputs[s['vm_id']]) for s in read.states]
+                            result={'vm':views[0]} if 'vm_id' in spec else {'vms':views}
+                        elif action in ('get','probe','execution-context'):
                             observed=read.e.observe(records[0],deadline,_read_context=read)
-                            result={'vm':self._view(read.states[0],observation=observed)}
+                            result=({'observation':observed} if action=='probe' else
+                                    {'vm':self._view(read.states[0],observation=observed)})
                         else:
                             observed=read.e.observe_many(records,deadline,_read_context=read)
                             # 빈 목록에서도 대상 집합·host 확인을 생략하지 않는다.
                             if not records:read.validate()
                             result={'vms':[self._view(s,observation=observed[s['vm_id']]) for s in read.states]}
+                    elif action in ('templates','recovery-operation'):
+                        vm.storage_check(self.data)
+                        if action=='templates':
+                            result={'templates':catalog.entries(self.data,deadline=deadline,clock=self.p.clock)}
+                            if catalog.entries(self.data,deadline=deadline,clock=self.p.clock)!=result['templates']:raise ReadChanged()
+                        else:
+                            from xenova_recovery import read_attempt
+                            op=read_attempt(self.data,spec['recovery_attempt_id'])
+                            if read_attempt(self.data,spec['recovery_attempt_id'])!=op:raise ReadChanged()
+                            context['operation_id']=op['operation_id']
+                            result={'attempt':op}
                     else:
                         try:vm.storage_check(self.data)
                         except (OSError,PlatformError,ValueError):
@@ -1743,7 +1872,7 @@ class Manager:
                         def search():
                             if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','operation search budget expired')
                             rows=(self._operations(deadline=deadline) if action=='operation' else
-                                  self.p.execution().requests(deadline=deadline))
+                                  read_requests(self.data,deadline=deadline,clock=self.p.clock))
                             if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','operation search budget expired')
                             found=[item for item in rows if item.get(selector)==selected]
                             if len(found)>1:fail('RECONCILE_REQUIRED','operation selector is ambiguous')
@@ -1761,14 +1890,22 @@ class Manager:
                         trace_bind(operation_id=op['operation_id'],vm_id=op['vm_id'])
                         if action=='operation':result=view
                         else:
+                            host_error=None
                             try:host=self.p.boot_id_reader()
-                            except (OSError,PlatformError,ValueError):host=None
+                            except (OSError,PlatformError,ValueError) as error:
+                                host=None;host_error=type(error).__name__
+                            if not isinstance(host,str) or not vm.UUID.fullmatch(host):
+                                if host_error is None:host_error='InvalidHostIdentity'
+                                host=None
                             same=(host==op['host_boot_id']) if host is not None else None
                             sampled=int(self.p.clock()*1000)
                             original_end=op.get('deadline_monotonic_ms')
                             result={'operation':op,'deadline_observation':{'host_boot_id':host,
                                 'observed_monotonic_ms':sampled,'original_host_matches':same,
                                 'execution_deadline_expired':(sampled>=original_end) if same and type(original_end) is int else None}}
+                            if host_error:
+                                result['diagnostic_warnings']=[{'code':'OBSERVATION_UNAVAILABLE',
+                                    'scope':'host-identity','cause_type':host_error}]
                     if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','query completed after budget')
                     return result
                 except ReadChanged:
@@ -1779,24 +1916,72 @@ class Manager:
                     raise
         raise AssertionError('bounded query round exhausted')
 
+    def _provisioning(self, action, spec, execute, context, deadline):
+        from xenova_provisioning import status, ensure, apply_stopped_linux, bootstrap_execution
+        read=ReadContext(self,'intents',spec,deadline)
+        read.validate_one(spec['vm_id']);state=read.states[0];record=state['record']
+        result={'vm_id':state['vm_id'],'lifecycle':state['lifecycle'],
+                'profile':record.get('provisioning_profile'),'supply':status(self.data,state['vm_id']),
+                'initial_template':{'template_id':record.get('template_id'),'template_version':record.get('template_version'),
+                    'manifest_sha256':record.get('template_manifest_sha256',record.get('creation_origin',{}).get('manifest_sha256'))},
+                'current_profile':{'status':'unobserved','profile':None}}
+        execution=self.p.execution();run=execution.run_record(record)
+        if run and run.get('host_boot_id')==execution.host and run.get('phase')=='observed':
+            result['current_profile']={'status':'captured-launch','profile':run.get('signal_profile'),
+                'execution_id':run['execution_id'],'host_boot_id':run['host_boot_id'],'observation':'not-refreshed'}
+        if action=='provisioning':return result
+        if state['lifecycle']!='REGISTERED':fail('VM_NOT_FOUND','only a currently registered VM can be supplied')
+        if not record.get('provisioning_profile'):
+            fail('PROVISIONING_PROFILE_UNDECLARED','verified communication profile is not declared')
+        if not execute:return {**result,'plan':True,'execute_required':True}
+        context['asset_lease']=context['output_stack'].enter_context(AssetLease(self.p,state['vm_id'],'provision',None))
+        with operation_lock(self.p.runtime) as fd:
+            context['common_fd']=fd;self._writable();context['asset_lease'].guard()
+            read.validate_one(spec['vm_id'])
+            records=self.p.records(validate_assets=False)
+            if vm.guest_kind(record)=='linux':
+                from xenova_resources import guards
+                guards(self,state,self._operations(),fail,context,records)
+            with self._lifecycle_io(context,records,refresh_records=False):
+                if vm.guest_kind(record)=='linux':
+                    supplied=apply_stopped_linux(self.p,record,deadline=deadline,clock=self.p.clock)
+                else:
+                    supplied=ensure(self.data,record,deadline=deadline,clock=self.p.clock,retry_reload=True)
+                    intent=self.p.execution().intent(record)
+                    if record['provisioning_profile']['channels'] and intent and intent['desired_state']=='running':
+                        supplied=bootstrap_execution(self.p,record,deadline=deadline)
+        return {**result,'plan':False,'execute_required':False,'supply':supplied}
+
+    def _registration(self,spec,execute,deadline):
+        from xenova_registration import payload,launch
+        read=ReadContext(self,'intents',spec,deadline);read.validate_one(spec['vm_id'])
+        state=read.states[0]
+        if state['lifecycle']!='REGISTERED':fail('VM_NOT_FOUND','notification requires a currently registered VM')
+        body=payload(state['record'])
+        if not execute:return {'plan':True,'execute_required':True,'registration':body}
+        return {'plan':False,'execute_required':False,'vm_id':state['vm_id'],
+                'notification':launch(self.data,self.p.runtime,state['record'],automatic=False,budget=deadline-self.p.clock())}
+
     def _call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None, _output=None):
         """HTTP를 가정하지 않는다. 모든 응답은 동일 JSON envelope이고 stdout을 쓰지 않는다."""
         entered = self.p.clock()
-        context = {'operation_id': None, 'replayed': False, 'write_operation': False,'entered':entered,'budget_ms':budget_ms}
+        context = {'operation_id': None, 'replayed': False, 'write_operation': False,'entered':entered,'budget_ms':budget_ms,
+                   'output_stack':_output.stack}
         response={'schema_version':'1.0','ok':False,'request_id':request_id if self._text_token(request_id) else uuid4(),
                   'operation_id':None,'replayed':False,'data':None,'error':None}
         trace_bind(request_id=response['request_id'])
         try:
             if budget_ms is not None and (type(budget_ms) is not int or not 0<budget_ms<=(creation.MAX_CALL_MS if action=='create' else 105000)):
                 fail('INVALID_SPEC','budget_ms must be 1..'+str(creation.MAX_CALL_MS if action=='create' else 105000))
-            if budget_ms is not None and action not in ('create','operation-reconcile','start','stop','reboot','destroy','get','list','operation','control-operation','recovery-reconcile'):
+            if budget_ms is not None and action not in ('create','operation-reconcile','start','stop','reboot','destroy','get','list','intents','probe','execution-context','templates','operation','control-operation','recovery-operation','recovery-reconcile','provision','provisioning','registration-notify'):
                 fail('INVALID_SPEC','budget_ms is supported only for control and bounded reads')
             spec = self._validate_call(action, spec, execute, idempotency_key, request_id)
             trace_bind(vm_id=spec.get('vm_id'), recovery_attempt_id=spec.get('recovery_attempt_id'))
-            try:
-                trace_bind(host_boot_id=self.p.boot_id_reader())
-            except Exception:
-                pass  # Optional trace identity does not replace required host guards.
+            if action not in ('intents','provisioning','registration-notify'):
+                try:
+                    trace_bind(host_boot_id=self.p.boot_id_reader())
+                except Exception:
+                    pass  # Optional trace identity does not replace required host guards.
             if action == 'snapshot':
                 response.update(ok=True, data={'snapshot':self.p.execution().snapshot(spec['vm_id'], spec['max_age_ms'])})
                 return response
@@ -1812,15 +1997,22 @@ class Manager:
                 self.p.response_deadline=entered+budget_ms/1000
             else:
                 self.p.response_deadline=float('inf')
+            if action=='registration-notify':
+                return {**response,'ok':True,'data':self._registration(spec,execute,deadline)}
+            if action in ('provision','provisioning'):
+                self.p.response_deadline=min(getattr(self.p,'response_deadline',deadline),deadline)
+                try:result=self._provisioning(action,spec,execute,context,deadline)
+                except TimeoutError:fail('DEADLINE_EXCEEDED','provisioning call budget expired; inspect the original supply state')
+                return {**response,'ok':True,'data':result}
             if action=='create':self.p.response_deadline=deadline
             cpu_deadline = deadline
             trace_bind(deadline_monotonic_ms=int(deadline*1000))
             if action=='operation-reconcile':
                 result=creation.reconcile(self,spec,execute,context,deadline,_output)
                 return {**response,'ok':True,'data':result,'operation_id':context['operation_id']}
-            if action in ('get','list','operation','control-operation'):
+            if action in ('get','list','intents','probe','execution-context','templates','operation','control-operation','recovery-operation'):
                 self.p.response_deadline=min(self.p.response_deadline,deadline)
-                if action in ('get','list'):
+                if action in ('get','list','probe','execution-context'):
                     with observation_slot(self.p.runtime,deadline=deadline,clock=self.p.clock) as fd:
                         previous_fds=_output.fds
                         _output.fds=(*previous_fds,fd)
@@ -1861,6 +2053,8 @@ class Manager:
                         break
             if isinstance(result,PrivateCreate):
                 result=self._complete_private(result,context)
+            if isinstance(result,PrivateProvision):
+                result=self._complete_provision(result,context)
             response.update(ok=True,data=result)
         except ManagementError as exc:
             response['error']=exc.error

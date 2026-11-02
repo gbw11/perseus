@@ -1,9 +1,33 @@
 # HTTP·Spring·화면 종단 연결 요청
 
 담당: FastAPI·Spring·프론트. 상태: **6-A 인계 준비 / 담당 제품 구현·종단 수락 전**.
-기존 D02·D08을 유지한다. 아래가 2026-11-01 현재 지시다. 과거 소스·실패·요구는 마지막 이력에 보존했다.
+기존 D02·D08을 유지한다. 아래가 2026-11-02 현재 지시다. 과거 소스·실패·요구는 마지막 이력에 보존했다.
 
 ## 현재 담당자가 할 일
+
+### D02·D08 — 로컬 등록-only 통지의 수신 구현·계약 회신
+
+플랫폼은 자동 최대 1회 sender와 `xenova-vm registration-notify UUID --execute [--json]`를 제공한다.
+[정확한 JSON·응답·인증 계약안과 예제](../contracts/vm-provisioning-v1.md)를 먼저 확인한다.
+제공자 HTTP fixture 시험을 통과한 경로이며 **실제 Spring route의 구현·합의·DB 수락은 아직 없다**.
+
+현재 `vm/api/VmController.java:create`의 `POST /api/v1/vms`는
+`vm/application/VmService.java:create`가 UUID를 새로 만들고 Pi 생성/시작을 요청한다.
+등록 통지를 이 함수에 연결하지 않는다. 같은 계층에 계약안
+`POST /api/v1/vms/registrations`의 등록 전용 DTO·권한·저장 경계를 추가하는 것이 담당 작업이다.
+호스트 인증을 해당 UUID 등록 권한에 결합하고 전달 UUID를 그대로 사용한다.
+같은 UUID는 중복 행/재생성 없이 확인하되 다른 host/guest identity는 거절한다.
+늦은 등록이나 명시 재전송이 현재 자원·이름·의도·보관/삭제 상태를 옛 body로 덮지 않아야 한다.
+
+정상 수락은 Linux/Zephyr 일반 생성과 factory 등록→sender의 실제 POST→DB 확정 응답이다.
+서버 저장 뒤 응답 유실→**명시 CLI만** 재전송→동일 UUID 한 행도 확인한다.
+401/403/409·큰/무효 body·redirect·DNS/응답 정체에서는 거짓 확정·자동 retry/GET이 없어야 한다.
+Spring 생성→Pi 생성→등록 통지가 원 Spring 응답/DB transaction을 기다리는 순환도 시험한다.
+자동 통지 실패가 로컬 등록/원 응답/다른 VM stop을 실패로 만들지 않는 것은 플랫폼 제공자 시험에 있다.
+기존 full HTTP 201/409와 optional 자원 생략 의미 비교는 유지하며 이 통지를 새 create mode로 만들지 않는다.
+
+담당 회신: route/DTO/auth 합의 여부, 실제 수정 후보·명령·DB 중복/늦은 요청 시험 결과,
+운영 endpoint/token 공급 주체, 미수행 설치·EC2·보드 수락. 현재 endpoint/token은 배포 미공급 상태다.
 
 우선 기본 VM 관리와 원 작업 회수를 연결하고 자원 생략과 차량 입력은 각각 별도 작업으로 처리한다.
 FastAPI의 key stop·원 key 조회는 이미 있다. 이를 재구현하거나 기존 full create를 바꾸기 위한 새 API 버전을 만들 필요는 없다.
@@ -27,6 +51,28 @@ FastAPI의 key stop·원 key 조회는 이미 있다. 이를 재구현하거나 
 하위는 Debian·Ubuntu·Zephyr의 등록·제어·원 결과·명시 수습, OS 공통 정적 shared/exclusive pinning과 해제를 제공한다.
 긴 create/restore/firmware·usage·DHCP 중 다른 VM 진행의 로컬 근거가 있다. 모든 외부 장애의 제어 기한 보장은 아니다.
 실제 Spring·화면·배포본과 optional DTO는 아직 수락하지 않았다.
+
+### D02·D08 — CLI·조회 정합화 제공물 소비
+
+하위 `intents`는 등록/의도 metadata만 반환한다. [사용법과 필드](../platform/cli-manager-spec.md#cmd-intents)를
+필요한 운영·Worker 질문에 사용하고 현재 domain/Xen/Agent·앱 건강 조회를 대체하지 않는다.
+기존 get/list·execution-context 전체 VMView, probe observation, HTTP DTO/201/409는 유지한다.
+새 HTTP version/header나 내부 journal 선택·직접 파일 파싱은 필요 없다.
+
+하위 CLI `status`는 JSON 유무와 무관하게 list다. 옛 자산/시각 종합 진단 소비는
+`diagnose --details`로 전환한다. `control-operation --idempotency-key KEY [--vm-id UUID]`는
+첫 응답의 operation ID가 없어도 원 기록을 회수하며 선행 live get이 필요 없다.
+원 key/기한 재발급, 부재=미수락 확정, pending=STOPPED 변환은 하지 않는다.
+
+FastAPI 담당 수정 위치는 `drivers/platform.py:SerializedManager.call/fork`와
+`_BUDGET_ACTIONS/call_with_budget`다. 실제 사용하는 intents/probe/execution-context/
+templates/recovery-operation도 독립 request fork로 연결하고 잔여 budget을 전달한다.
+timeout_ms를 지원하는 조회와 budget만 지원하는 templates를 구분한다. 지원하지 않는 필드를 일괄 추가하지 않는다.
+상위 공용 mutex/threadpool 대기로 하위의 독립 조회·짧은 stop 수락을 다시 직렬화하지 않는다.
+
+정상 수락: 같은 API 프로세스에서 A 긴 restore/생성 동안 B 정상 조회·원 key 회수·실제 stop 완료.
+실패 수락: 부분 열람/원장 손상/슬롯 경합·예산 만료를 빈 목록·삭제·성공으로 바꾸지 않고 이후 정상 회복.
+하위 제공 시험과 상위 제품 연결을 구분한다. 이번에 FastAPI/Spring/화면 제품은 수정하지 않았다.
 
 <a id="defaults-errors"></a>
 ## D02·D08 입력·오류 계약
@@ -71,6 +117,17 @@ AUTO→MANUAL은 현재 중립 후 새 조작을 요구한다. 재접속의 옛 
 DEC-16의 앱 lifecycle은 QUALIFIED·실제 준비·출력 허가를 분리하고 DEC-15·ARCH-T08 영상은 실제 프레임 진행·만료를 표시한다.
 Gateway 내부 submit_transition queue는 원격 API가 아니다. 별도 로컬 Worker에는 [실제 UDS/client](../contracts/gateway-provider-v1.md)가 제공된다.
 이 연결은 외부 HTTP endpoint가 아니며 Spring/화면의 기존 관리 API를 바꾸지 않는다. 화면의 모드/복귀 연결은 기존 권한·현재 route를 확인해 담당자가 수락한다.
+
+현재 지도형 앱 제공물은 [drive-world-1](../contracts/drive-world/README.md)과
+[같은 후보의 검증 기록](../verification/recovery-scenario-closure-20261030.md#history-driving-app)에 있다.
+화면에서는 사용자 MANUAL 선택과 자동 장애 대체를 구별한다. 제공자 계약의 `manual_hold=true`로
+선택한 MANUAL은 지도 입력이 회복됐다는 이유만으로 AUTO로 바뀌지 않는다. 기존 resume/countdown의
+권한 있는 명시 요청으로 복귀한다. 이 선택을 Worker의 장애 판단이나 일반 VM 제어에 추가하지 않는다.
+AUTO→MANUAL의 장치 STOP/APPLIED·정지 관측 대기와 원 세션의 중립/새 조작도 별도로 표시한다.
+시리얼 write·앱 준비·권위 커밋을 물리 정지로 표시하지 않는다. 같은 MANUAL 세션의 A/B 승계는
+이미 유효한 조작을 이어가며, 화면이 새 조작이나 새 세션을 합성할 필요가 없다.
+이 결과를 노출할 HTTP/WebSocket 위치는 위 실제 입력 생산 경로와 현재 인증을 대조해 연결한다.
+로컬 UDS가 있다는 이유로 새로운 외부 route가 제공됐다고 안내하지 않는다.
 
 ## 선행조건과 담당 회신
 

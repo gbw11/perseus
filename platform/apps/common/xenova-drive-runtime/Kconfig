@@ -70,6 +70,14 @@ config XENOVA_DRIVE_APP_STOP_MS
 	  Foundation test allowance for a root-requested app reset. Expiry retains
 	  resources and reports failure; it never grants abort or another attempt.
 
+config XENOVA_DRIVE_LATTICE
+	bool "Explicit bounded lattice/tracker product profile"
+	depends on XENOVA_DRIVE_WARM
+	default n
+	help
+	  Requires an explicit generated vehicle/resource profile and separate
+	  binary world/state inputs. No operating vehicle values are inferred.
+
 if XENOVA_DRIVE_WORKERS
 config XENOVA_DRIVE_WORKER_STACK_SIZE
 	int "Reserved stack bytes per calculation owner"

@@ -2,7 +2,9 @@
 
 2026-11-01 제공자 구현이다. 이 문서의 wire 선택은 이번 변경에서 추가했다.
 검증 후보·실행 결과·대역 경계는 [보고서](../verification/recovery-scenario-closure-20261030.md#gateway-provider)에 둔다.
-외부 HTTP API, VM 복구 정책, 실제 planner·ESP32·차량 수락은 포함하지 않는다.
+외부 HTTP API·VM 복구 정책·실제 ESP32/차량 수락은 포함하지 않는다.
+후속 실제 planner·binary 인계의 제공 범위와 검증 수준은
+[drive-world-1](drive-world/README.md) 및 [현재 보고](../verification/recovery-scenario-closure-20261030.md#history-driving-app)를 따른다.
 
 ## G1 설치와 호출
 
@@ -14,9 +16,10 @@ root 소유 디렉터리 0700·소켓 0600과 Linux `SO_PEERCRED` UID=0을 모�
 다른 namespace에서는 해당 socket 경로만 제공해야 하며 전체 Authority 디렉터리를 공유할 필요가 없다.
 
 ```python
-from xenova_gateway.client import GatewayClient, GatewayRejected, GatewayUnavailable
+from xenova_gateway.client import GatewayClient, GatewayRejected, GatewayUnavailable, new_request_id
 
 client = GatewayClient()  # 통신 budget_s=1.0; override는 0<값<=10초
+request_id = new_request_id(host)  # 최초 송신 전에 한 번 생성하고 원 spec과 함께 보존
 # request_id와 spec은 최초 호출 전에 Worker의 원 복구 기록에 보존한다.
 # 아래 변수는 그 기록과 현재 Manager 실행/의도, client.context()에서 얻는다.
 spec = dict(host_boot_id=host, target_vm=vm_id, target_execution_id=execution_id,
@@ -39,9 +42,15 @@ except GatewayRejected as error:
 재전달 생략은 원 모드다. null·무효값·알 수 없는 필드는 거절한다.
 필수 실행·의도·승인 문맥은 생략으로 복원하지 않는다.
 
+MANUAL handoff의 선택 `manual_hold=true`는 명시적인 사용자 MANUAL 의도를 보존한다.
+AUTO 입력/준비 회복만으로 복귀하지 않으며 기존 resume/countdown을 거쳐야 한다.
+신규 생략/false는 기존 동작이고, 같은 원 요청의 재전달 생략은 원 선택을 사용한다.
+true와 false의 실제 변경은 충돌하며 null·비불리언은 거절한다. 다른 목적/모드로 확대하지 않는다.
+
 | 함수 | 입력·결과 |
 |---|---|
 | `context()` | 메모리의 현재 host/owner/generation/mode/phase, 출력 허가·저장 미확정, 대상별 binding 요약. Xen/Store 재조회 없음 |
+| `history()` | 현재 보존 수·정리 가능 수·bytes·정책 요약. 조회는 정리나 fsync를 수행하지 않음 |
 | `submit(request_id, spec)` | actor가 내구 수락한 원 작업 view. queue 접수만으로 성공 응답하지 않음 |
 | `get(request_id)` | 원 진행/결과와 현재성. 조회가 준비·복구·승계를 새로 실행하거나 기한을 갱신하지 않음 |
 | `commit(request_id)` | handoff의 현재 준비·원 승인 대조 후 기존 권위 전환. COMMITTED는 앱/장치 완료와 다름 |
@@ -76,6 +85,15 @@ Worker는 보호 목적이면 원 key/host/대상/실행 일치, durable, PROTEC
 계획 인계는 정상 A를 유지해 B를 준비하고, 커밋 뒤 새 문맥의 앱 적용·계산을 기다린다.
 기존 stateless 경로는 유지한다. stateful의 `continuity=stop_then_resume`이면 연속 승계로 표시하지 않고 정지·명시 재개가 필요하다.
 
+신규 `--drive-link` 프로필의 연속 인계는 직전 실제 명령의 **남은 원 유효기간**만 유지한다.
+커밋·재전달이 command expiry를 갱신하지 않는다. 새 target의 현재 binding·자기 계산과
+출력 guard를 통과해야 이후 명령을 제출한다. 장치 자체 응답 지연까지 제거하는 보장은 아니다.
+`context().output_wait`는 정확한 원 목표 하나의 rate 대기와 현재 MANUAL 정지 확인 상태를
+설명한다. 대기는 수락/제출/장치 적용 성공이 아니다. 새 MANUAL 이동은 해당 Pi/device session과
+generation의 STOP/APPLIED·stationary 관측 뒤에 허용한다. 원 기한이 지나면
+`PHYSICAL_STOP_UNCONFIRMED`로 제한하며 값 0·타이머·옛 ACK로 정지를 만들지 않는다.
+같은 유효 driver session의 MANUAL A/B 연속은 새 정지/재조작과 구별한다.
+
 | 코드·상황 | 호출자의 처리 |
 |---|---|
 | `UNAVAILABLE` | 접속 전 실패. 같은 원 key로 이후 재확인 |
@@ -85,13 +103,56 @@ Worker는 보호 목적이면 원 key/host/대상/실행 일치, durable, PROTEC
 | `INVALID_FRAME/INVALID_INPUT` | 문법·값 오류. 원 값으로 덮지 않음 |
 | `TARGET_CHANGED/HOST_CHANGED/AUTHORITY_CHANGED/DEADLINE_EXCEEDED` | 현재 승인과 대상 재판단. 원 요청을 새 문맥으로 덮지 않음 |
 | `STORAGE_UNCERTAIN` | 내구 수락/결과 미확정. 원 저장 수습 없이 정상 완료 주장 금지 |
-| `HISTORY_FULL` | 보호 16개 한도. 조용한 이력 삭제·key 신규 취급 없음 |
+| `HISTORY_FULL/HISTORY_BYTES_RESERVED` | 개수 또는 필수 후속 증거 예약 공간 부족. 활성 보호의 정당한 종결·보존 만료 후 같은 원 요청 확인. 강제 삭제 금지 |
+| `REQUEST_WINDOW_EXPIRED` | 새 수락 가능 기간 밖의 key. 기한 변경·재발급으로 같은 요청을 실행하지 않음 |
+| `RESULT_NOT_RETAINED_OR_UNKNOWN` | 결과 보존 밖일 수 있는 부재. 과거 수락/정리 사실이나 성공을 재구성하지 않음 |
+| `LEGACY_KEY_NOT_ADMISSIBLE/HISTORY_POLICY_REQUIRED/REQUEST_DEADLINE_OUTSIDE_WINDOW/REQUEST_TIME_INVALID` | 신규 key/설정/원 예산의 계약 오류. 기존 원 결과는 같은 key로 조회하며 원장을 변환하지 않음 |
 | `TRANSITION_REJECTED/INTERNAL_ERROR` | 기존 상태·상세 reason 또는 내부 원인 보존. 자동 force/rollback 없음 |
 
 원 보호와 전환은 기존 64KiB Authority 안에 각각 최대 16/32개다. 별도 journal·DB·무제한 이력을 만들지 않는다.
-기록을 자동 축출하지 않으며 한도에서는 새 수락을 거절한다. 지원 이력 정리 없이 오래된 key를 재사용하지 않는다.
+명시 history 정책을 선택하면 아래 조건의 종결 이력만 신규 내구 수락과 함께 정리한다.
 Gateway 재시작은 원 결과를 회수하지만 자동 출력·재무장을 하지 않는다. 새로운 optional 필드를 모르는 구형 내부 writer와 혼합하지 않는다.
 외부 client는 wire v1을 사용하며 내부 Authority schema를 선택·해석하지 않는다.
+
+### 이력 수명과 반복 운영
+
+`--history-policy` / `XENOVA_GATEWAY_HISTORY_POLICY`는 root 소유 0600 JSON의 양의 정수
+`retry_ms`, `retention_ms`를 받는다. 운영값은 승인 입력이며 코드에 기본 시간을 넣지 않는다.
+미설정은 기존 UUID 신규 호출·기존 보존 한도를 유지한다. 이미 수명 fence를 저장한 뒤에는
+정책 파일을 빼도 새 legacy UUID 수락을 다시 열지 않는다.
+
+새 호출자는 `new_request_id(host_boot_id)`를 최초 송신 전에 한 번 사용한다.
+key는 `g1:<host UUID>:<Pi monotonic 발급 ms>:<UUID nonce>`다. 같은 host의 발급 시각이며 벽시계를 사용하지 않는다.
+형식은 client가 제공하고 호출자는 key와 spec을 원 attempt에 보존한다. 재조회·재연결·재시작에서 다시 만들지 않는다.
+이 형식은 사용자가 승인한 시간 포함 key 확장이며 기존 원장은 변환하지 않는다.
+정책 선택 후 신규 opaque UUID는 제한하고, 저장된 과거 UUID의 submit/get/commit/cancel/finish는 그대로 지원한다.
+이 제한은 유한 저장에서 임의 UUID의 무기한 중복 판별을 약속하지 않기 위한 배포 호환 경계다.
+
+새 요청의 원 deadline은 발급 시각+retry_ms 이내다. 수락 후 `retry_until_ms`와
+`retained_through_ms=max(retry_until_ms, 원 deadline+retention_ms)`를 원 기록에 고정한다.
+이는 **신규 수락 가능 기간**, **상세 결과의 최소 조회 보존 기간**, **실제 작업 기한**을 구분한다.
+보존 기간은 실행/출력 허가가 아니다. 정책 변경이 이미 약속한 기간을 줄이지 않는다.
+
+actor는 신규 수락 시 기존 최대 48개 기록을 한 번 확인한다. PROTECTED, PREPARING/PREPARED,
+현재 PENDING 전환이 참조하는 COMMITTED, 저장 미확정은 정리하지 않는다.
+나머지도 후속 증거의 원 deadline과 고정 조회 보존이 끝나야 정리한다.
+정리와 신규 수락·최소 발급시각 fence는 같은 Authority 원자 교체/file·parent fsync에 들어간다.
+실패하면 RAM 공간을 먼저 반환하지 않는다. get·history·주행 주기에는 정리 쓰기를 추가하지 않는다.
+
+정리된 발급시각 이하의 key는 기한을 바꿔도 신규 수락되지 않는다. fence는 정책 기간을 늘려도 후퇴하지 않는다.
+다른 host key는 시각을 비교하지 않고 HOST_CHANGED다. 기존 host의 활성 보호는 자동 삭제하지 않는다.
+과거 key의 부재를 최초 부재·정리 완료로 무기한 정확히 구별하지 않으며
+`RESULT_NOT_RETAINED_OR_UNKNOWN`은 그 한계를 표시한다. 만료된 승인으로 재실행하지 않는다.
+
+전체 64KiB 상한은 유지한다. 신규 수락 전에 기록당 최대 4096 bytes와 현재 제어/pending 여유 4096 bytes를 예약한다.
+따라서 16/32개는 별도 개수 상한이고, 실제 동시 보존 가능 수는 bytes 예약으로 더 작을 수 있다.
+수락 주기×고정 보존 기간이 이 용량을 넘으면 근거 있는 수락 제한이며 무제한 queue로 우회하지 않는다.
+운영 담당은 지원 호출 빈도·원 기한·필수 결과 회수 기간에 맞춰 두 시간을 승인해야 한다.
+
+로컬 반복 예제는 `examples/provider_lab.py --directory <새 소유 xenova-gateway-lab-* 경로>
+--history-retry-ms 180 --history-retention-ms 30`과 `tests/test_history.py`다.
+180/30ms는 빠른 보존 경계 시험값이며 운영값이 아니다. 실제 별도 프로세스/UDS에서
+100회 요청·종결을 같은 저장소로 반복하고, 원 결과·재시작·실패 보호를 확인한다.
 
 ## framing·수명·비용
 
@@ -123,7 +184,9 @@ Gateway는 당시 허용 출처의 완전 사본 최대 8개, 현재 target appl
 실제 앱 연결: Python `StateReceiver.receive/rebuild`→`ManeuverAdapter.prepare/calculate`,
 C `drive_adapter_apply_maneuver`→기존 `drive_state_preparation`을 사용한다.
 앱은 merge segment·기하/동역학적 적합성과 실제 계산을 책임진다. 적용만으로 progress/READY를 발급하지 않는다.
-소유한 현재 기본 C 알고리즘은 stateless로 유지한다. 신규 codec/적용 훅과 테스트 stateful adapter가 제공됐으며 실제 planner 상태 생산·계산 연결은 남는다.
+기본 C 알고리즘은 stateless로 유지한다. 신규 지도형 프로필의 실제 planner/path 생산·전체 적용·
+target 계산은 [drive-world-1](drive-world/README.md)의 별도 bounded binary 통로를 사용한다.
+기존 JSON codec·테스트 stateful adapter의 성공을 신규 실제 계산의 수락으로 대신하지 않는다.
 
 ## G3 명시 선택 serial feedback-1
 
@@ -158,6 +221,35 @@ codec·고정 vector·PTY 가상 장치는 [제품 codec](../../platform/service
 [시험](../../platform/services/gateway/tests/test_feedback.py), [가상 장치](../../platform/services/gateway/examples/virtual_esp32.py)에 있다.
 고정 hex vector는 [feedback-1 JSON](vectors/gateway-feedback-1.json)이며 제품 시험이 매번 encode 결과와 대조한다.
 실제 ESP32 생산·watchdog/E-stop·차량 물리 정지는 [장치 요청](../requests/20261029-request-esp32.md)과 7번에서 공동 수락한다.
+
+### 명시 선택 feedback-2와 Pi 로컬 odometry
+
+`--serial-profile feedback-2 --odometry-config <private-file>`에서만 선택한다.
+feedback-1 명령/ACK frame은 유지하고 HELLO/ACK의 version을 2로 명시하며 capability
+ODOMETRY=32를 추가로 요구한다. 구형 firmware에 자동으로 새 프레임을 보내지 않는다.
+기존 COBS/CRC·single serial owner·부분 frame 상한을 그대로 사용한다.
+
+| ID | payload (같은 little-endian·UUID 규칙) |
+|---|---|
+| ODOM_PROBE `0x0f04` | pi_session:uuid, device_session:uuid, pi_send_us:u64 |
+| ODOM_REPORT `0x0f03` | pi_session:uuid, device_session:uuid, echoed_pi_send_us:u64, device_sample_us:u64, source_sample:u64, cumulative_left_ticks:i64, cumulative_right_ticks:i64, quality:u8, steering_mrad:i32, steering_error_mrad:u16 |
+
+device_sample_us는 실제 encoder 표본의 장치 시각이다. 원 probe의 Pi send/receive 구간으로
+시계 오차를 제한하고 장치 시각과 Pi 시각을 직접 빼지 않는다. source_sample은 같은 device
+session에서 증가하며 cumulative encoder는 회신 송신 횟수나 명령 적분값이 아니다.
+quality bit encoder=1은 필수, steering measured=2/estimated=4는 동시에 켤 수 없다.
+steering을 제공하면 양의 오차 범위도 제공한다. 센서 미지원의 0을 실제 측정 0으로 표시하지 않는다.
+
+private 0600 설정은 vehicle/calibration·metres_per_tick·track_width_m·wheelbase_m와 실제 속도·
+시계/표본 나이·주기·encoder bits·pose 오차의 승인값을 공급한다. 필드/strict 검사는
+`odometry.py:OdometryConfig`가 원본이다. 시험 수치를 운영 default로 넣지 않는다.
+첫 표본은 속도 추측에 쓰지 않으며 reset·긴 불연속은 새 odom epoch로 분리한다.
+Pi `VehicleSample` 발행은 Jetson 연결을 기다리지 않는다. 명령 수락/적용·stationary와
+odom의 실제 표본은 각자의 원 session/sequence를 유지한다.
+
+실제 제품 parser/PTY 왕복·부정 표본과 정상 회복은 `tests/test_odometry.py`, 가상 차량은
+`platform/apps/drive/tests/run_lattice_pair.py`에서 제공한다. 프레임의 바이트 vector와
+독립 encoder는 아래 장치 요청에 연결한다. 실제 MCU 생산·차량 보정·물리 정지 완료가 아니다.
 
 ## 바로 실행할 예제와 시험
 

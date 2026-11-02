@@ -30,6 +30,8 @@ def fingerprint(app):
     groups += ["platform/guests/zephyr/" + name for name in ("xen-store", "xen-runtime", "diagnostics", "telemetry")]
     if app == "drive":
         groups += ["platform/apps/autonomous/zephyr/src", "platform/apps/manual/zephyr/src"]
+        groups += ['platform/apps/drive/'+name for name in ('world','planner','profiles','tools')]
+        groups += ['docs/contracts/drive-world']
     # Interpreter caches are generated output, never firmware source inputs.
     paths = [p for group in groups for p in sorted((ROOT / group).rglob("*"))
              if p.is_file() and "__pycache__" not in p.parts and p.suffix not in (".pyc", ".pyo")]
@@ -39,6 +41,7 @@ def fingerprint(app):
         "platform/guests/zephyr/starter.lock.json", "platform/first-install/artifact_io.py",
         "platform/first-install/first_install_contract.py",
         "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_zephyr.py",
+        "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_guest_profile.py",
         "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_runtime.py",
         "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_trace.py")]
     if any(p.is_symlink() for p in paths):
@@ -49,7 +52,7 @@ def fingerprint(app):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--app", choices=("manual", "autonomous", "drive"), required=True)
-    p.add_argument("--profile", choices=("operations", "experiment", "warm-operations", "warm-experiment"), default="operations",
+    p.add_argument("--profile", choices=("operations", "experiment", "warm-operations", "warm-experiment", "warm-lattice-lab"), default="operations",
                    help="operations excludes raw capture; experiment explicitly includes it")
     p.add_argument("--zephyr-source", type=Path, required=True)
     p.add_argument("--tools", type=Path, required=True)
@@ -57,6 +60,12 @@ def main():
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
     if args.profile.startswith('warm-') and args.app!='drive':p.error('warm profiles require the common drive firmware')
+    if args.profile=='warm-lattice-lab':
+        home=ROOT/'platform/apps/drive'
+        profile=json.loads((home/'profiles/lattice-lab-1.json').read_text())
+        generated=json.loads((home/'planner/generated/primitive-manifest.json').read_text())
+        if generated['profile']!=profile or generated['primitive_source_sha256']!=sha(home/'planner/generated/primitives.c'):
+            raise ValueError('selected vehicle profile/primitive generation differs; regenerate with the fixed tool')
     for path in (args.zephyr_source, args.tools, args.output):
         if not path.is_absolute() or path.resolve() != path or path.is_symlink():
             raise ValueError("canonical absolute paths required")
@@ -110,6 +119,12 @@ def main():
                     "-DCONFIG_XENOVA_DIAGNOSTICS_THREADS=" + ("y" if args.profile == "experiment" else "n")]
     if args.app == "drive":
         profile_args = ["-DEXTRA_CONF_FILE=" + str(home / "profiles" / (args.profile + ".conf"))]
+    if args.profile=='warm-lattice-lab':
+        # This frozen toolchain contains picolibc. Legacy cross-compile does not
+        # advertise it without an explicit path/flag; do not change old profiles.
+        header=args.tools/'aarch64-zephyr-elf/aarch64-zephyr-elf/include/picolibc.h'
+        if not header.is_file():raise ValueError('fixed picolibc headers required for the selected math profile')
+        profile_args+=['-DTOOLCHAIN_HAS_PICOLIBC=ON','-DCONFIG_TOOLCHAIN_CROSS_COMPILE_SUPPORTS_THREAD_LOCAL_STORAGE=y']
     run("configure", [cmake, "-S", home, "-B", build, "-GNinja", "-DBOARD=xenvm",
                       "-DCMAKE_MAKE_PROGRAM=" + str(ninja), "-DDTC_OVERLAY_FILE=" + str(home / "boards/xenvm.overlay"),
                       *profile_args])
@@ -136,6 +151,10 @@ def main():
             raise ValueError("resolved configuration differs from selected profile: " + name)
     if ("CONFIG_XENOVA_DRIVE_WARM=y\n" in config)!=args.profile.startswith('warm-'):
         raise ValueError('resolved readiness profile differs from requested profile')
+    if args.profile=='warm-lattice-lab' and 'CONFIG_PICOLIBC=y\n' not in config:
+        raise ValueError('actual target lacks the selected fixed math library')
+    if args.profile=='warm-lattice-lab' and 'CONFIG_THREAD_LOCAL_STORAGE=y\n' not in config:
+        raise ValueError('toolchain picolibc errno requires thread-local storage')
     if "CONFIG_STACK_SENTINEL=y\n" not in config:
         raise ValueError("drive target must retain stack boundary detection")
     netfront_stack_audit = {"send_frame_bytes": int(send[0][1]), "direct_frame_budget_bytes": 256,
@@ -146,6 +165,7 @@ def main():
         frames = {}
         basenames=["workers.c", "adapter.c", "autonomous.c", "manual.c", "xm_payload.c", "xm_json.c"]
         if args.profile.startswith('warm-'):basenames += ['context.c','runtime.c','main.c','xen_bootstrap.c','xm_zclient.c']
+        if args.profile=='warm-lattice-lab':basenames += ['lattice_app.c','lattice_input.c','engine.c','lattice.c','world.c','pb_decode.c','pb_encode.c']
         for basename in basenames:
             item = next(v for v in commands if v["file"].endswith("/" + basename))
             argv = shlex.split(item["command"])
@@ -168,8 +188,14 @@ def main():
     spec.loader.exec_module(verifier)
     verifier.verify_event_irq(build / "zephyr/zephyr.dts")
     segments = verifier.verify_elf(build / "zephyr/zephyr.elf")
+    license_file=args.zephyr_source/'LICENSE'
+    if args.profile=='warm-lattice-lab':
+        license_file=args.output/'THIRD_PARTY_LICENSES.txt'
+        nanopb=snapshot/'platform/apps/drive/world/nanopb/LICENSE.txt'
+        license_file.write_text('Zephyr / Xenova application (Apache-2.0)\n\n'+
+            (args.zephyr_source/'LICENSE').read_text()+'\n\nNanopb runtime (zlib)\n\n'+nanopb.read_text())
     run("package", [sys.executable, "-B", snapshot / "platform/scripts/package-xenova-firmware.py",
-                    "--build-dir", build / "zephyr", "--license", args.zephyr_source / "LICENSE",
+                    "--build-dir", build / "zephyr", "--license", license_file,
                     "--version", "0.1.0-drive-" + digest[:12], "--app", "xenova-" + args.app,
                     "--source-revision", "sha256:" + digest, "--build-id", args.output.name,
                     "--app-source", home, "--networked", "--output", args.output / "firmware", "--execute"])
@@ -182,6 +208,14 @@ def main():
                "files": {p.name: {"sha256": sha(p), "bytes": p.stat().st_size}
                          for p in sorted((args.output / "firmware").iterdir()) if p.is_file()},
                "acceptance": {"M1_arm_build": True, "M2_board": False, "M3_performance": False}}
+    if args.profile=='warm-lattice-lab':
+        receipt['drive_contract']={'kind':'test','world_profile':profile['id'],
+            'schema_sha256':sha(snapshot/'docs/contracts/drive-world/world.proto'),
+            'primitive_sha256':generated['asset_sha256'],
+            'app_state_models':{'autonomous':'stateful','manual':'stateless'},
+            'bootstrap_profile':'warm-drive-1','map_slots':3,'map_cells':4096,
+            'odom_slots':128,'path_points':512,'node_limit':profile['node_limit'],
+            'output_authority':'Gateway','operating_vehicle_limits_verified':False}
     (args.output / "BUILD_RECEIPT.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(json.dumps({"candidate": str(args.output / "firmware"), "firmware_sha256": receipt["files"]["zephyr.bin"]["sha256"]}))
 

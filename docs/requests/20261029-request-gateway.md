@@ -1,23 +1,28 @@
 # Gateway 직접 구현·공동 연동
 
 담당: 박신영 / 플랫폼·Gateway. 상태: **G1 실제 로컬 호출·G2 상태 연결·G3 피드백 제공자 구현 / 상대 제품·장치·운영 수락 전**.
-Gateway 자체를 타 담당자에게 위임하지 않는다. 아래가 2026-11-01 현재 작업이며 당시 원문은 이력에 보존한다.
+Gateway 자체를 타 담당자에게 위임하지 않는다. 아래가 2026-11-02 현재 작업이며 당시 원문은 이력에 보존한다.
 
 ## 현재 작업과 제공물
 
 | 기존 ID·상태 | 수정 위치·이유 | 정상 수락·실패 보호 |
 |---|---|---|
-| DEC-11·16 / 공통 계약·stateless 로컬 제공 | `platform/services/gateway/xenova_gateway/planning.py`, `authority.py:commit_transition`, `warm.py`, `verified_runner.py`. 준비·권위 커밋·새 문맥 계산을 구분 | 원 요청·기한·generation 보존, 정상 A 유지·B 준비·조건부 커밋. 중단·늦은 응답·준비 실패의 무권한 승격 0 |
+| DEC-11·16 / 공통 권위·계획 인계 로컬 제공 | `platform/services/gateway/xenova_gateway/planning.py`, `authority.py:commit_transition`, `warm.py`, `verified_runner.py`. 준비·권위 커밋·새 문맥 계산을 구분 | 원 요청·기한·generation 보존, 정상 A 유지·B 준비·조건부 커밋. 중단·늦은 응답·준비 실패의 무권한 승격 0. 실제 stateful 계산은 DEC-19 행 |
 | D03-G01·G03·G04 / 국소 제공, G02 결정 대기 | `authority_ops.py`, `authority.py`. 정상 원본 재확인과 손상 백업의 최신성 복원을 구분 | 같은 lease/hash·원 이력 보존, 명시 재무장. marker 삭제·옛 권위 초기화/자동 복원 0 |
 | DEC-12·18·ARCH-T16·18 / 실제 생산자 공동 수락 전 | Spring/UI 입력 생산자와 MQTT·C 수신 adapter. 실제 session/sample/action·원 나이를 이어야 함 | 같은 MANUAL 승계 유지, AUTO→MANUAL의 현재 중립 뒤 새 조작. 캐시 재발행·generation 교체만으로 새 행동 승인 0 |
-| DEC-13·ARCH-T25·26·38 / G3 제공자 로컬 완료, 실제 장치 전 | `feedback.py`, `output_owner.py`, `verified_runner.py`. 명시 feedback-1 parser·RX/TX·원 명령/장치 session·결과 연결 | 실제 PTY/pyserial의 부분·붙은 frame, CRC·옛 ACK·장치 재부팅·기한·센서 부재. 기존 write-only 유지, 물리 정지 성공 생성 0 |
-| DEC-19·ARCH-T21~23·32·35 / G2 제공자 로컬 완료, 실제 planner 전 | `state_transfer.py`, 공용 `handoff.py`, C `xm_state_*`·`drive_adapter_apply_maneuver`. 완전 사본/적용/계산/출력 구분 | 실제 MQTT·Python/C 교차·native ASan/UBSan. 당시 수락 사본 재사용·권한 종료 후 늦은 갱신 거절. 기본 C 알고리즘은 stateless 유지 |
+| DEC-13·ARCH-T25·26·38 / G3 제공자 로컬, 실제 장치 전 | `feedback.py`, `odometry.py`, `output_owner.py`, `verified_runner.py`. feedback-1 호환과 명시 feedback-2·원 encoder/장치 시계·Pi 로컬 상태 | 실제 PTY/pyserial의 부분·붙은 frame, CRC·옛 ACK·장치 재부팅·기한·센서 부재. write-only 유지, 타이머/목표 적분의 물리 관측 위장 0 |
+| DEC-19·ARCH-T21~23·32·35 / 실제 planner/path 제공자 연결 | `state_transfer.py`, `drive_link.py`, `drive/planner/engine.c`, `lattice_app.c`. 기존 JSON adapter와 별도 full path binary·실제 적용/target 계산 | 제품 C·실제 MQTT/native A/B. 당시 수락 사본 재사용·권한 종료 뒤 갱신 거절, 새 instance의 실제 준비·정당한 재합류. 실차 수락 별도 |
 | D01/D03·DEC-11·16 / G1 제공자 로컬 완료, Worker 연결 전 | `ipc.py`, `client.py`, `provider.py`, 기존 actor/planning/Authority. 실제 별도 프로세스 submit/get/commit/cancel/finish | 원 key·기한·승인 의미, 내구 수락·지속 exclusion·정상 종결, slow reader/partial/포화·저장 EIO·재시작·peer 검사 |
 
 플랫폼의 [최신 로컬 검증](../verification/recovery-scenario-closure-20261030.md#gateway-provider)과
 [Gateway README](../../platform/services/gateway/README.md)가 제공 근거다.
 부가 진단은 제한된 queue로 분리됐고 최초/희귀 cause·필수 Authority 저장·STOP 순서는 보존한다.
 직접 ERROR/CRITICAL 경로의 실제 지연·Zephyr 총 로그 비용은 기존 근거 범위를 넘겨 완료로 표시하지 않는다.
+
+후속 이력 수명은 `history.py`·`client.new_request_id`와 같은 Authority 저장 경계에서 제공한다.
+활성/미확정 보호를 자동 해제하지 않고 종결·원 보존·참조 해소 뒤 새 수락과 함께 정리한다.
+계약과 실제 반복/주행/ARM·설치 수준은
+[현재 검증](../verification/recovery-scenario-closure-20261030.md#history-driving-app)을 따른다.
 
 ## 6-B 포장과 설치 전제
 
@@ -30,7 +35,8 @@ unit은 기본 disable, 설정은 비활성 example만 제공한다. package 설
 
 Worker–Gateway 전송은 [실제 client/UDS 계약](../contracts/gateway-provider-v1.md)으로 제공한다.
 Worker는 [지정한 Engine/rejoin 연결 위치](20261029-request-recovery-worker.md#d03--제공된-gateway-client를-복구-단계에-연결)에 소비를 구현한다.
-상태 인계의 공통 adapter·전송·수락/적용은 제공됐지만 실제 planner의 상태 생산·기하 검증·계산 연결은 플랫폼/앱 직접 후속이다.
+실제 planner의 상태 생산·기하 검증·target 계산 연결은 플랫폼 소유 코드에서 구현했다.
+Jetson 담당의 실제 mapper와 ESP32 실제 표본/차량, Worker의 원 복구 단계 소비는 각 요청서에서 수락한다.
 실제 차량 한계·ACK 기한·firmware/센서는 [ESP32 요청](20261029-request-esp32.md)에서 공동 수락한다.
 백업 최신성 복원은 기존 D03-G02 대기이며 이번 포장·IPC로 닫지 않는다.
 

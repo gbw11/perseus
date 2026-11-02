@@ -7,6 +7,14 @@ Mosquitto를 dom0 이미지에 포함하고, 계정·ACL은 데이터 파티션�
 
 ## 구성과 원본
 
+일반 VM 생성·factory 등록의 실제 공급은 [VM 공통 provisioning 계약](../../../docs/contracts/vm-provisioning-v1.md)에 연결했다.
+`ensure_accounts`는 같은 UUID 자격을 보존하고 필요한 신규 계정만 기존 writer로 준비한다.
+명시 폐기한 계정은 revoked fence로 자동 부활을 막는다. 구형 writer와 새 fence를 혼합하지 않는다.
+해시 전/후의 staging을 원 암호로 재개하며 손상/소실을 빈 저장소로 취급하지 않는다.
+Linux Agent의 실제 v2 송신과 drive/link 생산·소비를 자기 VM/승인 Gateway ACL에 연결했다.
+자격 확보·broker 반영·guest 전달·인증·건강은 다른 상태다. package library는
+`xenova-mqtt-broker-provider`, 기존 서비스·활성화는 main package가 소유한다.
+
 | 파일·구성 | 역할 |
 |---|---|
 | `etc/policy.json` | 계정 프로필과 허용 토픽의 공통 원본. 비밀번호 없음 |

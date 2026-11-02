@@ -16,6 +16,10 @@ struct xt_bootstrap {
 	bool persistent_crash;
 	/* Drive-only root-issued app identities. Absent in the v2 Publisher channel. */
 	char drive_profile[24],auto_instance_id[37],manual_instance_id[37];
+	/* Optional independent Jetson input connection. Never substitutes the Pi
+	 * control broker or inherits its credentials. Absent means AUTO unavailable. */
+	char world_broker_ipv4[16],world_username[47],world_password[129],world_profile[65];
+	uint16_t world_port;
 };
 typedef int (*xt_bootstrap_loader)(struct xt_bootstrap *, int64_t deadline_ms, void *);
 /* Mutable JSON is parsed in place. own_vm_id must come from an independent,

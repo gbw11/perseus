@@ -125,3 +125,27 @@ def test_socket_url_peer_close_becomes_sink_error():
         sink.close()
     finally:
         srv.close()
+
+
+@pytest.mark.skipif(__import__('os').name!='posix',reason='actual PTY required')
+def test_nonblocking_pty_saturation_is_failure_and_new_owner_can_progress():
+    import os
+    import pty
+    pytest.importorskip('serial')
+    master,slave=pty.openpty();os.set_blocking(master,False)
+    sink=SerialSink(os.ttyname(slave));frame=DriveFrame(1,1,.1,0.)
+    try:
+        assert sink._write_fd is not None
+        assert sink.write(frame,0)==len(encode(frame))
+        assert os.read(master,256)==encode(frame)
+        with pytest.raises(SinkError):
+            for _ in range(4096):sink.write(frame,0)
+            raise AssertionError('bounded PTY queue did not saturate')
+        assert sink.failures==1 and sink.first_failure is not None
+        sink.close()
+        while True:
+            try:os.read(master,4096)
+            except BlockingIOError:break
+        sink=SerialSink(os.ttyname(slave))
+        assert sink.write(frame,0)==len(encode(frame)) and os.read(master,256)==encode(frame)
+    finally:sink.close();os.close(master);os.close(slave)

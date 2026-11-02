@@ -361,7 +361,7 @@ class FoundationTest(unittest.TestCase):
         self.start()
         original = self.p.command
         def broken(args, **kwargs):
-            if args == ["xl","list","-l"]:
+            if args[:2] == ["xl","list"]:
                 raise vm.PlatformError("injected Xen access failure")
             return original(args, **kwargs)
         self.p.command = broken
@@ -376,7 +376,7 @@ class FoundationTest(unittest.TestCase):
     def test_broken_xl_output_is_not_absence(self):
         self.start()
         original = self.p.command
-        self.p.command = lambda args, **kw: "not-json" if args == ["xl","list","-l"] else original(args, **kw)
+        self.p.command = lambda args, **kw: "not-json" if args[:2] == ["xl","list"] else original(args, **kw)
         self.assertFalse(self.call("probe", {"vm_id":self.vm_id,"timeout_ms":1000})["ok"])
 
     def test_empty_xl_outputs_are_not_confirmed_absence(self):
@@ -575,8 +575,9 @@ class FoundationTest(unittest.TestCase):
         self.assertEqual(self.p.execution().barrier()["state"], "quiescing")
 
     def test_host_barrier_published_before_bounded_operation_drain(self):
-        with operation_lock(self.p.runtime), patch.object(vm, "Platform", return_value=self.p), self.assertRaises(OperationBusy):
+        with operation_lock(self.p.runtime), patch.object(vm, "Platform", return_value=self.p), self.assertRaises(SystemExit) as caught:
             vm.main(["shutdown-all"])
+        self.assertEqual(caught.exception.code,3)
         self.assertEqual(self.p.execution().barrier()["state"], "quiescing")
         self.assertEqual(self.physical("shutdown"), [])
         self.assertGreaterEqual(self.ticks, 90)
@@ -634,14 +635,14 @@ class FoundationTest(unittest.TestCase):
         self.assertEqual(len(self.physical("create")),2)
         self.assertEqual(self.state()["desired_state"],"running")
 
-    def test_busy_probe_is_unknown_and_keeps_last_success(self):
+    def test_probe_during_common_lock_publishes_current_observation(self):
         self.start()
         with operation_lock(self.p.runtime):
             result = self.call("probe",{"vm_id":self.vm_id,"timeout_ms":1000})
-        self.fails(result,"OPERATION_IN_PROGRESS")
+        self.ok(result)
         snap = self.ok(self.call("snapshot",{"vm_id":self.vm_id,"max_age_ms":1000}))["snapshot"]
-        self.assertTrue(snap["unknown"])
-        self.assertEqual(snap["last_error"]["code"],"OPERATION_IN_PROGRESS")
+        self.assertFalse(snap["unknown"])
+        self.assertIsNone(snap["last_error"])
         self.assertEqual(snap["last_success"]["value"]["presence"],"present")
 
     def test_destroy_means_stop_intent_and_does_not_retire_assets(self):

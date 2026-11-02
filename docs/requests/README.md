@@ -7,13 +7,18 @@
 
 ## 현재 담당자에게 전달할 요청서
 
+2026-11-02 자격 공급·등록-only 통지·현재 적용 프로필의 실제 제공물은
+[공통 계약](../contracts/vm-provisioning-v1.md)과 [후보별 결과](../verification/recovery-scenario-closure-20261030.md#vm-provisioning-integration)에 있다.
+Worker의 VM별 자격/같은 receipt 소비, Spring 등록-only 수신, Linux 실제 guest smoke,
+Jetson의 별도 broker 자격 공급은 각 요청서의 현재 본문에서 시작한다. 제품 코드를 대신 수정하거나 운영 설치한 결과는 아니다.
+
 2026-11-01 6-A에서 HTTP·Worker·Linux·Gateway의 현재 본문과 이력을 분리했다. 각 본문에는 수정 이유/위치·하위 제공물·정상/실패 수락·선행조건·담당 회신이 있다. [배포 준비·공동 결정·7번 입력표](../platform/deployment-readiness.md)는 플랫폼 원본이며 실제 배포나 담당 제품 완료를 뜻하지 않는다.
 
 2026-10-29의 주행·복구 확장 요청은 아래 `20261029-request-*` 문서에서 시작합니다. 각 문서의 **현재 할 일 → 함께 읽을 파일 → 최소 수정과 나머지 작업** 순서로 읽습니다. 기존 D01·D02·D03·D08 요청의 ID·상세 조건·미완료 상태는 아래 원문에 보존하며, 새 문서가 완료 상태를 대신하지 않습니다.
 
 | 현재 요청서 | 담당 | 이번 최소 연결 밖의 주요 작업 |
 |---|---|---|
-| [Gateway 직접 구현·공동 연동](20261029-request-gateway.md) | 박신영 / 플랫폼·Gateway | G1 client/UDS, G2 공통 상태 adapter, G3 feedback-1 제공. 실제 Worker·planner·장치 공동 수락 전 |
+| [Gateway 직접 구현·공동 연동](20261029-request-gateway.md) | 박신영 / 플랫폼·Gateway | G1 client/UDS·bounded 이력, G2 실제 lattice/path 연결, G3 선택 feedback-2·odom 제공. 실제 Worker·mapper·장치/차량 공동 수락 전 |
 | [Recovery Worker](20261029-request-recovery-worker.md) | Worker·Engine | D01 건강 분류·episode 회복, D03 원 결과 수습·전체 복구 연동 |
 | [Linux·Agent](20261029-request-linux-agent.md) | Linux 엔지니어·Agent | D01-L01~L05 자원·서비스 진행·로컬 감독·설치 |
 | [HTTP·Spring·화면](20261029-request-http-spring-ui.md) | FastAPI·Spring·프론트 | Linux 준비 중 조회/실제 정지 연결, 원 key·pending 종단 연결, 수동 입력 세션·명시적 모드/복귀 |

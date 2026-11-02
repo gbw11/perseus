@@ -25,7 +25,10 @@ static void work(void *a,void *b,void *c)
   if(!rc&&(strcmp(incoming.drive_profile,"warm-drive-1")||!incoming.auto_instance_id[0]||!incoming.manual_instance_id[0]))rc=-EPROTO;
   if(!rc&&identified&&(memcmp(&first.identity,&incoming.identity,sizeof(first.identity))||
      strcmp(first.username,incoming.username)||strcmp(first.password,incoming.password)||
-     strcmp(first.broker_ipv4,incoming.broker_ipv4)||first.port!=incoming.port))rc=-EXDEV;
+     strcmp(first.broker_ipv4,incoming.broker_ipv4)||first.port!=incoming.port||
+     strcmp(first.world_broker_ipv4,incoming.world_broker_ipv4)||first.world_port!=incoming.world_port||
+     strcmp(first.world_username,incoming.world_username)||strcmp(first.world_password,incoming.world_password)||
+     strcmp(first.world_profile,incoming.world_profile)))rc=-EXDEV;
   k_mutex_lock(&context_lock,K_FOREVER);
   available=!rc&&!atomic_get(&stop);
   if(available){current=incoming;observed=k_uptime_get();if(!identified){first=incoming;identified=true;}}

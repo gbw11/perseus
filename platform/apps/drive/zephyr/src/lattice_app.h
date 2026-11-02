@@ -1,0 +1,20 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+#ifndef XENOVA_LATTICE_APP_H
+#define XENOVA_LATTICE_APP_H
+#include "controller.h"
+#include "workers.h"
+#include "world.h"
+#include <xenova/drive_io.h>
+int drive_lattice_start(struct drive_controller *);
+void drive_lattice_context(const struct xd_inputs *);
+/* Actual worker health/deadline assessment precedes source-state export. */
+void drive_lattice_completed(const struct drive_completion *);
+/* Old AUTO calculation owner has joined before this poll/restart. */
+int drive_lattice_reset_poll(int64_t original_deadline_ms);
+void drive_lattice_adapter(struct drive_adapter *,bool manual);
+int drive_lattice_join(int64_t original_deadline_ms);
+/* Called by the state I/O owner. Builds a real completed-path snapshot only;
+ * no timer creates calculation progress and no ownership is granted here. */
+int drive_lattice_snapshot(dw_state *);
+void drive_lattice_report(void);
+#endif

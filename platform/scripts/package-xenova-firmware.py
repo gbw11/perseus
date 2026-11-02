@@ -47,6 +47,8 @@ def main(argv=None):
             'source': {'zephyr_version': '4.4.0', 'app': args.app,
                        'source_revision': args.source_revision, 'build_id': args.build_id},
             'hardware_profile': profile, 'capabilities': zephyr.NET_CAPABILITIES if args.networked else zephyr.CAPABILITIES}
+    from xenova_guest_profile import from_manifest
+    meta['provisioning_profile']=from_manifest(meta,config=(args.build_dir/'.config').read_text())
     if not all(value.strip() for value in meta['source'].values()):
         raise ValueError('firmware provenance values must not be empty')
     if args.app_source is not None:

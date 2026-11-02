@@ -43,6 +43,9 @@ struct xd_io_stats {
  size_t stack_unused_bytes;
 };
 int xd_io_start(struct xm_zclient *, const char *control, const char *input);
+/* Before startup only. Small local vehicle input shares the v1 owner, so
+ * MANUAL never waits for a separate mapper/state connection. */
+int xd_io_binary(const struct xm_zbinary *);
 /* One owner/client, with both existing mode inputs. No second Store/session. */
 int xd_io_start_dual(struct xm_zclient *, const char *control, const char *input, const char *perception);
 int xd_io_snapshot(struct xd_inputs *);

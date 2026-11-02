@@ -1,6 +1,6 @@
 """조건을 다시 확인하는 일회성 복구 실행. 감시·정책·반복 실행 서비스는 아니다."""
 from first_install_contract import uuid4
-from xenova_execution import ExecutionError, fingerprint, refuse, short_lock
+from xenova_execution import ExecutionError, fingerprint, refuse, short_lock, read_record
 from xenova_runtime import PlatformError
 import xenova_catalog as catalog
 import xenova_vm as vm
@@ -34,6 +34,18 @@ def validate_request(spec):
     return spec
 
 
+def read_attempt(data, identity, *, reader=read_record):
+    """원 시도의 무결성만 확인한다. 현재 host·실행·복구 허가는 조회하지 않는다."""
+    if not isinstance(identity,str) or not vm.UUID.fullmatch(identity):
+        refuse('INVALID_SPEC','canonical recovery attempt required')
+    value=reader(data/'recovery-attempts'/(identity+'.json'))
+    if value is None:refuse('VM_NOT_FOUND','recovery attempt not found')
+    if (value.get('recovery_attempt_id')!=identity or value.get('request_hash')!=fingerprint(value.get('request'))
+            or not vm.UUID.fullmatch(value.get('operation_id',''))):
+        refuse('RECONCILE_REQUIRED','recovery attempt integrity mismatch')
+    return value
+
+
 class Recovery:
     def __init__(self, manager):
         self.m = manager
@@ -45,13 +57,7 @@ class Recovery:
         return self.e._path(self.p.data, "recovery-attempts", identity)
 
     def read_attempt(self, identity):
-        value = self.e.read(self.path(identity))
-        if value is None:
-            refuse("VM_NOT_FOUND", "recovery attempt not found")
-        if (value.get("recovery_attempt_id") != identity or value.get("request_hash") != fingerprint(value.get("request"))
-                or not vm.UUID.fullmatch(value.get("operation_id", ""))):
-            refuse("RECONCILE_REQUIRED", "recovery attempt integrity mismatch")
-        return value
+        return read_attempt(self.p.data,identity,reader=self.e.read)
 
     def attempts(self):
         root = self.p.data/"recovery-attempts"

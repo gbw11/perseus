@@ -16,6 +16,8 @@ static atomic_t stop;
 static struct xm_zclient *client;
 static char control_topic[XM_TOPIC_MAX], input_topic[XM_TOPIC_MAX], perception_topic[XM_TOPIC_MAX];
 static bool dual_mode, perception_registered;
+static struct xm_zbinary binary;
+static bool binary_registered;
 static struct xd_inputs shared, working;
 static struct xd_manual_source manual_source; /* v1 receive owner only */
 static struct xd_candidate pending, active;
@@ -186,6 +188,9 @@ static void owner(void *a,void *b,void *c) {
    rc=xm_zclient_subscribe(client,perception_topic,0);
    perception_registered=!rc;
   }
+  if(!rc&&binary.topic&&!binary_registered){
+   client->binary=binary;rc=xm_zclient_subscribe(client,binary.topic,0);binary_registered=!rc;
+  }
   uint64_t after=clock_us();
   k_mutex_lock(&exchange_lock,K_FOREVER);stats.prepare_max_us=MAX(stats.prepare_max_us,after-before);k_mutex_unlock(&exchange_lock);
   if(rc){(void)k_sem_take(&io_wake,K_MSEC(10));continue;}
@@ -245,6 +250,12 @@ static int start(struct xm_zclient *c,const char *control,const char *input,cons
 }
 int xd_io_start(struct xm_zclient *c,const char *control,const char *input) {
  return start(c,control,input,NULL);
+}
+int xd_io_binary(const struct xm_zbinary *in){
+ if(!in||!in->topic||!in->buffer||!in->receive||!in->capacity||in->capacity>2048||strlen(in->topic)>=XM_TOPIC_MAX)return -EINVAL;
+ if(k_mutex_lock(&io_lifecycle_lock,K_NO_WAIT))return -EBUSY;
+ int rc=attempted_start?-EALREADY:0;if(!rc)binary=*in;
+ k_mutex_unlock(&io_lifecycle_lock);return rc;
 }
 int xd_io_start_dual(struct xm_zclient *c,const char *control,const char *input,const char *perception) {
  if(!perception)return -EINVAL;

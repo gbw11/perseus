@@ -15,6 +15,41 @@ def limits(**changes):
     return replace(VehicleLimits(-.5,.5,-.3,.3,2.,3.),**changes)
 
 
+def test_manual_activation_requires_original_session_stop_and_finite_completion(tmp_path):
+    from uuid import uuid4
+    from xenova_gateway.verified_runner import VerifiedGatewayRunner
+    from xenova_gateway.output_owner import SubmissionReceipt
+    from xenova_gateway.machine import Mode
+    from test_warm import WarmWorld
+    from test_verified import A,B,Client
+    pi,device=str(uuid4()),str(uuid4())
+    class Device(MockSink):
+        def device_view(self):return dict(feedback_supported=True,ready=True,fault=None,pi_session=pi,device_session=device)
+        def write(self,frame,t):
+            count=super().write(frame,t);r=SubmissionReceipt(count,frame)
+            r.metadata=dict(command_sequence=len(self.frames),pi_session=pi,device_session=device);return r
+    w=WarmWorld(tmp_path/'authority',mode='MANUAL');w.perception=False;w.arm()
+    w.m._change(Mode.MANUAL,A,'test_new_control',w.t,arm=True);w.tick(.1)
+    sink=Device();runner=VerifiedGatewayRunner(Client(),sink,authority=w.auth,bindings=w.cache,
+        vm_ids=(A,B),clock=lambda:w.t,readiness_profile='warm-drive-1');runner.machine=w.m;runner.drive_link=object()
+    action=ForwardDrive('manual',w.m.generation,.1,0.,source={'app_id':'manual'})
+    assert not runner._manual_can_move(action,sink.device_view(),w.t)
+    original=runner._manual_activation['deadline_ms'];sequence=runner._manual_activation['first_stop']
+    event=dict(command_generation=action.generation,command_kind='STOP',status='APPLIED',physical_stop=True,
+        pi_session=pi,device_session=device,command_sequence=sequence,observed_monotonic=w.t)
+    for changed in ({'physical_stop':None},{'device_session':str(uuid4())},{'command_generation':action.generation-1},
+                    {'observed_monotonic':original/1000+.01}):
+        runner._manual_observe([{**event,**changed}]);assert not runner._manual_activation['ready']
+    runner._manual_observe([event]);assert runner._manual_can_move(action,sink.device_view(),w.t)
+    w.m._change(Mode.MANUAL,A,'another_control',w.t,arm=True)
+    newer=ForwardDrive('manual',w.m.generation,.1,0.,source={'app_id':'manual'})
+    w.t+=.03;assert not runner._manual_can_move(newer,sink.device_view(),w.t)
+    original=runner._manual_activation['deadline_ms'];w.t=original/1000+.01
+    assert not runner._manual_can_move(newer,sink.device_view(),w.t)
+    assert w.m.failure=='PHYSICAL_STOP_UNCONFIRMED' and not w.m.output_permitted
+    assert runner._manual_activation['deadline_ms']==original and isinstance(sink.frames[-1][1],StopFrame)
+
+
 def test_no_invented_serial_limits_and_explicit_schema(tmp_path):
     with pytest.raises(SystemExit):parse(['--sink','serial'],env={})
     path=tmp_path/'limits.json'
@@ -49,6 +84,16 @@ def test_rate_uses_accepted_quantized_targets_and_capped_gap():
 def test_quantization_cannot_exceed_measured_bounds():
     guard=LimitedSink(MockSink(),limits(max_v_mps=.1006),0.)
     with pytest.raises(SinkError,match='QUANTIZED'):guard.write(DriveFrame(1,1,.1006,0),.1)
+
+
+def test_burst_preview_defers_exact_target_without_changing_final_guard():
+    sink=MockSink();guard=LimitedSink(sink,limits(),0.)
+    guard.write(DriveFrame(1,1,.04,.06),.02);before=guard.previous
+    target=DriveFrame(1,2,.08,.12);at=guard.drive_ready_at(target)
+    assert at==pytest.approx(.04) and guard.previous==before and len(sink.frames)==1
+    guard.write(target,at)
+    assert guard.previous[:2]==(.08,.12)
+    assert guard.drive_ready_at(DriveFrame(1,3,.5,.12))==float('inf')
 
 
 def test_partial_submission_never_advances_baseline_and_stop_is_attempted():

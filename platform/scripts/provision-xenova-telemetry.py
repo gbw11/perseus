@@ -47,7 +47,14 @@ def credentials(path, vm_id, channel=None, *, for_reconciliation=False):
     trusted Store channel. Parsing an account does not grant broker permission.
     """
     value, identity = private_json(path)
-    if set(value) != {"vm_id", "broker_ipv4", "port", "username", "password", "trusted_internal_plaintext"}:
+    validate_credentials(value,vm_id,channel,for_reconciliation=for_reconciliation)
+    return value,identity
+
+
+def validate_credentials(value,vm_id,channel=None,*,for_reconciliation=False):
+    """동일 private codec의 메모리 검사. 별도 broker 자격을 합칠 때도 검사 규칙을 재사용한다."""
+    required={"vm_id", "broker_ipv4", "port", "username", "password", "trusted_internal_plaintext"}
+    if not isinstance(value,dict) or set(value) not in (required,required|{'world'}):
         raise ValueError("credential input fields invalid")
     if channel not in (None, "telemetry", "drive"):
         raise ValueError("unsupported bootstrap channel")
@@ -70,7 +77,18 @@ def credentials(path, vm_id, channel=None, *, for_reconciliation=False):
     # Runtime provisioning uses printable ASCII, avoiding parser escape ambiguity.
     if not isinstance(password, str) or not 1 <= len(password) <= 128 or any(not 33 <= ord(c) <= 126 or c in '\\"' for c in password):
         raise ValueError("provisioned password encoding unsupported")
-    return value, identity
+    if 'world' in value:
+        world=value['world']
+        if channel=='telemetry' or value['username']!=vm_id or not isinstance(world,dict) or set(world)!={'broker_ipv4','port','username','password','profile','trusted_internal_plaintext'}:
+            raise ValueError('world input requires explicit drive credentials')
+        if str(ipaddress.IPv4Address(world['broker_ipv4']))!=world['broker_ipv4'] or type(world['port']) is not int or not 1<=world['port']<=65535:
+            raise ValueError('world broker address/port')
+        if world['username']!=vm_id or world['trusted_internal_plaintext'] is not True:
+            raise ValueError('world broker account/trust')
+        secret=world['password']
+        if not isinstance(secret,str) or not 1<=len(secret)<=128 or any(not 33<=ord(c)<=126 or c in '\\"' for c in secret):raise ValueError('world password encoding')
+        if not isinstance(world['profile'],str) or not 1<=len(world['profile'])<=64 or any(not (c.isascii() and (c.isalnum() or c in '-_.')) for c in world['profile']):raise ValueError('world profile')
+    return value
 
 
 def current(vm_id, *, deadline=None, guard=None):
@@ -324,6 +342,10 @@ def bootstrap_payload(context, credential, receipt, channel):
         if set(apps)!={'autonomous','manual'} or len(set(apps.values()))!=2:raise ValueError('invalid app identities')
         value.update(drive_profile='warm-drive-1',auto_instance_id=canonical(apps['autonomous']),
                      manual_instance_id=canonical(apps['manual']))
+    world=value.pop('world',None)
+    if world is not None:
+        if channel!='drive' or receipt.get('drive_profile')!='warm-drive-1':raise ValueError('world input requires warm drive profile')
+        value.update({'world_'+key:world[key] for key in ('broker_ipv4','port','username','password','profile')})
     return value
 
 

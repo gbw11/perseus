@@ -33,6 +33,9 @@ class VerifiedGatewayRunner(GatewayRunner):
         self._transitions=__import__('queue').Queue(maxsize=8)
         from .provider import GatewayProvider
         self.provider=GatewayProvider(self)
+        self.drive_link=None
+        self._deferred_drive=None;self.serial_deferred=0
+        self._manual_activation=None;self.manual_withheld=0;self._manual_stop_try=0.
         queue=__import__('queue')
         self._provider_queues=[queue.Queue(maxsize=n) for n in (4,4,8)]
         self._provider_turn=0;self.provider_calls=0;self.provider_high_water=0
@@ -41,7 +44,7 @@ class VerifiedGatewayRunner(GatewayRunner):
     def submit_provider(self,call):
         import queue
         if self.readiness_profile!='warm-drive-1':raise ValueError('provider requires warm profile')
-        lane=0 if call['action'] in ('cancel','finish') else 1 if call['action'] in ('get','context') else 2
+        lane=0 if call['action'] in ('cancel','finish') else 1 if call['action'] in ('get','context','history') else 2
         result=queue.Queue(maxsize=1)
         self._provider_queues[lane].put_nowait((call,result))
         self.provider_high_water=max(self.provider_high_water,sum(q.qsize() for q in self._provider_queues))
@@ -66,6 +69,9 @@ class VerifiedGatewayRunner(GatewayRunner):
             except ValueError:response=dict(version=VERSION,ok=False,error={'code':'INVALID_INPUT'})
             except AuthorityError as exc:
                 code='STORAGE_UNCERTAIN' if self.authority.error else 'TRANSITION_REJECTED'
+                if not self.authority.error and str(exc) in ('HISTORY_BYTES_RESERVED','REQUEST_WINDOW_EXPIRED',
+                        'REQUEST_TIME_INVALID','REQUEST_DEADLINE_OUTSIDE_WINDOW','LEGACY_KEY_NOT_ADMISSIBLE','HOST_CHANGED','HISTORY_POLICY_REQUIRED'):
+                    code=str(exc)
                 response=dict(version=VERSION,ok=False,error={'code':code,'reason':str(exc)[:192]})
             except Exception as exc:
                 self.machine.output_permitted=False;self.machine._authorized=False
@@ -182,7 +188,10 @@ class VerifiedGatewayRunner(GatewayRunner):
         if self.readiness_profile=='warm-drive-1':
             try:state=self._state_messages.get_nowait()
             except queue.Empty:pass
-            else:self.machine.states.receive(state)
+            else:
+                if self.drive_link is not None and state.envelope.get('app_id')=='autonomous':
+                    self.drive_link.reject('STATE_LEGACY_PROFILE')
+                else:self.machine.states.receive(state)
         self._transition_once()
 
     def begin(self):
@@ -190,6 +199,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         machine=WarmDriveMachine if self.readiness_profile=='warm-drive-1' else VerifiedDriveMachine
         self.machine=machine(vm_ids=self.pair,authority=self.authority,bindings=self.bindings,
             clock=self._clock,timing=self._timing)
+        self.machine.continuous_handoff=self.drive_link is not None
         retained=self._client.latest(topics.vehicle_control())
         if retained is not None:
             try:self.authority.reconcile(retained.payload)
@@ -229,6 +239,35 @@ class VerifiedGatewayRunner(GatewayRunner):
         except Exception:
             c['ticket']=None;self.machine.note_delivery(c['generation'],'failed',now)
 
+    def _manual_can_move(self,action,device,now):
+        """Current control's STOP observation, never a historical recovery grant."""
+        if self.drive_link is None or action.source['app_id']!='manual':return True
+        gate=self._manual_activation;pending=self.authority.value.get('pending') or {}
+        session=(device.get('pi_session'),device.get('device_session'))
+        if (gate and gate['generation']!=action.generation and gate['ready'] and gate['session']==session and
+            pending.get('manual_policy')=='CONTINUE_SESSION' and gate['driver']==pending.get('manual_session') and
+            self.machine._handoff_grace_until>now):
+            gate={**gate,'generation':action.generation,'kind':'same_session_continuation'};self._manual_activation=gate
+        if gate and gate['generation']==action.generation and gate['session']==session and gate['ready']:return True
+        self.manual_withheld+=1;self._deferred_drive=None
+        if gate and gate['generation']==action.generation and now*1000>=gate['deadline_ms']:
+            self.machine.output_permitted=False;self.machine._authorized=False
+            self._submit(ForwardStop(action.generation));self.machine._fail('PHYSICAL_STOP_UNCONFIRMED',now)
+        elif now-self._manual_stop_try>=self.machine.timing.stop_resend_s:
+            self._manual_stop_try=now;self._submit(ForwardStop(action.generation))
+        return False
+
+    def _manual_observe(self,events):
+        gate=self._manual_activation
+        if gate is None or gate['ready']:return
+        for event in events:
+            if (event.get('command_generation')==gate['generation'] and event.get('command_kind')=='STOP' and
+                event.get('status')=='APPLIED' and event.get('physical_stop') is True and
+                (event.get('pi_session'),event.get('device_session'))==gate['session'] and
+                event.get('command_sequence',0)>=gate['first_stop'] and
+                event.get('observed_monotonic',float('inf'))*1000<=gate['deadline_ms']):
+                gate['ready']=True;gate['observed_monotonic_ms']=int(event['observed_monotonic']*1000);break
+
     def _submit(self,action):
         now=self._clock();source=action.source if isinstance(action,ForwardDrive) else None
         device=self.device_view()
@@ -246,8 +285,19 @@ class VerifiedGatewayRunner(GatewayRunner):
                 not 0<=now-source['received_monotonic']<=self.machine.timing.command_timeout_s or
                 not self.machine._ready(source['vm_id'],source['app_id'],now)):
                 self.serial_context_rejected+=1;return
+            if not self._manual_can_move(action,device,now):return
             frame=self._encoder.drive(action.generation,action.v_mps,action.steer_rad)
-        else:frame=self._encoder.stop(action.generation,STOP_SAFE_STOP)
+            if self.drive_link is not None:
+                ready=getattr(self._sink,'drive_ready_at',lambda f:0.)(frame)
+                if ready>now:
+                    # One active-output mailbox, original receive time. STOP
+                    # clears it; replacement never renews a source command.
+                    expires=source['received_monotonic']+self.machine.timing.command_timeout_s
+                    self._deferred_drive=(action,min(ready,expires));self.serial_deferred+=1
+                    return
+            self._deferred_drive=None
+        else:
+            self._deferred_drive=None;frame=self._encoder.stop(action.generation,STOP_SAFE_STOP)
         data=encode(frame)
         record={'source':source,'frame_counter':frame.counter,'generation':frame.generation,
                 'encoded_hex':data.hex(),'submitted_monotonic':now,'device_applied':None}
@@ -259,8 +309,16 @@ class VerifiedGatewayRunner(GatewayRunner):
             if hasattr(accepted,'frame'):
                 actual=accepted.frame
                 record.update(frame_counter=actual.counter,encoded_hex=encode(actual).hex())
-                if accepted.metadata:record.update(serial_profile='feedback-1',**accepted.metadata)
+                if accepted.metadata:
+                    record.update(accepted.metadata);record.setdefault('serial_profile','feedback-1')
             self.serial_accepted+=1;record['serial_result']='accepted';record['accepted_bytes']=accepted
+            if (self.drive_link is not None and isinstance(action,ForwardStop) and self.machine.active_app=='manual' and
+                (self._manual_activation is None or self._manual_activation['generation']!=action.generation)):
+                pending=self.authority.value.get('pending') or {}
+                if pending.get('deadline_ms'):
+                    self._manual_activation=dict(generation=action.generation,deadline_ms=pending['deadline_ms'],ready=False,
+                        session=(record.get('pi_session'),record.get('device_session')),driver=pending.get('manual_session'),
+                        first_stop=record.get('command_sequence',2**64),kind='observed_stop')
         except (SinkError,OSError) as error:
             serial_error=error;cause=error.__cause__ or error
             record['failure_cause']={'cause_type':type(cause).__name__,'errno':getattr(cause,'errno',None)}
@@ -325,6 +383,7 @@ class VerifiedGatewayRunner(GatewayRunner):
             else:super()._emit([action])
 
     def run_once(self,timeout_s=.005):
+        if self.drive_link is not None:self.drive_link.tick()
         import queue
         try:first=self._queue.get(timeout=timeout_s) if timeout_s>0 else self._queue.get_nowait()
         except queue.Empty:first=None
@@ -337,7 +396,11 @@ class VerifiedGatewayRunner(GatewayRunner):
             self.machine._fail(device['fault'],self._clock())
         self._delivery(self._clock());self._drain(first)
         self._emit(self.machine.step(self._clock()))
+        held=self._deferred_drive
+        if held is not None and self._clock()>=held[1]:
+            self._deferred_drive=None;self._submit(held[0])
         events=getattr(self._sink,'feedback_events',lambda:[])()
+        self._manual_observe(events)
         try:self.provider.capture(events)
         except AuthorityError:
             self.machine.output_permitted=False;self.machine._authorized=False

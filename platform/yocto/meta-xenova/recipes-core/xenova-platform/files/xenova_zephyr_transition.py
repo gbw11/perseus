@@ -58,6 +58,7 @@ def mutate(m,spec,execute,key,records,context,fail):
     network="hardware_profile" in info
     updated=copy.deepcopy(before)
     updated.update(active_firmware={k:info[k] for k in ("manifest","revision","version","sha256")},
+        provisioning_profile=info['provisioning_profile'],
         hardware_profile=copy.deepcopy(zephyr.NET_PROFILE if network else zephyr.PROFILE),
         capabilities=dict(zephyr.NET_CAPABILITIES if network else zephyr.CAPABILITIES),
         shutdown_policy="cooperative-xenstore" if network else "explicit-force",

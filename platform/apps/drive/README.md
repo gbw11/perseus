@@ -1,7 +1,8 @@
 # A/B 공통 Zephyr 주행 펌웨어
 
-같은 `drive/zephyr` 번들을 두 VM에 사용한다. 기존 `auto_step()`과 `manual_step()`은
-바꾸지 않고 링크하며, VM마다 UUID·MAC·인증정보·CPU 배치를 유지한다.
+같은 `drive/zephyr` 번들을 두 VM에 사용하고 VM마다 UUID·MAC·인증정보·CPU 배치를 유지한다.
+기본 프로필은 기존 `auto_step()`·`manual_step()`을 유지한다. 명시적인 `warm-lattice-lab`은
+실제 bounded lattice·충돌 검사·tracker와 독립 MANUAL을 연결한 합성 차량 시험 프로필이다.
 AUTO/MANUAL 계산 모드와 Active/Standby VM 선택은 서로 다른 축이다.
 실제 CPU·heap/pool·작업 완료 근거와 기능 준비의 관계는
 [건강 판정 계약](../../../docs/contracts/health-evidence-v1.md)을 따른다. 공통 펌웨어는 기존
@@ -20,7 +21,28 @@ release deadline과 필수 계산 실패를 NOT_READY·0 출력 후보로 연결
 | 시리얼 제출 | 실제 쓰기 수락 바이트 수 | 최종 장치 적용 |
 
 토픽·필드·자료형·준비 보고 규칙의 원문은 [MQTT 계약](../../../docs/contracts/mqtt-contract-v1.md#62-앱-준비-보고-appreadiness)이다.
-현재 장치 적용 ACK는 연결되지 않았다. `vehicle.status.applied_generation`을 추측해 채우지 않는다.
+장치 ACK는 Gateway의 명시적 feedback-1/feedback-2에서만 소비한다.
+write-only에서는 적용을 알 수 없다. `vehicle.status.applied_generation`을 추측해 채우지 않는다.
+
+## 지도 기반 제품 프로필
+
+`world/world.c`가 정식 nanopb 입력·불변 map·exact odom anchor를 관리하고,
+`planner/lattice.c`가 실제 탐색·swept footprint·RPP 계산을 수행한다.
+`planner/engine.c`는 map/path의 writer·reader lease와 원 계산의 채택·취소를 관리한다.
+`zephyr/src/lattice_input.c`의 Jetson map 연결과 Pi state 연결은 별도 소유자이며,
+작은 Pi 차량 입력은 기존 제어 수신자로 받는다. AUTO 계산과 MANUAL 계산도 서로 기다리지 않는다.
+
+`lattice_app.c`는 완전 path 적용 후 현재 target의 실제 tracker 계산을 수행한다.
+root binding의 AUTO 모델은 `stateful`, MANUAL은 `stateless`다. Standby의 자격·사본 적용은
+선택된 앱의 실제 progress나 출력 허가가 아니다. AUTO instance 교체 때 기존 계산과 planner를
+취소하고 실제 join·참조 반환을 확인한다. MANUAL과 입력 소유자의 수명은 유지한다.
+
+wire·좌표·시각·크기·생성 도구는 [drive-world-1](../../../docs/contracts/drive-world/README.md),
+설계·외부 원리 대응은 [주행 설계](../../../docs/platform/drive-pipeline-architecture.md#s22),
+실제 통과/실패·빌드·통합 수준은 [현재 보고](../../../docs/verification/recovery-scenario-closure-20261030.md#history-driving-app)를 따른다.
+프로필 수치·시험 지도·가상 장치는 운영값이나 실제 Jetson/ESP32 완성품이 아니다.
+
+아래의 기본 어댑터 설명은 기존 프로필의 제공 경계다. 신규 지도형 계산의 실제 제공 위치는 위와 같다.
 
 ## 계산과 앱 교체 경계
 
@@ -34,7 +56,7 @@ release deadline과 필수 계산 실패를 NOT_READY·0 출력 후보로 연결
 ```
 
 `zephyr/src/adapter.h`의 `drive_adapter`가 계산·실제 완료 순번·입력 유효성·상태 준비·
-유한한 출력값 검증을 맡는다. 현재 두 계산은 상태 없는 어댑터로 선언한다. 상태 있는
+유한한 출력값 검증을 맡는다. 기존 두 계산은 상태 없는 어댑터로 선언한다. 상태 있는
 앱으로 교체할 때는 `requires_state_sync=true`, `state_ready=false`로 시작하고 앱이
 warm-up·동기화를 확인해야 한다. 함수가 반환됐다는 사실만으로 READY가 되지 않는다.
 상태 있는 앱은 `preparation.h`의 완전한 준비 근거와 현재 수신 문맥도 제공한다.
@@ -70,17 +92,17 @@ Standby는 계산을 제출하지 않고 입력·설정·소유 상태의 제한
 
 `drive_adapter.qualify`는 불변 설정·입력의 제한된 검사이며 계산이나 I/O를 실행하지 않는다.
 상태 있는 앱은 준비 조건을 이 연결부에 구현해야 한다. qualifier가 없거나 상태 준비가
-끝나지 않으면 STATE_PREPARING이다. 현재 두 앱은 현재 입력으로 준비 가능한 상태 없는
-구현이다. 지도·상태 사본·새 planner를 구현한 것으로 확대하지 않는다.
+끝나지 않으면 STATE_PREPARING이다. 기존 프로필의 두 앱은 현재 입력으로 준비 가능한 상태 없는
+구현이며, 그 기반 시험을 신규 지도형 프로필 전체의 수락으로 확대하지 않는다.
 
 상태 준비의 공통 검사는 원 요청·수신 execution/instance·frame/설정/maneuver 문맥,
 완전한 상태 revision과 재구축/인계 출처를 보존한다. 인계 사본은 수락 당시의 원 VM·
 execution/instance·generation도 보존한다. 이 필드만으로 출처가 인증되는 것은 아니며
 향후 실제 상태 수신부가 먼저 신뢰된 출처·완전성·기능적 호환성을 확인해야 한다.
 사본 적용 완료 뒤 정상 pose/입력 갱신은 어댑터가 제한된 비용으로 재검증한다.
-준비 완료 기한을 지도/경로 사본의 일괄 TTL로 쓰지 않는다. 실제 상태 전송·live 참조
-교환·planner는 아직 연결되지 않았다. Gateway의 현재 계획 인계도 root가 명시한
-stateless 앱만 허용하며 상태 있는 앱을 일반 QUALIFIED로 대신 승인하지 않는다.
+준비 완료 기한을 지도/경로 사본의 일괄 TTL로 쓰지 않는다. 신규 지도형 프로필의 실제 상태
+전송·참조 교환·planner는 위 모듈에 연결한다. Gateway는 root가 명시한 모델과 G2 적용 근거를
+확인하며 상태 있는 앱을 일반 QUALIFIED로 대신 승인하지 않는다.
 
 선택형 [세션 입력](../../../docs/contracts/mqtt-contract-v1.md#71-명시적-세션-입력-manual-session-1)은
 원 sample/action·세션 유효성·원 나이를 C/Python에서 검사한다. 새 control의

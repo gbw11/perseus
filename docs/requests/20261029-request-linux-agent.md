@@ -1,7 +1,7 @@
 # Linux·Agent 후속 구현 요청
 
 담당: Linux 엔지니어·Guest Agent. 상태: **6-A 인계 준비 / 담당 제품·설치본 수락 전**.
-2026-11-01 현재 지시다. D01-L01~L05와 [상세 정의](2026-10-27-linux-health-agent.md)를 유지한다.
+2026-11-02 현재 지시다. D01-L01~L05와 [상세 정의](2026-10-27-linux-health-agent.md)를 유지한다.
 
 ## 현재 담당자가 할 일
 
@@ -18,6 +18,27 @@ Linux VM의 host 실행·CPU 배치·backend는 플랫폼 책임이다. Agent가
 
 ## 플랫폼 제공물과 지원 조건
 
+### L05 — VM별 private 공급이 연결된 제공물
+
+[공통 공급·조회 계약](../contracts/vm-provisioning-v1.md)의 실제 자동 hook을 연결했다.
+일반 Debian/Ubuntu는 검증 복사의 private root 단계에서 `/etc/xenova/agent.env`를 공급한다.
+factory는 host의 UUID 계획 뒤 env와 root 전용 `platform-identity.json`을 설치한다.
+기존 guest identity unit이 이 UUID로 instance-id를 확정하고 Agent unit은 identity/env 뒤 시작한다.
+공용 template/seed에 VM 비밀번호를 넣지 않는다. 실제 AgentSettings·Agent client로 parser/인증/ACL을 시험했다.
+
+Agent 담당자는 `agent/xenova_agent/config.py:AgentSettings.from_env`, `__main__.py:build_client`와
+`agent/deploy/xenova-agent.service`의 기존 환경 소비를 유지한다. 같은 UUID의 재시작/복구로
+암호를 만들거나 hostname·guest machine-id에서 별도 VM UUID를 만들지 않는다.
+현재 UUID 계정의 자기 VM v2 쓰기를 provider ACL에 연결했으며 다른 VM 신호 쓰기는 허용하지 않는다.
+여러 MQTT 연결은 자격을 재사용하되 Client ID가 충돌하지 않아야 한다.
+
+정상 수락은 두 OS의 실제 설치 rootfs에서 identity→환경→Agent heartbeat/v2 보고다.
+env 미공급/권한 오류·broker offline·collector/앱 오류는 각각 시험하고 인증/생존을 앱 진행으로 바꾸지 않는다.
+sender/helper·부분 RPM 시험이 새 대형 Linux template 제작·실제 guest 수락을 대신하지 않는다.
+다음 template 생성 입력은 `guest_agent_template.prepare`의 기존 설치 receipt와
+`prepare-xenova-guests.py`가 쓰는 `provisioning_profile`에 연결했다. 기존 1.0.2 immutable 자산은 수정하지 않았다.
+담당 회신에는 L05 후보·source hash·의존성·unit/환경 경로·실제 guest smoke·미수행을 적는다.
+
 플랫폼은 Debian·Ubuntu의 선택 템플릿 준비·검증 복사·원 기한·실패 수습과 host 실행/관측,
 OS 공통 정적 CPU 배치를 제공한다. [공개 관리 계약](../platform/cli-manager-spec.md)과
 [현재 기준선](../verification/platform-management-baseline.md)이 원본이다.
@@ -27,6 +48,13 @@ OS 공통 정적 CPU 배치를 제공한다. [공개 관리 계약](../platform/
 `prepare_deployment_seed`→identity unit/drop-in 연결을 따른다. 기존 Agent 설치 검증과
 [배포 단위표](../platform/deployment-readiness.md#cohort)를 재사용하며 이미 게시한 template/hash를 제자리 수정하지 않는다.
 패키지 갱신으로 guest UUID·MAC/IP·hostname·credential을 재발급하지 않는다.
+
+이번 Gateway·Zephyr 지도형 제공물의 RPM/ARM 검증은
+[별도 배포 항목](../platform/deployment-readiness.md#history-drive-install)에 연결했다.
+이는 새 Agent가 포함된 Linux 템플릿을 재생성하거나 guest에서 건강 판정을 수락한 결과가 아니다.
+L05 후보를 받으면 위 일반 생성·factory seed 경로의 빌드 입력과 설치 receipt를 갱신하고,
+각 guest의 실제 수집·보고 smoke를 확인한다. Agent가 새 지도/주행 프로토콜을 소비하거나
+플랫폼 대신 affinity·출력 권한을 보정하도록 요구하지 않는다.
 
 ## 오류·진단 비용의 담당 작업
 

@@ -13,6 +13,11 @@
 | seed의 다음 부팅 | `guest_identity.ensure()` | 기존 식별자·키 검증. 암호·키를 초기화하지 않음 |
 
 일반 VM의 설정은 **생성 시 오프라인 주입**, 네트워크 주소 획득은 **부팅 시 DHCP**다.
+현재 공급 hook은 검증된 Agent 설치 receipt에서 통신 profile을 읽고 일반 private root에
+`agent.env`를 설치한다. factory seed 빌드에는 VM 비밀이 없으며 `FirstBoot.register`의 host UUID
+계획 뒤 공급한다. 새 seed의 `guest_identity.ensure`는 root 전용 platform-identity.json이 있으면
+그 UUID를 사용하고, 없을 때만 기존 machine-id 파생 호환 경로를 유지한다.
+[정확한 공급/재공급·단계·소비 계약](../../../docs/contracts/vm-provisioning-v1.md)을 따른다.
 일반 VM에는 seed 전용 `identity-complete.json`이 없어도 정상이다.
 seed의 해당 표식은 **식별자·SSH 키 준비 완료**만 뜻한다. 네트워크 연결이나 에이전트 준비 완료를 뜻하지 않는다.
 `xenova_first_boot.py`는 dom0의 공통 SD 최초 등록 처리이며, domU 에이전트 설치기가 아니다.
