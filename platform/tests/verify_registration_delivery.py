@@ -16,6 +16,7 @@ def main():
     parser.add_argument('--task-root',type=Path,required=True)
     parser.add_argument('--base-root',type=Path,required=True)
     parser.add_argument('--qemu',type=Path,required=True)
+    parser.add_argument('--source-root',type=Path,help='검증한 고정 source root. 생략하면 task-root/source')
     parser.add_argument('--tag',default='final')
     args=parser.parse_args();task=args.task_root.resolve()
     target=task/('target-'+args.tag);target.mkdir()  # 이전 설치/증거를 덮거나 삭제하지 않는다.
@@ -65,7 +66,7 @@ def main():
                 if member.islnk() and (Path(member.linkname).is_absolute() or '..' in Path(member.linkname).parts):
                     raise ValueError('RPM hardlink escapes the owned target')
                 archive.extract(member,target,filter='fully_trusted')
-    source=task/'source/platform'
+    source=(args.source_root or task/'source')/'platform'
     product=source/'yocto/meta-xenova/recipes-core/xenova-platform/files'
     compared={}
     for name in ('xenova_management.py','xenova_management_cli.py','xenova_registration.py','xenova_registration_hook.py','xenova_first_boot.py'):
@@ -118,7 +119,22 @@ schema=app.openapi()
 assert '/api/v1/vm-registrations' in schema['paths'] and '/api/v1/vm-registrations/{vm_id}/notify' in schema['paths']
 assert not app.state.registration_sender._children
 import fastapi, pydantic
-print(json.dumps({'python':sys.version.split()[0],'fastapi':fastapi.__version__,'pydantic':pydantic.__version__,'registrations':result['data']['registrations'],'outbound_children':len(app.state.registration_sender._children)}))
+import asyncio, os, socket, uvicorn
+from dom0_manager.__main__ import ReadyServer
+async def ready_smoke():
+    Path('/tmp').mkdir(exist_ok=True)
+    endpoint='/tmp/registration-ready.sock'
+    with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as receiver:
+        receiver.bind(endpoint);receiver.setblocking(False)
+        server=ReadyServer(uvicorn.Config(fastapi.FastAPI(),host='127.0.0.1',port=0,log_level='critical',lifespan='on'))
+        server.config.load();server.lifespan=server.config.lifespan_class(server.config)
+        os.environ['NOTIFY_SOCKET']=endpoint
+        await server.startup()
+        assert server.started and receiver.recv(64)==b'READY=1'
+        assert server.servers[0].sockets[0].getsockname()[1]>0
+        await server.shutdown()
+asyncio.run(ready_smoke())
+print(json.dumps({'python':sys.version.split()[0],'fastapi':fastapi.__version__,'pydantic':pydantic.__version__,'registrations':result['data']['registrations'],'outbound_children':len(app.state.registration_sender._children),'ready_after_listen':True,'uvicorn':uvicorn.__version__}))
 '''
     (target/'registration-smoke.py').write_text(script)
     process=subprocess.run(['chroot',str(target),'/qemu-aarch64-static','/usr/bin/python3.14','-I','/registration-smoke.py'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
