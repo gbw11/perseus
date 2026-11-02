@@ -22,6 +22,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -107,21 +108,35 @@ class DriveRelayIntegrationTest {
 
     @Test
     void gatewayAndAppMessagesBecomeTheDriveState() throws Exception {
-        // The relay subscribes asynchronously, so keep publishing until it has seen the messages.
+        String token = login();
+        AtomicReference<JsonNode> observed = new AtomicReference<>();
+        // The command is fresh for only 100 ms. Publish and read the API in the same retry so a slow login
+        // or CI scheduling pause cannot turn the direction assertion into a timing race.
         await(() -> {
             publish(DriveStateTracker.CONTROL_TOPIC, "dom0-gateway", null, "vehicle.control",
                     "{\"mode\":\"MANUAL\",\"generation\":7,\"active_app\":\"manual\",\"active_vm_id\":\"22222222-2222-4222-8222-222222222222\",\"reason\":\"command_timeout\"}",
                     1, true);
             publish("xenova/v1/apps/manual/events", "22222222-2222-4222-8222-222222222222", "manual",
                     "drive.command", "{\"generation\":7,\"v_mps\":0.3,\"steer_rad\":0.0}", 0, false);
-            var control = tracker.snapshot().control();
-            return control != null && "MANUAL".equals(control.mode()) && tracker.snapshot().apps().containsKey("manual");
+            ResponseEntity<String> candidate = restTemplate.exchange(
+                    "/api/v1/drive/state", HttpMethod.GET, new HttpEntity<>(bearer(token)), String.class);
+            if (!candidate.getStatusCode().is2xxSuccessful() || candidate.getBody() == null) {
+                return false;
+            }
+            try {
+                JsonNode state = objectMapper.readTree(candidate.getBody());
+                if ("FORWARD".equals(state.path("apps").path("manual").path("direction")
+                        .path("longitudinal").asText())) {
+                    observed.set(state);
+                    return true;
+                }
+                return false;
+            } catch (IOException exception) {
+                return false;
+            }
         });
 
-        ResponseEntity<String> response = restTemplate.exchange(
-                "/api/v1/drive/state", HttpMethod.GET, new HttpEntity<>(bearer(login())), String.class);
-        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
-        JsonNode state = objectMapper.readTree(response.getBody());
+        JsonNode state = observed.get();
         assertThat(state.path("control").path("mode").asText()).isEqualTo("MANUAL");
         assertThat(state.path("control").path("generation").asLong()).isEqualTo(7);
         assertThat(state.path("control").path("active_vm_id").asText())
