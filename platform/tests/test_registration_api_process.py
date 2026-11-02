@@ -227,44 +227,91 @@ class RegistrationApiProcessTest(unittest.TestCase):
         self.assertEqual(len(self.calls),1)
         self.assertEqual(self.notify(identity)[1]['http_status'],200);self.assertEqual(len(self.calls),2)
 
-    def test_factory_api_unavailable_is_finite_without_next_start_refill_then_manual_recovers(self):
-        self.stop_api();before=time.monotonic()
-        spawn=hook.subprocess.Popen;environments=[]
-        def launch(*args,**kwargs):
-            environments.append(kwargs.get('env'));return spawn(*args,**kwargs)
-        with (patch.object(hook,'CALL_SECONDS',.3),patch.object(hook.subprocess,'Popen',side_effect=launch),
-              patch.dict(os.environ,{'VM_REGISTRATION_SERVICE_TOKEN':'must-not-inherit',
-                                    'XENOVA_REGISTRATION_URL':'https://must-not-inherit.invalid'})):
-            started=hook.automatic(self.metadata['data'],self.metadata['run'],{'uuid':self.identity},wait_ready=True,
-                api_env=self.root/'local.env',token_file=self.root/'token.env')
-        self.assertEqual(started['state'],'attempt-started')
-        self.assertNotIn('VM_REGISTRATION_SERVICE_TOKEN',environments[0]);self.assertNotIn('XENOVA_REGISTRATION_URL',environments[0])
-        self.assertFalse(self.wait_result(self.metadata['data'],self.identity)['confirmed'])
-        self.assertLess(time.monotonic()-before,2);self.assertEqual(self.calls,[])
+    def owned_api_unit(self,*,fails=False):
+        """실제 로컬 systemd. production unit 대신 이 시험만 소유한 이름을 사용한다."""
+        if os.environ.get('XENOVA_TEST_SYSTEMD_BOOT')!='1':
+            self.skipTest('opt-in owned transient systemd fixtures: XENOVA_TEST_SYSTEMD_BOOT=1')
+        prefix='xenova-registration-fixture-'+uuid4().hex
+        unit=prefix+'-api.service';barrier=self.root/'api-release'
+        command=['systemd-run','--quiet','--no-block','--collect','--unit='+unit,
+                 '--property=Type=notify','--property=NotifyAccess=main','--property=TimeoutStartSec=40s',
+                 '--property=StandardOutput=append:'+str(self.root/'systemd-api.log'),
+                 '--property=StandardError=append:'+str(self.root/'systemd-api.log')]
+        environment={'PYTHONPATH':os.environ['PYTHONPATH'],'REGISTRATION_FIXTURE':str(self.root),
+                     'REGISTRATION_START_BARRIER':str(barrier),'XENOVA_SERVICE_TOKEN':TOKEN,
+                     'XENOVA_REGISTRATION_URL':f'http://127.0.0.1:{self.receiver.server_port}/api/v1/vms/registrations',
+                     'VM_REGISTRATION_SERVICE_TOKEN':SPRING_TOKEN,'XENOVA_REGISTRATION_TIMEOUT':'1'}
+        if os.environ.get('REGISTRATION_FACTORY_DATA'):
+            environment['REGISTRATION_FACTORY_DATA']=os.environ['REGISTRATION_FACTORY_DATA']
+        command += ['--setenv='+key+'='+value for key,value in environment.items()]
+        command += (['/usr/bin/false'] if fails else
+                    [sys.executable,str(Path(__file__).with_name('registration_api_fixture.py')),str(self.port)])
+        self.addCleanup(self.stop_owned_unit,unit)
+        subprocess.run(command,check=True,capture_output=True,timeout=5)
+        return unit,prefix,barrier
+
+    def stop_owned_unit(self,unit):
+        subprocess.run(['systemctl','stop',unit],capture_output=True,timeout=8)
+
+    def defer_to_owned_api(self,data,runtime,identity,unit,prefix):
+        callback=prefix+'-'+identity+'.service';self.addCleanup(self.stop_owned_unit,callback)
+        hook.defer_factory(Path(data),Path(runtime),self.root/'local.env',self.root/'token.env',
+                           time.monotonic()+hook.CALL_SECONDS,identity,api_unit=unit,unit_prefix=prefix+'-')
+        return callback
+
+    def test_factory_api_failure_cancels_job_without_restart_refill_then_manual_recovers(self):
+        self.stop_api();unit,prefix,barrier=self.owned_api_unit(fails=True)
+        callback=self.defer_to_owned_api(self.metadata['data'],self.metadata['run'],self.identity,unit,prefix)
+        end=time.monotonic()+5
+        while time.monotonic()<end:
+            jobs=subprocess.check_output(['systemctl','list-jobs','--no-legend'],text=True)
+            if callback not in jobs:break
+            time.sleep(.02)
+        else:self.fail('failed API dependency left an owned notification job pending')
+        self.assertEqual(self.calls,[])
         self.start_api();time.sleep(.15);self.assertEqual(self.calls,[])
         self.assertTrue(self.notify()[1]['confirmed']);self.assertEqual(len(self.calls),1)
 
-    def test_factory_consumed_opportunities_late_api_readiness_then_once_and_reboot_none(self):
+    def test_factory_ready_after_old_budget_then_once_and_api_restart_does_not_requeue(self):
         self.stop_api()
         board=Board(self.root/'board');board.grow_mount();board.factory()
         # factory 자산을 실제 서버가 읽는 등록부로 연결한다. guest 준비/실제 장치만 Board 대역이다.
         # 새 서버에는 이 factory data를 읽는 product Manager를 선택한다.
         os.environ['REGISTRATION_FACTORY_DATA']=str(board.p.data)
         try:
+            unit,prefix,barrier=self.owned_api_unit()
             import xenova_first_boot as boot
             import xenova_vm as vm
             from xenova_runtime import operation_lock
+            scheduled=[]
+            def automatic(data,runtime,record,*,wait_ready):
+                self.assertTrue(wait_ready)
+                # 부팅의 공통 잠금이 이미 반환된 실제 후속 경계다.
+                with operation_lock(runtime):pass
+                scheduled.append(self.defer_to_owned_api(data,runtime,record['uuid'],unit,prefix))
+            before=time.monotonic()
             with (patch.object(boot,'FirstBoot',return_value=board.p),
                   patch.object(boot,'operation_lock',side_effect=lambda:operation_lock(board.p.run)),
                   patch.object(sys,'argv',['xenova-first-boot','register']),
-                  patch.object(hook,'API_ENV',self.root/'local.env'),patch.object(hook,'TOKEN_FILE',self.root/'token.env')):
+                  patch.object(hook,'automatic',side_effect=automatic)):
                 boot.main()
+            self.assertLess(time.monotonic()-before,5)
             notices=list(vm.load_records(board.p.data,validate_assets=False).values())
             self.assertEqual(len(notices),2)
-            self.start_api(delay=.2)
+            # 기존 15초 전체 예산보다 늦게 API를 준비해도 송신 예산은 아직 시작하지 않았다.
+            time.sleep(hook.CALL_SECONDS+1)
+            self.assertEqual(self.calls,[])
+            active=subprocess.check_output(['systemctl','show',unit,'--property=ActiveState','--value'],text=True).strip()
+            self.assertEqual(active,'activating')
+            jobs=subprocess.check_output(['systemctl','list-jobs','--no-legend'],text=True)
+            self.assertTrue(all(callback in jobs for callback in scheduled))
+            barrier.touch()
             for record in notices:self.assertTrue(self.wait_result(board.p.data,record['uuid'])['confirmed'])
             self.assertEqual(len(self.calls),2);self.assertEqual(board.p.register(),[])
-            count=len(self.calls);time.sleep(.2);self.assertEqual(count,len(self.calls))
+            self.assertEqual(len(list((board.p.run/'registration-notices').glob('factory-started-*'))),2)
+            subprocess.run(['systemctl','restart',unit],capture_output=True,check=True,timeout=8)
+            time.sleep(.2);self.assertEqual(len(self.calls),2)
+            self.assertEqual(subprocess.check_output(['systemctl','show',unit,'--property=ActiveState','--value'],text=True).strip(),'active')
         finally:os.environ.pop('REGISTRATION_FACTORY_DATA',None)
 
 

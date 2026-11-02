@@ -79,4 +79,13 @@ def application():
 
 if __name__=='__main__':
     import uvicorn
-    uvicorn.run(application(),host='127.0.0.1',port=int(sys.argv[1]),log_level='critical',access_log=False)
+    from dom0_manager.__main__ import ReadyServer
+    barrier=os.environ.get('REGISTRATION_START_BARRIER')
+    if barrier:
+        # 시험만의 지연 기동. 제품 READY는 실제 lifespan/listen 뒤 ReadyServer가 보낸다.
+        end=time.monotonic()+40
+        while not Path(barrier).exists():
+            if time.monotonic()>=end:raise SystemExit('fixture startup barrier expired')
+            time.sleep(.02)
+    ReadyServer(uvicorn.Config(application(),host='127.0.0.1',port=int(sys.argv[1]),
+                              log_level='critical',access_log=False)).run()
