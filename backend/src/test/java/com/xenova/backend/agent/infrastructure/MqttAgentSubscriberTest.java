@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
+import com.xenova.backend.agent.application.ZephyrTelemetryMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventBackfillService;
 import java.time.Clock;
@@ -21,6 +22,7 @@ class MqttAgentSubscriberTest {
     private static final Instant RECEIVED_AT = Instant.parse("2026-10-27T06:00:00Z");
 
     private AgentMessageHandler agentHandler;
+    private ZephyrTelemetryMessageHandler telemetryHandler;
     private RecoveryEventMessageHandler recoveryHandler;
     private RecoveryEventBackfillService backfillService;
     private MqttAgentSubscriber subscriber;
@@ -28,12 +30,13 @@ class MqttAgentSubscriberTest {
     @BeforeEach
     void setUp() {
         agentHandler = mock(AgentMessageHandler.class);
+        telemetryHandler = mock(ZephyrTelemetryMessageHandler.class);
         recoveryHandler = mock(RecoveryEventMessageHandler.class);
         backfillService = mock(RecoveryEventBackfillService.class);
         MqttProperties properties = new MqttProperties(
                 true, "tcp://127.0.0.1:1883", "test-client", null, null, Duration.ofSeconds(1));
         subscriber = new MqttAgentSubscriber(
-                properties, agentHandler, recoveryHandler, backfillService,
+                properties, agentHandler, telemetryHandler, recoveryHandler, backfillService,
                 Clock.fixed(RECEIVED_AT, ZoneOffset.UTC));
     }
 
@@ -64,6 +67,19 @@ class MqttAgentSubscriberTest {
         subscriber.messageArrived(topic, new MqttMessage(payload));
 
         verify(agentHandler).handle(topic, payload, RECEIVED_AT);
-        verifyNoInteractions(recoveryHandler);
+        verifyNoInteractions(recoveryHandler, telemetryHandler);
+    }
+
+    @Test
+    void routesZephyrTelemetryMetricsToTelemetryHandler() {
+        byte[] payload = "telemetry".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String topic = "xenova/v2/vms/vm-1/telemetry/metrics";
+        int index = java.util.Arrays.asList(MqttAgentSubscriber.TOPICS).indexOf(ZephyrTelemetryMessageHandler.TOPIC);
+
+        subscriber.messageArrived(topic, new MqttMessage(payload));
+
+        assertThat(MqttAgentSubscriber.QOS[index]).isZero();
+        verify(telemetryHandler).handle(topic, payload, RECEIVED_AT);
+        verifyNoInteractions(agentHandler, recoveryHandler);
     }
 }
