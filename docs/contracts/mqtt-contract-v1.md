@@ -540,6 +540,8 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 - 202 는 "명령을 보냈다" 이다. 적용 여부는 WS-06 의 `sim.command.result`(같은 `request_id`)로 본다. 콘솔은 `ok: false` 면 `message` 를 띄운다. 3초 안에 결과가 없으면 "시뮬레이터 응답 없음" 으로 본다.
 - 없는 트랙 id 는 시뮬레이터가 `INVALID` 로 거부한다 (백엔드는 목록을 검사하지 않는다).
 - WS-06 은 서버 → 콘솔 단방향. `{type:"sim.snapshot", available, pose, world}` 를 10 Hz(위치는 최신 것만)로, `sim.world` 가 바뀌면 바로 한 번 더 보낸다. MQTT-18 을 받으면 `{type:"sim.command.result", …payload}` 를 바로 보낸다.
+- `sim.command.result` 는 명령을 보낸 콘솔만이 아니라 인증된 WS-06 연결 모두에 방송한다. 콘솔은 자기가 받은 202 의 `request_id` 로 짝을 짓고, 짝이 없는 결과(다른 콘솔의 명령)는 무시한다.
+- 결과가 REST 202 응답보다 먼저 올 수 있다 (시뮬레이터가 MQTT-17 을 바로 적용하면). 콘솔은 짝이 없는 결과를 3초 동안 들고 있다가 뒤늦게 온 202 의 `request_id` 와 맞춘다.
 
 ## 관련 문서
 
@@ -561,6 +563,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.5 | 2026-10-28 | MQTT-03 metrics 에 선택 필드 `process_collection`(수집 상태·발견/읽기 수·잘림·원인 종류)과 `unavailable_reason` 값 `counter_reset` 추가(3장). 기존 필드는 그대로이고 받는 쪽은 모르는 필드·사유를 무시해도 된다 (S15P31E110-309) |
 | v1.5 (보완) | 2026-10-28 | Linux 에이전트 0.3.0 이 자체 상태를 v2 Telemetry(Zephyr 계약 2.1) 토픽으로 함께 보낸다는 주석(3장). v1 토픽·payload 는 그대로 (S15P31E110-310) |
 | v1.6 | 2026-10-29 | 시뮬레이터 전용 12장 추가 (S15P31E110-261·-270·-271): MQTT-15 `sim.pose`·MQTT-16 `sim.world`·MQTT-17 `sim.command`·MQTT-18 `sim.command.result`, 콘솔 REST-30~37·WS-06. vehicle 브랜치 초안(그쪽 번호 v1.3·v1.4 §11)을 옮기며 바꾼 점: 구독자에서 인지 대역을 뺐다(젯슨은 전방 카메라 화면만), 트랙은 실제 서킷 10개, 배치 검사는 `ON_CAR`·`OUT_OF_TRACK` 만, `race` 는 선택. 계정 `simulator` 추가, `backend` 에 `sim/command` 쓰기, `perception` 읽기에서 `sim/#` 제외(9장). 기존 토픽·payload 는 그대로 |
+| v1.6 (보완) | 2026-11-02 | 12장 WS-06: `sim.command.result` 는 모든 콘솔 연결에 방송, 결과가 REST 202 보다 먼저 올 수 있음을 명시 (구현과 같음, S15P31E110-267). 토픽·payload 는 그대로 |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의
 QoS 교환은 메시지 전달을 위한 것이며 앱/장치 적용 확인을 대신하지 않는다.
