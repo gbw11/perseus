@@ -50,10 +50,14 @@ public class DriveResumeRequester {
 
     public synchronized void request(String requestedBy) {
         DriveState.Control control = tracker.snapshot().control();
-        if (control == null || !"AUTO_READY".equals(control.mode())) {
+        if (control == null || control.source().status() != DriveState.SourceStatus.FRESH) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "DRIVE_STATE_UNAVAILABLE",
+                    "신선한 주행 상태를 확인할 수 없어 자율주행 재개를 요청할 수 없습니다.");
+        }
+        if (!"AUTO_READY".equals(control.mode())) {
             throw new ApiException(HttpStatus.CONFLICT, "NOT_AUTO_READY",
                     "자율주행 재개는 AUTO_READY 상태에서만 할 수 있습니다. 현재: "
-                            + (control == null ? "알 수 없음" : control.mode()));
+                            + control.mode());
         }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("requested_by", requestedBy);

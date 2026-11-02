@@ -43,6 +43,10 @@ class ManualInputRelayTest {
             tracker, () -> publisher, objectMapper, Clock.fixed(Instant.parse("2026-10-20T00:00:00Z"), ZoneOffset.UTC));
     private long seq;
 
+    ManualInputRelayTest() {
+        tracker.mqttConnected();
+    }
+
     private void mode(String mode) {
         tracker.accept(DriveStateTracker.CONTROL_TOPIC, DriveStateTrackerTest.envelope(
                 "dom0-gateway", null, "vehicle.control", ++seq, "{\"mode\":\"%s\",\"generation\":%d}".formatted(mode, seq)));
@@ -70,6 +74,16 @@ class ManualInputRelayTest {
         assertThat(sent).hasSize(7); // 1 press + 5 repeats + 1 release, nothing after release
         assertThat(sent.get(0).path("payload").path("keys")).hasSize(2);
         assertThat(sent.get(6).path("payload").path("keys")).isEmpty();
+    }
+
+    @Test
+    void previousManualModeIsNotTrustedAfterMqttReconnect() {
+        mode("MANUAL");
+        tracker.mqttDisconnected();
+        tracker.mqttConnected();
+        assertThat(relay.update(List.of("up"))).isEqualTo(Result.NOT_MANUAL);
+        assertThat(sent).isEmpty();
+        assertThat(relay.held()).isEmpty();
     }
 
     @Test

@@ -117,6 +117,33 @@ WS   /ws/v1/display-service                 dom0 표시 서비스 전용 (첫 �
   비어 있으면 표시 서비스 연결을 모두 4401 로 거부합니다. 표시 서비스에도 같은 값을 설정합니다.
 - 배치 상태는 메모리에만 있어 백엔드가 재시작하면 두 모니터 모두 `split` 으로 돌아갑니다.
 
+## 차량 HDMI용 읽기 상태
+
+차량 HDMI 데이터는 전용 `/ws/face/*` 경로를 만들지 않고 기존 읽기 API를 재사용합니다.
+
+```text
+GET /api/v1/display/state    VM 실행·앱·OS·주행 모드·active_vm_id (사용자 JWT)
+WS  /ws/v1/display/state     같은 Display 스냅샷 (첫 프레임 사용자 JWT)
+GET /api/v1/drive/state      속도·조향·전압·경고·앱 명령·복구 재개 상태 (사용자 JWT)
+WS  /ws/v1/drive/state       같은 Drive 스냅샷 (첫 프레임 사용자 JWT)
+```
+
+- VM A/B의 현재 구동 여부는 고정 역할명이 아니라 신선한 `active_vm_id`와의 일치로 판정합니다.
+  일치하는 정상 주행 VM이 Active이고, 나머지 정상 주행 VM이 Standby입니다. source가 `stale`,
+  `disconnected`, `unknown`이면 이전 ID로 현재 구동 VM을 추론하지 않습니다.
+- Drive의 최상위 `source`는 MQTT 연결 경계를, `control.source`와 `vehicle.source`는 각 데이터의
+  `fresh`/`stale`/`disconnected`/`unknown` 상태와 age를 제공합니다. 마지막 값은 장애 분석을 위해
+  남지만 source가 `fresh`가 아니면 현재 값으로 표시하지 않습니다.
+- `apps.*.direction`은 신선한 `drive.command`의 부호로 계산합니다. `v_mps` 양수/음수/0은
+  `FORWARD`/`REVERSE`/`STOPPED`, `steer_rad` 양수/음수/0은 `LEFT`/`RIGHT`/`STRAIGHT`입니다.
+  오래된 명령은 `UNKNOWN`입니다. `STOPPED`는 브레이크와 입력 없음까지 구분하지 못합니다.
+- `vehicle.batt_v`는 전압이며 잔량 퍼센트가 아닙니다. SOC, 네비게이션, 음악 데이터는 아직
+  계약되지 않았으므로 임의 변환값이나 데모값을 반환하지 않습니다.
+- 복구 시작·완료·실패는 기존 `GET /api/v1/events`, `WS /ws/v1/events`를 사용합니다. dom0 로컬
+  presentation 연결은 platform 범위이며 이 백엔드 경로와 별도로 작업합니다.
+- dom0 키오스크의 HttpOnly 쿠키는 Spring 사용자 JWT가 아니므로 위 API와 VM 변경 API에서 모두
+  401로 거부됩니다. 키오스크는 기존 로컬 presentation과 렌더 ACK 범위만 사용합니다.
+
 ## 테스트
 
 Windows:
