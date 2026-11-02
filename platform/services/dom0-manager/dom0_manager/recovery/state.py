@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from ..models import RecoveryEvent
 from .model import FailureReason
+from .protection import PHASES as PROTECTION_PHASES
 from .store_files import preserve_corrupt, read_state
 
 log = logging.getLogger(__name__)
@@ -29,6 +30,8 @@ SCHEMA_VERSION = 1
 MODES = ("start-if-absent", "graceful-restart", "force-restart")
 GUEST_KINDS = ("linux", "zephyr")
 REASONS = frozenset(reason.value for reason in FailureReason)
+PROTECTION_SPEC = frozenset({"host_boot_id", "target_vm", "target_execution_id", "intent_revision", "lifecycle_generation", "expected_owner",
+                             "expected_generation", "deadline_ms", "parent_deadline_ms", "purpose"})
 
 
 class RecoveryStatus(str, Enum):
@@ -84,6 +87,9 @@ class RecoveryRecord:
     # graceful-restart 가 정상 종료에 실패한 실행. 같은 실행이 지금도 돌 때만 다음 시도를 force-restart 로 올린다(다른 실행에 옛 실패를 쓰지 않음)
     graceful_failed_execution_id: str | None = None
     attempt_closed: bool = False  # 현재 attempt 의 종료 이벤트(재시도 실패)를 이미 냈다. 그 뒤의 recovered·cancelled 는 시도에 붙이지 않는다
+    # 주행 VM 의 Gateway 보호(S15P31E110-346): {request_id, spec(원 spec), phase, note}. 첫 송신 전에 저장한다.
+    # 단계가 LIVE 이면 복구가 닫혀도 정산(finish·cancel)이 끝날 때까지 기록을 지우지 않는다
+    protection: dict[str, Any] | None = None
     final: bool = False
     closed_monotonic: float | None = None
     # 아직 outbox(recovery-events.jsonl)에 옮기지 못한 이벤트(계약 2.5, event_id 고정). 상태 전이와 같은 파일에 저장돼
@@ -165,6 +171,8 @@ class RecoveryRecord:
             if event["event_id"] in seen:
                 raise ValueError(f"duplicate pending event_id {event['event_id']}")
             seen.add(event["event_id"])
+        if self.protection is not None:
+            self._validate_protection()
         if self.request is not None:
             if not isinstance(self.request, dict):
                 raise ValueError("request must be an object")
@@ -186,6 +194,27 @@ class RecoveryRecord:
                 raise ValueError("DETECTED must not carry an attempt")
         elif self.closed_monotonic is None:
             raise ValueError(f"{self.status.value} requires closed_monotonic")
+
+    def _validate_protection(self) -> None:
+        """손상된 보호 기록으로 다른 실행을 정산하거나 새 키를 만들지 않도록 원 spec 의 모양까지 본다."""
+        entry = self.protection
+        if not isinstance(entry, dict) or set(entry) != {"request_id", "spec", "phase", "note"}:
+            raise ValueError("protection must be {request_id, spec, phase, note}")
+        if not isinstance(entry["request_id"], str) or not entry["request_id"] or entry["phase"] not in PROTECTION_PHASES:
+            raise ValueError("protection request_id/phase invalid")
+        if entry["note"] is not None and not isinstance(entry["note"], str):
+            raise ValueError("protection note must be a string or null")
+        spec = entry["spec"]
+        if not isinstance(spec, dict) or set(spec) != PROTECTION_SPEC or spec["purpose"] != "protect" or spec["target_vm"] != str(self.vm_id):
+            raise ValueError("protection spec does not belong to the record")
+        for name in ("host_boot_id", "target_execution_id", "expected_owner"):
+            if not isinstance(spec[name], str) or str(UUID(spec[name])) != spec[name]:
+                raise ValueError(f"protection spec {name} must be a canonical UUID")
+        for name in ("intent_revision", "lifecycle_generation", "expected_generation", "deadline_ms", "parent_deadline_ms"):
+            if type(spec[name]) is not int or spec[name] < 0:
+                raise ValueError(f"protection spec {name} must be a non-negative integer")
+        if spec["deadline_ms"] > spec["parent_deadline_ms"]:
+            raise ValueError("protection deadline exceeds its parent deadline")
 
 
 class RecoveryStore:
