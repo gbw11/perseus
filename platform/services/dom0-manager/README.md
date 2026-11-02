@@ -194,6 +194,7 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 | --- | --- | --- |
 | `XENOVA_PLATFORM_LIB` | `/usr/lib/xenova` | `xenova_management` 등 플랫폼 모듈 경로. 여러 개면 OS 경로 구분자로 |
 | `XENOVA_PLATFORM_BUSY_TIMEOUT` | `5` | 다른 요청이 플랫폼 `Manager`를 쓰는 동안 기다릴 최대 초. 넘으면 503 `PlatformUnavailable`(재시도 가능). 정지가 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다 |
+| `XENOVA_PLATFORM_READ_FORK` | `0` | `1`이면 일반 조회(get·list 등)를 직렬화하지 않고 호출마다 요청별 `Manager.fork()`로 부른다. 하위가 조회를 공통 실행 잠금 없이 처리하는 설치본을 확인한 뒤에만 켠다. Worker 도 같은 값을 읽는다 |
 
 동작 대응:
 
@@ -210,6 +211,8 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 플랫폼 `xen_state` → 계약 상태: `running`·`blocked`·`unknown`(플래그 없음) → running, `paused` → paused, `shutdown`·`dying` → stopping, `crashed` → crashed, `stopped` → 도메인 없음.
 
 `load_manager`는 `Manager`를 `SerializedManager`로 감싸 프로세스 안에서 `call`을 직렬화합니다. 플랫폼 `Manager`가 요청별 상태(`current_operation`·`replayed`)를 인스턴스 변수에 두어 FastAPI 스레드가 동시에 부르면 섞이기 때문입니다. 차례를 기다리는 시간은 `XENOVA_PLATFORM_BUSY_TIMEOUT`(기본 5초)으로 제한하고, 넘으면 플랫폼의 잠금 충돌과 같은 `OPERATION_IN_PROGRESS` 봉투를 돌려 503으로 냅니다. 정지가 90초 동안 잠금을 쥐어도 조회가 스레드풀에 쌓이지 않습니다. `/healthz`는 Manager를 거치지 않고 `xl info`와 registry 디렉터리 존재만 확인하므로 잠금이나 느린 `xl list`에 영향받지 않습니다.
+
+**조회의 요청별 Manager (S15P31E110-333)**: `XENOVA_PLATFORM_READ_FORK=1`이면 하위 계약의 일반 조회(`list`·`get`·`intents`·`probe`·`execution-context`·`templates`·`operation`·`control-operation`·`recovery-operation`·`provisioning`, [cli-manager-spec "일반 조회의 동시 실행과 정합성"](../../../docs/platform/cli-manager-spec.md#read-concurrency))는 직렬화를 거치지 않고 호출마다 새 `fork()` 객체로 부릅니다. 긴 Linux create 가 직렬화를 쥐어도 다른 VM 의 상세·목록이 busy timeout 503 없이 하위로 들어갑니다. 변경 action(create·start·stop·retire·recover_once·provision·registration-notify 등)은 그대로 직렬화합니다. 같은 요청 객체를 두 호출이 공유하지 않고 공유 `Manager` 를 잠금 없이 부르지 않습니다. 하위의 관측 슬롯 경합(`OPERATION_IN_PROGRESS`)·`TARGET_CHANGED`·`OBSERVATION_UNAVAILABLE` 은 지금처럼 503·409 로 냅니다. 기본은 꺼져 있습니다: `fork()` 가 있어도 조회가 공통 잠금을 쓰는 옛·혼합 설치본에서는 503 대신 하위 잠금 대기로 바뀔 뿐이기 때문입니다. `fork` 가 없으면 켜도 직렬화 경로입니다.
 
 **생성 입력**: `create`에는 Spring 발급 `vm_id`, 표시 이름(`<template_id 정규화>-<vm_id 앞 12자리>`), 템플릿 ID·버전, vcpus·memory_mib만 보냅니다. 내부 실행 이름(`vm-<hex>`)·MAC·Linux IP는 플랫폼이 전역 잠금 안에서 발급하고, IP가 바닥나면 플랫폼 `IP_POOL_EXHAUSTED`를 507 `InsufficientResources`(resource.name=ipv4)로 냅니다. 플랫폼 `INVALID_SPEC`은 400 그대로입니다. 인스턴스 디렉터리는 `configuration.id`(내부 이름)로 찾고, 통합 테스트는 생성이 201이며 registry·Xen UUID가 요청 UUID와 같은지 항상 검증합니다.
 
