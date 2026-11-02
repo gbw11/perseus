@@ -13,7 +13,12 @@ import {
   type LoginRequest,
   type SignupRequest,
   type TokenResponse,
+  type UpdateMemoryRequest,
+  type UpdateVcpuPinningRequest,
+  type UpdateVcpusRequest,
+  type VcpuPinning,
   type Vm,
+  type VmResources,
 } from '../api/types';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
 import { mockMemoryPoolSamples } from './memoryMetrics';
@@ -25,6 +30,7 @@ const TOKEN_TTL_S = 900;
 const LATENCY_MS = 150;
 
 let vms: Vm[] = initialVms();
+let pinningByVm = initialPinning();
 let tokenSeq = 0;
 let accessToken: string | null = null;
 /** Node(시험)에는 쿠키 저장소가 없어서 로그인 상태도 같이 기억한다. 브라우저는 새로고침 뒤 쿠키로 복원 */
@@ -36,12 +42,67 @@ let mockPassword = MOCK_PASSWORD;
 /** 시험용: 처음 상태로 */
 export function resetMockState(): void {
   vms = initialVms();
+  pinningByVm = initialPinning();
   tokenSeq = 0;
   accessToken = null;
   refreshGranted = false;
   mockUsername = MOCK_USER.username;
   mockNickname = MOCK_USER.nickname;
   mockPassword = MOCK_PASSWORD;
+}
+
+function initialPinning(): Map<string, VcpuPinning[]> {
+  return new Map([
+    [VM_IDS.autonomous, [{ vcpu: 0, pcpus: [1] }]],
+    [VM_IDS.manual, [{ vcpu: 0, pcpus: [2] }]],
+    [VM_IDS.interaction, [{ vcpu: 0, pcpus: [0, 3] }]],
+  ]);
+}
+
+const defaultPinning = (vm: Vm): VcpuPinning[] =>
+  Array.from({ length: vm.vcpus }, (_, vcpu) => ({ vcpu, pcpus: [0, 3] }));
+
+function resourcesOf(vm: Vm): VmResources {
+  const vcpuPinning = pinningByVm.get(vm.vm_id) ?? defaultPinning(vm);
+  pinningByVm.set(vm.vm_id, vcpuPinning);
+  const template = TEMPLATES.find(
+    (item) => item.template_id === vm.template_id && item.version === vm.template_version,
+  );
+  const fixed = vm.guest_kind === 'zephyr';
+  return {
+    vm_id: vm.vm_id,
+    vcpus: vm.vcpus,
+    memory_mib: vm.memory_mib,
+    pcpu_count: 4,
+    vcpu_pinning: vcpuPinning,
+    exclusive_pcpus: vm.guest_kind === 'zephyr' ? [...new Set(vcpuPinning.flatMap((row) => row.pcpus))] : [],
+    pcpus: [
+      { pcpu: 0, load_percent: 24.8 },
+      { pcpu: 1, load_percent: 36.2 },
+      { pcpu: 2, load_percent: 18.5 },
+      { pcpu: 3, load_percent: 41.7 },
+    ],
+    limits: {
+      vcpus_min: fixed ? vm.vcpus : 1,
+      vcpus_max: fixed ? vm.vcpus : 4,
+      memory_mib_min: fixed ? vm.memory_mib : (template?.min_memory_mib ?? 16),
+      memory_mib_max: fixed ? vm.memory_mib : 1024,
+      memory_mib_step: fixed ? 1 : 64,
+    },
+    observed_at: new Date().toISOString(),
+  };
+}
+
+function validMappings(vm: Vm, mappings: VcpuPinning[]): boolean {
+  if (mappings.length !== vm.vcpus) return false;
+  const sortedVcpus = mappings.map((row) => row.vcpu).sort((a, b) => a - b);
+  if (sortedVcpus.some((vcpu, index) => vcpu !== index)) return false;
+  return mappings.every(
+    ({ pcpus }) =>
+      pcpus.length > 0 &&
+      new Set(pcpus).size === pcpus.length &&
+      pcpus.every((pcpu) => Number.isInteger(pcpu) && pcpu >= 0 && pcpu < 4),
+  );
 }
 
 const error = (status: number, code: string, message: string, errors?: { field: string; reason: string }[]) =>
@@ -172,6 +233,89 @@ export const handlers = [
     return vm ? HttpResponse.json(vm as unknown as JsonBodyType) : vmNotFound();
   }),
 
+  http.get('*/api/v1/vms/:vmId/resources', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    return vm ? HttpResponse.json(resourcesOf(vm) as unknown as JsonBodyType) : vmNotFound();
+  }),
+
+  http.put('*/api/v1/vms/:vmId/resources/vcpu-pinning', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    if (!vm) return vmNotFound();
+    const body = (await request.json()) as Partial<UpdateVcpuPinningRequest>;
+    if (!body.mappings || !validMappings(vm, body.mappings)) {
+      return error(400, 'INVALID_ARGUMENT', '각 vCPU에는 하나 이상의 유효한 pCPU를 선택해야 합니다.');
+    }
+    if (vm.guest_kind === 'zephyr' && body.mappings.some((row) => row.pcpus.length !== 1)) {
+      return error(400, 'RESOURCE_UNSUPPORTED', 'Zephyr 전용 VM은 하나의 전용 pCPU에만 배치할 수 있습니다.');
+    }
+    pinningByVm.set(
+      vm.vm_id,
+      body.mappings.map(({ vcpu, pcpus }) => ({ vcpu, pcpus: [...pcpus].sort((a, b) => a - b) })),
+    );
+    return HttpResponse.json(resourcesOf(vm) as unknown as JsonBodyType);
+  }),
+
+  http.put('*/api/v1/vms/:vmId/resources/vcpus', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    if (!vm) return vmNotFound();
+    if (vm.guest_kind === 'zephyr') {
+      return error(400, 'RESOURCE_UNSUPPORTED', 'Zephyr VM은 고정 리소스 프로필을 사용합니다.');
+    }
+    if (vm.state !== 'stopped') {
+      return error(409, 'INVALID_VM_STATE', 'vCPU 수는 정지된 VM에서만 변경할 수 있습니다.');
+    }
+    const body = (await request.json()) as Partial<UpdateVcpusRequest>;
+    if (!Number.isInteger(body.vcpus) || body.vcpus! < 1 || body.vcpus! > 4) {
+      return error(400, 'INVALID_ARGUMENT', 'vCPU 수는 1~4 정수여야 합니다.');
+    }
+    const currentPinning = pinningByVm.get(vm.vm_id) ?? defaultPinning(vm);
+    const fallback = currentPinning[0]?.pcpus ?? [0, 3];
+    pinningByVm.set(
+      vm.vm_id,
+      Array.from({ length: body.vcpus! }, (_, vcpu) => ({
+        vcpu,
+        pcpus: [...(currentPinning[vcpu]?.pcpus ?? fallback)],
+      })),
+    );
+    vms = vms.map((item) => (item.vm_id === vm.vm_id ? { ...item, vcpus: body.vcpus! } : item));
+    return HttpResponse.json(resourcesOf(find(vm.vm_id)!) as unknown as JsonBodyType);
+  }),
+
+  http.put('*/api/v1/vms/:vmId/resources/memory', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    if (!vm) return vmNotFound();
+    if (vm.guest_kind === 'zephyr') {
+      return error(400, 'RESOURCE_UNSUPPORTED', 'Zephyr VM은 고정 리소스 프로필을 사용합니다.');
+    }
+    if (vm.state !== 'stopped') {
+      return error(409, 'INVALID_VM_STATE', '메모리는 정지된 VM에서만 변경할 수 있습니다.');
+    }
+    const body = (await request.json()) as Partial<UpdateMemoryRequest>;
+    const limits = resourcesOf(vm).limits;
+    if (
+      !Number.isInteger(body.memory_mib) ||
+      body.memory_mib! < limits.memory_mib_min ||
+      body.memory_mib! > limits.memory_mib_max ||
+      body.memory_mib! % limits.memory_mib_step !== 0
+    ) {
+      return error(
+        400,
+        'INVALID_ARGUMENT',
+        `메모리는 ${limits.memory_mib_min}~${limits.memory_mib_max} MiB, ${limits.memory_mib_step} MiB 단위여야 합니다.`,
+      );
+    }
+    vms = vms.map((item) => (item.vm_id === vm.vm_id ? { ...item, memory_mib: body.memory_mib! } : item));
+    return HttpResponse.json(resourcesOf(find(vm.vm_id)!) as unknown as JsonBodyType);
+  }),
+
   http.post('*/api/v1/vms', async ({ request }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
@@ -223,6 +367,7 @@ export const handlers = [
     if (!authorized(request)) return unauthorized();
     if (!find(String(params.vmId))) return vmNotFound();
     vms = vms.filter((vm) => vm.vm_id !== params.vmId);
+    pinningByVm.delete(String(params.vmId));
     return new HttpResponse(null, { status: 204 });
   }),
 
