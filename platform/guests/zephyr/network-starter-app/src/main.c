@@ -97,10 +97,11 @@ static int stats_cmd(const struct shell *sh,size_t argc,char **argv) {
   struct xnet_waits w;struct xnet_status s;
   int rc=xnet_waits_get(&w);if(rc)return rc;
   rc=xnet_status_get(&s);if(rc)return rc;
-  shell_print(sh,"{\"clock\":\"%s\",\"started\":%s,\"connected\":%s,\"backend_observation\":%d,\"backend_error\":%d,\"observation_error\":%d,\"first_observation_error\":%d,\"backend_wait_stage\":%d,\"packet_polls\":%llu,\"pending_batches\":%llu,\"packet_gap_max_us\":%llu,\"packet_lock_wait_max_us\":%llu,\"packet_lock_hold_max_us\":%llu,\"store_observations\":%llu,\"store_lock_wait_max_us\":%llu,\"store_response_max_us\":%llu,\"store_unavailable\":%llu,\"store_recoveries\":%llu,\"last_backend_success_ms\":%llu}",
+  shell_print(sh,"{\"clock\":\"%s\",\"started\":%s,\"connected\":%s,\"backend_observation\":%d,\"backend_error\":%d,\"observation_error\":%d,\"first_observation_error\":%d,\"backend_wait_stage\":%d,\"packet_polls\":%llu,\"pending_batches\":%llu,\"packet_gap_max_us\":%llu,\"packet_lock_wait_max_us\":%llu,\"packet_lock_hold_max_us\":%llu,\"packet_lock_timeouts\":%llu,\"packet_last_poll_ms\":%llu,\"packet_lock_first_error\":%d,\"store_observations\":%llu,\"store_lock_wait_max_us\":%llu,\"store_response_max_us\":%llu,\"store_unavailable\":%llu,\"store_recoveries\":%llu,\"last_backend_success_ms\":%llu}",
    w.cycle_clock?"cycles":"kernel_ticks",s.started?"true":"false",s.connected?"true":"false",s.backend_observation,s.backend_error,s.observation_error,s.first_observation_error,s.backend_wait_stage,
    (unsigned long long)w.packet_polls,(unsigned long long)w.pending_batches,(unsigned long long)w.packet_gap_max_us,
    (unsigned long long)w.packet_lock_wait_max_us,(unsigned long long)w.packet_lock_hold_max_us,
+   (unsigned long long)w.packet_lock_timeouts,(unsigned long long)w.packet_last_poll_ms,w.packet_lock_first_error,
    (unsigned long long)w.store_observations,(unsigned long long)w.store_lock_wait_max_us,(unsigned long long)w.store_response_max_us,
    (unsigned long long)w.store_unavailable,(unsigned long long)w.store_recoveries,(unsigned long long)w.last_backend_success_ms);
   return 0;

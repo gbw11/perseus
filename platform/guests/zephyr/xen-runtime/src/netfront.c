@@ -187,10 +187,23 @@ static void loop(void *a,void *b,void *c) {
  int rc=0;
  while(!closing) {
   rc=atomic_load(&backend_error);if(rc)break;
-  if(packet_acquire(20)){rc=-ETIMEDOUT;break;}
+  int lock_rc=packet_acquire(20);
+  if(lock_rc){
+   k_spinlock_key_t key=k_spin_lock(&waits_lock);
+   if(!waits.packet_lock_first_error)waits.packet_lock_first_error=lock_rc;
+   if(lock_rc==-EAGAIN&&waits.packet_lock_timeouts<UINT64_MAX)waits.packet_lock_timeouts++;
+   k_spin_unlock(&waits_lock,key);
+   /* Zephyr's bounded mutex wait expired without acquiring ownership. Keep
+    * this worker available for completion/drain; never touch the ring here.
+    * Yield between attempts and recheck close/backend failure each time. */
+   if(lock_rc==-EAGAIN){k_sleep(K_TICKS(1));continue;}
+   rc=lock_rc;break;
+  }
+  rc=atomic_load(&backend_error);
+  if(closing||rc){packet_release();break;}
   rc=xnf_poll(&n);bool more=!rc&&xnf_pending(&n);
   uint64_t now=clock_us();k_spinlock_key_t key=k_spin_lock(&waits_lock);
-  waits.packet_polls++;waits.pending_batches+=more;
+  waits.packet_polls++;waits.pending_batches+=more;waits.packet_last_poll_ms=now/1000;
   if(last_poll)waits.packet_gap_max_us=MAX(waits.packet_gap_max_us,now-last_poll);
   last_poll=now;k_spin_unlock(&waits_lock,key);
   packet_release();if(rc)break;
