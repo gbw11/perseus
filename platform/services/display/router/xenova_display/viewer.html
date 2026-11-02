@@ -6,12 +6,14 @@ body{margin:0;padding:24px;background:#0b1019;color:#e8eef9;font:16px system-ui}
 <main hidden id="screens"><article><h2>모니터 1</h2><p id="monitor-1-status">수신 대기</p><canvas id="monitor-1" width="1280" height="720" aria-label="모니터 1 전송 화면"></canvas></article><article><h2>모니터 2</h2><p id="monitor-2-status">수신 대기</p><canvas id="monitor-2" width="1280" height="720" aria-label="모니터 2 전송 화면"></canvas></article></main>
 <script>
 const form=document.querySelector('#login'),message=document.querySelector('#message'),screens=document.querySelector('#screens');
-const ids=['monitor-1','monitor-2'],received={},controllers={};let timer,generation=0;
+const ids=['monitor-1','monitor-2'],received={},opened={},controllers={};let timer,generation=0;
+// A half-open connection never ends the fetch; reconnect when the relay reports live frames we no longer draw.
+const STALL_MS=5000;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function marker(b,a,c,start=0){for(let i=start;i<b.length-1;i++)if(b[i]===a&&b[i+1]===c)return i;return -1;}
 async function receive(id,run){
  while(run===generation){
-  const abort=new AbortController();controllers[id]=abort;
+  const abort=new AbortController();controllers[id]=abort;opened[id]=performance.now();
   try{const r=await fetch('/streams/'+id+'.mjpeg',{signal:abort.signal,cache:'no-store'});if(!r.ok||!r.body)throw Error();const reader=r.body.getReader();let buffer=new Uint8Array();
    while(run===generation){const {done,value}=await reader.read();if(done)throw Error();const joined=new Uint8Array(buffer.length+value.length);joined.set(buffer);joined.set(value,buffer.length);buffer=joined;let latest;
     while(true){const start=marker(buffer,255,216);if(start<0){buffer=buffer.slice(-1);break;}const end=marker(buffer,255,217,start+2);if(end<0){buffer=buffer.slice(start);break;}latest=buffer.slice(start,end+2);buffer=buffer.slice(end+2);}
@@ -21,7 +23,7 @@ async function receive(id,run){
   }catch{received[id]=0;await sleep(1000);}
  }
 }
-async function poll(){let timeout;try{const abort=new AbortController();timeout=setTimeout(()=>abort.abort(),2500);const r=await fetch('/api/v1/streams',{cache:'no-store',signal:abort.signal});if(r.status===401){form.hidden=false;throw Error();}if(!r.ok)throw Error();const {streams}=await r.json();let all=true;for(const s of streams){const live=s.status==='live'&&received[s.output_id]&&performance.now()-received[s.output_id]<3000;all=all&&live;const status=document.getElementById(s.output_id+'-status');status.textContent=live?'화면 수신 중':'화면 수신 중단 · 마지막 프레임';status.className=live?'':'bad';}message.textContent=all?'두 화면 연결됨':'일부 화면의 수신을 기다리고 있습니다.';}catch{message.textContent='연결 끊김 · 아래는 마지막 수신 화면입니다.';for(const id of ids){document.getElementById(id+'-status').textContent='화면 수신 중단 · 마지막 프레임';document.getElementById(id+'-status').className='bad';}}finally{clearTimeout(timeout);timer=setTimeout(poll,1000);}}
+async function poll(){let timeout;try{const abort=new AbortController();timeout=setTimeout(()=>abort.abort(),2500);const r=await fetch('/api/v1/streams',{cache:'no-store',signal:abort.signal});if(r.status===401){form.hidden=false;throw Error();}if(!r.ok)throw Error();const {streams}=await r.json();let all=true;for(const s of streams){if(s.status==='live'&&performance.now()-Math.max(received[s.output_id]||0,opened[s.output_id]||0)>STALL_MS)controllers[s.output_id]?.abort();const live=s.status==='live'&&received[s.output_id]&&performance.now()-received[s.output_id]<3000;all=all&&live;const status=document.getElementById(s.output_id+'-status');status.textContent=live?'화면 수신 중':'화면 수신 중단 · 마지막 프레임';status.className=live?'':'bad';}message.textContent=all?'두 화면 연결됨':'일부 화면의 수신을 기다리고 있습니다.';}catch{message.textContent='연결 끊김 · 아래는 마지막 수신 화면입니다.';for(const id of ids){document.getElementById(id+'-status').textContent='화면 수신 중단 · 마지막 프레임';document.getElementById(id+'-status').className='bad';}}finally{clearTimeout(timeout);timer=setTimeout(poll,1000);}}
 form.addEventListener('submit',async e=>{e.preventDefault();const key=document.querySelector('#key');const token=key.value;key.value='';try{const r=await fetch('/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});if(!r.ok)throw Error();form.hidden=true;screens.hidden=false;generation++;for(const id of ids){controllers[id]?.abort();receive(id,generation);}clearTimeout(timer);poll();}catch{message.textContent='접속 키 또는 연결 상태를 확인해 주세요.'}});
 window.addEventListener('pagehide',()=>{generation++;clearTimeout(timer);for(const c of Object.values(controllers))c.abort();});
 </script></html>
