@@ -110,7 +110,7 @@ class DriveRelayIntegrationTest {
         // The relay subscribes asynchronously, so keep publishing until it has seen the messages.
         await(() -> {
             publish(DriveStateTracker.CONTROL_TOPIC, "dom0-gateway", null, "vehicle.control",
-                    "{\"mode\":\"MANUAL\",\"generation\":7,\"active_app\":\"manual\",\"active_vm_id\":null,\"reason\":\"command_timeout\"}",
+                    "{\"mode\":\"MANUAL\",\"generation\":7,\"active_app\":\"manual\",\"active_vm_id\":\"22222222-2222-4222-8222-222222222222\",\"reason\":\"command_timeout\"}",
                     1, true);
             publish("xenova/v1/apps/manual/events", "22222222-2222-4222-8222-222222222222", "manual",
                     "drive.command", "{\"generation\":7,\"v_mps\":0.3,\"steer_rad\":0.0}", 0, false);
@@ -124,9 +124,16 @@ class DriveRelayIntegrationTest {
         JsonNode state = objectMapper.readTree(response.getBody());
         assertThat(state.path("control").path("mode").asText()).isEqualTo("MANUAL");
         assertThat(state.path("control").path("generation").asLong()).isEqualTo(7);
+        assertThat(state.path("control").path("active_vm_id").asText())
+                .isEqualTo("22222222-2222-4222-8222-222222222222");
+        assertThat(state.path("control").path("source").path("status").asText()).isEqualTo("fresh");
         assertThat(state.path("apps").path("manual").path("vm_id").asText())
                 .isEqualTo("22222222-2222-4222-8222-222222222222");
         assertThat(state.path("apps").path("manual").path("last_command").path("v_mps").asDouble()).isEqualTo(0.3);
+        assertThat(state.path("apps").path("manual").path("direction").path("longitudinal").asText())
+                .isEqualTo("FORWARD");
+        assertThat(state.path("apps").path("manual").path("direction").path("lateral").asText())
+                .isEqualTo("STRAIGHT");
 
         JsonNode stats = objectMapper.readTree(restTemplate.exchange(
                 "/api/v1/messaging/stats", HttpMethod.GET, new HttpEntity<>(bearer(login())), String.class).getBody());

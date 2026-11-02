@@ -32,6 +32,8 @@ public class DriveStateTracker {
 
     /** The gateway's freshness rule (contract §5.1): a command older than this has stopped. */
     static final long COMMAND_FRESH_MS = 100;
+    /** vehicle.status is 20 Hz; twenty missed reports make the telemetry stale. */
+    static final long VEHICLE_FRESH_MS = 1000;
     /** Perception is 15 Hz; three missed frames mean the input is no longer valid. */
     static final long PERCEPTION_VALID_MS = 200;
     static final long RATE_WINDOW_MS = 1000;
@@ -50,6 +52,8 @@ public class DriveStateTracker {
     private final LongSupplier monotonicMillis;
 
     private long version;
+    private ConnectionState mqttConnection = ConnectionState.UNKNOWN;
+    private long mqttGeneration;
     private Stamped control;
     private Stamped vehicle;
     private Stamped perception;
@@ -108,12 +112,12 @@ public class DriveStateTracker {
         String publisher = text(envelope, "vm_id") != null ? text(envelope, "vm_id") : text(envelope, "source_id");
 
         if (CONTROL_TOPIC.equals(topic)) {
-            control = new Stamped(body, now, publisher);
+            control = new Stamped(body, now, publisher, mqttGeneration);
             if (!"AUTO_READY".equals(text(body, "mode"))) {
                 resume = null;
             }
         } else if (STATUS_TOPIC.equals(topic)) {
-            vehicle = new Stamped(body, now, publisher);
+            vehicle = new Stamped(body, now, publisher, mqttGeneration);
         } else {
             return onAppEvent(topicAppId, type, body, publisher, now);
         }
@@ -126,20 +130,20 @@ public class DriveStateTracker {
             case "drive.command" -> {
                 AppTrack app = app(appId);
                 app.vmId = publisher;
-                app.command = new Stamped(body, now, publisher);
+                app.command = new Stamped(body, now, publisher, mqttGeneration);
                 window(app.commandTimes, now).addLast(now);
             }
             case "app.heartbeat" -> {
                 AppTrack app = app(appId);
                 app.vmId = publisher;
-                app.heartbeat = new Stamped(body, now, publisher);
+                app.heartbeat = new Stamped(body, now, publisher, mqttGeneration);
             }
             case "perception.result" -> {
-                perception = new Stamped(body, now, publisher);
+                perception = new Stamped(body, now, publisher, mqttGeneration);
                 window(perceptionTimes, now).addLast(now);
             }
             case "drive.resume.accepted" -> {
-                resume = new Stamped(body, now, publisher);
+                resume = new Stamped(body, now, publisher, mqttGeneration);
                 version++;
                 return Optional.of(new DriveNotice(type, publisher, body));
             }
@@ -213,8 +217,28 @@ public class DriveStateTracker {
         Map<String, DriveState.App> appViews = new LinkedHashMap<>();
         apps.forEach((appId, app) -> appViews.put(appId, appView(app, now)));
         return new DriveState(
-                version, clock.instant(), controlView(now), vehicleView(now), appViews, perceptionView(now),
+                version, clock.instant(), transportSource(), controlView(now), vehicleView(now), appViews,
+                perceptionView(now),
                 resumeView(now));
+    }
+
+    /** MQTT lifecycle callbacks change the state version so WebSocket clients receive the boundary immediately. */
+    public synchronized void mqttConnected() {
+        if (mqttConnection != ConnectionState.CONNECTED) {
+            mqttGeneration++;
+        }
+        setConnection(ConnectionState.CONNECTED);
+    }
+
+    public synchronized void mqttDisconnected() {
+        setConnection(ConnectionState.DISCONNECTED);
+    }
+
+    private void setConnection(ConnectionState next) {
+        if (mqttConnection != next) {
+            mqttConnection = next;
+            version++;
+        }
     }
 
     public synchronized MessagingStats stats() {
@@ -232,7 +256,7 @@ public class DriveStateTracker {
         JsonNode c = control.body;
         return new DriveState.Control(
                 text(c, "mode"), longOrNull(c, "generation"), text(c, "active_app"), text(c, "active_vm_id"),
-                text(c, "reason"), now - control.at);
+                text(c, "reason"), now - control.at, source(control, now, null));
     }
 
     private DriveState.Vehicle vehicleView(long now) {
@@ -247,24 +271,73 @@ public class DriveStateTracker {
                 new DriveState.Flags(
                         flags.path("estop").asBoolean(false), flags.path("watchdog").asBoolean(false),
                         flags.path("obstacle").asBoolean(false)),
-                now - vehicle.at);
+                now - vehicle.at, source(vehicle, now, VEHICLE_FRESH_MS));
     }
 
     private DriveState.App appView(AppTrack app, long now) {
         DriveState.Command command = null;
         Long commandAgo = null;
         Boolean fresh = null;
+        DriveState.CommandDirection direction = null;
         if (app.command != null) {
             JsonNode c = app.command.body;
             command = new DriveState.Command(
                     longOrNull(c, "generation"), doubleOrNull(c, "v_mps"), doubleOrNull(c, "steer_rad"));
             commandAgo = now - app.command.at;
-            fresh = commandAgo <= COMMAND_FRESH_MS;
+            fresh = mqttConnection == ConnectionState.CONNECTED
+                    && app.command.mqttGeneration == mqttGeneration
+                    && commandAgo <= COMMAND_FRESH_MS;
+            direction = direction(command, fresh);
         }
         return new DriveState.App(
-                app.vmId, fresh, commandAgo, window(app.commandTimes, now).size(), command,
+                app.vmId, fresh, commandAgo, window(app.commandTimes, now).size(), command, direction,
                 app.heartbeat == null ? null : text(app.heartbeat.body, "state"),
                 app.heartbeat == null ? null : now - app.heartbeat.at);
+    }
+
+    private DriveState.CommandDirection direction(DriveState.Command command, boolean fresh) {
+        if (!fresh) {
+            return new DriveState.CommandDirection(
+                    DriveState.Longitudinal.UNKNOWN, DriveState.Lateral.UNKNOWN);
+        }
+        Double velocity = command.vMps();
+        Double steering = command.steerRad();
+        DriveState.Longitudinal longitudinal = velocity == null ? DriveState.Longitudinal.UNKNOWN
+                : velocity > 0 ? DriveState.Longitudinal.FORWARD
+                : velocity < 0 ? DriveState.Longitudinal.REVERSE : DriveState.Longitudinal.STOPPED;
+        // MQTT contract §7: positive steer is left and negative steer is right.
+        DriveState.Lateral lateral = steering == null ? DriveState.Lateral.UNKNOWN
+                : steering > 0 ? DriveState.Lateral.LEFT
+                : steering < 0 ? DriveState.Lateral.RIGHT : DriveState.Lateral.STRAIGHT;
+        return new DriveState.CommandDirection(longitudinal, lateral);
+    }
+
+    private DriveState.Source transportSource() {
+        return new DriveState.Source(switch (mqttConnection) {
+            case CONNECTED -> DriveState.SourceStatus.FRESH;
+            case DISCONNECTED -> DriveState.SourceStatus.DISCONNECTED;
+            case UNKNOWN -> DriveState.SourceStatus.UNKNOWN;
+        }, null);
+    }
+
+    private DriveState.Source source(Stamped value, long now, Long staleAfterMs) {
+        Long age = value == null ? null : now - value.at;
+        if (mqttConnection == ConnectionState.DISCONNECTED) {
+            return new DriveState.Source(DriveState.SourceStatus.DISCONNECTED, age);
+        }
+        if (mqttConnection == ConnectionState.UNKNOWN) {
+            return new DriveState.Source(DriveState.SourceStatus.UNKNOWN, age);
+        }
+        if (value == null) {
+            return new DriveState.Source(DriveState.SourceStatus.UNKNOWN, null);
+        }
+        if (value.mqttGeneration != mqttGeneration) {
+            return new DriveState.Source(DriveState.SourceStatus.UNKNOWN, age);
+        }
+        if (staleAfterMs != null && age > staleAfterMs) {
+            return new DriveState.Source(DriveState.SourceStatus.STALE, age);
+        }
+        return new DriveState.Source(DriveState.SourceStatus.FRESH, age);
     }
 
     private DriveState.Perception perceptionView(long now) {
@@ -274,13 +347,19 @@ public class DriveStateTracker {
         JsonNode p = perception.body;
         long ago = now - perception.at;
         return new DriveState.Perception(
-                ago <= PERCEPTION_VALID_MS, ago, window(perceptionTimes, now).size(),
+                mqttConnection == ConnectionState.CONNECTED
+                        && perception.mqttGeneration == mqttGeneration
+                        && ago <= PERCEPTION_VALID_MS,
+                ago, window(perceptionTimes, now).size(),
                 doubleOrNull(p, "lane_offset_m"), doubleOrNull(p, "heading_err_rad"),
                 p.path("obstacles").isArray() ? p.path("obstacles").size() : 0, p.path("stop").asBoolean(false));
     }
 
     private DriveState.Resume resumeView(long now) {
         if (resume == null) {
+            return null;
+        }
+        if (mqttConnection != ConnectionState.CONNECTED || resume.mqttGeneration != mqttGeneration) {
             return null;
         }
         Long switchIn = longOrNull(resume.body, "switch_in_ms");
@@ -335,11 +414,13 @@ public class DriveStateTracker {
         return value != null && value.isNumber() ? value.asDouble() : null;
     }
 
-    private record Stamped(JsonNode body, long at, String publisher) {
+    private record Stamped(JsonNode body, long at, String publisher, long mqttGeneration) {
     }
 
     private record Run(String run, long seq) {
     }
+
+    private enum ConnectionState { CONNECTED, DISCONNECTED, UNKNOWN }
 
     private static final class AppTrack {
         private String vmId;
