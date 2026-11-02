@@ -36,6 +36,8 @@
   관측 사이에 VM 이 시작됐으면 판정하지 않고, 건강 스냅샷도 재확인한 관측으로 낸다.
 - 장애 한 건(episode)에 Judgment 는 하나다. 사유가 바뀌어도(HEARTBEAT_LOST → DOMAIN_ABSENT) 다시 내지 않고 건강 스냅샷에만 반영한다.
   복구 정책(125)은 episode 가 닫힐 때까지 같은 recovery_id 로 재시도하며, 현재 상태는 health()·open_recovery() 로 본다.
+- 플랫폼 의도를 이번 주기에 읽지 못했으면(intent_known=False) crashed·absent 를 포함해 아무것도 판정하지 않고 열린 episode 도 그대로 둔다.
+  건강은 OBSERVATION_UNAVAILABLE 이다. 등록 목록은 마지막으로 읽은 것을 유지하므로 보관·삭제로 해석하지 않는다.
 - 시간은 전부 단조 시계다.
 """
 
@@ -325,6 +327,8 @@ class Watcher:
         return max(0.0, now - beat.received_monotonic)
 
     def _judge(self, track: _Track, obs: VmObservation, signal_age: float | None, now: float) -> tuple[Verdict, FailureReason | None]:
+        if not obs.intent_known:
+            return Verdict.UNKNOWN, None  # 의도를 못 읽었다: 오래된 의도로 재시작하지도, 대상 아님으로 episode 를 닫지도 않는다
         if not obs.eligible:
             return Verdict.OK, None
         if not obs.present:
@@ -431,7 +435,9 @@ class Watcher:
     # ---- 건강 스냅샷 ----
 
     def _health(self, track: _Track, obs: VmObservation, verdict: Verdict, reason: FailureReason | None, signal_age: float | None, now: float) -> VmHealth:
-        if verdict == Verdict.FAILED:
+        if not obs.intent_known:
+            state = HealthState.OBSERVATION_UNAVAILABLE
+        elif verdict == Verdict.FAILED:
             state = HealthState.UNHEALTHY
         elif not obs.present:
             state = HealthState.STARTING if obs.eligible else HealthState.STOPPED
@@ -474,6 +480,7 @@ class Watcher:
             heartbeat_age_s=signal_age,
             reason=reason,
             manager_seq=1 if previous is None else previous.manager_seq + 1 if changed else previous.manager_seq,
+            intent_known=obs.intent_known,
         )
 
     def health(self, vm_id: UUID) -> VmHealth | None:

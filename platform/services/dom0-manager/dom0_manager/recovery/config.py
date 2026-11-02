@@ -18,8 +18,8 @@ HEALTH_LEASE_PERIODS = 3  # vm.health 수명 = 재발행 주기 × 3 (MQTT 계�
 class RecoverySettings:
     # 감시 주기. heartbeat 주기와 같게 두면 판정 지연이 최대 한 주기다
     interval_s: float = HEARTBEAT_PERIOD_S
-    # 플랫폼 registry 의도(Manager.list)를 다시 읽는 주기. list 는 플랫폼 잠금을 쥐고 모든 VM 을 Xen 관측하므로 5초마다 부르지 않는다.
-    # 판정 직전에는 그 VM 만 get 으로 재확인하므로 이 캐시가 오래돼도 사용자가 끈 VM 을 재시작하지 않는다
+    # 템플릿 capability 를 다시 읽는 주기. 의도는 매 주기 Manager intents 로 읽는다. intents 를 모르는 옛 Manager 에서는 의도도
+    # 이 주기로 list 로 읽는다(list 는 플랫폼 잠금을 쥐고 모든 VM 을 Xen 관측하므로 5초마다 부르지 않는다)
     intent_refresh_s: float = 60.0
     # Linux VM: 이 시간 동안 agent.heartbeat 가 없으면 HEARTBEAT_LOST. 백엔드의 OFFLINE(30초)과 같고 계약 2.5 와 같다.
     # 3×주기(15초)는 STALE 이라 한 번 밀린 heartbeat 로 재시작하지 않도록 하한만 15초로 둔다
