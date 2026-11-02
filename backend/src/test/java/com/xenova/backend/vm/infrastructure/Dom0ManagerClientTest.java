@@ -79,6 +79,23 @@ class Dom0ManagerClientTest {
     }
 
     @Test
+    void listRegistrationsReadsTheDedicatedPlatformRegistryResponse() {
+        server.createContext("/api/v1/vm-registrations", exchange -> respond(exchange, 200, """
+                [{"vm_id":"%s","vcpus":1,"memory_mib":512,
+                  "name":"debian-dev","guest_kind":"linux","template_id":"debian-13-arm64",
+                  "template_version":"1.0.2","assigned_ipv4":"192.168.77.30"}]
+                """.formatted(VM_ID)));
+
+        var vm = client.listRegistrations().getFirst();
+
+        assertThat(vm.name()).isEqualTo("debian-dev");
+        assertThat(vm.guestKind()).isEqualTo(com.xenova.backend.template.domain.GuestKind.LINUX);
+        assertThat(vm.templateId()).isEqualTo("debian-13-arm64");
+        assertThat(vm.templateVersion()).isEqualTo("1.0.2");
+        assertThat(vm.assignedIpv4()).isEqualTo("192.168.77.30");
+    }
+
+    @Test
     void findTreatsVmNotFoundAsAbsentDomain() {
         server.createContext("/api/v1/vms/" + VM_ID, exchange -> respond(exchange, 404, """
                 {"code":"VMNotFound","message":"no domain","detail":"xl: domain not found"}

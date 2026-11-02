@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.vm.domain.VmControlPort;
 import com.xenova.backend.vm.domain.VmLaunchSpec;
+import com.xenova.backend.vm.domain.VmRegistrationInventory;
+import com.xenova.backend.vm.domain.VmRegistrationInventoryPort;
 import com.xenova.backend.vm.domain.VmRuntime;
 import java.io.IOException;
 import java.net.ConnectException;
@@ -30,7 +32,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 @Component
-public class Dom0ManagerClient implements VmControlPort {
+public class Dom0ManagerClient implements VmControlPort, VmRegistrationInventoryPort {
 
     private static final Logger log = LoggerFactory.getLogger(Dom0ManagerClient.class);
 
@@ -55,6 +57,16 @@ public class Dom0ManagerClient implements VmControlPort {
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
                 .body(VmRuntime[].class));
+        return response == null ? List.of() : Arrays.asList(response);
+    }
+
+    @Override
+    public List<VmRegistrationInventory> listRegistrations() {
+        VmRegistrationInventory[] response = executeQuery(() -> queryClient.get()
+                .uri("/api/v1/vm-registrations")
+                .retrieve()
+                .onStatus(status -> status.isError(), this::handleError)
+                .body(VmRegistrationInventory[].class));
         return response == null ? List.of() : Arrays.asList(response);
     }
 

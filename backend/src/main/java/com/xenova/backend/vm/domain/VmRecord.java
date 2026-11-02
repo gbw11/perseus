@@ -8,6 +8,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.Objects;
 
 // The public VM specification Spring owns. Retired rows remain here so a future restore can reuse the same
 // permanent vm_id; the platform registry remains the source of truth for disk/runtime lifecycle.
@@ -97,6 +98,34 @@ public class VmRecord {
         record.lifecycle = VmLifecycle.REGISTERED;
         record.assignedIpv4 = assignedIpv4;
         return record;
+    }
+
+    // Reconciles only fields owned by the platform registry. Console role, lifecycle and creation time remain local.
+    public boolean synchronizePlatformRegistration(
+            String name,
+            String templateId,
+            String templateVersion,
+            int vcpus,
+            int memoryMib,
+            GuestKind guestKind,
+            String assignedIpv4) {
+        boolean changed = !this.name.equals(name)
+                || !this.templateId.equals(templateId)
+                || !Objects.equals(this.templateVersion, templateVersion)
+                || this.vcpus != vcpus
+                || this.memoryMib != memoryMib
+                || getGuestKind() != guestKind
+                || !Objects.equals(this.assignedIpv4, assignedIpv4);
+        if (changed) {
+            this.name = name;
+            this.templateId = templateId;
+            this.templateVersion = templateVersion;
+            this.vcpus = vcpus;
+            this.memoryMib = memoryMib;
+            this.guestKind = guestKind;
+            this.assignedIpv4 = assignedIpv4;
+        }
+        return changed;
     }
 
     public GuestKind getGuestKind() {
