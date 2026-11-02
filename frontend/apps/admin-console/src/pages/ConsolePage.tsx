@@ -4,8 +4,10 @@ import { useSearchParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVms } from '../api/queries';
 import { osLabel, roleOf } from '../domain/roles';
-import { STATE_HEALTH, STATE_LABEL } from '../format';
+import { vmAuthorityOf } from '../domain/vmAuthority';
+import { capitalizeFirst, STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
+import { RuntimeLogsPanel } from '../console/RuntimeLogsPanel';
 import styles from './pages.module.css';
 
 /** xterm 이 무거워서 이 화면을 열 때만 불러온다 (platform -248 구현) */
@@ -24,19 +26,19 @@ export function ConsolePage() {
   const [params, setParams] = useSearchParams();
   const items = vms.data?.items ?? [];
   const selected = items.find((vm) => vm.vm_id === params.get('vm')) ?? items[0];
+  const selectedRole = selected ? roleOf(selected, drive) : null;
+  const selectedAuthority = selected
+    ? vmAuthorityOf(selectedRole, selected, drive?.control?.active_vm_id)
+    : undefined;
 
   return (
     <div className={styles.page}>
-      <section className={styles.pageHead}>
+      <header className={styles.contentHeading}>
         <div>
-          <div className={styles.eyebrow}>웹 콘솔 · 게스트 터미널</div>
-          <h1>VM 을 골라 바로 입력</h1>
+          <span className={styles.contentEyebrow}>VM ACCESS</span>
+          <h1>VM Console</h1>
         </div>
-        <span className={styles.grow} />
-        <span className={styles.dim}>
-          [연결]로 접속 · VM 당 쓰기 세션 1개 · 연결 해제는 VM 을 끄지 않는다
-        </span>
-      </section>
+      </header>
 
       {vms.error && (
         <p className={styles.error} role="alert">
@@ -48,6 +50,7 @@ export function ConsolePage() {
       <div className={styles.picks} role="tablist" aria-label="콘솔을 열 VM">
         {items.map((vm) => {
           const role = roleOf(vm, drive);
+          const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
           const on = vm.vm_id === selected?.vm_id;
           return (
             <button
@@ -60,13 +63,20 @@ export function ConsolePage() {
               onClick={() => setParams({ vm: vm.vm_id }, { replace: true })}
             >
               <span className={styles.row}>
-                <b style={{ color: role?.color }}>{role?.title ?? vm.name}</b>
+                <b style={{ color: role?.color }}>{role?.vmLabel ?? capitalizeFirst(vm.name)}</b>
                 <span className={styles.grow} />
-                <StatusBadge health={STATE_HEALTH[vm.state]} label={STATE_LABEL[vm.state]} size="sm" />
+                <span className={styles.consoleStates}>
+                  <span className={styles.consoleAuthority} data-authority={authority.toLowerCase()}>
+                    {authority}
+                  </span>
+                  <span className={styles.consoleRuntime}>
+                    <StatusBadge health={STATE_HEALTH[vm.state]} label={STATE_LABEL[vm.state]} size="sm" />
+                  </span>
+                </span>
               </span>
               <span className={styles.eyebrow}>
-                {vm.name} · {osLabel(vm)}
-                {vm.guest_kind === 'zephyr' ? ' · 셸 없음(로그만)' : ''}
+                {role ? (role.driving ? 'Drive' : 'Infotainment') : capitalizeFirst(vm.name)} · {osLabel(vm)}
+                {vm.guest_kind === 'zephyr' ? ' · 로그 전용' : ''}
               </span>
             </button>
           );
@@ -75,9 +85,15 @@ export function ConsolePage() {
 
       {selected && (
         <Suspense fallback={<p className={styles.dim}>콘솔 준비 중…</p>}>
-          <ConsolePanel key={selected.vm_id} vm={selected} />
+          <ConsolePanel
+            key={selected.vm_id}
+            vm={selected}
+            displayName={selectedRole?.vmLabel ?? capitalizeFirst(selected.name)}
+            authority={selectedAuthority}
+          />
         </Suspense>
       )}
+      <RuntimeLogsPanel key={`logs-${selected?.vm_id ?? 'all'}`} vmId={selected?.vm_id} />
     </div>
   );
 }

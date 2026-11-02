@@ -15,7 +15,7 @@
 | 기본 CPU 배치 | Zephyr A→pCPU 1, B→2, dom0·일반 VM의 모든 vCPU→{0,3}. Credit2·기존 vCPU 수 유지 |
 | 외부 레이어 | [layers.lock](../../platform/yocto/layers.lock)의 6개 URL·commit |
 | Linux 원본 | [sources.lock.json](../../platform/guests/sources.lock.json)의 Ubuntu·Debian cloud image |
-| 기본 선택 | [default-templates.lock.json](../../platform/guests/default-templates.lock.json): Ubuntu·Debian 1.0.2, Network Starter 1.1.0 |
+| 기본 선택 | [default-templates.lock.json](../../platform/guests/default-templates.lock.json): Ubuntu·Debian 1.0.2, 실제 drive warm-lattice-lab 1.0.0-lab.1. Network Starter는 과거 지원 입력으로 유지 |
 | 기본 VM | Debian Interaction 1대 + Zephyr A/B 2대 |
 | Linux 게스트 | Paho·공용 MQTT 클라이언트·Agent, 8GiB root 디스크 |
 | Zephyr 게스트 | 1 vCPU·16MiB·GICv2, Xen Ethernet·DHCP·ICMP·협조형 stop/reboot |
@@ -231,7 +231,7 @@ PYTHONPATH="$ZEPHYR_TOOLS/python" \
 
 ## 3. Linux·Network Starter 템플릿 준비
 
-현재 선택한 게시본이 `RELEASE_ROOT`에 준비돼 있으면 아래 검증·선택 확정으로 이어간다. 새 게시본을 만드는 실행은 새 출력 경로를 사용한다. Linux의 준비 버전은 각 `recipe.json`, Zephyr의 앱 출처는 `network-starter.lock.json`을 따른다.
+현재 선택한 게시본이 `RELEASE_ROOT`에 준비돼 있으면 아래 검증·선택 확정으로 이어간다. 새 게시본은 새 출력 경로를 사용한다. Linux의 준비 버전은 각 `recipe.json`, 현재 drive 출처는 실제 `BUILD_RECEIPT.json`과 검증한 새 template manifest를 따른다. network-starter.lock은 과거 Starter 재현용이다.
 
 ### Ubuntu·Debian 준비
 
@@ -260,6 +260,22 @@ done
 이 경로에서 새 rootfs에 `python3-paho-mqtt`를 설치하고, 저장소의 기존 Agent installer를 호출한다. Python import·Agent enable·설치 영수증·커널/부트 자산을 검사한 번들이 게시된다. `template.json`의 `guest_agent`와 `/etc/xenova/agent-install.json`에 패키지 버전과 실제 소스·deb 해시가 기록된다.
 
 ### Zephyr Network Starter 빌드·게시
+
+현재 factory는 실제 AUTO/MANUAL 제품 `zephyr-drive-lattice-lab-arm64`를 선택한다.
+고정 SDK의 `build-xenova-drive-app.py --app drive --profile warm-lattice-lab` 산출물과
+`BUILD_RECEIPT.json`을 먼저 만든 뒤 다음 도구로 **새 경로**에 포장한다.
+
+```sh
+python3 -B platform/scripts/package-xenova-drive-template.py \
+  --build-root /absolute/completed-drive-build \
+  --output /absolute/new-template-release
+```
+
+도구는 현재 source fingerprint·ARM payload·실제 앱 profile을 검사하고 새 manifest hash를 반환한다.
+현재 선택 lock과 assembly example은 검증한 실제 결과에 연결돼 있다.
+공용 seed/firmware에는 VM 암호가 없고 host 첫 등록에서 UUID별로 공급한다.
+`lattice-lab-1`은 시험 차량 프로필이다. 전체 Linux template/이미지/SD 제작·실차 수락은 별도 승인 범위다.
+아래 Starter 절차는 기존 지원 자산의 재현/호환용이며 현재 drive를 Starter로 대체하는 방법이 아니다.
 
 ```bash
 run network-starter-build python3 -B \
@@ -341,11 +357,12 @@ for entry in lock["templates"]:
         directory = Path("linux")/entry["id"]/version
         manifest = release/directory/"template.json"
     else:
-        z = json.loads((repo/"platform/guests/zephyr/network-starter.lock.json").read_text())
-        version = z["version"]
-        directory = Path("zephyr")/z["id"]/version
+        directory = Path(entry["directory"])
         manifest = release/directory/"firmware.json"
-        entry["id"] = z["id"]
+        meta = json.loads(manifest.read_text())
+        assert meta["id"] == entry["id"] and meta["template_id"] == entry["template_id"]
+        assert meta["source"]["app"] == "xenova-drive" and meta["source"]["drive_profile"] == "warm-lattice-lab"
+        version = meta["template_version"]
     entry.update(version=version, directory=str(directory),
                  manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest())
     versions[entry["template_id"]] = version
@@ -479,6 +496,21 @@ bzcat "$WIC" >"$RUN/dom0.wic"
 `xen,xen-bootargs`와 `xen,dom0-bootargs` 두 속성만 대상으로 한다.
 소스 템플릿 검사·부분 패키지 통과와 실제 이미지·HDMI 전원 부팅 수락은 구분한다.
 
+MQTT 운영 설정은 `xenova-mqtt-broker` 패키지로 설치하며, `bitbake xenova-mqtt-broker`로
+부분 패키징·QA를 수행할 수 있다. 같은 이름의 `mosquitto.service` override·Xenova drop-in·설정·enable
+preset과 `xenova-broker`의 설치 바이트를 확인한다. 공통 이미지와 seed에는
+`/srv/xenova/mqtt`의 계정·암호·초기화 흔적을 넣지 않는다. 데이터 마운트와 내부 브리지 뒤에
+기동하며 외부 online 대기를 VM 자동 시작에 연결하지 않는다. 첫 계정 발급은
+[MQTT 최초 설정](cli-manager-spec.md#cmd-mqtt-init), EC2의 MQTT·FastAPI 직접 접속은
+[Tailnet 접속 설정](cli-manager-spec.md#cmd-tailscale-serve)을 따른다. 인증 후 background Serve를
+한 번 설정하며 공통 이미지에 장치 인증자료·개별 Serve 상태를 넣지 않는다.
+계정·ACL 정책은 `platform/deploy/mosquitto/etc/policy.json` 하나를 사용한다.
+로컬 개발 파일의 일치는 `python3 platform/deploy/mosquitto/scripts/render-policy.py --check`로
+검사한다. 제품 패키지는 공통 관리 모듈·정책을 설치하며 개발용 예시 UUID와 비밀번호를
+seed에 넣지 않는다. 새 VM 계정은 이미지 재빌드 없이 `xenova-broker add-account`로 추가한다.
+v1 drive와 v2 Telemetry는 다른 계정이며 새 Telemetry Bootstrap은 telemetry-UUID를 사용한다.
+기존 UUID 형식 v2 펌웨어·Bootstrap은 이 새 계정과 호환된다고 가정하지 않는다.
+
 고정 meta-networking에는 Tailscale 1.94.2가 있지만, 현재 이미지는 보안 수정이 포함된
 공식 ARM64 정적 릴리스 1.104.2를 meta-xenova recipe로 고정한다. TS-2026-013의 수정은
 Go 1.27.3에 포함되어 기존 고정 Go 1.26.8 빌드와 구분한다. 외부 레이어·공용 컴파일러는 바꾸지 않는다.
@@ -577,7 +609,7 @@ try:
         "import fastapi,uvicorn,pydantic,pydantic_core,paho.mqtt.client;"
         "import tty,termios,fcntl,websockets,dom0_manager,xenova_mqtt;"
         "import sys;sys.path.insert(0,'/usr/lib/xenova');"
-        "import xenova_management,xenova_execution,xenova_recovery,xenova_cpu;"
+        "import xenova_management,xenova_execution,xenova_recovery,xenova_cpu,xenova_broker;"
         "import dom0_manager.drivers.xentop,dom0_manager.recovery,dom0_manager.service_token"])
     graph(root, ["multi-user.target", "sshd.service", "xenova-vms.service",
                  "xenova-dom0-manager.service", "xenova-recovery-worker.service",
@@ -663,7 +695,7 @@ deploy = Path(os.environ["DEPLOY"])
 path = (deploy/"xenova-xen-bringup-image-raspberrypi4-64.rootfs.manifest").resolve()
 names = {line.split()[0] for line in path.read_text().splitlines() if line.strip()}
 required = {"xenova-platform", "xenova-bringup", "xenova-dom0-manager",
-    "xenova-mqtt-client", "python3-fastapi", "python3-uvicorn", "python3-paho-mqtt",
+    "xenova-mqtt-client", "xenova-mqtt-broker", "python3-fastapi", "python3-uvicorn", "python3-paho-mqtt",
     "python3-shell", "python3-terminal", "python3-websockets", "xen-tools-xl",
     "xen-tools-xenstat", "libxenmanage1", "mosquitto", "mosquitto-clients",
     "qemu-system-i386", "systemd-extra-utils", "tailscale", "tailscaled"}

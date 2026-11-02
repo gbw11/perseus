@@ -16,7 +16,6 @@ export function DashboardLayout() {
         <div>
           <span className={styles.sectionEyebrow}>OBSERVE · VM MONITORING</span>
           <h1 id="dashboard-title">VM Dashboard</h1>
-          <p>VM 3대의 상태와 자원, 로그를 한곳에서 확인합니다.</p>
         </div>
       </header>
       <nav className={styles.dashboardTabs} aria-label="VM Dashboard 메뉴">

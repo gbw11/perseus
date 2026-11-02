@@ -12,6 +12,8 @@ struct raw_bootstrap {
 	bool persistent_crash;
 	int port;
 	bool trusted_internal_plaintext;
+	char drive_profile[24],auto_instance_id[37],manual_instance_id[37];
+	char world_broker_ipv4[16],world_username[47],world_password[129],world_profile[65];int world_port;
 };
 #define FIELD(name) JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,name,JSON_TOK_STRING)
 static const struct json_obj_descr fields[]={
@@ -23,7 +25,15 @@ static const struct json_obj_descr fields[]={
 	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,display_name,JSON_TOK_STRING_BUF),
 	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,artifact_sha256,JSON_TOK_STRING_BUF),
 	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,build_id,JSON_TOK_STRING_BUF),
-	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,persistent_crash,JSON_TOK_TRUE)
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,persistent_crash,JSON_TOK_TRUE),
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,drive_profile,JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,auto_instance_id,JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,manual_instance_id,JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,world_broker_ipv4,JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,world_username,JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,world_password,JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,world_profile,JSON_TOK_STRING_BUF),
+	JSON_OBJ_DESCR_PRIM(struct raw_bootstrap,world_port,JSON_TOK_NUMBER)
 };
 #undef FIELD
 static int copy(char *out,size_t capacity,const char *in)
@@ -31,11 +41,22 @@ static int copy(char *out,size_t capacity,const char *in)
 	if (!in || strlen(in)>=capacity) { return -EOVERFLOW; }
 	memcpy(out,in,strlen(in)+1);return 0;
 }
-int xt_bootstrap_decode(char *json,size_t bytes,const char *own_vm_id,struct xt_bootstrap *out)
+bool xt_bootstrap_account_matches(const char *username,const char *vm_id,const char *channel)
+{
+	if (!username || !xt_uuid_valid(vm_id)) { return false; }
+	if (channel && !strcmp(channel,"xenova-drive")) { return !strcmp(username,vm_id); }
+	if (channel && strcmp(channel,"xenova-telemetry")) { return false; }
+	return !strncmp(username,"telemetry-",10) && !strcmp(username+10,vm_id);
+}
+
+int xt_bootstrap_decode_channel(char *json,size_t bytes,const char *own_vm_id,
+			       const char *channel,struct xt_bootstrap *out)
 {
 	if(!out)return -EINVAL;
 	memset(out,0,sizeof(*out));
 	if (!json || !xt_uuid_valid(own_vm_id)) { return -EINVAL; }
+	bool drive = channel && !strcmp(channel,"xenova-drive");
+	if (channel && !drive && strcmp(channel,"xenova-telemetry")) { return -EINVAL; }
 	for(size_t i=0;i+1<bytes;i++)if(json[i]=='\\'){
 	 if(json[i+1]=='u')return -EPROTO;
 	 ++i;
@@ -60,10 +81,17 @@ int xt_bootstrap_decode(char *json,size_t bytes,const char *own_vm_id,struct xt_
 	 for(const char *p=raw.artifact_sha256;*p;p++)if(!((*p>='0'&&*p<='9')||(*p>='a'&&*p<='f')))return -EINVAL;
 	}
 	if (strcmp(own_vm_id,raw.vm_id) || raw.port<1 || raw.port>65535 || !raw.password[0] ||
-	    strcmp(raw.username,own_vm_id) || !raw.trusted_internal_plaintext) { return -EACCES; }
+	    !xt_bootstrap_account_matches(raw.username,own_vm_id,channel) ||
+	    !raw.trusted_internal_plaintext) { return -EACCES; }
 	if (!xt_uuid_valid(raw.boot_id) || !xt_uuid_valid(raw.publisher_id)) { return -EINVAL; }
 	bool bound=raw.host_boot_id[0] || raw.execution_id[0] || raw.receipt_id[0];
 	if (bound && (!xt_uuid_valid(raw.host_boot_id) || !xt_uuid_valid(raw.execution_id) || !xt_uuid_valid(raw.receipt_id))) { return -EINVAL; }
+	bool apps=raw.drive_profile[0]||raw.auto_instance_id[0]||raw.manual_instance_id[0];
+	if(apps&&(strcmp(raw.drive_profile,"warm-drive-1")||!xt_uuid_valid(raw.auto_instance_id)||
+	   !xt_uuid_valid(raw.manual_instance_id)||!strcmp(raw.auto_instance_id,raw.manual_instance_id)))return -EINVAL;
+	unsigned world=(unsigned)((found>>19)&31);
+	if(world&&(world!=31||!drive||!apps||!raw.world_broker_ipv4[0]||!raw.world_username[0]||!raw.world_password[0]||
+	   !raw.world_profile[0]||raw.world_port<1||raw.world_port>65535))return -EINVAL;
 	int rc;
 #define COPY(dst,src) do { rc=copy(dst,sizeof(dst),src);if (rc) { memset(out,0,sizeof(*out));return rc; } } while (0)
 	COPY(out->identity.vm_id,raw.vm_id);COPY(out->identity.boot_id,raw.boot_id);
@@ -73,6 +101,15 @@ int xt_bootstrap_decode(char *json,size_t bytes,const char *own_vm_id,struct xt_
 	COPY(out->hostname,raw.hostname);COPY(out->display_name,raw.display_name);
 	COPY(out->artifact_sha256,raw.artifact_sha256);COPY(out->build_id,raw.build_id);
 	out->persistent_crash=raw.persistent_crash;
+	COPY(out->drive_profile,raw.drive_profile);COPY(out->auto_instance_id,raw.auto_instance_id);
+	COPY(out->manual_instance_id,raw.manual_instance_id);
+	COPY(out->world_broker_ipv4,raw.world_broker_ipv4);COPY(out->world_username,raw.world_username);
+	COPY(out->world_password,raw.world_password);COPY(out->world_profile,raw.world_profile);out->world_port=(uint16_t)raw.world_port;
 #undef COPY
 	out->port=(uint16_t)raw.port;out->trusted_internal_plaintext=true;return 0;
+}
+
+int xt_bootstrap_decode(char *json,size_t bytes,const char *own_vm_id,struct xt_bootstrap *out)
+{
+	return xt_bootstrap_decode_channel(json,bytes,own_vm_id,"xenova-telemetry",out);
 }

@@ -198,7 +198,7 @@ def copy_rtos_templates(data, entries):
 
 def copy_management_catalog(data):
     """새 조립 저장소에만 factory public ID/version 카탈로그를 준비한다."""
-    from xenova_catalog import describe
+    from xenova_catalog import describe,DEFAULT_IDS,deployment_version
     from artifact_io import publish
     locked=json.loads((ROOT/'platform/guests/default-templates.lock.json').read_text())['templates']
     selected={e['id']:e for e in locked}
@@ -207,12 +207,18 @@ def copy_management_catalog(data):
         if not parent.exists():
             continue
         for directory in parent.iterdir():
-            if directory.name.startswith('.') or directory.name not in selected:
+            if directory.name.startswith('.'):
                 continue
             manifest = directory / ('firmware.json' if (directory / 'firmware.json').exists() else 'template.json')
             meta = json.loads(manifest.read_text())
-            descriptor = {'schema_version':'1.0','template_id':selected[directory.name]['template_id'],
-                          'template_version':selected[directory.name]['version'],'guest_kind':kind,
+            chosen=selected.get(directory.name)
+            if chosen is None:
+                # 현재 기본 선택이 바뀌어도 지원하는 옛 조립 입력의 공개 호출을 보존한다.
+                if kind!='zephyr' or directory.name not in DEFAULT_IDS:continue
+                rtos.info(directory,sha(manifest))
+                chosen={'template_id':DEFAULT_IDS[directory.name],'version':deployment_version(meta)}
+            descriptor = {'schema_version':'1.0','template_id':chosen['template_id'],
+                          'template_version':chosen['version'],'guest_kind':kind,
                           'asset_directory':str(directory.relative_to(data)),
                           'manifest_sha256':sha(manifest),'source_template_id':meta['id']}
             describe(data, descriptor, full=True)
@@ -234,7 +240,7 @@ def copy_rtos_seeds(data, entries):
     network=entries[0]['metadata'].get('hardware_profile') == zephyr.NET_PROFILE
     # Current config selects the new immutable template. Legacy input bundles remain
     # readable for rerunning old receipts; no existing store is migrated here.
-    allowed={'xenova-zephyr-network-starter-1.1.0','xenova-zephyr-starter-1.0.0',
+    allowed={'xenova-zephyr-drive-lattice-lab-1.0.0','xenova-zephyr-network-starter-1.1.0','xenova-zephyr-starter-1.0.0',
              'zephyr-4.4.0-xenvm'}
     if template not in allowed:
         raise ValueError('unknown immutable Zephyr factory template')
@@ -244,6 +250,8 @@ def copy_rtos_seeds(data, entries):
     manager=Manager(Platform(data,data/'.assembly-runtime',defaults_path=FILES/'defaults.json'))
     for default in defaults:
         metadata={k:default[k] for k in ('template_id','template_version','display_name') if k in default}
+        metadata['template_id']=entries[0]['metadata'].get('template_id',
+            xenova_catalog.DEFAULT_IDS.get(template,metadata.get('template_id')))
         metadata['template_version']=xenova_catalog.deployment_version(entries[0]['metadata'])
         if network:
             metadata.update(mac='02:00:00:00:00:00',ipv4=manager._allocate_ip({},reservations),
@@ -326,8 +334,13 @@ def platform_root_ok(root):
                 'etc/systemd/journald.conf.d/20-xenova.conf': FILES / 'xenova-journald.conf',
                 'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
     for name in ('xenova_boot_status.py','xenova_boot_progress.py','xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
-                 'xenova_cpu.py','xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py'):
+                 'xenova_cpu.py','xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py','xenova_preparation.py',
+                 'xenova_provisioning.py','xenova_guest_profile.py','xenova_registration.py'):
         expected['usr/lib/xenova/'+name] = FILES/name
+    expected['usr/lib/xenova/xenova_broker.py']=ROOT/'platform/deploy/mosquitto/scripts/xenova_broker.py'
+    expected['usr/share/xenova/mqtt/policy.json']=ROOT/'platform/deploy/mosquitto/etc/policy.json'
+    expected['usr/lib/xenova/provision_xenova_telemetry.py']=ROOT/'platform/scripts/provision-xenova-telemetry.py'
+    expected['usr/sbin/xenova-world-install']=FILES/'xenova-world-install'
     expected['usr/lib/xenova/artifact_io.py'] = ROOT/'platform/first-install/artifact_io.py'
     expected['usr/sbin/xenova-boot-status'] = FILES/'xenova-boot-status'
     expected['usr/sbin/xenova-wifi'] = FILES/'xenova-wifi'
@@ -584,6 +597,8 @@ def source_fingerprints():
                for p in sorted((ROOT/'platform/yocto/meta-xenova/recipes-core'/name).rglob('*')) if p.is_file()),
              *sorted(p for p in FILES.iterdir() if p.is_file()),
              ROOT / 'platform/scripts/verify-xenova-runtime-artifacts.py', ROOT / 'platform/scripts/package-xenova-firmware.py',
+             ROOT / 'platform/scripts/package-xenova-drive-template.py',ROOT/'platform/scripts/build-xenova-drive-app.py',
+             ROOT / 'platform/deploy/mosquitto/scripts/xenova_broker.py',ROOT/'platform/deploy/mosquitto/etc/policy.json',
              ROOT / 'platform/scripts/update-xenova-guest-ssh.py', ROOT / 'platform/scripts/collect-xenova-guest-evidence.py',
              *sorted((ROOT / 'platform/guests/zephyr/starter-app').rglob('*.*')),
              ROOT / 'platform/yocto/meta-xenova/recipes-extended/xen/xen_4.21.bbappend',

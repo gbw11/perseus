@@ -5,6 +5,7 @@ import { Button, Card } from '@xenova/ui';
 import { useEffect, useRef, useState } from 'react';
 import { ConsoleTransport, type ConsoleState } from '../api/console';
 import type { Vm } from '../api/types';
+import { capitalizeFirst } from '../format';
 import styles from './ConsolePanel.module.css';
 
 const LABEL: Record<ConsoleState, string> = {
@@ -16,10 +17,21 @@ const LABEL: Record<ConsoleState, string> = {
   error: '연결 오류',
 };
 
-export function ConsolePanel({ vm }: { vm: Vm }) {
+export type ConsoleAuthority = 'ACTIVE' | 'STANDBY' | 'UNKNOWN' | 'INFOTAINMENT';
+
+export function ConsolePanel({
+  vm,
+  displayName,
+  authority,
+}: {
+  vm: Vm;
+  displayName?: string;
+  authority?: ConsoleAuthority;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const transport = useRef<ConsoleTransport | null>(null);
   const terminal = useRef<Terminal | null>(null);
+  const consoleName = displayName ?? capitalizeFirst(vm.name);
   const [status, setStatus] = useState<{ state: ConsoleState; message: string }>({
     state: 'idle',
     message: '연결 버튼을 눌러 이 VM의 콘솔을 여세요.',
@@ -47,7 +59,7 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(element);
-    term.textarea?.setAttribute('aria-label', `${vm.name} 터미널 입력`);
+    term.textarea?.setAttribute('aria-label', `${consoleName} 터미널 입력`);
     terminal.current = term;
     let pendingOutput = 0;
     let disposed = false;
@@ -99,7 +111,7 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
       transport.current = null;
       terminal.current = null;
     };
-  }, [vm.vm_id, vm.name, vm.guest_kind]);
+  }, [vm.vm_id, vm.name, vm.guest_kind, consoleName]);
 
   useEffect(() => {
     if (!available) transport.current?.disconnect();
@@ -109,10 +121,15 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
   const closing = status.state === 'closing';
   return (
     <Card title="웹 콘솔">
-      <section aria-label={`${vm.name} 콘솔`} className={styles.panel}>
+      <section aria-label={`${consoleName} 콘솔`} className={styles.panel}>
         <div className={styles.toolbar}>
           <div className={styles.identity}>
-            <strong>{vm.name}</strong>
+            <strong>{consoleName}</strong>
+            {authority && (
+              <span className={styles.authority} data-authority={authority.toLowerCase()}>
+                {authority}
+              </span>
+            )}
             <span className={styles.badge} data-state={status.state}>
               {LABEL[status.state]}
             </span>
@@ -143,11 +160,10 @@ export function ConsolePanel({ vm }: { vm: Vm }) {
         </p>
         {vm.guest_kind === 'zephyr' && (
           <p className={styles.hint}>
-            Zephyr Starter는 부팅 안내 후 대기합니다. 새 로그가 없으면 화면이 비어 있을 수 있으며 현재
-            펌웨어에는 셸이 없습니다.
+            Zephyr VM 콘솔은 로그 전용입니다. 새 로그가 없으면 화면이 비어 있을 수 있습니다.
           </p>
         )}
-        <div data-theme="dark" className={styles.screen}>
+        <div data-theme="xenova" className={styles.screen}>
           <div ref={host} className={styles.terminal} />
         </div>
         <p className={styles.hint}>로그인은 게스트 계정을 사용합니다. 연결 해제는 VM을 종료하지 않습니다.</p>

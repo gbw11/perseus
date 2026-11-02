@@ -13,7 +13,7 @@ import com.xenova.backend.agent.domain.InventoryReport;
 import com.xenova.backend.agent.domain.NetworkInterface;
 import com.xenova.backend.template.domain.GuestKind;
 import com.xenova.backend.vm.domain.CreateVmCommand;
-import com.xenova.backend.vm.domain.VmControlPort;
+import com.xenova.backend.vm.infrastructure.Dom0ManagerClient;
 import com.xenova.backend.vm.domain.VmRecord;
 import com.xenova.backend.vm.domain.VmRecordRepository;
 import com.xenova.backend.vm.domain.VmRuntime;
@@ -44,7 +44,7 @@ class VmListApiIntegrationTest {
     private ObjectMapper objectMapper;
 
     @MockitoBean
-    private VmControlPort vmControlPort;
+    private Dom0ManagerClient vmControlPort;
 
     @Autowired
     private VmRecordRepository vmRecordRepository;

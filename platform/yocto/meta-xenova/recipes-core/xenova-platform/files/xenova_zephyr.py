@@ -172,7 +172,9 @@ def bundle_info(directory, expected=None):
     if manifest == 'firmware.json' and not re.search(
             r'^#define KERNEL_VERSION_STRING\s+"4\.4\.0"\s*$', asset(directory, 'zephyr.version.h').read_text(), re.M):
         raise PlatformError('firmware build version header must declare Zephyr 4.4.0')
-    return {'manifest': manifest, 'revision': digest, 'version': version,
+    from xenova_guest_profile import from_manifest
+    profile=from_manifest(meta,config=asset(directory,'zephyr.config').read_text())
+    return {'manifest': manifest, 'revision': digest, 'version': version,'provisioning_profile':profile,
             'sha256': meta['files']['zephyr.bin']['sha256'], 'source': source,
             'logical_bytes': total, 'payloads': sorted(payloads),
             **({'hardware_profile':NET_PROFILE, 'capabilities':NET_CAPABILITIES} if network else {})}
@@ -231,7 +233,23 @@ def copy_revision(source, parent, expected):
     return info
 
 
-def new_instance(data, key, template, records, *, autostart=False, board_shutdown_policy='refuse', registry='instances', seed=False, identity=None, workspace_path=None, metadata=None):
+class PreparedFirmware:
+    """검증한 private firmware를 같은 대상 소유 구간에서 게시한다. 해시 cache가 아니다."""
+    def __init__(self, record, stage, output):
+        self.record,self.stage,self.output=copy.deepcopy(record),stage,output
+        self.facts=self._facts()
+
+    def _facts(self):
+        return {str(p.relative_to(self.stage)):(s.st_dev,s.st_ino,s.st_size,s.st_mode,s.st_mtime_ns,s.st_ctime_ns)
+                for p in [self.stage,*self.stage.rglob('*')] for s in [p.lstat()]}
+
+    def publish(self):
+        if (self._facts()!=self.facts or json.loads((self.stage/'instance.json').read_text())!=self.record):
+            raise PlatformError('private firmware changed during credential preparation')
+        publish(self.stage,self.output);sync_directory(self.output.parent)
+
+
+def new_instance(data, key, template, records, *, autostart=False, board_shutdown_policy='refuse', registry='instances', seed=False, identity=None, workspace_path=None, metadata=None, private=False):
     """신규 인스턴스만 생성한다. seed는 새 조립 저장소에서만 호출한다."""
     if board_shutdown_policy not in ('graceful', 'refuse', 'force-allowed'):
         raise PlatformError('invalid Zephyr board shutdown policy')
@@ -256,6 +274,8 @@ def new_instance(data, key, template, records, *, autostart=False, board_shutdow
               'shutdown_policy': 'cooperative-xenstore' if network else 'explicit-force', 'board_shutdown_policy': board_shutdown_policy,
               'creation_origin': {'template': meta['id'], 'manifest_sha256': info['revision'], 'source': info['source']},
               'active_firmware': {k: info[k] for k in ('manifest', 'revision', 'version', 'sha256')}}
+    from xenova_guest_profile import from_manifest
+    record['provisioning_profile']=from_manifest(meta,config=asset(template,'zephyr.config').read_text())
     if metadata:
         record.update(metadata)
     if network and not all(record.get(k) for k in ('mac','ipv4','hostname')):
@@ -272,6 +292,7 @@ def new_instance(data, key, template, records, *, autostart=False, board_shutdow
     atomic_write(stage / 'instance.json', json.dumps(record, indent=2) + '\n')
     validate_instance(record, stage)
     sync_directory(stage)
+    if private:return PreparedFirmware(record,stage,output)
     publish(stage, output)
     sync_directory(output.parent)
     return record
@@ -279,14 +300,21 @@ def new_instance(data, key, template, records, *, autostart=False, board_shutdow
 
 def replace_firmware(directory, record, source, expected):
     """호출자가 공통 잠금과 정지 상태를 확인한 뒤 호출한다. 실패 시 기존 참조를 보존한다."""
+    updated = prepare_replacement(directory, record, source, expected)
+    atomic_write(directory / 'instance.json', json.dumps(updated, indent=2) + '\n')
+    return updated
+
+
+def prepare_replacement(directory, record, source, expected):
+    """동일 프로필 revision만 준비한다. 호출자가 대상 소유를 유지하고 채택 직전 재검사한다."""
     if not DIGEST.fullmatch(expected or ''):
         raise PlatformError('firmware replacement requires --sha256 of the manifest')
     validate_instance(record, directory)
     info = copy_revision(Path(source), directory / 'firmware', expected)
     updated = copy.deepcopy(record)
     updated['active_firmware'] = {k: info[k] for k in ('manifest', 'revision', 'version', 'sha256')}
+    updated['provisioning_profile']=info['provisioning_profile']
     validate_instance(updated, directory)
-    atomic_write(directory / 'instance.json', json.dumps(updated, indent=2) + '\n')
     return updated
 
 

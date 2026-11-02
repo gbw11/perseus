@@ -3,6 +3,18 @@
   height: 24px;
   width: auto;
 }
+.brandLink {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-3);
+  color: inherit;
+  text-decoration: none;
+}
+.brandLink:focus-visible {
+  border-radius: var(--x-radius-sm);
+  outline: 2px solid var(--x-primary);
+  outline-offset: 4px;
+}
 .brandText {
   font-family: var(--x-font-mono);
   font-size: 10px;
@@ -77,6 +89,12 @@
 }
 .dashboardTabs a[aria-current='page'] {
   border-bottom-color: var(--x-primary);
+  color: var(--x-primary);
+}
+.dashboardTabs a:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--x-primary) 7%, transparent);
+  box-shadow: inset 0 -2px var(--x-primary);
   color: var(--x-primary);
 }
 .dashboardBody {

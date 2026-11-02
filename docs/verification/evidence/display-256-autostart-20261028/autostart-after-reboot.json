@@ -1,0 +1,335 @@
+{
+  "boot_id": "a3fc3b67-2fcf-46c1-88dd-29255c169f21",
+  "tryboot_flag": 0,
+  "uptime": "120.50 179.57",
+  "kiosk_status": {
+    "schema_version": 1,
+    "layout_epoch": "400cc91c-2748-4800-b58a-ed515f35830e",
+    "backend": "x11",
+    "updated_monotonic": 120.003482166,
+    "outputs": {
+      "monitor-1": {
+        "status": "mapped",
+        "physical_verified": true,
+        "connector": "HDMI-1",
+        "rectangle": [
+          0,
+          0,
+          1280,
+          720
+        ],
+        "renderer_alive": true,
+        "applied_revision": 1,
+        "desired_render_revision": "7dfbc22b20aa73a2db84",
+        "render_revision": "7dfbc22b20aa73a2db84",
+        "dom_revision": 1
+      },
+      "monitor-2": {
+        "status": "mapped",
+        "physical_verified": true,
+        "connector": "HDMI-2",
+        "rectangle": [
+          1280,
+          0,
+          1280,
+          720
+        ],
+        "renderer_alive": true,
+        "applied_revision": 1,
+        "desired_render_revision": "7dfbc22b20aa73a2db84",
+        "render_revision": "7dfbc22b20aa73a2db84",
+        "dom_revision": 1
+      }
+    }
+  },
+  "fresh": true,
+  "new_epoch": true,
+  "ready": true,
+  "enabled": {
+    "code": 0,
+    "out": "enabled\n",
+    "err": ""
+  },
+  "services": {
+    "xenova-display.target": {
+      "code": 0,
+      "out": "ActiveState=active\nSubState=active\n",
+      "err": ""
+    },
+    "xenova-display-feed.service": {
+      "code": 0,
+      "out": "ActiveState=active\nSubState=running\nMainPID=1110\nResult=success\nNRestarts=0\n",
+      "err": ""
+    },
+    "xenova-display-graphics.service": {
+      "code": 0,
+      "out": "ActiveState=active\nSubState=running\nMainPID=520\nResult=success\nNRestarts=0\n",
+      "err": ""
+    },
+    "xenova-display-kiosk.service": {
+      "code": 0,
+      "out": "ActiveState=active\nSubState=running\nMainPID=1112\nResult=success\nNRestarts=0\n",
+      "err": ""
+    },
+    "xenova-dom0-manager.service": {
+      "code": 0,
+      "out": "ActiveState=active\nSubState=running\nMainPID=1124\nResult=success\nNRestarts=0\n",
+      "err": ""
+    }
+  },
+  "xen": {
+    "code": 0,
+    "out": "Name                                        ID   Mem VCPUs\tState\tTime(s)\nDomain-0                                     0  1024     4     r-----     172.8\ndebian-dev                                   1   512     1     -b----      14.3\nzephyr-drive-a                               2    16     1     -b----       0.7\nzephyr-drive-b                               3    16     1     -b----       0.7\n",
+    "err": ""
+  },
+  "failed": {
+    "code": 0,
+    "out": "  UNIT LOAD ACTIVE SUB DESCRIPTION\n\n0 loaded units listed.\n",
+    "err": ""
+  },
+  "listeners": {
+    "code": 0,
+    "out": "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\nLISTEN 0      2048       127.0.0.1:8082      0.0.0.0:*   \nLISTEN 0      2048       127.0.0.1:8081      0.0.0.0:*   \nLISTEN 0      128          0.0.0.0:22        0.0.0.0:*   \nLISTEN 0      128             [::]:22           [::]:*   \n",
+    "err": ""
+  },
+  "boot_config_sha256": "9f8dc2146b654152fc7f1a1388de6915a7f8d57257d9d1400c0686c99eb81557",
+  "drm": [
+    {
+      "name": "card0-HDMI-A-1",
+      "status": "connected",
+      "edid_sha256": "92a52d12e80b125e5d1d8a90c1acc772e6303e03a79961f98cea844e44e643f6"
+    },
+    {
+      "name": "card0-HDMI-A-2",
+      "status": "connected",
+      "edid_sha256": "ce1acb6e187b736d79d8103859f765f9f970863ad45b38fad07f2be5cb4c0275"
+    }
+  ],
+  "feed_unauthenticated": {
+    "status": 401
+  },
+  "feed_authenticated": {
+    "status": 200
+  },
+  "presentation": {
+    "schema_version": 1,
+    "type": "display.presentation",
+    "policy_epoch": "2941e877-45ee-4a88-ac9b-ea472eac6ea0",
+    "revision": 1,
+    "render_revision": "7dfbc22b20aa73a2db84",
+    "outputs": [
+      {
+        "output_id": "monitor-1",
+        "view": "overview",
+        "screen": "instrument",
+        "selection": "pinned",
+        "vm_id": null,
+        "reason": "차량 계기판 표시",
+        "renderer_ack": {
+          "policy_epoch": "2941e877-45ee-4a88-ac9b-ea472eac6ea0",
+          "revision": 1,
+          "render_revision": "7dfbc22b20aa73a2db84",
+          "stage": "dom_rendered",
+          "age_ms": 990
+        }
+      },
+      {
+        "output_id": "monitor-2",
+        "view": "detail",
+        "screen": "infotainment",
+        "selection": "pinned",
+        "vm_id": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+        "reason": "운영자가 선택한 VM 유지",
+        "renderer_ack": {
+          "policy_epoch": "2941e877-45ee-4a88-ac9b-ea472eac6ea0",
+          "revision": 1,
+          "render_revision": "7dfbc22b20aa73a2db84",
+          "stage": "dom_rendered",
+          "age_ms": 134
+        }
+      }
+    ],
+    "decisions": {
+      "64b1ab38-89cc-4454-8d94-b8201f4cdd33": {
+        "kind": "app_waiting",
+        "label": "VM 실행 중 · 앱 상태 미확인",
+        "tone": "warning"
+      },
+      "a77fa3fc-64e5-4d66-8225-2a49920bda2a": {
+        "kind": "app_waiting",
+        "label": "VM 실행 중 · 앱 상태 미확인",
+        "tone": "warning"
+      },
+      "055226af-b876-4707-8b5d-99e7f33ad3d7": {
+        "kind": "app_waiting",
+        "label": "VM 실행 중 · 앱 상태 미확인",
+        "tone": "warning"
+      }
+    },
+    "state": {
+      "schema_version": 1,
+      "type": "display.state",
+      "source_epoch": "2941e877-45ee-4a88-ac9b-ea472eac6ea0",
+      "sequence": 95,
+      "generated_at": "2026-10-28T08:12:10.128+00:00",
+      "mqtt_connected": false,
+      "binding_scope": "deployment",
+      "mqtt_subscriptions": {},
+      "vms": [
+        {
+          "vm_id": "64b1ab38-89cc-4454-8d94-b8201f4cdd33",
+          "role": "primary_drive",
+          "app_id": "autonomous",
+          "run_id": "2941e877-45ee-4a88-ac9b-ea472eac6ea0:2",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-28T08:12:08.657+00:00",
+              "observed_at": null,
+              "age_ms": 1470,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "untracked"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "a77fa3fc-64e5-4d66-8225-2a49920bda2a",
+          "role": "backup_drive",
+          "app_id": "manual",
+          "run_id": "2941e877-45ee-4a88-ac9b-ea472eac6ea0:3",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "zephyr",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": false,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-28T08:12:08.657+00:00",
+              "observed_at": null,
+              "age_ms": 1470,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "untracked"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "unsupported"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        },
+        {
+          "vm_id": "055226af-b876-4707-8b5d-99e7f33ad3d7",
+          "role": "interaction",
+          "app_id": "message-board",
+          "run_id": "2941e877-45ee-4a88-ac9b-ea472eac6ea0:1",
+          "guest_boot_id": null,
+          "xen_state": "running",
+          "operation": null,
+          "os": {
+            "expected": "debian",
+            "observed": null,
+            "match": null,
+            "evidence": null,
+            "current_run_verified": false
+          },
+          "app_state": "unknown",
+          "reported_app_state": null,
+          "agent_supported": true,
+          "sources": {
+            "xen": {
+              "received_at": "2026-10-28T08:12:08.657+00:00",
+              "observed_at": null,
+              "age_ms": 1470,
+              "status": "fresh"
+            },
+            "app": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "untracked"
+            },
+            "agent": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "untracked"
+            },
+            "inventory": {
+              "status": "unknown",
+              "age_ms": null,
+              "subscription_status": "untracked"
+            }
+          },
+          "screen_source": {
+            "kind": "status",
+            "handle": null
+          }
+        }
+      ],
+      "drive": {
+        "active_vm_id": null,
+        "mode": "unknown",
+        "ai_status": "unknown",
+        "source": {
+          "status": "unknown",
+          "age_ms": null,
+          "subscription_status": "untracked"
+        }
+      }
+    }
+  },
+  "journal": {
+    "code": 0,
+    "out": "Starting Xenova dedicated KMS X11 session...\nStarted Xenova dedicated KMS X11 session.\nStarted Xenova local display feed (read-only Xen and existing MQTT).\nStarted Xenova vehicle two-monitor kiosk.\n",
+    "err": ""
+  }
+}

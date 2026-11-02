@@ -72,6 +72,7 @@ class VmObservation:
     execution_id: str | None = None
     expected_app_boot_id: str | None = None
     expected_app_instance_id: str | None = None
+    expected_app_instances: dict[str,str] | None = None  # explicit warm profile only
 
     @property
     def eligible(self) -> bool:

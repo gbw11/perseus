@@ -1,0 +1,14 @@
+{
+  "sources": {
+    "debian-vm3": {
+      "vm_id": "00000000-0000-4000-8000-000000000003",
+      "components": ["xenova-agent.service", "interaction-app.service"],
+      "token_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "jetson": {
+      "vm_id": null,
+      "components": ["perception.service"],
+      "token_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}

@@ -26,7 +26,7 @@ def install_error_handlers(app: FastAPI) -> None:
     async def on_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
         # 클라이언트 연동 디버깅용: 거부한 원문을 로그에만 남긴다 (응답에는 넣지 않는다)
         try:
-            raw = (await request.body())[:300]
+            raw = b"<log payload omitted>" if request.url.path == "/api/v1/logs/ingest" else (await request.body())[:300]
         except Exception:  # noqa: BLE001 - 본문을 못 읽어도 응답은 내야 한다
             raw = b"<unreadable>"
         log.warning("400 InvalidArgument %s %s body=%r content-type=%s", request.method, request.url.path,

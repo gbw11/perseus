@@ -34,6 +34,10 @@ int mqtt_client_custom_transport_connect(struct mqtt_client *m)
 	if (s->close_error) { return s->close_error; }
 	s->fd=zsock_socket(NET_AF_INET,NET_SOCK_STREAM,NET_IPPROTO_TCP);
 	if (s->fd<0) { return -errno; }
+#if defined(CONFIG_XENOVA_MQTT_TCP_NODELAY)
+	int no_delay=1;
+	if(zsock_setsockopt(s->fd,NET_IPPROTO_TCP,ZSOCK_TCP_NODELAY,&no_delay,sizeof(no_delay))<0)return -errno;
+#endif
 	if (zsock_fcntl(s->fd,ZVFS_F_SETFL,ZVFS_O_NONBLOCK)<0) { return -errno; }
 	int rc=zsock_connect(s->fd,m->broker,sizeof(struct net_sockaddr_in));
 	if (rc<0 && errno!=EINPROGRESS && errno!=EALREADY) { return -errno; }

@@ -136,6 +136,8 @@ unit 실행의 성공을 현재 것으로 사용하지 않는다. `/run/xenova/b
 `agetty --reload`를 실행한다. `/etc/issue`나 기존 로그인 설정은 건드리지 않는다.
 
 
+배포 파일·의존성·설정 공급·내부 reader/writer 교체와 Gateway의 비활성 unit은 [배포 준비](deployment-readiness.md)를 따른다.
+
 ## 플랫폼 서비스와 준비 의존성
 
 | 서비스·자원 | 역할과 시작 조건 |
@@ -148,6 +150,7 @@ unit 실행의 성공을 현재 것으로 사용하지 않는다. `/run/xenova/b
 | `xenova-vm-shutdown.service` | backend/toolstack·저장소가 남아 있는 동안 guest를 정리할 독립 종료 guard |
 | `xenova-vms.service` | 등록 VM들의 autostart 판정과 시작을 한 batch로 실행 |
 | `xenova-host-admission.service` | autostart 뒤 이번 host의 admission barrier 초기화. 종료 시 새 시작·복구 차단 |
+| `mosquitto.service` | 내부 bridge·검증된 데이터 마운트와 최초 계정이 준비되면 broker 시작. 외부 네트워크 연결·소비자 인증은 VM 시작 조건이 아님 |
 | `tailscaled.service` | 검증된 `/srv/xenova`가 마운트된 뒤 원격 관리 데몬 시작. Tailnet 인증·인터넷 연결은 VM 시작 조건이 아님 |
 
 unit의 `After/Before`는 순서를 지정하고 `Requires/Wants`는 함께 시작할 의존성을
@@ -159,6 +162,29 @@ CPU 정책이 활성화되면 모든 수동/자동 start·reboot·recover_once�
 CPU 준비 서비스에는 VM으로 중지 전파를 일으키는 PartOf/BindsTo나 ExecStop이 없다.
 재시작이 실행 중 VM을 종료하거나 affinity를 초기화하지 않는다. 네트워크가 필요 없는
 게스트와 진단을 외부 네트워크 준비 뒤로 일괄 직렬화하지 않는다.
+
+### MQTT의 저장소·부팅 경계
+
+`xenova-mqtt-broker` 설정 패키지가 기존 `mosquitto.service`의 운영 설정과 enable을
+소유한다. Mosquitto 단독 패키지는 계속 기본 disable 상태다. 전체 unit override로
+외부 `network-online.target` 대기를 제외하며, 내부 bridge와 `/srv/xenova`만 요구한다.
+VM·CPU 준비·admission unit은 broker에 새 성공 의존성을 갖지 않는다.
+
+인증 자료는 공통 이미지에 넣지 않는다. 최초 계정이 없으면 broker 시작을 건너뛰고,
+운영자가 [계정 초기화](cli-manager-spec.md#cmd-broker)를 수행한 뒤 서비스를 시작한다.
+시작 전 검사는 실제 writable ext4 데이터 장치·계정 파일 권한·manifest를 확인한다.
+검증 실패를 익명 접속이나 rootfs의 새 계정으로 대체하지 않는다.
+
+Mosquitto listener는 localhost·내부 bridge에만 연다. EC2의 외부 접속은 보드의 기존
+`tailscaled`가 Tailnet IP의 1883·8081을 localhost MQTT·FastAPI로 전달한다.
+최초 인증 뒤 명시적으로 설정하는 [background Serve](cli-manager-spec.md#cmd-tailscale-serve)를
+사용하며 PC·SSH 터널·추가 daemon에 의존하지 않는다. 표시 피드 8082와 VM 사설망은 공개하지 않는다.
+broker 실행과 Agent/주행/Telemetry 소비자의 인증·실제 수신은 별도로 확인한다.
+서비스 재시작은 저장된 current 계정 세대를 재사용하며 VM 신원·의도·CPU 정책을 바꾸지 않는다.
+계정 작성은 xenova-broker 하나가 소유한다. 완성한 세대의 passwd·ACL을 고정 경로로 읽으며,
+저장 완료와 SIGHUP 요청·실제 인증을 구분한다. 과거 세대와 중단 기록을 지워 최초 상태로
+만들지 않는다. 기존 schema 1 또는 수동 배포 계정은 명시적인 전환 뒤 새 runtime을 시작한다.
+Tailnet이 늦다는 이유로 broker를 재시작하거나 주소를 반복 대기하지 않는다.
 
 ### Tailscale의 저장소·부팅 경계
 
@@ -179,6 +205,8 @@ cleanup이 기본 rootfs 상태 디렉터리를 새로 만드는 경로는 사�
 인증 URL 발급은 운영자가 `tailscale up --accept-dns=false`를 실행할 때만 요청한다.
 연결 단절 시에는 Tailscale 자체 재연결을 사용하며 별도 감시·인증 루프를 추가하지 않는다.
 기존 OpenSSH 인증을 그대로 쓰고 Tailscale SSH·subnet router·exit node·Funnel을 자동 활성화하지 않는다.
+MQTT·FastAPI의 background Serve 설정도 같은 장치 상태에 보존한다. Serve 연결이나 인증이
+실패해도 broker·관리 API·guest 부팅을 기다리게 하거나 해당 서비스를 재시작하지 않는다.
 
 VM factory UUID·실행 의도와 Tailscale 장치 키는 별개의 신원이다. 일반 재부팅·서비스
 재시작과 **데이터 파티션을 실제로 보존한** 이미지 갱신은 상태를 재사용한다.
@@ -188,6 +216,11 @@ factory seed·초기화/grow 정책은 이 통합으로 바꾸지 않는다.
 사용법·백업/복원과 중단 복구는 [접속 명세](cli-manager-spec.md#cmd-tailscale)를 따른다.
 
 ## 최초 등록과 매 부팅 준비
+
+일반 생성과 factory의 자격/등록-only 통지는 [공급 계약](../contracts/vm-provisioning-v1.md)을 따른다.
+factory의 UUID 계획 뒤 대상 lease를 유지하고 해시/guest I/O 동안 공통 관리 잠금을 반환한다.
+local 등록 완료 뒤 선택 통지 프로세스를 시작하며 HTTP 응답을 부팅/다른 VM 제어의 선행조건으로 두지 않는다.
+완료 boot/replay는 자동 통지 기회를 보충하지 않는다. broker는 첫 등록 뒤 기존 bridge/mount 조건으로 기동한다.
 
 최초 설치는 seed·카탈로그·identity plan으로 UUID/MAC와 자산을 확정한다. 중단 후에는
 같은 plan을 재개한다. 서비스 재시도나 최신 코드 설치를 이유로 신원을 다시 발급하거나
@@ -242,7 +275,7 @@ Zephyr 협조 reboot의 새 create는 새 실행 scope를 사용한다. 구형 �
 
 동시에 stop되는 unit은 시작 ordering의 역순으로 종료된다.
 
-1. host-admission의 host-quiesce가 새 시작·복구를 차단한다.
+1. host-admission의 host-quiesce가 새 시작·복구·Linux 준비 채택을 차단하고, 공통 실행 잠금 밖에서 활성 준비를 drain한다.
 2. 정상 활성 vms unit의 ExecStop이 shutdown-all로 기존 VM별 종료 정책을 적용한다.
 3. 독립 vm-shutdown guard가 guest 정리 경계를 유지한다.
 4. 실행 scope·backend/toolstack·저장소의 후속 정리가 진행된다.
@@ -250,6 +283,17 @@ Zephyr 협조 reboot의 새 create는 새 실행 scope를 사용한다. 구형 �
 scope의 `Before=xenova-vm-shutdown.service`는 종료 때 guard가 먼저 실행되게 한다.
 guard의 backend/toolstack/mount 의존성은 guest 정리 동안 필요한 기반을 유지한다.
 개별 scope 정리는 stop job의 역순 대기를 피하도록 신호와 최종 상태 확인을 사용한다.
+
+Linux 준비의 슬롯과 자식에게 전달된 원 실행 FD가 남아 있으면 저장소 해제를 진행하지 않는다.
+수락 전 lifecycle 검사도 `asset-<VM UUID>.lock` 대상 보호에 포함한다. `ensure_quiet/drain`은
+retire/restore/purge 실행자와 상속된 helper FD가 끝나기 전 저장소 해제를 거절한다.
+gate가 닫혔다 재열려도 검사 당시 barrier 사본과 달라진 실행은 늦게 게시하지 않는다.
+대상 lease → 공통 잠금 → 짧은 admission 순서와 실제 검증 범위는
+[lifecycle 소유 경계](management-boundaries.md#lifecycle의-대상-소유와-공통-잠금)를 따른다.
+슬롯이 풀려도 미완료 workspace의 자원 기록이 정리 미확정을 나타내면 거절한다.
+`xenova-vm poweroff/reboot-board/shutdown-all`의 준비 drain과 VM 정리는 같은 기존 90초
+예산을 사용한다. 준비 종료를 기다리며 공통 잠금을 계속 잡아 두지 않는다.
+이 guard는 미게시 자산을 자동 정리하거나 실패 operation을 종결하는 기능이 아니다.
 
 | 상황 | 종료 계약 |
 |---|---|
@@ -273,7 +317,7 @@ systemd 종료는 계속될 수 있어 남은 backend가 정리될 수 있다. �
 | DHCP | 15초 | service 준비와 호출자의 관리 deadline도 적용 |
 | autostart | 150초 | batch 전체 140초 |
 | vms/vm-shutdown 종료 | 각각 110초 | guest 정리 전체 90초 |
-| admission 종료 | 10초 | 새 시작·복구 차단 |
+| admission 종료 | 10초 | gate 차단과 Linux 준비 drain. 내부 9초로 반환 여유 1초를 남기며 unit 상한을 늘리지 않음 |
 
 unit 상한은 모든 선행 unit을 포함한 전원 부팅 상한이 아니다. fsync·커널 I/O를
 엄밀하게 선점하는 보장도 아니다. 개별 호출의 상위 대기/반환 예산은

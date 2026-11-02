@@ -1,0 +1,17 @@
+{
+  "scope": "HDMI0/card0-HDMI-A-1 cable disconnect/reconnect; no layout reapply or window reposition after hotplug",
+  "user_confirmation": "Reconnected and both screens normal",
+  "disconnect_observed": true,
+  "reconnect_observed": true,
+  "observed_disconnected_seconds": 11.17,
+  "final_bounds_match": {
+    "1": true,
+    "2": true
+  },
+  "framebuffer_restored": true,
+  "restoration_differing_bytes": 0,
+  "restored_active_vt": 1,
+  "feed_stopped": true,
+  "graphics_processes_stopped": true,
+  "other_port_hotplug_tested": false
+}

@@ -76,6 +76,9 @@ class Trace:
 
     def event(self, name, **values):
         if type(name) is str and _NAME.fullmatch(name):
+            if len(self.entries)>=self.max_events:
+                self.dropped+=1
+                return
             self._append({"kind": "event", "name": name,
                           "at_seconds": max(0.0, self._now()-self._origin),
                           "context": dict(self.context), "fields": _fields(values)})
@@ -117,10 +120,12 @@ class Trace:
                 total['calls'] += 1
                 total['errors'] += int(outcome == 'error')
                 total['inclusive_seconds'] += elapsed
-            self._append({"kind": "span", "name": name, "outcome": outcome,
-                "start_seconds": max(0.0, frame["start"]-self._origin),
-                "inclusive_seconds": elapsed, "exclusive_seconds": exclusive,
-                "context": dict(self.context), "fields": safe})
+            if len(self.entries)>=self.max_events:self.dropped+=1
+            else:
+                self._append({"kind": "span", "name": name, "outcome": outcome,
+                    "start_seconds": max(0.0, frame["start"]-self._origin),
+                    "inclusive_seconds": elapsed, "exclusive_seconds": exclusive,
+                    "context": dict(self.context), "fields": safe})
 
     def export(self):
         """복사본만 반환한다. 중첩 inclusive 합을 전체 소요시간으로 해석하지 않는다."""

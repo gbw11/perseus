@@ -39,11 +39,33 @@ def private_json(path):
         return json.load(stream), {"inode": st.st_ino, "mtime_ns": st.st_mtime_ns, "bytes": st.st_size}
 
 
-def credentials(path, vm_id):
+def credentials(path, vm_id, channel=None, *, for_reconciliation=False):
+    """Parse private credentials and bind their account to this VM.
+
+    The existing two-argument Coordinator API is channel-neutral. Explicit CLI
+    callers also check the intended channel here; the guest always checks its
+    trusted Store channel. Parsing an account does not grant broker permission.
+    """
     value, identity = private_json(path)
-    if set(value) != {"vm_id", "broker_ipv4", "port", "username", "password", "trusted_internal_plaintext"}:
+    validate_credentials(value,vm_id,channel,for_reconciliation=for_reconciliation)
+    return value,identity
+
+
+def validate_credentials(value,vm_id,channel=None,*,for_reconciliation=False):
+    """동일 private codec의 메모리 검사. 별도 broker 자격을 합칠 때도 검사 규칙을 재사용한다."""
+    required={"vm_id", "broker_ipv4", "port", "username", "password", "trusted_internal_plaintext"}
+    if not isinstance(value,dict) or set(value) not in (required,required|{'world'}):
         raise ValueError("credential input fields invalid")
-    if canonical(value["vm_id"]) != vm_id or value["username"] != vm_id:
+    if channel not in (None, "telemetry", "drive"):
+        raise ValueError("unsupported bootstrap channel")
+    expected = vm_id if channel == "drive" else "telemetry-" + vm_id
+    # Historical isolated-listener receipts may bind UUID accounts. Only the
+    # explicit reconciliation path can read them; it still checks the original
+    # payload hash, execution and Store value and never submits a new bootstrap.
+    allowed = {vm_id, "telemetry-" + vm_id} if channel is None else {expected}
+    if for_reconciliation and channel == "telemetry":
+        allowed.add(vm_id)
+    if canonical(value["vm_id"]) != vm_id or value["username"] not in allowed:
         raise ValueError("credential VM/account mismatch")
     if str(ipaddress.IPv4Address(value["broker_ipv4"])) != value["broker_ipv4"]:
         raise ValueError("numeric broker IPv4 required")
@@ -55,7 +77,18 @@ def credentials(path, vm_id):
     # Runtime provisioning uses printable ASCII, avoiding parser escape ambiguity.
     if not isinstance(password, str) or not 1 <= len(password) <= 128 or any(not 33 <= ord(c) <= 126 or c in '\\"' for c in password):
         raise ValueError("provisioned password encoding unsupported")
-    return value, identity
+    if 'world' in value:
+        world=value['world']
+        if channel=='telemetry' or value['username']!=vm_id or not isinstance(world,dict) or set(world)!={'broker_ipv4','port','username','password','profile','trusted_internal_plaintext'}:
+            raise ValueError('world input requires explicit drive credentials')
+        if str(ipaddress.IPv4Address(world['broker_ipv4']))!=world['broker_ipv4'] or type(world['port']) is not int or not 1<=world['port']<=65535:
+            raise ValueError('world broker address/port')
+        if world['username']!=vm_id or world['trusted_internal_plaintext'] is not True:
+            raise ValueError('world broker account/trust')
+        secret=world['password']
+        if not isinstance(secret,str) or not 1<=len(secret)<=128 or any(not 33<=ord(c)<=126 or c in '\\"' for c in secret):raise ValueError('world password encoding')
+        if not isinstance(world['profile'],str) or not 1<=len(world['profile'])<=64 or any(not (c.isascii() and (c.isalnum() or c in '-_.')) for c in world['profile']):raise ValueError('world profile')
+    return value
 
 
 def current(vm_id, *, deadline=None, guard=None):
@@ -304,7 +337,56 @@ def bootstrap_payload(context, credential, receipt, channel):
              "receipt_id": receipt['receipt_id']}
     if channel == 'telemetry':
         value.update(receipt.get('metadata', {}))
+    elif receipt.get('drive_profile')=='warm-drive-1':
+        apps=receipt['drive_apps']
+        if set(apps)!={'autonomous','manual'} or len(set(apps.values()))!=2:raise ValueError('invalid app identities')
+        value.update(drive_profile='warm-drive-1',auto_instance_id=canonical(apps['autonomous']),
+                     manual_instance_id=canonical(apps['manual']))
+    world=value.pop('world',None)
+    if world is not None:
+        if channel!='drive' or receipt.get('drive_profile')!='warm-drive-1':raise ValueError('world input requires warm drive profile')
+        value.update({'world_'+key:world[key] for key in ('broker_ipv4','port','username','password','profile')})
     return value
+
+
+def reinitialize_app(context,credential,source_identity,receipt_path,*,app,expected_instance,request_id,store,observe):
+    """Root-authorized app identity CAS, not a VM operation or forced thread stop.
+
+    Caller owns the existing receipt lock. Same request retries the same identity;
+    uncertain Store effects require existing reconciliation, never another UUID.
+    """
+    canonical(expected_instance);canonical(request_id)
+    if observe()!=context:raise ValueError('current execution required for app update/replay')
+    receipt,_=private_json(receipt_path)
+    if (app not in ('autonomous','manual') or getattr(store,'channel',None)!='drive' or
+        receipt.get('channel')!='drive' or receipt.get('drive_profile')!='warm-drive-1' or
+        receipt['context']!=context or receipt['credential_source']!=source_identity):
+        raise ValueError('current warm drive receipt required')
+    change=receipt.get('app_changes',{}).get(app)
+    if change is None and receipt.get('app_change',{}).get('app')==app:change=receipt['app_change']
+    if change and change['request_id']==request_id:
+        if change['app']!=app or change['expected_instance']!=expected_instance:raise ValueError('request input changed')
+        if receipt['phase']=='uncertain':raise ValueError('uncertain receipt requires reconciliation')
+        if receipt['phase']=='applied':return {'configured':True,'app':app,'instance_id':receipt['drive_apps'][app],'replayed':True}
+    else:
+        if receipt['phase']!='applied' or receipt['drive_apps'][app]!=expected_instance:
+            raise ValueError('app instance changed or prior update unresolved')
+        receipt={**receipt,'drive_apps':dict(receipt['drive_apps']),'phase':'prepared','store_call_returned':False,
+                 'pending_app':app,'app_update_base':dict(receipt['drive_apps'])}
+        receipt['drive_apps'][app]=str(uuid.uuid4())
+        receipt['app_changes']={**receipt.get('app_changes',{}),
+            app:{'request_id':request_id,'app':app,'expected_instance':expected_instance}}
+        save_receipt(receipt_path,receipt)
+    if observe()!=context:raise ValueError('execution changed before app update')
+    try:
+        store.apply(context,bootstrap_payload(context,credential,receipt,'drive'))
+        if observe()!=context:raise ValueError('execution changed during app update')
+    except (ValueError,OSError,subprocess.SubprocessError):
+        receipt['phase']='uncertain';receipt['store_call_returned']=getattr(store,'quiescent',False) is True
+        save_receipt(receipt_path,receipt);raise
+    receipt['phase']='applied';receipt['store_call_returned']=getattr(store,'quiescent',False) is True
+    save_receipt(receipt_path,receipt)
+    return {'configured':True,'app':app,'instance_id':receipt['drive_apps'][app],'replayed':False}
 
 
 def reconcile(context, credential, source_identity, receipt_path, *, store, observe, execute=False,
@@ -395,9 +477,11 @@ def reconcile(context, credential, source_identity, receipt_path, *, store, obse
 
 
 def provision(context, credential, source_identity, receipt_path, previous_path=None, store=None, observe=None,
-              channel="telemetry", guest_boot_receipt=None, metadata=None):
+              channel="telemetry", guest_boot_receipt=None, metadata=None,drive_profile=None):
     if channel not in ("telemetry", "drive") or getattr(store, "channel", "telemetry") != channel:
         raise ValueError("bootstrap channel/store mismatch")
+    if drive_profile not in (None,'verified-drive-1','warm-drive-1') or (channel!='drive' and drive_profile is not None):
+        raise ValueError('drive profile requires drive channel')
     shared_boot = None
     if channel=='telemetry' and metadata is None and isinstance(store,XenStore):
         if receipt_path.exists():
@@ -430,10 +514,14 @@ def provision(context, credential, source_identity, receipt_path, previous_path=
             raise ValueError("uncertain receipt requires inspection")
         if shared_boot and receipt["boot_id"] != shared_boot:
             raise ValueError("guest boot authority changed")
+        if drive_profile is not None and receipt.get('drive_profile','verified-drive-1')!=drive_profile:
+            raise ValueError('existing receipt profile cannot be silently changed')
     else:
         receipt = {"schema_version": "2.1-bootstrap", "metadata":metadata or {}, "channel": channel, "context": context, "credential_source": source_identity,
                    "boot_id": shared_boot or (previous["boot_id"] if previous else str(uuid.uuid4())),
                    "publisher_id": str(uuid.uuid4()), "receipt_id": str(uuid.uuid4()), "phase": "prepared"}
+        if channel=='drive' and drive_profile=='warm-drive-1':
+            receipt.update(drive_profile=drive_profile,drive_apps={app:str(uuid.uuid4()) for app in ('autonomous','manual')})
         save_receipt(receipt_path, receipt, True)
     bootstrap = bootstrap_payload(context, credential, receipt, channel)
     if metadata is not None and receipt.get('metadata',{})!=metadata:
@@ -479,6 +567,10 @@ def main(argv=None):
     parser.add_argument("--credentials-file", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--previous-receipt", type=Path)
+    parser.add_argument('--drive-profile',choices=('verified-drive-1','warm-drive-1'))
+    parser.add_argument('--reinitialize-app',choices=('autonomous','manual'),help='trusted app identity update; does not force stop')
+    parser.add_argument('--expected-app-instance',type=canonical)
+    parser.add_argument('--app-request-id',type=canonical,help='stable key reused after response loss')
     parser.add_argument("--guest-boot-receipt", type=Path,
                         help="drive only: applied telemetry receipt of the same guest execution")
     parser.add_argument("--expected-host-boot-id", type=canonical, required=True)
@@ -489,6 +581,12 @@ def main(argv=None):
     parser.add_argument('--timeout-ms', type=int, default=15000,
                         help='reconciliation observation budget, 1..15000; never extends an original write')
     args = parser.parse_args(argv)
+    if args.drive_profile is not None and (args.reconcile or args.reinitialize_app):
+        parser.error('--drive-profile selects initial provisioning, not reconciliation/app reset')
+    if args.reinitialize_app and (args.channel!='drive' or args.reconcile or args.previous_receipt or
+                                  not args.expected_app_instance or not args.app_request_id):
+        parser.error('app update requires drive channel, expected instance and stable request ID')
+    if not args.reinitialize_app and (args.expected_app_instance or args.app_request_id):parser.error('app update options require --reinitialize-app')
     if os.geteuid() != 0:
         parser.error("run on dom0 as root")
     parent = args.receipt.parent.lstat()
@@ -501,7 +599,8 @@ def main(argv=None):
     context = current(args.vm_id, deadline=deadline, guard=guard) if args.reconcile else current(args.vm_id)
     if context["host_boot_id"] != args.expected_host_boot_id or context["execution_id"] != args.expected_execution_id:
         raise ValueError("expected execution changed")
-    credential, identity = credentials(args.credentials_file, args.vm_id)
+    credential, identity = credentials(args.credentials_file, args.vm_id, args.channel,
+                                       for_reconciliation=args.reconcile)
     if args.reconcile:
         store = XenStore(args.channel)
         try:
@@ -524,9 +623,13 @@ def main(argv=None):
             raise ValueError("private receipt lock ownership/mode invalid")
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         store = XenStore(args.channel)
+        if args.reinitialize_app:
+            return reinitialize_app(context,credential,identity,args.receipt,app=args.reinitialize_app,
+                expected_instance=args.expected_app_instance,request_id=args.app_request_id,store=store,
+                observe=lambda:current(args.vm_id))
         return provision(context, credential, identity, args.receipt, args.previous_receipt,
                          store=store, observe=lambda: current(args.vm_id), channel=args.channel,
-                         guest_boot_receipt=args.guest_boot_receipt)
+                         guest_boot_receipt=args.guest_boot_receipt,drive_profile=args.drive_profile)
     finally:
         if store:
             store.close()

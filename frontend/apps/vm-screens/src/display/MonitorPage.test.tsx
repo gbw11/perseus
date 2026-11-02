@@ -19,16 +19,85 @@ function show(output = 'monitor-1', connected = true, p = presentationFixture())
     connected,
     error: connected ? null : '수집 연결 실패',
   });
-  return render(
+  return render(monitorTree(output));
+}
+
+function monitorTree(output: string) {
+  return (
     <MemoryRouter initialEntries={[`/display/${output}`]}>
       <Routes>
         <Route path="/display/:outputId" element={<MonitorPage />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
 describe('vehicle HDMI screens', () => {
+  describe.each(['monitor-1', 'monitor-2'])('%s state transitions', (output) => {
+    it.each([
+      ['stopped', '정지', 'muted'],
+      ['paused', '일시 정지', 'warning'],
+      ['operation', 'VM 작업 진행 중', 'warning'],
+      ['waiting', '상태 수신 대기', 'muted'],
+      ['stale', 'VM 상태 수신 지연 / 연결 끊김', 'warning'],
+    ] as const)('shows %s and removes its notice only after a normal decision', (kind, label, tone) => {
+      const p = presentationFixture();
+      const vm = p.state.vms[0]!;
+      vm.xen_state = kind === 'stopped' || kind === 'paused' ? kind : 'running';
+      p.decisions[vm.vm_id] = { kind, label, tone };
+      const view = show(output, true, p);
+      expect(screen.getByRole('status')).toHaveTextContent(`VM1 · ${label}`);
+      expect(screen.queryByText('복구 완료')).not.toBeInTheDocument();
+      if (output === 'monitor-2' && (kind === 'stopped' || kind === 'paused')) {
+        expect(screen.getByTestId('vm-VM1')).toHaveAttribute('data-running', 'false');
+      }
+      const normal = presentationFixture();
+      normal.state.vms[0]!.app_state = 'ready';
+      normal.state.vms[0]!.sources.app.status = 'fresh';
+      normal.decisions[vm.vm_id] = { kind: 'status', label: '앱 상태 수신 정상', tone: 'ok' };
+      vi.mocked(useDisplay).mockReturnValue({ presentation: normal, connected: true, error: null });
+      view.rerender(monitorTree(output));
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      expect(screen.queryByText(`VM1 · ${label}`)).not.toBeInTheDocument();
+      if (output === 'monitor-2') {
+        expect(screen.getByTestId('vm-VM1')).toHaveAttribute('data-running', 'true');
+        expect(screen.getByRole('article', { name: '게스트 콘텐츠' })).toHaveTextContent('앱 상태 수신 정상');
+      }
+    });
+  });
+  it('separates configured OS from a missing OS report despite fresh app heartbeat', () => {
+    const p = presentationFixture();
+    p.state.vms[0]!.sources.app.status = 'fresh';
+    show('monitor-2', true, p);
+    expect(screen.getByTestId('guest-os')).toHaveTextContent('설정 OS: Zephyr · OS 보고 미수신');
+  });
+  it('shows only the selected guest OS report and keeps unverified run binding explicit', () => {
+    const p = presentationFixture();
+    p.outputs[1]!.vm_id = p.state.vms[2]!.vm_id;
+    p.state.vms[2]!.os.observed = 'debian';
+    p.state.vms[2]!.sources.inventory.status = 'fresh';
+    show('monitor-2', true, p);
+    expect(screen.getByTestId('guest-os')).toHaveTextContent(
+      '설정 OS: Debian · OS 보고: Debian · 실행 연결 미검증',
+    );
+    expect(screen.getByTestId('guest-os')).not.toHaveTextContent('Zephyr');
+  });
+  it.each(['stale', 'disconnected'] as const)('does not present %s OS inventory as current', (status) => {
+    const p = presentationFixture();
+    p.state.vms[0]!.os.observed = 'zephyr';
+    p.state.vms[0]!.sources.inventory.status = status;
+    show('monitor-2', true, p);
+    expect(screen.getByTestId('guest-os')).toHaveTextContent('OS 보고 지연 · 현재 OS 미확인');
+    expect(screen.getByTestId('guest-os')).not.toHaveTextContent('OS 보고: Zephyr');
+  });
+  it('withholds the current OS report when display transport is disconnected', () => {
+    const p = presentationFixture();
+    p.state.vms[0]!.os.observed = 'zephyr';
+    p.state.vms[0]!.sources.inventory.status = 'fresh';
+    show('monitor-2', false, p);
+    expect(screen.getByTestId('guest-os')).toHaveTextContent('OS 보고 연결 미확인');
+    expect(screen.getByTestId('guest-os')).not.toHaveTextContent('OS 보고: Zephyr');
+  });
   it('does not carry a stale app error or current Xen claim into the vehicle screen', () => {
     const p = presentationFixture();
     p.state.vms[0]!.app_state = 'failed';

@@ -1,32 +1,99 @@
 .stack {
   position: fixed;
-  right: var(--x-space-5);
-  bottom: var(--x-space-5);
+  top: var(--x-space-5);
+  left: 50%;
   display: flex;
   flex-direction: column;
   gap: var(--x-space-2);
-  z-index: 1000;
+  align-items: center;
+  z-index: 1200;
+  transform: translateX(-50%);
 }
 .toast {
-  min-width: 240px;
-  max-width: 420px;
-  padding: var(--x-space-3) var(--x-space-4);
-  border-radius: var(--x-radius-sm);
-  background: var(--x-surface);
+  display: flex;
+  min-width: 340px;
+  max-width: min(520px, calc(100vw - 32px));
+  align-items: center;
+  gap: var(--x-space-3);
+  box-sizing: border-box;
+  padding: 14px 18px;
+  border: 1px solid color-mix(in srgb, var(--x-primary) 48%, var(--x-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--x-primary) 7%, var(--x-surface));
   color: var(--x-text);
-  border-left: 4px solid var(--x-primary);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 20%);
+  box-shadow: 0 14px 38px rgb(0 0 0 / 34%);
   font-size: var(--x-text-sm);
+  font-weight: 700;
+  line-height: 1.45;
+  animation: toastIn 0.2s ease-out;
+}
+.toast::before {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--x-primary) 18%, transparent);
+  color: var(--x-primary);
+  content: 'i';
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  font-weight: 900;
 }
 .ok {
-  border-left-color: var(--x-ok);
+  border-color: color-mix(in srgb, var(--x-ok) 52%, var(--x-border));
+  background: color-mix(in srgb, var(--x-ok) 9%, var(--x-surface));
+}
+.ok::before {
+  background: var(--x-ok-soft);
+  color: var(--x-ok);
+  content: '✓';
 }
 .fault {
-  border-left-color: var(--x-fault);
+  border-color: color-mix(in srgb, var(--x-fault) 52%, var(--x-border));
+  background: color-mix(in srgb, var(--x-fault) 9%, var(--x-surface));
+}
+.fault::before {
+  background: var(--x-fault-soft);
+  color: var(--x-fault);
+  content: '!';
 }
 .recovering {
-  border-left-color: var(--x-recovering);
+  border-color: color-mix(in srgb, var(--x-recovering) 52%, var(--x-border));
+}
+.recovering::before {
+  background: var(--x-recovering-soft);
+  color: var(--x-recovering);
+  content: '↻';
 }
 .stopped {
-  border-left-color: var(--x-stopped);
+  border-color: color-mix(in srgb, var(--x-stopped) 52%, var(--x-border));
+}
+.stopped::before {
+  background: color-mix(in srgb, var(--x-stopped) 16%, transparent);
+  color: var(--x-stopped);
+  content: '■';
+  font-size: 9px;
+}
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@media (max-width: 520px) {
+  .stack {
+    right: 16px;
+    left: 16px;
+    transform: none;
+  }
+  .toast {
+    width: 100%;
+    min-width: 0;
+  }
 }

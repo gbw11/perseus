@@ -1,6 +1,6 @@
 import { AppShell, Button } from '@xenova/ui';
 import logo from '@xenova/ui/assets/xenova-logo.png';
-import { NavLink, Outlet, useNavigate } from 'react-router';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router';
 import { useLogout } from '../api/queries';
 import { useSession } from '../auth';
 import { DriveProvider } from './DriveContext';
@@ -17,10 +17,14 @@ export function ConsoleLayout() {
     <DriveProvider>
       <AppShell
         brand={
-          <>
+          <Link
+            to="/dashboard/overview"
+            className={styles.brandLink}
+            aria-label="VM Dashboard Overview로 이동"
+          >
             <img src={logo} alt="Xenova" className={styles.logo} />
-            <small className={styles.brandText}>관리 콘솔</small>
-          </>
+            <small className={styles.brandText}>Admin Console</small>
+          </Link>
         }
         nav={
           <>

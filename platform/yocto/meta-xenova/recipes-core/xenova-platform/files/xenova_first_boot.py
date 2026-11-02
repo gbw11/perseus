@@ -203,7 +203,25 @@ class FirstBoot:
             if self.command(['sha256sum', directory / name]).split()[0] != spec['boot'][key]:
                 raise ValueError(f'factory boot asset mismatch: {name}')
 
-    def register(self):
+    def supply(self,record,common):
+        """UUID 계획 뒤 대상만 보호한다. 해시/guest I/O 동안 공통 관리 잠금은 반환한다."""
+        from contextlib import nullcontext
+        from xenova_vm import Platform
+        from xenova_preparation import request_output,AssetLease
+        from xenova_provisioning import ensure,apply_stopped_linux
+        platform=Platform(self.data,self.run)
+        path=self.data/'instances'/record['id']/'instance.json'
+        progress=self.data/'.first-install-state.json';before=read_json(progress)
+        with request_output(),AssetLease(platform,record['uuid'],'provision',None) as lease:
+            lease.guard()
+            with common.outside(platform) if common is not None else nullcontext():
+                if guest_kind(record)=='linux':apply_stopped_linux(platform,record,factory=True)
+                else:ensure(self.data,record)
+            lease.guard()
+            if read_json(path)!=record or read_json(progress)!=before:
+                raise ValueError('factory registration target changed during supply')
+
+    def register(self,*,common=None):
         self.verify_mount()
         factory = read_json(self.data / '.xenova-install.json')
         if factory.get('features') not in (FEATURES, LEGACY_FEATURES) or factory.get('schema') != 1:
@@ -225,8 +243,16 @@ class FirstBoot:
             raise ValueError('factory contract requires Zephyr firmware seeds')
         if current and (specs[0]['record'].get('template') != 'debian-13-20261015'
                         or specs[0]['record'].get('template_id') != 'debian-13-arm64'
-                        or any(s['record'].get('template_id') != 'zephyr-xenvm-starter-arm64' for s in firmware_specs)):
-            raise ValueError('current factory must use Debian Interaction and Zephyr Starter templates')
+                        or any(s['record'].get('template_id') not in ('zephyr-xenvm-starter-arm64','zephyr-drive-lattice-lab-arm64') for s in firmware_specs)):
+            raise ValueError('current factory requires verified Debian and supported Zephyr template profiles')
+        for item in firmware_specs:
+            r=item['record']
+            if r.get('template_id')=='zephyr-drive-lattice-lab-arm64' and (
+                    r.get('template')!='xenova-zephyr-drive-lattice-lab-1.0.0'
+                    or r.get('provisioning_profile',{}).get('apps')!={
+                        'autonomous':{'model':'stateful','standby_progress':'idle'},
+                        'manual':{'model':'stateless','standby_progress':'idle'}}):
+                raise ValueError('factory drive requires the actual bounded lattice/warm profile')
         if current and len({(s['record'].get('template'), s['record'].get('template_id'),
                              s['record'].get('template_version'), s['record'].get('creation_origin', {}).get('manifest_sha256'))
                             for s in firmware_specs}) != 1:
@@ -307,6 +333,8 @@ class FirstBoot:
                 raise ValueError('invalid factory instance path')
             seed, target = self.data / 'seeds' / key, self.data / 'instances' / key
             expected = {**spec['record'], **state['identities'][key], 'identity_state': 'ready'}
+            from xenova_preparation import guard_asset
+            guard_asset(argparse.Namespace(runtime=self.run), expected['uuid'])
             if (not target.exists() and not target.is_symlink() and state['phase'] == 'complete'
                     and retired_instance(self.data, key, expected['uuid'])):
                 continue
@@ -346,6 +374,8 @@ class FirstBoot:
                     raise ValueError('factory VMs share a writable disk')
                 inodes.add(inode)
             if key not in state['registered']:
+                if current.get('provisioning_profile',{}).get('channels'):
+                    self.supply(current,common)
                 state['registered'].append(key)
                 state['phase'] = 'registering'
                 self.save(state_path, state)
@@ -364,6 +394,13 @@ class FirstBoot:
             for spec in specs:
                 current = read_json(self.data/'instances'/spec['record']['id']/'instance.json')
                 execution.initialize(current, 'running', 'factory')
+        notices=[]
+        if not completed:
+            consumed=state.setdefault('registration_notices',[])
+            for spec in specs:
+                current=read_json(self.data/'instances'/spec['record']['id']/'instance.json')
+                if current['uuid'] not in consumed:
+                    consumed.append(current['uuid']);notices.append(current)
         state['phase'] = 'complete'
         self.save(state_path, state)
         self.save(self.run / 'install-ready.json', {'factory_id': factory['factory_id'], 'dom0_machine_id': mid,
@@ -371,13 +408,18 @@ class FirstBoot:
         if asset_errors:
             print(json.dumps({'registration': 'complete', 'asset_errors': asset_errors}))
         print('installation verified; hand off to existing VM autostart service')
+        # 부팅은 HTTP 응답을 기다리지 않는다. complete 뒤 중단되면 송신 0회일 수 있다.
+        if notices:
+            from xenova_registration import automatic
+            for record in notices:automatic(self.data,self.run,record)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['grow', 'register'])
     args = parser.parse_args()
-    with operation_lock():
+    from xenova_preparation import request_output
+    with request_output(),operation_lock() as common:
         boot = FirstBoot()
         from xenova_runtime import boot_progress
         display = boot_progress('storage' if args.action == 'grow' else 'registration', boot.run)
@@ -386,7 +428,7 @@ def main():
         if args.action == 'grow':
             boot.grow()
         else:
-            boot.register()
+            boot.register(common=common)
         # 성공 근거는 기존 필수 저장과 unit 결과다. 이 파일은 표시 보조 정보뿐이다.
         display('complete', mode=getattr(boot, 'display_mode', 'storage-verification'))
 

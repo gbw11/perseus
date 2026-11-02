@@ -25,7 +25,7 @@ def validate(spec, normalize_uuid, fail):
     return {**spec, "vm_id":normalize_uuid(spec["vm_id"])}
 
 
-def guards(manager, tomb, operations, fail):
+def guards(manager, tomb, operations, fail, context=None, records=None):
     """잠금을 얻었어도 남아 있는 물리 실행의 불확실성을 시간/PID만으로 없애지 않는다."""
     record = tomb["record"]
     e = manager.p.execution()
@@ -33,7 +33,8 @@ def guards(manager, tomb, operations, fail):
     if (not intent or intent["desired_state"] != "stopped" or
             intent["lifecycle_generation"] != tomb["generation"]):
         fail("INTENT_MISMATCH", "resource change requires applicable stopped intent")
-    if any(o["vm_id"] == record["uuid"] and o["status"] != "SUCCEEDED" for o in operations):
+    from xenova_creation import holds
+    if any(o["vm_id"] == record["uuid"] and holds(manager,o) for o in operations):
         fail("OPERATION_IN_PROGRESS", "an incomplete asset operation owns this VM", retryable=True)
     from xenova_recovery import Recovery
     if any(q["request"]["vm_id"] == record["uuid"] and q["phase"] not in ("completed", "failed")
@@ -51,12 +52,16 @@ def guards(manager, tomb, operations, fail):
     directory = manager.data/"instances"/record["id"]
     manager._record_at(record, directory)
     domains = manager._stopped(record)
-    manager.usage_check(directory, domains)
+    with manager._lifecycle_io(context or {}, records if records is not None else {}):
+        manager.usage_check(directory, domains)
 
 
 def mutate(manager, spec, execute, key, records, context, fail):
+    manager._asset_guard(context,spec['vm_id'])
     operations = manager._operations()
-    previous = next((o for o in operations if o["idempotency_key"] == key), None)
+    matches=[o for o in operations if o['idempotency_key']==key]
+    if len(matches)>1:fail('RECONCILE_REQUIRED','operation selector is ambiguous')
+    previous=matches[0] if matches else None
     if previous:
         context.update(operation_id=previous["operation_id"], replayed=True)
         if previous["action"] != ACTION or previous["request"] != spec:
@@ -86,7 +91,7 @@ def mutate(manager, spec, execute, key, records, context, fail):
     # a newer intent/start does not cause a second metadata write.
     published = previous and current == fingerprint(after) and before != after
     if not published:
-        guards(manager, tomb, [o for o in operations if o is not previous], fail)
+        guards(manager, tomb, [o for o in operations if o is not previous], fail, context, records)
     if not execute:
         return {"plan":True, "action":ACTION, "before":before, "after":after,
                 "configuration_sha256":fingerprint(after), "starts_guest":False}
@@ -102,8 +107,18 @@ def mutate(manager, spec, execute, key, records, context, fail):
         manager._save_op(previous)
     else:
         context["write_operation"] = True
+    if context.get('asset_lease'):context['asset_lease'].bind(previous)
     if not published:
-        manager._write(manager.data/"instances"/record["id"]/"instance.json", after)
+        manager._stopped(record)
+        manager._asset_guard(context,record['uuid'])
+        if manager.p.cpu().context(after)!=cpu_context:
+            fail('TARGET_CHANGED','CPU policy changed during resource preparation')
+        if manager._read(manager.data/'instances'/record['id']/'instance.json')!=record:
+            fail('TARGET_CHANGED','configuration changed before resource publication')
+        from xenova_execution import short_lock
+        with short_lock(manager.p.runtime,'admission'):
+            manager._writable()
+            manager._write(manager.data/"instances"/record["id"]/"instance.json", after)
         manager.checkpoint("resources-published", previous)
     result = {"vm_id":record["uuid"], "generation":tomb["generation"],
               "before":{"vcpus":before["vcpus"], "memory_mib":before["memory_mib"]},

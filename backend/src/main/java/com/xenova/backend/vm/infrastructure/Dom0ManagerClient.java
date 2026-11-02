@@ -1,6 +1,7 @@
 package com.xenova.backend.vm.infrastructure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.vm.domain.VmControlPort;
 import com.xenova.backend.vm.domain.VmLaunchSpec;
@@ -16,6 +17,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,6 +49,19 @@ public class Dom0ManagerClient implements VmControlPort {
         this.retryBackoff = properties.retryBackoff();
         this.queryClient = createClient(properties, properties.queryTimeout());
         this.commandClient = createClient(properties, properties.commandTimeout());
+    }
+
+    /** Read-only execution logs; independent from the console's interactive PTY lease. */
+    public JsonNode runtimeLogs(Map<String, Object> filters, boolean sources) {
+        return requireBody(executeQuery(() -> queryClient.get()
+                .uri(builder -> {
+                    builder.path(sources ? "/api/v1/logs/sources" : "/api/v1/logs");
+                    filters.forEach((key, value) -> builder.queryParam(key, value));
+                    return builder.build();
+                })
+                .retrieve()
+                .onStatus(status -> status.isError(), this::handleError)
+                .body(JsonNode.class)));
     }
 
     @Override
