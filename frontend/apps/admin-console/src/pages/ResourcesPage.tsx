@@ -2,7 +2,8 @@ import { Card } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import type { DriveState } from '../api/drive';
 import { useMetrics, useVms } from '../api/queries';
-import { VM_CPU_PERCENT_METRIC, type MetricSample, type Vm } from '../api/types';
+import type { Vm } from '../api/types';
+import { cpuPercentOf } from '../domain/vmMetrics';
 import { buildMemoryPoolSeries, bytesToKiB, type PoolSnapshot } from '../domain/memoryPools';
 import {
   ago,
@@ -605,18 +606,17 @@ function CpuDashboard({
 
 function CpuVmChart({ role, vm }: { role: Role | null; vm: Vm }) {
   const metrics = useMetrics(vm.vm_id, true);
-  const samples = metrics.data?.items ?? [];
-  const values = samples.map((sample) => cpuValue(sample)).filter((value): value is number => value != null);
+  // Zephyr 는 family 별로 표본이 나뉘므로 CPU 값이 있는 표본만 그린다
+  const values = (metrics.data?.items ?? [])
+    .map((sample) => cpuPercentOf(sample))
+    .filter((value): value is number => value != null);
   const current = values.at(-1) ?? null;
-  const points = samples
-    .map((sample, index) => {
-      const value = cpuValue(sample);
-      if (value == null) return null;
-      const x = samples.length <= 1 ? 100 : (index / (samples.length - 1)) * 100;
+  const points = values
+    .map((value, index) => {
+      const x = values.length <= 1 ? 100 : (index / (values.length - 1)) * 100;
       const y = 100 - Math.max(0, Math.min(100, value));
       return `${x},${y}`;
     })
-    .filter((point): point is string => point != null)
     .join(' ');
   const style = { '--vm-accent': role?.color ?? UNASSIGNED_COLOR } as CSSProperties;
 
@@ -677,8 +677,4 @@ function CpuVmChart({ role, vm }: { role: Role | null; vm: Vm }) {
       </div>
     </Card>
   );
-}
-
-function cpuValue(sample: MetricSample): number | null {
-  return sample.values.find((value) => value.name === VM_CPU_PERCENT_METRIC)?.value ?? null;
 }
