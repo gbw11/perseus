@@ -17,6 +17,17 @@
   상태 저장에 실패하면 이벤트를 내지 않고 다음 주기에 다시 저장한다. outbox 로 못 옮긴 이벤트는 레코드에 남아 Worker 재시작 뒤에도
   같은 event_id 로 저장·발행된다(수신 쪽은 event_id 로 중복을 거른다)
 - 정책 none 이거나 상태 파일이 깨졌으면 실행하지 않고 판정·건강만 낸다
+- force-restart 는 지금 실행에 대한 지금의 장애 증거가 있을 때만 고른다(S15P31E110-347). 판정 당시 사유·실행과 비교하지 않는다: 감시기는
+  장애 한 건에 판정을 한 번만 내므로, 실행이나 사유가 바뀐 뒤 장애가 이어지면 판정 당시 값과 영원히 어긋난다. 대신 감시기의 현재 건강이
+  의도를 읽은 UNHEALTHY 이고, 그 증거가 force 를 정당화하며, 플랫폼 view 와 같은 실행을 본 것이어야 한다.
+  · DOMAIN_CRASHED: 플랫폼 view 도 지금 crashed 여야 한다. 어떤 최초 사유보다 강한 근거다(heartbeat 손실 뒤 crash 포함)
+  · APP_HEARTBEAT_LOST: Zephyr 만. 동료 채널 증거가 있어야 UNHEALTHY 다(S15P31E110-335)
+  · graceful 실패 승격: 실패했던 실행이 지금도 돌고 있고 최초 사유와 같은 현재 증거일 때만. force 여부 자체도 현재 view·실행으로 정한다
+    (Zephyr, 지금 crashed, 같은 실행의 graceful 실패). 옛 실행의 crash·graceful 실패를 새 실행의 force 근거로 쓰지 않는다
+  · 실행 대조: 주행 VM 은 binding execution_id 가 반드시 있어야 하고 view 와 같아야 한다. 주행이 아닌 VM 은 관측에 execution_id 가 없어
+    domid 로 대조한다(Xen 은 한 host 부팅 안에서 domid 를 다시 쓰지 않는다. 제한 정책)
+  · 주행 VM 은 현재 Gateway 보호 근거(protection)도 있어야 한다. drive 분류를 모르면(drive config 없음) Zephyr force 는 모두 보류한다
+  근거가 부족하면 attempt 를 소비하지 않고 recovery.started 도 내지 않은 채 잠시 뒤 다시 본다. 플랫폼 per-VM force 승인은 플랫폼이 최종 확인한다
 """
 
 from __future__ import annotations
@@ -25,6 +36,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
@@ -74,6 +86,30 @@ class _NotSaved(Exception):
     """시도를 저장하지 못해 플랫폼을 부르지 않았다."""
 
 
+class _Held(Exception):
+    """force-restart 근거가 부족하다. attempt 를 소비하지 않고 잠시 뒤 다시 본다."""
+
+
+@dataclass(frozen=True)
+class ProtectionQuery:
+    """보호 근거 조회에 넘기는 읽기 전용 사본. 변경 가능한 레코드·view 를 잠금 밖으로 넘기지 않도록 스칼라만 담는다."""
+
+    recovery_id: UUID
+    vm_id: UUID
+    attempt: int
+    host_boot_id: str | None
+    execution_id: str | None
+    intent_revision: int | None
+    lifecycle_generation: int | None
+    domid: int | None
+    xen_state: str | None
+
+
+# 주행 VM 의 현재 Gateway 보호 근거. 보호가 지금 유효한가. 보호 수명주기(S15P31E110-346) 전에는 없다.
+# I/O(Gateway get 등)를 해도 된다: 엔진 잠금 밖에서 부르고, 잠근 뒤 레코드 열림·취소·현재 증거를 다시 확인한다. 상태를 바꾸지 않는다
+ProtectionEvidence = Callable[[ProtectionQuery], bool]
+
+
 class RecoveryEngine:
     def __init__(
         self,
@@ -87,6 +123,8 @@ class RecoveryEngine:
         wall: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         new_id: Callable[[], UUID] = uuid4,
         inline: bool = False,
+        drive_vm_ids: Iterable[UUID | str] | None = None,
+        protection: ProtectionEvidence | None = None,
     ) -> None:
         self._policy = policy
         self._platform = platform
@@ -97,6 +135,10 @@ class RecoveryEngine:
         self._wall = wall
         self._new_id = new_id
         self._inline = inline
+        # None: 주행 VM 이 어느 것인지 모른다(drive config 없음). Zephyr force 를 모두 보류한다. 빈 집합은 "주행 VM 없음"이 확인된 것
+        self._drive_vm_ids = None if drive_vm_ids is None else frozenset(str(UUID(str(v))) for v in drive_vm_ids)
+        self._protection = protection
+        self._held: dict[UUID, str] = {}  # 근거 부족으로 보류 중인 복구의 마지막 사유. 바뀔 때만 로그한다
         self._executor: ThreadPoolExecutor | None = None if inline else ThreadPoolExecutor(max_workers=1, thread_name_prefix="recovery")
         self._futures: dict[UUID, Future] = {}
         self._lock = threading.RLock()
@@ -260,9 +302,20 @@ class RecoveryEngine:
             raise _NotEligible(f"lifecycle={view.get('lifecycle')}")
         if view.get("desired_state") != "running" or not view.get("intent_applicable"):
             raise _NotEligible(f"desired_state={view.get('desired_state')} applicable={view.get('intent_applicable')}")
+        hold = self._evidence_hold(record, view)
+        if hold is None and self._drive_force(record, view):
+            with self._lock:
+                query = ProtectionQuery(record.recovery_id, record.vm_id, record.attempt, view.get("host_boot_id"), view.get("execution_id"),
+                                        view.get("intent_revision"), view.get("generation"), view.get("domid"), view.get("xen_state"))
+            if self._protection is None or not self._protection(query):  # I/O 일 수 있어 엔진 잠금 밖에서 한다
+                hold = "drive VM without current Gateway protection"
         with self._lock:
             if record.cancel_requested or not record.open:
                 raise _Cancelled()
+            hold = hold or self._evidence_hold(record, view)  # 보호를 조회하는 동안 현재 증거가 바뀌었을 수 있다
+            if hold is not None:
+                raise _Held(hold)
+            self._held.pop(record.recovery_id, None)
             now = self._clock()
             spec = self._build_spec(record, view, now)  # ValueError: 관측으로는 spec 을 만들 수 없음 → 최종 실패
             previous_closed = record.attempt_closed
@@ -337,6 +390,12 @@ class RecoveryEngine:
             self._close(record, RecoveryStatus.CANCELLED, now, error={"code": "TARGET_NOT_ELIGIBLE", "platform_code": None, "message": "cancelled before the platform accepted the attempt"})
         except _Recovered as exc:
             self._close(record, RecoveryStatus.RECOVERED, now, error={"code": "TARGET_HEALTHY", "platform_code": None, "message": str(exc)})
+        except _Held as exc:
+            record.due_monotonic = now + self._policy.transient_retry_s  # attempt·상태·이벤트는 그대로다
+            if self._held.get(record.recovery_id) != str(exc):
+                self._held[record.recovery_id] = str(exc)
+                log.warning("vm %s: recovery %s force-restart held: %s; rechecking every %.0fs", record.vm_id, record.recovery_id, exc,
+                            self._policy.transient_retry_s)
         except _NotSaved:
             record.due_monotonic = now + self._policy.transient_retry_s  # 상태는 _task_attempt 가 되돌렸다
             if record.status == RecoveryStatus.DETECTED:
@@ -374,8 +433,7 @@ class RecoveryEngine:
             execution_id = view.get("execution_id")
             if not execution_id:
                 raise ValueError("domain present but not a managed execution (no execution_id); recovery would not be correlated")
-            force = record.guest_kind == "zephyr" or record.reason == FailureReason.DOMAIN_CRASHED.value or record.graceful_failed
-            mode, expected = ("force-restart" if force else "graceful-restart"), {"execution_id": str(execution_id)}
+            mode, expected = ("force-restart" if self._wants_force(record, view) else "graceful-restart"), {"execution_id": str(execution_id)}
         for name in ("host_boot_id", "generation", "intent_revision"):
             if view.get(name) is None:
                 raise ValueError(f"platform view lacks {name}")
@@ -389,6 +447,45 @@ class RecoveryEngine:
             "mode": mode,
             "deadline_monotonic_ms": int((now + self._policy.attempt_deadline_s) * 1000),
         }
+
+    @staticmethod
+    def _wants_force(record: RecoveryRecord, view: dict[str, Any]) -> bool:
+        """현재 view·실행으로 정한다: Zephyr(graceful 없음), 지금 crashed, 지금 실행이 graceful 에 실패했던 그 실행."""
+        return (record.guest_kind == "zephyr" or view.get("xen_state") == "crashed"
+                or (record.graceful_failed_execution_id is not None and record.graceful_failed_execution_id == view.get("execution_id")))
+
+    def _drive_force(self, record: RecoveryRecord, view: dict[str, Any]) -> bool:
+        """이 시도가 주행 VM 의 force-restart 인가(Gateway 보호 근거가 필요하다)."""
+        return (view.get("domid") is not None and self._wants_force(record, view)
+                and self._drive_vm_ids is not None and str(record.vm_id) in self._drive_vm_ids)
+
+    def _evidence_hold(self, record: RecoveryRecord, view: dict[str, Any]) -> str | None:
+        """force-restart 를 고를 시도의 현재 증거가 부족하면 그 이유. 도메인이 없거나(start-if-absent) graceful 이면 None. I/O 없음."""
+        if view.get("domid") is None or not self._wants_force(record, view):
+            return None
+        zephyr = record.guest_kind == "zephyr"
+        if zephyr and self._drive_vm_ids is None:
+            return "drive VMs are unknown (no drive config); every Zephyr force-restart is held"
+        health = self._watcher.health(record.vm_id)
+        if health is None or not health.intent_known:
+            return "no current health with a known intent"
+        if health.state != HealthState.UNHEALTHY or health.reason is None:
+            return f"current health is {health.state.value}, not UNHEALTHY"
+        evidence = health.reason
+        if evidence == FailureReason.DOMAIN_CRASHED:
+            if view.get("xen_state") != "crashed":
+                return f"crash evidence but the platform now observes {view.get('xen_state')}"
+        elif not ((evidence == FailureReason.APP_HEARTBEAT_LOST and zephyr) or
+                  (record.graceful_failed_execution_id == view.get("execution_id") and evidence.value == record.reason)):
+            return f"current evidence {evidence.value} does not justify force-restart"
+        if health.domid != view.get("domid"):
+            return f"evidence is for domid {health.domid}, platform runs domid {view.get('domid')}"
+        drive = self._drive_vm_ids is not None and str(record.vm_id) in self._drive_vm_ids
+        if drive and (not health.execution_id or health.execution_id != view.get("execution_id")):
+            return f"drive VM evidence for execution {health.execution_id}, platform runs {view.get('execution_id')}"
+        if not drive and health.execution_id is not None and health.execution_id != view.get("execution_id"):
+            return f"evidence for execution {health.execution_id}, platform runs {view.get('execution_id')}"
+        return None
 
     def _on_result(self, record: RecoveryRecord, result: dict[str, Any], now: float) -> None:
         original = result.get("original_result") or {}
@@ -440,7 +537,7 @@ class RecoveryEngine:
         else:
             graceful_failure = code in GRACEFUL_FAILURE_CODES or (isinstance(exc, DriverTimeout) and exc.platform_code == "XEN_EXECUTION_FAILED")
             if record.mode == "graceful-restart" and self._policy.escalate_to_force and graceful_failure:
-                record.graceful_failed = True
+                record.graceful_failed_execution_id = ((record.request or {}).get("expected_execution") or {}).get("execution_id")
             self._attempt_failed(record, now, error)
 
     def _attempt_failed(self, record: RecoveryRecord, now: float, error: dict[str, Any]) -> None:
@@ -464,6 +561,7 @@ class RecoveryEngine:
         record.due_monotonic = None
         record.replay = False
         record.final = final or status in (RecoveryStatus.FAILED, RecoveryStatus.CANCELLED, RecoveryStatus.RECOVERED)
+        self._held.pop(record.recovery_id, None)
         if error is not None:
             record.last_error = error
         self._futures.pop(record.recovery_id, None)
