@@ -59,3 +59,16 @@ def test_worker_settings_keep_the_read_fork_flag():
     env = {"XENOVA_DRIVER": "platform", "XENOVA_CONSOLE_ENABLED": "1", "XENOVA_PLATFORM_READ_FORK": "1"}
     assert Settings.platform_from_env(env).platform_read_fork is True
     assert Settings.platform_from_env({"XENOVA_DRIVER": "platform"}).platform_read_fork is False
+
+
+def test_worker_settings_do_not_inherit_http_registration_credentials_or_options():
+    env = {"XENOVA_DRIVER": "platform", "XENOVA_REGISTRATION_URL": "https://fixture.invalid/api/v1/vms/registrations",
+           "VM_REGISTRATION_SERVICE_TOKEN": "fixture-spring-token", "XENOVA_REGISTRATION_TIMEOUT": "3",
+           "XENOVA_REGISTRATION_SLOT_DIR": "/tmp/fixture-sender"}
+    worker = Settings.platform_from_env(env)
+    assert (worker.registration_url, worker.registration_token, worker.registration_timeout_s, worker.registration_slot_dir) == (
+        "", "", 5.0, "/run/xenova/registration-sender")
+    http = Settings.from_env(env)
+    assert http.registration_url == env["XENOVA_REGISTRATION_URL"]
+    assert http.registration_token == env["VM_REGISTRATION_SERVICE_TOKEN"]
+    assert http.registration_timeout_s == "3" and http.registration_slot_dir == "/tmp/fixture-sender"

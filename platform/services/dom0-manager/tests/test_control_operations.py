@@ -668,9 +668,9 @@ def test_forked_read_gets_the_remaining_budget_and_nothing_after_it_ran_out():
 
 @pytest.mark.parametrize("action, forked, timeout", [
     ("intents", True, True), ("probe", True, True), ("execution-context", True, True), ("operation", True, True),
-    ("recovery-operation", True, True), ("provisioning", True, True),
+    ("recovery-operation", True, True), ("provisioning", True, True), ("registrations", True, True),
     ("templates", True, False),  # 하위 templates 는 spec timeout_ms 를 받지 않는다
-    ("provision", False, True), ("registration-notify", False, True),  # 공급·송신은 조회가 아니라 직렬화한다
+    ("provision", False, True),  # 공급은 조회가 아니라 직렬화한다. 구형 통지 action은 제거됐다.
     ("recovery-reconcile", False, True),  # 원 attempt 정산은 직렬화하되 timeout_ms 도 남은 값으로 줄인다
 ])
 def test_action_routing_budget_and_timeout(action, forked, timeout):
@@ -726,4 +726,3 @@ def test_reads_finish_while_a_real_create_holds_the_manager():
     assert created and created[0].status_code == 201
     shared = [c["action"] for c in inner.calls if not c["forked"]]
     assert shared == ["create", "start"]  # 조회는 하나도 공유 Manager 로 가지 않았다
-

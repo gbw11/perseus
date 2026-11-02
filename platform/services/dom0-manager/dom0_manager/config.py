@@ -13,7 +13,10 @@ DRIVERS = ("mock", "xen", "platform")
 # 이 값과 같아야 한다. xl_command_timeout_s 는 xl 서브프로세스에만 걸리고 Manager 호출을 제한하지 않는다
 PLATFORM_STOP_WAIT_S = 90.0
 # HTTP 프로세스만 쓰는 값. platform_from_env 는 이 값을 읽지 않는다
-HTTP_ONLY_ENV = ("XENOVA_HOST", "XENOVA_PORT", "XENOVA_SERVICE_TOKEN", "XENOVA_CONSOLE_ENABLED", "XENOVA_CONSOLE_LOCK_DIR")
+HTTP_ONLY_ENV = (
+    "XENOVA_HOST", "XENOVA_PORT", "XENOVA_SERVICE_TOKEN", "XENOVA_CONSOLE_ENABLED", "XENOVA_CONSOLE_LOCK_DIR",
+    "XENOVA_REGISTRATION_URL", "VM_REGISTRATION_SERVICE_TOKEN", "XENOVA_REGISTRATION_TIMEOUT", "XENOVA_REGISTRATION_SLOT_DIR",
+)
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,11 @@ class Settings:
     # Separate bounded execution-log database; empty means the log collector is not deployed.
     runtime_log_db: str = ""
     runtime_log_ingest_config: str = ""
+    # Spring 전용 송신 설정. 누락은 notify에만 영향을 주며 GET/일반 관리는 유지한다.
+    registration_url: str = ""
+    registration_token: str = ""
+    registration_timeout_s: float | str = 5.0
+    registration_slot_dir: str = "/run/xenova/registration-sender"
 
     def __post_init__(self) -> None:
         if self.console_enabled and not self.service_token:
@@ -113,6 +121,10 @@ class Settings:
             log_level=read("XENOVA_LOG_LEVEL", cls.log_level, str).upper(),
             runtime_log_db=read("XENOVA_RUNTIME_LOG_DB", cls.runtime_log_db, str),
             runtime_log_ingest_config=read("XENOVA_RUNTIME_LOG_INGEST_CONFIG", cls.runtime_log_ingest_config, str),
+            registration_url=read("XENOVA_REGISTRATION_URL", cls.registration_url, str),
+            registration_token=read("VM_REGISTRATION_SERVICE_TOKEN", cls.registration_token, str),
+            registration_timeout_s=read("XENOVA_REGISTRATION_TIMEOUT", cls.registration_timeout_s, str),
+            registration_slot_dir=read("XENOVA_REGISTRATION_SLOT_DIR", cls.registration_slot_dir, str),
         )
 
     @classmethod

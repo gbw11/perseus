@@ -1,5 +1,34 @@
 # dom0-manager
 
+## 등록 목록과 단건 통지
+
+`platform` 드라이버의 `GET /api/v1/vm-registrations`는 실행 여부와 무관한 REGISTERED 목록을 여덟 필드 배열로 반환합니다.
+`POST /api/v1/vm-registrations/{vm_id}/notify`는 UUID만 받아 현재 명세를 읽고 Spring 등록 POST를 한 번 보냅니다.
+기존 서비스 Bearer 인증이 필수이며 입력 body·URL·token 중계는 받지 않습니다. runtime `/vms`는 기존 의미를 유지합니다.
+
+```sh
+curl --fail-with-body -H "Authorization: Bearer $DOM0_SERVICE_TOKEN" \
+  http://127.0.0.1:8081/api/v1/vm-registrations
+curl --fail-with-body -X POST -H "Authorization: Bearer $DOM0_SERVICE_TOKEN" \
+  http://127.0.0.1:8081/api/v1/vm-registrations/850e8400-e29b-41d4-a716-446655440001/notify
+```
+
+Spring URL과 `VM_REGISTRATION_SERVICE_TOKEN`은 root 0600 `/etc/xenova/spring-registration.env`로 FastAPI에만 공급합니다.
+미설정은 notify에만 영향을 줍니다. 성공은 `confirmed=true`와 원 HTTP 200/201을 검증한 경우이고,
+upstream 거절(502·원 http_status/code), 응답 미확인(504), 설정/연결/포화(503)를 구별합니다.
+자동 retry/redirect/후속 GET은 없습니다. 일반 생성/factory의 공통 hook이 자동 기회를 소유하며 API startup/create service가 추가 송신하지 않습니다.
+
+실제 import·wire·한도·실패 처리와 설치 순서는 [공급 계약](../../../docs/contracts/vm-provisioning-v1.md),
+정상/실패의 별도 프로세스 시험은 [검증 기록](../../../docs/verification/vm-registration-api-20261102.md)을 따릅니다.
+구형 `xenova-vm registration-notify`와 하위 직접 Spring 설정은 제거했습니다. 하위 조회는 `xenova-vm registrations [UUID] --json`입니다.
+
+factory 통지는 등록 완료 사건에서 일시 systemd job을 비동기 예약합니다. API unit은 `Type=notify`이며
+제품 entrypoint가 ASGI startup·listen 완료 뒤 `READY=1`을 보냅니다. 통지 job은 그 뒤 기존 15초 예산으로
+실행하므로 first-boot·autostart는 기다리지 않습니다. API restart의 dependent 재진입도 같은 boot의
+배타 실행 표식으로 막습니다. API 기동 실패·응답 유실·다음 boot에서 자동 재예약하지 않습니다.
+API entrypoint·unit·하위 hook을 함께 설치해야 합니다. `uvicorn dom0_manager.main:app` 직접 실행은
+HTTP 개발 실행이며 systemd 준비 신호를 내는 제품 entrypoint를 대신하지 않습니다.
+
 ## MO-04 단계 3: 내부 WebSocket 프록시
 
 `/api/v1/vms/{vm_id}/console`에서 `ConsoleSession`의 입출력을 WebSocket과 연결합니다.
@@ -212,7 +241,7 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 
 `load_manager`는 `Manager`를 `SerializedManager`로 감싸 프로세스 안에서 `call`을 직렬화합니다. 플랫폼 `Manager`가 요청별 상태(`current_operation`·`replayed`)를 인스턴스 변수에 두어 FastAPI 스레드가 동시에 부르면 섞이기 때문입니다. 차례를 기다리는 시간은 `XENOVA_PLATFORM_BUSY_TIMEOUT`(기본 5초)으로 제한하고, 넘으면 플랫폼의 잠금 충돌과 같은 `OPERATION_IN_PROGRESS` 봉투를 돌려 503으로 냅니다. 정지가 90초 동안 잠금을 쥐어도 조회가 스레드풀에 쌓이지 않습니다. `/healthz`는 Manager를 거치지 않고 `xl info`와 registry 디렉터리 존재만 확인하므로 잠금이나 느린 `xl list`에 영향받지 않습니다.
 
-**조회의 요청별 Manager (S15P31E110-333)**: `XENOVA_PLATFORM_READ_FORK=1`이면 하위 계약의 일반 조회(`list`·`get`·`intents`·`probe`·`execution-context`·`templates`·`operation`·`control-operation`·`recovery-operation`·`provisioning`, [cli-manager-spec "일반 조회의 동시 실행과 정합성"](../../../docs/platform/cli-manager-spec.md#read-concurrency))는 직렬화를 거치지 않고 호출마다 새 `fork()` 객체로 부릅니다. 긴 Linux create 가 직렬화를 쥐어도 다른 VM 의 상세·목록이 busy timeout 503 없이 하위로 들어갑니다. 변경 action(create·start·stop·retire·recover_once·provision·registration-notify 등)은 그대로 직렬화합니다. 같은 요청 객체를 두 호출이 공유하지 않고 공유 `Manager` 를 잠금 없이 부르지 않습니다. 하위의 관측 슬롯 경합(`OPERATION_IN_PROGRESS`)·`TARGET_CHANGED`·`OBSERVATION_UNAVAILABLE` 은 지금처럼 503·409 로 냅니다. 기본은 꺼져 있습니다: `fork()` 가 있어도 조회가 공통 잠금을 쓰는 옛·혼합 설치본에서는 503 대신 하위 잠금 대기로 바뀔 뿐이기 때문입니다. `fork` 가 없으면 켜도 직렬화 경로입니다.
+**조회의 요청별 Manager (S15P31E110-333)**: `XENOVA_PLATFORM_READ_FORK=1`이면 하위 계약의 일반 조회(`list`·`get`·`intents`·`probe`·`execution-context`·`templates`·`operation`·`control-operation`·`recovery-operation`·`provisioning`, [cli-manager-spec "일반 조회의 동시 실행과 정합성"](../../../docs/platform/cli-manager-spec.md#read-concurrency))는 직렬화를 거치지 않고 호출마다 새 `fork()` 객체로 부릅니다. 긴 Linux create 가 직렬화를 쥐어도 다른 VM 의 상세·목록이 busy timeout 503 없이 하위로 들어갑니다. 변경 action(create·start·stop·retire·recover_once·provision 등)은 그대로 직렬화합니다. 같은 요청 객체를 두 호출이 공유하지 않고 공유 `Manager` 를 잠금 없이 부르지 않습니다. 하위의 관측 슬롯 경합(`OPERATION_IN_PROGRESS`)·`TARGET_CHANGED`·`OBSERVATION_UNAVAILABLE` 은 지금처럼 503·409 로 냅니다. 기본은 꺼져 있습니다: `fork()` 가 있어도 조회가 공통 잠금을 쓰는 옛·혼합 설치본에서는 503 대신 하위 잠금 대기로 바뀔 뿐이기 때문입니다. `fork` 가 없으면 켜도 직렬화 경로입니다.
 
 **생성 입력**: `create`에는 Spring 발급 `vm_id`, 표시 이름(`<template_id 정규화>-<vm_id 앞 12자리>`), 템플릿 ID·버전, vcpus·memory_mib만 보냅니다. 내부 실행 이름(`vm-<hex>`)·MAC·Linux IP는 플랫폼이 전역 잠금 안에서 발급하고, IP가 바닥나면 플랫폼 `IP_POOL_EXHAUSTED`를 507 `InsufficientResources`(resource.name=ipv4)로 냅니다. 플랫폼 `INVALID_SPEC`은 400 그대로입니다. 인스턴스 디렉터리는 `configuration.id`(내부 이름)로 찾고, 통합 테스트는 생성이 201이며 registry·Xen UUID가 요청 UUID와 같은지 항상 검증합니다.
 
