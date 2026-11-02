@@ -33,7 +33,7 @@ from test_xl import FakeRunner
 DEBIAN = UUID("4be41d5f-b8ef-408b-9709-7fe5ac11231f")
 ZEPHYR = UUID("0d950ea2-cc99-49df-9b60-a4ddf2c8e137")
 STOPPED = UUID("cd35a7fc-5f14-456a-a129-f0afc7d91d97")
-SETTINGS = RecoverySettings(interval_s=5, intent_refresh_s=60, heartbeat_lost_s=30, boot_grace_s=90, absent_grace_s=60)
+SETTINGS = RecoverySettings(interval_s=5, intent_refresh_s=60, heartbeat_lost_s=30, boot_grace_s=90, absent_grace_s=60, agent_sole_publisher="trust")
 
 XL_LIST = """\
 Name                                        ID   Mem VCPUs	State	Time(s)

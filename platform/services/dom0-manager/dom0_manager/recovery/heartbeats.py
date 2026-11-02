@@ -83,6 +83,14 @@ class AppHeartbeatTable(LastSeenTable[AppHeartbeat]):
             if any(value is None or value.boot_id!=boot or instances.get(value.app_id)!=value.instance_id for value in values):return None
             return tuple(values)
 
+    def latest_bound(self, vm_id, boot, instances):
+        """현재 실행 binding(boot·앱별 instance)에 맞는 앱 메시지 중 가장 최근 수신. 채널 전달 증거용이다.
+        기능 건강(supervision_pair)은 두 앱 중 오래된 쪽을 보지만, 전달 여부는 한 앱이라도 지금 오면 된다."""
+        with self._lock:
+            matched = [value for (owner, app), value in getattr(self, '_supervision', {}).items()
+                       if owner == vm_id and value.boot_id == boot and instances.get(app) == value.instance_id]
+            return max(matched, key=lambda value: value.received_monotonic) if matched else None
+
     def forget(self,vm_id):
         super().forget(vm_id)
         with self._lock:
