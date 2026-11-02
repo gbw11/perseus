@@ -15,7 +15,9 @@
 Spring 기원 생성에서는 Spring이 발급한 UUID `vm_id`를 registry와 Xen에 그대로 사용한다.
 로컬 CLI 생성과 factory 초기 설치는 기존 플랫폼 발급/UUID 계획이 영구 VM 신원을 확정한다.
 이미 등록된 VM의 Spring 등록 통지는 이 UUID를 바꾸거나 create/start를 역호출하지 않는다.
-[등록-only 계약안·실제 sender](vm-provisioning-v1.md)는 제공자 로컬 검증 상태이며 실제 Spring 수신 구현은 별도다.
+[등록 조회·통지 계약](vm-provisioning-v1.md)의 하위 `registrations`와 FastAPI GET `/api/v1/vm-registrations`,
+POST `/api/v1/vm-registrations/{vm_id}/notify`를 제공한다. GET은 실행과 무관한 현재 등록 목록의 여덟 필드 배열이다.
+기존 `/vms`는 domain 조회로 유지한다. Spring `800d584` 구현 소스를 확인했으며 DB/운영 공동 수락은 별도다.
 
 플랫폼 registry는 등록·보관·복구 생명주기의 원본입니다. dom0-manager는 플랫폼 관리 계층을 통해 registry와 Xen 실행 상태를 함께 조회합니다. `domid`는 재실행마다 바뀔 수 있으므로 영구 식별자로 사용하지 않습니다.
 
@@ -435,7 +437,7 @@ Spring의 페이지 규칙: (1) `gap: true`면 경고(`WARN`)로 `recovery.faile
 - dom0-manager 는 요청이 도착한 순간(스레드풀 대기 전)부터 로컬 단조 시계로 기한을 잰다. 이 기한 하나를 VM 잠금·자원 잠금 대기, Manager 직렬화 대기, 하위 플랫폼 호출, xl·xentop 실행이 나눠 쓴다.
 - 하위에는 남은 값에서 응답을 돌려줄 몫(`XENOVA_RESPONSE_RESERVE`, 기본 0.5초, 실측 전 임시값)을 뺀 만큼만 준다. 플랫폼 정지의 물리 기한은 기존 90초와 이 값 중 짧은 쪽이고, 조회(get·list·작업 조회)는 `timeout_ms` 도 남은 값으로 줄인다. xl·xentop 은 자체 한도와 남은 값 중 짧은 쪽이다.
 - 기다리는 동안 예산을 다 쓰면 **실행·제출하지 않고** `504 DriverTimeout` 이다(`platform_code=DEADLINE_EXCEEDED` 면 플랫폼 제출 전 만료, 없으면 잠금 대기 만료나 xl·xentop 실행 전 만료).
-- 하위 플랫폼의 `create`(등록)·`retire`(보관)는 호출 예산을 받지 않는다. 이 둘은 제출 직전에만 만료를 검사한다.
+- `create`(등록)·`retire`(보관)에는 아직 호출 예산을 넘기지 않고 제출 직전에만 만료를 검사한다. **알려진 제한(미해결)**: `create` 는 예산이 지나도 원 생성이 계속되고, 이어지는 시작은 예산 만료로 제출되지 않아 등록만 된 VM 이 남을 수 있다. 하위 `create` 는 예산으로 원 생성 기한을 줄이고 생성 정책 `call_ms` 보다 큰 값은 거절하므로 이 헤더 상한(105초)을 그대로 넘길 수 없다. 생성 예산의 상한·동기/비동기 접수는 플랫폼·Spring 과 정한 뒤 이 절을 고친다.
 - 헤더가 없으면 지금처럼 직렬화 대기 5초, 하위 기본 90초·15초, xl 5초를 쓴다.
 - 105000ms 는 입력 상한이지 HTTP 를 그만큼 기다리라는 뜻이 아니다. 같은 키의 재전달은 원 작업 기한을 다시 받지 않는다.
 

@@ -17,7 +17,9 @@ from dom0_manager.recovery.watcher import Watcher
 
 VM = UUID("4be41d5f-b8ef-408b-9709-7fe5ac11231f")
 ZEPHYR = UUID("0d950ea2-cc99-49df-9b60-a4ddf2c8e137")
-SETTINGS = RecoverySettings(interval_s=5, heartbeat_lost_s=30, app_heartbeat_lost_s=15, boot_grace_s=90, zephyr_boot_grace_s=30, absent_grace_s=60)
+# 대부분의 시험은 VM 하나로 다른 규칙을 본다. 단독 발행자 보류는 아래 "동료 발행자" 시험이 따로 본다
+SETTINGS = RecoverySettings(interval_s=5, heartbeat_lost_s=30, app_heartbeat_lost_s=15, boot_grace_s=90, zephyr_boot_grace_s=30, absent_grace_s=60,
+                            agent_sole_publisher="trust", app_sole_publisher="trust")
 
 
 def obs(vm_id=VM, *, present=True, state=VmState.running, desired="running", kind="linux", applicable=True, lifecycle="REGISTERED", domid=1, revision=2, expected=None):
@@ -625,3 +627,287 @@ def test_other_vm_delivery_is_not_evidence_for_a_silent_vm(world):
     assert world.watcher.agent_delivered() == {VM}
     world.clock.now += 30
     assert [j.reason for j in world.tick(obs())] == [FailureReason.HEARTBEAT_LOST]
+
+
+# ---- 동료 발행자: 공통 경로 장애와 VM 장애 구별 (S15P31E110-335) ----
+
+PEER = UUID("5c1e0b6a-2f1d-4c3e-9a8b-7d6e5f4a3b2c")
+PEER_ZEPHYR = UUID("6d2f1c7b-3e2a-4d4f-8b9c-8e7f6a5b4c3d")
+HOLD = replace(SETTINGS, agent_sole_publisher="hold", app_sole_publisher="hold")  # 기본값
+
+
+def peers_world(settings=HOLD, agents=(VM, PEER), armed=None):
+    world = World(arming=Known(agents, armed))
+    world.watcher._settings = settings
+    world.prove()
+    world.prove("app")
+    return world
+
+
+def boot_both(world, *observations):
+    """두 VM 이 부팅하고 첫 신호를 보낸다(이번 부팅에 신호를 보낸 동료가 된다)."""
+    assert world.tick(*observations) == []
+    world.clock.now += 5
+    for o in observations:
+        if o.guest_kind == "linux":
+            world.beat(o.vm_id)
+        else:
+            world.app_beat(o.vm_id)
+    assert world.tick(*observations) == []
+
+
+def advance(world, seconds, *observations, beating=(), step=5):
+    """step 초마다 beating 의 VM 만 신호를 보내며 tick 하고 판정을 모은다."""
+    out = []
+    end = world.clock.now + seconds
+    while world.clock.now < end:
+        world.clock.now += step
+        for vm_id in beating:
+            if vm_id in (VM, PEER):
+                world.beat(vm_id)
+            else:
+                world.app_beat(vm_id)
+        out += world.tick(*observations)
+    return out
+
+
+def test_loss_is_judged_when_a_peer_publisher_is_fresh():
+    world = peers_world()
+    target, peer = obs(VM), obs(PEER, domid=2)
+    boot_both(world, target, peer)
+    judged = advance(world, 40, target, peer, beating=[PEER])
+    assert [(j.vm_id, j.reason) for j in judged] == [(VM, FailureReason.HEARTBEAT_LOST)]
+    assert world.health(PEER).state == HealthState.HEALTHY
+
+
+def test_loss_together_with_every_peer_is_held_as_common_path():
+    world = peers_world()
+    target, peer = obs(VM), obs(PEER, domid=2)
+    boot_both(world, target, peer)
+    assert advance(world, 120, target, peer) == []  # 둘 다 조용하다: 브로커·브리지·ACL 공통 경로를 의심
+    assert world.health(VM).state == HealthState.OBSERVATION_UNAVAILABLE
+    assert world.health(PEER).state == HealthState.OBSERVATION_UNAVAILABLE
+
+
+def test_sole_publisher_is_held_by_default_and_judged_with_trust():
+    world = peers_world(agents=(VM,))
+    boot_both(world, obs())
+    assert advance(world, 120, obs()) == []
+    assert world.health().state == HealthState.OBSERVATION_UNAVAILABLE
+    trusted = peers_world(settings=replace(HOLD, agent_sole_publisher="trust"), agents=(VM,))
+    boot_both(trusted, obs())
+    assert [j.reason for j in advance(trusted, 40, obs())] == [FailureReason.HEARTBEAT_LOST]
+
+
+def test_held_channel_does_not_hold_xen_judgments():
+    world = peers_world()
+    target, peer = obs(VM), obs(PEER, domid=2)
+    boot_both(world, target, peer)
+    assert advance(world, 60, target, peer) == []
+    world.clock.now += 5
+    judged = world.tick(obs(VM, state=VmState.crashed), peer)
+    assert [(j.vm_id, j.reason) for j in judged] == [(VM, FailureReason.DOMAIN_CRASHED)]
+
+
+def test_judgment_resumes_when_a_peer_is_fresh_again():
+    world = peers_world()
+    target, peer = obs(VM), obs(PEER, domid=2)
+    boot_both(world, target, peer)
+    assert advance(world, 60, target, peer) == []  # 함께 조용: 보류
+    judged = advance(world, 10, target, peer, beating=[PEER])  # 공통 경로가 돌아왔는데 대상만 계속 조용하다
+    assert [(j.vm_id, j.reason) for j in judged] == [(VM, FailureReason.HEARTBEAT_LOST)]
+
+
+def test_peer_without_a_signal_in_this_boot_is_not_a_peer():
+    """동료가 아직 이번 부팅의 첫 신호 전(부팅 중)이면 채널 증거가 아니다. 대상은 단독 발행자처럼 보류한다."""
+    world = peers_world()
+    target = obs(VM)
+    assert world.tick(target) == []
+    world.clock.now += 5
+    world.beat(VM)
+    assert world.tick(target) == []
+    booting_peer = obs(PEER, domid=2)
+    assert advance(world, 60, target, booting_peer) == []
+    assert world.health(VM).state == HealthState.OBSERVATION_UNAVAILABLE
+
+
+def test_peer_on_another_channel_is_not_evidence():
+    """다른 채널(app)의 신선한 신호는 agent 채널 경로의 증거가 아니다."""
+    world = peers_world(armed={PEER_ZEPHYR: "autonomous"})
+    target, zephyr = obs(VM), obs(PEER_ZEPHYR, kind="zephyr", domid=3)
+    boot_both(world, target, zephyr)
+    assert advance(world, 60, target, zephyr, beating=[PEER_ZEPHYR], step=1) == []
+    assert world.health(VM).state == HealthState.OBSERVATION_UNAVAILABLE
+
+
+def test_app_channel_uses_zephyr_peers():
+    world = peers_world(agents=(), armed={ZEPHYR: "autonomous", PEER_ZEPHYR: "autonomous"})
+    target, peer = obs(ZEPHYR, kind="zephyr"), obs(PEER_ZEPHYR, kind="zephyr", domid=3)
+    boot_both(world, target, peer)
+    judged = advance(world, 20, target, peer, beating=[PEER_ZEPHYR], step=1)
+    assert [(j.vm_id, j.reason) for j in judged] == [(ZEPHYR, FailureReason.APP_HEARTBEAT_LOST)]
+    silent = peers_world(agents=(), armed={ZEPHYR: "autonomous", PEER_ZEPHYR: "autonomous"})
+    boot_both(silent, target, peer)
+    assert advance(silent, 60, target, peer, step=1) == []
+
+
+def test_sole_publisher_setting_is_validated():
+    defaults = RecoverySettings()
+    assert (defaults.agent_sole_publisher, defaults.app_sole_publisher) == ("hold", "hold")
+    loaded = RecoverySettings.from_env({"XENOVA_RECOVERY_AGENT_SOLE_PUBLISHER": " Trust "})
+    assert (loaded.agent_sole_publisher, loaded.app_sole_publisher) == ("trust", "hold")
+    for bad in ({"agent_sole_publisher": "always"}, {"app_sole_publisher": "yes"}):
+        with pytest.raises(ValueError, match="sole_publisher"):
+            RecoverySettings(**bad)
+
+
+def test_agent_trust_does_not_open_the_app_channel():
+    """시연처럼 단독 Linux 의 heartbeat 복구만 연다(agent=trust, app=hold). 주행 VM 이 하나만 남았을 때 app 신호가 끊기면
+    공통 경로 장애와 구별할 수 없으므로 보류한다. 남은 주행 VM 을 force-restart 하지 않는다."""
+    mixed = replace(HOLD, agent_sole_publisher="trust")
+    linux = peers_world(settings=mixed, agents=(VM,))
+    boot_both(linux, obs())
+    assert [j.reason for j in advance(linux, 40, obs())] == [FailureReason.HEARTBEAT_LOST]
+    drive = peers_world(settings=mixed, agents=(), armed={ZEPHYR: "autonomous"})
+    remaining = obs(ZEPHYR, kind="zephyr")
+    boot_both(drive, remaining)
+    assert advance(drive, 60, remaining, step=1) == []
+    assert drive.health(ZEPHYR).state == HealthState.OBSERVATION_UNAVAILABLE
+
+
+def test_staggered_last_beats_do_not_turn_common_silence_into_a_vm_fault():
+    """공통 경로가 끊기면 VM 마다 마지막 수신이 어긋난다(A 0초, B 4초). A 의 손실 창(30초)이 찰 때 B 는 26초라
+    손실 창으로는 신선해 보이지만, 동료 신선도 창(15초)으로는 이미 조용하다. A 를 개별 장애로 판정하지 않는다."""
+    world = peers_world()
+    target, peer = obs(VM), obs(PEER, domid=2)
+    assert world.tick(target, peer) == []
+    world.clock.now += 1
+    world.beat(VM)
+    world.clock.now += 4
+    world.beat(PEER)
+    assert world.tick(target, peer) == []
+    assert advance(world, 120, target, peer, step=1) == []
+    assert world.health(VM).state == HealthState.OBSERVATION_UNAVAILABLE
+
+
+@pytest.mark.parametrize("order", ["target-first", "peer-first"])
+def test_restarted_peer_with_only_previous_execution_beats_is_not_evidence(order):
+    """동료가 이번 주기에 새 domid 로 재시작했다. 이전 실행의 최근 heartbeat 는 지금 실행의 채널 증거가 아니다.
+    관측 순서와 무관하게 대상은 보류한다."""
+    world = peers_world()
+    target, peer = obs(VM), obs(PEER, domid=2)
+    boot_both(world, target, peer)
+    assert advance(world, 25, target, peer, beating=[PEER]) == []  # 대상만 멈췄다. 동료의 마지막 신호는 방금(이전 실행)
+    restarted = obs(PEER, domid=7)
+    world.clock.now += 5
+    pair = (target, restarted) if order == "target-first" else (restarted, target)
+    assert world.tick(*pair) == []
+    assert world.health(VM).state == HealthState.OBSERVATION_UNAVAILABLE
+
+
+def test_fast_reconnect_needs_a_new_message_before_loss_judgments():
+    """두 주기 사이에 끊겼다 다시 붙으면 승인은 그대로여도 연결 세대가 바뀐다. 재연결 뒤 메시지를 받고 한 창이 지나야 판정한다."""
+    world = World(arming=Known([VM]))
+    world.link = LinkState(agent=True, app=True, connection=1)
+    world.prove()
+    boot_both(world, obs())
+    world.link = LinkState(agent=True, app=True, connection=2)  # 대상이 멈춘 사이 빠르게 재연결
+    assert world.run(obs(), 60) == []  # 재연결 뒤 아무것도 안 왔다: 전달 증거 없음
+    assert world.health().state == HealthState.OBSERVATION_UNAVAILABLE
+    world.prove()  # 재연결 뒤 첫 메시지
+    assert [j.reason for j in world.run(obs(), 5)] == [FailureReason.HEARTBEAT_LOST]
+
+
+def test_app_channel_evidence_uses_the_latest_bound_app_message():
+    """채널 전달 증거는 현재 binding 의 앱 메시지 중 가장 최근이다. 다른 boot·instance 의 메시지는 세지 않는다."""
+    from types import SimpleNamespace
+
+    table = AppHeartbeatTable()
+    value = lambda check: SimpleNamespace(check=check, progress=check, phase="EXECUTING", readiness="READY", reason=None)
+    table.record_lifecycle(ZEPHYR, "autonomous", "fw-1", "a-1", value(1), 100.0)
+    table.record_lifecycle(ZEPHYR, "manual", "fw-1", "m-1", value(1), 140.0)
+    instances = {"autonomous": "a-1", "manual": "m-1"}
+    assert table.latest_bound(ZEPHYR, "fw-1", instances).received_monotonic == 140.0
+    assert min(table.supervision_pair(ZEPHYR, "fw-1", instances), key=lambda v: v.received_monotonic).received_monotonic == 100.0
+    assert table.latest_bound(ZEPHYR, "fw-1", {"autonomous": "a-1", "manual": "m-2"}).received_monotonic == 100.0
+    assert table.latest_bound(ZEPHYR, "fw-2", instances) is None
+
+
+def test_peer_freshness_window_is_shorter_than_the_loss_window():
+    settings = RecoverySettings()
+    assert (settings.agent_peer_fresh_s, settings.app_peer_fresh_s) == (15.0, 5.0)
+    short = RecoverySettings(heartbeat_lost_s=15, app_heartbeat_lost_s=3, boot_grace_s=90, zephyr_boot_grace_s=30)
+    assert (short.agent_peer_fresh_s, short.app_peer_fresh_s) == (10.0, 2.0)  # 손실 창 − 1주기로 줄어든다
+    env = {"XENOVA_RECOVERY_AGENT_PEER_FRESH": "20", "XENOVA_RECOVERY_APP_PEER_FRESH": "3"}
+    assert (RecoverySettings.from_env(env).agent_peer_fresh_s, RecoverySettings.from_env(env).app_peer_fresh_s) == (20.0, 3.0)
+    for bad in ({"agent_peer_fresh_s": 26}, {"agent_peer_fresh_s": 9}, {"app_peer_fresh_s": 15}, {"app_peer_fresh_s": 1}):
+        with pytest.raises(ValueError, match="peer_fresh"):
+            RecoverySettings(**bad)
+
+
+def test_drive_peer_sending_one_bound_app_is_channel_evidence():
+    """주행 VM 동료가 지금 실행에서 앱 하나(autonomous)만 보내도 app 채널이 전달 중이라는 증거다. 대상 A 의 앱 손실을 판정한다.
+    동료 B 자체는 두 앱이 모두 있어야 건강하므로 관측 불가로 남는다(기능 건강과 채널 증거는 다르다)."""
+    from types import SimpleNamespace
+
+    world = peers_world(agents=(), armed={ZEPHYR: "autonomous"})  # B 는 수신 이력이 없다
+
+    def drive(vm_id, domid, boot, instances):
+        return replace(obs(vm_id, kind="zephyr", domid=domid, expected=True), execution_binding_available=True,
+                       execution_id=f"exec-{domid}", expected_app_boot_id=boot, expected_app_instances=instances)
+
+    a_apps, b_apps = {"autonomous": "a-auto", "manual": "a-man"}, {"autonomous": "b-auto", "manual": "b-man"}
+    target, peer = drive(ZEPHYR, 3, "fw-a", a_apps), drive(PEER_ZEPHYR, 4, "fw-b", b_apps)
+    checks = {"n": 0}
+
+    def report(vm_id, app, boot, instance):
+        checks["n"] += 1
+        value = SimpleNamespace(check=checks["n"], progress=checks["n"], phase="EXECUTING", readiness="READY", reason=None)
+        world.apps.record_lifecycle(vm_id, app, boot, instance, value, world.clock.now)
+
+    assert world.tick(target, peer) == []
+    world.clock.now += 1
+    for app, instance in a_apps.items():
+        report(ZEPHYR, app, "fw-a", instance)
+    report(PEER_ZEPHYR, "autonomous", "fw-b", "b-auto")
+    assert world.tick(target, peer) == []
+    judged = []
+    for _ in range(40):  # A 는 조용하고 B 는 앱 하나만 계속 보낸다
+        world.clock.now += 1
+        report(PEER_ZEPHYR, "autonomous", "fw-b", "b-auto")
+        judged += world.tick(target, peer)
+    assert [(j.vm_id, j.reason) for j in judged] == [(ZEPHYR, FailureReason.APP_HEARTBEAT_LOST)]
+    assert world.health(PEER_ZEPHYR).state == HealthState.OBSERVATION_UNAVAILABLE
+
+
+
+# ---- 의도를 못 읽은 주기 (S15P31E110-336) ----
+
+
+def test_unknown_intent_holds_every_judgment_and_keeps_the_episode():
+    world = World(arming=Known([VM]))
+    world.prove()
+    boot_both(world, obs())
+    unknown = replace(obs(), intent_known=False)
+    assert world.run(unknown, 120) == []  # heartbeat 손실이어도 오래된 의도로 재시작하지 않는다
+    assert world.health().state == HealthState.OBSERVATION_UNAVAILABLE
+    assert world.health().intent_known is False  # 복구 엔진이 이 스냅샷의 desired_state 로 취소하지 않게 넘긴다
+    assert "intent_known" not in world.health().payload(lease_s=45)  # Worker 내부용. vm.health 계약은 그대로
+    world.clock.now += 5
+    assert world.tick(replace(obs(state=VmState.crashed), intent_known=False)) == []  # crashed 도 보류
+    assert world.run(replace(obs(present=False), intent_known=False), 120) == []  # absent 도 보류
+    world.clock.now += 5
+    assert [j.reason for j in world.tick(obs(present=False))] == [FailureReason.DOMAIN_ABSENT]  # 의도를 다시 읽으면 재개
+
+
+def test_unknown_intent_does_not_close_an_open_episode():
+    """의도를 못 읽는 동안 캐시가 stopped 여도 '대상 아님'으로 episode 를 닫지 않는다."""
+    world = World(arming=Known([VM]))
+    world.prove()
+    boot_both(world, obs())
+    judged = world.run(obs(), 40)
+    assert [j.reason for j in judged] == [FailureReason.HEARTBEAT_LOST]
+    episode = world.watcher.open_recovery(VM)
+    world.clock.now += 5
+    world.tick(replace(obs(desired="stopped"), intent_known=False))
+    assert world.watcher.open_recovery(VM) == episode

@@ -1,0 +1,715 @@
+{
+  "trial": "xenova-257-runtime-c8966d6e",
+  "duration_target_s": 120,
+  "markers_requested": true,
+  "product_native_worker": true,
+  "setup": {
+    "prior": {
+      "xenova-display-kiosk.service": true,
+      "xenova-display-graphics.service": true
+    }
+  },
+  "prepared": {
+    "native_dependency_check": true,
+    "started": true
+  },
+  "unauthenticated_http": 401,
+  "marker_requests": [
+    {
+      "id": 1,
+      "request_started_pc": 418140.6257905,
+      "ack": {
+        "id": 1,
+        "rgb": [
+          88,
+          32,
+          32
+        ],
+        "board_draw_request": 4230.729230076,
+        "board_draw_done": 4230.730051865
+      }
+    },
+    {
+      "id": 2,
+      "request_started_pc": 418141.2767264,
+      "ack": {
+        "id": 2,
+        "rgb": [
+          144,
+          32,
+          32
+        ],
+        "board_draw_request": 4231.385980381,
+        "board_draw_done": 4231.386871429
+      }
+    },
+    {
+      "id": 3,
+      "request_started_pc": 418141.7493284,
+      "ack": {
+        "id": 3,
+        "rgb": [
+          200,
+          32,
+          32
+        ],
+        "board_draw_request": 4231.868258206,
+        "board_draw_done": 4231.871184421
+      }
+    },
+    {
+      "id": 4,
+      "request_started_pc": 418142.2904043,
+      "ack": {
+        "id": 4,
+        "rgb": [
+          32,
+          88,
+          32
+        ],
+        "board_draw_request": 4232.394639345,
+        "board_draw_done": 4232.395270488
+      }
+    },
+    {
+      "id": 5,
+      "request_started_pc": 418142.8688378,
+      "ack": {
+        "id": 5,
+        "rgb": [
+          88,
+          88,
+          32
+        ],
+        "board_draw_request": 4232.978927438,
+        "board_draw_done": 4232.979926966
+      }
+    },
+    {
+      "id": 6,
+      "request_started_pc": 418143.2952585,
+      "ack": {
+        "id": 6,
+        "rgb": [
+          144,
+          88,
+          32
+        ],
+        "board_draw_request": 4233.404711797,
+        "board_draw_done": 4233.405542864
+      }
+    },
+    {
+      "id": 7,
+      "request_started_pc": 418143.7196679,
+      "ack": {
+        "id": 7,
+        "rgb": [
+          200,
+          88,
+          32
+        ],
+        "board_draw_request": 4233.826910818,
+        "board_draw_done": 4233.827533349
+      }
+    },
+    {
+      "id": 8,
+      "request_started_pc": 418144.109164,
+      "ack": {
+        "id": 8,
+        "rgb": [
+          32,
+          144,
+          32
+        ],
+        "board_draw_request": 4234.215732596,
+        "board_draw_done": 4234.219107288
+      }
+    },
+    {
+      "id": 9,
+      "request_started_pc": 418144.555297,
+      "ack": {
+        "id": 9,
+        "rgb": [
+          88,
+          144,
+          32
+        ],
+        "board_draw_request": 4234.692095324,
+        "board_draw_done": 4234.694551543
+      }
+    },
+    {
+      "id": 10,
+      "request_started_pc": 418145.1645716,
+      "ack": {
+        "id": 10,
+        "rgb": [
+          144,
+          144,
+          32
+        ],
+        "board_draw_request": 4235.279691518,
+        "board_draw_done": 4235.282659195
+      }
+    },
+    {
+      "id": 11,
+      "request_started_pc": 418145.883742,
+      "ack": {
+        "id": 11,
+        "rgb": [
+          200,
+          144,
+          32
+        ],
+        "board_draw_request": 4236.000287409,
+        "board_draw_done": 4236.001931784
+      }
+    },
+    {
+      "id": 12,
+      "request_started_pc": 418146.5584772,
+      "ack": {
+        "id": 12,
+        "rgb": [
+          32,
+          200,
+          32
+        ],
+        "board_draw_request": 4236.668184488,
+        "board_draw_done": 4236.676255657
+      }
+    },
+    {
+      "id": 13,
+      "request_started_pc": 418146.978995,
+      "ack": {
+        "id": 13,
+        "rgb": [
+          88,
+          200,
+          32
+        ],
+        "board_draw_request": 4237.087771013,
+        "board_draw_done": 4237.090180048
+      }
+    },
+    {
+      "id": 14,
+      "request_started_pc": 418147.3409456,
+      "ack": {
+        "id": 14,
+        "rgb": [
+          144,
+          200,
+          32
+        ],
+        "board_draw_request": 4237.451085849,
+        "board_draw_done": 4237.45376127
+      }
+    },
+    {
+      "id": 15,
+      "request_started_pc": 418147.7506242,
+      "ack": {
+        "id": 15,
+        "rgb": [
+          200,
+          200,
+          32
+        ],
+        "board_draw_request": 4237.862957424,
+        "board_draw_done": 4237.864397708
+      }
+    },
+    {
+      "id": 16,
+      "request_started_pc": 418148.2123089,
+      "ack": {
+        "id": 16,
+        "rgb": [
+          32,
+          32,
+          88
+        ],
+        "board_draw_request": 4238.328485842,
+        "board_draw_done": 4238.329401685
+      }
+    },
+    {
+      "id": 17,
+      "request_started_pc": 418148.7290262,
+      "ack": {
+        "id": 17,
+        "rgb": [
+          88,
+          32,
+          88
+        ],
+        "board_draw_request": 4238.836800048,
+        "board_draw_done": 4238.837356451
+      }
+    },
+    {
+      "id": 18,
+      "request_started_pc": 418149.1343489,
+      "ack": {
+        "id": 18,
+        "rgb": [
+          144,
+          32,
+          88
+        ],
+        "board_draw_request": 4239.250076408,
+        "board_draw_done": 4239.250782494
+      }
+    },
+    {
+      "id": 19,
+      "request_started_pc": 418149.5862498,
+      "ack": {
+        "id": 19,
+        "rgb": [
+          200,
+          32,
+          88
+        ],
+        "board_draw_request": 4239.692997191,
+        "board_draw_done": 4239.705472877
+      }
+    },
+    {
+      "id": 20,
+      "request_started_pc": 418150.1544816,
+      "ack": {
+        "id": 20,
+        "rgb": [
+          32,
+          88,
+          88
+        ],
+        "board_draw_request": 4240.261925901,
+        "board_draw_done": 4240.262498914
+      }
+    },
+    {
+      "id": 21,
+      "request_started_pc": 418150.5424429,
+      "ack": {
+        "id": 21,
+        "rgb": [
+          88,
+          88,
+          88
+        ],
+        "board_draw_request": 4240.693219527,
+        "board_draw_done": 4240.69598591
+      }
+    },
+    {
+      "id": 22,
+      "request_started_pc": 418151.1579536,
+      "ack": {
+        "id": 22,
+        "rgb": [
+          144,
+          88,
+          88
+        ],
+        "board_draw_request": 4241.263307616,
+        "board_draw_done": 4241.26556643
+      }
+    },
+    {
+      "id": 23,
+      "request_started_pc": 418151.5972251,
+      "ack": {
+        "id": 23,
+        "rgb": [
+          200,
+          88,
+          88
+        ],
+        "board_draw_request": 4241.731954932,
+        "board_draw_done": 4241.733914896
+      }
+    },
+    {
+      "id": 24,
+      "request_started_pc": 418152.1285248,
+      "ack": {
+        "id": 24,
+        "rgb": [
+          32,
+          144,
+          88
+        ],
+        "board_draw_request": 4242.234906242,
+        "board_draw_done": 4242.236249008
+      }
+    },
+    {
+      "id": 25,
+      "request_started_pc": 418152.5700785,
+      "ack": {
+        "id": 25,
+        "rgb": [
+          88,
+          144,
+          88
+        ],
+        "board_draw_request": 4242.68158153,
+        "board_draw_done": 4242.68389162
+      }
+    },
+    {
+      "id": 26,
+      "request_started_pc": 418153.0287797,
+      "ack": {
+        "id": 26,
+        "rgb": [
+          144,
+          144,
+          88
+        ],
+        "board_draw_request": 4243.140078213,
+        "board_draw_done": 4243.142037788
+      }
+    },
+    {
+      "id": 27,
+      "request_started_pc": 418153.6492676,
+      "ack": {
+        "id": 27,
+        "rgb": [
+          200,
+          144,
+          88
+        ],
+        "board_draw_request": 4243.764241678,
+        "board_draw_done": 4243.769634741
+      }
+    },
+    {
+      "id": 28,
+      "request_started_pc": 418154.2816757,
+      "ack": {
+        "id": 28,
+        "rgb": [
+          32,
+          200,
+          88
+        ],
+        "board_draw_request": 4244.394208406,
+        "board_draw_done": 4244.396797143
+      }
+    },
+    {
+      "id": 29,
+      "request_started_pc": 418154.8488277,
+      "ack": {
+        "id": 29,
+        "rgb": [
+          88,
+          200,
+          88
+        ],
+        "board_draw_request": 4244.959405335,
+        "board_draw_done": 4244.961230411
+      }
+    },
+    {
+      "id": 30,
+      "request_started_pc": 418155.4629631,
+      "ack": {
+        "id": 30,
+        "rgb": [
+          144,
+          200,
+          88
+        ],
+        "board_draw_request": 4245.568310194,
+        "board_draw_done": 4245.568924225
+      }
+    }
+  ],
+  "restart": {
+    "at_seconds": 60.04333700001007,
+    "before": {
+      "streams": [
+        {
+          "stream_id": "monitor-1",
+          "output_id": "monitor-1",
+          "capture_source_id": "x11-root:HDMI-1",
+          "capture_epoch": "22e4954d-e59d-4bda-be4d-48f0fbf6474b",
+          "rectangle": [
+            0,
+            0,
+            1280,
+            720
+          ],
+          "width": 1280,
+          "height": 720,
+          "codec": "mjpeg",
+          "fps": 5,
+          "frame_sequence": 295,
+          "frame_age_ms": 57,
+          "status": "live",
+          "error": null,
+          "bytes_total": 14204337,
+          "backend": "x11",
+          "physical_verified": true,
+          "render_revision": null,
+          "render_correlation": "unverified",
+          "reported_dom_revision": "f09e59f3acfe842f95ca"
+        },
+        {
+          "stream_id": "monitor-2",
+          "output_id": "monitor-2",
+          "capture_source_id": "x11-root:HDMI-2",
+          "capture_epoch": "2eb4dcd8-ad3d-4b99-8c98-ed4baf07d8fe",
+          "rectangle": [
+            1280,
+            0,
+            1280,
+            720
+          ],
+          "width": 1280,
+          "height": 720,
+          "codec": "mjpeg",
+          "fps": 5,
+          "frame_sequence": 293,
+          "frame_age_ms": 63,
+          "status": "live",
+          "error": null,
+          "bytes_total": 19239184,
+          "backend": "x11",
+          "physical_verified": true,
+          "render_revision": null,
+          "render_correlation": "unverified",
+          "reported_dom_revision": "f09e59f3acfe842f95ca"
+        }
+      ]
+    },
+    "action": {
+      "restarted": true
+    }
+  },
+  "streams": {
+    "monitor-1": {
+      "frames": 533,
+      "duration_s": 120.29111340001691,
+      "fps": 4.430917504500586,
+      "jpeg_mbps": 1.7043893119370792,
+      "connections": 2,
+      "errors": [
+        {
+          "at": 418186.8951652,
+          "type": "EOFError"
+        },
+        {
+          "at": 418187.4424765,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418187.9692683,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418188.4850568,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418189.0032802,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418189.5296128,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418190.072827,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418190.632269,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418191.1762743,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418191.6866193,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418192.2341486,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418192.7637923,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418193.3655041,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418193.9473285,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418194.4746773,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418195.0204247,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418195.5720883,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418196.1362173,
+          "type": "ChannelException"
+        }
+      ],
+      "largest_decode_gap_s": 11.452236199984327,
+      "gaps_over_1s": 1
+    },
+    "monitor-2": {
+      "frames": 531,
+      "duration_s": 120.29111340001691,
+      "fps": 4.414291172401147,
+      "jpeg_mbps": 2.3170195712891357,
+      "connections": 2,
+      "errors": [
+        {
+          "at": 418186.8955056,
+          "type": "EOFError"
+        },
+        {
+          "at": 418187.4572402,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418187.9924202,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418188.5149828,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418189.0311659,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418189.5616318,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418190.1447696,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418190.7021256,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418191.2351385,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418191.7548555,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418192.2830577,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418192.8007319,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418193.3982285,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418194.002656,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418194.5573999,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418195.1055247,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418195.6622017,
+          "type": "ChannelException"
+        },
+        {
+          "at": 418196.1952229,
+          "type": "ChannelException"
+        }
+      ],
+      "largest_decode_gap_s": 11.61089810001431,
+      "gaps_over_1s": 1
+    }
+  },
+  "elapsed_s": 120.29111340001691,
+  "latency": {
+    "monitor-1": {
+      "matched": 30,
+      "requested": 30,
+      "p95_ms": 402.0738000399433,
+      "scope": "PC control-request start -> JPEG decoded/pixel matched; includes outbound control; no cross-host clock subtraction"
+    },
+    "monitor-2": {
+      "matched": 30,
+      "requested": 30,
+      "p95_ms": 420.58650002582,
+      "scope": "PC control-request start -> JPEG decoded/pixel matched; includes outbound control; no cross-host clock subtraction"
+    }
+  },
+  "cleanup": {
+    "services": {
+      "xenova-display-kiosk.service": "active",
+      "xenova-display-graphics.service": "active",
+      "xenova-display-feed.service": "active",
+      "xenova-dom0-manager.service": "active",
+      "mosquitto.service": "active",
+      "tailscaled.service": "active"
+    },
+    "ssh_policy_restored": true,
+    "graphics_source_restored": true,
+    "graphics_source_unchanged": true,
+    "domains_unchanged": true,
+    "temporary_files_removed": true,
+    "sender_journal": "INFO:     Started server process [20665]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://127.0.0.1:8083 (Press CTRL+C to quit)\nStopping [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-c8966d6e/stream-host.py...\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [20665]\nxenova-257-runtime-c8966d6e.service: Deactivated successfully.\nStopped [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-c8966d6e/stream-host.py.\nxenova-257-runtime-c8966d6e.service: Consumed 53.798s CPU time over 1min 12.507s wall clock time, 59.3M memory peak.\nStarted [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-c8966d6e/stream-host.py.\nINFO:     Started server process [21068]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://127.0.0.1:8083 (Press CTRL+C to quit)\nStopping [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-c8966d6e/stream-host.py...\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [21068]\nxenova-257-runtime-c8966d6e.service: Deactivated successfully.\nStopped [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-c8966d6e/stream-host.py.\nxenova-257-runtime-c8966d6e.service: Consumed 47.072s CPU time over 1min 4.695s wall clock time, 58.6M memory peak.\n"
+  },
+  "sample_window_s": 119.04271020399938,
+  "cpu_mean_cores": {
+    "sender": 0.23840183032935133,
+    "native_worker": 0.435221946066374,
+    "other_pipeline": 0.0,
+    "browser": 0.3396260042359293,
+    "xorg": 0.1365896321760131
+  },
+  "cpu_scope": "service cgroups; process birth/exit intervals undercount startup/exit CPU; Chromium/Xorg excluded from pipeline",
+  "available_min_mib": 1705.90625,
+  "pipeline_rss_first_last_mib": [
+    93.10546875,
+    93.66015625
+  ],
+  "rss_note": "sum of per-process RSS; shared pages may be counted twice; not exclusive resident memory"
+}

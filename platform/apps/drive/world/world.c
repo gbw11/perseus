@@ -90,7 +90,7 @@ static bool wire_valid(const uint8_t *p,size_t n,const pb_msgdesc_t *desc,unsign
 }
 
 enum dw_result dw_world_validate(const dw_world *w,const struct dw_trust *t,uint64_t now,uint64_t *age) {
- if(w->major!=1||w->required_features)return DW_VERSION;
+ if(w->major!=1||(w->required_features&~DW_ROAD_PRIORITY))return DW_VERSION;
  if(!w->complete||w->truncated)return DW_ARRAY;
  if(!id(w->vehicle)||strcmp(w->vehicle,t->vehicle)||strcmp(w->mapper_boot,t->mapper_boot)||
     strcmp(w->mapper_instance,t->mapper_instance))return DW_SOURCE;
@@ -110,9 +110,12 @@ enum dw_result dw_world_validate(const dw_world *w,const struct dw_trust *t,uint
   if(k&&hypotf(w->reference[k].x-w->reference[k-1].x,w->reference[k].y-w->reference[k-1].y)<w->resolution_m*.1f)return DW_GEOMETRY;
  }
  if(!road_simple(w))return DW_GEOMETRY;
+ bool road=false;unsigned allowed=(w->required_features&DW_ROAD_PRIORITY)?15u:7u;
  for(size_t k=0;k<count;k++) {
-  if((w->occupancy.bytes[k]>100&&w->occupancy.bytes[k]!=255)||(w->cell_flags.bytes[k]&~7))return DW_ARRAY;
+  if((w->occupancy.bytes[k]>100&&w->occupancy.bytes[k]!=255)||(w->cell_flags.bytes[k]&~allowed))return DW_ARRAY;
+  road|=(w->cell_flags.bytes[k]&DW_CELL_ROAD)!=0;
  }
+ if((w->required_features&DW_ROAD_PRIORITY)&&!road)return DW_ARRAY;
  if(!w->reference_odom_seq||strcmp(w->clock_epoch,t->clock.epoch)||
     w->observed_us>w->completed_us||w->completed_us>w->published_us||
     w->published_us>INT64_MAX||now>INT64_MAX||now>t->clock.expires_pi_us||
@@ -165,7 +168,7 @@ enum dw_result dw_vehicle_decode(const uint8_t *p,size_t n,dw_vehicle *out) {
  return vehicle_validate(out);
 }
 static enum dw_result state_validate(const dw_state *out) {
- if(out->major!=1)return DW_VERSION;
+ if(out->major!=1||(out->world_features&~DW_ROAD_PRIORITY))return DW_VERSION;
  if(!out->complete||out->path_count<2||out->tracker_index>=out->path_count||
     !out->source_generation||!out->state_revision||!out->path_revision||!out->maneuver_revision||
     !out->vehicle_sequence||!out->calculation_sequence||out->direction< -1||out->direction>1||out->maneuver_phase>2)return DW_ARRAY;
@@ -174,6 +177,8 @@ static enum dw_result state_validate(const dw_state *out) {
     !id(out->reference_id)||!out->reference_revision)return DW_SOURCE;
  if(!id(out->message_id)||!id(out->calibration)||!id(out->map_epoch)||!out->observation_seq)return DW_SOURCE;
  if(!dw_pose_finite(out->merge_goal))return DW_NUMERIC;
+ if(out->has_merge_passed_reference_revision&&(!out->direction||!out->merge_passed_reference_revision||
+    out->merge_passed_reference_revision!=out->reference_revision))return DW_ARRAY;
  for(size_t k=0;k<out->path_count;k++) {
   const xenova_drive_PathPoint *point=&out->path[k];
   if(!dw_pose_finite(point->pose)||!isfinite(point->steering_rad)||!isfinite(point->velocity_mps))return DW_NUMERIC;
