@@ -20,11 +20,13 @@ from .config import FeedSettings
 from .mqtt import MqttSource
 from .state import StateStore
 from .policy import DisplayPolicy, RenderAck, Selection
+from .gateway import GatewayReader
 
 log = logging.getLogger(__name__)
 
 
-def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSource, web_root=None):
+def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSource, web_root=None,
+               gateway_factory=GatewayReader):
     settings = settings or FeedSettings.from_env()
     if driver is None:
         shared_path = os.environ.get("XENOVA_OBSERVATIONS_PATH")
@@ -32,6 +34,22 @@ def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSourc
     store = store or StateStore(settings)
     policy = DisplayPolicy(settings, store.epoch, clock=store.clock)
     sessions = {}
+
+    async def poll_gateway(reader):
+        unavailable = False
+        while True:
+            started = time.monotonic()
+            try:
+                value, observed = await asyncio.to_thread(reader.read)
+                store.gateway_success(value, observed_mono=observed)
+                unavailable = False
+            except Exception as error:
+                store.gateway_failure()
+                if not unavailable:
+                    log.warning("Gateway display context unavailable (%s)", type(error).__name__)
+                unavailable = True
+            # One outstanding bounded call at a time; skip catch-up polls.
+            await asyncio.sleep(max(0, 1 - (time.monotonic() - started)))
 
     async def poll():
         unavailable = False
@@ -54,15 +72,22 @@ def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSourc
 
     @asynccontextmanager
     async def lifespan(app):
-        task = asyncio.create_task(poll())
         source = mqtt_factory(store)
+        # Missing client installation in opt-in mode is a startup error, not a
+        # silent switch to MQTT/retained or raw Authority-file reads.
+        reader = gateway_factory(settings) if settings.drive_transport == "gateway" else None
+        tasks = [asyncio.create_task(poll())]
+        if reader is not None:
+            tasks.append(asyncio.create_task(poll_gateway(reader)))
         try:
             source.start()
             yield
         finally:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with suppress(asyncio.CancelledError):
+                    await task
             await asyncio.to_thread(source.stop)
 
     app = FastAPI(title="Xenova read-only display feed", lifespan=lifespan)

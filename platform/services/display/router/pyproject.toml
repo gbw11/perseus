@@ -20,5 +20,5 @@ include = ["xenova_display*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "../../dom0-manager", "../../vm-agent/mqtt-client"]
+pythonpath = [".", "../../dom0-manager", "../../vm-agent/mqtt-client", "../../gateway"]
 addopts = "-q"

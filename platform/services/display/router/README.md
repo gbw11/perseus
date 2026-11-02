@@ -1,5 +1,11 @@
 # dom0 표시 파이프라인 (2~5단계)
 
+## 기존 Gateway 주행 상태 직접 읽기 (선택형)
+
+2026-11-02 사용자 선택으로 `XENOVA_DISPLAY_DRIVE_TRANSPORT=gateway`를 추가했다. 기존 `GatewayClient.context()`만 1초마다 읽고 기존 상태/표시 API·WS에 반영한다. 기본 `mqtt`는 유지한다. gateway 모드에서는 별도 표시 MQTT 토픽을 구독·수락하지 않으며 Agent·앱 MQTT는 유지한다. 조회 단절·만료는 미확인, 선택된 AUTO/MANUAL과 출력 허가는 구분하고 두 HDMI에 ‘모드 선택 · 구동 준비 중’을 표시한다.
+
+[연결·신선도·권한·동시 배포 계약](../../../../docs/contracts/display-gateway-read-v1.md), [환경 예시](deploy/board-kms/gateway-read.env.example), [로컬 및 보드 확인 결과](../../../../docs/verification/display-255-gateway-read-20261102.md)를 따른다. Gateway와 client 패키지·root 전용 UDS는 기존 제공 경로가 준비돼 있어야 한다. 이 기능은 Gateway를 자동 설치·기동하거나 차량 제어를 실행하지 않는다. 아래 별도 MQTT 표시 토픽 설명은 기존 모드이며 새 읽기 경로에 필요한 추가 송신 작업이 아니다.
+
 HDMI 렌더러와 외부 웹이 함께 사용할 읽기 전용 상태 피드와 로컬 화면 선택 정책이다. 3단계 전체/상세 웹 렌더러에 이어 4단계에서 X11 실행기·실제 픽셀 캡처·원격 시연 전송을 추가했다. 실보드 HDMI 검증과 이미지 준비는 남아 있다. 기존 MO-04 터미널을 열거나 콘솔 출력을 상태 분석용으로 가로채지 않는다.
 
 ```text

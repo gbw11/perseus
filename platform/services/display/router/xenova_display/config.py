@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 from uuid import UUID
 
@@ -103,8 +103,17 @@ class FeedSettings:
     mqtt_password: str | None = None
     control_source: str = "dom0-gateway"
     binding_scope: Literal["legacy", "candidate", "deployment", "configured"] = "configured"
+    drive_transport: Literal["mqtt", "gateway"] = "mqtt"
+    gateway_socket: str = "/run/xenova-gateway/control.sock"
+    gateway_budget_s: float = 0.5
 
     def __post_init__(self):
+        if self.drive_transport not in {"mqtt", "gateway"}:
+            raise ValueError("invalid display drive transport")
+        if not PurePosixPath(self.gateway_socket).is_absolute() or '\0' in self.gateway_socket:
+            raise ValueError("Gateway socket path must be absolute")
+        if type(self.gateway_budget_s) not in (int, float) or not 0 < self.gateway_budget_s <= 1:
+            raise ValueError("Gateway read budget must be in (0, 1] seconds")
         if bool(self.mqtt_username) != bool(self.mqtt_password):
             raise ValueError('MQTT username and password must be configured together')
         if not self.token.strip():
@@ -135,4 +144,7 @@ class FeedSettings:
             mqtt_password=os.environ.get("XENOVA_DISPLAY_MQTT_PASSWORD"),
             control_source=os.environ.get("XENOVA_DISPLAY_CONTROL_SOURCE", "dom0-gateway"),
             binding_scope=scope,
+            drive_transport=os.environ.get("XENOVA_DISPLAY_DRIVE_TRANSPORT", "mqtt"),
+            gateway_socket=os.environ.get("XENOVA_DISPLAY_GATEWAY_SOCKET", "/run/xenova-gateway/control.sock"),
+            gateway_budget_s=float(os.environ.get("XENOVA_DISPLAY_GATEWAY_BUDGET_S", "0.5")),
         )
