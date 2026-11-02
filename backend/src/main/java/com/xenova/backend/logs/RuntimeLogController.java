@@ -2,7 +2,6 @@ package com.xenova.backend.logs;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.xenova.backend.common.error.ApiException;
-import com.xenova.backend.vm.infrastructure.Dom0ManagerClient;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -16,10 +15,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/logs")
 public class RuntimeLogController {
-    private final Dom0ManagerClient client;
+    private final RuntimeLogPort runtimeLogs;
 
-    public RuntimeLogController(Dom0ManagerClient client) {
-        this.client = client;
+    public RuntimeLogController(RuntimeLogPort runtimeLogs) {
+        this.runtimeLogs = runtimeLogs;
     }
 
     @GetMapping
@@ -52,7 +51,7 @@ public class RuntimeLogController {
 
     private JsonNode read(Map<String, Object> filters, boolean sources) {
         try {
-            return client.runtimeLogs(filters, sources);
+            return runtimeLogs.read(filters, sources);
         } catch (ApiException error) {
             if (error.getStatus().is5xxServerError()) {
                 throw new ApiException(error.getStatus(), "LOG_SOURCE_UNAVAILABLE",
