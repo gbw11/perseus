@@ -1,0 +1,47 @@
+{
+  "captures": [
+    {
+      "output_id": "monitor-1",
+      "code": 0,
+      "err": ""
+    },
+    {
+      "output_id": "monitor-2",
+      "code": 0,
+      "err": ""
+    }
+  ],
+  "release": "/opt/xenova-display/releases/20261028-ffed0f8",
+  "manifest": {
+    "bin/graphics-session.py": "3a97e594403fea7f6f1dfc142377380378a3c25156dbaf1bb10484e5a8226067",
+    "bin/graphics-child.py": "826d8af2c85d89f67c422d30489fc492a904560cf510fe3586fe78523e2511c3",
+    "bin/feed.py": "72959874bb2dad710f2bb2606745c4c987b8cf9a38b5b178ab675778c5e17fc9",
+    "units/xenova-display-feed.service": "c0e6917a4e754ba8cd2428fd0e263a5dd477190a14763c0763bd44ac968c91f5",
+    "units/xenova-display.target": "38e25fb4e65e98aff6457d8b61b96eeafadc0a670ab4313dbefad346ccf7f50c",
+    "units/xenova-display-kiosk.service": "cdb7634010926d2ad2892917c007de0c78d46a82155b683523b73a07b156d42b",
+    "units/xenova-display-graphics.service": "ae6849fffe91ddbbf7a233d24a8d871fc54736ec53390db28e1bd424c5545271",
+    "web/index.html": "792513fc5d946341f9c96980a578b305f20e8999fcfaa5f383d75762dcf5f791",
+    "web/favicon.png": "61f27411abef4809b83d2198d73f728091947246a18c86446d3c2373dd4a24d6",
+    "web/assets/xenova-mark-LxQ2B99p.png": "055946ea9db0d3509f5ab0edfa1b1328895abc761e137b805aeff02fc47c6162",
+    "web/assets/index-CvxUBLSk.css": "9136d76ea6921eb30fbc695a5faa8d55b242cd997796d790520d775f5c385331",
+    "web/assets/index-CapkutRM.js": "27217664b39e59662e45e0392869ecc61df9e361f5765c098e3ca8ea5116c5b3",
+    "lib/xenova_display/state.py": "79d988dc066d2d646f6fa5de0f936970d60ced1d66273fd7ca8b517241a64298",
+    "lib/xenova_display/mqtt.py": "e5d8af9d347e434ea31d55141dade1a9531cbb6e9fb9b245392a5f28a6899b96",
+    "lib/xenova_display/bindings.py": "a27132721589305093bcd53bd6ed68bb2354f0be6b60f0c09eb2104b2007f217",
+    "lib/xenova_display/viewer.html": "f48a9dd109f8d7f6884abacd6fcdec67492df77c51ce59db68359ccb9f40f30f",
+    "lib/xenova_display/kiosk.py": "fa00da2fa4bc677ee572e9d2f325a7fb2b381f74e3cd0f997e0ceca8059bad60",
+    "lib/xenova_display/__init__.py": "a35c60dd933616a756f651d9ee4540ddd2a85bf809a4dd19e6f430068004171f",
+    "lib/xenova_display/policy.py": "181e621d215d485d9ef6d3584a01b30d30ab996e4072838fe1caf7c43c60107c",
+    "lib/xenova_display/idle.py": "34601a9c7847cf017f27b40067bc960258f4cb5b31ea644ff11b38ce422f12d0",
+    "lib/xenova_display/outputs.py": "d2b60dec5a438b71e64b12c11d6cfcb1ed087adcc8e4c45c51e5be1e617c6db3",
+    "lib/xenova_display/config.py": "51a2453e362d4f33bcac9104afd81e4174f0db9bf2f371b24c21029093aca5c0",
+    "lib/xenova_display/main.py": "38aea2917676abaf3de17ed4338816d1e68f106261d2ed7f574b32b430342580",
+    "lib/xenova_display/stream.py": "9363d5af90a55576a71bd4cc8a83f0190e748f96369971f815ac4383646fbda6"
+  },
+  "private_file_modes": {
+    "/etc/xenova/display-256/feed.env": "0o600",
+    "/etc/xenova/display-256/kiosk.env": "0o600",
+    "/etc/xenova/display-256/bindings.json": "0o600"
+  },
+  "no_credential_contents_returned": true
+}

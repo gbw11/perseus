@@ -25,6 +25,10 @@ docker compose up -d --build
 docker compose ps
 ```
 
+운영 Spring은 MQTT를 활성화하고 Mosquitto의 전용 계정을 사용합니다. `.env`의
+`MQTT_BROKER_URL`, `MQTT_USERNAME`, `MQTT_PASSWORD`를 실제 배포값으로 교체해야 하며,
+정상 연결되면 Backend 로그에 `MQTT connected`와 `MQTT subscribed`가 차례로 남습니다.
+
 Nginx는 `/`를 관리 콘솔로, `/screens/`를 VM 모니터로, `/api/`·`/ws/`·`/actuator/`를
 Backend로 전달합니다. MySQL, Redis, Backend와 두 정적 웹 컨테이너는 호스트에 포트를 직접
 공개하지 않습니다.
@@ -67,6 +71,8 @@ docker compose --env-file deploy/jenkins/.env -f compose.jenkins.yaml exec jenki
 `/var/run/docker.sock` 연결은 Jenkins 파이프라인에 호스트의 root에 준하는 권한을 부여합니다. 관리자 이외 사용자가 임의의 Jenkinsfile을 실행할 수 없도록 Jenkins와 GitLab 권한을 제한해야 합니다.
 
 ## 주요 문서
+
+- [하위 플랫폼 구성과 문서 안내](docs/platform/README.md)
 
 - [Xenova CLI·Manager 기능 명세서](docs/platform/cli-manager-spec.md)
 - [Linux 자원·부팅 정책·Zephyr 네트워크/종료](platform/docs/resource-boot-zephyr.md)

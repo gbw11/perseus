@@ -46,6 +46,9 @@ export type VmState = 'running' | 'stopping' | 'paused' | 'crashed' | 'stopped';
 /** heartbeat 기준. zephyr 는 항상 UNKNOWN */
 export type AgentStatus = 'UNKNOWN' | 'ONLINE' | 'STALE' | 'OFFLINE';
 
+/** 백엔드 VmRole (DB vms.role). 배포자가 VM 등록·수정 때 지정하며 이름·app_id 로 추정하지 않는다 */
+export type VmRole = 'primary_drive' | 'backup_drive' | 'interaction';
+
 /** §2.2 프론트 공개 VM. agent_status·ipv4 는 목록·단건 조회에만 있다 */
 export interface Vm {
   vm_id: string;
@@ -58,6 +61,8 @@ export interface Vm {
   template_version: string;
   vcpus: number;
   memory_mib: number;
+  /** 역할 미지정이면 null */
+  role?: VmRole | null;
 }
 
 /** §5 GET /api/v1/vms */
@@ -181,6 +186,8 @@ export type EventType =
   | 'agent.status.changed'
   | 'recovery.started'
   | 'recovery.completed'
+  | 'recovery.recovered'
+  | 'recovery.cancelled'
   | 'recovery.failed'
   | 'demo.command.sent'
   | 'demo.command.completed'

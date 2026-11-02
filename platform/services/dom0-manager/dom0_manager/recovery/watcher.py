@@ -20,6 +20,12 @@
   armed 는 dom0(ArmingStore)에 남겨 Worker 재시작 뒤에도 유지한다. 앱이 없는 starter 펌웨어는 둘 다 아니라 Xen 상태로만 본다.
 - 관측 경로: 필터별 구독이 승인되지 않았거나(연결만으로는 부족, ACL 거부 포함) 승인된 지 한 창이 안 됐으면 그 신호의 손실은 UNKNOWN.
   브로커·ACL 문제는 VM 장애가 아니다. crashed·absent 는 Xen 관측이라 무관하다. 신호가 신선하면 경로 상태와 무관하게 OK 다.
+- 전달 근거는 두 겹이다. 채널(승인 뒤 어느 VM 이든 메시지가 옴)은 브로커가 그 채널을 지금 전달한다는 공통 근거일 뿐이고,
+  대상 VM 의 손실 판정 자격은 그 VM 의 수신 이력(ArmingStore, Linux agent_delivered·Zephyr armed)이다. 다른 VM 의 수신으로
+  대상 VM 을 판정하지 않는다. 이력이 없는 VM(계정·ACL 오류·배포 누락·첫 부팅 정체를 구별할 수 없음)은 UNKNOWN 이라 첫 부팅부터
+  멈춘 VM 은 자동 복구하지 않는다. 이력은 현재 신호가 아니다: 이전 부팅의 신호는 여전히 세지 않고 boot grace 뒤에 판정한다.
+  한 번 받은 뒤 그 VM 의 ACL 만 바뀌는 경우는 생존 신호만으로 구별할 수 없다(episode 당 시도 상한으로 묶인다).
+- HEALTHY 는 Xen 실행 + 생존 신호가 신선하다는 뜻이다. CPU·메모리·앱 기능까지 정상이라는 뜻이 아니다.
 - 판정을 내기 직전에 confirm(플랫폼 get)으로 의도와 실행 상태를 다시 읽고 그 관측으로 다시 판정한다. 캐시된 의도가 오래됐거나
   관측 사이에 VM 이 시작됐으면 판정하지 않고, 건강 스냅샷도 재확인한 관측으로 낸다.
 - 장애 한 건(episode)에 Judgment 는 하나다. 사유가 바뀌어도(HEARTBEAT_LOST → DOMAIN_ABSENT) 다시 내지 않고 건강 스냅샷에만 반영한다.
@@ -60,6 +66,7 @@ class Verdict(str, Enum):
 @dataclass
 class _Track:
     domid: int | None = None
+    execution_id: str | None = None
     domain_since: float | None = None  # 현재 domid 를 처음 본 시각
     signaled: bool = False  # 이번 부팅에서 생존 신호를 받은 적이 있다 (받으면 boot grace 끝)
     absent_since: float | None = None  # 도메인이 없는 것을 처음 본 시각
@@ -89,6 +96,7 @@ class Watcher:
         self._arming = arming
         armed_state = arming.load() if arming is not None else ArmingState()
         self._armed: dict[UUID, str] = armed_state.armed
+        self._agent_delivered: set[UUID] = set(armed_state.agent_delivered)
         # 저장 파일이 깨졌다: capability 선언도 armed 기록도 없는 Zephyr VM 은 대상 여부를 알 수 없다. HEALTHY 로 꾸미지 않는다
         self._history_lost = armed_state.history_lost
         self._clock = clock
@@ -97,14 +105,16 @@ class Watcher:
         self._link = LinkState.down()
         self._link_since: dict[str, float | None] = {AGENT: None, APP: None}
         # 승인 뒤 그 채널에서 메시지를 하나라도 받았는가. Mosquitto 는 읽기 ACL 에 막힌 구독도 SUBACK 성공으로 답하므로
-        # 승인만 믿고 "안 온다"를 판정하면 ACL 오설정이 그대로 VM 재시작으로 이어진다. 실제 수신이 경로의 증거다
+        # 승인만 믿고 "안 온다"를 판정하면 ACL 오설정이 그대로 VM 재시작으로 이어진다. 실제 수신이 경로의 증거다.
+        # 어느 VM 의 수신이든 되므로 채널 공통 근거다. 대상 VM 의 근거는 VM 별 수신 이력(_delivered)이다
         self._link_proven: dict[str, bool] = {AGENT: False, APP: False}
         self._link_warned: dict[str, bool] = {AGENT: False, APP: False}
         self._removed: list[UUID] = []  # 지난 removed_vm_ids() 이후 등록에서 사라진 VM
-        if self._armed:
-            log.info("restored %d armed Zephyr VM(s) from %s", len(self._armed), arming.path if arming else "-")
+        if self._armed or self._agent_delivered:
+            log.info("restored delivery history from %s: %d Zephyr VM(s), %d Linux VM(s)",
+                     arming.path if arming else "-", len(self._armed), len(self._agent_delivered))
         if self._history_lost:
-            log.error("armed history lost: undeclared Zephyr VMs are reported OBSERVATION_UNAVAILABLE until they signal (delete %s to clear)", arming.path if arming else "-")
+            log.error("armed history lost: undeclared Zephyr VMs are reported OBSERVATION_UNAVAILABLE until they signal; preserve %s and its evidence", arming.path if arming else "-")
 
     # ---- 판정 ----
 
@@ -151,8 +161,11 @@ class Watcher:
                 self._removed.append(vm_id)
                 self._heartbeats.forget(vm_id)
                 self._app_heartbeats.forget(vm_id)
-                if self._armed.pop(vm_id, None) is not None and self._arming is not None:
-                    self._arming.save(self._armed)
+                had_app = self._armed.pop(vm_id, None) is not None
+                had_agent = vm_id in self._agent_delivered
+                self._agent_delivered.discard(vm_id)
+                if (had_app or had_agent) and self._arming is not None:
+                    self._save_armed()
         return judgments
 
     def _evaluate(self, track: _Track, obs: VmObservation, now: float) -> tuple[Verdict, FailureReason | None, float | None]:
@@ -194,7 +207,7 @@ class Watcher:
                 self._check_delivery(channel)
 
     def _check_delivery(self, channel: str) -> bool:
-        """승인 뒤 그 채널로 메시지를 받았으면 경로가 증명된 것이다."""
+        """승인 뒤 그 채널로 메시지를 받았으면 브로커가 그 채널을 전달하는 것이다. 어느 VM 의 메시지든 되므로 특정 VM 의 근거는 아니다."""
         since = self._link_since[channel]
         if since is None:
             return False
@@ -224,8 +237,9 @@ class Watcher:
 
     def _track_domain(self, track: _Track, obs: VmObservation, now: float) -> None:
         if obs.present:
-            if track.domid != obs.domid:
+            if track.domid != obs.domid or (obs.execution_id is not None and track.execution_id!=obs.execution_id):
                 track.domid = obs.domid
+                track.execution_id=obs.execution_id
                 track.domain_since = now
                 track.signaled = False
             track.absent_since = None
@@ -252,20 +266,39 @@ class Watcher:
             return False
         return obs.capability_error is not None or (obs.app_heartbeat_expected is None and self._history_lost)
 
+    def _delivered(self, track: _Track, obs: VmObservation, channel: str) -> bool:
+        """이 VM 의 신호가 실제로 전달된 적이 있는가(손실 판정 자격). 현재 실행의 건강 근거가 아니다."""
+        return obs.vm_id in self._agent_delivered if channel == AGENT else track.app_armed
+
+    def _save_armed(self) -> None:
+        if self._arming.save(self._armed, self._agent_delivered) is False:
+            self._history_lost = True
+            log.error("armed history not saved in %s; undeclared targets remain observation-unavailable", self._arming.path)
+
     def _signal_age(self, track: _Track, obs: VmObservation, now: float) -> float | None:
         if obs.guest_kind == "zephyr":
             track.app_armed = track.app_armed or obs.vm_id in self._armed
             beat = self._app_heartbeats.last(obs.vm_id)
+            if obs.expected_app_instances is not None:
+                pair=self._app_heartbeats.supervision_pair(obs.vm_id,obs.expected_app_boot_id,obs.expected_app_instances)
+                beat=min(pair,key=lambda value:value.received_monotonic) if pair else None
             if beat is not None and not track.app_armed:
                 track.app_armed = True
                 self._armed[obs.vm_id] = beat.app_id
                 if self._arming is not None:
-                    self._arming.save(self._armed)
+                    self._save_armed()
                 log.info("vm %s armed for app.heartbeat liveness (app %s)", obs.vm_id, beat.app_id)
         else:
             beat = self._heartbeats.last(obs.vm_id)
+            if beat is not None and obs.vm_id not in self._agent_delivered:
+                self._agent_delivered.add(obs.vm_id)
+                if self._arming is not None:
+                    self._save_armed()
+                log.info("vm %s armed for agent.heartbeat loss judgments (first delivery observed)", obs.vm_id)
         if beat is None:
             return None
+        if obs.expected_app_instances is None and obs.expected_app_boot_id is not None and (beat.boot_id!=obs.expected_app_boot_id or
+            getattr(beat,'instance_id',None)!=obs.expected_app_instance_id):return None
         if track.domain_since is not None and beat.received_monotonic < track.domain_since:
             return None  # 이전 부팅의 신호. 새 부팅에서는 아직 한 번도 받지 않은 것과 같다
         if track.domain_since is not None:
@@ -284,14 +317,33 @@ class Watcher:
             return Verdict.FAILED, FailureReason.DOMAIN_CRASHED
         if obs.xen_state != VmState.running:
             return Verdict.UNKNOWN, None  # paused·stopping 은 장애가 아니지만 건강하지도 않다
+        if obs.execution_binding_available is False:return Verdict.UNKNOWN,None
+        if obs.expected_app_instances is not None:
+            pair=self._app_heartbeats.supervision_pair(obs.vm_id,obs.expected_app_boot_id,obs.expected_app_instances)
+            if pair is None:return Verdict.UNKNOWN,None
+            # Fresh functional restrictions are not VM death. Stale supervision
+            # still follows existing delivery/grace/common-path loss safeguards.
+            if all(0<=now-value.received_monotonic<=.3 for value in pair):
+                healthy=lambda value: (value.phase=='WAITING' and value.readiness=='QUALIFIED') or (
+                    value.phase=='EXECUTING' and value.readiness=='READY' and value.work_at is not None and 0<=now-value.work_at<=.3)
+                if not all(healthy(value) for value in pair):return Verdict.UNKNOWN,None
+            elif signal_age is not None and signal_age<self._settings.app_heartbeat_lost_s:
+                return Verdict.UNKNOWN,None
         liveness = self._liveness(track, obs)
         if liveness is None:
             if self._target_unknown(track, obs):
                 return Verdict.UNKNOWN, None
             return Verdict.OK, None  # 생존 신호가 없는 종류: Xen 실행이 전부다
         channel, window, grace, reason = liveness
+        if obs.execution_binding_available is True and not track.signaled:
+            # Never-received app traffic cannot distinguish startup failure
+            # from a per-VM ACL/delivery failure. Xen crash/absence stays above.
+            return Verdict.UNKNOWN,None
         if signal_age is not None and signal_age < window:
             return Verdict.OK, None
+        if not self._delivered(track, obs, channel):
+            # 이 VM 의 신호를 받은 적이 없다: 계정·ACL·배포 문제와 부팅 정체를 구별할 수 없다. 다른 VM 의 수신은 근거가 아니다
+            return Verdict.UNKNOWN, None
         if not self._link_ready(channel, now, window):
             return Verdict.UNKNOWN, None
         assert track.domain_since is not None
@@ -308,6 +360,10 @@ class Watcher:
             state = HealthState.STARTING if obs.eligible else HealthState.STOPPED
         elif obs.xen_state != VmState.running:
             state = HealthState.UNHEALTHY
+        elif obs.execution_binding_available is False:
+            state = HealthState.OBSERVATION_UNAVAILABLE
+        elif obs.expected_app_instances is not None and verdict==Verdict.UNKNOWN:
+            state = HealthState.OBSERVATION_UNAVAILABLE
         elif (liveness := self._liveness(track, obs)) is None:
             # 앱 신호가 선언되지도 관측되지도 않은 Zephyr: Xen 실행만 근거. armed 기록을 잃었으면 대상 여부를 모르므로 관측 불가
             state = HealthState.OBSERVATION_UNAVAILABLE if self._target_unknown(track, obs) else HealthState.HEALTHY
@@ -320,6 +376,10 @@ class Watcher:
                 state = HealthState.OBSERVATION_UNAVAILABLE
             elif not track.signaled and track.domain_since is not None and now - track.domain_since < grace:
                 state = HealthState.STARTING
+            elif obs.execution_binding_available is True and not track.signaled:
+                state = HealthState.OBSERVATION_UNAVAILABLE
+            elif not self._delivered(track, obs, channel):
+                state = HealthState.OBSERVATION_UNAVAILABLE
             elif not self._link_ready(channel, now, window):
                 state = HealthState.OBSERVATION_UNAVAILABLE
             else:
@@ -356,6 +416,9 @@ class Watcher:
 
     def armed(self) -> dict[UUID, str]:
         return dict(self._armed)
+
+    def agent_delivered(self) -> frozenset[UUID]:
+        return frozenset(self._agent_delivered)
 
     @property
     def history_lost(self) -> bool:

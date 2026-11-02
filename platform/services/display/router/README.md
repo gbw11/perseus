@@ -3,8 +3,8 @@
 HDMI 렌더러와 외부 웹이 함께 사용할 읽기 전용 상태 피드와 로컬 화면 선택 정책이다. 3단계 전체/상세 웹 렌더러에 이어 4단계에서 X11 실행기·실제 픽셀 캡처·원격 시연 전송을 추가했다. 실보드 HDMI 검증과 이미지 준비는 남아 있다. 기존 MO-04 터미널을 열거나 콘솔 출력을 상태 분석용으로 가로채지 않는다.
 
 ```text
-Xen xl 조회 ───────────────┐
-domU Agent/앱 ─ 로컬 MQTT ─┼─ dom0 display feed ─ 정책 ─ 로컬 전체/상세 렌더러
+기존 관리 서비스의 공유 상태 ┐
+domU Agent/앱 ─ 로컬 MQTT ─┼─ dom0 display feed ─ 정책 ─ 계기판/인포테인먼트
 권위 있는 제어 상태 ───────┘                 └ Spring ─ 외부 REST/WebSocket
 ```
 
@@ -14,13 +14,13 @@ Python 3.11 이상에서 저장소 루트 기준으로 같은 가상환경에 �
 
 ```sh
 python -m pip install ./platform/services/dom0-manager ./platform/services/vm-agent/mqtt-client ./platform/services/display/router
-export XENOVA_DRIVER=xen
+export XENOVA_OBSERVATIONS_PATH=/run/xenova/vm-observations.json
 export XENOVA_DISPLAY_BINDINGS=/etc/xenova/display-bindings.json
 # XENOVA_DISPLAY_TOKEN은 서비스 환경 파일 등으로 주입한다.
 python -m uvicorn xenova_display.main:create_app --factory --host 127.0.0.1 --port 8082 --workers 1
 ```
 
-동일 서비스 인스턴스의 상태를 사용하도록 단일 worker로 실행한다. Xen 조회에는 dom0의 기존 읽기 전용 드라이버를 사용한다. `xl console`, VM 시작/정지/재시작, 주행 명령은 실행하지 않는다. 토큰이 비어 있으면 시작을 거부한다. Python 경로/직접 실행 옵션은 기존 dom0-manager와 같다.
+동일 서비스 인스턴스의 상태를 사용하도록 단일 worker로 실행한다. 관리 서비스에도 같은 `XENOVA_OBSERVATIONS_PATH`를 설정하고 worker 1개로 실행해야 한다. 위 공유 모드를 명시한 수집기는 관리 서비스의 상태 파일만 읽고 Xen을 직접 조회하지 않는다. 경로를 설정하지 않으면 기존 드라이버 경로를 유지한다. 공유 파일이 실패하거나 만료되어도 직접 조회로 우회하지 않는다. 최종 공유 모드의 실보드 연속 검증은 별도이다. `xl console`, VM 시작/정지/재시작, 주행 명령은 실행하지 않는다. 토큰이 비어 있으면 시작을 거부한다. Python 경로/직접 실행 옵션은 기존 dom0-manager와 같다. [상태 공유·인증·적용 절차](../../../../docs/design/display-shared-observations.md)를 참고한다.
 
 설정 파일은 [QEMU 예제](examples/qemu-bindings.json)를 참고해 실제 등록 UUID·앱 토픽에 맞춘다. `primary-drive`, `backup-drive`는 새 발행 기능을 설치했다는 뜻이 아닌 **수신할 앱 ID 설정 예시**다. 기존 발행자가 `autonomous`, `manual`을 쓴다면 설정에서 명시적으로 매핑할 수 있지만, 이 이름으로 VM 역할/현재 주행 모드를 추론하지 않는다. 같은 역할·UUID·앱 ID의 중복과 dom0 UUID는 거부한다.
 
@@ -28,8 +28,9 @@ python -m uvicorn xenova_display.main:create_app --factory --host 127.0.0.1 --po
 | --- | --- |
 | `XENOVA_DISPLAY_BINDINGS` | 필수: JSON 매핑 파일 |
 | `XENOVA_DISPLAY_TOKEN` | 필수: 내부 REST/WS 서비스 토큰 |
+| `XENOVA_OBSERVATIONS_PATH` | 미설정 시 기존 경로 유지; 공유 모드 사용 시 관리 서비스와 같은 경로 지정 |
 | `XENOVA_DISPLAY_MQTT_HOST` / `PORT` | `127.0.0.1` / `1883` |
-| `XENOVA_DISPLAY_MQTT_USERNAME` / `PASSWORD` | 기존 브로커의 구독 계정 |
+| `XENOVA_DISPLAY_MQTT_USERNAME` / `PASSWORD` | 기존 브로커의 observer 읽기 전용 계정; 보드 진입점에서 필수 |
 | `XENOVA_DISPLAY_CONTROL_SOURCE` | `dom0-gateway`: 제어 상태 발행 source_id |
 
 MQTT는 기본적으로 dom0 loopback 브로커를 사용한다. 게스트별 토픽 발행권과 control 발행권은 브로커 계정/ACL로 제한해야 한다. 봉투의 `source_id` 검사만으로 발행자 인증을 대신하지 않는다. 실제 브로커 ACL이나 기존 메시지 계약은 변경하지 않는다.
@@ -63,7 +64,7 @@ export DISPLAY_FEED_BASE_URL=http://127.0.0.1:8082
 
 ## 3단계 로컬 화면 렌더링
 
-`frontend`에서 `npm run build -w @xenova/vm-screens`로 빌드한 뒤 수집기에 `XENOVA_DISPLAY_WEB_ROOT=<vm-screens/dist 절대 경로>`를 지정한다. 두 화면은 `/display/monitor-1`(전체 상태), `/display/monitor-2`(선택 VM 상세)다. 외부 대시보드의 페이지 라우팅과는 별도의 dom0 로컬 화면이다. 새 화면은 mock telemetry나 기존 자동/수동 VM 시나리오에 연결하지 않는다. 기존 `/split`, `/detail/:app`는 이전 시연 화면으로 남아 있으며 HDMI의 기본 진입점은 아니다.
+`frontend`에서 `npm run build -w @xenova/vm-screens`로 빌드한 뒤 수집기에 `XENOVA_DISPLAY_WEB_ROOT=<vm-screens/dist 절대 경로>`를 지정한다. 두 화면은 `/display/monitor-1`(차량 계기판), `/display/monitor-2`(인포테인먼트·선택 게스트 콘텐츠)다. `outputs.screen`을 각각 `instrument`/`infotainment`로 고정한다. 이전 `view` 필드는 선택 API 호환용이다. 속도·배터리·네비·음악과 게스트 영상 어댑터가 연결되기 전에는 수신 대기를 표시한다. 외부 대시보드의 페이지 라우팅과는 별도의 dom0 로컬 화면이다. 새 화면은 mock telemetry나 기존 자동/수동 VM 시나리오에 연결하지 않는다. 기존 `/split`, `/detail/:app`는 이전 시연 화면으로 남아 있으며 HDMI의 기본 진입점은 아니다.
 
 | 로컬 경로 | 용도/권한 |
 | --- | --- |
@@ -81,6 +82,8 @@ export DISPLAY_FEED_BASE_URL=http://127.0.0.1:8082
 ```
 
 `pinned`는 등록 UUID가 필수다. 잘못된 UUID/조합은 400, 이전 epoch/revision은 409, 요청 형식 오류는 422다. 기본은 VM1 pinned다. follow_active에서도 신선하고 명시적인 active_vm_id만 따라가며, 확인된 새 값이 없으면 마지막 선택을 유지한다. 장애·AUTO/MANUAL 변화만으로 다른 VM을 고르지 않는다.
+
+254번 보완: `outputs[].reason`에 전체/상세 화면의 선택 이유를 제공한다. 상세 화면은 이를 표시하며, 표시 피드 자체가 끊기면 과거 선택임을 안내한다. follow_active의 대상은 등록된 주 구동·백업 VM으로 제한하며, Debian 인터랙션 VM을 활성 구동 대상으로 선택하지 않는다. Debian을 명시적으로 pinned하는 것은 가능하다. 앱 구독 경로·보고 신선도를 먼저 확인하므로 과거 `failed` 값만으로 현재 앱 오류를 표시하지 않는다. 보드 없는 상태 전이 검증과 미검증 범위는 [254 검증 기록](../../../../docs/verification/display-254-policy.md)에 정리했다.
 
 presentation의 `revision`은 선택 설정 버전, `render_revision`은 실행 ID/상태·내용의 해시다. 렌더러는 두 animation frame 이후 epoch/revision/render_revision을 ACK한다. 이전 내용의 ACK는 409이며, 출력별 ACK는 3초 동안 갱신되지 않으면 만료된다. 응답의 `renderer_ack.stage=dom_rendered`는 DOM 렌더 확인이며 물리 HDMI `ready`나 캡처 성공을 의미하지 않는다. 물리 `applied_revision`/장치 연결 상태는 4단계에서 추가한다.
 
@@ -120,6 +123,8 @@ python -m xenova_display.stream --host 127.0.0.1 --port 8083
 
 송신기는 runtime 상태가 6초 이상 지연되거나 매핑/renderer가 유효하지 않으면 해당 프레임을 제공하지 않는다. FFmpeg는 출력별 실제 X11 root 사각형을 읽으며 웹 URL/별도 headless 페이지를 캡처하지 않는다. JPEG는 출력별 최대 2MiB·최신 1장만 보관하며 느린 수신자를 위해 과거 프레임 큐를 쌓지 않는다. 인코더가 종료되면 해당 인코더만 재시도한다. 키오스크와 송신기 사이에는 프로세스 종료 의존성이 없다.
 
+실제 Capture는 프레임 생성·무효화 알림을 모든 대기 수신자에게 전달한다. 수신자는 새 프레임을 읽을 때마다 인증·출력 유효성을 재검사하고, 알림이 없어도 최대 0.5초마다 인증·종료·연결 상태를 다시 확인한다. 프레임별 대기열은 만들지 않으며 여러 수신자가 하나의 알림을 서로 소비하지 않는다. 기존 동기식 진단 수집기에는 주기 대기를 유지한다. [257 분리 계측·가속 후보 검증](../../../../docs/verification/display-257-native-jpeg-20261030.md)은 임시 라이브러리 시험과 제품 기본 경로를 구분한다.
+
 시연 PC에서는 SSH 포워딩 등 프로젝트의 신뢰된 연결로 8083에 접근하고 `http://127.0.0.1:8083/demo`를 연다. 예를 들어 `ssh -N -L 8083:127.0.0.1:8083 <dom0 사용자>@<dom0 주소>`로 접속할 수 있다. 뷰어에서 시연 접속 키를 입력하면 1시간짜리 HttpOnly/SameSite=Strict 쿠키를 발급한다. HTTPS에서는 Secure다. 접속 키는 URL·번들·캡처 프레임에 넣지 않는다. 뷰어는 수신 JPEG만 canvas에 디코딩하며 VM 상태 JSON으로 화면을 재구성하지 않는다. 실제 디코드가 3초 이상 중단되거나 상태 조회가 실패하면 마지막 프레임임을 표시한다.
 
 | 송신기 경로 | 역할 |
@@ -156,7 +161,7 @@ python -B tests/probe_display_runtime.py --execute --soak-seconds 600 \
 - Xen 조회 성공 시에만 목록에서 사라진 등록 VM을 `stopped`로 표시한다. 조회 실패는 `disconnected`, 미수신은 `unknown`이다.
 - Xen 수신 유효기간 3초, 앱 heartbeat 3초, Agent heartbeat 15초를 사용한다. 모든 경과 시간은 dom0 단조 시계로 계산한다. inventory는 30초 이후 stale로 표시하지만 heartbeat와 독립된 과거 근거로 유지한다.
 - 실행 domid가 바뀌거나 부팅 ID가 변경되면 이전 앱·OS 자료를 비운다. inventory만으로 새로운 부팅을 확정하지 않는다. 먼저 비-retained heartbeat를 받아야 한다. 이전 boot/프로세스 epoch·중복/역순 seq는 버린다.
-- `run_id`는 수집기 epoch와 관측 domid를 묶은 관측 식별자다. 빠른 재부팅/동일 domid 재사용을 전부 증명하는 Xen 시작 세대 API는 아직 없다. `guest_boot_id`는 게스트 보고값이며 OS의 `current_run_verified`는 항상 false다. 부팅 전후를 놓치면 현재 실행과 OS 근거가 확실히 결합됐다고 표시하지 않는다.
+- `run_id`는 표시 수집기·관리 상태 제공자의 세대와 관측 실행 식별자(제공 시) 또는 domid를 묶는다. 시작 세대가 없는 드라이버는 동일 domid의 빠른 교체를 모두 증명하지 못한다. `guest_boot_id`는 게스트 보고값이며 OS의 `current_run_verified`는 항상 false다. 관측 식별자만으로 현재 실행과 OS 근거가 확실히 결합됐다고 표시하지 않는다.
 - 프로세스 수명 내 소스별 retired epoch는 128개까지만 추적한다. 한도 이후 새로운 세대는 수락하지 않고 운영 재시작/점검이 필요하다. 임의 발행자 수를 누적하지 않도록 등록된 세 VM·앱·지정된 control만 구독한다.
 - Zephyr Starter는 현재 앱 heartbeat를 보내지 않는다. 이때 앱/관측 OS는 unknown이고 기대 OS와 실제 Xen 실행 상태만 표시한다. 모터/미러링/승계 기능이 구현됐다고 표시하지 않는다.
 - `display.drive_state`의 명시적 `active_vm_id`와 `mode`를 따로 전달한다. `active_app`이나 구형 `vehicle.control`로 VM을 추측하지 않는다. retained 재생 보고는 현재 상태로 수락하지 않으며 3초 수신 지연 시 mode=unknown이다. AI 상태는 아직 unknown이다.
@@ -168,3 +173,10 @@ python -B tests/probe_display_runtime.py --execute --soak-seconds 600 \
 `tests/probe_display_control.py --execute --output <결과.json>`은 loopback 브로커를 띄워 별도 표시 상태 보고 → 실제 MQTT 수신 → REST/WS·상세 정책 연결을 시험한다. 기존 테스트 런타임의 amqtt/paho/httpx/websockets가 필요하며 PYTHONPATH는 위 runtime probe와 같다. 제어 엔진/Xen 관측은 합성이고 운영 ACL·실보드 검증이 아니다. [250 후속 검증 결과](../../../../docs/verification/display-250-followup.md)를 참고한다.
 
 `tests/probe_qemu.py`는 기존 격리 실험실 전용이며 일반 테스트에서 자동 실행되지 않는다. `--execute --output <증거 파일>`이 필요하다. 시험 호스트에 amqtt 0.11.3/pexpect, 기존 ARM64 휠과 Java 21/Spring 컴파일 결과가 있어야 한다. 실제 dom0의 임시 디렉터리에 수집기를 올리고 실제 Debian은 메모리에서만 임시 보고기를 실행한다. 테스트 브로커는 호스트 loopback에 있고 SSH 포워딩을 사용하므로 제품 배포의 로컬 Mosquitto 토폴로지와 구별한다. 기존 VM/이미지/서비스·실행 도메인 ID를 바꾸지 않는다. 결과는 [검증 기록](../../../../docs/verification/display-step2.md)을 참고한다.
+
+
+## 전용 X11 절전 방지와 시연 인코딩
+
+키오스크의 `--prevent-idle-blank`는 전용 차량 화면 세션에서만 사용한다. `xset`으로 기존 screen saver/DPMS 값을 읽고, screen saver timeout과 blanking 및 지원되는 DPMS를 끈 뒤 적용 결과를 확인한다. 일반 종료 시 기존 값을 복원한다. 공유 데스크톱에는 이 옵션을 사용하지 않는다. 강제 종료(SIGKILL)·전원 차단은 복원을 보장하지 않으며, 새 전용 X 서버 세션의 초기 설정을 다시 적용해야 한다. 배포 예시 unit은 이 옵션을 명시한다. 실제 보드의 상시 서비스에는 아직 설치하지 않았다.
+
+`outputs[].width/height`는 X11 원본 캡처 영역이다. 별도의 `stream_width/stream_height`는 기본 1280×720인 전송 JPEG 크기이며 짝수만 허용한다. 원본 전체를 비율 유지 축소하고 검은 여백을 채우므로 영역을 잘라내지 않는다. 스트림 metadata의 `rectangle`은 원본 영역, `width/height`는 인코딩 결과 크기다. MJPEG는 yuvj420p, encoder 1 thread와 단순 filter pipeline 1 thread를 사용한다. encoder의 `-threads`와 filter의 `-filter_threads`는 별도 설정이다([FFmpeg 공식 문서](https://ffmpeg.org/ffmpeg.html)).

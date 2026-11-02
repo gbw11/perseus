@@ -1,0 +1,21 @@
+{
+  "visual_acceptance_passed": false,
+  "visual_failure": {
+    "observed": "Final received infotainment JPEG is black while multipart sequence continues",
+    "evidence": "monitor-2-last.jpg",
+    "first_black_size_match_in_phase_s": 275,
+    "size_matching_is_timing_proxy_not_full_pixel_analysis": true
+  },
+  "blanking_diagnostic": {
+    "screen_saver_timeout_s": 600,
+    "dpms_enabled": true,
+    "dpms_standby_suspend_off_s": [
+      600,
+      600,
+      600
+    ],
+    "activate_reproduces_black": true,
+    "reset_restores_ui": true,
+    "production_fix_applied": false
+  }
+}

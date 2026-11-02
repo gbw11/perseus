@@ -28,12 +28,16 @@ class FakeSocket {
 
 describe('console transport', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     FakeSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeSocket);
     auth.getSession.mockReturnValue({ access_token: 'user-jwt', expires_at: '2099-01-01T00:00:00Z' });
     auth.refreshSession.mockReset();
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   function setup() {
     const callbacks = { state: vi.fn(), data: vi.fn() };
@@ -131,4 +135,157 @@ describe('console transport', () => {
     expect(ws.close).toHaveBeenCalled();
     expect(callbacks.state).not.toHaveBeenCalledWith('connected', expect.any(String));
   });
+
+  it.each(['opening', 'authenticating'])(
+    'bounds %s wait and ignores late readiness on manual retry',
+    async (phase) => {
+      const { transport, callbacks } = setup();
+      await transport.connect();
+      const ws = FakeSocket.instances[0]!;
+      const lateMessage = ws.onmessage;
+      const lateClose = ws.onclose;
+      if (phase === 'authenticating') ws.onopen?.();
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(callbacks.state).toHaveBeenLastCalledWith('error', expect.stringContaining('시간이 초과'));
+      expect(ws.close).toHaveBeenCalledOnce();
+      expect(transport.send('must not be queued')).toBe(false);
+      expect(FakeSocket.instances).toHaveLength(1);
+      await transport.connect();
+      lateMessage?.({ data: JSON.stringify({ type: 'connected', vm_id: 'vm-a' }) });
+      lateClose?.({ code: 1000 });
+      expect(callbacks.state).toHaveBeenLastCalledWith('connecting', expect.any(String));
+      const retry = FakeSocket.instances[1]!;
+      retry.onopen?.();
+      retry.ready();
+      expect(retry.sent).toHaveLength(1); // Authentication only; no old input replay.
+      expect(callbacks.state).toHaveBeenLastCalledWith('connected', expect.any(String));
+      transport.dispose();
+    },
+  );
+
+  it('expires a hung refresh without opening a socket when it later completes', async () => {
+    auth.getSession.mockReturnValue(null);
+    let finish!: (value: boolean) => void;
+    auth.refreshSession.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const { transport, callbacks } = setup();
+    const pending = transport.connect();
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(callbacks.state).toHaveBeenLastCalledWith('error', expect.stringContaining('시간이 초과'));
+    auth.getSession.mockReturnValue({ access_token: 'late-token', expires_at: '2099-01-01T00:00:00Z' });
+    finish(true);
+    await pending;
+    expect(FakeSocket.instances).toHaveLength(0);
+    transport.dispose();
+  });
+
+  it('a rejected refresh produces an authentication error instead of an unhandled promise', async () => {
+    auth.getSession.mockReturnValue(null);
+    auth.refreshSession.mockRejectedValue(new Error('offline'));
+    const { transport, callbacks } = setup();
+    await expect(transport.connect()).resolves.toBeUndefined();
+    expect(callbacks.state).toHaveBeenLastCalledWith('error', consoleCloseMessage(4401));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a quiet connected console is not mistaken for a connection timeout', async () => {
+    const { transport, callbacks } = setup();
+    await transport.connect();
+    FakeSocket.instances[0]!.ready();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(callbacks.state).toHaveBeenLastCalledWith('connected', expect.any(String));
+    expect(callbacks.data).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    transport.dispose();
+  });
+
+  it('late readiness after a server close cannot resurrect the old connection', async () => {
+    const { transport, callbacks } = setup();
+    await transport.connect();
+    const ws = FakeSocket.instances[0]!;
+    const lateMessage = ws.onmessage;
+    ws.onclose?.({ code: 4409 });
+    lateMessage?.({ data: JSON.stringify({ type: 'connected', vm_id: 'vm-a' }) });
+    expect(callbacks.state).toHaveBeenLastCalledWith('error', consoleCloseMessage(4409));
+    expect(transport.send('must not send')).toBe(false);
+    transport.dispose();
+  });
+
+  it('cancelling before the socket opens has a bounded cleanup wait', async () => {
+    const { transport, callbacks } = setup();
+    await transport.connect();
+    transport.disconnect();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(callbacks.state).toHaveBeenLastCalledWith(
+      'error',
+      expect.stringContaining('점유 해제는 확인되지'),
+    );
+    expect(FakeSocket.instances[0]!.sent).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    transport.dispose();
+  });
+
+  it('dispose clears pending timers and does not update an unmounted screen', async () => {
+    const { transport, callbacks } = setup();
+    await transport.connect();
+    transport.dispose();
+    const calls = callbacks.state.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(callbacks.state).toHaveBeenCalledTimes(calls);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('bounds cleanup wait without claiming that the server lease was released', async () => {
+    const { transport, callbacks } = setup();
+    await transport.connect();
+    const ws = FakeSocket.instances[0]!;
+    ws.onopen?.();
+    ws.ready();
+    transport.disconnect();
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(callbacks.state).toHaveBeenLastCalledWith('closing', expect.any(String));
+    await transport.connect();
+    expect(FakeSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(callbacks.state).toHaveBeenLastCalledWith(
+      'error',
+      expect.stringContaining('점유 해제는 확인되지'),
+    );
+    expect(ws.close).toHaveBeenCalledOnce();
+    expect(transport.send('stale input')).toBe(false);
+    await transport.connect();
+    expect(FakeSocket.instances).toHaveLength(2);
+    transport.dispose();
+  });
+
+  it('rejects a readiness frame for another VM without enabling input', async () => {
+    const { transport, callbacks } = setup();
+    await transport.connect();
+    const ws = FakeSocket.instances[0]!;
+    ws.onmessage?.({ data: JSON.stringify({ type: 'connected', vm_id: 'other-vm' }) });
+    expect(callbacks.state).toHaveBeenLastCalledWith('error', expect.stringContaining('응답 형식'));
+    expect(transport.send('must not send')).toBe(false);
+    expect(ws.close).toHaveBeenCalledWith(4003, expect.any(String));
+    expect(vi.getTimerCount()).toBe(0);
+    transport.dispose();
+  });
+
+  it.each([4401, 4404, 4409, 1006, 1011])(
+    'shows close %s and retries only on explicit action',
+    async (code) => {
+      const { transport, callbacks } = setup();
+      await transport.connect();
+      FakeSocket.instances[0]!.onclose?.({ code });
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(callbacks.state).toHaveBeenLastCalledWith('error', consoleCloseMessage(code));
+      expect(FakeSocket.instances).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+      await transport.connect();
+      expect(FakeSocket.instances).toHaveLength(2);
+      transport.dispose();
+    },
+  );
 });

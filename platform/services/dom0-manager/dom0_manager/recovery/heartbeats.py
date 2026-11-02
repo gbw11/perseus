@@ -58,5 +58,33 @@ class HeartbeatTable(LastSeenTable[Heartbeat]):
 class AppHeartbeatTable(LastSeenTable[AppHeartbeat]):
     """app.heartbeat (Zephyr 주행 VM). 봉투의 vm_id 로 묶으므로 app_id↔vm_id 대응표가 따로 필요 없다."""
 
-    def record(self, vm_id: UUID, app_id: str, state: str, boot_id: str, seq: int, received_monotonic: float) -> AppHeartbeat:
-        return self.put(AppHeartbeat(vm_id=vm_id, app_id=app_id, state=state, boot_id=boot_id, seq=seq, received_monotonic=received_monotonic))
+    def record(self, vm_id: UUID, app_id: str, state: str, boot_id: str, seq: int, received_monotonic: float,instance_id: str | None=None) -> AppHeartbeat:
+        return self.put(AppHeartbeat(vm_id=vm_id, app_id=app_id, state=state, boot_id=boot_id, seq=seq, received_monotonic=received_monotonic,instance_id=instance_id))
+
+    def record_lifecycle(self,vm_id,app_id,boot,instance,value,received):
+        """Keep per-app supervision separate from actual computation heartbeat."""
+        from types import SimpleNamespace
+        with self._lock:
+            if not hasattr(self,'_supervision'):self._supervision={}
+            key=vm_id,app_id;old=self._supervision.get(key)
+            same=bool(old and old.boot_id==boot and old.instance_id==instance)
+            if same and (value.check<=old.check or value.progress<old.progress):return False
+            work_at=received if value.progress and (not same or value.progress>old.progress) else old.work_at if same else None
+            self._supervision[key]=SimpleNamespace(vm_id=vm_id,app_id=app_id,boot_id=boot,instance_id=instance,
+                check=value.check,progress=value.progress,phase=value.phase,readiness=value.readiness,
+                reason=value.reason,received_monotonic=received,work_at=work_at)
+            self._last_received=max(received,self._last_received or received)
+        return True
+
+    def supervision_pair(self,vm_id,boot,instances):
+        """Require both current app identities. One app never covers another."""
+        with self._lock:
+            values=[getattr(self,'_supervision',{}).get((vm_id,app)) for app in ('autonomous','manual')]
+            if any(value is None or value.boot_id!=boot or instances.get(value.app_id)!=value.instance_id for value in values):return None
+            return tuple(values)
+
+    def forget(self,vm_id):
+        super().forget(vm_id)
+        with self._lock:
+            for key in list(getattr(self,'_supervision',{})):
+                if key[0]==vm_id:del self._supervision[key]

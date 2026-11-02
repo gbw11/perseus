@@ -8,6 +8,30 @@ config XENOVA_MQTT
 
 if XENOVA_MQTT
 
+config XENOVA_MQTT_BOUNDED_IO
+	bool "Use the shared deadline-bounded TCP transport"
+	depends on XENOVA_TELEMETRY
+	help
+	  Separate socket state per client; reuses Publisher's Zephyr transport.
+	  Connect/send/read are bounded, including broker absence during quiesce.
+
+config XENOVA_MQTT_TCP_NODELAY
+	bool "Disable Nagle on bounded MQTT sockets"
+	depends on XENOVA_MQTT_BOUNDED_IO
+	default n
+	help
+	  Header and body are separate writes. For explicitly selected low-latency
+	  profiles, avoid waiting for an ACK before sending the small body.
+
+config XENOVA_MQTT_IO_MS
+	int "Maximum v1 socket operation budget (ms)"
+	depends on XENOVA_MQTT_BOUNDED_IO
+	range 1 250
+	default 250
+	help
+	  This is a network I/O deadline, not the driving release period. A connect
+	  can consume this budget; actual skipped releases/lateness stay observable.
+
 config XENOVA_MQTT_RX_BUF
 	int "MQTT receive buffer bytes"
 	default 1280

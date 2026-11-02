@@ -22,6 +22,10 @@ static const struct xm_policy POLICIES[] = {
 	{"drive.mode.changed", 1, false, false},
 	{"drive.fault.detected", 1, false, false},
 	{"app.heartbeat", 0, false, false},
+	{"app.readiness", 0, false, true},
+	{"app.lifecycle", 0, false, true},
+ {"app.state.snapshot",1,false,false},
+ {"app.state.applied",1,false,false},
 	/* 7장 수동 입력 */
 	{"drive.input", 0, false, false},
 	/* 8장 지연 측정 */
@@ -44,5 +48,6 @@ const struct xm_policy *xm_policy_for(const char *type)
 
 size_t xm_policy_max_bytes(const struct xm_policy *p)
 {
+ if(p->type&&(!strcmp(p->type,"app.state.snapshot")||!strcmp(p->type,"app.state.applied")))return 8192;
 	return p->driving ? XM_MAX_DRIVING_BYTES : XM_MAX_BYTES;
 }

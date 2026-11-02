@@ -36,6 +36,21 @@ class Clock:
         return self.now
 
 
+class Known:
+    """수신 이력이 남아 있는 저장소. Worker 가 전에 이 VM 들의 신호를 받은 적이 있다(손실 판정 자격)."""
+
+    path = None
+
+    def __init__(self, agents=(), armed=None):
+        self.state = ArmingState(dict(armed or {}), False, frozenset(agents))
+
+    def load(self):
+        return self.state
+
+    def save(self, armed, agent_delivered=frozenset()):
+        return True
+
+
 class World:
     def __init__(self, confirm=None, arming=None):
         self.clock = Clock()
@@ -82,7 +97,8 @@ def world():
 # ---- Linux: agent.heartbeat ----
 
 
-def test_heartbeat_loss_is_judged_once_after_boot_grace(world):
+def test_heartbeat_loss_is_judged_once_after_boot_grace():
+    world = World(arming=Known([VM]))  # 이 VM 의 heartbeat 를 받은 적이 있다
     world.prove()
     assert world.tick(obs()) == []  # 도메인 처음 봄: boot_grace 시작
     assert world.run(obs(), 85) == []  # 유예 안: heartbeat 가 없어도 판정 없음
@@ -109,7 +125,8 @@ def test_fresh_heartbeats_prevent_judgment_and_loss_is_measured_from_last_beat(w
     assert [j.reason for j in judged] == [FailureReason.HEARTBEAT_LOST] and judged[0].heartbeat_age_s == 30.0
 
 
-def test_heartbeat_resume_clears_episode_and_next_failure_gets_new_recovery_id(world):
+def test_heartbeat_resume_clears_episode_and_next_failure_gets_new_recovery_id():
+    world = World(arming=Known([VM]))
     world.prove()
     world.tick(obs())
     world.clock.now += 90
@@ -174,8 +191,20 @@ def test_zephyr_restart_waits_for_app_within_zephyr_grace(world):
     assert [j.reason for j in world.tick(z2)] == [FailureReason.APP_HEARTBEAT_LOST]
 
 
-def test_declared_app_firmware_is_judged_without_any_prior_signal(world):
-    """템플릿 capability 가 app.heartbeat 를 선언하면 신호를 받은 적 없어도 유예 뒤 판정한다. Worker 재시작 직후 앱이 이미 죽어 있어도 놓치지 않는다."""
+def test_declared_app_firmware_without_delivery_history_is_not_judged(world):
+    """capability 선언은 감시 대상이라는 뜻일 뿐 이 VM 의 신호가 전달된다는 근거가 아니다. 받은 적 없으면 기동 실패와
+    계정·ACL 오류를 구별할 수 없어 판정하지 않는다. 다른 VM 의 수신도 근거가 아니다."""
+    world.prove("app")
+    z = obs(ZEPHYR, kind="zephyr", expected=True)
+    world.tick(z)
+    assert world.health(ZEPHYR).state == HealthState.STARTING
+    assert world.run(z, 300) == []
+    assert world.health(ZEPHYR).state == HealthState.OBSERVATION_UNAVAILABLE  # HEALTHY 도 UNHEALTHY 도 아니다
+
+
+def test_declared_app_firmware_with_delivery_history_is_judged_after_grace():
+    """Worker 재시작 직후 앱이 이미 죽어 있어도, 전에 신호를 받은 VM 이면 유예 뒤 판정한다."""
+    world = World(arming=Known(armed={ZEPHYR: "autonomous"}))
     world.prove("app")
     z = obs(ZEPHYR, kind="zephyr", expected=True)
     world.tick(z)
@@ -192,7 +221,8 @@ def test_arming_persists_across_watcher_restart(tmp_path):
     first.tick(z)
     first.app_beat(app_id="manual")
     first.tick(z)
-    assert json.loads((tmp_path / "recovery" / "armed.json").read_text()) == {"version": 1, "armed": {str(ZEPHYR): "manual"}, "history_lost": False}
+    assert json.loads((tmp_path / "recovery" / "armed.json").read_text()) == {
+        "version": 1, "armed": {str(ZEPHYR): "manual"}, "history_lost": False, "agent_delivered": []}
 
     second = World(arming=store)  # Worker 재시작: 앱은 이미 죽어 신호가 없다
     second.prove("app")
@@ -210,6 +240,32 @@ def test_arming_persists_across_watcher_restart(tmp_path):
 def test_arming_store_missing_file_is_empty_and_not_lost(tmp_path):
     assert ArmingStore(tmp_path / "none.json").load() == ArmingState()
     assert ArmingStore(None).load() == ArmingState()
+    older = tmp_path / "older.json"  # agent_delivered 가 생기기 전 파일: Linux 이력이 비어 있는 것과 같다(손상 아님)
+    older.write_text(json.dumps({"version": 1, "armed": {str(ZEPHYR): "manual"}, "history_lost": False}), encoding="utf-8")
+    store = ArmingStore(older)
+    assert store.load() == ArmingState({ZEPHYR: "manual"}) and store.history_lost is False
+
+
+def test_agent_delivery_history_is_persisted_and_is_not_a_current_signal(tmp_path):
+    path = tmp_path / "armed.json"
+    first = World(arming=ArmingStore(path))
+    first.tick(obs(domid=1))
+    first.clock.now += 10
+    first.beat()
+    first.tick(obs(domid=1))
+    assert first.watcher.agent_delivered() == {VM}
+    assert json.loads(path.read_text())["agent_delivered"] == [str(VM)]
+
+    second = World(arming=ArmingStore(path))  # Worker 재시작. 그 사이 VM 도 재부팅됐고 아직 신호가 없다
+    second.prove()  # 채널은 다른 VM 으로 열려 있다
+    second.tick(obs(domid=2))
+    assert second.health().state == HealthState.STARTING and second.health().heartbeat_age_s is None  # 이력은 현재 신호가 아니다
+    assert second.run(obs(domid=2), 85) == []
+    second.clock.now += 5  # 이 VM 의 신호를 받은 적이 있으니 boot grace 뒤에는 판정한다(부팅 중 멈춘 VM 복구)
+    assert [j.reason for j in second.tick(obs(domid=2))] == [FailureReason.HEARTBEAT_LOST]
+
+    second.tick(obs(ZEPHYR, kind="zephyr", domid=3))  # 등록에서 사라지면 이력도 지운다
+    assert second.watcher.agent_delivered() == frozenset() and json.loads(path.read_text())["agent_delivered"] == []
 
 
 @pytest.mark.parametrize("text", [
@@ -220,6 +276,9 @@ def test_arming_store_missing_file_is_empty_and_not_lost(tmp_path):
     json.dumps({"version": 1, "armed": []}),
     json.dumps({"version": 1, "armed": {str(ZEPHYR): ""}}),
     json.dumps({"version": 1, "armed": {}, "history_lost": "yes"}),
+    json.dumps({"version": 1, "armed": {}, "agent_delivered": str(VM)}),
+    json.dumps({"version": 1, "armed": {}, "agent_delivered": ["not-a-uuid"]}),
+    json.dumps({"version": 1, "armed": {}, "agent_delivered": [7]}),
 ])
 def test_corrupt_arming_store_is_set_aside_and_history_lost_persists(tmp_path, text):
     path = tmp_path / "armed.json"
@@ -227,11 +286,11 @@ def test_corrupt_arming_store_is_set_aside_and_history_lost_persists(tmp_path, t
     store = ArmingStore(path)
     assert store.load() == ArmingState({}, history_lost=True)
     assert (tmp_path / "armed.json.corrupt").read_text(encoding="utf-8") == text  # 깨진 파일은 보존
-    assert json.loads(path.read_text()) == {"version": 1, "armed": {}, "history_lost": True}
+    assert json.loads(path.read_text()) == {"version": 1, "armed": {}, "history_lost": True, "agent_delivered": []}
     store.save({ZEPHYR: "manual"})
     assert ArmingStore(path).load() == ArmingState({ZEPHYR: "manual"}, history_lost=True)  # Worker 재시작으로는 풀리지 않는다
-    path.unlink()  # 운영자가 지우면 풀린다
-    assert ArmingStore(path).load() == ArmingState()
+    path.unlink()  # 본 파일만 없어져도 남은 격리 증거로 차단을 유지한다.
+    assert ArmingStore(path).load() == ArmingState({}, history_lost=True)
 
 
 def test_lost_arming_history_reports_undeclared_zephyr_as_unobservable(tmp_path):
@@ -254,7 +313,8 @@ def test_lost_arming_history_reports_undeclared_zephyr_as_unobservable(tmp_path)
     world.app_beat(app_id="manual")  # 신호를 받으면 armed 되어 보통의 Zephyr 대상이 된다
     world.tick(undeclared, starter)
     assert world.health(ZEPHYR).state == HealthState.HEALTHY and world.watcher.armed() == {ZEPHYR: "manual"}
-    assert json.loads(path.read_text()) == {"version": 1, "armed": {str(ZEPHYR): "manual"}, "history_lost": True}
+    # Linux VM 은 위 tick 부터 관측 목록에 없어 등록 해제로 다뤄졌고 이력도 지워졌다
+    assert json.loads(path.read_text()) == {"version": 1, "armed": {str(ZEPHYR): "manual"}, "history_lost": True, "agent_delivered": []}
     world.clock.now += 20
     assert [j.reason for j in world.tick(undeclared, starter)] == [FailureReason.APP_HEARTBEAT_LOST]
 
@@ -282,7 +342,8 @@ def test_watcher_reports_vms_that_left_the_registry(world):
     assert world.watcher.removed_vm_ids() == [ZEPHYR] and world.watcher.removed_vm_ids() == []
 
 
-def test_linux_vm_ignores_app_heartbeat_and_zephyr_ignores_agent_heartbeat(world):
+def test_linux_vm_ignores_app_heartbeat_and_zephyr_ignores_agent_heartbeat():
+    world = World(arming=Known([VM]))
     z = obs(ZEPHYR, kind="zephyr", domid=2)
     world.tick(obs(), z)
     world.clock.now += 100
@@ -291,12 +352,26 @@ def test_linux_vm_ignores_app_heartbeat_and_zephyr_ignores_agent_heartbeat(world
     judged = world.tick(obs(), z)
     assert [(j.vm_id, j.reason) for j in judged] == [(VM, FailureReason.HEARTBEAT_LOST)]
     assert world.health(ZEPHYR).state == HealthState.HEALTHY and world.health(ZEPHYR).heartbeat_age_s is None
+    assert world.watcher.agent_delivered() == {VM}  # Zephyr 가 보낸 agent.heartbeat 는 Linux 이력을 만들지 않는다
+
+
+def test_linux_app_heartbeat_silence_never_judges_the_vm(world):
+    """Linux 앱의 app.heartbeat 는 앱 상태 표시용이다. 에이전트가 살아 있으면 앱 신호가 끊겨도 VM 을 재시작하지 않는다(게스트 안 systemd 몫)."""
+    world.tick(obs())
+    for step in range(40):  # 200초
+        world.clock.now += 5
+        world.beat(vm_id=VM)
+        if step < 4:
+            world.app_beat(vm_id=VM)  # 앱 신호는 20초 뒤 끊긴다
+        assert world.tick(obs()) == []
+    assert world.health().state == HealthState.HEALTHY
 
 
 # ---- 관측 경로 (필터별 구독 승인) ----
 
 
-def test_no_liveness_judgment_before_path_granted_and_health_says_unobservable(world):
+def test_no_liveness_judgment_before_path_granted_and_health_says_unobservable():
+    world = World(arming=Known([VM]))
     world.link = LinkState.down()
     world.tick(obs())
     assert world.run(obs(), 300) == []  # 구독 승인 없이는 heartbeat 손실을 절대 판정하지 않는다
@@ -311,7 +386,8 @@ def test_no_liveness_judgment_before_path_granted_and_health_says_unobservable(w
 
 def test_agent_path_denied_suspends_linux_only_and_app_path_denied_suspends_zephyr_only():
     z = obs(ZEPHYR, kind="zephyr", expected=True, domid=2)
-    world = World()
+    known = dict(agents=[VM], armed={ZEPHYR: "autonomous"})
+    world = World(arming=Known(**known))
     world.link = LinkState(agent=False, app=True)  # ACL 이 heartbeat 구독만 거부
     world.prove("app")
     judged = []
@@ -321,7 +397,7 @@ def test_agent_path_denied_suspends_linux_only_and_app_path_denied_suspends_zeph
     assert [(j.vm_id, j.reason) for j in judged] == [(ZEPHYR, FailureReason.APP_HEARTBEAT_LOST)]  # 앱 경로는 열려 있다
     assert world.health().state == HealthState.OBSERVATION_UNAVAILABLE  # Linux 는 관측 불가
 
-    world2 = World()
+    world2 = World(arming=Known(**known))
     world2.link = LinkState(agent=True, app=False)  # 앱 이벤트 구독만 거부
     world2.prove("agent")
     judged = []
@@ -385,7 +461,8 @@ def test_paused_or_stopping_is_not_a_failure(world):
 # ---- episode: 장애 한 건에 판정 하나 ----
 
 
-def test_reason_change_within_episode_does_not_emit_again(world):
+def test_reason_change_within_episode_does_not_emit_again():
+    world = World(arming=Known([VM]))
     world.prove()
     world.tick(obs())
     world.clock.now += 90
@@ -532,5 +609,19 @@ def test_granted_path_without_any_delivery_never_judges_loss(world):
     world.tick(obs())
     assert world.run(obs(), 200) == []  # 승인은 됐지만 이 채널로 아무것도 안 옴: 에이전트 미기동과 구별 불가 → 판정하지 않는다
     assert world.health().state == HealthState.OBSERVATION_UNAVAILABLE
-    world.prove()  # 다른 VM 의 heartbeat 가 오면 경로가 증명된다
+
+
+def test_other_vm_delivery_is_not_evidence_for_a_silent_vm(world):
+    """다른 VM 의 heartbeat 는 브로커가 채널을 전달한다는 공통 근거일 뿐이다. 이 VM 의 계정·ACL 이 막혀 처음부터 한 번도
+    전달되지 않았을 수 있으니 판정하지 않는다. 이 VM 의 신호를 한 번 받으면 그 뒤로는 창으로 판정한다."""
+    world.tick(obs())
+    for _ in range(40):  # 200초 동안 다른 VM 만 보낸다
+        world.clock.now += 5
+        world.prove()
+        assert world.tick(obs()) == []
+    assert world.health().state == HealthState.OBSERVATION_UNAVAILABLE and world.watcher.agent_delivered() == frozenset()
+    world.beat()  # 이 VM 의 첫 신호
+    assert world.tick(obs()) == [] and world.health().state == HealthState.HEALTHY
+    assert world.watcher.agent_delivered() == {VM}
+    world.clock.now += 30
     assert [j.reason for j in world.tick(obs())] == [FailureReason.HEARTBEAT_LOST]

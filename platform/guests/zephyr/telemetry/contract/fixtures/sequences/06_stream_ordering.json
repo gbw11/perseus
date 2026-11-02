@@ -1,0 +1,27 @@
+{
+  "name": "06_stream_ordering",
+  "purpose_ko": "같은 스트림 역전 표본은 최신값을 덮지 못함",
+  "test_scope": "reference receiver oracle only; no actual broker or control execution",
+  "steps": [
+    {
+      "op": "bind",
+      "vm_id": "11111111-1111-4111-8111-111111111111",
+      "boot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "publisher_instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/06_network_raw32.json",
+      "received_ms": 0,
+      "retained_delivery": false,
+      "expected": "CURRENT_OBSERVATION"
+    },
+    {
+      "op": "ingest",
+      "file": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "received_ms": 100,
+      "retained_delivery": false,
+      "expected": "OUT_OF_ORDER"
+    }
+  ]
+}

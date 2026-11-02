@@ -1,16 +1,22 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:xenova-test;DB_CLOSE_DELAY=-1
-    username: sa
-    password:
+    url: jdbc:tc:mysql:8.4:///xenova_test?TC_DAEMON=true
+    username: test
+    password: test
   data:
     redis:
       repositories:
         enabled: false
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: validate
     open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
   jackson:
     property-naming-strategy: SNAKE_CASE
 
@@ -35,16 +41,16 @@ xenova:
   template-catalog:
     templates:
       - template-id: debian-13-arm64
-        version: "1.0.0"
-        display-name: Debian 12
+        version: "1.0.2"
+        display-name: Debian 13
         min-memory-mib: 128
       - template-id: ubuntu-24.04-arm64
-        version: "1.0.0"
+        version: "1.0.2"
         display-name: Ubuntu 24.04
         min-memory-mib: 512
       - template-id: zephyr-xenvm-starter-arm64
-        version: "1.0.0"
-        display-name: Zephyr Starter 1.0.0
+        version: "1.1.0"
+        display-name: Zephyr Network Starter 1.1.0
         min-memory-mib: 16
         guest-kind: zephyr
   agent:
@@ -75,3 +81,5 @@ xenova:
     query-timeout: 2s
     command-timeout: 3s
     retry-backoff: 10ms
+  vm-registration:
+    service-token: test-registration-token

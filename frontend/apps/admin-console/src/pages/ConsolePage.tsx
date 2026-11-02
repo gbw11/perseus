@@ -3,10 +3,11 @@ import { lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVms } from '../api/queries';
-import { osLabel, roleOf } from '../domain/roles';
+import { osLabel, roleOf, sortVms } from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
-import { capitalizeFirst, STATE_HEALTH, STATE_LABEL } from '../format';
+import { STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
+import { RuntimeLogsPanel } from '../console/RuntimeLogsPanel';
 import styles from './pages.module.css';
 
 /** xterm 이 무거워서 이 화면을 열 때만 불러온다 (platform -248 구현) */
@@ -23,7 +24,7 @@ export function ConsolePage() {
   const vms = useVms();
   const { drive } = useDrive();
   const [params, setParams] = useSearchParams();
-  const items = vms.data?.items ?? [];
+  const items = sortVms(vms.data?.items ?? []);
   const selected = items.find((vm) => vm.vm_id === params.get('vm')) ?? items[0];
   const selectedRole = selected ? roleOf(selected, drive) : null;
   const selectedAuthority = selected
@@ -62,7 +63,7 @@ export function ConsolePage() {
               onClick={() => setParams({ vm: vm.vm_id }, { replace: true })}
             >
               <span className={styles.row}>
-                <b style={{ color: role?.color }}>{role?.vmLabel ?? capitalizeFirst(vm.name)}</b>
+                <b style={{ color: role?.color }}>{vm.name}</b>
                 <span className={styles.grow} />
                 <span className={styles.consoleStates}>
                   <span className={styles.consoleAuthority} data-authority={authority.toLowerCase()}>
@@ -74,7 +75,7 @@ export function ConsolePage() {
                 </span>
               </span>
               <span className={styles.eyebrow}>
-                {role ? (role.driving ? 'Drive' : 'Infotainment') : capitalizeFirst(vm.name)} · {osLabel(vm)}
+                {role?.short ?? '역할 미지정'} · {osLabel(vm)}
                 {vm.guest_kind === 'zephyr' ? ' · 로그 전용' : ''}
               </span>
             </button>
@@ -87,11 +88,12 @@ export function ConsolePage() {
           <ConsolePanel
             key={selected.vm_id}
             vm={selected}
-            displayName={selectedRole?.vmLabel ?? capitalizeFirst(selected.name)}
+            displayName={selected.name}
             authority={selectedAuthority}
           />
         </Suspense>
       )}
+      <RuntimeLogsPanel key={`logs-${selected?.vm_id ?? 'all'}`} vmId={selected?.vm_id} />
     </div>
   );
 }

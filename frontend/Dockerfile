@@ -29,7 +29,8 @@ RUN npm run build --workspace=@xenova/admin-console
 FROM dependencies AS screens-build
 
 ARG VITE_API_BASE_URL=
-ARG VITE_TELEMETRY=live
+# Public Spring-backed app preview; dom0 kiosk builds use VITE_TELEMETRY=display and VITE_BASE_PATH=/.
+ARG VITE_TELEMETRY=legacy-live
 ARG VITE_BASE_PATH=/screens/
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 ENV VITE_TELEMETRY=${VITE_TELEMETRY}

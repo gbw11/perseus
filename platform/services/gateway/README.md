@@ -1,14 +1,266 @@
-# xenova-gateway — dom0 게이트웨이 (제어권 전환 판정·ESP32 전달)
+# Xenova Gateway: 제어 문맥과 출력 경계
 
-dom0에서 도는 별도 프로세스입니다. 주행 앱의 `drive.command` 신선도로 제어권(AUTO·MANUAL·AUTO_READY·SAFE_STOP)을 판정하고,
-**활성 앱의 현재 세대 명령만** ESP32로 보냅니다 (S15P31E110-98).
-규칙은 [MQTT 메시지 계약 v1](../../../docs/contracts/mqtt-contract-v1.md) v1.2 5·6장과 [RC카 시나리오](../../../docs/scenario-rc-car.md) 4장·§8 결정(D1·D5·D8)을 따릅니다.
+Gateway는 모드·owner·출력 허가를 구분하고, 현재 허용된 앱 명령을 ESP32 시리얼로
+제출한다. VM 재시작은 기존 Recovery Engine, 최종 물리 정지는 장치 watchdog/E-stop의
+책임이다. PUBACK·준비 보고·시리얼 쓰기 수락은 장치의 적용 ACK가 아니다.
 
-| 하는 것 | 하지 않는 것 |
-| --- | --- |
-| 활성 앱 명령 100 ms 끊김 → 전환, `generation` 지정 | VM 재시작 (복구 서비스) |
-| `vehicle/control`(retained), `drive.mode.changed`, `drive.fault.detected`, `drive.resume.accepted`·`cancelled` 발행 | 인지 끊김 시 정지 (자율주행 앱, D5) |
-| 계약 5.5 수용 규칙 적용 후 시리얼 프레임 전달, `SAFE_STOP` 중 정지 프레임 | 최종 정지 (ESP32 와치독 300 ms) |
+현재 warm 제공자는 별도 프로세스용 `GatewayClient`·실제 UDS 수신부와 원 결과 조회·지원 취소/종결을 제공한다.
+[호출·상태·장치 계약](../../../docs/contracts/gateway-provider-v1.md), [Worker 연결 위치](../../../docs/requests/20261029-request-recovery-worker.md),
+[동일 후보 검증](../../../docs/verification/recovery-scenario-closure-20261030.md#gateway-provider)을 먼저 읽는다.
+설치 후보의 `python3 /usr/share/xenova/gateway-examples/provider_roundtrip.py`는 실제 별도 Gateway process/socket으로
+제출·동등 replay·값 충돌·조회·취소를 실행한다. 앱/Xen/output은 소유 fixture다.
+G2의 기존 JSON adapter는 유지하며 신규 실제 path/계산은
+[drive-world-1](../../../docs/contracts/drive-world/README.md)에 연결한다. G3는 feedback-1과
+명시 feedback-2/누적 encoder odom·PTY를 제공한다. 실제 ESP32·물리 정지·Worker 소비·운영 설치는 별도다.
+
+## 신규 지도형 주행과 이력 설정
+
+선택한 `warm-lattice-lab` 펌웨어·root binding을 사용할 때 warm Gateway에 `--drive-link`를
+명시한다. Pi 작은 차량 표본과 전체 path는 별도 bounded binary I/O로 처리한다.
+`--world-trust <private-file>`은 승인한 mapper/frame/clock/configuration 문맥을 공급한다.
+없거나 손상되면 원 오류를 남기고 AUTO 입력을 제한하며 Pi 차량 상태/MANUAL까지
+Jetson 연결 대기로 묶지 않는다. 이 파일의 시험값을 운영 설정으로 복사하지 않는다.
+
+장치 쪽은 지원 firmware와 승인값을 갖춘 경우에만
+`--serial-profile feedback-2 --odometry-config <private-file>`로 선택한다.
+기존 차량 출력 한계·ACK 기한·현재 session 검증은 그대로다. 새 MANUAL의 실제 정지 확인,
+같은 운전자 MANUAL A/B 연속, 사용자 `manual_hold`, 명시 AUTO 복귀를 구분한다.
+
+이력은 `--history-policy <private-file>`의 `retry_ms`와 `retention_ms`를 명시 공급할 때
+정당하게 종결하고 보존 약속·참조를 해소한 기록만 새 내구 수락에서 정리한다.
+`GatewayClient.history()`는 읽기 전용이다. `new_request_id(host_boot_id)`는 최초 송신 전에
+한 번 생성해 보존한다. 옛 저장 UUID는 변환하지 않고 원 결과를 회수한다. 과거 요청의
+기한 변경·정리 후 재도착으로 새 실행을 만들지 않는다. 설정·경계·오류는
+[제공자 계약](../../../docs/contracts/gateway-provider-v1.md#이력-수명과-반복-운영)이 원본이다.
+
+## verified 프로필 운영
+
+기본 프로필은 공통 A/B용 `verified`다. 먼저 같은 번들·서로 다른 UUID/인증정보와
+Worker의 실행별 provisioning 및 바인딩을 준비한다. 자세한 역할과 입력 조건은
+[공통 펌웨어 안내](../../apps/drive/README.md), 메시지 정의는
+[MQTT 계약](../../../docs/contracts/mqtt-contract-v1.md#공통-ab-펌웨어-프로필)에 있다.
+
+확인한 **최초 설치**에서만 root로 아래를 한 번 실행한다. 실제 `/srv/xenova` 마운트를
+확인하고 UUID를 실제 등록 값으로 바꾼다. 이미 원본/표지가 있으면 덮어쓰지 않는다.
+
+```bash
+python3 -m xenova_gateway \
+  --vm-a aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa \
+  --vm-b bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb \
+  --initialize-control-state
+```
+
+최초 원본은 SAFE_STOP·disarmed다. `--initial-active-vm`은 이 초기화 명령에서만
+선호 UUID를 바꾸는 선택 옵션이다. 평상시에는 원본의 owner/모드를 쓴다.
+
+```bash
+python3 -m xenova_gateway --sink mock \
+  --vm-a aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa \
+  --vm-b bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+```
+
+broker 주소·계정은 기존 `--host/--port/--username`과 `XENOVA_GATEWAY_BROKER_PASSWORD`를
+사용한다. 제품 인증정보를 명령행·Git·공개 로그에 넣지 않는다. 선택 경로는
+`--authority-dir`(`/srv/xenova/drive-control`), `--binding-file`
+(`/run/xenova/drive-bindings.json`)이다. `--start-mode`는 legacy 전용이다.
+실제 출력은 검증된 장치/복구 경로와 아래 차량 한계 파일을 준비한 뒤
+`--sink serial --serial-port /dev/ttyUSB0 --vehicle-limits /etc/xenova/vehicle-limits.json`로 선택한다.
+`--serial-port`는 pyserial URL도 받는다. `--serial-port socket://<PC>:7600`이면 같은 프레임
+바이트를 TCP로 PC 시뮬레이터(`--input frames --frame-listen 0.0.0.0:7600`)에 보낸다.
+연결 실패·끊김은 시리얼 오류와 같이 SinkError(출력 금지)로 처리된다. TCP 출력도 차량 한계 검증을 유지한다.
+Gateway의 정규 recipe/unit과 client subpackage가 제공된다. unit은 disable이며 활성 env·Authority 초기화·재무장을 만들지 않는다.
+현재 payload/의존성·설치 수준은 [배포 준비](../../../docs/platform/deployment-readiness.md)를 따른다.
+
+정지/Standby에서도 앱 준비를 확인한다. 적합한 다른 VM이 있으면 선택할 수 있지만,
+재시작·신원 미확인·전환 중·transport 상실·시리얼 오류 때는 출력을 금지한다.
+신선한 현재 준비 3초 → 현재 control 메시지 ID에 결합한 명시적 요청 → 3초 카운트다운
+→ 새 generation의 저장/발행/적용 확인 순서로 재무장한다. AUTO_READY도 같은 조건으로
+AUTO에 복귀한다. 계산 준비 회복만으로 자동 출발하거나 선호 A로 자동 원복하지 않는다.
+
+`drive.resume.requested` payload는 `expected_generation`과 선택 `requested_by`,
+공통 envelope의 `causation_id`는 Gateway가 현재 ACK를 확인한 control의 message_id다.
+Gateway 재연결/재시작 뒤에는 새 게시 ID를 확인해야 한다. 같은 요청 ID는 원본에
+저장해 중복 승인하지 않는다. 요청 소비자가 오프라인 요청을 새 승인으로 재발행하면
+안 된다. 기존 Spring/UI의 이 계약 연결은 아직 필요하다.
+
+로컬 운영 도구는 현재 control을 읽어 요청 문맥을 붙인다. 아래는 **요청 제출**이며
+수락·카운트다운·최종 적용은 각각 확인한다. `--verified` 생략은 legacy 도구 동작이다.
+
+```bash
+# 해당 broker 계정의 암호는 XENOVA_RESUME_BROKER_PASSWORD로 별도 전달한다.
+python3 platform/services/gateway/tools/send_resume.py --console --verified --host 127.0.0.1
+```
+
+제어 전환의 고정 적용 기한 1초는 재시도·옛 명령 수신으로 갱신하지 않는다. 실패는
+CONTROL_PUBLISH_UNCONFIRMED / CONTROL_APPLY_UNCONFIRMED 등으로 남기고 STOP이다.
+현재 준비를 확인한 운영자는 새 요청으로 재무장할 수 있다. 저장 상태·retained 충돌은
+CONTROL_AUTHORITY_CONFLICT이며 원본/복원 근거를 확인해야 한다. 임의 초기화하지 않는다.
+
+## 권위 원본 진단과 재확인
+
+다음 로컬 도구는 root 전용이며 broker·시리얼·VM을 조작하지 않는다. 실제 데이터 마운트를
+검증하고 원본을 조회한다. 디렉터리·marker·원본을 생성하거나 초기화하지 않는다.
+
+```bash
+python3 -m xenova_gateway.authority_ops inspect
+```
+
+`FIRST_INSTALL`은 디렉터리 부재/빈 디렉터리라는 관측이다. 그 자체가 최초 설치 승인이나
+출력 허가는 아니다. `VALID`는 private marker와 현재 원본의 schema·일관성을 읽었다는 뜻이다.
+`BLOCKED`는 손상·권한·마운트·동시 변경 등으로 근거를 확정하지 못한 상태다. 남은 임시 파일도
+최초 빈 상태로 취급하지 않으며 FIFO·symlink·공개 파일을 원본/marker로 받지 않는다.
+`--candidate /root/backup.json`은 선택적인 백업 내용 비교다. 백업이 정상 JSON이거나 같은
+generation이라는 사실만으로 최신성을 인정하지 않으며 원본을 백업으로 교체하지 않는다.
+
+현재 원본이 정상이고, 운영자가 기존 Gateway 실행을 종료한 뒤 동일 원본의 내구성을
+다시 확인하려면 아래 명령을 사용한다. SHA는 앞선 진단의 실제 `record_sha256`으로 바꾼다.
+
+```bash
+python3 -m xenova_gateway.authority_ops revalidate --execute \
+  --expected-sha256 '진단에서 확인한 64자리 record_sha256'
+```
+
+도구는 Gateway와 같은 단일 lease를 확보한 뒤 원본 해시를 다시 대조한다. 달라졌거나
+Gateway가 실행 중이면 거절한다. generation·owner·mode·원 요청·결과·pending·기한은
+보존하고 `rearm_required=true`로 내구 재기록한다. 저장 실패는 미확정이며 성공으로
+반환하지 않는다. 이 도구는 출력 자원을 열지 않으며 다음 Gateway 실행도 현재 신원·
+준비·명시적 재무장을 다시 확인한다. 원본 손상/유실의 백업 복원은 지원하지 않는다.
+marker까지 포함한 최신성 근거 없이 파일 삭제·과거 원본 복사·generation 초기화로 수습하지 않는다.
+
+## 차량 한계와 출력 실패
+
+`--vehicle-limits` 또는 `XENOVA_GATEWAY_VEHICLE_LIMITS`는 root 소유·0600의 JSON 파일이다.
+serial 출력에서는 필수이며, mock에서는 통제된 시험을 위해 선택할 수 있다. 검증은
+장치를 열기 전에 수행한다. 실제 차량 값은 차량 담당자가 측정·확정하며 코드에 기본값을 넣지 않는다.
+
+| 필드 | 단위·조건 |
+|---|---|
+| `schema_version` | `1.0-drive-output-limits` |
+| `min_v_mps`, `max_v_mps` | m/s. 하한 < 상한, 중립 0 포함 |
+| `min_steer_rad`, `max_steer_rad` | rad. 하한 < 상한, 중립 0 포함 |
+| `max_accel_mps2` | 양수 m/s². 연속 제출 목표 속도의 변화 한계 |
+| `max_steer_rate_rad_s` | 양수 rad/s. 연속 제출 목표 조향의 변화 한계 |
+
+모든 수치는 유한해야 하고 시리얼 i16 표현 범위에도 들어야 한다. 요청값과 양자화된
+출력값을 모두 검사한다. 변화율은 dom0의 같은 단조 시계에서 마지막으로 완전히 제출한
+목표를 기준으로 하며 경과 시간은 기존 명령 신선도 100ms까지만 인정한다. 긴 공백으로
+큰 목표 변화가 허용되지 않는다. 시작 속도/조향 목표는 중립이고 STOP 제출은 속도 목표만
+0으로 바꾼다. 이 값은 실제 차량 속도·조향 측정이 아니다.
+
+한계 위반·불완전 쓰기·출력 실패는 후속 DRIVE를 차단한다. verified/warm은 같은 처리
+차례에서 실패 journal의 fsync보다 먼저 STOP도 시도한다. STOP에는 완만한 변화율 제한을 적용하지 않는다. STOP도 실패할 수
+있으며 최종 정지는 기존 장치 watchdog/E-stop이 담당한다. 출력 경로를 수습해 Gateway를
+다시 시작하고 명시적으로 재무장하기 전 DRIVE를 재개하지 않는다. 장치 ACK·실제 정지
+확인은 별도 미연결 경계다. MQTT 공개 메시지나 필드는 이 검사 때문에 추가하지 않는다.
+
+## warm의 사전 준비와 조건부 커밋
+
+warm actor의 `submit_transition`은 기존 내부 연결부다. 별도 프로세스는 공개 `GatewayClient.submit/get/commit/cancel/finish`를 사용한다.
+아래 예제는 Gateway 내부 호출 설명이며 Worker SDK 사용법은 위 제공자 계약에 있다. 외부 HTTP/MQTT 전환 API를 추가하지 않았다.
+같은 원 요청 UUID와 예상 owner/generation·대상 VM·모드·절대 deadline을 보존한다.
+deadline은 같은 dom0 host boot의 단조 밀리초다. 외부 장치 시각을 전달하지 않는다.
+
+```python
+reply = runner.submit_transition(
+    'prepare', request_id, mode='AUTO', target_vm=target_vm,
+    expected_owner=current_owner, expected_generation=current_generation,
+    deadline_ms=original_deadline_ms,
+)
+```
+
+반환 queue는 제출 통로다. 큐 등록을 내구 수락으로 표시하지 않는다. actor가 처리한
+`ok=true, record.phase=PREPARING`을 받아야 원본 저장을 확인한 것이다. `refresh`는 현재
+근거를 원 요청에 채택하고 `commit`은 조건부 권위 전환, `cancel`은 미커밋 준비 취소,
+`get`은 원 기록 조회다. `get`과 동일 요청 재전달은 실행·기한 갱신을 하지 않는다.
+응답을 잃으면 같은 ID/인자를 보존하고 원 기록을 확인한다. caller의 기다림 종료는
+actor 취소가 아니다. 처리 queue는 최대 8건, 판정 회차당 한 건이며 포화는 제출 실패다.
+
+Gateway는 기존 Authority JSON에 원 요청·고정 spec·준비 결과·커밋 generation을 함께
+저장한다. 준비 중 정상 owner의 권한은 유지한다. 커밋에서 이전 명령 자격을 끝내고,
+대상의 새 generation 계산·신선한 명령을 확인한 뒤 출력한다. `COMMITTED`는 권위 변경이며
+앱 적용/장치 적용 완료가 아니다. 같은 요청의 반복 commit은 원 결과만 반환한다.
+커밋 후 취소 응답도 `COMMITTED`를 보존한다. 이후 정지는 기존 정지 의도로 요청한다.
+저장 효과 미확정이면 출력 금지이며 옛 generation으로 되돌리지 않는다.
+
+프로세스 재시작은 미커밋 준비를 ABANDONED로 보존하고 기존 출력은 재무장 전 금지한다.
+옛 승인·응답을 새 전환에 쓰지 않으며 커밋 결과와 원 key는 유지한다. 내구 기록은 최대
+32건·전체 JSON 64KiB이며 자동 삭제하지 않는다. 한도에서는 새 계획 요청을 거절하고
+기존 기록/정상 운행을 보존한다. 기록을 지워 차단을 해제하는 운영 절차는 제공하지 않는다.
+fsync 비용은 actor 지연에 포함되며 큐/틱 설정으로 worst-case를 보장하지 않는다.
+
+root 바인딩의 `app_state_models`는 실제 firmware/adapter와 일치해야 하며 선언 누락은 거절한다.
+stateless는 기존 지속 자격을 사용하고 stateful은 실제로 수락한 완전 사본/현재 대상 적용과 계산 근거를 요구한다.
+`xenova_mqtt.handoff.StateReceiver`와 `state_transfer.py`가 실제 메시지 경계를 연결한다.
+재구축만 있는 target은 stop_then_resume이며 연속 승계로 표시하지 않는다. 기본 C 알고리즘은 stateless로 유지한다.
+테스트 stateful adapter·실제 broker의 성공은 실제 planner 연속성 완료가 아니다.
+
+계획 AUTO는 이미 AUTO인 상태의 동일 모드 인계에 사용한다. MANUAL·AUTO_READY에서
+AUTO로 복귀할 때는 위의 명시적 재개·준비 유지·카운트다운 경로를 사용하며 계획
+커밋으로 우회할 수 없다. 이미 확정된 요청의 replay는 현재 모드가 달라도 원 결과를
+그대로 반환하고 새 제어를 발급하지 않는다.
+
+계획 MANUAL은 [세션 입력 계약](../../../docs/contracts/mqtt-contract-v1.md#71-명시적-세션-입력-manual-session-1)을
+요구한다. 같은 MANUAL 승계와 AUTO→MANUAL의 이동 조건은 별도다. 이 경로를 커밋하면
+세션 계약 선택을 영구 원본에 남기며 이후 원 세션의 확인이 없을 때 keys-only로 하향하지
+않는다. 현재 Spring은 새 표본 생산을 하지 않으므로 그 상태에서 성공으로 표시하지 않는다.
+준비·커밋·MANUAL 소비의 소스/로컬 수락과 실제 장치·제품 종단 수락은 구분한다.
+
+## 수신·출력 진단
+
+### 2026-11-01 부가 진단의 실행 경계
+
+실행 진입점은 Gateway logger에 `GatewayDiagnostics` 하나를 소유한다. INFO/WARNING은
+128개 queue에 표준 QueueHandler의 사본으로 전달한다. 일반 메시지는 4096문자에서
+자른 뒤 제어문자를 escape한다(최대 16384문자). 포화/종료 뒤 제출은 기다리지 않고
+drop 계수를 올린다. mutable 인자나 traceback frame을 queue에 남기지 않는다.
+기존 StreamHandler는 별도 잠금의 사본을 쓰고 ENOSPC 등 sink 실패를 같은 stderr에
+다시 출력하지 않는다. 권위/원 전환/receipt/필수 사건/시리얼 명령은 이 queue에 없다.
+
+`snapshot()`의 submitted/dropped/truncated/failed, 첫·최근 sink의 cause_type/errno,
+pending/worker_alive/closing은 내부 점검용이다. 새로운 HTTP/제어 API가 아니다.
+`close()`는 기존 handler를 복구하고 최대 0.25초 join한다. 막힌 worker는 강제 중단하거나
+재시작하지 않으며 worker_alive=true는 종료 미확정이다. handler가 회복한 뒤 실제 종료를
+확인한다. 임의 외부 handler/OS I/O나 Python 종료 전체의 지연 상한을 보장하지 않는다.
+
+ERROR/CRITICAL와 exc_info는 queue 포화·자르기·반복 억제 대상에서 제외하고 기존 sink로
+직접 전달한다. 최근 critical 원문/stack은 객체의 last_critical에도 보존한다. fatal 출력은
+진입점의 자원 종료 뒤 수행한다. SerialSink는 첫 write 오류의 cause_type/errno와 원
+SinkError의 cause를 남긴 후 즉시 반환하여 actor가 출력 철회/STOP을 먼저 시도한다.
+장치 적용 ACK나 물리 정지 완료라는 뜻은 아니다.
+
+정상 오프라인은 예외를 만들지 않고 aux_offline으로 센다. 실제 publish 오류는
+transport(type/errno/event/message)와 내부 결함의 첫 원인·최근 16개 사본을 구별한다.
+동일 type/message/위치의 연속 반복만 stack 재형식화를 생략한다. nested cause는 생략하지
+않으며 원 frame을 보관하지 않는다. 사본 한도 초과·반복은 별도 계수다. 상세 사본은 private
+진단이고 원 payload·credential을 일반 warning에 넣지 않는다. 드문 full stack은 크기를
+임의로 잘라 원인을 없애지 않으므로 모든 결함의 메모리 바이트 상한을 주장하지 않는다.
+
+MEASURE 형식과 INFO 기본 수준은 유지한다. 비활성 INFO에서는 필드 join/형식화를
+하지 않는다. `tools/measure_failover.py`가 MEASURE를 소비하므로 수준·누락 계수와
+포화 여부를 함께 기록한다. 포화 측정에서 누락된 행을 정상 측정값으로 채우지 않는다.
+큐/invalid 반복 경고는 누적 횟수 1,2,4,8…에 요약하며 rejected_commands/dropped_queue_full을
+계속 센다. 실행 주기·필수 출력·오류 코드·공개 거절 사유는 바꾸지 않는다.
+
+수신 판정은 매 회 최대 64건 또는 1ms 처리 뒤 진행한다. 명령은 허용된 실행/현재
+세대/VM/앱의 최신 네 칸으로 분리한다. 큐 상한이나 tick 5ms는 전체 최악 지연 보장이 아니다.
+필수 원본 fsync·serial I/O·호스트 스케줄링 비용은 따로 측정해야 한다.
+
+control은 연결된 상태에서만 제출하고 ticket으로 PUBACK을 관측한다. 같은 제어는
+같은 generation/문맥으로 최대 세 번 제출하며 앱 준비가 적용 증거다. 연결 단절 뒤
+Paho가 이미 받은 QoS1 bytes가 취소됐다고 가정하지 않는다. 구독/현재 실행/세대/준비
+검사가 계속 적용된다. 부가 이벤트 발행 오류가 주행 판정 루프를 종료시키지 않는다.
+
+`submissions`의 제한된 기록은 원 명령의 VM·execution·boot·instance·app·message_id·seq,
+수신 단조 시각, generation, 인코딩 hex/counter, serial_result/accepted_bytes를 제공한다.
+시리얼 실패는 OUTPUT_PATH_FAILED와 출력 금지로 반영된다. 장치 적용은 미연결이므로
+`device_applied=null`이다. `vehicle.status.applied_generation`을 만들어내지 않는다.
+STOP 재전달과 기존 watchdog/E-stop은 유지한다.
+
+## Legacy 분리 앱
+
+옛 분리 앱 시험은 `--profile legacy`로 명시적으로 선택한다. 공통 A/B 옵션과 함께
+쓸 수 없고 신뢰된 실행·새 준비 수락을 대신하지 않는다. 아래 토픽·모드·시험 도구는
+이 프로필의 설명이다. dom0에서는 두 프로필 모두 같은 전역 소유 잠금을 사용한다.
 
 ## 토픽
 
@@ -66,9 +318,15 @@ AUTO_READY ──재개 요청──▶ drive.resume.accepted {switch_in_ms: 300
 ## 실행
 
 Python 3.11 이상, paho-mqtt 1.6 또는 2.x. 시리얼은 pyserial(`python3-serial`)이 있어야 합니다.
+Yocto의 실제 provider는 `python3-pyserial`이다. 정규 `xenova-gateway` recipe는 공용 MQTT와
+Gateway를 target site-packages에 설치한다. 이 경로에서는 개발 소스의 PYTHONPATH가 필요 없다.
+unit은 기본 disable이고 `/usr/share/xenova/gateway.env.example`만 제공한다.
+승인한 root 전용 `/etc/xenova/gateway.env`·차량 한계·Authority/binding을 공급한 뒤 별도 설치 수락을 진행한다.
+설치가 Authority 초기화·재무장·출력 허가를 뜻하지 않는다.
+[배포 단위·교체·7번 입력표](../../../docs/platform/deployment-readiness.md)를 따른다.
 
 ```bash
-export PYTHONPATH=/opt/xenova/gateway:/opt/xenova/mqtt-client   # 개발 PC: platform/services/gateway 와 vm-agent/mqtt-client
+# 개발 PC에서만 각 프로젝트 경로를 PYTHONPATH로 연결한다. target은 site-packages를 사용한다.
 export XENOVA_GATEWAY_BROKER_PASSWORD=<비밀번호>                  # 저장소에 두지 않는다
 python3 -m xenova_gateway --sink serial --serial-port /dev/ttyUSB0
 ```
@@ -83,6 +341,8 @@ python3 -m xenova_gateway --sink serial --serial-port /dev/ttyUSB0
 | `--start-mode` | `XENOVA_GATEWAY_START_MODE` | `AUTO` | `SAFE_STOP` 이면 수동 명령이 올 때까지 정지 (시나리오 F5 "자동 출발 없음") |
 | `--retained-wait-s` | `XENOVA_GATEWAY_RETAINED_WAIT_S` | `1.0` | 시작 시 이전 `vehicle/control` 을 기다리는 시간 |
 | `--log-level` | `XENOVA_GATEWAY_LOG_LEVEL` | `INFO` | |
+| `--vm-a` / `--vm-b` | `XENOVA_GATEWAY_VM_A` / `_VM_B` | 없음 | 같은 공통 펌웨어를 실행하는 서로 다른 UUID 쌍. 둘을 함께 지정 |
+| `--initial-active-vm` | `XENOVA_GATEWAY_INITIAL_ACTIVE_VM` | `--vm-a` | retained 활성 문맥이 없는 최초 선택. 고정 Primary 역할이 아님 |
 
 판정 시간(100 ms·3 s·3 s·20 ms, 재개 카운트다운 3 s)은 계약값이라 인자로 바꾸지 않습니다 (`xenova_gateway/machine.py` `Timing`).
 
@@ -97,9 +357,10 @@ MEASURE event=first_output gen=12 mode=MANUAL reason=command_timeout t=… since
 
 `gap_ms` = 마지막 활성 명령 수신 → 판정, `since_last_active_ms` = 마지막 활성 명령 수신 → 새 세대 첫 프레임(수동 명령 또는 정지) 전달.
 
-## ESP32 시리얼 프레임 (초안)
+## 기존 write-only 프레임과 당시 초안
 
-> **초안입니다.** S15P31E110-241 에서 계약 v1.1 로 옮겨 확정합니다. 옛 [차량 제어 명세](../../../docs/design/vehicle-control-spec.md) 5.2 USB 시리얼 형식을 따랐습니다.
+> 아래는 write-only의 기존 bytes와 당시 설계 이력입니다. 현재 선택 feedback-1/feedback-2의
+> frame·session·ACK·센서 계약은 [제공자 원본](../../../docs/contracts/gateway-provider-v1.md)을 따릅니다.
 
 ```text
 본문   = [id:u16 LE][len:u8][payload][crc:u16 LE]      CRC-16/CCITT-FALSE (0x1021, 초기 0xFFFF), 범위 id·len·payload
@@ -153,9 +414,11 @@ python tools/measure_failover.py --port 18832 --runs 10
 - **브로커 `set_tcp_nodelay true`가 필요합니다.** 기본값(Nagle 켜짐)이면 브로커 → 게이트웨이 소켓에서 작은 메시지가 ACK를 기다리며 묶여, 전환 뒤 첫 수동 명령이 약 40 ms 늦게 옵니다 (브로커 단방향 지연 자체는 1.3 ms). dom0 브로커 설정(`platform/deploy/mosquitto/etc/mosquitto.conf`)에 넣어야 합니다.
 - Windows 수치입니다. 실보드(Linux, 코어 고정)에서 다시 잽니다.
 
-## 아직 안 한 것
+## 2026-10-21 당시 미완료 기록
+
+아래는 당시 이력이다. 현재 제공 상태는 문서 첫머리와 최신 검증을 따른다.
 
 - vchan 중계 (S15P31E110-240): Zephyr 주행 VM 의 명령은 dom0 중계를 거쳐 브로커로 온다. 게이트웨이는 브로커만 본다
 - 실제 ESP32 연결, 프레임 확정·계약 v1.1 (S15P31E110-241), `vehicle.status` 중계
-- 코어 고정·실시간 우선순위, systemd unit, Yocto 레시피 (플랫폼·deploy)
+- 코어 고정·실시간 우선순위와 실제 서비스/장치 수락은 미완료다. 2026-11-01 정규 recipe·비활성 unit 포장은 추가했으며 실제 설치와 구분한다.
 - 시리얼 쓰기 연속 실패 시 처리 (지금은 로그·횟수만, 최종 정지는 ESP32 와치독)

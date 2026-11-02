@@ -1,0 +1,91 @@
+// Platform-only merge request validation. Configure this Job for MR target branch: platform.
+pipeline {
+    agent any
+
+    options {
+        gitLabConnection('gitlab')
+        timeout(time: 20, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+    }
+
+    stages {
+        stage('Checkout Merge Result') {
+            steps {
+                script { checkoutMergeResult() }
+            }
+        }
+        stage('dom0-manager Test') {
+            steps {
+                updateGitlabCommitStatus name: 'jenkins-platform-check', state: 'running'
+                dir('platform/services/dom0-manager') {
+                    sh 'mkdir -p target'
+                    sh 'python3 -m pip install -q --user -e ../vm-agent/mqtt-client -e .[test]'
+                    sh 'python3 -m pytest -q --junitxml=target/pytest.xml'
+                }
+            }
+        }
+        stage('vm-agent Test') {
+            steps {
+                dir('platform/services/vm-agent/mqtt-client') {
+                    sh 'mkdir -p target'
+                    sh 'python3 -m pip install -q --user "paho-mqtt>=1.6,<3" "pytest>=7"'
+                    sh 'python3 -m pytest -q --junitxml=target/pytest.xml'
+                }
+                dir('platform/services/vm-agent/agent') {
+                    sh 'mkdir -p target'
+                    sh 'python3 -m pytest -q --junitxml=target/pytest.xml'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            junit testResults: 'platform/services/dom0-manager/target/pytest.xml,platform/services/vm-agent/mqtt-client/target/pytest.xml,platform/services/vm-agent/agent/target/pytest.xml', allowEmptyResults: true
+        }
+        success {
+            updateGitlabCommitStatus name: 'jenkins-platform-check', state: 'success'
+            notifyMattermost('good', '✅ Platform CI 성공')
+        }
+        failure {
+            updateGitlabCommitStatus name: 'jenkins-platform-check', state: 'failed'
+            notifyMattermost('danger', '❌ Platform CI 실패')
+        }
+        aborted {
+            updateGitlabCommitStatus name: 'jenkins-platform-check', state: 'canceled'
+            notifyMattermost('warning', '⚠️ Platform CI 중단')
+        }
+    }
+}
+
+def checkoutMergeResult() {
+    requireMergeRequest()
+    checkout([
+        $class: 'GitSCM',
+        branches: [[name: "origin/${env.gitlabTargetBranch}"]],
+        userRemoteConfigs: [[
+            credentialsId: 'xenova-gitlab-checkout',
+            name: 'origin',
+            refspec: '+refs/heads/*:refs/remotes/origin/*',
+            url: 'https://lab.ssafy.com/s15-final/S15P31E110.git'
+        ]]
+    ])
+    withEnv(["MR_SOURCE_REF=origin/${env.gitlabSourceBranch}"]) {
+        sh '''git -c user.name='Xenova Jenkins' -c user.email='jenkins@k15e110.p.ssafy.io' merge --no-edit "$MR_SOURCE_REF"'''
+    }
+}
+
+def requireMergeRequest() {
+    if (!env.gitlabSourceBranch || !env.gitlabTargetBranch) {
+        error('This job must be started by a GitLab Merge Request webhook.')
+    }
+}
+
+def notifyMattermost(String color, String title) {
+    mattermostSend color: color, message: """#### ${title}
+- Source: `${env.gitlabSourceBranch ?: '-'}`
+- Target: `${env.gitlabTargetBranch ?: '-'}`
+- Build: [${env.JOB_NAME} #${env.BUILD_NUMBER}](${env.BUILD_URL})"""
+}

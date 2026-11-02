@@ -1,0 +1,100 @@
+{
+  "schema_version": "2.0",
+  "type": "telemetry.metrics",
+  "message_id": "11111111-1111-4111-8111-111111111111/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/cccccccc-cccc-4ccc-8ccc-cccccccccccc/metrics/12",
+  "vm_id": "11111111-1111-4111-8111-111111111111",
+  "boot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "publisher_instance_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  "seq": "12",
+  "context": {
+    "binding": "unbound",
+    "host_boot_id": null,
+    "execution_id": null,
+    "receipt_id": null
+  },
+  "clock": {
+    "sent_uptime_ms": "10002",
+    "sent_at": null,
+    "utc_quality": "unavailable",
+    "utc_source": null,
+    "uncertainty_ms": null
+  },
+  "payload": {
+    "collection": {
+      "sample_id": "d954b599-e129-5526-9068-10e9b6e82d18",
+      "start_uptime_ms": "9999",
+      "end_uptime_ms": "10000",
+      "elapsed_us": "700",
+      "status": "ok",
+      "source_rc": 0
+    },
+    "family": "network",
+    "samples": [
+      {
+        "name": "network.netfront.tx_packets",
+        "unit": "packets",
+        "kind": "raw_counter",
+        "encoding": "u64_decimal",
+        "value": "4294967295",
+        "status": "ok",
+        "reason": null,
+        "source_rc": 0,
+        "labels": {
+          "interface": "eth0"
+        }
+      },
+      {
+        "name": "network.netfront.rx_packets",
+        "unit": "packets",
+        "kind": "raw_counter",
+        "encoding": "u64_decimal",
+        "value": "418",
+        "status": "ok",
+        "reason": null,
+        "source_rc": 0,
+        "labels": {
+          "interface": "eth0"
+        }
+      },
+      {
+        "name": "network.netfront.tx_drop",
+        "unit": "count",
+        "kind": "raw_counter",
+        "encoding": "u64_decimal",
+        "value": "0",
+        "status": "ok",
+        "reason": null,
+        "source_rc": 0,
+        "labels": {
+          "interface": "eth0"
+        }
+      },
+      {
+        "name": "network.interface_up",
+        "unit": "bool",
+        "kind": "gauge",
+        "encoding": "boolean",
+        "value": true,
+        "status": "ok",
+        "reason": null,
+        "source_rc": 0,
+        "labels": {
+          "interface": "eth0"
+        }
+      },
+      {
+        "name": "network.carrier",
+        "unit": "bool",
+        "kind": "gauge",
+        "encoding": "boolean",
+        "value": true,
+        "status": "ok",
+        "reason": null,
+        "source_rc": 0,
+        "labels": {
+          "interface": "eth0"
+        }
+      }
+    ]
+  }
+}

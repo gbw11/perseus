@@ -35,6 +35,10 @@ class ManagementTest(unittest.TestCase):
         self.run=Path(self.tmp.name)/'run'
         self.xen=FakeXen(self.data,{})
         self.p=vm.Platform(self.data,self.run,command=self.xen,defaults_path=FILES/'defaults.json')
+        # 명시적 로컬 시간 프로필. 생성 운영 기본값으로 설치하지 않는다.
+        self.p.creation_policy_path=self.data/'creation-policy.json'
+        self.p.creation_policy_path.write_text(json.dumps({'schema_version':'1.0','call_ms':3600000,
+                                                         'execution_ms':3500000,'cleanup_ms':5000}))
         self.storage=patch.object(vm,'storage_check');self.storage.start();self.addCleanup(self.storage.stop)
         self.m=management.Manager(self.p,preparer=self.prepare,usage_check=lambda *args:None, defaults_path=FILES/'defaults.json')
         network=patch.object(self.p,'check_network');network.start();self.addCleanup(network.stop)
@@ -108,6 +112,112 @@ class ManagementTest(unittest.TestCase):
         self.assertTrue(result['ok'],result)
         return result['data']['vm']
 
+    def cli_output(self,args):
+        output=io.StringIO()
+        with patch.object(cli,'Manager',return_value=self.m),redirect_stdout(output):
+            result=vm.main(args)
+        return result,output.getvalue()
+
+    def test_cli_short_list_shows_display_and_internal_names_actual_state_and_full_identity(self):
+        self.spec['name']='시험 개발 VM'
+        identity=self.create()
+        debian=record('debian-dev');debian['display_name']='Debian Interaction'
+        directory=fixture(self.data,debian)
+        self.xen.rows=[domain(debian,directory/'root.raw')]
+        self.xen.states={1:'-b----'}
+        result,output=self.cli_output(['list','--short'])
+        self.assertTrue(result['ok'],result)
+        self.assertEqual(output.splitlines(),[
+            'NAME | INTERNAL_NAME | UUID | STATE | IP',
+            f"Debian Interaction | debian-dev | {debian['uuid']} | blocked | {debian['ipv4']}",
+            f'시험 개발 VM | {self.key} | {identity} | stopped | 192.168.77.30'])
+
+    def test_cli_short_list_empty_prints_only_header(self):
+        result,output=self.cli_output(['list','--short'])
+        self.assertEqual(result['data']['vms'],[])
+        self.assertEqual(output,'NAME | INTERNAL_NAME | UUID | STATE | IP\n')
+
+    def test_cli_short_list_null_missing_fields_and_configuration_id_mapping(self):
+        response=self.call('list',{})
+        response['data']['vms']=[{},
+            {'name':None,'configuration':None,'vm_id':None,'xen_state':None,'ipv4':None},
+            {'name':'표시 이름','configuration':{'id':'registered-name','name':'not-the-cli-target'},
+             'vm_id':self.spec['vm_id'],'xen_state':None,'desired_state':'running',
+             'lifecycle':'REGISTERED','ipv4':'192.168.123.113'}]
+        with patch.object(self.m,'call',return_value=response):
+            result,output=self.cli_output(['list','--short'])
+        self.assertIs(result,response)
+        self.assertEqual(output.splitlines(),[
+            'NAME | INTERNAL_NAME | UUID | STATE | IP',
+            '- | - | - | - | -',
+            '- | - | - | - | -',
+            f"표시 이름 | registered-name | {self.spec['vm_id']} | - | 192.168.123.113"])
+
+    def test_cli_list_keeps_existing_pretty_and_compact_json_output(self):
+        self.spec['name']='시험 VM'
+        self.create()
+        for options,indent in (([],2),(['--json'],None)):
+            with self.subTest(options=options):
+                result,output=self.cli_output(['list',*options])
+                self.assertTrue(result['ok'],result)
+                self.assertEqual(output,json.dumps(result,ensure_ascii=False,indent=indent)+'\n')
+                self.assertIn('configuration',result['data']['vms'][0])
+
+    def test_cli_short_list_preserves_lifecycle_filter(self):
+        identity=self.create()
+        self.assertTrue(self.call('retire',{'vm_id':identity})['ok'])
+        result,output=self.cli_output(['list','--short'])
+        self.assertEqual(result['data']['vms'],[])
+        self.assertEqual(output.count('\n'),1)
+        for lifecycle in ('all','RETIRED'):
+            with self.subTest(lifecycle=lifecycle):
+                result,output=self.cli_output(['list','--short','--lifecycle',lifecycle])
+                self.assertEqual(len(result['data']['vms']),1)
+                self.assertEqual(result['data']['vms'][0]['lifecycle'],'RETIRED')
+                self.assertIn(f"custom | {self.key} | {identity} |",output)
+
+    def test_cli_short_option_conflicts_and_other_commands_fail_before_manager_call(self):
+        for args in (['list','--short','--json'],['list','--json','--short'],
+                     ['get',self.spec['vm_id'],'--short'],['templates','--short'],
+                     ['start',self.spec['vm_id'],'--short','--json'],['status','--short','--json']):
+            with self.subTest(args=args):
+                output=io.StringIO()
+                with patch.object(cli,'Manager',return_value=self.m),\
+                     patch.object(self.m,'call') as call,redirect_stdout(output),\
+                     self.assertRaises(SystemExit) as caught:
+                    vm.main(args)
+                self.assertEqual(caught.exception.code,2)
+                self.assertEqual(json.loads(output.getvalue())['error']['code'],'INVALID_SPEC')
+                call.assert_not_called()
+
+    def test_cli_short_list_query_error_keeps_json_error_and_exit_code(self):
+        self.create()
+        errors=[]
+        for options in ([],['--short'],['--json']):
+            with self.subTest(options=options):
+                output=io.StringIO()
+                with patch.object(cli,'Manager',return_value=self.m),\
+                     patch.object(cli,'uuid4',return_value=self.spec['vm_id']),\
+                     patch.object(self.p,'command',side_effect=vm.PlatformError('injected Xen query failure')),\
+                     redirect_stdout(output),self.assertRaises(SystemExit) as caught:
+                    vm.main(['list',*options])
+                self.assertEqual(caught.exception.code,4)
+                result=json.loads(output.getvalue())
+                self.assertFalse(result['ok'])
+                self.assertIsNone(result['data'])
+                self.assertNotIn('NAME |',output.getvalue())
+                errors.append(result)
+        self.assertEqual(errors[0],errors[1])
+        self.assertEqual(errors[0],errors[2])
+
+    def test_cli_list_help_documents_short_option(self):
+        output=io.StringIO()
+        with redirect_stdout(output),self.assertRaises(SystemExit) as caught:
+            vm.main(['list','--help'])
+        self.assertEqual(caught.exception.code,0)
+        self.assertIn('--short',output.getvalue())
+        self.assertIn('INTERNAL_NAME',output.getvalue())
+
     def test_plan_does_not_reserve_identity_key_name_ip_or_write_operations(self):
         result=self.call('create',self.spec,execute=False)
         self.assertTrue(result['ok'],result)
@@ -151,7 +261,7 @@ class ManagementTest(unittest.TestCase):
         self.assertEqual(result['error']['code'],'IP_CONFLICT')
 
     def test_manifest_content_and_parent_links_cannot_select_another_artifact(self):
-        source=self.data/'templates/source/Image';source.chmod(0o644);source.write_bytes(b'changed');source.chmod(0o444)
+        source=self.data/'templates/source/template.json';source.chmod(0o644);source.write_bytes(b'changed');source.chmod(0o444)
         result=self.call('create',self.spec)
         self.assertEqual(result['error']['code'],'ARTIFACT_INVALID')
         self.assertFalse((self.data/'operations').exists())
@@ -266,7 +376,7 @@ class ManagementTest(unittest.TestCase):
             output=io.StringIO()
             with redirect_stdout(output):
                 vm.main(['create','custom','--vm-id',self.spec['vm_id'],'--template-id','ubuntu-24.04-arm64','--template-version','1.0.0',
-                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','cli','--json'])
+                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','create:'+self.spec['vm_id'],'--json'])
             result=json.loads(output.getvalue());self.assertTrue(result['ok'],result)
             self.assertFalse((self.data/'operations').exists())
             output=io.StringIO()
@@ -421,21 +531,23 @@ class ManagementTest(unittest.TestCase):
         self.assertTrue((archive/'root.raw').is_file())
 
     def test_manager_itself_has_no_stdout_and_cli_execute_is_exactly_one_json(self):
-        import subprocess
+        from xenova_preparation import diagnostic, run
         original=self.m.preparer
         def noisy(op):
-            print('lower Python tool log')
-            subprocess.run(['python3','-c','print("lower process log")'],check=True)
+            diagnostic('lower Python tool log')
+            run(['python3','-c','print("lower process log")'],check=True)
             return original(op)
         self.m.preparer=noisy
         out=io.StringIO()
         with redirect_stdout(out):
             result=cli.main(['create','custom','--vm-id',self.spec['vm_id'],'--template-id','ubuntu-24.04-arm64','--template-version','1.0.0',
-                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','cli',
+                         '--vcpus','1','--memory-mib','512','--ipv4','192.168.77.30','--idempotency-key','create:'+self.spec['vm_id'],
                          '--execute','--json'],manager=self.m)
         self.assertEqual(json.loads(out.getvalue()),result)
         self.assertTrue(result['ok'],result)
         self.assertNotIn('lower',out.getvalue())
+        self.assertIn(b'lower Python tool log',self.m.last_output['bytes'])
+        self.assertIn(b'lower process log',self.m.last_output['bytes'])
 
 
     def test_uuid_collision_with_existing_vm_is_rejected_before_journal(self):

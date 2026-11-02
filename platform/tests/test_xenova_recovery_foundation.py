@@ -63,6 +63,36 @@ class FoundationTest(unittest.TestCase):
     def start(self, key=None):
         return self.ok(self.call("start", key=key))["vm"]
 
+    def test_list_forwards_original_verified_clock_and_incarnation(self):
+        self.start()
+        row = self.ok(self.m.call('list', {'lifecycle': 'REGISTERED'}))['vms'][0]
+        stored = json.loads((self.p.runtime/'observations'/(self.vm_id+'.json')).read_text())
+        self.assertEqual(row['observed_monotonic_ms'], stored['last_success']['monotonic_ms'])
+        self.assertEqual(row['xen_unique_id'], stored['last_success']['value']['xen_unique_id'])
+        self.assertEqual(row['host_boot_id'], self.host)
+
+    def test_lifecycle_reuse_is_scoped_to_read_round_not_next_request_or_control(self):
+        self.start()
+        with patch.object(self.m, '_tombs', wraps=self.m._tombs) as reads:
+            self.ok(self.m.call('list', {'lifecycle': 'REGISTERED'}))
+            self.assertEqual(reads.call_count, 2)  # 구성 집합 확보와 외부 관측 뒤 재확인
+            self.ok(self.m.call('list', {'lifecycle': 'REGISTERED'}))
+            self.assertEqual(reads.call_count, 4)  # 요청 사이에 metadata cache가 없음
+            self.ok(self.call('get'))
+            self.assertEqual(reads.call_count, 5)  # 단건은 한 전체 수명 조회와 해당 파일 guard 사용
+        original = execution.Execution.lifecycle
+        with patch.object(execution.Execution, 'lifecycle', autospec=True, side_effect=original) as fresh:
+            self.ok(self.call('get'))
+            self.assertEqual(fresh.call_count, 0)
+            self.ok(self.call('stop',key='fresh-control-lifecycle'))
+            self.assertGreaterEqual(fresh.call_count, 1)
+
+    def test_incomplete_internal_list_lifecycle_is_rejected(self):
+        self.start()
+        with self.assertRaises(execution.ExecutionError) as raised:
+            self.p.execution().observe_many([self.r], self.ticks+15, _lifecycles={})
+        self.assertEqual(raised.exception.error['code'], 'RECONCILE_REQUIRED')
+
     def stop(self, key=None):
         with patch.object(vm.os, "sync"):
             return self.ok(self.call("stop", key=key))["vm"]
@@ -139,9 +169,19 @@ class FoundationTest(unittest.TestCase):
         self.start()
         before = self.state()["intent_revision"]
         self.xen.hang_shutdown = True
-        result = self.call("stop")
-        self.fails(result, "XEN_EXECUTION_FAILED")
+        result = self.call("stop", key="accepted-stop-timeout")
+        self.fails(result, "RECONCILE_REQUIRED")
+        self.assertEqual(result["error"]["details"]["cause"]["code"], "XEN_EXECUTION_FAILED")
         self.assertTrue(result["error"]["details"]["accepted"])
+        operation = next(q for q in self.p.execution().requests() if q["operation_id"] == result["operation_id"])
+        self.assertEqual(operation["phase"], "uncertain")
+        self.assertIsNone(operation["result"])
+        deadline = operation["deadline_monotonic_ms"]
+        before_commands = len(self.physical("shutdown"))
+        replay = self.call("stop", key="accepted-stop-timeout")
+        self.fails(replay, "RECONCILE_REQUIRED")
+        self.assertEqual(len(self.physical("shutdown")), before_commands)
+        self.assertEqual(next(q for q in self.p.execution().requests() if q["operation_id"] == result["operation_id"])["deadline_monotonic_ms"], deadline)
         self.assertEqual(self.state()["desired_state"], "stopped")
         self.assertEqual(self.state()["intent_revision"], before+1)
         self.assertEqual(self.physical("destroy"), [])
@@ -321,7 +361,7 @@ class FoundationTest(unittest.TestCase):
         self.start()
         original = self.p.command
         def broken(args, **kwargs):
-            if args == ["xl","list","-l"]:
+            if args[:2] == ["xl","list"]:
                 raise vm.PlatformError("injected Xen access failure")
             return original(args, **kwargs)
         self.p.command = broken
@@ -336,7 +376,7 @@ class FoundationTest(unittest.TestCase):
     def test_broken_xl_output_is_not_absence(self):
         self.start()
         original = self.p.command
-        self.p.command = lambda args, **kw: "not-json" if args == ["xl","list","-l"] else original(args, **kw)
+        self.p.command = lambda args, **kw: "not-json" if args[:2] == ["xl","list"] else original(args, **kw)
         self.assertFalse(self.call("probe", {"vm_id":self.vm_id,"timeout_ms":1000})["ok"])
 
     def test_empty_xl_outputs_are_not_confirmed_absence(self):
@@ -344,8 +384,12 @@ class FoundationTest(unittest.TestCase):
         self.p.command = lambda args, **kw: "[]" if args == ["xl","list","-l"] else "" if args[:2] == ["xl","list"] else original(args,**kw)
         self.fails(self.call("probe",{"vm_id":self.vm_id,"timeout_ms":1000}),"OBSERVATION_UNAVAILABLE")
         before=self.p.execution().intent(self.r)
-        self.assertFalse(self.call("stop")["ok"])
-        self.assertEqual(self.p.execution().intent(self.r),before)
+        result=self.call("stop")
+        self.assertFalse(result["ok"])
+        self.assertTrue(result['error']['details']['accepted'])
+        self.assertEqual(self.p.execution().intent(self.r)['intent_revision'],before['intent_revision']+1)
+        self.assertEqual(self.p.execution().intent(self.r)['desired_state'],'stopped')
+        self.assertEqual(self.physical('shutdown'),[])
 
     def test_P15_barrier_blocks_start_and_recovery_but_not_completed_replay(self):
         self.start("done")
@@ -531,8 +575,9 @@ class FoundationTest(unittest.TestCase):
         self.assertEqual(self.p.execution().barrier()["state"], "quiescing")
 
     def test_host_barrier_published_before_bounded_operation_drain(self):
-        with operation_lock(self.p.runtime), patch.object(vm, "Platform", return_value=self.p), self.assertRaises(OperationBusy):
+        with operation_lock(self.p.runtime), patch.object(vm, "Platform", return_value=self.p), self.assertRaises(SystemExit) as caught:
             vm.main(["shutdown-all"])
+        self.assertEqual(caught.exception.code,3)
         self.assertEqual(self.p.execution().barrier()["state"], "quiescing")
         self.assertEqual(self.physical("shutdown"), [])
         self.assertGreaterEqual(self.ticks, 90)
@@ -590,14 +635,14 @@ class FoundationTest(unittest.TestCase):
         self.assertEqual(len(self.physical("create")),2)
         self.assertEqual(self.state()["desired_state"],"running")
 
-    def test_busy_probe_is_unknown_and_keeps_last_success(self):
+    def test_probe_during_common_lock_publishes_current_observation(self):
         self.start()
         with operation_lock(self.p.runtime):
             result = self.call("probe",{"vm_id":self.vm_id,"timeout_ms":1000})
-        self.fails(result,"OPERATION_IN_PROGRESS")
+        self.ok(result)
         snap = self.ok(self.call("snapshot",{"vm_id":self.vm_id,"max_age_ms":1000}))["snapshot"]
-        self.assertTrue(snap["unknown"])
-        self.assertEqual(snap["last_error"]["code"],"OPERATION_IN_PROGRESS")
+        self.assertFalse(snap["unknown"])
+        self.assertIsNone(snap["last_error"])
         self.assertEqual(snap["last_success"]["value"]["presence"],"present")
 
     def test_destroy_means_stop_intent_and_does_not_retire_assets(self):
@@ -786,9 +831,6 @@ class FactoryIntentTest(unittest.TestCase):
             started = m.call("start",{"vm_id":target["uuid"]})
             self.assertTrue(started["ok"],started)
             state=started["data"]["vm"]
-            refused=m.call("stop",{"vm_id":target["uuid"]})
-            self.assertFalse(refused["ok"])
-            self.assertEqual(p.execution().intent(target)["intent_revision"],state["intent_revision"])
             spec={"vm_id":target["uuid"],"recovery_attempt_id":uuid4(),"expected_host_boot_id":p.boot_id_reader(),
                   "expected_lifecycle_generation":0,"expected_intent_revision":state["intent_revision"],
                   "expected_execution":{"execution_id":state["execution_id"]},"mode":"force-restart",
@@ -798,6 +840,11 @@ class FactoryIntentTest(unittest.TestCase):
             spec["mode"]="graceful-restart"
             denied=m.call("recover_once",spec,execute=True)
             self.assertEqual(denied["error"]["code"],"RECOVERY_MODE_UNSUPPORTED",denied)
+            refused=m.call("stop",{"vm_id":target["uuid"]})
+            self.assertFalse(refused["ok"])
+            self.assertTrue(refused['error']['details']['accepted'])
+            self.assertEqual(p.execution().intent(target)["intent_revision"],state["intent_revision"]+1)
+            self.assertEqual(p.execution().intent(target)['desired_state'],'stopped')
             with patch.object(vm.os,"sync"):
                 stopped=m.call("stop",{"vm_id":target["uuid"],"force":True})
             self.assertTrue(stopped["ok"],stopped)

@@ -3,6 +3,7 @@
 안전 규칙
 - 인자 리스트로만 실행한다. 문자열 명령·shell=True 금지.
 - 모든 호출에 타임아웃을 둔다. 타임아웃은 DriverTimeout 으로 바꿔 서비스 전체가 멈추지 않게 한다.
+  요청 예산(budget.py)이 있으면 자체 한도와 남은 예산 중 짧은 쪽이고, 남은 예산이 없으면 실행하지 않는다.
 - stderr 전체를 응답에 싣지 않는다. 잘라서 detail 에만 넣고 message 는 짧게 유지한다.
 """
 
@@ -14,6 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Protocol
 
+from .. import budget as request_budget
 from ..errors import DriverError, DriverTimeout
 from ..models import VmState
 from .base import HostInfo
@@ -176,6 +178,7 @@ class Xl:
         self.command_timeout_s = command_timeout_s
 
     def _run(self, *args: str, timeout_s: float) -> str:
+        timeout_s = request_budget.clamp(timeout_s, f"xl {args[0]}")
         result = self._runner.run(["xl", *args], timeout_s=timeout_s)
         if result.returncode != 0:
             raise DriverError(

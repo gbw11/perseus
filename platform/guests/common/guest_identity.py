@@ -48,7 +48,18 @@ def ensure(root=Path('/'), command=subprocess.run):
             raise ValueError('completed guest SSH keys missing; no automatic key replacement')
         validate_keys(keys, command)
         return
-    instance_id = f'{mid[:8]}-{mid[8:12]}-{mid[12:16]}-{mid[16:20]}-{mid[20:]}'
+    assigned=directory/'platform-identity.json'
+    if assigned.exists() or assigned.is_symlink():
+        import stat
+        info=assigned.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or stat.S_IMODE(info.st_mode)!=0o600 or info.st_nlink!=1:
+            raise ValueError('invalid platform identity input')
+        supplied=json.loads(assigned.read_text())
+        if set(supplied)!={'schema','vm_id'} or supplied['schema']!=1 or not re.fullmatch('[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',supplied['vm_id']):
+            raise ValueError('invalid platform VM identity')
+        instance_id=supplied['vm_id']
+    else:
+        instance_id = f'{mid[:8]}-{mid[8:12]}-{mid[12:16]}-{mid[16:20]}-{mid[20:]}'
     state = {'schema': 1, 'machine_id': mid, 'instance_id': instance_id}
     if planned.exists():
         if json.loads(planned.read_text()) != state:

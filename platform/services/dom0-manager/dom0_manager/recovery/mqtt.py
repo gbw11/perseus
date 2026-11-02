@@ -20,11 +20,13 @@ log = logging.getLogger(__name__)
 HEARTBEAT_FILTER = "xenova/v1/vms/+/heartbeat"  # MQTT-01
 HEARTBEAT_TYPE = "agent.heartbeat"
 APP_EVENTS_FILTER = "xenova/v1/apps/+/events"  # MQTT-06. 그중 type app.heartbeat 만 쓴다
+VERIFIED_APP_EVENTS_FILTER = "xenova/v1/vms/+/apps/+/events"
 APP_HEARTBEAT_TYPE = "app.heartbeat"
 APP_STATES = ("active", "standby", "idle", "error")
 # 건강 스냅샷(MQTT-13, 계약 11.1). vms/{vm_id}/ 아래 토픽은 봉투 vm_id 와 토픽이 같아야 해서(계약 2장) VM 이 아닌 발행자는 쓸 수 없다.
 # 복구 이벤트(MQTT-12, xenova/v1/recovery/events)와 같은 가지에 둔다
 HEALTH_TOPIC_PREFIX = "xenova/v1/recovery/health"
+RECOVERY_EVENTS_TOPIC = "xenova/v1/recovery/events"  # MQTT-12. 복구 정책 엔진(125)의 recovery.started/completed/failed
 HEALTH_TYPE = "vm.health"
 CLEAR_WAIT_S = 2.0  # retained 삭제는 PUBACK 까지 확인한다. 못 받으면 다음 주기에 다시
 SHUTDOWN_BUDGET_S = 5.0  # 종료 전 관측 불가 발행 전체의 PUBACK 대기 한도
@@ -70,11 +72,11 @@ class LinkState:
         return cls(agent=False, app=False)
 
 
-def link_state(client: Any) -> LinkState:
+def link_state(client: Any,*,verified=False) -> LinkState:
     subscribed = getattr(client, "subscribed", None)
     if not callable(subscribed):
         return LinkState.down()  # 승인 여부를 알 수 없는 클라이언트는 관측 경로를 믿지 않는다
-    return LinkState(agent=bool(subscribed(HEARTBEAT_FILTER)), app=bool(subscribed(APP_EVENTS_FILTER)))
+    return LinkState(agent=bool(subscribed(HEARTBEAT_FILTER)), app=bool(subscribed(VERIFIED_APP_EVENTS_FILTER if verified else APP_EVENTS_FILTER)))
 
 
 def _identity(envelope: dict[str, Any]) -> tuple[UUID, str, int] | None:
@@ -118,7 +120,7 @@ def _valid_app_payload(payload: Any) -> str | None:
     return str(state)
 
 
-def app_heartbeat_handler(table: AppHeartbeatTable):
+def app_heartbeat_handler(table: AppHeartbeatTable,*,bindings=None,vm_ids=()):
     """apps/{app_id}/events 중 app.heartbeat 만. 봉투의 vm_id 로 VM 에 묶는다(VM 이 발행하므로 vm_id 와 app_id 가 함께 있다)."""
 
     def handle(message: MessageLike) -> None:
@@ -134,14 +136,37 @@ def app_heartbeat_handler(table: AppHeartbeatTable):
             log.warning("app.heartbeat dropped: topic=%s app_id=%s payload=%r", message.topic, envelope.get("app_id"), envelope.get("payload"))
             return
         vm_id, boot_id, seq = identity
+        if str(vm_id) in vm_ids:return  # configured verified VMs cannot bypass through legacy topics
         table.record(vm_id, match.group(1), state, boot_id, seq, message.received_monotonic)
 
     return handle
 
 
-def subscribe_liveness(client: ClientLike, heartbeats: HeartbeatTable, app_heartbeats: AppHeartbeatTable) -> None:
+def subscribe_liveness(client: ClientLike, heartbeats: HeartbeatTable, app_heartbeats: AppHeartbeatTable,*,rejoin=None) -> None:
     client.subscribe(HEARTBEAT_FILTER, heartbeat_handler(heartbeats), qos=1)
-    client.subscribe(APP_EVENTS_FILTER, app_heartbeat_handler(app_heartbeats), qos=0)
+    client.subscribe(APP_EVENTS_FILTER, app_heartbeat_handler(app_heartbeats,vm_ids=rejoin.vm_ids if rejoin else ()), qos=0)
+    if rejoin is not None:
+        if hasattr(client,'set_receive_guard'):client.set_receive_guard(rejoin.cache.guard(rejoin.vm_ids))
+        elif getattr(rejoin,'config',{}).get('readiness_profile')=='warm-drive-1':raise ValueError('warm profile requires pre-sequence binding guard')
+        def verified(message):
+            from xenova_mqtt import topics
+            info=topics.parse(message.topic);env=message.envelope
+            if (getattr(message,'retained',False) or info.vm_id not in rejoin.vm_ids or
+                info.app_id!=env.get('app_id') or info.vm_id!=env.get('vm_id') or
+                not rejoin.cache.accepts(info.vm_id,env.get('boot_id'),env.get('agent_instance_id'),message.received_monotonic,app=info.app_id)):return
+            warm=getattr(rejoin,'config',{}).get('readiness_profile')=='warm-drive-1'
+            if message.type=='app.lifecycle' and warm:
+                from xenova_mqtt.lifecycle import parse
+                try:value=parse(message.payload)
+                except (ValueError,TypeError):return
+                rejoin.on_readiness(message)
+                app_heartbeats.record_lifecycle(UUID(info.vm_id),info.app_id,env['boot_id'],env['agent_instance_id'],value,message.received_monotonic)
+            elif message.type=='app.readiness' and not warm:rejoin.on_readiness(message)
+            elif message.type=='app.heartbeat':
+                state=_valid_app_payload(message.payload)
+                if state:app_heartbeats.record(UUID(info.vm_id),info.app_id,state,env['boot_id'],env['seq'],
+                    message.received_monotonic,instance_id=env['agent_instance_id'])
+        client.subscribe(VERIFIED_APP_EVENTS_FILTER,verified,qos=0)
 
 
 def health_topic(vm_id: UUID) -> str:

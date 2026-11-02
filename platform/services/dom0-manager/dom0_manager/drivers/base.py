@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import ClassVar
 from uuid import UUID
 
-from ..errors import VMNotFound
-from ..models import StatsSource, UnavailableReason, Vm, VmState, VmStats
+from ..errors import NotSupportedByPlatform, VMNotFound
+from ..models import ControlOperation, StatsSource, UnavailableReason, Vm, VmState, VmStats
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,9 @@ class Domain:
     memory_mib: int
     domid: int | None = None
     name: str | None = None
+
+    # Internal observation identity; deliberately absent from the public Vm schema.
+    observation_id: str | None = None
 
     def to_vm(self) -> Vm:
         return Vm(vm_id=self.vm_id, state=self.state, vcpus=self.vcpus, memory_mib=self.memory_mib)
@@ -117,6 +120,8 @@ class StatsSample:
 
 class Driver(ABC):
     name: ClassVar[str] = "base"
+    # 제어 요청을 하위 작업 기록(멱등 키·원 작업 조회)으로 추적하는가. platform 만 True. 아니면 VmService 가 동기 정지로 처리한다
+    tracks_control_operations: ClassVar[bool] = False
 
     # ---- v1 계약 (생명주기·조회·상태) ----
 
@@ -145,6 +150,14 @@ class Driver(ABC):
     @abstractmethod
     def destroy(self, vm_id: UUID) -> None:
         """강제 종료. 디스크는 건드리지 않는다(디스크 삭제는 Provisioner). 멱등."""
+
+    def request_stop(self, vm_id: UUID, *, key: str) -> ControlOperation | None:
+        """키 있는 정지(S15P31E110-305). tracks_control_operations 인 드라이버만 구현한다. 등록이 없으면 None."""
+        raise NotSupportedByPlatform(f"{self.name} driver does not track control operations")
+
+    def control_operation(self, vm_id: UUID, *, key: str) -> ControlOperation:
+        """요청 키로 원 제어 작업 조회. 작업 기록이 없는 드라이버는 501."""
+        raise NotSupportedByPlatform(f"{self.name} driver does not track control operations")
 
     @abstractmethod
     def host_info(self) -> HostInfo:

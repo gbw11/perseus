@@ -1,0 +1,41 @@
+{
+  "idle_before": {
+    "blank": true,
+    "timeout": 600,
+    "cycle": 600,
+    "dpms": {
+      "timeouts": [
+        600,
+        600,
+        600
+      ],
+      "enabled": true
+    }
+  },
+  "idle_disabled": {
+    "blank": false,
+    "timeout": 0,
+    "cycle": 600,
+    "dpms": {
+      "timeouts": [
+        600,
+        600,
+        600
+      ],
+      "enabled": false
+    }
+  },
+  "idle_restored": {
+    "blank": true,
+    "timeout": 600,
+    "cycle": 600,
+    "dpms": {
+      "timeouts": [
+        600,
+        600,
+        600
+      ],
+      "enabled": true
+    }
+  }
+}

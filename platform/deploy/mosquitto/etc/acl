@@ -1,36 +1,93 @@
-# Xenova MQTT ACL — docs/contracts/mqtt-contract-v1.md §9 를 옮긴 것. 계약이 바뀌면 같이 고친다.
-#
-# 계정 이름 규칙: username = 토픽 안의 id
-#   VM 에이전트 = vm_id, 앱 VM = app_id(autonomous·manual·message-board), 젯슨 = perception
-#   Zephyr 앱은 dom0 vchan 중계가 그 앱의 app_id 계정으로 대신 접속한다 (계약 4.1)
-# pattern 줄은 모든 계정에 적용되고 %u 는 접속한 username 으로 바뀐다.
-# user 아래 topic 줄은 그 계정에만 적용된다.
+# Generated from policy.json; do not edit account generations.
 
-# 읽기: 개발 단계는 계약 토픽 전체를 모든 계정에 연다. 계정별 구독 제한은 계약 다음 개정(v1.2)에서 정한다.
-pattern read xenova/v1/#
+user 11111111-1111-4111-8111-111111111111
+topic read xenova/v1/#
+topic write xenova/v1/vms/11111111-1111-4111-8111-111111111111/heartbeat
+topic write xenova/v1/vms/11111111-1111-4111-8111-111111111111/inventory
+topic write xenova/v1/vms/11111111-1111-4111-8111-111111111111/metrics
+topic write xenova/v1/vms/11111111-1111-4111-8111-111111111111/command-result
+topic write xenova/v1/vms/11111111-1111-4111-8111-111111111111/apps/autonomous/events
+topic write xenova/v1/vms/11111111-1111-4111-8111-111111111111/apps/manual/events
+topic write xenova/v1/probes/#
+topic write xenova/v1/vms/11111111-1111-4111-8111-111111111111/drive/link/out
+topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/inventory
+topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/heartbeat
+topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics
+topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/events
+topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot
 
-# VM 에이전트 (username = vm_id): 자기 vm_id 토픽에만 보고
-pattern write xenova/v1/vms/%u/heartbeat
-pattern write xenova/v1/vms/%u/inventory
-pattern write xenova/v1/vms/%u/metrics
-pattern write xenova/v1/vms/%u/command-result
+user 22222222-2222-4222-8222-222222222222
+topic read xenova/v1/#
+topic write xenova/v1/vms/22222222-2222-4222-8222-222222222222/heartbeat
+topic write xenova/v1/vms/22222222-2222-4222-8222-222222222222/inventory
+topic write xenova/v1/vms/22222222-2222-4222-8222-222222222222/metrics
+topic write xenova/v1/vms/22222222-2222-4222-8222-222222222222/command-result
+topic write xenova/v1/vms/22222222-2222-4222-8222-222222222222/apps/autonomous/events
+topic write xenova/v1/vms/22222222-2222-4222-8222-222222222222/apps/manual/events
+topic write xenova/v1/probes/#
+topic write xenova/v1/vms/22222222-2222-4222-8222-222222222222/drive/link/out
+topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/inventory
+topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/heartbeat
+topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/metrics
+topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/events
+topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/snapshot
 
-# 앱 VM·젯슨 (username = app_id): 자기 앱 이벤트 토픽에만
-pattern write xenova/v1/apps/%u/events
-
-# 지연 측정 probe. 계약은 "자기 vm_id 가 source/target 인 것만" 이지만 payload 조건이라 브로커가 거르지 못한다.
-pattern write xenova/v1/probes/#
-
-# Recovery Worker: 건강 스냅샷·복구 이벤트만 발행한다 (계약 9·11장).
-user dom0-server
-topic write xenova/v1/recovery/#
+user autonomous
+topic read xenova/v1/#
+topic write xenova/v1/apps/autonomous/events
+topic write xenova/v1/probes/#
 
 user backend
+topic read xenova/v1/#
 topic write xenova/v1/apps/manual/input
 topic write xenova/v1/vms/+/command
+topic write xenova/v1/console/resume
+topic write xenova/v1/probes/#
 
-# 게이트웨이: ESP32 는 MQTT 에 붙지 않고 게이트웨이 시리얼 뒤에 있다 (계약 v1.1). vehicle/status 도 게이트웨이가 낸다.
+user dom0-server
+topic read xenova/v1/#
+topic write xenova/v1/recovery/#
+topic write xenova/v1/probes/#
+
 user gateway
+topic read xenova/v1/#
 topic write xenova/v1/vehicle/control
 topic write xenova/v1/vehicle/status
 topic write xenova/v1/apps/vehicle/events
+topic write xenova/v1/probes/#
+topic write xenova/v1/vms/+/drive/link/in
+
+user interaction
+topic read xenova/v1/#
+topic write xenova/v1/apps/interaction/events
+topic write xenova/v1/probes/#
+
+user manual
+topic read xenova/v1/#
+topic write xenova/v1/apps/manual/events
+topic write xenova/v1/probes/#
+
+user observer
+topic read xenova/v1/#
+
+user perception
+topic read xenova/v1/#
+topic write xenova/v1/apps/perception/events
+topic write xenova/v1/probes/#
+
+user telemetry-11111111-1111-4111-8111-111111111111
+topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/inventory
+topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/heartbeat
+topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics
+topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/events
+topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot
+
+user telemetry-22222222-2222-4222-8222-222222222222
+topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/inventory
+topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/heartbeat
+topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/metrics
+topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/events
+topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/snapshot
+
+user telemetry-reference-subscriber
+topic read xenova/v2/vms/+/telemetry/+

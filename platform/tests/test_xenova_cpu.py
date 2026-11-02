@@ -101,6 +101,43 @@ class CPUTest(unittest.TestCase):
     def activate(self):
         self.ok(self.policy());self.ok(self.prepare())
 
+    def test_policy_validation_uses_manager_entry_deadline_after_registry_delay(self):
+        original=self.p.records
+        def delayed(*args,**kwargs):
+            self.ticks=14
+            return original(*args,**kwargs)
+        budgets=[]
+        self.command_hook=lambda args,kwargs:budgets.append(kwargs.get('timeout'))
+        with patch.object(self.p,'records',side_effect=delayed):
+            self.ok(self.policy(execute=False))
+        self.assertTrue(budgets)
+        self.assertTrue(all(0 < seconds <= 1 for seconds in budgets))
+        self.assertFalse(self.p.cpu().policy_path.exists())
+
+    def test_factory_policy_observation_keeps_short_host_prepare_budget(self):
+        state={'storage_uuid':uuid4(),'identities':{
+            r['id']:{'uuid':r['uuid']} for r in (self.z,self.z2)},
+            'cpu_policy_activation':self.spec()}
+        (self.p.data/'.first-install-state.json').write_text(json.dumps(state))
+        def delayed(args,kwargs):
+            self.ticks=2
+            return None
+        self.command_hook=delayed
+        self.fails(self.prepare(timeout_ms=1000),'DEADLINE_EXCEEDED')
+        self.assertFalse(self.p.cpu().policy_path.exists())
+        self.assertFalse(self.p.cpu().receipt_path.exists())
+        self.assertFalse(any(c[:2]==['xl','vcpu-pin'] for c in self.xen.calls))
+
+    def test_policy_expiry_before_publication_preserves_policy_and_journals(self):
+        cpu=self.p.cpu();check=cpu.check_unknown
+        def delayed(*args):
+            check(*args);self.ticks=16
+        with patch.object(cpu,'check_unknown',side_effect=delayed),patch.object(self.p,'cpu',return_value=cpu):
+            self.fails(self.policy(),'DEADLINE_EXCEEDED')
+        self.assertFalse(cpu.policy_path.exists())
+        self.assertFalse(cpu.anchor.exists())
+        self.assertEqual(cpu.operations(),[])
+
     def test_plan_has_no_files_pins_or_identity_changes_and_revision_retry(self):
         before = {p.relative_to(self.p.data):p.read_bytes() for p in self.p.data.rglob('*.json')}
         planned = self.ok(self.policy(execute=False))
@@ -115,8 +152,7 @@ class CPUTest(unittest.TestCase):
         for change,code in [({'shared_pcpus':[0,4]},'INVALID_SPEC'),({'shared_pcpus':[0,1,3]},'INVALID_SPEC'),
                             ({'exclusive':[{'vm_id':self.zid,'pcpu':1},{'vm_id':self.z2['uuid'],'pcpu':1}]},'INVALID_SPEC'),
                             ({'exclusive':[{'vm_id':'bad','pcpu':1}]},'INVALID_SPEC'),
-                            ({'exclusive':[{'vm_id':uuid4(),'pcpu':1}]},'VM_NOT_FOUND'),
-                            ({'exclusive':[{'vm_id':self.linux['uuid'],'pcpu':1}]},'RESOURCE_UNSUPPORTED')]:
+                            ({'exclusive':[{'vm_id':uuid4(),'pcpu':1}]},'VM_NOT_FOUND')]:
             self.fails(self.policy(self.spec()|change),code)
         self.hardware=[0,2,3];self.fails(self.policy(),'RESOURCE_UNSUPPORTED')
         self.scheduler='credit';self.fails(self.layout(),'RESOURCE_UNSUPPORTED')

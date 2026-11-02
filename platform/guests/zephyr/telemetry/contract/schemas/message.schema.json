@@ -1,0 +1,1477 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Xenova Telemetry Publisher 2.1",
+  "description": "NEW protocol proposal; fixtures are synthetic and are not hardware evidence.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.1"
+    },
+    "type": {
+      "enum": [
+        "telemetry.inventory",
+        "telemetry.heartbeat",
+        "telemetry.metrics",
+        "telemetry.events",
+        "telemetry.snapshot"
+      ]
+    },
+    "message_id": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "vm_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "boot_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "publisher_instance_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "seq": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,19})$"
+    },
+    "context": {
+      "$ref": "#/$defs/context"
+    },
+    "clock": {
+      "$ref": "#/$defs/clock"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "type",
+    "message_id",
+    "vm_id",
+    "boot_id",
+    "publisher_instance_id",
+    "seq",
+    "context",
+    "clock",
+    "payload"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "u64": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,19})$"
+    },
+    "i64": {
+      "type": "string",
+      "pattern": "^(0|-?[1-9][0-9]{0,18})$"
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "binding": {
+          "enum": [
+            "unbound",
+            "host_provisioned"
+          ]
+        },
+        "host_boot_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "receipt_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "binding",
+        "host_boot_id",
+        "execution_id",
+        "receipt_id"
+      ],
+      "additionalProperties": false
+    },
+    "clock": {
+      "type": "object",
+      "properties": {
+        "sent_uptime_ms": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "sent_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 40
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "utc_quality": {
+          "enum": [
+            "unavailable",
+            "synchronized"
+          ]
+        },
+        "utc_source": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uncertainty_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 3600000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sent_uptime_ms",
+        "sent_at",
+        "utc_quality",
+        "utc_source",
+        "uncertainty_ms"
+      ],
+      "additionalProperties": false
+    },
+    "collection": {
+      "type": "object",
+      "properties": {
+        "sample_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "start_uptime_ms": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "end_uptime_ms": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "elapsed_us": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,19})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "collection_failed"
+          ]
+        },
+        "source_rc": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sample_id",
+        "start_uptime_ms",
+        "end_uptime_ms",
+        "elapsed_us",
+        "status",
+        "source_rc"
+      ],
+      "additionalProperties": false
+    },
+    "sample": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "unit": {
+          "enum": [
+            "bytes",
+            "count",
+            "packets",
+            "us",
+            "ms",
+            "percent",
+            "bool"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "gauge",
+            "counter",
+            "raw_counter"
+          ]
+        },
+        "encoding": {
+          "enum": [
+            "u64_decimal",
+            "i64_decimal",
+            "float64",
+            "boolean"
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,19})$"
+            },
+            {
+              "type": "string",
+              "pattern": "^(0|-?[1-9][0-9]{0,18})$"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "unsupported",
+            "not_registered",
+            "not_requested",
+            "no_sample",
+            "collection_failed",
+            "scan_limit",
+            "saturated",
+            "counter_discontinuity"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_rc": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "labels": {
+          "type": "object",
+          "maxProperties": 4,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      },
+      "required": [
+        "name",
+        "unit",
+        "kind",
+        "encoding",
+        "value",
+        "status",
+        "reason",
+        "source_rc",
+        "labels"
+      ],
+      "additionalProperties": false
+    },
+    "distribution": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "enum": [
+            "interval",
+            "absolute_jitter",
+            "schedule_lateness",
+            "step_elapsed"
+          ]
+        },
+        "task_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "task_epoch": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "unit": {
+          "const": "us"
+        },
+        "scope": {
+          "const": "task_epoch_cumulative"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "no_sample",
+            "saturated"
+          ]
+        },
+        "count": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "min_us": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,19})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_us": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,19})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sum_us": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,19})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "count_saturated": {
+          "type": "boolean"
+        },
+        "sum_saturated": {
+          "type": "boolean"
+        },
+        "histogram_saturated": {
+          "type": "boolean"
+        },
+        "histogram_kind": {
+          "const": "xdiag_log2_32_v1"
+        },
+        "buckets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,19})$"
+          },
+          "minItems": 32,
+          "maxItems": 32
+        },
+        "p95_upper_us": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,19})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "p99_upper_us": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,19})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "task_id",
+        "task_epoch",
+        "unit",
+        "scope",
+        "status",
+        "count",
+        "min_us",
+        "max_us",
+        "sum_us",
+        "count_saturated",
+        "sum_saturated",
+        "histogram_saturated",
+        "histogram_kind",
+        "buckets",
+        "p95_upper_us",
+        "p99_upper_us"
+      ],
+      "additionalProperties": false
+    },
+    "stack": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "unsupported",
+            "scan_limit",
+            "collection_failed"
+          ]
+        },
+        "source_rc": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "size_bytes": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "unused_high_water_bytes": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,19})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "source_rc",
+        "size_bytes",
+        "unused_high_water_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "thread": {
+      "type": "object",
+      "properties": {
+        "row_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 63
+        },
+        "name_truncated": {
+          "type": "boolean"
+        },
+        "state_text": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "state_flags": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": -32768,
+          "maximum": 32767
+        },
+        "stack": {
+          "$ref": "#/$defs/stack"
+        }
+      },
+      "required": [
+        "row_id",
+        "name",
+        "name_truncated",
+        "state_text",
+        "state_flags",
+        "priority",
+        "stack"
+      ],
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "event_seq": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "occurred_uptime_ms": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "category": {
+          "enum": [
+            "boot",
+            "error",
+            "publisher"
+          ]
+        },
+        "stage": {
+          "type": "string",
+          "maxLength": 31
+        },
+        "source_rc": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        "reason_code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 192
+        }
+      },
+      "required": [
+        "event_id",
+        "event_seq",
+        "occurred_uptime_ms",
+        "category",
+        "stage",
+        "source_rc",
+        "severity",
+        "reason_code",
+        "detail"
+      ],
+      "additionalProperties": false
+    },
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "source_total": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "source_retained": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "missed_before_capture": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "publisher_dropped_total": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "scope": {
+          "const": "current_guest_boot_ram_only"
+        }
+      },
+      "required": [
+        "source_total",
+        "source_retained",
+        "missed_before_capture",
+        "publisher_dropped_total",
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "part": {
+      "type": "object",
+      "properties": {
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        }
+      },
+      "required": [
+        "snapshot_id",
+        "index",
+        "count"
+      ],
+      "additionalProperties": false
+    },
+    "inventory": {
+      "type": "object",
+      "properties": {
+        "collection": {
+          "$ref": "#/$defs/collection"
+        },
+        "os": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "kernel_release": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "id",
+            "version",
+            "kernel_release"
+          ],
+          "additionalProperties": false
+        },
+        "hostname": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 63
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 63
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "firmware": {
+          "type": "object",
+          "properties": {
+            "build_id": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "artifact_sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "measurement_profile": {
+              "enum": [
+                "network_starter",
+                "diagnostic_exercise",
+                "driving_app",
+                "linux_agent"
+              ]
+            }
+          },
+          "required": [
+            "build_id",
+            "artifact_sha256",
+            "measurement_profile"
+          ],
+          "additionalProperties": false
+        },
+        "publisher": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "metric_catalog": {
+              "const": "xenova-telemetry-core-2.1"
+            }
+          },
+          "required": [
+            "name",
+            "version",
+            "metric_catalog"
+          ],
+          "additionalProperties": false
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 31
+              },
+              "mac": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^([0-9a-f]{2}:){5}[0-9a-f]{2}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "addresses": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "family": {
+                      "enum": [
+                        "ipv4",
+                        "ipv6"
+                      ]
+                    },
+                    "address": {
+                      "type": "string",
+                      "maxLength": 64
+                    }
+                  },
+                  "required": [
+                    "family",
+                    "address"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 0,
+                "maxItems": 4
+              }
+            },
+            "required": [
+              "name",
+              "mac",
+              "addresses"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 0,
+          "maxItems": 4
+        },
+        "interfaces_omitted": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "support": {
+                "enum": [
+                  "available",
+                  "unsupported",
+                  "not_registered"
+                ]
+              },
+              "reason": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "support",
+              "reason"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 16
+        },
+        "capabilities_omitted": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024
+        },
+        "clock_domains": {
+          "type": "object",
+          "properties": {
+            "uptime": {
+              "const": "guest_boot_milliseconds"
+            },
+            "loop_counter": {
+              "const": "local_hw_cycles_converted_us"
+            },
+            "frequency_hz": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,19})$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "same_epoch": {
+              "const": false
+            }
+          },
+          "required": [
+            "uptime",
+            "loop_counter",
+            "frequency_hz",
+            "same_epoch"
+          ],
+          "additionalProperties": false
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "max_payload_bytes": {
+              "const": 4096
+            },
+            "heartbeat_period_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 60000
+            },
+            "metrics_period_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 60000
+            },
+            "event_queue_capacity": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            },
+            "diagnostic_stack_scan_default": {
+              "const": "off"
+            }
+          },
+          "required": [
+            "max_payload_bytes",
+            "heartbeat_period_ms",
+            "metrics_period_ms",
+            "event_queue_capacity",
+            "diagnostic_stack_scan_default"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "collection",
+        "os",
+        "hostname",
+        "display_name",
+        "firmware",
+        "publisher",
+        "interfaces",
+        "interfaces_omitted",
+        "capabilities",
+        "capabilities_omitted",
+        "clock_domains",
+        "limits"
+      ],
+      "additionalProperties": false
+    },
+    "heartbeat": {
+      "type": "object",
+      "properties": {
+        "collection": {
+          "$ref": "#/$defs/collection"
+        },
+        "publisher_state": {
+          "enum": [
+            "running",
+            "degraded",
+            "stopping"
+          ]
+        },
+        "last_collection_success_uptime_ms": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,19})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "collection_failures_total": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "connection_attempts_total": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "publish_submit_failures_total": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "events_dropped_total": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$"
+        },
+        "app_health_asserted": {
+          "const": false
+        }
+      },
+      "required": [
+        "collection",
+        "publisher_state",
+        "last_collection_success_uptime_ms",
+        "collection_failures_total",
+        "connection_attempts_total",
+        "publish_submit_failures_total",
+        "events_dropped_total",
+        "app_health_asserted"
+      ],
+      "additionalProperties": false
+    },
+    "metrics": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "$ref": "#/$defs/collection"
+            },
+            "family": {
+              "enum": [
+                "memory",
+                "network",
+                "publisher",
+                "loop_progress"
+              ]
+            },
+            "samples": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sample"
+              },
+              "minItems": 1,
+              "maxItems": 12
+            }
+          },
+          "required": [
+            "collection",
+            "family",
+            "samples"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "$ref": "#/$defs/collection"
+            },
+            "family": {
+              "const": "loop_timing"
+            },
+            "distribution": {
+              "$ref": "#/$defs/distribution"
+            }
+          },
+          "required": [
+            "collection",
+            "family",
+            "distribution"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "$ref": "#/$defs/collection"
+            },
+            "family": {
+              "const": "cpu"
+            },
+            "samples": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sample"
+              },
+              "minItems": 1,
+              "maxItems": 12
+            },
+            "window": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sample_seq",
+                "start_uptime_ms",
+                "end_uptime_ms",
+                "scope",
+                "part_index",
+                "part_count",
+                "threads_status",
+                "rows_seen",
+                "rows_returned"
+              ],
+              "properties": {
+                "sample_seq": {
+                  "$ref": "#/$defs/u64"
+                },
+                "start_uptime_ms": {
+                  "$ref": "#/$defs/u64"
+                },
+                "end_uptime_ms": {
+                  "$ref": "#/$defs/u64"
+                },
+                "scope": {
+                  "const": "guest_accounted_up"
+                },
+                "part_index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 7
+                },
+                "part_count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                },
+                "threads_status": {
+                  "enum": [
+                    "ok",
+                    "truncated",
+                    "unsupported",
+                    "no_sample",
+                    "collection_failed"
+                  ]
+                },
+                "rows_seen": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "rows_returned": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 32
+                }
+              }
+            }
+          },
+          "required": [
+            "collection",
+            "family",
+            "samples",
+            "window"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "$ref": "#/$defs/collection"
+            },
+            "family": {
+              "const": "memory_regions"
+            },
+            "samples": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sample"
+              },
+              "minItems": 1,
+              "maxItems": 12
+            },
+            "source_sample_seq": {
+              "$ref": "#/$defs/u64"
+            },
+            "observed_uptime_ms": {
+              "$ref": "#/$defs/u64"
+            }
+          },
+          "required": [
+            "collection",
+            "family",
+            "samples",
+            "source_sample_seq",
+            "observed_uptime_ms"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "events": {
+      "type": "object",
+      "properties": {
+        "collection": {
+          "$ref": "#/$defs/collection"
+        },
+        "event": {
+          "$ref": "#/$defs/event"
+        },
+        "coverage": {
+          "$ref": "#/$defs/coverage"
+        }
+      },
+      "required": [
+        "collection",
+        "event",
+        "coverage"
+      ],
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "$ref": "#/$defs/collection"
+            },
+            "part": {
+              "$ref": "#/$defs/part"
+            },
+            "source_status": {
+              "enum": [
+                "ok",
+                "truncated",
+                "unsupported",
+                "not_requested",
+                "collection_failed"
+              ]
+            },
+            "source_rc": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -2147483648,
+                  "maximum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "threads"
+            },
+            "identity_scope": {
+              "const": "snapshot_local"
+            },
+            "rows_seen": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 65535
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rows_returned_total": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 32
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/thread"
+              },
+              "minItems": 0,
+              "maxItems": 4
+            }
+          },
+          "required": [
+            "collection",
+            "part",
+            "source_status",
+            "source_rc",
+            "kind",
+            "identity_scope",
+            "rows_seen",
+            "rows_returned_total",
+            "rows"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "$ref": "#/$defs/collection"
+            },
+            "part": {
+              "$ref": "#/$defs/part"
+            },
+            "source_status": {
+              "enum": [
+                "ok",
+                "truncated",
+                "unsupported",
+                "not_requested",
+                "collection_failed"
+              ]
+            },
+            "source_rc": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -2147483648,
+                  "maximum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "history"
+            },
+            "events": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/event"
+              },
+              "minItems": 0,
+              "maxItems": 8
+            },
+            "coverage": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/coverage"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "collection",
+            "part",
+            "source_status",
+            "source_rc",
+            "kind",
+            "events",
+            "coverage"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "telemetry.inventory"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/inventory"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "telemetry.heartbeat"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/heartbeat"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "telemetry.metrics"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/metrics"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "telemetry.events"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/events"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "telemetry.snapshot"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/snapshot"
+          }
+        }
+      }
+    }
+  ]
+}

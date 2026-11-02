@@ -1,0 +1,36 @@
+{
+  "root_bins": [
+    "python3",
+    "systemctl",
+    "python3.13",
+    "dbus-uuidgen",
+    "dbus-monitor",
+    "dbus-cleanup-sockets",
+    "dbus-daemon",
+    "dbus-launch",
+    "dbus-send",
+    "dbus-update-activation-environment",
+    "dbus-run-session"
+  ],
+  "python_dirs": [
+    "usr/lib/python3",
+    "usr/lib/python3.13"
+  ],
+  "playwright_paths": [],
+  "host_python_soabi": "cpython-314-aarch64-linux-gnu",
+  "host_node": null,
+  "runtime_unit": {
+    "code": 4,
+    "out": "",
+    "err": "Unit xenova-display-kiosk.service could not be found.\n"
+  },
+  "user_1000": {
+    "missing": "getent"
+  },
+  "systemd_run": "/usr/bin/systemd-run",
+  "rootfs_python": {
+    "code": 0,
+    "out": "Python 3.13.5\n",
+    "err": ""
+  }
+}

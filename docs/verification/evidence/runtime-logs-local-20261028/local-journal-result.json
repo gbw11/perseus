@@ -1,0 +1,40 @@
+{
+  "environment": "local WSL systemd; not Raspberry Pi",
+  "unit": "xenova-runtime-log-probe-882dfd4a.service",
+  "database": "/tmp/xenova-runtime-logs-uv24725w/logs.sqlite3",
+  "actual_journal": true,
+  "passed": true,
+  "record_count": 2,
+  "first_record_count": 1,
+  "checkpoint_persisted": true,
+  "restart_no_duplicate": true,
+  "second_record_after_restart": true,
+  "secret_redacted_before_storage": true,
+  "collector_stopped": true,
+  "records": [
+    {
+      "id": 1,
+      "event_id": "6c37b7307d1241d80ae86e67ccc59ad193be5592c1176155e839e17f8952ebe4",
+      "source_id": "dom0",
+      "vm_id": null,
+      "component": "xenova-runtime-log-probe-882dfd4a.service",
+      "boot_id": "c83ace8eedf14fbeb13fc27c34c18ec3",
+      "observed_at": "2026-10-28T14:00:54.990601+00:00",
+      "received_at": 1793196055.4341307,
+      "level": "INFO",
+      "message": "PROBE_FIRST function completed password=[REDACTED]"
+    },
+    {
+      "id": 2,
+      "event_id": "cc92105df026113f0c80d2543114d557b08120326194bb14fbfcb787e900fbed",
+      "source_id": "dom0",
+      "vm_id": null,
+      "component": "xenova-runtime-log-probe-882dfd4a.service",
+      "boot_id": "c83ace8eedf14fbeb13fc27c34c18ec3",
+      "observed_at": "2026-10-28T14:00:57.546629+00:00",
+      "received_at": 1793196058.00796,
+      "level": "INFO",
+      "message": "PROBE_SECOND function completed password=[REDACTED]"
+    }
+  ]
+}

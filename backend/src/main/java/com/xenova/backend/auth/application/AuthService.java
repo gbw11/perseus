@@ -57,7 +57,7 @@ public class AuthService {
     }
 
     @Transactional
-    public SignupResponse signup(String username, String password) {
+    public SignupResponse signup(String username, String nickname, String password) {
         if (userRepository.existsByUsername(username)) {
             throw new ApiException(HttpStatus.CONFLICT, "USERNAME_ALREADY_EXISTS", "이미 사용 중인 사용자 이름입니다.");
         }
@@ -66,9 +66,10 @@ public class AuthService {
         User user = userRepository.save(new User(
                 UUID.randomUUID().toString(),
                 username,
+                nickname,
                 passwordEncoder.encode(password),
                 now));
-        return new SignupResponse(user.getId(), user.getUsername(), user.getCreatedAt());
+        return new SignupResponse(user.getId(), user.getUsername(), user.getNickname(), user.getCreatedAt());
     }
 
     @Transactional
@@ -138,7 +139,7 @@ public class AuthService {
                 "Bearer",
                 properties.accessTokenTtl().toSeconds(),
                 accessToken.expiresAt(),
-                new LoginResponse.UserResponse(user.getId(), user.getUsername()));
+                new LoginResponse.UserResponse(user.getId(), user.getUsername(), user.getNickname()));
         return new LoginResult(response, refreshTokenValue);
     }
 

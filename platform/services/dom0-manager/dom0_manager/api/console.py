@@ -10,6 +10,7 @@ import hmac
 import json
 import logging
 import os
+import re
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import UUID
@@ -17,12 +18,15 @@ from uuid import UUID
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..console import ConsoleError, ConsoleExited
-from ..errors import Dom0ManagerError, InvalidArgument, VMNotFound
+from ..errors import Dom0ManagerError, InvalidArgument, PlatformUnavailable, VMNotFound
 from ..models import VmState
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 MAX_INPUT = 65536
+WATCH_INTERVAL_SECONDS = 2
+BUSY_RECHECK_SECONDS = 2
+BUSY_RECHECK_DELAY_SECONDS = 0.1
 
 
 class ConsoleBusy(Exception):
@@ -60,7 +64,19 @@ async def live_domain(service, vm_id: UUID):
     return domain
 
 
-async def relay(websocket: WebSocket, session, service, vm_id: UUID, domid: int) -> None:
+def retryable_console_busy(exc: PlatformUnavailable) -> bool:
+    # Older installed APIs preserve platform_code but predate retryable.
+    # Only that exact busy code gains the bounded read-only recheck; a modern
+    # explicit False/None still fails closed, as do all other error codes.
+    return (getattr(exc, 'platform_code', None) == 'OPERATION_IN_PROGRESS'
+            and getattr(exc, 'retryable', True) is True)
+
+
+async def relay(websocket: WebSocket, session, service, vm_id: UUID, domid: int,
+                *, observation_id: str | None = None) -> None:
+    confirmed = asyncio.Event()
+    confirmed.set()
+
     async def receive_input():
         while True:
             message = await websocket.receive()
@@ -80,20 +96,49 @@ async def relay(websocket: WebSocket, session, service, vm_id: UUID, domid: int)
                 data = text.encode('utf-8')
             if len(data) > MAX_INPUT:
                 raise EndRelay(1009, "console input exceeds 65536 bytes")
+            # Hold at most this one bounded frame in the current connection.
+            # Failed validation cancels it; it is never replayed on reconnect.
+            await confirmed.wait()
             await session.write(data)
 
     async def send_output():
         while True:
+            await confirmed.wait()
             data = await session.read()
+            await confirmed.wait()
             # 느린 수신자가 PTY reader를 영구 점유하지 않도록 전송에 시한을 둔다.
             await asyncio.wait_for(websocket.send_bytes(data), 5)
 
     async def watch_domain():
         while True:
-            await asyncio.sleep(2)
-            domain = await live_domain(service, vm_id)
-            if domain.domid != domid:
+            await asyncio.sleep(WATCH_INTERVAL_SECONDS)
+            rechecking = False
+            try:
+                domain = await live_domain(service, vm_id)
+            except PlatformUnavailable as exc:
+                if not retryable_console_busy(exc):
+                    raise
+                confirmed.clear()
+                rechecking = True
+                logger.info("console VM validation paused for VM %s (platform busy)", vm_id)
+                try:
+                    async with asyncio.timeout(BUSY_RECHECK_SECONDS):
+                        while True:
+                            await asyncio.sleep(BUSY_RECHECK_DELAY_SECONDS)
+                            try:
+                                domain = await live_domain(service, vm_id)
+                                break
+                            except PlatformUnavailable as retry:
+                                if not retryable_console_busy(retry):
+                                    raise
+                except TimeoutError:
+                    raise EndRelay(1011, 'VM validation busy; reconnect required') from None
+            if (domain.vm_id != vm_id or domain.domid != domid
+                    or getattr(domain, 'observation_id', None) != observation_id):
                 raise EndRelay(4409, "VM incarnation changed; reconnect required")
+            confirmed.set()
+            if rechecking:
+                logger.info("console VM validation resumed for VM %s", vm_id)
 
     tasks = [asyncio.create_task(action()) for action in (receive_input, send_output, watch_domain)]
     try:
@@ -136,9 +181,11 @@ async def vm_console(websocket: WebSocket, vm_id: str):
             async with session:
                 # xl 실행 사이에 VM이 바뀌면 입력을 허용하지 않고 닫는다.
                 current = await live_domain(service, identifier)
-                if current.domid != domain.domid:
+                if (current.domid != domain.domid or current.vm_id != identifier
+                        or getattr(current, 'observation_id', None) != getattr(domain, 'observation_id', None)):
                     raise EndRelay(4409, "VM incarnation changed; reconnect required")
-                await relay(websocket, session, service, identifier, domain.domid)
+                await relay(websocket, session, service, identifier, domain.domid,
+                            observation_id=getattr(current, 'observation_id', None))
     except EndRelay as exc:
         code, reason = exc.code, exc.reason
     except ConsoleBusy:
@@ -152,10 +199,14 @@ async def vm_console(websocket: WebSocket, vm_id: str):
         reason = "console process ended"
     except WebSocketDisconnect:
         return
-    except (ConsoleError, Dom0ManagerError, TimeoutError, OSError):
+    except (ConsoleError, Dom0ManagerError, TimeoutError, OSError) as exc:
         code, reason = 1011, "console unavailable"
         # 터미널 데이터, 암호, 서비스 토큰, 예외 detail은 로그에 남기지 않는다.
-        logger.warning("console unavailable for VM %s", vm_id)
+        platform_code = getattr(exc, 'platform_code', None)
+        if not isinstance(platform_code, str) or not re.fullmatch(r'[A-Z_]{1,64}', platform_code):
+            platform_code = 'unspecified'
+        logger.warning("console unavailable for VM %s (error_type=%s, platform_code=%s)",
+                       vm_id, type(exc).__name__, platform_code)
     finally:
         try:
             await asyncio.wait_for(websocket.close(code=code, reason=reason), 2)

@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+menuconfig XENOVA_DIAGNOSTICS
+	bool "Xenova local diagnostics"
+	help
+	  Bounded, transport-independent boot/error snapshots and timing hooks.
+	  No MQTT, automatic thread scans, fatal-handler override or VM control.
+
+if XENOVA_DIAGNOSTICS
+config XENOVA_DIAGNOSTICS_CPU
+	bool "Single-vCPU guest runtime windows and thread lifetimes"
+	depends on !SMP
+	select THREAD_RUNTIME_STATS
+	select THREAD_MONITOR
+	select THREAD_NAME
+	select TRACING
+	default y if BOARD_XENVM || BOARD_NATIVE_SIM
+	help
+	  Frozen Zephyr usage API, 200 ms cached collection, no stack scan.
+	  Finite-width accounting gaps are invalidated rather than repaired.
+
+config XENOVA_DIAGNOSTICS_POOLS
+	bool "Fixed network data pool payload occupancy"
+	depends on NETWORKING && NET_BUF_FIXED_DATA_SIZE
+	select NET_BUF_POOL_USAGE
+	default y
+
+config XENOVA_DIAGNOSTICS_TIMING
+	bool "64-bit cycle clock and periodic work measurements"
+	depends on TIMER_HAS_64BIT_CYCLE_COUNTER
+	default y
+
+config XENOVA_DIAGNOSTICS_THREADS
+	bool "On-demand thread/stack snapshots"
+	default y
+	select THREAD_MONITOR
+	select THREAD_NAME
+	select THREAD_STACK_INFO
+	select INIT_STACKS
+	help
+	  Uses the same stack-space API as Thread Analyzer but preserves errors.
+	  Scanning is intrusive; do not request it during jitter measurements.
+
+config XENOVA_DIAGNOSTICS_MAX_THREADS
+	int "Maximum thread rows in a snapshot"
+	range 1 32
+	default 16
+
+config XENOVA_DIAGNOSTICS_STACK_SCAN_LIMIT
+	int "Maximum stack bytes scanned per thread"
+	range 256 65536
+	default 16384
+
+config XENOVA_DIAGNOSTICS_HEAP
+	bool "Kernel system heap statistics (frozen Zephyr 4.4 adapter)"
+	depends on HEAP_MEM_POOL_SIZE > 0
+	select SYS_HEAP_RUNTIME_STATS
+	default y
+endif
+
+choice TRACING_FORMAT_CHOICE
+	default TRACING_USER if XENOVA_DIAGNOSTICS_CPU
+endchoice

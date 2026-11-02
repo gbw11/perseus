@@ -1,0 +1,32 @@
+{
+  "branch": "feat/platform/S15P31E110-256-kiosk-recovery",
+  "autostart": true,
+  "rebooted": true,
+  "boot_before": "98d7d22b-7484-49a2-a5f7-d660303e85fb",
+  "boot_after": "a3fc3b67-2fcf-46c1-88dd-29255c169f21",
+  "tryboot_flag": 0,
+  "new_kiosk_epoch": true,
+  "two_outputs_applied": true,
+  "manual_start_after_reboot": false,
+  "user_visual_confirmation": "Both screens automatically displayed normally after reboot",
+  "vm_domains_preserved": [
+    "debian-dev",
+    "zephyr-drive-a",
+    "zephyr-drive-b"
+  ],
+  "manager_api_service_active": true,
+  "failed_units": 0,
+  "local_display_unauthenticated_status": 401,
+  "local_display_authenticated_status": 200,
+  "screens_left_running": true,
+  "ssh_capture_reconnect_timeouts": 2,
+  "ssh_reconnect_then_capture_success": true,
+  "ssh_timeout_cause": "not established",
+  "new_board_units": [
+    "xenova-display.target",
+    "xenova-display-feed.service",
+    "xenova-display-graphics.service",
+    "xenova-display-kiosk.service"
+  ],
+  "yocto_image_packaging_included": false
+}

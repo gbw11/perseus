@@ -127,6 +127,7 @@ static int build(const char *fn, int args, char *out, size_t n)
 	}
 	if (!strcmp(fn, "vm")) return xm_topic_vm(out, n, a, b);
 	if (!strcmp(fn, "app_events")) return xm_topic_app_events(out, n, a);
+	if (!strcmp(fn, "vm_app_events")) return xm_topic_vm_app_events(out, n, a, b);
 	if (!strcmp(fn, "manual_input")) return xm_topic_manual_input(out, n);
 	if (!strcmp(fn, "vehicle_control")) return xm_topic_vehicle_control(out, n);
 	if (!strcmp(fn, "vehicle_status")) return xm_topic_vehicle_status(out, n);
@@ -349,6 +350,17 @@ static void test_uuid(void)
 		      out[19] == '8' || out[19] == '9'), "uuid %s", out);
 }
 
+static void test_lifecycle(void)
+{
+ char out[256];
+ CHECK(xm_app_lifecycle_json(out,sizeof(out),42,1,0,"WAITING","QUALIFIED",NULL)>0,"waiting qualification");
+ CHECK(strstr(out,"\"progress_seq\":\"0\"")&&strstr(out,"\"profile\":\"warm-drive-1\""),"distinct supervision %s",out);
+ CHECK(xm_app_lifecycle_json(out,sizeof(out),42,1,0,"EXECUTING","READY",NULL)==-EINVAL,"no fabricated progress");
+ CHECK(xm_app_lifecycle_json(out,sizeof(out),42,1,1,"WAITING","READY",NULL)==-EINVAL,"waiting is not activation");
+ CHECK(xm_app_lifecycle_json(out,sizeof(out),42,UINT64_MAX,UINT64_MAX,"EXECUTING","READY",NULL)>0,"full counters");
+ CHECK(xm_app_lifecycle_json(out,16,42,1,1,"EXECUTING","READY",NULL)==-ENOSPC,"bounded serialization");
+}
+
 int main(int argc, char **argv)
 {
 	const char *dir = argc > 1 ? argv[1] : "tests/vectors";
@@ -360,6 +372,7 @@ int main(int argc, char **argv)
 	test_encode_roundtrip();
 	test_payloads();
 	test_uuid();
+	test_lifecycle();
 	printf("%d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;
 }

@@ -18,10 +18,11 @@ class Policy:
     retain: bool = False
     # 주행 토픽: 1 KB 제한, 받는 쪽은 최신 1건만 쓴다 (latest-only)
     driving: bool = False
+    limit: int | None = None
 
     @property
     def max_bytes(self) -> int:
-        return MAX_DRIVING_BYTES if self.driving else MAX_BYTES
+        return self.limit if self.limit is not None else MAX_DRIVING_BYTES if self.driving else MAX_BYTES
 
 
 POLICIES: dict[str, Policy] = {
@@ -44,6 +45,10 @@ POLICIES: dict[str, Policy] = {
     "drive.fault.detected": Policy(qos=1),
     # 6.1 앱 생존 신호: 1초마다 다시 오므로 유실돼도 다음 것으로 충분하다
     "app.heartbeat": Policy(qos=0),
+    "app.readiness": Policy(qos=0, driving=True),
+    "app.lifecycle": Policy(qos=0, driving=True),
+    "app.state.snapshot": Policy(qos=1,limit=8192),
+    "app.state.applied": Policy(qos=1,limit=8192),
     # 7장 수동 입력
     "drive.input": Policy(qos=0),
     # 8장 지연 측정

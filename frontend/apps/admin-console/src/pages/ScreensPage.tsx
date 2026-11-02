@@ -10,18 +10,15 @@ const SCREENS_BASE = import.meta.env.VITE_SCREENS_ORIGIN || '/monitor';
  */
 export function ScreensPage() {
   const links = [
-    ['모니터 1 — 3분할', '/split'],
-    ['모니터 2 — 자율주행 상세', '/detail/autonomous'],
-    ['모니터 2 — 수동주행 상세', '/detail/manual'],
-    ['모니터 2 — 네비게이션 상세', '/detail/interaction'],
-    ['모니터 2 — 시뮬레이터 (시뮬레이터 구성)', '/sim'],
+    ['모니터 1 — VM 전체 상태', '/display/monitor-1'],
+    ['모니터 2 — 정책이 선택한 VM 상세', '/display/monitor-2'],
   ] as const;
   return (
     <Card title="모니터 화면 (RC카 시나리오 §5)">
       <p className={styles.dim}>
-        라즈베리파이 HDMI 모니터에 뜨는 화면이다. 조작은 없다 — 시연 제어에서 강제 종료·재개를 하면 모니터가
-        따라간다. 실제 모니터에는 ?kiosk=1 로 띄운다. 모니터 2 선택은 화면 라우터 제어(-129·-130)가 생기면
-        여기서 한다.
+        dom0 표시 수집기와 로컬 정책이 정한 전체·상세 화면입니다. 상세 대상은 UUID로 선택하며 주행 모드와
+        주·백업 역할을 구분합니다. 이 링크는 화면 열기이며 HDMI 적용 성공을 뜻하지 않습니다. 로컬 표시 세션이
+        필요하고 외부 서버에서 볼 때는 별도 연결이 필요합니다.
       </p>
       <ul className={styles.linkList}>
         {links.map(([label, path]) => (

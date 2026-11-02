@@ -3,7 +3,6 @@
 
 명시적 create만 자산을 생성한다. start는 등록 자산을 재사용하며 자동 복구는 하지 않는다.
 """
-import argparse
 import json
 import os
 from pathlib import Path
@@ -14,6 +13,8 @@ import sys
 import time
 
 from xenova_runtime import PlatformError, atomic_write, ensure_runtime, operation_lock, sync_directory
+from xenova_trace import span, traced
+from xenova_preparation import run as request_run, diagnostic as print, ensure_quiet, drain
 import xenova_zephyr as zephyr
 
 DATA = Path('/srv/xenova')
@@ -21,12 +22,13 @@ RUN = Path('/run/xenova')
 ID = re.compile(r'[a-z][a-z0-9-]{0,39}\Z')
 UUID = re.compile(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z')
 MAC = re.compile(r'02(?::[0-9a-f]{2}){5}\Z')
+# xenova-vms.service의 150초 바깥 상한에서 결과 저장·종료 여유를 남긴다.
+AUTOSTART_TIMEOUT = 140
 
 
 def run(args, timeout=15):
     try:
-        p = subprocess.run(args, text=True, stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, timeout=timeout, check=False)
+        p = request_run(args, text=True, capture=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise PlatformError(f'{args[0]} failed: {exc}') from exc
     if p.returncode:
@@ -157,7 +159,7 @@ def validate_record(record, directory, *, allow_seed=False, allow_archive=False)
     return record
 
 
-def load_records(data, *, validate_assets=True):
+def load_records(data, *, validate_assets=True, deadline=None, clock=time.monotonic):
     """공통 신원·경로·디스크 중복 검증. validate_assets는 전체 부팅 자산 검사도 요청한다.
 
     CLI는 공통 검증 후 실행 대상만 자산을 검사한다. 누락된 비대상 부팅 자산은
@@ -168,6 +170,9 @@ def load_records(data, *, validate_assets=True):
         raise PlatformError('instance registry missing')
     records, identities, disks = {}, set(), set()
     for directory in sorted(registry.iterdir()):
+        if deadline is not None and clock()>=deadline:
+            from xenova_execution import refuse
+            refuse('DEADLINE_EXCEEDED','registry scan budget expired')
         if directory.name.startswith('.'):
             continue
         if directory.is_symlink() or not directory.is_dir() or directory.resolve() != directory:
@@ -233,26 +238,31 @@ def started_state(record, row):
 
 class Platform:
     def __init__(self, data=DATA, runtime=RUN, command=run, sleep=time.sleep, clock=time.monotonic, *, defaults_path=Path("/etc/xenova/defaults.json"),
-                 boot_id_reader=None, execution_checkpoint=None, execution_policy_path=None):
+                 boot_id_reader=None, execution_checkpoint=None, execution_policy_path=None, creation_policy_path=None):
         self.data, self.runtime = Path(data), Path(runtime)
         self.defaults_path = Path(defaults_path)
         self.command, self.sleep, self.clock = command, sleep, clock
+        # 주입 runner는 Xen/프로세스 경계를 대역한다. 실제 runner만 systemd scope로 실행한다.
+        self.process_isolation = command is run
         self.boot_id_reader = boot_id_reader or (lambda: Path("/proc/sys/kernel/random/boot_id").read_text().strip())
         self.execution_checkpoint = execution_checkpoint or (lambda phase, value: None)
         self.execution_policy_path = Path(execution_policy_path) if execution_policy_path else self.defaults_path.with_name("execution-policy.json")
+        self.creation_policy_path = Path(creation_policy_path) if creation_policy_path else self.defaults_path.with_name('creation-policy.json')
 
     def execution(self):
         from xenova_execution import Execution
         return Execution(self)
 
-    def request_control(self, action, record, *, force=False, idempotency_key=None):
+    def request_control(self, action, record, *, force=False, idempotency_key=None, deadline=None):
         """Caller holds operation_lock and has verified the mounted registry."""
-        return self.execution().control(action, record, force=force, key=idempotency_key)
+        return self.execution().control(action, record, force=force, key=idempotency_key, deadline=deadline)
 
 
+    @traced('platform.registry')
     def records(self, *, validate_assets=True):
         storage_check(self.data)
-        return load_records(self.data, validate_assets=validate_assets)
+        return load_records(self.data, validate_assets=validate_assets,
+                            deadline=getattr(self,'response_deadline',None),clock=self.clock)
 
     def templates(self):
         """SD의 불변 템플릿 목록. 전체 root 해시는 실제 생성 직전에 검증한다."""
@@ -292,9 +302,10 @@ class Platform:
     def create(self, args, records=None):
         """기존 Python 호출 지점도 공통 계약으로 위임한다. records 인자는 신뢰/재사용하지 않는다."""
         from xenova_management import Manager
-        spec = {'vm_id':getattr(args,'vm_id',None), 'name':getattr(args,'name',None) or args.id, 'template_id':getattr(args,'template_id',getattr(args,'template',None)),
-                'template_version':getattr(args,'template_version',None),
-                'vcpus':getattr(args,'vcpus',None), 'memory_mib':getattr(args,'memory_mib',None)}
+        spec = {'vm_id':getattr(args,'vm_id',None), 'name':getattr(args,'name',args.id), 'template_id':getattr(args,'template_id',getattr(args,'template',None)),
+                'template_version':getattr(args,'template_version',None)}
+        for field in ('vcpus','memory_mib'):
+            if hasattr(args,field):spec[field]=getattr(args,field)
         if getattr(args,'ipv4',None) is not None:
             spec['ipv4']=args.ipv4
         return Manager(self).call('create',spec,execute=getattr(args,'execute',False),
@@ -316,13 +327,21 @@ class Platform:
         return free, required
 
     def timed_command(self, args, deadline=None):
+        kind = ('.'.join(args[:2]) if args[0] in ('xl','systemctl') else args[0])
+        with span('external.command', command_kind=kind,
+                  remaining_seconds=deadline-self.clock() if deadline is not None else 15):
+            return self._timed_command(args, deadline)
+
+    def _timed_command(self, args, deadline=None):
         if deadline is None:
             return self.command(args)
         remaining = deadline - self.clock()
         if remaining <= 0:
-            raise PlatformError('guest operation deadline exceeded')
+            from xenova_execution import refuse
+            refuse('DEADLINE_EXCEEDED', 'guest operation deadline exceeded')
         return self.command(args, timeout=min(15, remaining))
 
+    @traced('platform.domains')
     def domains(self, *, deadline=None):
         """고정 Xen의 상세 설정과 짧은 목록의 실행 상태를 domid/name으로 대조한다."""
         rows = json.loads(self.timed_command(['xl', 'list', '-l'], deadline))
@@ -432,14 +451,14 @@ class Platform:
     def confirm_board_empty(self, deadline):
         self.removal_observation(set(), deadline, board=True)
 
-    def check_xen(self):
+    def check_xen(self, *, deadline=None):
         if 'control_d' not in Path('/proc/xen/capabilities').read_text().split():
             raise PlatformError('not Xen dom0: control_d capability absent')
         if not stat.S_ISCHR(Path('/dev/xen/privcmd').stat().st_mode):
             raise PlatformError('Xen privcmd control interface absent')
-        self.command(['xl', 'info'])
-        self.domains()
-        if not any(line.split()[1] == '0' for line in self.command(['xl', 'list']).splitlines()[1:] if line.strip()):
+        self.timed_command(['xl', 'info'], deadline)
+        self.domains(deadline=deadline)
+        if not any(line.split()[1] == '0' for line in self.timed_command(['xl', 'list'], deadline).splitlines()[1:] if line.strip()):
             raise PlatformError('Domain-0 missing; VM start refused')
 
     def check_network(self, sysnet=Path('/sys/class/net'), *, deadline=None):
@@ -463,18 +482,33 @@ class Platform:
                    for link in links for a in link.get('addr_info', [])):
             raise PlatformError('xenbr0 must have 192.168.77.1/24')
 
-    def prepare_dhcp(self, records, *, deadline=None):
+    def prepare_dhcp(self, records, *, deadline=None, _outside=None):
+        """예약 파일 게시는 공통 잠금 아래, 소유한 자산 호출의 서비스 대기만 밖에서 수행한다."""
+        if _outside is None:
+            with span('platform.prepare-dhcp'):
+                return self._prepare_dhcp(records,deadline=deadline)
+        # lock.hold를 끝내는 동안 그 안에 걸친 aggregate span을 열어두지 않는다.
+        # 이 경로는 개별 external.command와 lock.released.lifecycle로 계측한다.
+        return self._prepare_dhcp(records,deadline=deadline,_outside=_outside)
+
+    def _prepare_dhcp(self,records,*,deadline=None,_outside=None):
         def command(args, timeout=15):
             remaining = timeout if deadline is None else min(timeout, deadline-self.clock())
             if remaining <= 0:
-                raise PlatformError('guest operation deadline exceeded')
-            return self.command(args, timeout=remaining)
-        command(['systemctl', 'start', 'xenova-dhcp.service'], timeout=30)
-        if deadline is None:
-            self.check_network()
+                from xenova_execution import refuse
+                refuse('DEADLINE_EXCEEDED', 'guest operation deadline exceeded')
+            with span('external.command', command_kind='.'.join(args[:2]), timeout_seconds=remaining):
+                return self.command(args, timeout=remaining)
+        def service():
+            command(['systemctl', 'start', 'xenova-dhcp.service'], timeout=30)
+            if deadline is None:self.check_network()
+            else:self.check_network(deadline=deadline)
+            command(['systemctl', 'is-active', '--quiet', 'xenova-dhcp.service'])
+        if _outside is None:service()
         else:
-            self.check_network(deadline=deadline)
-        command(['systemctl', 'is-active', '--quiet', 'xenova-dhcp.service'])
+            with _outside():service()
+        # 서비스 대기 사이 새 VM이 게시될 수 있다. 이전 사본으로 최신 예약을 덮지 않는다.
+        if _outside is not None:records=self.records(validate_assets=False)
         ensure_runtime(self.runtime)
         known = {r.get('mac') for r in records.values()}
         known.update(t['record'].get('mac') for t in read_tombstones(self.data).values())
@@ -497,7 +531,9 @@ class Platform:
             f"{r['mac']},{r['ipv4']},{r['hostname']},infinite\n"
             for r in records.values() if has_network(r))
         atomic_write(self.runtime / 'dhcp-hosts', hosts, 0o644)
-        command(['systemctl', 'reload', 'xenova-dhcp.service'])
+        if _outside is None:command(['systemctl', 'reload', 'xenova-dhcp.service'])
+        else:
+            with _outside():command(['systemctl', 'reload', 'xenova-dhcp.service'])
 
     def cpu(self):
         from xenova_cpu import CPU
@@ -603,27 +639,71 @@ class Platform:
             self.sleep(min(0.1,max(0,deadline-self.clock())))
         raise PlatformError('cooperative reboot removal deadline exceeded; no force')
 
-    def control(self, record, action, expected, *, deadline=None):
+    def control(self, record, action, expected, *, deadline=None, _launch=None):
         row = self.resolve_domain(record, expected=expected, deadline=deadline)
-        self.timed_command(['xl', action, str(row['domid'])], deadline)
+        if action=='reboot' and self.process_isolation and guest_kind(record)=='linux':
+            from xenova_guest_process import command
+            row={**row,'xen_unique_id':self.execution().unique(row,deadline)}
+            self.timed_command(command(self,record,deadline,target=row,reboot_launch=_launch),deadline)
+        elif action=='reboot':
+            # 대역 runner도 최종 의도 검사와 제출의 순서를 실제 admission 잠금으로 검증한다.
+            from xenova_execution import short_lock, refuse
+            with short_lock(self.runtime,'admission'):
+                if _launch:
+                    self.execution().guard_launch(record,_launch,deadline)
+                else:
+                    intent=self.execution().intent(record)
+                    if intent and intent['desired_state']!='running':
+                        refuse('INTENT_MISMATCH','reboot superseded by stop intent')
+                self.timed_command(['xl', action, str(row['domid'])], deadline)
+        else:
+            self.timed_command(['xl',action,str(row['domid'])],deadline)
         return row
 
-    def start(self, record, *, _accept=None, _owner=None, deadline=None):
+    def _settle_created_domain(self, record, row, deadline):
+        """생성 직후의 빈 xl 상태만 기존 기한 안에서 재관측한다.
+
+        unknown을 running으로 바꾸지 않는다. 같은 incarnation의 실제
+        running/blocked 관측이 필요하며 기존 도메인 시작에는 적용하지 않는다.
+        """
+        if row['xen_state'] != 'unknown':
+            return row
+        deadline = deadline if deadline is not None else self.clock()+15
+        expected = {**row, 'xen_unique_id':self.execution().unique(row, deadline)}
+        while row['xen_state'] == 'unknown':
+            remaining = deadline-self.clock()
+            if remaining <= 0:
+                raise DomainStateError(record, row)
+            self.sleep(min(0.1, remaining))
+            row = self.resolve_domain(record, expected=expected, deadline=deadline)
+        return row
+
+    @traced('platform.start')
+    def start(self, record, *, _accept=None, _owner=None, deadline=None, _result=None):
         """Validated launch primitive; user intent enters through request_control."""
+        from xenova_preparation import guard_asset
+        guard_asset(self, record['uuid'])
         execution = self.execution()
+        deadline = self.clock()+90 if deadline is None else deadline
         execution.gate()
         self.timed_command(['systemctl', 'is-active', '--quiet', 'xenova-vm-shutdown.service'], deadline)
         directory = self.data / 'instances' / record['id']
         validate_record(record, directory)
-        cpu_context = self.cpu().require(record, deadline or self.clock()+15)
+        cpu_context = self.cpu().context(record)
         text = self.config(record)
         domains = self.domains(deadline=deadline)
         existing = self.matching(record, domains)
         if existing:
-            self.cpu().require(record, deadline or self.clock()+15, expected=cpu_context, present=True)
             state = started_state(record, existing[0])
             if _accept:
                 _accept()
+            observation = execution.observe(record, deadline)
+            state = started_state(record, observation)
+            self.cpu().require(record, deadline, expected=cpu_context, present=True,
+                               expected_identity=observation)
+            self.supply_execution(record,deadline)
+            if _result is not None:
+                _result['observation'] = observation
             print(f"{record['id']}: already {state}; no duplicate create; app_readiness=unknown")
             return state
         disk = directory / 'root.raw' if guest_kind(record) == 'linux' else None
@@ -636,52 +716,160 @@ class Platform:
         owner = _accept() if _accept else _owner
         execution.gate()
         ensure_runtime(self.runtime)
-        launch = execution.prepare_launch(record, owner, deadline=deadline, expected_cpu=cpu_context)
+        captured = {}
+        self.cpu().require(record, deadline, expected=cpu_context, capture=captured)
+        launch = execution.prepare_launch(record, owner, deadline=deadline, expected_cpu=cpu_context,
+                                          cpu_evidence=captured.get('evidence'))
         config = self.runtime / (record['id'] + '.cfg')
         atomic_write(config, text)
-        remaining = 45 if deadline is None else min(45, deadline-self.clock())
+        # 준비/쓰기 뒤 새 도메인·디스크 점유를 다시 확인한다. 이 검사는
+        # CPU 근거 재사용과 별개이며 외부 xl을 전역 잠금으로 막는다는 뜻이 아니다.
+        latest = self.domains(deadline=deadline)
+        if self.matching(record, latest):
+            raise DomainIdentityError('domain appeared before explicit launch')
+        for domain in latest:
+            for item in domain.get('config', {}).get('disks', []):
+                path = item.get('pdev_path')
+                if disk is not None and path and Path(path).exists() and os.path.samefile(path, disk):
+                    raise PlatformError(f'{disk} became attached before launch')
+        try:
+            execution.guard_launch(record, launch, deadline)
+        except PlatformError:
+            # 아직 helper/명령을 만들지 않은 이 경계만 안전한 미제출 종결 근거다.
+            # 확인·저장 실패면 원 거절과 미확정 실행을 유지하며 성공으로 바꾸지 않는다.
+            try:
+                execution.abort_unsubmitted_launch(record, launch, deadline)
+            except (PlatformError, OSError, ValueError):
+                pass
+            raise
+        command_deadline=min(deadline,self.clock()+45)
+        remaining = command_deadline-self.clock()
         if remaining <= 0:
-            raise PlatformError('guest operation deadline exceeded')
-        self.command(['xl', 'create', str(config)], timeout=remaining)
+            from xenova_execution import refuse
+            refuse('DEADLINE_EXCEEDED', 'guest operation deadline exceeded')
+        def submit(argv):
+            left=command_deadline-self.clock()
+            if left<=0:
+                from xenova_execution import refuse
+                refuse('DEADLINE_EXCEEDED','create submission deadline expired')
+            # create의 기존 45초 상한을 유지한다. 조회용 timed_command의 15초와 구별한다.
+            return self.command(argv,timeout=left)
+        with span('external.command', command_kind='xl.create', timeout_seconds=remaining):
+            if _result is not None:
+                _result['physical_submitted'] = True
+            if self.process_isolation:
+                from xenova_guest_process import command
+                argv=command(self,record,deadline,launch=launch)
+                submit(argv)
+            else:
+                from xenova_execution import short_lock
+                with short_lock(self.runtime,'admission'):
+                    execution.guard_launch(record,launch,deadline)
+                    submit(['xl','create',str(config)])
         created = self.matching(record, self.domains(deadline=deadline))
         if not created:
             raise PlatformError(f"{record['id']}: xl create returned without a live domain")
-        state = started_state(record, created[0])
-        execution.bind_launch(record, launch, created[0], deadline or self.clock()+15)
+        current = self._settle_created_domain(record, created[0], deadline)
+        state = started_state(record, current)
+        bound = execution.bind_launch(record, launch, current, deadline)
+        self.supply_execution(record,deadline)
+        if _result is not None:
+            _result['observation'] = bound['observation']
         print(f"{record['id']}: Xen domain created ({state}); guest OS/app readiness is not asserted")
         return state
 
-    def autostart(self, records, required_ids):
+    def supply_execution(self,record,deadline):
+        """검증된 새 실행에 기존 영구 자격을 게시한다. guest 인증/준비 성공은 별개다."""
+        if guest_kind(record)=='zephyr' and record.get('provisioning_profile',{}).get('channels'):
+            from xenova_provisioning import bootstrap_execution
+            bootstrap_execution(self,record,deadline=deadline)
+
+    def autostart(self, records, required_ids, *, deadline=None):
+        """한 부팅 호출의 전체 예산을 공유하고 이미 시작한 guest를 롤백하지 않는다.
+
+        이 결과는 Xen 실행 단계다. guest OS·앱 준비를 기다리지 않으며, 실패한
+        start는 실제 효과가 없다는 뜻이 아니다. 재호출은 기존 실행 신원을 확인한다.
+        """
+        deadline = self.clock() + AUTOSTART_TIMEOUT if deadline is None else deadline
+        host = self.execution().host
         missing = [key for key in required_ids if key not in records]
         failures = ['default instances not provisioned: ' + ','.join(missing)] if missing else []
         results = {key: {'result': 'failed', 'error': 'default instance not provisioned'} for key in missing}
         results.update({key: {'result': 'pending'} for key in records})
         ensure_runtime(self.runtime)
+        from xenova_runtime import boot_progress
+        display = boot_progress('autostart', self.runtime, clock=self.clock, host=host)
+        display_states = {key: {'vm_id': record['uuid'], 'name': record.get('display_name', record['id']),
+                               'internal_name': key, 'state': 'waiting', 'selected': None, 'code': None}
+                          for key, record in records.items()}
+        def show(phase):
+            display(phase, vms=list(display_states.values()), missing_instances=missing)
+        show('targets-discovered')
         result_path = self.runtime / 'autostart-results.json'
         def save_results():
+            for value in results.values():
+                value.update(host_boot_id=host, deadline_monotonic_ms=int(deadline * 1000))
             atomic_write(result_path, json.dumps(results, indent=2) + '\n')
         save_results()
         for key, record in records.items():
+            if self.clock() >= deadline:
+                # admission/intent를 새로 만들거나 다음 VM에 새 예산을 주지 않는다.
+                for value in results.values():
+                    if value['result'] == 'pending':
+                        value.update(result='not-started', error='autostart batch deadline exceeded',
+                                     start_invoked=False)
+                for key, item in results.items():
+                    if item['result'] == 'not-started' and key in display_states:
+                        display_states[key].update(state='not-started', code='BATCH_DEADLINE_EXCEEDED')
+                show('deadline-exceeded')
+                failures.append('autostart batch deadline exceeded; pending guests not started')
+                save_results()
+                break
             decision = self.execution().boot_decision(record)
+            display_states[key]['selected'] = bool(decision['start'])
             if not decision['start']:
                 results[key] = {'result': 'skipped', 'autostart': record['autostart'],
                                 'boot_admission': decision['admission']}
                 save_results()
+                display_states[key].update(state='excluded', code=decision['admission'].get('reason'))
+                show('policy-selection')
                 continue
             results[key] = {'result': 'starting'}
             save_results()
+            start_invoked = False
+            failure_code = None
             try:
                 if has_network(record):
-                    self.prepare_dhcp(records)
-                state = self.start(record)
+                    display_states[key]['state'] = 'network-prepare'
+                    show('network-preparation')
+                    self.prepare_dhcp(records, deadline=deadline)
+                if self.clock() >= deadline:
+                    raise PlatformError('autostart batch deadline exceeded before start')
+                start_invoked = True
+                display_states[key]['state'] = 'execution-start'
+                show('execution-start-and-verification')
+                state = self.start(record, deadline=deadline)
                 results[key] = {'result': state, 'xen_state': state, 'app_readiness': 'unknown',
                                 'boot_admission': decision['admission']}
             except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
                 failures.append(f"{key}: {exc}")
-                results[key] = {'result': 'failed', 'error': str(exc), 'app_readiness': 'unknown'}
+                known_code = getattr(exc, 'error', {}).get('code')
+                if isinstance(known_code, str) and re.fullmatch('[A-Z][A-Z0-9_]{0,63}', known_code):
+                    failure_code = known_code
+                results[key] = {'result': 'not-started' if not start_invoked and self.clock() >= deadline else 'failed',
+                                'error': str(exc), 'app_readiness': 'unknown',
+                                'start_invoked': start_invoked, 'boot_admission': decision['admission']}
                 if isinstance(exc, DomainStateError):
                     results[key].update(xen_state=exc.xen_state, xen_state_flags=exc.xen_state_flags)
             save_results()
+            outcome = results[key]['result']
+            code = None
+            if outcome in ('failed', 'not-started'):
+                # 원문 stderr/exception에는 비밀이 있을 수 있어 화면에는 원인 유형만 게시한다.
+                code = failure_code or ('START_FAILED_RESULT_MAY_EXIST' if start_invoked else 'START_NOT_SUBMITTED')
+            display_states[key].update(state=outcome if outcome in ('failed', 'not-started') else 'verified', code=code)
+            show('result-recorded')
+        show('failed' if failures else 'complete')
         print(json.dumps({'autostart_results': results}, indent=2))
         if failures:
             raise PlatformError('; '.join(failures))
@@ -700,9 +888,14 @@ class Platform:
         return rows
 
     def stop_many(self, records, timeout=90, *, force=False, board=False, deadline=None,
-                  _accept=None, _expected_runs=None, _observed=None):
+                  _accept=None, _expected_runs=None, _observed=None, _result=None):
         """사전 안전 검사와 요청 후 신원 관측을 분리한다. 자동 강제 종료는 없다."""
+        from xenova_preparation import guard_asset
+        for record in records:
+            guard_asset(self, record['uuid'])
         ensure_runtime(self.runtime)
+        if board:
+            ensure_quiet(self)
         attempt = os.urandom(16).hex()
         result = {'action': 'stop', 'attempt_id': attempt, 'stopped': [], 'already_stopped': [],
                   'forced': [], 'graceful_shutdown_requested': [], 'instances': {},
@@ -723,6 +916,9 @@ class Platform:
                 rows = self.matching(record, domains)
                 rows = self.observed_target(record, rows, (_observed or {}).get(record['uuid']), deadline)
                 if not rows:
+                    if self.process_isolation:
+                        from xenova_guest_process import cleanup
+                        cleanup(self,record,self.execution().run_record(record),deadline)
                     result['already_stopped'].append(record['id'])
                     result['instances'][record['id']] = {'result': 'already_stopped', 'stage': 'domain-absent'}
                     continue
@@ -759,6 +955,8 @@ class Platform:
                                         'stage': 'identity-recheck'}
             save()
             try:
+                if _result is not None:
+                    _result['physical_submitted'] = True
                 self.control(record, 'destroy' if strategy == 'forced' else 'shutdown', row, deadline=deadline)
             except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
                 if isinstance(exc, DomainIdentityError):
@@ -795,6 +993,9 @@ class Platform:
             for record, row, strategy in pending:
                 key, domid = record['id'], row['domid']
                 if domid not in before and domid not in after:
+                    if self.process_isolation:
+                        from xenova_guest_process import cleanup
+                        cleanup(self,record,self.execution().run_record(record),deadline)
                     result['stopped'].append(key)
                     self.execution().end_run(record)
                     result['instances'][key].update(result=strategy, stage='domain-removed', xen_state='stopped')
@@ -828,6 +1029,7 @@ class Platform:
 
     def prepare_board_shutdown(self, records, action, *, force=False, deadline=None):
         self.execution().quiesce(action)
+        ensure_quiet(self)  # 대기 drain은 CLI가 공통 잠금 밖에서 수행한다.
         self._shutdown_deadline = self.clock() + 90 if deadline is None else deadline
         try:
             result = self.stop_many(records, force=force, board=True, deadline=self._shutdown_deadline)
@@ -841,6 +1043,10 @@ class Platform:
 
     def finish_board_shutdown(self, action):
         try:
+            barrier=self.execution().barrier()
+            if not barrier or barrier['state']!='quiescing':
+                raise PlatformError('host admission must remain closed before storage shutdown')
+            ensure_quiet(self)
             # 내부 CLI는 marker로 새 기동을 막는다. 외부 xl과 원자적인 배제는 아니다.
             self.confirm_board_empty(self._shutdown_deadline)
             self.command(['systemctl', 'stop', 'xenova-vms.service', 'xenova-vm-shutdown.service', 'xenova-dhcp.service'], timeout=110)
@@ -850,33 +1056,44 @@ class Platform:
         except (PlatformError, OSError, ValueError, KeyError, TypeError) as exc:
             (self.runtime / 'shutdown-requested').unlink(missing_ok=True)
             path = self.runtime / 'board-shutdown-result.json'
-            result = json.loads(path.read_text())
+            result = json.loads(path.read_text()) if path.exists() else {'board_action':action}
             result['final_check_error'] = str(exc)
             atomic_write(path, json.dumps(result, indent=2) + '\n')
             raise
 
-    def reboot(self, record, timeout=90, *, force=False, _accept=None, _observed=None):
+    @traced('platform.reboot')
+    def reboot(self, record, timeout=90, *, force=False, _accept=None, _observed=None,
+               deadline=None, _result=None):
+        from xenova_preparation import guard_asset
+        guard_asset(self, record['uuid'])
+        deadline = self.clock()+timeout if deadline is None else deadline
         validate_record(record, self.data / 'instances' / record['id'])
-        rows = self.matching(record, self.domains())
-        rows = self.observed_target(record, rows, _observed, self.clock()+15)
+        rows = self.matching(record, self.domains(deadline=deadline))
+        rows = self.observed_target(record, rows, _observed, deadline)
         if not rows:
             raise PlatformError('cannot reboot a stopped VM')
         if guest_kind(record) == 'zephyr' and not force:
             raise PlatformError('Zephyr graceful reboot unsupported; use reboot --force')
         self.execution().require_launch_available(record)
-        self.cpu().require(record, self.clock()+15, present=True)
+        cpu_context = self.cpu().context(record)
         owner = _accept() if _accept else None
         if guest_kind(record) == 'zephyr' or force:
-            self.stop_many([record], timeout=timeout, force=True, _observed={record['uuid']:_observed} if _observed else None)
-            self.start(record, _owner=owner)
+            self.stop_many([record], timeout=timeout, force=True, deadline=deadline,
+                           _observed={record['uuid']:_observed} if _observed else None, _result=_result)
+            self.start(record, _owner=owner, deadline=deadline, _result=_result)
             print(json.dumps({'action': 'reboot', 'id': record['id'], 'forced': True, 'app_readiness': 'unknown'}))
             return
         previous = rows[0]['domid']
         execution = self.execution()
         ensure_runtime(self.runtime)
-        launch = execution.prepare_launch(record, owner)
-        self.control(record, 'reboot', rows[0])
-        deadline = self.clock() + timeout
+        captured = {}
+        self.cpu().require(record, deadline, expected=cpu_context, present=True, capture=captured)
+        launch = execution.prepare_launch(record, owner, deadline=deadline, expected_cpu=cpu_context,
+                                          cpu_evidence=captured.get('evidence'), reuse_process_scope=True)
+        execution.guard_launch(record, launch, deadline)
+        if _result is not None:
+            _result['physical_submitted'] = True
+        self.control(record, 'reboot', rows[0], deadline=deadline, _launch=launch)
         while self.clock() < deadline:
             # 종료 중 상세 설정은 먼저 사라질 수 있다. 새 실행이 관측된 뒤
             # 기존의 상세 신원·디스크 검사와 launch 결합을 다시 수행한다.
@@ -897,56 +1114,79 @@ class Platform:
                 rows = self.matching(record, self.domains(deadline=deadline))
                 if not rows or rows[0]['domid'] != fresh[0]['domid']:
                     raise DomainIdentityError('reboot target changed before launch binding')
-                started_state(record, rows[0])
-                execution.bind_launch(record, launch, rows[0], deadline)
+                current = self._settle_created_domain(record, rows[0], deadline)
+                started_state(record, current)
+                bound = execution.bind_launch(record, launch, current, deadline)
+                if _result is not None:
+                    _result['observation'] = bound['observation']
                 print('guest domain restarted with same UUID/disk; OS readiness not asserted')
                 return
-            self.sleep(1)
+            self.sleep(min(1, max(0, deadline-self.clock())))
         raise PlatformError('guest reboot not observed before deadline; no force reset')
 
 
     def status(self, records):
-        domains = self.domains()
+        deadline = self.clock()+15
+        domains = self.domains(deadline=deadline)
+        execution = self.execution()
+        observations = execution.observe_many(list(records.values()), deadline)
         result = []
         for r in records.values():
-            rows = self.matching(r, domains)
             try:
                 validate_record(r, self.data / 'instances' / r['id'])
                 asset_error = None
             except (PlatformError, OSError, ValueError, KeyError) as exc:
                 asset_error = str(exc)
-            observation = self.execution().observe(r, self.clock()+15)
-            lifecycle, generation = self.execution().lifecycle(r)
-            control = self.execution().describe(r, generation, lifecycle, observation)
+            observation = observations[r['uuid']]
+            lifecycle, generation = execution.lifecycle(r)
+            control = execution.describe(r, generation, lifecycle, observation)
             result.append({**r, **control, 'asset_error': asset_error, 'guest_kind': guest_kind(r), 'registered': True,
                            'xen_state': observation['xen_state'],
                            'xen_state_flags': observation['xen_state_flags'],
                            'domid': observation['domid'], 'app_readiness': 'unknown',
                            'graceful_shutdown_supported': cooperative(r),
                            'effective_board_shutdown_policy': board_shutdown_policy(r)})
-        return {'instances': result, 'domains': domains, 'time': self.time_status()}
+        return {'instances': result, 'domains': domains, 'time': self.time_status(deadline=deadline)}
 
-    def time_status(self):
+    def time_status(self, *, deadline=None):
         try:
-            text = self.command(['timedatectl', 'show', '-p', 'NTPSynchronized', '-p', 'NTP', '-p', 'Timezone'])
+            text = self.timed_command(['timedatectl', 'show', '-p', 'NTPSynchronized', '-p', 'NTP', '-p', 'Timezone'],
+                                      self.clock()+15 if deadline is None else deadline)
             values = dict(row.split('=', 1) for row in text.splitlines() if '=' in row)
             return {'synchronized': (values['NTPSynchronized'] == 'yes') if values.get('NTPSynchronized') in ('yes', 'no') else None, 'details': values,
                     'interval_clock': 'monotonic'}
         except PlatformError as exc:
             return {'synchronized': None, 'error': str(exc), 'interval_clock': 'monotonic'}
 
-    def replace_firmware(self, record, source, expected, *, execute=False):
+    def replace_firmware(self, record, source, expected, *, execute=False, _context=None):
+        from xenova_preparation import guard_asset
+        from xenova_management import Manager
+        manager=Manager(self)
+        if _context is None:guard_asset(self, record['uuid'])
+        else:manager._asset_guard(_context,record['uuid'])
         if guest_kind(record) != 'zephyr':
             raise PlatformError('firmware-replace requires a Zephyr instance')
         if self.matching(record, self.domains()):
             raise PlatformError('firmware replacement requires a stopped domain')
         directory = self.data / 'instances' / record['id']
-        info = zephyr.bundle_info(source, expected)
+        records=self.records(validate_assets=False)
+        with manager._lifecycle_io(_context or {},records):
+            info = zephyr.bundle_info(source, expected)
         if not expected:
             raise PlatformError('--sha256 of firmware manifest is required')
         if execute:
-            self.reserve_space(info['logical_bytes'] * 2, self.records(validate_assets=False))
-            zephyr.replace_firmware(directory, record, source, expected)
+            self.reserve_space(info['logical_bytes'] * 2, records)
+            if _context is None:zephyr.replace_firmware(directory, record, source, expected)
+            else:
+                with manager._lifecycle_io(_context,records):
+                    updated=zephyr.prepare_replacement(directory,record,source,expected)
+                manager._stopped(record)
+                if manager._read(directory/'instance.json')!=record:
+                    raise PlatformError('firmware configuration changed before publication')
+                from xenova_execution import short_lock
+                with short_lock(self.runtime,'admission'):
+                    manager._writable()
+                    atomic_write(directory/'instance.json',json.dumps(updated,indent=2)+'\n')
         print(json.dumps({'action': 'firmware-replace' if execute else 'plan-firmware-replace',
                           'id': record['id'], 'firmware': info, 'uuid': record['uuid'],
                           'starts_guest': False}, indent=2))
@@ -958,7 +1198,7 @@ class Platform:
                                   idempotency_key=idempotency_key)
 
 
-def read_tombstones(data):
+def read_tombstones(data, *, deadline=None, clock=time.monotonic):
     """정식 UUID.json만 읽는다. atomic_write 잔여 파일은 검증 후 보존하고 채택하지 않는다."""
     from xenova_catalog import plain
     root = data / 'tombstones'
@@ -967,6 +1207,9 @@ def read_tombstones(data):
     plain(root, directory=True)
     result = {}
     for path in sorted(root.iterdir()):
+        if deadline is not None and clock()>=deadline:
+            from xenova_execution import refuse
+            refuse('DEADLINE_EXCEEDED','lifecycle scan budget expired')
         suffix = re.fullmatch(r'(.+\.json)\.tmp-[0-9]+-[0-9a-f]{12}', path.name)
         if suffix and UUID.fullmatch(suffix[1][:-5]):
             plain(path)
@@ -1019,33 +1262,17 @@ def dhcp_ready(pid, timeout=5):
     raise PlatformError('dnsmasq did not open UDP/67 within 5s')
 
 
-def main(argv=None):
-    raw = list(sys.argv[1:] if argv is None else argv)
-    managed = {'firmware-transition','update-resources','list','get','retire','restore','purge','operation','create','delete','templates',
-               'recover-once','recover_once','snapshot','probe','execution-context','control-operation','recovery-operation','host-resume','cpu-layout','cpu-policy-set','cpu-host-prepare'}
-    if '--json' in raw or (raw and raw[0] in managed):
-        from xenova_management_cli import main as management_main
-        return management_main(raw)
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['create', 'templates', 'check-xen', 'check-network', 'dhcp-ready',
-        'autostart', 'start', 'stop', 'reboot', 'shutdown-all', 'autostart-set', 'status', 'destroy',
-        'poweroff', 'reboot-board', 'console', 'delete', 'firmware-replace', 'diagnose', 'config', 'board-shutdown-set', 'host-init', 'host-quiesce'])
-    parser.add_argument('id', nargs='?')
-    parser.add_argument('value', nargs='?')
-    parser.add_argument('--idempotency-key', help='reuse only for retransmission of the same control request')
-    parser.add_argument('--force', action='store_true', help='explicit immediate destruction; board/shutdown-all force applies to all guests including Linux')
-    parser.add_argument('--execute', action='store_true', help='explicitly publish create/delete/firmware-replace; otherwise plan only')
-    parser.add_argument('--template')
-    parser.add_argument('--bundle', type=Path)
-    parser.add_argument('--sha256', help='expected firmware manifest SHA-256')
-    parser.add_argument('--ipv4')
-    parser.add_argument('--memory-mib', type=int)
-    parser.add_argument('--vcpus', type=int)
-    parser.add_argument('--autostart', action='store_true', help='persist next-boot policy; no immediate start')
-    args = parser.parse_args(argv)
-    p = Platform()
+def legacy_command(action, options, *, platform=None):
+    """부팅·PTY·명시 진단의 기존 handler. 공통 VM 관리는 CLI에서 Manager로 연결한다."""
+    from argparse import Namespace
+    args = Namespace(**{'force':False,'execute':False,'id':None,'bundle':None,'sha256':None,
+                        **options,'action':action})
+    p = platform if platform is not None else Platform()
     if args.action in ('host-init', 'host-quiesce'):
         value = p.execution().initialize_host() if args.action == 'host-init' else p.execution().quiesce('systemd-shutdown')
+        if args.action=='host-quiesce':
+            # host-admission unit의 기존 TimeoutStopSec=10s 안에서 반환 여유 1초를 남긴다.
+            drain(p,p.clock()+9)
         print(json.dumps(value))
         return
     if args.action == 'check-network':
@@ -1065,83 +1292,72 @@ def main(argv=None):
         dhcp_ready(int(args.id))
         return
     if args.action == 'check-xen':
-        p.check_xen()
+        # xenova-xen-ready.service의 30초 상한 안에서 모든 xl 조회가 예산을 공유한다.
+        p.check_xen(deadline=p.clock()+25)
+        return
+    if args.action == 'firmware-replace':
+        if args.bundle is None:
+            raise PlatformError('firmware-replace requires --bundle and --sha256')
+        from xenova_preparation import AssetLease, lifecycle_slot, request_output
+        records=p.records(validate_assets=False)
+        if args.id not in records:raise PlatformError('unknown instance id; create it explicitly')
+        identity=records[args.id]['uuid']
+        with request_output() as output:
+            lease=output.stack.enter_context(AssetLease(p,identity,'firmware-replace',None))
+            output.stack.enter_context(lifecycle_slot(p))
+            with operation_lock(p.runtime) as common:
+                record=p.records(validate_assets=False).get(args.id)
+                if not record or record['uuid']!=identity:raise PlatformError('firmware target changed')
+                lease.guard()
+                p.replace_firmware(record,args.bundle,args.sha256,execute=args.execute,
+                                   _context={'asset_lease':lease,'common_fd':common})
         return
     if args.action == 'diagnose':
-        print(json.dumps({'time': p.time_status(), 'cmdline': Path('/proc/cmdline').read_text(),
-                          'uptime': Path('/proc/uptime').read_text().split()[0]}, indent=2))
-        return
+        if options.get('details'):
+            with operation_lock(p.runtime):
+                result = p.status(p.records(validate_assets=False))
+            return result
+        return {'time': p.time_status(), 'cmdline': Path('/proc/cmdline').read_text(),
+                'uptime': Path('/proc/uptime').read_text().split()[0]}
     board_action, console_target = None, None
     shutdown_deadline = None
     if args.action in ('shutdown-all', 'poweroff', 'reboot-board'):
         shutdown_deadline = p.clock()+90
         p.execution().quiesce(args.action)
+        drain(p,shutdown_deadline)
+    autostart_deadline = p.clock()+AUTOSTART_TIMEOUT if args.action == 'autostart' else None
     with operation_lock(p.runtime, deadline=shutdown_deadline, clock=p.clock, sleep=p.sleep):
         # 전체 신원/경로 검증과 실행 대상의 부팅 자산 검증은 수명을 달리한다.
         records = p.records(validate_assets=False)
-        if ((p.runtime / 'shutdown-requested').exists()
-                and args.action in ('create', 'delete', 'firmware-replace', 'autostart-set', 'board-shutdown-set')):
-            raise PlatformError('board shutdown is in progress; registry mutation refused')
-        if args.action in ('autostart-set', 'board-shutdown-set', 'config') or (args.action == 'firmware-replace' and args.execute):
-            p.execution().gate()
-        if args.action == 'templates':
-            print(json.dumps(p.templates(), indent=2))
-        elif args.action == 'create':
-            p.create(args, records)
-        elif args.action == 'status':
-            print(json.dumps(p.status(records), indent=2))
-        elif args.action == 'autostart':
-            p.check_xen()
+        if args.action == 'autostart':
+            p.check_xen(deadline=autostart_deadline)
             defaults = json.loads(p.defaults_path.read_text())
             required = defaults['instances'] + defaults.get('firmware_instances', [])
-            p.autostart(records, [r['id'] for r in required if not retired_instance(p.data, r['id'])])
+            p.autostart(records, [r['id'] for r in required if not retired_instance(p.data, r['id'])],
+                        deadline=autostart_deadline)
         elif args.action in ('shutdown-all', 'poweroff', 'reboot-board'):
             if args.action == 'shutdown-all':
                 p.stop_many(list(records.values()), force=args.force, board=True, deadline=shutdown_deadline)
             else:
                 board_action = 'reboot' if args.action == 'reboot-board' else 'poweroff'
                 p.prepare_board_shutdown(list(records.values()), board_action, force=args.force, deadline=shutdown_deadline)
-        else:
+        elif args.action == 'console':
             if args.id not in records:
                 raise PlatformError('unknown instance id; create it explicitly')
             record = records[args.id]
-            if args.action in ('start', 'stop', 'reboot'):
-                p.request_control(args.action, record, force=args.force, idempotency_key=args.idempotency_key)
-            elif args.action == 'config':
-                validate_record(record, p.data / 'instances' / record['id'])
-                ensure_runtime(p.runtime)
-                target = p.runtime / (record['id'] + '.cfg')
-                atomic_write(target, p.config(record))
-                print(target)
-            elif args.action == 'console':
-                row = p.resolve_domain(record)
-                console_target = str(p.resolve_domain(record, expected=row)['domid'])
-            elif args.action == 'firmware-replace':
-                if args.bundle is None:
-                    raise PlatformError('firmware-replace requires --bundle and --sha256')
-                p.replace_firmware(record, args.bundle, args.sha256, execute=args.execute)
-            elif args.action == 'delete':
-                p.delete(record, execute=args.execute)
-            elif args.action == 'autostart-set':
-                if args.value not in ('on', 'off'):
-                    raise PlatformError('autostart-set requires on or off')
-                record['autostart'] = args.value == 'on'
-                atomic_write(p.data / 'instances' / args.id / 'instance.json', json.dumps(record, indent=2) + '\n')
-            elif args.action == 'board-shutdown-set':
-                updated = {**record, 'board_shutdown_policy': args.value}
-                validate_identity(updated)
-                atomic_write(p.data / 'instances' / args.id / 'instance.json', json.dumps(updated, indent=2) + '\n')
-                print(json.dumps({'id': args.id, 'board_shutdown_policy': board_shutdown_policy(updated), 'starts_guest': False}))
-            elif args.action == 'destroy':
-                if not args.force:
-                    raise PlatformError('destroy requires --force; this is not graceful shutdown')
-                p.request_control('destroy', record, force=True, idempotency_key=args.idempotency_key)
+            row = p.resolve_domain(record)
+            console_target = str(p.resolve_domain(record, expected=row)['domid'])
     if console_target:
         # 직전 조회로 검증한 domid만 전달한다. 콘솔 세션 동안 작업 잠금은 보유하지 않는다.
         os.execvp('xl', ['xl', 'console', '-t', 'pv', console_target])
     if board_action:
         # ExecStop도 같은 잠금을 사용하므로 잠금 밖에서 서비스를 중지한다.
         p.finish_board_shutdown(board_action)
+
+
+def main(argv=None):
+    from xenova_management_cli import main as management_main
+    return management_main(argv)
 
 
 if __name__ == '__main__':

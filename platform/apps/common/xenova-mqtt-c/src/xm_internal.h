@@ -2,6 +2,7 @@
 #ifndef XENOVA_MQTT_XM_INTERNAL_H_
 #define XENOVA_MQTT_XM_INTERNAL_H_
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -31,6 +32,10 @@ int xm_json_is_object(const struct xm_json *j, int i);
 /* JSON 정수(부호·숫자만, true/false·실수 아님)면 0 과 *out */
 int xm_json_int(const struct xm_json *j, int i, int64_t *out);
 int xm_json_is_null(const struct xm_json *j, int i);
+/* JSON 숫자(정수·실수·지수)면 0 과 *out. true/false/null·문자열은 -EINVAL */
+int xm_json_number(const struct xm_json *j, int i, double *out);
+/* true/false 면 1 과 *out, 아니면 0 */
+int xm_json_is_bool(const struct xm_json *j, int i, bool *out);
 
 /* out[*pos..] 에 붙여 쓴다. 넘치면 -ENOSPC 이고 *pos 는 그대로 */
 int xm_put(char *out, size_t n, size_t *pos, const char *text);

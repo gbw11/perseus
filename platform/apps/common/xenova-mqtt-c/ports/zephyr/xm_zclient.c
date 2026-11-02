@@ -20,6 +20,16 @@ static struct xm_zclient *owner(struct mqtt_client *m)
 	return CONTAINER_OF(m, struct xm_zclient, mqtt);
 }
 
+static void io_budget(struct xm_zclient *c)
+{
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	c->socket_io.deadline_ms = k_uptime_get() + CONFIG_XENOVA_MQTT_IO_MS;
+	if (c->publish_deadline_ms) { c->socket_io.deadline_ms = MIN(c->socket_io.deadline_ms, c->publish_deadline_ms); }
+#else
+	ARG_UNUSED(c);
+#endif
+}
+
 static void utf8(struct mqtt_utf8 *u, const char *s)
 {
 	u->utf8 = (const uint8_t *)s;
@@ -54,6 +64,7 @@ static int send_subscribe(struct xm_zclient *c, int first, int count)
 		topics[i].qos = c->subs[first + i].qos;
 	}
 	list.message_id = ++c->packet_id ? c->packet_id : ++c->packet_id;
+	io_budget(c);
 	return count ? mqtt_subscribe(&c->mqtt, &list) : 0;
 }
 
@@ -81,11 +92,24 @@ static void on_publish(struct xm_zclient *c, const struct mqtt_publish_param *p)
 	char topic[XM_TOPIC_MAX];
 	size_t len = p->message.payload.len;
 	size_t tlen = p->message.topic.topic.size;
+	if(c->binary.topic&&tlen==strlen(c->binary.topic)&&!memcmp(p->message.topic.topic.utf8,c->binary.topic,tlen)){
+		/* An oversized declaration closes only this connection, rather than
+		 * draining an attacker-controlled unbounded body before control work. */
+		if(!c->binary.buffer||len>c->binary.capacity){c->payload_rc=-EMSGSIZE;return;}
+		if((c->payload_rc=mqtt_readall_publish_payload(&c->mqtt,c->binary.buffer,len))<0)return;
+		c->received++;
+		if(p->message.topic.qos==MQTT_QOS_1_AT_LEAST_ONCE){
+			struct mqtt_puback_param ack={.message_id=p->message_id};(void)mqtt_publish_qos1_ack(&c->mqtt,&ack);
+		}
+		if(p->retain_flag||p->message.topic.qos!=MQTT_QOS_0_AT_MOST_ONCE||!c->binary.receive||
+		   c->binary.receive(c->binary.context,c->binary.buffer,len,k_uptime_get()))c->dropped++;
+		return;
+	}
 	bool fits = len <= sizeof(c->payload) && tlen < sizeof(topic);
 
 	/* 큰 메시지도 소켓에서 끝까지 읽어 내야 다음 패킷을 읽을 수 있다 */
 	if (fits) {
-		if (mqtt_readall_publish_payload(&c->mqtt, c->payload, len) < 0) {
+		if ((c->payload_rc = mqtt_readall_publish_payload(&c->mqtt, c->payload, len)) < 0) {
 			return;
 		}
 	} else {
@@ -93,6 +117,7 @@ static void on_publish(struct xm_zclient *c, const struct mqtt_publish_param *p)
 			int n = mqtt_read_publish_payload_blocking(&c->mqtt, c->payload, MIN(left, sizeof(c->payload)));
 
 			if (n <= 0) {
+				c->payload_rc = n ? n : -EIO;
 				return;
 			}
 			left -= (size_t)n;
@@ -132,11 +157,16 @@ static void on_publish(struct xm_zclient *c, const struct mqtt_publish_param *p)
 	}
 	for (int i = 0; i < c->nsubs; i++) {
 		if (xm_topic_matches(c->subs[i].filter, topic)) {
+			int64_t received = k_uptime_get();
+			if (c->accept_input && c->accept_input(c->accept_context, topic, &env, received)) {
+				c->dropped++;
+				return;
+			}
 			struct xm_zlatest *slot = latest_slot(c, topic, true);
 
 			memcpy(slot->data, c->payload, len);
 			slot->len = len;
-			slot->rx_ms = k_uptime_get();
+			slot->rx_ms = received;
 			break;
 		}
 	}
@@ -149,6 +179,7 @@ static void on_event(struct mqtt_client *m, const struct mqtt_evt *evt)
 	switch (evt->type) {
 	case MQTT_EVT_CONNACK:
 		if (evt->result != 0) {
+			c->last_io_rc = -EACCES;
 			LOG_WRN("MQTT 연결 거부: %d", evt->result);
 			mqtt_abort(m);
 			schedule_retry(c);
@@ -161,6 +192,7 @@ static void on_event(struct mqtt_client *m, const struct mqtt_evt *evt)
 		LOG_INF("MQTT 연결 (구독 %d개 복구)", c->nsubs);
 		break;
 	case MQTT_EVT_DISCONNECT:
+		if(evt->result)c->last_io_rc=evt->result;
 		LOG_WRN("MQTT 연결 끊김, 재연결 대기");
 		schedule_retry(c);
 		break;
@@ -182,11 +214,17 @@ int xm_zclient_init(struct xm_zclient *c, const char *vm_id, const char *source_
 	struct sockaddr_in *sin = (struct sockaddr_in *)&c->broker;
 
 	memset(c, 0, sizeof(*c));
-	sys_rand_get(r, sizeof(r));
-	xm_uuid4_format(boot, r);
-	sys_rand_get(r, sizeof(r));
-	xm_uuid4_format(inst, r);
-	int rc = xm_identity_init(&c->id, vm_id, source_id, app_id, boot, inst);
+	int rc;
+	if (cfg->boot_id || cfg->instance_id) {
+		if (!cfg->boot_id || !cfg->instance_id) { return -EINVAL; }
+		rc = xm_identity_init(&c->id, vm_id, source_id, app_id, cfg->boot_id, cfg->instance_id);
+	} else {
+		sys_rand_get(r, sizeof(r));
+		xm_uuid4_format(boot, r);
+		sys_rand_get(r, sizeof(r));
+		xm_uuid4_format(inst, r);
+		rc = xm_identity_init(&c->id, vm_id, source_id, app_id, boot, inst);
+	}
 
 	if (rc) {
 		return rc;
@@ -220,7 +258,13 @@ int xm_zclient_init(struct xm_zclient *c, const char *vm_id, const char *source_
 	c->mqtt.rx_buf_size = sizeof(c->rx_buf);
 	c->mqtt.tx_buf = c->tx_buf;
 	c->mqtt.tx_buf_size = sizeof(c->tx_buf);
+	#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	c->socket_io.fd = -1;
+	c->mqtt.transport.type = MQTT_TRANSPORT_CUSTOM;
+	c->mqtt.transport.custom_transport_data = &c->socket_io;
+#else
 	c->mqtt.transport.type = MQTT_TRANSPORT_NON_SECURE;
+#endif
 	c->backoff_ms = BACKOFF_MIN_MS;
 	return 0;
 }
@@ -238,17 +282,38 @@ int xm_zclient_subscribe(struct xm_zclient *c, const char *filter, uint8_t qos)
 
 int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 {
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	if (c->socket_io.close_error) { return c->socket_io.close_error; }
+#endif
 	int64_t now = k_uptime_get();
 
 	if (!c->socket_open) {
 		if (now >= c->retry_at_ms) {
+			++c->connection_attempts;
+			io_budget(c);
 			int rc = mqtt_connect(&c->mqtt); /* TCP 연결 + CONNECT. CONNACK 은 mqtt_input 에서 */
 
+			if (rc == 0) {
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+				int fd = c->socket_io.fd;
+#else
+				int fd = c->mqtt.transport.tcp.sock;
+#endif
+				/* Every fresh v1 socket, including reconnects, disables Nagle
+				 * before subscriptions or application messages can be sent. */
+				const int enabled = 1;
+				if (zsock_setsockopt(fd, NET_IPPROTO_TCP, ZSOCK_TCP_NODELAY,
+						     &enabled, sizeof(enabled)) < 0) {
+					rc = -errno;
+				}
+			}
 			if (rc == 0) {
 				c->socket_open = true;
 				c->retry_at_ms = now + CONNACK_WAIT_MS;
 			} else {
+				c->last_io_rc = rc;
 				LOG_DBG("MQTT 연결 실패 %d", rc);
+				xm_zclient_close(c);
 				schedule_retry(c);
 			}
 		}
@@ -258,19 +323,30 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 		}
 	}
 	if (!c->connected && k_uptime_get() >= c->retry_at_ms) {
+		c->last_io_rc = -ETIMEDOUT;
 		LOG_WRN("CONNACK 시간 초과");
 		mqtt_abort(&c->mqtt);
 		schedule_retry(c);
 		return -ETIMEDOUT;
 	}
 
-	struct zsock_pollfd fds = {.fd = c->mqtt.transport.tcp.sock, .events = ZSOCK_POLLIN};
+	#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	int fd = c->socket_io.fd;
+#else
+	int fd = c->mqtt.transport.tcp.sock;
+#endif
+	struct zsock_pollfd fds = {.fd = fd, .events = ZSOCK_POLLIN};
 	int keep = mqtt_keepalive_time_left(&c->mqtt);
 	int rc = zsock_poll(&fds, 1, MAX(MIN(timeout_ms, keep), 0));
 
 	if (rc > 0 && (fds.revents & (ZSOCK_POLLIN | ZSOCK_POLLERR | ZSOCK_POLLHUP))) {
+		io_budget(c);
+		c->payload_rc = 0;
 		rc = mqtt_input(&c->mqtt);
+		if (c->payload_rc) { rc = c->payload_rc; }
+		if(rc<0)c->last_io_rc=rc;
 		if (rc < 0 && c->socket_open) {
+			c->last_io_rc = rc;
 			LOG_WRN("MQTT 수신 오류 %d", rc);
 			mqtt_abort(&c->mqtt);
 			schedule_retry(c);
@@ -278,6 +354,7 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 		}
 	}
 	if (c->socket_open) {
+		io_budget(c);
 		rc = mqtt_live(&c->mqtt);
 		if (rc < 0 && rc != -EAGAIN) {
 			mqtt_abort(&c->mqtt);
@@ -288,7 +365,8 @@ int xm_zclient_poll(struct xm_zclient *c, int32_t timeout_ms)
 	return 0;
 }
 
-int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type, const char *payload_json)
+static int publish_as(struct xm_zclient *c,const char *topic,const char *type,const char *payload_json,
+                      const struct xm_identity *identity)
 {
 	struct xm_zpub *pub = NULL;
 	char message_id[12], at[32];
@@ -310,7 +388,7 @@ int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type
 	/* message_id 는 seq 와 별개인 단조 카운터 (계약 §2 펌웨어 예외, 설계 §6 D3) */
 	snprintf(message_id, sizeof(message_id), "%u", ++c->message_counter);
 	sent_at(at);
-	int len = xm_envelope_encode(c->out, sizeof(c->out), &c->id, topic, type, pub->seq + 1, message_id, at,
+	int len = xm_envelope_encode(c->out, sizeof(c->out), identity, topic, type, pub->seq + 1, message_id, at,
 				     payload_json);
 
 	if (len < 0) {
@@ -327,13 +405,56 @@ int xm_zclient_publish(struct xm_zclient *c, const char *topic, const char *type
 	if (rule->qos > 0) {
 		param.message_id = ++c->packet_id ? c->packet_id : ++c->packet_id;
 	}
+	io_budget(c);
 	int rc = mqtt_publish(&c->mqtt, &param);
 
 	if (rc == 0) {
 		pub->seq++;
 		c->published++;
+	} else {
+		/* A partial frame cannot be overwritten by the next candidate. Abort
+		 * this byte stream; never retry this message on the next connection. */
+		c->last_io_rc = rc;
+		xm_zclient_close(c);
+		schedule_retry(c);
 	}
 	return rc;
+}
+
+int xm_zclient_publish(struct xm_zclient *c,const char *topic,const char *type,const char *payload)
+{ return publish_as(c,topic,type,payload,&c->id); }
+
+int xm_zclient_publish_as_until(struct xm_zclient *c,const char *topic,const char *type,
+ const char *payload,const char *instance,int64_t end)
+{
+ if(end<=k_uptime_get())return -ETIMEDOUT;
+ struct xm_identity identity;
+ int rc=xm_identity_init(&identity,c->id.vm_id,c->id.source_id,c->id.app_id,c->id.boot_id,instance);
+ if(rc)return rc;
+ int64_t previous=c->publish_deadline_ms;c->publish_deadline_ms=end;
+ rc=publish_as(c,topic,type,payload,&identity);c->publish_deadline_ms=previous;return rc;
+}
+
+int xm_zclient_publish_until(struct xm_zclient *c,const char *topic,const char *type,
+			    const char *json,int64_t end)
+{
+	if (end <= k_uptime_get()) { return -ETIMEDOUT; }
+	c->publish_deadline_ms = end;
+	int rc = xm_zclient_publish(c,topic,type,json);
+	c->publish_deadline_ms = 0;
+	return rc;
+}
+
+void xm_zclient_close(struct xm_zclient *c)
+{
+	io_budget(c);
+	(void)mqtt_abort(&c->mqtt);
+#if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
+	/* Connect can fail before the MQTT library takes socket ownership. */
+	(void)xt_socket_close(&c->socket_io);
+#endif
+	c->connected = false;
+	c->socket_open = false;
 }
 
 int xm_zclient_latest(struct xm_zclient *c, const char *topic, struct xm_envelope *env, int64_t *age_ms)

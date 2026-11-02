@@ -1,0 +1,22 @@
+{
+  "stage": "/opt/xenova-display-probe/20261028-vehicle-457565587e67",
+  "isolated_library_copied": true,
+  "original_library_unchanged": true,
+  "all_source_hashes_match": true,
+  "policy_imported_from_new_stage": true,
+  "source_hashes": {
+    "app_reports.py": "4a7cf5f1fe27a3367b9d267c7ca50969a8aed888aa723de60b784c96ecb2f57e",
+    "bindings.py": "a27132721589305093bcd53bd6ed68bb2354f0be6b60f0c09eb2104b2007f217",
+    "config.py": "2ab29761b664faed697a3f4e477f3082ccaa81a39babd3f5ada63ee174de482c",
+    "kiosk.py": "eeb3f468385c95716966b7d761bcb9a0d1f8967ee5befd6507fe225e9d9a548b",
+    "main.py": "38aea2917676abaf3de17ed4338816d1e68f106261d2ed7f574b32b430342580",
+    "mqtt.py": "76c5415efac02e8f649472635e286232b472f4f4fd4ed55eae4dcdd4ef2d52ee",
+    "outputs.py": "dec531bbc464054e2f1d6910b80e6864a6d95986dfec6b44f56a2c9bc1a1d563",
+    "policy.py": "2695289ac7a5f2c30b29bb35cd8b8271004db12cbc4c60033fbb99bee670f3dc",
+    "state.py": "5b1a888e10c93135cd4746c80119bb02e6f4f498e51193aa4ff0172d5f57a1a4",
+    "stream.py": "f9352492d5e6fb1725f33a6014661bd6790016b180de8251771b971bcbf10630",
+    "viewer.html": "f48a9dd109f8d7f6884abacd6fcdec67492df77c51ce59db68359ccb9f40f30f",
+    "__init__.py": "a35c60dd933616a756f651d9ee4540ddd2a85bf809a4dd19e6f430068004171f"
+  },
+  "automatic_start_installed": false
+}

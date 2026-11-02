@@ -44,7 +44,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 class DisplayRouteIntegrationTest {
 
     private static final String CREDENTIALS = """
-            {"username":"display-user","password":"password123!"}
+            {"username":"display-user","nickname":"디스플레이 테스트","password":"password123!"}
             """;
     private static final String SERVICE_TOKEN = "test-display-service-token";
     private static final String CONSOLE_PATH = "/ws/v1/displays";
@@ -104,7 +104,7 @@ class DisplayRouteIntegrationTest {
     @Test
     void changesRouteAndRejectsBadRequests() throws Exception {
         String token = login();
-        String vmId = vm(VmRole.AUTONOMOUS);
+        String vmId = vm(VmRole.PRIMARY_DRIVE);
         long revision = revision(token, "display-1");
 
         ResponseEntity<String> changed = put("display-1", token,
@@ -151,8 +151,8 @@ class DisplayRouteIntegrationTest {
     @Test
     void displayServiceReceivesRoutesAndReportsThem() throws Exception {
         String token = login();
-        String autonomousVm = vm(VmRole.AUTONOMOUS);
-        String boardVm = vm(VmRole.MESSAGE_BOARD);
+        String primaryVm = vm(VmRole.PRIMARY_DRIVE);
+        String interactionVm = vm(VmRole.INTERACTION);
         Socket console = console(token);
         console.next(); // snapshot after auth
 
@@ -177,14 +177,14 @@ class DisplayRouteIntegrationTest {
         // PUT → route.set with the role's screen.
         long revision = revision(token, "display-0");
         assertThat(put("display-0", token, "{\"vm_id\":\"%s\",\"view\":\"os-face\",\"expected_revision\":%d}"
-                .formatted(autonomousVm, revision)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+                .formatted(primaryVm, revision)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         JsonNode set = service.until(f -> "route.set".equals(f.path("type").asText())
                 && f.path("revision").asLong() == revision + 1);
         assertThat(set.path("display_id").asText()).isEqualTo("display-0");
         assertThat(set.path("view").asText()).isEqualTo("os-face");
-        assertThat(set.path("vm_id").asText()).isEqualTo(autonomousVm);
-        assertThat(set.path("app_id").asText()).isEqualTo("autonomous");
-        assertThat(set.path("screen_path").asText()).isEqualTo("/detail/autonomous");
+        assertThat(set.path("vm_id").asText()).isEqualTo(primaryVm);
+        assertThat(set.path("app_id").asText()).isEqualTo("primary_drive");
+        assertThat(set.path("screen_path").asText()).isEqualTo("/detail/primary_drive");
 
         // route.applied → ACTIVE with observed_route.
         service.send("{\"type\":\"route.applied\",\"display_id\":\"display-0\",\"revision\":%d,\"request_id\":\"%s\"}"
@@ -192,7 +192,7 @@ class DisplayRouteIntegrationTest {
         JsonNode active = item(console.until(s -> "ACTIVE".equals(item(s, "display-0").path("status").asText())),
                 "display-0");
         assertThat(active.path("observed_route").path("view").asText()).isEqualTo("os-face");
-        assertThat(active.path("observed_route").path("vm_id").asText()).isEqualTo(autonomousVm);
+        assertThat(active.path("observed_route").path("vm_id").asText()).isEqualTo(primaryVm);
         assertThat(active.path("observed_route").path("verification_level").asText()).isEqualTo("kiosk_loaded");
         assertThat(active.path("observed_route").path("applied_at").isTextual()).isTrue();
 
@@ -230,15 +230,15 @@ class DisplayRouteIntegrationTest {
         assertThat(error.path("last_error").asText()).isEqualTo("kiosk timeout");
         assertThat(error.path("observed_route").path("view").asText()).isEqualTo("os-face");
 
-        // message-board → interaction screen, sent even while that monitor is unplugged. Plugging it in only
+        // interaction → interaction screen, sent even while that monitor is unplugged. Plugging it in only
         // changes the status: the service already holds that route.set.
         long other = revision(token, "display-1");
         assertThat(put("display-1", token, "{\"vm_id\":\"%s\",\"view\":\"os-face\",\"expected_revision\":%d}"
-                .formatted(boardVm, other)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+                .formatted(interactionVm, other)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         JsonNode board = service.until(f -> "route.set".equals(f.path("type").asText())
                 && "display-1".equals(f.path("display_id").asText()));
         assertThat(board.path("revision").asLong()).isEqualTo(other + 1);
-        assertThat(board.path("app_id").asText()).isEqualTo("message-board");
+        assertThat(board.path("app_id").asText()).isEqualTo("interaction");
         assertThat(board.path("screen_path").asText()).isEqualTo("/detail/interaction");
         service.send("{\"type\":\"display.status\",\"display_id\":\"display-1\",\"connected\":true}");
         assertThat(item(console.until(s -> item(s, "display-1").path("connected").asBoolean()), "display-1")
@@ -246,7 +246,7 @@ class DisplayRouteIntegrationTest {
 
         // The same route again still bumps the revision and re-sends route.set (a refresh).
         assertThat(put("display-1", token, "{\"vm_id\":\"%s\",\"view\":\"os-face\",\"expected_revision\":%d}"
-                .formatted(boardVm, other + 1)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+                .formatted(interactionVm, other + 1)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(service.until(f -> "route.set".equals(f.path("type").asText())
                 && "display-1".equals(f.path("display_id").asText())).path("revision").asLong()).isEqualTo(other + 2);
 

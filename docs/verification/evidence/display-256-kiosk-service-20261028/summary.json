@@ -1,0 +1,67 @@
+{
+  "branch": "feat/platform/S15P31E110-256-kiosk-recovery",
+  "base_platform": "ffed0f8",
+  "completed_service_checks": true,
+  "runtime_only": true,
+  "boot_autostart_enabled": false,
+  "real_product_kiosk": true,
+  "browser_other_pid_retained": true,
+  "initial": {
+    "ActiveState": "active",
+    "SubState": "running",
+    "MainPID": "13201",
+    "NRestarts": "0",
+    "ControlGroup": "/system.slice/xenova-display-kiosk-trial.service"
+  },
+  "browser_recovered": {
+    "ActiveState": "active",
+    "SubState": "running",
+    "MainPID": "13201",
+    "NRestarts": "0",
+    "ControlGroup": "/system.slice/xenova-display-kiosk-trial.service"
+  },
+  "supervisor_recovered": {
+    "ActiveState": "active",
+    "SubState": "running",
+    "MainPID": "13776",
+    "NRestarts": "1",
+    "ControlGroup": "/system.slice/xenova-display-kiosk-trial.service"
+  },
+  "explicit_start_after_stop": {
+    "ActiveState": "active",
+    "SubState": "running",
+    "MainPID": "14322",
+    "NRestarts": "0",
+    "ControlGroup": "/system.slice/xenova-display-kiosk-trial.service"
+  },
+  "epochs": {
+    "initial": "631b8496-f649-44b9-8c4a-08f8effeb116",
+    "browser_recovery": "631b8496-f649-44b9-8c4a-08f8effeb116",
+    "supervisor_recovery": "fcc4e3b3-8d72-434b-8066-0c1b9c8a90b7",
+    "explicit_start_after_stop": "6d7f65af-5fe8-48a7-831f-164eb11c2546"
+  },
+  "clean_stop": {
+    "ActiveState": "inactive",
+    "SubState": "dead",
+    "MainPID": "0",
+    "NRestarts": "0",
+    "ControlGroup": ""
+  },
+  "final_stop": {
+    "ActiveState": "inactive",
+    "SubState": "dead",
+    "MainPID": "0",
+    "NRestarts": "0",
+    "ControlGroup": ""
+  },
+  "runtime_unit_removed": true,
+  "framebuffer_restored": true,
+  "restoration_differing_bytes": 0,
+  "restored_active_vt": 1,
+  "feed_stopped": true,
+  "verified_sources": {
+    "kiosk.py": "fa00da2fa4bc677ee572e9d2f325a7fb2b381f74e3cd0f997e0ceca8059bad60",
+    "outputs.py": "d2b60dec5a438b71e64b12c11d6cfcb1ed087adcc8e4c45c51e5be1e617c6db3",
+    "idle.py": "34601a9c7847cf017f27b40067bc960258f4cb5b31ea644ff11b38ce422f12d0"
+  }
+}

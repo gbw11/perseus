@@ -1,5 +1,15 @@
 # frontend
 
+## 252 통합 기준 (2026-10-26)
+
+실제 HDMI는 dom0의 `/display/monitor-1`(전체)·`/display/monitor-2`(선택 UUID 상세)이며 로컬 수집기·254 정책을 따른다. `VITE_TELEMETRY` 비움/`display`에서 기존 `/split`·`/detail/:app`은 이 경로로 이동한다. 이 모드는 Spring 주행 Provider나 로그인에 의존하지 않는다. 두 Zephyr는 VM1 주 구동·VM2 백업이며 주행 모드와 구별한다. VM3는 Debian 인터랙션이고 인식은 Jetson 담당이다.
+
+아래 `/split`·`/detail`·`/sim` 설명은 **명시적 앱 미리보기 모드**(`console`/`scenario`/`live`/`legacy-live`)에 해당한다. 기본을 console mock으로 가정하지 않는다. 외부 Docker screens는 Spring 앱 미리보기를 명시적으로 유지한다. 앱 ID autonomous/manual은 VM의 주·백업 역할과 동의어가 아니다. 실제 HDMI 캡처와 외부 앱 미리보기를 같은 출력 증거로 취급하지 않는다.
+
+관리 콘솔은 API VM 목록(`GET /api/v1/vms`)을 그대로 카드로 그리고 VM 이름으로 부른다. 주 구동·백업·인터랙션 역할은 백엔드가 주는 `role`(DB `vms.role`, VM 등록·수정 때 지정)로만 표시하고, 없으면 "역할 미지정"으로 둔다. VM 이름·앱 ID로 역할을 추측하지 않는다. 역할은 재빌드 없이 VM 수정 API로 바꾼다. 기존 명령·앱 ID는 변경하지 않는다.
+
+실제/미연결 경계는 [표시 경로 계약](../docs/contracts/display-route-v1.md), [카메라 계약](../docs/contracts/camera-stream-v1.md), [통합 검증 기록](../docs/verification/display-252-integration.md)을 따른다.
+
 관리 콘솔과 모니터 화면(VM 앱 화면)이 같은 디자인 시스템을 쓰는 npm workspaces 입니다.
 
 ```text
@@ -60,7 +70,7 @@ API·WebSocket 프록시와 운영 도메인은 배포 Nginx 설정에서 연결
 
 기존 `/vms`, `/resources`, `/demo`, `/console` 주소는 북마크 호환을 위해 새 주소로 이동시킵니다.
 
-VM 은 "VM 1·2·3" 이 아니라 역할 이름(자율주행·수동주행·네비게이션)으로 부릅니다 (`src/domain/roles.ts`). 이벤트 분류·문구는 `src/domain/events.ts`.
+VM 역할은 확정된 UUID 매핑으로 VM1 주 구동·VM2 백업·VM3 Debian 인터랙션을 구분합니다 (`src/domain/vmBindings.ts`, `src/domain/roles.ts`). 앱 ID나 이름만으로 역할을 추측하지 않습니다. 이벤트 분류·문구는 `src/domain/events.ts`.
 
 ### 웹 콘솔 (UI-05 / MO-04)
 
@@ -101,7 +111,7 @@ VITE_MOCK=true npm run dev:console    # 또는 .env.local 에 VITE_MOCK=true
 | `/detail/autonomous` · `manual` · `interaction` | 모니터 2 — 관리자가 고른 1개 상세 |
 
 - **모니터는 보여 주기만 합니다** (화면 정의서 §1). 버튼·키 입력이 없고, 강제 종료·부하·재개·수동 키는 모두 관리 콘솔 **시연 제어**에서 합니다. 아래 띠는 데이터 출처·연결 상태와 화면 링크뿐이고 키오스크(`?kiosk=1`)에서는 숨깁니다.
-- 데이터 출처 (`VITE_TELEMETRY`): 비움 = 관리 콘솔 mock 시나리오를 따라감 · `live` = 백엔드 중계(`/ws/v1/drive/state`, `/ws/v1/events`, 시나리오 D2) · `scenario` = 이 앱 혼자 도는 가짜 시나리오.
+- 데이터 출처 (`VITE_TELEMETRY`): 비움/`display` = 실제 HDMI 로컬 정책 · `console` = 관리 콘솔 mock 시나리오 · `live`/`legacy-live` = 기존 Spring 앱 미리보기 · `scenario` = 합성 시나리오.
 - 복구 서비스의 `recovery.started` 를 받으면 그 앱 칸은 명령이 다시 신선해질 때까지 '복구 중'(노랑)으로 표시합니다.
 - 색·배치는 Stitch 시안(a_1·b_vm_1·interaction 계열)을 따릅니다. 1920×1080 기준.
 
@@ -110,7 +120,7 @@ VITE_MOCK=true npm run dev:console    # 또는 .env.local 에 VITE_MOCK=true
 콘솔 mock 시나리오는 브라우저 채널(BroadcastChannel)로 상태를 내보내므로 두 화면이 **같은 origin** 이어야 합니다. 콘솔 개발 서버가 `/monitor/` 를 모니터 개발 서버로 넘깁니다.
 
 ```bash
-cd apps/vm-screens    && VITE_BASE=/monitor/ npx vite --port 5174       # Git Bash 는 앞에 MSYS_NO_PATHCONV=1
+cd apps/vm-screens    && VITE_TELEMETRY=console VITE_BASE=/monitor/ npx vite --port 5174       # Git Bash 는 앞에 MSYS_NO_PATHCONV=1
 cd apps/admin-console && VITE_MOCK=true npx vite --port 5173            # VITE_MONITOR_ORIGIN 기본 http://localhost:5174
 ```
 

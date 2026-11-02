@@ -1,0 +1,497 @@
+{
+  "scope": "one physical framebuffer; sequential existing pages; production EDID mapping not verified",
+  "pc": [
+    {
+      "output_id": "monitor-1",
+      "transport": "HTTP MJPEG over pinned SSH direct-tcpip",
+      "pc_observed_at": "2026-10-28T09:27:26+0900",
+      "unauthenticated_status": 401,
+      "wrong_token_status": 401,
+      "login_status": 204,
+      "cookie_httponly": true,
+      "cookie_samesite": true,
+      "cookie_status": 200,
+      "metadata": {
+        "streams": [
+          {
+            "stream_id": "monitor-1",
+            "output_id": "monitor-1",
+            "capture_source_id": "x11-root:diagnostic-monitor-1",
+            "capture_epoch": "dfa267cc-f35a-4cf5-9afe-b1171396b217",
+            "rectangle": [
+              0,
+              0,
+              1824,
+              984
+            ],
+            "width": 1824,
+            "height": 984,
+            "codec": "mjpeg",
+            "fps": 5,
+            "frame_sequence": 2,
+            "frame_age_ms": 204,
+            "status": "live",
+            "error": null,
+            "bytes_total": 175302,
+            "backend": "virtual_x11",
+            "physical_verified": false,
+            "render_revision": null,
+            "render_correlation": "unverified",
+            "reported_dom_revision": null
+          },
+          {
+            "stream_id": "monitor-2",
+            "output_id": "monitor-2",
+            "capture_source_id": "x11-root:diagnostic-monitor-2",
+            "capture_epoch": "0f061acb-60bd-4dd9-89d0-842dd87b1091",
+            "rectangle": [
+              1824,
+              0,
+              1824,
+              984
+            ],
+            "width": 1824,
+            "height": 984,
+            "codec": "mjpeg",
+            "fps": 5,
+            "frame_sequence": 0,
+            "frame_age_ms": null,
+            "status": "unavailable",
+            "error": "output_unavailable",
+            "bytes_total": 0,
+            "backend": "virtual_x11",
+            "physical_verified": false,
+            "render_revision": null,
+            "render_correlation": "unverified",
+            "reported_dom_revision": null
+          }
+        ]
+      },
+      "connections": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "content_type": "multipart/x-mixed-replace; boundary=frame",
+          "frames": 20,
+          "distinct_frames": 13,
+          "jpeg_bytes": 1755382,
+          "elapsed_s": 5.891,
+          "received_fps": 3.34,
+          "jpeg_mbps": 2.384,
+          "frame_hashes": [
+            "827d5b083970c5c74823fc2bfd7ba7922f887af95466f9f488b0676cf8e9fd56",
+            "2f37ef790ba60b62757820fa981f9d01f0ba6a8e0b15835b58bddd44a7af9131",
+            "f501a1d71717b361723fbdfe4d67a5ba8b0b8aed4a58904ba9c9edfa4b2be3c8",
+            "9b5bd73bd948e2ce5f4e60569b7e529c344b41f4007140d9c31ee4343325ce13",
+            "8d1d1e01a5e1d17f754c404c41bcd88e4650e05a0eab95eed88a77bb2946fb9b",
+            "b9af9952bb29fff2fafa6fd5eaa05726eba3a7326e982c288e0ef5c88c346700",
+            "51ed6f4fa307b3ce26e50e822962997810f66db5ae0454b152bdc38b58298b94",
+            "c150b8b7e343b667e837965a6c996de39b652be55181df4ae59aef105e082976",
+            "6b90641dd9e8b56acc55fdf213bc447d0d566c14134aa2f9cdd16a3e3a68a108",
+            "9b5bd73bd948e2ce5f4e60569b7e529c344b41f4007140d9c31ee4343325ce13",
+            "8d1d1e01a5e1d17f754c404c41bcd88e4650e05a0eab95eed88a77bb2946fb9b",
+            "b9af9952bb29fff2fafa6fd5eaa05726eba3a7326e982c288e0ef5c88c346700",
+            "d2b1ad9216d2bed479bc7452a65a66fdeb229c750597f0dc9a487a3c6afbdf65",
+            "082749afbe4c0a68879050e1c8a0c96c2e2ebe013570716234326b20f815d6f8",
+            "37090074fdedf844c71208abd2147d2d19b0f67584e760ce7b169771eb3a3764",
+            "9b5bd73bd948e2ce5f4e60569b7e529c344b41f4007140d9c31ee4343325ce13",
+            "8d1d1e01a5e1d17f754c404c41bcd88e4650e05a0eab95eed88a77bb2946fb9b",
+            "cecbba64e1f7568a5330608fc9ef10e5f362a5bcba3c4e73c1d07c88a0eed755",
+            "827d5b083970c5c74823fc2bfd7ba7922f887af95466f9f488b0676cf8e9fd56",
+            "082749afbe4c0a68879050e1c8a0c96c2e2ebe013570716234326b20f815d6f8"
+          ]
+        },
+        {
+          "attempt": 2,
+          "status": 200,
+          "content_type": "multipart/x-mixed-replace; boundary=frame",
+          "frames": 20,
+          "distinct_frames": 14,
+          "jpeg_bytes": 1755761,
+          "elapsed_s": 5.765,
+          "received_fps": 3.45,
+          "jpeg_mbps": 2.436,
+          "frame_hashes": [
+            "b75b3b06ccdbd415c195006f0282eb75c13213b3a8be50806a543e99772777a2",
+            "19bb0b34f162087d075e47c08e67106c72f38f8c07ff53b2913f74dd3e21c97c",
+            "8d1d1e01a5e1d17f754c404c41bcd88e4650e05a0eab95eed88a77bb2946fb9b",
+            "b9af9952bb29fff2fafa6fd5eaa05726eba3a7326e982c288e0ef5c88c346700",
+            "d2b1ad9216d2bed479bc7452a65a66fdeb229c750597f0dc9a487a3c6afbdf65",
+            "082749afbe4c0a68879050e1c8a0c96c2e2ebe013570716234326b20f815d6f8",
+            "37090074fdedf844c71208abd2147d2d19b0f67584e760ce7b169771eb3a3764",
+            "9b5bd73bd948e2ce5f4e60569b7e529c344b41f4007140d9c31ee4343325ce13",
+            "8d1d1e01a5e1d17f754c404c41bcd88e4650e05a0eab95eed88a77bb2946fb9b",
+            "cecbba64e1f7568a5330608fc9ef10e5f362a5bcba3c4e73c1d07c88a0eed755",
+            "827d5b083970c5c74823fc2bfd7ba7922f887af95466f9f488b0676cf8e9fd56",
+            "2f37ef790ba60b62757820fa981f9d01f0ba6a8e0b15835b58bddd44a7af9131",
+            "37090074fdedf844c71208abd2147d2d19b0f67584e760ce7b169771eb3a3764",
+            "19bb0b34f162087d075e47c08e67106c72f38f8c07ff53b2913f74dd3e21c97c",
+            "36c18956f4d5417e07b99fdc49f5c904496da6f3be6329ce59615eea8914587c",
+            "cecbba64e1f7568a5330608fc9ef10e5f362a5bcba3c4e73c1d07c88a0eed755",
+            "d2b1ad9216d2bed479bc7452a65a66fdeb229c750597f0dc9a487a3c6afbdf65",
+            "082749afbe4c0a68879050e1c8a0c96c2e2ebe013570716234326b20f815d6f8",
+            "6b90641dd9e8b56acc55fdf213bc447d0d566c14134aa2f9cdd16a3e3a68a108",
+            "9e18ffa23de1186279d20c68be5ca1c13c9aa8c876f1caa4728919611af2d979"
+          ]
+        }
+      ]
+    },
+    {
+      "output_id": "monitor-2",
+      "transport": "HTTP MJPEG over pinned SSH direct-tcpip",
+      "pc_observed_at": "2026-10-28T09:27:53+0900",
+      "unauthenticated_status": 401,
+      "wrong_token_status": 401,
+      "login_status": 204,
+      "cookie_httponly": true,
+      "cookie_samesite": true,
+      "cookie_status": 200,
+      "metadata": {
+        "streams": [
+          {
+            "stream_id": "monitor-1",
+            "output_id": "monitor-1",
+            "capture_source_id": "x11-root:diagnostic-monitor-1",
+            "capture_epoch": "653cbb0e-9fdf-4966-80c2-de1f2d6dbb3f",
+            "rectangle": [
+              1824,
+              0,
+              1824,
+              984
+            ],
+            "width": 1824,
+            "height": 984,
+            "codec": "mjpeg",
+            "fps": 5,
+            "frame_sequence": 0,
+            "frame_age_ms": null,
+            "status": "unavailable",
+            "error": "output_unavailable",
+            "bytes_total": 0,
+            "backend": "virtual_x11",
+            "physical_verified": false,
+            "render_revision": null,
+            "render_correlation": "unverified",
+            "reported_dom_revision": null
+          },
+          {
+            "stream_id": "monitor-2",
+            "output_id": "monitor-2",
+            "capture_source_id": "x11-root:diagnostic-monitor-2",
+            "capture_epoch": "5f167e5f-4d9e-4245-8ff3-fba0a7c8ea4a",
+            "rectangle": [
+              0,
+              0,
+              1824,
+              984
+            ],
+            "width": 1824,
+            "height": 984,
+            "codec": "mjpeg",
+            "fps": 5,
+            "frame_sequence": 1,
+            "frame_age_ms": 317,
+            "status": "live",
+            "error": null,
+            "bytes_total": 80157,
+            "backend": "virtual_x11",
+            "physical_verified": false,
+            "render_revision": null,
+            "render_correlation": "unverified",
+            "reported_dom_revision": null
+          }
+        ]
+      },
+      "connections": [
+        {
+          "attempt": 1,
+          "status": 200,
+          "content_type": "multipart/x-mixed-replace; boundary=frame",
+          "frames": 20,
+          "distinct_frames": 20,
+          "jpeg_bytes": 1602444,
+          "elapsed_s": 5.172,
+          "received_fps": 4.08,
+          "jpeg_mbps": 2.479,
+          "frame_hashes": [
+            "684b7a0201f852dae63e950ef8456109ceb2b5ced434c55a83580eb812e90ee6",
+            "d81a1167ab4e9974b21cfc11a1ed3f22da40a082b324699fe6d581070affae56",
+            "b6768f9d23503a4ee8d4d3dca82a4d7a0121ad5ae3d75bd03271d0c3d7afaec2",
+            "5d5a94ff6c6b97948e207ea8f55eedc8279128154624942b7a10225dc51d65f9",
+            "5ed4ad7a50ed002821febb1fcd1dc3d6411f5bb339639a67342922c8a2a9f219",
+            "b61cc13ff20b7305c3aa38d474c9d7ac8af80378f52225ae7968cbe909e83273",
+            "090d1b3e12c2b41b3ed4fbc8d49f0f8766488aa3dd52c41ccda4f90a6b73b920",
+            "ebca672adb0dd829f687c6b5431e4804130d3f3e4ad1707fe6c39ae78e3f479c",
+            "1e4296518d68c0e098360e2b91dc73d16b5a8ce43d5c7b19d885a812e0a05328",
+            "66925d3eea18e977f44b900232c86f3babfb04dface26b09594485d42db6752a",
+            "c02c1d2c2b97d933ae4636a8ce2fa9e9a3428409c2c58770fe388c8ad057da27",
+            "729f9258e20308ada04d72802c6e2e690a984b2b3f04fc1a4f9a1f8bba230dd0",
+            "d2cef18be9c89941ed2a877a50809f8903cbe6e291eade7154b92e5dc36f4d1e",
+            "61f551200626cc8a42366d0b716208291e7b9dcf3b1637b0fd6488ed7a32ae2d",
+            "cabaab8629836d6574d5e399376da327985ecf7bdfccad5af6f929c207dd8e05",
+            "af2f8725a77c3353cb1c3ef8519622aa42bd5b5586e4227fa714fc713d2b6e6a",
+            "19c26e08668e2e4cbd745de51cc2fc39284c6ee3c3ee054ba699b157fe6efc3c",
+            "975ad54a67f27758763eb737873b1439022751cce890a52fea9d0f3350d8072a",
+            "7ffcbef3ac8ef02033bc9b930be631120c571d9df857c543b0775f431f35b14f",
+            "e60b77969cc198f2695cfb4f92616895766c17462035878baf3c95602c3c1b3f"
+          ]
+        },
+        {
+          "attempt": 2,
+          "status": 200,
+          "content_type": "multipart/x-mixed-replace; boundary=frame",
+          "frames": 20,
+          "distinct_frames": 20,
+          "jpeg_bytes": 1602474,
+          "elapsed_s": 5.547,
+          "received_fps": 3.57,
+          "jpeg_mbps": 2.311,
+          "frame_hashes": [
+            "c06a7458e595d73f0ce5e19cce224052ceab3680dd4f111fb2bf93ec654e70de",
+            "5ea898bed32ec17bf5fc28dc0a6653875e1deffa26f5b614fa79d0ea1e15ddb8",
+            "fdadfc14a88d0925a6b3c0088e044b6d963643326721188f9f1bc15f1df01c21",
+            "e32a4cbf1a9ab64ec4fca4cb1cecc928fc9d98cec2d0367bdab73e7eefe535f9",
+            "878919e5c3929f4ae040428645dd63228cbbc1b33d9a8a06a0eb939bf272e939",
+            "497203522f1b8edba3eb70fd1e633db1d25fe07180bffbcc4e684a2a70383a8a",
+            "08eb073fbf9850dd5e05abd3fbdd058f14f3e495f3da3f1214f95f971cb8cad0",
+            "d3bc8f2a083949e1e5d69fa2dd0eaa5dc85f44ec1e6c78be3a0a6a78395c001c",
+            "dd31ea004f76a08d4767b9b5d5566dbb91f5bd2f2c67fb00fe8662d025855cca",
+            "b1a808f5bc2d4e50f48da357095a0da76990b0ee45ed8f7538b24fc7a466cba2",
+            "68aa7fd91df01d958cf98eac56683ee64767676b611b2e401415389822ba6d77",
+            "e7aa728c96a3037184e05fe36ad940e277267e77e6f7e3c4afba99826459e048",
+            "ceb6d72d405398c19034cced9e9ba1b130acac548bb19767a4e0861767128cd5",
+            "d5e6bdd043b5ec039d69bf4b399da03280b58a235ac11039453f771c72c0df6d",
+            "fab08d4c9ba9468b7ad48d8425532b226e0fb33c56c0803d8bf798d3a1eb1ef5",
+            "be4c923f83f3cab281a06db7c6d53943fbdd64224ec0e2802f7334862230ea11",
+            "aa22c285b5ca2ab99b7457fd3d390bac66dfb9bc40a1ca77549b5227a1f3668d",
+            "34b7e8c25af72ce332943367bcc6083a9694ad06ebb5e2e12345b4a16de489f9",
+            "350bf7dd3c2751e185e090cff09b65f729b68c1e35b2f7124f0e18d03598cde9",
+            "b877254538bdf5f53221f39806876f584fd3386f34bcdaba7524d19238517ccf"
+          ]
+        }
+      ]
+    }
+  ],
+  "board": {
+    "observed_at": "2026-10-28T00:26:59.772956+00:00",
+    "scope": "isolated fbdev Xorg and sandboxed Chromium with existing display pages",
+    "pages": [
+      {
+        "output_id": "monitor-1",
+        "dom": {
+          "title": "Xenova VM 화면",
+          "text": " XENOVA / LOCAL HDMI\nVM 전체 상태\nMONITOR 01\n상태 피드 연결\n주행 모드\n미확인\n활성 구동 VM\n미확인\nJetson AI · 인식\n미확인\n\n주·백업 전환과 자동·수동 전환을 별도로 표시합니다.\n\nVM1 / 주 구동\nZ\nZephyr RTOS\n\n자동 · 수동 주행\n\nVM 실행 중 · 앱 상태 미확인\n기대 OS\nzephyr\n관측 OS\n근거 미수신\nXen 상태\nrunning\n앱 상태\n미확인\nVM UUID\n64b1ab38-89cc-4454-8d94-b8201f4cdd33\nVM2 / 백업 · 미러링\nZ\nZephyr RTOS\n\n구동 승계 대기 역할\n\nVM 실행 중 · 앱 상태 미확인\n기대 OS\nzephyr\n관측 OS\n근거 미수신\nXen 상태\nrunning\n앱 상태\n미확인\nVM UUID\na77fa3fc-64e5-4d66-8225-2a49920bda2a\nVM3 / 인터랙션\nD\nDebian GNU/Linux\n\n사용자 인터랙션 앱\n\nVM 실행 중 · 앱 상태 미확인\n기대 OS\ndebian\n관측 OS\n근거 미수신\nXen 상태\nrunning\n앱 상태\n미확인\nVM UUID\n055226af-b876-4707-8b5d-99e7f33ad3d7\nLOCAL DISPLAY · 읽기 전용\n정책 1 · 렌더 71aca393",
+          "width": 1824,
+          "height": 984
+        },
+        "relay": {
+          "before_disconnect": {
+            "monitor-1": {
+              "stream_id": "monitor-1",
+              "output_id": "monitor-1",
+              "capture_source_id": "x11-root:diagnostic-monitor-1",
+              "capture_epoch": "dfa267cc-f35a-4cf5-9afe-b1171396b217",
+              "rectangle": [
+                0,
+                0,
+                1824,
+                984
+              ],
+              "width": 1824,
+              "height": 984,
+              "codec": "mjpeg",
+              "fps": 5,
+              "frame_sequence": 42,
+              "frame_age_ms": 220,
+              "status": "live",
+              "error": null,
+              "bytes_total": 3686662,
+              "backend": "virtual_x11",
+              "physical_verified": false,
+              "render_revision": null,
+              "render_correlation": "unverified",
+              "reported_dom_revision": null
+            },
+            "monitor-2": {
+              "stream_id": "monitor-2",
+              "output_id": "monitor-2",
+              "capture_source_id": "x11-root:diagnostic-monitor-2",
+              "capture_epoch": "0f061acb-60bd-4dd9-89d0-842dd87b1091",
+              "rectangle": [
+                1824,
+                0,
+                1824,
+                984
+              ],
+              "width": 1824,
+              "height": 984,
+              "codec": "mjpeg",
+              "fps": 5,
+              "frame_sequence": 0,
+              "frame_age_ms": null,
+              "status": "unavailable",
+              "error": "output_unavailable",
+              "bytes_total": 0,
+              "backend": "virtual_x11",
+              "physical_verified": false,
+              "render_revision": null,
+              "render_correlation": "unverified",
+              "reported_dom_revision": null
+            }
+          },
+          "source_removed_status": {
+            "stream_id": "monitor-1",
+            "output_id": "monitor-1",
+            "capture_source_id": "x11-root:diagnostic-monitor-1",
+            "capture_epoch": "dfa267cc-f35a-4cf5-9afe-b1171396b217",
+            "rectangle": [
+              0,
+              0,
+              1824,
+              984
+            ],
+            "width": 1824,
+            "height": 984,
+            "codec": "mjpeg",
+            "fps": 5,
+            "frame_sequence": 42,
+            "frame_age_ms": 248,
+            "status": "unavailable",
+            "error": "frame_stale",
+            "bytes_total": 3686662,
+            "backend": "virtual_x11",
+            "physical_verified": false,
+            "render_revision": null,
+            "render_correlation": "unverified",
+            "reported_dom_revision": null
+          },
+          "stale_frame_withheld": true,
+          "diagnostic_mapping_only": true,
+          "private_mount_namespace": true
+        }
+      },
+      {
+        "output_id": "monitor-2",
+        "dom": {
+          "title": "Xenova VM 화면",
+          "text": " XENOVA / LOCAL HDMI\nVM 상세 화면\nMONITOR 02\n상태 피드 연결\n주행 모드\n미확인\n활성 구동 VM\n미확인\nJetson AI · 인식\n미확인\n\n주·백업 전환과 자동·수동 전환을 별도로 표시합니다.\n\nVM1 / 주 구동\nZ\nZephyr RTOS\n\n자동 · 수동 주행\n\nVM 실행 중 · 앱 상태 미확인\n기대 OS\nzephyr\n관측 OS\n근거 미수신\nXen 상태\nrunning\n앱 상태\n미확인\n앱 · 상태 화면\n\n현재는 상태 화면을 표시합니다.\n\n앱 화면 소스가 아직 연결되지 않았습니다.\nVM UUID\n64b1ab38-89cc-4454-8d94-b8201f4cdd33\n관측 실행 ID\nb0262314-f54a-4df6-8c5b-66b8328784cf:2\n수신 근거\n\n소스별 연결 상태를 따로 확인합니다.\n\nXen 실행 정보\n수신 정상 · 0.2초 전\n앱 heartbeat\n미수신\nVM Agent\n미지원\nOS inventory\n미수신\n화면 선택\n\n선택 VM 유지\n\n주행 모드와 활성 구동 VM은 확인된 제어 상태를 기준으로 표시합니다.\n\nLOCAL DISPLAY · 읽기 전용\n정책 1 · 렌더 71aca393",
+          "width": 1824,
+          "height": 984
+        },
+        "relay": {
+          "before_disconnect": {
+            "monitor-1": {
+              "stream_id": "monitor-1",
+              "output_id": "monitor-1",
+              "capture_source_id": "x11-root:diagnostic-monitor-1",
+              "capture_epoch": "653cbb0e-9fdf-4966-80c2-de1f2d6dbb3f",
+              "rectangle": [
+                1824,
+                0,
+                1824,
+                984
+              ],
+              "width": 1824,
+              "height": 984,
+              "codec": "mjpeg",
+              "fps": 5,
+              "frame_sequence": 0,
+              "frame_age_ms": null,
+              "status": "unavailable",
+              "error": "output_unavailable",
+              "bytes_total": 0,
+              "backend": "virtual_x11",
+              "physical_verified": false,
+              "render_revision": null,
+              "render_correlation": "unverified",
+              "reported_dom_revision": null
+            },
+            "monitor-2": {
+              "stream_id": "monitor-2",
+              "output_id": "monitor-2",
+              "capture_source_id": "x11-root:diagnostic-monitor-2",
+              "capture_epoch": "5f167e5f-4d9e-4245-8ff3-fba0a7c8ea4a",
+              "rectangle": [
+                0,
+                0,
+                1824,
+                984
+              ],
+              "width": 1824,
+              "height": 984,
+              "codec": "mjpeg",
+              "fps": 5,
+              "frame_sequence": 43,
+              "frame_age_ms": 106,
+              "status": "live",
+              "error": null,
+              "bytes_total": 3445381,
+              "backend": "virtual_x11",
+              "physical_verified": false,
+              "render_revision": null,
+              "render_correlation": "unverified",
+              "reported_dom_revision": null
+            }
+          },
+          "source_removed_status": {
+            "stream_id": "monitor-2",
+            "output_id": "monitor-2",
+            "capture_source_id": "x11-root:diagnostic-monitor-2",
+            "capture_epoch": "5f167e5f-4d9e-4245-8ff3-fba0a7c8ea4a",
+            "rectangle": [
+              0,
+              0,
+              1824,
+              984
+            ],
+            "width": 1824,
+            "height": 984,
+            "codec": "mjpeg",
+            "fps": 5,
+            "frame_sequence": 43,
+            "frame_age_ms": 109,
+            "status": "unavailable",
+            "error": "frame_stale",
+            "bytes_total": 3445381,
+            "backend": "virtual_x11",
+            "physical_verified": false,
+            "render_revision": null,
+            "render_correlation": "unverified",
+            "reported_dom_revision": null
+          },
+          "stale_frame_withheld": true,
+          "diagnostic_mapping_only": true,
+          "private_mount_namespace": true
+        }
+      }
+    ],
+    "prior_vt": 1,
+    "guest_commands_sent": false,
+    "system_services_changed": false,
+    "boot_image_changed": false,
+    "mqtt_reports_connected": false,
+    "ui_scope": "existing VM overview/detail renderer; new instrument/infotainment design not implemented here",
+    "namespace_exit": 0,
+    "namespace_error": "",
+    "framebuffer_restored": true,
+    "restoration_differing_bytes": 0,
+    "restoration_note": "terminal redraw can change pixels; mismatch is recorded, not treated as proven restoration",
+    "restored_active_vt": 1,
+    "graphics_child": {
+      "namespace_setup": true,
+      "xorg_started": true,
+      "chromium_started": true,
+      "xrandr": {
+        "code": 0,
+        "out": "Screen 0: minimum 1824 x 984, current 1824 x 984, maximum 1824 x 984\ndefault connected 1824x984+0+0 0mm x 0mm\n\tnon-desktop: 0 \n\t\tsupported: 0, 1\n   1824x984       0.00* \n",
+        "err": ""
+      },
+      "probe-Xorg.log": "on\"\n[  1156.119] \tcompiled for 1.21.1.16, module version = 1.0.0\n[  1156.119] \tABI class: X.Org Server Extension, version 10.0\n[  1156.119] (II) LoadModule: \"fbdev\"\n[  1156.120] (II) Loading /usr/lib/xorg/modules/drivers/fbdev_drv.so\n[  1156.122] (II) Module fbdev: vendor=\"X.Org Foundation\"\n[  1156.122] \tcompiled for 1.21.1.16, module version = 0.5.0\n[  1156.122] \tModule class: X.Org Video Driver\n[  1156.122] \tABI class: X.Org Video Driver, version 25.2\n[  1156.122] (II) LoadModule: \"mouse\"\n[  1156.123] (WW) Warning, couldn't open module mouse\n[  1156.123] (EE) Failed to load module \"mouse\" (module does not exist, 0)\n[  1156.123] (II) LoadModule: \"kbd\"\n[  1156.124] (WW) Warning, couldn't open module kbd\n[  1156.124] (EE) Failed to load module \"kbd\" (module does not exist, 0)\n[  1156.124] (II) FBDEV: driver for framebuffer: fbdev\n[  1156.124] (WW) xf86OpenConsole: setpgid failed: Operation not permitted\n[  1156.124] (WW) xf86OpenConsole: setsid failed: Operation not permitted\n[  1156.131] (WW) Falling back to old probe method for fbdev\n[  1156.131] (II) Loading sub module \"fbdevhw\"\n[  1156.131] (II) LoadModule: \"fbdevhw\"\n[  1156.132] (II) Loading /usr/lib/xorg/modules/libfbdevhw.so\n[  1156.134] (II) Module fbdevhw: vendor=\"X.Org Foundation\"\n[  1156.134] \tcompiled for 1.21.1.16, module version = 0.0.2\n[  1156.134] \tABI class: X.Org Video Driver, version 25.2\n[  1156.135] (II) FBDEV(0): using /dev/fb1\n[  1156.135] (II) FBDEV(0): Creating default Display subsection in Screen section\n\t\"probe-screen\" for depth/fbbpp 24/32\n[  1156.135] (**) FBDEV(0): Depth 24, (--) framebuffer bpp 32\n[  1156.135] (==) FBDEV(0): RGB weight 888\n[  1156.135] (==) FBDEV(0): Default visual is TrueColor\n[  1156.135] (==) FBDEV(0): Using gamma correction (1.0, 1.0, 1.0)\n[  1156.135] (II) FBDEV(0): hardware: simple (video memory: 7011kB)\n[  1156.135] (DB) xf86MergeOutputClassOptions unsupported bus type 0\n[  1156.135] (**) FBDEV(0): Option \"fbdev\" \"/dev/fb1\"\n[  1156.135] (II) FBDEV(0): checking modes against framebuffer device...\n[  1156.135] (II) FBDEV(0): checking modes against monitor...\n[  1156.135] (II) FBDEV(0): Virtual size is 1824x984 (pitch 1824)\n[  1156.135] (**) FBDEV(0):  Built-in mode \"current\"\n[  1156.135] (==) FBDEV(0): DPI set to (96, 96)\n[  1156.135] (II) Loading sub module \"fb\"\n[  1156.135] (II) LoadModule: \"fb\"\n[  1156.135] (II) Module \"fb\" already built-in\n[  1156.135] (**) FBDEV(0): using shadow framebuffer\n[  1156.135] (II) Loading sub module \"shadow\"\n[  1156.136] (II) LoadModule: \"shadow\"\n[  1156.136] (II) Loading /usr/lib/xorg/modules/libshadow.so\n[  1156.138] (II) Module shadow: vendor=\"X.Org Foundation\"\n[  1156.138] \tcompiled for 1.21.1.16, module version = 1.1.0\n[  1156.138] \tABI class: X.Org ANSI C Emulation, version 0.4\n[  1156.139] (II) FBDEV(0): FBIOBLANK: Invalid argument (Screen blanking not supported by kernel - disabling)\n[  1156.139] (==) FBDEV(0): Backing store enabled\n[  1156.141] (==) FBDEV(0): DPMS enabled\n[  1156.141] (II) Initializing extension Generic Event Extension\n[  1156.141] (II) Initializing extension SHAPE\n[  1156.142] (II) Initializing extension MIT-SHM\n[  1156.143] (II) Initializing extension XInputExtension\n[  1156.143] (II) Initializing extension XTEST\n[  1156.144] (II) Initializing extension BIG-REQUESTS\n[  1156.145] (II) Initializing extension SYNC\n[  1156.145] (II) Initializing extension XKEYBOARD\n[  1156.146] (II) Initializing extension XC-MISC\n[  1156.147] (II) Initializing extension SECURITY\n[  1156.147] (II) Initializing extension XFIXES\n[  1156.148] (II) Initializing extension RENDER\n[  1156.149] (II) Initializing extension RANDR\n[  1156.150] (II) Initializing extension COMPOSITE\n[  1156.150] (II) Initializing extension DAMAGE\n[  1156.151] (II) Initializing extension MIT-SCREEN-SAVER\n[  1156.151] (II) Initializing extension DOUBLE-BUFFER\n[  1156.152] (II) Initializing extension RECORD\n[  1156.153] (II) Initializing extension DPMS\n[  1156.153] (II) Initializing extension Present\n[  1156.154] (II) Initializing extension DRI3\n[  1156.154] (II) Initializing extension X-Resource\n[  1156.155] (II) Initializing extension XVideo\n[  1156.157] (II) Initializing extension XVideo-MotionCompensation\n[  1156.157] (II) Initializing extension SELinux\n[  1156.157] (II) SELinux: Disabled on system\n[  1156.157] (II) Initializing extension GLX\n[  1156.158] (II) AIGLX: Screen 0 is not DRI2 capable\n[  1157.616] (II) IGLX: Loaded and initialized swrast\n[  1157.616] (II) GLX: Initialized DRISWRAST GL provider for screen 0\n[  1157.616] (II) Initializing extension XFree86-VidModeExtension\n[  1157.617] (II) Initializing extension XFree86-DGA\n[  1157.617] (II) Initializing extension XFree86-DRI\n[  1157.617] (II) Initializing extension DRI2\n[  1157.789] (II) LoadModule: \"mouse\"\n[  1157.790] (WW) Warning, couldn't open module mouse\n[  1157.790] (EE) Failed to load module \"mouse\" (module does not exist, 0)\n[  1157.790] (EE) No input driver matching `mouse'\n[  1157.790] (II) Falling back to input driver `libinput'\n[  1157.790] (II) LoadModule: \"libinput\"\n[  1157.791] (WW) Warning, couldn't open module libinput\n[  1157.791] (EE) Failed to load module \"libinput\" (module does not exist, 0)\n[  1157.791] (II) LoadModule: \"kbd\"\n[  1157.792] (WW) Warning, couldn't open module kbd\n[  1157.792] (EE) Failed to load module \"kbd\" (module does not exist, 0)\n[  1157.792] (EE) No input driver matching `kbd'\n[  1157.792] (II) Falling back to input driver `libinput'\n[  1157.792] (II) LoadModule: \"libinput\"\n[  1157.793] (WW) Warning, couldn't open module libinput\n[  1157.793] (EE) Failed to load module \"libinput\" (module does not exist, 0)\n[  1157.934] (EE) dbus-core: error connecting to system bus: org.freedesktop.DBus.Error.FileNotFound (Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory)\n[  1167.937] (EE) dbus-core: error connecting to system bus: org.freedesktop.DBus.Error.FileNotFound (Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory)\n[  1177.981] (EE) dbus-core: error connecting to system bus: org.freedesktop.DBus.Error.FileNotFound (Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory)\n[  1187.993] (EE) dbus-core: error connecting to system bus: org.freedesktop.DBus.Error.FileNotFound (Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory)\n[  1198.002] (EE) dbus-core: error connecting to system bus: org.freedesktop.DBus.Error.FileNotFound (Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory)\n[  1208.003] (EE) dbus-core: error connecting to system bus: org.freedesktop.DBus.Error.FileNotFound (Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory)\n[  1218.004] (EE) dbus-core: error connecting to system bus: org.freedesktop.DBus.Error.FileNotFound (Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory)\n[  1219.416] (II) Server terminated successfully (0). Closing log file.\n",
+      "xorg-stdio.log": "\nX.Org X Server 1.21.1.16\nX Protocol Version 11, Revision 0\nCurrent Operating System: Linux raspberrypi4-64 6.18.33-v8 #1 SMP PREEMPT Thu May 28 02:31:14 UTC 2026 aarch64\nKernel command line: console=hvc0 loglevel=4 systemd.log_level=info systemd.log_target=journal-or-kmsg systemd.show_status=error root=PARTUUID=076c4a2a-02 rootwait\nxorg-server 2:21.1.16-1.3+deb13u4 (https://www.debian.org/support) \nCurrent version of pixman: 0.44.0\n\tBefore reporting problems, check http://wiki.x.org\n\tto make sure that you have the latest version.\nMarkers: (--) probed, (**) from config file, (==) default setting,\n\t(++) from command line, (!!) notice, (II) informational,\n\t(WW) warning, (EE) error, (NI) not implemented, (??) unknown.\n(++) Log file: \"/run/probe-Xorg.log\", Time: Wed Oct 28 00:27:05 2026\n(++) Using config file: \"/run/probe-Xorg.conf\"\n(==) Using system config directory \"/usr/share/X11/xorg.conf.d\"\n(II) Server terminated successfully (0). Closing log file.\n",
+      "chromium-probe.log": "[17:37:1028/002710.052852:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory\n[17:37:1028/002710.053096:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:37:1028/002711.262614:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory\n[17:37:1028/002711.262921:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory\n[17:37:1028/002711.263219:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory\n[17:37:1028/002711.263343:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:37:1028/002711.263435:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:37:1028/002711.387824:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:37:1028/002712.224114:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n\nDevTools listening on ws://127.0.0.1:46731/devtools/browser/4520118c-1322-4ef0-a0c7-0cd1a8ed8e3e\n[17:37:1028/002712.886333:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:37:1028/002712.886499:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:17:1028/002714.093872:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[17:37:1028/002714.095218:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:17:1028/002714.108876:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[17:37:1028/002714.110497:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:17:1028/002714.124347:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[17:17:1028/002714.242251:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[17:37:1028/002714.242868:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:17:1028/002714.568538:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[17:37:1028/002714.572568:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory\n[17:37:1028/002714.573182:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory\n[17:17:1028/002714.574132:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[17:37:1028/002714.574557:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:17:1028/002714.599165:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[17:17:1028/002714.780660:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: unknown error type: \n[17:17:1028/002714.781804:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[17:37:1028/002714.782681:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:17:1028/002714.986996:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[17:37:1028/002714.988814:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[17:17:1028/002715.480624:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n",
+      "processes_stopped": true
+    },
+    "feed_stopped": true
+  },
+  "remote_exit": 0
+}

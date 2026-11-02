@@ -43,8 +43,8 @@ def record(key='ubuntu-dev'):
     return r
 
 
-def fixture(base, r):
-    d = base / 'instances' / r['id']
+def fixture(base, r, *, directory=None):
+    d = directory if directory is not None else base / 'instances' / r['id']
     d.mkdir(parents=True)
     for filename in ['root.raw', 'Image', 'initrd']:
         (d / filename).write_bytes(b'fixture: not an image')
@@ -52,6 +52,18 @@ def fixture(base, r):
     (d / 'boot.json').write_text(json.dumps({'kernel_release': r['kernel_release'], 'root_device': '/dev/xvda', 'kernel_sha256': digest, 'initrd_sha256': digest}))
     (d / 'instance.json').write_text(json.dumps(r))
     return d
+
+
+def private_fixture(base, r, workspace, *, saved_user_file=False):
+    """OS 복사만 대체하며 실제 private 결과/자원 receipt/Manager 게시 경계를 유지한다."""
+    from prepare_instance import Workspace, PreparedInstance
+    work=Workspace(base/'instances',workspace)
+    stage=fixture(base,r,directory=work.path/r['id'])
+    with (stage/'root.raw').open('r+b') as stream:
+        stream.seek(1080);stream.write(b'\x53\xef')
+    if saved_user_file:(stage/'saved-user-file').write_text('keep me')
+    work.seal_clean()
+    return PreparedInstance(vm,r,stage,base/'instances'/r['id'],{})
 
 
 def domain(r, path, domid=1):
@@ -114,6 +126,16 @@ class LifecycleTest(unittest.TestCase):
         self.base = Path(self.temp.name)
         self.r = record()
         self.directory = fixture(self.base, self.r)
+        (self.base / '.xenova-storage.json').write_text(json.dumps(
+            {'schema':1, 'uuid':'12345678-1234-4234-8234-123456789abc'}))
+        mountinfo = self.base / 'mountinfo'
+        mountinfo.write_text(f'1 0 8:3 / {self.base} rw - ext4 /dev/fixture rw\n')
+        # Direct start now rechecks the real registry at its physical guard. Supply
+        # the small fixture's mount evidence while retaining storage_check logic.
+        real_storage_check = vm.storage_check
+        storage = patch.object(vm, 'storage_check', side_effect=lambda data: real_storage_check(data, mountinfo))
+        storage.start()
+        self.addCleanup(storage.stop)
         self.records = {self.r['id']: self.r}
         self.runner = FakeXen(self.base, self.records)
         self.ticks = 0

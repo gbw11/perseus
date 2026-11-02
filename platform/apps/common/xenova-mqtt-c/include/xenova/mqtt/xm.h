@@ -1,7 +1,7 @@
 /*
  * xenova_mqtt C판 — MQTT 계약 v1 (docs/contracts/mqtt-contract-v1.md) 코어.
  * Python xenova_mqtt(platform/services/vm-agent/mqtt-client)와 같은 토픽·정책·봉투·검사·seq 규칙.
- * 설계: docs/design/mqtt-c-client.md. 동적 메모리를 쓰지 않는다. 함수는 재진입 가능하지만 객체는 한 스레드가 소유한다.
+ * 설계: docs/design/mqtt-c-client.md. 동적 메모리를 쓰지 않는다. decoder/payload parser의 정적 scratch는 한 스레드가 소유한다.
  *
  * 반환값: 0 이상 성공(문자열 함수는 길이), 음수 errno (-EINVAL, -ENOSPC, -EMSGSIZE).
  */
@@ -35,6 +35,7 @@ extern "C" {
 
 int xm_topic_vm(char *out, size_t n, const char *vm_id, const char *kind); /* kind: heartbeat … command-result */
 int xm_topic_app_events(char *out, size_t n, const char *app_id);
+int xm_topic_vm_app_events(char *out, size_t n, const char *vm_id, const char *app_id);
 int xm_topic_manual_input(char *out, size_t n);
 int xm_topic_vehicle_control(char *out, size_t n);
 int xm_topic_vehicle_status(char *out, size_t n);
@@ -131,11 +132,44 @@ bool xm_seq_accept(struct xm_seq_tracker *t, const char *topic, const struct xm_
 
 int xm_drive_command_json(char *out, size_t n, uint32_t generation, float v_mps, float steer_rad);
 int xm_app_heartbeat_json(char *out, size_t n, const char *state, int64_t uptime_ms);
+/* progress is a decimal uint64 string on the wire, never a transport counter. */
+/* Completed work only; progress is a lossless uint64 decimal string.
+ * READY requires nonzero generation/progress and a null reason. */
+int xm_app_readiness_json(char *out, size_t n, uint32_t applied_generation,
+                         uint64_t progress, const char *readiness, const char *reason);
+/* warm-drive-1 only: checked waiting qualification is not completed work. */
+int xm_app_lifecycle_json(char *out,size_t n,uint32_t generation,uint64_t check,
+                         uint64_t progress,const char *phase,const char *readiness,const char *reason);
+
+/* drive-state-1 complete logical state. This is not vehicle output authority. */
+struct xm_state_context {
+ uint64_t frame,configuration,maneuver,road_revision,route_revision;
+ char odom_epoch[XM_UUID_LEN+1];
+};
+struct xm_state_snapshot {
+ char execution[XM_UUID_LEN+1];
+ uint64_t intent_revision,lifecycle_generation,state_revision;
+ uint32_t source_generation;
+ struct xm_state_context context;
+ char kind[8],side[8],phase[8],merge_segment[65];
+};
+struct xm_state_application {
+ char execution[XM_UUID_LEN+1],copy_message_id[XM_UUID_LEN+1];
+ uint64_t intent_revision,lifecycle_generation,state_revision;
+ struct xm_state_context context;
+ bool rebuilt,applied;
+};
+int xm_state_snapshot_json(char *,size_t,const struct xm_state_snapshot *);
+int xm_state_snapshot_parse(struct xm_span,struct xm_state_snapshot *);
+int xm_state_application_json(char *,size_t,const struct xm_state_application *);
+int xm_state_application_parse(struct xm_span,struct xm_state_application *);
 
 struct xm_vehicle_control {
 	uint32_t generation;
 	char mode[16];
 	char active_app[XM_ID_MAX]; /* null 이면 빈 문자열 */
+	char active_vm_id[XM_UUID_LEN + 1]; /* 기존 vehicle.control 필드, null/생략이면 빈 문자열 */
+ char manual_session[XM_UUID_LEN+1],manual_policy[24]; /* explicit session contract only */
 };
 int xm_vehicle_control_parse(struct xm_span payload, struct xm_vehicle_control *out);
 
@@ -148,6 +182,29 @@ enum xm_key {
 };
 /* keys 배열을 비트마스크로. 모르는 키는 무시. keys 가 배열이 아니면 -EINVAL */
 int xm_drive_input_parse(struct xm_span payload, uint32_t *keys);
+struct xm_manual_sample {
+ char session[XM_UUID_LEN+1];uint64_t sample,action;
+ uint32_t generation,keys,age_ms;bool valid;
+};
+/* Strict manual-session-1 payload; counters are original source evidence. */
+int xm_manual_sample_parse(struct xm_span payload,struct xm_manual_sample *out);
+
+/* perception.result (계약 5.4). 좌표는 차량 기준 지면: x 전방, y 왼쪽 + (m) */
+#define XM_PERCEPTION_MAX_OBSTACLES 8
+struct xm_obstacle {
+	float x, y, w;
+};
+struct xm_perception_result {
+	float lane_offset_m;   /* + = 차가 차선 중심보다 왼쪽 */
+	float heading_err_rad; /* + = 차선이 왼쪽으로 돈다 */
+	bool stop;
+	int n_obstacles;       /* 가까운 순. 형식이 틀린 원소는 건너뛴다 */
+	struct xm_obstacle obstacles[XM_PERCEPTION_MAX_OBSTACLES];
+};
+/* lane_offset_m·heading_err_rad(유한 숫자)·stop(bool)·obstacles(배열) 중 하나라도 틀리면 -EINVAL */
+int xm_perception_result_parse(struct xm_span payload, struct xm_perception_result *out);
+/* perception.event (계약 6장) {"kind":..,"detail":..} */
+int xm_perception_event_json(char *out, size_t n, const char *kind, const char *detail);
 
 #ifdef __cplusplus
 }

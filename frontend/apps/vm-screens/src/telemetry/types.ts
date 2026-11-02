@@ -28,24 +28,24 @@ export interface AppMeta {
 export const APPS: Record<AppId, AppMeta> = {
   autonomous: {
     id: 'autonomous',
-    title: '자율주행',
+    title: '자율 명령 앱',
     topicAppId: 'autonomous',
     guest: 'zephyr',
-    role: '인지 결과로 주행 명령 50 Hz',
+    role: '기존 autonomous 앱 · VM 주 구동 역할과 별개',
   },
   manual: {
     id: 'manual',
-    title: '수동주행',
+    title: '수동 입력 앱',
     topicAppId: 'manual',
     guest: 'zephyr',
-    role: '대기 → 장애 시 즉시 인계',
+    role: '기존 manual 앱 · VM 백업 역할과 별개',
   },
   interaction: {
     id: 'interaction',
-    title: '네비게이션',
+    title: 'Debian 인터랙션 앱',
     topicAppId: 'message-board',
     guest: 'debian',
-    role: '카메라 AI 장애물 감지·트랙 지도·알림',
+    role: '인터랙션·지도·영상 표시 · AI/인식은 Jetson 담당',
   },
 };
 

@@ -19,20 +19,20 @@
   "firmware_instances": [
     {
       "id": "zephyr-drive-a",
-      "template": "xenova-zephyr-network-starter-1.1.0",
+      "template": "xenova-zephyr-drive-lattice-lab-1.0.0",
       "autostart": true,
       "board_shutdown_policy": "graceful",
-      "template_id": "zephyr-xenvm-starter-arm64",
-      "template_version": "1.1.0",
+      "template_id": "zephyr-drive-lattice-lab-arm64",
+      "template_version": "1.0.0-lab.1",
       "display_name": "Zephyr 주행 A"
     },
     {
       "id": "zephyr-drive-b",
-      "template": "xenova-zephyr-network-starter-1.1.0",
+      "template": "xenova-zephyr-drive-lattice-lab-1.0.0",
       "autostart": true,
       "board_shutdown_policy": "graceful",
-      "template_id": "zephyr-xenvm-starter-arm64",
-      "template_version": "1.1.0",
+      "template_id": "zephyr-drive-lattice-lab-arm64",
+      "template_version": "1.0.0-lab.1",
       "display_name": "Zephyr 주행 B"
     }
   ],

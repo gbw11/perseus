@@ -191,7 +191,7 @@ Zephyr 선택 시 자원 단계는 고정 프로필(1 vCPU / 16 MiB)만 보여 �
 ┌ 자율주행 · AUTO · gen 4        속도 0.50 m/s  조향 +0.07  장애물 없음              ┐
 ├─────────────────────┬─────────────────────┬─────────────────────┤
 │ 자율주행    [정상]   │ 수동주행    [정상]   │ 인터랙션    [정상]   │
-│ Zephyr · autonomous │ Zephyr · manual     │ Debian · message-board │
+│ Zephyr · autonomous │ Zephyr · manual     │ Debian · interaction │
 │ ▶ 차량 제어 중       │ 예비 — 준비됨        │ ─ 최근 알림 5건 ─      │
 │ 명령 50 Hz           │ 명령 50 Hz (v=0)     │ 수동주행으로 즉시 인계  │
 │ 인지 차선 0.05 m     │ 키 입력 없음          │ 자율주행 명령 끊김      │

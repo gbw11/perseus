@@ -1,0 +1,40 @@
+# Independent protoc --encode input. Synthetic decoder vector, not a route.
+major: 1
+minor: 0
+required_features: 0
+vehicle: "rc-test-1"
+mapper_boot: "11111111-1111-4111-8111-111111111111"
+mapper_instance: "22222222-2222-4222-8222-222222222222"
+map_epoch: "33333333-3333-4333-8333-333333333333"
+frame_epoch: "44444444-4444-4444-8444-444444444444"
+odom_epoch: "55555555-5555-4555-8555-555555555555"
+sequence: 2
+configuration: "lattice-lab-1"
+calibration: "encoder-lab-1"
+primitive: "0554319af8a84297547c4248f7eae1e7b85d927980219928ae226ff0edff8010"
+reference_id: "decoder-vector"
+reference_revision: 1
+origin { x: 0 y: 0 yaw: 0 }
+resolution_m: 0.1
+width: 4
+height: 4
+reference_odom_seq: 1
+reference_vehicle_pose { x: 0.3 y: 1.6 yaw: 0 }
+observed_us: 1000000
+completed_us: 1001000
+published_us: 1002000
+observation_seq: 2
+clock_epoch: "66666666-6666-4666-8666-666666666666"
+occupancy: "\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
+cell_flags: "\003\003\003\003\003\003\003\003\003\003\003\003\003\003\003\003"
+# 3,600,000 milliseconds, little endian, retained original cell age.
+age_le32: "\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000\200\356\066\000"
+reference { x: 0 y: 1.6 }
+reference { x: 6 y: 1.6 }
+left_boundary { x: 0 y: 3 }
+left_boundary { x: 6 y: 3 }
+right_boundary { x: 0 y: 0.2 }
+right_boundary { x: 6 y: 0.2 }
+complete: true
+truncated: false
+inflation_policy: 0

@@ -194,3 +194,10 @@ def test_resume_on_other_topic_is_not_fed():
     client.deliver(topics.app_events("manual"), "drive.resume.requested", {"requested_by": "x"}, vm_id=MANUAL_VM)
     drive(runner, client, clock, 0.02, heartbeat=True)
     assert not [m for _, m, _ in client.published if m == "drive.resume.accepted"]
+
+
+def test_legacy_runner_cannot_fall_back_to_unbound_paired_control():
+    import pytest
+    client, clock, sink = FakeClient(), Clock(), MockSink()
+    with pytest.raises(ValueError, match="VerifiedGatewayRunner"):
+        GatewayRunner(client, sink, clock=clock, vm_ids=(AUTO_VM, MANUAL_VM))

@@ -1,0 +1,357 @@
+{
+  "catalog_id": "xenova-telemetry-core-2.1",
+  "status": "new_contract",
+  "entries": [
+    {
+      "name": "memory.kernel_heap.used_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory",
+      "labels": [],
+      "source": "xdiag kernel heap adapter",
+      "meaning_ko": "kernel system heap에서 현재 할당된 바이트; 전체 VM RAM 또는 libc heap이 아님"
+    },
+    {
+      "name": "memory.kernel_heap.free_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory",
+      "labels": [],
+      "source": "xdiag kernel heap adapter",
+      "meaning_ko": "kernel system heap의 allocator가 보고한 미할당 바이트; 전체 VM RAM 또는 libc heap이 아님"
+    },
+    {
+      "name": "memory.kernel_heap.high_water_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory",
+      "labels": [],
+      "source": "xdiag kernel heap adapter",
+      "meaning_ko": "kernel system heap의 현재 부팅 중 최대 할당 바이트; 전체 VM RAM 또는 libc heap이 아님"
+    },
+    {
+      "name": "cpu.system.percent",
+      "unit": "percent",
+      "kind": "gauge",
+      "encoding": "float64",
+      "family": "cpu",
+      "labels": [],
+      "source": "Zephyr UP runtime window",
+      "meaning_ko": "동일 구간의 guest non-idle accounted / total accounted; Xen pCPU 사용률이 아님"
+    },
+    {
+      "name": "network.netfront.tx_packets",
+      "unit": "packets",
+      "kind": "raw_counter",
+      "encoding": "u64_decimal",
+      "family": "network",
+      "labels": [
+        "interface"
+      ],
+      "source": "xnet_stats()",
+      "meaning_ko": "netfront 송신 카운터; 32비트 원본, wrap 보정 없이 전달",
+      "raw_bits": 32,
+      "reset_scope": "guest_boot"
+    },
+    {
+      "name": "network.netfront.rx_packets",
+      "unit": "packets",
+      "kind": "raw_counter",
+      "encoding": "u64_decimal",
+      "family": "network",
+      "labels": [
+        "interface"
+      ],
+      "source": "xnet_stats()",
+      "meaning_ko": "netfront 수신 카운터; 32비트 원본, wrap 보정 없이 전달",
+      "raw_bits": 32,
+      "reset_scope": "guest_boot"
+    },
+    {
+      "name": "network.netfront.tx_drop",
+      "unit": "count",
+      "kind": "raw_counter",
+      "encoding": "u64_decimal",
+      "family": "network",
+      "labels": [
+        "interface"
+      ],
+      "source": "xnet_stats()",
+      "meaning_ko": "netfront 송신 drop; 32비트 원본, wrap 보정 없이 전달",
+      "raw_bits": 32,
+      "reset_scope": "guest_boot"
+    },
+    {
+      "name": "network.netfront.rx_drop",
+      "unit": "count",
+      "kind": "raw_counter",
+      "encoding": "u64_decimal",
+      "family": "network",
+      "labels": [
+        "interface"
+      ],
+      "source": "xnet_stats()",
+      "meaning_ko": "netfront 수신 drop; 32비트 원본, wrap 보정 없이 전달",
+      "raw_bits": 32,
+      "reset_scope": "guest_boot"
+    },
+    {
+      "name": "network.netfront.pool_busy",
+      "unit": "count",
+      "kind": "raw_counter",
+      "encoding": "u64_decimal",
+      "family": "network",
+      "labels": [
+        "interface"
+      ],
+      "source": "xnet_stats()",
+      "meaning_ko": "netfront pool busy; 32비트 원본, wrap 보정 없이 전달",
+      "raw_bits": 32,
+      "reset_scope": "guest_boot"
+    },
+    {
+      "name": "network.netfront.protocol_errors",
+      "unit": "count",
+      "kind": "raw_counter",
+      "encoding": "u64_decimal",
+      "family": "network",
+      "labels": [
+        "interface"
+      ],
+      "source": "xnet_stats()",
+      "meaning_ko": "netfront protocol error; 32비트 원본, wrap 보정 없이 전달",
+      "raw_bits": 32,
+      "reset_scope": "guest_boot"
+    },
+    {
+      "name": "network.interface_up",
+      "unit": "bool",
+      "kind": "gauge",
+      "encoding": "boolean",
+      "family": "network",
+      "labels": [
+        "interface"
+      ],
+      "source": "net_if",
+      "meaning_ko": "net_if up; DHCP/IP/TCP/MQTT/app 준비와 다름"
+    },
+    {
+      "name": "network.carrier",
+      "unit": "bool",
+      "kind": "gauge",
+      "encoding": "boolean",
+      "family": "network",
+      "labels": [
+        "interface"
+      ],
+      "source": "net_if",
+      "meaning_ko": "net_if carrier; DHCP/IP/TCP/MQTT/app 준비와 다름"
+    },
+    {
+      "name": "loop.completed_total",
+      "unit": "count",
+      "kind": "counter",
+      "encoding": "u64_decimal",
+      "family": "loop_progress",
+      "labels": [
+        "task_id",
+        "task_epoch"
+      ],
+      "source": "xdiag_loop",
+      "meaning_ko": "성공한 xdiag_loop_end의 완료 횟수",
+      "reset_scope": "task_epoch"
+    },
+    {
+      "name": "loop.in_flight",
+      "unit": "bool",
+      "kind": "gauge",
+      "encoding": "boolean",
+      "family": "loop_progress",
+      "labels": [
+        "task_id",
+        "task_epoch"
+      ],
+      "source": "xdiag_loop",
+      "meaning_ko": "begin 후 end가 아직 확정되지 않은 작업",
+      "reset_scope": null
+    },
+    {
+      "name": "loop.last_completed_age_us",
+      "unit": "us",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "loop_progress",
+      "labels": [
+        "task_id",
+        "task_epoch"
+      ],
+      "source": "xdiag_loop",
+      "meaning_ko": "Core 조회 시점에서 마지막 완료까지의 local elapsed; 이전 완료 없으면 no_sample",
+      "reset_scope": null
+    },
+    {
+      "name": "loop.deadline_miss_total",
+      "unit": "count",
+      "kind": "counter",
+      "encoding": "u64_decimal",
+      "family": "loop_progress",
+      "labels": [
+        "task_id",
+        "task_epoch"
+      ],
+      "source": "xdiag_loop",
+      "meaning_ko": "완료 시 예정 release+deadline을 넘긴 작업 수; 진행 중 hang은 아직 포함되지 않음",
+      "reset_scope": "task_epoch"
+    },
+    {
+      "name": "loop.skipped_release_total",
+      "unit": "count",
+      "kind": "counter",
+      "encoding": "u64_decimal",
+      "family": "loop_progress",
+      "labels": [
+        "task_id",
+        "task_epoch"
+      ],
+      "source": "xdiag_loop",
+      "meaning_ko": "Core가 확정한 실행하지 못한 release 수",
+      "reset_scope": "task_epoch"
+    },
+    {
+      "name": "loop.last_interval_us",
+      "unit": "us",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "loop_progress",
+      "labels": [
+        "task_id",
+        "task_epoch"
+      ],
+      "source": "xdiag_loop",
+      "meaning_ko": "직전 실제 시작 간격; 첫 작업에는 no_sample",
+      "reset_scope": null
+    },
+    {
+      "name": "loop.last_jitter_us",
+      "unit": "us",
+      "kind": "gauge",
+      "encoding": "i64_decimal",
+      "family": "loop_progress",
+      "labels": [
+        "task_id",
+        "task_epoch"
+      ],
+      "source": "xdiag_loop",
+      "meaning_ko": "직전 실제 시작 간격-period, 음수 보존",
+      "reset_scope": null
+    },
+    {
+      "name": "publisher.collection_failures_total",
+      "unit": "count",
+      "kind": "counter",
+      "encoding": "u64_decimal",
+      "family": "publisher",
+      "labels": [],
+      "source": "new telemetry publisher",
+      "meaning_ko": "실제 수집 실패; 세션 중 누적, subscriber 처리 성공을 뜻하지 않음",
+      "reset_scope": "publisher_instance"
+    },
+    {
+      "name": "publisher.publish_submit_failures_total",
+      "unit": "count",
+      "kind": "counter",
+      "encoding": "u64_decimal",
+      "family": "publisher",
+      "labels": [],
+      "source": "new telemetry publisher",
+      "meaning_ko": "local MQTT publish 제출 실패; 세션 중 누적, subscriber 처리 성공을 뜻하지 않음",
+      "reset_scope": "publisher_instance"
+    },
+    {
+      "name": "publisher.events_dropped_total",
+      "unit": "count",
+      "kind": "counter",
+      "encoding": "u64_decimal",
+      "family": "publisher",
+      "labels": [],
+      "source": "new telemetry publisher",
+      "meaning_ko": "bounded event queue에서 유실된 사건; 세션 중 누적, subscriber 처리 성공을 뜻하지 않음",
+      "reset_scope": "publisher_instance"
+    },
+    {
+      "name": "publisher.payload_oversize_total",
+      "unit": "count",
+      "kind": "counter",
+      "encoding": "u64_decimal",
+      "family": "publisher",
+      "labels": [],
+      "source": "new telemetry publisher",
+      "meaning_ko": "크기 초과로 발행하지 못한 payload; 세션 중 누적, subscriber 처리 성공을 뜻하지 않음",
+      "reset_scope": "publisher_instance"
+    },
+    {
+      "name": "publisher.puback_timeouts_total",
+      "unit": "count",
+      "kind": "counter",
+      "encoding": "u64_decimal",
+      "family": "publisher",
+      "labels": [],
+      "source": "new telemetry publisher",
+      "meaning_ko": "제한 시간 안에 PUBACK을 관측하지 못한 QoS1 메시지; 세션 중 누적, subscriber 처리 성공을 뜻하지 않음",
+      "reset_scope": "publisher_instance"
+    },
+    {
+      "name": "cpu.thread.percent",
+      "unit": "percent",
+      "kind": "gauge",
+      "encoding": "float64",
+      "family": "cpu",
+      "labels": [
+        "thread_id",
+        "thread_name",
+        "name_truncated"
+      ],
+      "source": "Zephyr UP runtime window",
+      "meaning_ko": "guest boot 내 스레드 수명 ID; 같은 전체 계상 분모에 대한 구간 사용률"
+    },
+    {
+      "name": "memory.region.used_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory_regions",
+      "labels": [
+        "region"
+      ],
+      "source": "fixed net_buf data payload pool occupancy",
+      "meaning_ko": "RX/TX 데이터 block payload만 포함; descriptor·padding·전체 RAM 제외"
+    },
+    {
+      "name": "memory.region.free_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory_regions",
+      "labels": [
+        "region"
+      ],
+      "source": "fixed net_buf data payload pool occupancy",
+      "meaning_ko": "RX/TX 데이터 block payload만 포함; descriptor·padding·전체 RAM 제외"
+    },
+    {
+      "name": "memory.region.capacity_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory_regions",
+      "labels": [
+        "region"
+      ],
+      "source": "fixed net_buf data payload pool occupancy",
+      "meaning_ko": "RX/TX 데이터 block payload만 포함; descriptor·padding·전체 RAM 제외"
+    }
+  ]
+}

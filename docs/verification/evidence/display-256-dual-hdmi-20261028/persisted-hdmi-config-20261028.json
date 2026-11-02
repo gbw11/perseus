@@ -1,0 +1,14 @@
+{
+  "normal_config_persisted": true,
+  "new_sha256": "9f8dc2146b654152fc7f1a1388de6915a7f8d57257d9d1400c0686c99eb81557",
+  "changed_from": "dtoverlay=vc4-kms-v3d",
+  "changed_to": "dtoverlay=vc4-kms-v3d-pi4,cma-64",
+  "backup": "/root/xenova-hdmi-backup/20261028-060513/config.txt",
+  "xen": "Name                                        ID   Mem VCPUs\tState\tTime(s)\nDomain-0                                     0  1024     4     r-----     117.8\ndebian-dev                                   1   512     1     -b----      16.9\nzephyr-drive-a                               2    16     1     -b----       2.3\nzephyr-drive-b                               3    16     1     -b----       2.3\n",
+  "connected_hdmi": [
+    "card0-HDMI-A-1",
+    "card0-HDMI-A-2"
+  ],
+  "no_additional_reboot": true,
+  "kernel_xen_boot_script_replaced": false
+}

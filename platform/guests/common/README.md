@@ -13,9 +13,85 @@
 | seed의 다음 부팅 | `guest_identity.ensure()` | 기존 식별자·키 검증. 암호·키를 초기화하지 않음 |
 
 일반 VM의 설정은 **생성 시 오프라인 주입**, 네트워크 주소 획득은 **부팅 시 DHCP**다.
+현재 공급 hook은 검증된 Agent 설치 receipt에서 통신 profile을 읽고 일반 private root에
+`agent.env`를 설치한다. factory seed 빌드에는 VM 비밀이 없으며 `FirstBoot.register`의 host UUID
+계획 뒤 공급한다. 새 seed의 `guest_identity.ensure`는 root 전용 platform-identity.json이 있으면
+그 UUID를 사용하고, 없을 때만 기존 machine-id 파생 호환 경로를 유지한다.
+[정확한 공급/재공급·단계·소비 계약](../../../docs/contracts/vm-provisioning-v1.md)을 따른다.
 일반 VM에는 seed 전용 `identity-complete.json`이 없어도 정상이다.
 seed의 해당 표식은 **식별자·SSH 키 준비 완료**만 뜻한다. 네트워크 연결이나 에이전트 준비 완료를 뜻하지 않는다.
 `xenova_first_boot.py`는 dom0의 공통 SD 최초 등록 처리이며, domU 에이전트 설치기가 아니다.
+
+## 인스턴스 디스크 준비와 검증
+
+Linux 관리 경로는 템플릿 선택 때 metadata·manifest 신원·자산 크기·소유권·용량을 검사한다.
+사전 전체 payload 해시 없이 원 작업과 예약을 기록한 뒤 준비한다. `make_instance()`는 선택된
+`template_manifest_sha256`을 현재 manifest와 대조하고, 원본에서 신규 private 파일로
+복사하는 동일 바이트 전체를 기대 SHA-256과 비교한다. `root.raw`·커널·initrd·boot.json·
+kernel.config를 모두 검증한 뒤 파일시스템 UUID와 게스트 신원·SSH를 설정한다.
+
+복사본은 원본과 다른 inode로 생성한다. sparse hole은 출력에서도 유지하고 해시에는
+해당 길이의 0 바이트를 포함한다. hole 조회가 지원되지 않으면 전체 스트림을 검증하며
+복사한다. 전역 검증 cache나 reflink를 사용하지 않는다.
+
+원본의 dev/inode·크기·mtime/ctime·mode 등은 복사 전후와 게시 직전에 비교한다.
+이 정보는 같은 준비 작업의 변경 guard이며 내용 검증은 전체 스트림 해시가 담당한다.
+guest 설정으로 복사본이 바뀌는 것과 원본 변경은 구분한다. 원본 교체·해시 불일치·
+I/O 오류·동기화 실패 시 게시하지 않고 작업 경로를 보존한다. 기존 출력은 덮어쓰지 않는다.
+실행자 중단 뒤 부분 작업의 자동 초기화나 새 operation 발급도 하지 않는다.
+
+관리 경로의 준비 실패는 기존 operation에 `RECOVERY_REQUIRED`와 원인을 기록한다.
+실패 기록 저장이 미확정이면 응답에도 이를 남긴다. 같은 요청의 조회는 원 기록을 읽으며,
+실패가 기록된 부분 workspace의 재실행은 최초 오류와 파일을 보존한 채 차단한다.
+workspace 생성 전 실패와 이미 게시된 자산의 후속 등록은 같은 operation·예약으로
+재확인한다. 정확한 상태·오류·재전달 계약은 [생성 계약](../../../docs/platform/cli-manager-spec.md#creation-contract)을 따른다.
+Linux 계획 성공은 payload 무결성이나 생성 완료의 확인이 아니다.
+미게시 부분 준비를 정리하는 관리 명령은 아직 없으며, 등록/보관 VM용 `retire/purge`로
+대신 처리하지 않는다. 원 key 조회와 파일 보존 이후의 종결·예약 해제는 별도 후속 범위다.
+
+Manager는 `make_instance(private=True)`로 준비 결과를 받아 공통/admission 잠금 안에서
+현재 원 작업·등록부·예약·gate와 대조한 뒤 게시한다. 준비 결과는 원 manifest·사본·
+workspace/target에 결합하며, helper는 먼저 public 경로로 옮기지 않는다.
+독립 factory seed 준비는 기존 오프라인 경로를 유지한다. 초기화된 운영 저장소의
+`prepare-xenova-guests.py instance` 직접 실행은 거절하며 Manager create를 사용한다.
+원 실행 소유권 없이 private 모드만 지정하는 것으로 이 제한을 우회할 수 없다.
+
+`Workspace`는 할당/해제의 미확정 여부와 mount/loop를 private 자원 파일에 기록한다.
+정리 확인 후에만 준비 결과를 반환한다. Python 진단과 외부 명령 출력은 요청별 제한
+sink로 보내며 전역 stdout/FD를 바꾸지 않는다. 새 외부 의존성 없이 기존 thread-local
+기반을 사용한다. 동기 Manager 호출은 요청마다 별도 fork 객체를 사용한다.
+
+기존 직접 준비 경로의 구형 Linux manifest가 `files`를 생략한 경우에는 기존
+`root_sha256`와 boot manifest의 해시로 검증한다. 새 관리 카탈로그는 계속 완전한
+`files` manifest를 요구한다. 준비 완료는 Xen 실행·OS 기동·Agent 연결 완료를 뜻하지 않는다.
+
+## Linux Bash 프롬프트
+
+새 Linux VM의 준비 레코드에 있는 `display_name`을 게스트의
+`/etc/xenova/display-name`에 데이터로 전달한다. 값이 없는 구형 레코드는 기존
+`name`을 사용한다. 일반 VM과 factory seed 모두 같은 Bash 초기화 코드를 설치한다.
+
+```text
+[주행 제어 A] root@vm-a13f0b2c:~#
+```
+
+`vm-a13f0b2c`는 **VM UUID 앞 8자리를 보여주는 프롬프트용 표기**다.
+실제 `/etc/hostname`, Xen 도메인 이름, UUID·MAC·IP·SSH 키는 변경하지 않는다.
+일반 VM의 `/etc/xenova/prompt-uuid`에는 이미 할당된 UUID를 기록하고,
+factory seed는 부팅 후 읽을 수 있는 Xen UUID 또는 기존 `instance-id`를 사용한다.
+seed의 임시 UUID를 표시하거나 표시를 위해 새 UUID를 만들지 않는다.
+유효한 UUID를 읽지 못하면 기존 프롬프트를 유지한다.
+
+`/etc/profile.d/xenova-prompt.sh`와 시스템 `bash.bashrc`의 source 연결로
+로그인·비로그인 대화형 Bash의 기본 `promptvars` 설정에서 적용한다.
+기존 `PROMPT_COMMAND`를 보존하고,
+사용자 rc 파일의 기본 PS1 설정 뒤에 표시한다. 이름은 쉘 코드로 source하지 않으며
+PS1의 고정 변수 참조를 통해 표시해 `$()`·백틱·따옴표·역슬래시를 실행하지 않는다.
+비대화형 명령과 Bash 이외의 셸, Zephyr에는 적용하지 않는다.
+
+이 설정은 새 인스턴스/seed 사본을 준비할 때 설치한다. 기존 VM에 준비 함수를
+다시 실행해 적용하지 않는다. 현재 이름 변경 API나 실행 중인 게스트로의 이름
+동기화 기능은 없으며, 향후 이름 변경 기능에서 반영 시점을 별도로 정한다.
 
 ## 현재 입력과 역할 분담
 

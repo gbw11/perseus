@@ -100,6 +100,10 @@ class Board:
         self.xen.rows.append(domain(ubuntu, ubuntu_dir / "root.raw", 1))
         _publish_template(self.data)
         self.platform = vm.Platform(self.data, self.run, command=self.xen, defaults_path=DEFAULTS)
+        # 명시적 로컬 시험 프로필이며 서비스/운영 기본 정책으로 배포하지 않는다.
+        self.platform.creation_policy_path=self.data/'creation-policy-test.json'
+        self.platform.creation_policy_path.write_text(json.dumps({'schema_version':'1.0','call_ms':3600000,
+                                                                 'execution_ms':3500000,'cleanup_ms':5000}))
         self.manager = management.Manager(self.platform, preparer=self._prepare, usage_check=lambda *a: None, defaults_path=DEFAULTS)
 
     def _prepare(self, op):
@@ -207,6 +211,72 @@ def test_create_retransmission_does_not_rename_existing_instance(client, board):
     assert current["initial_spec"] == initial
     assert (directory / "root.raw").stat().st_ino == disk_inode
 
+
+# ---- 정지 요청 추적 (S15P31E110-305): 실제 Manager.fork·budget_ms·control-operation ----
+
+
+def keyed_stop(client, vm_id, key, **headers):
+    return client.post(f"/api/v1/vms/{vm_id}/stop", headers={"Idempotency-Key": key, **headers})
+
+
+def lookup(client, vm_id, key):
+    return client.get(f"/api/v1/vms/{vm_id}/control-operations", params={"request_key": key})
+
+
+def shutdowns(board):
+    return [call for call in board.xen.calls if call[:2] == ["xl", "shutdown"]]
+
+
+def test_real_keyed_stop_replay_lookup_and_conflict(client, board):
+    first = keyed_stop(client, UBUNTU, "stop-ubuntu-1", **{"X-Request-Budget-Ms": "20000"})  # 실제 Manager 가 budget_ms 를 받는다
+    assert first.status_code == 200, first.text
+    original = first.json()
+    assert (original["status"], original["accepted"]) == ("completed", True) and original["operation_id"]
+    assert len(shutdowns(board)) == 1
+
+    again = keyed_stop(client, UBUNTU, "stop-ubuntu-1")  # 응답을 잃었다고 보고 같은 키로 재전달
+    assert again.status_code == 200, again.text
+    assert (again.json()["status"], again.json()["operation_id"]) == ("completed", original["operation_id"])
+    assert len(shutdowns(board)) == 1  # 완료 replay 는 물리 동작을 반복하지 않는다
+
+    found = lookup(client, UBUNTU, "stop-ubuntu-1")
+    assert found.status_code == 200, found.text
+    assert (found.json()["status"], found.json()["operation_id"], found.json()["action"]) == ("completed", original["operation_id"], "stop")
+
+    conflict = keyed_stop(client, DEBIAN, "stop-ubuntu-1")  # 같은 키를 다른 VM 에
+    assert conflict.status_code == 409 and conflict.json()["platform_code"] == "IDEMPOTENCY_CONFLICT"
+    assert lookup(client, UBUNTU, "never-sent").status_code == 404
+
+
+def test_real_keyed_stop_is_accepted_while_a_long_operation_holds_the_execution_lock(client, board):
+    """긴 start·복구가 플랫폼 실행 잠금을 쥔 동안: 정지 의도는 내구 수락(202)되고 물리 정지는 없다. 잠금이 풀린 뒤 같은 키로 이행한다."""
+    from xenova_runtime import operation_lock
+
+    with operation_lock(board.manager.p.runtime):
+        pending = keyed_stop(client, UBUNTU, "stop-during-long")
+        assert pending.status_code == 202, pending.text
+        accepted_op = pending.json()
+        assert (accepted_op["status"], accepted_op["accepted"], accepted_op["phase"]) == ("pending", True, "accepted")
+        assert accepted_op["operation_id"] and accepted_op["intent_revision"]
+        assert shutdowns(board) == []
+        found = lookup(client, UBUNTU, "stop-during-long")  # 조회는 실행 잠금을 기다리지 않는다
+        assert found.status_code == 200 and (found.json()["status"], found.json()["operation_id"]) == ("pending", accepted_op["operation_id"])
+    done = keyed_stop(client, UBUNTU, "stop-during-long")
+    assert done.status_code == 200, done.text
+    assert (done.json()["status"], done.json()["operation_id"]) == ("completed", accepted_op["operation_id"])
+    assert len(shutdowns(board)) == 1
+
+
+def test_real_budget_exhausted_submits_nothing(board):
+    manager = SerializedManager(board.manager)
+    driver = PlatformDriver(manager, Xl(FakeRunner({("xl", "info"): XL_INFO})))
+    app = create_app(Settings(driver="platform", log_level="WARNING", response_reserve_s=0.5), driver=driver,
+                     provisioner=PlatformProvisioner(manager))
+    response = keyed_stop(TestClient(app), UBUNTU, "too-late", **{"X-Request-Budget-Ms": "100"})
+    assert response.status_code == 504, response.text
+    assert shutdowns(board) == []
+    assert list((board.data / "control-requests").glob("*.json")) == []  # 의도 수락 기록도 없다
+
 @pytest.mark.parametrize("name", ["개발용 Ubuntu", "\u00a0VM", "VM\u3000", "\u2003주행 A VM\u202f"])
 def test_spring_dto_name_uses_actual_manager_metadata_preparer(client, board, name):
     """DTO 필드·실제 HTTP·Manager 메타데이터를 연결하고 Linux 디스크 복사 경계만 대체한다."""
@@ -224,11 +294,11 @@ def test_spring_dto_name_uses_actual_manager_metadata_preparer(client, board, na
     def copy_disk_boundary(args, **kwargs):
         record = kwargs["record_override"]
         assert record["display_name"] == body["name"]
-        directory = fixture(board.data, record)
-        with (directory / "root.raw").open("r+b") as stream:
-            stream.seek(1080)
-            stream.write(b"\x53\xef")
+        from test_xenova_platform import private_fixture
+        assert kwargs['private'] is True
+        prepared=private_fixture(board.data,record,kwargs['workspace_path'])
         board.records[record["id"]] = record
+        return prepared
     with patch.object(prepare_instance, "make_instance", side_effect=copy_disk_boundary) as copy:
         response = client.post("/api/v1/vms", json=body)
     assert response.status_code == 201, response.text

@@ -341,6 +341,72 @@ class DomainReviewTest(unittest.TestCase):
         self.assertEqual(len(self.xen.rows), 1)
         self.assertFalse(any(c[:2] in (['xl', 'destroy'], ['xl', 'unpause']) for c in self.xen.calls))
 
+    def test_created_transient_unknown_waits_for_same_blocked_incarnation(self):
+        self.xen.states[1] = '------'
+        now = [0.0]
+        self.p.clock = lambda: now[0]
+        def settle(seconds):
+            now[0] += seconds
+            self.xen.states[1] = '-b----'
+        self.p.sleep = settle
+        self.cli('start', self.linux['id'])
+        run = self.p.execution().run_record(self.linux)
+        self.assertEqual(run['phase'], 'observed')
+        self.assertEqual(run['domid'], 1)
+        self.assertEqual(len([c for c in self.xen.calls if c[:2] == ['xl', 'create']]), 1)
+        self.assertFalse(any(c[:2] in (['xl', 'destroy'], ['xl', 'unpause']) for c in self.xen.calls))
+
+    def test_created_persistent_unknown_expires_without_recreate_or_binding(self):
+        self.xen.states[1] = '------'
+        now = [0.0]
+        self.p.clock = lambda: now[0]
+        self.p.sleep = lambda seconds: now.__setitem__(0, now[0]+seconds)
+        real_storage_check = vm.storage_check
+        with patch.object(vm, 'storage_check', side_effect=lambda data: real_storage_check(data, self.mountinfo)), \
+                self.assertRaisesRegex(vm.PlatformError, 'unknown|deadline'):
+            with redirect_stdout(self.output):
+                self.p.start(self.linux, deadline=0.3)
+        self.assertLessEqual(now[0], 0.3)
+        self.assertEqual(self.p.execution().run_record(self.linux)['phase'], 'launching')
+        self.assertEqual(len([c for c in self.xen.calls if c[:2] == ['xl', 'create']]), 1)
+        self.assertFalse(any(c[:2] in (['xl', 'destroy'], ['xl', 'unpause']) for c in self.xen.calls))
+
+    def test_created_unknown_incarnation_change_is_rejected(self):
+        self.xen.states[1] = '------'
+        now = [0.0]
+        self.p.clock = lambda: now[0]
+        def replace(seconds):
+            now[0] += seconds
+            self.xen.rows[0] = copy.deepcopy(self.xen.rows[0])
+            self.xen.states[1] = '-b----'
+        self.p.sleep = replace
+        with self.assertRaisesRegex(vm.PlatformError, 'incarnation') as failure:
+            self.cli('start', self.linux['id'])
+        # create 제출 뒤의 실패는 물리 효과를 취소한 것이 아니다. 원인과 소유
+        # journal을 보존하고 같은 요청의 무조건 create 재전송을 막는다.
+        self.assertEqual(failure.exception.error['code'], 'RECONCILE_REQUIRED')
+        self.assertEqual(failure.exception.error['details']['cause']['code'], 'XEN_EXECUTION_FAILED')
+        self.assertTrue(failure.exception.error['details']['accepted'])
+        self.assertEqual(self.p.execution().run_record(self.linux)['phase'], 'launching')
+        self.assertEqual(self.p.execution().requests()[-1]['phase'], 'uncertain')
+        self.assertEqual(len([c for c in self.xen.calls if c[:2] == ['xl', 'create']]), 1)
+
+    def test_created_unknown_becoming_crashed_is_not_accepted(self):
+        self.xen.states[1] = '------'
+        now = [0.0]
+        self.p.clock = lambda: now[0]
+        def crash(seconds):
+            now[0] += seconds
+            self.xen.states[1] = '---sc-'
+        self.p.sleep = crash
+        with self.assertRaisesRegex(vm.PlatformError, 'crashed') as failure:
+            self.cli('start', self.linux['id'])
+        self.assertEqual(failure.exception.error['code'], 'RECONCILE_REQUIRED')
+        self.assertEqual(failure.exception.error['details']['cause']['code'], 'XEN_EXECUTION_FAILED')
+        self.assertEqual(self.p.execution().run_record(self.linux)['phase'], 'launching')
+        self.assertEqual(self.p.execution().requests()[-1]['phase'], 'uncertain')
+        self.assertEqual(len([c for c in self.xen.calls if c[:2] == ['xl', 'create']]), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,0 +1,40 @@
+{
+  "environment": "local WSL systemd + real HTTP Manager mock driver; no real VM/board",
+  "unit": "xenova-log-http-probe-2907f3ad.service",
+  "actual_http_ingestion": true,
+  "passed": true,
+  "read_status": 200,
+  "records": [
+    {
+      "id": 1,
+      "event_id": "484019b7fdc9891ca88b8f5bb63b720d5889cdbf7ca5a8c29bed5ab1e3eb0254",
+      "source_id": "local-probe-vm3",
+      "vm_id": "00000000-0000-4000-8000-000000000003",
+      "component": "xenova-log-http-probe-2907f3ad.service",
+      "boot_id": "1d1876bb936e452ba249c08671fe9458",
+      "observed_at": "2026-10-28T13:58:41.828423+00:00",
+      "received_at": 1793195923.4503045,
+      "level": "INFO",
+      "message": "HTTP_FIRST cross-process log password=[REDACTED]"
+    },
+    {
+      "id": 2,
+      "event_id": "9c0afda35250ed837355e884e3bdb4337eafef4aae73014fe217bc3ec408553b",
+      "source_id": "local-probe-vm3",
+      "vm_id": "00000000-0000-4000-8000-000000000003",
+      "component": "xenova-log-http-probe-2907f3ad.service",
+      "boot_id": "1d1876bb936e452ba249c08671fe9458",
+      "observed_at": "2026-10-28T13:58:45.562727+00:00",
+      "received_at": 1793195926.6068473,
+      "level": "INFO",
+      "message": "HTTP_SECOND cross-process log password=[REDACTED]"
+    }
+  ],
+  "network_failure_preserved_checkpoint": true,
+  "receiver_restart_preserved_epoch": true,
+  "reconnect_no_duplicate": true,
+  "source_token_read_denied": true,
+  "source_token_control_denied": true,
+  "source_uuid_bound_by_receiver": true,
+  "secrets_redacted": true
+}
