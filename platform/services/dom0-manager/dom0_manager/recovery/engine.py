@@ -95,6 +95,14 @@ class _Held(Exception):
     """force-restart 근거가 부족하다. attempt 를 소비하지 않고 잠시 뒤 다시 본다."""
 
 
+class _ProtectionFailed(Exception):
+    """Gateway 보호를 이 복구에서 더 얻을 수 없다(계약·설정 거절, 보호 요청 상한). 새 키로 우회하지 않고 최종 실패로 닫는다."""
+
+    def __init__(self, message: str, code: str | None) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 @dataclass(frozen=True)
 class _Settlement:
     """닫힌 복구의 보호 정산 결과. 시작할 때의 보호 기록 사본(키 대조용)과 Gateway 결과."""
@@ -301,6 +309,14 @@ class RecoveryEngine:
         drive = hold is None and self._drive_force(record, view)
         if drive:
             hold = self._protect(record, view)  # Gateway I/O 는 엔진 잠금 밖에서 한다
+            if hold is None:
+                # 보호를 얻는 동안 Manager 쪽이 바뀌었을 수 있다: 지금 view 로 대상·의도·실행을 다시 보고, 보호가 그 실행의 것인지 아래에서 확인한다
+                view = self._platform.view(record.vm_id)
+                if view.get("lifecycle") != "REGISTERED" or view.get("desired_state") != "running" or not view.get("intent_applicable"):
+                    raise _NotEligible(f"after protection: lifecycle={view.get('lifecycle')} desired_state={view.get('desired_state')} "
+                                       f"applicable={view.get('intent_applicable')}")
+                if not self._drive_force(record, view):
+                    hold = "after protection the platform view no longer calls for a force-restart"
         with self._lock:
             if record.cancel_requested or not record.open:
                 raise _Cancelled()
@@ -393,6 +409,9 @@ class RecoveryEngine:
             self._close(record, RecoveryStatus.CANCELLED, now, error={"code": "TARGET_NOT_ELIGIBLE", "platform_code": None, "message": "cancelled before the platform accepted the attempt"})
         except _Recovered as exc:
             self._close(record, RecoveryStatus.RECOVERED, now, error={"code": "TARGET_HEALTHY", "platform_code": None, "message": str(exc)})
+        except _ProtectionFailed as exc:
+            self._close(record, RecoveryStatus.FAILED, now, final=True, error={
+                "code": "PROTECTION_UNAVAILABLE", "platform_code": None, "message": f"{exc} (Gateway {exc.code})" if exc.code else str(exc)})
         except _Held as exc:
             record.due_monotonic = now + self._policy.transient_retry_s  # attempt·상태·이벤트는 그대로다
             if self._held.get(record.recovery_id) != str(exc):
@@ -509,6 +528,8 @@ class RecoveryEngine:
                 return f"protection {entry['request_id']} for an earlier execution is not settled yet: {outcome.note}"
             entry = None
         if entry is None or entry["phase"] not in LIVE:
+            if record.protection_requests >= self._policy.max_attempts:
+                raise _ProtectionFailed(f"{record.protection_requests} Gateway protection request(s) ended without protection", None)
             parent_ms = int((self._clock() + self._policy.attempt_deadline_s) * 1000)  # 이 시도의 부모 기한. 보호 기한은 이 안에 든다
             try:
                 entry = protector.plan(record.vm_id, view, parent_ms)
@@ -518,13 +539,17 @@ class RecoveryEngine:
                 if record.cancel_requested or not record.open:
                     raise _Cancelled()
                 previous, record.protection = record.protection, dict(entry)
+                record.protection_requests += 1
                 if not self._save():
                     record.protection = previous
+                    record.protection_requests -= 1
                     return "protection request not recorded; Gateway not called"
             log.warning("vm %s: recovery %s requesting Gateway protection %s for execution %s", record.vm_id, record.recovery_id,
                         entry["request_id"], entry["spec"]["target_execution_id"])
         outcome = protector.secure(entry)
         self._note_protection(record, entry, outcome)
+        if outcome.final:
+            raise _ProtectionFailed(outcome.note, outcome.code)
         return None if outcome.ready else outcome.note
 
     @staticmethod
@@ -533,8 +558,10 @@ class RecoveryEngine:
         return spec["host_boot_id"] == view.get("host_boot_id") and spec["target_execution_id"] == view.get("execution_id")
 
     def _protected_for(self, record: RecoveryRecord, view: dict[str, Any]) -> bool:
+        """기록된 보호가 지금 view 의 실행·의도·lifecycle generation 에 대한 PROTECTED 인가."""
         entry = record.protection
-        return entry is not None and entry["phase"] == PROTECTED and self._same_execution(entry, view)
+        return (entry is not None and entry["phase"] == PROTECTED and self._same_execution(entry, view)
+                and (entry["spec"]["intent_revision"], entry["spec"]["lifecycle_generation"]) == (view.get("intent_revision"), view.get("generation")))
 
     def _note_protection(self, record: RecoveryRecord, entry: dict[str, Any], outcome: Outcome) -> str:
         """Gateway 결과를 기록에 적는다(같은 키일 때만). 적은 단계를 돌려준다."""

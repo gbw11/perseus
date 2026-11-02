@@ -90,6 +90,7 @@ class RecoveryRecord:
     # 주행 VM 의 Gateway 보호(S15P31E110-346): {request_id, spec(원 spec), phase, note}. 첫 송신 전에 저장한다.
     # 단계가 LIVE 이면 복구가 닫혀도 정산(finish·cancel)이 끝날 때까지 기록을 지우지 않는다
     protection: dict[str, Any] | None = None
+    protection_requests: int = 0  # 이 복구에서 발급한 보호 키 수. 정책 시도 수를 넘겨 새 키를 만들지 않는다
     final: bool = False
     closed_monotonic: float | None = None
     # 아직 outbox(recovery-events.jsonl)에 옮기지 못한 이벤트(계약 2.5, event_id 고정). 상태 전이와 같은 파일에 저장돼
@@ -150,6 +151,8 @@ class RecoveryRecord:
             raise ValueError("detected_monotonic must be a finite number")
         if type(self.attempt) is not int or self.attempt < 0:
             raise ValueError("attempt must be a non-negative integer")
+        if type(self.protection_requests) is not int or self.protection_requests < 0 or (self.protection is not None and self.protection_requests < 1):
+            raise ValueError("protection_requests must be a non-negative integer counting the recorded protection")
         for name in ("attempt_started_monotonic", "due_monotonic", "closed_monotonic"):
             value = getattr(self, name)
             if value is not None and not _finite(value):

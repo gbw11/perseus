@@ -111,19 +111,27 @@ def test_unreachable_gateway_holds_and_retries_the_same_key(tmp_path, failure):
     assert len(w.platform.recover_calls()) == 1 and w.gateway.issued == 1
 
 
-def test_key_refused_after_its_deadline_is_replaced_only_once_the_gateway_says_so(tmp_path):
-    """원 기한이 지나 같은 키가 DEADLINE_EXCEEDED 로 거절되면(만들지 않음이 확정) 그때만 새 키를 만든다."""
+def test_expired_key_is_replaced_only_after_a_fresh_judgment_and_within_the_request_cap(tmp_path):
+    """원 기한이 지나 같은 키가 DEADLINE_EXCEEDED 로 거절되면 그 키는 끝이다. 다음 차례에 현재 증거·view 를 다시 판단한 뒤에만
+    새 키를 만들고, 복구당 보호 요청 수는 정책 시도 수(3)를 넘지 않는다. 넘으면 최종 실패다."""
     w = drive(tmp_path)
-    w.gateway.fail("submit", GatewayUncertain("UNAVAILABLE"))
+    for _ in range(3):
+        w.gateway.fail("submit", GatewayUncertain("UNAVAILABLE"))
+        w.gateway.fail("submit", GatewayRefused("DEADLINE_EXCEEDED"))
     w.engine.on_judgment(zephyr_judgment())
+    keys = []
+    for _ in range(3):
+        w.tick()  # 새 키 발급 → 결과 모름
+        keys.append(entry(w)["request_id"])
+        w.advance(6)
+        w.tick()  # 같은 키 재전달 → 기한 경과
+        assert held(w) and entry(w)["phase"] == "ABANDONED" and entry(w)["request_id"] == keys[-1]
+        w.advance(5)
     w.tick()
-    first = entry(w)["request_id"]
-    w.advance(6)
-    w.tick()
-    assert held(w) and entry(w)["phase"] == "ABANDONED" and entry(w)["request_id"] == first
-    w.advance(5)
-    w.tick()
-    assert entry(w)["request_id"] != first and w.gateway.issued == 2 and len(w.platform.recover_calls()) == 1
+    record = w.record()
+    assert len(set(keys)) == 3 and w.gateway.issued == 3 and record.protection_requests == 3
+    assert record.status == RecoveryStatus.FAILED and record.final and record.last_error["code"] == "PROTECTION_UNAVAILABLE"
+    assert w.platform.recover_calls() == []
 
 
 def test_no_gateway_binding_holds_without_issuing_a_key(tmp_path):
@@ -151,16 +159,100 @@ def test_gateway_context_that_does_not_match_holds(tmp_path, change):
     assert held(w) and w.gateway.count("submit") == 0
 
 
-def test_refused_protection_is_abandoned_and_a_new_key_is_planned(tmp_path):
-    w = drive(tmp_path)
-    w.gateway.fail("submit", GatewayRefused("AUTHORITY_CHANGED"))
+@pytest.mark.parametrize("code", ["AUTHORITY_CHANGED", "TARGET_CHANGED", "HOST_CHANGED"])
+def test_context_refusal_keeps_the_key_while_the_gateway_context_is_unchanged(tmp_path, code):
+    w = drive(tmp_path, policy=RecoveryPolicy(transient_retry_s=2.0))
+    w.gateway.fail("submit", GatewayRefused(code))  # 거절됐지만 다시 읽은 문맥은 원 spec 그대로다
     w.engine.on_judgment(zephyr_judgment())
     w.tick()
     first = entry(w)["request_id"]
-    assert held(w) and entry(w)["phase"] == "ABANDONED"
+    assert held(w) and entry(w)["phase"] == "UNKNOWN" and "same key kept" in entry(w)["note"]
+    w.advance(2)
+    w.tick()
+    assert entry(w)["request_id"] == first and w.gateway.issued == 1 and len(w.platform.recover_calls()) == 1
+
+
+def test_context_refusal_with_a_changed_context_plans_a_new_request(tmp_path):
+    w = drive(tmp_path)
+    submit = w.gateway.submit
+
+    def authority_moves(request_id, spec):
+        w.gateway.generation = 8  # 요청을 만든 뒤 Gateway generation 이 바뀌었다
+        return submit(request_id, spec)
+
+    w.gateway.submit = authority_moves
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    first = entry(w)["request_id"]
+    assert held(w) and entry(w)["phase"] == "ABANDONED" and "generation 7 -> 8" in entry(w)["note"]
+    w.gateway.submit = submit
     w.advance(5)
     w.tick()
-    assert entry(w)["request_id"] != first and entry(w)["phase"] == "PROTECTED" and len(w.platform.recover_calls()) == 1
+    assert entry(w)["request_id"] != first and entry(w)["spec"]["expected_generation"] == 8 and len(w.platform.recover_calls()) == 1
+
+
+@pytest.mark.parametrize("code", ["REQUEST_WINDOW_EXPIRED", "REQUEST_DEADLINE_OUTSIDE_WINDOW", "HISTORY_POLICY_REQUIRED", "INVALID_INPUT",
+                                  "TARGET_NOT_MANAGED"])
+def test_contract_or_configuration_refusal_fails_without_another_key(tmp_path, code):
+    w = drive(tmp_path)
+    w.gateway.fail("submit", GatewayRefused(code))
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    record = w.record()
+    assert record.status == RecoveryStatus.FAILED and record.final and record.last_error["code"] == "PROTECTION_UNAVAILABLE"
+    assert code in record.last_error["message"] and entry(w)["phase"] == "ABANDONED"
+    w.advance(30)
+    w.tick()
+    assert w.gateway.issued == 1 and w.gateway.count("submit") == 1 and w.platform.recover_calls() == []
+
+
+@pytest.mark.parametrize("code", ["HISTORY_FULL", "HISTORY_BYTES_RESERVED", "TARGET_ALREADY_PROTECTED", "SOMETHING_NEW"])
+def test_capacity_and_unknown_refusals_wait_with_the_same_key(tmp_path, code):
+    w = drive(tmp_path, policy=RecoveryPolicy(transient_retry_s=2.0))
+    w.gateway.fail("submit", GatewayRefused(code))
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    assert held(w) and entry(w)["phase"] == "UNKNOWN"
+    w.advance(2)
+    w.tick()  # 용량이 돌아왔다
+    assert w.gateway.issued == 1 and len(w.platform.recover_calls()) == 1
+
+
+def test_idempotency_conflict_fails_and_keeps_the_key_for_settlement(tmp_path):
+    w = drive(tmp_path)
+    w.gateway.fail("submit", GatewayRefused("IDEMPOTENCY_CONFLICT"))
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    record = w.record()
+    assert record.status == RecoveryStatus.FAILED and entry(w)["phase"] == "UNKNOWN"  # 같은 키가 있을 수 있어 정산 대상으로 남는다
+    assert w.gateway.issued == 1 and w.platform.recover_calls() == []
+
+
+@pytest.mark.parametrize("change", ["stopped", "intent", "execution"])
+def test_platform_view_is_read_again_after_protection(tmp_path, change):
+    """보호를 얻는 동안 Manager 쪽이 바뀌었으면 옛 view 로 시도하지 않는다(attempt·recovery.started 0)."""
+    w = drive(tmp_path)
+    submit = w.gateway.submit
+
+    def manager_moves(request_id, spec):
+        result = submit(request_id, spec)
+        if change == "stopped":
+            w.platform.views[VM] = view(desired="stopped")
+        elif change == "intent":
+            w.platform.views[VM] = view(revision=4)
+        else:
+            w.platform.views[VM] = {**view(), "execution_id": NEW, "domid": 6}
+        return result
+
+    w.gateway.submit = manager_moves
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    record = w.record()
+    assert w.platform.recover_calls() == [] and record.attempt == 0 and w.events == []
+    if change == "stopped":
+        assert record.status == RecoveryStatus.CANCELLED
+    else:
+        assert record.open and entry(w)["phase"] == "PROTECTED"  # 보호는 원 실행의 것: 다음 차례에 정산·재판단한다
 
 
 @pytest.mark.parametrize("damage", ["target", "storage", "execution", "durable", "excluded"])
@@ -433,6 +525,19 @@ def test_damaged_protection_record_blocks_the_store(tmp_path, damage):
     w.tick()
     data = json.loads(w.store.path.read_text(encoding="utf-8"))
     damage(data["recoveries"][0]["protection"])
+    w.store.path.write_text(json.dumps(data), encoding="utf-8")
+    store = RecoveryStore(w.store.path)
+    assert store.load() == {} and store.history_lost
+
+
+@pytest.mark.parametrize("count", [0, -1, "1", True])
+def test_protection_request_count_must_cover_the_recorded_protection(tmp_path, count):
+    w = drive(tmp_path)
+    w.platform.results = [platform_down()]
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    data = json.loads(w.store.path.read_text(encoding="utf-8"))
+    data["recoveries"][0]["protection_requests"] = count  # 상한을 우회하는 손상
     w.store.path.write_text(json.dumps(data), encoding="utf-8")
     store = RecoveryStore(w.store.path)
     assert store.load() == {} and store.history_lost

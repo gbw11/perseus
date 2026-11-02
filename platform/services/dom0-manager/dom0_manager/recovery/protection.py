@@ -5,7 +5,9 @@
 
 - 키와 원 spec 은 첫 송신 전에 복구 기록에 저장한다(엔진). 응답을 잃으면 같은 키·같은 spec 으로 다시 묻는다. 새 키를 만들지 않는다
 - 이 모듈은 Gateway I/O 와 응답 판정만 한다. 기록 전이·저장은 엔진이 잠금 안에서 한다
-- host 가 바뀐 보호는 정산하지 않고 이력(HISTORICAL)으로 둔다. Gateway 는 현재 host 의 보호만 활성으로 본다(플랫폼 결정)
+- host 가 바뀐 보호는 정산하지 않고 이력(HISTORICAL)으로 둔다. 현재 host 의 보호만 활성으로 보는 것은 Gateway 쪽 결정이며,
+  Gateway 가 그것을 반영하기 전에는 이전 host 의 보호가 재선택과 새 보호를 계속 막는다(그동안 주행 VM force 는 보류된다)
+- crashed·미합류 실행은 Gateway binding 이 없어 보호를 요청하지 않는다. binding 부재를 확인한 재선택 차단 전용 보호가 계약에 생기면 그때 받는다
 - Gateway 응답 하나를 성공으로 믿지 않는다: 원 spec 과 같은 대상·실행·의도·기한, durable, 현재 host·대상 일치, held·owner_excluded 를 본다
 """
 
@@ -23,18 +25,23 @@ UNKNOWN = "UNKNOWN"  # 보냈지만 결과를 모른다(응답 유실·일시 �
 PROTECTED = "PROTECTED"  # Gateway 가 원 spec 그대로 내구 수락했다
 RELEASED = "RELEASED"  # 새 실행 binding 확인 뒤 finish
 CANCELLED = "CANCELLED"  # 복구 전 정당 종료로 원 실행에 cancel
-ABANDONED = "ABANDONED"  # Gateway 가 만들지 않았음이 확정됐다(거절·기한 경과 뒤 부재)
+ABANDONED = "ABANDONED"  # Gateway 가 만들지 않았음이 확정됐다(문맥 변경·기한 경과·계약 거절)
 HISTORICAL = "HISTORICAL"  # 이전 host 부팅의 보호. 정산하지 않는다
 LOST = "LOST"  # 수락됐던 보호를 Gateway 가 더는 모른다. 운영자 확인 대상
 PHASES = frozenset({PLANNED, UNKNOWN, PROTECTED, RELEASED, CANCELLED, ABANDONED, HISTORICAL, LOST})
 LIVE = frozenset({PLANNED, UNKNOWN, PROTECTED})
 
-# submit 거절 가운데 이 키의 보호를 만들지 않았음이 확정인 것. submit 은 같은 키가 있으면 원 view 를 돌려주므로 이 거절은 키가 없다는 뜻이고,
-# 같은 키의 앞선 송신은 같은 mailbox 에서 먼저 처리됐거나 버려졌다
-NOT_CREATED = frozenset({
-    "TARGET_CHANGED", "HOST_CHANGED", "AUTHORITY_CHANGED", "DEADLINE_EXCEEDED", "TARGET_NOT_MANAGED", "TARGET_ALREADY_PROTECTED",
-    "HISTORY_FULL", "HISTORY_BYTES_RESERVED", "REQUEST_WINDOW_EXPIRED", "LEGACY_KEY_NOT_ADMISSIBLE", "HISTORY_POLICY_REQUIRED",
-    "REQUEST_DEADLINE_OUTSIDE_WINDOW", "REQUEST_TIME_INVALID", "GENERATION_EXHAUSTED", "INVALID_INPUT",
+# submit 거절의 분류(계약 G1 "코드·상황"). submit 은 같은 키가 있으면 원 view 를 돌려주므로 아래 거절은 지금 그 키가 없다는 뜻이고,
+# 같은 키의 앞선 송신은 같은 mailbox 에서 먼저 처리됐거나 버려졌다. 그래도 거절 하나로 새 키를 만들지 않는다:
+# - 문맥 변경: Gateway 문맥을 다시 읽어 원 spec 과 실제로 달라졌을 때만 이 키를 버린다. 같으면 같은 키를 유지한다
+# - 기한 경과: 이 키는 다시 수락될 수 없다. 새 요청은 엔진이 현재 증거·view 를 다시 판단한 뒤 복구당 상한 안에서만 만든다
+# - 계약·설정 거절: 키·기한을 바꿔 우회하지 않는다. 복구를 최종 실패로 닫고 운영자에게 넘긴다
+# - 그 밖(용량 부족·바쁨·저장 미확정·다른 보호가 대상을 쥠·모르는 코드): 같은 키를 보존하고 기다린다
+CONTEXT_CODES = frozenset({"TARGET_CHANGED", "HOST_CHANGED", "AUTHORITY_CHANGED"})
+EXPIRED_CODES = frozenset({"DEADLINE_EXCEEDED"})
+REJECTED_CODES = frozenset({
+    "REQUEST_WINDOW_EXPIRED", "REQUEST_DEADLINE_OUTSIDE_WINDOW", "HISTORY_POLICY_REQUIRED", "LEGACY_KEY_NOT_ADMISSIBLE", "REQUEST_TIME_INVALID",
+    "INVALID_INPUT", "INVALID_FRAME", "TARGET_NOT_MANAGED", "GENERATION_EXHAUSTED",
 })
 ABSENT = frozenset({"NOT_FOUND", "RESULT_NOT_RETAINED_OR_UNKNOWN"})
 SPEC_FIELDS = ("target_vm", "target_execution_id", "intent_revision", "lifecycle_generation", "deadline_ms")
@@ -115,6 +122,8 @@ class Outcome:
     phase: str
     note: str
     ready: bool = False
+    final: bool = False  # 계약·설정 거절: 새 키로 우회하지 않고 복구를 최종 실패로 닫는다
+    code: str | None = None  # 그때의 Gateway 거절 코드
 
 
 def _canonical(value: Any) -> bool:
@@ -183,14 +192,46 @@ class GatewayProtection:
         except GatewayUncertain as exc:
             return Outcome(phase if phase == PROTECTED else UNKNOWN, f"Gateway outcome unknown ({exc.code}); asking again with the same key")
         except GatewayRefused as exc:
-            if exc.code == "HOST_CHANGED" and phase == PROTECTED:
-                return Outcome(HISTORICAL, "protection belongs to an earlier host boot")
-            if phase == PROTECTED and exc.code in ABSENT:
-                return Outcome(LOST, f"accepted protection no longer known to the Gateway ({exc.code})")
-            if phase != PROTECTED and exc.code in NOT_CREATED:
-                return Outcome(ABANDONED, f"Gateway refused the protection ({exc.code}); not created")
-            return Outcome(phase if phase == PROTECTED else UNKNOWN, f"Gateway refused ({exc.code}); same key kept")
+            if phase == PROTECTED:
+                if exc.code == "HOST_CHANGED":
+                    return Outcome(HISTORICAL, "protection belongs to an earlier host boot")
+                if exc.code in ABSENT:
+                    return Outcome(LOST, f"accepted protection no longer known to the Gateway ({exc.code})")
+                return Outcome(PROTECTED, f"Gateway refused get ({exc.code})")
+            return self._refused(entry, exc.code)
         return self._judge(data, entry)
+
+    def _refused(self, entry: dict[str, Any], code: str) -> Outcome:
+        if code in REJECTED_CODES:
+            return Outcome(ABANDONED, f"Gateway rejected the protection request ({code}); not retried with another key or deadline",
+                           final=True, code=code)
+        if code == "IDEMPOTENCY_CONFLICT":  # 같은 키가 다른 spec 으로 있다: 보호가 있을 수 있어 정산 대상으로 남긴다
+            return Outcome(UNKNOWN, f"Gateway holds this key with another request ({code})", final=True, code=code)
+        if code in EXPIRED_CODES:
+            return Outcome(ABANDONED, f"protection deadline elapsed before acceptance ({code}); this key can never be accepted", code=code)
+        if code in CONTEXT_CODES:
+            changed = self._context_change(entry["spec"])
+            if changed is not None:
+                return Outcome(ABANDONED, f"Gateway refused ({code}) and its context changed: {changed}", code=code)
+            return Outcome(UNKNOWN, f"Gateway refused ({code}) but its context still matches the request; same key kept", code=code)
+        return Outcome(UNKNOWN, f"Gateway refused ({code}); same key kept", code=code)
+
+    def _context_change(self, spec: dict[str, Any]) -> str | None:
+        """지금 Gateway 문맥이 원 spec 과 다른 점. 같거나 읽지 못하면 None(같은 키 유지)."""
+        try:
+            context = self._gateway.context()
+        except (GatewayUncertain, GatewayRefused):
+            return None
+        if not isinstance(context, dict):
+            return None
+        target = (context.get("targets") or {}).get(spec["target_vm"]) if isinstance(context.get("targets"), dict) else None
+        bound = None if not isinstance(target, dict) else (target.get("execution_id"), target.get("intent_revision"), target.get("lifecycle_generation"))
+        now = (context.get("host_boot_id"), context.get("owner"), context.get("generation"), bound)
+        then = (spec["host_boot_id"], spec["expected_owner"], spec["expected_generation"],
+                (spec["target_execution_id"], spec["intent_revision"], spec["lifecycle_generation"]))
+        names = ("host", "owner", "generation", "binding")
+        changed = [f"{name} {a!r} -> {b!r}" for name, a, b in zip(names, then, now) if a != b]
+        return ", ".join(changed) or None
 
     # ---- 정산 ----
 
