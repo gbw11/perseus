@@ -878,3 +878,36 @@ def test_drive_peer_sending_one_bound_app_is_channel_evidence():
         judged += world.tick(target, peer)
     assert [(j.vm_id, j.reason) for j in judged] == [(ZEPHYR, FailureReason.APP_HEARTBEAT_LOST)]
     assert world.health(PEER_ZEPHYR).state == HealthState.OBSERVATION_UNAVAILABLE
+
+
+
+# ---- 의도를 못 읽은 주기 (S15P31E110-336) ----
+
+
+def test_unknown_intent_holds_every_judgment_and_keeps_the_episode():
+    world = World(arming=Known([VM]))
+    world.prove()
+    boot_both(world, obs())
+    unknown = replace(obs(), intent_known=False)
+    assert world.run(unknown, 120) == []  # heartbeat 손실이어도 오래된 의도로 재시작하지 않는다
+    assert world.health().state == HealthState.OBSERVATION_UNAVAILABLE
+    assert world.health().intent_known is False  # 복구 엔진이 이 스냅샷의 desired_state 로 취소하지 않게 넘긴다
+    assert "intent_known" not in world.health().payload(lease_s=45)  # Worker 내부용. vm.health 계약은 그대로
+    world.clock.now += 5
+    assert world.tick(replace(obs(state=VmState.crashed), intent_known=False)) == []  # crashed 도 보류
+    assert world.run(replace(obs(present=False), intent_known=False), 120) == []  # absent 도 보류
+    world.clock.now += 5
+    assert [j.reason for j in world.tick(obs(present=False))] == [FailureReason.DOMAIN_ABSENT]  # 의도를 다시 읽으면 재개
+
+
+def test_unknown_intent_does_not_close_an_open_episode():
+    """의도를 못 읽는 동안 캐시가 stopped 여도 '대상 아님'으로 episode 를 닫지 않는다."""
+    world = World(arming=Known([VM]))
+    world.prove()
+    boot_both(world, obs())
+    judged = world.run(obs(), 40)
+    assert [j.reason for j in judged] == [FailureReason.HEARTBEAT_LOST]
+    episode = world.watcher.open_recovery(VM)
+    world.clock.now += 5
+    world.tick(replace(obs(desired="stopped"), intent_known=False))
+    assert world.watcher.open_recovery(VM) == episode

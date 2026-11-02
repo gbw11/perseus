@@ -83,8 +83,9 @@ class FakeWatcher:
     def health(self, vm_id):
         return self.healths.get(vm_id)
 
-    def set(self, vm_id, state, *, desired="running", reason=None):
-        self.healths[vm_id] = VmHealth(vm_id=vm_id, state=state, desired_state=desired, xen_state="running", heartbeat_age_s=None, reason=reason, manager_seq=1)
+    def set(self, vm_id, state, *, desired="running", reason=None, intent_known=True):
+        self.healths[vm_id] = VmHealth(vm_id=vm_id, state=state, desired_state=desired, xen_state="running", heartbeat_age_s=None, reason=reason,
+                                       manager_seq=1, intent_known=intent_known)
 
 
 def judgment(vm_id=VM, reason=FailureReason.HEARTBEAT_LOST, recovery_id=REC, kind="linux"):
@@ -861,3 +862,60 @@ def test_policy_from_env_and_validation():
         RecoveryPolicy(attempt_deadline_s=121)
     with pytest.raises(ValueError):
         RecoveryPolicy(policy="failover")
+
+
+
+# ---- 의도를 못 읽은 주기의 건강 스냅샷 (S15P31E110-336) ----
+
+STALE_STOPPED = dict(desired="stopped", intent_known=False)  # 마지막으로 읽은 의도는 stopped, 지금은 읽지 못함
+
+
+def test_waiting_recovery_is_not_cancelled_by_a_stale_stopped_intent(tmp_path):
+    w = make(tmp_path)
+    w.platform.results = [DriverError("xl failed", platform_code="XEN_EXECUTION_FAILED")]
+    w.engine.on_judgment(judgment())
+    w.tick()
+    assert w.record().status == RecoveryStatus.BACKOFF
+    w.watcher.set(VM, HealthState.OBSERVATION_UNAVAILABLE, **STALE_STOPPED)
+    w.advance(2)
+    w.tick()
+    assert w.record().status == RecoveryStatus.BACKOFF and w.record().open  # 오래된 stopped 로 닫지 않는다
+    w.watcher.set(VM, HealthState.STOPPED, desired="stopped")  # 의도를 다시 읽었고 정말 stopped
+    w.advance(1)
+    w.tick()
+    assert w.record().status == RecoveryStatus.CANCELLED and w.record().last_error["code"] == "TARGET_NOT_ELIGIBLE"
+
+
+def test_running_attempt_is_not_cancel_requested_by_a_stale_stopped_intent(tmp_path):
+    w = make(tmp_path, inline=False)
+    w.platform.block = threading.Event()
+    w.engine.on_judgment(judgment())
+    w.tick()
+    wait_until(w.platform.entered.is_set)
+    w.watcher.set(VM, HealthState.OBSERVATION_UNAVAILABLE, **STALE_STOPPED)
+    w.tick()
+    record = w.record()
+    assert record.status == RecoveryStatus.EXECUTING and record.cancel_requested is False
+    w.watcher.set(VM, HealthState.STOPPED, desired="stopped")
+    w.tick()
+    assert record.cancel_requested is True  # 다시 읽은 stopped 는 취소 요청이다
+    w.platform.block.set()
+    wait_until(lambda: all(f.done() for f in w.engine._futures.values()))  # noqa: SLF001
+    w.engine.shutdown()
+
+
+def test_replay_is_not_cancelled_by_a_stale_stopped_intent(tmp_path):
+    """응답을 잃었고 플랫폼에 닿은 기록도 없다. 오래된 stopped 로 TARGET_NOT_ELIGIBLE 종료하지 않고 같은 spec 으로 다시 보낸다."""
+    w = make(tmp_path)
+    w.platform.results = [DriverTimeout("lost")]
+    w.engine.on_judgment(judgment())
+    w.tick()
+    record = w.record()
+    spec = dict(record.request)
+    w.watcher.set(VM, HealthState.OBSERVATION_UNAVAILABLE, **STALE_STOPPED)
+    w.advance(5)
+    w.tick()
+    assert record.last_error is None or record.last_error.get("code") != "TARGET_NOT_ELIGIBLE"
+    assert record.status != RecoveryStatus.CANCELLED
+    calls = w.platform.recover_calls()
+    assert len(calls) == 2 and calls[-1][1] == spec  # 같은 원 spec 재전달(플랫폼이 expected_intent_revision 을 다시 본다)

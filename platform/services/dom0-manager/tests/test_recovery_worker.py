@@ -67,6 +67,7 @@ class FakeManager:
 
     def __init__(self, views, *, fail=None, templates=None):
         self.views = views
+        self.data = None  # 주면 intents·list 성공 응답의 data 를 그대로 이것으로 낸다(손상 응답 시험)
         self.fail = fail
         self.templates = TEMPLATES if templates is None else templates
         self.calls = []
@@ -84,7 +85,7 @@ class FakeManager:
             if view is None:
                 return {"ok": False, "error": {"code": "VM_NOT_FOUND", "message": "registered VM not found", "retryable": False, "details": {}}}
             return {"ok": True, "data": {"vm": view}}
-        return {"ok": True, "data": {"vms": self.views}}
+        return {"ok": True, "data": {"vms": self.views} if self.data is None else self.data}
 
 
 class FakeClient:
@@ -143,7 +144,7 @@ def test_platform_observer_joins_cached_intent_with_fresh_xl_domains():
     clock = [1000.0]
     manager = FakeManager([
         _view(DEBIAN, "debian-dev"), _view(ZEPHYR, "zephyr-drive-a", kind="zephyr", template=("zephyr-drive-arm64", "1.0.0")),
-        _view(STOPPED, "stopped-vm", desired="stopped"), {"vm_id": "not-a-uuid", "name": "broken"},
+        _view(STOPPED, "stopped-vm", desired="stopped"),
     ])
     runner = _runner()
     observer = PlatformObserver(manager, Xl(runner), intent_refresh_s=60, clock=lambda: clock[0])
@@ -156,25 +157,50 @@ def test_platform_observer_joins_cached_intent_with_fresh_xl_domains():
 
     clock[0] += 30
     observer()
-    assert [c[0] for c in manager.calls] == ["list", "templates"]  # 60초 안에는 다시 부르지 않는다 (잠금·Xen 관측 회피)
+    assert [c[0] for c in manager.calls] == ["intents", "templates", "intents"]  # 의도는 매 주기, capability 는 60초마다
+    assert "list" not in [c[0] for c in manager.calls]  # 잠금·Xen 관측을 하는 list 는 부르지 않는다
     assert [args[:2] for args, _ in runner.calls] == [("xl", "list"), ("xl", "list"), ("xl", "list"), ("xl", "list")]  # xl 은 매번
     clock[0] += 30
     observer()
-    assert [c[0] for c in manager.calls] == ["list", "templates", "list", "templates"]
+    assert [c[0] for c in manager.calls] == ["intents", "templates", "intents", "intents", "templates"]
 
 
-def test_platform_observer_keeps_cache_when_refresh_is_busy_but_fails_without_any():
+def test_platform_observer_keeps_registrations_but_marks_intent_unknown_when_refresh_fails():
     manager = FakeManager([_view(DEBIAN, "debian-dev")])
     clock = [0.0]
     observer = PlatformObserver(manager, Xl(_runner()), intent_refresh_s=60, clock=lambda: clock[0])
-    manager.fail = "OPERATION_IN_PROGRESS"
+    manager.fail = "STORAGE_UNAVAILABLE"
     with pytest.raises(PlatformUnavailable):
-        observer()  # 캐시가 없으면 관측 실패
+        observer()  # 읽은 적이 없으면 관측 실패
     manager.fail = None
-    assert [o.vm_id for o in observer()] == [DEBIAN]
-    clock[0] += 61
-    manager.fail = "OPERATION_IN_PROGRESS"
-    assert [o.vm_id for o in observer()] == [DEBIAN]  # 갱신 실패: 캐시 유지, xl 은 최신
+    assert [(o.vm_id, o.intent_known) for o in observer()] == [(DEBIAN, True)]
+    clock[0] += 5
+    manager.fail = "STORAGE_UNAVAILABLE"
+    stale = observer()
+    assert [(o.vm_id, o.intent_known) for o in stale] == [(DEBIAN, False)]  # 등록은 남기고(삭제 아님) 의도는 근거가 아니다
+    assert stale[0].present and stale[0].domid == 1  # xl 은 최신
+    clock[0] += 5
+    manager.fail = None
+    assert [(o.vm_id, o.intent_known) for o in observer()] == [(DEBIAN, True)]  # 다시 읽으면 재개
+
+
+def test_platform_observer_falls_back_to_list_on_a_manager_without_intents():
+    class OldManager(FakeManager):
+        def call(self, action, spec=None, **kwargs):
+            if action == "intents":
+                self.calls.append((action, spec))
+                return {"ok": False, "error": {"code": "INVALID_SPEC", "message": "unsupported management action", "retryable": False, "details": {}}}
+            return super().call(action, spec, **kwargs)
+
+    manager = OldManager([_view(DEBIAN, "debian-dev")])
+    clock = [0.0]
+    observer = PlatformObserver(manager, Xl(_runner()), intent_refresh_s=60, clock=lambda: clock[0])
+    assert [(o.vm_id, o.intent_known) for o in observer()] == [(DEBIAN, True)]
+    clock[0] += 30
+    observer()
+    clock[0] += 30
+    observer()
+    assert [c[0] for c in manager.calls] == ["intents", "list", "templates", "list", "templates"]  # 한 번 확인 뒤 list 를 60초마다
 
 
 def test_platform_observer_rejects_non_boolean_capability():
@@ -203,8 +229,8 @@ def test_confirm_reads_one_vm_with_get_and_updates_cache():
     fresh = observer.confirm(DEBIAN)
     assert manager.calls[-1] == ("get", {"vm_id": str(DEBIAN)})
     assert (fresh.desired_state, fresh.intent_revision, fresh.present, fresh.eligible) == ("stopped", 3, False, False)
-    assert {o.vm_id: o.desired_state for o in observer()}[DEBIAN] == "stopped"  # 캐시도 갱신됨, list 재호출 없음
-    assert [c[0] for c in manager.calls] == ["list", "templates", "get"]
+    assert {o.vm_id: o.desired_state for o in observer()}[DEBIAN] == "stopped"
+    assert [c[0] for c in manager.calls] == ["intents", "templates", "get", "intents"]
 
     manager.views = [_view(ZEPHYR, "zephyr-drive-a", kind="zephyr")]
     assert observer.confirm(DEBIAN) is None  # 등록이 사라짐
@@ -483,3 +509,162 @@ def test_worker_run_stops_on_event_and_keeps_monotonic_schedule():
     worker = RecoveryWorker(SETTINGS, observer, Watcher(SETTINGS, HeartbeatTable(), AppHeartbeatTable(), clock=lambda: clock[0]), link=LinkState.up, clock=lambda: clock[0])
     worker.run(stop)
     assert ticks == [0.0, 5.0, 10.0] and sleeps[:2] == [5.0, 5.0]
+
+
+def test_worker_keeps_health_targets_when_intents_cannot_be_read(tmp_path):
+    """의도 조회가 실패해도 등록 삭제로 해석해 retained 건강을 지우지 않는다. 판정은 보류하고 건강은 관측 불가로 낸다."""
+    clock = [1000.0]
+    manager = FakeManager([_view(DEBIAN, "debian-dev")])
+    observer = PlatformObserver(manager, Xl(_runner()), intent_refresh_s=60, clock=lambda: clock[0])
+    client = FakeClient()
+    table = HeartbeatTable()
+    watcher = Watcher(SETTINGS, table, AppHeartbeatTable(), clock=lambda: clock[0])
+    worker = RecoveryWorker(SETTINGS, observer, watcher, link=lambda: link_state(client),
+                            health_publisher=HealthPublisher(client), clock=lambda: clock[0])
+    table.record(DEBIAN, "boot-1", 1, clock[0])
+    assert worker.run_once() == []
+    manager.fail = "STORAGE_UNAVAILABLE"
+    for _ in range(40):  # 200초: heartbeat 도 없고 의도도 못 읽는다
+        clock[0] += 5
+        assert worker.run_once() == []
+    assert client.cleared == []
+    assert client.published[-1][2]["state"] == HealthState.OBSERVATION_UNAVAILABLE.value
+
+
+
+@pytest.mark.parametrize("data", [
+    {},  # vms 누락
+    {"vms": None},
+    {"vms": {"debian": "x"}},
+    {"vms": [_view(DEBIAN, "debian-dev"), "not-an-object"]},
+    {"vms": [_view(DEBIAN, "debian-dev"), {**_view(ZEPHYR, "zephyr-drive-a"), "vm_id": "not-a-uuid"}]},  # 일부 행만 손상
+    {"vms": [_view(DEBIAN, "debian-dev"), _view(DEBIAN, "debian-copy")]},  # 중복 vm_id
+    {"vms": [{**_view(DEBIAN, "debian-dev"), "desired_state": None}]},
+    {"vms": [{**_view(DEBIAN, "debian-dev"), "intent_applicable": "true"}]},
+    {"vms": [{**_view(DEBIAN, "debian-dev"), "intent_revision": "2"}]},
+    {"vms": [{key: value for key, value in _view(DEBIAN, "debian-dev").items() if key != "lifecycle"}]},
+    {"vms": [{key: value for key, value in _view(DEBIAN, "debian-dev").items() if key != "guest_kind"}]},
+    {"vms": [_view(DEBIAN, "debian-dev", desired="banana")]},  # 타입은 맞지만 허용값이 아님
+    {"vms": [_view(DEBIAN, "debian-dev", lifecycle="BROKEN")]},
+    {"vms": [_view(DEBIAN, "debian-dev", lifecycle="RETIRED")]},  # 기본 목록은 REGISTERED 만
+    {"vms": [_view(DEBIAN, "debian-dev", kind="windows")]},
+    {"vms": [_view(UUID(int=0), "nil")]},
+    {"vms": [_view(DEBIAN, "debian-dev", revision=0)]},
+    {"vms": [_view(DEBIAN, "debian-dev", desired="unknown", applicable=True)]},  # 적용 가능한데 상태 없음
+    {"vms": [_view(DEBIAN, "debian-dev", revision=None, applicable=True)]},  # 적용 가능한데 revision 없음
+    {"vms": [_view(DEBIAN, "")]},  # 이름 없음
+    {"vms": [{key: value for key, value in _view(DEBIAN, "debian-dev").items() if key != "name"}]},
+    {"vms": [_view(ZEPHYR, "zephyr-drive-a", kind="zephyr", template=("", "1.0.0"))]},  # Zephyr 는 템플릿 필수
+    {"vms": [{key: value for key, value in _view(ZEPHYR, "zephyr-drive-a", kind="zephyr").items() if key != "template_version"}]},
+    {"vms": [_view(DEBIAN, "debian-dev", template=(7, "1.0.0"))]},
+])
+def test_invalid_intent_response_keeps_the_previous_registrations(data):
+    """성공 envelope 라도 목록이 불완전하면 부분 적용하지 않는다. 이전 등록을 유지하고 의도는 모름으로 둔다."""
+    manager = FakeManager([_view(DEBIAN, "debian-dev"), _view(ZEPHYR, "zephyr-drive-a", kind="zephyr")])
+    clock = [0.0]
+    observer = PlatformObserver(manager, Xl(_runner()), intent_refresh_s=60, clock=lambda: clock[0])
+    assert {o.vm_id for o in observer()} == {DEBIAN, ZEPHYR}
+    manager.data = data
+    clock[0] += 5
+    stale = observer()
+    assert {o.vm_id for o in stale} == {DEBIAN, ZEPHYR} and all(not o.intent_known for o in stale)
+    manager.data = None
+    clock[0] += 5
+    assert all(o.intent_known for o in observer())
+
+
+def test_invalid_first_intent_response_is_an_observation_failure():
+    manager = FakeManager([])
+    manager.data = {"vms": [{"vm_id": "not-a-uuid", "name": "broken"}]}
+    with pytest.raises(PlatformUnavailable):
+        PlatformObserver(manager, Xl(_runner()), intent_refresh_s=60)()
+
+
+def test_worker_does_not_clear_health_on_a_partial_intent_response():
+    clock = [1000.0]
+    manager = FakeManager([_view(DEBIAN, "debian-dev"), _view(ZEPHYR, "zephyr-drive-a", kind="zephyr")])
+    observer = PlatformObserver(manager, Xl(_runner()), intent_refresh_s=60, clock=lambda: clock[0])
+    client = FakeClient()
+    watcher = Watcher(SETTINGS, HeartbeatTable(), AppHeartbeatTable(), clock=lambda: clock[0])
+    worker = RecoveryWorker(SETTINGS, observer, watcher, link=lambda: link_state(client),
+                            health_publisher=HealthPublisher(client), clock=lambda: clock[0])
+    worker.run_once()
+    manager.data = {"vms": [_view(DEBIAN, "debian-dev"), {"vm_id": "not-a-uuid"}]}  # ZEPHYR 행이 깨져 빠졌다
+    for _ in range(3):
+        clock[0] += 5
+        worker.run_once()
+    assert client.cleared == [] and watcher.health(ZEPHYR) is not None
+
+
+
+def test_intent_rows_without_an_applicable_intent_are_valid():
+    """명시 의도가 없으면 desired_state=unknown·revision null·applicable=false 다(플랫폼 계약). 손상이 아니다."""
+    manager = FakeManager([_view(DEBIAN, "debian-dev", desired="unknown", applicable=False, revision=None),
+                           _view(ZEPHYR, "zephyr-drive-a", kind="zephyr", desired="stopped", applicable=False, revision=4)])
+    observations = PlatformObserver(manager, Xl(_runner()), intent_refresh_s=60)()
+    assert all(o.intent_known for o in observations) and not any(o.eligible for o in observations)
+
+
+
+def test_linux_registration_without_a_template_is_valid():
+    """Linux 는 템플릿을 판정에 쓰지 않는다. 템플릿이 없는 등록(null) 하나로 전체 의도 조회를 실패시키지 않는다."""
+    manager = FakeManager([{**_view(DEBIAN, "debian-dev"), "template_id": None, "template_version": None}])
+    assert [o.intent_known for o in PlatformObserver(manager, Xl(_runner()), intent_refresh_s=60)()] == [True]
+
+
+@pytest.mark.parametrize("change", [
+    {"guest_kind": "windows"},
+    {"intent_revision": "3"},
+    {"desired_state": "banana"},
+    {"vm_id": str(ZEPHYR)},  # 다른 VM 의 응답
+    {"intent_applicable": True, "lifecycle": "RETIRED"},
+])
+def test_confirm_rejects_an_invalid_get_and_keeps_the_cache(change):
+    manager = FakeManager([_view(DEBIAN, "debian-dev"), _view(ZEPHYR, "zephyr-drive-a", kind="zephyr", template=("zephyr-drive-arm64", "1.0.0"))])
+    observer = PlatformObserver(manager, Xl(_runner()), intent_refresh_s=60)
+    observer()
+    before = {vm_id: dict(intent) for vm_id, intent in observer._intents.items()}  # noqa: SLF001 - 재조회 없이 캐시를 직접 본다
+    bad = {**_view(DEBIAN, "debian-dev", desired="stopped", revision=9), **change}
+    manager.call = lambda action, spec=None, **kw: {"ok": True, "data": {"vm": bad}}
+    with pytest.raises(PlatformUnavailable):
+        observer.confirm(DEBIAN)
+    assert observer._intents == before  # noqa: SLF001 - 다음 intents 재조회로 덮기 전, 잘못된 get 이 캐시를 바꾸지 않았다
+
+
+def test_confirm_accepts_a_retired_registration_as_not_eligible():
+    manager = FakeManager([_view(DEBIAN, "debian-dev")])
+    observer = PlatformObserver(manager, Xl(_runner()), intent_refresh_s=60)
+    observer()
+    manager.views[0] = _view(DEBIAN, "debian-dev", lifecycle="RETIRED", applicable=False)
+    fresh = observer.confirm(DEBIAN)
+    assert fresh.lifecycle == "RETIRED" and not fresh.eligible
+
+
+def test_invalid_confirm_holds_the_judgment():
+    """판정 직전 get 이 잘못된 응답이면 그 주기에는 판정하지 않는다(감시기는 재확인 실패를 보류로 다룬다)."""
+    clock = [1000.0]
+    manager = FakeManager([_view(DEBIAN, "debian-dev", xen_state="running", domid=1)])  # get 도 xl 과 같은 실행을 본다
+    observer = PlatformObserver(manager, Xl(_runner()), intent_refresh_s=60, clock=lambda: clock[0])
+    table = HeartbeatTable()
+    watcher = Watcher(SETTINGS, table, AppHeartbeatTable(), confirm=observer.confirm, clock=lambda: clock[0])
+    client = FakeClient()
+    worker = RecoveryWorker(SETTINGS, observer, watcher, link=lambda: link_state(client), clock=lambda: clock[0])
+    table.record(UUID(int=77), "boot-x", 1, clock[0])  # 채널 증거
+    table.record(DEBIAN, "boot-1", 1, clock[0])
+    worker.run_once()
+    real_call = manager.call
+
+    def corrupt_get(action, spec=None, **kwargs):
+        if action == "get":
+            return {"ok": True, "data": {"vm": {**_view(DEBIAN, "debian-dev"), "guest_kind": "zephyr", "template_id": ""}}}
+        return real_call(action, spec, **kwargs)
+
+    manager.call = corrupt_get
+    judged = []
+    for _ in range(20):  # 100초: heartbeat 손실 창을 넘긴다
+        clock[0] += 5
+        judged += worker.run_once()
+    assert judged == []
+    manager.call = real_call
+    clock[0] += 5
+    assert [j.reason for j in worker.run_once()] == [FailureReason.HEARTBEAT_LOST]  # 정상 get 이면 판정
