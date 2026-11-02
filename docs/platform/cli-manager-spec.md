@@ -6,7 +6,7 @@ Xenova는 Raspberry Pi 4의 Xen dom0에서 VM 등록·실행·관측·복구·�
 
 VM 자격 공급과 적용 신호는 [공통 provisioning 계약](../contracts/vm-provisioning-v1.md)을 따른다.
 `provisioning UUID`는 비밀 없는 읽기, `provision UUID`는 계획이며 `--execute`로 명시 공급한다.
-`registration-notify UUID`도 계획이며 `--execute`가 등록-only sender를 한 번 실행한다.
+`registrations [UUID]`는 읽기 전용 등록 명세 조회다. 통지는 인증된 FastAPI POST로 요청한다.
 세 명령 모두 내부 이름/UUID 대상·human/JSON의 같은 실행 경로와 strict 옵션 검사를 사용한다.
 새 HTTP endpoint로 자동 노출된 기능은 아니다. 기존 full/optional create·동등 replay 계약은 그대로다.
 
@@ -134,7 +134,7 @@ HTTP/WebSocket의 기존 DTO·상태 코드는 별도 계약이다. CLI 추가�
 | [`xenova-vm status`](#cmd-status) | list와 같은 현재 상태 조회 |
 | [`xenova-vm intents`](#cmd-intents) | 저장된 관리 의도·lifecycle metadata |
 | [`xenova-vm provisioning / provision`](#cmd-provisioning) | 비밀 없는 공급·실행 프로필 조회 / 명시 재공급 |
-| [`xenova-vm registration-notify`](#cmd-registration-notify) | 등록-only 통지 계획 / 명시 1회 송신 |
+| [`xenova-vm registrations`](#cmd-registrations) | 실행과 독립인 현재 등록 명세 단건 / 목록 |
 | [`xenova-vm create`](#cmd-create) | 독립 VM 등록 |
 | [`xenova-vm start`](#cmd-start) | 등록 VM 시작 |
 | [`xenova-vm stop`](#cmd-stop) | VM 협조형 정지 |
@@ -4363,11 +4363,18 @@ running intent이면 같은 실행의 기존 Bootstrap/receipt에 연결한다. 
 null/무효 옵션·새 key는 허용하지 않는다. 전체 계약/오류 단계는 [공급 계약](../contracts/vm-provisioning-v1.md)에 있다.
 
 <a id="cmd-registration-notify"></a>
-## 등록-only 통지
+<a id="cmd-registrations"></a>
+## 현재 등록 명세 조회
 
-`xenova-vm registration-notify TARGET [--execute] [--timeout-ms MS] [--budget-ms MS] [--json]`.
-현재 REGISTERED VM만 대상이다. 생략은 공개 body 계획, execute는 같은 sender의 명시 1회 송신이다.
-자격/VM/디스크·원 생성/실행·의도를 만들지 않는다. JSON은 포맷만 바꾼다.
-확인 응답은 exit 0, 미설정·거절·통신 미확인·포화는 결과의 상세 state와 exit 4,
-무효 입력/대상은 기존 validation exit 2다. force·lifecycle·원 key 등 무관한 옵션은 거절한다.
-자동 최대 1회와 수동 송신, Spring 계약안·배포 설정·응답 유실 의미는 [등록 통지 계약](../contracts/vm-provisioning-v1.md)을 따른다.
+`xenova-vm registrations [UUID] [--timeout-ms MS] [--budget-ms MS] [--json]`.
+단건은 `data.registration`, 목록은 `data.registrations`다. JSON은 포맷만 바꾼다.
+execute·원 key·lifecycle 필터는 받지 않는다. UUID 없이 현재 REGISTERED 전체를 읽는다.
+factory/no create journal, stopped/no domid, 등록 뒤 start 실패도 포함하며 RETIRED/PURGED/미게시 자산은 제외한다.
+name(display_name 우선)·현재 저장 자원·원 template/version·저장 IPv4의 여덟 필드다.
+같은 이름의 다른 UUID를 유지하고 Zephyr 예약 IP를 null로 바꾸지 않는다.
+Xen/Store/Agent/intent/네트워크/비밀·cache 게시·payload hash 없이 유한 metadata 재대조를 한다.
+손상·부분 열람은 오류다. 세부 원천·HTTP 매핑은 [공급 계약](../contracts/vm-provisioning-v1.md)을 따른다.
+
+구형 `registration-notify`는 옵션·계획·JSON·별칭까지 제거했다. 옛 anchor는 이 전환 안내로 연결한다.
+수동 재신청은 `POST /api/v1/vm-registrations/{vm_id}/notify`에 Bearer 인증을 넣은 curl이다.
+통지 성공/거절/미확정은 HTTP 결과이며 조회 CLI의 새 실행 모드가 아니다.

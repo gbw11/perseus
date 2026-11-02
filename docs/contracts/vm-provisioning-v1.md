@@ -96,45 +96,97 @@ Starter의 `app_heartbeat=false`, 미선언 null, 실제 drive의 true는 서로
 true로부터 신호 수신·정상 계산·READY·출력 허가를 추론하지 않는다. warm Standby의 progress idle은 정상이다.
 현재 lattice AUTO는 stateful, MANUAL은 stateless이며 미선언을 stateless로 승인하지 않는다.
 
-## Spring 등록-only 계약안과 실제 sender
+## 등록 metadata와 FastAPI 등록 통지
 
-제공자 송신부: `xenova_registration`, 수동 CLI: `xenova-vm registration-notify UUID [--execute] [--json]`.
-계획은 무송신이다. 실제 송신 결과 미확인은 JSON의 `confirmed=false`와 CLI exit 4로 반환한다.
-이 CLI는 현재 REGISTERED 대상만 읽으며 VM/계정/디스크 생성, create/start 역호출을 하지 않는다.
+### 읽기 전용 하위 API
 
-**합의 전 수신 계약안:** `POST /api/v1/vms/registrations`, HTTPS, 호스트에 한정된 Bearer token.
-현재 `VmController.create`의 `POST /api/v1/vms`는 새 UUID·Pi create/start를 수행하므로 사용하지 않는다.
-송신 JSON은 `schema_version=1.0`, `vm_id`, `name`, `guest_kind`, `template_id`,
-`template_version`(과거 등록에 없으면 null), `vcpus`, `memory_mib`, 네트워크 VM의 `assigned_ipv4`다.
-값은 등록 구성이며 실제 running/Agent IP/현재 건강을 넣지 않는다. 인증이 source host와 등록 권한을 결합해야 한다.
-UUID만으로 권한이 생기지 않는다.
+`from xenova_management import Manager` 뒤 `Manager().call('registrations', spec)`를 호출한다.
+`spec={}`는 `data.registrations` 배열, `spec={'vm_id':UUID}`는 `data.registration` 단건이다.
+두 호출 모두 선택 `timeout_ms=1..15000`과 별도 `budget_ms`를 받으며 execute·원 key는 받지 않는다.
+CLI는 `xenova-vm registrations [UUID] --json`이다. `--execute`는 거절한다.
 
-수신자는 전달 UUID를 그대로 저장/확인한다. 같은 UUID의 재전송은 중복 행·create/start를 만들지 않는다.
-기존 행의 현재 자원/이름/의도/보관·삭제 상태를 늦은 등록 body로 덮거나 부활시키지 않는다.
-기존 UUID의 다른 host/guest identity는 409, 무권한은 401/403, 무효 DTO는 400으로 거절하는 안이다.
-DB transaction을 확정하거나 기존 허용 등록을 확인한 경우만 다음 body와 200/201을 반환한다.
+현재 REGISTERED인 일반/factory VM을 실행 여부·domid·autostart·의도와 무관하게 반환한다.
+RETIRED/PURGED와 숨은 미게시 자산은 제외하고 읽기 실패·손상·중복 UUID를 빈 목록으로 바꾸지 않는다.
+기존 metadata reader의 대상 집합·tombstone·원 create 완료·현재 구성 재대조를 최대 두 회차로 수행한다.
+Xen/Store/Agent/MQTT/네트워크·token·intent·catalog·관측 cache·대용량 payload는 읽거나 쓰지 않는다.
 
-```json
-{"vm_id":"850e8400-e29b-41d4-a716-446655440001","registration":"confirmed"}
+반환은 항상 `vm_id, name, guest_kind, template_id, template_version, vcpus, memory_mib, assigned_ipv4`의 여덟 key다.
+name은 저장 display_name 우선, 없으면 내부 name이다. 이름 중복을 보정/숨김/dedup하지 않는다.
+자원은 현재 저장 구성, template은 생성 때 보존한 template_id(구형은 당시 template), 버전은 없으면 null이다.
+IPv4는 OS와 무관하게 저장 예약값 또는 null이며 실제 접속·Agent 주소가 아니다.
+`intents`, runtime `list/get/status`의 의미는 바꾸지 않는다.
+
+### FastAPI 조회·수동 재신청
+
+- `GET /api/v1/vm-registrations`: 200과 위 여덟 필드의 **배열 자체**. nullable key도 유지한다.
+- `POST /api/v1/vm-registrations/{vm_id}/notify`: UUID만 받고 현재 등록을 조회해 Spring에 한 번 송신한다.
+- 두 API 모두 기존 `XENOVA_SERVICE_TOKEN`의 Bearer 인증이 필요하다. 본문·query URL/token/등록자료는 받지 않는다.
+- FastAPI `api/registrations.py`→`PlatformDriver.registrations`→요청별 `Manager.fork()`→공개 action 경로다.
+  CLI subprocess·raw journal·선행 live list/get·상위 공용 장기 mutex를 사용하지 않는다.
+
+```sh
+# 토큰은 승인된 비밀 공급 경로로 받은 환경 값이다. 예제에 실제 값을 기록하지 않는다.
+curl --fail-with-body -H "Authorization: Bearer $DOM0_SERVICE_TOKEN" \
+  http://127.0.0.1:8081/api/v1/vm-registrations
+curl --fail-with-body -X POST -H "Authorization: Bearer $DOM0_SERVICE_TOKEN" \
+  -H 'X-Request-Budget-Ms: 10000' \
+  http://127.0.0.1:8081/api/v1/vm-registrations/850e8400-e29b-41d4-a716-446655440001/notify
 ```
 
-다른 2xx/빈 응답/접수 body는 `response-unconfirmed`다. 3xx는 따라가지 않는다.
-연결 불가, TLS 검증 실패, 서버 거절, 응답 형식 오류, 전송 후 응답 유실/timeout을 구별한다.
-응답 유실은 DB 미등록 증거가 아니며 자동 retry/GET은 없다. 운영 endpoint/token 공급과 실제 Spring 수신 구현은 미완료다.
+POST 응답은 `vm_id, request_id, state, confirmed`와 가능한 `http_status, upstream_code, cause_type`다.
+FastAPI 200은 Spring의 200/201 + 같은 UUID의 `registration=confirmed`가 모두 맞는 경우다.
+Spring 400/401/403/409/503은 FastAPI 502의 `state=rejected`, 원 `http_status`와 안전한 code로 구분한다.
+FastAPI 자체 인증 실패는 401이고 Spring에는 송신하지 않는다. redirect/무효 본문/다른 UUID/접수는 502 미확정이다.
+응답 유실·원 호출 기한 초과는 504 미확인, 연결/설정/포화는 503이며 자동 retry·후속 GET·동기화는 없다.
+UUID 미등록·퇴역·삭제는 하위 오류의 기존 HTTP 매핑이며 복원/생성/시작하지 않는다.
 
-설정은 root 0600 `/etc/xenova/registration-notification.json`과 그 `token_file`의
-root 0600 `{"token":"…"}`다. 예시는 `/usr/share/xenova/registration-notification.json.example`에만 설치한다.
-공급 전에는 not-configured이며 무송신이다. loopback HTTP는 명시 시험 설정에서만 허용한다.
+### Spring wire와 확인 범위
 
-자동 기회는 create 완료 journal의 `registration_notice=consumed`, factory complete progress의
-`registration_notices`에 먼저 기록한다. 기록 후 중단하면 실제 송신 0회일 수 있다.
-완료 replay/재부팅/복구/restore/profile 변경/기존 VM 순회로 보충하지 않는다.
-등록 확정 후 독립 프로세스에 공개 body만 넘기며 관리/대상 FD를 상속하지 않는다.
-runtime flock slot 4개가 전체 동시 수를 제한한다. 설정의 기본 2초·상한 5초는 전송 자원 예산이며
-VM 실행/운영 성능 보장이 아니다. supervisor가 DNS/TLS/read를 포함한 HTTP 자식을 기한에 종료·회수한다.
-포화는 capacity-skipped로 소비된 자동 기회를 종료한다. 자동 큐/daemon/restart/timer는 없다.
-부가 결과는 root 0700 `/srv/xenova/registration-notices/UUID.json`에 기록한다.
-결과 기록/기동 실패도 이미 확정된 로컬 등록을 뒤집지 않는다. 수동 호출은 같은 sender를 한 번 실행한다.
+사용자의 Spring 구현 완료 전달과 `origin/backend` `800d584`의 실제 DTO/controller/auth/service 및
+목록 동기화 코드를 대조했다. Spring 코드는 수정하지 않는다. 제품 실행·DB·운영 수락은 별도다.
+Spring 전용 `POST /api/v1/vms/registrations`에 아래 **전체 envelope**를 보낸다. 예시 UUID/값은 fixture다.
+
+```json
+{"schema_version":"1.0","ok":true,"request_id":"0c6e71a6-9f82-41f4-b282-749bbe521aa2","operation_id":null,"replayed":false,"data":{"plan":true,"execute_required":true,"registration":{"schema_version":"1.0","vm_id":"850e8400-e29b-41d4-a716-446655440001","name":"debian-fixture","guest_kind":"linux","template_id":"debian-arm64-fixture","template_version":"1.0.2","vcpus":2,"memory_mib":512,"assigned_ipv4":"192.168.77.30"}},"error":null}
+```
+
+plan/execute_required는 합의된 wire 요소이며 읽기 API의 실행 요구나 DB 확정이 아니다.
+201(신규)/200(동일 UUID)의 `{"vm_id":"…","registration":"confirmed"}`를 검증한다.
+단건은 기존 행을 덮지 않는다. 관리자 `POST /api/v1/vms/synchronizations`가 이 GET을 읽어
+지정 필드를 갱신하는 별도 기능이다. create/start 역호출·실패 fallback으로 사용하지 않는다.
+Spring의 이름 충돌·퇴역 UUID 거절은 원 오류로 돌려준다. 첨부 GET 문서의 이름 유일성/Zephyr null 문구보다
+사용자의 최신 이름·IP 무보정 결정이 우선하며 Spring 제약을 피하려고 데이터를 바꾸지 않는다.
+
+### 설정·한도·자동 기회
+
+Spring URL `XENOVA_REGISTRATION_URL`과 `VM_REGISTRATION_SERVICE_TOKEN`은 FastAPI만 읽는다.
+root 0600 `/etc/xenova/spring-registration.env`는 선택 EnvironmentFile이고 활성 파일/비밀은 패키지가 만들지 않는다.
+비활성 예시는 `/usr/share/xenova/spring-registration.env.example`다. URL은 HTTPS이며 numeric loopback HTTP만 격리용으로 허용한다.
+통지 미설정/손상은 이 기능만 제한한다. GET과 일반 VM 관리는 Spring 설정과 독립이다.
+Spring token을 로컬 API token과 복사·공유하지 않는다.
+
+기본 HTTP 송신 상한 5초(설정 최대 15초)는 전송 자원 예산이다. 요청 헤더가 있으면
+인증/조회/송신의 남은 예산 안에서 더 짧게 사용한다. 헤더 없는 notify 전체는 15초이며 단계마다 기한을 재발급하지 않는다.
+worker 공통 flock slot 4개, 전용 HTTP 자식과 앱 shutdown의 kill/wait를 사용한다.
+DNS/응답이 느려도 event loop·Manager lease에서 기다리지 않는다. 포화는 미송신 거절이며 큐·daemon·자동 retry는 없다.
+예상 UUID 형식 거절은 400 사유를 유지하고 `app.state.registration_validation`의 포화 계수/최초 512자 진단만 남긴다.
+async 경계에서 느린 경고 sink·원 본문 수집을 기다리지 않는다. 내부 결함·다른 오류 종류/최초 원인은 축소하지 않는다.
+커널/저장장치 전체 장애에서의 hard deadline 보장은 아니다.
+
+자동 기회는 기존 create 완료 journal `registration_notice=consumed`, factory complete의 `registration_notices`가 소유한다.
+실제 송신 전 소비를 내구 확정하며, 이미 소비된 기회·과거 결과는 그대로 읽는다. 중단 직후 송신 0회도 가능하다.
+공통/대상 FD와 lease 반환 뒤 `xenova_registration_hook.automatic`이 로컬 FastAPI에만 1회 요청한다.
+factory는 first-boot main의 잠금 반환 후 별도 유한 helper를 띄운다. 최대 15초 안에서 `/openapi.json` 준비만 확인한 뒤 POST 1회다.
+등록/원 응답/autostart는 이를 기다리지 않는다. POST 뒤 조회·retry·다음 부팅 보충은 없다.
+helper는 `/etc/xenova/dom0-manager.env`의 bind 주소/port와 기존 API token 공급만 사용한다.
+token의 unit 우선순위(manager.env가 token.env를 override)를 따르며 Spring 전용 파일은 읽지 않는다.
+API 프로세스 안의 create에서도 helper에 Spring token/URL이나 다른 서비스 자격을 환경으로 넘기지 않는다.
+helper도 4 slot으로 제한하며 결과는 기존 root-private `registration-notices/UUID.json`에 부가 기록한다.
+launch/기록 실패·start 실패·API 부재가 로컬 등록을 rollback하지 않는다.
+
+구형 `registration-notify` 명령은 계획/실행/JSON/별칭까지 제거했다. 하위 직접 Spring sender와
+`registration-notification.json`·token JSON·설치 예시도 제거했다. 수동 요청은 위 인증된 curl이다.
+과거 결과/검증 이력은 보존한다. 설치 시 옛 프로세스 drain·기존 파일의 운영 정리는 [배포 절차](../platform/deployment-readiness.md#registration-api)를 따른다.
 
 ## 재현과 제공 수준
 

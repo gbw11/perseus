@@ -219,7 +219,11 @@ factory seed·초기화/grow 정책은 이 통합으로 바꾸지 않는다.
 
 일반 생성과 factory의 자격/등록-only 통지는 [공급 계약](../contracts/vm-provisioning-v1.md)을 따른다.
 factory의 UUID 계획 뒤 대상 lease를 유지하고 해시/guest I/O 동안 공통 관리 잠금을 반환한다.
-local 등록 완료 뒤 선택 통지 프로세스를 시작하며 HTTP 응답을 부팅/다른 VM 제어의 선행조건으로 두지 않는다.
+local 등록 완료 뒤 선택 로컬 FastAPI 후속을 시작하며 HTTP 응답을 부팅/다른 VM 제어의 선행조건으로 두지 않는다.
+현재 first-boot는 complete 기회 소비 후 common/대상 FD를 반환하고 helper를 띄운다. helper는 최대 15초
+API `/openapi.json` 준비를 확인한 뒤 UUID notify POST를 1회만 시도한다. API/Spring 부재로 first-boot 종료나
+autostart가 기다리거나 다음 boot의 재송신 큐가 생기지 않는다. Spring 송신·토큰은 FastAPI가 소유한다.
+[설정·교체·기동 경계](deployment-readiness.md#registration-api)를 따른다.
 완료 boot/replay는 자동 통지 기회를 보충하지 않는다. broker는 첫 등록 뒤 기존 bridge/mount 조건으로 기동한다.
 
 최초 설치는 seed·카탈로그·identity plan으로 UUID/MAC와 자산을 확정한다. 중단 후에는

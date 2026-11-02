@@ -15,7 +15,9 @@
 Spring 기원 생성에서는 Spring이 발급한 UUID `vm_id`를 registry와 Xen에 그대로 사용한다.
 로컬 CLI 생성과 factory 초기 설치는 기존 플랫폼 발급/UUID 계획이 영구 VM 신원을 확정한다.
 이미 등록된 VM의 Spring 등록 통지는 이 UUID를 바꾸거나 create/start를 역호출하지 않는다.
-[등록-only 계약안·실제 sender](vm-provisioning-v1.md)는 제공자 로컬 검증 상태이며 실제 Spring 수신 구현은 별도다.
+[등록 조회·통지 계약](vm-provisioning-v1.md)의 하위 `registrations`와 FastAPI GET `/api/v1/vm-registrations`,
+POST `/api/v1/vm-registrations/{vm_id}/notify`를 제공한다. GET은 실행과 무관한 현재 등록 목록의 여덟 필드 배열이다.
+기존 `/vms`는 domain 조회로 유지한다. Spring `800d584` 구현 소스를 확인했으며 DB/운영 공동 수락은 별도다.
 
 플랫폼 registry는 등록·보관·복구 생명주기의 원본입니다. dom0-manager는 플랫폼 관리 계층을 통해 registry와 Xen 실행 상태를 함께 조회합니다. `domid`는 재실행마다 바뀔 수 있으므로 영구 식별자로 사용하지 않습니다.
 
