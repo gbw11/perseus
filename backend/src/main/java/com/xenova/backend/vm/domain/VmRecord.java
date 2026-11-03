@@ -8,6 +8,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.Objects;
 
 // The public VM specification Spring owns. Retired rows remain here so a future restore can reuse the same
 // permanent vm_id; the platform registry remains the source of truth for disk/runtime lifecycle.
@@ -25,7 +26,7 @@ public class VmRecord {
     @Column(name = "template_id", nullable = false, length = 64)
     private String templateId;
 
-    @Column(name = "template_version", nullable = false, length = 64)
+    @Column(name = "template_version", length = 64)
     private String templateVersion;
 
     @Column(nullable = false)
@@ -52,6 +53,9 @@ public class VmRecord {
     @Column(length = 16)
     private VmRole role;
 
+    @Column(name = "assigned_ipv4", length = 45)
+    private String assignedIpv4;
+
     protected VmRecord() {
     }
 
@@ -70,6 +74,58 @@ public class VmRecord {
         this.role = command.role();
         this.createdAt = createdAt;
         this.lifecycle = VmLifecycle.REGISTERED;
+    }
+
+    public static VmRecord registeredByPlatform(
+            String vmId,
+            String name,
+            String templateId,
+            String templateVersion,
+            int vcpus,
+            int memoryMib,
+            GuestKind guestKind,
+            Instant createdAt,
+            String assignedIpv4) {
+        VmRecord record = new VmRecord();
+        record.vmId = vmId;
+        record.name = name;
+        record.templateId = templateId;
+        record.templateVersion = templateVersion;
+        record.vcpus = vcpus;
+        record.memoryMib = memoryMib;
+        record.guestKind = guestKind;
+        record.createdAt = createdAt;
+        record.lifecycle = VmLifecycle.REGISTERED;
+        record.assignedIpv4 = assignedIpv4;
+        return record;
+    }
+
+    // Reconciles only fields owned by the platform registry. Console role, lifecycle and creation time remain local.
+    public boolean synchronizePlatformRegistration(
+            String name,
+            String templateId,
+            String templateVersion,
+            int vcpus,
+            int memoryMib,
+            GuestKind guestKind,
+            String assignedIpv4) {
+        boolean changed = !this.name.equals(name)
+                || !this.templateId.equals(templateId)
+                || !Objects.equals(this.templateVersion, templateVersion)
+                || this.vcpus != vcpus
+                || this.memoryMib != memoryMib
+                || getGuestKind() != guestKind
+                || !Objects.equals(this.assignedIpv4, assignedIpv4);
+        if (changed) {
+            this.name = name;
+            this.templateId = templateId;
+            this.templateVersion = templateVersion;
+            this.vcpus = vcpus;
+            this.memoryMib = memoryMib;
+            this.guestKind = guestKind;
+            this.assignedIpv4 = assignedIpv4;
+        }
+        return changed;
     }
 
     public GuestKind getGuestKind() {
@@ -135,4 +191,9 @@ public class VmRecord {
     public Instant getCreatedAt() {
         return createdAt;
     }
+
+    public String getAssignedIpv4() {
+        return assignedIpv4;
+    }
+
 }

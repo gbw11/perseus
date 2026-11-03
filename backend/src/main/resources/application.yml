@@ -118,3 +118,6 @@ xenova:
     # Keep long-running VM commands connected for up to 15 minutes.
     command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:15m}
     retry-backoff: ${DOM0_MANAGER_RETRY_BACKOFF:500ms}
+  vm-registration:
+    # Platform registration sender authentication; separate from user JWT and dom0-manager credentials.
+    service-token: ${VM_REGISTRATION_SERVICE_TOKEN:}

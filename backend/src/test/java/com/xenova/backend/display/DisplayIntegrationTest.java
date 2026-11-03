@@ -21,6 +21,7 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -99,6 +100,18 @@ class DisplayIntegrationTest {
             assertThat(client.closed.get(5, TimeUnit.SECONDS).getCode()).isEqualTo(4401);
             assertThat(calls.get()).isZero();
         }
+    }
+
+    @Test void kioskCookieIsNotAcceptedByBackendReadOrAdminApis() {
+        HttpHeaders kiosk = new HttpHeaders();
+        kiosk.add(HttpHeaders.COOKIE, "xenova_display=local-kiosk-session");
+        assertThat(rest.exchange("/api/v1/display/state", HttpMethod.GET,
+                new HttpEntity<>(kiosk), String.class).getStatusCode().value()).isEqualTo(401);
+        assertThat(rest.exchange("/api/v1/drive/state", HttpMethod.GET,
+                new HttpEntity<>(kiosk), String.class).getStatusCode().value()).isEqualTo(401);
+        assertThat(rest.exchange("/api/v1/vms", HttpMethod.POST,
+                new HttpEntity<>("{}", kiosk), String.class).getStatusCode().value()).isEqualTo(401);
+        assertThat(calls.get()).isZero();
     }
 
     @Test void upstreamFailureIsExplicitAndNextSnapshotRecovers() throws Exception {

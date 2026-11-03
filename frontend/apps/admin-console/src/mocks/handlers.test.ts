@@ -5,6 +5,7 @@ import {
   VM_CPU_PERCENT_METRIC,
   type MetricHistoryResponse,
   type TokenResponse,
+  type VmResources,
   type Vm,
   type VmListResponse,
 } from '../api/types';
@@ -120,5 +121,62 @@ describe('MSW mock API', () => {
     expect(
       metrics.items.flatMap((sample) => sample.values).some((value) => value.name === 'cpu_percent'),
     ).toBe(false);
+  });
+
+  it('vCPU 핀닝을 적용한 뒤 재조회 값이 일치한다', async () => {
+    await login();
+    const id = VM_IDS.interaction;
+    const before = await request<VmResources>(`/api/v1/vms/${id}/resources`);
+    expect(before.vcpu_pinning).toEqual([{ vcpu: 0, pcpus: [0, 3] }]);
+
+    await request<VmResources>(`/api/v1/vms/${id}/resources/vcpu-pinning`, {
+      method: 'PUT',
+      body: { mappings: [{ vcpu: 0, pcpus: [3] }] },
+    });
+
+    const after = await request<VmResources>(`/api/v1/vms/${id}/resources`);
+    expect(after.vcpu_pinning).toEqual([{ vcpu: 0, pcpus: [3] }]);
+  });
+
+  it('vCPU에 pCPU를 하나도 선택하지 않으면 변경을 거절한다', async () => {
+    await login();
+    await expect(
+      request(`/api/v1/vms/${VM_IDS.interaction}/resources/vcpu-pinning`, {
+        method: 'PUT',
+        body: { mappings: [{ vcpu: 0, pcpus: [] }] },
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'INVALID_ARGUMENT' });
+  });
+
+  it('정지된 Linux VM의 vCPU와 메모리를 변경한다', async () => {
+    await login();
+    const id = VM_IDS.interaction;
+    await expect(
+      request(`/api/v1/vms/${id}/resources/vcpus`, { method: 'PUT', body: { vcpus: 2 } }),
+    ).rejects.toMatchObject({ status: 409, code: 'INVALID_VM_STATE' });
+
+    await request(`/api/v1/vms/${id}/stop`, { method: 'POST' });
+    await request(`/api/v1/vms/${id}/resources/vcpus`, { method: 'PUT', body: { vcpus: 2 } });
+    await request(`/api/v1/vms/${id}/resources/memory`, {
+      method: 'PUT',
+      body: { memory_mib: 768 },
+    });
+
+    const resources = await request<VmResources>(`/api/v1/vms/${id}/resources`);
+    const vm = await request<Vm>(`/api/v1/vms/${id}`);
+    expect(resources).toMatchObject({ vcpus: 2, memory_mib: 768 });
+    expect(resources.vcpu_pinning).toHaveLength(2);
+    expect(vm).toMatchObject({ vcpus: 2, memory_mib: 768 });
+  });
+
+  it('Zephyr 고정 프로필은 vCPU와 메모리 변경을 거절한다', async () => {
+    await login();
+    await request(`/api/v1/vms/${VM_IDS.autonomous}/stop`, { method: 'POST' });
+    await expect(
+      request(`/api/v1/vms/${VM_IDS.autonomous}/resources/memory`, {
+        method: 'PUT',
+        body: { memory_mib: 64 },
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'RESOURCE_UNSUPPORTED' });
   });
 });

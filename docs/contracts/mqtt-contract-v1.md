@@ -88,7 +88,13 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
   | `error` | `read_failed`의 원인 종류. 예외·errno 이름만(예: `PermissionError(EACCES)`), 그 밖에는 `null` |
 
   `processes[]`는 CPU 상위 목록이라 이 상태가 `ok`여도 특정 앱의 생존 근거가 아니다(6.1)
-- Linux 에이전트(0.3.0부터)는 v1 토픽과 별도로 자기 상태(inventory·metrics 루프가 돌고 있는지, 수집·발행 실패 누계)를 `xenova/v2/vms/{vm_id}/telemetry/{inventory|heartbeat|metrics}`에 Zephyr 게스트와 같은 [Telemetry 계약 2.1](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md) 형식으로 보낸다(`firmware.measurement_profile = linux_agent`, metrics family `publisher`). v1 heartbeat 는 에이전트 프로세스의 생존이고, v2 heartbeat 의 `publisher_state` 는 metrics 루프의 진행 여부다. 복구 Worker 의 판정 입력이 아니며, 브로커 ACL 의 v2 쓰기 허용과 백엔드 구독·저장은 별도 작업이다
+- Linux 에이전트(0.3.0부터)는 v1 토픽과 별도로 자기 상태(inventory·metrics 루프가 돌고 있는지, 수집·발행 실패 누계)를 `xenova/v2/vms/{vm_id}/telemetry/{inventory|heartbeat|metrics}`에 Zephyr 게스트와 같은 [Telemetry 계약 2.1](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md) 형식으로 보낸다(`firmware.measurement_profile = linux_agent`, metrics family `publisher`). v1 heartbeat 는 에이전트 프로세스의 생존이고, v2 heartbeat 의 `publisher_state` 는 metrics 루프의 진행 여부다. 복구 Worker 의 판정 입력이 아니다. 백엔드는 아래 v2 metrics 수신 규칙대로 이 `publisher` 표본도 함께 저장한다
+- 백엔드는 v2 중 `xenova/v2/vms/+/telemetry/metrics`(QoS 0)만 구독해 Zephyr VM의 CPU·메모리를 MQTT-03 과 같은 메트릭 표본으로 저장한다 (2026-11-02). inventory·heartbeat·events·snapshot 은 구독하지 않는다
+  - 받는 조건: `schema_version = "2.1"`, `type = "telemetry.metrics"`, 토픽 `{vm_id}` 와 `vm_id` 일치, `message_id`·`payload.samples[]` 존재. 하나라도 어긋나면 버린다
+  - 저장: `source = zephyr_telemetry`, 표본 ID 는 `message_id` 로 만든 UUID(같은 메시지는 한 번만 저장), 관측 시각은 `clock.sent_at`, 없으면 수신 시각. `window_ms` 는 `window.start/end_uptime_ms` 차이
+  - 값: `status = ok` 이면 숫자 또는 u64 10진 문자열을 숫자로 바꾸고, 그 외에는 `value = null`, `unavailable_reason` = `reason`(없으면 `status`). `labels` 는 문자열 맵으로 저장한다
+  - 화면은 Linux 의 `cpu_percent_allocated`·`memory_used_bytes` 대신 Zephyr 의 `cpu.system.percent`, `memory.kernel_heap.used_bytes / (used_bytes + free_bytes)` 를 쓴다
+  - 브로커의 `backend` 계정에 이 토픽 읽기 권한이 있어야 한다(9장)
 - heartbeat 주기는 5초. 에이전트 상태는 **백엔드가 heartbeat 나이로 판정**한다 (`ONLINE` → 15초 `STALE` → 30초 `OFFLINE`). 에이전트가 스스로 상태를 선언하지 않는다.
 - heartbeat는 **VM 재시작 판정에만** 쓴다. 주행 제어권 전환 판정에는 쓰지 않는다 (5장).
 
@@ -506,14 +512,15 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | 젯슨 | `xenova/v1/apps/perception/events` |
 | 게이트웨이 | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/apps/vehicle/events` |
 | 공통 Zephyr 직접 MQTT | username=vm_id. `xenova/v1/vms/%u/apps/autonomous/events`와 `.../manual/events`만 쓰기. 토픽과 봉투 VM/app를 대조하고 현재 실행은 root 바인딩으로 확인 |
-| 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/vms/{vm_id}/command`, `xenova/v1/console/resume` |
+| 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/vms/{vm_id}/command`, `xenova/v1/console/resume`, `xenova/v1/sim/command` (12장) |
+| 시뮬레이터 (`simulator`, 시뮬레이터 구성만) | `xenova/v1/sim/pose`·`sim/world`·`sim/result`. 구독은 `xenova/v1/sim/command` 만. `vehicle.status` 는 게이트웨이 대역으로 `gateway` 계정을 따로 쓴다 (12장) |
 | 각 VM 측정 클라이언트·응답기 | `xenova/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
 | dom0 Recovery Worker (`dom0-server`) | `xenova/v1/recovery/events`·`xenova/v1/recovery/health/{vm_id}` (11장, ACL 은 `xenova/v1/recovery/#`). 구독(read)은 `xenova/v1/vms/+/heartbeat`, legacy `xenova/v1/apps/+/events`, verified `xenova/v1/vms/+/apps/+/events`(Zephyr `app.heartbeat`, 6.1). 개발 단계의 전체 읽기 허용에 포함되며 계정별 구독 제한(다음 개정)에서도 유지한다. 계정 `dom0-server`와 이 발행·구독 규칙은 `platform/deploy/mosquitto/etc/policy.json`에서 함께 관리하며 개발용 accounts·acl을 생성한다. Worker 는 필터별 구독 승인(SUBACK)에 더해 승인 뒤 실제 수신을 경로의 증거로 삼는다. Mosquitto 는 읽기 ACL 에 막힌 구독도 SUBACK 성공으로 답하고 전달만 거르므로(실보드 확인), 승인만으로는 경로를 믿지 않고 그 경로로 메시지를 받기 전에는 손실을 판정하지 않는다 |
 
 브로커 계정·ACL 파일은 [브로커 구성](../../platform/deploy/mosquitto/README.md)(`platform/deploy/mosquitto/etc/acl`)에서 관리한다.
 
 - 계정 이름 = 토픽 안의 id: 에이전트는 `vm_id`, legacy 앱은 `app_id`, 젯슨은 `perception`, 그 외 `gateway`·`backend`. 공통 정책에서 계정별 ACL을 생성해 자기 토픽만 허용한다. 전역 pattern으로 v2·읽기 전용 계정에 v1 쓰기를 부여하지 않는다. ESP32는 MQTT에 붙지 않으므로 계정이 없다 (v1.1).
-- 구독(read)은 개발 단계에서 v1 계정에 `xenova/v1/#`를 연다. `observer`는 이 읽기만 허용하며 probe도 발행하지 않는다. 별도 v2 계정에는 v1 읽기·쓰기를 부여하지 않는다. 계정별 구독 제한은 다음 개정(v1.2)에서 정한다.
+- 구독(read)은 개발 단계에서 v1 계정에 `xenova/v1/#`를 연다. 단 젯슨 `perception` 은 `xenova/v1/sim/#` 를 뺀 v1 영역(`apps`·`vms`·`vehicle`·`display`·`console`·`recovery`·`probes`)만 읽는다 — 시뮬레이터 구성에서 트랙·차 위치를 보지 않게 (12장). `observer`는 이 읽기만 허용하며 probe도 발행하지 않는다. 별도 v2 계정에는 v1 읽기·쓰기를 부여하지 않는다. `backend` 는 v1 읽기에 더해 v2 중 `xenova/v2/vms/+/telemetry/metrics` 만 읽는다(3장). 계정별 구독 제한은 다음 개정(v1.2)에서 정한다.
 - `probes/#` 의 "자기 vm_id 만" 조건은 payload 기준이라 브로커가 거르지 못한다. 받는 쪽이 검사한다.
 
 ## 10. 미확정
@@ -574,6 +581,115 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 - VM 이 등록에서 사라지면(삭제·보관) Worker 가 빈 payload(QoS 1, retain)로 retained 를 지우고 PUBACK 까지 확인한다. 지우지 못했으면 플랫폼 관측과 무관하게 다음 주기에 다시 시도한다.
 - Worker 가 정상 종료할 때는 남은 VM 전부를 `OBSERVATION_UNAVAILABLE` 로 다시 내고 PUBACK 까지 확인한다(`manager_seq` 증가). 비정상 종료면 받는 쪽의 `lease_s` 만료가 같은 결론을 낸다.
 
+## 12. 시뮬레이터 전용 (실차에는 없음)
+
+차를 시뮬레이터로 둔 구성(중간점검 기본)에서만 쓰는 메시지·API 다. 실차 구성에는 이 토픽이 없고, 받는 쪽은 없어도 동작해야 한다.
+시뮬레이터는 ESP32 자리(게이트웨이 시리얼 뒤)에 있다. 아래는 **실차에 없는 값**(위치·트랙)과 **시연 조작**만이며, 관람 화면(모니터 1 세 번째 칸·관리 콘솔)과 콘솔 조작용이다.
+
+**젯슨(인지)은 이 토픽을 받지 않는다.** 젯슨은 시뮬레이터의 전방 카메라 화면(HTTP MJPEG `GET /camera/stream.mjpg`)만 보고 `perception.result` 를 낸다. 트랙 모양·차 위치를 알고 주행하면 실차와 다르기 때문이다. 브로커 ACL 에서 `perception` 계정은 `xenova/v1/sim/#` 를 읽을 수 없다 (9장).
+
+### 12.1 토픽
+
+| ID | 토픽 | `type` | 발행 → 구독 | 주기 | QoS | retain |
+| --- | --- | --- | --- | --- | --- | --- |
+| MQTT-15 | `xenova/v1/sim/pose` | `sim.pose` | 시뮬레이터 → 백엔드 | 20 Hz | 0 | X |
+| MQTT-16 | `xenova/v1/sim/world` | `sim.world` | 시뮬레이터 → 백엔드 | 바뀔 때 + 시작 | 1 | O |
+| MQTT-17 | `xenova/v1/sim/command` | `sim.command` | 백엔드(운영자 콘솔) → 시뮬레이터 | 조작할 때 | 1 | X |
+| MQTT-18 | `xenova/v1/sim/result` | `sim.command.result` | 시뮬레이터 → 백엔드 | 명령마다 1번 | 1 | X |
+
+- 발행자 `source_id`: 시뮬레이터 `simulator`, 백엔드 `dom0-server` (계정 `backend`, 수동 입력·재개 요청과 같음). 봉투·seq 규칙은 2장과 같다.
+- 좌표는 **트랙 고정 좌표**다 (5.4 `perception.result` 의 차량 기준 좌표와 다르다). x·y(m), `yaw` = +x 에서 반시계 rad.
+- 값은 모두 **모의 단위**(m, m/s)다. 화면은 트랙의 `real_m` ÷ 중심선 한 바퀴 길이(약 51)를 곱해 실제 서킷 단위(km, km/h)로 보인다.
+
+**`sim.pose`**
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `x`, `y` | float | 차 뒷바퀴 축 가운데 위치 (m) |
+| `yaw` | float | 진행 방향 (rad, −π ~ π) |
+| `v_mps`, `steer_rad` | float | 지금 속도(구동 바퀴 둘레 속도)·전륜각 (모델 값). 후진이면 `v_mps` < 0 |
+| `world_revision` | uint32 | 이 위치를 계산할 때의 `sim.world.revision` |
+| `surface` | string | 차 중심이 있는 노면 `road` · `grass` · `dirt` |
+| `race` | object | 선택. 출발 신호·랩 `{phase, lights_on, lap, lap_ms, last_lap_ms, best_lap_ms, jump_start}`. 지금 시뮬레이터는 보내지 않는다 (화면은 없으면 표시하지 않는다) |
+
+**`sim.world`**
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `revision` | uint32 | 트랙·장애물·E-stop 이 바뀔 때마다 1 오른다. 시작 1. 시뮬레이터가 다시 시작하면 1 부터 다시 세므로, 받는 쪽은 revision 이 줄어도 새 실행으로 보고 받는다. 시뮬레이터는 정상 종료할 때 retained 를 지운다 |
+| `track` | object | 지금 트랙. 아래 표 |
+| `tracks` | array | 고를 수 있는 트랙 `[{id, name, real_m}]`. 10개: `spielberg`·`monza`·`silverstone`·`spa`·`melbourne`·`hungaroring`·`catalunya`·`mexico`·`bahrain`·`interlagos`. 시작은 `spielberg` |
+| `car` | object | `{length_m, width_m}` 판정에 쓰는 차 몸 크기. `0.42`·`0.20` |
+| `time_scale` | float | 시뮬레이터 시간 배율 (1 = 실제 시간). 화면이 위치 사이를 이어 그릴 때 곱한다 |
+| `obstacles` | array | `[{id, kind, x, y, w}]` — 종류·가운데 위치(m)·폭(m). 최대 8개 |
+| `estop` | bool | 시연용 E-stop 이 걸려 있음 (`vehicle.status.flags.estop` 도 같이 true) |
+
+`track`
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `shape` | string | `centerline` |
+| `id`, `name` | string | 트랙 id·화면 이름 |
+| `real_m` | uint32 | 실제 서킷 한 바퀴 길이 (m). 화면 단위 변환에 쓴다 |
+| `lane_width_m`, `curb_m` | float | 차선 폭 `0.6`, 연석 폭 `0.06`. 연석 끝까지 아스팔트 |
+| `centerline` | array | `[[x, y], …]` 차선 중심선, 약 0.2 m 간격, 닫힌 고리 (진행 방향 순서). 트랙마다 413 ~ 681점 |
+| `wall_left_m`, `wall_right_m` | array | 점마다 중심선에서 왼쪽·오른쪽 벽까지 거리 (m). 연석 밖 ~ 벽 = 잔디·흙. 출발 직선은 잔디 없이 바로 벽, 코너 근처는 보통의 두 배 |
+| `start_index` | uint32 | 출발선이 있는 `centerline` 점 |
+
+- 트랙 모양 출처: TUM racetrack-database (LGPL-3.0, © OpenStreetMap contributors) 중심선을 1/50 로 줄이고 반경 0.8 m 미만 코너만 다듬었다. 벽 거리는 시뮬레이터가 계산해 넣는다 — 받는 쪽은 그대로 쓴다. 관리 콘솔 mock 과 같은 계산이다.
+- `sim.world` 는 가장 긴 스파 기준 약 30 KB (1장 64 KB 이하).
+
+**`sim.command`**
+
+| `op` | 인자 | 동작 |
+| --- | --- | --- |
+| `obstacle.add` | `obstacle_id`, `kind`, `x`, `y` | 장애물 놓기. `kind` = `cone`(폭 0.18) · `box`(0.30) · `tires`(0.26), 없으면 `cone`. `obstacle_id` 는 백엔드가 만든다. 이미 있으면 무시하고 적용으로 답한다 (QoS 1 중복 전달) |
+| `obstacle.move` | `obstacle_id`, `x`, `y` | 옮기기 |
+| `obstacle.remove` | `obstacle_id` | 치우기 |
+| `estop` | `engaged` (bool) | E-stop 걸기·풀기 |
+| `push` | `dy_m` | 차를 진행 방향 기준 옆으로 옮긴다 (+ 왼쪽, \|dy_m\| ≤ 0.5). 자율주행이 차선으로 돌아오는지 보이는 시연용 |
+| `track.select` | `track_id` | 트랙 바꾸기. 장애물을 모두 치우고 차를 출발선에 세운다 |
+| `race.start` | — | 다시 출발. 차를 출발선에 세운다 |
+
+- 모든 명령에 `request_id`(string)를 넣는다. 시뮬레이터는 명령마다 MQTT-18 `sim.command.result` 를 한 번 낸다. 적용되면 `sim.world`(revision +1)도 다시 낸다 — `push`·`race.start` 는 `sim.pose` 에만 보인다.
+- 모르는 `op`·범위 밖 값은 `ok: false`, `code: INVALID` 로 답한다 (9번째 장애물, \|dy_m\| > 0.5, 없는 `track_id`, 없는 `obstacle_id`).
+- **배치 검사**: 차 몸과 겹치면 `ON_CAR`, 벽 밖이면 `OUT_OF_TRACK` 으로 거부한다. 관리 콘솔 mock 의 `NO_GAP`·`TOO_DENSE`·`TOO_CLOSE`(회피 주행을 미리 돌려 보기)는 지금 자율 앱이 장애물을 피하지 않고 서기만 하므로 시뮬레이터가 내지 않는다. 받는 쪽은 이 코드도 그대로 처리할 수 있어야 한다.
+
+**`sim.command.result`** (MQTT-18)
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `request_id` | string | 받은 명령의 `request_id` |
+| `op` | string | 받은 명령의 `op` |
+| `ok` | bool | 적용했나 |
+| `code` | string \| null | 거부 사유 `ON_CAR` · `OUT_OF_TRACK` · `INVALID` (예약: `NO_GAP` · `TOO_DENSE` · `TOO_CLOSE`). `ok` 이면 null |
+| `message` | string \| null | 화면에 그대로 띄울 한 줄 |
+| `gap_m`, `need_m` | float \| null | `NO_GAP` 일 때 모의 단위 틈·필요 폭. 지금은 null |
+
+### 12.2 콘솔 API (백엔드)
+
+인증은 다른 콘솔 API 와 같은 사용자 JWT, 오류 본문은 [VM 관리 API 계약](vm-api-contract-v1.md) 8.2 `{code, message}`.
+
+| ID | 메서드 | 경로 | 요청 | 성공 | 오류 |
+| --- | --- | --- | --- | --- | --- |
+| REST-30 | GET | `/api/v1/sim/state` | — | 200 `{available, pose, world, pose_age_ms}` | 401 |
+| REST-31 | POST | `/api/v1/sim/obstacles` | `{kind, x, y}` (`kind` 기본 `cone`) | 202 `{obstacle_id, request_id}` | 401, 409, 422 |
+| REST-32 | PUT | `/api/v1/sim/obstacles/{obstacle_id}` | `{x, y}` | 202 `{request_id}` | 401, 404, 409, 422 |
+| REST-33 | DELETE | `/api/v1/sim/obstacles/{obstacle_id}` | — | 202 `{request_id}` | 401, 404, 409 |
+| REST-34 | POST | `/api/v1/sim/estop` | `{engaged}` | 202 `{request_id}` | 401, 409, 422 |
+| REST-35 | POST | `/api/v1/sim/push` | `{dy_m}` | 202 `{request_id}` | 401, 409, 422 |
+| REST-36 | POST | `/api/v1/sim/track` | `{track_id}` | 202 `{request_id}` | 401, 409, 422 |
+| REST-37 | POST | `/api/v1/sim/race/start` | — | 202 `{request_id}` | 401, 409 |
+| WS-06 | WS | `/ws/v1/sim` | 첫 프레임 `{type:"auth", access_token}` | `sim.snapshot` 푸시 | 인증 실패 시 닫음 |
+
+- `available` = 마지막 `sim.pose` 가 1초 안 (백엔드 단조 시계). `pose`·`world` 는 마지막으로 받은 payload 그대로 (없으면 null).
+- 409 `SIM_UNAVAILABLE`: 시뮬레이터가 없음(`available` false). 404 `OBSTACLE_NOT_FOUND`: 백엔드가 아는 마지막 `sim.world` 에 그 id 가 없음. 422 `VALIDATION_ERROR`: 필드 타입·범위 (모르는 `kind`, \|dy_m\| > 0.5, 숫자가 아닌 x·y, 비어 있는 `track_id`, 장애물 8개 초과). 503 `MQTT_UNAVAILABLE`: 브로커에 연결되어 있지 않아 명령을 보내지 못함.
+- 202 는 "명령을 보냈다" 이다. 적용 여부는 WS-06 의 `sim.command.result`(같은 `request_id`)로 본다. 콘솔은 `ok: false` 면 `message` 를 띄운다. 3초 안에 결과가 없으면 "시뮬레이터 응답 없음" 으로 본다.
+- 없는 트랙 id 는 시뮬레이터가 `INVALID` 로 거부한다 (백엔드는 목록을 검사하지 않는다).
+- WS-06 은 서버 → 콘솔 단방향. `{type:"sim.snapshot", available, pose, world}` 를 10 Hz(위치는 최신 것만)로, `sim.world` 가 바뀌면 바로 한 번 더 보낸다. MQTT-18 을 받으면 `{type:"sim.command.result", …payload}` 를 바로 보낸다.
+- `sim.command.result` 는 명령을 보낸 콘솔만이 아니라 인증된 WS-06 연결 모두에 방송한다. 콘솔은 자기가 받은 202 의 `request_id` 로 짝을 짓고, 짝이 없는 결과(다른 콘솔의 명령)는 무시한다.
+- 결과가 REST 202 응답보다 먼저 올 수 있다 (시뮬레이터가 MQTT-17 을 바로 적용하면). 콘솔은 짝이 없는 결과를 3초 동안 들고 있다가 뒤늦게 온 202 의 `request_id` 와 맞춘다.
+
 ## 관련 문서
 
 - [VM 관리 API 계약 v1](vm-api-contract-v1.md) — `vm_id`, `guest_kind`
@@ -593,6 +709,9 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.4 | 2026-10-27 | Linux 인터랙션 VM 의 app_id 를 `message-board` 에서 `interaction` 으로 바꾼다(4장). 올릴 앱이 정해지지 않아 앱 이름 대신 역할 ID 를 쓴다. 토픽 `apps/message-board/events` → `apps/interaction/events`(5장 재개 요청, 6장), 구독자 표기 "메시지 보드" → "인터랙션 VM". type·payload 는 그대로 (S15P31E110-303) |
 | v1.5 | 2026-10-28 | MQTT-03 metrics 에 선택 필드 `process_collection`(수집 상태·발견/읽기 수·잘림·원인 종류)과 `unavailable_reason` 값 `counter_reset` 추가(3장). 기존 필드는 그대로이고 받는 쪽은 모르는 필드·사유를 무시해도 된다 (S15P31E110-309) |
 | v1.5 (보완) | 2026-10-28 | Linux 에이전트 0.3.0 이 자체 상태를 v2 Telemetry(Zephyr 계약 2.1) 토픽으로 함께 보낸다는 주석(3장). v1 토픽·payload 는 그대로 (S15P31E110-310) |
+| v1.5 (보완) | 2026-11-02 | 백엔드가 v2 `telemetry/metrics` 를 구독해 Zephyr CPU·메모리를 메트릭 표본(`source = zephyr_telemetry`)으로 저장한다(3장). `backend` 계정에 이 토픽 읽기 권한 추가(9장). v1 토픽·payload 는 그대로 |
+| v1.6 | 2026-10-29 | 시뮬레이터 전용 12장 추가 (S15P31E110-261·-270·-271): MQTT-15 `sim.pose`·MQTT-16 `sim.world`·MQTT-17 `sim.command`·MQTT-18 `sim.command.result`, 콘솔 REST-30~37·WS-06. vehicle 브랜치 초안(그쪽 번호 v1.3·v1.4 §11)을 옮기며 바꾼 점: 구독자에서 인지 대역을 뺐다(젯슨은 전방 카메라 화면만), 트랙은 실제 서킷 10개, 배치 검사는 `ON_CAR`·`OUT_OF_TRACK` 만, `race` 는 선택. 계정 `simulator` 추가, `backend` 에 `sim/command` 쓰기, `perception` 읽기에서 `sim/#` 제외(9장). 기존 토픽·payload 는 그대로 |
+| v1.6 (보완) | 2026-11-02 | 12장 WS-06: `sim.command.result` 는 모든 콘솔 연결에 방송, 결과가 REST 202 보다 먼저 올 수 있음을 명시 (구현과 같음, S15P31E110-267). 토픽·payload 는 그대로 |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의
 QoS 교환은 메시지 전달을 위한 것이며 앱/장치 적용 확인을 대신하지 않는다.

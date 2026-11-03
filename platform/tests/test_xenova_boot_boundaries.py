@@ -18,7 +18,7 @@ import test_xenova_cpu as cpu_fixture
 import test_xenova_default_deployment as deployment_fixture
 from test_xenova_platform import FakeXen, fixture, record
 import xenova_vm as vm
-from xenova_runtime import OperationBusy, operation_lock
+from xenova_runtime import operation_lock
 
 
 class AutostartBudgetTest(unittest.TestCase):
@@ -139,11 +139,16 @@ class AutostartBudgetTest(unittest.TestCase):
         self.assertEqual(boot.call_args.kwargs['deadline'], 10 + vm.AUTOSTART_TIMEOUT)
 
     def test_storage_failure_prevents_registry_fallback_and_all_guest_starts(self):
+        output = io.StringIO()
         with patch.object(vm, 'Platform', return_value=self.p), \
              patch.object(vm, 'storage_check', side_effect=vm.PlatformError('data mount unavailable')), \
-             patch.object(self.p, 'autostart') as boot:
-            with self.assertRaisesRegex(vm.PlatformError, 'data mount unavailable'):
+             patch.object(self.p, 'autostart') as boot, redirect_stdout(output):
+            with self.assertRaises(SystemExit) as failure:
                 vm.main(['autostart'])
+        self.assertEqual(failure.exception.code, 4)
+        error = json.loads(output.getvalue())['error']
+        self.assertEqual(error['code'], 'ARTIFACT_INVALID')
+        self.assertIn('data mount unavailable', error['message'])
         boot.assert_not_called()
         self.assertFalse(self.xen.calls)
 
@@ -154,9 +159,14 @@ class AutostartBudgetTest(unittest.TestCase):
 
     def test_autostart_lock_contention_preserves_immediate_busy_contract(self):
         entered = self.ticks
-        with operation_lock(self.p.runtime), patch.object(vm, 'Platform', return_value=self.p):
-            with self.assertRaises(OperationBusy):
+        output = io.StringIO()
+        with operation_lock(self.p.runtime), patch.object(vm, 'Platform', return_value=self.p), redirect_stdout(output):
+            with self.assertRaises(SystemExit) as failure:
                 vm.main(['autostart'])
+        self.assertEqual(failure.exception.code, 3)
+        error = json.loads(output.getvalue())['error']
+        self.assertEqual(error['code'], 'OPERATION_IN_PROGRESS')
+        self.assertTrue(error['retryable'])
         self.assertEqual(self.ticks, entered)
         self.assertFalse(self.xen.calls)
 

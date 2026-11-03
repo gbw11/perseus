@@ -12,22 +12,22 @@
   },
   "rtos_templates": [
     {
-      "template_dir": "/absolute/xenova-template-releases/zephyr/xenova-zephyr-drive-lattice-lab-1.0.0/1.0.0-lab.1",
-      "template_manifest_sha256": "893b3e6ff2298d87dc41f1456bfbcb1ed9b30c21b97d929a6403a2e23bb5d87f"
+      "template_dir": "/absolute/xenova-template-releases/zephyr/xenova-zephyr-drive-lattice-lab-1.0.0/1.0.0-lab.2",
+      "template_manifest_sha256": "eb5309e15aa5ef705ed846e77f4d196280da67d508f67bcee72892587493f28b"
     }
   ],
   "linux_templates": [
     {
-      "template_dir": "/absolute/xenova-template-releases/linux/ubuntu-24.04-20260926/1.0.2",
+      "template_dir": "/absolute/xenova-template-releases/linux/ubuntu-24.04-20260926/1.0.4",
       "template_manifest_sha256": "REPLACE_WITH_SELECTED_TEMPLATE_JSON_SHA256",
       "template_id": "ubuntu-24.04-arm64",
-      "template_version": "1.0.2"
+      "template_version": "1.0.4"
     },
     {
-      "template_dir": "/absolute/xenova-template-releases/linux/debian-13-20261015/1.0.2",
+      "template_dir": "/absolute/xenova-template-releases/linux/debian-13-20261015/1.0.4",
       "template_manifest_sha256": "REPLACE_WITH_SELECTED_TEMPLATE_JSON_SHA256",
       "template_id": "debian-13-arm64",
-      "template_version": "1.0.2"
+      "template_version": "1.0.4"
     }
   ]
 }

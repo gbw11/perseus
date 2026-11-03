@@ -284,12 +284,26 @@ class ReviewBoundaryTest(unittest.TestCase):
                     self.fail("expired critical section entered")
         self.assertEqual(raised.exception.error["code"],"DEADLINE_EXCEEDED")
 
-    def test_R5_busy_probe_error_publisher_does_not_wait_for_observation_lock(self):
-        release=self.hold("observation-"+self.vm_id)
+    def test_R5_probe_does_not_take_common_execution_lock(self):
+        self.start()
         with operation_lock(self.p.runtime):
-            response=self.call("probe",{"vm_id":self.vm_id,"timeout_ms":20})
-        self.fails(response,"OPERATION_IN_PROGRESS")
+            observation = self.ok(self.call("probe", {"vm_id": self.vm_id, "timeout_ms": 20}))
+        self.assertEqual(observation["observation"]["xen_state"], "running")
+
+    def test_R5_busy_probe_error_publisher_does_not_wait_for_observation_lock(self):
+        self.start()
+        command = self.p.command
+        def unavailable(args, **kwargs):
+            if args[:2] == ["xl", "list"]:
+                raise vm.PlatformError("injected Xen failure")
+            return command(args, **kwargs)
+        release = self.hold("observation-"+self.vm_id)
+        before = self.ticks
+        with patch.object(self.p, "command", side_effect=unavailable), operation_lock(self.p.runtime):
+            response = self.call("probe", {"vm_id": self.vm_id, "timeout_ms": 20})
+        self.fails(response, "OBSERVATION_UNAVAILABLE")
         self.assertTrue(response["error"]["details"]["diagnostic_warnings"])
+        self.assertEqual(self.ticks, before)
         self.assertFalse(release.is_set())
 
 

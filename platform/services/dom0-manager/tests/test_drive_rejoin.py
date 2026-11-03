@@ -65,6 +65,7 @@ def test_engine_completion_provisions_current_execution_then_standby_readiness(f
         current['intent_revision'],None,None,None))
     with patch.object(xenova_vm.os,'sync'):engine.tick()
     record=engine.records()[0]
+    assert gateway.count('submit') == int(present)
     protected=[row['spec']['target_execution_id'] for row in gateway.rows.values()]
     assert protected==([before] if present else [])  # start-if-absent needs no Gateway protection
     if present:assert record.protection['phase']=='PROTECTED'  # released only after the new execution binds in the Gateway

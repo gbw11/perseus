@@ -33,6 +33,10 @@ class DriveResumeRequesterTest {
     };
     private long seq;
 
+    DriveResumeRequesterTest() {
+        tracker.mqttConnected();
+    }
+
     private void control(String mode) {
         tracker.accept(DriveStateTracker.CONTROL_TOPIC, DriveStateTrackerTest.envelope("dom0-gateway", null,
                 "vehicle.control", ++seq, "{\"mode\":\"%s\",\"generation\":1}".formatted(mode)));
@@ -59,12 +63,25 @@ class DriveResumeRequesterTest {
     void refusesOutsideAutoReady() {
         assertThatThrownBy(() -> requester(publisher).request("operator"))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
-                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
-                    assertThat(e.getCode()).isEqualTo("NOT_AUTO_READY");
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                    assertThat(e.getCode()).isEqualTo("DRIVE_STATE_UNAVAILABLE");
                 });
         control("MANUAL");
         assertThatThrownBy(() -> requester(publisher).request("operator"))
                 .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("NOT_AUTO_READY"));
+        assertThat(sent).isEmpty();
+    }
+
+    @Test
+    void refusesAControlValueFromThePreviousMqttConnection() {
+        control("AUTO_READY");
+        tracker.mqttDisconnected();
+        tracker.mqttConnected();
+        assertThatThrownBy(() -> requester(publisher).request("operator"))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                    assertThat(e.getCode()).isEqualTo("DRIVE_STATE_UNAVAILABLE");
+                });
         assertThat(sent).isEmpty();
     }
 
