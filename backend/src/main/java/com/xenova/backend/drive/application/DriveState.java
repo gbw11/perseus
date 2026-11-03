@@ -15,7 +15,8 @@ public record DriveState(
         Vehicle vehicle,
         Map<String, App> apps,
         Perception perception,
-        Resume resume) {
+        Resume resume,
+        Map<String, Map<String, VmApp>> vmApps) {
 
     public enum SourceStatus {
         FRESH("fresh"),
@@ -77,6 +78,20 @@ public record DriveState(
     }
 
     public record Command(Long generation, Double vMps, Double steerRad) {
+    }
+
+    /** Last scoped reports for an observed app execution, with independent freshness per signal. */
+    public record VmApp(
+            String bootId, String appInstanceId, Lifecycle lifecycle, Source lifecycleSource,
+            Heartbeat heartbeat, Source heartbeatSource) {
+    }
+
+    public record Lifecycle(
+            String profile, String phase, String readiness, String reason,
+            long appliedGeneration, String checkSeq, String progressSeq) {
+    }
+
+    public record Heartbeat(String state, double uptimeS) {
     }
 
     /**
