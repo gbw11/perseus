@@ -103,7 +103,7 @@ class ControlOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     vm_id: UUID
-    action: str = Field(description="현재 stop")
+    action: str = Field(description="stop 또는 reboot")
     request_key: str | None = Field(default=None, description="최초 제출 전에 호출자가 정한 Idempotency-Key")
     operation_id: UUID | None = Field(default=None, description="하위 원 제어 작업. 수락 전 거절·작업 기록 없는 드라이버면 null")
     status: ControlStatus

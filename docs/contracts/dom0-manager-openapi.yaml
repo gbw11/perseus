@@ -367,6 +367,61 @@ paths:
           $ref: '#/components/responses/PlatformUnavailable'
         '504':
           $ref: '#/components/responses/DriverTimeout'
+  /api/v1/vms/{vm_id}/reboot:
+    parameters:
+      - $ref: '#/components/parameters/VmId'
+    post:
+      tags: [VMs]
+      operationId: rebootVm
+      summary: 정상 재부팅 (같은 디스크로 새 실행)
+      description: >-
+        실행 중인 VM 을 게스트 정상 재부팅으로 같은 등록·디스크의 새 실행(새 execution_id)으로 다시 시작한다 (기준 문서 4.10).
+        stop + create 조합이 아니라 플랫폼 reboot 한 번이다. 키 없는 호출은 동기 방식이며 새 실행이 관측될 때까지 최대 90초 기다린다.
+        자동 강제 재부팅은 없다. 명령 제출 전 기한 만료는 504, 제출 뒤 새 실행을 확인하지 못하면 503(RECONCILE_REQUIRED, 결과 미확정).
+        force 입력은 없다(협력 제어 채널이 없는 Zephyr 는 501).
+        신규 재부팅은 키 유무와 관계없이 실행 중인 도메인만 대상이다: 꺼짐·paused·crashed·stopping 이면 409, 등록이 없으면 404.
+        Idempotency-Key 가 있으면 정지와 같은 요청 추적 모드다 (4.3.1): 같은 키의 원 작업이 있으면 재전달로 보고 상태 확인 없이
+        이어 가며, 완료면 200, 수락했지만 실행이 남았으면 202 로 ControlOperation(action=reboot) 을 돌려준다.
+      x-driver-timeout-seconds: 90
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: 최초 전송 전에 정한 요청 키. 재전송·조회에 같은 값. ASCII 가시 문자 1..200자
+          schema:
+            type: [string, 'null']
+        - $ref: '#/components/parameters/RequestBudget'
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: 키 있음. 원 작업 완료(새 실행 관측). 같은 키 재전달이어도 같은 operation_id, 물리 동작 반복 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlOperation'
+        '202':
+          description: 키 있음. 재부팅을 내구 수락했고 실행이 남음 (status=pending). 같은 키로 재전달하거나 조회한다
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlOperation'
+        '204':
+          description: 키 없음. 재부팅 완료(새 실행 관측). 디스크 보존
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
+        '404':
+          $ref: '#/components/responses/VMNotFound'
+        '409':
+          $ref: '#/components/responses/InvalidState'
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '501':
+          $ref: '#/components/responses/NotSupported'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
   /api/v1/vms/{vm_id}/control-operations:
     parameters:
       - $ref: '#/components/parameters/VmId'
@@ -891,7 +946,7 @@ components:
           format: uuid
         action:
           type: string
-          description: 현재 stop
+          description: stop 또는 reboot
         request_key:
           type: [string, 'null']
         operation_id:

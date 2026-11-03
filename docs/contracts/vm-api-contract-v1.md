@@ -283,6 +283,7 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 | `POST` | `/api/v1/vms` | `201` VM | `400`, `401`, `409`, `507`, `500`, `501`, `503`, `504` |
 | `GET` | `/api/v1/vms/{vm_id}` | `200` VM | `400`, `401`, `404`, `500`, `503`, `504` |
 | `POST` | `/api/v1/vms/{vm_id}/stop` | `204`. `Idempotency-Key` 가 있으면 `200`·`202` 작업 상태 (4.3.1) | `400`, `401`, `409`, `500`, `501`, `503`, `504` |
+| `POST` | `/api/v1/vms/{vm_id}/reboot` | `204`. `Idempotency-Key` 가 있으면 `200`·`202` 작업 상태 (4.10) | `400`, `401`, `404`, `409`, `500`, `501`, `503`, `504` |
 | `GET` | `/api/v1/vms/{vm_id}/control-operations` | `200` 작업 상태 (4.8) | `400`, `401`, `404`, `500`, `501`, `503`, `504` |
 | `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `400`, `401`, `404`, `409`, `500`, `501`, `503`, `504` |
 | `GET` | `/healthz` | `200` | `401`, `503` |
@@ -356,7 +357,7 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 
 | 필드 | 의미 |
 |---|---|
-| `vm_id`, `action` | 대상과 동작(현재 `stop`) |
+| `vm_id`, `action` | 대상과 동작(`stop` 또는 `reboot`) |
 | `request_key` | 최초 키 |
 | `operation_id` | 하위 원 제어 작업. 수락 전 거절이면 `null` |
 | `status` | 위 표 |
@@ -441,6 +442,23 @@ Spring의 페이지 규칙: (1) `gap: true`면 경고(`WARN`)로 `recovery.faile
 - 헤더가 없으면 지금처럼 직렬화 대기 5초, 하위 기본 90초·15초, xl 5초를 쓴다.
 - 105000ms 는 입력 상한이지 HTTP 를 그만큼 기다리라는 뜻이 아니다. 같은 키의 재전달은 원 작업 기한을 다시 받지 않는다.
 
+### 4.10 `POST /api/v1/vms/{vm_id}/reboot`
+
+실행 중인 VM 을 **게스트 정상 재부팅**으로 다시 시작한다. 같은 등록·디스크의 새 실행(새 `execution_id`)이 관측되면 완료다. stop 과 create 를 이어 부르는 것이 아니라 플랫폼 `reboot` 한 번이며, 의도(`desired_state: running`)는 바뀌지 않는다. 디스크는 보존된다.
+
+- 성공 응답은 `204 No Content`. 새 실행의 VM 은 단건 조회(4.1·`GET /api/v1/vms/{vm_id}`)로 읽는다.
+- **실행 중인 도메인만 대상이다.** 꺼져 있으면 `409 InvalidState`(재부팅이 아니라 시작한다), `paused`·`crashed`·`stopping` 도 `409`(crashed 는 정지 뒤 시작). 등록이 없으면 `404 VMNotFound` — stop 과 달리 목표(새 실행)를 달성할 수 없기 때문이다.
+- 호출은 동기 방식이며 플랫폼은 기본 최대 90초까지 새 실행을 기다린다. **자동으로 강제 재부팅하지 않는다.**
+- 시간·결과의 의미:
+  - 재부팅 명령을 제출하기 **전에** 기한(4.9 예산 포함)이 끝나면 `504 DriverTimeout`. 아무것도 바뀌지 않았다.
+  - 명령을 제출한 **뒤** 새 실행을 확인하지 못하면 `503 PlatformUnavailable`(`platform_code=RECONCILE_REQUIRED`, 키 있으면 `operation.status=uncertain`). 기존 도메인이 남았는지, 새 도메인이 생겼는지, 둘 다 없는지 **확정할 수 없다.** 자동 재시도·새 키·force 로 우회하지 않고 조사한다. 키 없는 호출은 원 작업을 다시 찾을 수 없으므로, 결과를 추적해야 하는 호출자는 키를 쓴다.
+  - 성공(`204`·`200 completed`)은 새 `execution_id` 가 관측됐다는 뜻이다. 앱 준비·주행 권한 회복은 아니다.
+- force 입력은 없다. 협력 제어 채널이 있는 Zephyr 는 그 채널로 재부팅하고, 없는 Zephyr 는 `501 NotSupported`(4.3 의 Zephyr 개별 force 규약과 같다).
+- `Idempotency-Key` 가 있으면 정지와 같은 요청 추적 모드다(4.3.1 의 응답 표·`ControlOperation`·조회 4.8·예산 4.9 를 그대로 쓰고 `action: reboot`). **키는 재부팅 가능 상태를 바꾸지 않는다.** dom0-manager 는 같은 키의 원 작업을 먼저 조회(4.8)해서, 없으면 신규 요청으로 보고 키 없는 호출과 같이 실행 상태를 확인하고(`409`·`404`), 있으면 재전달로 보고 상태 확인 없이 원 작업으로 보낸다. 조회를 지원하지 않는 Manager 면 신규·재전달을 가를 수 없어 `501` 이고 아무것도 보내지 않는다. 재부팅 중에는 도메인이 잠깐 없어서 상태 확인이 재전달을 `409` 로 막기 때문이다. 같은 키가 다른 동작(stop 등)의 원 작업이면 플랫폼이 `409 IDEMPOTENCY_CONFLICT` 로 거절한다.
+- mock 드라이버는 같은 VM 의 새 도메인(새 domid)으로 동기 재부팅하고 키 있으면 `200 completed`(`operation_id: null`)다. 재부팅을 제공하지 않는 드라이버는 `501`.
+- 플랫폼은 꺼진 VM·force 없는 비협력 Zephyr 거절에 아직 전용 코드가 없어 `ARTIFACT_INVALID` 의 문구로만 알린다. dom0-manager 는 그 두 문구만 `409`·`501` 로 바꾸고 `platform_code` 는 원본(`ARTIFACT_INVALID`)을 둔다.
+- Recovery Worker 에는 사용자 재부팅이다: 새 실행은 플랫폼 실행 소유자 `user` 로 기록되고, 감시기는 새 domid 로 부팅 유예부터 다시 본다. 복구 이벤트를 내지 않는다.
+
 ---
 
 ## 5. Spring 공개 API
@@ -515,7 +533,7 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 | `404` | `VMNotFound` | `GET` 대상 도메인 부재 |
 | `404` | `OperationNotFound` | 요청 키로 원 제어 작업을 찾지 못함 (4.8). 검색 부재이며 미수락의 증거가 아님 |
 
-플랫폼이 제어 요청을 수락(완료 포함)했다고 하면서 유효한 원 작업 ID 를 주지 않으면 `503 PlatformUnavailable` 이다. 조회(4.8)한 원 기록은 정확히 "이 VM·이 키의 graceful stop" 이어야 한다: 작업 ID 가 유효하고 봉투의 값과 같음, 기록과 요청의 `vm_id` 가 조회 VM, 요청이 `stop`(force 없음), `idempotency_key` 가 조회 키, 단계가 알려진 값. 하나라도 어긋나면 하위 버전 불일치·기록 손상으로 보고 `503` 이다. 추적할 수 없거나 다른 작업인 기록을 `200`·`202` 로 꾸미지 않는다.
+플랫폼이 제어 요청을 수락(완료 포함)했다고 하면서 유효한 원 작업 ID 를 주지 않으면 `503 PlatformUnavailable` 이다. 조회(4.8)한 원 기록은 정확히 "이 VM·이 키의 graceful stop·reboot" 이어야 한다: 작업 ID 가 유효하고 봉투의 값과 같음, 기록과 요청의 `vm_id` 가 조회 VM, 요청이 `stop`·`reboot`(force 없음), `idempotency_key` 가 조회 키, 단계가 알려진 값. 하나라도 어긋나면 하위 버전 불일치·기록 손상으로 보고 `503` 이다. 추적할 수 없거나 다른 작업인 기록을 `200`·`202` 로 꾸미지 않는다.
 | `409` | `VMExists` | `vm_id` 충돌 (단일 의미) |
 | `507` | `InsufficientResources` | 가용 자원 부족. `resource.name`: `memory_mib`, `vcpus`, `ipv4`(플랫폼 Linux IP 풀 고갈, `IP_POOL_EXHAUSTED`) |
 | `401` | `Unauthorized` | Bearer 서비스 토큰 없음·불일치 (`/healthz` 포함) |

@@ -273,6 +273,7 @@ _CODE_MAP: dict[str, type[Dom0ManagerError]] = {
     "IP_CONFLICT": InvalidState,
     "OPERATION_IN_PROGRESS": PlatformUnavailable,  # 다른 플랫폼 작업이 잠금 보유(재시도 가능). 프로세스 안 직렬화 대기 초과도 같은 코드
     "VM_NOT_STOPPED": InvalidState,
+    "VM_NOT_RUNNING": InvalidState,  # 신규 reboot 를 실행 중이 아닌 도메인에 요청함(플랫폼에 요청한 전용 코드)
     "TARGET_CHANGED": InvalidState,
     "ASSET_IN_USE": InvalidState,
     "RESTORE_CONFLICT": InvalidState,
@@ -296,6 +297,11 @@ _CODE_MAP: dict[str, type[Dom0ManagerError]] = {
 # 메시지로만 실린다. 플랫폼이 DEADLINE_EXCEEDED 를 내기 전까지 이 두 코드에 한해 메시지로 시한 초과를 가려 504 로 낸다
 _TIMEOUT_MESSAGE_CODES = frozenset({"XEN_EXECUTION_FAILED", "ARTIFACT_INVALID"})
 _TIMEOUT_MESSAGE_MARKERS = ("deadline", "timed out")
+# reboot 의 수락 전 거절도 전용 코드 없이 ARTIFACT_INVALID 문구로만 온다(xenova_vm.reboot). 이 두 문구만 계약 오류로 가린다
+_REFUSAL_MESSAGES: tuple[tuple[str, type[Dom0ManagerError]], ...] = (
+    ("cannot reboot a stopped VM", InvalidState),  # 실행 중인 도메인이 없다
+    ("Zephyr graceful reboot unsupported", NotSupportedByPlatform),  # 협력 제어 채널이 없는 Zephyr. HTTP 에는 force 가 없다
+)
 
 
 def raise_for_envelope(envelope: dict[str, Any], *, context: str, operation: ControlOperation | None = None) -> dict[str, Any]:
@@ -318,7 +324,10 @@ def raise_for_envelope(envelope: dict[str, Any], *, context: str, operation: Con
     if code == "IP_POOL_EXHAUSTED":  # 플랫폼이 전역 잠금 안에서 고른 Linux 내부 IP 가 바닥남
         raise InsufficientResources("ipv4", 1, 0, platform_code=code, retryable=retryable)
     cls: type[Dom0ManagerError]
-    if code in _TIMEOUT_MESSAGE_CODES and any(marker in message for marker in _TIMEOUT_MESSAGE_MARKERS):
+    refusal = next((c for marker, c in _REFUSAL_MESSAGES if message.startswith(marker)), None) if code == "ARTIFACT_INVALID" else None
+    if refusal is not None:
+        cls = refusal
+    elif code in _TIMEOUT_MESSAGE_CODES and any(marker in message for marker in _TIMEOUT_MESSAGE_MARKERS):
         cls, message = DriverTimeout, "platform operation deadline exceeded"
     else:
         cls = _CODE_MAP.get(code, DriverError)  # 모르는 코드(ARTIFACT_INVALID 등)는 500 이지만 원본 코드는 보존한다
@@ -385,7 +394,7 @@ def _accepted_without_operation(code: str | None) -> PlatformUnavailable:
 
 
 def control_operation_from_envelope(envelope: dict[str, Any], *, vm_id: UUID, action: str, key: str | None) -> ControlOperation:
-    """제어 호출(stop) 봉투 → 상태. 수락된 요청의 오류는 details 의 허용 필드만 옮긴다.
+    """제어 호출(stop·reboot) 봉투 → 상태. 수락된 요청의 오류는 details 의 허용 필드만 옮긴다.
 
     수락된 요청(완료 포함)은 원 작업 ID 가 있어야 추적할 수 있다. 없거나 UUID 가 아니면 하위 버전 불일치·기록 손상이므로
     수락·완료로 내지 않고 503 이다.
@@ -437,7 +446,7 @@ def control_operation_from_envelope(envelope: dict[str, Any], *, vm_id: UUID, ac
     )
 
 
-_TRACKED_REQUEST = {"action": "stop", "force": False}  # HTTP 가 키로 추적하는 제어 요청(4.3.1). 다른 기록은 이 조회의 대상이 아니다
+_TRACKED_ACTIONS = frozenset({"stop", "reboot"})  # HTTP 가 키로 추적하는 제어 요청(4.3.1, force 없음). 다른 기록은 이 조회의 대상이 아니다
 
 
 def control_operation_from_record(
@@ -445,8 +454,8 @@ def control_operation_from_record(
 ) -> ControlOperation:
     """control-operation 조회의 원 기록 → 상태. superseded 는 현재 의도와 대조해야 알 수 있어 여기서는 내지 않는다.
 
-    응답 유실 뒤 원 작업을 되찾는 경계라 기록이 정확히 '이 VM·이 키의 graceful stop' 이어야 한다: 유효한 operation_id 가 봉투의 값과
-    같고, record.vm_id·request.vm_id 가 조회 VM 이고, request 가 stop(force 없음)이고, idempotency_key 가 조회 키이고, phase 가 알려진
+    응답 유실 뒤 원 작업을 되찾는 경계라 기록이 정확히 '이 VM·이 키의 graceful stop·reboot' 이어야 한다: 유효한 operation_id 가 봉투의
+    값과 같고, record.vm_id·request.vm_id 가 조회 VM 이고, request 가 stop·reboot(force 없음)이고, idempotency_key 가 조회 키이고, phase 가 알려진
     값. 하나라도 어긋나면 기록 손상이나 하위 버전 불일치이므로 200 으로 꾸미지 않고 503 이다.
     """
     phase = _str(record.get("phase"))
@@ -456,8 +465,8 @@ def control_operation_from_record(
         ("operation_id", operation_id is None or _uuid(envelope_operation_id) != operation_id),
         ("vm_id", _uuid(record.get("vm_id")) != vm_id),
         ("request.vm_id", _uuid(request.get("vm_id")) != vm_id),
-        ("request.action", request.get("action") != _TRACKED_REQUEST["action"]),
-        ("request.force", request.get("force") is not _TRACKED_REQUEST["force"]),  # 빠진 필드를 False 로 채우지 않는다
+        ("request.action", request.get("action") not in _TRACKED_ACTIONS),
+        ("request.force", request.get("force") is not False),  # 빠진 필드를 False 로 채우지 않는다
         ("idempotency_key", record.get("idempotency_key") != key),
         ("phase", phase not in _PHASE_STATUS),
     ) if bad]
@@ -619,6 +628,11 @@ class PlatformDriver(Driver):
             return  # 멱등: 등록 자체가 없어도 목표 상태(도메인 부재)는 달성
         raise_for_envelope(envelope, context=f"stop {vm_id}")
 
+    def reboot(self, vm_id: UUID) -> None:
+        """같은 디스크로 새 실행(새 execution_id)을 시작한다. 하위가 graceful 재부팅 뒤 새 실행을 관측할 때까지 기다린다.
+        force 는 넘기지 않는다: 협력 제어 채널이 없는 Zephyr 는 501 이다. 등록이 없으면 404(stop 과 달리 목표를 달성할 수 없다)."""
+        raise_for_envelope(call_with_budget(self.manager, "reboot", {"vm_id": str(vm_id), "force": False}), context=f"reboot {vm_id}")
+
     # ---- 요청별 등록 조회·정지 추적 (S15P31E110-305) ----
 
     def _request_manager(self) -> ManagerLike:
@@ -638,6 +652,18 @@ class PlatformDriver(Driver):
             return operation
         raise_for_envelope(envelope, context=f"stop {vm_id}", operation=operation)
         return None  # raise_for_envelope 는 ok 가 아니면 반드시 예외를 낸다
+
+    def request_reboot(self, vm_id: UUID, *, key: str) -> ControlOperation:
+        """키 있는 graceful reboot(S15P31E110-208). stop 과 같은 원장이다: 완료·접수(pending)는 상태로 돌려주고, 그 밖은 원 작업 문맥을
+        붙인 예외로 올린다. 신규·재전달 구분과 신규의 실행 상태 검사는 서비스가 먼저 한다(VmService.request_reboot)."""
+        envelope = call_with_budget(self._request_manager(), "reboot", {"vm_id": str(vm_id), "force": False}, idempotency_key=key)
+        if not envelope.get("ok") and (envelope.get("error") or {}).get("code") == "VM_NOT_FOUND":
+            raise_for_envelope(envelope, context=f"reboot {vm_id}")
+        operation = control_operation_from_envelope(envelope, vm_id=vm_id, action="reboot", key=key)
+        if envelope.get("ok") or operation.status == ControlStatus.pending:
+            return operation
+        raise_for_envelope(envelope, context=f"reboot {vm_id}", operation=operation)
+        raise AssertionError("raise_for_envelope raises when not ok")
 
     def control_operation(self, vm_id: UUID, *, key: str) -> ControlOperation:
         """원 제어 작업을 요청 키로 읽는다. 짧은 admission 잠금만 쓰고 시작·정지·이행이나 Xen 관측을 하지 않는다."""
