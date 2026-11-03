@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 
 class VmState(str, Enum):
@@ -273,3 +274,116 @@ class RecoveryEventsResponse(BaseModel):
     next_after_event_id: UUID | None = Field(default=None, description="돌려준 마지막 이벤트의 event_id. events 가 비어 있으면 null")
     oldest_event_id: UUID | None = Field(default=None, description="보관된 가장 오래된 이벤트(진단용)")
     gap: bool = Field(description="after_event_id 가 보관 범위 밖이거나 커서 뒤의 보관 줄이 손상돼 그 이후 이력을 잃었을 수 있음")
+
+
+# ---- CPU 배치 조회 (S15P31E110-353, 계약 4.11) ----
+# 플랫폼 cpu-layout 응답의 공개 필드만 옮긴다(모르는 필드는 버린다). null 은 '해당 없음·모름'이며 true/false 로 채우지 않는다.
+
+
+class _CpuModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+class VcpuAffinity(_CpuModel):
+    vcpu: int = Field(ge=0)
+    pcpus: list[int] = Field(description="이 vCPU 가 돌 수 있는 물리 CPU(hard affinity)")
+
+
+class CpuHost(_CpuModel):
+    online_pcpus: list[int]
+    max_cpu_id: int
+    pool_name: str
+    scheduler: str
+    desired_dom0_pcpus: list[int] | None = Field(description="정책의 공유 집합. 정책 미설정이면 null")
+    observed_dom0_hard_affinity: list[VcpuAffinity] = Field(description="실제 dom0 vCPU 마스크 전부")
+    ready: bool = Field(description="현재 host 부팅·정책 revision 의 준비 기록과 실제 배치가 일치")
+
+
+class CpuReservation(_CpuModel):
+    """전용 코어 예약. 정책 1.0 의 {vm_id, pcpu} 와 2.0 의 {vm_id, mode: exclusive, pcpus} 를 같은 모양으로 맞춘다.
+    두 형식이 섞였거나 2.0 의 mode 가 exclusive 가 아니면 전용 예약으로 내보내지 않고 거부한다."""
+
+    vm_id: UUID
+    pcpus: list[int]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_shape(cls, value):
+        if not isinstance(value, dict):
+            return value
+        if "pcpu" in value:
+            if "pcpus" in value or "mode" in value:
+                raise ValueError("reservation mixes the 1.0 pcpu and 2.0 mode/pcpus shapes")
+            return {"vm_id": value.get("vm_id"), "pcpus": [value["pcpu"]]}
+        if value.get("mode") != "exclusive":
+            raise ValueError(f"reservation mode must be exclusive, got {value.get('mode')!r}")
+        return {k: v for k, v in value.items() if k != "mode"}
+
+
+class CpuObserved(_CpuModel):
+    presence: Literal["present", "absent"] = Field(description="absent 면 나머지는 null(정지는 불일치가 아니다)")
+    domid: int | None
+    xen_unique_id: str | None
+    vcpus: int | None
+    hard_affinity: list[VcpuAffinity] | None
+
+    @model_validator(mode="after")
+    def _matches_presence(self):
+        values = (self.domid, self.xen_unique_id, self.vcpus, self.hard_affinity)
+        if self.presence == "absent" and any(v is not None for v in values):
+            raise ValueError("absent domain must not carry observed domid/identity/vcpus/affinity")
+        if self.presence == "present" and any(v is None for v in values):
+            raise ValueError("present domain must carry observed domid/identity/vcpus/affinity")
+        return self
+
+
+class CpuConflict(_CpuModel):
+    domid: int
+    vm_id: UUID | None = Field(default=None, description="관리 VM 이 아니면(Domain-0 등) null")
+    name: str | None = None
+    vcpu: int
+    pcpus: list[int] = Field(description="겹친 물리 CPU")
+
+
+class CpuIssue(_CpuModel):
+    """AFFINITY_MISMATCH · EXCLUSIVE_CONFLICT · CPU_NOT_READY · POLICY_PUBLICATION_PENDING. 코드마다 쓰는 필드가 다르다."""
+
+    code: Literal["AFFINITY_MISMATCH", "EXCLUSIVE_CONFLICT", "CPU_NOT_READY", "POLICY_PUBLICATION_PENDING"]
+    vm_id: UUID | None = None
+    domid: int | None = None
+    name: str | None = None
+    expected: list[VcpuAffinity] | None = None
+    actual: list[VcpuAffinity] | None = None
+    conflicts: list[CpuConflict] | None = None
+    operation_id: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _present_fields_only(self, handler):
+        """코드가 쓰지 않는 필드는 내지 않는다(플랫폼 issue 와 같은 모양). 다른 모델의 null 은 의미가 있어 그대로 둔다."""
+        return {k: v for k, v in handler(self).items() if v is not None}
+
+
+class VmCpuLayout(_CpuModel):
+    vm_id: UUID
+    execution_id: str | None = Field(description="현재 Xen 실행과 결합한 실행 ID. 미관리·부재는 null")
+    vcpus: int
+    allocation: Literal["exclusive", "shared"] | None = Field(description="정책 미설정이면 null")
+    desired_hard_affinity: list[VcpuAffinity] | None
+    observed: CpuObserved
+    affinity_matches: bool | None = Field(description="실제 수량·마스크가 정책과 일치. 정지·미설정이면 null")
+    exclusive_verified: bool | None = Field(description="전용 VM 의 마스크 일치 + 다른 도메인과 중복 없음. 공유·정지·미설정이면 null")
+    issues: list[CpuIssue]
+
+
+class CpuLayout(_CpuModel):
+    """조회 성공이 배치 준수를 뜻하지 않는다. host.ready·affinity_matches·exclusive_verified·issues 를 함께 본다."""
+
+    configured: bool
+    policy_revision: int | None
+    policy_schema_version: str | None = None
+    host_boot_id: str
+    observed_monotonic_ms: int = Field(description="관측한 host 의 단조 시각 ms. UTC 아님, 다른 시계와 빼지 않는다")
+    host: CpuHost
+    reservations: list[CpuReservation]
+    vms: list[VmCpuLayout] = Field(description="전체 조회면 등록된 모든 VM, 한 VM 조회면 그 VM 하나")
+    issues: list[CpuIssue]

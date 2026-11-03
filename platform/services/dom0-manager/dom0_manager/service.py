@@ -25,7 +25,7 @@ from . import budget as request_budget
 from .config import Settings
 from .drivers.base import CreateSpec, Domain, Driver, Provisioner, StatsSample
 from .errors import InsufficientResources, InvalidArgument, InvalidState, OperationNotFound, VMExists, VMNotFound
-from .models import ControlOperation, ControlStatus, CreateVmRequest, VmState
+from .models import ControlOperation, ControlStatus, CpuLayout, CreateVmRequest, VmState
 
 
 DOM0_UUID = UUID(int=0)  # xl list -l 에서 Domain-0 의 uuid 는 00000000-0000-0000-0000-000000000000 이다
@@ -158,6 +158,12 @@ class VmService:
     def control_operation(self, vm_id: UUID, key: str) -> ControlOperation:
         reject_dom0(vm_id)
         return self._driver.control_operation(vm_id, key=key)
+
+    def cpu_layout(self, vm_id: UUID | None = None) -> CpuLayout:
+        """CPU 배치 조회(S15P31E110-353). 조회만 하므로 vm_id 락을 쓰지 않는다."""
+        if vm_id is not None:
+            reject_dom0(vm_id)
+        return self._driver.cpu_layout(vm_id)
 
     def _require_running(self, vm_id: UUID) -> None:
         """재부팅 전제: 등록이 있고(없으면 404) 도메인이 running 이다(꺼짐·paused·crashed·stopping 은 409). 하위 reboot 는 도메인

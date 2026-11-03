@@ -234,6 +234,7 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 | `POST /vms` | 등록이 없으면 `create`(`idempotency_key=create-<vm_id>`, Spring 발급 `vm_id`를 그대로 전달) → `start` |
 | `POST /vms/{id}/stop` | `stop` (`force=false`, 플랫폼이 최대 90초 대기). 시한 초과는 504. `Idempotency-Key` 가 있으면 아래 "정지 요청 추적" |
 | `POST /vms/{id}/reboot` | `reboot` (`force=false`, 플랫폼이 새 실행까지 최대 90초 대기). 신규 재부팅은 키 유무와 관계없이 먼저 등록(없으면 404)·실행 중(아니면 409)을 확인한다. 키 있으면 같은 키의 원 작업을 먼저 조회해 있으면 재전달로 보고 상태 확인 없이 보낸다(작업 상태 `action: reboot`). 명령 제출 뒤 새 실행 미확인은 503(`RECONCILE_REQUIRED`). 꺼진 VM·비협력 Zephyr 거절은 플랫폼이 `ARTIFACT_INVALID` 문구로만 알려 그 두 문구만 409·501 로 바꾼다(계약 4.10) |
+| `GET /cpu-layout`, `GET /vms/{id}/cpu-layout` | `cpu-layout` (`vm_id?`, `timeout_ms` 기본 5000). 조회 전용. 하위는 `budget_ms` 를 받지 않아 요청 예산은 `timeout_ms` 로만 줄이고, 플랫폼이 operation lock 을 기다리지 않으므로 요청별 Manager(fork)로 부른다. 응답은 공개 필드만 고정 모델로 형식·의미값(presence·allocation·issue code·예약 형식)까지 검증해 옮긴다. 어긋나거나 한 VM 조회가 그 VM 하나가 아니면 503. 관측 중 바뀜(`TARGET_CHANGED`)은 409 가 아니라 503(계약 4.11) |
 | `GET /vms/{id}/control-operations?request_key=` | `control-operation` (`vm_id`, `idempotency_key`, `timeout_ms` 기본 5000). 읽기만 한다. stop·reboot(force 없음) 기록만 돌려준다 |
 | `DELETE /vms/{id}` | 실행 중 409 → 정지 후 `retire`(숨김 보관) |
 
