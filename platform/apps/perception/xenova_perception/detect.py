@@ -1,8 +1,8 @@
 """OpenCV 색 기반 인식. webcam·video 입력에서만 쓴다 (extra `camera`).
 
 장애물: HSV 빨강·진한 주황(교통 콘) 마스크 → 덩어리(연결 요소) → 박스 아랫변을 지면에 투영.
-차선:   흰색·노란색 마스크 (수평선 아래만) → 선 덩어리(연결 요소)마다 픽셀을 지면에 투영해 y = f(x) (2차) 맞춤
-        → 차 앞 0.3 m 에서 가장 가까운 왼쪽(y>0)·오른쪽(y<0) 선의 가운데(한쪽만 보이면 차로 폭/2 만큼 옮김)를 차선 중심 c(x).
+차선:   흰색·노란색 마스크 (수평선 아래만) → 선 덩어리(연결 요소)마다 픽셀을 지면에 투영
+        → 덩어리마다 왼쪽·오른쪽·버림을 따져 같은 중심의 원호 두 줄(차로 중심 ± 차로 폭/2) 모델을 맞춤 → 차선 중심 c(x).
         lane_offset_m = −c(0), heading_err_rad = atan((c(0.6) − c(0)) / 0.6). 선이 안 보이면 둘 다 0.
 
 학습 모델이 아니라 색 임계값이라 조명·배경에 약하다. 시연할 때는 빨간 콘·흰 테이프처럼 색이 분명한 것을 쓴다.
@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass
 
@@ -36,11 +37,21 @@ class ColorRanges:
 
 COLORS = ColorRanges()
 MIN_OBSTACLE_AREA = 0.001   # 화면 넓이 대비. 작은 점은 잡음으로 버린다
-LANE_MAX_SAMPLES = 600       # 선 덩어리 하나에서 투영할 최대 픽셀 수 (넘으면 고르게 솎는다)
+LANE_FIT_SAMPLES = 200       # 선 덩어리 하나에서 투영할 최대 픽셀 수 (넘으면 고르게 솎는다. 가설마다 맞추므로 적게)
 LANE_MIN_POINTS = 30
+LANE_MIN_SPAN_M = 0.1        # 선 덩어리의 전방 길이가 이보다 짧으면 버린다
 LANE_X_RANGE = (0.15, 2.0)   # 이 전방 거리 안의 차선 점만 쓴다 (멀리는 투영 오차가 크다)
-LANE_QUADRATIC_SPAN_M = 0.6  # 선이 이만큼 길게 보이면 2차, 짧으면 직선으로 맞춘다
-LANE_SIDE_X = 0.3            # 왼쪽·오른쪽 선을 가르는 전방 거리
+LANE_QUADRATIC_SPAN_M = 0.6  # 초기값: 선이 이만큼 길게 보이면 2차, 짧으면 직선으로 굽음을 읽는다
+LANE_MAX_LINES = 3           # 왼쪽·오른쪽·버림을 모두 따져 보는 선 덩어리 수 (큰 것부터)
+LANE_FIT_TAU_M = 0.03        # 잔차를 이 값에서 자른다 (다른 선·잡음이 모델을 끌지 않게)
+LANE_FIT_ITERATIONS = 8
+LANE_MAX_PSI_RAD = 1.2
+LANE_MAX_CURVATURE = 3.0     # 1/m. 반경 0.33 m 보다 급한 곡선은 없다고 본다
+LANE_HALF_RANGE_M = (0.1, 1.0)  # 양쪽 선이 다 보일 때 맞추는 차로 폭/2 의 범위
+# 사전 지식 (점 하나당 벌점의 제곱근, 값 1 m 또는 1 rad 또는 1/m 기준): 차는 차로 안에서 차로 방향을 대체로 따라 달린다.
+# 선이 차 앞 0.4 m 부터만 보여 c0·psi·kappa 가 서로 맞바뀌는(같은 점을 똑같이 잘 설명하는) 경우 덜 치우친 쪽을 고르게 한다.
+# 데이터가 분명히 정하는 값은 몇 % 안쪽으로만 끌린다
+LANE_PRIOR = (0.1, 0.05, 0.005)  # (c0, psi, kappa)
 LANE_LOOKAHEAD_M = 0.6       # heading_err 를 재는 전방 주시 거리
 
 
@@ -72,40 +83,121 @@ def find_obstacles(hsv: np.ndarray, projector: Projector) -> tuple[list[Obstacle
     return obstacles, boxes
 
 
-def _fit(xs: np.ndarray, ys: np.ndarray) -> np.ndarray | None:
-    """y = c0 + c1·x (+ c2·x²) 최소제곱 계수 (np.polyval 순서). 점이 적거나 x 가 한 곳에 몰리면 None.
-
-    곡선 차로를 따라가려면 2차가 필요하지만, 짧게 보이는 선에 2차를 맞추면 끝이 튄다 → x 폭이 좁으면 직선.
-    """
-    if len(xs) < LANE_MIN_POINTS or float(np.ptp(xs)) < 0.1:
-        return None
-    degree = 2 if float(np.ptp(xs)) >= LANE_QUADRATIC_SPAN_M else 1
-    return np.polyfit(xs, ys, degree)
-
-
-def lane_lines(mask: np.ndarray, projector: Projector) -> list[np.ndarray]:
-    """흰·노란 선 덩어리마다 지면 곡선 하나를 맞춘다. 덩어리로 나누는 이유: 곡선에서는 오른쪽 선이
-    차 앞에서 왼쪽(y > 0)으로 넘어가므로 y 부호로 점을 나누면 두 선이 섞인다."""
+def lane_lines(mask: np.ndarray, projector: Projector) -> list[tuple[np.ndarray, np.ndarray]]:
+    """흰·노란 선 덩어리마다 지면 점 (x, y) 를 낸다. 큰 덩어리부터 LANE_MAX_LINES 개까지. 덩어리로 나누는 이유:
+    곡선에서는 오른쪽 선이 차 앞에서 왼쪽(y > 0)으로 넘어가므로 y 부호로 점을 나누면 두 선이 섞인다."""
     count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    lines: list[np.ndarray] = []
-    for i in range(1, count):  # 0 은 배경
-        if stats[i, cv2.CC_STAT_AREA] < LANE_MIN_POINTS:
-            continue
+    lines: list[tuple[np.ndarray, np.ndarray]] = []
+    for i in sorted(range(1, count), key=lambda i: -stats[i, cv2.CC_STAT_AREA]):  # 0 은 배경
+        if stats[i, cv2.CC_STAT_AREA] < LANE_MIN_POINTS or len(lines) == LANE_MAX_LINES:
+            break
         vs, us = np.nonzero(labels == i)
-        step = max(1, len(vs) // LANE_MAX_SAMPLES)
+        step = max(1, len(vs) // LANE_FIT_SAMPLES)
         xs, ys, valid = projector.to_ground_many(us[::step].astype(float), vs[::step].astype(float))
         keep = valid & (xs >= LANE_X_RANGE[0]) & (xs <= LANE_X_RANGE[1])
-        coeffs = _fit(xs[keep], ys[keep])
-        if coeffs is not None:
-            lines.append(coeffs)
+        xs, ys = xs[keep], ys[keep]
+        if len(xs) >= LANE_MIN_POINTS and float(np.ptp(xs)) >= LANE_MIN_SPAN_M:
+            lines.append((xs, ys))
     return lines
+
+
+@dataclass(frozen=True)
+class LaneFit:
+    """차로 중심을 원호로 본 모델 (차 기준). x = 0 에서 가로 위치 c0, 방향 psi(왼쪽 +), 곡률 kappa(1/m, 왼쪽 +).
+    양쪽 선은 중심에서 ±half 떨어진 같은 중심의 원호다. cost 는 가설끼리 견주는 값 (작을수록 좋다)."""
+
+    c0: float
+    psi: float
+    kappa: float
+    half: float
+    cost: float
+
+    def centre(self, x: float) -> float:
+        """전방 x 에서 중심선의 가로 위치. 원호가 x 까지 못 가면(반경 < x) 가장 멀리 간 곳의 값."""
+        # 원 위의 점 d = (x, dy): n·d − kappa·|d|²/2 = 0, n = (−sin psi, cos psi) → dy 의 2차식. 곡률 0 에서도 안정한 근
+        cos, k = math.cos(self.psi), self.kappa
+        c = x * math.sin(self.psi) + k * x * x / 2
+        return self.c0 + 2 * c / (cos + math.sqrt(max(0.0, cos * cos - 2 * k * c)))
+
+
+def _fit_arc(xs: np.ndarray, ys: np.ndarray, side: np.ndarray, half: float, free_half: bool, n_prior: int) -> LaneFit:
+    """점마다 왼쪽(+1)·오른쪽(−1) 선이라고 정해 두고 원호 모델을 가우스-뉴턴(Huber 가중)으로 맞춘다.
+
+    원호 모델에서 점 d = (x, y − c0) 의 중심선 횡거리 o 는 o(1 − kappa·o/2) = n·d − kappa·|d|²/2 를 만족한다
+    (곡률 0 이면 직선). 잔차 = 그 차이 / (1 − kappa·o) ≈ 선까지의 거리. 양쪽 선이 다 있으면 half(차로 폭/2)도 맞춘다.
+    n_prior = 사전 지식의 무게 (점 수). 가설끼리 비용을 견줄 수 있게 맞추지 않은 점까지 센 전체 점 수를 준다.
+    """
+    # 초기값: 점이 많은 쪽 선에 y = a + b·x (+ c·x²) 를 맞춰 x = 0 의 방향·곡률을 읽는다
+    main_side = 1.0 if np.count_nonzero(side > 0) >= np.count_nonzero(side < 0) else -1.0
+    main = side == main_side
+    degree = 2 if float(np.ptp(xs[main])) >= LANE_QUADRATIC_SPAN_M else 1
+    coeffs = np.polyfit(xs[main], ys[main], degree)
+    c2, b, a = coeffs if degree == 2 else (0.0, *coeffs)
+    psi = math.atan(b)
+    kappa = float(np.clip(2 * c2 / (1 + b * b) ** 1.5, -LANE_MAX_CURVATURE, LANE_MAX_CURVATURE))
+    p = np.array([a - main_side * half / math.cos(psi), psi, kappa, half])
+    cols = 4 if free_half else 3
+    prior = np.zeros((3, cols))
+    prior[:, :3] = np.diag(LANE_PRIOR) * math.sqrt(n_prior)
+
+    def residual(p: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        c0, psi, k, h = p
+        o = side * h
+        dy = ys - c0
+        sin, cos = math.sin(psi), math.cos(psi)
+        den = np.maximum(1 - k * o, 0.2)
+        r = (-xs * sin + dy * cos - k * (xs * xs + dy * dy) / 2 - o * (1 - k * o / 2)) / den
+        jac = np.stack([(-cos + k * dy) / den, (-xs * cos - dy * sin) / den,
+                        (o * o - xs * xs - dy * dy) / 2 / den, -side], axis=1)
+        return r, jac
+
+    for _ in range(LANE_FIT_ITERATIONS):
+        r, jac = residual(p)
+        w = np.sqrt(np.minimum(1.0, LANE_FIT_TAU_M / np.maximum(np.abs(r), 1e-9)))
+        # 사전 지식은 c0·psi·kappa 를 0 으로 당기는 가짜 관측 세 줄
+        rows = np.vstack([jac[:, :cols] * w[:, None], prior])
+        rhs = np.concatenate([-r * w, -prior[:, :3] @ p[:3]])
+        step = np.linalg.lstsq(rows, rhs, rcond=None)[0]
+        p[:cols] += step
+        p[1] = float(np.clip(p[1], -LANE_MAX_PSI_RAD, LANE_MAX_PSI_RAD))
+        p[2] = float(np.clip(p[2], -LANE_MAX_CURVATURE, LANE_MAX_CURVATURE))
+        p[3] = float(np.clip(p[3], *LANE_HALF_RANGE_M))
+        if float(np.max(np.abs(step))) < 1e-5:
+            break
+    r, _ = residual(p)
+    cost = float(np.sum(np.minimum(r * r, LANE_FIT_TAU_M ** 2)) + np.sum((prior[:, :3] @ p[:3]) ** 2))
+    return LaneFit(float(p[0]), float(p[1]), float(p[2]), float(p[3]), cost)
+
+
+def fit_lane(lines: list[tuple[np.ndarray, np.ndarray]], lane_width_m: float) -> LaneFit | None:
+    """선 덩어리마다 왼쪽·오른쪽·버림을 모두 따져 보고(3^n − 1 가설) 비용이 가장 작은 원호 모델을 고른다.
+
+    비용 = 맞춘 점의 잘린 잔차² + 버린 점마다 τ² + 사전 지식 벌점(LANE_PRIOR). 사전 지식의 c0 항이 한쪽 선만 보일 때
+    왼쪽·오른쪽을 가른다: 같은 선을 어느 쪽으로 보든 잔차는 같으니 차가 차로 안(|c0| 작음)에 있는 쪽을 고른다.
+    급코너에서 바깥 선 하나만 보여도 선 전체의 굽음으로 방향·곡률을 읽어, 먼 쪽 짧은 선을 2차식으로 차 앞까지 늘리지 않는다.
+    """
+    if not lines:
+        return None
+    total = sum(len(xs) for xs, _ in lines)
+    best: LaneFit | None = None
+    for sides in itertools.product((1, -1, 0), repeat=len(lines)):
+        used = [(xs, ys, s) for (xs, ys), s in zip(lines, sides) if s]
+        if not used:
+            continue
+        xs = np.concatenate([u[0] for u in used])
+        ys = np.concatenate([u[1] for u in used])
+        side = np.concatenate([np.full(len(u[0]), float(u[2])) for u in used])
+        fit = _fit_arc(xs, ys, side, lane_width_m / 2, free_half=1 in sides and -1 in sides, n_prior=total)
+        cost = fit.cost + (total - len(xs)) * LANE_FIT_TAU_M ** 2
+        if best is None or cost < best.cost:
+            best = LaneFit(fit.c0, fit.psi, fit.kappa, fit.half, cost)
+    return best
 
 
 def find_lane(hsv: np.ndarray, projector: Projector, lane_width_m: float) -> Lane | None:
     """차선 추정. 못 찾으면 None (payload 에는 0 으로 나간다).
 
-    차 바로 앞(x = LANE_SIDE_X)에서 y 가 양수인 선 중 가장 가까운 것을 왼쪽, 음수 중 가장 가까운 것을 오른쪽으로 본다.
-    차로 중심 c(x) = 두 선의 가운데 (한쪽만 보이면 차로 폭/2 만큼 옮김).
+    선 덩어리들을 함께 원호 모델로 맞춰(fit_lane) 차로 중심 c(x) 를 얻는다. 한쪽만 보이면 그 선에서 차로 폭/2 안쪽의 원호.
     lane_offset_m = −c(0), heading_err_rad = atan((c(L) − c(0)) / L), L = LANE_LOOKAHEAD_M.
     → 곡선이면 heading 에 앞쪽 굽음이 들어가 자율 앱이 미리 꺾는다.
     """
@@ -114,25 +206,11 @@ def find_lane(hsv: np.ndarray, projector: Projector, lane_width_m: float) -> Lan
     if top >= mask.shape[0]:
         return None
     mask[:top] = 0
-    left = right = None
-    for coeffs in lane_lines(mask, projector):
-        y = float(np.polyval(coeffs, LANE_SIDE_X))
-        if y > 0 and (left is None or y < left[0]):
-            left = (y, coeffs)
-        elif y < 0 and (right is None or y > right[0]):
-            right = (y, coeffs)
-    if left is None and right is None:
+    fit = fit_lane(lane_lines(mask, projector), lane_width_m)
+    if fit is None:
         return None
-
-    def centre(x: float) -> float:
-        if left and right:
-            return (float(np.polyval(left[1], x)) + float(np.polyval(right[1], x))) / 2
-        if left:
-            return float(np.polyval(left[1], x)) - lane_width_m / 2
-        return float(np.polyval(right[1], x)) + lane_width_m / 2
-
-    c0 = centre(0.0)
-    return Lane(offset_m=-c0, heading_err_rad=math.atan2(centre(LANE_LOOKAHEAD_M) - c0, LANE_LOOKAHEAD_M))
+    c0 = fit.centre(0.0)
+    return Lane(offset_m=-c0, heading_err_rad=math.atan2(fit.centre(LANE_LOOKAHEAD_M) - c0, LANE_LOOKAHEAD_M))
 
 
 class Detector:
