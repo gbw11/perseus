@@ -264,7 +264,19 @@ export function SimTrackControl() {
                 size="sm"
                 variant="secondary"
                 disabled={off}
-                onClick={() => void randomSimObstacles().catch(fail)}
+                onClick={() =>
+                  void randomSimObstacles(
+                    g,
+                    pose,
+                    world.obstacles.map((o) => o.id),
+                  )
+                    .then((n) => {
+                      if (n === null) return;
+                      if (n === 3) toast.show('장애물 3개를 놓았어요', 'ok', 1500);
+                      else toast.show(`장애물 ${n}개만 놓았어요 — 나머지는 자리가 없었어요`, 'recovering');
+                    })
+                    .catch(fail)
+                }
               >
                 무작위 3개
               </Button>
