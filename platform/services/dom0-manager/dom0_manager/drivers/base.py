@@ -23,7 +23,7 @@ from typing import ClassVar
 from uuid import UUID
 
 from ..errors import NotSupportedByPlatform, VMNotFound
-from ..models import ControlOperation, StatsSource, UnavailableReason, Vm, VmState, VmStats
+from ..models import ControlOperation, CpuLayout, StatsSource, UnavailableReason, Vm, VmState, VmStats
 
 
 @dataclass(frozen=True)
@@ -163,6 +163,10 @@ class Driver(ABC):
         """실행 중인 도메인을 같은 디스크로 다시 시작한다(게스트 정상 재부팅, 새 실행). 제공하지 않는 드라이버는 501.
         재부팅 명령을 제출한 뒤 새 실행을 확인하지 못하면 결과 미확정이다(기존·새 도메인의 유무를 단정하지 않는다). 자동 강제 재부팅은 없다."""
         raise NotSupportedByPlatform(f"{self.name} driver does not support reboot")
+
+    def cpu_layout(self, vm_id: UUID | None = None) -> CpuLayout:  # S15P31E110-353
+        """정책 CPU 배치와 실제 Xen hard affinity 조회. 플랫폼 CPU 정책이 없는 드라이버는 501."""
+        raise NotSupportedByPlatform(f"{self.name} driver does not report CPU layout")
 
     def request_reboot(self, vm_id: UUID, *, key: str) -> ControlOperation:
         """키 있는 재부팅(S15P31E110-208). tracks_control_operations 인 드라이버만 구현한다."""

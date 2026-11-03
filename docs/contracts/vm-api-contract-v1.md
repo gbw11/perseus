@@ -286,6 +286,8 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 | `POST` | `/api/v1/vms/{vm_id}/reboot` | `204`. `Idempotency-Key` 가 있으면 `200`·`202` 작업 상태 (4.10) | `400`, `401`, `404`, `409`, `500`, `501`, `503`, `504` |
 | `GET` | `/api/v1/vms/{vm_id}/control-operations` | `200` 작업 상태 (4.8) | `400`, `401`, `404`, `500`, `501`, `503`, `504` |
 | `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `400`, `401`, `404`, `409`, `500`, `501`, `503`, `504` |
+| `GET` | `/api/v1/cpu-layout` | `200` CPU 배치 (4.11) | `401`, `500`, `501`, `503`, `504` |
+| `GET` | `/api/v1/vms/{vm_id}/cpu-layout` | `200` CPU 배치 (4.11) | `400`, `401`, `404`, `500`, `501`, `503`, `504` |
 | `GET` | `/healthz` | `200` | `401`, `503` |
 
 `/healthz` 를 뺀 모든 엔드포인트는 선택 헤더 `X-Request-Budget-Ms`(요청 예산, 4.9)를 받는다.
@@ -458,6 +460,22 @@ Spring의 페이지 규칙: (1) `gap: true`면 경고(`WARN`)로 `recovery.faile
 - mock 드라이버는 같은 VM 의 새 도메인(새 domid)으로 동기 재부팅하고 키 있으면 `200 completed`(`operation_id: null`)다. 재부팅을 제공하지 않는 드라이버는 `501`.
 - 플랫폼은 꺼진 VM·force 없는 비협력 Zephyr 거절에 아직 전용 코드가 없어 `ARTIFACT_INVALID` 의 문구로만 알린다. dom0-manager 는 그 두 문구만 `409`·`501` 로 바꾸고 `platform_code` 는 원본(`ARTIFACT_INVALID`)을 둔다.
 - Recovery Worker 에는 사용자 재부팅이다: 새 실행은 플랫폼 실행 소유자 `user` 로 기록되고, 감시기는 새 domid 로 부팅 유예부터 다시 본다. 복구 이벤트를 내지 않는다.
+
+
+### 4.11 `GET /api/v1/cpu-layout`, `GET /api/v1/vms/{vm_id}/cpu-layout`
+
+플랫폼 `cpu-layout` 으로 **정책이 정한 vCPU→pCPU 배치와 실제 Xen hard affinity·전용성 검사**를 읽는다. 조회만 하며 정책·affinity·VM 을 바꾸지 않는다. 한 VM 조회도 같은 스키마이고 `vms` 에 그 VM 하나만 담는다(전용성은 다른 모든 도메인의 vCPU 를 함께 관측해 판정한다).
+
+- **`200` 은 조회 성공이지 배치 준수가 아니다.** `host.ready`·`affinity_matches`·`exclusive_verified`·`issues` 를 함께 본다.
+- `null` 은 해당 없음·모름이다. 정지(`observed.presence: absent`)·공유(`allocation: shared` 의 `exclusive_verified`)·정책 미설정(`configured: false`)의 null 을 성공(true)으로 읽지 않는다. 정지는 불일치가 아니다.
+- 불일치는 `200` 이고 `affinity_matches: false`·`exclusive_verified: false` 와 `issues` 로 알린다. issue 는 `code`(`AFFINITY_MISMATCH`·`EXCLUSIVE_CONFLICT`·`CPU_NOT_READY`·`POLICY_PUBLICATION_PENDING`)와 그 코드가 쓰는 필드만 담는다(충돌한 domid·vcpu·pcpus 등).
+- `reservations` 는 전용 코어 예약이다. 플랫폼 정책 1.0 의 `{vm_id, pcpu}` 와 2.0 의 `{vm_id, mode, pcpus}` 를 `{vm_id, pcpus}` 로 맞춘다.
+- `observed_monotonic_ms` 는 관측한 host 의 단조 시각이다. UTC 가 아니며 다른 시계와 빼지 않는다.
+- 플랫폼은 공통 operation lock 을 **기다리지 않고** 시도한다. 긴 변경 작업(생성·정지·재부팅 등)이 잠금을 쥐고 있으면 바로 `503`(`platform_code=OPERATION_IN_PROGRESS`, 재시도 가능)이다. dom0-manager 도 이 조회를 요청별 Manager 로 불러 자체 직렬화 대기에 묶지 않는다.
+- 요청 예산(4.9)은 하위 `timeout_ms`(기본 5000, 상한 15000)로만 줄인다. 하위 `cpu-layout` 은 `budget_ms` 를 받지 않는다.
+- 오류: 미등록 VM `404`, 관측 실패 `503 OBSERVATION_UNAVAILABLE`(빈 마스크·0 으로 성공을 대체하지 않는다), 관측 도중 domain set·신원·정책이 바뀌면 `503 TARGET_CHANGED`(재시도 가능, 대상 충돌이 아니다), 기한 만료 `504`, 손상된 정책 `500`(`platform_code=CPU_POLICY_INVALID`, 재시도로 풀리지 않는다). 플랫폼 응답의 모양이나 의미값이 계약을 벗어나면 꾸미지 않고 `503` 이다: `presence`(present·absent)와 관측값의 짝, `allocation`(exclusive·shared·null), issue `code`(위 네 가지), 예약 형식(1.0 `pcpu` 와 2.0 `mode: exclusive`·`pcpus` 를 섞지 않음, 2.0 의 mode 는 exclusive 만). 한 VM 조회의 `vms` 가 정확히 그 VM 하나가 아니어도(빈 목록·다른 VM·여러 VM) `503` 이다.
+- `exclusive_verified` 는 관측 시점의 hard affinity 중복 검사다. IRQ·캐시·메모리·I/O 격리나 실시간 보장이 아니다.
+- CPU 정책이 없는 드라이버(mock 등)와 `cpu-layout` 을 모르는 옛 Manager 는 `501`.
 
 ---
 

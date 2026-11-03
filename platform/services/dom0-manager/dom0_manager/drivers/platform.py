@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import json
 import logging
 import os
 import sys
@@ -51,7 +52,7 @@ from ..errors import (
     VMExists,
     VMNotFound,
 )
-from ..models import ControlOperation, ControlStatus, VmState
+from ..models import ControlOperation, ControlStatus, CpuLayout, VmState
 from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner, StatsSample
 from .xentop import Xentop, collect_stats
 from .xl import Xl
@@ -93,10 +94,13 @@ _TIMEOUT_ACTIONS = frozenset({
 })
 # 하위가 공통 실행 잠금 없이 처리하는 일반 조회. read_fork 일 때 직렬화하지 않고 호출마다 새 fork 로 부른다.
 # provisioning·registrations는 metadata 조회다. provision은 공급 변경이므로 직렬화한다.
+# cpu-layout 은 공통 operation lock 을 기다리지 않고 시도해 경합이면 바로 OPERATION_IN_PROGRESS 다. 그래서 여기서도 줄 세우지 않는다
 _READ_ACTIONS = frozenset({
     "list", "get", "intents", "probe", "execution-context", "templates", "operation", "control-operation", "recovery-operation",
-    "provisioning", "registrations",
+    "provisioning", "registrations", "cpu-layout",
 })
+# budget_ms 는 받지 않고 spec timeout_ms(1..15000) 만 받는 조회. 요청 예산은 timeout_ms 로만 줄인다
+_TIMEOUT_ONLY_ACTIONS = frozenset({"cpu-layout"})
 _READ_TIMEOUT_MS = 15_000  # 하위 조회의 기본·상한
 
 
@@ -118,11 +122,12 @@ def call_with_budget(manager: Any, action: str, spec: dict[str, Any] | None = No
     remaining = budget.downstream_ms()
     if remaining is None:
         return _deadline_envelope(action, kwargs.get("request_id"))
-    if action in _BUDGET_ACTIONS and _accepts_budget(manager):
+    budgeted = action in _BUDGET_ACTIONS and _accepts_budget(manager)
+    if budgeted:
         kwargs["budget_ms"] = min(remaining, request_budget.MAX_MS)
-        if action in _TIMEOUT_ACTIONS:
-            spec = dict(spec or {})
-            spec["timeout_ms"] = min(int(spec.get("timeout_ms", _READ_TIMEOUT_MS)), remaining, _READ_TIMEOUT_MS)
+    if action in _TIMEOUT_ONLY_ACTIONS or (budgeted and action in _TIMEOUT_ACTIONS):
+        spec = dict(spec or {})
+        spec["timeout_ms"] = min(int(spec.get("timeout_ms", _READ_TIMEOUT_MS)), remaining, _READ_TIMEOUT_MS)
     return manager.call(action, spec, **kwargs)
 
 
@@ -537,6 +542,7 @@ def view_to_domain(view: dict[str, Any]) -> Domain | None:
 
 
 _LOOKUP_TIMEOUT_MS = 5_000  # 원 작업 조회의 기본 한도. HTTP 조회 계약 5초와 같다
+_CPU_LAYOUT_TIMEOUT_MS = 5_000  # CPU 배치 조회의 기본 한도. Spring 조회 한도(6초) 안에서 응답한다
 
 
 class PlatformDriver(Driver):
@@ -688,6 +694,38 @@ class PlatformDriver(Driver):
         observation = data.get("deadline_observation") if isinstance(data.get("deadline_observation"), dict) else {}
         return control_operation_from_record(record, observation, vm_id=vm_id, key=key,
                                              envelope_operation_id=envelope.get("operation_id"))
+
+    # ---- CPU 배치 (S15P31E110-353) ----
+
+    def cpu_layout(self, vm_id: UUID | None = None) -> CpuLayout:
+        """정책 배치와 실제 Xen hard affinity·전용성 검사. 조회만 한다(정책·affinity·VM 을 바꾸지 않음).
+        하위는 공통 operation lock 을 기다리지 않으므로 긴 변경 작업 중이면 바로 503(재시도 가능)이다."""
+        spec: dict[str, Any] = {"timeout_ms": _CPU_LAYOUT_TIMEOUT_MS}
+        if vm_id is not None:
+            spec["vm_id"] = str(vm_id)
+        envelope = call_with_budget(self.manager, "cpu-layout", spec)
+        context = "cpu-layout" if vm_id is None else f"cpu-layout {vm_id}"
+        if not envelope.get("ok"):
+            error = envelope.get("error") or {}
+            code = error.get("code")
+            if code == "INVALID_SPEC":  # 입력은 API 가 먼저 검사한다. 남는 경우는 cpu-layout 을 모르는 옛 Manager 다
+                raise NotSupportedByPlatform("platform manager does not support cpu-layout",
+                                             detail=f"{code}: {error.get('message')}", platform_code=code)
+            if code == "TARGET_CHANGED":  # 관측 도중 domain set·신원·정책이 바뀌었다: 대상 충돌이 아니라 다시 읽을 일이다
+                raise PlatformUnavailable(f"{context}: CPU state changed during observation; read again",
+                                          detail=f"{code}: {error.get('message')}", platform_code=code, retryable=True)
+            raise_for_envelope(envelope, context=context)
+        try:
+            layout = CpuLayout.model_validate_json(json.dumps(envelope.get("data")), strict=True)
+        except (TypeError, ValueError) as exc:  # ValidationError 도 ValueError 다. JSON 으로 옮길 수 없는 값도 같은 손상이다
+            # 모양·의미값이 어긋난 응답을 빈 마스크·false 로 꾸미지 않는다
+            raise PlatformUnavailable(f"{context}: platform returned a malformed CPU layout; inspect the platform version",
+                                      detail=str(exc)[:300]) from exc
+        if vm_id is not None and [vm.vm_id for vm in layout.vms] != [vm_id]:
+            # 한 VM 조회의 결과는 정확히 그 VM 하나다. 빈 목록·다른 VM·여러 VM 을 그 VM 의 배치로 내지 않는다
+            raise PlatformUnavailable(f"{context}: platform returned CPU layout for {[str(vm.vm_id) for vm in layout.vms]}, not this VM",
+                                      detail="single-VM cpu-layout must contain exactly the requested VM")
+        return layout
 
     # ---- 호스트 ----
 

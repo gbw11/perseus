@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 from . import __version__
-from .api import console, health, logs, recovery, registrations, stats, vms
+from .api import console, cpu, health, logs, recovery, registrations, stats, vms
 from .api.errors import install_error_handlers
 from .config import Settings
 from .console import ConsoleSession
@@ -61,6 +61,7 @@ def create_app(
     app.include_router(health.router)
     app.include_router(vms.router, prefix="/api/v1")
     app.include_router(stats.router, prefix="/api/v1")
+    app.include_router(cpu.router, prefix="/api/v1")
     app.include_router(console.router, prefix="/api/v1")
     app.include_router(recovery.router, prefix="/api/v1")
     app.include_router(logs.router, prefix="/api/v1")
