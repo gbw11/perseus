@@ -2157,10 +2157,12 @@ xenova-broker initialize
 ```
 
 기본 서비스 계정의 계획만 출력한다. 저장하려면 `--execute`가 필요하다.
-`--vm UUID`는 선택·반복 옵션이며 해당 VM의 v1(UUID)·v2(`telemetry-UUID`) 계정을 함께 추가한다.
+`--vm UUID`는 선택·반복 옵션이며 해당 VM의 Agent·주행용 UUID 계정과
+`telemetry-UUID` 계정을 함께 추가한다. Telemetry 계정은 자기 VM의 v1 `/metrics`와 v2 텔레메트리를 발행한다.
 생략해도 서비스 계정은 만들 수 있고, 새 VM 계정은 나중에 추가할 수 있다.
 초기화 재실행은 기존 계정·비밀번호를 보존하고 빠진 기본 계정과 지정 VM만 추가한다.
 기존 목록에서 빠진 UUID를 삭제하지 않는다.
+패키지의 정책이 바뀌면 `initialize`의 계획을 확인하고 `--execute`로 새 ACL 세대를 게시한다.
 
 | 명령 | 필수 인자 | 선택·기본값 | 동작 |
 |---|---|---|---|
@@ -2191,7 +2193,7 @@ xenova-vm list --short
 read -r -p 'VM UUID: ' VM_ID
 xenova-broker add-account "$VM_ID"
 xenova-broker add-account "$VM_ID" --execute
-# v2 Publisher도 사용할 때만 별도 계정을 추가한다.
+# Telemetry Publisher가 필요한 VM에 별도 계정을 추가한다.
 xenova-broker add-account "telemetry-$VM_ID" --execute
 xenova-broker list
 ```

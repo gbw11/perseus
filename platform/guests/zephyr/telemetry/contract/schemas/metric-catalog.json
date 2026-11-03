@@ -33,6 +33,16 @@
       "meaning_ko": "kernel system heap의 현재 부팅 중 최대 할당 바이트; 전체 VM RAM 또는 libc heap이 아님"
     },
     {
+      "name": "memory.kernel_heap.accounted_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory",
+      "labels": [],
+      "source": "xdiag kernel heap adapter, allocated_bytes + free_bytes from one sample",
+      "meaning_ko": "allocator가 이번 표본에서 할당 또는 미할당으로 계상한 kernel system heap 바이트 합계"
+    },
+    {
       "name": "cpu.system.percent",
       "unit": "percent",
       "kind": "gauge",
@@ -125,6 +135,16 @@
       "meaning_ko": "netfront protocol error; 32비트 원본, wrap 보정 없이 전달",
       "raw_bits": 32,
       "reset_scope": "guest_boot"
+    },
+    {
+      "name": "rx_bytes_per_s",
+      "unit": "bytes/s",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "network",
+      "labels": ["interface", "counter_epoch"],
+      "source": "Diagnostics cached netfront RX byte rate",
+      "meaning_ko": "같은 ring 세대의 두 유효 관측 사이 RX 바이트 차이를 실제 경과 시간으로 나눈 정수 초당 수신률"
     },
     {
       "name": "network.interface_up",

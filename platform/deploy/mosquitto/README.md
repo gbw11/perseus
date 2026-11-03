@@ -57,7 +57,8 @@ xenova-broker add-account "telemetry-$VM_ID" --execute
 xenova-broker list
 ```
 
-v1 Agent·주행 계정은 UUID, v2 Publisher 계정은 telemetry-UUID입니다. 두 비밀번호는
+Agent·주행 계정은 UUID, Telemetry Publisher 계정은 telemetry-UUID입니다. Publisher 계정은
+자기 VM의 v2 텔레메트리와 v1 `/metrics` 발행 권한을 갖습니다. 두 비밀번호는
 독립적입니다. 한 계정을 지워도 동반 계정·VM·자산·CPU 정책은 바뀌지 않습니다.
 새 서비스 이름은 공통 정책에 명시해야 하며 알 수 없는 이름에는 권한을 추측해 주지 않습니다.
 기존 message-board 계정은 유지하지만 새 기본 서비스에는 현행 interaction을 사용합니다.
@@ -93,6 +94,7 @@ drive·telemetry는 기존 provisioning 도구용 private JSON이며 내부 주�
   passwd와 passwd.credentials를 읽기만 합니다. 필요한 기본 서비스는 이후 initialize로 추가합니다.
 - 원본 평문이 없거나 계정 집합이 다르면 자동 재발급하지 않습니다. 원본을 보존해 수습합니다.
 - 정상 재부팅·서비스 재시작·데이터 보존 업데이트는 기존 인증정보를 재사용합니다.
+- 정책을 교체한 보드는 `xenova-broker initialize` 계획을 확인한 뒤 `--execute`로 기존 계정의 ACL 세대를 갱신합니다. 패키지의 정책 파일과 실행 중인 ACL 세대는 별개입니다.
 - SD 전체 재설치로 데이터가 초기화되면 새 비밀번호를 소비자에 반영합니다. VM UUID도
   바뀌면 계정 이름·Bootstrap 입력도 바뀝니다. 이미지 조립·데이터 초기화 정책은 그대로입니다.
 

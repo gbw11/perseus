@@ -178,6 +178,9 @@ def validate(message:dict[str,Any],topic:str,qos:int,retain:bool,raw_length:int|
                     require(v['labels']['region'] in ('net_rx_data','net_tx_data'),'METRIC_LABELS','unknown selected memory region')
                 if 'task_epoch' in v['labels']:
                     require(re.fullmatch(SCHEMA['$defs']['uuid']['pattern'],v['labels']['task_epoch']) is not None,'METRIC_LABELS','task_epoch UUID')
+                if 'counter_epoch' in v['labels']:
+                    epoch=unsigned(v['labels']['counter_epoch'],'counter_epoch')
+                    require(epoch>0 or v['status']!='ok','METRIC_LABELS','observed byte counter requires a ring epoch')
                 key=(v['name'],tuple(sorted(v['labels'].items())))
                 require(key not in seen,'METRIC_DUPLICATE',v['name']);seen.add(key)
                 if v['status']!='ok':

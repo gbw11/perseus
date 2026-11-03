@@ -35,6 +35,11 @@ int main(void)
 		.now_us=50000000,.frequency_hz=54000000,.heap_used=9007199254741003ULL,
 		.heap_free=2000,.heap_peak=9007199254741103ULL,.threads_rc=-EAGAIN,
 		.interface_up=true,.carrier=false,.net={UINT32_MAX,2,3,4,5,6}};
+	observation.resources.net_end_ms=50000;
+	observation.resources.net_epoch=7;
+	observation.resources.rx_bytes=9007199254741111ULL;
+	observation.resources.tx_bytes=UINT64_MAX;
+	observation.resources.rx_bytes_per_s=12345;
 	assert(!xdiag_timing_init(&observation.timing,20000,20000,0));
 	assert(!xdiag_timing_begin(&observation.timing,100));
 	assert(!xdiag_timing_end(&observation.timing,200));
@@ -45,6 +50,7 @@ int main(void)
 	xt_capture_events(&publisher,&observation.history);
 	assert(publisher.event_count==12 && publisher.counters.source_missed==8);
 	for (enum xt_kind k=XT_INVENTORY;k<=XT_PUBLISHER;++k) { emit(k,0); }
+	emit(XT_NETWORK_V1,0);
 	struct xdr_counter before={.total=100,.busy=10,.at_ms=49000},after={.total=500,.busy=111,.at_ms=50000};
 	xdr_window(&before,&after,10000,&observation.resources.cpu);
 	assert(!observation.resources.cpu.rc&&observation.resources.cpu.percent_milli==25250);
@@ -86,6 +92,7 @@ int main(void)
 	assert(!xt_utc_update(&publisher.utc,49900,50000,1767225600000ULL,25,500,"dom0_adjtimex"));
 	char iso[25];uint64_t bound;
 	assert(!xt_utc_read(&publisher.utc,50000,iso,&bound));assert(!strcmp(iso,"2026-01-01T00:00:00.000Z")&&bound==126);
+	emit(XT_NETWORK_V1,0);
 	emit(XT_HEARTBEAT,0);
 	assert(xt_utc_read(&publisher.utc,80000,iso,&bound)==-ENODATA);
 	assert(xt_utc_update(&publisher.utc,50001,50000,1767225600000ULL,25,500,"dom0_adjtimex")==-ERANGE);
@@ -111,7 +118,21 @@ int main(void)
 	}
 	for (unsigned i=0;i<8;++i) { emit(XT_THREADS,i); }
 	emit(XT_HISTORY,0);emit(XT_HISTORY,1);
-	observation.net[0]=0;emit(XT_NETWORK,0);
+	observation.net[0]=0;
+	observation.resources.rx_bytes_per_s=0;emit(XT_NETWORK,0);
+	observation.resources.net_rate_rc=-ENODATA;emit(XT_NETWORK,0);
+	observation.resources.net_epoch=8;
+	observation.resources.rx_bytes=0;
+	observation.resources.net_rate_rc=-EOVERFLOW;emit(XT_NETWORK,0);
+	emit(XT_NETWORK_V1,0);
+	observation.resources.net_rate_rc=0;
+	observation.resources.net_end_ms=47999;emit(XT_NETWORK,0);
+	emit(XT_NETWORK_V1,0);
+	observation.resources.net_end_ms=50000;
+	observation.resources.net_bytes_rc=observation.resources.net_rate_rc=-EIO;
+	observation.resources.net_epoch=0;
+	emit(XT_NETWORK_V1,0);
+	observation.heap_used=UINT64_MAX;emit(XT_MEMORY,0);
 	publisher.counters.submit_failures=UINT64_MAX;emit(XT_PUBLISHER,0);
 	observation.heap_rc=-ENOTSUP;observation.network_rc=-EIO;observation.timing_rc=-ENOENT;
 	observation.rows=0;observation.rows_seen=0;observation.threads_rc=-EAGAIN;

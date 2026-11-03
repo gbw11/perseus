@@ -246,6 +246,7 @@
         "unit": {
           "enum": [
             "bytes",
+            "bytes/s",
             "count",
             "packets",
             "us",

@@ -508,8 +508,9 @@ preset과 `xenova-broker`의 설치 바이트를 확인한다. 공통 이미지�
 로컬 개발 파일의 일치는 `python3 platform/deploy/mosquitto/scripts/render-policy.py --check`로
 검사한다. 제품 패키지는 공통 관리 모듈·정책을 설치하며 개발용 예시 UUID와 비밀번호를
 seed에 넣지 않는다. 새 VM 계정은 이미지 재빌드 없이 `xenova-broker add-account`로 추가한다.
-v1 drive와 v2 Telemetry는 다른 계정이며 새 Telemetry Bootstrap은 telemetry-UUID를 사용한다.
-기존 UUID 형식 v2 펌웨어·Bootstrap은 이 새 계정과 호환된다고 가정하지 않는다.
+주행은 VM UUID 계정, Telemetry는 `telemetry-UUID` 계정을 쓴다. Telemetry 계정은 자기 VM의
+v1 `/metrics`와 v2 텔레메트리를 발행한다. 기존 설치에 정책을 교체하면
+[브로커 ACL 갱신 절차](../../platform/deploy/mosquitto/README.md#기존-계정과-업데이트)를 따른다.
 
 고정 meta-networking에는 Tailscale 1.94.2가 있지만, 현재 이미지는 보안 수정이 포함된
 공식 ARM64 정적 릴리스 1.104.2를 meta-xenova recipe로 고정한다. TS-2026-013의 수정은
