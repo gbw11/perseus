@@ -26,8 +26,13 @@
     (Zephyr, 지금 crashed, 같은 실행의 graceful 실패). 옛 실행의 crash·graceful 실패를 새 실행의 force 근거로 쓰지 않는다
   · 실행 대조: 주행 VM 은 binding execution_id 가 반드시 있어야 하고 view 와 같아야 한다. 주행이 아닌 VM 은 관측에 execution_id 가 없어
     domid 로 대조한다(Xen 은 한 host 부팅 안에서 domid 를 다시 쓰지 않는다. 제한 정책)
-  · 주행 VM 은 현재 Gateway 보호 근거(protection)도 있어야 한다. drive 분류를 모르면(drive config 없음) Zephyr force 는 모두 보류한다
+  · 주행 VM 은 현재 Gateway 보호도 있어야 한다. drive 분류를 모르면(drive config 없음) Zephyr force 는 모두 보류한다
   근거가 부족하면 attempt 를 소비하지 않고 recovery.started 도 내지 않은 채 잠시 뒤 다시 본다. 플랫폼 per-VM force 승인은 플랫폼이 최종 확인한다
+- 주행 VM 의 Gateway 보호 수명주기(S15P31E110-346, protection.py): 키·원 spec 을 저장한 뒤 submit 하고, 같은 실행에 대해 PROTECTED 가
+  확인된 뒤에만 attempt 를 시작한다. 응답을 잃으면 같은 키로 다시 묻는다. 보호를 더 쓰지 않게 되면(완료·취소·회복·다른 실행) 새 실행
+  binding 이 보이면 finish, 원 실행 그대로이고 취소·회복으로 닫혔으면 cancel 한다. 열린 복구에서 같은 실행의 의도 revision·lifecycle
+  generation 만 바뀌었으면 옛 보호를 cancel 한 뒤 지금 의도로 새 보호를 받는다. 실패로 닫힌 복구는 cancel 하지 않는다(고장 난 실행의
+  재선택 차단을 풀지 않음). 정산이 남은 기록은 닫혀도 지우지 않고 Worker 재시작 뒤에도 이어 간다. 이전 host 의 보호는 정산하지 않는다
 """
 
 from __future__ import annotations
@@ -46,6 +51,7 @@ from ..errors import Dom0ManagerError, DriverTimeout
 from .model import FailureReason, HealthState, Judgment, VmHealth
 from .platform_recovery import RecoveryPlatform
 from .policy import RecoveryPolicy
+from .protection import HISTORICAL, LIVE, LOST, PROTECTED, GatewayProtection, Outcome, ProtectionHold
 from .state import RecoveryRecord, RecoveryStatus, RecoveryStore
 
 log = logging.getLogger(__name__)
@@ -90,24 +96,20 @@ class _Held(Exception):
     """force-restart 근거가 부족하다. attempt 를 소비하지 않고 잠시 뒤 다시 본다."""
 
 
+class _ProtectionFailed(Exception):
+    """Gateway 보호를 이 복구에서 더 얻을 수 없다(계약·설정 거절, 보호 요청 상한). 새 키로 우회하지 않고 최종 실패로 닫는다."""
+
+    def __init__(self, message: str, code: str | None) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 @dataclass(frozen=True)
-class ProtectionQuery:
-    """보호 근거 조회에 넘기는 읽기 전용 사본. 변경 가능한 레코드·view 를 잠금 밖으로 넘기지 않도록 스칼라만 담는다."""
+class _Settlement:
+    """닫힌 복구의 보호 정산 결과. 시작할 때의 보호 기록 사본(키 대조용)과 Gateway 결과."""
 
-    recovery_id: UUID
-    vm_id: UUID
-    attempt: int
-    host_boot_id: str | None
-    execution_id: str | None
-    intent_revision: int | None
-    lifecycle_generation: int | None
-    domid: int | None
-    xen_state: str | None
-
-
-# 주행 VM 의 현재 Gateway 보호 근거. 보호가 지금 유효한가. 보호 수명주기(S15P31E110-346) 전에는 없다.
-# I/O(Gateway get 등)를 해도 된다: 엔진 잠금 밖에서 부르고, 잠근 뒤 레코드 열림·취소·현재 증거를 다시 확인한다. 상태를 바꾸지 않는다
-ProtectionEvidence = Callable[[ProtectionQuery], bool]
+    entry: dict[str, Any]
+    outcome: Outcome
 
 
 class RecoveryEngine:
@@ -124,7 +126,7 @@ class RecoveryEngine:
         new_id: Callable[[], UUID] = uuid4,
         inline: bool = False,
         drive_vm_ids: Iterable[UUID | str] | None = None,
-        protection: ProtectionEvidence | None = None,
+        protection: GatewayProtection | None = None,
     ) -> None:
         self._policy = policy
         self._platform = platform
@@ -137,7 +139,8 @@ class RecoveryEngine:
         self._inline = inline
         # None: 주행 VM 이 어느 것인지 모른다(drive config 없음). Zephyr force 를 모두 보류한다. 빈 집합은 "주행 VM 없음"이 확인된 것
         self._drive_vm_ids = None if drive_vm_ids is None else frozenset(str(UUID(str(v))) for v in drive_vm_ids)
-        self._protection = protection
+        self._protection = protection  # 없으면 주행 VM force 는 보류된다
+        self._settle_due: dict[UUID, float] = {}  # 닫힌 복구의 보호 정산을 다음에 시도할 시각(메모리. 재시작하면 바로 다시 본다)
         self._held: dict[UUID, str] = {}  # 근거 부족으로 보류 중인 복구의 마지막 사유. 바뀔 때만 로그한다
         self._executor: ThreadPoolExecutor | None = None if inline else ThreadPoolExecutor(max_workers=1, thread_name_prefix="recovery")
         self._futures: dict[UUID, Future] = {}
@@ -242,6 +245,7 @@ class RecoveryEngine:
                 elif record.status == RecoveryStatus.VERIFYING and self._due(record, now):
                     self._attempt_failed(record, now, {"code": "REOBSERVE_TIMEOUT", "platform_code": None,
                                                        "message": f"target changed but neither HEALTHY nor STOPPED within {self._policy.verify_timeout_s:g}s"})
+            self._schedule_settlements(now)
             self._prune()
 
     def shutdown(self) -> None:
@@ -303,16 +307,23 @@ class RecoveryEngine:
         if view.get("desired_state") != "running" or not view.get("intent_applicable"):
             raise _NotEligible(f"desired_state={view.get('desired_state')} applicable={view.get('intent_applicable')}")
         hold = self._evidence_hold(record, view)
-        if hold is None and self._drive_force(record, view):
-            with self._lock:
-                query = ProtectionQuery(record.recovery_id, record.vm_id, record.attempt, view.get("host_boot_id"), view.get("execution_id"),
-                                        view.get("intent_revision"), view.get("generation"), view.get("domid"), view.get("xen_state"))
-            if self._protection is None or not self._protection(query):  # I/O 일 수 있어 엔진 잠금 밖에서 한다
-                hold = "drive VM without current Gateway protection"
+        drive = hold is None and self._drive_force(record, view)
+        if drive:
+            hold = self._protect(record, view)  # Gateway I/O 는 엔진 잠금 밖에서 한다
+            if hold is None:
+                # 보호를 얻는 동안 Manager 쪽이 바뀌었을 수 있다: 지금 view 로 대상·의도·실행을 다시 보고, 보호가 그 실행의 것인지 아래에서 확인한다
+                view = self._platform.view(record.vm_id)
+                if view.get("lifecycle") != "REGISTERED" or view.get("desired_state") != "running" or not view.get("intent_applicable"):
+                    raise _NotEligible(f"after protection: lifecycle={view.get('lifecycle')} desired_state={view.get('desired_state')} "
+                                       f"applicable={view.get('intent_applicable')}")
+                if not self._drive_force(record, view):
+                    hold = "after protection the platform view no longer calls for a force-restart"
         with self._lock:
             if record.cancel_requested or not record.open:
                 raise _Cancelled()
-            hold = hold or self._evidence_hold(record, view)  # 보호를 조회하는 동안 현재 증거가 바뀌었을 수 있다
+            hold = hold or self._evidence_hold(record, view)  # 보호를 확보하는 동안 현재 증거가 바뀌었을 수 있다
+            if hold is None and drive and not self._protected_for(record, view):
+                hold = "drive VM without a current Gateway protection for this execution"
             if hold is not None:
                 raise _Held(hold)
             self._held.pop(record.recovery_id, None)
@@ -382,6 +393,15 @@ class RecoveryEngine:
         self._futures[record.recovery_id] = self._executor.submit(work)
 
     def _finish(self, record: RecoveryRecord, future: Future, now: float) -> None:
+        if not record.open:  # 닫힌 복구의 실행 스레드 일은 보호 정산뿐이다
+            try:
+                settlement = future.result()
+            except Exception:  # noqa: BLE001 - 정산 실패는 기록을 바꾸지 않고 다음 차례에 다시 본다
+                log.exception("vm %s: recovery %s Gateway protection settlement raised", record.vm_id, record.recovery_id)
+                return
+            if self._note_protection(record, settlement.entry, settlement.outcome) not in LIVE:
+                self._settle_due.pop(record.recovery_id, None)
+            return
         try:
             result = future.result()
         except _NotEligible as exc:
@@ -390,6 +410,9 @@ class RecoveryEngine:
             self._close(record, RecoveryStatus.CANCELLED, now, error={"code": "TARGET_NOT_ELIGIBLE", "platform_code": None, "message": "cancelled before the platform accepted the attempt"})
         except _Recovered as exc:
             self._close(record, RecoveryStatus.RECOVERED, now, error={"code": "TARGET_HEALTHY", "platform_code": None, "message": str(exc)})
+        except _ProtectionFailed as exc:
+            self._close(record, RecoveryStatus.FAILED, now, final=True, error={
+                "code": "PROTECTION_UNAVAILABLE", "platform_code": None, "message": f"{exc} (Gateway {exc.code})" if exc.code else str(exc)})
         except _Held as exc:
             record.due_monotonic = now + self._policy.transient_retry_s  # attempt·상태·이벤트는 그대로다
             if self._held.get(record.recovery_id) != str(exc):
@@ -486,6 +509,93 @@ class RecoveryEngine:
         if not drive and health.execution_id is not None and health.execution_id != view.get("execution_id"):
             return f"evidence for execution {health.execution_id}, platform runs {view.get('execution_id')}"
         return None
+
+    # ---- Gateway 보호 (S15P31E110-346) ----
+
+    def _protect(self, record: RecoveryRecord, view: dict[str, Any]) -> str | None:
+        """주행 VM force 직전: 이 실행의 보호를 확보한다. 보류 사유 또는 None. 기록 전이는 잠금 안에서 저장한 뒤에만 Gateway 를 부른다."""
+        protector = self._protection
+        if protector is None:
+            return "drive VM without a Gateway protection provider"
+        with self._lock:
+            entry = None if record.protection is None else dict(record.protection)
+        if entry is not None and entry["phase"] in LIVE and not self._same_target(entry, view):
+            # 이전 host·실행·의도의 보호: 새 보호(Gateway 는 VM 당 활성 보호 하나)보다 정산이 먼저다. 다른 실행이면 새 binding 으로 finish,
+            # 같은 실행에서 의도·lifecycle generation 만 바뀌었으면 원 실행에 cancel. 결과를 모르면 새 키 없이 다음 차례에 같은 키로 다시 본다
+            if entry["spec"]["host_boot_id"] != view.get("host_boot_id"):
+                outcome = Outcome(HISTORICAL, "protection was issued on an earlier host boot; not settled")
+            else:
+                outcome = protector.settle(entry, allow_cancel=entry["spec"]["target_execution_id"] == view.get("execution_id"))
+            if self._note_protection(record, entry, outcome) in LIVE:
+                return f"protection {entry['request_id']} for an earlier execution or intent is not settled yet: {outcome.note}"
+            entry = None
+        if entry is None or entry["phase"] not in LIVE:
+            if record.protection_requests >= self._policy.max_attempts:
+                raise _ProtectionFailed(f"{record.protection_requests} Gateway protection request(s) ended without protection", None)
+            parent_ms = int((self._clock() + self._policy.attempt_deadline_s) * 1000)  # 이 시도의 부모 기한. 보호 기한은 이 안에 든다
+            try:
+                entry = protector.plan(record.vm_id, view, parent_ms)
+            except ProtectionHold as exc:
+                return str(exc)
+            with self._lock:
+                if record.cancel_requested or not record.open:
+                    raise _Cancelled()
+                previous, record.protection = record.protection, dict(entry)
+                record.protection_requests += 1
+                if not self._save():
+                    record.protection = previous
+                    record.protection_requests -= 1
+                    return "protection request not recorded; Gateway not called"
+            log.warning("vm %s: recovery %s requesting Gateway protection %s for execution %s", record.vm_id, record.recovery_id,
+                        entry["request_id"], entry["spec"]["target_execution_id"])
+        outcome = protector.secure(entry)
+        self._note_protection(record, entry, outcome)
+        if outcome.final:
+            raise _ProtectionFailed(outcome.note, outcome.code)
+        return None if outcome.ready else outcome.note
+
+    @staticmethod
+    def _same_target(entry: dict[str, Any], view: dict[str, Any]) -> bool:
+        """보호의 대상 신원(host·실행·의도 revision·lifecycle generation)이 지금 view 와 같은가."""
+        spec = entry["spec"]
+        return ((spec["host_boot_id"], spec["target_execution_id"], spec["intent_revision"], spec["lifecycle_generation"])
+                == (view.get("host_boot_id"), view.get("execution_id"), view.get("intent_revision"), view.get("generation")))
+
+    def _protected_for(self, record: RecoveryRecord, view: dict[str, Any]) -> bool:
+        entry = record.protection
+        return entry is not None and entry["phase"] == PROTECTED and self._same_target(entry, view)
+
+    def _note_protection(self, record: RecoveryRecord, entry: dict[str, Any], outcome: Outcome) -> str:
+        """Gateway 결과를 기록에 적는다(같은 키일 때만). 적은 단계를 돌려준다."""
+        with self._lock:
+            current = record.protection
+            if current is None or current["request_id"] != entry["request_id"]:
+                return entry["phase"]
+            if (current["phase"], current["note"]) != (outcome.phase, outcome.note):
+                if current["phase"] != outcome.phase:
+                    level = log.error if outcome.phase == LOST else log.warning
+                    level("vm %s: recovery %s Gateway protection %s %s -> %s: %s", record.vm_id, record.recovery_id, entry["request_id"],
+                          current["phase"], outcome.phase, outcome.note)
+                record.protection = {**current, "phase": outcome.phase, "note": outcome.note}
+                self._save()
+            return outcome.phase
+
+    def _schedule_settlements(self, now: float) -> None:
+        """닫힌 복구에 남은 보호를 정산한다. 실행 스레드에서 Gateway 를 부르고 결과는 collect 가 적는다."""
+        if self._protection is None:
+            return
+        for record in [r for r in self._records.values() if not r.open and r.protection is not None and r.protection["phase"] in LIVE]:
+            if record.recovery_id in self._futures or now < self._settle_due.get(record.recovery_id, 0.0):
+                continue
+            self._settle_due[record.recovery_id] = now + self._policy.transient_retry_s
+            self._submit(record, lambda record=record: self._task_settle(record), now)
+
+    def _task_settle(self, record: RecoveryRecord) -> _Settlement:
+        with self._lock:
+            entry = dict(record.protection or {})
+            # 원 실행 그대로일 때 cancel 은 정당한 종료(사용자 stop·회복)만. 완료는 새 실행 finish, 실패는 고장 난 실행을 계속 막아 둔다
+            allow_cancel = record.status in (RecoveryStatus.CANCELLED, RecoveryStatus.RECOVERED)
+        return _Settlement(entry, self._protection.settle(entry, allow_cancel=allow_cancel))
 
     def _on_result(self, record: RecoveryRecord, result: dict[str, Any], now: float) -> None:
         original = result.get("original_result") or {}
@@ -668,7 +778,8 @@ class RecoveryEngine:
         return record.due_monotonic is None or now >= record.due_monotonic
 
     def _prune(self) -> None:
-        closed = sorted((r for r in self._records.values() if not r.open and not r.pending_events), key=lambda r: r.closed_monotonic or 0.0)
+        closed = sorted((r for r in self._records.values() if not r.open and not r.pending_events
+                         and (r.protection is None or r.protection["phase"] not in LIVE)), key=lambda r: r.closed_monotonic or 0.0)
         stale = closed[:-KEEP_CLOSED] if len(closed) > KEEP_CLOSED else []
         for record in stale:
             del self._records[record.recovery_id]
