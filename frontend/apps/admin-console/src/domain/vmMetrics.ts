@@ -10,8 +10,21 @@ import { VM_CPU_PERCENT_METRIC, type MetricSample, type Vm } from '../api/types'
 export const ZEPHYR_CPU_PERCENT_METRIC = 'cpu.system.percent';
 export const ZEPHYR_HEAP_USED_METRIC = 'memory.kernel_heap.used_bytes';
 export const ZEPHYR_HEAP_FREE_METRIC = 'memory.kernel_heap.free_bytes';
+export const LINUX_MEMORY_USED_METRIC = 'memory_used_bytes';
 
 const MIB_BYTES = 1024 * 1024;
+
+export interface LinuxMemoryPoint {
+  observedAt: string;
+  usedBytes: number;
+  percent: number;
+}
+
+export interface LinuxMemorySeries {
+  points: LinuxMemoryPoint[];
+  current: LinuxMemoryPoint | null;
+  totalBytes: number;
+}
 
 export function metricValue(sample: MetricSample, name: string): number | null {
   return sample.values.find((value) => value.name === name)?.value ?? null;
@@ -24,7 +37,7 @@ export function cpuPercentOf(sample: MetricSample): number | null {
 
 /** 메모리 사용률(%). Linux 는 할당 메모리 대비, Zephyr 는 커널 heap(used+free) 대비 */
 export function memoryPercentOf(sample: MetricSample, vm: Pick<Vm, 'memory_mib'>): number | null {
-  const used = metricValue(sample, 'memory_used_bytes');
+  const used = metricValue(sample, LINUX_MEMORY_USED_METRIC);
   if (used != null) return (used / (vm.memory_mib * MIB_BYTES)) * 100;
   const heapUsed = metricValue(sample, ZEPHYR_HEAP_USED_METRIC);
   const heapFree = metricValue(sample, ZEPHYR_HEAP_FREE_METRIC);
@@ -42,4 +55,22 @@ export function latest(
     if (value != null) return value;
   }
   return null;
+}
+
+/** Linux guest-agent 표본만 사용해 할당 메모리 대비 실제 사용량 시계열을 만든다. */
+export function buildLinuxMemorySeries(
+  samples: readonly MetricSample[],
+  vm: Pick<Vm, 'memory_mib'>,
+): LinuxMemorySeries {
+  const totalBytes = vm.memory_mib * MIB_BYTES;
+  const points =
+    totalBytes > 0
+      ? samples.flatMap((sample) => {
+          const usedBytes = metricValue(sample, LINUX_MEMORY_USED_METRIC);
+          if (usedBytes == null || !Number.isFinite(usedBytes) || usedBytes < 0) return [];
+          return [{ observedAt: sample.observed_at, usedBytes, percent: (usedBytes / totalBytes) * 100 }];
+        })
+      : [];
+
+  return { points, current: points.at(-1) ?? null, totalBytes };
 }

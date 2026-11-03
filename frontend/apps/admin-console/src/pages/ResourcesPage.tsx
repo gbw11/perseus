@@ -4,11 +4,10 @@ import type { DriveState } from '../api/drive';
 import { useMetrics, useVms } from '../api/queries';
 import type { Vm } from '../api/types';
 import { buildCpuChartScale, cpuChartY, formatCpuTick } from '../domain/cpuChart';
-import { cpuPercentOf } from '../domain/vmMetrics';
+import { buildLinuxMemorySeries, cpuPercentOf, type LinuxMemoryPoint } from '../domain/vmMetrics';
 import { buildMemoryPoolSeries, bytesToKiB, type PoolSnapshot } from '../domain/memoryPools';
 import {
   ago,
-  appReportOf,
   osLabel,
   ROLES,
   roleOf,
@@ -200,12 +199,12 @@ function MemoryDashboard({
     <div className={styles.page}>
       <header className={styles.contentHeading}>
         <div>
-          <span className={styles.contentEyebrow}>RESOURCE · RX/TX POOLS</span>
+          <span className={styles.contentEyebrow}>RESOURCE · MEMORY</span>
           <h1>Memory</h1>
         </div>
         <div className={styles.memoryHeadingMeta}>
-          <span>최근 60초 · 기본 2초 표본</span>
-          <span>Linux VM 지표 협의 중</span>
+          <span>Linux 최근 5분</span>
+          <span>Zephyr 최근 60초 · Pool</span>
         </div>
       </header>
 
@@ -216,7 +215,7 @@ function MemoryDashboard({
           vm.guest_kind === 'zephyr' ? (
             <MemoryVmPanel key={vm.vm_id} vm={vm} drive={drive} />
           ) : (
-            <InfotainmentMemoryPanel key={vm.vm_id} vm={vm} drive={drive} />
+            <LinuxMemoryPanel key={vm.vm_id} vm={vm} drive={drive} />
           ),
         )}
       </div>
@@ -423,18 +422,27 @@ function CounterItem({ label, value }: { label: string; value: number | null }) 
   );
 }
 
-function InfotainmentMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
+function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
+  const metrics = useMetrics(vm.vm_id, true);
+  const series = buildLinuxMemorySeries(metrics.data?.items ?? [], vm);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
-  const heartbeatAgo = appReportOf(vm, drive)?.heartbeat_ago_ms;
   const style = {
     '--vm-accent': role?.color ?? UNASSIGNED_COLOR,
-    '--rx-accent': 'var(--x-primary)',
-    '--tx-accent': 'var(--x-pool-tx)',
   } as CSSProperties;
+  const current = series.current;
+  const freeBytes = current ? Math.max(0, series.totalBytes - current.usedBytes) : null;
+  const notice = metrics.error
+    ? '메트릭 연결 오류 · 마지막 정상 데이터가 있으면 그대로 표시합니다.'
+    : metrics.isPending && !current
+      ? '메모리 메트릭 수신 대기 중입니다.'
+      : !current
+        ? '메모리 데이터 없음'
+        : null;
+
   return (
     <Card
-      className={[styles.memoryVmCard, styles.memoryPendingCard].join(' ')}
+      className={styles.memoryVmCard}
       style={style}
       title={
         <span className={styles.memoryVmTitle}>
@@ -449,71 +457,96 @@ function InfotainmentMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | nu
           <span className={styles.authority} data-authority={authority.toLowerCase()}>
             {authority}
           </span>
-          <small>마지막 확인 {heartbeatAgo != null ? ago(heartbeatAgo) : '—'}</small>
+          <small>마지막 갱신 {current ? relativeTime(current.observedAt) : '—'}</small>
         </span>
       }
     >
-      <div className={styles.memoryPendingIntro}>
-        <strong>RX/TX Pool 지표 협의 중</strong>
-        <p>현재는 Heartbeat만 수집됩니다. 데이터 계약 확정 후 실제 지표 영역으로 연결합니다.</p>
-      </div>
+      {notice && (
+        <div className={styles.memoryNotice} data-tone={metrics.error ? 'fault' : undefined}>
+          {notice}
+        </div>
+      )}
 
-      <div className={styles.poolSummaryGrid}>
-        <UnavailablePool label="RX Pool" tone="rx" />
-        <UnavailablePool label="TX Pool" tone="tx" />
-      </div>
+      <section className={styles.linuxMemorySummary}>
+        <div className={styles.linuxMemorySummaryHead}>
+          <span>메모리 사용률</span>
+          <strong>{current ? `${current.percent.toFixed(1)}%` : '—'}</strong>
+        </div>
+        <div className={styles.linuxMemoryAmount}>
+          <strong>{current ? formatMiB(current.usedBytes) : '—'}</strong>
+          <span>/ {formatMiB(series.totalBytes)}</span>
+        </div>
+        <div className={styles.linuxMemoryFree}>
+          <span>여유</span>
+          <strong>{freeBytes == null ? '—' : formatMiB(freeBytes)}</strong>
+        </div>
+        <div
+          className={styles.linuxMemoryBar}
+          role="progressbar"
+          aria-label={`${vm.name} 메모리 사용률`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={current ? Math.round(Math.max(0, Math.min(100, current.percent))) : undefined}
+        >
+          <i style={{ width: `${current ? Math.max(0, Math.min(100, current.percent)) : 0}%` }} />
+        </div>
+      </section>
 
-      <UnavailableChart title="패킷 처리율" />
-      <UnavailableChart title="Pool 점유율" />
+      <LinuxMemoryChart vmName={vm.name} points={series.points} />
 
-      <div className={styles.counterGrid}>
-        <CounterItem label="RX drop" value={null} />
-        <CounterItem label="TX drop" value={null} />
-        <CounterItem label="TX 페이지 부족" value={null} />
-        <CounterItem label="프로토콜 오류" value={null} />
-      </div>
-
-      <div className={styles.memoryPendingMeta}>
-        <span>
-          <small>HEARTBEAT</small>
-          <strong>{heartbeatAgo != null ? 'Connected' : '데이터 없음'}</strong>
-        </span>
-        <span>
-          <small>POOL CONTRACT</small>
-          <strong>데이터 계약 준비 중</strong>
-        </span>
+      <div className={styles.memoryObservation}>
+        {current
+          ? `할당 ${vm.memory_mib.toLocaleString('ko-KR')} MiB 중 ${formatMiB(current.usedBytes)} 사용 중`
+          : 'Linux guest-agent의 memory_used_bytes 표본을 기다리고 있습니다.'}
       </div>
     </Card>
   );
 }
 
-function UnavailablePool({ label, tone }: { label: string; tone: 'rx' | 'tx' }) {
-  return (
-    <section className={[styles.poolSummary, styles.poolUnavailable].join(' ')} data-tone={tone}>
-      <div className={styles.poolSummaryHead}>
-        <span>
-          <i aria-hidden="true" />
-          {label}
-        </span>
-        <strong>—</strong>
-      </div>
-      <div className={styles.poolUnavailableText}>
-        <strong>지표 협의 중</strong>
-        <span>실제 값을 제공하지 않습니다.</span>
-      </div>
-    </section>
+function LinuxMemoryChart({ vmName, points }: { vmName: string; points: LinuxMemoryPoint[] }) {
+  const line = chartPoints(
+    points.map((point) => ({ observedAt: point.observedAt, rx: point.percent, tx: null })),
+    'rx',
+    100,
   );
-}
 
-function UnavailableChart({ title }: { title: string }) {
   return (
-    <section className={[styles.memoryChartBlock, styles.memoryUnavailableChart].join(' ')}>
+    <section className={styles.memoryChartBlock}>
       <header>
-        <strong>{title}</strong>
+        <strong>메모리 사용률</strong>
+        <span className={styles.linuxMemoryLegend}>
+          <i />
+          Used %
+        </span>
       </header>
-      <div>
-        <strong>데이터 계약 준비 중</strong>
-        <span>Linux VM 계측 항목이 확정되면 연결됩니다.</span>
+      <div className={styles.memoryChart}>
+        {line ? (
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label={`${vmName} 메모리 사용률 최근 5분 그래프`}
+          >
+            {[0, 25, 50, 75, 100].map((value) => (
+              <line
+                key={value}
+                x1="0"
+                x2="100"
+                y1={100 - value}
+                y2={100 - value}
+                className={styles.memoryGridLine}
+              />
+            ))}
+            <polyline points={line} className={styles.linuxMemoryLine} vectorEffect="non-scaling-stroke" />
+          </svg>
+        ) : (
+          <div className={styles.memoryChartEmpty}>데이터 없음</div>
+        )}
+        <span className={styles.memoryChartMax}>100%</span>
+        <div className={styles.memoryChartAxis} aria-hidden="true">
+          <span>5분 전</span>
+          <span>현재</span>
+        </div>
       </div>
     </section>
   );
@@ -564,6 +597,10 @@ function observationOf(
 function formatKiB(value: number | null): string {
   if (value == null) return '—';
   return `${bytesToKiB(value).toLocaleString('ko-KR', { maximumFractionDigits: 2, minimumFractionDigits: value ? 2 : 0 })} KiB`;
+}
+
+function formatMiB(value: number): string {
+  return `${(value / (1024 * 1024)).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
 }
 
 function relativeTime(value: string | null): string {
