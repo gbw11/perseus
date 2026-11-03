@@ -1066,6 +1066,8 @@ CPU 정책이 없는 기존 설치의 활성화는 모든 관리 게스트가 �
 
 공통 이미지에는 HTTP 토큰·MQTT 암호·개인 Wi-Fi 설정을 넣지 않는다. 설치 후 `xenova-dom0-manager.service`가 `dom0_manager.service_token`을 실행해 `/etc/xenova/dom0-manager-token.env`를 0600으로 준비한다. `/etc/xenova/dom0-manager.env`의 기존 서비스 토큰은 우선하며 자동 회전하지 않는다. worker는 `/etc/xenova/recovery-worker.env`의 `XENOVA_RECOVERY_*` 설정을 읽고, broker 연결 문제로 VM 자동 시작이나 host admission을 외부 online 대기에 묶지 않는다.
 
+Debian·Ubuntu 게스트의 내부 DHCP는 `192.168.77.1`을 NTP 서버로 전달한다. `xenova-guest-ntp.service`는 `xenbr0`에서만 듣고, dom0의 `systemd-timesyncd`가 첫 동기화를 마치고 커널의 UTC 오차 한도를 확인한 뒤 응답한다. 게스트 자동 시작은 이 동기화를 기다리지 않는다. 보드에서는 `ss -lun 'sport = :123'`, 게스트에서는 `timedatectl timesync-status`와 `timedatectl show -p NTPSynchronized`로 확인한다. Zephyr는 실행별 XenStore UTC 대응을 사용한다.
+
 pinning 기능 수락과 성능 효과는 나누어 기록한다. 동일 펌웨어·입력·broker 설정에서 pinning 전/후 × Debian 부하 유무를 비교하고, guest 계산 주기와 Gateway 지연 각각의 p95/p99·관측 최대·deadline miss·오류/손실을 보관한다. 실제 주행 앱이 없는 경우 타이밍 harness 결과로 범위를 명시한다.
 
 ## 10. XenStore G1 시험 인계물
