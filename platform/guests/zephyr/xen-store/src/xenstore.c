@@ -100,6 +100,14 @@ static int connection(struct xs_client *c)
 	return 0;
 }
 
+static int publish_progress(struct xs_client *c, uint32_t *index, uint32_t value)
+{
+	__atomic_store_n(index, value, __ATOMIC_RELEASE);
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	int rc = c->io.notify(c->io.context);
+	return rc ? fatal(c, rc) : 0;
+}
+
 /* Acquire the peer's index before bytes; release our index after bytes.
  * Notifications are sent after publishing either producer or consumer progress.
  */
@@ -123,11 +131,8 @@ static int ring_transfer(struct xs_client *c, bool write, void *data, size_t cou
 		else { bytes[i] = ring[MASK_XENSTORE_IDX(index + i)]; }
 	}
 	if (count) {
-		__atomic_store_n(write ? &r->req_prod : &r->rsp_cons,
-				 index + (uint32_t)count, __ATOMIC_RELEASE);
-		__atomic_thread_fence(__ATOMIC_SEQ_CST);
-		rc = c->io.notify(c->io.context);
-		if (rc) { return fatal(c, rc); }
+		rc = publish_progress(c, write ? &r->req_prod : &r->rsp_cons, index + (uint32_t)count);
+		if (rc) { return rc; }
 	}
 	return (int)count;
 }
@@ -286,6 +291,51 @@ static int pump(struct xs_client *c, uint32_t request, uint32_t type,
 	return rc ? rc : 1;
 }
 
+/* A frame that fits in the request ring must never expose a partial header or
+ * body. The session owner is the only producer, and the peer only frees space. */
+static int try_request_frame(struct xs_client *c, const struct xsd_sockmsg *header,
+			     const void *payload, int64_t end)
+{
+	struct xenstore_domain_interface *r = c->ring;
+	int rc = connection(c);
+	if (rc) { return rc; }
+	uint32_t prod = __atomic_load_n(&r->req_prod, __ATOMIC_ACQUIRE);
+	uint32_t used = prod - __atomic_load_n(&r->req_cons, __ATOMIC_ACQUIRE);
+	if (used > XENSTORE_RING_SIZE) { return fatal(c, -EPROTO); }
+	const size_t total = sizeof(*header) + header->len;
+	if (total > XENSTORE_RING_SIZE - used) { return 0; }
+	const char *bytes = (const char *)header;
+	for (size_t i = 0; i < sizeof(*header); i++) {
+		r->req[MASK_XENSTORE_IDX(prod + i)] = bytes[i];
+	}
+	bytes = payload;
+	for (size_t i = 0; i < header->len; i++) {
+		r->req[MASK_XENSTORE_IDX(prod + sizeof(*header) + i)] = bytes[i];
+	}
+	if (!xs_remaining(c, end)) { return -ETIMEDOUT; }
+	c->sending_request = 0;
+	rc = publish_progress(c, &r->req_prod, prod + (uint32_t)total);
+	return rc ? rc : (int)total;
+}
+
+static int send_request_frame(struct xs_client *c, const struct xsd_sockmsg *header,
+			      const void *payload, int64_t end)
+{
+	for (;;) {
+		/* Correlate any buffered late response or invalid early reply before
+		 * the request becomes visible to the server. */
+		bool ignored = false;
+		int progress = pump(c, 0, 0, 0, NULL, 0, NULL, &ignored);
+		if (progress < 0) { return progress; }
+		int rc = try_request_frame(c, header, payload, end);
+		if (rc) { return rc < 0 ? rc : 0; }
+		if (!xs_remaining(c, end)) { return -ETIMEDOUT; }
+		if (progress) { continue; }
+		rc = wait_until(c, end);
+		if (rc < 0) { return rc; }
+	}
+}
+
 static int request_held(struct xs_client *c, uint32_t type, uint32_t tx,
 		   const void *payload, size_t length, void *output,
 		   size_t capacity, size_t *output_length, int ms)
@@ -298,6 +348,8 @@ static int request_held(struct xs_client *c, uint32_t type, uint32_t tx,
 	int rc;
 	if (tx && tx != c->active_tx) { return -EINVAL; }
 	if (c->next_request == UINT32_MAX) { return -EOVERFLOW; }
+	/* An enclosing deadline can reach zero between Store calls. */
+	if (!ms) { return -ETIMEDOUT; }
 	unsigned int slot;
 	for (;;) {
 		for (slot = 0; slot < XS_PENDING_LIMIT; slot++) {
@@ -315,6 +367,14 @@ static int request_held(struct xs_client *c, uint32_t type, uint32_t tx,
 	size_t sent = 0;
 	const size_t total = sizeof(h) + length;
 	c->last_error[0] = 0;
+	if (total <= XENSTORE_RING_SIZE) {
+		rc = send_request_frame(c, &h, payload, end);
+		if (rc) {
+			if (c->sending_request) { c->pending[slot] = 0; c->sending_request = 0; }
+			return rc;
+		}
+		sent = total;
+	}
 	while (sent < total) {
 		void *data = sent < sizeof(h) ? (char *)&h + sent : (char *)payload + sent-sizeof(h);
 		size_t count = sent < sizeof(h) ? sizeof(h)-sent : total-sent;
@@ -503,6 +563,7 @@ int xs_watch(struct xs_client *c, const char *path, uint32_t *id, int ms)
 	if (!c || !id || path_length(path) < 0 || path[0] != '/') { return -EINVAL; }
 	int lock = enter(c);
 	if (lock) { return lock; }
+	if (!ms) { return leave(c, -ETIMEDOUT); }
 	struct xs_watch_slot *w = NULL;
 	for (unsigned int i = 0; i < XS_WATCH_LIMIT; i++) {
 		if (c->watches[i].state == XS_W_FREE) { w = &c->watches[i]; break; }
@@ -535,6 +596,7 @@ int xs_unwatch(struct xs_client *c, uint32_t id, int ms)
 	if (lock) { return lock; }
 	struct xs_watch_slot *w = watch_slot(c, id);
 	if (!w) { return leave(c, -ENOENT); }
+	if (!ms) { return leave(c, -ETIMEDOUT); }
 	w->state = XS_W_CLOSING;
 	w->initial = false; w->notifications = 0;
 	char payload[XS_PATH_LIMIT+16], reply[4];
