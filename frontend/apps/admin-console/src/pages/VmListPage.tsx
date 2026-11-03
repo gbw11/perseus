@@ -1,5 +1,5 @@
 import { Button, Card, Modal, StatusBadge, useToast } from '@xenova/ui';
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVms, type VmAction } from '../api/queries';
@@ -9,6 +9,7 @@ import { STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
 import { VmOperationNotice } from './VmOperationProgress';
 import { useVmOperationProgress } from './useVmOperationProgress';
+import { finishVmCreation, isVmCreationPending, usePendingVmCreations } from './vmCreationProgress';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
 
@@ -19,6 +20,7 @@ export function VmListPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const [deleting, setDeleting] = useState<Vm | null>(null);
+  const pendingCreations = usePendingVmCreations();
 
   const run = (vm: Vm, kind: VmAction) =>
     vmOperations.run(vm, kind, {
@@ -30,10 +32,25 @@ export function VmListPage() {
       onError: (_error, message) => toast.show(message, 'fault', 5000),
     });
 
-  const items = vms.data?.items ?? [];
+  const items = useMemo(() => vms.data?.items ?? [], [vms.data?.items]);
   const running = items.filter((vm) => vm.state === 'running').length;
   const vcpus = items.reduce((sum, vm) => sum + vm.vcpus, 0);
   const memory = items.reduce((sum, vm) => sum + vm.memory_mib, 0);
+  const visiblePendingCreations = useMemo(
+    () =>
+      pendingCreations.filter(
+        (creation) => !items.some((vm) => vm.name === creation.name && vm.state === 'running'),
+      ),
+    [items, pendingCreations],
+  );
+
+  useEffect(() => {
+    pendingCreations.forEach((creation) => {
+      if (items.some((vm) => vm.name === creation.name && vm.state === 'running')) {
+        finishVmCreation(creation.name);
+      }
+    });
+  }, [items, pendingCreations]);
 
   return (
     <div className={styles.controlPage}>
@@ -76,23 +93,38 @@ export function VmListPage() {
         </div>
       )}
 
+      {visiblePendingCreations.length > 0 && (
+        <div className={styles.pendingCreationSummary} role="status">
+          <i aria-hidden="true" />
+          <div>
+            <strong>VM 생성 작업 진행 중</strong>
+            <span>{visiblePendingCreations.map((creation) => creation.name).join(', ')}</span>
+          </div>
+          <small>목록을 자동으로 갱신해 완료 상태를 확인합니다.</small>
+        </div>
+      )}
+
       <div className={styles.controlGrid}>
         {items.map((vm, index) => {
           const accent = VM_ACCENTS[index % VM_ACCENTS.length];
           const zephyr = vm.guest_kind === 'zephyr';
           const operation = vmOperations.operations[vm.vm_id];
           const operationPending = operation?.status === 'pending';
+          const creationPending = isVmCreationPending(vm.name, vm.state, pendingCreations);
+          const controlsDisabled = operationPending || creationPending;
           return (
             <Card
               key={vm.vm_id}
-              className={`${styles.controlVmCard} ${styles.clickCard}`}
+              className={`${styles.controlVmCard} ${creationPending ? '' : styles.clickCard}`}
               style={{ '--vm-accent': accent } as CSSProperties}
-              role="link"
-              tabIndex={0}
-              aria-label={`${vm.name} 상세`}
-              onClick={() => navigate(`/control/vms/${vm.vm_id}`)}
+              role={creationPending ? undefined : 'link'}
+              tabIndex={creationPending ? -1 : 0}
+              aria-label={`${vm.name} ${creationPending ? '생성 중' : '상세'}`}
+              onClick={() => {
+                if (!creationPending) navigate(`/control/vms/${vm.vm_id}`);
+              }}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && event.target === event.currentTarget) {
+                if (!creationPending && event.key === 'Enter' && event.target === event.currentTarget) {
                   navigate(`/control/vms/${vm.vm_id}`);
                 }
               }}
@@ -104,7 +136,11 @@ export function VmListPage() {
                     <h3>{vm.name}</h3>
                     <p>{osLabel(vm)}</p>
                   </div>
-                  <StatusBadge health={STATE_HEALTH[vm.state]} label={STATE_LABEL[vm.state]} size="sm" />
+                  <StatusBadge
+                    health={creationPending ? 'recovering' : STATE_HEALTH[vm.state]}
+                    label={creationPending ? '생성 중' : STATE_LABEL[vm.state]}
+                    size="sm"
+                  />
                 </div>
 
                 <dl className={styles.controlFacts}>
@@ -129,6 +165,12 @@ export function VmListPage() {
                 </dl>
 
                 <VmOperationNotice operation={operation} now={vmOperations.now} />
+                {creationPending && (
+                  <div className={styles.vmCreationCardNotice} role="status">
+                    <i aria-hidden="true" />
+                    <span>dom0에서 VM을 생성하고 있습니다.</span>
+                  </div>
+                )}
 
                 <div
                   className={styles.controlCardActions}
@@ -139,7 +181,7 @@ export function VmListPage() {
                     <Button
                       size="sm"
                       onClick={() => run(vm, 'start')}
-                      disabled={vm.state === 'running' || operationPending}
+                      disabled={vm.state === 'running' || controlsDisabled}
                     >
                       시작
                     </Button>
@@ -147,7 +189,7 @@ export function VmListPage() {
                       size="sm"
                       variant="secondary"
                       onClick={() => run(vm, 'stop')}
-                      disabled={vm.state !== 'running' || operationPending}
+                      disabled={vm.state !== 'running' || controlsDisabled}
                     >
                       정지
                     </Button>
@@ -156,7 +198,7 @@ export function VmListPage() {
                     size="sm"
                     variant="danger"
                     onClick={() => setDeleting(vm)}
-                    disabled={operationPending}
+                    disabled={controlsDisabled}
                   >
                     삭제
                   </Button>

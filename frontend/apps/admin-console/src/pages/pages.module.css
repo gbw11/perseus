@@ -2402,6 +2402,125 @@ button.chip:hover:not(.chipOn) {
 .createError > span {
   color: var(--x-text-muted);
 }
+.createProgress {
+  display: grid;
+  gap: var(--x-space-4);
+  padding: var(--x-space-4);
+  border: 1px solid color-mix(in srgb, var(--x-primary) 48%, var(--x-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--x-primary) 7%, var(--x-surface-2));
+}
+.createProgressHeading {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-3);
+}
+.createProgressHeading > i,
+.pendingCreationSummary > i,
+.vmCreationCardNotice > i {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--x-primary) 28%, transparent);
+  border-top-color: var(--x-primary);
+  border-radius: 50%;
+  animation: vmOperationSpin 0.8s linear infinite;
+}
+.createProgressHeading > div {
+  display: grid;
+  gap: 3px;
+}
+.createProgressHeading strong {
+  color: var(--x-text);
+  font-size: var(--x-text-md);
+}
+.createProgressHeading span,
+.createProgress p {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.createProgress dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+}
+.createProgress dl > div {
+  display: grid;
+  gap: 5px;
+  padding: var(--x-space-3);
+  border-right: 1px solid var(--x-border);
+}
+.createProgress dl > div:last-child {
+  border-right: 0;
+}
+.createProgress dt {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.createProgress dd {
+  margin: 0;
+  color: var(--x-text);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+  font-weight: 800;
+}
+.createProgress p {
+  margin: 0;
+  line-height: 1.55;
+}
+.createLeaveNotice {
+  display: grid;
+  gap: var(--x-space-2);
+  padding: var(--x-space-3);
+}
+.createLeaveNotice strong {
+  color: var(--x-text);
+  line-height: 1.55;
+}
+.createLeaveNotice p {
+  margin: 0;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.pendingCreationSummary {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--x-space-3);
+  padding: var(--x-space-3) var(--x-space-4);
+  border: 1px solid color-mix(in srgb, var(--x-primary) 45%, var(--x-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--x-primary) 7%, var(--x-surface-2));
+}
+.pendingCreationSummary > div {
+  display: grid;
+  gap: 3px;
+}
+.pendingCreationSummary strong,
+.pendingCreationSummary span {
+  color: var(--x-text);
+}
+.pendingCreationSummary span,
+.pendingCreationSummary small {
+  font-size: var(--x-text-xs);
+}
+.pendingCreationSummary small {
+  color: var(--x-text-muted);
+}
+.vmCreationCardNotice {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-2);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--x-primary) 42%, var(--x-border));
+  border-radius: var(--x-radius-sm);
+  background: color-mix(in srgb, var(--x-primary) 7%, var(--x-surface-2));
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
 .createSuccess {
   display: grid;
   justify-items: center;
@@ -2484,6 +2603,22 @@ button.chip:hover:not(.chipOn) {
   .createStageHead {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .createProgress dl {
+    grid-template-columns: 1fr;
+  }
+  .createProgress dl > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--x-border);
+  }
+  .createProgress dl > div:last-child {
+    border-bottom: 0;
+  }
+  .pendingCreationSummary {
+    grid-template-columns: auto 1fr;
+  }
+  .pendingCreationSummary > small {
+    grid-column: 2;
   }
   .controlHeadingActions {
     width: 100%;
