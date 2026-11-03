@@ -18,6 +18,8 @@ from dom0_manager.recovery.platform_recovery import PlatformRecovery
 from dom0_manager.recovery.policy import RecoveryPolicy
 from dom0_manager.recovery.state import RecoveryStore,RecoveryStatus
 from dom0_manager.recovery.model import Judgment,FailureReason,HealthState,VmHealth
+from dom0_manager.recovery.protection import GatewayProtection
+from fake_gateway import FakeGateway
 from dom0_manager.recovery.rejoin import RejoinCoordinator,ProductionBootstrap,production
 from xenova_mqtt import Identity,topics
 from xenova_mqtt.client import Message
@@ -40,7 +42,7 @@ def fixture():
 @pytest.mark.parametrize('warm',[False,True])
 def test_engine_completion_provisions_current_execution_then_standby_readiness(fixture,tmp_path,monkeypatch,present,warm):
     f=fixture;vm=f.zid;other=str(uuid4());current=f.state();before=current['execution_id']
-    health=None;protection_calls=[]
+    health=None
     # External Xen boundary: the original domain disappeared, or it is still running but its app heartbeat stopped.
     if not present:f.xen.rows=[];reason=FailureReason.DOMAIN_ABSENT
     else:
@@ -52,15 +54,20 @@ def test_engine_completion_provisions_current_execution_then_standby_readiness(f
         reason=FailureReason.APP_HEARTBEAT_LOST
         health=VmHealth(vm_id=UUID(vm),state=HealthState.UNHEALTHY,desired_state='running',xen_state='running',heartbeat_age_s=None,
             reason=reason,manager_seq=1,intent_known=True,domid=current['domid'],execution_id=current['execution_id'])
-    def protection(query):  # test-only Gateway protection evidence for a drive VM; S15P31E110-346 supplies the real one
-        protection_calls.append(query.execution_id);return True
-    engine=RecoveryEngine(RecoveryPolicy(),PlatformRecovery(f.m),SimpleNamespace(health=lambda vm_id:health if str(vm_id)==vm else None),
+    # Gateway boundary (S15P31E110-346): fake provider whose binding is the platform's current execution.
+    platform=PlatformRecovery(f.m);view=platform.view(UUID(vm))
+    gateway=FakeGateway(view['host_boot_id'],lambda:f.ticks)
+    gateway.bind(vm,view['execution_id'],revision=view['intent_revision'],generation=view['generation'])
+    protection=GatewayProtection(gateway,deadline_s=5.0,call_budget_s=1.0,clock=lambda:f.ticks)
+    engine=RecoveryEngine(RecoveryPolicy(),platform,SimpleNamespace(health=lambda vm_id:health if str(vm_id)==vm else None),
         RecoveryStore(tmp_path/'recoveries.json'),clock=lambda:f.ticks,inline=True,drive_vm_ids=[vm,other],protection=protection)
     engine.on_judgment(Judgment(uuid4(),UUID(vm),reason,f.ticks,'zephyr','running',
         current['intent_revision'],None,None,None))
     with patch.object(xenova_vm.os,'sync'):engine.tick()
     record=engine.records()[0]
-    assert protection_calls==([before] if present else [])  # start-if-absent needs no Gateway protection
+    protected=[row['spec']['target_execution_id'] for row in gateway.rows.values()]
+    assert protected==([before] if present else [])  # start-if-absent needs no Gateway protection
+    if present:assert record.protection['phase']=='PROTECTED'  # released only after the new execution binds in the Gateway
     assert record.status is RecoveryStatus.COMPLETED and record.execution_id!=before
     observed=observe(f.p,vm);assert observed['execution_id']==record.execution_id
     assert len(f.physical('destroy'))==(1 if present else 0)

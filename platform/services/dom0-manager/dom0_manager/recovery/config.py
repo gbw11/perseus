@@ -50,6 +50,12 @@ class RecoverySettings:
     broker_password: str | None = None
     # 봉투의 source_id (MQTT 계약 2장). 계정 이름도 같다 (9장)
     source_id: str = "dom0-server"
+    # 주행 VM 보호(S15P31E110-346)에 쓰는 Gateway 로컬 소켓(계약 gateway-provider-v1 G1). drive config 가 있을 때만 쓴다
+    gateway_socket: str = "/run/xenova-gateway/control.sock"
+    # Gateway 호출 한 번(연결·송신·수신)의 상한. 넘으면 결과를 모르는 것으로 보고 같은 키로 다시 묻는다. 클라이언트 허용 범위 (0, 10]
+    gateway_call_budget_s: float = 1.0
+    # 보호 요청의 Gateway 기한(수락·출력 철회까지). 복구 시도 기한 안으로 자른다. Gateway history 정책을 쓰면 retry_ms 이하여야 한다
+    gateway_protect_deadline_s: float = 5.0
     # Worker 재시작 뒤에도 남길 상태(armed 등). /run/xenova 는 플랫폼 runtime 디렉터리(tmpfs)라 host 재부팅이면 비워진다
     state_dir: str = "/run/xenova/recovery"
     log_level: str = "INFO"
@@ -71,6 +77,12 @@ class RecoverySettings:
             raise ValueError("health_refresh_s must be at least interval_s; snapshots are republished at most once per cycle")
         if self.intent_refresh_s < 3 * HEARTBEAT_PERIOD_S:
             raise ValueError(f"intent_refresh_s must be at least {3 * HEARTBEAT_PERIOD_S:g}s; Manager.list holds the platform lock and observes every VM")
+        if not (math.isfinite(self.gateway_call_budget_s) and 0 < self.gateway_call_budget_s <= 10):
+            raise ValueError(f"gateway_call_budget_s must be in (0, 10] seconds, got {self.gateway_call_budget_s!r}")
+        if not (math.isfinite(self.gateway_protect_deadline_s) and self.gateway_call_budget_s < self.gateway_protect_deadline_s <= 60):
+            raise ValueError(f"gateway_protect_deadline_s must be above gateway_call_budget_s and at most 60s, got {self.gateway_protect_deadline_s!r}")
+        if not self.gateway_socket.startswith("/"):
+            raise ValueError(f"gateway_socket must be an absolute path, got {self.gateway_socket!r}")
         if not 0 < self.broker_port < 65536:
             raise ValueError(f"broker_port out of range: {self.broker_port!r}")
         for name, lost, period, default in (("agent_peer_fresh_s", self.heartbeat_lost_s, HEARTBEAT_PERIOD_S, 15.0),
@@ -121,6 +133,9 @@ class RecoverySettings:
             broker_username=read("XENOVA_RECOVERY_BROKER_USERNAME", None, str),
             broker_password=read("XENOVA_RECOVERY_BROKER_PASSWORD", None, str),
             source_id=read("XENOVA_RECOVERY_SOURCE_ID", cls.source_id, str).strip(),
+            gateway_socket=read("XENOVA_RECOVERY_GATEWAY_SOCKET", cls.gateway_socket, str),
+            gateway_call_budget_s=read("XENOVA_RECOVERY_GATEWAY_CALL_BUDGET", cls.gateway_call_budget_s, float),
+            gateway_protect_deadline_s=read("XENOVA_RECOVERY_GATEWAY_PROTECT_DEADLINE", cls.gateway_protect_deadline_s, float),
             state_dir=read("XENOVA_RECOVERY_STATE_DIR", cls.state_dir, str),
             log_level=read("XENOVA_RECOVERY_LOG_LEVEL", cls.log_level, str).upper(),
         )

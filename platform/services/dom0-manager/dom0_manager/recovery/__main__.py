@@ -23,6 +23,7 @@ from .events import EventLog
 from .lock import EXIT_LOCKED, AlreadyRunning, acquire
 from .platform_recovery import PlatformRecovery
 from .policy import RecoveryPolicy
+from .protection import ClientPort, GatewayProtection
 from .state import RecoveryStore
 from .heartbeats import AppHeartbeatTable, HeartbeatTable
 from .mqtt import RECOVERY_EVENTS_TOPIC, HealthPublisher, build_client, link_state, subscribe_liveness
@@ -89,10 +90,18 @@ def main() -> int:
             log.warning("recovery event publish failed (stored for GET /api/v1/recovery/events): %s", exc)
         return True
 
-    # 주행 VM 의 force-restart 는 Gateway 보호 근거가 있어야 한다. 보호 수명주기(S15P31E110-346) 전에는 근거가 없어 보류된다.
+    # 주행 VM 의 force-restart 는 Gateway 보호(S15P31E110-346)를 먼저 확보한다. Gateway 클라이언트를 못 읽으면 주행 VM force 는 보류된다.
     # drive config 가 없으면 주행 VM 이 어느 것인지 모르므로(None) 엔진이 Zephyr force 를 모두 보류한다
+    protection = None
+    if rejoin:
+        try:
+            gateway = ClientPort.production(settings.gateway_socket, settings.gateway_call_budget_s)
+        except ImportError as exc:
+            log.error("Gateway client unavailable (%s): drive VM force-restart stays held; install xenova-gateway-client", exc)
+        else:
+            protection = GatewayProtection(gateway, deadline_s=settings.gateway_protect_deadline_s, call_budget_s=settings.gateway_call_budget_s)
     engine = RecoveryEngine(policy, PlatformRecovery(manager), watcher, RecoveryStore(Path(settings.state_dir) / "recoveries.json"), on_event=publish_event,
-                            drive_vm_ids=rejoin.vm_ids if rejoin else None)
+                            drive_vm_ids=rejoin.vm_ids if rejoin else None, protection=protection)
     log.info("recovery policy=%s max_attempts=%d backoff=%s attempt_deadline=%.0fs verify_timeout=%.0fs", policy.policy, policy.max_attempts,
              ",".join(f"{b:g}" for b in policy.backoff_s), policy.attempt_deadline_s, policy.verify_timeout_s)
     worker = RecoveryWorker(
