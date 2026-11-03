@@ -101,7 +101,7 @@ def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSourc
     async def service_auth(request, call_next):
         path = request.url.path
         read_screen = request.method == "GET" and (
-            path in {"/display/monitor-1", "/display/monitor-2", "/api/v1/display/presentation"}
+            path in {"/display/monitor-1", "/display/monitor-2", "/display/mobile", "/api/v1/display/presentation"}
             or path.startswith("/assets/"))
         ack_screen = request.method == "POST" and path in {
             "/api/v1/display/outputs/monitor-1/ack", "/api/v1/display/outputs/monitor-2/ack"}
@@ -164,7 +164,7 @@ def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSourc
 
         @app.get("/display/{output_id}", include_in_schema=False)
         def monitor_page(output_id: str):
-            if output_id not in {"monitor-1", "monitor-2"}:
+            if output_id not in {"monitor-1", "monitor-2", "mobile"}:
                 raise HTTPException(404)
             return FileResponse(root / "index.html")
 

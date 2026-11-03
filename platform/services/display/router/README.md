@@ -1,5 +1,13 @@
 # dom0 표시 파이프라인 (2~5단계)
 
+## 휴대폰 통합 표시 UI (350)
+
+빌드된 vm-screens의 `/display/mobile`은 기존 인증된 presentation API를 한 번 조회해
+계기판·인포테인먼트를 함께 렌더링한다. 모바일용 HDMI ACK나 세 번째 하드웨어 출력을
+만들지 않는다. 기존 주행·OS 표시 규칙과 알림을 재사용한다.
+USB 접근·초기 인증 연결은 349, HDMI/휴대폰 실행 전환은 351 범위이며 이 UI 추가만으로
+완료된 것이 아니다. [구현·로컬 검증과 실물 확인 항목](../../../../docs/verification/display-350-mobile-20261103.md)을 참조한다.
+
 ## Yocto 이미지의 네이티브 HDMI 실행
 
 이미지에는 Xorg·Chromium·Playwright·Openbox와 `xenova-display.target`이 들어 있다.
