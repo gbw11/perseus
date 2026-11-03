@@ -4,6 +4,7 @@ import { Link, useBlocker, useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
 import { useCreateVm, useTemplates } from '../api/queries';
 import type { Template } from '../api/types';
+import { loadVmList } from '../api/vmListCache';
 import styles from './pages.module.css';
 import {
   blockVmCreationUnload,
@@ -93,7 +94,8 @@ export function VmCreatePage() {
     const startedAt = Date.now();
     setCreationStartedAt(startedAt);
     setNow(startedAt);
-    startVmCreation(name, startedAt);
+    // 같은 이름의 VM이 이미 있으면 409(사양 불일치) 또는 200(같은 사양 재시도)이므로 새로 생성되는 VM이 아니다
+    startVmCreation(name, startedAt, existingVmIdsNamed(name));
     void create
       .mutateAsync({
         name,
@@ -104,10 +106,9 @@ export function VmCreatePage() {
       .then(() => {
         const duration = Date.now() - startedAt;
         saveLastVmCreationDuration(duration);
-        if (mounted.current) {
-          finishVmCreation(name);
-          setLastCreationDuration(duration);
-        }
+        // 화면을 벗어난 뒤에 끝나도 목록 카드가 생성 중에 남지 않도록 항상 기록을 지운다
+        finishVmCreation(name);
+        if (mounted.current) setLastCreationDuration(duration);
       })
       .catch(() => {
         finishVmCreation(name);
@@ -115,6 +116,7 @@ export function VmCreatePage() {
   };
 
   const error = create.error instanceof ApiError ? create.error : null;
+  const timedOut = error !== null && isCreationTimeout(error);
   const goToList = () => navigate('/control');
 
   return (
@@ -340,7 +342,27 @@ export function VmCreatePage() {
             </dl>
           </div>
 
-          {create.error && (
+          {timedOut && (
+            <div className={styles.createProgress} role="status">
+              <div className={styles.createProgressHeading}>
+                <div>
+                  <strong>생성 요청의 응답 시간이 초과되었습니다</strong>
+                  <span>
+                    dom0에서 VM 생성이 계속 진행 중일 수 있습니다. 생성이 실패한 것은 아닐 수 있으니 VM
+                    목록에서 상태를 먼저 확인해 주세요.
+                  </span>
+                </div>
+              </div>
+              <p>목록에 VM이 없거나 시작되지 않았다면 같은 이름·사양으로 다시 생성하면 이어서 복구됩니다.</p>
+              <div className={styles.createTimeoutActions}>
+                <Button variant="secondary" size="sm" onClick={goToList}>
+                  VM 목록에서 확인
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {create.error && !timedOut && (
             <div className={styles.createError} role="alert">
               <strong>{error ? `${error.message} (${error.code})` : String(create.error)}</strong>
               {error && ERROR_HINT[error.code] && <span>{ERROR_HINT[error.code]}</span>}
@@ -387,7 +409,7 @@ export function VmCreatePage() {
               이전
             </Button>
             <Button onClick={submit} disabled={create.isPending}>
-              {create.isPending ? 'VM 생성 중…' : 'VM 생성'}
+              {create.isPending ? 'VM 생성 중…' : timedOut ? '같은 사양으로 다시 생성' : 'VM 생성'}
             </Button>
           </div>
         </section>
@@ -442,4 +464,14 @@ export function VmCreatePage() {
       </Modal>
     </div>
   );
+}
+
+/** 백엔드는 dom0-manager 응답을 command-timeout(15m)까지 기다린 뒤 504 VM_CONTROL_TIMEOUT으로 끝낸다 */
+function isCreationTimeout(error: ApiError): boolean {
+  return error.code === 'VM_CONTROL_TIMEOUT' || error.status === 504;
+}
+
+/** 이 탭이 마지막으로 받은 VM 목록에서 같은 이름의 VM. 목록이 없으면 비워 두고 응답으로 정리한다 */
+function existingVmIdsNamed(name: string): string[] {
+  return (loadVmList()?.data.items ?? []).filter((vm) => vm.name === name).map((vm) => vm.vm_id);
 }
