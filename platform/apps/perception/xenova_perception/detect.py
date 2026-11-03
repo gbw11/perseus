@@ -53,6 +53,12 @@ LANE_HALF_RANGE_M = (0.1, 1.0)  # 양쪽 선이 다 보일 때 맞추는 차로 
 # 데이터가 분명히 정하는 값은 몇 % 안쪽으로만 끌린다
 LANE_PRIOR = (0.1, 0.05, 0.005)  # (c0, psi, kappa)
 LANE_LOOKAHEAD_M = 0.6       # heading_err 를 재는 전방 주시 거리
+# 앞 프레임 이어 보기 (S15P31E110-360): 가설을 고를 때만 앞 프레임 c0·psi 와 많이 다른 가설에 벌점을 준다 (맞춘 값은 끌지 않는다).
+# 한 프레임(1/15 s, 0.5 m/s) 사이 c0·psi 는 몇 cm·0.05 rad 남짓만 바뀌는데, 머리핀 출구처럼 선이 짧게 보이면 반대쪽 가설이
+# 근소하게 이겨 heading 이 0.6 rad 넘게 뒤집히곤 했다 (catalunya 폐루프 이탈). 벌점 상한이 있어 증거가 분명하면 바뀐다
+LANE_TRACK_SIGMA = (0.2, 0.25)   # (c0 m, psi rad) — 벌점 = 전체 점 수 × τ² × Σ(차이/σ)²
+LANE_TRACK_MAX = 4.0             # 벌점 상한 (전체 점을 네 번 버리는 만큼)
+LANE_TRACK_GAP_S = 0.5           # 앞 프레임이 이보다 오래됐으면 이어 보지 않는다
 
 
 def _mask(hsv: np.ndarray, ranges) -> np.ndarray:
@@ -169,17 +175,20 @@ def _fit_arc(xs: np.ndarray, ys: np.ndarray, side: np.ndarray, half: float, free
     return LaneFit(float(p[0]), float(p[1]), float(p[2]), float(p[3]), cost)
 
 
-def fit_lane(lines: list[tuple[np.ndarray, np.ndarray]], lane_width_m: float) -> LaneFit | None:
+def fit_lane(lines: list[tuple[np.ndarray, np.ndarray]], lane_width_m: float,
+             prev: LaneFit | None = None) -> LaneFit | None:
     """선 덩어리마다 왼쪽·오른쪽·버림을 모두 따져 보고(3^n − 1 가설) 비용이 가장 작은 원호 모델을 고른다.
 
     비용 = 맞춘 점의 잘린 잔차² + 버린 점마다 τ² + 사전 지식 벌점(LANE_PRIOR). 사전 지식의 c0 항이 한쪽 선만 보일 때
     왼쪽·오른쪽을 가른다: 같은 선을 어느 쪽으로 보든 잔차는 같으니 차가 차로 안(|c0| 작음)에 있는 쪽을 고른다.
     급코너에서 바깥 선 하나만 보여도 선 전체의 굽음으로 방향·곡률을 읽어, 먼 쪽 짧은 선을 2차식으로 차 앞까지 늘리지 않는다.
+    prev(앞 프레임 결과)가 있으면 그와 c0·psi 가 많이 다른 가설에 고르기 벌점(LANE_TRACK_*)을 더한다. 반환 cost 에는 넣지 않는다.
     """
     if not lines:
         return None
     total = sum(len(xs) for xs, _ in lines)
     best: LaneFit | None = None
+    best_pick = math.inf
     for sides in itertools.product((1, -1, 0), repeat=len(lines)):
         used = [(xs, ys, s) for (xs, ys), s in zip(lines, sides) if s]
         if not used:
@@ -189,12 +198,28 @@ def fit_lane(lines: list[tuple[np.ndarray, np.ndarray]], lane_width_m: float) ->
         side = np.concatenate([np.full(len(u[0]), float(u[2])) for u in used])
         fit = _fit_arc(xs, ys, side, lane_width_m / 2, free_half=1 in sides and -1 in sides, n_prior=total)
         cost = fit.cost + (total - len(xs)) * LANE_FIT_TAU_M ** 2
-        if best is None or cost < best.cost:
+        pick = cost
+        if prev is not None:
+            jump = ((fit.c0 - prev.c0) / LANE_TRACK_SIGMA[0]) ** 2 + ((fit.psi - prev.psi) / LANE_TRACK_SIGMA[1]) ** 2
+            pick += total * LANE_FIT_TAU_M ** 2 * min(LANE_TRACK_MAX, jump)
+        if pick < best_pick:
+            best_pick = pick
             best = LaneFit(fit.c0, fit.psi, fit.kappa, fit.half, cost)
     return best
 
 
 def find_lane(hsv: np.ndarray, projector: Projector, lane_width_m: float) -> Lane | None:
+    fit = find_lane_fit(hsv, projector, lane_width_m)
+    return None if fit is None else lane_of(fit)
+
+
+def lane_of(fit: LaneFit) -> Lane:
+    c0 = fit.centre(0.0)
+    return Lane(offset_m=-c0, heading_err_rad=math.atan2(fit.centre(LANE_LOOKAHEAD_M) - c0, LANE_LOOKAHEAD_M))
+
+
+def find_lane_fit(hsv: np.ndarray, projector: Projector, lane_width_m: float,
+                  prev: LaneFit | None = None) -> LaneFit | None:
     """차선 추정. 못 찾으면 None (payload 에는 0 으로 나간다).
 
     선 덩어리들을 함께 원호 모델로 맞춰(fit_lane) 차로 중심 c(x) 를 얻는다. 한쪽만 보이면 그 선에서 차로 폭/2 안쪽의 원호.
@@ -206,17 +231,14 @@ def find_lane(hsv: np.ndarray, projector: Projector, lane_width_m: float) -> Lan
     if top >= mask.shape[0]:
         return None
     mask[:top] = 0
-    fit = fit_lane(lane_lines(mask, projector), lane_width_m)
-    if fit is None:
-        return None
-    c0 = fit.centre(0.0)
-    return Lane(offset_m=-c0, heading_err_rad=math.atan2(fit.centre(LANE_LOOKAHEAD_M) - c0, LANE_LOOKAHEAD_M))
+    return fit_lane(lane_lines(mask, projector), lane_width_m, prev)
 
 
 class Detector:
     def __init__(self, settings: PerceptionSettings) -> None:
         self._settings = settings
         self._projector: Projector | None = None
+        self._prev: tuple[float, LaneFit] | None = None  # (시각, 앞 프레임 차선) — 가설 고르기 이어 보기
 
     def projector(self, width: int, height: int) -> Projector:
         p = self._projector
@@ -229,7 +251,10 @@ class Detector:
         projector = self.projector(width, height)
         hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
         obstacles, boxes = find_obstacles(hsv, projector)
-        lane = find_lane(hsv, projector, self._settings.lane_width_m)
+        prev = self._prev[1] if self._prev and 0 <= at - self._prev[0] <= LANE_TRACK_GAP_S else None
+        fit = find_lane_fit(hsv, projector, self._settings.lane_width_m, prev)
+        self._prev = None if fit is None else (at, fit)
+        lane = None if fit is None else lane_of(fit)
         return make_result(
             lane or Lane(), obstacles, self._settings.stop_zone, at,
             limit=self._settings.max_obstacles, boxes=boxes, lane_found=lane is not None,
