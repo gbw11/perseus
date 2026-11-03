@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* Diagnostics adapter and closed v2 serializer. No transport or app-health claim. */
+/* Telemetry serializers. No transport or app-health claim. */
 #include <xenova/telemetry_core.h>
 #include "writer.h"
 #include <errno.h>
@@ -129,9 +129,9 @@ static const char *status(int rc)
 }
 static const char *cpu_status(int rc){return rc==-EOVERFLOW?"counter_discontinuity":status(rc);}
 
-static void sample(struct xt_writer *w, struct xt_publisher *p, const char *name,
+static void sample_value(struct xt_writer *w, const char *name,
 	const char *unit, const char *kind, unsigned encoding, int rc, uint64_t value,
-	unsigned labels, const char *override)
+	const char *override)
 {
 	const char *enc[]={"u64_decimal","i64_decimal","boolean","float64"};
 	const char *state=override ? override : status(rc);
@@ -149,12 +149,94 @@ static void sample(struct xt_writer *w, struct xt_publisher *p, const char *name
 	xt_raw(w,",\"status\":\"%s\",\"reason\":",state);
 	xt_string(w,strcmp(state,"ok") ? state : NULL);
 	xt_raw(w,",\"source_rc\":%d,\"labels\":{",rc);
+}
+
+static void sample(struct xt_writer *w, struct xt_publisher *p, const char *name,
+	const char *unit, const char *kind, unsigned encoding, int rc, uint64_t value,
+	unsigned labels, const char *override)
+{
+	sample_value(w,name,unit,kind,encoding,rc,value,override);
 	if (labels==1) { xt_raw(w,"\"interface\":"); xt_string(w,p->inventory.interface_name); }
 	if (labels==2) {
 		xt_raw(w,"\"task_id\":"); xt_string(w,p->inventory.task_id);
 		xt_raw(w,",\"task_epoch\":"); xt_string(w,p->task_epoch);
 	}
 	xt_raw(w,"}}");
+}
+
+static int network_source_rc(int rc, const struct xdr_snapshot *r, uint64_t sent)
+{
+	/* A recent Publisher collection does not refresh the copied source window. */
+	if (rc) { return rc; }
+	if (r->net_end_ms>sent || sent-r->net_end_ms>2000) { return -ETIMEDOUT; }
+	return r->net_epoch ? 0 : -ENODATA;
+}
+
+static void network_rate(struct xt_writer *w, const struct xt_publisher *p,
+	const struct xdr_snapshot *r, uint64_t sent)
+{
+	int rc=network_source_rc(r->net_rate_rc,r,sent);
+	sample_value(w,"rx_bytes_per_s","bytes/s","gauge",0,rc,r->rx_bytes_per_s,
+		rc==-EOVERFLOW ? "counter_discontinuity" : NULL);
+	xt_raw(w,"\"interface\":");xt_string(w,p->inventory.interface_name);
+	xt_raw(w,",\"counter_epoch\":");xt_u64(w,r->net_epoch);
+	xt_raw(w,"}}");
+}
+
+static void network_counter_v1(struct xt_writer *w, const char *name, const char *iface,
+	uint64_t epoch, int rc, uint64_t value)
+{
+	const char *reason=NULL;
+	if (rc==-ENODATA) { reason="first_sample"; }
+	else if (rc==-ENOTSUP || rc==-ENOENT) { reason="not_supported"; }
+	else if (rc==-ETIMEDOUT) { reason="stale_sample"; }
+	else if (rc==-ERANGE) { reason="counter_saturated"; }
+	else if (rc) { reason="read_failed"; }
+
+	xt_raw(w,"{\"name\":\"%s\",\"unit\":\"bytes\",\"value\":",name);
+	if (rc) { xt_raw(w,"null"); } else { xt_u64(w,value); }
+	xt_raw(w,",\"unavailable_reason\":");xt_string(w,reason);
+	xt_raw(w,",\"source_rc\":%d,\"labels\":{\"iface\":",rc);xt_string(w,iface);
+	xt_raw(w,",\"counter_epoch\":");xt_u64(w,epoch);
+	xt_raw(w,"}}");
+}
+
+static int encode_network_v1(struct xt_publisher *p, const struct xdr_snapshot *r,
+	uint64_t sent, struct xt_message *out)
+{
+	if (p->network_v1_sequence>=INT64_MAX || r->net_bytes_rc>0) { return -ERANGE; }
+	char message_id[XT_UUID_BYTES];
+	int rc=xt_sample_id(p,message_id);
+	if (rc) { return rc; }
+	uint64_t seq=p->network_v1_sequence+1;
+	int counter_rc=network_source_rc(r->net_bytes_rc,r,sent);
+	const struct xt_identity *id=&p->identity;
+	struct xt_writer w={.data=out->bytes,.size=XT_NETWORK_V1_MAX+1};
+
+	out->stream=XT_STREAMS;
+	out->qos=0;
+	out->retain=false;
+	(void)snprintf(out->topic,sizeof(out->topic),"xenova/v1/vms/%s/metrics",id->vm_id);
+	xt_raw(&w,"{\"schema_version\":\"1.0\",\"type\":\"agent.metrics\",\"message_id\":\"%s\","
+		"\"vm_id\":\"%s\",\"boot_id\":\"%s\",\"agent_instance_id\":\"%s\",\"seq\":%" PRIu64 ",\"sent_at\":",
+		message_id,id->vm_id,id->boot_id,id->publisher_id,seq);
+	char iso[25];uint64_t uncertainty;
+	xt_string(&w,xt_utc_read(&p->utc,sent,iso,&uncertainty) ? NULL : iso);
+	xt_raw(&w,",\"payload\":{\"window_ms\":null,\"observed_uptime_ms\":");
+	if (counter_rc) { xt_raw(&w,"null"); } else { xt_u64(&w,r->net_end_ms); }
+	xt_raw(&w,",\"values\":[");
+	network_counter_v1(&w,"net_rx_bytes_total",p->inventory.interface_name,r->net_epoch,counter_rc,r->rx_bytes);
+	xt_raw(&w,",");
+	network_counter_v1(&w,"net_tx_bytes_total",p->inventory.interface_name,r->net_epoch,counter_rc,r->tx_bytes);
+	xt_raw(&w,"]}}");
+	if (w.error) {
+		out->bytes[0]=0;out->length=0;
+		if (w.error==-ENOSPC) { ++p->counters.payload_oversize; }
+		return w.error;
+	}
+	out->length=w.used;
+	p->network_v1_sequence=seq;
+	return 0;
 }
 
 static void capability(struct xt_writer *w,const char *id,bool supported,const char *reason)
@@ -206,14 +288,22 @@ static void heartbeat(struct xt_writer *w,const struct xt_counters *c)
 	xt_raw(w,",\"app_health_asserted\":false");
 }
 
-static void metrics(struct xt_writer *w,struct xt_publisher *p,enum xt_kind kind,const struct xt_observation *s)
+static void metrics(struct xt_writer *w,struct xt_publisher *p,enum xt_kind kind,
+	const struct xt_observation *s,uint64_t sent)
 {
 	const char *family=kind==XT_MEMORY ? "memory" : kind==XT_NETWORK ? "network" : kind==XT_PROGRESS ? "loop_progress" : "publisher";
 	xt_raw(w,",\"family\":\"%s\",\"samples\":[",family);
 	if (kind==XT_MEMORY) {
 		sample(w,p,"memory.kernel_heap.used_bytes","bytes","gauge",0,s->heap_rc,s->heap_used,0,NULL);xt_raw(w,",");
 		sample(w,p,"memory.kernel_heap.free_bytes","bytes","gauge",0,s->heap_rc,s->heap_free,0,NULL);xt_raw(w,",");
-		sample(w,p,"memory.kernel_heap.high_water_bytes","bytes","gauge",0,s->heap_rc,s->heap_peak,0,NULL);
+		sample(w,p,"memory.kernel_heap.high_water_bytes","bytes","gauge",0,s->heap_rc,s->heap_peak,0,NULL);xt_raw(w,",");
+		int rc=s->heap_rc;
+		uint64_t accounted=0;
+		if (!rc) {
+			if (s->heap_used>UINT64_MAX-s->heap_free) { rc=-ERANGE; }
+			else { accounted=s->heap_used+s->heap_free; }
+		}
+		sample(w,p,"memory.kernel_heap.accounted_bytes","bytes","gauge",0,rc,accounted,0,NULL);
 	} else if (kind==XT_NETWORK) {
 		const char *names[]={"tx_packets","rx_packets","tx_drop","rx_drop","pool_busy","protocol_errors"};
 		for (unsigned i=0;i<6;++i) {
@@ -222,7 +312,8 @@ static void metrics(struct xt_writer *w,struct xt_publisher *p,enum xt_kind kind
 			sample(w,p,name,i<2 ? "packets" : "count","raw_counter",0,rc,s->net[i],1,NULL);xt_raw(w,",");
 		}
 		sample(w,p,"network.interface_up","bool","gauge",2,s->network_rc,s->interface_up,1,NULL);xt_raw(w,",");
-		sample(w,p,"network.carrier","bool","gauge",2,s->network_rc,s->carrier,1,NULL);
+		sample(w,p,"network.carrier","bool","gauge",2,s->network_rc,s->carrier,1,NULL);xt_raw(w,",");
+		network_rate(w,p,&s->resources,sent);
 	} else if (kind==XT_PROGRESS) {
 		const struct xdiag_timing *t=&s->timing;
 		const char *names[]={"completed_total","in_flight","last_completed_age_us","deadline_miss_total","skipped_release_total","last_interval_us","last_jitter_us"};
@@ -368,8 +459,12 @@ int xt_encode(struct xt_publisher *p,enum xt_kind kind,const struct xt_observati
 	uint64_t sent,const char sample_id[37],const char snapshot_id[37],unsigned part,struct xt_message *out)
 {
 	if (!p || !s || !out || !xt_uuid_valid(sample_id) || s->start_ms>s->end_ms || s->end_ms>sent ||
-    s->rows>XT_THREAD_MAX || kind<XT_INVENTORY || kind>XT_POOLS) { return -EINVAL; }
-	if ((kind==XT_HEARTBEAT || (kind>=XT_MEMORY && kind<=XT_PUBLISHER) || kind==XT_CPU || kind==XT_POOLS) && sent-s->end_ms>2000) { ++p->counters.live_discarded;return -ETIMEDOUT; }
+    s->rows>XT_THREAD_MAX || kind<XT_INVENTORY || kind>XT_NETWORK_V1) { return -EINVAL; }
+	if ((kind==XT_HEARTBEAT || (kind>=XT_MEMORY && kind<=XT_PUBLISHER) ||
+	     kind==XT_CPU || kind==XT_POOLS || kind==XT_NETWORK_V1) && sent-s->end_ms>2000) {
+		++p->counters.live_discarded;return -ETIMEDOUT;
+	}
+	if (kind==XT_NETWORK_V1) { return encode_network_v1(p,&s->resources,sent,out); }
 	/* Collection copies a cache: its new end timestamp cannot renew the source
 	 * window. Reject stale resource pages before allocating a stream sequence. */
 	if (kind==XT_CPU || kind==XT_POOLS) {
@@ -415,7 +510,7 @@ int xt_encode(struct xt_publisher *p,enum xt_kind kind,const struct xt_observati
 	else if (kind==XT_EVENT) { xt_raw(&w,",\"event\":");event(&w,p,&p->events[0]);xt_raw(&w,",\"coverage\":");coverage(&w,p,&s->history); }
 	else if (kind==XT_THREADS||kind==XT_HISTORY) { snapshot(&w,p,kind,s,snapshot_id,part); }
 	else if (kind==XT_CPU||kind==XT_POOLS) { resources(&w,p,kind,s,part); }
-	else { metrics(&w,p,kind,s); }
+	else { metrics(&w,p,kind,s,sent); }
 	xt_raw(&w,"}}");
 	if (w.error) { out->bytes[0]=0;out->length=0;if (w.error==-ENOSPC) { ++p->counters.payload_oversize; }return w.error; }
 	out->length=w.used;p->sequence[stream]=seq;return 0;
