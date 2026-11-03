@@ -56,6 +56,12 @@ xenova:
   agent:
     stale-after: 15s
     offline-after: 30s
+  vm:
+    # Integration tests stub dom0-manager per test; the cache and its loop are covered by unit tests.
+    runtime-cache:
+      enabled: false
+      refresh-delay: 1s
+      stale-limit: 10s
   event:
     # Tests call AgentStatusWatcher.check() and VmStateWatcher.check() themselves.
     agent-status-check-interval-ms: 3600000

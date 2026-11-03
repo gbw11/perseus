@@ -1,6 +1,6 @@
 # VM 관리 API 계약 v1
 
-**최종 갱신** 2026-10-27
+**최종 갱신** 2026-11-02
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼
 **구성 계층** 프론트 ↔ Spring (공개 API) ↔ dom0-manager (FastAPI) ↔ Xen `xl`
 
@@ -449,7 +449,7 @@ Spring의 페이지 규칙: (1) `gap: true`면 경고(`WARN`)로 `recovery.faile
 
 | 메서드 | 경로 | 성공 응답 | 비고 |
 |---|---|---|---|
-| `GET` | `/api/v1/vms` | `200` `{items: VM[], observed_at}` | 자기 레코드와 조합한 전체 목록. 생성 순 정렬. Spring에 레코드가 없는 도메인은 제외 |
+| `GET` | `/api/v1/vms` | `200` `{items: VM[], observed_at}` | 자기 레코드와 조합한 전체 목록. 생성 순 정렬. Spring에 레코드가 없는 도메인은 제외. `state`·`vcpus`·`memory_mib`는 Spring이 들고 있는 마지막 dom0 목록에서 오며 `observed_at`은 그 목록을 dom0-manager에서 받은 시각(아래 런타임 캐시) |
 | `POST` | `/api/v1/vms` | 신규 `201` VM, 동일 명세 재시도 `200` VM | 같은 이름에 다른 명세면 `409 VM_NAME_CONFLICT` |
 | `GET` | `/api/v1/vms/{vm_id}` | `200` VM | — |
 | `PATCH` | `/api/v1/vms/{vm_id}` | `200` VM (조회 응답과 같은 모양) | 본문 `{"role": "manual"}`, `{"role": null}`이면 역할을 지움. 역할만 바꿀 수 있고 dom0-manager를 호출하지 않으며 이벤트도 남기지 않음. 보관된 VM은 `404 VM_NOT_FOUND` |
@@ -460,7 +460,9 @@ Spring의 페이지 규칙: (1) `gap: true`면 경고(`WARN`)로 `recovery.faile
 
 모든 공개 API는 `Authorization: Bearer {access_token}`이 필요합니다. 생성·시작·정지·삭제가 성공하면 이벤트(`vm.created`, `vm.state.changed`, `vm.deleted`)가 기록됩니다.
 
-Xen은 VM 상태 변화를 누구에게도 알리지 않으므로, Spring이 dom0-manager `GET /api/v1/vms`를 주기적으로(기본 5초, `EVENT_VM_STATE_CHECK_INTERVAL_MS`) 조회해 사용자 조작 없이 바뀐 상태(크래시, 스스로 종료 등)를 `vm.state.changed`(`cause: detected`)로 기록합니다. 조작 중인 VM은 건너뛰고, dom0-manager에 닿지 않으면 그 회차는 아무것도 기록하지 않으며, 서버가 처음 보는 VM은 기준값만 저장합니다.
+**런타임 캐시 (S15P31E110-344).** 목록·단건 조회는 요청마다 dom0-manager를 부르지 않고 Spring이 들고 있는 마지막 dom0 목록으로 답합니다(실측: 요청마다 부르면 2.7~4.4초). 전용 스레드 하나가 dom0 `GET /api/v1/vms`를 마친 뒤 `VM_RUNTIME_REFRESH_DELAY`(기본 1초) 쉬고 다시 부르므로, 상태 변화는 dom0 목록 한 번 + 1초 안에 반영됩니다. 시작·생성·정지·삭제의 결과는 그 VM에 즉시 반영합니다. 목록이 `VM_RUNTIME_STALE_LIMIT`(기본 10초)보다 오래되면(루프 정지·연속 실패) 그 요청이 dom0-manager를 직접 부르고, 그것도 실패하면 기존과 같은 오류를 돌려줍니다 — 오래된 목록으로 장애를 숨기지 않습니다. `VM_RUNTIME_CACHE_ENABLED=false`면 요청마다 dom0-manager를 부르는 예전 동작입니다.
+
+Xen은 VM 상태 변화를 누구에게도 알리지 않으므로, Spring이 dom0-manager `GET /api/v1/vms`를 주기적으로(위 갱신 루프마다. 캐시를 끄면 `EVENT_VM_STATE_CHECK_INTERVAL_MS`, 기본 5초) 조회해 사용자 조작 없이 바뀐 상태(크래시, 스스로 종료 등)를 `vm.state.changed`(`cause: detected`)로 기록합니다. 조작 중인 VM은 건너뛰고, dom0-manager에 닿지 않으면 그 회차는 아무것도 기록하지 않으며, 서버가 처음 보는 VM은 기준값만 저장합니다.
 
 **xentop 통계의 저장과 사용률 계산.** Spring은 4.6절 응답의 VM마다 `MetricSample(source = "xen", boot_id = null, window_ms = null, observed_at = sampled_at)`을 저장합니다. 값 이름과 단위는 다음과 같고, `unavailable`에 있는 필드는 값 `null`에 `unavailableReason`을 그대로 둡니다.
 
@@ -716,3 +718,4 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1.14 | 2026-10-22 | 복구 이벤트 `reason` 에 `APP_HEARTBEAT_LOST`(Zephyr VM, D8) 추가, `DOMAIN_ABSENT` 의 60초 유예 명시(2.5). VM 별 건강 스냅샷 `vm.health` 는 MQTT 계약 11.1절 (S15P31E110-124) |
 | v1.15 | 2026-10-27 | `role` 허용값 `message-board` 를 `interaction` 으로 바꾼다(2.2·5장, MQTT 계약 v1.4 의 app_id 변경). 예전 값은 `422 VALIDATION_ERROR` (S15P31E110-303) |
 | v1.16 | 2026-10-27 | 정지 요청 추적(S15P31E110-305): stop 의 선택 헤더 `Idempotency-Key` 와 작업 상태 응답 `200`·`202`(4.3.1), 원 작업 조회 `GET /api/v1/vms/{vm_id}/control-operations`(4.8), `/healthz` 를 뺀 전 엔드포인트의 선택 요청 예산 `X-Request-Budget-Ms`(4.9, 잠금 대기·하위 호출·xl·xentop), 오류 본문 `retryable`·`operation`, 오류 코드 `404 OperationNotFound`(8.1). 키·예산이 없는 기존 호출의 응답은 그대로 |
+| v1.17 | 2026-11-02 | Spring 런타임 캐시(S15P31E110-344): `GET /api/v1/vms`·단건 조회는 마지막 dom0 목록으로 답하고 `observed_at`은 그 목록의 관측 시각, 전용 갱신 루프(조회 후 1초), stale-limit 10초 초과 시 직접 조회·실패 시 오류(5장). 필드 변경 없음 |

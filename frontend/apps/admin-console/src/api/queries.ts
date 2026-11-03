@@ -20,6 +20,7 @@ import type {
   VmResourceUpdate,
   VmResources,
 } from './types';
+import { clearVmList, loadVmList, saveVmList } from './vmListCache';
 
 export const keys = {
   vms: ['vms'] as const,
@@ -39,8 +40,15 @@ const POLL_MS = 5000;
 export function useVms(pollMs = POLL_MS) {
   return useQuery({
     queryKey: keys.vms,
-    queryFn: ({ signal }) => request<VmListResponse>('/api/v1/vms', { signal }),
+    queryFn: async ({ signal }) => {
+      const list = await request<VmListResponse>('/api/v1/vms', { signal });
+      saveVmList(list);
+      return list;
+    },
     refetchInterval: pollMs,
+    // 새로고침 직후에는 이 탭이 마지막으로 받은 목록을 먼저 보여 주고 곧바로 다시 읽는다 (S15P31E110-345)
+    initialData: () => loadVmList()?.data,
+    initialDataUpdatedAt: () => loadVmList()?.savedAt,
   });
 }
 
@@ -202,6 +210,7 @@ export function useLogout() {
     mutationFn: () => request<void>('/api/v1/auth/logout', { method: 'POST' }),
     onSettled: () => {
       setSession(null);
+      clearVmList();
       client.clear();
     },
   });

@@ -118,6 +118,14 @@ xenova:
     # Keep long-running VM commands connected for up to 15 minutes.
     command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:15m}
     retry-backoff: ${DOM0_MANAGER_RETRY_BACKOFF:500ms}
+  vm:
+    # GET /api/v1/vms answers from the last dom0-manager list; one background loop refreshes it (S15P31E110-344).
+    runtime-cache:
+      enabled: ${VM_RUNTIME_CACHE_ENABLED:true}
+      # pause after each refresh: a state change shows up after about one dom0-manager list plus this
+      refresh-delay: ${VM_RUNTIME_REFRESH_DELAY:1s}
+      # safety net only: past this age (loop stopped or failing) reads go to dom0-manager again
+      stale-limit: ${VM_RUNTIME_STALE_LIMIT:10s}
   vm-registration:
     # Platform registration sender authentication; separate from user JWT and dom0-manager credentials.
     service-token: ${VM_REGISTRATION_SERVICE_TOKEN:}
