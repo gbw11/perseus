@@ -9,6 +9,9 @@
   등록·시작·정지·보관 직전에는 드라이버 종류와 무관하게 여기서 한 번 더 확인한다(mock 도 실보드와 같은 의미가 되게).
 - 키 있는 정지(request_stop)는 작업을 추적하는 드라이버(platform)에서 vm_id 락·선행 조회 없이 바로 하위 수락으로 간다.
   긴 start 가 같은 VM 의 락을 쥐어도 정지 의도는 먼저 받아들여진다(실제 실행 순서는 플랫폼 실행 잠금이 정한다).
+- 재부팅(S15P31E110-208): 키 유무와 관계없이 신규 재부팅은 실행 중인 도메인만 받는다(없으면 404, 실행 중이 아니면 409). 키 있으면
+  같은 키의 원 작업을 먼저 조회해, 있으면 재전달로 보고 상태 검사 없이 하위로 보낸다. 재부팅 중에는 도메인이 잠깐 없어 상태 검사가
+  재전달을 409 로 막기 때문이다. 키 없는 재부팅만 vm_id 락 안에서 동기로 기다린다
 """
 
 from __future__ import annotations
@@ -21,8 +24,8 @@ from uuid import UUID
 from . import budget as request_budget
 from .config import Settings
 from .drivers.base import CreateSpec, Domain, Driver, Provisioner, StatsSample
-from .errors import InsufficientResources, InvalidArgument, InvalidState, VMExists, VMNotFound
-from .models import ControlOperation, ControlStatus, CreateVmRequest
+from .errors import InsufficientResources, InvalidArgument, InvalidState, OperationNotFound, VMExists, VMNotFound
+from .models import ControlOperation, ControlStatus, CreateVmRequest, VmState
 
 
 DOM0_UUID = UUID(int=0)  # xl list -l 에서 Domain-0 의 uuid 는 00000000-0000-0000-0000-000000000000 이다
@@ -133,9 +136,49 @@ class VmService:
         self.stop(vm_id)
         return ControlOperation(vm_id=vm_id, action="stop", request_key=key, status=ControlStatus.completed, accepted=True)
 
+    def reboot(self, vm_id: UUID) -> None:
+        reject_dom0(vm_id)
+        with self._vm_lock(vm_id):
+            self._require_running(vm_id)
+            request_budget.ensure(f"rebooting vm {vm_id}")
+            self._driver.reboot(vm_id)
+
+    def request_reboot(self, vm_id: UUID, key: str) -> ControlOperation:
+        """키 있는 재부팅. 신규 요청은 키 없는 재부팅과 같은 전제(실행 중)를 본다. 같은 키의 원 작업이 있으면 재전달로 보고 상태를 보지 않는다.
+        작업 기록이 없는 드라이버(mock·xen)는 동기 재부팅 뒤 완료로 답한다(operation_id 없음, 조회 불가)."""
+        reject_dom0(vm_id)
+        if self._driver.tracks_control_operations:
+            if not self._has_original(vm_id, key):
+                self._require_running(vm_id)
+            request_budget.ensure(f"rebooting vm {vm_id}")
+            return self._driver.request_reboot(vm_id, key=key)
+        self.reboot(vm_id)
+        return ControlOperation(vm_id=vm_id, action="reboot", request_key=key, status=ControlStatus.completed, accepted=True)
+
     def control_operation(self, vm_id: UUID, key: str) -> ControlOperation:
         reject_dom0(vm_id)
         return self._driver.control_operation(vm_id, key=key)
+
+    def _require_running(self, vm_id: UUID) -> None:
+        """재부팅 전제: 등록이 있고(없으면 404) 도메인이 running 이다(꺼짐·paused·crashed·stopping 은 409). 하위 reboot 는 도메인
+        존재만 확인하므로 이 검사가 키 유무와 관계없이 같은 의미를 만든다."""
+        if not self._provisioner.instance_exists(vm_id):
+            raise VMNotFound(f"instance {vm_id} not registered")
+        try:
+            domain = self._driver.get_domain(vm_id)
+        except VMNotFound:
+            raise InvalidState(f"vm {vm_id} is not running; start it instead of rebooting") from None
+        if domain.state != VmState.running:
+            raise InvalidState(f"vm {vm_id} is {domain.state.value}; reboot needs a running domain (stop it, then start)")
+
+    def _has_original(self, vm_id: UUID, key: str) -> bool:
+        """같은 키의 원 제어 작업이 있는가(읽기만). 없다는 확인(OperationNotFound)만 신규 요청이다. 조회를 모르는 옛 Manager(501)나
+        다른 조회 실패는 그대로 올린다: 신규·재전달을 가르지 못한 채 보내면 진행 중인 재부팅의 재전달을 409 로 거절할 수 있다."""
+        try:
+            self._driver.control_operation(vm_id, key=key)
+        except OperationNotFound:
+            return False
+        return True
 
     def delete(self, vm_id: UUID) -> None:
         """계약 v1.1: 실행 중이면 409, 등록이 없으면 404, 정지된 VM 은 숨김 보관(retire). 강제 종료는 하지 않는다."""

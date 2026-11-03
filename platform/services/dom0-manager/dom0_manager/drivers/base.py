@@ -159,6 +159,15 @@ class Driver(ABC):
         """요청 키로 원 제어 작업 조회. 작업 기록이 없는 드라이버는 501."""
         raise NotSupportedByPlatform(f"{self.name} driver does not track control operations")
 
+    def reboot(self, vm_id: UUID) -> None:  # S15P31E110-208
+        """실행 중인 도메인을 같은 디스크로 다시 시작한다(게스트 정상 재부팅, 새 실행). 제공하지 않는 드라이버는 501.
+        재부팅 명령을 제출한 뒤 새 실행을 확인하지 못하면 결과 미확정이다(기존·새 도메인의 유무를 단정하지 않는다). 자동 강제 재부팅은 없다."""
+        raise NotSupportedByPlatform(f"{self.name} driver does not support reboot")
+
+    def request_reboot(self, vm_id: UUID, *, key: str) -> ControlOperation:
+        """키 있는 재부팅(S15P31E110-208). tracks_control_operations 인 드라이버만 구현한다."""
+        raise NotSupportedByPlatform(f"{self.name} driver does not track control operations")
+
     @abstractmethod
     def host_info(self) -> HostInfo:
         """가용 메모리·코어 수."""
@@ -168,9 +177,6 @@ class Driver(ABC):
         """하이퍼바이저가 응답하면 True. /healthz 가 503 을 구분하는 근거."""
 
     # ---- v2 (별도 계약 작성 후) ----
-
-    def reboot(self, vm_id: UUID) -> None:  # S15P31E110-208
-        raise NotImplementedError("reboot: S15P31E110-208")
 
     def set_vcpus(self, vm_id: UUID, vcpus: int) -> None:  # S15P31E110-101
         raise NotImplementedError("set_vcpus: S15P31E110-101")
