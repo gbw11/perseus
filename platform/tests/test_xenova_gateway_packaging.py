@@ -23,6 +23,8 @@ class GatewayPackagingTest(unittest.TestCase):
                             ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
             shutil.copytree(project / 'examples', source / 'examples',
                             ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            shutil.copytree(ROOT / 'platform/apps/drive/world/python/xenova_drive_world',
+                            source / 'xenova_drive_world', ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
             shutil.copyfile(project / 'pyproject.toml', source / 'pyproject.toml')
             recipe = RECIPES / 'xenova-gateway/xenova-gateway_0.1.0.bb'
             for item in (recipe.parent / 'files').iterdir():
