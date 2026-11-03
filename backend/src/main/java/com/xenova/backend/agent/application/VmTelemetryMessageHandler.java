@@ -4,7 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.agent.application.AgentMessageHandler.Result;
 import com.xenova.backend.agent.domain.MetricSample;
+import com.xenova.backend.agent.domain.MetricSampleData;
+import com.xenova.backend.agent.domain.MetricSampleData.CpuWindow;
 import com.xenova.backend.agent.domain.MetricValue;
+import com.xenova.backend.common.UnsignedDecimal;
+import com.xenova.backend.template.domain.GuestKind;
+import com.xenova.backend.vm.domain.VmRecord;
+import com.xenova.backend.vm.domain.VmRecordRepository;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -20,28 +26,25 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-// Stores Zephyr Telemetry Publisher metrics (contract 2.1, platform/guests/zephyr/telemetry/contract) as metric
-// samples, so Zephyr VMs are read through the same metrics API as Linux agents.
-// One message carries one family (cpu, memory, memory_regions, ...); each becomes its own sample.
-// Like AgentMessageHandler it never throws: a bad message is logged and dropped.
+// Ingests Linux and Zephyr telemetry 2.1 metric samples.
 @Component
-public class ZephyrTelemetryMessageHandler {
+public class VmTelemetryMessageHandler {
 
-    public static final String TOPIC = "xenova/v2/vms/+/telemetry/metrics";
-
+    public static final String METRICS_TOPIC = "xenova/v2/vms/+/telemetry/metrics";
     static final String SUPPORTED_SCHEMA_VERSION = "2.1";
-    static final String SOURCE = "zephyr_telemetry";
     private static final Pattern TOPIC_PATTERN = Pattern.compile("^xenova/v2/vms/([^/]+)/telemetry/metrics$");
-    private static final String TYPE = "telemetry.metrics";
 
-    private static final Logger log = LoggerFactory.getLogger(ZephyrTelemetryMessageHandler.class);
+    private static final Logger log = LoggerFactory.getLogger(VmTelemetryMessageHandler.class);
 
     private final ObjectMapper objectMapper;
     private final AgentDataService agentDataService;
+    private final VmRecordRepository vmRecords;
 
-    public ZephyrTelemetryMessageHandler(ObjectMapper objectMapper, AgentDataService agentDataService) {
+    public VmTelemetryMessageHandler(
+            ObjectMapper objectMapper, AgentDataService agentDataService, VmRecordRepository vmRecords) {
         this.objectMapper = objectMapper;
         this.agentDataService = agentDataService;
+        this.vmRecords = vmRecords;
     }
 
     public static boolean matches(String topic) {
@@ -52,10 +55,10 @@ public class ZephyrTelemetryMessageHandler {
         try {
             return process(topic, payload, receivedAt);
         } catch (Rejected rejected) {
-            log.warn("Rejected Zephyr telemetry on {}: {}", topic, rejected.getMessage());
+            log.warn("Rejected VM telemetry on {}: {}", topic, rejected.getMessage());
             return Result.REJECTED;
         } catch (RuntimeException exception) {
-            log.error("Failed to store Zephyr telemetry on {}", topic, exception);
+            log.error("Failed to store VM telemetry on {}", topic, exception);
             return Result.REJECTED;
         }
     }
@@ -73,29 +76,52 @@ public class ZephyrTelemetryMessageHandler {
         if (!SUPPORTED_SCHEMA_VERSION.equals(root.path("schema_version").asText(null))) {
             throw new Rejected("schema_version " + root.path("schema_version"));
         }
-        if (!TYPE.equals(root.path("type").asText(null))) {
+        if (!"telemetry.metrics".equals(root.path("type").asText(null))) {
             throw new Rejected("type " + root.path("type"));
         }
         if (!topicVmId.equals(root.path("vm_id").asText(null))) {
             throw new Rejected("vm_id mismatch: topic " + topicVmId + ", body " + root.path("vm_id"));
         }
+        return storeMetrics(topicVmId, root, receivedAt);
+    }
+
+    private Result storeMetrics(String topicVmId, JsonNode root, Instant receivedAt) {
         String messageId = root.path("message_id").asText("");
         JsonNode samples = root.path("payload").path("samples");
         if (messageId.isBlank() || !samples.isArray()) {
             throw new Rejected("missing message_id or payload.samples");
         }
 
+        JsonNode window = root.path("payload").path("window");
+        String family = root.path("payload").path("family").asText("");
+        String source = metricSource(topicVmId, family);
+        CpuWindow cpuWindow = null;
+        if (MetricSample.ZEPHYR_TELEMETRY.equals(source) && "cpu".equals(family) && window.has("part_count")) {
+            try {
+                cpuWindow = ZephyrCpuPage.parse(root, window, samples);
+            } catch (IllegalArgumentException exception) {
+                throw new Rejected(exception.getMessage());
+            }
+        }
         MetricSample sample = new MetricSample(
                 // message_id is "vm/boot/publisher/metrics/seq", longer than the 36-char sample_id column.
                 UUID.nameUUIDFromBytes(messageId.getBytes(StandardCharsets.UTF_8)).toString(),
                 topicVmId,
                 root.path("boot_id").asText(null),
-                SOURCE,
+                source,
                 observedAt(root.path("clock").path("sent_at"), receivedAt),
                 receivedAt,
-                windowMs(root.path("payload").path("window")),
-                values(samples));
+                cpuWindow == null ? windowMs(window)
+                        : UnsignedDecimal.elapsedMillis(cpuWindow.startUptimeMs(), cpuWindow.endUptimeMs()),
+                new MetricSampleData(values(samples), null, cpuWindow));
         return agentDataService.recordMetrics(sample) ? Result.ACCEPTED : Result.IGNORED;
+    }
+
+    private String metricSource(String vmId, String family) {
+        return vmRecords.findById(vmId).map(VmRecord::getGuestKind)
+                .map(kind -> kind == GuestKind.ZEPHYR ? MetricSample.ZEPHYR_TELEMETRY : MetricSample.LINUX_TELEMETRY)
+                // Publisher counters are shared. The other supported 2.1 families are Zephyr's profiles.
+                .orElse("publisher".equals(family) ? MetricSample.VM_TELEMETRY : MetricSample.ZEPHYR_TELEMETRY);
     }
 
     // Without trusted UTC (sent_at null) the Publisher only knows its own uptime, so arrival time stands in.

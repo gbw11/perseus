@@ -82,6 +82,8 @@ xenova:
   agent:
     stale-after: ${AGENT_STALE_AFTER:15s}
     offline-after: ${AGENT_OFFLINE_AFTER:30s}
+    # v2 telemetry heartbeat is sent every 2s; past this lease the Publisher state shows STALE (display only)
+    telemetry-heartbeat-lease: ${AGENT_TELEMETRY_HEARTBEAT_LEASE:6s}
   # 에이전트 상태(ONLINE/STALE/OFFLINE) 변화를 이벤트로 남기기 위해 확인하는 주기
   event:
     agent-status-check-interval-ms: ${EVENT_AGENT_STATUS_CHECK_INTERVAL_MS:5000}
