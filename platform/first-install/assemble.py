@@ -496,15 +496,31 @@ def platform_boot_ok(image, table, output):
     return result
 
 
-def copy_range(source, target, offset, length):
+def _copy_zeroed_stream(source, target):
+    """새 파일의 논리 바이트를 유지하며 0 블록만 sparse로 보존한다."""
+    zeros = bytes(64 * 1024)
+    while block := source.read(len(zeros)):
+        if block == zeros[:len(block)]:
+            target.seek(len(block), os.SEEK_CUR)
+        else:
+            target.write(block)
+    target.truncate(target.tell())
+
+
+def copy_range(source, target, offset, length, *, zeroed_destination=False):
+    """새로 확장한 0 영역에서는 0 블록을 hole로 유지한다. 기존 영역은 기본 복사를 쓴다."""
+    zeros = bytes(64 * 1024) if zeroed_destination else None
     with source.open('rb') as inp, target.open('r+b') as out:
         out.seek(offset)
         left = length
         while left:
-            block = inp.read(min(left, 8 * MIB))
+            block = inp.read(min(left, len(zeros) if zeroed_destination else 8 * MIB))
             if not block:
                 raise ValueError('truncated prepared data filesystem')
-            out.write(block)
+            if zeroed_destination and block == zeros[:len(block)]:
+                out.seek(len(block), os.SEEK_CUR)
+            else:
+                out.write(block)
             left -= len(block)
         out.flush()
         os.fsync(out.fileno())
@@ -622,7 +638,7 @@ def assemble(config, image, record, planned):
     base = work.path / 'platform.img'
     opener = bz2.open if image.suffix == '.bz2' else open
     with opener(image, 'rb') as inp, base.open('xb') as out:
-        shutil.copyfileobj(inp, out, 8 * MIB)
+        _copy_zeroed_stream(inp, out)
     try:
         platform_boot = platform_boot_ok(base, planned['layout'], work.path)
         root = platform_mount(work, base)
@@ -701,7 +717,9 @@ def assemble(config, image, record, planned):
         for entry in planned.get('rtos_templates', []):
             rtos.info(entry['template'], entry['template_manifest_sha256'])
         final = stage / 'xenova-first-install.img'
-        shutil.copyfile(base, final)
+        with final.open('xb') as stream:
+            stream.truncate(base.stat().st_size)
+        copy_range(base, final, 0, base.stat().st_size, zeroed_destination=True)
         with final.open('r+b') as stream:
             stream.truncate(planned['capacity']['image_bytes'])
             stream.seek(478)
@@ -710,7 +728,7 @@ def assemble(config, image, record, planned):
             stream.write(struct.pack('<B3sB3sII', 0, b'\xfe\xff\xff', 0x83, b'\xfe\xff\xff', start, count))
             stream.flush()
             os.fsync(stream.fileno())
-        copy_range(datafile, final, start * SECTOR, count * SECTOR)
+        copy_range(datafile, final, start * SECTOR, count * SECTOR, zeroed_destination=True)
         with final.open('rb') as stream:
             final_layout = layout(stream.read(SECTOR), final.stat().st_size, with_data=True)
         partition_hashes = []
