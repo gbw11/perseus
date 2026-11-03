@@ -653,3 +653,74 @@ source-package 입력 대조까지 수행했다. **ARM firmware/정규 패키지
 재현: 기존 고정 도구 환경에서 `packet-lock/run_packet.py <새-tag> packet`을 실행한다.
 `packet` 대신 `policy`/`lifecycle`/`wait`/`starter`로 해당 native 회귀를 실행하고,
 `packet-lock/run_host.py`로 host 제품 C·source-package 회귀를 실행한다.
+
+## 2026-11-03 실보드 단절 후속과 develop 통합
+
+### 기준과 관측
+
+원격 develop의 `ec49da415d425e3d4daf263d0012da71ffaebcf2`를 11월 3일에 받아 분리
+작업트리를 만들었다. 보드의 `lab.2` 입력 영수증에는 platform의 `6f4c640`과 `d0bce11`이
+들어 있었고 develop에는 두 변경이 빠져 있었다. 두 변경을 후보에 가져와 기존 보드를
+교체할 때 해당 보호가 사라지지 않게 했다. 주행앱 입력 26개, 주행 계약, 하드웨어,
+provisioning 프로필 및 경로를 정규화한 Kconfig는 설치된 `lab.2`와 같았다.
+
+수정 전 보드에서 A의 게스트 링크는 down, XenBus 양쪽은 Connected(4)였다. Dom0의
+`vif2.0`에서 세 차례 Guest Rx stalled가 기록됐고 같은 브리지의 B와 Debian은 통신했다.
+22초 브로커 관찰에서 A 표본은 0건, B는 heartbeat 11건과 metrics 131건이었다.
+고정 Raspberry Pi 커널은 수신 요청 슬롯이 모자란 상태를 stall로 보고한다. 대기 프레임이
+만료된 뒤에도 ready를 기록할 수 있어 실제 수신은 게스트와 MQTT에서 별도로 대조했다.
+[고정 커널 RX 처리](https://github.com/raspberrypi/linux/blob/95b85bebbedcaedfa7ca79116ed38b7376fba412/drivers/net/xen-netback/rx.c#L481-L504)
+
+### 정책과 코드
+
+| 경계 | 재현 근거 및 변경 |
+|---|---|
+| netfront 관측과 packet lock | usable Store의 일시 timeout·busy는 기존 링을 유지하며 재관측한다. 일시 packet lock 대기는 다음 tick에 다시 시도한다. 실제 backend 종료, 손상된 Store와 링 프로토콜 실패는 종결한다. |
+| XenStore 송신 | `xen-store/src/xenstore.c`는 링에 맞는 요청을 한 번에 게시한다. 기한이나 공간 부족으로 미게시하면 producer·알림을 그대로 두고 pending 슬롯을 반환한다. 완전 송신 후 늦은 응답은 원 요청 ID로 처리한다. 큰 요청의 스트리밍과 부분 송신 뒤 세션 차단은 유지한다. |
+| 협조 종료 | `xen-runtime/src/shutdown.c`의 단일 watch 힌트가 읽기 일시 오류에 소실되던 문제를 수정했다. usable Store에서 일시 오류인 동안 100ms 간격으로 값을 재확인한다. Store의 poison/close가 확인되면 감시를 종료한다. 유효 요청을 확인한 후 기존 ACK·quiesce·네트워크 및 Store 정리·hypercall 순서와 단일 소유권을 적용한다. |
+| 현장 진단 | `xen-runtime/src/netfront.c`와 공통 주행 runtime에 `xenova drive netfront`를 연결했다. 기존 카운터와 워커가 종료된 위치·errno를 게스트 콘솔에서 조회한다. 종결 경로의 기존 로그에도 위치가 남는다. |
+
+### 로컬 검증과 후보
+
+- 동일 Store fixture에서 이전 코드는 기한 만료 때 헤더 16바이트를 게시한 채 세션을
+  차단했다. 후보는 게시 0바이트, poison 0, pending 0을 확인했고 다음 정상 read가 성공했다.
+  요청 링에 공간이 한 바이트 모자라는 사례와 ring wrap도 확인했다. Store 67개 C 사례가
+  일반 빌드와 ASan/UBSan에서 통과했다.
+- 같은 단일 종료 watch 시험에서 이전 코드는 timeout 뒤 원 요청을 확보하지 못했다.
+  수정본은 timeout·busy·again에서 각 한 번 진행했고, read/watch의 sticky poison에서는
+  quiesce·hypercall을 제출하지 않았다. 종료·네트워크 소유권 native_sim 17개와 합친
+  후보의 관련 native_sim 13개를 각각 실행했다. Store·Xen hypercall 경계를 대역으로 뒀다.
+- `platform/scripts/build-xenova-drive-app.py --app drive --profile warm-lattice-lab`을
+  고정 Zephyr 4.4.0·SDK로 실행했다. ARM 입력
+  `3eb84a4a5e78d311c23643a3b46288e6705a1e41231f714024c7484dbaf6161e`,
+  버전 `0.1.0-drive-3eb84a4a5e78`,
+  manifest `878647a0d6fb9cf8154fada882a11e6adeeca5f64b87b32966bf46a6a82360b3`,
+  바이너리 `b18ed2eeb133afd37e61dc2687b6a0912b89b79412420fd7034e896224aaf092`.
+- 기존 `lab.2`에 진단만 추가한 후보를 A에서 먼저 실행했다. 첫 3분 동안 A heartbeat
+  91건, metrics 1,093건, `app.lifecycle.WAITING` 3,660건을 받았다. B는 heartbeat
+  92건과 metrics 1,096건을 받았고, Spring DB에서 두 VM의 새 Zephyr 표본을 확인했다.
+  이 구간에는 기존 장애가 재발하지 않아 그 장애의 최초 errno는 확보되지 않았다.
+
+### 최종 작업트리와 실보드 수락
+
+현재 작업의 원본은 로컬 `chore/frontend/live-console-check` 작업트리다. 이 브랜치를
+`ec49da4`까지 fast-forward한 뒤 별도 검증 사본의 코드·시험·문서와 ARM 산출물을 옮겼다.
+platform의 `6f4c640`과 `d0bce11`을 출처를 남기는 `cherry-pick -x`로 가져왔다.
+이 브랜치에서 대응하는 커밋은 각각 `d46a15c`와 `bf59702`다. ARM 영수증에 들어 있는 입력
+309개의 바이트 크기와 SHA-256이 현재 작업트리와 모두 일치했다. 고정 Zephyr commit은
+`684c9e8f32e4373a21098559f748f06915f950c9`, SDK는 1.0.0이다.
+로컬 기존 변경은 stash와 diff로 보관했다. 프런트의 기존 로컬 콘솔·지표 수정과 develop의
+Linux 메모리 차트를 합친 뒤 타입 검사, Vitest 28파일 204개, 겹쳤던 두 파일의 Prettier 검사를 통과했다.
+원본 커밋을 가져온 뒤 XenStore, netfront, Store 관측 상태의 host 회귀 10개를 다시 실행했다.
+
+차량 출력 Gateway가 비활성인 상태에서 A만 일반 종료하고 최종 ARM 번들로 교체했다.
+A의 로드 manifest가 후보와 일치했고, 이어 강제 옵션 없이 `xenova-vm reboot`를 실행해
+25.57초 후 정상 결과를 받았다. A domid는 5에서 6으로 바뀌고 같은 manifest를 다시 로드했다.
+B는 재부팅 중 heartbeat 15건·metrics 181건을 보냈고 실행 ID와 Xen unique ID가 유지됐다.
+
+재부팅 뒤 45초씩 네 구간을 관찰했다. A는 heartbeat 92건, metrics 1,099건,
+`app.lifecycle.WAITING` 3,689건을 보냈다. B는 heartbeat 92건과 metrics 1,101건을 보냈다.
+게스트 콘솔에서 A의 DHCP 주소, carrier, MQTT 연결을 확인했다. Store 일시 관측 실패
+1건과 회복 1건이 남았고, worker 종결 오류는 0이었다. Spring DB의 읽기 전용 2분 조회에서도
+A 617건과 B 622건의 새 Zephyr metrics를 확인했다. 최초 장애의 정확한 트리거는 확보하지
+못했다. 실차 장치 연결과 출력 인가는 이 검증 범위에 포함되지 않는다.
