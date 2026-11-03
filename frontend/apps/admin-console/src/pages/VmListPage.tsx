@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
-import { osLabel } from '../domain/roles';
+import { osLabel, sortVms } from '../domain/roles';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
 import { VmOperationNotice } from './VmOperationProgress';
@@ -37,7 +37,7 @@ export function VmListPage() {
       onError: (_error, message) => toast.show(message, 'fault', 5000),
     });
 
-  const items = useMemo(() => vms.data?.items ?? [], [vms.data?.items]);
+  const items = useMemo(() => sortVms(vms.data?.items ?? []), [vms.data?.items]);
   const running = items.filter((vm) => vm.state === 'running').length;
   const vcpus = items.reduce((sum, vm) => sum + vm.vcpus, 0);
   const memory = items.reduce((sum, vm) => sum + vm.memory_mib, 0);
