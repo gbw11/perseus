@@ -26,6 +26,41 @@ export interface LinuxMemorySeries {
   totalBytes: number;
 }
 
+interface ZephyrHeapPoint extends LinuxMemoryPoint {
+  freeBytes: number;
+}
+
+function measured(value: number | null): value is number {
+  return value != null && Number.isFinite(value) && value >= 0;
+}
+
+function heapPoint(sample: MetricSample): ZephyrHeapPoint | null {
+  const usedBytes = metricValue(sample, ZEPHYR_HEAP_USED_METRIC);
+  const freeBytes = metricValue(sample, ZEPHYR_HEAP_FREE_METRIC);
+  if (!measured(usedBytes) || !measured(freeBytes) || usedBytes + freeBytes <= 0) return null;
+  return {
+    observedAt: sample.observed_at,
+    usedBytes,
+    freeBytes,
+    percent: (usedBytes / (usedBytes + freeBytes)) * 100,
+  };
+}
+
+/** The heap capacity and usage come from the same allocator observation. */
+export function buildZephyrHeapSeries(samples: readonly MetricSample[]) {
+  const observations = samples
+    .filter((sample) =>
+      sample.values.some(
+        (value) => value.name === ZEPHYR_HEAP_USED_METRIC || value.name === ZEPHYR_HEAP_FREE_METRIC,
+      ),
+    )
+    .map(heapPoint);
+  return {
+    points: observations.filter((point): point is ZephyrHeapPoint => point != null),
+    current: observations.at(-1) ?? null,
+  };
+}
+
 export function metricValue(sample: MetricSample, name: string): number | null {
   return sample.values.find((value) => value.name === name)?.value ?? null;
 }
@@ -39,10 +74,7 @@ export function cpuPercentOf(sample: MetricSample): number | null {
 export function memoryPercentOf(sample: MetricSample, vm: Pick<Vm, 'memory_mib'>): number | null {
   const used = metricValue(sample, LINUX_MEMORY_USED_METRIC);
   if (used != null) return (used / (vm.memory_mib * MIB_BYTES)) * 100;
-  const heapUsed = metricValue(sample, ZEPHYR_HEAP_USED_METRIC);
-  const heapFree = metricValue(sample, ZEPHYR_HEAP_FREE_METRIC);
-  if (heapUsed == null || heapFree == null || heapUsed + heapFree <= 0) return null;
-  return (heapUsed / (heapUsed + heapFree)) * 100;
+  return heapPoint(sample)?.percent ?? null;
 }
 
 /** pick 이 값을 내는 가장 최근 표본의 값 */

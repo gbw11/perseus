@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { MetricSample } from '../api/types';
-import { buildLinuxMemorySeries, cpuPercentOf, latest, memoryPercentOf } from './vmMetrics';
+import {
+  buildLinuxMemorySeries,
+  buildZephyrHeapSeries,
+  cpuPercentOf,
+  latest,
+  memoryPercentOf,
+} from './vmMetrics';
 
 const sample = (source: string, values: Record<string, number | null>): MetricSample => ({
   sample_id: crypto.randomUUID(),
@@ -40,6 +46,23 @@ describe('vm metrics', () => {
     ];
     expect(latest(samples, cpuPercentOf)).toBe(30);
     expect(latest(samples, (s) => memoryPercentOf(s, { memory_mib: 16 }))).toBeNull();
+  });
+  it('keeps measured zero and does not fill an incomplete heap report with an older capacity', () => {
+    const zero = sample('zephyr_telemetry', {
+      'memory.kernel_heap.used_bytes': 0,
+      'memory.kernel_heap.free_bytes': 1024,
+    });
+    const other = sample('zephyr_telemetry', { 'memory.region.used_bytes': 256 });
+    const missing = sample('zephyr_telemetry', { 'memory.kernel_heap.used_bytes': 512 });
+    expect(buildZephyrHeapSeries([zero, other]).current).toMatchObject({
+      usedBytes: 0,
+      freeBytes: 1024,
+      percent: 0,
+    });
+    expect(buildZephyrHeapSeries([zero, other, missing])).toEqual({
+      points: [expect.objectContaining({ usedBytes: 0, percent: 0 })],
+      current: null,
+    });
   });
   it('builds Linux memory usage history from samples that carry memory data', () => {
     const samples = [

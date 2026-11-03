@@ -12,7 +12,9 @@ import type {
   RouteRequest,
   SignupRequest,
   SignupResponse,
+  TelemetryHeartbeatResponse,
   Template,
+  ThreadsResponse,
   TokenResponse,
   UpdateVcpuPinningRequest,
   Vm,
@@ -30,6 +32,8 @@ export const keys = {
   events: (query: string) => ['events', query] as const,
   metrics: (id: string, minutes = 5) => ['vms', id, 'metrics', minutes] as const,
   processes: (id: string) => ['vms', id, 'processes'] as const,
+  threads: (id: string) => ['vms', id, 'threads'] as const,
+  telemetryHeartbeat: (id: string) => ['vms', id, 'telemetry-heartbeat'] as const,
   displays: ['displays'] as const,
 };
 
@@ -119,7 +123,7 @@ export function useEvents(params: { vm_id?: string; type?: string; severity?: st
   });
 }
 
-/** 최근 n 분 메트릭 (Linux VM 만, 에이전트 MQTT-03) */
+/** 최근 n 분 동안 백엔드가 수신한 VM 메트릭 */
 export function useMetrics(vmId: string, enabled: boolean, minutes = 5, pollMs = POLL_MS) {
   return useQuery({
     queryKey: keys.metrics(vmId, minutes),
@@ -142,6 +146,29 @@ export function useProcesses(vmId: string, enabled: boolean) {
       request<ProcessesResponse>(`/api/v1/vms/${encodeURIComponent(vmId)}/processes`, { signal }),
     enabled,
     refetchInterval: POLL_MS,
+  });
+}
+
+export function useThreads(vmId: string) {
+  return useQuery({
+    queryKey: keys.threads(vmId),
+    queryFn: ({ signal }) =>
+      request<ThreadsResponse>(`/api/v1/vms/${encodeURIComponent(vmId)}/threads`, { signal }),
+    enabled: Boolean(vmId),
+    refetchInterval: POLL_MS,
+  });
+}
+
+export function useTelemetryHeartbeat(vmId: string) {
+  return useQuery({
+    queryKey: keys.telemetryHeartbeat(vmId),
+    queryFn: ({ signal }) =>
+      request<TelemetryHeartbeatResponse>(`/api/v1/vms/${encodeURIComponent(vmId)}/telemetry/heartbeat`, {
+        signal,
+      }),
+    enabled: Boolean(vmId),
+    refetchInterval: 2000,
+    retry: false,
   });
 }
 

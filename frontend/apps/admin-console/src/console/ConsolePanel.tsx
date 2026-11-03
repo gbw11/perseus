@@ -159,9 +159,7 @@ export function ConsolePanel({
           {available ? status.message : 'VM을 실행한 뒤 콘솔에 연결할 수 있습니다.'}
         </p>
         {vm.guest_kind === 'zephyr' && (
-          <p className={styles.hint}>
-            Zephyr VM 콘솔은 로그 전용입니다. 새 로그가 없으면 화면이 비어 있을 수 있습니다.
-          </p>
+          <p className={styles.hint}>Zephyr VM에서 새 로그가 없으면 화면이 비어 있을 수 있습니다.</p>
         )}
         <div data-theme="xenova" className={styles.screen}>
           <div ref={host} className={styles.terminal} />

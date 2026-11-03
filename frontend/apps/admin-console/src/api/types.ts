@@ -49,7 +49,7 @@ export type AgentStatus = 'UNKNOWN' | 'ONLINE' | 'STALE' | 'OFFLINE';
 /** 백엔드 VmRole (DB vms.role). 배포자가 VM 등록·수정 때 지정하며 이름·app_id 로 추정하지 않는다 */
 export type VmRole = 'primary_drive' | 'backup_drive' | 'interaction';
 
-/** §2.2 프론트 공개 VM. agent_status·ipv4 는 목록·단건 조회에만 있다 */
+/** §2.2 프론트 공개 VM. 주소 필드는 조회용 VM 응답에 포함된다. */
 export interface Vm {
   vm_id: string;
   name: string;
@@ -57,6 +57,7 @@ export interface Vm {
   state: VmState;
   agent_status?: AgentStatus;
   ipv4?: string | null;
+  assigned_ipv4?: string | null;
   template_id: string;
   template_version: string;
   vcpus: number;
@@ -216,7 +217,7 @@ export interface EventListResponse {
   items: VmEvent[];
 }
 
-// ---- 메트릭·프로세스 (노션 API 명세 "메트릭 조회", 백엔드 MetricsController) — 에이전트가 있는 Linux VM 만 ----
+// ---- 메트릭·프로세스·스레드 (Spring VM 조회 계약) ----
 
 /** VM에 할당된 vCPU 용량을 기준으로 계산한 전체 CPU 사용률. 프로세스 cpu_percent와 구분한다. */
 export const VM_CPU_PERCENT_METRIC = 'cpu_percent_allocated';
@@ -227,6 +228,7 @@ export interface MetricValue {
   unit: string | null;
   labels: Record<string, string> | null;
   unavailable_reason: string | null;
+  counter_value?: string | null;
 }
 
 export interface MetricSample {
@@ -237,6 +239,10 @@ export interface MetricSample {
   observed_at: string;
   received_at?: string;
   window_ms?: number | null;
+  network?: {
+    publisher_instance_id: string;
+    observed_uptime_ms: string | null;
+  };
   values: MetricValue[];
 }
 
@@ -256,6 +262,45 @@ export interface ProcessesResponse {
   observed_at: string | null;
   stale: boolean;
   items: ProcessInfo[];
+  process_collection?: {
+    status: 'first_sample' | 'ok' | 'partial' | 'read_failed' | 'disabled';
+    discovered: number;
+    read_ok: number;
+    vanished: number;
+    failed: number;
+    truncated: boolean;
+    error: string | null;
+  } | null;
+}
+
+export interface ThreadsResponse {
+  vm_id: string;
+  window_ms: number | null;
+  received_at: string | null;
+  stale: boolean;
+  threads_status: string | null;
+  parts_received: number;
+  part_count: number | null;
+  complete: boolean;
+  conflicting_pages: boolean;
+  items: {
+    thread_id: string;
+    thread_name: string;
+    name_truncated: boolean;
+    cpu_percent: number | null;
+    unavailable_reason: string | null;
+  }[];
+}
+
+export interface TelemetryHeartbeatResponse {
+  vm_id: string;
+  status: 'FRESH' | 'STALE' | 'UNKNOWN';
+  publisher_state: 'running' | 'degraded' | 'stopping' | null;
+  last_collection_success_uptime_ms?: string | null;
+  last_collection_success_age_ms: number | null;
+  collection_failures_total: number | null;
+  received_at: string | null;
+  age_ms: number | null;
 }
 
 // ---- 화면 배치 (노션 API 명세 REST-23·REST-24, 백엔드 -129) ----

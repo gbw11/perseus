@@ -303,6 +303,7 @@ export function snapshot(): DriveState {
   const active = activeApp();
   const manualActive = active === 'manual';
   const lost = store.perceptionLost;
+  const controlAge = (now % 1000) - ((now % 1000) % 100);
   return {
     version: 1,
     observed_at: new Date(now).toISOString(),
@@ -312,7 +313,8 @@ export function snapshot(): DriveState {
       active_app: active,
       active_vm_id: active ? vmOf(active) : null,
       reason: store.reason,
-      received_ago_ms: (now % 1000) - ((now % 1000) % 100),
+      received_ago_ms: controlAge,
+      source: { status: 'fresh', age_ms: controlAge },
     },
     vehicle: {
       applied_generation: store.generation,

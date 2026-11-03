@@ -76,7 +76,6 @@ export function ConsolePage() {
               </span>
               <span className={styles.eyebrow}>
                 {role?.short ?? '역할 미지정'} · {osLabel(vm)}
-                {vm.guest_kind === 'zephyr' ? ' · 로그 전용' : ''}
               </span>
             </button>
           );

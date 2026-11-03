@@ -1037,6 +1037,12 @@ button.chip:hover:not(.chipOn) {
   justify-items: end;
   gap: 4px;
 }
+.publisherStatus {
+  margin-bottom: var(--x-space-3);
+}
+.publisherStatus strong {
+  font-weight: 600;
+}
 .memoryNotice {
   margin-bottom: var(--x-space-3);
   padding: 8px var(--x-space-3);
@@ -1218,38 +1224,9 @@ button.chip:hover:not(.chipOn) {
   font-family: var(--x-font-mono);
   font-size: 10px;
 }
-.counterGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--x-space-2);
+.memoryChartBlock + .linuxMemorySummary,
+.memoryChartBlock + .poolSummaryGrid {
   margin-top: var(--x-space-3);
-}
-.counterItem {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius-sm);
-  background: var(--x-surface-2);
-}
-.counterItem span,
-.counterItem small {
-  overflow: hidden;
-  color: var(--x-text-muted);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.counterItem strong {
-  font-family: var(--x-font-mono);
-  font-size: var(--x-text-lg);
-}
-.counterItem[data-active='true'] {
-  border-color: color-mix(in srgb, var(--x-recovering) 55%, var(--x-border));
-}
-.counterItem[data-active='true'] strong {
-  color: var(--x-recovering);
 }
 .memoryObservation {
   margin-top: var(--x-space-2);
@@ -1467,21 +1444,6 @@ button.chip:hover:not(.chipOn) {
 .resourceFacts small {
   color: var(--x-text-muted);
   font-size: var(--x-text-xs);
-}
-.telemetryEmpty {
-  display: grid;
-  place-items: center;
-  gap: var(--x-space-2);
-  min-height: 160px;
-  padding: var(--x-space-5);
-  border: 1px dashed var(--x-border);
-  border-radius: var(--x-radius-sm);
-  color: var(--x-text-muted);
-  text-align: center;
-}
-.telemetryEmpty strong {
-  color: var(--x-text);
-  font-size: var(--x-text-lg);
 }
 .detailEvents {
   display: grid;

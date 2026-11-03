@@ -4,7 +4,12 @@ import type { DriveState } from '../api/drive';
 import { useMetrics, useVms } from '../api/queries';
 import type { Vm } from '../api/types';
 import { buildCpuChartScale, cpuChartY, formatCpuTick } from '../domain/cpuChart';
-import { buildLinuxMemorySeries, cpuPercentOf, type LinuxMemoryPoint } from '../domain/vmMetrics';
+import {
+  buildLinuxMemorySeries,
+  buildZephyrHeapSeries,
+  cpuPercentOf,
+  type LinuxMemoryPoint,
+} from '../domain/vmMetrics';
 import { buildMemoryPoolSeries, bytesToKiB, type PoolSnapshot } from '../domain/memoryPools';
 import {
   ago,
@@ -54,6 +59,7 @@ const CORES = [0, 1, 2, 3];
 const PINS: Record<Domain, number[]> = { dom0: [0], autonomous: [1], manual: [2], 'message-board': [3] };
 const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512, 'message-board': 256 };
 const DOM0_MEMORY_MIB = 1024;
+const MIB_BYTES = 1024 * 1024;
 
 export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all' }) {
   const vms = useVms();
@@ -204,7 +210,7 @@ function MemoryDashboard({
         </div>
         <div className={styles.memoryHeadingMeta}>
           <span>Linux 최근 5분</span>
-          <span>Zephyr 최근 60초 · Pool</span>
+          <span>Zephyr 최근 60초 · 힙·Pool</span>
         </div>
       </header>
 
@@ -226,7 +232,9 @@ function MemoryDashboard({
 function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
   const metrics = useMetrics(vm.vm_id, true, 1, 2000);
-  const series = buildMemoryPoolSeries(metrics.data?.items ?? []);
+  const samples = metrics.data?.items ?? [];
+  const series = buildMemoryPoolSeries(samples);
+  const heap = buildZephyrHeapSeries(samples);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
   const lastUpdated = relativeTime(series.lastObservedAt);
   const style = {
@@ -259,6 +267,30 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
           메트릭 연결 오류
         </div>
       )}
+      <MemoryUsageSummary
+        vmName={vm.name}
+        label="VM 메모리 사용률"
+        current={null}
+        capacity={vm.memory_mib * MIB_BYTES}
+        freeBytes={null}
+        format={formatMiB}
+      />
+      <MemoryUsageChart
+        vmName={vm.name}
+        title="VM 메모리 사용률"
+        points={[]}
+        range="60초"
+        emptyMessage="Zephyr VM 전체 메모리 사용량은 현재 계측되지 않습니다."
+      />
+      <MemoryUsageSummary
+        vmName={vm.name}
+        label="커널 힙 사용률"
+        current={heap.current}
+        capacity={heap.current ? heap.current.usedBytes + heap.current.freeBytes : null}
+        freeBytes={heap.current?.freeBytes ?? null}
+        format={formatKiB}
+      />
+      <MemoryUsageChart vmName={vm.name} title="커널 힙 사용률" points={heap.points} range="60초" />
       <div className={styles.poolSummaryGrid}>
         <PoolSummary label="RX Pool" pool={series.rx} tone="rx" />
         <PoolSummary label="TX Pool" pool={series.tx} tone="tx" />
@@ -285,16 +317,6 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
           tx: point.txPercent,
         }))}
       />
-
-      <div className={styles.counterGrid}>
-        <CounterItem
-          label={`${recentInterval(series.counters.intervalSeconds)} RX drop`}
-          value={series.counters.rxDrop}
-        />
-        <CounterItem label="TX drop" value={series.counters.txDrop} />
-        <CounterItem label="TX 페이지 부족" value={series.counters.poolBusy} />
-        <CounterItem label="프로토콜 오류" value={series.counters.protocolErrors} />
-      </div>
 
       <div className={styles.memoryObservation}>
         {observationOf(series, metrics.isPending, !!metrics.error)}
@@ -412,16 +434,6 @@ function MemoryChart({
   );
 }
 
-function CounterItem({ label, value }: { label: string; value: number | null }) {
-  return (
-    <div className={styles.counterItem} data-active={value != null && value > 0 ? 'true' : undefined}>
-      <span>{label}</span>
-      <strong>{value == null ? '—' : value}</strong>
-      <small>{value == null ? '데이터 없음' : '회/구간'}</small>
-    </div>
-  );
-}
-
 function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
   const metrics = useMetrics(vm.vm_id, true);
@@ -467,32 +479,15 @@ function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
         </div>
       )}
 
-      <section className={styles.linuxMemorySummary}>
-        <div className={styles.linuxMemorySummaryHead}>
-          <span>메모리 사용률</span>
-          <strong>{current ? `${current.percent.toFixed(1)}%` : '—'}</strong>
-        </div>
-        <div className={styles.linuxMemoryAmount}>
-          <strong>{current ? formatMiB(current.usedBytes) : '—'}</strong>
-          <span>/ {formatMiB(series.totalBytes)}</span>
-        </div>
-        <div className={styles.linuxMemoryFree}>
-          <span>여유</span>
-          <strong>{freeBytes == null ? '—' : formatMiB(freeBytes)}</strong>
-        </div>
-        <div
-          className={styles.linuxMemoryBar}
-          role="progressbar"
-          aria-label={`${vm.name} 메모리 사용률`}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={current ? Math.round(Math.max(0, Math.min(100, current.percent))) : undefined}
-        >
-          <i style={{ width: `${current ? Math.max(0, Math.min(100, current.percent)) : 0}%` }} />
-        </div>
-      </section>
-
-      <LinuxMemoryChart vmName={vm.name} points={series.points} />
+      <MemoryUsageSummary
+        vmName={vm.name}
+        label="메모리 사용률"
+        current={current}
+        capacity={series.totalBytes}
+        freeBytes={freeBytes}
+        format={formatMiB}
+      />
+      <MemoryUsageChart vmName={vm.name} title="메모리 사용률" points={series.points} range="5분" />
 
       <div className={styles.memoryObservation}>
         {current
@@ -503,7 +498,66 @@ function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   );
 }
 
-function LinuxMemoryChart({ vmName, points }: { vmName: string; points: LinuxMemoryPoint[] }) {
+function MemoryUsageSummary({
+  vmName,
+  label,
+  current,
+  capacity,
+  freeBytes,
+  format,
+}: {
+  vmName: string;
+  label: string;
+  current: LinuxMemoryPoint | null;
+  capacity: number | null;
+  freeBytes: number | null;
+  format: (bytes: number) => string;
+}) {
+  const percent = current ? Math.max(0, Math.min(100, current.percent)) : null;
+  return (
+    <section className={styles.linuxMemorySummary}>
+      <div className={styles.linuxMemorySummaryHead}>
+        <span>{label}</span>
+        <strong>{current ? `${current.percent.toFixed(1)}%` : '—'}</strong>
+      </div>
+      <div className={styles.linuxMemoryAmount}>
+        <strong>{current ? format(current.usedBytes) : '—'}</strong>
+        <span>
+          {current || capacity == null ? '/ ' : '할당 '}
+          {capacity == null ? '—' : format(capacity)}
+        </span>
+      </div>
+      <div className={styles.linuxMemoryFree}>
+        <span>여유</span>
+        <strong>{freeBytes == null ? '—' : format(freeBytes)}</strong>
+      </div>
+      <div
+        className={styles.linuxMemoryBar}
+        role="progressbar"
+        aria-label={`${vmName} ${label}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent == null ? undefined : Math.round(percent)}
+      >
+        <i style={{ width: `${percent ?? 0}%` }} />
+      </div>
+    </section>
+  );
+}
+
+function MemoryUsageChart({
+  vmName,
+  title,
+  points,
+  range,
+  emptyMessage = '데이터 없음',
+}: {
+  vmName: string;
+  title: string;
+  points: LinuxMemoryPoint[];
+  range: '5분' | '60초';
+  emptyMessage?: string;
+}) {
   const line = chartPoints(
     points.map((point) => ({ observedAt: point.observedAt, rx: point.percent, tx: null })),
     'rx',
@@ -513,7 +567,7 @@ function LinuxMemoryChart({ vmName, points }: { vmName: string; points: LinuxMem
   return (
     <section className={styles.memoryChartBlock}>
       <header>
-        <strong>메모리 사용률</strong>
+        <strong>{title}</strong>
         <span className={styles.linuxMemoryLegend}>
           <i />
           Used %
@@ -525,7 +579,7 @@ function LinuxMemoryChart({ vmName, points }: { vmName: string; points: LinuxMem
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
             role="img"
-            aria-label={`${vmName} 메모리 사용률 최근 5분 그래프`}
+            aria-label={`${vmName} ${title} 최근 ${range} 그래프`}
           >
             {[0, 25, 50, 75, 100].map((value) => (
               <line
@@ -540,11 +594,11 @@ function LinuxMemoryChart({ vmName, points }: { vmName: string; points: LinuxMem
             <polyline points={line} className={styles.linuxMemoryLine} vectorEffect="non-scaling-stroke" />
           </svg>
         ) : (
-          <div className={styles.memoryChartEmpty}>데이터 없음</div>
+          <div className={styles.memoryChartEmpty}>{emptyMessage}</div>
         )}
         <span className={styles.memoryChartMax}>100%</span>
         <div className={styles.memoryChartAxis} aria-hidden="true">
-          <span>5분 전</span>
+          <span>{range} 전</span>
           <span>현재</span>
         </div>
       </div>
@@ -600,17 +654,13 @@ function formatKiB(value: number | null): string {
 }
 
 function formatMiB(value: number): string {
-  return `${(value / (1024 * 1024)).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
+  return `${(value / MIB_BYTES).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
 }
 
 function relativeTime(value: string | null): string {
   if (!value) return '—';
   const elapsed = Math.max(0, Date.now() - Date.parse(value));
   return ago(elapsed);
-}
-
-function recentInterval(seconds: number | null): string {
-  return seconds == null ? '최근 구간' : `최근 ${Number(seconds.toFixed(1))}초`;
 }
 
 function CpuDashboard({
