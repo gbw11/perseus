@@ -48,21 +48,73 @@ class TelemetryModelTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout.decode() + result.stderr.decode())
             self.assertIn(b"PASS production model", result.stderr)
             received = []
+            v1 = []
             for line in result.stdout.splitlines():
                 row = json.loads(line, object_pairs_hook=self.oracle.reject_duplicate_keys)
                 message = row["message"]
                 raw = line.split(b'"message":', 1)[1][:-1]
+                if message['type'] == 'agent.metrics':
+                    self.assertEqual(row['topic'], f"xenova/v1/vms/{message['vm_id']}/metrics")
+                    self.assertEqual((row['qos'], row['retain']), (0, False))
+                    self.assertLessEqual(len(raw), 1024)
+                    v1.append(message)
+                    continue
                 self.oracle.validate(message, row["topic"], row["qos"], row["retain"], len(raw))
                 received.append(message)
             self.assertEqual({m["type"] for m in received}, {"telemetry." + s for s in self.oracle.STREAMS})
             samples = [s for m in received if m["type"] == "telemetry.metrics" for s in m["payload"].get("samples", [])]
             self.assertTrue(any(s["name"] == "loop.last_jitter_us" and s["value"] == "-100" for s in samples))
             self.assertTrue(any(s["name"] == "memory.kernel_heap.used_bytes" and s["value"] == "9007199254741003" for s in samples))
+            def values_for(family):
+                return [{s['name']: s for s in m['payload']['samples']} for m in received
+                        if m['type'] == 'telemetry.metrics' and m['payload']['family'] == family]
+
+            memory = values_for('memory')
+            accounted = 'memory.kernel_heap.accounted_bytes'
+            self.assertEqual([(m[accounted]['status'], m[accounted]['value']) for m in memory],
+                             [('ok', '9007199254743003'), ('collection_failed', None), ('unsupported', None)])
+            network = values_for('network')
+            counter, tx, rate = 'net_rx_bytes_total', 'net_tx_bytes_total', 'rx_bytes_per_s'
+            self.assertTrue(all(counter not in sample and tx not in sample for sample in network))
+            self.assertEqual(network[0][rate]['value'], '12345')
+            self.assertEqual(network[0][rate]['labels'], {'interface': 'eth0', 'counter_epoch': '7'})
+            self.assertEqual(network[1][rate]['value'], '0')
+            self.assertEqual(network[2][rate]['status'], 'no_sample')
+            self.assertIsNone(network[2][rate]['value'])
+            self.assertEqual(network[3][rate]['status'], 'counter_discontinuity')
+            self.assertIsNone(network[3][rate]['value'])
+            for failed in network[4:]:
+                self.assertEqual(failed[rate]['status'], 'collection_failed')
+                self.assertIsNone(failed[rate]['value'])
+            self.assertEqual([m['seq'] for m in v1], [1, 2, 3, 4, 5])
+            self.assertEqual({m['schema_version'] for m in v1}, {'1.0'})
+            self.assertEqual(len({uuid.UUID(m['message_id']) for m in v1}), len(v1))
+            self.assertIsNone(v1[0]['sent_at'])
+            self.assertEqual(v1[1]['sent_at'], '2026-01-01T00:00:00.000Z')
+            self.assertEqual(v1[0]['payload']['observed_uptime_ms'], '50000')
+            for m in v1:
+                self.assertNotIn('processes', m['payload'])
+                self.assertEqual({v['name'] for v in m['payload']['values']}, {counter, tx})
+            totals = [m['payload']['values'] for m in v1]
+            self.assertEqual([v['value'] for v in totals[0]], ['9007199254741111', '18446744073709551615'])
+            self.assertEqual(totals[0][0]['labels'], {'iface': 'eth0', 'counter_epoch': '7'})
+            self.assertEqual(totals[2][0]['value'], '0')
+            self.assertEqual(totals[2][0]['labels']['counter_epoch'], '8')
+            for values, reason in zip(totals[3:], ['stale_sample', 'read_failed'], strict=True):
+                self.assertTrue(all(v['value'] is None and v['unavailable_reason'] == reason for v in values))
             self.assertTrue(any(s["status"] == "collection_failed" for s in samples))
             self.assertTrue(any(s["status"] == "not_registered" for s in samples))
             # Negative mutations of actual producer output exercise the closed
             # 2.1 contract independently of the C encoder's implementation.
             from copy import deepcopy
+            message = next(m for m in received if m['type'] == 'telemetry.metrics'
+                           and m['payload']['family'] == 'network')
+            topic = f"xenova/v2/vms/{message['vm_id']}/telemetry/metrics"
+            for label in ('0', 'not-an-epoch'):
+                changed = deepcopy(message)
+                next(s for s in changed['payload']['samples'] if s['name'] == rate)['labels']['counter_epoch'] = label
+                with self.assertRaises(self.oracle.ContractError):
+                    self.oracle.validate(changed, topic, 0, False)
             cpu=next(m for m in received if m['type']=='telemetry.metrics'
                      and m['payload']['family']=='cpu' and m['payload']['samples'][0]['status']=='ok')
             for invalid in ('25.25',-0.001,100.001,float('nan'),float('inf')):

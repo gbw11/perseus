@@ -1,0 +1,21 @@
+[Unit]
+Description=Xenova authenticated remote screen sender
+Requires=xenova-display-graphics.service
+After=xenova-display-graphics.service
+BindsTo=xenova-display-graphics.service
+PartOf=xenova-display-graphics.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/xenova/display-stream.env
+Environment=PYTHONPATH=@STREAM_RELEASE@/host-lib:/opt/xenova-display/current/lib
+ExecStartPre=/usr/bin/python3 @STREAM_RELEASE@/stream-host.py --check
+ExecStart=/usr/bin/python3 @STREAM_RELEASE@/stream-host.py
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=xenova-display.target

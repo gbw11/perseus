@@ -151,14 +151,16 @@ static void collect(struct k_work *work)
  }
 #endif
  struct xdiag_network net={0};int net_rc=xdiag_network_read(&net);
- result.net_rate_rc=net_rc?net_rc:net.bytes_rc;
+ result.net_bytes_rc=net_rc?net_rc:net.bytes_rc;
+ result.net_rate_rc=result.net_bytes_rc;
  result.net_start_ms=net_at;result.net_end_ms=k_uptime_get();
  result.tx_bytes=net.tx_bytes;result.rx_bytes=net.rx_bytes;result.net_epoch=net.counter_epoch;
  if(!result.net_rate_rc){
   uint64_t dt=result.net_end_ms-net_at;
   if(!net_at)result.net_rate_rc=-ENODATA;
-  else if(!dt||dt>10000||net.counter_epoch!=net_previous.counter_epoch||
+  else if(!dt||net.counter_epoch!=net_previous.counter_epoch||
    net.tx_bytes<net_previous.tx_bytes||net.rx_bytes<net_previous.rx_bytes)result.net_rate_rc=-EOVERFLOW;
+  else if(dt>10000)result.net_rate_rc=-ETIMEDOUT;
   else if(net.tx_bytes-net_previous.tx_bytes>UINT64_MAX/1000||net.rx_bytes-net_previous.rx_bytes>UINT64_MAX/1000)result.net_rate_rc=-ERANGE;
   else{result.tx_bytes_per_s=(net.tx_bytes-net_previous.tx_bytes)*1000/dt;result.rx_bytes_per_s=(net.rx_bytes-net_previous.rx_bytes)*1000/dt;}
   net_previous=net;net_at=result.net_end_ms;
@@ -186,7 +188,8 @@ static int resources_get(struct xdr_snapshot *out,k_timeout_t wait)
   for(size_t i=0;i<out->rows;i++)out->threads[i].rc=-EOVERFLOW;
   for(size_t i=0;i<out->regions;i++)out->memory[i].rc=-EOVERFLOW;
   if(out->heap_rc!=-ENOTSUP)out->heap_rc=-EOVERFLOW;
-  out->net_rate_rc=-EOVERFLOW;
+  if(!out->net_bytes_rc)out->net_bytes_rc=-ETIMEDOUT;
+  if(!out->net_rate_rc)out->net_rate_rc=-ETIMEDOUT;
  }
  return 0;
 }
@@ -197,6 +200,7 @@ static int init(void)
  cache.cpu.rc=xdiag_cpu_supported()?-ENODATA:-ENOTSUP;
  cache.threads_rc=xdiag_cpu_supported()?-ENODATA:-ENOTSUP;
  cache.heap_rc=IS_ENABLED(CONFIG_XENOVA_DIAGNOSTICS_HEAP)?-ENODATA:-ENOTSUP;
+ cache.net_bytes_rc=cache.net_rate_rc=-ENODATA;
  (void)k_work_reschedule(&resource_work,K_MSEC(200));return 0;
 }
 SYS_INIT(init,APPLICATION,CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);

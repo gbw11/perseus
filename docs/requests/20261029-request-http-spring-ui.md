@@ -5,29 +5,28 @@
 
 ## 현재 담당자가 할 일
 
-### D02·D08 — 로컬 등록-only 통지의 수신 구현·계약 회신
+### D02·D08 — 제공된 등록 조회·통지의 설치와 공동 수락
 
-플랫폼은 자동 최대 1회 sender와 `xenova-vm registration-notify UUID --execute [--json]`를 제공한다.
-[정확한 JSON·응답·인증 계약안과 예제](../contracts/vm-provisioning-v1.md)를 먼저 확인한다.
-제공자 HTTP fixture 시험을 통과한 경로이며 **실제 Spring route의 구현·합의·DB 수락은 아직 없다**.
+이 후보에는 **하위와 FastAPI 등록 기능을 구현했다**. GET `/api/v1/vm-registrations`로 실행 여부와 무관한
+현재 등록 목록을 읽고, 인증된 POST `/api/v1/vm-registrations/{vm_id}/notify`에 UUID만 주면
+FastAPI가 Spring 등록 POST를 한 번 보내 결과를 반환한다. 일반 생성·최초 설치의 자동 최대 1회 후속도 같은 경로다.
+이 제공자 API를 상대 담당자가 다시 만들 필요는 없다.
+factory 자동 통지는 API의 실제 listen/`READY=1` 뒤 실행되는 일시 systemd job으로 연결했다.
+first-boot/autostart는 이 job을 기다리지 않고, API restart의 dependent 재진입도 같은 boot의 실행 표식으로 차단한다.
+운영 설치에서는 API entrypoint·notify unit·하위 hook을 함께 교체하고, 지연 기동→대상별 1회 및 restart→추가 0회를 수락한다.
+[정식 계약·curl·오류·설정](../contracts/vm-provisioning-v1.md), [시험·설치 산출물](../verification/vm-registration-api-20261102.md)을 사용한다.
 
-현재 `vm/api/VmController.java:create`의 `POST /api/v1/vms`는
-`vm/application/VmService.java:create`가 UUID를 새로 만들고 Pi 생성/시작을 요청한다.
-등록 통지를 이 함수에 연결하지 않는다. 같은 계층에 계약안
-`POST /api/v1/vms/registrations`의 등록 전용 DTO·권한·저장 경계를 추가하는 것이 담당 작업이다.
-호스트 인증을 해당 UUID 등록 권한에 결합하고 전달 UUID를 그대로 사용한다.
-같은 UUID는 중복 행/재생성 없이 확인하되 다른 host/guest identity는 거절한다.
-늦은 등록이나 명시 재전송이 현재 자원·이름·의도·보관/삭제 상태를 옛 body로 덮지 않아야 한다.
+| 담당·상태 | 다음 할 일과 이유 | 실제 위치·제공물 | 정상·실패 수락 및 회신 |
+|---|---|---|---|
+| 플랫폼/FastAPI · 이 후보 제공 | 하위 모듈과 새 route/sender/helper를 설치. 옛 sender를 병행하지 않음 | `api/registrations.py`, `PlatformDriver.registrations`, `registration_sender.RegistrationSender`, `xenova_registration_hook`; 두 정규 recipe | GET의 배열/nullable/factory 등록, POST·응답 유실 후 명시 재신청. 설치 import/route·후보·명령·배포 여부 회신 |
+| Spring · 사용자 완료 전달 + 소스 확인 | 현재 구현을 설치·공동 수락. 수신부 재구현 요청이 아님 | backend `800d584`: `VmRegistrationController/Request/Service`, `VmRegistrationAuthenticationFilter`, `Dom0ManagerClient.listRegistrations`, `Dom0VmRegistrationInventoryClient`, `VmSynchronizationService` | 신규 201/동일 UUID 200·이름/퇴역 409·인증 401/403/미설정 503, 관리자 동기화→실제 GET→필드 반영. DB 후보·실행 결과·미수행을 구분해 회신 |
+| 운영/플랫폼·Spring · 설정/설치 대기 | 승인 URL과 Spring 발급 token을 FastAPI 전용 root 0600 파일에 공급 | `/etc/xenova/spring-registration.env`; `XENOVA_REGISTRATION_URL`, `VM_REGISTRATION_SERVICE_TOKEN`. 로컬 `XENOVA_SERVICE_TOKEN`과 별개 | 미설정은 notify만 503, GET/기본 관리 정상. 비밀은 회신/로그/이미지에 기록하지 않음 |
+| 공동 · 제품 종단 미수락 | Spring create transaction과 자동 callback 교차 확인 | 기존 Spring create와 실제 FastAPI create→하위 완료 hook→notify | 원 응답/autostart/다른 VM stop 진행, 자동 POST 1회 이하, timeout 뒤 자동 retry/GET/동기화 0. 실제 배포 후보·관측·제약 회신 |
 
-정상 수락은 Linux/Zephyr 일반 생성과 factory 등록→sender의 실제 POST→DB 확정 응답이다.
-서버 저장 뒤 응답 유실→**명시 CLI만** 재전송→동일 UUID 한 행도 확인한다.
-401/403/409·큰/무효 body·redirect·DNS/응답 정체에서는 거짓 확정·자동 retry/GET이 없어야 한다.
-Spring 생성→Pi 생성→등록 통지가 원 Spring 응답/DB transaction을 기다리는 순환도 시험한다.
-자동 통지 실패가 로컬 등록/원 응답/다른 VM stop을 실패로 만들지 않는 것은 플랫폼 제공자 시험에 있다.
-기존 full HTTP 201/409와 optional 자원 생략 의미 비교는 유지하며 이 통지를 새 create mode로 만들지 않는다.
-
-담당 회신: route/DTO/auth 합의 여부, 실제 수정 후보·명령·DB 중복/늦은 요청 시험 결과,
-운영 endpoint/token 공급 주체, 미수행 설치·EC2·보드 수락. 현재 endpoint/token은 배포 미공급 상태다.
+Spring 단건 POST는 기존 행을 덮지 않고 관리자 동기화는 별도다. 같은 이름의 서로 다른 UUID와 Zephyr 저장 IPv4를
+플랫폼에서 보정하지 않는다. Spring 제약과 충돌하면 원 code/http_status를 확인하고 이름/UUID를 바꿔 우회하지 않는다.
+구형 하위 통지 CLI·직접 Spring 설정은 제거했다. 수동 요청은 위 POST의 curl이며 VM·계정·의도·디스크를 만들지 않는다.
+Spring 코드는 읽기 대조만 했고 실제 Spring/DB 실행과 운영 확인은 하지 않았다. 하위·FastAPI 실제 HTTP 시험과 구분한다.
 
 우선 기본 VM 관리와 원 작업 회수를 연결하고 자원 생략과 차량 입력은 각각 별도 작업으로 처리한다.
 FastAPI의 key stop·원 key 조회는 이미 있다. 이를 재구현하거나 기존 full create를 바꾸기 위한 새 API 버전을 만들 필요는 없다.
@@ -147,6 +146,14 @@ API backend 수명은 플랫폼/API 공동 수락이 필요하므로 아직 서�
 
 <details>
 <summary>2026-11-01 이전 요청·진행 기록 원문</summary>
+
+### 2026-11-02 등록 경로 교체 전 요구 (현재 지시 아님)
+
+앞선 공급 후보는 하위 `registration-notify UUID --execute`와 직접 Spring sender를 제공했고,
+등록 전용 route/DTO/auth·DB 수락을 Spring 담당에게 요청했다. 당시 계약안·송신 fixture 결과는
+[이전 공급 보고](../verification/recovery-scenario-closure-20261030.md#vm-provisioning-integration)에 보존한다.
+이번에는 사용자 완료 전달과 backend `800d584` 소스를 대조해 이 요청을 설치·공동 수락으로 전환했고,
+FastAPI가 송신을 소유하도록 구현했다. 옛 CLI나 수신부 신규 구현 지시를 현재 작업으로 읽지 않는다.
 
 # HTTP·Spring·화면 종단 연결 요청
 

@@ -2,9 +2,21 @@ import { Card } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import type { DriveState } from '../api/drive';
 import { useMetrics, useVms } from '../api/queries';
-import { VM_CPU_PERCENT_METRIC, type MetricSample, type Vm } from '../api/types';
+import type { Vm } from '../api/types';
+import { buildCpuChartScale, cpuChartY, formatCpuTick } from '../domain/cpuChart';
+import { buildLinuxMemorySeries, cpuPercentOf, type LinuxMemoryPoint } from '../domain/vmMetrics';
 import { buildMemoryPoolSeries, bytesToKiB, type PoolSnapshot } from '../domain/memoryPools';
-import { ago, ROLE_ORDER, ROLES, vmOf, type AppId, type Role } from '../domain/roles';
+import {
+  ago,
+  osLabel,
+  ROLES,
+  roleOf,
+  sortVms,
+  UNASSIGNED_COLOR,
+  vmOf,
+  type AppId,
+  type Role,
+} from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import { useDrive } from '../layout/DriveContext';
 import styles from './pages.module.css';
@@ -181,45 +193,44 @@ function MemoryDashboard({
   drive: DriveState | null;
   pending: boolean;
 }) {
-  const drivingRoles = [ROLES.autonomous, ROLES.manual];
-  const infotainment = ROLES['message-board'];
+  const vms = sortVms(items ?? []);
 
   return (
     <div className={styles.page}>
       <header className={styles.contentHeading}>
         <div>
-          <span className={styles.contentEyebrow}>RESOURCE · RX/TX POOLS</span>
+          <span className={styles.contentEyebrow}>RESOURCE · MEMORY</span>
           <h1>Memory</h1>
         </div>
         <div className={styles.memoryHeadingMeta}>
-          <span>최근 60초 · 기본 2초 표본</span>
-          <span>VM C 지표 협의 중</span>
+          <span>Linux 최근 5분</span>
+          <span>Zephyr 최근 60초 · Pool</span>
         </div>
       </header>
 
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
 
       <div className={styles.memoryVmGrid}>
-        {drivingRoles.map((role) => (
-          <MemoryVmPanel key={role.app} role={role} vm={vmOf(role.app, items, drive)} drive={drive} />
-        ))}
-        <InfotainmentMemoryPanel
-          role={infotainment}
-          vm={vmOf(infotainment.app, items, drive)}
-          drive={drive}
-        />
+        {vms.map((vm) =>
+          vm.guest_kind === 'zephyr' ? (
+            <MemoryVmPanel key={vm.vm_id} vm={vm} drive={drive} />
+          ) : (
+            <LinuxMemoryPanel key={vm.vm_id} vm={vm} drive={drive} />
+          ),
+        )}
       </div>
     </div>
   );
 }
 
-function MemoryVmPanel({ role, vm, drive }: { role: Role; vm: Vm | undefined; drive: DriveState | null }) {
-  const metrics = useMetrics(vm?.vm_id ?? '', !!vm, 1, 2000);
+function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
+  const role = roleOf(vm, drive);
+  const metrics = useMetrics(vm.vm_id, true, 1, 2000);
   const series = buildMemoryPoolSeries(metrics.data?.items ?? []);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
   const lastUpdated = relativeTime(series.lastObservedAt);
   const style = {
-    '--vm-accent': role.color,
+    '--vm-accent': role?.color ?? UNASSIGNED_COLOR,
     '--rx-accent': 'var(--x-primary)',
     '--tx-accent': 'var(--x-pool-tx)',
   } as CSSProperties;
@@ -230,8 +241,8 @@ function MemoryVmPanel({ role, vm, drive }: { role: Role; vm: Vm | undefined; dr
       style={style}
       title={
         <span className={styles.memoryVmTitle}>
-          <strong>{role.vmLabel}</strong>
-          <small>Zephyr · 네트워크 데이터 Pool</small>
+          <strong>{vm.name}</strong>
+          <small>{role?.short ?? '역할 미지정'} · Zephyr · 네트워크 데이터 Pool</small>
         </span>
       }
       actions={
@@ -256,7 +267,7 @@ function MemoryVmPanel({ role, vm, drive }: { role: Role; vm: Vm | undefined; dr
       <MemoryChart
         title="패킷 처리율"
         unit="packets/s"
-        ariaLabel={`${role.vmLabel} RX TX 패킷 처리율 최근 60초`}
+        ariaLabel={`${vm.name} RX TX 패킷 처리율 최근 60초`}
         points={series.packetRates.map((point) => ({
           observedAt: point.observedAt,
           rx: point.rxPacketsPerSecond,
@@ -266,7 +277,7 @@ function MemoryVmPanel({ role, vm, drive }: { role: Role; vm: Vm | undefined; dr
       <MemoryChart
         title="Pool 점유율"
         unit="%"
-        ariaLabel={`${role.vmLabel} RX TX Pool 점유율 최근 60초`}
+        ariaLabel={`${vm.name} RX TX Pool 점유율 최근 60초`}
         max={100}
         points={series.usage.map((point) => ({
           observedAt: point.observedAt,
@@ -411,30 +422,34 @@ function CounterItem({ label, value }: { label: string; value: number | null }) 
   );
 }
 
-function InfotainmentMemoryPanel({
-  role,
-  vm,
-  drive,
-}: {
-  role: Role;
-  vm: Vm | undefined;
-  drive: DriveState | null;
-}) {
+function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
+  const role = roleOf(vm, drive);
+  const metrics = useMetrics(vm.vm_id, true);
+  const series = buildLinuxMemorySeries(metrics.data?.items ?? [], vm);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
-  const heartbeatAgo = drive?.apps['message-board']?.heartbeat_ago_ms;
   const style = {
-    '--vm-accent': role.color,
-    '--rx-accent': 'var(--x-primary)',
-    '--tx-accent': 'var(--x-pool-tx)',
+    '--vm-accent': role?.color ?? UNASSIGNED_COLOR,
   } as CSSProperties;
+  const current = series.current;
+  const freeBytes = current ? Math.max(0, series.totalBytes - current.usedBytes) : null;
+  const notice = metrics.error
+    ? '메트릭 연결 오류 · 마지막 정상 데이터가 있으면 그대로 표시합니다.'
+    : metrics.isPending && !current
+      ? '메모리 메트릭 수신 대기 중입니다.'
+      : !current
+        ? '메모리 데이터 없음'
+        : null;
+
   return (
     <Card
-      className={[styles.memoryVmCard, styles.memoryPendingCard].join(' ')}
+      className={styles.memoryVmCard}
       style={style}
       title={
         <span className={styles.memoryVmTitle}>
-          <strong>{role.vmLabel}</strong>
-          <small>{vm ? 'Debian' : 'Not discovered'} · Infotainment</small>
+          <strong>{vm.name}</strong>
+          <small>
+            {role?.short ?? '역할 미지정'} · {osLabel(vm)}
+          </small>
         </span>
       }
       actions={
@@ -442,71 +457,96 @@ function InfotainmentMemoryPanel({
           <span className={styles.authority} data-authority={authority.toLowerCase()}>
             {authority}
           </span>
-          <small>마지막 확인 {heartbeatAgo != null ? ago(heartbeatAgo) : '—'}</small>
+          <small>마지막 갱신 {current ? relativeTime(current.observedAt) : '—'}</small>
         </span>
       }
     >
-      <div className={styles.memoryPendingIntro}>
-        <strong>RX/TX Pool 지표 협의 중</strong>
-        <p>현재는 Heartbeat만 수집됩니다. 데이터 계약 확정 후 실제 지표 영역으로 연결합니다.</p>
-      </div>
+      {notice && (
+        <div className={styles.memoryNotice} data-tone={metrics.error ? 'fault' : undefined}>
+          {notice}
+        </div>
+      )}
 
-      <div className={styles.poolSummaryGrid}>
-        <UnavailablePool label="RX Pool" tone="rx" />
-        <UnavailablePool label="TX Pool" tone="tx" />
-      </div>
+      <section className={styles.linuxMemorySummary}>
+        <div className={styles.linuxMemorySummaryHead}>
+          <span>메모리 사용률</span>
+          <strong>{current ? `${current.percent.toFixed(1)}%` : '—'}</strong>
+        </div>
+        <div className={styles.linuxMemoryAmount}>
+          <strong>{current ? formatMiB(current.usedBytes) : '—'}</strong>
+          <span>/ {formatMiB(series.totalBytes)}</span>
+        </div>
+        <div className={styles.linuxMemoryFree}>
+          <span>여유</span>
+          <strong>{freeBytes == null ? '—' : formatMiB(freeBytes)}</strong>
+        </div>
+        <div
+          className={styles.linuxMemoryBar}
+          role="progressbar"
+          aria-label={`${vm.name} 메모리 사용률`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={current ? Math.round(Math.max(0, Math.min(100, current.percent))) : undefined}
+        >
+          <i style={{ width: `${current ? Math.max(0, Math.min(100, current.percent)) : 0}%` }} />
+        </div>
+      </section>
 
-      <UnavailableChart title="패킷 처리율" />
-      <UnavailableChart title="Pool 점유율" />
+      <LinuxMemoryChart vmName={vm.name} points={series.points} />
 
-      <div className={styles.counterGrid}>
-        <CounterItem label="RX drop" value={null} />
-        <CounterItem label="TX drop" value={null} />
-        <CounterItem label="TX 페이지 부족" value={null} />
-        <CounterItem label="프로토콜 오류" value={null} />
-      </div>
-
-      <div className={styles.memoryPendingMeta}>
-        <span>
-          <small>HEARTBEAT</small>
-          <strong>{heartbeatAgo != null ? 'Connected' : '데이터 없음'}</strong>
-        </span>
-        <span>
-          <small>POOL CONTRACT</small>
-          <strong>데이터 계약 준비 중</strong>
-        </span>
+      <div className={styles.memoryObservation}>
+        {current
+          ? `할당 ${vm.memory_mib.toLocaleString('ko-KR')} MiB 중 ${formatMiB(current.usedBytes)} 사용 중`
+          : 'Linux guest-agent의 memory_used_bytes 표본을 기다리고 있습니다.'}
       </div>
     </Card>
   );
 }
 
-function UnavailablePool({ label, tone }: { label: string; tone: 'rx' | 'tx' }) {
-  return (
-    <section className={[styles.poolSummary, styles.poolUnavailable].join(' ')} data-tone={tone}>
-      <div className={styles.poolSummaryHead}>
-        <span>
-          <i aria-hidden="true" />
-          {label}
-        </span>
-        <strong>—</strong>
-      </div>
-      <div className={styles.poolUnavailableText}>
-        <strong>지표 협의 중</strong>
-        <span>실제 값을 제공하지 않습니다.</span>
-      </div>
-    </section>
+function LinuxMemoryChart({ vmName, points }: { vmName: string; points: LinuxMemoryPoint[] }) {
+  const line = chartPoints(
+    points.map((point) => ({ observedAt: point.observedAt, rx: point.percent, tx: null })),
+    'rx',
+    100,
   );
-}
 
-function UnavailableChart({ title }: { title: string }) {
   return (
-    <section className={[styles.memoryChartBlock, styles.memoryUnavailableChart].join(' ')}>
+    <section className={styles.memoryChartBlock}>
       <header>
-        <strong>{title}</strong>
+        <strong>메모리 사용률</strong>
+        <span className={styles.linuxMemoryLegend}>
+          <i />
+          Used %
+        </span>
       </header>
-      <div>
-        <strong>데이터 계약 준비 중</strong>
-        <span>VM C 계측 항목이 확정되면 연결됩니다.</span>
+      <div className={styles.memoryChart}>
+        {line ? (
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label={`${vmName} 메모리 사용률 최근 5분 그래프`}
+          >
+            {[0, 25, 50, 75, 100].map((value) => (
+              <line
+                key={value}
+                x1="0"
+                x2="100"
+                y1={100 - value}
+                y2={100 - value}
+                className={styles.memoryGridLine}
+              />
+            ))}
+            <polyline points={line} className={styles.linuxMemoryLine} vectorEffect="non-scaling-stroke" />
+          </svg>
+        ) : (
+          <div className={styles.memoryChartEmpty}>데이터 없음</div>
+        )}
+        <span className={styles.memoryChartMax}>100%</span>
+        <div className={styles.memoryChartAxis} aria-hidden="true">
+          <span>5분 전</span>
+          <span>현재</span>
+        </div>
       </div>
     </section>
   );
@@ -559,6 +599,10 @@ function formatKiB(value: number | null): string {
   return `${bytesToKiB(value).toLocaleString('ko-KR', { maximumFractionDigits: 2, minimumFractionDigits: value ? 2 : 0 })} KiB`;
 }
 
+function formatMiB(value: number): string {
+  return `${(value / (1024 * 1024)).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
+}
+
 function relativeTime(value: string | null): string {
   if (!value) return '—';
   const elapsed = Math.max(0, Date.now() - Date.parse(value));
@@ -590,30 +634,30 @@ function CpuDashboard({
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
 
       <div className={styles.cpuGrid}>
-        {ROLE_ORDER.map((app) => (
-          <CpuVmChart key={app} role={ROLES[app]} vm={vmOf(app, items, drive)} />
+        {sortVms(items ?? []).map((vm) => (
+          <CpuVmChart key={vm.vm_id} role={roleOf(vm, drive)} vm={vm} />
         ))}
       </div>
     </div>
   );
 }
 
-function CpuVmChart({ role, vm }: { role: Role; vm: Vm | undefined }) {
-  const metrics = useMetrics(vm?.vm_id ?? '', !!vm);
-  const samples = metrics.data?.items ?? [];
-  const values = samples.map((sample) => cpuValue(sample)).filter((value): value is number => value != null);
+function CpuVmChart({ role, vm }: { role: Role | null; vm: Vm }) {
+  const metrics = useMetrics(vm.vm_id, true);
+  // Zephyr 는 family 별로 표본이 나뉘므로 CPU 값이 있는 표본만 그린다
+  const values = (metrics.data?.items ?? [])
+    .map((sample) => cpuPercentOf(sample))
+    .filter((value): value is number => value != null);
   const current = values.at(-1) ?? null;
-  const points = samples
-    .map((sample, index) => {
-      const value = cpuValue(sample);
-      if (value == null) return null;
-      const x = samples.length <= 1 ? 100 : (index / (samples.length - 1)) * 100;
-      const y = 100 - Math.max(0, Math.min(100, value));
+  const scale = buildCpuChartScale(values);
+  const points = values
+    .map((value, index) => {
+      const x = values.length <= 1 ? 100 : (index / (values.length - 1)) * 100;
+      const y = cpuChartY(value, scale.max);
       return `${x},${y}`;
     })
-    .filter((point): point is string => point != null)
     .join(' ');
-  const style = { '--vm-accent': role.color } as CSSProperties;
+  const style = { '--vm-accent': role?.color ?? UNASSIGNED_COLOR } as CSSProperties;
 
   return (
     <Card
@@ -623,8 +667,8 @@ function CpuVmChart({ role, vm }: { role: Role; vm: Vm | undefined }) {
         <span className={styles.cpuCardTitle}>
           <i aria-hidden="true" />
           <span>
-            <strong>{role.vmLabel}</strong>
-            <small>{role.title}</small>
+            <strong>{vm.name}</strong>
+            <small>{role?.title ?? '역할 미지정'}</small>
           </span>
         </span>
       }
@@ -632,24 +676,27 @@ function CpuVmChart({ role, vm }: { role: Role; vm: Vm | undefined }) {
     >
       <div className={styles.cpuChart}>
         {points ? (
-          <svg
-            viewBox="0 0 100 100"
-            preserveAspectRatio="none"
-            role="img"
-            aria-label={`${role.vmLabel} CPU 사용률 최근 5분 그래프`}
-          >
-            {[0, 25, 50, 75, 100].map((value) => (
-              <line
-                key={value}
-                x1="0"
-                x2="100"
-                y1={100 - value}
-                y2={100 - value}
-                className={styles.cpuGridLine}
-              />
-            ))}
-            <polyline points={points} className={styles.cpuLine} vectorEffect="non-scaling-stroke" />
-          </svg>
+          <div className={styles.cpuPlot}>
+            <div className={styles.cpuYAxis} aria-hidden="true">
+              {scale.ticks.map((value) => (
+                <span key={value} style={{ top: `${100 - (value / scale.max) * 100}%` }}>
+                  {formatCpuTick(value)}%
+                </span>
+              ))}
+            </div>
+            <svg
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              role="img"
+              aria-label={`${vm.name} CPU 사용률 최근 5분 그래프, 세로축 최대 ${scale.max}%`}
+            >
+              {scale.ticks.map((value) => {
+                const y = 100 - (value / scale.max) * 100;
+                return <line key={value} x1="0" x2="100" y1={y} y2={y} className={styles.cpuGridLine} />;
+              })}
+              <polyline points={points} className={styles.cpuLine} vectorEffect="non-scaling-stroke" />
+            </svg>
+          </div>
         ) : (
           <div className={styles.cpuEmpty}>
             <strong>{metrics.isPending ? '메트릭 수신 대기 중' : 'CPU 데이터 없음'}</strong>
@@ -672,8 +719,4 @@ function CpuVmChart({ role, vm }: { role: Role; vm: Vm | undefined }) {
       </div>
     </Card>
   );
-}
-
-function cpuValue(sample: MetricSample): number | null {
-  return sample.values.find((value) => value.name === VM_CPU_PERCENT_METRIC)?.value ?? null;
 }

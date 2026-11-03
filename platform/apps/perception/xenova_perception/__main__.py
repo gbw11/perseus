@@ -3,6 +3,7 @@
     python -m xenova_perception --source synthetic --scenario approach
     python -m xenova_perception --source webcam --device 0 --show
     python -m xenova_perception --source video --video samples/road.mp4 --show
+    python -m xenova_perception --source stream --url http://127.0.0.1:8090/camera/stream.mjpg --show
 
 브로커 비밀번호는 환경변수 XENOVA_PERCEPTION_BROKER_PASSWORD 로 넘긴다 (명령행 --password 도 되지만 프로세스 목록에 보인다).
 """
@@ -47,6 +48,7 @@ def parse_args(argv: list[str] | None = None, env: Mapping[str, str] | None = No
     p.add_argument("--source", choices=SOURCES, default="synthetic")
     p.add_argument("--device", type=int, default=0, help="webcam 장치 번호")
     p.add_argument("--video", help="video 파일 경로 (끝나면 처음부터 반복)")
+    p.add_argument("--url", help="stream: MJPEG 주소 (시뮬레이터 전방 카메라)")
     p.add_argument("--scenario", choices=tuple(SCENARIOS), default="approach", help="synthetic 시나리오")
     p.add_argument("--host", default=base.get("broker_host", PerceptionSettings.broker_host))
     p.add_argument("--port", type=int, default=base.get("broker_port", PerceptionSettings.broker_port))
@@ -58,16 +60,17 @@ def parse_args(argv: list[str] | None = None, env: Mapping[str, str] | None = No
     p.add_argument("--stop-distance", type=float, default=zone.distance_m, help="정지 영역 전방 거리 m")
     p.add_argument("--vehicle-width", type=float, default=zone.vehicle_width_m, help="차폭 m")
     p.add_argument("--margin", type=float, default=zone.margin_m, help="정지 영역 좌우 여유 m")
+    p.add_argument("--lane-width", type=float, default=PerceptionSettings.lane_width_m, help="차로 폭 m (한쪽 선만 보일 때)")
     p.add_argument("--show", action="store_true", help="탐지 박스 미리보기 창 (webcam·video)")
     p.add_argument("--duration", type=float, help="이 시간(s) 뒤 종료")
     p.add_argument("--log-level", choices=LOG_LEVELS, default=base.get("log_level", "INFO"))
     a = p.parse_args(argv)
     return PerceptionSettings(
-        source=a.source, device=a.device, video_path=a.video, scenario=a.scenario,
+        source=a.source, device=a.device, video_path=a.video, url=a.url, scenario=a.scenario,
         broker_host=a.host, broker_port=a.port, username=a.username or None, password=a.password or None,
         camera=Camera(height_m=a.camera_height, pitch_rad=math.radians(a.camera_pitch), hfov_rad=math.radians(a.hfov)),
         stop_zone=StopZone(distance_m=a.stop_distance, vehicle_width_m=a.vehicle_width, margin_m=a.margin),
-        show=a.show, duration_s=a.duration, log_level=a.log_level,
+        lane_width_m=a.lane_width, show=a.show, duration_s=a.duration, log_level=a.log_level,
     )
 
 

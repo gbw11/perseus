@@ -1,5 +1,11 @@
 # Zephyr 계산·통신·Store 대기 분리 검증
 
+최신 로컬 변경은 [packet lock 경합 복귀(2026-11-03)](#packet-lock-경합-복귀2026-11-03)와
+그 앞의 [netfront 관측 실패 복귀](#netfront-관측-실패-복귀2026-11-02)에 기록했다.
+아래의 기존 실보드·F01·TCP_NODELAY 결과는 각각 당시 후보의 이력이다.
+특히 초기 후보의 “관측 불가도 전송 차단”은 이번 후속에서 변경했으며,
+이번 변경을 기존 실보드 시험에서 검증한 것으로 해석하지 않는다.
+
 ## 판정과 기준선
 
 **기존 기준선/A/B/통합의 실제 Xen 비교는 각 1회 완료했고 기능·자료 정합성을 통과했다.**
@@ -436,3 +442,285 @@ backoff·연결 실패 시 옵션 미호출을 확인했다. 생산 socket 옵�
 [workqueue](https://docs.zephyrproject.org/latest/kernel/services/threads/workqueue.html),
 [clock](https://docs.zephyrproject.org/latest/kernel/services/timing/clocks.html) 문서를 참고했다.
 구체적인 ABI·오류·timeout 동작의 기준은 latest 문서가 아닌 고정 소스와 실제 빌드/시험이다.
+
+## netfront 관측 실패 복귀(2026-11-02)
+
+### 기준 후보와 재현
+
+합쳐진 주행 MR 이후 `origin/platform`의 `10d25e9e2a9250921d3ead1cf69e1e67ac3212ee`에서
+`feat/platform/zephyr-netfront-observation-recovery`를 만들었다. 이전 빈 계획 브랜치는
+정리했고, 별도 worktree에서만 수정했다. 기준 HEAD에 이번 미커밋 diff·새 시험 파일을
+합친 것이 로컬 후보다. 보드·운영 서비스·설치본은 바꾸지 않았다.
+
+기준 netfront는 패킷 worker와 Store observer를 이미 분리했다. 그러나 observer의
+`backend_state(50)`이 한 번 `-ETIMEDOUT`을 반환하면 `backend_error`에 기록하고
+`connected=false`로 바꾼 뒤 두 worker가 끝났다. 이후 Store 응답이 돌아와도 one-shot
+netfront에는 재시작 경로가 없었다. 실제 제품 소스와 고정 Zephyr native kernel로
+재현했으며, `before-run.log`에는 `link down rc=-110`과 패킷 poll 진행 단언 실패가 남아 있다.
+
+동일한 `-ETIMEDOUT`도 원인이 다르다. 응답 대기 만료는 late response를 기존 Store
+pending 창에서 회수할 수 있지만, 부분 요청 전송 후 poisoned가 된 세션은 재사용할 수 없다.
+반환 코드만 일괄 완화하지 않고 세션 상태를 같은 잠금 아래 확인하도록 했다.
+
+### 무엇을 어떤 기준으로 바꿨는가
+
+| 위치 | 변경과 판단 기준 | 유지한 경계 |
+|---|---|---|
+| `xen-runtime/src/netfront.c`: `backend_state`, `state_loop`, `observe` | 이미 연결된 VIF의 세션 획득 실패 및 사용 가능한 Store의 timeout/EAGAIN/EBUSY를 관측 불가로 기록. 패킷 처리와 기존 자원 소유는 유지하고 기존 250ms cadence로 재관측 | 한 번의 조회 예산 50ms, 시작/종료 handshake, 단일 VIF·one-shot 수명 유지. 재연결·새 ring/grant 없음 |
+| `xen-runtime/src/runtime.c`: `xsr_watch_next_status` | 기존 watch 한 번과 같은 세션 잠금에서 poisoned/closed를 반환. 예전 `xsr_watch_next`는 이 함수로 위임 | 추가 Store 읽기·수신자·잠금·deadline 발급 없음. 원 rc 보존 |
+| `state_loop`의 종결 분기 | 실제 Closing/Closed, backend 경로 불일치, 프로토콜 오류, 사용할 수 없는 Store와 지원하지 않는 XenBus 상태는 전송 차단 | poisoned timeout을 일반 timeout으로 숨기지 않음. 다음 정상 응답이 종결 상태를 복구하지 않음 |
+| `xnet_status_get`, `xnet_waits_get` | 최근 관측 오류와 최초 오류, Connected 확인 시각, 관측 불가·복귀 계수를 구별 | 조회를 위해 Store·Xen을 다시 읽지 않음. 정상 재관측은 `connected=true`를 쓰지 않아 stop과 경쟁해도 TX 재허가 없음 |
+| Network Starter `xenova stats waits` | 기존 JSON에 TX 허용·최근/최초 관측 오류·누적 계수를 추가 | 요청한 로컬 출력만 수행. MQTT schema·앱 건강·차량 안전 판정 변경 없음 |
+
+`backend_error`는 backend 관측으로 전송을 차단한 종결 오류이고,
+`observation_error`는 최근 관측 오류다. 복귀 후 후자는 0이 되지만
+`first_observation_error`는 그대로 남는다. `backend_observation=1`은 당시 Connected
+확인일 뿐 MQTT 연결·앱 입력 신선도·출력 권한을 뜻하지 않는다. 관측 불가 상태를
+일정 시간 뒤 정상으로 바꾸거나 임의 N회 뒤 강제 종료하는 정책은 추가하지 않았다.
+packet lock의 기존 검증과 주행/Gateway의 입력 나이·출력 만료도 변경하지 않았다.
+
+신원 확인은 기존 `xvif_refresh`의 backend 경로 동일성과 XenBus 상태 읽기를 재사용한다.
+이번에 MAC/backend-id까지 매번 다시 검증하는 기능을 추가했다고 주장하지 않는다.
+ring의 ID·generation·길이·flags·index 검증, 64건 처리 한도와 grant 회수 알고리즘은
+제품 코드 변경 없이 유지했다. TX 포화의 `-ENOBUFS`와 RX 할당 실패의 단일 패킷 drop·
+슬롯 재게시 후 다음 정상 수신을 회귀로 확인했다.
+
+### Linux 참고와 적용 범위
+
+원문은 Linux **v6.12**의 고정 파일을 사용했다. 내려받은 원문과 URL·SHA-256은
+실행 폴더 `references/`와 `sources.json`에 보존한다. Linux 코드의 복사나 새 의존성은 없다.
+
+| 공식 원문 | 확인한 원리 | 이번 제품 대응 |
+|---|---|---|
+| [xen-netfront.c](https://github.com/torvalds/linux/blob/v6.12/drivers/net/xen-netfront.c)의 `netback_changed` | backend의 실제 상태 전이와 알림/관측 처리를 구분 | `state_loop`에서 관측 실패와 확인된 종료·손상을 분리. Linux hotplug/reconfiguration 전체를 이식하지 않음 |
+| 같은 파일의 `netfront_tx_slot_available`, `xennet_maybe_wake_tx`, `xennet_alloc_rx_buffers`, `rx_refill_timeout` | 유한 TX/RX 자원의 부족을 곧바로 영구 장치 종료로 만들지 않음 | 기존 Zephyr 8-slot TX 거절·응답 후 재사용, RX-copy drop·재게시를 보존하고 회복까지 시험. NAPI·Linux skb/refill timer는 추가하지 않음 |
+| [xenbus_client.c](https://github.com/torvalds/linux/blob/v6.12/drivers/xen/xenbus/xenbus_client.c)의 상태/오류 처리 | 실제 backend 종료·fatal과 일시 관측 실패를 혼동하지 않음 | 기존 XenStore의 poisoned·닫힌 세션, backend 경로 불일치·프로토콜 오류는 그대로 종결 |
+
+원문 SHA-256: netfront `a3973a407e59c01cc9b53a23baa67ac60222d0502cd5a5c1798884c87f80a1ad`,
+xenbus client `ea5b722f8ec9a38583b22d421aa0fa32c0b792ee89200d57a9bbebed2facb584`.
+빌드에 사용한 Zephyr 소스는 기존 lock과 같은
+`684c9e8f32e4373a21098559f748f06915f950c9`다.
+
+### 로컬 수락·실패 기록
+
+| 실행 | 실제 assertion과 결과 | 대체한 경계 |
+|---|---|---|
+| `final-policy-r2.json`: native kernel 15사례 | timeout·세션 잠금 실패·EAGAIN/EBUSY 뒤 패킷 진행/동일 자원 복귀, 반복 실패·watch 폭주, 실제 Closing/Closed·신원/프로토콜/poison 종결, stop과 늦은 정상 응답 경합 통과 | Xen·Store·net device만 fixture. netfront·ring·grant pool·thread/lock/join은 제품/실제 kernel |
+| 관측 불가 중 close | 최초 `-ETIMEDOUT`, grant 18개·게시 불확정 보존. 응답 회복 후 같은 close로 정상 종료, TX 재개 없음 | 위와 동일 |
+| 기존 lifecycle 27사례 | 초기화 각 단계 실패·응답 유실·시작/송신/종료 경합·busy grant·외부 종료 소유와 최초 오류 보존 통과 | 위와 동일 |
+| 기존 Store 대기 5사례 | 35ms 조회 지연 중 패킷 진행, timeout·종료·신원/프로토콜 오류 구분 통과 | 외부 Store 지연/오류만 주입 |
+| 실제 Network Starter main 5사례 | 정상 시작과 필수 기반 실패의 unwind·join·watch/grant 정리 통과. 변경한 상태 출력 코드도 같은 빌드에 포함 | broker/장치 실연결·대화형 shell 출력 수락은 아님 |
+| host 제품 C + ASan/UBSan | ring 32사례·70,000-frame wrap, grant/종료, 공유 Store 1,000회 동시 읽기 통과. Store core 61사례·adapter pending replay·고정 ABI 등 기존 7 unittest 통과 | kernel/hypercall/외부 Store 경계만 대체 |
+| `test_netfront_observation_status.py` | 실제 `runtime.c`의 기존/checked watch·잠금 거절·poisoned timeout·closed 상태를 host와 sanitizer에서 통과 | kernel mutex/clock와 Store 호출만 대체 |
+| 기존 lifecycle 입력/transport 3 unittest | source snapshot·실제 package 도구 실행·원 socket owner/deadline 회귀 통과 | 실제 ARM firmware·정규 target package 수락은 아님 |
+
+중간 시험 실패도 보존했다. `after2`는 TX completion 제출 직후 worker 회수를 기다리지
+않고 8개 슬롯을 채우던 시험 순서 오류였다. 실제 회수 계수 확인 뒤 포화를 검사하도록 고쳤다.
+`final-policy`의 close 시험은 fixture가 frontend=4에서만 실패를 주입해 Closing 단계에서
+저절로 정상 응답을 돌려준 문제였다. 해당 시험에서만 close 중에도 오류를 유지하도록
+수정한 뒤 `final-policy-r2`가 통과했다. 이 두 실패 때문에 제품 보호를 완화하지 않았다.
+
+### 비용·포장·남은 수락
+
+반복 timeout 1,100ms 구간은 정상 watch와 watch 폭주 각각 재관측 증가 4회,
+관측 불가 누계 5회·복귀 1회였고 패킷 poll이 계속 진행했다. watch 폭주가 재시도 횟수를
+늘리지 않았다. Store 35ms 지연 시험의 같은 30ms 창에서도 packet poll 2회를 기록했다.
+이는 native tick 기반 로컬 표본이며 실제 Xen 지연 상한·처리율이나 MQTT 성능 보장이 아니다.
+
+새 thread·queue·타이머·할당·설정 수치는 없다. 기존 짧은 계측 spinlock 안에서 작은
+상태/계수만 갱신한다. watch의 상태 확인도 기존 세션 잠금을 사용하는 같은 호출이다.
+실패마다 형식화·stack·console 출력을 추가하지 않았다. native ELF의 `nm -S`에서
+`waits`는 72→96 byte, 최초/최근 오류는 각 4 byte로 추가 정적 상태 합계 **32 byte**다.
+이 값은 native symbol 크기이며 ARM RAM/stack high-water나 전체 메모리 상한이 아니다.
+
+기존 AUTO/MANUAL/공통 drive 및 Network Starter builder의 입력 수집이 변경 runtime
+파일을 포함함을 대조했다. Starter main이 바뀌었으므로 기존 게시 lock을 제자리 수정하지
+않고 다음 ARM 빌드에서 별도 `--candidate-version`을 사용해야 한다. 새 recipe·라이브러리·
+target 의존성은 필요하지 않으며 소스 lock·운영 템플릿·이미지는 변경하지 않았다.
+이번에는 native 빌드·host 검증까지 수행했고 **ARM firmware/정규 패키지·실보드·실제 MQTT
+단절 복귀는 미수행**이다. 이후 고정 ARM 후보에서 정상 통신·일시 Store 지연 복귀·실제
+backend 종료·협조 종료와 stack/CPU를 확인해야 한다.
+
+별도로 packet worker의 기존 `packet_acquire(20)` 실패도 worker 종료로 이어지는 경로를
+발견해 사용자에게 알렸다. **이 절의 당시 후보에서는** 실제 경합 실패로 재현하지 않았으며
+상태 관측 수정과 구분해 변경하지 않았다. 이후 승인된 재현·보완은 아래 2026-11-03 절에 있다.
+
+원자료는 `C:/Users/SSAFY/Documents/Codex/2026-11-02/netfront-policy`에 있다.
+`verify_local.py`가 configure/build/run 명령·환경·결과를 JSON으로 남긴다.
+`FINAL_INPUTS.json`은 기준 HEAD·변경 파일/시험 해시와 빌드 입력 포함 여부를 기록한다.
+worktree는 같은 경로의 `worktree/`, native 산출물은 WSL의
+`/home/ssafy/xenova-netfront-policy-20261102/`다. 이전 실패·중간 로그는 삭제하지 않았다.
+
+재현 명령(기존 고정 WSL 도구가 있는 환경):
+
+```sh
+python3 /mnt/c/Users/SSAFY/Documents/Codex/2026-11-02/netfront-policy/verify_local.py <새-tag> policy
+# policy 대신 lifecycle / wait / starter / host로 해당 회귀 실행
+python3 -m unittest discover -s platform/tests -p test_xenova_netfront_native.py -v
+python3 -m unittest discover -s platform/tests -p test_xenova_xenstore_g1.py -k NativeCoreTest -v
+python3 platform/tests/test_netfront_observation_status.py -v
+```
+
+보드 적용·운영 설정/서비스 변경·commit/push는 수행하지 않았다.
+
+## packet lock 경합 복귀(2026-11-03)
+
+### 재현과 수정 기준
+
+사용자 승인 후 같은 `feat/platform/zephyr-netfront-observation-recovery` worktree에서
+앞선 Store 보완을 보존하고 이어서 수정했다. 기준은 platform `10d25e9`와 위 11월 2일
+미커밋 후보다. 이 절의 원자료는 기존 실행 폴더 아래 `packet-lock/`에 따로 보존한다.
+앞선 `FINAL_INPUTS.json`·로그·후보 사본은 새 결과로 덮어쓰지 않았다.
+
+먼저 실제 제품 `send()`가 획득한 mutex를 `net_pkt_read` 외부 경계의 semaphore로
+100ms 보유시켰다. Zephyr kernel의 실제 대기 만료가 발생했고, 수정 전 worker는
+`link down rc=-110`, `connected=0`이 됐다. 정상 진행을 요구한 동일 시험은 실패했다.
+`before.json`, `before-run-00.log`, `netfront-before-packet.c`와 시험 사본에 이 반례가 있다.
+이는 통제된 경합 재현이며 실제 보드 트래픽에서의 발생 빈도를 측정한 결과는 아니다.
+
+| 변경 위치 | 무엇을 어떻게 바꿨는가 | 기준·보존한 보호 |
+|---|---|---|
+| `xen-runtime/src/netfront.c`: `loop` | `packet_acquire(20)`의 `-EAGAIN`만 잠금 미획득으로 분류. ring 접근 없이 기존 한 tick 양보 후 다음 회차로 진행 | 고정 Zephyr `kernel/mutex.c`의 시간 제한 대기 만료 반환값을 실제 시험으로 확인. 20ms 예산·mutex·ring 소유 그대로 |
+| 같은 함수의 오류·효과 경계 | 다른 잠금 오류는 원 rc로 종결. 잠금 획득 직후에도 `closing`·`backend_error`를 재확인하고 필요하면 잠금을 반환한 뒤 종료 | 모든 오류를 경합으로 합치지 않음. backend 종료·프로토콜 오류를 정상 복귀로 바꾸지 않음 |
+| `xnet_waits` 및 기존 `xenova stats waits` | worker의 포화 timeout 누계·최초 잠금 오류·마지막 실제 poll uptime 추가 | 정상 경합마다 console/stack 출력 없음. `connected`만으로 진행을 주장하지 않고 poll 정체를 별도 확인. 추가 Store 조회 없음 |
+
+송신 함수의 잠금 실패는 기존처럼 해당 호출에 `-ETIMEDOUT`을 반환한다. 비밀 송신 큐·
+무한 패킷 재전송·잠금 강제 해제·재초기화는 추가하지 않았다. `stop_requested`는 새 TX를
+차단하지만 이미 수락한 TX의 completion 처리는 남겨야 하므로 worker의 즉시 종료 조건으로
+추가하지 않았다. 실제 close의 drain·join·backend handshake·grant 회수는 기존 기한을 쓴다.
+자원 사용자가 남으면 미정리로 반환하며 자동으로 새 기한을 발급하지 않는다.
+
+### 실제 RTOS 레퍼런스와 대응
+
+* [FreeRTOS+TCP V4.3.0 STM32 `NetworkInterface.c`](https://github.com/FreeRTOS/FreeRTOS-Plus-TCP/blob/V4.3.0/source/portable/NetworkInterface/STM32/NetworkInterface.c#L602-L645)의 `prvNetworkInterfaceOutput`은 descriptor와 TX mutex 대기에 실패하면 확보한 자원을 반환하고 해당 송신 실패로 끝낸다. 실제 PHY down의 `FreeRTOS_NetworkDown`은 별도 EMAC task 경로다. 우리도 경합의 영향 범위와 링크 종결을 구분하되 worker의 재시도 방식은 우리 수명 모델에 맞춰 구현했다. 해당 소스의 20ms를 운영 권장값으로 복사한 것이 아니다.
+* [고정 Zephyr W5500 드라이버](https://github.com/zephyrproject-rtos/zephyr/blob/684c9e8f32e4373a21098559f748f06915f950c9/drivers/ethernet/eth_w5500.c#L262-L346)는 PHY 읽기 실패와 실제 링크 down을 분리한다. `w5500_tx`의 완료 대기 실패도 송신 호출에 반환한다. 이는 앞선 Store 관측 보완의 추가 RTOS 근거다. W5500의 SPI 오류 전체 처리나 장치 reset 방식을 Xen grant 수명에 이식하지 않았다.
+* [같은 고정 Zephyr의 `kernel/mutex.c`](https://github.com/zephyrproject-rtos/zephyr/blob/684c9e8f32e4373a21098559f748f06915f950c9/kernel/mutex.c)와 실제 native kernel에서 `-EAGAIN`을 확인했다. timeout 이외의 커널 오류는 계속 종결한다. Linux spinlock·`K_FOREVER`로의 치환이나 새 lock 분리는 하지 않았다.
+
+이들은 역할별 정책 근거이며 동일 Xen RTOS 드라이버의 성능 수락은 아니다.
+FreeRTOS 공식 소스는 웹 원문으로 확인했다. 추가 원문 사본·취득 결과는 `references.json`에
+구분하며, 로컬 취득 실패를 source hash가 확보된 것으로 표시하지 않는다.
+
+### 수락 결과와 비용
+
+제품 packet worker·ring·실제 Zephyr mutex/priority inheritance·thread/join을 사용했다.
+Xen/Store/net device와 원 packet 읽기 지연만 외부 fixture다. 예상 밖 커널 오류 사례는
+실제 contention을 확인한 뒤 worker의 다음 mutex 호출에만 `-EIO`를 주입했다.
+
+| 시험·원자료 | 직접 확인한 결과 |
+|---|---|
+| `after3.json`: 경합 9사례 | 100ms·1초·반복 경합, Store 실패와 동시 경합, stop·close·backend 종료·잘못된 completion·커널 오류의 정상/실패/후속 정리 통과 |
+| 정상 경합·회복 | 잠금 보유 중 poll 0회, 최초 worker lock 오류 `-11` 유지. 새 grant 0·조기 revoke 0. 해제 후 실제 completion 회수와 다음 송신 성공 |
+| 지속 경합 | 1초 보유 사례에서 timeout 누계 21회, 마지막 poll 시각 정체를 확인. 시도 횟수가 경과 시간/기존 대기 예산으로 정한 시험 상한 안이며 정상 상태로 위장하지 않음 |
+| stop과 close | stop 뒤 새 송신 `-ENETDOWN`, 이미 수락한 TX completion 회수. 별도 60ms close 예산 만료에서는 grant 18개를 보존하고, 소유자 반환 후 명시적 로컬 close 재호출로 정상 정리 |
+| 실제 종결 | backend Closing의 `-ENETDOWN`, 잘못된 TX ID의 최초 `-EPROTO`, 주입한 커널 `-EIO` 모두 전송 차단. ring·grant 재초기화와 자동 재연결 없음 |
+| `combined-policy.json` 등 | 앞선 Store 보완 15, 기존 lifecycle 27, Store 대기 5, 실제 Starter main 5사례 통과. 경합 9와 합쳐 native kernel **61사례**이며 중복 실행을 더하지 않음 |
+| `host.json` | 기존 제품 ring/grant/공유 Store/종료의 native·ASan/UBSan, Store core 61사례와 adapter/ABI, checked watch 및 source-package/transport 회귀 통과 |
+
+close 재호출 시험은 원 외부 shutdown 기한을 연장하는 자동 재시도가 아니다. 지원되는
+로컬 cleanup의 별도 명시 재확인을 사용한다. 원 기한 만료 결과와 `cleanup_error`는 남는다.
+
+`after1`의 stop 시험은 연결 차단 후 기존 `xnet_stats()`가 `-ENETDOWN`을 반환하는 계약을
+시험에서 빠뜨려 실패했다. 실제 `xnf_poll` 결과를 관찰하도록 fixture를 고쳤다.
+`after2`의 ring 손상 시험도 최초 `-EPROTO` 뒤 이미 failed인 ring의 후속 poll/close는
+기존 `-ENETDOWN`이라는 점을 반영했다. 최초 오류·차단·회수 근거를 모두 검사하며 제품
+오류 분류는 바꾸지 않았다. 실패 로그는 남겼고 마지막 `after3` 9사례가 통과했다.
+
+로컬 단일·1초 보유·Store 결합 사례는 sender 해제부터 completion 확인까지 각각
+40ms였다. 이 값에는 sender join·가상 backend 응답·시험 polling이 포함된다.
+native의 10ms tick 때문에 설정 20ms 대기의 관측 최대도 30,000µs였다. 실제 Xen/ARM의
+최악 지연이나 20/40ms 보장을 뜻하지 않는다. mutex 보유 중에 네트워크가 계속 처리된다고
+주장하지 않으며, 소유자가 반환한 뒤 진행이 살아나는 것을 수락했다.
+
+제품에는 새 allocation·thread·queue·설정·timeout 상향이 없다. 기존 계측 spinlock 아래
+작은 상태만 갱신한다. native ELF의 제품 `waits` symbol은 96→120 byte로 **24 byte 증가**했다.
+시험 fixture의 추가 thread/계수와 제품 상시 비용은 구분한다. ARM 메모리/stack 수락은 아니다.
+
+### 최종 후보와 남은 수락
+
+`packet-lock/FINAL_INPUTS.json`과 `FINAL.diff`에 최종 HEAD+diff·소스 해시를 남겼다.
+기존 AUTO/MANUAL/공통 drive·Starter builder의 현재 입력 수집에 변경 runtime·header·
+Starter 진단이 포함됨을 다시 확인했다. 새 recipe·의존성·소스 lock·운영값은 없다.
+다음 ARM 후보는 기존처럼 수정된 전체 runtime/소비 header를 같은 펌웨어로 빌드하고,
+Starter에는 새 candidate version을 지정해야 한다. 이번에는 native 빌드·host 검증·
+source-package 입력 대조까지 수행했다. **ARM firmware/정규 패키지·실제 Xen/MQTT·보드
+적용과 commit/push는 미수행**이다.
+
+실보드에서는 실제 TX/RX 부하와 vCPU 배치에서 lock 대기/보유·마지막 poll·회복을 측정하고,
+동시에 실제 backend 종료·협조 종료를 확인해야 한다. 지속적인 잠금 보유를 만드는 실제
+호출 구간이나 deadlock이 확인되면 그 원인을 별도로 고쳐야 하며 이번 재시도가 이를
+해결했다고 주장하지 않는다. 로컬 수락 중 추가 제품 결함은 확인하지 않았다.
+
+재현: 기존 고정 도구 환경에서 `packet-lock/run_packet.py <새-tag> packet`을 실행한다.
+`packet` 대신 `policy`/`lifecycle`/`wait`/`starter`로 해당 native 회귀를 실행하고,
+`packet-lock/run_host.py`로 host 제품 C·source-package 회귀를 실행한다.
+
+## 2026-11-03 실보드 단절 후속과 develop 통합
+
+### 기준과 관측
+
+원격 develop의 `ec49da415d425e3d4daf263d0012da71ffaebcf2`를 11월 3일에 받아 분리
+작업트리를 만들었다. 보드의 `lab.2` 입력 영수증에는 platform의 `6f4c640`과 `d0bce11`이
+들어 있었고 develop에는 두 변경이 빠져 있었다. 두 변경을 후보에 가져와 기존 보드를
+교체할 때 해당 보호가 사라지지 않게 했다. 주행앱 입력 26개, 주행 계약, 하드웨어,
+provisioning 프로필 및 경로를 정규화한 Kconfig는 설치된 `lab.2`와 같았다.
+
+수정 전 보드에서 A의 게스트 링크는 down, XenBus 양쪽은 Connected(4)였다. Dom0의
+`vif2.0`에서 세 차례 Guest Rx stalled가 기록됐고 같은 브리지의 B와 Debian은 통신했다.
+22초 브로커 관찰에서 A 표본은 0건, B는 heartbeat 11건과 metrics 131건이었다.
+고정 Raspberry Pi 커널은 수신 요청 슬롯이 모자란 상태를 stall로 보고한다. 대기 프레임이
+만료된 뒤에도 ready를 기록할 수 있어 실제 수신은 게스트와 MQTT에서 별도로 대조했다.
+[고정 커널 RX 처리](https://github.com/raspberrypi/linux/blob/95b85bebbedcaedfa7ca79116ed38b7376fba412/drivers/net/xen-netback/rx.c#L481-L504)
+
+### 정책과 코드
+
+| 경계 | 재현 근거 및 변경 |
+|---|---|
+| netfront 관측과 packet lock | usable Store의 일시 timeout·busy는 기존 링을 유지하며 재관측한다. 일시 packet lock 대기는 다음 tick에 다시 시도한다. 실제 backend 종료, 손상된 Store와 링 프로토콜 실패는 종결한다. |
+| XenStore 송신 | `xen-store/src/xenstore.c`는 링에 맞는 요청을 한 번에 게시한다. 기한이나 공간 부족으로 미게시하면 producer·알림을 그대로 두고 pending 슬롯을 반환한다. 완전 송신 후 늦은 응답은 원 요청 ID로 처리한다. 큰 요청의 스트리밍과 부분 송신 뒤 세션 차단은 유지한다. |
+| 협조 종료 | `xen-runtime/src/shutdown.c`의 단일 watch 힌트가 읽기 일시 오류에 소실되던 문제를 수정했다. usable Store에서 일시 오류인 동안 100ms 간격으로 값을 재확인한다. Store의 poison/close가 확인되면 감시를 종료한다. 유효 요청을 확인한 후 기존 ACK·quiesce·네트워크 및 Store 정리·hypercall 순서와 단일 소유권을 적용한다. |
+| 현장 진단 | `xen-runtime/src/netfront.c`와 공통 주행 runtime에 `xenova drive netfront`를 연결했다. 기존 카운터와 워커가 종료된 위치·errno를 게스트 콘솔에서 조회한다. 종결 경로의 기존 로그에도 위치가 남는다. |
+
+### 로컬 검증과 후보
+
+- 동일 Store fixture에서 이전 코드는 기한 만료 때 헤더 16바이트를 게시한 채 세션을
+  차단했다. 후보는 게시 0바이트, poison 0, pending 0을 확인했고 다음 정상 read가 성공했다.
+  요청 링에 공간이 한 바이트 모자라는 사례와 ring wrap도 확인했다. Store 67개 C 사례가
+  일반 빌드와 ASan/UBSan에서 통과했다.
+- 같은 단일 종료 watch 시험에서 이전 코드는 timeout 뒤 원 요청을 확보하지 못했다.
+  수정본은 timeout·busy·again에서 각 한 번 진행했고, read/watch의 sticky poison에서는
+  quiesce·hypercall을 제출하지 않았다. 종료·네트워크 소유권 native_sim 17개와 합친
+  후보의 관련 native_sim 13개를 각각 실행했다. Store·Xen hypercall 경계를 대역으로 뒀다.
+- `platform/scripts/build-xenova-drive-app.py --app drive --profile warm-lattice-lab`을
+  고정 Zephyr 4.4.0·SDK로 실행했다. ARM 입력
+  `3eb84a4a5e78d311c23643a3b46288e6705a1e41231f714024c7484dbaf6161e`,
+  버전 `0.1.0-drive-3eb84a4a5e78`,
+  manifest `878647a0d6fb9cf8154fada882a11e6adeeca5f64b87b32966bf46a6a82360b3`,
+  바이너리 `b18ed2eeb133afd37e61dc2687b6a0912b89b79412420fd7034e896224aaf092`.
+- 기존 `lab.2`에 진단만 추가한 후보를 A에서 먼저 실행했다. 첫 3분 동안 A heartbeat
+  91건, metrics 1,093건, `app.lifecycle.WAITING` 3,660건을 받았다. B는 heartbeat
+  92건과 metrics 1,096건을 받았고, Spring DB에서 두 VM의 새 Zephyr 표본을 확인했다.
+  이 구간에는 기존 장애가 재발하지 않아 그 장애의 최초 errno는 확보되지 않았다.
+
+### 최종 작업트리와 실보드 수락
+
+현재 작업의 원본은 로컬 `chore/frontend/live-console-check` 작업트리다. 이 브랜치를
+`ec49da4`까지 fast-forward한 뒤 별도 검증 사본의 코드·시험·문서와 ARM 산출물을 옮겼다.
+platform의 `6f4c640`과 `d0bce11`을 출처를 남기는 `cherry-pick -x`로 가져왔다.
+이 브랜치에서 대응하는 커밋은 각각 `d46a15c`와 `bf59702`다. ARM 영수증에 들어 있는 입력
+309개의 바이트 크기와 SHA-256이 현재 작업트리와 모두 일치했다. 고정 Zephyr commit은
+`684c9e8f32e4373a21098559f748f06915f950c9`, SDK는 1.0.0이다.
+로컬 기존 변경은 stash와 diff로 보관했다. 프런트의 기존 로컬 콘솔·지표 수정과 develop의
+Linux 메모리 차트를 합친 뒤 타입 검사, Vitest 28파일 204개, 겹쳤던 두 파일의 Prettier 검사를 통과했다.
+원본 커밋을 가져온 뒤 XenStore, netfront, Store 관측 상태의 host 회귀 10개를 다시 실행했다.
+
+차량 출력 Gateway가 비활성인 상태에서 A만 일반 종료하고 최종 ARM 번들로 교체했다.
+A의 로드 manifest가 후보와 일치했고, 이어 강제 옵션 없이 `xenova-vm reboot`를 실행해
+25.57초 후 정상 결과를 받았다. A domid는 5에서 6으로 바뀌고 같은 manifest를 다시 로드했다.
+B는 재부팅 중 heartbeat 15건·metrics 181건을 보냈고 실행 ID와 Xen unique ID가 유지됐다.
+
+재부팅 뒤 45초씩 네 구간을 관찰했다. A는 heartbeat 92건, metrics 1,099건,
+`app.lifecycle.WAITING` 3,689건을 보냈다. B는 heartbeat 92건과 metrics 1,101건을 보냈다.
+게스트 콘솔에서 A의 DHCP 주소, carrier, MQTT 연결을 확인했다. Store 일시 관측 실패
+1건과 회복 1건이 남았고, worker 종결 오류는 0이었다. Spring DB의 읽기 전용 2분 조회에서도
+A 617건과 B 622건의 새 Zephyr metrics를 확인했다. 최초 장애의 정확한 트리거는 확보하지
+못했다. 실차 장치 연결과 출력 인가는 이 검증 범위에 포함되지 않는다.

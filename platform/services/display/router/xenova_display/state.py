@@ -38,6 +38,28 @@ class StateStore:
         self.control = None
         self.control_epoch = None
         self.control_retired = set()
+        self.gateway_observation = None
+        self.gateway_connected = False
+        self.gateway_identity = None
+
+    def gateway_success(self, value, *, observed_mono):
+        if self.settings.drive_transport != "gateway":
+            raise ValueError("Gateway drive source is not selected")
+        with self.lock:
+            identity = (value["authority"]["generation"],
+                        value["authority"]["selected_vm_id"], value["authority"]["selected_mode"])
+            if self.gateway_identity is not None:
+                previous = self.gateway_identity
+                if identity[0] < previous[0] or (identity[0] == previous[0] and identity != previous):
+                    raise ValueError("Gateway authority regressed or conflicted")
+            self.gateway_identity = identity
+            self.gateway_observation = self.observation(value, source_id="gateway.context")
+            self.gateway_observation["received_mono"] = observed_mono
+            self.gateway_connected = True
+
+    def gateway_failure(self):
+        with self.lock:
+            self.gateway_connected = False
 
     def observation(self, value, *, observed_at=None, **metadata):
         return {"value": deepcopy(value), "received_at": utc_now(), "received_mono": self.clock(),
@@ -272,6 +294,8 @@ class StateStore:
         return source, state
 
     def _control(self, env, retained):
+        if self.settings.drive_transport != "mqtt":
+            return False  # No fallback or competing source in explicit Gateway mode.
         p = env["payload"]
         # Old active_app semantics must not be used to infer a VM or a driving mode.
         if (retained or env.get("source_id") != self.settings.control_source
@@ -338,6 +362,12 @@ class StateStore:
             drive = {"active_vm_id": None, "mode": "unknown", "ai_status": "unknown", "source": control_source}
             if control_source["status"] == "fresh":
                 drive.update(self.control["value"])
+            if self.settings.drive_transport == "gateway":
+                source = self.source(self.gateway_observation, 3, connected=self.gateway_connected)
+                drive = {"active_vm_id": None, "mode": "unknown", "ai_status": "unknown",
+                         "source": source, "authority": None}
+                if source["status"] == "fresh":
+                    drive.update(deepcopy(self.gateway_observation["value"]))
             return {"schema_version": 1, "type": "display.state", "source_epoch": self.epoch,
                     "sequence": self.sequence, "generated_at": utc_now(),
                     "mqtt_connected": self.mqtt_connected, "binding_scope": self.settings.binding_scope,

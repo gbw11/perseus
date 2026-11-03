@@ -41,6 +41,7 @@ def fingerprint(app):
         "platform/guests/zephyr/starter.lock.json", "platform/first-install/artifact_io.py",
         "platform/first-install/first_install_contract.py",
         "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_zephyr.py",
+        "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_catalog.py",
         "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_guest_profile.py",
         "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_runtime.py",
         "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_trace.py")]

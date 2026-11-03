@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 from . import __version__
-from .api import console, health, logs, recovery, stats, vms
+from .api import console, cpu, health, logs, recovery, registrations, stats, vms
 from .api.errors import install_error_handlers
 from .config import Settings
 from .console import ConsoleSession
@@ -39,15 +40,32 @@ def create_app(
     app.state.driver = driver
     app.state.service = VmService(driver, provisioner, settings)
     app.state.console_factory = ConsoleSession
+    from .registration_sender import RegistrationSender
+    app.state.registration_sender = RegistrationSender(settings)
+    # 예상된 등록 입력 거절의 유한 부가 진단. 원 operation/등록 기록을 대체하지 않는다.
+    app.state.registration_validation = {"rejected": 0, "first_detail": None}
+    previous = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def registration_lifespan(application):
+        async with previous(application):
+            try:
+                yield
+            finally:
+                app.state.registration_sender.close()
+
+    app.router.lifespan_context = registration_lifespan
     from .observations import install_observations
     install_observations(app)
 
     app.include_router(health.router)
     app.include_router(vms.router, prefix="/api/v1")
     app.include_router(stats.router, prefix="/api/v1")
+    app.include_router(cpu.router, prefix="/api/v1")
     app.include_router(console.router, prefix="/api/v1")
     app.include_router(recovery.router, prefix="/api/v1")
     app.include_router(logs.router, prefix="/api/v1")
+    app.include_router(registrations.router, prefix="/api/v1")
     install_error_handlers(app)
     _install_request_budget(app, settings.response_reserve_s)
     if settings.service_token:
@@ -70,6 +88,9 @@ def _install_request_budget(app: FastAPI, reserve_s: float) -> None:
     @app.middleware("http")
     async def request_budget(request, call_next):
         raw = request.headers.get(budget.HEADER)
+        if (raw is None and request.method == "POST" and request.url.path.startswith("/api/v1/vm-registrations/")
+                and request.url.path.endswith("/notify")):
+            raw = "15000"  # 기본 notify 기한도 threadpool 대기 전에 한 번만 시작한다.
         if raw is None or request.url.path in budget.EXEMPT_PATHS:
             return await call_next(request)
         try:

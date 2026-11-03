@@ -155,7 +155,10 @@ int xdiag_snapshot_get(struct xdiag_snapshot *s, bool include_threads)
 	if (k_is_in_isr()) { return -EWOULDBLOCK; }
 	memset(s, 0, sizeof(*s));
 	int resources_rc=xdiag_resources_get(&s->resources);
-	if(resources_rc){s->resources.cpu.rc=resources_rc;s->resources.threads_rc=resources_rc;}
+	if (resources_rc) {
+		s->resources.cpu.rc=s->resources.threads_rc=resources_rc;
+		s->resources.net_bytes_rc=s->resources.net_rate_rc=resources_rc;
+	}
 	s->captured_uptime_ms = k_uptime_get();
 	uint64_t start = 0, end;
 	s->clock_rc = xdiag_clock_us(&start);

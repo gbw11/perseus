@@ -1259,75 +1259,84 @@ button.chip:hover:not(.chipOn) {
   color: var(--x-text-muted);
   font-size: var(--x-text-xs);
 }
-.memoryPendingCard {
-  min-width: 0;
-}
-.memoryPendingIntro {
-  margin-bottom: var(--x-space-3);
-  padding: var(--x-space-3);
-  border-radius: var(--x-radius-sm);
-  background: var(--x-surface-sunken);
-}
-.memoryPendingIntro p {
-  margin: 5px 0 0;
-  color: var(--x-text-muted);
-  font-size: var(--x-text-sm);
-}
-.poolUnavailable {
-  min-height: 112px;
-}
-.poolUnavailableText {
+.linuxMemorySummary {
   display: grid;
-  grid-column: 1 / -1;
-  gap: 3px;
-  padding-top: var(--x-space-2);
-  border-top: 1px solid var(--x-border);
-}
-.poolUnavailableText strong {
-  color: var(--x-text);
-  font-size: var(--x-text-sm);
-}
-.poolUnavailableText span {
-  color: var(--x-text-muted);
-  font-size: var(--x-text-xs);
-}
-.memoryUnavailableChart > div {
-  display: grid;
-  min-height: 150px;
-  place-items: center;
-  align-content: center;
-  gap: var(--x-space-2);
-  border-block: 1px solid var(--x-border);
-  color: var(--x-text-muted);
-  text-align: center;
-}
-.memoryUnavailableChart > div strong {
-  color: var(--x-text);
-  font-size: var(--x-text-sm);
-}
-.memoryUnavailableChart > div span {
-  font-size: var(--x-text-xs);
-}
-.memoryPendingMeta {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--x-space-2);
-  margin-top: var(--x-space-4);
-}
-.memoryPendingMeta > span {
-  display: grid;
-  gap: 4px;
-  padding: var(--x-space-3);
-  border-radius: var(--x-radius-sm);
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px var(--x-space-3);
+  padding: var(--x-space-4);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
   background: var(--x-surface-2);
 }
-.memoryPendingMeta small {
+.linuxMemorySummaryHead {
+  display: contents;
+}
+.linuxMemorySummaryHead > span {
+  color: var(--x-text);
+  font-weight: 700;
+}
+.linuxMemorySummaryHead > strong {
+  color: var(--vm-accent);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+}
+.linuxMemoryAmount {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.linuxMemoryAmount strong {
+  color: var(--x-text);
+  font-family: var(--x-font-mono);
+  font-size: clamp(18px, 1.5vw, 24px);
+}
+.linuxMemoryAmount span,
+.linuxMemoryFree span {
+  color: var(--x-text-muted);
+  font-size: 10px;
+}
+.linuxMemoryFree {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+.linuxMemoryFree strong {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+}
+.linuxMemoryBar {
+  grid-column: 1 / -1;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--x-surface-sunken);
+}
+.linuxMemoryBar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--vm-accent);
+}
+.linuxMemoryLegend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   color: var(--x-text-muted);
   font-family: var(--x-font-mono);
   font-size: 10px;
 }
-.memoryPendingMeta strong {
-  font-size: var(--x-text-sm);
+.linuxMemoryLegend i {
+  width: 15px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--vm-accent);
+}
+.linuxMemoryLine {
+  fill: none;
+  stroke: var(--vm-accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 @media (max-width: 1200px) {
   .memoryVmGrid {
@@ -1608,8 +1617,35 @@ button.chip:hover:not(.chipOn) {
 .cpuChart svg {
   display: block;
   width: 100%;
-  height: 220px;
+  height: 100%;
   overflow: visible;
+}
+.cpuPlot {
+  position: relative;
+  height: 220px;
+  padding-left: 38px;
+}
+.cpuYAxis {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 32px;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+}
+.cpuYAxis span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+.cpuYAxis span:first-child {
+  transform: none;
+}
+.cpuYAxis span:last-child {
+  transform: translateY(-100%);
 }
 .cpuGridLine {
   stroke: var(--x-border);
@@ -1642,7 +1678,7 @@ button.chip:hover:not(.chipOn) {
   position: absolute;
   right: 0;
   bottom: 7px;
-  left: 0;
+  left: 38px;
   display: flex;
   justify-content: space-between;
   color: var(--x-text-muted);
@@ -1665,6 +1701,9 @@ button.chip:hover:not(.chipOn) {
   .cpuChart svg,
   .cpuEmpty {
     min-height: 200px;
+    height: 200px;
+  }
+  .cpuPlot {
     height: 200px;
   }
 }
@@ -1839,6 +1878,49 @@ button.chip:hover:not(.chipOn) {
 .controlCardActions > div {
   display: flex;
   gap: var(--x-space-2);
+}
+.vmOperationNotice {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--x-space-2);
+  padding: 10px 12px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  font-size: var(--x-text-xs);
+}
+.vmOperationNotice > i {
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--x-primary) 30%, transparent);
+  border-top-color: var(--x-primary);
+  border-radius: 50%;
+  animation: vmOperationSpin 0.8s linear infinite;
+}
+.vmOperationNotice > strong {
+  color: var(--x-text);
+}
+.vmOperationNotice > span {
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+}
+.vmOperationNotice[data-tone='pending'] {
+  border-color: color-mix(in srgb, var(--x-primary) 42%, var(--x-border));
+  background: color-mix(in srgb, var(--x-primary) 7%, var(--x-surface-2));
+}
+.vmOperationNotice[data-tone='fault'] {
+  grid-template-columns: auto 1fr;
+  border-color: color-mix(in srgb, var(--x-fault) 44%, var(--x-border));
+  background: color-mix(in srgb, var(--x-fault) 7%, var(--x-surface-2));
+}
+.vmOperationNotice[data-tone='fault'] > strong,
+.vmOperationNotice[data-tone='fault'] > span {
+  color: var(--x-fault);
+}
+@keyframes vmOperationSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .controlEmpty {
   display: grid;
@@ -2668,9 +2750,12 @@ button.chip:hover:not(.chipOn) {
   gap: var(--x-space-2);
   margin-top: var(--x-space-4);
 }
+.lifecycleState + .vmOperationNotice {
+  margin-top: var(--x-space-3);
+}
 .controlResourceSummary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid var(--x-border);
   border-radius: 12px;
@@ -2699,35 +2784,497 @@ button.chip:hover:not(.chipOn) {
 .controlResourceSummary > div[data-available='false'] strong {
   color: color-mix(in srgb, var(--x-text-muted) 72%, var(--x-surface-3));
 }
-.resourceControlNotice {
+.pinningCardTag {
+  color: var(--x-primary);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+.pinningIntro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--x-space-5);
+  margin-bottom: var(--x-space-4);
+}
+.pinningIntro > div:first-child {
+  display: grid;
+  gap: 6px;
+}
+.pinningIntro strong {
+  color: var(--x-text);
+  font-size: var(--x-text-md);
+}
+.pinningIntro p {
+  margin: 0;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+  line-height: 1.55;
+}
+.pinningObservation {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--x-space-2);
+}
+.pinningObservation span {
+  padding: 6px 9px;
+  border: 1px solid var(--x-border);
+  border-radius: 999px;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+.pinningObservation span:first-child {
+  border-color: color-mix(in srgb, var(--x-primary) 35%, var(--x-border));
+  color: var(--x-primary);
+}
+.pinningState {
+  display: grid;
+  gap: 6px;
+  min-height: 108px;
+  place-content: center;
+  padding: var(--x-space-5);
+  border: 1px dashed var(--x-border);
+  border-radius: 12px;
+  color: var(--x-text-muted);
+  text-align: center;
+}
+.pinningState strong {
+  color: var(--x-text);
+}
+.pinningState span {
+  max-width: 620px;
+  font-size: var(--x-text-sm);
+  line-height: 1.55;
+}
+.pinningState[data-tone='waiting'] {
+  border-color: color-mix(in srgb, var(--x-recovering) 48%, var(--x-border));
+  background: color-mix(in srgb, var(--x-recovering) 5%, transparent);
+}
+.pinningTableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--x-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--x-surface-2) 74%, transparent);
+}
+.pinningTable {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.pinningTable th,
+.pinningTable td {
+  border-right: 1px solid var(--x-border);
+  border-bottom: 1px solid var(--x-border);
+}
+.pinningTable tr:last-child th,
+.pinningTable tr:last-child td {
+  border-bottom: 0;
+}
+.pinningTable th:last-child,
+.pinningTable td:last-child {
+  border-right: 0;
+}
+.pinningTable thead th {
+  position: relative;
+  height: 94px;
+  padding: var(--x-space-3);
+  background: color-mix(in srgb, var(--x-surface-3) 82%, transparent);
+  color: var(--x-text);
+  text-align: center;
+}
+.pinningTable thead th:first-child {
+  width: 210px;
+  color: var(--x-text);
+  text-align: left;
+}
+.pinningTable thead th > span,
+.pinningTable thead th > small {
+  display: block;
+}
+.pinningTable thead th > span {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-md);
+  font-weight: 800;
+}
+.pinningTable thead th:first-child > span {
+  font-family: inherit;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+.pinningTable thead th > small {
+  margin-top: 7px;
+  color: var(--x-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.pinningTable thead th > em {
+  display: inline-block;
+  margin-top: 7px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vm-accent) 16%, transparent);
+  color: var(--vm-accent);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.pinningTable thead th[data-exclusive='true'] {
+  box-shadow: inset 0 3px 0 var(--vm-accent);
+}
+.pinningTable tbody th {
+  padding: 20px;
+  background: color-mix(in srgb, var(--x-surface-3) 48%, transparent);
+  text-align: left;
+}
+.pinningTable tbody th span,
+.pinningTable tbody th small {
+  display: block;
+}
+.pinningTable tbody th span {
+  color: var(--x-text);
+  font-family: var(--x-font-mono);
+  font-size: 17px;
+  font-weight: 800;
+}
+.pinningTable tbody th small {
+  margin-top: 8px;
+  color: color-mix(in srgb, var(--x-text-muted) 86%, var(--x-text));
+  font-size: 12px;
+  font-weight: 700;
+}
+.pinningTable td {
+  height: 84px;
+  padding: 12px;
+  text-align: center;
+}
+.pinningCell {
+  display: inline-grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid var(--x-border-strong);
+  border-radius: 12px;
+  background: var(--x-surface);
+  color: var(--x-bg);
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+.pinningCell:hover:not(:disabled),
+.pinningCell:focus-visible {
+  border-color: var(--vm-accent);
+  outline: none;
+  transform: translateY(-1px);
+}
+.pinningCell[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--vm-accent) 78%, white);
+  background: var(--vm-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vm-accent) 14%, transparent);
+}
+.pinningCell[data-changed='true'] {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--x-recovering) 25%, transparent),
+    inset 0 0 0 2px var(--x-recovering);
+}
+.pinningCell:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+.pinningCell > span {
+  font-size: 21px;
+  font-weight: 900;
+  line-height: 1;
+}
+.pinningReview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--x-space-5);
+  margin-top: var(--x-space-4);
+  padding: var(--x-space-4);
+  border: 1px solid var(--x-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--x-surface-2) 76%, transparent);
+}
+.pinningReview[data-dirty='true'] {
+  border-color: color-mix(in srgb, var(--x-recovering) 44%, var(--x-border));
+  background: color-mix(in srgb, var(--x-recovering) 5%, var(--x-surface-2));
+}
+.pinningReview > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 11px;
+}
+.pinningReview > div:first-child > span {
+  color: var(--x-text);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.pinningReview p {
+  margin: 0;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+  line-height: 1.55;
+}
+.pinningReview ul {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pinningReview li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 11px;
+  color: color-mix(in srgb, var(--x-text-muted) 82%, var(--x-text));
+  font-family: var(--x-font-mono);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+.pinningReview li strong {
+  color: var(--x-text);
+  font-size: 15px;
+  font-weight: 850;
+}
+.pinningReview li b {
+  color: var(--x-recovering);
+  font-size: 17px;
+  font-weight: 900;
+}
+.pinningActions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--x-space-2);
+}
+.pinningFeedback {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: var(--x-space-3);
+  padding: 11px 13px;
+  border-radius: 10px;
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+}
+.pinningFeedback > i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+.pinningFeedback[data-tone='ok'] {
+  background: color-mix(in srgb, var(--x-ok) 10%, transparent);
+  color: var(--x-ok);
+}
+.pinningFeedback[data-tone='fault'] {
+  background: color-mix(in srgb, var(--x-fault) 10%, transparent);
+  color: var(--x-fault);
+}
+.resourceTuningSection {
+  min-width: 0;
+  padding: var(--x-space-4);
+  border: 1px solid var(--x-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--x-surface-2) 76%, transparent);
+}
+.resourceSectionHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--x-space-4);
+  margin-bottom: var(--x-space-4);
+}
+.resourceSectionHeading > div {
+  display: grid;
+  gap: 6px;
+}
+.resourceSectionHeading > div > span {
+  color: var(--x-text);
+  font-size: 18px;
+  font-weight: 850;
+  letter-spacing: -0.025em;
+}
+.resourceSectionHeading p {
+  margin: 0;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  line-height: 1.55;
+}
+.resourceEditState {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--vm-accent) 38%, var(--x-border));
+  border-radius: 999px;
+  color: var(--vm-accent);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.resourceEditState:not([data-enabled='true']) {
+  border-color: var(--x-border);
+  color: var(--x-text-muted);
+  font-family: inherit;
+}
+.resourceEditState[data-enabled='true'] {
+  border-color: color-mix(in srgb, var(--x-ok) 42%, var(--x-border));
+  color: var(--x-ok);
+}
+.memoryInputGroup input {
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  border: 1px solid var(--x-border-strong);
+  border-radius: 9px;
+  outline: none;
+  background: var(--x-surface-2);
+  color: var(--x-text);
+  font: 800 var(--x-text-md) var(--x-font-mono);
+}
+.memoryInputGroup input:focus {
+  border-color: var(--vm-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vm-accent) 12%, transparent);
+}
+.memoryInputGroup input[aria-invalid='true'] {
+  border-color: var(--x-fault);
+}
+.resourceValidation {
+  margin: 8px 0 0;
+  color: var(--x-fault);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.resourceApplyRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--x-space-4);
   margin-top: var(--x-space-4);
-  padding: var(--x-space-4);
-  border: 1px dashed color-mix(in srgb, var(--x-primary) 46%, var(--x-border));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--x-primary) 5%, transparent);
+  padding-top: var(--x-space-3);
+  border-top: 1px solid var(--x-border);
 }
-.resourceControlNotice > div {
+.resourceApplyRow > span {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  line-height: 1.5;
+}
+.resourceApplyRow > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--x-space-2);
+}
+.resourceCapacityGrid {
   display: grid;
-  gap: 5px;
+  grid-template-columns: repeat(2, minmax(280px, 420px));
+  justify-content: center;
+  gap: var(--x-space-3);
 }
-.resourceControlNotice strong {
+.resourceCapacityItem {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: var(--x-space-3);
+  border: 1px solid var(--x-border);
+  border-radius: 12px;
+  background: var(--x-surface);
+}
+.resourceCapacityItem > span:first-child {
   color: var(--x-text);
+  font-size: var(--x-text-sm);
+  font-weight: 800;
 }
-.resourceControlNotice div > span {
+.resourceCapacityItem > small {
+  color: color-mix(in srgb, var(--x-text-muted) 82%, var(--x-text));
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+.vcpuOptions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+.vcpuOptions button {
+  display: grid;
+  place-content: center;
+  min-width: 0;
+  min-height: 52px;
+  padding: 7px;
+  border: 1px solid var(--x-border-strong);
+  border-radius: 9px;
+  background: var(--x-surface-2);
+  color: var(--x-text-muted);
+  cursor: pointer;
+}
+.vcpuOptions button strong {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-md);
+}
+.vcpuOptions button small {
+  font-size: 9px;
+  font-weight: 700;
+}
+.vcpuOptions button[aria-pressed='true'] {
+  border-color: var(--vm-accent);
+  background: color-mix(in srgb, var(--vm-accent) 13%, var(--x-surface-2));
+  color: var(--vm-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vm-accent) 10%, transparent);
+}
+.vcpuOptions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.64;
+}
+.memoryInputGroup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+}
+.memoryInputGroup input {
+  padding: 12px 54px 12px 14px;
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+.memoryInputGroup > span {
+  z-index: 1;
+  grid-column: 2;
+  grid-row: 1;
+  padding-right: 14px;
+  color: color-mix(in srgb, var(--x-text-muted) 82%, var(--x-text));
+  font-size: 12px;
+  font-weight: 800;
+  pointer-events: none;
+}
+.resourceEmpty {
+  display: grid;
+  min-height: 116px;
+  place-content: center;
+  padding: var(--x-space-4);
+  border: 1px dashed var(--x-border);
+  border-radius: 12px;
   color: var(--x-text-muted);
   font-size: var(--x-text-sm);
+  text-align: center;
 }
-.resourceControlNotice > span {
-  flex: 0 0 auto;
-  color: var(--x-primary);
-  font-family: var(--x-font-mono);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
+.resourceEmpty[data-tone='fault'] {
+  border-color: color-mix(in srgb, var(--x-fault) 42%, var(--x-border));
+  color: var(--x-fault);
 }
 .dangerZone {
   display: flex;
@@ -2760,20 +3307,10 @@ button.chip:hover:not(.chipOn) {
   .controlDetailGrid {
     grid-template-columns: 1fr;
   }
-  .controlResourceSummary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .controlResourceSummary > div:nth-child(2) {
-    border-right: 0;
-  }
-  .controlResourceSummary > div:nth-child(-n + 2) {
-    border-bottom: 1px solid var(--x-border);
-  }
 }
 @media (max-width: 640px) {
   .controlDetailHero,
-  .dangerZone,
-  .resourceControlNotice {
+  .dangerZone {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -2788,5 +3325,39 @@ button.chip:hover:not(.chipOn) {
   }
   .lifecycleActions {
     flex-direction: column;
+  }
+  .controlResourceSummary {
+    grid-template-columns: 1fr;
+  }
+  .controlResourceSummary > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--x-border);
+  }
+  .controlResourceSummary > div:last-child {
+    border-bottom: 0;
+  }
+  .pinningIntro,
+  .pinningReview {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .pinningObservation {
+    flex-wrap: wrap;
+  }
+  .pinningActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .resourceSectionHeading,
+  .resourceApplyRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .resourceCapacityGrid {
+    grid-template-columns: 1fr;
+  }
+  .resourceApplyRow > div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

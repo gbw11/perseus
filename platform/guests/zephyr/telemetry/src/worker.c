@@ -173,13 +173,14 @@ static int send_observation(enum xt_kind kind,const struct xt_observation *sourc
 	if (qos1 && pending) { return -EBUSY; }
 	/* Reserve the maximum packet size before encoding. No live packet waits
 	 * offline or ages in a serialized queue; collect again on reconnect. */
-	if (!budget(XT_PAYLOAD_MAX+128)) { return -EAGAIN; }
+	unsigned reservation=(kind==XT_NETWORK_V1 ? XT_NETWORK_V1_MAX : XT_PAYLOAD_MAX)+128;
+	if (!budget(reservation)) { return -EAGAIN; }
 	uint64_t start=k_ticks_to_us_floor64(k_uptime_ticks());
 	int rc=xt_encode(&publisher,kind,source,k_uptime_get(),sample,snapshot,part,&outgoing);
 	publisher.counters.serialized_us+=k_ticks_to_us_floor64(k_uptime_ticks())-start;
 	if (rc) { return rc; }
 	/* Return the conservative reservation surplus, with framing still counted. */
-	tokens+=(XT_PAYLOAD_MAX+128)-(unsigned)(outgoing.length+strlen(outgoing.topic)+12);
+	tokens+=reservation-(unsigned)(outgoing.length+strlen(outgoing.topic)+12);
 	if (outgoing.qos) {
 		inflight=outgoing;pending_kind=kind;
 		pending_event_seq=kind==XT_EVENT ? publisher.events[0].event_seq : 0;
@@ -252,8 +253,11 @@ static void work(void *a,void *b,void *c)
 	snapshot_active=false;tokens=BURST_BYTES;token_time=k_uptime_get();
 	bool identified=false;int previous_error=0;int64_t next_capture=0;
 	int64_t next_clock=0;
-	enum xt_kind periodic[]={XT_HEARTBEAT,XT_MEMORY,XT_NETWORK,XT_PROGRESS,XT_INTERVAL,XT_JITTER,XT_LATENESS,XT_ELAPSED,XT_PUBLISHER,XT_POOLS};
-	unsigned periods[]={2000,2000,2000,1000,5000,5000,5000,5000,5000,2000};
+	static const struct { enum xt_kind kind; unsigned ms; } periodic[]={
+		{XT_HEARTBEAT,2000},{XT_MEMORY,2000},{XT_NETWORK_V1,2000},{XT_NETWORK,2000},
+		{XT_PROGRESS,1000},{XT_INTERVAL,5000},{XT_JITTER,5000},{XT_LATENESS,5000},
+		{XT_ELAPSED,5000},{XT_PUBLISHER,5000},{XT_POOLS,2000},
+	};
 	cpu_active=false;cpu_due=0;
 	int64_t due[ARRAY_SIZE(periodic)]={0};
 	while (!atomic_get(&stopping)) {
@@ -333,10 +337,11 @@ static void work(void *a,void *b,void *c)
 				current.end_ms=core_end;next_capture=k_uptime_get()+200;
 			}
 			for (unsigned i=0;i<ARRAY_SIZE(periodic) && connected;++i) {
-				if (now<due[i] || (periodic[i]>=XT_INTERVAL && periodic[i]<=XT_ELAPSED && current.timing_rc)) { continue; }
-				if(periodic[i]==XT_POOLS&&!current.resources.regions)continue;
-				int rc=send_observation(periodic[i],&current,current_sample,NULL,0);
-				if (rc!=-EAGAIN && rc!=-EBUSY) { due[i]=now+periods[i]; }
+				enum xt_kind kind=periodic[i].kind;
+				if (now<due[i] || (kind>=XT_INTERVAL && kind<=XT_ELAPSED && current.timing_rc)) { continue; }
+				if(kind==XT_POOLS&&!current.resources.regions)continue;
+				int rc=send_observation(kind,&current,current_sample,NULL,0);
+				if (rc!=-EAGAIN && rc!=-EBUSY) { due[i]=now+periodic[i].ms; }
 			}
 			if(cpu_active&&k_uptime_get()>=cpu_expiry){cpu_active=false;++publisher.counters.live_discarded;}
 			if(!cpu_active&&now>=cpu_due){

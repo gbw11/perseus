@@ -1,6 +1,6 @@
 export type VmAuthority = 'ACTIVE' | 'STANDBY' | 'UNKNOWN' | 'INFOTAINMENT';
 
-/** VM A·B의 제어권은 active_vm_id만 신뢰하고, 비주행 VM은 역할을 그대로 표시한다. */
+/** 주행 VM(주 구동·백업)의 제어권은 active_vm_id만 신뢰하고, 비주행 VM은 역할을 그대로 표시한다. */
 export function vmAuthorityOf(
   role: { driving: boolean } | null,
   vm: { vm_id: string } | undefined,
