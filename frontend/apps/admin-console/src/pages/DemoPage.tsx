@@ -399,6 +399,9 @@ function ManualInput() {
  * [자율주행 재개] — AUTO_READY 에서만 활성. 누르면 POST /api/v1/drive/resume (MQTT-13).
  * 바로 바뀌지 않는다: 게이트웨이가 받아들이면 3·2·1 카운트다운 뒤 AUTO (계약 v1.2 §6, 화면 위 알림).
  */
+/** 재개 취소 API(DELETE /api/v1/drive/resume, S15P31E110-280)는 백엔드에 아직 없어 mock 에서만 보인다 */
+const CAN_CANCEL_RESUME = import.meta.env.VITE_MOCK === 'true';
+
 function Resume() {
   const { drive } = useDrive();
   const toast = useToast();
@@ -427,7 +430,7 @@ function Resume() {
           ? `▶ ${Math.max(1, Math.ceil(counting.remaining_ms / 1000))}초 뒤 자율주행${auto ? ' (자동 복귀)' : ''}`
           : '▶ 자율주행 재개'}
       </Button>
-      {counting && (
+      {counting && CAN_CANCEL_RESUME && (
         <Button
           variant="danger"
           style={{ width: '100%', marginTop: 'var(--x-space-2)' }}
@@ -440,7 +443,9 @@ function Resume() {
       <p className={styles.dim}>
         {counting
           ? auto
-            ? '자율주행이 복구돼 자동으로 돌아가는 중 — [취소]하면 수동주행이 계속 몰고, 그 뒤에는 [재개]로만 돌아간다.'
+            ? CAN_CANCEL_RESUME
+              ? '자율주행이 복구돼 자동으로 돌아가는 중 — [취소]하면 수동주행이 계속 몰고, 그 뒤에는 [재개]로만 돌아간다.'
+              : '자율주행이 복구돼 자동으로 돌아가는 중.'
             : '카운트다운 중 — 그 사이 자율주행이 다시 끊기면 취소되고 수동주행이 유지된다.'
           : ready
             ? '자동 복귀를 취소했다. 누르면 3·2·1 을 센 뒤 AUTO 로 돌아간다.'
