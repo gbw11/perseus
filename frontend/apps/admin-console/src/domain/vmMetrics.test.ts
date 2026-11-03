@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MetricSample } from '../api/types';
-import { cpuPercentOf, latest, memoryPercentOf } from './vmMetrics';
+import { buildLinuxMemorySeries, cpuPercentOf, latest, memoryPercentOf } from './vmMetrics';
 
 const sample = (source: string, values: Record<string, number | null>): MetricSample => ({
   sample_id: crypto.randomUUID(),
@@ -40,5 +40,30 @@ describe('vm metrics', () => {
     ];
     expect(latest(samples, cpuPercentOf)).toBe(30);
     expect(latest(samples, (s) => memoryPercentOf(s, { memory_mib: 16 }))).toBeNull();
+  });
+  it('builds Linux memory usage history from samples that carry memory data', () => {
+    const samples = [
+      sample('guest_agent', { memory_used_bytes: 128 * 1024 * 1024 }),
+      sample('guest_agent', { cpu_percent_allocated: 8 }),
+      sample('guest_agent', { memory_used_bytes: 256 * 1024 * 1024 }),
+    ];
+
+    const series = buildLinuxMemorySeries(samples, { memory_mib: 512 });
+
+    expect(series.totalBytes).toBe(512 * 1024 * 1024);
+    expect(series.points).toHaveLength(2);
+    expect(series.points.map((point) => point.percent)).toEqual([25, 50]);
+    expect(series.current?.usedBytes).toBe(256 * 1024 * 1024);
+  });
+  it('ignores invalid memory samples and an invalid VM allocation', () => {
+    const samples = [
+      sample('guest_agent', { memory_used_bytes: -1 }),
+      sample('guest_agent', { memory_used_bytes: Number.POSITIVE_INFINITY }),
+    ];
+
+    expect(buildLinuxMemorySeries(samples, { memory_mib: 512 }).current).toBeNull();
+    expect(
+      buildLinuxMemorySeries([sample('guest_agent', { memory_used_bytes: 10 })], { memory_mib: 0 }).points,
+    ).toEqual([]);
   });
 });
