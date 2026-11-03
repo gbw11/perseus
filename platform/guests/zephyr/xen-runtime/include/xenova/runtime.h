@@ -18,6 +18,8 @@ int xsr_watch_next_status(uint32_t watch, int timeout_ms, bool *unusable);
 /* Remove only the caller's watch; does not close other users' shared session. */
 int xsr_unwatch(uint32_t watch, int64_t deadline);
 int xsr_read(const char *path, char *value, size_t capacity, int timeout_ms);
+/* Same read and budget; distinguish a recoverable timeout from terminal Store loss. */
+int xsr_read_status(const char *path, char *value, size_t capacity, int timeout_ms, bool *unusable);
 int xsr_write(const char *path, const char *value, int timeout_ms);
 /* Limited owned grant table. Mutually exclusive with Zephyr XEN_GRANT_TABLE. */
 int xgrant_init(void);

@@ -48,9 +48,16 @@ int xsr_watch_next_status(uint32_t watch,int ms,bool *unusable) {
 int xsr_watch_next(uint32_t watch,int ms) {
  return xsr_watch_next_status(watch,ms,NULL);
 }
-int xsr_read(const char *path,char *value,size_t cap,int ms) {
+int xsr_read_status(const char *path,char *value,size_t cap,int ms,bool *unusable) {
+ if(unusable)*unusable=false;
  int64_t end=k_uptime_get()+ms;struct xs_client *c=xsr_acquire(end);if(!c)return -ETIMEDOUT;
- int rc=xs_read_text(c,0,path,value,cap,MAX(0,end-k_uptime_get()));xsr_release();return rc;
+ int left=MAX(0,end-k_uptime_get());
+ int rc=left?xs_read_text(c,0,path,value,cap,left):-ETIMEDOUT;
+ if(unusable)*unusable=c->poisoned||c->closed;
+ xsr_release();return rc;
+}
+int xsr_read(const char *path,char *value,size_t cap,int ms) {
+ return xsr_read_status(path,value,cap,ms,NULL);
 }
 int xsr_write(const char *path,const char *value,int ms) {
  int64_t end=k_uptime_get()+ms;struct xs_client *c=xsr_acquire(end);if(!c)return -ETIMEDOUT;

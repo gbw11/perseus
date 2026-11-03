@@ -69,8 +69,21 @@ int xs_watch(struct xs_client *c,const char *p,uint32_t *id,int ms) {
  return is("shutdown-watch")||is("net-watch")?-ETIMEDOUT:0;
 }
 int xsr_unwatch(uint32_t id,int64_t end) { assert(id);return end<=k_uptime_get()?-ETIMEDOUT:0; }
+static bool shutdown_watch_delivered;
+static unsigned shutdown_watch_reads;
+static int64_t shutdown_read_failed_at;
+static bool shutdown_read_case(void) { return strstr(xl_case,"shutdown-external-read-")!=NULL; }
 int xsr_watch_next(uint32_t id,int ms) {
  ARG_UNUSED(id);k_sleep(K_MSEC(ms));
+ if(shutdown_read_case()){
+  assert(!client.poisoned);
+  if(!shutdown_watch_delivered){shutdown_watch_delivered=true;return 0;}
+ }
+ if(is("shutdown-external-watch-poison")){
+  assert(!client.poisoned);
+  client.poisoned=true;client.fatal_error=-ETIMEDOUT;
+  return client.fatal_error;
+ }
  if(xl_wait_enabled&&front==4){
   if(is("wait-watch-busy")){k_sem_give(&xl_store_wait);return -EBUSY;}
   if(is("wait-watch-poison")){client.poisoned=true;client.fatal_error=-ETIMEDOUT;k_sem_give(&xl_store_wait);}
@@ -79,14 +92,30 @@ int xsr_watch_next(uint32_t id,int ms) {
  return client.poisoned?client.fatal_error:-ETIMEDOUT;
 }
 int xsr_watch_next_status(uint32_t id,int ms,bool *unusable) {
- int rc=xsr_watch_next(id,ms);*unusable=client.poisoned||client.closed;return rc;
+ int rc=xsr_watch_next(id,ms);if(unusable)*unusable=client.poisoned||client.closed;return rc;
 }
 int xsr_read(const char *p,char *v,size_t n,int ms) {
  if(ms<=0)return -ETIMEDOUT;
  if(strstr(p,"control/shutdown")) {
-  snprintf(v,n,"%s",strstr(xl_case,"external")?"reboot":"");return 0;
+  if(shutdown_read_case()) {
+   if(!shutdown_watch_delivered){snprintf(v,n,"%s","");return 0;}
+   if(++shutdown_watch_reads==1) {
+    shutdown_read_failed_at=k_uptime_get();
+    if(is("shutdown-external-read-busy"))return -EBUSY;
+    if(is("shutdown-external-read-again"))return -EAGAIN;
+    if(is("shutdown-external-read-poison")){client.poisoned=true;client.fatal_error=-ETIMEDOUT;}
+    return -ETIMEDOUT;
+   }
+   assert(shutdown_watch_reads==2&&!client.poisoned);
+   assert(k_uptime_get()-shutdown_read_failed_at>=100);
+  }
+  bool external=strstr(xl_case,"external")&&!is("shutdown-external-watch-poison");
+  snprintf(v,n,"%s",external?"reboot":"");return 0;
  }
  snprintf(v,n,"1");return 0;
+}
+int xsr_read_status(const char *p,char *v,size_t n,int ms,bool *unusable) {
+ int rc=xsr_read(p,v,n,ms);if(unusable)*unusable=client.poisoned||client.closed;return rc;
 }
 int xsr_write(const char *p,const char *v,int ms) {
  if(ms<=0)return -ETIMEDOUT;
