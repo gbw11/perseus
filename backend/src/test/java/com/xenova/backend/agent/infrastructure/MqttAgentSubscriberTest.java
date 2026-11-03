@@ -7,7 +7,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
 import com.xenova.backend.agent.application.TelemetryHeartbeatMessageHandler;
-import com.xenova.backend.agent.application.ZephyrTelemetryMessageHandler;
+import com.xenova.backend.agent.application.VmTelemetryMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventBackfillService;
 import java.time.Clock;
@@ -23,7 +23,7 @@ class MqttAgentSubscriberTest {
     private static final Instant RECEIVED_AT = Instant.parse("2026-10-27T06:00:00Z");
 
     private AgentMessageHandler agentHandler;
-    private ZephyrTelemetryMessageHandler telemetryHandler;
+    private VmTelemetryMessageHandler telemetryHandler;
     private TelemetryHeartbeatMessageHandler heartbeatHandler;
     private RecoveryEventMessageHandler recoveryHandler;
     private RecoveryEventBackfillService backfillService;
@@ -32,7 +32,7 @@ class MqttAgentSubscriberTest {
     @BeforeEach
     void setUp() {
         agentHandler = mock(AgentMessageHandler.class);
-        telemetryHandler = mock(ZephyrTelemetryMessageHandler.class);
+        telemetryHandler = mock(VmTelemetryMessageHandler.class);
         heartbeatHandler = mock(TelemetryHeartbeatMessageHandler.class);
         recoveryHandler = mock(RecoveryEventMessageHandler.class);
         backfillService = mock(RecoveryEventBackfillService.class);
@@ -77,7 +77,7 @@ class MqttAgentSubscriberTest {
     void routesZephyrTelemetryMetricsToTelemetryHandler() {
         byte[] payload = "telemetry".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         String topic = "xenova/v2/vms/vm-1/telemetry/metrics";
-        int index = java.util.Arrays.asList(MqttAgentSubscriber.TOPICS).indexOf(ZephyrTelemetryMessageHandler.TOPIC);
+        int index = java.util.Arrays.asList(MqttAgentSubscriber.TOPICS).indexOf(VmTelemetryMessageHandler.METRICS_TOPIC);
 
         subscriber.messageArrived(topic, new MqttMessage(payload));
 

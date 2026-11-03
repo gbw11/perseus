@@ -1,17 +1,25 @@
 package com.xenova.backend.agent.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.agent.application.AgentMessageHandler.Result;
-import com.xenova.backend.agent.application.TelemetryHeartbeatStore.Heartbeat;
 import com.xenova.backend.agent.application.TelemetryHeartbeatStore.Status;
 import com.xenova.backend.agent.application.TelemetryHeartbeatStore.View;
+import com.xenova.backend.agent.domain.TelemetryHeartbeat;
+import com.xenova.backend.agent.domain.TelemetryHeartbeat.Report;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,23 +55,31 @@ class TelemetryHeartbeatMessageHandlerTest {
                 return now.get();
             }
         };
-        store = new TelemetryHeartbeatStore(Duration.ofSeconds(6), clock);
+        Map<String, TelemetryHeartbeat> reports = new HashMap<>();
+        AgentDataService agentData = mock(AgentDataService.class);
+        when(agentData.recordTelemetryHeartbeat(anyString(), any(Report.class))).thenAnswer(invocation ->
+                reports.computeIfAbsent(invocation.getArgument(0), TelemetryHeartbeat::new)
+                        .observe(invocation.getArgument(1)));
+        when(agentData.findTelemetryHeartbeat(anyString())).thenAnswer(invocation ->
+                Optional.ofNullable(reports.get(invocation.getArgument(0))).map(TelemetryHeartbeat::report));
+        store = new TelemetryHeartbeatStore(Duration.ofSeconds(6), clock, agentData);
         handler = new TelemetryHeartbeatMessageHandler(new ObjectMapper(), store);
     }
 
     @Test
-    void keepsPublisherStateAndLastSuccessAge() {
+    void keepsPublisherStateAndLastSuccessUptime() {
         assertThat(handler.handle(TOPIC, heartbeat(VM, BOOT, "7", "degraded", "12000", "10500"), false, T0))
                 .isEqualTo(Result.ACCEPTED);
 
         View view = store.view(VM);
         assertThat(view.status()).isEqualTo(Status.FRESH);
-        Heartbeat kept = view.heartbeat();
+        Report kept = view.heartbeat();
         assertThat(kept.publisherState()).isEqualTo("degraded");
-        assertThat(kept.lastCollectionSuccessAgeMs()).isEqualTo(1500L);
-        assertThat(kept.collectionFailuresTotal()).isEqualTo(3L);
-        assertThat(kept.publishSubmitFailuresTotal()).isZero();
-        assertThat(kept.connectionAttemptsTotal()).isEqualTo(1L);
+        assertThat(kept.sentUptimeMs()).isEqualTo("12000");
+        assertThat(kept.lastCollectionSuccessUptimeMs()).isEqualTo("10500");
+        assertThat(kept.collectionFailuresTotal()).isEqualTo("3");
+        assertThat(kept.publishSubmitFailuresTotal()).isEqualTo("0");
+        assertThat(kept.connectionAttemptsTotal()).isEqualTo("1");
         assertThat(kept.bootId()).isEqualTo(BOOT);
         assertThat(view.ageMs()).isZero();
     }
@@ -91,8 +107,8 @@ class TelemetryHeartbeatMessageHandlerTest {
         assertThat(handler.handle(TOPIC, heartbeat(VM, BOOT, "9", "degraded", "2000", "2000"), true,
                 T0.plusSeconds(1))).isEqualTo(Result.IGNORED);
 
-        Heartbeat kept = store.view(VM).heartbeat();
-        assertThat(kept.seq()).isEqualTo(5L);
+        Report kept = store.view(VM).heartbeat();
+        assertThat(kept.seq()).isEqualTo("5");
         assertThat(kept.receivedAt()).isEqualTo(T0);
     }
 
@@ -121,10 +137,10 @@ class TelemetryHeartbeatMessageHandlerTest {
     }
 
     @Test
-    void leavesLastSuccessAgeEmptyWhenUptimeIsMissingOrAhead() {
+    void leavesLastSuccessEmptyWhenItIsAheadOfTheReport() {
         handler.handle(TOPIC, heartbeat(VM, BOOT, "1", "running", "2000", "3000"), false, T0);
 
-        assertThat(store.view(VM).heartbeat().lastCollectionSuccessAgeMs()).isNull();
+        assertThat(store.view(VM).heartbeat().lastCollectionSuccessUptimeMs()).isNull();
     }
 
     private static byte[] replace(byte[] payload, String from, String to) {

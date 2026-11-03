@@ -96,6 +96,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
   "state": "running",
   "agent_status": "ONLINE",
   "ipv4": "192.168.77.20",
+  "assigned_ipv4": "192.168.77.20",
   "template_id": "debian-13-arm64",
   "template_version": "1.0.0",
   "vcpus": 1,
@@ -108,10 +109,11 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 |---|---|
 | `vm_id` | VM 고유 ID. Spring이 생성 |
 | `name` | 표시 이름. Spring 레코드 |
-| `guest_kind` | VM 종류 `linux` / `zephyr`. 생성 때 템플릿에서 복사해 Spring 레코드에 저장. **Spring만 쓰는 값이며 dom0-manager 계약에는 없음.** `zephyr`는 에이전트·네트워크·정상 종료가 없는 콘솔 전용 펌웨어라 `agent_status`가 항상 `UNKNOWN` |
+| `guest_kind` | VM 종류 `linux` / `zephyr`. 생성 때 템플릿에서 복사해 Spring 레코드에 저장. **Spring만 쓰는 값이며 dom0-manager 계약에는 없음.** `zephyr`는 Linux Agent 생존 보고가 없어 `agent_status`가 `UNKNOWN`이며, 네트워크 지원은 펌웨어에 따라 다름 |
 | `state` | Xen 기준 실행 상태 (3.3절). 도메인이 없으면 `stopped` |
 | `agent_status` | heartbeat 기준 에이전트 상태 `UNKNOWN`/`ONLINE`/`STALE`/`OFFLINE`. **목록·단건 조회에만** 있고 생성·시작·정지 응답에는 없음 |
 | `ipv4` | 에이전트가 마지막으로 보고한 IPv4 (eth0 우선, loopback 제외). 꺼져 있어도 마지막 값을 유지. 보고가 없으면 `null`, `zephyr`는 항상 `null`. **목록·단건 조회에만** 있음. dom0-manager VM 객체에는 IP가 없어 에이전트 보고를 씀 |
+| `assigned_ipv4` | 플랫폼 등록부에서 Spring에 저장한 예약 IPv4. Linux와 Zephyr 모두 표시하며 저장값이 없으면 `null`. 목록·단건 조회와 역할 변경 응답에서 제공. VM이 정지해도 보이며, 실제 게스트 주소 획득이나 접속 여부는 별도 관측값임 |
 | `template_id`, `template_version` | 생성에 쓴 템플릿. Spring 레코드 |
 | `vcpus`, `memory_mib` | 실행 중이면 dom0-manager가 관측한 값, 꺼져 있으면 Spring 레코드의 값 |
 | `role` | RC카 시나리오에서 이 VM이 맡은 앱. 값은 MQTT 계약의 `app_id`와 같은 `autonomous` / `manual` / `interaction`, 없으면 `null`. 생성 때 지정하거나 `PATCH`로 바꿈. **Spring 레코드에만 있고 dom0-manager 계약에는 없음.** 생성 명세가 아니라서 같은 이름·명세 재시도(200)는 역할이 달라도 기존 VM을 그대로 돌려줌. 같은 역할을 여러 VM이 가져도 막지 않음 |

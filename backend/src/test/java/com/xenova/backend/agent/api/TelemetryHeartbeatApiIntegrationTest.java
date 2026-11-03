@@ -7,7 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.agent.application.TelemetryHeartbeatStore;
-import com.xenova.backend.agent.application.TelemetryHeartbeatStore.Heartbeat;
+import com.xenova.backend.agent.domain.TelemetryHeartbeat.Report;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,8 +53,8 @@ class TelemetryHeartbeatApiIntegrationTest {
 
     @Test
     void returnsLatestHeartbeatInSnakeCase() throws Exception {
-        store.offer(new Heartbeat(VM, "boot-1", "instance-1", 3, "running", 1200L, 0L, 0L, 1L, Instant.now()),
-                false);
+        store.offer(VM, new Report("boot-1", "instance-1", "3", "2000", "running", "800", "0", "0", "1",
+                Instant.now()), false);
 
         mockMvc.perform(get("/api/v1/vms/" + VM + "/telemetry/heartbeat")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))

@@ -78,7 +78,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 - inventory 필수값은 `os.id`, `kernel_release`, `hostname`. os-release가 없는 Zephyr는 `os.id = "zephyr"`, `kernel_release = "<Zephyr 버전>"`으로 보낸다.
 - metrics의 `unit`은 `percent`, `bytes`만 받는다. 그 외는 `METRIC_UNIT_MISMATCH`. 값마다 `value`가 `null`이면 `unavailable_reason`을 붙인다(측정 실패를 0으로 보내지 않는다). 에이전트는 `source`를 보내지 않으며 백엔드가 `guest_agent`로 저장한다. dom0가 xentop으로 재는 VM 외부 관측값은 `source = xen`으로 VM API 계약 2.4·4.6절을 따른다
 - metrics의 `unavailable_reason`은 `first_sample`(구간 없음), `counter_reset`(누적 카운터가 되돌아감, 그 값이 새 기준), `not_supported`, `read_failed`, `parse_error`, `device_not_found`다. 받는 쪽은 모르는 사유도 문자열 그대로 받는다
-- `process_collection`은 `processes[]`가 어떻게 모였는지다. 빈 `processes[]`를 "프로세스 없음"으로 읽지 않게 한다. 에이전트 0.2.2부터 보내며(0.2.1은 `counter_reset`까지), 없는 메시지(옛 에이전트)는 수집 상태를 모르는 것으로 본다. 백엔드의 저장·노출은 별도 작업이며 그전까지 백엔드는 이 필드를 무시한다
+- `process_collection`은 `processes[]`가 어떻게 모였는지다. 에이전트 0.2.2부터 보내며, 백엔드는 최신 프로세스 목록과 함께 저장해 `GET /api/v1/vms/{vmId}/processes`로 반환한다. 보고가 없는 구형 에이전트나 기존 저장 행은 `null`이며, 이 경우 빈 목록의 이유는 미확인이다.
 
   | 필드 | 의미 |
   | --- | --- |
@@ -89,16 +89,13 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 
   `processes[]`는 CPU 상위 목록이라 이 상태가 `ok`여도 특정 앱의 생존 근거가 아니다(6.1)
 - Linux 에이전트(0.3.0부터)는 v1 토픽과 별도로 자기 상태(inventory·metrics 루프가 돌고 있는지, 수집·발행 실패 누계)를 `xenova/v2/vms/{vm_id}/telemetry/{inventory|heartbeat|metrics}`에 Zephyr 게스트와 같은 [Telemetry 계약 2.1](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md) 형식으로 보낸다(`firmware.measurement_profile = linux_agent`, metrics family `publisher`). v1 heartbeat 는 에이전트 프로세스의 생존이고, v2 heartbeat 의 `publisher_state` 는 metrics 루프의 진행 여부다. 복구 Worker 의 판정 입력이 아니다. 백엔드는 아래 v2 metrics 수신 규칙대로 이 `publisher` 표본도 함께 저장한다
-- 백엔드는 v2 중 `xenova/v2/vms/+/telemetry/metrics`(QoS 0)를 구독해 Zephyr VM의 CPU·메모리를 MQTT-03 과 같은 메트릭 표본으로 저장한다 (2026-11-02). inventory·events·snapshot 은 구독하지 않는다
+- 백엔드는 v2의 `xenova/v2/vms/+/telemetry/metrics`와 `xenova/v2/vms/+/telemetry/heartbeat`를 QoS 0으로 구독한다. inventory·events·snapshot은 구독하지 않는다.
+  - heartbeat는 Linux·Zephyr 공통 수집기 보고다. 백엔드는 VM별 최신 보고를 저장하고 `GET /api/v1/vms/{vmId}/telemetry/heartbeat`에서 `FRESH`·`STALE`·`UNKNOWN`과 함께 제공한다. `FRESH`일 때만 `publisher_state`를 현재 수집 상태로 해석한다. 실패 누계와 마지막 수집 성공 시각은 별도 근거다. 조회 형식은 [백엔드 README](../../backend/README.md)를 따른다.
   - 받는 조건: `schema_version = "2.1"`, `type = "telemetry.metrics"`, 토픽 `{vm_id}` 와 `vm_id` 일치, `message_id`·`payload.samples[]` 존재. 하나라도 어긋나면 버린다
-- 백엔드는 v2 `xenova/v2/vms/+/telemetry/heartbeat`(QoS 0)도 구독해 VM 별 최신 Publisher 상태만 메모리에 둔다 (2026-11-03, S15P31E110-358). Linux 에이전트와 Zephyr Publisher 를 같은 규칙으로 받는다. 진단 표시 전용이며 VM 정상·복구·앱 정상의 근거가 아니다
-  - 받는 조건: `schema_version = "2.1"`, `type = "telemetry.heartbeat"`, 토픽 `{vm_id}` 와 `vm_id` 일치, `boot_id`·`publisher_instance_id`·`seq` 존재, `payload.publisher_state` ∈ running·degraded·stopping. 하나라도 어긋나면 버린다
-  - 같은 `boot_id`·`publisher_instance_id` 안에서 `seq` 가 커질 때만 바꾼다(중복·역전 무시). 새 boot·instance 면 새로 시작한다. retained 로 받은 메시지는 lease 를 갱신하지 않는다
-  - 조회 `GET /api/v1/vms/{vm_id}/telemetry/heartbeat`(사용자 JWT): `status`(FRESH·STALE·UNKNOWN), `publisher_state`, `last_collection_success_age_ms`(= `clock.sent_uptime_ms` − `last_collection_success_uptime_ms`, 게스트 uptime 차이라 UTC 없이 계산), `collection_failures_total`·`publish_submit_failures_total`·`connection_attempts_total`, `boot_id`, `received_at`, `age_ms`. 마지막 수신 뒤 6초(`xenova.agent.telemetry-heartbeat-lease`, Telemetry 계약 진단 lease)가 지나면 STALE, 백엔드 시작 뒤 한 번도 못 받았으면 UNKNOWN
-  - 저장: `source = zephyr_telemetry`, 표본 ID 는 `message_id` 로 만든 UUID(같은 메시지는 한 번만 저장), 관측 시각은 `clock.sent_at`, 없으면 수신 시각. `window_ms` 는 `window.start/end_uptime_ms` 차이
+  - 지표 출처는 등록 VM 종류에 따라 `linux_telemetry` 또는 `zephyr_telemetry`다. 등록 전 공통 Publisher 지표는 `vm_telemetry`다. 표본 ID는 `message_id`로 만든 UUID, 관측 시각은 `clock.sent_at` 또는 수신 시각, `window_ms`는 계측 구간 차이다.
   - 값: `status = ok` 이면 숫자 또는 u64 10진 문자열을 숫자로 바꾸고, 그 외에는 `value = null`, `unavailable_reason` = `reason`(없으면 `status`). `labels` 는 문자열 맵으로 저장한다
   - 화면은 Linux 의 `cpu_percent_allocated`·`memory_used_bytes` 대신 Zephyr 의 `cpu.system.percent`, `memory.kernel_heap.used_bytes / (used_bytes + free_bytes)` 를 쓴다
-  - 브로커의 `backend` 계정에 이 토픽 읽기 권한이 있어야 한다(9장)
+  - 브로커의 `backend` 계정에 두 토픽의 읽기 권한이 있어야 한다(9장)
 - heartbeat 주기는 5초. 에이전트 상태는 **백엔드가 heartbeat 나이로 판정**한다 (`ONLINE` → 15초 `STALE` → 30초 `OFFLINE`). 에이전트가 스스로 상태를 선언하지 않는다.
 - heartbeat는 **VM 재시작 판정에만** 쓴다. 주행 제어권 전환 판정에는 쓰지 않는다 (5장).
 
@@ -523,7 +520,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 브로커 계정·ACL 파일은 [브로커 구성](../../platform/deploy/mosquitto/README.md)(`platform/deploy/mosquitto/etc/acl`)에서 관리한다.
 
 - 계정 이름 = 토픽 안의 id: 에이전트는 `vm_id`, legacy 앱은 `app_id`, 젯슨은 `perception`, 그 외 `gateway`·`backend`. 공통 정책에서 계정별 ACL을 생성해 자기 토픽만 허용한다. 전역 pattern으로 v2·읽기 전용 계정에 v1 쓰기를 부여하지 않는다. ESP32는 MQTT에 붙지 않으므로 계정이 없다 (v1.1).
-- 구독(read)은 개발 단계에서 v1 계정에 `xenova/v1/#`를 연다. `observer`는 이 읽기만 허용하며 probe도 발행하지 않는다. 별도 v2 계정에는 v1 읽기·쓰기를 부여하지 않는다. `backend` 는 v1 읽기에 더해 v2 `xenova/v2/vms/+/telemetry/+` 를 읽고, 그중 metrics·heartbeat 를 구독한다(3장). 계정별 구독 제한은 다음 개정(v1.2)에서 정한다.
+- 구독(read)은 개발 단계에서 v1 계정에 `xenova/v1/#`를 연다. `observer`는 이 읽기만 허용하며 probe도 발행하지 않는다. 별도 v2 계정에는 v1 읽기·쓰기를 부여하지 않는다. Spring의 `backend` 계정은 v1 읽기에 더해 v2 `telemetry/metrics`와 `telemetry/heartbeat`의 읽기 권한이 필요하다(3장).
 - `probes/#` 의 "자기 vm_id 만" 조건은 payload 기준이라 브로커가 거르지 못한다. 받는 쪽이 검사한다.
 
 ## 10. 미확정

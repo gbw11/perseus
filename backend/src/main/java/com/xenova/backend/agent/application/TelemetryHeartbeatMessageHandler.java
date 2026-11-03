@@ -2,11 +2,14 @@ package com.xenova.backend.agent.application;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.TextNode;
 import com.xenova.backend.agent.application.AgentMessageHandler.Result;
-import com.xenova.backend.agent.application.TelemetryHeartbeatStore.Heartbeat;
+import com.xenova.backend.agent.domain.TelemetryHeartbeat.Report;
+import com.xenova.backend.common.UnsignedDecimal;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -23,6 +26,7 @@ public class TelemetryHeartbeatMessageHandler {
 
     private static final Pattern TOPIC_PATTERN = Pattern.compile("^xenova/v2/vms/([^/]+)/telemetry/heartbeat$");
     private static final String TYPE = "telemetry.heartbeat";
+    private static final int MAX_PAYLOAD_BYTES = 4096;
     private static final Set<String> STATES = Set.of("running", "degraded", "stopping");
 
     private static final Logger log = LoggerFactory.getLogger(TelemetryHeartbeatMessageHandler.class);
@@ -57,11 +61,11 @@ public class TelemetryHeartbeatMessageHandler {
             throw new Rejected("unknown topic");
         }
         String topicVmId = matcher.group(1);
-        if (payload.length > AgentMessageHandler.MAX_PAYLOAD_BYTES) {
+        if (payload.length > MAX_PAYLOAD_BYTES) {
             throw new Rejected(payload.length + " bytes");
         }
         JsonNode root = read(payload);
-        if (!ZephyrTelemetryMessageHandler.SUPPORTED_SCHEMA_VERSION.equals(root.path("schema_version").asText(null))) {
+        if (!VmTelemetryMessageHandler.SUPPORTED_SCHEMA_VERSION.equals(root.path("schema_version").asText(null))) {
             throw new Rejected("schema_version " + root.path("schema_version"));
         }
         if (!TYPE.equals(root.path("type").asText(null))) {
@@ -70,55 +74,55 @@ public class TelemetryHeartbeatMessageHandler {
         if (!topicVmId.equals(root.path("vm_id").asText(null))) {
             throw new Rejected("vm_id mismatch: topic " + topicVmId + ", body " + root.path("vm_id"));
         }
-        String bootId = text(root.path("boot_id"));
-        String instanceId = text(root.path("publisher_instance_id"));
-        Long seq = decimal(root.path("seq"));
-        if (bootId == null || instanceId == null || seq == null) {
-            throw new Rejected("missing boot_id, publisher_instance_id or seq");
+        String bootId = root.path("boot_id").asText("");
+        String instanceId = root.path("publisher_instance_id").asText("");
+        String seq = decimal(root.path("seq"));
+        if (!uuid(topicVmId) || !uuid(bootId) || !uuid(instanceId) || seq == null || "0".equals(seq)
+                || !String.join("/", topicVmId, bootId, instanceId, "heartbeat", seq)
+                        .equals(root.path("message_id").asText())) {
+            throw new Rejected("invalid heartbeat identity or sequence");
         }
         JsonNode body = root.path("payload");
-        String state = body.path("publisher_state").asText(null);
+        String state = body.path("publisher_state").asText("");
         if (!STATES.contains(state)) {
             throw new Rejected("publisher_state " + body.path("publisher_state"));
         }
+        if (body.path("app_health_asserted").asBoolean(false)) {
+            throw new Rejected("publisher heartbeat cannot assert app health");
+        }
 
-        Heartbeat heartbeat = new Heartbeat(
-                topicVmId,
-                bootId,
-                instanceId,
-                seq,
-                state,
-                lastSuccessAgeMs(decimal(root.path("clock").path("sent_uptime_ms")),
-                        decimal(body.path("last_collection_success_uptime_ms"))),
+        String sent = decimal(root.path("clock").path("sent_uptime_ms"));
+        String lastSuccess = decimal(body.path("last_collection_success_uptime_ms"));
+        if (sent != null && lastSuccess != null && UnsignedDecimal.compare(lastSuccess, sent) > 0) {
+            lastSuccess = null;
+        }
+        Report heartbeat = new Report(bootId, instanceId, seq, sent, state, lastSuccess,
                 decimal(body.path("collection_failures_total")),
                 decimal(body.path("publish_submit_failures_total")),
                 decimal(body.path("connection_attempts_total")),
                 receivedAt);
-        return store.offer(heartbeat, retained) ? Result.ACCEPTED : Result.IGNORED;
+        return store.offer(topicVmId, heartbeat, retained) ? Result.ACCEPTED : Result.IGNORED;
     }
 
-    // Both are the Publisher's own uptime, so their difference is meaningful without a trusted UTC clock.
-    private static Long lastSuccessAgeMs(Long sentUptimeMs, Long lastSuccessUptimeMs) {
-        if (sentUptimeMs == null || lastSuccessUptimeMs == null || lastSuccessUptimeMs > sentUptimeMs) {
+    // Preserve the exact u64 and continue accepting the older numeric representation.
+    private static String decimal(JsonNode value) {
+        if (!value.isTextual() && !value.isIntegralNumber()) {
             return null;
         }
-        return sentUptimeMs - lastSuccessUptimeMs;
-    }
-
-    // u64 arrives as a decimal string (contract §5); a plain JSON number is accepted too.
-    private static Long decimal(JsonNode value) {
         try {
-            if (value.isTextual()) {
-                return Long.parseUnsignedLong(value.asText());
-            }
-            return value.isIntegralNumber() && value.asLong() >= 0 ? value.asLong() : null;
-        } catch (NumberFormatException exception) {
+            return UnsignedDecimal.read(value.isIntegralNumber() ? TextNode.valueOf(value.asText()) : value, "u64");
+        } catch (IllegalArgumentException exception) {
             return null;
         }
     }
 
-    private static String text(JsonNode value) {
-        return value.isTextual() && !value.asText().isBlank() ? value.asText() : null;
+    private static boolean uuid(String value) {
+        try {
+            return value.length() == 36 && UUID.fromString(value).toString().equals(value)
+                    && !"00000000-0000-0000-0000-000000000000".equals(value);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     private JsonNode read(byte[] payload) {
