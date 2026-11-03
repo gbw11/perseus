@@ -599,6 +599,19 @@ button.chip:hover:not(.chipOn) {
   gap: var(--x-space-3);
   min-width: 0;
 }
+/* 시뮬레이터 없음 (-262) — 끊기면 카드를 지우지 않고 알리고 조작을 막는다 */
+.simOff {
+  margin: 0 0 var(--x-space-3);
+  padding: var(--x-space-2) var(--x-space-3);
+  border-radius: var(--x-radius-sm);
+  border: 1px solid var(--x-border);
+  color: var(--x-text-muted);
+}
+.simControl[aria-disabled='true'] .simMap {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .simGroup {
   display: grid;
   gap: var(--x-space-2);
@@ -1982,7 +1995,7 @@ button.chip:hover:not(.chipOn) {
 }
 
 .headingLink {
-  padding: 8px 12px;
+  padding: var(--x-space-2) var(--x-space-3);
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius-sm);
   color: var(--x-text-muted);
