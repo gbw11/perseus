@@ -24,6 +24,9 @@ struct xnet_status {
  int observation_error, first_observation_error;
  bool connected;
  int backend_wait_stage; /* 0=none/complete, 1=session acquire, 2=response */
+ /* Packet worker terminal cause; ordinary close and observation loss leave it unset. */
+ const char *worker_failure_source;
+ int worker_error;
 };
 struct xnet_waits {
  uint64_t packet_polls, pending_batches, packet_gap_max_us;
