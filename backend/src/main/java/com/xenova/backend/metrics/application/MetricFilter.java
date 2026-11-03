@@ -12,7 +12,8 @@ import org.springframework.http.HttpStatus;
 // Optional source and metric-name filters shared by REST-12 and WS-01.
 public record MetricFilter(Set<String> sources, Set<String> names) {
 
-    public static final Set<String> SOURCES = Set.of("xen", "guest_agent");
+    public static final Set<String> SOURCES = Set.of("xen", "guest_agent", MetricSample.ZEPHYR_TELEMETRY,
+            MetricSample.LINUX_TELEMETRY, MetricSample.VM_TELEMETRY);
 
     public static MetricFilter of(List<String> sources, List<String> names) {
         Set<String> sourceSet = sources == null ? Set.of() : Set.copyOf(sources);

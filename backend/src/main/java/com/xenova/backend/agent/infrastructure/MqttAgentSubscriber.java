@@ -1,7 +1,7 @@
 package com.xenova.backend.agent.infrastructure;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
-import com.xenova.backend.agent.application.ZephyrTelemetryMessageHandler;
+import com.xenova.backend.agent.application.VmTelemetryMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventBackfillService;
 import java.time.Clock;
@@ -31,21 +31,22 @@ import org.springframework.util.StringUtils;
 @EnableConfigurationProperties(MqttProperties.class)
 public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended {
 
-    // Heartbeat and inventory use QoS 1, metrics QoS 0 (MQTT-01/02/03). Zephyr telemetry metrics are QoS 0 too.
+    // v1 heartbeat and inventory use QoS 1. v1 metrics and v2 diagnostics use QoS 0.
     static final String[] TOPICS = {
             AgentMessageHandler.TOPIC_PREFIX + "+/heartbeat",
             AgentMessageHandler.TOPIC_PREFIX + "+/inventory",
             AgentMessageHandler.TOPIC_PREFIX + "+/metrics",
             RecoveryEventMessageHandler.TOPIC,
-            ZephyrTelemetryMessageHandler.TOPIC
+            VmTelemetryMessageHandler.METRICS_TOPIC,
+            VmTelemetryMessageHandler.HEARTBEAT_TOPIC
     };
-    static final int[] QOS = {1, 1, 0, 1, 0};
+    static final int[] QOS = {1, 1, 0, 1, 0, 0};
 
     private static final Logger log = LoggerFactory.getLogger(MqttAgentSubscriber.class);
 
     private final MqttProperties properties;
     private final AgentMessageHandler handler;
-    private final ZephyrTelemetryMessageHandler telemetryHandler;
+    private final VmTelemetryMessageHandler telemetryHandler;
     private final RecoveryEventMessageHandler recoveryEventHandler;
     private final RecoveryEventBackfillService recoveryEventBackfillService;
     private final Clock clock;
@@ -61,7 +62,7 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
     public MqttAgentSubscriber(
             MqttProperties properties,
             AgentMessageHandler handler,
-            ZephyrTelemetryMessageHandler telemetryHandler,
+            VmTelemetryMessageHandler telemetryHandler,
             RecoveryEventMessageHandler recoveryEventHandler,
             RecoveryEventBackfillService recoveryEventBackfillService,
             Clock clock) {
@@ -141,8 +142,10 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
             recoveryEventHandler.handle(message.getPayload(), receivedAt);
             return;
         }
-        if (ZephyrTelemetryMessageHandler.matches(topic)) {
-            telemetryHandler.handle(topic, message.getPayload(), receivedAt);
+        if (VmTelemetryMessageHandler.matches(topic)) {
+            if (!message.isRetained() || !topic.endsWith("/heartbeat")) {
+                telemetryHandler.handle(topic, message.getPayload(), receivedAt);
+            }
             return;
         }
         handler.handle(topic, message.getPayload(), receivedAt);

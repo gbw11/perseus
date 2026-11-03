@@ -6,7 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
-import com.xenova.backend.agent.application.ZephyrTelemetryMessageHandler;
+import com.xenova.backend.agent.application.VmTelemetryMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventBackfillService;
 import java.time.Clock;
@@ -22,7 +22,7 @@ class MqttAgentSubscriberTest {
     private static final Instant RECEIVED_AT = Instant.parse("2026-10-27T06:00:00Z");
 
     private AgentMessageHandler agentHandler;
-    private ZephyrTelemetryMessageHandler telemetryHandler;
+    private VmTelemetryMessageHandler telemetryHandler;
     private RecoveryEventMessageHandler recoveryHandler;
     private RecoveryEventBackfillService backfillService;
     private MqttAgentSubscriber subscriber;
@@ -30,7 +30,7 @@ class MqttAgentSubscriberTest {
     @BeforeEach
     void setUp() {
         agentHandler = mock(AgentMessageHandler.class);
-        telemetryHandler = mock(ZephyrTelemetryMessageHandler.class);
+        telemetryHandler = mock(VmTelemetryMessageHandler.class);
         recoveryHandler = mock(RecoveryEventMessageHandler.class);
         backfillService = mock(RecoveryEventBackfillService.class);
         MqttProperties properties = new MqttProperties(
@@ -74,8 +74,25 @@ class MqttAgentSubscriberTest {
     void routesZephyrTelemetryMetricsToTelemetryHandler() {
         byte[] payload = "telemetry".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         String topic = "xenova/v2/vms/vm-1/telemetry/metrics";
-        int index = java.util.Arrays.asList(MqttAgentSubscriber.TOPICS).indexOf(ZephyrTelemetryMessageHandler.TOPIC);
+        int index = java.util.Arrays.asList(MqttAgentSubscriber.TOPICS).indexOf(VmTelemetryMessageHandler.METRICS_TOPIC);
 
+        subscriber.messageArrived(topic, new MqttMessage(payload));
+
+        assertThat(MqttAgentSubscriber.QOS[index]).isZero();
+        verify(telemetryHandler).handle(topic, payload, RECEIVED_AT);
+        verifyNoInteractions(agentHandler, recoveryHandler);
+    }
+
+    @Test
+    void subscribesToV2HeartbeatsAndDropsRetainedDelivery() {
+        byte[] payload = "heartbeat".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String topic = "xenova/v2/vms/vm-1/telemetry/heartbeat";
+        int index = java.util.Arrays.asList(MqttAgentSubscriber.TOPICS).indexOf(VmTelemetryMessageHandler.HEARTBEAT_TOPIC);
+        MqttMessage retained = new MqttMessage(payload);
+        retained.setRetained(true);
+
+        subscriber.messageArrived(topic, retained);
+        verifyNoInteractions(telemetryHandler);
         subscriber.messageArrived(topic, new MqttMessage(payload));
 
         assertThat(MqttAgentSubscriber.QOS[index]).isZero();

@@ -4,6 +4,8 @@ import com.xenova.backend.metrics.application.MetricFilter;
 import com.xenova.backend.metrics.application.MetricsQueryService;
 import com.xenova.backend.metrics.application.MetricsQueryService.Processes;
 import com.xenova.backend.metrics.application.MetricsQueryService.ProcessSort;
+import com.xenova.backend.metrics.application.MetricsQueryService.TelemetryStatus;
+import com.xenova.backend.metrics.application.ZephyrThreads;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -43,6 +45,16 @@ public class MetricsController {
             @RequestParam(defaultValue = "cpu_percent") String sort,
             @RequestParam(defaultValue = "10") int limit) {
         return service.processes(vmId, ProcessSort.fromValue(sort), limit);
+    }
+
+    @GetMapping("/threads")
+    public ZephyrThreads threads(@PathVariable String vmId) {
+        return service.threads(vmId);
+    }
+
+    @GetMapping("/telemetry/status")
+    public TelemetryStatus telemetryStatus(@PathVariable String vmId) {
+        return service.telemetryStatus(vmId);
     }
 
     public record MetricHistoryResponse(List<MetricSampleResponse> items) {

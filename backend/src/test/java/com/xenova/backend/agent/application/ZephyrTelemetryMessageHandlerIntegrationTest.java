@@ -29,7 +29,7 @@ class ZephyrTelemetryMessageHandlerIntegrationTest {
     private static final Instant RECEIVED = Instant.parse("2026-11-02T03:00:01Z");
 
     @Autowired
-    private ZephyrTelemetryMessageHandler handler;
+    private VmTelemetryMessageHandler handler;
 
     @Autowired
     private MetricSampleRepository metricSampleRepository;
