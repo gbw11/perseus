@@ -206,7 +206,7 @@ for key, value in values.items():
 import re, sys
 values = dict(re.findall(r"^([A-Za-z0-9_:/.-]+)=\"(.*)\"$", sys.stdin.read(), re.M))
 expected = {"PN": sys.argv[1], "MACHINE": "raspberrypi4-64", "DISTRO": "poky",
-            "INIT_MANAGER": "systemd", "RPI_DOM0_MEM": "1024M",
+            "INIT_MANAGER": "systemd", "RPI_DOM0_MEM": "3072M",
             "PREFERRED_PROVIDER_virtual/kernel": "linux-raspberrypi"}
 for key, value in expected.items():
     if values.get(key) != value:
