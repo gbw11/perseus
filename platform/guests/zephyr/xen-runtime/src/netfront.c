@@ -33,6 +33,8 @@ static atomic_bool monitor_closing;
 static atomic_int backend_error,backend_observation;
 static atomic_int backend_wait_stage;
 static int observation_error,first_observation_error; /* waits_lock */
+static const char *worker_failure_source; /* waits_lock */
+static int worker_error; /* waits_lock */
 static struct xnet_waits waits;
 static struct k_spinlock waits_lock;
 static uint64_t packet_locked_at,last_poll;
@@ -185,8 +187,10 @@ static void state_loop(void *a,void *b,void *c) {
 static void loop(void *a,void *b,void *c) {
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
  int rc=0;
+ const char *source=NULL;
  while(!closing) {
-  rc=atomic_load(&backend_error);if(rc)break;
+  rc=atomic_load(&backend_error);
+  if(rc){source="backend";break;}
   int lock_rc=packet_acquire(20);
   if(lock_rc){
    k_spinlock_key_t key=k_spin_lock(&waits_lock);
@@ -197,22 +201,32 @@ static void loop(void *a,void *b,void *c) {
     * this worker available for completion/drain; never touch the ring here.
     * Yield between attempts and recheck close/backend failure each time. */
    if(lock_rc==-EAGAIN){k_sleep(K_TICKS(1));continue;}
-   rc=lock_rc;break;
+   rc=lock_rc;source="packet-lock";break;
   }
   rc=atomic_load(&backend_error);
-  if(closing||rc){packet_release();break;}
+  if(closing||rc){
+   packet_release();
+   if(rc)source="backend";
+   break;
+  }
   rc=xnf_poll(&n);bool more=!rc&&xnf_pending(&n);
   uint64_t now=clock_us();k_spinlock_key_t key=k_spin_lock(&waits_lock);
   waits.packet_polls++;waits.pending_batches+=more;waits.packet_last_poll_ms=now/1000;
   if(last_poll)waits.packet_gap_max_us=MAX(waits.packet_gap_max_us,now-last_poll);
   last_poll=now;k_spin_unlock(&waits_lock,key);
-  packet_release();if(rc)break;
+  packet_release();if(rc){source="ring";break;}
   /* Retain the 64-completion budget; reschedule between batches, without the
    * ordinary 10ms idle when the backend has already posted more work. */
   if(more){k_sleep(K_TICKS(1));continue;}
   (void)k_sem_take(&net_wake,K_MSEC(10));
  }
- if(rc){connected=false;net_eth_carrier_off(iface);printk("XENOVA netfront link down rc=%d\n",rc);}
+ if(rc){
+  k_spinlock_key_t key=k_spin_lock(&waits_lock);
+  worker_failure_source=source;worker_error=rc;
+  k_spin_unlock(&waits_lock,key);
+  connected=false;net_eth_carrier_off(iface);
+  printk("XENOVA netfront link down rc=%d source=%s\n",rc,source);
+ }
  worker_done=true;
 }
 static void iface_init(struct net_if *i) {
@@ -459,7 +473,8 @@ int xnet_status_get(struct xnet_status *out) {
   .monitor_joined=!monitor_started||monitor_joined,
   .backend_observation=atomic_load(&backend_observation),.backend_error=atomic_load(&backend_error),
   .backend_wait_stage=atomic_load(&backend_wait_stage),.connected=connected,
-  .observation_error=observation_error,.first_observation_error=first_observation_error};
+  .observation_error=observation_error,.first_observation_error=first_observation_error,
+  .worker_failure_source=worker_failure_source,.worker_error=worker_error};
  k_spin_unlock(&waits_lock,key);
  k_mutex_unlock(&lifecycle_lock);return 0;
 }

@@ -11,13 +11,15 @@ Diagnostics의 실제 관측을 직접 netfront/TCP MQTT로 발행한다. CPU·�
 기본 이름·실행 펌웨어·유효한 UTC를 제공하되, 앱 준비·출력 권한·복구 허가는 판단하지
 않는다. `app_health_asserted=false`, v1 heartbeat/readiness와 v2 Publisher의 구분을 유지한다.
 
-네트워크 바이트·전송률, CPU 원시 누계, 내부 수집 비용, 실행별 오류/fatal 보존 자료는
-로컬 진단 대상이다. 기존 boot/error 사건과 네트워크 패킷·오류 지표는 유지하지만,
-내부 상세를 새 MQTT 지표로 모두 발행하지 않는다.
+이 계약은 네트워크 수신률을 기존 패킷·오류 지표와 함께 발행한다. RX/TX 바이트 누적값은
+[MQTT-03](../../../../../docs/contracts/mqtt-contract-v1.md#31-zephyr의-공통-네트워크-지표-mqtt-03)으로
+발행한다. 송신률, CPU 원시 누계, 내부 수집 비용, 실행별 오류/fatal 보존 자료는 로컬에서 확인한다.
 
 ## 2. 버전과 지원 구성
 
 현재 Publisher는 payload `2.1`과 catalog `xenova-telemetry-core-2.1`을 발행한다.
+수신률과 heap 계상 합계는 2.1에 추가된 선택 지표다. 새 schema/catalog는
+기존 2.1 표본도 수락한다. 이전 목록만 허용하는 폐쇄형 검사기는 목록을 갱신해야 한다.
 토픽 namespace는 `xenova/v2`를 유지한다. 2.0 소비자가 2.1을 처리한다고 가정하지 않으며
 자동 downgrade·v1 혼용·이중 발행을 하지 않는다. 독립 검사기는 명시적 버전으로 분기한다.
 
@@ -39,7 +41,7 @@ xenova/v2/vms/{vm_id}/telemetry/{inventory|heartbeat|metrics|events|snapshot}
 
 - 신규 봉투 `schema_version="2.1"`, `type="telemetry.<stream>"`를 사용한다.
 - MQTT **프로토콜**은 3.1.1을 사용한다. payload의 버전 2.1은 MQTT 프로토콜 버전이 아니다.
-- 기존 v1 주행/Agent 토픽은 변경하지 않는다. 기본 구현에 v1/v2 이중 발행을 넣지 않는다.
+- v1 주행·Agent 토픽의 기존 역할을 유지한다. Publisher의 공통 RX/TX 누적값은 v1 MQTT-03에서만 발행한다.
 - 소비자 미구현은 새 발행 계약을 축소하는 이유가 아니다. 구형 수신기의 수신·저장 성공으로도 보고하지 않는다.
 - 패치 개정은 문서/검증 수정만. 필드·단위·타입·의미 변경은 schema와 fixture 개정을 동반한다. 2.0 validator는 폐쇄형으로 정의한다. 알 수 없는 필드를 조용히 버리는 방식으로 호환됐다고 표시하지 않는다.
 - `agent_instance_id`의 역할은 새 `publisher_instance_id`로 명확히 표현한다. Linux에서도 process/Agent 실행마다 해당 ID를 바꾸면 같은 계약을 구현할 수 있다. 모든 기존 API 필드명을 일괄 개명하는 작업은 아니다.
@@ -227,10 +229,10 @@ inventory의 지원 선언과 현재 전송 봉투의 UTC 품질은 별개다.
 
 | Family | 내용 | 현재 Core와의 관계 |
 |---|---|---|
-| memory | kernel heap used/free/high-water | kernel system heap 범위 |
+| memory | kernel heap used/free/high-water/accounted | kernel system heap 범위 |
 | cpu | 시스템·스레드별 구간 사용률 | guest-accounted UP 범위, 별도 window |
 | memory_regions | RX/TX 고정 data pool used/free/capacity | payload 영역만 포함 |
-| network | raw32 tx/rx/drop/pool/protocol, if up/carrier | 기존 provider 재사용 |
+| network | raw32 tx/rx/drop/pool/protocol, if up/carrier, RX byte rate | 기존 provider와 Diagnostics cache 재사용 |
 | loop_progress | 완료·in-flight·age·deadline miss·skipped·간격·signed jitter | **실제 hook 등록 시만** 제공 |
 | loop_timing | interval / abs jitter / lateness / elapsed 분포 각 1개 메시지 | Core 누적 통계 그대로 |
 | publisher | 수집/전송/유실/크기/ACK 오류 | 새 publisher가 직접 생산 |
@@ -242,6 +244,19 @@ inventory의 지원 선언과 현재 전송 봉투의 UTC 품질은 별개다.
 정확한 이름·unit·kind·encoding·labels·원천은 catalog를 따른다. kernel heap과 RX/TX data pool은 정적 RAM 안의 서로 다른 allocator 범위이며, 전체 VM used/free RAM으로 합산하지 않는다.
 
 `network.netfront.*`는 **raw_counter 32bit**다. snapshot 필드가 64bit라고 wrap을 복원한 누적값이 되지는 않는다. 여러 wrap을 배제할 시간/최대 발생률의 근거가 없으면 modulo 차분도 신뢰할 rate로 제시하지 않는다. 재부팅·reset은 반드시 별도 epoch에서 비교한다.
+
+`rx_bytes_per_s`는 같은 ring 세대의 인접 유효 표본에서
+`floor(Δbytes × 1000 / Δuptime_ms)`를 계산한 값이다. v1 누적값과 같은 Diagnostics 캐시를
+쓰며 `interface`와 십진 문자열 `counter_epoch`를 붙인다. 첫 표본이나 읽기 실패 뒤에는
+수신률이 미측정이다. ring 재초기화·역전은 `counter_discontinuity`로,
+10초를 넘는 표본 간격·만료된 관측은 음수 `source_rc`가 붙은 `collection_failed`로 보낸다.
+포화나 산술 범위 초과도 null과 원 `source_rc`를 유지한다. 실제 무트래픽 수신률은 `0`이다.
+`counter_epoch="0"`은 epoch를 관측하지 못한 미측정 표본에만 쓴다.
+
+`memory.kernel_heap.accounted_bytes`는 한 allocator 관측에서 `used_bytes + free_bytes`다.
+고정 heap 예약 크기나 VM RAM 사용량이 아니며, allocator 메타데이터는 계상 범위 밖일 수 있다.
+할당 RAM·버퍼 풀·스택은 각자의 범위로 표시한다. 전송은 `bytes`/`bytes/s`를 사용하고,
+화면에서 heap·pool은 KiB, VM 할당량은 MiB, 수신률은 KiB/s로 환산할 수 있다.
 
 ### 9.3 루프 완료와 마감
 
