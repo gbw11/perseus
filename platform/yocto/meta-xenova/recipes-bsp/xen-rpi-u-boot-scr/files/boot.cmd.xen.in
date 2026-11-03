@@ -31,7 +31,7 @@ setenv xen_loadaddr     "0x00200000"
 setenv kernel_loadaddr  "0x00400000"
 
 echo Add boot arguments for Xen
-fdt set /chosen xen,xen-bootargs "console=dtuart dtuart=/soc/serial@7e215040 dom0_mem='@@RPI_DOM0_MEM@@' @@RPI_DEBUG_XEN_ARGS@@" || exit 1
+fdt set /chosen xen,xen-bootargs "console=dtuart dtuart=/soc/serial@7e215040 dom0_mem=@@RPI_DOM0_MEM@@ @@RPI_DEBUG_XEN_ARGS@@" || exit 1
 
 echo Add a dom0 node to chosen to put Linux boot information in
 fdt mknode /chosen dom0 || exit 1

@@ -1,0 +1,35 @@
+[Unit]
+Description=Xenova opt-in USB phone display access
+Wants=xenova-display-feed.service
+After=network.target xenova-display-feed.service
+ConditionPathExists=/etc/xenova/display-mobile.json
+ConditionPathExists=/etc/xenova/display.env
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/xenova/display.env
+RuntimeDirectory=xenova-display-mobile
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/python3 -m xenova_display.mobile_access --config /etc/xenova/display-mobile.json
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_UNIX AF_NETLINK
+# Only needed for binding the listener to the verified USB network device.
+CapabilityBoundingSet=CAP_NET_RAW
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

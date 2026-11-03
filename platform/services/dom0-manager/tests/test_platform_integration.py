@@ -267,6 +267,52 @@ def test_real_keyed_stop_is_accepted_while_a_long_operation_holds_the_execution_
     assert len(shutdowns(board)) == 1
 
 
+def reboots(board):
+    return [call for call in board.xen.calls if call[:2] in (["xl", "reboot"], ["xl", "destroy"], ["xl", "shutdown"])]
+
+
+@pytest.mark.parametrize("flags", ["--p---", "---sc-", "---s--", "-----d"])  # paused · crashed · shutdown · dying
+@pytest.mark.parametrize("key", [None, "reboot-not-running"])
+def test_real_reboot_of_a_vm_that_is_not_running_is_409_with_or_without_a_key(client, board, flags, key):
+    """실제 Manager reboot 는 도메인 존재만 본다. 키 유무와 관계없이 실행 중이 아니면 409 이고 물리 명령을 내지 않는다."""
+    board.xen.states = {1: flags}
+    headers = {"Idempotency-Key": key} if key else {}
+    response = client.post(f"/api/v1/vms/{UBUNTU}/reboot", headers=headers)
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == "InvalidState"
+    assert reboots(board) == []
+    assert list((board.data / "control-requests").glob("*.json")) == []  # 의도 수락 기록도 없다
+
+
+def test_real_keyed_reboot_starts_a_new_execution_and_replays_without_repeating(client, board):
+    debian = board.records["debian-dev"]  # 플랫폼이 시작한(관리하는) 실행에서 재부팅한다
+    body = {"vm_id": str(DEBIAN), "name": "debian", "template_id": TEMPLATE_ID, "template_version": TEMPLATE_VERSION,
+            "vcpus": debian["vcpus"], "memory_mib": debian["memory_mib"]}
+    assert client.post("/api/v1/vms", json=body).status_code == 201
+    before = board.manager.call("get", {"vm_id": str(DEBIAN)})["data"]["vm"]
+    assert before["execution_id"]
+    first = client.post(f"/api/v1/vms/{DEBIAN}/reboot", headers={"Idempotency-Key": "reboot-debian-1"})
+    assert first.status_code == 200, first.text
+    original = first.json()
+    assert (original["action"], original["status"], original["accepted"]) == ("reboot", "completed", True) and original["operation_id"]
+    assert [c[:2] for c in reboots(board)] == [["xl", "reboot"]]
+    after = board.manager.call("get", {"vm_id": str(DEBIAN)})["data"]["vm"]
+    assert after["domid"] is not None and after["execution_id"] and after["execution_id"] != before["execution_id"]  # 새 실행
+
+    again = client.post(f"/api/v1/vms/{DEBIAN}/reboot", headers={"Idempotency-Key": "reboot-debian-1"})
+    assert again.status_code == 200, again.text
+    assert again.json()["operation_id"] == original["operation_id"] and len(reboots(board)) == 1  # 재전달은 물리 동작을 반복하지 않는다
+    found = lookup(client, DEBIAN, "reboot-debian-1")
+    assert found.status_code == 200 and (found.json()["action"], found.json()["operation_id"]) == ("reboot", original["operation_id"])
+
+
+def test_real_reboot_of_a_stopped_or_unregistered_vm(client, board):
+    response = client.post(f"/api/v1/vms/{DEBIAN}/reboot", headers={"Idempotency-Key": "reboot-debian"})  # 등록됐지만 꺼짐
+    assert response.status_code == 409, response.text
+    assert client.post(f"/api/v1/vms/{NEW_VM}/reboot").status_code == 404
+    assert reboots(board) == []
+
+
 def test_real_budget_exhausted_submits_nothing(board):
     manager = SerializedManager(board.manager)
     driver = PlatformDriver(manager, Xl(FakeRunner({("xl", "info"): XL_INFO})))

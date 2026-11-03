@@ -1,5 +1,7 @@
 # Display pipeline v1 — 제안 계약
 
+> **2026-11-02 주행 표시 연결 선택:** [기존 Gateway context 읽기](display-gateway-read-v1.md)를 opt-in으로 추가했다. 이 모드에서는 아래 별도 display MQTT 토픽 발행/ACL을 요구하지 않는다. Agent·앱 MQTT는 유지한다. 기존 mqtt 기본값은 호환용이며 두 주행 소스를 혼합·자동 fallback하지 않는다. 새 수집기와 authority 준비 상태를 지원하는 프론트를 함께 배치한다.
+
 2026-11-02 · S15P31E110-250 · 기준 platform 24b26ff. 초기 가상 시험과 이후 실제 HDMI 시험을 구분한다. 현재 계약·측정·합의 대기는 [250 결정 기록](display-250-decisions.md)을 우선한다. 아래 단계별 설명은 당시 이력이며 현재 모든 항목의 미구현 목록이 아니다.
 
 ## 2026-11-02 구현·검증 대조

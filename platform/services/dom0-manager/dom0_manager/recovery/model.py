@@ -112,6 +112,9 @@ class VmHealth:
     # 이번 주기에 플랫폼 의도를 실제로 읽었는가(Worker 내부용, payload 에 내지 않는다). False 면 desired_state 는 마지막으로 읽은 값이라
     # 복구 엔진이 이것으로 복구를 취소·종료하지 않는다
     intent_known: bool = True
+    # 이 스냅샷이 본 실행(Worker 내부용, payload 에 내지 않는다). 복구 엔진이 force 직전에 지금 실행의 장애 증거인지 대조한다
+    domid: int | None = None
+    execution_id: str | None = None
 
     @property
     def ok(self) -> bool:

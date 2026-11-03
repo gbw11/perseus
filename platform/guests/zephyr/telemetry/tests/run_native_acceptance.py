@@ -22,6 +22,7 @@ import time
 import uuid
 import re
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal,ROUND_HALF_UP
 
 BASE = Path(__file__).resolve().parents[1]
@@ -37,6 +38,25 @@ def write_private(path, value):
 def public_binding(bootstrap):
     return {"vm_id": bootstrap["vm_id"], "boot_id": bootstrap["boot_id"],
             "publisher_instance_id": bootstrap["publisher_id"]}
+
+
+def collect_network_v1(subscriber, duration):
+    """Capture only the v1 metrics topic through the independent MQTT reader."""
+    rows = []
+    deadline = time.monotonic() + duration
+    subscriber.sock.settimeout(0.25)
+    try:
+        while time.monotonic() < deadline:
+            try:
+                flags, data = subscriber.receive()
+            except socket.timeout:
+                continue
+            assert flags == 0x30, "v1 network metrics must be QoS 0 and non-retained"
+            size = int.from_bytes(data[:2], "big")
+            rows.append((data[2:2 + size].decode(), json.loads(data[2 + size:])))
+    finally:
+        subscriber.close()
+    return rows
 
 
 def main():
@@ -59,6 +79,7 @@ def main():
     commands = []
     children = []
     handles = []
+    readers = ThreadPoolExecutor(max_workers=1)
 
     def run(argv, **kwargs):
         started = time.monotonic()
@@ -93,6 +114,13 @@ def main():
                      "--duration", str(duration), "--internal-plaintext"])
 
     try:
+        spec = importlib.util.spec_from_file_location("readonly_peer", BASE / "tools/reference_subscriber.py")
+        peer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(peer)
+        broker_root = ROOT / "platform/deploy/mosquitto"
+        spec = importlib.util.spec_from_file_location("broker_policy", broker_root / "scripts/xenova_broker.py")
+        broker_policy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(broker_policy)
         run(["ip", "link", "set", "lo", "up"])
         run(["ip", "link", "add", "xtbr", "type", "bridge"])
         run(["ip", "address", "add", "192.0.2.1/24", "dev", "xtbr"])
@@ -122,11 +150,10 @@ def main():
         write_private(password_path, "telemetry-reference-subscriber:" + subscriber_password + "\ntelemetry-test-audit:" + audit_password + "\n" +
                       "".join(b["username"] + ":" + b["password"] + "\n" for b in bootstraps))
         run([tools / "usr/bin/mosquitto_passwd", "-U", password_path])
-        acl = "user telemetry-reference-subscriber\ntopic read xenova/v2/vms/+/telemetry/+\nuser telemetry-test-audit\ntopic read xenova/#\n"
-        for b in bootstraps:
-            acl += "user " + b["username"] + "\n"
-            for stream in ("inventory", "heartbeat", "metrics", "events", "snapshot"):
-                acl += f"topic write xenova/v2/vms/{b['vm_id']}/telemetry/{stream}\n"
+        policy = broker_policy.policy(broker_root / "etc/policy.json")
+        profiles = {"telemetry-reference-subscriber": "service",
+                    **{b["username"]: "telemetry" for b in bootstraps}}
+        acl = broker_policy.acl(profiles, policy) + "\nuser telemetry-test-audit\ntopic read xenova/#\n"
         write_private(private / "acl", acl)
         write_private(private / "mosquitto.conf", f"listener 18883 192.0.2.1\nuser root\nallow_anonymous false\npassword_file {password_path}\nacl_file {private / 'acl'}\npersistence false\nlog_type error\n")
         broker = spawn("broker", [tools / "usr/sbin/mosquitto", "-c", private / "mosquitto.conf"])
@@ -136,6 +163,9 @@ def main():
         bindings_path = args.output / "bindings.json"
         bindings_path.write_text(json.dumps([public_binding(b) for b in bootstraps], indent=2))
         sub = subscriber("initial", 10 if args.extended else 14)
+        network_reader = peer.ReadOnlySubscriber("192.0.2.1", 18883,
+            {"username": "telemetry-test-audit", "password": audit_password}, "xenova/v1/vms/+/metrics")
+        network_result = readers.submit(collect_network_v1, network_reader, 8)
         time.sleep(0.3)
         guests = []
         source_runs = []
@@ -154,9 +184,6 @@ def main():
             source_runs.append(("guest-" + label, bootstrap["vm_id"], bootstrap["boot_id"]))
         fault_result = {}
         if args.extended:
-            spec = importlib.util.spec_from_file_location("readonly_peer", BASE / "tools/reference_subscriber.py")
-            peer = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(peer)
             audit = peer.ReadOnlySubscriber("192.0.2.1", 18883,
                      {"username": "telemetry-test-audit", "password": audit_password}, "xenova/#")
             def raw_connect(username, password, anonymous=False):
@@ -179,7 +206,10 @@ def main():
             assert not accepted
             probe = ("xt2-forbidden-probe-" + uuid.uuid4().hex).encode()
             acked_denials = 0
-            for topic in (f"xenova/v2/vms/{bootstraps[1]['vm_id']}/telemetry/metrics", "xenova/v1/vehicles/test/drive/command"):
+            for topic in (f"xenova/v2/vms/{bootstraps[1]['vm_id']}/telemetry/metrics",
+                          f"xenova/v1/vms/{bootstraps[1]['vm_id']}/metrics",
+                          f"xenova/v1/vms/{bootstraps[0]['vm_id']}/heartbeat",
+                          "xenova/v1/vehicles/test/drive/command"):
                 sock, reader, accepted = raw_connect(bootstraps[0]["username"], bootstraps[0]["password"])
                 assert accepted
                 sock.sendall(peer.packet(0x32, peer.utf8(topic) + b"\0\7" + probe))
@@ -256,15 +286,53 @@ def main():
         assert {m["type"] for m in messages} == {"telemetry." + s for s in ("inventory", "heartbeat", "metrics", "events", "snapshot")}
         matched = 0
         sources = {};resources={};cpu_matched=0
+        network_sources = {}
         for label, vm_id, boot_id in source_runs:
             for line in (args.output / (label + ".stdout")).read_text().splitlines():
                 if line.startswith("XT_SOURCE "):
                     source = json.loads(line[len("XT_SOURCE "):])
                     sources.setdefault((vm_id, boot_id, source["start_ms"], source["end_ms"]), []).append(source)
+                    network_sources[(vm_id, boot_id, source["net_uptime_ms"])] = source
                 if line.startswith('XT_RESOURCE '):
                     source=json.loads(line[len('XT_RESOURCE '):]);key=(vm_id,boot_id,source['sample'])
                     if key in resources:assert resources[key]==source,'same cache sample changed across reads/restart'
                     resources[key]=source
+        v1_rows = network_result.result()
+        epochs = {b["vm_id"]: set() for b in bootstraps}
+        identities = {b["vm_id"]: b for b in bootstraps}
+        interfaces = {(m["vm_id"], m["boot_id"], m["publisher_instance_id"]):
+                      m["payload"]["interfaces"][0]["name"]
+                      for m in messages if m["type"] == "telemetry.inventory" and m["payload"]["interfaces"]}
+        last_sequences = {}
+        message_ids = set()
+        for topic, message in v1_rows:
+            vm_id = message["vm_id"]
+            binding = identities[vm_id]
+            assert topic == f"xenova/v1/vms/{vm_id}/metrics"
+            assert (message["schema_version"], message["type"]) == ("1.0", "agent.metrics")
+            assert message["boot_id"] == binding["boot_id"]
+            assert message["agent_instance_id"] == binding["publisher_id"]
+            assert message["seq"] > last_sequences.get(vm_id, 0)
+            last_sequences[vm_id] = message["seq"]
+            message_id = uuid.UUID(message["message_id"])
+            assert message_id not in message_ids
+            message_ids.add(message_id)
+            payload = message["payload"]
+            values = {v["name"]: v for v in payload["values"]}
+            assert set(values) == {"net_rx_bytes_total", "net_tx_bytes_total"}
+            assert "processes" not in payload and payload["window_ms"] is None
+            if payload["observed_uptime_ms"] is None:
+                assert all(v["value"] is None and v["unavailable_reason"] for v in values.values())
+                continue
+            raw = network_sources[(vm_id, message["boot_id"], payload["observed_uptime_ms"])]
+            for direction in ("rx", "tx"):
+                value = values[f"net_{direction}_bytes_total"]
+                assert value["value"] == raw[f"{direction}_bytes"] and value["unit"] == "bytes"
+                iface = interfaces[(vm_id, message["boot_id"], message["agent_instance_id"])]
+                assert value["labels"] == {"iface": iface, "counter_epoch": raw["net_epoch"]}
+            epochs[vm_id].add(raw["net_epoch"])
+        assert all(value == {"1", "2"} for value in epochs.values()), epochs
+
         cpu_pages={}
         for m in messages:
             if m['type']=='telemetry.inventory':
@@ -298,16 +366,24 @@ def main():
         else:assert cpu_matched>0
         for index, bootstrap in enumerate(bootstraps):
             loops = []
+            rx_matched = 0
             for m in messages:
                 if m["vm_id"] != bootstrap["vm_id"] or m["type"] != "telemetry.metrics":
                     continue
                 p = m["payload"]
                 candidates = sources[(m["vm_id"], m["boot_id"], p["collection"]["start_uptime_ms"], p["collection"]["end_uptime_ms"])]
                 values = {s["name"]: s["value"] for s in p.get("samples", [])}
+                assert not {"net_rx_bytes_total", "net_tx_bytes_total"} & values.keys()
                 if p["family"] == "memory":
                     assert any(values["memory.kernel_heap.used_bytes"] == s["heap_used"] and
-                               values["memory.kernel_heap.free_bytes"] == s["heap_free"] for s in candidates)
+                               values["memory.kernel_heap.free_bytes"] == s["heap_free"] and
+                               int(values["memory.kernel_heap.accounted_bytes"]) == int(s["heap_used"]) + int(s["heap_free"])
+                               for s in candidates)
                     matched += 1
+                if p["family"] == "network" and values["rx_bytes_per_s"] is not None:
+                    assert int(values["rx_bytes_per_s"]) > 0
+                    assert any(values["rx_bytes_per_s"] == s["rx_bytes_per_s"] for s in candidates)
+                    rx_matched += 1
                 if p["family"] == "loop_progress":
                     assert any(values["loop.completed_total"] == s["completed"] and
                                values["loop.in_flight"] == s["in_flight"] for s in candidates)
@@ -315,6 +391,7 @@ def main():
                         assert any(values["loop.last_jitter_us"] == s["jitter"] for s in candidates)
                     loops.append((m["boot_id"], int(p["collection"]["end_uptime_ms"]), values))
                     matched += 1
+            assert rx_matched > 0
             for boot in {boot for boot, _, _ in loops}:
                 stalled = [values for b, end, values in loops if b == boot and end > 7500]
                 assert len(stalled) >= 2
@@ -368,6 +445,7 @@ def main():
         capture(source,archive,receipt,cursor=cursor,storage_guard=lambda:None)
         assert any(e['category']=='fatal_observed' for row in query(archive) for e in row['record']['events'])
         result = {"actual_producer": True, "received": len(records), "source_comparisons": matched,
+                  "v1_network_received": len(v1_rows), "v1_network_vm_ring_epochs": 4,
                   "cpu_source_comparisons":cpu_matched,"metadata_utf8_roundtrip":True,
                   "resources_enabled":not args.resources_off,
                   "cpu_page_groups":len(cpu_pages),
@@ -392,6 +470,7 @@ def main():
                     process.wait()
         for handle in handles:
             handle.close()
+        readers.shutdown()
         for process in children:
             for command in commands:
                 if command.get("pid") == process.pid:

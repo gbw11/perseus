@@ -900,6 +900,14 @@ def test_unknown_intent_holds_every_judgment_and_keeps_the_episode():
     assert [j.reason for j in world.tick(obs(present=False))] == [FailureReason.DOMAIN_ABSENT]  # 의도를 다시 읽으면 재개
 
 
+def test_health_carries_the_observed_execution_for_the_engine():
+    world = World(arming=Known([VM]))
+    world.tick(replace(obs(domid=4), execution_id="exec-4"))
+    health = world.health()
+    assert (health.domid, health.execution_id) == (4, "exec-4")
+    assert not {"domid", "execution_id"} & set(health.payload(lease_s=45))  # Worker 내부용
+
+
 def test_unknown_intent_does_not_close_an_open_episode():
     """의도를 못 읽는 동안 캐시가 stopped 여도 '대상 아님'으로 episode 를 닫지 않는다."""
     world = World(arming=Known([VM]))
