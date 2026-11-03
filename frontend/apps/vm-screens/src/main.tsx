@@ -51,6 +51,10 @@ function ToSplit() {
 const router = createBrowserRouter(
   [
     // dom0 표시 수집기 kiosk 화면 (S15P31E110-250, display-pipeline 계약)
+    {
+      path: '/display/mobile',
+      lazy: async () => ({ Component: (await import('./display/MobilePage')).MobilePage }),
+    },
     { path: '/display/:outputId', element: <MonitorPage /> },
     {
       element: <Root />,

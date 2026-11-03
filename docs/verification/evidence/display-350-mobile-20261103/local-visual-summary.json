@@ -1,0 +1,155 @@
+{
+  "environment": "local Windows Chrome / synthetic API / production build; NOT physical Galaxy or USB",
+  "results": [
+    {
+      "case": "landscape",
+      "viewport": [
+        915,
+        412
+      ],
+      "dimensions": {
+        "width": 915,
+        "height": 412,
+        "headerTop": 8
+      },
+      "writes": [],
+      "errors": [],
+      "recovered": null
+    },
+    {
+      "case": "s24-portrait",
+      "viewport": [
+        360,
+        780
+      ],
+      "dimensions": {
+        "width": 360,
+        "height": 809,
+        "headerTop": 12
+      },
+      "writes": [],
+      "errors": [],
+      "recovered": null
+    },
+    {
+      "case": "s24-landscape",
+      "viewport": [
+        780,
+        360
+      ],
+      "dimensions": {
+        "width": 780,
+        "height": 360,
+        "headerTop": 8
+      },
+      "writes": [],
+      "errors": [],
+      "recovered": null
+    },
+    {
+      "case": "s24-landscape-toolbar",
+      "viewport": [
+        780,
+        300
+      ],
+      "dimensions": {
+        "width": 780,
+        "height": 360,
+        "headerTop": 8
+      },
+      "writes": [],
+      "errors": [],
+      "recovered": null
+    },
+    {
+      "case": "portrait",
+      "viewport": [
+        412,
+        915
+      ],
+      "dimensions": {
+        "width": 412,
+        "height": 915,
+        "headerTop": 12
+      },
+      "writes": [],
+      "errors": [],
+      "recovered": null
+    },
+    {
+      "case": "small-portrait",
+      "viewport": [
+        360,
+        640
+      ],
+      "dimensions": {
+        "width": 360,
+        "height": 809,
+        "headerTop": 12
+      },
+      "writes": [],
+      "errors": [],
+      "recovered": null
+    },
+    {
+      "case": "small-landscape",
+      "viewport": [
+        740,
+        360
+      ],
+      "dimensions": {
+        "width": 740,
+        "height": 360,
+        "headerTop": 8
+      },
+      "writes": [],
+      "errors": [],
+      "recovered": null
+    },
+    {
+      "case": "narrow",
+      "viewport": [
+        320,
+        568
+      ],
+      "dimensions": {
+        "width": 320,
+        "height": 856,
+        "headerTop": 12
+      },
+      "writes": [],
+      "errors": [],
+      "recovered": null
+    },
+    {
+      "case": "fault",
+      "viewport": [
+        915,
+        412
+      ],
+      "dimensions": {
+        "width": 915,
+        "height": 412,
+        "headerTop": 8
+      },
+      "writes": [],
+      "errors": [],
+      "recovered": null
+    },
+    {
+      "case": "disconnect",
+      "viewport": [
+        915,
+        412
+      ],
+      "dimensions": {
+        "width": 915,
+        "height": 412,
+        "headerTop": 8
+      },
+      "writes": [],
+      "errors": [],
+      "recovered": true
+    }
+  ]
+}

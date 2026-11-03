@@ -32,6 +32,9 @@ static bool monitor_started,monitor_joined;
 static atomic_bool monitor_closing;
 static atomic_int backend_error,backend_observation;
 static atomic_int backend_wait_stage;
+static int observation_error,first_observation_error; /* waits_lock */
+static const char *worker_failure_source; /* waits_lock */
+static int worker_error; /* waits_lock */
 static struct xnet_waits waits;
 static struct k_spinlock waits_lock;
 static uint64_t packet_locked_at,last_poll;
@@ -113,7 +116,8 @@ static int frontend_state(const char *value,int ms) {
  if(snprintf(path,sizeof(path),"%s/state",vif.frontend)>=(int)sizeof(path))return -ENAMETOOLONG;
  return xsr_write(path,value,ms);
 }
-static int backend_state(int ms) {
+static int backend_state(int ms,bool *unusable) {
+ if(unusable)*unusable=false;
  int64_t end=k_uptime_get()+ms;
  atomic_store(&backend_wait_stage,1);
  uint64_t before=clock_us();struct xs_client *c=xsr_acquire(end);uint64_t acquired=clock_us();
@@ -122,10 +126,28 @@ static int backend_state(int ms) {
  k_spin_unlock(&waits_lock,key);
  if(!c)return -ETIMEDOUT;
  atomic_store(&backend_wait_stage,2);
- int rc=xvif_refresh(c,&vif,MAX(0,end-k_uptime_get()));uint64_t done=clock_us();xsr_release();
+ int rc=xvif_refresh(c,&vif,MAX(0,end-k_uptime_get()));uint64_t done=clock_us();
+ if(unusable)*unusable=c->poisoned||c->closed;
+ xsr_release();
  key=k_spin_lock(&waits_lock);waits.store_response_max_us=MAX(waits.store_response_max_us,done-acquired);k_spin_unlock(&waits_lock,key);
  if(!rc)atomic_store(&backend_wait_stage,0);
  return rc?rc:(int)vif.backend_state;
+}
+static bool unavailable(int rc) { return rc==-ETIMEDOUT||rc==-EAGAIN||rc==-EBUSY; }
+static void observe(int kind,int error) {
+ k_spinlock_key_t key=k_spin_lock(&waits_lock);
+ int previous=atomic_load(&backend_observation);
+ if(error&&!first_observation_error)first_observation_error=error;
+ observation_error=error;
+ if(kind==2&&waits.store_unavailable<UINT64_MAX)waits.store_unavailable++;
+ if(kind==1){
+  if(previous==2&&waits.store_recoveries<UINT64_MAX)waits.store_recoveries++;
+  waits.last_backend_success_ms=k_uptime_get();
+ }
+ if(kind==3||kind==4){atomic_store(&backend_error,error);connected=false;}
+ atomic_store(&backend_observation,kind);
+ k_spin_unlock(&waits_lock,key);
+ if(kind==3||kind==4)k_sem_give(&net_wake);
 }
 static int share(void *page,bool ro,uint32_t *ref) {
  if(!admit())return -ECANCELED;
@@ -140,23 +162,23 @@ static void state_loop(void *a,void *b,void *c) {
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
  int64_t next_state=k_uptime_get()+250;
  while(!monitor_closing) {
-  int hint=xsr_watch_next(backend_watch,1);
+  bool unusable=false;
+  int hint=xsr_watch_next_status(backend_watch,1,&unusable);
   if(monitor_closing)break;
-  if(hint!=0&&hint!=-ETIMEDOUT) {
-   atomic_store(&backend_observation,4);atomic_store(&backend_error,hint);
-   connected=false;k_sem_give(&net_wake);break;
+  if(unusable||(hint<0&&!unavailable(hint))) {
+   observe(4,hint<0?hint:-ENOTCONN);break;
   }
-  if(!hint||k_uptime_get()>=next_state) {
-   int state=backend_state(50);
+  if(hint==-EBUSY||hint==-EAGAIN)observe(2,hint);
+  /* A failed read is not a device lease expiry. Keep the established ring
+   * owner and retry at the existing cadence, even if watch hints are flooding.
+   * Fatal Store state and actual XenBus closure still stop the transport. */
+  if((!hint&&atomic_load(&backend_observation)!=2)||k_uptime_get()>=next_state) {
+   int state=backend_state(50,&unusable);
    if(monitor_closing)break;
-   if(state<0||state>=XenbusStateClosing) {
-    int kind=state>=XenbusStateClosing?3:
-     state==-ETIMEDOUT||state==-EAGAIN||state==-EBUSY?2:4;
-    atomic_store(&backend_observation,kind);
-    atomic_store(&backend_error,state<0?state:-ENETDOWN);
-    connected=false;k_sem_give(&net_wake);break;
-   }
-   atomic_store(&backend_observation,1);
+   if(!unusable&&unavailable(state))observe(2,state);
+   else if(!unusable&&state==XenbusStateConnected)observe(1,0);
+   else {observe(state==XenbusStateClosing||state==XenbusStateClosed?3:4,
+                 state<0?state:-ENETDOWN);break;}
    next_state=k_uptime_get()+250;
   }
   (void)k_sem_take(&state_wake,K_MSEC(10));
@@ -165,21 +187,46 @@ static void state_loop(void *a,void *b,void *c) {
 static void loop(void *a,void *b,void *c) {
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
  int rc=0;
+ const char *source=NULL;
  while(!closing) {
-  rc=atomic_load(&backend_error);if(rc)break;
-  if(packet_acquire(20)){rc=-ETIMEDOUT;break;}
+  rc=atomic_load(&backend_error);
+  if(rc){source="backend";break;}
+  int lock_rc=packet_acquire(20);
+  if(lock_rc){
+   k_spinlock_key_t key=k_spin_lock(&waits_lock);
+   if(!waits.packet_lock_first_error)waits.packet_lock_first_error=lock_rc;
+   if(lock_rc==-EAGAIN&&waits.packet_lock_timeouts<UINT64_MAX)waits.packet_lock_timeouts++;
+   k_spin_unlock(&waits_lock,key);
+   /* Zephyr's bounded mutex wait expired without acquiring ownership. Keep
+    * this worker available for completion/drain; never touch the ring here.
+    * Yield between attempts and recheck close/backend failure each time. */
+   if(lock_rc==-EAGAIN){k_sleep(K_TICKS(1));continue;}
+   rc=lock_rc;source="packet-lock";break;
+  }
+  rc=atomic_load(&backend_error);
+  if(closing||rc){
+   packet_release();
+   if(rc)source="backend";
+   break;
+  }
   rc=xnf_poll(&n);bool more=!rc&&xnf_pending(&n);
   uint64_t now=clock_us();k_spinlock_key_t key=k_spin_lock(&waits_lock);
-  waits.packet_polls++;waits.pending_batches+=more;
+  waits.packet_polls++;waits.pending_batches+=more;waits.packet_last_poll_ms=now/1000;
   if(last_poll)waits.packet_gap_max_us=MAX(waits.packet_gap_max_us,now-last_poll);
   last_poll=now;k_spin_unlock(&waits_lock,key);
-  packet_release();if(rc)break;
+  packet_release();if(rc){source="ring";break;}
   /* Retain the 64-completion budget; reschedule between batches, without the
    * ordinary 10ms idle when the backend has already posted more work. */
   if(more){k_sleep(K_TICKS(1));continue;}
   (void)k_sem_take(&net_wake,K_MSEC(10));
  }
- if(rc){connected=false;net_eth_carrier_off(iface);printk("XENOVA netfront link down rc=%d\n",rc);}
+ if(rc){
+  k_spinlock_key_t key=k_spin_lock(&waits_lock);
+  worker_failure_source=source;worker_error=rc;
+  k_spin_unlock(&waits_lock,key);
+  connected=false;net_eth_carrier_off(iface);
+  printk("XENOVA netfront link down rc=%d source=%s\n",rc,source);
+ }
  worker_done=true;
 }
 static void iface_init(struct net_if *i) {
@@ -225,7 +272,7 @@ static int start_inner(void) {
  startup_stage="backend-init-wait";
  while(vif.backend_state!=XenbusStateInitWait) {
   if(stop_requested)return -ECANCELED;
-  int state=backend_state(100);
+  int state=backend_state(100,NULL);
   if(state<0||state>=XenbusStateClosing)return state<0?state:-ENETDOWN;
   if(k_uptime_get()>=end)return -ETIMEDOUT;
   (void)xsr_watch_next(backend_watch,10);
@@ -266,7 +313,7 @@ static int start_inner(void) {
  startup_stage="backend-connected-wait";
  for(;;) {
   if(stop_requested)return -ECANCELED;
-  int state=backend_state(100);
+  int state=backend_state(100,NULL);
   if(state==XenbusStateConnected)break;
   if(state<0||state>=XenbusStateClosing)return state<0?state:-ENETDOWN;
   if(k_uptime_get()>=end)return -ETIMEDOUT;
@@ -275,7 +322,7 @@ static int start_inner(void) {
  if(stop_requested)return -ECANCELED;
  net_if_set_link_addr(iface,vif.mac,6,NET_LINK_ETHERNET);
  connected=true;net_eth_carrier_on(iface);
- atomic_store(&backend_observation,1);
+ observe(1,0);
  if(!admit())return -ECANCELED;
  monitor_started=true;
  if(!k_thread_create(&monitor,monitor_stack,K_THREAD_STACK_SIZEOF(monitor_stack),state_loop,NULL,NULL,NULL,CONFIG_XENOVA_NETFRONT_THREAD_PRIORITY,0,K_NO_WAIT)){monitor_started=false;return -ENOMEM;}
@@ -310,7 +357,7 @@ static int backend_closed(int64_t end) {
  int rc=frontend_state("5",MIN(100,MAX(0,end-k_uptime_get())));if(rc)return rc;
  bool acknowledged=false;
  while(k_uptime_get()<end) {
-  int state=backend_state(MIN(100,MAX(0,end-k_uptime_get())));
+  int state=backend_state(MIN(100,MAX(0,end-k_uptime_get())),NULL);
   if(state==XenbusStateClosing||state==XenbusStateClosed){acknowledged=true;break;}
   if(state<0)return state;
   k_sleep(K_MSEC(MIN(10,MAX(0,end-k_uptime_get()))));
@@ -318,7 +365,7 @@ static int backend_closed(int64_t end) {
  if(!acknowledged)return -ETIMEDOUT;
  rc=frontend_state("6",MIN(100,MAX(0,end-k_uptime_get())));if(rc)return rc;
  while(k_uptime_get()<end) {
-  int state=backend_state(MIN(100,MAX(0,end-k_uptime_get())));
+  int state=backend_state(MIN(100,MAX(0,end-k_uptime_get())),NULL);
   if(state==XenbusStateClosed){publication_possible=false;return 0;}
   if(state<0)return state;
   k_sleep(K_MSEC(MIN(10,MAX(0,end-k_uptime_get()))));
@@ -417,6 +464,7 @@ int xnet_status_get(struct xnet_status *out) {
  if(!out)return -EINVAL;
  if(k_mutex_lock(&lifecycle_lock,K_NO_WAIT))return -EBUSY;
  unsigned held=0;for(unsigned i=0;i<grant_count;i++)held+=grants[i]!=0;
+ k_spinlock_key_t key=k_spin_lock(&waits_lock);
  *out=(struct xnet_status){.started=started,.stopping=stop_requested,.ring_ready=ring_ready,
   .worker_joined=!worker_started||worker_joined,.watch_owned=watch_owned,
   .publication_possible=publication_possible,.interface_possible=interface_possible,
@@ -424,7 +472,10 @@ int xnet_status_get(struct xnet_status *out) {
   .cleanup_error=cleanup_error,.stage=startup_stage,.monitor_started=monitor_started,
   .monitor_joined=!monitor_started||monitor_joined,
   .backend_observation=atomic_load(&backend_observation),.backend_error=atomic_load(&backend_error),
-  .backend_wait_stage=atomic_load(&backend_wait_stage)};
+  .backend_wait_stage=atomic_load(&backend_wait_stage),.connected=connected,
+  .observation_error=observation_error,.first_observation_error=first_observation_error,
+  .worker_failure_source=worker_failure_source,.worker_error=worker_error};
+ k_spin_unlock(&waits_lock,key);
  k_mutex_unlock(&lifecycle_lock);return 0;
 }
 int xnet_stats(struct xnf_stats *out) {

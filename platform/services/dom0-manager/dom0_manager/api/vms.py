@@ -101,6 +101,38 @@ def stop_vm(
     return JSONResponse(status_code=status, content=operation.model_dump(mode="json"))
 
 
+@router.post(
+    "/vms/{vm_id}/reboot",
+    operation_id="rebootVm",
+    summary="정상 재부팅 (같은 디스크로 새 실행)",
+    status_code=204,
+    response_class=Response,
+    responses={
+        200: {"model": ControlOperation, "description": "Idempotency-Key 가 있을 때: 원 작업 완료(재전달 포함). 새 실행이 관측됨"},
+        202: {"model": ControlOperation, "description": "Idempotency-Key 가 있을 때: 재부팅을 내구 수락했고 실행이 남음. 같은 키로 재전달·조회"},
+        204: {"description": "키 없음: 재부팅 완료(새 실행이 관측됨)"},
+        400: _ERR,
+        404: _ERR,
+        409: _ERR,
+        **_COMMAND_ERRS,
+    },
+)
+def reboot_vm(
+    vm_id: UUID,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key",
+        description="최초 전송 전에 정한 요청 키. 재전송·조회에 같은 값을 쓴다. 없으면 동기 재부팅(204)",
+    ),
+    service: VmService = Depends(get_service),
+) -> Response:
+    if idempotency_key is None:
+        service.reboot(vm_id)
+        return Response(status_code=204)
+    operation = service.request_reboot(vm_id, _request_key(idempotency_key, "Idempotency-Key"))
+    status = 202 if operation.status == ControlStatus.pending else 200
+    return JSONResponse(status_code=status, content=operation.model_dump(mode="json"))
+
+
 @router.get(
     "/vms/{vm_id}/control-operations",
     operation_id="getControlOperation",

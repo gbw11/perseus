@@ -45,7 +45,9 @@ DOCUMENTATION = (
     "platform/guests/zephyr/telemetry/contract/schemas/message.schema.json",
     "platform/guests/zephyr/telemetry/contract/schemas/metric-catalog.json",
     "platform/guests/zephyr/telemetry/contract/docs/CONSUMER_HANDOFF.md",
-    "platform/scripts/provision-xenova-telemetry.py")
+    "platform/scripts/provision-xenova-telemetry.py",
+    "platform/services/display/router/README.md",
+    "platform/services/gateway/README.md")
 RUNBOOK = """# XenStore G1 인계물
 
 G1 빌드·패키징과 시험 도구 사용은
@@ -70,7 +72,10 @@ def runtime_sources():
         "xenova_boot_progress", "xenova_boot_status", "xenova_cpu", "xenova_vm", "xenova_runtime", "xenova_trace", "xenova_guest_process", "xenova_zephyr", "xenova_execution",
         "xenova_recovery", "xenova_resources", "xenova_zephyr_control",
         "xenova_zephyr_transition", "xenova_domain_identity", "xenova_catalog",
-        "xenova_management", "xenova_management_cli", "xenova_first_boot", "xenova_wifi")}
+        "xenova_management", "xenova_management_cli", "xenova_first_boot", "xenova_wifi",
+        "xenova_preparation", "xenova_creation", "xenova_provisioning", "xenova_guest_profile",
+        "xenova_registration_hook", "xenova_registration", "xenova_drive_binding")}
+    result["xenova_broker.py"] = "platform/deploy/mosquitto/scripts/xenova_broker.py"
     result.update({name + ".py": f"platform/first-install/{name}.py"
                    for name in ("artifact_io", "first_install_contract")})
     result.update({name + ".py": f"platform/guests/common/{name}.py"

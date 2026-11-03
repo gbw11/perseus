@@ -123,8 +123,10 @@ class Accounts(unittest.TestCase):
         value = self.load()
         self.assertNotIn(B, value['profiles'])
         block = broker.grants((value['path'] / 'acl').read_text())['telemetry-' + B]
-        self.assertEqual(len(block), 5)
-        self.assertTrue(all('xenova/v2/vms/' + B + '/telemetry/' in line for line in block))
+        self.assertEqual(block, {f'topic write xenova/v1/vms/{B}/metrics'} | {
+            f'topic write xenova/v2/vms/{B}/telemetry/{stream}'
+            for stream in ('inventory', 'heartbeat', 'metrics', 'events', 'snapshot')
+        })
 
     def test_read_only_profiles_cannot_publish(self):
         self.run_change(vms=[A])

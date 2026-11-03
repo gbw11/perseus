@@ -481,6 +481,8 @@ class Watcher:
             reason=reason,
             manager_seq=1 if previous is None else previous.manager_seq + 1 if changed else previous.manager_seq,
             intent_known=obs.intent_known,
+            domid=obs.domid,
+            execution_id=obs.execution_id,
         )
 
     def health(self, vm_id: UUID) -> VmHealth | None:

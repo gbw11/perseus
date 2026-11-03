@@ -4,7 +4,7 @@
 **대상 시스템** Raspberry Pi 4 + Xen 멀티 OS 관리 플랫폼, RC카 시나리오
 **브로커** dom0 Mosquitto
 
-VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받는 MQTT 메시지의 기준 문서입니다. ESP32는 MQTT에 붙지 않고 게이트웨이를 거친다(4장). 에이전트 수신부는 이미 백엔드에 구현돼 있고(`backend/.../agent/`), 이 문서의 2장·3장은 그 구현과 같습니다. 4장 이후 RC카 메시지는 새로 정하는 내용입니다.
+VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받는 MQTT 메시지의 기준 문서입니다. ESP32는 게이트웨이의 시리얼 경로를 사용합니다(4장). Linux 에이전트 수신은 Spring에 구현돼 있습니다. 3.1절의 Zephyr 공통 네트워크 지표는 플랫폼 발행과 로컬 브로커 검증까지 완료했고, Spring의 저장·조회 연결이 남았습니다.
 
 `MQTT-NN`은 노션 인터페이스 계약의 MQTT 계약 ID입니다. 토픽별 상세 규칙(오류 코드, 중복 처리, 수락 기준)은 노션 행에 있고, 이 문서와 다르면 이 문서를 따릅니다.
 
@@ -18,14 +18,14 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 | --- | --- |
 | 토픽 접두사 | `xenova/v1/`. 10/20 이름 통일로 접두사도 바꿨다. 이전 `perseus/v1/`는 어디에도 배포된 적이 없어 호환 처리는 없다 |
 | 인코딩 | UTF-8 JSON, 필드 이름은 snake_case |
-| 시각 | `sent_at`은 ISO-8601 UTC. **보드 간 시각 비교로 판정하지 않는다.** 신선도는 받는 쪽이 수신 시각으로 잰다 |
+| 시각 | `sent_at`은 ISO-8601 UTC. Zephyr MQTT-03에서 UTC를 확보하지 못하면 null이다. 신선도는 수신 시각으로 잰다 |
 | 단위 | 속도 `m/s`, 조향 `rad`, 시간 `ms`, 메트릭 `percent`·`bytes`. (에이전트 MQTT-03 기준. dom0의 xentop 원시값은 MQTT가 아니라 VM API 계약 4.6 `GET /api/v1/stats`로 전달한다) |
 | 크기 | 메시지 64 KB 이하. 주행 토픽(`drive.command`, `vehicle/*`)은 1 KB 이하 |
 | 세션 | clean session. 오프라인 큐에 기대지 않는다 |
 
 ## 2. 공통 봉투
 
-모든 메시지가 같은 봉투를 쓴다. 백엔드 `AgentEnvelope`가 이 형식을 검사하고, 어긋나면 로그만 남기고 버린다.
+공통 봉투를 사용한다. Spring의 `AgentEnvelope`와 `AgentMessageHandler`는 Linux 에이전트 메시지를 검사한다. Zephyr MQTT-03의 시각·누적값 처리 조건은 3.1절을 따른다.
 
 ```json
 {
@@ -52,7 +52,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 | `agent_instance_id` | O | 발행 프로세스 실행마다 바뀌는 값. 에이전트가 아니어도 같은 필드를 쓴다 |
 | `type` | O | 메시지 종류. 점으로 구분한 소문자 (`agent.heartbeat`, `drive.command`) |
 | `seq` | O | 1 이상. 같은 `agent_instance_id`·토픽 안에서 1씩 증가. 받는 쪽은 마지막 값 이하를 버린다 (중복·지연) |
-| `sent_at` | O | ISO-8601 UTC |
+| `sent_at` | O | ISO-8601 UTC. Zephyr MQTT-03에서 UTC 미확보 시 null |
 | `payload` | O | JSON 객체 |
 | `correlation_id` | 선택 | 앱 간 한 흐름을 묶는 ID |
 | `causation_id` | 선택 | 직접 원인이 된 메시지의 `message_id` |
@@ -60,9 +60,9 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 - 노션 MQTT-06의 AppEventEnvelope는 이 봉투로 합친다: `event_id` → `message_id`, `source_vm_id` → `vm_id`, `source_app_id` → `app_id`, `event_type` → `type`.
 - 백엔드가 에이전트에 보내는 명령(MQTT-04)만 예외다. 공통 필드(`schema_version`, `message_id`, `vm_id`, `type`, `sent_at`)에 명령 전용 필드를 더한 CommandEnvelope를 쓰고, `boot_id`·`agent_instance_id`·`seq` 대신 `expected_boot_id`·`command_id`를 쓴다.
 - `boot_id`나 `agent_instance_id`가 바뀌면 받는 쪽은 그 발행자의 `seq` 기준을 새로 잡는다.
-- 펌웨어(Zephyr)는 `message_id`를 단조 증가 정수 문자열로 대신할 수 있다.
+- Zephyr 앱 토픽은 `message_id`에 단조 증가 정수 문자열을 쓸 수 있다. Zephyr MQTT-03은 저장소의 36자 표본 키에 맞춰 메시지별 UUID를 사용한다.
 
-## 3. 에이전트 토픽 (구현됨)
+## 3. VM 에이전트·자원 지표 토픽
 
 각 VM의 에이전트와 백엔드가 주고받는다. heartbeat·inventory·metrics 수신은 백엔드에 구현돼 있고, 명령(04·05)은 설계 초안이다.
 
@@ -70,15 +70,15 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 | --- | --- | --- | --- | --- | --- | --- |
 | MQTT-01 | `xenova/v1/vms/{vm_id}/heartbeat` | `agent.heartbeat` | 에이전트 → 백엔드 | 1 | X | `{}` (봉투만) |
 | MQTT-02 | `xenova/v1/vms/{vm_id}/inventory` | `agent.inventory` | 에이전트 → 백엔드 | 1 | **O** | `os{id, version_id, pretty_name}`, `kernel_release`, `hostname`, `interfaces[{name, mac, addresses[{address, family}]}]`, `agent_version`, `capabilities{commands[], metrics[]}` |
-| MQTT-03 | `xenova/v1/vms/{vm_id}/metrics` | `agent.metrics` | 에이전트 → 백엔드 | 0 | X | `window_ms`, `values[{name, unit, ...}]`, `processes[]`, `process_collection{status, discovered, read_ok, vanished, failed, truncated, error}` |
+| MQTT-03 | `xenova/v1/vms/{vm_id}/metrics` | `agent.metrics` | Linux Agent·Zephyr Publisher → 백엔드 | 0 | X | 공통 `window_ms`·`values[]`. Linux는 `processes[]`·`process_collection`, Zephyr는 `observed_uptime_ms`(3.1절) |
 | MQTT-04 | `xenova/v1/vms/{vm_id}/command` | `agent.command` | 백엔드 → 에이전트 | 1 | X | `command_id`, `operation_id`, `expected_boot_id`, `expires_at`, `action`(`stress`/`agent_exit`), `parameters` |
 | MQTT-05 | `xenova/v1/vms/{vm_id}/command-result` | `agent.command_result` | 에이전트 → 백엔드 | 1 | X | `command_id`, `operation_id`, `status`(`ACCEPTED`/`RUNNING`/`SUCCEEDED`/`FAILED`/`REJECTED`), `started_at`, `finished_at`, `duration_ms`, `result`, `error` |
 
 - inventory는 retained다. 최초 기동과 OS·네트워크 정보가 바뀔 때 전체를 다시 보낸다. retained 메시지는 마지막 보고일 뿐 지금 `ONLINE`이라는 증거가 아니다. VM을 삭제하면 백엔드가 그 VM의 retained inventory를 지운다.
 - inventory 필수값은 `os.id`, `kernel_release`, `hostname`. os-release가 없는 Zephyr는 `os.id = "zephyr"`, `kernel_release = "<Zephyr 버전>"`으로 보낸다.
-- metrics의 `unit`은 `percent`, `bytes`만 받는다. 그 외는 `METRIC_UNIT_MISMATCH`. 값마다 `value`가 `null`이면 `unavailable_reason`을 붙인다(측정 실패를 0으로 보내지 않는다). 에이전트는 `source`를 보내지 않으며 백엔드가 `guest_agent`로 저장한다. dom0가 xentop으로 재는 VM 외부 관측값은 `source = xen`으로 VM API 계약 2.4·4.6절을 따른다
+- v1 metrics의 `unit`은 `percent`, `bytes`다. 다른 단위는 `METRIC_UNIT_MISMATCH`로 거절한다. `value`가 null이면 `unavailable_reason`을 붙인다. 발행자는 `source`를 보내지 않으며, Spring은 Linux Agent 표본을 `guest_agent`로 저장한다. dom0의 xentop 관측값은 VM API 계약 2.4·4.6절의 `source = xen`을 사용한다.
 - metrics의 `unavailable_reason`은 `first_sample`(구간 없음), `counter_reset`(누적 카운터가 되돌아감, 그 값이 새 기준), `not_supported`, `read_failed`, `parse_error`, `device_not_found`다. 받는 쪽은 모르는 사유도 문자열 그대로 받는다
-- `process_collection`은 `processes[]`가 어떻게 모였는지다. 빈 `processes[]`를 "프로세스 없음"으로 읽지 않게 한다. 에이전트 0.2.2부터 보내며(0.2.1은 `counter_reset`까지), 없는 메시지(옛 에이전트)는 수집 상태를 모르는 것으로 본다. 백엔드의 저장·노출은 별도 작업이며 그전까지 백엔드는 이 필드를 무시한다
+- `process_collection`은 `processes[]`가 어떻게 모였는지다. 에이전트 0.2.2부터 보내며, 백엔드는 최신 프로세스 목록과 함께 저장해 `GET /api/v1/vms/{vmId}/processes`로 반환한다. 보고가 없는 구형 에이전트나 기존 저장 행은 `null`이며, 이 경우 빈 목록의 이유는 미확인이다.
 
   | 필드 | 의미 |
   | --- | --- |
@@ -89,14 +89,24 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 
   `processes[]`는 CPU 상위 목록이라 이 상태가 `ok`여도 특정 앱의 생존 근거가 아니다(6.1)
 - Linux 에이전트(0.3.0부터)는 v1 토픽과 별도로 자기 상태(inventory·metrics 루프가 돌고 있는지, 수집·발행 실패 누계)를 `xenova/v2/vms/{vm_id}/telemetry/{inventory|heartbeat|metrics}`에 Zephyr 게스트와 같은 [Telemetry 계약 2.1](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md) 형식으로 보낸다(`firmware.measurement_profile = linux_agent`, metrics family `publisher`). v1 heartbeat 는 에이전트 프로세스의 생존이고, v2 heartbeat 의 `publisher_state` 는 metrics 루프의 진행 여부다. 복구 Worker 의 판정 입력이 아니다. 백엔드는 아래 v2 metrics 수신 규칙대로 이 `publisher` 표본도 함께 저장한다
-- 백엔드는 v2 중 `xenova/v2/vms/+/telemetry/metrics`(QoS 0)만 구독해 Zephyr VM의 CPU·메모리를 MQTT-03 과 같은 메트릭 표본으로 저장한다 (2026-11-02). inventory·heartbeat·events·snapshot 은 구독하지 않는다
+- 백엔드는 v2의 `xenova/v2/vms/+/telemetry/metrics`와 `xenova/v2/vms/+/telemetry/heartbeat`를 QoS 0으로 구독한다. inventory·events·snapshot은 구독하지 않는다.
+  - heartbeat는 Linux·Zephyr 공통 수집기 보고다. 백엔드는 VM별 최신 보고를 저장하고 `GET /api/v1/vms/{vmId}/telemetry/heartbeat`에서 `FRESH`·`STALE`·`UNKNOWN`과 함께 제공한다. `FRESH`일 때만 `publisher_state`를 현재 수집 상태로 해석한다. 실패 누계와 마지막 수집 성공 시각은 별도 근거다. 조회 형식은 [백엔드 README](../../backend/README.md)를 따른다.
   - 받는 조건: `schema_version = "2.1"`, `type = "telemetry.metrics"`, 토픽 `{vm_id}` 와 `vm_id` 일치, `message_id`·`payload.samples[]` 존재. 하나라도 어긋나면 버린다
-  - 저장: `source = zephyr_telemetry`, 표본 ID 는 `message_id` 로 만든 UUID(같은 메시지는 한 번만 저장), 관측 시각은 `clock.sent_at`, 없으면 수신 시각. `window_ms` 는 `window.start/end_uptime_ms` 차이
+  - 지표 출처는 등록 VM 종류에 따라 `linux_telemetry` 또는 `zephyr_telemetry`다. 등록 전 공통 Publisher 지표는 `vm_telemetry`다. 표본 ID는 `message_id`로 만든 UUID, 관측 시각은 `clock.sent_at` 또는 수신 시각, `window_ms`는 계측 구간 차이다.
   - 값: `status = ok` 이면 숫자 또는 u64 10진 문자열을 숫자로 바꾸고, 그 외에는 `value = null`, `unavailable_reason` = `reason`(없으면 `status`). `labels` 는 문자열 맵으로 저장한다
   - 화면은 Linux 의 `cpu_percent_allocated`·`memory_used_bytes` 대신 Zephyr 의 `cpu.system.percent`, `memory.kernel_heap.used_bytes / (used_bytes + free_bytes)` 를 쓴다
-  - 브로커의 `backend` 계정에 이 토픽 읽기 권한이 있어야 한다(9장)
+  - 브로커의 `backend` 계정에 두 토픽의 읽기 권한이 있어야 한다(9장)
 - heartbeat 주기는 5초. 에이전트 상태는 **백엔드가 heartbeat 나이로 판정**한다 (`ONLINE` → 15초 `STALE` → 30초 `OFFLINE`). 에이전트가 스스로 상태를 선언하지 않는다.
 - heartbeat는 **VM 재시작 판정에만** 쓴다. 주행 제어권 전환 판정에는 쓰지 않는다 (5장).
+
+### 3.1 Zephyr의 공통 네트워크 지표 (MQTT-03)
+
+- Zephyr Telemetry Publisher도 자기 VM의 `xenova/v1/vms/{vm_id}/metrics`에 2초 주기로 QoS 0, retain 없이 `agent.metrics`를 발행한다. 봉투는 `1.0`이며 `agent_instance_id`는 그 Publisher 인스턴스 UUID다. v1 네트워크 표본은 1024 bytes 이하다.
+- `payload.values`는 `net_rx_bytes_total`, `net_tx_bytes_total` 두 값이다. 단위는 `bytes`이며 유효한 값은 정밀도를 보존하는 unsigned 64-bit 십진 문자열이다. RX는 guest 스택이 수락한 Ethernet 프레임 바이트, TX는 guest netfront TX 링에 제출한 Ethernet 프레임 바이트다.
+- `labels.iface`와 `labels.counter_epoch`를 붙인다. 차분은 VM·부팅·인터페이스·링 세대가 같을 때만 한다. `payload.observed_uptime_ms`는 캐시의 관측 단조 시각을 십진 문자열로 보내며 유효한 관측이 없으면 null이다. 누적값이므로 `window_ms`는 null이다.
+- 초기 미관측·미지원·수집 실패·포화·만료에는 값 대신 null과 각각 `first_sample`, `not_supported`, `read_failed`, `counter_saturated`, `stale_sample` 사유를 보낸다. `source_rc`는 원 오류 코드이며 유효한 값은 `0`이다. 실제 0 바이트는 `"0"`이다. `sent_at`은 검증된 UTC를 사용하며 미확보 시 null이다. 소비자는 이때 수신 시각을 조회 시각으로 삼고, 차분 간격에는 관측 단조 시각을 사용한다.
+- 프로세스 목록과 수집 상태는 이 표본에 없다. Spring 연동은 VM 종류에 따라 출처를 구분하고 메트릭만 저장하며, 숫자로 바꾸기 전에 누적값의 원 정밀도를 보존해야 한다. 자원 지표 수신을 Agent나 앱 생존으로 해석하지 않는다.
+- 직접 계측한 `rx_bytes_per_s`와 패킷·힙·풀·스레드 상세는 [Telemetry 2.1](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md)을 따른다.
 
 ## 4. RC카 구성과 app_id
 
@@ -110,7 +120,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 
 - `guest_kind` 값은 `linux`, `zephyr` 두 가지다 (VM 관리 API 계약과 같다).
 - `interaction` 은 앱 이름이 아니라 VM 역할 ID 다. 이 VM 에 어떤 앱을 올릴지는 정하지 않았고, 무엇을 올려도 토픽·브로커 계정·VM `role` 값은 이 ID 를 쓴다.
-- 자율·수동주행 VM은 Zephyr다 (2026-10-20 [RC카 시나리오](../scenario-rc-car.md) §2). Zephyr에는 VM 에이전트가 없어 `agent.*` 토픽을 내지 않는다. 앱 프로세스 생존은 `app.heartbeat`(6.1)로 알린다.
+- 자율·수동주행 VM은 Zephyr다 (2026-10-20 [RC카 시나리오](../scenario-rc-car.md) §2). Zephyr Telemetry Publisher는 공통 네트워크 누적값을 MQTT-03으로 발행한다. 앱 프로세스 생존은 `app.heartbeat`(6.1)로 알린다.
 - ESP32는 MQTT에 붙지 않는다. dom0 USB 시리얼(이후 CAN)로 게이트웨이와만 통신한다 (시나리오 §8 D1). 이 문서에서 ESP32로 가는 명령·ESP32에서 오는 상태는 모두 게이트웨이를 거친다.
 
 ### 4.1 Zephyr VM 연결 (netfront 직접 MQTT)
@@ -511,7 +521,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | 앱 VM | `xenova/v1/apps/{자기 app_id}/events` |
 | 젯슨 | `xenova/v1/apps/perception/events` |
 | 게이트웨이 | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/apps/vehicle/events` |
-| 공통 Zephyr 직접 MQTT | username=vm_id. `xenova/v1/vms/%u/apps/autonomous/events`와 `.../manual/events`만 쓰기. 토픽과 봉투 VM/app를 대조하고 현재 실행은 root 바인딩으로 확인 |
+| 공통 Zephyr 직접 MQTT | username=vm_id. `xenova/v1/vms/%u/apps/autonomous/events`와 `.../manual/events`로 앱 이벤트 발행. 토픽과 봉투 VM/app를 대조하고 현재 실행은 root 바인딩으로 확인 |
 | 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/vms/{vm_id}/command`, `xenova/v1/console/resume`, `xenova/v1/sim/command` (12장) |
 | 시뮬레이터 (`simulator`, 시뮬레이터 구성만) | `xenova/v1/sim/pose`·`sim/world`·`sim/result`. 구독은 `xenova/v1/sim/command` 만. `vehicle.status` 는 게이트웨이 대역으로 `gateway` 계정을 따로 쓴다 (12장) |
 | 각 VM 측정 클라이언트·응답기 | `xenova/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
@@ -520,7 +530,9 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 브로커 계정·ACL 파일은 [브로커 구성](../../platform/deploy/mosquitto/README.md)(`platform/deploy/mosquitto/etc/acl`)에서 관리한다.
 
 - 계정 이름 = 토픽 안의 id: 에이전트는 `vm_id`, legacy 앱은 `app_id`, 젯슨은 `perception`, 그 외 `gateway`·`backend`. 공통 정책에서 계정별 ACL을 생성해 자기 토픽만 허용한다. 전역 pattern으로 v2·읽기 전용 계정에 v1 쓰기를 부여하지 않는다. ESP32는 MQTT에 붙지 않으므로 계정이 없다 (v1.1).
-- 구독(read)은 개발 단계에서 v1 계정에 `xenova/v1/#`를 연다. 단 젯슨 `perception` 은 `xenova/v1/sim/#` 를 뺀 v1 영역(`apps`·`vms`·`vehicle`·`display`·`console`·`recovery`·`probes`)만 읽는다 — 시뮬레이터 구성에서 트랙·차 위치를 보지 않게 (12장). `observer`는 이 읽기만 허용하며 probe도 발행하지 않는다. 별도 v2 계정에는 v1 읽기·쓰기를 부여하지 않는다. `backend` 는 v1 읽기에 더해 v2 중 `xenova/v2/vms/+/telemetry/metrics` 만 읽는다(3장). 계정별 구독 제한은 다음 개정(v1.2)에서 정한다.
+- `backend`의 읽기 ACL은 `xenova/v1/#`와 `xenova/v2/vms/+/telemetry/+`다. 백엔드가 실제로 구독하는 v2 토픽은 `metrics`와 `heartbeat`다(3장).
+- 젯슨 `perception`은 v1의 `apps`·`vms`·`vehicle`·`display`·`console`·`recovery`·`probes` 영역만 읽는다. 시뮬레이터 토픽은 제외한다(12장). `observer`는 `xenova/v1/#` 읽기 전용이다.
+- VM별 Telemetry 계정(`telemetry-{vm_id}`)은 자기 VM의 v2 Telemetry와 v1 `metrics`에 발행할 수 있다. 읽기 권한은 없다.
 - `probes/#` 의 "자기 vm_id 만" 조건은 payload 기준이라 브로커가 거르지 못한다. 받는 쪽이 검사한다.
 
 ## 10. 미확정
@@ -710,6 +722,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.5 | 2026-10-28 | MQTT-03 metrics 에 선택 필드 `process_collection`(수집 상태·발견/읽기 수·잘림·원인 종류)과 `unavailable_reason` 값 `counter_reset` 추가(3장). 기존 필드는 그대로이고 받는 쪽은 모르는 필드·사유를 무시해도 된다 (S15P31E110-309) |
 | v1.5 (보완) | 2026-10-28 | Linux 에이전트 0.3.0 이 자체 상태를 v2 Telemetry(Zephyr 계약 2.1) 토픽으로 함께 보낸다는 주석(3장). v1 토픽·payload 는 그대로 (S15P31E110-310) |
 | v1.5 (보완) | 2026-11-02 | 백엔드가 v2 `telemetry/metrics` 를 구독해 Zephyr CPU·메모리를 메트릭 표본(`source = zephyr_telemetry`)으로 저장한다(3장). `backend` 계정에 이 토픽 읽기 권한 추가(9장). v1 토픽·payload 는 그대로 |
+| v1.5 (보완) | 2026-11-03 | 백엔드가 v2 `telemetry/heartbeat` 도 구독해 VM 별 Publisher 상태(`publisher_state`·마지막 수집 성공 경과·실패 누계)를 `GET /api/v1/vms/{vm_id}/telemetry/heartbeat` 로 보인다(3장, S15P31E110-358). `backend` 읽기 권한 표기를 실제 정책 `xenova/v2/vms/+/telemetry/+` 로 맞춤(9장). v1 토픽·payload 는 그대로 |
 | v1.6 | 2026-10-29 | 시뮬레이터 전용 12장 추가 (S15P31E110-261·-270·-271): MQTT-15 `sim.pose`·MQTT-16 `sim.world`·MQTT-17 `sim.command`·MQTT-18 `sim.command.result`, 콘솔 REST-30~37·WS-06. vehicle 브랜치 초안(그쪽 번호 v1.3·v1.4 §11)을 옮기며 바꾼 점: 구독자에서 인지 대역을 뺐다(젯슨은 전방 카메라 화면만), 트랙은 실제 서킷 10개, 배치 검사는 `ON_CAR`·`OUT_OF_TRACK` 만, `race` 는 선택. 계정 `simulator` 추가, `backend` 에 `sim/command` 쓰기, `perception` 읽기에서 `sim/#` 제외(9장). 기존 토픽·payload 는 그대로 |
 | v1.6 (보완) | 2026-11-02 | 12장 WS-06: `sim.command.result` 는 모든 콘솔 연결에 방송, 결과가 REST 202 보다 먼저 올 수 있음을 명시 (구현과 같음, S15P31E110-267). 토픽·payload 는 그대로 |
 

@@ -1,0 +1,18 @@
+{
+  "units": {
+    "code": 0,
+    "stdout": "  systemd-udevd-control.socket                                                                                            loaded    active   running   udev Control Socket",
+    "stderr": ""
+  },
+  "unit_files": {
+    "code": 0,
+    "stdout": "systemd-udevd-control.socket                static          -",
+    "stderr": ""
+  },
+  "unix": {
+    "code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "candidate_directories": []
+}

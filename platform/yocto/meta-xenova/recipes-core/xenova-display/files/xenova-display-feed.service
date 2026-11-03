@@ -1,0 +1,20 @@
+[Unit]
+Description=Xenova read-only display state and local web feed
+After=network.target
+ConditionPathExists=/etc/xenova/display-bindings.json
+ConditionPathExists=/etc/xenova/display.env
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/xenova/display.env
+Environment=XENOVA_DRIVER=xen
+Environment=XENOVA_DISPLAY_BINDINGS=/etc/xenova/display-bindings.json
+Environment=XENOVA_DISPLAY_WEB_ROOT=/usr/share/xenova/display/web
+ExecStart=/usr/bin/python3 -m uvicorn xenova_display.main:create_app --factory --host 127.0.0.1 --port 8082 --workers 1
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
