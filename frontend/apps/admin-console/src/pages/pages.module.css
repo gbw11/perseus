@@ -1259,75 +1259,84 @@ button.chip:hover:not(.chipOn) {
   color: var(--x-text-muted);
   font-size: var(--x-text-xs);
 }
-.memoryPendingCard {
-  min-width: 0;
-}
-.memoryPendingIntro {
-  margin-bottom: var(--x-space-3);
-  padding: var(--x-space-3);
-  border-radius: var(--x-radius-sm);
-  background: var(--x-surface-sunken);
-}
-.memoryPendingIntro p {
-  margin: 5px 0 0;
-  color: var(--x-text-muted);
-  font-size: var(--x-text-sm);
-}
-.poolUnavailable {
-  min-height: 112px;
-}
-.poolUnavailableText {
+.linuxMemorySummary {
   display: grid;
-  grid-column: 1 / -1;
-  gap: 3px;
-  padding-top: var(--x-space-2);
-  border-top: 1px solid var(--x-border);
-}
-.poolUnavailableText strong {
-  color: var(--x-text);
-  font-size: var(--x-text-sm);
-}
-.poolUnavailableText span {
-  color: var(--x-text-muted);
-  font-size: var(--x-text-xs);
-}
-.memoryUnavailableChart > div {
-  display: grid;
-  min-height: 150px;
-  place-items: center;
-  align-content: center;
-  gap: var(--x-space-2);
-  border-block: 1px solid var(--x-border);
-  color: var(--x-text-muted);
-  text-align: center;
-}
-.memoryUnavailableChart > div strong {
-  color: var(--x-text);
-  font-size: var(--x-text-sm);
-}
-.memoryUnavailableChart > div span {
-  font-size: var(--x-text-xs);
-}
-.memoryPendingMeta {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--x-space-2);
-  margin-top: var(--x-space-4);
-}
-.memoryPendingMeta > span {
-  display: grid;
-  gap: 4px;
-  padding: var(--x-space-3);
-  border-radius: var(--x-radius-sm);
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px var(--x-space-3);
+  padding: var(--x-space-4);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
   background: var(--x-surface-2);
 }
-.memoryPendingMeta small {
+.linuxMemorySummaryHead {
+  display: contents;
+}
+.linuxMemorySummaryHead > span {
+  color: var(--x-text);
+  font-weight: 700;
+}
+.linuxMemorySummaryHead > strong {
+  color: var(--vm-accent);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+}
+.linuxMemoryAmount {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.linuxMemoryAmount strong {
+  color: var(--x-text);
+  font-family: var(--x-font-mono);
+  font-size: clamp(18px, 1.5vw, 24px);
+}
+.linuxMemoryAmount span,
+.linuxMemoryFree span {
+  color: var(--x-text-muted);
+  font-size: 10px;
+}
+.linuxMemoryFree {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+.linuxMemoryFree strong {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+}
+.linuxMemoryBar {
+  grid-column: 1 / -1;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--x-surface-sunken);
+}
+.linuxMemoryBar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--vm-accent);
+}
+.linuxMemoryLegend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   color: var(--x-text-muted);
   font-family: var(--x-font-mono);
   font-size: 10px;
 }
-.memoryPendingMeta strong {
-  font-size: var(--x-text-sm);
+.linuxMemoryLegend i {
+  width: 15px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--vm-accent);
+}
+.linuxMemoryLine {
+  fill: none;
+  stroke: var(--vm-accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 @media (max-width: 1200px) {
   .memoryVmGrid {
@@ -1608,8 +1617,35 @@ button.chip:hover:not(.chipOn) {
 .cpuChart svg {
   display: block;
   width: 100%;
-  height: 220px;
+  height: 100%;
   overflow: visible;
+}
+.cpuPlot {
+  position: relative;
+  height: 220px;
+  padding-left: 38px;
+}
+.cpuYAxis {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 32px;
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+}
+.cpuYAxis span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+.cpuYAxis span:first-child {
+  transform: none;
+}
+.cpuYAxis span:last-child {
+  transform: translateY(-100%);
 }
 .cpuGridLine {
   stroke: var(--x-border);
@@ -1642,7 +1678,7 @@ button.chip:hover:not(.chipOn) {
   position: absolute;
   right: 0;
   bottom: 7px;
-  left: 0;
+  left: 38px;
   display: flex;
   justify-content: space-between;
   color: var(--x-text-muted);
@@ -1665,6 +1701,9 @@ button.chip:hover:not(.chipOn) {
   .cpuChart svg,
   .cpuEmpty {
     min-height: 200px;
+    height: 200px;
+  }
+  .cpuPlot {
     height: 200px;
   }
 }
@@ -1839,6 +1878,49 @@ button.chip:hover:not(.chipOn) {
 .controlCardActions > div {
   display: flex;
   gap: var(--x-space-2);
+}
+.vmOperationNotice {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--x-space-2);
+  padding: 10px 12px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  font-size: var(--x-text-xs);
+}
+.vmOperationNotice > i {
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--x-primary) 30%, transparent);
+  border-top-color: var(--x-primary);
+  border-radius: 50%;
+  animation: vmOperationSpin 0.8s linear infinite;
+}
+.vmOperationNotice > strong {
+  color: var(--x-text);
+}
+.vmOperationNotice > span {
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+}
+.vmOperationNotice[data-tone='pending'] {
+  border-color: color-mix(in srgb, var(--x-primary) 42%, var(--x-border));
+  background: color-mix(in srgb, var(--x-primary) 7%, var(--x-surface-2));
+}
+.vmOperationNotice[data-tone='fault'] {
+  grid-template-columns: auto 1fr;
+  border-color: color-mix(in srgb, var(--x-fault) 44%, var(--x-border));
+  background: color-mix(in srgb, var(--x-fault) 7%, var(--x-surface-2));
+}
+.vmOperationNotice[data-tone='fault'] > strong,
+.vmOperationNotice[data-tone='fault'] > span {
+  color: var(--x-fault);
+}
+@keyframes vmOperationSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .controlEmpty {
   display: grid;
@@ -2667,6 +2749,9 @@ button.chip:hover:not(.chipOn) {
   display: flex;
   gap: var(--x-space-2);
   margin-top: var(--x-space-4);
+}
+.lifecycleState + .vmOperationNotice {
+  margin-top: var(--x-space-3);
 }
 .controlResourceSummary {
   display: grid;
