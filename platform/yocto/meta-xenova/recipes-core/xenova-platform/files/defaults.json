@@ -12,7 +12,7 @@
       "vcpus": 1,
       "autostart": true,
       "template_id": "debian-13-arm64",
-      "template_version": "1.0.3",
+      "template_version": "1.0.4",
       "display_name": "Debian Interaction"
     }
   ],
@@ -23,7 +23,7 @@
       "autostart": true,
       "board_shutdown_policy": "graceful",
       "template_id": "zephyr-drive-lattice-lab-arm64",
-      "template_version": "1.0.0-lab.1",
+      "template_version": "1.0.0-lab.2",
       "display_name": "Zephyr 주행 A"
     },
     {
@@ -32,7 +32,7 @@
       "autostart": true,
       "board_shutdown_policy": "graceful",
       "template_id": "zephyr-drive-lattice-lab-arm64",
-      "template_version": "1.0.0-lab.1",
+      "template_version": "1.0.0-lab.2",
       "display_name": "Zephyr 주행 B"
     }
   ],

@@ -13,7 +13,8 @@ DEFAULT_IDS = {'ubuntu-24.04-20260926': 'ubuntu-24.04-arm64',
                'debian-13-20261015': 'debian-13-arm64',
                'xenova-zephyr-starter-1.0.0': 'zephyr-xenvm-starter-arm64',
                'xenova-zephyr-network-starter-1.1.0':'zephyr-xenvm-starter-arm64',
-               'xenova-zephyr-drive-common': 'zephyr-xenvm-starter-arm64'}
+               'xenova-zephyr-drive-common': 'zephyr-xenvm-starter-arm64',
+               'xenova-zephyr-drive-lattice-lab-1.0.0': 'zephyr-drive-lattice-lab-arm64'}
 
 
 def sha(path):

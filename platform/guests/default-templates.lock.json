@@ -4,25 +4,25 @@
     {
       "guest_kind": "linux",
       "id": "ubuntu-24.04-20260926",
-      "version": "1.0.3",
-      "directory": "linux/ubuntu-24.04-20260926/1.0.3",
-      "manifest_sha256": "200832238ec4be6e6e474a108abed18c83de79c381b18df0bd853821cdba460c",
+      "version": "1.0.4",
+      "directory": "linux/ubuntu-24.04-20260926/1.0.4",
+      "manifest_sha256": "fdab5e7c99304d85467596773b1bfc92cf0e8317706839d961ff325a00001cc4",
       "template_id": "ubuntu-24.04-arm64"
     },
     {
       "guest_kind": "linux",
       "id": "debian-13-20261015",
-      "version": "1.0.3",
-      "directory": "linux/debian-13-20261015/1.0.3",
-      "manifest_sha256": "b921978f23c63f62fda32a883f2a8bcc1307426ce13c2aee9727481f2a8cb842",
+      "version": "1.0.4",
+      "directory": "linux/debian-13-20261015/1.0.4",
+      "manifest_sha256": "4bf654646fea56cbc0f68078dfd9d8b5f06572d6f8e4489fbbfb076446901f49",
       "template_id": "debian-13-arm64"
     },
     {
       "guest_kind": "zephyr",
       "id": "xenova-zephyr-drive-lattice-lab-1.0.0",
-      "version": "1.0.0-lab.1",
-      "directory": "zephyr/xenova-zephyr-drive-lattice-lab-1.0.0/1.0.0-lab.1",
-      "manifest_sha256": "893b3e6ff2298d87dc41f1456bfbcb1ed9b30c21b97d929a6403a2e23bb5d87f",
+      "version": "1.0.0-lab.2",
+      "directory": "zephyr/xenova-zephyr-drive-lattice-lab-1.0.0/1.0.0-lab.2",
+      "manifest_sha256": "eb5309e15aa5ef705ed846e77f4d196280da67d508f67bcee72892587493f28b",
       "template_id": "zephyr-drive-lattice-lab-arm64"
     }
   ]

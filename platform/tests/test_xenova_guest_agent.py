@@ -107,7 +107,7 @@ class GuestAgentTest(unittest.TestCase):
             recipe = ROOT / 'platform/guests/linux' / source / 'recipe.json'
             result = template_recipe.source_info(recipe, source)
             self.assertEqual(result['recipe']['guest_agent'], {'packages': ['python3-paho-mqtt']})
-            self.assertEqual(result['recipe']['version'], '1.0.3')
+            self.assertEqual(result['recipe']['version'], '1.0.4')
             inputs = result['preparer_files']
             for path in agent.source_files():
                 self.assertEqual(inputs[str(path.relative_to(ROOT))], hashlib.sha256(path.read_bytes()).hexdigest())
