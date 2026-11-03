@@ -8,8 +8,8 @@
     t <트랙id>  트랙 바꾸기 (장애물 치우고 출발선으로). t 만 치면 목록
     c           장애물 모두 치우기
     e           비상정지 켜기/끄기
-    s           상태 한 줄 출력
-    r           트랙 시작 위치로 (속도 0)
+    s           상태 한 줄 출력 (출발 신호·랩 포함)
+    r           트랙 시작 위치로 (속도 0), 출발 신호 처음부터
     q           종료
 """
 
@@ -72,6 +72,9 @@ def describe(sim: Simulator) -> str:
         f"steer={v.steer_rad:+.3f}rad gen={sim.applied_generation} flags={','.join(flags) or '-'} "
         f"obstacles={len(v.obstacles)}"
     )
+    r = sim.race.payload()
+    line += (f" race={r['phase']}" + (f" lights={r['lights_on']}/5" if r["phase"] == "lights" else f" lap={r['lap'] + 1}")
+             + (" jump" if r["jump_start"] else ""))
     if sim.frames is not None:
         f = sim.frames
         line += f" frames(ok={f.accepted} bad={f.bad_frames} dup={f.duplicates} old_gen={f.stale_generation})"
@@ -111,7 +114,7 @@ def handle(line: str, sim: Simulator, stop: threading.Event, out: TextIO) -> Non
         print(describe(sim), file=out)
     elif cmd == "r":
         sim.reset_to_start()
-        print("트랙 시작 위치로", file=out)
+        print("트랙 시작 위치로, 출발 신호 처음부터", file=out)
     elif cmd == "q":
         stop.set()
     else:
@@ -141,6 +144,8 @@ def parse_args(argv: list[str] | None = None) -> SimSettings:
     parser.add_argument("--camera", default=SimSettings.camera_listen,
                         help="전방 카메라 MJPEG host:port, 'off' 면 끈다")
     parser.add_argument("--track", default=SimSettings.track_id, choices=track_ids(), help="시작 트랙")
+    parser.add_argument("--no-start-lights", action="store_true",
+                        help="출발 신호 없이 바로 출발 (계약 12장 race, 랩 시간만 잰다)")
     parser.add_argument("--sense-range", type=float, default=SimSettings.sense_range_m, help="전방 감지 거리 m")
     parser.add_argument("--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
     a = parser.parse_args(argv)
@@ -148,7 +153,7 @@ def parse_args(argv: list[str] | None = None) -> SimSettings:
         broker_host=a.host, broker_port=a.port, username=a.username or None, password=a.password,
         sim_topics=not a.no_sim_topics, sim_username=a.sim_username or None, sim_password=a.sim_password,
         input=a.input, frame_listen=a.frame_listen, camera_listen=None if a.camera == "off" else a.camera,
-        track_id=a.track, sense_range_m=a.sense_range, log_level=a.log_level,
+        track_id=a.track, start_lights=not a.no_start_lights, sense_range_m=a.sense_range, log_level=a.log_level,
     )
 
 
