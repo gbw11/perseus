@@ -1879,6 +1879,49 @@ button.chip:hover:not(.chipOn) {
   display: flex;
   gap: var(--x-space-2);
 }
+.vmOperationNotice {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--x-space-2);
+  padding: 10px 12px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  font-size: var(--x-text-xs);
+}
+.vmOperationNotice > i {
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--x-primary) 30%, transparent);
+  border-top-color: var(--x-primary);
+  border-radius: 50%;
+  animation: vmOperationSpin 0.8s linear infinite;
+}
+.vmOperationNotice > strong {
+  color: var(--x-text);
+}
+.vmOperationNotice > span {
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+}
+.vmOperationNotice[data-tone='pending'] {
+  border-color: color-mix(in srgb, var(--x-primary) 42%, var(--x-border));
+  background: color-mix(in srgb, var(--x-primary) 7%, var(--x-surface-2));
+}
+.vmOperationNotice[data-tone='fault'] {
+  grid-template-columns: auto 1fr;
+  border-color: color-mix(in srgb, var(--x-fault) 44%, var(--x-border));
+  background: color-mix(in srgb, var(--x-fault) 7%, var(--x-surface-2));
+}
+.vmOperationNotice[data-tone='fault'] > strong,
+.vmOperationNotice[data-tone='fault'] > span {
+  color: var(--x-fault);
+}
+@keyframes vmOperationSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .controlEmpty {
   display: grid;
   place-items: center;
@@ -2706,6 +2749,9 @@ button.chip:hover:not(.chipOn) {
   display: flex;
   gap: var(--x-space-2);
   margin-top: var(--x-space-4);
+}
+.lifecycleState + .vmOperationNotice {
+  margin-top: var(--x-space-3);
 }
 .controlResourceSummary {
   display: grid;

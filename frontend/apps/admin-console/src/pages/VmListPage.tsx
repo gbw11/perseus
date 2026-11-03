@@ -2,35 +2,33 @@ import { Button, Card, Modal, StatusBadge, useToast } from '@xenova/ui';
 import { useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
-import { useVmAction, useVms, type VmAction } from '../api/queries';
+import { useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
 import { osLabel } from '../domain/roles';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
+import { VmOperationNotice } from './VmOperationProgress';
+import { useVmOperationProgress } from './useVmOperationProgress';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
 
 /** VM 생명주기와 할당 자원을 관리하는 목록. 주행 모드·제어권은 Overview에서만 다룬다. */
 export function VmListPage() {
   const vms = useVms(1000);
-  const action = useVmAction();
+  const vmOperations = useVmOperationProgress();
   const toast = useToast();
   const navigate = useNavigate();
   const [deleting, setDeleting] = useState<Vm | null>(null);
 
   const run = (vm: Vm, kind: VmAction) =>
-    action.mutate(
-      { vmId: vm.vm_id, action: kind },
-      {
-        onSuccess: () =>
-          toast.show(
-            `${vm.name}: ${kind === 'start' ? '시작' : kind === 'stop' ? '정지' : '삭제'} 요청 완료`,
-            'ok',
-          ),
-        onError: (error) =>
-          toast.show(error instanceof ApiError ? error.message : String(error), 'fault', 5000),
-      },
-    );
+    vmOperations.run(vm, kind, {
+      onSuccess: () =>
+        toast.show(
+          `${vm.name}: ${kind === 'start' ? '시작' : kind === 'stop' ? '정지' : '삭제'} 요청 완료`,
+          'ok',
+        ),
+      onError: (_error, message) => toast.show(message, 'fault', 5000),
+    });
 
   const items = vms.data?.items ?? [];
   const running = items.filter((vm) => vm.state === 'running').length;
@@ -82,6 +80,8 @@ export function VmListPage() {
         {items.map((vm, index) => {
           const accent = VM_ACCENTS[index % VM_ACCENTS.length];
           const zephyr = vm.guest_kind === 'zephyr';
+          const operation = vmOperations.operations[vm.vm_id];
+          const operationPending = operation?.status === 'pending';
           return (
             <Card
               key={vm.vm_id}
@@ -128,25 +128,36 @@ export function VmListPage() {
                   </div>
                 </dl>
 
+                <VmOperationNotice operation={operation} now={vmOperations.now} />
+
                 <div
                   className={styles.controlCardActions}
                   onClick={(event) => event.stopPropagation()}
                   onKeyDown={(event) => event.stopPropagation()}
                 >
                   <div>
-                    <Button size="sm" onClick={() => run(vm, 'start')} disabled={vm.state === 'running'}>
+                    <Button
+                      size="sm"
+                      onClick={() => run(vm, 'start')}
+                      disabled={vm.state === 'running' || operationPending}
+                    >
                       시작
                     </Button>
                     <Button
                       size="sm"
                       variant="secondary"
                       onClick={() => run(vm, 'stop')}
-                      disabled={vm.state !== 'running'}
+                      disabled={vm.state !== 'running' || operationPending}
                     >
                       정지
                     </Button>
                   </div>
-                  <Button size="sm" variant="danger" onClick={() => setDeleting(vm)}>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => setDeleting(vm)}
+                    disabled={operationPending}
+                  >
                     삭제
                   </Button>
                 </div>
