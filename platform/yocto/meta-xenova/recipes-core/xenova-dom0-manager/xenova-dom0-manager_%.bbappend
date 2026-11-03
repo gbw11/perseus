@@ -13,9 +13,8 @@ do_install:append() {
     install -d "${D}${systemd_system_unitdir}/xenova-dom0-manager.service.d" \
         "${D}${sysconfdir}/xenova/runtime-logs" "${D}${datadir}/xenova/runtime-logs"
     chmod 0700 "${D}${sysconfdir}/xenova/runtime-logs"
-    sed 's|@PYTHON@|${bindir}/python3|g' "${S}/xenova-runtime-log-collector.service" \
-        > "${D}${systemd_system_unitdir}/xenova-runtime-log-collector.service"
-    chmod 0644 "${D}${systemd_system_unitdir}/xenova-runtime-log-collector.service"
+    install -m 0644 "${S}/xenova-runtime-log-collector.service" \
+        "${D}${systemd_system_unitdir}/xenova-runtime-log-collector.service"
     install -m 0644 "${S}/runtime-logs-manager.conf" \
         "${D}${systemd_system_unitdir}/xenova-dom0-manager.service.d/30-runtime-logs.conf"
     install -m 0600 "${S}/runtime-log-db.env" \
