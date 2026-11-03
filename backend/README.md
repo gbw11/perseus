@@ -170,13 +170,15 @@ WS  /ws/v1/drive/state       같은 Drive 스냅샷 (첫 프레임 사용자 JWT
 
 ## Linux·Zephyr 수집기 상태
 
-- `GET /api/v1/vms/{vmId}/telemetry/status`에서 v2.1 heartbeat의 현재 표시값
-  `publisher_state`를 조회합니다. 최근 유효 수신 후 6초 미만이면 `running`, `degraded`,
-  `stopping` 중 보고한 값이고, 미수신·만료는 `unknown`입니다. 마지막 보고와 `received_at`은
-  별도로 남으며 `receipt_lease_valid`는 Spring의 수신 유효기간만 나타냅니다.
-- `last_collection_success_uptime_ms`와 `collection_failures_total`은 각각 게스트 부팅 뒤
-  경과 시간과 Publisher 세션의 누계로, 정밀도를 유지하는 십진 문자열입니다.
-  누계가 남아 있어도 새 heartbeat가 `running`이면 화면에는 `running`으로 표시합니다.
+- `GET /api/v1/vms/{vmId}/telemetry/heartbeat`에서 VM별 마지막 v2.1 보고와
+  `received_at`·`age_ms`를 조회합니다. `status=FRESH`일 때만 `publisher_state`의
+  `running`·`degraded`·`stopping`을 현재 상태로 표시합니다. `STALE`은 관측 만료,
+  `UNKNOWN`은 미수신입니다. 만료된 마지막 보고는 진단용으로 남습니다.
+  수신 lease 기본값은 6초이며 `AGENT_TELEMETRY_HEARTBEAT_LEASE`에서 설정합니다.
+- `last_collection_success_uptime_ms`는 게스트 부팅 후 마지막 수집 성공까지의 시간을
+  십진 문자열로 제공합니다. 기존 `last_collection_success_age_ms`는 보고 당시 경과 시간입니다.
+  `collection_failures_total`은 Publisher 세션의 누적 실패 횟수입니다.
+  누계가 남아 있어도 신선한 heartbeat가 `running`이면 화면에는 `running`으로 표시합니다.
   이 응답은 최신 수신 관측이며 현재 Xen 실행을 확인하는 근거로 쓰지 않습니다.
   기존 Linux v1 `agent_status` 및 VM 복구 경로와 독립입니다.
 - Flyway V7은 `vm_telemetry_heartbeats`에 VM당 최신 보고 한 건을 저장합니다. 같은 세션의

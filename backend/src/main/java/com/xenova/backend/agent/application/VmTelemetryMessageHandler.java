@@ -7,7 +7,6 @@ import com.xenova.backend.agent.domain.MetricSample;
 import com.xenova.backend.agent.domain.MetricSampleData;
 import com.xenova.backend.agent.domain.MetricSampleData.CpuWindow;
 import com.xenova.backend.agent.domain.MetricValue;
-import com.xenova.backend.agent.domain.TelemetryHeartbeat;
 import com.xenova.backend.common.UnsignedDecimal;
 import com.xenova.backend.template.domain.GuestKind;
 import com.xenova.backend.vm.domain.VmRecord;
@@ -20,7 +19,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -28,17 +26,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-// Ingests Linux and Zephyr telemetry 2.1 metrics and diagnostic heartbeats.
+// Ingests Linux and Zephyr telemetry 2.1 metric samples.
 @Component
 public class VmTelemetryMessageHandler {
 
     public static final String METRICS_TOPIC = "xenova/v2/vms/+/telemetry/metrics";
-    public static final String HEARTBEAT_TOPIC = "xenova/v2/vms/+/telemetry/heartbeat";
-
-    private static final String SUPPORTED_SCHEMA_VERSION = "2.1";
-    private static final int HEARTBEAT_MAX_PAYLOAD_BYTES = 4096;
-    private static final Pattern TOPIC_PATTERN = Pattern.compile("^xenova/v2/vms/([^/]+)/telemetry/(metrics|heartbeat)$");
-    private static final Set<String> PUBLISHER_STATES = Set.of("running", "degraded", "stopping");
+    static final String SUPPORTED_SCHEMA_VERSION = "2.1";
+    private static final Pattern TOPIC_PATTERN = Pattern.compile("^xenova/v2/vms/([^/]+)/telemetry/metrics$");
 
     private static final Logger log = LoggerFactory.getLogger(VmTelemetryMessageHandler.class);
 
@@ -75,53 +69,20 @@ public class VmTelemetryMessageHandler {
             throw new Rejected("unknown topic");
         }
         String topicVmId = matcher.group(1);
-        String stream = matcher.group(2);
-        int maxBytes = "heartbeat".equals(stream) ? HEARTBEAT_MAX_PAYLOAD_BYTES : AgentMessageHandler.MAX_PAYLOAD_BYTES;
-        if (payload.length > maxBytes) {
+        if (payload.length > AgentMessageHandler.MAX_PAYLOAD_BYTES) {
             throw new Rejected(payload.length + " bytes");
         }
         JsonNode root = read(payload);
         if (!SUPPORTED_SCHEMA_VERSION.equals(root.path("schema_version").asText(null))) {
             throw new Rejected("schema_version " + root.path("schema_version"));
         }
-        if (!("telemetry." + stream).equals(root.path("type").asText(null))) {
+        if (!"telemetry.metrics".equals(root.path("type").asText(null))) {
             throw new Rejected("type " + root.path("type"));
         }
         if (!topicVmId.equals(root.path("vm_id").asText(null))) {
             throw new Rejected("vm_id mismatch: topic " + topicVmId + ", body " + root.path("vm_id"));
         }
-        if ("heartbeat".equals(stream)) {
-            return storeHeartbeat(topicVmId, root, receivedAt);
-        }
         return storeMetrics(topicVmId, root, receivedAt);
-    }
-
-    private Result storeHeartbeat(String vmId, JsonNode root, Instant receivedAt) {
-        TelemetryHeartbeat.Report report;
-        try {
-            uuid(vmId);
-            String bootId = uuid(root.path("boot_id").asText(""));
-            String publisherId = uuid(root.path("publisher_instance_id").asText(""));
-            String seq = UnsignedDecimal.read(root.path("seq"), "seq");
-            String sent = UnsignedDecimal.read(root.path("clock").path("sent_uptime_ms"), "sent_uptime_ms");
-            JsonNode body = root.path("payload");
-            JsonNode lastSuccess = body.path("last_collection_success_uptime_ms");
-            String success = lastSuccess.isNull() ? null
-                    : UnsignedDecimal.read(lastSuccess, "last_collection_success_uptime_ms");
-            String failures = UnsignedDecimal.read(body.path("collection_failures_total"), "collection_failures_total");
-            String state = body.path("publisher_state").asText("");
-            String expectedId = vmId + "/" + bootId + "/" + publisherId + "/heartbeat/" + seq;
-            if ("0".equals(seq) || !expectedId.equals(root.path("message_id").asText())
-                    || !PUBLISHER_STATES.contains(state)
-                    || (success != null && UnsignedDecimal.compare(success, sent) > 0)
-                    || !body.path("app_health_asserted").isBoolean() || body.path("app_health_asserted").booleanValue()) {
-                throw new IllegalArgumentException("invalid publisher heartbeat");
-            }
-            report = new TelemetryHeartbeat.Report(bootId, publisherId, seq, sent, state, success, failures, receivedAt);
-        } catch (IllegalArgumentException exception) {
-            throw new Rejected(exception.getMessage());
-        }
-        return agentDataService.recordTelemetryHeartbeat(vmId, report) ? Result.ACCEPTED : Result.IGNORED;
     }
 
     private Result storeMetrics(String topicVmId, JsonNode root, Instant receivedAt) {
@@ -161,14 +122,6 @@ public class VmTelemetryMessageHandler {
                 .map(kind -> kind == GuestKind.ZEPHYR ? MetricSample.ZEPHYR_TELEMETRY : MetricSample.LINUX_TELEMETRY)
                 // Publisher counters are shared. The other supported 2.1 families are Zephyr's profiles.
                 .orElse("publisher".equals(family) ? MetricSample.VM_TELEMETRY : MetricSample.ZEPHYR_TELEMETRY);
-    }
-
-    private static String uuid(String value) {
-        if (value.length() != 36 || !UUID.fromString(value).toString().equals(value)
-                || "00000000-0000-0000-0000-000000000000".equals(value)) {
-            throw new IllegalArgumentException("invalid heartbeat identity");
-        }
-        return value;
     }
 
     // Without trusted UTC (sent_at null) the Publisher only knows its own uptime, so arrival time stands in.

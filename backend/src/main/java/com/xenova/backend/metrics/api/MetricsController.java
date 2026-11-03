@@ -4,7 +4,6 @@ import com.xenova.backend.metrics.application.MetricFilter;
 import com.xenova.backend.metrics.application.MetricsQueryService;
 import com.xenova.backend.metrics.application.MetricsQueryService.Processes;
 import com.xenova.backend.metrics.application.MetricsQueryService.ProcessSort;
-import com.xenova.backend.metrics.application.MetricsQueryService.TelemetryStatus;
 import com.xenova.backend.metrics.application.ZephyrThreads;
 import java.time.Instant;
 import java.util.List;
@@ -50,11 +49,6 @@ public class MetricsController {
     @GetMapping("/threads")
     public ZephyrThreads threads(@PathVariable String vmId) {
         return service.threads(vmId);
-    }
-
-    @GetMapping("/telemetry/status")
-    public TelemetryStatus telemetryStatus(@PathVariable String vmId) {
-        return service.telemetryStatus(vmId);
     }
 
     public record MetricHistoryResponse(List<MetricSampleResponse> items) {

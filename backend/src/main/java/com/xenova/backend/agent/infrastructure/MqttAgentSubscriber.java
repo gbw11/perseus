@@ -1,6 +1,7 @@
 package com.xenova.backend.agent.infrastructure;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
+import com.xenova.backend.agent.application.TelemetryHeartbeatMessageHandler;
 import com.xenova.backend.agent.application.VmTelemetryMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventBackfillService;
@@ -31,14 +32,14 @@ import org.springframework.util.StringUtils;
 @EnableConfigurationProperties(MqttProperties.class)
 public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended {
 
-    // v1 heartbeat and inventory use QoS 1. v1 metrics and v2 diagnostics use QoS 0.
+    // Heartbeat and inventory use QoS 1, metrics QoS 0 (MQTT-01/02/03). v2 telemetry metrics and heartbeat are QoS 0.
     static final String[] TOPICS = {
             AgentMessageHandler.TOPIC_PREFIX + "+/heartbeat",
             AgentMessageHandler.TOPIC_PREFIX + "+/inventory",
             AgentMessageHandler.TOPIC_PREFIX + "+/metrics",
             RecoveryEventMessageHandler.TOPIC,
             VmTelemetryMessageHandler.METRICS_TOPIC,
-            VmTelemetryMessageHandler.HEARTBEAT_TOPIC
+            TelemetryHeartbeatMessageHandler.TOPIC
     };
     static final int[] QOS = {1, 1, 0, 1, 0, 0};
 
@@ -47,6 +48,7 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
     private final MqttProperties properties;
     private final AgentMessageHandler handler;
     private final VmTelemetryMessageHandler telemetryHandler;
+    private final TelemetryHeartbeatMessageHandler telemetryHeartbeatHandler;
     private final RecoveryEventMessageHandler recoveryEventHandler;
     private final RecoveryEventBackfillService recoveryEventBackfillService;
     private final Clock clock;
@@ -63,12 +65,14 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
             MqttProperties properties,
             AgentMessageHandler handler,
             VmTelemetryMessageHandler telemetryHandler,
+            TelemetryHeartbeatMessageHandler telemetryHeartbeatHandler,
             RecoveryEventMessageHandler recoveryEventHandler,
             RecoveryEventBackfillService recoveryEventBackfillService,
             Clock clock) {
         this.properties = properties;
         this.handler = handler;
         this.telemetryHandler = telemetryHandler;
+        this.telemetryHeartbeatHandler = telemetryHeartbeatHandler;
         this.recoveryEventHandler = recoveryEventHandler;
         this.recoveryEventBackfillService = recoveryEventBackfillService;
         this.clock = clock;
@@ -143,9 +147,11 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
             return;
         }
         if (VmTelemetryMessageHandler.matches(topic)) {
-            if (!message.isRetained() || !topic.endsWith("/heartbeat")) {
-                telemetryHandler.handle(topic, message.getPayload(), receivedAt);
-            }
+            telemetryHandler.handle(topic, message.getPayload(), receivedAt);
+            return;
+        }
+        if (TelemetryHeartbeatMessageHandler.matches(topic)) {
+            telemetryHeartbeatHandler.handle(topic, message.getPayload(), message.isRetained(), receivedAt);
             return;
         }
         handler.handle(topic, message.getPayload(), receivedAt);

@@ -21,7 +21,6 @@ public class MetricsQueryService {
 
     static final Duration DEFAULT_RANGE = Duration.ofMinutes(15);
     static final Duration MAX_RANGE = Duration.ofHours(24);
-    private static final Duration TELEMETRY_HEARTBEAT_LEASE = Duration.ofSeconds(6);
 
     private final AgentDataService agentDataService;
     private final Clock clock;
@@ -73,22 +72,6 @@ public class MetricsQueryService {
         List<MetricSample> pages = agentDataService.findMetricSamples(vmId, now.minus(Duration.ofMinutes(2)),
                 now.plus(Duration.ofMinutes(2)));
         return ZephyrThreads.latest(vmId, pages, receivedAt -> agentDataService.isStale(receivedAt, now));
-    }
-
-    public TelemetryStatus telemetryStatus(String vmId) {
-        return agentDataService.findTelemetryHeartbeat(vmId).map(report -> {
-            Duration age = Duration.between(report.receivedAt(), clock.instant());
-            boolean fresh = !age.isNegative() && age.compareTo(TELEMETRY_HEARTBEAT_LEASE) < 0;
-            return new TelemetryStatus(vmId, fresh ? report.publisherState() : "unknown", report.publisherState(),
-                    report.bootId(), report.publisherInstanceId(), report.receivedAt(), fresh,
-                    report.lastCollectionSuccessUptimeMs(), report.collectionFailuresTotal());
-        }).orElseGet(() -> new TelemetryStatus(vmId, "unknown", null, null, null, null, false, null, null));
-    }
-
-    public record TelemetryStatus(
-            String vmId, String publisherState, String lastReportedPublisherState, String bootId,
-            String publisherInstanceId, Instant receivedAt, boolean receiptLeaseValid,
-            String lastCollectionSuccessUptimeMs, String collectionFailuresTotal) {
     }
 
     public record FilteredSample(MetricSample sample, List<MetricValue> values) {

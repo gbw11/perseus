@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.xenova.backend.agent.application.AgentDataService;
 import com.xenova.backend.agent.application.AgentMessageHandler;
 import com.xenova.backend.agent.application.AgentMessageHandler.Result;
+import com.xenova.backend.agent.application.TelemetryHeartbeatMessageHandler;
 import com.xenova.backend.agent.application.VmTelemetryMessageHandler;
 import com.xenova.backend.agent.domain.MetricSample;
 import com.xenova.backend.agent.domain.MetricSampleRepository;
@@ -21,6 +22,7 @@ import com.xenova.backend.agent.domain.ProcessSnapshotRepository;
 import com.xenova.backend.template.domain.GuestKind;
 import com.xenova.backend.vm.domain.VmRecord;
 import com.xenova.backend.vm.domain.VmRecordRepository;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -72,6 +74,9 @@ class MetricsApiIntegrationTest {
 
     @Autowired
     private VmTelemetryMessageHandler zephyrHandler;
+
+    @Autowired
+    private TelemetryHeartbeatMessageHandler heartbeatHandler;
 
     private String accessToken;
 
@@ -317,12 +322,14 @@ class MetricsApiIntegrationTest {
         String boot = "f2000000-0000-4000-8000-000000000001";
         String publisher = "f3000000-0000-4000-8000-000000000001";
         String replacement = "f3000000-0000-4000-8000-000000000002";
-        String statusPath = "/telemetry/status";
+        String statusPath = "/telemetry/heartbeat";
+        BigInteger failures = new BigInteger("18446744073709551615");
         Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
         Instant expired = now.minusSeconds(7);
         perform(vm, statusPath)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.publisher_state").value("unknown"))
+                .andExpect(jsonPath("$.status").value("UNKNOWN"))
+                .andExpect(jsonPath("$.publisher_state").doesNotExist())
                 .andExpect(jsonPath("$.received_at").isEmpty());
 
         ObjectNode degraded = heartbeat(vm, boot, publisher, "9007199254740993", "50000", "degraded", "49900");
@@ -331,25 +338,28 @@ class MetricsApiIntegrationTest {
         assertThat(publishHeartbeat(heartbeat(vm, boot, publisher, "9007199254740992", "50000", "running", "49900"), now))
                 .isEqualTo(Result.IGNORED);
         perform(vm, statusPath)
-                .andExpect(jsonPath("$.publisher_state").value("unknown"))
-                .andExpect(jsonPath("$.last_reported_publisher_state").value("degraded"))
-                .andExpect(jsonPath("$.receipt_lease_valid").value(false))
+                .andExpect(jsonPath("$.status").value("STALE"))
+                .andExpect(jsonPath("$.publisher_state").value("degraded"))
+                .andExpect(jsonPath("$.received_at").value(expired.toString()))
                 .andExpect(jsonPath("$.last_collection_success_uptime_ms").value("49900"))
-                .andExpect(jsonPath("$.collection_failures_total").value("18446744073709551615"));
+                .andExpect(result -> assertThat(objectMapper.readTree(result.getResponse().getContentAsByteArray())
+                        .path("collection_failures_total").bigIntegerValue()).isEqualTo(failures));
 
         assertThat(publishHeartbeat(heartbeat(vm, boot, publisher, "9007199254740994", "52000", "running", "51900"), now))
                 .isEqualTo(Result.ACCEPTED);
         perform(vm, statusPath)
+                .andExpect(jsonPath("$.status").value("FRESH"))
                 .andExpect(jsonPath("$.publisher_state").value("running"))
-                .andExpect(jsonPath("$.receipt_lease_valid").value(true))
+                .andExpect(jsonPath("$.last_collection_success_age_ms").value(100))
                 .andExpect(jsonPath("$.last_collection_success_uptime_ms").value("51900"))
-                .andExpect(jsonPath("$.collection_failures_total").value("18446744073709551615"));
+                .andExpect(result -> assertThat(objectMapper.readTree(result.getResponse().getContentAsByteArray())
+                        .path("collection_failures_total").bigIntegerValue()).isEqualTo(failures));
 
         assertThat(publishHeartbeat(heartbeat(vm, boot, replacement, "1", "52100", "stopping", null), now))
                 .isEqualTo(Result.ACCEPTED);
         assertThat(publishHeartbeat(heartbeat(vm, boot, publisher, "9007199254740995", "54000", "degraded", null), now))
                 .isEqualTo(Result.IGNORED);
-        assertThat(publishHeartbeat(heartbeat(vm, boot, replacement, "2", "52000", "running", "52001"), now))
+        assertThat(publishHeartbeat(heartbeat(vm, boot, replacement, "2", "52000", "sleeping", "52001"), now))
                 .isEqualTo(Result.REJECTED);
         perform(vm, statusPath)
                 .andExpect(jsonPath("$.publisher_state").value("stopping"))
@@ -364,7 +374,7 @@ class MetricsApiIntegrationTest {
         perform(vm, statusPath)
                 .andExpect(jsonPath("$.boot_id").value(reboot))
                 .andExpect(jsonPath("$.publisher_state").value("running"));
-        perform(ZEPHYR_VM, statusPath).andExpect(jsonPath("$.publisher_state").value("unknown"));
+        perform(ZEPHYR_VM, statusPath).andExpect(jsonPath("$.status").value("UNKNOWN"));
     }
 
     @Test
@@ -408,7 +418,7 @@ class MetricsApiIntegrationTest {
 
     private Result publishHeartbeat(ObjectNode root, Instant receivedAt) {
         String topic = "xenova/v2/vms/" + root.path("vm_id").textValue() + "/telemetry/heartbeat";
-        return zephyrHandler.handle(topic, root.toString().getBytes(StandardCharsets.UTF_8), receivedAt);
+        return heartbeatHandler.handle(topic, root.toString().getBytes(StandardCharsets.UTF_8), false, receivedAt);
     }
 
     private Result publishNetwork(String json, Instant received) {

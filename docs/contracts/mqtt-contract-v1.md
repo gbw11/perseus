@@ -90,7 +90,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
   `processes[]`는 CPU 상위 목록이라 이 상태가 `ok`여도 특정 앱의 생존 근거가 아니다(6.1)
 - Linux 에이전트(0.3.0부터)는 v1 토픽과 별도로 자기 상태(inventory·metrics 루프가 돌고 있는지, 수집·발행 실패 누계)를 `xenova/v2/vms/{vm_id}/telemetry/{inventory|heartbeat|metrics}`에 Zephyr 게스트와 같은 [Telemetry 계약 2.1](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md) 형식으로 보낸다(`firmware.measurement_profile = linux_agent`, metrics family `publisher`). v1 heartbeat 는 에이전트 프로세스의 생존이고, v2 heartbeat 의 `publisher_state` 는 metrics 루프의 진행 여부다. 복구 Worker 의 판정 입력이 아니다. 백엔드는 아래 v2 metrics 수신 규칙대로 이 `publisher` 표본도 함께 저장한다
 - 백엔드는 v2의 `xenova/v2/vms/+/telemetry/metrics`와 `xenova/v2/vms/+/telemetry/heartbeat`를 QoS 0으로 구독한다. inventory·events·snapshot은 구독하지 않는다.
-  - heartbeat는 Linux·Zephyr 공통 수집기 보고다. 백엔드는 VM별 최신 보고를 저장하고 최근 유효 수신 후 6초가 지나면 현재 표시값을 `unknown`으로 반환한다. 실패 누계와 마지막 수집 성공 시각은 별도 근거다. 조회 형식은 [백엔드 README](../../backend/README.md)를 따른다.
+  - heartbeat는 Linux·Zephyr 공통 수집기 보고다. 백엔드는 VM별 최신 보고를 저장하고 `GET /api/v1/vms/{vmId}/telemetry/heartbeat`에서 `FRESH`·`STALE`·`UNKNOWN`과 함께 제공한다. `FRESH`일 때만 `publisher_state`를 현재 수집 상태로 해석한다. 실패 누계와 마지막 수집 성공 시각은 별도 근거다. 조회 형식은 [백엔드 README](../../backend/README.md)를 따른다.
   - 받는 조건: `schema_version = "2.1"`, `type = "telemetry.metrics"`, 토픽 `{vm_id}` 와 `vm_id` 일치, `message_id`·`payload.samples[]` 존재. 하나라도 어긋나면 버린다
   - 지표 출처는 등록 VM 종류에 따라 `linux_telemetry` 또는 `zephyr_telemetry`다. 등록 전 공통 Publisher 지표는 `vm_telemetry`다. 표본 ID는 `message_id`로 만든 UUID, 관측 시각은 `clock.sent_at` 또는 수신 시각, `window_ms`는 계측 구간 차이다.
   - 값: `status = ok` 이면 숫자 또는 u64 10진 문자열을 숫자로 바꾸고, 그 외에는 `value = null`, `unavailable_reason` = `reason`(없으면 `status`). `labels` 는 문자열 맵으로 저장한다
@@ -601,6 +601,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.5 | 2026-10-28 | MQTT-03 metrics 에 선택 필드 `process_collection`(수집 상태·발견/읽기 수·잘림·원인 종류)과 `unavailable_reason` 값 `counter_reset` 추가(3장). 기존 필드는 그대로이고 받는 쪽은 모르는 필드·사유를 무시해도 된다 (S15P31E110-309) |
 | v1.5 (보완) | 2026-10-28 | Linux 에이전트 0.3.0 이 자체 상태를 v2 Telemetry(Zephyr 계약 2.1) 토픽으로 함께 보낸다는 주석(3장). v1 토픽·payload 는 그대로 (S15P31E110-310) |
 | v1.5 (보완) | 2026-11-02 | 백엔드가 v2 `telemetry/metrics` 를 구독해 Zephyr CPU·메모리를 메트릭 표본(`source = zephyr_telemetry`)으로 저장한다(3장). `backend` 계정에 이 토픽 읽기 권한 추가(9장). v1 토픽·payload 는 그대로 |
+| v1.5 (보완) | 2026-11-03 | 백엔드가 v2 `telemetry/heartbeat` 도 구독해 VM 별 Publisher 상태(`publisher_state`·마지막 수집 성공 경과·실패 누계)를 `GET /api/v1/vms/{vm_id}/telemetry/heartbeat` 로 보인다(3장, S15P31E110-358). `backend` 읽기 권한 표기를 실제 정책 `xenova/v2/vms/+/telemetry/+` 로 맞춤(9장). v1 토픽·payload 는 그대로 |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의
 QoS 교환은 메시지 전달을 위한 것이며 앱/장치 적용 확인을 대신하지 않는다.

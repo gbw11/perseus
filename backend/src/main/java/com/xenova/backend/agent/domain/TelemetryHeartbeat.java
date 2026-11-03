@@ -35,7 +35,7 @@ public class TelemetryHeartbeat {
     @Column(nullable = false, length = 20)
     private String seq;
 
-    @Column(nullable = false, length = 20)
+    @Column(length = 20)
     private String sentUptimeMs;
 
     @Column(nullable = false, length = 8)
@@ -44,8 +44,14 @@ public class TelemetryHeartbeat {
     @Column(length = 20)
     private String lastCollectionSuccessUptimeMs;
 
-    @Column(nullable = false, length = 20)
+    @Column(length = 20)
     private String collectionFailuresTotal;
+
+    @Column(length = 20)
+    private String publishSubmitFailuresTotal;
+
+    @Column(length = 20)
+    private String connectionAttemptsTotal;
 
     @Column(nullable = false)
     private Instant receivedAt;
@@ -63,13 +69,12 @@ public class TelemetryHeartbeat {
         }
         if (report.bootId().equals(bootId)) {
             if (report.publisherInstanceId().equals(publisherInstanceId)) {
-                if (UnsignedDecimal.compare(report.seq(), seq) <= 0
-                        || UnsignedDecimal.compare(report.sentUptimeMs(), sentUptimeMs) < 0) {
+                if (UnsignedDecimal.compare(report.seq(), seq) <= 0 || isOlderInSameBoot(report)) {
                     return false;
                 }
             } else {
                 if (report.publisherInstanceId().equals(previousPublisherInstanceId)
-                        || UnsignedDecimal.compare(report.sentUptimeMs(), sentUptimeMs) < 0) {
+                        || isOlderInSameBoot(report)) {
                     return false;
                 }
                 previousPublisherInstanceId = publisherInstanceId;
@@ -88,17 +93,26 @@ public class TelemetryHeartbeat {
         publisherState = report.publisherState();
         lastCollectionSuccessUptimeMs = report.lastCollectionSuccessUptimeMs();
         collectionFailuresTotal = report.collectionFailuresTotal();
+        publishSubmitFailuresTotal = report.publishSubmitFailuresTotal();
+        connectionAttemptsTotal = report.connectionAttemptsTotal();
         receivedAt = report.receivedAt();
         return true;
     }
 
+    private boolean isOlderInSameBoot(Report report) {
+        return report.sentUptimeMs() != null && sentUptimeMs != null
+                && UnsignedDecimal.compare(report.sentUptimeMs(), sentUptimeMs) < 0;
+    }
+
     public Report report() {
         return new Report(bootId, publisherInstanceId, seq, sentUptimeMs, publisherState,
-                lastCollectionSuccessUptimeMs, collectionFailuresTotal, receivedAt);
+                lastCollectionSuccessUptimeMs, collectionFailuresTotal, publishSubmitFailuresTotal,
+                connectionAttemptsTotal, receivedAt);
     }
 
     public record Report(
             String bootId, String publisherInstanceId, String seq, String sentUptimeMs, String publisherState,
-            String lastCollectionSuccessUptimeMs, String collectionFailuresTotal, Instant receivedAt) {
+            String lastCollectionSuccessUptimeMs, String collectionFailuresTotal, String publishSubmitFailuresTotal,
+            String connectionAttemptsTotal, Instant receivedAt) {
     }
 }
