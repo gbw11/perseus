@@ -1,10 +1,20 @@
 import { Button, Card, Modal } from '@xenova/ui';
-import { useState, type CSSProperties } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Link, useBlocker, useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
 import { useCreateVm, useTemplates } from '../api/queries';
 import type { Template } from '../api/types';
 import styles from './pages.module.css';
+import {
+  blockVmCreationUnload,
+  estimatedRemainingTime,
+  finishVmCreation,
+  formatVmCreationTime,
+  readLastVmCreationDuration,
+  saveLastVmCreationDuration,
+  startVmCreation,
+  VM_CREATION_LEAVE_MESSAGE,
+} from './vmCreationProgress';
 
 const STEPS = ['템플릿 선택', 'VM 정보 및 리소스', '생성 정보 확인'] as const;
 const TEMPLATE_ACCENTS = [
@@ -32,6 +42,11 @@ export function VmCreatePage() {
   const [name, setName] = useState('');
   const [vcpus, setVcpus] = useState(1);
   const [memory, setMemory] = useState(512);
+  const [creationStartedAt, setCreationStartedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [lastCreationDuration, setLastCreationDuration] = useState(readLastVmCreationDuration);
+  const mounted = useRef(false);
+  const leaveBlocker = useBlocker(create.isPending);
   const zephyr = template?.guest_kind === 'zephyr';
   const spec = zephyr ? ZEPHYR_PROFILE : { vcpus, memory_mib: memory };
   const nameOk = name.length >= 1 && name.length <= 63 && name.trim() === name;
@@ -44,6 +59,29 @@ export function VmCreatePage() {
     spec.memory_mib >= template.min_memory_mib &&
     spec.memory_mib <= MAX_MEMORY;
 
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!create.isPending) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [create.isPending]);
+
+  useEffect(() => {
+    if (!create.isPending) return;
+    window.addEventListener('beforeunload', blockVmCreationUnload);
+    return () => window.removeEventListener('beforeunload', blockVmCreationUnload);
+  }, [create.isPending]);
+
+  useEffect(() => {
+    if (!create.isPending && leaveBlocker.state === 'blocked') leaveBlocker.reset();
+  }, [create.isPending, leaveBlocker]);
+
   const pick = (selected: Template) => {
     setTemplate(selected);
     setMemory(Math.max(selected.min_memory_mib, Math.min(memory, MAX_MEMORY)));
@@ -52,12 +90,28 @@ export function VmCreatePage() {
 
   const submit = () => {
     if (!template) return;
-    create.mutate({
-      name,
-      template_id: template.template_id,
-      template_version: template.version,
-      ...spec,
-    });
+    const startedAt = Date.now();
+    setCreationStartedAt(startedAt);
+    setNow(startedAt);
+    startVmCreation(name, startedAt);
+    void create
+      .mutateAsync({
+        name,
+        template_id: template.template_id,
+        template_version: template.version,
+        ...spec,
+      })
+      .then(() => {
+        const duration = Date.now() - startedAt;
+        saveLastVmCreationDuration(duration);
+        if (mounted.current) {
+          finishVmCreation(name);
+          setLastCreationDuration(duration);
+        }
+      })
+      .catch(() => {
+        finishVmCreation(name);
+      });
   };
 
   const error = create.error instanceof ApiError ? create.error : null;
@@ -293,6 +347,41 @@ export function VmCreatePage() {
             </div>
           )}
 
+          {create.isPending && creationStartedAt !== null && (
+            <div className={styles.createProgress} role="status" aria-live="polite">
+              <div className={styles.createProgressHeading}>
+                <i aria-hidden="true" />
+                <div>
+                  <strong>VM을 생성하고 있습니다</strong>
+                  <span>dom0 작업이 끝날 때까지 최대 15분 정도 걸릴 수 있습니다.</span>
+                </div>
+              </div>
+              <dl>
+                <div>
+                  <dt>경과 시간</dt>
+                  <dd>{formatVmCreationTime(now - creationStartedAt)}</dd>
+                </div>
+                {lastCreationDuration !== null && (
+                  <>
+                    <div>
+                      <dt>직전 생성 소요</dt>
+                      <dd>{formatVmCreationTime(lastCreationDuration)}</dd>
+                    </div>
+                    <div>
+                      <dt>예상 남은 시간</dt>
+                      <dd>
+                        {formatVmCreationTime(
+                          estimatedRemainingTime(now - creationStartedAt, lastCreationDuration),
+                        )}
+                      </dd>
+                    </div>
+                  </>
+                )}
+              </dl>
+              <p>{VM_CREATION_LEAVE_MESSAGE}</p>
+            </div>
+          )}
+
           <div className={styles.createStageActions}>
             <Button variant="secondary" onClick={() => setStep(1)} disabled={create.isPending}>
               이전
@@ -331,6 +420,25 @@ export function VmCreatePage() {
             </dl>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={leaveBlocker.state === 'blocked'}
+        title="VM 생성이 진행 중입니다"
+        onClose={() => leaveBlocker.reset?.()}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => leaveBlocker.reset?.()}>
+              계속 생성 보기
+            </Button>
+            <Button onClick={() => leaveBlocker.proceed?.()}>이동</Button>
+          </>
+        }
+      >
+        <div className={styles.createLeaveNotice}>
+          <strong>{VM_CREATION_LEAVE_MESSAGE}</strong>
+          <p>이 화면을 벗어나도 서버에 전달된 생성 요청은 취소되지 않습니다.</p>
+        </div>
       </Modal>
     </div>
   );
