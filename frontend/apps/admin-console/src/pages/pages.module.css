@@ -2471,6 +2471,10 @@ button.chip:hover:not(.chipOn) {
   margin: 0;
   line-height: 1.55;
 }
+.createTimeoutActions {
+  display: flex;
+  justify-content: flex-end;
+}
 .createLeaveNotice {
   display: grid;
   gap: var(--x-space-2);

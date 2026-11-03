@@ -9,7 +9,12 @@ import { STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
 import { VmOperationNotice } from './VmOperationProgress';
 import { useVmOperationProgress } from './useVmOperationProgress';
-import { finishVmCreation, isVmCreationPending, usePendingVmCreations } from './vmCreationProgress';
+import {
+  finishVmCreation,
+  isVmCreationPending,
+  matchesVmCreation,
+  usePendingVmCreations,
+} from './vmCreationProgress';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
 
@@ -39,14 +44,14 @@ export function VmListPage() {
   const visiblePendingCreations = useMemo(
     () =>
       pendingCreations.filter(
-        (creation) => !items.some((vm) => vm.name === creation.name && vm.state === 'running'),
+        (creation) => !items.some((vm) => matchesVmCreation(vm, creation) && vm.state === 'running'),
       ),
     [items, pendingCreations],
   );
 
   useEffect(() => {
     pendingCreations.forEach((creation) => {
-      if (items.some((vm) => vm.name === creation.name && vm.state === 'running')) {
+      if (items.some((vm) => matchesVmCreation(vm, creation) && vm.state === 'running')) {
         finishVmCreation(creation.name);
       }
     });
@@ -110,7 +115,7 @@ export function VmListPage() {
           const zephyr = vm.guest_kind === 'zephyr';
           const operation = vmOperations.operations[vm.vm_id];
           const operationPending = operation?.status === 'pending';
-          const creationPending = isVmCreationPending(vm.name, vm.state, pendingCreations);
+          const creationPending = isVmCreationPending(vm, pendingCreations);
           const controlsDisabled = operationPending || creationPending;
           return (
             <Card
