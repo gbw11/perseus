@@ -1,0 +1,314 @@
+{
+  "schema_version": "2.1",
+  "provider": "feat/platform/guest-clock-sync HEAD983fa121dbdb7a208ad61cd9d2738394c80d23c3 plus uncommitted 1.0.8 manual memory and managed RAM provider",
+  "package_sha256": "ae11c1ea45d778a543b733b450168ec517d55d5af200fb92978030074b0caa23",
+  "scope": "Exact contract vectors and native Publisher MQTT captures; external delivery/native fixture boundaries are not real board driving or physical device acceptance. No credentials included. Each capture keeps its original VM, source and context independently.",
+  "files": [
+    {
+      "file": "fixtures/manual-memory-busy.json",
+      "source": "fixtures-2.1\\manual-memory-busy.json",
+      "kind": "contract_valid",
+      "sha256": "94f53f15aba00158b6c80d65f5899d42bb3886d709ef6c4a6e0580b3b98d6c9f"
+    },
+    {
+      "file": "fixtures/manual-memory-input-empty.json",
+      "source": "fixtures-2.1\\manual-memory-input-empty.json",
+      "kind": "contract_valid",
+      "sha256": "11032e4d8c5b359d4dd5b054a5525bab2c79619d691cc205979a14a661d9c8d8"
+    },
+    {
+      "file": "fixtures/manual-memory-input-expired.json",
+      "source": "fixtures-2.1\\manual-memory-input-expired.json",
+      "kind": "contract_valid",
+      "sha256": "8bb5dc83c0d4e7c4aeeb8866db3ef5e9e84f5a6092ed07a274e7a5f6ee59776c"
+    },
+    {
+      "file": "fixtures/manual-memory-input-invalid.json",
+      "source": "fixtures-2.1\\manual-memory-input-invalid.json",
+      "kind": "contract_valid",
+      "sha256": "89b5ad6063c905497706a3083ed012f57346b07a51d2c4cb0ef9bb3d16d6b943"
+    },
+    {
+      "file": "fixtures/manual-memory-input-negative-time.json",
+      "source": "fixtures-2.1\\manual-memory-input-negative-time.json",
+      "kind": "contract_valid",
+      "sha256": "bd6a1291ed921bfa8daf3e5a10672caad3e910a94e333ccb004dc1d0415a53f1"
+    },
+    {
+      "file": "fixtures/manual-memory-input-seq-zero.json",
+      "source": "fixtures-2.1\\manual-memory-input-seq-zero.json",
+      "kind": "contract_valid",
+      "sha256": "ec6a2252d06817fca53213a047c55170a86bc6a1172dbb9e11e445c9f8310b29"
+    },
+    {
+      "file": "fixtures/manual-memory-input-unclassified.json",
+      "source": "fixtures-2.1\\manual-memory-input-unclassified.json",
+      "kind": "contract_valid",
+      "sha256": "e66262dd44298949e4818a8a339de7c62b0c06497293d75a7f7fabb76c31cee7"
+    },
+    {
+      "file": "fixtures/manual-memory-pending-empty.json",
+      "source": "fixtures-2.1\\manual-memory-pending-empty.json",
+      "kind": "contract_valid",
+      "sha256": "3e45e9a0f07c27ca380fb40357d8fb884e23343261fa2edf83cc3c3346ae9b0e"
+    },
+    {
+      "file": "fixtures/manual-memory-pending-full.json",
+      "source": "fixtures-2.1\\manual-memory-pending-full.json",
+      "kind": "contract_valid",
+      "sha256": "41a34cebb3d0c2db0faea5786e3e90ebcf9a04e1aeb1e2363ecfaf2742effc7b"
+    },
+    {
+      "file": "fixtures/manual-memory-result-empty.json",
+      "source": "fixtures-2.1\\manual-memory-result-empty.json",
+      "kind": "contract_valid",
+      "sha256": "5ddc5af7ca15e7528b29ece97d6eb5f11c67793603e627f9dd8bac403c988f77"
+    },
+    {
+      "file": "fixtures/manual-memory-result-read.json",
+      "source": "fixtures-2.1\\manual-memory-result-read.json",
+      "kind": "contract_valid",
+      "sha256": "bdb61c519ce27bd8672eff3f40372738aad7527d3831f6279f5ab4e142e237c0"
+    },
+    {
+      "file": "fixtures/manual-memory-result-retained.json",
+      "source": "fixtures-2.1\\manual-memory-result-retained.json",
+      "kind": "contract_valid",
+      "sha256": "136c945bc620c67ab20cdc4c7158c5f375d2d8619d2b0abde5a8e3540885c241"
+    },
+    {
+      "file": "fixtures/manual-memory-result-revoked.json",
+      "source": "fixtures-2.1\\manual-memory-result-revoked.json",
+      "kind": "contract_valid",
+      "sha256": "f699b1b16857dca24c887bf9fd77cd41b1b232000690afcb901290e8f7799097"
+    },
+    {
+      "file": "fixtures/manual-memory-running-empty.json",
+      "source": "fixtures-2.1\\manual-memory-running-empty.json",
+      "kind": "contract_valid",
+      "sha256": "58beee0a9e9986ee747fc6ae1ec056866cc2dd30fb74a12eafe8b3bc4282e46b"
+    },
+    {
+      "file": "fixtures/manual-memory-running-full.json",
+      "source": "fixtures-2.1\\manual-memory-running-full.json",
+      "kind": "contract_valid",
+      "sha256": "5b317f98d5b07a59f84c97533c8e68520931a06eac6bddd8d1ffa31967a5ab42"
+    },
+    {
+      "file": "fixtures/manual-memory-sample-expired.json",
+      "source": "fixtures-2.1\\manual-memory-sample-expired.json",
+      "kind": "contract_valid",
+      "sha256": "535e6bec1686be25b2c991bf847019d712dbcdd2ef36436fda5a6d29af17c31a"
+    },
+    {
+      "file": "fixtures/manual-memory-u64-boundary.json",
+      "source": "fixtures-2.1\\manual-memory-u64-boundary.json",
+      "kind": "contract_valid",
+      "sha256": "855be9a35f34d40475c26a0c5549af92287c5ed0e5112dab86d5552029527a3c"
+    },
+    {
+      "file": "invalid/manual-memory-buffer-on-auto.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-buffer-on-auto.json",
+      "kind": "contract_invalid",
+      "sha256": "801296910b0f48e950fb4b6f735267b88b61a231c68d8d1825afe33c6168c397"
+    },
+    {
+      "file": "invalid/manual-memory-busy-has-buffer.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-busy-has-buffer.json",
+      "kind": "contract_invalid",
+      "sha256": "f15c4cf81f3b682f337d9998f146ce0fae6b6d55a372ef018724ec314cd8feed"
+    },
+    {
+      "file": "invalid/manual-memory-content-over-owned-slot.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-content-over-owned-slot.json",
+      "kind": "contract_invalid",
+      "sha256": "478dea560b9ad9a8f4effaeed2c644861cabefedcc3bbef6b2909843a1857df5"
+    },
+    {
+      "file": "invalid/manual-memory-empty-has-sequence.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-empty-has-sequence.json",
+      "kind": "contract_invalid",
+      "sha256": "dcefd13a7961971ad69282e8db70f3c1c2756db04626282bf025a280e217b4bd"
+    },
+    {
+      "file": "invalid/manual-memory-future-original-time.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-future-original-time.json",
+      "kind": "contract_invalid",
+      "sha256": "c5c76806b86c37955b30ff2d98e648cf20d3a62f7a064ea8fa3a52a9b5988764"
+    },
+    {
+      "file": "invalid/manual-memory-input-contention-u32-overflow.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-input-contention-u32-overflow.json",
+      "kind": "contract_invalid",
+      "sha256": "7500f60a5f5bd97f0821934ae74a65a646a08046579b37188e6152dfc6409203"
+    },
+    {
+      "file": "invalid/manual-memory-input-performed.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-input-performed.json",
+      "kind": "contract_invalid",
+      "sha256": "ec6368e602b97e5fbe23e55cbbcab570b60fda0e9cba9f001f637e5bbbea6823"
+    },
+    {
+      "file": "invalid/manual-memory-input-read-sequence.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-input-read-sequence.json",
+      "kind": "contract_invalid",
+      "sha256": "81a6d673900590fda80b76207e3f5056f6e0d29572aad53c03bcdc336df5397b"
+    },
+    {
+      "file": "invalid/manual-memory-invalid-slot-accounting.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-invalid-slot-accounting.json",
+      "kind": "contract_invalid",
+      "sha256": "07f831197ef7b8225570cd061dc7af5953a852618eea135b8db03531ecc0ba9f"
+    },
+    {
+      "file": "invalid/manual-memory-missing-buffer.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-missing-buffer.json",
+      "kind": "contract_invalid",
+      "sha256": "cf338c3f748b02d2d48c79fc92de5833b50f74da8ae7ae15444c7847d6303c48"
+    },
+    {
+      "file": "invalid/manual-memory-missing-original-metric.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-missing-original-metric.json",
+      "kind": "contract_invalid",
+      "sha256": "120144767c3715d6d576e21fb1c949f6d17e7e0331224c0d459376689ea9f13f"
+    },
+    {
+      "file": "invalid/manual-memory-mixed-owner-regions.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-mixed-owner-regions.json",
+      "kind": "contract_invalid",
+      "sha256": "93584d12b86b7bf7917f473b1c0c79d8ba6e4e42383ce5a5ddb9e987a0ca0f62"
+    },
+    {
+      "file": "invalid/manual-memory-null-observed-buffer.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-null-observed-buffer.json",
+      "kind": "contract_invalid",
+      "sha256": "74deb69f92871a0507d60c319f4e742576e43099d13aac5fe3aaace4b2c89a6c"
+    },
+    {
+      "file": "invalid/manual-memory-positive-source-rc.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-positive-source-rc.json",
+      "kind": "contract_invalid",
+      "sha256": "5fe2e2a9f29ba825829c0be4650c2dc1895701daa350423a293d221077d22f77"
+    },
+    {
+      "file": "invalid/manual-memory-result-missing-performed.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-result-missing-performed.json",
+      "kind": "contract_invalid",
+      "sha256": "ace91530def3250c4675087e3929f0a7c7ea873726ac186002b1e20cf7088199"
+    },
+    {
+      "file": "invalid/manual-memory-revoked-not-boolean.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-revoked-not-boolean.json",
+      "kind": "contract_invalid",
+      "sha256": "4fc7a9913745ee515a01b263df35a3ef0d680c453d96de1a8dd71c1f318e3175"
+    },
+    {
+      "file": "invalid/manual-memory-sequence-u64-overflow.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-sequence-u64-overflow.json",
+      "kind": "contract_invalid",
+      "sha256": "e9e38bfe84852816c416135cc16e04a2e08fece6326b828932d8322d87326477"
+    },
+    {
+      "file": "invalid/manual-memory-stored-missing-sequence.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-stored-missing-sequence.json",
+      "kind": "contract_invalid",
+      "sha256": "37bedf72dac03000274923f49c39765c7b1f8fa130901ab3473043f805f8caf1"
+    },
+    {
+      "file": "invalid/manual-memory-unknown-buffer-property.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-unknown-buffer-property.json",
+      "kind": "contract_invalid",
+      "sha256": "2ba91c01f702ddcab29a3432d9caf8d74eecf96afb037e38e46105493945dc01"
+    },
+    {
+      "file": "invalid/manual-memory-unknown-input-status.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-unknown-input-status.json",
+      "kind": "contract_invalid",
+      "sha256": "68c81a2c1ae703f541785a97a60c63bb44b1f5f71af0b9285757fdd60c455c97"
+    },
+    {
+      "file": "invalid/manual-memory-unknown-phase.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-unknown-phase.json",
+      "kind": "contract_invalid",
+      "sha256": "35bf6019f1cd24a04167d1e69d1a2fc3f05063e3afb3598de3dba410fc1f2c41"
+    },
+    {
+      "file": "invalid/manual-memory-wrong-owner-phase.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-wrong-owner-phase.json",
+      "kind": "contract_invalid",
+      "sha256": "6dc4baad8ef72b01728cc0ba435c46420274c9ffde8474d2b8c8f2e29206536d"
+    },
+    {
+      "file": "invalid/manual-memory-zero-lifetime.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-zero-lifetime.json",
+      "kind": "contract_invalid",
+      "sha256": "b2794ecfafca144ed6f1b0808904c8f7defa87887a79181eeb51bc895695e5cf"
+    },
+    {
+      "file": "invalid/manual-memory-zero-read-sequence.json",
+      "source": "fixtures-2.1\\invalid\\manual-memory-zero-read-sequence.json",
+      "kind": "contract_invalid",
+      "sha256": "04845fd98eee0e2fc2f0deb9b5123b424783d5fe6e3c9813c3a8b2314ca05e1d"
+    },
+    {
+      "file": "native/manual_input.json",
+      "source": "manual-memory/wire-examples/manual_input.json",
+      "kind": "native_capture",
+      "sha256": "c1d3d0d954c7780a48d881d080195ebf38cb42d03a3c6f2b11428092bef5574b"
+    },
+    {
+      "file": "native/manual_pending.json",
+      "source": "manual-memory/wire-examples/manual_pending.json",
+      "kind": "native_capture",
+      "sha256": "86609917331a71f4b66a15ba09b284d463e647b199a591e8d8d4266299ffcf1f"
+    },
+    {
+      "file": "native/manual_running.json",
+      "source": "manual-memory/wire-examples/manual_running.json",
+      "kind": "native_capture",
+      "sha256": "6db1dd9c422be99c7f5cf120bed8f399936725e899b5e46cf29ea3c91de71d3f"
+    },
+    {
+      "file": "native/manual_result.json",
+      "source": "manual-memory/wire-examples/manual_result.json",
+      "kind": "native_capture",
+      "sha256": "7fa5d8e56333dad6c7f5e2abd92a80012528813ecd76e93d1a4cc209b6ec7a26"
+    },
+    {
+      "file": "ram/ram-committed.json",
+      "source": "fixtures-2.1/ram-committed.json",
+      "kind": "ram_fixture",
+      "sha256": "abe9baa6ce9d1d5affe493a79e1c32dc9459e71d6da9ca964c4507cbea42f474"
+    },
+    {
+      "file": "ram/ram-heap-changed.json",
+      "source": "fixtures-2.1/ram-heap-changed.json",
+      "kind": "ram_fixture",
+      "sha256": "bae4cfd6277acf249a337244c39d0ecf9a1ec7457a212a981ea12a21317e20e2"
+    },
+    {
+      "file": "ram/ram-unsupported.json",
+      "source": "fixtures-2.1/ram-unsupported.json",
+      "kind": "ram_fixture",
+      "sha256": "c7377f30fd3ebdee91c0167f24e327421627c460ac187520e496f6273ad91f7b"
+    },
+    {
+      "file": "ram/ram-source-expired.json",
+      "source": "fixtures-2.1/ram-source-expired.json",
+      "kind": "ram_fixture",
+      "sha256": "80f095028504d5ba22b1da69911fc0a1300569fc533ac89a325f7cf96a8dc6f1"
+    },
+    {
+      "file": "ram/ram-free-over-total.json",
+      "source": "fixtures-2.1/ram-free-over-total.json",
+      "kind": "ram_fixture",
+      "sha256": "76da8694189c26464e691cfa2437d777d11955d81882da9dcc231a97c87b3e2a"
+    },
+    {
+      "file": "ram/ram-source-unidentified.json",
+      "source": "fixtures-2.1/ram-source-unidentified.json",
+      "kind": "ram_fixture",
+      "sha256": "9992f29c607066d7e87a7b78782f06355c6bf13eb2583c3735a507c748247b19"
+    }
+  ]
+}
