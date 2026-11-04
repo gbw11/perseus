@@ -1,0 +1,29 @@
+{
+  "environment": "local Windows Chrome, static product connection page only; not phone/USB acceptance",
+  "results": [
+    {
+      "case": "portrait",
+      "viewport": [
+        360,
+        780
+      ],
+      "size": {
+        "width": 360,
+        "inputRight": 307,
+        "inputLeft": 53
+      }
+    },
+    {
+      "case": "landscape",
+      "viewport": [
+        780,
+        360
+      ],
+      "size": {
+        "width": 780,
+        "inputRight": 551,
+        "inputLeft": 229
+      }
+    }
+  ]
+}

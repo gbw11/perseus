@@ -54,6 +54,11 @@ POLICIES: dict[str, Policy] = {
     # 8장 지연 측정
     "probe.ping": Policy(qos=1),
     "probe.pong": Policy(qos=1),
+    # 12장 시뮬레이터 전용 (실차에는 없음)
+    "sim.pose": Policy(qos=0, driving=True),
+    "sim.world": Policy(qos=1, retain=True),
+    "sim.command": Policy(qos=1),
+    "sim.command.result": Policy(qos=1),
 }
 
 # 계약 표에 없는 type. 유실보다 중복이 낫다고 보고 QoS 1 로 둔다.

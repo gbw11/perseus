@@ -17,12 +17,14 @@ import { Link } from 'react-router';
 import type { DriveState } from '../api/drive';
 import { useEvents, useMetrics, useVms } from '../api/queries';
 import { restartSimRace, selectSimTrack, useSimState, type SimView } from '../api/sim';
-import { VM_CPU_PERCENT_METRIC, type MetricSample, type Vm, type VmEvent } from '../api/types';
+import type { Vm, VmEvent } from '../api/types';
+import { cpuPercentOf, latest, memoryPercentOf } from '../domain/vmMetrics';
 import { clock, describe } from '../domain/events';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import {
   ago,
   appHealth,
+  appReportOf,
   appHealthLabel,
   controlLabel,
   MODE_HEALTH,
@@ -34,9 +36,10 @@ import {
   roleOf,
   SAFETY,
   signed,
+  sortVms,
+  UNASSIGNED_COLOR,
   vmOf,
   type AppId,
-  type Role,
 } from '../domain/roles';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
@@ -225,7 +228,7 @@ function AppCard({
   const role = ROLES[app];
   const state = drive?.apps[app];
   const health = appHealth(role, vm, state);
-  const control = controlLabel(role, drive);
+  const control = controlLabel(role, vm, drive);
   const active = !!vm && drive?.control?.active_vm_id === vm.vm_id && drive.control.received_ago_ms < 3000;
   const command = state?.last_command;
   // 시뮬레이터 구성(계약 v1.4 실제 서킷)이면 모니터와 같은 차 1인칭을 카드에도 (자율 = 인식 박스)
@@ -463,20 +466,19 @@ function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null
   );
 }
 
-const MIB_BYTES = 1024 * 1024;
 type VmConnection = 'Connected' | 'Delayed' | 'Disconnected' | 'Unknown';
 
 /**
  * VM Dashboard / Overview.
- * VM A·B는 동일한 주행 VM으로 표현하고, 제어권(Active/Standby)과 주행 모드(AUTO/MANUAL)를 분리한다.
+ * API VM 목록을 그대로 카드로 그리고 VM 이름으로 부른다. 역할은 vm.role 이 있을 때만 표시한다.
+ * 두 주행 VM은 제어권(Active/Standby)과 주행 모드(AUTO/MANUAL)를 분리한다.
  */
 export function DashboardPage() {
   const { drive, socket } = useDrive();
   const vms = useVms();
   const events = useEvents({ limit: 30 });
-  const items = vms.data?.items ?? [];
+  const items = sortVms(vms.data?.items ?? []);
   const activeVm = items.find((vm) => vm.vm_id === drive?.control?.active_vm_id);
-  const activeRole = activeVm ? roleOf(activeVm, drive) : null;
 
   return (
     <div className={styles.overviewPage}>
@@ -492,10 +494,7 @@ export function DashboardPage() {
           label="DRIVE MODE"
           value={drive?.control?.mode ? MODE_LABEL[drive.control.mode] : 'Unknown'}
         />
-        <OverviewSummaryItem
-          label="CONTROL AUTHORITY"
-          value={activeRole?.vmLabel ?? activeVm?.name ?? 'None'}
-        />
+        <OverviewSummaryItem label="CONTROL AUTHORITY" value={activeVm?.name ?? 'None'} />
         <OverviewSummaryItem
           label="TELEMETRY"
           value={socket === 'open' ? 'Connected' : socket === 'connecting' ? 'Connecting' : 'Disconnected'}
@@ -511,20 +510,17 @@ export function DashboardPage() {
         </div>
       )}
 
+      {vms.isSuccess && items.length === 0 && <div className={styles.statePanel}>등록된 VM이 없습니다.</div>}
+
       <div className={styles.vmGrid}>
-        {ROLE_ORDER.map((app) => {
-          const role = ROLES[app];
-          const vm = vmOf(app, items, drive);
-          return (
-            <VmOverviewCard
-              key={app}
-              role={role}
-              vm={vm}
-              drive={drive}
-              latestEvent={overviewLatestEvent(events.data?.items, vm?.vm_id)}
-            />
-          );
-        })}
+        {items.map((vm) => (
+          <VmOverviewCard
+            key={vm.vm_id}
+            vm={vm}
+            drive={drive}
+            latestEvent={overviewLatestEvent(events.data?.items, vm.vm_id)}
+          />
+        ))}
       </div>
     </div>
   );
@@ -540,39 +536,38 @@ function OverviewSummaryItem({ label, value, tone }: { label: string; value: str
 }
 
 function VmOverviewCard({
-  role,
   vm,
   drive,
   latestEvent,
 }: {
-  role: Role;
-  vm: Vm | undefined;
+  vm: Vm;
   drive: DriveState | null;
   latestEvent: VmEvent | undefined;
 }) {
-  const metrics = useMetrics(vm?.vm_id ?? '', vm?.guest_kind === 'linux');
+  const role = roleOf(vm, drive);
+  const metrics = useMetrics(vm.vm_id, true);
   const samples = metrics.data?.items ?? [];
-  const lastSample = samples.at(-1);
-  const cpu = overviewMetricValue(lastSample, VM_CPU_PERCENT_METRIC);
-  const usedBytes = overviewMetricValue(lastSample, 'memory_used_bytes');
-  const memory = vm && usedBytes != null ? (usedBytes / (vm.memory_mib * MIB_BYTES)) * 100 : null;
-  const app = drive?.apps[role.app];
+  const cpu = latest(samples, cpuPercentOf);
+  const memory = latest(samples, (sample) => memoryPercentOf(sample, vm));
+  const app = appReportOf(vm, drive);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
   const connection = overviewConnection(vm, app);
-  const health = vm ? appHealth(role, vm, app) : 'stopped';
+  const health = appHealth(role, vm, app);
   const eventSummary = latestEvent
-    ? `${clock(latestEvent.occurred_at)} · ${describe(latestEvent, () => role.vmLabel).title}`
+    ? `${clock(latestEvent.occurred_at)} · ${describe(latestEvent, () => vm.name).title}`
     : '최근 중요 이벤트 없음';
-  const unavailable = overviewMetricUnavailable(vm, metrics.isPending, samples.length);
+  const unavailable = overviewMetricUnavailable(metrics.isPending, samples.length);
+  const driving = role ? role.driving : vm.guest_kind === 'zephyr';
 
-  const content = (
-    <>
+  const style = { '--vm-accent': role?.color ?? UNASSIGNED_COLOR } as CSSProperties;
+  return (
+    <Link className={styles.vmCard} style={style} to={`/dashboard/vms/${vm.vm_id}`}>
       <div className={styles.vmCardTop}>
         <div>
-          <span className={styles.vmKicker}>{role.title}</span>
-          <h3>{role.vmLabel}</h3>
+          <span className={styles.vmKicker}>{role?.title ?? '역할 미지정'}</span>
+          <h3>{vm.name}</h3>
           <p>
-            {role.driving ? 'Drive' : 'Infotainment'} · {vm ? osLabel(vm) : 'Not discovered'}
+            {driving ? 'Drive' : 'Infotainment'} · {osLabel(vm)}
           </p>
         </div>
         <span className={styles.authority} data-authority={authority.toLowerCase()}>
@@ -581,11 +576,7 @@ function VmOverviewCard({
       </div>
 
       <div className={styles.vmStatusRows}>
-        <OverviewStatusLine
-          label="VM"
-          value={vm ? STATE_LABEL[vm.state] : '연결 대기'}
-          tone={vm ? STATE_HEALTH[vm.state] : 'stopped'}
-        />
+        <OverviewStatusLine label="VM" value={STATE_LABEL[vm.state]} tone={STATE_HEALTH[vm.state]} />
         <OverviewStatusLine label="APP" value={overviewAppStatus(health, !!app)} tone={health} />
         <OverviewStatusLine
           label="LINK"
@@ -601,7 +592,7 @@ function VmOverviewCard({
           label="Memory"
           value={memory}
           unavailable={unavailable}
-          detail={vm ? `${vm.memory_mib} MiB allocated` : undefined}
+          detail={vm.guest_kind === 'zephyr' ? 'Kernel heap' : `${vm.memory_mib} MiB allocated`}
         />
       </div>
 
@@ -610,20 +601,9 @@ function VmOverviewCard({
           <span>RECENT SIGNAL</span>
           <p>{eventSummary}</p>
         </div>
-        <strong>{vm ? 'View details ↗' : 'Waiting for VM'}</strong>
+        <strong>View details ↗</strong>
       </div>
-    </>
-  );
-
-  const style = { '--vm-accent': role.color } as CSSProperties;
-  return vm ? (
-    <Link className={styles.vmCard} style={style} to={`/dashboard/vms/${vm.vm_id}`}>
-      {content}
     </Link>
-  ) : (
-    <article className={`${styles.vmCard} ${styles.vmCardMissing}`} style={style}>
-      {content}
-    </article>
   );
 }
 
@@ -678,8 +658,7 @@ function OverviewMetricBar({
   );
 }
 
-function overviewConnection(vm: Vm | undefined, app: DriveState['apps'][string] | undefined): VmConnection {
-  if (!vm) return 'Unknown';
+function overviewConnection(vm: Vm, app: DriveState['apps'][string] | undefined): VmConnection {
   if (app?.heartbeat_ago_ms != null) {
     if (app.heartbeat_ago_ms <= 3000) return 'Connected';
     if (app.heartbeat_ago_ms <= 10_000) return 'Delayed';
@@ -706,13 +685,7 @@ function overviewAppStatus(health: Health, hasApp: boolean): string {
   return 'Unknown';
 }
 
-function overviewMetricValue(sample: MetricSample | undefined, name: string): number | null {
-  return sample?.values.find((value) => value.name === name)?.value ?? null;
-}
-
-function overviewMetricUnavailable(vm: Vm | undefined, pending: boolean, sampleCount: number): string | null {
-  if (!vm) return 'VM not discovered';
-  if (vm.guest_kind === 'zephyr') return 'Guest metrics not reported';
+function overviewMetricUnavailable(pending: boolean, sampleCount: number): string | null {
   if (pending) return 'Loading metrics';
   if (sampleCount === 0) return 'No metric data';
   return null;

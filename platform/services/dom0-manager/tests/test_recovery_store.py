@@ -229,7 +229,7 @@ def test_production_sink_confirms_local_record_not_puback(tmp_path, monkeypatch)
     monkeypatch.delenv('XENOVA_RECOVERY_DRIVE_CONFIG', raising=False)
     monkeypatch.setattr(entry.RecoverySettings, 'from_env', lambda: RecoverySettings(state_dir=str(tmp_path)))
     settings = config.Settings.from_env({'XENOVA_DRIVER': 'platform'})
-    monkeypatch.setattr(entry.Settings, 'from_env', lambda: settings)
+    monkeypatch.setattr(entry.Settings, 'platform_from_env', lambda: settings)
     monkeypatch.setattr(entry, 'acquire', lambda *a: 0)
     monkeypatch.setattr(entry, 'load_manager', lambda *a, **kw: SimpleNamespace(data=tmp_path))
     monkeypatch.setattr(entry, '_xl', lambda *a: None)
@@ -247,3 +247,71 @@ def test_production_sink_confirms_local_record_not_puback(tmp_path, monkeypatch)
     assert sink(value) is True
     assert EventLog(tmp_path / 'recovery-events.jsonl').events() == [value]
     assert publish.call_args.kwargs == {'qos': 1, 'retain': False, 'wait_s': 0}
+
+
+
+@pytest.mark.parametrize("drive_config", [False, True])
+def test_entrypoint_marks_drive_vms_unknown_without_a_drive_config(tmp_path, monkeypatch, drive_config):
+    """drive config 가 없으면 엔트리포인트는 주행 VM 을 '모름'(None)으로 넘긴다. 엔진은 그때 Zephyr force 를 모두 보류한다."""
+    from types import SimpleNamespace
+
+    from dom0_manager import config
+    from dom0_manager.recovery import __main__ as entry
+    from dom0_manager.recovery.config import RecoverySettings
+
+    class Captured(Exception):
+        pass
+
+    captured = {}
+
+    def engine(*args, **kwargs):
+        captured.update(kwargs)
+        raise Captured
+
+    drive = ("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+    if drive_config:
+        import sys
+        import types
+
+        monkeypatch.setenv("XENOVA_RECOVERY_DRIVE_CONFIG", str(tmp_path / "drive.json"))
+        fake = types.ModuleType("dom0_manager.recovery.rejoin")  # 실제 rejoin 은 xenova_mqtt·마운트된 데이터가 필요하다
+        fake.production = lambda *a: SimpleNamespace(vm_ids=drive, cache=None)
+        monkeypatch.setitem(sys.modules, "dom0_manager.recovery.rejoin", fake)
+    else:
+        monkeypatch.delenv("XENOVA_RECOVERY_DRIVE_CONFIG", raising=False)
+    monkeypatch.setattr(entry.RecoverySettings, "from_env", lambda: RecoverySettings(state_dir=str(tmp_path)))
+    settings = config.Settings.from_env({"XENOVA_DRIVER": "platform"})
+    monkeypatch.setattr(entry.Settings, "platform_from_env", lambda: settings)
+    monkeypatch.setattr(entry, "acquire", lambda *a: 0)
+    monkeypatch.setattr(entry, "load_manager", lambda *a, **kw: SimpleNamespace(data=tmp_path))
+    monkeypatch.setattr(entry, "_xl", lambda *a: None)
+    monkeypatch.setattr(entry, "PlatformObserver", lambda *a, **kw: SimpleNamespace(confirm=lambda *a: None))
+    monkeypatch.setattr(entry, "build_client", lambda *a: SimpleNamespace(start=lambda **kw: False))
+    monkeypatch.setattr(entry, "subscribe_liveness", lambda *a, **kw: None)
+    monkeypatch.setattr(entry, "RecoveryEngine", engine)
+    with pytest.raises(Captured):
+        entry.main()
+    assert captured["drive_vm_ids"] == (drive if drive_config else None)
+
+
+
+def test_legacy_graceful_failed_flag_moves_to_the_attempted_execution():
+    """실행을 적기 전 상태 파일의 graceful_failed 는 그 시도가 겨냥한 원 실행으로 옮긴다. 원 실행을 모르면 승격하지 않는다."""
+    from uuid import UUID
+
+    from dom0_manager.recovery.state import RecoveryRecord
+
+    base = {"recovery_id": str(UUID(int=1)), "vm_id": "4be41d5f-b8ef-408b-9709-7fe5ac11231f", "reason": "HEARTBEAT_LOST",
+            "guest_kind": "linux", "status": "BACKOFF", "detected_at": "2026-11-02T00:00:00.000Z", "detected_monotonic": 1.0,
+            "attempt": 1, "due_monotonic": 2.0, "attempt_closed": True}
+    attempt_id = str(UUID(int=9))
+    request = {"vm_id": base["vm_id"], "recovery_attempt_id": attempt_id, "mode": "graceful-restart",
+               "expected_execution": {"execution_id": "exec-1"}}
+    migrated = RecoveryRecord.from_json({**base, "graceful_failed": True, "recovery_attempt_id": attempt_id, "request": request,
+                                         "mode": "graceful-restart"})
+    assert migrated.graceful_failed_execution_id == "exec-1"
+    assert RecoveryRecord.from_json({**base, "graceful_failed": True}).graceful_failed_execution_id is None
+    assert RecoveryRecord.from_json({**base, "graceful_failed": False}).graceful_failed_execution_id is None
+    for broken in ("true", 1, {}, None):  # bool 이 아닌 옛 값은 손상이다(정상 복원으로 바꾸지 않음)
+        with pytest.raises(ValueError, match="graceful_failed"):
+            RecoveryRecord.from_json({**base, "graceful_failed": broken})

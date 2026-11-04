@@ -20,6 +20,17 @@ static struct xt_inventory info={.os_version=KERNEL_VERSION_STRING,.build_id="na
 	.profile="diagnostic_exercise",.task_id="diagnostic.exercise",.interface_name="native-tap",
 	.diagnostics=true,.timing=true,.threads=true,.heap=true,.publisher=true};
 
+/* TAP has no Xen ring. Supply deterministic bytes at the netfront boundary. */
+static int test_network(struct xdiag_network *out, void *context)
+{
+	ARG_UNUSED(context);
+	uint64_t age=k_uptime_get();
+	uint64_t epoch=age>=4500 ? 2 : 1;
+	uint64_t elapsed=epoch==2 ? age-4500 : age;
+	*out=(struct xdiag_network){.rx_bytes=elapsed*8,.tx_bytes=elapsed*4,.counter_epoch=epoch};
+	return 0;
+}
+
 static int bootstrap_load(struct xt_bootstrap *out,int64_t deadline,void *context)
 {
 	ARG_UNUSED(context);
@@ -33,8 +44,16 @@ static int bootstrap_load(struct xt_bootstrap *out,int64_t deadline,void *contex
 
 void xt_test_observation(const struct xdiag_snapshot *raw,const struct xt_observation *s)
 {
-	printf("XT_SOURCE {\"start_ms\":\"%" PRIu64 "\",\"end_ms\":\"%" PRIu64 "\",\"heap_used\":\"%" PRIu64 "\",\"heap_free\":\"%" PRIu64 "\",\"completed\":\"%" PRIu64 "\",\"in_flight\":%s,\"jitter\":\"%" PRId64 "\",\"timing_rc\":%d}\n",s->start_ms,s->end_ms,(uint64_t)raw->heap_allocated_bytes,(uint64_t)raw->heap_free_bytes,raw->timing.loop_seq,raw->timing.in_flight ? "true" : "false",raw->timing.last_jitter_us,raw->timing_rc);
 	const struct xdr_snapshot *r=&raw->resources;
+	printf("XT_SOURCE {\"start_ms\":\"%" PRIu64 "\",\"end_ms\":\"%" PRIu64
+		"\",\"heap_used\":\"%" PRIu64 "\",\"heap_free\":\"%" PRIu64
+		"\",\"completed\":\"%" PRIu64 "\",\"in_flight\":%s,\"jitter\":\"%" PRId64
+		"\",\"timing_rc\":%d,\"rx_bytes\":\"%" PRIu64 "\",\"tx_bytes\":\"%" PRIu64
+		"\",\"rx_bytes_per_s\":\"%" PRIu64 "\",\"net_uptime_ms\":\"%" PRIu64
+		"\",\"net_epoch\":\"%" PRIu64 "\"}\n",
+		s->start_ms,s->end_ms,(uint64_t)raw->heap_allocated_bytes,(uint64_t)raw->heap_free_bytes,
+		raw->timing.loop_seq,raw->timing.in_flight ? "true" : "false",raw->timing.last_jitter_us,
+		raw->timing_rc,r->rx_bytes,r->tx_bytes,r->rx_bytes_per_s,r->net_end_ms,r->net_epoch);
 	printf("XT_RESOURCE {\"sample\":\"%llu\",\"rc\":%d,\"total\":\"%llu\",\"busy\":\"%llu\",\"total_delta\":\"%llu\",\"busy_delta\":\"%llu\"}\n",
 	 r->sample,r->cpu.rc,r->raw.total,r->raw.busy,r->cpu.total_delta,r->cpu.busy_delta);
 }
@@ -59,6 +78,7 @@ int main(void)
 	}
 	assert(!xdiag_boot("native-main",0));
 	assert(!xdiag_loop_init(&loop,20000,20000));assert(!xdiag_loop_watch(&loop));
+	assert(!xdiag_network_register(test_network,NULL));
 	assert(!xt_start(bootstrap_load,NULL,&info));
 	int64_t start=k_uptime_get();bool stalled=false,requested=false,restarted=false,history_requested=false;
 	int64_t duration=option("XT_TEST_DURATION_MS",25000),stall=option("XT_TEST_STALL_MS",8000);

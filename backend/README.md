@@ -128,6 +128,20 @@ GET /api/v1/drive/state      속도·조향·전압·경고·앱 명령·복구 
 WS  /ws/v1/drive/state       같은 Drive 스냅샷 (첫 프레임 사용자 JWT)
 ```
 
+자율주행 재개와 취소는 운영자 콘솔에서 보냅니다 (MQTT 계약 §5.2·§6, v1.7).
+
+```text
+POST   /api/v1/drive/resume  AUTO_READY 에서 재개 요청 → console/resume 에 drive.resume.requested (202, 그 밖의 모드 409 NOT_AUTO_READY)
+DELETE /api/v1/drive/resume  3초 카운트다운 취소 → drive.resume.cancel_requested (202, 카운트다운 없으면 409 NO_RESUME_COUNTDOWN)
+```
+
+- 두 요청 모두 envelope `causation_id` 에 지금 받은 `vehicle.control` 의 `message_id`, payload `expected_generation` 에
+  그 세대(취소는 카운트다운을 시작한 세대)를 넣습니다. verified 게이트웨이는 이 문맥이 맞지 않는 요청을 버립니다.
+- 202 는 "보냈다" 입니다. 결과는 게이트웨이의 `drive.resume.accepted` / `drive.resume.cancelled`(운영자 취소면
+  `reason: operator_cancelled`, 모드 유지)로 오고 `GET /api/v1/drive/state` 의 `resume`(`requested_by` 포함)과 이벤트 로그에 반영됩니다.
+- 취소가 오면 `resume` 은 null 이 되고, 10초 동안 `resume_cancel`(`reason`·`requested_by`·`generation`·`received_ago_ms`)이 남아
+  화면이 운영자 취소와 조건이 깨져 끝난 카운트다운을 구분할 수 있습니다.
+
 - VM A/B의 현재 구동 여부는 고정 역할명이 아니라 신선한 `active_vm_id`와의 일치로 판정합니다.
   일치하는 정상 주행 VM이 Active이고, 나머지 정상 주행 VM이 Standby입니다. source가 `stale`,
   `disconnected`, `unknown`이면 이전 ID로 현재 구동 VM을 추론하지 않습니다.

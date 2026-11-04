@@ -9,7 +9,7 @@ from xenova_mqtt import Message, topics
 from xenova_mqtt import envelope as env
 from xenova_simulator.__main__ import handle
 from xenova_simulator.config import SOURCE_ID, SimSettings
-from xenova_simulator.sim import Simulator
+from xenova_simulator.sim import VM_APP_EVENTS, Simulator
 
 
 class Clock:
@@ -36,13 +36,20 @@ class FakeClient:
     def publish(self, topic, message_type, payload, **_):
         self.published.append((topic, message_type, payload))
 
-    def control(self, generation, mode, active_app):
-        envelope = {"type": "vehicle.control", "payload": {"generation": generation, "mode": mode, "active_app": active_app}}
+    def control(self, generation, mode, active_app, active_vm_id=None):
+        payload = {"generation": generation, "mode": mode, "active_app": active_app, "active_vm_id": active_vm_id}
+        envelope = {"type": "vehicle.control", "payload": payload}
         self.latest_by_topic[topics.vehicle_control()] = Message(topics.vehicle_control(), envelope)
 
     def app(self, app_id, message_type, payload):
         topic = topics.app_events(app_id)
         self.handlers[topic](Message(topic, {"type": message_type, "payload": payload}))
+
+    def vm_app(self, vm_id, app_id, message_type, payload):
+        """공통 A/B 펌웨어(verified) 토픽. 실제 클라이언트처럼 와일드카드 구독 핸들러로 보낸다."""
+        topic = topics.vm_app_events(vm_id, app_id)
+        handler = next(h for f, h in self.handlers.items() if topics.matches(f, topic))
+        handler(Message(topic, {"type": message_type, "payload": payload}))
 
 
 @pytest.fixture
@@ -71,7 +78,22 @@ def drive(sim, clock, seconds, dt=0.01, feed=None):
 
 
 def test_subscribes_control_and_both_drive_apps(client, sim):
-    assert set(client.handlers) == {topics.app_events("autonomous"), topics.app_events("manual")}
+    assert set(client.handlers) == {topics.app_events("autonomous"), topics.app_events("manual"), VM_APP_EVENTS}
+
+
+def test_starts_on_track_start_pose(sim):
+    v = sim.vehicle
+    assert (v.x, v.y, v.heading_rad) == sim.track.start_pose()
+    assert sim.track.id == "spielberg"
+
+
+def test_select_track_clears_obstacles_and_goes_to_start(sim):
+    sim.add_obstacle_ahead(1.0)
+    sim.select_track("monza")
+    assert sim.track.id == "monza" and sim.vehicle.obstacles == []
+    assert (sim.vehicle.x, sim.vehicle.y, sim.vehicle.heading_rad) == sim.track.start_pose()
+    _, off, progress = sim.track_frame()
+    assert off == pytest.approx(0.0, abs=1e-9) and progress == pytest.approx(0.0, abs=1e-6)
 
 
 def test_no_control_means_no_motion(client, clock, sim):
@@ -81,8 +103,8 @@ def test_no_control_means_no_motion(client, clock, sim):
 
 def test_active_app_command_moves_car(client, clock, sim):
     client.control(7, "MANUAL", "manual")
-    drive(sim, clock, 1.0, feed=lambda: client.app("manual", "drive.command", {"generation": 7, "v_mps": 1.0, "steer_rad": 0.0}))
-    assert sim.vehicle.v_mps == pytest.approx(1.0)
+    drive(sim, clock, 2.0, feed=lambda: client.app("manual", "drive.command", {"generation": 7, "v_mps": 1.0, "steer_rad": 0.0}))
+    assert sim.vehicle.v_mps == pytest.approx(1.0, rel=0.01)
     assert sim.applied_generation == 7
     assert sim.watchdog is False
 
@@ -136,7 +158,7 @@ def test_estop_stops_and_flags(client, clock, sim):
 
 
 def test_obstacle_flag_in_status(client, clock, sim):
-    sim.vehicle.place_obstacle_ahead(0.3)
+    sim.vehicle.place_obstacle_ahead(0.6)
     drive(sim, clock, 0.1)
     assert client.published[-1][2]["flags"]["obstacle"] is True
 
@@ -166,7 +188,7 @@ def test_malformed_command_is_dropped(client, clock, sim):
 
 def test_terminal_commands(sim):
     out, stop = io.StringIO(), threading.Event()
-    handle("o 0.3", sim, stop, out)
+    handle("o 0.6", sim, stop, out)
     assert sim.vehicle.obstacle_ahead()
     handle("c", sim, stop, out)
     assert not sim.vehicle.obstacles
@@ -175,8 +197,45 @@ def test_terminal_commands(sim):
     handle("e", sim, stop, out)
     assert not sim.estop
     handle("s", sim, stop, out)
-    assert "gen=0" in out.getvalue()
+    assert "gen=0" in out.getvalue() and "track=spielberg" in out.getvalue()
+    handle("o 1.0 tires", sim, stop, out)
+    assert sim.vehicle.obstacles[-1].kind == "tires"
+    handle("t", sim, stop, out)
+    assert "interlagos" in out.getvalue()
+    handle("t spa", sim, stop, out)
+    assert sim.track.id == "spa" and not sim.vehicle.obstacles
     handle("o x", sim, stop, out)
     assert "사용법" in out.getvalue()
     handle("q", sim, stop, out)
     assert stop.is_set()
+
+
+A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+
+def test_verified_command_from_active_vm_moves_car(client, clock, sim):
+    client.control(4, "AUTO", "autonomous", A)
+    drive(sim, clock, 1.0, feed=lambda: client.vm_app(A, "autonomous", "drive.command", {"generation": 4, "v_mps": 0.5, "steer_rad": 0.1}))
+    assert sim.vehicle.v_mps > 0.4 and sim.applied_generation == 4 and sim.watchdog is False
+
+
+def test_verified_command_from_other_vm_is_ignored(client, clock, sim):
+    client.control(4, "AUTO", "autonomous", A)
+    drive(sim, clock, 1.0, feed=lambda: client.vm_app(B, "autonomous", "drive.command", {"generation": 4, "v_mps": 0.5, "steer_rad": 0.0}))
+    assert sim.vehicle.v_mps == 0.0 and sim.watchdog is True
+
+
+def test_verified_readiness_on_same_topic_is_ignored(client, clock, sim):
+    client.control(4, "MANUAL", "manual", B)
+    client.vm_app(B, "manual", "drive.command", {"generation": 4, "v_mps": 0.3, "steer_rad": 0.0})
+    client.vm_app(B, "manual", "app.readiness", {"ready": True})
+    assert sim.target() == (0.3, 0.0)
+
+
+def test_status_speed_comes_from_encoder(client, clock, sim):
+    client.control(1, "MANUAL", "manual")
+    drive(sim, clock, 2.0, feed=lambda: client.app("manual", "drive.command", {"generation": 1, "v_mps": 0.5, "steer_rad": 0.0}))
+    status = client.published[-1][2]
+    assert status["v_mps"] == pytest.approx(0.5, abs=0.02)
+    assert sim.vehicle.encoder_count > 0

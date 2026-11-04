@@ -1,0 +1,25 @@
+{
+  "issue": "S15P31E110-351",
+  "date": "2026-11-03",
+  "base": "eb0f009",
+  "environment": "local WSL, Python 3.14, systemd-analyze 259; not Raspberry Pi",
+  "tests": 103,
+  "new_mobile_runtime_tests": 26,
+  "existing_regression_tests": 77,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "warnings": ["Existing Starlette/httpx TestClient deprecation"],
+  "real_local_checks": [
+    "Local HTTP success, 401, 302, 503, no redirects or proxy, bounded body",
+    "Authentication and presentation via existing create_app / TestClient",
+    "systemd-analyze condition: marker absent, present, removed",
+    "bbappend install shell fragment into isolated temporary root"
+  ],
+  "board_accessed": false,
+  "physical_phone_verified": false,
+  "usb_verified": false,
+  "bitbake_build_verified": false,
+  "production_services_changed": false,
+  "existing_tracked_files_changed": false
+}

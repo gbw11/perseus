@@ -14,13 +14,18 @@ import type {
   SignupResponse,
   Template,
   TokenResponse,
+  UpdateVcpuPinningRequest,
   Vm,
   VmListResponse,
+  VmResourceUpdate,
+  VmResources,
 } from './types';
+import { clearVmList, loadVmList, saveVmList } from './vmListCache';
 
 export const keys = {
   vms: ['vms'] as const,
   vm: (id: string) => ['vms', id] as const,
+  vmResources: (id: string) => ['vms', id, 'resources'] as const,
   templates: ['templates'] as const,
   events: (query: string) => ['events', query] as const,
   metrics: (id: string, minutes = 5) => ['vms', id, 'metrics', minutes] as const,
@@ -35,8 +40,15 @@ const POLL_MS = 5000;
 export function useVms(pollMs = POLL_MS) {
   return useQuery({
     queryKey: keys.vms,
-    queryFn: ({ signal }) => request<VmListResponse>('/api/v1/vms', { signal }),
+    queryFn: async ({ signal }) => {
+      const list = await request<VmListResponse>('/api/v1/vms', { signal });
+      saveVmList(list);
+      return list;
+    },
     refetchInterval: pollMs,
+    // 새로고침 직후에는 이 탭이 마지막으로 받은 목록을 먼저 보여 주고 곧바로 다시 읽는다 (S15P31E110-345)
+    initialData: () => loadVmList()?.data,
+    initialDataUpdatedAt: () => loadVmList()?.savedAt,
   });
 }
 
@@ -45,6 +57,44 @@ export function useVm(vmId: string) {
     queryKey: keys.vm(vmId),
     queryFn: ({ signal }) => request<Vm>(`/api/v1/vms/${encodeURIComponent(vmId)}`, { signal }),
     refetchInterval: POLL_MS,
+  });
+}
+
+export function useVmResources(vmId: string) {
+  return useQuery({
+    queryKey: keys.vmResources(vmId),
+    queryFn: ({ signal }) =>
+      request<VmResources>(`/api/v1/vms/${encodeURIComponent(vmId)}/resources`, { signal }),
+    enabled: Boolean(vmId),
+    refetchInterval: POLL_MS,
+  });
+}
+
+export function useUpdateVcpuPinning(vmId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateVcpuPinningRequest) =>
+      request<VmResources>(`/api/v1/vms/${encodeURIComponent(vmId)}/resources/vcpu-pinning`, {
+        method: 'PUT',
+        body,
+      }),
+    onSettled: () => client.invalidateQueries({ queryKey: keys.vmResources(vmId) }),
+  });
+}
+
+export function useUpdateVmResource(vmId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ kind, body }: VmResourceUpdate) =>
+      request<VmResources>(`/api/v1/vms/${encodeURIComponent(vmId)}/resources/${kind}`, {
+        method: 'PUT',
+        body,
+      }),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: keys.vmResources(vmId) });
+      void client.invalidateQueries({ queryKey: keys.vm(vmId) });
+      void client.invalidateQueries({ queryKey: keys.vms });
+    },
   });
 }
 
@@ -160,6 +210,7 @@ export function useLogout() {
     mutationFn: () => request<void>('/api/v1/auth/logout', { method: 'POST' }),
     onSettled: () => {
       setSession(null);
+      clearVmList();
       client.clear();
     },
   });

@@ -56,6 +56,7 @@ export function initialVms(): Vm[] {
       template_version: '1.0.0',
       vcpus: 1,
       memory_mib: 16,
+      role: 'primary_drive',
     },
     {
       vm_id: VM_IDS.manual,
@@ -68,6 +69,7 @@ export function initialVms(): Vm[] {
       template_version: '1.0.0',
       vcpus: 1,
       memory_mib: 16,
+      role: 'backup_drive',
     },
     {
       vm_id: VM_IDS.interaction,
@@ -80,6 +82,7 @@ export function initialVms(): Vm[] {
       template_version: '1.0.0',
       vcpus: 1,
       memory_mib: 512,
+      role: 'interaction',
     },
   ];
 }

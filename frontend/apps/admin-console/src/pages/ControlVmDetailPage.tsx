@@ -2,11 +2,15 @@ import { Button, Card, Modal, useToast } from '@xenova/ui';
 import { useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../api/client';
-import { useVm, useVmAction, useVms, type VmAction } from '../api/queries';
+import { useVm, useVmResources, useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
 import { osLabel } from '../domain/roles';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
+import { ResourceAdjustmentPanel } from './ResourceAdjustmentPanel';
+import { VcpuPinningPanel } from './VcpuPinningPanel';
+import { VmOperationNotice } from './VmOperationProgress';
+import { useVmOperationProgress } from './useVmOperationProgress';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
 
@@ -17,33 +21,39 @@ const AGENT_LABEL: Record<NonNullable<Vm['agent_status']>, string> = {
   UNKNOWN: '상태 확인 대기',
 };
 
+function pinningSummary(mappings: { vcpu: number; pcpus: number[] }[]): string {
+  if (!mappings.length) return '조회 대기';
+  const labels = mappings.map((mapping) => mapping.pcpus.join(', '));
+  return labels.every((label) => label === labels[0]) ? `pCPU ${labels[0]}` : 'vCPU별 설정';
+}
+
 /** Dashboard의 관측 상세와 분리된 VM Control 전용 관리 상세. */
 export function ControlVmDetailPage() {
   const { vmId = '' } = useParams();
   const vm = useVm(vmId);
+  const resources = useVmResources(vmId);
   const vms = useVms();
-  const action = useVmAction();
+  const vmOperations = useVmOperationProgress();
   const toast = useToast();
   const navigate = useNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const index = vms.data?.items.findIndex((item) => item.vm_id === vmId) ?? -1;
-  const accent = index >= 0 ? VM_ACCENTS[index % VM_ACCENTS.length] : 'var(--x-primary)';
+  const accent = (index >= 0 ? VM_ACCENTS[index % VM_ACCENTS.length] : undefined) ?? 'var(--x-primary)';
 
   const run = (target: Vm, kind: VmAction) =>
-    action.mutate(
-      { vmId: target.vm_id, action: kind },
-      {
-        onSuccess: () => {
-          toast.show(
-            `${target.name}: ${kind === 'start' ? '시작' : kind === 'stop' ? '정지' : '삭제'} 요청 완료`,
-            'ok',
-          );
-          if (kind === 'delete') navigate('/control');
-        },
-        onError: (error) =>
-          toast.show(error instanceof ApiError ? error.message : String(error), 'fault', 5000),
+    vmOperations.run(target, kind, {
+      onSuccess: () => {
+        toast.show(
+          `${target.name}: ${kind === 'start' ? '시작' : kind === 'stop' ? '정지' : '삭제'} 요청 완료`,
+          'ok',
+        );
+        if (kind === 'delete') navigate('/control');
       },
-    );
+      onError: (_error, message) => toast.show(message, 'fault', 5000),
+    });
+
+  const operation = vmOperations.operations[vmId];
+  const operationPending = operation?.status === 'pending';
 
   return (
     <div className={styles.controlDetailPage} style={{ '--vm-accent': accent } as CSSProperties}>
@@ -133,17 +143,18 @@ export function ControlVmDetailPage() {
                 <strong>{STATE_LABEL[vm.data.state]}</strong>
                 <small>명령 실행 후 서버에서 다시 조회한 상태가 화면에 반영됩니다.</small>
               </div>
+              <VmOperationNotice operation={operation} now={vmOperations.now} />
               <div className={styles.lifecycleActions}>
                 <Button
                   onClick={() => run(vm.data, 'start')}
-                  disabled={vm.data.state === 'running' || action.isPending}
+                  disabled={vm.data.state === 'running' || operationPending}
                 >
                   VM 시작
                 </Button>
                 <Button
                   variant="secondary"
                   onClick={() => run(vm.data, 'stop')}
-                  disabled={vm.data.state !== 'running' || action.isPending}
+                  disabled={vm.data.state !== 'running' || operationPending}
                 >
                   VM 정지
                 </Button>
@@ -155,33 +166,24 @@ export function ControlVmDetailPage() {
             <div className={styles.controlResourceSummary}>
               <div data-available="true">
                 <span>vCPU</span>
-                <strong>{vm.data.vcpus}</strong>
+                <strong>{resources.data?.vcpus ?? vm.data.vcpus}</strong>
                 <small>개</small>
               </div>
               <div data-available="true">
                 <span>메모리</span>
-                <strong>{vm.data.memory_mib}</strong>
+                <strong>{resources.data?.memory_mib ?? vm.data.memory_mib}</strong>
                 <small>MiB</small>
               </div>
-              <div data-available="false">
-                <span>CPU 핀닝</span>
-                <strong>—</strong>
-                <small>설정 미조회</small>
+              <div data-available={resources.data ? 'true' : 'false'}>
+                <span>vCPU 핀닝</span>
+                <strong>{resources.data ? pinningSummary(resources.data.vcpu_pinning) : '—'}</strong>
+                <small>{resources.data ? 'Xen hard affinity' : '설정 미조회'}</small>
               </div>
-              <div data-available="false">
-                <span>스케줄러</span>
-                <strong>—</strong>
-                <small>가중치 미조회</small>
-              </div>
-            </div>
-            <div className={styles.resourceControlNotice}>
-              <div>
-                <strong>고급 자원 관리</strong>
-                <span>vCPU 핀닝과 vCPU·메모리·스케줄러 가중치 설정이 이 영역에 연결됩니다.</span>
-              </div>
-              <span>RESOURCE CONTROL</span>
             </div>
           </Card>
+
+          <ResourceAdjustmentPanel key={`tuning-${vm.data.vm_id}`} vm={vm.data} accent={accent} />
+          <VcpuPinningPanel key={`pinning-${vm.data.vm_id}`} vm={vm.data} accent={accent} />
 
           <section className={styles.dangerZone} aria-labelledby="danger-zone-title">
             <div>
@@ -189,7 +191,7 @@ export function ControlVmDetailPage() {
               <h2 id="danger-zone-title">VM 삭제</h2>
               <p>VM을 종료하고 연결된 디스크를 삭제합니다. 삭제한 VM은 복구할 수 없습니다.</p>
             </div>
-            <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+            <Button variant="danger" onClick={() => setDeleteOpen(true)} disabled={operationPending}>
               VM 삭제
             </Button>
           </section>

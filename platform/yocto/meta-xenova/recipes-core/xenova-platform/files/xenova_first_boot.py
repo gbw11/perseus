@@ -409,9 +409,7 @@ class FirstBoot:
             print(json.dumps({'registration': 'complete', 'asset_errors': asset_errors}))
         print('installation verified; hand off to existing VM autostart service')
         # 부팅은 HTTP 응답을 기다리지 않는다. complete 뒤 중단되면 송신 0회일 수 있다.
-        if notices:
-            from xenova_registration import automatic
-            for record in notices:automatic(self.data,self.run,record)
+        return notices
 
 
 def main():
@@ -428,9 +426,13 @@ def main():
         if args.action == 'grow':
             boot.grow()
         else:
-            boot.register(common=common)
+            notices=boot.register(common=common)
         # 성공 근거는 기존 필수 저장과 unit 결과다. 이 파일은 표시 보조 정보뿐이다.
         display('complete', mode=getattr(boot, 'display_mode', 'storage-verification'))
+    # common/자산 보호와 요청 출력의 상속 FD를 반환한 뒤 시작한다. 부팅은 HTTP를 기다리지 않는다.
+    if args.action=='register':
+        from xenova_registration_hook import automatic
+        for record in notices or []:automatic(boot.data,boot.run,record,wait_ready=True)
 
 
 if __name__ == '__main__':

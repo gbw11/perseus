@@ -46,6 +46,9 @@ export type VmState = 'running' | 'stopping' | 'paused' | 'crashed' | 'stopped';
 /** heartbeat 기준. zephyr 는 항상 UNKNOWN */
 export type AgentStatus = 'UNKNOWN' | 'ONLINE' | 'STALE' | 'OFFLINE';
 
+/** 백엔드 VmRole (DB vms.role). 배포자가 VM 등록·수정 때 지정하며 이름·app_id 로 추정하지 않는다 */
+export type VmRole = 'primary_drive' | 'backup_drive' | 'interaction';
+
 /** §2.2 프론트 공개 VM. agent_status·ipv4 는 목록·단건 조회에만 있다 */
 export interface Vm {
   vm_id: string;
@@ -58,6 +61,8 @@ export interface Vm {
   template_version: string;
   vcpus: number;
   memory_mib: number;
+  /** 역할 미지정이면 null */
+  role?: VmRole | null;
 }
 
 /** §5 GET /api/v1/vms */
@@ -77,6 +82,58 @@ export interface CreateVmRequest {
   /** 템플릿 min_memory_mib ~ 1024 */
   memory_mib: number;
 }
+
+// ---- VM 리소스 제어 (Jira -107 공개 API, FE -113·-114) -------------------------------
+
+/** Xen vCPU 하나가 실행될 수 있는 물리 CPU 집합(hard affinity). */
+export interface VcpuPinning {
+  vcpu: number;
+  pcpus: number[];
+}
+
+export interface PcpuStatus {
+  pcpu: number;
+  /** 최근 호스트 메트릭이 없으면 null. 프론트에서 추정하지 않는다. */
+  load_percent: number | null;
+}
+
+export interface ResourceLimits {
+  vcpus_min: number;
+  vcpus_max: number;
+  memory_mib_min: number;
+  memory_mib_max: number;
+  memory_mib_step: number;
+}
+
+/** GET /api/v1/vms/{id}/resources */
+export interface VmResources {
+  vm_id: string;
+  vcpus: number;
+  memory_mib: number;
+  pcpu_count: number;
+  vcpu_pinning: VcpuPinning[];
+  /** 서버가 전용으로 검증한 코어만 강조한다. 이름이나 OS로 전용 여부를 추론하지 않는다. */
+  exclusive_pcpus: number[];
+  pcpus: PcpuStatus[];
+  limits: ResourceLimits;
+  observed_at: string;
+}
+
+/** PUT /api/v1/vms/{id}/resources/vcpu-pinning */
+export interface UpdateVcpuPinningRequest {
+  mappings: VcpuPinning[];
+}
+
+export interface UpdateMemoryRequest {
+  memory_mib: number;
+}
+
+export interface UpdateVcpusRequest {
+  vcpus: number;
+}
+
+export type VmResourceUpdate =
+  { kind: 'memory'; body: UpdateMemoryRequest } | { kind: 'vcpus'; body: UpdateVcpusRequest };
 
 /** §2.3 */
 export interface Template {
@@ -117,6 +174,7 @@ export type KnownErrorCode =
   | 'VM_CONTROL_UNAVAILABLE'
   | 'VM_CONTROL_TIMEOUT'
   | 'VM_CONTROL_BAD_RESPONSE'
+  | 'RESOURCE_UNSUPPORTED'
   | 'INTERNAL_SERVER_ERROR';
 
 // ---- 이벤트 (노션 API 명세 REST-18 "이벤트 조회", 백엔드 EventResponse) -------------------

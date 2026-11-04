@@ -109,6 +109,7 @@ def test_browser_cookie_cannot_change_policy_or_reveal_service_state(settings, s
     service = create_app(settings, driver=Driver(), store=store, mqtt_factory=NoMqtt, web_root=tmp_path)
     with TestClient(service) as client:
         assert client.get("/display/monitor-1").status_code == 401
+        assert client.get("/display/mobile").status_code == 401
         assert client.post("/api/v1/display/session").status_code == 401
         headers = {"Authorization": "Bearer test-only-token"}
         session = client.post("/api/v1/display/session", headers=headers)
@@ -116,12 +117,16 @@ def test_browser_cookie_cannot_change_policy_or_reveal_service_state(settings, s
         assert "HttpOnly" in session.headers["set-cookie"]
         assert "test-only-token" not in session.headers["set-cookie"]
         assert client.get("/display/monitor-1").status_code == 200
+        assert client.get("/display/mobile").status_code == 200
         p = client.get("/api/v1/display/presentation").json()
+        assert [o["output_id"] for o in p["outputs"]] == ["monitor-1", "monitor-2"]
         assert "test-only-token" not in str(p)
         assert client.get("/api/v1/display/state").status_code == 401
         select = {"policy_epoch": p["policy_epoch"], "revision": p["revision"], "selection": "pinned", "vm_id": VM2}
         assert client.post("/api/v1/display/selection", json=select).status_code == 401
         ack = {key: p[key] for key in ("policy_epoch", "revision", "render_revision")}
+        assert client.post("/api/v1/display/outputs/mobile/ack", json=ack).status_code == 401
+        assert client.post("/api/v1/display/outputs/mobile/ack", headers=headers, json=ack).status_code == 404
         assert client.post("/api/v1/display/outputs/monitor-1/ack", json=ack).status_code == 204
         changed = client.post("/api/v1/display/selection", headers=headers, json=select)
         assert changed.status_code == 200
