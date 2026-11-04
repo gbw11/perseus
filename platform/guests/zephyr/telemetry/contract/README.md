@@ -2,13 +2,14 @@
 
 [CONTRACT.md](CONTRACT.md), [message schema](schemas/message.schema.json),
 [metric catalog](schemas/metric-catalog.json)가 현재 **2.1**의 원문이다.
-Publisher는 기존 v2 토픽을 유지하고 2.1을 명시한다. 2.0으로 조용히 변환하지 않는다.
+Publisher의 v2 상세 지표는 2.1로 발행한다. 공통 RX/TX 누적값의 원문은
+[v1 MQTT-03](../../../../../docs/contracts/mqtt-contract-v1.md#31-zephyr의-공통-네트워크-지표-mqtt-03)이다.
 
 - [2.0 원문·schema/catalog](versions/2.0/CONTRACT.md)와 기존 fixtures/는 과거 입력을 보존한다.
 - `tools/validate_contract.py --self-test`는 보존한 2.0 합성 Golden과
   `fixtures-2.1/`의 결정적 production-C 경계 표본을 구분해 검사한다.
-- 실제 C bytes와 native 수신은 `platform/tests/test_xenova_telemetry.py` 및
-  `tests/run_native_acceptance.py`에서 별도로 검사한다. Golden 통과는 실계측 수락이 아니다.
+- 실제 C bytes와 native 브로커 수신은 `platform/tests/test_xenova_telemetry.py` 및
+  `../tests/run_native_acceptance.py`에서 검사한다. 두 시험 모두 v1 누적값과 v2 수신률의 발행 경계를 확인한다.
 - `docs/`의 날짜별 검토·과거 결과는 당시 근거다. 현재 기능·사용법은 계약과 상위 README를 따른다.
 - 제품 소비자는 schema 2.1/catalog 분기, CPU window/수명 label, memory region,
   nullable UTC와 capability/표본/현재 상태의 구분을 지원해야 한다.

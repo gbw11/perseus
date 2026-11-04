@@ -99,8 +99,10 @@ export function LegacyDashboardPage() {
       {control?.mode === 'AUTO_READY' && (
         <div className={styles.draft}>
           {drive?.resume
-            ? `자율주행 ${drive.resume.requested_by === 'auto' ? '자동 복귀' : '재개'} — ${Math.max(1, Math.ceil(drive.resume.remaining_ms / 1000))}초 뒤 전환`
-            : '자율주행 재개 가능 (자동 복귀 취소됨)'}{' '}
+            ? `자율주행 재개 — ${Math.max(1, Math.ceil(drive.resume.remaining_ms / 1000))}초 뒤 전환`
+            : drive?.resume_cancel?.reason === 'operator_cancelled'
+              ? '자율주행 재개 취소됨 — 수동주행 유지'
+              : '자율주행 재개 가능'}{' '}
           — <Link to="/simulator">Simulator</Link>에서 {drive?.resume ? '[취소]' : '[자율주행 재개]'}
         </div>
       )}
@@ -108,7 +110,7 @@ export function LegacyDashboardPage() {
       <div className={styles.cols3}>
         {ROLE_ORDER.map((app) =>
           // 시뮬레이터 구성이면 세 번째 칸이 시뮬레이터로 바뀐다 (위치가 1초 안에 오면, 화면 배치 계약 v1.1 §5.6)
-          app === 'message-board' && sim.available ? (
+          app === 'interaction' && sim.available ? (
             <SimCard key="simulator" sim={sim} drive={drive} board={vmOf(app, vms.data?.items, drive)} />
           ) : (
             <AppCard key={app} app={app} vm={vmOf(app, vms.data?.items, drive)} drive={drive} sim={sim} />
@@ -363,8 +365,8 @@ const CAR_COLOR = {
  */
 function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null; board: Vm | undefined }) {
   const active = drive?.control?.active_app ?? null;
-  const boardState = drive?.apps['message-board'];
-  const boardHealth = appHealth(ROLES['message-board'], board, boardState);
+  const boardState = drive?.apps.interaction;
+  const boardHealth = appHealth(ROLES.interaction, board, boardState);
   const pose = sim.pose;
   const flags = drive?.vehicle?.flags;
   const toast = useToast();

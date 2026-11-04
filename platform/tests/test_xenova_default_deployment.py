@@ -141,6 +141,10 @@ class DefaultDeploymentTest(unittest.TestCase):
         entry = assemble.rtos.info(source, assemble.sha(source / "firmware.json"))
         config = json.loads((ROOT / "platform/first-install/example.config.json").read_text())
         config["rtos_templates"] = [{"template_dir": str(source), "template_manifest_sha256": entry["template_manifest_sha256"]}]
+        selected = json.loads((ROOT / "platform/guests/default-templates.lock.json").read_text())["templates"]
+        versions = {row["template_id"]: row["version"] for row in selected}
+        for row in config["linux_templates"]:
+            row["template_version"] = versions[row["template_id"]]
         image = self.base / "platform" / "source.wic"
         info = {"logical_bytes": 8 * contract.GIB, "allocated_bytes": 2048, "boot_bytes": 8192,
                 "preparation_scratch_bytes": 0}
@@ -190,11 +194,15 @@ class DefaultDeploymentTest(unittest.TestCase):
             path = directory / "template.json"
             path.write_text(json.dumps(meta))
             path.chmod(0o444)
+        # A selected new factory bundle must not relabel an older retained fixture.
+        expected = {e["template_id"]: e["version"] for e in selected if e["guest_kind"] == "linux"}
+        for directory in (board.data / "rtos-templates").iterdir():
+            metadata = json.loads((directory / "firmware.json").read_text())
+            expected[catalog.DEFAULT_IDS[directory.name]] = catalog.deployment_version(metadata)
         assemble.copy_management_catalog(board.data)
         rows = catalog.entries(board.data)
         self.assertEqual({e["template_id"] for e in rows},
                          {"ubuntu-24.04-arm64", "debian-13-arm64", "zephyr-xenvm-starter-arm64"})
         self.assertEqual({e["template_id"]: e["template_version"] for e in rows},
-                         {**{e["template_id"]: e["version"] for e in selected if e['guest_kind']=='linux'},
-                          'zephyr-xenvm-starter-arm64':'1.1.0'})
+                         expected)
         self.assertFalse((board.data / "seeds/ubuntu-dev").exists())

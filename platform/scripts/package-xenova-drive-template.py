@@ -15,7 +15,7 @@ from first_install_contract import uuid4
 
 ID='xenova-zephyr-drive-lattice-lab-1.0.0'
 TEMPLATE='zephyr-drive-lattice-lab-arm64'
-VERSION='1.0.0-lab.1'
+VERSION='1.0.0-lab.2'
 
 
 def package(build,output):

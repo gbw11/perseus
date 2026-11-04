@@ -203,11 +203,16 @@ ZTEST(diagnostics,test_network_byte_rate_epoch_and_failure)
  provider_rc=0;struct xdr_snapshot r;zassert_ok(xdiag_resources_get(&r));
  next_resource(&r);next_resource(&r);
  byte_tx+=64;byte_rx+=128;next_resource(&r);
+ zassert_ok(r.net_bytes_rc);zassert_equal(r.rx_bytes,byte_rx);
  zassert_ok(r.net_rate_rc);uint64_t dt=r.net_end_ms-r.net_start_ms;
  zassert_true(dt>0);zassert_equal(r.tx_bytes_per_s,64000/dt);zassert_equal(r.rx_bytes_per_s,128000/dt);
+ next_resource(&r);zassert_ok(r.net_rate_rc);zassert_equal(r.rx_bytes_per_s,0);
  byte_epoch++;byte_tx=byte_rx=0;next_resource(&r);zassert_equal(r.net_rate_rc,-EOVERFLOW);
+ zassert_ok(r.net_bytes_rc);zassert_equal(r.net_epoch,byte_epoch);zassert_equal(r.rx_bytes,0);
  provider_rc=-EIO;next_resource(&r);zassert_equal(r.net_rate_rc,-EIO);
+ zassert_equal(r.net_bytes_rc,-EIO);
  provider_rc=0;next_resource(&r);zassert_equal(r.net_rate_rc,-ENODATA);
+ zassert_ok(r.net_bytes_rc);
 }
 
 #if defined(CONFIG_XENOVA_DIAGNOSTICS_CPU)

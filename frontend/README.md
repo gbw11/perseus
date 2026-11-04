@@ -78,6 +78,14 @@ Memory 탭은 기존 `GET /api/v1/vms/{vmId}/metrics`로 상단 RAM 요약과 �
 최고 점유·최소 여유, 정적 예약, 확보 실패·경합 누계는 서로 다른 값입니다.
 VM 할당량은 MiB, 작은 풀은 KiB 또는 B로 표시하며 개별 영역을 합산하지 않습니다.
 
+Linux의 여유는 같은 표본의 `memory_available_bytes`(MemAvailable)를 우선하며, 없으면
+할당량−사용량을 **여유 (추정)**으로 표시합니다. 디스크 읽기·쓰기 누적값과 속도는 유지하고,
+속도는 같은 부팅·장치 집합의 연속 표본에서만 계산합니다.
+Zephyr의 커널 힙은 상단 RAM과 분리해 공통 상세에 두고 `accounted_bytes`를 전체로 우선합니다
+(없거나 사용량보다 작으면 used+free). 힙은 최근 5분, RAM·앱 버퍼·RX/TX 풀은 최근 60초를 조회합니다.
+5분 힙 이력도 새 부팅·publisher 관측 뒤 이전 세션의 현재값이나 그래프로 되살리지 않습니다.
+조회 오류 안내는 Linux의 기존 마지막 성공 데이터 표시와 Zephyr의 관측 만료 규칙을 구분합니다.
+
 상단 카드·그래프 이름은 Linux와 같은 **메모리 사용률**, free는 **여유**입니다.
 Zephyr의 **정적 예약 포함** 기준은 보조 설명과 툴팁에 표시합니다. 같은 memory 봉투의
 total/mapped/static/free 네 값과 원 관측 문맥을 검사하고 `committed=total-free`를 계산합니다.

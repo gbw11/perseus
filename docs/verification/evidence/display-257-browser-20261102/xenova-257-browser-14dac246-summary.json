@@ -1,0 +1,215 @@
+{
+  "trial": "xenova-257-browser-14dac246",
+  "error": null,
+  "browser_version": "156.0.8078.74",
+  "configured_fps": 5,
+  "measurement_scope": "PC browser request -> real X11 pixels -> JPEG -> product viewer canvas draw -> two requestAnimationFrame callbacks; includes outbound control; not physical LCD scanout",
+  "soak_seconds_browser_clock": 602.5515,
+  "soak_seconds_controller": 600.0971474000253,
+  "streams": {
+    "monitor-2": {
+      "frames": 2961,
+      "first": 45051.30000001192,
+      "last": 647494.8000000119,
+      "maxGap": 762.0999999642372,
+      "gapsOver1s": 0,
+      "fps": 4.914102777936823
+    },
+    "monitor-1": {
+      "frames": 2975,
+      "first": 45266.09999996424,
+      "last": 647449.3999999762,
+      "maxGap": 707.8999999761581,
+      "gapsOver1s": 0,
+      "fps": 4.937337306437707
+    }
+  },
+  "browser_latency": {
+    "monitor-1": {
+      "requested": 60,
+      "matched": 60,
+      "p50_ms": 228.80000001192093,
+      "p95_ms": 456,
+      "max_ms": 558.3000000119209
+    },
+    "monitor-2": {
+      "requested": 60,
+      "matched": 60,
+      "p50_ms": 236.10000002384186,
+      "p95_ms": 487.69999998807907,
+      "max_ms": 564.8000000119209
+    }
+  },
+  "proxy": {
+    "monitor-1": {
+      "connections": 1,
+      "bytes": 153946984,
+      "errors": []
+    },
+    "monitor-2": {
+      "connections": 1,
+      "bytes": 209202281,
+      "errors": []
+    }
+  },
+  "browser_latency_phases": {
+    "browser_latency": {
+      "monitor-1": {
+        "requested": 60,
+        "matched": 60,
+        "p95_ms": 456,
+        "max_ms": 558.3000000119209
+      },
+      "monitor-2": {
+        "requested": 60,
+        "matched": 60,
+        "p95_ms": 487.69999998807907,
+        "max_ms": 564.8000000119209
+      }
+    },
+    "browser_latency_post_soak": {
+      "monitor-1": {
+        "requested": 60,
+        "matched": 60,
+        "p95_ms": 520.6000000238419,
+        "max_ms": 715.5
+      },
+      "monitor-2": {
+        "requested": 60,
+        "matched": 60,
+        "p95_ms": 473,
+        "max_ms": 732
+      }
+    }
+  },
+  "browser_latency_same_trial_pooled": {
+    "monitor-1": {
+      "matched": 120,
+      "requested": 120,
+      "p95_ms": 489.5,
+      "max_ms": 715.5
+    },
+    "monitor-2": {
+      "matched": 120,
+      "requested": 120,
+      "p95_ms": 487.69999998807907,
+      "max_ms": 732
+    }
+  },
+  "additional_stream_connections_in_soak": {
+    "monitor-1": 0,
+    "monitor-2": 0
+  },
+  "additional_proxy_errors_in_soak": {
+    "monitor-1": 0,
+    "monitor-2": 0
+  },
+  "multipart_body_mbps": 4.484895316002034,
+  "cpu_mean_cores": {
+    "sender": 0.14520110321540236,
+    "native_worker": 0.48419877272854744,
+    "other_pipeline": 0.0,
+    "browser": 0.36244255569395745,
+    "xorg": 0.1717898115089058,
+    "other_system": 0.19734172740354292
+  },
+  "cpu_sample_seconds": 597.9982112889993,
+  "jpeg_capture_mbps": 4.478128279491463,
+  "jpeg_rate_note": "encoded source bytes, not wire bytes; interval spans adjacent API snapshots",
+  "cleanup": {
+    "services": {
+      "xenova-display-kiosk.service": "active",
+      "xenova-display-graphics.service": "active",
+      "xenova-display-feed.service": "active",
+      "xenova-dom0-manager.service": "active",
+      "mosquitto.service": "active",
+      "tailscaled.service": "active"
+    },
+    "ssh_policy_restored": true,
+    "graphics_source_restored": true,
+    "graphics_source_unchanged": true,
+    "domains_unchanged": true,
+    "temporary_files_removed": true,
+    "sender_journal": "Started [systemd-run] /usr/bin/python3 /run/xenova-257-browser-14dac246/stream-host.py.\nINFO:     Started server process [75951]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://127.0.0.1:8083 (Press CTRL+C to quit)\nStopping [systemd-run] /usr/bin/python3 /run/xenova-257-browser-14dac246/stream-host.py...\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [75951]\nxenova-257-browser-14dac246.service: Deactivated successfully.\nStopped [systemd-run] /usr/bin/python3 /run/xenova-257-browser-14dac246/stream-host.py.\nxenova-257-browser-14dac246.service: Consumed 17min 45.156s CPU time over 26min 59.470s wall clock time, 59.9M memory peak.\n"
+  },
+  "hotplug_freshness": null,
+  "available_min_mib": 1843.45703125,
+  "pipeline_rss_first_last_mib": [
+    94.46484375,
+    94.46484375
+  ],
+  "causal_video_latency_bounds": {
+    "clock-latency-bounds-1.json": {
+      "method": "causal echo bounds, source draw bracket -> product canvas + two RAF callbacks",
+      "rate_envelope": [
+        0.99,
+        1.01
+      ],
+      "assumption": "clock rate envelope over this <=120s batch; not certified physical scanout timing",
+      "echoes": 300,
+      "echo_constraints_consistent": true,
+      "streams": {
+        "monitor-1": {
+          "requested": 60,
+          "matched": 60,
+          "p95_lower_ms": 431.6829121922128,
+          "p95_upper_ms": 455.6984896124086,
+          "max_source_clock_uncertainty_ms": 49.349222673190525
+        },
+        "monitor-2": {
+          "requested": 60,
+          "matched": 60,
+          "p95_lower_ms": 415.8538887571849,
+          "p95_upper_ms": 461.46546496032533,
+          "max_source_clock_uncertainty_ms": 49.349222673190525
+        }
+      }
+    },
+    "clock-latency-bounds-2.json": {
+      "method": "causal echo bounds, source draw bracket -> product canvas + two RAF callbacks",
+      "rate_envelope": [
+        0.99,
+        1.01
+      ],
+      "assumption": "clock rate envelope over this <=120s batch; not certified physical scanout timing",
+      "echoes": 300,
+      "echo_constraints_consistent": true,
+      "streams": {
+        "monitor-1": {
+          "requested": 60,
+          "matched": 60,
+          "p95_lower_ms": 439.97942635568324,
+          "p95_upper_ms": 463.533021157491,
+          "max_source_clock_uncertainty_ms": 54.16178008529823
+        },
+        "monitor-2": {
+          "requested": 60,
+          "matched": 60,
+          "p95_lower_ms": 432.57229548320174,
+          "p95_upper_ms": 455.18092854181305,
+          "max_source_clock_uncertainty_ms": 54.16178008529823
+        }
+      }
+    }
+  },
+  "hotplug_phases": {
+    "waiting": {
+      "samples": 16,
+      "disconnected_samples": 0
+    },
+    "monitor-1": {
+      "samples": 424,
+      "disconnected_samples": 0,
+      "peer": "monitor-2",
+      "peer_unavailable_samples": 0,
+      "peer_new_gaps_over_1s": 0,
+      "max_runtime_age_s": 1.1304593659988313,
+      "target_unavailable_samples": 0,
+      "peer_draws_during_observed_disconnect": null,
+      "final_states": {
+        "monitor-1": "live",
+        "monitor-2": "live"
+      }
+    }
+  }
+}

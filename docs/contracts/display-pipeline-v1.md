@@ -1,6 +1,15 @@
 # Display pipeline v1 — 제안 계약
 
-2026-10-22 · S15P31E110-250 · 1~4단계 구현 및 5단계 가상 통합 검증. 실보드 HDMI 검증은 남아 있다.
+> **2026-11-02 주행 표시 연결 선택:** [기존 Gateway context 읽기](display-gateway-read-v1.md)를 opt-in으로 추가했다. 이 모드에서는 아래 별도 display MQTT 토픽 발행/ACL을 요구하지 않는다. Agent·앱 MQTT는 유지한다. 기존 mqtt 기본값은 호환용이며 두 주행 소스를 혼합·자동 fallback하지 않는다. 새 수집기와 authority 준비 상태를 지원하는 프론트를 함께 배치한다.
+
+2026-11-02 · S15P31E110-250 · 기준 platform 24b26ff. 초기 가상 시험과 이후 실제 HDMI 시험을 구분한다. 현재 계약·측정·합의 대기는 [250 결정 기록](display-250-decisions.md)을 우선한다. 아래 단계별 설명은 당시 이력이며 현재 모든 항목의 미구현 목록이 아니다.
+
+## 2026-11-02 구현·검증 대조
+
+- 실제 두 HDMI의 계기판·인포테인먼트, 상태별 렌더와 재부팅 자동 시작을 252·256에서 확인했다. ‘보드 미준비’는 현재 제한이 아니다.
+- 같은 X11 픽셀의 선택형 MIT-SHM/TurboJPEG 전송을 257에서 확인했다. 기본 FFmpeg는 유지한다. 602.55초·실제 약 4.91~4.94 FPS, 전경 Chrome 지연 p95 상한 약 456~464ms, CPU 약 0.63코어·JPEG 약 4.48Mbps다. 환경·시계 가정·HDMI0 복귀 중 반대편 약 1.05초 갱신 간격·동적 영상 미검증은 [최종 증거](../verification/display-257-browser-acceptance-20261102.md)를 따른다. 시험 후 원복했으므로 영구 배포와 구분한다.
+- Gateway Authority와 provider context에 mode·owner 등의 원본이 이미 있다. 그러나 표시 수신 계약의 별도 1초 토픽 송신과 gateway write ACL은 기준 platform에 연결되지 않았다. [송수신 간격·권위 경계](display-drive-state-v1.md)를 유지하고 기존 retained를 신선한 보고로 재포장하지 않는다.
+- 초기 전체/상세 view는 API 호환 필드이며 현재 UI는 아래 screen 매핑이다. 휴대폰 자체 렌더링 모드는 별도 검토로 이번 계약에 자동 편입하지 않는다.
 
 ## 2026-10-28 차량 HDMI 화면 변경 (최신)
 

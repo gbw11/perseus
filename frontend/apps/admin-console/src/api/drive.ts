@@ -82,8 +82,18 @@ export interface DriveState {
     switch_in_ms: number;
     accepted_ago_ms: number;
     remaining_ms: number;
-    /** 자동 복귀면 auto (계약 v1.5) */
-    requested_by?: string;
+    /** 재개를 요청한 운영자 (drive.resume.accepted requested_by) */
+    requested_by?: string | null;
+  } | null;
+  /**
+   * 마지막 drive.resume.cancelled — 10초 동안만 (계약 v1.7). 운영자 취소(operator_cancelled)는 모드를 바꾸지 않고,
+   * 그 밖의 reason 은 게이트웨이가 조건이 깨져 카운트다운을 끝낸 것이다.
+   */
+  resume_cancel?: {
+    reason: string | null;
+    requested_by: string | null;
+    generation: number | null;
+    received_ago_ms: number;
   } | null;
 }
 
@@ -199,8 +209,8 @@ export async function requestResume(): Promise<void> {
 }
 
 /**
- * 재개 카운트다운 취소 (DELETE /api/v1/drive/resume → MQTT-13 drive.resume.cancel_requested, 계약 v1.5).
- * 자동 복귀를 막고 수동주행을 유지한다. 그 뒤에는 [자율주행 재개]로만 돌아간다.
+ * 재개 카운트다운 취소 (DELETE /api/v1/drive/resume → console/resume drive.resume.cancel_requested, 계약 v1.7).
+ * 모드는 그대로(수동주행 유지)이고, 다시 [자율주행 재개]를 눌러야 AUTO 로 간다. 카운트다운이 없으면 409.
  */
 export async function cancelResume(): Promise<void> {
   if (MOCK) {
@@ -214,7 +224,7 @@ export async function cancelResume(): Promise<void> {
 /** 시연 동작 (mock 에서만 동작 — 실제 API 는 격리 시연 -135 가 정한다) */
 export const mockDemo = MOCK
   ? {
-      forceKill: (target: 'autonomous' | 'manual' | 'message-board') =>
+      forceKill: (target: 'autonomous' | 'manual' | 'interaction') =>
         void loadScenario().then((s) => s.forceKill(target)),
       togglePerception: () => void loadScenario().then((s) => s.togglePerception()),
     }

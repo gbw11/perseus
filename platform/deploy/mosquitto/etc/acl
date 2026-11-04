@@ -39,9 +39,11 @@ topic write xenova/v1/probes/#
 
 user backend
 topic read xenova/v1/#
+topic read xenova/v2/vms/+/telemetry/+
 topic write xenova/v1/apps/manual/input
 topic write xenova/v1/vms/+/command
 topic write xenova/v1/console/resume
+topic write xenova/v1/sim/command
 topic write xenova/v1/probes/#
 
 user dom0-server
@@ -71,11 +73,24 @@ user observer
 topic read xenova/v1/#
 
 user perception
-topic read xenova/v1/#
+topic read xenova/v1/apps/#
+topic read xenova/v1/vms/#
+topic read xenova/v1/vehicle/#
+topic read xenova/v1/display/#
+topic read xenova/v1/console/#
+topic read xenova/v1/recovery/#
+topic read xenova/v1/probes/#
 topic write xenova/v1/apps/perception/events
 topic write xenova/v1/probes/#
 
+user simulator
+topic read xenova/v1/sim/command
+topic write xenova/v1/sim/pose
+topic write xenova/v1/sim/world
+topic write xenova/v1/sim/result
+
 user telemetry-11111111-1111-4111-8111-111111111111
+topic write xenova/v1/vms/11111111-1111-4111-8111-111111111111/metrics
 topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/inventory
 topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/heartbeat
 topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/metrics
@@ -83,6 +98,7 @@ topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/events
 topic write xenova/v2/vms/11111111-1111-4111-8111-111111111111/telemetry/snapshot
 
 user telemetry-22222222-2222-4222-8222-222222222222
+topic write xenova/v1/vms/22222222-2222-4222-8222-222222222222/metrics
 topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/inventory
 topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/heartbeat
 topic write xenova/v2/vms/22222222-2222-4222-8222-222222222222/telemetry/metrics

@@ -38,7 +38,10 @@ message WorldSnapshot {
   required uint64 observation_seq = 25;
   required string clock_epoch = 26;
   // row-major: occupancy 0..100 or 255 unknown. Flags bit0 valid, bit1
-  // statically retained, bit2 expired. age_le32 is original age in milliseconds.
+  // statically retained, bit2 expired. required_features bit0 enables road
+  // priority: cell_flags bit3 marks cell centers in the preferred road.
+  // It never makes invalid/occupied/expired cells traversable.
+  // age_le32 is original age in milliseconds.
   required bytes occupancy = 27;
   required bytes cell_flags = 28;
   required bytes age_le32 = 29;
@@ -101,6 +104,10 @@ message DriveState {
   required string calibration = 24;
   required string map_epoch = 25;
   required uint64 observation_seq = 26;
+  // Present only after this maneuver's merge milestone was actually passed on
+  // this reference revision. Absence is not proof of passage.
+  optional uint64 merge_passed_reference_revision = 27;
+  optional uint32 world_features = 28; // absent: legacy map semantics (0)
 }
 // Separate Pi state connection. These bounded management/state messages are
 // not part of the small command/control JSON socket or the Jetson map client.

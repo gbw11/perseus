@@ -5,10 +5,12 @@ import { useMetrics, useVms } from '../api/queries';
 import type { MetricSample, Vm } from '../api/types';
 import { buildCpuChartScale, cpuChartY, formatCpuTick } from '../domain/cpuChart';
 import {
+  buildDiskIoSnapshot,
   buildLinuxMemorySeries,
   buildZephyrHeapSeries,
   cpuPercentOf,
-  type LinuxMemoryPoint,
+  linuxFreeMemory,
+  type DiskIoCounter,
 } from '../domain/vmMetrics';
 import { buildMemoryPoolSeries, bytesToKiB, type PoolSnapshot } from '../domain/memoryPools';
 import {
@@ -28,6 +30,7 @@ import { AppMemoryPools } from './AppMemoryPools';
 import { ManagedRamSummary } from './ManagedRamSummary';
 import { sharedMemoryObservation, sharedObservedAt } from '../domain/sharedMemoryObservation';
 import { memoryObservationRunKey, selectMemoryObservationRun } from '../domain/memoryObservationRun';
+import { MetricErrorNotice } from './MetricErrorNotice';
 import styles from './pages.module.css';
 
 /**
@@ -50,18 +53,18 @@ const DOMAINS: { id: Domain; title: string; sub: string; color: string; dedicate
   },
   { id: 'manual', title: ROLES.manual.title, sub: 'Zephyr', color: ROLES.manual.color, dedicated: true },
   {
-    id: 'message-board',
-    title: ROLES['message-board'].title,
+    id: 'interaction',
+    title: ROLES.interaction.title,
     sub: 'Debian 13',
-    color: ROLES['message-board'].color,
+    color: ROLES.interaction.color,
     dedicated: false,
   },
 ];
 const CORES = [0, 1, 2, 3];
 
 /** RC카 시나리오 §2: 자율·수동은 전용 1코어씩, 네비게이션은 남은 코어 */
-const PINS: Record<Domain, number[]> = { dom0: [0], autonomous: [1], manual: [2], 'message-board': [3] };
-const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512, 'message-board': 256 };
+const PINS: Record<Domain, number[]> = { dom0: [0], autonomous: [1], manual: [2], interaction: [3] };
+const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512, interaction: 256 };
 const DOM0_MEMORY_MIB = 1024;
 const MIB_BYTES = 1024 * 1024;
 
@@ -214,7 +217,7 @@ function MemoryDashboard({
         </div>
         <div className={styles.memoryHeadingMeta}>
           <span>Linux 최근 5분</span>
-          <span>Zephyr 최근 60초 · 힙·Pool</span>
+          <span>Zephyr RAM·버퍼 최근 60초 · 힙 최근 5분</span>
         </div>
       </header>
 
@@ -236,6 +239,7 @@ function MemoryDashboard({
 function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
   const metrics = useMetrics(vm.vm_id, true, 1, 2000);
+  const heapMetrics = useMetrics(vm.vm_id, true);
   const samples = metrics.data?.items ?? [];
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
   const style = {
@@ -263,10 +267,8 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
         </span>
       }
     >
-      {metrics.error && (
-        <div className={styles.memoryNotice} data-tone="fault">
-          메트릭 연결 오류
-        </div>
+      {(metrics.error || heapMetrics.error) && (
+        <MetricErrorNotice detail="최근 관측 이력을 표시하며, 만료된 현재값은 비웁니다." />
       )}
       <p className={styles.dim}>
         VM 구성 {vm.memory_mib.toLocaleString('ko-KR')} MiB · 관리 RAM과 내부 버퍼 점유를 분리합니다.
@@ -276,8 +278,9 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
         <SharedMemoryPanels
           vmName={vm.name}
           samples={samples}
+          heapSamples={heapMetrics.data?.items ?? []}
           pending={metrics.isPending}
-          failed={!!metrics.error}
+          failed={!!metrics.error || !!heapMetrics.error}
         />
       </AppMemoryPools>
     </Card>
@@ -287,11 +290,13 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
 function SharedMemoryPanels({
   vmName,
   samples,
+  heapSamples,
   pending,
   failed,
 }: {
   vmName: string;
   samples: MetricSample[];
+  heapSamples: MetricSample[];
   pending: boolean;
   failed: boolean;
 }) {
@@ -300,29 +305,34 @@ function SharedMemoryPanels({
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
-  const run = selectMemoryObservationRun(samples, samples[0]?.vm_id ?? '');
-  const observed =
-    run.state === 'selected' ? samples.filter((sample) => memoryObservationRunKey(sample) === run.key) : [];
-  const projected = observed.map((sample) => {
-    const family = sample.telemetry?.family;
-    const at = family === 'memory' || family === 'memory_regions' ? sharedObservedAt(sample, family) : null;
-    return at ? { ...sample, observed_at: at } : sample;
-  });
-  const series = buildMemoryPoolSeries(projected);
-  const heap = buildZephyrHeapSeries(projected);
+  // The 5-minute heap query must also respect a new session first seen in the 60-second buffer query.
+  const allSamples = [...heapSamples, ...samples];
+  const run = selectMemoryObservationRun(allSamples, allSamples[0]?.vm_id ?? '');
+  const projectRun = (history: MetricSample[]) =>
+    (run.state === 'selected'
+      ? history.filter((sample) => memoryObservationRunKey(sample) === run.key)
+      : []
+    ).map((sample) => {
+      const family = sample.telemetry?.family;
+      const at = family === 'memory' || family === 'memory_regions' ? sharedObservedAt(sample, family) : null;
+      return at ? { ...sample, observed_at: at } : sample;
+    });
+  const series = buildMemoryPoolSeries(projectRun(samples));
+  const heap = buildZephyrHeapSeries(projectRun(heapSamples));
   const heapObservation = sharedMemoryObservation(
-    samples,
+    allSamples,
     'memory',
     ['memory.kernel_heap.used_bytes', 'memory.kernel_heap.free_bytes'],
     now,
   );
-  const currentHeap =
+  const currentHeapView =
     heapObservation.state === 'fresh' && heapObservation.sample
-      ? buildZephyrHeapSeries([heapObservation.sample]).current
+      ? buildZephyrHeapSeries([heapObservation.sample])
       : null;
+  const currentHeap = currentHeapView?.current ?? null;
   const pool = (region: 'net_rx_data' | 'net_tx_data'): PoolSnapshot => {
     const view = sharedMemoryObservation(
-      samples,
+      allSamples,
       'memory_regions',
       ['memory.region.used_bytes', 'memory.region.free_bytes', 'memory.region.capacity_bytes'],
       now,
@@ -345,11 +355,15 @@ function SharedMemoryPanels({
     <>
       <section className={styles.appMemoryPool} aria-label={`${vmName} 공통 커널 힙`}>
         <MemoryUsageSummary
-          vmName={vmName}
           label="커널 힙 사용률"
-          current={currentHeap}
-          capacity={currentHeap ? currentHeap.usedBytes + currentHeap.freeBytes : null}
+          badge={HEAP_BASIS_BADGE}
+          ariaLabel={`${vmName} 커널 힙 사용률`}
+          percent={currentHeap?.percent ?? null}
+          usedBytes={currentHeap?.usedBytes ?? null}
+          totalBytes={currentHeap?.totalBytes ?? null}
+          freeLabel="여유"
           freeBytes={currentHeap?.freeBytes ?? null}
+          freeNote={currentHeapView?.reason ?? heapObservation.reason}
           format={formatKiB}
         />
         <p className={styles.dim}>
@@ -357,7 +371,11 @@ function SharedMemoryPanels({
           {heapObservation.observedAt &&
             ` · 원 관측 약 ${ago(Math.max(0, now - Date.parse(heapObservation.observedAt)))}`}
         </p>
-        <MemoryUsageChart vmName={vmName} title="커널 힙 사용률" points={heap.points} range="60초" />
+        <UsageChart
+          title="커널 힙 사용률"
+          ariaLabel={`${vmName} 커널 힙 사용률 최근 5분 그래프`}
+          points={heap.points}
+        />
       </section>
       <section
         className={`${styles.appMemoryPool} ${styles.memorySharedNetwork}`}
@@ -509,23 +527,109 @@ function MemoryChart({
   );
 }
 
+interface BasisBadge {
+  label: string;
+  title: string;
+}
+
+/** Zephyr 메모리 사용률은 VM 전체 RAM 이 아니라 커널 heap 기준이다 */
+const HEAP_BASIS_BADGE: BasisBadge = {
+  label: '커널 heap 기준',
+  title: 'VM 전체 RAM이 아닌 커널 heap 기준 · 전체 = accounted_bytes(없으면 used+free)',
+};
+
+function BasisBadgeTag({ badge }: { badge: BasisBadge }) {
+  return (
+    <small className={styles.memoryBasisBadge} title={badge.title}>
+      {badge.label}
+    </small>
+  );
+}
+
+/** Linux 메모리·Zephyr 커널 heap 이 함께 쓰는 사용률 요약 (사용량 / 전체, 여유, 막대) */
+function MemoryUsageSummary({
+  label,
+  badge,
+  ariaLabel,
+  percent,
+  usedBytes,
+  totalBytes,
+  freeLabel,
+  freeTitle,
+  freeBytes,
+  freeNote,
+  format,
+}: {
+  label: string;
+  badge?: BasisBadge;
+  ariaLabel: string;
+  percent: number | null;
+  usedBytes: number | null;
+  totalBytes: number | null;
+  freeLabel: string;
+  /** 여유 값의 기준 설명 (툴팁) */
+  freeTitle?: string;
+  freeBytes: number | null;
+  freeNote: string | null;
+  format: (bytes: number | null) => string;
+}) {
+  const clamped = percent == null ? null : Math.max(0, Math.min(100, percent));
+  return (
+    <section className={styles.linuxMemorySummary}>
+      <div className={styles.linuxMemorySummaryHead}>
+        <span>
+          {label}
+          {badge && <BasisBadgeTag badge={badge} />}
+        </span>
+        <strong>{percent == null ? '—' : `${percent.toFixed(1)}%`}</strong>
+      </div>
+      <div className={styles.linuxMemoryAmount}>
+        <strong>{format(usedBytes)}</strong>
+        <span>/ {format(totalBytes)}</span>
+      </div>
+      <div className={styles.linuxMemoryFree} title={freeTitle}>
+        <span>{freeLabel}</span>
+        <strong>{freeBytes == null ? (freeNote ?? '—') : format(freeBytes)}</strong>
+      </div>
+      <div
+        className={styles.linuxMemoryBar}
+        role="progressbar"
+        aria-label={ariaLabel}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={clamped == null ? undefined : Math.round(clamped)}
+      >
+        <i style={{ width: `${clamped ?? 0}%` }} />
+      </div>
+    </section>
+  );
+}
+
 function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
   const metrics = useMetrics(vm.vm_id, true);
-  const series = buildLinuxMemorySeries(metrics.data?.items ?? [], vm);
+  const samples = metrics.data?.items ?? [];
+  const series = buildLinuxMemorySeries(samples, vm);
+  const free = linuxFreeMemory(series);
+  const disk = buildDiskIoSnapshot(samples);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
   const style = {
     '--vm-accent': role?.color ?? UNASSIGNED_COLOR,
   } as CSSProperties;
   const current = series.current;
-  const freeBytes = current ? Math.max(0, series.totalBytes - current.usedBytes) : null;
   const notice = metrics.error
-    ? '메트릭 연결 오류 · 마지막 정상 데이터가 있으면 그대로 표시합니다.'
+    ? null
     : metrics.isPending && !current
       ? '메모리 메트릭 수신 대기 중입니다.'
       : !current
         ? '메모리 데이터 없음'
         : null;
+  const freeTitle =
+    free.basis === 'available'
+      ? '여유 = MemAvailable (memory_available_bytes)'
+      : free.basis === 'estimated'
+        ? `MemAvailable ${free.reason ?? '데이터 없음'} · 할당량 − 사용량으로 추정`
+        : undefined;
 
   return (
     <Card
@@ -548,21 +652,38 @@ function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
         </span>
       }
     >
-      {notice && (
-        <div className={styles.memoryNotice} data-tone={metrics.error ? 'fault' : undefined}>
-          {notice}
-        </div>
-      )}
+      {metrics.error && <MetricErrorNotice />}
+      {notice && <div className={styles.memoryNotice}>{notice}</div>}
 
       <MemoryUsageSummary
-        vmName={vm.name}
         label="메모리 사용률"
-        current={current}
-        capacity={series.totalBytes}
-        freeBytes={freeBytes}
-        format={formatMiB}
+        ariaLabel={`${vm.name} 메모리 사용률`}
+        percent={current?.percent ?? null}
+        usedBytes={current?.usedBytes ?? null}
+        totalBytes={series.totalBytes}
+        freeLabel={free.basis === 'estimated' ? '여유 (추정)' : '여유'}
+        freeTitle={freeTitle}
+        freeBytes={free.bytes}
+        freeNote={null}
+        format={formatMiBOrDash}
       />
-      <MemoryUsageChart vmName={vm.name} title="메모리 사용률" points={series.points} range="5분" />
+
+      <UsageChart
+        title="메모리 사용률"
+        ariaLabel={`${vm.name} 메모리 사용률 최근 5분 그래프`}
+        points={series.points}
+      />
+
+      <section className={styles.memoryChartBlock} aria-label={`${vm.name} 디스크 I/O`}>
+        <header>
+          <strong>디스크 I/O</strong>
+          <span className={styles.memoryBasisNote}>장치 합산 · 같은 부팅 구간에서만 속도 계산</span>
+        </header>
+        <div className={styles.counterGrid}>
+          <DiskIoItem label="읽기" counter={disk.read} />
+          <DiskIoItem label="쓰기" counter={disk.write} />
+        </div>
+      </section>
 
       <div className={styles.memoryObservation}>
         {current
@@ -573,64 +694,34 @@ function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   );
 }
 
-function MemoryUsageSummary({
-  vmName,
-  label,
-  current,
-  capacity,
-  freeBytes,
-  format,
-}: {
-  vmName: string;
-  label: string;
-  current: LinuxMemoryPoint | null;
-  capacity: number | null;
-  freeBytes: number | null;
-  format: (bytes: number) => string;
-}) {
-  const percent = current ? Math.max(0, Math.min(100, current.percent)) : null;
+function DiskIoItem({ label, counter }: { label: string; counter: DiskIoCounter }) {
   return (
-    <section className={styles.linuxMemorySummary}>
-      <div className={styles.linuxMemorySummaryHead}>
-        <span>{label}</span>
-        <strong>{current ? `${current.percent.toFixed(1)}%` : '—'}</strong>
-      </div>
-      <div className={styles.linuxMemoryAmount}>
-        <strong>{current ? format(current.usedBytes) : '—'}</strong>
-        <span>
-          {current || capacity == null ? '/ ' : '할당 '}
-          {capacity == null ? '—' : format(capacity)}
-        </span>
-      </div>
-      <div className={styles.linuxMemoryFree}>
-        <span>여유</span>
-        <strong>{freeBytes == null ? '—' : format(freeBytes)}</strong>
-      </div>
-      <div
-        className={styles.linuxMemoryBar}
-        role="progressbar"
-        aria-label={`${vmName} ${label}`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={percent == null ? undefined : Math.round(percent)}
-      >
-        <i style={{ width: `${percent ?? 0}%` }} />
-      </div>
-    </section>
+    <div className={styles.counterItem}>
+      <span>{label} 누적</span>
+      <strong>{counter.totalBytes == null ? '—' : formatBytes(counter.totalBytes)}</strong>
+      <small>
+        {counter.totalBytes == null
+          ? (counter.reason ?? '데이터 없음')
+          : counter.bytesPerSecond == null
+            ? '속도 계산 대기'
+            : `${formatBytes(counter.bytesPerSecond)}/s`}
+      </small>
+    </div>
   );
 }
 
-function MemoryUsageChart({
-  vmName,
+/** 최근 5분 사용률(%) 선 그래프. Linux 메모리와 Zephyr 커널 heap 이 함께 쓴다 */
+function UsageChart({
   title,
+  badge,
+  ariaLabel,
   points,
-  range,
   emptyMessage = '데이터 없음',
 }: {
-  vmName: string;
   title: string;
-  points: LinuxMemoryPoint[];
-  range: '5분' | '60초';
+  badge?: BasisBadge;
+  ariaLabel: string;
+  points: readonly { observedAt: string; percent: number }[];
   emptyMessage?: string;
 }) {
   const line = chartPoints(
@@ -642,7 +733,10 @@ function MemoryUsageChart({
   return (
     <section className={styles.memoryChartBlock}>
       <header>
-        <strong>{title}</strong>
+        <strong>
+          {title}
+          {badge && <BasisBadgeTag badge={badge} />}
+        </strong>
         <span className={styles.linuxMemoryLegend}>
           <i />
           Used %
@@ -650,12 +744,7 @@ function MemoryUsageChart({
       </header>
       <div className={styles.memoryChart}>
         {line ? (
-          <svg
-            viewBox="0 0 100 100"
-            preserveAspectRatio="none"
-            role="img"
-            aria-label={`${vmName} ${title} 최근 ${range} 그래프`}
-          >
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={ariaLabel}>
             {[0, 25, 50, 75, 100].map((value) => (
               <line
                 key={value}
@@ -673,7 +762,7 @@ function MemoryUsageChart({
         )}
         <span className={styles.memoryChartMax}>100%</span>
         <div className={styles.memoryChartAxis} aria-hidden="true">
-          <span>{range} 전</span>
+          <span>5분 전</span>
           <span>현재</span>
         </div>
       </div>
@@ -703,13 +792,24 @@ function observationOf(
   pending: boolean,
   failed: boolean,
 ): string {
-  if (failed) return '메트릭을 가져오지 못했습니다. 마지막 정상 표본이 있으면 그대로 유지합니다.';
+  if (failed) return '메트릭 조회 실패 · 관측 이력은 유지하고 만료된 현재값은 비웁니다.';
   if (pending && !series.lastObservedAt) return '메트릭 수신 대기 중입니다.';
   if (series.rx.state === 'invalid' || series.tx.state === 'invalid')
     return '잘못된 Pool 데이터가 감지되었습니다.';
   if (series.rx.state !== 'ok' || series.tx.state !== 'ok') return 'RX/TX Pool 데이터가 없습니다.';
   if (series.rx.freeBytes === 0) return 'RX Pool 여유 없음 · 고갈이 관측되었습니다.';
   return '관측된 Pool 상태를 표시하고 있습니다.';
+}
+
+function formatBytes(value: number): string {
+  if (value >= 1024 * 1024 * 1024) return `${(value / 1024 ** 3).toFixed(2)} GiB`;
+  if (value >= 1024 * 1024) return `${(value / 1024 ** 2).toFixed(1)} MiB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${Math.round(value)} B`;
+}
+
+function formatMiBOrDash(value: number | null): string {
+  return value == null ? '—' : formatMiB(value);
 }
 
 function formatKiB(value: number | null): string {

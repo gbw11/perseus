@@ -33,6 +33,36 @@ function monitorTree(output: string) {
 }
 
 describe('vehicle HDMI screens', () => {
+  describe.each(['monitor-1', 'monitor-2'])('%s Gateway drive context', (output) => {
+    it('shows saved AUTO selection as preparing until output is permitted and clears it on disconnect', () => {
+      const p = presentationFixture();
+      p.state.drive.mode = 'AUTO';
+      p.state.drive.source = { status: 'fresh', age_ms: 100 };
+      p.state.drive.authority = {
+        selected_vm_id: p.state.vms[0]!.vm_id,
+        selected_mode: 'AUTO',
+        generation: 4,
+        phase: 'DISARMED',
+        output_permitted: false,
+        storage_uncertain: false,
+      };
+      const view = show(output, true, p);
+      expect(screen.getByText('자율 모드 선택 · 구동 준비 중')).toBeInTheDocument();
+      expect(screen.queryByText('현재 구동 VM1')).not.toBeInTheDocument();
+      const applied = structuredClone(p);
+      applied.state.drive.authority!.phase = 'APPLIED';
+      applied.state.drive.authority!.output_permitted = true;
+      applied.state.drive.active_vm_id = p.state.vms[0]!.vm_id;
+      vi.mocked(useDisplay).mockReturnValue({ presentation: applied, connected: true, error: null });
+      view.rerender(monitorTree(output));
+      expect(screen.getByText('자율주행')).toBeInTheDocument();
+      expect(screen.queryByText('자율 모드 선택 · 구동 준비 중')).not.toBeInTheDocument();
+      vi.mocked(useDisplay).mockReturnValue({ presentation: applied, connected: false, error: '끊김' });
+      view.rerender(monitorTree(output));
+      expect(screen.getByText('주행 모드 미확인')).toBeInTheDocument();
+      expect(screen.queryByText('자율주행')).not.toBeInTheDocument();
+    });
+  });
   describe.each(['monitor-1', 'monitor-2'])('%s state transitions', (output) => {
     it.each([
       ['stopped', '정지', 'muted'],

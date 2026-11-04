@@ -103,6 +103,25 @@ def test_control_operation_schema_matches(client):
     assert set(actual["ControlOperation"]["required"]) == set(contract["ControlOperation"]["required"])
 
 
+def test_cpu_layout_schemas_match(client):
+    contract = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["components"]["schemas"]
+    actual = client.app.openapi()["components"]["schemas"]
+    for name in ("CpuLayout", "CpuHost", "VmCpuLayout", "CpuObserved", "CpuReservation", "CpuIssue", "CpuConflict", "VcpuAffinity"):
+        assert set(actual[name]["properties"]) == set(contract[name]["properties"]), name
+        assert set(actual[name].get("required", [])) == set(contract[name]["required"]), name
+
+    def enum(prop):
+        """열거값 집합. Optional Literal(anyOf 의 enum + null)과 yaml 의 enum(null 포함)을 같은 모양으로 본다."""
+        values = set(prop.get("enum", []))
+        for option in prop.get("anyOf", []):
+            values |= set(option.get("enum", [])) | ({None} if option.get("type") == "null" else set())
+        return values
+
+    for schema, field in (("CpuObserved", "presence"), ("VmCpuLayout", "allocation"), ("CpuIssue", "code")):
+        live, static = enum(actual[schema]["properties"][field]), enum(contract[schema]["properties"][field])
+        assert live and live == static, (schema, field, live, static)
+
+
 def test_security_scheme_and_401_are_declared(client):
     """인증은 미들웨어라 라우트에 안 보인다. 라이브 OpenAPI 도 yaml 처럼 ServiceToken 을 전역 security 로 선언하고 모든
     엔드포인트가 401 을 명시해야 한다."""

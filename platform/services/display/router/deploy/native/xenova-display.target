@@ -1,0 +1,7 @@
+[Unit]
+Description=Xenova configured native HDMI display
+Wants=xenova-display-feed.service xenova-display-hdmi.service
+After=xenova-display-feed.service xenova-display-hdmi.service
+
+[Install]
+WantedBy=multi-user.target

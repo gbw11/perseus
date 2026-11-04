@@ -63,13 +63,19 @@ int main(void) {
   assert(xnet_start()==-EALREADY);
  } else {
   int rc=xshutdown_start(hook,NULL);
-  if(strstr(xl_case,"external")) {
+  if(!strcmp(xl_case,"shutdown-external-read-poison")||!strcmp(xl_case,"shutdown-external-watch-poison")) {
+   assert(!rc);k_sleep(K_MSEC(250));
+   struct xshutdown_status s;assert(!xshutdown_status_get(&s));
+   assert(!s.request_owned&&!hooks&&!xl_closed&&!xl_hypercalls);
+   assert(xshutdown_stop(k_uptime_get()+500)==-ETIMEDOUT);
+  } else if(strstr(xl_case,"external")) {
    assert(!rc);struct xshutdown_status s;
    int64_t end=k_uptime_get()+1000;
    do { k_sleep(K_MSEC(1));assert(!xshutdown_status_get(&s)); }while(!s.cleanup_error&&k_uptime_get()<end);
    assert(s.request_owned&&s.cleanup_error);
    unsigned expected=strstr(xl_case,"ack")||strstr(xl_case,"hook")||strstr(xl_case,"reject")||strstr(xl_case,"store")?0:1;
    assert(xl_hypercalls==expected);k_sleep(K_MSEC(50));assert(xl_hypercalls==expected);
+   if(strstr(xl_case,"external-read-"))assert(hooks==1&&xl_closed==1);
    assert(xshutdown_stop(k_uptime_get()+100)==-EBUSY);
   } else {
    assert(rc<0);assert(!xshutdown_stop(k_uptime_get()+1000));

@@ -3,6 +3,7 @@ planner/tracker/state geometry runs in drive/tests/test_engine.py, not mocked th
 """
 import queue
 import time
+import pytest
 from uuid import uuid4
 
 from xenova_drive_world import schema,encode,decode
@@ -35,7 +36,8 @@ def snapshot(w,t):
     return link
 
 
-def test_actual_binary_socket_state_and_original_g2_acceptance(broker,tmp_path):
+@pytest.mark.parametrize('direction',[0,1,-1])
+def test_actual_binary_socket_state_and_original_g2_acceptance(broker,tmp_path,direction):
     w=StateWorld(tmp_path/'authority');t=trust(w);instance=str(uuid4())
     io=DriveLinkIO('127.0.0.1',broker,None,None,(A,B),clock=lambda:w.t)
     provider=DriveLinkProvider(w.runner,io,t,instance)
@@ -47,6 +49,11 @@ def test_actual_binary_socket_state_and_original_g2_acceptance(broker,tmp_path):
     try:
         until(lambda:io.thread.is_alive() and client.is_connected())
         body=snapshot(w,t)
+        if direction:
+            body.snapshot.direction=direction;body.snapshot.maneuver_phase=2
+            body.snapshot.maneuver_revision=7 if direction<0 else 1
+            body.snapshot.merge_passed_reference_revision=body.snapshot.reference_revision
+            body.snapshot.world_features=1
         def submit():
             client.publish(outbound(A),encode(body),qos=0,retain=False)
             end=time.monotonic()+.1
@@ -61,6 +68,8 @@ def test_actual_binary_socket_state_and_original_g2_acceptance(broker,tmp_path):
         until(lambda:not received.empty())
         accepted=received.get(timeout=1)
         assert accepted.WhichOneof('payload')=='accepted' and accepted.accepted.state==body.snapshot
+        assert accepted.accepted.state.HasField('merge_passed_reference_revision')==bool(direction)
+        assert accepted.accepted.state.world_features==(1 if direction else 0)
         assert body.snapshot.message_id in w.m.states.copies
         applied=schema.DriveLink(major=1);p=applied.applied
         p.vm=B;p.execution=w.executions[B];p.app_instance=w.ids[B]['autonomous'];p.host_boot=w.auth.host;p.gateway_instance=instance

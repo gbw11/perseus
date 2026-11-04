@@ -1,5 +1,6 @@
 package com.xenova.backend.drive.application;
 
+import com.fasterxml.jackson.annotation.JsonValue;
 import java.time.Instant;
 import java.util.Map;
 
@@ -9,11 +10,35 @@ import java.util.Map;
 public record DriveState(
         long version,
         Instant observedAt,
+        Source source,
         Control control,
         Vehicle vehicle,
         Map<String, App> apps,
         Perception perception,
-        Resume resume) {
+        Resume resume,
+        Map<String, Map<String, VmApp>> vmApps) {
+
+    public enum SourceStatus {
+        FRESH("fresh"),
+        STALE("stale"),
+        DISCONNECTED("disconnected"),
+        UNKNOWN("unknown");
+
+        private final String value;
+
+        SourceStatus(String value) {
+            this.value = value;
+        }
+
+        @JsonValue
+        public String value() {
+            return value;
+        }
+    }
+
+    /** Source freshness is independent from the last values, which stay available for diagnosis. */
+    public record Source(SourceStatus status, Long ageMs) {
+    }
 
     // vehicle.control (MQTT-09) from the dom0 gateway.
     public record Control(
@@ -22,7 +47,8 @@ public record DriveState(
             String activeApp,
             String activeVmId,
             String reason,
-            long receivedAgoMs) {
+            long receivedAgoMs,
+            Source source) {
     }
 
     // vehicle.status (MQTT-10) from the ESP32.
@@ -32,7 +58,8 @@ public record DriveState(
             Double steerRad,
             Double battV,
             Flags flags,
-            long receivedAgoMs) {
+            long receivedAgoMs,
+            Source source) {
     }
 
     public record Flags(boolean estop, boolean watchdog, boolean obstacle) {
@@ -45,12 +72,38 @@ public record DriveState(
             Long commandAgoMs,
             int commandHz,
             Command lastCommand,
+            CommandDirection direction,
             String heartbeatState,
             Long heartbeatAgoMs) {
     }
 
     public record Command(Long generation, Double vMps, Double steerRad) {
     }
+
+    /** Last scoped reports for an observed app execution, with independent freshness per signal. */
+    public record VmApp(
+            String bootId, String appInstanceId, Lifecycle lifecycle, Source lifecycleSource,
+            Heartbeat heartbeat, Source heartbeatSource) {
+    }
+
+    public record Lifecycle(
+            String profile, String phase, String readiness, String reason,
+            long appliedGeneration, String checkSeq, String progressSeq) {
+    }
+
+    public record Heartbeat(String state, double uptimeS) {
+    }
+
+    /**
+     * Direction derived only from a fresh drive.command. STOPPED means v_mps=0 and cannot distinguish
+     * a brake key from released input; the raw command remains authoritative.
+     */
+    public record CommandDirection(Longitudinal longitudinal, Lateral lateral) {
+    }
+
+    public enum Longitudinal { FORWARD, REVERSE, STOPPED, UNKNOWN }
+
+    public enum Lateral { LEFT, RIGHT, STRAIGHT, UNKNOWN }
 
     // perception.result (MQTT-06) from the Jetson.
     public record Perception(

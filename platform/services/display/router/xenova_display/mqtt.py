@@ -23,7 +23,8 @@ class MqttSource:
         self.topics = tuple(dict.fromkeys([
             *[topic for b in self.settings.bindings if b.agent_supported for topic in
               (f"xenova/v1/vms/{b.vm_id}/heartbeat", f"xenova/v1/vms/{b.vm_id}/inventory")],
-            *[b.app_topic(app) for b in self.settings.bindings for app in b.report_app_ids], DISPLAY_DRIVE_TOPIC]))
+            *[b.app_topic(app) for b in self.settings.bindings for app in b.report_app_ids],
+            *([DISPLAY_DRIVE_TOPIC] if self.settings.drive_transport == "mqtt" else [])]))
         self.pending = {}
         self.early = {}
         self.subscribing = False

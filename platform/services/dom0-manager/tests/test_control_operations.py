@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from conftest import VM_A, create_body
+from dom0_manager import budget as request_budget
 from dom0_manager.config import Settings
 from dom0_manager.drivers.mock import MockDriver, MockProvisioner
 from dom0_manager.drivers.platform import PlatformDriver, PlatformProvisioner, SerializedManager
@@ -560,3 +562,167 @@ def test_platform_retryable_is_kept_on_ordinary_errors(client, manager):
     body = client.get(f"/api/v1/vms/{VM_A}").json()
     assert (body["code"], body["platform_code"], body["retryable"]) == ("PlatformUnavailable", "OPERATION_IN_PROGRESS", True)
     assert "operation" not in body  # 작업 문맥은 키 있는 제어 요청에만
+
+
+# ---- 일반 조회의 요청별 Manager (S15P31E110-333) ----
+
+
+class ForkingManager(Manager):
+    """플랫폼 fork 흉내: 같은 요청 객체의 동시 call 은 무대기 OPERATION_IN_PROGRESS. 공유 inner 직접 호출도 기록한다."""
+
+    def __init__(self, calls=None, responses=None, forked=False):
+        super().__init__(calls, responses, forked)
+        self._busy = threading.Lock()
+        self.forks = []
+
+    def fork(self):
+        child = ForkingManager(self.calls, self.responses, forked=True)
+        self.forks.append(child)
+        return child
+
+    def call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None):
+        if not self._busy.acquire(blocking=False):
+            return failure("OPERATION_IN_PROGRESS", retryable=True)
+        try:
+            return super().call(action, spec, execute=execute, idempotency_key=idempotency_key, request_id=request_id, budget_ms=budget_ms)
+        finally:
+            self._busy.release()
+
+
+def test_reads_do_not_wait_for_a_long_mutation_when_read_fork_is_on():
+    """긴 create 가 직렬화를 쥔 동안 다른 VM 의 상세·목록은 요청별 Manager 로 바로 하위에 닿는다. 변경은 그대로 직렬화된다."""
+    inner = ForkingManager()
+    serialized = SerializedManager(inner, busy_timeout_s=0.2, read_fork=True)
+    client = TestClient(app_for(serialized))
+    assert serialized._lock.acquire(timeout=1)  # create 가 Manager 를 쥐고 있다
+    try:
+        assert client.get(f"/api/v1/vms/{VM_A}").status_code == 200
+        assert client.get("/api/v1/vms").status_code == 200
+        assert [(c["action"], c["forked"]) for c in inner.calls] == [("get", True), ("list", True)]
+        assert len(inner.forks) == 2  # 호출마다 새 요청 객체
+        keyless = stop(client, key=None)
+        assert keyless.status_code == 503 and keyless.json()["platform_code"] == "OPERATION_IN_PROGRESS"
+        assert len(inner.calls) == 2  # 변경은 직렬화 대기에서 막혀 하위에 닿지 않았다
+    finally:
+        serialized._lock.release()
+
+
+def test_concurrent_reads_each_get_their_own_request_object():
+    """같은 요청 객체를 공유하면 하위가 무대기 거절한다. 동시에 들어온 두 조회가 모두 진입해야 객체를 나눠 쓴 것이다."""
+    inner = ForkingManager()
+    entered, release = threading.Semaphore(0), threading.Event()
+
+    def slow_get(spec):
+        entered.release()
+        assert release.wait(5)
+        return envelope(data={"vm": VIEW})
+
+    inner.responses["get"] = slow_get
+    serialized = SerializedManager(inner, busy_timeout_s=0.2, read_fork=True)
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(serialized.call("get", {"vm_id": str(VM_A)}))) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    try:
+        assert entered.acquire(timeout=5) and entered.acquire(timeout=5)  # 둘 다 하위에 들어갔다
+    finally:
+        release.set()
+        for thread in threads:
+            thread.join(5)
+    assert [r["ok"] for r in results] == [True, True]
+
+
+@pytest.mark.parametrize("read_fork, inner_factory", [(False, ForkingManager), (True, OldManager)])
+def test_reads_stay_serialized_without_read_fork_or_platform_fork(read_fork, inner_factory):
+    """설정을 끄거나 하위에 fork 가 없으면 조회도 지금처럼 직렬화 대기 끝에 503 이고 하위에 닿지 않는다."""
+    inner = inner_factory()
+    serialized = SerializedManager(inner, busy_timeout_s=0.1, read_fork=read_fork)
+    client = TestClient(app_for(serialized))
+    assert serialized._lock.acquire(timeout=1)
+    try:
+        response = client.get(f"/api/v1/vms/{VM_A}")
+    finally:
+        serialized._lock.release()
+    assert response.status_code == 503 and response.json()["platform_code"] == "OPERATION_IN_PROGRESS"
+    assert inner.calls == []
+
+
+def test_forked_read_gets_the_remaining_budget_and_nothing_after_it_ran_out():
+    inner = ForkingManager()
+    serialized = SerializedManager(inner, busy_timeout_s=5, read_fork=True)
+    client = TestClient(app_for(serialized, response_reserve_s=0))
+    assert serialized._lock.acquire(timeout=1)  # 직렬화가 막혀 있어도 조회 예산은 그대로 하위에 간다
+    try:
+        assert client.get(f"/api/v1/vms/{VM_A}", headers={"X-Request-Budget-Ms": "3000"}).status_code == 200
+        call = inner.calls[-1]
+        assert call["forked"] and 2500 <= call["budget_ms"] <= 3000 and call["spec"]["timeout_ms"] == call["budget_ms"]
+    finally:
+        serialized._lock.release()
+    token = request_budget.start(1, reserve_s=1)  # 남은 값이 응답 몫보다 작다
+    try:
+        result = serialized.call("list", {"lifecycle": "REGISTERED"})
+    finally:
+        request_budget.reset(token)
+    assert result["error"]["code"] == "DEADLINE_EXCEEDED" and inner.calls[-1]["action"] == "get"  # list 는 제출되지 않았다
+
+
+@pytest.mark.parametrize("action, forked, timeout", [
+    ("intents", True, True), ("probe", True, True), ("execution-context", True, True), ("operation", True, True),
+    ("recovery-operation", True, True), ("provisioning", True, True), ("registrations", True, True),
+    ("templates", True, False),  # 하위 templates 는 spec timeout_ms 를 받지 않는다
+    ("provision", False, True),  # 공급은 조회가 아니라 직렬화한다. 구형 통지 action은 제거됐다.
+    ("recovery-reconcile", False, True),  # 원 attempt 정산은 직렬화하되 timeout_ms 도 남은 값으로 줄인다
+])
+def test_action_routing_budget_and_timeout(action, forked, timeout):
+    inner = ForkingManager()
+    inner.responses[action] = envelope(data={})
+    token = request_budget.start(4000, reserve_s=0)
+    try:
+        SerializedManager(inner, read_fork=True).call(action, {})
+    finally:
+        request_budget.reset(token)
+    call = inner.calls[-1]
+    assert call["forked"] is forked and 3500 <= call["budget_ms"] <= 4000
+    assert call["spec"].get("timeout_ms") == (call["budget_ms"] if timeout else None)
+
+
+def test_reads_finish_while_a_real_create_holds_the_manager():
+    """HTTP create 가 실제로 하위 create 에서 멈춘 동안(별도 스레드) 다른 VM 의 상세·목록이 요청별 Manager 로 200 이다.
+    create 는 직렬화된 공유 Manager 로 불리고, 풀린 뒤 start 까지 끝난다."""
+    other = "22222222-2222-4222-8222-222222222222"
+    inner = ForkingManager()
+    entered, release = threading.Event(), threading.Event()
+    registered = {"vm": None}
+
+    def get(spec):
+        if spec["vm_id"] == str(VM_A) and registered["vm"] is None:
+            return failure("VM_NOT_FOUND")
+        return envelope(data={"vm": {**VIEW, "vm_id": spec["vm_id"]}})
+
+    def create(spec):
+        entered.set()
+        assert release.wait(10)
+        registered["vm"] = {**VIEW, "domid": None, "xen_state": None}
+        return envelope(data={"vm": registered["vm"]}, operation_id=OP)
+
+    inner.responses.update(get=get, create=create, start=envelope(data={"vm": VIEW}))
+    serialized = SerializedManager(inner, busy_timeout_s=0.2, read_fork=True)
+    app = create_app(Settings(driver="platform", log_level="WARNING"),
+                     driver=PlatformDriver(serialized, Xl(FakeRunner({("xl", "info"): XL_INFO}))),
+                     provisioner=PlatformProvisioner(serialized))
+    created = []
+    worker = threading.Thread(target=lambda: created.append(TestClient(app).post("/api/v1/vms", json=create_body())))
+    worker.start()
+    try:
+        assert entered.wait(10)  # 하위 create 가 공유 Manager 를 쥐고 멈춰 있다
+        client = TestClient(app)
+        assert client.get(f"/api/v1/vms/{other}").status_code == 200
+        assert client.get("/api/v1/vms").status_code == 200
+        keyless = client.post(f"/api/v1/vms/{other}/stop")
+        assert keyless.status_code == 503  # 다른 VM 이라도 변경은 여전히 직렬화된다
+    finally:
+        release.set()
+        worker.join(10)
+    assert created and created[0].status_code == 201
+    shared = [c["action"] for c in inner.calls if not c["forked"]]
+    assert shared == ["create", "start"]  # 조회는 하나도 공유 Manager 로 가지 않았다

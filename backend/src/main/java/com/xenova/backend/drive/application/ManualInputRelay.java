@@ -135,7 +135,9 @@ public class ManualInputRelay {
 
     private boolean manual() {
         DriveState.Control control = tracker.snapshot().control();
-        return control != null && "MANUAL".equals(control.mode());
+        return control != null
+                && control.source().status() == DriveState.SourceStatus.FRESH
+                && "MANUAL".equals(control.mode());
     }
 
     private boolean send(List<String> keys) {
