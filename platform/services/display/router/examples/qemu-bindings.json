@@ -1,5 +1,5 @@
 [
   {"vm_id":"dd33284f-baf2-417f-93b2-a1af3c3f1ea2","role":"primary_drive","expected_os":"zephyr","app_id":"primary-drive","agent_supported":false},
   {"vm_id":"820a0522-243f-42f1-90e9-9b74e1522965","role":"backup_drive","expected_os":"zephyr","app_id":"backup-drive","agent_supported":false},
-  {"vm_id":"33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6","role":"interaction","expected_os":"debian","app_id":"message-board","agent_supported":true}
+  {"vm_id":"33c1f55b-55dc-4b4c-9f7b-ddc247e6d5d6","role":"interaction","expected_os":"debian","app_id":"interaction","agent_supported":true}
 ]

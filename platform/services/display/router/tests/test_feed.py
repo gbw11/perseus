@@ -38,7 +38,7 @@ def domains(primary_domid=18):
 
 
 def message(vm=VM1, kind="app.heartbeat", seq=1, boot="boot-1", instance="publisher-1", **payload):
-    app = {VM1: "primary-drive", VM2: "backup-drive", VM3: "message-board"}[vm]
+    app = {VM1: "primary-drive", VM2: "backup-drive", VM3: "interaction"}[vm]
     return {"schema_version": "1.0", "message_id": f"m-{seq}", "vm_id": vm,
             "boot_id": boot, "agent_instance_id": instance, "type": kind, "seq": seq,
             "app_id": app, "sent_at": "2099-01-01T00:00:00Z", "payload": payload}
