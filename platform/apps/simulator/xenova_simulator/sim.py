@@ -11,12 +11,18 @@
   게이트웨이의 출력 허가·재무장 판정은 이 경로에서 보이지 않는다 → 실제 출력과 맞추려면 frames 를 쓴다.
 
 vehicle.status 의 v_mps 는 엔코더 count 변화로 잰 속도, steer_rad 는 서보가 만든 전륜각이다.
+
+시뮬레이터 전용 (실차에 없음, 계약 §12):
+- 출발 신호·랩 (race.py): 출발 신호 중에는 수동이 아닌 활성 앱(자율·모름)의 전진을 막는다. frames 입력은 활성 앱을
+  모르므로(MQTT 를 보지 않는다) 늘 막고 부정 출발도 판정하지 않는다.
+- 노면: 연석 밖(잔디·흙)에서는 0.3 m/s 를 넘으면 1.2 m/s² 로 줄어 0.3 m/s 에 머문다 (관리 콘솔 mock physics 와 같음).
 """
 
 from __future__ import annotations
 
 import logging
 import math
+import random
 import threading
 import time
 from collections.abc import Callable
@@ -28,12 +34,16 @@ from xenova_mqtt import topics
 from .config import SimSettings
 from .frames import FrameReceiver
 from .model import Obstacle, Vehicle
+from .race import Race
 from .track import Track
 from .track import load as load_track
 
 log = logging.getLogger("xenova_simulator")
 
 DRIVE_APPS = ("autonomous", "manual")
+# 노면 (계약 §12 sim.pose.surface, 관리 콘솔 mock physics): 연석 밖은 이 속도를 넘으면 이 감속으로 줄인다
+OFFROAD_MAX_MPS = 0.3
+OFFROAD_DECEL_MPS2 = 1.2
 VM_APP_EVENTS = "xenova/v1/vms/+/apps/+/events"
 
 
@@ -60,6 +70,7 @@ class Simulator:
         *,
         clock: Callable[[], float] = time.monotonic,
         frames: FrameReceiver | None = None,
+        rng: Callable[[], float] = random.random,
     ) -> None:
         self._client = client
         self._settings = settings
@@ -82,15 +93,18 @@ class Simulator:
         self._auto_id = 0
         self.track = load_track(settings.track_id)
         self.track_index: int | None = None   # 가까운 중심선 점 (다음 찾기의 시작점)
+        self.active_app: str | None = None     # 이번 주기 활성 앱 (mqtt 입력만 안다)
+        self.race = Race(clock, rng=rng, lights=settings.start_lights)
         self.reset_to_start()
 
     # --- 트랙·장애물 ---
 
     def reset_to_start(self) -> None:
-        """출발선 위에서 진행 방향을 보고 선다."""
+        """출발선 위에서 진행 방향을 보고 서고, 출발 신호를 처음부터 (계약 §12 race.start)."""
         with self._pose_lock:
             self.vehicle.reset(*self.track.start_pose())
             self.track_index = self.track.start_index
+            self.race.restart()
 
     def select_track(self, track_id: str) -> None:
         """트랙 바꾸기: 장애물을 모두 치우고 출발선에 선다 (계약 v1.4 track.select 와 같은 동작)."""
@@ -183,6 +197,7 @@ class Simulator:
             return self._frame_target()
         now = self._clock()
         control = self.control()
+        self.active_app = control[2] if control is not None else None
         if self.estop or control is None:
             self.watchdog = False
             return 0.0, self.vehicle.steer_rad
@@ -243,8 +258,17 @@ class Simulator:
     def tick(self, dt: float) -> dict[str, Any] | None:
         """물리 한 단계. status 주기가 되면 vehicle.status 를 발행하고 payload 를 돌려준다."""
         target_v, target_steer = self.target()
+        manual = self.active_app == "manual"
+        forward = target_v > 0
+        if forward and self.race.holds(manual):
+            target_v = 0.0  # 출발 신호: 불이 모두 꺼질 때까지 출발선에서 기다린다
         with self._pose_lock:
+            v0 = self.vehicle.v_mps
             self.vehicle.step(target_v, target_steer, dt)
+            i, off, _ = self.track_frame()
+            if self.track.surface(i, off) != "road":
+                self._offroad_drag(v0, dt)
+            self.race.update(i, self.track.start_index, self.track.N, manual=manual, forward=forward)
         # 마감 시각을 누적한다. "지난 발행 후 50 ms 이상" 으로 재면 물리 주기(10 ms) 오차로 60 ms 간격이 섞여 17 Hz 가 된다
         now = self._clock()
         period = 1.0 / self._settings.status_rate_hz
@@ -258,6 +282,15 @@ class Simulator:
         self._client.publish(topics.vehicle_status(), "vehicle.status", payload, qos=0)
         self.published += 1
         return payload
+
+    def _offroad_drag(self, v_before: float, dt: float) -> None:
+        """잔디·흙: OFFROAD_MAX_MPS 를 넘는 속도는 OFFROAD_DECEL_MPS2 로 줄인다. 모터가 더 밀어도 그 속도에 머문다."""
+        v = self.vehicle
+        speed = abs(v.v_mps)
+        if speed <= OFFROAD_MAX_MPS:
+            return
+        capped = max(OFFROAD_MAX_MPS, min(speed, abs(v_before)) - OFFROAD_DECEL_MPS2 * dt)
+        v.wheel_rad_s = math.copysign(capped, v.v_mps) / self._settings.drivetrain.wheel_radius_m
 
     def run(self, stop: threading.Event, after_tick: Callable[[], None] | None = None) -> None:
         """고정 주기로 tick 한다 (수동 앱과 같은 마감 시각 누적 방식). after_tick 은 시뮬레이터 전용 토픽 발행."""

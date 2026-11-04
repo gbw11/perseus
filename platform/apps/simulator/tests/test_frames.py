@@ -43,7 +43,7 @@ def clock():
 
 @pytest.fixture
 def sim(clock):
-    s = Simulator(NullClient(), SimSettings(input="frames"), clock=clock)
+    s = Simulator(NullClient(), SimSettings(input="frames", start_lights=False), clock=clock)
     s.subscribe()
     return s
 

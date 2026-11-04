@@ -621,8 +621,22 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | `yaw` | float | 진행 방향 (rad, −π ~ π) |
 | `v_mps`, `steer_rad` | float | 지금 속도(구동 바퀴 둘레 속도)·전륜각 (모델 값). 후진이면 `v_mps` < 0 |
 | `world_revision` | uint32 | 이 위치를 계산할 때의 `sim.world.revision` |
-| `surface` | string | 차 중심이 있는 노면 `road` · `grass` · `dirt` |
-| `race` | object | 선택. 출발 신호·랩 `{phase, lights_on, lap, lap_ms, last_lap_ms, best_lap_ms, jump_start}`. 지금 시뮬레이터는 보내지 않는다 (화면은 없으면 표시하지 않는다) |
+| `surface` | string | 차 중심이 있는 노면 `road` · `grass` · `dirt`. 잔디·흙에서 차는 최고 0.3 m/s (넘으면 1.2 m/s² 로 줄어든다) |
+| `race` | object | 선택. 출발 신호·랩 `{phase, lights_on, lap, lap_ms, last_lap_ms, best_lap_ms, jump_start}` — 아래 표. 시뮬레이터는 늘 보낸다. 받는 쪽은 없으면 표시하지 않는다 |
+
+`race` (F1 방식 출발 신호, [RC카 시나리오](../scenario-rc-car.md)와 같은 시연 규칙 P7)
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `phase` | string | `lights`(출발 신호 중) · `go`(출발 뒤) |
+| `lights_on` | uint8 | 켜진 빨간 불 0 ~ 5. 다시 출발 0.7 초 뒤부터 1 초마다 하나씩 켜지고, 다섯 개가 켜진 뒤 0.2 ~ 3.0 초 사이 무작위로 모두 꺼지면 `go`. `go` 면 0 |
+| `lap` | uint32 | 끝낸 바퀴 수. 반 바퀴를 지난 뒤 출발선(`track.start_index`)을 넘으면 1 오른다 |
+| `lap_ms` | uint32 | 지금 바퀴 경과 (ms, 시뮬레이터 시간). `lights` 면 0 |
+| `last_lap_ms`, `best_lap_ms` | uint32 \| null | 지난·최고 랩 (ms). 아직 없으면 null |
+| `jump_start` | bool | 부정 출발: 불이 하나라도 켜진 동안 수동 앱이 전진을 명령함. 첫 바퀴 랩 시간에 +5 초 |
+
+- 출발 신호 중에는 시뮬레이터가 수동이 아닌 활성 앱(자율)의 전진을 막아 출발선에 둔다 — 자율 앱은 신호를 보지 않는다. 수동은 막지 않는다.
+- 활성 앱은 `vehicle.control` 로 안다. 시뮬레이터가 게이트웨이 시리얼 프레임을 받는 구성(MQTT 를 보지 않음)에서는 활성 앱을 몰라 늘 막고, `jump_start` 는 false 다.
 
 **`sim.world`**
 
@@ -660,12 +674,18 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | `obstacle.remove` | `obstacle_id` | 치우기 |
 | `estop` | `engaged` (bool) | E-stop 걸기·풀기 |
 | `push` | `dy_m` | 차를 진행 방향 기준 옆으로 옮긴다 (+ 왼쪽, \|dy_m\| ≤ 0.5). 자율주행이 차선으로 돌아오는지 보이는 시연용 |
-| `track.select` | `track_id` | 트랙 바꾸기. 장애물을 모두 치우고 차를 출발선에 세운다 |
-| `race.start` | — | 다시 출발. 차를 출발선에 세운다 |
+| `track.select` | `track_id` | 트랙 바꾸기. 장애물을 모두 치우고 차를 출발선에 세운다. 출발 신호도 처음부터 |
+| `race.start` | — | 다시 출발. 차를 출발선에 세우고 출발 신호·랩 기록(지난·최고·부정 출발)을 처음부터 |
 
 - 모든 명령에 `request_id`(string)를 넣는다. 시뮬레이터는 명령마다 MQTT-18 `sim.command.result` 를 한 번 낸다. 적용되면 `sim.world`(revision +1)도 다시 낸다 — `push`·`race.start` 는 `sim.pose` 에만 보인다.
 - 모르는 `op`·범위 밖 값은 `ok: false`, `code: INVALID` 로 답한다 (9번째 장애물, \|dy_m\| > 0.5, 없는 `track_id`, 없는 `obstacle_id`).
-- **배치 검사**: 차 몸과 겹치면 `ON_CAR`, 벽 밖이면 `OUT_OF_TRACK` 으로 거부한다. 관리 콘솔 mock 의 `NO_GAP`·`TOO_DENSE`·`TOO_CLOSE`(회피 주행을 미리 돌려 보기)는 지금 자율 앱이 장애물을 피하지 않고 서기만 하므로 시뮬레이터가 내지 않는다. 받는 쪽은 이 코드도 그대로 처리할 수 있어야 한다.
+- **배치 검사** (`obstacle.add`·`obstacle.move`, 관리 콘솔 mock checkPlacement 와 같은 식·순서). 앞에서부터 처음 걸린 것으로 거부한다. 옮기기는 옛 자리를 빼고 본다.
+  1. `OUT_OF_TRACK`: 장애물이 벽 밖으로 조금이라도 나감 (\|옆 거리\| > 벽 − 폭/2)
+  2. `ON_CAR`: 차 몸(길이 0.42·폭 0.20)과 겹침
+  3. `NO_GAP`: 장애물 앞뒤(차 길이 + 폭)를 3 cm 마다 보아, 가장 넓은 틈(벽~장애물~벽)이 0.26 m(차 폭 0.20 + 양쪽 0.03) 보다 좁음. `gap_m`·`need_m` 을 채운다
+  4. `TOO_DENSE`: 틈은 있지만, 기준 회피 주행(mock 의 자율 규칙: 인지 4 m → 틈 고르기 → pure pursuit·속도 계획)을 장애물 묶음 4.8 m 앞에서 출발시켜 보면 서거나 닿음
+  5. `TOO_CLOSE`: 출발 뒤(`race.phase` = `go`)이고 차 바로 앞(−0.3 ~ 4.8 m)이라, 지금 차 상태로 4 를 돌려 봐도 못 지나감
+- 4·5 의 기준 회피 주행은 화면 판정용이다. 지금 자율 앱은 장애물을 피하지 않고 앞에서 선다.
 
 **`sim.command.result`** (MQTT-18)
 
@@ -674,9 +694,9 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | `request_id` | string | 받은 명령의 `request_id` |
 | `op` | string | 받은 명령의 `op` |
 | `ok` | bool | 적용했나 |
-| `code` | string \| null | 거부 사유 `ON_CAR` · `OUT_OF_TRACK` · `INVALID` (예약: `NO_GAP` · `TOO_DENSE` · `TOO_CLOSE`). `ok` 이면 null |
+| `code` | string \| null | 거부 사유 `OUT_OF_TRACK` · `ON_CAR` · `NO_GAP` · `TOO_DENSE` · `TOO_CLOSE` · `INVALID`. `ok` 이면 null |
 | `message` | string \| null | 화면에 그대로 띄울 한 줄 |
-| `gap_m`, `need_m` | float \| null | `NO_GAP` 일 때 모의 단위 틈·필요 폭. 지금은 null |
+| `gap_m`, `need_m` | float \| null | `NO_GAP` 일 때 모의 단위 가장 넓은 틈·필요 폭(0.26). 다른 경우 null |
 
 ### 12.2 콘솔 API (백엔드)
 
@@ -724,6 +744,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.5 (보완) | 2026-11-02 | 백엔드가 v2 `telemetry/metrics` 를 구독해 Zephyr CPU·메모리를 메트릭 표본(`source = zephyr_telemetry`)으로 저장한다(3장). `backend` 계정에 이 토픽 읽기 권한 추가(9장). v1 토픽·payload 는 그대로 |
 | v1.5 (보완) | 2026-11-03 | 백엔드가 v2 `telemetry/heartbeat` 도 구독해 VM 별 Publisher 상태(`publisher_state`·마지막 수집 성공 경과·실패 누계)를 `GET /api/v1/vms/{vm_id}/telemetry/heartbeat` 로 보인다(3장, S15P31E110-358). `backend` 읽기 권한 표기를 실제 정책 `xenova/v2/vms/+/telemetry/+` 로 맞춤(9장). v1 토픽·payload 는 그대로 |
 | v1.6 | 2026-10-29 | 시뮬레이터 전용 12장 추가 (S15P31E110-261·-270·-271): MQTT-15 `sim.pose`·MQTT-16 `sim.world`·MQTT-17 `sim.command`·MQTT-18 `sim.command.result`, 콘솔 REST-30~37·WS-06. vehicle 브랜치 초안(그쪽 번호 v1.3·v1.4 §11)을 옮기며 바꾼 점: 구독자에서 인지 대역을 뺐다(젯슨은 전방 카메라 화면만), 트랙은 실제 서킷 10개, 배치 검사는 `ON_CAR`·`OUT_OF_TRACK` 만, `race` 는 선택. 계정 `simulator` 추가, `backend` 에 `sim/command` 쓰기, `perception` 읽기에서 `sim/#` 제외(9장). 기존 토픽·payload 는 그대로 |
+| v1.6 (보완) | 2026-11-03 | 12장 시뮬레이터 남은 항목 구현 (S15P31E110-319): `sim.pose.race` 를 늘 보냄(출발 신호·랩·부정 출발 규칙, 출발 신호 중 자율 차는 출발선에서 대기), 배치 검사 `NO_GAP`·`TOO_DENSE`·`TOO_CLOSE` 를 예약에서 구현으로(관리 콘솔 mock 과 같은 판정, `NO_GAP` 이면 `gap_m`·`need_m`), `OUT_OF_TRACK` 을 mock 과 같이 "벽 밖으로 조금이라도 나가면"으로 맞춤, 잔디·흙 최고 0.3 m/s 명시, `race.start`·`track.select` 가 출발 신호를 처음부터. 필드 이름·타입은 그대로 |
 | v1.6 (보완) | 2026-11-02 | 12장 WS-06: `sim.command.result` 는 모든 콘솔 연결에 방송, 결과가 REST 202 보다 먼저 올 수 있음을 명시 (구현과 같음, S15P31E110-267). 토픽·payload 는 그대로 |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의

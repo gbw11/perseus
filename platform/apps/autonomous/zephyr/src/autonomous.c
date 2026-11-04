@@ -9,8 +9,10 @@ void auto_cfg_default(struct auto_cfg *cfg)
 	/* 실차 측정 전 값. 1/10 RC카 실내 시연 기준, 시나리오 전환 중 이동 거리 목표(0.5 m/s 상한)에 맞춘다 */
 	cfg->cruise_mps = 0.5f;
 	cfg->max_steer_rad = 0.4f;
-	cfg->k_offset = 1.5f;
-	cfg->k_heading = 1.0f;
+	cfg->wheelbase_m = 0.26f;     /* 시뮬레이터 차와 같다 */
+	cfg->camera_ahead_m = 0.20f;  /* 시뮬레이터 CameraSpec.mount_x_m */
+	cfg->lookahead_m = 0.6f;      /* 인지 대역 LANE_LOOKAHEAD_M */
+	cfg->k_offset = 1.0f;         /* 정답 인지 silverstone 최대 이탈 0.169 → 0.098 m (0.5 는 0.129) */
 	cfg->corridor_half_m = 0.15f; /* 인지 대역 StopZone: 차폭 0.20/2 + 여유 0.05 */
 	cfg->slow_m = 1.6f;
 	cfg->stop_m = 0.8f;           /* 인지 대역 StopZone.distance_m */
@@ -29,6 +31,42 @@ static float clampf(float v, float lo, float hi)
 	return v < lo ? lo : (v > hi ? hi : v);
 }
 
+#define AUTO_HALF_PI    1.57079633f
+#define AUTO_MAX_HEADING 1.4f /* tan 을 키우지 않게 heading_err 를 자른다 (머리핀 근처, tan 1.4 ≈ 5.8) */
+
+/* |x| ≤ AUTO_MAX_HEADING 에서 sin/cos 테일러 (x^13 항 < 1e-7) */
+static float tanf_approx(float x)
+{
+	float x2 = x * x;
+	float s = x * (1.0f - x2 / 6.0f * (1.0f - x2 / 20.0f * (1.0f - x2 / 42.0f * (1.0f - x2 / 72.0f * (1.0f - x2 / 110.0f)))));
+	float c = 1.0f - x2 / 2.0f * (1.0f - x2 / 12.0f * (1.0f - x2 / 30.0f * (1.0f - x2 / 56.0f * (1.0f - x2 / 90.0f * (1.0f - x2 / 132.0f)))));
+
+	return s / c;
+}
+
+/* Abramowitz–Stegun 4.4.49 (|z| ≤ 1 에서 오차 ≤ 1e-5), |z| > 1 은 π/2 − atan(1/z) */
+static float atanf_approx(float z)
+{
+	bool inv = absf(z) > 1.0f;
+	float t = inv ? 1.0f / z : z;
+	float t2 = t * t;
+	float a = t * (0.9998660f + t2 * (-0.3302995f + t2 * (0.1801410f + t2 * (-0.0851330f + t2 * 0.0208351f))));
+
+	if (!inv) {
+		return a;
+	}
+	return (z > 0.0f ? AUTO_HALF_PI : -AUTO_HALF_PI) - a;
+}
+
+float auto_pursuit_steer(const struct auto_cfg *cfg, float lane_offset_m, float heading_err_rad)
+{
+	float h = clampf(heading_err_rad, -AUTO_MAX_HEADING, AUTO_MAX_HEADING);
+	float y = -lane_offset_m + cfg->lookahead_m * tanf_approx(h);
+	float x = cfg->camera_ahead_m + cfg->lookahead_m;
+
+	return atanf_approx(cfg->wheelbase_m * 2.0f * y / (x * x + y * y)) - cfg->k_offset * lane_offset_m;
+}
+
 void auto_target(const struct auto_cfg *cfg, const struct xm_perception_result *p, float *v_mps, float *steer_rad,
 		 enum auto_reason *reason, float *nearest_m)
 {
@@ -43,9 +81,8 @@ void auto_target(const struct auto_cfg *cfg, const struct xm_perception_result *
 	}
 	*nearest_m = nearest;
 
-	float steer = cfg->k_heading * p->heading_err_rad - cfg->k_offset * p->lane_offset_m;
-
-	*steer_rad = clampf(steer, -cfg->max_steer_rad, cfg->max_steer_rad);
+	*steer_rad = clampf(auto_pursuit_steer(cfg, p->lane_offset_m, p->heading_err_rad), -cfg->max_steer_rad,
+			    cfg->max_steer_rad);
 
 	/* 인지가 정지를 요구하거나 정지 거리 안이면 선다. 인지 대역과 거리 기준이 달라도 더 이른 쪽을 따른다 */
 	if (p->stop || (nearest >= 0.0f && nearest <= cfg->stop_m)) {

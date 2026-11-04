@@ -87,6 +87,8 @@ class SimSettings:
     frame_listen: str = "0.0.0.0:7600"            # frames 입력: 게이트웨이 시리얼 프레임을 받을 TCP 주소
     camera_listen: str | None = "0.0.0.0:8090"    # 전방 카메라 MJPEG. None 이면 카메라를 끈다
     track_id: str = "spielberg"                   # 계약 v1.4 §11 트랙 10개 중 하나 (track.track_ids())
+    # 출발 신호 (계약 §12 sim.pose.race, 시나리오 P7). False 면 바로 go — 랩 시간만 잰다 (시험·개발용)
+    start_lights: bool = True
     drivetrain: Drivetrain = field(default_factory=Drivetrain)
     camera: CameraSpec = field(default_factory=CameraSpec)
     wheelbase_m: float = 0.26
