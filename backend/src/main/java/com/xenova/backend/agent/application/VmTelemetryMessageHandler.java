@@ -155,6 +155,7 @@ public class VmTelemetryMessageHandler {
             boolean ok = "ok".equals(node.path("status").asText(null));
             Double value = ok ? number(node.path("value")) : null;
             String reason = value != null ? null
+                    : ok ? "parse_error"
                     : node.path("reason").isTextual() ? node.path("reason").asText()
                     : node.path("status").asText("unavailable");
             values.add(new MetricValue(name, value, node.path("unit").asText(null), labels(node.path("labels")),
@@ -163,19 +164,20 @@ public class VmTelemetryMessageHandler {
         return values;
     }
 
-    // u64/i64 arrive as decimal strings, float64 as JSON numbers (contract §5).
+    // The numeric API represents boolean gauges as 0/1; decimal strings retain their existing handling.
     private static Double number(JsonNode value) {
-        if (value.isNumber()) {
-            return value.asDouble();
+        if (value.isBoolean()) {
+            return value.booleanValue() ? 1.0 : 0.0;
         }
-        if (value.isTextual()) {
-            try {
-                return Double.valueOf(value.asText());
-            } catch (NumberFormatException exception) {
-                return null;
-            }
+        if (!value.isNumber() && !value.isTextual()) {
+            return null;
         }
-        return null;
+        try {
+            double number = value.isNumber() ? value.doubleValue() : Double.parseDouble(value.textValue());
+            return Double.isFinite(number) ? number : null;
+        } catch (NumberFormatException exception) {
+            return null;
+        }
     }
 
     private static Long decimal(JsonNode value) {
