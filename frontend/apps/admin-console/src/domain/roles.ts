@@ -9,7 +9,7 @@ import type { DriveApp, DriveMode, DriveState } from '../api/drive';
 import type { Vm, VmRole } from '../api/types';
 import { STATE_HEALTH } from '../format';
 
-export type AppId = 'autonomous' | 'manual' | 'message-board';
+export type AppId = 'autonomous' | 'manual' | 'interaction';
 
 export interface Role {
   app: AppId;
@@ -38,8 +38,8 @@ export const ROLES: Record<AppId, Role> = {
     color: 'var(--x-app-manual)',
     driving: true,
   },
-  'message-board': {
-    app: 'message-board',
+  interaction: {
+    app: 'interaction',
     vmRole: 'interaction',
     title: '인터랙션 VM',
     short: '인터랙션',
@@ -48,7 +48,7 @@ export const ROLES: Record<AppId, Role> = {
   },
 };
 
-export const ROLE_ORDER: AppId[] = ['autonomous', 'manual', 'message-board'];
+export const ROLE_ORDER: AppId[] = ['autonomous', 'manual', 'interaction'];
 
 /** 역할 미지정 VM 의 카드 색 */
 export const UNASSIGNED_COLOR = 'var(--x-text-muted)';
