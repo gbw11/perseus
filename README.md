@@ -51,7 +51,7 @@ Standalone 방식으로 발급한 Let's Encrypt 인증서는 `deploy/certbot/ren
 
 ### Jenkins 컨테이너
 
-Jenkins는 운영 서비스와 별도인 `compose.jenkins.yaml`로 실행합니다. 전용 이미지에는 Java 21, Node.js 22, Python 3, Git, SSH, Docker CLI·Buildx·Compose와 파이프라인 플러그인이 포함됩니다. Jenkins 웹 포트는 `127.0.0.1`에만 바인딩하고, 운영 Nginx와는 공유 `xenova_app` 네트워크를 통해 `/jenkins/` 경로로 연결합니다.
+Jenkins는 운영 서비스와 별도인 `compose.jenkins.yaml`로 실행합니다. 전용 이미지에는 Java 21, Node.js 22, Python 3, gcc·CMake·Make(C 호스트 시험), Git, SSH, Docker CLI·Buildx·Compose와 파이프라인 플러그인이 포함됩니다. Jenkins 웹 포트는 `127.0.0.1`에만 바인딩하고, 운영 Nginx와는 공유 `xenova_app` 네트워크를 통해 `/jenkins/` 경로로 연결합니다.
 
 ```bash
 cd /opt/xenova

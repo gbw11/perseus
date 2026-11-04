@@ -96,11 +96,11 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
   });
 
   it('네비게이션을 죽여도 주행은 그대로 (격리), 수동주행이 제어 중에 죽으면 SAFE_STOP', () => {
-    forceKill('message-board');
+    forceKill('interaction');
     expect(last.control).toMatchObject({ mode: 'AUTO', generation: 4 });
-    expect(last.apps['message-board']?.heartbeat_ago_ms).toBeNull();
+    expect(last.apps.interaction?.heartbeat_ago_ms).toBeNull();
     vi.advanceTimersByTime(3000 + 5000 + 200);
-    expect(last.apps['message-board']?.heartbeat_ago_ms).not.toBeNull();
+    expect(last.apps.interaction?.heartbeat_ago_ms).not.toBeNull();
     forceKill('autonomous');
     forceKill('manual');
     expect(last.control).toMatchObject({ mode: 'SAFE_STOP', active_app: null });
@@ -112,7 +112,7 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
     const seen = new Set<number | null>();
     for (let i = 0; i < 10; i++) {
       vi.advanceTimersByTime(100);
-      seen.add(last.apps['message-board']!.heartbeat_ago_ms);
+      seen.add(last.apps.interaction!.heartbeat_ago_ms);
     }
     expect(seen.size).toBe(10);
     for (const ms of seen) expect((ms ?? 0) % 100).toBe(0);

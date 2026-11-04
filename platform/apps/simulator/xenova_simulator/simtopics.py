@@ -1,9 +1,9 @@
 """시뮬레이터 전용 토픽 (MQTT 계약 §12, S15P31E110-261). 관람 화면(앱 3번 칸·관리 콘솔)과 콘솔 조작용이다.
 
-- 발행 `xenova/v1/sim/pose` (sim.pose, 20 Hz, QoS 0): 차 뒷바퀴 축 위치·방향·속도·조향·world_revision·노면
+- 발행 `xenova/v1/sim/pose` (sim.pose, 20 Hz, QoS 0): 차 뒷바퀴 축 위치·방향·속도·조향·world_revision·노면·출발 신호와 랩(race)
 - 발행 `xenova/v1/sim/world` (sim.world, 바뀔 때, QoS 1 retained): 트랙·트랙 목록·차 크기·장애물·E-stop. 정상 종료 시 retained 삭제
 - 구독 `xenova/v1/sim/command` (sim.command, QoS 1): 백엔드(콘솔 REST-31~37)가 보내는 조작
-- 발행 `xenova/v1/sim/result` (sim.command.result, QoS 1): 명령마다 한 번, 적용 여부·거부 사유
+- 발행 `xenova/v1/sim/result` (sim.command.result, QoS 1): 명령마다 한 번, 적용 여부·거부 사유 (배치 검사는 placement.py)
 
 젯슨(인지)은 이 토픽을 받지 않는다 — 브로커 ACL 에서 perception 계정은 sim/* 를 읽을 수 없다. 젯슨은 카메라 화면만 본다.
 계정은 simulator (vehicle.status 를 내는 gateway 계정과 따로, 계약 9장).
@@ -22,6 +22,7 @@ from typing import Any
 
 from xenova_mqtt import topics
 
+from . import placement
 from .model import KIND_W, Obstacle
 from .track import track_ids, load as load_track
 
@@ -32,10 +33,8 @@ USERNAME = "simulator"
 POSE_RATE_HZ = 20.0
 MAX_OBSTACLES = 8
 PUSH_MAX_M = 0.5
-CAR_LENGTH_M = 0.42      # 계약 §12 sim.world.car 기본값 (관리 콘솔 mock CAR_L)
-CAR_WIDTH_M = 0.20
-# 차 몸 가운데: 뒷바퀴 축에서 앞으로 (축간거리 0.26 m 의 절반쯤)
-_CAR_CENTRE_M = 0.13
+CAR_LENGTH_M = placement.CAR_L          # 계약 §12 sim.world.car 기본값 (관리 콘솔 mock CAR_L)
+CAR_WIDTH_M = 2 * placement.CAR_HALF
 
 
 def _number(payload: dict[str, Any], name: str) -> float | None:
@@ -81,11 +80,15 @@ class SimTopics:
         op = payload.get("op") if isinstance(payload.get("op"), str) else ""
         request_id = payload.get("request_id") if isinstance(payload.get("request_id"), str) else ""
         with self._lock:
-            code, message = self._apply(op, payload)
+            outcome = self._apply(op, payload)
+        if isinstance(outcome, placement.Check):
+            code, message, gap, need = outcome.code, outcome.message, outcome.gap_m, outcome.need_m
+        else:
+            (code, message), gap, need = outcome, None, None
         return {"request_id": request_id, "op": op, "ok": code is None, "code": code, "message": message,
-                "gap_m": None, "need_m": None}
+                "gap_m": gap, "need_m": need}
 
-    def _apply(self, op: str, p: dict[str, Any]) -> tuple[str | None, str | None]:
+    def _apply(self, op: str, p: dict[str, Any]) -> tuple[str | None, str | None] | placement.Check:
         sim = self._sim
         car = sim.vehicle
         if op in ("obstacle.add", "obstacle.move", "obstacle.remove"):
@@ -115,7 +118,7 @@ class SimTopics:
             else:
                 old = existing[oid]
                 obstacle = Obstacle.of(old.kind, x, y, oid)
-            reason = self._placement(obstacle)
+            reason = self._placement(obstacle, [o for o in car.obstacles if o.id != oid])
             if reason:
                 return reason
             if op == "obstacle.add":
@@ -146,24 +149,16 @@ class SimTopics:
             return None, None
         return "INVALID", f"모르는 명령 {op!r}"
 
-    def _placement(self, o: Obstacle) -> tuple[str, str] | None:
-        """놓을 수 없는 자리면 (code, message). 계약의 NO_GAP·TOO_DENSE·TOO_CLOSE(회피 주행 미리 돌려보기)는
-        지금 자율 앱이 피하지 않고 서기만 하므로 하지 않는다 — 벽 밖·차와 겹침만 본다."""
+    def _placement(self, o: Obstacle, others: list[Obstacle]) -> placement.Check | None:
+        """놓을 수 없는 자리면 거부 사유 (OUT_OF_TRACK·ON_CAR·NO_GAP·TOO_DENSE·TOO_CLOSE, placement.py).
+        others = 이 장애물을 뺀 지금 장애물. 옮기기면 옛 자리는 빼고 새 자리로 본다 (mock moveObstacle 과 같음)."""
         sim = self._sim
-        track = sim.track
-        i, off, _ = track.frame(o.x, o.y)
-        if abs(off) - o.w / 2 > track.wall(i, off):
-            return "OUT_OF_TRACK", "벽 밖에는 놓을 수 없어요"
-        car = sim.vehicle
-        cx = car.x + _CAR_CENTRE_M * math.cos(car.heading_rad)
-        cy = car.y + _CAR_CENTRE_M * math.sin(car.heading_rad)
-        # 차 몸(길이×폭 직사각형)과 장애물 바닥이 겹치는가: 차 좌표로 옮겨 축별로 본다
-        dx, dy = o.x - cx, o.y - cy
-        along = dx * math.cos(car.heading_rad) + dy * math.sin(car.heading_rad)
-        side = -dx * math.sin(car.heading_rad) + dy * math.cos(car.heading_rad)
-        if abs(along) < CAR_LENGTH_M / 2 + o.w / 2 and abs(side) < CAR_WIDTH_M / 2 + o.w / 2:
-            return "ON_CAR", "차와 겹치는 자리예요"
-        return None
+        track, v = sim.track, sim.vehicle
+        item = placement.Item.at(track, o.id, o.kind, o.x, o.y)
+        items = [placement.Item.at(track, q.id, q.kind, q.x, q.y) for q in others] + [item]
+        car = placement.Car(v.x, v.y, v.heading_rad, v.v_mps, v.steer_rad,
+                            sim.track_index if sim.track_index is not None else track.nearest(v.x, v.y))
+        return placement.check(track, items, item, car, sim.race.phase == "go")
 
     # --- 발행 ---
 
@@ -188,6 +183,7 @@ class SimTopics:
             "x": round(v.x, 4), "y": round(v.y, 4), "yaw": round(v.heading_rad, 4),
             "v_mps": round(v.v_mps, 4), "steer_rad": round(v.steer_rad, 4),
             "world_revision": self.revision, "surface": sim.track.surface(i, off),
+            "race": sim.race.payload(),
         }
 
     def publish(self) -> None:

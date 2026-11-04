@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { circuitOf, nearest, type CircuitTrack } from '@xenova/ui';
+import { initialSim, snapshotOf } from '../mocks/sim';
 import { setSession } from './client';
 import {
   createSimResultWaiter,
   describeSimResult,
+  placeRandomObstacles,
   placeSimObstacle,
   selectSimTrack,
   SimCommandError,
@@ -148,5 +151,48 @@ describe('장애물 놓기 (REST-31 → WS-06)', () => {
     expect(e).toBeInstanceOf(SimCommandError);
     expect((e as SimCommandError).message).toBe('시뮬레이터 응답 없음');
     expect((e as SimCommandError).result).toMatchObject({ request_id: 'req-10', op: 'track.select' });
+  });
+});
+
+describe('무작위 3개 실데이터 (S15P31E110-364)', () => {
+  const g = circuitOf(snapshotOf(initialSim(0)).world!.track as CircuitTrack);
+  const ok = (): SimCommandResult => result({ op: 'obstacle.add' });
+  const rejected = (code: string): SimCommandResult => result({ op: 'obstacle.add', ok: false, code });
+
+  it('차 앞 트랙 위에 차례로 세 자리를 놓는다', async () => {
+    const spots: [number, number][] = [];
+    const n = await placeRandomObstacles(g, g.start, async (_kind, x, y) => {
+      spots.push([x, y]);
+      return ok();
+    });
+    expect(n).toBe(3);
+    expect(spots).toHaveLength(3);
+    for (const [x, y] of spots) {
+      const i = nearest(g, x, y);
+      const ahead = (i - g.start + g.N) % g.N;
+      expect(ahead).toBeGreaterThanOrEqual(30); // 차 바로 앞은 비운다
+      expect(Math.hypot(x - g.C[i]![0], y - g.C[i]![1])).toBeLessThanOrEqual(0.2501); // 가로 ±0.25 안
+    }
+  });
+
+  it('거부되면 다른 자리로 다시 고르고, 장애물마다 8번까지만', async () => {
+    let calls = 0;
+    const n = await placeRandomObstacles(g, g.start, async () => {
+      calls++;
+      return calls === 1 || calls === 2 ? rejected('NO_GAP') : calls <= 4 ? ok() : rejected('TOO_DENSE');
+    });
+    // 1·2 거부 → 3 놓임, 4 놓임, 세 번째는 8번 모두 거부
+    expect(n).toBe(2);
+    expect(calls).toBe(4 + 8);
+  });
+
+  it('응답 없음이면 더 보내지 않는다', async () => {
+    let calls = 0;
+    const n = await placeRandomObstacles(g, g.start, async () => {
+      calls++;
+      return calls === 1 ? ok() : rejected('NO_RESPONSE');
+    });
+    expect(n).toBe(1);
+    expect(calls).toBe(2);
   });
 });
