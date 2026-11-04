@@ -11,7 +11,7 @@ import logging
 import platform
 import socket
 import struct
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from . import __version__
@@ -19,7 +19,7 @@ from .procfs import Roots, read_text
 
 log = logging.getLogger("xenova_agent.inventory")
 
-# capabilities.metrics: 이 에이전트가 MQTT-03 으로 보내는 메트릭 이름(계약 3장). 명령(MQTT-04)은 아직 받지 않는다
+# capabilities.metrics: 이 에이전트가 MQTT-03 으로 보내는 메트릭 이름(계약 3장). capabilities.commands 는 데모 명령이 켜졌을 때만 채운다
 METRIC_NAMES = (
     "cpu_percent_allocated",
     "memory_used_bytes",
@@ -110,6 +110,7 @@ def collect(
     hostname: Callable[[], str] = socket.gethostname,
     kernel_release: Callable[[], str] = platform.release,
     ipv4_of: Callable[[str], str | None] = ipv4_address,
+    commands: Sequence[str] = (),
 ) -> dict[str, Any]:
     try:
         os_release = parse_os_release(read_text(roots.etc / "os-release"))
@@ -129,5 +130,5 @@ def collect(
         "hostname": hostname() or "unknown",
         "interfaces": interfaces(roots, ipv4_of),
         "agent_version": __version__,
-        "capabilities": {"commands": [], "metrics": list(METRIC_NAMES)},
+        "capabilities": {"commands": list(commands), "metrics": list(METRIC_NAMES)},
     }

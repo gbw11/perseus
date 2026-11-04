@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xenova-agent"
-version = "0.3.0"
+version = "0.4.0"
 description = "Xenova VM 에이전트: MQTT 계약 v1 heartbeat·inventory·metrics 송신 (S15P31E110-117, -122)"
 requires-python = ">=3.11"
 # xenova_mqtt 는 같은 저장소의 ../mqtt-client 라 여기 선언하지 않는다. 게스트에는 deploy/install_into_rootfs.py 가 두 패키지를

@@ -20,6 +20,8 @@ DEFAULT_HEARTBEAT_INTERVAL_S = 5.0
 DEFAULT_METRICS_INTERVAL_S = 2.0
 DEFAULT_TOP_PROCESSES = 10  # processes[] 개수. 64KB 메시지 상한 안쪽을 지키는 기본값이며 계약상 고정값은 아니다
 DEFAULT_INVENTORY_REFRESH_S = 60.0  # inventory 를 다시 읽어 바뀌었는지 보는 간격
+# 명령 기록(같은 command_id 재실행 방지). 유닛의 RuntimeDirectory 라 부팅마다 비워진다
+DEFAULT_STATE_DIR = Path("/run/xenova-agent")
 MAX_TOP_PROCESSES = 50
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 NIL_UUID = str(uuid.UUID(int=0))
@@ -50,6 +52,9 @@ class AgentSettings:
     inventory_refresh_s: float = DEFAULT_INVENTORY_REFRESH_S
     # v2 Telemetry(에이전트 자체 상태, xenova_agent.telemetry) 발행. 브로커 ACL 이 v2 쓰기를 막으면 조용히 버려질 뿐 v1 에는 영향이 없다
     telemetry_enabled: bool = True
+    # MQTT-04 데모 명령(stress·agent_exit). 시연용 이미지에서만 켠다. 꺼져 있으면 명령을 DEMO_DISABLED 로 거절한다
+    demo_commands: bool = False
+    state_dir: Path | None = DEFAULT_STATE_DIR
     log_level: str = "INFO"
 
     def __post_init__(self) -> None:
@@ -98,6 +103,7 @@ class AgentSettings:
             metrics_interval_s=read("XENOVA_AGENT_METRICS_INTERVAL", cls.metrics_interval_s, float),
             top_processes=read("XENOVA_AGENT_TOP_PROCESSES", cls.top_processes, int),
             telemetry_enabled=read("XENOVA_AGENT_TELEMETRY", cls.telemetry_enabled, _as_bool),
+            demo_commands=read("XENOVA_AGENT_DEMO_COMMANDS", cls.demo_commands, _as_bool),
             log_level=read("XENOVA_AGENT_LOG_LEVEL", cls.log_level, str).upper(),
         )
 

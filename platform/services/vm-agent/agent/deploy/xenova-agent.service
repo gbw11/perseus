@@ -10,13 +10,21 @@ Wants=network-online.target
 [Service]
 Type=simple
 # 선택: XENOVA_AGENT_BROKER_HOST/PORT, XENOVA_AGENT_BROKER_USERNAME/PASSWORD, XENOVA_AGENT_METRICS_INTERVAL(초, 기본 2),
-# XENOVA_AGENT_TOP_PROCESSES(0~50, 기본 10), XENOVA_AGENT_LOG_LEVEL. heartbeat 주기는 계약값 5초라 설정할 수 없다(넣으면 시작 거부)
+# XENOVA_AGENT_TOP_PROCESSES(0~50, 기본 10), XENOVA_AGENT_LOG_LEVEL. heartbeat 주기는 계약값 5초라 설정할 수 없다(넣으면 시작 거부).
+# XENOVA_AGENT_DEMO_COMMANDS=1 이면 MQTT-04 데모 명령(stress·agent_exit)을 실행한다. 기본은 꺼짐(명령을 DEMO_DISABLED 로 거절)
 EnvironmentFile=-/etc/xenova/agent.env
 # 설치 경로는 install_into_rootfs.py 와 같다. xenova_mqtt(mqtt-client)와 xenova_agent 두 패키지가 보여야 한다
 Environment=PYTHONPATH=/opt/xenova/mqtt-client:/opt/xenova/agent
 ExecStart=/usr/bin/python3 -m xenova_agent
 Restart=always
 RestartSec=2
+# agent_exit 데모 명령의 종료 코드. 다시 띄우지 않아 heartbeat 가 끊긴 채로 남고 Recovery Worker 가 그 끊김으로 장애를 판정한다
+RestartPreventExitStatus=3
+SuccessExitStatus=3
+# 처리한 명령 기록(/run/xenova-agent/commands.json). 부팅마다 비워지고, 같은 부팅 안의 재시작에는 남아 재전달된 명령을 다시 실행하지 않는다
+RuntimeDirectory=xenova-agent
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
 KillSignal=SIGTERM
 TimeoutStopSec=10
 # heartbeat 송신에는 권한이 필요 없다. /etc/xenova/instance-id 가 root 0600 이라 uid 는 root 로 두되 capability 를 전부 떼고 쓰기를 막는다.

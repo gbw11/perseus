@@ -1,6 +1,7 @@
 """`python -m xenova_agent`: 설정을 읽고 MQTT 클라이언트를 띄운 뒤 heartbeat 루프(메인 스레드), inventory·metrics 발행 루프(Reporter
-스레드), 에이전트 자체 상태의 v2 Telemetry 루프(세 번째 스레드)를 돈다. 수집이 느려도 heartbeat 가 밀리지 않고, Reporter 가 멈춰도
-Telemetry 가 그것을 알리도록 셋을 나눈다. SIGTERM·SIGINT 로 멈춘다."""
+스레드), 에이전트 자체 상태의 v2 Telemetry 루프(세 번째 스레드), MQTT-04 데모 명령 처리(네 번째 스레드)를 돈다. 수집이 느려도
+heartbeat 가 밀리지 않고, Reporter 가 멈춰도 Telemetry 가 그것을 알리고, 명령 처리가 생존 신호를 밀지 않도록 나눈다.
+SIGTERM·SIGINT 로 멈춘다. agent_exit 명령으로 멈추면 종료 코드 3 이고 유닛이 다시 띄우지 않는다."""
 
 from __future__ import annotations
 
@@ -9,8 +10,10 @@ import signal
 import sys
 import threading
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
+from .commands import ACTIONS, EXIT_CODE
 from .config import AgentSettings
 from .heartbeat import HeartbeatFailed, HeartbeatSender
 from .reporter import Reporter
@@ -31,6 +34,10 @@ def build_client(settings: AgentSettings) -> Any:
     )
 
 
+def inventory_commands(settings: AgentSettings) -> tuple[str, ...]:
+    return ACTIONS if settings.demo_commands else ()
+
+
 def build_reporter(client: Any, settings: AgentSettings) -> Reporter:
     from . import inventory
     from .metrics import MetricsCollector
@@ -38,7 +45,7 @@ def build_reporter(client: Any, settings: AgentSettings) -> Reporter:
 
     return Reporter(
         client, settings.vm_id,
-        collect_inventory=inventory.collect,
+        collect_inventory=partial(inventory.collect, commands=inventory_commands(settings)),
         collect_metrics=MetricsCollector().collect,
         collect_processes=ProcessSampler(top_n=settings.top_processes).collect,
         interval_s=settings.metrics_interval_s,
@@ -46,20 +53,36 @@ def build_reporter(client: Any, settings: AgentSettings) -> Reporter:
     )
 
 
-def build_telemetry(client: Any, settings: AgentSettings, *, reporter: Any, reporter_thread: threading.Thread | None, sender: HeartbeatSender) -> Any:
-    from . import __version__, inventory
-    from .telemetry import TelemetryPublisher
-
+def boot_id_of(client: Any) -> str:
     boot_id = getattr(getattr(client, "identity", None), "boot_id", None)
     if not boot_id:
         from xenova_mqtt.envelope import read_boot_id
 
         boot_id = read_boot_id()
+    return boot_id
+
+
+def build_commands(client: Any, settings: AgentSettings, *, on_exit: Callable[[], None]) -> Any:
+    from .commands import CommandHandler, CommandHistory
+
+    return CommandHandler(
+        client, settings.vm_id,
+        boot_id=boot_id_of(client),
+        enabled=settings.demo_commands,
+        history=CommandHistory(settings.state_dir),
+        on_exit=on_exit,
+    )
+
+
+def build_telemetry(client: Any, settings: AgentSettings, *, reporter: Any, reporter_thread: threading.Thread | None, sender: HeartbeatSender) -> Any:
+    from . import __version__, inventory
+    from .telemetry import TelemetryPublisher
+
     return TelemetryPublisher(
         client, settings.vm_id,
-        boot_id=boot_id,
+        boot_id=boot_id_of(client),
         agent_version=__version__,
-        collect_inventory=inventory.collect,
+        collect_inventory=partial(inventory.collect, commands=inventory_commands(settings)),
         reporter_status=reporter.status if reporter is not None else (lambda: None),
         reporter_alive=reporter_thread.is_alive if reporter_thread is not None else (lambda: False),
         v1_publish_failures=lambda: sender.failed,
@@ -72,6 +95,7 @@ def run(
     client_factory: Callable[[AgentSettings], Any] = build_client,
     reporter_factory: Callable[[Any, AgentSettings], Any] | None = build_reporter,
     telemetry_factory: Callable[..., Any] | None = build_telemetry,
+    command_factory: Callable[..., Any] | None = build_commands,
     stop: threading.Event | None = None,
     install_signals: bool = True,
 ) -> int:
@@ -82,6 +106,10 @@ def run(
             signal.signal(signum, lambda *_: stop.set())
 
     client = client_factory(settings)
+    # 구독은 연결 전에 등록해 둔다. 클라이언트가 연결·재연결마다 다시 요청한다
+    commands = command_factory(client, settings, on_exit=stop.set) if command_factory is not None else None
+    if commands is not None:
+        commands.subscribe()
     # 브로커가 없어도 start 는 실패하지 않고 뒤에서 재시도한다. 첫 heartbeat 를 바로 보내도록 한 주기만큼만 연결을 기다린다
     client.start(wait_s=settings.heartbeat_interval_s)
     log.info(
@@ -97,6 +125,8 @@ def run(
         telemetry = telemetry_factory(client, settings, reporter=reporter, reporter_thread=reporter_thread, sender=sender)
     telemetry_stop = threading.Event()
     telemetry_thread = telemetry.start(telemetry_stop) if telemetry is not None else None
+    commands_stop = threading.Event()
+    commands_thread = commands.start(commands_stop) if commands is not None else None
     try:
         sender.run(stop)
     except HeartbeatFailed as exc:
@@ -104,6 +134,9 @@ def run(
         log.error("xenova-agent 실패: %s (보냄 %d, 건너뜀 %d)", exc, sender.sent, sender.skipped)
         return 1
     finally:
+        commands_stop.set()  # 도는 stress 를 끝내고 그 결과를 클라이언트가 살아 있을 때 보낸다
+        if commands_thread is not None:
+            commands_thread.join(timeout=5)
         telemetry_stop.set()  # 클라이언트가 살아 있을 때 마지막 stopping heartbeat 를 보내도록 먼저 멈춘다
         if telemetry_thread is not None:
             telemetry_thread.join(timeout=5)
@@ -112,7 +145,7 @@ def run(
             reporter_thread.join(timeout=5)
         client.stop()
     log.info("xenova-agent 종료: 보냄 %d, 연결 없어 건너뜀 %d, 실패 %d", sender.sent, sender.skipped, sender.failed)
-    return 0
+    return EXIT_CODE if commands is not None and commands.exit_requested else 0
 
 
 def main() -> int:
