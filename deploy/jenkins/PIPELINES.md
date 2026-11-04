@@ -38,7 +38,7 @@ Production deployment Job:
 - Frontend: install, lint, typecheck, tests, both production builds, and both frontend image builds.
 - Platform: dom0-manager and vm-agent Python tests.
 - Vehicle: simulator, perception, and manual app Python tests; xenova-mqtt-c, manual, and autonomous C host tests (CMake, ASan/UBSan).
-- Develop/Master check: backend, frontend, and platform checks above, Compose validation, and all application image builds. Vehicle checks are not included yet.
+- Develop/Master check: all checks above (including vehicle), Compose validation, and all application image builds.
 - Master deploy: all checks, production image build, EC2 deployment, Nginx restart, and public health checks.
 
 The `master` Merge Request check never deploys. Production deployment begins only after the merge creates a Push event on `master`.
