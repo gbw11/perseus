@@ -15,7 +15,7 @@
 | 기본 CPU 배치 | Zephyr A→pCPU 1, B→2, dom0·일반 VM의 모든 vCPU→{0,3}. Credit2·기존 vCPU 수 유지 |
 | 외부 레이어 | [layers.lock](../../platform/yocto/layers.lock)의 8개 URL·commit |
 | Linux 원본 | [sources.lock.json](../../platform/guests/sources.lock.json)의 Ubuntu·Debian cloud image |
-| 기본 선택 | [default-templates.lock.json](../../platform/guests/default-templates.lock.json): Ubuntu·Debian 1.0.3, 실제 drive warm-lattice-lab 1.0.0-lab.1. Network Starter는 과거 지원 입력으로 유지 |
+| 기본 선택 | [default-templates.lock.json](../../platform/guests/default-templates.lock.json): Ubuntu·Debian 1.0.4, 실제 drive warm-lattice-lab 1.0.8. Network Starter는 과거 지원 입력으로 유지 |
 | 기본 VM | Debian Interaction 1대 + Zephyr A/B 2대 |
 | Linux 게스트 | Paho·공용 MQTT 클라이언트·Agent, 8GiB root 디스크 |
 | Zephyr 게스트 | 1 vCPU·16MiB·GICv2, Xen Ethernet·DHCP·ICMP·협조형 stop/reboot |
@@ -311,7 +311,7 @@ run drive-build python3 -B "$REPO/platform/scripts/build-xenova-drive-app.py" \
 
 run drive-template-package python3 -B \
   "$REPO/platform/scripts/package-xenova-drive-template.py" \
-  --build-root "$RUN/drive-build" --output "$RUN/drive-candidate"
+  --build-root "$RUN/drive-build" --output "$RUN/drive-candidate" --version 1.0.8
 ```
 
 포장 도구는 현재 source fingerprint·ARM payload·실제 앱 profile과
@@ -1154,3 +1154,24 @@ Connected·ring-ref·도메인 루트 권한을 대신 써 넣어 통과시키�
 
 G1은 Store·권한·transaction·watch·회수를 검증한다. Ethernet packet 송수신·DHCP·
 MQTT·앱 준비는 Network Starter와 해당 앱의 별도 수락 근거로 기록한다.
+
+
+## 2026-11-04 앱 메모리 제공물: 수동 버퍼와 RAM 요약
+
+선택 주행 프로필의 로컬 제공 및 다음 이미지 기본 선택 버전은 `1.0.8`이다. `build-xenova-drive-app.py`의
+`--app drive --profile warm-lattice-lab`과 `package-xenova-drive-template.py --version 1.0.8`을
+사용하며 출력은 기존 release와 다른 새 디렉터리로 지정한다. 기존 source receipt 검증을 유지한다.
+
+이 펌웨어는 기존 AUTO 4영역과 MANUAL 입력·대기·실행·보관 결과 4영역을 같은
+Diagnostics provider로 수집한다. 상단 관리 RAM은 기존 memory 봉투의 total/free를 조합한다.
+[정식 계약](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md)과
+[소비 예제](../../platform/guests/zephyr/telemetry/contract/docs/CONSUMER_HANDOFF.md),
+[최종 후보·명령·실제 대역과 한계](../verification/recovery-scenario-closure-20261030.md)를 함께 확인한다.
+
+새 C 코드와 metadata는 firmware에 링크되며 새 target Python 의존성·daemon·unit은 없다.
+기존 템플릿 선택을 자동 변경하지 않는다. 부분 firmware 포장은 정규 전체 이미지·실보드 설치·
+Spring 저장/화면 수락과 구분한다. 스택 발행 계약은 유지하고 화면 적용은 보류한다.
+
+RAM 상단은 최근 유효 관측과 원 관측 시각을 표시한다. 독립 실행 조회 없이 같은 memory 봉투로 계산하며, 6초 원 lease·같은 표본의 오류/상충 보류·boot/publisher별 그래프 분리를 유지한다. 최신 계약·참조 도구는 `ram-recent-observation-contract-2.1-20261104.tar.gz`로 별도 제공한다. 이번 후속에는 링크되는 C/H·설정 변경이 없으므로 새 firmware 버전을 발급하거나 기존 `1.0.8` manifest를 수정하지 않는다. 자세한 변경·검증은 [최근 관측 후속](../verification/recovery-scenario-closure-20261030.md#ram-recent-observation-20261104)에 기록한다.
+
+2026-11-05에는 검증한 1.0.8 manifest(SHA256 47c8eaedb7032c93bbfb58e003d7bde4fd07b3de8506ccbed76912912b61649a)를 기본 lock·factory A/B·조립 예시에 함께 선택했다. 기존 Linux 선택은 1.0.4다. 실제 release root에 같은 불변 1.0.8 디렉터리를 공급한 뒤 resolve/조립 검사를 수행한다. 전체 이미지 빌드·보드 설치는 별도이며 [선택 검증](../verification/recovery-scenario-closure-20261030.md#image-default108-20261105)에 근거를 둔다.
