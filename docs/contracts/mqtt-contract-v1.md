@@ -200,6 +200,19 @@ MANUAL/AUTO 재무장도 이 요청을 사용하며 legacy의 AUTO_READY 전용 
 ```
 
 이는 전체 envelope가 아닌 관련 필드 예시다. 공통 필수 신원·seq 필드는 §2를 따른다.
+
+받아들인 재개는 `drive.resume.accepted`(`switch_in_ms: 3000`)로 알리고 3초 뒤 AUTO로 바꾼다.
+그 3초 동안 운영자는 같은 토픽(`console/resume`)으로 `drive.resume.cancel_requested`를 보내 취소할 수 있다(v1.7).
+취소 요청도 `causation_id`(현재 control message_id)와 payload `expected_generation`(카운트다운을 시작한 세대)을 가진다.
+둘이 맞고 카운트다운 중이면 Gateway는 카운트다운을 멈추고 `drive.resume.cancelled`(`reason: "operator_cancelled"`)를 낸다.
+모드는 바꾸지 않으며(AUTO_READY 등 그대로), 다시 AUTO로 가려면 새 재개 요청이 필요하다. 자동 복귀는 없다.
+카운트다운이 없거나 문맥이 맞지 않는 취소 요청은 이벤트 없이 무시한다. 취소는 반복돼도 결과가 같으므로 영구 중복 기록을 남기지 않는다.
+
+```json
+{"type":"drive.resume.cancel_requested","causation_id":"<현재 control message_id>",
+ "payload":{"expected_generation":42,"requested_by":"operator"}}
+```
+
 소비자 이행과 설치는 [공통 펌웨어 안내](../../platform/apps/drive/README.md)에 있다.
 Spring/표시 소비자의 새 토픽·재개 문맥·정지 중 입력 공급은 아직 제품 연결이 필요하다.
 
@@ -282,10 +295,16 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 | MQTT-06 | `xenova/v1/apps/autonomous/events` | `perception.event` | 자율 VM → 인터랙션 VM | 1 | `kind`(obstacle 등), `detail` |
 | MQTT-06 | `xenova/v1/apps/interaction/events` | `message.posted` | 인터랙션 VM → 주행 화면 | 1 | `text`, `level` |
 | MQTT-06 | `xenova/v1/apps/interaction/events` | `drive.resume.requested` | 인터랙션 VM → 게이트웨이 | 1 | `requested_by` |
+| — | `xenova/v1/console/resume` | `drive.resume.requested` | 백엔드(운영자 콘솔) → 게이트웨이 | 1 | `expected_generation`, `requested_by` (+ envelope `causation_id`) |
+| — | `xenova/v1/console/resume` | `drive.resume.cancel_requested` | 백엔드(운영자 콘솔) → 게이트웨이 | 1 | `expected_generation`, `requested_by` (+ envelope `causation_id`) — v1.7 |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.resume.accepted` | 게이트웨이 → 백엔드, 주행 화면 | 1 | `switch_in_ms`(3000), `generation`, `requested_by` |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.resume.cancelled` | 게이트웨이 → 백엔드, 주행 화면 | 1 | `reason`, `generation`, (`operator_cancelled` 일 때) `requested_by` |
 | MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed` | 게이트웨이 → 인터랙션 VM, 주행 화면, 백엔드 | 1 | `from`, `to`, `generation`, `reason` |
 | MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.fault.detected` | 게이트웨이 → 인터랙션 VM, 백엔드 | 1 | `app_id`, `vm_id`, `reason`, `detected_at` |
 
 - Legacy의 `drive.resume.requested`는 `AUTO_READY`일 때만 받아들인다. 다른 모드에서는 무시하고 `drive.mode.changed`를 내지 않는다.
+- `drive.resume.cancelled`의 `reason`: `operator_cancelled`(운영자 취소, v1.7), `readiness_lost`(대상 VM·앱 준비 상실·세대 변경), 그 밖에는 카운트다운을 끝낸 모드 전환의 reason(`autonomous_lost`, `command_timeout`, `no_fresh_standby` 등). 운영자 취소만 모드를 바꾸지 않는다.
+- `console/resume` 토픽에는 노션 계약 ID가 아직 없다(코드 주석의 "MQTT-13"은 11장 `recovery/health`와 겹치는 옛 표기).
 - 백엔드는 `drive.mode.changed`, `drive.fault.detected`를 콘솔 이벤트 로그(REST-18, `/ws/v1/events`)에 남긴다. 심각도는 모드 전환 `INFO`, `SAFE_STOP` 진입·장애 `WARNING`.
 
 ### 6.1 앱 생존 신호 `app.heartbeat`
@@ -746,6 +765,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.6 | 2026-10-29 | 시뮬레이터 전용 12장 추가 (S15P31E110-261·-270·-271): MQTT-15 `sim.pose`·MQTT-16 `sim.world`·MQTT-17 `sim.command`·MQTT-18 `sim.command.result`, 콘솔 REST-30~37·WS-06. vehicle 브랜치 초안(그쪽 번호 v1.3·v1.4 §11)을 옮기며 바꾼 점: 구독자에서 인지 대역을 뺐다(젯슨은 전방 카메라 화면만), 트랙은 실제 서킷 10개, 배치 검사는 `ON_CAR`·`OUT_OF_TRACK` 만, `race` 는 선택. 계정 `simulator` 추가, `backend` 에 `sim/command` 쓰기, `perception` 읽기에서 `sim/#` 제외(9장). 기존 토픽·payload 는 그대로 |
 | v1.6 (보완) | 2026-11-03 | 12장 시뮬레이터 남은 항목 구현 (S15P31E110-319): `sim.pose.race` 를 늘 보냄(출발 신호·랩·부정 출발 규칙, 출발 신호 중 자율 차는 출발선에서 대기), 배치 검사 `NO_GAP`·`TOO_DENSE`·`TOO_CLOSE` 를 예약에서 구현으로(관리 콘솔 mock 과 같은 판정, `NO_GAP` 이면 `gap_m`·`need_m`), `OUT_OF_TRACK` 을 mock 과 같이 "벽 밖으로 조금이라도 나가면"으로 맞춤, 잔디·흙 최고 0.3 m/s 명시, `race.start`·`track.select` 가 출발 신호를 처음부터. 필드 이름·타입은 그대로 |
 | v1.6 (보완) | 2026-11-02 | 12장 WS-06: `sim.command.result` 는 모든 콘솔 연결에 방송, 결과가 REST 202 보다 먼저 올 수 있음을 명시 (구현과 같음, S15P31E110-267). 토픽·payload 는 그대로 |
+| v1.7 | 2026-11-04 | 재개 카운트다운 운영자 취소 (S15P31E110-280): `console/resume` 에 `drive.resume.cancel_requested`(`causation_id`·`expected_generation`·`requested_by`) 추가, `drive.resume.cancelled` reason `operator_cancelled`(모드 유지, 자동 복귀 없음)(5.2 verified, 6장). 6장 표에 그동안 게이트웨이 README 에만 있던 `drive.resume.accepted`·`cancelled` 와 `console/resume` 재개 요청 행을 올림. 기존 토픽·payload·ACL 은 그대로 |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의
 QoS 교환은 메시지 전달을 위한 것이며 앱/장치 적용 확인을 대신하지 않는다.
