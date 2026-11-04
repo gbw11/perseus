@@ -3,6 +3,7 @@
  * 규칙은 MQTT 계약 v1.2 §5.2·§6, RC카 시나리오 §4 (시간만 줄임):
  *   - 자율주행 강제 종료 → 명령 끊김 → MANUAL(인계) → 재시작(복구 중) → 3초 연속 정상 → AUTO_READY
  *   - [재개] → drive.resume.accepted(3초 카운트다운) → AUTO, 그 사이 자율주행이 다시 죽으면 drive.resume.cancelled
+ *   - 카운트다운 중 [취소] → drive.resume.cancelled(operator_cancelled), 모드 유지. 자동 복귀는 없다 (계약 v1.7)
  *   - 수동주행이 제어 중 죽으면 SAFE_STOP, 돌아오면 MANUAL. 네비게이션이 죽어도 주행은 그대로 (격리)
  *   - 인지 끊김(D5)은 모드를 바꾸지 않는다: 자율주행이 정지 명령(v=0)을 낸다
  */
@@ -37,6 +38,8 @@ const BOOT_MS = 5000;
 const READY_FRESH_MS = 3000;
 /** MQTT 계약 v1.2 §6: 재개 받아들인 뒤 전환까지 */
 export const RESUME_COUNTDOWN_MS = 3000;
+/** 마지막 재개 취소를 상태에 남기는 시간 (백엔드 RESUME_CANCEL_VISIBLE_MS 와 같다) */
+const RESUME_CANCEL_VISIBLE_MS = 10_000;
 /** 인계 표본값 (≤150 ms 목표). 계약 이벤트에는 아직 필드가 없다 */
 export const HANDOFF_MS = 112;
 
@@ -59,10 +62,10 @@ interface Store {
   reason: string;
   apps: Record<Target, AppLife>;
   resumeAt: number | null;
-  /** 카운트다운을 시작한 쪽 — 자동 복귀(auto) 또는 운영자 재개(admin) (계약 v1.5) */
-  resumeBy: 'auto' | 'admin' | null;
-  /** 운영자가 자동 복귀를 취소했다 — 이번 AUTO_READY 동안은 [재개]로만 */
-  autoBlocked: boolean;
+  /** 카운트다운을 시작한 운영자 */
+  resumeBy: string | null;
+  /** 마지막 drive.resume.cancelled — 백엔드 DriveState.resume_cancel 처럼 잠깐 보인다 */
+  lastCancel: { reason: string; by: string | null; generation: number; at: number } | null;
   perceptionLost: boolean;
   keys: DriveKey[];
   v: number;
@@ -114,7 +117,7 @@ function initial(): Store {
     apps: { autonomous: life(130), manual: life(570), interaction: life(820) },
     resumeAt: null,
     resumeBy: null,
-    autoBlocked: false,
+    lastCancel: null,
     perceptionLost: false,
     keys: [],
     v: 0.5,
@@ -151,7 +154,6 @@ function setMode(to: DriveMode, reason: string, severity: EventSeverity = 'INFO'
   store.mode = to;
   store.generation += 1;
   store.reason = reason;
-  if (to !== 'AUTO_READY') store.autoBlocked = false; // AUTO_READY 를 벗어나면 다음에 다시 자동 복귀
   push(
     event('drive.mode.changed', severity, null, {
       from,
@@ -169,10 +171,11 @@ function activeApp(): 'autonomous' | 'manual' | null {
   return null;
 }
 
-/** 3·2·1 시작 — 자동 복귀(계약 v1.5)든 운영자 재개든 같은 카운트다운 */
-function startCountdown(by: 'auto' | 'admin') {
+/** 3·2·1 시작 — 운영자 [재개]를 게이트웨이가 받아들였을 때 (계약 v1.2 §6) */
+function startCountdown(by: string) {
   store.resumeAt = Date.now() + RESUME_COUNTDOWN_MS;
   store.resumeBy = by;
+  store.lastCancel = null;
   push(
     event('drive.resume.accepted', 'INFO', null, {
       switch_in_ms: RESUME_COUNTDOWN_MS,
@@ -182,11 +185,14 @@ function startCountdown(by: 'auto' | 'admin') {
   );
 }
 
-function cancelResume(reason: string) {
+function cancelResume(reason: string, by: string | null = null) {
   if (store.resumeAt == null) return;
   store.resumeAt = null;
   store.resumeBy = null;
-  push(event('drive.resume.cancelled', 'WARNING', null, { reason, generation: store.generation }));
+  store.lastCancel = { reason, by, generation: store.generation, at: Date.now() };
+  const payload: Record<string, unknown> = { reason, generation: store.generation };
+  if (reason === 'operator_cancelled') payload.requested_by = by;
+  push(event('drive.resume.cancelled', 'INFO', null, payload));
 }
 
 function step() {
@@ -217,9 +223,7 @@ function step() {
     auto.aliveSince != null &&
     t - auto.aliveSince >= READY_FRESH_MS
   ) {
-    setMode('AUTO_READY', 'autonomous_recovered');
-    // 자동 복귀 (계약 v1.5): 운영자 조작 없이 바로 3·2·1 — 콘솔 [취소]로 막을 수 있다
-    if (!store.autoBlocked) startCountdown('auto');
+    setMode('AUTO_READY', 'autonomous_recovered'); // 자동 복귀는 없다 — 운영자 [재개]를 기다린다
   }
   if (store.mode === 'AUTO_READY' && !auto.alive) {
     cancelResume('autonomous_lost');
@@ -228,10 +232,9 @@ function step() {
   if (store.resumeAt != null) {
     if (!auto.alive || store.mode !== 'AUTO_READY') cancelResume('autonomous_lost');
     else if (t >= store.resumeAt) {
-      const by = store.resumeBy;
       store.resumeAt = null;
       store.resumeBy = null;
-      setMode('AUTO', by === 'auto' ? 'auto_resumed' : 'resume_requested');
+      setMode('AUTO', 'resume_requested');
     }
   }
   // 시뮬레이터 근거리 감지 (지난 tick 위치 기준) → vehicle.status flags.obstacle
@@ -371,6 +374,15 @@ export function snapshot(): DriveState {
             accepted_ago_ms: RESUME_COUNTDOWN_MS - Math.max(0, store.resumeAt - now),
             remaining_ms: Math.max(0, store.resumeAt - now),
             requested_by: store.resumeBy ?? 'admin',
+          },
+    resume_cancel:
+      store.lastCancel == null || now - store.lastCancel.at > RESUME_CANCEL_VISIBLE_MS
+        ? null
+        : {
+            reason: store.lastCancel.reason,
+            requested_by: store.lastCancel.by,
+            generation: store.lastCancel.generation,
+            received_ago_ms: now - store.lastCancel.at,
           },
   };
 }
@@ -555,11 +567,10 @@ export function resume(): boolean {
   return true;
 }
 
-/** 카운트다운 취소 (계약 v1.5 drive.resume.cancel_requested) — 수동이 계속 몰고, 이번 AUTO_READY 동안은 [재개]로만 */
+/** 카운트다운 취소 (계약 v1.7 drive.resume.cancel_requested) — 모드는 그대로, 다시 [재개]로만 AUTO */
 export function cancelResumeCountdown(): boolean {
   if (store.resumeAt == null) return false;
-  cancelResume('operator_cancelled');
-  store.autoBlocked = true;
+  cancelResume('operator_cancelled', 'admin');
   emit();
   return true;
 }
