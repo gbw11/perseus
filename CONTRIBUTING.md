@@ -63,7 +63,7 @@ S15P31E110/
 │   ├── apps/                 # VM 애플리케이션 (RC카 시나리오 앱, 폴더 이름 = MQTT app_id)
 │   │   ├── autonomous/       # 자율주행 VM
 │   │   ├── manual/           # 수동주행 VM
-│   │   ├── message-board/    # 메시지 보드 VM
+│   │   ├── interaction/      # 인터랙션 VM
 │   │   ├── perception/       # 젯슨 대역 인식 (PC 웹캠·영상·합성, 젯슨 전 시연·시험용)
 │   │   └── simulator/        # 가상 RC카 (실차 전 시연·시험용, app_id 아님)
 │   ├── deploy/               # dom0 서비스 등록·배포 설정

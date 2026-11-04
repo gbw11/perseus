@@ -12,6 +12,8 @@
 - 재부팅(S15P31E110-208): 키 유무와 관계없이 신규 재부팅은 실행 중인 도메인만 받는다(없으면 404, 실행 중이 아니면 409). 키 있으면
   같은 키의 원 작업을 먼저 조회해, 있으면 재전달로 보고 상태 검사 없이 하위로 보낸다. 재부팅 중에는 도메인이 잠깐 없어 상태 검사가
   재전달을 409 로 막기 때문이다. 키 없는 재부팅만 vm_id 락 안에서 동기로 기다린다
+- 자원 변경(S15P31E110-368): 정지한 Linux 의 등록 설정을 바꾸므로 Provisioner 몫이다. 같은 VM 의 create·stop·delete 와 vm_id 락으로
+  직렬화한다. 신규·재전달 구분과 실행 상태 확인은 Provisioner(플랫폼은 원 작업 조회와 하위 검사)가 한다
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from . import budget as request_budget
 from .config import Settings
 from .drivers.base import CreateSpec, Domain, Driver, Provisioner, StatsSample
 from .errors import InsufficientResources, InvalidArgument, InvalidState, OperationNotFound, VMExists, VMNotFound
-from .models import ControlOperation, ControlStatus, CpuLayout, CreateVmRequest, VmState
+from .models import ControlOperation, ControlStatus, CpuLayout, CreateVmRequest, ResourceUpdate, UpdateResourcesRequest, VmState
 
 
 DOM0_UUID = UUID(int=0)  # xl list -l 에서 Domain-0 의 uuid 는 00000000-0000-0000-0000-000000000000 이다
@@ -158,6 +160,13 @@ class VmService:
     def control_operation(self, vm_id: UUID, key: str) -> ControlOperation:
         reject_dom0(vm_id)
         return self._driver.control_operation(vm_id, key=key)
+
+    def update_resources(self, vm_id: UUID, request: UpdateResourcesRequest, key: str) -> ResourceUpdate:
+        """정지한 Linux VM 의 vCPU·메모리 변경(계약 4.12). 다음 시작부터 적용된다."""
+        reject_dom0(vm_id)
+        with self._vm_lock(vm_id):
+            request_budget.ensure(f"changing resources of vm {vm_id}")
+            return self._provisioner.update_resources(vm_id, vcpus=request.vcpus, memory_mib=request.memory_mib, key=key)
 
     def cpu_layout(self, vm_id: UUID | None = None) -> CpuLayout:
         """CPU 배치 조회(S15P31E110-353). 조회만 하므로 vm_id 락을 쓰지 않는다."""

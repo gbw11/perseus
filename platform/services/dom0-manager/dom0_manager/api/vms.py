@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Header, Query, Response
 from fastapi.responses import JSONResponse
 
 from ..errors import InvalidArgument
-from ..models import ControlOperation, ControlStatus, CreateVmRequest, Error, Vm
+from ..models import ControlOperation, ControlStatus, CreateVmRequest, Error, ResourceUpdate, UpdateResourcesRequest, Vm
 from ..service import VmService
 from . import get_service
 
@@ -131,6 +131,31 @@ def reboot_vm(
     operation = service.request_reboot(vm_id, _request_key(idempotency_key, "Idempotency-Key"))
     status = 202 if operation.status == ControlStatus.pending else 200
     return JSONResponse(status_code=status, content=operation.model_dump(mode="json"))
+
+
+@router.put(
+    "/vms/{vm_id}/resources",
+    operation_id="updateVmResources",
+    summary="정지한 Linux VM 의 vCPU·메모리 변경 (다음 시작부터 적용)",
+    response_model=ResourceUpdate,
+    responses={
+        200: {"description": "변경 완료. 같은 키 재전송도 원 결과(같은 operation_id·before·after)"},
+        400: _ERR,
+        404: _ERR,
+        409: {"model": Error, "description": "InvalidState: 실행 중·stopped 의도 아님·설정이 바뀜. VMExists: 같은 키가 다른 요청의 원 작업"},
+        **_COMMAND_ERRS,
+    },
+)
+def update_vm_resources(
+    vm_id: UUID,
+    request: UpdateResourcesRequest,
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        description="필수. 최초 전송 전에 정한 요청 키. 응답을 잃으면 같은 키·같은 본문으로 다시 보낸다",
+    ),
+    service: VmService = Depends(get_service),
+) -> ResourceUpdate:
+    return service.update_resources(vm_id, request, _request_key(idempotency_key, "Idempotency-Key"))
 
 
 @router.get(
