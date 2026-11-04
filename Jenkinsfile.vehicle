@@ -1,0 +1,104 @@
+// Vehicle-only merge request validation. Configure this Job for MR target branch: vehicle.
+// Jetson·실보드 없이 도는 호스트 시험만 돌린다. Zephyr 이미지 빌드와 native_sim 시험은 제외한다.
+pipeline {
+    agent any
+
+    options {
+        gitLabConnection('gitlab')
+        timeout(time: 20, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+    }
+
+    stages {
+        stage('Checkout Merge Result') {
+            steps {
+                script { checkoutMergeResult() }
+            }
+        }
+        stage('Vehicle Python Test') {
+            // 시뮬레이터·인지·수동 앱. 브로커 통합 테스트는 XENOVA_MQTT_TEST_BROKER 가 없으면 건너뛴다.
+            // 인지 시험은 synthetic 입력만 써서 OpenCV([camera])가 필요 없다.
+            steps {
+                updateGitlabCommitStatus name: 'jenkins-vehicle-check', state: 'running'
+                script {
+                    for (app in ['simulator', 'perception', 'manual']) {
+                        dir("platform/apps/${app}") {
+                            sh 'mkdir -p target'
+                            sh 'python3 -m pip install -q --user -e .[test]'
+                            sh 'python3 -m pytest -q --junitxml=target/pytest.xml'
+                        }
+                    }
+                }
+            }
+        }
+        stage('Vehicle C Host Test') {
+            // 공통 MQTT C 라이브러리와 Zephyr 앱 로직을 gcc 로 시험한다 (ASan·UBSan). cmake·make 는 Jenkins 이미지에 있다.
+            steps {
+                script {
+                    def suites = [
+                        'mqtt-c'    : 'platform/apps/common/xenova-mqtt-c',
+                        'manual'    : 'platform/apps/manual/zephyr/tests',
+                        'autonomous': 'platform/apps/autonomous/zephyr/tests',
+                    ]
+                    suites.each { name, source ->
+                        sh """
+                            cmake -S ${source} -B target/c-host/${name} -DCMAKE_EXE_LINKER_FLAGS=-no-pie
+                            cmake --build target/c-host/${name} -j 2
+                            ctest --test-dir target/c-host/${name} --output-on-failure --output-junit ctest.xml
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            junit testResults: 'platform/apps/simulator/target/pytest.xml,platform/apps/perception/target/pytest.xml,platform/apps/manual/target/pytest.xml,target/c-host/*/ctest.xml', allowEmptyResults: true
+        }
+        success {
+            updateGitlabCommitStatus name: 'jenkins-vehicle-check', state: 'success'
+            notifyMattermost('good', '✅ Vehicle CI 성공')
+        }
+        failure {
+            updateGitlabCommitStatus name: 'jenkins-vehicle-check', state: 'failed'
+            notifyMattermost('danger', '❌ Vehicle CI 실패')
+        }
+        aborted {
+            updateGitlabCommitStatus name: 'jenkins-vehicle-check', state: 'canceled'
+            notifyMattermost('warning', '⚠️ Vehicle CI 중단')
+        }
+    }
+}
+
+def checkoutMergeResult() {
+    requireMergeRequest()
+    checkout([
+        $class: 'GitSCM',
+        branches: [[name: "origin/${env.gitlabTargetBranch}"]],
+        userRemoteConfigs: [[
+            credentialsId: 'xenova-gitlab-checkout',
+            name: 'origin',
+            refspec: '+refs/heads/*:refs/remotes/origin/*',
+            url: 'https://lab.ssafy.com/s15-final/S15P31E110.git'
+        ]]
+    ])
+    withEnv(["MR_SOURCE_REF=origin/${env.gitlabSourceBranch}"]) {
+        sh '''git -c user.name='Xenova Jenkins' -c user.email='jenkins@k15e110.p.ssafy.io' merge --no-edit "$MR_SOURCE_REF"'''
+    }
+}
+
+def requireMergeRequest() {
+    if (!env.gitlabSourceBranch || !env.gitlabTargetBranch) {
+        error('This job must be started by a GitLab Merge Request webhook.')
+    }
+}
+
+def notifyMattermost(String color, String title) {
+    mattermostSend color: color, message: """#### ${title}
+- Source: `${env.gitlabSourceBranch ?: '-'}`
+- Target: `${env.gitlabTargetBranch ?: '-'}`
+- Build: [${env.JOB_NAME} #${env.BUILD_NUMBER}](${env.BUILD_URL})"""
+}
