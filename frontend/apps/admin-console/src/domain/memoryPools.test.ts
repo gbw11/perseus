@@ -30,15 +30,8 @@ function pool(region: 'net_rx_data' | 'net_tx_data', used: number, free: number,
   ];
 }
 
-function counters(rx: number, tx: number, rxDrop = 0) {
-  return [
-    value(MEMORY_POOL_METRICS.rxPackets, rx),
-    value(MEMORY_POOL_METRICS.txPackets, tx),
-    value(MEMORY_POOL_METRICS.rxDrop, rxDrop),
-    value(MEMORY_POOL_METRICS.txDrop, 0),
-    value(MEMORY_POOL_METRICS.poolBusy, 0),
-    value(MEMORY_POOL_METRICS.protocolErrors, 0),
-  ];
+function counters(rx: number, tx: number) {
+  return [value(MEMORY_POOL_METRICS.rxPackets, rx), value(MEMORY_POOL_METRICS.txPackets, tx)];
 }
 
 describe('Memory Pool telemetry', () => {
@@ -67,23 +60,21 @@ describe('Memory Pool telemetry', () => {
     expect(invalid.tx).toMatchObject({ state: 'missing', usagePercent: null });
   });
 
-  it('실제 표본 간격으로 packets/s와 최근 구간 증가량을 계산한다', () => {
+  it('실제 표본 간격으로 packets/s를 계산한다', () => {
     const series = buildMemoryPoolSeries([
-      sample('2026-10-28T05:00:00.000Z', counters(100, 60, 2)),
-      sample('2026-10-28T05:00:02.500Z', counters(125, 75, 8)),
+      sample('2026-10-28T05:00:00.000Z', counters(100, 60)),
+      sample('2026-10-28T05:00:02.500Z', counters(125, 75)),
     ]);
 
     expect(series.packetRates.at(-1)).toMatchObject({ rxPacketsPerSecond: 10, txPacketsPerSecond: 6 });
-    expect(series.counters).toMatchObject({ intervalSeconds: 2.5, rxDrop: 6, txDrop: 0 });
   });
 
-  it('재시작이나 counter 감소 뒤 음수 rate와 delta를 만들지 않는다', () => {
+  it('재시작이나 counter 감소 뒤 음수 rate를 만들지 않는다', () => {
     const reset = buildMemoryPoolSeries([
-      sample('2026-10-28T05:00:00.000Z', counters(100, 60, 5), 'boot-1'),
-      sample('2026-10-28T05:00:02.000Z', counters(2, 1, 0), 'boot-2'),
+      sample('2026-10-28T05:00:00.000Z', counters(100, 60), 'boot-1'),
+      sample('2026-10-28T05:00:02.000Z', counters(2, 1), 'boot-2'),
     ]);
 
     expect(reset.packetRates.at(-1)).toMatchObject({ rxPacketsPerSecond: null, txPacketsPerSecond: null });
-    expect(reset.counters).toMatchObject({ intervalSeconds: null, rxDrop: null });
   });
 });

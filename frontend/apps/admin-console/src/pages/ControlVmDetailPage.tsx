@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVm, useVmResources, useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
-import { osLabel } from '../domain/roles';
+import { osLabel, sortVms } from '../domain/roles';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
 import { ResourceAdjustmentPanel } from './ResourceAdjustmentPanel';
@@ -37,7 +37,7 @@ export function ControlVmDetailPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const index = vms.data?.items.findIndex((item) => item.vm_id === vmId) ?? -1;
+  const index = sortVms(vms.data?.items ?? []).findIndex((item) => item.vm_id === vmId);
   const accent = (index >= 0 ? VM_ACCENTS[index % VM_ACCENTS.length] : undefined) ?? 'var(--x-primary)';
 
   const run = (target: Vm, kind: VmAction) =>

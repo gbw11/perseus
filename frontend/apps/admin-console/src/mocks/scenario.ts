@@ -41,8 +41,8 @@ export const RESUME_COUNTDOWN_MS = 3000;
 export const HANDOFF_MS = 112;
 
 type Listener = (state: DriveState) => void;
-export type Target = 'autonomous' | 'manual' | 'message-board';
-const TARGETS: Target[] = ['autonomous', 'manual', 'message-board'];
+export type Target = 'autonomous' | 'manual' | 'interaction';
+const TARGETS: Target[] = ['autonomous', 'manual', 'interaction'];
 
 interface AppLife {
   alive: boolean;
@@ -77,7 +77,7 @@ const vmOf = (target: Target) =>
 const NAME: Record<Target, string> = {
   autonomous: '자율주행',
   manual: '수동주행',
-  'message-board': '네비게이션',
+  interaction: '네비게이션',
 };
 
 let seq = 0;
@@ -111,7 +111,7 @@ function initial(): Store {
     mode: 'AUTO',
     generation: 4,
     reason: 'start',
-    apps: { autonomous: life(130), manual: life(570), 'message-board': life(820) },
+    apps: { autonomous: life(130), manual: life(570), interaction: life(820) },
     resumeAt: null,
     resumeBy: null,
     autoBlocked: false,
@@ -299,7 +299,7 @@ function app(
 
 export function snapshot(): DriveState {
   const now = Date.now();
-  const { autonomous: auto, manual, 'message-board': board } = store.apps;
+  const { autonomous: auto, manual, interaction: board } = store.apps;
   const active = activeApp();
   const manualActive = active === 'manual';
   const lost = store.perceptionLost;
@@ -340,7 +340,7 @@ export function snapshot(): DriveState {
         manualActive ? store.steer : 0,
         manualActive ? 'active' : 'standby',
       ),
-      'message-board': app('message-board', board, now, 0, 0, 'idle', false),
+      interaction: app('interaction', board, now, 0, 0, 'idle', false),
     },
     perception: lost
       ? {
@@ -509,7 +509,7 @@ function takeDown(target: Target, vmState: 'crashed' | 'stopped') {
   a.vmState = vmState;
   if (vmState === 'stopped')
     push(event('vm.state.changed', 'INFO', vmOf(target), { from: 'running', to: 'stopped' }));
-  if (target === 'message-board') return emit(); // 주행과 무관 — 격리
+  if (target === 'interaction') return emit(); // 주행과 무관 — 격리
   push(
     event('drive.fault.detected', 'WARNING', vmOf(target), {
       app_id: target,
