@@ -24,6 +24,7 @@ int xt_observe(struct xt_observation *out,bool threads)
 	out->elapsed_us=source.collection_elapsed_us;
 	if (rc) {
 		out->heap_rc=out->network_rc=out->timing_rc=out->threads_rc=rc;
+		out->resources.net_bytes_rc=out->resources.net_rate_rc=rc;
 		return rc;
 	}
 	out->history=source.history;

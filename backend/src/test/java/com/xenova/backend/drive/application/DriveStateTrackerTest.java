@@ -255,6 +255,57 @@ class DriveStateTrackerTest {
     }
 
     @Test
+    void scopedLifecycleAndHeartbeatKeepSeparateFreshnessAndRejectPreviousInstances() {
+        String first = "33333333-3333-4333-8333-333333333333";
+        String next = "44444444-4444-4444-8444-444444444444";
+        String topic = "xenova/v1/vms/" + AUTO_VM + "/apps/autonomous/events";
+        String waiting = """
+                {"profile":"warm-drive-1","phase":"WAITING","readiness":"QUALIFIED","reason":null,
+                 "applied_generation":3,"check_seq":"9","progress_seq":"0"}
+                """;
+        String idle = "{\"state\":\"idle\",\"uptime_s\":1.5}";
+        command("autonomous", MANUAL_VM, 0.5);
+        tracker.accept(topic, scoped(AUTO_VM, first, "app.lifecycle", 1, waiting), true);
+        tracker.accept(topic, scoped(MANUAL_VM, first, "app.lifecycle", 1, waiting));
+        assertThat(tracker.snapshot().vmApps()).isEmpty();
+
+        tracker.accept(topic, scoped(AUTO_VM, first, "app.lifecycle", 1, waiting));
+        DriveState.VmApp app = tracker.snapshot().vmApps().get(AUTO_VM).get("autonomous");
+        assertThat(app.lifecycle().phase()).isEqualTo("WAITING");
+        assertThat(app.lifecycle().progressSeq()).isEqualTo("0");
+        assertThat(app.heartbeat()).isNull();
+        assertThat(app.heartbeatSource().status()).isEqualTo(DriveState.SourceStatus.UNKNOWN);
+
+        tracker.accept(topic, scoped(AUTO_VM, first, "app.heartbeat", 2, idle));
+        tracker.accept("xenova/v1/vms/" + MANUAL_VM + "/apps/autonomous/events",
+                scoped(MANUAL_VM, first, "app.heartbeat", 1, idle));
+        now.addAndGet(301);
+        tracker.accept(topic, scoped(AUTO_VM, first, "app.lifecycle", 3, waiting));
+        app = tracker.snapshot().vmApps().get(AUTO_VM).get("autonomous");
+        assertThat(app.lifecycleSource().status()).isEqualTo(DriveState.SourceStatus.STALE);
+        assertThat(app.heartbeatSource().status()).isEqualTo(DriveState.SourceStatus.FRESH);
+        assertThat(tracker.snapshot().vmApps()).containsKeys(AUTO_VM, MANUAL_VM);
+        assertThat(tracker.snapshot().apps().get("autonomous").vmId()).isEqualTo(MANUAL_VM);
+
+        tracker.accept(topic, scoped(AUTO_VM, next, "app.heartbeat", 1, idle));
+        tracker.accept(topic, scoped(AUTO_VM, first, "app.lifecycle", 4, waiting));
+        app = tracker.snapshot().vmApps().get(AUTO_VM).get("autonomous");
+        assertThat(app.appInstanceId()).isEqualTo(next);
+        assertThat(app.lifecycle()).isNull();
+        assertThat(app.heartbeat().state()).isEqualTo("idle");
+        tracker.mqttDisconnected();
+        tracker.mqttConnected();
+        assertThat(tracker.snapshot().vmApps().get(AUTO_VM).get("autonomous").heartbeatSource().status())
+                .isEqualTo(DriveState.SourceStatus.UNKNOWN);
+    }
+
+    private byte[] scoped(String vm, String instance, String type, int seq, String payload) {
+        return new String(envelope(vm, "autonomous", type, seq, payload), StandardCharsets.UTF_8)
+                .replace("b-1", "55555555-5555-4555-8555-555555555555").replace("i-1", instance)
+                .getBytes(StandardCharsets.UTF_8);
+    }
+
+    @Test
     void versionChangesOnlyWithNewData() {
         long before = tracker.version();
         tracker.snapshot();

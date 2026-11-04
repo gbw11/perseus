@@ -5,6 +5,10 @@
 실제 실행 결과·파일 hash는 [최신 검증 보고](../verification/recovery-scenario-closure-20261030.md#history-drive-final)에 연결한다.
 이번 작업은 운영 설치·서비스 교체·7번 수락을 실행하지 않는다.
 
+등록 조회·FastAPI 통지의 현재 후보는 `5a9c839` + `feat/platform/vm-registration-api` diff/새 파일이다.
+[등록 연결 검증](../verification/vm-registration-api-20261102.md)의 source/install/RPM manifest를 사용한다.
+앞선 직접 Spring sender 후보와 새 FastAPI 제공 후보를 같은 설치 완료로 합치지 않는다.
+
 2026-11-02 CLI·조회 후속은 위 제공물 위에 `f8a8663` + 현재 diff/새 파일로 식별한다.
 현재 조회/원 기록 reader의 검증·패키지 근거는 [CLI·조회 마감](../verification/recovery-scenario-closure-20261030.md#cli-query-consistency)이다.
 앞선 Gateway/firmware 제공 archive를 제자리 수정하거나 그 시험을 이번 모듈의 설치 증거로 쓰지 않는다.
@@ -15,6 +19,53 @@
 [제공자 계약](../contracts/vm-provisioning-v1.md)과 [검증 보고](../verification/recovery-scenario-closure-20261030.md#vm-provisioning-integration)를 따른다.
 `xenova-platform`의 provisioning/profile/registration·Bootstrap·first-boot와 broker provider를 같은 내부 후보로 설치한다.
 일반 full HTTP 호출자까지 새 journal 선택이나 동일 commit 교체를 요구하지 않는다.
+
+<a id="registration-api"></a>
+### 등록 조회·FastAPI 통지의 교체
+
+`xenova-platform`은 `/usr/lib/xenova`의 순수 `xenova_registration`, 로컬 `xenova_registration_hook`,
+Manager/CLI/first-boot를 설치한다. `assemble.py`의 source gate도 새 hook을 요구한다.
+`xenova-dom0-manager`는 site-packages의 `api/registrations.py`, `registration_sender.py`, settings·driver·app을
+기존 패키지에 함께 설치한다. 새 상주 daemon이나 CLI 통지 proxy는 없다. factory 사건만 일시 systemd job을 만든다.
+netclient/io/ctypes/sqlite3 등 실제 target 분할 의존성을 대조한다.
+`sqlite3`는 기존 runtime_logs의 앱 import에 필요하다. 실제 ARM import에서 누락을 확인해 의존성에 명시했으며 DB/Worker 저장 정책을 바꾸지 않는다.
+
+Spring 송신은 API 프로세스 소유다. unit은 선택 `/etc/xenova/spring-registration.env`를 읽으며
+승인 URL/`VM_REGISTRATION_SERVICE_TOKEN`은 Spring/운영 담당이 root 0600으로 공급한다.
+이미지에는 `/usr/share/xenova/spring-registration.env.example`만 설치하고 활성 파일/비밀은 만들지 않는다.
+기존 `/etc/xenova/dom0-manager-token.env`와 `dom0-manager.env`의 `XENOVA_SERVICE_TOKEN`은 로컬 API 인증용이다.
+Spring 전용 파일에 이 변수를 덮어쓰지 않는다. helper는 API bind/port와 API token만 읽으며 Spring 전용 파일을 읽지 않는다.
+
+자동 기회 소비→잠금/대상 FD 반환→로컬 후속의 순서다. factory의 first-boot main은 complete 뒤
+잠금을 반환하고 별도 helper로 일시 job을 `--no-block` 예약한다. job은 API를 Requires/After로 참조하고
+API의 `Type=notify` 준비 완료 뒤 실행된다. `dom0_manager.__main__.ReadyServer`가 ASGI startup과
+listen 성공 뒤에만 `READY=1`을 보낸다. first-boot 완료·autostart는 API/HTTP를 기다리지 않는다.
+API는 기존 host-admission 이후 순서를 유지한다. 송신의 기존 15초 예산과 runtime 상한은 job 실행 때 시작한다.
+job은 일반 큐/영속 spool이 아니며 현재 factory의 새 등록 UUID에만 만들어진다. API 실패·다음 부팅에서 재예약하지 않는다.
+명시 API restart가 남은 dependent를 다시 실행해도 `/run/xenova/registration-notices/factory-started-UUID`의
+배타 표식이 같은 boot의 두 번째 송신을 차단한다. 이 표식은 API startup/종료에서 삭제하지 않는다.
+POST를 시도한 뒤에는 retry/GET이 없다. API startup/multi-worker·다음 boot가 과거 대상을 순회해 보충하지 않는다.
+API sender는 worker 공통 4 slot과 자체 deadline을 가지며 종료 때 자식을 kill/wait한다.
+helper도 4 slot이고 관리 FD는 상속하지 않는다. 커널/필수 저장의 모든 정체를 선점하는 보장은 아니다.
+
+운영 실행 없이 다음 교체 순서를 인계한다.
+
+1. 기존 내부 writer/helper를 기존 admission/drain 경로로 정지하고 활성 작업·상속 FD의 종결을 확인한다.
+   이미 시작한 옛 통지 helper는 재송신하지 말고 종결/소유를 확인한다. API backend 수명의 기존 공동 수락은 계속 필요하다.
+2. 두 새 RPM과 필요한 target Python 의존성, 실제 로드하는 하위 모듈을 일관되게 교체한다.
+   특히 API `__main__.py`·`Type=notify/NotifyAccess=main` unit·하위 hook을 같은 후보로 교체한다.
+   구형 entrypoint에 notify unit만 설치하면 READY를 보내지 못한다. unit 변경의 daemon-reload/서비스 교체는 승인된 운영 절차에서 수행한다.
+   옛 `registration-notification.json.example`은 새 RPM payload에서 제거됐다. 운영의 옛 JSON/token 파일은
+   실행자가 사용 중인지 확인한 뒤 승인된 운영 절차로 비활성화/보관한다. 이번 작업은 기존 파일을 삭제하지 않았다.
+3. 새 FastAPI URL/token을 공급하고 설치 경로의 import·OpenAPI·GET 배열을 확인한다.
+   송신 설정 부재에서 notify만 제한되고 GET/기본 관리가 되는지도 확인한다. 패키지 갱신으로 과거 자동 기회를 초기화하지 않는다.
+4. 승인된 fixture UUID로만 명시 curl POST와 Spring confirmed·거절/응답 유실을 공동 수락한다.
+   동일 UUID의 단건은 기존 값을 보존하며 목록 동기화의 필드 갱신과 별도다.
+5. 실패 시 원 journal/factory 기회·자산을 보존한다. 삭제/새 UUID/기회 초기화로 통과시키거나
+   구형 binary가 새 설치 집합을 읽는지 확인 없이 downgrade하지 않는다.
+
+정규 package QA/ARM import·소유 root smoke와 실제 board/systemd·Spring DB·운영 교체는
+[동일 후보 보고](../verification/vm-registration-api-20261102.md)에서 구분한다. Worker/Gateway/planner/Agent를 이 변경 때문에 함께 재구현하지 않는다.
 
 담당자 현재 지시는 [요청 색인](../requests/README.md)에서 읽는다. 하위 create의 의미 비교·기한·소유·수습과
 OS 공통 정적 CPU 배치는 이전 검증 범위를 유지한다. 기존 full HTTP 호출은 그대로 지원하고 optional 상위 DTO는 담당 제품 확장으로 남는다.
@@ -49,7 +100,7 @@ OS 공통 정적 CPU 배치는 이전 검증 범위를 유지한다. 기존 full
 | 원 계정 writer·정책 | broker recipe의 `xenova-mqtt-broker-provider`: `/usr/lib/xenova/xenova_broker.py`, `/usr/share/xenova/mqtt/policy.json`. native mosquitto_passwd·Python 의존 포함. 플랫폼→broker→bringup→플랫폼 순환을 피하려고 library payload를 분리했으며 별도 daemon은 없음 |
 | broker 서비스 | 기존 `xenova-mqtt-broker`: 제공자 package와 bringup에 의존. 기존 활성화/bridge/mount 조건 유지, 첫 등록 뒤 기동해 최초 계정 준비와 순환 대기를 만들지 않음 |
 | 명시 world 설치 | `/usr/sbin/xenova-world-install`; root private 입력만 읽고 현재 등록/정지/소유 guard 뒤 world 부분 적용. broker/VM 생성 없음 |
-| 선택 Spring 통지 | 비활성 `/usr/share/xenova/registration-notification.json.example`만 설치. 활성 root 0600 endpoint/token 설정은 운영/Spring 담당 공급. 별도 unit/timer/retry daemon 없음 |
+| 등록 조회·선택 통지 | 하위 projection/hook와 dom0-manager route/sender를 같은 제공 후보로 설치. 비활성 `/usr/share/xenova/spring-registration.env.example`; FastAPI 전용 root 0600 설정은 운영/Spring 담당 공급. 옛 직접 sender/CLI 제거. [설치 절차](#registration-api) |
 | 실제 drive template | `package-xenova-drive-template.py --build-root ... --output NEW`가 현재 소스와 실제 ARM BUILD_RECEIPT·payload를 대조해 새 immutable envelope 생성. `default-templates.lock.json`·defaults·assembly example이 실제 hash 선택. lab 차량 프로필이며 실제 차량 승인값 아님 |
 | Linux template/seed | 기존 1.0.2 선택 자산 유지. 다음 template builder는 실제 Agent receipt에서 profile 생성. 새 seed는 현재 guest_identity helper를 포함하고 host UUID 계획 뒤 private env 공급. 전체 Linux rootfs를 이번에 재제작하지 않음 |
 

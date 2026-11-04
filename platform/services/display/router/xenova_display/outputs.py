@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 from typing import Literal
@@ -34,9 +34,17 @@ class RuntimeConfig(BaseModel):
     stream_width: int = Field(default=1280, ge=640, le=1920, multiple_of=2)
     stream_height: int = Field(default=720, ge=480, le=1080, multiple_of=2)
     jpeg_quality: int = Field(default=7, ge=2, le=20)
+    encoder: Literal['ffmpeg', 'native_jpeg'] = 'ffmpeg'
+    native_jpeg_quality: int = Field(default=85, ge=1, le=100)
+    native_jpeg_library: str | None = Field(default=None, min_length=1, max_length=4096)
 
     @model_validator(mode="after")
     def validate_mapping(self):
+        if self.encoder == 'native_jpeg':
+            if not self.native_jpeg_library or not PurePosixPath(self.native_jpeg_library).is_absolute() or '\0' in self.native_jpeg_library:
+                raise ValueError('native encoder requires an absolute library path')
+            if any((o.width,o.height)!=(self.stream_width,self.stream_height) for o in self.outputs):
+                raise ValueError('native encoder requires matching source/stream dimensions; use FFmpeg for scaling')
         if {o.output_id for o in self.outputs} != {"monitor-1", "monitor-2"}:
             raise ValueError("two unique logical outputs required")
         if len({o.connector for o in self.outputs}) != 2:

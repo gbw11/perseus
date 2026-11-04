@@ -2,6 +2,7 @@ package com.xenova.backend.drive.application;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.xenova.backend.common.UnsignedDecimal;
 import java.io.IOException;
 import java.time.Clock;
 import java.util.ArrayDeque;
@@ -11,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.function.LongSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -29,6 +31,7 @@ public class DriveStateTracker {
     public static final String CONTROL_TOPIC = PREFIX + "vehicle/control";
     public static final String STATUS_TOPIC = PREFIX + "vehicle/status";
     public static final String APP_EVENTS_FILTER = PREFIX + "apps/+/events";
+    public static final String VM_APP_EVENTS_FILTER = PREFIX + "vms/+/apps/+/events";
 
     /** The gateway's freshness rule (contract §5.1): a command older than this has stopped. */
     static final long COMMAND_FRESH_MS = 100;
@@ -45,6 +48,11 @@ public class DriveStateTracker {
     static final long RESUME_GRACE_MS = 2000;
 
     private static final Pattern APP_EVENTS = Pattern.compile("^xenova/v1/apps/([^/+#\\s]+)/events$");
+    private static final Pattern VM_APP_EVENTS = Pattern.compile("^xenova/v1/vms/([^/]+)/apps/([^/+#\\s]{1,64})/events$");
+    private static final int MAX_SCOPED_APPS = 256;
+    private static final int REMEMBERED_APP_RUNS = 8;
+    private static final long LIFECYCLE_FRESH_MS = 300;
+    private static final long HEARTBEAT_FRESH_MS = 3000;
     private static final Logger log = LoggerFactory.getLogger(DriveStateTracker.class);
 
     private final ObjectMapper objectMapper;
@@ -60,6 +68,7 @@ public class DriveStateTracker {
     private Stamped resume;
     private final Deque<Long> perceptionTimes = new ArrayDeque<>();
     private final Map<String, AppTrack> apps = new TreeMap<>();
+    private final LinkedHashMap<VmAppKey, VmAppTrack> vmApps = new LinkedHashMap<>();
     private final Map<String, Counter> stats = new TreeMap<>();
     private final Map<String, Run> lastSeq = new HashMap<>();
     private long rejected;
@@ -78,10 +87,14 @@ public class DriveStateTracker {
     // ---- intake -------------------------------------------------------------------------------------
 
     /** Returns a notice to record for drive.mode.changed / drive.fault.detected / drive.resume.* events. */
-    public synchronized Optional<DriveNotice> accept(String topic, byte[] payload) {
+    public Optional<DriveNotice> accept(String topic, byte[] payload) {
+        return accept(topic, payload, false);
+    }
+
+    public synchronized Optional<DriveNotice> accept(String topic, byte[] payload, boolean retained) {
         long now = monotonicMillis.getAsLong();
         try {
-            return process(topic, payload, now);
+            return process(topic, payload, retained, now);
         } catch (Rejected rejection) {
             rejected++;
             log.debug("Dropped drive message on {}: {} {}", topic, rejection.code, rejection.getMessage());
@@ -89,12 +102,19 @@ public class DriveStateTracker {
         }
     }
 
-    private Optional<DriveNotice> process(String topic, byte[] payload, long now) {
+    private Optional<DriveNotice> process(String topic, byte[] payload, boolean retained, long now) {
         if (payload.length == 0) {
             return Optional.empty(); // a retained message being cleared
         }
         if (payload.length > MAX_PAYLOAD_BYTES) {
             throw new Rejected("PAYLOAD_TOO_LARGE", payload.length + " bytes");
+        }
+        Matcher vmTopic = VM_APP_EVENTS.matcher(topic);
+        if (vmTopic.matches()) {
+            if (!retained) {
+                onVmAppEvent(vmTopic.group(1), vmTopic.group(2), payload, now);
+            }
+            return Optional.empty();
         }
         Matcher appTopic = APP_EVENTS.matcher(topic);
         String topicAppId = appTopic.matches() ? appTopic.group(1) : null;
@@ -123,6 +143,63 @@ public class DriveStateTracker {
         }
         version++;
         return Optional.empty();
+    }
+
+    private void onVmAppEvent(String vmId, String appId, byte[] payload, long now) {
+        if (payload.length > 1024) {
+            throw new Rejected("PAYLOAD_TOO_LARGE", "scoped app report");
+        }
+        JsonNode envelope = read(payload);
+        if (envelope == null || !envelope.isObject()) {
+            throw new Rejected("PAYLOAD_INVALID", "scoped app envelope is not an object");
+        }
+        String type = envelope.path("type").asText("");
+        if (!"app.lifecycle".equals(type) && !"app.heartbeat".equals(type)) {
+            return;
+        }
+        validate(envelope, appId);
+        String bootId = text(envelope, "boot_id");
+        String instanceId = text(envelope, "agent_instance_id");
+        if (!vmId.equals(text(envelope, "vm_id")) || envelope.has("source_id")
+                || !uuid(vmId) || !uuid(bootId) || !uuid(instanceId)) {
+            throw new Rejected("APP_ID_MISMATCH", "scoped app identity");
+        }
+        JsonNode body = envelope.path("payload");
+        DriveState.Lifecycle lifecycle = null;
+        DriveState.Heartbeat heartbeat = null;
+        try {
+            if ("app.lifecycle".equals(type)) {
+                lifecycle = VmAppReport.lifecycle(body);
+            } else {
+                heartbeat = VmAppReport.heartbeat(body);
+            }
+        } catch (IllegalArgumentException exception) {
+            throw new Rejected("PAYLOAD_INVALID", exception.getMessage());
+        }
+        VmAppKey key = new VmAppKey(vmId, appId);
+        VmAppTrack track = vmApps.get(key);
+        if (track == null) {
+            if (vmApps.size() == MAX_SCOPED_APPS) {
+                vmApps.pollFirstEntry();
+            }
+            track = new VmAppTrack();
+            vmApps.put(key, track);
+        }
+        AppRun run = new AppRun(bootId, instanceId);
+        long seq = envelope.path("seq").longValue();
+        if (!track.accept(run, seq, lifecycle)) {
+            return;
+        }
+        Stamped stamp = new Stamped(body, now, vmId, mqttGeneration);
+        if (lifecycle != null) {
+            track.lifecycle = lifecycle;
+            track.lifecycleStamp = stamp;
+        } else {
+            track.heartbeat = heartbeat;
+            track.heartbeatStamp = stamp;
+        }
+        count(VM_APP_EVENTS_FILTER, type, now);
+        version++;
     }
 
     private Optional<DriveNotice> onAppEvent(String appId, String type, JsonNode body, String publisher, long now) {
@@ -219,7 +296,16 @@ public class DriveStateTracker {
         return new DriveState(
                 version, clock.instant(), transportSource(), controlView(now), vehicleView(now), appViews,
                 perceptionView(now),
-                resumeView(now));
+                resumeView(now), vmAppViews(now));
+    }
+
+    private Map<String, Map<String, DriveState.VmApp>> vmAppViews(long now) {
+        Map<String, Map<String, DriveState.VmApp>> views = new TreeMap<>();
+        vmApps.forEach((key, track) -> views.computeIfAbsent(key.vmId, ignored -> new TreeMap<>()).put(key.appId,
+                new DriveState.VmApp(track.run.bootId, track.run.instanceId, track.lifecycle,
+                        source(track.lifecycleStamp, now, LIFECYCLE_FRESH_MS),
+                        track.heartbeat, source(track.heartbeatStamp, now, HEARTBEAT_FRESH_MS))));
+        return views;
     }
 
     /** MQTT lifecycle callbacks change the state version so WebSocket clients receive the boundary immediately. */
@@ -404,6 +490,14 @@ public class DriveStateTracker {
         return value != null && value.isTextual() && !value.asText().isBlank() ? value.asText() : null;
     }
 
+    private static boolean uuid(String value) {
+        try {
+            return value.length() == 36 && UUID.fromString(value).toString().equals(value);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
     private static Long longOrNull(JsonNode node, String field) {
         JsonNode value = node.get(field);
         return value != null && value.isIntegralNumber() ? value.asLong() : null;
@@ -418,6 +512,49 @@ public class DriveStateTracker {
     }
 
     private record Run(String run, long seq) {
+    }
+
+    private record VmAppKey(String vmId, String appId) {
+    }
+
+    private record AppRun(String bootId, String instanceId) {
+    }
+
+    private static final class VmAppTrack {
+        private final Deque<AppRun> retired = new ArrayDeque<>();
+        private AppRun run;
+        private long seq;
+        private DriveState.Lifecycle lifecycle;
+        private Stamped lifecycleStamp;
+        private DriveState.Heartbeat heartbeat;
+        private Stamped heartbeatStamp;
+
+        private boolean accept(AppRun next, long nextSeq, DriveState.Lifecycle nextLifecycle) {
+            if (next.equals(run)) {
+                if (nextSeq <= seq || (lifecycle != null && nextLifecycle != null
+                        && (UnsignedDecimal.compare(nextLifecycle.checkSeq(), lifecycle.checkSeq()) <= 0
+                        || UnsignedDecimal.compare(nextLifecycle.progressSeq(), lifecycle.progressSeq()) < 0))) {
+                    return false;
+                }
+            } else {
+                if (retired.contains(next)) {
+                    return false;
+                }
+                if (run != null) {
+                    retired.addLast(run);
+                    if (retired.size() > REMEMBERED_APP_RUNS) {
+                        retired.removeFirst();
+                    }
+                }
+                run = next;
+                lifecycle = null;
+                lifecycleStamp = null;
+                heartbeat = null;
+                heartbeatStamp = null;
+            }
+            seq = nextSeq;
+            return true;
+        }
     }
 
     private enum ConnectionState { CONNECTED, DISCONNECTED, UNKNOWN }

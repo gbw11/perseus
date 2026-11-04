@@ -517,6 +517,8 @@ Worker 제품·실제 planner/ESP32·운영/물리 수락은 로컬 제공과 �
 
 [공통 공급 계약](../contracts/vm-provisioning-v1.md)과 [같은 후보의 수락](recovery-scenario-closure-20261030.md#vm-provisioning-integration)이 현재 후속 원본이다.
 앞선 조사 대응표와 CLI intents를 재사용해 일반 생성/factory의 UUID별 자격 공급, 실행별 기존 receipt,
-등록-only 일회 sender/명시 CLI, 실제 drive template 선택을 연결했다. 선언·구성·실제 관측과 원 결과/현재 guard를 나눈다.
-기존 생성 검증 복사·기한·수습·CPU/동시성·오류 분류는 유지한다. Spring 수신 구현·Worker 소비·Jetson 계정과
+등록-only 일회 sender/명시 CLI, 실제 drive template 선택을 연결했던 선행 후보의 이력이다.
+현재는 [등록 조회·FastAPI 통지 후속](vm-registration-api-20261102.md)에서 하위 명세 조회와 FastAPI GET/notify,
+일반/factory 로컬 후속을 제공하며 옛 CLI·직접 sender·설정을 제거했다. Spring `800d584` 구현 소스를 대조했다.
+선언·구성·실제 관측과 원 결과/현재 guard를 나누고 생성 검증 복사·기한·수습·CPU/동시성·오류 분류는 유지한다. 실제 Spring DB 공동 수락·Worker 소비·Jetson 계정과
 새 Linux rootfs/운영 설치·실보드 수락은 각각 별도다. 과거 절의 당시 미연결을 최신 결함으로 다시 등록하지 않는다.

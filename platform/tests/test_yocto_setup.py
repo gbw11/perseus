@@ -12,7 +12,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORIES = (
     "openembedded-core", "bitbake", "meta-yocto",
-    "meta-raspberrypi", "meta-virtualization", "meta-openembedded",
+    "meta-raspberrypi", "meta-virtualization", "meta-openembedded", "meta-browser", "meta-clang",
 )
 
 
@@ -64,7 +64,7 @@ class SetupSafetyTest(unittest.TestCase):
     def test_clean_check_creates_no_build(self):
         result = self.run_setup("--check")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.count("[OK]"), 6)
+        self.assertEqual(result.stdout.count("[OK]"), len(REPOSITORIES))
         self.assertFalse((self.workspace / "build-test").exists())
 
     def test_missing_check_creates_no_workspace(self):

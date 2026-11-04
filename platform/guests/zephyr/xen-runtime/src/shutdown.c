@@ -77,10 +77,15 @@ static void watcher(void *a,void *b,void *c) {
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
  /* All paths after creation release this barrier, including publication failure. */
  k_sem_take(&feature_publication_done,K_FOREVER);
+ const int read_ms=100;
  bool dirty=true;
+ int64_t retry_at=0;
  while(!atomic_get(&stopping)) {
-  if(dirty) {
-   char request[32];int rc=xsr_read(shutdown_path,request,sizeof(request),100);
+  bool unusable;
+  if(dirty&&k_uptime_get()>=retry_at) {
+   char request[32];
+   int rc=xsr_read_status(shutdown_path,request,sizeof(request),read_ms,&unusable);
+   if(unusable)break;
    if(!rc&&request[0]&&(!strcmp(request,"poweroff")||!strcmp(request,"reboot"))&&
       atomic_cas(&owner,0,1)) {
     int64_t end=k_uptime_get()+CONFIG_XENOVA_SHUTDOWN_BUDGET_MS;
@@ -90,9 +95,15 @@ static void watcher(void *a,void *b,void *c) {
     printk("XENOVA shutdown phase=%d rc=%d withdrawal=%d; removal must be observed by dom0\n",flow.phase,rc,withdraw);
     break; /* Failed/returning requests must not become new physical jobs. */
    }
-   dirty=false;
+   /* The hint is consumed. Retry the read if the shared session can recover. */
+   dirty=rc==-ETIMEDOUT||rc==-EAGAIN||rc==-EBUSY;
+   if(dirty)retry_at=k_uptime_get()+read_ms;
   }
-  if(!atomic_get(&stopping)&&!xsr_watch_next(watch_id,10))dirty=true;
+  if(!atomic_get(&stopping)) {
+   int rc=xsr_watch_next_status(watch_id,10,&unusable);
+   if(unusable)break;
+   if(!rc)dirty=true;
+  }
   k_sleep(K_MSEC(10));
  }
 }

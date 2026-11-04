@@ -3105,3 +3105,81 @@ Yocto의 미존재 python3-ssl 의존성과 broker wrapper의 직접 python3-cor
 `C:/Users/SSAFY/Documents/Codex/2026-11-02/vm-provisioning/delivery-release3/`에 모았다.
 임시 VM root·credential/token·Authority·raw bootstrap 파일은 이 묶음에서 제외했다.
 source changes는 위 HEAD에 적용하는 변경 묶음이며 전체 이미지나 운영 설치 완료본이 아니다.
+
+## 2026-11-02 — Red Bull Ring 도로 우선과 자동 종단 보완
+
+기존 합성 짧은 지도 대신 저장소 simulator의 Red Bull Ring geometry를 84.336m 시험 축척으로
+사용했다. 이전 13개 장애물 완주는 접촉/바깥 경계 보호만 확인했으며, S4/S5의 빈 코너에서
+도로를 벗어나 지름길을 택하는 품질 결함은 별개였다. 이번 수락은 **도로 안 우선·필요 우회·복귀**다.
+시험 도로 폭 0.72m·64×64/0.1m rolling grid·차량/시계/odom·bicycle plant는 fixture이며 운영값이 아니다.
+
+### 무엇을 어떤 기준으로 바꿨는가
+
+- 원 boundary는 hard 통행 경계로 유지하고 `required_features` bit0와 기존 cell_flags bit3으로
+  선호 도로를 구분했다. `mark_road`는 실제 생산자가 준 도로 geometry만 표시하며 occupancy·age·
+  원 시각을 바꾸지 않는다. Python/C strict reader와 생성 schema, path/인계 `world_features`를
+  연결해 서로 다른 도로 의미의 path 채택을 막았다. feature=0은 과거 호환이며 새 품질 수락은 아니다.
+- 같은 heap/node pool에서 차체의 도로 밖 사용 거리를 길이/곡률보다 우선했다. 기존 4096-cell
+  유도값 공간을 재사용하고 차체 inscribed disk를 반영했다. shoulder 색인은 고정 512B 추가,
+  node는 48B 이하 유지다. analytic 종단이 도로 밖을 가르면 실제 primitive 탐색을 계속한다.
+- 새 정책의 실제 주행 중 42.66m에서 자동 목표가 회전 grid 밖에 놓이는 기존 결함을 확인했다.
+  기존 끝 여유와 4.5m horizon 안의 실제 reference 지점으로 제한했다. 꼭짓점의 0길이 구간은
+  건너뛰며 새 점 외삽이나 grid/예산 확대는 하지 않는다.
+- 다음 67.73m 정지에서는 목표 허용 범위의 3,969 자세 표본이 모두 실제 footprint 충돌이었다.
+  `lp_start_local`은 원 collision index·cell 한도·deadline으로 자동 종단을 확인하고, 막히면
+  같은 horizon에서 resolution 간격으로 더 가까운 reference 지점을 고른다. 다음 rolling map은
+  장애물 너머 목표를 선택할 수 있다. 명시 `lp_start` 목표와 원 `merge_goal`·통과 근거는 보존한다.
+  안전한 전방 후보가 없으면 거절하고 실제 새 정상 지도로 회복한다.
+
+42.66m·67.73m 실패 원자료/바이너리와 수정 전후 시험은 PC
+`C:/Users/SSAFY/Documents/Codex/2026-11-02/circuit-road-priority/`에 각각 보존했다.
+중간 실패를 완주나 회귀 통과 수치로 합산하지 않는다.
+
+### 같은 13개 배치의 최종 결과와 비용
+
+| 항목 | 먼 쪽 배치: 이전 → 최종 | 우회 공간 쪽 배치: 이전 → 최종 |
+|---|---|---|
+| 기준선 진행 | 84.24 → 84.24 / 84.34m | 84.24 → 84.24 / 84.34m |
+| 실제 모의 이동 / 모의 시간 | 79.64m/199.30s → 84.72m/212.00s | 81.14m/203.06s → 84.72m/212.00s |
+| S4/S5 57~62m 기준선 최대 편차 | 82.2 → 8.8cm | 60.2 → 8.8cm |
+| 같은 구간 차체+여유의 도로 밖 표본 | 492 → 0 | 561 → 0 |
+| 새 탐색 수 / 채택 path | 548/106 → 266/131 | 634/127 → 266/131 |
+| 새 탐색 평균 / p95, host ms | 228.8/530.6 → 122.6/365.7 | 211.0/482.4 → 125.2/367.3 |
+| tracker 평균, host ms | 0.181 → 0.154 | 0.167 → 0.154 |
+| host 전체, s | 132.51 → 41.14 | 140.53 → 41.86 |
+
+두 최종 배치에서 actual trace와 채택 path는 같았다. 새 도로 우선 경로에서는 여섯 바깥 장애물이
+출력을 바꾸지 않았다는 이 입력의 결과이며 일반적인 무영향 보장은 아니다. 각 10,600 표본에서
+장애물 접촉·hard 경계/grid 이탈·tracker 오류 0, 차체+관측 여유의 최소 장애물 간격 0.167m다.
+도로 밖 차체 사용은 V1~V7 주변의 7개 구간이며 모두 복귀했다. 빈 코너 2~13/57~62/78~83m의
+차체 도로 이탈은 각각 0이다. 마지막 우회는 73.24m에서 정상 종결했고 최종 활성 intent도 0이다.
+장애물 근처라는 이유만으로 모든 경로의 수학적 최소 이탈·전역 최적성을 주장하지 않는다.
+
+266개 탐색 중 68개는 WORK_BUDGET, 67개는 NOT_FOUND였다. 새 실패 경로를 게시하지 않고
+현재 유효한 path·명령 보호를 유지한 결과 모든 tracker 표본이 진행했다. 실패를 성공으로 합치거나
+원 deadline을 늘리지 않았다. 노드 high-water 4,308/4,331은 원 8,192 이하이며 확장 4,096·
+collision cell 1,500,000·2s 시험 planner budget·원 차량 속도/조향 한도도 유지했다.
+
+시간은 WSL host에서 새/기존 실제 C 호출을 구분한 각 배치 1회 표본이다. 도로 의미와 실제 궤적이
+달라진 기능 변경 전후이며 순수 미세 최적화 배수·ARM/20ms 실시간/실차 보장은 아니다. road mask
+생산은 별도 평균 0.441/0.444ms로 계수했다. 원 계수·원 trace·스크립트·범위는 `comparison.json`과
+`report.md`, 실패 회귀·후속 실행 명령은 같은 폴더의 로그에 있다.
+
+### 최종 소스·인계·부분 포장 수준
+
+관련 world/lattice/engine 회귀 **59건**, 별도 격리 broker의 실제 Gateway binary 사본/적용 회귀
+**7건**을 통과했다. 고정 SDK로 최신 native_sim과 Xen ARM firmware를 부분 빌드/포장했다.
+ARM source SHA-256은 `cd07f1501e3a3f78090e0e2c059b452a1e6bb80bed84316dacf1db50cb11fdf3`,
+`zephyr.bin`은 `7d6e4073aef3929d29485e98153061b0368449f35e621807916215dfe82a663f`다.
+계산 worker stack 8,192B와 기존 sentinel을 유지했다. direct frame 검사는 전체 호출 peak나 보드
+stack high-water를 대신하지 않는다. `build-source-check.json`이 시험/빌드/현재 소스 일치를 확인한다.
+
+기존 Gateway recipe가 `xenova_drive_world/*.py`를 0644로 설치하므로 새 `road.py`도 포함한다.
+개발 소스 경로 대신 별도 설치한 모듈을 고정 target Python 3.14.7/protobuf 6.33.6의 ARM/QEMU에서
+실제 import·road 표시·새 State 필드로 확인했다. 새 정규 RPM/전체 이미지·운영 설치 완료는 아니다.
+`20261029-request-jetson.md` 현재 본문에 실제 import/생산 위치·실패 수락을 연결했다.
+실제 mapper는 observed 도로/바깥 통행 영역을 공급하고 새 지원 후보를 설치해야 한다.
+
+최종 두 완주만 `overview.png`에 그렸다. 개별 지도 조각이나 이전 정지 지점은 표시하지 않았다.
+이전 코드/실패·기존 planner/Gateway 변경을 보존했고 타 담당 제품·운영 설정·서비스·보드·실차·
+재무장·7번 수락·commit/push는 수행하지 않았다.

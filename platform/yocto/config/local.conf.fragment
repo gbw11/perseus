@@ -5,7 +5,7 @@ MACHINE = "raspberrypi4-64"
 DISTRO = "poky"
 
 INIT_MANAGER = "systemd"
-DISTRO_FEATURES:append = " virtualization xen"
+DISTRO_FEATURES:append = " virtualization xen x11 opengl"
 
 PREFERRED_PROVIDER_virtual/kernel = "linux-raspberrypi"
 
@@ -17,3 +17,8 @@ RPI_DOM0_MEM = "3072M"
 # 현재 WSL2 빌드의 임시 자원 제한값이며 호스트에 맞게 조정한다.
 BB_NUMBER_THREADS = "4"
 PARALLEL_MAKE = "-j 4"
+
+# FFmpeg x11grab/MJPEG is used by the display relay.
+LICENSE_FLAGS_ACCEPTED:append = " commercial_ffmpeg"
+PACKAGECONFIG:append:pn-ffmpeg = " xcb"
+PACKAGECONFIG:pn-chromium-x11 = "use-egl"

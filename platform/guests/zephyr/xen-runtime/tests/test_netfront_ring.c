@@ -73,6 +73,8 @@ int main(void){
  init();rx(0,n.rx_id[0],0,0,-1);assert(!xnf_poll(&n)&&n.stats.rx_drop==1);cases++;
  init();memcpy(n.rx_pages[0],packet,64);drop=-ENOMEM;
  rx(0,n.rx_id[0],0,0,64);assert(!xnf_poll(&n)&&n.stats.rx_drop==1&&n.rx_posted[0]);cases++;
+ drop=0;rx(1,n.rx_id[0],0,0,64);
+ assert(!xnf_poll(&n)&&n.stats.rx==1&&n.stats.rx_drop==1&&n.rx_posted[0]&&!n.failed);cases++;
  init();for(unsigned i=0;i<70000;i++){
   assert(!xnf_send(&n,packet,64));
   tx(i,n.tx->ring[i&255].req.id,0);

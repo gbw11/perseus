@@ -198,27 +198,19 @@ def copy_rtos_templates(data, entries):
 
 def copy_management_catalog(data):
     """새 조립 저장소에만 factory public ID/version 카탈로그를 준비한다."""
-    from xenova_catalog import describe,DEFAULT_IDS,deployment_version
+    from xenova_catalog import describe, DEFAULT_IDS, deployment_version
     from artifact_io import publish
-    locked=json.loads((ROOT/'platform/guests/default-templates.lock.json').read_text())['templates']
-    selected={e['id']:e for e in locked}
     for kind, folder in [('linux','templates'),('zephyr','rtos-templates')]:
         parent = data / folder
         if not parent.exists():
             continue
         for directory in parent.iterdir():
-            if directory.name.startswith('.'):
+            if directory.name.startswith('.') or directory.name not in DEFAULT_IDS:
                 continue
             manifest = directory / ('firmware.json' if (directory / 'firmware.json').exists() else 'template.json')
             meta = json.loads(manifest.read_text())
-            chosen=selected.get(directory.name)
-            if chosen is None:
-                # 현재 기본 선택이 바뀌어도 지원하는 옛 조립 입력의 공개 호출을 보존한다.
-                if kind!='zephyr' or directory.name not in DEFAULT_IDS:continue
-                rtos.info(directory,sha(manifest))
-                chosen={'template_id':DEFAULT_IDS[directory.name],'version':deployment_version(meta)}
-            descriptor = {'schema_version':'1.0','template_id':chosen['template_id'],
-                          'template_version':chosen['version'],'guest_kind':kind,
+            descriptor = {'schema_version':'1.0','template_id':DEFAULT_IDS[directory.name],
+                          'template_version':deployment_version(meta),'guest_kind':kind,
                           'asset_directory':str(directory.relative_to(data)),
                           'manifest_sha256':sha(manifest),'source_template_id':meta['id']}
             describe(data, descriptor, full=True)
@@ -241,7 +233,7 @@ def copy_rtos_seeds(data, entries):
     # Current config selects the new immutable template. Legacy input bundles remain
     # readable for rerunning old receipts; no existing store is migrated here.
     allowed={'xenova-zephyr-drive-lattice-lab-1.0.0','xenova-zephyr-network-starter-1.1.0','xenova-zephyr-starter-1.0.0',
-             'zephyr-4.4.0-xenvm'}
+             'zephyr-4.4.0-xenvm', 'xenova-zephyr-drive-common'}
     if template not in allowed:
         raise ValueError('unknown immutable Zephyr factory template')
     records=[];reservations={}
@@ -335,7 +327,7 @@ def platform_root_ok(root):
                 'etc/systemd/system.conf.d/20-xenova.conf': FILES / 'xenova-system.conf'}
     for name in ('xenova_boot_status.py','xenova_boot_progress.py','xenova_management.py','xenova_management_cli.py','xenova_catalog.py','xenova_wifi.py',
                  'xenova_cpu.py','xenova_execution.py','xenova_recovery.py','xenova_domain_identity.py','xenova_preparation.py',
-                 'xenova_provisioning.py','xenova_guest_profile.py','xenova_registration.py'):
+                 'xenova_provisioning.py','xenova_guest_profile.py','xenova_registration.py','xenova_registration_hook.py'):
         expected['usr/lib/xenova/'+name] = FILES/name
     expected['usr/lib/xenova/xenova_broker.py']=ROOT/'platform/deploy/mosquitto/scripts/xenova_broker.py'
     expected['usr/share/xenova/mqtt/policy.json']=ROOT/'platform/deploy/mosquitto/etc/policy.json'
@@ -498,21 +490,37 @@ def platform_boot_ok(image, table, output):
                    'fdt move ${fdtcontroladdr} ${fdt_addr_r}', 'booti ${xen_loadaddr} - ${fdt_addr_r}',
                    'fdt rm /soc/mmcnr@7e300000 dmas || exit 1',
                    'fdt rm /soc/mmcnr@7e300000 dma-names || exit 1',
-                   'xenova_debug', 'setenv xenova_logargs "loglevel=3 ', 'systemd.show_status=error'):
+                   'xenova_debug', 'setenv xenova_logargs "loglevel=4 ', 'systemd.show_status=error'):
         if marker not in script:
             raise ValueError('platform lacks validated Xen boot/PARTUUID contract: ' + marker)
     return result
 
 
-def copy_range(source, target, offset, length):
+def _copy_zeroed_stream(source, target):
+    """새 파일의 논리 바이트를 유지하며 0 블록만 sparse로 보존한다."""
+    zeros = bytes(64 * 1024)
+    while block := source.read(len(zeros)):
+        if block == zeros[:len(block)]:
+            target.seek(len(block), os.SEEK_CUR)
+        else:
+            target.write(block)
+    target.truncate(target.tell())
+
+
+def copy_range(source, target, offset, length, *, zeroed_destination=False):
+    """새로 확장한 0 영역에서는 0 블록을 hole로 유지한다. 기존 영역은 기본 복사를 쓴다."""
+    zeros = bytes(64 * 1024) if zeroed_destination else None
     with source.open('rb') as inp, target.open('r+b') as out:
         out.seek(offset)
         left = length
         while left:
-            block = inp.read(min(left, 8 * MIB))
+            block = inp.read(min(left, len(zeros) if zeroed_destination else 8 * MIB))
             if not block:
                 raise ValueError('truncated prepared data filesystem')
-            out.write(block)
+            if zeroed_destination and block == zeros[:len(block)]:
+                out.seek(len(block), os.SEEK_CUR)
+            else:
+                out.write(block)
             left -= len(block)
         out.flush()
         os.fsync(out.fileno())
@@ -630,7 +638,7 @@ def assemble(config, image, record, planned):
     base = work.path / 'platform.img'
     opener = bz2.open if image.suffix == '.bz2' else open
     with opener(image, 'rb') as inp, base.open('xb') as out:
-        shutil.copyfileobj(inp, out, 8 * MIB)
+        _copy_zeroed_stream(inp, out)
     try:
         platform_boot = platform_boot_ok(base, planned['layout'], work.path)
         root = platform_mount(work, base)
@@ -709,7 +717,9 @@ def assemble(config, image, record, planned):
         for entry in planned.get('rtos_templates', []):
             rtos.info(entry['template'], entry['template_manifest_sha256'])
         final = stage / 'xenova-first-install.img'
-        shutil.copyfile(base, final)
+        with final.open('xb') as stream:
+            stream.truncate(base.stat().st_size)
+        copy_range(base, final, 0, base.stat().st_size, zeroed_destination=True)
         with final.open('r+b') as stream:
             stream.truncate(planned['capacity']['image_bytes'])
             stream.seek(478)
@@ -718,7 +728,7 @@ def assemble(config, image, record, planned):
             stream.write(struct.pack('<B3sB3sII', 0, b'\xfe\xff\xff', 0x83, b'\xfe\xff\xff', start, count))
             stream.flush()
             os.fsync(stream.fileno())
-        copy_range(datafile, final, start * SECTOR, count * SECTOR)
+        copy_range(datafile, final, start * SECTOR, count * SECTOR, zeroed_destination=True)
         with final.open('rb') as stream:
             final_layout = layout(stream.read(SECTOR), final.stat().st_size, with_data=True)
         partition_hashes = []

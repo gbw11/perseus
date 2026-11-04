@@ -43,6 +43,21 @@ Python은 `from xenova_drive_world import schema, encode, decode`로 사용합�
 QoS0/non-retained 단일 PUBLISH로 보냅니다. JSON 봉투·압축·조각 프로토콜을 추가하지 않습니다.
 최대 wire 32KiB·64×64 cell·road 각 64점이며 운영 주기·해상도는 이 최대값과 별개입니다.
 
+도로 우선 주행에는 바깥 통행 가능 경계와 선호 도로를 구분해 공급해 주세요. 공통 제공물의
+`from xenova_drive_world import mark_road`를 사용해 실제 같은 frame의 `road_left/right` Point
+점열을 `mark_road(snapshot, road_left, road_right)`에 넘기고 기존 `encode(snapshot)`로
+발행합니다. 기존 boundary는 hard 통행 경계로 유지하고 feature bit 0·cell flag bit3으로
+도로를 구분합니다. 이 호출은 occupancy/age/원 시각/출처를 free나 새 표본으로 바꾸지 않습니다.
+정확한 입력·인계·호환은 [도로 우선 계약](../contracts/drive-world/README.md#도로-우선-입력--feature-bit-0)을 따릅니다.
+
+수정 위치는 담당 mapper의 완전 snapshot 조립→encoder 직전입니다. 실제 소스 경로와
+entrypoint를 회신해 주세요. 기존 feature=0의 넓은 corridor만 보내면 도로 우선 지원을
+연결한 것으로 보지 않습니다. 시험 도로 폭 0.72m를 실제 운영 폭으로 복사하지 마세요.
+정상 수락은 빈 곡선의 도로 유지, 도로 안 가능한 우회, 필요한 경우만 확인된 여유 사용과
+통과 후 복귀입니다. unknown/점유/만료가 road flag 때문에 free가 되지 않는지, 미지원 feature·
+도로 구분 누락·다른 map 의미의 사본이 거절되는지도 확인합니다. 실제 mapper/센서 설치 수락은
+아직 수행하지 않았으며 제품 코드를 대신 수정하지 않았습니다.
+
 Pi 상태는 broker P `xenova/v1/vehicle/state.pb`의 `VehicleSample`입니다. 현재
 host/gateway/device/odom 문맥·원 표본/오차와 `sequence`를 확인해 mapper의 pose anchor에
 사용합니다. mapper가 채운 `reference_odom_seq`와 그 순간의 `reference_vehicle_pose`를

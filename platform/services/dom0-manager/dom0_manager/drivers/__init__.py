@@ -43,7 +43,7 @@ def build_driver(settings: Settings) -> Driver:
         return XenDriver(_xl(settings, runner), xentop=_xentop(settings, runner))
     from .platform import PlatformDriver, load_manager, load_records_loader
 
-    manager = load_manager(settings.platform_lib, busy_timeout_s=settings.platform_busy_timeout_s)
+    manager = load_manager(settings.platform_lib, busy_timeout_s=settings.platform_busy_timeout_s, read_fork=settings.platform_read_fork)
     return PlatformDriver(
         manager,
         _xl(settings, runner),
@@ -62,7 +62,7 @@ def build_provisioner(settings: Settings, driver: Driver | None = None) -> Provi
     manager = (
         driver.manager
         if isinstance(driver, PlatformDriver)
-        else load_manager(settings.platform_lib, busy_timeout_s=settings.platform_busy_timeout_s)
+        else load_manager(settings.platform_lib, busy_timeout_s=settings.platform_busy_timeout_s, read_fork=settings.platform_read_fork)
     )
     return PlatformProvisioner(manager)
 

@@ -1,6 +1,6 @@
 """`python -m dom0_manager.recovery`: Recovery Worker 프로세스. dom0-manager HTTP 와 별도 systemd 유닛으로 돈다.
 
-플랫폼·xl 설정은 XENOVA_*(dom0_manager.config.Settings), Worker 설정은 XENOVA_RECOVERY_* 다. XENOVA_DRIVER 는 platform 이어야 한다
+플랫폼·xl 설정은 XENOVA_*(dom0_manager.config.Settings.platform_from_env, HTTP 전용 값은 읽지 않음), Worker 설정은 XENOVA_RECOVERY_* 다. XENOVA_DRIVER 는 platform 이어야 한다
 (desired_state 는 플랫폼 registry 에만 있다). SIGTERM·SIGINT 로 멈춘다. 종료 코드: 설정 오류 2, 정상 0.
 """
 
@@ -23,6 +23,7 @@ from .events import EventLog
 from .lock import EXIT_LOCKED, AlreadyRunning, acquire
 from .platform_recovery import PlatformRecovery
 from .policy import RecoveryPolicy
+from .protection import ClientPort, GatewayProtection
 from .state import RecoveryStore
 from .heartbeats import AppHeartbeatTable, HeartbeatTable
 from .mqtt import RECOVERY_EVENTS_TOPIC, HealthPublisher, build_client, link_state, subscribe_liveness
@@ -36,7 +37,7 @@ log = logging.getLogger("dom0_manager.recovery")
 def main() -> int:
     try:
         settings = RecoverySettings.from_env()
-        platform_settings = Settings.from_env()
+        platform_settings = Settings.platform_from_env()
         policy = RecoveryPolicy.from_env()
     except ValueError as exc:
         print(f"xenova-recovery-worker: {exc}", file=sys.stderr)
@@ -51,7 +52,9 @@ def main() -> int:
         log.error("xenova-recovery-worker not started: %s", exc)
         return EXIT_LOCKED
 
-    manager = load_manager(platform_settings.platform_lib, busy_timeout_s=platform_settings.platform_busy_timeout_s)
+    manager = load_manager(
+        platform_settings.platform_lib, busy_timeout_s=platform_settings.platform_busy_timeout_s, read_fork=platform_settings.platform_read_fork
+    )
     rejoin=None
     if os.environ.get('XENOVA_RECOVERY_DRIVE_CONFIG'):
         from .rejoin import production
@@ -87,7 +90,18 @@ def main() -> int:
             log.warning("recovery event publish failed (stored for GET /api/v1/recovery/events): %s", exc)
         return True
 
-    engine = RecoveryEngine(policy, PlatformRecovery(manager), watcher, RecoveryStore(Path(settings.state_dir) / "recoveries.json"), on_event=publish_event)
+    # 주행 VM 의 force-restart 는 Gateway 보호(S15P31E110-346)를 먼저 확보한다. Gateway 클라이언트를 못 읽으면 주행 VM force 는 보류된다.
+    # drive config 가 없으면 주행 VM 이 어느 것인지 모르므로(None) 엔진이 Zephyr force 를 모두 보류한다
+    protection = None
+    if rejoin:
+        try:
+            gateway = ClientPort.production(settings.gateway_socket, settings.gateway_call_budget_s)
+        except ImportError as exc:
+            log.error("Gateway client unavailable (%s): drive VM force-restart stays held; install xenova-gateway-client", exc)
+        else:
+            protection = GatewayProtection(gateway, deadline_s=settings.gateway_protect_deadline_s, call_budget_s=settings.gateway_call_budget_s)
+    engine = RecoveryEngine(policy, PlatformRecovery(manager), watcher, RecoveryStore(Path(settings.state_dir) / "recoveries.json"), on_event=publish_event,
+                            drive_vm_ids=rejoin.vm_ids if rejoin else None, protection=protection)
     log.info("recovery policy=%s max_attempts=%d backoff=%s attempt_deadline=%.0fs verify_timeout=%.0fs", policy.policy, policy.max_attempts,
              ",".join(f"{b:g}" for b in policy.backoff_s), policy.attempt_deadline_s, policy.verify_timeout_s)
     worker = RecoveryWorker(

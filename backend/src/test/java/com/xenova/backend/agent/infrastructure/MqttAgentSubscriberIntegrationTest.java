@@ -7,13 +7,20 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.timeout;
 
 import com.xenova.backend.agent.domain.AgentHeartbeatRepository;
+import com.xenova.backend.agent.domain.MetricSampleRepository;
+import com.xenova.backend.agent.domain.TelemetryHeartbeatRepository;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventBackfillService;
+import com.xenova.backend.template.domain.GuestKind;
+import com.xenova.backend.vm.domain.VmRecord;
+import com.xenova.backend.vm.domain.VmRecordRepository;
 import io.moquette.broker.Server;
 import io.moquette.broker.config.MemoryConfig;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Properties;
@@ -38,6 +45,15 @@ class MqttAgentSubscriberIntegrationTest {
 
     @Autowired
     private AgentHeartbeatRepository heartbeatRepository;
+
+    @Autowired
+    private MetricSampleRepository metricSamples;
+
+    @Autowired
+    private TelemetryHeartbeatRepository telemetryHeartbeats;
+
+    @Autowired
+    private VmRecordRepository vmRecords;
 
     @Autowired
     private MqttAgentSubscriber subscriber;
@@ -115,6 +131,75 @@ class MqttAgentSubscriberIntegrationTest {
         verify(recoveryEventHandler).handle(
                 org.mockito.ArgumentMatchers.any(byte[].class),
                 org.mockito.ArgumentMatchers.any(Instant.class));
+    }
+
+    @Test
+    void zephyrV1CountersAndV2CpuReachTheirStoragePathsThroughTheBroker() throws Exception {
+        String vm = "f1000000-0000-4000-8000-000000000002";
+        String messageId = "f4000000-0000-4000-8000-000000000001";
+        String network = """
+                {"schema_version":"1.0","type":"agent.metrics","vm_id":"%s","message_id":"%s",
+                 "boot_id":"f2000000-0000-4000-8000-000000000001","agent_instance_id":"f3000000-0000-4000-8000-000000000001",
+                 "seq":1,"sent_at":null,"payload":{"window_ms":null,"observed_uptime_ms":"50000","values":[
+                 {"name":"net_rx_bytes_total","unit":"bytes","value":"9007199254740993","unavailable_reason":null,
+                  "source_rc":0,"labels":{"iface":"eth0","counter_epoch":"1"}},
+                 {"name":"net_tx_bytes_total","unit":"bytes","value":"0","unavailable_reason":null,
+                  "source_rc":0,"labels":{"iface":"eth0","counter_epoch":"1"}}]}}
+                """.formatted(vm, messageId);
+        byte[] cpu = Files.readString(Path.of("../platform/guests/zephyr/telemetry/contract/fixtures-2.1/cpu.json"))
+                .replace("f1000000-0000-4000-8000-000000000001", vm).getBytes(StandardCharsets.UTF_8);
+        vmRecords.save(VmRecord.registeredByPlatform(vm, "broker-zephyr", "zephyr-fixture", "1", 1, 16,
+                GuestKind.ZEPHYR, Instant.now(), null));
+        try (MqttClient publisher = new MqttClient(
+                "tcp://127.0.0.1:" + PORT, "zephyr-fixture-publisher", new MemoryPersistence())) {
+            publisher.connect();
+            Instant deadline = Instant.now().plusSeconds(10);
+            while (Instant.now().isBefore(deadline)) {
+                publisher.publish("xenova/v1/vms/" + vm + "/metrics", network.getBytes(StandardCharsets.UTF_8),
+                        0, false);
+                publisher.publish("xenova/v2/vms/" + vm + "/telemetry/metrics", cpu, 0, false);
+                if (metricSamples.findById(messageId).isPresent()
+                        && metricSamples.findAll().stream().anyMatch(sample -> vm.equals(sample.getVmId())
+                                && sample.getCpuWindow() != null)) {
+                    break;
+                }
+                Thread.sleep(100);
+            }
+            publisher.disconnect();
+        }
+        assertThat(metricSamples.findById(messageId).orElseThrow().getValues().getFirst().counterValue())
+                .isEqualTo("9007199254740993");
+        assertThat(metricSamples.findAll()).anyMatch(sample -> sample.getVmId().equals(vm)
+                && sample.getCpuWindow() != null && "1".equals(sample.getCpuWindow().sampleSeq()));
+    }
+
+    @Test
+    void v2PublisherHeartbeatsReachDedicatedStorageThroughMqtt() throws Exception {
+        String zephyr = "f1000000-0000-4000-8000-000000000006";
+        String linux = "f1000000-0000-4000-8000-000000000007";
+        String fixture = Files.readString(Path.of("../platform/guests/zephyr/telemetry/contract/fixtures-2.1/utc.json"));
+        String zephyrHeartbeat = fixture.replace("f1000000-0000-4000-8000-000000000001", zephyr);
+        String linuxHeartbeat = fixture.replace("f1000000-0000-4000-8000-000000000001", linux)
+                .replace("\"2026-01-01T00:00:00.000Z\"", "null").replace("\"synchronized\"", "\"unavailable\"")
+                .replace("\"dom0_adjtimex\"", "null").replace("\"uncertainty_ms\": 126", "\"uncertainty_ms\": null")
+                .replace("\"running\"", "\"degraded\"");
+        try (MqttClient publisher = new MqttClient(
+                "tcp://127.0.0.1:" + PORT, "heartbeat-fixture-publisher", new MemoryPersistence())) {
+            publisher.connect();
+            Instant deadline = Instant.now().plusSeconds(10);
+            while (Instant.now().isBefore(deadline)
+                    && (telemetryHeartbeats.findById(zephyr).isEmpty() || telemetryHeartbeats.findById(linux).isEmpty())) {
+                publisher.publish("xenova/v2/vms/" + zephyr + "/telemetry/heartbeat",
+                        zephyrHeartbeat.getBytes(StandardCharsets.UTF_8), 0, false);
+                publisher.publish("xenova/v2/vms/" + linux + "/telemetry/heartbeat",
+                        linuxHeartbeat.getBytes(StandardCharsets.UTF_8), 0, false);
+                Thread.sleep(100);
+            }
+            publisher.disconnect();
+        }
+        assertThat(telemetryHeartbeats.findById(zephyr).orElseThrow().report().publisherState()).isEqualTo("running");
+        assertThat(telemetryHeartbeats.findById(linux).orElseThrow().report().publisherState()).isEqualTo("degraded");
+        assertThat(heartbeatRepository.findAll()).noneMatch(row -> zephyr.equals(row.getVmId()) || linux.equals(row.getVmId()));
     }
 
     private static int freePort() {
