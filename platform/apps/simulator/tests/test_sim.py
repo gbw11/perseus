@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import math
 import threading
 
 import pytest
@@ -64,7 +65,7 @@ def client():
 
 @pytest.fixture
 def sim(client, clock):
-    s = Simulator(client, SimSettings(), clock=clock)
+    s = Simulator(client, SimSettings(start_lights=False), clock=clock)  # 출발 신호는 test_race.py
     s.subscribe()
     return s
 
@@ -239,3 +240,70 @@ def test_status_speed_comes_from_encoder(client, clock, sim):
     status = client.published[-1][2]
     assert status["v_mps"] == pytest.approx(0.5, abs=0.02)
     assert sim.vehicle.encoder_count > 0
+
+
+# --- 출발 신호·노면 (계약 §12 sim.pose.race·surface, S15P31E110-319) ---
+
+@pytest.fixture
+def race_sim(client, clock):
+    s = Simulator(client, SimSettings(), clock=clock, rng=lambda: 0.0)   # 불이 꺼지는 순간 = 출발 후 4.9 s
+    s.subscribe()
+    return s
+
+
+def moved(sim):
+    x, y, _ = sim.track.start_pose()
+    return math.hypot(sim.vehicle.x - x, sim.vehicle.y - y)
+
+
+def test_autonomous_waits_on_grid_until_lights_out(client, clock, race_sim):
+    client.control(3, "AUTO", "autonomous")
+    feed = lambda: client.app("autonomous", "drive.command", {"generation": 3, "v_mps": 0.5, "steer_rad": 0.0})
+    drive(race_sim, clock, 4.8, feed=feed)
+    assert race_sim.race.phase == "lights" and race_sim.race.lights_on == 5
+    assert moved(race_sim) == 0.0 and race_sim.race.jump is False
+    drive(race_sim, clock, 1.0, feed=feed)
+    assert race_sim.race.phase == "go" and moved(race_sim) > 0.1
+
+
+def test_manual_is_not_held_and_jump_start_is_flagged(client, clock, race_sim):
+    client.control(4, "MANUAL", "manual")
+    drive(race_sim, clock, 1.5, feed=lambda: client.app("manual", "drive.command", {"generation": 4, "v_mps": 0.5, "steer_rad": 0.0}))
+    assert race_sim.race.phase == "lights" and moved(race_sim) > 0.1
+    assert race_sim.race.jump is True
+    handle("r", race_sim, threading.Event(), io.StringIO())   # 다시 출발: 부정 출발 기록도 지운다
+    assert race_sim.race.jump is False and moved(race_sim) == 0.0
+
+
+def test_frames_input_holds_until_lights_out():
+    """frames 입력은 활성 앱을 모른다 → 늘 잡아 두고 부정 출발은 판정하지 않는다."""
+    from xenova_gateway.frame import FrameEncoder, encode
+
+    clock = Clock()
+    s = Simulator(FakeClient(), SimSettings(input="frames"), clock=clock, rng=lambda: 0.0)
+    enc = FrameEncoder()
+    drive(s, clock, 3.0, feed=lambda: s.frames.feed(encode(enc.drive(1, 0.5, 0.0)), clock.now))
+    assert moved(s) == 0.0 and s.race.jump is False
+    drive(s, clock, 3.0, feed=lambda: s.frames.feed(encode(enc.drive(1, 0.5, 0.0)), clock.now))
+    assert s.race.phase == "go" and moved(s) > 0.1
+
+
+def test_grass_caps_speed_at_0_3(client, clock, sim):
+    """연석 밖(잔디·흙)은 0.3 m/s 를 넘으면 1.2 m/s² 로 줄어 0.3 m/s 에 머문다 (mock physics 와 같음)."""
+    T = sim.track
+    i = next(k for k in range(T.N) if T.wall_left_m[k] > 0.8 and not T.corner[k] and not T.corner[(k + 20) % T.N])
+    client.control(5, "MANUAL", "manual")
+    feed = lambda: client.app("manual", "drive.command", {"generation": 5, "v_mps": 1.0, "steer_rad": 0.0})
+    sim.vehicle.reset(*T.at(i, 0.0), math.atan2(T.tan[i][1], T.tan[i][0]))
+    sim.track_index = i
+    drive(sim, clock, 1.5, feed=feed)
+    assert sim.vehicle.v_mps == pytest.approx(1.0, rel=0.01)   # 아스팔트: 명령대로
+    sim.push(0.55)                                             # 잔디로
+    j, off, _ = sim.track_frame()
+    assert T.surface(j, off) in ("grass", "dirt")
+    drive(sim, clock, 0.2, feed=feed)
+    assert 0.65 < sim.vehicle.v_mps < 0.85                     # 0.2 s × 1.2 m/s² 만큼 줄어드는 중
+    drive(sim, clock, 0.5, feed=feed)
+    j, off, _ = sim.track_frame()
+    assert T.surface(j, off) in ("grass", "dirt")
+    assert sim.vehicle.v_mps == pytest.approx(0.3, abs=1e-9)
