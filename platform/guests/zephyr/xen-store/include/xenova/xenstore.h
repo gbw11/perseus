@@ -41,7 +41,7 @@ struct xs_client {
 	uint32_t next_request, next_watch, active_tx, abandoned_start;
 	uint32_t late_responses, sending_request;
 	uint32_t pending[XS_PENDING_LIMIT];
-	bool busy, poisoned, closed;
+	bool busy, poisoned, closed, orphan_tx;
 	int fatal_error;
 	char last_error[32];
 	struct xsd_sockmsg rx_header;
@@ -72,6 +72,7 @@ int xs_write(struct xs_client *, uint32_t tx, const char *path,
 	     const void *value, size_t length, int timeout_ms);
 int xs_mkdir(struct xs_client *, const char *path, int timeout_ms);
 int xs_remove(struct xs_client *, const char *path, int timeout_ms);
+/* A new start may drain an abandoned start and abort its orphan within this budget. */
 int xs_transaction_start(struct xs_client *, uint32_t *tx, int timeout_ms);
 int xs_transaction_end(struct xs_client *, uint32_t tx, bool commit, int timeout_ms);
 typedef int (*xs_transaction_fn)(struct xs_client *, uint32_t tx,
