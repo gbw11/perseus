@@ -21,7 +21,7 @@ import {
   type VmResources,
 } from '../api/types';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
-import { mockMemoryPoolSamples } from './memoryMetrics';
+import { mockKernelHeapSamples, mockMemoryPoolSamples } from './memoryMetrics';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
@@ -423,17 +423,20 @@ export const handlers = [
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
     if (params.vmId === VM_IDS.autonomous || params.vmId === VM_IDS.manual) {
-      return HttpResponse.json({ items: mockMemoryPoolSamples(String(params.vmId)) });
+      const vmId = String(params.vmId);
+      return HttpResponse.json({ items: [...mockKernelHeapSamples(vmId), ...mockMemoryPoolSamples(vmId)] });
     }
     if (params.vmId !== VM_IDS.interaction) return HttpResponse.json({ items: [] });
     const now = Date.now();
     const items = Array.from({ length: 30 }, (_, i) => {
       const t = now - (29 - i) * 10_000;
       const wave = Math.sin(t / 40_000);
+      const usedBytes = (142 + 10 * wave) * 1024 * 1024;
       return {
         sample_id: `m-${t}`,
         vm_id: VM_IDS.interaction,
-        source: 'agent',
+        boot_id: 'mock-boot-interaction',
+        source: 'guest_agent',
         observed_at: new Date(t).toISOString(),
         values: [
           {
@@ -445,11 +448,35 @@ export const handlers = [
           },
           {
             name: 'memory_used_bytes',
-            value: (142 + 10 * wave) * 1024 * 1024,
+            value: usedBytes,
             unit: 'bytes',
             labels: null,
             unavailable_reason: null,
           },
+          {
+            // MemAvailable 은 페이지 캐시 일부를 포함해 할당량 − 사용량보다 조금 작다
+            name: 'memory_available_bytes',
+            value: 512 * 1024 * 1024 - usedBytes - 24 * 1024 * 1024,
+            unit: 'bytes',
+            labels: null,
+            unavailable_reason: null,
+          },
+          ...(['xvda', 'xvdb'] as const).flatMap((device, d) => [
+            {
+              name: 'disk_read_bytes_total',
+              value: (d === 0 ? 180_000_000 : 4_000_000) + i * (d === 0 ? 96_000 : 4_096),
+              unit: 'bytes',
+              labels: { device },
+              unavailable_reason: null,
+            },
+            {
+              name: 'disk_write_bytes_total',
+              value: (d === 0 ? 62_000_000 : 1_000_000) + i * (d === 0 ? 40_960 : 0),
+              unit: 'bytes',
+              labels: { device },
+              unavailable_reason: null,
+            },
+          ]),
           {
             name: 'net_rx_bytes_total',
             value: 1_200_000 + i * 8_000,

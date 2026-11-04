@@ -22,15 +22,47 @@ function poolValues(region: 'net_rx_data' | 'net_tx_data', usedBytes: number): M
   ];
 }
 
+const HEAP_INTERVAL_MS = 10_000;
+const HEAP_SAMPLES = 30;
+const HEAP_ACCOUNTED = 48 * 1024;
+
 /**
- * 정상 상태(VM B)와 RX 처리가 밀려 점유·drop이 증가한 관측 예시(VM A).
+ * Zephyr 커널 heap 표본(최근 5분, 10초 간격). 실제 Publisher 처럼 memory 계열만 담은 별도 표본이다.
+ * VM A 는 사용량이 서서히 오르고, VM B 는 낮게 유지된다.
+ */
+export function mockKernelHeapSamples(vmId: string, now = Date.now()): MetricSample[] {
+  const busy = vmId === VM_IDS.autonomous;
+  let highWater = 0;
+  return Array.from({ length: HEAP_SAMPLES }, (_, index) => {
+    const used = busy ? 18 * 1024 + index * 512 : 9 * 1024 + (index % 5) * 256;
+    highWater = Math.max(highWater, used + 1024);
+    const observedAt = new Date(now - (HEAP_SAMPLES - 1 - index) * HEAP_INTERVAL_MS).toISOString();
+    return {
+      sample_id: `heap-${vmId}-${index}-${now}`,
+      vm_id: vmId,
+      boot_id: `mock-boot-${vmId}`,
+      source: 'zephyr_telemetry',
+      observed_at: observedAt,
+      received_at: observedAt,
+      window_ms: HEAP_INTERVAL_MS,
+      values: [
+        metric('memory.kernel_heap.used_bytes', used, 'bytes'),
+        metric('memory.kernel_heap.free_bytes', HEAP_ACCOUNTED - used, 'bytes'),
+        metric('memory.kernel_heap.high_water_bytes', highWater, 'bytes'),
+        metric('memory.kernel_heap.accounted_bytes', HEAP_ACCOUNTED, 'bytes'),
+      ],
+    };
+  });
+}
+
+/**
+ * 정상 상태(VM B)와 RX 처리가 밀려 Pool 점유가 증가한 관측 예시(VM A).
  * 화면은 이 값을 실제 장애 판정이나 확정 임계값으로 사용하지 않는다.
  */
 export function mockMemoryPoolSamples(vmId: string, now = Date.now()): MetricSample[] {
   const delayed = vmId === VM_IDS.autonomous;
   let rxPackets = 20_000;
   let txPackets = 15_000;
-  let rxDrop = delayed ? 12 : 2;
 
   return Array.from({ length: SAMPLES }, (_, index) => {
     const delayStep = Math.max(0, index - 14);
@@ -40,7 +72,6 @@ export function mockMemoryPoolSamples(vmId: string, now = Date.now()): MetricSam
     const txIncrement = delayed ? 96 + (index % 3) * 4 : 100 + (index % 5) * 5;
     rxPackets += rxIncrement;
     txPackets += txIncrement;
-    if (delayed && index === SAMPLES - 1) rxDrop += 6;
 
     const observedAt = new Date(now - (SAMPLES - 1 - index) * INTERVAL_MS).toISOString();
     const labels = { interface: 'netfront' };
@@ -57,10 +88,6 @@ export function mockMemoryPoolSamples(vmId: string, now = Date.now()): MetricSam
         ...poolValues('net_tx_data', txUsed),
         metric(MEMORY_POOL_METRICS.rxPackets, rxPackets, 'packets', labels),
         metric(MEMORY_POOL_METRICS.txPackets, txPackets, 'packets', labels),
-        metric(MEMORY_POOL_METRICS.rxDrop, rxDrop, 'count', labels),
-        metric(MEMORY_POOL_METRICS.txDrop, 0, 'count', labels),
-        metric(MEMORY_POOL_METRICS.poolBusy, 0, 'count', labels),
-        metric(MEMORY_POOL_METRICS.protocolErrors, 0, 'count', labels),
       ],
     };
   });
