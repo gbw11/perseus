@@ -103,10 +103,10 @@ def test_events_and_fault_published_with_detected_at():
     assert isinstance(sink.frames[-1][1], StopFrame)
 
 
-def test_resume_from_message_board_is_fed():
+def test_resume_from_interaction_is_fed():
     runner, client, clock, _ = make()
     runner.begin()
-    client.deliver(topics.app_events("message-board"), "drive.resume.requested", {"requested_by": "operator"},
+    client.deliver(topics.app_events("interaction"), "drive.resume.requested", {"requested_by": "operator"},
                    vm_id="33333333-3333-4333-8333-333333333333")
     runner.run_once(0)
     # SAFE_STOP 이라 무시된다 — 모드 이벤트는 시작·SAFE_STOP 두 개뿐
@@ -170,11 +170,11 @@ def test_resume_from_console_counts_down_then_auto():
                         {"from": "AUTO_READY", "to": "AUTO", "generation": gen + 1, "reason": "resume_requested"})]
 
 
-def test_resume_from_message_board_cancelled_when_autonomous_lost():
+def test_resume_from_interaction_cancelled_when_autonomous_lost():
     runner, client, clock, _ = auto_ready_runner()
     gen = runner.machine.generation
     client.published.clear()
-    client.deliver(topics.app_events("message-board"), "drive.resume.requested", {"requested_by": "operator"},
+    client.deliver(topics.app_events("interaction"), "drive.resume.requested", {"requested_by": "operator"},
                    vm_id="33333333-3333-4333-8333-333333333333")
     drive(runner, client, clock, 1.0, heartbeat=True)
     drive(runner, client, clock, 0.2, apps=("manual",))
@@ -190,7 +190,7 @@ def test_resume_from_message_board_cancelled_when_autonomous_lost():
 def test_resume_on_other_topic_is_not_fed():
     runner, client, clock, _ = auto_ready_runner()
     client.published.clear()
-    # 주행 앱 토픽에 실린 재개 요청은 받지 않는다 (요청 경로는 메시지 보드·콘솔 둘)
+    # 주행 앱 토픽에 실린 재개 요청은 받지 않는다 (요청 경로는 인터랙션 VM·콘솔 둘)
     client.deliver(topics.app_events("manual"), "drive.resume.requested", {"requested_by": "x"}, vm_id=MANUAL_VM)
     drive(runner, client, clock, 0.02, heartbeat=True)
     assert not [m for _, m, _ in client.published if m == "drive.resume.accepted"]

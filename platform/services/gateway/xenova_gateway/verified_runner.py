@@ -116,7 +116,7 @@ class VerifiedGatewayRunner(GatewayRunner):
             topic=f'{topics.PREFIX}/vms/{vm}/apps/+/events';self._app_filters.append(topic)
             self._client.subscribe(topic,self._enqueue,qos=1 if self.readiness_profile=='warm-drive-1' else 0)
         self._client.subscribe(CONSOLE_RESUME,self._enqueue,qos=1)
-        self._client.subscribe(topics.app_events('message-board'),self._enqueue,qos=1)
+        self._client.subscribe(topics.app_events('interaction'),self._enqueue,qos=1)
         self._client.subscribe(topics.vehicle_control(),self._enqueue,qos=1)
         if self.readiness_profile=='warm-drive-1':self._client.subscribe(topics.manual_input(),self._enqueue,qos=0)
 
@@ -165,7 +165,7 @@ class VerifiedGatewayRunner(GatewayRunner):
                 ref={k:envelope.get(k) for k in ('message_id','boot_id','agent_instance_id','seq')}
                 ref.update(vm_id=vm,app_id=app,execution_id=binding['execution_id'],received_monotonic=t)
                 self.machine.on_command(app,vm,message.payload,t,ref)
-        elif (message.type==RESUME_REQUESTED and message.topic in (CONSOLE_RESUME,topics.app_events('message-board'))
+        elif (message.type==RESUME_REQUESTED and message.topic in (CONSOLE_RESUME,topics.app_events('interaction'))
               and not self._output_broken and self._control_message_id is not None
               and envelope.get('causation_id')==self._control_message_id):
             self.machine.on_resume(t,message.payload.get('requested_by'),

@@ -309,7 +309,7 @@ def test_resume_during_countdown_is_ignored():
     accepted_t = h.now
     assert len(events(out, "drive.resume.accepted")) == 1
     h.run(1.5, heartbeat=(AUTONOMOUS,))
-    h.m.on_resume(h.now, "message-board")
+    h.m.on_resume(h.now, "interaction")
     out = h.run(PERIOD, heartbeat=(AUTONOMOUS,))
     assert not events(out, "drive.resume.accepted")
     assert [a for a in of(out, Measure) if a.event == "resume_ignored"]

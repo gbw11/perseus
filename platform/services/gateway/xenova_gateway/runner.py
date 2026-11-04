@@ -41,7 +41,7 @@ log = logging.getLogger("xenova_gateway")
 TICK_S = 0.005
 # 기본 시계. 단조 증가하고 해상도가 높다 (Linux CLOCK_MONOTONIC). Windows 의 time.monotonic 은 15.6 ms 단위라 쓰지 않는다
 QUEUE_MAX = 1024
-MESSAGE_BOARD = "message-board"
+INTERACTION = "interaction"
 # MQTT-13 운영자 콘솔 재개 (백엔드가 POST /api/v1/drive/resume 을 받아 발행, 계약 v1.2). xenova_mqtt.topics 에 아직 빌더가 없다
 CONSOLE_RESUME = f"{topics.PREFIX}/console/resume"
 RESUME_REQUESTED = "drive.resume.requested"
@@ -89,7 +89,7 @@ class GatewayRunner:
         # 주행 명령은 QoS 0 (계약 5.3). 재개 요청은 QoS 1. control 은 시작 시 이전 세대를 읽는 데만 쓴다
         for app in DRIVE_APPS:
             self._client.subscribe(topics.app_events(app), self._enqueue, qos=0)
-        self._client.subscribe(topics.app_events(MESSAGE_BOARD), self._enqueue, qos=1)
+        self._client.subscribe(topics.app_events(INTERACTION), self._enqueue, qos=1)
         self._client.subscribe(CONSOLE_RESUME, self._enqueue, qos=1)
         self._client.subscribe(topics.vehicle_control(), qos=1)
 
@@ -120,8 +120,8 @@ class GatewayRunner:
                         log.warning("버림 %s drive.command: invalid payload 누적=%d", app_id, self.rejected_commands)
             elif message.type == "app.heartbeat":
                 machine.on_heartbeat(app_id, vm_id, message.payload, t)
-        elif message.type == RESUME_REQUESTED and (app_id == MESSAGE_BOARD or message.topic == CONSOLE_RESUME):
-            # 메시지 보드(MQTT-06)와 운영자 콘솔(MQTT-13) 어느 쪽에서 와도 같다
+        elif message.type == RESUME_REQUESTED and (app_id == INTERACTION or message.topic == CONSOLE_RESUME):
+            # 인터랙션 VM(MQTT-06)와 운영자 콘솔(MQTT-13) 어느 쪽에서 와도 같다
             requested_by = message.payload.get("requested_by")
             requested_by = requested_by if isinstance(requested_by, str) else None
             log.info("재개 요청 수신 requested_by=%s", requested_by[:96] if requested_by else None)
