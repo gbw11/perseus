@@ -110,11 +110,49 @@ pipeline {
                 }
             }
         }
+
+        stage('Vehicle Python Test') {
+            // Jenkinsfile.vehicle 과 같은 시험. 시뮬레이터·인지·수동 앱 (OpenCV 불필요, 브로커 시험은 건너뜀)
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    script {
+                        for (app in ['simulator', 'perception', 'manual']) {
+                            dir("platform/apps/${app}") {
+                                sh 'mkdir -p target'
+                                sh 'python3 -m pip install -q --user -e .[test] && python3 -m pytest -q --junitxml=target/pytest.xml'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Vehicle C Host Test') {
+            // Jenkinsfile.vehicle 과 같은 시험. 공통 MQTT C 라이브러리와 Zephyr 앱 로직 (cmake·ctest, ASan·UBSan)
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    script {
+                        def suites = [
+                            'mqtt-c'    : 'platform/apps/common/xenova-mqtt-c',
+                            'manual'    : 'platform/apps/manual/zephyr/tests',
+                            'autonomous': 'platform/apps/autonomous/zephyr/tests',
+                        ]
+                        suites.each { name, source ->
+                            sh """
+                                cmake -S ${source} -B target/c-host/${name} -DCMAKE_EXE_LINKER_FLAGS=-no-pie
+                                cmake --build target/c-host/${name} -j 2
+                                ctest --test-dir target/c-host/${name} --output-on-failure --output-junit ctest.xml
+                            """
+                        }
+                    }
+                }
+            }
+        }
     }
 
     post {
         always {
-            junit testResults: 'backend/target/surefire-reports/*.xml,frontend/target/vitest.xml,platform/services/dom0-manager/target/pytest.xml,platform/services/vm-agent/mqtt-client/target/pytest.xml,platform/services/vm-agent/agent/target/pytest.xml', allowEmptyResults: true
+            junit testResults: 'backend/target/surefire-reports/*.xml,frontend/target/vitest.xml,platform/services/dom0-manager/target/pytest.xml,platform/services/vm-agent/mqtt-client/target/pytest.xml,platform/services/vm-agent/agent/target/pytest.xml,platform/apps/simulator/target/pytest.xml,platform/apps/perception/target/pytest.xml,platform/apps/manual/target/pytest.xml,target/c-host/*/ctest.xml', allowEmptyResults: true
             sh '''
                 if command -v docker >/dev/null 2>&1; then
                     docker image rm \
