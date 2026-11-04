@@ -1,9 +1,10 @@
-# xenova-agent — VM 에이전트 (heartbeat·inventory·metrics·자체 상태)
+# xenova-agent — VM 에이전트 (heartbeat·inventory·metrics·자체 상태·데모 명령)
 
 Linux 게스트 안에서 돌며 [MQTT 계약 v1](../../../../docs/contracts/mqtt-contract-v1.md)의 heartbeat(MQTT-01)·inventory(MQTT-02)·metrics(MQTT-03)를 dom0 Mosquitto 로 보냅니다.
 봉투·토픽·QoS·자동 재연결은 [mqtt-client](../mqtt-client/README.md)의 `xenova_mqtt`가 맡고, 이 패키지는 수집과 주기·수명을 정합니다.
 heartbeat 는 메인 스레드, inventory·metrics 는 별도 스레드(Reporter)에서 돌아 수집이 느리거나 실패해도 heartbeat(복구 Worker 의 생존 판정 근거)가 밀리지 않습니다.
 세 번째 스레드는 에이전트 자신의 상태(Reporter 가 돌고 있는지, 실패 누계)를 [v2 Telemetry](#자체-상태-v2-telemetry) 형식으로 보냅니다.
+네 번째 스레드는 시연용 [데모 명령](#데모-명령-mqtt-0405)(MQTT-04)을 받아 처리하고 결과(MQTT-05)를 보냅니다. 기본은 꺼져 있습니다.
 
 ## heartbeat (MQTT-01)
 
@@ -63,6 +64,22 @@ v1 heartbeat 는 에이전트 프로세스가 살아 있다는 뜻일 뿐이고,
 | 끊김·크기 | 끊긴 동안 보내지 않고 쌓지 않음. `seq` 는 실제로 보낸(또는 제출에 실패한) 메시지만 씀. 봉투 포함 4096 바이트를 넘으면 보내지 않고 `payload_oversize_total` 로 셈 |
 | 받는 쪽 | 계약 6장 lease: heartbeat 6초 안에 못 받으면 STALE. Recovery Worker 는 v2 를 읽지 않으므로 VM 재시작 근거가 아님. 브로커 ACL 의 v2 쓰기 허용과 백엔드 구독은 별도 작업이며, ACL 이 막으면 조용히 버려질 뿐 v1 에는 영향이 없음 |
 
+## 데모 명령 (MQTT-04·05)
+
+격리·자동 복구 시연용입니다. 필수 제품 기능이 아니므로 `XENOVA_AGENT_DEMO_COMMANDS=1` 인 에이전트만 실행하고, 꺼져 있으면 모든 명령을 `DEMO_DISABLED` 로 거절합니다. 규칙은 [MQTT 계약 3.2절](../../../../docs/contracts/mqtt-contract-v1.md#32-데모-명령-mqtt-0405)이 기준입니다.
+
+| 항목 | 값 |
+| --- | --- |
+| 구독·발행 | 자기 VM 의 `xenova/v1/vms/{vm_id}/command`(QoS 1)만 받고, 결과는 `.../command-result`(QoS 1) |
+| 처리 위치 | 수신 스레드는 큐에 넣기만 하고 검사·실행은 명령 스레드가 함. 부하는 별도 프로세스라 heartbeat·metrics 가 밀리지 않음 |
+| 검사 | `type` = `agent.command`(다른 type 은 버림), `operation_id` 는 문자열, `expected_boot_id` = 이 부팅의 boot_id, `sent_at`·`expires_at`(유효 기간 300초 이하, 보낸 시각이 에이전트 시계보다 30초 넘게 앞서면 `CLOCK_UNTRUSTED`), retained 명령 거절, 파라미터는 정수만(bool·실수 거절) |
+| `stress` | `cpu_workers` 0~4(워커당 프로세스 하나, nice 19), `memory_mib` 0~512(페이지마다 써서 실제 RSS, `oom_score_adj` 1000, MemAvailable−64MiB 이하만), `duration_s` 1~120. 한 번에 하나(`BUSY`). `RUNNING` → 시간이 지나면 `SUCCEEDED`, 부하 프로세스가 일찍 죽으면 `FAILED`. 시간이 지나면 남은 프로세스를 반드시 끝냄 |
+| `agent_exit` | 도는 stress 를 끝내고 `ACCEPTED` 를 보낸 뒤, 그 발행의 PUBACK 을 확인해야만 종료 코드 3 으로 끝남. 유닛의 `RestartPreventExitStatus=3` 이라 다시 뜨지 않고 heartbeat 가 끊긴 채로 남아 Recovery Worker 의 heartbeat 끊김 판정 대상이 됨. 종결 결과는 `ACCEPTED` 하나라 연결이 없거나 PUBACK 이 늦어도 실패 결과를 따로 내지 않고 기다리며(연결되면 제출), 그동안 새 명령은 `AGENT_EXITING`. 진행 단계(`exit_pending` → `exit_acked`)를 기록에 남겨, PUBACK 전에 에이전트가 다시 시작하면 같은 `ACCEPTED` 를 다시 제출하고 종료하며, `exit_acked` 를 기록하지 못하면 종료하지 않고 다시 시도하고, `exit_acked` 뒤 수동으로 다시 시작하면 종료하지 않음 |
+| 중복 | 같은 `command_id`·같은 요청(action·parameters·expected_boot_id·operation_id)은 다시 실행하지 않고 마지막 결과를 다시 보냄. 요청이 다르면 `IDEMPOTENCY_CONFLICT`. 실행 전에 `/run/xenova-agent/commands.json`(RuntimeDirectory, 부팅마다 비워짐)에 남겨 같은 부팅 안의 에이전트 재시작 뒤에도 반복하지 않음. 다른 부팅의 명령은 `BOOT_MISMATCH` |
+| 기록 실패 | 실행 전 기록을 남기지 못하면 실행하지 않고 `STATE_UNAVAILABLE`. 기록 파일을 읽지 못하거나 손상됐으면 덮어쓰지 않고 모든 명령을 `STATE_UNAVAILABLE` 로 거절(에이전트 로그 ERROR). 항목마다 지문(64자리 hex)·결과 필드 전체·상태별 필드 규칙·command_id 중복·종료 대기 1개 이하를 검사. 고치려면 파일을 확인하고 지운 뒤 에이전트를 다시 시작 |
+| 정지 | SIGTERM 으로 멈추면 도는 stress 를 끝내고 `FAILED`(`AGENT_STOPPING`)를 보낸 뒤 종료. 도는 중에 에이전트가 죽어 다시 시작됐다면 그 명령의 기록을 `FAILED`(`AGENT_STOPPING`)로 바꿔 둠 |
+| inventory | 켜져 있을 때만 `capabilities.commands = ["stress", "agent_exit"]` |
+
 ## 설정
 
 | 환경변수 | 기본값 | 설명 |
@@ -73,6 +90,7 @@ v1 heartbeat 는 에이전트 프로세스가 살아 있다는 뜻일 뿐이고,
 | `XENOVA_AGENT_METRICS_INTERVAL` | `2` | metrics 수집·발행 주기(초) |
 | `XENOVA_AGENT_TOP_PROCESSES` | `10` | `processes[]` 개수(0~50). 0 이면 빈 목록이고 /proc 을 훑지 않는다 |
 | `XENOVA_AGENT_TELEMETRY` | `1` | 자체 상태의 v2 Telemetry 발행(1/0, true/false, yes/no, on/off). v1 토픽에는 영향이 없다 |
+| `XENOVA_AGENT_DEMO_COMMANDS` | `0` | MQTT-04 데모 명령(stress·agent_exit) 실행(1/0 등). 시연용 이미지에서만 켬 |
 | `XENOVA_AGENT_LOG_LEVEL` | `INFO` | DEBUG/INFO/WARNING/ERROR/CRITICAL |
 
 heartbeat 주기는 계약값 5초로 고정이며 환경변수로 바꿀 수 없습니다(`XENOVA_AGENT_HEARTBEAT_INTERVAL`이 설정돼 있으면 시작을 거부). 시험용 짧은 주기는 `AgentSettings(heartbeat_interval_s=…)` 생성자로만 줍니다. vm_id 는 소문자·하이픈 표준형으로 정규화해 토픽과 봉투에 씁니다(Spring·registry 문자열과 글자까지 같아야 함). UUID 가 아니거나 nil UUID(Domain-0)이거나, 포트·로그 레벨이 범위 밖이면 시작하지 않고 종료 코드 2 로 끝납니다.
