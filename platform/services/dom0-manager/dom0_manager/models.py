@@ -57,6 +57,34 @@ class CreateVmRequest(BaseModel):
         return value
 
 
+class UpdateResourcesRequest(BaseModel):
+    """정지한 Linux VM 의 자원 변경(S15P31E110-368). 다음 시작부터 적용된다. true·2.0·"2" 를 정수로 바꾸지 않는다."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    vcpus: int = Field(ge=1, le=4)
+    memory_mib: int = Field(ge=128, le=1024, description="플랫폼 하한 128, API 상한 1024. 템플릿별 하한은 Spring 이 검사한다")
+
+
+class VmResources(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    vcpus: int = Field(ge=1)
+    memory_mib: int = Field(ge=1)
+
+
+class ResourceUpdate(BaseModel):
+    """자원 변경 결과. 같은 키 재전송도 원 결과(같은 operation_id·before·after)다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vm_id: UUID
+    operation_id: UUID | None = Field(description="하위 원 자산 작업. 작업 기록이 없는 드라이버(mock)면 null")
+    before: VmResources
+    after: VmResources
+    applies_on_next_start: bool = Field(description="항상 true. 실행 중인 게스트를 바꾸지 않고 다음 시작부터 적용된다")
+
+
 class ResourceName(str, Enum):
     vcpus = "vcpus"
     memory_mib = "memory_mib"

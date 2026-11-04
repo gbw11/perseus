@@ -21,6 +21,11 @@
   옛·혼합 설치본에서는 직렬화 대기(busy timeout 503) 대신 하위 잠금 대기로 바뀔 뿐이라 기본은 끈다
 - 요청 예산(budget.py)이 있으면 직렬화 대기를 남은 예산으로 줄이고, 하위에는 budget_ms(get/list/control-operation 은 timeout_ms 도)로
   남은 값만 준다. 남은 값이 없으면 제출하지 않는다
+
+자원 변경(S15P31E110-368, 계약 4.12): 정지한 Linux 의 등록 설정을 바꾸는 자산 작업 update-resources 다. 하위는 기대 generation·설정
+해시까지 같아야 재전달로 보는데 변경이 반영되면 설정 해시가 바뀐다. 그래서 같은 키의 원 작업을 먼저 찾아 있으면 원 요청을 그대로
+다시 보낸다. 키는 자산 원장(operation)과 제어 원장(control-operation)에 따로 있어, 다른 동작의 키를 놓치지 않게 둘 다 본다
+(하위가 두 원장을 함께 보장하기 전까지의 임시 방안이며 동시 제출 경합은 막지 못한다). update-resources 는 budget_ms 를 받지 않는다
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -52,7 +58,7 @@ from ..errors import (
     VMExists,
     VMNotFound,
 )
-from ..models import ControlOperation, ControlStatus, CpuLayout, VmState
+from ..models import ControlOperation, ControlStatus, CpuLayout, ResourceUpdate, VmResources, VmState
 from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner, StatsSample
 from .xentop import Xentop, collect_stats
 from .xl import Xl
@@ -543,6 +549,28 @@ def view_to_domain(view: dict[str, Any]) -> Domain | None:
 
 _LOOKUP_TIMEOUT_MS = 5_000  # 원 작업 조회의 기본 한도. HTTP 조회 계약 5초와 같다
 _CPU_LAYOUT_TIMEOUT_MS = 5_000  # CPU 배치 조회의 기본 한도. Spring 조회 한도(6초) 안에서 응답한다
+_RESOURCE_ACTION = "update-resources"
+_RESOURCE_FIELDS = frozenset({"vm_id", "vcpus", "memory_mib", "expected_lifecycle_generation", "expected_configuration_sha256"})
+
+
+def _generation(value: Any) -> bool:
+    """lifecycle generation: bool 이 아닌 0 이상 정수."""
+    return type(value) is int and value >= 0
+
+
+def _sha256(value: Any) -> bool:
+    """플랫폼 설정 해시: 소문자 16진수 64자리(xenova_resources.validate 와 같은 규칙)."""
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _resources(value: Any) -> VmResources | None:
+    """플랫폼 before·after. 정확히 두 정수(bool 아님)이고 플랫폼 Linux 범위(1..4 vCPU, 128..8192 MiB)여야 한다."""
+    if not isinstance(value, dict) or set(value) != {"vcpus", "memory_mib"}:
+        return None
+    vcpus, memory_mib = value["vcpus"], value["memory_mib"]
+    if type(vcpus) is not int or type(memory_mib) is not int or not 1 <= vcpus <= 4 or not 128 <= memory_mib <= 8192:
+        return None
+    return VmResources(vcpus=vcpus, memory_mib=memory_mib)
 
 
 class PlatformDriver(Driver):
@@ -831,14 +859,15 @@ class PlatformProvisioner(Provisioner):
 
     @staticmethod
     def _spec_mismatch(existing: dict[str, Any], template_id: str, template_version: str, vcpus: int, memory_mib: int) -> list[str]:
-        """계약 4.2 Spring 불변조건: 같은 vm_id 에는 같은 생성 명세. 기록된 값과 다른 항목을 돌려준다."""
+        """계약 4.2 Spring 불변조건: 같은 vm_id 에는 같은 생성 명세. 기록된 값과 다른 항목을 돌려준다.
+        자원은 최초 명세가 아니라 지금 등록 설정과 비교한다. 자원 변경(4.12) 뒤 Spring 은 바뀐 값으로 다시 시작한다."""
         initial = existing.get("initial_spec") or {}
         configuration = existing.get("configuration") or {}
         recorded = {
             "template_id": initial.get("template_id"),
             "template_version": initial.get("template_version"),
-            "vcpus": initial.get("vcpus", configuration.get("vcpus")),
-            "memory_mib": initial.get("memory_mib", configuration.get("memory_mib")),
+            "vcpus": configuration.get("vcpus", initial.get("vcpus")),
+            "memory_mib": configuration.get("memory_mib", initial.get("memory_mib")),
         }
         requested = {"template_id": template_id, "template_version": template_version, "vcpus": vcpus, "memory_mib": memory_mib}
         # 공장 기본 VM 처럼 initial_spec 이 없는 옛 등록은 템플릿을 비교할 수 없어 자원만 비교한다
@@ -885,3 +914,126 @@ class PlatformProvisioner(Provisioner):
         if not envelope.get("ok") and (envelope.get("error") or {}).get("code") == "VM_NOT_FOUND":
             raise VMNotFound(f"instance {vm_id} not registered")
         raise_for_envelope(envelope, context=f"retire {vm_id}")
+
+    # ---- 자원 변경 (S15P31E110-368) ----
+
+    def update_resources(self, vm_id: UUID, *, vcpus: int, memory_mib: int, key: str) -> ResourceUpdate:
+        """원 작업이 있으면 원 요청을 그대로 다시 보내고, 없으면 지금 등록의 generation·설정 해시로 신규 제출한다."""
+        context = f"update-resources {vm_id}"
+        spec = self._original_resource_request(vm_id, key, vcpus, memory_mib)
+        if spec is None:
+            spec = self._new_resource_request(vm_id, vcpus, memory_mib)
+            envelope = call_with_budget(self.manager, _RESOURCE_ACTION, spec, execute=True, idempotency_key=key)
+            if (envelope.get("error") or {}).get("code") != "TARGET_CHANGED":
+                return self._resource_result(envelope, vm_id, key, spec, context)
+            # 원 작업을 기록한 뒤 거절됐을 수 있다. 같은 키의 원 작업을 다시 찾기 전에는 새 키를 권하지 않는다
+            try:
+                original = self._original_resource_request(vm_id, key, vcpus, memory_mib)
+            except (VMExists, NotSupportedByPlatform):
+                raise  # 그 사이 같은 키의 다른 작업이 보였거나 조회를 모른다: 409·501 그대로
+            except Dom0ManagerError as exc:
+                raise PlatformUnavailable(
+                    f"{context}: refused as TARGET_CHANGED and the original operation could not be looked up; resend with the same key",
+                    platform_code="TARGET_CHANGED") from exc
+            if original is None:
+                raise_for_envelope(envelope, context=f"{context}: no operation was recorded for this key; read the VM again before a new request")
+            spec = original
+        envelope = call_with_budget(self.manager, _RESOURCE_ACTION, spec, execute=True, idempotency_key=key)
+        return self._resource_result(envelope, vm_id, key, spec, context)
+
+    def _original_resource_request(self, vm_id: UUID, key: str, vcpus: int, memory_mib: int) -> dict[str, Any] | None:
+        """같은 키의 원 자산 작업 요청. 없으면 None. 다른 VM·값·동작(제어 원장 포함)의 키면 409, 조회를 모르는 옛 Manager 면 501."""
+        lookup = {"idempotency_key": key, "timeout_ms": _LOOKUP_TIMEOUT_MS}
+        control = call_with_budget(self.manager, "control-operation", lookup)
+        if control.get("ok"):
+            data = control.get("data") if isinstance(control.get("data"), dict) else {}
+            record = data.get("operation") if isinstance(data.get("operation"), dict) else {}
+            operation_id = _uuid(record.get("operation_id"))
+            if (operation_id is None or _uuid(control.get("operation_id")) != operation_id
+                    or record.get("idempotency_key") != key or _uuid(record.get("vm_id")) is None):
+                # 빈 응답·다른 키를 키 충돌로 꾸미지 않는다
+                raise PlatformUnavailable(f"control-operation record for key {key!r} is malformed; inspect the original journal")
+            raise VMExists(f"Idempotency-Key {key!r} belongs to a control operation (stop/reboot) of vm {record['vm_id']}; nothing was changed")
+        self._raise_lookup_error(control, "control-operation")
+        envelope = call_with_budget(self.manager, "operation", lookup)
+        if not envelope.get("ok"):
+            self._raise_lookup_error(envelope, "operation")
+            return None
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+        op = data.get("operation") if isinstance(data.get("operation"), dict) else {}
+        request = op.get("request") if isinstance(op.get("request"), dict) else {}
+        operation_id = _uuid(op.get("operation_id"))
+        problems = [name for name, bad in (
+            ("operation_id", operation_id is None or _uuid(envelope.get("operation_id")) != operation_id),
+            ("idempotency_key", op.get("idempotency_key") != key),
+            ("action", not isinstance(op.get("action"), str)),
+            ("vm_id", _uuid(op.get("vm_id")) is None),
+        ) if bad]
+        if problems:
+            raise PlatformUnavailable(f"asset operation record for key {key!r} is malformed ({', '.join(problems)}); inspect the original journal")
+        if op["action"] != _RESOURCE_ACTION or _uuid(op["vm_id"]) != vm_id:
+            raise VMExists(f"Idempotency-Key {key!r} belongs to {op['action']} of vm {op['vm_id']}; nothing was changed")
+        if (set(request) != _RESOURCE_FIELDS or _uuid(request.get("vm_id")) != vm_id
+                or type(request["vcpus"]) is not int or type(request["memory_mib"]) is not int
+                or not _generation(request["expected_lifecycle_generation"]) or not _sha256(request["expected_configuration_sha256"])):
+            raise PlatformUnavailable(f"update-resources record for key {key!r} has a malformed request; inspect the original journal")
+        if (request["vcpus"], request["memory_mib"]) != (vcpus, memory_mib):
+            raise VMExists(f"Idempotency-Key {key!r} already changed vm {vm_id} to other values; nothing was changed")
+        return request
+
+    @staticmethod
+    def _raise_lookup_error(envelope: dict[str, Any], action: str) -> None:
+        """원 작업 조회 실패를 계약 오류로 낸다. 검색 부재(VM_NOT_FOUND)만 통과한다."""
+        error = envelope.get("error") or {}
+        code = error.get("code")
+        if code == "VM_NOT_FOUND":
+            return
+        if code == "INVALID_SPEC":  # 키는 API 가 먼저 검사한다. 남는 경우는 키 조회를 모르는 옛 Manager 다
+            raise NotSupportedByPlatform(f"platform manager does not support {action} lookup by key; nothing was changed",
+                                         detail=f"{code}: {error.get('message')}", platform_code=code)
+        raise_for_envelope(envelope, context=f"{action} lookup")
+
+    def _new_resource_request(self, vm_id: UUID, vcpus: int, memory_mib: int) -> dict[str, Any]:
+        view = self._registration(vm_id)
+        if view is None:
+            raise VMNotFound(f"instance {vm_id} not registered")
+        if view.get("guest_kind") != "linux":
+            raise InvalidArgument(f"vm {vm_id} is {view.get('guest_kind')}; only Linux resources can be changed (Zephyr is fixed by its firmware profile)")
+        if view.get("domid") is not None:
+            raise InvalidState(f"vm {vm_id} is running; stop it before changing resources")
+        generation, digest = view.get("generation"), view.get("configuration_sha256")
+        if not _generation(generation) or not _sha256(digest):
+            raise PlatformUnavailable(f"platform view of vm {vm_id} lacks generation/configuration_sha256; inspect the platform version")
+        return {"vm_id": str(vm_id), "vcpus": vcpus, "memory_mib": memory_mib,
+                "expected_lifecycle_generation": generation, "expected_configuration_sha256": digest}
+
+    @staticmethod
+    def _resource_result(envelope: dict[str, Any], vm_id: UUID, key: str, spec: dict[str, Any], context: str) -> ResourceUpdate:
+        if not envelope.get("ok"):
+            error = envelope.get("error") or {}
+            details = error.get("details") if isinstance(error.get("details"), dict) else {}
+            if error.get("code") == "DEADLINE_EXCEEDED" and details.get("submitted") is not False:
+                # 504 는 제출 전 만료만이다. 제출 뒤의 시한 초과는 바뀌었을 수 있어 같은 키로 다시 확인한다
+                raise PlatformUnavailable(f"{context}: deadline exceeded after submission; resend with the same key",
+                                          platform_code="DEADLINE_EXCEEDED", retryable=False)
+            raise_for_envelope(envelope, context=context)
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+        op = data.get("operation") if isinstance(data.get("operation"), dict) else {}
+        result = data.get("original_result") if isinstance(data.get("original_result"), dict) else {}
+        operation_id = _uuid(op.get("operation_id"))
+        before, after = _resources(result.get("before")), _resources(result.get("after"))
+        problems = [name for name, bad in (
+            ("operation_id", operation_id is None or _uuid(envelope.get("operation_id")) != operation_id),
+            ("operation.idempotency_key", op.get("idempotency_key") != key),
+            ("operation.action", op.get("action") != _RESOURCE_ACTION),
+            ("operation.vm_id", _uuid(op.get("vm_id")) != vm_id),
+            ("operation.request", op.get("request") != spec),
+            ("operation.status", op.get("status") != "SUCCEEDED"),
+            ("original_result.vm_id", _uuid(result.get("vm_id")) != vm_id),
+            ("original_result.before", before is None),
+            ("original_result.after", after is None or (after.vcpus, after.memory_mib) != (spec["vcpus"], spec["memory_mib"])),
+            ("original_result.starts_guest", result.get("starts_guest") is not False),
+        ) if bad]
+        if problems:
+            raise PlatformUnavailable(f"{context}: platform returned a malformed result ({', '.join(problems)}); inspect the original journal")
+        return ResourceUpdate(vm_id=vm_id, operation_id=operation_id, before=before, after=after, applies_on_next_start=True)

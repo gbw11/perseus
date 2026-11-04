@@ -54,7 +54,7 @@ def build_driver(settings: Settings) -> Driver:
 
 def build_provisioner(settings: Settings, driver: Driver | None = None) -> Provisioner:
     if settings.driver == "mock":
-        return MockProvisioner()
+        return MockProvisioner(running=driver.has_domain if isinstance(driver, MockDriver) else None)
     if settings.driver == "xen":
         return UnavailableProvisioner(settings.instance_root)
     from .platform import PlatformDriver, PlatformProvisioner, load_manager
