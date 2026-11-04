@@ -506,7 +506,7 @@ export const handlers = [
       observed_at: new Date().toISOString(),
       stale: false,
       items: [
-        { pid: 412, name: 'message-board', cpu_percent: 4.2, rss_bytes: 48_234_496 },
+        { pid: 412, name: 'interaction', cpu_percent: 4.2, rss_bytes: 48_234_496 },
         { pid: 388, name: 'xenova-agent', cpu_percent: 1.1, rss_bytes: 21_495_808 },
         { pid: 1, name: 'systemd', cpu_percent: 0.2, rss_bytes: 11_010_048 },
       ],

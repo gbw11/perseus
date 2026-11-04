@@ -75,7 +75,7 @@ export function DemoPage() {
 const KILL_EFFECT: Record<AppId, string> = {
   autonomous: '명령이 끊겨 게이트웨이가 수동주행으로 넘긴다 (MANUAL, gen +1). 복구되면 AUTO_READY.',
   manual: '수동주행이 제어 중이면 SAFE_STOP, 아니면 예비만 사라진다.',
-  'message-board': '주행과 무관 — 차는 그대로 달린다 (격리).',
+  interaction: '주행과 무관 — 차는 그대로 달린다 (격리).',
 };
 
 function IsolationCard({ app }: { app: AppId }) {

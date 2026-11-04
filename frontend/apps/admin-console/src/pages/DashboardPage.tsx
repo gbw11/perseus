@@ -107,7 +107,7 @@ export function LegacyDashboardPage() {
       <div className={styles.cols3}>
         {ROLE_ORDER.map((app) =>
           // 시뮬레이터 구성이면 세 번째 칸이 시뮬레이터로 바뀐다 (위치가 1초 안에 오면, 화면 배치 계약 v1.1 §5.6)
-          app === 'message-board' && sim.available ? (
+          app === 'interaction' && sim.available ? (
             <SimCard key="simulator" sim={sim} drive={drive} board={vmOf(app, vms.data?.items, drive)} />
           ) : (
             <AppCard key={app} app={app} vm={vmOf(app, vms.data?.items, drive)} drive={drive} sim={sim} />
@@ -362,8 +362,8 @@ const CAR_COLOR = {
  */
 function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null; board: Vm | undefined }) {
   const active = drive?.control?.active_app ?? null;
-  const boardState = drive?.apps['message-board'];
-  const boardHealth = appHealth(ROLES['message-board'], board, boardState);
+  const boardState = drive?.apps.interaction;
+  const boardHealth = appHealth(ROLES.interaction, board, boardState);
   const pose = sim.pose;
   const flags = drive?.vehicle?.flags;
   const toast = useToast();

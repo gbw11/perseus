@@ -49,18 +49,18 @@ const DOMAINS: { id: Domain; title: string; sub: string; color: string; dedicate
   },
   { id: 'manual', title: ROLES.manual.title, sub: 'Zephyr', color: ROLES.manual.color, dedicated: true },
   {
-    id: 'message-board',
-    title: ROLES['message-board'].title,
+    id: 'interaction',
+    title: ROLES.interaction.title,
     sub: 'Debian 13',
-    color: ROLES['message-board'].color,
+    color: ROLES.interaction.color,
     dedicated: false,
   },
 ];
 const CORES = [0, 1, 2, 3];
 
 /** RC카 시나리오 §2: 자율·수동은 전용 1코어씩, 네비게이션은 남은 코어 */
-const PINS: Record<Domain, number[]> = { dom0: [0], autonomous: [1], manual: [2], 'message-board': [3] };
-const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512, 'message-board': 256 };
+const PINS: Record<Domain, number[]> = { dom0: [0], autonomous: [1], manual: [2], interaction: [3] };
+const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512, interaction: 256 };
 const DOM0_MEMORY_MIB = 1024;
 
 export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all' }) {
