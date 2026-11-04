@@ -115,4 +115,8 @@ public class MetricSample {
     public MetricSampleData.CpuWindow getCpuWindow() {
         return data == null ? null : data.cpuWindow();
     }
+
+    public MetricSampleData.TelemetryObservation getTelemetry() {
+        return data == null ? null : data.telemetry();
+    }
 }
