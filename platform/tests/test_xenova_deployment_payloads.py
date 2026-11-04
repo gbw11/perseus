@@ -181,12 +181,14 @@ class DeploymentPayloadTest(unittest.TestCase):
         python=self.root/"usr/bin/python3";python.write_text("#!/bin/sh\nexit 0\n");python.chmod(0o755)
         worker=self.root/"usr/lib/systemd/system/xenova-recovery-worker.service"
         worker.write_bytes((payloads.API/"deploy"/worker.name).read_bytes())
+        config=unit.with_name("xenova-recovery-config.service")
+        config.write_bytes((payloads.API/"deploy"/config.name).read_bytes())
         self.assertNotIn("network-online.target",worker.read_text())
         self.assertIn("network.target",worker.read_text())
         self.assertIn("ReadWritePaths=/srv/xenova /run/xenova /var/lib/xen",worker.read_text())
         for source in (payloads.RECIPES/"xenova-platform/files").glob("*.service"):
             (self.root/"usr/lib/systemd/system"/source.name).write_bytes(source.read_bytes())
-        normal=verify(self.root,unit.name,worker.name)
+        normal=verify(self.root,unit.name,worker.name,config.name)
         self.assertEqual(normal.returncode,0,normal.stdout+normal.stderr)
         for text in ("Found ordering cycle","deleted to break ordering cycle","Ordering cycle found, skipping"):
             self.assertNotIn(text,normal.stdout+normal.stderr)

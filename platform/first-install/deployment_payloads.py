@@ -24,6 +24,7 @@ def source_files(site_packages):
     result.update({
         "usr/lib/systemd/system/xenova-dom0-manager.service": RECIPES/"xenova-dom0-manager/files/xenova-dom0-manager.service",
         "usr/lib/systemd/system/xenova-recovery-worker.service": API/"deploy/xenova-recovery-worker.service",
+        "usr/lib/systemd/system/xenova-recovery-config.service": API/"deploy/xenova-recovery-config.service",
         "etc/xenova/dom0-manager.env": RECIPES/"xenova-dom0-manager/files/dom0-manager.env",
         "usr/lib/systemd/system/" + COLLECTOR: RUNTIME_LOGS/COLLECTOR,
         "usr/lib/systemd/system/xenova-dom0-manager.service.d/30-runtime-logs.conf": RUNTIME_LOGS/"runtime-logs-manager.conf",
