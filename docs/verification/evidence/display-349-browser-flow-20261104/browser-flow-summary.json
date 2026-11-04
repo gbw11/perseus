@@ -1,0 +1,26 @@
+{
+  "environment": "PC IAB Chromium browser / WSL Python 3.14 / built vm-screens / synthetic upstream; no board, USB or physical phone",
+  "checks": {
+    "expired_code_rejected": true,
+    "native_form_origin_verified": true,
+    "paired_product_ui": true,
+    "session_expiry_hides_previous_live_state": true,
+    "used_code_rejected": true,
+    "rotated_code_reconnects": true,
+    "feed_loss_distinct_from_auth_expiry": true,
+    "feed_recovery_without_repair": true,
+    "unauthorized_polls_not_forwarded": true,
+    "no_control_requests": true
+  },
+  "product_ttls_s": {
+    "code": 120,
+    "session": 28800
+  },
+  "expiry_method": "Advance injected server monotonic test clock; production TTLs unchanged; browser cookie Max-Age was not accelerated",
+  "loopback_ports_closed": {
+    "18754": true,
+    "18756": true
+  },
+  "browser_console_errors_observed": 0,
+  "scope_limit": "Not physical S24, USB discovery/device binding, root launcher, image build or real Gateway/VM telemetry acceptance"
+}
