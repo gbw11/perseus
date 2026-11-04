@@ -8,6 +8,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.List;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 // Latest top-process list sent with the metrics, served later by REST-13. One row per VM.
 @Entity
@@ -32,6 +34,10 @@ public class ProcessSnapshot {
     @Column(name = "processes", columnDefinition = "longtext")
     private List<ProcessInfo> processes;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "process_collection", columnDefinition = "json")
+    private ProcessCollection processCollection;
+
     protected ProcessSnapshot() {
     }
 
@@ -39,9 +45,11 @@ public class ProcessSnapshot {
         this.vmId = vmId;
     }
 
-    public void update(String bootId, List<ProcessInfo> processes, Instant observedAt, Instant receivedAt) {
+    public void update(String bootId, List<ProcessInfo> processes, ProcessCollection processCollection,
+            Instant observedAt, Instant receivedAt) {
         this.bootId = bootId;
         this.processes = processes;
+        this.processCollection = processCollection;
         this.observedAt = observedAt;
         this.receivedAt = receivedAt;
     }
@@ -64,5 +72,9 @@ public class ProcessSnapshot {
 
     public List<ProcessInfo> getProcesses() {
         return processes == null ? List.of() : processes;
+    }
+
+    public ProcessCollection getProcessCollection() {
+        return processCollection;
     }
 }

@@ -1,11 +1,17 @@
 package com.xenova.backend.agent.application;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.agent.domain.InventoryReport;
 import com.xenova.backend.agent.domain.MetricSample;
+import com.xenova.backend.agent.domain.MetricSampleData;
 import com.xenova.backend.agent.domain.MetricValue;
 import com.xenova.backend.agent.domain.NetworkInterface;
+import com.xenova.backend.agent.domain.ProcessCollection;
+import com.xenova.backend.template.domain.GuestKind;
+import com.xenova.backend.vm.domain.VmRecord;
+import com.xenova.backend.vm.domain.VmRecordRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -26,16 +32,21 @@ public class AgentMessageHandler {
     static final String SUPPORTED_SCHEMA_VERSION = "1.0";
     private static final Pattern TOPIC = Pattern.compile("^xenova/v1/vms/([^/]+)/(heartbeat|inventory|metrics)$");
     private static final Set<String> METRIC_UNITS = Set.of("percent", "bytes");
+    private static final Set<String> PROCESS_STATUSES = Set.of("first_sample", "ok", "partial", "read_failed", "disabled");
+    private static final Pattern PROCESS_ERROR = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{0,63}(\\([A-Z][A-Z0-9_]{0,31}\\))?");
     private static final String GUEST_AGENT_SOURCE = "guest_agent";
 
     private static final Logger log = LoggerFactory.getLogger(AgentMessageHandler.class);
 
     private final ObjectMapper objectMapper;
     private final AgentDataService agentDataService;
+    private final VmRecordRepository vmRecords;
 
-    public AgentMessageHandler(ObjectMapper objectMapper, AgentDataService agentDataService) {
+    public AgentMessageHandler(ObjectMapper objectMapper, AgentDataService agentDataService,
+            VmRecordRepository vmRecords) {
         this.objectMapper = objectMapper;
         this.agentDataService = agentDataService;
+        this.vmRecords = vmRecords;
     }
 
     public Result handle(String topic, byte[] payload, Instant receivedAt) {
@@ -62,7 +73,9 @@ public class AgentMessageHandler {
         }
 
         AgentEnvelope envelope = read(payload, AgentEnvelope.class);
-        validateEnvelope(envelope, topicVmId, "agent." + kind);
+        boolean zephyrNetwork = "metrics".equals(kind) && envelope.payload() != null
+                && envelope.payload().has("observed_uptime_ms");
+        validateEnvelope(envelope, topicVmId, "agent." + kind, zephyrNetwork);
 
         boolean stored = switch (kind) {
             case "heartbeat" -> agentDataService.recordHeartbeat(
@@ -70,13 +83,16 @@ public class AgentMessageHandler {
                     receivedAt);
             case "inventory" -> agentDataService.recordInventory(
                     topicVmId, toInventory(envelope), receivedAt);
-            case "metrics" -> storeMetrics(topicVmId, envelope, receivedAt);
+            case "metrics" -> zephyrNetwork
+                    ? storeZephyrNetwork(topicVmId, envelope, receivedAt)
+                    : storeMetrics(topicVmId, envelope, receivedAt);
             default -> throw new Rejected("PAYLOAD_INVALID", "unknown kind " + kind);
         };
         return stored ? Result.ACCEPTED : Result.IGNORED;
     }
 
-    private void validateEnvelope(AgentEnvelope envelope, String topicVmId, String expectedType) {
+    private void validateEnvelope(AgentEnvelope envelope, String topicVmId, String expectedType,
+            boolean zephyrNetwork) {
         if (!SUPPORTED_SCHEMA_VERSION.equals(envelope.schemaVersion())) {
             throw new Rejected("SCHEMA_VERSION_UNSUPPORTED", String.valueOf(envelope.schemaVersion()));
         }
@@ -87,10 +103,27 @@ public class AgentMessageHandler {
             throw new Rejected("PAYLOAD_INVALID", "type " + envelope.type());
         }
         if (isBlank(envelope.messageId()) || isBlank(envelope.bootId()) || isBlank(envelope.agentInstanceId())
-                || envelope.seq() == null || envelope.seq() < 1 || envelope.sentAt() == null
+                || envelope.seq() == null || envelope.seq() < 1 || (!zephyrNetwork && envelope.sentAt() == null)
                 || envelope.payload() == null || !envelope.payload().isObject()) {
             throw new Rejected("PAYLOAD_INVALID", "missing envelope field");
         }
+    }
+
+    private boolean storeZephyrNetwork(String vmId, AgentEnvelope envelope, Instant receivedAt) {
+        MetricSampleData data;
+        try {
+            data = ZephyrNetworkMetrics.parse(envelope);
+        } catch (IllegalArgumentException exception) {
+            throw new Rejected("PAYLOAD_INVALID", exception.getMessage());
+        }
+        boolean registeredZephyr = vmRecords.findById(vmId).filter(VmRecord::isRegistered)
+                .map(vm -> vm.getGuestKind() == GuestKind.ZEPHYR).orElse(false);
+        if (!registeredZephyr) {
+            throw new Rejected("PAYLOAD_INVALID", "Zephyr network metrics require a registered Zephyr VM");
+        }
+        Instant observedAt = envelope.sentAt() == null ? receivedAt : envelope.sentAt();
+        return agentDataService.recordMetrics(new MetricSample(envelope.messageId(), vmId,
+                envelope.bootId(), MetricSample.ZEPHYR_TELEMETRY, observedAt, receivedAt, null, data));
     }
 
     private InventoryReport toInventory(AgentEnvelope envelope) {
@@ -132,7 +165,32 @@ public class AgentMessageHandler {
                 receivedAt,
                 metrics.windowMs(),
                 values);
-        return agentDataService.recordMetrics(sample, metrics.processes() == null ? List.of() : metrics.processes());
+        return agentDataService.recordMetrics(sample, metrics.processes() == null ? List.of() : metrics.processes(),
+                processCollection(metrics.processCollection()));
+    }
+
+    // A malformed optional diagnostic leaves the metric and process rows usable for older agents and consumers.
+    private static ProcessCollection processCollection(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        String status = node.path("status").asText("");
+        JsonNode discovered = node.path("discovered");
+        JsonNode readOk = node.path("read_ok");
+        JsonNode vanished = node.path("vanished");
+        JsonNode failed = node.path("failed");
+        JsonNode truncated = node.path("truncated");
+        JsonNode errorNode = node.path("error");
+        String error = errorNode.textValue();
+        if (!PROCESS_STATUSES.contains(status) || !truncated.isBoolean()
+                || List.of(discovered, readOk, vanished, failed).stream().anyMatch(
+                        count -> !count.isIntegralNumber() || !count.canConvertToInt() || count.intValue() < 0)
+                || (!errorNode.isNull() && !errorNode.isMissingNode()
+                        && (error == null || !PROCESS_ERROR.matcher(error).matches()))) {
+            return null;
+        }
+        return new ProcessCollection(status, discovered.intValue(), readOk.intValue(), vanished.intValue(),
+                failed.intValue(), truncated.booleanValue(), error);
     }
 
     private <T> T read(byte[] payload, Class<T> type) {

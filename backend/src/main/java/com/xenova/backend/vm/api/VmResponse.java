@@ -7,8 +7,7 @@ import com.xenova.backend.vm.domain.VmRole;
 import com.xenova.backend.vm.domain.VmState;
 
 // agent_status is separate from state: a VM can be running while its agent is OFFLINE.
-// A zephyr guest has no agent, so its agent_status stays UNKNOWN and its ipv4 is null; guest_kind tells the screen why.
-// ipv4 is the last address the agent reported, so it stays visible while the VM is off.
+// ipv4 is the last Linux Agent report. assignedIpv4 comes from registration and is available while stopped.
 public record VmResponse(
         String vmId,
         String name,
@@ -16,6 +15,7 @@ public record VmResponse(
         VmState state,
         AgentStatus agentStatus,
         String ipv4,
+        String assignedIpv4,
         String templateId,
         String templateVersion,
         int vcpus,
@@ -30,6 +30,7 @@ public record VmResponse(
                 vm.state(),
                 agentStatus,
                 vm.guestKind() == GuestKind.ZEPHYR ? null : ipv4,
+                vm.assignedIpv4(),
                 vm.templateId(),
                 vm.templateVersion(),
                 vm.vcpus(),

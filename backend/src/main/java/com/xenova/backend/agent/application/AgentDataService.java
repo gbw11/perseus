@@ -8,9 +8,12 @@ import com.xenova.backend.agent.domain.AgentStatus;
 import com.xenova.backend.agent.domain.InventoryReport;
 import com.xenova.backend.agent.domain.MetricSample;
 import com.xenova.backend.agent.domain.MetricSampleRepository;
+import com.xenova.backend.agent.domain.ProcessCollection;
 import com.xenova.backend.agent.domain.ProcessInfo;
 import com.xenova.backend.agent.domain.ProcessSnapshot;
 import com.xenova.backend.agent.domain.ProcessSnapshotRepository;
+import com.xenova.backend.agent.domain.TelemetryHeartbeat;
+import com.xenova.backend.agent.domain.TelemetryHeartbeatRepository;
 import com.xenova.backend.agent.infrastructure.AgentProperties;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,6 +31,7 @@ public class AgentDataService {
 
     private final AgentInventoryRepository inventoryRepository;
     private final AgentHeartbeatRepository heartbeatRepository;
+    private final TelemetryHeartbeatRepository telemetryHeartbeatRepository;
     private final MetricSampleRepository metricSampleRepository;
     private final ProcessSnapshotRepository processSnapshotRepository;
     private final AgentProperties properties;
@@ -36,12 +40,14 @@ public class AgentDataService {
     public AgentDataService(
             AgentInventoryRepository inventoryRepository,
             AgentHeartbeatRepository heartbeatRepository,
+            TelemetryHeartbeatRepository telemetryHeartbeatRepository,
             MetricSampleRepository metricSampleRepository,
             ProcessSnapshotRepository processSnapshotRepository,
             AgentProperties properties,
             ApplicationEventPublisher eventPublisher) {
         this.inventoryRepository = inventoryRepository;
         this.heartbeatRepository = heartbeatRepository;
+        this.telemetryHeartbeatRepository = telemetryHeartbeatRepository;
         this.metricSampleRepository = metricSampleRepository;
         this.processSnapshotRepository = processSnapshotRepository;
         this.properties = properties;
@@ -71,16 +77,37 @@ public class AgentDataService {
         return true;
     }
 
+    @Transactional
+    public boolean recordTelemetryHeartbeat(String vmId, TelemetryHeartbeat.Report report) {
+        TelemetryHeartbeat heartbeat = telemetryHeartbeatRepository.findById(vmId)
+                .orElseGet(() -> new TelemetryHeartbeat(vmId));
+        if (!heartbeat.observe(report)) {
+            return false;
+        }
+        telemetryHeartbeatRepository.save(heartbeat);
+        return true;
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<TelemetryHeartbeat.Report> findTelemetryHeartbeat(String vmId) {
+        return telemetryHeartbeatRepository.findById(vmId).map(TelemetryHeartbeat::report);
+    }
+
     // Redelivered MQTT messages (QoS 1) keep their message_id, so a known sample_id is skipped.
     @Transactional
     public boolean recordMetrics(MetricSample sample, List<ProcessInfo> processes) {
+        return recordMetrics(sample, processes, null);
+    }
+
+    @Transactional
+    public boolean recordMetrics(MetricSample sample, List<ProcessInfo> processes, ProcessCollection processCollection) {
         if (!recordMetrics(sample)) {
             return false;
         }
         ProcessSnapshot snapshot = processSnapshotRepository.findById(sample.getVmId())
                 .orElseGet(() -> new ProcessSnapshot(sample.getVmId()));
         if (snapshot.getObservedAt() == null || !sample.getObservedAt().isBefore(snapshot.getObservedAt())) {
-            snapshot.update(sample.getBootId(), processes, sample.getObservedAt(), sample.getReceivedAt());
+            snapshot.update(sample.getBootId(), processes, processCollection, sample.getObservedAt(), sample.getReceivedAt());
             processSnapshotRepository.save(snapshot);
         }
         return true;
