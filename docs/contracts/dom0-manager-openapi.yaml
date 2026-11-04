@@ -422,6 +422,62 @@ paths:
           $ref: '#/components/responses/PlatformUnavailable'
         '504':
           $ref: '#/components/responses/DriverTimeout'
+  /api/v1/vms/{vm_id}/resources:
+    parameters:
+      - $ref: '#/components/parameters/VmId'
+    put:
+      tags: [VMs]
+      operationId: updateVmResources
+      summary: 정지한 Linux VM 의 vCPU·메모리 변경 (다음 시작부터 적용)
+      description: >-
+        정지한 Linux VM 의 등록 설정에서 vcpus·memory_mib 를 바꾼다 (기준 문서 4.12). 실행 중인 게스트를 바꾸지 않고 게스트를 시작하지
+        않는다. 플랫폼 update-resources 한 번이다. 같은 키의 원 작업을 자산·제어 원장 모두에서 먼저 찾아, 같은 VM·같은 값의 원 자원
+        변경이면 원 요청을 그대로 다시 보내고(같은 결과), 다른 요청의 키면 409 VMExists 로 아무것도 보내지 않는다. TARGET_CHANGED 는
+        원 작업이 없음을 다시 확인한 뒤에만 409 다. 504 는 제출 전 예산 만료뿐이다. 실행 중 핀·가중치·메모리 변경은 범위 밖이다.
+      x-driver-timeout-seconds: 15
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: 필수. 최초 전송 전에 정한 요청 키. 응답을 잃으면 같은 키·같은 본문으로 다시 보낸다. ASCII 가시 문자 1..200자
+          schema:
+            type: string
+        - $ref: '#/components/parameters/RequestBudget'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateResourcesRequest'
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: 변경 완료. 같은 키·같은 본문의 재전송도 원 결과(같은 operation_id·before·after)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceUpdate'
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
+        '404':
+          $ref: '#/components/responses/VMNotFound'
+        '409':
+          description: >-
+            InvalidState: 도메인이 있음·stopped 의도 아님·설정이 바뀌었고 원 작업 없음(TARGET_CHANGED)·자산 사용 중.
+            VMExists: 같은 키가 다른 요청(다른 VM·값·동작)의 원 작업
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '501':
+          $ref: '#/components/responses/NotSupported'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
   /api/v1/vms/{vm_id}/control-operations:
     parameters:
       - $ref: '#/components/parameters/VmId'
@@ -934,6 +990,53 @@ components:
           description: >-
             공통 하한 16 (Zephyr 는 16 고정 프로필). 템플릿별 하한·상한은 플랫폼 템플릿 resource_limits 와
             Spring 템플릿 설정이 검사한다. 배수 제약 없음. 64 단위는 화면 입력 규칙일 뿐이다
+    UpdateResourcesRequest:
+      type: object
+      description: >-
+        정지한 Linux VM 의 자원 변경 (기준 문서 4.12). 범위는 vcpus 1..4, memory_mib 128..1024(플랫폼 하한 128, API 상한 1024).
+        템플릿별 하한(Debian 256, Ubuntu 512)은 Spring 이 검사한다
+      additionalProperties: false
+      required: [vcpus, memory_mib]
+      properties:
+        vcpus:
+          type: integer
+          minimum: 1
+          maximum: 4
+        memory_mib:
+          type: integer
+          minimum: 128
+          maximum: 1024
+    VmResources:
+      type: object
+      additionalProperties: false
+      required: [vcpus, memory_mib]
+      properties:
+        vcpus:
+          type: integer
+          minimum: 1
+        memory_mib:
+          type: integer
+          minimum: 1
+    ResourceUpdate:
+      type: object
+      description: 자원 변경 결과. 같은 키 재전송도 원 결과다. Spring 은 after 로 자기 레코드를 갱신하고 재시작(4.2)에 이 값을 보낸다
+      additionalProperties: false
+      required: [vm_id, operation_id, before, after, applies_on_next_start]
+      properties:
+        vm_id:
+          type: string
+          format: uuid
+        operation_id:
+          type: [string, 'null']
+          format: uuid
+          description: 하위 원 자산 작업. 플랫폼에서는 항상 UUID, 작업 기록이 없는 mock 만 null
+        before:
+          $ref: '#/components/schemas/VmResources'
+        after:
+          $ref: '#/components/schemas/VmResources'
+        applies_on_next_start:
+          type: boolean
+          description: 항상 true. 실행 중인 게스트를 바꾸지 않고 다음 시작부터 적용된다
     ResourceError:
       type: object
       additionalProperties: false
