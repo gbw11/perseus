@@ -105,6 +105,12 @@ def inspect(deploy, image, output):
                        '0x00200000', '0x00400000', 'booti ${xen_loadaddr} - ${fdt_addr_r}']:
             check(marker in script, 'WIC boot script contains ' + marker)
         check('@@' not in script and 'mmc 1:' not in script, 'WIC boot substitutions are complete')
+        memory = metadata['RPI_DOM0_MEM']
+        check(bool(re.fullmatch(r'[1-9][0-9]*[MGT]', memory)),
+              'dom0 memory metadata is a size with a unit')
+        check(bool(re.search(r'(?:^|\s)dom0_mem=' + re.escape(memory) + r'(?=\s|$)', script)),
+              'actual Xen argument uses the selected unquoted dom0 memory size')
+
     except (AssertionError, ValueError) as error:
         (output / 'result.json').write_text(json.dumps({'image': str(image.resolve()), 'passed': checks, 'hashes': hashes, 'error': str(error)}, indent=2) + '\n')
         raise

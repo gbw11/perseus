@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "services": {
-    "backend": {"default": true, "read": ["xenova/v1/#"], "write": ["xenova/v1/apps/manual/input", "xenova/v1/vms/+/command", "xenova/v1/console/resume", "xenova/v1/sim/command", "xenova/v1/probes/#"]},
+    "backend": {"default": true, "read": ["xenova/v1/#", "xenova/v2/vms/+/telemetry/+"], "write": ["xenova/v1/apps/manual/input", "xenova/v1/vms/+/command", "xenova/v1/console/resume", "xenova/v1/sim/command", "xenova/v1/probes/#"]},
     "dom0-server": {"default": true, "read": ["xenova/v1/#"], "write": ["xenova/v1/recovery/#", "xenova/v1/probes/#"]},
     "gateway": {"default": true, "read": ["xenova/v1/#"], "write": ["xenova/v1/vehicle/control", "xenova/v1/vehicle/status", "xenova/v1/apps/vehicle/events", "xenova/v1/probes/#", "xenova/v1/vms/+/drive/link/in"]},
     "perception": {"default": true, "read": ["xenova/v1/apps/#", "xenova/v1/vms/#", "xenova/v1/vehicle/#", "xenova/v1/display/#", "xenova/v1/console/#", "xenova/v1/recovery/#", "xenova/v1/probes/#"], "write": ["xenova/v1/apps/perception/events", "xenova/v1/probes/#"]},
@@ -19,7 +19,7 @@
   },
   "telemetry": {
     "read": [],
-    "write": ["xenova/v2/vms/{vm_id}/telemetry/inventory", "xenova/v2/vms/{vm_id}/telemetry/heartbeat", "xenova/v2/vms/{vm_id}/telemetry/metrics", "xenova/v2/vms/{vm_id}/telemetry/events", "xenova/v2/vms/{vm_id}/telemetry/snapshot"]
+    "write": ["xenova/v1/vms/{vm_id}/metrics", "xenova/v2/vms/{vm_id}/telemetry/inventory", "xenova/v2/vms/{vm_id}/telemetry/heartbeat", "xenova/v2/vms/{vm_id}/telemetry/metrics", "xenova/v2/vms/{vm_id}/telemetry/events", "xenova/v2/vms/{vm_id}/telemetry/snapshot"]
   },
   "development_vm_ids": ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"]
 }

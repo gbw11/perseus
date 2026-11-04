@@ -1,0 +1,17 @@
+{
+  "host_boot_id": "18b7941b-d1f0-439f-a0c1-f4ffbeab50ce",
+  "gateway_service": {
+    "code": 0,
+    "stdout": "ActiveState=inactive\nFragmentPath=\nMainPID=0",
+    "stderr": ""
+  },
+  "socket": {
+    "exists": false
+  },
+  "gateway_package": false,
+  "display_services": {
+    "code": 0,
+    "stdout": "active\nactive\nactive",
+    "stderr": ""
+  }
+}

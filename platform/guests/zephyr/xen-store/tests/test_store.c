@@ -17,6 +17,9 @@ struct peer {
 	char request[4113], pending[65536];
 	size_t req_have, pending_len, pending_pos, fragment;
 	int request_count, writes, commits, aborts, conflicts, watches, unwatches;
+	uint32_t notified_req_prod;
+	unsigned int request_notifications;
+	bool release_room_at_deadline;
 	bool no_vif, incomplete, denied, malformed, hold, stop_reading, watch_early, unwatch_late;
 	bool empty_directory, multiple;
 	bool response_clock, app_acl, data_missing, data_denied, data_read_only, app_signal, flood_clock;
@@ -183,12 +186,21 @@ static int notify(void *ctx)
 {
 	struct peer *p=ctx;
 	if (p->flood_clock) { p->clock++; }
+	if (p->ring.req_prod != p->notified_req_prod) {
+		p->notified_req_prod = p->ring.req_prod;
+		p->request_notifications++;
+	}
 	step(p);return 0;
 }
 static int wait_event(void *ctx,int64_t end)
 {
 	struct peer *p=ctx;
 	if (p->clock>=end) { return -ETIMEDOUT; }
+	if (p->release_room_at_deadline) {
+		p->ring.req_cons = p->ring.req_prod; /* The peer consumes older bytes. */
+		p->clock = end;
+		return 0;
+	}
 	p->clock++;
 	if (p->app_signal && strstr(p->watch_path,"/data/")) {
 		set_value(p,p->watch_path,"dom0-marker",false);
@@ -299,6 +311,90 @@ static void mismatched_type(void)
 	peer.wrong_type=true;char text[16];
 	CHECK(xs_read_text(&peer.client,0,"domid",text,sizeof(text),100)==-EPROTO);
 }
+static void full_frame_wrap(void)
+{
+	const char path[] = "/value";
+	char value[XENSTORE_RING_SIZE - sizeof(struct xsd_sockmsg) - sizeof(path)];
+	memset(value, 'x', sizeof(value));
+	const uint32_t start = UINT32_MAX - 7;
+	peer.ring.req_cons = peer.ring.req_prod = peer.notified_req_prod = start;
+	CHECK(xs_write(&peer.client, 0, path, value, sizeof(value), 5) == 0);
+	CHECK(peer.ring.req_prod == start + (uint32_t)XENSTORE_RING_SIZE);
+	CHECK(peer.ring.req_cons == peer.ring.req_prod && peer.request_notifications == 1);
+	const char *stored = get_value(&peer, path, false);
+	CHECK(stored && strlen(stored) == sizeof(value) && !memcmp(stored, value, sizeof(value)));
+}
+
+static void frame_one_byte_short(void)
+{
+	const size_t size = sizeof(struct xsd_sockmsg) + sizeof("domid");
+	const uint32_t prod = XENSTORE_RING_SIZE - size + 1;
+	peer.stop_reading = true;
+	peer.ring.req_prod = peer.notified_req_prod = prod;
+	char reply[16];
+	CHECK(xs_read_text(&peer.client, 0, "domid", reply, sizeof(reply), 2) == -ETIMEDOUT);
+	CHECK(peer.ring.req_prod == prod && !peer.request_notifications && !peer.client.poisoned);
+	CHECK(!peer.client.sending_request);
+	for (int i = 0; i < XS_PENDING_LIMIT; i++) { CHECK(!peer.client.pending[i]); }
+	peer.ring.req_cons = prod; /* Drop the old byte occupancy injected by this test. */
+	peer.stop_reading = false;
+	CHECK(xs_read_text(&peer.client, 0, "domid", reply, sizeof(reply), 5) == 0);
+	CHECK(!strcmp(reply, "42") && peer.request_count == 1);
+}
+
+static void frame_room_at_deadline(void)
+{
+	peer.stop_reading = peer.release_room_at_deadline = true;
+	peer.ring.req_prod = peer.notified_req_prod = XENSTORE_RING_SIZE;
+	char reply[16];
+	CHECK(xs_read_text(&peer.client, 0, "domid", reply, sizeof(reply), 2) == -ETIMEDOUT);
+	CHECK(peer.ring.req_prod == XENSTORE_RING_SIZE && !peer.request_notifications);
+	CHECK(!peer.client.poisoned && !peer.client.sending_request && !peer.client.pending[0]);
+	peer.stop_reading = peer.release_room_at_deadline = false;
+	CHECK(xs_read_text(&peer.client, 0, "domid", reply, sizeof(reply), 5) == 0);
+	CHECK(!strcmp(reply, "42") && peer.request_count == 1);
+}
+
+static void frame_expired_after_copy(void)
+{
+	char reply[16];
+	peer.jump_at = 2; /* Deadline calculation succeeds; the publication check expires. */
+	CHECK(xs_read_text(&peer.client, 0, "domid", reply, sizeof(reply), 5) == -ETIMEDOUT);
+	CHECK(!memcmp(peer.ring.req + sizeof(struct xsd_sockmsg), "domid", sizeof("domid")));
+	CHECK(!peer.ring.req_prod && !peer.request_notifications && !peer.request_count);
+	CHECK(!peer.client.poisoned && !peer.client.sending_request && !peer.client.pending[0]);
+	CHECK(xs_read_text(&peer.client, 0, "domid", reply, sizeof(reply), 5) == 0);
+	CHECK(!strcmp(reply, "42") && peer.request_count == 1);
+}
+
+static void zero_request_budget(void)
+{
+	char reply[16]; uint32_t watch = 0;
+	CHECK(xs_read_text(&peer.client, 0, "domid", reply, sizeof(reply), 0) == -ETIMEDOUT);
+	CHECK(xs_watch(&peer.client, "/watch", &watch, 0) == -ETIMEDOUT && !watch);
+	CHECK(!peer.ring.req_prod && !peer.request_notifications && !peer.request_count);
+	CHECK(!peer.client.poisoned && !peer.client.sending_request && !peer.client.pending[0]);
+	CHECK(xs_watch(&peer.client, "/watch", &watch, 5) == 0 && watch);
+	CHECK(xs_unwatch(&peer.client, watch, 0) == -ETIMEDOUT);
+	struct xs_watch_event event;
+	CHECK(xs_watch_next(&peer.client, watch, &event, 0) == 0 && event.initial);
+	CHECK(xs_read_text(&peer.client, 0, "domid", reply, sizeof(reply), 5) == 0);
+	CHECK(!strcmp(reply, "42") && peer.request_count == 2);
+}
+
+static void published_frame_late_response(void)
+{
+	peer.hold = peer.flood_clock = true;
+	char reply[16];
+	CHECK(xs_read_text(&peer.client, 0, "domid", reply, sizeof(reply), 1) == -ETIMEDOUT);
+	CHECK(peer.request_count == 1 && peer.request_notifications == 1);
+	CHECK(!peer.client.poisoned && !peer.client.sending_request && peer.client.pending[0]);
+	peer.hold = peer.flood_clock = false;
+	set_value(&peer, "/value", "new-response", false);
+	CHECK(xs_read_text(&peer.client, 0, "/value", reply, sizeof(reply), 5) == 0);
+	CHECK(!strcmp(reply, "new-response") && peer.client.late_responses == 1);
+}
+
 static void delayed_response(void)
 {
 	peer.hold=true;char text[32];
@@ -320,7 +416,11 @@ static void partial_send_timeout(void)
 {
 	peer.stop_reading=true;char value[2048];memset(value,'x',sizeof(value));
 	CHECK(xs_write(&peer.client,0,"/value",value,sizeof(value),5)==-ETIMEDOUT);
-	CHECK(peer.client.poisoned);
+	CHECK(peer.client.poisoned && peer.client.sending_request);
+	CHECK(peer.ring.req_prod == XENSTORE_RING_SIZE);
+	char reply[16];
+	CHECK(xs_read_text(&peer.client, 0, "domid", reply, sizeof(reply), 5) == -ETIMEDOUT);
+	CHECK(peer.ring.req_prod == XENSTORE_RING_SIZE);
 }
 static void watch_before_ack(void)
 {
@@ -606,6 +706,7 @@ static void early_response_rejected(void)
 {
 	char value[16];peer.stop_reading=true;
 	queue(&peer,XS_READ,1,0,"bad",4);
+	step(&peer); /* The reply is already visible before the request is published. */
 	CHECK(xs_read_text(&peer.client,0,"domid",value,sizeof(value),100)==-EPROTO);
 	CHECK(peer.client.poisoned);
 }
@@ -741,6 +842,12 @@ int main(int argc, char **argv)
 		{"corrupt_index", corrupt_index},
 		{"unexpected_response_id", unexpected_response_id},
 		{"mismatched_type", mismatched_type},
+		{"full_frame_wrap", full_frame_wrap},
+		{"frame_one_byte_short", frame_one_byte_short},
+		{"frame_room_at_deadline", frame_room_at_deadline},
+		{"frame_expired_after_copy", frame_expired_after_copy},
+		{"zero_request_budget", zero_request_budget},
+		{"published_frame_late_response", published_frame_late_response},
 		{"delayed_response", delayed_response},
 		{"partial_timeout", partial_timeout},
 		{"partial_send_timeout", partial_send_timeout},

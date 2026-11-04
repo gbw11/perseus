@@ -100,12 +100,12 @@ class ReadContext:
         self.m,self.action,self.spec,self.deadline=manager,action,spec,deadline
         self.started_ms=int(manager.p.clock()*1000)
         self.observed_ms={}
-        self.e=None if action=='intents' else manager.p.execution()
+        self.e=None if action in ('intents','registrations') else manager.p.execution()
         self.check()
         self.states,self.tombs=manager._read_states(action,spec,deadline)
         self.by_id={s['vm_id']:s for s in self.states}
         self.lifecycles={s['vm_id']:(s['lifecycle'],s['generation']) for s in self.states}
-        self.inputs={s['vm_id']:(read_intent(manager.data,s['vm_id']) if self.e is None else
+        self.inputs={} if action=='registrations' else {s['vm_id']:(read_intent(manager.data,s['vm_id']) if self.e is None else
                      self.e.observation_inputs(s['record'],self.lifecycles[s['vm_id']])) for s in self.states}
         self.check()
 
@@ -141,15 +141,15 @@ class ReadContext:
         if creation and state['lifecycle']=='REGISTERED':
             op=self.optional(self.m.data/'operations'/(creation+'.json'))
             if not op or op.get('vm_id')!=identity or op.get('status')!='SUCCEEDED':raise ReadChanged()
-        current=(read_intent(self.m.data,identity) if self.e is None else
-                 self.e.observation_inputs(record,self.lifecycles[identity]))
-        if current!=self.inputs[identity]:
-            raise ReadChanged()
+        if self.action!='registrations':
+            current=(read_intent(self.m.data,identity) if self.e is None else
+                     self.e.observation_inputs(record,self.lifecycles[identity]))
+            if current!=self.inputs[identity]:raise ReadChanged()
         self.check()
 
     def validate(self):
         self.check()
-        if self.action=='list' or self.action=='intents' and 'vm_id' not in self.spec:
+        if self.action=='list' or self.action in ('intents','registrations') and 'vm_id' not in self.spec:
             states,_=self.m._read_states(self.action,self.spec,self.deadline)
             if self.revision(states)!=self.revision(self.states):raise ReadChanged()
         # 각 항목은 바로 이어지는 관측 게시 잠금 안에서 한 번 대조한다. 같은 검사를 중복하지 않는다.
@@ -343,7 +343,7 @@ class Manager:
                                'reboot', 'destroy', 'autostart-set', 'board-shutdown-set', 'config',
                                'recover_once', 'recovery-operation', 'recovery-reconcile', 'control-operation', 'snapshot', 'probe',
                                'execution-context', 'host-resume', 'cpu-layout', 'cpu-policy-set', 'cpu-host-prepare'}
-        actions.update(('operation-reconcile','provision','provisioning','registration-notify'))
+        actions.update(('operation-reconcile','provision','provisioning','registrations'))
         if not isinstance(action, str) or action not in actions:
             fail('INVALID_SPEC', 'unsupported management action')
         if type(execute) is not bool:
@@ -356,7 +356,13 @@ class Manager:
             spec = {}
         if not isinstance(spec, dict):
             fail('INVALID_SPEC', 'request must be an object')
-        if action in ('provision','provisioning','registration-notify'):
+        if action=='registrations':
+            if execute or key is not None or set(spec)-{'vm_id','timeout_ms'}:
+                fail('INVALID_SPEC','registrations is a read-only UUID query')
+            timeout=spec.get('timeout_ms',15000)
+            if type(timeout) is not int or not 0<timeout<=15000:fail('INVALID_SPEC','timeout_ms must be 1..15000')
+            return {**spec,**({'vm_id':normalize_uuid(spec['vm_id'])} if 'vm_id' in spec else {}),'timeout_ms':timeout}
+        if action in ('provision','provisioning'):
             if action=='provisioning' and execute:fail('INVALID_SPEC','provisioning is read-only')
             if set(spec)-{'vm_id','timeout_ms'} or 'vm_id' not in spec:
                 fail('INVALID_SPEC','provisioning requires a VM UUID and optional timeout_ms')
@@ -1693,7 +1699,7 @@ class Manager:
             self.last_output={'bytes':bytes(output.content),'dropped':output.dropped}
         # 원장 완료/관리·대상 FD 반환 뒤 공개 등록 자료만 넘긴다. HTTP를 기다리지 않는다.
         if self._registration_events:
-            from xenova_registration import automatic
+            from xenova_registration_hook import automatic
             events,self._registration_events=self._registration_events,[]
             for record in events:automatic(self.data,self.p.runtime,record)
         try:
@@ -1797,8 +1803,10 @@ class Manager:
         tombs=self._tombs(deadline=deadline)
         # 전체 신원/디스크 중복은 위에서 검증했다. builder가 VM마다 같은 전체 dict를 재검색하지 않는다.
         by_uuid={record['uuid']:{key:record} for key,record in records.items()}
-        if action in ('get','probe','execution-context') or action=='intents' and 'vm_id' in spec:
+        if action in ('get','probe','execution-context') or action in ('intents','registrations') and 'vm_id' in spec:
             states=[self._state(spec['vm_id'],by_uuid.get(spec['vm_id'],{}),tombstones=tombs)]
+            if action=='registrations' and states[0]['lifecycle']!='REGISTERED':
+                fail('VM_NOT_FOUND','VM is not currently registered')
         else:
             # 기존 정렬된 등록 경로의 표시 순서를 유지하고 과거 수명 항목만 뒤에 붙인다.
             ids=list(dict.fromkeys([r['uuid'] for r in records.values()]+list(tombs)))
@@ -1835,10 +1843,16 @@ class Manager:
             with span('read.round',count=attempt+1):
                 if self.p.clock()>=deadline:fail('DEADLINE_EXCEEDED','query budget expired')
                 try:
-                    if action in ('get','list','probe','execution-context','intents'):
+                    if action in ('get','list','probe','execution-context','intents','registrations'):
                         read=ReadContext(self,action,spec,deadline)
                         records=[s['record'] for s in read.states]
-                        if action=='intents':
+                        if action=='registrations':
+                            from xenova_registration import registration
+                            read.validate()
+                            for state in read.states:read.validate_one(state['vm_id'])
+                            views=[registration(s['record']) for s in read.states]
+                            result={'registration':views[0]} if 'vm_id' in spec else {'registrations':views}
+                        elif action=='intents':
                             read.validate()
                             for state in read.states:read.validate_one(state['vm_id'])
                             views=[self._intent_view(s,read.inputs[s['vm_id']]) for s in read.states]
@@ -1952,16 +1966,6 @@ class Manager:
                         supplied=bootstrap_execution(self.p,record,deadline=deadline)
         return {**result,'plan':False,'execute_required':False,'supply':supplied}
 
-    def _registration(self,spec,execute,deadline):
-        from xenova_registration import payload,launch
-        read=ReadContext(self,'intents',spec,deadline);read.validate_one(spec['vm_id'])
-        state=read.states[0]
-        if state['lifecycle']!='REGISTERED':fail('VM_NOT_FOUND','notification requires a currently registered VM')
-        body=payload(state['record'])
-        if not execute:return {'plan':True,'execute_required':True,'registration':body}
-        return {'plan':False,'execute_required':False,'vm_id':state['vm_id'],
-                'notification':launch(self.data,self.p.runtime,state['record'],automatic=False,budget=deadline-self.p.clock())}
-
     def _call(self, action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None, _output=None):
         """HTTP를 가정하지 않는다. 모든 응답은 동일 JSON envelope이고 stdout을 쓰지 않는다."""
         entered = self.p.clock()
@@ -1973,11 +1977,11 @@ class Manager:
         try:
             if budget_ms is not None and (type(budget_ms) is not int or not 0<budget_ms<=(creation.MAX_CALL_MS if action=='create' else 105000)):
                 fail('INVALID_SPEC','budget_ms must be 1..'+str(creation.MAX_CALL_MS if action=='create' else 105000))
-            if budget_ms is not None and action not in ('create','operation-reconcile','start','stop','reboot','destroy','get','list','intents','probe','execution-context','templates','operation','control-operation','recovery-operation','recovery-reconcile','provision','provisioning','registration-notify'):
+            if budget_ms is not None and action not in ('create','operation-reconcile','start','stop','reboot','destroy','get','list','intents','registrations','probe','execution-context','templates','operation','control-operation','recovery-operation','recovery-reconcile','provision','provisioning'):
                 fail('INVALID_SPEC','budget_ms is supported only for control and bounded reads')
             spec = self._validate_call(action, spec, execute, idempotency_key, request_id)
             trace_bind(vm_id=spec.get('vm_id'), recovery_attempt_id=spec.get('recovery_attempt_id'))
-            if action not in ('intents','provisioning','registration-notify'):
+            if action not in ('intents','provisioning','registrations'):
                 try:
                     trace_bind(host_boot_id=self.p.boot_id_reader())
                 except Exception:
@@ -1997,8 +2001,6 @@ class Manager:
                 self.p.response_deadline=entered+budget_ms/1000
             else:
                 self.p.response_deadline=float('inf')
-            if action=='registration-notify':
-                return {**response,'ok':True,'data':self._registration(spec,execute,deadline)}
             if action in ('provision','provisioning'):
                 self.p.response_deadline=min(getattr(self.p,'response_deadline',deadline),deadline)
                 try:result=self._provisioning(action,spec,execute,context,deadline)
@@ -2010,7 +2012,7 @@ class Manager:
             if action=='operation-reconcile':
                 result=creation.reconcile(self,spec,execute,context,deadline,_output)
                 return {**response,'ok':True,'data':result,'operation_id':context['operation_id']}
-            if action in ('get','list','intents','probe','execution-context','templates','operation','control-operation','recovery-operation'):
+            if action in ('get','list','intents','registrations','probe','execution-context','templates','operation','control-operation','recovery-operation'):
                 self.p.response_deadline=min(self.p.response_deadline,deadline)
                 if action in ('get','list','probe','execution-context'):
                     with observation_slot(self.p.runtime,deadline=deadline,clock=self.p.clock) as fd:

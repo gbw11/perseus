@@ -1,0 +1,32 @@
+[Unit]
+Description=Xenova native HDMI X11 and unprivileged kiosk
+After=local-fs.target systemd-user-sessions.service xenova-display-feed.service
+PartOf=xenova-display.target
+ConditionPathExists=/etc/xenova/display-runtime.json
+ConditionPathExists=/etc/xenova/display-Xorg.conf
+ConditionPathExists=/etc/xenova/display-kiosk.env
+ConditionPathExists=/etc/xenova/display-bindings.json
+ConditionPathExists=/etc/xenova/display.env
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=notify
+NotifyAccess=main
+Group=xenova-display
+EnvironmentFile=/etc/xenova/display-kiosk.env
+RuntimeDirectory=xenova-display-graphics
+RuntimeDirectoryMode=0750
+TTYPath=/dev/tty7
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+TTYReset=no
+TTYVHangup=no
+ExecStart=/usr/bin/python3 -m xenova_display.native_session
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=45
+TimeoutStopSec=25
+KillMode=mixed
+UMask=0077

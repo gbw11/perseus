@@ -25,11 +25,19 @@
   대상 VM 을 판정하지 않는다. 이력이 없는 VM(계정·ACL 오류·배포 누락·첫 부팅 정체를 구별할 수 없음)은 UNKNOWN 이라 첫 부팅부터
   멈춘 VM 은 자동 복구하지 않는다. 이력은 현재 신호가 아니다: 이전 부팅의 신호는 여전히 세지 않고 boot grace 뒤에 판정한다.
   한 번 받은 뒤 그 VM 의 ACL 만 바뀌는 경우는 생존 신호만으로 구별할 수 없다(episode 당 시도 상한으로 묶인다).
+- 채널 증거는 구독 승인 뒤 첫 수신으로 한 번 세우고 구독이 끊길 때까지 유지하므로, 나중에 브로커·브리지·ACL 같은 공통 경로가
+  막혀 모든 VM 이 함께 조용해지는 것은 알지 못한다. 그래서 손실을 판정하기 직전에 같은 채널의 동료 발행자(대상이 아닌 등록 VM 중
+  의도 running·Xen running 이고 지금 실행에서 그 채널 메시지를 받은 적이 있는 VM)를 본다. 동료 자격은 채널 전달 증거라 기능 건강과
+  다르다: 주행 VM 은 앱 하나만 보내도 동료다(그 VM 자체의 건강은 두 앱이 모두 있어야 한다). 하나라도 신선하면 채널이 지금 전달하므로 판정한다.
+  동료가 모두 조용하면 공통 경로를 의심해 보류한다(UNKNOWN). 동료가 없으면(단독 발행자) 둘을 구별할 수 없어 기본은 보류이고,
+  채널별 단독 발행자 정책(agent_sole_publisher·app_sole_publisher)이 trust 일 때만 판정한다. crashed·absent 는 Xen 관측이라 이 규칙과 무관하다.
 - HEALTHY 는 Xen 실행 + 생존 신호가 신선하다는 뜻이다. CPU·메모리·앱 기능까지 정상이라는 뜻이 아니다.
 - 판정을 내기 직전에 confirm(플랫폼 get)으로 의도와 실행 상태를 다시 읽고 그 관측으로 다시 판정한다. 캐시된 의도가 오래됐거나
   관측 사이에 VM 이 시작됐으면 판정하지 않고, 건강 스냅샷도 재확인한 관측으로 낸다.
 - 장애 한 건(episode)에 Judgment 는 하나다. 사유가 바뀌어도(HEARTBEAT_LOST → DOMAIN_ABSENT) 다시 내지 않고 건강 스냅샷에만 반영한다.
   복구 정책(125)은 episode 가 닫힐 때까지 같은 recovery_id 로 재시도하며, 현재 상태는 health()·open_recovery() 로 본다.
+- 플랫폼 의도를 이번 주기에 읽지 못했으면(intent_known=False) crashed·absent 를 포함해 아무것도 판정하지 않고 열린 episode 도 그대로 둔다.
+  건강은 OBSERVATION_UNAVAILABLE 이다. 등록 목록은 마지막으로 읽은 것을 유지하므로 보관·삭제로 해석하지 않는다.
 - 시간은 전부 단조 시계다.
 """
 
@@ -73,6 +81,7 @@ class _Track:
     episode: Judgment | None = None  # 진행 중 장애 (최초 판정)
     current_reason: FailureReason | None = None  # 지금 보이는 사유 (episode 안에서 바뀔 수 있다)
     app_armed: bool = False  # Zephyr: app.heartbeat 를 받은 적이 있다 (ArmingStore 로 영속)
+    held: str | None = None  # 손실 판정을 보류한 이유(silent: 동료도 모두 조용, sole: 동료 없음). 바뀔 때만 로그한다
     health: VmHealth | None = None
 
 
@@ -110,6 +119,7 @@ class Watcher:
         self._link_proven: dict[str, bool] = {AGENT: False, APP: False}
         self._link_warned: dict[str, bool] = {AGENT: False, APP: False}
         self._removed: list[UUID] = []  # 지난 removed_vm_ids() 이후 등록에서 사라진 VM
+        self._observed: dict[UUID, VmObservation] = {}  # 이번 주기의 관측. 동료 발행자를 고르는 데 쓴다
         if self._armed or self._agent_delivered:
             log.info("restored delivery history from %s: %d Zephyr VM(s), %d Linux VM(s)",
                      arming.path if arming else "-", len(self._armed), len(self._agent_delivered))
@@ -121,6 +131,10 @@ class Watcher:
     def tick(self, observations: list[VmObservation], now: float | None = None, *, link: LinkState | None = None) -> list[Judgment]:
         now = self._clock() if now is None else now
         self._track_link(LinkState.up() if link is None else link, now)
+        self._observed = {obs.vm_id: obs for obs in observations}
+        # 판정보다 먼저 모든 VM 의 실행 세대(domid·execution)를 갱신한다. 동료 증거를 고를 때 뒤에 평가될 VM 의 이전 실행 상태를 쓰지 않게 한다
+        for obs in observations:
+            self._track_domain(self._tracks.setdefault(obs.vm_id, _Track()), obs, now)
         judgments: list[Judgment] = []
         seen: set[UUID] = set()
         for obs in observations:
@@ -191,8 +205,15 @@ class Watcher:
         return fresh
 
     def _track_link(self, link: LinkState, now: float) -> None:
+        reconnected = link.connection is not None and self._link.connection is not None and link.connection != self._link.connection
         for channel, up, was in ((AGENT, link.agent, self._link.agent), (APP, link.app, self._link.app)):
-            if up and not was:
+            if up and was and reconnected:
+                # 두 주기 사이에 끊겼다 다시 붙었다. 승인은 그대로여도 끊기기 전 수신은 지금 연결의 전달 증거가 아니다
+                self._link_since[channel] = now
+                self._link_proven[channel] = False
+                self._link_warned[channel] = False
+                log.warning("%s liveness path reconnected; loss judgments resume after the first message and one signal window", channel)
+            elif up and not was:
                 self._link_since[channel] = now
                 self._link_proven[channel] = False
                 self._link_warned[channel] = False
@@ -306,6 +327,8 @@ class Watcher:
         return max(0.0, now - beat.received_monotonic)
 
     def _judge(self, track: _Track, obs: VmObservation, signal_age: float | None, now: float) -> tuple[Verdict, FailureReason | None]:
+        if not obs.intent_known:
+            return Verdict.UNKNOWN, None  # 의도를 못 읽었다: 오래된 의도로 재시작하지도, 대상 아님으로 episode 를 닫지도 않는다
         if not obs.eligible:
             return Verdict.OK, None
         if not obs.present:
@@ -340,6 +363,7 @@ class Watcher:
             # from a per-VM ACL/delivery failure. Xen crash/absence stays above.
             return Verdict.UNKNOWN,None
         if signal_age is not None and signal_age < window:
+            track.held = None
             return Verdict.OK, None
         if not self._delivered(track, obs, channel):
             # 이 VM 의 신호를 받은 적이 없다: 계정·ACL·배포 문제와 부팅 정체를 구별할 수 없다. 다른 VM 의 수신은 근거가 아니다
@@ -349,12 +373,71 @@ class Watcher:
         assert track.domain_since is not None
         if not track.signaled and now - track.domain_since < grace:
             return Verdict.UNKNOWN, None
+        if self._channel_hold(track, obs, channel, window, now) is not None:
+            return Verdict.UNKNOWN, None
         return Verdict.FAILED, reason
+
+    def _channel_hold(self, track: _Track, obs: VmObservation, channel: str, window: float, now: float) -> str | None:
+        """대상의 신호 손실을 공통 경로 장애와 구별할 수 없으면 그 이유(silent·sole). None 이면 판정해도 된다."""
+        fresh = self._settings.agent_peer_fresh_s if channel == AGENT else self._settings.app_peer_fresh_s
+        evidence = self._peer_evidence(obs.vm_id, channel, fresh, now)
+        sole = self._settings.agent_sole_publisher if channel == AGENT else self._settings.app_sole_publisher
+        if evidence == "fresh" or (evidence == "none" and sole == "trust"):
+            hold = None
+        else:
+            hold = "silent" if evidence == "silent" else "sole"
+        if hold != track.held:
+            if hold == "silent":
+                log.warning("vm %s: %s signal lost together with every peer publisher; common path suspected, loss judgment held", obs.vm_id, channel)
+            elif hold == "sole":
+                log.warning("vm %s: %s signal lost and no peer publisher can tell a VM fault from a common path fault; loss judgment held "
+                            "(XENOVA_RECOVERY_%s_SOLE_PUBLISHER=trust judges sole publishers)", obs.vm_id, channel, channel.upper())
+            elif track.held is not None:
+                log.info("vm %s: a peer %s publisher is fresh again; loss judgment resumes", obs.vm_id, channel)
+            track.held = hold
+        return hold
+
+    def _peer_evidence(self, vm_id: UUID, channel: str, fresh_s: float, now: float) -> str:
+        """같은 채널 동료 발행자의 신선도. fresh: 하나라도 fresh_s 안, silent: 동료는 있으나 모두 그 밖, none: 동료 없음.
+        동료는 지금 실행(tick 첫 단계에서 갱신한 domid·execution, domain_since 이후)에서 그 채널의 유효 메시지를 받은 VM 이다.
+        그 메시지가 곧 동료의 전달 경로 증거라 기능 건강(signaled)·수신 이력(_delivered)은 따로 요구하지 않는다."""
+        silent = False
+        for peer_id, peer in self._observed.items():
+            if peer_id == vm_id or not peer.eligible or not peer.present or peer.xen_state != VmState.running:
+                continue
+            track = self._tracks.get(peer_id)
+            if track is None or track.domain_since is None or track.domid != peer.domid:
+                continue
+            if peer.execution_id is not None and track.execution_id != peer.execution_id:
+                continue
+            liveness = self._liveness(track, peer)
+            if liveness is None or liveness[0] != channel:
+                continue
+            received = self._last_received(peer, channel)
+            if received is None or received < track.domain_since:
+                continue  # 지금 실행에서 이 채널 메시지를 받은 적이 없다(부팅 중이거나 이전 실행의 신호뿐): 동료가 아니다
+            if now - received < fresh_s:
+                return "fresh"
+            silent = True
+        return "silent" if silent else "none"
+
+    def _last_received(self, obs: VmObservation, channel: str) -> float | None:
+        """그 VM 이 이 채널로 보낸 마지막 신호의 수신 시각(채널 전달 증거). 현재 binding 이 있으면 그 binding 의 앱 메시지 중 가장 최근이다.
+        기능 건강(_signal_age)은 두 앱 중 오래된 쪽을 보지만, 채널이 지금 전달하는지는 한 앱이라도 오면 된다."""
+        if channel == AGENT:
+            beat = self._heartbeats.last(obs.vm_id)
+        elif obs.expected_app_instances is not None:
+            beat = self._app_heartbeats.latest_bound(obs.vm_id, obs.expected_app_boot_id, obs.expected_app_instances)
+        else:
+            beat = self._app_heartbeats.last(obs.vm_id)
+        return beat.received_monotonic if beat is not None else None
 
     # ---- 건강 스냅샷 ----
 
     def _health(self, track: _Track, obs: VmObservation, verdict: Verdict, reason: FailureReason | None, signal_age: float | None, now: float) -> VmHealth:
-        if verdict == Verdict.FAILED:
+        if not obs.intent_known:
+            state = HealthState.OBSERVATION_UNAVAILABLE
+        elif verdict == Verdict.FAILED:
             state = HealthState.UNHEALTHY
         elif not obs.present:
             state = HealthState.STARTING if obs.eligible else HealthState.STOPPED
@@ -382,6 +465,8 @@ class Watcher:
                 state = HealthState.OBSERVATION_UNAVAILABLE
             elif not self._link_ready(channel, now, window):
                 state = HealthState.OBSERVATION_UNAVAILABLE
+            elif self._channel_hold(track, obs, channel, window, now) is not None:
+                state = HealthState.OBSERVATION_UNAVAILABLE
             else:
                 state = HealthState.UNHEALTHY
         previous = track.health
@@ -395,6 +480,9 @@ class Watcher:
             heartbeat_age_s=signal_age,
             reason=reason,
             manager_seq=1 if previous is None else previous.manager_seq + 1 if changed else previous.manager_seq,
+            intent_known=obs.intent_known,
+            domid=obs.domid,
+            execution_id=obs.execution_id,
         )
 
     def health(self, vm_id: UUID) -> VmHealth | None:

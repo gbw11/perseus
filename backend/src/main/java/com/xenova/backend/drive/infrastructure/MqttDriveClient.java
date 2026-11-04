@@ -32,8 +32,9 @@ public class MqttDriveClient implements SmartLifecycle, MqttCallbackExtended, Dr
 
     // QoS is the subscription maximum: vehicle/control is QoS 1 retained, the rest arrive at their own QoS.
     static final String[] TOPICS = {
-            DriveStateTracker.CONTROL_TOPIC, DriveStateTracker.STATUS_TOPIC, DriveStateTracker.APP_EVENTS_FILTER};
-    static final int[] QOS = {1, 0, 1};
+            DriveStateTracker.CONTROL_TOPIC, DriveStateTracker.STATUS_TOPIC, DriveStateTracker.APP_EVENTS_FILTER,
+            DriveStateTracker.VM_APP_EVENTS_FILTER};
+    static final int[] QOS = {1, 0, 1, 0};
 
     private static final Logger log = LoggerFactory.getLogger(MqttDriveClient.class);
 
@@ -127,7 +128,8 @@ public class MqttDriveClient implements SmartLifecycle, MqttCallbackExtended, Dr
 
     @Override
     public void messageArrived(String topic, MqttMessage message) {
-        tracker.accept(topic, message.getPayload()).ifPresent(notice -> recorder.execute(() -> eventLogger.record(notice)));
+        tracker.accept(topic, message.getPayload(), message.isRetained())
+                .ifPresent(notice -> recorder.execute(() -> eventLogger.record(notice)));
     }
 
     @Override

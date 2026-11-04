@@ -58,7 +58,7 @@ def test_frozen_protoc_golden_to_python_and_nanopb(probe):
 
 
 @pytest.mark.parametrize('field,value,reason',[
-    ('major',2,'VERSION'),('required_features',1,'VERSION'),('complete',False,'ARRAY'),
+    ('major',2,'VERSION'),('required_features',2,'VERSION'),('complete',False,'ARRAY'),
     ('truncated',True,'ARRAY'),('width',65,'ARRAY'),('occupancy',b'','ARRAY'),
     ('mapper_boot',fixture.INSTANCE,'SOURCE'),('frame_epoch',fixture.INSTANCE,'EPOCH'),
     ('configuration','wrong','CONFIGURATION'),('resolution_m',float('nan'),'GEOMETRY'),
@@ -86,6 +86,25 @@ def test_producer_rejects_nonfinite_and_missing_arrays():
     with pytest.raises(ValueError):encode(value)
     value=fixture.world();value.cell_flags=b''
     with pytest.raises(ValueError):encode(value)
+
+
+def test_preferred_road_feature_is_explicit_and_never_supplies_free_cells(probe):
+    from xenova_drive_world import mark_road
+    value=fixture.world()
+    original=(value.occupancy,value.age_le32,bytes(value.cell_flags))
+    left=[schema.Point(x=p.x,y=1.96) for p in value.reference]
+    right=[schema.Point(x=p.x,y=1.24) for p in value.reference]
+    mark_road(value,left,right)
+    assert value.required_features==1 and value.minor==1
+    assert value.occupancy==original[0] and value.age_le32==original[1]
+    assert all((a&7)==b for a,b in zip(value.cell_flags,original[2]))
+    assert product(probe,encode(value))['result']=='OK'
+    value.required_features=0
+    with pytest.raises(ValueError,match='cell encoding'):encode(value)
+    assert product(probe,value.SerializeToString())['result']=='ARRAY'
+    value.required_features=1;value.cell_flags=bytes([3])*len(value.cell_flags)
+    with pytest.raises(ValueError,match='preferred road'):encode(value)
+    assert product(probe,value.SerializeToString())['result']=='ARRAY'
 
 
 def test_road_shape_rejects_crossing_or_wrong_side_then_accepts_recovery(probe):
