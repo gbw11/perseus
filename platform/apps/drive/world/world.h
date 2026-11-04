@@ -29,10 +29,13 @@ struct dw_trust { char vehicle[65],mapper_boot[37],mapper_instance[37],map_epoch
 struct dw_snapshot { dw_world world; uint64_t received_us,observed_upper_age_us,valid_until_us; };
 struct dw_handle { uint32_t generation; uint8_t slot; uint32_t lease; };
 struct dw_slot { struct dw_snapshot snapshot; atomic_uint generation,leases[8],readers; uint32_t source_revision; bool writing; };
-struct dw_pool { atomic_flag lock; struct dw_slot slots[DW_MAP_SLOTS]; int current;
+/* Payload occupancy is inside preallocated storage, never additional RAM.
+ * Counts are boot-lifetime; BUSY is lock contention, not capacity exhaustion. */
+struct dw_memory { uint64_t reserved,capacity,used,peak,exhausted,contention; };
+struct dw_pool { atomic_flag lock; atomic_ullong contention; uint64_t exhausted; struct dw_slot slots[DW_MAP_SLOTS]; int current;
  struct dw_trust trust; bool authorized; uint32_t source_revision,next_lease;
  uint32_t next_generation; uint64_t published,rejected,busy,high_water; };
-struct dw_odometry { atomic_flag lock; dw_vehicle samples[DW_ODOM_SLOTS]; size_t next,count; };
+struct dw_odometry { atomic_flag lock; dw_vehicle samples[DW_ODOM_SLOTS]; size_t next,count,high_water; };
 
 enum dw_result dw_decode(const uint8_t *,size_t,const struct dw_trust *,uint64_t,struct dw_snapshot *);
 enum dw_result dw_vehicle_decode(const uint8_t *,size_t,dw_vehicle *);
@@ -47,6 +50,8 @@ void dw_pool_init(struct dw_pool *);
 /* Authenticated connection/configuration owner only. Does not discard the last
  * map or renew its observations; outstanding older writers cannot publish. */
 enum dw_result dw_pool_source(struct dw_pool *,const struct dw_trust *);
+enum dw_result dw_memory_read(struct dw_pool *,struct dw_memory *);
+enum dw_result dw_odom_memory_read(struct dw_odometry *,struct dw_memory *);
 enum dw_result dw_reserve(struct dw_pool *,struct dw_handle *,struct dw_snapshot **);
 enum dw_result dw_publish(struct dw_pool *,struct dw_handle);
 enum dw_result dw_abort(struct dw_pool *,struct dw_handle);

@@ -119,8 +119,12 @@ static void thread_row(const struct k_thread *thread, void *context)
 	row->stack_bytes = thread->stack_info.size;
 	if (row->stack_bytes > CONFIG_XENOVA_DIAGNOSTICS_STACK_SCAN_LIMIT) {
 		row->stack_rc = -E2BIG;
-	} else {
-		row->stack_rc = k_thread_stack_space_get(thread, &row->unused_bytes);
+	} else if (IS_ENABLED(CONFIG_ARCH_POSIX)) {
+        /* Frozen POSIX arch executes on pthread stacks, not these K_THREAD_STACK
+         * buffers. A fill scan of the reserved Zephyr buffer would be fiction. */
+        row->stack_rc = -ENOTSUP;
+    } else {
+        row->stack_rc = k_thread_stack_space_get(thread, &row->unused_bytes);
 		if (!row->stack_rc && row->unused_bytes > row->stack_bytes) {
 			row->stack_rc = -EIO;
 		}
@@ -157,6 +161,7 @@ int xdiag_snapshot_get(struct xdiag_snapshot *s, bool include_threads)
 	int resources_rc=xdiag_resources_get(&s->resources);
 	if (resources_rc) {
 		s->resources.cpu.rc=s->resources.threads_rc=resources_rc;
+        s->resources.firmware_rc=s->resources.page_rc=resources_rc;
 		s->resources.net_bytes_rc=s->resources.net_rate_rc=resources_rc;
 	}
 	s->captured_uptime_ms = k_uptime_get();

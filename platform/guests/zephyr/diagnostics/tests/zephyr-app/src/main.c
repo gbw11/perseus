@@ -100,10 +100,10 @@ ZTEST(diagnostics, test_actual_threads_heap_and_errors)
 			zassert_true(t->unused_bytes <= t->stack_bytes);
 			found = true;
 		} else {
-			zassert_equal(t->stack_rc, -E2BIG);
+			zassert_true(t->stack_rc==-E2BIG||(IS_ENABLED(CONFIG_ARCH_POSIX)&&t->stack_rc==-ENOTSUP));
 		}
 	}
-	if (CONFIG_XENOVA_DIAGNOSTICS_STACK_SCAN_LIMIT >= CONFIG_TEST_EXTRA_STACK_SIZE + 1024) {
+	if (!IS_ENABLED(CONFIG_ARCH_POSIX)&&CONFIG_XENOVA_DIAGNOSTICS_STACK_SCAN_LIMIT >= CONFIG_TEST_EXTRA_STACK_SIZE + 1024) {
 		zassert_true(found);
 	}
 #else
