@@ -256,6 +256,39 @@ class Watcher:
             return False
         return now - since >= window_s
 
+    def link_report(self, now: float | None = None) -> dict[str, str]:
+        """채널별 관측 경로 상태(자가진단용). NOT_GRANTED 연결·구독 승인 없음, DELIVERING 승인 뒤 한 창 안에 실제 수신,
+        SILENT 승인 뒤 한 창이 지나도록 받은 것이 없거나 마지막 수신이 한 창보다 오래됨, WAITING 승인 뒤 아직 한 창이 안 됨.
+        한 번 받은 것으로 끝내지 않는다: 브로커가 ACL 을 다시 읽으면(HUP) 연결·구독은 그대로인 채 전달만 멈춘다. 판정에는 쓰지 않는다."""
+        now = self._clock() if now is None else now
+        report = {}
+        for channel, window in ((AGENT, self._settings.heartbeat_lost_s), (APP, self._settings.app_heartbeat_lost_s)):
+            since = self._link_since[channel]
+            if since is None:
+                report[channel] = "NOT_GRANTED"
+                continue
+            self._check_delivery(channel)
+            last = (self._heartbeats if channel == AGENT else self._app_heartbeats).last_received_monotonic()
+            if last is not None and last >= since and now - last < window:
+                report[channel] = "DELIVERING"
+            else:
+                report[channel] = "SILENT" if now - since >= window else "WAITING"
+        return report
+
+    def expected_publishers(self) -> dict[str, bool]:
+        """채널마다 지금 신호를 보내고 있어야 할 VM 이 있는가(자가진단용). 실행 중이고 복구 대상이며 부팅 유예가 끝난 VM 만 센다.
+        Zephyr 는 앱 펌웨어로 선언됐거나 신호를 받은 적이 있는(armed) VM 만. 마지막 주기의 관측을 쓴다."""
+        expected = {AGENT: False, APP: False}
+        for obs in self._observed.values():
+            track = self._tracks.get(obs.vm_id)
+            if not (obs.present and obs.eligible) or track is None or track.health is None or track.health.state == HealthState.STARTING:
+                continue
+            if obs.guest_kind == "linux":
+                expected[AGENT] = True
+            elif obs.app_heartbeat_expected is True or (obs.app_heartbeat_expected is None and obs.vm_id in self._armed):
+                expected[APP] = True
+        return expected
+
     def _track_domain(self, track: _Track, obs: VmObservation, now: float) -> None:
         if obs.present:
             if track.domid != obs.domid or (obs.execution_id is not None and track.execution_id!=obs.execution_id):

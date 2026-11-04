@@ -121,6 +121,11 @@ class PlatformObserver:
         self._action = "intents"  # 옛 Manager 면 list 로 바뀐다
         self._intent_known = True  # 마지막 의도 조회가 성공했는가. 실패하면 캐시는 표시용이고 판정 근거가 아니다
 
+    @property
+    def intent_known(self) -> bool:
+        """마지막 의도 조회가 성공했는가(자가진단용)."""
+        return self._intent_known
+
     # ---- 주기 관측 ----
 
     def __call__(self) -> list[VmObservation]:
