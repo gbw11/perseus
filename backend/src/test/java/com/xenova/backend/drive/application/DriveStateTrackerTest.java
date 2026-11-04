@@ -333,6 +333,26 @@ class DriveStateTrackerTest {
     }
 
     @Test
+    void operatorCancelIsKeptBrieflySoScreensCanTellItApart() {
+        control("AUTO_READY", 4, null);
+        send("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle", "drive.resume.accepted",
+                "{\"switch_in_ms\":3000,\"generation\":4,\"requested_by\":\"operator\"}");
+        assertThat(tracker.snapshot().resume().requestedBy()).isEqualTo("operator");
+        assertThat(tracker.snapshot().resumeCancel()).isNull();
+        send("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle", "drive.resume.cancelled",
+                "{\"reason\":\"operator_cancelled\",\"generation\":4,\"requested_by\":\"admin\"}");
+        now.addAndGet(500);
+        DriveState state = tracker.snapshot();
+        assertThat(state.resume()).isNull();
+        assertThat(state.resumeCancel().reason()).isEqualTo("operator_cancelled");
+        assertThat(state.resumeCancel().requestedBy()).isEqualTo("admin");
+        assertThat(state.resumeCancel().generation()).isEqualTo(4);
+        assertThat(state.resumeCancel().receivedAgoMs()).isEqualTo(500);
+        now.addAndGet(DriveStateTracker.RESUME_CANCEL_VISIBLE_MS);
+        assertThat(tracker.snapshot().resumeCancel()).isNull();
+    }
+
+    @Test
     void resumeCancelledOrLeavingAutoReadyClearsTheCountdown() {
         control("AUTO_READY", 4, null);
         send("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle", "drive.resume.accepted",
