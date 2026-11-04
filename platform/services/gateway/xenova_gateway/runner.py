@@ -45,6 +45,8 @@ INTERACTION = "interaction"
 # MQTT-13 운영자 콘솔 재개 (백엔드가 POST /api/v1/drive/resume 을 받아 발행, 계약 v1.2). xenova_mqtt.topics 에 아직 빌더가 없다
 CONSOLE_RESUME = f"{topics.PREFIX}/console/resume"
 RESUME_REQUESTED = "drive.resume.requested"
+# 재개 카운트다운 운영자 취소 (계약 v1.7, 백엔드 DELETE /api/v1/drive/resume 이 같은 토픽으로 발행)
+RESUME_CANCEL_REQUESTED = "drive.resume.cancel_requested"
 
 
 def _generation(payload: Any) -> int | None:
@@ -126,6 +128,11 @@ class GatewayRunner:
             requested_by = requested_by if isinstance(requested_by, str) else None
             log.info("재개 요청 수신 requested_by=%s", requested_by[:96] if requested_by else None)
             machine.on_resume(t, requested_by)
+        elif message.type == RESUME_CANCEL_REQUESTED and (app_id == INTERACTION or message.topic == CONSOLE_RESUME):
+            requested_by = message.payload.get("requested_by")
+            requested_by = requested_by if isinstance(requested_by, str) else None
+            log.info("재개 취소 요청 수신 requested_by=%s", requested_by[:96] if requested_by else None)
+            machine.on_cancel_resume(t, requested_by)
 
     def _drain(self, first: tuple[float, Any] | None = None) -> None:
         item = first

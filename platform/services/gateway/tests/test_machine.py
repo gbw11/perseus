@@ -413,3 +413,57 @@ def test_safe_stop_start_mode_sends_stop_and_waits_for_manual():
     assert h.m.mode is Mode.SAFE_STOP   # 자동 출발 없음
     h.run(PERIOD, apps=(AUTONOMOUS, MANUAL_APP))
     assert h.m.mode is Mode.MANUAL
+
+
+# --- 운영자 취소 (계약 v1.7, S15P31E110-280) ------------------------------------
+
+def test_operator_cancel_stops_countdown_and_keeps_auto_ready():
+    h = auto_ready()
+    gen = h.m.generation
+    h.m.on_resume(h.now, "operator")
+    h.run(1.0, heartbeat=(AUTONOMOUS,))
+    assert h.m.on_cancel_resume(h.now, "admin") is True
+    out = h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    assert events(out, "drive.resume.cancelled") == [
+        {"reason": "operator_cancelled", "generation": gen, "requested_by": "admin"}]
+    # 모드·세대는 그대로이고 control 을 다시 내지 않는다
+    assert h.m.mode is Mode.AUTO_READY and h.m.generation == gen and not h.m.counting_down
+    assert not events(out, "drive.mode.changed") and not of(out, PublishControl)
+    # 3초가 지나도 AUTO 로 가지 않고, 수동이 계속 몬다
+    out = h.run(3.0, heartbeat=(AUTONOMOUS,))
+    assert h.m.mode is Mode.AUTO_READY
+    assert {f.app_id for f in of(out, ForwardDrive)} == {"manual"}
+    assert not events(out, "drive.resume.cancelled")
+
+
+def test_operator_cancel_wins_over_expiry_in_same_step():
+    h = auto_ready()
+    gen = h.m.generation
+    h.m.on_resume(h.now, "operator")
+    h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    h.run(2.98, heartbeat=(AUTONOMOUS,))          # 다음 step 이 만료 시각
+    h.m.on_cancel_resume(h.now, "admin")
+    out = h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    assert h.m.mode is Mode.AUTO_READY and h.m.generation == gen
+    assert [e["reason"] for e in events(out, "drive.resume.cancelled")] == ["operator_cancelled"]
+
+
+def test_operator_cancel_without_countdown_is_ignored():
+    h = auto_ready()
+    assert h.m.on_cancel_resume(h.now, "admin") is False
+    out = h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    assert not events(out, "drive.resume.cancelled") and h.m.mode is Mode.AUTO_READY
+
+
+def test_resume_again_after_operator_cancel():
+    h = auto_ready()
+    gen = h.m.generation
+    h.m.on_resume(h.now, "operator")
+    h.run(0.5, heartbeat=(AUTONOMOUS,))
+    h.m.on_cancel_resume(h.now, "admin")
+    h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    h.m.on_resume(h.now, "operator")
+    out = h.run(PERIOD, heartbeat=(AUTONOMOUS,))
+    assert events(out, "drive.resume.accepted")[0]["generation"] == gen
+    h.run(3.0, heartbeat=(AUTONOMOUS,))
+    assert h.m.mode is Mode.AUTO and h.m.generation == gen + 1
