@@ -1,8 +1,8 @@
 import { Card } from '@xenova/ui';
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import type { DriveState } from '../api/drive';
 import { useMetrics, useVms } from '../api/queries';
-import type { Vm } from '../api/types';
+import type { MetricSample, Vm } from '../api/types';
 import { buildCpuChartScale, cpuChartY, formatCpuTick } from '../domain/cpuChart';
 import {
   buildLinuxMemorySeries,
@@ -24,6 +24,10 @@ import {
 } from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import { useDrive } from '../layout/DriveContext';
+import { AppMemoryPools } from './AppMemoryPools';
+import { ManagedRamSummary } from './ManagedRamSummary';
+import { sharedMemoryObservation, sharedObservedAt } from '../domain/sharedMemoryObservation';
+import { memoryObservationRunKey, selectMemoryObservationRun } from '../domain/memoryObservationRun';
 import styles from './pages.module.css';
 
 /**
@@ -216,7 +220,7 @@ function MemoryDashboard({
 
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
 
-      <div className={styles.memoryVmGrid}>
+      <div className={`${styles.memoryVmGrid} ${styles.memoryOverviewGrid}`}>
         {vms.map((vm) =>
           vm.guest_kind === 'zephyr' ? (
             <MemoryVmPanel key={vm.vm_id} vm={vm} drive={drive} />
@@ -233,10 +237,7 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
   const metrics = useMetrics(vm.vm_id, true, 1, 2000);
   const samples = metrics.data?.items ?? [];
-  const series = buildMemoryPoolSeries(samples);
-  const heap = buildZephyrHeapSeries(samples);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
-  const lastUpdated = relativeTime(series.lastObservedAt);
   const style = {
     '--vm-accent': role?.color ?? UNASSIGNED_COLOR,
     '--rx-accent': 'var(--x-primary)',
@@ -250,7 +251,7 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
       title={
         <span className={styles.memoryVmTitle}>
           <strong>{vm.name}</strong>
-          <small>{role?.short ?? '역할 미지정'} · Zephyr · 네트워크 데이터 Pool</small>
+          <small>{role?.short ?? '역할 미지정'} · Zephyr · 앱 버퍼·힙·네트워크 풀</small>
         </span>
       }
       actions={
@@ -258,7 +259,7 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
           <span className={styles.authority} data-authority={authority.toLowerCase()}>
             {authority}
           </span>
-          <small>마지막 갱신 {lastUpdated}</small>
+          <small>관측 시각과 만료는 영역별로 확인</small>
         </span>
       }
     >
@@ -267,61 +268,135 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
           메트릭 연결 오류
         </div>
       )}
-      <MemoryUsageSummary
-        vmName={vm.name}
-        label="VM 메모리 사용률"
-        current={null}
-        capacity={vm.memory_mib * MIB_BYTES}
-        freeBytes={null}
-        format={formatMiB}
-      />
-      <MemoryUsageChart
-        vmName={vm.name}
-        title="VM 메모리 사용률"
-        points={[]}
-        range="60초"
-        emptyMessage="Zephyr VM 전체 메모리 사용량은 현재 계측되지 않습니다."
-      />
-      <MemoryUsageSummary
-        vmName={vm.name}
-        label="커널 힙 사용률"
-        current={heap.current}
-        capacity={heap.current ? heap.current.usedBytes + heap.current.freeBytes : null}
-        freeBytes={heap.current?.freeBytes ?? null}
-        format={formatKiB}
-      />
-      <MemoryUsageChart vmName={vm.name} title="커널 힙 사용률" points={heap.points} range="60초" />
-      <div className={styles.poolSummaryGrid}>
-        <PoolSummary label="RX Pool" pool={series.rx} tone="rx" />
-        <PoolSummary label="TX Pool" pool={series.tx} tone="tx" />
-      </div>
-
-      <MemoryChart
-        title="패킷 처리율"
-        unit="packets/s"
-        ariaLabel={`${vm.name} RX TX 패킷 처리율 최근 60초`}
-        points={series.packetRates.map((point) => ({
-          observedAt: point.observedAt,
-          rx: point.rxPacketsPerSecond,
-          tx: point.txPacketsPerSecond,
-        }))}
-      />
-      <MemoryChart
-        title="Pool 점유율"
-        unit="%"
-        ariaLabel={`${vm.name} RX TX Pool 점유율 최근 60초`}
-        max={100}
-        points={series.usage.map((point) => ({
-          observedAt: point.observedAt,
-          rx: point.rxPercent,
-          tx: point.txPercent,
-        }))}
-      />
-
-      <div className={styles.memoryObservation}>
-        {observationOf(series, metrics.isPending, !!metrics.error)}
-      </div>
+      <p className={styles.dim}>
+        VM 구성 {vm.memory_mib.toLocaleString('ko-KR')} MiB · 관리 RAM과 내부 버퍼 점유를 분리합니다.
+      </p>
+      <ManagedRamSummary vmId={vm.vm_id} vmName={vm.name} samples={samples} />
+      <AppMemoryPools vmId={vm.vm_id} vmName={vm.name} samples={samples}>
+        <SharedMemoryPanels
+          vmName={vm.name}
+          samples={samples}
+          pending={metrics.isPending}
+          failed={!!metrics.error}
+        />
+      </AppMemoryPools>
     </Card>
+  );
+}
+
+function SharedMemoryPanels({
+  vmName,
+  samples,
+  pending,
+  failed,
+}: {
+  vmName: string;
+  samples: MetricSample[];
+  pending: boolean;
+  failed: boolean;
+}) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const run = selectMemoryObservationRun(samples, samples[0]?.vm_id ?? '');
+  const observed =
+    run.state === 'selected' ? samples.filter((sample) => memoryObservationRunKey(sample) === run.key) : [];
+  const projected = observed.map((sample) => {
+    const family = sample.telemetry?.family;
+    const at = family === 'memory' || family === 'memory_regions' ? sharedObservedAt(sample, family) : null;
+    return at ? { ...sample, observed_at: at } : sample;
+  });
+  const series = buildMemoryPoolSeries(projected);
+  const heap = buildZephyrHeapSeries(projected);
+  const heapObservation = sharedMemoryObservation(
+    samples,
+    'memory',
+    ['memory.kernel_heap.used_bytes', 'memory.kernel_heap.free_bytes'],
+    now,
+  );
+  const currentHeap =
+    heapObservation.state === 'fresh' && heapObservation.sample
+      ? buildZephyrHeapSeries([heapObservation.sample]).current
+      : null;
+  const pool = (region: 'net_rx_data' | 'net_tx_data'): PoolSnapshot => {
+    const view = sharedMemoryObservation(
+      samples,
+      'memory_regions',
+      ['memory.region.used_bytes', 'memory.region.free_bytes', 'memory.region.capacity_bytes'],
+      now,
+      region,
+    );
+    if (view.state === 'fresh' && view.sample)
+      return buildMemoryPoolSeries([view.sample])[region === 'net_rx_data' ? 'rx' : 'tx'];
+    return {
+      state: 'missing',
+      usedBytes: null,
+      freeBytes: null,
+      capacityBytes: null,
+      usagePercent: null,
+      reason: view.reason,
+    };
+  };
+  const rx = pool('net_rx_data'),
+    tx = pool('net_tx_data');
+  return (
+    <>
+      <section className={styles.appMemoryPool} aria-label={`${vmName} 공통 커널 힙`}>
+        <MemoryUsageSummary
+          vmName={vmName}
+          label="커널 힙 사용률"
+          current={currentHeap}
+          capacity={currentHeap ? currentHeap.usedBytes + currentHeap.freeBytes : null}
+          freeBytes={currentHeap?.freeBytes ?? null}
+          format={formatKiB}
+        />
+        <p className={styles.dim}>
+          {heapObservation.reason}
+          {heapObservation.observedAt &&
+            ` · 원 관측 약 ${ago(Math.max(0, now - Date.parse(heapObservation.observedAt)))}`}
+        </p>
+        <MemoryUsageChart vmName={vmName} title="커널 힙 사용률" points={heap.points} range="60초" />
+      </section>
+      <section
+        className={`${styles.appMemoryPool} ${styles.memorySharedNetwork}`}
+        aria-label={`${vmName} 공통 네트워크 풀`}
+      >
+        <h4>MQTT 포함 공통 RX/TX 풀</h4>
+        <p className={styles.dim}>네트워크 공용 버퍼이며 MQTT 전용 메모리 사용량이 아닙니다.</p>
+        <div className={styles.poolSummaryGrid}>
+          <PoolSummary label="RX Pool" pool={rx} tone="rx" />
+          <PoolSummary label="TX Pool" pool={tx} tone="tx" />
+        </div>
+
+        <MemoryChart
+          title="패킷 처리율"
+          unit="packets/s"
+          ariaLabel={`${vmName} RX TX 패킷 처리율 최근 60초`}
+          points={series.packetRates.map((point) => ({
+            observedAt: point.observedAt,
+            rx: point.rxPacketsPerSecond,
+            tx: point.txPacketsPerSecond,
+          }))}
+        />
+        <MemoryChart
+          title="Pool 점유율"
+          unit="%"
+          ariaLabel={`${vmName} RX TX Pool 점유율 최근 60초`}
+          max={100}
+          points={series.usage.map((point) => ({
+            observedAt: point.observedAt,
+            rx: point.rxPercent,
+            tx: point.txPercent,
+          }))}
+        />
+
+        <div className={styles.memoryObservation}>
+          {observationOf({ ...series, rx, tx }, pending, failed)}
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -634,17 +709,6 @@ function observationOf(
     return '잘못된 Pool 데이터가 감지되었습니다.';
   if (series.rx.state !== 'ok' || series.tx.state !== 'ok') return 'RX/TX Pool 데이터가 없습니다.';
   if (series.rx.freeBytes === 0) return 'RX Pool 여유 없음 · 고갈이 관측되었습니다.';
-  if ((series.counters.rxDrop ?? 0) > 0) {
-    return `RX Pool 점유 ${series.rx.usagePercent!.toFixed(1)}% · 최근 구간 RX drop ${series.counters.rxDrop}회`;
-  }
-  if ((series.counters.txDrop ?? 0) > 0) return `최근 구간 TX drop ${series.counters.txDrop}회`;
-  if ((series.counters.poolBusy ?? 0) > 0) return `최근 구간 TX 페이지 부족 ${series.counters.poolBusy}회`;
-  if ((series.counters.protocolErrors ?? 0) > 0)
-    return `최근 구간 프로토콜 오류 ${series.counters.protocolErrors}회`;
-  const latestRate = series.packetRates.at(-1);
-  if ((latestRate?.rxPacketsPerSecond ?? 0) > 0 || (latestRate?.txPacketsPerSecond ?? 0) > 0) {
-    return '패킷이 처리되고 버퍼가 반환되고 있습니다.';
-  }
   return '관측된 Pool 상태를 표시하고 있습니다.';
 }
 

@@ -1,21 +1,11 @@
 import { useTelemetryHeartbeat } from '../api/queries';
+import { publisherObservation } from '../domain/telemetryPublisher';
 import styles from './pages.module.css';
-
-const STATES = { running: '수집 중', degraded: '수집 저하', stopping: '종료 중' };
 
 /** Publisher diagnostics are independent from VM, v1 Agent and application liveness. */
 export function PublisherStatus({ vmId }: { vmId: string }) {
   const query = useTelemetryHeartbeat(vmId);
-  const report = query.data?.vm_id === vmId ? query.data : undefined;
-  const state = query.isError
-    ? '조회 불가'
-    : query.isPending
-      ? '조회 중'
-      : report?.status === 'FRESH' && report.publisher_state
-        ? STATES[report.publisher_state]
-        : report?.status === 'STALE'
-          ? '관측 만료'
-          : '미수신';
+  const { report, label } = publisherObservation(vmId, query);
   const received = report?.received_at;
   const successes = report?.last_collection_success_uptime_ms;
   const failures = report?.collection_failures_total;
@@ -24,7 +14,7 @@ export function PublisherStatus({ vmId }: { vmId: string }) {
       <div className={styles.rows}>
         <div>
           <span>수집기 상태 (v2)</span>
-          <strong>{state}</strong>
+          <strong>{label}</strong>
         </div>
         <div>
           <span>마지막 heartbeat 수신</span>

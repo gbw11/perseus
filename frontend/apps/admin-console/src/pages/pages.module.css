@@ -879,7 +879,7 @@ button.chip:hover:not(.chipOn) {
 }
 .statusLine {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-columns: 6rem minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--x-space-2);
   min-height: 24px;
@@ -894,9 +894,11 @@ button.chip:hover:not(.chipOn) {
   display: flex;
   align-items: center;
   gap: 7px;
+  overflow-wrap: anywhere;
   font-size: var(--x-text-sm);
 }
 .statusLine strong i {
+  flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -1314,6 +1316,144 @@ button.chip:hover:not(.chipOn) {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
+}
+.appMemorySection {
+  margin-bottom: var(--x-space-4);
+}
+.appMemorySection > header,
+.appMemoryPool > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--x-space-2);
+  flex-wrap: wrap;
+}
+.appMemorySection h3 {
+  margin: 0;
+}
+.appMemorySection small,
+.appMemoryTime {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appMemoryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--x-space-3);
+}
+.memoryVmGrid.memoryOverviewGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.memoryGroup {
+  margin-top: var(--x-space-4);
+}
+.memoryGroup h4 {
+  margin: 0 0 var(--x-space-2);
+}
+.memoryGroupBadge {
+  display: inline-block;
+  padding: 3px 10px;
+  border: 1px solid var(--x-border);
+  border-radius: 999px;
+  font-size: var(--x-text-xs);
+  color: var(--x-text-muted);
+}
+.bufferState {
+  display: grid;
+  gap: 4px;
+  margin-top: var(--x-space-2);
+  font-size: var(--x-text-xs);
+}
+.bufferState span,
+.bufferState small {
+  color: var(--x-text-muted);
+}
+.memorySharedNetwork {
+  grid-column: span 2;
+}
+.managedRamSection {
+  margin-bottom: var(--x-space-4);
+}
+.managedRamNotice {
+  grid-column: 1 / -1;
+}
+@media (max-width: 700px) {
+  .memorySharedNetwork {
+    grid-column: auto;
+  }
+}
+.appMemoryPool {
+  min-width: 0;
+  padding: var(--x-space-3);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  background: var(--x-surface-2);
+  --pool-accent: var(--vm-accent);
+}
+.appMemoryPool header b {
+  color: var(--vm-accent);
+  font-family: var(--x-font-mono);
+}
+.appMemoryAmount {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: var(--x-space-2) 0;
+  font-family: var(--x-font-mono);
+}
+.appMemoryAmount > strong {
+  font-size: var(--x-text-lg);
+}
+.appMemoryAmount > span,
+.appMemoryPool dt {
+  color: var(--x-text-muted);
+}
+.appMemoryPool dl {
+  margin: var(--x-space-3) 0;
+  display: grid;
+  gap: 6px;
+  font-size: var(--x-text-xs);
+}
+.appMemoryPool dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--x-space-2);
+}
+.appMemoryPool dd {
+  margin: 0;
+  font-family: var(--x-font-mono);
+  overflow-wrap: anywhere;
+}
+.appMemoryNotice {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appPoolChart svg {
+  display: block;
+  width: 100%;
+  height: 80px;
+  overflow: visible;
+}
+.appPoolChart > div:last-child {
+  display: flex;
+  justify-content: space-between;
+  color: var(--x-text-muted);
+  font-size: 10px;
+}
+.appPoolChartEmpty {
+  display: grid;
+  place-items: center;
+  min-height: 80px;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appMemoryDot {
+  fill: var(--vm-accent);
+}
+.appMemoryTime {
+  display: block;
+  margin-top: var(--x-space-2);
 }
 @media (max-width: 1200px) {
   .memoryVmGrid {
