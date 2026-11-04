@@ -53,13 +53,33 @@
 | --- | --- | --- |
 | 전방 카메라 | `GET http://<PC>:8090/camera/stream.mjpg`, `/camera/snapshot.jpg` (`--camera`, `off` 면 끔) | 320×240, 15 fps, JPEG. 마지막 프레임이 0.5 s 넘게 오래되면 snapshot 은 503 |
 | `vehicle.status` | `xenova/v1/vehicle/status` | 20 Hz, QoS 0, `source_id: dom0-gateway` (게이트웨이 상태 중계가 생기기 전 대역). `v_mps` 는 엔코더 count 로 잰 속도, `steer_rad` 는 서보가 만든 각 |
-| `sim.pose` | `xenova/v1/sim/pose` | 20 Hz, QoS 0, 계정·`source_id` `simulator`. `{x, y, yaw, v_mps, steer_rad, world_revision, surface}` (트랙 고정 좌표) |
+| `sim.pose` | `xenova/v1/sim/pose` | 20 Hz, QoS 0, 계정·`source_id` `simulator`. `{x, y, yaw, v_mps, steer_rad, world_revision, surface, race}` (트랙 고정 좌표). `race` = 출발 신호·랩 (아래) |
 | `sim.world` | `xenova/v1/sim/world` | 바뀔 때, QoS 1 retained. `{revision, track, tracks, car, time_scale, obstacles, estop}`. 정상 종료 시 retained 삭제 |
 | `sim.command.result` | `xenova/v1/sim/result` | 명령마다 한 번. `{request_id, op, ok, code, message, gap_m, need_m}` |
 
 시뮬레이터 전용 토픽은 [MQTT 계약](../../../docs/contracts/mqtt-contract-v1.md) 12장입니다. 관람 화면(모니터 1 세 번째 칸·관리 콘솔)이 백엔드
 REST-30·WS-06 을 거쳐 그리고, 관리 콘솔 버튼은 REST-31~37 → `xenova/v1/sim/command`(구독)로 시뮬레이터를 조작합니다
-(장애물 놓기·옮기기·치우기, E-stop, 차 밀기, 트랙 바꾸기, 다시 출발). 배치 검사는 차와 겹침(`ON_CAR`)·벽 밖(`OUT_OF_TRACK`)만 합니다.
+(장애물 놓기·옮기기·치우기, E-stop, 차 밀기, 트랙 바꾸기, 다시 출발).
+
+**배치 검사** (`placement.py`, 관리 콘솔 mock `simEngine.ts` checkPlacement 와 같은 식·순서. 무작위 300개 배치에서 mock 과 결과가 모두 같음을 확인):
+
+| 코드 | 거부하는 자리 |
+| --- | --- |
+| `OUT_OF_TRACK` | 장애물이 벽 밖으로 조금이라도 나감 (\|off\| > 벽 − 폭/2) |
+| `ON_CAR` | 차 몸과 겹침 |
+| `NO_GAP` | 장애물 앞뒤(차 길이만큼)에서 가장 넓은 틈 < 0.26 m (차 폭 0.20 + 양쪽 0.03). 결과에 `gap_m`·`need_m` |
+| `TOO_DENSE` | 틈은 있지만 기준 회피 주행(mock 자율 규칙)을 묶음 4.8 m 앞에서 돌려 보면 서거나 닿음 |
+| `TOO_CLOSE` | 출발 뒤(`race.phase = go`) 달리는 차 바로 앞(−0.3 ~ 4.8 m)이라 지금 상태로 돌려 봐도 못 지나감 |
+
+`TOO_DENSE`·`TOO_CLOSE` 의 "기준 회피 주행"은 mock 의 자율 규칙과 mock 차 모델이다. 지금 Zephyr 자율 앱은 장애물 앞에서 서기만 하므로
+실제 주행과 같은 판정은 아니고, 콘솔 화면이 mock 과 같은 자리를 같은 이유로 거부하게 하는 것이다. 검사 한 번에 보통 0.2 초, 길면 0.8 초.
+
+**출발 신호·랩** (`race.py`, 시나리오 P7, mock `newRace`·`advance` 와 같음): 다시 출발(`race.start`·`track.select`·터미널 `r`·시작) 0.7 초 뒤부터
+빨간 불이 1 초마다 켜지고(5개), 0.2 ~ 3.0 초 뒤 모두 꺼지면 `go`. 출발 신호 중에는 수동이 아닌 활성 앱(자율)의 전진을 막아 출발선에 둔다
+(자율 앱은 신호를 보지 않으므로). 수동은 막지 않으며, 불이 켜진 뒤 전진하면 부정 출발 → 첫 바퀴 +5 초.
+`frames` 입력은 활성 앱을 모르므로 늘 막고 부정 출발은 판정하지 않는다. 랩은 반 바퀴를 지난 뒤 출발선을 넘을 때. `--no-start-lights` 면 바로 `go`.
+
+**노면**: 연석 밖(잔디·흙)에서는 0.3 m/s 를 넘으면 1.2 m/s² 로 줄어 0.3 m/s 에 머문다 (mock physics 와 같음, 판정 점 = 뒷바퀴 축 가운데).
 **젯슨 `perception` 계정은 브로커 ACL 로 `sim/*` 를 읽을 수 없습니다** — 젯슨은 카메라 화면만 봅니다.
 
 ## 차량·트랙 모델
@@ -101,8 +121,8 @@ python -m xenova_perception --source stream --url http://<시뮬레이터 PC>:80
 | `t [트랙id]` | 트랙 바꾸기 (장애물 치우고 출발선으로). id 없이 치면 목록 |
 | `c` | 장애물 모두 치우기 |
 | `e` | 비상정지 켜기/끄기 |
-| `s` | 트랙·위치·차로 중심 이탈·노면·한 바퀴 진행·바퀴 rpm·엔코더·속도·조향·세대·플래그·프레임 수 한 줄 |
-| `r` | 출발선으로 (속도 0) |
+| `s` | 트랙·위치·차로 중심 이탈·노면·한 바퀴 진행·바퀴 rpm·엔코더·속도·조향·세대·플래그·출발 신호·랩·프레임 수 한 줄 |
+| `r` | 출발선으로 (속도 0), 출발 신호 처음부터 |
 | `q` | 종료 |
 
 ### 보드 없이 폐루프 리허설
@@ -135,9 +155,9 @@ python -m pytest        # 바퀴·엔코더·서보·자전거 모델, 트랙, �
 
 ## 한계
 
-- 콘솔 mock 의 `NO_GAP`·`TOO_DENSE`·`TOO_CLOSE`(회피 주행 미리 돌려 보기)·출발 신호·랩(`sim.pose.race`)은 하지 않습니다. 지금 자율 앱은 장애물을 피하지 않고 섭니다.
-- 인지 대역(색 기반)의 차선 정확도 (레드불링·헝가로링·몬자 중심선 위 표본, 실제 트랙 값과 비교): 오프셋 오차 p95 0.14 m,
-  방향 오차 p95 0.25 rad, 급한 코너 최대 0.54 rad. 60° 카메라에 바깥 선 하나만 보이는 코너에서 크다. 폐루프는 오프셋 보정으로 버틴다.
+- 배치 검사(`NO_GAP` 등)는 mock 의 기준 회피 주행으로 미리 돌려 보지만, 지금 자율 앱 자체는 장애물을 피하지 않고 섭니다.
+- 인지 대역(색 기반)의 차선 정확도는 10개 트랙 한 바퀴에서 오프셋 오차 p95 0.035 m·방향 오차 p95 0.060 rad (S15P31E110-320,
+  `../perception/README.md` 결과표). 곡률이 바뀌는 곳·머리핀에서 방향 오차가 0.3~0.75 rad 까지 튄다.
 - 연석은 실제처럼 빨강·흰 줄이 아니라 파랑입니다 (색 기반 인지가 장애물·차선으로 착각하지 않게). 벽은 바닥 색으로만 그립니다.
 
 - 평평한 지면, 미끄럼 없음, 조명·그림자·흔들림 없는 깨끗한 화면입니다. 실제 카메라보다 인지가 쉽습니다.

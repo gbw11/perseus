@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/api': { target: backend, changeOrigin: true },
-        '/ws': { target: backend.replace(/^http/, 'ws'), ws: true },
+        '/ws': { target: backend.replace(/^http/, 'ws'), ws: true, changeOrigin: true },
         '/monitor': { target: monitor, ws: true },
       },
     },

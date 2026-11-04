@@ -1,6 +1,9 @@
 # 수동주행 앱 테스트를 CI에 추가 — 정수환(deploy) 요청
 
 > 작성: 공병우, 2026-10-20 · 관련: S15P31E110-155·237 (브랜치 `feat/app/S15P31E110-155-manual-drive-app`)
+>
+> **2026-11-04 반영 (S15P31E110-365)**: 정수환 부재 주간에 팀 협의로 공병우가 처리. 루트 `Jenkinsfile` 대신 파트별 구조에 맞춰
+> `Jenkinsfile.vehicle`(Job `xenova-vehicle-check`)에 수동 앱 pytest 와 C 호스트 시험(cmake + ctest)을 넣었다. Zephyr 빌드는 여전히 제외.
 
 ## 0. 요약
 

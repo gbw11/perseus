@@ -27,5 +27,6 @@ include = ["xenova_perception*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "../../services/vm-agent/mqtt-client"]
+# ../simulator: 차선 정확도 시험(test_lane_eval)이 시뮬레이터 전방 카메라 화면을 쓴다 (없으면 그 시험만 skip)
+pythonpath = [".", "../../services/vm-agent/mqtt-client", "../simulator"]
 addopts = "-q"

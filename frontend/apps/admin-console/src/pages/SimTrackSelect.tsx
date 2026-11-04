@@ -11,16 +11,19 @@ export function SimTrackSelect({
   tracks,
   current,
   onPick,
+  disabled = false,
 }: {
   tracks: TrackItem[];
   current: string;
   onPick: (id: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <select
       className={styles.trackSelect}
       value={current}
       aria-label="트랙 고르기"
+      disabled={disabled}
       onChange={(e) => onPick(e.target.value)}
     >
       {tracks.map((t) => (

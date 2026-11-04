@@ -195,7 +195,7 @@ export async function cancelResume(): Promise<void> {
 /** 시연 동작 (mock 에서만 동작 — 실제 API 는 격리 시연 -135 가 정한다) */
 export const mockDemo = MOCK
   ? {
-      forceKill: (target: 'autonomous' | 'manual' | 'message-board') =>
+      forceKill: (target: 'autonomous' | 'manual' | 'interaction') =>
         void loadScenario().then((s) => s.forceKill(target)),
       togglePerception: () => void loadScenario().then((s) => s.togglePerception()),
     }
