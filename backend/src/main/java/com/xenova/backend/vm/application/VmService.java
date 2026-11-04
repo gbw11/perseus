@@ -15,13 +15,12 @@ import com.xenova.backend.vm.domain.VmRole;
 import com.xenova.backend.vm.domain.VmRuntime;
 import com.xenova.backend.vm.domain.VmState;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -41,6 +40,7 @@ public class VmService {
     private final TemplateCatalog templateCatalog;
     private final EventRecorder eventRecorder;
     private final VmStateTracker stateTracker;
+    private final VmRuntimeCache runtimeCache;
     private final Clock clock;
 
     public VmService(
@@ -49,27 +49,47 @@ public class VmService {
             TemplateCatalog templateCatalog,
             EventRecorder eventRecorder,
             VmStateTracker stateTracker,
+            VmRuntimeCache runtimeCache,
             Clock clock) {
         this.vmControlPort = vmControlPort;
         this.vmRecordRepository = vmRecordRepository;
         this.templateCatalog = templateCatalog;
         this.eventRecorder = eventRecorder;
         this.stateTracker = stateTracker;
+        this.runtimeCache = runtimeCache;
         this.clock = clock;
+    }
+
+    public record VmList(List<Vm> vms, Instant observedAt) {
     }
 
     // Domains unknown to Spring (e.g. started by a platform tool) are left out.
     public List<Vm> list() {
-        Map<String, VmRuntime> runtimes = vmControlPort.list().stream()
-                .collect(Collectors.toMap(VmRuntime::vmId, Function.identity(), (first, second) -> first));
-        return vmRecordRepository.findAllByLifecycleOrLifecycleIsNullOrderByCreatedAtAsc(VmLifecycle.REGISTERED).stream()
-                .map(record -> Vm.of(record, runtimes.get(record.getVmId())))
-                .toList();
+        return listObserved().vms();
+    }
+
+    // observedAt: when dom0-manager reported the runtimes, which can be a little before the response.
+    public VmList listObserved() {
+        return combine(runtimeCache.read());
+    }
+
+    // Always asks dom0-manager; the state check uses it so the cache is refreshed by one caller.
+    public List<Vm> listLive() {
+        return combine(runtimeCache.refresh()).vms();
     }
 
     public Vm get(String vmId) {
         VmRecord record = findRecord(vmId);
-        return Vm.of(record, vmControlPort.find(vmId).orElse(null));
+        return Vm.of(record, runtimeCache.find(vmId).orElse(null));
+    }
+
+    private VmList combine(VmRuntimeCache.Snapshot snapshot) {
+        Map<String, VmRuntime> runtimes = snapshot.runtimes();
+        List<Vm> vms = vmRecordRepository.findAllByLifecycleOrLifecycleIsNullOrderByCreatedAtAsc(VmLifecycle.REGISTERED)
+                .stream()
+                .map(record -> Vm.of(record, runtimes.get(record.getVmId())))
+                .toList();
+        return new VmList(vms, snapshot.observedAt());
     }
 
     // The role is a console label only: no dom0-manager call, no event, and the VM keeps running as it is.
@@ -111,7 +131,9 @@ public class VmService {
     private Vm launchNew(VmRecord record) {
         Vm vm;
         try {
-            vm = Vm.of(record, vmControlPort.launch(record.getVmId(), record.launchSpec()));
+            VmRuntime runtime = vmControlPort.launch(record.getVmId(), record.launchSpec());
+            runtimeCache.put(record.getVmId(), runtime);
+            vm = Vm.of(record, runtime);
         } catch (ApiException exception) {
             if (!DOMAIN_EXISTS.equals(exception.getCode())) {
                 // On a timeout the domain may still be coming up, so the record is kept and a retry can recover it.
@@ -150,6 +172,7 @@ public class VmService {
         return underOperation(vmId, () -> {
             VmState before = vmControlPort.find(vmId).map(VmRuntime::state).orElse(null);
             vmControlPort.stop(vmId);
+            runtimeCache.remove(vmId);
             if (before != null) {
                 stateTracker.changedByUser(vmId, before, VmState.STOPPED, VmStateTracker.CAUSE_USER_STOP);
             }
@@ -163,6 +186,7 @@ public class VmService {
         VmRecord record = findRecord(vmId);
         underOperation(vmId, () -> {
             vmControlPort.destroy(vmId);
+            runtimeCache.remove(vmId);
             record.retire();
             vmRecordRepository.save(record);
             stateTracker.forget(vmId);
@@ -206,7 +230,9 @@ public class VmService {
     private Vm launch(VmRecord record) {
         Vm vm;
         try {
-            vm = Vm.of(record, vmControlPort.launch(record.getVmId(), record.launchSpec()));
+            VmRuntime runtime = vmControlPort.launch(record.getVmId(), record.launchSpec());
+            runtimeCache.put(record.getVmId(), runtime);
+            vm = Vm.of(record, runtime);
         } catch (ApiException exception) {
             // 409 VMExists for our own vm_id means an earlier launch already succeeded (contract 10.1).
             if (!DOMAIN_EXISTS.equals(exception.getCode())) {

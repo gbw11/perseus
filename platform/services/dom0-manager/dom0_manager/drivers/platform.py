@@ -16,6 +16,9 @@
 - 키 있는 stop 과 원 작업 조회(control-operation)는 Manager.fork() 의 요청별 객체로 부른다. 긴 start 가 공유 Manager 를 쥐어도
   stop 은 짧은 admission 잠금으로 정지 의도를 내구 수락하고, 실행 잠금이 잡혀 있으면 기다리지 않고 pending 으로 돌아온다.
   나머지 action 은 지금처럼 SerializedManager 로 직렬화한다. fork 가 없는 옛 Manager 는 직렬화된 경로를 그대로 쓴다
+- 일반 조회(_READ_ACTIONS)는 read_fork(XENOVA_PLATFORM_READ_FORK)일 때 호출마다 새 fork 로 부른다. 하위가 이 조회를 공통 실행
+  잠금 없이 처리하는 후보(cli-manager-spec "일반 조회의 동시 실행과 정합성")에서만 켠다. fork 가 있어도 조회가 공통 잠금을 쓰는
+  옛·혼합 설치본에서는 직렬화 대기(busy timeout 503) 대신 하위 잠금 대기로 바뀔 뿐이라 기본은 끈다
 - 요청 예산(budget.py)이 있으면 직렬화 대기를 남은 예산으로 줄이고, 하위에는 budget_ms(get/list/control-operation 은 timeout_ms 도)로
   남은 값만 준다. 남은 값이 없으면 제출하지 않는다
 """
@@ -24,6 +27,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import json
 import logging
 import os
 import sys
@@ -48,7 +52,7 @@ from ..errors import (
     VMExists,
     VMNotFound,
 )
-from ..models import ControlOperation, ControlStatus, VmState
+from ..models import ControlOperation, ControlStatus, CpuLayout, VmState
 from .base import CreateSpec, Domain, Driver, HostInfo, InstancePaths, Provisioner, StatsSample
 from .xentop import Xentop, collect_stats
 from .xl import Xl
@@ -74,8 +78,29 @@ class ManagerLike(Protocol):
 # 요청 예산 전달
 # ---------------------------------------------------------------------------
 
-_BUDGET_ACTIONS = frozenset({"start", "stop", "reboot", "destroy", "get", "list", "control-operation"})  # 하위 budget_ms 허용 action
-_TIMEOUT_ACTIONS = frozenset({"get", "list", "control-operation"})  # spec timeout_ms(1..15000) 를 받는 조회
+# 하위 budget_ms 를 넘기는 action (cli-manager-spec Python Manager 호출).
+# 미해결(S15P31E110-334): create 는 아직 넘기지 않아 요청 예산이 지나도 원 생성이 계속된다. 하위는 create 예산이 생성 정책
+# call_ms 보다 크면 INVALID_SPEC 이고 원 생성 기한을 진입+budget_ms−cleanup_ms 로 줄이므로, HTTP 예산 상한(105초)을 그대로
+# 넘기면 Linux 생성이 끝나지 못한다. 헤더 상한·정책 값·Spring timeout 을 정한 뒤 연결한다
+_BUDGET_ACTIONS = frozenset({
+    "start", "stop", "reboot", "destroy", "get", "list", "intents", "probe", "execution-context", "templates", "operation",
+    "control-operation", "recovery-operation", "recovery-reconcile", "operation-reconcile",
+    "provision", "provisioning", "registrations",
+})
+# spec timeout_ms(1..15000) 를 받는 action. templates 는 받지 않는다
+_TIMEOUT_ACTIONS = frozenset({
+    "get", "list", "intents", "probe", "execution-context", "operation", "control-operation", "recovery-operation", "recovery-reconcile",
+    "provision", "provisioning", "registrations",
+})
+# 하위가 공통 실행 잠금 없이 처리하는 일반 조회. read_fork 일 때 직렬화하지 않고 호출마다 새 fork 로 부른다.
+# provisioning·registrations는 metadata 조회다. provision은 공급 변경이므로 직렬화한다.
+# cpu-layout 은 공통 operation lock 을 기다리지 않고 시도해 경합이면 바로 OPERATION_IN_PROGRESS 다. 그래서 여기서도 줄 세우지 않는다
+_READ_ACTIONS = frozenset({
+    "list", "get", "intents", "probe", "execution-context", "templates", "operation", "control-operation", "recovery-operation",
+    "provisioning", "registrations", "cpu-layout",
+})
+# budget_ms 는 받지 않고 spec timeout_ms(1..15000) 만 받는 조회. 요청 예산은 timeout_ms 로만 줄인다
+_TIMEOUT_ONLY_ACTIONS = frozenset({"cpu-layout"})
 _READ_TIMEOUT_MS = 15_000  # 하위 조회의 기본·상한
 
 
@@ -97,11 +122,12 @@ def call_with_budget(manager: Any, action: str, spec: dict[str, Any] | None = No
     remaining = budget.downstream_ms()
     if remaining is None:
         return _deadline_envelope(action, kwargs.get("request_id"))
-    if action in _BUDGET_ACTIONS and _accepts_budget(manager):
+    budgeted = action in _BUDGET_ACTIONS and _accepts_budget(manager)
+    if budgeted:
         kwargs["budget_ms"] = min(remaining, request_budget.MAX_MS)
-        if action in _TIMEOUT_ACTIONS:
-            spec = dict(spec or {})
-            spec["timeout_ms"] = min(int(spec.get("timeout_ms", _READ_TIMEOUT_MS)), remaining, _READ_TIMEOUT_MS)
+    if action in _TIMEOUT_ONLY_ACTIONS or (budgeted and action in _TIMEOUT_ACTIONS):
+        spec = dict(spec or {})
+        spec["timeout_ms"] = min(int(spec.get("timeout_ms", _READ_TIMEOUT_MS)), remaining, _READ_TIMEOUT_MS)
     return manager.call(action, spec, **kwargs)
 
 
@@ -138,18 +164,26 @@ class SerializedManager:
     가득 차 서비스 전체가 멈춘 것처럼 보인다. 그래서 대기 시간을 넘기면 플랫폼의 파일 잠금 충돌과 같은 모양의
     OPERATION_IN_PROGRESS(retryable) 봉투를 돌려주고, 호출자는 그것을 503 PlatformUnavailable 로 낸다.
     요청 예산이 있으면 대기 한도는 남은 예산과 busy_timeout_s 중 짧은 쪽이고, 차례가 왔을 때 예산이 다 썼으면 제출하지 않는다.
+
+    read_fork 이면 일반 조회는 이 직렬화를 거치지 않고 호출마다 새 요청 객체(inner.fork())로 부른다. 같은 fork 객체를 두 호출이
+    공유하지 않고, 공유 inner 를 잠금 없이 부르지도 않는다. fork 가 없으면 조회도 직렬화된다.
     """
 
-    def __init__(self, inner: ManagerLike, *, busy_timeout_s: float = 5.0) -> None:
+    def __init__(self, inner: ManagerLike, *, busy_timeout_s: float = 5.0, read_fork: bool = False) -> None:
         self._inner = inner
         self._lock = threading.Lock()
         self.busy_timeout_s = busy_timeout_s
+        self.read_fork = read_fork
 
     @property
     def data(self) -> Path:
         return self._inner.data
 
     def call(self, action: str, spec: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+        if self.read_fork and action in _READ_ACTIONS:
+            forked = self.fork()
+            if forked is not None:
+                return call_with_budget(forked, action, spec, **kwargs)
         budget = request_budget.current()
         wait = self.busy_timeout_s if budget is None else budget.wait_s(self.busy_timeout_s)
         if not self._lock.acquire(timeout=wait):
@@ -189,7 +223,7 @@ def _busy_envelope(action: str, waited_s: float, request_id: Any) -> dict[str, A
     }
 
 
-def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0) -> ManagerLike:
+def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0, read_fork: bool = False) -> ManagerLike:
     """XENOVA_PLATFORM_LIB 의 디렉터리들을 sys.path 에 넣고 xenova_management.Manager() 를 만든다."""
     for entry in [p for p in platform_lib.split(os.pathsep) if p]:
         if entry not in sys.path:
@@ -200,7 +234,7 @@ def load_manager(platform_lib: str, *, busy_timeout_s: float = 5.0) -> ManagerLi
         raise PlatformUnavailable(
             "xenova_management not importable; set XENOVA_PLATFORM_LIB (board: /usr/lib/xenova)", detail=str(exc)
         ) from exc
-    return SerializedManager(module.Manager(), busy_timeout_s=busy_timeout_s)
+    return SerializedManager(module.Manager(), busy_timeout_s=busy_timeout_s, read_fork=read_fork)
 
 
 RecordsLoader = Callable[[], Mapping[str, Mapping[str, Any]]]
@@ -244,6 +278,7 @@ _CODE_MAP: dict[str, type[Dom0ManagerError]] = {
     "IP_CONFLICT": InvalidState,
     "OPERATION_IN_PROGRESS": PlatformUnavailable,  # 다른 플랫폼 작업이 잠금 보유(재시도 가능). 프로세스 안 직렬화 대기 초과도 같은 코드
     "VM_NOT_STOPPED": InvalidState,
+    "VM_NOT_RUNNING": InvalidState,  # 신규 reboot 를 실행 중이 아닌 도메인에 요청함(플랫폼에 요청한 전용 코드)
     "TARGET_CHANGED": InvalidState,
     "ASSET_IN_USE": InvalidState,
     "RESTORE_CONFLICT": InvalidState,
@@ -267,6 +302,11 @@ _CODE_MAP: dict[str, type[Dom0ManagerError]] = {
 # 메시지로만 실린다. 플랫폼이 DEADLINE_EXCEEDED 를 내기 전까지 이 두 코드에 한해 메시지로 시한 초과를 가려 504 로 낸다
 _TIMEOUT_MESSAGE_CODES = frozenset({"XEN_EXECUTION_FAILED", "ARTIFACT_INVALID"})
 _TIMEOUT_MESSAGE_MARKERS = ("deadline", "timed out")
+# reboot 의 수락 전 거절도 전용 코드 없이 ARTIFACT_INVALID 문구로만 온다(xenova_vm.reboot). 이 두 문구만 계약 오류로 가린다
+_REFUSAL_MESSAGES: tuple[tuple[str, type[Dom0ManagerError]], ...] = (
+    ("cannot reboot a stopped VM", InvalidState),  # 실행 중인 도메인이 없다
+    ("Zephyr graceful reboot unsupported", NotSupportedByPlatform),  # 협력 제어 채널이 없는 Zephyr. HTTP 에는 force 가 없다
+)
 
 
 def raise_for_envelope(envelope: dict[str, Any], *, context: str, operation: ControlOperation | None = None) -> dict[str, Any]:
@@ -289,7 +329,10 @@ def raise_for_envelope(envelope: dict[str, Any], *, context: str, operation: Con
     if code == "IP_POOL_EXHAUSTED":  # 플랫폼이 전역 잠금 안에서 고른 Linux 내부 IP 가 바닥남
         raise InsufficientResources("ipv4", 1, 0, platform_code=code, retryable=retryable)
     cls: type[Dom0ManagerError]
-    if code in _TIMEOUT_MESSAGE_CODES and any(marker in message for marker in _TIMEOUT_MESSAGE_MARKERS):
+    refusal = next((c for marker, c in _REFUSAL_MESSAGES if message.startswith(marker)), None) if code == "ARTIFACT_INVALID" else None
+    if refusal is not None:
+        cls = refusal
+    elif code in _TIMEOUT_MESSAGE_CODES and any(marker in message for marker in _TIMEOUT_MESSAGE_MARKERS):
         cls, message = DriverTimeout, "platform operation deadline exceeded"
     else:
         cls = _CODE_MAP.get(code, DriverError)  # 모르는 코드(ARTIFACT_INVALID 등)는 500 이지만 원본 코드는 보존한다
@@ -356,7 +399,7 @@ def _accepted_without_operation(code: str | None) -> PlatformUnavailable:
 
 
 def control_operation_from_envelope(envelope: dict[str, Any], *, vm_id: UUID, action: str, key: str | None) -> ControlOperation:
-    """제어 호출(stop) 봉투 → 상태. 수락된 요청의 오류는 details 의 허용 필드만 옮긴다.
+    """제어 호출(stop·reboot) 봉투 → 상태. 수락된 요청의 오류는 details 의 허용 필드만 옮긴다.
 
     수락된 요청(완료 포함)은 원 작업 ID 가 있어야 추적할 수 있다. 없거나 UUID 가 아니면 하위 버전 불일치·기록 손상이므로
     수락·완료로 내지 않고 503 이다.
@@ -408,7 +451,7 @@ def control_operation_from_envelope(envelope: dict[str, Any], *, vm_id: UUID, ac
     )
 
 
-_TRACKED_REQUEST = {"action": "stop", "force": False}  # HTTP 가 키로 추적하는 제어 요청(4.3.1). 다른 기록은 이 조회의 대상이 아니다
+_TRACKED_ACTIONS = frozenset({"stop", "reboot"})  # HTTP 가 키로 추적하는 제어 요청(4.3.1, force 없음). 다른 기록은 이 조회의 대상이 아니다
 
 
 def control_operation_from_record(
@@ -416,8 +459,8 @@ def control_operation_from_record(
 ) -> ControlOperation:
     """control-operation 조회의 원 기록 → 상태. superseded 는 현재 의도와 대조해야 알 수 있어 여기서는 내지 않는다.
 
-    응답 유실 뒤 원 작업을 되찾는 경계라 기록이 정확히 '이 VM·이 키의 graceful stop' 이어야 한다: 유효한 operation_id 가 봉투의 값과
-    같고, record.vm_id·request.vm_id 가 조회 VM 이고, request 가 stop(force 없음)이고, idempotency_key 가 조회 키이고, phase 가 알려진
+    응답 유실 뒤 원 작업을 되찾는 경계라 기록이 정확히 '이 VM·이 키의 graceful stop·reboot' 이어야 한다: 유효한 operation_id 가 봉투의
+    값과 같고, record.vm_id·request.vm_id 가 조회 VM 이고, request 가 stop·reboot(force 없음)이고, idempotency_key 가 조회 키이고, phase 가 알려진
     값. 하나라도 어긋나면 기록 손상이나 하위 버전 불일치이므로 200 으로 꾸미지 않고 503 이다.
     """
     phase = _str(record.get("phase"))
@@ -427,8 +470,8 @@ def control_operation_from_record(
         ("operation_id", operation_id is None or _uuid(envelope_operation_id) != operation_id),
         ("vm_id", _uuid(record.get("vm_id")) != vm_id),
         ("request.vm_id", _uuid(request.get("vm_id")) != vm_id),
-        ("request.action", request.get("action") != _TRACKED_REQUEST["action"]),
-        ("request.force", request.get("force") is not _TRACKED_REQUEST["force"]),  # 빠진 필드를 False 로 채우지 않는다
+        ("request.action", request.get("action") not in _TRACKED_ACTIONS),
+        ("request.force", request.get("force") is not False),  # 빠진 필드를 False 로 채우지 않는다
         ("idempotency_key", record.get("idempotency_key") != key),
         ("phase", phase not in _PHASE_STATUS),
     ) if bad]
@@ -499,6 +542,7 @@ def view_to_domain(view: dict[str, Any]) -> Domain | None:
 
 
 _LOOKUP_TIMEOUT_MS = 5_000  # 원 작업 조회의 기본 한도. HTTP 조회 계약 5초와 같다
+_CPU_LAYOUT_TIMEOUT_MS = 5_000  # CPU 배치 조회의 기본 한도. Spring 조회 한도(6초) 안에서 응답한다
 
 
 class PlatformDriver(Driver):
@@ -521,6 +565,14 @@ class PlatformDriver(Driver):
         self._monotonic = monotonic
 
     # ---- 조회 ----
+
+    def registrations(self, vm_id: UUID | None = None):
+        """공개 metadata action을 요청별 객체로 호출한다. live list/get을 앞세우지 않는다."""
+        spec = {"timeout_ms": 5000}
+        if vm_id is not None:
+            spec["vm_id"] = str(vm_id)
+        data = raise_for_envelope(call_with_budget(self._request_manager(), "registrations", spec), context="registrations")
+        return data["registration" if vm_id is not None else "registrations"]
 
     def _views(self, lifecycle: str = "REGISTERED") -> list[dict[str, Any]]:
         data = raise_for_envelope(call_with_budget(self.manager, "list", {"lifecycle": lifecycle}), context="list")
@@ -582,10 +634,15 @@ class PlatformDriver(Driver):
             return  # 멱등: 등록 자체가 없어도 목표 상태(도메인 부재)는 달성
         raise_for_envelope(envelope, context=f"stop {vm_id}")
 
-    # ---- 정지 요청 추적 (S15P31E110-305) ----
+    def reboot(self, vm_id: UUID) -> None:
+        """같은 디스크로 새 실행(새 execution_id)을 시작한다. 하위가 graceful 재부팅 뒤 새 실행을 관측할 때까지 기다린다.
+        force 는 넘기지 않는다: 협력 제어 채널이 없는 Zephyr 는 501 이다. 등록이 없으면 404(stop 과 달리 목표를 달성할 수 없다)."""
+        raise_for_envelope(call_with_budget(self.manager, "reboot", {"vm_id": str(vm_id), "force": False}), context=f"reboot {vm_id}")
+
+    # ---- 요청별 등록 조회·정지 추적 (S15P31E110-305) ----
 
     def _request_manager(self) -> ManagerLike:
-        """stop 수락·원 작업 조회용 요청별 Manager. fork 가 없으면 공유(직렬화된) Manager 를 그대로 쓴다."""
+        """등록 조회·stop 수락·원 작업 조회용 객체. 구형 fork 부재는 공유 직렬화를 유지한다."""
         fork = getattr(self.manager, "fork", None)
         forked = fork() if callable(fork) else None
         return forked if forked is not None else self.manager
@@ -601,6 +658,18 @@ class PlatformDriver(Driver):
             return operation
         raise_for_envelope(envelope, context=f"stop {vm_id}", operation=operation)
         return None  # raise_for_envelope 는 ok 가 아니면 반드시 예외를 낸다
+
+    def request_reboot(self, vm_id: UUID, *, key: str) -> ControlOperation:
+        """키 있는 graceful reboot(S15P31E110-208). stop 과 같은 원장이다: 완료·접수(pending)는 상태로 돌려주고, 그 밖은 원 작업 문맥을
+        붙인 예외로 올린다. 신규·재전달 구분과 신규의 실행 상태 검사는 서비스가 먼저 한다(VmService.request_reboot)."""
+        envelope = call_with_budget(self._request_manager(), "reboot", {"vm_id": str(vm_id), "force": False}, idempotency_key=key)
+        if not envelope.get("ok") and (envelope.get("error") or {}).get("code") == "VM_NOT_FOUND":
+            raise_for_envelope(envelope, context=f"reboot {vm_id}")
+        operation = control_operation_from_envelope(envelope, vm_id=vm_id, action="reboot", key=key)
+        if envelope.get("ok") or operation.status == ControlStatus.pending:
+            return operation
+        raise_for_envelope(envelope, context=f"reboot {vm_id}", operation=operation)
+        raise AssertionError("raise_for_envelope raises when not ok")
 
     def control_operation(self, vm_id: UUID, *, key: str) -> ControlOperation:
         """원 제어 작업을 요청 키로 읽는다. 짧은 admission 잠금만 쓰고 시작·정지·이행이나 Xen 관측을 하지 않는다."""
@@ -625,6 +694,38 @@ class PlatformDriver(Driver):
         observation = data.get("deadline_observation") if isinstance(data.get("deadline_observation"), dict) else {}
         return control_operation_from_record(record, observation, vm_id=vm_id, key=key,
                                              envelope_operation_id=envelope.get("operation_id"))
+
+    # ---- CPU 배치 (S15P31E110-353) ----
+
+    def cpu_layout(self, vm_id: UUID | None = None) -> CpuLayout:
+        """정책 배치와 실제 Xen hard affinity·전용성 검사. 조회만 한다(정책·affinity·VM 을 바꾸지 않음).
+        하위는 공통 operation lock 을 기다리지 않으므로 긴 변경 작업 중이면 바로 503(재시도 가능)이다."""
+        spec: dict[str, Any] = {"timeout_ms": _CPU_LAYOUT_TIMEOUT_MS}
+        if vm_id is not None:
+            spec["vm_id"] = str(vm_id)
+        envelope = call_with_budget(self.manager, "cpu-layout", spec)
+        context = "cpu-layout" if vm_id is None else f"cpu-layout {vm_id}"
+        if not envelope.get("ok"):
+            error = envelope.get("error") or {}
+            code = error.get("code")
+            if code == "INVALID_SPEC":  # 입력은 API 가 먼저 검사한다. 남는 경우는 cpu-layout 을 모르는 옛 Manager 다
+                raise NotSupportedByPlatform("platform manager does not support cpu-layout",
+                                             detail=f"{code}: {error.get('message')}", platform_code=code)
+            if code == "TARGET_CHANGED":  # 관측 도중 domain set·신원·정책이 바뀌었다: 대상 충돌이 아니라 다시 읽을 일이다
+                raise PlatformUnavailable(f"{context}: CPU state changed during observation; read again",
+                                          detail=f"{code}: {error.get('message')}", platform_code=code, retryable=True)
+            raise_for_envelope(envelope, context=context)
+        try:
+            layout = CpuLayout.model_validate_json(json.dumps(envelope.get("data")), strict=True)
+        except (TypeError, ValueError) as exc:  # ValidationError 도 ValueError 다. JSON 으로 옮길 수 없는 값도 같은 손상이다
+            # 모양·의미값이 어긋난 응답을 빈 마스크·false 로 꾸미지 않는다
+            raise PlatformUnavailable(f"{context}: platform returned a malformed CPU layout; inspect the platform version",
+                                      detail=str(exc)[:300]) from exc
+        if vm_id is not None and [vm.vm_id for vm in layout.vms] != [vm_id]:
+            # 한 VM 조회의 결과는 정확히 그 VM 하나다. 빈 목록·다른 VM·여러 VM 을 그 VM 의 배치로 내지 않는다
+            raise PlatformUnavailable(f"{context}: platform returned CPU layout for {[str(vm.vm_id) for vm in layout.vms]}, not this VM",
+                                      detail="single-VM cpu-layout must contain exactly the requested VM")
+        return layout
 
     # ---- 호스트 ----
 
@@ -765,7 +866,8 @@ class PlatformProvisioner(Provisioner):
         }
         # ipv4 는 보내지 않는다. 플랫폼이 registry·tombstone·진행 중 작업·공장 예약·DHCP lease 를 전역 잠금 안에서 보고 고르며,
         # 바닥나면 IP_POOL_EXHAUSTED → 507 InsufficientResources(ipv4). 명세 오류(INVALID_SPEC·템플릿 없음)는 400 이다.
-        # create 는 하위 budget_ms 를 받지 않지만, 앞의 잠금·조회에서 요청 예산을 다 썼으면 등록을 제출하지 않는다
+        # 미해결(S15P31E110-334): create 에는 아직 하위 budget_ms 를 넘기지 않는다(_BUDGET_ACTIONS 주석). 지금은 앞의 잠금·조회에서
+        # 요청 예산을 다 썼을 때 등록을 제출하지 않는 것만 지킨다
         envelope = call_with_budget(self.manager, "create", spec, execute=True, idempotency_key=f"create-{vm_id}")
         data = raise_for_envelope(envelope, context=f"create {name}")
         view = (data.get("vm") or data.get("current") or data.get("original_result") or {}) if isinstance(data, dict) else {}

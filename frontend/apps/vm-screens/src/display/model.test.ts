@@ -3,6 +3,30 @@ import { presentationFixture } from './fixture';
 import { parsePresentation, SnapshotOrder } from './model';
 
 describe('HDMI presentation contract', () => {
+  it('validates Gateway permission separately from selected AUTO mode', () => {
+    const p = presentationFixture();
+    p.state.drive.mode = 'AUTO';
+    p.state.drive.source.status = 'fresh';
+    p.state.drive.authority = {
+      selected_vm_id: p.state.vms[0]!.vm_id,
+      selected_mode: 'AUTO',
+      generation: 1,
+      phase: 'DISARMED',
+      output_permitted: false,
+      storage_uncertain: false,
+    };
+    expect(parsePresentation(p).state.drive.active_vm_id).toBeNull();
+    p.state.drive.active_vm_id = p.state.vms[0]!.vm_id;
+    expect(() => parsePresentation(p)).toThrow();
+    p.state.drive.authority.phase = 'APPLIED';
+    p.state.drive.authority.output_permitted = true;
+    expect(parsePresentation(p).state.drive.active_vm_id).toBe(p.state.vms[0]!.vm_id);
+    p.state.drive.authority.storage_uncertain = true;
+    expect(() => parsePresentation(p)).toThrow();
+    p.state.drive.active_vm_id = null;
+    p.state.drive.mode = 'unknown';
+    expect(parsePresentation(p).state.drive.mode).toBe('unknown');
+  });
   it('rejects incompatible OS roles, missing detail targets and unsupported active driving targets', () => {
     const wrongOs = presentationFixture();
     wrongOs.state.vms[1]!.os.expected = 'debian';

@@ -52,18 +52,70 @@ static void test_lane_keeping(void)
 		      st.reason == AUTO_REASON_CRUISE,
 	      "straight (%f,%f) %s", cmd.v_mps, cmd.steer_rad, auto_reason_name(st.reason));
 
-	/* 차가 차선 중심보다 왼쪽 10 cm → 오른쪽(−)으로 */
+	/* 차가 차선 중심보다 왼쪽 10 cm → 오른쪽(−)으로. 0.8 m 앞 (y −0.1) 을 지나는 원호 atan(0.26·2·−0.1/0.65) − k_offset·0.1 */
 	step("{\"lane_offset_m\":0.1,\"heading_err_rad\":0,\"stop\":false,\"obstacles\":[]}", 10, CONTROL_AUTO, &cmd, &st);
-	CHECK(near(cmd.steer_rad, -0.15f) && cmd.v_mps < 0.5f && cmd.v_mps > 0.4f, "left offset (%f,%f)", cmd.v_mps,
-	      cmd.steer_rad);
+	CHECK(near(cmd.steer_rad, atanf(0.26f * 2 * -0.1f / 0.65f) - 0.1f) && cmd.v_mps < 0.5f && cmd.v_mps > 0.4f,
+	      "left offset (%f,%f)", cmd.v_mps, cmd.steer_rad);
 
 	/* 차선이 왼쪽으로 돈다 → 왼쪽(+)으로 */
 	step("{\"lane_offset_m\":0,\"heading_err_rad\":0.2,\"stop\":false,\"obstacles\":[]}", 10, CONTROL_AUTO, &cmd, &st);
-	CHECK(near(cmd.steer_rad, 0.2f), "left curve steer %f", cmd.steer_rad);
+	float y = 0.6f * tanf(0.2f);
+	CHECK(near(cmd.steer_rad, atanf(0.26f * 2 * y / (0.64f + y * y))), "left curve steer %f", cmd.steer_rad);
+}
 
+/* 인지 정의 그대로 원호 위 차의 (lane_offset, heading_err) 를 만든다. 후륜 축이 반경 r 원호 위, 원호 방향 (r > 0 왼쪽) */
+static void arc_perception(float r, float *offset, float *heading)
+{
+	float R = fabsf(r), s = r > 0 ? 1.0f : -1.0f;
+	float y0 = s * (R - sqrtf(R * R - 0.2f * 0.2f)); /* 카메라(후륜 축 0.2 m 앞) 아래 중심선 */
+	float y1 = s * (R - sqrtf(R * R - 0.8f * 0.8f)); /* 카메라 0.6 m 앞 */
+
+	*offset = -y0;
+	*heading = atanf((y1 - y0) / 0.6f);
+}
+
+static void test_pursuit_follows_arc(void)
+{
+	struct auto_cfg cfg;
+	const float radii[] = {0.8f, -0.8f, 1.5f, -1.5f, 5.0f};
+
+	auto_cfg_default(&cfg);
+	/* 원호 위에 있으면 그 원호의 조향 atan(wheelbase/r) + offset 항 — 급코너에서 더 꺾어 안쪽으로 파고들지 않는다 (-360).
+	 * 원호 위 후륜 축이면 카메라 아래 중심선이 조금 옆(off ≠ 0)이라 offset 항을 빼고 원호 부분만 본다 */
+	for (unsigned i = 0; i < sizeof(radii) / sizeof(radii[0]); i++) {
+		float off, hd;
+
+		arc_perception(radii[i], &off, &hd);
+		float steer = auto_pursuit_steer(&cfg, off, hd) + cfg.k_offset * off;
+		CHECK(fabsf(steer - atanf(0.26f / radii[i])) < 2e-4f, "arc r=%.1f steer %f want %f", radii[i], steer,
+		      atanf(0.26f / radii[i]));
+	}
+
+	/* tan·atan 근사가 math.h 와 같다 (xenvm minimal libc 에는 math.h 가 없다) */
+	float worst = 0.0f;
+	for (float off = -0.4f; off <= 0.4f; off += 0.05f) {
+		for (float hd = -1.4f; hd <= 1.4f; hd += 0.01f) {
+			float y = -off + 0.6f * tanf(hd);
+			float want = atanf(0.26f * 2 * y / (0.64f + y * y)) - off;
+			float d = fabsf(auto_pursuit_steer(&cfg, off, hd) - want);
+			worst = d > worst ? d : worst;
+		}
+	}
+	CHECK(worst < 1e-4f, "approximation error %g", worst);
+}
+
+static void test_steer_clamp(void)
+{
+	struct auto_cfg cfg;
+	struct xm_perception_result p = {.lane_offset_m = -0.2f, .heading_err_rad = 0.5f};
+	float v, steer, nearest;
+	enum auto_reason reason;
+
+	auto_cfg_default(&cfg);
+	cfg.max_steer_rad = 0.1f; /* 기본 0.4 는 lookahead 0.8 m 원호로는 닿지 않는다 (최대 atan(0.26·1.25) ≈ 0.31) */
+	auto_target(&cfg, &p, &v, &steer, &reason, &nearest);
 	/* 최대 조향으로 자르고, 그때 속도는 turn_slowdown 만큼 준다 */
-	step("{\"lane_offset_m\":-1,\"heading_err_rad\":1,\"stop\":false,\"obstacles\":[]}", 10, CONTROL_AUTO, &cmd, &st);
-	CHECK(near(cmd.steer_rad, 0.4f) && near(cmd.v_mps, 0.3f), "clamp (%f,%f)", cmd.v_mps, cmd.steer_rad);
+	CHECK(near(steer, 0.1f) && near(v, 0.3f) && reason == AUTO_REASON_CRUISE, "clamp (%f,%f)", v, steer);
 }
 
 static void test_obstacles(void)
@@ -171,6 +223,8 @@ static void test_vm_id(void)
 int main(void)
 {
 	test_lane_keeping();
+	test_pursuit_follows_arc();
+	test_steer_clamp();
 	test_obstacles();
 	test_perception_loss();
 	test_control();

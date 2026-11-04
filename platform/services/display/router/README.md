@@ -1,5 +1,80 @@
 # dom0 표시 파이프라인 (2~5단계)
 
+## 휴대폰 통합 표시 UI (350)
+
+빌드된 vm-screens의 `/display/mobile`은 기존 인증된 presentation API를 한 번 조회해
+계기판·인포테인먼트를 함께 렌더링한다. 모바일용 HDMI ACK나 세 번째 하드웨어 출력을
+만들지 않는다. 기존 주행·OS 표시 규칙과 알림을 재사용한다.
+USB 접근·초기 인증 연결은 349, HDMI/휴대폰 실행 전환은 351 범위이며 이 UI 추가만으로
+완료된 것이 아니다. [구현·로컬 검증과 실물 확인 항목](../../../../docs/verification/display-350-mobile-20261103.md)을 참조한다.
+
+## Yocto 이미지의 네이티브 HDMI 실행
+
+이미지에는 Xorg·Chromium·Playwright·Openbox와 `xenova-display.target`이 들어 있다.
+이 경로는 별도 Debian graphics rootfs를 사용하지 않는다. 기존 [board-kms](deploy/board-kms/README.md)
+배포는 별도 프로파일이며 그 당시 실보드 검증을 새 Yocto 경로의 수락으로 간주하지 않는다.
+
+### 설치별 설정과 시작
+
+다음 파일을 먼저 준비한다. 예시는 `/usr/share/xenova/display/examples/`에 있다.
+공통 이미지에는 토큰·실제 EDID·배포 bindings를 넣지 않는다.
+
+| 경로 | 내용·권한 |
+|---|---|
+| `/etc/xenova/display.env` | 기존 feed 설정과 MQTT 읽기 계정. root:root 0600 |
+| `/etc/xenova/display-bindings.json` | 실제 등록 UUID의 deployment bindings. root 소유, 다른 사용자의 쓰기 금지 |
+| `/etc/xenova/display-kiosk.env` | feed와 같은 `XENOVA_DISPLAY_TOKEN`만 전달. MQTT 암호는 넣지 않음. root:root 0600 |
+| `/etc/xenova/display-runtime.json` | `native-x11-runtime.json` 기반의 실제 두 connector·EDID·배치. backend=x11, display=:5. root:root 0644 |
+| `/etc/xenova/display-Xorg.conf` | `display-Xorg.conf.example` 기반의 실제 modesetting KMS card 경로. root:root 0644 |
+
+DRM card/connector와 EDID는 실제 장치의 `/sys/class/drm/`에서 확인한다.
+빈 EDID의 해시나 예시의 0 해시를 운영 값으로 쓰지 않는다. 최종 connector·EDID·해상도 일치는
+기존 `X11Layout`이 검증하며 불일치를 실제 표시 성공으로 바꾸지 않는다.
+
+```sh
+systemctl start xenova-display.target
+systemctl status xenova-display-hdmi.service
+journalctl -b -u xenova-display-hdmi.service
+cat /run/xenova-display-graphics/client/display-runtime.json
+```
+
+이미지는 target을 enable하지만 설정 파일이 없으면 HDMI 서비스를 건너뛴다.
+파일을 준비한 뒤 수동 start 또는 다음 정상 부팅에서 시작한다. 설정 오류·장치 부재는 journal의
+실패로 남는다. 자동 재시작은 120초에 3회로 제한하며 VM·관리 서비스의 재시작을 유발하지 않는다.
+
+### 소유권·준비·종료
+
+- `xenova-display`는 암호가 잠겼고 `/sbin/nologin`을 사용하는 전용 계정이다.
+  Openbox·기존 kiosk/Chromium은 이 계정으로 실행하며 Chromium sandbox를 끄지 않는다.
+- root 감독 프로세스는 전용 Xorg와 VT를 소유한다. X11 TCP 수신을 끄고 매 시작마다 새 Xauthority를 만든다.
+  feed 토큰은 kiosk에만 전달하며 Xorg/Openbox에는 전달하지 않는다.
+- 전용 VT7을 사용한다. `tty-fail`로 이미 다른 세션이 소유한 terminal의 인수를 거절한다.
+  getty·SSH·PAM·커널 boot 인자·VM 신원/CPU 정책은 바꾸지 않는다.
+- Xorg의 `displayfd`가 현재 프로세스의 준비를 알린 뒤 renderer를 시작한다.
+  service active/READY는 X11 세션 준비이며 실제 화면·데이터 수신·renderer 준비 완료가 아니다.
+  실제 화면은 새 `layout_epoch`, 신선한 상태와 출력별 `physical_verified`, `renderer_alive`,
+  `applied_revision`으로 구분해 확인한다.
+- 종료 때 kiosk → Openbox → Xorg 순서로 하나의 15초 예산을 사용한다.
+  systemd의 소유 cgroup이 잔존 하위 프로세스 최종 정리를 맡는다.
+  정상 종료는 원래 VT로 복귀하되 사용자가 다른 VT로 전환했다면 그 선택을 되돌리지 않는다.
+  강제 종료·전원 상실의 픽셀 단위 복원까지 보장하지 않는다.
+
+표시만 중지하거나 자동 시작을 해제할 때는 다음을 사용한다. VM·관리 서비스를 중지하지 않는다.
+
+```sh
+systemctl stop xenova-display.target
+systemctl disable xenova-display.target
+```
+
+새 경로의 로컬 오류 주입·실제 패키징과 물리 HDMI 수락은 별도다.
+실보드에 적용하려면 실제 EDID·VT 인계·Chromium sandbox·로그인 복구와 화면 렌더링을 확인해야 한다.
+
+## 기존 Gateway 주행 상태 직접 읽기 (선택형)
+
+2026-11-02 사용자 선택으로 `XENOVA_DISPLAY_DRIVE_TRANSPORT=gateway`를 추가했다. 기존 `GatewayClient.context()`만 1초마다 읽고 기존 상태/표시 API·WS에 반영한다. 기본 `mqtt`는 유지한다. gateway 모드에서는 별도 표시 MQTT 토픽을 구독·수락하지 않으며 Agent·앱 MQTT는 유지한다. 조회 단절·만료는 미확인, 선택된 AUTO/MANUAL과 출력 허가는 구분하고 두 HDMI에 ‘모드 선택 · 구동 준비 중’을 표시한다.
+
+[연결·신선도·권한·동시 배포 계약](../../../../docs/contracts/display-gateway-read-v1.md), [환경 예시](deploy/board-kms/gateway-read.env.example), [로컬 및 보드 확인 결과](../../../../docs/verification/display-255-gateway-read-20261102.md)를 따른다. Gateway와 client 패키지·root 전용 UDS는 기존 제공 경로가 준비돼 있어야 한다. 이 기능은 Gateway를 자동 설치·기동하거나 차량 제어를 실행하지 않는다. 아래 별도 MQTT 표시 토픽 설명은 기존 모드이며 새 읽기 경로에 필요한 추가 송신 작업이 아니다.
+
 HDMI 렌더러와 외부 웹이 함께 사용할 읽기 전용 상태 피드와 로컬 화면 선택 정책이다. 3단계 전체/상세 웹 렌더러에 이어 4단계에서 X11 실행기·실제 픽셀 캡처·원격 시연 전송을 추가했다. 실보드 HDMI 검증과 이미지 준비는 남아 있다. 기존 MO-04 터미널을 열거나 콘솔 출력을 상태 분석용으로 가로채지 않는다.
 
 ```text

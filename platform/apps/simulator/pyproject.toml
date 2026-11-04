@@ -5,14 +5,19 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "xenova-simulator"
 version = "0.1.0"
-description = "Xenova 가상 RC카: 활성 앱 drive.command → vehicle.status 20 Hz (S15P31E110-47)"
+description = "Xenova 가상 RC카: 게이트웨이 시리얼 프레임·drive.command → 바퀴·서보 모델, 전방 카메라 MJPEG (S15P31E110-47, -268)"
 requires-python = ">=3.11"
 # xenova_mqtt 는 같은 저장소의 platform/services/vm-agent/mqtt-client 라 여기 선언하지 않는다 (수동 앱과 같은 방식)
 dependencies = [
     "paho-mqtt>=1.6,<3",
+    "numpy>=1.24",   # 트랙 벽 계산 (track.py)
 ]
 
 [project.optional-dependencies]
+# 전방 카메라 렌더링·JPEG (인지 대역 perception 의 camera extra 와 같은 OpenCV)
+camera = [
+    "opencv-python-headless>=4.8",
+]
 test = [
     "pytest>=7",
 ]
@@ -20,7 +25,10 @@ test = [
 [tool.setuptools.packages.find]
 include = ["xenova_simulator*"]
 
+[tool.setuptools.package-data]
+xenova_simulator = ["tracks.json"]   # 서킷 10개 중심선 (tools/export_tracks.py)
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "../../services/vm-agent/mqtt-client"]
+pythonpath = [".", "../../services/vm-agent/mqtt-client", "../../services/gateway", "../perception"]
 addopts = "-q"

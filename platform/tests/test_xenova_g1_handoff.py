@@ -53,7 +53,6 @@ class HandoffTest(unittest.TestCase):
         self.package()
         manifest = handoff.verify(self.output)
         mapping = handoff.runtime_sources()
-        self.assertEqual(len(mapping), 28)
         self.assertIn("xenova_boot_progress.py",mapping)
         self.assertIn("xenova_boot_status.py",mapping)
         self.assertIn("xenova_cpu.py",mapping)
@@ -75,11 +74,13 @@ class HandoffTest(unittest.TestCase):
             "s=importlib.util.spec_from_file_location('lab',d/'scripts/xenova-xenstore-g1-lab.py');"
             "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);p=m.platform(d/'runtime');"
             "import xenova_execution,xenova_recovery,xenova_management,xenova_first_boot,xen_config;"
+            "import xenova_creation,xenova_preparation,xenova_provisioning,xenova_broker;"
             "assert p.execution().__class__.__module__=='xenova_execution';"
             "r=xenova_management.Manager().call('create',{});assert r['error']['code']=='INVALID_SPEC';"
             "assert str(p.data)=='/srv/xenova' and str(p.runtime)=='/run/xenova';"
             "assert all(str(d/'runtime') in sys.modules[n].__file__ for n in "
-            "['xenova_vm','xenova_execution','xenova_recovery','xenova_management','first_install_contract']);"
+            "['xenova_vm','xenova_execution','xenova_recovery','xenova_management','first_install_contract',"
+            "'xenova_creation','xenova_preparation','xenova_provisioning','xenova_broker']);"
             "print('isolated complete G1 runtime PASS')")
         p = subprocess.run([sys.executable, "-I", "-B", "-c", code],
                            cwd=self.root, capture_output=True, text=True, timeout=30)

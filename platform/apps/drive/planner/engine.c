@@ -105,7 +105,7 @@ enum de_result de_plan_start(struct drive_engine *e,uint64_t now,struct lp_budge
  if(!request||request==e->started)return DE_WAITING;
  struct dw_handle h;const struct dw_snapshot *map;
  enum dw_result dr=dw_acquire(&e->maps,&h,&map);if(dr)return DE_MAP;
- dw_pose pose,goal;dw_vehicle vehicle;enum de_result rc=inputs(e,map,now,&pose,&vehicle,NULL);
+ dw_pose pose,goal;dw_vehicle vehicle={0};enum de_result rc=inputs(e,map,now,&pose,&vehicle,NULL);
  float terminal_sweep=.5f*e->config->primitive_speed*e->config->primitive_duration/(LP_PRIMITIVE_SAMPLES-1);
  /* The terminal node may retain a valid nonzero heading. A front-only
   * clearance misses the rotated outer corner; reserve its circumscribed radius. */
@@ -113,23 +113,39 @@ enum de_result de_plan_start(struct drive_engine *e,uint64_t now,struct lp_budge
                            e->config->half_width+e->config->margin+e->config->tracking_guard+terminal_sweep);
  if(!rc&&lp_reference_goal(&map->world,pose,e->config->plan_horizon,
     end_clearance,&goal)!=LP_PATH_FOUND)rc=DE_PATH;
+ float speed=fmaxf(0,vehicle.velocity_mps);
+ float replan_distance=fmaxf(e->config->lookahead_min,fminf(e->config->lookahead_max,speed*e->config->lookahead_time))+
+                       speed*e->config->reaction_s+speed*speed/(2*e->config->max_brake)+e->config->goal_distance;
  if(!rc&&e->maneuver_active){
+  struct lp_road_state current,merge;float steering=vehicle.has_measured_steering_rad?vehicle.measured_steering_rad:vehicle.estimated_steering_rad;
+  bool projected=lp_reference_project(&map->world,pose,&current)==LP_PATH_FOUND&&
+                 lp_reference_project(&map->world,e->maneuver_goal,&merge)==LP_PATH_FOUND;
+  bool member=projected&&hypotf(merge.pose.x-e->maneuver_goal.x,merge.pose.y-e->maneuver_goal.y)<=e->config->goal_distance;
+  if(e->merge_passed_reference_revision!=map->world.reference_revision)e->merge_passed_reference_revision=0;
+  if(member&&current.arc-vehicle.position_error_m>=merge.arc)e->merge_passed_reference_revision=map->world.reference_revision;
+  bool rejoined=projected&&e->merge_passed_reference_revision&&
+                fabsf(current.offset)+vehicle.position_error_m<=e->config->goal_distance&&
+                fabsf(dw_angle(pose.yaw-current.pose.yaw))+vehicle.heading_error_rad<=e->config->goal_heading&&
+                fabsf(steering-atanf(e->config->wheelbase*current.curvature))+vehicle.steering_error_rad<=e->config->max_steer/(LP_STEERS/2);
   if(strcmp(e->maneuver_frame,map->world.frame_epoch)||strcmp(e->maneuver_odom,map->world.odom_epoch)||
    strcmp(e->maneuver_configuration,map->world.configuration)||strcmp(e->maneuver_reference,map->world.reference_id)||
-   (hypotf(pose.x-e->maneuver_goal.x,pose.y-e->maneuver_goal.y)<=e->config->goal_distance&&
-    fabsf(dw_angle(pose.yaw-e->maneuver_goal.yaw))<=e->config->goal_heading)){
-   e->maneuver_active=false;e->maneuver_direction=0;
+   rejoined){
+   e->maneuver_active=false;e->maneuver_direction=0;e->merge_passed_reference_revision=0;
    if(e->maneuver_revision<UINT64_MAX)e->maneuver_revision++;
-  }else goal=e->maneuver_goal;
+  }else if(member&&!e->merge_passed_reference_revision&&merge.arc-current.arc>replan_distance)goal=e->maneuver_goal;
+  /* Keep the merge milestone while a fresh local path continues beyond it.
+   * Reaching a sampled endpoint is not proof of physical road rejoining. */
  }
  if(!rc){
   struct de_reference previous;const struct lp_path *old;
   if(!de_path_acquire(e,&previous,&old)){
    struct lp_metrics checked={0};
-   bool same_goal=e->maneuver_active||hypotf(goal.x-old->goal.x,goal.y-old->goal.y)<e->config->goal_distance||
-                  hypotf(pose.x-old->goal.x,pose.y-old->goal.y)>e->config->plan_horizon*.25f;
-   enum lp_result usable=same_goal?lp_validate_path(old,&map->world,e->config,&checked,&budget):LP_INPUT;
-   if(same_goal&&(usable==LP_COLLISION||usable==LP_INPUT||usable==LP_NUMERIC))e->path_invalidated=true;
+   bool same_intent=(old->direction!=0)==e->maneuver_active&&
+                    old->merge_passed_reference_revision==e->merge_passed_reference_revision;
+   float remaining=lp_path_remaining(old,pose,NULL);
+   bool same_goal=hypotf(goal.x-old->goal.x,goal.y-old->goal.y)<e->config->goal_distance||remaining>replan_distance;
+   enum lp_result usable=same_intent&&same_goal?lp_validate_path(old,&map->world,e->config,&checked,&budget):LP_INPUT;
+   if(same_intent&&same_goal&&(usable==LP_COLLISION||usable==LP_INPUT||usable==LP_NUMERIC))e->path_invalidated=true;
    (void)de_path_release(e,previous);
    if(usable==LP_PATH_FOUND){e->path_invalidated=false;e->started=request;(void)dw_release(&e->maps,h);return DE_OK;}
   }
@@ -141,7 +157,7 @@ enum de_result de_plan_start(struct drive_engine *e,uint64_t now,struct lp_budge
  e->started=request;e->budget=budget;e->plans++;
  float steering=vehicle.has_measured_steering_rad?vehicle.measured_steering_rad:
                  vehicle.has_estimated_steering_rad?vehicle.estimated_steering_rad:NAN;
- e->search_reason=lp_start(&e->search,&map->world,pose,steering,goal,e->config,e->assets,budget,e->maneuver_direction);
+ e->search_reason=lp_start_local(&e->search,&map->world,pose,steering,goal,e->config,e->assets,budget,e->maneuver_direction);
  return e->last_reason=DE_OK;
 }
 enum de_result de_plan_slice(struct drive_engine *e,unsigned expansions,uint64_t now){
@@ -183,12 +199,21 @@ enum de_result de_plan_slice(struct drive_engine *e,unsigned expansions,uint64_t
    else{
     path->revision=++e->path_revision;
     if(!e->maneuver_revision)e->maneuver_revision=1;
+    if(e->maneuver_active){
+     path->merge_goal=e->maneuver_goal;
+     path->merge_passed_reference_revision=e->merge_passed_reference_revision;
+     if(!path->direction)path->direction=e->maneuver_direction;
+    }
     if(path->direction){
-     if(e->maneuver_active&&e->maneuver_direction!=path->direction)e->maneuver_revision++;
-     e->maneuver_active=true;e->maneuver_direction=path->direction;e->maneuver_goal=path->goal;
+     if(e->maneuver_active&&e->maneuver_direction!=path->direction){
+      /* The merge milestone and its checked context are unchanged above.
+       * New avoidance direction does not undo its observed physical passage. */
+      e->maneuver_revision++;
+     }
+     e->maneuver_active=true;e->maneuver_direction=path->direction;e->maneuver_goal=path->merge_goal;
      strcpy(e->maneuver_frame,path->frame);strcpy(e->maneuver_odom,path->odom);
      strcpy(e->maneuver_configuration,path->configuration);strcpy(e->maneuver_reference,path->reference);
-    }else if(e->maneuver_active)path->direction=e->maneuver_direction;
+    }
     path->maneuver_revision=e->maneuver_revision;
    }
   }
@@ -258,11 +283,16 @@ enum de_result de_apply(struct drive_engine *e,const dw_state *state,uint64_t no
  if(!rc&&(strcmp(state->frame_epoch,map->world.frame_epoch)||strcmp(state->odom_epoch,map->world.odom_epoch)))rc=DE_FRAME;
  if(!rc&&(strcmp(state->configuration,map->world.configuration)||strcmp(state->primitive,e->assets->sha256)||strcmp(state->calibration,map->world.calibration)))rc=DE_CONFIGURATION;
  if(!rc&&strcmp(state->reference_id,map->world.reference_id))rc=DE_REFERENCE;
+ if(!rc&&state->world_features!=map->world.required_features)rc=DE_CONFIGURATION;
  if(!rc&&(!state->complete||state->path_count<2||state->path_count>LP_PATH))rc=DE_STATE;
  if(!rc)rc=reserve(e,&ph,&path);
  if(!rc){
   memset(path,0,sizeof(*path));path->count=state->path_count;memcpy(path->points,state->path,path->count*sizeof(*path->points));
-  path->goal=state->merge_goal;path->revision=state->path_revision;path->maneuver_revision=state->maneuver_revision;
+  path->merge_goal=state->merge_goal;path->goal=path->points[path->count-1].pose;
+  path->world_features=state->world_features;
+  path->merge_passed_reference_revision=state->has_merge_passed_reference_revision&&
+   state->merge_passed_reference_revision==map->world.reference_revision?state->merge_passed_reference_revision:0;
+  path->revision=state->path_revision;path->maneuver_revision=state->maneuver_revision;
   path->direction=state->direction;path->phase=state->maneuver_phase;
   strcpy(path->frame,state->frame_epoch);strcpy(path->odom,state->odom_epoch);
   strcpy(path->configuration,state->configuration);strcpy(path->reference,state->reference_id);
@@ -283,7 +313,8 @@ enum de_result de_apply_finish(struct drive_engine *e){
  e->apply_pending=false;
  if(e->apply_valid&&rc==DE_OK){
   const struct lp_path *path=&e->paths[e->apply_path.slot].path;
-  e->maneuver_active=path->direction!=0;e->maneuver_direction=path->direction;e->maneuver_goal=path->goal;e->maneuver_revision=path->maneuver_revision;
+  e->maneuver_active=path->direction!=0;e->maneuver_direction=path->direction;e->maneuver_goal=path->merge_goal;e->maneuver_revision=path->maneuver_revision;
+  e->merge_passed_reference_revision=path->merge_passed_reference_revision;
   if(e->path_revision<path->revision)e->path_revision=path->revision;
   strcpy(e->maneuver_frame,path->frame);strcpy(e->maneuver_odom,path->odom);
   strcpy(e->maneuver_configuration,path->configuration);strcpy(e->maneuver_reference,path->reference);
@@ -298,7 +329,7 @@ enum de_result de_restart(struct drive_engine *e){
  if(e->epoch==UINT32_MAX||e->requested==UINT32_MAX){give(e);return DE_LIMIT;}
  e->epoch++;e->current=-1;e->started=0;atomic_fetch_add(&e->requested,1);
  memset(&e->tracker,0,sizeof(e->tracker));e->completed=0;e->stopping=false;
- e->maneuver_active=false;e->maneuver_direction=0;e->maneuver_revision=0;
+ e->maneuver_active=false;e->maneuver_direction=0;e->maneuver_revision=0;e->merge_passed_reference_revision=0;
  give(e);return DE_OK;
 }
 const char *de_reason(enum de_result rc){

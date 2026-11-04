@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "usb_interface": "VERIFY_USB_INTERFACE",
+  "phone_ipv4": "VERIFY_PHONE_IPV4",
+  "port": 8084
+}

@@ -1,6 +1,16 @@
 # 표시용 주행 상태 v1 — 제어 담당 연결 규격
 
-2026-10-22 · S15P31E110-250. 사용자가 별도 표시 상태의 1초 보고 방향을 선택했다. **표시 수신 구현은 준비됐지만 제어 담당의 합의와 발행자/ACL 연결은 아직 완료되지 않았다.** 이 문서를 팀원에게 전송하지는 않았다.
+> **2026-11-02 사용자 선택:** 표시 수집기가 기존 Gateway context를 직접 읽는 [gateway 읽기 계약](display-gateway-read-v1.md)을 추가했다. 명시적 gateway 모드에서는 아래 MQTT 표시 토픽을 사용하지 않는다. 아래 1초 발행·ACL 항목은 호환 mqtt 모드의 이력이며 새 읽기 경로의 필수 의존성이 아니다. 기본값은 mqtt이므로 설정·수집기·프론트 동시 배치가 필요하다. 이 선택을 실제 보드 Gateway 배포 완료로 취급하지 않는다.
+
+2026-11-02 · S15P31E110-250 · platform 24b26ff에서 재확인. 사용자가 별도 표시 상태의 1초 보고 방향을 선택했다. **Gateway의 제어 권위 원본·담당 근거는 Git에 있으며, 표시용 발행 경로·신선도 의미·ACL 연결 확인은 아직 남아 있다.** 이 정리에서 팀원 메시지 전송·운영 설정 변경을 하지 않았다.
+
+## Git에서 확인한 연결 근거
+
+[AuthorityStore.payload](../../platform/services/gateway/xenova_gateway/authority.py)는 mode·owner로 vehicle.control payload를 만들고 [VerifiedRunner](../../platform/services/gateway/xenova_gateway/verified_runner.py)는 이를 발행한다. [MQTT 계약](mqtt-contract-v1.md#54-payload)은 source_id=dom0-gateway와 mode·active_vm_id를 정의한다. [Authority 요청서](../requests/2026-10-27-authority-recovery-ctrl.md)는 현재 Gateway 담당을 박신영으로 명시한다. 담당 미정이 아니라 **표시용 전달 연동이 미확인**인 상태다.
+
+추가로 [provider context](gateway-provider-v1.md)는 현재 owner·mode·generation 외에 phase·output_permitted·storage_uncertain을 제공한다. 저장된 선호 owner나 mode만으로 재시작/disarmed/PENDING 상태를 실제 주행 정상으로 표시해서는 안 된다. 원본 상태를 재사용하되 어떤 조건에서 표시용 active_vm_id·mode를 확정할지 맞춰야 한다.
+
+기준 platform의 Gateway 코드에는 아래 display.drive_state 주기 발행이 없고, [gateway ACL](../../platform/deploy/mosquitto/etc/acl)에도 해당 토픽 write가 없다. 기존 vehicle.control은 변경 시 발행·retained이므로 ‘새 값이 3초 안 왔다’는 이유만으로 제어 상태 이상을 판단하는 구독으로 대체하지 않는다. context가 존재한다는 사실만으로 표시 어댑터가 연결됐다고 처리하지도 않는다. 기존 제어 엔진에 중복 결정 로직을 만들지 않고 표시용 연결 방식만 확인한다.
 
 ## 담당 경계
 
@@ -52,9 +62,9 @@ VM UUID는 QEMU VM1 예시이며 실보드 등록 UUID로 교체해야 한다. `
 
 ## 팀원 확인 사항
 
-1. 실제 상태 결정 주체가 dom0 게이트웨이인지, source_id와 구현 담당은 누구인지.
+1. Git상 원본은 dom0 Gateway, source_id=dom0-gateway, 담당 근거는 박신영이다. 이를 표시용 발행에도 사용할지와 발행 구현 담당을 확인한다.
 2. 위 토픽/type/1초 주기/retain=false와 3초 freshness에 동의하는지.
-3. 등록 VM UUID, 허용 모드/null의 의미가 실제 제어 상태와 맞는지.
+3. 등록 VM UUID, 허용 모드/null의 의미를 확인한다. 특히 provider phase·output_permitted·storage_uncertain 및 저장된 선호 owner와 실제 적용 상태를 구분한다.
 4. 권위 상태를 모를 때 발행 중단, 프로세스 재시작 시 새 instance_id·seq 초기화가 가능한지.
 5. 발행 계정과 새 토픽 ACL을 누가 반영할지, 실제 발행 연결 검증 일정을 언제 잡을지.
 

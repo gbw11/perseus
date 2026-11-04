@@ -1,0 +1,22 @@
+{
+  "issue": "S15P31E110-349",
+  "date": "2026-11-03",
+  "base": "84a0f8f",
+  "environment": "local WSL / Python 3.14 and separate Windows Chrome static UI check",
+  "tests": 181,
+  "new_access_tests": 78,
+  "existing_regression_tests": 103,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "warnings": ["Existing Starlette/httpx TestClient deprecation"],
+  "pairing": {"digits": 6, "ttl_seconds": 120, "maximum_attempts": 5, "single_use": true},
+  "session_maximum_seconds": 28800,
+  "board_accessed": false,
+  "physical_phone_verified": false,
+  "physical_usb_verified": false,
+  "bitbake_build_verified": false,
+  "browser_end_to_end_auth_verified": false,
+  "production_services_changed": false,
+  "existing_tracked_files_changed": false
+}

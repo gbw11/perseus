@@ -1,5 +1,24 @@
 # Telemetry 실제 계측·출처·지원 계약 검증
 
+## 공통 네트워크 지표 발행 경로 — 2026-11-03
+
+기준은 `feat/platform/zephyr-network-telemetry`의 `05aa95c` 위 플랫폼 변경이다.
+같은 Diagnostics 캐시와 MQTT 작업자에서 [v1 MQTT-03](../contracts/mqtt-contract-v1.md#31-zephyr의-공통-네트워크-지표-mqtt-03)으로
+RX/TX 누적값을, [v2 2.1](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md)로 수신률과
+상세 자원 지표를 보낸다. VM마다 ring 세대와 관측 단조 시각을 보존한다.
+
+| 검증 | 결과 |
+|---|---|
+| 제품 C 인코더·계약 | `python3 -B -m unittest discover -s platform/tests -p test_xenova_telemetry.py -v` 15개 통과. ASan/UBSan, uint64 상한, UTC 유무, ring 초기화, 만료·읽기 실패, v2에 RX/TX 누적값이 없는지 확인 |
+| 계정·ACL | 격리 Linux에서 `test_xenova*broker*.py` 30개 통과. Telemetry 계정의 자기 VM v1 `/metrics` 권한과 기존 비밀번호 보존을 검사. `render-policy.py --check` 통과 |
+| Zephyr native 진단 | `native_sim/native/64`와 `resources-network.conf`로 8개 통과. 바이트 변화·유효한 0·ring 세대 변경·읽기 실패 후 복귀를 확인 |
+| 격리 MQTT 왕복 | `run_native_acceptance.py --execute --extended`로 실제 Zephyr 발행기와 Mosquitto 2.0.18 사용. VM 2대의 v1 표본 8개와 각 VM의 ring 세대 2개를 캐시와 대조. v2 표본 296개 수신, 교차 VM 발행 및 같은 VM heartbeat 발행 차단. Xen ring 입력은 native 시험 provider로 대체 |
+| ARM64 | Zephyr 4.4.0 고정 도구로 `xenvm` 주행앱과 `warm-lattice-lab.conf` 빌드 성공. 문서 정합화 후 빌드 ID를 갱신한 `zephyr.bin` SHA-256 `44d3b05eb2a02a298c26e40ae004a40c5287b99438e6630f13abf1f21ece967f` |
+
+Spring의 v1 저장과 화면, 실보드 설치·수신은 후속 수락이다. 기존 보드의 ACL 반영 절차는
+[브로커 안내](../../platform/deploy/mosquitto/README.md#기존-계정과-업데이트)를 따른다.
+아래 10월 기록의 지표 범위와 검증 결과는 각 당시 후보에 적용된다.
+
 ## 로컬 마감 보완 — 2026-10-27
 
 기준은 Telemetry 5개 커밋이 포함된 `da9221f`, 브랜치는

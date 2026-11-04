@@ -24,11 +24,27 @@ class AcceptanceTest(unittest.TestCase):
 
     def cli(self, *args, console=None):
         real_storage = vm.storage_check
+        output = io.StringIO()
         with patch.object(vm, 'Platform', return_value=self.p), \
              patch.object(vm, 'storage_check', side_effect=lambda data: real_storage(data, self.mountinfo)), \
              patch.object(self.p, 'check_xen'), patch.object(self.p, 'check_network'), \
-             patch.object(vm.os, 'execvp', side_effect=console) as execution, redirect_stdout(io.StringIO()):
-            vm.main(list(args))
+             patch.object(vm.os, 'execvp', side_effect=console) as execution, redirect_stdout(output):
+            try:
+                vm.main(list(args))
+            except SystemExit as exc:
+                # Public CLI errors are JSON envelopes plus a failure exit.
+                # Keep the physical-command assertions below on the real entry.
+                self.assertNotEqual(exc.code, 0)
+                documents, remaining = [], output.getvalue().lstrip()
+                while remaining:
+                    document, end = json.JSONDecoder().raw_decode(remaining)
+                    documents.append(document)
+                    remaining = remaining[end:].lstrip()
+                # Legacy board shutdown also emits its per-VM result first.
+                result = documents[-1]
+                self.assertFalse(result['ok'])
+                self.assertIsNotNone(result['error']['code'])
+                raise vm.PlatformError(result['error']['message']) from exc
         return execution
 
     def save(self, r):
@@ -184,10 +200,11 @@ class AcceptanceTest(unittest.TestCase):
         self.assertEqual({z['id'] for z in defaults['firmware_instances']}, {'zephyr-drive-a','zephyr-drive-b'})
         for z in defaults['firmware_instances']:
             self.assertTrue(z['autostart'])
-            self.assertEqual(z['template'], 'xenova-zephyr-network-starter-1.1.0')
+            self.assertEqual(z['template'], 'xenova-zephyr-drive-lattice-lab-1.0.0')
             self.assertEqual(z['board_shutdown_policy'], 'graceful')
-            self.assertEqual(z['template_id'], 'zephyr-xenvm-starter-arm64')
-            self.assertEqual(z['template_version'], '1.1.0')
+            self.assertEqual(z['template_id'], 'zephyr-drive-lattice-lab-arm64')
+            selected = json.loads((ROOT / 'platform/guests/default-templates.lock.json').read_text())['templates']
+            self.assertEqual(z['template_version'], next(e['version'] for e in selected if e['guest_kind'] == 'zephyr'))
         self.assertTrue(all(row['autostart'] for row in defaults['instances']))
         self.assertFalse(zephyr.CAPABILITIES['graceful_shutdown'])
         old = self.add_zephyr()

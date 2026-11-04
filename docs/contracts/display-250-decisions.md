@@ -1,74 +1,93 @@
 # S15P31E110-250 계약 확정 기록
 
-2026-10-22 사용자 응답 반영. 별도 표시 상태의 1초 보고와 전송 1차 목표는 사용자 선택으로 확정했다. 보드는 아직 준비되지 않았고 제어 담당 팀원과의 합의는 필요하다. 사용자 선택을 팀 전체 합의나 보드 검증으로 기록하지 않는다.
+> **후속 사용자 결정(2026-11-02):** 별도 MQTT 표시 송신 대신 기존 Gateway의 읽기 전용 정보를 직접 읽고 미허가 선택 상태는 ‘구동 준비 중’으로 표시하도록 선택했다. [새 연결 계약](display-gateway-read-v1.md)을 따른다. 아래 MQTT 발행·ACL 합의 대기는 이전 모드의 이력이며 새 경로의 필수 작업으로 중복 추적하지 않는다. 구현·실보드 전제는 [255 검증 기록](../verification/display-255-gateway-read-20261102.md)에서 구분한다. Jira 상태를 자동 변경하지 않는다.
 
-## 이미 정해진 범위
+2026-11-02 정리. 기준 origin/platform **24b26ff**. 2026-10-22 사용자 결정과 이후 실제 보드 시험을 대조했다. 문서 정리 과정에서 보드·서비스·Jira·제어 구현은 변경하지 않았다.
 
-- 외부 대시보드·웹 콘솔의 페이지 라우팅은 별도 담당. 이 작업은 연결/데이터 파이프라인을 담당한다.
-- HDMI 두 화면의 선택·구성·실행과 동일 화면의 원격 시연 전달은 이 작업 범위다.
-- 모니터 1은 세 VM 전체 상태, 모니터 2는 선택 VM 상세. 기본 VM1 pinned, 명시적인 follow_active만 활성 VM을 따른다.
-- VM1/VM2는 같은 Zephyr의 주 구동/백업, VM3는 Debian. 주행 모드와 활성 VM은 별개다.
-- 표시 서비스는 주행 승계/VM 재시작을 실행하지 않는다. 상태 미수신을 정상으로 추정하지 않는다.
+## 1. 담당 범위와 현재 화면 구성
 
-## 1. 권위 있는 제어 상태
+외부 웹의 페이지 라우팅은 별도 담당이며, 본인은 domU→dom0→외부 웹의 데이터·텍스트 콘솔 연결, HDMI 표시 정책·렌더링·출력, 같은 HDMI 픽셀의 원격 시연 전송을 담당한다. 표시 서비스가 차량 주행·VM 승계·재시작을 결정하지 않는다.
 
-현행 수신기는 `source_id=dom0-gateway`의 확인된 `active_vm_id`·`mode`를 읽는다. 사용자는 **제어 담당 팀원과 합의가 필요함**을 확인했다. 이 source_id의 실제 권위 발행자/구현 담당 확정은 아직 남아 있다. 제어 담당에게 메시지를 전송하거나 합의를 대신 기록하지 않았다.
+| 출력 | 현재 구성 | 데이터·선택 경계 |
+| --- | --- | --- |
+| monitor-1 / HDMI0 | 계기판 (screen=instrument) | 속도·배터리·확정 주행 모드·주요 경고·대기 연출. 미수신 값은 미확인 |
+| monitor-2 / HDMI1 | 인포테인먼트·게스트 데이터 (screen=infotainment) | 네비·음악·주행 모드·현재 실행 VM·게스트 콘텐츠·오류/작업 알림. 별도 VM 상태 요약 패널은 두지 않음 |
 
-**발견한 차이와 처리:** 기존 [MQTT 계약](mqtt-contract-v1.md)은 `xenova/v1/vehicle/control`, 변경 시 발행, QoS 1, retain=true다. 이전 표시 수신기는 같은 토픽의 비-retained 입력에 3초 freshness를 적용해 상태 변화가 없어도 미확인이 되는 문제가 있었다. 이번에 표시 수신 경로를 별도 토픽으로 분리했다. 기존 차량 제어 토픽/발행자/공용 계약/실제 ACL은 변경하지 않았다.
+Pi4의 HDMI0는 USB-C 전원 가까운 micro-HDMI, HDMI1은 먼 포트다. 설치 시 output_id·connector·EDID·좌표 매핑을 검증하며 XRandR와 DRM 이름을 같은 문자열로 가정하지 않는다.
 
-사용자는 **별도 표시용 상태 토픽을 1초마다 발행**하는 방향을 선택했다. 수신 계약은 `xenova/v1/display/drive-state`, `type=display.drive_state`, QoS 1, retain=false로 구체화했다. 매 보고 seq를 올리고 3초 미수신 시 live 주장을 제거한다. 발행자는 마지막 제어 이벤트를 무조건 주기 복사하는 것이 아니라, 제어 엔진이 현재도 확정할 수 있는 상태를 보고해야 한다. [팀원 검토용 규격](display-drive-state-v1.md)에 payload·발행/수신/ACL 역할을 정리했다.
+2026-10-21의 ‘VM 전체/선택 VM 상세’는 변경 전 설계다. view=overview|detail은 선택 API 호환 필드이며 현재 화면의 외형이 아니다. monitor-2의 pinned/follow_active는 게스트 콘텐츠 선택에만 적용한다. 수집기와 프론트의 screen 매핑을 함께 배치한다.
 
-확정할 최소 규격:
+VM1·VM2는 같은 Zephyr 번들의 주 구동·백업이고 VM3는 Debian이다. 각 Zephyr VM은 autonomous/manual 앱 ID를 모두 사용하며 VM UUID로 구분한다. 주행 모드와 활성 VM은 독립 값이다. 미러링 완료·주행 준비는 단순 heartbeat로 증명하지 않는다.
 
-| 항목 | 검토 기준 |
+휴대폰 자체 렌더링 모드는 별도 검토 중인 옵션이다. 이 문서는 그 모드의 구현·채택이나 기존 HDMI 범위 대체를 확정하지 않는다.
+
+## 2. 제어 상태: Git에서 확인한 원본과 남은 연결
+
+### 이미 있는 권위 구현
+
+- [MQTT 계약 5.4](mqtt-contract-v1.md#54-payload)는 Gateway의 source_id=dom0-gateway, vehicle.control의 generation/mode/active_app/active_vm_id를 정의한다.
+- [AuthorityStore.payload](../../platform/services/gateway/xenova_gateway/authority.py)는 저장된 mode·owner로 제어 payload를 만든다. [VerifiedRunner](../../platform/services/gateway/xenova_gateway/verified_runner.py)는 vehicle.control을 실제 발행한다.
+- [GatewayProvider.context](../../platform/services/gateway/xenova_gateway/provider.py)는 메모리의 owner·generation·mode와 phase·output_permitted·storage_uncertain 등을 읽는 경로를 제공한다. [provider 계약](gateway-provider-v1.md)의 context는 Xen/Store 추가 조회 없이 제공된다.
+- [Authority 요청서](../requests/2026-10-27-authority-recovery-ctrl.md)의 2026-10-29 담당 정정은 **박신영 / 플랫폼·Gateway**다. 이는 저장소상 담당 근거이며 표시 전용 토픽 발행 합의의 증거는 아니다.
+
+따라서 ‘활성 VM·주행 모드를 누가 결정하는지 전혀 미정’으로 기록하지 않는다. 다만 Authority의 저장된 선호 owner나 mode가 물리 구동 허가·장치 적용 완료를 뜻하지는 않는다. 특히 재시작·disarmed·PENDING 상태를 표시용 정상 주행으로 단순 변환하지 않는다.
+
+### 표시 수신 계약과 실제 공백
+
+사용자 선택은 별도 표시 토픽 xenova/v1/display/drive-state, type display.drive_state, 1초 주기, QoS1, retain=false다. 수신기는 매 보고 새 seq를 요구하고 3초 미수신 시 mode=unknown·active_vm_id=null로 만료한다. 기존 vehicle/control의 변경 시 발행·retained 규칙은 유지한다.
+
+| 항목 | 기준 platform에서 확인한 결과 |
 | --- | --- |
-| 권위 | 실제 주·백업/주행 모드를 결정하는 제어 담당. 표시 서비스가 active_app/VM 장애로 추론하지 않음 |
-| payload | `active_vm_id`=등록 VM1/2 UUID 또는 null, `mode`=AUTO/MANUAL/SAFE_STOP/AUTO_READY |
-| 주기/freshness | 사용자 선택: 1초 보고, 수신 후 3초 미수신이면 mode=unknown·active_vm_id=null |
-| 중복/재시작 | 공용 봉투의 boot_id·agent_instance_id·seq. 매 보고 seq 증가, 이전 세대/역순 폐기 |
-| 인증 | 브로커 계정/ACL로 권위 발행자만 발행. source_id 문자열만으로 인증을 대신하지 않음 |
-| AI·복구 상태 | 연결 전 unknown/null 유지. AI 장애만으로 활성 VM 변경을 만들지 않음 |
+| 제어 권위 원본·구현 주체 | Gateway에 있음 |
+| 표시용 토픽 수신·역순/중복/만료 처리 | 표시 수집기에 구현, loopback 합성 발행 시험 있음 |
+| 표시용 토픽을 1초마다 보내는 Gateway 송신 구현 | Gateway 소스에서 찾지 못함 |
+| 표시용 토픽 write ACL | [gateway ACL 블록](../../platform/deploy/mosquitto/etc/acl)에 없음 |
+| provider context의 표시 어댑터 | 이 정리에서 구현하지 않음. 읽기 경로 존재를 연결 완료로 처리하지 않음 |
+| 실제 보드 발행·ACL·제어 상태 연동 | 이번 문서 정리에서 조회하지 않음 |
 
-**상태: 사용자 방향 선택 및 수신 구현 완료. 제어 담당의 토픽/권위/발행 구현/ACL 합의 대기.**
+기존 retained 메시지를 어댑터가 무조건 1초마다 재발행하면 권위 프로세스의 현재 생존·상태를 증명하지 못한다. 표시용 보고는 기존 Gateway의 검증된 현재 상태를 재사용하고, phase·출력 허가·저장 미확정·관측 실패의 의미를 담당과 맞춰야 한다. source_id 문자열은 브로커 인증을 대신하지 않는다.
 
-## 2. 대상 보드의 실행 가능성
+남은 결정은 [제어 담당 연결 규격](display-drive-state-v1.md)의 토픽·발행 경로·신선도·상태 의미·ACL 적용 주체를 확인하는 것이다. 주행 제어를 새로 구현하거나 이번 문서 정리에서 Gateway·ACL을 변경하지 않는다. 실제 제어 보고 만료/복귀는 255, VM별 앱 보고는 253에서 검증한다.
 
-저장소의 `xenova-xen-bringup-image.bb`는 최소 Xen 테스트 이미지이며 이 레시피에서 Xorg·Chromium·FFmpeg가 명시적으로 설치되지 않는다. `local.conf.fragment`의 dom0 메모리는 1024M이다. 실제 설치 이미지/패키지/그래픽 장치와 같다는 근거는 아니며, 이 설정만으로 렌더/캡처 가능 또는 불가능을 확정하지 않는다.
+## 3. 보드·출력 실행 가능성: 확인 완료 범위
 
-표준 Python만으로 실행 가능한 [환경 점검 도구](../../platform/services/display/router/tools/probe_board_environment.py)를 준비했다. 보드 설정·패키지·서비스·VM을 바꾸거나 GUI를 시작하지 않고 기존 도구/DRM/세션을 조회한다.
+‘보드 미준비’는 2026-10-22 시점의 이력이며 현재 실행 가능성의 미해결 사유가 아니다.
 
-```sh
-# 실제 dom0에서 실행. 가능하면 기존 그래픽 사용자 세션을 사용한다.
-python3 probe_board_environment.py > display-board-environment.json
-# 기존 X11 DISPLAY를 알고 있는 경우에만 지정한다.
-python3 probe_board_environment.py --display :0 > display-board-x11-environment.json
-```
+- [256 자동 시작 시험](../verification/display-256-autostart-20261028.md): Pi4에서 KMS/Xorg·Chromium 두 화면, 서비스 배치·정상 재부팅 후 자동 표시 확인.
+- [252 상태 렌더 시험](../verification/display-252-dual-state-20261028.md): 두 출력에서 합성 상태 13단계씩 26항목 확인. 실제 주행 장애를 발생시킨 결과는 아니다.
+- [257 최종 시험](../verification/display-257-browser-acceptance-20261102.md): 실제 두 HDMI 캡처·원격 디코드, 양쪽 물리 분리·복귀 확인.
 
-결과 수집 성공은 HDMI 수락 성공이 아니다. 도구가 모두 있어도 ARM/Xen의 GPU 접근·실제 두 창 배치·FFmpeg 캡처는 별도로 시험한다. 사용자는 **아직 보드가 준비되지 않음**으로 답했다. 보드에 접속하거나 패키지/이미지/서비스를 변경하지 않았다.
+기존 보드의 실행 묶음으로 확인했으며 Yocto 이미지 편입·모든 새 이미지 호환·최신 수정 영구 배포를 보증하지 않는다. 메모리 기본 레시피 값을 실제 보드의 현재 할당량으로 인용하지 않는다.
 
-**상태: 보드 준비 대기. 점검 도구와 수락 절차 준비 완료, 실제 보드 확인 미수행.** 실보드 수락 세부 항목은 [검증 절차](../verification/display-hardware-acceptance.md)를 따른다.
+## 4. 원격 전송 선정·목표·측정 결과
 
-## 3. 원격 전송·측정 기준
+기본 backend는 FFmpeg이며 선택형 native backend는 X11/MIT-SHM→재사용 TurboJPEG 버퍼→MJPEG/HTTP→브라우저 canvas다. 같은 실제 출력 소스의 픽셀을 전송한다. 시연 키는 feed 키와 분리하고 HttpOnly 쿠키, loopback 바인딩과 인증된 접근 경계를 사용한다. 별도 웹 대시보드 재렌더를 HDMI 전송 성공으로 취급하지 않는다.
 
-실제 구현된 프로토콜은 X11 root 영역별 FFmpeg x11grab → MJPEG/HTTP → 원격 canvas 디코드다. 키오스크와 송신기는 별도 실행한다. 시연용 키는 feed 키와 다르고 HttpOnly 쿠키로 연결하며, 기본 loopback 바인딩과 SSH 포워딩 또는 준비된 HTTPS 경계를 사용한다. 원격 단절/송신 종료가 로컬 창을 종료시키지 않는 가상 시험을 통과했다.
+| 항목 | 1차 기준 | 실제 보드 최종 관측 |
+| --- | --- | --- |
+| 해상도·FPS | 출력별 1280×720, 설정 5 FPS | 실제 약 4.91~4.94 FPS. 엄격한 수신 하한 5.000 통과로 기록하지 않음 |
+| JPEG 설정 | backend별 명시 | native quality85. FFmpeg q=7과 같은 척도가 아님 |
+| 영상 지연 | p95 ≤500ms 목표 | 전경 Chrome 계측 p95 상한 약 456~464ms |
+| JPEG payload 합계 | ≤8Mbps 목표 | 약 4.48Mbps. HTTP/SSH 헤더 포함 전체 망 사용량과 구분 |
+| 송신기+인코더 CPU | 평균 ≤1코어 | 약 0.63코어. 로컬 Chromium·전체 시스템 CPU와 구분 |
+| 연속 수신 | ≥10분 | 약 602.55초, 추가 재연결·1초 이상 draw 공백 각각 0회 |
+| 분리·복귀 | 출력별 식별·새 영상 복귀 | 양쪽 실제 HDMI 확인. HDMI0 복귀 시 반대편 약 1.05초 draw 간격 1회 |
 
-사용자가 선택한 1차 기준:
+지연은 원격 명령 왕복을 단순히 영상 지연으로 사용하지 않는다. source draw bracket·clock echo·브라우저 draw/두 RAF 계측을 사용했고, 120초 이하 batch의 상대 시계 속도 0.99~1.01 공학 가정을 명시했다. 물리 LCD scanout·WAN·모든 망 조건의 보장이 아니다. 장비·망·시계 제약·실패 후보·원자료는 [최종 기록](../verification/display-257-browser-acceptance-20261102.md)에 있다.
 
-| 항목 | 사용자 확정 목표 |
+시험 대상은 상태 패널과 작은 표식 변화다. 실제 지도·카메라·게스트 동영상 전체 부하, 물리 차량 동작 통합은 별도다. 6 FPS는 비교만 했고 기본값은 5다. 뒤이어 병합된 viewer의 5초 프레임 정지 재연결 보완은 위 10분 시험보다 나중 코드이며 그 시험으로 실보드 검증했다고 주장하지 않는다.
+
+시험 후 native 라이브러리·키오스크 후보·SSH 포트 허용을 원복했다. **저장소 병합과 보드 영구 적용은 다르다.** 상시 native 배치·unit enable·정식 접속 경로는 [배포 안내](../../platform/services/display/router/deploy/board-kms/STREAM.md)를 따라 별도 적용한다.
+
+## 5. 250 완료 조건 대조
+
+| 완료 조건 | 근거·판정 |
 | --- | --- |
-| 출력/전송 | 출력별 1280×720, 5 FPS, JPEG quality 7. 10 FPS는 별도 개선 |
-| 지연 | 실보드/실제 시연 PC에서 로컬 화면 대비 p95 ≤500ms 목표. 시계 오차/표본 수 기록 |
-| 대역폭 | 두 출력 JPEG payload 합계 ≤8Mbps 목표. HTTP/SSH 포함 실제 망 전송량도 별도 기록 |
-| CPU | Pi 송신기 + 두 인코더 평균 ≤1코어 상당(1코어=100%) 목표. 로컬 렌더러와 총 시스템도 분리 측정 |
-| 독립성 | 원격망/송신기 장애에도 로컬 두 출력 유지 |
-| 연속 시험 | 10분 이상, 양쪽 출력/원격 디코드·FPS·CPU·메모리·단절 횟수 기록 |
+| 외부 웹 라우팅/HDMI 담당 경계 | 본 문서 1절·설계 문서에 정리 |
+| 두 출력·상태 결정표·전환 인터페이스 | 계기판/인포테인먼트로 갱신. 252·254·256 근거 존재 |
+| HDMI와 원격 stream 소스 식별 | 실제 X11 영역 캡처·output_id·분리 복귀 증거 존재 |
+| 프로토콜·자원/화질/지연 기준·독립성 | 목표와 측정·제약 분리. 원격 실패가 HDMI 실행을 소유하지 않는 경계 정의 |
+| QEMU/보드/모니터/원격 수신 구분 | 검증 문서별 환경과 범위 구분 |
+| 기존 미결정인 제어 상태 전달 합의 | 원본·담당 근거는 찾음. 표시용 발행·신선도·ACL 연결 확인은 남음 |
 
-사용자는 **이 기준을 1차 목표로 사용**하기로 했다. X11/MJPEG는 실보드 호환 확인 전까지 구현 기준이며, 보드가 해당 스택을 지원한다고 확정한 것은 아니다. 사용자 확정 목표와 실제 달성 여부는 따로 기록한다. 가상 검증은 [5단계 evidence](../verification/display-step5-runtime-evidence.json)를 따른다. 전체 가상 시험 RSS 약 2.8GiB를 1GiB dom0의 실제 사용량으로 대입하거나 Pi 자원 목표 달성으로 간주하지 않는다.
-
-**상태: 사용자 1차 목표 확정 완료. 실제 보드 달성 여부는 미검증.**
-
-사용자 선택 반영 후 Python 58개와 새 토픽의 실제 loopback MQTT/REST/WS 수락 6개를 통과했다. [후속 검증 결과](../verification/display-250-followup.md)에 구체적인 시험/합성 입력의 경계를 기록했다.
-
-## 250 완료 판단
-
-위 3은 사용자 기준 확정으로 정리했다. 1의 사용자 선택/수신 준비는 끝났지만 **제어 담당 합의**가 남고, 2는 **보드 미준비로 실제 환경 확인**이 남는다. 기존 Jira 완료 조건대로 250을 아직 완료 처리하지 않는다. 실제 HDMI 전체 수락은 후속 출력·전송·통합 이슈에서 수행하되, 250은 적용할 구성과 그 근거를 먼저 확정한다. 현재 Jira 상태/완료 조건은 변경하지 않았다.
+250은 새 화면 개발보다 **계약 마감 검토 단계**다. 보드 미준비나 이미 수행한 성능 시험을 다시 미해결로 세지 않는다. 제어 연결 방식이 아직 확정되지 않았다는 기존 의존성을 삭제하거나 합의 완료로 꾸미지 않는다. 250을 합의 대기 없이 완료하도록 범위를 바꾸려면 그 결정과 후속 담당·이슈를 명시해야 한다. 이번 정리에서는 Jira 완료·범위 변경을 하지 않는다.

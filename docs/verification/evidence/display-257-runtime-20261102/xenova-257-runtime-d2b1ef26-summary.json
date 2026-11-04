@@ -1,0 +1,39 @@
+{
+  "trial": "xenova-257-runtime-d2b1ef26",
+  "duration_target_s": 600,
+  "markers_requested": true,
+  "product_native_worker": true,
+  "setup": {
+    "prior": {
+      "xenova-display-kiosk.service": true,
+      "xenova-display-graphics.service": true
+    }
+  },
+  "prepared": {
+    "native_dependency_check": true,
+    "started": true
+  },
+  "unauthenticated_http": 401,
+  "error": "TimeoutError: ",
+  "cleanup": {
+    "services": {
+      "xenova-display-kiosk.service": "active",
+      "xenova-display-graphics.service": "active",
+      "xenova-display-feed.service": "active",
+      "xenova-dom0-manager.service": "active",
+      "mosquitto.service": "active",
+      "tailscaled.service": "active"
+    },
+    "ssh_policy_restored": true,
+    "graphics_source_restored": true,
+    "graphics_source_unchanged": true,
+    "domains_unchanged": true,
+    "temporary_files_removed": true,
+    "sender_journal": "Started [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-d2b1ef26/stream-host.py.\nINFO:     Started server process [19445]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://127.0.0.1:8083 (Press CTRL+C to quit)\nStopping [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-d2b1ef26/stream-host.py...\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [19445]\nxenova-257-runtime-d2b1ef26.service: Deactivated successfully.\nStopped [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-d2b1ef26/stream-host.py.\nxenova-257-runtime-d2b1ef26.service: Consumed 19.887s CPU time over 22.805s wall clock time, 58.7M memory peak.\n"
+  },
+  "streams": {},
+  "latency": {},
+  "sample_window_s": 0,
+  "cpu_mean_cores": {},
+  "cpu_scope": "service cgroups; process birth/exit intervals undercount startup/exit CPU; Chromium/Xorg excluded from pipeline"
+}
