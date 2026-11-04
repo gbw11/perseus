@@ -35,6 +35,48 @@ def device():
         assert not owner.thread.is_alive() and not virtual.thread.is_alive()
 
 
+def test_queued_stop_precedes_feedback_after_idle_wakeup(monkeypatch):
+    from threading import Event
+    from xenova_gateway.sink import MockSink
+
+    first_poll = Event()
+    release_poll = Event()
+    idle = Event()
+    calls = []
+
+    class FeedbackSink(MockSink):
+        snapshot = {}
+
+        def poll(self, now):
+            calls.append('poll')
+            if not first_poll.is_set():
+                first_poll.set()
+                assert release_poll.wait(1)
+
+        def write(self, frame, now):
+            calls.append('write')
+            return super().write(frame, now)
+
+    owner = OutputOwner(FeedbackSink(), command_timeout_s=.1)
+    try:
+        assert first_poll.wait(1)
+        wait_on_condition = owner.condition.wait
+
+        def wait_until_notified(delay):
+            idle.set()
+            return wait_on_condition(1 if not owner.closing else delay)
+
+        monkeypatch.setattr(owner.condition, 'wait', wait_until_notified)
+        release_poll.set()
+        assert idle.wait(1)
+        owner.write(StopFrame(42, 0, 1), time.monotonic())
+        wait(lambda: len(calls) >= 3)
+        assert calls[:3] == ['poll', 'write', 'poll']
+    finally:
+        release_poll.set()
+        owner.close()
+
+
 def test_c13_pty_partial_roundtrip_stages_and_missing_sensor_is_unknown(device):
     owner,sink,virtual=device
     sent=owner.write(DriveFrame(42,0,.1,0),time.monotonic())

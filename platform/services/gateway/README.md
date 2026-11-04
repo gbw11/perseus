@@ -252,9 +252,21 @@ Paho가 이미 받은 QoS1 bytes가 취소됐다고 가정하지 않는다. 구�
 
 `submissions`의 제한된 기록은 원 명령의 VM·execution·boot·instance·app·message_id·seq,
 수신 단조 시각, generation, 인코딩 hex/counter, serial_result/accepted_bytes를 제공한다.
-시리얼 실패는 OUTPUT_PATH_FAILED와 출력 금지로 반영된다. 장치 적용은 미연결이므로
-`device_applied=null`이다. `vehicle.status.applied_generation`을 만들어내지 않는다.
-STOP 재전달과 기존 watchdog/E-stop은 유지한다.
+시리얼 쓰기 실패는 OUTPUT_PATH_FAILED와 출력 금지로 반영된다.
+submissions.device_applied는 null이며 feedback 프로필의 실제 적용 결과는 별도 device view와
+원 요청의 original.device에서 확인한다.
+
+기동·주기 STOP은 기존 단일 장치 소유자에게 제출하고 actor에서 스레드 기상을 기다리지 않는다.
+큐에 있는 동안 serial_result=pending, serial_wait=queued로 기록한다. 같은 STOP의 실제
+완료를 회수하기 전에는 새 STOP이나 DRIVE를 제출하지 않는다. 완료하면 원 기록을 accepted로
+갱신하고 원 submitted_monotonic을 보존한다. serial_completed_monotonic은 actor가 완료를
+회수한 시각이다. 장치 수락·적용·물리 정지는 각 feedback 근거로 따로 확인한다.
+
+직접 write 호출의 10ms 대기가 끝난 STOP은 call_budget_exhausted로 표시하고 같은 소유 작업을
+회수한다. 필수 보호 저장 직전의 직접 STOP 제출은 기존 동기 경계를 사용한다. DRIVE의 기존
+10ms 대기 실패와 후속 STOP, 원 명령 만료, 실제 쓰기 실패·장치 적용 기한·종료 확인은 계속
+검사한다. 실제 소유 스레드가 종료되거나 쓰기가 실패하면 해당 오류로 출력 금지를 확정한다.
+STOP 대기 상태는 원 Authority나 작업 기록을 대신하지 않는다.
 
 ## Legacy 분리 앱
 
