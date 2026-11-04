@@ -3,7 +3,10 @@
 #include <string.h>
 #include <math.h>
 
-static bool take(struct drive_engine *e){return !atomic_flag_test_and_set_explicit(&e->lock,memory_order_acquire);}
+static bool take(struct drive_engine *e){
+ if(!atomic_flag_test_and_set_explicit(&e->lock,memory_order_acquire))return true;
+ atomic_fetch_add(&e->resource_contention,1);return false;
+}
 static void give(struct drive_engine *e){atomic_flag_clear_explicit(&e->lock,memory_order_release);}
 static bool readers(const struct de_path_slot *s){for(unsigned i=0;i<DE_READERS;i++)if(s->leases[i])return true;return false;}
 void de_init(struct drive_engine *e,const struct lp_config *c,const struct lp_assets *a){
@@ -17,8 +20,13 @@ static enum de_result reserve(struct drive_engine *e,struct de_reference *h,stru
  else if(e->next_generation==UINT32_MAX)rc=DE_LIMIT;
  else for(unsigned i=0;i<DE_PATH_SLOTS;i++)if((int)i!=e->current&&!readers(&e->paths[i])&&!e->paths[i].writing){
   struct de_path_slot *slot=&e->paths[i];slot->writing=true;slot->generation=++e->next_generation;
-  *h=(struct de_reference){i,slot->generation,0};*path=&slot->path;rc=DE_OK;break;
+  *h=(struct de_reference){i,slot->generation,0};*path=&slot->path;rc=DE_OK;
+  unsigned used=0;
+  for(unsigned j=0;j<DE_PATH_SLOTS;j++)if((int)j==e->current||e->paths[j].writing||readers(&e->paths[j]))used++;
+  if(used>e->path_peak)e->path_peak=used;
+  break;
  }
+ if(rc==DE_BUSY)e->path_exhausted++;
  give(e);return rc;
 }
 static enum de_result publish(struct drive_engine *e,struct de_reference h,bool valid){
@@ -98,6 +106,11 @@ enum de_result de_receive_poll(struct drive_engine *e,uint64_t now){
  if(atomic_load(&e->requested)==UINT32_MAX)return DE_LIMIT;
  atomic_fetch_add(&e->requested,1);return DE_OK;
 }
+static void search_memory_publish(struct drive_engine *e){
+ unsigned used=e->search.used;
+ if(used>atomic_load(&e->search_peak))atomic_store(&e->search_peak,used);
+ atomic_store(&e->search_used,used);
+}
 enum de_result de_plan_start(struct drive_engine *e,uint64_t now,struct lp_budget budget){
  if(e->planning||e->apply_pending)return DE_BUSY;
  bool stopped=e->stopping;uint32_t request=e->requested;
@@ -158,6 +171,7 @@ enum de_result de_plan_start(struct drive_engine *e,uint64_t now,struct lp_budge
  float steering=vehicle.has_measured_steering_rad?vehicle.measured_steering_rad:
                  vehicle.has_estimated_steering_rad?vehicle.estimated_steering_rad:NAN;
  e->search_reason=lp_start_local(&e->search,&map->world,pose,steering,goal,e->config,e->assets,budget,e->maneuver_direction);
+ search_memory_publish(e);
  return e->last_reason=DE_OK;
 }
 enum de_result de_plan_slice(struct drive_engine *e,unsigned expansions,uint64_t now){
@@ -165,6 +179,7 @@ enum de_result de_plan_slice(struct drive_engine *e,unsigned expansions,uint64_t
  if(e->stopping)e->search_reason=LP_CANCELLED;
  struct lp_path *path=&e->paths[e->planning_path.slot].path;
  if(e->search_reason==LP_SEARCHING)e->search_reason=lp_advance(&e->search,expansions,path);
+ search_memory_publish(e);
  if(e->search_reason==LP_SEARCHING)return DE_WAITING;
  /* A high-rate pose-anchored map must not starve a bounded search. Validate
   * the completed path against the latest complete map, keeping the original
@@ -226,6 +241,7 @@ enum de_result de_plan_slice(struct drive_engine *e,unsigned expansions,uint64_t
  unsigned outcome=(unsigned)atomic_load(&e->search_reason);
  if(outcome<=LP_CLOCK){
   e->search_outcomes[outcome]++;
+  if(outcome==LP_NODE_BUDGET)atomic_fetch_add(&e->search_exhausted,1);
   if(outcome!=LP_PATH_FOUND&&e->first_search_failure==LP_SEARCHING)e->first_search_failure=(enum lp_result)outcome;
  }
  const struct lp_metrics *m=&e->search.metrics;struct lp_metrics *total=&e->planned;
@@ -337,4 +353,28 @@ const char *de_reason(enum de_result rc){
   "PATH_UNAVAILABLE","OBSERVATION_EXPIRED","CONTEXT_CHANGED","STATE_REJECTED","RESOURCE_LIMIT","CANCELLED","CLOCK_ERROR",
   "STATE_FRAME_CHANGED","STATE_CONFIGURATION_CHANGED","STATE_REFERENCE_CHANGED"};
  return (unsigned)rc<sizeof(reasons)/sizeof(*reasons)?reasons[rc]:"INTERNAL_ERROR";
+}
+
+enum de_result de_memory_read(struct drive_engine *e,unsigned region,struct dw_memory *out){
+ if(!out||region>3)return DE_INPUT;
+ if(region==0)return dw_memory_read(&e->maps,out)==DW_OK?DE_OK:DE_BUSY;
+ if(region==3)return dw_odom_memory_read(&e->odometry,out)==DW_OK?DE_OK:DE_BUSY;
+ if(region==2){
+  /* Allocated nodes at the last completed slice, not transient stack/heap use.
+   * The index/heap/heuristic workspace is included only in reserved bytes. */
+  unsigned used=atomic_load(&e->search_used);
+  unsigned peak=atomic_load(&e->search_peak);
+  *out=(struct dw_memory){.reserved=sizeof(e->search),.capacity=(uint64_t)e->config->node_limit*sizeof(e->search.nodes[0]),
+   .used=(uint64_t)used*sizeof(e->search.nodes[0]),
+   .peak=(uint64_t)peak*sizeof(e->search.nodes[0]),
+   .exhausted=atomic_load(&e->search_exhausted)};
+  return DE_OK;
+ }
+ if(atomic_flag_test_and_set_explicit(&e->lock,memory_order_acquire))return DE_BUSY;
+ unsigned used=0;
+ for(unsigned i=0;i<DE_PATH_SLOTS;i++)if((int)i==e->current||e->paths[i].writing||readers(&e->paths[i]))used++;
+ *out=(struct dw_memory){.reserved=sizeof(e->paths),.capacity=DE_PATH_SLOTS*sizeof(struct lp_path),
+  .used=used*sizeof(struct lp_path),.peak=e->path_peak*sizeof(struct lp_path),
+  .exhausted=e->path_exhausted,.contention=atomic_load(&e->resource_contention)};
+ give(e);return DE_OK;
 }

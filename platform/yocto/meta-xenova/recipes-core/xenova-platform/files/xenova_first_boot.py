@@ -404,7 +404,7 @@ class FirstBoot:
         state['phase'] = 'complete'
         self.save(state_path, state)
         self.save(self.run / 'install-ready.json', {'factory_id': factory['factory_id'], 'dom0_machine_id': mid,
-                                                 'asset_errors': asset_errors})
+                                                 'asset_errors': asset_errors, 'fresh_registration': not completed})
         if asset_errors:
             print(json.dumps({'registration': 'complete', 'asset_errors': asset_errors}))
         print('installation verified; hand off to existing VM autostart service')

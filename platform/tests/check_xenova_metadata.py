@@ -136,7 +136,7 @@ print('PASS Xenova PN/SRC_URI/image dependencies, single SSH service mode and ne
 _, api = load('xenova-dom0-manager')
 _, mqtt = load('xenova-mqtt-client')
 assert {'xenova-dom0-manager', 'xenova-mqtt-client'} <= set(image['IMAGE_INSTALL'].split())
-assert {'python3-fastapi', 'python3-uvicorn', 'python3-websockets', 'python3-terminal', 'python3-netclient', 'python3-shell', 'python3-datetime', 'xenova-platform', 'xen-tools-xenstat', 'xenova-mqtt-client'} <= set(api['RDEPENDS:xenova-dom0-manager'].split())
+assert {'python3-fastapi', 'python3-uvicorn', 'python3-websockets', 'python3-terminal', 'python3-netclient', 'python3-shell', 'python3-datetime', 'xenova-platform', 'xen-tools-xenstat', 'xenova-mqtt-client', 'xenova-gateway-client'} <= set(api['RDEPENDS:xenova-dom0-manager'].split())
 assert 'python3-paho-mqtt' in mqtt['RDEPENDS:xenova-mqtt-client'].split()
 assert set(api['SYSTEMD_SERVICE:xenova-dom0-manager'].split()) == {'xenova-dom0-manager.service', 'xenova-recovery-worker.service', 'xenova-runtime-log-collector.service'}
 assert {'systemd', 'python3-sqlite3'} <= set(api['RDEPENDS:xenova-dom0-manager'].split())
@@ -144,6 +144,7 @@ log_files = LAYER/'recipes-core/xenova-dom0-manager/files/runtime-logs'
 for name in ['xenova-runtime-log-collector.service', 'runtime-log-db.env', 'runtime-logs-manager.conf']:
     assert selected(api, name).resolve() == log_files/name
 assert selected(api, 'xenova-recovery-worker.service').resolve() == ROOT/'platform/services/dom0-manager/deploy/xenova-recovery-worker.service'
+assert selected(api, 'xenova-recovery-config.service').resolve() == ROOT/'platform/services/dom0-manager/deploy/xenova-recovery-config.service'
 assert api['SYSTEMD_AUTO_ENABLE:xenova-dom0-manager'] == 'enable'
 assert selected(api, 'dom0_manager', directory=True).resolve() == ROOT/'platform/services/dom0-manager/dom0_manager'
 assert selected(mqtt, 'xenova_mqtt', directory=True).resolve() == ROOT/'platform/services/vm-agent/mqtt-client/xenova_mqtt'

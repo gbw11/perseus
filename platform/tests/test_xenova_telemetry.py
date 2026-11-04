@@ -69,6 +69,66 @@ class TelemetryModelTest(unittest.TestCase):
                 return [{s['name']: s for s in m['payload']['samples']} for m in received
                         if m['type'] == 'telemetry.metrics' and m['payload']['family'] == family]
 
+            all_app_memory=values_for('app_memory')
+            app_memory=[v for v in all_app_memory if not next(iter(v.values()))['labels']['region'].startswith('manual_')]
+            self.assertEqual(len(app_memory),6)
+            busy=app_memory[4]
+            self.assertTrue(all(v['value'] is None and v['source_rc']==-16 and v['reason']=='owner_busy' for v in busy.values()))
+            self.assertEqual(app_memory[5]['memory.app.used_bytes']['value'],'0')
+            for region in app_memory[:4]:
+                self.assertEqual(int(region['memory.app.used_bytes']['value'])+int(region['memory.app.free_bytes']['value']),int(region['memory.app.capacity_bytes']['value']))
+                self.assertEqual(region['memory.app.capacity_failure_total']['value'],'3')
+            manual=[m for m in received if m['type']=='telemetry.metrics' and
+                    m['payload'].get('family')=='app_memory' and
+                    m['payload']['samples'][0]['labels']['region'].startswith('manual_')]
+            self.assertEqual(len(manual),17)
+            self.assertEqual({v['labels']['region'] for row in all_app_memory for v in row.values()},
+                             {'drive_maps','drive_paths','drive_search_nodes','drive_odometry',
+                              'manual_input','manual_pending','manual_running','manual_result'})
+            def manual_values(message):
+                return {v['name'].removeprefix('memory.app.'):v for v in message['payload']['samples']}
+            empty=[m for m in manual if m['payload']['buffer'] is not None and m['payload']['buffer']['phase']=='empty']
+            self.assertEqual(len(empty),4)
+            for m in empty:
+                b=m['payload']['buffer'];v=manual_values(m)
+                self.assertIsNone(b['sequence']);self.assertIsNone(b['source_uptime_ms'])
+                self.assertEqual((b['content_bytes'],v['used_bytes']['value']),('0','0'))
+            stored=[m for m in manual if m['payload']['samples'][0]['labels']['region']=='manual_input' and
+                    m['payload']['buffer']['phase']=='stored']
+            self.assertEqual(len(stored),5)
+            zero=stored[0]['payload']['buffer']
+            self.assertEqual((zero['sequence'],zero['source_uptime_ms']),('0','0'))
+            self.assertIsNone(stored[-1]['payload']['buffer']['source_uptime_ms'])
+            self.assertEqual(stored[-1]['payload']['buffer']['sequence'],'0')
+            self.assertEqual([m['payload']['buffer']['input_status'] for m in stored],
+                             ['accepted','unclassified','invalid','expired','accepted'])
+            for m in stored:
+                self.assertEqual(manual_values(m)['used_bytes']['value'],'256')
+                self.assertEqual(manual_values(m)['high_water_bytes']['value'],'256')
+                self.assertTrue(all(v['status']=='ok' for v in m['payload']['samples']))
+            for phase in ('pending','running'):
+                m=next(m for m in manual if m['payload']['buffer'] and m['payload']['buffer']['phase']==phase)
+                b=m['payload']['buffer'];v=manual_values(m)
+                self.assertEqual((v['used_bytes']['value'],b['content_bytes']),('1024','512'))
+                self.assertIsNone(b['performed']);self.assertIsNone(b['last_read_sequence'])
+            retained=[m for m in manual if m['payload']['buffer'] and m['payload']['buffer']['phase']=='retained'
+                      and m['payload']['buffer']['sequence']=='9']
+            self.assertEqual(len(retained),3)
+            self.assertEqual([m['payload']['buffer']['last_read_sequence'] for m in retained],[None,'9','9'])
+            self.assertEqual([m['payload']['buffer']['revoked'] for m in retained],[False,False,True])
+            for m in retained:
+                self.assertEqual(manual_values(m)['used_bytes']['value'],'1024')
+                self.assertEqual(m['payload']['buffer']['content_bytes'],'1024')
+                self.assertTrue(m['payload']['buffer']['performed'])
+            missing=[m for m in manual if m['payload']['buffer'] is None]
+            self.assertEqual(len(missing),2)
+            self.assertEqual({m['payload']['samples'][0]['reason'] for m in missing},
+                             {'owner_busy','sample_expired'})
+            self.assertTrue(all(v['value'] is None for m in missing for v in m['payload']['samples']))
+            maximum=manual[-1]
+            self.assertEqual(maximum['payload']['buffer']['content_bytes'],str(2**64-1))
+            self.assertEqual(maximum['payload']['buffer']['sequence'],str(2**64-1))
+            self.assertLessEqual(len(self.oracle.wire_bytes(maximum)),4096)
             memory = values_for('memory')
             accounted = 'memory.kernel_heap.accounted_bytes'
             self.assertEqual([(m[accounted]['status'], m[accounted]['value']) for m in memory],

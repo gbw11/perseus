@@ -1,13 +1,13 @@
 SUMMARY = "Xenova platform-backed dom0 HTTP management service"
 LICENSE = "CLOSED"
 FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../services/dom0-manager:${THISDIR}/../../../../services/dom0-manager/deploy:"
-SRC_URI = "file://dom0_manager file://pyproject.toml file://xenova-dom0-manager.service file://dom0-manager.env file://spring-registration.env.example file://xenova-recovery-worker.service file://drive-rejoin.example.json"
+SRC_URI = "file://dom0_manager file://pyproject.toml file://xenova-dom0-manager.service file://dom0-manager.env file://spring-registration.env.example file://xenova-recovery-worker.service file://xenova-recovery-config.service file://drive-rejoin.example.json"
 S = "${UNPACKDIR}"
 
 inherit allarch python3-dir systemd
 
 # PTY 콘솔의 tty/termios와 pyproject에 선언된 WebSocket 전송을 설치한다.
-RDEPENDS:${PN} = "python3-core python3-fastapi python3-uvicorn python3-websockets python3-terminal python3-json python3-logging python3-threading python3-netclient python3-io python3-ctypes python3-sqlite3 python3-shell python3-crypt python3-math python3-datetime xenova-platform xen-tools-xenstat xenova-mqtt-client"
+RDEPENDS:${PN} = "python3-core python3-fastapi python3-uvicorn python3-websockets python3-terminal python3-json python3-logging python3-threading python3-netclient python3-io python3-ctypes python3-sqlite3 python3-shell python3-crypt python3-math python3-datetime xenova-platform xen-tools-xenstat xenova-mqtt-client xenova-gateway-client"
 # 통계/감시기 시험 소스를 옮겨도 xentop·공용 MQTT runtime을 다시 설치하지 않게 한다.
 SYSTEMD_SERVICE:${PN} = "xenova-dom0-manager.service xenova-recovery-worker.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
@@ -22,9 +22,10 @@ do_install() {
     install -m 0644 "${S}/drive-rejoin.example.json" "${D}${datadir}/xenova/drive-rejoin.example.json"
     install -m 0644 "${S}/xenova-dom0-manager.service" "${D}${systemd_system_unitdir}/xenova-dom0-manager.service"
     install -m 0644 "${S}/xenova-recovery-worker.service" "${D}${systemd_system_unitdir}/xenova-recovery-worker.service"
+    install -m 0644 "${S}/xenova-recovery-config.service" "${D}${systemd_system_unitdir}/xenova-recovery-config.service"
     install -m 0600 "${S}/dom0-manager.env" "${D}${sysconfdir}/xenova/dom0-manager.env"
     install -m 0644 "${S}/spring-registration.env.example" "${D}${datadir}/xenova/spring-registration.env.example"
 }
 
-FILES:${PN} += "${PYTHON_SITEPACKAGES_DIR}/dom0_manager ${datadir}/xenova"
+FILES:${PN} += "${PYTHON_SITEPACKAGES_DIR}/dom0_manager ${datadir}/xenova ${systemd_system_unitdir}/xenova-recovery-config.service"
 CONFFILES:${PN} += "${sysconfdir}/xenova/dom0-manager.env"

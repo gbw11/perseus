@@ -59,7 +59,7 @@ def test_image_installs_one_collector_with_shared_private_configuration(image):
     collector = ini(units / UNIT)
     manager = ini(units / 'xenova-dom0-manager.service.d/30-runtime-logs.conf')
     config = image / collector['Service']['EnvironmentFile'].lstrip('/')
-    assert manager['Service']['EnvironmentFile'] == collector['Service']['EnvironmentFile']
+    assert manager['Service']['EnvironmentFile'] == '-' + collector['Service']['EnvironmentFile']
     assert stat.S_IMODE(config.stat().st_mode) == 0o600
     assert stat.S_IMODE(config.parent.stat().st_mode) == 0o700
     assert config.read_text().splitlines()[-1] == 'XENOVA_RUNTIME_LOG_DB=/var/lib/xenova-runtime-logs/logs.sqlite3'

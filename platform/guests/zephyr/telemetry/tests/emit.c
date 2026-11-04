@@ -3,6 +3,7 @@
 #include <xenova/telemetry_core.h>
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -11,13 +12,87 @@ static struct xt_observation observation;
 static struct xt_message message;
 static char sample_id[37], snapshot_id[37];
 
-static void emit(enum xt_kind kind,unsigned part)
+static void emit_at(enum xt_kind kind,unsigned part,uint64_t sent)
 {
 	assert(!xt_sample_id(&publisher,sample_id));
-	int rc=xt_encode(&publisher,kind,&observation,50000,sample_id,snapshot_id,part,&message);
+	int rc=xt_encode(&publisher,kind,&observation,sent,sample_id,snapshot_id,part,&message);
 	if (rc) { fprintf(stderr,"encode kind=%d part=%u rc=%d\n",kind,part,rc); }
 	assert(!rc && message.length<=XT_PAYLOAD_MAX);
 	printf("{\"topic\":\"%s\",\"qos\":%u,\"retain\":%s,\"message\":%s}\n",message.topic,message.qos,message.retain ? "true" : "false",message.bytes);
+}
+
+
+static void emit(enum xt_kind kind,unsigned part){emit_at(kind,part,50000);}
+
+static void reject_manual(unsigned part,int error)
+{
+ uint64_t sequence=publisher.sequence[2];
+ assert(xt_encode(&publisher,XT_APP_MEMORY,&observation,50000,sample_id,snapshot_id,part,&message)==error);
+ assert(publisher.sequence[2]==sequence);
+}
+
+static void manual_boundaries(void)
+{
+ observation.resources.app_count=XDR_APP_REGIONS;
+ for(unsigned i=0;i<XDR_MANUAL_REGIONS;i++){
+  observation.resources.app[i+XDR_AUTO_REGIONS]=(struct xdr_app_region){.reserved=2048,.capacity=1024};
+  observation.resources.app_buffer[i]=(struct xdr_app_buffer){.source_ms=-1};
+  emit(XT_APP_MEMORY,i+XDR_AUTO_REGIONS);
+ }
+ struct xdr_app_region *input=&observation.resources.app[4];
+ struct xdr_app_buffer *b=&observation.resources.app_buffer[0];
+ input->used=input->peak=256;
+ *b=(struct xdr_app_buffer){.phase=XDR_BUFFER_STORED,.content_bytes=256,
+  .sequence=0,.source_ms=0,.context_revision=11,.connection_revision=7,.input_status=XDR_INPUT_ACCEPTED};
+ emit(XT_APP_MEMORY,4); /* Envelope seq/time0 are not absence. */
+ b->input_status=XDR_INPUT_UNCLASSIFIED;emit(XT_APP_MEMORY,4);
+ b->input_status=XDR_INPUT_INVALID;b->source_rc=-EBADMSG;emit(XT_APP_MEMORY,4);
+ b->input_status=XDR_INPUT_EXPIRED;b->source_rc=-ETIME;emit(XT_APP_MEMORY,4);
+ b->input_status=XDR_INPUT_ACCEPTED;b->source_rc=0;b->source_ms=-1;emit(XT_APP_MEMORY,4);
+ for(unsigned i=1;i<3;i++){
+  observation.resources.app[4+i]=(struct xdr_app_region){.reserved=2048,.capacity=1024,.used=1024,.peak=1024};
+  observation.resources.app_buffer[i]=(struct xdr_app_buffer){.phase=(uint8_t)(i+XDR_BUFFER_STORED),
+   .content_bytes=512,.sequence=9,.source_ms=49990,.lifetime=1,.context_revision=11,
+   .connection_revision=7,.input_status=XDR_INPUT_ACCEPTED};
+  emit(XT_APP_MEMORY,4+i);
+ }
+ struct xdr_app_region *result=&observation.resources.app[7];
+ struct xdr_app_buffer *r=&observation.resources.app_buffer[3];
+ *result=(struct xdr_app_region){.reserved=2048,.capacity=1024,.used=1024,.peak=1024};
+ *r=(struct xdr_app_buffer){.phase=XDR_BUFFER_RETAINED,.content_bytes=1024,.sequence=9,
+  .source_ms=49990,.lifetime=1,.context_revision=11,.connection_revision=7,
+  .input_status=XDR_INPUT_ACCEPTED,.performed=true};
+ emit(XT_APP_MEMORY,7);
+ r->read_sequence=9;emit(XT_APP_MEMORY,7); /* Reading retained bytes does not free the result. */
+ r->revoked=true;r->source_rc=-ECANCELED;emit(XT_APP_MEMORY,7);
+ result->rc=-EBUSY;r->phase=UINT8_MAX;emit(XT_APP_MEMORY,7); /* Unobserved metadata is not inspected. */
+ result->rc=-ETIMEDOUT;emit(XT_APP_MEMORY,7);
+ result->rc=0;r->phase=UINT8_MAX;reject_manual(7,-ERANGE);
+ r->phase=XDR_BUFFER_RETAINED;r->input_status=UINT8_MAX;reject_manual(7,-ERANGE);
+ r->input_status=XDR_INPUT_ACCEPTED;r->source_rc=1;reject_manual(7,-ERANGE);
+ r->source_rc=0;r->phase=XDR_BUFFER_RUNNING;reject_manual(7,-ERANGE);
+ r->phase=XDR_BUFFER_RETAINED;r->content_bytes=1025;reject_manual(7,-ERANGE);
+ r->content_bytes=1024;r->source_ms=50001;reject_manual(7,-ERANGE);
+ r->source_ms=49990;observation.resources.app_count=7;reject_manual(7,-EINVAL);
+ observation.resources.app_count=4;reject_manual(4,-EINVAL);
+ observation.resources.app_count=8;reject_manual(8,-EINVAL);
+ observation.resources.app_count=XDR_AUTO_REGIONS;
+}
+
+static void manual_max_wire(void)
+{
+ observation.start_ms=observation.end_ms=UINT64_MAX;observation.collection_rc=0;
+ observation.resources.app_registered=true;observation.resources.app_count=XDR_APP_REGIONS;
+ observation.resources.raw.at_ms=observation.resources.sample=UINT64_MAX;
+ observation.resources.app[7]=(struct xdr_app_region){.reserved=UINT64_MAX,.capacity=UINT64_MAX,
+  .used=UINT64_MAX,.peak=UINT64_MAX,.exhausted=UINT64_MAX,.contention=UINT64_MAX};
+ observation.resources.app_buffer[3]=(struct xdr_app_buffer){.phase=XDR_BUFFER_RETAINED,
+  .content_bytes=UINT64_MAX,.sequence=UINT64_MAX,.source_ms=INT64_MAX,.lifetime=UINT64_MAX,
+  .context_revision=UINT64_MAX,.connection_revision=UINT64_MAX,.read_sequence=UINT64_MAX,
+  .source_rc=INT_MIN,.input_status=XDR_INPUT_CONTEXT_CHANGED,.performed=true,.revoked=true};
+ publisher.sequence[2]=UINT64_MAX-1;
+ emit_at(XT_APP_MEMORY,7,UINT64_MAX);
+ fprintf(stderr,"MANUAL_MAX_WIRE_BYTES %zu\n",message.length);
 }
 
 int main(void)
@@ -61,6 +136,20 @@ int main(void)
 	observation.resources.regions=1;
 	observation.resources.memory[0]=(struct xdr_region){.id="net_rx_data",.used=256,.free=768,.capacity=1024};
 	emit(XT_POOLS,0);
+    observation.resources.app_registered=true;observation.resources.app_count=XDR_AUTO_REGIONS;
+    for(unsigned part=0;part<XDR_AUTO_REGIONS;part++){
+     observation.resources.app[part]=(struct xdr_app_region){.reserved=2048,.capacity=1024,.used=256,.peak=768,.exhausted=3,.contention=5};
+     emit(XT_APP_MEMORY,part);
+    }
+    observation.resources.app[0].rc=-EBUSY;emit(XT_APP_MEMORY,0);
+    observation.resources.app[0]=(struct xdr_app_region){.reserved=2048,.capacity=1024};
+    emit(XT_APP_MEMORY,0); /* Observed valid zero, unlike BUSY/null. */
+    observation.resources.app[0].used=1025;
+    assert(xt_encode(&publisher,XT_APP_MEMORY,&observation,50000,sample_id,snapshot_id,0,&message)==-ERANGE);
+    observation.resources.app[0].used=0;
+
+    manual_boundaries();
+
 	/* A fresh collection must not give an old resource cache a new lease. */
 	uint64_t resource_sequence=publisher.sequence[2];
 	assert(xt_encode(&publisher,XT_CPU,&observation,52001,sample_id,snapshot_id,0,&message)==-ETIMEDOUT);
@@ -158,6 +247,8 @@ int main(void)
 	}
 	assert(publisher.event_count==32 && publisher.counters.events_dropped==13);
 	size_t count=publisher.event_count;xt_capture_events(&publisher,&observation.history);assert(count==publisher.event_count);
+    manual_max_wire();
+
 	fprintf(stderr,"PASS production model, source/queue loss, raw32 wrap, nulls, pages and u64 boundaries\n");
 	return 0;
 }

@@ -8,6 +8,10 @@
 #include <zephyr/sys/sys_heap.h>
 #include <errno.h>
 #include <string.h>
+#include <stdatomic.h>
+#if defined(CONFIG_BOARD_XENVM)
+#include <zephyr/kernel/mm.h>
+#endif
 #if defined(CONFIG_XENOVA_DIAGNOSTICS_POOLS)
 #include <zephyr/net_buf.h>
 #endif
@@ -15,6 +19,18 @@ K_MUTEX_DEFINE(resource_cache_lock);
 static struct xdr_snapshot cache;
 static struct xdiag_network net_previous;
 static uint64_t net_at;
+static atomic_int app_memory_state; /* 0 absent, 1 installing, 2 immutable/ready */
+static xdiag_app_memory_provider app_memory;
+static void *app_memory_context;
+static unsigned app_memory_count;
+int xdiag_app_memory_register(xdiag_app_memory_provider provider,void *context,unsigned count){
+ if(!provider||k_is_in_isr()||(count!=XDR_AUTO_REGIONS&&count!=XDR_APP_REGIONS))return -EINVAL;
+ int absent=0;
+ if(!atomic_compare_exchange_strong(&app_memory_state,&absent,1))return -EALREADY;
+ app_memory_context=context;app_memory=provider;app_memory_count=count;
+ atomic_store_explicit(&app_memory_state,2,memory_order_release);return 0;
+}
+
 #if defined(CONFIG_XENOVA_DIAGNOSTICS_CPU) && defined(CONFIG_SCHED_THREAD_USAGE_AUTO_ENABLE) && \
  !defined(CONFIG_THREAD_RUNTIME_STATS_USE_TIMING_FUNCTIONS) && defined(CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER)
 #define XDR_CPU_LIVE 1
@@ -150,6 +166,19 @@ static void collect(struct k_work *work)
   if(!r->rc){r->free=(uint64_t)free*CONFIG_NET_BUF_DATA_SIZE;r->used=r->capacity-r->free;}
  }
 #endif
+ /* Registration publishes one boot-lifetime callback with release/acquire.
+  * No collector-side lock or silent missing provider on cache contention. */
+ result.app_registered=atomic_load_explicit(&app_memory_state,memory_order_acquire)==2;
+ if(result.app_registered){result.app_count=app_memory_count;app_memory(result.app,result.app_buffer,app_memory_context);}
+ result.firmware_rc=result.page_rc=-ENOTSUP;
+#if defined(CONFIG_BOARD_XENVM)
+ extern char z_mapped_start[],z_mapped_end[],_image_ram_start[],_image_ram_end[];
+ result.ram_region_bytes=(uint64_t)CONFIG_SRAM_SIZE*1024;
+ result.mapped_bytes=(uintptr_t)z_mapped_end-(uintptr_t)z_mapped_start;
+ result.static_data_bytes=(uintptr_t)_image_ram_end-(uintptr_t)_image_ram_start;
+ result.firmware_rc=0;
+ result.page_free_bytes=k_mem_free_get();result.page_rc=0;
+#endif
  struct xdiag_network net={0};int net_rc=xdiag_network_read(&net);
  result.net_bytes_rc=net_rc?net_rc:net.bytes_rc;
  result.net_rate_rc=result.net_bytes_rc;
@@ -188,6 +217,8 @@ static int resources_get(struct xdr_snapshot *out,k_timeout_t wait)
   for(size_t i=0;i<out->rows;i++)out->threads[i].rc=-EOVERFLOW;
   for(size_t i=0;i<out->regions;i++)out->memory[i].rc=-EOVERFLOW;
   if(out->heap_rc!=-ENOTSUP)out->heap_rc=-EOVERFLOW;
+  if(out->page_rc!=-ENOTSUP)out->page_rc=-EOVERFLOW;
+  for(unsigned i=0;i<XDR_APP_REGIONS;i++)if(out->app_registered)out->app[i].rc=-ETIMEDOUT;
   if(!out->net_bytes_rc)out->net_bytes_rc=-ETIMEDOUT;
   if(!out->net_rate_rc)out->net_rate_rc=-ETIMEDOUT;
  }
@@ -197,6 +228,7 @@ int xdiag_resources_get(struct xdr_snapshot *out){return resources_get(out,K_MSE
 int xdiag_resources_try_get(struct xdr_snapshot *out){return resources_get(out,K_NO_WAIT);}
 static int init(void)
 {
+ cache.firmware_rc=cache.page_rc=-ENODATA;
  cache.cpu.rc=xdiag_cpu_supported()?-ENODATA:-ENOTSUP;
  cache.threads_rc=xdiag_cpu_supported()?-ENODATA:-ENOTSUP;
  cache.heap_rc=IS_ENABLED(CONFIG_XENOVA_DIAGNOSTICS_HEAP)?-ENODATA:-ENOTSUP;

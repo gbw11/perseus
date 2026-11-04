@@ -93,6 +93,9 @@ broker ACL은 별도 원본이며 network 지원이나 앱 자기 보고만으�
 new incarnation은 새 capture/binding을 확인한다. firmware 교체가 과거 실행의 선언을 바꾸지 않는다.
 
 Starter의 `app_heartbeat=false`, 미선언 null, 실제 drive의 true는 서로 다르다.
+`templates`의 Zephyr `capabilities.app_heartbeat`는 기존 Worker 호환을 위해
+`provisioning_profile.signals.app_heartbeat`의 선언된 boolean을 투영한다.
+미선언이면 호환 필드도 생략한다.
 true로부터 신호 수신·정상 계산·READY·출력 허가를 추론하지 않는다. warm Standby의 progress idle은 정상이다.
 현재 lattice AUTO는 stateful, MANUAL은 stateless이며 미선언을 stateless로 승인하지 않는다.
 

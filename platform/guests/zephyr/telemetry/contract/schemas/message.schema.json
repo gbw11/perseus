@@ -524,6 +524,17 @@
               "type": "null"
             }
           ]
+        },
+        "max_used_bytes": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,19})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1076,6 +1087,12 @@
               },
               "minItems": 1,
               "maxItems": 12
+            },
+            "source_sample_seq": {
+              "$ref": "#/$defs/u64"
+            },
+            "observed_uptime_ms": {
+              "$ref": "#/$defs/u64"
             }
           },
           "required": [
@@ -1083,7 +1100,31 @@
             "family",
             "samples"
           ],
-          "additionalProperties": false
+          "additionalProperties": false,
+          "dependentRequired": {
+            "source_sample_seq": [
+              "observed_uptime_ms"
+            ],
+            "observed_uptime_ms": [
+              "source_sample_seq"
+            ]
+          },
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "source_sample_seq"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "family": {
+                    "const": "memory"
+                  }
+                }
+              }
+            }
+          ]
         },
         {
           "type": "object",
@@ -1227,6 +1268,187 @@
             "observed_uptime_ms"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "$ref": "#/$defs/collection"
+            },
+            "family": {
+              "const": "app_memory"
+            },
+            "samples": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sample"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            },
+            "source_sample_seq": {
+              "$ref": "#/$defs/u64"
+            },
+            "observed_uptime_ms": {
+              "$ref": "#/$defs/u64"
+            },
+            "buffer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/app_buffer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "collection",
+            "family",
+            "samples",
+            "source_sample_seq",
+            "observed_uptime_ms"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "samples": {
+                    "contains": {
+                      "properties": {
+                        "labels": {
+                          "properties": {
+                            "region": {
+                              "enum": [
+                                "manual_input",
+                                "manual_pending",
+                                "manual_running",
+                                "manual_result"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "region"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "labels"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "samples"
+                ]
+              },
+              "then": {
+                "required": [
+                  "buffer"
+                ],
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "samples": {
+                          "contains": {
+                            "properties": {
+                              "status": {
+                                "not": {
+                                  "const": "ok"
+                                }
+                              }
+                            },
+                            "required": [
+                              "status"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "buffer": {
+                          "type": "null"
+                        }
+                      }
+                    },
+                    "else": {
+                      "properties": {
+                        "buffer": {
+                          "$ref": "#/$defs/app_buffer"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "samples": {
+                          "contains": {
+                            "properties": {
+                              "labels": {
+                                "properties": {
+                                  "region": {
+                                    "enum": [
+                                      "manual_result"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "region"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "labels"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "samples"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "buffer": {
+                          "properties": {
+                            "performed": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "else": {
+                      "properties": {
+                        "buffer": {
+                          "properties": {
+                            "performed": {
+                              "type": "null"
+                            },
+                            "last_read_sequence": {
+                              "type": "null"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "buffer"
+                  ]
+                }
+              }
+            }
+          ]
         }
       ]
     },
@@ -1389,6 +1611,141 @@
             "coverage"
           ],
           "additionalProperties": false
+        }
+      ]
+    },
+    "app_buffer": {
+      "type": "object",
+      "properties": {
+        "phase": {
+          "enum": [
+            "empty",
+            "stored",
+            "pending",
+            "running",
+            "retained"
+          ]
+        },
+        "content_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/u64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_uptime_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/u64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "owner_lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/u64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "context_revision": {
+          "$ref": "#/$defs/u64"
+        },
+        "connection_revision": {
+          "$ref": "#/$defs/u64"
+        },
+        "input_status": {
+          "enum": [
+            "missing",
+            "unclassified",
+            "accepted",
+            "invalid",
+            "expired",
+            "context_changed"
+          ]
+        },
+        "source_rc": {
+          "type": "integer",
+          "maximum": 0
+        },
+        "performed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "revoked": {
+          "type": "boolean"
+        },
+        "last_read_sequence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/u64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "phase",
+        "content_bytes",
+        "sequence",
+        "source_uptime_ms",
+        "owner_lifetime",
+        "context_revision",
+        "connection_revision",
+        "input_status",
+        "source_rc",
+        "performed",
+        "revoked",
+        "last_read_sequence"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "phase": {
+                "const": "empty"
+              }
+            },
+            "required": [
+              "phase"
+            ]
+          },
+          "then": {
+            "properties": {
+              "content_bytes": {
+                "const": "0"
+              },
+              "sequence": {
+                "type": "null"
+              },
+              "source_uptime_ms": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "sequence": {
+                "$ref": "#/$defs/u64"
+              }
+            }
+          }
         }
       ]
     }

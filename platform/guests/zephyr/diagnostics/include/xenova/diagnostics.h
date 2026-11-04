@@ -57,6 +57,10 @@ int xdiag_network_register(xdiag_network_provider, void *context);
 int xdiag_network_read(struct xdiag_network *);
 int xdiag_clock_us(uint64_t *out);
 /* Reads the single collector's cache; never advances a CPU baseline or scans stacks. */
+/* One boot-lifetime app provider. It only tries owner metadata locks and never
+ * scans payloads, allocates, blocks, logs, or calls transport/readiness paths. */
+typedef void (*xdiag_app_memory_provider)(struct xdr_app_region out[XDR_APP_REGIONS],struct xdr_app_buffer detail[XDR_MANUAL_REGIONS],void *context);
+int xdiag_app_memory_register(xdiag_app_memory_provider provider,void *context,unsigned count);
 int xdiag_resources_get(struct xdr_snapshot *);
 /* Hot-path optional evidence: never waits for the collector. Same age/error
  * rules as resources_get; failure is unavailable evidence, not app failure. */

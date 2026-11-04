@@ -1,5 +1,5 @@
 {
-  "scope": "Deterministic production-C fixture bytes; not live source, ARM or hardware acceptance",
+  "scope": "Original deterministic production-C and actual ARM QEMU fixtures, plus synthetic MANUAL owner metadata encoded by the production C codec. Provenance is per fixture; no board or vehicle acceptance is implied.",
   "schema_version": "2.1",
   "valid": [
     {
@@ -29,6 +29,958 @@
       "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/heartbeat",
       "qos": 0,
       "retain": false
+    },
+    {
+      "name": "app-memory-empty",
+      "file": "fixtures-2.1/app-memory-empty.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "actual-arm-qemu-product-collector-and-codec",
+        "source_log_sha256": "5609fb15ec3cce2c5acc2e9489b9c7817f33f9f2d0d3b2a927d01e41e0a892ea",
+        "synthetic_test_identities": true,
+        "scope": "local fixture; not board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "app-memory-full",
+      "file": "fixtures-2.1/app-memory-full.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "actual-arm-qemu-product-collector-and-codec",
+        "source_log_sha256": "5609fb15ec3cce2c5acc2e9489b9c7817f33f9f2d0d3b2a927d01e41e0a892ea",
+        "synthetic_test_identities": true,
+        "scope": "local fixture; not board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "app-memory-busy",
+      "file": "fixtures-2.1/app-memory-busy.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "actual-arm-qemu-product-collector-and-codec",
+        "source_log_sha256": "5609fb15ec3cce2c5acc2e9489b9c7817f33f9f2d0d3b2a927d01e41e0a892ea",
+        "synthetic_test_identities": true,
+        "scope": "local fixture; not board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "app-memory-released",
+      "file": "fixtures-2.1/app-memory-released.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "actual-arm-qemu-product-collector-and-codec",
+        "source_log_sha256": "5609fb15ec3cce2c5acc2e9489b9c7817f33f9f2d0d3b2a927d01e41e0a892ea",
+        "synthetic_test_identities": true,
+        "scope": "local fixture; not board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "app-memory-stack-max-used",
+      "file": "fixtures-2.1/app-memory-stack-max-used.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "origin": {
+        "kind": "actual-arm-qemu-product-collector-and-codec",
+        "source_log_sha256": "5609fb15ec3cce2c5acc2e9489b9c7817f33f9f2d0d3b2a927d01e41e0a892ea",
+        "synthetic_test_identities": true,
+        "scope": "local fixture; not board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "app-memory-stack-scan-limit",
+      "file": "fixtures-2.1/app-memory-stack-scan-limit.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/snapshot",
+      "qos": 1,
+      "retain": false,
+      "origin": {
+        "kind": "actual-arm-qemu-product-collector-and-codec",
+        "source_log_sha256": "5609fb15ec3cce2c5acc2e9489b9c7817f33f9f2d0d3b2a927d01e41e0a892ea",
+        "synthetic_test_identities": true,
+        "scope": "local fixture; not board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "manual-memory-input-empty",
+      "file": "fixtures-2.1/manual-memory-input-empty.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-pending-empty",
+      "file": "fixtures-2.1/manual-memory-pending-empty.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-running-empty",
+      "file": "fixtures-2.1/manual-memory-running-empty.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-result-empty",
+      "file": "fixtures-2.1/manual-memory-result-empty.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-input-seq-zero",
+      "file": "fixtures-2.1/manual-memory-input-seq-zero.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-input-unclassified",
+      "file": "fixtures-2.1/manual-memory-input-unclassified.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-input-invalid",
+      "file": "fixtures-2.1/manual-memory-input-invalid.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-input-expired",
+      "file": "fixtures-2.1/manual-memory-input-expired.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-input-negative-time",
+      "file": "fixtures-2.1/manual-memory-input-negative-time.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-pending-full",
+      "file": "fixtures-2.1/manual-memory-pending-full.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-running-full",
+      "file": "fixtures-2.1/manual-memory-running-full.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-result-retained",
+      "file": "fixtures-2.1/manual-memory-result-retained.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-result-read",
+      "file": "fixtures-2.1/manual-memory-result-read.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-result-revoked",
+      "file": "fixtures-2.1/manual-memory-result-revoked.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-busy",
+      "file": "fixtures-2.1/manual-memory-busy.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-sample-expired",
+      "file": "fixtures-2.1/manual-memory-sample-expired.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    },
+    {
+      "name": "manual-memory-u64-boundary",
+      "file": "fixtures-2.1/manual-memory-u64-boundary.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "origin": {
+        "kind": "deterministic-production-c-codec",
+        "producer": "platform/guests/zephyr/telemetry/tests/emit.c",
+        "producer_sha256": "1d2ac17669c12748a96315948c92cca891d45a21f0e8d73ecca62d05a6d2211b",
+        "model_sha256": "00654858a45a7aa16f02e097e2f18d03fbf94021dc29f19f4947f7d893d21e3a",
+        "scope": "Synthetic owner boundary metadata; exact production-C wire bytes. Not native owner measurement, installed firmware or board acceptance."
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "manual-memory-missing-buffer",
+      "file": "fixtures-2.1/invalid/manual-memory-missing-buffer.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-seq-zero"
+      }
+    },
+    {
+      "name": "manual-memory-null-observed-buffer",
+      "file": "fixtures-2.1/invalid/manual-memory-null-observed-buffer.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-seq-zero"
+      }
+    },
+    {
+      "name": "manual-memory-busy-has-buffer",
+      "file": "fixtures-2.1/invalid/manual-memory-busy-has-buffer.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-busy"
+      }
+    },
+    {
+      "name": "manual-memory-wrong-owner-phase",
+      "file": "fixtures-2.1/invalid/manual-memory-wrong-owner-phase.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "MANUAL_BUFFER_PHASE",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-running-full"
+      }
+    },
+    {
+      "name": "manual-memory-unknown-phase",
+      "file": "fixtures-2.1/invalid/manual-memory-unknown-phase.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-running-full"
+      }
+    },
+    {
+      "name": "manual-memory-unknown-input-status",
+      "file": "fixtures-2.1/invalid/manual-memory-unknown-input-status.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-seq-zero"
+      }
+    },
+    {
+      "name": "manual-memory-positive-source-rc",
+      "file": "fixtures-2.1/invalid/manual-memory-positive-source-rc.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-invalid"
+      }
+    },
+    {
+      "name": "manual-memory-content-over-owned-slot",
+      "file": "fixtures-2.1/invalid/manual-memory-content-over-owned-slot.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "MANUAL_BUFFER_CONTENT",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-running-full"
+      }
+    },
+    {
+      "name": "manual-memory-empty-has-sequence",
+      "file": "fixtures-2.1/invalid/manual-memory-empty-has-sequence.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-empty"
+      }
+    },
+    {
+      "name": "manual-memory-stored-missing-sequence",
+      "file": "fixtures-2.1/invalid/manual-memory-stored-missing-sequence.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-seq-zero"
+      }
+    },
+    {
+      "name": "manual-memory-future-original-time",
+      "file": "fixtures-2.1/invalid/manual-memory-future-original-time.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "MANUAL_BUFFER_TIME",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-seq-zero"
+      }
+    },
+    {
+      "name": "manual-memory-zero-lifetime",
+      "file": "fixtures-2.1/invalid/manual-memory-zero-lifetime.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "MANUAL_BUFFER_LIFETIME",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-running-full"
+      }
+    },
+    {
+      "name": "manual-memory-input-performed",
+      "file": "fixtures-2.1/invalid/manual-memory-input-performed.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-seq-zero"
+      }
+    },
+    {
+      "name": "manual-memory-zero-read-sequence",
+      "file": "fixtures-2.1/invalid/manual-memory-zero-read-sequence.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "MANUAL_BUFFER_LIFETIME",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-result-read"
+      }
+    },
+    {
+      "name": "manual-memory-input-read-sequence",
+      "file": "fixtures-2.1/invalid/manual-memory-input-read-sequence.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-seq-zero"
+      }
+    },
+    {
+      "name": "manual-memory-unknown-buffer-property",
+      "file": "fixtures-2.1/invalid/manual-memory-unknown-buffer-property.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-result-read"
+      }
+    },
+    {
+      "name": "manual-memory-mixed-owner-regions",
+      "file": "fixtures-2.1/invalid/manual-memory-mixed-owner-regions.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "APP_MEMORY_SHAPE",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-seq-zero"
+      }
+    },
+    {
+      "name": "manual-memory-missing-original-metric",
+      "file": "fixtures-2.1/invalid/manual-memory-missing-original-metric.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "APP_MEMORY_SHAPE",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-seq-zero"
+      }
+    },
+    {
+      "name": "manual-memory-invalid-slot-accounting",
+      "file": "fixtures-2.1/invalid/manual-memory-invalid-slot-accounting.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "APP_MEMORY_ACCOUNTING",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-running-full"
+      }
+    },
+    {
+      "name": "manual-memory-sequence-u64-overflow",
+      "file": "fixtures-2.1/invalid/manual-memory-sequence-u64-overflow.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "INTEGER_RANGE",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-input-seq-zero"
+      }
+    },
+    {
+      "name": "manual-memory-result-missing-performed",
+      "file": "fixtures-2.1/invalid/manual-memory-result-missing-performed.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-result-read"
+      }
+    },
+    {
+      "name": "manual-memory-revoked-not-boolean",
+      "file": "fixtures-2.1/invalid/manual-memory-revoked-not-boolean.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-production-c-fixture",
+        "base": "manual-memory-result-revoked"
+      }
+    },
+    {
+      "name": "manual-memory-buffer-on-auto",
+      "file": "fixtures-2.1/invalid/manual-memory-buffer-on-auto.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "SCHEMA_INVALID",
+      "origin": {
+        "kind": "negative-mutation-of-existing-auto-fixture",
+        "base": "app-memory-empty"
+      }
+    },
+    {
+      "name": "manual-memory-input-contention-u32-overflow",
+      "file": "fixtures-2.1/invalid/manual-memory-input-contention-u32-overflow.json",
+      "topic": "xenova/v2/vms/f1000000-0000-4000-8000-000000000001/telemetry/metrics",
+      "qos": 0,
+      "retain": false,
+      "expected_error": "RAW_COUNTER_RANGE",
+      "origin": {
+        "kind": "negative-counter-width-mutation",
+        "base": "manual-memory-input-seq-zero",
+        "scope": "32-bit source range on u64-decimal wire; not native/board measurement"
+      }
+    }
+  ],
+  "ram_summaries": [
+    {
+      "name": "ram-committed",
+      "file": "fixtures-2.1/ram-committed.json",
+      "expected": {
+        "status": "ok",
+        "reason": null,
+        "total_bytes": "16384",
+        "committed_bytes": "4096",
+        "free_bytes": "12288",
+        "percent": "25.000"
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-valid-zero",
+      "file": "fixtures-2.1/ram-valid-zero.json",
+      "expected": {
+        "status": "ok",
+        "reason": null,
+        "total_bytes": "16384",
+        "committed_bytes": "0",
+        "free_bytes": "16384",
+        "percent": "0.000"
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-reserved-increase",
+      "file": "fixtures-2.1/ram-reserved-increase.json",
+      "expected": {
+        "status": "ok",
+        "reason": null,
+        "total_bytes": "16384",
+        "committed_bytes": "8192",
+        "free_bytes": "8192",
+        "percent": "50.000"
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-returned",
+      "file": "fixtures-2.1/ram-returned.json",
+      "expected": {
+        "status": "ok",
+        "reason": null,
+        "total_bytes": "16384",
+        "committed_bytes": "4096",
+        "free_bytes": "12288",
+        "percent": "25.000"
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-heap-changed",
+      "file": "fixtures-2.1/ram-heap-changed.json",
+      "expected": {
+        "status": "ok",
+        "reason": null,
+        "total_bytes": "16384",
+        "committed_bytes": "4096",
+        "free_bytes": "12288",
+        "percent": "25.000"
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-free-over-total",
+      "file": "fixtures-2.1/ram-free-over-total.json",
+      "expected": {
+        "status": "invalid",
+        "reason": "RAM_FREE_RANGE",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-mapped-over-total",
+      "file": "fixtures-2.1/ram-mapped-over-total.json",
+      "expected": {
+        "status": "invalid",
+        "reason": "RAM_MAPPED_RANGE",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-static-over-mapped",
+      "file": "fixtures-2.1/ram-static-over-mapped.json",
+      "expected": {
+        "status": "invalid",
+        "reason": "RAM_STATIC_RANGE",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-mapped-free-conflict",
+      "file": "fixtures-2.1/ram-mapped-free-conflict.json",
+      "expected": {
+        "status": "invalid",
+        "reason": "RAM_MAPPED_FREE_CONFLICT",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-total-zero",
+      "file": "fixtures-2.1/ram-total-zero.json",
+      "expected": {
+        "status": "invalid",
+        "reason": "RAM_TOTAL_ZERO",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-null-ok",
+      "file": "fixtures-2.1/ram-null-ok.json",
+      "expected": {
+        "status": "invalid",
+        "reason": "MEASUREMENT_STATUS",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-unsupported",
+      "file": "fixtures-2.1/ram-unsupported.json",
+      "expected": {
+        "status": "unknown",
+        "reason": "RAM_SOURCE_UNAVAILABLE",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-owner-busy",
+      "file": "fixtures-2.1/ram-owner-busy.json",
+      "expected": {
+        "status": "unknown",
+        "reason": "RAM_SOURCE_UNAVAILABLE",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-collection-unavailable",
+      "file": "fixtures-2.1/ram-collection-unavailable.json",
+      "expected": {
+        "status": "unknown",
+        "reason": "RAM_COLLECTION_UNAVAILABLE",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-source-expired",
+      "file": "fixtures-2.1/ram-source-expired.json",
+      "expected": {
+        "status": "unknown",
+        "reason": "RAM_SOURCE_EXPIRED",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-source-unidentified",
+      "file": "fixtures-2.1/ram-source-unidentified.json",
+      "expected": {
+        "status": "unknown",
+        "reason": "RAM_SOURCE_UNIDENTIFIED",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-source-pair-partial",
+      "file": "fixtures-2.1/ram-source-pair-partial.json",
+      "expected": {
+        "status": "invalid",
+        "reason": "SCHEMA_INVALID",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-missing-field",
+      "file": "fixtures-2.1/ram-missing-field.json",
+      "expected": {
+        "status": "unknown",
+        "reason": "RAM_FIELDS_MISSING",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-half-up",
+      "file": "fixtures-2.1/ram-half-up.json",
+      "expected": {
+        "status": "ok",
+        "reason": null,
+        "total_bytes": "200000",
+        "committed_bytes": "4687",
+        "free_bytes": "195313",
+        "percent": "2.344"
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-u64-precision",
+      "file": "fixtures-2.1/ram-u64-precision.json",
+      "expected": {
+        "status": "ok",
+        "reason": null,
+        "total_bytes": "18446744073709551615",
+        "committed_bytes": "18446744073709551614",
+        "free_bytes": "1",
+        "percent": "100.000"
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-partial-context",
+      "file": "fixtures-2.1/ram-partial-context.json",
+      "expected": {
+        "status": "invalid",
+        "reason": "CONTEXT_BINDING",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-legacy-unidentified",
+      "file": "fixtures-2.1/ram-legacy-unidentified.json",
+      "expected": {
+        "status": "unknown",
+        "reason": "RAM_SCHEMA_UNSUPPORTED",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
+    },
+    {
+      "name": "ram-mixed-messages",
+      "file": "fixtures-2.1/ram-mixed-messages.json",
+      "expected": {
+        "status": "invalid",
+        "reason": "RAM_MESSAGE_TYPE",
+        "percent": null
+      },
+      "origin": {
+        "kind": "synthetic-same-payload-ram-reference",
+        "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+        "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+      }
     }
   ]
 }

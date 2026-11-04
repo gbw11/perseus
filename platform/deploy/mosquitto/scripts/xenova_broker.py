@@ -581,6 +581,20 @@ def reload_broker():
     return 'reload_requested'
 
 
+def service_environment(value, name):
+    """Render the existing board account for its dom0 service."""
+    prefix = {'dom0-server': 'XENOVA_RECOVERY', 'gateway': 'XENOVA_GATEWAY'}.get(name)
+    if prefix is None or value['profiles'].get(name) != 'service':
+        raise SetupError('expected a provisioned dom0 service account')
+    return {f'{prefix}_BROKER_HOST': '127.0.0.1', f'{prefix}_BROKER_PORT': '1883',
+            f'{prefix}_BROKER_USERNAME': name, f'{prefix}_BROKER_PASSWORD': value['secrets'][name]}
+
+
+def render_environment(settings):
+    # inspect() rejects quote, backslash and control characters in credentials.
+    return ''.join(f'{key}="{value}"\n' for key, value in settings.items())
+
+
 def export(value, name, form, output, execute=False):
     """계정 하나만 전용 파일로 전달한다. guest 설정과 receipt는 쓰지 않는다."""
     if name not in value['secrets']:
@@ -601,6 +615,10 @@ def export(value, name, form, output, execute=False):
         if name != 'backend':
             raise SetupError('backend export requires backend account')
         content = f'MQTT_USERNAME={name}\nMQTT_PASSWORD={password}\n'
+    elif form == 'recovery-env':
+        if name != 'dom0-server':
+            raise SetupError('recovery export requires dom0-server account')
+        content = render_environment(service_environment(value, name))
     elif form == 'display-env':
         if name != 'observer' or value['profiles'].get(name) != 'service':
             raise SetupError('display export requires the existing read-only observer account')
@@ -640,7 +658,7 @@ def main(argv=None):
     check.add_argument('--runtime', action='store_true', help='require current configuration-compatible generation')
     command = commands.add_parser('export-account')
     command.add_argument('name')
-    command.add_argument('--format', choices=('agent-env', 'backend-env', 'display-env', 'credentials', 'drive', 'telemetry'), required=True)
+    command.add_argument('--format', choices=('agent-env', 'backend-env', 'display-env', 'recovery-env', 'credentials', 'drive', 'telemetry'), required=True)
     command.add_argument('--output', type=Path, required=True)
     command.add_argument('--execute', action='store_true')
     args = parser.parse_args(argv)

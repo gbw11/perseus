@@ -7,6 +7,7 @@
 #include <zephyr/sys/atomic.h>
 #include <errno.h>
 #include <string.h>
+#include <stdatomic.h>
 
 struct task {
  struct k_thread thread;
@@ -21,6 +22,10 @@ struct task {
  int64_t stop_deadline;
  uint64_t restart_from;
  int restart_rc;
+ bool running_live;
+ atomic_t running_performed;
+ /* Boot-lifetime high-water survives joined application restarts. */
+ uint64_t memory_peak[3], memory_read_sequence;
 };
 static struct task tasks[DRIVE_TASK_COUNT];
 K_THREAD_STACK_DEFINE(auto_stack, CONFIG_XENOVA_DRIVE_WORKER_STACK_SIZE);
@@ -29,6 +34,13 @@ K_MUTEX_DEFINE(workers_lifecycle);
 static atomic_t stopping, initialized;
 static bool attempted;
 static int64_t cleanup_deadline;
+static atomic_ullong memory_contention;
+static void memory_busy(void)
+{
+ unsigned long long old=atomic_load_explicit(&memory_contention,memory_order_relaxed);
+ while(old!=UINT64_MAX&&!atomic_compare_exchange_weak_explicit(&memory_contention,&old,old+1,
+       memory_order_relaxed,memory_order_relaxed)) {}
+}
 
 static bool valid(enum drive_task task) { return (unsigned)task < DRIVE_TASK_COUNT; }
 
@@ -42,6 +54,8 @@ static void run(void *argument, void *unused1, void *unused2)
   if (atomic_get(&stopping)||atomic_get(&t->cancelled)) { t->status.pending = false; k_mutex_unlock(&t->exchange); break; }
   if (!t->status.pending) { k_mutex_unlock(&t->exchange); continue; }
   t->running = t->pending; t->status.pending = false; t->status.state = DRIVE_TASK_RUNNING;
+  t->running_live=true;atomic_set(&t->running_performed,0);
+  t->memory_peak[1]=sizeof(t->running);
   t->status.running_deadline_us=t->running.deadline_us;
   k_mutex_unlock(&t->exchange);
   struct drive_completion result = {.sequence=t->running.sequence, .context_revision=t->running.context_revision};
@@ -55,7 +69,7 @@ static void run(void *argument, void *unused1, void *unused2)
   else if (result.begin_us > t->running.deadline_us) { result.rc = -ETIMEDOUT; }
   else if (atomic_get(&stopping)||atomic_get(&t->cancelled)) { result.rc = -ESHUTDOWN; }
   else {
-   result.performed = true;
+   result.performed = true;atomic_set(&t->running_performed,1);
    struct xm_span control = {t->running.control, t->running.control_length};
    struct xm_span input = {t->running.input, t->running.input_length};
    if (!t->running.input_length) { input.p = NULL; }
@@ -74,11 +88,13 @@ static void run(void *argument, void *unused1, void *unused2)
    if (!result.sample.reason || strcmp(result.sample.reason, "OUTPUT_INVALID")) result.sample.reason = "CALCULATION_FAILED";
   }
   k_mutex_lock(&t->exchange, K_FOREVER);
+  t->running_live=false;
   if(atomic_get(&stopping)||atomic_get(&t->cancelled)){
    t->status.pending=false;t->status.state=DRIVE_TASK_STOPPING;
    k_mutex_unlock(&t->exchange);break;
   }
   t->result = result; t->status.completed_sequence = result.sequence;
+  t->memory_peak[2]=sizeof(t->result);
   t->status.state = atomic_get(&stopping) ? DRIVE_TASK_STOPPING : DRIVE_TASK_WAITING;
   k_mutex_unlock(&t->exchange);
  }
@@ -127,10 +143,10 @@ int drive_workers_offer(enum drive_task task, const struct drive_job *job)
      job->release_us > job->deadline_us || job->control_length > XM_MAX_DRIVING_BYTES ||
      job->input_length > XM_MAX_DRIVING_BYTES) return -EINVAL;
  if (atomic_get(&stopping)) return -ESHUTDOWN;
- if (k_mutex_lock(&workers_lifecycle, K_NO_WAIT)) return -EBUSY;
+ if (k_mutex_lock(&workers_lifecycle, K_NO_WAIT)) { if(task==DRIVE_TASK_MANUAL)memory_busy();return -EBUSY; }
  struct task *t = &tasks[task];
  if (!t->status.started) { k_mutex_unlock(&workers_lifecycle); return -ENODEV; }
- if (k_mutex_lock(&t->exchange, K_NO_WAIT)) { k_mutex_unlock(&workers_lifecycle); return -EBUSY; }
+ if (k_mutex_lock(&t->exchange, K_NO_WAIT)) { if(task==DRIVE_TASK_MANUAL)memory_busy();k_mutex_unlock(&workers_lifecycle);return -EBUSY; }
  int result = 0;
  if (atomic_get(&stopping)) result = -ESHUTDOWN;
  else if (atomic_get(&t->cancelled)) result = -ESHUTDOWN;
@@ -143,6 +159,7 @@ int drive_workers_offer(enum drive_task task, const struct drive_job *job)
   }
   if (!result) {
    t->pending = *job;t->pending.lifetime=t->status.lifetime;
+   t->memory_peak[0]=sizeof(t->pending);
    t->status.accepted_sequence = job->sequence; t->status.pending = true;
    k_sem_give(&t->wake);
   }
@@ -154,15 +171,15 @@ int drive_workers_offer(enum drive_task task, const struct drive_job *job)
 int drive_workers_read(enum drive_task task, uint64_t revision, struct drive_completion *out)
 {
  if (!valid(task) || !out) return -EINVAL;
- if (k_mutex_lock(&workers_lifecycle, K_NO_WAIT)) return -EBUSY;
+ if (k_mutex_lock(&workers_lifecycle, K_NO_WAIT)) { if(task==DRIVE_TASK_MANUAL)memory_busy();return -EBUSY; }
  struct task *t = &tasks[task]; int rc = 0;
  if (!t->status.started) rc = -ENODEV;
- else if (k_mutex_lock(&t->exchange, K_NO_WAIT)) rc = -EBUSY;
+ else if (k_mutex_lock(&t->exchange, K_NO_WAIT)) { if(task==DRIVE_TASK_MANUAL)memory_busy();rc=-EBUSY; }
  else {
   if (atomic_get(&t->cancelled)||atomic_get(&stopping)) rc=-ESHUTDOWN;
   else if (!t->status.completed_sequence) rc = -ENODATA;
   else if (t->result.context_revision != revision) rc = -EXDEV;
-  else { *out = t->result; }
+  else { *out = t->result;t->memory_read_sequence=t->result.sequence; }
   k_mutex_unlock(&t->exchange);
  }
  k_mutex_unlock(&workers_lifecycle); return rc;
@@ -178,6 +195,50 @@ int drive_workers_status(enum drive_task task, struct drive_task_status *out)
  else { *out = t->status; k_mutex_unlock(&t->exchange); }
  if(!rc)out->revoked=atomic_get(&t->cancelled)||atomic_get(&stopping);
  k_mutex_unlock(&workers_lifecycle); return rc;
+}
+
+static void memory_job(struct xdr_app_buffer *out,const struct drive_job *job,
+                       uint8_t phase,uint64_t now)
+{
+ out->phase=phase;out->sequence=job->sequence;out->source_ms=job->input_received_ms;
+ out->lifetime=job->lifetime;out->context_revision=job->context_revision;
+ out->connection_revision=job->connection_revision;
+ out->content_bytes=job->control_length+job->input_length;
+ out->input_status=job->input_length?XDR_INPUT_UNCLASSIFIED:XDR_INPUT_MISSING;
+ if(now>job->deadline_us)out->input_status=XDR_INPUT_EXPIRED;
+}
+int drive_workers_memory_read(struct xdr_app_region out[3],struct xdr_app_buffer detail[3])
+{
+ if(!out||!detail)return -EINVAL;
+ uint64_t now;int rc=xdiag_clock_us(&now);if(rc)return rc;
+ if(k_mutex_lock(&workers_lifecycle,K_NO_WAIT))return -EBUSY;
+ if(!atomic_get(&initialized)){k_mutex_unlock(&workers_lifecycle);return -ENODEV;}
+ struct task *t=&tasks[DRIVE_TASK_MANUAL];
+ if(k_mutex_lock(&t->exchange,K_NO_WAIT)){
+  k_mutex_unlock(&workers_lifecycle);return -EBUSY;
+ }
+ memset(out,0,3*sizeof(*out));memset(detail,0,3*sizeof(*detail));
+ const uint64_t sizes[]={sizeof(t->pending),sizeof(t->running),sizeof(t->result)};
+ bool occupied[]={t->status.pending,t->running_live,t->status.completed_sequence!=0};
+ for(unsigned i=0;i<3;i++){
+  out[i]=(struct xdr_app_region){.reserved=sizes[i],.capacity=sizes[i],
+   .used=occupied[i]?sizes[i]:0,.peak=t->memory_peak[i],
+   .contention=atomic_load_explicit(&memory_contention,memory_order_relaxed)};
+  detail[i].revoked=atomic_get(&stopping)||atomic_get(&t->cancelled);
+  detail[i].input_status=XDR_INPUT_MISSING;
+  detail[i].source_ms=-1; /* Empty storage has no source timestamp. */
+ }
+ if(occupied[0])memory_job(&detail[0],&t->pending,XDR_BUFFER_PENDING,now);
+ if(occupied[1]){
+  memory_job(&detail[1],&t->running,XDR_BUFFER_RUNNING,now);
+  detail[1].performed=atomic_get(&t->running_performed)!=0;
+ }
+ if(occupied[2]){
+  memory_job(&detail[2],&t->result.source,XDR_BUFFER_RETAINED,now);
+  detail[2].content_bytes=sizeof(t->result);detail[2].source_rc=t->result.rc;
+  detail[2].performed=t->result.performed;detail[2].read_sequence=t->memory_read_sequence;
+ }
+ k_mutex_unlock(&t->exchange);k_mutex_unlock(&workers_lifecycle);return 0;
 }
 
 void drive_workers_stop(void)
@@ -265,6 +326,7 @@ int drive_task_restart(enum drive_task task,uint64_t lifetime,const struct drive
   memset(&t->pending,0,sizeof(t->pending));memset(&t->running,0,sizeof(t->running));
   memset(&t->result,0,sizeof(t->result));memset(&t->resources,0,sizeof(t->resources));
   memset(&t->status,0,sizeof(t->status));t->status.lifetime=lifetime+1;
+  t->running_live=false;atomic_set(&t->running_performed,0);t->memory_read_sequence=0;
   t->adapter=*fresh;t->stop_deadline=0;t->restart_from=lifetime;
   k_sem_reset(&t->wake);atomic_set(&t->cancelled,0);
   k_thread_stack_t *stack=task==DRIVE_TASK_AUTO?auto_stack:manual_stack;

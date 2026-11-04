@@ -225,6 +225,36 @@ class ProvisioningHooksTest(unittest.TestCase):
         dest=f.p.data/'catalog/provision-drive';dest.mkdir();(dest/'1.0.0.json').write_text(json.dumps(descriptor))
         return {'vm_id':B,'name':'supplied-zephyr','template_id':'provision-drive','template_version':'1.0.0'}
 
+    def test_catalog_projects_only_declared_app_heartbeat(self):
+        import test_xenova_recovery_foundation as foundation
+        import xenova_catalog as catalog
+        import xenova_management as management
+
+        f = foundation.FoundationTest('runTest')
+        f.setUp()
+        self.addCleanup(f.doCleanups)
+        self.zephyr_template(f)
+        manager = management.Manager(f.p)
+        catalog_entry = f.p.data/'catalog/provision-drive/1.0.0.json'
+        manifest = f.p.data/'rtos-templates/provision-drive/firmware.json'
+        for app, expected in (('xenova-drive', True), ('xenova-starter', False), ('undeclared-fixture', None)):
+            with self.subTest(app=app):
+                value = json.loads(manifest.read_text())
+                value['source']['app'] = app
+                manifest.chmod(0o644)
+                manifest.write_text(json.dumps(value))
+                manifest.chmod(0o444)
+                descriptor = json.loads(catalog_entry.read_text())
+                descriptor['manifest_sha256'] = catalog.sha(manifest)
+                catalog_entry.write_text(json.dumps(descriptor))
+                response = manager.call('templates')
+                self.assertTrue(response['ok'], response)
+                row = next(t for t in response['data']['templates'] if t['template_id'] == 'provision-drive')
+                self.assertIs(row['provisioning_profile']['signals']['app_heartbeat'], expected)
+                self.assertIs(row['capabilities'].get('app_heartbeat'), expected)
+                if expected is None:
+                    self.assertNotIn('app_heartbeat', row['capabilities'])
+
     def test_zephyr_create_hash_barrier_allows_other_actual_stop_and_preserves_credentials(self):
         import test_xenova_recovery_foundation as foundation
         import xenova_management as management
