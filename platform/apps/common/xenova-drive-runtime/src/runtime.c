@@ -64,6 +64,9 @@ static int64_t cleanup_end(void)
 }
 static struct xm_zclient *app_client;
 static int64_t retry_at;
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+static atomic_t lifecycle_queued,lifecycle_rejected,lifecycle_first_rejection;
+#endif
 static uint64_t app_start_ms;
 #if defined(CONFIG_XENOVA_RUNTIME)
 static int network_rc = -EAGAIN;
@@ -365,7 +368,16 @@ int xd_publish_completed(const char *topic,const char *type,const char *payload,
 }
 int64_t xd_cleanup_deadline_ms(void) { return cleanup_end(); }
 int xd_publish_supervision(const char *topic,const char *payload,uint64_t check,int64_t at,const struct xd_inputs *context)
-{return admit()?xd_io_report_at(topic,"app.lifecycle",payload,check,context,at):-ESHUTDOWN;}
+{
+ int rc=admit()?xd_io_report_at(topic,"app.lifecycle",payload,check,context,at):-ESHUTDOWN;
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+ if(rc){
+  atomic_inc(&lifecycle_rejected);
+  (void)atomic_cas(&lifecycle_first_rejection,0,rc);
+ }else atomic_inc(&lifecycle_queued);
+#endif
+ return rc;
+}
 void xd_app_cleanup_error(int error)
 {
  if(error){atomic_set(&app_close_error,error);(void)xdiag_error("drive-app-cleanup",error);}
@@ -698,6 +710,17 @@ static int drive_cmd_inner(const struct shell *sh, size_t argc, char **argv)
 	if ((!records || (sends && !offset)) && !io_status) {
 		emit(sh,"XD_IO {\"enqueued\":\"%" PRIu64 "\",\"replaced\":\"%" PRIu64 "\",\"expired\":\"%" PRIu64 "\",\"context_dropped\":\"%" PRIu64 "\",\"stopped\":\"%" PRIu64 "\",\"attempted\":\"%" PRIu64 "\",\"sent\":\"%" PRIu64 "\",\"failed\":\"%" PRIu64 "\",\"event_dropped\":\"%" PRIu64 "\",\"heartbeat_replaced\":\"%" PRIu64 "\",\"heartbeat_dropped\":\"%" PRIu64 "\",\"heartbeat_expired\":\"%" PRIu64 "\",\"readiness_replaced\":\"%" PRIu64 "\",\"readiness_dropped\":\"%" PRIu64 "\",\"readiness_expired\":\"%" PRIu64 "\",\"prepare_max_us\":\"%" PRIu64 "\",\"poll_max_us\":\"%" PRIu64 "\",\"exchange_max_us\":\"%" PRIu64 "\",\"delivery_rows\":%zu,\"delivery_overflow\":\"%" PRIu64 "\",\"transmissions_complete\":%s,\"close_error\":%d}",
 		 io.enqueued,io.replaced,io.expired,io.context_dropped,io.stopped,io.attempted,io.sent,io.failed,io.event_dropped,io.heartbeat_replaced,io.heartbeat_dropped,io.heartbeat_expired,io.readiness_replaced,io.readiness_dropped,io.readiness_expired,io.prepare_max_us,io.poll_max_us,io.exchange_max_us,delivery_size,delivery_lost,sends_complete ? "true" : "false",io.close_error);
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+		struct xd_context_status context;
+		int context_rc=xd_context_status_get(&context);
+		emit(sh,"XD_REPORT {\"queued\":%u,\"queue_rejected\":%u,\"first_queue_rc\":%d,\"sent\":\"%" PRIu64 "\",\"first_send_rc\":%d}",
+		     (unsigned)atomic_get(&lifecycle_queued),(unsigned)atomic_get(&lifecycle_rejected),
+		     (int)atomic_get(&lifecycle_first_rejection),io.lifecycle_sent,io.lifecycle_first_send_error);
+		if(!context_rc){
+			emit(sh,"XD_CONTEXT {\"loads\":\"%" PRIu64 "\",\"failures\":\"%" PRIu64 "\",\"first_rc\":%d,\"last_rc\":%d,\"available\":%s}",
+			     context.loads,context.failures,context.first_error,context.last_error,context.available?"true":"false");
+		}
+#endif
 		if (!io.stack_error) {
 			emit(sh,"XD_CLOCK {\"frequency_hz\":%u,\"io_clock_rc\":%d,\"snapshot_busy\":\"%" PRIu64 "\",\"stack_rc\":0,\"stack_unused_bytes\":%zu}",
 			 sys_clock_hw_cycles_per_sec(),io.clock_error,io.snapshot_busy,io.stack_unused_bytes);

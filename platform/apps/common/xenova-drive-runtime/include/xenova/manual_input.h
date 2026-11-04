@@ -28,22 +28,30 @@ static inline void xd_manual_bind(struct xd_manual_source *s,const char *receive
  }
  /* Keep original sample identity/time across app replacement and reconnect. */
 }
-static inline void xd_manual_control(struct xd_manual_source *s,struct xm_span payload)
+/* Return the existing parser result separately from the causal gate. The
+ * optional observation never changes which controls/samples the gate accepts. */
+static inline int xd_manual_control_observed(struct xd_manual_source *s,struct xm_span payload,
+ struct xm_vehicle_control *observed)
 {
- struct xm_vehicle_control c;
- if(xm_vehicle_control_parse(payload,&c)||!c.manual_policy[0]){
-  s->controlled=false;memset(&s->witness,0,sizeof(s->witness));return;
+ struct xm_vehicle_control c;int rc=xm_vehicle_control_parse(payload,&c);
+ if(observed){if(!rc)*observed=c;else memset(observed,0,sizeof(*observed));}
+ if(rc||!c.manual_policy[0]){
+  s->controlled=false;memset(&s->witness,0,sizeof(s->witness));return rc;
  }
  if(s->controlled&&c.generation==s->control.generation){
   if(strcmp(c.manual_session,s->control.manual_session)||strcmp(c.manual_policy,s->control.manual_policy)){
    s->blocked=true;memset(&s->witness,0,sizeof(s->witness));
   }
-  return;
+  return 0;
  }
  if(s->controlled&&c.generation<s->control.generation){
-  s->blocked=true;memset(&s->witness,0,sizeof(s->witness));return;
+  s->blocked=true;memset(&s->witness,0,sizeof(s->witness));return 0;
  }
- s->control=c;s->controlled=true;s->blocked=false;memset(&s->witness,0,sizeof(s->witness));
+ s->control=c;s->controlled=true;s->blocked=false;memset(&s->witness,0,sizeof(s->witness));return 0;
+}
+static inline void xd_manual_control(struct xd_manual_source *s,struct xm_span payload)
+{
+ (void)xd_manual_control_observed(s,payload,NULL);
 }
 /* Nonzero means the original sample must not replace/renew the latest slot.
  * Invalid source-session notices remain observable and revoke neutral proof. */

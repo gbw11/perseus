@@ -341,4 +341,229 @@ class StopAcceptanceTest(unittest.TestCase):
         self.assertEqual(len(self.f.physical('create')),before)
 
 
+
+class SupersededStopReconciliationTest(unittest.TestCase):
+    """Public Manager replay; only Xen/systemctl/storage are fault fixtures."""
+    setUp = StopAcceptanceTest.setUp
+
+    def prepare_pair(self, successor_action='stop'):
+        self.f.start('superseded-original-start')
+        self.xen.hang_shutdown=True
+        first=self.f.call('stop',key='superseded-graceful')
+        self.f.fails(first,'RECONCILE_REQUIRED')
+        self.original_path=self.p.data/'control-requests'/(first['operation_id']+'.json')
+        self.original=self.p.execution().read(self.original_path)
+        self.assertEqual(self.original['phase'],'uncertain')
+        spec={'vm_id':self.f.vm_id,'force':True}
+        force=self.f.call(successor_action,spec,key='explicit-superseding-force')
+        self.f.ok(force)
+        self.successor_path=self.p.data/'control-requests'/(force['operation_id']+'.json')
+        self.successor=self.p.execution().read(self.successor_path)
+        self.assertEqual(self.successor['base_revision'],self.original['intent_revision'])
+        self.assertEqual(self.successor['intent_revision'],self.original['intent_revision']+1)
+        self.assertEqual(self.successor['result']['observation']['presence'],'absent')
+        self.original_bytes=self.original_path.read_bytes()
+        self.other_requests={path.name:path.read_bytes()
+            for path in (self.p.data/'control-requests').glob('*.json') if path!=self.original_path}
+        self.intent_bytes=(self.p.data/'control'/(self.f.vm_id+'.json')).read_bytes()
+        self.run_path=self.p.runtime/'executions'/(self.f.vm_id+'.json')
+        self.run_bytes=self.run_path.read_bytes()
+        self.physical_before=[c for c in self.xen.calls if len(c)>1 and c[0]=='xl'
+                              and c[1] in ('create','shutdown','destroy','reboot')]
+
+    def replay(self):
+        return self.f.call('stop',key='superseded-graceful')
+
+    def assert_preserved(self):
+        self.assertEqual(self.intent_bytes,(self.p.data/'control'/(self.f.vm_id+'.json')).read_bytes())
+        self.assertEqual(self.run_bytes,self.run_path.read_bytes())
+        self.assertEqual(self.other_requests,{path.name:path.read_bytes()
+            for path in (self.p.data/'control-requests').glob('*.json') if path!=self.original_path})
+        self.assertEqual(self.physical_before,[c for c in self.xen.calls if len(c)>1 and c[0]=='xl'
+                          and c[1] in ('create','shutdown','destroy','reboot')])
+
+    def test_direct_completed_force_closes_original_failed_and_keeps_first_cause(self):
+        self.prepare_pair()
+        original_requests=execution.Execution.requests
+        with patch.object(execution.Execution,'requests',autospec=True,side_effect=original_requests) as lookup:
+            replay=self.replay()
+        cause=self.original['error']['details']['cause']
+        self.f.fails(replay,cause['code'])
+        self.assertTrue(replay['replayed'])
+        settled=self.p.execution().read(self.original_path)
+        self.assertEqual(settled['phase'],'failed')
+        for key,value in self.original.items():
+            if key not in ('phase','events','error'):self.assertEqual(settled[key],value,key)
+        self.assertEqual(settled['events'][:-1],self.original['events'])
+        self.assertEqual(settled['events'][-1]['phase'],'failed')
+        proof=settled['error']['details']['stop_reconciliation']
+        self.assertTrue(proof['metadata_only'])
+        self.assertEqual(proof['original_error'],self.original['error'])
+        self.assertEqual(proof['superseding_operation_id'],self.successor['operation_id'])
+        self.assertEqual(settled['error']['details']['cause'],cause)
+        self.assertEqual(lookup.call_count,2)  # Existing admission scan + control scan, no third scan.
+        settled_bytes=self.original_path.read_bytes()
+        again=self.replay();self.f.fails(again,cause['code'])
+        self.assertEqual(self.original_path.read_bytes(),settled_bytes)
+        self.assert_preserved()
+
+    def test_explicit_destroy_is_also_a_direct_forced_stop(self):
+        self.prepare_pair('destroy')
+        self.f.fails(self.replay(),self.original['error']['details']['cause']['code'])
+        self.assertEqual(self.p.execution().read(self.original_path)['phase'],'failed')
+        self.assert_preserved()
+
+    def test_original_deadline_failure_keeps_deadline_and_first_error(self):
+        self.prepare_pair()
+        op=copy.deepcopy(self.original)
+        op['error']['details']['cause']={'code':'DEADLINE_EXCEEDED','message':'original stop budget expired',
+                                       'retryable':False,'details':{'original_marker':'kept'}}
+        self.p.execution().write(self.original_path,op)
+        replay=self.replay();self.f.fails(replay,'DEADLINE_EXCEEDED')
+        final=self.p.execution().read(self.original_path)
+        self.assertEqual(final['deadline_monotonic_ms'],op['deadline_monotonic_ms'])
+        self.assertEqual(final['error']['details']['stop_reconciliation']['original_error'],op['error'])
+        self.assertEqual(final['error']['details']['cause'],op['error']['details']['cause'])
+        self.assert_preserved()
+
+    def test_changed_host_generation_or_unfinished_successor_keeps_hold(self):
+        self.prepare_pair()
+        original_successor=copy.deepcopy(self.successor)
+        for change in ({'phase':'uncertain'}, {'host_boot_id':foundation.HOST_B},
+                       {'lifecycle_generation':self.original['lifecycle_generation']+1},
+                       {'base_revision':self.original['intent_revision']-1},
+                       {'source':'boot-policy'}):
+            with self.subTest(change=change):
+                self.p.execution().write(self.successor_path,{**original_successor,**change})
+                response=self.replay()
+                self.assertFalse(response['ok'])
+                self.assertEqual(self.original_path.read_bytes(),self.original_bytes)
+        self.p.execution().write(self.successor_path,original_successor)
+        self.assert_preserved()
+
+    def test_new_present_execution_or_newer_stopped_run_does_not_release_original(self):
+        self.prepare_pair()
+        self.xen.rows=[foundation.domain(self.r,self.f.directory/'root.raw',77)]
+        response=self.replay();self.f.fails(response,'RECONCILE_REQUIRED')
+        self.assertEqual(self.original_path.read_bytes(),self.original_bytes)
+        self.xen.rows.clear()
+        run=self.p.execution().read(self.run_path)
+        for change in ({'phase':'observed'}, {'intent_revision':self.original['intent_revision']},
+                       {'stopped_monotonic_ms':self.successor['events'][-1]['monotonic_ms']+1}):
+            with self.subTest(change=change):
+                self.p.execution().write(self.run_path,{**run,**change})
+                self.assertFalse(self.replay()['ok'])
+                self.assertEqual(self.original_path.read_bytes(),self.original_bytes)
+        self.p.execution().write(self.run_path,run)
+        self.assert_preserved()
+
+    def test_intermediate_start_prevents_adopting_a_later_force(self):
+        self.prepare_pair()
+        self.f.start('intermediate-start')
+        self.f.ok(self.f.call('stop',{'vm_id':self.f.vm_id,'force':True},key='later-force'))
+        response=self.replay();self.f.fails(response,'TARGET_CHANGED')
+        self.assertEqual(self.original_path.read_bytes(),self.original_bytes)
+
+    def test_required_settlement_storage_failure_restores_uncertain_without_success(self):
+        import errno
+        for after_publication in (False,True):
+            with self.subTest(after_publication=after_publication):
+                if not hasattr(self,'original'):self.prepare_pair()
+                write=execution.Execution.write
+                attempts=[]
+                def failing(owner,path,value):
+                    if Path(path)==self.original_path:
+                        attempts.append(value['phase'])
+                        if value['phase']=='failed':
+                            if after_publication:write(owner,path,value)
+                            raise OSError(errno.EIO,'injected settlement EIO')
+                    return write(owner,path,value)
+                with patch.object(execution.Execution,'write',autospec=True,side_effect=failing):
+                    response=self.replay()
+                self.f.fails(response,'RECONCILE_REQUIRED')
+                self.assertEqual(response['error']['details']['rollback'],'restored')
+                self.assertEqual(attempts,['failed','uncertain'])
+                self.assertEqual(self.original_path.read_bytes(),self.original_bytes)
+                self.assert_preserved()
+
+    def test_parent_directory_fsync_failure_keeps_original_uncertain(self):
+        import errno
+        self.prepare_pair()
+        with patch.object(execution,'sync_directory',side_effect=OSError(errno.EIO,'injected parent fsync')):
+            response=self.replay()
+        self.f.fails(response,'RECONCILE_REQUIRED')
+        self.assertEqual(self.original_path.read_bytes(),self.original_bytes)
+        self.assert_preserved()
+
+
+
+    def test_owned_scope_still_requires_readonly_cleanup_when_mode_flag_is_off(self):
+        from xenova_guest_process import scope_name
+        self.prepare_pair()
+        run=self.p.execution().read(self.run_path)
+        run['process_scope']=scope_name(self.f.vm_id,run['execution_id'])
+        self.p.execution().write(self.run_path,run);self.run_bytes=self.run_path.read_bytes()
+        self.assertFalse(self.p.process_isolation)
+        timed_command=self.p.timed_command
+        calls=[]
+        def observed(args,deadline):
+            if args[:2]==['systemctl','show']:
+                calls.append(list(args))
+                return {'LoadState':'loaded','ActiveState':'active',
+                        'Before':'xenova-vm-shutdown.service'}[args[args.index('-p')+1]]
+            return timed_command(args,deadline)
+        with patch.object(self.p,'timed_command',side_effect=observed):
+            response=self.replay()
+        self.f.fails(response,'RECONCILE_REQUIRED')
+        self.assertTrue(calls)
+        self.assertTrue(all(call[:2]==['systemctl','show'] for call in calls))
+        self.assertEqual(self.original_path.read_bytes(),self.original_bytes)
+        with patch.object(self.p,'timed_command',side_effect=lambda args,deadline:
+                          'not-found' if args[:2]==['systemctl','show'] else timed_command(args,deadline)):
+            self.f.fails(self.replay(),self.original['error']['details']['cause']['code'])
+        self.assertEqual(self.p.execution().read(self.original_path)['phase'],'failed')
+        self.assert_preserved()
+
+    def test_new_stop_accepted_during_observation_invalidates_settlement(self):
+        self.prepare_pair()
+        command=self.p.command
+        accepted=[]
+        def observe_and_supersede(args,**kwargs):
+            if args==['xl','list','-l'] and not accepted:
+                accepted.append(self.m.fork().call('stop',{'vm_id':self.f.vm_id},execute=True,
+                                                  idempotency_key='new-intent-during-observation'))
+            return command(args,**kwargs)
+        with patch.object(self.p,'command',side_effect=observe_and_supersede):
+            response=self.replay()
+        self.assertTrue(accepted)
+        self.f.fails(accepted[0],'OPERATION_IN_PROGRESS')
+        self.assertTrue(accepted[0]['error']['details']['accepted'])
+        self.f.fails(response,'TARGET_CHANGED')
+        self.assertEqual(self.original_path.read_bytes(),self.original_bytes)
+        self.assertEqual(self.physical_before,[c for c in self.xen.calls if len(c)>1 and c[0]=='xl'
+                          and c[1] in ('create','shutdown','destroy','reboot')])
+
+    def test_failed_rollback_reports_both_storage_failures_and_original_cause(self):
+        import errno
+        self.prepare_pair()
+        write=execution.Execution.write
+        attempts=[]
+        def unavailable(owner,path,value):
+            if Path(path)==self.original_path:
+                attempts.append(value['phase'])
+                raise OSError(errno.EIO,'injected unavailable original journal')
+            return write(owner,path,value)
+        with patch.object(execution.Execution,'write',autospec=True,side_effect=unavailable):
+            response=self.replay()
+        self.f.fails(response,'RECONCILE_REQUIRED')
+        details=response['error']['details']
+        self.assertEqual(details['storage_errno'],errno.EIO)
+        self.assertEqual(details['rollback'],'unconfirmed')
+        self.assertEqual(details['rollback_error']['errno'],errno.EIO)
+        self.assertEqual(details['cause'],self.original['error'])
+        self.assertEqual(attempts,['failed','uncertain'])
+        self.assertEqual(self.original_path.read_bytes(),self.original_bytes)
+        self.assert_preserved()
+
+
 if __name__=='__main__':unittest.main()

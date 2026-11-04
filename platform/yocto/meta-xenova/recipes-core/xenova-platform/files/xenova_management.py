@@ -1147,7 +1147,11 @@ class Manager:
                 fail('RECOVERY_REQUIRED','private preparation returned no verified result',
                      details={'operation_id':op['operation_id']})
             self.checkpoint('private-prepared',op)
-            with operation_lock(self.p.runtime):
+            # The private owner can wait for an unrelated mutation to finish
+            # while the original execution still has time to publish.
+            with creation.work(self,op,context) as end, operation_lock(
+                    self.p.runtime,blocking=True,deadline=end,clock=self.p.clock,sleep=self.p.sleep):
+                creation.check(self,end)
                 current=next((o for o in self._operations() if o['operation_id']==op['operation_id']),None)
                 if current!=op or self._owner_state(op)!='active':
                     fail('TARGET_CHANGED','original preparation operation or owner changed')

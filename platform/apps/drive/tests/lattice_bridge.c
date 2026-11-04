@@ -143,3 +143,15 @@ int engine_state(void *pointer,uint8_t *out,size_t cap){
  pb_ostream_t stream=pb_ostream_from_buffer(out,cap);bool ok=pb_encode(&stream,xenova_drive_DriveState_fields,s);
  free(s);return ok?(int)stream.bytes_written:-1;
 }
+
+int engine_memory(void *e,unsigned region,uint64_t *out){
+ struct dw_memory m;enum de_result rc=de_memory_read(e,region,&m);
+ if(!rc){out[0]=m.reserved;out[1]=m.capacity;out[2]=m.used;out[3]=m.peak;out[4]=m.exhausted;out[5]=m.contention;}
+ return rc;
+}
+int engine_force_node_limit(void *pointer,uint64_t now){
+ struct drive_engine *e=pointer;
+ struct lp_config limited=*e->config;limited.node_limit=1;
+ const struct lp_config *original=e->config;e->config=&limited;
+ int rc=engine_plan(e,now,4096);e->config=original;return rc;
+}

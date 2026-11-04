@@ -148,7 +148,8 @@ def main():
         raise ValueError("netfront send exceeds the direct 256-byte stack-frame budget")
     config = (build / "zephyr/.config").read_text()
     for name in ("XENOVA_DRIVE_RECORDER", "XENOVA_DIAGNOSTICS_THREADS"):
-        if ("CONFIG_" + name + "=y\n" in config) != args.profile.endswith("experiment"):
+        expected=args.profile.endswith("experiment") or (name=="XENOVA_DIAGNOSTICS_THREADS" and args.profile=="warm-lattice-lab")
+        if ("CONFIG_" + name + "=y\n" in config) != expected:
             raise ValueError("resolved configuration differs from selected profile: " + name)
     if ("CONFIG_XENOVA_DRIVE_WARM=y\n" in config)!=args.profile.startswith('warm-'):
         raise ValueError('resolved readiness profile differs from requested profile')
@@ -158,6 +159,20 @@ def main():
         raise ValueError('toolchain picolibc errno requires thread-local storage')
     if "CONFIG_STACK_SENTINEL=y\n" not in config:
         raise ValueError("drive target must retain stack boundary detection")
+    tcp_workqueue_stack_audit = None
+    if args.app == "drive":
+        tcp_rows = [line.partition("=")[2] for line in config.splitlines()
+                    if line.startswith("CONFIG_NET_TCP_WORKQ_STACK_SIZE=")]
+        if len(tcp_rows) != 1 or not tcp_rows[0].isdigit() or int(tcp_rows[0]) < 2048:
+            raise ValueError("drive TCP workqueue must reserve at least 2048 bytes")
+        tcp_workqueue_stack_audit = {
+            "reserved_bytes": int(tcp_rows[0]),
+            "minimum_reserved_bytes": 2048,
+            "reference_c_chain_lower_bound_bytes": 1152,
+            "reference_build_id": "sha256:78500a046176f1155dadc24f7d00d0f6c69decebeff47ae500a50a356f351600",
+            "reference_chain": "tcp_resend_data -> TCP/Ethernet -> ARP allocation (including work_queue_main)",
+            "scope": "matched 1.0.4 ARM C frames with tail calls removed; excludes thread entry/architecture saves; not a worst-case upper bound",
+            "target_high_water_required": True}
     netfront_stack_audit = {"send_frame_bytes": int(send[0][1]), "direct_frame_budget_bytes": 256,
                             "stack_sentinel": True,
                             "scope": "adapter direct frame; target tests still validate the caller chain"}
@@ -166,7 +181,7 @@ def main():
         frames = {}
         basenames=["workers.c", "adapter.c", "autonomous.c", "manual.c", "xm_payload.c", "xm_json.c"]
         if args.profile.startswith('warm-'):basenames += ['context.c','runtime.c','main.c','xen_bootstrap.c','xm_zclient.c']
-        if args.profile=='warm-lattice-lab':basenames += ['lattice_app.c','lattice_input.c','engine.c','lattice.c','world.c','pb_decode.c','pb_encode.c']
+        if args.profile=='warm-lattice-lab':basenames += ['lattice_app.c','lattice_input.c','lattice_memory.c','engine.c','lattice.c','world.c','pb_decode.c','pb_encode.c']
         for basename in basenames:
             item = next(v for v in commands if v["file"].endswith("/" + basename))
             argv = shlex.split(item["command"])
@@ -202,6 +217,7 @@ def main():
                     "--app-source", home, "--networked", "--output", args.output / "firmware", "--execute"])
     receipt = {"netfront_stack_audit": netfront_stack_audit, "app": args.app, "profile": args.profile,
                "calculation_stack_audit": calculation_stack_audit,
+               "tcp_workqueue_stack_audit": tcp_workqueue_stack_audit,
                "config_sha256": sha(build / "zephyr/.config"),
                "source_files": source, "source_sha256": digest, "zephyr_commit": commit,
                "compiler_sha256": sha(compiler), "compiler_version": subprocess.check_output([str(compiler), "--version"], text=True).splitlines()[0],

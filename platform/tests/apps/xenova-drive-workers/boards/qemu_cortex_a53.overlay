@@ -1,0 +1,3 @@
+/* Worker acceptance never sends network packets; satisfy the fixed QEMU SLIP port. */
+/ { chosen { zephyr,uart-pipe = &uart0; }; };
+&eth0 { status = "disabled"; };

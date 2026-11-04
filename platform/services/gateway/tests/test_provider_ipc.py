@@ -348,6 +348,86 @@ def test_c14_command_expiry_stop_runs_while_actor_storage_is_blocked(actor_serve
     assert out[0]['phase']=='PREPARING'
 
 
+@pytest.mark.parametrize('write_failure', (False, True))
+def test_pending_stop_outcome(tmp_path, write_failure):
+    import importlib.util
+    from xenova_gateway.frame import StopFrame
+    from xenova_gateway.machine import ForwardDrive, ForwardStop
+    from xenova_gateway.output_owner import OutputOwner
+    from xenova_gateway.sink import MockSink
+
+    spec = importlib.util.spec_from_file_location('pending_stop_lab', LAB)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    lab = module.Lab(tmp_path/'xenova-gateway-lab-stop')
+    entered, release = threading.Event(), threading.Event()
+
+    class DelayedStop(MockSink):
+        def write(self, frame, at):
+            assert isinstance(frame, StopFrame)
+            entered.set()
+            assert release.wait(2)
+            if write_failure:
+                raise OSError(5, 'test device write failed')
+            return super().write(frame, at)
+
+    device = DelayedStop()
+    owner = None
+    try:
+        runner = lab.runner
+        runner._emit(runner.machine.block('owned pending STOP test', time.monotonic()))
+        lab.output.close()
+        runner._finish_stop()
+        owner = OutputOwner(device, command_timeout_s=.1)
+        runner._sink = owner
+        before = lab.auth.path.read_bytes()
+        failed = runner.serial_failed
+        accepted = runner.serial_accepted
+        generation = runner.machine.generation
+
+        runner._submit(ForwardStop(generation))
+        assert entered.wait(1) and runner._pending_stop is not None
+        original = runner.submissions[-1]
+        assert original['serial_result'] == 'pending'
+        submitted = original['submitted_monotonic']
+        record_count = len(runner.submissions)
+
+        runner._submit(ForwardStop(generation))
+        runner._submit(ForwardDrive('manual', generation, .1, 0))
+        assert len(runner.submissions) == record_count
+        assert runner.serial_failed == failed
+        assert runner.serial_accepted == accepted
+        assert lab.auth.path.read_bytes() == before
+
+        release.set()
+        until = time.monotonic()+1
+        while runner._pending_stop is not None and time.monotonic() < until:
+            runner._finish_stop()
+            time.sleep(.001)
+        assert runner._pending_stop is None
+        assert original['submitted_monotonic'] == submitted
+        assert original['device_applied'] is None
+
+        if write_failure:
+            assert original['serial_result'] == 'failed'
+            assert original['failure_cause']['cause_type'] == 'OSError'
+            assert runner.serial_failed == failed+1
+            assert runner.machine.failure == 'OUTPUT_PATH_FAILED'
+            assert not runner.machine.output_permitted
+        else:
+            assert original['serial_result'] == 'accepted'
+            assert runner.serial_accepted == accepted+1
+            assert runner.serial_failed == failed
+            assert len(device.frames) == 1
+            assert lab.auth.path.read_bytes() == before
+            assert original['serial_completed_monotonic'] >= submitted
+    finally:
+        release.set()
+        if owner is not None:
+            owner.close()
+        lab.close()
+
+
 def test_unconfirmed_device_write_retains_one_stop_and_prohibits_late_new_drive():
     from xenova_gateway.output_owner import OutputOwner
     from xenova_gateway.sink import MockSink,SinkError

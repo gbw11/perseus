@@ -5,7 +5,7 @@ After=systemd-journald.service
 [Service]
 Type=simple
 EnvironmentFile=/etc/xenova/runtime-logs/collector.env
-ExecStart=@PYTHON@ -m dom0_manager.log_collector --unit xenova-dom0-manager.service --unit xenova-recovery-worker.service --unit xenova-gateway.service --unit mosquitto.service --unit xenova-display-feed.service --unit xenova-display-hdmi.service --unit xenova-display-mobile.service
+ExecStart=/usr/bin/python3 -m dom0_manager.log_collector --unit xenova-dom0-manager.service --unit xenova-recovery-worker.service --unit xenova-gateway.service --unit mosquitto.service --unit xenova-display-feed.service --unit xenova-display-hdmi.service --unit xenova-display-mobile.service
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=10

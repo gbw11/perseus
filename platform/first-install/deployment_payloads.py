@@ -1,4 +1,4 @@
-"""dom0 API·MQTT 설치 소스 계약. 조립 시 파일 누락과 과거 이미지 재사용을 거부한다."""
+"""dom0 API·MQTT·실행 로그 설치 소스 계약. 조립 시 파일 누락과 과거 이미지 재사용을 거부한다."""
 from pathlib import Path
 import stat
 
@@ -8,6 +8,9 @@ ROOT = Path(__file__).resolve().parents[2]
 RECIPES = ROOT / "platform/yocto/meta-xenova/recipes-core"
 API = ROOT / "platform/services/dom0-manager"
 MQTT = ROOT / "platform/services/vm-agent/mqtt-client"
+RUNTIME_LOGS = RECIPES / "xenova-dom0-manager/files/runtime-logs"
+COLLECTOR = "xenova-runtime-log-collector.service"
+LOG_ENV = "etc/xenova/runtime-logs/collector.env"
 
 
 def source_files(site_packages):
@@ -21,7 +24,11 @@ def source_files(site_packages):
     result.update({
         "usr/lib/systemd/system/xenova-dom0-manager.service": RECIPES/"xenova-dom0-manager/files/xenova-dom0-manager.service",
         "usr/lib/systemd/system/xenova-recovery-worker.service": API/"deploy/xenova-recovery-worker.service",
+        "usr/lib/systemd/system/xenova-recovery-config.service": API/"deploy/xenova-recovery-config.service",
         "etc/xenova/dom0-manager.env": RECIPES/"xenova-dom0-manager/files/dom0-manager.env",
+        "usr/lib/systemd/system/" + COLLECTOR: RUNTIME_LOGS/COLLECTOR,
+        "usr/lib/systemd/system/xenova-dom0-manager.service.d/30-runtime-logs.conf": RUNTIME_LOGS/"runtime-logs-manager.conf",
+        LOG_ENV: RUNTIME_LOGS/"runtime-log-db.env",
         "usr/share/xenova/dom0-manager-pyproject.toml": API/"pyproject.toml",
         "usr/share/xenova/mqtt-client-pyproject.toml": MQTT/"pyproject.toml",
     })
@@ -54,6 +61,12 @@ def installed_sources(root):
             raise ValueError("required dom0 service not enabled: " + unit)
     if stat.S_IMODE(path("etc/xenova/dom0-manager.env").stat().st_mode) != 0o600:
         raise ValueError("dom0 API environment must be root-only (0600)")
+    collector_link = "etc/systemd/system/multi-user.target.wants/" + COLLECTOR
+    if not (root/collector_link).is_symlink() or path(collector_link) != path("usr/lib/systemd/system/" + COLLECTOR):
+        raise ValueError("required dom0 service not enabled: " + COLLECTOR)
+    log_env = path(LOG_ENV)
+    if log_env.is_file() and stat.S_IMODE(log_env.stat().st_mode) != 0o600:
+        raise ValueError("runtime log environment must be root-only (0600): " + LOG_ENV)
     if (root/"etc/xenova/dom0-manager-token.env").exists() or (root/"etc/xenova/dom0-manager-token.env").is_symlink():
         raise ValueError("common image must not contain a board service token")
     return source_files(site)
