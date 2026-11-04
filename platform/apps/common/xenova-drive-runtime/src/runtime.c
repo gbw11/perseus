@@ -574,8 +574,43 @@ static void output_row(const struct shell *sh, const struct row *r)
 }
 #endif
 
+#if defined(CONFIG_XENOVA_RUNTIME) && defined(CONFIG_XENOVA_NETFRONT)
+static int netfront_snapshot(const struct shell *sh)
+{
+	struct xnet_status status;
+	struct xnet_waits waits;
+	int rc = xnet_status_get(&status);
+	if (rc) { return rc; }
+	rc = xnet_waits_get(&waits);
+	if (rc) { return rc; }
+
+	/* Two bounded copies, not an atomic view of traffic in flight. */
+	emit(sh, "XD_NETFRONT {\"started\":%s,\"connected\":%s,\"stopping\":%s,"
+	     "\"backend_observation\":%d,\"backend_error\":%d,\"observation_error\":%d,"
+	     "\"first_observation_error\":%d,\"backend_wait_stage\":%d,"
+	     "\"worker_source\":\"%s\",\"worker_error\":%d}",
+	     status.started ? "true" : "false", status.connected ? "true" : "false",
+	     status.stopping ? "true" : "false", status.backend_observation, status.backend_error,
+	     status.observation_error, status.first_observation_error, status.backend_wait_stage,
+	     status.worker_failure_source ? status.worker_failure_source : "none", status.worker_error);
+	emit(sh, "XD_NETFRONT_WAITS {\"packet_clock\":\"%s\",\"packet_polls\":\"%" PRIu64
+	     "\",\"packet_last_poll_ms\":\"%" PRIu64 "\",\"packet_gap_max_us\":\"%" PRIu64
+	     "\",\"packet_lock_timeouts\":\"%" PRIu64 "\",\"packet_lock_first_error\":%d,"
+	     "\"packet_lock_hold_max_us\":\"%" PRIu64 "\",\"store_unavailable\":\"%" PRIu64
+	     "\",\"store_recoveries\":\"%" PRIu64 "\",\"last_backend_success_ms\":\"%" PRIu64 "\"}",
+	     waits.cycle_clock ? "cycles" : "ticks", waits.packet_polls, waits.packet_last_poll_ms,
+	     waits.packet_gap_max_us, waits.packet_lock_timeouts, waits.packet_lock_first_error,
+	     waits.packet_lock_hold_max_us, waits.store_unavailable, waits.store_recoveries,
+	     waits.last_backend_success_ms);
+	return 0;
+}
+#endif
+
 static int drive_cmd_inner(const struct shell *sh, size_t argc, char **argv)
 {
+#if defined(CONFIG_XENOVA_RUNTIME) && defined(CONFIG_XENOVA_NETFRONT)
+	if (argc == 2 && !strcmp(argv[1], "netfront")) { return netfront_snapshot(sh); }
+#endif
  if(argc==2&&!strcmp(argv[1],"health")){
   struct xdh_health health[2];
   k_spinlock_key_t key=k_spin_lock(&capture_lock);
@@ -751,6 +786,6 @@ void xd_client_stopped(struct xm_zclient *client) { (void)xd_finish(client, 0); 
 SHELL_STATIC_SUBCMD_SET_CREATE(xenova_commands,
 	SHELL_CMD(diag, NULL, "Local Core snapshot; threads is intrusive", xdiag_shell_cmd),
 	SHELL_CMD(telemetry, NULL, "Separate v2 Publisher status/snapshot", xt_shell_cmd),
-	SHELL_CMD(drive, NULL, "Local health; capture <delay_ms> <duration_ms>; records [offset] [1..4] after window", drive_cmd),
+	SHELL_CMD(drive, NULL, "Local health/netfront; capture <delay_ms> <duration_ms>; records [offset] [1..4] after window", drive_cmd),
 	SHELL_SUBCMD_SET_END);
 SHELL_CMD_REGISTER(xenova, &xenova_commands, "Xenova common diagnostics", NULL);

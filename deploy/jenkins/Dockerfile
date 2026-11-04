@@ -7,11 +7,13 @@ USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
+        cmake \
         curl \
         gcc \
         git \
         gnupg \
         libc6-dev \
+        make \
         openssh-client \
         python3 \
         python3-pip \

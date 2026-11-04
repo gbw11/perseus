@@ -1,17 +1,19 @@
 # Zephyr Telemetry Publisher 2.1
 
-Diagnostics Core의 실제 관측을 별도 v2 MQTT 연결로 발행하는 공통 모듈이다.
+Diagnostics Core의 실제 관측을 전용 MQTT 연결로 발행하는 공통 모듈이다.
+RX/TX 누적값은 [v1 MQTT-03](../../../../docs/contracts/mqtt-contract-v1.md#31-zephyr의-공통-네트워크-지표-mqtt-03),
+수신률과 상세 자원·진단 지표는 v2 Telemetry 2.1로 발행한다.
 Core의 수집·주기 작업과 전송을 분리하며, 주행 계산·앱 건강 판정·복구 정책을 수행하지 않는다.
 Network Starter가 Xen netfront → xenbr0 → 인증된 broker로 연결하는 참조 앱이다.
-기존 `xm_zclient`, v1 주행/Agent 토픽과 제품 backend는 변경하지 않는다.
+주행 앱은 `xm_zclient`를 사용하고, 이 모듈은 자원 관측의 MQTT 전송을 맡는다.
 
 ## 계약과 구성
 
 - [현재 계약](contract/CONTRACT.md), [schema](contract/schemas/message.schema.json),
   [metric catalog](contract/schemas/metric-catalog.json)가 wire 형식의 기준이다.
-- `contract/versions/2.0/`와 기존 합성 fixture는 과거 원문이다. 현재 발행은 2.1이며
+- `contract/versions/2.0/`와 기존 합성 fixture는 과거 원문이다. 현재 v2 발행은 2.1이며
   독립 검사기가 버전별 schema/catalog를 선택한다. 과거 검증 결과는 현재 수락을 대신하지 않는다.
-- `src/model.c`, `src/writer.c`: allocation 없는 RTOS 독립 모델·4096-byte 직렬화.
+- `src/model.c`, `src/writer.c`: allocation 없는 RTOS 독립 직렬화. v1 네트워크 표본 1024 bytes, v2 메시지 4096 bytes 상한.
 - `src/adapter.c`: 고정 Zephyr 4.4 Diagnostics 구조체의 실제 필드 매핑.
 - `src/worker.c`: MQTT client 한 개를 소유하는 단일 thread, cadence·큐·ACK·종료.
 - `src/socket_transport.c`: 표준 Zephyr MQTT 프로토콜 + 전체 deadline을 유지하는 TCP I/O.
@@ -30,7 +32,7 @@ stop/start의 TCB 재사용을 직렬화하며, timeout이면 아직 종료를 �
 
 ## Core → wire 대응
 
-| 실제 원천 | v2 필드·의미 |
+| 실제 원천 | 발행 필드·의미 |
 |---|---|
 | own-domain Store `/vm/<UUID>` | `vm_id`; display name/domid/고정 Kconfig 값으로 대체하지 않음 |
 | 실행별 bootstrap `boot_id` | guest 부팅 공용 namespace. TCP 재연결·Publisher 재시작에서는 유지 |
@@ -39,9 +41,12 @@ stop/start의 TCB 재사용을 직렬화하며, timeout이면 아직 종료를 �
 | `k_uptime_get()` 전후 | collection start/end, 전송 직전 sent uptime. 다른 장치 clock과 빼지 않음 |
 | `collection_elapsed_us`, `collection_rc` | Core 수집 경과. 직렬화/전송/hook 비용과 별개. 실패는 null·원 rc |
 | heap allocated/free/peak | `memory.kernel_heap.{used_bytes,free_bytes,high_water_bytes}`, bytes/u64 문자열 |
+| 같은 heap 관측의 allocated + free | `memory.kernel_heap.accounted_bytes`, allocator 계상 범위 |
 | 실제 UP runtime cache | `cpu.system.percent`, `cpu.thread.percent`, 소수 JSON number와 별도 window·수명 label |
 | 실제 RX/TX data pool | `memory.region.{used_bytes,free_bytes,capacity_bytes}`, region label |
 | network tx/rx | `network.netfront.{tx_packets,rx_packets}`, packets/raw_counter. 원본 32bit 유지 |
+| Diagnostics RX/TX 바이트 누적값 | v1 `net_rx_bytes_total`·`net_tx_bytes_total`, u64 문자열과 `iface`·`counter_epoch` |
+| Diagnostics RX 바이트 수신률 | `rx_bytes_per_s`, u64 문자열과 `counter_epoch` |
 | network tx_drop/rx_drop/pool_busy/protocol_errors | 같은 suffix의 `network.netfront.*`, count/raw_counter, 32bit |
 | 실제 `net_if_is_up` / `net_if_is_carrier_ok` | 각각 `network.interface_up`, `network.carrier`, boolean. IP/MQTT ready가 아님 |
 | 실제 Zephyr interface index/link address/IPv4 | inventory `if<index>`, MAC·주소. network label과 같은 identifier |
@@ -70,7 +75,8 @@ Core가 관측하는 task는 static lifetime 한 개이며, 재초기화는 writ
 `xenova diag threads`만 기존 stack high-water scan을 수행한다. byte는 netfront TX ring
 제출 수락·RX stack 수락의 Ethernet frame 길이이며 상대 수신·물리 전송 완료가 아니다.
 32비트 패킷/오류 카운터는 기존 의미를 유지하고 별도의 64비트 byte counter를 사용한다.
-첫 rate는 no_sample, epoch/reset·긴 공백·포화는 무효다. MQTT 지표는 추가하지 않는다.
+첫 rate는 no_sample, epoch/reset·긴 공백·포화는 무효다. 같은 캐시에서 v1 MQTT-03으로
+RX/TX 누적값을, v2 2.1로 수신률을 발행한다. 둘 다 기존 Telemetry 작업자와 MQTT 연결을 쓴다.
 
 기존 xenconsoled 한 개가 PTY로 전달하면서 진단 사실만 별도 log로 필터링한다.
 콘솔 처리 경로는 기록 파일을 열거나 쓰지 않는다. 최대64개 기록 사본을 비대기 큐로
@@ -134,7 +140,8 @@ Manager의 `execution-context`와 실제 Xen unique ID를 전후 확인한다. b
 private receipt를 uncertain으로 남기고 성공으로 보고하지 않는다.
 
 준비된 private 디렉터리의 credential JSON에는 아래 필드만 둔다. 실제 값은 Git·터미널·로그에
-출력하지 않고 안전한 파일 입력으로 준비한다. 새 공통 broker의 v2 username은 `telemetry-<VM full UUID>`다. v1 drive 채널의 username은 기존 UUID다.
+출력하지 않고 안전한 파일 입력으로 준비한다. Telemetry 연결은 `telemetry-<VM full UUID>`를 쓰며
+자기 VM의 v1 `/metrics`와 v2 텔레메트리를 발행한다. 주행 연결은 기존 UUID 계정을 쓴다.
 
 ```json
 {

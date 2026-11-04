@@ -4,6 +4,9 @@ import copy
 from contextlib import redirect_stdout
 import io
 import json
+import ast
+import io
+from contextlib import redirect_stdout
 import os
 from pathlib import Path
 import shutil
@@ -115,7 +118,11 @@ class LockTest(unittest.TestCase):
     def test_early_and_cli_use_same_lock_without_tmpfiles_or_lifetime_cleanup(self):
         for name in ('xenova_first_boot.py', 'xenova_vm.py'):
             source = (FILES / name).read_text()
-            self.assertIn('with operation_lock(', source)
+            tree=ast.parse(source)
+            self.assertTrue(any(isinstance(item.context_expr,ast.Call)
+                                and isinstance(item.context_expr.func,ast.Name)
+                                and item.context_expr.func.id=='operation_lock'
+                                for node in ast.walk(tree) if isinstance(node,ast.With) for item in node.items))
             self.assertNotIn('/run/lock', source)
         for name in ('xenova-data-prepare.service', 'xenova-first-boot.service', 'xenova-vms.service'):
             source = (FILES / name).read_text()
@@ -434,8 +441,11 @@ class ManagementTest(unittest.TestCase):
     def test_cli_start_zephyr_skips_dhcp_and_stop_requires_explicit_force(self):
         with patch.object(vm, 'Platform', return_value=self.p), patch.object(self.p, 'records', return_value=self.records), patch.object(self.p, 'check_xen'), patch.object(self.p, 'prepare_dhcp', side_effect=AssertionError('not used')):
             vm.main(['start', 'zephyr-dev'])
-            with self.assertRaisesRegex(vm.PlatformError, 'explicit --force'):
+            output=io.StringIO()
+            with redirect_stdout(output),self.assertRaises(SystemExit) as error:
                 vm.main(['stop', 'zephyr-dev'])
+            self.assertEqual(error.exception.code,4)
+            self.assertIn('explicit --force',json.loads(output.getvalue())['error']['message'])
             vm.main(['stop', 'zephyr-dev', '--force'])
         self.assertFalse(self.xen.rows)
 

@@ -73,6 +73,8 @@ class VmObservation:
     expected_app_boot_id: str | None = None
     expected_app_instance_id: str | None = None
     expected_app_instances: dict[str,str] | None = None  # explicit warm profile only
+    # 이번 주기에 플랫폼 의도를 실제로 읽었는가. False 면 의도 필드는 마지막으로 읽은 값(표시용)이고 판정 근거가 아니다
+    intent_known: bool = True
 
     @property
     def eligible(self) -> bool:
@@ -107,6 +109,12 @@ class VmHealth:
     heartbeat_age_s: float | None
     reason: FailureReason | None
     manager_seq: int  # 같은 VM 에서 내용이 바뀔 때만 1 증가. 받는 쪽이 재시작 후 retained 값과 새 값을 구별한다
+    # 이번 주기에 플랫폼 의도를 실제로 읽었는가(Worker 내부용, payload 에 내지 않는다). False 면 desired_state 는 마지막으로 읽은 값이라
+    # 복구 엔진이 이것으로 복구를 취소·종료하지 않는다
+    intent_known: bool = True
+    # 이 스냅샷이 본 실행(Worker 내부용, payload 에 내지 않는다). 복구 엔진이 force 직전에 지금 실행의 장애 증거인지 대조한다
+    domid: int | None = None
+    execution_id: str | None = None
 
     @property
     def ok(self) -> bool:

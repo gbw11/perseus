@@ -32,6 +32,39 @@ write-only에서는 적용을 알 수 없다. `vehicle.status.applied_generation
 `zephyr/src/lattice_input.c`의 Jetson map 연결과 Pi state 연결은 별도 소유자이며,
 작은 Pi 차량 입력은 기존 제어 수신자로 받는다. AUTO 계산과 MANUAL 계산도 서로 기다리지 않는다.
 
+도로 우선 운용은 [drive-world의 feature bit 0](../../../docs/contracts/drive-world/README.md#도로-우선-입력--feature-bit-0)을
+사용한다. mapper가 제공한 도로 cell을 선호하고, 기존 바깥 경계 안의 여유 사용을 별도 비용
+우선순위로 최소화한다. 허용 영역이라는 이유만으로 빈 곡선의 안쪽을 단축하지 않는다.
+`mark_road` 생산 helper와 C/Python strict reader, 불변 path/인계의 `world_features`를 함께 제공한다.
+폭을 현재 pose나 그림에서 추정하지 않는다. 과거 feature=0은 같은 의미의 품질 수락이 아니다.
+
+전방 목표도 원 4.5m 범위에서 현재 회전 grid와 기존 차체 끝 여유 안의 reference 지점으로
+고른다. 좌표를 잘라 새 도로점을 만들거나 지도 밖으로 외삽하지 않는다. reference 꼭짓점과
+현재 위치가 같은 0길이 구간은 건너뛰고, 유효한 전방 목표가 없으면 기존 제한을 유지한다.
+자동 목표가 현재 장애물과 겹치면 `lp_start_local`이 같은 collision index·작업량·원 기한으로
+종단 차체를 검사하고, 원 전방 범위 안에서 resolution 간격으로 더 가까운 reference 목표를
+고른다. 다음 rolling map에서는 장애물 너머의 목표를 다시 선택할 수 있다. 명시 목표를 받는
+`lp_start`와 지속 중인 `merge_goal`·통과 근거는 이 조정으로 바꾸지 않는다.
+
+일반 도로 추종의 편차만으로 우회 의도를 만들지 않는다. 원 도로 위 차체 통로의 막힌 cell을
+기존 충돌 색인·원 탐색 예산 안에서 확인한 경우에만 새 우회 방향을 부여한다. 지도 밖은
+이 분류의 장애물 증거가 아니며, 실제 경로·최종 명령에서는 계속 통행 불가로 검사한다.
+이동 경로의 종단은 도로 곡률에 맞는 실제 primitive 상태로 끝날 수 있다. 곡선 목표에도
+조향 0의 직선 꼬리를 붙이지 않는다.
+
+`lp_path.goal`은 현재 실행 경로의 목표이고 `merge_goal`은 지속할 우회 의도의 재합류 목표다.
+남은 경로가 lookahead·반응/제동 여유에 가까워지면 앞선 국소 경로를 계산한다. 그동안 원 우회
+방향·재합류 목표는 보존하며, 실제 도로 기준 위치·방향·조향과 관측 오차를 확인해야 우회를
+종결한다. 계획 종단 방향 오차와 실제 추종·관측 오차도 기존 전체 허용각 안에서 함께 확인한다.
+새 경로가 실패하면 기존 경로의 유효 구간만 사용하고 현재 명령의 반응·제동 검사는 유지한다.
+
+재합류 목표의 최근접 투영이 반환돼도 실제 같은 도로에 속하는지 확인한 뒤 전방 거리로 쓴다.
+목표 구간을 지났다는 근거는 같은 maneuver·reference revision에 결합해 불변 path와 인계
+사본에 보존한다. 이후 목표가 이동 지도에서 잘려도 현재 도로에 실제 복귀하면 정상 종결할 수
+있다. 같은 합류 목표·유효 문맥에서 우회 방향이 바뀌어도 관측한 통과 근거는 보존한다.
+방향 변경의 maneuver revision 증가와 현재 실제 복귀 검사는 유지한다.
+근거 부재·도로 revision 변경·조회 실패를 통과나 복귀 완료로 바꾸지 않는다.
+
 `lattice_app.c`는 완전 path 적용 후 현재 target의 실제 tracker 계산을 수행한다.
 root binding의 AUTO 모델은 `stateful`, MANUAL은 `stateless`다. Standby의 자격·사본 적용은
 선택된 앱의 실제 progress나 출력 허가가 아니다. AUTO instance 교체 때 기존 계산과 planner를

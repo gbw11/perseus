@@ -19,8 +19,12 @@ def resolve(release_root, catalog):
         raise ValueError('canonical release root required')
     from xenova_catalog import DEFAULT_IDS
     entries = catalog.get('templates', [])
-    if (catalog.get('schema') != 1 or len(entries) != 3
-            or {e.get('template_id') for e in entries} != set(DEFAULT_IDS.values())):
+    linux_ids = {DEFAULT_IDS['ubuntu-24.04-20260926'], DEFAULT_IDS['debian-13-20261015']}
+    if (catalog.get('schema') != 1 or not isinstance(entries, list) or len(entries) != 3
+            or not all(isinstance(e, dict) for e in entries)
+            or len({e.get('template_id') for e in entries}) != 3
+            or {e.get('template_id') for e in entries if e.get('guest_kind') == 'linux'} != linux_ids
+            or sum(e.get('guest_kind') == 'zephyr' for e in entries) != 1):
         raise ValueError('one current default per template ID required; no duplicate catalog')
     result = {'linux_templates': [], 'rtos_templates': []}
     for entry in entries:
@@ -29,7 +33,7 @@ def resolve(release_root, catalog):
             raise ValueError('template path escapes release root')
         if DEFAULT_IDS.get(entry.get('id')) != entry['template_id']:
             raise ValueError('normalized default template identity mismatch')
-        kind = 'zephyr' if entry['template_id'] == 'zephyr-xenvm-starter-arm64' else 'linux'
+        kind = 'linux' if entry['template_id'] in linux_ids else 'zephyr'
         if entry.get('guest_kind') != kind:
             raise ValueError('default template kind mismatch')
         directory = root / relative
@@ -47,7 +51,7 @@ def resolve(release_root, catalog):
         else:
             info = assembly.rtos.info(directory, entry['manifest_sha256'])
             if info['id'] != entry['id'] or info['metadata'].get('template_version',info['metadata'].get('version')) != entry['version']:
-                raise ValueError('default Starter identity/version mismatch')
+                raise ValueError('default Zephyr identity/version mismatch')
             result['rtos_templates'].append({'template_dir': str(directory),
                                              'template_manifest_sha256': entry['manifest_sha256']})
     return result

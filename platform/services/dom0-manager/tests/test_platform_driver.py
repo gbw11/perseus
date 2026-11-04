@@ -485,6 +485,8 @@ def test_build_driver_wraps_manager_and_provisioner_reuses_it(monkeypatch):
     assert isinstance(driver.manager, SerializedManager)
     assert provisioner.manager is driver.manager
     assert driver.manager.busy_timeout_s == 0.5
+    assert driver.manager.read_fork is False  # 일반 조회 fork 는 명시적으로 켠다
+    assert build_driver(Settings(driver="platform", platform_lib="", platform_read_fork=True)).manager.read_fork is True
 
 
 def test_serialized_manager_busy_timeout_is_retryable_503():

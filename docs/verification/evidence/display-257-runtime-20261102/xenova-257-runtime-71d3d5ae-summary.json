@@ -1,0 +1,73 @@
+{
+  "trial": "xenova-257-runtime-71d3d5ae",
+  "duration_target_s": 60,
+  "markers_requested": false,
+  "product_native_worker": true,
+  "setup": {
+    "prior": {
+      "xenova-display-kiosk.service": true,
+      "xenova-display-graphics.service": true
+    }
+  },
+  "prepared": {
+    "native_dependency_check": true,
+    "started": true
+  },
+  "unauthenticated_http": 401,
+  "marker_requests": [],
+  "streams": {
+    "monitor-1": {
+      "frames": 299,
+      "duration_s": 60.09162770002149,
+      "fps": 4.975734747819006,
+      "jpeg_mbps": 1.910602531406533,
+      "connections": 1,
+      "errors": [],
+      "largest_decode_gap_s": 0.44031360000371933,
+      "gaps_over_1s": 0
+    },
+    "monitor-2": {
+      "frames": 300,
+      "duration_s": 60.09162770002149,
+      "fps": 4.992376001156193,
+      "jpeg_mbps": 2.617922096990289,
+      "connections": 1,
+      "errors": [],
+      "largest_decode_gap_s": 0.4348216999787837,
+      "gaps_over_1s": 0
+    }
+  },
+  "elapsed_s": 60.09162770002149,
+  "cleanup": {
+    "services": {
+      "xenova-display-kiosk.service": "active",
+      "xenova-display-graphics.service": "active",
+      "xenova-display-feed.service": "active",
+      "xenova-dom0-manager.service": "active",
+      "mosquitto.service": "active",
+      "tailscaled.service": "active"
+    },
+    "ssh_policy_restored": true,
+    "graphics_source_restored": true,
+    "graphics_source_unchanged": true,
+    "domains_unchanged": true,
+    "temporary_files_removed": true,
+    "sender_journal": "Started [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-71d3d5ae/stream-host.py.\nINFO:     Started server process [18123]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://127.0.0.1:8083 (Press CTRL+C to quit)\nStopping [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-71d3d5ae/stream-host.py...\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.\nINFO:     Finished server process [18123]\nxenova-257-runtime-71d3d5ae.service: Deactivated successfully.\nStopped [systemd-run] /usr/bin/python3 /run/xenova-257-runtime-71d3d5ae/stream-host.py.\nxenova-257-runtime-71d3d5ae.service: Consumed 49.744s CPU time over 1min 13.810s wall clock time, 58.7M memory peak.\n"
+  },
+  "latency": {},
+  "sample_window_s": 58.11038739800006,
+  "cpu_mean_cores": {
+    "sender": 0.17088166926145384,
+    "native_worker": 0.4396804279587257,
+    "other_pipeline": 0.0,
+    "browser": 0.32593140139093,
+    "xorg": 0.13904570872432498
+  },
+  "cpu_scope": "service cgroups; process birth/exit intervals undercount startup/exit CPU; Chromium/Xorg excluded from pipeline",
+  "available_min_mib": 1781.89453125,
+  "pipeline_rss_first_last_mib": [
+    93.55859375,
+    94.05859375
+  ],
+  "rss_note": "sum of per-process RSS; shared pages may be counted twice; not exclusive resident memory"
+}

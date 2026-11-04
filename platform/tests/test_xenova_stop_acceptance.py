@@ -113,7 +113,9 @@ class StopAcceptanceTest(unittest.TestCase):
         thread.start()
         try:
             self.assertTrue(entered.wait(10),phase)
-            pending=self.f.call('stop',key='race-stop')
+            # Independent request context, same persistent execution locks.
+            pending=self.f.m.fork().call('stop',{'vm_id':self.f.vm_id},
+                                         execute=True,idempotency_key='race-stop')
             self.f.fails(pending,'OPERATION_IN_PROGRESS')
             self.assertTrue(pending['error']['details']['accepted'])
             self.assertEqual(self.p.execution().intent(self.r)['intent_revision'],initial+1)
@@ -174,7 +176,9 @@ class StopAcceptanceTest(unittest.TestCase):
         thread.start()
         try:
             self.assertTrue(entered.wait(10))
-            pending=self.f.call('stop',key='waiting-stop')
+            pending=self.f.m.fork().call('stop',{'vm_id':self.f.vm_id},
+                                         execute=True,idempotency_key='waiting-stop')
+            self.f.fails(pending,'OPERATION_IN_PROGRESS')
             self.assertTrue(pending['error']['details']['accepted'])
             self.assertEqual(len(self.f.physical('shutdown')),1)
             self.xen.rows.clear()  # 이미 제출된 graceful 요청의 외부 효과.

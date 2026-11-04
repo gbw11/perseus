@@ -7,9 +7,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from first_install_fixture import vm
 from xenova_sysfs_fixture import XenSysfs
 import test_xenova_platform as contracts
-from test_xenova_platform import FILES, ROOT, FakeXen, fixture, guest, record, vm
+from test_xenova_platform import FILES, ROOT, FakeXen, fixture, guest, record
 
 
 class UnitOwnershipTest(unittest.TestCase):
@@ -125,7 +126,7 @@ class NetworkLifecycleRegressionTest(unittest.TestCase):
         service = (ROOT / 'platform/yocto/meta-xenova/recipes-core/xenova-bringup/files/xenova-dhcp.service').read_text()
         self.assertIn('ExecStartPre=/usr/sbin/xenova-vm check-network', service)
         # DHCP restart의 실제 ExecStartPre 진입점을 호출한다. systemd/dnsmasq는 실행하지 않는다.
-        with patch.object(vm, 'Platform', return_value=self.p), patch.object(vm, 'RUN', self.p.runtime):
+        with patch.object(vm, 'Platform', return_value=self.p):
             vm.main(['check-network'])
         self.assertEqual(hosts.read_bytes(), before)
         self.assertEqual(len(self.xen.rows), 1)

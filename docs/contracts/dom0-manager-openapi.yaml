@@ -367,6 +367,61 @@ paths:
           $ref: '#/components/responses/PlatformUnavailable'
         '504':
           $ref: '#/components/responses/DriverTimeout'
+  /api/v1/vms/{vm_id}/reboot:
+    parameters:
+      - $ref: '#/components/parameters/VmId'
+    post:
+      tags: [VMs]
+      operationId: rebootVm
+      summary: 정상 재부팅 (같은 디스크로 새 실행)
+      description: >-
+        실행 중인 VM 을 게스트 정상 재부팅으로 같은 등록·디스크의 새 실행(새 execution_id)으로 다시 시작한다 (기준 문서 4.10).
+        stop + create 조합이 아니라 플랫폼 reboot 한 번이다. 키 없는 호출은 동기 방식이며 새 실행이 관측될 때까지 최대 90초 기다린다.
+        자동 강제 재부팅은 없다. 명령 제출 전 기한 만료는 504, 제출 뒤 새 실행을 확인하지 못하면 503(RECONCILE_REQUIRED, 결과 미확정).
+        force 입력은 없다(협력 제어 채널이 없는 Zephyr 는 501).
+        신규 재부팅은 키 유무와 관계없이 실행 중인 도메인만 대상이다: 꺼짐·paused·crashed·stopping 이면 409, 등록이 없으면 404.
+        Idempotency-Key 가 있으면 정지와 같은 요청 추적 모드다 (4.3.1): 같은 키의 원 작업이 있으면 재전달로 보고 상태 확인 없이
+        이어 가며, 완료면 200, 수락했지만 실행이 남았으면 202 로 ControlOperation(action=reboot) 을 돌려준다.
+      x-driver-timeout-seconds: 90
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: 최초 전송 전에 정한 요청 키. 재전송·조회에 같은 값. ASCII 가시 문자 1..200자
+          schema:
+            type: [string, 'null']
+        - $ref: '#/components/parameters/RequestBudget'
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: 키 있음. 원 작업 완료(새 실행 관측). 같은 키 재전달이어도 같은 operation_id, 물리 동작 반복 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlOperation'
+        '202':
+          description: 키 있음. 재부팅을 내구 수락했고 실행이 남음 (status=pending). 같은 키로 재전달하거나 조회한다
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlOperation'
+        '204':
+          description: 키 없음. 재부팅 완료(새 실행 관측). 디스크 보존
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
+        '404':
+          $ref: '#/components/responses/VMNotFound'
+        '409':
+          $ref: '#/components/responses/InvalidState'
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '501':
+          $ref: '#/components/responses/NotSupported'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
   /api/v1/vms/{vm_id}/control-operations:
     parameters:
       - $ref: '#/components/parameters/VmId'
@@ -431,6 +486,70 @@ paths:
                 $ref: '#/components/schemas/StatsResponse'
         '500':
           $ref: '#/components/responses/DriverError'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
+  /api/v1/cpu-layout:
+    get:
+      tags: [Resources]
+      operationId: getCpuLayout
+      summary: 전체 VM 의 CPU 배치(정책·실제 Xen)
+      description: >-
+        플랫폼 cpu-layout (기준 문서 4.11). 정책이 정한 vCPU→pCPU 배치와 실제 Xen hard affinity·전용성 검사를 돌려준다. 조회만 하며
+        정책·affinity·VM 을 바꾸지 않는다. 200 은 조회 성공이지 배치 준수가 아니다: host.ready·affinity_matches·exclusive_verified·issues 를
+        함께 본다. null 은 해당 없음·모름(정지·공유·정책 미설정)이며 성공이 아니다. 긴 변경 작업이 플랫폼 잠금을 쥐고 있으면 기다리지 않고
+        503(재시도 가능). 관측 실패는 빈 마스크로 꾸미지 않고 503 이다.
+      x-driver-timeout-seconds: 5
+      parameters:
+        - $ref: '#/components/parameters/RequestBudget'
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: 정책·실제 CPU 배치
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CpuLayout'
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '501':
+          $ref: '#/components/responses/NotSupported'
+        '503':
+          $ref: '#/components/responses/PlatformUnavailable'
+        '504':
+          $ref: '#/components/responses/DriverTimeout'
+  /api/v1/vms/{vm_id}/cpu-layout:
+    parameters:
+      - $ref: '#/components/parameters/VmId'
+    get:
+      tags: [Resources]
+      operationId: getVmCpuLayout
+      summary: 한 VM 의 CPU 배치(정책·실제 Xen)
+      description: >-
+        전체 조회와 같은 스키마이며 vms 에 그 VM 하나만 담는다. 전용성 검사는 다른 모든 도메인의 vCPU 를 함께 관측해 판정한다.
+        등록이 없으면 404 (기준 문서 4.11).
+      x-driver-timeout-seconds: 5
+      parameters:
+        - $ref: '#/components/parameters/RequestBudget'
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '200':
+          description: 정책·실제 CPU 배치(그 VM)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CpuLayout'
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
+        '404':
+          $ref: '#/components/responses/VMNotFound'
+        '500':
+          $ref: '#/components/responses/DriverError'
+        '501':
+          $ref: '#/components/responses/NotSupported'
         '503':
           $ref: '#/components/responses/PlatformUnavailable'
         '504':
@@ -507,6 +626,138 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Health'
+  /api/v1/vm-registrations:
+    get:
+      tags:
+      - VM registrations
+      summary: Registrations
+      operationId: listVmRegistrations
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/Registration'
+                type: array
+                title: Response Listvmregistrations
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '501':
+          description: Not Implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - $ref: '#/components/parameters/RequestBudget'
+  /api/v1/vm-registrations/{vm_id}/notify:
+    post:
+      tags:
+      - VM registrations
+      summary: Notify
+      description: 조회와 송신이 같은 호출 예산을 쓴다. 응답 유실 후 자동 재송신하지 않는다.
+      operationId: notifyVmRegistration
+      parameters:
+      - name: vm_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Vm Id
+      - $ref: '#/components/parameters/RequestBudget'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Bad Request
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Unauthorized
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Not Found
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Internal Server Error
+        '501':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Not Implemented
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: Bad Gateway
+        '503':
+          content:
+            application/json:
+              schema:
+                anyOf:
+                - $ref: '#/components/schemas/Notification'
+                - $ref: '#/components/schemas/Error'
+                title: Response 503 Notifyvmregistration
+          description: Service Unavailable
+        '504':
+          content:
+            application/json:
+              schema:
+                anyOf:
+                - $ref: '#/components/schemas/Notification'
+                - $ref: '#/components/schemas/Error'
+                title: Response 504 Notifyvmregistration
+          description: Gateway Timeout
+
 components:
   securitySchemes:
     LogProducerToken:
@@ -542,6 +793,87 @@ components:
         type: string
         format: uuid
   schemas:
+    Registration:
+      properties:
+        vm_id:
+          type: string
+          title: Vm Id
+        name:
+          type: string
+          title: Name
+        guest_kind:
+          type: string
+          enum:
+          - linux
+          - zephyr
+          title: Guest Kind
+        template_id:
+          type: string
+          title: Template Id
+        template_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Template Version
+        vcpus:
+          type: integer
+          title: Vcpus
+        memory_mib:
+          type: integer
+          title: Memory Mib
+        assigned_ipv4:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assigned Ipv4
+      additionalProperties: false
+      type: object
+      required:
+      - vm_id
+      - name
+      - guest_kind
+      - template_id
+      - template_version
+      - vcpus
+      - memory_mib
+      - assigned_ipv4
+      title: Registration
+    Notification:
+      properties:
+        vm_id:
+          type: string
+          title: Vm Id
+        request_id:
+          type: string
+          title: Request Id
+        state:
+          type: string
+          title: State
+        confirmed:
+          type: boolean
+          title: Confirmed
+        http_status:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Http Status
+        upstream_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Upstream Code
+        cause_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cause Type
+      type: object
+      required:
+      - vm_id
+      - request_id
+      - state
+      - confirmed
+      title: Notification
     VmState:
       type: string
       description: >-
@@ -678,7 +1010,7 @@ components:
           format: uuid
         action:
           type: string
-          description: 현재 stop
+          description: stop 또는 reboot
         request_key:
           type: [string, 'null']
         operation_id:
@@ -892,6 +1224,110 @@ components:
         status:
           type: string
           enum: [ok, xen_unavailable]
+    VcpuAffinity:
+      type: object
+      required: [vcpu, pcpus]
+      properties:
+        vcpu: {type: integer, minimum: 0}
+        pcpus:
+          type: array
+          items: {type: integer}
+          description: 이 vCPU 가 돌 수 있는 물리 CPU(hard affinity)
+    CpuHost:
+      type: object
+      required: [online_pcpus, max_cpu_id, pool_name, scheduler, desired_dom0_pcpus, observed_dom0_hard_affinity, ready]
+      properties:
+        online_pcpus: {type: array, items: {type: integer}}
+        max_cpu_id: {type: integer}
+        pool_name: {type: string}
+        scheduler: {type: string}
+        desired_dom0_pcpus:
+          type: [array, 'null']
+          items: {type: integer}
+          description: 정책의 공유 집합. 정책 미설정이면 null
+        observed_dom0_hard_affinity:
+          type: array
+          items: {$ref: '#/components/schemas/VcpuAffinity'}
+        ready:
+          type: boolean
+          description: 현재 host 부팅·정책 revision 의 준비 기록과 실제 배치가 일치
+    CpuReservation:
+      type: object
+      required: [vm_id, pcpus]
+      description: 전용 코어 예약. 플랫폼 정책 1.0 {vm_id, pcpu} 와 2.0 {vm_id, mode, pcpus} 를 같은 모양으로 맞춘다
+      properties:
+        vm_id: {type: string, format: uuid}
+        pcpus: {type: array, items: {type: integer}}
+    CpuObserved:
+      type: object
+      required: [presence, domid, xen_unique_id, vcpus, hard_affinity]
+      properties:
+        presence:
+          type: string
+          enum: [present, absent]
+          description: absent 면 나머지는 모두 null(정지는 불일치가 아니다), present 면 모두 값이 있다
+        domid: {type: [integer, 'null']}
+        xen_unique_id: {type: [string, 'null']}
+        vcpus: {type: [integer, 'null']}
+        hard_affinity:
+          type: [array, 'null']
+          items: {$ref: '#/components/schemas/VcpuAffinity'}
+    CpuConflict:
+      type: object
+      required: [domid, vcpu, pcpus]
+      properties:
+        domid: {type: integer}
+        vm_id: {type: [string, 'null'], format: uuid, description: 관리 VM 이 아니면(Domain-0 등) null}
+        name: {type: [string, 'null']}
+        vcpu: {type: integer}
+        pcpus: {type: array, items: {type: integer}, description: 겹친 물리 CPU}
+    CpuIssue:
+      type: object
+      required: [code]
+      description: >-
+        AFFINITY_MISMATCH · EXCLUSIVE_CONFLICT · CPU_NOT_READY · POLICY_PUBLICATION_PENDING. 코드마다 쓰는 필드만 담는다
+        (쓰지 않는 필드는 빠진다)
+      properties:
+        code: {type: string, enum: [AFFINITY_MISMATCH, EXCLUSIVE_CONFLICT, CPU_NOT_READY, POLICY_PUBLICATION_PENDING]}
+        vm_id: {type: string, format: uuid}
+        domid: {type: integer}
+        name: {type: string}
+        expected: {type: array, items: {$ref: '#/components/schemas/VcpuAffinity'}}
+        actual: {type: array, items: {$ref: '#/components/schemas/VcpuAffinity'}}
+        conflicts: {type: array, items: {$ref: '#/components/schemas/CpuConflict'}}
+        operation_id: {type: string}
+    VmCpuLayout:
+      type: object
+      required: [vm_id, execution_id, vcpus, allocation, desired_hard_affinity, observed, affinity_matches, exclusive_verified, issues]
+      properties:
+        vm_id: {type: string, format: uuid}
+        execution_id: {type: [string, 'null'], description: 현재 Xen 실행과 결합한 실행 ID. 미관리·부재는 null}
+        vcpus: {type: integer}
+        allocation: {type: [string, 'null'], enum: [exclusive, shared, null], description: 정책 미설정이면 null}
+        desired_hard_affinity:
+          type: [array, 'null']
+          items: {$ref: '#/components/schemas/VcpuAffinity'}
+        observed: {$ref: '#/components/schemas/CpuObserved'}
+        affinity_matches: {type: [boolean, 'null'], description: 실제 수량·마스크가 정책과 일치. 정지·미설정이면 null}
+        exclusive_verified: {type: [boolean, 'null'], description: 전용 VM 의 마스크 일치와 다른 도메인과의 중복 없음. 공유·정지·미설정이면 null}
+        issues: {type: array, items: {$ref: '#/components/schemas/CpuIssue'}}
+    CpuLayout:
+      type: object
+      required: [configured, policy_revision, host_boot_id, observed_monotonic_ms, host, reservations, vms, issues]
+      description: 조회 성공이 배치 준수를 뜻하지 않는다. host.ready·affinity_matches·exclusive_verified·issues 를 함께 본다
+      properties:
+        configured: {type: boolean}
+        policy_revision: {type: [integer, 'null']}
+        policy_schema_version: {type: [string, 'null']}
+        host_boot_id: {type: string}
+        observed_monotonic_ms: {type: integer, description: 관측한 host 의 단조 시각 ms. UTC 아님, 다른 시계와 빼지 않는다}
+        host: {$ref: '#/components/schemas/CpuHost'}
+        reservations: {type: array, items: {$ref: '#/components/schemas/CpuReservation'}}
+        vms:
+          type: array
+          items: {$ref: '#/components/schemas/VmCpuLayout'}
+          description: 전체 조회면 등록된 모든 VM, 한 VM 조회면 그 VM 하나
+        issues: {type: array, items: {$ref: '#/components/schemas/CpuIssue'}}
   responses:
     InvalidArgument:
       description: 형식 또는 범위 오류 (FastAPI 422 를 400 으로 정규화). 경로의 vm_id 가 UUID 가 아니거나 nil UUID(Domain-0)인 경우 포함

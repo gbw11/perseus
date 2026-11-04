@@ -9,8 +9,12 @@
 
 2026-11-02 자격 공급·등록-only 통지·현재 적용 프로필의 실제 제공물은
 [공통 계약](../contracts/vm-provisioning-v1.md)과 [후보별 결과](../verification/recovery-scenario-closure-20261030.md#vm-provisioning-integration)에 있다.
-Worker의 VM별 자격/같은 receipt 소비, Spring 등록-only 수신, Linux 실제 guest smoke,
-Jetson의 별도 broker 자격 공급은 각 요청서의 현재 본문에서 시작한다. 제품 코드를 대신 수정하거나 운영 설치한 결과는 아니다.
+등록 조회·통지는 [FastAPI 제공자 후속](../verification/vm-registration-api-20261102.md)이 현재 기준이다.
+FastAPI GET/notify·자동 후속은 구현했고 Spring 등록/동기화는 backend `800d584` 소스를 확인했다.
+Spring 수신부 신규 구현 대신 승인 설정 공급·설치·DB 공동 수락을 요청한다.
+Worker의 VM별 자격/같은 receipt 소비, Linux 실제 guest smoke,
+Jetson의 별도 broker 자격 공급은 각 요청서의 현재 본문에서 시작한다. 이 제품들은 대신 수정하지 않았다.
+이번 등록 FastAPI는 사용자 승인 범위에서 직접 구현했으며 운영 설치와는 별개다.
 
 2026-11-01 6-A에서 HTTP·Worker·Linux·Gateway의 현재 본문과 이력을 분리했다. 각 본문에는 수정 이유/위치·하위 제공물·정상/실패 수락·선행조건·담당 회신이 있다. [배포 준비·공동 결정·7번 입력표](../platform/deployment-readiness.md)는 플랫폼 원본이며 실제 배포나 담당 제품 완료를 뜻하지 않는다.
 
@@ -36,7 +40,7 @@ Jetson의 별도 broker 자격 공급은 각 요청서의 현재 본문에서 �
 | [Linux·Agent 건강 연결](2026-10-27-linux-health-agent.md) | Linux 엔지니어·Agent | D01-L01~L05: 자원·서비스/앱 진행·Agent 전달·로컬 감독·배포 | 요청 작성·플랫폼 근거 제공 완료, 담당자 구현·연동·실보드 수락 전 |
 | [Worker 건강 분류·복구·재합류](2026-10-27-recovery-health-ctrl.md) | Recovery Worker·Engine(ctrl) | D01-W01~W05 및 D03-W01~W04: 건강 입력·행동·원 결과 재확인·receipt 재사용·준비 연결 | 하위 제공물 준비, 담당자 구현·수락 전. D01 대기 유지 |
 | [Gateway Authority 수습](2026-10-27-authority-recovery-ctrl.md) | 박신영 / 플랫폼·Gateway | D03-G01~G04: 원본/백업 최신성·단일 소유·제한적 복원·재무장·저장 실패 | 기존 수습 과제 보존, 직접 구현·운영/장치 수락 전 |
-| [HTTP·Spring·VM 관리 화면 연동](../platform/management-integration-request.md) | FastAPI·Spring·화면 | D02·D08: 원 요청 key·pending/완료·시간 예산·후속 조회/이행 | 하위 구현 마감, 상위 연동 미구현·종단 수락 전 |
+| [HTTP·Spring·VM 관리 화면 연동](../platform/management-integration-request.md) | FastAPI·Spring·화면 | D02·D08: 등록 GET/notify 설치·공동 수락, 원 key·pending/완료·시간 예산·후속 이행 | 등록 하위/FastAPI 제공·Spring 소스 확인. 나머지 상위 연결·동일 설치본 종단은 미수락 |
 
 ## 담당 회신 양식
 

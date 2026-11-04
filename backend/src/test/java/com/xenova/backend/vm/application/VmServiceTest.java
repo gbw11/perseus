@@ -27,6 +27,7 @@ import com.xenova.backend.vm.domain.VmRecordRepository;
 import com.xenova.backend.vm.domain.VmRuntime;
 import com.xenova.backend.vm.domain.VmState;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -67,7 +68,11 @@ class VmServiceTest {
     void setUp() {
         TemplateCatalog templateCatalog = new TemplateCatalog(new TemplateCatalogProperties(
                 List.of(new VmTemplate("alpine", "1.2.0", "Alpine 1.2.0", 128, GuestKind.LINUX))));
-        service = new VmService(vmControlPort, vmRecordRepository, templateCatalog, eventRecorder, stateTracker, Clock.fixed(NOW, ZoneOffset.UTC));
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        // Disabled cache: every read goes to the port, as these cases were written for.
+        VmRuntimeCache runtimeCache = new VmRuntimeCache(
+                vmControlPort, new VmRuntimeCacheProperties(false, Duration.ofSeconds(1), Duration.ofSeconds(10)), clock);
+        service = new VmService(vmControlPort, vmRecordRepository, templateCatalog, eventRecorder, stateTracker, runtimeCache, clock);
     }
 
     @Test
