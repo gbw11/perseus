@@ -2,35 +2,33 @@ import { Button, Card, Modal, StatusBadge, useToast } from '@xenova/ui';
 import { useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
-import { useVmAction, useVms, type VmAction } from '../api/queries';
+import { useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
 import { osLabel } from '../domain/roles';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
+import { VmOperationNotice } from './VmOperationProgress';
+import { useVmOperationProgress } from './useVmOperationProgress';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
 
 /** VM 생명주기와 할당 자원을 관리하는 목록. 주행 모드·제어권은 Overview에서만 다룬다. */
 export function VmListPage() {
   const vms = useVms(1000);
-  const action = useVmAction();
+  const vmOperations = useVmOperationProgress();
   const toast = useToast();
   const navigate = useNavigate();
   const [deleting, setDeleting] = useState<Vm | null>(null);
 
   const run = (vm: Vm, kind: VmAction) =>
-    action.mutate(
-      { vmId: vm.vm_id, action: kind },
-      {
-        onSuccess: () =>
-          toast.show(
-            `${vm.name}: ${kind === 'start' ? '시작' : kind === 'stop' ? '정지' : '삭제'} 요청 완료`,
-            'ok',
-          ),
-        onError: (error) =>
-          toast.show(error instanceof ApiError ? error.message : String(error), 'fault', 5000),
-      },
-    );
+    vmOperations.run(vm, kind, {
+      onSuccess: () =>
+        toast.show(
+          `${vm.name}: ${kind === 'start' ? '시작' : kind === 'stop' ? '정지' : '삭제'} 요청 완료`,
+          'ok',
+        ),
+      onError: (_error, message) => toast.show(message, 'fault', 5000),
+    });
 
   const items = vms.data?.items ?? [];
   const running = items.filter((vm) => vm.state === 'running').length;
@@ -46,7 +44,13 @@ export function VmListPage() {
           <p className={styles.headingDescription}>VM 생성과 생명주기, 할당 자원을 관리합니다.</p>
         </div>
         <div className={styles.controlHeadingActions}>
-          {vms.data && <ObservedClock at={vms.dataUpdatedAt} />}
+          {vms.data && (
+            <ObservedClock
+              at={observedAt(vms.data.observed_at, vms.dataUpdatedAt)}
+              receivedAt={vms.dataUpdatedAt}
+              refreshing={!vms.isFetchedAfterMount}
+            />
+          )}
           <Button onClick={() => navigate('/control/vms/new')}>+ VM 생성</Button>
         </div>
       </header>
@@ -76,6 +80,8 @@ export function VmListPage() {
         {items.map((vm, index) => {
           const accent = VM_ACCENTS[index % VM_ACCENTS.length];
           const zephyr = vm.guest_kind === 'zephyr';
+          const operation = vmOperations.operations[vm.vm_id];
+          const operationPending = operation?.status === 'pending';
           return (
             <Card
               key={vm.vm_id}
@@ -122,25 +128,36 @@ export function VmListPage() {
                   </div>
                 </dl>
 
+                <VmOperationNotice operation={operation} now={vmOperations.now} />
+
                 <div
                   className={styles.controlCardActions}
                   onClick={(event) => event.stopPropagation()}
                   onKeyDown={(event) => event.stopPropagation()}
                 >
                   <div>
-                    <Button size="sm" onClick={() => run(vm, 'start')} disabled={vm.state === 'running'}>
+                    <Button
+                      size="sm"
+                      onClick={() => run(vm, 'start')}
+                      disabled={vm.state === 'running' || operationPending}
+                    >
                       시작
                     </Button>
                     <Button
                       size="sm"
                       variant="secondary"
                       onClick={() => run(vm, 'stop')}
-                      disabled={vm.state !== 'running'}
+                      disabled={vm.state !== 'running' || operationPending}
                     >
                       정지
                     </Button>
                   </div>
-                  <Button size="sm" variant="danger" onClick={() => setDeleting(vm)}>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => setDeleting(vm)}
+                    disabled={operationPending}
+                  >
                     삭제
                   </Button>
                 </div>
@@ -197,14 +214,31 @@ function SummaryItem({ label, value, tone }: { label: string; value: string; ton
   );
 }
 
-function ObservedClock({ at }: { at: number }) {
+/** 서버가 dom0 목록을 받은 시각(observed_at). 읽을 수 없으면 화면이 응답을 받은 시각 */
+function observedAt(iso: string | undefined, fallback: number): number {
+  const parsed = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/** at: 서버가 dom0 목록을 받은 시각, receivedAt: 화면이 그 응답을 받은 시각 (둘의 차이가 서버 목록의 나이) */
+function ObservedClock({
+  at,
+  receivedAt,
+  refreshing,
+}: {
+  at: number;
+  receivedAt: number;
+  refreshing: boolean;
+}) {
   const time = new Date(at).toTimeString().slice(0, 8);
+  const ageSeconds = Math.max(0, Math.round((receivedAt - at) / 1000));
   return (
     <span className={styles.observedTime}>
-      마지막 갱신
+      마지막 확인
       <b key={time} className={styles.tick}>
         {time}
       </b>
+      {refreshing ? ' · 갱신 중' : ageSeconds >= 3 ? ` · ${ageSeconds}초 전` : ''}
     </span>
   );
 }

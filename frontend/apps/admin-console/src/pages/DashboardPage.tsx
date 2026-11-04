@@ -17,7 +17,8 @@ import { Link } from 'react-router';
 import type { DriveState } from '../api/drive';
 import { useEvents, useMetrics, useVms } from '../api/queries';
 import { restartSimRace, selectSimTrack, useSimState, type SimView } from '../api/sim';
-import { VM_CPU_PERCENT_METRIC, type MetricSample, type Vm, type VmEvent } from '../api/types';
+import type { Vm, VmEvent } from '../api/types';
+import { cpuPercentOf, latest, memoryPercentOf } from '../domain/vmMetrics';
 import { clock, describe } from '../domain/events';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import {
@@ -465,7 +466,6 @@ function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null
   );
 }
 
-const MIB_BYTES = 1024 * 1024;
 type VmConnection = 'Connected' | 'Delayed' | 'Disconnected' | 'Unknown';
 
 /**
@@ -545,12 +545,10 @@ function VmOverviewCard({
   latestEvent: VmEvent | undefined;
 }) {
   const role = roleOf(vm, drive);
-  const metrics = useMetrics(vm.vm_id, vm.guest_kind === 'linux');
+  const metrics = useMetrics(vm.vm_id, true);
   const samples = metrics.data?.items ?? [];
-  const lastSample = samples.at(-1);
-  const cpu = overviewMetricValue(lastSample, VM_CPU_PERCENT_METRIC);
-  const usedBytes = overviewMetricValue(lastSample, 'memory_used_bytes');
-  const memory = usedBytes != null ? (usedBytes / (vm.memory_mib * MIB_BYTES)) * 100 : null;
+  const cpu = latest(samples, cpuPercentOf);
+  const memory = latest(samples, (sample) => memoryPercentOf(sample, vm));
   const app = appReportOf(vm, drive);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
   const connection = overviewConnection(vm, app);
@@ -558,7 +556,7 @@ function VmOverviewCard({
   const eventSummary = latestEvent
     ? `${clock(latestEvent.occurred_at)} · ${describe(latestEvent, () => vm.name).title}`
     : '최근 중요 이벤트 없음';
-  const unavailable = overviewMetricUnavailable(vm, metrics.isPending, samples.length);
+  const unavailable = overviewMetricUnavailable(metrics.isPending, samples.length);
   const driving = role ? role.driving : vm.guest_kind === 'zephyr';
 
   const style = { '--vm-accent': role?.color ?? UNASSIGNED_COLOR } as CSSProperties;
@@ -594,7 +592,7 @@ function VmOverviewCard({
           label="Memory"
           value={memory}
           unavailable={unavailable}
-          detail={`${vm.memory_mib} MiB allocated`}
+          detail={vm.guest_kind === 'zephyr' ? 'Kernel heap' : `${vm.memory_mib} MiB allocated`}
         />
       </div>
 
@@ -687,12 +685,7 @@ function overviewAppStatus(health: Health, hasApp: boolean): string {
   return 'Unknown';
 }
 
-function overviewMetricValue(sample: MetricSample | undefined, name: string): number | null {
-  return sample?.values.find((value) => value.name === name)?.value ?? null;
-}
-
-function overviewMetricUnavailable(vm: Vm, pending: boolean, sampleCount: number): string | null {
-  if (vm.guest_kind === 'zephyr') return 'Guest metrics not reported';
+function overviewMetricUnavailable(pending: boolean, sampleCount: number): string | null {
   if (pending) return 'Loading metrics';
   if (sampleCount === 0) return 'No metric data';
   return null;

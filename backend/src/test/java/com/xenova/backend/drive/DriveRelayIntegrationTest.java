@@ -277,14 +277,43 @@ class DriveRelayIntegrationTest {
         assertThat(tracker.snapshot().resume()).isNull();
     }
 
+    @Test
+    void scopedAppReportsReachTheExistingDriveStateApiThroughMqtt() throws Exception {
+        String vm = "99999999-9999-4999-8999-999999999999";
+        String topic = "xenova/v1/vms/" + vm + "/apps/autonomous/events";
+        String token = login();
+        AtomicReference<JsonNode> observed = new AtomicReference<>();
+        await(() -> {
+            long check = SEQ.incrementAndGet();
+            publish(topic, vm, "autonomous", "app.lifecycle", """
+                    {"profile":"warm-drive-1","phase":"WAITING","readiness":"NOT_READY","reason":"INPUT_UNAVAILABLE",
+                     "applied_generation":0,"check_seq":"%d","progress_seq":"0"}
+                    """.formatted(check), 0, false);
+            publish(topic, vm, "autonomous", "app.heartbeat", "{\"state\":\"idle\",\"uptime_s\":1.25}", 0, false);
+            ResponseEntity<JsonNode> result = restTemplate.exchange(
+                    "/api/v1/drive/state", HttpMethod.GET, new HttpEntity<>(bearer(token)), JsonNode.class);
+            if (!result.getStatusCode().is2xxSuccessful() || result.getBody() == null) {
+                return false;
+            }
+            JsonNode app = result.getBody().path("vm_apps").path(vm).path("autonomous");
+            observed.set(app);
+            return app.path("lifecycle").isObject() && app.path("heartbeat").isObject();
+        });
+        assertThat(observed.get().path("lifecycle").path("phase").asText()).isEqualTo("WAITING");
+        assertThat(observed.get().path("lifecycle").path("reason").asText()).isEqualTo("INPUT_UNAVAILABLE");
+        assertThat(observed.get().path("heartbeat").path("state").asText()).isEqualTo("idle");
+    }
+
     // ---- helpers ------------------------------------------------------------------------------------
 
     private void publish(String topic, String publisher, String appId, String type, String payload, int qos,
             boolean retained) {
         boolean vm = publisher.length() == 36;
         String json = """
-                {"schema_version":"1.0","message_id":"it-%d","%s":"%s",%s"boot_id":"it-boot",
-                 "agent_instance_id":"it-run","type":"%s","seq":%d,"sent_at":"%s","payload":%s}
+                {"schema_version":"1.0","message_id":"it-%d","%s":"%s",%s
+                 "boot_id":"77777777-7777-4777-8777-777777777777",
+                 "agent_instance_id":"88888888-8888-4888-8888-888888888888",
+                 "type":"%s","seq":%d,"sent_at":"%s","payload":%s}
                 """.formatted(SEQ.incrementAndGet(), vm ? "vm_id" : "source_id", publisher,
                 appId == null ? "" : "\"app_id\":\"" + appId + "\",", type, SEQ.get(), Instant.now(), payload);
         try {

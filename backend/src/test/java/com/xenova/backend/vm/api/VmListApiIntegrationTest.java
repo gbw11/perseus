@@ -71,19 +71,20 @@ class VmListApiIntegrationTest {
                 .andExpect(jsonPath("$.items[0].state").value("running"))
                 .andExpect(jsonPath("$.items[0].agent_status").value("UNKNOWN"))
                 .andExpect(jsonPath("$.items[0].ipv4").doesNotExist())
+                .andExpect(jsonPath("$.items[0].assigned_ipv4").hasJsonPath())
+                .andExpect(jsonPath("$.items[0].assigned_ipv4").doesNotExist())
                 .andExpect(jsonPath("$.observed_at").isNotEmpty());
     }
 
     @Test
-    void ipv4ComesFromTheAgentReportAndIsNullForZephyr() throws Exception {
+    void listAndDetailKeepRegisteredAndReportedAddressesSeparate() throws Exception {
         vmRecordRepository.deleteAll();
         inventoryRepository.deleteAll();
         Instant now = Instant.now();
-        vmRecordRepository.save(new VmRecord("vm-linux",
-                new CreateVmCommand("debian-a", "debian-13-arm64", "1.0.0", 1, 256), GuestKind.LINUX, now));
-        vmRecordRepository.save(new VmRecord("vm-zephyr",
-                new CreateVmCommand("zephyr-a", "zephyr-xenvm-starter-arm64", "1.0.0", 1, 16),
-                GuestKind.ZEPHYR, now.plusSeconds(1)));
+        vmRecordRepository.save(VmRecord.registeredByPlatform("vm-linux", "debian-a", "debian-13-arm64",
+                "1.0.0", 1, 256, GuestKind.LINUX, now, "192.168.77.21"));
+        vmRecordRepository.save(VmRecord.registeredByPlatform("vm-zephyr", "zephyr-a", "zephyr-xenvm-starter-arm64",
+                "1.0.0", 1, 16, GuestKind.ZEPHYR, now.plusSeconds(1), "192.168.77.2"));
         when(vmControlPort.list()).thenReturn(List.of(
                 new VmRuntime("vm-linux", VmState.RUNNING, 1, 256),
                 new VmRuntime("vm-zephyr", VmState.RUNNING, 1, 16)));
@@ -95,13 +96,21 @@ class VmListApiIntegrationTest {
                         new NetworkInterface("eth0", "02:16:3e:77:00:20", List.of("fe80::1", "192.168.77.20"))),
                 "0.1.0", now), now);
 
-        mockMvc.perform(get("/api/v1/vms")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + login()))
+        String authorization = "Bearer " + login();
+        mockMvc.perform(get("/api/v1/vms").header(HttpHeaders.AUTHORIZATION, authorization))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].guest_kind").value("linux"))
                 .andExpect(jsonPath("$.items[0].ipv4").value("192.168.77.20"))
+                .andExpect(jsonPath("$.items[0].assigned_ipv4").value("192.168.77.21"))
                 .andExpect(jsonPath("$.items[1].guest_kind").value("zephyr"))
+                .andExpect(jsonPath("$.items[1].assigned_ipv4").value("192.168.77.2"))
                 .andExpect(jsonPath("$.items[1].ipv4").doesNotExist());
+
+        mockMvc.perform(get("/api/v1/vms/vm-zephyr").header(HttpHeaders.AUTHORIZATION, authorization))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("stopped"))
+                .andExpect(jsonPath("$.assigned_ipv4").value("192.168.77.2"))
+                .andExpect(jsonPath("$.ipv4").doesNotExist());
     }
 
     private String login() throws Exception {

@@ -19,7 +19,7 @@ class XenovaBackendApplicationTests {
 
     @Test
     void flywayBuildsTheSchemaExpectedByHibernate() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
 
         Integer tableCount = jdbcTemplate.queryForObject(
                 """
@@ -29,11 +29,11 @@ class XenovaBackendApplicationTests {
                   AND table_name IN (
                     'users', 'vms', 'vm_events', 'vehicle_control_states',
                     'vm_metric_samples', 'vm_process_snapshots', 'vm_recovery_health',
-                    'recovery_sync_states'
+                    'recovery_sync_states', 'vm_telemetry_heartbeats'
                   )
                 """,
                 Integer.class);
 
-        assertThat(tableCount).isEqualTo(8);
+        assertThat(tableCount).isEqualTo(9);
     }
 }
