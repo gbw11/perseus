@@ -98,8 +98,10 @@ export function LegacyDashboardPage() {
       {control?.mode === 'AUTO_READY' && (
         <div className={styles.draft}>
           {drive?.resume
-            ? `자율주행 ${drive.resume.requested_by === 'auto' ? '자동 복귀' : '재개'} — ${Math.max(1, Math.ceil(drive.resume.remaining_ms / 1000))}초 뒤 전환`
-            : '자율주행 재개 가능 (자동 복귀 취소됨)'}{' '}
+            ? `자율주행 재개 — ${Math.max(1, Math.ceil(drive.resume.remaining_ms / 1000))}초 뒤 전환`
+            : drive?.resume_cancel?.reason === 'operator_cancelled'
+              ? '자율주행 재개 취소됨 — 수동주행 유지'
+              : '자율주행 재개 가능'}{' '}
           — <Link to="/simulator">Simulator</Link>에서 {drive?.resume ? '[취소]' : '[자율주행 재개]'}
         </div>
       )}
