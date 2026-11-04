@@ -1,6 +1,29 @@
 # 복구 시나리오 국소 마감: Authority 진단·출력 검증·조회 예산
 
-## 현재 상태 요약
+최신 후속: [2026-11-05 문서 현재화·작업 커밋](#branch-commit-closure-20261105). [다음 이미지 주행1.0.8 선택](#image-default108-20261105)과 실제 seed 검증을 포함한다. [RAM 최근 관측 계약](#ram-recent-observation-20261104)은 그대로 유지한다. [수동 버퍼·관리 RAM 제공자 후보](#manual-buffer-managed-ram-20261104)와 이전 보드·실패 근거는 날짜별 원문에 보존했다.
+
+<a id="현재-상태-요약"></a>
+## 현재 작업 묶음과 확인 수준
+
+현재 작업은 `feat/platform/guest-clock-sync`의983fa12 이후 변경이다. 이전 단계의 설계·실패·수락을 보존하되,
+아래가 이번 브랜치의 최신 제공 범위다. 이 표의 소스 제공·로컬 검증·이전 보드 수락을 하나의 완료로 합치지 않는다.
+
+| 작업 묶음 | 현재 제공 | 수락 수준·남은 경계 |
+|---|---|---|
+| 연속 Linux reboot·원 stop 수습 | 신원/디스크를 검증한 새 실행 결합, 원 key 재조회, 직접 후속 force의 부재 근거로 옛 stop 실패 종결 | 로컬 회귀·이전 보드 근거. 신원 불명/잔존 소유 자원은 계속 보류 |
+| create 게시·실행 binding | 원 기한 안의 게시 잠금 대기, identity-only 관측·제한된 재확인·동일 실행 공급 | 기존 복사1회/원 소유·기한 유지. 보드 병렬 binding 지연의 모든 원인은 미확정 |
+| Worker/Gateway 설정 공급 | 기존 MQTT 자격 재사용, factory UUID별 설정·최초 mock 초기화, client 의존성과 heartbeat 선언 호환 | 실제 차량 출력 승인과 별개. 실제 Worker·A/B·장치 종단은 미수락 항목을 유지 |
+| XenStore 거래 회복 | 늦은 응답 회수·고아 거래만 abort, 원 commit 재전송 금지 | native/ASan·UBSan·보드 후보 근거 |
+| Gateway STOP | 단일 원 제출의 pending/완료 회수·출력 우선·기존10ms 직접 호출 보호·장치 참조 보존 | PTY·보드 후보 확인. 실제 장치/물리 정지나 모든 부하의 기한 보장은 아님 |
+| 앱 메모리·Telemetry2.1 | AUTO4+MANUAL4 실제 owner, 고정 예약/점유/최고값·원 시각·결과 보관 구분, 유한 공정 발행 | native·ARM/QEMU·8-region 로컬 MQTT. 실보드 지도 채택→실계산→점유 변화는 미완료 |
+| RAM 최근 관측 | 같은 봉투의 total−page-free, 6초 원 lease·최초 오류·역전/퇴역 boot 보호 | 계약·참조 소비자 제공. Spring/화면 후보는 별도, 스택 화면은 보류 |
+| 펌웨어·다음 이미지 | 공통 주행1.0.8의 실제 bin/manifest, 기본 lock·factory A/B·조립 예시 일치 | 로컬 ARM·실제 seed 수락. 전체 이미지/RPM 재빌드·운영 설치는 별도 |
+| 문서 현재화 | 예산 헤더·조건부 fork·key stop200/202·원 key 조회의 실제 제공을 반영 | 과거 설치본/미연결 설명은 이력으로 보존. 실제 배포값은 재조회하지 않음 |
+
+기본 선택은 Linux1.0.4/주행1.0.8, 마지막 보드 메모리 후보는1.0.7이다. 세 버전은 서로 다른 수준이다.
+이전 표본의 시간·source hash·operation과 실패 기록을 최신 후보가 이미 다시 수락한 것으로 확대하지 않는다.
+
+## 기존 단계별 기준선과 후속 연결
 
 | 구분 | 현재 판정 |
 |---|---|
@@ -3183,3 +3206,746 @@ stack high-water를 대신하지 않는다. `build-source-check.json`이 시험/
 최종 두 완주만 `overview.png`에 그렸다. 개별 지도 조각이나 이전 정지 지점은 표시하지 않았다.
 이전 코드/실패·기존 planner/Gateway 변경을 보존했고 타 담당 제품·운영 설정·서비스·보드·실차·
 재무장·7번 수락·commit/push는 수행하지 않았다.
+
+
+<a id="board-recovery-20261104"></a>
+
+## 2026-11-04 실보드 복구 시나리오 재시험
+
+작업 기준은 `feat/platform/guest-clock-sync`의 `983fa12`와 기존 1~5번 수정, 이번 diff다.
+Pi의 설치본과 시험 후보를 분리했다. 설치본 API는 8081에 유지하고, 후보 HTTP와 Gateway는
+loopback과 시험용 저장 경로에서 실행했다. 기존 실행은 Debian domid 6, Zephyr A/B 2·3이다.
+Xen 장애 주입과 firmware 교체 대상은 이번에 등록한 시험 VM으로 한정했다.
+
+### 재현과 수정
+
+| 확인 지점 | 수정과 검증 |
+| --- | --- |
+| Zephyr start 뒤 자격 공급 실패 | 실제 start에 성공한 Xen 실행에서 `-b---- → ------ → -b----`가 관측됐다. 자격 공급의 첫 live 관측만 기존 예산 안에서 기다린다. 같은 부트스트랩의 이후 검사에서 빈 상태를 받으면 직전 live 확인과 host·execution ID·domid·Xen 고유 신원이 일치하는지 다시 확인한다. paused·shutdown·crash, 신원 변경, 의도 변경은 기존처럼 거절한다. 일반 binding 조회에는 완화를 적용하지 않는다. |
+| 설치된 lab.2의 협조 종료 미확정 | 시험 VM의 `xl reboot`와 이후 `xl shutdown`이 각각 기존 15초 반환 한도를 넘겼다. XenStore에 `poweroff`가 남아 있었고 설치 ELF에는 `4dee6b3`의 `xsr_read_status` 심볼이 없었다. 현재 소스로 ARM 번들을 빌드해 시험 VM에 정식 firmware-transition을 적용했다. 새 번들에서 domid 11→12, 같은 reboot 키의 재전달에서 12 유지, 정상 stop 뒤 부재, 원 reboot·stop 기록의 completed를 확인했다. 브로커에서 v1 `app.lifecycle` 214건, v1 drive link 출력 23건을 받았다. |
+| Linux 복사 뒤 게시 잠금 경합 | 첫 시험은 약 297초 후 공통 잠금 경합으로 원 작업이 preparing에 남았다. `266ae7a0-f894-41a1-adea-adc3d6c029ff`에 정식 `discard-private`를 적용해 원 기록을 FAILED로 종결했다. 준비가 끝난 소유자에게만 원 실행·호출 기한 중 남은 시간으로 기존 잠금을 기다리게 했다. 새 시험은 복사 직후 실제 flock을 1초 잡은 상태에서 264.74초에 등록을 마쳤다. 원 작업 `2e06856a-2709-4de1-a009-f6e8b1b28bba`를 명시값을 채운 같은 키로 회수했고, domid 13으로 기동했다. Agent heartbeat가 새 UUID에서 실제 수신됐다. `recover_once` `7233da39-53c6-4963-9f7a-4a4f3388bd9d`로 34.44초 뒤 domid 14가 됐다. Agent는 두 boot ID에서 총 6건이 들어왔다. 같은 attempt는 원 결과를 반환했고, 새 attempt의 옛 실행은 TARGET_CHANGED, 사용자 stop 이후의 attempt는 INTENT_MISMATCH였다. 이 두 시간은 서로 다른 경합 표본이다. |
+| 다음 이미지의 ARM 선택 | 시험과 동일한 `zephyr.bin`을 새 불변 1.0.3으로 포장했다. binary SHA-256은 `c27cdc5944b17016dbb434c25ceb525acc562ba16e71afac6d32ff445e6738b9`, 공개 manifest는 `7f4df6201d5df2dca128bcd072228a365c57c6d96341b522d1d6c2e1034d8b18`다. 기본 lock, factory defaults와 조립 예시를 같은 버전으로 맞췄다. 설치 중인 A/B는 기존 자산으로 계속 실행했다. |
+
+### 시나리오별 근거와 남은 수락
+
+| 단계와 ID | 이번 증거 | 남은 실보드 수락 |
+| --- | --- | --- |
+| ① A1·E1·A4 | 기존 factory VM 실행과 신규 Zephyr·Debian의 별도 실행 신원을 보드에서 확인했다. 새 Zephyr에서 v1 앱 이벤트, 신규 Debian의 두 실행에서 Agent heartbeat를 받았다. Worker 회귀로 최초 미수신과 유예, 새 실행의 기준 초기화를 확인했다. | 새 SD 최초 등록, 첫 미수신부터 운영 Worker 상태 파일과 회복까지. |
+| ② A2·A3·A5·AO1–AO4 | 실제 v1 수신과 기존 설치의 v2 생존을 구분했다. Worker/Gateway 회귀에서 미수신·무효·지연·중복·비인가 신호와 관측 불가를 시험했다. | 기존 A/B의 v1 재수락, 현장 ACL 부분 장애와 실제 장치 시계 대응. |
+| ② B1–B4·BO1–BO3 | 제품 C 계산·지도·tracker 시험과 Worker/Gateway의 늦은 계산·모드 분리·출력 한도 회귀를 실행했다. | 현재 차량 입력, 실보드 마감 지연, 실제 변화율 및 장기 운용 수락. |
+| ②·③ C1·C2·CO1–CO3 | allocator·진단 제한·건강 분리의 로컬 근거와 Linux 준비 자원 보호를 구분했다. | 실제 메모리 오염·스택 고갈의 출력 차단 지연과 보드 자원 측정. |
+| ②·③ D1·D2·D3·D4·DO1·DO3 | Worker 복구 중복 제거, 공통 연결 실패 보류, 두 실행의 분리 회귀를 실행했다. 실제 시험 VM 처리 중 기존 세 VM의 domid가 유지됐다. | 운영 Agent/App의 로컬 복구 승격, 공유 backend 장애 주입, VM별 대역폭과 동시 손실 정책. |
+| ④ F1·F2·F5·FO1·DO2 | Zephyr 같은 reboot 키 재전달과 원 stop 조회, 새 Debian 게시 경합과 원 실패 수습을 보드에서 확인했다. 하위 stop/복구 경합과 원 기한 회귀를 실행했다. | 운영 Spring의 원 key 회수, 실제 복구 중 동시 사용자 stop, 기간 단위 전역 복구 상한. |
+| ⑤ E4·F4·G1 | 로컬 Worker·Gateway의 실행 결과와 건강 회복 분리, 저장 실패·중복 사건 경계를 확인했다. | 연속 장애의 안정 구간과 episode 예산 정책, 운영 저장 장애·회복 수락. |
+| ⑥ H1·H2·H3·B4 | 로컬 warm 모드·승계·장치 codec 및 원장 회귀를 실행했다. 보드의 별도 Gateway 프로세스는 최초 기동과 재시작 모두 SAFE_STOP·DISARMED와 출력 미허가를 반환했고 중복 실행을 거절했다. 실제 ARM의 PTY·warm·보호 순서 fixture 20개가 순차 재실행에서 통과했다. | Jetson 실제 입력, 장치 적용·물리 정지, 전체 A→B→A 연속 승계. |
+| ⑦ A4·AO3·F2·G2·GO1·H3 | 원 결과 조회, 로컬 손상 원장 및 재시작·사건 중복 보호 회귀를 실행했다. 실제 보드의 시험 Gateway는 SD의 시험 전용 Authority로 재시작했다. 손상된 원본을 거절했으며 자동 재무장·세대 초기화가 없었다. | 운영 host 재부팅, 운영 Authority 손상 복원, 운영 Spring 재시작과 장치 세션 재결합. |
+| ⑧ E2·F2 | 시험 Zephyr와 Debian의 사용자 stop과 실제 Xen 부재, retire/purge를 확인했다. Debian의 기존 복구 요청은 stop 이후 현재 의도 대조에서 거절됐다. 원 stop 키 조회는 두 게스트 모두 completed였다. | 운영 UI에서 복구와 사용자 stop을 경합시키는 종단 수락. |
+
+### 설치와 관측
+
+- 설치본 부팅 journal에서 첫 설치 서비스 완료는 15.08초, 두 텔레메트리의 첫 실행은 약 10.07초였다.
+  후보의 systemd 연결과 SD 조립 게이트는 별도 회귀로 검증한다.
+- 후보 설정 생성으로 기존 계정을 사용한 Worker env 0600과 실제 A/B UUID를 확인했다. 운영 Worker를
+  다시 시작하거나 새 env를 운영 경로에 쓰지 않았다. 설치본의 상태 파일 및 기존 A/B v1 수신은 별도 수락이다.
+- 보드의 실제 journal을 시험 SQLite로 수집했다. 조회 200건과 커서 저장을 확인했고,
+  후보 FastAPI의 인증된 `/api/v1/logs`에서 2건을 읽었다. CPU 조회는 200, 인증 없는 CPU 조회는 401,
+  없는 UUID의 reboot는 404였다. 설치본 8081의 OpenAPI에는 CPU·reboot 경로가 없었다.
+- `xl vcpu-list`에서 A/B hard affinity는 각각 1과 2, Debian과 dom0의 공유 마스크는 0,3이었다.
+  실제 pin 변경, 호스트 재부팅, 시리얼 차량 연결과 Spring/화면 종단은 별도 수락이다.
+
+### 검증 환경과 정리
+
+- 최종 하위 Python 후보는 Linux native 파일시스템에서 복구·정지·부팅·등록·포장 회귀 204개를 통과했다.
+  Windows 공유 마운트에서 실행한 두 fixture는 정책 파일이 group/world writable로 보였으며, 같은 권한
+  검증을 유지한 Linux native 실행에서 통과했다. Worker와 Gateway 로컬 회귀도 각각 종료코드 0이었다.
+- XenStore·netfront·진단 일반/ASan·UBSan 회귀 32개, C controller·health·state·codec 6개,
+  lattice·world 44개를 통과했다. 실보드에서 큰 fixture를 병렬로 실행한 첫 시도에는 자식 시간 초과,
+  긴 Unix socket 경로, 누락된 시험 전용 자료가 있었다. 경로·자료와 동시 부하를 분리해 위의 ARM
+  Gateway 20개를 다시 실행했다. 병렬 PTY에서 관측한 10ms 제출 미확정은 별도 성능 관찰로 남긴다.
+- 실보드에서 만든 시험 VM은 정식 stop/retire/purge로, 미게시 Debian 자산은 원 operation으로 정리했다.
+  발급한 시험 계정 12개를 공식 revoke로 회수했고 기존 계정의 비밀번호와 기존 세 domid를 대조했다.
+  원 작업 기록은 조회할 수 있게 보존했다. 회수한 Debian 시험 자격의 브로커 인증이 실제 거절됐다. 이후 12초 구독에서 기존 Debian heartbeat 2건, 기존 A/B v1 앱 이벤트 0건이었다.
+- 1.0.3 전달 tar의 SHA-256은 5dfccc645ddc8842cc6de566c7ff59aead7e16df48310386e3f537d56e5f5086이다.
+  Linux의 template release root에 풀면 `zephyr/xenova-zephyr-drive-lattice-lab-1.0.0/1.0.3`를
+  현재 lock으로 읽을 수 있다. 새 전체 이미지 빌드·설치와 실제 장치 출력 수락은 남았다.
+
+
+
+<a id="board-xenstore-v1-resume-20261104"></a>
+
+## 2026-11-04 실보드 v1 발행 고착 진단
+
+983fa12와 기존 복구·배포 작업트리를 기준으로 같은 Pi에서 재현했다.
+Factory A/B의 netfront는 연결됐고 패킷 잠금 시간 초과는 0회였다.
+Store 자격과 부트 신원은 현재 브로커와 실행 receipt에 맞았지만,
+직접 브로커 구독에서 Debian heartbeat만 받고 기존 A/B의 v1 앱 이벤트는 받지 못했다.
+
+- 계측 ARM의 v1 이벤트는 시험 VM에서 1,207건, 동료 시험 VM에서 564건을 송신한 뒤
+  멈췄다. 이후 Store 문맥 조회가 연속으로 실패했고 마지막 오류는 -EBUSY였다.
+- 늦은 시작 응답이나 종료 미확정 거래가 있으면 xs_transaction_start가 새 요청을
+  거절하면서 늦은 응답이나 남은 거래를 정리하지 않았다. 새 호출은 자기 기한 안에서
+  늦은 응답을 회수하고 고아 거래만 abort한다. 원 commit은 재전송하지 않는다.
+  동일 거래의 ENOENT는 종료된 거래를 정리한 것으로만 처리한다.
+  [Xen의 거래 조회·종료 구현](https://raw.githubusercontent.com/xen-project/xen/master/tools/xenstored/transaction.c)
+- XenStore 수정 ARM의 zephyr.bin SHA-256은
+  6739415b17699ba4861b46f54c713e8da6cc8df807c5d3768074dfa6323c9c41이다.
+  XD_REPORT와 XD_CONTEXT는 기존 콘솔 요청에서만 큐 수락·실제 제출·최초 오류와 현재
+  문맥을 보여준다. 늦은 시작과 미전송·늦은 종료는 native 및 ASan/UBSan에서 확인했다.
+- 바인딩은 두 UUID/name/domid 목록, 고유 실행 ID 두 번, 현재 의도·admission을
+  계속 대조한다. 전체 디스크 설정 목록을 제거한 비교에서 24건씩 모두 확인했고
+  중앙값은 660.3→405.3ms였다. 순간 무표시 상태는 같은 기한 안에서 한 번만 재확인한다.
+- Gateway의 CRC-16/CCITT-FALSE를 Python 표준 라이브러리의 C 구현으로 바꿨다. ARM의 동일
+  63바이트 프레임 인코딩 CPU 시간은 1,267.0→222.2µs였고 바이트가 일치했다.
+  Debian 검증 복사와 Xen 조회를 병행한 PTY 표본에서는 각각 50회 중 미확정 5→2건이었다.
+  기존 10ms 한도와 STOP 보호를 유지했다.
+  [Python crc_hqx](https://docs.python.org/3/library/binascii.html#binascii.crc_hqx)
+
+실보드 PTY는 ESP32 대신 가상 장치를 썼고, Gateway 보호 시험은 mock 출력을 사용했다.
+
+두 시험 VM에 같은 ARM을 적용한 뒤 135초 동안 15초 간격으로 실제 MQTT 수신을
+확인했다. 두 VM 모두 구간마다 v1 앱 이벤트를 보냈고, 최종 콘솔은 누적 송신
+5,115건과 4,151건, Store 문맥 정상 및 마지막 오류 0을 기록했다.
+Factory A/B에는 순서대로 정상 종료, 정식 firmware-transition, 기동을 적용했다.
+A domid는 2→9, B는 3→10이었다. 두 VM의 UUID·MAC·IPv4는 동일했다.
+각각 45초 동안 새 boot ID의 AUTO/MANUAL v1 이벤트를 A 449/449건,
+B 449/447건 받았다. 두 앱 모두 WAITING/NOT_READY였다.
+
+현재 패키저, 기본 template lock, factory defaults와 첫 설치 예제는 1.0.4를 선택한다.
+공개 manifest SHA-256은 21f6526e57c93866fcf009cf6ad21f8fe9f4499715854211545bc683a67104ea다.
+정식 패키저에서 같은 manifest와 바이너리를 재생성했고 template workflow 10개가 통과했다.
+별도 전체 SD 이미지 조립이나 운영 서비스 재설치는 수행하지 않았다.
+
+임시 Worker와 mock Gateway를 분리 프로세스로 연결했다. 두 시험 VM을 동시에
+검증하는 동안 새 ARM은 브로커에 계속 v1 이벤트를 보냈으나 실행 바인딩은 간헐적으로
+만료됐다. 설치본은 Python 신원 helper를 사용하고 있어 기존 레시피의 ARM native
+helper를 시험 PATH에만 넣어 대조했다. 같은 2초 관측 기한 안에서 후반 xl list -v와
+고유 실행 ID 명령이 여전히 시간 초과했다.
+
+동료 시험 VM을 제거한 뒤 기존 B의 정상 신호와 남은 시험 VM의 v1 이벤트를 실제
+Worker가 현재 신원과 대조해 받았다. 시험 VM의 이전 boot ID만 Worker 수신 경계에서
+차단했다. Gateway 보호 레코드 및 recover_once 제출은 0건이었고, 관측 오류가 반복된
+뒤 시험 Worker가 중도 종료했다. 커널 로그에는 OOM이 없었다. 종료 원인과 자동 복구
+종단은 미확정이다. 이번 수락은 기존 A/B v1 복귀와 시험용 원 보호 호출을 포함하며
+실제 자동 재시작이나 차량 적용 수락을 포함하지 않는다.
+
+시험 VM 두 대는 정상 stop·retire·purge로, 두 VM에 발급한 MQTT 계정 네 개는
+공식 revoke로 정리했다. 기존 브로커 자격 15개의 값은 그대로였다.
+
+정리 후 Factory A/B만 대상으로 정책 none의 Worker와 mock Gateway를 다시 띄웠다.
+복사한 기존 applied receipt를 읽고 현재 Xen 실행을 검증했다. Worker가 A의
+AUTO/MANUAL 273/271건, B의 300/300건을 수락했고 두 VM의 감시가 활성화됐다.
+A 바인딩 오류가 한 차례 더 관측됐다. Gateway context의 시작과 마지막 표본은
+SAFE_STOP/FAILED였고 출력 권한은 끝까지 false였다.
+
+
+### 2026-11-04 Gateway STOP 제출 대기 계측과 MANUAL 재확인
+
+이번 변경은 STOP의 소유·완료 전달 경계에 한정한다. 기준 HEAD는 983fa12이며,
+기존 guest-clock-sync 작업트리의 미커밋 변경을 보존했다. 앞선 vehicle/state.pb
+ACL 추가는 해당 보드에 적용된 상태로 시험했다.
+
+| 확인한 구간 | 실측과 수정 기준 |
+|---|---|
+| 큐 접수 → 소유 스레드 기상 | 첫 표본 0.28ms, 별도 표본 약 21.1ms. 호출 스레드의 대기 만료와 실제 쓰기 실패를 분리 |
+| 기상 뒤 수신 처리 | 첫 표본에서 STOP보다 앞서 3.44ms 소비. 대기 중인 출력부터 처리하고 쓰기 뒤에 RX·odom 진행 |
+| 논블로킹 쓰기 호출 전후 | 첫 표본 벽시계 10.88ms, 해당 스레드 CPU 약 0.36ms. 커널·GIL·호스트 스케줄링 각각의 비중은 미분리 |
+| 동기 호출의 10ms 만료 | 기존 코드가 계속 소유 중인 STOP을 OUTPUT_PATH_FAILED로 확정. 원 제출의 완료 참조를 보존하고 같은 결과 회수 |
+| 새 명령 직후 ACK view | 이전 명령의 applied가 잠시 남는 경합을 전체 회귀에서 발견. 완료 알림 전에 최신 명령 참조를 게시 |
+
+output_owner.py는 한 장치 스레드와 기존 한 칸 mailbox를 유지한다.
+기동·주기 STOP은 StopSubmission을 반환하며 정상 pending마다 예외를 던지지 않는다.
+verified_runner.py는 원 제출 기록 하나를 pending → accepted/failed로 갱신한다.
+원 submitted_monotonic을 보존하며 serial_completed_monotonic은 actor의 회수 시각이다.
+미확정 STOP이 있는 동안 새 STOP·DRIVE 제출을 보류한다. 직접 write 호출의
+10ms 한도와 DRIVE 미확정 뒤 필수 STOP, 원 명령 만료 및 feedback 기한 검사는 유지한다.
+필수 보호 저장 직전의 직접 STOP 제출은 기존 동기 경계를 사용한다.
+실제 쓰기 실패·장치 소유자 종료 및 드문 내부 오류의 원인·traceback도 보존한다.
+
+회귀는 기존 test_feedback.py와 test_provider_ipc.py에 국소 추가했다.
+대기에서 깨어난 STOP의 RX 선행 방지, 원 STOP 단일 제출, 완료 전 DRIVE 차단,
+실제 쓰기 성공 회수, OSError 실패 및 Authority 원본 보존을 검사한다.
+Linux/WSL에서 저장소의 pytest 설정과 기존 시험 패키지, 보드에서 가져온 Python
+의존성 소스를 격리 사용했다. 실제 보드의 protobuf backend는 upb이며,
+WSL 회귀의 protobuf는 Python backend를 사용했다.
+
+실보드 시험은 기존 A/B의 실행을 유지하고 실제 USB 장치가 없는 상태에서
+명시한 /dev/pts 경로 하나에만 Gateway feedback-2를 연결했다.
+가상 ESP32는 기존 run_lattice_pair.py의 byte-stream 물리 fixture를 재사용했다.
+수동 입력 송신과 가상 ESP32를 독립 프로세스로 분리했으며 차량 수치는
+기존 rc-test-1 / encoder-lab-1 시험값만 사용했다.
+
+기존 Worker RejoinCoordinator와 실제 하위 Xen 조회를 사용하는 후보에서는
+현재 binding의 원래 2초 관측 기한 초과가 반복됐다. DEADLINE_EXCEEDED에는
+observation publication deadline expired, short lock deadline expired가 포함됐다.
+시험 종료 후 admission 잠금의 보유 PID는 없었고, A 단독 관측 두 번은
+411.0ms와 580.0ms에 성공했다. 잠금 고착이나 단일 helper 결함으로 확정하지 않는다.
+마지막 앱 분리 시험은 실제 Xen 신원과 기존 applied receipt를 전후 대조하는
+임시 binding 생산자로 Worker 경계를 대체했다. 변경·부재·관측 실패에서는
+binding을 발행하지 않고 기존 3초 유효기간을 유지했다. 이를 실제 Worker
+종단 수락으로 계산하지 않는다.
+
+관측한 개선 후보에서는 출력 실패 0을 유지하며 원 STOP 결과를 회수했다.
+하지만 MANUAL의 POSE_UNAVAILABLE·INPUT_STALE가 계속 관측됐고,
+A의 MANUAL heartbeat는 대시보드에서 미수신이었다. 실제 발행 boot/app instance는
+기존 applied receipt와 일치하고 진행 번호는 0이었다.
+MANUAL 진입·계산 완료·heartbeat 화면 수락은 미완료로 남긴다.
+
+A는 domid 11 / execution 18897f8f-896d-4e05-a393-08f524f3348b,
+B는 domid 10 / execution 0d268d88-1d3f-4a14-b66e-71f1cf448e21을 시험 전후 유지했다.
+Authority는 시험 전용 경로를 사용했고, 운영 Gateway 서비스 교체 대신
+임시 후보를 실행했다. 실제 장치·물리 정지 수락에 해당하지 않는다.
+
+최종 Gateway 회귀는 255 passed, 5 skipped, 88.50초였다. 최종 보드 후보는
+STOP 60건을 회수했고 쓰기 실패 0, 종료 후 pending 0이었다. 이 회차는 A binding
+확보 단계에서 끝나 MANUAL 입력 송신 단계에 도달하지 못했다. 앞선 입력 송신 회차의
+대시보드도 MANUAL heartbeat 미수신이었다. 계측·시험 대역 원문과 소스 SHA-256은
+로컬 2026-11-04/stop-profile/evidence.tar 및 summary.json에 보존했다.
+
+## 2026-11-04 앱 메모리 계측·TCP 스택·정지 수습 후속
+
+### 현재 제공 상태와 사용법
+
+최종 펌웨어는 **1.0.7**이다. CLI/VM의 기존 입력과 MQTT v2.1의 토픽·봉투는 유지했다.
+`xenova/v2/vms/{vm_id}/telemetry/metrics`에서 `family="app_memory"`와 `memory.app.*`를 읽으면 된다.
+`labels.region`은 `drive_maps`, `drive_paths`, `drive_search_nodes`, `drive_odometry`다.
+값은 bytes/count의 십진 문자열이며, 유효한 0과 null·경합·미지원·실패를 구분한다.
+스택은 공식 콘솔의 `xenova telemetry threads`로 명시 요청한다. 자동 스택 스캔은 추가하지 않았다.
+
+| 범위 | 최종 확인 | 남은 것 |
+|---|---|---|
+| 소스·실제 owner→Diagnostics→codec | 지도·경로·탐색·odom 점유/용량/최고 점유/반환·실패·경합, RAM 포함 관계, 명시 스택 | 운영 입력의 필요 용량·수치는 별도 측정 |
+| native·ARM/QEMU·부분 포장 | 실제 owner/codec/MQTT·고부하·thread 교체·ARM ELF·불변 bundle 검증 | 전체 이미지/RPM/설치본 종단과 동일시하지 않음 |
+| 실보드 B | 1.0.7 설치·정상 stop/start, 네 앱 지표와 스택 실제 수신, 원 stop 결과 회수·시험 설정 복원 | 합성 지도는 큐 제출 뒤 실제 앱 채택/계산까지 통과하지 못함 |
+| Spring·화면 | 아래 제공 계약/원문/시험을 연결할 수 있음 | 소비 제품 연결은 서브 작업. 스택 화면은 사용자 결정으로 보류, EC2 배포는 별도 승인 |
+
+### 무엇을 어떤 기준으로 바꿨는가
+
+| 실제 위치 | 변경과 이유 | 보존한 조건 |
+|---|---|---|
+| `platform/apps/drive/world/world.[ch]` | 실제 map 슬롯·odom ring의 점유·boot 중 최고 점유·확보 실패/경합을 owner가 갱신. 읽기 위해 payload를 다시 세거나 복사하지 않음 | 유한 슬롯/ring·원 데이터 수명·반환·odom reset 이후 최고 점유 |
+| `platform/apps/drive/planner/engine.[ch]` | path 슬롯 및 완료된 탐색 slice의 node 점유를 관측. used→peak 읽기 순서를 고정해 자기 모순을 방지 | 실제 planner/tracker/충돌 검사·노드 상한. 상수 used나 타이머 progress 없음 |
+| `platform/apps/drive/zephyr/src/lattice_memory.[ch]`, `platform/guests/zephyr/diagnostics/src/resources.c` | 등록은 한 번만 CAS 0→1→2로 게시. 주기 cache는 owner try-lock만 사용하고 busy는 원 rc/null로 보냄 | 무대기 owner 읽기·기존 200ms collector. 새 전역 잠금/전체 배열 scan 없음 |
+| `diagnostics`, `platform/guests/zephyr/telemetry/src/model.c·worker.c` | RAM 선언·mapped/static·page allocator와 앱 풀을 구분. CPU의 기존 frozen capture를 공유해 새 10,448B observation 복사를 제거 | 원 sample/window·실제 관측 시각, heap/pool/stack의 중첩 범위 |
+| `platform/guests/zephyr/telemetry/src/worker.c` | CPU/앱의 첫 예산 시도를 교대하고, 만료 후에도 미전달 page/region 순서를 새 표본에서 이어감. encode 실패로 wire가 0인 경우 토큰 예약을 환불 | 16KiB/s·8KiB burst·원 2초 TTL. 오래된 값을 새 시각으로 바꾸지 않음. CPU 부분 window를 합쳐 완전으로 만들지 않음 |
+| `diagnostics`·snapshot codec | ARM fill scan의 최대 사용량/최소 여유를 보냄. native pthread의 가짜 Zephyr stack 배열은 unsupported/null | 명시 요청·행수 상한·snapshot-local row ID. CPU lifetime ID와 결합 금지 |
+| `platform/apps/drive/zephyr/prj.conf`·build script | 실제 1.0.4의 TCP workqueue 1,024B를 2,048B로 보완하고 resolved 설정 guard/별도 audit receipt 추가 | RX/TX 4,096B, sentinel, direct netfront send frame 48B. timeout을 늘리지 않음 |
+| `xenova_execution.py`·`test_xenova_stop_acceptance.py` | 완료된 직접 다음 revision의 명시 force와 현재 부재가 확인될 때만 옛 uncertain graceful stop을 원 실패로 종결 | 원 key/hash/신원/기한/최초 cause·내구 저장·소유 프로세스 확인. 추가 물리 명령/전체 request scan 0 |
+
+앱 `reserved_bytes`는 정적 구조체 예약이고, `capacity_bytes`는 그 안의 슬롯/노드/ring 사용 한도다.
+`used_bytes`가 줄어도 Xen에 VM RAM을 반환했다는 뜻은 아니다.
+map/path/search/odom와 heap·stack은 firmware 영역 안에 있으므로 더해서 VM 전체 사용량으로 만들지 않는다.
+
+### 최종 후보와 로컬 수락
+
+기준은 `feat/platform/guest-clock-sync` / HEAD `983fa12`에 보존된 미커밋 변경이다.
+HEAD 하나가 모든 변경을 뜻하지 않는다. 펌웨어 subset의 실제 고정 식별은 다음과 같다.
+
+| 항목 | 최종 값 |
+|---|---|
+| ARM build | `/home/ssafy/xenova-app-memory-20261104/arm-release107-final` |
+| source SHA256 | `abba8b121028864e84ff40289852430c3475c60af8bc67eb58bc9f2878121463` |
+| zephyr.bin SHA256 / bytes | `a7e2c9fa249ab15cfbd2cd9f26e69f3e60832c288eea50c0dc35d5fcfa36fc8e` / 523,328 |
+| release directory | `/home/ssafy/xenova-app-memory-20261104/release-1.0.7` |
+| manifest revision | `2127ee188c3648b25d2f4d4e6d772f84a5892af174269f8f219a8f6956d06c94` |
+| package 전송 archive SHA256 | `8df91f2ea558a3b54d653750965c9231e1b432ad8ff174d5feff6a1b1615adc3` |
+| 별도 실행 provider SHA256 | `9b4cb13aa257ae1079abfd2aa4c88020b8f17df0c3242fb06dfe278721f37e79` |
+
+고정 SDK/Zephyr와 새 불변 output을 사용했다. package가 현재 source fingerprint와 receipt·payload 9개 파일의
+hash/크기/읽기 전용 mode를 대조한다. 공개된 옛 bundle을 제자리 수정하거나 운영 기본 catalog를 자동 승격하지 않았다.
+
+- codec/source/실제 engine/world 관련 62개 회귀: 32.02초 통과.
+- 최종 worker/계약/TCP 영향의 telemetry/source/Zephyr lifecycle 31개: 28.89초 통과.
+  두 묶음은 일부 중복되므로 93개의 독립 시험으로 합산하지 않는다.
+- 실제 kernel owner→Diagnostics→제품 codec의 native 2개와 ARM QEMU 2개 통과.
+  native pthread stack과 실제 ARM stack의 지원 차이를 그대로 검증했다.
+- 기존 172-message MQTT 수락은 중간 후보 근거다. 최종 worker는 아래의 실제 25초 부하 수락으로 별도 확인했다.
+- stop 수습 신규 11개+10 subtests, 관련 stop/execution/reboot/recovery 125개+15 subtests 통과.
+  3개의 환경 실패는 수정 전 모듈에서도 동일 재현했다:
+  force-policy fixture mode 거절 2개, systemd259 analyzer loader 미공급 1개.
+- `git diff --check` 통과. 실제 pytest 명령은 telemetry/source 두 파일과 engine/world, 이후
+  `test_xenova_zephyr_lifecycle.py`를 영향별로 실행했다. 상세 argv/SDK/명령 결과는 아래 원자료에 남겼다.
+
+### 전송 비용과 고부하 반례의 마감
+
+실보드 1.0.6에서 CPU 앞 페이지가 예산을 먼저 사용하고 앱 순서가 매 cycle 0으로 돌아가면서
+odom이 전혀 전달되지 않는 반례를 확인했다. PC 회수 checkpoint의 앱 전달은 map/path/search/odom
+`12/12/2/0`이었다. 개별 메시지의 schema가 맞다는 사실로 전체 제공을 통과시키지 않았다.
+
+실제 publisher 25초·양 VM 각 실제 28 threads·동일 설정의 before/final 비교는 다음과 같다.
+이는 harness 전체 벽시계 시간이 아니라 publisher 실행 시간이다.
+
+| 계수 | 변경 전 | 최종 |
+|---|---:|---:|
+| 앱 map/path/search/odom 전달 | 14/11/2/0 | 15/15/15/14 |
+| 전체 수신 메시지 | 392 | 385 |
+| 활성 CPU 완전/부분 window | 17/7 | 3/21 |
+| 최종 실제 모든 28 lifetime thread·마지막 CPU page | 일부 앞 순서 우세 | 모두 회전 수신 |
+| 최종 원 schema 오류 | — | 0 |
+
+개선의 근거는 로그나 메시지 수 감소가 아니라 **누락됐던 region/CPU tail의 실제 전달**이다.
+고정 예산의 부담도 명시한다: 과부하에서는 CPU 동시 완전 window가 줄었다. 부분 page를 다른
+window와 합치지 않았고, 전체 thread의 같은 순간 관측·hard deadline을 보장한다고 쓰지 않는다.
+관측한 앱 최대 수신 간격은 5.872초, source age 최대 1,980ms였다. 전송률과 TTL은 올리지 않았다.
+
+실제 thread 수를 `28→16→28`로 바꾼 별도 25초 시험도 382-message 수락을 통과했다.
+양 VM 각각 재생성한 12개 thread의 lifetime ID가 새 값이고, 모든 40개 lifetime ID를 관측했다.
+페이지 수 축소/확대 후 modulo와 부분 window 구분, map 점유→반환 0·peak 보존도 확인했다.
+
+실제 1.0.4 대비 1.0.7의 오프라인 ELF 차이는 RAM 선언 +0, mapped +12,288B,
+static data +8,192B, 명명 stack +1,024B(TCP만), engine +64B, kernel heap capacity +0이다.
+중복 `app_memory_frozen`은 없다. callback의 알려진 직접 frame 합 160B는 전체 최악 stack 상한이 아니다.
+
+1.0.4의 실행 가능한 retransmit→ARP C-frame 하한은 1,152B로 TCP 예약 1,024B보다 컸다.
+기존 PC/LR은 sentinel 검출 지점이지 최초 덮어쓰기 명령의 증거가 아니다.
+1.0.6에서 22개 원/계측 객체 기계어·relocation 일치를 확인했고, 1.0.7에서 그 22개 분석을 다시 했다고
+확대하지 않는다. 최종 실제 B snapshot은 TCP 예약 2,048B / 최대 사용 436B / 최소 여유 1,612B였다.
+이 표본이 모든 ARP/재전송 상황의 최악 상한은 아니다.
+
+### 실보드 시험과 실제 MQTT 값
+
+접속은 사용자 지정 `root@100.108.226.65`로 전환했다. 운영 Gateway/실제 USB 장치는 사용하지 않고
+임시 Authority·PTY·별도 world broker로 시험했다. A는 이 작업에서 재부팅하지 않았다.
+
+1.0.4 B는 새 firmware 적용 전 `tcp_work` overflow로 멈춰 있었다. 원 graceful timeout/uncertain을 보존하고,
+사용자 승인 후 당시의 정확한 B 실행만 force로 수습했다. 이어서 원 key
+`4ecdab40-1ab1-4de4-a2ad-3166e2fa97ac`를 임시 제공자로 재호출해
+`failed/XEN_EXECUTION_FAILED`로 닫았다. 실제 명령은 조회뿐이었고, 이후 보드 재부팅 뒤에도
+원 `operation_id=140a5611-7345-47e0-941c-81ede29eb18c`·hash·기한·원 host의 결과를 회수했다.
+정상 graceful 성공으로 바꾸거나 새 실행 권한으로 사용하지 않았다.
+
+중간 1.0.6의 1,755-message raw는 사용자 확인의 사고 재부팅으로 /run에서 PC 회수 전에 소실됐다.
+도구 출력의 596B TCP high-water와 전체 raw 보존을 구분했다. 이후 중간 자료는 PC에도 회수했다.
+새 host `55e67259-5483-478e-a611-396e44506802`에서 최종 1.0.7을 설치했다.
+
+| 보존 capture | 원 v2 메시지 / schema 오류 | 앱 네 region 수신 | 의미 |
+|---|---:|---|---|
+| run3 | 934 / 0 | 50/50/49/49 | 현재 B firmware/실행 신원 일치, 사용·peak 모두0 |
+| run4 | 927 / 0 | 56/55/55/56 | 원 source age 최대1,998ms, 사용·peak 모두0 |
+| capture6 | 430 / 0 | 24/25/24/24 | 동일 실행의 최종 snapshot 5parts·19rows 정합 |
+
+capture6의 stack 수집 비용은 631µs였지만 각 part 전송은 원 collection 끝에서 3,972~26,360ms 뒤였다.
+수집 비용과 전송 대기를 구분하고 최신 주기 관측으로 바꾸지 않는다. row ID는 snapshot-local이다.
+이 capture는 정리 전 `e8d9b94d-cbfd-47ac-97bb-d41db2dd7118` 실행이며 아래 복원 후 실행의 수신 근거가 아니다.
+
+실제 원 메시지의 값은 다음과 같다. 숫자는 bytes이며 kernel/page allocator/앱 영역을 합산하지 않는다.
+
+| 원 metric 범위 | 실제 값 |
+|---|---:|
+| firmware mapped / static data | 2,252,800 / 1,732,608 |
+| page allocator free | 14,524,416 |
+| kernel heap used / free | 0 / 65,536 |
+| net RX used / free | 0 / 131,072 |
+| net TX used / free | 0 / 8,192 |
+| maps reserved / capacity / used | 81,224 / 80,472 / 0 |
+| paths reserved / capacity / used | 31,608 / 31,536 / 0 |
+| search reserved / capacity / used | 509,152 / 393,216 / 0 |
+| odom reserved / capacity / used | 55,328 / 55,296 / 0 |
+
+별도 실제 200ms CPU window는 system 12.379%, idle 87.621%, main 7.034%,
+drive-auto 0%, planner 0.218%, tcp_work 0.007%였다. 이는 guest-accounted UP 비율이며 pCPU 점유율이 아니다.
+실제 원 body 네 개는 `board-run4-wire-examples`에, topic/QoS/retain/수신 시각/source seq/원 SHA는
+그 `manifest.json`에 보존했다. 예제 파일은 편집한 가상 JSON이 아니다.
+
+### 지도 주입의 미완료와 정상 복원
+
+가상 장치/mapper만 대역 처리했고 B 앱·planner·codec·Gateway는 실제 코드를 사용했다.
+지도 enqueue가 곧 앱 수락/실제 계산이라는 주장은 하지 않는다.
+
+| 회차 | 조건 | 결과 |
+|---|---|---|
+| 초기 | Gateway 비활성, retained control 없음 | maps0. fresh 시험 Authority의 실제 SAFE_STOP bootstrap으로 시험 전제 보완 |
+| run1 | launcher의 잘못된 공용 MQTT 경로 | 설치본 fallback을 발견. 원 실패 보존 후 실제 업로드 경로/hash로 고정 |
+| run2 | 올바른 MQTT, 같은-process 200ms binding stress | map queue0. actual vehicle freshness 미충족 |
+| run3 | 현재 후보 identity-only observer | map queue8, allocation0, CONTROL_APPLY_UNCONFIRMED |
+| run4 | 실제 Worker처럼 조회 완료 후 1초 대기 | map queue12, allocation0, CONTROL_APPLY_UNCONFIRMED |
+| run5 | Worker 관측과 Gateway를 별도 process로 분리, 제품 BindingFile 사용 | map queue7, allocation0, CONTROL_PUBLISH_UNCONFIRMED |
+
+정리 전 SAFE_STOP은 같은 actor의 출력 철회로 실제 발행·수신 및 DISARMED를 확인했다.
+binding 부재를 과거 복구 허가로 바꾸지 않았고, 매 회 실제 출력은 0이었다.
+
+단독 binding profile은 B389ms/A468ms, 두 VM 병렬760/831ms로 성공했다.
+같은 process/Gateway 부하에서는 원 2초 예산의 관측 실패와 차량 표본 만료가 발생했다.
+process 분리 후 binding 오류는 줄었지만 actor p95는 run4 65.9ms→run5 91.5ms였으므로 GIL 하나를
+확정 원인으로 쓰지 않는다. idle 지도 생성 0.7~1.9ms / encode 12.3~15.1ms 세 표본도 남겼다.
+원 1초 control 적용·차량 freshness·clock 한도를 올려서 통과시키지 않았다.
+
+**실보드 합성 지도 채택→실제 path/탐색 점유 증가→입력 만료 후 반환은 미완료**다.
+다음 플랫폼/Gateway 작업은 `verified_runner.run_once/_delivery`, `DriveLinkProvider.receive/tick`,
+guest `lattice_input.c:link_received/vehicle_received`와 장치 feedback 단계의 지연/거절을 원 clock probe에
+대응하는 것이다. 이 절의 자료만으로 특정 구간의 최초 원인을 확정하지 않는다. 실제 Jetson/ESP32/실차 수락도 없다.
+
+최종 정리에서는 B 1.0.6→1.0.7 및 1.0.7 시험 종료를 모두 **정상 stop**으로 확인했다.
+임시 world 필드만 제거하고 기존 Pi 자격 값은 같음을 대조했다. 사고 재부팅으로 원 /run backup을
+잃었으므로 원 파일의 byte-exact 복원을 주장하지 않고, 나머지 credential 값의 동일성과 world 부재를 확인했다.
+복원 start의 최초 admission busy는 미수락이었고 같은 key 재호출로 기동했다.
+최종 B는 `execution=45824862-0d33-452a-b510-0ead09d6ba47` / domid5 / observed이며 A 실행은 동일했다.
+Worker active, 운영 Gateway inactive를 복구했고, 소유 시험 process 0·broker 종료를 확인한 뒤
+정확한 /run 시험 디렉터리를 제거했다. 보드 재부팅·실제 출력·비밀번호 재발급·commit/push는 이 작업에서 하지 않았다.
+
+원자료의 공통 디렉터리는 `C:/Users/SSAFY/Documents/Codex/2026-11-04/app-memory`다.
+`final107-artifact-evidence.json`, `final107-ram-diff-summary.json`,
+`native-fairness-final-assertions.json`, `board-final-independent-summary.json`,
+`board-final-public-manifest.json` 및 `board-final-public.tar.gz`를 함께 본다.
+최종 archive는 105개 공개 시험 파일이며 private 디렉터리/credential 값 필드를 제외했다.
+archive SHA256은 `81cc25bebe4498cfbcf6c26e98c92fccdcf65fbac4bfefcdb0560dacc5f4eb1a`다.
+
+[정식 계약](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md#95-앱-메모리와-펌웨어-예약-범위),
+[소비 인계](../../platform/guests/zephyr/telemetry/contract/docs/CONSUMER_HANDOFF.md#앱-메모리와-스택-연결),
+[기존 HTTP/Spring/화면 요청서](../requests/20261029-request-http-spring-ui.md)의 현재 본문을 사용한다.
+Spring 저장·조회와 앱 풀 화면은 후속 소비 연결이며, 스택 화면은 보류·EC2 배포는 사용자 지시 대기다.
+
+
+<a id="manual-buffer-managed-ram-20261104"></a>
+## 2026-11-04 수동 버퍼 계측과 관리 RAM 요약
+
+이번 후속은 앞 절의 앱 풀·커널 힙·스택 발행을 유지하면서 MANUAL의 입력·대기·실행·결과 보관을 연결했다.
+상단은 기존 물리 페이지 원천으로 **Zephyr 관리 RAM 확보량**을 계산하도록 확정했다.
+소유 플랫폼의 구현·로컬 수락·부분 firmware 제공을 마쳤다. Spring/프론트·운영 설치는 이 완료에 포함하지 않는다.
+
+### 사용 위치와 실제 바뀐 동작
+
+상세 발행은 계속 MQTT 2.1의 `xenova/v2/vms/<vm_id>/telemetry/metrics`, QoS0·retain=false다.
+새 토픽·서비스·VM 관리 API를 만들지 않았다.
+
+| 화면 대상 | 실제 계약 위치 |
+|---|---|
+| 자동 지도·경로·탐색 | `app_memory` / `drive_maps, drive_paths, drive_search_nodes` |
+| 공통 차량 관측 | `app_memory` / `drive_odometry` |
+| 수동 입력·대기·실행·보관 결과 | `app_memory` / `manual_input, manual_pending, manual_running, manual_result` |
+| 공통 RX/TX | `memory_regions` / `net_rx_data, net_tx_data`. MQTT 전용 사용량이 아닌 공통 네트워크 풀 |
+| 커널 힙 | `memory` / `memory.kernel_heap.*` |
+| 스택 | 기존 `telemetry.snapshot`의 threads 행. 발행은 유지하며 화면 적용은 보류 |
+
+앱 영역은 기존 여덟 `memory.app.*` 지표를 유지하고 수동 네 영역에만 `payload.buffer`를 추가한다.
+현재 점유·예약량·내용 길이는 다른 값이다. 이번 저장소 범위는 다음처럼 한정했다.
+
+| region / 소유 API | 포함한 실제 저장소와 ARM 크기 | 점유·유효성·수명 기준 |
+|---|---|---|
+| `manual_input` / `xd_io_memory_read` | `io.c:shared.input` 하나. 예약1200B·payload 용량1024B | 보관 길이가 used. 미수신·분류 전·무효·만료·문맥 변경을 metadata로 구분하며 만료만으로 보관 bytes를 없애지 않음 |
+| `manual_pending` / `drive_workers_memory_read` | MANUAL `task.pending`, 2360B | 실제 pending 소유 중에만 슬롯 전체 점유. 최신 대기 교체가 running 사본을 덮지 않음 |
+| `manual_running` / 같은 API | 별도 `task.running`, 2360B | callback이 실제 반환할 때까지 점유. 취소·RESIDUAL만으로 해제하지 않음 |
+| `manual_result` / 같은 API | `task.result`, 2592B. 내부 source job도 이 크기에 포함 | 완료 사본 보관 중 점유. 읽기는 복사이며 해제가 아님. 다음 완료·join 후 restart의 실제 정리와 구분 |
+
+`working`, runtime/main의 입력 사본·staging job·main의 완료 사본·자동 지역변수·전송 슬롯은 위 표의 범위 밖이다.
+같은 저장소를 다른 이름으로 더하지 않았고, 이 네 영역의 합을 수동 앱 전체나 VM 전체 used라고 부르지 않는다.
+공유 worker 경합 누계는 세 슬롯에 같은 값을 제공하므로 합산하지 않는다. 진단 getter의 BUSY는 업무 누계에서 제외한다.
+입력 경합은 기존 업무 snapshot의 32bit 원천이다. u64 문자열 봉투가 원천 폭을 늘리지 않으며 감소 시 불연속으로 처리한다.
+
+`buffer`는 phase·content_bytes·원 sequence/source_uptime_ms·worker lifetime·원 context/connection revision,
+input_status·원 source_rc·result의 performed/last_read_sequence·revoked를 제공한다.
+원 seq/time0은 유효하며, 음수 원 시각은 null로 보존한다. 새 control·재조회·reconnect가 옛 입력의 원 시각/revision을 갱신하지 않는다.
+performed는 callback 수행 사실, accepted는 입력 분류 사실이다. READY·현재 출력 허가·장치 적용을 뜻하지 않는다.
+최고 점유는 실제 owner 전이에서 갱신해 짧은 계산도 남기고, worker restart로 boot 최고값·누계를 지우지 않는다.
+
+실제 native MQTT 원문 예제의 result는 `sequence="200"`, `last_read_sequence="199"`, `phase="retained"`,
+`content_bytes="2592"`, `source_uptime_ms="3980"`, `performed=true`였다.
+보관된 새 완료와 이전 읽기까지 구분되지만, 이것만으로 현재 계산 중이라고 표시하지 않는다.
+[원문·신원·해시](C:/Users/SSAFY/Documents/Codex/2026-11-04/manual-memory/wire-examples/manifest.json)는 개별 메시지 예제다.
+서로 다른 VM/표본의 예제를 한 snapshot으로 합치지 않는다.
+
+### 상단 RAM: 같은 원천의 전체·확보·미할당
+
+새 wire 지표를 중복해서 만들지 않았다. 기존 `family="memory"`의 다음 값과 원 표본 쌍을 사용한다.
+
+- total: `memory.firmware.ram_region_bytes`.
+- free: `memory.page_allocator.free_bytes`.
+- committed: `total - free`.
+- percent: `committed * 100 / total`, Decimal ROUND_HALF_UP 소수3자리.
+- 단위는 bytes의 정확한 십진 문자열이다. 화면 MiB는 1024²로 변환한다.
+
+고정 SDK `684c9e8f…`의 물리 frame 관리 범위는 CONFIG_SRAM_BASE_ADDRESS/SIZE다.
+현 지원 Zephyr는 catalog·instance 검증·Xen cfg 생성·firmware DT/CONFIG가 16MiB로 맞는다.
+페이지 free-list도 같은 관리 범위를 사용하며 현 profile은 demand paging off·page 정렬이다.
+정적 image·heap/pool/stack 예약과 동적 page 확보는 비free에 포함된다.
+외부 grant-table window·외부 PFN bare-map은 이 local RAM free-list와 구분한다.
+현재 등록 memory_mib는 구성값이며 별도 Xen 실측이 아니다. ARM 부트에 실제 할당 nr_pages를 관측하는 제공물도 없다.
+따라서 이름은 **Zephyr 관리 RAM 확보량**, free는 **미할당 물리 RAM**으로 한정한다.
+현재 payload 점유나 Linux MemTotal−MemAvailable과 같은 뜻으로 표시하지 않는다. 물리 free가 모든 풀·가상주소 할당 성공을 보장하지도 않는다.
+
+같은 VM/boot/publisher/실행 문맥의 같은 memory 봉투·source_sample_seq/observed_uptime_ms만 조합한다.
+total0·free>total·mapped>total·static>mapped·mapped+free>total, null·실패·미지원·만료에는 비율을 만들지 않는다.
+same-source의 새 heap 메시지는 RAM lease를 갱신하지 않는다. 같은 표본이 오류/null로 바뀌면 원 실패를 보존하고 옛 정상 비율을 숨긴다.
+새 source의 정상 수집에서 회복한다. 당시 참조 view는 외부 현재 실행 확인을 필수로 요구했다. 이 표시 조건은 아래 [최근 관측 후속](#ram-recent-observation-20261104)의 사용자 결정으로 대체되었으며, 당시 시험 결과와 불변 제공물은 이력으로 보존한다.
+
+실행 가능한 참조와 정상·실패 예제는 [정식 계약](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md),
+[catalog/schema](../../platform/guests/zephyr/telemetry/contract/schemas/metric-catalog.json),
+[소비 인계](../../platform/guests/zephyr/telemetry/contract/docs/CONSUMER_HANDOFF.md)에 둔다.
+
+```sh
+cd platform/guests/zephyr/telemetry/contract
+python3 tools/validate_contract.py --self-test
+python3 tools/validate_contract.py --ram-summary fixtures-2.1/ram-committed.json
+```
+
+두 번째 명령의 합성 예제는 total16384/committed4096/free12288 bytes, percent `"25.000"`다. 운영 기본값이 아니다.
+과거 보드1.0.7 원문은 2252800/16777216=13.428%라는 역사적 계산만 확인했다. 새 후보 수신·현재 상태로 재명명하지 않았다.
+
+### 구현 위치와 비용 판단
+
+입력은 `drive_io.h/io.c/manual_input.h`에서 기존 parser1회의 결과와 작은 owner shadow를 재사용한다.
+workers.c/h는 별도 pending/running/result 소유 metadata를 기존 교환 경계에서 관리한다.
+`lattice_memory.c`는 기존 단일 Diagnostics provider에 AUTO4+실제 MANUAL4를 합성한다.
+미연결 standalone provider는4만 제공하며 미관측 영역을0으로 채우지 않는다.
+`resources.h/resources.c`, `telemetry/model.c/worker.c`는 실제 count와 작은 metadata를 기존 cache/frozen/codec 경로에 전달한다.
+진단은 기존 lock의 K_NO_WAIT만 사용한다. payload 재파싱·전체 scan·새 전역 잠금·별도 전체 frozen 사본·매 수집 Xen/Store 호출을 추가하지 않았다.
+
+| 비용 / 비교1.0.7→최종1.0.8 | 실제 근거와 한계 |
+|---|---|
+| 선언 RAM·기존 pool/input/job/completion·설정·스택 예약 | 동일. writable stack 예약119584B 유지 |
+| image mapped / static 범위 | +12288B / +8192B. 서로 겹치는 범위이며 합산하지 않음 |
+| resources snapshot / task | 2904→3384B(+480) / 11536→12048B(+512). snapshot의4region×56+4detail×64가480B |
+| 직접 C frame | memory callback96→112B, worker run2768→2784B. getter208B. 부분 호출합은 실제 stack 최고값이 아님 |
+| 전송 | 기존16KiB/s·burst8KiB·원 표본TTL2초·4096B 한도 유지. 실제 수동 payload 최대2579B, U64 경계 fixture2933B |
+| 정상 / 실제 스레드 부하 | 같은 native 후보·32초 두 Publisher. 정상484건, 부하490건. 양쪽 모두8region과 각10/30개 thread ID 수신, 현재 oracle 위반0 |
+| 부분 표본 / freshness | 정상 CPU완전27·부분5, 부하 완전2·부분29. 일부 window를 완전 표본으로 합치지 않음. 실제 region 수신 최대간격4.699/8.481초, 송신 원 표본 age 최대1980ms |
+| 시간 수치 | native tick 해상도에서 수집/직렬화 누계0으로 찍힌 값은 비용0 근거가 아님. 이 표본으로 µs 단위 개선·실보드 기한을 주장하지 않음 |
+
+짧은 수동 계산은 200ms 관측 사이에 끝나 현재 pending/running이 모두0으로 수신될 수 있다.
+실제 MQTT에서도 현재0·최고2360B가 함께 나왔고 result는2592B 보관됐다.
+그래프를 움직이려고 계산을 지연하거나 가짜 할당을 만들지 않았다.
+부하의8.481초 수신 간격은 소비 lease6초를 넘을 수 있다. 그 구간은 stale로 표시하며 모든 영역 상시 fresh라고 하지 않는다.
+974건은 원문으로 다시 검증했고 native/ARM/현재 작업트리의 공통 제품 C/H114개도 byte 일치했다.
+
+### 실제 수락과 실패 이력
+
+| 실행 경로 | 확인 결과 |
+|---|---|
+| 입력 원천 native10 | 실제 io accept/refresh/getter·parser·mutex. 외부 MQTT latest delivery만 fixture. seq0·원 age/revision 보존·무효/만료 보관·mode/instance/reconnect·BUSY→회복 |
+| 수신→수동 계산 chain1 | encoded envelope/core decode→실제 io snapshot→job→worker thread→기존 stateless manual adapter/manual_step→보관/읽기. v_milli1000·read_sequence1 확인. lattice의 실제 차량/clock callback 수락과 구분 |
+| worker native11 / ARM QEMU | immutable running+최신 pending 교체·동시점유·AUTO독립진행·실제 callback 잔존·취소/join/restart·peak 보존. 동일 ARM ELF3회 연속PASS |
+| RAM native3 / ARM QEMU3 | 기존 pool/stack2개 보존. 실제 k_malloc512와 map slot점유/반환은 physical free 불변. 실제2page map/쓰기에서8192B감소, unmap후 원복 |
+| ARM RAM 직접 수치 | 시험용128MiB: total134217728, free132980736→132972544→132980736, committed1236992→1245184→1236992. Xen16MiB 보드 측정으로 확대하지 않음 |
+| 실제 codec·기존 C | native13/ARM15 원문 oracle 통과. 기존 ASan/UBSan C6개 통과. native/ARM ENOTSUP 원 errno(-95/-134)를 같은 숫자로 강제하지 않음 |
+| 최종 관련 Python |111개·10subtests 통과. 정상+ASan/UBSan codec, source, 기존 AUTO world/engine·실행 신원·collection·포장 포함 |
+| 계약 | 기존2.0 30정상/30거절·11sequences/28assertions, 기존2.1 및 새 MANUAL 정상17/거절24, RAM23벡터·현재성23assertions. 아래 개별 evidence로 대역·중복 범위를 확인 |
+
+최종 Python 명령은 `pytest -o addopts= -q`에
+`test_xenova_telemetry.py, test_xenova_telemetry_sources.py, test_engine.py, test_world.py,
+test_xenova_drive_lifecycle_bootstrap.py, test_xenova_drive_collection.py,
+test_xenova_drive_integration.py, test_xenova_template_workflow.py`를 지정했다.
+실제 전체 argv/SDK·빌드 설정·return code는 아래 command JSON과 native/ARM evidence에 보존했다.
+
+ARM 시험에서는 새 시험 함수의 다중 completion 값 반환이 main8192B를 넘겼다.
+시험을 out-pointer/정적 보관으로 고쳐 직접 frame13376→416B, 대기 helper224B로 줄였으며 제품 stack/sentinel·기한은 유지했다.
+정상 업무 경합까지 증가할 수 있는 누계의 옛 고정 baseline assertion도 각 강제 주입 직전 기준으로 고쳤다.
+완료 후 main 재개가300ms 경계를 넘는 관측 경합은 원 finished_ms<=원 절대end 검증과 마지막 nonblocking read1회로 다뤘다.
+원 기한 뒤 완료를 성공시키지 않는다. 최초 별도 RUNNING timeout의 개별 원인은 확정하지 않았고 일부 rolling 원로그는 command transcript만 남은 한계를 evidence에 명시했다.
+최종3회 통과를 모든 host 부하·실보드의 시간 상한으로 확대하지 않는다.
+시험 종료 대기32초/40초의 정합화·Python import 경로 보완·picolibc errno 분석 수정도 시험 환경 이력이며 제품 timeout을 올린 것이 아니다.
+
+### 최종 후보·부분 포장·인계
+
+현재 브랜치 `feat/platform/guest-clock-sync`, HEAD `983fa121dbdb7a208ad61cd9d2738394c80d23c3`에
+기존 미커밋 작업과 이번 후속이 함께 있다. HEAD만 전체 후보라고 하지 않는다.
+
+```text
+version: 1.0.8
+source: 4add6d53d8c7264472e9381a771334ec983ab7eeefda408b6308b1b44a12b96f
+zephyr.bin: 05274f0b41c79f88f743051e7bbe5ff7a0465835c530f30cd239b61063fd424e
+firmware manifest: 47c8eaedb7032c93bbfb58e003d7bde4fd07b3de8506ccbed76912912b61649a
+contract SHA256SUMS: 7d01a7f5bb82f7658167f42a38fb91731be6ffad4186d7ce5143eb2f9c842c3f
+contract manifest: 0e28e382d4d2295db627de1946d368f80034984394376d4b96661f5a766e528c
+```
+
+빌드/부분 템플릿은 WSL `/home/ssafy/xenova-manual-memory-20261104/arm-release108-ram-final`,
+`release-1.0.8-ram-final`에 있다. package가 현재 fingerprint와 receipt·9개 payload를 다시 검증했다.
+중간 pre-LF/E8 후보와 이전1.0.7은 보존한다. 새 source 때문에 과거 산출물을 제자리 수정하지 않았다.
+새 C 코드는 기존 firmware에 링크되며 별도 target daemon·unit·라이브러리는 없다.
+정규 전체 이미지/RPM 재조립·보드 설치·default template 선택 변경은 실행하지 않았다.
+
+주요 실행:
+```sh
+python3 -B platform/scripts/build-xenova-drive-app.py --app drive --profile warm-lattice-lab \
+  --zephyr-source /home/ssafy/perseus-zephyr-template-20261016-153845/source/zephyr \
+  --tools /home/ssafy/perseus-zephyr-template-20261016-153845/host-tools \
+  --output /home/ssafy/xenova-manual-memory-20261104/arm-release108-ram-final --execute
+python3 -B platform/scripts/package-xenova-drive-template.py \
+  --build-root /home/ssafy/xenova-manual-memory-20261104/arm-release108-ram-final \
+  --output /home/ssafy/xenova-manual-memory-20261104/release-1.0.8-ram-final --version 1.0.8
+```
+
+근거 위치:
+- `C:/Users/SSAFY/Documents/Codex/2026-11-04/manual-memory/`: 최종 MQTT 원문/해시·정상/부하 집계·source 동등성·전달 묶음.
+- `C:/Users/SSAFY/Documents/Codex/2026-11-04/app-memory/`: `input-memory-verification.json`,
+  `worker-memory-acceptance/summary.json`, `worker-stack-arm/audit.json`,
+  `managed-ram-sdk-analysis.json`, `managed-ram-codec-evidence.json`,
+  `final108-arm-memory-evidence.json`, `final108-ram-diff-summary.json`,
+  `manual-contract-final-checksums.json`, `ram-contract-final-checksums.json`,
+  `ram-reference-cli-and-historical-evidence.json`.
+- WSL `/home/ssafy/xenova-manual-memory-20261104/`: 실제 command/log JSON·현재 후보 ELF와 부분 package.
+  입력·RAM 추가 시험의 별도 command/log는 `/home/ssafy/xenova-app-memory-20261104/`에도 보존했다.
+
+[기존 D02·D08 현재 요청서](../requests/20261029-request-http-spring-ui.md)에 설치·소비 위치와 정상/실패 수락을 개정했다.
+서브 작업용은 이 제공물의 buffer·원 표본/context·RAM summary를 Spring 저장/조회와 화면에 연결한다.
+스택 화면은 계속 보류한다. 운영 보드·실차·EC2·서비스·실데이터·타 담당 제품·commit/push는 이번에 변경하지 않았다.
+
+최종 전달 묶음은 [manual-ram-provider-1.0.8.tar.gz](C:/Users/SSAFY/Documents/Codex/2026-11-04/manual-memory/manual-ram-provider-1.0.8.tar.gz)다.
+SHA256 `ae11c1ea45d778a543b733b450168ec517d55d5af200fb92978030074b0caa23`,
+2971639B·201개 항목이며 firmware·계약·원문·검증 요약의 내부 SHA를 모두 확인했다.
+인계 bundle은 운영 설치가 아니며 private broker fixture·비밀번호를 포함하지 않는다.
+
+
+<a id="ram-recent-observation-20261104"></a>
+## 2026-11-04 RAM 최근 관측 계약 마감
+
+### 현재 사용 기준과 실제 예제
+
+상단은 **Zephyr 관리 RAM 확보량의 최근 유효 관측**이다. 사용자는 마지막 유효 메모리 표본·원 관측 시각·만료를 표시하고 새 부팅의 그래프를 이어 붙이지 않는 기준을 확정했다. 이에 따라 외부 현재 실행 확인을 필수로 두었던 이전 절의 표시 조건을 대체했다. 같은 memory 봉투의 total/mapped/static/page-free 검증, 정확한 uint64·HALF_UP 소수3자리 계산은 유지했다. MQTT 버전·topic·metric·단위·봉투 필드는 바꾸지 않았다.
+
+기본 참조 소비는 외부 bind/expected_context 없이 동작한다. 정식 기존 계약 시험 환경에서 contract 디렉터리의 예제는 다음과 같다. ReferenceConsumer는 시험 oracle이며 제품 SDK·새 서버가 아니다.
+
+```python
+import sys
+from pathlib import Path
+sys.path.insert(0, "tools")
+from validate_contract import load_message, validate, ReferenceConsumer
+
+m = load_message(Path("fixtures-2.1/ram-committed.json"))
+validate(m, f"xenova/v2/vms/{m['vm_id']}/telemetry/metrics", 0, False)
+c = ReferenceConsumer()
+c.ingest(m, received_ms=1000)
+assert c.ram_view(m["vm_id"], now_ms=1000)["percent"] == "25.000"
+assert c.ram_view(m["vm_id"], now_ms=7001)["reason"] == "RAM_RECEIPT_EXPIRED"
+```
+
+위 숫자는 total16384/free12288 bytes의 합성 계산 fixture다. 최근 수신은 물리적으로 현재 실행인 VM·앱 건강·복구 허가·출력 권한·장치 적용을 증명하지 않는다. 독립 문맥을 가진 소비자가 명시한 bind/expected_context의 기존 strict 비교는 유지하며, RAM 이외 oracle stream의 기존 bind 의미도 바꾸지 않는다. 네트워크 자체의 운송 지연 상한은 확인하지 않았다.
+
+### 확인한 문제와 국소 수정
+
+| 수정 전 반례·이유 | 최종 처리·보존한 보호 |
+|---|---|
+| 외부 bind가 없으면 ingest부터 거절하고 expected_context가 없으면 정상 RAM도 UNKNOWN | RAM 최근 관측만 기본 ingest→cache→view를 연결. 다른 소비 목적의 실행 확인·명시 필터는 유지 |
+| 같은 원 source가 오류−75가 된 뒤 새 envelope로 옛 정상값이 오면 정상 비율로 복원될 수 있었음 | 원 lease 안에서도 최초 실패·원 rc를 유지. 새 유효 source에서만 회복. 이전23assertion은 만료 이후 회복만 보아 이 결함을 놓쳤고, 원 실패와 중간42assertion 후보를 보존 |
+| 같은 boot/publisher/source에서 receipt만 바뀌면 receiver 최초시각1000→6000으로 갱신되어8000에도 정상 | 원 source 동일성과 context 대조를 분리. RAM_CONTEXT_CHANGED로 원 payload/lease를 유지하며 보류 |
+| 같은 message_id의 RAM 내용 상충은 ID_REUSE_CONFLICT를 반환하면서도 기존 정상 비율이 남음 | 해당 현재 source만 같은 원 사유로 보류. 과거 다른 source의 ID 충돌로 최신 표본을 무효화하지 않음 |
+| source A→B→새 envelope의 옛A에서 A를 다시 채택하고 lease 재발급 | 현재 캐시의 원 순번·시각으로 역전을 거절. 같은 순번의 다른 시각은 양방향 상충. 새 순번·비감소 시각에서 정상 회복 |
+| boot A/p1→B/p1→지연A/처음 보는p2가 쌍 단위 퇴역을 우회 | 기존 순번 map에 알려진 퇴역 boot 표식을 재사용. A의 어느 publisher도 재선택하지 않고, 현재 B의 publisher 정상 교체·다음 새 boot C는 허용 |
+| 실패·만료 view가 원 source 쌍·시각·status를 비움 | 검증한 whole payload의 원 identity/source/status/rc를 보존하고 파생 bytes/percent만 null |
+
+오류 종류를 합치거나 최초 원인을 제거하지 않았다. 동일 원 source의 정상 재전달·다른 family·새 heap collection은 6초 원 lease를 연장하지 않는다. source/수신 단조 시계를 섞지 않고 수신 후 경과에 원 송신 당시 source age를 더한다. 실제0·미수신·미지원·경합·오류·만료를 구분한다.
+
+세션이 바뀌면 캐시와 그래프 구간을 나눈다. 같은 boot/publisher라도 원 host/execution/receipt가 달라진 새 source는 그래프를 이어 붙이지 않는다. 이는 원 관측 문맥 보존이며 추가 외부 조회를 필수로 한다는 뜻이 아니다. 알려진 퇴역 출처 차단은 관측·보존 범위 안의 보호이고, 아직 보지 못한 출처의 물리적 최신성이나 무기한 모든 과거 세션 기억은 보장하지 않는다. 새 원장·daemon·runtime 전역 잠금·매주기 추가 조회/복사/스캔은 없다.
+
+### 최종 후보·실행·제공 수준
+
+기준 HEAD `983fa121dbdb7a208ad61cd9d2738394c80d23c3`와 기존 미커밋 작업을 보존했다. 최종 `validate_contract.py` SHA는 `5115f026d064306fa89aa85c981afae57b2ebd764cbbdd3ec722f2d1a6e809bc`다. 이번 수정은 정식 계약·소비 인계·참조 도구와 현재 요청서·빌드/배포 설명·본 보고서다. 카탈로그·schema·C/H·wire는 기존 제공물을 재사용했다.
+
+| 실제 실행·범위 | 결과·한계 |
+|---|---|
+| `python3 tools/validate_contract.py --self-test` | 2.0 정상30/거절30·sequence11개28assertions, 2.1 정상27/거절24, RAM 계산23벡터, RAM view140assertions PASS. 오프라인 계약 oracle이며 실제 보드/제품 화면 시험 아님 |
+| 독립 driver `review_recent_ram.py --assert-final` | 동결 원문과 실행 전후 동일 SHA, 11/11 PASS. 원 lease·sticky·context·ABA·퇴역 boot/새 publisher·시각 상충 반례 재실행 |
+| 기존 환경의 `python3 -B -m pytest -o addopts= -q platform/tests/test_xenova_telemetry.py --tb=short` | 15PASS, pytest6.68초/전체 명령10.09초. 실제 C codec·ASan/UBSan 출력 및 기존 공급 fixture 포함. Xen/운영 broker/보드는 대역·미실행 |
+| 별도 계약 묶음 압축 해제→해시→독립 import→self-test→위 기본 예제 | top175/contract166 checksum PASS, 정상25.000→6초 초과 만료 및 원 source metadata 보존. 제품 설치본이나 target rootfs 수락이 아님 |
+| 불변1.0.8 BUILD_RECEIPT와 현재 소스 대조 | C/H130개 포함 소스·설정163개 불일치0. bin `05274f0b…63fd424e`, manifest `47c8eaed…61649a` 그대로. 이번에 ARM/QEMU 재빌드하지 않음 |
+
+검증 근거는 `Documents/Codex/2026-11-04/app-memory/recent-observation/`에 모았다. `before-result.json`·`before-ABA-result.json`과 중간 동결 결과를 보존하고, `final-result.json`·`final-codec-regression.json/log`·`archive-acceptance.json`·`firmware-unchanged.json`으로 최종 후보를 구분한다. 이 값은 로컬 시험 결과이며 처리 기한·운영 성능 보장이 아니다. 이번 변경은 wire 크기·주기·고정 전송 예산을 늘리지 않는다.
+
+별도 host 계약 제공물 `ram-recent-observation-contract-2.1-20261104.tar.gz`는 **176 members / 149988 bytes**, SHA `bdd2f3d0536975137738a3f2561390b1e9ae1cb005550d0af0f19be65c3b93cb`다. 현재 contract SHA256SUMS의 SHA는 `b774a589ac06ed85d715795aa35ac912f1c4a3a976a098d3adc7026f5e3a6e54`다. 이전 불변1.0.8 firmware와 `manual-ram-provider-1.0.8.tar.gz`(SHA `ae11c1ea…0caa23`)를 덮어쓰거나 새 계약 검증을 이미 포함한 것으로 재표기하지 않았다.
+
+### 인계와 미수행
+
+- 정식 원문은 `telemetry/contract/CONTRACT.md` 6절/9.6절, 소비 절차는 `docs/CONSUMER_HANDOFF.md`, 담당 지시는 기존 HTTP·Spring·화면 요청서의 현재 본문이다. 빌드/배포 원본도 별도 host 계약 묶음과 기존 firmware의 수준을 구분한다.
+- 독립 실행 확인을 공급하려고 추가했던 하위 `telemetry_context` projection은 최신 결정으로 철회했다. 본인이 추가한 부분만 제거해 Manager/provisioning 두 파일이 작업 전 미커밋 원문과 바이트 일치함을 확인했다. 철회 후보·시험은 이력이고 현재 제공 기능이 아니다. FastAPI 응답·endpoint·권한은 변경하지 않았다.
+- 서브 작업용은 확정 계약으로 Spring 원문 저장·조회와 프론트의 최근 관측/원 시각/만료/그래프 구간을 연결한다. 실제 소비 제품 구현·배포 수락은 그 후보의 결과로 판단하며 이 보고서로 대신하지 않는다.
+- 스택 발행 계약은 유지하고 화면은 보류한다. 보드·운영 서비스·실데이터·실차·EC2·배포·commit/push는 이번 후속에서 실행하지 않았다.
+
+
+<a id="image-default108-20261105"></a>
+## 2026-11-05 다음 이미지의 주행 A/B 1.0.8 선택
+
+사용자가 다음 이미지에 1.0.8을 선택하도록 요청했다. 이전 기본1.0.4에서 실제 검증한 불변 ARM1.0.8로 Zephyr 선택만 맞췄다. Ubuntu·Debian의 기존1.0.4 선택·UUID·자격·자원·autostart 정책은 그대로다. MQTT schema2.1과 v2 namespace, 최신 RAM 최근 관측 계약·스택 화면 보류도 유지한다.
+
+| 실제 변경 위치 | 적용 기준 |
+|---|---|
+| `platform/guests/default-templates.lock.json` | Zephyr version/directory/실제 manifest SHA를1.0.8로 함께 변경. Linux 두 entry는 바이트 의미 그대로 보존 |
+| `platform/yocto/meta-xenova/recipes-core/xenova-platform/files/defaults.json` | factory A/B 공통 template_version1.0.8. 영구 VM 신원이나 설치된 기록은 변경하지 않음 |
+| `platform/first-install/example.config.json` | RTOS release 경로와 manifest hash를 같은1.0.8로 선택 |
+| `platform/tests/test_xenova_template_workflow.py` | lock·factory A/B·조립 예시의 version/path/hash 일치와 기존 경로 검증을 연결 |
+| 기존 build-guide/deployment-readiness | Linux1.0.4/주행1.0.8 구분, 부분 제공물과 실제 이미지·보드 설치 수준을 구분 |
+
+선택한 manifest SHA256은 `47c8eaedb7032c93bbfb58e003d7bde4fd07b3de8506ccbed76912912b61649a`, 실제 bin SHA256은 `05274f0b41c79f88f743051e7bbe5ff7a0465835c530f30cd239b61063fd424e`다. 기존1.0.8 manifest·bin을 제자리 수정하거나 hash 검증을 우회하지 않았다. `/home/ssafy/xenova-manual-memory-20261104/release-1.0.8-ram-final`의 실제10파일을 검증해 사용했다.
+
+기존 제품 함수 `assemble.rtos_info → copy_rtos_templates → copy_rtos_seeds → copy_management_catalog`를 격리 데이터 경로에서 실행했다. A/B 두 seed 모두 template/active_firmware version1.0.8과 동일 bin hash를 확인했다. identity_state는 pending이며 실제 VM 등록·시작·MQTT 계정 발급은 하지 않았다. 잘못된 manifest hash는 정상적으로 거절했다. 처음 단독 fixture는 전체 조립이 미리 만드는 instances 디렉터리를 빠뜨려 실패했고, 그 불완전 fixture를 보존한 뒤 정상 전제를 갖춘 새 fixture로 통과했다. 제품 보호를 완화하지 않았다.
+
+- 템플릿 workflow 회귀: `python3 -B -m pytest -o addopts= -q platform/tests/test_xenova_template_workflow.py --tb=short` → **10PASS·5subtests**,1.71초.
+- 배포 payload까지 확장한 묶음: **23PASS·21subtests/1환경 오류**,28.38초. 실패는 기존 `systemd >=259` loader 부재이며 `XENOVA_DOM0_SYSTEMD_ANALYZE`가 필요한 시험이다. unit이나 의존성을 바꿔 통과시키지 않았고 target package QA 완료라고 주장하지 않는다.
+- 정규 release 상대 경로로 포장한 archive를 독립 경로에 풀고 실제 `xenova_zephyr.bundle_info`로10개 읽기 전용 파일·manifest/bin을 다시 검증했다.
+- 별도 archive 검사의 첫 실행은 도구의 기존 first-install Python 경로 누락으로 import하지 못했다. 정상 기존 모듈 경로를 공급해 같은 archive가 통과했다. 제품의 모듈·의존성 변경은 없다.
+
+빌더 제공물은 `Documents/Codex/2026-11-05/image-default108/zephyr-drive-template-1.0.8.tar.gz`다. **2,739,063bytes**, SHA256 `806d60aad2358c1e14799ba9f6713838ccc5dcb233a1df17fa50d6f165ae3f9a`이며 내부 경로는 `zephyr/xenova-zephyr-drive-lattice-lab-1.0.0/1.0.8/`다. 기존 release root의 새1.0.8 경로로만 공급하고 기존 게시본을 덮지 않는다. 같은 폴더의 `actual-template-seed-acceptance.json`·`template-archive.json`·`archive-acceptance.json`·`tests.json`에 원 결과와 대역/환경 범위를 기록했다.
+
+다음 이미지 빌더는 이 template을 실제 RELEASE_ROOT에 공급하고, 변경된 defaults를 포함한 플랫폼 패키지/rootfs와 조립 config를 함께 사용해야 한다. 캐시된 옛 rootfs나 이전 조립 config가 새 선택을 이미 포함한다고 간주하지 않는다. 이번 작업은 소스 기본 선택·실제 템플릿과 seed 경로의 로컬 수락이며, 전체 dom0 이미지/RPM 재빌드·SD 기록·기존 A/B 전환·운영 서비스/실데이터·EC2·실차·commit/push는 실행하지 않았다.
+
+
+<a id="branch-commit-closure-20261105"></a>
+## 2026-11-05 문서 현재화와 작업 단위 커밋
+
+사용자 요청에 따라 에이전트 없이 문서 정합성을 보완하고, 기존3커밋(710054e/59db419/983fa12)을 보존한 채
+나머지를10개 작업 단위로 나눴다. 제품/계약/빌드/선택9커밋 뒤 본 문서 정리를 별도 커밋으로 남긴다.
+브랜치명 변경·push·배포·보드/운영 서비스·실차 작업은 수행하지 않는다.
+
+### 무엇을 어떤 근거로 정리했는가
+
+- §cli-manager-spec.md#time-budgets§의 '현재 FastAPI가 하위 예산을 전달하지 않는다', '원 key를 보존하지 않는다'는
+  구식 설명을 실제 §main.py:_install_request_budget§·§budget.py§·§drivers/platform.py:call_with_budget§·
+  §service.py:request_stop§·§api/vms.py§와 대조해 교체했다.
+- 선택 헤더가 있을 때만 도착 시점부터 Q/S·하위 잔여 예산을 공유한다. 헤더 생략의 기존 동작,
+  read_fork의 기본false·기능 설정·하위 fork 지원 조건, 구형 하위의 공유 직렬화 fallback을 유지한다.
+  create/retire의 budget_ms 미전달과 필수 저장·실제 설치본의 시간 한계는 미완료 범위로 남긴다.
+- key stop의200/202·원 key 조회와 keyless204를 분리했다. 현재 CPU GET의 TARGET_CHANGED503·
+  구형 하위 INVALID_SPEC501, 아직 미등록인 CPU 오류의500과 권장 매핑을 구분했다. 오류 종류·원 사유를 합치지 않았다.
+- 보고서 앞에 현재 작업/확인 수준을 모아 기존 단계별 이력과 구분했다. Linux 기본1.0.4, 주행 기본·로컬1.0.8,
+  마지막 보드 메모리1.0.7을 한 가지 완료로 합치지 않는다.
+- HTTP/Spring 요청서에서 RAM 문맥 분리와 stack row identity 설명이 섞인 문장을 분리했다.
+  기존 time-budgets·sources 및 과거 하위 소절의 anchor를 보존하고 관련12문서의 로컬 링크/anchor가 모두 해석되는지 확인했다.
+- 최종 MQTT 계약·166파일 checksum은 바꾸지 않았다. schema2.1과 최근 관측/원 lease·최초 오류·퇴역 boot 보호,
+  스택 화면 보류·타 담당 제품 경계는 기존 확정 계약을 따른다.
+
+### 작업 커밋 대응
+
+| 커밋 | 작업 단위 |
+|---|---|
+| §7e0bca6a§ | reboot 결합·원 stop 실패 수습 |
+| §5d76fbaa§ | create 게시·binding 진행 |
+| §9278accc§ | Worker/Gateway 자격·factory 포장 |
+| §44fa2ca4§ | XenStore 고아 거래 정리 |
+| §05497677§ | Gateway STOP 원 결과·출력 우선 |
+| §b74f4d89§ | MQTT 앱 버퍼·최근 RAM 계약 |
+| §d6f74912§ | 실제 owner 메모리 계측·공정 발행 |
+| §234c24e3§ | TCP 스택·불변 버전 빌드 검사 |
+| §6268d79b§ | 실제 주행1.0.8 기본 선택 |
+
+Git의 기존 LF 규칙에 따라 일부 시험 입력의 CRLF가 index에서 정규화됐다. 기존 불변1.0.8 firmware/manifest를
+수정하지 않았다. 현재 구현 커밋의 **비시험 C/H·빌드 설정132개**가 원 ARM receipt와 일치함을 Git blob으로 확인했다.
+기존 ARM source digest는 원 snapshot의 값이며, host 계약 후속·정규화된 시험 입력까지 현재 저장소 전체와 같은 digest라고 주장하지 않는다.
+
+### 이번 실제 로컬 확인
+
+Windows 작업 파일은 원문·해시로 백업했다. 실행은 버전 관리되는 소스만 Linux 임시 경로에 복사한 fixture에서 수행했으며
+큰 이미지·운영 자산은 복사하지 않았다. 테스트한 플랫폼 소스1184파일이 원 작업 파일과 바이트 일치했다.
+
+| 확인 범위·기존 시험 | 최종 결과·한계 |
+|---|---|
+| reboot/stop/binding/provisioning/preparation/packaging/template/XenStore/Telemetry 하위 묶음 | 일반 사용자139PASS·21SKIP·21subtests. root 소유 조건의21건은 아래 두 회차로 모두 따로 확인 |
+| root-owned private 공급·factory 설정 | 기존 Mosquitto2.0.18 도구 경로를 공급해20PASS·5subtests. 실제 운영 계정/브로커를 쓰지 않음 |
+| 실제 ARM1.0.8 factory 시험 | XENOVA_ACTUAL_DRIVE_TEMPLATE로 불변 번들을 공급해1PASS. 실제 조립/등록/VM별 공급 함수, Xen/서비스는 소유 fixture |
+| key stop/HTTP 통합/CPU/OpenAPI 계약 |166PASS. 기존 HTTP·서비스 예산·fork·원 결과 의미 확인, 라이브러리 deprecation warning1건은 의존성 변경 없이 보존 |
+| Gateway IPC/feedback/PTY |41PASS. 실제 로컬 IPC·원 STOP 수습·바이트 경로, 실제 장치/물리 정지 수락 아님 |
+| planner/world/Telemetry 원천/lifecycle bootstrap |53PASS. 실제 제품 계산/owner 코드와 원 관측·독립성 비회귀 |
+| MQTT 정식 self-test |2.0 정상30/거절30·11sequence28assertions,2.1 정상27/거절24,RAM계산23·view140assertions PASS |
+| 배포 payload |13PASS·16subtests,1환경 실패. systemd>=259 loader 미공급의 기존 제한이며 경고/검증을 제거하지 않음 |
+| 문서·index·파일 범위 |12문서 로컬 링크/anchor 이상0, 전체 whitespace 검사 통과, 계약166파일의 실제 staged blob checksum 일치 |
+
+첫 실행의 환경/입력 실패도 보존했다. WSL Git이 Windows gitdir를 읽지 못해 host Git inventory로 소스를 공급했고,
+first-install/common 경로 누락·변경 없는 Spring DTO 누락·Mosquitto PATH 누락은 기존 도구/입력을 공급해 같은 시험이 통과했다.
+별도 metadata 검사기는 bitbake -e 로그 인자 없이 호출해 사전 오류가 났으며, 정규 BitBake metadata/package QA를 새로 수행한 근거로 세지 않는다.
+실패를 숨기려고 제품·권한·timeout·필수 검증을 완화하거나 의존성을 설치하지 않았다.
+
+정확한 명령/전체 로그/해시·커밋 계획은 `Documents/Codex/2026-11-05/commit-closure/`에 있다.
+`platform-core-paths-fixed`, `private-root-fixtures-tools-fixed`, `actual-arm-factory`, `http-contract-inputs-fixed`,
+`gateway`, `planner-telemetry`, `mqtt-contract`, `deployment-payload`의 json/log를 확인한다.
+최초 오류·중간 결과·원문 backup, `docs-check.json`·`tested-source-equivalence.json`·
+`committed-arm-source-equivalence.json`·`commits.json`도 보존한다.
+
+systemd259를 갖춘 고정 target/정규 패키지·전체 이미지 검증, 실보드 지도 채택/실제 계산·MANUAL heartbeat 화면,
+운영 Worker/Gateway 및 장치 종단은 각 기존 수락의 미완료 범위다. 이번 커밋과 로컬 성공 횟수로 완료를 대신하지 않는다.
