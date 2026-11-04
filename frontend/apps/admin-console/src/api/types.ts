@@ -229,6 +229,33 @@ export interface MetricValue {
   labels: Record<string, string> | null;
   unavailable_reason: string | null;
   counter_value?: string | null;
+  /** v2 정수의 원문. value 숫자 projection보다 우선한다. */
+  raw_value?: string | null;
+  status?: string | null;
+  source_rc?: number | null;
+}
+
+/** 소유 버퍼의 내용·업무 상태. 관측 성공이나 출력 허가와 다른 경계다. */
+export interface ManualBufferObservation {
+  phase: 'empty' | 'stored' | 'pending' | 'running' | 'retained';
+  content_bytes: string;
+  sequence: string | null;
+  source_uptime_ms: string | null;
+  owner_lifetime: string | null;
+  context_revision: string;
+  connection_revision: string;
+  input_status: 'missing' | 'unclassified' | 'accepted' | 'invalid' | 'expired' | 'context_changed';
+  source_rc: number;
+  performed: boolean | null;
+  revoked: boolean;
+  last_read_sequence: string | null;
+}
+
+export interface TelemetryExecutionContext {
+  binding: string;
+  host_boot_id: string | null;
+  execution_id: string | null;
+  receipt_id: string | null;
 }
 
 export interface MetricSample {
@@ -242,6 +269,28 @@ export interface MetricSample {
   network?: {
     publisher_instance_id: string;
     observed_uptime_ms: string | null;
+  };
+  telemetry?: {
+    family: string;
+    publisher_instance_id: string;
+    message_seq?: string | null;
+    source_sample_seq: string | null;
+    observed_uptime_ms: string | null;
+    sent_uptime_ms: string;
+    sent_at: string | null;
+    utc_quality: string | null;
+    utc_source: string | null;
+    uncertainty_ms: number | null;
+    collection: {
+      sample_id: string;
+      start_uptime_ms: string;
+      end_uptime_ms: string;
+      elapsed_us: string | null;
+      status: string;
+      source_rc: number | null;
+    };
+    context: TelemetryExecutionContext;
+    buffer?: ManualBufferObservation | null;
   };
   values: MetricValue[];
 }
@@ -283,6 +332,21 @@ export interface ThreadsResponse {
   part_count: number | null;
   complete: boolean;
   conflicting_pages: boolean;
+  stack_snapshot?: {
+    snapshot_id: string;
+    source_status: string;
+    rows_seen: number | null;
+    received_at: string;
+    expires_at: string;
+    items: {
+      row_id: number;
+      name: string;
+      name_truncated: boolean;
+      reserved_bytes: number;
+      peak_used_bytes: number | null;
+      status: string;
+    }[];
+  } | null;
   items: {
     thread_id: string;
     thread_name: string;

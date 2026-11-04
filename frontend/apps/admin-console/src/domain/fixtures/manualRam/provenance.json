@@ -1,0 +1,238 @@
+{
+  "provider": "feat/platform/guest-clock-sync at 983fa12 + 1.0.8 manual/RAM follow-up",
+  "scope": "Unmodified provider contract fixtures; synthetic schema/codec values are not operating measurements or current bindings. Consumer tests transform these wire bodies into the already tested Spring metrics projection. No credentials.",
+  "files": [
+    {
+      "file": "manual-memory-busy.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-busy.json",
+      "sha256": "94f53f15aba00158b6c80d65f5899d42bb3886d709ef6c4a6e0580b3b98d6c9f"
+    },
+    {
+      "file": "manual-memory-input-empty.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-input-empty.json",
+      "sha256": "11032e4d8c5b359d4dd5b054a5525bab2c79619d691cc205979a14a661d9c8d8"
+    },
+    {
+      "file": "manual-memory-input-expired.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-input-expired.json",
+      "sha256": "8bb5dc83c0d4e7c4aeeb8866db3ef5e9e84f5a6092ed07a274e7a5f6ee59776c"
+    },
+    {
+      "file": "manual-memory-input-invalid.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-input-invalid.json",
+      "sha256": "89b5ad6063c905497706a3083ed012f57346b07a51d2c4cb0ef9bb3d16d6b943"
+    },
+    {
+      "file": "manual-memory-input-negative-time.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-input-negative-time.json",
+      "sha256": "bd6a1291ed921bfa8daf3e5a10672caad3e910a94e333ccb004dc1d0415a53f1"
+    },
+    {
+      "file": "manual-memory-input-seq-zero.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-input-seq-zero.json",
+      "sha256": "ec6a2252d06817fca53213a047c55170a86bc6a1172dbb9e11e445c9f8310b29"
+    },
+    {
+      "file": "manual-memory-input-unclassified.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-input-unclassified.json",
+      "sha256": "e66262dd44298949e4818a8a339de7c62b0c06497293d75a7f7fabb76c31cee7"
+    },
+    {
+      "file": "manual-memory-pending-empty.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-pending-empty.json",
+      "sha256": "3e45e9a0f07c27ca380fb40357d8fb884e23343261fa2edf83cc3c3346ae9b0e"
+    },
+    {
+      "file": "manual-memory-pending-full.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-pending-full.json",
+      "sha256": "41a34cebb3d0c2db0faea5786e3e90ebcf9a04e1aeb1e2363ecfaf2742effc7b"
+    },
+    {
+      "file": "manual-memory-result-empty.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-result-empty.json",
+      "sha256": "5ddc5af7ca15e7528b29ece97d6eb5f11c67793603e627f9dd8bac403c988f77"
+    },
+    {
+      "file": "manual-memory-result-read.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-result-read.json",
+      "sha256": "bdb61c519ce27bd8672eff3f40372738aad7527d3831f6279f5ab4e142e237c0"
+    },
+    {
+      "file": "manual-memory-result-retained.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-result-retained.json",
+      "sha256": "136c945bc620c67ab20cdc4c7158c5f375d2d8619d2b0abde5a8e3540885c241"
+    },
+    {
+      "file": "manual-memory-result-revoked.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-result-revoked.json",
+      "sha256": "f699b1b16857dca24c887bf9fd77cd41b1b232000690afcb901290e8f7799097"
+    },
+    {
+      "file": "manual-memory-running-empty.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-running-empty.json",
+      "sha256": "58beee0a9e9986ee747fc6ae1ec056866cc2dd30fb74a12eafe8b3bc4282e46b"
+    },
+    {
+      "file": "manual-memory-running-full.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-running-full.json",
+      "sha256": "5b317f98d5b07a59f84c97533c8e68520931a06eac6bddd8d1ffa31967a5ab42"
+    },
+    {
+      "file": "manual-memory-sample-expired.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-sample-expired.json",
+      "sha256": "535e6bec1686be25b2c991bf847019d712dbcdd2ef36436fda5a6d29af17c31a"
+    },
+    {
+      "file": "manual-memory-u64-boundary.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/manual-memory-u64-boundary.json",
+      "sha256": "855be9a35f34d40475c26a0c5549af92287c5ed0e5112dab86d5552029527a3c"
+    },
+    {
+      "file": "ram-collection-unavailable.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-collection-unavailable.json",
+      "sha256": "5f44c36ae6b7bc95399a977d213aa05fbe84bcdf1a7f5f602ea1b5bc0e6d145d"
+    },
+    {
+      "file": "ram-committed.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-committed.json",
+      "sha256": "abe9baa6ce9d1d5affe493a79e1c32dc9459e71d6da9ca964c4507cbea42f474"
+    },
+    {
+      "file": "ram-free-over-total.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-free-over-total.json",
+      "sha256": "76da8694189c26464e691cfa2437d777d11955d81882da9dcc231a97c87b3e2a"
+    },
+    {
+      "file": "ram-half-up.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-half-up.json",
+      "sha256": "b8cae860baea664da75f963fb702fdcf7533ec749de7ad4b3f8c56bc1070bb34"
+    },
+    {
+      "file": "ram-heap-changed.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-heap-changed.json",
+      "sha256": "bae4cfd6277acf249a337244c39d0ecf9a1ec7457a212a981ea12a21317e20e2"
+    },
+    {
+      "file": "ram-legacy-unidentified.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-legacy-unidentified.json",
+      "sha256": "e3cce2f61f9de77d016e935c1b4271ade7d974cbe3b410e86249360d19532984"
+    },
+    {
+      "file": "ram-mapped-free-conflict.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-mapped-free-conflict.json",
+      "sha256": "c5f04ad49cd1c00a0e497afba17fefe4689d40d37ed7a85784471252512fb064"
+    },
+    {
+      "file": "ram-mapped-over-total.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-mapped-over-total.json",
+      "sha256": "1212142e2d298b20183b5fe4166761f9a432216d0f1f77436fe93ad205c11b29"
+    },
+    {
+      "file": "ram-missing-field.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-missing-field.json",
+      "sha256": "155127be3df26228e623237d4d1d1976535ca22c97b52592be9b5ea0ac46a556"
+    },
+    {
+      "file": "ram-mixed-messages.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-mixed-messages.json",
+      "sha256": "8963a5c44287bf96dd2bebf45a4462dc205c2b78723800c6ebf3e28f0191068e"
+    },
+    {
+      "file": "ram-null-ok.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-null-ok.json",
+      "sha256": "48f2bb473bc27173aa7b4bd1be69e7a87ed266bac5bfb91991d3559353235444"
+    },
+    {
+      "file": "ram-owner-busy.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-owner-busy.json",
+      "sha256": "555eefb910070d1ba0467d94ce9596bd621f06b61a4c9b39ae2f9d2554304356"
+    },
+    {
+      "file": "ram-partial-context.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-partial-context.json",
+      "sha256": "0330d1f1afa7505dc204bd3e108fe32eae5c1a84cf4bf12a7120048f589cf817"
+    },
+    {
+      "file": "ram-reserved-increase.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-reserved-increase.json",
+      "sha256": "f1181c2533682b4dd290eaf3c21157c404e26f174fa0a2a0faaf0ef9aaa51382"
+    },
+    {
+      "file": "ram-returned.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-returned.json",
+      "sha256": "abe9baa6ce9d1d5affe493a79e1c32dc9459e71d6da9ca964c4507cbea42f474"
+    },
+    {
+      "file": "ram-source-expired.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-source-expired.json",
+      "sha256": "80f095028504d5ba22b1da69911fc0a1300569fc533ac89a325f7cf96a8dc6f1"
+    },
+    {
+      "file": "ram-source-pair-partial.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-source-pair-partial.json",
+      "sha256": "861fb4055d20e1d178d55f52dc2df0d7cc4339e5c42fcc61f0d46972dde40162"
+    },
+    {
+      "file": "ram-source-unidentified.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-source-unidentified.json",
+      "sha256": "9992f29c607066d7e87a7b78782f06355c6bf13eb2583c3735a507c748247b19"
+    },
+    {
+      "file": "ram-static-over-mapped.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-static-over-mapped.json",
+      "sha256": "9107a580742ea15176386e70cc1b9c620576abc5ad247b215a1c1f14ca981276"
+    },
+    {
+      "file": "ram-total-zero.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-total-zero.json",
+      "sha256": "7501e390fbebfd5b191706c9eef66f817f6296be9b88881b105b7389b1702659"
+    },
+    {
+      "file": "ram-u64-precision.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-u64-precision.json",
+      "sha256": "67bbc608a9dacae709e43be29cae5f0a7a9a5aa34a967ca30dbac507cd2e1b78"
+    },
+    {
+      "file": "ram-unsupported.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-unsupported.json",
+      "sha256": "c7377f30fd3ebdee91c0167f24e327421627c460ac187520e496f6273ad91f7b"
+    },
+    {
+      "file": "ram-valid-zero.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/ram-valid-zero.json",
+      "sha256": "1d75e266648282a1b73580f3754c97174083a1f5f696717494dc03aeb46c446e"
+    },
+    {
+      "file": "native-manual_input.json",
+      "source": "manual-memory/wire-examples/manual_input.json",
+      "sha256": "c1d3d0d954c7780a48d881d080195ebf38cb42d03a3c6f2b11428092bef5574b",
+      "scope": "Actual native Publisher byte body. Not ARM/board driving acceptance; each example keeps its own VM/execution/source."
+    },
+    {
+      "file": "native-manual_pending.json",
+      "source": "manual-memory/wire-examples/manual_pending.json",
+      "sha256": "86609917331a71f4b66a15ba09b284d463e647b199a591e8d8d4266299ffcf1f",
+      "scope": "Actual native Publisher byte body. Not ARM/board driving acceptance; each example keeps its own VM/execution/source."
+    },
+    {
+      "file": "native-manual_running.json",
+      "source": "manual-memory/wire-examples/manual_running.json",
+      "sha256": "6db1dd9c422be99c7f5cf120bed8f399936725e899b5e46cf29ea3c91de71d3f",
+      "scope": "Actual native Publisher byte body. Not ARM/board driving acceptance; each example keeps its own VM/execution/source."
+    },
+    {
+      "file": "native-manual_result.json",
+      "source": "manual-memory/wire-examples/manual_result.json",
+      "sha256": "7fa5d8e56333dad6c7f5e2abd92a80012528813ecd76e93d1a4cc209b6ec7a26",
+      "scope": "Actual native Publisher byte body. Not ARM/board driving acceptance; each example keeps its own VM/execution/source."
+    },
+    {
+      "file": "native-memory-unsupported.json",
+      "source": "manual-memory/wire-examples/native-memory-unsupported.json",
+      "sha256": "12851427cb8b7d4c26ee81b289dfe010df4b2a30e5b1b3d38b785315daf8ef6d",
+      "scope": "Actual native Publisher byte body. Not ARM/board driving acceptance; each example keeps its own VM/execution/source."
+    }
+  ],
+  "test_loader": "cases.json is a derived lookup snapshot of the original JSON files and oracle, used to avoid parallel Vitest dynamic-import temporary-module races on Windows. Original wire files remain unmodified beside it.",
+  "loader_sha256": "926638e3ee042fb60ffb90c3ae6d21742cd0b1881d9753288770b8473b322d6d"
+}
