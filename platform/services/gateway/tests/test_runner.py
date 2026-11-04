@@ -201,3 +201,19 @@ def test_legacy_runner_cannot_fall_back_to_unbound_paired_control():
     client, clock, sink = FakeClient(), Clock(), MockSink()
     with pytest.raises(ValueError, match="VerifiedGatewayRunner"):
         GatewayRunner(client, sink, clock=clock, vm_ids=(AUTO_VM, MANUAL_VM))
+
+def test_cancel_from_console_keeps_auto_ready():
+    """운영자 취소 (계약 v1.7, S15P31E110-280). legacy 는 causation 검사 없이 같은 토픽에서 받는다."""
+    runner, client, clock, _ = auto_ready_runner()
+    gen = runner.machine.generation
+    client.published.clear()
+    client.deliver(CONSOLE_RESUME, "drive.resume.requested", {"requested_by": "admin"}, source_id="dom0-server")
+    drive(runner, client, clock, 1.0, heartbeat=True)
+    client.deliver(CONSOLE_RESUME, "drive.resume.cancel_requested", {"requested_by": "admin"}, source_id="dom0-server")
+    drive(runner, client, clock, 3.0, heartbeat=True)
+    assert runner.machine.mode is Mode.AUTO_READY and runner.machine.generation == gen
+    vehicle = [(m, p) for t, m, p in client.published if t == topics.app_events("vehicle")]
+    assert vehicle == [
+        ("drive.resume.accepted", {"switch_in_ms": 3000, "generation": gen, "requested_by": "admin"}),
+        ("drive.resume.cancelled", {"reason": "operator_cancelled", "generation": gen, "requested_by": "admin"}),
+    ]

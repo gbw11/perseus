@@ -5,6 +5,7 @@
 
     python tools/send_resume.py --port 18832
     python tools/send_resume.py --port 18832 --console --requested-by admin
+    python tools/send_resume.py --port 18832 --console --verified --cancel   # 카운트다운 취소 (계약 v1.7)
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ def main() -> int:
     parser.add_argument("--vm-id", default=INTERACTION_VM)
     parser.add_argument("--requested-by", default="operator")
     parser.add_argument("--verified",action="store_true",help="현재 control의 세대·게시 ID에 결합한 공통 A/B 재개 요청")
+    parser.add_argument("--cancel",action="store_true",help="재개 대신 drive.resume.cancel_requested (카운트다운 취소)")
     args = parser.parse_args()
 
     if args.console:
@@ -60,7 +62,8 @@ def main() -> int:
             if type(generation) is not int or not 1<=generation<=0xffffffff:
                 raise ValueError('control generation invalid')
             payload['expected_generation']=generation;cause=control.envelope['message_id']
-        client.publish(topic,"drive.resume.requested",payload,causation_id=cause,wait_s=1)
+        kind="drive.resume.cancel_requested" if args.cancel else "drive.resume.requested"
+        client.publish(topic,kind,payload,causation_id=cause,wait_s=1)
         print('request submitted; verify drive.resume.accepted and the resulting control separately')
     finally:client.stop()
     return 0

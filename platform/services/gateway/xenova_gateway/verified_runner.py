@@ -7,7 +7,7 @@ from collections import deque
 from xenova_mqtt import topics
 from .authority import AuthorityError
 from .machine import DRIVE_APPS,ForwardDrive,ForwardStop,PublishControl,PublishEvent,Measure
-from .runner import GatewayRunner,CONSOLE_RESUME,RESUME_REQUESTED
+from .runner import GatewayRunner,CONSOLE_RESUME,RESUME_REQUESTED,RESUME_CANCEL_REQUESTED
 from .verified import VerifiedDriveMachine
 from .frame import encode,STOP_SAFE_STOP
 from .sink import SinkError
@@ -165,10 +165,12 @@ class VerifiedGatewayRunner(GatewayRunner):
                 ref={k:envelope.get(k) for k in ('message_id','boot_id','agent_instance_id','seq')}
                 ref.update(vm_id=vm,app_id=app,execution_id=binding['execution_id'],received_monotonic=t)
                 self.machine.on_command(app,vm,message.payload,t,ref)
-        elif (message.type==RESUME_REQUESTED and message.topic in (CONSOLE_RESUME,topics.app_events('interaction'))
+        elif (message.type in (RESUME_REQUESTED,RESUME_CANCEL_REQUESTED) and message.topic in (CONSOLE_RESUME,topics.app_events('interaction'))
               and not self._output_broken and self._control_message_id is not None
               and envelope.get('causation_id')==self._control_message_id):
-            self.machine.on_resume(t,message.payload.get('requested_by'),
+            handler=self.machine.on_resume if message.type==RESUME_REQUESTED else self.machine.on_cancel_resume
+            requested_by=message.payload.get('requested_by')
+            handler(t,requested_by if isinstance(requested_by,str) else None,
                 expected_generation=message.payload.get('expected_generation'),message_id=envelope.get('message_id'))
 
     def _drain(self,first=None):
