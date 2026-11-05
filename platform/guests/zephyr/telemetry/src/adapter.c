@@ -25,6 +25,7 @@ int xt_observe(struct xt_observation *out,bool threads)
 	if (rc) {
 		out->heap_rc=out->network_rc=out->timing_rc=out->threads_rc=rc;
 		out->resources.net_bytes_rc=out->resources.net_rate_rc=rc;
+        out->resources.firmware_rc=out->resources.page_rc=rc;
 		return rc;
 	}
 	out->history=source.history;
@@ -40,8 +41,10 @@ int xt_observe(struct xt_observation *out,bool threads)
 	out->net[0]=source.network.tx;out->net[1]=source.network.rx;
 	out->net[2]=source.network.tx_drop;out->net[3]=source.network.rx_drop;
 	out->net[4]=source.network.pool_busy;out->net[5]=source.network.protocol_errors;
+#if defined(CONFIG_NETWORKING)
 	struct net_if *iface=net_if_get_default();
 	if (iface && !out->network_rc) { out->interface_up=net_if_is_up(iface);out->carrier=net_if_is_carrier_ok(iface); }
+#endif
 	out->timing_rc=source.timing_rc;out->timing=source.timing;
 	/* Read after copying timing: never subtract collection-start from a newer completion. */
 	if (xdiag_clock_us(&out->now_us) && !out->timing_rc) { out->timing_rc=-ENOTSUP; }

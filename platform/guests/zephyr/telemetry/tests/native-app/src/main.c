@@ -2,6 +2,8 @@
 /* Actual Core/Publisher/MQTT over native TAP. Runtime-only test credentials;
  * deterministic timing boundaries are tested separately in the portable test. */
 #include <xenova/telemetry.h>
+#include "lattice_memory.h"
+
 #include <xenova/diagnostics.h>
 #include <zephyr/kernel.h>
 #include <zephyr/version.h>
@@ -13,8 +15,36 @@
 #include <inttypes.h>
 #include <zephyr/net/net_pkt.h>
 #include <zephyr/net/net_if.h>
+#if defined(CONFIG_XENOVA_DRIVE_WORKERS)
+#include "workers.h"
+static struct auto_cfg memory_auto_cfg;
+static struct manual_cfg memory_manual_cfg;
+static struct drive_adapter memory_auto,memory_manual;
+static struct drive_job memory_job;
+static struct drive_completion memory_completion;
+static struct k_thread pressure_threads[20];
+K_THREAD_STACK_ARRAY_DEFINE(pressure_stacks,20,1024);
+static bool pressure_enabled;
+static void pressure_park(void *a,void *b,void *c){
+ ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);k_sleep(K_FOREVER);
+}
+static void pressure_start(void){
+ pressure_enabled=getenv("XT_TEST_RESOURCE_PRESSURE")!=NULL;
+ if(!pressure_enabled)return;
+ for(unsigned i=0;i<20;i++){
+  k_thread_create(&pressure_threads[i],pressure_stacks[i],K_THREAD_STACK_SIZEOF(pressure_stacks[i]),
+   pressure_park,NULL,NULL,NULL,14,0,K_NO_WAIT);
+  char name[24];snprintf(name,sizeof(name),"manual-pressure-%02u",i);
+  assert(!k_thread_name_set(&pressure_threads[i],name));
+ }
+}
+#endif
 
 static struct xdiag_loop loop;
+extern const struct lp_config lp_selected_config;
+extern const struct lp_assets lp_selected_assets;
+static struct drive_engine memory_engine;
+static struct dw_handle memory_handles[DW_MAP_SLOTS];
 static char instance_id[37];
 static struct xt_inventory info={.os_version=KERNEL_VERSION_STRING,.build_id="native-actual-publisher",
 	.profile="diagnostic_exercise",.task_id="diagnostic.exercise",.interface_name="native-tap",
@@ -77,17 +107,45 @@ int main(void)
 		printf("BOOTSTRAP_CHECK %d\n",rc);exit(rc ? 1 : 0);
 	}
 	assert(!xdiag_boot("native-main",0));
+    de_init(&memory_engine,&lp_selected_config,&lp_selected_assets);
+#if defined(CONFIG_XENOVA_DRIVE_WORKERS)
+    drive_auto_adapter(&memory_auto,&memory_auto_cfg);drive_manual_adapter(&memory_manual,&memory_manual_cfg);
+    assert(!drive_workers_start(&memory_auto,&memory_manual));pressure_start();
+    strcpy(memory_job.control,"{\"generation\":42,\"mode\":\"MANUAL\",\"active_app\":\"manual\",\"active_vm_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"}");
+    strcpy(memory_job.input,"{\"keys\":[\"up\"]}");
+    memory_job.control_length=strlen(memory_job.control);memory_job.input_length=strlen(memory_job.input);
+    memory_job.context_revision=memory_job.connection_revision=memory_job.lifetime=1;
+#endif
+    assert(!drive_lattice_memory_register(&memory_engine));
+    struct dw_trust memory_trust={0};struct dw_snapshot *memory_payload;
+    assert(!dw_pool_source(&memory_engine.maps,&memory_trust));
+    for(unsigned i=0;i<DW_MAP_SLOTS;i++)assert(!dw_reserve(&memory_engine.maps,&memory_handles[i],&memory_payload));
 	assert(!xdiag_loop_init(&loop,20000,20000));assert(!xdiag_loop_watch(&loop));
 	assert(!xdiag_network_register(test_network,NULL));
 	assert(!xt_start(bootstrap_load,NULL,&info));
 	int64_t start=k_uptime_get();bool stalled=false,requested=false,restarted=false,history_requested=false;
 	int64_t duration=option("XT_TEST_DURATION_MS",25000),stall=option("XT_TEST_STALL_MS",8000);
 	int64_t restart=option("XT_TEST_RESTART_MS",0);
-	int64_t next_report=0,next_error=0;char reported_publisher[37]={0};
+	int64_t next_report=0,next_error=0;
+#if defined(CONFIG_XENOVA_DRIVE_WORKERS)
+    int64_t next_manual=0;
+#endif
+    char reported_publisher[37]={0};
 	void *allocation=k_malloc(1024);assert(allocation);
 	struct net_pkt *held=net_pkt_rx_alloc_with_buffer(net_if_get_default(),512,NET_AF_UNSPEC,0,K_NO_WAIT);assert(held);
 	while (k_uptime_get()-start<duration) {
 		int64_t age=k_uptime_get()-start;
+#if defined(CONFIG_XENOVA_DRIVE_WORKERS)
+        /* Actual adapter calculation; no hardware or READY in this harness. */
+        if(age<stall&&age>=next_manual){
+         assert(!xdiag_clock_us(&memory_job.release_us));memory_job.deadline_us=memory_job.release_us+20000;
+         memory_job.sequence++;memory_job.input_received_ms=k_uptime_get();
+         int rc=drive_workers_offer(DRIVE_TASK_MANUAL,&memory_job);
+         assert(!rc||rc==-EBUSY);next_manual=age+20;
+        }
+        int copied=drive_workers_read(DRIVE_TASK_MANUAL,1,&memory_completion);
+        assert(!copied||copied==-ENODATA||copied==-EBUSY);
+#endif
 		if(getenv("XT_TEST_FATAL_MS")&&age>=option("XT_TEST_FATAL_MS",3000)){k_oops();}
 		if (age>=next_report) {
 			struct xt_status state;assert(!xt_status_get(&state));
@@ -108,7 +166,8 @@ int main(void)
 		uint64_t now;assert(!xdiag_clock_us(&now));
 		if (!stalled && now>=loop.timing.next_release_us) {
 			assert(!xdiag_loop_begin(&loop));
-			if (age>=stall) { stalled=true;k_free(allocation);allocation=NULL;net_pkt_unref(held);held=NULL; }
+			if (age>=stall) { stalled=true;k_free(allocation);allocation=NULL;net_pkt_unref(held);held=NULL;
+                for(unsigned i=0;i<DW_MAP_SLOTS;i++)assert(!dw_abort(&memory_engine.maps,memory_handles[i])); }
 			else {
 				volatile unsigned result=0;for (unsigned i=0;i<128;++i) { result=result*1664525U+i; }(void)result;
 				assert(!xdiag_loop_end(&loop));
@@ -118,6 +177,12 @@ int main(void)
 	}
 	uint64_t before;assert(!xdiag_clock_us(&before));
 	assert(!xt_stop(k_uptime_get()+1000));
+#if defined(CONFIG_XENOVA_DRIVE_WORKERS)
+    assert(!drive_workers_join(k_uptime_get()+1000));
+    if(pressure_enabled)for(unsigned i=0;i<20;i++){
+     k_thread_abort(&pressure_threads[i]);assert(!k_thread_join(&pressure_threads[i],K_MSEC(200)));
+    }
+#endif
 	uint64_t after;assert(!xdiag_clock_us(&after));
 	struct xt_status state;assert(!xt_status_get(&state));
 	struct xdr_snapshot resources;assert(!xdiag_resources_get(&resources));

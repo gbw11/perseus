@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVm, useVmResources, useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
-import { osLabel } from '../domain/roles';
+import { osLabel, sortVms } from '../domain/roles';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
 import { ResourceAdjustmentPanel } from './ResourceAdjustmentPanel';
@@ -37,7 +37,7 @@ export function ControlVmDetailPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const index = vms.data?.items.findIndex((item) => item.vm_id === vmId) ?? -1;
+  const index = sortVms(vms.data?.items ?? []).findIndex((item) => item.vm_id === vmId);
   const accent = (index >= 0 ? VM_ACCENTS[index % VM_ACCENTS.length] : undefined) ?? 'var(--x-primary)';
 
   const run = (target: Vm, kind: VmAction) =>
@@ -100,14 +100,8 @@ export function ControlVmDetailPage() {
                   <strong>{osLabel(vm.data)}</strong>
                 </div>
                 <div className={styles.identityFact}>
-                  <span className={styles.identityLabel}>연결</span>
-                  <span
-                    className={styles.identityStatus}
-                    data-tone={vm.data.guest_kind === 'zephyr' || vm.data.ipv4 ? 'ok' : 'waiting'}
-                  >
-                    <i aria-hidden="true" />
-                    {vm.data.guest_kind === 'zephyr' ? 'vchan · dom0 중계' : (vm.data.ipv4 ?? 'IP 할당 대기')}
-                  </span>
+                  <span className={styles.identityLabel}>예약 IPv4</span>
+                  <strong>{vm.data.assigned_ipv4 ?? '—'}</strong>
                 </div>
                 <div className={styles.identityFact}>
                   <span className={styles.identityLabel}>템플릿</span>

@@ -4,6 +4,7 @@
  * not an acknowledgement on reception or a periodic Standby calculation. */
 #include "lattice_app.h"
 #include "lattice_input.h"
+#include "lattice_memory.h"
 #include <zephyr/random/random.h>
 #include <zephyr/sys/atomic.h>
 #include <errno.h>
@@ -265,6 +266,7 @@ void drive_lattice_completed(const struct drive_completion *work){
 int drive_lattice_start(struct drive_controller *controller){
  if(initialized)return -EALREADY;
  initialized=true;de_init(&engine,&lp_selected_config,&lp_selected_assets);
+ int memory_rc=drive_lattice_memory_register(&engine);if(memory_rc)return memory_rc;
  manual_cfg_default(&manual_config);manual_config.max_speed_mps=lp_selected_config.max_velocity;
  manual_config.max_reverse_mps=lp_selected_config.max_reverse_velocity;manual_config.max_steer_rad=lp_selected_config.max_steer;
  drive_lattice_adapter(&controller->automatic,false);drive_lattice_adapter(&controller->manual,true);

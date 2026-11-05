@@ -8,6 +8,9 @@
 #include <stdbool.h>
 #define XDR_THREADS 32
 #define XDR_REGIONS 2
+#define XDR_APP_REGIONS 8
+#define XDR_AUTO_REGIONS 4
+#define XDR_MANUAL_REGIONS 4
 struct xdr_counter { uint64_t total, busy, at_ms; };
 struct xdr_window {
  uint64_t start_ms, end_ms, total_delta, busy_delta;
@@ -26,7 +29,31 @@ struct xdr_region {
  int rc;
  uint64_t capacity, used, free;
 };
+/* Regions are disjoint app owners. reserved includes metadata/workspace;
+ * used/free/peak cover only the documented payload allocation units. */
+struct xdr_app_region {
+ int rc;
+ uint64_t reserved,capacity,used,peak,exhausted,contention;
+};
+/* Small MANUAL owner metadata, never readiness or output permission. */
+enum xdr_buffer_phase { XDR_BUFFER_EMPTY, XDR_BUFFER_STORED, XDR_BUFFER_PENDING,
+ XDR_BUFFER_RUNNING, XDR_BUFFER_RETAINED };
+enum xdr_input_status { XDR_INPUT_MISSING, XDR_INPUT_UNCLASSIFIED, XDR_INPUT_ACCEPTED,
+ XDR_INPUT_INVALID, XDR_INPUT_EXPIRED, XDR_INPUT_CONTEXT_CHANGED };
+struct xdr_app_buffer {
+ uint64_t content_bytes,sequence,lifetime,context_revision,connection_revision,read_sequence;
+ int64_t source_ms;
+ int source_rc;
+ uint8_t phase,input_status;
+ bool performed,revoked;
+};
 struct xdr_snapshot {
+ int firmware_rc,page_rc;
+ uint64_t ram_region_bytes,mapped_bytes,static_data_bytes,page_free_bytes;
+ bool app_registered;
+ uint8_t app_count;
+ struct xdr_app_region app[XDR_APP_REGIONS];
+ struct xdr_app_buffer app_buffer[XDR_MANUAL_REGIONS];
 	int heap_rc;
 	uint64_t heap_allocated_bytes, heap_free_bytes;
 	uint64_t collect_us,total_collect_us,max_collect_us;

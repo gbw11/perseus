@@ -38,6 +38,7 @@ class VerifiedDriveMachine(ControlMachine):
         self.apps=self.nodes[self.active_vm]
         self.prepared={(vm,app):Prepared() for vm in self.vm_ids for app in DRIVE_APPS}
         self.sessions={};self.streams={};self.references={}
+        self._cancel_ids:list[str]=[]  # 최근 취소 요청 message_id (메모리, 재전달 중복만 막는다)
         self.output_permitted=False;self._authorized=False;self.transport_ok=False;self.delivered=False
         self.failure=None;self._resume_authorized=False
         self.continuous_handoff=False;self._handoff_grace_until=0.;self._resume_auto=False
@@ -205,6 +206,19 @@ class VerifiedDriveMachine(ControlMachine):
         self._resume_auto=auto_return
         self._resume_requested.append((t,requested_by));self._resume_authorized=True;self._resume_vm=target;return True
 
+    def on_cancel_resume(self,t,requested_by=None,*,expected_generation=None,message_id=None):
+        """drive.resume.cancel_requested (계약 v1.7). 카운트다운을 시작한 세대와 같은 expected_generation 만 받는다.
+
+        영구 중복 기록은 남기지 않지만, QoS 1 재전달이 같은 세대의 다음 카운트다운을 끄지 않도록
+        최근 message_id 는 메모리에 둔다.
+        """
+        countdown=self._countdown
+        if countdown is None or not isinstance(message_id,str) or not message_id:return False
+        if type(expected_generation) is not int or expected_generation!=countdown.generation or countdown.generation!=self.generation:return False
+        if message_id in self._cancel_ids:return False
+        self._cancel_ids.append(message_id);del self._cancel_ids[:-64]
+        return super().on_cancel_resume(t,requested_by)
+
     def _resume(self,now):
         if not self._resume_requested:return []
         from .machine import _Countdown
@@ -259,6 +273,8 @@ class VerifiedDriveMachine(ControlMachine):
                         'mode':self.mode.value,'output_permitted':self.output_permitted,'t':now}))
             return actions+self._output(now)
         if (self.phase=='FAILED' or self.failure) and not (self._resume_requested or self._countdown):return self._output(now)
+        # 아래 판정은 actions 를 새로 대입하므로 운영자 취소 이벤트는 따로 두었다가 앞에 붙인다
+        cancelled=self._operator_cancel(now)
         if app and self.output_permitted:
             p=self.prepared[self.active_vm,app]
             if self.mode is Mode.AUTO and p.state!='READY' and p.reason in ('INPUT_UNAVAILABLE','INPUT_STALE','INPUT_INVALID','MAP_UNAVAILABLE','OBSERVATION_EXPIRED') and self._qualified(self.active_vm,MANUAL_APP,now,held=True):
@@ -286,5 +302,5 @@ class VerifiedDriveMachine(ControlMachine):
                 self._authorized=True
                 target_mode=Mode.AUTO if self.mode is Mode.AUTO_READY or self._resume_auto else Mode.MANUAL if self.mode is Mode.SAFE_STOP else self.mode
                 actions=self._change(target_mode,self._resume_vm,'resume_requested',now,arm=True)
-        if not actions:actions+=self._resume(now)
-        return actions+self._output(now)
+        if not actions and not cancelled:actions+=self._resume(now)
+        return cancelled+actions+self._output(now)

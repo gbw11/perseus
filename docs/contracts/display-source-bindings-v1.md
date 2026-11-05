@@ -4,7 +4,7 @@
 
 ## 설정
 
-[시험 후보 예제](../../platform/services/display/router/examples/integration-candidate-bindings.json)는 `schema_version: 1`, `scope: candidate`, `bindings` 배열로 구성한다. 세 UUID는 합성 값이며 실제 VM 등록값이 아니다. VM1→autonomous, VM2→manual은 사용자 승인 **시험 후보**이고 실제 주·백업 배치는 담당 확인이 필요하다. VM3는 Debian/interaction/message-board 후보이며 message-board 송신 구현은 별도 의존성이다.
+[시험 후보 예제](../../platform/services/display/router/examples/integration-candidate-bindings.json)는 `schema_version: 1`, `scope: candidate`, `bindings` 배열로 구성한다. 세 UUID는 합성 값이며 실제 VM 등록값이 아니다. VM1→autonomous, VM2→manual은 사용자 승인 **시험 후보**이고 실제 주·백업 배치는 담당 확인이 필요하다. VM3는 `expected_os: debian`·`role: interaction`·`app_id: interaction` 후보이다. [MQTT 계약 4장](mqtt-contract-v1.md)에서 `interaction`은 특정 앱 이름이 아닌 인터랙션 VM의 역할 ID이며, 앱 events 토픽은 `xenova/v1/apps/interaction/events`를 사용한다. 실제 앱 송신 구현·배포·보고 수신은 별도 확인 대상이다.
 
 각 항목은 `vm_id`, `role`, `expected_os`, `app_id`, `agent_supported`를 가진다. 정확히 세 항목이 필요하고 UUID·역할·앱 ID 중복, dom0 UUID, 역할과 기대 OS 불일치를 거부한다. 기존 배열 설정은 호환되며 `binding_scope=legacy`로 표시한다. 새 형식의 `deployment`도 작성자의 분류일 뿐 실제 등록 조회에 통과했다는 증거가 아니다.
 

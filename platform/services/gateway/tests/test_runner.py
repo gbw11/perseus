@@ -103,10 +103,10 @@ def test_events_and_fault_published_with_detected_at():
     assert isinstance(sink.frames[-1][1], StopFrame)
 
 
-def test_resume_from_message_board_is_fed():
+def test_resume_from_interaction_is_fed():
     runner, client, clock, _ = make()
     runner.begin()
-    client.deliver(topics.app_events("message-board"), "drive.resume.requested", {"requested_by": "operator"},
+    client.deliver(topics.app_events("interaction"), "drive.resume.requested", {"requested_by": "operator"},
                    vm_id="33333333-3333-4333-8333-333333333333")
     runner.run_once(0)
     # SAFE_STOP 이라 무시된다 — 모드 이벤트는 시작·SAFE_STOP 두 개뿐
@@ -170,11 +170,11 @@ def test_resume_from_console_counts_down_then_auto():
                         {"from": "AUTO_READY", "to": "AUTO", "generation": gen + 1, "reason": "resume_requested"})]
 
 
-def test_resume_from_message_board_cancelled_when_autonomous_lost():
+def test_resume_from_interaction_cancelled_when_autonomous_lost():
     runner, client, clock, _ = auto_ready_runner()
     gen = runner.machine.generation
     client.published.clear()
-    client.deliver(topics.app_events("message-board"), "drive.resume.requested", {"requested_by": "operator"},
+    client.deliver(topics.app_events("interaction"), "drive.resume.requested", {"requested_by": "operator"},
                    vm_id="33333333-3333-4333-8333-333333333333")
     drive(runner, client, clock, 1.0, heartbeat=True)
     drive(runner, client, clock, 0.2, apps=("manual",))
@@ -190,7 +190,7 @@ def test_resume_from_message_board_cancelled_when_autonomous_lost():
 def test_resume_on_other_topic_is_not_fed():
     runner, client, clock, _ = auto_ready_runner()
     client.published.clear()
-    # 주행 앱 토픽에 실린 재개 요청은 받지 않는다 (요청 경로는 메시지 보드·콘솔 둘)
+    # 주행 앱 토픽에 실린 재개 요청은 받지 않는다 (요청 경로는 인터랙션 VM·콘솔 둘)
     client.deliver(topics.app_events("manual"), "drive.resume.requested", {"requested_by": "x"}, vm_id=MANUAL_VM)
     drive(runner, client, clock, 0.02, heartbeat=True)
     assert not [m for _, m, _ in client.published if m == "drive.resume.accepted"]
@@ -201,3 +201,19 @@ def test_legacy_runner_cannot_fall_back_to_unbound_paired_control():
     client, clock, sink = FakeClient(), Clock(), MockSink()
     with pytest.raises(ValueError, match="VerifiedGatewayRunner"):
         GatewayRunner(client, sink, clock=clock, vm_ids=(AUTO_VM, MANUAL_VM))
+
+def test_cancel_from_console_keeps_auto_ready():
+    """운영자 취소 (계약 v1.7, S15P31E110-280). legacy 는 causation 검사 없이 같은 토픽에서 받는다."""
+    runner, client, clock, _ = auto_ready_runner()
+    gen = runner.machine.generation
+    client.published.clear()
+    client.deliver(CONSOLE_RESUME, "drive.resume.requested", {"requested_by": "admin"}, source_id="dom0-server")
+    drive(runner, client, clock, 1.0, heartbeat=True)
+    client.deliver(CONSOLE_RESUME, "drive.resume.cancel_requested", {"requested_by": "admin"}, source_id="dom0-server")
+    drive(runner, client, clock, 3.0, heartbeat=True)
+    assert runner.machine.mode is Mode.AUTO_READY and runner.machine.generation == gen
+    vehicle = [(m, p) for t, m, p in client.published if t == topics.app_events("vehicle")]
+    assert vehicle == [
+        ("drive.resume.accepted", {"switch_in_ms": 3000, "generation": gen, "requested_by": "admin"}),
+        ("drive.resume.cancelled", {"reason": "operator_cancelled", "generation": gen, "requested_by": "admin"}),
+    ]

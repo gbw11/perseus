@@ -1,8 +1,10 @@
 [Unit]
 Description=Xenova Gateway authority and output
 Requires=srv-xenova.mount
-After=srv-xenova.mount xenova-first-boot.service mosquitto.service xenova-vms.service
+After=srv-xenova.mount xenova-first-boot.service mosquitto.service xenova-vms.service xenova-recovery-config.service
 Before=xenova-host-admission.service
+ConditionPathExists=|/run/xenova/gateway-factory.env
+ConditionPathExists=|/etc/xenova/gateway.env
 
 [Service]
 Type=simple
@@ -10,7 +12,8 @@ User=root
 UMask=0077
 RuntimeDirectory=xenova-gateway
 RuntimeDirectoryMode=0700
-EnvironmentFile=/etc/xenova/gateway.env
+EnvironmentFile=-/run/xenova/gateway-factory.env
+EnvironmentFile=-/etc/xenova/gateway.env
 ExecStart=/usr/bin/python3 -m xenova_gateway
 Restart=no
 

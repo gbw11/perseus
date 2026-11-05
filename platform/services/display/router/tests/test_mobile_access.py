@@ -64,6 +64,7 @@ def test_wrong_origin_or_missing_origin_does_not_consume_a_code(link):
     client, _, pairing, *_ = link
     assert client.post("/connect", data={"code": "123456"}).status_code == 403
     assert client.post("/connect", data={"code": "123456"}, headers={"Origin": "http://other.invalid"}).status_code == 403
+    assert client.post("/connect", data={"code": "123456"}, headers={"Origin": "null"}).status_code == 403
     assert pairing.tries == 0 and pair(link).status_code == 303
 
 
@@ -150,5 +151,5 @@ def test_every_response_prevents_cache_framing_and_referrer_leak(link):
     for path in ("/connect", "/display/mobile", "/api/v1/display/presentation"):
         response = client.get(path)
         assert response.headers["cache-control"] == "no-store"
-        assert response.headers["referrer-policy"] == "no-referrer"
+        assert response.headers["referrer-policy"] == ("same-origin" if path == "/connect" else "no-referrer")
         assert response.headers["x-frame-options"] == "DENY"

@@ -290,6 +290,7 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 | `DELETE` | `/api/v1/vms/{vm_id}` | `204` | `400`, `401`, `404`, `409`, `500`, `501`, `503`, `504` |
 | `GET` | `/api/v1/cpu-layout` | `200` CPU 배치 (4.11) | `401`, `500`, `501`, `503`, `504` |
 | `GET` | `/api/v1/vms/{vm_id}/cpu-layout` | `200` CPU 배치 (4.11) | `400`, `401`, `404`, `500`, `501`, `503`, `504` |
+| `PUT` | `/api/v1/vms/{vm_id}/resources` | `200` 자원 변경 결과 (4.12) | `400`, `401`, `404`, `409`, `500`, `501`, `503`, `504` |
 | `GET` | `/healthz` | `200` | `401`, `503` |
 
 `/healthz` 를 뺀 모든 엔드포인트는 선택 헤더 `X-Request-Budget-Ms`(요청 예산, 4.9)를 받는다.
@@ -310,7 +311,7 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 - Linux IP는 Spring이 전달하지 않는다. 플랫폼이 전역 잠금 안에서 IP 풀과 registry를 확인해 빈 주소를 자동 할당한다.
 - 플랫폼 `create`에는 Spring 발급 `vm_id`, 요청의 표시 이름 `name`, 템플릿 ID·버전, vcpus·memory_mib를 보낸다. 내부 실행 이름(`vm-<hex>`)·MAC·IP는 플랫폼이 발급하고, IP가 바닥나면 플랫폼 `IP_POOL_EXHAUSTED`를 `507 InsufficientResources`(`resource.name=ipv4`)로 낸다. 플랫폼 `INVALID_SPEC`은 `400 InvalidArgument`다.
 
-**Spring 불변조건** — 동일한 `vm_id`에는 항상 동일한 생성 명세를 전송한다. 플랫폼은 registry의 기존 생성 명세와 비교해 위반을 거부한다.
+**Spring 불변조건** — 동일한 `vm_id`에는 항상 동일한 생성 명세를 전송한다. 플랫폼은 registry의 기존 생성 명세와 비교해 위반을 거부한다. 단 `vcpus`·`memory_mib` 는 최초 명세가 아니라 **지금 등록 설정**과 비교한다. 자원 변경(4.12) 뒤 재시작은 바뀐 값(`200` 응답의 `after`)으로 보낸다.
 
 <a id="lower-create-compatibility"></a>
 2026-11-01 하위 호환 보완: 위 **기존 완전 명시 HTTP 요청은 그대로 유효**하며 endpoint·header·
@@ -321,7 +322,7 @@ Spring은 3.1의 네 상태에 `stopped`를 더해 다섯 상태를 공개합니
 처리하고 호출자에게 journal 버전/파일 해석/변환을 요구하지 않는다. HTTP/화면의 선택적 생략
 지원은 아직 별도 담당 확장이다. 실행 중 VM의 기존 409와 등록 후 start 의미는 바꾸지 않는다.
 
-- 도메인이 없고 등록된 디스크만 있을 때(재시작)는 요청 명세가 기록된 최초 명세와 다르면 `409 VMExists`로 거부한다(1.4절 "다른 최초 명세는 충돌"). 같은 명세면 `201`로 재시작한다.
+- 도메인이 없고 등록된 디스크만 있을 때(재시작)는 요청 명세가 기록된 명세와 다르면 `409 VMExists`로 거부한다(1.4절 "다른 최초 명세는 충돌"). 템플릿 ID·버전은 최초 명세와, `vcpus`·`memory_mib` 는 지금 등록 설정(4.12 변경 반영)과 비교한다. 같은 명세면 `201`로 재시작한다.
 
 `start` 엔드포인트는 두지 않습니다. 꺼진 VM의 재시작은 같은 `vm_id`로 이 엔드포인트를 재호출하는 방식이며, 디스크가 보존되어 있으므로 데이터는 유지됩니다.
 
@@ -479,6 +480,54 @@ Spring의 페이지 규칙: (1) `gap: true`면 경고(`WARN`)로 `recovery.faile
 - `exclusive_verified` 는 관측 시점의 hard affinity 중복 검사다. IRQ·캐시·메모리·I/O 격리나 실시간 보장이 아니다.
 - CPU 정책이 없는 드라이버(mock 등)와 `cpu-layout` 을 모르는 옛 Manager 는 `501`.
 
+
+### 4.12 `PUT /api/v1/vms/{vm_id}/resources` — 정지한 Linux VM 의 vCPU·메모리 변경
+
+정지한 Linux VM 의 등록 설정에서 vCPU 수와 메모리를 바꾼다. 실행 중인 게스트를 바꾸지 않으며(hotplug·balloon 없음) **다음 시작부터** 적용된다. 게스트를 시작하지 않는다. 플랫폼 `update-resources` 한 번이다.
+
+- 헤더 `Idempotency-Key` **필수**(ASCII 가시 문자 1..200자). 없거나 형식이 틀리면 `400`. 최초 전송 전에 정하고 재전송에 같은 값을 쓴다.
+- 본문 `{"vcpus": 2, "memory_mib": 768}`. 두 필드 모두 필수. **범위는 vcpus 1..4, memory_mib 128..1024** 다(플랫폼 하한 128, API 상한 1024). 템플릿별 하한(Debian 256, Ubuntu 512)은 Spring 이 더 검사한다.
+- 성공 `200`:
+
+```json
+{
+  "vm_id": "550e8400-e29b-41d4-a716-446655440000",
+  "operation_id": "5d1c0a2e-7b3f-4c1e-9a55-2f8e6b1d4c70",
+  "before": { "vcpus": 1, "memory_mib": 512 },
+  "after": { "vcpus": 2, "memory_mib": 768 },
+  "applies_on_next_start": true
+}
+```
+
+  같은 키·같은 본문의 재전송도 `200` 이고 원 결과(같은 `operation_id`·`before`·`after`)다. `operation_id` 는 플랫폼에서 항상 UUID 이고, 작업 기록이 없는 mock 만 `null` 이다.
+- 대상: 등록된 **Linux** VM, 도메인이 없고 의도가 `stopped`. Zephyr 는 펌웨어 프로필이 고정이라 `400`.
+- 처리 순서: dom0-manager 는 같은 키의 원 작업을 **자산 원장(asset operation)과 제어 원장(stop·reboot) 둘 다**에서 먼저 찾는다. 키는 동작·VM 전체에서 하나의 요청만 가리킨다.
+  - 같은 VM·같은 값의 원 자원 변경이 있으면 원 요청을 그대로 다시 보낸다(완료면 원 결과, 미완료면 같은 작업을 이어 간다). 반영 뒤에는 설정 해시가 바뀌므로 지금 값으로 요청을 다시 만들지 않는다.
+  - 같은 키가 다른 VM·다른 값·다른 동작(stop·reboot·retire 등)의 원 작업이면 `409 VMExists` 이고 아무것도 보내지 않는다.
+  - 원 작업이 없으면 지금 등록의 generation·설정 해시를 기대값으로 신규 제출한다.
+  - 키 조회를 지원하지 않는 옛 Manager 면 신규·재전달을 가를 수 없어 `501` 이고 아무것도 보내지 않는다.
+  - 두 원장을 따로 조회하는 것은 플랫폼이 원장 전체의 키 충돌을 보장하기 전까지의 방안이다. 같은 키의 동시 제출 경합은 막지 못한다.
+- `TARGET_CHANGED`(조회와 제출 사이에 설정·세대가 바뀜)를 받으면 dom0-manager 가 같은 키의 원 작업을 다시 찾는다. 원 작업이 있으면 같은 키로 이어서 끝내고, 없음이 확인됐을 때만 `409 InvalidState`(`platform_code=TARGET_CHANGED`)다. 이때만 호출자는 VM 을 다시 읽고 바꿀지 정한 뒤 **새 키**를 쓴다. 다시 찾지 못하면 `503`(같은 키로 재전송).
+- 응답을 잃으면 **같은 키·같은 본문**으로 다시 보낸다. 새 키를 만들면 이중 변경이 될 수 있다.
+- 요청 예산(4.9): 원 작업 조회는 예산 안에서 하고, 하위 `update-resources` 는 `budget_ms` 를 받지 않는다. **`504` 는 제출 전에 예산이 끝났을 때만**이며 아무것도 바뀌지 않았다. 제출한 뒤에는 바뀌었을 수 있으므로 `504` 로 답하지 않는다(제출 뒤 시한 초과는 `503`, 같은 키로 재전송).
+- 오류:
+
+| HTTP / `code` | `platform_code` | 경우 |
+|---|---|---|
+| `400 InvalidArgument` | — / `RESOURCE_UNSUPPORTED` | 범위 밖, 키 없음·형식 오류, nil UUID / Zephyr·플랫폼 범위 밖 |
+| `404 VMNotFound` | `VM_NOT_FOUND` | 등록 없음 |
+| `409 InvalidState` | — / `VM_NOT_STOPPED` / `INTENT_MISMATCH` / `TARGET_CHANGED` / `ASSET_IN_USE` | 도메인이 있음(실행·paused·crashed·stopping: 먼저 정지) / 의도가 stopped 아님 / 설정·세대가 바뀌었고 원 작업 없음 / 자산 사용 중 |
+| `409 VMExists` | — / `IDEMPOTENCY_CONFLICT` | 같은 키가 다른 요청의 원 작업 |
+| `503 PlatformUnavailable` | `OPERATION_IN_PROGRESS` / `RECONCILE_REQUIRED` / `RECOVERY_REQUIRED` / `STORAGE_UNAVAILABLE` | 다른 플랫폼 작업 진행 중(같은 키로 재시도) / 미해결 제어·복구·실행이 VM 을 소유 / 원 작업 미완료(같은 키로 재전송하면 이어 감) / 저장소 장애 |
+| `504 DriverTimeout` | `DEADLINE_EXCEEDED` | 제출 전 예산 만료. 바뀐 것 없음 |
+| `501 NotSupported` | — / `INVALID_SPEC` | 자원 변경을 제공하지 않는 드라이버, 키 조회를 모르는 옛 Manager |
+
+- 플랫폼 응답은 그대로 믿지 않는다. 원 작업의 키·동작(`update-resources`)·`vm_id`·요청이 보낸 것과 같고, 봉투와 기록의 `operation_id` 가 같은 UUID 이고, 상태가 완료이고, `after` 가 요청값이고, `before`·`after` 가 정수(bool 아님)·플랫폼 범위 안이고, `starts_guest` 가 `false` 여야 한다. 하나라도 어긋나면 `503` 이다. 원 작업 조회 기록이 어긋나도 `503` 이고 아무것도 보내지 않는다.
+- Spring 은 `200` 의 `after` 로 자기 VM 레코드의 `vcpus`·`memory_mib` 를 갱신한다. 꺼진 VM 의 공개 값은 Spring 레코드 값이고(2.2), 재시작(4.2)에도 이 값을 보낸다.
+- CPU 배치는 바꾸지 않는다. 플랫폼 CPU 정책이 다음 시작 때 모든 vCPU 에 같은 마스크를 적용·검증한다(4.11 로 확인).
+- 범위 밖: 실행 중 vCPU 핀·스케줄러 가중치·메모리 변경(플랫폼 미지원), CPU 배치 정책 변경(모든 게스트 정지가 필요한 유지보수 작업, 플랫폼 `cpu-policy-set`).
+- mock 드라이버: 등록됐고 실행 중이 아닌 VM 의 값을 바꾸고 `200`(`operation_id: null`). 같은 키·같은 값은 원 결과, 다른 값은 `409 VMExists`.
+
 ---
 
 ## 5. Spring 공개 API
@@ -556,7 +605,7 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 | `404` | `OperationNotFound` | 요청 키로 원 제어 작업을 찾지 못함 (4.8). 검색 부재이며 미수락의 증거가 아님 |
 
 플랫폼이 제어 요청을 수락(완료 포함)했다고 하면서 유효한 원 작업 ID 를 주지 않으면 `503 PlatformUnavailable` 이다. 조회(4.8)한 원 기록은 정확히 "이 VM·이 키의 graceful stop·reboot" 이어야 한다: 작업 ID 가 유효하고 봉투의 값과 같음, 기록과 요청의 `vm_id` 가 조회 VM, 요청이 `stop`·`reboot`(force 없음), `idempotency_key` 가 조회 키, 단계가 알려진 값. 하나라도 어긋나면 하위 버전 불일치·기록 손상으로 보고 `503` 이다. 추적할 수 없거나 다른 작업인 기록을 `200`·`202` 로 꾸미지 않는다.
-| `409` | `VMExists` | `vm_id` 충돌 (단일 의미) |
+| `409` | `VMExists` | `vm_id` 충돌. 자원 변경(4.12)에서는 같은 `Idempotency-Key` 가 다른 요청의 원 작업 |
 | `507` | `InsufficientResources` | 가용 자원 부족. `resource.name`: `memory_mib`, `vcpus`, `ipv4`(플랫폼 Linux IP 풀 고갈, `IP_POOL_EXHAUSTED`) |
 | `401` | `Unauthorized` | Bearer 서비스 토큰 없음·불일치 (`/healthz` 포함) |
 | `501` | `NotSupported` | 드라이버·플랫폼이 제공하지 않는 동작. xen 모드의 생성·정지·삭제 명령 |
@@ -604,7 +653,7 @@ retire는 복구 가능성을 위해 디스크를 보존하고, 실제 공간 �
 
 FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환하므로 `400 InvalidArgument`로 정규화합니다. 예외 핸들러 교체만으로는 부족하며, **생성 스키마에서 422 응답 정의와 `HTTPValidationError` 모델까지 제거**해야 OpenAPI 차이 검사가 통과합니다.
 
-`VMExists`는 `vm_id` 충돌 단일 의미입니다. 정지된 등록 VM에 다른 생성 명세가 와도 `409 VMExists`입니다(4.2절). dom0-manager는 표시 이름을 모르므로 이름 중복은 Spring이 판정합니다.
+`VMExists`는 생성에서 `vm_id` 충돌 단일 의미입니다. 정지된 등록 VM에 다른 생성 명세가 와도 `409 VMExists`입니다(4.2절). 자원 변경(4.12)에서는 같은 키가 다른 요청의 원 작업이라는 뜻입니다. dom0-manager는 표시 이름을 모르므로 이름 중복은 Spring이 판정합니다.
 
 ### 8.2 Spring
 
@@ -654,7 +703,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | `name` | 1~63자, 한글·공백 허용. 제어문자·줄 구분 문자와 앞뒤 공백 금지 | Spring 소유, create 전달 경로에서 동일 규칙 검증 |
 | `vm_id` | UUID. nil UUID(`00000000-…`)는 Domain-0이므로 모든 엔드포인트에서 `400 InvalidArgument` | dom0-manager (백엔드가 막는 것과 별개로 거부) |
 | `vcpus` | 1~4 | Spring, dom0-manager |
-| `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16) | 템플릿별 하한은 Spring, 템플릿별 범위(`resource_limits`)는 플랫폼 카탈로그가 create 때 검사(벗어나면 `400 InvalidArgument`), 공통 범위는 dom0-manager |
+| `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16). 자원 변경(4.12)은 128~1024 | 템플릿별 하한은 Spring, 템플릿별 범위(`resource_limits`)는 플랫폼 카탈로그가 create 때 검사(벗어나면 `400 InvalidArgument`), 공통 범위는 dom0-manager. 자원 변경의 하한 128 은 플랫폼 `update-resources` 범위 |
 | 배수 제약 | 없음. 화면 입력만 64 단위 | — |
 | `template_id` | 공개 카탈로그 ID·버전을 그대로 전달 | Spring 목록 검사 + 플랫폼의 정확한 ID·버전·해시 검사 |
 | `role` | 선택. `autonomous` / `manual` / `interaction` 또는 `null` (대소문자 구분). 그 밖의 값은 `422 VALIDATION_ERROR` (`field: role`) | Spring 소유 (생성·`PATCH`) |
@@ -757,3 +806,4 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1.15 | 2026-10-27 | `role` 허용값 `message-board` 를 `interaction` 으로 바꾼다(2.2·5장, MQTT 계약 v1.4 의 app_id 변경). 예전 값은 `422 VALIDATION_ERROR` (S15P31E110-303) |
 | v1.16 | 2026-10-27 | 정지 요청 추적(S15P31E110-305): stop 의 선택 헤더 `Idempotency-Key` 와 작업 상태 응답 `200`·`202`(4.3.1), 원 작업 조회 `GET /api/v1/vms/{vm_id}/control-operations`(4.8), `/healthz` 를 뺀 전 엔드포인트의 선택 요청 예산 `X-Request-Budget-Ms`(4.9, 잠금 대기·하위 호출·xl·xentop), 오류 본문 `retryable`·`operation`, 오류 코드 `404 OperationNotFound`(8.1). 키·예산이 없는 기존 호출의 응답은 그대로 |
 | v1.17 | 2026-11-02 | Spring 런타임 캐시(S15P31E110-344): `GET /api/v1/vms`·단건 조회는 마지막 dom0 목록으로 답하고 `observed_at`은 그 목록의 관측 시각, 전용 갱신 루프(조회 후 1초), stale-limit 10초 초과 시 직접 조회·실패 시 오류(5장). 필드 변경 없음 |
+| v1.18 | 2026-11-04 | 정지한 Linux VM 의 자원 변경 `PUT /api/v1/vms/{vm_id}/resources`(4.12, S15P31E110-368): 필수 `Idempotency-Key`, 범위 vcpus 1..4·memory_mib 128..1024, 다음 시작부터 적용, 자산·제어 원장 키 조회, `TARGET_CHANGED` 뒤 원 작업 재확인. 재시작(4.2)의 자원 비교 기준을 지금 등록 설정으로 바꾼다. 실행 중 핀·가중치·메모리 변경은 범위 밖 |

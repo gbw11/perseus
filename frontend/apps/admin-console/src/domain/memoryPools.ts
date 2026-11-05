@@ -6,10 +6,6 @@ export const MEMORY_POOL_METRICS = {
   capacity: 'memory.region.capacity_bytes',
   rxPackets: 'network.netfront.rx_packets',
   txPackets: 'network.netfront.tx_packets',
-  rxDrop: 'network.netfront.rx_drop',
-  txDrop: 'network.netfront.tx_drop',
-  poolBusy: 'network.netfront.pool_busy',
-  protocolErrors: 'network.netfront.protocol_errors',
 } as const;
 
 export type PoolRegion = 'net_rx_data' | 'net_tx_data';
@@ -36,20 +32,11 @@ export interface PacketRatePoint {
   txPacketsPerSecond: number | null;
 }
 
-export interface RecentCounterDeltas {
-  intervalSeconds: number | null;
-  rxDrop: number | null;
-  txDrop: number | null;
-  poolBusy: number | null;
-  protocolErrors: number | null;
-}
-
 export interface MemoryPoolSeries {
   rx: PoolSnapshot;
   tx: PoolSnapshot;
   usage: PoolUsagePoint[];
   packetRates: PacketRatePoint[];
-  counters: RecentCounterDeltas;
   lastObservedAt: string | null;
 }
 
@@ -58,10 +45,6 @@ interface CounterSnapshot {
   bootId: string | null;
   rxPackets: number | null;
   txPackets: number | null;
-  rxDrop: number | null;
-  txDrop: number | null;
-  poolBusy: number | null;
-  protocolErrors: number | null;
 }
 
 const EMPTY_POOL: PoolSnapshot = {
@@ -109,26 +92,7 @@ export function buildMemoryPoolSeries(samples: MetricSample[]): MemoryPoolSeries
     });
   }
 
-  const previous = counters.at(-2);
-  const current = counters.at(-1);
-  const seconds = previous && current ? elapsedSeconds(previous.observedAt, current.observedAt) : null;
-  const sameBoot =
-    !!previous && !!current && (!previous.bootId || !current.bootId || previous.bootId === current.bootId);
-
-  return {
-    rx,
-    tx,
-    usage,
-    packetRates,
-    counters: {
-      intervalSeconds: sameBoot ? seconds : null,
-      rxDrop: sameBoot ? delta(previous?.rxDrop, current?.rxDrop) : null,
-      txDrop: sameBoot ? delta(previous?.txDrop, current?.txDrop) : null,
-      poolBusy: sameBoot ? delta(previous?.poolBusy, current?.poolBusy) : null,
-      protocolErrors: sameBoot ? delta(previous?.protocolErrors, current?.protocolErrors) : null,
-    },
-    lastObservedAt,
-  };
+  return { rx, tx, usage, packetRates, lastObservedAt };
 }
 
 export function bytesToKiB(bytes: number): number {
@@ -173,10 +137,6 @@ function counterSnapshot(sample: MetricSample): CounterSnapshot {
     bootId: sample.boot_id ?? null,
     rxPackets: metricNumber(sample.values, MEMORY_POOL_METRICS.rxPackets),
     txPackets: metricNumber(sample.values, MEMORY_POOL_METRICS.txPackets),
-    rxDrop: metricNumber(sample.values, MEMORY_POOL_METRICS.rxDrop),
-    txDrop: metricNumber(sample.values, MEMORY_POOL_METRICS.txDrop),
-    poolBusy: metricNumber(sample.values, MEMORY_POOL_METRICS.poolBusy),
-    protocolErrors: metricNumber(sample.values, MEMORY_POOL_METRICS.protocolErrors),
   };
 }
 
@@ -199,7 +159,7 @@ function rate(previous: number | null, current: number | null, seconds: number |
   return change == null || seconds == null ? null : change / seconds;
 }
 
-function delta(previous: number | null | undefined, current: number | null | undefined): number | null {
+function delta(previous: number | null, current: number | null): number | null {
   if (previous == null || current == null || current < previous) return null;
   return current - previous;
 }

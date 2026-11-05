@@ -1,0 +1,13 @@
+[Unit]
+Description=Supply local Recovery Worker and factory Gateway configuration
+Requisite=xenova-first-boot.service
+After=xenova-first-boot.service
+Before=xenova-recovery-worker.service xenova-gateway.service
+RequiresMountsFor=/srv/xenova
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -m dom0_manager.recovery_host_config
+RemainAfterExit=yes
+TimeoutStartSec=20
+UMask=0077

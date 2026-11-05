@@ -1,0 +1,53 @@
+{
+  "server_started": true,
+  "url": "http://127.0.0.1:18756/display/mobile",
+  "synthetic_only": true,
+  "phase": "applied",
+  "feed_available": true,
+  "sequence": 145,
+  "test_clock_offset_s": 28922.0,
+  "code_remaining_s": 1,
+  "session_valid": true,
+  "requests": {
+    "GET /display/mobile 303": 2,
+    "GET /connect 200": 2,
+    "POST origin expected": 4,
+    "POST /connect 401": 2,
+    "POST /connect 303": 2,
+    "GET /display/mobile 200": 2,
+    "GET /assets/index-DolEQKKr.css 200": 2,
+    "GET /assets/index-Dnfi9W5P.js 200": 2,
+    "GET /assets/MobilePage-CUfO5ApN.css 200": 2,
+    "GET /assets/MobilePage-CNxc269B.js 200": 2,
+    "GET /display/favicon.png 404": 1,
+    "GET /assets/xenova-logo-NjuEsEqP.png 200": 2,
+    "GET /api/v1/display/presentation 200": 145,
+    "GET /api/v1/display/presentation 401": 26,
+    "GET /api/v1/display/presentation 503": 13
+  },
+  "upstream_requests": {
+    "/display/mobile": 2,
+    "/assets/index-Dnfi9W5P.js": 2,
+    "/assets/index-DolEQKKr.css": 2,
+    "/assets/MobilePage-CNxc269B.js": 2,
+    "/assets/MobilePage-CUfO5ApN.css": 2,
+    "/assets/xenova-logo-NjuEsEqP.png": 2,
+    "/api/v1/display/presentation": 158
+  },
+  "operations": [
+    "code",
+    "expire-code",
+    "rotate",
+    "code",
+    "applied",
+    "expire-session",
+    "rotate",
+    "code",
+    "fail-feed",
+    "recover-feed",
+    "stop"
+  ],
+  "listener_closed": true,
+  "product_code_seconds": 120,
+  "product_session_seconds": 28800
+}

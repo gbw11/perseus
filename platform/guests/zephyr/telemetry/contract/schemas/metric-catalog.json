@@ -142,7 +142,10 @@
       "kind": "gauge",
       "encoding": "u64_decimal",
       "family": "network",
-      "labels": ["interface", "counter_epoch"],
+      "labels": [
+        "interface",
+        "counter_epoch"
+      ],
       "source": "Diagnostics cached netfront RX byte rate",
       "meaning_ko": "같은 ring 세대의 두 유효 관측 사이 RX 바이트 차이를 실제 경과 시간으로 나눈 정수 초당 수신률"
     },
@@ -372,6 +375,147 @@
       ],
       "source": "fixed net_buf data payload pool occupancy",
       "meaning_ko": "RX/TX 데이터 block payload만 포함; descriptor·padding·전체 RAM 제외"
+    },
+    {
+      "name": "memory.firmware.ram_region_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory",
+      "labels": [],
+      "source": "fixed xenvm linker symbols / CONFIG_SRAM_SIZE",
+      "meaning_ko": "CONFIG_SRAM_SIZE가 선언한 xenvm 물리 page-frame 관리 범위. 같은 memory payload의 total-free로 Zephyr 관리 RAM 확보량을 계산할 때 분모로 사용. 실제 Xen 할당 관측이나 VM 전체 실사용률이 아님"
+    },
+    {
+      "name": "memory.firmware.mapped_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory",
+      "labels": [],
+      "source": "fixed xenvm linker symbols / CONFIG_SRAM_SIZE",
+      "meaning_ko": "ARM 링크 심볼 z_mapped_start..z_mapped_end의 firmware 매핑 범위. 코드·데이터·고정 풀·스택·정렬 포함; 전체 VM 사용량이 아님"
+    },
+    {
+      "name": "memory.firmware.static_data_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory",
+      "labels": [],
+      "source": "fixed xenvm linker symbols / CONFIG_SRAM_SIZE",
+      "meaning_ko": "ARM 링크 심볼 _image_ram_start.._image_ram_end의 RAM 데이터 예약 범위. mapped_bytes의 부분집합이며 힙·풀·스택 예약을 이미 포함"
+    },
+    {
+      "name": "memory.page_allocator.free_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "memory",
+      "labels": [],
+      "source": "fixed Zephyr k_mem_free_get",
+      "meaning_ko": "고정 Zephyr k_mem_free_get의 free physical frames bytes. 같은 payload/source-pair의 ram_region_bytes에서 빼면 Zephyr 관리 RAM 확보량. mapped/static·heap/pool 예약이 이미 포함되므로 내부 free나 used를 다시 더하지 않음. native 미지원"
+    },
+    {
+      "name": "memory.app.reserved_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "app_memory",
+      "labels": [
+        "region"
+      ],
+      "source": "product drive world/planner and MANUAL input/worker owner metadata, bounded try-lock / atomic publication",
+      "meaning_ko": "소유 구조체의 정적 예약 크기. used/capacity를 포함하며 firmware RAM에 이미 포함. region 간 또는 VM 사용률로 단순 합산 금지"
+    },
+    {
+      "name": "memory.app.used_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "app_memory",
+      "labels": [
+        "region"
+      ],
+      "source": "product drive world/planner and MANUAL input/worker owner metadata, bounded try-lock / atomic publication",
+      "meaning_ko": "AUTO의 map/path payload 슬롯·search 완료 slice·odom ring 점유. MANUAL input은 저장된 입력 길이(무효·만료라도 보관 중이면 유지), pending/running은 실제 소유한 job 슬롯 크기, result는 읽은 뒤에도 보관한 completion 크기. 입력/출력 유효성·READY·출력 허가가 아님"
+    },
+    {
+      "name": "memory.app.free_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "app_memory",
+      "labels": [
+        "region"
+      ],
+      "source": "product drive world/planner and MANUAL input/worker owner metadata, bounded try-lock / atomic publication",
+      "meaning_ko": "같은 region capacity-used. 정적 RAM을 OS에 반환했다는 뜻이 아님"
+    },
+    {
+      "name": "memory.app.capacity_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "app_memory",
+      "labels": [
+        "region"
+      ],
+      "source": "product drive world/planner and MANUAL input/worker owner metadata, bounded try-lock / atomic publication",
+      "meaning_ko": "같은 region의 논리 점유 한도. input은 지정된 수신 payload 상한, pending/running/result는 각각 해당 실제 슬롯 구조 크기. AUTO search는 node_limit × 노드 크기. 별도 scratch·다른 사본·thread stack·전체 VM 메모리를 포함하지 않음"
+    },
+    {
+      "name": "memory.app.high_water_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "app_memory",
+      "labels": [
+        "region"
+      ],
+      "source": "product drive world/planner and MANUAL input/worker owner metadata, bounded try-lock / atomic publication",
+      "meaning_ko": "현재 firmware boot 중 실제 소유 전이에서 기록한 최고 논리 점유. 짧은 MANUAL 계산도 수집 주기 사이의 peak를 보존하며 worker 재시작/결과 읽기로 초기화하지 않음"
+    },
+    {
+      "name": "memory.app.min_free_bytes",
+      "unit": "bytes",
+      "kind": "gauge",
+      "encoding": "u64_decimal",
+      "family": "app_memory",
+      "labels": [
+        "region"
+      ],
+      "source": "product drive world/planner and MANUAL input/worker owner metadata, bounded try-lock / atomic publication",
+      "meaning_ko": "현재 boot의 capacity-high_water. 현재 여유나 전체 VM 가용량이 아님"
+    },
+    {
+      "name": "memory.app.capacity_failure_total",
+      "unit": "count",
+      "kind": "raw_counter",
+      "encoding": "u64_decimal",
+      "family": "app_memory",
+      "labels": [
+        "region"
+      ],
+      "source": "product drive world/planner and MANUAL input/worker owner metadata, bounded try-lock / atomic publication",
+      "meaning_ko": "소유자의 실제 슬롯/노드 한도 확보 실패 누적. lock busy·신원 counter exhaustion·odometry 덮어쓰기는 공간 부족으로 세지 않음",
+      "raw_bits": 64
+    },
+    {
+      "name": "memory.app.contention_total",
+      "unit": "count",
+      "kind": "raw_counter",
+      "encoding": "u64_decimal",
+      "family": "app_memory",
+      "labels": [
+        "region"
+      ],
+      "source": "product drive world/planner and MANUAL input/worker owner metadata, bounded try-lock / atomic publication",
+      "meaning_ko": "제품의 실제 업무 lock 획득 실패 원 누계. 진단 getter/probe의 BUSY는 제외하고 search는 0. manual_pending/running/result는 같은 MANUAL worker 교환 offer/read counter이므로 합산 금지. manual_input은 업무 xd_io_snapshot의 32-bit wrapping atomic_t 비트 패턴을 u64 decimal로 노출하며 감소 시 불연속 처리. 나머지는 기존 64-bit 원천",
+      "raw_bits": 64,
+      "raw_bits_by_region": {
+        "manual_input": 32
+      }
     }
   ]
 }

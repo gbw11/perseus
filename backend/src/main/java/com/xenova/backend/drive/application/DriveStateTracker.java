@@ -46,6 +46,8 @@ public class DriveStateTracker {
     static final long RESUME_SWITCH_MS = 3000;
     /** A countdown the gateway never finished (no mode change arrived) disappears this long after its end. */
     static final long RESUME_GRACE_MS = 2000;
+    // How long the last drive.resume.cancelled stays in the snapshot.
+    static final long RESUME_CANCEL_VISIBLE_MS = 10_000;
 
     private static final Pattern APP_EVENTS = Pattern.compile("^xenova/v1/apps/([^/+#\\s]+)/events$");
     private static final Pattern VM_APP_EVENTS = Pattern.compile("^xenova/v1/vms/([^/]+)/apps/([^/+#\\s]{1,64})/events$");
@@ -63,9 +65,12 @@ public class DriveStateTracker {
     private ConnectionState mqttConnection = ConnectionState.UNKNOWN;
     private long mqttGeneration;
     private Stamped control;
+    // message_id of the vehicle.control envelope in `control`: the gateway binds resume requests to it (causation_id).
+    private String controlMessageId;
     private Stamped vehicle;
     private Stamped perception;
     private Stamped resume;
+    private Stamped resumeCancel;
     private final Deque<Long> perceptionTimes = new ArrayDeque<>();
     private final Map<String, AppTrack> apps = new TreeMap<>();
     private final LinkedHashMap<VmAppKey, VmAppTrack> vmApps = new LinkedHashMap<>();
@@ -133,6 +138,7 @@ public class DriveStateTracker {
 
         if (CONTROL_TOPIC.equals(topic)) {
             control = new Stamped(body, now, publisher, mqttGeneration);
+            controlMessageId = text(envelope, "message_id");
             if (!"AUTO_READY".equals(text(body, "mode"))) {
                 resume = null;
             }
@@ -221,11 +227,15 @@ public class DriveStateTracker {
             }
             case "drive.resume.accepted" -> {
                 resume = new Stamped(body, now, publisher, mqttGeneration);
+                resumeCancel = null;
                 version++;
                 return Optional.of(new DriveNotice(type, publisher, body));
             }
             case "drive.resume.cancelled", "drive.mode.changed" -> {
                 resume = null;
+                if ("drive.resume.cancelled".equals(type)) {
+                    resumeCancel = new Stamped(body, now, publisher, mqttGeneration);
+                }
                 version++;
                 return Optional.of(new DriveNotice(type, publisher, body));
             }
@@ -289,6 +299,22 @@ public class DriveStateTracker {
         return version;
     }
 
+    /**
+     * The vehicle.control publication a resume or cancel request must refer to (contract §5.2 verified profile):
+     * the envelope message_id goes into causation_id and the generation into expected_generation. Empty when there
+     * is no control from the current MQTT connection.
+     */
+    public synchronized Optional<ControlContext> controlContext() {
+        if (control == null || controlMessageId == null || mqttConnection != ConnectionState.CONNECTED
+                || control.mqttGeneration != mqttGeneration) {
+            return Optional.empty();
+        }
+        return Optional.of(new ControlContext(controlMessageId, longOrNull(control.body, "generation")));
+    }
+
+    public record ControlContext(String messageId, Long generation) {
+    }
+
     public synchronized DriveState snapshot() {
         long now = monotonicMillis.getAsLong();
         Map<String, DriveState.App> appViews = new LinkedHashMap<>();
@@ -296,7 +322,7 @@ public class DriveStateTracker {
         return new DriveState(
                 version, clock.instant(), transportSource(), controlView(now), vehicleView(now), appViews,
                 perceptionView(now),
-                resumeView(now), vmAppViews(now));
+                resumeView(now), resumeCancelView(now), vmAppViews(now));
     }
 
     private Map<String, Map<String, DriveState.VmApp>> vmAppViews(long now) {
@@ -441,6 +467,15 @@ public class DriveStateTracker {
                 p.path("obstacles").isArray() ? p.path("obstacles").size() : 0, p.path("stop").asBoolean(false));
     }
 
+    private DriveState.ResumeCancel resumeCancelView(long now) {
+        if (resumeCancel == null || resumeCancel.mqttGeneration != mqttGeneration
+                || now - resumeCancel.at > RESUME_CANCEL_VISIBLE_MS) {
+            return null;
+        }
+        return new DriveState.ResumeCancel(text(resumeCancel.body, "reason"), text(resumeCancel.body, "requested_by"),
+                longOrNull(resumeCancel.body, "generation"), now - resumeCancel.at);
+    }
+
     private DriveState.Resume resumeView(long now) {
         if (resume == null) {
             return null;
@@ -454,7 +489,8 @@ public class DriveStateTracker {
         if (ago > total + RESUME_GRACE_MS) {
             return null;
         }
-        return new DriveState.Resume(longOrNull(resume.body, "generation"), total, ago, Math.max(0, total - ago));
+        return new DriveState.Resume(longOrNull(resume.body, "generation"), total, ago, Math.max(0, total - ago),
+                text(resume.body, "requested_by"));
     }
 
     // ---- helpers ------------------------------------------------------------------------------------

@@ -188,9 +188,12 @@ def bootstrap_execution(platform, record, *, deadline, store_factory=None, obser
     api=bootstrap_api()
     fields=('vm_id','host_boot_id','execution_id','domid','xen_unique_id')
     applied=[]
+    previous_live=None
+
     def current():
         if platform.clock()>=deadline:raise TimeoutError('execution supply budget expired')
-        row=(observe or (lambda:binding(platform,record['uuid'],timeout_s=min(2,deadline-platform.clock()))))()
+        row=(observe or (lambda:binding(platform,record['uuid'],timeout_s=min(2,deadline-platform.clock()),
+                                        wait_for_live=True,previous_live=previous_live)))()
         if row.get('status')!='observed':raise ValueError('current execution is not eligible for provisioning')
         if row.get('signal_profile') is None:raise ValueError('loaded execution profile unavailable; no latest-profile inference')
         profile=validate(row['signal_profile'])
@@ -198,6 +201,7 @@ def bootstrap_execution(platform, record, *, deadline, store_factory=None, obser
         if not applied:applied.append(profile)
         return {key:row[key] for key in fields}
     context=current();profile=applied[0]
+    previous_live=context
     directory=receipt_directory(platform.data,record['uuid'],context['execution_id'],create=True)
     channels=[c for c in ('telemetry','drive') if c in profile['channels']]
     for channel in channels:

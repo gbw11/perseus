@@ -1,0 +1,2 @@
+/* Memory/codec acceptance uses loopback, not a PCI NIC or external network. */
+&eth0 { status = "disabled"; };

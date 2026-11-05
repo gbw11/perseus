@@ -21,7 +21,7 @@ import {
   type VmResources,
 } from '../api/types';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
-import { mockMemoryPoolSamples } from './memoryMetrics';
+import { mockKernelHeapSamples, mockMemoryPoolSamples } from './memoryMetrics';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
@@ -423,17 +423,20 @@ export const handlers = [
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
     if (params.vmId === VM_IDS.autonomous || params.vmId === VM_IDS.manual) {
-      return HttpResponse.json({ items: mockMemoryPoolSamples(String(params.vmId)) });
+      const vmId = String(params.vmId);
+      return HttpResponse.json({ items: [...mockKernelHeapSamples(vmId), ...mockMemoryPoolSamples(vmId)] });
     }
     if (params.vmId !== VM_IDS.interaction) return HttpResponse.json({ items: [] });
     const now = Date.now();
     const items = Array.from({ length: 30 }, (_, i) => {
       const t = now - (29 - i) * 10_000;
       const wave = Math.sin(t / 40_000);
+      const usedBytes = (142 + 10 * wave) * 1024 * 1024;
       return {
         sample_id: `m-${t}`,
         vm_id: VM_IDS.interaction,
-        source: 'agent',
+        boot_id: 'mock-boot-interaction',
+        source: 'guest_agent',
         observed_at: new Date(t).toISOString(),
         values: [
           {
@@ -445,16 +448,40 @@ export const handlers = [
           },
           {
             name: 'memory_used_bytes',
-            value: (142 + 10 * wave) * 1024 * 1024,
+            value: usedBytes,
             unit: 'bytes',
             labels: null,
             unavailable_reason: null,
           },
           {
+            // MemAvailable 은 페이지 캐시 일부를 포함해 할당량 − 사용량보다 조금 작다
+            name: 'memory_available_bytes',
+            value: 512 * 1024 * 1024 - usedBytes - 24 * 1024 * 1024,
+            unit: 'bytes',
+            labels: null,
+            unavailable_reason: null,
+          },
+          ...(['xvda', 'xvdb'] as const).flatMap((device, d) => [
+            {
+              name: 'disk_read_bytes_total',
+              value: (d === 0 ? 180_000_000 : 4_000_000) + i * (d === 0 ? 96_000 : 4_096),
+              unit: 'bytes',
+              labels: { device },
+              unavailable_reason: null,
+            },
+            {
+              name: 'disk_write_bytes_total',
+              value: (d === 0 ? 62_000_000 : 1_000_000) + i * (d === 0 ? 40_960 : 0),
+              unit: 'bytes',
+              labels: { device },
+              unavailable_reason: null,
+            },
+          ]),
+          {
             name: 'net_rx_bytes_total',
             value: 1_200_000 + i * 8_000,
             unit: 'bytes',
-            labels: null,
+            labels: { iface: 'eth0' },
             unavailable_reason: null,
           },
         ],
@@ -479,10 +506,54 @@ export const handlers = [
       observed_at: new Date().toISOString(),
       stale: false,
       items: [
-        { pid: 412, name: 'message-board', cpu_percent: 4.2, rss_bytes: 48_234_496 },
+        { pid: 412, name: 'interaction', cpu_percent: 4.2, rss_bytes: 48_234_496 },
         { pid: 388, name: 'xenova-agent', cpu_percent: 1.1, rss_bytes: 21_495_808 },
         { pid: 1, name: 'systemd', cpu_percent: 0.2, rss_bytes: 11_010_048 },
       ],
     } as unknown as JsonBodyType);
+  }),
+
+  http.get('*/api/v1/vms/:vmId/threads', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const zephyr = params.vmId === VM_IDS.autonomous || params.vmId === VM_IDS.manual;
+    return HttpResponse.json({
+      vm_id: params.vmId,
+      window_ms: zephyr ? 1000 : null,
+      received_at: zephyr ? new Date().toISOString() : null,
+      stale: !zephyr,
+      threads_status: zephyr ? 'ok' : null,
+      parts_received: zephyr ? 1 : 0,
+      part_count: zephyr ? 1 : null,
+      complete: zephyr,
+      conflicting_pages: false,
+      items: zephyr
+        ? [
+            {
+              thread_id: '1',
+              thread_name: 'telemetry',
+              name_truncated: false,
+              cpu_percent: 1.2,
+              unavailable_reason: null,
+            },
+          ]
+        : [],
+    });
+  }),
+
+  http.get('*/api/v1/vms/:vmId/telemetry/heartbeat', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const known = Object.values(VM_IDS).some((id) => id === params.vmId);
+    return HttpResponse.json({
+      vm_id: params.vmId,
+      status: known ? 'FRESH' : 'UNKNOWN',
+      publisher_state: known ? 'running' : null,
+      last_collection_success_uptime_ms: known ? '12000' : null,
+      last_collection_success_age_ms: known ? 500 : null,
+      collection_failures_total: known ? 2 : null,
+      received_at: known ? new Date().toISOString() : null,
+      age_ms: known ? 0 : null,
+    });
   }),
 ];

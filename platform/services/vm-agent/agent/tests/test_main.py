@@ -22,6 +22,9 @@ class FakeClient:
     def publish_raw(self, topic, data, *, qos, retain, wait_s=None):
         self.raw.append((topic, bytes(data)))
 
+    def subscribe(self, topic_filter, handler=None, *, qos=1):
+        self.subscriptions = getattr(self, "subscriptions", []) + [(topic_filter, handler)]
+
     @property
     def connected(self) -> bool:
         return bool(self.started_with)
@@ -119,3 +122,59 @@ def test_telemetry_can_be_disabled_by_settings():
     settings = AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.05, telemetry_enabled=False)
     assert run(settings, client_factory=lambda s: client, reporter_factory=None, stop=stop, install_signals=False) == 0
     assert client.raw == [] and len(client.published) == 1
+
+
+def test_commands_subscribe_before_connect_and_inventory_lists_them_only_when_enabled():
+    from xenova_agent.__main__ import inventory_commands
+
+    stop = threading.Event()
+    client = FakeClient(stop)
+    order = []
+    client.start = lambda wait_s=None: (order.append("start"), client.started_with.append(wait_s))[1] or True
+    original = client.subscribe
+    client.subscribe = lambda *a, **k: (order.append("subscribe"), original(*a, **k))
+    settings = AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.05, telemetry_enabled=False, state_dir=None)
+    assert run(settings, client_factory=lambda s: client, reporter_factory=None, stop=stop, install_signals=False) == 0
+    assert order == ["subscribe", "start"]
+    assert [t for t, _ in client.subscriptions] == [f"xenova/v1/vms/{VM_ID}/command"]
+    assert inventory_commands(settings) == ()
+    assert inventory_commands(AgentSettings(vm_id=VM_ID, demo_commands=True)) == ("stress", "agent_exit")
+
+
+def test_agent_exit_command_ends_run_with_exit_code_3():
+    """agent_exit 가 PUBACK 확인 뒤 정지를 요청하면 run 은 유닛이 다시 띄우지 않는 종료 코드 3 으로 끝난다."""
+    from datetime import datetime, timedelta, timezone
+
+    from xenova_mqtt import Message
+
+    from xenova_agent.commands import EXIT_CODE
+
+    stop = threading.Event()
+
+    class Client(FakeClient):
+        identity = type("Identity", (), {"boot_id": "boot-1"})()
+
+        def publish(self, topic, message_type, payload, **kwargs):
+            self.published.append((topic, message_type, dict(payload)))
+            if message_type == "agent.heartbeat" and len(self.published) == 1:
+                now = datetime.now(timezone.utc)
+                iso = lambda t: t.isoformat(timespec="milliseconds").replace("+00:00", "Z")  # noqa: E731
+                handler = self.subscriptions[0][1]
+                handler(Message(f"xenova/v1/vms/{VM_ID}/command", {
+                    "schema_version": "1.0", "message_id": "m", "vm_id": VM_ID, "type": "agent.command", "sent_at": iso(now),
+                    "payload": {"command_id": "x-1", "operation_id": None, "expected_boot_id": "boot-1",
+                                "expires_at": iso(now + timedelta(seconds=60)), "action": "agent_exit", "parameters": {}},
+                }))
+            return {}
+
+        def publish_tracked(self, topic, message_type, payload):
+            self.published.append((topic, message_type, dict(payload)))
+            info = type("Info", (), {"is_published": lambda self: True})()
+            return type("Ticket", (), {"info": info})()
+
+    client = Client(stop)
+    settings = AgentSettings(vm_id=VM_ID, heartbeat_interval_s=0.05, telemetry_enabled=False, demo_commands=True, state_dir=None)
+    assert run(settings, client_factory=lambda s: client, reporter_factory=None, stop=stop, install_signals=False) == EXIT_CODE
+    results = [p for _, kind, p in client.published if kind == "agent.command_result"]
+    assert [r["status"] for r in results] == ["ACCEPTED"]
+    assert client.stopped is True

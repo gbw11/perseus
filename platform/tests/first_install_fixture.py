@@ -184,6 +184,7 @@ def platform_root(root):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
     (root/"etc/xenova/dom0-manager.env").chmod(0o600)
+    (root/assemble.deployment_payloads.LOG_ENV).chmod(0o600)
     for dependency in ('fastapi/__init__.py', 'uvicorn/__init__.py', 'paho/mqtt/client.py',
                        'pydantic/__init__.py', 'starlette/__init__.py', 'anyio/__init__.py'):
         target=root/'usr/lib/python3.14/site-packages'/dependency
@@ -207,6 +208,8 @@ def platform_root(root):
     wants.mkdir(exist_ok=True)
     for name in ('xenova-dom0-manager.service', 'xenova-recovery-worker.service', 'xenova-host-admission.service', 'xenova-first-boot.service', 'srv-xenova.mount', 'xenova-vms.service', 'xenova-vm-shutdown.service'):
         (wants / name).symlink_to('/usr/lib/systemd/system/' + name)
+    collector = assemble.deployment_payloads.COLLECTOR
+    (wants/collector).symlink_to('/usr/lib/systemd/system/' + collector)
     early = root/'etc/systemd/system/sysinit.target.wants'
     early.mkdir(parents=True, exist_ok=True)
     (early/'xenova-boot-status.service').symlink_to('/usr/lib/systemd/system/xenova-boot-status.service')

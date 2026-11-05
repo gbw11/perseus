@@ -6,6 +6,7 @@ import com.xenova.backend.agent.application.AgentMessageHandler.Result;
 import com.xenova.backend.agent.domain.MetricSample;
 import com.xenova.backend.agent.domain.MetricSampleData;
 import com.xenova.backend.agent.domain.MetricSampleData.CpuWindow;
+import com.xenova.backend.agent.domain.MetricSampleData.TelemetryObservation;
 import com.xenova.backend.agent.domain.MetricValue;
 import com.xenova.backend.common.UnsignedDecimal;
 import com.xenova.backend.template.domain.GuestKind;
@@ -19,6 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -33,6 +35,8 @@ public class VmTelemetryMessageHandler {
     public static final String METRICS_TOPIC = "xenova/v2/vms/+/telemetry/metrics";
     static final String SUPPORTED_SCHEMA_VERSION = "2.1";
     private static final Pattern TOPIC_PATTERN = Pattern.compile("^xenova/v2/vms/([^/]+)/telemetry/metrics$");
+    private static final Set<String> RAM_METRICS = Set.of("memory.firmware.ram_region_bytes", "memory.firmware.mapped_bytes",
+            "memory.firmware.static_data_bytes", "memory.page_allocator.free_bytes");
 
     private static final Logger log = LoggerFactory.getLogger(VmTelemetryMessageHandler.class);
 
@@ -96,6 +100,12 @@ public class VmTelemetryMessageHandler {
         String family = root.path("payload").path("family").asText("");
         String source = metricSource(topicVmId, family);
         CpuWindow cpuWindow = null;
+        TelemetryObservation telemetry;
+        try {
+            telemetry = TelemetryMemoryObservation.parse(root);
+        } catch (IllegalArgumentException exception) {
+            throw new Rejected(exception.getMessage());
+        }
         if (MetricSample.ZEPHYR_TELEMETRY.equals(source) && "cpu".equals(family) && window.has("part_count")) {
             try {
                 cpuWindow = ZephyrCpuPage.parse(root, window, samples);
@@ -113,7 +123,7 @@ public class VmTelemetryMessageHandler {
                 receivedAt,
                 cpuWindow == null ? windowMs(window)
                         : UnsignedDecimal.elapsedMillis(cpuWindow.startUptimeMs(), cpuWindow.endUptimeMs()),
-                new MetricSampleData(values(samples), null, cpuWindow));
+                new MetricSampleData(values(samples, family), null, cpuWindow, telemetry));
         return agentDataService.recordMetrics(sample) ? Result.ACCEPTED : Result.IGNORED;
     }
 
@@ -145,37 +155,77 @@ public class VmTelemetryMessageHandler {
         return (int) (end - start);
     }
 
-    private static List<MetricValue> values(JsonNode samples) {
+    private static List<MetricValue> values(JsonNode samples, String family) {
         List<MetricValue> values = new ArrayList<>();
         for (JsonNode node : samples) {
             String name = node.path("name").asText("");
             if (name.isBlank()) {
                 throw new Rejected("metric without name");
             }
-            boolean ok = "ok".equals(node.path("status").asText(null));
-            Double value = ok ? number(node.path("value")) : null;
-            String reason = value != null ? null
-                    : node.path("reason").isTextual() ? node.path("reason").asText()
-                    : node.path("status").asText("unavailable");
+            String status = node.path("status").asText(null);
+            boolean ok = "ok".equals(status);
+            String raw = null;
+            Double value = null;
+            if (ok && "u64_decimal".equals(node.path("encoding").asText(null))) {
+                try {
+                    raw = UnsignedDecimal.read(node.path("value"), name);
+                    // JavaScript/API doubles cannot represent arbitrary uint64 gauges exactly.
+                    value = UnsignedDecimal.compare(raw, "9007199254740991") <= 0 ? Double.valueOf(raw) : null;
+                } catch (IllegalArgumentException ignored) {
+                    // Keep this failed value in the sample rather than turn an invalid uint64 into zero.
+                }
+            } else if (ok) {
+                value = number(node.path("value"));
+            }
+            String reason = null;
+            if (value == null && raw == null) {
+                reason = ok ? "parse_error"
+                        : node.path("reason").isTextual() ? node.path("reason").asText()
+                        : node.path("status").asText("unavailable");
+            }
+            if (ok && RAM_METRICS.contains(name) && !ramContractMatches(node, family)) {
+                // Preserve the malformed observation instead of leaving an older valid RAM sample as the latest.
+                // A canonical source value remains diagnostic evidence even when its declared encoding is wrong.
+                if (raw == null) {
+                    try {
+                        raw = UnsignedDecimal.read(node.path("value"), name);
+                    } catch (IllegalArgumentException ignored) {
+                        // Non-uint64 source content cannot be represented by the exact raw integer field.
+                    }
+                }
+                value = null;
+                reason = "ram_contract_mismatch";
+            }
+            JsonNode sourceRc = node.path("source_rc");
             values.add(new MetricValue(name, value, node.path("unit").asText(null), labels(node.path("labels")),
-                    reason));
+                    reason, "raw_counter".equals(node.path("kind").asText()) ? raw : null,
+                    sourceRc.isIntegralNumber() && sourceRc.canConvertToInt() ? sourceRc.intValue() : null,
+                    raw, status));
         }
         return values;
     }
 
-    // u64/i64 arrive as decimal strings, float64 as JSON numbers (contract §5).
+    private static boolean ramContractMatches(JsonNode node, String family) {
+        return "memory".equals(family) && "bytes".equals(node.path("unit").asText())
+                && "gauge".equals(node.path("kind").asText())
+                && "u64_decimal".equals(node.path("encoding").asText())
+                && node.path("labels").isObject() && node.path("labels").isEmpty();
+    }
+
+    // The numeric API represents boolean gauges as 0/1; decimal strings retain their existing handling.
     private static Double number(JsonNode value) {
-        if (value.isNumber()) {
-            return value.asDouble();
+        if (value.isBoolean()) {
+            return value.booleanValue() ? 1.0 : 0.0;
         }
-        if (value.isTextual()) {
-            try {
-                return Double.valueOf(value.asText());
-            } catch (NumberFormatException exception) {
-                return null;
-            }
+        if (!value.isNumber() && !value.isTextual()) {
+            return null;
         }
-        return null;
+        try {
+            double number = value.isNumber() ? value.doubleValue() : Double.parseDouble(value.textValue());
+            return Double.isFinite(number) ? number : null;
+        } catch (NumberFormatException exception) {
+            return null;
+        }
     }
 
     private static Long decimal(JsonNode value) {
