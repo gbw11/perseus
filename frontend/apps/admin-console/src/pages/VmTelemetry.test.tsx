@@ -196,9 +196,197 @@ function renderPage(path = '/dashboard/memory') {
   return { ...page, client };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('VM telemetry dashboard', () => {
+  it('keeps Memory cards and original observations through query failure, expiry and recovery', async () => {
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const fetch = fixture();
+    const original = fetch.getMockImplementation()!;
+    const sample = memoryFixture('ram-committed', now - 500);
+    sample.vm_id = VM_IDS.autonomous;
+    let failed = false;
+    let report = sample;
+    fetch.mockImplementation((url: string) => {
+      const path = new URL(url, 'http://fixture').pathname;
+      if (failed && (path === '/api/v1/vms' || path.endsWith('/metrics')))
+        return Promise.resolve(
+          Response.json({ code: 'UNAVAILABLE', message: 'fixture failure' }, { status: 503 }),
+        );
+      return path.endsWith(`/vms/${VM_IDS.autonomous}/metrics`)
+        ? Promise.resolve(Response.json({ items: [report] }))
+        : original(url);
+    });
+    const page = renderPage();
+    const card = within(await screen.findByRole('region', { name: 'autonomous 메모리 사용률' }));
+    expect(await card.findByText('25.000%')).toBeInTheDocument();
+    failed = true;
+    now += 1000;
+    await act(() => page.client.refetchQueries());
+    expect(screen.getByText(/실시간 데이터를 불러오지 못하고 있습니다/)).toBeInTheDocument();
+    expect(card.getByText('25.000%')).toBeInTheDocument();
+    now += 7000;
+    act(() => vi.advanceTimersByTime(1000));
+    expect(card.getByText('25.000%')).toBeInTheDocument();
+    expect(card.getByText('관측 만료 · 최근 관측값')).toBeInTheDocument();
+    expect(card.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
+    failed = false;
+    report = memoryFixture('ram-reserved-increase', now - 500);
+    report.vm_id = sample.vm_id;
+    await act(() => page.client.refetchQueries());
+    expect(card.getByText('50.000%')).toBeInTheDocument();
+    expect(card.queryByText('관측 만료 · 최근 관측값')).not.toBeInTheDocument();
+    expect(screen.queryByText(/실시간 데이터를 불러오지 못하고 있습니다/)).not.toBeInTheDocument();
+    page.unmount();
+  });
+
+  it('uses the same managed RAM percentage on Overview and Memory while keeping Linux unchanged', async () => {
+    const now = Date.now();
+    const fetch = fixture();
+    const original = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (url: string) => {
+      if (!new URL(url, 'http://fixture').pathname.endsWith('/metrics') || url.includes(VM_IDS.interaction))
+        return original(url);
+      const sample = memoryFixture(
+        url.includes(VM_IDS.autonomous) ? 'ram-committed' : 'ram-valid-zero',
+        now - 500,
+      );
+      sample.vm_id = url.includes(VM_IDS.autonomous) ? VM_IDS.autonomous : VM_IDS.manual;
+      return Response.json({ items: [sample] });
+    });
+    const page = renderPage('/dashboard/overview');
+    const autonomous = within(await screen.findByRole('link', { name: /autonomous/ }));
+    expect(await autonomous.findByLabelText('Memory 25.000%')).toBeInTheDocument();
+    expect(autonomous.getByText(/정적 예약 포함/)).toBeInTheDocument();
+    expect(autonomous.queryByText('Kernel heap')).not.toBeInTheDocument();
+    expect(
+      await within(screen.getByRole('link', { name: /manual/ })).findByLabelText('Memory 0.000%'),
+    ).toBeInTheDocument();
+    expect(
+      await within(screen.getByRole('link', { name: /interaction/ })).findByLabelText('Memory 0%'),
+    ).toBeInTheDocument();
+    page.unmount();
+    renderPage();
+    expect(
+      await within(await screen.findByRole('region', { name: 'autonomous 메모리 사용률' })).findByText(
+        '25.000%',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('expires Overview RAM without waiting for another successful query', async () => {
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const fetch = fixture();
+    const original = fetch.getMockImplementation()!;
+    const sample = memoryFixture('ram-committed', now - 500);
+    sample.vm_id = VM_IDS.autonomous;
+    fetch.mockImplementation((url: string) =>
+      new URL(url, 'http://fixture').pathname.endsWith(`/vms/${VM_IDS.autonomous}/metrics`)
+        ? Promise.resolve(Response.json({ items: [sample] }))
+        : original(url),
+    );
+    const page = renderPage('/dashboard/overview');
+    const card = within(await screen.findByRole('link', { name: /autonomous/ }));
+    expect(await card.findByLabelText('Memory 25.000%')).toBeInTheDocument();
+    now += 6001;
+    act(() => vi.advanceTimersByTime(1000));
+    expect(card.getByText('관측 만료 · 최근 관측값')).toBeInTheDocument();
+    expect(card.getByLabelText('Memory 25.000%')).toBeInTheDocument();
+    page.unmount();
+  });
+
+  it.each(['heap-only', 'unsupported', 'expired', 'new-boot'])(
+    'does not replace %s RAM with the heap percentage',
+    async (state) => {
+      const now = Date.now();
+      const fetch = fixture();
+      const original = fetch.getMockImplementation()!;
+      fetch.mockImplementation(async (url: string) => {
+        const response = await original(url);
+        if (!new URL(url, 'http://fixture').pathname.endsWith(`/vms/${VM_IDS.autonomous}/metrics`))
+          return response;
+        if (state === 'heap-only') return response;
+        const sample = memoryFixture(
+          state === 'unsupported' ? 'ram-unsupported' : 'ram-committed',
+          now - (state === 'expired' ? 20_000 : 1000),
+        );
+        sample.vm_id = VM_IDS.autonomous;
+        const items = [sample];
+        if (state === 'new-boot') {
+          const next = memoryFixture('manual-memory-pending-full', now - 500);
+          next.vm_id = sample.vm_id;
+          next.boot_id = 'new-boot';
+          items.push(next);
+        }
+        return Response.json({ items });
+      });
+      renderPage('/dashboard/overview');
+      const card = within(await screen.findByRole('link', { name: /autonomous/ }));
+      const reason =
+        state === 'heap-only'
+          ? '관리 RAM 표본을 확인할 수 없습니다.'
+          : state === 'unsupported'
+            ? '관리 RAM 수집 불가'
+            : state === 'expired'
+              ? '관측 만료 · 최근 관측값'
+              : '관리 RAM 표본 미수신';
+      expect(await card.findByText(reason)).toBeInTheDocument();
+      expect(
+        card.getByLabelText(state === 'expired' ? 'Memory 25.000%' : 'Memory 데이터 없음'),
+      ).toBeInTheDocument();
+      expect(card.queryByLabelText('Memory 50.000%')).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([false, true])(
+    'renders packet rates without memory metadata and splits reboot gaps=%s',
+    async (reboot) => {
+      const fetch = fixture();
+      const original = fetch.getMockImplementation()!;
+      fetch.mockImplementation(async (url: string) => {
+        const response = await original(url);
+        if (!new URL(url, 'http://fixture').pathname.endsWith(`/vms/${VM_IDS.autonomous}/metrics`))
+          return response;
+        const body: { items: MetricSample[] } = await response.json();
+        body.items.push(
+          ...[0, 1, 2, 3, 4, 5].map((index): MetricSample => ({
+            sample_id: `network-${index}`,
+            vm_id: VM_IDS.autonomous,
+            boot_id: reboot && index >= 3 ? 'next-boot' : body.items[0]!.boot_id,
+            source: 'zephyr_telemetry',
+            observed_at: new Date(Date.now() - 12_000 + index * 2000).toISOString(),
+            values: ['rx', 'tx'].map((direction) => ({
+              name: `network.netfront.${direction}_packets`,
+              value: (direction === 'rx' ? 100 : 200) + index * (direction === 'rx' ? 40 : 80),
+              unit: 'packets',
+              labels: { interface: 'if1' },
+              unavailable_reason: null,
+            })),
+          })),
+        );
+        return Response.json(body);
+      });
+      renderPage();
+      const chart = await screen.findByRole('img', { name: 'autonomous RX TX 패킷 처리율 최근 60초' });
+      expect(chart.querySelectorAll('polyline')).toHaveLength(reboot ? 4 : 2);
+      expect(
+        screen.queryByRole('img', { name: 'manual RX TX 패킷 처리율 최근 60초' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('progressbar', { name: 'autonomous 커널 힙 사용률' })).toHaveAttribute(
+        'aria-valuenow',
+        '50',
+      );
+    },
+  );
+
   it('shows VM / APP / LINK and uses Agent for Linux and telemetry heartbeat for Zephyr', async () => {
     const fetch = fixture();
     renderPage('/dashboard/overview');
@@ -504,7 +692,7 @@ describe('VM telemetry dashboard', () => {
     ).toBeInTheDocument();
   });
 
-  it('retains heap history while expiring the current value rather than displaying zero', async () => {
+  it('retains an expired heap observation with an explicit label instead of blanking its summary', async () => {
     const fetch = fixture();
     const original = fetch.getMockImplementation()!;
     fetch.mockImplementation(async (url: string) => {
@@ -521,7 +709,9 @@ describe('VM telemetry dashboard', () => {
     ).toBeInTheDocument();
     const heap = within(screen.getByRole('region', { name: 'autonomous 공통 커널 힙' }));
     expect(heap.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
-    expect(heap.queryByText('0.0%')).not.toBeInTheDocument();
-    expect(heap.getAllByText(/관측 만료 · 이력만 표시/).length).toBeGreaterThan(0);
+    expect(heap.getByText('50.0%')).toBeInTheDocument();
+    expect(heap.getByRole('progressbar')).toHaveAttribute('aria-valuetext', '최근 관측 50.0% · 관측 만료');
+    expect(heap.getByText(/관측 만료 · 최근 관측값/)).toBeInTheDocument();
+    expect(heap.getByText('관측 당시 여유')).toBeInTheDocument();
   });
 });

@@ -143,7 +143,13 @@ export function sharedMemoryObservation(
     return empty('unverified', '원 관측 시각 오류 · 이력만 표시');
   if (!last.available)
     return { state: 'unavailable', reason: '수집 불가 · 이력만 표시', sample: null, observedAt };
-  if (now < last.received || now - last.received + last.age > 6000)
-    return { state: 'expired', reason: '관측 만료 · 이력만 표시', sample: null, observedAt };
+  if (now < last.received) return empty('unverified', '수신 시각 오류 · 이력만 표시');
+  if (now - last.received + last.age > 6000)
+    return {
+      state: 'expired',
+      reason: '관측 만료 · 최근 관측값',
+      sample: now - Date.parse(observedAt) <= 60_000 ? last.sample : null,
+      observedAt,
+    };
   return { state: 'fresh', reason: '최근 메모리 관측', sample: last.sample, observedAt };
 }
