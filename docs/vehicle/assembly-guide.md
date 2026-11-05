@@ -330,12 +330,13 @@ flowchart LR
 **D2. PulseView 준비 (처음 한 번)**
 
 1. [PulseView](https://sigrok.org/wiki/Downloads) 의 Windows 설치 파일을 받아 설치한다. 같이 설치되는 Zadig 가 시작 메뉴에 생긴다([sigrok Windows 안내](https://sigrok.org/wiki/Windows)).
-2. 로직 분석기를 PC USB 에 꽂고 Zadig 를 연다. Options → List All Devices 를 켠다.
-3. 목록에서 로직 분석기를 고른다. 이름은 제품마다 다르다(`fx2lafw`, `Unknown Device` 등). 헷갈리면 로직 분석기를 뺐다 꽂아 목록에서 사라졌다 나타나는 것을 고른다. 키보드·마우스 같은 다른 장치를 고르면 그 장치가 안 될 수 있다.
-4. 드라이버 칸을 `WinUSB` 로 두고 Install Driver(또는 Replace Driver)를 누른다.
+2. 로직 분석기를 PC USB 에 꽂는다. 드라이버가 없어서 장치 관리자의 기타 장치에 `알 수 없는 장치` 로 보이는 것이 정상이다.
+3. 시작 메뉴에서 Zadig 를 연다(관리자 권한을 물으면 허용). 목록에서 로직 분석기를 고른다. 이름(`Unknown Device #1` 등) 대신 USB ID 칸으로 확인한다. 이 종류의 로직 분석기는 보통 `0925 3881` 이다.
+   - 목록에 없을 때만 Options → List All Devices 를 켠다. 그때는 키보드·마우스 같은 다른 장치를 고르지 않도록 USB ID 를 꼭 확인한다. 다른 장치에 설치하면 그 장치가 안 될 수 있다.
+4. 드라이버 칸을 `WinUSB` 로 두고 Install Driver(또는 Replace Driver)를 누른다. 끝나면 장치 관리자에서 로직 분석기가 기타 장치에서 빠져 범용 직렬 버스 장치로 옮겨 간다.
 5. PulseView 를 연다. 위쪽 장치 칸에 `Saleae Logic` 이나 `fx2lafw` 가 보이면 된다.
    - 안 보이면 장치 칸 → Connect to Device → 드라이버 `fx2lafw` → Scan for devices → 고르고 OK.
-   - 그래도 안 되면 Zadig 를 다시 연다. PulseView 가 펌웨어를 올린 뒤 로직 분석기가 다른 장치로 다시 잡히는 일이 있다. 새로 보이는 장치에도 4 를 한다.
+   - 그래도 안 되거나 `LIBUSB_ERROR` 가 나오면 장치 관리자를 다시 본다. PulseView 가 펌웨어를 올린 뒤 로직 분석기가 다시 잡히면서 기타 장치에 또 나타나는 일이 있다. 그 장치에도 Zadig 로 4 를 한다.
 6. 샘플 수 `20 M`, 샘플 속도 `2 MHz` 로 둔다. Run 을 한 번 누르면 10초 동안 기록한다. D0·D1·D2 만 남기고 다른 채널은 꺼 두면 보기 편하다.
 7. 주파수와 듀티를 숫자로 보려면 디코더 추가(Add protocol decoder)에서 `PWM` 을 고르고 Data 를 D0 으로 정한다.
 
