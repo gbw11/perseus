@@ -14,17 +14,18 @@ import {
 import type { Health } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
-import type { DriveState } from '../api/drive';
-import { useEvents, useMetrics, useVms } from '../api/queries';
+import type { DriveState, SocketState } from '../api/drive';
+import { useEvents, useMetrics, useTelemetryHeartbeat, useVms } from '../api/queries';
 import { restartSimRace, selectSimTrack, useSimState, type SimView } from '../api/sim';
 import type { Vm, VmEvent } from '../api/types';
 import { cpuPercentOf, latest, memoryPercentOf } from '../domain/vmMetrics';
+import { observedControl, vmAppObservations } from '../domain/driveObservations';
 import { clock, describe } from '../domain/events';
+import { publisherObservation } from '../domain/telemetryPublisher';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import {
   ago,
   appHealth,
-  appReportOf,
   appHealthLabel,
   controlLabel,
   MODE_HEALTH,
@@ -41,7 +42,7 @@ import {
   vmOf,
   type AppId,
 } from '../domain/roles';
-import { STATE_HEALTH, STATE_LABEL } from '../format';
+import { AGENT_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
 import { SimTrackSelect } from './SimTrackSelect';
 import styles from './pages.module.css';
@@ -468,8 +469,6 @@ function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null
   );
 }
 
-type VmConnection = 'Connected' | 'Delayed' | 'Disconnected' | 'Unknown';
-
 /**
  * VM Dashboard / Overview.
  * API VM 목록을 그대로 카드로 그리고 VM 이름으로 부른다. 역할은 vm.role 이 있을 때만 표시한다.
@@ -480,7 +479,10 @@ export function DashboardPage() {
   const vms = useVms();
   const events = useEvents({ limit: 30 });
   const items = sortVms(vms.data?.items ?? []);
-  const activeVm = items.find((vm) => vm.vm_id === drive?.control?.active_vm_id);
+  const control = observedControl(drive, socket);
+  const activeVm = items.find((vm) => vm.vm_id === control?.active_vm_id);
+  const authority =
+    control && !control.active_vm_id && !control.active_app ? '없음' : (activeVm?.name ?? '미확인');
 
   return (
     <div className={styles.overviewPage}>
@@ -492,13 +494,10 @@ export function DashboardPage() {
       </header>
 
       <section className={styles.overviewSummary} aria-label="주행 및 연결 요약">
+        <OverviewSummaryItem label="DRIVE MODE" value={control?.mode ? MODE_LABEL[control.mode] : '미확인'} />
+        <OverviewSummaryItem label="CONTROL AUTHORITY" value={authority} />
         <OverviewSummaryItem
-          label="DRIVE MODE"
-          value={drive?.control?.mode ? MODE_LABEL[drive.control.mode] : 'Unknown'}
-        />
-        <OverviewSummaryItem label="CONTROL AUTHORITY" value={activeVm?.name ?? 'None'} />
-        <OverviewSummaryItem
-          label="TELEMETRY"
+          label="상태 스트림"
           value={socket === 'open' ? 'Connected' : socket === 'connecting' ? 'Connecting' : 'Disconnected'}
           tone={socket === 'open' ? 'ok' : socket === 'connecting' ? 'recovering' : 'fault'}
         />
@@ -520,6 +519,7 @@ export function DashboardPage() {
             key={vm.vm_id}
             vm={vm}
             drive={drive}
+            socket={socket}
             latestEvent={overviewLatestEvent(events.data?.items, vm.vm_id)}
           />
         ))}
@@ -540,21 +540,22 @@ function OverviewSummaryItem({ label, value, tone }: { label: string; value: str
 function VmOverviewCard({
   vm,
   drive,
+  socket,
   latestEvent,
 }: {
   vm: Vm;
   drive: DriveState | null;
+  socket: SocketState;
   latestEvent: VmEvent | undefined;
 }) {
   const role = roleOf(vm, drive);
   const metrics = useMetrics(vm.vm_id, true);
+  const publisher = publisherObservation(vm.vm_id, useTelemetryHeartbeat(vm.vm_id));
   const samples = metrics.data?.items ?? [];
   const cpu = latest(samples, cpuPercentOf);
   const memory = latest(samples, (sample) => memoryPercentOf(sample, vm));
-  const app = appReportOf(vm, drive);
-  const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
-  const connection = overviewConnection(vm, app);
-  const health = appHealth(role, vm, app);
+  const apps = vmAppObservations(vm.vm_id, drive, socket);
+  const authority = vmAuthorityOf(role, vm, observedControl(drive, socket)?.active_vm_id);
   const eventSummary = latestEvent
     ? `${clock(latestEvent.occurred_at)} · ${describe(latestEvent, () => vm.name).title}`
     : '최근 중요 이벤트 없음';
@@ -579,13 +580,17 @@ function VmOverviewCard({
 
       <div className={styles.vmStatusRows}>
         <OverviewStatusLine label="VM" value={STATE_LABEL[vm.state]} tone={STATE_HEALTH[vm.state]} />
-        <OverviewStatusLine label="APP" value={overviewAppStatus(health, !!app)} tone={health} />
+        <OverviewStatusLine label="앱 상태" value={overviewAppSignal(apps, 'phaseLabel')} />
+        <OverviewStatusLine label="앱 heartbeat" value={overviewAppSignal(apps, 'heartbeatLabel')} />
         <OverviewStatusLine
-          label="LINK"
-          value={connection}
-          tone={overviewConnectionTone(connection)}
-          detail={app?.heartbeat_ago_ms != null ? ago(app.heartbeat_ago_ms) : undefined}
+          label="수집기 (v2)"
+          value={publisher.label}
+          tone={publisher.tone}
+          detail={publisher.report?.age_ms != null ? ago(publisher.report.age_ms) : undefined}
         />
+        {vm.guest_kind === 'linux' && (
+          <OverviewStatusLine label="Linux Agent" value={AGENT_LABEL[vm.agent_status ?? 'UNKNOWN']} />
+        )}
       </div>
 
       <div className={styles.resourceBlock}>
@@ -617,7 +622,7 @@ function OverviewStatusLine({
 }: {
   label: string;
   value: string;
-  tone: Health;
+  tone?: Health;
   detail?: string;
 }) {
   return (
@@ -660,31 +665,14 @@ function OverviewMetricBar({
   );
 }
 
-function overviewConnection(vm: Vm, app: DriveState['apps'][string] | undefined): VmConnection {
-  if (app?.heartbeat_ago_ms != null) {
-    if (app.heartbeat_ago_ms <= 3000) return 'Connected';
-    if (app.heartbeat_ago_ms <= 10_000) return 'Delayed';
-    return 'Disconnected';
-  }
-  if (vm.agent_status === 'ONLINE') return 'Connected';
-  if (vm.agent_status === 'STALE') return 'Delayed';
-  if (vm.agent_status === 'OFFLINE') return 'Disconnected';
-  return 'Unknown';
-}
-
-function overviewConnectionTone(connection: VmConnection): Health {
-  if (connection === 'Connected') return 'ok';
-  if (connection === 'Delayed') return 'recovering';
-  if (connection === 'Disconnected') return 'fault';
-  return 'stopped';
-}
-
-function overviewAppStatus(health: Health, hasApp: boolean): string {
-  if (!hasApp) return 'Unknown';
-  if (health === 'ok') return 'Ready';
-  if (health === 'recovering') return 'Degraded';
-  if (health === 'fault') return 'Failed';
-  return 'Unknown';
+function overviewAppSignal(
+  reports: ReturnType<typeof vmAppObservations>,
+  field: 'phaseLabel' | 'heartbeatLabel',
+): string {
+  const labels = new Set(reports.map((report) => report[field]));
+  if (labels.size === 0) return '미확인';
+  if (labels.size === 1) return reports[0]![field];
+  return reports.map((report) => `${report.appId}: ${report[field]}`).join(' · ');
 }
 
 function overviewMetricUnavailable(pending: boolean, sampleCount: number): string | null {

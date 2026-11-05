@@ -1,8 +1,8 @@
 import { Card } from '@xenova/ui';
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import type { DriveState } from '../api/drive';
 import { useMetrics, useVms } from '../api/queries';
-import type { Vm } from '../api/types';
+import type { MetricSample, Vm } from '../api/types';
 import { buildCpuChartScale, cpuChartY, formatCpuTick } from '../domain/cpuChart';
 import {
   buildDiskIoSnapshot,
@@ -26,6 +26,10 @@ import {
 } from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import { useDrive } from '../layout/DriveContext';
+import { AppMemoryPools } from './AppMemoryPools';
+import { ManagedRamSummary } from './ManagedRamSummary';
+import { sharedMemoryObservation, sharedObservedAt } from '../domain/sharedMemoryObservation';
+import { memoryObservationRunKey, selectMemoryObservationRun } from '../domain/memoryObservationRun';
 import { MetricErrorNotice } from './MetricErrorNotice';
 import styles from './pages.module.css';
 
@@ -62,6 +66,7 @@ const CORES = [0, 1, 2, 3];
 const PINS: Record<Domain, number[]> = { dom0: [0], autonomous: [1], manual: [2], interaction: [3] };
 const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512, interaction: 256 };
 const DOM0_MEMORY_MIB = 1024;
+const MIB_BYTES = 1024 * 1024;
 
 export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all' }) {
   const vms = useVms();
@@ -212,13 +217,13 @@ function MemoryDashboard({
         </div>
         <div className={styles.memoryHeadingMeta}>
           <span>Linux 최근 5분</span>
-          <span>Zephyr heap 최근 5분 · Pool 최근 60초</span>
+          <span>Zephyr RAM·버퍼 최근 60초 · 힙 최근 5분</span>
         </div>
       </header>
 
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
 
-      <div className={styles.memoryVmGrid}>
+      <div className={`${styles.memoryVmGrid} ${styles.memoryOverviewGrid}`}>
         {vms.map((vm) =>
           vm.guest_kind === 'zephyr' ? (
             <MemoryVmPanel key={vm.vm_id} vm={vm} drive={drive} />
@@ -235,11 +240,8 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
   const metrics = useMetrics(vm.vm_id, true, 1, 2000);
   const heapMetrics = useMetrics(vm.vm_id, true);
-  const series = buildMemoryPoolSeries(metrics.data?.items ?? []);
-  const heap = buildZephyrHeapSeries(heapMetrics.data?.items ?? []);
+  const samples = metrics.data?.items ?? [];
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
-  const lastUpdated = relativeTime(latestTime(series.lastObservedAt, heap.current?.observedAt ?? null));
-  const heapCurrent = heap.current;
   const style = {
     '--vm-accent': role?.color ?? UNASSIGNED_COLOR,
     '--rx-accent': 'var(--x-primary)',
@@ -253,7 +255,7 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
       title={
         <span className={styles.memoryVmTitle}>
           <strong>{vm.name}</strong>
-          <small>{role?.short ?? '역할 미지정'} · Zephyr · 커널 heap · 네트워크 데이터 Pool</small>
+          <small>{role?.short ?? '역할 미지정'} · Zephyr · 앱 버퍼·힙·네트워크 풀</small>
         </span>
       }
       actions={
@@ -261,58 +263,158 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
           <span className={styles.authority} data-authority={authority.toLowerCase()}>
             {authority}
           </span>
-          <small>마지막 갱신 {lastUpdated}</small>
+          <small>관측 시각과 만료는 영역별로 확인</small>
         </span>
       }
     >
-      {(metrics.error || heapMetrics.error) && <MetricErrorNotice />}
-
-      <MemoryUsageSummary
-        label="메모리 사용률"
-        badge={HEAP_BASIS_BADGE}
-        ariaLabel={`${vm.name} 메모리 사용률(커널 heap 기준)`}
-        percent={heapCurrent?.percent ?? null}
-        usedBytes={heapCurrent?.usedBytes ?? null}
-        totalBytes={heapCurrent?.totalBytes ?? null}
-        freeLabel="여유"
-        freeBytes={heapCurrent?.freeBytes ?? null}
-        freeNote={heapCurrent ? null : heapMetrics.isPending ? '수신 대기' : heap.reason}
-        format={formatKiB}
-      />
-      <UsageChart
-        title="메모리 사용률"
-        badge={HEAP_BASIS_BADGE}
-        ariaLabel={`${vm.name} 메모리 사용률(커널 heap 기준) 최근 5분 그래프`}
-        points={heap.points}
-      />
-
-      <div className={styles.poolSummaryGrid}>
-        <PoolSummary label="RX Pool" pool={series.rx} tone="rx" />
-        <PoolSummary label="TX Pool" pool={series.tx} tone="tx" />
-      </div>
-
-      <MemoryChart
-        title="패킷 처리율"
-        unit="packets/s"
-        ariaLabel={`${vm.name} RX TX 패킷 처리율 최근 60초`}
-        points={series.packetRates.map((point) => ({
-          observedAt: point.observedAt,
-          rx: point.rxPacketsPerSecond,
-          tx: point.txPacketsPerSecond,
-        }))}
-      />
-      <MemoryChart
-        title="Pool 점유율"
-        unit="%"
-        ariaLabel={`${vm.name} RX TX Pool 점유율 최근 60초`}
-        max={100}
-        points={series.usage.map((point) => ({
-          observedAt: point.observedAt,
-          rx: point.rxPercent,
-          tx: point.txPercent,
-        }))}
-      />
+      {(metrics.error || heapMetrics.error) && (
+        <MetricErrorNotice detail="최근 관측 이력을 표시하며, 만료된 현재값은 비웁니다." />
+      )}
+      <p className={styles.dim}>
+        VM 구성 {vm.memory_mib.toLocaleString('ko-KR')} MiB · 관리 RAM과 내부 버퍼 점유를 분리합니다.
+      </p>
+      <ManagedRamSummary vmId={vm.vm_id} vmName={vm.name} samples={samples} />
+      <AppMemoryPools vmId={vm.vm_id} vmName={vm.name} samples={samples}>
+        <SharedMemoryPanels
+          vmName={vm.name}
+          samples={samples}
+          heapSamples={heapMetrics.data?.items ?? []}
+          pending={metrics.isPending}
+          failed={!!metrics.error || !!heapMetrics.error}
+        />
+      </AppMemoryPools>
     </Card>
+  );
+}
+
+function SharedMemoryPanels({
+  vmName,
+  samples,
+  heapSamples,
+  pending,
+  failed,
+}: {
+  vmName: string;
+  samples: MetricSample[];
+  heapSamples: MetricSample[];
+  pending: boolean;
+  failed: boolean;
+}) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  // The 5-minute heap query must also respect a new session first seen in the 60-second buffer query.
+  const allSamples = [...heapSamples, ...samples];
+  const run = selectMemoryObservationRun(allSamples, allSamples[0]?.vm_id ?? '');
+  const projectRun = (history: MetricSample[]) =>
+    (run.state === 'selected'
+      ? history.filter((sample) => memoryObservationRunKey(sample) === run.key)
+      : []
+    ).map((sample) => {
+      const family = sample.telemetry?.family;
+      const at = family === 'memory' || family === 'memory_regions' ? sharedObservedAt(sample, family) : null;
+      return at ? { ...sample, observed_at: at } : sample;
+    });
+  const series = buildMemoryPoolSeries(projectRun(samples));
+  const heap = buildZephyrHeapSeries(projectRun(heapSamples));
+  const heapObservation = sharedMemoryObservation(
+    allSamples,
+    'memory',
+    ['memory.kernel_heap.used_bytes', 'memory.kernel_heap.free_bytes'],
+    now,
+  );
+  const currentHeapView =
+    heapObservation.state === 'fresh' && heapObservation.sample
+      ? buildZephyrHeapSeries([heapObservation.sample])
+      : null;
+  const currentHeap = currentHeapView?.current ?? null;
+  const pool = (region: 'net_rx_data' | 'net_tx_data'): PoolSnapshot => {
+    const view = sharedMemoryObservation(
+      allSamples,
+      'memory_regions',
+      ['memory.region.used_bytes', 'memory.region.free_bytes', 'memory.region.capacity_bytes'],
+      now,
+      region,
+    );
+    if (view.state === 'fresh' && view.sample)
+      return buildMemoryPoolSeries([view.sample])[region === 'net_rx_data' ? 'rx' : 'tx'];
+    return {
+      state: 'missing',
+      usedBytes: null,
+      freeBytes: null,
+      capacityBytes: null,
+      usagePercent: null,
+      reason: view.reason,
+    };
+  };
+  const rx = pool('net_rx_data'),
+    tx = pool('net_tx_data');
+  return (
+    <>
+      <section className={styles.appMemoryPool} aria-label={`${vmName} 공통 커널 힙`}>
+        <MemoryUsageSummary
+          label="커널 힙 사용률"
+          badge={HEAP_BASIS_BADGE}
+          ariaLabel={`${vmName} 커널 힙 사용률`}
+          percent={currentHeap?.percent ?? null}
+          usedBytes={currentHeap?.usedBytes ?? null}
+          totalBytes={currentHeap?.totalBytes ?? null}
+          freeLabel="여유"
+          freeBytes={currentHeap?.freeBytes ?? null}
+          freeNote={currentHeapView?.reason ?? heapObservation.reason}
+          format={formatKiB}
+        />
+        <p className={styles.dim}>
+          {heapObservation.reason}
+          {heapObservation.observedAt &&
+            ` · 원 관측 약 ${ago(Math.max(0, now - Date.parse(heapObservation.observedAt)))}`}
+        </p>
+        <UsageChart
+          title="커널 힙 사용률"
+          ariaLabel={`${vmName} 커널 힙 사용률 최근 5분 그래프`}
+          points={heap.points}
+        />
+      </section>
+      <section
+        className={`${styles.appMemoryPool} ${styles.memorySharedNetwork}`}
+        aria-label={`${vmName} 공통 네트워크 풀`}
+      >
+        <h4>MQTT 포함 공통 RX/TX 풀</h4>
+        <p className={styles.dim}>네트워크 공용 버퍼이며 MQTT 전용 메모리 사용량이 아닙니다.</p>
+        <div className={styles.poolSummaryGrid}>
+          <PoolSummary label="RX Pool" pool={rx} tone="rx" />
+          <PoolSummary label="TX Pool" pool={tx} tone="tx" />
+        </div>
+
+        <MemoryChart
+          title="패킷 처리율"
+          unit="packets/s"
+          ariaLabel={`${vmName} RX TX 패킷 처리율 최근 60초`}
+          points={series.packetRates.map((point) => ({
+            observedAt: point.observedAt,
+            rx: point.rxPacketsPerSecond,
+            tx: point.txPacketsPerSecond,
+          }))}
+        />
+        <MemoryChart
+          title="Pool 점유율"
+          unit="%"
+          ariaLabel={`${vmName} RX TX Pool 점유율 최근 60초`}
+          max={100}
+          points={series.usage.map((point) => ({
+            observedAt: point.observedAt,
+            rx: point.rxPercent,
+            tx: point.txPercent,
+          }))}
+        />
+
+        <div className={styles.memoryObservation}>
+          {observationOf({ ...series, rx, tx }, pending, failed)}
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -614,11 +716,13 @@ function UsageChart({
   badge,
   ariaLabel,
   points,
+  emptyMessage = '데이터 없음',
 }: {
   title: string;
   badge?: BasisBadge;
   ariaLabel: string;
   points: readonly { observedAt: string; percent: number }[];
+  emptyMessage?: string;
 }) {
   const line = chartPoints(
     points.map((point) => ({ observedAt: point.observedAt, rx: point.percent, tx: null })),
@@ -654,7 +758,7 @@ function UsageChart({
             <polyline points={line} className={styles.linuxMemoryLine} vectorEffect="non-scaling-stroke" />
           </svg>
         ) : (
-          <div className={styles.memoryChartEmpty}>데이터 없음</div>
+          <div className={styles.memoryChartEmpty}>{emptyMessage}</div>
         )}
         <span className={styles.memoryChartMax}>100%</span>
         <div className={styles.memoryChartAxis} aria-hidden="true">
@@ -683,10 +787,18 @@ function chartPoints(points: ChartPoint[], key: 'rx' | 'tx', max: number): strin
     .join(' ');
 }
 
-function latestTime(a: string | null, b: string | null): string | null {
-  if (!a) return b;
-  if (!b) return a;
-  return Date.parse(a) >= Date.parse(b) ? a : b;
+function observationOf(
+  series: ReturnType<typeof buildMemoryPoolSeries>,
+  pending: boolean,
+  failed: boolean,
+): string {
+  if (failed) return '메트릭 조회 실패 · 관측 이력은 유지하고 만료된 현재값은 비웁니다.';
+  if (pending && !series.lastObservedAt) return '메트릭 수신 대기 중입니다.';
+  if (series.rx.state === 'invalid' || series.tx.state === 'invalid')
+    return '잘못된 Pool 데이터가 감지되었습니다.';
+  if (series.rx.state !== 'ok' || series.tx.state !== 'ok') return 'RX/TX Pool 데이터가 없습니다.';
+  if (series.rx.freeBytes === 0) return 'RX Pool 여유 없음 · 고갈이 관측되었습니다.';
+  return '관측된 Pool 상태를 표시하고 있습니다.';
 }
 
 function formatBytes(value: number): string {
@@ -706,7 +818,7 @@ function formatKiB(value: number | null): string {
 }
 
 function formatMiB(value: number): string {
-  return `${(value / (1024 * 1024)).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
+  return `${(value / MIB_BYTES).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
 }
 
 function relativeTime(value: string | null): string {

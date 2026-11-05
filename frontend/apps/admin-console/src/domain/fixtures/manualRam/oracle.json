@@ -1,0 +1,345 @@
+[
+  {
+    "name": "ram-committed",
+    "file": "fixtures-2.1/ram-committed.json",
+    "expected": {
+      "status": "ok",
+      "reason": null,
+      "total_bytes": "16384",
+      "committed_bytes": "4096",
+      "free_bytes": "12288",
+      "percent": "25.000"
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-valid-zero",
+    "file": "fixtures-2.1/ram-valid-zero.json",
+    "expected": {
+      "status": "ok",
+      "reason": null,
+      "total_bytes": "16384",
+      "committed_bytes": "0",
+      "free_bytes": "16384",
+      "percent": "0.000"
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-reserved-increase",
+    "file": "fixtures-2.1/ram-reserved-increase.json",
+    "expected": {
+      "status": "ok",
+      "reason": null,
+      "total_bytes": "16384",
+      "committed_bytes": "8192",
+      "free_bytes": "8192",
+      "percent": "50.000"
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-returned",
+    "file": "fixtures-2.1/ram-returned.json",
+    "expected": {
+      "status": "ok",
+      "reason": null,
+      "total_bytes": "16384",
+      "committed_bytes": "4096",
+      "free_bytes": "12288",
+      "percent": "25.000"
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-heap-changed",
+    "file": "fixtures-2.1/ram-heap-changed.json",
+    "expected": {
+      "status": "ok",
+      "reason": null,
+      "total_bytes": "16384",
+      "committed_bytes": "4096",
+      "free_bytes": "12288",
+      "percent": "25.000"
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-free-over-total",
+    "file": "fixtures-2.1/ram-free-over-total.json",
+    "expected": {
+      "status": "invalid",
+      "reason": "RAM_FREE_RANGE",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-mapped-over-total",
+    "file": "fixtures-2.1/ram-mapped-over-total.json",
+    "expected": {
+      "status": "invalid",
+      "reason": "RAM_MAPPED_RANGE",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-static-over-mapped",
+    "file": "fixtures-2.1/ram-static-over-mapped.json",
+    "expected": {
+      "status": "invalid",
+      "reason": "RAM_STATIC_RANGE",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-mapped-free-conflict",
+    "file": "fixtures-2.1/ram-mapped-free-conflict.json",
+    "expected": {
+      "status": "invalid",
+      "reason": "RAM_MAPPED_FREE_CONFLICT",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-total-zero",
+    "file": "fixtures-2.1/ram-total-zero.json",
+    "expected": {
+      "status": "invalid",
+      "reason": "RAM_TOTAL_ZERO",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-null-ok",
+    "file": "fixtures-2.1/ram-null-ok.json",
+    "expected": {
+      "status": "invalid",
+      "reason": "MEASUREMENT_STATUS",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-unsupported",
+    "file": "fixtures-2.1/ram-unsupported.json",
+    "expected": {
+      "status": "unknown",
+      "reason": "RAM_SOURCE_UNAVAILABLE",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-owner-busy",
+    "file": "fixtures-2.1/ram-owner-busy.json",
+    "expected": {
+      "status": "unknown",
+      "reason": "RAM_SOURCE_UNAVAILABLE",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-collection-unavailable",
+    "file": "fixtures-2.1/ram-collection-unavailable.json",
+    "expected": {
+      "status": "unknown",
+      "reason": "RAM_COLLECTION_UNAVAILABLE",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-source-expired",
+    "file": "fixtures-2.1/ram-source-expired.json",
+    "expected": {
+      "status": "unknown",
+      "reason": "RAM_SOURCE_EXPIRED",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-source-unidentified",
+    "file": "fixtures-2.1/ram-source-unidentified.json",
+    "expected": {
+      "status": "unknown",
+      "reason": "RAM_SOURCE_UNIDENTIFIED",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-source-pair-partial",
+    "file": "fixtures-2.1/ram-source-pair-partial.json",
+    "expected": {
+      "status": "invalid",
+      "reason": "SCHEMA_INVALID",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-missing-field",
+    "file": "fixtures-2.1/ram-missing-field.json",
+    "expected": {
+      "status": "unknown",
+      "reason": "RAM_FIELDS_MISSING",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-half-up",
+    "file": "fixtures-2.1/ram-half-up.json",
+    "expected": {
+      "status": "ok",
+      "reason": null,
+      "total_bytes": "200000",
+      "committed_bytes": "4687",
+      "free_bytes": "195313",
+      "percent": "2.344"
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-u64-precision",
+    "file": "fixtures-2.1/ram-u64-precision.json",
+    "expected": {
+      "status": "ok",
+      "reason": null,
+      "total_bytes": "18446744073709551615",
+      "committed_bytes": "18446744073709551614",
+      "free_bytes": "1",
+      "percent": "100.000"
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-partial-context",
+    "file": "fixtures-2.1/ram-partial-context.json",
+    "expected": {
+      "status": "invalid",
+      "reason": "CONTEXT_BINDING",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-legacy-unidentified",
+    "file": "fixtures-2.1/ram-legacy-unidentified.json",
+    "expected": {
+      "status": "unknown",
+      "reason": "RAM_SCHEMA_UNSUPPORTED",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  },
+  {
+    "name": "ram-mixed-messages",
+    "file": "fixtures-2.1/ram-mixed-messages.json",
+    "expected": {
+      "status": "invalid",
+      "reason": "RAM_MESSAGE_TYPE",
+      "percent": null
+    },
+    "origin": {
+      "kind": "synthetic-same-payload-ram-reference",
+      "base": "fixtures/valid/04_heap_and_unsupported_cpu.json",
+      "scope": "16KiB algebra profile and arithmetic boundaries only; not firmware RAM policy, native/ARM owner measurement, board or vehicle acceptance"
+    }
+  }
+]

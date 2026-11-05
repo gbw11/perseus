@@ -97,14 +97,11 @@ export function cpuPercentOf(sample: MetricSample): number | null {
   return metricValue(sample, VM_CPU_PERCENT_METRIC) ?? metricValue(sample, ZEPHYR_CPU_PERCENT_METRIC);
 }
 
-/** 메모리 사용률(%). Linux 는 할당 메모리 대비, Zephyr 는 커널 heap(used+free) 대비 */
+/** 메모리 사용률(%). Linux 는 할당 메모리, Zephyr 는 커널 heap(accounted 또는 used+free) 대비 */
 export function memoryPercentOf(sample: MetricSample, vm: Pick<Vm, 'memory_mib'>): number | null {
   const used = metricValue(sample, LINUX_MEMORY_USED_METRIC);
   if (used != null) return (used / (vm.memory_mib * MIB_BYTES)) * 100;
-  const heapUsed = metricValue(sample, ZEPHYR_HEAP_USED_METRIC);
-  const heapFree = metricValue(sample, ZEPHYR_HEAP_FREE_METRIC);
-  if (heapUsed == null || heapFree == null || heapUsed + heapFree <= 0) return null;
-  return (heapUsed / (heapUsed + heapFree)) * 100;
+  return buildZephyrHeapSeries([sample]).current?.percent ?? null;
 }
 
 /** pick 이 값을 내는 가장 최근 표본의 값 */
@@ -168,13 +165,17 @@ export function linuxFreeMemory(series: LinuxMemorySeries): LinuxFreeMemory {
 export function buildZephyrHeapSeries(samples: readonly MetricSample[]): ZephyrHeapSeries {
   const ordered = [...samples].sort((a, b) => Date.parse(a.observed_at) - Date.parse(b.observed_at));
   let reason: string | null = null;
+  let current: ZephyrHeapPoint | null = null;
   const points = ordered.flatMap((sample): ZephyrHeapPoint[] => {
     if (!sample.values.some((value) => value.name.startsWith('memory.kernel_heap.'))) return [];
+    current = null;
     const usedBytes = validValue(sample, ZEPHYR_HEAP_USED_METRIC);
     const freeBytes = validValue(sample, ZEPHYR_HEAP_FREE_METRIC);
     if (usedBytes == null || freeBytes == null) {
       reason =
-        reasonOf(sample, ZEPHYR_HEAP_USED_METRIC) ?? reasonOf(sample, ZEPHYR_HEAP_FREE_METRIC) ?? NO_DATA;
+        (usedBytes == null ? reasonOf(sample, ZEPHYR_HEAP_USED_METRIC) : null) ??
+        (freeBytes == null ? reasonOf(sample, ZEPHYR_HEAP_FREE_METRIC) : null) ??
+        NO_DATA;
       return [];
     }
     const accounted = validValue(sample, ZEPHYR_HEAP_ACCOUNTED_METRIC);
@@ -185,19 +186,17 @@ export function buildZephyrHeapSeries(samples: readonly MetricSample[]): ZephyrH
       return [];
     }
     reason = null;
-    return [
-      {
-        observedAt: sample.observed_at,
-        usedBytes,
-        freeBytes,
-        totalBytes,
-        totalBasis: useAccounted ? 'accounted' : 'used_plus_free',
-        percent: (usedBytes / totalBytes) * 100,
-        highWaterBytes: validValue(sample, ZEPHYR_HEAP_HIGH_WATER_METRIC),
-      },
-    ];
+    current = {
+      observedAt: sample.observed_at,
+      usedBytes,
+      freeBytes,
+      totalBytes,
+      totalBasis: useAccounted ? 'accounted' : 'used_plus_free',
+      percent: (usedBytes / totalBytes) * 100,
+      highWaterBytes: validValue(sample, ZEPHYR_HEAP_HIGH_WATER_METRIC),
+    };
+    return [current];
   });
-  const current = points.at(-1) ?? null;
   return { points, current, reason: current ? null : reason };
 }
 
