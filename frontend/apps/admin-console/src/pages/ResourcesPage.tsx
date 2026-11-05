@@ -1,7 +1,7 @@
 import { Card } from '@xenova/ui';
 import { useEffect, useState, type CSSProperties } from 'react';
 import type { DriveState } from '../api/drive';
-import { useMetrics, useVms } from '../api/queries';
+import { LIVE_POLL_MS, useMetrics, useVms } from '../api/queries';
 import type { MetricSample, Vm } from '../api/types';
 import { buildCpuChartScale, cpuChartY, formatCpuTick } from '../domain/cpuChart';
 import {
@@ -35,6 +35,8 @@ import { AppMemoryPools } from './AppMemoryPools';
 import { ManagedRamSummary } from './ManagedRamSummary';
 import { sharedMemoryObservation, sharedObservedAt } from '../domain/sharedMemoryObservation';
 import { memoryObservationRunKey, selectMemoryObservationRun } from '../domain/memoryObservationRun';
+import { LiveDataAlert } from '../layout/LiveDataAlert';
+import { useNow } from '../useNow';
 import { MetricErrorNotice } from './MetricErrorNotice';
 import styles from './pages.module.css';
 
@@ -74,7 +76,7 @@ const DOM0_MEMORY_MIB = 1024;
 const MIB_BYTES = 1024 * 1024;
 
 export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all' }) {
-  const vms = useVms();
+  const vms = useVms(LIVE_POLL_MS, { keepLastData: view === 'memory' });
   const { drive } = useDrive();
   const vmFor = (d: Domain) => (d === 'dom0' ? undefined : vmOf(d, vms.data?.items, drive));
   const memory = (d: Domain) => (d === 'dom0' ? DOM0_MEMORY_MIB : (vmFor(d)?.memory_mib ?? 0));
@@ -227,6 +229,7 @@ function MemoryDashboard({
       </header>
 
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
+      <LiveDataAlert />
 
       <div className={styles.memoryVmGrid}>
         {vms.map((vm) =>
@@ -243,8 +246,8 @@ function MemoryDashboard({
 
 function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
-  const metrics = useMetrics(vm.vm_id, true, 1, 2000);
-  const heapMetrics = useMetrics(vm.vm_id, true, 5, 2000);
+  const metrics = useMetrics(vm.vm_id, true, 1, LIVE_POLL_MS, { keepLastData: true });
+  const heapMetrics = useMetrics(vm.vm_id, true, 5, LIVE_POLL_MS, { keepLastData: true });
   const samples = metrics.data?.items ?? [];
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
   const style = {
@@ -648,8 +651,9 @@ function MemoryUsageSummary({
 }
 
 function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
+  const now = useNow();
   const role = roleOf(vm, drive);
-  const metrics = useMetrics(vm.vm_id, true);
+  const metrics = useMetrics(vm.vm_id, true, 5, LIVE_POLL_MS, { keepLastData: true });
   const samples = metrics.data?.items ?? [];
   const series = buildLinuxMemorySeries(samples, vm);
   const free = linuxFreeMemory(series);
@@ -690,7 +694,7 @@ function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
           <span className={styles.authority} data-authority={authority.toLowerCase()}>
             {authority}
           </span>
-          <small>마지막 갱신 {current ? relativeTime(current.observedAt) : '—'}</small>
+          <small>마지막 갱신 {current ? relativeTime(current.observedAt, now) : '—'}</small>
         </span>
       }
     >
@@ -876,9 +880,9 @@ function formatMiB(value: number): string {
   return `${(value / MIB_BYTES).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
 }
 
-function relativeTime(value: string | null): string {
+function relativeTime(value: string | null, now: number): string {
   if (!value) return '—';
-  const elapsed = Math.max(0, Date.now() - Date.parse(value));
+  const elapsed = Math.max(0, now - Date.parse(value));
   return ago(elapsed);
 }
 
@@ -901,6 +905,7 @@ function CpuDashboard({
       </header>
 
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
+      <LiveDataAlert />
 
       <div className={styles.cpuGrid}>
         {sortVms(items ?? []).map((vm) => (

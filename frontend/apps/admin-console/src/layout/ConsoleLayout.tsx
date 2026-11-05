@@ -4,6 +4,8 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router';
 import { useLogout } from '../api/queries';
 import { useSession } from '../auth';
 import { DriveProvider } from './DriveContext';
+import { LiveDataAlertHost } from './LiveDataAlert';
+import { MockBoardSwitch } from './MockBoardSwitch';
 import { ResumeNotice } from './ResumeNotice';
 import styles from './layout.module.css';
 
@@ -53,7 +55,9 @@ export function ConsoleLayout() {
         }
       >
         <ResumeNotice />
+        <LiveDataAlertHost />
         <Outlet />
+        <MockBoardSwitch />
       </AppShell>
     </DriveProvider>
   );

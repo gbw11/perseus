@@ -11,6 +11,7 @@ import { ResourceAdjustmentPanel } from './ResourceAdjustmentPanel';
 import { VcpuPinningPanel } from './VcpuPinningPanel';
 import { VmOperationNotice } from './VmOperationProgress';
 import { useVmOperationProgress } from './useVmOperationProgress';
+import { LiveDataAlert } from '../layout/LiveDataAlert';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
 
@@ -78,7 +79,8 @@ export function ControlVmDetailPage() {
       </header>
 
       {vm.isPending && <div className={styles.statePanel}>VM 관리 정보를 불러오는 중입니다…</div>}
-      {vm.error && (
+      <LiveDataAlert />
+      {vm.error instanceof ApiError && vm.error.status === 404 && (
         <div className={styles.statePanel} role="alert">
           {vm.error instanceof ApiError ? `${vm.error.message} (${vm.error.code})` : String(vm.error)}
         </div>

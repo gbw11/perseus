@@ -203,6 +203,49 @@ afterEach(() => {
 });
 
 describe('VM telemetry dashboard', () => {
+  it('keeps Memory cards and original observations through query failure, expiry and recovery', async () => {
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const fetch = fixture();
+    const original = fetch.getMockImplementation()!;
+    const sample = memoryFixture('ram-committed', now - 500);
+    sample.vm_id = VM_IDS.autonomous;
+    let failed = false;
+    let report = sample;
+    fetch.mockImplementation((url: string) => {
+      const path = new URL(url, 'http://fixture').pathname;
+      if (failed && (path === '/api/v1/vms' || path.endsWith('/metrics')))
+        return Promise.resolve(
+          Response.json({ code: 'UNAVAILABLE', message: 'fixture failure' }, { status: 503 }),
+        );
+      return path.endsWith(`/vms/${VM_IDS.autonomous}/metrics`)
+        ? Promise.resolve(Response.json({ items: [report] }))
+        : original(url);
+    });
+    const page = renderPage();
+    const card = within(await screen.findByRole('region', { name: 'autonomous 메모리 사용률' }));
+    expect(await card.findByText('25.000%')).toBeInTheDocument();
+    failed = true;
+    now += 1000;
+    await act(() => page.client.refetchQueries());
+    expect(screen.getByText(/실시간 데이터를 불러오지 못하고 있습니다/)).toBeInTheDocument();
+    expect(card.getByText('25.000%')).toBeInTheDocument();
+    now += 7000;
+    act(() => vi.advanceTimersByTime(1000));
+    expect(card.getByText('25.000%')).toBeInTheDocument();
+    expect(card.getByText('관측 만료 · 최근 관측값')).toBeInTheDocument();
+    expect(card.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
+    failed = false;
+    report = memoryFixture('ram-reserved-increase', now - 500);
+    report.vm_id = sample.vm_id;
+    await act(() => page.client.refetchQueries());
+    expect(card.getByText('50.000%')).toBeInTheDocument();
+    expect(card.queryByText('관측 만료 · 최근 관측값')).not.toBeInTheDocument();
+    expect(screen.queryByText(/실시간 데이터를 불러오지 못하고 있습니다/)).not.toBeInTheDocument();
+    page.unmount();
+  });
+
   it('uses the same managed RAM percentage on Overview and Memory while keeping Linux unchanged', async () => {
     const now = Date.now();
     const fetch = fixture();
