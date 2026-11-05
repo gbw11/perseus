@@ -21,6 +21,7 @@ from .mqtt import MqttSource
 from .state import StateStore
 from .policy import DisplayPolicy, RenderAck, Selection
 from .gateway import GatewayReader
+from .shared import SharedFollower
 
 log = logging.getLogger(__name__)
 
@@ -53,22 +54,29 @@ def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSourc
 
     async def poll():
         unavailable = False
+        follower = SharedFollower(driver) if isinstance(driver, ObservationFile) else None
+        interval = .25 if follower is not None else 1
         while True:
+            started = time.monotonic()
             try:
-                if isinstance(driver, ObservationFile):
-                    domains, observed = await asyncio.to_thread(driver.read)
-                    store.poll_success(domains, observed_mono=observed)
+                if follower is not None:
+                    update = await asyncio.to_thread(follower.read_changed)
+                    if update is not None:
+                        domains, observed = update
+                        store.poll_success(domains, observed_mono=observed)
                 else:
                     # Explicitly injected test/probe adapters only.
                     domains = await asyncio.to_thread(driver.list_domains)
                     store.poll_success(domains)
                 unavailable = False
             except Exception as error:
+                if follower is not None:
+                    follower.invalidate()
                 store.poll_failure()
                 if not unavailable:
                     log.warning("Shared VM display observation unavailable (%s)", type(error).__name__)
                 unavailable = True
-            await asyncio.sleep(1)
+            await asyncio.sleep(max(0, interval - (time.monotonic() - started)))
 
     @asynccontextmanager
     async def lifespan(app):
