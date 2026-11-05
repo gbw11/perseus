@@ -481,7 +481,7 @@ export const handlers = [
             name: 'net_rx_bytes_total',
             value: 1_200_000 + i * 8_000,
             unit: 'bytes',
-            labels: null,
+            labels: { iface: 'eth0' },
             unavailable_reason: null,
           },
         ],
@@ -511,5 +511,49 @@ export const handlers = [
         { pid: 1, name: 'systemd', cpu_percent: 0.2, rss_bytes: 11_010_048 },
       ],
     } as unknown as JsonBodyType);
+  }),
+
+  http.get('*/api/v1/vms/:vmId/threads', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const zephyr = params.vmId === VM_IDS.autonomous || params.vmId === VM_IDS.manual;
+    return HttpResponse.json({
+      vm_id: params.vmId,
+      window_ms: zephyr ? 1000 : null,
+      received_at: zephyr ? new Date().toISOString() : null,
+      stale: !zephyr,
+      threads_status: zephyr ? 'ok' : null,
+      parts_received: zephyr ? 1 : 0,
+      part_count: zephyr ? 1 : null,
+      complete: zephyr,
+      conflicting_pages: false,
+      items: zephyr
+        ? [
+            {
+              thread_id: '1',
+              thread_name: 'telemetry',
+              name_truncated: false,
+              cpu_percent: 1.2,
+              unavailable_reason: null,
+            },
+          ]
+        : [],
+    });
+  }),
+
+  http.get('*/api/v1/vms/:vmId/telemetry/heartbeat', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const known = Object.values(VM_IDS).some((id) => id === params.vmId);
+    return HttpResponse.json({
+      vm_id: params.vmId,
+      status: known ? 'FRESH' : 'UNKNOWN',
+      publisher_state: known ? 'running' : null,
+      last_collection_success_uptime_ms: known ? '12000' : null,
+      last_collection_success_age_ms: known ? 500 : null,
+      collection_failures_total: known ? 2 : null,
+      received_at: known ? new Date().toISOString() : null,
+      age_ms: known ? 0 : null,
+    });
   }),
 ];

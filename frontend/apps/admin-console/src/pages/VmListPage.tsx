@@ -112,7 +112,6 @@ export function VmListPage() {
       <div className={styles.controlGrid}>
         {items.map((vm, index) => {
           const accent = VM_ACCENTS[index % VM_ACCENTS.length];
-          const zephyr = vm.guest_kind === 'zephyr';
           const operation = vmOperations.operations[vm.vm_id];
           const operationPending = operation?.status === 'pending';
           const creationPending = isVmCreationPending(vm, pendingCreations);
@@ -164,8 +163,8 @@ export function VmListPage() {
                     </dd>
                   </div>
                   <div className={styles.controlFactWide}>
-                    <dt>연결</dt>
-                    <dd>{zephyr ? 'vchan · dom0 중계' : (vm.ipv4 ?? 'IP 할당 대기')}</dd>
+                    <dt>예약 IPv4</dt>
+                    <dd>{vm.assigned_ipv4 ?? '—'}</dd>
                   </div>
                 </dl>
 

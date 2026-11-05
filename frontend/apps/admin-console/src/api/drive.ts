@@ -27,10 +27,27 @@ export interface DriveApp {
   heartbeat_ago_ms: number | null;
 }
 
+export interface DriveSource {
+  status: 'fresh' | 'stale' | 'disconnected' | 'unknown';
+  age_ms: number | null;
+}
+
+export interface VmAppReport {
+  lifecycle: {
+    phase: 'WAITING' | 'ACTIVATING' | 'EXECUTING' | 'STOPPING' | 'RESIDUAL';
+    readiness: 'QUALIFIED' | 'READY' | 'NOT_READY';
+    reason: string | null;
+  } | null;
+  lifecycle_source: DriveSource;
+  heartbeat: { state: NonNullable<DriveApp['heartbeat_state']> } | null;
+  heartbeat_source: DriveSource;
+}
+
 /** 백엔드 DriveState (MQTT 계약 §5.4 필드, "*_ago_ms" 는 백엔드 시계 기준). 블록이 null 이면 아직 못 받음 */
 export interface DriveState {
   version: number;
   observed_at: string;
+  source?: DriveSource;
   control: {
     mode: DriveMode | null;
     generation: number | null;
@@ -38,6 +55,7 @@ export interface DriveState {
     active_vm_id: string | null;
     reason: string | null;
     received_ago_ms: number;
+    source?: DriveSource;
   } | null;
   vehicle: {
     applied_generation: number | null;
@@ -48,6 +66,7 @@ export interface DriveState {
     received_ago_ms: number;
   } | null;
   apps: Record<string, DriveApp>;
+  vm_apps?: Record<string, Record<string, VmAppReport>>;
   perception: {
     valid: boolean;
     received_ago_ms: number;

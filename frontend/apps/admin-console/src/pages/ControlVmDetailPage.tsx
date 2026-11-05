@@ -100,14 +100,8 @@ export function ControlVmDetailPage() {
                   <strong>{osLabel(vm.data)}</strong>
                 </div>
                 <div className={styles.identityFact}>
-                  <span className={styles.identityLabel}>연결</span>
-                  <span
-                    className={styles.identityStatus}
-                    data-tone={vm.data.guest_kind === 'zephyr' || vm.data.ipv4 ? 'ok' : 'waiting'}
-                  >
-                    <i aria-hidden="true" />
-                    {vm.data.guest_kind === 'zephyr' ? 'vchan · dom0 중계' : (vm.data.ipv4 ?? 'IP 할당 대기')}
-                  </span>
+                  <span className={styles.identityLabel}>예약 IPv4</span>
+                  <strong>{vm.data.assigned_ipv4 ?? '—'}</strong>
                 </div>
                 <div className={styles.identityFact}>
                   <span className={styles.identityLabel}>템플릿</span>

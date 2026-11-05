@@ -746,7 +746,7 @@ button.chip:hover:not(.chipOn) {
 }
 .overviewSummary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid var(--x-border);
   border-radius: 14px;
@@ -907,9 +907,11 @@ button.chip:hover:not(.chipOn) {
   display: flex;
   align-items: center;
   gap: 7px;
+  overflow-wrap: anywhere;
   font-size: var(--x-text-sm);
 }
 .statusLine strong i {
+  flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -996,15 +998,6 @@ button.chip:hover:not(.chipOn) {
   .vmGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .overviewSummary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .summaryItem:nth-child(2) {
-    border-right: 0;
-  }
-  .summaryItem:nth-child(-n + 2) {
-    border-bottom: 1px solid var(--x-border);
-  }
 }
 /* ---- S15P31E110-311 VM별 RX/TX 데이터 Pool ---- */
 .memoryHeadingMeta {
@@ -1025,11 +1018,12 @@ button.chip:hover:not(.chipOn) {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--x-space-4);
-  align-items: stretch;
+  /* VM별 상세 길이가 달라도 다른 카드에 빈 영역을 만들지 않는다. */
+  align-items: start;
 }
 .memoryVmCard {
   min-width: 0;
-  height: 100%;
+  height: auto;
   border-top: 4px solid var(--vm-accent);
 }
 .memoryVmTitle {
@@ -1049,6 +1043,12 @@ button.chip:hover:not(.chipOn) {
   display: grid;
   justify-items: end;
   gap: 4px;
+}
+.publisherStatus {
+  margin-bottom: var(--x-space-3);
+}
+.publisherStatus strong {
+  font-weight: 600;
 }
 .memoryNotice {
   margin-bottom: var(--x-space-3);
@@ -1236,6 +1236,10 @@ button.chip:hover:not(.chipOn) {
   font-family: var(--x-font-mono);
   font-size: 10px;
 }
+.memoryChartBlock + .linuxMemorySummary,
+.memoryChartBlock + .poolSummaryGrid {
+  margin-top: var(--x-space-3);
+}
 .counterGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1376,6 +1380,136 @@ button.chip:hover:not(.chipOn) {
   stroke-linejoin: round;
   stroke-width: 2;
 }
+.appMemorySection {
+  margin-bottom: var(--x-space-4);
+}
+.appMemorySection > header,
+.appMemoryPool > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--x-space-2);
+  flex-wrap: wrap;
+}
+.appMemorySection h3 {
+  margin: 0;
+}
+.appMemorySection small,
+.appMemoryTime {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appMemoryGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--x-space-3);
+}
+.memoryGroup {
+  margin-top: var(--x-space-4);
+}
+.memoryGroup h4 {
+  margin: 0 0 var(--x-space-2);
+}
+.memoryGroupBadge {
+  display: inline-block;
+  padding: 3px 10px;
+  border: 1px solid var(--x-border);
+  border-radius: 999px;
+  font-size: var(--x-text-xs);
+  color: var(--x-text-muted);
+}
+.bufferState {
+  display: grid;
+  gap: 4px;
+  margin-top: var(--x-space-2);
+  font-size: var(--x-text-xs);
+}
+.bufferState span,
+.bufferState small {
+  color: var(--x-text-muted);
+}
+.memorySharedNetwork {
+  grid-column: 1 / -1;
+}
+.managedRamSection {
+  margin-bottom: var(--x-space-4);
+}
+.managedRamNotice {
+  grid-column: 1 / -1;
+}
+.appMemoryPool {
+  min-width: 0;
+  padding: var(--x-space-3);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  background: var(--x-surface-2);
+  --pool-accent: var(--vm-accent);
+}
+.appMemoryPool header b {
+  color: var(--vm-accent);
+  font-family: var(--x-font-mono);
+}
+.appMemoryAmount {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: var(--x-space-2) 0;
+  font-family: var(--x-font-mono);
+}
+.appMemoryAmount > strong {
+  font-size: var(--x-text-lg);
+}
+.appMemoryAmount > span,
+.appMemoryPool dt {
+  color: var(--x-text-muted);
+}
+.appMemoryPool dl {
+  margin: var(--x-space-3) 0;
+  display: grid;
+  gap: 6px;
+  font-size: var(--x-text-xs);
+}
+.appMemoryPool dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--x-space-2);
+}
+.appMemoryPool dd {
+  margin: 0;
+  font-family: var(--x-font-mono);
+  overflow-wrap: anywhere;
+}
+.appMemoryNotice {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appPoolChart svg {
+  display: block;
+  width: 100%;
+  height: 80px;
+  overflow: visible;
+}
+.appPoolChart > div:last-child {
+  display: flex;
+  justify-content: space-between;
+  color: var(--x-text-muted);
+  font-size: 10px;
+}
+.appPoolChartEmpty {
+  display: grid;
+  place-items: center;
+  min-height: 80px;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appMemoryDot {
+  fill: var(--vm-accent);
+}
+.appMemoryTime {
+  display: block;
+  margin-top: var(--x-space-2);
+}
 @media (max-width: 1200px) {
   .memoryVmGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1505,21 +1639,6 @@ button.chip:hover:not(.chipOn) {
 .resourceFacts small {
   color: var(--x-text-muted);
   font-size: var(--x-text-xs);
-}
-.telemetryEmpty {
-  display: grid;
-  place-items: center;
-  gap: var(--x-space-2);
-  min-height: 160px;
-  padding: var(--x-space-5);
-  border: 1px dashed var(--x-border);
-  border-radius: var(--x-radius-sm);
-  color: var(--x-text-muted);
-  text-align: center;
-}
-.telemetryEmpty strong {
-  color: var(--x-text);
-  font-size: var(--x-text-lg);
 }
 .detailEvents {
   display: grid;
