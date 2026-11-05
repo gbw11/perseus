@@ -185,7 +185,8 @@ class StateStore:
                         observed_at=env["sent_at"], source_id=topic, source_epoch=list(epoch),
                         sequence=env["seq"], retained=retained, _mqtt_generation=self.mqtt_generation)
                     return False  # Deferred; not yet accepted as displayed OS evidence.
-            # Only a non-retained heartbeat establishes a boot, not historical inventory.
+            # A live heartbeat or opted-in warm supervision may establish a
+            # reported boot; retained inventory never proves current liveness.
             boot = env["boot_id"]
             if boot != g["boot_id"]:
                 if retained or kind in ("agent.inventory", "app.readiness") or boot in g["retired_boots"] or len(g["retired_boots"]) >= 128:
@@ -213,7 +214,7 @@ class StateStore:
                             return False
                         g["retired_apps"].add((app_id, current))
                     # A publisher restart invalidates only this app's readiness.
-                    for app_kind in ("app.heartbeat", "app.readiness"):
+                    for app_kind in ("app.heartbeat", "app.readiness", "app.lifecycle", "app.lifecycle.work"):
                         g["channels"].pop((app_id, app_kind), None)
                     g["app_instances"][app_id] = epoch
                     g["app_sequences"].pop(app_id, None)
@@ -235,10 +236,31 @@ class StateStore:
                             or int(new["progress_seq"]) < int(old["progress_seq"])
                             or (new["readiness"] == "READY" and int(new["progress_seq"]) == int(old["progress_seq"]))):
                         return False
+                if scoped and kind == "app.lifecycle":
+                    old, new = previous["value"], env["payload"]
+                    if (new["applied_generation"] < old["applied_generation"]
+                            or int(new["check_seq"]) <= int(old["check_seq"])
+                            or int(new["progress_seq"]) < int(old["progress_seq"])):
+                        return False
                 if previous["source_epoch"] != list(epoch):
                     if len(g["retired_epochs"]) >= 128:
                         return False
                     g["retired_epochs"].add((key, tuple(previous["source_epoch"])))
+            if scoped and kind == "app.lifecycle":
+                work_key = (app_id, "app.lifecycle.work")
+                payload = env["payload"]
+                if payload["readiness"] != "READY":
+                    g["channels"].pop(work_key, None)
+                elif previous is not None and payload["applied_generation"] != previous["value"]["applied_generation"]:
+                    g["channels"].pop(work_key, None)
+                    if int(payload["progress_seq"]) > int(previous["value"]["progress_seq"]):
+                        g["channels"][work_key] = self.observation(payload, observed_at=env["sent_at"],
+                            source_id=topic, source_epoch=list(epoch), sequence=env["seq"],
+                            retained=False, _mqtt_generation=self.mqtt_generation)
+                elif previous is None or int(payload["progress_seq"]) > int(previous["value"]["progress_seq"]):
+                    g["channels"][work_key] = self.observation(payload, observed_at=env["sent_at"],
+                        source_id=topic, source_epoch=list(epoch), sequence=env["seq"],
+                        retained=False, _mqtt_generation=self.mqtt_generation)
             g["channels"][key] = self.observation(env["payload"], observed_at=env["sent_at"],
                 source_id=topic, source_epoch=list(epoch), sequence=env["seq"], retained=retained,
                 _mqtt_generation=self.mqtt_generation)
@@ -268,11 +290,25 @@ class StateStore:
         if xen_live and source["status"] == "fresh":
             state = "failed" if heartbeat["value"]["state"] == "error" else "ready"
         observation = g["channels"].get((app_id, "app.readiness")) if scoped else None
-        readiness_source = self.mqtt_source(observation, .3, topic, supported=scoped)
+        readiness_source = self.mqtt_source(observation, .3, topic,
+            supported=scoped and b.report_profile == "verified-drive-1")
         current = (xen_live and state == "ready" and readiness_source["status"] == "fresh")
-        return {"app_id": app_id, "topic": topic, "app_state": state,
+        warm = scoped and b.report_profile == "warm-drive-1"
+        lifecycle = g["channels"].get((app_id, "app.lifecycle")) if warm else None
+        lifecycle_source = self.mqtt_source(lifecycle, .3, topic, supported=warm)
+        work = g["channels"].get((app_id, "app.lifecycle.work")) if warm else None
+        work_source = self.mqtt_source(work, .3, topic, supported=warm)
+        lifecycle_current = (deepcopy(lifecycle["value"]) if lifecycle is not None
+            and xen_live and lifecycle_source["status"] == "fresh"
+            and (lifecycle["value"]["readiness"] != "READY" or work_source["status"] == "fresh") else None)
+        if warm and state == "ready" and (lifecycle_current is None or lifecycle_current["readiness"] != "READY"):
+            state = "unknown"  # Fresh supervision/qualification is not completed work.
+        return {"app_id": app_id, "topic": topic, "app_state": state, "report_profile": b.report_profile,
                 "reported_app_state": heartbeat["value"]["state"] if heartbeat else None,
                 "source": source,
+                "lifecycle": {"reported": deepcopy(lifecycle["value"]) if lifecycle else None,
+                    "current": lifecycle_current, "source": lifecycle_source,
+                    "calculation_source": work_source, "execution_verified": False, "authority_verified": False},
                 "readiness": {"reported": deepcopy(observation["value"]) if observation else None,
                     "current": deepcopy(observation["value"]) if current else None,
                     "source": readiness_source, "execution_verified": False, "authority_verified": False}}
