@@ -12,7 +12,12 @@ import {
   linuxFreeMemory,
   type DiskIoCounter,
 } from '../domain/vmMetrics';
-import { buildMemoryPoolSeries, bytesToKiB, type PoolSnapshot } from '../domain/memoryPools';
+import {
+  buildMemoryPoolSeries,
+  buildPacketRateSeries,
+  bytesToKiB,
+  type PoolSnapshot,
+} from '../domain/memoryPools';
 import {
   ago,
   osLabel,
@@ -239,7 +244,7 @@ function MemoryDashboard({
 function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
   const metrics = useMetrics(vm.vm_id, true, 1, 2000);
-  const heapMetrics = useMetrics(vm.vm_id, true);
+  const heapMetrics = useMetrics(vm.vm_id, true, 5, 2000);
   const samples = metrics.data?.items ?? [];
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
   const style = {
@@ -268,7 +273,7 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
       }
     >
       {(metrics.error || heapMetrics.error) && (
-        <MetricErrorNotice detail="최근 관측 이력을 표시하며, 만료된 현재값은 비웁니다." />
+        <MetricErrorNotice detail="최근 관측값·이력을 표시하며, 만료 여부는 영역별로 구분합니다." />
       )}
       <ManagedRamSummary vmId={vm.vm_id} vmName={vm.name} samples={samples} />
       <p className={styles.dim}>
@@ -318,6 +323,8 @@ function SharedMemoryPanels({
       return at ? { ...sample, observed_at: at } : sample;
     });
   const series = buildMemoryPoolSeries(projectRun(samples));
+  // Network reports do not carry the memory observation context.
+  const packetRates = buildPacketRateSeries(samples);
   const heap = buildZephyrHeapSeries(projectRun(heapSamples));
   const heapObservation = sharedMemoryObservation(
     allSamples,
@@ -326,11 +333,11 @@ function SharedMemoryPanels({
     now,
   );
   const currentHeapView =
-    heapObservation.state === 'fresh' && heapObservation.sample
+    (heapObservation.state === 'fresh' || heapObservation.state === 'expired') && heapObservation.sample
       ? buildZephyrHeapSeries([heapObservation.sample])
       : null;
   const currentHeap = currentHeapView?.current ?? null;
-  const pool = (region: 'net_rx_data' | 'net_tx_data'): PoolSnapshot => {
+  const pool = (region: 'net_rx_data' | 'net_tx_data'): PoolSnapshot & { expired?: boolean } => {
     const view = sharedMemoryObservation(
       allSamples,
       'memory_regions',
@@ -338,8 +345,11 @@ function SharedMemoryPanels({
       now,
       region,
     );
-    if (view.state === 'fresh' && view.sample)
-      return buildMemoryPoolSeries([view.sample])[region === 'net_rx_data' ? 'rx' : 'tx'];
+    if ((view.state === 'fresh' || view.state === 'expired') && view.sample)
+      return {
+        ...buildMemoryPoolSeries([view.sample])[region === 'net_rx_data' ? 'rx' : 'tx'],
+        expired: view.state === 'expired',
+      };
     return {
       state: 'missing',
       usedBytes: null,
@@ -361,7 +371,8 @@ function SharedMemoryPanels({
           percent={currentHeap?.percent ?? null}
           usedBytes={currentHeap?.usedBytes ?? null}
           totalBytes={currentHeap?.totalBytes ?? null}
-          freeLabel="여유"
+          freeLabel={heapObservation.state === 'expired' ? '관측 당시 여유' : '여유'}
+          expired={heapObservation.state === 'expired' && currentHeap != null}
           freeBytes={currentHeap?.freeBytes ?? null}
           freeNote={currentHeapView?.reason ?? heapObservation.reason}
           format={formatKiB}
@@ -392,7 +403,7 @@ function SharedMemoryPanels({
           title="패킷 처리율"
           unit="packets/s"
           ariaLabel={`${vmName} RX TX 패킷 처리율 최근 60초`}
-          points={series.packetRates.map((point) => ({
+          points={packetRates.map((point) => ({
             observedAt: point.observedAt,
             rx: point.rxPacketsPerSecond,
             tx: point.txPacketsPerSecond,
@@ -411,14 +422,24 @@ function SharedMemoryPanels({
         />
 
         <div className={styles.memoryObservation}>
-          {observationOf({ ...series, rx, tx }, pending, failed)}
+          {rx.expired || tx.expired
+            ? '일부 Pool 관측 만료 · 영역별 최근 관측값을 표시합니다.'
+            : observationOf({ ...series, rx, tx }, pending, failed)}
         </div>
       </section>
     </>
   );
 }
 
-function PoolSummary({ label, pool, tone }: { label: string; pool: PoolSnapshot; tone: 'rx' | 'tx' }) {
+function PoolSummary({
+  label,
+  pool,
+  tone,
+}: {
+  label: string;
+  pool: PoolSnapshot & { expired?: boolean };
+  tone: 'rx' | 'tx';
+}) {
   const usable = pool.state === 'ok';
   return (
     <section className={styles.poolSummary} data-tone={tone}>
@@ -434,7 +455,7 @@ function PoolSummary({ label, pool, tone }: { label: string; pool: PoolSnapshot;
         <span>/ {usable ? formatKiB(pool.capacityBytes) : '—'}</span>
       </div>
       <div className={styles.poolFree}>
-        <span>여유</span>
+        <span>{pool.expired ? '관측 당시 여유' : '여유'}</span>
         <strong>{usable ? formatKiB(pool.freeBytes) : pool.reason}</strong>
       </div>
       <div
@@ -443,10 +464,16 @@ function PoolSummary({ label, pool, tone }: { label: string; pool: PoolSnapshot;
         aria-label={`${label} 사용률`}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={usable ? Math.round(pool.usagePercent!) : undefined}
+        aria-valuenow={usable && !pool.expired ? Math.round(pool.usagePercent!) : undefined}
+        aria-valuetext={
+          usable && pool.expired ? `최근 관측 ${pool.usagePercent!.toFixed(1)}% · 관측 만료` : undefined
+        }
       >
         <i style={{ width: `${usable ? Math.min(100, pool.usagePercent!) : 0}%` }} />
       </div>
+      <p className={styles.appMemoryNotice}>
+        {pool.expired ? '관측 만료 · 최근 관측값' : usable ? '최근 관측값' : pool.reason}
+      </p>
     </section>
   );
 }
@@ -493,7 +520,7 @@ function MemoryChart({
         </span>
       </header>
       <div className={styles.memoryChart}>
-        {rxPoints || txPoints ? (
+        {rxPoints.length || txPoints.length ? (
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={ariaLabel}>
             {[0, 25, 50, 75, 100].map((value) => (
               <line
@@ -505,12 +532,22 @@ function MemoryChart({
                 className={styles.memoryGridLine}
               />
             ))}
-            {rxPoints && (
-              <polyline points={rxPoints} className={styles.memoryRxLine} vectorEffect="non-scaling-stroke" />
-            )}
-            {txPoints && (
-              <polyline points={txPoints} className={styles.memoryTxLine} vectorEffect="non-scaling-stroke" />
-            )}
+            {rxPoints.map((segment, index) => (
+              <polyline
+                key={`rx-${index}`}
+                points={segment}
+                className={styles.memoryRxLine}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+            {txPoints.map((segment, index) => (
+              <polyline
+                key={`tx-${index}`}
+                points={segment}
+                className={styles.memoryTxLine}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
           </svg>
         ) : (
           <div className={styles.memoryChartEmpty}>데이터 없음</div>
@@ -559,6 +596,7 @@ function MemoryUsageSummary({
   freeBytes,
   freeNote,
   format,
+  expired = false,
 }: {
   label: string;
   badge?: BasisBadge;
@@ -572,6 +610,7 @@ function MemoryUsageSummary({
   freeBytes: number | null;
   freeNote: string | null;
   format: (bytes: number | null) => string;
+  expired?: boolean;
 }) {
   const clamped = percent == null ? null : Math.max(0, Math.min(100, percent));
   return (
@@ -597,7 +636,10 @@ function MemoryUsageSummary({
         aria-label={ariaLabel}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={clamped == null ? undefined : Math.round(clamped)}
+        aria-valuenow={clamped == null || expired ? undefined : Math.round(clamped)}
+        aria-valuetext={
+          expired && percent != null ? `최근 관측 ${percent.toFixed(1)}% · 관측 만료` : undefined
+        }
       >
         <i style={{ width: `${clamped ?? 0}%` }} />
       </div>
@@ -743,7 +785,7 @@ function UsageChart({
         </span>
       </header>
       <div className={styles.memoryChart}>
-        {line ? (
+        {line.length ? (
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={ariaLabel}>
             {[0, 25, 50, 75, 100].map((value) => (
               <line
@@ -755,7 +797,14 @@ function UsageChart({
                 className={styles.memoryGridLine}
               />
             ))}
-            <polyline points={line} className={styles.linuxMemoryLine} vectorEffect="non-scaling-stroke" />
+            {line.map((segment, index) => (
+              <polyline
+                key={index}
+                points={segment}
+                className={styles.linuxMemoryLine}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
           </svg>
         ) : (
           <div className={styles.memoryChartEmpty}>{emptyMessage}</div>
@@ -770,21 +819,27 @@ function UsageChart({
   );
 }
 
-function chartPoints(points: ChartPoint[], key: 'rx' | 'tx', max: number): string {
-  if (!points.length) return '';
+function chartPoints(points: ChartPoint[], key: 'rx' | 'tx', max: number): string[] {
+  if (!points.length) return [];
   const start = Date.parse(points[0]!.observedAt);
   const end = Date.parse(points.at(-1)!.observedAt);
   const span = Math.max(1, end - start);
-  return points
-    .map((point) => {
-      const value = point[key];
-      if (value == null) return null;
-      const x = ((Date.parse(point.observedAt) - start) / span) * 100;
-      const y = 100 - (Math.max(0, Math.min(max, value)) / max) * 100;
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .filter((point): point is string => point != null)
-    .join(' ');
+  const segments: string[][] = [];
+  let segment: string[] = [];
+  for (const point of points) {
+    const value = point[key];
+    // 미측정·카운터 초기화 경계에 선을 이어 연속 측정처럼 보이지 않게 한다.
+    if (value == null || !Number.isFinite(value)) {
+      if (segment.length) segments.push(segment);
+      segment = [];
+      continue;
+    }
+    const x = ((Date.parse(point.observedAt) - start) / span) * 100;
+    const y = 100 - (Math.max(0, Math.min(max, value)) / max) * 100;
+    segment.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+  }
+  if (segment.length) segments.push(segment);
+  return segments.map((part) => part.join(' '));
 }
 
 function observationOf(

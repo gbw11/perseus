@@ -12,7 +12,7 @@ import {
   useToast,
 } from '@xenova/ui';
 import type { Health } from '@xenova/ui';
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
 import type { DriveState, SocketState } from '../api/drive';
 import { useEvents, useMetrics, useTelemetryHeartbeat, useVms } from '../api/queries';
@@ -22,6 +22,7 @@ import { cpuPercentOf, latest, memoryPercentOf } from '../domain/vmMetrics';
 import { observedControl, vmAppObservations } from '../domain/driveObservations';
 import { clock, describe } from '../domain/events';
 import { publisherObservation } from '../domain/telemetryPublisher';
+import { buildManagedRamSeries, managedRamReason } from '../domain/managedRam';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import {
   ago,
@@ -478,6 +479,11 @@ export function DashboardPage() {
   const { drive, socket } = useDrive();
   const vms = useVms();
   const events = useEvents({ limit: 30 });
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   const items = sortVms(vms.data?.items ?? []);
   const control = observedControl(drive, socket);
   const activeVm = items.find((vm) => vm.vm_id === control?.active_vm_id);
@@ -515,6 +521,7 @@ export function DashboardPage() {
             vm={vm}
             drive={drive}
             socket={socket}
+            now={now}
             vmStatusError={vms.isError}
             latestEvent={overviewLatestEvent(events.data?.items, vm.vm_id)}
           />
@@ -544,18 +551,21 @@ function VmOverviewCard({
   vm,
   drive,
   socket,
+  now,
   vmStatusError,
   latestEvent,
 }: {
   vm: Vm;
   drive: DriveState | null;
   socket: SocketState;
+  now: number;
   vmStatusError: boolean;
   latestEvent: VmEvent | undefined;
 }) {
   const role = roleOf(vm, drive);
-  const metrics = useMetrics(vm.vm_id, true);
   const linux = vm.guest_kind === 'linux';
+  // 현재값 카드에는 Memory 탭과 같은 짧은 이력·조회 주기를 사용한다.
+  const metrics = useMetrics(vm.vm_id, true, linux ? 5 : 1, linux ? 5000 : 2000);
   const heartbeat = useTelemetryHeartbeat(linux ? '' : vm.vm_id);
   const publisher = publisherObservation(vm.vm_id, heartbeat);
   // LINK tracks heartbeat freshness; publisher collection health stays in the detailed diagnostics.
@@ -578,7 +588,13 @@ function VmOverviewCard({
   const telemetryAge = !heartbeat.isError && !heartbeat.isPending ? publisher.report?.age_ms : null;
   const samples = metrics.data?.items ?? [];
   const cpu = latest(samples, cpuPercentOf);
-  const memory = latest(samples, (sample) => memoryPercentOf(sample, vm));
+  const ram = linux ? null : buildManagedRamSeries(samples, vm.vm_id, now);
+  const ramDisplay = ram?.recentObservation ?? ram?.current;
+  const memory = linux
+    ? latest(samples, (sample) => memoryPercentOf(sample, vm))
+    : ramDisplay?.status === 'ok'
+      ? Number(ramDisplay.percent)
+      : null;
   const apps = vmAppObservations(vm.vm_id, drive, socket);
   const authority = vmAuthorityOf(role, vm, observedControl(drive, socket)?.active_vm_id);
   const eventSummary = latestEvent
@@ -620,8 +636,22 @@ function VmOverviewCard({
         <OverviewMetricBar
           label="Memory"
           value={memory}
-          unavailable={unavailable}
-          detail={vm.guest_kind === 'zephyr' ? 'Kernel heap' : `${vm.memory_mib} MiB allocated`}
+          precision={linux ? 0 : 3}
+          unavailable={
+            metrics.isError
+              ? '메트릭 조회 불가'
+              : (unavailable ??
+                (ram && ram.current.status !== 'ok'
+                  ? ram.recentObservation
+                    ? '관측 만료 · 최근 관측값'
+                    : managedRamReason(ram.current.reason)
+                  : null))
+          }
+          detail={
+            linux
+              ? `${vm.memory_mib} MiB allocated`
+              : `정적 예약 포함${ram?.lastObservationAt == null ? '' : ` · ${ago(Math.max(0, now - ram.lastObservationAt))}`}`
+          }
         />
       </div>
 
@@ -663,11 +693,13 @@ function OverviewStatusLine({
 function OverviewMetricBar({
   label,
   value,
+  precision = 0,
   unavailable,
   detail,
 }: {
   label: string;
   value: number | null;
+  precision?: number;
   unavailable: string | null;
   detail?: string;
 }) {
@@ -676,11 +708,11 @@ function OverviewMetricBar({
     <div className={styles.metricRow}>
       <div>
         <span>{label}</span>
-        <strong>{value == null ? '—' : `${value.toFixed(0)}%`}</strong>
+        <strong>{value == null ? '—' : `${value.toFixed(precision)}%`}</strong>
       </div>
       <div
         className={styles.metricTrack}
-        aria-label={`${label} ${value == null ? '데이터 없음' : `${value.toFixed(0)}%`}`}
+        aria-label={`${label} ${value == null ? '데이터 없음' : `${value.toFixed(precision)}%`}`}
       >
         <i style={{ width: `${safeValue}%` }} />
       </div>
