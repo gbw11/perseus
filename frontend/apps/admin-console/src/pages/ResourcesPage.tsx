@@ -30,6 +30,8 @@ import { AppMemoryPools } from './AppMemoryPools';
 import { ManagedRamSummary } from './ManagedRamSummary';
 import { sharedMemoryObservation, sharedObservedAt } from '../domain/sharedMemoryObservation';
 import { memoryObservationRunKey, selectMemoryObservationRun } from '../domain/memoryObservationRun';
+import { LiveDataAlert } from '../layout/LiveDataAlert';
+import { useNow } from '../useNow';
 import { MetricErrorNotice } from './MetricErrorNotice';
 import styles from './pages.module.css';
 
@@ -222,6 +224,7 @@ function MemoryDashboard({
       </header>
 
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
+      <LiveDataAlert />
 
       <div className={styles.memoryVmGrid}>
         {vms.map((vm) =>
@@ -606,6 +609,7 @@ function MemoryUsageSummary({
 }
 
 function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
+  const now = useNow();
   const role = roleOf(vm, drive);
   const metrics = useMetrics(vm.vm_id, true);
   const samples = metrics.data?.items ?? [];
@@ -648,7 +652,7 @@ function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
           <span className={styles.authority} data-authority={authority.toLowerCase()}>
             {authority}
           </span>
-          <small>마지막 갱신 {current ? relativeTime(current.observedAt) : '—'}</small>
+          <small>마지막 갱신 {current ? relativeTime(current.observedAt, now) : '—'}</small>
         </span>
       }
     >
@@ -821,9 +825,9 @@ function formatMiB(value: number): string {
   return `${(value / MIB_BYTES).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
 }
 
-function relativeTime(value: string | null): string {
+function relativeTime(value: string | null, now: number): string {
   if (!value) return '—';
-  const elapsed = Math.max(0, Date.now() - Date.parse(value));
+  const elapsed = Math.max(0, now - Date.parse(value));
   return ago(elapsed);
 }
 
@@ -846,6 +850,7 @@ function CpuDashboard({
       </header>
 
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
+      <LiveDataAlert />
 
       <div className={styles.cpuGrid}>
         {sortVms(items ?? []).map((vm) => (
