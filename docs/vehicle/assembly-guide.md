@@ -346,6 +346,9 @@ flowchart LR
 
 ESP32 를 PC 에 연결하고 시리얼 모니터를 연다(단계 C-6). 시험마다 PulseView 에서 Run 을 누르고 10초 안에 그 시험을 한다. 기록이 끝나면 화면을 확대해 본다. 13 번 점퍼선은 13 번 쪽 끝만 뺐다 꽂는다.
 
+- 한 COM 포트는 한 프로그램만 열 수 있다. Arduino IDE 시리얼 모니터, PuTTY, 시험 7 의 파이썬 중 하나만 연다. 포트가 안 열리면 다른 프로그램을 닫고, 장치 관리자에서 COM 번호가 바뀌지 않았는지 본다(다른 USB 포트에 꽂으면 바뀔 수 있다).
+- PuTTY 를 써도 된다(Connection type `Serial`, COM 번호, Speed `115200`). PuTTY 는 글자를 치는 즉시 보내고 Enter 가 줄 끝이다. 그래서 시험 5 의 `No Line Ending` 은 Enter 없이 치기, `New Line` 은 Enter 누르기다. 친 글자를 보려면 Terminal → Local echo 를 `Force on` 으로 둔다(Local line editing 은 `Force off`).
+
 1. 리셋: Run 을 누르고 바로 ESP32 의 EN 버튼을 누른다.
    - 시리얼: `ready: disarmed`
    - PulseView: D0·D1 은 처음부터 끝까지 Low 이고 튀는 곳이 없다. D2 는 리셋 뒤 20 ms 마다 1.5 ms 폭 펄스
