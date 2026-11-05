@@ -120,6 +120,8 @@ def inspect(root):
             and not any(word in dependencies for word in ('hdmi', 'graphics', 'kiosk', 'stream', 'display.target')))
         checks['hdmi_opt_in_guard'] = (values(unit(units / 'xenova-display-hdmi.service.d/50-mobile-first.conf'), 'Unit', 'ConditionPathExists')
             == '!/etc/xenova/display-mobile-first' and 'native_session' in values(hdmi, 'Service', 'ExecStart'))
+        checks['terminal_mode_guard'] = (values(unit(units / 'xenova-display-hdmi.service.d/60-display-mode.conf'), 'Unit', 'ConditionPathExists')
+            == '!/run/xenova-display-mode/mobile')
         checks['phone_boot_not_enabled'] = not any(
             list(folder.glob('*.wants/xenova-display-mobile.service')) for folder in
             [units, inside(root, 'etc/systemd/system')])
@@ -132,14 +134,15 @@ def inspect(root):
     checks['one_installed_python_package'] = len(modules) == 1
     checks['mobile_python_modules_installed'] = len(modules) == 1 and all(
         inside(root, str((modules[0] / name).relative_to(root))).is_file()
-        for name in ('main.py', 'mobile_access.py', 'mobile_network.py', 'mobile_upstream.py', 'mobile_preflight.py'))
+        for name in ('main.py', 'mobile_access.py', 'mobile_network.py', 'mobile_upstream.py', 'mobile_preflight.py', 'display_mode.py'))
     checks['operator_guides_installed'] = all(inside(root, name).is_file() for name in (
         'usr/share/xenova/display/mobile/mobile-first.README.md',
         'usr/share/xenova/display/mobile/mobile-deployment.README.md',
+        'usr/share/xenova/display/mobile/display-mode.README.md',
         'usr/share/xenova/display/mobile-access/mobile-access.README.md'))
     checks['private_config_not_seeded'] = not any(inside(root, name).exists() for name in (
         'etc/xenova/display.env', 'etc/xenova/display-bindings.json',
-        'etc/xenova/display-mobile.json', 'etc/xenova/display-mobile-first'))
+        'etc/xenova/display-mobile.json', 'etc/xenova/display-mobile-first', 'run/xenova-display-mode/mobile'))
     try:
         detail.update(web_assets(inside(root, 'usr/share/xenova/display/web')))
         checks['compiled_mobile_assets_complete'] = detail['mobile_route_present']

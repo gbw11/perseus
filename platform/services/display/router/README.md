@@ -255,3 +255,11 @@ python -B tests/probe_display_runtime.py --execute --soak-seconds 600 \
 키오스크의 `--prevent-idle-blank`는 전용 차량 화면 세션에서만 사용한다. `xset`으로 기존 screen saver/DPMS 값을 읽고, screen saver timeout과 blanking 및 지원되는 DPMS를 끈 뒤 적용 결과를 확인한다. 일반 종료 시 기존 값을 복원한다. 공유 데스크톱에는 이 옵션을 사용하지 않는다. 강제 종료(SIGKILL)·전원 차단은 복원을 보장하지 않으며, 새 전용 X 서버 세션의 초기 설정을 다시 적용해야 한다. 배포 예시 unit은 이 옵션을 명시한다. 실제 보드의 상시 서비스에는 아직 설치하지 않았다.
 
 `outputs[].width/height`는 X11 원본 캡처 영역이다. 별도의 `stream_width/stream_height`는 기본 1280×720인 전송 JPEG 크기이며 짝수만 허용한다. 원본 전체를 비율 유지 축소하고 검은 여백을 채우므로 영역을 잘라내지 않는다. 스트림 metadata의 `rectangle`은 원본 영역, `width/height`는 인코딩 결과 크기다. MJPEG는 yuvj420p, encoder 1 thread와 단순 filter pipeline 1 thread를 사용한다. encoder의 `-threads`와 filter의 `-filter_threads`는 별도 설정이다([FFmpeg 공식 문서](https://ffmpeg.org/ffmpeg.html)).
+
+## HDMI ↔ 휴대폰 터미널 전환 (351, 2026-11-05)
+
+기본은 HDMI이며 `sudo python3 -m xenova_display.display_mode mobile` 또는
+`sudo python3 -m xenova_display.display_mode hdmi`로 왕복 전환한다.
+`status`는 표시 선택·서비스·렌더러 상태만 조회한다.
+새 runtime guard를 포함한 native 배포가 필요하며 기존 persistent mobile-first 설정은
+운영자가 소유·이관을 확인해야 한다. [준비·실패·재인증·부팅 절차](deploy/mobile/display-mode.README.md)를 따른다.
