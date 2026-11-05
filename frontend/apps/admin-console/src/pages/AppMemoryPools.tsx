@@ -82,7 +82,8 @@ function PoolPanel({
   points: AppMemoryPoint[];
   now: number;
 }) {
-  const usable = current.state === 'ok' && !current.stale;
+  const usable = current.state === 'ok';
+  const expired = usable && current.stale;
   const display = (value: bigint | null) => formatAppBytes(usable ? value : null);
   const buffer = usable ? current.buffer : null;
   return (
@@ -105,21 +106,23 @@ function PoolPanel({
         aria-label={`${vmName} ${label} 점유율`}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={usable ? current.usagePercent! : undefined}
+        aria-valuenow={usable && !expired ? current.usagePercent! : undefined}
+        aria-valuetext={expired ? `최근 관측 ${current.usagePercent!.toFixed(1)}% · 관측 만료` : undefined}
       >
         <i style={{ width: `${usable ? current.usagePercent : 0}%` }} />
       </div>
-      {!usable && (
-        <p
-          className={styles.appMemoryNotice}
-          title={`${current.reason ?? ''}${current.sourceRc == null ? '' : ` (${current.sourceRc})`}`}
-        >
-          {current.stale && current.state === 'ok' ? '관측 만료 · 최근 이력만 표시' : reasonLabel(current)}
-        </p>
-      )}
+      <p
+        className={styles.appMemoryNotice}
+        title={`${current.reason ?? ''}${current.sourceRc == null ? '' : ` (${current.sourceRc})`}`}
+      >
+        {expired ? '관측 만료 · 최근 관측값' : usable ? '최근 관측값' : reasonLabel(current)}
+      </p>
       {buffer && (
         <div className={styles.bufferState}>
-          <strong>{phaseLabel(buffer.phase)}</strong>
+          <strong>
+            {expired ? '관측 당시 · ' : ''}
+            {phaseLabel(buffer.phase)}
+          </strong>
           <span title={`input_status=${buffer.input_status}, source_rc=${buffer.source_rc}`}>
             입력: {inputLabel(buffer.input_status)}
           </span>
@@ -153,7 +156,7 @@ function PoolPanel({
       )}
       <dl>
         <div>
-          <dt>현재 여유</dt>
+          <dt>{expired ? '관측 당시 여유' : '현재 여유'}</dt>
           <dd title={usable ? rawBytes(current.free_bytes) : undefined}>{display(current.free_bytes)}</dd>
         </div>
         <div>

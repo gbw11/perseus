@@ -177,6 +177,26 @@ describe('shared heap and network pool observation clocks', () => {
     expect(sharedMemoryObservation([report], 'memory_regions', POOL, NOW, 'net_tx_data').state).toBe('fresh');
   });
 
+  it('keeps only a valid recent expired observation for display without renewing freshness', () => {
+    const report = pool();
+    expect(
+      sharedMemoryObservation([report], 'memory_regions', POOL, NOW + 7000, 'net_rx_data'),
+    ).toMatchObject({
+      state: 'expired',
+      sample: report,
+    });
+    expect(
+      sharedMemoryObservation([report], 'memory_regions', POOL, NOW + 61_000, 'net_rx_data'),
+    ).toMatchObject({
+      state: 'expired',
+      sample: null,
+    });
+    expect(sharedMemoryObservation([report], 'memory_regions', POOL, NOW - 1, 'net_rx_data')).toMatchObject({
+      state: 'unverified',
+      sample: null,
+    });
+  });
+
   it('uses original uptime and rejects conflicting context on the same source', () => {
     const report = pool();
     report.telemetry!.sent_at = new Date(NOW).toISOString();
