@@ -43,6 +43,7 @@ ACTIVE_APP: dict[Mode, str | None] = {
 REASON_START = "start"
 REASON_COMMAND_TIMEOUT = "command_timeout"
 REASON_RESUME = "resume_requested"
+REASON_OPERATOR_CANCELLED = "operator_cancelled"
 REASON_NO_FRESH_STANDBY = "no_fresh_standby"
 REASON_MANUAL_FRESH = "manual_fresh"            # SAFE_STOP → MANUAL
 REASON_AUTONOMOUS_READY = "autonomous_ready"    # MANUAL → AUTO_READY
@@ -167,6 +168,8 @@ class ControlMachine:
         self.apps = {app: AppTrack(app, vm_id=(vm_ids or {}).get(app)) for app in DRIVE_APPS}
         self._resume_requested: list[tuple[float, str | None]] = []
         self._countdown: _Countdown | None = None
+        # 운영자 취소 요청 (계약 v1.7). 다음 step 에서 카운트다운 중이면 operator_cancelled 로 끝낸다
+        self._cancel_requested: tuple[float, str | None] | None = None
         self._last_stop_t: float | None = None
         self._measure: _Pending | None = None
         self._started = False
@@ -204,6 +207,14 @@ class ControlMachine:
 
     def on_resume(self, t: float, requested_by: str | None = None) -> None:
         self._resume_requested.append((t, requested_by))
+
+    def on_cancel_resume(self, t: float, requested_by: str | None = None) -> bool:
+        """drive.resume.cancel_requested (계약 v1.7). 카운트다운 중일 때만 받고, 아니면 이벤트 없이 무시한다."""
+        if self._countdown is None:
+            log.info("재개 취소 요청 무시: 카운트다운 없음")
+            return False
+        self._cancel_requested = (t, requested_by)
+        return True
 
     @property
     def counting_down(self) -> bool:
@@ -260,6 +271,7 @@ class ControlMachine:
         if not self._started:
             raise RuntimeError("start() 를 먼저 부른다")
         actions: list[Action] = []
+        actions += self._operator_cancel(now)
         actions += self._faults(now)
         transition = self._decide(now)
         if transition is not None:
@@ -327,15 +339,27 @@ class ControlMachine:
             Measure("resume_accepted", {"gen": self.generation, "t": now}),
         ]
 
-    def _cancel_countdown(self, reason: str, now: float) -> list[Action]:
-        """카운트다운 중 AUTO_READY 를 AUTO 가 아닌 곳으로 벗어나면 cancelled. reason 은 그 전환의 reason."""
+    def _operator_cancel(self, now: float) -> list[Action]:
+        """받아 둔 운영자 취소를 처리한다. 만료·모드 판정보다 먼저 봐서, 같은 step 에 만료돼도 취소가 이긴다."""
+        request = self._cancel_requested
+        self._cancel_requested = None
+        if request is None or self._countdown is None:
+            return []
+        return self._cancel_countdown(REASON_OPERATOR_CANCELLED, now, requested_by=request[1])
+
+    def _cancel_countdown(self, reason: str, now: float, *, requested_by: str | None = None) -> list[Action]:
+        """카운트다운을 끝내고 cancelled 를 낸다. reason 은 그 전환의 reason 또는 operator_cancelled(모드 유지)."""
         countdown = self._countdown
+        self._cancel_requested = None
         if countdown is None:
             return []
         self._countdown = None
         log.info("재개 취소 gen=%d reason=%s", countdown.generation, reason)
+        payload: dict[str, Any] = {"reason": reason, "generation": countdown.generation}
+        if reason == REASON_OPERATOR_CANCELLED:
+            payload["requested_by"] = requested_by
         return [
-            PublishEvent("drive.resume.cancelled", {"reason": reason, "generation": countdown.generation}),
+            PublishEvent("drive.resume.cancelled", payload),
             Measure("resume_cancelled", {"gen": countdown.generation, "reason": reason,
                                          "since_accept_ms": round((now - countdown.start_t) * 1000, 3)}),
         ]

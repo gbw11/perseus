@@ -23,7 +23,7 @@
       "autostart": true,
       "board_shutdown_policy": "graceful",
       "template_id": "zephyr-drive-lattice-lab-arm64",
-      "template_version": "1.0.0-lab.2",
+      "template_version": "1.0.8",
       "display_name": "Zephyr 주행 A"
     },
     {
@@ -32,7 +32,7 @@
       "autostart": true,
       "board_shutdown_policy": "graceful",
       "template_id": "zephyr-drive-lattice-lab-arm64",
-      "template_version": "1.0.0-lab.2",
+      "template_version": "1.0.8",
       "display_name": "Zephyr 주행 B"
     }
   ],

@@ -4257,79 +4257,79 @@ enable/active는 broker 종단 성공과 다르다. 실제 인증·SUBACK·신�
 |---|---|
 | INVALID_SPEC / RESOURCE_UNSUPPORTED | 400 / 입력·지원 환경 수정 |
 | VM_NOT_FOUND | 404 / 최신 UUID 확인 |
-| VM_NOT_STOPPED / IDEMPOTENCY_CONFLICT / TARGET_CHANGED | 409 / 현재 문맥 확인. 새 key로 무조건 반복 금지 |
+| VM_NOT_STOPPED / IDEMPOTENCY_CONFLICT | 409 / 현재 문맥 확인. 새 key로 무조건 반복 금지 |
+| TARGET_CHANGED (CPU GET) | 현재503/retryable=true / 새 조회로 현재 배치 재확인 |
 | OPERATION_IN_PROGRESS | 503 / retryable 응답 확인 후 제한된 backoff |
 | RECONCILE_REQUIRED / STORAGE_UNAVAILABLE / RECOVERY_REQUIRED | 503 / journal·저장소 조사 |
 | CPU_POLICY_INVALID / CPU_NOT_READY | 503 / 관리자 복구·host 준비 |
 | CPU_APPLY_INCOMPLETE | 409 / 실행 신원·실제 배치 확인, 자동 destroy·repin 금지 |
 | OBSERVATION_UNAVAILABLE / DEADLINE_EXCEEDED | 503 / 504 / 새 조회 가능, 변경은 journal 우선 |
 
-위 CPU 세 코드는 신규 매핑 인계 항목이다. 현행 mapper는 미등록 CPU 오류를 DriverError(500)로 처리한다. 원 code는 platform_code로, message는 detail로 전달하지만 retryable/details를 구조화해 보존하지 않으므로 별도 CPU 어댑터에서 보존 방식을 정해야 한다. CPU 오류의 retryable 기본값은 false다.
+CPU_POLICY_INVALID/CPU_NOT_READY/CPU_APPLY_INCOMPLETE의 위 상태코드는 권장 매핑이며 현재 공통 mapper에는 아직 없어 DriverError(500)로 반환한다. 현재 CPU GET 어댑터는 TARGET_CHANGED를 retryable=true의503, 하위가 cpu-layout을 모르는 INVALID_SPEC을501로 처리한다. API 입력 검증 실패는400이다. 원 code·message·boolean retryable은 각각 platform_code·detail·retryable로 보존한다. raw details 전체를 공개하지 않으며 key 제어의 원 작업은 허용 필드만 operation으로 투영한다. 권장 CPU 오류 매핑과 실제 운영 수락은 별도 인계 항목이다.
 
-하위 timeout_ms는 1..15000ms이고 상위 SerializedManager의 기본 최대 5초 mutex 대기는 포함하지 않는다. 현재 HTTP 조회 5초·Spring 6초 예산 안에서 상위 대기를 줄이거나 소모 시간을 빼고 남은 기한을 전달한다. ok=true인 불일치 응답을 HTTP 성공 여부만으로 배치 준수라고 판정하지 않는다.
+하위 timeout_ms는1..15000ms다. X-Request-Budget-Ms가 있으면 현재 FastAPI는 도착 시점부터의 잔여 예산에서 응답 여유를 뺀 budget_ms/timeout_ms를 지원 action에 전달한다. SerializedManager 대기는 기본5초와 잔여 예산 중 짧은 값이다. 일반 조회는 XENOVA_PLATFORM_READ_FORK=true와 하위 fork 지원 시 직렬화를 우회한다. 헤더 생략·구형 하위·기능별 예외와 Spring의 실제 호출 예산은 아래 표를 따른다. ok=true인 불일치 응답을 HTTP 성공 여부만으로 배치 준수라고 판정하지 않는다.
 
 <a id="time-budgets"></a>
 ## 호출 경로별 시간 예산과 연동 상태
 
-Q는 threadpool·VM/resource mutex의 순서 대기, S는 SerializedManager 대기,
-L은 플랫폼 잠금, E는 검증·실행, P는 필수 저장·반환, R은 기존 결과의 제한된 재확인이다.
-하위 Manager 진입 이후의 기한에 앞선 Q/S가 자동 포함되지는 않는다.
-아래 배포 관측값은 검증 보고서의 설치본에서 읽은 값이고, 현재 보드 재조회값이 아니다.
-Spring은 소스 기본값만 확인했으며 운영 배포 override는 별도 확인이 필요하다.
+이 절의 현재 구현 대조는2026-11-05 소스 기준이다. 이전 설치본의 대기·실패 측정은
+[측정 이력](../verification/platform-management-boundaries-history.md)에 보존하며 현재 연결 상태로 읽지 않는다.
+Q는 threadpool·VM/resource mutex 대기, S는 SerializedManager 대기, L은 하위 잠금,
+E는 검증·실행, P는 필수 저장·반환, R은 기존 결과의 제한된 재확인이다.
 
-| 경로·적용 위치 | 현재 적용값·계산 시작점 | 포함·제외와 현재 상태 |
+현재 HTTP의 선택 헤더 `X-Request-Budget-Ms`는1..105000ms이며 요청 도착 시점부터 잰다.
+`budget.py`의 context를 service 잠금·driver가 공유하고, 하위에는 남은 시간에서
+`Settings.response_reserve_s`(소스 기본0.5초)를 뺀 값을 전달한다. 응답 여유는 실측 전 설정값이며
+엄밀한 반환 보장값이 아니다. 헤더가 없으면 새 제한을 만들지 않고 기존 동작을 유지한다.
+원 control/recovery 기한은 재전달로 연장하지 않는다.
+
+| 경로·실제 위치 | 현재 적용·포함 범위 | 조건·남은 수락 |
 |---|---|---|
-| Manager get/list/intents/probe/execution-context 및 원 기록 조회 (`xenova_management.Manager._query`) | 진입 시점부터 기본 15초 | spec timeout_ms 1..15000ms와 호출 budget_ms 중 짧은 기한을 registry·관측 슬롯·재확인에서 공유. CLI도 두 인자를 전달. intents는 슬롯/Xen 관측 없음 |
-| probe / cpu-layout / cpu-host-prepare | timeout_ms 기본 15000, 1..15000ms. Manager 진입부터 | 선택한 잔여 기한이 하위 명령에도 적용. CPU factory 정책 등록도 같은 기한 사용 |
-| cpu-policy-set | Manager 진입부터 기본 15초 | registry·정책 검증·관측이 공유. 별도 내부 15초 재발급 없음. 공개 timeout 입력 추가 없음 |
-| start/stop/reboot/destroy | Manager 진입부터 기본 90초 | 선택 budget_ms는 물리 기한을 줄이고 R의 잔여 예산도 제한. 원 요청의 기한은 재발급하지 않음. fsync 등 필수 P를 선점하는 엄밀한 반환 상한은 아님 |
-| UUID/내부 이름 start/stop/reboot/destroy CLI | CLI 진입부터 기본 90초 | 같은 Manager 제어 경로. 파싱·이름 해석 비용을 차감한 budget_ms를 전달하며 원 실행 기한을 재발급하지 않음. syscall·필수 저장의 선점 상한은 아님 |
-| recover_once | 요청의 deadline_monotonic_ms | 최초 수락 시 미래 120초 이내, 원 host에 결합. 재전달로 갱신하지 않음. 만료 뒤 R 최대 15초는 새 실행 권한이 아님 |
-| autostart / unit | batch 전체 140초 / TimeoutStartSec 150초 | 모든 VM이 공유. 전원 부팅 전체의 상한은 아님 |
-| FastAPI `SerializedManager.call` | S 기본 5초 | 하위 Manager 진입 전이며 하위 15/90초에 포함되지 않음. 배포 관측값도 5초 |
-| FastAPI `VmService._vm_lock/create/stop` | VM/resource Q에 현재 유한 상한 없음 | 하위에서 상위의 전체 대기를 제한할 수 없음 |
-| FastAPI xl driver | query subprocess 5초, command 소스 기본/배포 관측 95초 | 별도 xl 호출 상한. platform Manager의 전체 timeout이 아님 |
-| HTTP health/stats | xl 직접 관측 및 요청별 관측 경계 5초 | 공통 Manager get/list와 다른 경로. threadpool Q는 별도 |
-| Spring `application.yml`·`Dom0ManagerProperties`·`Dom0ManagerClient.createClient` | 소스 기본 connect/query/command=2/6/100초 | 각 HTTP 시도의 대기 설정. 배포값 미확인. query와 command의 재시도 정책도 서로 다름 |
-| Recovery Worker | interval 5초, intent refresh 60초 등 관측/장애 판정 유예 | 현재 RecoveryEngine 단일 executor와 연결. 최초 실행 슬롯에서 110초 원 attempt 기한을 고정하고 재전달에는 그대로 사용 |
+| Manager get/list/intents/probe/execution-context·원 기록 조회 | Manager 진입부터 기본15초. timeout_ms1..15000과 budget_ms 중 짧은 기한 공유 | intents는 Xen 관측 없음. 조회 예산으로 과거 작업의 물리 기한을 갱신하지 않음 |
+| probe / cpu-layout / cpu-host-prepare | 하위 timeout_ms 기본15000,1..15000ms. registry·관측·하위 명령이 같은 기한 사용 | 현재 CPU HTTP의 기본 timeout_ms는5000이며 요청 예산이 있으면 더 짧은 잔여값 사용 |
+| cpu-policy-set | Manager 진입부터 기본15초. 별도 내부15초 재발급 없음 | 공개 CPU 변경은 기존 로컬 계약. CPU GET을 변경 API로 확대하지 않음 |
+| start/stop/reboot/destroy | 기본90초. 지원되는 budget_ms는 물리 실행·재확인 잔여 시간을 줄임 | 필수 P를 생략하거나 syscall을 선점하는 상한은 아님 |
+| UUID/내부 이름 control CLI | CLI 진입 기본90초에서 파싱·이름 해석 비용을 차감해 Manager에 전달 | 같은 원 key/신원/기한 유지 |
+| recover_once | 최초 수락한 host·deadline_monotonic_ms에 결합. 최초 미래120초 이내 | 만료 뒤 R 최대15초는 확인용이며 새 물리 실행 허가가 아님 |
+| autostart / unit | batch 전체140초 / TimeoutStartSec150초 | 모든 VM의 batch 예산이며 전원 부팅 전체 지연 보장은 아님 |
+| HTTP 일반 조회·SerializedManager.call | 기본 S5초. 헤더가 있으면 min(S, 잔여 예산), 하위 지원 action에 budget_ms 및 필요한 timeout_ms 전달 | read_fork는 소스 기본false. XENOVA_PLATFORM_READ_FORK=true이고 하위 fork를 지원할 때 조회별 새 Manager로 S 우회 |
+| HTTP VM/resource 잠금 | create·key 없는 control/delete는 기존 잠금 사용. 헤더가 있으면 Q도 잔여 예산으로 제한 | 헤더 생략 시 해당 잠금 대기에 새 유한 상한은 없음. threadpool 대기 소모는 도착 시점 기한에 반영 |
+| key stop·원 key 조회 | request_stop/control_operation은 플랫폼 드라이버의 요청별 fork를 사용하며 service의 VM 잠금을 기다리지 않음 | fork를 모르는 구형 Manager는 공유 직렬화를 유지. key 없는 stop과 mock/xl fallback은 기존 동기 경로 |
+| HTTP xl/xentop driver | query 소스 기본5초, command 기본95초. 헤더가 있으면 자체 한도와 응답 여유를 뺀 잔여값 중 짧은 값 | platform Manager 호출 전체 기한과 다른 subprocess 한도. healthz는 요청 예산 예외·자체5초 |
+| HTTP create·retire | 제출 전 만료 검사. 현재 call_with_budget의 budget_ms 전달 대상에는 포함되지 않음 | 수락한 긴 create는 HTTP 예산 후에도 원 생성 정책·원 기한 아래 계속될 수 있음. 생성 정책/상위 수락은 별도 |
+| Spring | 소스 기본 connect/query/command2/6/100초, query·command별 재시도 정책 별도 | 실제 배포 override·요청 헤더 공급·전체 재시도 예산은 담당 후보에서 수락 |
+| Recovery Worker | interval5초·intent refresh60초 등 판정 유예, 최초 실행 슬롯의 원 attempt110초 | 대기/장애 판정 유예와 물리 attempt 기한을 합치지 않음 |
 
-fsync·프로세스 생성·커널 I/O를 선점하는 엄밀한 wall-clock 상한이 아니다. 필수 내구
-저장은 만료됐다는 이유로 생략하지 않는다. R은 결과 확인에만 사용하고 create/reboot를
-재제출하지 않는다. 완료 요청의 현재 조회 실패는 원 결과와 분리한다.
+fsync·프로세스 생성·커널 I/O를 선점하는 엄밀한 wall-clock 상한은 아니다.
+R은 원 결과 확인에만 사용하고 create/reboot를 재제출하지 않는다. 완료 결과와 현재 관측 실패는 분리한다.
+Spring executeQuery는 전송 후 transport 실패도 최대 두 시도, executeCommand는 연결 실패만 재시도하며
+소스 기본 backoff는500ms다. 따라서 query6초가 재시도 전체 상한은 아니다.
+배포값·설치 모듈은 이번 문서 정리에서 보드 재조회하지 않았다.
 
-Spring의 `executeQuery`는 전송 후 transport 실패도 최대 두 시도까지 재시도하며,
-`executeCommand`는 연결 실패만 재시도한다. 소스 기본 backoff는 500ms다. 따라서 query의
-6초는 재시도 루프 전체 상한이 아니다. 전체 호출은 시도별 연결/응답 대기와 backoff까지
-구분해 계산해야 하며, command의 전송 후 timeout을 새 물리 요청으로 반복하면 안 된다.
+<a id="하위만으로-닫히지-않는-시간-계약"></a>
+### 이미 연결된 흐름과 남은 종단 수락
 
-CPU 시간 전달은 하위에서 수정한 현재 동작이다. registry가 14초를 쓴 정책 계획에는
-남은 1초만 전달하고, 1초 host-prepare의 factory 관측이 2초에 끝나면 게시·pin 없이
-DEADLINE_EXCEEDED로 거절한다. 검증 후 게시 직전 만료도 새 정책을 쓰지 않는다.
-이 결과는 fake clock/Xen의 회귀이며 실제 보드 지연 측정이나 HTTP 종단 해결이 아니다.
+| 경로 | 현재 소스 제공 | 실제로 남은 것 |
+|---|---|---|
+| HTTP get/list·일반 control | 기존 call_with_budget가 헤더 잔여값을 지원 하위에 전달. SerializedManager와 VM 잠금도 같은 요청 예산 소비 | caller의 헤더 공급, read_fork 설치 조건, 원 반환 여유·공유 기반 부하의 제품 종단 검증 |
+| 복구 중 key stop | Idempotency-Key 있는 POST stop은 완료200/내구 수락 pending202. request_key 조회와 허용 operation 필드 보존. VM 잠금·Manager S를 우회하는 fork 경로 구현 | Spring/화면의 key 보존·pending 표시·원 결과 회수와 운영 설치본 수락. 202를 STOPPED로 저장하지 않음 |
+| key 없는 stop | 기존204 동기 완료 계약 | key 경로의200/202 의미를 기존 호출에 몰래 적용하지 않음 |
+| Worker recover_once | 원 attempt/D 선저장·journal 우선 확인·원 host/기한 재사용 | 실제 장애 판단·출력 보호·rejoin·사용자 stop 경쟁의 제품 종단 수락 |
+| 자산 create | 원 수락/실패·자원 예약·실제 검증 복사·명시 수습 보존 | HTTP 예산과 승인 생성 정책의 연결, 부분 실패 회수, 실설치·운영 시간 수락 |
 
-### 하위만으로 닫히지 않는 시간 계약
+25초·120초의 새 HTTP 대기는 합의·적용하지 않는다. 하위 예산 전달과 key stop은 이미 제공되지만,
+모든 상위 제품·설치본·외부 지연의 종단 상한이 수락됐다는 뜻은 아니다.
 
-| 기능/호출 경로 | 현재 계약·시간 소비 | 하위 조정 또는 어려운 이유 | 최소 변경안·반환 여유·협의 |
-|---|---|---|---|
-| HTTP get/list | 조회 계약 5초, Spring query 기본 6초. 하위 기본 E/P 15초에 S 최대 5초·Q가 앞섬 | 하위 timeout_ms/budget_ms는 제공하지만 현행 FastAPI는 전달하지 않음. 기본값 일괄 축소나 관측 생략 없이 남은 기간을 선택할 수 있음 | 상위 Q/S와 반환 여유를 같은 요청 예산에 포함하고 get/list에 잔여값을 연결해야 함. 종단 연결·수락은 미완료 |
-| 일반 HTTP control | 기본 E 90초 + 기존 R 최대 15초 + P, S 최대 5초. Spring command 기본 100초 | 하위 budget_ms로 물리/재확인 잔여 예산을 제한할 수 있지만 FastAPI 전달은 미연결. 상위 Q가 무기한이면 유한 종단 보장 불가 | Q/S 소모와 반환 여유를 뺀 실제 잔여값 전달. 물리 원 기한은 연장하지 않음. 100초 caller 안에서 수습 관측이 충분한지는 제품 조건별 수락 필요 |
-| 복구 중 stop HTTP | VM Q와 S가 하위 수락보다 앞섬. 오류 details·원 key도 현재 경로에서 보존하지 않음 | 하위의 짧은 durable 수락만으로 상위 잠금을 우회할 수 없음 | 기존 stop 경로의 짧은 수락/긴 실행 분리와 요청별 Manager 상태 보호, pending/completed 응답 구분 필요. 새 HTTP API를 임의 구현하지 않음 |
-| Worker recover_once 실행 | 현재 Engine이 실행 슬롯·현재 view에서 기본 110초 spec을 선저장한 뒤 호출 | 실행 전 판단 큐/직렬화 대기는 이 실행 예산과 별도. 응답 유실은 원 attempt journal로 확인 | 같은 attempt의 원 host·절대 D를 재사용. 원 D 뒤 기존 verify_timeout_s(기본 150초)까지 결과 조회가 계속 실패하면 final RECONCILE_REQUIRED로 조정 요구. 이 확인 예산은 새 물리 실행 허가가 아님 |
-| 자산 등록 create | metadata·용량 후 검증 root 복사 1회·guest 준비·조건부 게시/등록. 후속 start는 별도 제어 | 하위는 유한 생성 정책/원 host·기한을 제공. 제어 90초·조회 15초를 생성 운영값으로 쓰지 않음 | 승인된 생성 정책 공급·잔여 호출 예산과 원 결과 회수·명시 수습을 상위에서 연결. 실제 운영 시간/HTTP/보드 수락은 별도 |
+<a id="복구-중-정지-요청-연동의-변경-지점"></a>
+### 확인한 실제 위치와 담당 수락
 
-25초·120초 HTTP 대기는 합의·적용된 계약이 아니다. 관측 최대 시간은 보장 상한이
-아니며, 특정 후보의 표본 수·정책·firmware·domain·저장소 조건은
-[측정 보고서](../verification/platform-management-boundaries-history.md)에 있다.
-현재 상위 대기·동기 계약의 불일치는 미해결이다.
-
-### 복구 중 정지 요청 연동의 변경 지점
-
-| 담당 위치 | 연결할 내용·수락 조건 |
+| 실제 위치 | 현재 책임·수락 |
 |---|---|
-| `platform/services/dom0-manager/dom0_manager/service.py:VmService._vm_lock/create/stop`, `drivers/platform.py:SerializedManager.call` | 원 요청 예산에서 Q/S 차감. 긴 복구 잠금 중 별도 stop이 durable pending으로 수락되고 요청별 Manager 상태가 섞이지 않는 HTTP 경쟁 시험 |
-| `drivers/platform.py:PlatformDriver._stop/raise_for_envelope`, `errors.py:Dom0ManagerError.body`, `api/errors.py`, `api/vms.py:stop_vm` | 원 key/operation, accepted/completion/revision/deadline 전달. 미수락 busy·pending·완료·superseded·만료 구별. 기존 204 완료를 접수 완료로 재해석하지 않음 |
-| `backend/src/main/resources/application.yml`, `backend/src/main/java/com/xenova/backend/vm/infrastructure/Dom0ManagerProperties.java`, `Dom0ManagerClient.createClient/executeQuery/executeCommand/handleError` | 실제 배포 timeout 확인, 협의한 전체 예산 반영, 응답 유실 시 원 작업 재확인. 전송 후 timeout을 새 key로 반복하지 않는 시험 |
-| `platform/services/dom0-manager/dom0_manager/recovery/worker.py:RecoveryWorker.run_once`, `recovery/__main__.py:main` | 현재 Engine 연결·원 attempt/D 선저장·journal 우선 재확인을 유지. 제품 HTTP stop 진입의 Q/S·pending 전달과 실제 보드 중단/복원은 별도 종단 수락 |
+| `dom0_manager/main.py:_install_request_budget`, `budget.py` | 헤더 검증·도착 시점 기한·context·응답 여유, healthz 예외 |
+| `service.py:VmService._vm_lock/_resource_guard/request_stop`, `drivers/platform.py:SerializedManager.call/fork/call_with_budget` | Q/S 차감·조건부 read fork·key stop의 별도 요청 객체. 구형 하위 fallback 보호 |
+| `api/vms.py:stop_vm/get_control_operation`, `drivers/platform.py:control_operation_from_envelope/control_operation_from_record/raise_for_envelope` | key stop200/202·원 key GET·accepted/completion/원 사유·허용 operation 필드. 기존 keyless204 유지 |
+| Spring `Dom0ManagerClient`·`VmService`와 화면 | 기존 제공 경로를 소비하고 실제 배포 timeout·key·전체 예산을 담당 후보로 회신 |
+| `recovery/worker.py:RecoveryWorker.run_once`, `recovery/__main__.py:main` | 원 attempt·저장·판정·재합류 책임. RAM/Telemetry의 최근 수신을 복구 허가로 바꾸지 않음 |
 
 <a id="sources"></a>
 ## 구현 근거와 유지 기준

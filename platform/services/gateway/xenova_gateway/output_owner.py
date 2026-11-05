@@ -11,6 +11,32 @@ from .frame import DriveFrame, StopFrame, STOP_SAFE_STOP, STOP_SHUTDOWN, encode
 from .sink import SinkError
 
 
+class StopSubmission:
+    """Bounded reference to the original STOP and its actual completion."""
+
+    def __init__(self, event, result, owner, reason='call_budget_exhausted'):
+        self.event = event
+        self.result = result
+        self.owner = owner
+        self.reason = reason
+
+    def outcome(self):
+        if not self.event.is_set():
+            if not self.owner.is_alive():
+                raise SinkError("device owner terminated before submission confirmation")
+            return None
+        value = self.result[0]
+        if isinstance(value, BaseException):
+            raise SinkError('owned serial submission failed') from value
+        return value
+
+
+class PendingStop(SinkError):
+    def __init__(self, submission):
+        super().__init__('device submission outcome unconfirmed')
+        self.submission = submission
+
+
 class SubmissionReceipt(int):
     def __new__(cls, count, frame,metadata=None):
         value = super().__new__(cls, count)
@@ -48,6 +74,10 @@ class OutputOwner:
         if count != len(encode(frame)):
             raise SinkError('partial owned serial submission')
         self.last = frame
+        if self.device is not None:
+            # Expose the new command reference before waking its caller.
+            # The previous command's ACK must not appear applied to this one.
+            self._device_view = dict(self.device.snapshot)
         return SubmissionReceipt(count,frame,getattr(count,'metadata',None))
 
     def device_view(self):return dict(self._device_view)
@@ -65,7 +95,7 @@ class OutputOwner:
                 except queue.Empty:break
         return result
 
-    def write(self, frame, now):
+    def _enqueue(self, frame, now):
         if isinstance(frame,DriveFrame) and self.first_failure is not None:
             raise SinkError('device owner fault; new DRIVE prohibited') from self.first_failure
         if isinstance(frame, DriveFrame) and not 0 <= self.clock()-now < self.timeout:
@@ -87,6 +117,17 @@ class OutputOwner:
                 else:raise SinkError('device owner unavailable/busy')
             else:self.pending=item
             self.condition.notify()
+        return item, event, result, cancelled
+
+    def submit_stop(self, frame, now):
+        """Queue one STOP without waiting in the actor for a thread wakeup."""
+        if not isinstance(frame, StopFrame):
+            raise TypeError('STOP frame required')
+        _, event, result, _ = self._enqueue(frame, now)
+        return StopSubmission(event, result, self.thread, reason='queued')
+
+    def write(self, frame, now):
+        item, event, result, cancelled = self._enqueue(frame, now)
         if not event.wait(.01):
             cancelled.set()
             if isinstance(frame,DriveFrame):
@@ -99,21 +140,27 @@ class OutputOwner:
                           threading.Event(),[],threading.Event())
                     if self.pending is item or self.pending is None:self.pending=stop
                     self.condition.notify()
+            if isinstance(frame, StopFrame):
+                raise PendingStop(StopSubmission(event, result, self.thread))
             raise SinkError('device submission outcome unconfirmed')
         if isinstance(result[0], BaseException):
             raise SinkError('owned serial submission failed') from result[0]
         return result[0]
 
+    def _poll_device(self):
+        try:
+            self.device.poll(self.clock())
+            self._device_view = dict(self.device.snapshot)
+        except (OSError, SinkError) as exc:
+            if self.first_failure is None:
+                self.first_failure = exc
+            self._device_view = {**self._device_view, 'ready': False, 'fault': 'DEVICE_LINK_UNAVAILABLE',
+                                 'accepted': None, 'applied': None, 'physical_stop': None}
+
     def _loop(self):
+        poll_due = self.device is not None
         try:
             while True:
-                if self.device is not None:
-                    try:
-                        self.device.poll(self.clock());self._device_view=dict(self.device.snapshot)
-                    except (OSError,SinkError) as exc:
-                        if self.first_failure is None:self.first_failure=exc
-                        self._device_view={**self._device_view,'ready':False,'fault':'DEVICE_LINK_UNAVAILABLE',
-                                           'accepted':None,'applied':None,'physical_stop':None}
                 with self.condition:
                     now = self.clock()
                     expired = self.expiry is not None and now >= self.expiry
@@ -132,9 +179,17 @@ class OutputOwner:
                             frame = StopFrame(self.last.generation, 0, STOP_SHUTDOWN)
                         else:
                             break
+                    elif poll_due:
+                        frame = None
                     else:
                         delay = .01 if self.expiry is None else max(.0001, min(.01, self.expiry-now))
-                        self.condition.wait(delay); continue
+                        self.condition.wait(delay)
+                        poll_due = self.device is not None
+                        continue
+                if frame is None:
+                    self._poll_device()
+                    poll_due = False
+                    continue
                 try:
                     receipt = self._write(frame, now)
                     if isinstance(frame, DriveFrame):
@@ -151,6 +206,12 @@ class OutputOwner:
                     result.append(outcome); event.set()
                 if self.closing and item is None:
                     break
+                # Complete the queued output before parsing feedback or
+                # sending an odometry probe. Poll after each write so input
+                # still progresses when commands arrive continuously.
+                if self.device is not None:
+                    self._poll_device()
+                    poll_due = False
         finally:
             self.sink.close()
 

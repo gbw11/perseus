@@ -7,7 +7,7 @@
  * 백엔드가 아직 WS-06 을 열지 않았으면(S15P31E110-270 전) 연결이 실패해 계속 available=false 다.
  */
 import { useEffect, useRef, useState } from 'react';
-import type { SimPose, SimWorld } from '@xenova/ui';
+import { nearest, type Circuit, type SimPose, type SimWorld } from '@xenova/ui';
 import { request, type RequestOptions } from './client';
 import { useAuthedSocket } from './drive';
 
@@ -275,10 +275,61 @@ export async function removeSimObstacles(ids: string[]): Promise<SimCommandResul
   return results.find((r) => !r.ok) ?? results[results.length - 1] ?? null;
 }
 
-/** 무작위 3개 — mock 만 (실제 연결은 2단계에서 REST-31 세 번으로) */
-export async function randomSimObstacles(): Promise<void> {
-  if (!MOCK) throw new Error('무작위 놓기는 아직 mock 에서만 동작합니다');
-  (await scenario()).simRandom();
+const RANDOM_COUNT = 3;
+/** 장애물 하나에 자리를 다시 고르는 최대 횟수 (거부될 때마다 한 번씩 왕복) */
+const RANDOM_TRIES = 8;
+const RANDOM_KINDS: ObstacleKind[] = ['cone', 'box', 'tires'];
+
+/**
+ * 무작위로 장애물을 놓는다 (S15P31E110-364). mock randomObstacles 와 같은 자리 규칙:
+ * 차 앞 30점 + 트랙 25 % 안 무작위, 장애물마다 트랙 10 % 씩 더 앞, 가로 ±0.25 (모의 m).
+ * place 가 거부(ok: false)하면 다른 자리로 다시 고르고, 응답 없음이면 더 보내지 않는다. 놓인 개수를 돌려준다.
+ */
+export async function placeRandomObstacles(
+  g: Circuit,
+  carIndex: number,
+  place: (kind: ObstacleKind, x: number, y: number) => Promise<SimCommandResult>,
+  rand: () => number = Math.random,
+): Promise<number> {
+  let placed = 0;
+  for (let n = 0; n < RANDOM_COUNT; n++)
+    for (let t = 0; t < RANDOM_TRIES; t++) {
+      const i = (carIndex + 30 + Math.floor(rand() * g.N * 0.25) + n * Math.floor(g.N * 0.1)) % g.N;
+      const off = (rand() * 2 - 1) * 0.25;
+      const [cx, cy] = g.C[i]!;
+      const [nx, ny] = g.nor[i]!;
+      const kind = RANDOM_KINDS[Math.floor(rand() * RANDOM_KINDS.length)]!;
+      const r = await place(kind, cx + nx * off, cy + ny * off);
+      if (r.ok) {
+        placed++;
+        break;
+      }
+      if (r.code === 'NO_RESPONSE') return placed;
+    }
+  return placed;
+}
+
+/**
+ * 무작위 3개 — 기존 장애물을 치우고 새로 놓는다 (mock 과 같음). 실데이터는 REST-33 치우기 뒤 REST-31 을
+ * 자리마다 보낸다 (계약 변경 없음). 놓인 개수를 돌려준다 (mock 은 결과를 따로 주지 않아 null).
+ */
+export async function randomSimObstacles(
+  g: Circuit,
+  pose: SimPose | null,
+  obstacleIds: string[],
+): Promise<number | null> {
+  if (MOCK) {
+    (await scenario()).simRandom();
+    return null;
+  }
+  if (obstacleIds.length) {
+    const cleared = await removeSimObstacles(obstacleIds);
+    if (cleared && !cleared.ok) throw new SimCommandError(cleared);
+  }
+  const carIndex = pose ? nearest(g, pose.x, pose.y) : g.start;
+  return placeRandomObstacles(g, carIndex, (kind, x, y) =>
+    command('obstacle.add', '/api/v1/sim/obstacles', { method: 'POST', body: { kind, x, y } }),
+  );
 }
 
 /** E-stop 걸기·풀기 (REST-34) */

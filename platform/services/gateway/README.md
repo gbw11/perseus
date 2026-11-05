@@ -252,9 +252,21 @@ Paho가 이미 받은 QoS1 bytes가 취소됐다고 가정하지 않는다. 구�
 
 `submissions`의 제한된 기록은 원 명령의 VM·execution·boot·instance·app·message_id·seq,
 수신 단조 시각, generation, 인코딩 hex/counter, serial_result/accepted_bytes를 제공한다.
-시리얼 실패는 OUTPUT_PATH_FAILED와 출력 금지로 반영된다. 장치 적용은 미연결이므로
-`device_applied=null`이다. `vehicle.status.applied_generation`을 만들어내지 않는다.
-STOP 재전달과 기존 watchdog/E-stop은 유지한다.
+시리얼 쓰기 실패는 OUTPUT_PATH_FAILED와 출력 금지로 반영된다.
+submissions.device_applied는 null이며 feedback 프로필의 실제 적용 결과는 별도 device view와
+원 요청의 original.device에서 확인한다.
+
+기동·주기 STOP은 기존 단일 장치 소유자에게 제출하고 actor에서 스레드 기상을 기다리지 않는다.
+큐에 있는 동안 serial_result=pending, serial_wait=queued로 기록한다. 같은 STOP의 실제
+완료를 회수하기 전에는 새 STOP이나 DRIVE를 제출하지 않는다. 완료하면 원 기록을 accepted로
+갱신하고 원 submitted_monotonic을 보존한다. serial_completed_monotonic은 actor가 완료를
+회수한 시각이다. 장치 수락·적용·물리 정지는 각 feedback 근거로 따로 확인한다.
+
+직접 write 호출의 10ms 대기가 끝난 STOP은 call_budget_exhausted로 표시하고 같은 소유 작업을
+회수한다. 필수 보호 저장 직전의 직접 STOP 제출은 기존 동기 경계를 사용한다. DRIVE의 기존
+10ms 대기 실패와 후속 STOP, 원 명령 만료, 실제 쓰기 실패·장치 적용 기한·종료 확인은 계속
+검사한다. 실제 소유 스레드가 종료되거나 쓰기가 실패하면 해당 오류로 출력 금지를 확정한다.
+STOP 대기 상태는 원 Authority나 작업 기록을 대신하지 않는다.
 
 ## Legacy 분리 앱
 
@@ -268,8 +280,9 @@ STOP 재전달과 기존 watchdog/E-stop은 유지한다.
 | --- | --- | --- | --- |
 | 구독 | `xenova/v1/apps/{autonomous,manual}/events` | `drive.command` | 신선도 판정, 활성 앱이면 전달 |
 | 구독 | `xenova/v1/apps/{autonomous,manual}/events` | `app.heartbeat` | `AUTO_READY` 조건 (D8). 전환 판정에는 쓰지 않는다 |
-| 구독 | `xenova/v1/apps/message-board/events` | `drive.resume.requested` | 재개 요청 (메시지 보드 VM, MQTT-06). QoS 1 |
+| 구독 | `xenova/v1/apps/interaction/events` | `drive.resume.requested` | 재개 요청 (인터랙션 VM, MQTT-06). QoS 1 |
 | 구독 | `xenova/v1/console/resume` | `drive.resume.requested` | 재개 요청 (운영자 콘솔 → 백엔드 발행, MQTT-13). QoS 1. 위와 똑같이 처리 |
+| 구독 | `xenova/v1/console/resume`, `xenova/v1/apps/interaction/events` | `drive.resume.cancel_requested` | 재개 카운트다운 운영자 취소 (계약 v1.7). QoS 1. verified 는 재개와 같은 `causation_id` 검사 |
 | 구독 | `xenova/v1/vehicle/control` | `vehicle.control` | 시작할 때 이전 세대 읽기만 (재시작해도 세대를 되돌리지 않는다) |
 | 발행 | `xenova/v1/vehicle/control` | `vehicle.control` | QoS 1 retained. 시작·전환마다 |
 | 발행 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed`, `drive.fault.detected`, `drive.resume.accepted`, `drive.resume.cancelled` | QoS 1 |
@@ -306,7 +319,8 @@ STOP 재전달과 기존 watchdog/E-stop은 유지한다.
 AUTO_READY ──재개 요청──▶ drive.resume.accepted {switch_in_ms: 3000, generation, requested_by}
               │            (모드 AUTO_READY 유지, 수동이 계속 제어. 화면이 3·2·1 을 센다)
               ├─ 3초 뒤 조건 여전히 충족 ─▶ AUTO, 세대 +1, drive.mode.changed reason resume_requested
-              └─ 그 사이 AUTO_READY 를 벗어남 ─▶ drive.resume.cancelled {reason, generation} → MANUAL 또는 SAFE_STOP
+              ├─ 그 사이 AUTO_READY 를 벗어남 ─▶ drive.resume.cancelled {reason, generation} → MANUAL 또는 SAFE_STOP
+              └─ 그 사이 운영자 취소 ─▶ drive.resume.cancelled {reason: operator_cancelled, generation, requested_by} → AUTO_READY 유지
 ```
 
 - 받는 조건: 모드 `AUTO_READY` 이고 카운트다운 중이 아님. 카운트다운 중 재요청, 같은 판정 주기의 두 번째 요청은 무시합니다 (이벤트 없음, `MEASURE event=resume_ignored`).
@@ -314,6 +328,9 @@ AUTO_READY ──재개 요청──▶ drive.resume.accepted {switch_in_ms: 300
 - `cancelled.reason`은 그 전환의 `reason` 그대로입니다. 자율 명령·heartbeat 가 끊기면 `autonomous_lost` (→ `MANUAL`), 수동 명령이 끊기면 `no_fresh_standby` (→ `SAFE_STOP`).
 - `accepted`·`cancelled`의 `generation`은 수락 때의 세대(`AUTO_READY` 세대)입니다. `cancelled`는 그 전환의 `vehicle/control`·`drive.mode.changed`보다 먼저 냅니다 (`SAFE_STOP`이면 정지 프레임이 맨 앞).
 - `requested_by`는 요청 payload 의 문자열 그대로, 없으면 `null`.
+- **운영자 취소** (계약 v1.7, S15P31E110-280): `drive.resume.cancel_requested` 를 받으면 다음 판정 주기에서 카운트다운을 멈추고 `cancelled {reason: "operator_cancelled", generation, requested_by}` 를 냅니다. 모드·세대·control 은 그대로이고 다시 AUTO 로 가려면 새 재개 요청이 필요합니다 (자동 복귀 없음). 같은 판정 주기에 3초가 차도 취소가 먼저입니다.
+  - 카운트다운이 없으면 이벤트 없이 무시합니다.
+  - verified 는 envelope `causation_id` = 현재 control message_id, payload `expected_generation` = 카운트다운을 시작한 세대여야 받습니다. 영구 중복 기록은 남기지 않고 최근 64개 `message_id` 만 메모리에 둬 QoS 1 재전달이 같은 세대의 다음 카운트다운을 끄지 않게 합니다.
 
 ## 실행
 
@@ -397,7 +414,7 @@ python tools/measure_failover.py --port 18832 --runs 10
 | 도구 | 하는 일 |
 | --- | --- |
 | `tools/mock_drive_app.py` | 주행 앱 목. `vehicle/control` 세대로 `drive.command` 50 Hz + `app.heartbeat` 1초 |
-| `tools/send_resume.py` | 재개 요청 목. `drive.resume.requested` 한 번. 기본은 메시지 보드 경로, `--console` 이면 `xenova/v1/console/resume` (계정 `backend`, `source_id: dom0-server`) |
+| `tools/send_resume.py` | 재개 요청 목. `drive.resume.requested` 한 번. 기본은 인터랙션 VM 경로, `--console` 이면 `xenova/v1/console/resume` (계정 `backend`, `source_id: dom0-server`) |
 | `tools/measure_failover.py` | 위 둘과 게이트웨이·수동 앱을 띄워 AUTO→MANUAL→AUTO_READY→(재개 3초)→AUTO 를 N회, 끝에 SAFE_STOP 을 잰다 |
 
 ## 검증 현황 (2026-10-21, 개발 PC Windows + Docker mosquitto 2.0.21, 목 싱크)

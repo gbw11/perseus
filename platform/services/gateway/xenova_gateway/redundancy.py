@@ -198,6 +198,8 @@ class RedundantControlMachine(ControlMachine):
         if not self._started:
             raise RuntimeError("start() required")
         vm, app = self.active_vm, self.active_app
+        # 아래 판정은 actions 를 새로 대입하므로 운영자 취소는 따로 두었다가 앞에 붙인다
+        cancelled = self._operator_cancel(now)
         actions: list[Action] = []
         faults: list[Action] = []
         if app is not None:
@@ -241,4 +243,4 @@ class RedundantControlMachine(ControlMachine):
         # SAFE_STOP never elects an unconfirmed standby using heartbeat alone.
         if not actions:
             actions += self._resume(now)
-        return actions + faults + self._output(now)
+        return cancelled + actions + faults + self._output(now)

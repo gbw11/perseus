@@ -25,6 +25,7 @@ from .platform_recovery import PlatformRecovery
 from .policy import RecoveryPolicy
 from .protection import ClientPort, GatewayProtection
 from .state import RecoveryStore
+from .status import GatewayProbe, StatusReporter
 from .heartbeats import AppHeartbeatTable, HeartbeatTable
 from .mqtt import RECOVERY_EVENTS_TOPIC, HealthPublisher, build_client, link_state, subscribe_liveness
 from .observe import PlatformObserver
@@ -93,20 +94,32 @@ def main() -> int:
     # 주행 VM 의 force-restart 는 Gateway 보호(S15P31E110-346)를 먼저 확보한다. Gateway 클라이언트를 못 읽으면 주행 VM force 는 보류된다.
     # drive config 가 없으면 주행 VM 이 어느 것인지 모르므로(None) 엔진이 Zephyr force 를 모두 보류한다
     protection = None
+    probe = None
+    gateway_client = None  # drive config 가 없으면 Gateway 를 쓰지 않는다
     if rejoin:
         try:
             gateway = ClientPort.production(settings.gateway_socket, settings.gateway_call_budget_s)
         except ImportError as exc:
+            gateway_client = False
             log.error("Gateway client unavailable (%s): drive VM force-restart stays held; install xenova-gateway-client", exc)
         else:
+            gateway_client = True
             protection = GatewayProtection(gateway, deadline_s=settings.gateway_protect_deadline_s, call_budget_s=settings.gateway_call_budget_s)
+            probe = GatewayProbe(gateway)
     engine = RecoveryEngine(policy, PlatformRecovery(manager), watcher, RecoveryStore(Path(settings.state_dir) / "recoveries.json"), on_event=publish_event,
                             drive_vm_ids=rejoin.vm_ids if rejoin else None, protection=protection)
     log.info("recovery policy=%s max_attempts=%d backoff=%s attempt_deadline=%.0fs verify_timeout=%.0fs", policy.policy, policy.max_attempts,
              ",".join(f"{b:g}" for b in policy.backoff_s), policy.attempt_deadline_s, policy.verify_timeout_s)
+    # 자가진단(354): 계정·ACL·의도·Gateway 가 막혀도 Worker 는 멈추지 않고 DEGRADED 로 남긴다. 비밀번호는 있는지만 본다
+    status = StatusReporter(
+        settings.state_dir, policy=policy.policy, broker_configured=bool(settings.broker_username) and bool(settings.broker_password),
+        drive_vm_ids=rejoin.vm_ids if rejoin else None, gateway_client=gateway_client, interval_s=settings.interval_s,
+        connected=lambda: bool(getattr(client, "connected", False)), links=watcher.link_report, publishers=watcher.expected_publishers, intent_known=lambda: observer.intent_known,
+        gateway=probe, internal=lambda: engine.hold_reasons() + (["ARMED_HISTORY_LOST"] if watcher.history_lost else []),
+    )
     worker = RecoveryWorker(
         settings, observer, watcher, link=lambda: link_state(client,verified=rejoin is not None), health_publisher=HealthPublisher(client, refresh_s=settings.health_refresh_s),
-        engine=engine,rejoin=rejoin,
+        engine=engine,rejoin=rejoin,status=status,
     )
 
     stop = threading.Event()

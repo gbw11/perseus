@@ -254,3 +254,54 @@ def test_dequeued_first_event_survives_scheduler_pause_before_drain(tmp_path,mon
     monkeypatch.setattr('xenova_gateway.verified_runner.time.perf_counter',lambda:next(moments))
     runner._drain((w.t,'already-dequeued'))
     assert seen==['already-dequeued']
+
+
+# --- 운영자 취소 (계약 v1.7, S15P31E110-280) ------------------------------------
+
+def _auto_ready(tmp_path):
+    w=World(tmp_path/'authority');w.arm();w.perception=False;w.tick(.1)
+    w.perception=True;w.tick(3.4);assert w.m.mode is Mode.AUTO_READY
+    w.tick(3.2);return w
+
+def _cancelled(w):
+    return [a.payload for a in w.actions if isinstance(a,PublishEvent) and a.type=='drive.resume.cancelled']
+
+def test_operator_cancel_stops_countdown_and_keeps_mode(tmp_path):
+    w=_auto_ready(tmp_path);generation=w.m.generation
+    assert w.resume();w.tick(.5);assert w.m.counting_down
+    assert w.m.on_cancel_resume(w.t,'admin',expected_generation=generation,message_id=str(uuid4()))
+    w.tick(.02)
+    assert _cancelled(w)==[{'reason':'operator_cancelled','generation':generation,'requested_by':'admin'}]
+    assert w.m.mode is Mode.AUTO_READY and w.m.generation==generation and not w.m.counting_down
+    assert not any(isinstance(a,PublishControl) for a in w.actions)
+    w.tick(3.2);assert w.m.mode is Mode.AUTO_READY
+    # 새 재개 요청으로만 AUTO 로 간다
+    assert w.resume();w.tick(3.2);assert w.m.mode is Mode.AUTO
+
+def test_operator_cancel_rejects_wrong_context_and_redelivery(tmp_path):
+    w=_auto_ready(tmp_path);generation=w.m.generation
+    assert not w.m.on_cancel_resume(w.t,'admin',expected_generation=generation,message_id=str(uuid4()))  # 카운트다운 없음
+    assert w.resume();w.tick(.5)
+    assert not w.m.on_cancel_resume(w.t,'admin',expected_generation=generation-1,message_id=str(uuid4()))
+    assert not w.m.on_cancel_resume(w.t,'admin',expected_generation=str(generation),message_id=str(uuid4()))
+    assert not w.m.on_cancel_resume(w.t,'admin',expected_generation=generation,message_id=None)
+    request=str(uuid4())
+    assert w.m.on_cancel_resume(w.t,'admin',expected_generation=generation,message_id=request);w.tick(.02)
+    # 같은 세대의 다음 카운트다운을 QoS 1 재전달이 끄지 못한다
+    assert w.resume();w.tick(.5)
+    assert not w.m.on_cancel_resume(w.t,'admin',expected_generation=generation,message_id=request)
+    w.tick(3.2);assert w.m.mode is Mode.AUTO
+
+def test_runner_cancel_requires_current_control_causation(tmp_path):
+    w=_auto_ready(tmp_path);client=Client()
+    runner=VerifiedGatewayRunner(client,MockSink(),authority=w.auth,bindings=w.cache,vm_ids=(A,B),clock=lambda:w.t)
+    runner.subscribe();runner.begin();runner.machine=w.m
+    from xenova_gateway.runner import CONSOLE_RESUME
+    def send(kind,cause):
+        value=build(Identity(source_id='dom0-server'),kind,{'expected_generation':w.m.generation,'requested_by':'admin'},1)
+        value['causation_id']=cause;runner._feed(w.t,Message(CONSOLE_RESUME,value,w.t))
+    runner._control_message_id=str(uuid4())
+    send('drive.resume.requested',runner._control_message_id);w.tick(.5);assert w.m.counting_down
+    send('drive.resume.cancel_requested',str(uuid4()));w.tick(.02);assert w.m.counting_down and not _cancelled(w)
+    send('drive.resume.cancel_requested',runner._control_message_id);w.tick(.02)
+    assert [c['reason'] for c in _cancelled(w)]==['operator_cancelled'] and w.m.mode is Mode.AUTO_READY

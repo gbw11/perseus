@@ -16,7 +16,7 @@ public class MetricValuesConverter implements AttributeConverter<MetricSampleDat
     @Override
     public String convertToDatabaseColumn(MetricSampleData data) {
         try {
-            if (data == null || (data.network() == null && data.cpuWindow() == null)) {
+            if (data == null || (data.network() == null && data.cpuWindow() == null && data.telemetry() == null)) {
                 return MAPPER.writeValueAsString(data == null ? List.of() : data.values());
             }
             return MAPPER.writeValueAsString(data);

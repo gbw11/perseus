@@ -60,7 +60,7 @@ def test_candidate_needs_explicit_opt_in_and_does_not_claim_registry_verificatio
     monkeypatch.setenv("XENOVA_DISPLAY_ALLOW_CANDIDATE_BINDINGS","1")
     settings=FeedSettings.from_env()
     assert settings.binding_scope=="candidate"
-    assert [b.app_id for b in settings.bindings]==["autonomous","manual","message-board"]
+    assert [b.app_id for b in settings.bindings]==["autonomous","manual","interaction"]
 
 
 @pytest.mark.parametrize("change",["version","boolean_version","duplicate_vm","duplicate_app","wrong_os","unknown_field"])
@@ -202,10 +202,11 @@ def test_xen_state_has_priority_over_previous_app_report(candidate,state,app_sta
     assert p["decisions"][vm_id]["kind"]==state
 
 
-def test_live_app_error_and_return_to_normal_choose_distinct_screens(candidate):
+@pytest.mark.parametrize("index,app_id", [(1,"manual"), (2,"interaction")])
+def test_live_app_error_and_return_to_normal_choose_distinct_screens(candidate,index,app_id):
     policy=DisplayPolicy(candidate.settings,candidate.epoch)
-    topic="xenova/v1/apps/manual/events"
-    assert candidate.ingest(topic,heartbeat(candidate,1,state="error"))
-    assert policy.presentation(candidate.snapshot())["decisions"][str(candidate.settings.bindings[1].vm_id)]["kind"]=="app_error"
-    assert candidate.ingest(topic,heartbeat(candidate,1,state="standby",seq=2))
-    assert policy.presentation(candidate.snapshot())["decisions"][str(candidate.settings.bindings[1].vm_id)]["kind"]=="status"
+    topic=f"xenova/v1/apps/{app_id}/events"
+    assert candidate.ingest(topic,heartbeat(candidate,index,state="error"))
+    assert policy.presentation(candidate.snapshot())["decisions"][str(candidate.settings.bindings[index].vm_id)]["kind"]=="app_error"
+    assert candidate.ingest(topic,heartbeat(candidate,index,state="standby",seq=2))
+    assert policy.presentation(candidate.snapshot())["decisions"][str(candidate.settings.bindings[index].vm_id)]["kind"]=="status"

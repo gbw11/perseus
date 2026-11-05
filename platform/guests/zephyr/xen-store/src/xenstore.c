@@ -265,13 +265,14 @@ static int pump(struct xs_client *c, uint32_t request, uint32_t type,
 	} else if (h.req_id != request) {
 		c->late_responses++;
 		if (h.req_id == c->abandoned_start) {
-			if (h.type == XS_TRANSACTION_START) {
+			if (h.tx_id || c->active_tx) { rc = fatal(c, -EPROTO); }
+			else if (h.type == XS_TRANSACTION_START) {
 				uint32_t orphan;
 				size_t n = h.len;
 				if (n && c->rx_body[n-1] == 0) { n--; }
 				rc = memchr(c->rx_body, 0, n) ? -EPROTO : parse_number(c->rx_body, &orphan);
 				if (rc) { fatal(c, rc); }
-				if (!rc) { c->active_tx = orphan; }
+				if (!rc) { c->active_tx = orphan; c->orphan_tx = true; }
 			} else if (h.type != XS_ERROR) { rc = fatal(c, -EPROTO); }
 			c->abandoned_start = 0;
 		}
@@ -346,7 +347,9 @@ static int request_held(struct xs_client *c, uint32_t type, uint32_t tx,
 	int64_t end = xs_deadline(c, ms);
 	if (end < 0) { return -EINVAL; }
 	int rc;
-	if (tx && tx != c->active_tx) { return -EINVAL; }
+	if (tx && (tx != c->active_tx || (c->orphan_tx && type != XS_TRANSACTION_END))) {
+		return -EINVAL;
+	}
 	if (c->next_request == UINT32_MAX) { return -EOVERFLOW; }
 	/* An enclosing deadline can reach zero between Store calls. */
 	if (!ms) { return -ETIMEDOUT; }
@@ -504,14 +507,45 @@ int xs_remove(struct xs_client *c, const char *path, int ms)
 	return path_request(c, XS_RM, 0, path, reply, sizeof(reply), NULL, ms);
 }
 
+static int transaction_end_held(struct xs_client *c, uint32_t tx, bool commit, int ms)
+{
+	if (tx != c->active_tx) { return -EINVAL; }
+	/* Replaying a commit can hide the original uncertain outcome. A later
+	 * abort only retires the same ID, including ENOENT after a late commit. */
+	if (commit && c->orphan_tx) { return -EALREADY; }
+	char reply[4];
+	int rc = request_held(c, XS_TRANSACTION_END, tx, commit ? "T" : "F", 2,
+			 reply, sizeof(reply), NULL, ms);
+	if (!rc || rc == -EAGAIN || rc == -ENOENT) {
+		c->active_tx = 0;
+		c->orphan_tx = false;
+	} else {
+		c->orphan_tx = true;
+	}
+	return rc;
+}
+
 int xs_transaction_start(struct xs_client *c, uint32_t *tx, int ms)
 {
 	if (!c || !tx) { return -EINVAL; }
 	int lock = enter(c);
 	if (lock) { return lock; }
-	if (c->active_tx || c->abandoned_start) { return leave(c, -EBUSY); }
+	int64_t end = xs_deadline(c, ms);
+	if (end < 0) { return leave(c, -EINVAL); }
+	while (c->abandoned_start) {
+		if (!xs_remaining(c, end)) { return leave(c, -EBUSY); }
+		bool ignored = false;
+		int rc = pump(c, 0, 0, 0, NULL, 0, NULL, &ignored);
+		if (rc <= 0) { return leave(c, rc ? rc : -EBUSY); }
+	}
+	if (c->orphan_tx) {
+		int rc = transaction_end_held(c, c->active_tx, false, xs_remaining(c, end));
+		if (rc && rc != -ENOENT && rc != -EAGAIN) { return leave(c, rc); }
+	}
+	if (c->active_tx) { return leave(c, -EBUSY); }
 	char reply[16]; size_t len = 0;
-	int rc = request_held(c, XS_TRANSACTION_START, 0, "", 1, reply, sizeof(reply)-1, &len, ms);
+	int rc = request_held(c, XS_TRANSACTION_START, 0, "", 1, reply, sizeof(reply)-1, &len,
+			      xs_remaining(c, end));
 	if (rc) { return leave(c, rc); }
 	reply[len] = 0;
 	if (len && reply[len-1] == 0) { reply[--len] = 0; }
@@ -524,15 +558,10 @@ int xs_transaction_start(struct xs_client *c, uint32_t *tx, int ms)
 
 int xs_transaction_end(struct xs_client *c, uint32_t tx, bool commit, int ms)
 {
-	char reply[4];
-	if (!c || !tx) { return -EINVAL; }
+	if (!c || !tx || ms < 0) { return -EINVAL; }
 	int lock = enter(c);
 	if (lock) { return lock; }
-	if (tx != c->active_tx) { return leave(c, -EINVAL); }
-	int rc = request_held(c, XS_TRANSACTION_END, tx, commit ? "T" : "F", 2,
-			 reply, sizeof(reply), NULL, ms);
-	if (!rc || rc == -EAGAIN || rc == -ENOENT) { c->active_tx = 0; }
-	return leave(c, rc);
+	return leave(c, transaction_end_held(c, tx, commit, ms));
 }
 
 int xs_transaction(struct xs_client *c, unsigned int limit, int ms,

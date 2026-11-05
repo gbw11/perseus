@@ -30,8 +30,8 @@ def driver() -> MockDriver:
 
 
 @pytest.fixture
-def provisioner() -> MockProvisioner:
-    return MockProvisioner()
+def provisioner(driver: MockDriver) -> MockProvisioner:
+    return MockProvisioner(running=driver.has_domain)
 
 
 @pytest.fixture

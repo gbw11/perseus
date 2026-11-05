@@ -53,7 +53,8 @@ class GatewayPackagingTest(unittest.TestCase):
         self.assertIn('SYSTEMD_AUTO_ENABLE:${PN} = "disable"', recipe)
         self.assertIn('python3-pyserial', recipe)
         self.assertIn('xenova-mqtt-client', recipe)
-        self.assertIn('EnvironmentFile=/etc/xenova/gateway.env', unit)
+        self.assertIn('EnvironmentFile=-/run/xenova/gateway-factory.env', unit)
+        self.assertIn('EnvironmentFile=-/etc/xenova/gateway.env', unit)
         self.assertIn('ExecStart=/usr/bin/python3 -m xenova_gateway', unit)
         self.assertIn('Restart=no', unit)
         for forbidden in ('--initialize-control-state', 'ExecStartPre=', 'KillMode=process', 'KillMode=none'):

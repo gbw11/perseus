@@ -43,6 +43,8 @@ const REASON: Record<string, string> = {
   autonomous_lost: '자율주행이 다시 끊김',
   manual_lost: '수동주행 끊김',
   not_auto_ready: 'AUTO_READY 아님',
+  operator_cancelled: '운영자 취소',
+  readiness_lost: '준비 상태 깨짐',
 };
 
 const str = (value: unknown) => (value == null ? '' : String(value));

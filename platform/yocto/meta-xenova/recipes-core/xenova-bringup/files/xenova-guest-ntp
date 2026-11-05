@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""Serve the synchronized dom0 clock to Linux guests on the isolated Xen bridge."""
+
+import ipaddress
+from pathlib import Path
+import socket
+import struct
+import sys
+import time
+
+
+BRIDGE_ADDRESS = '192.168.77.1'
+GUEST_NETWORK = ipaddress.IPv4Network('192.168.77.0/24')
+SYNC_MARKER = Path('/run/systemd/timesync/synchronized')
+NTP_EPOCH = 2_208_988_800
+NANOSECONDS = 1_000_000_000
+
+
+def ntp_timestamp(unix_ns):
+    seconds, fraction_ns = divmod(unix_ns, NANOSECONDS)
+    return struct.pack('!II', (seconds + NTP_EPOCH) & 0xffffffff, (fraction_ns << 32) // NANOSECONDS)
+
+
+def response(request, receive_ns, transmit_ns, reference_ns, error_ms):
+    if len(request) != 48:
+        return None
+    version = (request[0] >> 3) & 7
+    # This endpoint supports basic client requests with no extensions or MAC.
+    if request[0] & 7 != 3 or version not in (3, 4) or not any(request[40:48]):
+        return None
+    if not 0 < reference_ns <= transmit_ns or not 0 <= transmit_ns - receive_ns < NANOSECONDS:
+        return None
+    # A conservative stratum identifies this as a secondary local source.
+    dispersion = (error_ms * 65536 + 999) // 1000
+    header = struct.pack('!BBbbII4s', version << 3 | 4, 15, 6, -10, 0, dispersion, b'LOCL')
+    return (header + ntp_timestamp(reference_ns) + request[40:48]
+            + ntp_timestamp(receive_ns) + ntp_timestamp(transmit_ns))
+
+
+def main():
+    sys.path.insert(0, '/usr/lib/xenova')
+    from xenova_telemetry_support import clock_sample
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, b'xenbr0\0')
+        server.bind((BRIDGE_ADDRESS, 123))
+        while True:
+            request, peer = server.recvfrom(49)
+            receive_ns = time.time_ns()
+            if len(request) != 48 or ipaddress.IPv4Address(peer[0]) not in GUEST_NETWORK:
+                continue
+            try:
+                reference_ns = SYNC_MARKER.stat().st_mtime_ns
+                quality = clock_sample()
+            except (OSError, ValueError):
+                continue
+            packet = response(request, receive_ns, time.time_ns(), reference_ns, quality['source_error_ms'])
+            if packet is not None:
+                server.sendto(packet, peer)
+
+
+if __name__ == '__main__':
+    main()

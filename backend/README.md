@@ -128,6 +128,20 @@ GET /api/v1/drive/state      속도·조향·전압·경고·앱 명령·복구 
 WS  /ws/v1/drive/state       같은 Drive 스냅샷 (첫 프레임 사용자 JWT)
 ```
 
+자율주행 재개와 취소는 운영자 콘솔에서 보냅니다 (MQTT 계약 §5.2·§6, v1.7).
+
+```text
+POST   /api/v1/drive/resume  AUTO_READY 에서 재개 요청 → console/resume 에 drive.resume.requested (202, 그 밖의 모드 409 NOT_AUTO_READY)
+DELETE /api/v1/drive/resume  3초 카운트다운 취소 → drive.resume.cancel_requested (202, 카운트다운 없으면 409 NO_RESUME_COUNTDOWN)
+```
+
+- 두 요청 모두 envelope `causation_id` 에 지금 받은 `vehicle.control` 의 `message_id`, payload `expected_generation` 에
+  그 세대(취소는 카운트다운을 시작한 세대)를 넣습니다. verified 게이트웨이는 이 문맥이 맞지 않는 요청을 버립니다.
+- 202 는 "보냈다" 입니다. 결과는 게이트웨이의 `drive.resume.accepted` / `drive.resume.cancelled`(운영자 취소면
+  `reason: operator_cancelled`, 모드 유지)로 오고 `GET /api/v1/drive/state` 의 `resume`(`requested_by` 포함)과 이벤트 로그에 반영됩니다.
+- 취소가 오면 `resume` 은 null 이 되고, 10초 동안 `resume_cancel`(`reason`·`requested_by`·`generation`·`received_ago_ms`)이 남아
+  화면이 운영자 취소와 조건이 깨져 끝난 카운트다운을 구분할 수 있습니다.
+
 - VM A/B의 현재 구동 여부는 고정 역할명이 아니라 신선한 `active_vm_id`와의 일치로 판정합니다.
   일치하는 정상 주행 VM이 Active이고, 나머지 정상 주행 VM이 Standby입니다. source가 `stale`,
   `disconnected`, `unknown`이면 이전 ID로 현재 구동 VM을 추론하지 않습니다.
@@ -153,6 +167,45 @@ WS  /ws/v1/drive/state       같은 Drive 스냅샷 (첫 프레임 사용자 JWT
   `labels.counter_epoch`가 같고 `network.observed_uptime_ms`가 증가한 두 유효 표본을
   사용합니다. 수신 시각은 조회 정렬용이며 차분 간격은 관측 업타임으로 구합니다.
   Telemetry 2.1의 직접 계측 `rx_bytes_per_s`는 기존 지표 조회에서 함께 받을 수 있습니다.
+- 같은 조회와 WebSocket에서 `family="app_memory"`의 지도·경로·탐색·odom 풀과 수동 버퍼를 제공합니다.
+  `labels.region`은 `drive_maps`, `drive_paths`, `drive_search_nodes`, `drive_odometry`,
+  `manual_input`, `manual_pending`, `manual_running`, `manual_result`입니다.
+  `memory.app.*`의 예약·점유·용량·여유·최고 점유·최소 여유 및 확보 실패·경합 누계는
+  `values[].raw_value`에 정확한 uint64 십진 문자열로 보존합니다. 안전 정수 범위에서만
+  `value`에도 숫자를 제공합니다. `status=ok`와 `raw_value`가 있다면 `value=null`이어도
+  미측정이 아닙니다. 유효한 `"0"`과 실패의 `null`을 구분하고 `status`,
+  `unavailable_reason`, `source_rc`를 함께 확인합니다. `counter_value`는 기존 원 누계용입니다.
+- 수동 버퍼의 `telemetry.buffer`는 입력 보관·작업 대기·실제 실행·결과 보관을 구분합니다.
+  `phase`는 `empty/stored/pending/running/retained`, 원 입력 상태는 별도 `input_status`입니다.
+  입력이 만료돼도 보관 중인 bytes는 남을 수 있고, 결과를 읽어도 retained 사본은 해제되지 않습니다.
+  `performed`는 callback 수행 사실, `revoked`는 철회 관측이며 계산 성공·출력 적용·실제 종료를 뜻하지 않습니다.
+  sequence·원 시각의 유효한 0과 null, `performed=false`와 미지원/null을 보존합니다.
+  소유자 관측 실패의 `buffer=null`과 입력 자체의 invalid/expired를 구분합니다.
+  worker 세 버퍼의 경합 누계는 같은 원천이므로 합산하지 않습니다. 입력 경합 원천은 32비트이며
+  감소는 불연속입니다. 원 errno는 플랫폼별 값을 그대로 보존합니다.
+- 선택 필드 `telemetry`는 봉투의 `message_seq`와 원 `source_sample_seq`, `observed_uptime_ms`, 수집 구간,
+  송신 시각·업타임·UTC 품질, publisher와 host/execution/receipt 문맥을 보존합니다.
+  `observed_at`은 기존처럼 송신 UTC 또는 수신 시각이며, 캐시 원 관측 시각과 다릅니다.
+  `family="memory"`의 원 시각 쌍은 firmware/page allocator의 캐시를 가리킵니다.
+  직접 kernel heap의 관측 구간은 `telemetry.collection`입니다. 과거 시각 없는 표본에
+  원 시각을 만들어 넣지 않습니다.
+- 앱 풀의 마지막 값은 region과 원 표본·실행 문맥별로 다룹니다. 다른 region의 수신으로
+  갱신하지 않고, 2초 송신 TTL을 화면 수신 보장으로 해석하지 않습니다. 이 API는 수신한
+  관측을 제공하며 현재 Xen 실행이나 주행 준비를 확인하지 않습니다. 정적 예약에 이미
+  포함된 heap·pool·stack·firmware 영역을 합산해 VM 전체 메모리 사용량으로 만들지 않습니다.
+- Zephyr 상단 **메모리 사용률**은 정적 예약을 포함하며, 같은 `family="memory"` 표본의 선언 관리 RAM에서
+  미할당 물리 RAM을 뺀 값입니다. `ram_region_bytes`, `mapped_bytes`, `static_data_bytes`,
+  `page_allocator.free_bytes` 네 값과 원 시각·수집 상태를 한 봉투 그대로 제공합니다.
+  이는 실제 Xen 할당량·RSS·Linux `MemTotal−MemAvailable`과 다른 범위입니다.
+  이 네 지표의 family·단위·kind·encoding·빈 labels가 계약과 다르면 원 자료는 진단으로 남기고
+  `value=null`, `unavailable_reason=ram_contract_mismatch`로 반환합니다. 원 source가 실패했다면
+  그 원 사유와 errno를 우선 보존합니다. scope가 다른 여유량을 전체 RAM으로 계산하지 않습니다.
+  화면은 마지막으로 받은 유효한 원 관측과 관측 시각을 표시하며, 원 표본 나이와 최초 수신 후
+  경과를 합친 6초가 지나면 만료 처리합니다. 새 boot/publisher 또는 새 원 표본의 실행 문맥
+  변경을 관측하면 그래프 구간을 나눕니다. 이미 퇴역한 세션의 지연 수신으로 이전 값을
+  되살리지 않습니다. 독립적인 현재 실행 확인은
+  RAM 표시의 필수 조건이 아닙니다. FastAPI의 응답 확장이나 추가 조회 없이 이 관측을 소비하며,
+  RAM 숫자를 현재 물리 실행·건강·복구 허가·출력 권한의 증거로 쓰지 않습니다.
 - `GET /api/v1/vms/{vmId}/threads`는 최근 Zephyr 2.1 CPU 표본 한 묶음을 반환합니다.
   이름과 별개인 `thread_id`, `cpu_percent`, 계측 구간, 페이지 수와 수집 상태를 제공합니다.
   `complete`는 페이지 전달의 완전성이고, 실제 수집 잘림은 `threads_status=truncated`로
@@ -165,8 +218,9 @@ WS  /ws/v1/drive/state       같은 Drive 스냅샷 (첫 프레임 사용자 JWT
   기존 공용 토픽의 `apps`와 모드 필드도 유지됩니다.
 
 신규 지표는 기존 `vm_metric_samples.metric_values`에 값과 관측 문맥을 함께 저장합니다.
-이 버전은 과거 배열과 새 객체 형식을 읽습니다. 새 객체를 저장한 뒤에는 배열만 읽는
-이전 Spring 바이너리로 되돌리기 전에 DB 읽기 호환을 확인해야 합니다.
+이 버전은 과거 배열과 객체 형식을 읽습니다. `raw_value`·`status`·`telemetry`를 저장한 뒤에는
+새 필드를 모르는 이전 Spring converter가 읽기를 거절할 수 있습니다. 이전 바이너리로
+되돌릴 때는 DB 읽기 호환을 먼저 확인해야 합니다. 이번 변경은 과거 행을 변환하지 않습니다.
 
 ## Linux·Zephyr 수집기 상태
 
@@ -205,6 +259,19 @@ Windows:
 ```powershell
 .\mvnw.cmd test
 ```
+
+앱 메모리 소비 경로만 확인하려면 Java 21에서 다음을 실행합니다.
+
+```powershell
+.\mvnw.cmd '-Dtest=VmTelemetryAppMemoryTest,VmTelemetryManualMemoryTest,AppMemoryMqttConsumerTest,VmTelemetryBooleanTest' test
+```
+
+이 시험은 실제 격리 MQTT 소켓·제품 수신기·handler·JSON converter·조회 service·HTTP controller를
+실행하고 DB repository 경계는 메모리 대역으로 둡니다. HTTP controller 검사는 MockMvc이며
+인증 전체 흐름과 실제 MySQL은 별도입니다. 실보드 원문과 제품 codec fixture의 출처·해시는
+`src/test/resources/telemetry-app-memory/provenance.json`과 `telemetry-manual-memory/provenance.json`에
+있습니다. 수동 제공물은 1.0.8의 native 원문이며 보드 수신으로 재명명하지 않습니다.
+운영 MQTT·EC2 배포 수락을 대신하지 않습니다.
 
 Linux/macOS:
 

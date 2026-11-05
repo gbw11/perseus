@@ -15,6 +15,7 @@ static xt_bootstrap_loader load;
 static bool attempted,started,joined,available,identified;
 static atomic_t stop;
 static int64_t observed;
+static struct xd_context_status status;
 
 static void work(void *a,void *b,void *c)
 {
@@ -30,6 +31,12 @@ static void work(void *a,void *b,void *c)
      strcmp(first.world_username,incoming.world_username)||strcmp(first.world_password,incoming.world_password)||
      strcmp(first.world_profile,incoming.world_profile)))rc=-EXDEV;
   k_mutex_lock(&context_lock,K_FOREVER);
+  status.loads++;
+  if(rc){
+   status.failures++;
+   if(!status.first_error)status.first_error=rc;
+  }
+  status.last_error=rc;
   available=!rc&&!atomic_get(&stop);
   if(available){current=incoming;observed=k_uptime_get();if(!identified){first=incoming;identified=true;}}
   k_mutex_unlock(&context_lock);
@@ -59,6 +66,14 @@ int xd_context_get(struct xt_bootstrap *out)
  int rc=available&&!atomic_get(&stop)&&k_uptime_get()-observed<=300?0:-EAGAIN;
  if(!rc)*out=current;else memset(out,0,sizeof(*out));
  k_mutex_unlock(&context_lock);return rc;
+}
+int xd_context_status_get(struct xd_context_status *out)
+{
+ if(k_mutex_lock(&context_lock,K_NO_WAIT))return -EBUSY;
+ *out=status;
+ out->available=available&&!atomic_get(&stop)&&k_uptime_get()-observed<=300;
+ k_mutex_unlock(&context_lock);
+ return 0;
 }
 int xd_context_join(int64_t end)
 {

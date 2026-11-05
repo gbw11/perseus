@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import json
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -15,10 +16,12 @@ from first_install_contract import uuid4
 
 ID='xenova-zephyr-drive-lattice-lab-1.0.0'
 TEMPLATE='zephyr-drive-lattice-lab-arm64'
-VERSION='1.0.0-lab.2'
+VERSION='1.0.8'
 
 
-def package(build,output):
+def package(build,output,*,version=VERSION):
+    if not isinstance(version,str) or not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",version):
+        raise ValueError("plain major.minor.patch firmware version required")
     zephyr.plain(build);new_path(output)
     receipt=json.loads(zephyr.asset(build,'BUILD_RECEIPT.json').read_text())
     spec=importlib.util.spec_from_file_location('drive_builder',ROOT/'platform/scripts/build-xenova-drive-app.py')
@@ -36,20 +39,22 @@ def package(build,output):
         'autonomous':{'model':'stateful','standby_progress':'idle'},'manual':{'model':'stateless','standby_progress':'idle'}}:
         raise ValueError('actual stateful AUTO/independent MANUAL profile required')
     stage=output.parent/('.drive-template-'+uuid4());shutil.copytree(source,stage)
-    meta.update(id=ID,kind='zephyr-xen-firmware',template_id=TEMPLATE,template_version=VERSION)
+    meta.update(id=ID,kind='zephyr-xen-firmware',template_id=TEMPLATE,template_version=version,version=version)
     meta['source']['build_receipt_sha256']=zephyr.sha(build/'BUILD_RECEIPT.json')
     meta['source'].update(zephyr_commit=receipt['zephyr_commit'],sdk_version=receipt['sdk_version'],drive_profile=receipt['profile'])
     # 원 firmware/manifest를 덮지 않고 새 배포 envelope만 생성한다.
     target=stage/'firmware.json';target.chmod(0o644);target.write_text(json.dumps(meta,indent=2)+'\n');target.chmod(0o444)
     result=zephyr.bundle_info(stage);publish(stage,output)
-    return {'id':ID,'template_id':TEMPLATE,'version':VERSION,'directory':f'zephyr/{ID}/{VERSION}',
+    return {'id':ID,'template_id':TEMPLATE,'version':version,'directory':f'zephyr/{ID}/{version}',
             'manifest_sha256':result['revision'],'guest_kind':'zephyr','firmware_sha256':result['sha256']}
 
 
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--build-root',type=Path,required=True)
-    p.add_argument('--output',type=Path,required=True);args=p.parse_args(argv)
-    print(json.dumps(package(args.build_root,args.output),indent=2))
+    p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--version',default=VERSION,help='new immutable release, plain major.minor.patch')
+    args=p.parse_args(argv)
+    print(json.dumps(package(args.build_root,args.output,version=args.version),indent=2))
 
 
 if __name__=='__main__':main()

@@ -7,10 +7,11 @@ from collections import deque
 from xenova_mqtt import topics
 from .authority import AuthorityError
 from .machine import DRIVE_APPS,ForwardDrive,ForwardStop,PublishControl,PublishEvent,Measure
-from .runner import GatewayRunner,CONSOLE_RESUME,RESUME_REQUESTED
+from .runner import GatewayRunner,CONSOLE_RESUME,RESUME_REQUESTED,RESUME_CANCEL_REQUESTED
 from .verified import VerifiedDriveMachine
 from .frame import encode,STOP_SAFE_STOP
 from .sink import SinkError
+from .output_owner import PendingStop
 
 class VerifiedGatewayRunner(GatewayRunner):
     drain_limit=64
@@ -34,6 +35,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         from .provider import GatewayProvider
         self.provider=GatewayProvider(self)
         self.drive_link=None
+        self._pending_stop = None
         self._deferred_drive=None;self.serial_deferred=0
         self._manual_activation=None;self.manual_withheld=0;self._manual_stop_try=0.
         queue=__import__('queue')
@@ -116,7 +118,7 @@ class VerifiedGatewayRunner(GatewayRunner):
             topic=f'{topics.PREFIX}/vms/{vm}/apps/+/events';self._app_filters.append(topic)
             self._client.subscribe(topic,self._enqueue,qos=1 if self.readiness_profile=='warm-drive-1' else 0)
         self._client.subscribe(CONSOLE_RESUME,self._enqueue,qos=1)
-        self._client.subscribe(topics.app_events('message-board'),self._enqueue,qos=1)
+        self._client.subscribe(topics.app_events('interaction'),self._enqueue,qos=1)
         self._client.subscribe(topics.vehicle_control(),self._enqueue,qos=1)
         if self.readiness_profile=='warm-drive-1':self._client.subscribe(topics.manual_input(),self._enqueue,qos=0)
 
@@ -165,10 +167,12 @@ class VerifiedGatewayRunner(GatewayRunner):
                 ref={k:envelope.get(k) for k in ('message_id','boot_id','agent_instance_id','seq')}
                 ref.update(vm_id=vm,app_id=app,execution_id=binding['execution_id'],received_monotonic=t)
                 self.machine.on_command(app,vm,message.payload,t,ref)
-        elif (message.type==RESUME_REQUESTED and message.topic in (CONSOLE_RESUME,topics.app_events('message-board'))
+        elif (message.type in (RESUME_REQUESTED,RESUME_CANCEL_REQUESTED) and message.topic in (CONSOLE_RESUME,topics.app_events('interaction'))
               and not self._output_broken and self._control_message_id is not None
               and envelope.get('causation_id')==self._control_message_id):
-            self.machine.on_resume(t,message.payload.get('requested_by'),
+            handler=self.machine.on_resume if message.type==RESUME_REQUESTED else self.machine.on_cancel_resume
+            requested_by=message.payload.get('requested_by')
+            handler(t,requested_by if isinstance(requested_by,str) else None,
                 expected_generation=message.payload.get('expected_generation'),message_id=envelope.get('message_id'))
 
     def _drain(self,first=None):
@@ -268,7 +272,59 @@ class VerifiedGatewayRunner(GatewayRunner):
                 event.get('observed_monotonic',float('inf'))*1000<=gate['deadline_ms']):
                 gate['ready']=True;gate['observed_monotonic_ms']=int(event['observed_monotonic']*1000);break
 
-    def _submit(self,action):
+    def _accept_submission(self, action, record, accepted):
+        if hasattr(accepted,'frame'):
+            actual=accepted.frame
+            record.update(frame_counter=actual.counter,encoded_hex=encode(actual).hex())
+            if accepted.metadata:
+                record.update(accepted.metadata);record.setdefault('serial_profile','feedback-1')
+        self.serial_accepted+=1;record['serial_result']='accepted';record['accepted_bytes']=accepted
+        if (self.drive_link is not None and isinstance(action,ForwardStop) and action.generation==self.machine.generation and self.machine.active_app=='manual' and
+            (self._manual_activation is None or self._manual_activation['generation']!=action.generation)):
+            pending=self.authority.value.get('pending') or {}
+            if pending.get('deadline_ms'):
+                self._manual_activation=dict(generation=action.generation,deadline_ms=pending['deadline_ms'],ready=False,
+                    session=(record.get('pi_session'),record.get('device_session')),driver=pending.get('manual_session'),
+                    first_stop=record.get('command_sequence',2**64),kind='observed_stop')
+
+    def _defer_stop(self, submission, action, record):
+        record['serial_result'] = 'pending'
+        record['serial_wait'] = submission.reason
+        self.submissions.append(record)
+        self._pending_stop = (submission, action, record)
+
+    def _finish_stop(self):
+        if self._pending_stop is None:
+            return
+        pending, action, record = self._pending_stop
+        try:
+            accepted = pending.outcome()
+        except (SinkError, OSError) as error:
+            cause = error.__cause__ or error
+            record.update(serial_result='failed', failure_reason='OUTPUT_SUBMISSION_FAILED',
+                          failure_cause={'cause_type': type(cause).__name__, 'errno': getattr(cause, 'errno', None),
+                                         'message': str(cause)})
+            self.serial_failed += 1
+            self._output_broken = True
+            self.machine.output_permitted = False
+            self.machine._authorized = False
+            self.machine._fail('OUTPUT_PATH_FAILED', self._clock())
+        else:
+            if accepted is None:
+                return
+            self._accept_submission(action, record, accepted)
+            record['serial_completed_monotonic'] = self._clock()
+        self._pending_stop = None
+
+    def _submit(self,action,*,wait_for_stop=True):
+        self._finish_stop()
+        if self._pending_stop is not None:
+            if wait_for_stop and isinstance(action, ForwardStop):
+                self._pending_stop[0].event.wait(.01)
+                self._finish_stop()
+            # One original STOP remains owned. Do not resubmit it or allow
+            # DRIVE to overtake its unresolved physical submission.
+            return
         now=self._clock();source=action.source if isinstance(action,ForwardDrive) else None
         device=self.device_view()
         if device['feedback_supported'] and not device['ready']:
@@ -304,21 +360,20 @@ class VerifiedGatewayRunner(GatewayRunner):
         if isinstance(action,ForwardDrive):record.update(v_mps=action.v_mps,steer_rad=action.steer_rad)
         serial_error=None
         try:
-            accepted=self._sink.write(frame,now)
+            submit_stop = getattr(self._sink, 'submit_stop', None)
+            if isinstance(action, ForwardStop) and not wait_for_stop and submit_stop is not None:
+                submission = submit_stop(frame, now)
+                accepted = submission.outcome()
+                if accepted is None:
+                    self._defer_stop(submission, action, record)
+                    return
+            else:
+                accepted = self._sink.write(frame, now)
             if accepted!=len(data):raise SinkError('serial acceptance length unavailable/partial')
-            if hasattr(accepted,'frame'):
-                actual=accepted.frame
-                record.update(frame_counter=actual.counter,encoded_hex=encode(actual).hex())
-                if accepted.metadata:
-                    record.update(accepted.metadata);record.setdefault('serial_profile','feedback-1')
-            self.serial_accepted+=1;record['serial_result']='accepted';record['accepted_bytes']=accepted
-            if (self.drive_link is not None and isinstance(action,ForwardStop) and self.machine.active_app=='manual' and
-                (self._manual_activation is None or self._manual_activation['generation']!=action.generation)):
-                pending=self.authority.value.get('pending') or {}
-                if pending.get('deadline_ms'):
-                    self._manual_activation=dict(generation=action.generation,deadline_ms=pending['deadline_ms'],ready=False,
-                        session=(record.get('pi_session'),record.get('device_session')),driver=pending.get('manual_session'),
-                        first_stop=record.get('command_sequence',2**64),kind='observed_stop')
+            self._accept_submission(action, record, accepted)
+        except PendingStop as pending:
+            self._defer_stop(pending.submission, action, record)
+            return
         except (SinkError,OSError) as error:
             serial_error=error;cause=error.__cause__ or error
             record['failure_cause']={'cause_type':type(cause).__name__,'errno':getattr(cause,'errno',None)}
@@ -341,7 +396,7 @@ class VerifiedGatewayRunner(GatewayRunner):
 
     def _emit(self,actions):
         for action in actions:
-            if isinstance(action,(ForwardDrive,ForwardStop)):self._submit(action)
+            if isinstance(action,(ForwardDrive,ForwardStop)):self._submit(action,wait_for_stop=False)
             elif isinstance(action,PublishControl):self._publish_control(action.payload,self._clock())
             elif isinstance(action,PublishEvent):
                 if not self._client.connected:
@@ -383,6 +438,7 @@ class VerifiedGatewayRunner(GatewayRunner):
             else:super()._emit([action])
 
     def run_once(self,timeout_s=.005):
+        self._finish_stop()
         if self.drive_link is not None:self.drive_link.tick()
         import queue
         try:first=self._queue.get(timeout=timeout_s) if timeout_s>0 else self._queue.get_nowait()
@@ -416,4 +472,6 @@ class VerifiedGatewayRunner(GatewayRunner):
     def shutdown(self):
         try:
             if self.machine:self._submit(ForwardStop(self.machine.generation))
-        finally:self._sink.close()
+        finally:
+            self._sink.close()
+            self._finish_stop()
