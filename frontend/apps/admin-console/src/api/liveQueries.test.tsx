@@ -5,7 +5,8 @@ import { ToastProvider } from '@xenova/ui';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LiveDataAlert, LiveDataAlertHost } from '../layout/LiveDataAlert';
 import { useNow } from '../useNow';
-import { useTelemetryHeartbeat, useVms } from './queries';
+import { useMetrics, useTelemetryHeartbeat, useVms } from './queries';
+import { memoryFixture } from '../domain/memoryContractFixtures';
 import type { VmListResponse } from './types';
 import { loadVmList } from './vmListCache';
 
@@ -83,6 +84,55 @@ afterEach(() => {
 });
 
 describe('실시간 조회 실패', () => {
+  it.each([false, true])(
+    '메트릭의 마지막 응답 유지는 명시 선택=%s일 때만 적용하고 오류·수신 시각을 보존한다',
+    async (keepLastData) => {
+      const backend = { online: true, hold: null as Promise<void> | null };
+      const sample = memoryFixture('ram-committed', Date.now() - 1000);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          if (backend.hold) await backend.hold;
+          return backend.online
+            ? Response.json({ items: [sample] })
+            : Response.json(BOARD_DOWN, { status: 502 });
+        }),
+      );
+      const { result } = renderHook(
+        () => {
+          const { data, isError, error, refetch } = useMetrics(sample.vm_id, true, 1, 60_000, {
+            keepLastData,
+          });
+          return { data, isError, error, refetch };
+        },
+        { wrapper: wrapper() },
+      );
+      await waitFor(() => expect(result.current.data?.items).toHaveLength(1));
+      const receivedAt = result.current.data!.items[0]!.received_at;
+      backend.online = false;
+      await act(() => result.current.refetch());
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.error).toBeTruthy();
+      if (keepLastData) expect(result.current.data!.items[0]!.received_at).toBe(receivedAt);
+      else expect(result.current.data).toBeUndefined();
+
+      const release = holdResponses(backend);
+      let pending: ReturnType<typeof result.current.refetch> | undefined;
+      act(() => {
+        pending = result.current.refetch();
+      });
+      expect(result.current.isError).toBe(true);
+      if (keepLastData) expect(result.current.data!.items[0]!.received_at).toBe(receivedAt);
+      backend.online = true;
+      await act(async () => {
+        release();
+        await pending;
+      });
+      await waitFor(() => expect(result.current.isError).toBe(false));
+      expect(result.current.data!.items[0]!.received_at).toBe(receivedAt);
+    },
+  );
+
   it('VM 목록 조회가 실패하면 이전 목록을 지우고 저장해 둔 목록도 지운다', async () => {
     const backend = stubBackend();
     const { result } = renderHook(() => useVmsInRender(), { wrapper: wrapper() });

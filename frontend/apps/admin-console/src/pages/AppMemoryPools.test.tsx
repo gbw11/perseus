@@ -72,8 +72,13 @@ describe('app memory panels', () => {
     expect(maps.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
     expect(maps.getByText(/원 관측 약 1초 전/)).toBeInTheDocument();
     const timers = vi.getTimerCount();
+    act(() => vi.advanceTimersByTime(6000));
+    expect(maps.getByText('50.0%')).toBeInTheDocument();
+    expect(maps.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
+    expect(maps.getByText('관측 만료 · 최근 관측값')).toBeInTheDocument();
+    expect(maps.getByText('관측 당시 여유')).toBeInTheDocument();
     act(() => {
-      vi.advanceTimersByTime(61_000);
+      vi.advanceTimersByTime(55_000);
     });
     expect(maps.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
     expect(maps.getByText('최근 60초 표본 없음')).toBeInTheDocument();

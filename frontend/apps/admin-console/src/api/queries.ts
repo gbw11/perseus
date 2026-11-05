@@ -178,8 +178,14 @@ export function useEvents(params: { vm_id?: string; type?: string; severity?: st
   );
 }
 
-/** 최근 n 분 동안 백엔드가 수신한 VM 메트릭 */
-export function useMetrics(vmId: string, enabled: boolean, minutes = 5, pollMs = LIVE_POLL_MS) {
+/** 최근 n 분 이력. keepLastData는 조회 오류와 원 표본 만료를 직접 표시하는 관측 화면에서만 쓴다. */
+export function useMetrics(
+  vmId: string,
+  enabled: boolean,
+  minutes = 5,
+  pollMs = LIVE_POLL_MS,
+  { keepLastData = false }: { keepLastData?: boolean } = {},
+) {
   return useWithoutStaleData(
     useQuery({
       queryKey: keys.metrics(vmId, minutes),
@@ -193,6 +199,7 @@ export function useMetrics(vmId: string, enabled: boolean, minutes = 5, pollMs =
       enabled,
       refetchInterval: pollMs,
     }),
+    keepLastData,
   );
 }
 
