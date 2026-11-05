@@ -892,7 +892,7 @@ button.chip:hover:not(.chipOn) {
 }
 .statusLine {
   display: grid;
-  grid-template-columns: 6rem minmax(0, 1fr) auto;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--x-space-2);
   min-height: 24px;
@@ -1027,11 +1027,12 @@ button.chip:hover:not(.chipOn) {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--x-space-4);
-  align-items: stretch;
+  /* VM별 상세 길이가 달라도 다른 카드에 빈 영역을 만들지 않는다. */
+  align-items: start;
 }
 .memoryVmCard {
   min-width: 0;
-  height: 100%;
+  height: auto;
   border-top: 4px solid var(--vm-accent);
 }
 .memoryVmTitle {
@@ -1248,6 +1249,39 @@ button.chip:hover:not(.chipOn) {
 .memoryChartBlock + .poolSummaryGrid {
   margin-top: var(--x-space-3);
 }
+.counterGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--x-space-2);
+  margin-top: var(--x-space-3);
+}
+.counterItem {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface-2);
+}
+.counterItem span,
+.counterItem small {
+  overflow: hidden;
+  color: var(--x-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.counterItem strong {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+}
+.counterItem[data-active='true'] {
+  border-color: color-mix(in srgb, var(--x-recovering) 55%, var(--x-border));
+}
+.counterItem[data-active='true'] strong {
+  color: var(--x-recovering);
+}
 .memoryObservation {
   margin-top: var(--x-space-2);
   padding: 9px var(--x-space-3);
@@ -1376,11 +1410,8 @@ button.chip:hover:not(.chipOn) {
 }
 .appMemoryGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
-  gap: var(--x-space-3);
-}
-.memoryVmGrid.memoryOverviewGrid {
   grid-template-columns: minmax(0, 1fr);
+  gap: var(--x-space-3);
 }
 .memoryGroup {
   margin-top: var(--x-space-4);
@@ -1407,18 +1438,13 @@ button.chip:hover:not(.chipOn) {
   color: var(--x-text-muted);
 }
 .memorySharedNetwork {
-  grid-column: span 2;
+  grid-column: 1 / -1;
 }
 .managedRamSection {
   margin-bottom: var(--x-space-4);
 }
 .managedRamNotice {
   grid-column: 1 / -1;
-}
-@media (max-width: 700px) {
-  .memorySharedNetwork {
-    grid-column: auto;
-  }
 }
 .appMemoryPool {
   min-width: 0;

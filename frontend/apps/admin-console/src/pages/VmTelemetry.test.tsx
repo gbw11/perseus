@@ -269,7 +269,9 @@ describe('VM telemetry dashboard', () => {
         '50',
       );
       expect(screen.queryByRole('progressbar', { name: `${name} VM 메모리 사용률` })).not.toBeInTheDocument();
-      expect(screen.getByRole('region', { name: `${name} 앱 버퍼 점유` })).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: `${name} 앱 버퍼 점유` })).toBeVisible();
+      for (const group of ['자동', '공통', '수동'])
+        expect(screen.getByRole('region', { name: `${name} ${group} 메모리` })).toBeVisible();
     }
     expect(
       await screen.findByRole('img', { name: 'interaction 메모리 사용률 최근 5분 그래프' }),

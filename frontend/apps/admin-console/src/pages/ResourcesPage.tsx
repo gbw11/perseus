@@ -223,7 +223,7 @@ function MemoryDashboard({
 
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
 
-      <div className={`${styles.memoryVmGrid} ${styles.memoryOverviewGrid}`}>
+      <div className={styles.memoryVmGrid}>
         {vms.map((vm) =>
           vm.guest_kind === 'zephyr' ? (
             <MemoryVmPanel key={vm.vm_id} vm={vm} drive={drive} />
@@ -270,10 +270,10 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
       {(metrics.error || heapMetrics.error) && (
         <MetricErrorNotice detail="최근 관측 이력을 표시하며, 만료된 현재값은 비웁니다." />
       )}
+      <ManagedRamSummary vmId={vm.vm_id} vmName={vm.name} samples={samples} />
       <p className={styles.dim}>
         VM 구성 {vm.memory_mib.toLocaleString('ko-KR')} MiB · 관리 RAM과 내부 버퍼 점유를 분리합니다.
       </p>
-      <ManagedRamSummary vmId={vm.vm_id} vmName={vm.name} samples={samples} />
       <AppMemoryPools vmId={vm.vm_id} vmName={vm.name} samples={samples}>
         <SharedMemoryPanels
           vmName={vm.name}
