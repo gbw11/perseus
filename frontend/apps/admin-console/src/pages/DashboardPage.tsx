@@ -493,14 +493,9 @@ export function DashboardPage() {
         </div>
       </header>
 
-      <section className={styles.overviewSummary} aria-label="주행 및 연결 요약">
+      <section className={styles.overviewSummary} aria-label="주행 및 관측 요약">
         <OverviewSummaryItem label="DRIVE MODE" value={control?.mode ? MODE_LABEL[control.mode] : '미확인'} />
         <OverviewSummaryItem label="CONTROL AUTHORITY" value={authority} />
-        <OverviewSummaryItem
-          label="상태 스트림"
-          value={socket === 'open' ? 'Connected' : socket === 'connecting' ? 'Connecting' : 'Disconnected'}
-          tone={socket === 'open' ? 'ok' : socket === 'connecting' ? 'recovering' : 'fault'}
-        />
         <OverviewSummaryItem label="LAST OBSERVED" value={overviewObserved(vms.data?.observed_at)} />
       </section>
 
@@ -520,6 +515,7 @@ export function DashboardPage() {
             vm={vm}
             drive={drive}
             socket={socket}
+            vmStatusError={vms.isError}
             latestEvent={overviewLatestEvent(events.data?.items, vm.vm_id)}
           />
         ))}
@@ -537,20 +533,49 @@ function OverviewSummaryItem({ label, value, tone }: { label: string; value: str
   );
 }
 
+const AGENT_LINK_TONE = {
+  ONLINE: 'ok',
+  STALE: 'recovering',
+  OFFLINE: 'fault',
+  UNKNOWN: 'stopped',
+} satisfies Record<NonNullable<Vm['agent_status']>, Health>;
+
 function VmOverviewCard({
   vm,
   drive,
   socket,
+  vmStatusError,
   latestEvent,
 }: {
   vm: Vm;
   drive: DriveState | null;
   socket: SocketState;
+  vmStatusError: boolean;
   latestEvent: VmEvent | undefined;
 }) {
   const role = roleOf(vm, drive);
   const metrics = useMetrics(vm.vm_id, true);
-  const publisher = publisherObservation(vm.vm_id, useTelemetryHeartbeat(vm.vm_id));
+  const linux = vm.guest_kind === 'linux';
+  const heartbeat = useTelemetryHeartbeat(linux ? '' : vm.vm_id);
+  const publisher = publisherObservation(vm.vm_id, heartbeat);
+  // LINK tracks heartbeat freshness; publisher collection health stays in the detailed diagnostics.
+  const telemetryFresh = !heartbeat.isError && !heartbeat.isPending && publisher.report?.status === 'FRESH';
+  const agent = vm.agent_status ?? 'UNKNOWN';
+  const linkLabel = linux
+    ? vmStatusError
+      ? '조회 불가'
+      : AGENT_LABEL[agent]
+    : telemetryFresh
+      ? '연결됨'
+      : publisher.label;
+  const linkTone = linux
+    ? vmStatusError
+      ? 'fault'
+      : AGENT_LINK_TONE[agent]
+    : telemetryFresh
+      ? 'ok'
+      : publisher.tone;
+  const telemetryAge = !heartbeat.isError && !heartbeat.isPending ? publisher.report?.age_ms : null;
   const samples = metrics.data?.items ?? [];
   const cpu = latest(samples, cpuPercentOf);
   const memory = latest(samples, (sample) => memoryPercentOf(sample, vm));
@@ -580,17 +605,14 @@ function VmOverviewCard({
 
       <div className={styles.vmStatusRows}>
         <OverviewStatusLine label="VM" value={STATE_LABEL[vm.state]} tone={STATE_HEALTH[vm.state]} />
-        <OverviewStatusLine label="앱 상태" value={overviewAppSignal(apps, 'phaseLabel')} />
-        <OverviewStatusLine label="앱 heartbeat" value={overviewAppSignal(apps, 'heartbeatLabel')} />
+        <OverviewStatusLine label="APP" labelTitle="앱 상태" value={overviewAppSignal(apps, 'phaseLabel')} />
         <OverviewStatusLine
-          label="수집기 (v2)"
-          value={publisher.label}
-          tone={publisher.tone}
-          detail={publisher.report?.age_ms != null ? ago(publisher.report.age_ms) : undefined}
+          label="LINK"
+          labelTitle={linux ? 'Linux Agent heartbeat (v1)' : 'Zephyr Telemetry heartbeat (v2)'}
+          value={linkLabel}
+          tone={linkTone}
+          detail={linux ? 'Agent' : `Telemetry${telemetryAge == null ? '' : ` · ${ago(telemetryAge)}`}`}
         />
-        {vm.guest_kind === 'linux' && (
-          <OverviewStatusLine label="Linux Agent" value={AGENT_LABEL[vm.agent_status ?? 'UNKNOWN']} />
-        )}
       </div>
 
       <div className={styles.resourceBlock}>
@@ -616,18 +638,20 @@ function VmOverviewCard({
 
 function OverviewStatusLine({
   label,
+  labelTitle,
   value,
   tone,
   detail,
 }: {
   label: string;
+  labelTitle?: string;
   value: string;
   tone?: Health;
   detail?: string;
 }) {
   return (
     <div className={styles.statusLine} data-tone={tone}>
-      <span>{label}</span>
+      <span title={labelTitle}>{label}</span>
       <strong>
         <i aria-hidden="true" /> {value}
       </strong>
