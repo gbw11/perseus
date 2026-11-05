@@ -1,0 +1,1919 @@
+{
+  "issue": "S15P31E110-253",
+  "date": "2026-11-05",
+  "base_platform": "d459ee5",
+  "branch": "feat/platform/S15P31E110-253-normal-deployment",
+  "prior_mr": 431,
+  "deployment": {
+    "configured": true,
+    "platform": "d459ee5",
+    "changed_modules": [
+      "config.py",
+      "app_reports.py",
+      "state.py",
+      "policy.py"
+    ],
+    "created_files": [
+      "/etc/xenova/display-bindings.json",
+      "/etc/xenova/display.env",
+      "/etc/systemd/system/xenova-dom0-manager.service.d/253-observations.conf"
+    ],
+    "mqtt_credentials_reused": true,
+    "registry_checked": true,
+    "runtime_restarted": false
+  },
+  "follower": {
+    "follower_candidate_deployed": true,
+    "changed_modules": [
+      "main.py",
+      "shared.py"
+    ],
+    "only_display_code_changed": true,
+    "feed_restart_required": true
+  },
+  "native_source_check": {
+    "processes": [
+      {
+        "pid": 85455,
+        "read_fork": "not configured",
+        "observations_path": "/run/xenova/vm-observations.json"
+      }
+    ],
+    "hashes": {
+      "xenova_management.py": "eaedf7c76ed276e5487b89dbd5b353baac7463c166915bc20ea890938de07762",
+      "xenova_execution.py": "9b4cb13aa257ae1079abfd2aa4c88020b8f17df0c3242fb06dfe278721f37e79",
+      "xenova_runtime.py": "eb7c4ee59aad54a31fefb95a8cac1277b4bc4a04ea1a85998e14bc2b224d44b4"
+    }
+  },
+  "native_single_query_profile": {
+    "diagnostic_only": true,
+    "calls": 1,
+    "execute": false,
+    "elapsed_s": 1.4967258239994408,
+    "ok": true,
+    "error_code": null,
+    "views": [
+      {
+        "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+        "state": "blocked",
+        "observed_age_ms": 669
+      },
+      {
+        "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "state": "blocked",
+        "observed_age_ms": 576
+      },
+      {
+        "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+        "state": "blocked",
+        "observed_age_ms": 444
+      }
+    ],
+    "trace": {
+      "elapsed_seconds": 1.4853633299999274,
+      "summary": {
+        "platform.registry": {
+          "calls": 2,
+          "errors": 0,
+          "inclusive_seconds": 0.12258115999975416,
+          "exclusive_seconds": 0.12258115999975416
+        },
+        "manager.registry-state": {
+          "calls": 6,
+          "errors": 0,
+          "inclusive_seconds": 0.004216468999402423,
+          "exclusive_seconds": 0.004216468999402423
+        },
+        "execution.publish_observation": {
+          "calls": 6,
+          "errors": 0,
+          "inclusive_seconds": 0.22859688000153255,
+          "exclusive_seconds": 0.22859688000153255
+        },
+        "external.command": {
+          "calls": 8,
+          "errors": 0,
+          "inclusive_seconds": 0.8085055179999472,
+          "exclusive_seconds": 0.8085055179999472
+        },
+        "storage.file_write": {
+          "calls": 3,
+          "errors": 0,
+          "inclusive_seconds": 0.0017890990002342733,
+          "exclusive_seconds": 0.0017890990002342733
+        },
+        "storage.file_fsync": {
+          "calls": 3,
+          "errors": 0,
+          "inclusive_seconds": 0.0002474799994161003,
+          "exclusive_seconds": 0.0002474799994161003
+        },
+        "storage.replace": {
+          "calls": 3,
+          "errors": 0,
+          "inclusive_seconds": 0.0052141860005576746,
+          "exclusive_seconds": 0.0052141860005576746
+        },
+        "storage.directory_fsync": {
+          "calls": 3,
+          "errors": 0,
+          "inclusive_seconds": 0.0001926100003402098,
+          "exclusive_seconds": 0.0001926100003402098
+        },
+        "storage.atomic_write": {
+          "calls": 3,
+          "errors": 0,
+          "inclusive_seconds": 0.017508043999441725,
+          "exclusive_seconds": 0.010064668998893467
+        },
+        "execution.observe_many": {
+          "calls": 1,
+          "errors": 0,
+          "inclusive_seconds": 1.24666463199992,
+          "exclusive_seconds": 0.2472372490010457
+        },
+        "manager.view": {
+          "calls": 3,
+          "errors": 0,
+          "inclusive_seconds": 0.020629281999390514,
+          "exclusive_seconds": 0.020629281999390514
+        },
+        "read.round": {
+          "calls": 1,
+          "errors": 0,
+          "inclusive_seconds": 1.4714941130005172,
+          "exclusive_seconds": 0.022219511000002967
+        },
+        "manager.call": {
+          "calls": 1,
+          "errors": 0,
+          "inclusive_seconds": 1.48502623999957,
+          "exclusive_seconds": 0.013532126999052707
+        }
+      },
+      "command_summary": {
+        "xl.list": {
+          "calls": 2,
+          "errors": 0,
+          "inclusive_seconds": 0.20715226999982406
+        },
+        "xenova-domain-identity": {
+          "calls": 6,
+          "errors": 0,
+          "inclusive_seconds": 0.6013532480001231
+        }
+      },
+      "dropped_entries": 0
+    }
+  },
+  "writer_baseline": {
+    "samples": 118,
+    "min_age_ms": 497,
+    "mean_age_ms": 2040.2,
+    "p95_age_ms": 3975,
+    "max_age_ms": 5004,
+    "unavailable_or_expired_samples": 18,
+    "errors": [],
+    "load": "10.39 8.77 8.70 10/198 87314"
+  },
+  "writer_read_fork": {
+    "samples": 118,
+    "min_age_ms": 390,
+    "mean_age_ms": 1449.3,
+    "p95_age_ms": 3397,
+    "max_age_ms": 4528,
+    "unavailable_or_expired_samples": 7,
+    "errors": [],
+    "load": "10.83 10.50 9.63 6/194 93837"
+  },
+  "api_baseline": {
+    "samples": 25,
+    "xen_status_counts": {
+      "fresh": 15,
+      "stale": 5,
+      "disconnected": 5
+    },
+    "lifecycle_current_count_counts": {
+      "4": 15,
+      "0": 10
+    },
+    "http_200_samples": 25,
+    "errors": [],
+    "all_gateway_safe_stop": true,
+    "all_expired_decisions_fail_closed": true,
+    "samples_detail": [
+      {
+        "at_mono": 7348.984,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1676,
+        "shared_age_ms": 1949,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7349.988,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2462,
+        "shared_age_ms": 2651,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7350.989,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1354,
+        "shared_age_ms": 1540,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7352.002,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2361,
+        "shared_age_ms": 920,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7353.003,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1568,
+        "shared_age_ms": 1957,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7354.008,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1094,
+        "shared_age_ms": 1212,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7355.008,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2058,
+        "shared_age_ms": 2256,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7356.008,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3065,
+        "shared_age_ms": 1229,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7357.01,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2269,
+        "shared_age_ms": 2548,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7358.012,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3150,
+        "shared_age_ms": 1322,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7359.017,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2285,
+        "shared_age_ms": 2606,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7360.017,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3225,
+        "shared_age_ms": 3458,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7361.018,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "disconnected",
+        "xen_age_ms": 4281,
+        "shared_age_ms": 3586,
+        "shared_status": "unavailable",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7362.021,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "disconnected",
+        "xen_age_ms": 5289,
+        "shared_age_ms": 4567,
+        "shared_status": "unavailable",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7363.024,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "disconnected",
+        "xen_age_ms": 6236,
+        "shared_age_ms": 5419,
+        "shared_status": "unavailable",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7364.024,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "disconnected",
+        "xen_age_ms": 7260,
+        "shared_age_ms": 1808,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7365.026,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2436,
+        "shared_age_ms": 2637,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7366.026,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3491,
+        "shared_age_ms": 1623,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7367.032,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2492,
+        "shared_age_ms": 2703,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7368.039,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3413,
+        "shared_age_ms": 1176,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7369.039,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1912,
+        "shared_age_ms": 2247,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7370.039,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2846,
+        "shared_age_ms": 3162,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7371.039,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "disconnected",
+        "xen_age_ms": 3785,
+        "shared_age_ms": 4123,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7372.042,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1002,
+        "shared_age_ms": 1231,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7373.042,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2077,
+        "shared_age_ms": 2276,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      }
+    ]
+  },
+  "api_read_fork": {
+    "samples": 25,
+    "xen_status_counts": {
+      "stale": 4,
+      "disconnected": 1,
+      "fresh": 20
+    },
+    "lifecycle_current_count_counts": {
+      "0": 5,
+      "4": 19,
+      "1": 1
+    },
+    "http_200_samples": 25,
+    "errors": [],
+    "all_gateway_safe_stop": true,
+    "all_expired_decisions_fail_closed": true,
+    "samples_detail": [
+      {
+        "at_mono": 7659.983,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3042,
+        "shared_age_ms": 3375,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7660.983,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "disconnected",
+        "xen_age_ms": 4055,
+        "shared_age_ms": 1133,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7661.988,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1830,
+        "shared_age_ms": 2362,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7662.992,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2906,
+        "shared_age_ms": 837,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7663.993,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1405,
+        "shared_age_ms": 1820,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7664.998,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2384,
+        "shared_age_ms": 2722,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7666.0,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3324,
+        "shared_age_ms": 1376,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7667.003,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2283,
+        "shared_age_ms": 694,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7668.004,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1461,
+        "shared_age_ms": 1759,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7669.004,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2473,
+        "shared_age_ms": 810,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7670.008,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1537,
+        "shared_age_ms": 1722,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7671.013,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2492,
+        "shared_age_ms": 1042,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7672.013,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1670,
+        "shared_age_ms": 1904,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7673.014,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2655,
+        "shared_age_ms": 1295,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7674.016,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1868,
+        "shared_age_ms": 2150,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7675.017,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2908,
+        "shared_age_ms": 3097,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7676.024,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1776,
+        "shared_age_ms": 2101,
+        "shared_status": "ok",
+        "lifecycle_current_count": 1,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_waiting",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_waiting",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7677.026,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2841,
+        "shared_age_ms": 2990,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7678.033,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3738,
+        "shared_age_ms": 1836,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7679.034,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2453,
+        "shared_age_ms": 2779,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7680.035,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3419,
+        "shared_age_ms": 1495,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7681.035,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2329,
+        "shared_age_ms": 2534,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7682.045,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1333,
+        "shared_age_ms": 1648,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7683.048,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2410,
+        "shared_age_ms": 979,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 7684.048,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1794,
+        "shared_age_ms": 2110,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      }
+    ]
+  },
+  "api_follower_candidate_with_two_browser_consumers": {
+    "samples": 25,
+    "xen_status_counts": {
+      "fresh": 19,
+      "stale": 6
+    },
+    "lifecycle_current_count_counts": {
+      "4": 17,
+      "0": 6,
+      "3": 1,
+      "2": 1
+    },
+    "http_200_samples": 25,
+    "errors": [],
+    "all_gateway_safe_stop": true,
+    "all_expired_decisions_fail_closed": true,
+    "samples_detail": [
+      {
+        "at_mono": 8487.102,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1058,
+        "shared_age_ms": 1634,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8488.122,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1763,
+        "shared_age_ms": 2240,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8489.122,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2895,
+        "shared_age_ms": 1341,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8490.123,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2272,
+        "shared_age_ms": 2803,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8491.125,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3076,
+        "shared_age_ms": 3356,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8492.137,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1594,
+        "shared_age_ms": 1891,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8493.143,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2726,
+        "shared_age_ms": 3138,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8494.146,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3313,
+        "shared_age_ms": 3480,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8495.154,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 5028,
+        "shared_age_ms": 5499,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8496.394,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 5664,
+        "shared_age_ms": 6096,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8497.395,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1723,
+        "shared_age_ms": 2141,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8498.397,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2792,
+        "shared_age_ms": 3074,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8499.406,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 3678,
+        "shared_age_ms": 3891,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8500.417,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1917,
+        "shared_age_ms": 2441,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8501.42,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2878,
+        "shared_age_ms": 3008,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8502.425,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1272,
+        "shared_age_ms": 1807,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8503.434,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2367,
+        "shared_age_ms": 2906,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8504.435,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1406,
+        "shared_age_ms": 1769,
+        "shared_status": "ok",
+        "lifecycle_current_count": 3,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_waiting",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8505.436,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2989,
+        "shared_age_ms": 4037,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8507.307,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "stale",
+        "xen_age_ms": 4250,
+        "shared_age_ms": 2046,
+        "shared_status": "ok",
+        "lifecycle_current_count": 0,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "stale",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "stale",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "stale"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8508.307,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2574,
+        "shared_age_ms": 928,
+        "shared_status": "ok",
+        "lifecycle_current_count": 2,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_waiting",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8509.373,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1557,
+        "shared_age_ms": 2195,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8510.629,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2660,
+        "shared_age_ms": 1307,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8511.813,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 1933,
+        "shared_age_ms": 2236,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      },
+      {
+        "at_mono": 8512.813,
+        "http": 200,
+        "mqtt": true,
+        "xen_status": "fresh",
+        "xen_age_ms": 2568,
+        "shared_age_ms": 3295,
+        "shared_status": "ok",
+        "lifecycle_current_count": 4,
+        "agent_status": "fresh",
+        "decisions": {
+          "de113a23-d80e-4333-94b8-788babe0e41e": "app_preparing",
+          "5002a22d-63d6-4f7a-9106-193b14499898": "app_preparing",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": "app_waiting"
+        },
+        "drive_source": "fresh",
+        "drive_mode": "SAFE_STOP",
+        "active_vm": null
+      }
+    ]
+  },
+  "normal_feed_restart": {
+    "before_epoch": "2b4cbd2e-3091-4388-9ca9-b0c40a70b84c",
+    "after_epoch": "acd5fb4e-fb0f-4725-b931-2f4c209d710c",
+    "changed": true
+  },
+  "websocket": {
+    "handshake": 101,
+    "snapshots": [
+      {
+        "type": "display.state",
+        "sequence": 3,
+        "mqtt_connected": true,
+        "vm_ids": [
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4"
+        ],
+        "received_lifecycle_apps": 4,
+        "drive_mode": "SAFE_STOP"
+      },
+      {
+        "type": "display.state",
+        "sequence": 4,
+        "mqtt_connected": true,
+        "vm_ids": [
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4"
+        ],
+        "received_lifecycle_apps": 4,
+        "drive_mode": "SAFE_STOP"
+      }
+    ]
+  },
+  "web_assets": {
+    "index_bytes": 501,
+    "title": [
+      "Xenova VM 화면"
+    ],
+    "scripts": [
+      "/assets/index-esvup8yl.js"
+    ],
+    "styles": [
+      "./favicon.png",
+      "/assets/index-DolEQKKr.css"
+    ],
+    "html_prefix": "<!doctype html>\n<html lang=\"ko\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, viewport-fit=cover\" />\n    <link rel=\"icon\" type=\"image/png\" href=\"./favicon.png\" />\n    <title>Xenova VM 화면</title>\n    <script type=\"module\" crossorigin src=\"/assets/index-esvup8yl.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/assets/index-DolEQKKr.css\">\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>\n",
+    "assets_count": 6
+  },
+  "web_http": {
+    "/display/monitor-1": {
+      "status": 200,
+      "length_header": "501",
+      "bytes": 501,
+      "type": "text/html; charset=utf-8",
+      "sha256": "97b749f5440eab7588726baa62594259eda0f3327b01d356b261ecb885dbac67"
+    },
+    "/assets/index-esvup8yl.js": {
+      "status": 200,
+      "length_header": "479967",
+      "bytes": 479967,
+      "type": "text/javascript; charset=utf-8",
+      "sha256": "cb15a6402cc2c9460773d84a0812d51a24959f9bea7c6c61c9206e2827b8eb5f"
+    },
+    "/api/v1/display/presentation": {
+      "status": 200,
+      "length_header": "10753",
+      "bytes": 10753,
+      "type": "application/json",
+      "sha256": "b1f360a87e2882c5a6f09b78b75ce9d80f49fae2ed5151fa6e532206179f096a"
+    }
+  },
+  "browser_observations": {
+    "transport": "temporary PC loopback viewer -> SSH -> board normal feed 127.0.0.1:8082",
+    "service_token_in_browser": false,
+    "monitor_1": [
+      "드라이버 계기판",
+      "표시 연결됨",
+      "안전 정지 모드",
+      "SAFE_STOP",
+      "속도 데이터 수신 대기",
+      "배터리 데이터 수신 대기"
+    ],
+    "monitor_2": [
+      "인포테인먼트 · 게스트 데이터",
+      "표시 연결됨",
+      "VM1 주 구동 켜짐",
+      "VM2 백업 · 미러링 켜짐",
+      "VM3 인터랙션 켜짐",
+      "앱 보고 수신 · 일부 준비 대기",
+      "설정 OS: Zephyr · OS 보고 미수신"
+    ],
+    "physical_hdmi_test": false
+  },
+  "ssh_restoration": {
+    "ssh_original_hash_restored": true,
+    "temporary_port_removed": true,
+    "sshd_config_test": true
+  },
+  "final": {
+    "source_matches_deployment_manifest": true,
+    "unrelated_display_sources_unchanged": true,
+    "config_matches_manifest": true,
+    "private_permissions": {
+      "/etc/xenova/display.env": "0o600",
+      "/etc/xenova/display-bindings.json": "0o600",
+      "/etc/xenova/display-253-receiver": "0o700"
+    },
+    "units": {
+      "xenova-dom0-manager.service": {
+        "Id": "xenova-dom0-manager.service",
+        "ActiveState": "active",
+        "MainPID": "92805"
+      },
+      "xenova-display-feed.service": {
+        "Id": "xenova-display-feed.service",
+        "ActiveState": "active",
+        "MainPID": "97046"
+      },
+      "mosquitto.service": {
+        "Id": "mosquitto.service",
+        "ActiveState": "active",
+        "MainPID": "820"
+      },
+      "xenova-gateway.service": {
+        "Id": "xenova-gateway.service",
+        "ActiveState": "active",
+        "MainPID": "1487"
+      },
+      "xenova-recovery-worker.service": {
+        "Id": "xenova-recovery-worker.service",
+        "ActiveState": "active",
+        "MainPID": "1489"
+      },
+      "xenova-runtime-log-collector.service": {
+        "Id": "xenova-runtime-log-collector.service",
+        "ActiveState": "active",
+        "MainPID": "516"
+      },
+      "tailscaled.service": {
+        "Id": "tailscaled.service",
+        "ActiveState": "active",
+        "MainPID": "605"
+      }
+    },
+    "loaded": {
+      "xenova-dom0-manager.service": {
+        "observation_path": "/run/xenova/vm-observations.json",
+        "read_fork": "1",
+        "console_enabled": true,
+        "rss": [
+          "VmRSS:\t   72064 kB",
+          "Threads:\t4"
+        ]
+      },
+      "xenova-display-feed.service": {
+        "observation_path": "/run/xenova/vm-observations.json",
+        "read_fork": "",
+        "console_enabled": false,
+        "rss": [
+          "VmRSS:\t   60848 kB",
+          "Threads:\t6"
+        ]
+      }
+    },
+    "feed_enabled": "enabled",
+    "vm_list_attempts": [
+      200
+    ],
+    "vms": [
+      {
+        "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+        "state": "running"
+      },
+      {
+        "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "state": "running"
+      },
+      {
+        "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+        "state": "running"
+      }
+    ],
+    "shared": {
+      "host_boot_id": "62412d0a-e30e-459b-8269-ca49cbe2aeed",
+      "producer_epoch": "3b73d1e4-e629-41c9-bac3-e451f66495c3",
+      "status": "ok",
+      "domains": [
+        {
+          "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "state": "running",
+          "vcpus": 1,
+          "memory_mib": 512,
+          "domid": 1,
+          "name": "Debian Interaction",
+          "observation_id": "bdd2c4da-669a-4ab6-aa6e-922290bc77ff"
+        },
+        {
+          "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+          "state": "running",
+          "vcpus": 1,
+          "memory_mib": 16,
+          "domid": 2,
+          "name": "Zephyr 주행 A",
+          "observation_id": "b3281ee9-4b90-43b0-8255-498cd210e0f0"
+        },
+        {
+          "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+          "state": "running",
+          "vcpus": 1,
+          "memory_mib": 16,
+          "domid": 3,
+          "name": "Zephyr 주행 B",
+          "observation_id": "fde1206f-530b-4d53-af3d-83ba73e031f2"
+        }
+      ]
+    },
+    "gateway": {
+      "owner": "de113a23-d80e-4333-94b8-788babe0e41e",
+      "generation": 1,
+      "mode": "SAFE_STOP",
+      "phase": "DISARMED",
+      "output_permitted": false
+    },
+    "ssh_original_restored": true,
+    "duplicate_exported_credential_removed": true
+  },
+  "local_tests": {
+    "display_suite": {
+      "passed": 416,
+      "skipped": 1
+    },
+    "read_fork_related": {
+      "passed": 7,
+      "deselected": 84
+    }
+  },
+  "candidate_sources": {
+    "main.py": "3ceaa7face26ee4d684b83fdd2e36260558014008b1d4c92d7b70b0b4b287035",
+    "shared.py": "e1e7f00b52ad8606e3f37e67e4dece2b07e36751b67f051acb7e4cd890377b9d"
+  },
+  "limitations": [
+    "Shared source expiry still occurs. No freshness TTL relaxation or extra Xen fallback.",
+    "Short sequential comparison is not a controlled performance benchmark. Final browser-consumer window still contains 6 non-fresh samples out of 25.",
+    "Follower optimization is deployed on board and included in this branch; platform merge and image inclusion require review.",
+    "Actual physical HDMI ports, phone, VM restart, failover and driving output were not tested.",
+    "No actual Zephyr OS inventory or Debian interaction app heartbeat was observed.",
+    "No Jira status change; 253 closeout is deferred pending remaining source-delay/deployment review."
+  ]
+}

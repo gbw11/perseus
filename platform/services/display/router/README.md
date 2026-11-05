@@ -22,6 +22,12 @@ warm profile은 기존 `xenova_mqtt.lifecycle.parse`가 설치되어 있어야 �
 
 [2026-11-05 실제 수신·단절/복귀·API/WS 검증 및 남은 배포 조건](../../../../docs/verification/display-253-warm-reports-20261105.md)을 참조한다.
 
+이후 [정상 서비스 배포·재시작·실제 화면 소비·공유 상태 지연 측정](../../../../docs/verification/display-253-normal-deployment-20261105.md)을 진행했다.
+공유 파일을 사용하는 feed는 250ms마다 변경 여부만 확인하고 새 프레임일 때만 기존 검증기로 읽는다.
+변하지 않은 파일의 관측 시각을 갱신하지 않으므로 기존 3초 만료는 그대로 적용된다.
+일반 읽기 요청의 fork 옵션은 하위 플랫폼의 동시 읽기 지원을 검증한 설치에서만 사용한다.
+아래 측정에서 공유 관측 만료는 완전히 해소되지 않았으므로 보드 전체 성능 수락으로 간주하지 않는다.
+
 ## 휴대폰 통합 표시 UI (350)
 
 빌드된 vm-screens의 `/display/mobile`은 기존 인증된 presentation API를 한 번 조회해
