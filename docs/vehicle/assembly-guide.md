@@ -262,17 +262,22 @@ flowchart LR
 
 ### 단계 C. ESP32 를 PC 에 연결
 
-1. [Arduino IDE](https://docs.espressif.com/projects/arduino-esp32/en/latest/installing.html) 를 설치하고, 보드 매니저에서 `esp32 by Espressif Systems`(3.x)를 설치한다.
+1. Arduino IDE 와 ESP32 보드 패키지를 설치한다. [Arduino-ESP32 설치 안내](https://docs.espressif.com/projects/arduino-esp32/en/latest/installing.html)의 "Installing using Arduino IDE" 만 따르면 된다. 같은 페이지의 Windows (manual installation)·Linux·macOS 절과 Development release 링크는 쓰지 않는다.
+   1. arduino.cc 에서 Arduino IDE(2.x)를 받아 설치한다.
+   2. File > Preferences 의 Additional boards manager URLs 칸에 Stable 링크 `https://espressif.github.io/arduino-esp32/package_esp32_index.json` 을 넣는다.
+   3. Tools > Board > Boards Manager 에서 `esp32` 를 검색해 **esp32 by Espressif Systems** 를 설치한다. 버전은 3.x 여야 한다(부록 A 는 2.x 에서 컴파일되지 않는다). 이름이 비슷한 "Arduino ESP32 Boards" 는 다른 보드용이다.
+   4. IDE 를 다시 켜고, 설치한 버전을 9.1 에 적는다.
 2. ESP32 핀에는 아무것도 꽂지 않고, Micro USB 케이블로 PC 에만 연결한다.
-3. Windows 장치 관리자 → 포트(COM & LPT)에 `Silicon Labs CP210x … (COMx)` 가 나타나는지 본다.
-   - 없으면 [CP210x 드라이버](https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers)를 설치한다.
-   - 그래도 없으면 케이블이 충전 전용일 수 있으니 다른 케이블로 바꾼다.
+3. Windows 장치 관리자 → 포트(COM & LPT)에 `Silicon Labs CP210x USB to UART Bridge (COMx)` 가 나타나는지 본다.
+   - 기타 장치에 `CP2102 USB to UART Bridge Controller` 로 보이면 보드와 케이블은 정상이고 드라이버만 없는 것이다. [CP210x 드라이버](https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers) 페이지에서 CP210x Universal Windows Driver 를 받아 압축을 푼다. 그 장치를 오른쪽 클릭 → 드라이버 업데이트 → 내 컴퓨터에서 드라이버 찾아보기 → 푼 폴더를 고른다.
+   - 기타 장치에도 보이지 않으면 케이블이 충전 전용일 수 있으니 다른 케이블로 바꾼다.
 4. Arduino IDE 에서 보드는 `ESP32 Dev Module`, 포트는 위의 COMx 로 고른다.
-5. [부록 A](#부록-a-책상-시험용-esp32-스케치) 스케치를 붙여 넣고 업로드한다. `Connecting....` 에서 멈추면 ESP32 의 BOOT 버튼을 누르고 있다가 업로드가 시작되면 뗀다.
-6. 시리얼 모니터를 115200, 줄 끝 "새 줄(Newline)" 로 연다. `i` 를 보내 스케치 버전을 9장에 적는다.
+5. [부록 A](#부록-a-책상-시험용-esp32-스케치) 스케치를 붙여 넣고 ✓(Verify)로 먼저 컴파일한다. `Sketch uses … bytes` 가 나오면 성공이다. 그다음 업로드(→)한다. `Connecting....` 에서 멈추면 ESP32 의 BOOT 버튼을 누르고 있다가 업로드가 시작되면 뗀다.
+6. 시리얼 모니터를 115200, 줄 끝 "새 줄(Newline)" 로 연다. `ready: disarmed` 가 안 보이면 ESP32 의 EN 버튼(리셋)을 한 번 누른다. 그 앞에 나오는 `rst:`·`boot:` 같은 부팅 메시지는 정상이다. `i` 를 보내 스케치 버전을 9장에 적는다.
 
 확인
 
+- [ ] ✓(Verify) 컴파일 성공
 - [ ] 시리얼 모니터에 `ready: disarmed` 가 보인다
 - [ ] `i` 에 스케치 버전이 나온다
 
@@ -598,6 +603,7 @@ flowchart LR
 | 항목 | 값 |
 | --- | --- |
 | 스케치 버전(`i` 출력) | |
+| Arduino-ESP32 버전(보드 매니저) | |
 | 멀티미터 모델 | |
 | 전원공급기 모델 | |
 | 온도계 모델 | |
