@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DriveState } from '../api/drive';
@@ -182,7 +182,7 @@ function fixture(stackSupported = true) {
 
 function renderPage(path = '/dashboard/memory') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const page = render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
@@ -193,26 +193,133 @@ function renderPage(path = '/dashboard/memory') {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...page, client };
 }
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe('VM telemetry dashboard', () => {
-  it('shows scoped app observations and publisher freshness separately on Overview', async () => {
-    fixture();
+  it('shows VM / APP / LINK and uses Agent for Linux and telemetry heartbeat for Zephyr', async () => {
+    const fetch = fixture();
     renderPage('/dashboard/overview');
     const autonomous = within(await screen.findByRole('link', { name: /autonomous/ }));
     expect(autonomous.getByText('대기')).toBeInTheDocument();
-    expect(autonomous.getByText('미수신')).toBeInTheDocument();
-    expect(await autonomous.findByText('수집 중')).toBeInTheDocument();
+    const aLink = within(autonomous.getByTitle('Zephyr Telemetry heartbeat (v2)').parentElement!);
+    expect(await aLink.findByText('연결됨')).toBeInTheDocument();
+    expect(aLink.getByText('Telemetry')).toBeInTheDocument();
+    expect(autonomous.queryByText('앱 HB')).not.toBeInTheDocument();
     const manual = within(screen.getByRole('link', { name: /manual/ }));
-    expect(manual.queryByText('대기')).not.toBeInTheDocument();
-    expect(manual.getByText('관측 만료')).toBeInTheDocument();
-    expect(manual.queryByText('수집 중')).not.toBeInTheDocument();
+    expect(within(manual.getByText('APP').parentElement!).getByText('실행 중')).toBeInTheDocument();
+    expect(await within(manual.getByText('LINK').parentElement!).findByText('미수신')).toBeInTheDocument();
     const linux = within(screen.getByRole('link', { name: /interaction/ }));
-    expect(linux.getByText('Linux Agent')).toBeInTheDocument();
-    expect(linux.getByText('연결됨')).toBeInTheDocument();
-    expect(await linux.findByText('관측 만료')).toBeInTheDocument();
+    const agentLink = within(linux.getByTitle('Linux Agent heartbeat (v1)').parentElement!);
+    expect(agentLink.getByText('연결됨')).toBeInTheDocument();
+    expect(agentLink.getByText('Agent')).toBeInTheDocument();
+    for (const card of [autonomous, manual, linux]) {
+      const rows = card.getByText('VM', { exact: true }).parentElement!.parentElement!.children;
+      expect(Array.from(rows).map((row) => row.firstElementChild?.textContent)).toEqual([
+        'VM',
+        'APP',
+        'LINK',
+      ]);
+    }
+    const summary = within(screen.getByRole('region', { name: '주행 및 관측 요약' }));
+    expect(summary.getByText('DRIVE MODE')).toBeInTheDocument();
+    expect(summary.getByText('CONTROL AUTHORITY')).toBeInTheDocument();
+    expect(summary.getByText('LAST OBSERVED')).toBeInTheDocument();
+    expect(summary.queryByText('상태 스트림')).not.toBeInTheDocument();
+    expect(summary.queryByText('TELEMETRY')).not.toBeInTheDocument();
+    expect(
+      fetch.mock.calls.some(
+        ([url]) => url.includes(VM_IDS.interaction) && url.endsWith('/telemetry/heartbeat'),
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    ['degraded', '수집 저하'],
+    ['stopping', '종료 중'],
+  ])(
+    'keeps a fresh %s publisher connected while retaining detailed collection diagnostics',
+    async (state, label) => {
+      const fetch = fixture();
+      const original = fetch.getMockImplementation()!;
+      fetch.mockImplementation(async (url: string) => {
+        const response = await original(url);
+        if (!url.endsWith(`/vms/${VM_IDS.autonomous}/telemetry/heartbeat`)) return response;
+        return Response.json({
+          ...(await response.json()),
+          publisher_state: state,
+          collection_failures_total: 7,
+        });
+      });
+      const page = renderPage('/dashboard/overview');
+      const card = within(await screen.findByRole('link', { name: /autonomous/ }));
+      const row = card.getByText('LINK').parentElement!;
+      expect(await within(row).findByText('연결됨')).toBeInTheDocument();
+      expect(row).toHaveAttribute('data-tone', 'ok');
+      expect(card.queryByText(label)).not.toBeInTheDocument();
+      page.unmount();
+      renderPage(`/dashboard/vms/${VM_IDS.autonomous}`);
+      const diagnostics = within(await screen.findByRole('region', { name: '텔레메트리 수집기 상태' }));
+      expect(await diagnostics.findByText(label)).toBeInTheDocument();
+      expect(diagnostics.getByText('7')).toBeInTheDocument();
+      expect(screen.getByText('앱 heartbeat · drive')).toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    ['STALE', '관측 만료'],
+    ['UNKNOWN', '미수신'],
+    ['unavailable', '조회 불가'],
+    ['other-vm', '미수신'],
+  ])('keeps Zephyr LINK %s distinct from a live VM and waiting app', async (state, label) => {
+    const fetch = fixture();
+    const original = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (url: string) => {
+      const response = await original(url);
+      if (!url.endsWith(`/vms/${VM_IDS.autonomous}/telemetry/heartbeat`)) return response;
+      if (state === 'unavailable') return Response.json({}, { status: 503 });
+      const report = await response.json();
+      return Response.json(
+        state === 'other-vm' ? { ...report, vm_id: VM_IDS.manual } : { ...report, status: state },
+      );
+    });
+    renderPage('/dashboard/overview');
+    const card = within(await screen.findByRole('link', { name: /autonomous/ }));
+    expect(within(card.getByText('VM').parentElement!).getByText('실행 중')).toBeInTheDocument();
+    expect(within(card.getByText('APP').parentElement!).getByText('대기')).toBeInTheDocument();
+    const link = within(card.getByText('LINK').parentElement!);
+    expect(await link.findByText(label)).toBeInTheDocument();
+    expect(link.queryByText('연결됨')).not.toBeInTheDocument();
+  });
+
+  it('keeps an expired app report separate from a fresh telemetry link', async () => {
+    fixture();
+    const stale = structuredClone(drive);
+    stale.vm_apps![VM_IDS.autonomous]!.drive!.lifecycle_source.status = 'stale';
+    useDrive.mockReturnValue({ drive: stale, socket: 'open' });
+    renderPage('/dashboard/overview');
+    const card = within(await screen.findByRole('link', { name: /autonomous/ }));
+    expect(within(card.getByText('APP').parentElement!).getByText('관측 만료')).toBeInTheDocument();
+    expect(await within(card.getByText('LINK').parentElement!).findByText('연결됨')).toBeInTheDocument();
+  });
+
+  it('does not present cached Linux Agent status as a current connection when VM lookup fails', async () => {
+    const fetch = fixture();
+    const original = fetch.getMockImplementation()!;
+    let failList = false;
+    fetch.mockImplementation(async (url: string) =>
+      failList && url === '/api/v1/vms' ? Response.json({}, { status: 503 }) : original(url),
+    );
+    const page = renderPage('/dashboard/overview');
+    const card = within(await screen.findByRole('link', { name: /interaction/ }));
+    const link = within(card.getByText('LINK').parentElement!);
+    expect(await link.findByText('연결됨')).toBeInTheDocument();
+    failList = true;
+    await act(() => page.client.invalidateQueries({ queryKey: ['vms'], exact: true }));
+    expect(await link.findByText('조회 불가')).toBeInTheDocument();
+    expect(link.queryByText('연결됨')).not.toBeInTheDocument();
   });
 
   it('shows Zephyr thread pages, heap, RX rate, reserved IP and only its own app reports', async () => {

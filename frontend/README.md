@@ -70,6 +70,10 @@ API·WebSocket 프록시와 운영 도메인은 배포 Nginx 설정에서 연결
 
 기존 `/vms`, `/resources`, `/demo`, `/console` 주소는 북마크 호환을 위해 새 주소로 이동시킵니다.
 
+Overview 카드의 `VM / APP / LINK`는 VM 실행·앱 상태·heartbeat 신선도를 각각 표시합니다.
+LINK는 Linux의 Agent 상태와 Zephyr의 Telemetry heartbeat를 사용하며, 수집 저하·실패 누계와 구분합니다.
+상단에는 주행 모드·출력 권한·마지막 관측만 두고, 앱 heartbeat와 수집기 진단은 VM 상세에서 확인합니다.
+
 ### Zephyr 앱 메모리
 
 Memory 탭은 기존 `GET /api/v1/vms/{vmId}/metrics`로 상단 RAM 요약과 하단 자동·공통·수동 상세를 표시합니다.

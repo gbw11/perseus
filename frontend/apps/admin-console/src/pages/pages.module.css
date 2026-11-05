@@ -746,7 +746,7 @@ button.chip:hover:not(.chipOn) {
 }
 .overviewSummary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid var(--x-border);
   border-radius: 14px;
@@ -997,15 +997,6 @@ button.chip:hover:not(.chipOn) {
 @media (max-width: 1200px) {
   .vmGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .overviewSummary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .summaryItem:nth-child(2) {
-    border-right: 0;
-  }
-  .summaryItem:nth-child(-n + 2) {
-    border-bottom: 1px solid var(--x-border);
   }
 }
 /* ---- S15P31E110-311 VM별 RX/TX 데이터 Pool ---- */
