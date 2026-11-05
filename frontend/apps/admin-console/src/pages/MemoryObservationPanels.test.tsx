@@ -26,10 +26,15 @@ describe('RAM summary and grouped buffer panels', () => {
     act(() => {
       vi.advanceTimersByTime(6001);
     });
-    expect(card.getByText('관리 RAM 관측 만료')).toBeInTheDocument();
+    expect(card.getByText('관측 만료 · 최근 관측값')).toBeInTheDocument();
     expect(card.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
-    expect(card.queryByText('25.000%')).not.toBeInTheDocument();
+    expect(card.getByRole('progressbar')).toHaveAttribute('aria-valuetext', '최근 관측 25.000% · 관측 만료');
+    expect(card.getByText('25.000%')).toBeInTheDocument();
+    expect(card.getByText('관측 당시 여유')).toBeInTheDocument();
     expect(card.getByRole('img', { name: 'Zephyr A 메모리 사용률 관측 이력' })).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(card.queryByText('25.000%')).not.toBeInTheDocument();
+    expect(card.getByText('관리 RAM 관측 만료')).toBeInTheDocument();
     page.unmount();
     expect(vi.getTimerCount()).toBe(timers - 1);
   });

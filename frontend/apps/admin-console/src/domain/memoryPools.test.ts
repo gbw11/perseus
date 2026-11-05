@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MetricSample, MetricValue } from '../api/types';
-import { buildMemoryPoolSeries, bytesToKiB, MEMORY_POOL_METRICS } from './memoryPools';
+import { buildMemoryPoolSeries, buildPacketRateSeries, bytesToKiB, MEMORY_POOL_METRICS } from './memoryPools';
 
 const value = (name: string, amount: number, labels: Record<string, string> | null = null): MetricValue => ({
   name,
@@ -76,5 +76,71 @@ describe('Memory Pool telemetry', () => {
     ]);
 
     expect(reset.packetRates.at(-1)).toMatchObject({ rxPacketsPerSecond: null, txPacketsPerSecond: null });
+  });
+
+  it('메모리 metadata 없는 원 네트워크 표본에서 무트래픽 0과 초기화·미측정을 구분한다', () => {
+    const at = (index: number, rx: number, tx: number) =>
+      sample(new Date(index * 2000).toISOString(), counters(rx, tx));
+    const missing = at(3, 30, 60);
+    missing.values[0]!.unavailable_reason = 'read_failed';
+    expect(
+      buildPacketRateSeries([
+        at(0, 10, 20),
+        at(1, 30, 60),
+        at(2, 30, 60),
+        missing,
+        at(4, 50, 80),
+        at(5, 1, 2),
+      ]),
+    ).toEqual([
+      { observedAt: at(1, 0, 0).observed_at, rxPacketsPerSecond: 10, txPacketsPerSecond: 20 },
+      { observedAt: at(2, 0, 0).observed_at, rxPacketsPerSecond: 0, txPacketsPerSecond: 0 },
+      { observedAt: missing.observed_at, rxPacketsPerSecond: null, txPacketsPerSecond: 0 },
+      { observedAt: at(4, 0, 0).observed_at, rxPacketsPerSecond: null, txPacketsPerSecond: 10 },
+      { observedAt: at(5, 0, 0).observed_at, rxPacketsPerSecond: null, txPacketsPerSecond: null },
+    ]);
+  });
+
+  it.each(['vm', 'boot', 'missing-boot', 'interface', 'publisher', 'epoch'])(
+    '%s 경계를 넘는 패킷 차분을 만들지 않는다',
+    (boundary) => {
+      const first = sample('2026-11-05T04:00:00Z', counters(100, 200));
+      first.network = { publisher_instance_id: 'publisher', observed_uptime_ms: '1000' };
+      first.values.forEach((value) => {
+        value.labels = { interface: 'if1', counter_epoch: '1' };
+      });
+      const next = structuredClone(first);
+      next.observed_at = '2026-11-05T04:00:02Z';
+      next.values.forEach((value) => {
+        value.value! += 100;
+      });
+      if (boundary === 'vm') next.vm_id = 'vm-b';
+      if (boundary === 'boot') next.boot_id = 'boot-2';
+      if (boundary === 'missing-boot') next.boot_id = null;
+      if (boundary === 'interface')
+        next.values.forEach((value) => {
+          value.labels!.interface = 'if2';
+        });
+      if (boundary === 'publisher') next.network!.publisher_instance_id = 'publisher-2';
+      if (boundary === 'epoch')
+        next.values.forEach((value) => {
+          value.labels!.counter_epoch = '2';
+        });
+      expect(buildPacketRateSeries([first, next]).at(-1)).toMatchObject({
+        rxPacketsPerSecond: null,
+        txPacketsPerSecond: null,
+      });
+    },
+  );
+
+  it('무효·부정확한 원 카운터를 정상 숫자로 대신하지 않는다', () => {
+    const first = sample('2026-11-05T04:00:00Z', counters(10, 20));
+    const next = sample('2026-11-05T04:00:02Z', counters(100, 200));
+    next.values[0]!.raw_value = '9007199254740993';
+    next.values[1]!.status = 'unsupported';
+    expect(buildPacketRateSeries([first, next]).at(-1)).toMatchObject({
+      rxPacketsPerSecond: null,
+      txPacketsPerSecond: null,
+    });
   });
 });

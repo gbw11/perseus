@@ -195,6 +195,8 @@ describe('managed RAM observation lease', () => {
     const view = buildManagedRamSeries([report, duplicate], report.vm_id, NOW + 7000, identity(report));
     expect(view.firstReceivedAt).toBe(NOW);
     expect(view.current).toMatchObject({ reason: 'RAM_RECEIPT_EXPIRED', percent: null });
+    expect(view.recentObservation?.percent).toBe('25.000');
+    expect(buildManagedRamSeries([report], report.vm_id, NOW + 61_000).recentObservation).toBeNull();
   });
 
   it('keeps same-source collection failure sticky until a genuinely new source recovers', () => {
@@ -214,6 +216,7 @@ describe('managed RAM observation lease', () => {
     const failed = buildManagedRamSeries([good, bad, replay], good.vm_id, NOW + 2000, identity(good));
     expect(failed.current).toMatchObject({ reason: 'RAM_SOURCE_UNAVAILABLE', percent: null });
     expect(failed.current.sourceStatus['memory.page_allocator.free_bytes']?.sourceRc).toBe(-134);
+    expect(failed.recentObservation).toBeNull();
     const next = structuredClone(good);
     next.received_at = new Date(NOW + 3000).toISOString();
     Object.assign(next.telemetry!, {

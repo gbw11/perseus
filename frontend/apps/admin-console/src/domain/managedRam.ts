@@ -11,6 +11,20 @@ const FIELDS = [
 const U64_MAX = 18_446_744_073_709_551_615n;
 const RECEIPT_LEASE_MS = 6000;
 
+/** Overview와 Memory가 같은 RAM 관측 실패·만료 사유를 표시한다. */
+export function managedRamReason(reason: string | null): string {
+  if (reason === 'RAM_CONTEXT_UNVERIFIED') return '관측 문맥 불완전';
+  if (reason === 'RAM_CONTEXT_CHANGED') return '실행 문맥 변경 · 현재 값 미확인';
+  if (reason === 'RAM_SESSION_AMBIGUOUS') return '관측 세션 순서 미확인';
+  if (reason === 'RAM_NOT_RECEIVED') return '관리 RAM 표본 미수신';
+  if (reason === 'RAM_SOURCE_UNIDENTIFIED') return '원 관측 시각 미확인';
+  if (reason === 'RAM_SOURCE_EXPIRED' || reason === 'RAM_RECEIPT_EXPIRED') return '관리 RAM 관측 만료';
+  if (reason === 'RAM_SAMPLE_CONFLICT') return '같은 원 표본의 RAM 값 충돌';
+  if (reason === 'RAM_SOURCE_UNAVAILABLE' || reason === 'RAM_COLLECTION_UNAVAILABLE')
+    return '관리 RAM 수집 불가';
+  return reason ? '관리 RAM 표본을 확인할 수 없습니다.' : '관리 RAM 표본 미수신';
+}
+
 export interface ManagedRamIdentity {
   vmId: string;
   bootId: string;
@@ -36,6 +50,8 @@ export interface ManagedRamPoint {
 
 export interface ManagedRamView {
   current: ManagedRamSummary;
+  /** 최근 60초의 유효한 마지막 관측. current가 만료돼도 과거값으로 표시할 수 있다. */
+  recentObservation: ManagedRamSummary | null;
   points: ManagedRamPoint[];
   lastObservationAt: number | null;
   firstReceivedAt: number | null;
@@ -272,6 +288,7 @@ export function buildManagedRamSeries(
     previousContext = context;
   }
   const view = {
+    recentObservation: null as ManagedRamSummary | null,
     points,
     lastObservationAt: latest?.observedAt ?? null,
     firstReceivedAt: latest?.receivedAt ?? null,
@@ -301,6 +318,10 @@ export function buildManagedRamSeries(
   if (latest.observedAt > now) return { ...view, current: unknown('RAM_SOURCE_TIME_INVALID') };
   if (now < latest.receivedAt) return { ...view, current: unknown('RAM_RECEIVER_CLOCK_ORDER') };
   if (now - latest.receivedAt + latest.sourceAge > RECEIPT_LEASE_MS)
-    return { ...view, current: unknown('RAM_RECEIPT_EXPIRED') };
-  return { ...view, current: latest.summary };
+    return {
+      ...view,
+      recentObservation: latest.observedAt >= now - 60_000 ? latest.summary : null,
+      current: unknown('RAM_RECEIPT_EXPIRED'),
+    };
+  return { ...view, recentObservation: latest.summary, current: latest.summary };
 }
