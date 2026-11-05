@@ -9,6 +9,7 @@ import {
   type Vm,
   type VmListResponse,
 } from '../api/types';
+import { setMockBoardDown } from './board';
 import { MOCK_PASSWORD, VM_IDS } from './data';
 import { handlers, resetMockState } from './handlers';
 
@@ -53,6 +54,20 @@ describe('MSW mock API', () => {
     const vm = await request<Vm>(`/api/v1/vms/${list.items[2]!.vm_id}`);
     expect(vm.guest_kind).toBe('linux');
     expect(vm.agent_status).toBe('ONLINE');
+  });
+
+  it('mock 보드를 끊으면 VM 목록·상세가 502 VM_CONTROL_BAD_RESPONSE, 다시 이으면 정상', async () => {
+    await login();
+    setMockBoardDown(true);
+    await expect(request('/api/v1/vms')).rejects.toMatchObject({
+      status: 502,
+      code: 'VM_CONTROL_BAD_RESPONSE',
+    });
+    await expect(request(`/api/v1/vms/${VM_IDS.interaction}`)).rejects.toMatchObject({ status: 502 });
+
+    setMockBoardDown(false);
+    const list = await request<VmListResponse>('/api/v1/vms');
+    expect(list.items).toHaveLength(3);
   });
 
   it('틀린 비밀번호는 INVALID_CREDENTIALS, 토큰 없이는 401', async () => {

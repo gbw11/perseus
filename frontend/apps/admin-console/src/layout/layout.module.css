@@ -170,3 +170,34 @@
     display: none;
   }
 }
+
+/* 실시간 조회 실패 알림 (LiveDataAlert) — 콘솔 모든 화면 위 */
+.liveAlert {
+  margin-bottom: var(--x-space-4);
+  padding: var(--x-space-3) var(--x-space-4);
+  border: 1px solid var(--x-fault);
+  border-radius: var(--x-radius);
+  color: var(--x-fault);
+  font-size: var(--x-text-sm);
+}
+.liveAlert ul {
+  margin: var(--x-space-1) 0 0;
+  padding-left: var(--x-space-5);
+}
+
+/* mock 모드 전용 보드 끊김 스위치 (MockBoardSwitch) */
+.mockBoardSwitch {
+  position: fixed;
+  right: var(--x-space-5);
+  bottom: var(--x-space-5);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-3);
+  padding: var(--x-space-2) var(--x-space-3);
+  border: 1px dashed var(--x-border);
+  border-radius: var(--x-radius);
+  background: var(--x-surface-3);
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}

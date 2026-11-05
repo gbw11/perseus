@@ -15,7 +15,7 @@ import type { Health } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
 import type { DriveState, SocketState } from '../api/drive';
-import { useEvents, useMetrics, useTelemetryHeartbeat, useVms } from '../api/queries';
+import { useEvents, useMetrics, useTelemetryHeartbeat, LIVE_POLL_MS, useVms } from '../api/queries';
 import { restartSimRace, selectSimTrack, useSimState, type SimView } from '../api/sim';
 import type { Vm, VmEvent } from '../api/types';
 import { cpuPercentOf, latest, memoryPercentOf } from '../domain/vmMetrics';
@@ -46,6 +46,7 @@ import { AGENT_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
 import { SimTrackSelect } from './SimTrackSelect';
 import styles from './pages.module.css';
+import { LiveDataAlert } from '../layout/LiveDataAlert';
 
 const MOCK = import.meta.env.VITE_MOCK === 'true';
 /** 세 번째 VM 이 낸 AI 감지 영상 (MJPEG) — dom0 웹 프록시가 같은 origin 으로 넘긴다 (카메라 계약 camera-stream-v1) */
@@ -476,7 +477,8 @@ function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null
  */
 export function DashboardPage() {
   const { drive, socket } = useDrive();
-  const vms = useVms();
+  // 실패해도 카드를 남기고 카드가 '조회 불가' 로 표시한다
+  const vms = useVms(LIVE_POLL_MS, { keepLastData: true });
   const events = useEvents({ limit: 30 });
   const items = sortVms(vms.data?.items ?? []);
   const control = observedControl(drive, socket);
@@ -500,11 +502,7 @@ export function DashboardPage() {
       </section>
 
       {vms.isPending && <div className={styles.statePanel}>VM 상태를 불러오는 중입니다…</div>}
-      {vms.error && (
-        <div className={styles.statePanel} role="alert">
-          VM 상태를 불러오지 못했습니다. 연결을 확인해 주세요.
-        </div>
-      )}
+      <LiveDataAlert />
 
       {vms.isSuccess && items.length === 0 && <div className={styles.statePanel}>등록된 VM이 없습니다.</div>}
 
