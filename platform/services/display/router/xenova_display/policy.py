@@ -43,6 +43,18 @@ def decide_vm(vm):
         return {"kind": "operation", "label": "VM 작업 진행 중", "tone": "warning"}
     if vm["os"]["observed"] and vm["os"]["observed"] != vm["os"]["expected"]:
         return {"kind": "os_mismatch", "label": "OS 보고 불일치 확인 필요", "tone": "warning"}
+    apps = list(vm.get("apps", {}).values())
+    if apps and all(a.get("report_profile") == "warm-drive-1" for a in apps):
+        values = [a.get("lifecycle", {}).get("current") for a in apps]
+        if all(v is not None for v in values):
+            if any(v["phase"] == "RESIDUAL" for v in values):
+                return {"kind": "app_error", "label": "앱 정리 미확정 · 상태 확인 필요", "tone": "danger"}
+            if any(v["phase"] == "STOPPING" for v in values):
+                return {"kind": "app_stopping", "label": "앱 종료 중 · VM 실행 중", "tone": "warning"}
+            if any(v["readiness"] == "NOT_READY" for v in values):
+                return {"kind": "app_preparing", "label": "앱 보고 수신 · 일부 준비 대기", "tone": "warning"}
+            if any(v["readiness"] == "QUALIFIED" for v in values):
+                return {"kind": "app_standby", "label": "앱 대기 보고 수신 · 출력 허가는 별도", "tone": "muted"}
     if vm["sources"]["app"].get("subscription_status") in {"pending", "denied", "error", "unavailable"}:
         return {"kind": "app_source_unavailable", "label": "VM 실행 중 · 앱 보고 수신 경로 미확인", "tone": "warning"}
     if vm["sources"]["app"]["status"] != "fresh":
@@ -106,12 +118,16 @@ class DisplayPolicy:
             # Content identity excludes continuously changing age/capture time, but includes run/boot/source changes.
             content = {"outputs": outputs, "decisions": decisions, "drive": drive,
                        "vms": state["vms"]}
-            def stable(value):
+            def stable(value, path=()):
                 if isinstance(value, dict):
-                    return {k: stable(v) for k, v in value.items()
-                            if k not in {"age_ms", "received_at", "observed_at"}}
+                    ignored = {"age_ms", "received_at", "observed_at"}
+                    if path[-2:] in {("lifecycle", "reported"), ("lifecycle", "current")}:
+                        ignored.add("check_seq")  # 100ms supervision is not new screen content.
+                    if path[-2:] in {("lifecycle", "source"), ("lifecycle", "calculation_source")}:
+                        ignored.add("sequence")
+                    return {k: stable(v, (*path, k)) for k, v in value.items() if k not in ignored}
                 if isinstance(value, list):
-                    return [stable(v) for v in value]
+                    return [stable(v, path) for v in value]
                 return value
             render_revision = hashlib.sha256(json.dumps(stable(content), sort_keys=True).encode()).hexdigest()[:20]
             for output in outputs:
