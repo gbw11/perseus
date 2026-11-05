@@ -344,34 +344,42 @@ flowchart LR
 
 **D3. 시험**
 
-ESP32 를 PC 에 연결하고 시리얼 모니터를 연다(단계 C-6). 시험마다 PulseView 에서 Run 을 누르고 10초 안에 그 시험을 한다. 기록이 끝나면 화면을 확대해 본다. 13 번 점퍼선은 13 번 쪽 끝만 뺐다 꽂는다.
+ESP32 를 PC 에 연결하고 시리얼 모니터(또는 PuTTY)를 연다(단계 C-6). 시험마다 PulseView 에서 Run 을 누르고 10초 안에 그 시험을 한다. 기록이 끝나면 화면을 확대해 본다. 13 번 점퍼선은 13 번 쪽 끝만 뺐다 꽂는다.
 
+- 직접 치는 것은 `a`, `f30`, `b30` 같은 짧은 명령뿐이다. 아래의 "`a` Enter" 는 a 를 치고 Enter 를 누르라는 뜻이다.
+- → 뒤의 `armed`·`run f 30%`·`auto stop` 같은 글은 ESP32 가 보내 화면에 나오는 응답이다. 치지 않는다. 응답이 다르게 나오면 거기서 멈춘다.
 - 한 COM 포트는 한 프로그램만 열 수 있다. Arduino IDE 시리얼 모니터, PuTTY, 시험 7 의 파이썬 중 하나만 연다. 포트가 안 열리면 다른 프로그램을 닫고, 장치 관리자에서 COM 번호가 바뀌지 않았는지 본다(다른 USB 포트에 꽂으면 바뀔 수 있다).
-- PuTTY 를 써도 된다(Connection type `Serial`, COM 번호, Speed `115200`). PuTTY 는 글자를 치는 즉시 보내고 Enter 가 줄 끝이다. 그래서 시험 5 의 `No Line Ending` 은 Enter 없이 치기, `New Line` 은 Enter 누르기다. 친 글자를 보려면 Terminal → Local echo 를 `Force on` 으로 둔다(Local line editing 은 `Force off`).
+- PuTTY 를 써도 된다(Connection type `Serial`, COM 번호, Speed `115200`). PuTTY 는 글자를 치는 즉시 보내고 Enter 가 줄 끝이다. 친 글자를 보려면 Terminal → Local echo 를 `Force on` 으로 둔다(Local line editing 은 `Force off`).
 
-1. 리셋: Run 을 누르고 바로 ESP32 의 EN 버튼을 누른다.
-   - 시리얼: `ready: disarmed`
+1. 리셋: Run 을 누르고 바로 ESP32 의 EN 버튼을 누른다(칠 것 없음) → `ready: disarmed`
    - PulseView: D0·D1 은 처음부터 끝까지 Low 이고 튀는 곳이 없다. D2 는 리셋 뒤 20 ms 마다 1.5 ms 폭 펄스
-2. 돌리기: Run, `a`, `f30`
-   - 시리얼: `armed`, `run f 30%`, 약 1초 뒤 `auto stop`
+2. 돌리기 (Run 을 누른 뒤)
+   1. `a` Enter → `armed`
+   2. `f30` Enter → `run f 30%`, 약 1초 뒤 `auto stop`
    - PulseView: D0·D1 에 20 kHz(주기 50 µs), 듀티 30 %(켜짐 15 µs) 신호가 약 1초 나오고 Low
-3. 비상정지: Run, `a`, `f30` 을 보내고 1초 안에 13 번 점퍼선을 뺀다. 다시 꽂고 `f30`. 이어서 `a`, `f30`.
-   - 시리얼: `ESTOP: disarmed` → `not armed` → `armed`, `run f 30%`, `auto stop`
-   - PulseView: 처음 신호는 점퍼선을 뺀 순간 끊긴다(1초가 안 됨). 다시 꽂은 뒤의 `f30` 에는 신호가 없다. `a` 뒤에만 다시 1초 나온다
-4. 짧게 눌림: Run, `a`, `f30` 을 보내고 1초 안에 점퍼선을 뺐다가 바로 다시 꽂는다. `f30`.
-   - 시리얼: `ESTOP: disarmed`, `not armed`
-   - PulseView: 뺀 순간 끊기고, 다시 꽂아도 신호가 없다
-5. 줄바꿈 없는 입력과 비상정지 전에 보낸 입력. 시리얼 모니터의 줄 끝 설정(처음엔 `New Line`)을 바꿔 가며 한다.
-   1. `New Line`(새 줄)으로 `a` → `armed`
-   2. `No Line Ending`(줄 끝 없음)으로 바꾸고 `f30` → 아무 응답 없음, 신호 없음
+3. 비상정지 (Run 을 누른 뒤)
+   1. `a` Enter → `armed`
+   2. `f30` Enter → `run f 30%`. 1초 안에 13 번 점퍼선을 뺀다 → `ESTOP: disarmed`
+   3. 점퍼선을 다시 꽂고 `f30` Enter → `not armed`
+   4. `a` Enter → `armed`. `f30` Enter → `run f 30%`, 약 1초 뒤 `auto stop`
+   - PulseView: 2 의 신호는 점퍼선을 뺀 순간 끊긴다(1초가 안 됨). 3 에서는 신호가 없고, 4 에서 다시 약 1초 나온다
+4. 짧게 눌림 (Run 을 누른 뒤)
+   1. `a` Enter → `armed`
+   2. `f30` Enter → `run f 30%`. 1초 안에 점퍼선을 뺐다가 바로 다시 꽂는다 → `ESTOP: disarmed`
+   3. `f30` Enter → `not armed`
+   - PulseView: 뺀 순간 끊기고, 3 에서도 신호가 없다
+5. 줄바꿈 없는 입력과 비상정지 전에 보낸 입력 (Run 을 누른 뒤). PuTTY 는 Enter 를 누르지 않으면 줄 끝이 안 간다. Arduino 시리얼 모니터는 줄 끝 설정을 `No Line Ending` 으로 바꾸고 보내면 같다.
+   1. `a` Enter → `armed`
+   2. `f30` 을 치고 Enter 는 누르지 않는다(시리얼 모니터는 `No Line Ending` 으로 보낸다) → 응답 없음, 신호 없음
    3. 그대로 점퍼선을 뺀다 → `ESTOP: disarmed`, `ESTOP: input dropped`. 다시 꽂는다
-   4. `No Line Ending` 그대로 `a` → 응답 없음. 점퍼선을 뺐다가 다시 꽂는다 → `ESTOP: input dropped`
-   5. `New Line` 으로 되돌리고 `f30` → `not armed`(4 의 `a` 로 재무장되지 않았다)
-   6. `a`, `f30` → `armed`, `run f 30%`, 신호 약 1초
-6. 방향 바꾸기: Run, `a`, `f30`
-   1. 도는 동안 `b30` → `stop first`
-   2. `auto stop` 이 나온 직후(1초 안에) `b30` → `wait`
-   3. 1초 넘게 기다린 뒤 `b30` → `run b 30%`, 신호 약 1초
+   4. `a` 를 치고 Enter 는 누르지 않는다 → 응답 없음. 점퍼선을 뺐다가 다시 꽂는다 → `ESTOP: input dropped`
+   5. `f30` Enter(시리얼 모니터는 `New Line` 으로 되돌리고 보낸다) → `not armed`(4 의 `a` 로 재무장되지 않았다)
+   6. `a` Enter → `armed`. `f30` Enter → `run f 30%`, 신호 약 1초
+6. 방향 바꾸기 (Run 을 누른 뒤)
+   1. `a` Enter → `armed`. `f30` Enter → `run f 30%`
+   2. 도는 동안(1초 안에) `b30` Enter → `stop first`
+   3. `auto stop` 이 나온 직후(1초 안에) `b30` Enter → `wait`
+   4. 1초 넘게 기다린 뒤 `b30` Enter → `run b 30%`, 약 1초 뒤 `auto stop`. 신호 약 1초
 7. 조회 명령을 쉬지 않고 보내기: 시리얼 모니터를 닫는다(한 포트는 한 프로그램만 열 수 있다). 파이썬이 없으면 python.org 에서 설치하고 `pip install pyserial` 을 한 번 한다. 아래를 `spam.py` 로 저장하고 `COM5` 를 단계 C 의 포트로 바꾼다. PulseView 에서 Run 을 누르고 `python spam.py` 를 실행한다.
 
     ```python
@@ -390,7 +398,7 @@ ESP32 를 PC 에 연결하고 시리얼 모니터를 연다(단계 C-6). 시험�
     print("auto stop 받음" if b"auto stop" in got else "auto stop 없음")
     ```
 
-   - 화면: `auto stop 받음`
+   - 직접 칠 것은 없다. 파이썬 창에 `auto stop 받음` 이 나와야 한다
    - PulseView: `e` 를 쉬지 않고 보내는 동안에도 D0·D1 신호가 약 1초 뒤 꺼진다
 
 확인
