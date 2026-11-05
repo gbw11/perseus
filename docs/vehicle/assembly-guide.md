@@ -368,12 +368,15 @@ ESP32 를 PC 에 연결하고 시리얼 모니터(또는 PuTTY)를 연다(단계
    2. `f30` Enter → `run f 30%`. 1초 안에 점퍼선을 뺐다가 바로 다시 꽂는다 → `ESTOP: disarmed`
    3. `f30` Enter → `not armed`
    - PulseView: 뺀 순간 끊기고, 3 에서도 신호가 없다
-5. 줄바꿈 없는 입력과 비상정지 전에 보낸 입력 (Run 을 누른 뒤). PuTTY 는 Enter 를 누르지 않으면 줄 끝이 안 간다. Arduino 시리얼 모니터는 줄 끝 설정을 `No Line Ending` 으로 바꾸고 보내면 같다.
+5. 줄 끝 없이 보낸 입력과 비상정지 전에 보낸 입력. Enter(줄 끝)가 오기 전의 명령은 실행되지 않고, 그 사이 비상정지가 오면 버려지는지 본다.
+   - PuTTY: Enter 를 누르지 않으면 줄 끝이 가지 않는다. Local line editing 은 `Force off` 여야 한다. 켜져 있으면 Enter 전까지 아무것도 보내지 않아 이 시험이 안 된다.
+   - Arduino 시리얼 모니터: 입력 칸 옆 줄 끝 설정을 `No Line Ending` 으로 바꾸고 보내면 같다.
+   - PulseView 는 10초만 기록하니 2 와 6 을 할 때 각각 Run 을 누른다.
    1. `a` Enter → `armed`
    2. `f30` 을 치고 Enter 는 누르지 않는다(시리얼 모니터는 `No Line Ending` 으로 보낸다) → 응답 없음, 신호 없음
-   3. 그대로 점퍼선을 뺀다 → `ESTOP: disarmed`, `ESTOP: input dropped`. 다시 꽂는다
+   3. 그대로 점퍼선을 뺀다 → `ESTOP: disarmed`, `ESTOP: input dropped`. 다시 꽂는다. `input dropped` 가 안 나오면 `f30` 이 ESP32 에 가지 않은 것이니 PuTTY 설정을 다시 본다
    4. `a` 를 치고 Enter 는 누르지 않는다 → 응답 없음. 점퍼선을 뺐다가 다시 꽂는다 → `ESTOP: input dropped`
-   5. `f30` Enter(시리얼 모니터는 `New Line` 으로 되돌리고 보낸다) → `not armed`(4 의 `a` 로 재무장되지 않았다)
+   5. `f30` Enter(시리얼 모니터는 `New Line` 으로 되돌리고 보낸다) → `not armed`. 여기서 `armed` 가 나오면 4 의 `a` 가 남아 있던 것이니 멈추고 팀에 공유한다
    6. `a` Enter → `armed`. `f30` Enter → `run f 30%`, 신호 약 1초
 6. 방향 바꾸기 (Run 을 누른 뒤)
    1. `a` Enter → `armed`. `f30` Enter → `run f 30%`
