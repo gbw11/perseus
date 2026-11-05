@@ -1,9 +1,56 @@
 # HTTP·Spring·화면 종단 연결 요청
 
 담당: FastAPI·Spring·프론트. 상태: **6-A 인계 준비 / 담당 제품 구현·종단 수락 전**.
-기존 D02·D08을 유지한다. 아래가 2026-11-02 현재 지시다. 과거 소스·실패·요구는 마지막 이력에 보존했다.
+기존 D02·D08을 유지한다. 등록 연결은 2026-11-02, 앱 메모리 제공물은 2026-11-04 현재 지시다. 과거 소스·실패·요구는 마지막 이력에 보존했다.
 
 ## 현재 담당자가 할 일
+
+### D02·D08 — 제공된 앱 메모리 계측을 저장·조회·화면에 연결
+
+플랫폼은 지도·경로·탐색 노드·odom ring에 이어 수동 입력·대기 작업·실행 작업·보관 결과를
+각각 계측한다. 기존 MQTT v2.1의 `app_memory` family와 `memory.app.*`를 유지하고,
+수동 네 region에는 `payload.buffer`로 원 입력 시각·순번·작업 수명·보관/철회 상태를 제공한다.
+수동 입력이 만료돼도 보관 bytes는 남을 수 있고, 결과를 읽어도 보관 점유는 줄지 않는다.
+
+상단은 **Zephyr 관리 RAM 확보량**으로 표시한다. 같은 `family="memory"` 봉투와 원 표본의
+`memory.firmware.ram_region_bytes`를 total, `memory.page_allocator.free_bytes`를 free로 두고
+`확보량=total-free`, `비율=확보량×100/total`로 계산한다. 이 값은 Xen이 실제 할당한 VM 전체 RAM이나
+현재 payload 사용량이 아니다. 현재 지원 프로필의 관리 범위는 16MiB이며, 풀·힙 안의 점유가
+움직여도 상단은 평평할 수 있다. 유효하지 않은 total/free·null·미지원·만료에는 비율을 만들지 않는다.
+정확한 검증·반올림과 오류 예제는 계약 도구의 `ram_summary`/`--ram-summary`를 재사용한다. bytes는 정확한
+u64 십진 문자열, 비율은 ROUND_HALF_UP 소수 세 자리로 유지하고 JS Number로 먼저 변환하지 않는다.
+
+이번 상단 카드는 **마지막으로 받은 유효한 메모리 표본·원 관측 시각·6초 만료**를 기준으로 연결한다.
+독립 current host/execution/receipt 검증은 표시 필수조건에서 제거했다. 현재 HTTP VM 응답에 없는 실행문맥을
+추가하거나 raw journal/receipt를 읽어야만 화면을 만들 수 있다는 요구가 아니다. 별도 독립 검증이 필요한
+소비자는 참조 `ram_view`의 선택 `expected_context` 필터를 사용할 수 있으며, 생략/`None`은 추가 필터 없음이다.
+원 봉투의 VM·guest boot·publisher·실행 문맥은 보존하고 새 부팅/발행 세션의 그래프는 분리한다.
+알려진 옛 세션의 지연 수신으로 화면을 되돌리거나 새 세션의 빈 값을 이전 세션 값으로 채우지 않는다.
+
+6초는 최초 수신 후 경과와 송신 당시 원 source-age를 합쳐 판정한다. 같은 source-pair가 새 heap 봉투에
+실려도 lease를 연장하지 않으며, 오류/null·상충 표본은 원 사유를 남기고 새 source의 정상 관측에서 회복한다.
+이 표시와 수신 사실은 VM 건강·복구·READY·출력 권한이 아니다. 네트워크 지연까지 검증한 freshness로
+확대하지 않는다. 이전 외부 current context 필수 조건은 2026-11-04 사용자 결정에 따라 이 기준으로 대체한다.
+[정식 원천·지표·스택 의미](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md#95-앱-메모리와-펌웨어-예약-범위),
+[소비 예제·실패 수락](../../platform/guests/zephyr/telemetry/contract/docs/CONSUMER_HANDOFF.md#앱-메모리와-스택-연결)을 먼저 확인한다.
+
+| 담당·현재 상태 | 할 일과 실제 위치 | 정상·실패 수락 및 회신 |
+|---|---|---|
+| 플랫폼 · 소스·로컬 제공 | 실제 `lattice_memory.c`→Diagnostics cache→`telemetry/model.c/worker.c`. 선택 주행 프로필에서 명시 stack snapshot 활성화. native/ARM·부분 산출물과 보드 확인은 검증 보고서에서 구분 | 현재 수동 계측은 1.0.8 로컬 후보의 실제 owner·codec·ARM/QEMU·8-region MQTT로 검증한다. 이전 1.0.7의 보드 B 수신·정상 stop/start는 이력으로 재사용한다. 새 후보 보드 설치·지도 채택·실차 수락은 미수행이며 상세 후보/실패 이력은 검증 보고서에 연결 |
+| Spring · 기존 수신부 확장 | `backend/src/main/java/com/xenova/backend/agent/application/ZephyrTelemetryMessageHandler.java:process/values/number`, `backend/src/main/java/com/xenova/backend/agent/domain/MetricValue.java`, `backend/src/main/java/com/xenova/backend/metrics/application/MetricFilter.java`. 기존 `xenova/v2/vms/+/telemetry/metrics` 수신을 재사용 | 새 region·buffer metadata·정확한 십진 값·status/reason/source_rc·원 관측 시점·boot/publisher/실행 문맥이 저장/조회에서 유지됨. 상단은 같은 memory 봉투의 total/free만 조합하고 다른 표본과 섞지 않음. 독립 실행문맥 검증 없이 최근 관측으로 소비하되 원 시각·6초 만료·세션 분리와 오류 사유를 유지. 다른 지표나 같은 source 재수신이 과거 값을 fresh로 만들지 않음. 별도 서브 후보의 null/boolean 수정을 재사용하고 배포 여부 회신 |
+| 프론트 · 소비 연결 | `frontend/apps/admin-console/src/domain/memoryPools.ts:buildMemoryPoolSeries`, `pages/ResourcesPage.tsx` (스택 화면 적용은 사용자 결정으로 보류). `memory.region.*`의 RX/TX와 `memory.app.*`의 앱 pool은 분리 | 상단은 관리 RAM 확보량·총량·여유·비율·추이를 표시. 하단은 자동(지도·경로·노드), 공통(odom·RX/TX·커널 힙), 수동(입력·대기·실행·보관 결과)으로 표시. 예약·heap·pool·stack을 더해 VM 전체 used를 만들지 않음. null·경합·scan_limit·미지원과 유효 0, 반환 후 회복을 구분 |
+| 공동 · 설치·종단 대기 | 현재 동작하는 firmware의 build/artifact·VM·boot·publisher와 저장/화면 후보를 대조. 로컬 소스나 문서 개정은 운영 배포 증거가 아님 | RAM 외부 bind 없는 정상 표시·정확 u64/반올림·6초 만료·같은 source 재수신/오류 sticky·boot/publisher 그래프 분리·옛 세션 역복귀 차단·새 source 회복을 확인. snapshot part 유실·pool 포화의 기존 수락도 유지. 후보/명령/원 표본/미수행/배포 상태를 회신. 스택 화면과 EC2 배포는 수행하지 않음 |
+
+앱/CPU 페이지의 nominal 주기는 도착 보장이 아니다. 고정 byte 예산에서 페이지 시작점이 회전하므로 region별 source 시각을 저장하고, 다른 window 조각을 같은 완전 CPU 표본으로 합치지 않는다. 실제 board 예제는 검증 보고서의 원자료 경로에서 확인한다.
+
+같은 boot/publisher에서도 새 source의 원 host/execution/receipt 문맥이 달라지면 그래프 구간을 나누고 원 문맥을 보존한다. 이는 추가 외부 조회·현재 실행 검증을 표시의 필수조건으로 요구한다는 뜻이 아니다.
+
+스택의 `row_id`는 snapshot 안의 행 번호이며 CPU `thread_id`나 이름으로 합치지 않는다.
+스택 MQTT 발행과 계약 검증은 유지하되 화면 적용은 보류한다. 향후 표시할 때는 같은
+VM·boot·publisher의 완전한 snapshot만 사용한다. `max_used_bytes`는 fill scan이 확인한 최대 사용량이며 현재 사용량이 아니다.
+미지원·한도·실패를 0으로 바꾸지 않고 firmware mapped/static_data·page allocator free도
+각자의 범위로 표시한다. memory payload의 선택 원천 시각 쌍은 cache에, collection 구간은 직접 heap에 적용한다. 실제 VM 전체 사용률은 이 합계로 새로 만들지 않는다.
+
 
 ### D02·D08 — 제공된 등록 조회·통지의 설치와 공동 수락
 

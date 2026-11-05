@@ -414,3 +414,30 @@ def test_invalid_merge_passage_rejected_and_new_reference_does_not_inherit_it(li
         assert library.engine_track(target,1400000,out)==0 and out[0]>0
         assert exported_state(library,target).direction==state.direction
     finally:library.engine_free(e);library.engine_free(target)
+
+def test_real_owner_memory_search_failure_then_normal_progress(library):
+    library.engine_memory.argtypes=[C.c_void_p,C.c_uint,C.POINTER(C.c_uint64)]
+    library.engine_force_node_limit.argtypes=[C.c_void_p,C.c_uint64]
+    e=library.engine_new()
+    def memory(region):
+        data=(C.c_uint64*6)()
+        assert library.engine_memory(e,region,data)==0
+        reserved,capacity,used,peak,failures,busy=data
+        assert 0<=used<=peak<=capacity<=reserved
+        return list(data)
+    try:
+        assert all(memory(i)[2]==0 for i in range(4))
+        w=fixture.world();obstacle(w,19,24,13,19)
+        load(library,e,w);send_vehicle(library,e,vehicle());send_vehicle(library,e,vehicle(2,at=1220000))
+        assert library.engine_force_node_limit(e,1220000)==6
+        failed=memory(2);assert failed[4]==1 and failed[2]>0
+        # A new real observation requests another bounded plan; no fake READY.
+        w.sequence=2;w.observation_seq=2
+        load(library,e,w)
+        assert library.engine_plan(e,1220000,4096)==0
+        out=(C.c_float*4)()
+        assert library.engine_track(e,1220000,out)==0 and out[0]>0
+        assert all(memory(i)[2]>0 for i in range(4))
+        assert memory(2)[4]==failed[4] and memory(2)[3]>=failed[3]
+    finally:
+        library.engine_free(e)

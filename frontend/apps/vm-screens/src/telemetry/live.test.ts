@@ -41,7 +41,7 @@ const state = (patch: Partial<DriveStateDto> = {}): DriveStateDto => ({
   apps: {
     autonomous: app({ command_fresh: false, command_ago_ms: 900, command_hz: 0, heartbeat_ago_ms: 5000 }),
     manual: app(),
-    'message-board': app({ command_fresh: null, command_ago_ms: null, command_hz: 0, last_command: null }),
+    interaction: app({ command_fresh: null, command_ago_ms: null, command_hz: 0, last_command: null }),
   },
   perception: {
     valid: true,

@@ -18,7 +18,7 @@ import {
   vmStateOf,
 } from './scenario';
 
-describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
+describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6, v1.7 취소)', () => {
   let off: () => void;
   let last: DriveState;
 
@@ -38,7 +38,7 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
     expect(last.apps.manual?.command_fresh).toBe(true);
   });
 
-  it('강제 종료 → MANUAL 인계 → 복구 → AUTO_READY → 자동 3·2·1 → AUTO, 매번 gen +1 (계약 v1.5)', () => {
+  it('강제 종료 → MANUAL 인계 → 복구 → AUTO_READY → [재개] 3·2·1 → AUTO, 매번 gen +1 (계약 v1.2)', () => {
     expect(resume()).toBe(false); // AUTO_READY 가 아니면 무시
     forceKill('autonomous');
     expect(last.control).toMatchObject({ mode: 'MANUAL', generation: 5, active_app: 'manual' });
@@ -47,12 +47,16 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
     expect(vmStateOf(VM_IDS.autonomous)).toBe('running');
     expect(last.apps.autonomous?.command_fresh).toBe(false); // 재시작 중
     vi.advanceTimersByTime(5000 + 3100);
-    // AUTO_READY 가 되자마자 운영자 조작 없이 자동 복귀 카운트다운
+    // AUTO_READY 에서는 운영자 [재개]를 기다린다 — 자동 복귀 없음
     expect(last.control).toMatchObject({ mode: 'AUTO_READY', generation: 6 });
-    expect(last.resume?.requested_by).toBe('auto');
+    expect(last.resume).toBeNull();
+    vi.advanceTimersByTime(10_000);
+    expect(last.control?.mode).toBe('AUTO_READY');
+    expect(resume()).toBe(true);
+    expect(last.resume?.requested_by).toBe('admin');
     expect(last.resume?.remaining_ms).toBeLessThanOrEqual(3000);
     expect(scenarioEvents().find((e) => e.type === 'drive.resume.accepted')).toMatchObject({
-      payload: { switch_in_ms: 3000, requested_by: 'auto' },
+      payload: { switch_in_ms: 3000, requested_by: 'admin' },
     });
     expect(resume()).toBe(false); // 카운트다운 중 재요청은 무시
     vi.advanceTimersByTime(3100);
@@ -60,26 +64,28 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
       mode: 'AUTO',
       generation: 7,
       active_app: 'autonomous',
-      reason: 'auto_resumed',
+      reason: 'resume_requested',
     });
     expect(last.resume).toBeNull();
   });
 
-  it('자동 복귀를 취소하면 수동주행 유지, 그 뒤에는 [재개]로만 돌아간다', () => {
+  it('카운트다운 중 [취소]하면 모드 유지, 다시 [재개]로만 돌아간다 (계약 v1.7)', () => {
     forceKill('autonomous');
     vi.advanceTimersByTime(3000 + 5000 + 3100);
-    expect(last.resume?.requested_by).toBe('auto');
+    expect(cancelResumeCountdown()).toBe(false); // 카운트다운 없음
+    expect(resume()).toBe(true);
     expect(cancelResumeCountdown()).toBe(true);
     expect(scenarioEvents()[0]).toMatchObject({
       type: 'drive.resume.cancelled',
-      payload: { reason: 'operator_cancelled' },
+      severity: 'INFO',
+      payload: { reason: 'operator_cancelled', requested_by: 'admin', generation: 6 },
     });
     expect(last.resume).toBeNull();
-    vi.advanceTimersByTime(10_000);
-    expect(last.control?.mode).toBe('AUTO_READY'); // 다시 자동으로 돌아가지 않는다
-    expect(cancelResumeCountdown()).toBe(false);
+    expect(last.resume_cancel).toMatchObject({ reason: 'operator_cancelled', requested_by: 'admin' });
+    vi.advanceTimersByTime(10_500);
+    expect(last.control).toMatchObject({ mode: 'AUTO_READY', generation: 6 }); // 자동으로 돌아가지 않는다
+    expect(last.resume_cancel).toBeNull(); // 10초 뒤 사라진다
     expect(resume()).toBe(true);
-    expect(last.resume?.requested_by).toBe('admin');
     vi.advanceTimersByTime(3100);
     expect(last.control).toMatchObject({ mode: 'AUTO', reason: 'resume_requested' });
   });
@@ -87,6 +93,7 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
   it('카운트다운 중 자율주행이 다시 죽으면 복귀 취소, 수동주행 유지', () => {
     forceKill('autonomous');
     vi.advanceTimersByTime(3000 + 5000 + 3100);
+    expect(resume()).toBe(true);
     expect(last.resume).not.toBeNull();
     forceKill('autonomous');
     expect(scenarioEvents().some((e) => e.type === 'drive.resume.cancelled')).toBe(true);
@@ -96,11 +103,11 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
   });
 
   it('네비게이션을 죽여도 주행은 그대로 (격리), 수동주행이 제어 중에 죽으면 SAFE_STOP', () => {
-    forceKill('message-board');
+    forceKill('interaction');
     expect(last.control).toMatchObject({ mode: 'AUTO', generation: 4 });
-    expect(last.apps['message-board']?.heartbeat_ago_ms).toBeNull();
+    expect(last.apps.interaction?.heartbeat_ago_ms).toBeNull();
     vi.advanceTimersByTime(3000 + 5000 + 200);
-    expect(last.apps['message-board']?.heartbeat_ago_ms).not.toBeNull();
+    expect(last.apps.interaction?.heartbeat_ago_ms).not.toBeNull();
     forceKill('autonomous');
     forceKill('manual');
     expect(last.control).toMatchObject({ mode: 'SAFE_STOP', active_app: null });
@@ -112,7 +119,7 @@ describe('mock 시연 시나리오 (MQTT 계약 v1.2 §5.2·§6)', () => {
     const seen = new Set<number | null>();
     for (let i = 0; i < 10; i++) {
       vi.advanceTimersByTime(100);
-      seen.add(last.apps['message-board']!.heartbeat_ago_ms);
+      seen.add(last.apps.interaction!.heartbeat_ago_ms);
     }
     expect(seen.size).toBe(10);
     for (const ms of seen) expect((ms ?? 0) % 100).toBe(0);

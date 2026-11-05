@@ -16,6 +16,7 @@ public record DriveState(
         Map<String, App> apps,
         Perception perception,
         Resume resume,
+        ResumeCancel resumeCancel,
         Map<String, Map<String, VmApp>> vmApps) {
 
     public enum SourceStatus {
@@ -123,6 +124,16 @@ public record DriveState(
             Long generation,
             long switchInMs,
             long acceptedAgoMs,
-            long remainingMs) {
+            long remainingMs,
+            String requestedBy) {
+    }
+
+    // The last drive.resume.cancelled, kept for a short while so screens can tell an operator cancel
+    // (reason operator_cancelled, the mode stays) from a countdown the gateway ended (contract v1.7).
+    public record ResumeCancel(
+            String reason,
+            String requestedBy,
+            Long generation,
+            long receivedAgoMs) {
     }
 }

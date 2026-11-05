@@ -13,6 +13,7 @@ from .config import RecoverySettings
 from .model import Judgment, VmObservation
 from .engine import RecoveryEngine
 from .mqtt import HealthPublisher, LinkState
+from .status import StatusReporter
 from .watcher import Watcher
 
 log = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class RecoveryWorker:
         engine: RecoveryEngine | None = None,
         clock: Callable[[], float] = time.monotonic,
         rejoin=None,
+        status: StatusReporter | None = None,
     ) -> None:
         self._settings = settings
         self._observer = observer
@@ -43,6 +45,7 @@ class RecoveryWorker:
         self._engine = engine
         self._clock = clock
         self._rejoin=rejoin
+        self._status = status
         self.ticks = 0
         self.skipped = 0
 
@@ -58,6 +61,7 @@ class RecoveryWorker:
             if self._engine is not None:
                 self._engine.collect(self._clock())  # 판정은 못 해도 끝난 복구 시도의 결과는 회수한다
                 if self._rejoin is not None:self._rejoin.completed(self._engine.completed_executions())
+            self._report(None)
             return []
         self.ticks += 1
         now = self._clock()
@@ -80,7 +84,17 @@ class RecoveryWorker:
         if self._engine is not None:
             self._engine.tick(now)  # 건강 스냅샷이 갱신된 뒤 복구 상태를 전진시킨다. 플랫폼 호출은 엔진의 실행 스레드에서
             if self._rejoin is not None:self._rejoin.completed(self._engine.completed_executions())
+        self._report(observations)
         return judgments
+
+    def _report(self, observations: list[VmObservation] | None) -> None:
+        """자가진단 상태(354). 진단 실패가 감시·복구 주기를 멈추게 하지 않는다."""
+        if self._status is None:
+            return
+        try:
+            self._status.report(observations)
+        except Exception:  # noqa: BLE001
+            log.exception("worker status report failed; readers will see the status as stale")
 
     def shutdown(self) -> None:
         """멈추기 전에 남은 retained 건강 스냅샷을 관측 불가로 바꾼다. 비정상 종료면 받는 쪽의 lease 만료가 같은 일을 한다."""

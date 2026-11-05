@@ -13,6 +13,10 @@ struct de_path_slot {struct lp_path path;atomic_uint generation,leases[DE_READER
 struct de_reference {unsigned slot;uint32_t generation,lease;};
 struct de_witness {uint64_t reference_revision,observation_sequence,valid_until_pi_us;char map_epoch[37];};
 struct drive_engine {
+ atomic_ullong resource_contention;
+ uint64_t path_peak,path_exhausted;
+ atomic_uint search_used,search_peak;
+ atomic_ullong search_exhausted;
  struct dw_pool maps;struct dw_odometry odometry;
  struct de_path_slot paths[DE_PATH_SLOTS];atomic_flag lock;
  const struct lp_config *config;const struct lp_assets *assets;
@@ -33,6 +37,9 @@ struct drive_engine {
  atomic_int search_reason,last_state_result,last_world_result;struct lp_budget budget;
  unsigned search_outcomes[LP_CLOCK+1];enum lp_result first_search_failure;
 };
+/* Metadata-only, nonblocking. Search values are published by its sole owner
+ * at completed slice boundaries; the search arrays are never scanned here. */
+enum de_result de_memory_read(struct drive_engine *,unsigned region,struct dw_memory *);
 void de_init(struct drive_engine *,const struct lp_config *,const struct lp_assets *);
 /* Inputs have authenticated source/clock metadata. Receive only publishes a
  * complete immutable map; it never performs search or reports app progress. */

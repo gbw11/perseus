@@ -313,6 +313,64 @@ def test_real_reboot_of_a_stopped_or_unregistered_vm(client, board):
     assert reboots(board) == []
 
 
+# ---- 자원 변경 (S15P31E110-368): 실제 update-resources·operation·control-operation ----
+
+
+def resize(client, vm_id, key, vcpus, memory_mib, **headers):
+    return client.put(f"/api/v1/vms/{vm_id}/resources", json={"vcpus": vcpus, "memory_mib": memory_mib},
+                      headers={"Idempotency-Key": key, **headers})
+
+
+def restart_body(vcpus, memory_mib):
+    return {"vm_id": str(DEBIAN), "name": "debian", "template_id": TEMPLATE_ID, "template_version": TEMPLATE_VERSION,
+            "vcpus": vcpus, "memory_mib": memory_mib}
+
+
+def test_real_resource_update_replays_refuses_other_keys_and_restarts_with_the_new_values(client, board):
+    debian = board.records["debian-dev"]
+    assert client.post("/api/v1/vms", json=restart_body(debian["vcpus"], debian["memory_mib"])).status_code == 201
+    running = resize(client, DEBIAN, "resize-while-running", 2, 768)
+    assert (running.status_code, running.json()["code"]) == (409, "InvalidState")
+    assert client.post(f"/api/v1/vms/{DEBIAN}/stop").status_code == 204
+    before = board.manager.call("get", {"vm_id": str(DEBIAN)})["data"]["vm"]
+    creates = sum(c[:2] == ["xl", "create"] for c in board.xen.calls)
+
+    first = resize(client, DEBIAN, "resize-debian-1", 2, 768, **{"X-Request-Budget-Ms": "20000"})  # 하위는 budget_ms 를 받지 않는다
+    assert first.status_code == 200, first.text
+    result = first.json()
+    assert result["before"] == {"vcpus": debian["vcpus"], "memory_mib": debian["memory_mib"]}
+    assert result["after"] == {"vcpus": 2, "memory_mib": 768} and result["operation_id"] and result["applies_on_next_start"] is True
+    after = board.manager.call("get", {"vm_id": str(DEBIAN)})["data"]["vm"]
+    assert (after["configuration"]["vcpus"], after["configuration"]["memory_mib"]) == (2, 768)
+    assert after["configuration_sha256"] != before["configuration_sha256"]
+    assert (after["generation"], after["initial_spec"], after["domid"]) == (before["generation"], before["initial_spec"], None)
+    assert sum(c[:2] == ["xl", "create"] for c in board.xen.calls) == creates  # 게스트를 시작하지 않는다
+
+    again = resize(client, DEBIAN, "resize-debian-1", 2, 768)  # 응답을 잃었다고 보고 같은 키·같은 본문
+    assert again.status_code == 200, again.text
+    assert again.json() == result  # 설정 해시가 바뀌었어도 원 요청으로 재전달해 원 결과
+    other = resize(client, DEBIAN, "resize-debian-1", 1, 512)
+    assert (other.status_code, other.json()["code"]) == (409, "VMExists")
+
+    assert keyed_stop(client, UBUNTU, "stop-then-resize").status_code == 200
+    reused = resize(client, DEBIAN, "stop-then-resize", 2, 768)  # 제어 원장의 키
+    assert (reused.status_code, reused.json()["code"]) == (409, "VMExists")
+    current = board.manager.call("get", {"vm_id": str(DEBIAN)})["data"]["vm"]
+    assert current["configuration_sha256"] == after["configuration_sha256"]
+
+    old = client.post("/api/v1/vms", json=restart_body(debian["vcpus"], debian["memory_mib"]))
+    assert (old.status_code, old.json()["code"]) == (409, "VMExists")
+    restarted = client.post("/api/v1/vms", json=restart_body(2, 768))
+    assert restarted.status_code == 201, restarted.text
+    assert (restarted.json()["vcpus"], restarted.json()["memory_mib"]) == (2, 768)
+
+
+def test_real_resource_update_of_unregistered_or_never_stopped_vm(client, board):
+    assert resize(client, NEW_VM, "resize-missing", 2, 768).status_code == 404
+    legacy = resize(client, DEBIAN, "resize-no-stopped-intent", 2, 768)  # 등록만 된 옛 VM 은 stopped 의도가 없다
+    assert (legacy.status_code, legacy.json()["platform_code"]) == (409, "INTENT_MISMATCH")
+
+
 def test_real_budget_exhausted_submits_nothing(board):
     manager = SerializedManager(board.manager)
     driver = PlatformDriver(manager, Xl(FakeRunner({("xl", "info"): XL_INFO})))

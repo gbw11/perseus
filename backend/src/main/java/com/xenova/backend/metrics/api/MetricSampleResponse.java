@@ -3,6 +3,7 @@ package com.xenova.backend.metrics.api;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.xenova.backend.agent.domain.MetricSample;
 import com.xenova.backend.agent.domain.MetricSampleData.NetworkObservation;
+import com.xenova.backend.agent.domain.MetricSampleData.TelemetryObservation;
 import com.xenova.backend.agent.domain.MetricValue;
 import java.time.Instant;
 import java.util.List;
@@ -17,7 +18,8 @@ public record MetricSampleResponse(
         Instant receivedAt,
         Integer windowMs,
         List<MetricValue> values,
-        @JsonInclude(JsonInclude.Include.NON_NULL) NetworkObservation network) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) NetworkObservation network,
+        @JsonInclude(JsonInclude.Include.NON_NULL) TelemetryObservation telemetry) {
 
     public static MetricSampleResponse of(MetricSample sample, List<MetricValue> values) {
         return new MetricSampleResponse(
@@ -29,6 +31,7 @@ public record MetricSampleResponse(
                 sample.getReceivedAt(),
                 sample.getWindowMs(),
                 values,
-                sample.getNetwork());
+                sample.getNetwork(),
+                sample.getTelemetry());
     }
 }

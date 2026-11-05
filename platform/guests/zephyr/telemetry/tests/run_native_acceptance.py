@@ -67,6 +67,8 @@ def main():
     parser.add_argument("--execute", action="store_true", required=True)
     parser.add_argument("--extended", action="store_true", help="ACL, disconnect, native boot/session replacement")
     parser.add_argument("--resources-off",action="store_true",help="paired CPU/pool-disabled candidate; require unsupported CPU, never fake zero")
+    parser.add_argument("--manual-memory",action="store_true",help="actual MANUAL workers + 8-region contract")
+    parser.add_argument("--resource-pressure",action="store_true",help="20 extra real kernel threads per guest")
     args = parser.parse_args()
     if os.geteuid() or os.readlink("/proc/self/ns/net") == os.readlink("/proc/1/ns/net"):
         parser.error("root in a new isolated network namespace required")
@@ -108,10 +110,19 @@ def main():
             raise RuntimeError("owned test process failed, pid=" + str(process.pid))
 
     def subscriber(label, duration):
-        return spawn(label, [sys.executable, "-B", BASE / "tools/reference_subscriber.py",
+        process=spawn(label, [sys.executable, "-B", BASE / "tools/reference_subscriber.py",
                      "--host", "192.0.2.1", "--port", "18883", "--credentials", private / "subscriber.json",
                      "--bindings-file", bindings_path, "--output", args.output / label,
                      "--duration", str(duration), "--internal-plaintext"])
+        # The reference subscriber creates received.jsonl only after CONNACK and
+        # SUBACK. A fixed sleep is not evidence that early boot events can arrive.
+        ready=args.output/label/"received.jsonl"
+        end=time.monotonic()+5
+        while not ready.exists():
+            if process.poll() is not None or time.monotonic()>=end:
+                raise RuntimeError("reference subscriber not ready: "+label)
+            time.sleep(.01)
+        return process
 
     try:
         spec = importlib.util.spec_from_file_location("readonly_peer", BASE / "tools/reference_subscriber.py")
@@ -162,7 +173,7 @@ def main():
             raise RuntimeError("private broker did not start")
         bindings_path = args.output / "bindings.json"
         bindings_path.write_text(json.dumps([public_binding(b) for b in bootstraps], indent=2))
-        sub = subscriber("initial", 10 if args.extended else 14)
+        sub = subscriber("initial", 34 if args.manual_memory else 10 if args.extended else 14)
         network_reader = peer.ReadOnlySubscriber("192.0.2.1", 18883,
             {"username": "telemetry-test-audit", "password": audit_password}, "xenova/v1/vms/+/metrics")
         network_result = readers.submit(collect_network_v1, network_reader, 8)
@@ -175,7 +186,8 @@ def main():
             path = private / (label + ".json")
             write_private(path, bootstrap)
             guest_env = dict(env, XT_TEST_BOOTSTRAP=str(path), XT_TEST_INSTANCE_ID=bootstrap["vm_id"],
-                             XT_TEST_DURATION_MS="32000" if args.extended and index == 0 else "12000", XT_TEST_STALL_MS="6000")
+                             XT_TEST_DURATION_MS="32000" if args.manual_memory or args.extended and index == 0 else "12000", XT_TEST_STALL_MS="6000")
+            if args.resource_pressure:guest_env["XT_TEST_RESOURCE_PRESSURE"]="1"
             if args.extended and index == 0:
                 guest_env.update(XT_TEST_RESTART_MS="25000", XT_TEST_ERROR_BURST="1")
             guests.append(spawn("guest-" + label, [args.binary, "-rt", "-no-color", "-eth-if=xtap" + label,
@@ -272,7 +284,7 @@ def main():
                             "publisher_restart_same_boot": True, "native_process_new_boot": True}
         else:
             for guest in guests:
-                wait(guest, 20)
+                wait(guest, 40 if args.manual_memory else 20)
             wait(sub, 10)
         late = subscriber("retained", 3)
         wait(late, 8)
@@ -365,6 +377,33 @@ def main():
             assert cpu_matched==0
         else:assert cpu_matched>0
         for index, bootstrap in enumerate(bootstraps):
+            app_messages=[m for m in messages if m['vm_id']==bootstrap['vm_id'] and
+                          m['type']=='telemetry.metrics' and m['payload']['family']=='app_memory']
+            regions={s['labels']['region'] for m in app_messages for s in m['payload']['samples']}
+            expected_regions={'drive_maps','drive_paths','drive_search_nodes','drive_odometry'}
+            if args.manual_memory:expected_regions|={'manual_input','manual_pending','manual_running','manual_result'}
+            assert regions==expected_regions,(regions,expected_regions)
+            if args.manual_memory:
+                results=[m for m in app_messages if m['payload']['samples'][0]['labels']['region']=='manual_result'
+                         and m['payload']['buffer'] is not None]
+                assert results and any(m['payload']['buffer']['phase']=='retained' and
+                    int(m['payload']['samples'][1]['value'])>0 for m in results)
+                for region in ('manual_pending','manual_running'):
+                    pages=[m for m in app_messages if m['payload']['samples'][0]['labels']['region']==region
+                           and m['payload']['buffer'] is not None]
+                    assert any(int(m['payload']['samples'][4]['value'])>0 for m in pages),(region,'peak missed')
+                inputs=[m for m in app_messages if m['payload']['samples'][0]['labels']['region']=='manual_input'
+                        and m['payload']['buffer'] is not None]
+                assert inputs and all(m['payload']['buffer']['input_status']=='missing' for m in inputs)
+                # Transport is not started here; the input-owner fixture covers receive/expiry.
+            maps=[{s['name']:s for s in m['payload']['samples']} for m in app_messages
+                  if m['payload']['samples'][0]['labels']['region']=='drive_maps']
+            observed=[v for v in maps if v['memory.app.used_bytes']['status']=='ok']
+            assert any(int(v['memory.app.used_bytes']['value'])>0 for v in observed)
+            assert any(v['memory.app.used_bytes']['value']=='0' and
+                       int(v['memory.app.high_water_bytes']['value'])>0 for v in observed)
+            for values in observed:
+                assert int(values['memory.app.used_bytes']['value'])+int(values['memory.app.free_bytes']['value'])==int(values['memory.app.capacity_bytes']['value'])
             loops = []
             rx_matched = 0
             for m in messages:

@@ -68,7 +68,14 @@ class TemplateRecipeTest(unittest.TestCase):
         self.assertEqual(len({e['template_id'] for e in entries}), 3)
         selected = next(e for e in entries if e['guest_kind'] == 'zephyr')
         self.assertEqual(selected['id'], 'xenova-zephyr-drive-lattice-lab-1.0.0')
-        self.assertEqual(selected['version'], '1.0.0-lab.2')
+        self.assertEqual(selected['version'], '1.0.8')
+        self.assertEqual(selected['directory'], 'zephyr/' + selected['id'] + '/1.0.8')
+        self.assertEqual(selected['manifest_sha256'], '47c8eaedb7032c93bbfb58e003d7bde4fd07b3de8506ccbed76912912b61649a')
+        defaults = json.loads((ROOT / 'platform/yocto/meta-xenova/recipes-core/xenova-platform/files/defaults.json').read_text())
+        self.assertEqual({v['template_version'] for v in defaults['firmware_instances']}, {'1.0.8'})
+        example = json.loads((ROOT / 'platform/first-install/example.config.json').read_text())['rtos_templates'][0]
+        self.assertTrue(example['template_dir'].endswith('/' + selected['directory']))
+        self.assertEqual(example['template_manifest_sha256'], selected['manifest_sha256'])
         self.assertTrue((ROOT / 'platform/guests/zephyr/starter.lock.json').is_file())
 
     def test_default_catalog_rejects_legacy_duplicate_or_escaping_selection(self):

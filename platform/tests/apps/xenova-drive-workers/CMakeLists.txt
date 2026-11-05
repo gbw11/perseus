@@ -6,7 +6,8 @@ list(APPEND ZEPHYR_EXTRA_MODULES ${PLATFORM}/guests/zephyr/diagnostics
   ${PLATFORM}/apps/common/xenova-drive-runtime)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(xenova_drive_workers)
-zephyr_link_libraries(-Wl,--wrap=z_impl_k_thread_create)
+zephyr_link_libraries(-Wl,--wrap=z_impl_k_thread_create -Wl,--wrap=z_impl_k_mutex_lock
+  -Wl,--wrap=drive_adapter_run_until -Wl,--wrap=xdiag_resources_try_get -Wl,--wrap=xdh_assess)
 target_include_directories(app PRIVATE ${DRIVE}
   ${PLATFORM}/apps/autonomous/zephyr/src ${PLATFORM}/apps/manual/zephyr/src)
 target_sources(app PRIVATE src/main.c ${DRIVE}/workers.c ${DRIVE}/adapter.c

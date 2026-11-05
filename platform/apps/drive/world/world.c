@@ -204,7 +204,10 @@ enum dw_result dw_link_decode(const uint8_t *p,size_t n,xenova_drive_DriveLink *
  return out->which_payload>=2&&out->which_payload<=6?DW_OK:DW_VERSION;
 }
 
-static bool lock(struct dw_pool *p) { return !atomic_flag_test_and_set_explicit(&p->lock,memory_order_acquire); }
+static bool lock(struct dw_pool *p) {
+ if(!atomic_flag_test_and_set_explicit(&p->lock,memory_order_acquire))return true;
+ atomic_fetch_add(&p->contention,1);return false;
+}
 static void unlock(struct dw_pool *p) { atomic_flag_clear_explicit(&p->lock,memory_order_release); }
 void dw_pool_init(struct dw_pool *p) { memset(p,0,sizeof(*p));atomic_flag_clear(&p->lock);p->current=-1; }
 enum dw_result dw_pool_source(struct dw_pool *p,const struct dw_trust *t) {
@@ -226,7 +229,7 @@ enum dw_result dw_reserve(struct dw_pool *p,struct dw_handle *h,struct dw_snapsh
   if(used>p->high_water)p->high_water=used;
   *h=(struct dw_handle){slot->generation,(uint8_t)k,0};*out=&slot->snapshot;rc=DW_OK;break;
  }
- if(rc)p->busy++;
+ if(rc){p->busy++;if(rc==DW_NO_SPACE&&p->next_generation!=UINT32_MAX)p->exhausted++;}
  unlock(p);return rc;
 }
 enum dw_result dw_publish(struct dw_pool *p,struct dw_handle h) {
@@ -302,6 +305,7 @@ static enum dw_result odom_add(struct dw_odometry *h,const dw_vehicle *v) {
   if(v->sequence<=last->sequence||v->pi_sample_us<=last->pi_sample_us||v->source_sample<=last->source_sample||v->source_us<=last->source_us)return DW_STALE;
  }
  h->samples[h->next]=*v;h->next=(h->next+1)%DW_ODOM_SLOTS;if(h->count<DW_ODOM_SLOTS)h->count++;
+ if(h->count>h->high_water)h->high_water=h->count;
  return DW_OK;
 }
 enum dw_result dw_odom_add(struct dw_odometry *h,const dw_vehicle *v) {
@@ -331,4 +335,21 @@ enum dw_result dw_current_pose(const dw_world *w,struct dw_odometry *h,uint64_t 
 const char *dw_reason(enum dw_result rc) {
  static const char *const names[]={"OK","BUSY","TOO_LARGE","DECODE","VERSION","SOURCE","ARRAY","GEOMETRY", "TIME","CONFIGURATION","STALE","NO_REFERENCE","EPOCH","HANDLE","NO_SPACE","NUMERIC"};
  return (unsigned)rc<sizeof(names)/sizeof(*names)?names[rc]:"INTERNAL_ERROR";
+}
+
+enum dw_result dw_memory_read(struct dw_pool *p,struct dw_memory *out){
+ if(atomic_flag_test_and_set_explicit(&p->lock,memory_order_acquire))return DW_BUSY;
+ unsigned used=0;
+ for(unsigned i=0;i<DW_MAP_SLOTS;i++)
+  if((int)i==p->current||p->slots[i].writing||atomic_load(&p->slots[i].readers))used++;
+ *out=(struct dw_memory){.reserved=sizeof(*p),.capacity=DW_MAP_SLOTS*sizeof(struct dw_snapshot),
+  .used=used*sizeof(struct dw_snapshot),.peak=p->high_water*sizeof(struct dw_snapshot),
+  .exhausted=p->exhausted,.contention=atomic_load(&p->contention)};
+ unlock(p);return DW_OK;
+}
+enum dw_result dw_odom_memory_read(struct dw_odometry *p,struct dw_memory *out){
+ if(atomic_flag_test_and_set_explicit(&p->lock,memory_order_acquire))return DW_BUSY;
+ *out=(struct dw_memory){.reserved=sizeof(*p),.capacity=sizeof(p->samples),
+  .used=p->count*sizeof(p->samples[0]),.peak=p->high_water*sizeof(p->samples[0])};
+ atomic_flag_clear_explicit(&p->lock,memory_order_release);return DW_OK;
 }

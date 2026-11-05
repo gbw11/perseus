@@ -292,7 +292,15 @@ static void metrics(struct xt_writer *w,struct xt_publisher *p,enum xt_kind kind
 	const struct xt_observation *s,uint64_t sent)
 {
 	const char *family=kind==XT_MEMORY ? "memory" : kind==XT_NETWORK ? "network" : kind==XT_PROGRESS ? "loop_progress" : "publisher";
-	xt_raw(w,",\"family\":\"%s\",\"samples\":[",family);
+	xt_raw(w,",\"family\":\"%s\"",family);
+	if(kind==XT_MEMORY){
+	 const struct xdr_snapshot *r=&s->resources;
+	 if(r->raw.at_ms>s->end_ms){w->error=-EINVAL;return;}
+	 /* The page allocator is cached; heap fields retain collection timing. */
+	 xt_raw(w,",\"source_sample_seq\":");xt_u64(w,r->sample);
+	 xt_raw(w,",\"observed_uptime_ms\":");xt_u64(w,r->raw.at_ms);
+	}
+	xt_raw(w,",\"samples\":[");
 	if (kind==XT_MEMORY) {
 		sample(w,p,"memory.kernel_heap.used_bytes","bytes","gauge",0,s->heap_rc,s->heap_used,0,NULL);xt_raw(w,",");
 		sample(w,p,"memory.kernel_heap.free_bytes","bytes","gauge",0,s->heap_rc,s->heap_free,0,NULL);xt_raw(w,",");
@@ -304,6 +312,13 @@ static void metrics(struct xt_writer *w,struct xt_publisher *p,enum xt_kind kind
 			else { accounted=s->heap_used+s->heap_free; }
 		}
 		sample(w,p,"memory.kernel_heap.accounted_bytes","bytes","gauge",0,rc,accounted,0,NULL);
+        const struct xdr_snapshot *r=&s->resources;
+        const char *names[]={"memory.firmware.ram_region_bytes","memory.firmware.mapped_bytes",
+         "memory.firmware.static_data_bytes","memory.page_allocator.free_bytes"};
+        uint64_t values[]={r->ram_region_bytes,r->mapped_bytes,r->static_data_bytes,r->page_free_bytes};
+        for(unsigned i=0;i<4;i++){
+         xt_raw(w,",");sample(w,p,names[i],"bytes","gauge",0,i==3?r->page_rc:r->firmware_rc,values[i],0,NULL);
+        }
 	} else if (kind==XT_NETWORK) {
 		const char *names[]={"tx_packets","rx_packets","tx_drop","rx_drop","pool_busy","protocol_errors"};
 		for (unsigned i=0;i<6;++i) {
@@ -356,11 +371,68 @@ static void distribution(struct xt_writer *w,struct xt_publisher *p,enum xt_kind
 	xt_raw(w,"}");
 }
 
+/* The buffer view describes stored owner metadata, never current permission.
+ * Negative original receive time remains unavailable; it is not rewritten to 0. */
+static void app_buffer(struct xt_writer *w,const struct xdr_app_region *m,
+ const struct xdr_app_buffer *b,unsigned index,uint64_t collection_end)
+{
+ xt_raw(w,",\"buffer\":");
+ if(m->rc){xt_raw(w,"null");return;}
+ if(b->phase>XDR_BUFFER_RETAINED||b->input_status>XDR_INPUT_CONTEXT_CHANGED||
+    b->source_rc>0||b->content_bytes>m->used||
+    (b->phase&&b->phase!=index+XDR_BUFFER_STORED)||
+    (!b->phase&&(m->used||b->content_bytes))||
+    (b->phase&&b->source_ms>=0&&(uint64_t)b->source_ms>collection_end)){
+  w->error=-ERANGE;return;
+ }
+ static const char *phases[]={"empty","stored","pending","running","retained"};
+ static const char *inputs[]={"missing","unclassified","accepted","invalid","expired","context_changed"};
+ xt_raw(w,"{\"phase\":");xt_string(w,phases[b->phase]);
+ xt_raw(w,",\"content_bytes\":");xt_u64(w,b->content_bytes);
+ xt_raw(w,",\"sequence\":");if(b->phase)xt_u64(w,b->sequence);else xt_raw(w,"null");
+ xt_raw(w,",\"source_uptime_ms\":");
+ if(b->phase&&b->source_ms>=0)xt_u64(w,(uint64_t)b->source_ms);else xt_raw(w,"null");
+ xt_raw(w,",\"owner_lifetime\":");if(b->lifetime)xt_u64(w,b->lifetime);else xt_raw(w,"null");
+ xt_raw(w,",\"context_revision\":");xt_u64(w,b->context_revision);
+ xt_raw(w,",\"connection_revision\":");xt_u64(w,b->connection_revision);
+ xt_raw(w,",\"input_status\":");xt_string(w,inputs[b->input_status]);
+ xt_raw(w,",\"source_rc\":%d,\"performed\":",b->source_rc);
+ if(index==XDR_MANUAL_REGIONS-1)xt_raw(w,"%s",boolean(b->performed));else xt_raw(w,"null");
+ xt_raw(w,",\"revoked\":%s,\"last_read_sequence\":",boolean(b->revoked));
+ if(index==XDR_MANUAL_REGIONS-1&&b->read_sequence)xt_u64(w,b->read_sequence);else xt_raw(w,"null");
+ xt_raw(w,"}");
+}
+
 static void resources(struct xt_writer *w,struct xt_publisher *p,enum xt_kind kind,
  const struct xt_observation *s,unsigned part)
 {
  const struct xdr_snapshot *r=&s->resources;
  if(r->rows>XDR_THREADS||r->regions>XDR_REGIONS){w->error=-ERANGE;return;}
+ if(kind==XT_APP_MEMORY){
+  static const char *ids[]={"drive_maps","drive_paths","drive_search_nodes","drive_odometry",
+   "manual_input","manual_pending","manual_running","manual_result"};
+  if(!r->app_registered||(r->app_count!=XDR_AUTO_REGIONS&&r->app_count!=XDR_APP_REGIONS)||
+     part>=r->app_count){w->error=-EINVAL;return;}
+  const struct xdr_app_region *m=&r->app[part];
+  if(m->rc>0||(!m->rc&&(m->used>m->capacity||m->peak>m->capacity||m->used>m->peak||m->capacity>m->reserved))){
+   w->error=-ERANGE;return;
+  }
+  xt_raw(w,",\"family\":\"app_memory\",\"source_sample_seq\":");xt_u64(w,r->sample);
+  xt_raw(w,",\"observed_uptime_ms\":");xt_u64(w,r->raw.at_ms);xt_raw(w,",\"samples\":[");
+  const char *names[]={"reserved_bytes","used_bytes","free_bytes","capacity_bytes","high_water_bytes","min_free_bytes","capacity_failure_total","contention_total"};
+  uint64_t values[]={m->reserved,m->used,m->capacity-m->used,m->capacity,m->peak,m->capacity-m->peak,m->exhausted,m->contention};
+  for(unsigned i=0;i<8;i++){
+   if(i)xt_raw(w,",");
+   xt_raw(w,"{\"name\":\"memory.app.%s\",\"unit\":\"%s\",\"kind\":\"%s\",\"encoding\":\"u64_decimal\",\"value\":",
+    names[i],i<6?"bytes":"count",i<6?"gauge":"raw_counter");
+   if(m->rc)xt_raw(w,"null");else xt_u64(w,values[i]);
+   xt_raw(w,",\"status\":\"%s\",\"reason\":",status(m->rc));xt_string(w,m->rc==-EBUSY?"owner_busy":m->rc==-ETIMEDOUT?"sample_expired":m->rc?status(m->rc):NULL);
+   xt_raw(w,",\"source_rc\":%d,\"labels\":{\"region\":",m->rc);xt_string(w,ids[part]);xt_raw(w,"}}");
+  }
+  xt_raw(w,"]");
+  if(part>=XDR_AUTO_REGIONS)app_buffer(w,m,&r->app_buffer[part-XDR_AUTO_REGIONS],part-XDR_AUTO_REGIONS,s->end_ms);
+  return;
+ }
  if(kind==XT_POOLS){
   xt_raw(w,",\"family\":\"memory_regions\",\"source_sample_seq\":");xt_u64(w,r->sample);
   xt_raw(w,",\"observed_uptime_ms\":");xt_u64(w,r->raw.at_ms);xt_raw(w,",\"samples\":[");
@@ -424,10 +496,12 @@ static void coverage(struct xt_writer *w,struct xt_publisher *p,const struct xdi
 
 static void thread(struct xt_writer *w,const struct xt_thread *t,size_t row)
 {
-	xt_raw(w,"{\"row_id\":%zu,\"name\":",row);xt_string(w,t->name);
+	if(t->stack_rc>0||(!t->stack_rc&&t->unused_bytes>t->stack_bytes)){w->error=-ERANGE;return;}
+    xt_raw(w,"{\"row_id\":%zu,\"name\":",row);xt_string(w,t->name);
 	xt_raw(w,",\"name_truncated\":%s,\"state_text\":",boolean(t->name_truncated));xt_string(w,t->state);
 	xt_raw(w,",\"state_flags\":%u,\"priority\":%d,\"stack\":{\"status\":\"%s\",\"source_rc\":%d,\"size_bytes\":",(unsigned)t->flags,t->priority,t->stack_rc==-E2BIG ? "scan_limit" : status(t->stack_rc),t->stack_rc);xt_u64(w,t->stack_bytes);
-	xt_raw(w,",\"unused_high_water_bytes\":");if (t->stack_rc) { xt_raw(w,"null"); } else { xt_u64(w,t->unused_bytes); }xt_raw(w,"}}");
+	xt_raw(w,",\"unused_high_water_bytes\":");if (t->stack_rc) { xt_raw(w,"null"); } else { xt_u64(w,t->unused_bytes); }
+    xt_raw(w,",\"max_used_bytes\":");if(t->stack_rc){xt_raw(w,"null");}else{xt_u64(w,t->stack_bytes-t->unused_bytes);}xt_raw(w,"}}");
 }
 
 static void snapshot(struct xt_writer *w,struct xt_publisher *p,enum xt_kind kind,
@@ -459,15 +533,15 @@ int xt_encode(struct xt_publisher *p,enum xt_kind kind,const struct xt_observati
 	uint64_t sent,const char sample_id[37],const char snapshot_id[37],unsigned part,struct xt_message *out)
 {
 	if (!p || !s || !out || !xt_uuid_valid(sample_id) || s->start_ms>s->end_ms || s->end_ms>sent ||
-    s->rows>XT_THREAD_MAX || kind<XT_INVENTORY || kind>XT_NETWORK_V1) { return -EINVAL; }
+    s->rows>XT_THREAD_MAX || kind<XT_INVENTORY || kind>XT_APP_MEMORY) { return -EINVAL; }
 	if ((kind==XT_HEARTBEAT || (kind>=XT_MEMORY && kind<=XT_PUBLISHER) ||
-	     kind==XT_CPU || kind==XT_POOLS || kind==XT_NETWORK_V1) && sent-s->end_ms>2000) {
+	     kind==XT_CPU || kind==XT_POOLS || kind==XT_NETWORK_V1 || kind==XT_APP_MEMORY) && sent-s->end_ms>2000) {
 		++p->counters.live_discarded;return -ETIMEDOUT;
 	}
 	if (kind==XT_NETWORK_V1) { return encode_network_v1(p,&s->resources,sent,out); }
 	/* Collection copies a cache: its new end timestamp cannot renew the source
 	 * window. Reject stale resource pages before allocating a stream sequence. */
-	if (kind==XT_CPU || kind==XT_POOLS) {
+	if (kind==XT_CPU || kind==XT_POOLS || kind==XT_APP_MEMORY) {
 		uint64_t source=kind==XT_CPU ? s->resources.cpu.end_ms : s->resources.raw.at_ms;
 		if (source>s->end_ms) { return -EINVAL; }
 		if (sent-source>2000) { ++p->counters.live_discarded;return -ETIMEDOUT; }
@@ -509,7 +583,7 @@ int xt_encode(struct xt_publisher *p,enum xt_kind kind,const struct xt_observati
 	else if (kind>=XT_INTERVAL && kind<=XT_ELAPSED) { distribution(&w,p,kind,s); }
 	else if (kind==XT_EVENT) { xt_raw(&w,",\"event\":");event(&w,p,&p->events[0]);xt_raw(&w,",\"coverage\":");coverage(&w,p,&s->history); }
 	else if (kind==XT_THREADS||kind==XT_HISTORY) { snapshot(&w,p,kind,s,snapshot_id,part); }
-	else if (kind==XT_CPU||kind==XT_POOLS) { resources(&w,p,kind,s,part); }
+	else if (kind==XT_CPU||kind==XT_POOLS||kind==XT_APP_MEMORY) { resources(&w,p,kind,s,part); }
 	else { metrics(&w,p,kind,s,sent); }
 	xt_raw(&w,"}}");
 	if (w.error) { out->bytes[0]=0;out->length=0;if (w.error==-ENOSPC) { ++p->counters.payload_oversize; }return w.error; }

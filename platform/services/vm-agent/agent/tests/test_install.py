@@ -41,6 +41,8 @@ def test_install_copies_packages_and_unit(tmp_path):
 
     assert (root / "opt/xenova/mqtt-client/xenova_mqtt/__init__.py").is_file()
     assert (root / "opt/xenova/agent/xenova_agent/heartbeat.py").is_file()
+    assert (root / "opt/xenova/agent/xenova_agent/commands.py").is_file()
+    assert (root / "opt/xenova/agent/xenova_agent/stress.py").is_file()
     assert not (root / "opt/xenova/agent/xenova_agent/tests").exists()
     assert not list(root.glob("opt/xenova/**/__pycache__"))
     text = (root / UNIT).read_text(encoding="utf-8")
@@ -51,6 +53,7 @@ def test_install_copies_packages_and_unit(tmp_path):
     assert "ConditionPathExists=/etc/xenova/instance-id" in directives
     assert "ExecStart=/usr/bin/python3 -m xenova_agent" in directives
     assert "Environment=PYTHONPATH=/opt/xenova/mqtt-client:/opt/xenova/agent" in directives
+    assert "RestartPreventExitStatus=3" in directives and "RuntimeDirectory=xenova-agent" in directives
     assert root / UNIT in installed
     assert not (root / "etc/systemd/system/xenova-agent.service.d").exists()
     if enable:

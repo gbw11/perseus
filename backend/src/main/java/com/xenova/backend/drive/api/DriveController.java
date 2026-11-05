@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -42,6 +43,14 @@ public class DriveController {
     @PostMapping("/api/v1/drive/resume")
     public ResponseEntity<Map<String, Object>> resume(Authentication authentication) {
         resumeRequester.request(username(authentication));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of("accepted", true));
+    }
+
+    // Cancel the resume countdown (contract v1.7). 202: the gateway answers with drive.resume.cancelled
+    // (reason operator_cancelled) and the mode stays; 409 NO_RESUME_COUNTDOWN when there is none.
+    @DeleteMapping("/api/v1/drive/resume")
+    public ResponseEntity<Map<String, Object>> cancelResume(Authentication authentication) {
+        resumeRequester.cancel(username(authentication));
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of("accepted", true));
     }
 

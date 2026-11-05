@@ -1,0 +1,53 @@
+{
+  "schema_version": "2.1",
+  "provider": "feat/platform/guest-clock-sync at 983fa12 plus uncommitted app-memory implementation (2026-11-04)",
+  "scope": "Contract fixtures and unmodified B 1.0.7 MQTT bodies. All board app-memory occupancy/high-water values are zero; no board planner progress or physical output is implied. UUIDs identify only test/capture executions; no credentials or secrets are included.",
+  "board_archive_sha256": "5841c3f6ac80ff5fc32ad46b11c7fda1e600714b05f412dd616a0f798b0ae3bf",
+  "files": [
+    {
+      "file": "app-memory-empty.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/app-memory-empty.json",
+      "sha256": "876b6de8aaf68c6ed53be89e2d4cb6510f83bcb97885ee4a8655b148816c240a"
+    },
+    {
+      "file": "app-memory-full.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/app-memory-full.json",
+      "sha256": "c0bb6cc9f86a27efa23b7cc5a8cb15d9cb1a15cc1eba5c306794ecdaf1dfbfd7"
+    },
+    {
+      "file": "app-memory-busy.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/app-memory-busy.json",
+      "sha256": "9f0f034c500ac1216598d5fdcad879389b6c2a1e066c920b81ed8d19fc8da2ba"
+    },
+    {
+      "file": "app-memory-released.json",
+      "source": "platform/guests/zephyr/telemetry/contract/fixtures-2.1/app-memory-released.json",
+      "sha256": "45bbf48bfb2b27856aab3474f3124f2ef1174bd9f985888f418c86ebe07066ad"
+    },
+    {
+      "file": "board-app-memory-drive_maps.json",
+      "source": "board-run4-wire-examples/app-memory-drive_maps.json",
+      "sha256": "42039c04e6cc26a97b8460f775422f49da6012797ec4bb4542bac5d9858b5bc6"
+    },
+    {
+      "file": "board-app-memory-drive_paths.json",
+      "source": "board-run4-wire-examples/app-memory-drive_paths.json",
+      "sha256": "912ea8369aaa5b1a704667cac3e2980153a48ea44e735c162eaa8b5373db0d03"
+    },
+    {
+      "file": "board-app-memory-drive_search_nodes.json",
+      "source": "board-run4-wire-examples/app-memory-drive_search_nodes.json",
+      "sha256": "ec305a20445d2c16ef422d7fc7e2a3a1e1ba6b087f758cca48d80b808b9b7b97"
+    },
+    {
+      "file": "board-app-memory-drive_odometry.json",
+      "source": "board-run4-wire-examples/app-memory-drive_odometry.json",
+      "sha256": "c9922c022cfad3dd05e8850ceaa2a6f8d5afdf649c960a1d588324b6e8c5d8bc"
+    },
+    {
+      "file": "board-memory.json",
+      "source": "board-run4-wire-examples/memory.json",
+      "sha256": "625857885b90c433cf26140af914626a732598bde320007718859cb11ac8b6ef"
+    }
+  ]
+}

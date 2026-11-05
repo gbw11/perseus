@@ -365,7 +365,7 @@ def test_absent_domain_uses_start_if_absent_with_observation_revision(tmp_path):
 
 @pytest.mark.parametrize("reason, kind", [(FailureReason.APP_HEARTBEAT_LOST, "zephyr"), (FailureReason.DOMAIN_CRASHED, "linux")])
 def test_zephyr_and_crashed_domains_use_force_restart(tmp_path, reason, kind):
-    w = make(tmp_path)
+    w = make(tmp_path, non_drive_vm_ids=[VM])
     w.watcher.failing(VM, reason)
     if reason == FailureReason.DOMAIN_CRASHED:
         w.platform.views[VM] = crashed_view()
@@ -988,7 +988,7 @@ def test_zephyr_force_is_held_without_current_evidence_for_the_current_execution
 
 
 def test_held_force_starts_normally_once_the_evidence_appears(tmp_path):
-    w = make(tmp_path)
+    w = make(tmp_path, non_drive_vm_ids=[VM])
     w.watcher.set(VM, HealthState.OBSERVATION_UNAVAILABLE)
     w.engine.on_judgment(zephyr_judgment())
     w.tick()
@@ -1005,7 +1005,7 @@ def test_held_force_starts_normally_once_the_evidence_appears(tmp_path):
 
 
 def test_crash_force_needs_xen_evidence_on_the_same_execution_not_the_app_channel(tmp_path):
-    w = make(tmp_path)
+    w = make(tmp_path, non_drive_vm_ids=[VM])
     w.watcher.failing(VM, FailureReason.DOMAIN_CRASHED)
     w.platform.views[VM] = crashed_view()
     w.engine.on_judgment(judgment(reason=FailureReason.DOMAIN_CRASHED, kind="zephyr"))
@@ -1021,8 +1021,19 @@ def test_drive_vm_force_needs_current_gateway_protection(tmp_path):
     assert held(w)  # Gateway 보호 제공자가 없다. 보호를 받은 뒤의 force 는 test_recovery_protection.py
 
 
+def test_zephyr_missing_from_the_drive_config_is_held_not_forced_without_protection(tmp_path):
+    w = make(tmp_path, drive_vm_ids=[VM2])  # 설정에 A(VM2)만 있고 B(VM)도 등록돼 있다
+    w.watcher.failing(VM, APP)
+    w.engine.on_judgment(zephyr_judgment())
+    w.tick()
+    w.advance(5)
+    w.tick()
+    assert held(w) and w.record().attempt == 0 and w.platform.recover_calls() == []
+    assert w.events == []
+
+
 def test_non_drive_vm_and_graceful_or_absent_paths_are_not_gated(tmp_path):
-    w = make(tmp_path, drive_vm_ids=[VM2])  # 이 VM 은 주행 VM 이 아니다
+    w = make(tmp_path, drive_vm_ids=[VM2], non_drive_vm_ids=[VM])  # 비주행으로 선언된 Zephyr
     w.watcher.failing(VM, APP)
     w.engine.on_judgment(zephyr_judgment())
     w.tick()
@@ -1071,7 +1082,7 @@ def test_unknown_drive_classification_holds_every_zephyr_force(tmp_path):
 @pytest.mark.parametrize("first, kind", [(APP, "zephyr"), (FailureReason.HEARTBEAT_LOST, "linux")])
 def test_crash_after_another_failure_is_stronger_evidence_for_force(tmp_path, first, kind):
     """최초 사유가 생존 신호 손실이어도 같은 실행이 지금 crashed 면 그 증거로 force 한다(사유가 바뀌어도 영구 보류하지 않음)."""
-    w = make(tmp_path)
+    w = make(tmp_path, non_drive_vm_ids=[VM])
     w.watcher.failing(VM, FailureReason.DOMAIN_CRASHED)
     w.platform.views[VM] = crashed_view()
     w.engine.on_judgment(judgment(reason=first, kind=kind))

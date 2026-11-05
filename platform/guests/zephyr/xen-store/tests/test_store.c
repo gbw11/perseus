@@ -25,7 +25,7 @@ struct peer {
 	bool response_clock, app_acl, data_missing, data_denied, data_read_only, app_signal, flood_clock;
 	int clock_reads, jump_at, parent_checks;
 	bool oversize, future_id, wrong_type, watch_during_read;
-	uint32_t tx;
+	uint32_t tx, closed_tx;
 	struct kv values[32], staged[32];
 	size_t value_count, staged_count;
 	char watch_path[256], token[16];
@@ -129,6 +129,8 @@ static void handle(struct peer *p, struct xsd_sockmsg h, char *payload)
 		snprintf(result,sizeof(result),"%u",p->tx);value=result;break;
 	case XS_TRANSACTION_END:
 		CHECK(h.tx_id==p->tx);
+		if (h.tx_id==p->closed_tx) { error="ENOENT";break; }
+		p->closed_tx=h.tx_id;
 		if (payload[0]=='F') { p->aborts++;p->staged_count=0; }
 		else {
 			p->commits++;
@@ -475,6 +477,34 @@ static void late_transaction_start_cleanup(void)
 	peer.hold=false;
 	CHECK(xs_close(&peer.client,100)==0);
 	CHECK(peer.aborts==1);
+}
+static void transaction_recovers_late_start(void)
+{
+	uint32_t tx;
+	peer.hold=true;
+	CHECK(xs_transaction_start(&peer.client,&tx,5)==-ETIMEDOUT);
+	CHECK(xs_transaction_start(&peer.client,&tx,5)==-EBUSY);
+	peer.hold=false;
+	step(&peer);
+	CHECK(xs_transaction_start(&peer.client,&tx,100)==0 && tx==2);
+	CHECK(peer.aborts==1 && peer.client.active_tx==tx);
+	CHECK(xs_transaction_start(&peer.client,&tx,100)==-EBUSY && peer.aborts==1);
+	CHECK(xs_transaction_end(&peer.client,tx,false,100)==0);
+}
+static void transaction_recovers_missing_or_late_end(void)
+{
+	uint32_t tx;
+	CHECK(xs_transaction_start(&peer.client,&tx,100)==0);
+	CHECK(xs_transaction_end(&peer.client,tx,false,0)==-ETIMEDOUT);
+	CHECK(xs_transaction_start(&peer.client,&tx,100)==0 && tx==2 && peer.aborts==1);
+	peer.hold=true;
+	CHECK(xs_transaction_end(&peer.client,tx,true,5)==-ETIMEDOUT);
+	CHECK(xs_transaction_end(&peer.client,tx,true,100)==-EALREADY);
+	peer.hold=false;
+	step(&peer);
+	CHECK(xs_transaction_start(&peer.client,&tx,100)==0 && tx==3);
+	CHECK(peer.commits==1 && peer.aborts==1);
+	CHECK(xs_transaction_end(&peer.client,tx,false,100)==0);
 }
 static void lost_transaction_start_cleanup(void)
 {
@@ -858,6 +888,8 @@ int main(int argc, char **argv)
 		{"watch_registration_timeout_cleanup", watch_registration_timeout_cleanup},
 		{"late_transaction_start_cleanup", late_transaction_start_cleanup},
 		{"lost_transaction_start_cleanup", lost_transaction_start_cleanup},
+		{"transaction_recovers_late_start", transaction_recovers_late_start},
+		{"transaction_recovers_missing_or_late_end", transaction_recovers_missing_or_late_end},
 		{"no_vif", no_vif},
 		{"discover_vif", discover_vif},
 		{"malformed_vif", malformed_vif},

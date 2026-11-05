@@ -166,7 +166,10 @@ bash scripts/check.sh
 | 시뮬레이터 (시뮬레이터 구성만) | 개발 PC → 브로커 | `gateway`(vehicle.status)와 `simulator`(sim/pose·world·result 쓰기, sim/command 읽기) 두 계정. Jetson 계정 `perception`은 `xenova/v1/sim/#`를 읽지 못한다 — 젯슨은 시뮬레이터 카메라 화면만 본다 (MQTT 계약 12장) |
 | 브라우저 | 백엔드 중계 | `ws://127.0.0.1:9001`은 개발 확인용 |
 
-Recovery Worker의 보드별 인증정보는 `/etc/xenova/recovery-worker.env`에 적용합니다.
+첫 설치 뒤 `xenova-recovery-config.service`가 기존 `dom0-server` 계정을
+`/etc/xenova/recovery-worker.env`에 공급합니다. 기존 운영 파일은 보존합니다.
+별도 root 전용 디렉터리로 내보낼 때는
+`xenova-broker export-account dom0-server --format recovery-env --output /private/recovery.env --execute`를 사용합니다.
 설정 항목과 서비스 사용법은 [dom0-manager 안내](../../services/dom0-manager/README.md)를 따릅니다.
 로컬 계정·ACL을 변경할 때는 `policy.json`을 수정한 뒤 생성·검사·passwd 재생성 순서로
 반영하며 `etc/accounts`를 별도로 편집하지 않습니다. 로컬 broker 종료는

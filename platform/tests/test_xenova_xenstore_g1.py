@@ -53,7 +53,7 @@ class NativeCoreTest(unittest.TestCase):
             self.assertEqual(compile_result.returncode, 0, compile_result.stdout+compile_result.stderr)
             result = subprocess.run([str(binary)],text=True,capture_output=True,timeout=30)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
-            self.assertIn("PASS 67 production-code cases",result.stdout)
+            self.assertIn("PASS 69 production-code cases",result.stdout)
             if os.environ.get("XENOVA_TEST_LOG_DIR"):
                 directory=Path(os.environ["XENOVA_TEST_LOG_DIR"])
                 directory.mkdir(parents=True,exist_ok=True)

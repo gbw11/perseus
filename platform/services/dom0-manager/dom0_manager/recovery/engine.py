@@ -126,6 +126,7 @@ class RecoveryEngine:
         new_id: Callable[[], UUID] = uuid4,
         inline: bool = False,
         drive_vm_ids: Iterable[UUID | str] | None = None,
+        non_drive_vm_ids: Iterable[UUID | str] = (),
         protection: GatewayProtection | None = None,
     ) -> None:
         self._policy = policy
@@ -137,8 +138,10 @@ class RecoveryEngine:
         self._wall = wall
         self._new_id = new_id
         self._inline = inline
-        # None: 주행 VM 이 어느 것인지 모른다(drive config 없음). Zephyr force 를 모두 보류한다. 빈 집합은 "주행 VM 없음"이 확인된 것
+        # None: 주행 VM 이 어느 것인지 모른다(drive config 없음). Zephyr force 를 모두 보류한다
         self._drive_vm_ids = None if drive_vm_ids is None else frozenset(str(UUID(str(v))) for v in drive_vm_ids)
+        # Gateway 보호 없이 force 해도 되는 Zephyr 는 명시적으로 선언한 것뿐이다. drive config 에 없다고 비주행으로 보지 않는다
+        self._non_drive_vm_ids = frozenset(str(UUID(str(v))) for v in non_drive_vm_ids)
         self._protection = protection  # 없으면 주행 VM force 는 보류된다
         self._settle_due: dict[UUID, float] = {}  # 닫힌 복구의 보호 정산을 다음에 시도할 시각(메모리. 재시작하면 바로 다시 본다)
         self._held: dict[UUID, str] = {}  # 근거 부족으로 보류 중인 복구의 마지막 사유. 바뀔 때만 로그한다
@@ -489,6 +492,9 @@ class RecoveryEngine:
         zephyr = record.guest_kind == "zephyr"
         if zephyr and self._drive_vm_ids is None:
             return "drive VMs are unknown (no drive config); every Zephyr force-restart is held"
+        if zephyr and str(record.vm_id) not in self._drive_vm_ids and str(record.vm_id) not in self._non_drive_vm_ids:
+            # 설정에서 빠진 Zephyr 를 비주행으로 보고 Gateway 보호 없이 force 하지 않는다. 비주행 Zephyr 는 따로 선언해야 한다
+            return "Zephyr VM is in neither the drive config nor the declared non-drive VMs; its force-restart is held"
         health = self._watcher.health(record.vm_id)
         if health is None or not health.intent_known:
             return "no current health with a known intent"
@@ -765,6 +771,18 @@ class RecoveryEngine:
         left = sum(len(r.pending_events) for r in self._records.values())
         if left:
             log.error("recovery worker degraded: %d recovery event(s) not stored in the outbox yet; kept in %s and retried every cycle", left, self._store.path)
+
+    def hold_reasons(self) -> list[str]:
+        """복구 실행·기록을 막고 있는 내부 상태(자가진단용, 354)."""
+        with self._lock:
+            reasons = []
+            if self._lost:
+                reasons.append("RECOVERY_HISTORY_LOST")  # 어떤 복구도 실행하지 않는다
+            if self._dirty:
+                reasons.append("RECOVERY_STATE_UNSAVED")  # 상태가 저장되기 전에는 이벤트를 내지 않는다
+            if any(record.pending_events for record in self._records.values()):
+                reasons.append("RECOVERY_EVENTS_PENDING")  # outbox 에 못 옮겨 Spring 이 재보충으로도 못 받는다
+            return reasons
 
     # ---- 보조 ----
 
