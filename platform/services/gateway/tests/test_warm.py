@@ -71,6 +71,14 @@ def test_symmetric_warm_mode_failover_rejoin(tmp_path,first,other):
     assert w.m.active_vm==first and w.m.mode is Mode.AUTO
     assert any(isinstance(action,ForwardDrive) for action in w.actions)
 
+def test_warm_vm_trust_failover_uses_standby_qualification(tmp_path):
+    w=WarmWorld(tmp_path/'authority');w.arm();generation=w.m.generation
+    actions=w.m.on_vm_untrusted(A,'autonomous',
+        {'trust':'UNTRUSTED','reason':'AUTO_DEADLINE_MISS','consecutive_misses':5,'command_id':'warm-delay-1'},w.t)
+    assert actions and w.m.active_vm==B and w.m.generation==generation+1
+    assert w.auth.value['distrusted'][0]['vm_id']==A and not w.m.output_permitted
+    w.tick(.1);assert w.m.active_vm==B and w.m.output_permitted
+
 def test_qualification_not_activation_and_no_legacy_fallback(tmp_path):
     w=WarmWorld(tmp_path/'authority');w.tick(3.2)
     assert w.m._qualified(B,'autonomous',w.t,held=True) and not w.m._ready(B,'autonomous',w.t)

@@ -338,6 +338,15 @@ static void test_payloads(void)
 	CHECK(xm_drive_input_parse(sp("{\"keys\":[]}"), &keys) == 0 && keys == 0, "empty keys");
 	CHECK(xm_drive_input_parse(sp("{\"keys\":\"up\"}"), &keys) == -EINVAL, "keys not array");
 	CHECK(xm_drive_input_parse(sp("{}"), &keys) == -EINVAL, "keys missing");
+
+	struct xm_auto_delay_command command;
+	const char *delay="{\"command_id\":\"cmd-1\",\"operation_id\":\"op-1\",\"expected_boot_id\":\"boot\",\"expires_at\":\"2026-11-06T00:00:00Z\",\"action\":\"auto_delay\",\"parameters\":{\"delay_ms\":20,\"duration_s\":30}}";
+	CHECK(xm_auto_delay_command_parse(sp(delay),&command)==0&&command.delay_ms==20&&command.duration_s==30,
+	      "auto delay command");
+	CHECK(xm_auto_delay_command_parse(sp("{\"command_id\":\"c\",\"expected_boot_id\":\"b\",\"expires_at\":\"t\",\"action\":\"auto_delay\",\"parameters\":{\"delay_ms\":101,\"duration_s\":30}}"),&command)==-ERANGE,
+	      "auto delay bounds");
+	CHECK(xm_auto_delay_command_parse(sp("{\"command_id\":\"c\",\"expected_boot_id\":\"b\",\"expires_at\":\"t\",\"action\":\"auto_delay\",\"parameters\":{\"delay_ms\":20,\"duration_s\":30,\"extra\":1}}"),&command)==-ERANGE,
+	      "auto delay extra parameter");
 }
 
 static void test_uuid(void)

@@ -41,6 +41,8 @@ class VerifiedDriveMachine(ControlMachine):
         self._cancel_ids:list[str]=[]  # 최근 취소 요청 message_id (메모리, 재전달 중복만 막는다)
         self.output_permitted=False;self._authorized=False;self.transport_ok=False;self.delivered=False
         self.failure=None;self._resume_authorized=False
+        self.untrusted={row['vm_id']:dict(row) for row in value.get('distrusted',[])}
+        self._trust_commands={row['command_id'] for row in self.untrusted.values()}
         self.continuous_handoff=False;self._handoff_grace_until=0.;self._resume_auto=False
         self._resume_vm=self.active_vm
         # Restart restores preference, never output permission, even if the last
@@ -69,9 +71,10 @@ class VerifiedDriveMachine(ControlMachine):
 
     def _bound(self,vm,now,app=None):
         from xenova_mqtt.drive_binding import app_instance
-        if self.authority.protected(vm):return False
         row=self.bindings.current(vm,now)
         if not row:return False
+        if self.authority.protected_execution(vm)==row['execution_id']:return False
+        if vm in self.untrusted and row['execution_id']==self.untrusted[vm]['execution_id']:return False
         return all(self.sessions.get((vm,target))==(row['execution_id'],row['boot_id'],app_instance(row,target))
                    for target in (DRIVE_APPS if app is None else (app,)))
 
@@ -108,6 +111,34 @@ class VerifiedDriveMachine(ControlMachine):
         if vm in self.nodes and app in DRIVE_APPS and self._bound(vm,t,app):
             self.nodes[vm][app].last_heartbeat_t=t
 
+    def on_vm_untrusted(self,vm,app,payload,t):
+        """Atomically revoke the current owner and select a prepared mirror.
+
+        The new owner remains disarmed until it applies the newly issued
+        generation. A missing mirror therefore becomes SAFE_STOP, never a
+        continuation of output from the distrusted execution.
+        """
+        if (vm!=self.active_vm or app!=AUTONOMOUS or self.active_app!=AUTONOMOUS or
+            not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED' or
+            payload.get('reason')!='AUTO_DEADLINE_MISS' or
+            type(payload.get('consecutive_misses')) is not int or payload['consecutive_misses']<5):return []
+        command_id=payload.get('command_id')
+        if not isinstance(command_id,str) or not command_id or len(command_id)>128 or command_id in self._trust_commands:return []
+        binding=self.bindings.current(vm,t)
+        if binding is None:return []
+        self._trust_commands.add(command_id)
+        distrust={'vm_id':vm,'execution_id':binding['execution_id'],'reason':payload['reason'],'command_id':command_id,
+                  'observed_monotonic_ms':int(t*1000),'generation':self.generation}
+        self.untrusted[vm]=distrust
+        self.nodes[vm][AUTONOMOUS].pending=None
+        other=next(candidate for candidate in self.vm_ids if candidate!=vm)
+        actions=[Measure('vm_untrusted',{'vm_id':vm,'reason':payload['reason'],'command_id':command_id,
+                                         'gen':self.generation,'t':t})]
+        if self.transport_ok and self._qualified(other,AUTONOMOUS,t,held=True):
+            return actions+self._change(self.mode,other,'vm_untrusted',t,arm=True,distrust=distrust)
+        self._authorized=False
+        return actions+self._change(Mode.SAFE_STOP,vm,'no_fresh_standby',t,distrust=distrust)
+
     def _ready(self,vm,app,now,held=False):
         p=self.prepared[vm,app]
         return bool(self._bound(vm,now,app) and p.generation==self.generation and p.state=='READY' and
@@ -120,7 +151,10 @@ class VerifiedDriveMachine(ControlMachine):
                     0<=now-p.observed<=self.readiness_lease_s)
 
     def _qualified(self,vm,app,now,held=False):
-        return self._ready(vm,app,now,held=held)
+        return vm not in self.untrusted and not self.authority.protected(vm) and self._ready(vm,app,now,held=held)
+
+    def rejoin_ready(self,vm,app,now):
+        return vm in self.untrusted and self.authority.protected(vm) and self._ready(vm,app,now,held=True)
 
     def node_status(self,vm,now):
         app=self.active_app or MANUAL_APP
@@ -162,11 +196,11 @@ class VerifiedDriveMachine(ControlMachine):
             failure={'reason':reason,'generation':self.generation,'observed_monotonic_ms':int(now*1000)})
         except AuthorityError:self.failure='AUTHORITY_STORAGE_UNCERTAIN'
 
-    def _change(self,mode,vm,reason,now,*,arm=False,manual=None):
+    def _change(self,mode,vm,reason,now,*,arm=False,manual=None,distrust=None):
         cancelled=[] if reason=='resume_requested' else self._cancel_countdown(reason,now)
         self._countdown=None;self._resume_requested.clear()
         self.output_permitted=False
-        try:self.authority.issue(mode,vm,reason,now,self.apply_timeout_s,arm=arm,manual=manual)
+        try:self.authority.issue(mode,vm,reason,now,self.apply_timeout_s,arm=arm,manual=manual,distrust=distrust)
         except AuthorityError as exc:
             self._fail(str(exc),now)
             return [ForwardStop(self.generation)]

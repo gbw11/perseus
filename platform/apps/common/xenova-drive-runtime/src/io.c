@@ -3,8 +3,10 @@
  * The calculation owns payload parsers and never waits for this worker's I/O. */
 #include <xenova/drive_io.h>
 #include <xenova/diagnostics.h>
+#include <xenova/auto_delay.h>
 #include <zephyr/sys/atomic.h>
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 K_MUTEX_DEFINE(exchange_lock);
@@ -15,6 +17,13 @@ static struct k_thread thread;
 static atomic_t stop;
 static struct xm_zclient *client;
 static char control_topic[XM_TOPIC_MAX], input_topic[XM_TOPIC_MAX], perception_topic[XM_TOPIC_MAX];
+#if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
+static char fault_command_topic[XM_TOPIC_MAX],fault_result_topic[XM_TOPIC_MAX],fault_event_topic[XM_TOPIC_MAX];
+static bool fault_command_registered,fault_running,fault_untrusted_sent;
+static int64_t fault_last_rx=-1,fault_started_ms,fault_deadline_ms;
+static struct xm_auto_delay_command fault_command;
+static char fault_last_status[12];
+#endif
 static bool dual_mode, perception_registered;
 static struct xm_zbinary binary;
 static bool binary_registered;
@@ -233,12 +242,67 @@ static void send_report(void) {
   k_mutex_unlock(&exchange_lock);
  }
 }
+#if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
+static void fault_result(const struct xm_auto_delay_command *command,const char *status,const char *error,uint64_t duration)
+{
+ char json[512];if(!command->command_id[0]||xm_auto_delay_result_json(json,sizeof(json),command,status,duration,error)<0)return;
+ if(command==&fault_command)strcpy(fault_last_status,status);
+ (void)xm_zclient_publish(client,fault_result_topic,"agent.command_result",json);
+}
+static bool same_fault_command(const struct xm_auto_delay_command *a,const struct xm_auto_delay_command *b)
+{
+ return !strcmp(a->command_id,b->command_id)&&!strcmp(a->operation_id,b->operation_id)&&
+  !strcmp(a->expected_boot_id,b->expected_boot_id)&&a->delay_ms==b->delay_ms&&a->duration_s==b->duration_s;
+}
+static void receive_fault_command(void)
+{
+ struct xm_envelope env;int64_t age;
+ if(xm_zclient_latest(client,fault_command_topic,&env,&age))return;
+ int64_t rx=0;for(size_t i=0;i<ARRAY_SIZE(client->latest);i++)if(!strcmp(client->latest[i].topic,fault_command_topic)){rx=client->latest[i].rx_ms;break;}
+ if(rx==fault_last_rx)return;fault_last_rx=rx;
+ if(!xm_span_eq(env.type,"agent.command"))return;
+ struct xm_auto_delay_command incoming;int rc=xm_auto_delay_command_parse(env.payload,&incoming);
+ if(xm_zclient_latest_retained(client,fault_command_topic)){fault_result(&incoming,"REJECTED","INVALID_COMMAND",0);return;}
+ if(rc){fault_result(&incoming,"REJECTED",rc==-ERANGE?"INVALID_PARAMETERS":"INVALID_COMMAND",0);return;}
+ if(strcmp(incoming.expected_boot_id,client->id.boot_id)){fault_result(&incoming,"REJECTED","BOOT_MISMATCH",0);return;}
+ if(fault_command.command_id[0]&&!strcmp(incoming.command_id,fault_command.command_id)){
+  if(!same_fault_command(&incoming,&fault_command))fault_result(&incoming,"REJECTED","IDEMPOTENCY_CONFLICT",0);
+  else fault_result(&fault_command,fault_last_status[0]?fault_last_status:(fault_running?"RUNNING":"FAILED"),NULL,
+                    fault_running?0:(uint64_t)MAX(k_uptime_get()-fault_started_ms,0));
+  return;
+ }
+ rc=drive_auto_delay_start(incoming.delay_ms,incoming.duration_s);
+ if(rc){fault_result(&incoming,"REJECTED",rc==-EBUSY?"BUSY":"STRESS_FAILED",0);return;}
+ fault_command=incoming;fault_running=true;fault_untrusted_sent=false;fault_started_ms=k_uptime_get();
+ fault_deadline_ms=fault_started_ms+(int64_t)incoming.duration_s*1000;fault_result(&fault_command,"RUNNING",NULL,0);
+}
+static void observe_fault_command(void)
+{
+ if(!fault_running)return;
+ struct drive_auto_delay_status status;drive_auto_delay_status_get(&status);int64_t now=k_uptime_get();
+ if(status.unhealthy&&!fault_untrusted_sent){
+  char json[256];snprintf(json,sizeof(json),"{\"trust\":\"UNTRUSTED\",\"reason\":\"AUTO_DEADLINE_MISS\",\"consecutive_misses\":%u,\"command_id\":\"%s\"}",status.consecutive_deadline_misses,fault_command.command_id);
+  if(!xm_zclient_publish(client,fault_event_topic,"vm.trust",json))fault_untrusted_sent=true;
+ }
+ if(now>=fault_deadline_ms){fault_running=false;fault_result(&fault_command,"SUCCEEDED",NULL,(uint64_t)(now-fault_started_ms));}
+ else if(!status.active){fault_running=false;fault_result(&fault_command,"FAILED","STRESS_FAILED",(uint64_t)(now-fault_started_ms));}
+}
+#endif
 static void owner(void *a,void *b,void *c) {
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
  while(!atomic_get(&stop)) {
   uint64_t before=clock_us();
   if(atomic_get(&stop)||!xd_owner_admit())break;
   int rc=xd_owner_prepare(client,control_topic,input_topic);
+#if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
+  if(!rc&&!fault_command_registered){
+   rc=xm_topic_vm(fault_command_topic,sizeof(fault_command_topic),client->id.vm_id,"command");
+   if(rc>=0)rc=xm_topic_vm(fault_result_topic,sizeof(fault_result_topic),client->id.vm_id,"command-result");
+   if(rc>=0)rc=xm_topic_vm_app_events(fault_event_topic,sizeof(fault_event_topic),client->id.vm_id,"autonomous");
+   if(rc>=0)rc=xm_zclient_subscribe(client,fault_command_topic,1);
+   fault_command_registered=rc>=0;if(rc>0)rc=0;
+  }
+#endif
   if(!rc&&dual_mode&&!perception_registered){
    rc=xm_zclient_subscribe(client,perception_topic,0);
    perception_registered=!rc;
@@ -259,12 +323,18 @@ static void owner(void *a,void *b,void *c) {
   xd_manual_bind(&manual_source,working.app_instances[1]);
   client->accept_input=accept_input;client->accept_context=NULL;
   before=clock_us();(void)xm_zclient_poll(client,0);after=clock_us();
+#if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
+  receive_fault_command();observe_fault_command();
+#endif
   k_mutex_lock(&exchange_lock,K_FOREVER);stats.poll_max_us=MAX(stats.poll_max_us,after-before);k_mutex_unlock(&exchange_lock);
   refresh();
   if(atomic_get(&stop)||!xd_owner_admit())break;
   send_command();send_report();
   (void)k_sem_take(&io_wake,K_MSEC(10));
  }
+#if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
+ if(fault_running){fault_running=false;drive_auto_delay_stop();fault_result(&fault_command,"FAILED","AGENT_STOPPING",(uint64_t)MAX(k_uptime_get()-fault_started_ms,0));}
+#endif
  if(initialized)xm_zclient_close(client);
  k_mutex_lock(&exchange_lock,K_FOREVER);
 #if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)

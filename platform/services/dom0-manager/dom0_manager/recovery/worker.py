@@ -66,6 +66,13 @@ class RecoveryWorker:
         self.ticks += 1
         now = self._clock()
         judgments = self._watcher.tick(observations, now, link=self._link())
+        if self._rejoin is not None:
+            current={str(obs.vm_id):obs for obs in observations}
+            for event in self._rejoin.trust_events():
+                obs=current.get(event['vm_id'])
+                judgment=None if obs is None else self._watcher.report_untrusted(
+                    obs,event['execution_id'],now)
+                if judgment is not None:judgments.append(judgment)
         for judgment in judgments:
             log.warning(
                 "vm %s judged %s (desired=%s domid=%s xen=%s signal_age=%s) recovery_id=%s",

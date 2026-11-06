@@ -177,6 +177,27 @@ def test_auto_ready_waits_for_both_app_applications_without_generation_bounce(tm
     w.m.on_readiness('autonomous',A,{'applied_generation':generation,'progress_seq':'9999','readiness':'READY','reason':None},w.t)
     w.m.step(w.t);assert w.m.phase=='APPLIED' and w.m.generation==generation
 
+def test_vm_untrusted_atomically_selects_prepared_mirror_and_blocks_old_owner(tmp_path):
+    w=World(tmp_path/'authority');w.arm();old=w.m.generation
+    payload={'trust':'UNTRUSTED','reason':'AUTO_DEADLINE_MISS','consecutive_misses':5,'command_id':'delay-1'}
+    actions=w.m.on_vm_untrusted(A,'autonomous',payload,w.t)
+    assert w.m.active_vm==B and w.m.generation==old+1 and not w.m.output_permitted
+    assert w.auth.value['owner']==B and w.auth.value['pending']['arm_after_apply']
+    assert w.auth.value['distrusted'][0]['vm_id']==A
+    assert any(isinstance(action,PublishControl) for action in actions)
+    assert not w.m.on_command('autonomous',A,{'generation':w.m.generation,'v_mps':1.,'steer_rad':0},w.t,
+                              {'message_id':str(uuid4())})
+    assert w.m.on_vm_untrusted(A,'autonomous',payload,w.t)==[]
+    w.tick(.1);assert w.m.output_permitted and w.m.active_vm==B
+    assert any(isinstance(action,ForwardDrive) for action in w.actions)
+
+def test_vm_untrusted_without_prepared_mirror_enters_safe_stop(tmp_path):
+    w=World(tmp_path/'authority');w.arm();w.m.prepared[B,'autonomous'].observed=None
+    actions=w.m.on_vm_untrusted(A,'autonomous',
+        {'trust':'UNTRUSTED','reason':'AUTO_DEADLINE_MISS','consecutive_misses':5,'command_id':'delay-2'},w.t)
+    assert w.m.mode is Mode.SAFE_STOP and w.m.active_vm==A and not w.m.output_permitted
+    assert any(isinstance(action,ForwardStop) for action in actions)
+
 class Client:
     connected=True;connections=1
     def __init__(self):self.handlers={};self.published=[];self.status='acknowledged'
@@ -231,6 +252,18 @@ def test_runner_rejects_retained_and_stale_causation_resume(tmp_path):
     runner._enqueue(message(w,A,'autonomous','app.readiness',{'applied_generation':w.m.generation,
         'progress_seq':'9999','readiness':'READY','reason':None},retained=True));runner._drain()
     assert w.m.prepared[A,'autonomous'].observed==p
+
+def test_runner_routes_current_nonretained_vm_trust_event(tmp_path):
+    w=World(tmp_path/'authority');w.arm();client=Client()
+    runner=VerifiedGatewayRunner(client,MockSink(),authority=w.auth,bindings=w.cache,vm_ids=(A,B),clock=lambda:w.t)
+    runner.subscribe();runner.begin();runner.machine=w.m
+    payload={'trust':'UNTRUSTED','reason':'AUTO_DEADLINE_MISS','consecutive_misses':5,'command_id':'delay-3'}
+    runner._enqueue(message(w,A,'autonomous','vm.trust',payload));runner._drain()
+    assert w.m.active_vm==B and w.auth.value['owner']==B
+    # A retained or standby-originated signal cannot revoke the new owner.
+    generation=w.m.generation
+    runner._enqueue(message(w,B,'autonomous','vm.trust',{**payload,'command_id':'delay-4'},retained=True));runner._drain()
+    assert w.m.generation==generation and w.m.active_vm==B
 
 def test_runner_control_puback_is_not_app_application_and_aux_failure_isolated(tmp_path):
     w=World(tmp_path/'authority');client=Client();client.status='pending'

@@ -166,11 +166,12 @@ def subscribe_liveness(client: ClientLike, heartbeats: HeartbeatTable, app_heart
                 rejoin.on_readiness(message)
                 app_heartbeats.record_lifecycle(UUID(info.vm_id),info.app_id,env['boot_id'],env['agent_instance_id'],value,message.received_monotonic)
             elif message.type=='app.readiness' and not warm:rejoin.on_readiness(message)
+            elif message.type=='vm.trust':rejoin.on_trust(message)
             elif message.type=='app.heartbeat':
                 state=_valid_app_payload(message.payload)
                 if state:app_heartbeats.record(UUID(info.vm_id),info.app_id,state,env['boot_id'],env['seq'],
                     message.received_monotonic,instance_id=env['agent_instance_id'])
-        client.subscribe(VERIFIED_APP_EVENTS_FILTER,verified,qos=0)
+        client.subscribe(VERIFIED_APP_EVENTS_FILTER,verified,qos=1)
 
 
 def health_topic(vm_id: UUID) -> str:
