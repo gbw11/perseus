@@ -148,6 +148,46 @@ bench-001/
 
 기본 기록 상한은1GiB, 종료 결과 여유64KiB, 디스크 여유 하한8GiB다. 공간 부족·파일 오류·필수 stream 누락·실제 저장된 동기 후보 없음·강제 종료는 성공이 아니다. 정상 제한 시간 기록 완료는0, 런타임 실패/불완전 기록은1, 인수·설정 오류/기존 출력 경로는2다. 중간에 남은 파일은 삭제하지 않는다. 원본·index의 hash 대조와 불완전 기록 처리는 아래 재생기가 담당한다. 이 기록 형식은 정전 내구성이나 주행 준비를 보증하지 않는다.
 
+## YOLOP·RGB·native depth 장치 벤치
+
+`yolop-bench`는 같은 CAM_A video에서 RGB NV12와 BGR letterbox→YOLOP를 만들고, native RIGHT depth도 함께 수신한다. 모델은 [고정 자산 명세](assets/yolop-320x320.md)의 로컬 blob만 사용한다. 자산 검사·원 기동 기한·Device owner·단일 graph 시작을 유지하며 부팅 중 다운로드하지 않는다.
+
+`profiles/oak-yolop-rgb-depth-bench.example.json`을 저장소 밖에 복사하고 승인 MXID와 자산 디렉터리·manifest 경로를 채운다. 상대 경로는 profile 파일 기준이다. no-JPEG/REQUIRED 벤치 전용이며 기존 ABSENT 수집 profile과 섞지 않는다.
+
+```bash
+xenova-vehicle yolop-bench \
+  --profile "$HOME/xenova-config/yolop-bench.json" \
+  --duration-s 30 --output "$HOME/xenova-data/yolop-bench/run-001" --json
+```
+
+부모는 SDK를 import하지 않고 기존 capture와 공통인 spawn 감시·4KiB 제어 통로·실제 자식 종료를 사용한다. A에서 검증 bytes→Blob 등록은 한 session에 한 번이다. RGB/depth host queue8, NN output2, metadata-only passthrough8 및 device 입력1은 nonblocking이다. collector는 stream당 최대1개, 회차16개/4MiB 이하로 복사한다. NN 출력은 원 SDK 객체 수명 안에서 소유 bytes로 만들고, 실제 runtime tensor 이름·dtype·rank/dims·stride·offset·범위·겹침을 검증한다. compiler layout을 대신 넣지 않는다. 활성 FP16 값의 NaN/Inf도 검사한다.
+
+첫 NN layout과 SDK `getLayerFp16` 대조는 별도 `NN_LAYOUT_PROBE`의 원15초 이내에 한 번만 수행하고 추가 복사 비용을 기록한다. 완료 뒤 SDK/J clock barrier를 세워 그전에 소모한 프레임을 벤치 관측으로 재사용하지 않는다. cold startup90초, ASSET_CHECK15초·DEVICE_BOOT30초·PIPELINE_START30초·초기 probe15초는 원 기동 기한과 min이다. 늦게 돌아온 단계도 원 기한을 다시 받지 않는다.
+
+원 RGB와 NN passthrough/output은 동일 pipeline/capture binding, 원 sequence/device/SDK 시각으로 연결한다. ring은 stream별8개/500ms이며 늦은 결과·다른 context·순번 역전·입력 부재를 보고한다. depth는 같은 sequence로 묶지 않고 SDK 시각 차이10ms 이내의 후보만 표시한다. 이 값은 벤치 초깃값이며 metric 동기 오차 수락값이 아니다. RGB/depth 진전 공백500ms와 NN 기한을 분리한다. 기본 NN 첫 결과15초, 이후 수신 및 **검증된 원 입력 pairing 진전** 공백5초다. 다른 stream·heartbeat·미결합 NN 수신은 pairing 기한을 연장하지 않는다.
+
+전체 NN 연속 녹화가 아니라 최대3개의 독립 표본을 저장한다. 정상 대기2개와 실패 예약1개를 가진 A 내부 writer1개가 비차단 제출을 받는다. 기본 저장 상한64MiB(결과 여유64KiB 포함), 여유 공간 하한8GiB다. 결과에 실제 수신·연결/거절 분모, 원 시각, 관측된 수신률 계산용 경과시간, 검사 비용·수집 회차 시간·RSS를 남긴다. NN을 카메라15Hz와 같다고 가정하지 않는다.
+
+```text
+run-001/
+├── yolop-bench-result.json   # 원 기한·종료·관측/NN/pairing·writer 통계
+├── bench-manifest.json      # 자산/graph 선언·원 context·첫 NN layout/golden
+├── samples/0001/
+│   ├── source.json          # 원 RGB/depth/NN 시각·key·실제 runtime tensor metadata
+│   ├── sample-index.json    # 파일별 길이·SHA256
+│   ├── rgb.nv12
+│   ├── depth.raw16le
+│   ├── nn-buffer.bin
+│   └── *.fp16               # 검증된 runtime offset에서 분리한 세 layer
+└── failure/                 # 발생 시 최초 실패의 제한된 미검증 원자료
+```
+
+이 출력은 capture/replay v1 dataset이 아니며 기존 `replay`에 입력하지 않는다. NN 연속 기록·재생은 별도 형식/작업으로 확장한다. 실패 원자료는 `raw_unvalidated=true`이며 정상 tensor나 관측으로 승인하지 않는다. ImageManip pixel equivalence·실제 NN semantic parser·metric 보정은 별도 검증이다. 성공한 장치 벤치도 `nn_ready=false`, `metric_ready=false`, `runtime_readiness=not_evaluated`를 유지한다.
+
+정상 종료0, 런타임/검증/필수 입력 또는 pairing 정체1, 인수·profile·기존 출력 경로 오류2, SIGINT130/SIGTERM143이다. 저장 drain과 Device close를 동일15초 종료 예산에서 병행하고 실제 A 종료 전 새 owner를 시작하지 않는다. 정상적인 기한 종료는 무손실15Hz·트랙 인식 정확도·주행 준비의 수락을 뜻하지 않는다.
+
+최종 결과 파일은 별도 I/O 자식이 임시 파일을 준비한 뒤 부모의 COMMIT/ABORT 결정을 받아 게시한다. 그 결정 전 SIGINT/TERM은 중단 결과를 저장하고, 결정 뒤 도착한 신호는 `final_receipt.too_late_signals`에 기록하며 확정 결과를 뒤집지 않는다. 부모는 I/O 자식의 실제 종료까지 신호와 소유권을 유지한다. 최종화는 I/O5초+회수2초의 원7초 예산에서 한 번만 시도한다. 저장 실패·ACK/실종료 불명은 성공이 아니며, 정전·SIGKILL에 대한 완전 내구성 보장은 아니다.
+
 ## 카메라 없는 원본 재생
 
 `replay`는 위 version1 기록을 읽어 RGB NV12·native depth RAW16_LE 원본 bytes를 index 순서대로 재생한다. DepthAI·NumPy·OpenCV 설치나 카메라 연결은 필요 없다. 원 device/SDK/J 시각, stream별 순번, source key와 capture context를 유지하며, 저장 누락을 보간하거나 RGB/depth를 같은 노출로 재정의하지 않는다.

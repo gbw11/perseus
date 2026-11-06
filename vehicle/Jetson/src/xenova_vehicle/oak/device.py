@@ -68,7 +68,7 @@ class _DeviceLock:
             self.fd = None
 
 
-def _pipeline(dai, fps: int):
+def _pipeline(dai, fps: int, *, graph_extension=None):
     pipeline = dai.Pipeline()
     color = pipeline.create(dai.node.ColorCamera)
     color.setBoardSocket(dai.CameraBoardSocket.CAM_A)
@@ -122,6 +122,8 @@ def _pipeline(dai, fps: int):
         xout.input.setQueueSize(1)
         xout.input.setBlocking(False)
         output.link(xout.input)
+    if graph_extension is not None:
+        graph_extension(pipeline, color, stereo)
     return pipeline
 
 
@@ -155,6 +157,18 @@ class OakSource:
         self._last = {}
         self._started = False
 
+    def _build_pipeline(self, dai):
+        return _pipeline(dai, self.profile.fps)
+
+    def _queue_sizes(self) -> dict[str, int]:
+        return {"rgb_video": 8, "depth_right": 8}
+
+    def _graph_declaration(self, pipeline) -> dict:
+        return _json_copy(pipeline.serializeToJson())
+
+    def _decorate_receipt(self, receipt: dict) -> dict:
+        return receipt
+
     def start(self, on_stage) -> dict:
         """승인 MXID만 열어 graph를 정확히 한 번 시작하고 선언/장치 receipt를 반환한다."""
         if self._started:
@@ -166,8 +180,8 @@ class OakSource:
         self._dai = dai
         if dai.__version__ != "2.29.0.0":
             raise RuntimeError(f"DepthAI 2.29.0.0 required, found {dai.__version__}")
-        pipeline = _pipeline(dai, self.profile.fps)
-        graph = _json_copy(pipeline.serializeToJson())
+        pipeline = self._build_pipeline(dai)
+        graph = self._graph_declaration(pipeline)
         self._lock = _DeviceLock(self.profile.device_mxid)
         on_stage("DEVICE_BOOT")
         found = [info for info in dai.Device.getAllAvailableDevices()
@@ -187,8 +201,8 @@ class OakSource:
         if self._device.startPipeline(pipeline) is not True:
             raise RuntimeError("startPipeline did not confirm success")
         # v2 startPipeline가 만든 기본 blocking queue를 즉시 유한 nonblocking으로 바꾼다.
-        self._queues = {name: self._device.getOutputQueue(name=name, maxSize=8, blocking=False)
-                        for name in ("rgb_video", "depth_right")}
+        self._queues = {name: self._device.getOutputQueue(name=name, maxSize=size, blocking=False)
+                        for name, size in self._queue_sizes().items()}
         queues_configured_j_us = time.monotonic_ns() // 1000
         receipt = {"device_mxid": self._device.getMxId(), "depthai_version": dai.__version__,
                 "usb_speed": str(self._device.getUsbSpeed()), "sensors": sensors,
@@ -210,7 +224,7 @@ class OakSource:
                 "timestamp_offset": "END", "depth_alignment": "RECTIFIED_RIGHT",
                 "depth_unit": "millimeter", "focus_policy": "unlocked_bench_only",
                 "capture_ready": False, "metric_ready": False}
-        return _json_copy(receipt)
+        return _json_copy(self._decorate_receipt(receipt))
 
     def sample_clock(self) -> dict:
         """D=SDK steady clock를 J 단조시각 사이에서 읽는다. sync 오차 수락은 별도다."""

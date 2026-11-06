@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "profile_id": "oak-yolop-rgb-depth-bench-v1",
+  "device_mxid": "REPLACE_WITH_OAK_MXID",
+  "asset_dir": "../assets/yolop-320x320-rvc2-ov2021.4-sh6-v1",
+  "asset_manifest": "../assets/yolop-320x320-rvc2-ov2021.4-sh6-v1/asset-manifest.json",
+  "nn_requirement": "REQUIRED",
+  "jpeg_enabled": false,
+  "fps": 15,
+  "max_bytes": 67108864,
+  "min_free_bytes": 8589934592,
+  "startup_timeout_s": 90,
+  "stall_timeout_s": 0.5,
+  "close_timeout_s": 15,
+  "sync_tolerance_us": 10000,
+  "nn_first_timeout_s": 15,
+  "nn_stall_timeout_s": 5,
+  "diagnostic_samples": 3
+}
