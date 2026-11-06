@@ -1,5 +1,6 @@
 package com.xenova.backend.vm.application;
 
+import com.xenova.backend.agent.application.AgentInventoryCleaner;
 import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.event.application.EventRecorder;
 import com.xenova.backend.event.application.VmStateTracker;
@@ -43,6 +44,7 @@ public class VmService {
     private final EventRecorder eventRecorder;
     private final VmStateTracker stateTracker;
     private final VmRuntimeCache runtimeCache;
+    private final AgentInventoryCleaner inventoryCleaner;
     private final Clock clock;
 
     public VmService(
@@ -52,6 +54,7 @@ public class VmService {
             EventRecorder eventRecorder,
             VmStateTracker stateTracker,
             VmRuntimeCache runtimeCache,
+            AgentInventoryCleaner inventoryCleaner,
             Clock clock) {
         this.vmControlPort = vmControlPort;
         this.vmRecordRepository = vmRecordRepository;
@@ -59,6 +62,7 @@ public class VmService {
         this.eventRecorder = eventRecorder;
         this.stateTracker = stateTracker;
         this.runtimeCache = runtimeCache;
+        this.inventoryCleaner = inventoryCleaner;
         this.clock = clock;
     }
 
@@ -209,6 +213,8 @@ public class VmService {
             return null;
         });
         eventRecorder.vmDeleted(vmId, record.getName());
+        // Only after dom0-manager confirmed the delete. Failures are logged there and never fail the delete.
+        inventoryCleaner.vmDeleted(vmId);
     }
 
     // Marks the VM busy so the periodic state check does not report this operation's

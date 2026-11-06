@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.xenova.backend.common.error.ApiException;
+import com.xenova.backend.agent.application.AgentInventoryCleaner;
 import com.xenova.backend.event.application.EventRecorder;
 import com.xenova.backend.event.application.VmStateTracker;
 import com.xenova.backend.template.application.TemplateCatalog;
@@ -61,6 +62,9 @@ class VmServiceTest {
     private EventRecorder eventRecorder;
 
     @Mock
+    private AgentInventoryCleaner inventoryCleaner;
+
+    @Mock
     private VmStateTracker stateTracker;
 
     private VmService service;
@@ -73,7 +77,7 @@ class VmServiceTest {
         // Disabled cache: every read goes to the port, as these cases were written for.
         VmRuntimeCache runtimeCache = new VmRuntimeCache(
                 vmControlPort, new VmRuntimeCacheProperties(false, Duration.ofSeconds(1), Duration.ofSeconds(10)), clock);
-        service = new VmService(vmControlPort, vmRecordRepository, templateCatalog, eventRecorder, stateTracker, runtimeCache, clock);
+        service = new VmService(vmControlPort, vmRecordRepository, templateCatalog, eventRecorder, stateTracker, runtimeCache, inventoryCleaner, clock);
     }
 
     @Test
@@ -328,6 +332,18 @@ class VmServiceTest {
         assertThat(record.getLifecycle()).isEqualTo(VmLifecycle.RETIRED);
         verify(eventRecorder).vmDeleted("vm-1", "alpine-1");
         verify(stateTracker).forget("vm-1");
+        // Contract mqtt §3: the deleted VM's retained and stored inventory goes after dom0 confirmed the delete.
+        verify(inventoryCleaner).vmDeleted("vm-1");
+    }
+
+    @Test
+    void failedDestroyKeepsTheInventory() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        org.mockito.Mockito.doThrow(new ApiException(HttpStatus.CONFLICT, "INVALID_VM_STATE", "실행 중"))
+                .when(vmControlPort).destroy("vm-1");
+
+        assertThatThrownBy(() -> service.destroy("vm-1")).isInstanceOf(ApiException.class);
+        verify(inventoryCleaner, never()).vmDeleted(anyString());
     }
 
     @Test
