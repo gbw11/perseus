@@ -8,6 +8,7 @@ import com.xenova.backend.template.domain.VmTemplate;
 import com.xenova.backend.vm.domain.CreateVmCommand;
 import com.xenova.backend.vm.domain.Vm;
 import com.xenova.backend.vm.domain.VmControlPort;
+import com.xenova.backend.vm.domain.VmControlOperation;
 import com.xenova.backend.vm.domain.VmLifecycle;
 import com.xenova.backend.vm.domain.VmRecord;
 import com.xenova.backend.vm.domain.VmRecordRepository;
@@ -180,6 +181,18 @@ public class VmService {
         });
     }
 
+    public VmControlOperation reboot(String vmId, String requestKey) {
+        String validatedKey = validateRequestKey(requestKey);
+        findRecord(vmId);
+        return vmControlPort.requestReboot(vmId, validatedKey);
+    }
+
+    public VmControlOperation controlOperation(String vmId, String requestKey) {
+        String validatedKey = validateRequestKey(requestKey);
+        findRecord(vmId);
+        return vmControlPort.findControlOperation(vmId, validatedKey);
+    }
+
     // The platform retires the disk instead of deleting it. Keep the specification and vm_id for a future restore,
     // but hide the retired VM from the current v1 list/get/start/stop surface.
     public void destroy(String vmId) {
@@ -248,6 +261,17 @@ public class VmService {
         return vmRecordRepository.findById(vmId)
                 .filter(VmRecord::isRegistered)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "VM_NOT_FOUND", "존재하지 않는 VM입니다."));
+    }
+
+    private static String validateRequestKey(String requestKey) {
+        if (requestKey == null || requestKey.isEmpty() || requestKey.length() > 200
+                || requestKey.chars().anyMatch(character -> character < '!' || character > '~')) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "INVALID_ARGUMENT",
+                    "Idempotency-Key는 1~200자의 표시 가능한 ASCII 문자여야 합니다.");
+        }
+        return requestKey;
     }
 
     public record CreateResult(Vm vm, boolean created) {

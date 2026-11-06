@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.vm.domain.VmControlPort;
+import com.xenova.backend.vm.domain.VmControlOperation;
 import com.xenova.backend.vm.domain.VmLaunchSpec;
 import com.xenova.backend.vm.domain.VmRegistrationInventory;
 import com.xenova.backend.vm.domain.VmRuntime;
@@ -123,6 +124,28 @@ public class Dom0ManagerClient implements VmControlPort {
     }
 
     @Override
+    public VmControlOperation requestReboot(String vmId, String requestKey) {
+        return requireBody(executeCommand(() -> commandClient.post()
+                    .uri("/api/v1/vms/{vmId}/reboot", vmId)
+                    .header("Idempotency-Key", requestKey)
+                    .retrieve()
+                    .onStatus(status -> status.isError(), this::handleError)
+                    .body(VmControlOperation.class)));
+    }
+
+    @Override
+    public VmControlOperation findControlOperation(String vmId, String requestKey) {
+        return requireBody(executeQuery(() -> queryClient.get()
+                .uri(builder -> builder
+                        .path("/api/v1/vms/{vmId}/control-operations")
+                        .queryParam("request_key", requestKey)
+                        .build(vmId))
+                .retrieve()
+                .onStatus(status -> status.isError(), this::handleError)
+                .body(VmControlOperation.class)));
+    }
+
+    @Override
     public void destroy(String vmId) {
         executeCommand(() -> {
             commandClient.delete()
@@ -186,6 +209,7 @@ public class Dom0ManagerClient implements VmControlPort {
             case "VMExists" -> new ApiException(HttpStatus.CONFLICT, "VM_ALREADY_EXISTS", message);
             case "InvalidState" -> new ApiException(HttpStatus.CONFLICT, "INVALID_VM_STATE", message);
             case "InvalidArgument" -> new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", message);
+            case "OperationNotFound" -> new ApiException(HttpStatus.NOT_FOUND, "OPERATION_NOT_FOUND", message);
             // Passed on as 507 like dom0-manager: retrying the same request cannot succeed until resources free up.
             case "InsufficientResources" -> new ApiException(
                     HttpStatus.INSUFFICIENT_STORAGE, "INSUFFICIENT_RESOURCES", insufficientResourceMessage(error));
