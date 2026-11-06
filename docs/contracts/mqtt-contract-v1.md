@@ -231,6 +231,9 @@ verified payload의 필수 `expected_generation`은 현재 uint32 세대, 선택
 `message_id`는 요청 중복 방지에 사용한다. 과거 세대/게시 문맥·retained 요청·재전달 중복은
 새 승인으로 쓰지 않는다. 재연결 뒤에는 새 control 문맥을 확인한다. 출력 금지 상태의
 MANUAL/AUTO 재무장도 이 요청을 사용하며 legacy의 AUTO_READY 전용 규칙과 구별한다.
+SAFE_STOP 에서도 같은 요청을 받는다: Gateway 가 준비된 수동 VM 을 골라 MANUAL 로 재무장한다
+(`verified.on_resume`). 백엔드는 AUTO_READY·MANUAL·AUTO·SAFE_STOP 에서 요청을 보내고(그 밖의 모드는 409),
+적용할 수 없는 요청은 Gateway 가 이벤트 없이 무시한다 — 202 는 "보냈다"는 뜻이지 재무장 완료가 아니다.
 
 ```json
 {"type":"drive.resume.requested","causation_id":"<현재 control message_id>",
@@ -594,7 +597,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 | legacy 앱 계정 (`autonomous`·`manual`·`interaction`) | `xenova/v1/apps/{자기 app_id}/events`, `xenova/v1/probes/#`. `message-board` 계정은 정책에 남아 있으나 기본 생성하지 않는다(`default: false`) |
 | 젯슨 (`perception`) | `xenova/v1/apps/perception/events`, `xenova/v1/probes/#` |
 | 게이트웨이 (`gateway`) | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/vehicle/state.pb`([drive-world](drive-world/README.md)), `xenova/v1/apps/vehicle/events`, `xenova/v1/vms/+/drive/link/in`, `xenova/v1/probes/#` |
-| 백엔드 (`backend`) | `xenova/v1/apps/manual/input`, `xenova/v1/vms/+/command`, `xenova/v1/console/resume`, `xenova/v1/sim/command` (12장), `xenova/v1/probes/#` |
+| 백엔드 (`backend`) | `xenova/v1/apps/manual/input`, `xenova/v1/vms/+/command`, `xenova/v1/vms/+/inventory` (VM 삭제 때 retained 지우기, 3장), `xenova/v1/console/resume`, `xenova/v1/sim/command` (12장), `xenova/v1/probes/#` |
 | 시뮬레이터 (`simulator`, 시뮬레이터 구성만) | `xenova/v1/sim/pose`·`sim/world`·`sim/result`. 구독은 `xenova/v1/sim/command` 만. `vehicle.status` 는 게이트웨이 대역으로 `gateway` 계정을 따로 쓴다 (12장) |
 | VM 별 Telemetry (`telemetry-{vm_id}`) | `xenova/v1/vms/{자기 vm_id}/metrics`, v2 `xenova/v2/vms/{자기 vm_id}/telemetry/inventory`·`heartbeat`·`metrics`·`events`·`snapshot`. 읽기 없음 |
 | 읽기 전용 (`observer`, `telemetry-reference-subscriber`) | 없음. `observer` 는 `xenova/v1/#`, `telemetry-reference-subscriber` 는 `xenova/v2/vms/+/telemetry/+` 만 읽는다 |
@@ -823,6 +826,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.8 | 2026-11-04 | 3.2절 데모 명령 규칙 추가 (S15P31E110-123): MQTT-04 payload 필드·범위(`stress` 의 `cpu_workers`·`memory_mib`·`duration_s`), 유효 기간 300초·시계 허용 30초(`CLOCK_UNTRUSTED`), 같은 `command_id`·같은 요청은 재실행 없이 마지막 결과 재전송, 다른 요청은 `IDEMPOTENCY_CONFLICT`, 기록을 남기지 못하면 실행하지 않음(`STATE_UNAVAILABLE`), MQTT-05 상태 흐름과 오류 코드, `agent_exit` 의 종결 결과는 `ACCEPTED` 하나이고 PUBACK 확인 뒤 종료(PUBACK 전 재시작은 이어서 진행), MQTT-05 중복은 백엔드가 `(vm_id, command_id)` 집계 키로 처리(같은 결과 재전달은 무시, `RUNNING` → 종결은 전이, 종결 뒤 다른 종결은 계약 위반). 데모 설정이 꺼진 에이전트는 `DEMO_DISABLED`. 10장 미확정에서 명령 만료 허용 범위 제외 |
 | v1.8.1 | 2026-11-06 | 5.4 `perception.result` 의 좌표·부호(원점·축·`lane_offset_m`·`heading_err_rad` 부호·장애물 기준점·순서·최대 8개)를 구현이 이미 따르는 규칙대로 명시 (S15P31E110-156 후속, -249). 6.3 `app.lifecycle` reason 에 C·Python 이 이미 받는 lattice 계산 코드 23개를 적음. 7.1 의 "기존 1024 bytes 상한" 을 실제(공통 C 수신기 1024 bytes, 정책 표는 64 KB)대로 고침. 필드·타입·토픽은 그대로 |
 | v1.8.2 | 2026-11-06 | 구현에 맞춤: 5.1·6.1 `app.heartbeat` 끊김 기준을 주체별로 구분(표시 3초, 복구 서비스 재시작 15초·Linux 30초), 2장 백엔드 heartbeat 순서 판정(같은 instance 는 `seq`, 다른 instance 는 `sent_at`), 9장 ACL 표를 `policy.json` 기준으로 보완(v2 Telemetry, `drive/link/*`, `vehicle/state.pb`, 계정별 `probes/#`, `telemetry-{vm_id}`·읽기 전용 계정). 토픽·payload 변경 없음 |
+| v1.8.3 | 2026-11-06 | 5.2 verified 재개 요청을 SAFE_STOP 에서도 받는다(Gateway 가 수동 VM 으로 재무장), 백엔드 허용 모드 AUTO_READY·MANUAL·AUTO·SAFE_STOP 명시. 9장 `backend` 쓰기에 `xenova/v1/vms/+/inventory`(VM 삭제 때 retained inventory 지우기, 3장) 추가 — 사용자 결정. 토픽·payload 는 그대로 |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의
 QoS 교환은 메시지 전달을 위한 것이며 앱/장치 적용 확인을 대신하지 않는다.
