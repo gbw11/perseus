@@ -57,8 +57,10 @@ public class Dom0ManagerClient implements VmControlPort {
         return requireBody(executeQuery(() -> queryClient.get()
                 .uri(builder -> {
                     builder.path(sources ? "/api/v1/logs/sources" : "/api/v1/logs");
-                    filters.forEach((key, value) -> builder.queryParam(key, value));
-                    return builder.build();
+                    // Values go in as URI variables so they are fully encoded: as literal template text a
+                    // '{' broke the build (500) and a '+' reached dom0-manager as a space.
+                    filters.keySet().forEach(key -> builder.queryParam(key, "{" + key + "}"));
+                    return builder.build(filters);
                 })
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
@@ -138,8 +140,8 @@ public class Dom0ManagerClient implements VmControlPort {
         return requireBody(executeQuery(() -> queryClient.get()
                 .uri(builder -> builder
                         .path("/api/v1/vms/{vmId}/control-operations")
-                        .queryParam("request_key", requestKey)
-                        .build(vmId))
+                        .queryParam("request_key", "{requestKey}")
+                        .build(vmId, requestKey))
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
                 .body(VmControlOperation.class)));
@@ -207,6 +209,11 @@ public class Dom0ManagerClient implements VmControlPort {
         return switch (error.code() == null ? "" : error.code()) {
             case "VMNotFound" -> new ApiException(HttpStatus.NOT_FOUND, "VM_NOT_FOUND", message);
             case "VMExists" -> new ApiException(HttpStatus.CONFLICT, "VM_ALREADY_EXISTS", message);
+            // The board already uses this platform (domain) name for a different vm_id. Unlike VMExists it is never
+            // our own earlier launch, so it must not be read as success: it is the same public code as a Spring-side
+            // name clash.
+            case "VMNameConflict" -> new ApiException(
+                    HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "보드에 같은 이름의 VM이 이미 있습니다. 다른 이름을 사용하세요.");
             case "InvalidState" -> new ApiException(HttpStatus.CONFLICT, "INVALID_VM_STATE", message);
             case "InvalidArgument" -> new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", message);
             case "OperationNotFound" -> new ApiException(HttpStatus.NOT_FOUND, "OPERATION_NOT_FOUND", message);

@@ -37,6 +37,8 @@ public class MqttDriveClient implements SmartLifecycle, MqttCallbackExtended, Dr
     static final int[] QOS = {1, 0, 1, 0};
 
     private static final Logger log = LoggerFactory.getLogger(MqttDriveClient.class);
+    // Matches the 10 s connection timeout below.
+    static final long ACTION_TIMEOUT_MS = 10_000;
 
     private final MqttProperties properties;
     private final DriveStateTracker tracker;
@@ -70,6 +72,9 @@ public class MqttDriveClient implements SmartLifecycle, MqttCallbackExtended, Dr
             throw new IllegalStateException("Invalid MQTT broker settings: " + properties.brokerUrl(), exception);
         }
         client.setCallback(this);
+        // A QoS 1 publish (resume request) waits for PUBACK on an HTTP thread inside a synchronized method;
+        // without a limit a stalled broker would hang that request and every one queued behind it.
+        client.setTimeToWait(ACTION_TIMEOUT_MS);
         running = true;
         scheduler.execute(this::connect);
     }
@@ -128,8 +133,13 @@ public class MqttDriveClient implements SmartLifecycle, MqttCallbackExtended, Dr
 
     @Override
     public void messageArrived(String topic, MqttMessage message) {
-        tracker.accept(topic, message.getPayload(), message.isRetained())
-                .ifPresent(notice -> recorder.execute(() -> eventLogger.record(notice)));
+        // An exception thrown back to Paho closes the connection, so one bad message must not escape.
+        try {
+            tracker.accept(topic, message.getPayload(), message.isRetained())
+                    .ifPresent(notice -> recorder.execute(() -> eventLogger.record(notice)));
+        } catch (RuntimeException exception) {
+            log.warn("Dropped MQTT drive message on {}", topic, exception);
+        }
     }
 
     @Override

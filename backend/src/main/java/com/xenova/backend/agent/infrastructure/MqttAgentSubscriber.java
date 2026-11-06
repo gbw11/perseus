@@ -2,12 +2,15 @@ package com.xenova.backend.agent.infrastructure;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
 import com.xenova.backend.agent.application.AgentCommandPublisher;
+import com.xenova.backend.agent.application.RetainedInventoryClearer;
 import com.xenova.backend.agent.application.TelemetryHeartbeatMessageHandler;
 import com.xenova.backend.agent.application.VmTelemetryMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventBackfillService;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -31,7 +34,8 @@ import org.springframework.util.StringUtils;
 @Component
 @ConditionalOnProperty(prefix = "xenova.mqtt", name = "enabled", havingValue = "true")
 @EnableConfigurationProperties(MqttProperties.class)
-public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended, AgentCommandPublisher {
+public class MqttAgentSubscriber
+        implements SmartLifecycle, MqttCallbackExtended, AgentCommandPublisher, RetainedInventoryClearer {
 
     // Heartbeat and inventory use QoS 1, metrics QoS 0 (MQTT-01/02/03). v2 telemetry metrics and heartbeat are QoS 0.
     static final String[] TOPICS = {
@@ -43,6 +47,7 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
             TelemetryHeartbeatMessageHandler.TOPIC
     };
     static final int[] QOS = {1, 1, 0, 1, 0, 0};
+    static final long ACTION_TIMEOUT_MS = 10_000;
 
     private static final Logger log = LoggerFactory.getLogger(MqttAgentSubscriber.class);
 
@@ -58,6 +63,9 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
         thread.setDaemon(true);
         return thread;
     });
+
+    // Retained inventory clears that could not be sent yet; retried after every (re)connect.
+    private final Set<String> pendingInventoryClears = ConcurrentHashMap.newKeySet();
 
     private volatile MqttClient client;
     private volatile boolean running;
@@ -87,6 +95,8 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
             throw new IllegalStateException("Invalid MQTT broker settings: " + properties.brokerUrl(), exception);
         }
         client.setCallback(this);
+        // A QoS 1 publish (retained inventory clear) waits for PUBACK; a stalled broker must not hold the scheduler.
+        client.setTimeToWait(ACTION_TIMEOUT_MS);
         running = true;
         scheduler.execute(this::connect);
     }
@@ -129,6 +139,7 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
                 client.subscribe(TOPICS, QOS);
                 log.info("MQTT subscribed to {} topic filters", TOPICS.length);
                 recoveryEventBackfillService.requestBackfill();
+                pendingInventoryClears.forEach(this::publishInventoryClear);
             } catch (MqttException exception) {
                 log.error("MQTT subscribe failed", exception);
             }
@@ -155,12 +166,50 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
             telemetryHeartbeatHandler.handle(topic, message.getPayload(), message.isRetained(), receivedAt);
             return;
         }
+        if (message.getPayload().length == 0 && topic.endsWith("/inventory")) {
+            // The broker forwards our own retained-inventory clear (or anyone's) as an empty message: not a report.
+            return;
+        }
         handler.handle(topic, message.getPayload(), receivedAt);
+    }
+
+    // Contract §3: deleting a VM removes its retained inventory. An empty retained QoS 1 message clears it.
+    // Sent on the scheduler so the HTTP delete never waits for the broker.
+    @Override
+    public void clearRetainedInventory(String vmId) {
+        pendingInventoryClears.add(vmId);
+        try {
+            scheduler.execute(() -> publishInventoryClear(vmId));
+        } catch (RuntimeException exception) {
+            log.warn("Retained inventory clear for VM {} not scheduled: {}", vmId, exception.getMessage());
+        }
+    }
+
+    private void publishInventoryClear(String vmId) {
+        MqttClient current = client;
+        if (current == null || !current.isConnected()) {
+            log.warn("MQTT not connected: retained inventory of deleted VM {} will be cleared after reconnecting",
+                    vmId);
+            return;
+        }
+        try {
+            current.publish(inventoryTopic(vmId), new byte[0], 1, true);
+            pendingInventoryClears.remove(vmId);
+            log.info("Cleared retained inventory of deleted VM {}", vmId);
+        } catch (MqttException exception) {
+            log.warn("Clearing retained inventory of deleted VM {} failed ({}), retrying after reconnect",
+                    vmId, exception.getMessage());
+        }
+    }
+
+    static String inventoryTopic(String vmId) {
+        return AgentMessageHandler.TOPIC_PREFIX + vmId + "/inventory";
     }
 
     @Override
     public void deliveryComplete(IMqttDeliveryToken token) {
         // agent.command is QoS 1; command-result is the application-level answer.
+        // Retained inventory clears are confirmed synchronously in publishInventoryClear.
     }
 
     @Override
