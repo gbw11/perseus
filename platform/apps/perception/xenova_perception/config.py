@@ -78,7 +78,7 @@ class PerceptionSettings:
     password: str | None = None
     camera: Camera = Camera()
     stop_zone: StopZone = StopZone()
-    lane_width_m: float = 0.6         # 한쪽 차선만 보일 때 중심을 추정하는 차로 폭 (시뮬레이터 서킷, MQTT 계약 v1.4 §11)
+    lane_width_m: float = 0.6         # 한쪽 차선만 보일 때 중심을 추정하는 차로 폭 (시뮬레이터 서킷, MQTT 계약 §12)
     max_obstacles: int = 8            # 가까운 순으로 이만큼만 싣는다
     # 이 시간보다 오래된 프레임 결과는 다시 내지 않는다. 카메라가 멈췄는데 옛 결과를 계속 내면
     # 자율주행 VM 이 젯슨 끊김(시나리오 F6)을 알아채지 못한다

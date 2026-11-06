@@ -1,4 +1,4 @@
-"""서킷 트랙: 관리 콘솔 mock(simEngine.ts buildTrack)과 같은 계산인지, 계약 v1.4 §11 sim.world.track 형식인지."""
+"""서킷 트랙: 관리 콘솔 mock(simEngine.ts buildTrack)과 같은 계산인지, 계약 §12 sim.world.track 형식인지."""
 
 from __future__ import annotations
 
