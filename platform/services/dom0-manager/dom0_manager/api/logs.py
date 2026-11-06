@@ -6,7 +6,8 @@ import json
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse
 
 from ..runtime_logs import LogStore
 from ..errors import InvalidArgument, PlatformUnavailable
@@ -77,7 +78,8 @@ async def ingest(request: Request):
     supplied = raw_auth[7:] if raw_auth.startswith("Bearer ") else ""
     expected = credential.get("token_sha256", "") if isinstance(credential, dict) else ""
     if not expected or not supplied or not hmac.compare_digest(hashlib.sha256(supplied.encode()).hexdigest(), expected):
-        raise HTTPException(401, "source authentication required")
+        # 계약: 401 도 Error 스키마 {code, message}. HTTPException 은 {"detail": ...} 로 나가 형식이 어긋난다
+        return JSONResponse(status_code=401, content={"code": "Unauthorized", "message": "source authentication required"})
     if not IDENTIFIER.fullmatch(source_id):
         raise InvalidArgument("invalid source identity")
     body = bytearray()
