@@ -67,7 +67,8 @@ def vm(store, index=0):
 def test_configuration_explicit_opt_in_and_no_legacy_fallback(rig):
     store, source, _ = rig
     with pytest.raises(ValueError): load_bindings(PROFILE)
-    assert len(source.topics) == 8
+    assert len(source.topics) == 7  # 4 VM-scoped app topics + 3 interaction/Agent topics; no drive-state topic
+    assert "xenova/v1/display/drive-state" not in source.topics
     for index in (0, 1):
         for app in ("autonomous", "manual"):
             assert store.settings.bindings[index].app_topic(app) in source.topics

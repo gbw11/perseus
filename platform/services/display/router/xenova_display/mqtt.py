@@ -3,7 +3,6 @@ import json
 import logging
 
 import paho.mqtt.client as mqtt
-from .config import DISPLAY_DRIVE_TOPIC
 
 log = logging.getLogger(__name__)
 
@@ -23,8 +22,8 @@ class MqttSource:
         self.topics = tuple(dict.fromkeys([
             *[topic for b in self.settings.bindings if b.agent_supported for topic in
               (f"xenova/v1/vms/{b.vm_id}/heartbeat", f"xenova/v1/vms/{b.vm_id}/inventory")],
-            *[b.app_topic(app) for b in self.settings.bindings for app in b.report_app_ids],
-            *([DISPLAY_DRIVE_TOPIC] if self.settings.drive_transport == "mqtt" else [])]))
+            # Driving state comes from the Gateway context, never from an MQTT topic.
+            *[b.app_topic(app) for b in self.settings.bindings for app in b.report_app_ids]]))
         self.pending = {}
         self.early = {}
         self.subscribing = False
