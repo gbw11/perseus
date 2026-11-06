@@ -317,6 +317,20 @@ M-only 교체는 같은 capture tracker와 새 mapper/request 문맥의 parser t
 
 REQUIRED의 초기 준비5개만 구현한다. ABSENT는 실제 NN stream이 없는 source scope이며 NN_READY를 발급하지 않는다. OPTIONAL 상세 parser는 `OPTIONAL_PARSER_NOT_IMPLEMENTED`로 표시하고 timer를 시작하지 않는다. `classical_fallback_allowed=True`일 때의 OPTIONAL 정책 허용은 실제 classical/metric 경로 수락이 아니다. warmup 완료는 지속 freshness·정확도·METRIC_READY/WORLD_VALID/DRIVE_PERMITTED가 아니며 해당 권한을 올리는 API는 제공하지 않는다. 실제 worker·IPC·resource guard·재시작 실행은 호출하는 adapter의 별도 책임이다.
 
+## LocalEnvelope 구조와 유한 대기열
+
+`runtime.local_envelope`의 `decode_structure(raw_bytes)`와 `encode_structure(fields)`는 `StructuralPacket`을 반환한다. 공개 constructor도 같은 검사를 수행한다. exact12 outer key·canonical UUID/u64string·kind/domain·UTF-8 JSON과 상한을 검사한다. payload는 bounded opaque JSON object다. kind별 unknown payload key/type/role·peer·sequence·원 기한·cleanup 허가는 별도 admission 책임이며, 구조 성공으로 작업을 실행하지 않는다.
+
+packet은 최대4096B이고 root object를 depth1, payload object를 depth2로 세어 container depth6까지 허용한다. 모든 깊이의 decoded duplicate key, NaN/Inf·overflow float, lone surrogate, UTF16/BOM·잘못된UTF8·잘림·뒤 데이터·packet 앞뒤 whitespace를 거절한다. 내부 whitespace와 유효한 JSON 지수 표기는 허용하며 원 bytes를 보존한다. `packet.fields`/`packet.payload`는 새 사본이다. 이를 수정해도 큐·TX의 원 bytes는 바뀌지 않는다.
+
+encoder는 exact builtin JSON tree를 먼저 검사한다. node/container length/string character work≤4096, integer bitlength≤13653, container depth≤6와 cycle 검사를 거친 뒤 실제 JSON 문자열 escaping/UTF8·숫자 표현 비용을4096B 예산에 누적한다. `sort_keys=True, ensure_ascii=False, separators=(',',':'), allow_nan=False`로 출력하고 최종 bytecap을 다시 검사한다. 한 호출 동안 입력 tree를 바꾸지 않는 단일 owner 계약이다. decoder는 실제 수신4096B를 기준으로 수락한다. compact 지수 표기의 유한 float가 re-encode 때 길어질 수 있으므로 decode→encode 성공이나 bytes 동일성을 원 packet 보존의 대체물로 쓰지 않는다.
+
+`runtime.mailbox.RxMailbox`는 peer별 general8/latest HEARTBEAT1/terminal2를 보관한다. FAULT/STOP/STOPPED는 terminal이며 `pop()`은 terminal FIFO→general FIFO→heartbeat, 빈 경우None이다. `put(packet)`의 `PutResult`는 ACCEPTED/REPLACED_HEARTBEAT/BUSY_GENERAL/BUSY_TERMINAL을 구분하고 `.accepted`/bool은 접수만 뜻한다. 포화한 class를 덮어쓰거나 다른 class를 침범하지 않는다. heartbeat만 도착 최신 한 개로 교체한다. 실제 peer·sequence admission 뒤 사용하는 staging이며 논리 중복·원 순번 판정을 대신하지 않는다. RX 처리 우선순위는 이미 sequence가 붙은 TX wire 송신 순서와 별개다.
+
+`PendingTx.accept(packet)`은 빈 TX slot에만 접수한다. True는 실제 송신 완료가 아니다. `peek()`은 같은 `PendingTransmission` handle과 원 bytes를 돌려주며 EAGAIN 가정에서 변하지 않는다. 실제 전체 송신 완료 뒤 `finish(expected_handle)`로 현재 접수만 해제한다. 같은 packet을 다시 접수해도 새 handle이므로 옛 finish가 새 pending을 지우지 못한다. terminal/heartbeat도 pending을 교체하지 않는다. wire ACK·원 job 완료·sequence 발급·재시도·만료 삭제 기능은 없다.
+
+두 구조는 thread/lock/clock/sleep/I/O를 만들지 않는다. RX 최대11packet과 TX1packet의 encoded bytes 상한은49152B이며 Python 객체와 소비자가 따로 보유한 사본의 overhead는 별도다. local fence·기한 판정은 큐 상태와 관계없이 상위 actor가 수행해야 한다. 실제 socket/서비스/lease/메모리 회수와 full LocalEnvelope 의미 검증은 이 API가 제공하지 않는다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
