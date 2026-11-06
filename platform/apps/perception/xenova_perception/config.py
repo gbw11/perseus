@@ -82,7 +82,9 @@ class PerceptionSettings:
     max_obstacles: int = 8            # 가까운 순으로 이만큼만 싣는다
     # 이 시간보다 오래된 프레임 결과는 다시 내지 않는다. 카메라가 멈췄는데 옛 결과를 계속 내면
     # 자율주행 VM 이 젯슨 끊김(시나리오 F6)을 알아채지 못한다
-    stale_s: float = 0.5
+    # 자율 앱의 인지 끊김 기준(AUTO_PERCEPTION_TIMEOUT_MS 300 ms)보다 짧아야 한다. 0.5 s 면 마지막 프레임 뒤
+    # 최대 0.5 + 0.3 s 동안 옛 결과로 주행한다
+    stale_s: float = 0.2
     rate_hz: float = RESULT_RATE_HZ
     show: bool = False
     duration_s: float | None = None   # 주면 그 시간 뒤 종료 (시험용)
