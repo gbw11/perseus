@@ -224,6 +224,43 @@ result = run_yolop_replay(dataset, consumer=consume, speed=0)
 
 API consumer는 소유 bytes와 원 descriptor를 받는다. 새 검사 비용은 재생 진단으로 구분하며 원 `validation_elapsed_us`를 덮어쓰지 않는다. CLI 출력 디렉터리의 `events.jsonl`에는 원 descriptor·payload 길이/hash·재생 timing을, `yolop-replay-result.json`에는 원 기록의 완료 여부와 재생 완료 여부를 따로 남긴다. 마지막 trace close 후에도 API 취소를 확인한다. 결과 저장의 최종 확정 뒤 신호는 API/stdout 전용 `finalization.too_late_signals`로 기록한다. 정상 재생0, 손상/미허용 불완전/실행 오류1, 잘못된 인수·기존 출력 경로2, 확정 전 SIGINT130/SIGTERM143이다.
 
+## RGB·native depth·YOLOP 후보 해석 API
+
+`YolopDecoder`는 위 선택 재생 표본을 BGR/native depth와 검출·road/lane 후보로 바꾼다. 기존에 승인한 NumPy와 OpenCV는 decode 호출에서만 import한다. 카메라·모델·네트워크를 열지 않으며 기본 CLI·doctor·수집 경로에서는 이 decoder를 호출하지 않는다.
+
+```python
+import json
+from pathlib import Path
+from xenova_vehicle.perception.observation import YolopDecoder
+from xenova_vehicle.perception.yolop import YolopPostprocessConfig
+from xenova_vehicle.recording.yolop_replay import run_yolop_replay
+
+dataset = Path("/path/to/recorded-yolop-bench")
+manifest = json.loads((dataset / "bench-manifest.json").read_text())
+decoder = YolopDecoder(manifest, YolopPostprocessConfig(confidence=0.5, iou_threshold=0.3))
+
+def consume(sample):
+    observation = decoder.decode(sample)
+    shared_bgr = observation.rgb.bgr             # uint8 HWC 360x640x3
+    native_z_mm = observation.depth.depth_mm     # readonly <u2 480x640, RIGHT axial Z
+    vehicle_candidates = observation.yolop.detections_source
+    road_candidates = observation.yolop.road.source  # uint8 360x640
+    lane_candidates = observation.yolop.lane.source
+    provenance = observation.provenance
+
+result = run_yolop_replay(dataset, consumer=consume, speed=0)
+```
+
+한 표본에서 NV12→BGR 변환을 한 번 수행하며 소비자들이 반환 결과를 공유한다. BGR은 새 소유 C-packed 배열, depth와 NN layer는 원 소유 bytes를 유지하는 readonly view다. 원 표본·frame·packet을 강하게 참조하므로 SDK 객체 수명에 의존하지 않으며 다음 decode가 이전 결과를 덮어쓰지 않는다. `decode_rgb`/`decode_depth`는 같은 packed RawFrame 계약의 독립 함수로도 쓴다. row padding·형식·길이가 다르면 거절한다. depth0은 invalid/unknown이며 `has_measurement`는 D!=0 표식이다. 이 값으로 RGB 정렬·metric 신뢰도·빈공간을 승인하지 않는다.
+
+YOLOP는 실제 runtime tensor의 offset/stride를 읽고 FP16 det를 FP32로 바꾼 뒤 strict objectness 및 obj×class threshold를 적용한다. confidence0.5/IoU0.3은 임시 시험값이다. class0는 차량 후보이며 콘·박스 등 모든 장애물 class를 뜻하지 않는다. 프로젝트 NMS 정책은 FP32 내부 연산 후 binary64 threshold와 strict IoU 비교, score 내림차순·동점 원 row 오름차순이다. 모든6300행을 보며 pre-topK 없이 최대500개 NMS prefix에서 멈추고 미분류 잔여를 계수한다. 이 비교 상한은 실행시간 보장이 아니며 원 Torchvision kernel parity도 미확인이다. nonpositive 크기 또는 FP32 변환 뒤 접힌 box는 제외하고 센다. 양수의 작은 box에 임의2px 하한을 추가하지 않는다. full NN 좌표 NMS 뒤 content ROI clip/역변환하므로 padding 검출이 다른 후보를 억제한 뒤 source에서 사라질 수 있다.
+
+det의 모든 obj/class와 두 segmentation score는 [0,1]이어야 한다. 범위 밖 유한 값도 전체 decode를 실패시키며 sigmoid/clamp로 수리하지 않는다. 이는 고정 모델의 score 정의역을 보호하는 프로젝트 정책이다. 원 packet은 호출자가 유지한다. NaN/Inf·layout 검사는 NNPacket 경계의 책임이다.
+
+road/lane은 두 channel argmax이며 동점은 첫 channel이다. `argmax_nn`은320×320 원 label, `observed_nn`은 rows70..249만 관측인 별도 bool mask, `content`는180×320이다. padding label은 배경·FREE 관측이 아니다. source mask는 `source[y,x]=argmax_nn[70+y//2,x//2]`로 정확히2배 nearest 복원한다. 박스는 연속 image-edge 좌표로 x_source=2×x_nn, y_source=2×(y_nn−70)을 적용한다. 실제 ImageManip 입력 픽셀이 보존되지 않아 pixel equivalence는 미확인이다.
+
+결과는 원 source/time·context와 model/preprocessing/parser/config identity를 연결한다. `source_metadata`와 provenance는 사본이며 새 `costs_us`가 원 검사 비용을 덮어쓰지 않는다. S03 표본의 결박을 다시 검사하지만 파일 hash는 reader 책임이다. `REPLAY`, `live_authority=false`, `nn_ready=false`, `metric_ready=false`와 원 depth 시간 한계를 유지한다. 후보 mask/box는 차선·주차칸·occupied/free 최종판정이나 차량 제어 권한이 아니다.
+
 ## 카메라 없는 원본 재생
 
 `replay`는 위 version1 기록을 읽어 RGB NV12·native depth RAW16_LE 원본 bytes를 index 순서대로 재생한다. DepthAI·NumPy·OpenCV 설치나 카메라 연결은 필요 없다. 원 device/SDK/J 시각, stream별 순번, source key와 capture context를 유지하며, 저장 누락을 보간하거나 RGB/depth를 같은 노출로 재정의하지 않는다.
