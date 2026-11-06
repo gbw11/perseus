@@ -23,6 +23,7 @@ import {
 import { mockBoardDown, setMockBoardDown } from './board';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
 import { mockKernelHeapSamples, mockMemoryPoolSamples, mockZephyrNetworkSamples } from './memoryMetrics';
+import { mockTelemetryHeartbeat } from './telemetryHeartbeat';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
@@ -569,16 +570,6 @@ export const handlers = [
   http.get('*/api/v1/vms/:vmId/telemetry/heartbeat', async ({ request, params }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
-    const known = Object.values(VM_IDS).some((id) => id === params.vmId);
-    return HttpResponse.json({
-      vm_id: params.vmId,
-      status: known ? 'FRESH' : 'UNKNOWN',
-      publisher_state: known ? 'running' : null,
-      last_collection_success_uptime_ms: known ? '12000' : null,
-      last_collection_success_age_ms: known ? 500 : null,
-      collection_failures_total: known ? 2 : null,
-      received_at: known ? new Date().toISOString() : null,
-      age_ms: known ? 0 : null,
-    });
+    return HttpResponse.json(mockTelemetryHeartbeat(String(params.vmId)));
   }),
 ];
