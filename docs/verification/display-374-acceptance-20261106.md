@@ -77,3 +77,6 @@ Management → Execution 복원 및 API 재시작 절차를 따른다.
 상세 수치와 보존 비교는 [JSON 증거](display-374-acceptance-20261106.json)에 있다.
 이 배포·부분 수락 결과는 platform 대상 MR에서 검토한다. Jira 완료 처리와 253 전체 마감은
 연속 freshness 조건을 만족한 후 별도로 판단한다.
+
+후속 [읽기 전용 지연 분리 진단](display-374-readonly-timing-20261106.md)에서도 지연이 재현됐다.
+정상 서비스 코드를 추가 교체하지 않았으며 374 완료 판정은 유지 보류한다.
