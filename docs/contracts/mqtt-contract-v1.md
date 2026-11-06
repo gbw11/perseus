@@ -60,6 +60,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 - 노션 MQTT-06의 AppEventEnvelope는 이 봉투로 합친다: `event_id` → `message_id`, `source_vm_id` → `vm_id`, `source_app_id` → `app_id`, `event_type` → `type`.
 - 백엔드가 에이전트에 보내는 명령(MQTT-04)만 예외다. 공통 필드(`schema_version`, `message_id`, `vm_id`, `type`, `sent_at`)에 명령 전용 필드를 더한 CommandEnvelope를 쓰고, `boot_id`·`agent_instance_id`·`seq` 대신 `expected_boot_id`·`command_id`를 쓴다.
 - `boot_id`나 `agent_instance_id`가 바뀌면 받는 쪽은 그 발행자의 `seq` 기준을 새로 잡는다.
+  - 백엔드의 `agent.heartbeat` 저장은 VM 마다 마지막 보고 하나를 두고, 같은 `agent_instance_id` 면 `seq` 가 더 클 때만, 다른 `agent_instance_id` 면 `sent_at` 이 저장된 값보다 늦을 때만(어느 쪽이든 `sent_at` 이 없으면 받음) 새 보고로 받는다. `boot_id` 는 비교에 쓰지 않는다 — 에이전트는 프로세스마다 새 `agent_instance_id`(UUID)를 만들므로 재부팅도 instance 변경으로 잡힌다. 이전 instance 의 늦게 도착한 보고가 새 instance 를 덮지 않게 하기 위해서다.
 - Zephyr 앱 토픽은 `message_id`에 단조 증가 정수 문자열을 쓸 수 있다. Zephyr MQTT-03은 저장소의 36자 표본 키에 맞춰 메시지별 UUID를 사용한다.
 
 ## 3. VM 에이전트·자원 지표 토픽
@@ -175,7 +176,7 @@ v1 앱과 v2 Publisher는 같은 guest boot여도 서로 다른 instance와 sock
 | 판정 | 주체 | 근거 신호 |
 | --- | --- | --- |
 | 제어권 전환 (자율 ↔ 수동) | **dom0 게이트웨이** (관리 서버와 별도 프로세스) | 활성 앱의 `drive.command` 끊김 100 ms |
-| VM 재시작 | 복구 서비스 | Xen 도메인 상태 + Linux VM은 에이전트 `OFFLINE`, Zephyr VM은 `app.heartbeat`(6.1) 3초 끊김 |
+| VM 재시작 | 복구 서비스 | Xen 도메인 상태 + Linux VM은 `agent.heartbeat` 30초 무수신(백엔드 `OFFLINE` 기준과 같음), Zephyr VM은 `app.heartbeat`(6.1) 15초 무수신 (11.1, 기본값. `XENOVA_RECOVERY_HEARTBEAT_LOST`·`XENOVA_RECOVERY_APP_HEARTBEAT_LOST`) |
 | 최종 정지 | ESP32 | 게이트웨이 시리얼 프레임 끊김 300 ms (와치독) |
 
 - 게이트웨이는 VM을 재시작하지 않고, 복구 서비스는 제어권을 바꾸지 않는다.
@@ -230,6 +231,9 @@ verified payload의 필수 `expected_generation`은 현재 uint32 세대, 선택
 `message_id`는 요청 중복 방지에 사용한다. 과거 세대/게시 문맥·retained 요청·재전달 중복은
 새 승인으로 쓰지 않는다. 재연결 뒤에는 새 control 문맥을 확인한다. 출력 금지 상태의
 MANUAL/AUTO 재무장도 이 요청을 사용하며 legacy의 AUTO_READY 전용 규칙과 구별한다.
+SAFE_STOP 에서도 같은 요청을 받는다: Gateway 가 준비된 수동 VM 을 골라 MANUAL 로 재무장한다
+(`verified.on_resume`). 백엔드는 AUTO_READY·MANUAL·AUTO·SAFE_STOP 에서 요청을 보내고(그 밖의 모드는 409),
+적용할 수 없는 요청은 Gateway 가 이벤트 없이 무시한다 — 202 는 "보냈다"는 뜻이지 재무장 완료가 아니다.
 
 ```json
 {"type":"drive.resume.requested","causation_id":"<현재 control message_id>",
@@ -365,7 +369,7 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 
 - 앱 **프로세스**가 살아 있는지와 상태를 알린다. VM 생존은 `agent.heartbeat`(3장), 제어권 전환은 `drive.command` 끊김 100 ms(5장)로 판정하며 이 신호를 쓰지 않는다.
 - 계산 main이 실제 완료를 근거로 생성한다. 별도 통신 worker는 그 보고만 전달하며 관측 시각·완료 순번을 새로 만들지 않는다. 입력 부족은 verified에서 app.readiness로, 계산 실패는 heartbeat error와 준비 오류로 구분한다.
-- 받는 쪽은 3초 동안 못 받으면 그 앱을 끊김으로 표시한다.
+- **표시하는** 받는 쪽(백엔드 주행 상태, 관리 콘솔, 주행 화면)은 3초 동안 못 받으면 그 앱을 끊김으로 표시한다. 복구 서비스의 VM 재시작 판정은 이 표시 기준이 아니라 15초 무수신이다(5.1·11.1). 한 번 밀린 신호로 VM 을 재시작하지 않도록 더 보수적으로 둔다.
 - verified의 `active`는 게스트가 적용한 control에서 자신이 선택됐다는 보고이며 Gateway의 실제 출력 허가가 아니다. 준비·승격은 §6.2를 따른다.
 - Legacy의 에이전트가 없는 Zephyr 주행 VM에서는 이 신호가 앱 쪽 생존 정보다. 복구 서비스의 VM 재시작 판정(5.1)과 게이트웨이의 `AUTO_READY` 판정(5.2)은 Xen 도메인 상태와 이 신호를 쓴다 (시나리오 §8 D8).
 - Linux VM 에서 도는 앱도 같은 토픽·형식으로 보낸다(어떤 앱을 올릴지는 4장 앱 구성에 따른다). 주행과 무관한 앱의 평상시 상태는 `idle` 이다. 에이전트의 `agent.heartbeat`(3장)는 VM·에이전트 생존이고 앱 생존이 아니며, `metrics` 의 `processes[]` 는 CPU 상위 목록이라 앱 생존 근거로 쓰지 않는다.
@@ -589,17 +593,17 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 
 | 계정 | publish 허용 |
 | --- | --- |
-| 각 VM 에이전트 | `xenova/v1/vms/{자기 vm_id}/heartbeat·inventory·metrics·command-result` |
-| 앱 VM | `xenova/v1/apps/{자기 app_id}/events` |
-| 젯슨 | `xenova/v1/apps/perception/events` |
-| 게이트웨이 | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/apps/vehicle/events` |
-| 공통 Zephyr 직접 MQTT | username=vm_id. `xenova/v1/vms/%u/apps/autonomous/events`와 `.../manual/events`로 앱 이벤트 발행. 토픽과 봉투 VM/app를 대조하고 현재 실행은 root 바인딩으로 확인 |
-| 백엔드 | `xenova/v1/apps/manual/input`, `xenova/v1/vms/{vm_id}/command`, `xenova/v1/console/resume`, `xenova/v1/sim/command` (12장) |
+| 각 VM (username = `vm_id`. Linux 에이전트와 공통 Zephyr 직접 MQTT 가 같은 계정 규칙) | v1 `xenova/v1/vms/{자기 vm_id}/heartbeat`·`inventory`·`metrics`·`command-result`, `xenova/v1/vms/{자기 vm_id}/apps/autonomous/events`·`.../apps/manual/events`(verified 앱 이벤트), `xenova/v1/vms/{자기 vm_id}/drive/link/out`(DriveLink, [drive-world](drive-world/README.md)), `xenova/v1/probes/#`, v2 `xenova/v2/vms/{자기 vm_id}/telemetry/inventory`·`heartbeat`·`metrics`·`events`·`snapshot`. Zephyr 앱 이벤트는 토픽과 봉투 VM/app 를 대조하고 현재 실행은 root 바인딩으로 확인 |
+| legacy 앱 계정 (`autonomous`·`manual`·`interaction`) | `xenova/v1/apps/{자기 app_id}/events`, `xenova/v1/probes/#`. `message-board` 계정은 정책에 남아 있으나 기본 생성하지 않는다(`default: false`) |
+| 젯슨 (`perception`) | `xenova/v1/apps/perception/events`, `xenova/v1/probes/#` |
+| 게이트웨이 (`gateway`) | `xenova/v1/vehicle/control`, `xenova/v1/vehicle/status`, `xenova/v1/vehicle/state.pb`([drive-world](drive-world/README.md)), `xenova/v1/apps/vehicle/events`, `xenova/v1/vms/+/drive/link/in`, `xenova/v1/probes/#` |
+| 백엔드 (`backend`) | `xenova/v1/apps/manual/input`, `xenova/v1/vms/+/command`, `xenova/v1/vms/+/inventory` (VM 삭제 때 retained 지우기, 3장), `xenova/v1/console/resume`, `xenova/v1/sim/command` (12장), `xenova/v1/probes/#` |
 | 시뮬레이터 (`simulator`, 시뮬레이터 구성만) | `xenova/v1/sim/pose`·`sim/world`·`sim/result`. 구독은 `xenova/v1/sim/command` 만. `vehicle.status` 는 게이트웨이 대역으로 `gateway` 계정을 따로 쓴다 (12장) |
-| 각 VM 측정 클라이언트·응답기 | `xenova/v1/probes/#` (자기 `vm_id`가 `source_vm_id`·`target_vm_id`와 맞는 것만) |
-| dom0 Recovery Worker (`dom0-server`) | `xenova/v1/recovery/events`·`xenova/v1/recovery/health/{vm_id}` (11장, ACL 은 `xenova/v1/recovery/#`). 구독(read)은 `xenova/v1/vms/+/heartbeat`, legacy `xenova/v1/apps/+/events`, verified `xenova/v1/vms/+/apps/+/events`(Zephyr `app.heartbeat`, 6.1). 개발 단계의 전체 읽기 허용에 포함되며 계정별 구독 제한(다음 개정)에서도 유지한다. 계정 `dom0-server`와 이 발행·구독 규칙은 `platform/deploy/mosquitto/etc/policy.json`에서 함께 관리하며 개발용 accounts·acl을 생성한다. Worker 는 필터별 구독 승인(SUBACK)에 더해 승인 뒤 실제 수신을 경로의 증거로 삼는다. Mosquitto 는 읽기 ACL 에 막힌 구독도 SUBACK 성공으로 답하고 전달만 거르므로(실보드 확인), 승인만으로는 경로를 믿지 않고 그 경로로 메시지를 받기 전에는 손실을 판정하지 않는다 |
+| VM 별 Telemetry (`telemetry-{vm_id}`) | `xenova/v1/vms/{자기 vm_id}/metrics`, v2 `xenova/v2/vms/{자기 vm_id}/telemetry/inventory`·`heartbeat`·`metrics`·`events`·`snapshot`. 읽기 없음 |
+| 읽기 전용 (`observer`, `telemetry-reference-subscriber`) | 없음. `observer` 는 `xenova/v1/#`, `telemetry-reference-subscriber` 는 `xenova/v2/vms/+/telemetry/+` 만 읽는다 |
+| dom0 Recovery Worker (`dom0-server`) | `xenova/v1/recovery/events`·`xenova/v1/recovery/health/{vm_id}` (11장, ACL 은 `xenova/v1/recovery/#`), `xenova/v1/probes/#`. 구독(read)은 `xenova/v1/vms/+/heartbeat`, legacy `xenova/v1/apps/+/events`, verified `xenova/v1/vms/+/apps/+/events`(Zephyr `app.heartbeat`, 6.1). 개발 단계의 전체 읽기 허용에 포함되며 계정별 구독 제한(다음 개정)에서도 유지한다. 계정 `dom0-server`와 이 발행·구독 규칙은 `platform/deploy/mosquitto/etc/policy.json`에서 함께 관리하며 개발용 accounts·acl을 생성한다. Worker 는 필터별 구독 승인(SUBACK)에 더해 승인 뒤 실제 수신을 경로의 증거로 삼는다. Mosquitto 는 읽기 ACL 에 막힌 구독도 SUBACK 성공으로 답하고 전달만 거르므로(실보드 확인), 승인만으로는 경로를 믿지 않고 그 경로로 메시지를 받기 전에는 손실을 판정하지 않는다 |
 
-브로커 계정·ACL 파일은 [브로커 구성](../../platform/deploy/mosquitto/README.md)(`platform/deploy/mosquitto/etc/acl`)에서 관리한다.
+브로커 계정·ACL 의 원본은 `platform/deploy/mosquitto/etc/policy.json` 이다([브로커 구성](../../platform/deploy/mosquitto/README.md)). 개발용 `etc/accounts`·`etc/acl` 은 이 정책에서 생성한 결과이고, Yocto 브로커(`xenova-mqtt-broker`)도 같은 `policy.json` 을 설치해 계정을 만든다. 위 표는 그 정책을 옮긴 것이며 다르면 정책이 기준이다. 모든 VM·서비스 계정의 `probes/#` 발행은 8장 지연 측정용이다.
 
 - 계정 이름 = 토픽 안의 id: 에이전트는 `vm_id`, legacy 앱은 `app_id`, 젯슨은 `perception`, 그 외 `gateway`·`backend`. 공통 정책에서 계정별 ACL을 생성해 자기 토픽만 허용한다. 전역 pattern으로 v2·읽기 전용 계정에 v1 쓰기를 부여하지 않는다. ESP32는 MQTT에 붙지 않으므로 계정이 없다 (v1.1).
 - `backend`의 읽기 ACL은 `xenova/v1/#`와 `xenova/v2/vms/+/telemetry/+`다. 백엔드가 실제로 구독하는 v2 토픽은 `metrics`와 `heartbeat`다(3장).
@@ -821,6 +825,8 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.7 | 2026-11-04 | 재개 카운트다운 운영자 취소 (S15P31E110-280): `console/resume` 에 `drive.resume.cancel_requested`(`causation_id`·`expected_generation`·`requested_by`) 추가, `drive.resume.cancelled` reason `operator_cancelled`(모드 유지, 자동 복귀 없음)(5.2 verified, 6장). 6장 표에 그동안 게이트웨이 README 에만 있던 `drive.resume.accepted`·`cancelled` 와 `console/resume` 재개 요청 행을 올림. 기존 토픽·payload·ACL 은 그대로 |
 | v1.8 | 2026-11-04 | 3.2절 데모 명령 규칙 추가 (S15P31E110-123): MQTT-04 payload 필드·범위(`stress` 의 `cpu_workers`·`memory_mib`·`duration_s`), 유효 기간 300초·시계 허용 30초(`CLOCK_UNTRUSTED`), 같은 `command_id`·같은 요청은 재실행 없이 마지막 결과 재전송, 다른 요청은 `IDEMPOTENCY_CONFLICT`, 기록을 남기지 못하면 실행하지 않음(`STATE_UNAVAILABLE`), MQTT-05 상태 흐름과 오류 코드, `agent_exit` 의 종결 결과는 `ACCEPTED` 하나이고 PUBACK 확인 뒤 종료(PUBACK 전 재시작은 이어서 진행), MQTT-05 중복은 백엔드가 `(vm_id, command_id)` 집계 키로 처리(같은 결과 재전달은 무시, `RUNNING` → 종결은 전이, 종결 뒤 다른 종결은 계약 위반). 데모 설정이 꺼진 에이전트는 `DEMO_DISABLED`. 10장 미확정에서 명령 만료 허용 범위 제외 |
 | v1.8.1 | 2026-11-06 | 5.4 `perception.result` 의 좌표·부호(원점·축·`lane_offset_m`·`heading_err_rad` 부호·장애물 기준점·순서·최대 8개)를 구현이 이미 따르는 규칙대로 명시 (S15P31E110-156 후속, -249). 6.3 `app.lifecycle` reason 에 C·Python 이 이미 받는 lattice 계산 코드 23개를 적음. 7.1 의 "기존 1024 bytes 상한" 을 실제(공통 C 수신기 1024 bytes, 정책 표는 64 KB)대로 고침. 필드·타입·토픽은 그대로 |
+| v1.8.2 | 2026-11-06 | 구현에 맞춤: 5.1·6.1 `app.heartbeat` 끊김 기준을 주체별로 구분(표시 3초, 복구 서비스 재시작 15초·Linux 30초), 2장 백엔드 heartbeat 순서 판정(같은 instance 는 `seq`, 다른 instance 는 `sent_at`), 9장 ACL 표를 `policy.json` 기준으로 보완(v2 Telemetry, `drive/link/*`, `vehicle/state.pb`, 계정별 `probes/#`, `telemetry-{vm_id}`·읽기 전용 계정). 토픽·payload 변경 없음 |
+| v1.8.3 | 2026-11-06 | 5.2 verified 재개 요청을 SAFE_STOP 에서도 받는다(Gateway 가 수동 VM 으로 재무장), 백엔드 허용 모드 AUTO_READY·MANUAL·AUTO·SAFE_STOP 명시. 9장 `backend` 쓰기에 `xenova/v1/vms/+/inventory`(VM 삭제 때 retained inventory 지우기, 3장) 추가 — 사용자 결정. 토픽·payload 는 그대로 |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의
 QoS 교환은 메시지 전달을 위한 것이며 앱/장치 적용 확인을 대신하지 않는다.

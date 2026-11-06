@@ -56,6 +56,10 @@ after 생략: 최신 최대 limit개를 오래된 순으로 반환한다. after 
 }
 ```
 
+`has_more`는 after를 준 조회에서만 계산하며 after가 없으면 항상 false다. `oldest_cursor`는 보존 기간 안 기록이 없으면 null이다.
+
+`GET /api/v1/logs/sources` 응답은 `{"epoch", "items": [{"source_id", "vm_id"(없으면 null), "components": [...], "state": "connected|disconnected|unavailable", "updated_at", "last_record_at"}]}`이다. `updated_at`·`last_record_at`은 epoch 초(없으면 null)다. 수신기 설정(sources.json)에만 있고 한 번도 보내지 않은 소스는 `unavailable`·두 시각 null로 붙는다. 기계 판독 스키마는 [dom0-manager OpenAPI](dom0-manager-openapi.yaml)의 `RuntimeLogPage`·`RuntimeLogSources`·`RuntimeLogIngestResult`이며 Spring은 dom0 본문을 그대로 전달한다.
+
 observed_at은 소스가 보고한 발생 시각이고 received_at/id는 수신 순서다. guest boot_id는 기록의 출처이며 Xen 실행 세대 검증 근거로 쓰지 않는다. 서로 다른 소스의 시계가 정확히 동기화됐다고 가정하지 않는다. record 순서는 수신 id 기준이다.
 
 재접속은 마지막 next_cursor로 조회하며 중복 id는 합친다. epoch가 달라지면 이전 커서를 버리고 최신 목록부터 다시 동기화한다. history_truncated면 보존 한도에 의한 누락을 사용자에게 알린다. 브라우저 버퍼는1,000개로 제한한다. 오류 시 이전 기록을 유지하되 연결 끊김으로 표시한다. 일시정지는 조회만 멈추며 수집기·VM·콘솔을 중지하지 않는다.
