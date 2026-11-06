@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.vm.domain.VmControlPort;
+import com.xenova.backend.vm.domain.VmControlOperation;
 import com.xenova.backend.vm.domain.VmLaunchSpec;
 import com.xenova.backend.vm.domain.VmRegistrationInventory;
 import com.xenova.backend.vm.domain.VmRuntime;
@@ -56,8 +57,10 @@ public class Dom0ManagerClient implements VmControlPort {
         return requireBody(executeQuery(() -> queryClient.get()
                 .uri(builder -> {
                     builder.path(sources ? "/api/v1/logs/sources" : "/api/v1/logs");
-                    filters.forEach((key, value) -> builder.queryParam(key, value));
-                    return builder.build();
+                    // Values go in as URI variables so they are fully encoded: as literal template text a
+                    // '{' broke the build (500) and a '+' reached dom0-manager as a space.
+                    filters.keySet().forEach(key -> builder.queryParam(key, "{" + key + "}"));
+                    return builder.build(filters);
                 })
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
@@ -123,6 +126,28 @@ public class Dom0ManagerClient implements VmControlPort {
     }
 
     @Override
+    public VmControlOperation requestReboot(String vmId, String requestKey) {
+        return requireBody(executeCommand(() -> commandClient.post()
+                    .uri("/api/v1/vms/{vmId}/reboot", vmId)
+                    .header("Idempotency-Key", requestKey)
+                    .retrieve()
+                    .onStatus(status -> status.isError(), this::handleError)
+                    .body(VmControlOperation.class)));
+    }
+
+    @Override
+    public VmControlOperation findControlOperation(String vmId, String requestKey) {
+        return requireBody(executeQuery(() -> queryClient.get()
+                .uri(builder -> builder
+                        .path("/api/v1/vms/{vmId}/control-operations")
+                        .queryParam("request_key", "{requestKey}")
+                        .build(vmId, requestKey))
+                .retrieve()
+                .onStatus(status -> status.isError(), this::handleError)
+                .body(VmControlOperation.class)));
+    }
+
+    @Override
     public void destroy(String vmId) {
         executeCommand(() -> {
             commandClient.delete()
@@ -184,8 +209,14 @@ public class Dom0ManagerClient implements VmControlPort {
         return switch (error.code() == null ? "" : error.code()) {
             case "VMNotFound" -> new ApiException(HttpStatus.NOT_FOUND, "VM_NOT_FOUND", message);
             case "VMExists" -> new ApiException(HttpStatus.CONFLICT, "VM_ALREADY_EXISTS", message);
+            // The board already uses this platform (domain) name for a different vm_id. Unlike VMExists it is never
+            // our own earlier launch, so it must not be read as success: it is the same public code as a Spring-side
+            // name clash.
+            case "VMNameConflict" -> new ApiException(
+                    HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "보드에 같은 이름의 VM이 이미 있습니다. 다른 이름을 사용하세요.");
             case "InvalidState" -> new ApiException(HttpStatus.CONFLICT, "INVALID_VM_STATE", message);
             case "InvalidArgument" -> new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", message);
+            case "OperationNotFound" -> new ApiException(HttpStatus.NOT_FOUND, "OPERATION_NOT_FOUND", message);
             // Passed on as 507 like dom0-manager: retrying the same request cannot succeed until resources free up.
             case "InsufficientResources" -> new ApiException(
                     HttpStatus.INSUFFICIENT_STORAGE, "INSUFFICIENT_RESOURCES", insufficientResourceMessage(error));

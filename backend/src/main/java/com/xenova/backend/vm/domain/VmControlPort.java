@@ -17,6 +17,12 @@ public interface VmControlPort {
     // Graceful shutdown; the domain disappears and the disk is kept. Idempotent.
     void stop(String vmId);
 
+    // Submits a tracked graceful reboot. Reusing requestKey returns the original operation instead of rebooting twice.
+    VmControlOperation requestReboot(String vmId, String requestKey);
+
+    // Reads the original tracked stop/reboot operation without executing it again.
+    VmControlOperation findControlOperation(String vmId, String requestKey);
+
     // Forced shutdown and disk deletion. Idempotent.
     void destroy(String vmId);
 }
