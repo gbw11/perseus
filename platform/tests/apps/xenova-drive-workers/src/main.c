@@ -3,7 +3,7 @@
 #include <zephyr/kernel.h>
 #include <xenova/diagnostics.h>
 #include "workers.h"
-#include "auto_delay.h"
+#include <xenova/auto_delay.h>
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>

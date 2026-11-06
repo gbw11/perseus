@@ -2,7 +2,7 @@
 /* Separate preemptible AUTO/MANUAL owners. Long callbacks hold no exchange
  * lock. A stuck callback is retained and reported, never forcibly recycled. */
 #include "workers.h"
-#include "auto_delay.h"
+#include <xenova/auto_delay.h>
 #include <xenova/diagnostics.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>

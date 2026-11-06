@@ -10,6 +10,6 @@ zephyr_link_libraries(-Wl,--wrap=z_impl_k_thread_create -Wl,--wrap=z_impl_k_mute
   -Wl,--wrap=drive_adapter_run_until -Wl,--wrap=xdiag_resources_try_get -Wl,--wrap=xdh_assess)
 target_include_directories(app PRIVATE ${DRIVE}
   ${PLATFORM}/apps/autonomous/zephyr/src ${PLATFORM}/apps/manual/zephyr/src)
-target_sources(app PRIVATE src/main.c ${DRIVE}/workers.c ${DRIVE}/adapter.c ${DRIVE}/auto_delay.c
+target_sources(app PRIVATE src/main.c ${DRIVE}/workers.c ${DRIVE}/adapter.c
   ${PLATFORM}/apps/autonomous/zephyr/src/autonomous.c
   ${PLATFORM}/apps/manual/zephyr/src/manual.c)

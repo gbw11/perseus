@@ -13,7 +13,6 @@ target_include_directories(app PRIVATE ../../autonomous/zephyr/src ../../manual/
 target_sources(app PRIVATE src/main.c src/controller.c src/adapter.c
   ../../autonomous/zephyr/src/autonomous.c ../../manual/zephyr/src/manual.c)
 target_sources_ifdef(CONFIG_XENOVA_DRIVE_WORKERS app PRIVATE src/workers.c)
-target_sources_ifdef(CONFIG_XENOVA_AUTO_DELAY_INJECTION app PRIVATE src/auto_delay.c)
 
 if(CONFIG_XENOVA_DRIVE_LATTICE)
   set(DRIVE_WORLD ${CMAKE_CURRENT_SOURCE_DIR}/../world)

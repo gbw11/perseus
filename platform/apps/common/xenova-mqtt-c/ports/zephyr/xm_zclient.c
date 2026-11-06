@@ -167,6 +167,7 @@ static void on_publish(struct xm_zclient *c, const struct mqtt_publish_param *p)
 			memcpy(slot->data, c->payload, len);
 			slot->len = len;
 			slot->rx_ms = received;
+			slot->retained = p->retain_flag;
 			break;
 		}
 	}
@@ -470,4 +471,8 @@ int xm_zclient_latest(struct xm_zclient *c, const char *topic, struct xm_envelop
 	}
 	*age_ms = k_uptime_get() - slot->rx_ms;
 	return 0;
+}
+bool xm_zclient_latest_retained(struct xm_zclient *c,const char *topic)
+{
+	struct xm_zlatest *slot=latest_slot(c,topic,false);return slot&&slot->len&&slot->retained;
 }
