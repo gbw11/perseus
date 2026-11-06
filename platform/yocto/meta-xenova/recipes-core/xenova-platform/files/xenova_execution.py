@@ -43,6 +43,27 @@ def fingerprint(value):
     return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
+def same_read_execution(left, right):
+    """Only live scheduler movement may differ between two verified read samples.
+
+    Never substitute the newer sample or its clock. The caller keeps its own
+    validated observation, and must not replace a newer on-disk observation.
+    Paused/shutdown/dying, identity, intent and admission changes still retry.
+    """
+    if left == right:
+        return True
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    for value in (left, right):
+        flags = value.get('xen_state_flags')
+        if (not isinstance(flags, str) or not re.fullmatch(r'[r-][b-]----', flags)
+                or value.get('xen_state') != vm.xen_state(flags)):
+            return False
+    volatile = {'xen_state', 'xen_state_flags'}
+    return ({k:v for k,v in left.items() if k not in volatile}
+            == {k:v for k,v in right.items() if k not in volatile})
+
+
 def read_record(path):
     """원자 JSON을 검증해 읽는다. host 관측·초기화·저장 없이 부재와 손상을 구분한다."""
     if not path.exists() and not path.is_symlink():
@@ -686,10 +707,15 @@ class Execution:
                 for record, row, unique in verified}
 
     @traced('execution.publish_observation')
-    def observation_inputs(self, record, lifecycle):
+    def observation_inputs(self, record, lifecycle, *, _common=None):
         """외부 관측과 분리한 원자 JSON 입력. 공유 memo나 새 권위 원본이 아니다."""
+        common = self.observation_common_inputs() if _common is None else _common
         return {'lifecycle':lifecycle,'run':self.run_record(record),'intent':self.intent(record),
-                'admission':self.admission(record),'barrier':self.barrier(),
+                'admission':self.admission(record), **common}
+
+    def observation_common_inputs(self):
+        """한 읽기 회차의 시작 입력만 공유한다. 게시 직전 검증에는 재사용하지 않는다."""
+        return {'barrier':self.barrier(),
                 'shutdown_requested':(self.runtime/'shutdown-requested').exists()}
 
     def publish_observation(self, record, row, unique, deadline, *, _lifecycle=None, _read_context=None):
@@ -727,9 +753,13 @@ class Execution:
                 point=(previous.get('last_attempt_monotonic_ms') if previous.get('last_error') is not None
                        else last.get('monotonic_ms') if last else None)
                 newer=type(point) is int and point>sampled
-                if newer and (not last or last['value']!=observation or previous.get('last_error') is not None):
+                if newer and (not last or not same_read_execution(last['value'], observation)
+                              or previous.get('last_error') is not None):
                     raise ReadChanged()
-            if last is None or fingerprint(last["value"]) != fingerprint(observation):
+            # A delayed read does not publish a new revision. Scheduler-only
+            # differences may be returned with its original clock, not a
+            # fabricated revision newer than the already-published sample.
+            if not newer and (last is None or fingerprint(last["value"]) != fingerprint(observation)):
                 revision += 1
             value = {"schema_version":"1.0", "vm_id":record["uuid"], "host_boot_id":self.host,
                      "observation_revision":revision, "last_success":{"monotonic_ms":sampled,
