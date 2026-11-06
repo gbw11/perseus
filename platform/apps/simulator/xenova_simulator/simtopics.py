@@ -24,7 +24,8 @@ from xenova_mqtt import topics
 
 from . import placement
 from .model import KIND_W, Obstacle
-from .track import track_ids, load as load_track
+from .track import load as load_track
+from .track import sources as track_sources
 
 log = logging.getLogger("xenova_simulator")
 
@@ -140,7 +141,7 @@ class SimTopics:
             return None, None
         if op == "track.select":
             track_id = p.get("track_id")
-            if track_id not in track_ids():
+            if track_id not in track_sources():
                 return "INVALID", f"모르는 트랙 {track_id!r}"
             sim.select_track(track_id)
             return None, None
@@ -167,7 +168,8 @@ class SimTopics:
         return {
             "revision": self.revision,
             "track": sim.track.payload(),
-            "tracks": [{"id": t.id, "name": t.name, "real_m": t.real_m} for t in map(load_track, track_ids())],
+            # 목록에는 이름·길이만 필요하다. Track() 을 10개 다 만들면(벽 계산) 첫 발행 때 물리 스레드가 약 0.8 s 멈춘다
+            "tracks": [{"id": t.id, "name": t.name, "real_m": t.real_m} for t in track_sources().values()],
             "car": {"length_m": CAR_LENGTH_M, "width_m": CAR_WIDTH_M},
             "time_scale": 1.0,
             "obstacles": [{"id": o.id, "kind": o.kind, "x": round(o.x, 4), "y": round(o.y, 4), "w": round(o.w, 4)}
