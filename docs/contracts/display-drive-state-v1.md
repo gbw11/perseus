@@ -1,4 +1,6 @@
-# 표시용 주행 상태 v1 — 제어 담당 연결 규격
+# 표시용 주행 상태 v1 — 제어 담당 연결 규격 (폐기)
+
+> **폐기 (2026-11-06, Gateway 읽기로 대체):** 사용자 결정으로 표시 수집기의 주행 상태 입력을 [Gateway 읽기 계약](display-gateway-read-v1.md) 하나로 정리했다. 이 문서의 `xenova/v1/display/drive-state` / `display.drive_state` 토픽은 발행자·ACL이 끝내 연결되지 않았고, 수집기는 더 이상 구독·수락하지 않는다(`XENOVA_DISPLAY_DRIVE_TRANSPORT`·`XENOVA_DISPLAY_CONTROL_SOURCE` 설정도 제거, 남아 있으면 경고 후 무시). 아래 발행·ACL 요청은 **진행하지 않는다**. 이하 내용은 당시 결정 이력으로만 남긴다.
 
 > **2026-11-02 사용자 선택:** 표시 수집기가 기존 Gateway context를 직접 읽는 [gateway 읽기 계약](display-gateway-read-v1.md)을 추가했다. 명시적 gateway 모드에서는 아래 MQTT 표시 토픽을 사용하지 않는다. 아래 1초 발행·ACL 항목은 호환 mqtt 모드의 이력이며 새 읽기 경로의 필수 의존성이 아니다. 기본값은 mqtt이므로 설정·수집기·프론트 동시 배치가 필요하다. 이 선택을 실제 보드 Gateway 배포 완료로 취급하지 않는다.
 

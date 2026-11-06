@@ -8,7 +8,7 @@
 
 - 실제 두 HDMI의 계기판·인포테인먼트, 상태별 렌더와 재부팅 자동 시작을 252·256에서 확인했다. ‘보드 미준비’는 현재 제한이 아니다.
 - 같은 X11 픽셀의 선택형 MIT-SHM/TurboJPEG 전송을 257에서 확인했다. 기본 FFmpeg는 유지한다. 602.55초·실제 약 4.91~4.94 FPS, 전경 Chrome 지연 p95 상한 약 456~464ms, CPU 약 0.63코어·JPEG 약 4.48Mbps다. 환경·시계 가정·HDMI0 복귀 중 반대편 약 1.05초 갱신 간격·동적 영상 미검증은 [최종 증거](../verification/display-257-browser-acceptance-20261102.md)를 따른다. 시험 후 원복했으므로 영구 배포와 구분한다.
-- Gateway Authority와 provider context에 mode·owner 등의 원본이 이미 있다. 그러나 표시 수신 계약의 별도 1초 토픽 송신과 gateway write ACL은 기준 platform에 연결되지 않았다. [송수신 간격·권위 경계](display-drive-state-v1.md)를 유지하고 기존 retained를 신선한 보고로 재포장하지 않는다.
+- Gateway Authority와 provider context에 mode·owner 등의 원본이 이미 있다. 2026-11-06부터 수집기는 이 context를 [직접 읽는 경로](display-gateway-read-v1.md) 하나로 주행 상태를 받는다. 별도 1초 표시 토픽([폐기](display-drive-state-v1.md))은 쓰지 않으며 기존 retained를 신선한 보고로 재포장하지 않는다.
 - 초기 전체/상세 view는 API 호환 필드이며 현재 UI는 아래 screen 매핑이다. 휴대폰 자체 렌더링 모드는 별도 검토로 이번 계약에 자동 편입하지 않는다.
 
 ## 2026-10-28 차량 HDMI 화면 변경 (최신)
@@ -26,7 +26,7 @@
 
 현재 구현·검증 사실과 팀/사용자가 확정할 항목을 [250 결정 기록](display-250-decisions.md)에 구분한다. 가상 시험은 [5단계 결과](../verification/display-step5.md)를 따른다. 아래 단계별 설명은 해당 단계의 이력이며 최신 출력 실행 구현은 4단계 설명을 우선한다.
 
-사용자 선택으로 기존 `vehicle/control`의 변경 시 발행/retain 규칙과 표시 상태 보고를 분리했다. 표시기는 `xenova/v1/display/drive-state`, `type=display.drive_state`의 1초 주기 비-retained 보고만 받으며 기존 차량 제어 메시지를 구독하지 않는다. [연결 규격](display-drive-state-v1.md)에 수신 구현과 팀원 합의 대기를 구분한다. 기존 제어 발행자·주행 명령·공용 MQTT 계약·실제 브로커 ACL은 변경하지 않았다.
+표시기는 기존 차량 제어 메시지(`vehicle/control`)를 구독하지 않는다. 주행 상태는 [Gateway context 읽기](display-gateway-read-v1.md)로만 받는다(2026-11-06 사용자 결정. 이전의 별도 MQTT 표시 토픽 `xenova/v1/display/drive-state`는 [폐기](display-drive-state-v1.md)). 기존 제어 발행자·주행 명령·공용 MQTT 계약·실제 브로커 ACL은 변경하지 않았다.
 
 ## 4단계 구현 현황
 

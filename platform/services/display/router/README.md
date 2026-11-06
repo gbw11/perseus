@@ -97,11 +97,11 @@ systemctl disable xenova-display.target
 새 경로의 로컬 오류 주입·실제 패키징과 물리 HDMI 수락은 별도다.
 실보드에 적용하려면 실제 EDID·VT 인계·Chromium sandbox·로그인 복구와 화면 렌더링을 확인해야 한다.
 
-## 기존 Gateway 주행 상태 직접 읽기 (선택형)
+## 주행 상태 — 기존 Gateway 직접 읽기 (유일한 입력)
 
-2026-11-02 사용자 선택으로 `XENOVA_DISPLAY_DRIVE_TRANSPORT=gateway`를 추가했다. 기존 `GatewayClient.context()`만 1초마다 읽고 기존 상태/표시 API·WS에 반영한다. 기본 `mqtt`는 유지한다. gateway 모드에서는 별도 표시 MQTT 토픽을 구독·수락하지 않으며 Agent·앱 MQTT는 유지한다. 조회 단절·만료는 미확인, 선택된 AUTO/MANUAL과 출력 허가는 구분하고 두 HDMI에 ‘모드 선택 · 구동 준비 중’을 표시한다.
+2026-11-02 사용자 선택으로 추가한 Gateway 읽기를 2026-11-06 사용자 결정으로 **유일한 주행 상태 입력**으로 정리했다. 수집기는 기존 `GatewayClient.context()`만 1초마다 읽고 기존 상태/표시 API·WS에 반영한다. 예전 `xenova/v1/display/drive-state` MQTT 경로(발행자·ACL이 없어 항상 미확인이던 기존 기본값 `mqtt`)와 `XENOVA_DISPLAY_DRIVE_TRANSPORT`·`XENOVA_DISPLAY_CONTROL_SOURCE` 설정은 없앴다. 예전 환경 파일에 이 값이 남아 있으면 기동은 그대로 하고 경고 로그만 남긴 뒤 무시한다(`gateway` 값은 경고 없음). Agent·앱 MQTT는 유지한다. 조회 단절·만료는 미확인, 선택된 AUTO/MANUAL과 출력 허가는 구분하고 두 HDMI에 ‘모드 선택 · 구동 준비 중’을 표시한다. Gateway client 패키지·host boot id·socket이 없는 개발 PC에서도 수집기는 기동하며 주행 상태는 `unknown`이다(1초마다 재시도, 경고는 한 번).
 
-[연결·신선도·권한·동시 배포 계약](../../../../docs/contracts/display-gateway-read-v1.md), [환경 예시](deploy/board-kms/gateway-read.env.example), [로컬 및 보드 확인 결과](../../../../docs/verification/display-255-gateway-read-20261102.md)를 따른다. Gateway와 client 패키지·root 전용 UDS는 기존 제공 경로가 준비돼 있어야 한다. 이 기능은 Gateway를 자동 설치·기동하거나 차량 제어를 실행하지 않는다. 아래 별도 MQTT 표시 토픽 설명은 기존 모드이며 새 읽기 경로에 필요한 추가 송신 작업이 아니다.
+[연결·신선도·권한·동시 배포 계약](../../../../docs/contracts/display-gateway-read-v1.md), [환경 예시](deploy/board-kms/gateway-read.env.example), [로컬 및 보드 확인 결과](../../../../docs/verification/display-255-gateway-read-20261102.md)를 따른다. Gateway와 client 패키지·root 전용 UDS는 기존 제공 경로가 준비돼 있어야 한다. 이 기능은 Gateway를 자동 설치·기동하거나 차량 제어를 실행하지 않는다. Yocto 표시 패키지는 `xenova-gateway-client`에 의존한다.
 
 HDMI 렌더러와 외부 웹이 함께 사용할 읽기 전용 상태 피드와 로컬 화면 선택 정책이다. 3단계 전체/상세 웹 렌더러에 이어 4단계에서 X11 실행기·실제 픽셀 캡처·원격 시연 전송을 추가했다. 실보드 HDMI 검증과 이미지 준비는 남아 있다. 기존 MO-04 터미널을 열거나 콘솔 출력을 상태 분석용으로 가로채지 않는다.
 
@@ -134,11 +134,12 @@ python -m uvicorn xenova_display.main:create_app --factory --host 127.0.0.1 --po
 | `XENOVA_OBSERVATIONS_PATH` | 미설정 시 기존 경로 유지; 공유 모드 사용 시 관리 서비스와 같은 경로 지정 |
 | `XENOVA_DISPLAY_MQTT_HOST` / `PORT` | `127.0.0.1` / `1883` |
 | `XENOVA_DISPLAY_MQTT_USERNAME` / `PASSWORD` | 기존 브로커의 observer 읽기 전용 계정; 보드 진입점에서 필수 |
-| `XENOVA_DISPLAY_CONTROL_SOURCE` | `dom0-gateway`: 제어 상태 발행 source_id |
+| `XENOVA_DISPLAY_GATEWAY_SOCKET` | `/run/xenova-gateway/control.sock`: 주행 상태를 읽는 Gateway UDS |
+| `XENOVA_DISPLAY_GATEWAY_BUDGET_S` | `0.5`: Gateway context 한 번 읽기 제한 시간(0 초과 1 이하) |
 
-MQTT는 기본적으로 dom0 loopback 브로커를 사용한다. 게스트별 토픽 발행권과 control 발행권은 브로커 계정/ACL로 제한해야 한다. 봉투의 `source_id` 검사만으로 발행자 인증을 대신하지 않는다. 실제 브로커 ACL이나 기존 메시지 계약은 변경하지 않는다.
+MQTT는 기본적으로 dom0 loopback 브로커를 사용한다. 게스트별 토픽 발행권은 브로커 계정/ACL로 제한해야 한다. 봉투의 `source_id` 검사만으로 발행자 인증을 대신하지 않는다. 실제 브로커 ACL이나 기존 메시지 계약은 변경하지 않는다.
 
-사용자 선택에 따라 표시용 주행 상태는 **`xenova/v1/display/drive-state` / `type=display.drive_state` / 1초 주기 / QoS 1 / retain=false**로 분리했다. 수신 코드는 준비됐지만 실제 권위 발행자와 제어 담당의 발행/ACL 연결 합의는 남아 있다. 현재 브로커 `gateway` 계정에는 새 토픽 쓰기 권한이 없으므로 권한 반영 전 발행 가능하다고 가정하지 않는다. 기존 `xenova/v1/vehicle/control`은 구독/해석하지 않는다. [제어 담당 연결 규격](../../../../docs/contracts/display-drive-state-v1.md)을 따른다.
+주행 상태는 MQTT로 받지 않는다. 기존 `xenova/v1/vehicle/control`도, 폐기된 `xenova/v1/display/drive-state`도 구독/해석하지 않는다([폐기된 규격](../../../../docs/contracts/display-drive-state-v1.md)).
 
 사용자 확정 1차 영상 목표는 출력별 1280×720·5 FPS, 지연 p95 ≤500ms, JPEG 두 출력 합계 ≤8Mbps, 송신기+인코더 CPU 평균 ≤1코어다. 실보드 달성 여부는 미검증이며 10 FPS는 후속 개선이다. [목표 및 미결정 항목](../../../../docs/contracts/display-250-decisions.md)을 참고한다.
 
@@ -265,15 +266,15 @@ python -B tests/probe_display_runtime.py --execute --soak-seconds 600 \
 - Xen 수신 유효기간 3초, 앱 heartbeat 3초, Agent heartbeat 15초를 사용한다. 모든 경과 시간은 dom0 단조 시계로 계산한다. inventory는 30초 이후 stale로 표시하지만 heartbeat와 독립된 과거 근거로 유지한다.
 - 실행 domid가 바뀌거나 부팅 ID가 변경되면 이전 앱·OS 자료를 비운다. inventory만으로 새로운 부팅을 확정하지 않는다. 먼저 비-retained heartbeat를 받아야 한다. 이전 boot/프로세스 epoch·중복/역순 seq는 버린다.
 - `run_id`는 표시 수집기·관리 상태 제공자의 세대와 관측 실행 식별자(제공 시) 또는 domid를 묶는다. 시작 세대가 없는 드라이버는 동일 domid의 빠른 교체를 모두 증명하지 못한다. `guest_boot_id`는 게스트 보고값이며 OS의 `current_run_verified`는 항상 false다. 관측 식별자만으로 현재 실행과 OS 근거가 확실히 결합됐다고 표시하지 않는다.
-- 프로세스 수명 내 소스별 retired epoch는 128개까지만 추적한다. 한도 이후 새로운 세대는 수락하지 않고 운영 재시작/점검이 필요하다. 임의 발행자 수를 누적하지 않도록 등록된 세 VM·앱·지정된 control만 구독한다.
+- 프로세스 수명 내 소스별 retired epoch는 128개까지만 추적한다. 한도 이후 새로운 세대는 수락하지 않고 운영 재시작/점검이 필요하다. 임의 발행자 수를 누적하지 않도록 등록된 세 VM·앱만 구독한다.
 - Zephyr Starter는 현재 앱 heartbeat를 보내지 않는다. 이때 앱/관측 OS는 unknown이고 기대 OS와 실제 Xen 실행 상태만 표시한다. 모터/미러링/승계 기능이 구현됐다고 표시하지 않는다.
-- `display.drive_state`의 명시적 `active_vm_id`와 `mode`를 따로 전달한다. `active_app`이나 구형 `vehicle.control`로 VM을 추측하지 않는다. retained 재생 보고는 현재 상태로 수락하지 않으며 3초 수신 지연 시 mode=unknown이다. AI 상태는 아직 unknown이다.
+- Gateway context의 `active_vm_id`와 `mode`를 따로 전달한다. `active_app`이나 구형 `vehicle.control`로 VM을 추측하지 않는다. 마지막 성공 읽기 후 3초가 지나거나 읽기가 실패하면 mode=unknown·active_vm_id=null이다. AI 상태는 아직 unknown이다.
 
 ## 검증
 
 수집기 디렉터리에서 `python -m pytest`를 실행한다. Spring은 `backend`에서 `./mvnw -Dtest=DisplayIntegrationTest,ConsoleWebSocketIntegrationTest test`로 검증한다.
 
-`tests/probe_display_control.py --execute --output <결과.json>`은 loopback 브로커를 띄워 별도 표시 상태 보고 → 실제 MQTT 수신 → REST/WS·상세 정책 연결을 시험한다. 기존 테스트 런타임의 amqtt/paho/httpx/websockets가 필요하며 PYTHONPATH는 위 runtime probe와 같다. 제어 엔진/Xen 관측은 합성이고 운영 ACL·실보드 검증이 아니다. [250 후속 검증 결과](../../../../docs/verification/display-250-followup.md)를 참고한다.
+예전 drive-state MQTT 시험용 `tests/probe_display_control.py`는 2026-11-06 경로 폐기와 함께 지웠다(기록: [250 후속 검증 결과](../../../../docs/verification/display-250-followup.md)). 주행 상태 → REST/WS·정책 연결은 `tests/test_gateway_drive.py`·`tests/test_display_integration.py`가 합성 Gateway 관측으로 시험한다.
 
 `tests/probe_qemu.py`는 기존 격리 실험실 전용이며 일반 테스트에서 자동 실행되지 않는다. `--execute --output <증거 파일>`이 필요하다. 시험 호스트에 amqtt 0.11.3/pexpect, 기존 ARM64 휠과 Java 21/Spring 컴파일 결과가 있어야 한다. 실제 dom0의 임시 디렉터리에 수집기를 올리고 실제 Debian은 메모리에서만 임시 보고기를 실행한다. 테스트 브로커는 호스트 loopback에 있고 SSH 포워딩을 사용하므로 제품 배포의 로컬 Mosquitto 토폴로지와 구별한다. 기존 VM/이미지/서비스·실행 도메인 ID를 바꾸지 않는다. 결과는 [검증 기록](../../../../docs/verification/display-step2.md)을 참고한다.
 

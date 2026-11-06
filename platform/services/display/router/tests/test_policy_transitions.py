@@ -3,17 +3,13 @@ from copy import deepcopy
 
 import pytest
 
-from xenova_display.config import DISPLAY_DRIVE_TOPIC, DISPLAY_DRIVE_TYPE
 from xenova_display.policy import DisplayPolicy, Selection, decide_vm
 from xenova_display.state import StateStore
-from test_feed import VM1, VM2, VM3, app, domains, message, settings, store  # noqa: F401
+from test_feed import VM1, VM2, VM3, app, domains, gateway_drive, message, settings, store  # noqa: F401
 
 
 def control(store, *, seq, active=VM1, mode="AUTO"):
-    env = message(kind=DISPLAY_DRIVE_TYPE, seq=seq, active_vm_id=active, mode=mode)
-    env.pop("vm_id")
-    env["source_id"] = "dom0-gateway"
-    assert store.ingest(DISPLAY_DRIVE_TOPIC, env)
+    gateway_drive(store, generation=seq, active=active, mode=mode)
 
 
 def follow(policy):

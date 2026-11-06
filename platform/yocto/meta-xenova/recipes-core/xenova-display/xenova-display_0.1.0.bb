@@ -12,7 +12,7 @@ GROUPADD_PARAM:${PN} = "--system xenova-display"
 USERADD_PARAM:${PN} = "--system --gid xenova-display --home-dir /var/lib/xenova-display --no-create-home --shell /sbin/nologin --password '!' xenova-display"
 
 
-RDEPENDS:${PN} = "xenova-dom0-manager xenova-mqtt-client python3-playwright chromium-x11 xserver-xorg xrandr xauth xinit openbox dbus ffmpeg source-han-sans-kr-fonts fontconfig xf86-input-libinput xf86-video-fbdev xf86-video-modesetting util-linux-setpriv python3-core"
+RDEPENDS:${PN} = "xenova-dom0-manager xenova-mqtt-client xenova-gateway-client python3-playwright chromium-x11 xserver-xorg xrandr xauth xinit openbox dbus ffmpeg source-han-sans-kr-fonts fontconfig xf86-input-libinput xf86-video-fbdev xf86-video-modesetting util-linux-setpriv python3-core"
 
 SYSTEMD_SERVICE:${PN} = "xenova-display-feed.service xenova-display.target"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
