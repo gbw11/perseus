@@ -32,6 +32,7 @@ public class MqttSimClient implements SmartLifecycle, MqttCallbackExtended, SimC
     static final int[] QOS = {0, 1, 1};
 
     private static final Logger log = LoggerFactory.getLogger(MqttSimClient.class);
+    static final long ACTION_TIMEOUT_MS = 10_000;
 
     private final MqttProperties properties;
     private final SimStateTracker tracker;
@@ -57,6 +58,8 @@ public class MqttSimClient implements SmartLifecycle, MqttCallbackExtended, SimC
             throw new IllegalStateException("Invalid MQTT broker settings: " + properties.brokerUrl(), exception);
         }
         client.setCallback(this);
+        // sim.command is QoS 1 and is published from a synchronized HTTP path; never wait forever for PUBACK.
+        client.setTimeToWait(ACTION_TIMEOUT_MS);
         running = true;
         scheduler.execute(this::connect);
     }
