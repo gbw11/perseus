@@ -68,6 +68,46 @@ class CaptureRuntimeTests(unittest.TestCase):
         report = self.capture(fixtures.PollHangSource, duration=3)
         self.assertEqual(report["reason"], "capture_stalled")
         self.assertTrue(report["forced_termination"])
+        self.assertEqual(set(report["fault_streams"]), {"rgb_video", "depth_right"})
+        self.assertTrue(all(report["last_worker_status"]["last_stream_progress_j_us"].values()))
+
+    def test_first_frame_hang_uses_original_startup_deadline(self):
+        started = time.monotonic()
+        report = self.capture(fixtures.FirstFrameHangSource, duration=30,
+                              startup_timeout_s=2.0)
+        self.assertLess(time.monotonic() - started, 8)
+        self.assertEqual(report["reason"], "capture_warmup_timeout")
+        self.assertFalse(report["complete"])
+        self.assertTrue(report["forced_termination"])
+        self.assertEqual(set(report["fault_streams"]), {"rgb_video", "depth_right"})
+        self.assertTrue(all(stamp is None for stamp in
+                            report["last_worker_status"]["last_stream_progress_j_us"].values()))
+
+    def test_first_frames_may_arrive_after_normal_stall_budget(self):
+        report = self.capture(fixtures.DelayedFirstFrameSource, duration=1.0)
+        self.assertTrue(report["complete"], report)
+        self.assertFalse(report["forced_termination"])
+
+    def test_one_stream_heartbeats_cannot_extend_missing_stream_deadline(self):
+        report = self.capture(fixtures.NoDepthSource, duration=3,
+                              startup_timeout_s=2.0)
+        self.assertEqual(report["reason"], "capture_warmup_timeout")
+        self.assertEqual(report["fault_streams"], ["depth_right"])
+        self.assertFalse(report["complete"])
+        self.assertFalse(report["forced_termination"])
+        progress = report["last_worker_status"]["last_stream_progress_j_us"]
+        self.assertIsNotNone(progress["rgb_video"])
+        self.assertIsNone(progress["depth_right"])
+
+    def test_one_saved_pair_cannot_hide_mid_capture_depth_stall(self):
+        report = self.capture(fixtures.DepthStopsSource, duration=3)
+        self.assertEqual(report["reason"], "capture_stalled")
+        self.assertEqual(report["fault_streams"], ["depth_right"])
+        self.assertFalse(report["complete"])
+        self.assertFalse(report["forced_termination"])
+        self.assertGreater(report["last_worker_status"]["recording"]["recorded_candidate_pairs"], 0)
+        self.assertGreater(report["last_worker_status"]["recording"]["per_stream_counts"]["rgb_video"], 1)
+        self.assertEqual(report["last_worker_status"]["recording"]["per_stream_counts"]["depth_right"], 1)
 
     def test_close_hang_does_not_report_success(self):
         report = self.capture(fixtures.CloseHangSource)
@@ -85,6 +125,12 @@ class CaptureRuntimeTests(unittest.TestCase):
         report = self.capture(fixtures.FinalRetrySource)
         self.assertTrue(report["complete"], report)
         self.assertEqual(report["last_worker_status"]["kind"], "final")
+
+    def test_device_close_and_writer_flush_share_the_same_close_budget(self):
+        report = self.capture(fixtures.CloseOverlapSource, close_timeout_s=1.0)
+        self.assertTrue(report["complete"], report)
+        self.assertTrue(report["last_worker_status"]["recording"]["writer_exit_confirmed"])
+        self.assertFalse(report["forced_termination"])
 
     def test_one_missing_stream_cannot_pass_capture(self):
         report = self.capture(fixtures.NoDepthSource)

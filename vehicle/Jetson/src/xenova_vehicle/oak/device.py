@@ -239,13 +239,16 @@ class OakSource:
         if ((message.getWidth(), message.getHeight()) != expected
                 or message.getType() != expected_type):
             raise ValueError("unexpected OAK frame dimensions/type")
-        spec = message.getRaw().fb
+        raw = message.getRaw()
+        spec = raw.fb
         row_bytes = 640 if rgb else 1280
+        # NV12는 두 plane, RAW16은 한 plane이다. 실물 SDK의 미사용 offset은0이 아니다.
+        # 사용하지 않는 plane 값을 포인터/길이로 해석하지 않고 실제 plane과 bytes만 검증한다.
         if (spec.stride not in (0, row_bytes) or spec.p1Offset != 0
-                or (rgb and spec.p2Offset not in (0, 640 * 360))
-                or (not rgb and spec.p2Offset != 0)
-                or spec.p3Offset != 0):
-            raise ValueError("unsupported OAK frame stride/plane offsets")
+                or (rgb and spec.p2Offset not in (0, 640 * 360))):
+            raise ValueError(f"unsupported OAK {stream} stride/active plane offsets: "
+                             f"stride={spec.stride}, p1={spec.p1Offset}"
+                             + (f", p2={spec.p2Offset}" if rgb else ""))
         data = memoryview(message.getData())
         expected_bytes = 640 * 360 * 3 // 2 if rgb else 640 * 480 * 2
         if (data.ndim != 1 or data.itemsize != 1 or not data.c_contiguous

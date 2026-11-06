@@ -204,6 +204,27 @@ class OakDeviceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-increasing"):
             source._frame("depth_right", message)
 
+    def test_unused_plane_offsets_do_not_reject_valid_real_device_layout(self):
+        source = device.OakSource(CaptureProfile("OAK_TEST_1"))
+        source._dai = sdk_fixture().dai
+        rgb, _ = frame_message("rgb_video")
+        rgb.getRaw.return_value.fb.p3Offset = 1951039232
+        depth, _ = frame_message("depth_right")
+        depth.getRaw.return_value.fb.p2Offset = 1940735744
+        depth.getRaw.return_value.fb.p3Offset = 1940735744
+        self.assertEqual(len(source._frame("rgb_video", rgb).payload), 345600)
+        self.assertEqual(len(source._frame("depth_right", depth).payload), 614400)
+
+    def test_active_plane_offsets_are_still_rejected(self):
+        source = device.OakSource(CaptureProfile("OAK_TEST_1"))
+        source._dai = sdk_fixture().dai
+        for stream, field in (("rgb_video", "p1Offset"), ("rgb_video", "p2Offset"),
+                              ("depth_right", "p1Offset")):
+            message, _ = frame_message(stream)
+            setattr(message.getRaw.return_value.fb, field, 123)
+            with self.subTest(stream=stream, field=field), self.assertRaises(ValueError):
+                source._frame(stream, message)
+
 
 @unittest.skipUnless(sys.platform == "linux", "real flock ownership requires Linux")
 class LinuxDeviceLockTests(unittest.TestCase):

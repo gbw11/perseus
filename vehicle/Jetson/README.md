@@ -4,19 +4,20 @@ Jetson Nano B01과 OAK-D-Lite에서 수집한 관측을 처리해 차선·장애
 
 ## 확인한 Jetson 환경
 
-2026-11-06 전용 환경 설치 후 SSH 조회 기준이다. 설치·연결 상태가 바뀌면 다시 조회한 날짜와 값으로 갱신한다.
+2026-11-06 전용 환경 설치·실제 OAK 수신 확인 기준이다. 설치·연결 상태가 바뀌면 다시 조회한 날짜와 값으로 갱신한다.
 
 | 항목 | 확인 결과 |
 |---|---|
 | OS / L4T | Ubuntu 18.04.6 / 32.7.6 |
-| 메모리 / 디스크 | 약 4GB / 루트 여유 42G |
+| 메모리 / 디스크 | 약 4GB / 루트 여유 약41GiB |
 | 시스템 Python·라이브러리 | Python 3.6.9, OpenCV 4.1.1, NumPy 1.13.3 유지 |
 | 앱 Python | 별도 CPython 3.11.18 + 가상환경, pip 26.2.1 |
 | 앱 라이브러리 | DepthAI 2.29.0.0, NumPy 1.26.4, opencv-python-headless 4.10.0.84 |
-| OAK | 일반 사용자 SDK에서 1개 검색, 영상 수신·운영 USB 속도 미검증 |
+| OAK | RGB IMX214·mono OV7251×2, NV12 640×360/native depth 640×480 수신·종료 확인 |
+| OAK USB | 실제 동작 HIGH(USB 2.0), USB 3 연결·동시 NN 부하 미검증 |
 | 네트워크 | Wi-Fi 접속 중, Ethernet 통신 미검증 |
 
-glibc는2.27이다. L4T 일치는 JetPack 전체 패키지 설치 확인과 구분한다. 최초 시스템 조회와 별도 환경의 설치·검증 근거는 `Jetson-drive-docs/making-reports/0003-jetson-environment.md`와 `0005-jetson-python311-environment.md`에 보존한다.
+glibc는2.27이다. L4T 일치는 JetPack 전체 패키지 설치 확인과 구분한다. 최초 시스템 조회·전용 환경·실제 수신의 근거는 `Jetson-drive-docs/making-reports/0003-jetson-environment.md`, `0005-jetson-python311-environment.md`, `0008-jetson-oak-capture-validation.md`에 보존한다.
 
 ## 앱 전용 환경
 
@@ -128,7 +129,7 @@ Jetson의 전용 환경에서 다음과 같이 실행한다. 출력 경로는 �
   --json
 ```
 
-기록 시간은 장치·queue 설정과 초기 시계 표본 확보 뒤부터 센다. 기본 시작 기한90초, 실제 프레임 진전 공백500ms, 종료 기한15초를 벤치 초깃값으로 둔다. 정상 종료가 안 되면 TERM/KILL 각1초 안에서 실제 자식 종료를 확인하고 실패로 보고한다. native hang이나 OS의 미회수 상태에서 자동 재연결하지 않는다. Ctrl+C/SIGTERM도 같은 정리를 거치며 종료 코드는 각각130/143이다. 실제 Nano에서 이 기한을 수락한 것은 아니다.
+기록 시간은 장치·queue 설정과 초기 시계 표본 확보 뒤부터 센다. 기본 시작 기한90초이며, 각 stream의 첫 입력은 원 시작 기한과 수집 시작+15초 중 빠른 때까지만 기다린다. 입력을 받은 뒤에는 필수 stream별 실제 진전 공백500ms, 종료 기한15초를 벤치 초깃값으로 둔다. RGB만 계속 들어오는 동안 depth가 멈춰도 실패로 처리한다. 저장 drain과 Device close는 같은 전체 종료 예산 안에서 병행한다. 정상 종료가 안 되면 TERM/KILL 각1초 안에서 실제 자식 종료를 확인하고 실패로 보고한다. native hang이나 OS의 미회수 상태에서 자동 재연결하지 않는다. Ctrl+C/SIGTERM도 같은 정리를 거치며 종료 코드는 각각130/143이다. 위 기한은 다른 부하·장면·OS 정체에서의 반환 보장을 뜻하지 않는다.
 
 부모는 가벼운 감시를, A 자식만 SDK·Device·raw bytes를 소유한다. A 안의 단일 writer thread에 최대8개 프레임을 비차단 제출하고 포화 시 drop을 센다. 원본 파일·보정 manifest·index는 writer가 쓰며, 출력 예약/결과 파일은 acquisition 전후의 짧은 별도 I/O 자식에서5초 제한으로 처리한다. 이 I/O 자식과 A는 동시에 실행하지 않는다. Linux 제어 통로는 최대4KiB nonblocking seqpacket이며 raw 이미지를 보내지 않는다. Windows 시험용 stream 대체 통로는 Linux 실기 수락을 대신하지 않는다.
 

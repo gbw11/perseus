@@ -52,6 +52,7 @@ def acquisition_worker(endpoint, profile, duration_s, output, context, source_fa
     phase = "STARTING"
     phase_since = j_us()
     progress = j_us()
+    stream_progress = {stream: None for stream in ("rgb_video", "depth_right")}
     prestart_drops = 0
     error = None
     reason = "failed"
@@ -66,6 +67,7 @@ def acquisition_worker(endpoint, profile, duration_s, output, context, source_fa
             recording["error"] = _short_text(recording["error"])
         value = {"kind": "final" if final else "status", "phase": phase,
                  "phase_since_j_us": phase_since, "last_progress_j_us": progress,
+                 "last_stream_progress_j_us": dict(stream_progress),
                  "observations": tracker.snapshot(), "recording": recording,
                  "prestart_dropped_frames": prestart_drops,
                  "error": _short_text(error) if error else None,
@@ -144,6 +146,7 @@ def acquisition_worker(endpoint, profile, duration_s, output, context, source_fa
                                   "candidate_pair": pair}
                     writer.submit(frame, provenance)
                     progress = j_us()
+                    stream_progress[frame.stream] = frame.received_j_us
                 writer_stats = writer.snapshot()
                 if writer_stats.get("error"):
                     raise RuntimeError(writer_stats["error"])
@@ -156,12 +159,12 @@ def acquisition_worker(endpoint, profile, duration_s, output, context, source_fa
         error = _short_text(f"{type(exc).__name__}: {exc}")
         reason = "worker_error"
     finally:
+        close_deadline = time.monotonic() + profile.close_timeout_s
         stage("DRAINING")
         if writer is not None:
             try:
-                writer_stats = writer.close(timeout_s=min(2.0, profile.close_timeout_s))
-                if writer_stats.get("error") or not writer_stats.get("writer_exit_confirmed"):
-                    error = error or writer_stats.get("error") or "recording writer did not exit"
+                # 원본은 소유한 bytes이므로 writer drain과 Device close를 병행할 수 있다.
+                writer_stats = writer.close(timeout_s=0)
             except Exception as exc:
                 error = error or f"recording close: {type(exc).__name__}: {exc}"[:768]
         stage("CLOSING")
@@ -171,6 +174,14 @@ def acquisition_worker(endpoint, profile, duration_s, output, context, source_fa
                 close_confirmed = True
             except Exception as exc:
                 error = error or f"device close: {type(exc).__name__}: {exc}"[:768]
+        if writer is not None:
+            try:
+                remaining = max(0.0, close_deadline - time.monotonic())
+                writer_stats = writer.close(timeout_s=remaining)
+                if writer_stats.get("error") or not writer_stats.get("writer_exit_confirmed"):
+                    error = error or writer_stats.get("error") or "recording writer did not exit"
+            except Exception as exc:
+                error = error or f"recording close: {type(exc).__name__}: {exc}"[:768]
         phase, phase_since = ("CLOSED" if close_confirmed else "FAILED"), j_us()
         flush_deadline = time.monotonic() + 0.1
         while time.monotonic() < flush_deadline and not peer_gone:
@@ -234,6 +245,7 @@ def run_capture(profile, duration_s: float, output: Path, *, source_factory=None
     last_status = None
     final_status = None
     parent_reason = None
+    fault_streams = []
     requested_signal = None
     writer_progress = 0
     writer_pending_since = None
@@ -302,8 +314,23 @@ def run_capture(profile, duration_s: float, output: Path, *, source_factory=None
             elif last_status and last_status["phase"] == "CAPTURING":
                 if capture_started is not None and now >= capture_started + duration_s:
                     reason = "duration_elapsed"
-                elif j_us() - last_status["last_progress_j_us"] > profile.stall_timeout_s * 1_000_000:
-                    reason = "capture_stalled"
+                else:
+                    current_j_us = j_us()
+                    per_stream = last_status["last_stream_progress_j_us"]
+                    stalled = [stream for stream, stamp in per_stream.items()
+                               if stamp is not None
+                               and current_j_us - stamp > profile.stall_timeout_s * 1_000_000]
+                    # 첫 입력 대기는 원 startup/capture 기한에 묶고 상태 통지로 연장하지 않는다.
+                    first_frame_deadline = min(startup_deadline, capture_started + 15.0)
+                    missing = [stream for stream, stamp in per_stream.items() if stamp is None]
+                    if stalled:
+                        reason = "capture_stalled"
+                        if stop_started is None:
+                            fault_streams = stalled
+                    elif missing and now >= first_frame_deadline:
+                        reason = "capture_warmup_timeout"
+                        if stop_started is None:
+                            fault_streams = missing
                 recording = last_status.get("recording", {})
                 if recording.get("pending_frames", 0):
                     written = recording.get("written_frames", 0)
@@ -345,6 +372,7 @@ def run_capture(profile, duration_s: float, output: Path, *, source_factory=None
             process.close()
     report["elapsed_s"] = round(time.monotonic() - began, 6)
     report["last_worker_status"] = final_status or last_status
+    report["fault_streams"] = fault_streams
     report["error"] = error or (final_status or {}).get("error")
     report["reason"] = (parent_reason if parent_reason not in (None, "worker_finishing")
                         else (final_status or {}).get("reason", "worker_exited_without_result"))

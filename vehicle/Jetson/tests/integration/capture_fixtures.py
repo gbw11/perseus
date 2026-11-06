@@ -47,8 +47,31 @@ class BootHangSource(FakeSource):
 
 class PollHangSource(FakeSource):
     def poll(self):
+        if self.sequence == 0:
+            return super().poll()
         time.sleep(60)
         return []
+
+
+class FirstFrameHangSource(FakeSource):
+    def poll(self):
+        time.sleep(60)
+        return []
+
+
+class DelayedFirstFrameSource(FakeSource):
+    def start(self, stage):
+        self.first_frame_at = time.monotonic() + 0.7
+        return super().start(stage)
+
+    def poll(self):
+        return [] if time.monotonic() < self.first_frame_at else super().poll()
+
+
+class DepthStopsSource(FakeSource):
+    def poll(self):
+        frames = super().poll()
+        return frames if self.sequence <= 1 else frames[:1]
 
 
 class CloseHangSource(FakeSource):
@@ -94,6 +117,20 @@ class FinalRetrySource(FakeSource):
             return original(channel, value)
         ControlChannel.send = delayed_final
         return super().start(stage)
+
+
+class CloseOverlapSource(FakeSource):
+    """종료 중첩 순서만 확인하는 시험 입력. 실제 SD fsync 성능 시험은 아니다."""
+
+    def start(self, stage):
+        from xenova_vehicle.recording import writer
+        def delayed_sync(_fd):
+            time.sleep(0.6)
+        writer.os.fsync = delayed_sync
+        return super().start(stage)
+
+    def close(self):
+        time.sleep(0.6)
 
 
 def hang_receipt(*_args):
