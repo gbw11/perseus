@@ -63,7 +63,7 @@ class WarmDriveMachine(VerifiedDriveMachine):
             if row is None or context(row,app)!=pending['target']:return False
         return super()._ready(vm,app,now,held)
 
-    def _change(self,mode,vm,reason,now,*,arm=False):
+    def _change(self,mode,vm,reason,now,*,arm=False,distrust=None):
         from .machine import Mode
         if not self._abandon('CONTROL_CONTEXT_CHANGED'):return [ForwardStop(self.generation)]
         manual=None
@@ -76,7 +76,7 @@ class WarmDriveMachine(VerifiedDriveMachine):
             previous=self.authority.value.get('pending') or {}
             if manual and reason=='resume_requested' and self.authority.value['rearm_required'] and previous.get('manual_policy')=='NEUTRAL_THEN_ACTION':
                 manual['manual_policy']='NEUTRAL_THEN_ACTION'
-        return super()._change(mode,vm,reason,now,arm=arm,manual=manual)
+        return super()._change(mode,vm,reason,now,arm=arm,manual=manual,distrust=distrust)
 
     def _adopt_control(self,*args,**kwargs):
         actions=super()._adopt_control(*args,**kwargs)

@@ -145,7 +145,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 - 결과를 받지 못하면(만료까지) 보낸 쪽은 결과 없음으로 처리한다. 같은 `command_id` 로 다시 보내면 실행 없이 마지막 결과만 돌아온다
 - MQTT-05 는 QoS 1 이라 같은 결과가 두 번 이상 올 수 있다(재전달, 재시작 뒤 재제출). 백엔드는 `(vm_id, command_id)` 를 한 명령의 집계 키로 쓴다. 같은 `status`·같은 payload 의 재전달은 무시하고, `RUNNING` → `SUCCEEDED`/`FAILED` 는 정상 상태 전이로 처리한다. 종결 상태 뒤에 다른 종결 상태가 오면 계약 위반으로 기록한다
 - Zephyr `auto_delay`는 UTC 시계가 없으므로 `expires_at`의 형식과 상한은 명령을 발행하는 백엔드가 검증한다. drive-v1은 현재 boot 일치, retained 여부와 파라미터를 검증하고 단조 시계로 실행 시간을 제한한다. 결과의 UTC 시각 필드는 null이다.
-- 지연 주입 중 AUTO 계산이 release deadline을 연속 5회 넘으면 drive-v1은 해당 VM의 `apps/autonomous/events`에 `vm.trust`를 QoS 1로 한 번 발행한다. payload는 `trust=UNTRUSTED`, `reason=AUTO_DEADLINE_MISS`, `consecutive_misses=5`, `command_id`를 담는다. 이 이벤트는 계산 실패를 VM 신뢰 불가 판정으로 전달할 뿐 출력 차단·전환을 직접 수행하지 않는다.
+- 지연 주입 중 AUTO 계산이 release deadline을 연속 5회 넘으면 drive-v1은 해당 VM의 `apps/autonomous/events`에 `vm.trust`를 QoS 1로 한 번 발행한다. payload는 `trust=UNTRUSTED`, `reason=AUTO_DEADLINE_MISS`, `consecutive_misses=5`, `command_id`를 담는다. Gateway는 현재 AUTO 출력 owner의 유효한 이벤트만 받는다. 같은 세대의 미러 VM이 hold 조건까지 충족했으면 Authority 세대를 한 번 증가시키며 기존 owner 차단과 미러 owner 선정을 함께 기록하고, 미러가 새 세대를 적용한 뒤 출력을 허용한다. 준비된 미러가 없으면 `SAFE_STOP`으로 전환한다.
 
 ## 4. RC카 구성과 app_id
 

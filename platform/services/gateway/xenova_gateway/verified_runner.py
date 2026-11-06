@@ -124,7 +124,7 @@ class VerifiedGatewayRunner(GatewayRunner):
 
     def _enqueue(self,message):
         info=topics.parse(message.topic)
-        if message.type in ('drive.command','app.heartbeat','app.readiness','app.lifecycle','app.state.snapshot','app.state.applied'):
+        if message.type in ('drive.command','app.heartbeat','app.readiness','app.lifecycle','app.state.snapshot','app.state.applied','vm.trust'):
             if (info.vm_id not in self.pair or info.app_id not in DRIVE_APPS or
                 info.vm_id!=message.envelope.get('vm_id') or info.app_id!=message.envelope.get('app_id') or
                 getattr(message,'retained',False)):return
@@ -161,6 +161,7 @@ class VerifiedGatewayRunner(GatewayRunner):
             if message.type=='app.readiness':self.machine.on_readiness(app,vm,message.payload,t)
             elif message.type=='app.lifecycle' and self.readiness_profile=='warm-drive-1':self.machine.on_lifecycle(app,vm,message.payload,t)
             elif message.type=='app.heartbeat':self.machine.on_heartbeat(app,vm,message.payload,t)
+            elif message.type=='vm.trust':self._emit(self.machine.on_vm_untrusted(vm,app,message.payload,t))
             elif message.type=='drive.command':
                 binding=self.bindings.current(vm,trust_at)
                 if binding is None:return
