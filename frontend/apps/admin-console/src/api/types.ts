@@ -332,9 +332,6 @@ export interface ThreadsResponse {
   part_count: number | null;
   complete: boolean;
   conflicting_pages: boolean;
-  /** 수집 창에서 본 전체 스레드 수(잘림 전). CPU 탭 "N개 중 M개" 의 N */
-  rows_seen?: number | null;
-  rows_returned?: number | null;
   stack_snapshot?: {
     snapshot_id: string;
     source_status: string;
@@ -358,9 +355,6 @@ export interface ThreadsResponse {
     unavailable_reason: string | null;
   }[];
 }
-
-/** CPU 탭 스레드 목록 한 행 */
-export type ThreadRow = ThreadsResponse['items'][number];
 
 export interface TelemetryHeartbeatResponse {
   vm_id: string;

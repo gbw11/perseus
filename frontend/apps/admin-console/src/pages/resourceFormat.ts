@@ -55,10 +55,6 @@ export function formatMiB(value: number): string {
   return `${(value / (1024 * 1024)).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
 }
 
-export function formatMiBOrDash(value: number | null): string {
-  return value == null ? '—' : formatMiB(value);
-}
-
 export function relativeTime(value: string | null): string {
   if (!value) return '—';
   const elapsed = Math.max(0, Date.now() - Date.parse(value));

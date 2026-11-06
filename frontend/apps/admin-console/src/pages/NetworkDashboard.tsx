@@ -9,8 +9,8 @@ import {
   buildRxByteRateSeries,
   buildZephyrByteSeries,
   interfaceFlagOf,
-  mergeRxRateFallback,
-  withRateFallback,
+  mergeDirectRxRate,
+  withDirectRate,
   ZEPHYR_CARRIER_METRIC,
   ZEPHYR_INTERFACE_UP_METRIC,
   type InterfaceFlag,
@@ -93,9 +93,9 @@ function ZephyrNetworkPanel({ vm, drive }: { vm: Vm; drive: DriveState | null })
   const packets = buildPacketRateSeries(samples).at(-1);
   const bytes = buildZephyrByteSeries(samples);
   const rxRate = buildRxByteRateSeries(samples);
-  // RX 속도는 counter_value 차분을 우선하고, 못 구할 때(첫 표본·세대 바뀜 등)만 플랫폼 계측값을 쓴다
-  const rx = withRateFallback(bytes.rx, rxRate.current);
-  const ratePoints = mergeRxRateFallback(bytes.rates, rxRate.points);
+  // RX 속도는 팀원 쪽과 같은 순서로 직접 계측값(rx_bytes_per_s)을 먼저, 없을 때만 counter_value 차분. TX 는 차분
+  const rx = withDirectRate(bytes.rx, rxRate.current);
+  const ratePoints = mergeDirectRxRate(bytes.rates, rxRate.points);
   const interfaceUp = interfaceFlagOf(samples, ZEPHYR_INTERFACE_UP_METRIC);
   const carrier = interfaceFlagOf(samples, ZEPHYR_CARRIER_METRIC);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);

@@ -145,7 +145,14 @@ export function buildRxByteRateSeries(samples: readonly MetricSample[]): {
     const metric = sample.values.find((value) => value.name === ZEPHYR_RX_BYTES_RATE_METRIC);
     if (!metric) continue;
     const value = metric.value;
-    if (value == null || !Number.isFinite(value) || value < 0) {
+    // 팀원 쪽 networkRxKiBPerSecond 와 같은 조건: 단위 bytes/s, 사유 없음, 0 이상 유한값
+    if (
+      metric.unit !== 'bytes/s' ||
+      metric.unavailable_reason ||
+      value == null ||
+      !Number.isFinite(value) ||
+      value < 0
+    ) {
       reason = displayReason(metric);
       continue;
     }
@@ -156,33 +163,34 @@ export function buildRxByteRateSeries(samples: readonly MetricSample[]): {
   return { points, current: last?.value ?? null, reason: last ? reason : (reason ?? NO_DATA) };
 }
 
-/** 차분으로 속도를 못 구했을 때만 대체 속도를 쓴다. 누적값 자체가 없으면 대체하지 않는다 */
-export function withRateFallback(counter: DiskIoCounter, fallback: number | null): DiskIoCounter {
-  if (counter.bytesPerSecond != null || counter.totalBytes == null || fallback == null) return counter;
-  return { ...counter, bytesPerSecond: fallback };
+/**
+ * RX 현재 속도. 팀원 쪽(networkRxKiBPerSecond)과 같은 순서로 직접 계측값(rx_bytes_per_s)을 먼저 쓰고,
+ * 없을 때만 counter_value 차분값을 쓴다. 누적값은 그대로 둔다
+ */
+export function withDirectRate(counter: DiskIoCounter, direct: number | null): DiskIoCounter {
+  return direct == null ? counter : { ...counter, bytesPerSecond: direct };
 }
 
-/** 대체 속도를 그 시각의 값으로 볼 수 있는 최대 나이 */
-const FALLBACK_MAX_AGE_MS = 10_000;
+/** 직접 계측값을 그 시각의 값으로 볼 수 있는 최대 나이 */
+const DIRECT_MAX_AGE_MS = 10_000;
 
 /**
- * 그래프용 RX 속도 시계열. counter_value 차분 값이 있는 점은 그대로 두고, 차분을 못 구한 점(세대 바뀜 등)만
- * 그 시각 이전의 가장 가까운 대체 속도(rx_bytes_per_s)로 채운다. 차분 점이 하나도 없으면 대체 시계열을 쓴다.
+ * 그래프용 RX 속도 시계열. 각 점은 그 시각 이전 10초 이내의 가장 가까운 직접 계측값(rx_bytes_per_s)을 먼저 쓰고,
+ * 없을 때만 counter_value 차분값을 쓴다. TX 는 차분값 그대로. 차분 점이 하나도 없으면 직접 계측 시계열을 쓴다.
  */
-export function mergeRxRateFallback(
+export function mergeDirectRxRate(
   rates: readonly RxTxPoint[],
-  fallback: readonly { observedAt: string; value: number }[],
+  direct: readonly { observedAt: string; value: number }[],
 ): RxTxPoint[] {
   if (rates.length === 0) {
-    return fallback.map((point) => ({ observedAt: point.observedAt, rx: point.value, tx: null }));
+    return direct.map((point) => ({ observedAt: point.observedAt, rx: point.value, tx: null }));
   }
   return rates.map((point) => {
-    if (point.rx != null) return point;
     const at = Date.parse(point.observedAt);
     let nearest: { observedAt: string; value: number } | undefined;
-    for (const candidate of fallback) {
+    for (const candidate of direct) {
       const candidateAt = Date.parse(candidate.observedAt);
-      if (candidateAt <= at && at - candidateAt <= FALLBACK_MAX_AGE_MS) nearest = candidate;
+      if (candidateAt <= at && at - candidateAt <= DIRECT_MAX_AGE_MS) nearest = candidate;
     }
     return nearest ? { ...point, rx: nearest.value } : point;
   });

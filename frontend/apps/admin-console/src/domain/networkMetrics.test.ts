@@ -7,8 +7,8 @@ import {
   buildZephyrByteSeries,
   displayReason,
   interfaceFlagOf,
-  mergeRxRateFallback,
-  withRateFallback,
+  mergeDirectRxRate,
+  withDirectRate,
   ZEPHYR_INTERFACE_UP_METRIC,
 } from './networkMetrics';
 
@@ -220,7 +220,7 @@ describe('Zephyr 인터페이스 상태', () => {
 describe('Zephyr rx_bytes_per_s', () => {
   it('직접 계측 값을 시계열로 읽고 값이 없으면 사유를 남긴다', () => {
     const rate = (at: string, value: number | null, reason: string | null = null) =>
-      sample(at, [metric({ name: 'rx_bytes_per_s', value, unavailable_reason: reason })]);
+      sample(at, [metric({ name: 'rx_bytes_per_s', value, unit: 'bytes/s', unavailable_reason: reason })]);
 
     const series = buildRxByteRateSeries([
       rate('2026-11-04T01:00:02Z', 2048),
@@ -231,31 +231,36 @@ describe('Zephyr rx_bytes_per_s', () => {
 
     const missing = buildRxByteRateSeries([rate('2026-11-04T01:00:00Z', null, 'rate_not_ready')]);
     expect(missing).toEqual({ points: [], current: null, reason: 'rate_not_ready' });
+
+    // 팀원 쪽과 같은 조건: 단위가 bytes/s 가 아니면 쓰지 않는다
+    const wrongUnit = sample('2026-11-04T01:00:00Z', [
+      metric({ name: 'rx_bytes_per_s', value: 10, unit: 'bytes' }),
+    ]);
+    expect(buildRxByteRateSeries([wrongUnit]).current).toBeNull();
   });
 });
 
-describe('RX 속도 대체값', () => {
-  it('counter_value 차분이 있으면 그 값을, 없을 때만 대체 속도를 쓴다', () => {
+describe('RX 현재 속도', () => {
+  it('직접 계측값(rx_bytes_per_s)이 있으면 그 값을, 없을 때만 counter_value 차분값을 쓴다', () => {
     const counted = { totalBytes: 1000, bytesPerSecond: 50, reason: null };
     const waiting = { totalBytes: 1000, bytesPerSecond: null, reason: null };
-    const missing = { totalBytes: null, bytesPerSecond: null, reason: 'source_unavailable' };
 
-    expect(withRateFallback(counted, 99)).toEqual(counted);
-    expect(withRateFallback(waiting, 99)).toEqual({ ...waiting, bytesPerSecond: 99 });
-    expect(withRateFallback(waiting, null)).toEqual(waiting);
-    expect(withRateFallback(missing, 99)).toEqual(missing);
+    expect(withDirectRate(counted, 99)).toEqual({ ...counted, bytesPerSecond: 99 });
+    expect(withDirectRate(counted, null)).toEqual(counted);
+    expect(withDirectRate(waiting, 99)).toEqual({ ...waiting, bytesPerSecond: 99 });
+    expect(withDirectRate(waiting, null)).toEqual(waiting);
   });
 });
 
-describe('송수신 속도 그래프 대체값', () => {
+describe('송수신 속도 그래프 RX', () => {
   const at = (seconds: number) => new Date(Date.UTC(2026, 10, 4, 1, 0, seconds)).toISOString();
 
-  it('차분 점은 그대로 두고, 차분을 못 구한 점만 그 시각 이전 10초 이내 대체 속도로 채운다', () => {
-    const merged = mergeRxRateFallback(
+  it('각 점은 그 시각 이전 10초 이내 직접 계측값을 먼저 쓰고, 없을 때만 차분값을 쓴다. TX 는 그대로', () => {
+    const merged = mergeDirectRxRate(
       [
         { observedAt: at(2), rx: 100, tx: 10 },
         { observedAt: at(4), rx: null, tx: null },
-        { observedAt: at(30), rx: null, tx: 5 },
+        { observedAt: at(30), rx: 70, tx: 5 },
       ],
       [
         { observedAt: at(1), value: 900 },
@@ -263,14 +268,16 @@ describe('송수신 속도 그래프 대체값', () => {
       ],
     );
     expect(merged).toEqual([
-      { observedAt: at(2), rx: 100, tx: 10 },
+      { observedAt: at(2), rx: 900, tx: 10 },
       { observedAt: at(4), rx: 300, tx: null },
-      { observedAt: at(30), rx: null, tx: 5 },
+      { observedAt: at(30), rx: 70, tx: 5 },
     ]);
   });
 
-  it('차분 점이 하나도 없으면 대체 시계열을 RX 로 그린다', () => {
-    expect(mergeRxRateFallback([], [{ observedAt: at(1), value: 42 }])).toEqual([
+  it('직접 계측값이 없으면 차분 시계열 그대로, 차분 점이 없으면 직접 계측 시계열을 RX 로 그린다', () => {
+    const rates = [{ observedAt: at(2), rx: 100, tx: 10 }];
+    expect(mergeDirectRxRate(rates, [])).toEqual(rates);
+    expect(mergeDirectRxRate([], [{ observedAt: at(1), value: 42 }])).toEqual([
       { observedAt: at(1), rx: 42, tx: null },
     ]);
   });

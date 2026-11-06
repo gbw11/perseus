@@ -32,7 +32,6 @@ import { sharedMemoryObservation, sharedObservedAt } from '../domain/sharedMemor
 import { memoryObservationRunKey, selectMemoryObservationRun } from '../domain/memoryObservationRun';
 import { LiveDataAlert } from '../layout/LiveDataAlert';
 import { useNow } from '../useNow';
-import { CpuWorkloadList } from './CpuWorkloadList';
 import { MetricErrorNotice } from './MetricErrorNotice';
 import { NetworkDashboard } from './NetworkDashboard';
 import styles from './pages.module.css';
@@ -875,8 +874,6 @@ function CpuVmChart({ role, vm }: { role: Role | null; vm: Vm }) {
           {metrics.error ? '메트릭 연결 오류' : values.length ? `${values.length} samples` : 'No samples'}
         </span>
       </div>
-
-      <CpuWorkloadList vm={vm} />
     </Card>
   );
 }

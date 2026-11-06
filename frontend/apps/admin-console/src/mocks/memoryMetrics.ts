@@ -1,4 +1,4 @@
-import type { MetricSample, MetricValue, ThreadsResponse } from '../api/types';
+import type { MetricSample, MetricValue } from '../api/types';
 import { MEMORY_POOL_METRICS } from '../domain/memoryPools';
 import { VM_IDS } from './data';
 
@@ -232,57 +232,4 @@ export function mockZephyrNetworkSamples(vmId: string, now = Date.now()): Metric
     });
   }
   return samples;
-}
-
-const MOCK_THREADS: Record<string, [string, number][]> = {
-  [VM_IDS.autonomous]: [
-    ['drive_ctrl', 31.5],
-    ['lidar_rx', 18.2],
-    ['netfront_rx', 9.4],
-    ['telemetry_pub', 4.1],
-    ['shell', 0.6],
-    ['logging', 0.4],
-    ['sysworkq', 1.2],
-    ['idle', 33.8],
-    ['main', 0.3],
-    ['net_mgmt', 0.2],
-    ['tcp_work', 0.3],
-    ['rx_q[0]', 0.0],
-  ],
-  [VM_IDS.manual]: [
-    ['manual_ctrl', 12.0],
-    ['netfront_rx', 3.2],
-    ['telemetry_pub', 2.9],
-    ['idle', 80.1],
-    ['sysworkq', 0.8],
-    ['main', 0.2],
-  ],
-};
-
-/**
- * GET /threads mock. 응답 모양은 origin/frontend 의 /threads mock(Zephyr 만 표본, Linux 는 만료 빈 응답)을 따르고,
- * CPU 탭 상위 10개 목록을 보이려고 스레드 12개와 전체 개수(rows_seen)만 더한다.
- */
-export function mockZephyrThreads(vmId: string, now = Date.now()): ThreadsResponse {
-  const rows = MOCK_THREADS[vmId];
-  return {
-    vm_id: vmId,
-    window_ms: rows ? 1000 : null,
-    received_at: rows ? new Date(now).toISOString() : null,
-    stale: !rows,
-    threads_status: rows ? 'ok' : null,
-    parts_received: rows ? 1 : 0,
-    part_count: rows ? 1 : null,
-    complete: !!rows,
-    conflicting_pages: false,
-    rows_seen: rows ? rows.length : null,
-    rows_returned: rows ? rows.length : null,
-    items: (rows ?? []).map(([name, cpu], index) => ({
-      thread_id: `0x${(0x20000000 + index * 0x100).toString(16)}`,
-      thread_name: name,
-      name_truncated: false,
-      cpu_percent: cpu,
-      unavailable_reason: null,
-    })),
-  };
 }

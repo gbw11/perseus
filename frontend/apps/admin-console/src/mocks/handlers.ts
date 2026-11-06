@@ -22,12 +22,7 @@ import {
 } from '../api/types';
 import { mockBoardDown, setMockBoardDown } from './board';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
-import {
-  mockKernelHeapSamples,
-  mockMemoryPoolSamples,
-  mockZephyrNetworkSamples,
-  mockZephyrThreads,
-} from './memoryMetrics';
+import { mockKernelHeapSamples, mockMemoryPoolSamples, mockZephyrNetworkSamples } from './memoryMetrics';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
@@ -531,39 +526,44 @@ export const handlers = [
         items: [],
       } as unknown as JsonBodyType);
     }
-    const items = [
-      { pid: 412, name: 'interaction', cpu_percent: 4.2, rss_bytes: 48_234_496 },
-      { pid: 388, name: 'xenova-agent', cpu_percent: 1.1, rss_bytes: 21_495_808 },
-      { pid: 1, name: 'systemd', cpu_percent: 0.2, rss_bytes: 11_010_048 },
-      { pid: 233, name: 'systemd-journald', cpu_percent: 0.1, rss_bytes: 9_437_184 },
-      { pid: 301, name: 'mosquitto_sub', cpu_percent: 0.3, rss_bytes: 3_145_728 },
-      { pid: 455, name: 'chromium', cpu_percent: 2.6, rss_bytes: 98_566_144 },
-      { pid: 456, name: 'chromium-gpu', cpu_percent: 1.8, rss_bytes: 61_865_984 },
-      { pid: 120, name: 'dbus-daemon', cpu_percent: 0.0, rss_bytes: 4_194_304 },
-      { pid: 140, name: 'sshd', cpu_percent: 0.0, rss_bytes: 7_340_032 },
-      { pid: 160, name: 'cron', cpu_percent: null, rss_bytes: 2_097_152 },
-    ];
     return HttpResponse.json({
       vm_id: VM_IDS.interaction,
       observed_at: new Date().toISOString(),
       stale: false,
-      items,
-      process_collection: {
-        status: 'ok',
-        discovered: 87,
-        read_ok: 87,
-        vanished: 0,
-        failed: 0,
-        truncated: false,
-        error: null,
-      },
+      items: [
+        { pid: 412, name: 'interaction', cpu_percent: 4.2, rss_bytes: 48_234_496 },
+        { pid: 388, name: 'xenova-agent', cpu_percent: 1.1, rss_bytes: 21_495_808 },
+        { pid: 1, name: 'systemd', cpu_percent: 0.2, rss_bytes: 11_010_048 },
+      ],
     } as unknown as JsonBodyType);
   }),
 
   http.get('*/api/v1/vms/:vmId/threads', async ({ request, params }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
-    return HttpResponse.json(mockZephyrThreads(String(params.vmId)) as unknown as JsonBodyType);
+    const zephyr = params.vmId === VM_IDS.autonomous || params.vmId === VM_IDS.manual;
+    return HttpResponse.json({
+      vm_id: params.vmId,
+      window_ms: zephyr ? 1000 : null,
+      received_at: zephyr ? new Date().toISOString() : null,
+      stale: !zephyr,
+      threads_status: zephyr ? 'ok' : null,
+      parts_received: zephyr ? 1 : 0,
+      part_count: zephyr ? 1 : null,
+      complete: zephyr,
+      conflicting_pages: false,
+      items: zephyr
+        ? [
+            {
+              thread_id: '1',
+              thread_name: 'telemetry',
+              name_truncated: false,
+              cpu_percent: 1.2,
+              unavailable_reason: null,
+            },
+          ]
+        : [],
+    });
   }),
 
   http.get('*/api/v1/vms/:vmId/telemetry/heartbeat', async ({ request, params }) => {

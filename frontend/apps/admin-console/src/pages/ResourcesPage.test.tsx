@@ -2,13 +2,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render as rtlRender, screen, within } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { initialVms, VM_IDS } from '../mocks/data';
-import { mockZephyrThreads } from '../mocks/memoryMetrics';
+import { initialVms } from '../mocks/data';
 import { ResourcesPage } from './ResourcesPage';
 
 const state = vi.hoisted(() => ({ metricsError: null as Error | null }));
 
 vi.mock('../layout/DriveContext', () => ({ useDrive: () => ({ drive: null }) }));
+// 공용 1초 시계는 첫 렌더에 모듈을 불러온 시각을 돌려줄 수 있어, 표본(렌더 때 만든 현재 시각)보다 과거가 된다.
+// Pool 현재값은 수신 시각보다 이른 now 를 오류로 보므로 테스트에서는 렌더 시점의 현재 시각을 쓴다
+vi.mock('../useNow', () => ({ useNow: () => Date.now() }));
 
 vi.mock('../api/queries', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/queries')>();
@@ -64,26 +66,6 @@ vi.mock('../api/queries', async (importOriginal) => {
       error: state.metricsError,
       isPending: false,
     }),
-    useProcesses: () => ({
-      data: {
-        vm_id: data.VM_IDS.interaction,
-        observed_at: new Date().toISOString(),
-        stale: false,
-        items: [{ pid: 1, name: 'systemd', cpu_percent: 0.5, rss_bytes: 1024 * 1024 }],
-        process_collection: {
-          status: 'ok',
-          discovered: 42,
-          read_ok: 42,
-          vanished: 0,
-          failed: 0,
-          truncated: false,
-          error: null,
-        },
-      },
-      error: null,
-      isPending: false,
-    }),
-    useThreads: (vmId: string) => ({ data: memory.mockZephyrThreads(vmId), error: null, isPending: false }),
   };
 });
 
@@ -172,23 +154,5 @@ describe('Network 탭', () => {
     render(<ResourcesPage view="network" />);
 
     expect(screen.getAllByRole('alert')).toHaveLength(initialVms().length);
-  });
-});
-
-describe('CPU 탭', () => {
-  it('Linux 카드에 상위 프로세스와 수집 상태, Zephyr 카드에 상위 10개 스레드를 그린다', () => {
-    render(<ResourcesPage view="cpu" />);
-
-    const processes = screen.getByRole('region', { name: 'interaction 상위 프로세스' });
-    expect(within(processes).getByText('42개 중 1개 · CPU 높은 순')).toBeInTheDocument();
-    expect(within(processes).getByText('수집 정상')).toBeInTheDocument();
-    expect(within(processes).getByText('systemd')).toBeInTheDocument();
-
-    const threads = screen.getByRole('region', { name: 'autonomous 스레드' });
-    expect(within(threads).getByText('12개 중 10개 · CPU 높은 순')).toBeInTheDocument();
-    expect(within(threads).getByText('계측 구간 1.0초')).toBeInTheDocument();
-    expect(within(threads).getAllByRole('row')).toHaveLength(11);
-    expect(within(threads).getAllByRole('cell')[0]).toHaveTextContent('idle');
-    expect(mockZephyrThreads(VM_IDS.autonomous).items).toHaveLength(12);
   });
 });

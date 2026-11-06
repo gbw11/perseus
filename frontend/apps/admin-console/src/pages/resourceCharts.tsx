@@ -1,10 +1,8 @@
 /** Memory·Network 탭 공통 블록: 텍스트 수치 격자, RX/TX 2선 그래프, 누적·속도 타일 */
-import type { DiskIoCounter } from '../domain/vmMetrics';
 import styles from './pages.module.css';
 import { useState, type MouseEvent } from 'react';
 import {
   chartPoints,
-  formatBytes,
   latestValue,
   nearestPointIndex,
   pointXPercent,
@@ -213,30 +211,5 @@ export function RxTxChart({
         </div>
       </div>
     </section>
-  );
-}
-
-/** 누적 바이트와 현재 속도 타일 (디스크 읽기·쓰기, 네트워크 수신·송신) */
-export function ByteCounterItem({
-  label,
-  counter,
-  waiting = '속도 계산 대기',
-}: {
-  label: string;
-  counter: DiskIoCounter;
-  waiting?: string;
-}) {
-  return (
-    <div className={styles.counterItem}>
-      <span>{label} 누적</span>
-      <strong>{counter.totalBytes == null ? '—' : formatBytes(counter.totalBytes)}</strong>
-      <small>
-        {counter.totalBytes == null
-          ? (counter.reason ?? '데이터 없음')
-          : counter.bytesPerSecond == null
-            ? waiting
-            : `${formatBytes(counter.bytesPerSecond)}/s`}
-      </small>
-    </div>
   );
 }
