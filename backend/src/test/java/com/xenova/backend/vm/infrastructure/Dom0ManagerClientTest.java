@@ -538,6 +538,24 @@ class Dom0ManagerClientTest {
         assertThat(requests).hasValue(1);
     }
 
+    @Test
+    void vmNameConflictIsAPublicNameConflictNotAnExistingVm() {
+        server.createContext("/api/v1/vms", exchange -> respond(exchange, 409, """
+                {
+                  "code":"VMNameConflict",
+                  "message":"platform name already used by another vm_id"
+                }
+                """));
+
+        assertThatThrownBy(() -> client.launch(VM_ID, SPEC))
+                .isInstanceOfSatisfying(
+                        ApiException.class,
+                        exception -> {
+                            assertThat(exception.getStatus().value()).isEqualTo(409);
+                            assertThat(exception.getCode()).isEqualTo("VM_NAME_CONFLICT");
+                        });
+    }
+
     private static String controlOperation(String status) {
         return """
                 {

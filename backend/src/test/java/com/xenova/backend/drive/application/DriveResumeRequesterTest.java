@@ -13,6 +13,8 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpStatus;
 
 class DriveResumeRequesterTest {
@@ -97,16 +99,34 @@ class DriveResumeRequesterTest {
         assertThat(sent).isEmpty();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"MANUAL", "AUTO"})
+    void publishesTheSameRequestToRearmADisarmedManualOrAuto(String mode) {
+        // Contract §5.2 (verified): a disarmed MANUAL/AUTO is rearmed with the same drive.resume.requested.
+        control(mode);
+        requester(publisher).request("operator");
+        assertThat(sent).hasSize(1);
+        JsonNode message = sent.get(0);
+        assertThat(message.path("type").asText()).isEqualTo("drive.resume.requested");
+        assertThat(message.path("causation_id").asText()).isEqualTo("m-1");
+        assertThat(message.path("payload").path("expected_generation").asLong()).isEqualTo(1);
+        assertThat(message.path("payload").path("requested_by").asText()).isEqualTo("operator");
+        assertThat(message.path("payload").size()).isEqualTo(2);
+    }
+
     @Test
-    void refusesOutsideAutoReady() {
+    void refusesOutsideResumableModes() {
         assertThatThrownBy(() -> requester(publisher).request("operator"))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
                     assertThat(e.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
                     assertThat(e.getCode()).isEqualTo("DRIVE_STATE_UNAVAILABLE");
                 });
-        control("MANUAL");
+        control("SAFE_STOP");
         assertThatThrownBy(() -> requester(publisher).request("operator"))
-                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("NOT_AUTO_READY"));
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(e.getCode()).isEqualTo("NOT_AUTO_READY");
+                });
         assertThat(sent).isEmpty();
     }
 

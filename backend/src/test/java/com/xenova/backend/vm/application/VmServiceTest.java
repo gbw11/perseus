@@ -162,6 +162,37 @@ class VmServiceTest {
     }
 
     @Test
+    void createRefusedForAPlatformNameConflictRemovesTheRecordAndIsNotASuccess() {
+        when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.empty());
+        when(vmRecordRepository.save(any(VmRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(vmControlPort.launch(anyString(), any())).thenThrow(
+                new ApiException(HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "이름 충돌"));
+
+        assertThatThrownBy(() -> service.create(ALPINE))
+                .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(exception.getCode()).isEqualTo("VM_NAME_CONFLICT");
+                });
+        verify(vmRecordRepository).delete(any(VmRecord.class));
+        verify(vmControlPort, never()).find(anyString());
+        verify(eventRecorder, never()).vmCreated(any());
+    }
+
+    @Test
+    void startRefusedForAPlatformNameConflictIsNotTreatedAsStarted() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        when(vmControlPort.find("vm-1")).thenReturn(Optional.empty());
+        when(vmControlPort.launch("vm-1", new VmLaunchSpec("alpine-1", "alpine", "1.2.0", 1, 256))).thenThrow(
+                new ApiException(HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "이름 충돌"));
+
+        assertThatThrownBy(() -> service.start("vm-1"))
+                .isInstanceOfSatisfying(ApiException.class,
+                        exception -> assertThat(exception.getCode()).isEqualTo("VM_NAME_CONFLICT"));
+        verify(stateTracker, never()).changedByUser(anyString(), any(), any(), anyString());
+        verify(vmRecordRepository, never()).delete(any(VmRecord.class));
+    }
+
+    @Test
     void createThatTimedOutKeepsTheRecordForARetry() {
         when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.empty());
         when(vmRecordRepository.save(any(VmRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));

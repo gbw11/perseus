@@ -209,6 +209,11 @@ public class Dom0ManagerClient implements VmControlPort {
         return switch (error.code() == null ? "" : error.code()) {
             case "VMNotFound" -> new ApiException(HttpStatus.NOT_FOUND, "VM_NOT_FOUND", message);
             case "VMExists" -> new ApiException(HttpStatus.CONFLICT, "VM_ALREADY_EXISTS", message);
+            // The board already uses this platform (domain) name for a different vm_id. Unlike VMExists it is never
+            // our own earlier launch, so it must not be read as success: it is the same public code as a Spring-side
+            // name clash.
+            case "VMNameConflict" -> new ApiException(
+                    HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "보드에 같은 이름의 VM이 이미 있습니다. 다른 이름을 사용하세요.");
             case "InvalidState" -> new ApiException(HttpStatus.CONFLICT, "INVALID_VM_STATE", message);
             case "InvalidArgument" -> new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", message);
             case "OperationNotFound" -> new ApiException(HttpStatus.NOT_FOUND, "OPERATION_NOT_FOUND", message);
