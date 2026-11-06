@@ -424,7 +424,14 @@ mode를 발급하면 해당 새 세대 적용을 다시 확인한다. 상태 있
 | `progress_seq` | 정규 uint64 십진 string, 0..18446744073709551615 | 앱 instance의 실제 계산 완료 순번. 무업무 대기 중 증가하지 않음 |
 | `phase` | WAITING / ACTIVATING / EXECUTING / STOPPING / RESIDUAL | 무업무 대기 / 현재 문맥의 계산 대기 / 계산 실행·결과 관측 / 종료 중 / 정리 미확정 |
 | `readiness` | QUALIFIED / READY / NOT_READY | 사전 대기 자격 / 실제 계산을 확인한 활성화 준비 / 제한 상태 |
-| `reason` | QUALIFIED·READY는 null, NOT_READY는 제한 코드 | 6.2절 코드와 APP_STOPPING·RESOURCE_RETAINED |
+| `reason` | QUALIFIED·READY는 null, NOT_READY는 제한 코드 | 6.2절 코드, APP_STOPPING·RESOURCE_RETAINED, 아래 lattice 계산 코드 |
+
+lattice 계산 코드(공통 펌웨어의 경로 계획·추종 사유. C `xm_app_lifecycle_json`·Python `xenova_mqtt.lifecycle.LATTICE_REASONS` 가 같은 집합을 받는다):
+BUSY, MAP_UNAVAILABLE, WORLD_UNAVAILABLE, POSE_UNAVAILABLE, PATH_UNAVAILABLE, PATH_INVALIDATED,
+OBSERVATION_EXPIRED, CONTEXT_CHANGED, STEERING_UNAVAILABLE, CLOCK_ERROR, SEARCH_NOT_FOUND,
+NODE_BUDGET, WORK_BUDGET, DEADLINE, CANCELLED, NUMERIC_ERROR, COLLISION, PATH_LIMIT,
+STATE_REJECTED, RESOURCE_LIMIT, STATE_FRAME_CHANGED, STATE_CONFIGURATION_CHANGED, STATE_REFERENCE_CHANGED.
+이 코드는 `app.lifecycle` 에만 쓴다. 6.2 `app.readiness` 의 reason 집합은 그대로다.
 
 앞자리 0은 값 0 외에는 허용하지 않는다. 알 수 없는 필드·프로필·enum·이유·자료형은
 거절한다. QUALIFIED는 WAITING과 1 이상의 generation이 필요하다. READY는 EXECUTING과
@@ -493,8 +500,9 @@ Xen crash/absent, Engine 원 attempt·예산·force 승인 경계는 유지한�
 
 현재 backend의 keys-only 생산 경로와 구분하는 선택 계약이다. 공통 C decoder/어댑터와
 warm Gateway에 소비 경로가 있으며 Spring/UI의 실제 세션 생산·모드 독립 공급은 아직
-연결되지 않았다. 기존 `drive.input` type·토픽·QoS 0·retain false·1024 bytes 상한을
-재사용한다. 아래 필드를 모두 사용하고 추가 필드는 거절한다.
+연결되지 않았다. 기존 `drive.input` type·토픽·QoS 0·retain false를 재사용하고, payload는
+1024 bytes 이하다(공통 C 수신기가 이보다 큰 입력을 버린다. 정책 표의 `drive.input` 상한은
+주행 토픽이 아닌 일반 64 KB 그대로다). 아래 필드를 모두 사용하고 추가 필드는 거절한다.
 
 | 필드 | 타입·범위 | 의미 |
 |---|---|---|
@@ -812,7 +820,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.6 (보완) | 2026-11-02 | 12장 WS-06: `sim.command.result` 는 모든 콘솔 연결에 방송, 결과가 REST 202 보다 먼저 올 수 있음을 명시 (구현과 같음, S15P31E110-267). 토픽·payload 는 그대로 |
 | v1.7 | 2026-11-04 | 재개 카운트다운 운영자 취소 (S15P31E110-280): `console/resume` 에 `drive.resume.cancel_requested`(`causation_id`·`expected_generation`·`requested_by`) 추가, `drive.resume.cancelled` reason `operator_cancelled`(모드 유지, 자동 복귀 없음)(5.2 verified, 6장). 6장 표에 그동안 게이트웨이 README 에만 있던 `drive.resume.accepted`·`cancelled` 와 `console/resume` 재개 요청 행을 올림. 기존 토픽·payload·ACL 은 그대로 |
 | v1.8 | 2026-11-04 | 3.2절 데모 명령 규칙 추가 (S15P31E110-123): MQTT-04 payload 필드·범위(`stress` 의 `cpu_workers`·`memory_mib`·`duration_s`), 유효 기간 300초·시계 허용 30초(`CLOCK_UNTRUSTED`), 같은 `command_id`·같은 요청은 재실행 없이 마지막 결과 재전송, 다른 요청은 `IDEMPOTENCY_CONFLICT`, 기록을 남기지 못하면 실행하지 않음(`STATE_UNAVAILABLE`), MQTT-05 상태 흐름과 오류 코드, `agent_exit` 의 종결 결과는 `ACCEPTED` 하나이고 PUBACK 확인 뒤 종료(PUBACK 전 재시작은 이어서 진행), MQTT-05 중복은 백엔드가 `(vm_id, command_id)` 집계 키로 처리(같은 결과 재전달은 무시, `RUNNING` → 종결은 전이, 종결 뒤 다른 종결은 계약 위반). 데모 설정이 꺼진 에이전트는 `DEMO_DISABLED`. 10장 미확정에서 명령 만료 허용 범위 제외 |
-| v1.8.1 | 2026-11-06 | 5.4 `perception.result` 의 좌표·부호(원점·축·`lane_offset_m`·`heading_err_rad` 부호·장애물 기준점·순서·최대 8개)를 구현이 이미 따르는 규칙대로 명시 (S15P31E110-156 후속, -249). 필드·타입·토픽은 그대로 |
+| v1.8.1 | 2026-11-06 | 5.4 `perception.result` 의 좌표·부호(원점·축·`lane_offset_m`·`heading_err_rad` 부호·장애물 기준점·순서·최대 8개)를 구현이 이미 따르는 규칙대로 명시 (S15P31E110-156 후속, -249). 6.3 `app.lifecycle` reason 에 C·Python 이 이미 받는 lattice 계산 코드 23개를 적음. 7.1 의 "기존 1024 bytes 상한" 을 실제(공통 C 수신기 1024 bytes, 정책 표는 64 KB)대로 고침. 필드·타입·토픽은 그대로 |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의
 QoS 교환은 메시지 전달을 위한 것이며 앱/장치 적용 확인을 대신하지 않는다.
