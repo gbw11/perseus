@@ -1,5 +1,5 @@
 import { Card } from '@xenova/ui';
-import { useEffect, useState, type CSSProperties } from 'react';
+import type { CSSProperties } from 'react';
 import type { DriveState } from '../api/drive';
 import { LIVE_POLL_MS, useMetrics, useVms } from '../api/queries';
 import type { MetricSample, Vm } from '../api/types';
@@ -311,11 +311,8 @@ function SharedMemoryPanels({
   pending: boolean;
   failed: boolean;
 }) {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+  // 화면 전체가 같이 쓰는 1초 시계 — 같은 카드 안의 "n초 전"이 서로 다른 시계로 계산되지 않게
+  const now = useNow();
   // The 5-minute heap query must also respect a new session first seen in the 60-second buffer query.
   const allSamples = [...heapSamples, ...samples];
   const run = selectMemoryObservationRun(allSamples, allSamples[0]?.vm_id ?? '');

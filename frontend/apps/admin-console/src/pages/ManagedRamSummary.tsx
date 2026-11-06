@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
 import type { MetricSample } from '../api/types';
 import { buildManagedRamSeries, managedRamReason } from '../domain/managedRam';
 import { MemoryPercentChart } from './AppMemoryPools';
 import styles from './pages.module.css';
+import { useNow } from '../useNow';
 
 /** Linux와 같은 요약 형태로 최근 Zephyr 관리 RAM 관측과 그 시각을 표시한다. */
 export function ManagedRamSummary({
@@ -14,11 +14,8 @@ export function ManagedRamSummary({
   vmName: string;
   samples: MetricSample[];
 }) {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+  // 화면 전체가 같이 쓰는 1초 시계 — 같은 카드 안의 "n초 전"이 서로 다른 시계로 계산되지 않게
+  const now = useNow();
   const { current, recentObservation, points, lastObservationAt, timeBasis } = buildManagedRamSeries(
     samples,
     vmId,
