@@ -14,6 +14,20 @@ from xenova_mqtt.readiness import parse as parse_readiness
 log=logging.getLogger(__name__)
 CONTEXT=('vm_id','host_boot_id','execution_id','domid','xen_unique_id')
 
+def valid_vm_trust_payload(payload):
+    if not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED':return False
+    command_id=payload.get('command_id')
+    if not isinstance(command_id,str) or not command_id or len(command_id)>128:return False
+    reason=payload.get('reason')
+    if reason=='AUTO_DEADLINE_MISS':return type(payload.get('consecutive_misses')) is int and payload['consecutive_misses']>=5
+    if reason=='MEMORY_PRESSURE':
+        return (payload.get('metric')=='memory.kernel_heap.used_bytes' and
+                type(payload.get('used_percent')) is int and 0<=payload['used_percent']<=100 and
+                type(payload.get('threshold_percent')) is int and 50<=payload['threshold_percent']<=99 and
+                payload['used_percent']>=payload['threshold_percent'] and
+                type(payload.get('consecutive_samples')) is int and payload['consecutive_samples']>=2)
+    return False
+
 class ProductionBootstrap:
     def __init__(self,config,observe,*,uid=0):
         self.config=config;self.observe=observe;self.uid=uid
@@ -193,10 +207,7 @@ class RejoinCoordinator:
         info=topics.parse(message.topic);payload=message.payload;now=self.clock()
         row=self.cache.current(info.vm_id,now)
         if (getattr(message,'retained',False) or message.type!='vm.trust' or info.app_id!='autonomous' or
-            not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED' or
-            payload.get('reason')!='AUTO_DEADLINE_MISS' or type(payload.get('consecutive_misses')) is not int or
-            payload['consecutive_misses']<5 or not isinstance(payload.get('command_id'),str) or
-            not payload['command_id'] or len(payload['command_id'])>128 or row is None):return
+            not valid_vm_trust_payload(payload) or row is None):return
         try:self._trust_reports.put_nowait({'vm_id':info.vm_id,'execution_id':row['execution_id'],
             'command_id':payload['command_id'],'received_monotonic':message.received_monotonic})
         except queue.Full:pass

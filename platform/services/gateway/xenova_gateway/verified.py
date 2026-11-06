@@ -10,6 +10,20 @@ from .authority import AuthorityError,AuthorityStore
 from .machine import (ControlMachine,Mode,Timing,DRIVE_APPS,AUTONOMOUS,MANUAL_APP,
     AppTrack,ForwardDrive,ForwardStop,PublishControl,PublishEvent,Measure,valid_command)
 
+TRUST_REASONS=frozenset(('AUTO_DEADLINE_MISS','MEMORY_PRESSURE'))
+
+def valid_untrusted_payload(payload):
+    if not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED' or payload.get('reason') not in TRUST_REASONS:return False
+    command_id=payload.get('command_id')
+    if not isinstance(command_id,str) or not command_id or len(command_id)>128:return False
+    if payload['reason']=='AUTO_DEADLINE_MISS':
+        return type(payload.get('consecutive_misses')) is int and payload['consecutive_misses']>=5
+    return (payload.get('metric')=='memory.kernel_heap.used_bytes' and
+            type(payload.get('used_percent')) is int and 0<=payload['used_percent']<=100 and
+            type(payload.get('threshold_percent')) is int and 50<=payload['threshold_percent']<=99 and
+            payload['used_percent']>=payload['threshold_percent'] and
+            type(payload.get('consecutive_samples')) is int and payload['consecutive_samples']>=2)
+
 @dataclass
 class Prepared:
     progress: int = -1
@@ -118,10 +132,10 @@ class VerifiedDriveMachine(ControlMachine):
         generation. A missing mirror therefore becomes SAFE_STOP, never a
         continuation of output from the distrusted execution.
         """
-        if (vm!=self.active_vm or app!=AUTONOMOUS or self.active_app!=AUTONOMOUS or
-            not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED' or
-            payload.get('reason')!='AUTO_DEADLINE_MISS' or
-            type(payload.get('consecutive_misses')) is not int or payload['consecutive_misses']<5):return []
+        if (vm!=self.active_vm or app!=AUTONOMOUS or self.active_app is None or
+            not valid_untrusted_payload(payload)):return []
+        if payload['reason']=='AUTO_DEADLINE_MISS' and self.active_app!=AUTONOMOUS:return []
+        affected_app=self.active_app
         command_id=payload.get('command_id')
         if not isinstance(command_id,str) or not command_id or len(command_id)>128 or command_id in self._trust_commands:return []
         binding=self.bindings.current(vm,t)
@@ -130,11 +144,11 @@ class VerifiedDriveMachine(ControlMachine):
         distrust={'vm_id':vm,'execution_id':binding['execution_id'],'reason':payload['reason'],'command_id':command_id,
                   'observed_monotonic_ms':int(t*1000),'generation':self.generation}
         self.untrusted[vm]=distrust
-        self.nodes[vm][AUTONOMOUS].pending=None
+        self.nodes[vm][affected_app].pending=None
         other=next(candidate for candidate in self.vm_ids if candidate!=vm)
         actions=[Measure('vm_untrusted',{'vm_id':vm,'reason':payload['reason'],'command_id':command_id,
                                          'gen':self.generation,'t':t})]
-        if self.transport_ok and self._qualified(other,AUTONOMOUS,t,held=True):
+        if self.transport_ok and self._qualified(other,affected_app,t,held=True):
             return actions+self._change(self.mode,other,'vm_untrusted',t,arm=True,distrust=distrust)
         self._authorized=False
         return actions+self._change(Mode.SAFE_STOP,vm,'no_fresh_standby',t,distrust=distrust)

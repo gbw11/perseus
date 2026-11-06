@@ -20,7 +20,7 @@ from dom0_manager.recovery.state import RecoveryStore,RecoveryStatus
 from dom0_manager.recovery.model import Judgment,FailureReason,HealthState,VmHealth
 from dom0_manager.recovery.protection import GatewayProtection
 from fake_gateway import FakeGateway
-from dom0_manager.recovery.rejoin import RejoinCoordinator,ProductionBootstrap,production
+from dom0_manager.recovery.rejoin import RejoinCoordinator,ProductionBootstrap,production,valid_vm_trust_payload
 from xenova_mqtt import Identity,topics
 from xenova_mqtt.client import Message
 from xenova_mqtt.envelope import build
@@ -31,6 +31,13 @@ sys.path.insert(0,str(ROOT/'platform/tests'))
 import test_xenova_network_zephyr as network
 from xenova_drive_binding import observe
 import xenova_vm
+
+def test_memory_pressure_trust_payload_is_accepted_for_recovery():
+    payload={'trust':'UNTRUSTED','reason':'MEMORY_PRESSURE','metric':'memory.kernel_heap.used_bytes',
+        'used_percent':89,'threshold_percent':85,'consecutive_samples':5,'command_id':'memory-1'}
+    assert valid_vm_trust_payload(payload)
+    assert not valid_vm_trust_payload({**payload,'used_percent':80})
+    assert not valid_vm_trust_payload({**payload,'consecutive_samples':1})
 
 @pytest.fixture
 def fixture():
