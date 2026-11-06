@@ -191,6 +191,25 @@ cd apps/admin-console && VITE_MOCK=true npx vite --port 5173            # VITE_M
 - 웹 콘솔: VM Dashboard의 [Console] 탭에서 VM 을 골라 [연결]. 웹 터미널 계약 `browser-console-v1` 그대로 — 자동 접속·재접속 없음, [연결 해제] 로 점유를 푼다(platform -248). mock 에서는 가짜 셸(Debian: `help`·`uname -a`·`ps` 등, Zephyr: 부팅 로그만)
 - 모니터: `http://localhost:5173/monitor/split?kiosk=1`, 상세는 `/monitor/detail/<앱>`. 실제로는 dom0 표시 서비스가 콘솔 [화면 배치] 에 따라 키오스크 주소를 바꾼다(화면 배치 계약 `docs/contracts/display-route-v1.md`). mock 에서는 `?display=display-0` 으로 열면 모니터가 표시 서비스 대신 콘솔 mock 배치를 따라간다. 콘솔 탭이 열려 있는 동안 따라갑니다.
 
+### HDMI 차량 화면 노트북 미리보기 (S15P31E110-128)
+
+보드 없이 dom0 표시 수집기 자리에 가짜 수집기(8082)를 붙여 HDMI 화면(`/display/*`)을 노트북에서 만든다.
+
+```bash
+cd apps/vm-screens && npm run preview:monitors     # 가짜 수집기 8082 + vite 5174
+```
+
+| 주소                                      | 화면                                                                                           |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `http://localhost:5174/display/combined`  | 모니터 2대를 합친 차량 화면: 출발 전 차 외관 → 출발하면 왼쪽 3D 주행 · 오른쪽 내비 (회사 → 집) |
+| `http://localhost:5174/display/monitor-1` | 드라이버 계기판                                                                                |
+| `http://localhost:5174/display/monitor-2` | 인포테인먼트                                                                                   |
+
+- 테마: 07~19시 밝게, 그 밖에는 어둡게. `?theme=light|dark` 로 고정
+- 가짜 수집기 조작: `http://127.0.0.1:8082/scenario/<cycle|cruise|safe-stop|auto-ready|failover-done|manual|feed-down>`, 경로 위 지점으로 건너뛰기 `/jump/<지도 m>` (전체 3,820 m)
+- 지도·경로·사거리·차로 수는 `src/display/cityMap.ts` 하나에서 정한다 (가짜 수집기도 같은 파일을 읽는다)
+- 차량·Zephyr·주변 값(`state.vehicle` `drive_apps` `drive_limits` `trip` `road` `world`)은 **제안 필드**다. 실제 dom0 수집기는 아직 보내지 않으므로 보드에서는 "수신 대기"로 보인다
+
 ## 규칙
 
 - 스타일: CSS 변수 토큰(`packages/ui/src/tokens.css`) + CSS Modules. 색은 토큰만 씁니다.

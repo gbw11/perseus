@@ -7,7 +7,9 @@
     "dev": "vite --port 5174",
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview --port 5174",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "preview:monitors": "node scripts/preview-monitors.mjs",
+    "preview:feed": "node scripts/fake-display-feed.mjs"
   },
   "dependencies": {
     "@xenova/ui": "0.1.0"

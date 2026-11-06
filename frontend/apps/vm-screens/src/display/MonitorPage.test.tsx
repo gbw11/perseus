@@ -147,7 +147,7 @@ describe('vehicle HDMI screens', () => {
     show();
     expect(screen.getByRole('heading', { name: '드라이버 계기판' })).toBeInTheDocument();
     expect(screen.getByTestId('speed-value')).toHaveTextContent('—');
-    expect(screen.getByTestId('battery-value')).toHaveTextContent('—');
+    expect(screen.queryByTestId('battery-value')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'VM 전체 상태' })).not.toBeInTheDocument();
     expect(screen.queryAllByRole('button')).toHaveLength(0);
   });

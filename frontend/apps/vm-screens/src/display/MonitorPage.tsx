@@ -1,10 +1,12 @@
 import mark from '@xenova/ui/assets/xenova-mark.png';
 import { useEffect } from 'react';
 import { useParams } from 'react-router';
+import { InstrumentCluster } from './InstrumentCluster';
 import { ROLE } from './model';
 import { driveSummary, osName, osReport } from './presentation';
 import { Notices } from './Notices';
 import { useDisplay } from './useDisplay';
+import instrumentStyles from './instrument.module.css';
 import styles from './monitor.module.css';
 export function MonitorPage() {
   const { outputId } = useParams();
@@ -40,7 +42,19 @@ export function MonitorPage() {
   if (outputId !== 'monitor-1' && outputId !== 'monitor-2') return <main>알 수 없는 출력입니다.</main>;
   const instrument = outputId === 'monitor-1';
   const mapped = output?.screen === (instrument ? 'instrument' : 'infotainment');
-  const { mode, modeLabel, preparing, active, selectedDrive, authority } = driveSummary(p, connected, mapped);
+  if (instrument) {
+    return (
+      <main
+        className={instrumentStyles.screen}
+        data-theme="dark"
+        data-testid={outputId}
+        data-connected={connected}
+      >
+        <InstrumentCluster p={p} connected={connected} error={error} mapped={mapped} />
+      </main>
+    );
+  }
+  const { modeLabel, preparing, active, selectedDrive } = driveSummary(p, connected, mapped);
   const selected = p?.state.vms.find((v) => v.vm_id === output?.vm_id);
   return (
     <main className={styles.screen} data-theme="dark" data-testid={outputId} data-connected={connected}>
@@ -65,40 +79,6 @@ export function MonitorPage() {
       )}
       {!mapped ? (
         <section className={styles.empty}>차량 화면 정책 수신 대기</section>
-      ) : instrument ? (
-        <>
-          <section className={styles.instrument} aria-label="차량 계기판">
-            <article className={styles.speed} aria-label="실제 차량 속도">
-              <span className={styles.caption}>VEHICLE SPEED</span>
-              <strong data-testid="speed-value">—</strong>
-              <span className={styles.unit}>km/h</span>
-              <p>속도 데이터 수신 대기</p>
-            </article>
-            <div className={styles.driveLane} aria-hidden="true">
-              <span />
-              <span />
-              <span />
-              <i />
-            </div>
-            <article className={styles.driveMode} aria-label="주행 모드">
-              <span className={styles.caption}>DRIVE MODE</span>
-              <strong>{modeLabel}</strong>
-              <span className={styles.modeCode}>{mode === 'unknown' ? '—' : mode}</span>
-              <p>{authority ? '제어 상태 표시 · 실제 차량 이동과 구분' : '확정된 주행 모드를 표시합니다.'}</p>
-            </article>
-            <article className={styles.battery} aria-label="차량 배터리">
-              <div>
-                <span>배터리 잔량</span>
-                <strong data-testid="battery-value">
-                  — <small>%</small>
-                </strong>
-              </div>
-              <div className={styles.batteryTrack} />
-              <p>배터리 데이터 수신 대기</p>
-            </article>
-          </section>
-          <Notices p={p} connected={connected} />
-        </>
       ) : (
         <>
           <section className={styles.modeStrip} aria-label="주행 안내">
