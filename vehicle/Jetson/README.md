@@ -188,6 +188,42 @@ run-001/
 
 최종 결과 파일은 별도 I/O 자식이 임시 파일을 준비한 뒤 부모의 COMMIT/ABORT 결정을 받아 게시한다. 그 결정 전 SIGINT/TERM은 중단 결과를 저장하고, 결정 뒤 도착한 신호는 `final_receipt.too_late_signals`에 기록하며 확정 결과를 뒤집지 않는다. 부모는 I/O 자식의 실제 종료까지 신호와 소유권을 유지한다. 최종화는 I/O5초+회수2초의 원7초 예산에서 한 번만 시도한다. 저장 실패·ACK/실종료 불명은 성공이 아니며, 정전·SIGKILL에 대한 완전 내구성 보장은 아니다.
 
+## YOLOP 선택 진단 표본 재생
+
+`yolop-replay`는 `yolop-bench`가 저장한 선택 표본의 RGB·native depth·NN 원본을 카메라 없이 읽는다. `depthai`·NumPy·OpenCV·네트워크나 원 모델 파일이 필요하지 않다. 최대8개 선택 표본의 재생이며, 전체 주행 시간의 연속 NN 녹화를 뜻하지 않는다.
+
+```bash
+xenova-vehicle yolop-replay \
+  --dataset "$HOME/xenova-data/yolop-bench/run-001" \
+  --output "$HOME/xenova-data/yolop-replay/run-001" --speed 1 --json
+```
+
+모든 선택 표본의 파일·해시·원 문맥·실제 NN layout/FP16·파생 layer slice를 먼저 검사하고, 전달 직전 파일 수명을 다시 확인한다. 원 profile의 Linux 자산 경로는 기록 값으로 보존한다. 과거 실행의 자산 hash는 provenance이며 현재 모델 파일 검사나 장치 readback의 증거로 바꾸지 않는다. index에는 metadata 자체의 외부 서명·hash 결박이 없으므로 모든 metadata를 함께 고친 변조의 진위까지 인증하지 않는다.
+
+기본값은 불완전 기록을 거절한다. `--allow-incomplete`는 온전한 index가 있는 선택 prefix를 허용한다. writer가 마지막에 쓰는 `sample-index.json`이 없는 마지막 꼬리만 제한적으로 제외하며, 이미 index가 있는 표본의 손상·유실·NaN을 건너뛰지 않는다. 실패 원자료와 writer drop도 따로 보고한다. 선택 후보의 drop을 연속 NN frame 손실률로 해석하지 않는다.
+
+정상 꼬리는 RGB→depth→NN buffer→세 layer→source 순서의 prefix여야 하며 마지막 파일만 짧을 수 있다. 깊이 수신 시각은 저장 SDK/J의 단조 인과관계와 RGB bridge에 투영한 가능한 age 구간을 검사한다. 원 depth별 bridge는 저장돼 있지 않아 정확한 depth freshness를 재입증하지 않는다. API와 trace의 `depth_time_qualification`은 이 호환성 검사 한계를 별도로 표시하며 원 metadata는 그대로다.
+
+`--speed 1`은 원 네 stream 수신 J의 최댓값인 bundle availability 간격을 따르고, `--speed 0`은 대기 없이 전달한다. 새 replay instance/timeline과 원 device·SDK·J 시각·순번은 별개다. 출력은 `REPLAY`, `live_authority=false`, `nn_ready=false`, `metric_ready=false`다.
+
+```python
+from pathlib import Path
+from xenova_vehicle.recording.yolop_replay import run_yolop_replay
+
+dataset = Path("/path/to/recorded-yolop-bench")
+
+def consume(sample):
+    rgb_bytes = sample.rgb.payload
+    depth_bytes = sample.depth.payload
+    nn_bytes = sample.nn_output.payload
+    detection_bytes = sample.payloads["det_out.fp16"]
+    original_descriptor = sample.metadata
+
+result = run_yolop_replay(dataset, consumer=consume, speed=0)
+```
+
+API consumer는 소유 bytes와 원 descriptor를 받는다. 새 검사 비용은 재생 진단으로 구분하며 원 `validation_elapsed_us`를 덮어쓰지 않는다. CLI 출력 디렉터리의 `events.jsonl`에는 원 descriptor·payload 길이/hash·재생 timing을, `yolop-replay-result.json`에는 원 기록의 완료 여부와 재생 완료 여부를 따로 남긴다. 마지막 trace close 후에도 API 취소를 확인한다. 결과 저장의 최종 확정 뒤 신호는 API/stdout 전용 `finalization.too_late_signals`로 기록한다. 정상 재생0, 손상/미허용 불완전/실행 오류1, 잘못된 인수·기존 출력 경로2, 확정 전 SIGINT130/SIGTERM143이다.
+
 ## 카메라 없는 원본 재생
 
 `replay`는 위 version1 기록을 읽어 RGB NV12·native depth RAW16_LE 원본 bytes를 index 순서대로 재생한다. DepthAI·NumPy·OpenCV 설치나 카메라 연결은 필요 없다. 원 device/SDK/J 시각, stream별 순번, source key와 capture context를 유지하며, 저장 누락을 보간하거나 RGB/depth를 같은 노출로 재정의하지 않는다.

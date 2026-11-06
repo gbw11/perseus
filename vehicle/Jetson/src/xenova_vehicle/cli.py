@@ -114,6 +114,26 @@ def _replay_command(args: argparse.Namespace) -> int:
     return report["exit_code"]
 
 
+def _yolop_replay_command(args: argparse.Namespace) -> int:
+    from .recording.yolop_replay import run_yolop_replay
+
+    try:
+        report = run_yolop_replay(args.dataset, output=args.output, speed=args.speed,
+                                  allow_incomplete=args.allow_incomplete)
+    except (OSError, ValueError) as exc:
+        print(f"yolop-replay: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=True, allow_nan=False))
+    else:
+        print(f"YOLOP diagnostic replay {'finished' if report['replay_completed'] else 'incomplete'}: "
+              f"{report['replayed_samples']} selected samples; source_complete={report['source_complete']}")
+        if report.get("error"):
+            print(f"Error: {report['error']}")
+        print(f"Output: {report['output']}")
+    return report["exit_code"]
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI를 실행하고 종료 코드를 반환한다. argparse 사용 오류는 2다."""
     parser = argparse.ArgumentParser(prog="xenova-vehicle")
@@ -143,6 +163,12 @@ def main(argv: list[str] | None = None) -> int:
     replay.add_argument("--allow-incomplete", action="store_true",
                         help="explicitly allow verified indexed frames from an incomplete capture")
     replay.add_argument("--json", action="store_true", help="print one final JSON replay report")
+    yolop_replay = commands.add_parser("yolop-replay", help="validate/replay sparse YOLOP diagnostic samples offline")
+    yolop_replay.add_argument("--dataset", type=Path, required=True, help="S02 YOLOP diagnostic directory; not capture v1")
+    yolop_replay.add_argument("--output", type=Path, required=True, help="new metadata/hash trace directory")
+    yolop_replay.add_argument("--speed", type=_speed, default=1.0, help="original bundle availability rate; 0 means no waiting")
+    yolop_replay.add_argument("--allow-incomplete", action="store_true", help="allow an intact indexed prefix; never skip corrupt indexed samples")
+    yolop_replay.add_argument("--json", action="store_true", help="print one final diagnostic replay receipt")
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
@@ -153,4 +179,6 @@ def main(argv: list[str] | None = None) -> int:
         return _yolop_bench_command(args)
     if args.command == "replay":
         return _replay_command(args)
+    if args.command == "yolop-replay":
+        return _yolop_replay_command(args)
     parser.error("unsupported command")
