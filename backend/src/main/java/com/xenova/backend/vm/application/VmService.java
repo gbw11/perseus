@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -98,7 +99,8 @@ public class VmService {
         VmRecord record = findRecord(vmId);
         record.changeRole(role);
         vmRecordRepository.save(record);
-        return Vm.of(record, vmControlPort.find(vmId).orElse(null));
+        // Same source as get(): a live dom0-manager call here could fail after the role was already saved.
+        return Vm.of(record, runtimeCache.find(vmId).orElse(null));
     }
 
     // A retried request with the same name and spec returns the existing VM (200) instead of a duplicate.
@@ -124,26 +126,27 @@ public class VmService {
             return new CreateResult(underOperation(existing.getVmId(), () -> ensureRunning(existing)), false);
         }
 
-        VmRecord record = vmRecordRepository.save(
-                new VmRecord(UUID.randomUUID().toString(), command, template.guestKind(), clock.instant()));
+        VmRecord record;
+        try {
+            record = vmRecordRepository.save(
+                    new VmRecord(UUID.randomUUID().toString(), command, template.guestKind(), clock.instant()));
+        } catch (DataIntegrityViolationException exception) {
+            // Another request took the name between the check above and this insert (uk_vms_name).
+            throw new ApiException(HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "이미 사용 중인 VM 이름입니다.");
+        }
         return new CreateResult(underOperation(record.getVmId(), () -> launchNew(record)), true);
     }
 
     private Vm launchNew(VmRecord record) {
         Vm vm;
         try {
-            VmRuntime runtime = vmControlPort.launch(record.getVmId(), record.launchSpec());
-            runtimeCache.put(record.getVmId(), runtime);
-            vm = Vm.of(record, runtime);
+            vm = launchDomain(record);
         } catch (ApiException exception) {
-            if (!DOMAIN_EXISTS.equals(exception.getCode())) {
-                // On a timeout the domain may still be coming up, so the record is kept and a retry can recover it.
-                if (REJECTED_BY_DOM0.contains(exception.getCode())) {
-                    vmRecordRepository.delete(record);
-                }
-                throw exception;
+            // On a timeout the domain may still be coming up, so the record is kept and a retry can recover it.
+            if (REJECTED_BY_DOM0.contains(exception.getCode())) {
+                vmRecordRepository.delete(record);
             }
-            vm = get(record.getVmId());
+            throw exception;
         }
         eventRecorder.vmCreated(record);
         // vm.created already tells the story; the state is only remembered so polling does not repeat it.
@@ -241,20 +244,27 @@ public class VmService {
     }
 
     private Vm launch(VmRecord record) {
-        Vm vm;
+        Vm vm = launchDomain(record);
+        stateTracker.changedByUser(record.getVmId(), VmState.STOPPED, vm.state(), VmStateTracker.CAUSE_USER_START);
+        return vm;
+    }
+
+    // 409 VMExists for our own vm_id means an earlier launch already succeeded (contract 10.1), so the live
+    // domain is read back. Both create and start use this: the cached list may not have the domain yet.
+    private Vm launchDomain(VmRecord record) {
+        VmRuntime runtime;
         try {
-            VmRuntime runtime = vmControlPort.launch(record.getVmId(), record.launchSpec());
-            runtimeCache.put(record.getVmId(), runtime);
-            vm = Vm.of(record, runtime);
+            runtime = vmControlPort.launch(record.getVmId(), record.launchSpec());
         } catch (ApiException exception) {
-            // 409 VMExists for our own vm_id means an earlier launch already succeeded (contract 10.1).
             if (!DOMAIN_EXISTS.equals(exception.getCode())) {
                 throw exception;
             }
-            vm = Vm.of(record, vmControlPort.find(record.getVmId()).orElse(null));
+            runtime = vmControlPort.find(record.getVmId()).orElse(null);
         }
-        stateTracker.changedByUser(record.getVmId(), VmState.STOPPED, vm.state(), VmStateTracker.CAUSE_USER_START);
-        return vm;
+        if (runtime != null) {
+            runtimeCache.put(record.getVmId(), runtime);
+        }
+        return Vm.of(record, runtime);
     }
 
     private VmRecord findRecord(String vmId) {
