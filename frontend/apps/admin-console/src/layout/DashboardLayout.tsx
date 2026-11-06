@@ -5,6 +5,7 @@ const DASHBOARD_TABS = [
   ['/dashboard/overview', 'Overview'],
   ['/dashboard/cpu', 'CPU'],
   ['/dashboard/memory', 'Memory'],
+  ['/dashboard/network', 'Network'],
   ['/dashboard/console', 'Console'],
 ] as const;
 

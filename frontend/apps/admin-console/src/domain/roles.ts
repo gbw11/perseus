@@ -133,8 +133,16 @@ export const signed = (value: number | null | undefined, digits = 2, unit = '') 
 export const plain = (value: number | null | undefined, digits = 2, unit = '') =>
   value == null ? '—' : `${value.toFixed(digits)}${unit}`;
 
-export const ago = (ms: number | null | undefined) =>
-  ms == null ? '—' : ms < 1000 ? `${(ms / 1000).toFixed(1)}초 전` : `${Math.round(ms / 1000)}초 전`;
+/** 경과 시간. 1초 미만은 소수 한 자리, 60초 이상은 "N분 전", 60분 이상은 "N시간 N분 전" */
+export const ago = (ms: number | null | undefined): string => {
+  if (ms == null) return '—';
+  if (ms < 1000) return `${(ms / 1000).toFixed(1)}초 전`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}초 전`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}분 전`;
+  return `${Math.floor(minutes / 60)}시간 ${minutes % 60}분 전`;
+};
 
 /** 템플릿 id → "Debian 13" · "Ubuntu 24.04" · "Zephyr" */
 export function osLabel(vm: Pick<Vm, 'guest_kind' | 'template_id'>): string {

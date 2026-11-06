@@ -12,12 +12,7 @@ import {
   linuxFreeMemory,
   type DiskIoCounter,
 } from '../domain/vmMetrics';
-import {
-  buildMemoryPoolSeries,
-  buildPacketRateSeries,
-  bytesToKiB,
-  type PoolSnapshot,
-} from '../domain/memoryPools';
+import { buildPacketRateSeries, bytesToKiB } from '../domain/memoryPools';
 import {
   ago,
   osLabel,
@@ -38,6 +33,7 @@ import { memoryObservationRunKey, selectMemoryObservationRun } from '../domain/m
 import { LiveDataAlert } from '../layout/LiveDataAlert';
 import { useNow } from '../useNow';
 import { MetricErrorNotice } from './MetricErrorNotice';
+import { NetworkDashboard } from './NetworkDashboard';
 import styles from './pages.module.css';
 
 /**
@@ -75,7 +71,7 @@ const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512
 const DOM0_MEMORY_MIB = 1024;
 const MIB_BYTES = 1024 * 1024;
 
-export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all' }) {
+export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'network' | 'all' }) {
   const vms = useVms(LIVE_POLL_MS, { keepLastData: view === 'memory' });
   const { drive } = useDrive();
   const vmFor = (d: Domain) => (d === 'dom0' ? undefined : vmOf(d, vms.data?.items, drive));
@@ -91,6 +87,10 @@ export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all
 
   if (view === 'memory') {
     return <MemoryDashboard items={vms.data?.items} drive={drive} pending={vms.isPending} />;
+  }
+
+  if (view === 'network') {
+    return <NetworkDashboard items={vms.data?.items} drive={drive} pending={vms.isPending} />;
   }
 
   return (
@@ -283,13 +283,7 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
         VM 구성 {vm.memory_mib.toLocaleString('ko-KR')} MiB · 관리 RAM과 내부 버퍼 점유를 분리합니다.
       </p>
       <AppMemoryPools vmId={vm.vm_id} vmName={vm.name} samples={samples}>
-        <SharedMemoryPanels
-          vmName={vm.name}
-          samples={samples}
-          heapSamples={heapMetrics.data?.items ?? []}
-          pending={metrics.isPending}
-          failed={!!metrics.error || !!heapMetrics.error}
-        />
+        <SharedMemoryPanels vmName={vm.name} samples={samples} heapSamples={heapMetrics.data?.items ?? []} />
       </AppMemoryPools>
     </Card>
   );
@@ -299,14 +293,10 @@ function SharedMemoryPanels({
   vmName,
   samples,
   heapSamples,
-  pending,
-  failed,
 }: {
   vmName: string;
   samples: MetricSample[];
   heapSamples: MetricSample[];
-  pending: boolean;
-  failed: boolean;
 }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -325,7 +315,6 @@ function SharedMemoryPanels({
       const at = family === 'memory' || family === 'memory_regions' ? sharedObservedAt(sample, family) : null;
       return at ? { ...sample, observed_at: at } : sample;
     });
-  const series = buildMemoryPoolSeries(projectRun(samples));
   // Network reports do not carry the memory observation context.
   const packetRates = buildPacketRateSeries(samples);
   const heap = buildZephyrHeapSeries(projectRun(heapSamples));
@@ -340,30 +329,6 @@ function SharedMemoryPanels({
       ? buildZephyrHeapSeries([heapObservation.sample])
       : null;
   const currentHeap = currentHeapView?.current ?? null;
-  const pool = (region: 'net_rx_data' | 'net_tx_data'): PoolSnapshot & { expired?: boolean } => {
-    const view = sharedMemoryObservation(
-      allSamples,
-      'memory_regions',
-      ['memory.region.used_bytes', 'memory.region.free_bytes', 'memory.region.capacity_bytes'],
-      now,
-      region,
-    );
-    if ((view.state === 'fresh' || view.state === 'expired') && view.sample)
-      return {
-        ...buildMemoryPoolSeries([view.sample])[region === 'net_rx_data' ? 'rx' : 'tx'],
-        expired: view.state === 'expired',
-      };
-    return {
-      state: 'missing',
-      usedBytes: null,
-      freeBytes: null,
-      capacityBytes: null,
-      usagePercent: null,
-      reason: view.reason,
-    };
-  };
-  const rx = pool('net_rx_data'),
-    tx = pool('net_tx_data');
   return (
     <>
       <section className={styles.appMemoryPool} aria-label={`${vmName} 공통 커널 힙`}>
@@ -393,14 +358,10 @@ function SharedMemoryPanels({
       </section>
       <section
         className={`${styles.appMemoryPool} ${styles.memorySharedNetwork}`}
-        aria-label={`${vmName} 공통 네트워크 풀`}
+        aria-label={`${vmName} 공통 네트워크 패킷`}
       >
-        <h4>MQTT 포함 공통 RX/TX 풀</h4>
-        <p className={styles.dim}>네트워크 공용 버퍼이며 MQTT 전용 메모리 사용량이 아닙니다.</p>
-        <div className={styles.poolSummaryGrid}>
-          <PoolSummary label="RX Pool" pool={rx} tone="rx" />
-          <PoolSummary label="TX Pool" pool={tx} tone="tx" />
-        </div>
+        {/* RX/TX Pool 요약·Pool 점유율은 Network 탭으로 옮겼다 (S15P31E110-367). 패킷 처리율은 Memory 탭 정리 이슈에서 다룬다 */}
+        <h4>공통 네트워크 패킷</h4>
 
         <MemoryChart
           title="패킷 처리율"
@@ -412,72 +373,8 @@ function SharedMemoryPanels({
             tx: point.txPacketsPerSecond,
           }))}
         />
-        <MemoryChart
-          title="Pool 점유율"
-          unit="%"
-          ariaLabel={`${vmName} RX TX Pool 점유율 최근 60초`}
-          max={100}
-          points={series.usage.map((point) => ({
-            observedAt: point.observedAt,
-            rx: point.rxPercent,
-            tx: point.txPercent,
-          }))}
-        />
-
-        <div className={styles.memoryObservation}>
-          {rx.expired || tx.expired
-            ? '일부 Pool 관측 만료 · 영역별 최근 관측값을 표시합니다.'
-            : observationOf({ ...series, rx, tx }, pending, failed)}
-        </div>
       </section>
     </>
-  );
-}
-
-function PoolSummary({
-  label,
-  pool,
-  tone,
-}: {
-  label: string;
-  pool: PoolSnapshot & { expired?: boolean };
-  tone: 'rx' | 'tx';
-}) {
-  const usable = pool.state === 'ok';
-  return (
-    <section className={styles.poolSummary} data-tone={tone}>
-      <div className={styles.poolSummaryHead}>
-        <span>
-          <i aria-hidden="true" />
-          {label}
-        </span>
-        <strong>{usable ? `${pool.usagePercent!.toFixed(1)}%` : '—'}</strong>
-      </div>
-      <div className={styles.poolAmount}>
-        <strong>{usable ? formatKiB(pool.usedBytes) : '—'}</strong>
-        <span>/ {usable ? formatKiB(pool.capacityBytes) : '—'}</span>
-      </div>
-      <div className={styles.poolFree}>
-        <span>{pool.expired ? '관측 당시 여유' : '여유'}</span>
-        <strong>{usable ? formatKiB(pool.freeBytes) : pool.reason}</strong>
-      </div>
-      <div
-        className={styles.poolBar}
-        role="progressbar"
-        aria-label={`${label} 사용률`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={usable && !pool.expired ? Math.round(pool.usagePercent!) : undefined}
-        aria-valuetext={
-          usable && pool.expired ? `최근 관측 ${pool.usagePercent!.toFixed(1)}% · 관측 만료` : undefined
-        }
-      >
-        <i style={{ width: `${usable ? Math.min(100, pool.usagePercent!) : 0}%` }} />
-      </div>
-      <p className={styles.appMemoryNotice}>
-        {pool.expired ? '관측 만료 · 최근 관측값' : usable ? '최근 관측값' : pool.reason}
-      </p>
-    </section>
   );
 }
 
@@ -844,20 +741,6 @@ function chartPoints(points: ChartPoint[], key: 'rx' | 'tx', max: number): strin
   }
   if (segment.length) segments.push(segment);
   return segments.map((part) => part.join(' '));
-}
-
-function observationOf(
-  series: ReturnType<typeof buildMemoryPoolSeries>,
-  pending: boolean,
-  failed: boolean,
-): string {
-  if (failed) return '메트릭 조회 실패 · 관측 이력은 유지하고 만료된 현재값은 비웁니다.';
-  if (pending && !series.lastObservedAt) return '메트릭 수신 대기 중입니다.';
-  if (series.rx.state === 'invalid' || series.tx.state === 'invalid')
-    return '잘못된 Pool 데이터가 감지되었습니다.';
-  if (series.rx.state !== 'ok' || series.tx.state !== 'ok') return 'RX/TX Pool 데이터가 없습니다.';
-  if (series.rx.freeBytes === 0) return 'RX Pool 여유 없음 · 고갈이 관측되었습니다.';
-  return '관측된 Pool 상태를 표시하고 있습니다.';
 }
 
 function formatBytes(value: number): string {
