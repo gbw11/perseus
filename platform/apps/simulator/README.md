@@ -32,10 +32,11 @@
 | 같은 세대에서 counter 중복·역전, 더 낮은 세대 | 버림 | — |
 | 유효 프레임이 300 ms 없음 | 정지 | `watchdog` |
 
-게이트웨이 SerialSink 는 지금 `serial.Serial(port)` 로만 열기 때문에 TCP 로 보내려면 둘 중 하나가 필요합니다.
+게이트웨이 SerialSink 는 `serial.serial_for_url()` 로 열므로 `--serial-port socket://<PC IP>:7600` 으로 바로 붙습니다 (S15P31E110-269, 게이트웨이 README).
 
-- dom0 에서 가상 시리얼: `socat pty,link=/tmp/ttyXENOVA,raw,echo=0 tcp:<PC IP>:7600` 후 게이트웨이 `--sink serial --serial-port /tmp/ttyXENOVA`
-- 게이트웨이가 `serial.serial_for_url()` 을 쓰도록 바꾸고 `--serial-port socket://<PC IP>:7600` (S15P31E110-269, 게이트웨이를 최근 고친 박신영 님 리뷰)
+- 보조: dom0 에서 가상 시리얼 `socat pty,link=/tmp/ttyXENOVA,raw,echo=0 tcp:<PC IP>:7600` 후 게이트웨이 `--sink serial --serial-port /tmp/ttyXENOVA`
+- 게이트웨이의 write-only(legacy DRIVE·STOP 프레임) 출력만 흉내 냅니다. feedback 프로필(HELLO·COMMAND 프레임)은 받지 않습니다.
+- 게이트웨이 연결이 2 초 동안 아무것도 보내지 않으면(FIN 없이 끊긴 연결) 닫고 다음 연결을 기다립니다.
 
 **mqtt** — 구독하는 토픽:
 
@@ -86,7 +87,7 @@ REST-30·WS-06 을 거쳐 그리고, 관리 콘솔 버튼은 REST-31~37 → `xen
 
 | 항목 | 값 (`config.py`, 실차 측정 후 맞춤) |
 | --- | --- |
-| 트랙 | 실제 서킷 10개 ([MQTT 계약](../../../docs/contracts/mqtt-contract-v1.md) v1.4 §11, 관리 콘솔 mock 과 같은 중심선·벽). 차선 폭 0.6 m, 연석 0.06 m, 연석 밖 벽까지 잔디(코너 바깥은 흙). 출발선 = 가장 긴 직선의 30 % 지점. 기본 `spielberg` |
+| 트랙 | 실제 서킷 10개 ([MQTT 계약](../../../docs/contracts/mqtt-contract-v1.md) §12, 관리 콘솔 mock 과 같은 중심선·벽). 차선 폭 0.6 m, 연석 0.06 m, 연석 밖 벽까지 잔디(코너 바깥은 흙). 출발선 = 가장 긴 직선의 30 % 지점. 기본 `spielberg` |
 | 구동 | 후륜, 바퀴 반지름 33 mm, 엔코더 1320 count/바퀴, 모터 시정수 0.12 s, 최고 450 rpm, 가속 2 m/s², 감속 4 m/s² |
 | 조향 | 가상 전륜각 ±0.45 rad, 서보 5 rad/s, 축간거리 0.26 m. 실제 각도 센서는 없다고 본다 |
 | 카메라 | 후륜 축 앞 0.20 m, 높이 0.15 m, 15° 숙임, 수평 화각 60° — **인지 대역 기본값과 같아야 거리가 맞는다** |
