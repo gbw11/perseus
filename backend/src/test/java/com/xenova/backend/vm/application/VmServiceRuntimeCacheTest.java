@@ -9,6 +9,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.xenova.backend.agent.application.AgentInventoryCleaner;
 import com.xenova.backend.event.application.EventRecorder;
 import com.xenova.backend.event.application.VmStateTracker;
 import com.xenova.backend.template.application.TemplateCatalog;
@@ -51,7 +52,7 @@ class VmServiceRuntimeCacheTest {
         VmRuntimeCache cache = new VmRuntimeCache(
                 port, new VmRuntimeCacheProperties(true, Duration.ofSeconds(1), Duration.ofSeconds(10)), clock);
         service = new VmService(port, repository, templates, mock(EventRecorder.class), mock(VmStateTracker.class),
-                cache, clock);
+                cache, mock(AgentInventoryCleaner.class), clock);
         record = new VmRecord("vm-1", new CreateVmCommand("alpine-1", "alpine", "1.2.0", 1, 256), GuestKind.LINUX, START);
         when(repository.findAllByLifecycleOrLifecycleIsNullOrderByCreatedAtAsc(VmLifecycle.REGISTERED))
                 .thenReturn(List.of(record));
