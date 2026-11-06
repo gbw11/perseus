@@ -71,7 +71,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 | MQTT-01 | `xenova/v1/vms/{vm_id}/heartbeat` | `agent.heartbeat` | 에이전트 → 백엔드 | 1 | X | `{}` (봉투만) |
 | MQTT-02 | `xenova/v1/vms/{vm_id}/inventory` | `agent.inventory` | 에이전트 → 백엔드 | 1 | **O** | `os{id, version_id, pretty_name}`, `kernel_release`, `hostname`, `interfaces[{name, mac, addresses[{address, family}]}]`, `agent_version`, `capabilities{commands[], metrics[]}` |
 | MQTT-03 | `xenova/v1/vms/{vm_id}/metrics` | `agent.metrics` | Linux Agent·Zephyr Publisher → 백엔드 | 0 | X | 공통 `window_ms`·`values[]`. Linux는 `processes[]`·`process_collection`, Zephyr는 `observed_uptime_ms`(3.1절) |
-| MQTT-04 | `xenova/v1/vms/{vm_id}/command` | `agent.command` | 백엔드 → 에이전트 | 1 | X | `command_id`, `operation_id`, `expected_boot_id`, `expires_at`, `action`(`stress`/`agent_exit`), `parameters` |
+| MQTT-04 | `xenova/v1/vms/{vm_id}/command` | `agent.command` | 백엔드 → 에이전트/drive-v1 | 1 | X | `command_id`, `operation_id`, `expected_boot_id`, `expires_at`, `action`(`stress`/`agent_exit`/`auto_delay`), `parameters` |
 | MQTT-05 | `xenova/v1/vms/{vm_id}/command-result` | `agent.command_result` | 에이전트 → 백엔드 | 1 | X | `command_id`, `operation_id`, `status`(`ACCEPTED`/`RUNNING`/`SUCCEEDED`/`FAILED`/`REJECTED`), `started_at`, `finished_at`, `duration_ms`, `result`, `error` |
 
 - inventory는 retained다. 최초 기동과 OS·네트워크 정보가 바뀔 때 전체를 다시 보낸다. retained 메시지는 마지막 보고일 뿐 지금 `ONLINE`이라는 증거가 아니다. VM을 삭제하면 백엔드가 그 VM의 retained inventory를 지운다.
@@ -110,7 +110,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 
 ### 3.2 데모 명령 (MQTT-04·05)
 
-격리·자동 복구 시연용 명령이다. 필수 제품 기능이 아니며, 에이전트 설정 `XENOVA_AGENT_DEMO_COMMANDS=1` 인 Linux 에이전트만 실행한다. 꺼진 에이전트는 모든 명령을 `DEMO_DISABLED` 로 거절한다. 주행 Zephyr VM 에는 에이전트가 없어 이 명령을 받지 않는다.
+격리·자동 복구 시연용 명령이다. Linux의 `stress`·`agent_exit`는 에이전트 설정 `XENOVA_AGENT_DEMO_COMMANDS=1`일 때만 실행한다. Zephyr drive-v1은 빌드 설정 `XENOVA_AUTO_DELAY_INJECTION`일 때 `auto_delay`만 실행한다.
 
 **명령 (MQTT-04)**: 봉투는 2장 예외(`boot_id`·`agent_instance_id`·`seq` 없음)이고 `vm_id` 는 대상 VM, `type` 은 `agent.command` 다. 에이전트는 command 토픽에 온 다른 type 은 실행하지 않고 버린다. payload:
 
@@ -120,8 +120,8 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 | `operation_id` | 선택. 주면 문자열이어야 한다(아니면 `INVALID_COMMAND`). 결과에 그대로 돌려준다 |
 | `expected_boot_id` | 필수. 대상 VM 의 현재 boot_id(inventory 나 heartbeat 봉투에서 얻는다). 다르면 `BOOT_MISMATCH` |
 | `expires_at` | 필수. ISO-8601 UTC. 봉투 `sent_at` 보다 늦고 300초 이내여야 한다(`INVALID_COMMAND`). 받은 시각이 이 시각 이후면 `EXPIRED` |
-| `action` | `stress` / `agent_exit`. 그 밖은 `UNSUPPORTED_ACTION` |
-| `parameters` | 객체. `stress`: `cpu_workers` 0..4, `memory_mib` 0..512, `duration_s` 1..120, 모두 정수(bool·실수 불가), 앞의 둘 중 하나는 1 이상. 그 밖의 키는 거절. `agent_exit`: 빈 객체 |
+| `action` | `stress` / `agent_exit` / `auto_delay`. 그 밖은 `UNSUPPORTED_ACTION` |
+| `parameters` | 객체. `stress`: `cpu_workers` 0..4, `memory_mib` 0..512, `duration_s` 1..120, 모두 정수(bool·실수 불가), 앞의 둘 중 하나는 1 이상. `agent_exit`: 빈 객체. `auto_delay`: `delay_ms` 1..100과 `duration_s` 1..120 정수만 허용. 그 밖의 키는 거절 |
 
 - 시각: 에이전트는 자기 UTC 시계로 만료를 판정한다. `sent_at` 이 에이전트 시계보다 30초 넘게 앞서면 시계를 믿을 수 없다고 보고 `CLOCK_UNTRUSTED` 로 거절한다
 - retained 로 온 명령은 실행하지 않는다(`INVALID_COMMAND`). 명령은 retain 하지 않는다
@@ -144,6 +144,9 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 - `agent_exit`: 종결 결과는 `ACCEPTED` 하나다. 에이전트는 그 발행의 PUBACK 을 확인한 뒤에만 종료하고 다시 시작하지 않는다. 연결이 없거나 PUBACK 이 늦으면 다른 결과를 내지 않고 기다린다(QoS 1 발행은 늦게라도 전달될 수 있어 실패 결과를 따로 내면 모순된다). 기다리는 동안 새 명령은 `AGENT_EXITING` 으로 거절한다. PUBACK 전에 에이전트가 다시 시작하면 같은 `ACCEPTED` 를 다시 제출하고 확인되면 종료한다. 종료 완료를 기록하지 못하면 종료하지 않고 기록될 때까지 다시 시도한다. 확인 뒤 종료한 에이전트를 사람이 다시 시작했다면 다시 종료하지 않는다. 종료가 실제로 일어났는지는 heartbeat 가 끊기는 것(3장)으로 확인한다. 이후 복구는 Recovery Worker 의 판정을 따른다
 - 결과를 받지 못하면(만료까지) 보낸 쪽은 결과 없음으로 처리한다. 같은 `command_id` 로 다시 보내면 실행 없이 마지막 결과만 돌아온다
 - MQTT-05 는 QoS 1 이라 같은 결과가 두 번 이상 올 수 있다(재전달, 재시작 뒤 재제출). 백엔드는 `(vm_id, command_id)` 를 한 명령의 집계 키로 쓴다. 같은 `status`·같은 payload 의 재전달은 무시하고, `RUNNING` → `SUCCEEDED`/`FAILED` 는 정상 상태 전이로 처리한다. 종결 상태 뒤에 다른 종결 상태가 오면 계약 위반으로 기록한다
+- Zephyr `auto_delay`는 UTC 시계가 없으므로 `expires_at`의 형식과 상한은 명령을 발행하는 백엔드가 검증한다. drive-v1은 현재 boot 일치, retained 여부와 파라미터를 검증하고 단조 시계로 실행 시간을 제한한다. 결과의 UTC 시각 필드는 null이다.
+- 지연 주입 중 AUTO 계산이 release deadline을 연속 5회 넘으면 drive-v1은 해당 VM의 `apps/autonomous/events`에 `vm.trust`를 QoS 1로 한 번 발행한다. payload는 `trust=UNTRUSTED`, `reason=AUTO_DEADLINE_MISS`, `consecutive_misses=5`, `command_id`를 담는다. Gateway는 현재 AUTO 출력 owner의 유효한 이벤트만 받는다. 같은 세대의 미러 VM이 hold 조건까지 충족했으면 Authority 세대를 한 번 증가시키며 기존 owner 차단과 미러 owner 선정을 함께 기록하고, 미러가 새 세대를 적용한 뒤 출력을 허용한다. 준비된 미러가 없으면 `SAFE_STOP`으로 전환한다.
+- Recovery Worker도 binding 검증을 통과한 같은 `vm.trust`를 현재 execution에 고정된 `VM_UNTRUSTED` 판정으로 소비한다. heartbeat가 계속 와도 그 execution의 신뢰 실패는 해제되지 않으며, 기존 Gateway protection과 `recover_once`를 거쳐 새 execution으로 재시작한다. Rejoin Coordinator는 새 execution의 receipt·boot/app instance를 다시 적용하고 현재 Authority generation의 readiness/lifecycle이 hold 조건을 충족할 때까지 보호와 `distrusted` 기록을 유지한다. 이후 protection을 RELEASED로 끝내고 해당 VM을 출력 권한 없는 Standby 후보로 합류시킨다.
 
 ## 4. RC카 구성과 app_id
 

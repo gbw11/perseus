@@ -206,6 +206,17 @@ int xm_perception_result_parse(struct xm_span payload, struct xm_perception_resu
 /* perception.event (계약 6장) {"kind":..,"detail":..} */
 int xm_perception_event_json(char *out, size_t n, const char *kind, const char *detail);
 
+/* Zephyr drive demo command. UTC expiry remains a backend responsibility: the
+ * guest has only a monotonic clock. The parser is strict about the action,
+ * object shape, integer types and bounded delay/duration values. */
+struct xm_auto_delay_command {
+	char command_id[129], operation_id[129], expected_boot_id[XM_UUID_LEN + 1];
+	uint32_t delay_ms, duration_s;
+};
+int xm_auto_delay_command_parse(struct xm_span payload, struct xm_auto_delay_command *out);
+int xm_auto_delay_result_json(char *out, size_t n, const struct xm_auto_delay_command *command,
+			      const char *status, uint64_t duration_ms, const char *error_code);
+
 #ifdef __cplusplus
 }
 #endif

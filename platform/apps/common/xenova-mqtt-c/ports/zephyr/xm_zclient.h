@@ -20,6 +20,7 @@ struct xm_zlatest {
 	char data[CONFIG_XENOVA_MQTT_RX_BUF];
 	size_t len;
 	int64_t rx_ms; /* 받은 쪽 단조 시계 (계약 §1) */
+	bool retained;
 };
 
 struct xm_zsub {
@@ -110,5 +111,6 @@ int xm_zclient_publish_as_until(struct xm_zclient *,const char *topic,const char
 /* Single owner only. Abort pending I/O; no offline flush or publish retry. */
 void xm_zclient_close(struct xm_zclient *c);
 int xm_zclient_latest(struct xm_zclient *c, const char *topic, struct xm_envelope *env, int64_t *age_ms);
+bool xm_zclient_latest_retained(struct xm_zclient *c,const char *topic);
 
 #endif /* XENOVA_MQTT_XM_ZCLIENT_H_ */

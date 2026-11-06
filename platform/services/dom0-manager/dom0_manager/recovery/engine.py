@@ -504,7 +504,7 @@ class RecoveryEngine:
         if evidence == FailureReason.DOMAIN_CRASHED:
             if view.get("xen_state") != "crashed":
                 return f"crash evidence but the platform now observes {view.get('xen_state')}"
-        elif not ((evidence == FailureReason.APP_HEARTBEAT_LOST and zephyr) or
+        elif not ((evidence in (FailureReason.APP_HEARTBEAT_LOST,FailureReason.VM_UNTRUSTED) and zephyr) or
                   (record.graceful_failed_execution_id == view.get("execution_id") and evidence.value == record.reason)):
             return f"current evidence {evidence.value} does not justify force-restart"
         if health.domid != view.get("domid"):

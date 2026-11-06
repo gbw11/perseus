@@ -83,6 +83,8 @@ class _Track:
     app_armed: bool = False  # Zephyr: app.heartbeat 를 받은 적이 있다 (ArmingStore 로 영속)
     held: str | None = None  # 손실 판정을 보류한 이유(silent: 동료도 모두 조용, sole: 동료 없음). 바뀔 때만 로그한다
     health: VmHealth | None = None
+    external_reason: FailureReason | None = None
+    external_execution_id: str | None = None
 
 
 class Watcher:
@@ -181,6 +183,30 @@ class Watcher:
                 if (had_app or had_agent) and self._arming is not None:
                     self._save_armed()
         return judgments
+
+    def report_untrusted(self,obs: VmObservation,execution_id: str,now: float | None=None) -> Judgment | None:
+        """Latch a verified Gateway fault to this exact execution.
+
+        Fresh heartbeat cannot clear a functional trust failure. Only a new
+        managed execution clears the latch in _track_domain.
+        """
+        now=self._clock() if now is None else now
+        if (not obs.eligible or not obs.present or obs.guest_kind!='zephyr' or
+            not execution_id or obs.execution_id!=execution_id):return None
+        track=self._tracks.setdefault(obs.vm_id,_Track());self._track_domain(track,obs,now)
+        if track.external_execution_id not in (None,execution_id):return None
+        track.external_reason=FailureReason.VM_UNTRUSTED;track.external_execution_id=execution_id
+        if track.episode is None:
+            track.episode=Judgment(self._new_id(),obs.vm_id,FailureReason.VM_UNTRUSTED,now,obs.guest_kind,
+                obs.desired_state,obs.intent_revision,obs.domid,obs.xen_state,self._signal_age(track,obs,now))
+            result=track.episode
+        else:result=None
+        track.current_reason=FailureReason.VM_UNTRUSTED
+        track.health=VmHealth(obs.vm_id,HealthState.UNHEALTHY,obs.desired_state,
+            obs.xen_state.value if obs.xen_state else None,None,FailureReason.VM_UNTRUSTED,
+            1 if track.health is None else track.health.manager_seq+1,intent_known=obs.intent_known,
+            domid=obs.domid,execution_id=obs.execution_id)
+        return result
 
     def _evaluate(self, track: _Track, obs: VmObservation, now: float) -> tuple[Verdict, FailureReason | None, float | None]:
         self._track_domain(track, obs, now)
@@ -296,6 +322,7 @@ class Watcher:
                 track.execution_id=obs.execution_id
                 track.domain_since = now
                 track.signaled = False
+                track.external_reason=None;track.external_execution_id=None
             track.absent_since = None
         else:
             if track.absent_since is None:
@@ -373,6 +400,8 @@ class Watcher:
             return Verdict.FAILED, FailureReason.DOMAIN_CRASHED
         if obs.xen_state != VmState.running:
             return Verdict.UNKNOWN, None  # paused·stopping 은 장애가 아니지만 건강하지도 않다
+        if track.external_reason and track.external_execution_id==obs.execution_id:
+            return Verdict.FAILED,track.external_reason
         if obs.execution_binding_available is False:return Verdict.UNKNOWN,None
         if obs.expected_app_instances is not None:
             pair=self._app_heartbeats.supervision_pair(obs.vm_id,obs.expected_app_boot_id,obs.expected_app_instances)
