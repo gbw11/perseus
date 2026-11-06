@@ -85,29 +85,25 @@ def _keys(payload, expected):
         _fail('unsupported lifecycle payload keys')
 
 
-def _profile(packet, peer, receiver_role):
-    if type(packet) is not StructuralPacket or type(peer) is not LifecyclePeer:
-        _fail('expected structural packet and immutable registered peer')
+def _context(peer, receiver_role, kind):
+    """검사된 작은 scalar의 고정 profile 방향만 공유한다. RX 사건 수락은 하지 않는다."""
+    if type(peer) is not LifecyclePeer:
+        _fail('expected immutable registered peer')
     if type(receiver_role) is not str or receiver_role not in ('S', peer.role):
         _fail('receiver must be S or the registered child role')
-    f = packet.fields
-    kind, p = f['kind'], f['payload']
     if kind not in SUPPORTED_KINDS:
         _fail('kind is unsupported by the initial lifecycle profile')
-    if f['binding_domain'] != 'LIFECYCLE' or f['binding_revision'] != '0':
-        _fail('initial lifecycle requires LIFECYCLE revision zero')
     if receiver_role == 'S':
         if kind not in ('HELLO', 'HEARTBEAT', 'STOPPED'):
             _fail('unsupported child-to-S direction')
-        sender = peer.worker_instance
-    else:
-        if kind != 'STOP':
-            _fail('unsupported S-to-child direction')
-        sender = peer.service_instance
-    if (f['service_instance'], f['channel_epoch'], f['sender_instance']) != (
-            peer.service_instance, peer.channel_epoch, sender):
-        _fail('packet does not match the current registered peer/channel')
+        return peer.worker_instance
+    if kind != 'STOP':
+        _fail('unsupported S-to-child direction')
+    return peer.service_instance
 
+
+def _payload_profile(peer, kind, p, issued_us, expires_us):
+    """bounded builtin payload의 네 kind 의미만 공유한다. native 입력 work guard는 caller 책임이다."""
     if kind == 'HELLO':
         _keys(p, 'role worker_instance release_sha256 capability_mask')
         _uuid(p['worker_instance'])
@@ -127,7 +123,7 @@ def _profile(packet, peer, receiver_role):
             _fail('HEARTBEAT progress fields must both be null or both present')
         if seq is not None:
             _decimal(seq)
-            if _decimal(time) > int(f['issued_j_us']):
+            if _decimal(time) > issued_us:
                 _fail('reported progress is after the original issue time')
     elif kind == 'STOP':
         _keys(p, 'stop_revision reason drain_deadline_j_us')
@@ -137,7 +133,7 @@ def _profile(packet, peer, receiver_role):
                 or any(ord(c) < 32 or ord(c) > 126 for c in reason)):
             _fail('STOP reason must be bounded printable ASCII')
         drain = _decimal(p['drain_deadline_j_us'])
-        if not int(f['issued_j_us']) <= drain <= int(f['expires_j_us']):
+        if not issued_us <= drain <= expires_us:
             _fail('STOP drain must remain inside the original lifetime')
     else:
         _keys(p, 'stop_revision leases_released device_closed checkpoint_job status')
@@ -156,6 +152,19 @@ def _profile(packet, peer, receiver_role):
         if p['status'] == 'STOPPED' and (not p['leases_released']
                                        or peer.role == 'A' and not p['device_closed']):
             _fail('successful cleanup report requires its role-specific statements')
+
+
+def _profile(packet, peer, receiver_role):
+    if type(packet) is not StructuralPacket or type(peer) is not LifecyclePeer:
+        _fail('expected structural packet and immutable registered peer')
+    f = packet.fields
+    sender = _context(peer, receiver_role, f['kind'])
+    if f['binding_domain'] != 'LIFECYCLE' or f['binding_revision'] != '0':
+        _fail('initial lifecycle requires LIFECYCLE revision zero')
+    if (f['service_instance'], f['channel_epoch'], f['sender_instance']) != (
+            peer.service_instance, peer.channel_epoch, sender):
+        _fail('packet does not match the current registered peer/channel')
+    _payload_profile(peer, f['kind'], f['payload'], int(f['issued_j_us']), int(f['expires_j_us']))
     return f
 
 

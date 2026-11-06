@@ -345,6 +345,22 @@ HELLO는 channel당 한 번이며 HELLO 전 HEARTBEAT는 거절한다. child는 
 
 `snapshot`은 frozen 현재 문맥/highwater/HELLO/last packet/원 STOP·first_sent/보고만 보관하며 무한 history가 없다. fields/payload는 사본이다. 단일 owner가 private state를 수정하지 않는 계약으로 쓴다. 내부 clock/sleep/I/O나 서비스 실행은 없다. heartbeat state는 실제 준비·progress 증명이 아니며 A device_closed=true도 producer의 자원 수명 정리 진술이다. 생성 미시도를 명시 확인한 경우를 포함하지만 변수None·constructor 불명으로 true를 추정하면 안 된다. typed STOPPED는 실제 Device.close/process exit/lease 반환·회수 권한을 발급하지 않는다.
 
+## 순번 없는 lifecycle draft와 송신 준비
+
+`runtime.tx_outbox.LifecycleDraft(peer, receiver_role, kind, request_id, issued_us, expires_us, payload, cap_us=None)`는 위 네 kind의 순번 없는 원 진술을 보관한다. receiver_role은 기존 typed profile의 수신 방향이다. caller가 가진 실제 peer/request UUID·원 시각·원 cap을 요구하고 sequence나 임시 UUID를 만들지 않는다. outgoing draft는 issued<expires, expires≤원 cap을 검사한다. 기존 수신 parser의 형식/lifetime 분리는 유지한다. native payload는 exact dict≤5, exact str key/각 문자열≤64, exact str/bool/null의 flat scalar를 검사하면서 작은 소유 사본을 만든 뒤 공유 typed 규칙을 적용한다. subclass/custom value/nested container는 set/hash/복사/serialize 전에 거절한다. 입력 dict의 호출 중 동시변경과 private state 수정은 지원하지 않는다. fields는 sequence 없는 실제11field 사본, payload도 새 사본이며 아직 encoded packet이 아니다.
+
+`TxOutbox(peer, receiver_role)`는 고정 sender/channel/방향의 general8/latest heartbeat1/terminal2와 별도 pending1을 보관한다. 초기 general은 HELLO, terminal은 STOP/STOPPED다. `put(draft, now_us=..., cap_us=None)`은 현재 문맥·원 수명 뒤 현재 queue+pending의 request_id를 검사한다. 같은 ID의 전체 원 fingerprint(kind/peer/방향/request/body/issued/expires/원 cap)가 같으면 DUPLICATE_NO_EFFECT, 다르면 예외다. 새 HB snapshot에는 caller의 실제 새 request ID가 필요하다. 이는 초기 배포 선택이며 향후 여섯 kind의 원 operation 계약에 자동 적용하지 않는다. 중복 검사 뒤 새 HB만 coalesce하고 pending은 바꾸지 않는다. 포화는 BUSY_GENERAL/BUSY_TERMINAL이며 기존 상태를 유지한다. TxPutResult의 accepted/bool은 새 접수·HB 교체만 True이고 중복은 False다. 원 작업 재전송/완료 권한을 뜻하지 않는다.
+
+`prepare(now_us=..., cap_us=None)`는 pending이 있으면 같은 handle/bytes를 PENDING_CURRENT/PENDING_EXPIRED/PENDING_CAP_EXCEEDED와 함께 반환한다. 다른 queue를 몰래 purge하지 않는다. pending이 없으면 최대11개를 읽어 만료/cap drop 목록과 terminal FIFO→general FIFO→HB의 첫 valid 후보를 계획한다. 그 후보의 실제 next sequence로만 기존 b1 encoder를 호출하고, 새 local PendingTx 접수와 결과 구성이 성공하면 purge·후보 제거·pending·counter를 함께 확정한다. 실패하면 계획한 purge까지 상태를 유지한다. 모두 만료/cap 초과이면 EMPTY와 bounded DraftDrop 목록을 반환하며 purge만 확정하고 번호를 소비하지 않는다. future issue는 예외다. 원 issued/expires/cap/body를 수리하거나 새 TTL을 붙이지 않는다.
+
+새 channel의 counter는1부터 모든 kind를 합쳐 증가한다. MAX 발급 뒤 next_sequence=None이며 valid 후보는 SequenceExhausted로 거절하고 계획한 purge도 확정하지 않는다. 모두 만료면 drop만 처리할 수 있다. 이미 준비한 packet을 포기해도 번호를 환불하지 않는다. public seed/reset/resume/자동 channel UUID 발급은 없다. 같은 channel의 중복 outbox 생성과 은퇴한 객체 호출을 막는 전역 registry/routing은 실제 adapter 책임이다.
+
+`finish(expected_handle)`은 외부에서 실제 full send 성공을 확인한 뒤의 bookkeeping이다. 늦은 실제 성공 결과 정리와 새 dispatch 허가는 다르다. `abandon(expected_handle, cause=DiscardCause...)`은 현재 exact handle만 별도 PendingDrop(handle,draft,cause)로 반환하고 내부 holder를 새 빈 객체로 바꾼다. cause는 EXPIRED/CAP_EXCEEDED/FENCED/CANCELLED인 local 포기 진술이며 실제 미송신을 증명하지 않는다. 성공 finish를 호출하지 않고 old/foreign handle은 새 pending을 지우지 못한다. EAGAIN은 같은 pending을 유지한다. 이 API는 transport attempt를 실행하거나 추적하지 않으며 pending handle·같은 μs timestamp를 attempt ID로 쓰지 않는다. 실제 send 결과 반환 전 다른 thread/signal callback의 outbox 변이·포기는 금지한다. short send/성공 불명은 후속 channel fault/retirement 수습 대상이다.
+
+S는 queue 선택 전부터 즉시 local QUIESCING/fence를 적용해야 한다. prepared STOP bytes는 send 전에 b2 원 intent로 등록하고, 등록이 실패하면 송신하지 않는다. 실제 full-send 성공 뒤 성공 시도 직전 lower bound를 first_sent로 등록한다. 등록된 STOP을 local abandon해도 b2 원 latch·S fence·원 cleanup 기한은 유지하며 새 seq/request/expiry로 STOP을 재발급해 우회하지 않는다. full-send 성공 후 등록 시각이 만료됐다고 미송신 포기로 바꾸지 않는다. 이 actor/실제 송신/회수 경로는 현재 API 밖이다.
+
+snapshot은 frozen queue tuple·원 draft·pending handle·counter이며 counts는 사본이다. 현재 held ID 최대12개만 보며 완료·교체·포기 뒤 과거 history는 남기지 않는다. queued encoded bytes는0이고 encoded_held_bytes는 실제 pending bytes만 센다. 고정 네 kind의 작은 scalar/JSON 상한과 별개로 최종 actual-sequence b1 encode는4096B 상한을 유지한다. native Python 객체·소비자 사본 overhead는 별도다. queue 용량·priority 통과는 lifecycle 출력 허가가 아니다. 미송신 HELLO 포기 뒤 HB는 실제 RX가 거절하며, prior HELLO가 있는 STOPPED 뒤 HB 진술의 기존 수신 정책은 유지한다. 실제 OS peer/send/exit/lease/READY·post-success 원 raw 재답 ledger는 제공하지 않는다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
