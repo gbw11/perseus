@@ -5,6 +5,7 @@ import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } fr
 import { DevControls } from './components/DevControls';
 import { DisplayFollower } from './components/DisplayFollower';
 import { ResumeOverlay } from './components/ResumeOverlay';
+import { MonitorPage } from './display/MonitorPage';
 import { DetailPage } from './pages/DetailPage';
 import { SimPage } from './pages/SimPage';
 import { SplitPage } from './pages/SplitPage';
@@ -16,7 +17,6 @@ import {
 
 /** Default/display = local HDMI. Explicit live/console/scenario = legacy app preview. */
 const PROVIDERS = { live: LiveTelemetryProvider, scenario: MockTelemetryProvider };
-import { MonitorPage } from './display/MonitorPage';
 
 // Production HDMI uses the local collector/policy. Legacy app views are explicit previews.
 const legacyPreview = ['console', 'scenario', 'live', 'legacy-live'].includes(import.meta.env.VITE_TELEMETRY);
@@ -33,7 +33,7 @@ function Root() {
   const Provider = (mode && PROVIDERS[mode]) || ConsoleBusTelemetryProvider;
   return (
     <Provider>
-      {legacyPreview && <div role="note">앱 시연 화면 · HDMI 실제 상태/주·백업 승계 검증용이 아닙니다.</div>}
+      <div role="note">앱 시연 화면 · HDMI 실제 상태/주·백업 승계 검증용이 아닙니다.</div>
       <DisplayFollower />
       <Outlet />
       <ResumeOverlay />
