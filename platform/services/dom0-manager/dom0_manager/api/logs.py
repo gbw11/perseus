@@ -1,5 +1,6 @@
 """Read-only log API. Console input and log ingestion are deliberately separate."""
 from pathlib import Path
+import asyncio
 import hashlib
 import hmac
 import json
@@ -69,7 +70,8 @@ async def ingest(request: Request):
     if not config_path:
         raise PlatformUnavailable("log producers are not configured")
     try:
-        configured = json.loads(Path(config_path).read_text(encoding="utf-8"))["sources"]
+        # async 처리기 안이라 파일·SQLite 작업은 스레드로 넘긴다(이벤트 루프를 막으면 콘솔 WebSocket 등 다른 요청이 멈춘다)
+        configured = json.loads(await asyncio.to_thread(Path(config_path).read_text, encoding="utf-8"))["sources"]
     except (OSError, ValueError, KeyError):
         raise PlatformUnavailable("log source configuration unavailable") from None
     source_id = request.headers.get("x-log-source", "")
@@ -116,7 +118,11 @@ async def ingest(request: Request):
             normalized.append({**record, "source_id": source_id, "vm_id": vm_id})
     except (ValueError, KeyError, TypeError, AttributeError):
         raise InvalidArgument("invalid log batch or component is not allowed for this source") from None
-    current = store(request)
-    count = sum(current.append(**record) for record in normalized)
-    current.source(source_id, components, vm_id=vm_id, recorded=bool(records))
+    def write():
+        current = store(request)
+        count = sum(current.append(**record) for record in normalized)
+        current.source(source_id, components, vm_id=vm_id, recorded=bool(records))
+        return count
+
+    count = await asyncio.to_thread(write)
     return {"accepted": count, "duplicates": len(records) - count}

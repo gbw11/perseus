@@ -38,7 +38,11 @@ class XenDriver(Driver):
             if row.domid == DOM0_ID or row.name == DOM0_NAME:
                 continue  # Domain-0 은 관리 대상이 아니다. domid 0 또는 이름 Domain-0 둘 중 하나만 맞아도 뺀다
             entry = long_by_domid.get(row.domid)
-            uuid_text = ((entry or {}).get("config") or {}).get("c_info", {}).get("uuid")
+            if entry is None:
+                # xl list 와 xl list -l 사이에 사라진(또는 막 생긴) 도메인. 다음 조회에서 다시 본다.
+                # 이 한 줄 때문에 전체 목록을 500 으로 실패시키지 않는다
+                continue
+            uuid_text = (entry.get("config") or {}).get("c_info", {}).get("uuid")
             if not uuid_text:
                 raise DriverError(f"domain {row.name} (domid {row.domid}) has no uuid in xl list -l")
             try:
