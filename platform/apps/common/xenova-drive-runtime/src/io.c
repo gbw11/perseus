@@ -4,6 +4,7 @@
 #include <xenova/drive_io.h>
 #include <xenova/diagnostics.h>
 #include <xenova/auto_delay.h>
+#include <xenova/memory_stress.h>
 #include <zephyr/sys/atomic.h>
 #include <errno.h>
 #include <stdio.h>
@@ -23,6 +24,14 @@ static bool fault_command_registered,fault_running,fault_untrusted_sent;
 static int64_t fault_last_rx=-1,fault_started_ms,fault_deadline_ms;
 static struct xm_auto_delay_command fault_command;
 static char fault_last_status[12];
+static struct xm_resource_stress_command resource_command;
+static bool resource_running;
+static int64_t resource_started_ms;
+static uint64_t resource_duration_ms;
+static char resource_last_status[12];
+static uint64_t resource_observed_sample=UINT64_MAX;
+static uint32_t resource_pressure_samples;
+static bool resource_untrusted_sent;
 #endif
 static bool dual_mode, perception_registered;
 static struct xm_zbinary binary;
@@ -249,6 +258,12 @@ static void fault_result(const struct xm_auto_delay_command *command,const char 
  if(command==&fault_command)strcpy(fault_last_status,status);
  (void)xm_zclient_publish(client,fault_result_topic,"agent.command_result",json);
 }
+static void resource_stress_result(const struct xm_resource_stress_command *command,const char *status,const char *error,uint64_t duration)
+{
+ char json[512];if(!command->command_id[0]||xm_resource_stress_result_json(json,sizeof(json),command,status,duration,error)<0)return;
+ if(command==&resource_command)strcpy(resource_last_status,status);
+ (void)xm_zclient_publish(client,fault_result_topic,"agent.command_result",json);
+}
 static bool same_fault_command(const struct xm_auto_delay_command *a,const struct xm_auto_delay_command *b)
 {
  return !strcmp(a->command_id,b->command_id)&&!strcmp(a->operation_id,b->operation_id)&&
@@ -261,6 +276,22 @@ static void receive_fault_command(void)
  int64_t rx=0;for(size_t i=0;i<ARRAY_SIZE(client->latest);i++)if(!strcmp(client->latest[i].topic,fault_command_topic)){rx=client->latest[i].rx_ms;break;}
  if(rx==fault_last_rx)return;fault_last_rx=rx;
  if(!xm_span_eq(env.type,"agent.command"))return;
+ struct xm_resource_stress_command resource;int resource_rc=xm_resource_stress_command_parse(env.payload,&resource);
+ if(resource_rc!=-ENOTSUP){
+  if(xm_zclient_latest_retained(client,fault_command_topic)){resource_stress_result(&resource,"REJECTED","INVALID_COMMAND",0);return;}
+  if(resource_rc){resource_stress_result(&resource,"REJECTED",resource_rc==-ERANGE?"INVALID_PARAMETERS":"INVALID_COMMAND",0);return;}
+  if(strcmp(resource.expected_boot_id,client->id.boot_id)){resource_stress_result(&resource,"REJECTED","BOOT_MISMATCH",0);return;}
+  if(resource.action==XM_CPU_STRESS){resource_stress_result(&resource,"REJECTED","DEMO_DISABLED",0);return;}
+  if(resource_command.command_id[0]&&!strcmp(resource.command_id,resource_command.command_id)){
+   bool same=!strcmp(resource.operation_id,resource_command.operation_id)&&!strcmp(resource.expected_boot_id,resource_command.expected_boot_id)&&resource.memory_mib==resource_command.memory_mib&&resource.duration_s==resource_command.duration_s;
+   if(!same)resource_stress_result(&resource,"REJECTED","IDEMPOTENCY_CONFLICT",0);
+   else resource_stress_result(&resource_command,resource_last_status[0]?resource_last_status:(resource_running?"RUNNING":"FAILED"),NULL,resource_running?0:resource_duration_ms);
+   return;
+  }
+  int start_rc=drive_memory_stress_start(resource.memory_mib,resource.duration_s);
+  if(start_rc){resource_stress_result(&resource,"REJECTED",start_rc==-EBUSY?"BUSY":"RESOURCE_UNAVAILABLE",0);return;}
+  resource_command=resource;resource_running=true;resource_duration_ms=0;resource_started_ms=k_uptime_get();resource_stress_result(&resource_command,"RUNNING",NULL,0);return;
+ }
  struct xm_auto_delay_command incoming;int rc=xm_auto_delay_command_parse(env.payload,&incoming);
  if(xm_zclient_latest_retained(client,fault_command_topic)){fault_result(&incoming,"REJECTED","INVALID_COMMAND",0);return;}
  if(rc){fault_result(&incoming,"REJECTED",rc==-ERANGE?"INVALID_PARAMETERS":"INVALID_COMMAND",0);return;}
@@ -275,6 +306,31 @@ static void receive_fault_command(void)
  if(rc){fault_result(&incoming,"REJECTED",rc==-EBUSY?"BUSY":"STRESS_FAILED",0);return;}
  fault_command=incoming;fault_running=true;fault_untrusted_sent=false;fault_started_ms=k_uptime_get();
  fault_deadline_ms=fault_started_ms+(int64_t)incoming.duration_s*1000;fault_result(&fault_command,"RUNNING",NULL,0);
+}
+static void observe_resource_stress(void)
+{
+ if(!resource_running)return;struct drive_memory_stress_status status;drive_memory_stress_status_get(&status);
+ if(status.state==DRIVE_MEMORY_STRESS_RUNNING)return;resource_running=false;resource_duration_ms=(uint64_t)MAX(k_uptime_get()-resource_started_ms,0);
+ if(status.state==DRIVE_MEMORY_STRESS_SUCCEEDED)resource_stress_result(&resource_command,"SUCCEEDED",NULL,resource_duration_ms);
+ else resource_stress_result(&resource_command,"FAILED",status.error==-ENOMEM?"RESOURCE_UNAVAILABLE":"STRESS_FAILED",resource_duration_ms);
+}
+static void observe_resource_pressure(void)
+{
+#if defined(CONFIG_XENOVA_RESOURCE_STRESS_INJECTION)
+ struct xdr_snapshot snapshot;if(xdiag_resources_try_get(&snapshot)||snapshot.sample==resource_observed_sample)return;
+ resource_observed_sample=snapshot.sample;
+ if(snapshot.heap_rc||!snapshot.heap_allocated_bytes&&!snapshot.heap_free_bytes){resource_pressure_samples=0;return;}
+ uint64_t total=snapshot.heap_allocated_bytes+snapshot.heap_free_bytes;
+ bool pressured=snapshot.heap_allocated_bytes*100U>=total*CONFIG_XENOVA_RESOURCE_STRESS_MEMORY_THRESHOLD_PERCENT;
+ if(!pressured){resource_pressure_samples=0;resource_untrusted_sent=false;return;}
+ if(resource_pressure_samples<CONFIG_XENOVA_RESOURCE_STRESS_CONSECUTIVE_SAMPLES)resource_pressure_samples++;
+ if(resource_pressure_samples<CONFIG_XENOVA_RESOURCE_STRESS_CONSECUTIVE_SAMPLES||resource_untrusted_sent)return;
+ uint32_t percent=(uint32_t)(snapshot.heap_allocated_bytes*100U/total);char identity[129];
+ if(resource_running)snprintf(identity,sizeof(identity),"%s",resource_command.command_id);
+ else snprintf(identity,sizeof(identity),"heap-%llu",(unsigned long long)snapshot.sample);
+ char json[320];snprintf(json,sizeof(json),"{\"trust\":\"UNTRUSTED\",\"reason\":\"MEMORY_PRESSURE\",\"metric\":\"memory.kernel_heap.used_bytes\",\"used_percent\":%u,\"threshold_percent\":%u,\"consecutive_samples\":%u,\"command_id\":\"%s\"}",percent,CONFIG_XENOVA_RESOURCE_STRESS_MEMORY_THRESHOLD_PERCENT,resource_pressure_samples,identity);
+ if(!xm_zclient_publish(client,fault_event_topic,"vm.trust",json))resource_untrusted_sent=true;
+#endif
 }
 static void observe_fault_command(void)
 {
@@ -324,7 +380,7 @@ static void owner(void *a,void *b,void *c) {
   client->accept_input=accept_input;client->accept_context=NULL;
   before=clock_us();(void)xm_zclient_poll(client,0);after=clock_us();
 #if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
-  receive_fault_command();observe_fault_command();
+  receive_fault_command();observe_fault_command();observe_resource_stress();observe_resource_pressure();
 #endif
   k_mutex_lock(&exchange_lock,K_FOREVER);stats.poll_max_us=MAX(stats.poll_max_us,after-before);k_mutex_unlock(&exchange_lock);
   refresh();
@@ -334,6 +390,7 @@ static void owner(void *a,void *b,void *c) {
  }
 #if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
  if(fault_running){fault_running=false;drive_auto_delay_stop();fault_result(&fault_command,"FAILED","AGENT_STOPPING",(uint64_t)MAX(k_uptime_get()-fault_started_ms,0));}
+ if(resource_running){drive_memory_stress_stop();resource_running=false;resource_duration_ms=(uint64_t)MAX(k_uptime_get()-resource_started_ms,0);resource_stress_result(&resource_command,"FAILED","AGENT_STOPPING",resource_duration_ms);}
 #endif
  if(initialized)xm_zclient_close(client);
  k_mutex_lock(&exchange_lock,K_FOREVER);

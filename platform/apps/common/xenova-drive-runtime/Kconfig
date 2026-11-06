@@ -61,6 +61,27 @@ config XENOVA_AUTO_DELAY_INJECTION
 	  five consecutive deadline misses as a VM trust event. This is a test fault
 	  injector, not an operating driving policy, and is excluded from normal builds.
 
+config XENOVA_RESOURCE_STRESS_INJECTION
+	bool "Test-only VM resource stress injection"
+	depends on XENOVA_AUTO_DELAY_INJECTION
+	default n
+	help
+	  Enables bounded Zephyr VM resource stress commands. Memory stress allocates,
+	  touches and later releases 64KiB system-heap chunks. Test firmware must
+	  reserve enough system heap for the configured maximum.
+
+config XENOVA_RESOURCE_STRESS_MEMORY_THRESHOLD_PERCENT
+	int "System heap pressure threshold percent"
+	depends on XENOVA_RESOURCE_STRESS_INJECTION
+	range 50 99
+	default 85
+
+config XENOVA_RESOURCE_STRESS_CONSECUTIVE_SAMPLES
+	int "Consecutive resource samples before distrust"
+	depends on XENOVA_RESOURCE_STRESS_INJECTION
+	range 2 20
+	default 5
+
 config XENOVA_DRIVE_WARM
 	bool "Explicit warm-drive-1 app lifecycle profile"
 	depends on XENOVA_DRIVE_WORKERS
