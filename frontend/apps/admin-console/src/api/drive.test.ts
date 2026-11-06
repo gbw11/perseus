@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setSession } from './client';
-import { cancelResume, KEY_OF, pressKey, requestResume, type DriveKey } from './drive';
+import { cancelResume, driveKeyOf, KEY_OF, pressKey, requestResume, type DriveKey } from './drive';
+
+describe('driveKeyOf', () => {
+  it('Shift·CapsLock 대문자도 같은 키로 본다', () => {
+    expect(driveKeyOf('w')).toBe('up');
+    expect(driveKeyOf('W')).toBe('up');
+    expect(driveKeyOf('D')).toBe('right');
+    expect(driveKeyOf('ArrowLeft')).toBe('left');
+    expect(driveKeyOf(' ')).toBe('brake');
+    expect(driveKeyOf('Shift')).toBeUndefined();
+  });
+});
 
 describe('pressKey', () => {
   it('누르고 떼면 집합이 바뀌고, 계약 §7 순서로 정렬한다', () => {

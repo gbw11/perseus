@@ -2,7 +2,7 @@ import { Button, Card, Modal, StatusBadge, useToast } from '@xenova/ui';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ApiError } from '../api/client';
 import {
-  KEY_OF,
+  driveKeyOf,
   mockDemo,
   cancelResume,
   pressKey,
@@ -327,7 +327,7 @@ function ManualInput() {
       return;
     }
     const onKey = (down: boolean) => (event: KeyboardEvent) => {
-      const key = KEY_OF[event.key];
+      const key = driveKeyOf(event.key);
       if (!key || (event.target as HTMLElement | null)?.closest?.('input, textarea, select')) return;
       event.preventDefault(); // 화살표·스페이스로 페이지가 스크롤되지 않게
       press(key, down);
@@ -353,6 +353,7 @@ function ManualInput() {
       onPointerDown={() => press(key, true)}
       onPointerUp={() => press(key, false)}
       onPointerLeave={() => press(key, false)}
+      onPointerCancel={() => press(key, false)}
     >
       {text}
     </button>
