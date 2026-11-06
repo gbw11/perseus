@@ -30,6 +30,7 @@ const CATEGORY: Record<EventType, EventCategory> = {
   'demo.command.sent': 'demo',
   'demo.command.completed': 'demo',
   'demo.command.failed': 'demo',
+  'display.route.changed': 'demo',
 };
 
 export const categoryOf = (event: VmEvent): EventCategory => CATEGORY[event.type] ?? 'lifecycle';

@@ -627,7 +627,11 @@ function VmOverviewCard({
       </div>
 
       <div className={styles.resourceBlock}>
-        <OverviewMetricBar label="CPU" value={cpu} unavailable={unavailable} />
+        <OverviewMetricBar
+          label="CPU"
+          value={cpu}
+          unavailable={metrics.isError ? '메트릭 조회 불가' : unavailable}
+        />
         <OverviewMetricBar
           label="Memory"
           value={memory}

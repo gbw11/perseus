@@ -4,14 +4,13 @@ import { ROUTE_SCALE, routePosition, turnTravel } from './cityMap';
 import { DriveScene } from './DriveScene';
 import {
   activeCommand,
-  driveAppStatus,
-  driveAppsOf,
   maxSpeedOf,
   RATED_RUNTIME_S,
   remainingRuntimeS,
   roadOf,
   signalAhead,
   tripOf,
+  vmLineStatus,
   vehicleOf,
   worldObjectsOf,
 } from './driveExtras';
@@ -115,12 +114,7 @@ export function CombinedPage() {
   // 잠깐 보여 준 뒤 2분할 주행 화면
   const parked = trip !== null && trip.distance_m < 0.05 && (speed ?? 0) < 0.02;
   const departing = useDeparture(parked);
-  const vmStatus = (vm: NonNullable<typeof p>['state']['vms'][number]) =>
-    vm.role === 'interaction'
-      ? connected && vm.xen_state === 'running'
-        ? { label: '인포테인먼트', tone: 'ok' as const }
-        : { label: connected ? 'VM 꺼짐' : '연결 미확인', tone: 'muted' as const }
-      : driveAppStatus(driveAppsOf(p, vm.vm_id), vm.xen_state, connected);
+  const vmStatus = (vm: NonNullable<typeof p>['state']['vms'][number]) => vmLineStatus(p, vm, connected);
   const callouts: ParkedCallout[] = (p?.state.vms ?? []).map((vm) => ({
     key: ROLE[vm.role].name,
     title: `${ROLE[vm.role].name} · ${ROLE[vm.role].title}`,
@@ -309,12 +303,7 @@ export function CombinedPage() {
         />
         <footer className={styles.dock} aria-label="VM 상태">
           {p?.state.vms.map((vm) => {
-            const status =
-              vm.role === 'interaction'
-                ? connected && vm.xen_state === 'running'
-                  ? { label: '인포테인먼트', tone: 'ok' as const }
-                  : { label: connected ? 'VM 꺼짐' : '연결 미확인', tone: 'muted' as const }
-                : driveAppStatus(driveAppsOf(p, vm.vm_id), vm.xen_state, connected);
+            const status = vmStatus(vm);
             return (
               <span
                 key={vm.vm_id}

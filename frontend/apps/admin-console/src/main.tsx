@@ -10,7 +10,7 @@ import { ConsoleLayout } from './layout/ConsoleLayout';
 import { DashboardLayout } from './layout/DashboardLayout';
 import { ConsolePage } from './pages/ConsolePage';
 import { ControlVmDetailPage } from './pages/ControlVmDetailPage';
-import { DashboardPage } from './pages/DashboardPage';
+import { DashboardPage, LegacyDashboardPage } from './pages/DashboardPage';
 import { DemoPage } from './pages/DemoPage';
 import { EventsPage } from './pages/EventsPage';
 import { LoginPage } from './pages/LoginPage';
@@ -65,6 +65,8 @@ const router = createBrowserRouter([
       { path: '/control/vms/new', element: <VmCreatePage /> },
       { path: '/control/vms/:vmId', element: <ControlVmDetailPage /> },
       { path: '/simulator', element: <DemoPage /> },
+      // 실차가 안 될 때 쓰는 예비 대시보드 (주·백업 VM 카드 + 시뮬레이터). 메뉴에는 없다
+      { path: '/legacy/dashboard', element: <LegacyDashboardPage /> },
 
       // 기존 북마크와 외부 링크를 깨지 않도록 새 정보구조로 보낸다.
       { path: '/vms', element: <Navigate to="/control" replace /> },

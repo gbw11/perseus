@@ -364,9 +364,17 @@ export const handlers = [
     if (!vm) return vmNotFound();
     const action = String(params.action);
     if (action !== 'start' && action !== 'stop') return error(404, 'NOT_FOUND', '없는 동작입니다.');
-    const wanted = action === 'start' ? 'stopped' : 'running';
-    if (live(vm).state !== wanted)
-      return error(409, 'INVALID_VM_STATE', `지금 상태(${vm.state})에서는 할 수 없습니다.`);
+    // 계약 §5: start 는 running 이면 그대로 200, crashed·paused·stopping 이면 409 (정지 후 다시 시작).
+    // stop 은 runtime 유무와 관계없이 동작하고 이미 꺼져 있으면 그대로 200.
+    const state = live(vm).state;
+    if (action === 'start' && state === 'running') return HttpResponse.json(vm as unknown as JsonBodyType);
+    if (action === 'stop' && state === 'stopped') return HttpResponse.json(vm as unknown as JsonBodyType);
+    if (action === 'start' && state !== 'stopped')
+      return error(
+        409,
+        'INVALID_VM_STATE',
+        `지금 상태(${state})에서는 시작할 수 없습니다. 정지 후 다시 시작하세요.`,
+      );
     const next: Vm = { ...vm, state: action === 'start' ? 'running' : 'stopped' };
     vms = vms.map((v) => (v.vm_id === vm.vm_id ? next : v));
     // 주행 시나리오에도 알린다 — 자율주행 VM 을 멈추면 수동주행이 바로 이어받는다 (계약 §5.2)

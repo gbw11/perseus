@@ -1,180 +1,22 @@
-import { Button, Card, StatusBadge, useToast } from '@xenova/ui';
-import { Fragment, lazy, Suspense, useState, type CSSProperties } from 'react';
+import { Card, StatusBadge } from '@xenova/ui';
+import { Fragment, lazy, Suspense, type CSSProperties } from 'react';
 import { Link, useParams } from 'react-router';
 import { ApiError } from '../api/client';
-import {
-  useEvents,
-  useMetrics,
-  useProcesses,
-  useThreads,
-  useVm,
-  useVmAction,
-  type VmAction,
-} from '../api/queries';
+import { useEvents, useMetrics, useProcesses, useThreads, useVm } from '../api/queries';
 import type { Vm } from '../api/types';
-import { STATE_HEALTH, STATE_LABEL } from '../format';
+import { AGENT_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
 import { clock, describe } from '../domain/events';
 import { MODE_LABEL, osLabel, roleOf } from '../domain/roles';
 import { observedControl, vmAppObservations } from '../domain/driveObservations';
 import { networkRxKiBPerSecond } from '../domain/networkRate';
 import { cpuPercentOf, metricValue, ZEPHYR_HEAP_USED_METRIC } from '../domain/vmMetrics';
 import { useDrive } from '../layout/DriveContext';
-import { RuntimeLogsPanel } from '../console/RuntimeLogsPanel';
 import { PublisherStatus } from './PublisherStatus';
 import styles from './pages.module.css';
 
 const ConsolePanel = lazy(() =>
   import('../console/ConsolePanel').then((module) => ({ default: module.ConsolePanel })),
 );
-
-type Tab = 'overview' | 'charts' | 'processes';
-const TABS: [Tab, string][] = [
-  ['overview', '개요'],
-  ['charts', '실시간 차트'],
-  ['processes', '프로세스'],
-];
-
-/**
- * W-04 VM 상세 (화면 정의서 W-04, UI-04·UI-05) — 초안. 화면 완성은 정수환 담당 작업이 이어받는다.
- * 웹 콘솔은 카드 아래와 Dashboard의 Console 탭에 있다.
- * 참고 시안: stitch_untitled_project/ui_04_vm, ui_05.
- */
-export function LegacyVmDetailPage() {
-  const { vmId = '' } = useParams();
-  const vm = useVm(vmId);
-  const { drive } = useDrive();
-  const [tab, setTab] = useState<Tab>('overview');
-  const role = vm.data ? roleOf(vm.data, drive) : null;
-  const color = role?.color ?? 'var(--x-primary)';
-
-  return (
-    <div className={styles.page}>
-      <section className={styles.pageHead} style={{ borderTop: `3px solid ${color}` }}>
-        <div>
-          <div className={styles.eyebrow}>
-            <Link to="/control">VM 목록</Link> / {vm.data?.name ?? vmId}
-          </div>
-          <h1 style={{ color }}>{role?.title ?? vm.data?.name ?? 'VM 상세'}</h1>
-        </div>
-        {vm.data && (
-          <StatusBadge health={STATE_HEALTH[vm.data.state]} label={STATE_LABEL[vm.data.state]} size="lg" />
-        )}
-        <span className={styles.grow} />
-        {vm.data && <LifecycleButtons vm={vm.data} />}
-      </section>
-
-      {vm.isPending && <p className={styles.dim}>불러오는 중…</p>}
-      {vm.error && (
-        <p className={styles.error} role="alert">
-          {vm.error instanceof ApiError ? `${vm.error.message} (${vm.error.code})` : String(vm.error)}
-        </p>
-      )}
-
-      {vm.data && (
-        <Card>
-          <div className={styles.tabs} role="tablist">
-            {TABS.map(([id, label]) => (
-              <button
-                key={id}
-                role="tab"
-                type="button"
-                className={styles.tab}
-                aria-selected={tab === id}
-                onClick={() => setTab(id)}
-              >
-                {id === 'processes' && vm.data?.guest_kind === 'zephyr' ? '스레드' : label}
-              </button>
-            ))}
-          </div>
-          <div style={{ paddingTop: 'var(--x-space-4)' }}>
-            {tab === 'overview' && <Overview vm={vm.data} />}
-            {tab === 'charts' && <Charts vm={vm.data} />}
-            {tab === 'processes' && <ExecutionTable vm={vm.data} />}
-          </div>
-        </Card>
-      )}
-      {vm.data && (
-        <Suspense fallback={<p className={styles.dim}>콘솔 준비 중…</p>}>
-          <ConsolePanel key={vm.data.vm_id} vm={vm.data} />
-          <RuntimeLogsPanel key={`logs-${vm.data.vm_id}`} vmId={vm.data.vm_id} />
-        </Suspense>
-      )}
-    </div>
-  );
-}
-
-function LifecycleButtons({ vm }: { vm: Vm }) {
-  const action = useVmAction();
-  const toast = useToast();
-  const run = (kind: VmAction) =>
-    action.mutate(
-      { vmId: vm.vm_id, action: kind },
-      {
-        onSuccess: () => toast.show(`${vm.name}: ${kind === 'start' ? '시작' : '정지'} 요청 완료`, 'ok'),
-        onError: (error) =>
-          toast.show(error instanceof ApiError ? error.message : String(error), 'fault', 5000),
-      },
-    );
-  return (
-    <div className={styles.rowActions}>
-      <Button onClick={() => run('start')} disabled={vm.state === 'running'}>
-        시작
-      </Button>
-      <Button variant="secondary" onClick={() => run('stop')} disabled={vm.state !== 'running'}>
-        정지
-      </Button>
-    </div>
-  );
-}
-
-function Overview({ vm }: { vm: Vm }) {
-  const { drive, socket } = useDrive();
-  const role = roleOf(vm, drive);
-  const app = role ? drive?.apps[role.app] : undefined;
-  return (
-    <div className={styles.cols2}>
-      <div className={styles.rows}>
-        <div>
-          <span>VM ID</span>
-          <span>{vm.vm_id}</span>
-        </div>
-        <div>
-          <span>운영체제 · 템플릿</span>
-          <span>
-            {osLabel(vm)} · {vm.template_id} {vm.template_version}
-          </span>
-        </div>
-        <div>
-          <span>자원</span>
-          <span>
-            {vm.vcpus} vCPU / {vm.memory_mib} MiB
-          </span>
-        </div>
-        <div>
-          <span>예약 IPv4</span>
-          <span>{vm.assigned_ipv4 ?? '—'}</span>
-        </div>
-      </div>
-      <div className={styles.rows}>
-        <AppObservationRows vmId={vm.vm_id} drive={drive} socket={socket} />
-        {role && (
-          <>
-            {role.driving && (
-              <div>
-                <span>주행 명령</span>
-                <span>
-                  {socket === 'open' && app?.vm_id === vm.vm_id && app.command_fresh
-                    ? `${app.command_hz} Hz`
-                    : '미확인'}
-                </span>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
 
 const MIB = 1024 * 1024;
 
@@ -542,7 +384,7 @@ export function VmDetailPage() {
                 {vm.data.guest_kind === 'linux' && (
                   <div>
                     <span>Linux Agent 생존 (v1)</span>
-                    <span>{vm.data.agent_status ?? 'UNKNOWN'}</span>
+                    <span>{AGENT_LABEL[vm.data.agent_status ?? 'UNKNOWN']}</span>
                   </div>
                 )}
               </div>

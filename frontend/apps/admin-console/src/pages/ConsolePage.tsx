@@ -1,10 +1,11 @@
 import { StatusBadge } from '@xenova/ui';
 import { lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router';
-import { useVms } from '../api/queries';
+import { LIVE_POLL_MS, useVms } from '../api/queries';
 import { osLabel, roleOf, sortVms } from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
+import { observedControl } from '../domain/driveObservations';
 import { useDrive } from '../layout/DriveContext';
 import { RuntimeLogsPanel } from '../console/RuntimeLogsPanel';
 import styles from './pages.module.css';
@@ -21,15 +22,17 @@ const ConsolePanel = lazy(() =>
  * 웹 터미널 계약 browser-console-v1 그대로: [연결]로 접속, 자동 재접속 없음. VM 을 바꾸면 이전 연결은 끊긴다 — VM 은 종료하지 않는다.
  */
 export function ConsolePage() {
-  const vms = useVms();
-  const { drive } = useDrive();
+  // 목록 조회가 잠깐 실패해도 열린 터미널(ConsolePanel)이 언마운트되어 끊기지 않게 마지막 목록을 남긴다.
+  // 실패는 LiveDataAlert 가 따로 알린다.
+  const vms = useVms(LIVE_POLL_MS, { keepLastData: true });
+  const { drive, socket } = useDrive();
+  // Overview·VM 상세와 같은 제어권 판정 (소켓 open + control fresh 일 때만)
+  const activeVmId = observedControl(drive, socket)?.active_vm_id;
   const [params, setParams] = useSearchParams();
   const items = sortVms(vms.data?.items ?? []);
   const selected = items.find((vm) => vm.vm_id === params.get('vm')) ?? items[0];
   const selectedRole = selected ? roleOf(selected, drive) : null;
-  const selectedAuthority = selected
-    ? vmAuthorityOf(selectedRole, selected, drive?.control?.active_vm_id)
-    : undefined;
+  const selectedAuthority = selected ? vmAuthorityOf(selectedRole, selected, activeVmId) : undefined;
 
   return (
     <div className={styles.page}>
@@ -46,7 +49,7 @@ export function ConsolePage() {
       <div className={styles.picks} role="tablist" aria-label="콘솔을 열 VM">
         {items.map((vm) => {
           const role = roleOf(vm, drive);
-          const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
+          const authority = vmAuthorityOf(role, vm, activeVmId);
           const on = vm.vm_id === selected?.vm_id;
           return (
             <button

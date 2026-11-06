@@ -1,12 +1,6 @@
-import type { VmAction } from '../api/queries';
+import { VM_ACTION_LABEL as ACTION_LABEL } from '../format';
 import styles from './pages.module.css';
 import { formatElapsedTime, type VmOperation } from './useVmOperationProgress';
-
-const ACTION_LABEL: Record<VmAction, string> = {
-  start: '시작',
-  stop: '정지',
-  delete: '삭제',
-};
 
 export function VmOperationNotice({ operation, now }: { operation?: VmOperation; now: number }) {
   if (!operation) return null;

@@ -2,7 +2,7 @@
 
 ## 252 통합 기준 (2026-10-26)
 
-실제 HDMI는 dom0의 `/display/monitor-1`(전체)·`/display/monitor-2`(선택 UUID 상세)이며 로컬 수집기·254 정책을 따른다. `VITE_TELEMETRY` 비움/`display`에서 기존 `/split`·`/detail/:app`은 이 경로로 이동한다. 이 모드는 Spring 주행 Provider나 로그인에 의존하지 않는다. 두 Zephyr는 VM1 주 구동·VM2 백업이며 주행 모드와 구별한다. VM3는 Debian 인터랙션이고 인식은 Jetson 담당이다.
+실제 HDMI 화면은 모니터 2대를 합친 `/display/combined`(2026-11-06부터, 옛 `/display/monitor-1`·`monitor-2` 는 이리로 넘어감)이며 로컬 수집기·254 정책을 따른다. `VITE_TELEMETRY` 비움/`display`에서 기존 `/split`·`/detail/:app`은 이 경로로 이동한다. 이 모드는 Spring 주행 Provider나 로그인에 의존하지 않는다. 두 Zephyr는 VM1 주 구동·VM2 백업이며 주행 모드와 구별한다. VM3는 Debian 인터랙션이고 인식은 Jetson 담당이다.
 
 아래 `/split`·`/detail`·`/sim` 설명은 **명시적 앱 미리보기 모드**(`console`/`scenario`/`live`/`legacy-live`)에 해당한다. 기본을 console mock으로 가정하지 않는다. 외부 Docker screens는 Spring 앱 미리보기를 명시적으로 유지한다. 앱 ID autonomous/manual은 VM의 주·백업 역할과 동의어가 아니다. 실제 HDMI 캡처와 외부 앱 미리보기를 같은 출력 증거로 취급하지 않는다.
 
@@ -199,11 +199,12 @@ cd apps/admin-console && VITE_MOCK=true npx vite --port 5173            # VITE_M
 cd apps/vm-screens && npm run preview:monitors     # 가짜 수집기 8082 + vite 5174
 ```
 
-| 주소                                      | 화면                                                                                           |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `http://localhost:5174/display/combined`  | 모니터 2대를 합친 차량 화면: 출발 전 차 외관 → 출발하면 왼쪽 3D 주행 · 오른쪽 내비 (회사 → 집) |
-| `http://localhost:5174/display/monitor-1` | 드라이버 계기판                                                                                |
-| `http://localhost:5174/display/monitor-2` | 인포테인먼트                                                                                   |
+| 주소                                     | 화면                                                                                           |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `http://localhost:5174/display/combined` | 모니터 2대를 합친 차량 화면: 출발 전 차 외관 → 출발하면 왼쪽 3D 주행 · 오른쪽 내비 (회사 → 집) |
+| `http://localhost:5174/display/mobile`   | 휴대폰 화면                                                                                    |
+
+옛 모니터 화면(`/display/monitor-1` 계기판·`/display/monitor-2` 인포테인먼트)은 지웠다. 두 주소는 쿼리스트링을 그대로 들고 `/display/combined` 로 넘어간다.
 
 - 테마: 07~19시 밝게, 그 밖에는 어둡게. `?theme=light|dark` 로 고정
 - 가짜 수집기 조작: `http://127.0.0.1:8082/scenario/<cycle|cruise|safe-stop|auto-ready|failover-done|manual|feed-down>`, 경로 위 지점으로 건너뛰기 `/jump/<지도 m>` (전체 3,820 m)

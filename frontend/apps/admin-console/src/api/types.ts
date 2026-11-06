@@ -196,7 +196,9 @@ export type EventType =
   | 'drive.mode.changed'
   | 'drive.fault.detected'
   | 'drive.resume.accepted'
-  | 'drive.resume.cancelled';
+  | 'drive.resume.cancelled'
+  // 콘솔이 모니터 화면 배치를 바꿈 (REST-24, backend EventType.DISPLAY_ROUTE_CHANGED)
+  | 'display.route.changed';
 
 export type EventSeverity = 'INFO' | 'WARNING' | 'ERROR';
 
