@@ -71,6 +71,8 @@ Jetson/
 
 빈 디렉터리의 `.gitkeep`은 Git에서 구조를 보존하기 위한 파일이다.
 
+YOLOP 320×320의 고정 blob·출처·라이선스·입출력 계약과 수동 검사 방법은 [자산 명세](assets/yolop-320x320.md)를 따른다. 대용량 모델 파일은 외부 자산 경로에 두고 Git에는 manifest와 저작권·허가문을 보존한다.
+
 ## 책임과 실행 구조
 
 - 운영 실행은 S(supervisor/I/O), A(acquisition), M(mapper), D(storage)의 네 프로세스를 기준으로 한다. 폴더별로 프로세스를 추가하는 구조가 아니다.
