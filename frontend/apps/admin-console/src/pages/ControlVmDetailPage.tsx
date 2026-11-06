@@ -1,5 +1,5 @@
 import { Button, Card, Modal, useToast } from '@xenova/ui';
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVm, useVmResources, useVms, type VmAction } from '../api/queries';
@@ -31,6 +31,14 @@ export function ControlVmDetailPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // 삭제 요청은 길게 걸릴 수 있다. 그사이 다른 화면으로 갔으면 끝났을 때 /control 로 끌고 가지 않는다
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const index = sortVms(vms.data?.items ?? []).findIndex((item) => item.vm_id === vmId);
   const accent = (index >= 0 ? VM_ACCENTS[index % VM_ACCENTS.length] : undefined) ?? 'var(--x-primary)';
 
@@ -41,7 +49,7 @@ export function ControlVmDetailPage() {
           `${target.name}: ${kind === 'start' ? '시작' : kind === 'stop' ? '정지' : '삭제'} 요청 완료`,
           'ok',
         );
-        if (kind === 'delete') navigate('/control');
+        if (kind === 'delete' && mounted.current) navigate('/control');
       },
       onError: (_error, message) => toast.show(message, 'fault', 5000),
     });
