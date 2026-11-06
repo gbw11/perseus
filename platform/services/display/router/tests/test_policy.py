@@ -132,7 +132,9 @@ def test_browser_cookie_cannot_change_policy_or_reveal_service_state(settings, s
         assert "HttpOnly" in session.headers["set-cookie"]
         assert "test-only-token" not in session.headers["set-cookie"]
         assert client.get("/display/monitor-1").status_code == 200
+        assert client.get("/display/combined").status_code == 200
         assert client.get("/display/mobile").status_code == 200
+        assert client.get("/display/unknown").status_code == 401
         p = client.get("/api/v1/display/presentation").json()
         assert [o["output_id"] for o in p["outputs"]] == ["monitor-1", "monitor-2"]
         assert "test-only-token" not in str(p)
