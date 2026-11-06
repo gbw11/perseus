@@ -207,6 +207,48 @@ class DriveStateTrackerTest {
         assertThat(tracker.snapshot().control().activeVmId()).isEqualTo(MANUAL_VM);
     }
 
+    // The broker replays the retained control on resubscribe with the same seq: it is current again.
+    @Test
+    void retainedControlReplayedAfterReconnectBelongsToTheNewConnection() {
+        tracker.mqttConnected();
+        byte[] retainedControl = envelope("dom0-gateway", null, "vehicle.control", ++seq, """
+                {"generation":7,"mode":"MANUAL","active_app":"manual","active_vm_id":"%s","reason":"start"}
+                """.formatted(MANUAL_VM));
+        tracker.accept(DriveStateTracker.CONTROL_TOPIC, retainedControl, true);
+        assertThat(tracker.controlContext()).isPresent();
+
+        tracker.mqttDisconnected();
+        tracker.mqttConnected();
+        assertThat(tracker.controlContext()).isEmpty();
+
+        tracker.accept(DriveStateTracker.CONTROL_TOPIC, retainedControl, true);
+        assertThat(tracker.snapshot().control().source().status()).isEqualTo(DriveState.SourceStatus.FRESH);
+        assertThat(tracker.controlContext()).hasValueSatisfying(context ->
+                assertThat(context.generation()).isEqualTo(7L));
+    }
+
+    @Test
+    void nonRetainedDuplicateControlIsStillDropped() {
+        tracker.mqttConnected();
+        byte[] liveControl = envelope("dom0-gateway", null, "vehicle.control", ++seq, """
+                {"generation":7,"mode":"MANUAL","active_app":"manual","active_vm_id":"%s","reason":"start"}
+                """.formatted(MANUAL_VM));
+        tracker.accept(DriveStateTracker.CONTROL_TOPIC, liveControl, false);
+        tracker.mqttDisconnected();
+        tracker.mqttConnected();
+
+        tracker.accept(DriveStateTracker.CONTROL_TOPIC, liveControl, false);
+        assertThat(tracker.controlContext()).isEmpty();
+    }
+
+    @Test
+    void gatewayEventsFromAnotherAppTopicAreRejected() {
+        Optional<DriveNotice> forged = send("xenova/v1/apps/manual/events", MANUAL_VM, "manual",
+                "drive.mode.changed", "{\"from\":\"AUTO\",\"to\":\"MANUAL\",\"generation\":2,\"reason\":\"forged\"}");
+
+        assertThat(forged).isEmpty();
+    }
+
     @Test
     void modeChangeAndFaultBecomeNotices() {
         Optional<DriveNotice> mode = send("xenova/v1/apps/vehicle/events", "dom0-gateway", "vehicle",
