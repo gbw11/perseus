@@ -30,6 +30,7 @@ import {
   type Role,
 } from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
+import { observedControl } from '../domain/driveObservations';
 import { useDrive } from '../layout/DriveContext';
 import { AppMemoryPools } from './AppMemoryPools';
 import { ManagedRamSummary } from './ManagedRamSummary';
@@ -249,7 +250,9 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const metrics = useMetrics(vm.vm_id, true, 1, LIVE_POLL_MS, { keepLastData: true });
   const heapMetrics = useMetrics(vm.vm_id, true, 5, LIVE_POLL_MS, { keepLastData: true });
   const samples = metrics.data?.items ?? [];
-  const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
+  const { socket } = useDrive();
+  // Overview·VM 상세와 같이 소켓이 열려 있고 control 이 신선할 때만 ACTIVE/STANDBY 를 판정한다
+  const authority = vmAuthorityOf(role, vm, observedControl(drive, socket)?.active_vm_id);
   const style = {
     '--vm-accent': role?.color ?? UNASSIGNED_COLOR,
     '--rx-accent': 'var(--x-primary)',
@@ -658,7 +661,9 @@ function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const series = buildLinuxMemorySeries(samples, vm);
   const free = linuxFreeMemory(series);
   const disk = buildDiskIoSnapshot(samples);
-  const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
+  const { socket } = useDrive();
+  // Overview·VM 상세와 같이 소켓이 열려 있고 control 이 신선할 때만 ACTIVE/STANDBY 를 판정한다
+  const authority = vmAuthorityOf(role, vm, observedControl(drive, socket)?.active_vm_id);
   const style = {
     '--vm-accent': role?.color ?? UNASSIGNED_COLOR,
   } as CSSProperties;

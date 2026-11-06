@@ -5,6 +5,7 @@ import { useVms } from '../api/queries';
 import { osLabel, roleOf, sortVms } from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import { STATE_HEALTH, STATE_LABEL } from '../format';
+import { observedControl } from '../domain/driveObservations';
 import { useDrive } from '../layout/DriveContext';
 import { RuntimeLogsPanel } from '../console/RuntimeLogsPanel';
 import styles from './pages.module.css';
@@ -22,14 +23,14 @@ const ConsolePanel = lazy(() =>
  */
 export function ConsolePage() {
   const vms = useVms();
-  const { drive } = useDrive();
+  const { drive, socket } = useDrive();
+  // Overview·VM 상세와 같은 제어권 판정 (소켓 open + control fresh 일 때만)
+  const activeVmId = observedControl(drive, socket)?.active_vm_id;
   const [params, setParams] = useSearchParams();
   const items = sortVms(vms.data?.items ?? []);
   const selected = items.find((vm) => vm.vm_id === params.get('vm')) ?? items[0];
   const selectedRole = selected ? roleOf(selected, drive) : null;
-  const selectedAuthority = selected
-    ? vmAuthorityOf(selectedRole, selected, drive?.control?.active_vm_id)
-    : undefined;
+  const selectedAuthority = selected ? vmAuthorityOf(selectedRole, selected, activeVmId) : undefined;
 
   return (
     <div className={styles.page}>
@@ -46,7 +47,7 @@ export function ConsolePage() {
       <div className={styles.picks} role="tablist" aria-label="콘솔을 열 VM">
         {items.map((vm) => {
           const role = roleOf(vm, drive);
-          const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
+          const authority = vmAuthorityOf(role, vm, activeVmId);
           const on = vm.vm_id === selected?.vm_id;
           return (
             <button
