@@ -82,6 +82,8 @@ xenova:
   agent:
     stale-after: ${AGENT_STALE_AFTER:15s}
     offline-after: ${AGENT_OFFLINE_AFTER:30s}
+    # v2 telemetry heartbeat is sent every 2s; past this lease the Publisher state shows STALE (display only)
+    telemetry-heartbeat-lease: ${AGENT_TELEMETRY_HEARTBEAT_LEASE:6s}
   # 에이전트 상태(ONLINE/STALE/OFFLINE) 변화를 이벤트로 남기기 위해 확인하는 주기
   event:
     agent-status-check-interval-ms: ${EVENT_AGENT_STATUS_CHECK_INTERVAL_MS:5000}
@@ -118,6 +120,14 @@ xenova:
     # Keep long-running VM commands connected for up to 15 minutes.
     command-timeout: ${DOM0_MANAGER_COMMAND_TIMEOUT:15m}
     retry-backoff: ${DOM0_MANAGER_RETRY_BACKOFF:500ms}
+  vm:
+    # GET /api/v1/vms answers from the last dom0-manager list; one background loop refreshes it (S15P31E110-344).
+    runtime-cache:
+      enabled: ${VM_RUNTIME_CACHE_ENABLED:true}
+      # pause after each refresh: a state change shows up after about one dom0-manager list plus this
+      refresh-delay: ${VM_RUNTIME_REFRESH_DELAY:1s}
+      # safety net only: past this age (loop stopped or failing) reads go to dom0-manager again
+      stale-limit: ${VM_RUNTIME_STALE_LIMIT:10s}
   vm-registration:
     # Platform registration sender authentication; separate from user JWT and dom0-manager credentials.
     service-token: ${VM_REGISTRATION_SERVICE_TOKEN:}

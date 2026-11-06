@@ -3,6 +3,7 @@ package com.xenova.backend.metrics.application;
 import com.xenova.backend.agent.application.AgentDataService;
 import com.xenova.backend.agent.domain.MetricSample;
 import com.xenova.backend.agent.domain.MetricValue;
+import com.xenova.backend.agent.domain.ProcessCollection;
 import com.xenova.backend.agent.domain.ProcessInfo;
 import com.xenova.backend.agent.domain.ProcessSnapshot;
 import com.xenova.backend.common.error.ApiException;
@@ -51,7 +52,7 @@ public class MetricsQueryService {
         }
         ProcessSnapshot snapshot = agentDataService.findProcessSnapshot(vmId).orElse(null);
         if (snapshot == null) {
-            return new Processes(vmId, null, null, true, List.of());
+            return new Processes(vmId, null, null, true, List.of(), null);
         }
         List<ProcessInfo> items = snapshot.getProcesses().stream()
                 .sorted(Comparator.comparing(sort.key, Comparator.nullsLast(Comparator.reverseOrder())))
@@ -62,13 +63,22 @@ public class MetricsQueryService {
                 snapshot.getBootId(),
                 snapshot.getObservedAt(),
                 agentDataService.isStale(snapshot.getObservedAt(), clock.instant()),
-                items);
+                items,
+                snapshot.getProcessCollection());
+    }
+
+    public ZephyrThreads threads(String vmId) {
+        Instant now = clock.instant();
+        List<MetricSample> pages = agentDataService.findMetricSamples(vmId, now.minus(Duration.ofMinutes(2)),
+                now.plus(Duration.ofMinutes(2)));
+        return ZephyrThreads.latest(vmId, pages, receivedAt -> agentDataService.isStale(receivedAt, now));
     }
 
     public record FilteredSample(MetricSample sample, List<MetricValue> values) {
     }
 
-    public record Processes(String vmId, String bootId, Instant observedAt, boolean stale, List<ProcessInfo> items) {
+    public record Processes(String vmId, String bootId, Instant observedAt, boolean stale, List<ProcessInfo> items,
+                            ProcessCollection processCollection) {
     }
 
     public enum ProcessSort {

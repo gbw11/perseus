@@ -19,8 +19,11 @@ int main(void) {
    (long long)(k_uptime_get()-start),progress,baseline?"true":"false");
  } else {
   k_sleep(K_MSEC(20));struct xnet_status s;assert(!xnet_status_get(&s));
-  assert(s.backend_error&&s.backend_observation==(!strcmp(xl_case,"wait-closing")?3:!strcmp(xl_case,"wait-timeout")?2:4));
-  struct net_pkt p={.length=14};assert(xl_api->send(NULL,&p)==-ENETDOWN);
+  bool transient=!strcmp(xl_case,"wait-timeout");
+  assert(s.backend_observation==(!strcmp(xl_case,"wait-closing")?3:transient?2:4));
+  assert(transient?!s.backend_error&&s.observation_error:s.backend_error!=0);
+  struct net_pkt p={.length=14};assert(xl_api->send(NULL,&p)==(transient?0:-ENETDOWN));
+  if(transient)xl_complete_tx();
   printf("WAIT_RESULT {\"observation\":%d,\"error\":%d}\n",s.backend_observation,s.backend_error);
  }
  xl_wait_enabled=false;assert(!xnet_close(k_uptime_get()+1000));

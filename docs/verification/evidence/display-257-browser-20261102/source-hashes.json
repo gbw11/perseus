@@ -1,0 +1,10 @@
+{
+  "platform\\services\\display\\router\\xenova_display\\native_capture.py": "f74e0e55af9485c49abc456f49e4f163fa6f00bac7cf70f88b1159c33e8695df",
+  "platform\\services\\display\\router\\xenova_display\\native_jpeg.py": "b3dddb513e14b267a216a2cb06c4940dbe93d180c52bfde935bd583619f2d3a2",
+  "platform\\services\\display\\router\\xenova_display\\native_x11.py": "26c1dc7952509803e0d00bdf131ac6596f323d5509c07b0f1ca5e743f0f6f20f",
+  "platform\\services\\display\\router\\xenova_display\\viewer.html": "72e2ddf7d662d99d646986f1e921397df561a62e5b58ea952c622fa0a723e30d",
+  "platform\\services\\display\\router\\xenova_display\\kiosk.py": "426e7fab103795abf9965507f623ba732d1441baaced642894576a3db62b609d",
+  "platform\\services\\display\\router\\xenova_display\\stream.py": "b309cd38cb030f52cce12221d9fc3181fe7a7bc97131edbfe7195c42bcb83470",
+  "platform\\services\\display\\router\\xenova_display\\runtime_status.py": "e40b5f43366e0a49786f136020b6b632f3a1596eaaf8240ce30a898d7d8a5b2c",
+  "platform\\services\\display\\router\\deploy\\board-kms\\stream-host.py": "bb7a07bb0cbf0e49b68cb827fc31119b0ee94684d2dd798585dd809cb6b52681"
+}

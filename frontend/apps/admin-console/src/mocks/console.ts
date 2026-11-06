@@ -44,14 +44,14 @@ function shellReply(name: string, line: string, startedAt: number): string {
         '    PID TTY          TIME CMD',
         '      1 ?        00:00:01 systemd',
         '    212 ?        00:00:04 xenova-agent',
-        '    245 ?        00:00:02 message-board',
+        '    245 ?        00:00:02 interaction',
         '    301 hvc0     00:00:00 bash',
         '',
       ].join('\n');
     case 'systemctl':
       return [
-        '● message-board.service - Xenova 네비게이션 앱',
-        '     Loaded: loaded (/etc/systemd/system/message-board.service; enabled)',
+        '● interaction.service - Xenova 네비게이션 앱',
+        '     Loaded: loaded (/etc/systemd/system/interaction.service; enabled)',
         '     Active: active (running)',
         '',
       ].join('\n');

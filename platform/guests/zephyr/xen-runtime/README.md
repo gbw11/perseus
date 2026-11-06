@@ -103,11 +103,37 @@ Store 세션과 backend watch를 사용한다. watch는 알림이므로 값을 �
 최대 1ms 세션 사용과 잠금 밖 idle로 나누고, 상태 조회의 기존 50ms 예산은 유지한다.
 새 Store 수신자나 세션, system workqueue의 긴 blocking 작업은 추가하지 않는다.
 
-`xnet_status_get`의 backend_observation은 0=미관측, 1=확인된 정상,
+`xnet_status_get`의 backend_observation은 0=미관측, 1=확인된 Connected,
 2=이번 관측 불가, 3=확인된 Closing/Closed, 4=신원/프로토콜/전송 오류다.
-backend_error에 실제 오류를 보존한다. 관측 불가도 기존처럼 TX를 차단하며
-유예나 자동 재연결을 허용하지 않는다. backend_wait_stage는 최근 세션 획득(1),
-응답 대기(2), 정상 종료(0)의 구분이다. 초기화·종료의 Store handshake는 그대로다.
+이미 연결된 VIF에서 세션 획득 실패 또는 사용 가능한 Store의 `-ETIMEDOUT`,
+`-EAGAIN`, `-EBUSY`는 관측 불가다. 기존 ring·grant와 패킷 worker를 유지하고
+다음 250ms 재관측에서 확인한다. 관측 불가 중에는 watch가 몰려도 상태 재조회를
+앞당기지 않는다. 한 조회의 50ms 예산을 네트워크 연결의 수명으로 쓰지 않으며,
+현재 관측이 확인됐다고 표시하거나 MQTT 연결·앱 입력의 신선도를 보장하지 않는다.
+
+반면 실제 Closing/Closed, backend 경로 변경, 잘못된 응답 및 사용할 수 없는 Store는
+전송을 차단한다. 부분 요청 전송으로 Store가 poisoned가 된 `-ETIMEDOUT`도 여기에
+포함한다. 오류 코드만 보고 일시 실패로 바꾸지 않으며, 같은 세션 잠금 아래 확보한
+poisoned/closed 상태를 함께 확인한다. 지원하지 않는 XenBus 상태에서 자동 reconnect나
+새 ring·grant 초기화를 하지 않는다. 초기화·종료의 handshake와 grant 회수 조건은 그대로다.
+
+`backend_error`는 전송을 차단한 종결 오류다. `observation_error`는 최근 관측 오류이며,
+정상 재관측 뒤 0으로 돌아간다. `first_observation_error`는 최초 오류를 계속 보존한다.
+`connected`는 TX 허용 상태이며 앱 건강이 아니다. 복귀 시 이 값을 true로 다시 설정하지
+않으므로 stop 요청 뒤 도착한 정상 응답이 전송을 재개하지 않는다.
+`backend_wait_stage`는 최근 세션 획득(1), 응답 대기(2), 정상 종료(0)의 구분이다.
+
+패킷 worker의 `packet_lock` 획득은 기존 20ms 예산을 유지한다. 고정 Zephyr에서
+제한 시간 대기 만료인 `-EAGAIN`이면 ring에 접근하지 않고 한 scheduler tick을
+양보한 뒤 다시 시도한다. 이번 회차의 경합만으로 worker나 링크를 종료하지 않는다.
+다른 잠금 오류는 원 rc로 종결하며, 잠금 획득 뒤에도 close·backend 종결을 다시 확인한다.
+송신 호출은 기존처럼 자기 잠금 획득 실패를 `-ETIMEDOUT`으로 반환하며, 숨은 재송신 큐는 없다.
+
+`xnet_stop_request`는 새 송신을 차단하지만 이미 수락한 송신의 completion 처리까지
+즉시 중단하지 않는다. close는 기존 원 기한으로 drain·join·사용자 종료를 확인한다.
+살아 있는 잠금 소유자가 남으면 grant를 회수하거나 mutex를 강제로 풀지 않으며,
+소유자가 종료한 뒤 같은 close를 재호출해 정리한다. 지속적인 잠금 경합은 정상 진행이
+아니다. TX 허용 여부와 실제 poll 진행을 구별하고 대기·보유 시간 및 마지막 poll을 함께 본다.
 
 링 poll의 64건 한도와 검증·메모리 게시 순서를 유지한다. 처리할 응답이 남았으면
 일반 10ms idle 대신 한 scheduler tick 뒤 재실행하여 낮은 우선순위 worker에도
@@ -118,6 +144,13 @@ backend Closing/Closed·watch·grant를 정리한다. Store 자체는 마지막�
 Network Starter의 `xenova stats waits`는 패킷 poll 간격, packet lock 대기/보유,
 Store 세션 획득/응답 대기의 누적 최대와 관측 상태를 조회한다. `clock=cycles`는
 cycle counter, `kernel_ticks`는 tick 해상도다. 관측 최대는 최악 지연 보장값이 아니다.
+`store_unavailable`, `store_recoveries`는 관측 불가·복귀의 포화 누적 계수이며,
+`last_backend_success_ms`는 마지막 Connected 확인 시점의 guest uptime이다.
+`packet_lock_timeouts`는 packet worker의 잠금 대기 만료 누계이며 포화시킨다.
+`packet_lock_first_error`는 같은 worker에서 최초로 반환된 잠금 오류를 보존한다.
+`packet_last_poll_ms`는 마지막 실제 ring poll 시점의 guest uptime이다. 송신·통계 호출의
+잠금 실패를 이 worker 계수에 섞지 않는다. uptime 값은 host 시각과 직접 빼지 않는다.
+반복 실패마다 콘솔이나 stack을 출력하지 않는다. 카운터 조회도 Store를 재조회하지 않는다.
 이 로컬 계측은 MQTT 계약을 늘리거나 앱 정상·차량 안전을 판정하지 않는다.
 
 ## 고정 전송 기반

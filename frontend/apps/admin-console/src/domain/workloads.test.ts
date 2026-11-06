@@ -33,11 +33,6 @@ const processes = (overrides: Partial<ProcessesResponse> = {}): ProcessesRespons
 
 const threads = (overrides: Partial<ThreadsResponse> = {}): ThreadsResponse => ({
   vm_id: 'vm',
-  boot_id: 'boot',
-  publisher_instance_id: 'pub',
-  sample_seq: '1',
-  start_uptime_ms: '0',
-  end_uptime_ms: '2000',
   window_ms: 2000,
   received_at: '2026-11-04T01:00:00Z',
   stale: false,

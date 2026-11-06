@@ -51,6 +51,15 @@ function ToSplit() {
 const router = createBrowserRouter(
   [
     // dom0 표시 수집기 kiosk 화면 (S15P31E110-250, display-pipeline 계약)
+    {
+      path: '/display/mobile',
+      lazy: async () => ({ Component: (await import('./display/MobilePage')).MobilePage }),
+    },
+    // 모니터 2대(계기판·인포테인먼트)를 한 화면으로 합친 차량 화면 (S15P31E110-128, 미리보기 단계)
+    {
+      path: '/display/combined',
+      lazy: async () => ({ Component: (await import('./display/CombinedPage')).CombinedPage }),
+    },
     { path: '/display/:outputId', element: <MonitorPage /> },
     {
       element: <Root />,

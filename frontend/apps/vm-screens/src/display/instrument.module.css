@@ -1,0 +1,367 @@
+/* HDMI 1 드라이버 계기판 — 1920×1080 기준. 크기는 vh 로 잡아 미리보기 창이 작아도 비율을 유지한다 (1vh = 10.8px) */
+.screen {
+  --ic-bg: #0b0d10;
+  --ic-text: #f2f4f7;
+  --ic-muted: #8a909a;
+  --ic-dim: #3a3f47;
+  --ic-blue: #3e8bff;
+  --ic-red: #ff4d4f;
+  --ic-amber: #ffb020;
+  --ic-green: #34c77b;
+  box-sizing: border-box;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 2.6vh 3.4vh 1.6vh;
+  background: radial-gradient(ellipse at 50% 70%, #151a21 0%, var(--ic-bg) 62%);
+  color: var(--ic-text);
+  font-family: var(--x-font), sans-serif;
+}
+.screen * {
+  box-sizing: border-box;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.cluster {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 위: 경고등 + 연결 */
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 4.4vh;
+}
+.lamps {
+  display: flex;
+  gap: 2.2vh;
+}
+.lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.9vh;
+  color: var(--ic-dim);
+  font-size: 1.7vh;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.lamp i {
+  width: 1.5vh;
+  height: 1.5vh;
+  border-radius: 50%;
+  background: var(--ic-dim);
+}
+.lamp[data-on='true'] {
+  color: var(--ic-red);
+}
+.lamp[data-on='true'] i {
+  background: var(--ic-red);
+  box-shadow: 0 0 1.4vh var(--ic-red);
+}
+.lamp[data-key='obstacle'][data-on='true'] {
+  color: var(--ic-amber);
+}
+.lamp[data-key='obstacle'][data-on='true'] i {
+  background: var(--ic-amber);
+  box-shadow: 0 0 1.4vh var(--ic-amber);
+}
+.lamp[data-unknown='true'] {
+  opacity: 0.5;
+}
+.linkOk,
+.linkLost {
+  font-size: 1.6vh;
+  letter-spacing: 0.04em;
+}
+.linkOk {
+  color: var(--ic-muted);
+}
+.linkLost {
+  color: var(--ic-red);
+}
+.alert {
+  margin-top: 1vh;
+  padding: 1vh 1.6vh;
+  border: 1px solid var(--ic-red);
+  border-radius: 1vh;
+  color: var(--ic-red);
+  font-size: 1.8vh;
+}
+.waiting {
+  margin: auto;
+  color: var(--ic-muted);
+  font-size: 2.4vh;
+}
+
+/* 본문 3단 */
+.body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 46vh 1fr 44vh;
+  align-items: stretch;
+  gap: 2vh;
+}
+
+/* 왼쪽: 속도·모드 */
+.left {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2.6vh;
+  padding-left: 2vh;
+}
+.speed {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+.speed strong {
+  font-size: 19vh;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.speed span {
+  margin-top: 0.6vh;
+  color: var(--ic-muted);
+  font-size: 2.6vh;
+  letter-spacing: 0.06em;
+}
+.gears {
+  display: flex;
+  gap: 2.4vh;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 2.6vh;
+  font-weight: 600;
+  color: var(--ic-dim);
+}
+.gears li[data-active='true'] {
+  color: var(--ic-text);
+}
+.cluster[data-mode='AUTO'] .gears li[data-active='true'] {
+  color: var(--ic-blue);
+}
+.cluster[data-mode='SAFE_STOP'] .gears li[data-active='true'] {
+  color: var(--ic-red);
+}
+.modeLabel {
+  margin: 0;
+  font-size: 2.2vh;
+  color: var(--ic-muted);
+}
+.modeLabel[data-tone='warning'] {
+  color: var(--ic-amber);
+}
+.modeLabel[data-tone='danger'] {
+  color: var(--ic-red);
+}
+.setSpeed {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 1.4vh;
+}
+.setRing {
+  display: grid;
+  place-items: center;
+  width: 7.6vh;
+  height: 7.6vh;
+  border: 0.5vh solid var(--ic-text);
+  border-radius: 50%;
+  font-size: 2.3vh;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.setSpeed small {
+  color: var(--ic-muted);
+  font-size: 1.7vh;
+}
+.wheel {
+  width: 5.4vh;
+  height: 5.4vh;
+  justify-self: end;
+  fill: none;
+  stroke: var(--ic-dim);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.wheel[data-on='true'] {
+  stroke: var(--ic-blue);
+  filter: drop-shadow(0 0 0.8vh var(--ic-blue));
+}
+
+/* 가운데: 도로 */
+.road {
+  position: relative;
+  min-height: 0;
+  color: var(--ic-text);
+}
+.road svg {
+  width: 100%;
+  height: 100%;
+}
+.asphalt {
+  fill: #12161c;
+}
+.edge {
+  stroke: #59606b;
+  stroke-width: 4;
+}
+.dashes line {
+  stroke: #59606b;
+  stroke-width: 4;
+  stroke-dasharray: 34 30;
+}
+.road[data-moving='true'] .dashes line {
+  animation: dash 0.9s linear infinite;
+}
+@keyframes dash {
+  to {
+    stroke-dashoffset: 64;
+  }
+}
+.stopLine {
+  stroke: var(--ic-red);
+  stroke-width: 10;
+  stroke-linecap: round;
+}
+.obstacle polygon {
+  fill: var(--ic-amber);
+}
+.obstacle rect {
+  fill: #c98a12;
+}
+.obstacle {
+  filter: drop-shadow(0 0 12px rgba(255, 176, 32, 0.7));
+}
+.car .body {
+  fill: #e9ecf0;
+}
+.car .roof {
+  fill: #d4d8de;
+}
+.car .glass {
+  fill: #232933;
+}
+.car .mirror {
+  fill: #c3c8cf;
+}
+.car .wheelBlock {
+  fill: #1c2027;
+}
+.car .tail {
+  fill: #5a1416;
+}
+.car .tail[data-brake='true'] {
+  fill: var(--ic-red);
+  filter: drop-shadow(0 0 10px var(--ic-red));
+}
+
+/* 오른쪽: 구동 VM·주행 앱 */
+.right {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2.4vh;
+  padding-right: 2vh;
+}
+.driver {
+  display: grid;
+  gap: 0.6vh;
+}
+.driver small {
+  color: var(--ic-muted);
+  font-size: 1.8vh;
+  letter-spacing: 0.06em;
+}
+.driver strong {
+  font-size: 7vh;
+  font-weight: 600;
+  line-height: 1;
+}
+.cluster[data-mode='AUTO'] .driver strong {
+  color: var(--ic-blue);
+}
+.driver span {
+  color: var(--ic-muted);
+  font-size: 2vh;
+}
+.apps {
+  display: grid;
+  gap: 1.2vh;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.apps li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.4vh;
+  padding: 1.4vh 1.8vh;
+  border: 1px solid #222832;
+  border-left: 0.6vh solid var(--ic-dim);
+  border-radius: 1vh;
+  background: rgba(255, 255, 255, 0.03);
+}
+.appName {
+  font-size: 2.2vh;
+  font-weight: 600;
+}
+.appName small {
+  margin-left: 0.6vh;
+  color: var(--ic-muted);
+  font-size: 1.6vh;
+  font-weight: 500;
+}
+.apps em {
+  font-style: normal;
+  font-size: 1.9vh;
+  color: var(--ic-muted);
+}
+.apps li[data-tone='drive'] {
+  border-left-color: var(--ic-blue);
+}
+.apps li[data-tone='drive'] em {
+  color: var(--ic-blue);
+}
+.apps li[data-tone='ok'] {
+  border-left-color: var(--ic-green);
+}
+.apps li[data-tone='ok'] em {
+  color: var(--ic-green);
+}
+.apps li[data-tone='warning'] {
+  border-left-color: var(--ic-amber);
+}
+.apps li[data-tone='warning'] em {
+  color: var(--ic-amber);
+}
+.apps li[data-tone='danger'] {
+  border-left-color: var(--ic-red);
+}
+.apps li[data-tone='danger'] em {
+  color: var(--ic-red);
+}
+.obstacleNote {
+  margin: 0;
+  padding: 1.2vh 1.6vh;
+  border-radius: 1vh;
+  background: rgba(255, 176, 32, 0.12);
+  color: var(--ic-amber);
+  font-size: 1.9vh;
+}

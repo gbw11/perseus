@@ -35,8 +35,11 @@ ISR은 semaphore만 올리고 파싱·대기·상태 변경은 호출 thread에�
   알림은 합쳐질 수 있으므로 값은 항상 다시 읽는다.
 - `-ETIMEDOUT`은 값·연결 성공이 아니다. 늦은 일반 응답은 request ID로 폐기한다.
   완전히 송신한 요청의 일반 대기 만료는 client를 poison하지 않는다.
-  부분 송신 중 중단되면 byte stream을 재사용하지 않는다. watch가 유입되는 동안에도 송신
-  전체 deadline을 검사한다. 송신 0 byte 만료는 pending slot을 반환한다.
+  요청 전체가 링에 들어가면 헤더와 본문을 한 번에 게시한다. 공간이 부족한 상태에서 기한이
+  지나면 producer index는 유지하고 pending slot을 반환한다. 0ms에는 새 요청을 게시하지
+  않는다. 이미 등록한 watch의 이벤트는 `xs_watch_next`에서 0ms로도 확인할 수 있다.
+  링보다 큰 요청은 기존 스트리밍을 사용한다. 부분 송신 중 중단되면 byte stream을
+  재사용하지 않는다. watch가 유입되는 동안에도 송신 전체 deadline을 검사한다.
 - backend 정보 미완성은 probe의 `-EAGAIN`, VIF 없음은 `-ENODEV`, 거절은 `-EACCES`,
   형식 오류는 `-EPROTO`, backend 교체는 `-EXDEV`다.
 - close는 자기 transaction/watch를 제한시간 안에 정리한다. 실패하면 음수로 반환한다.

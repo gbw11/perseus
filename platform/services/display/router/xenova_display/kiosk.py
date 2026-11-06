@@ -36,6 +36,9 @@ class Kiosk:
         self.contexts, self.pages, self.renewed = {}, {}, {}
         self.profiles = {}
         self.states = {}
+        self.mapping = {}
+        self.mapping_at = 0
+        self.launch_lock = asyncio.Lock()
 
     async def start_output(self, browser_type, output):
         args = ["--ozone-platform=x11", "--force-device-scale-factor=1", "--no-first-run",
@@ -108,67 +111,130 @@ class Kiosk:
         finally:
             if guard: await asyncio.to_thread(guard.restore)
 
+    async def _layout_loop(self, interval):
+        while True:
+            try:
+                mapping = await asyncio.to_thread(self.layout.reconcile)
+            except Exception:
+                mapping = {o.output_id: {"status": "layout_error", "physical_verified": False}
+                           for o in self.config.outputs}
+            self.mapping, self.mapping_at = mapping, time.monotonic()
+            await asyncio.sleep(interval)
+
+    def _output_mapping(self, identity, now):
+        if not 0 <= now-self.mapping_at < 6:
+            return {"status": "layout_stale", "physical_verified": False}
+        return self.mapping.get(identity, {"status": "layout_waiting", "physical_verified": False})
+
+    def _runtime_status(self, now):
+        outputs = {}
+        for output in self.config.outputs:
+            identity = output.output_id
+            mapping = self._output_mapping(identity, now)
+            state = dict(self.states.get(identity, {"status": "renderer_waiting", "renderer_alive": False}))
+            state.update(connector=output.connector,
+                         rectangle=[output.x,output.y,output.width,output.height])
+            if mapping["status"] != "mapped":
+                state.update(mapping, renderer_alive=False, physical_verified=False)
+            elif state.get("status") == "mapped":
+                verified = state.get("renderer_verified_monotonic")
+                if verified is None or not 0 <= now-verified < 6:
+                    state.update(status="renderer_stale", renderer_alive=False, physical_verified=False)
+                else:
+                    state["physical_verified"] = mapping.get("physical_verified", False)
+            outputs[identity] = state
+        return {"schema_version": 1, "layout_epoch": self.epoch,
+                "backend": self.config.backend, "updated_monotonic": now, "outputs": outputs}
+
+    async def _output_loop(self, browser_type, output, interval):
+        while True:
+            mapping = self._output_mapping(output.output_id, time.monotonic())
+            await self._update_output(browser_type, output, mapping)
+            await asyncio.sleep(interval)
+
+    async def _update_output(self, browser_type, output, mapping):
+        identity = output.output_id
+        state = {**mapping, "connector": output.connector,
+            "rectangle": [output.x, output.y, output.width, output.height], "renderer_alive": False,
+            "applied_revision": None}
+        try:
+            page = self.pages.get(identity)
+            if state["status"] != "mapped":
+                self.states[identity] = state
+                await self.close_output(identity)
+            else:
+                if page is None or page.is_closed():
+                    state["status"] = "renderer_starting"
+                    self.states[identity] = state
+                    await self.close_output(identity)
+                    async with self.launch_lock:
+                        await self.start_output(browser_type, output)
+                    state["status"] = "mapped"
+                    page = self.pages[identity]
+                state["renderer_alive"] = not page.is_closed()
+                cdp = await self.contexts[identity].new_cdp_session(page)
+                window = await cdp.send("Browser.getWindowForTarget")
+                await cdp.detach()
+                bounds = window["bounds"]
+                if tuple(bounds[k] for k in ("left","top","width","height")) != (output.x,output.y,output.width,output.height):
+                    raise RuntimeError("browser is outside configured output")
+                state["renderer_verified_monotonic"] = time.monotonic()
+                self.states[identity] = state
+                try:
+                    if time.monotonic() - self.renewed[identity] > 3600:
+                        await self.renew(self.contexts[identity])
+                        self.renewed[identity] = time.monotonic()
+                    response = await self.contexts[identity].request.get(
+                        f"{self.config.feed_origin}/api/v1/display/presentation", timeout=2500)
+                    if response.status == 401:
+                        await self.renew(self.contexts[identity])
+                        self.renewed[identity] = time.monotonic()
+                        response = await self.contexts[identity].request.get(
+                            f"{self.config.feed_origin}/api/v1/display/presentation", timeout=2500)
+                    if response.status == 200:
+                        p = await response.json()
+                        selected = next(o for o in p["outputs"] if o["output_id"] == identity)
+                        ack = selected.get("renderer_ack")
+                        state["desired_render_revision"] = p["render_revision"]
+                        state["render_revision"] = ack["render_revision"] if ack else None
+                        if ack:
+                            state["dom_revision"] = ack["revision"]
+                            if state["physical_verified"]: state["applied_revision"] = ack["revision"]
+                    else: state["feed_status"] = "unavailable"
+                except Exception:
+                    # Keep the window and its explicit stale-data UI when the local feed is down.
+                    state["feed_status"] = "unavailable"
+        except Exception as error:
+            state["status"] = "renderer_error"
+            state["error_type"] = type(error).__name__
+            state["renderer_alive"] = False
+            self.states[identity] = state
+            await self.close_output(identity)
+        self.states[identity] = state
+
+    async def _supervise(self, browser_type, interval=1):
+        # A slow Chromium close/start belongs only to its output. Geometry
+        # observations and healthy output verification must continue meanwhile.
+        tasks = [asyncio.create_task(self._layout_loop(interval))]
+        tasks += [asyncio.create_task(self._output_loop(browser_type, o, interval))
+                  for o in self.config.outputs]
+        try:
+            while True:
+                for task in tasks:
+                    if task.done():
+                        await task
+                        raise RuntimeError("display supervisor task exited unexpectedly")
+                write_status(self.status_path, self._runtime_status(time.monotonic()))
+                await asyncio.sleep(interval)
+        finally:
+            for task in tasks: task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def _run(self):
         from playwright.async_api import async_playwright
         async with async_playwright() as playwright:
             try:
-                while True:
-                    try: mapping = await asyncio.to_thread(self.layout.reconcile)
-                    except Exception:
-                        mapping = {o.output_id: {"status": "layout_error", "physical_verified": False} for o in self.config.outputs}
-                    for output in self.config.outputs:
-                        identity = output.output_id
-                        state = {**mapping[identity], "connector": output.connector,
-                            "rectangle": [output.x, output.y, output.width, output.height], "renderer_alive": False,
-                            "applied_revision": None}
-                        try:
-                            page = self.pages.get(identity)
-                            if state["status"] != "mapped":
-                                await self.close_output(identity)
-                            else:
-                                if page is None or page.is_closed():
-                                    await self.close_output(identity)
-                                    await self.start_output(playwright.chromium, output)
-                                    page = self.pages[identity]
-                                state["renderer_alive"] = not page.is_closed()
-                                cdp = await self.contexts[identity].new_cdp_session(page)
-                                window = await cdp.send("Browser.getWindowForTarget")
-                                await cdp.detach()
-                                bounds = window["bounds"]
-                                if tuple(bounds[k] for k in ("left","top","width","height")) != (output.x,output.y,output.width,output.height):
-                                    raise RuntimeError("browser is outside configured output")
-                                try:
-                                    if time.monotonic() - self.renewed[identity] > 3600:
-                                        await self.renew(self.contexts[identity])
-                                        self.renewed[identity] = time.monotonic()
-                                    response = await self.contexts[identity].request.get(
-                                        f"{self.config.feed_origin}/api/v1/display/presentation", timeout=2500)
-                                    if response.status == 401:
-                                        await self.renew(self.contexts[identity])
-                                        self.renewed[identity] = time.monotonic()
-                                        response = await self.contexts[identity].request.get(
-                                            f"{self.config.feed_origin}/api/v1/display/presentation", timeout=2500)
-                                    if response.status == 200:
-                                        p = await response.json()
-                                        selected = next(o for o in p["outputs"] if o["output_id"] == identity)
-                                        ack = selected.get("renderer_ack")
-                                        state["desired_render_revision"] = p["render_revision"]
-                                        state["render_revision"] = ack["render_revision"] if ack else None
-                                        if ack:
-                                            state["dom_revision"] = ack["revision"]
-                                            if state["physical_verified"]: state["applied_revision"] = ack["revision"]
-                                    else: state["feed_status"] = "unavailable"
-                                except Exception:
-                                    # Keep the window and its explicit stale-data UI when the local feed is down.
-                                    state["feed_status"] = "unavailable"
-                        except Exception as error:
-                            state["status"] = "renderer_error"
-                            state["error_type"] = type(error).__name__
-                            await self.close_output(identity)
-                        self.states[identity] = state
-                    write_status(self.status_path, {"schema_version": 1, "layout_epoch": self.epoch,
-                        "backend": self.config.backend, "updated_monotonic": time.monotonic(), "outputs": self.states})
-                    await asyncio.sleep(1)
+                await self._supervise(playwright.chromium)
             finally:
                 for identity in set(self.contexts) | set(self.profiles): await self.close_output(identity)
                 if self.browser:

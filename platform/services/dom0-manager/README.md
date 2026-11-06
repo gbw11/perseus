@@ -1,5 +1,34 @@
 # dom0-manager
 
+## 등록 목록과 단건 통지
+
+`platform` 드라이버의 `GET /api/v1/vm-registrations`는 실행 여부와 무관한 REGISTERED 목록을 여덟 필드 배열로 반환합니다.
+`POST /api/v1/vm-registrations/{vm_id}/notify`는 UUID만 받아 현재 명세를 읽고 Spring 등록 POST를 한 번 보냅니다.
+기존 서비스 Bearer 인증이 필수이며 입력 body·URL·token 중계는 받지 않습니다. runtime `/vms`는 기존 의미를 유지합니다.
+
+```sh
+curl --fail-with-body -H "Authorization: Bearer $DOM0_SERVICE_TOKEN" \
+  http://127.0.0.1:8081/api/v1/vm-registrations
+curl --fail-with-body -X POST -H "Authorization: Bearer $DOM0_SERVICE_TOKEN" \
+  http://127.0.0.1:8081/api/v1/vm-registrations/850e8400-e29b-41d4-a716-446655440001/notify
+```
+
+Spring URL과 `VM_REGISTRATION_SERVICE_TOKEN`은 root 0600 `/etc/xenova/spring-registration.env`로 FastAPI에만 공급합니다.
+미설정은 notify에만 영향을 줍니다. 성공은 `confirmed=true`와 원 HTTP 200/201을 검증한 경우이고,
+upstream 거절(502·원 http_status/code), 응답 미확인(504), 설정/연결/포화(503)를 구별합니다.
+자동 retry/redirect/후속 GET은 없습니다. 일반 생성/factory의 공통 hook이 자동 기회를 소유하며 API startup/create service가 추가 송신하지 않습니다.
+
+실제 import·wire·한도·실패 처리와 설치 순서는 [공급 계약](../../../docs/contracts/vm-provisioning-v1.md),
+정상/실패의 별도 프로세스 시험은 [검증 기록](../../../docs/verification/vm-registration-api-20261102.md)을 따릅니다.
+구형 `xenova-vm registration-notify`와 하위 직접 Spring 설정은 제거했습니다. 하위 조회는 `xenova-vm registrations [UUID] --json`입니다.
+
+factory 통지는 등록 완료 사건에서 일시 systemd job을 비동기 예약합니다. API unit은 `Type=notify`이며
+제품 entrypoint가 ASGI startup·listen 완료 뒤 `READY=1`을 보냅니다. 통지 job은 그 뒤 기존 15초 예산으로
+실행하므로 first-boot·autostart는 기다리지 않습니다. API restart의 dependent 재진입도 같은 boot의
+배타 실행 표식으로 막습니다. API 기동 실패·응답 유실·다음 boot에서 자동 재예약하지 않습니다.
+API entrypoint·unit·하위 hook을 함께 설치해야 합니다. `uvicorn dom0_manager.main:app` 직접 실행은
+HTTP 개발 실행이며 systemd 준비 신호를 내는 제품 entrypoint를 대신하지 않습니다.
+
 ## MO-04 단계 3: 내부 WebSocket 프록시
 
 `/api/v1/vms/{vm_id}/console`에서 `ConsoleSession`의 입출력을 WebSocket과 연결합니다.
@@ -171,7 +200,8 @@ tests/
 | `destroy(vm_id)` | O | 명시적 강제 종료. 디스크는 Provisioner가. 멱등 |
 | `host_info()` | O | free_memory, total_memory, nr_cpus (`xl info`) |
 | `health()` | O | `xl info` 응답과 registry 저장소(`instances/`) 존재 → `/healthz` 503 판정. Manager 를 거치지 않아 조회 한도 안에 끝남 |
-| `reboot`, `set_vcpus`, `set_memory`, `pin_vcpu`, `set_sched_weight`, `get_stats` | v2 | 208·101·112에서. 기본 구현은 `NotImplementedError` |
+| `reboot(vm_id)` / `request_reboot(vm_id, key)` | platform·mock | 실행 중인 도메인을 같은 디스크로 새 실행으로 재시작(S15P31E110-208). 제공하지 않는 드라이버는 501 |
+| `set_vcpus`, `set_memory`, `pin_vcpu`, `set_sched_weight`, `get_stats` | v2 | 101·112에서. 기본 구현은 `NotImplementedError` |
 
 `Provisioner`는 `ensure_instance(vm_id, template_id, template_version, name=, vcpus=, memory_mib=) / instance_exists / delete_instance` 세 개입니다. platform 모드에서는 플랫폼 `create`(등록 + 디스크)와 `retire`(숨김 보관)로 구현되며, dom0-manager 안에 디스크 생성기는 없습니다. xen 모드는 조회 전용이라 `ensure_instance`가 501입니다.
 
@@ -194,6 +224,7 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 | --- | --- | --- |
 | `XENOVA_PLATFORM_LIB` | `/usr/lib/xenova` | `xenova_management` 등 플랫폼 모듈 경로. 여러 개면 OS 경로 구분자로 |
 | `XENOVA_PLATFORM_BUSY_TIMEOUT` | `5` | 다른 요청이 플랫폼 `Manager`를 쓰는 동안 기다릴 최대 초. 넘으면 503 `PlatformUnavailable`(재시도 가능). 정지가 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다 |
+| `XENOVA_PLATFORM_READ_FORK` | `0` | `1`이면 일반 조회(get·list 등)를 직렬화하지 않고 호출마다 요청별 `Manager.fork()`로 부른다. 하위가 조회를 공통 실행 잠금 없이 처리하는 설치본을 확인한 뒤에만 켠다. Worker 도 같은 값을 읽는다 |
 
 동작 대응:
 
@@ -202,7 +233,9 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 | `GET /vms`, `GET /vms/{id}` | `list` / `get`. `domid`가 있는 항목만 도메인으로 봄. 등록만 된 VM은 목록에 없고 단건은 404 |
 | `POST /vms` | 등록이 없으면 `create`(`idempotency_key=create-<vm_id>`, Spring 발급 `vm_id`를 그대로 전달) → `start` |
 | `POST /vms/{id}/stop` | `stop` (`force=false`, 플랫폼이 최대 90초 대기). 시한 초과는 504. `Idempotency-Key` 가 있으면 아래 "정지 요청 추적" |
-| `GET /vms/{id}/control-operations?request_key=` | `control-operation` (`vm_id`, `idempotency_key`, `timeout_ms` 기본 5000). 읽기만 한다 |
+| `POST /vms/{id}/reboot` | `reboot` (`force=false`, 플랫폼이 새 실행까지 최대 90초 대기). 신규 재부팅은 키 유무와 관계없이 먼저 등록(없으면 404)·실행 중(아니면 409)을 확인한다. 키 있으면 같은 키의 원 작업을 먼저 조회해 있으면 재전달로 보고 상태 확인 없이 보낸다(작업 상태 `action: reboot`). 명령 제출 뒤 새 실행 미확인은 503(`RECONCILE_REQUIRED`). 꺼진 VM·비협력 Zephyr 거절은 플랫폼이 `ARTIFACT_INVALID` 문구로만 알려 그 두 문구만 409·501 로 바꾼다(계약 4.10) |
+| `GET /cpu-layout`, `GET /vms/{id}/cpu-layout` | `cpu-layout` (`vm_id?`, `timeout_ms` 기본 5000). 조회 전용. 하위는 `budget_ms` 를 받지 않아 요청 예산은 `timeout_ms` 로만 줄이고, 플랫폼이 operation lock 을 기다리지 않으므로 요청별 Manager(fork)로 부른다. 응답은 공개 필드만 고정 모델로 형식·의미값(presence·allocation·issue code·예약 형식)까지 검증해 옮긴다. 어긋나거나 한 VM 조회가 그 VM 하나가 아니면 503. 관측 중 바뀜(`TARGET_CHANGED`)은 409 가 아니라 503(계약 4.11) |
+| `GET /vms/{id}/control-operations?request_key=` | `control-operation` (`vm_id`, `idempotency_key`, `timeout_ms` 기본 5000). 읽기만 한다. stop·reboot(force 없음) 기록만 돌려준다 |
 | `DELETE /vms/{id}` | 실행 중 409 → 정지 후 `retire`(숨김 보관) |
 
 플랫폼 오류 코드 → HTTP: `INVALID_SPEC`·템플릿 없음 400 / `VM_NOT_FOUND` 404 / 이름·IP·멱등성 충돌과 `VM_NOT_STOPPED` 등 409 / `INSUFFICIENT_STORAGE`·`IP_POOL_EXHAUSTED` 507 / `STORAGE_UNAVAILABLE`·`RECOVERY_REQUIRED`·`CLEANUP_INCOMPLETE`·`OPERATION_IN_PROGRESS`(잠금 보유, 재시도 가능) 503 / 시한 초과 504 / 그 외 500.
@@ -210,6 +243,8 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 플랫폼 `xen_state` → 계약 상태: `running`·`blocked`·`unknown`(플래그 없음) → running, `paused` → paused, `shutdown`·`dying` → stopping, `crashed` → crashed, `stopped` → 도메인 없음.
 
 `load_manager`는 `Manager`를 `SerializedManager`로 감싸 프로세스 안에서 `call`을 직렬화합니다. 플랫폼 `Manager`가 요청별 상태(`current_operation`·`replayed`)를 인스턴스 변수에 두어 FastAPI 스레드가 동시에 부르면 섞이기 때문입니다. 차례를 기다리는 시간은 `XENOVA_PLATFORM_BUSY_TIMEOUT`(기본 5초)으로 제한하고, 넘으면 플랫폼의 잠금 충돌과 같은 `OPERATION_IN_PROGRESS` 봉투를 돌려 503으로 냅니다. 정지가 90초 동안 잠금을 쥐어도 조회가 스레드풀에 쌓이지 않습니다. `/healthz`는 Manager를 거치지 않고 `xl info`와 registry 디렉터리 존재만 확인하므로 잠금이나 느린 `xl list`에 영향받지 않습니다.
+
+**조회의 요청별 Manager (S15P31E110-333)**: `XENOVA_PLATFORM_READ_FORK=1`이면 하위 계약의 일반 조회(`list`·`get`·`intents`·`probe`·`execution-context`·`templates`·`operation`·`control-operation`·`recovery-operation`·`provisioning`, [cli-manager-spec "일반 조회의 동시 실행과 정합성"](../../../docs/platform/cli-manager-spec.md#read-concurrency))는 직렬화를 거치지 않고 호출마다 새 `fork()` 객체로 부릅니다. 긴 Linux create 가 직렬화를 쥐어도 다른 VM 의 상세·목록이 busy timeout 503 없이 하위로 들어갑니다. 변경 action(create·start·stop·retire·recover_once·provision 등)은 그대로 직렬화합니다. 같은 요청 객체를 두 호출이 공유하지 않고 공유 `Manager` 를 잠금 없이 부르지 않습니다. 하위의 관측 슬롯 경합(`OPERATION_IN_PROGRESS`)·`TARGET_CHANGED`·`OBSERVATION_UNAVAILABLE` 은 지금처럼 503·409 로 냅니다. 기본은 꺼져 있습니다: `fork()` 가 있어도 조회가 공통 잠금을 쓰는 옛·혼합 설치본에서는 503 대신 하위 잠금 대기로 바뀔 뿐이기 때문입니다. `fork` 가 없으면 켜도 직렬화 경로입니다.
 
 **생성 입력**: `create`에는 Spring 발급 `vm_id`, 표시 이름(`<template_id 정규화>-<vm_id 앞 12자리>`), 템플릿 ID·버전, vcpus·memory_mib만 보냅니다. 내부 실행 이름(`vm-<hex>`)·MAC·Linux IP는 플랫폼이 전역 잠금 안에서 발급하고, IP가 바닥나면 플랫폼 `IP_POOL_EXHAUSTED`를 507 `InsufficientResources`(resource.name=ipv4)로 냅니다. 플랫폼 `INVALID_SPEC`은 400 그대로입니다. 인스턴스 디렉터리는 `configuration.id`(내부 이름)로 찾고, 통합 테스트는 생성이 201이며 registry·Xen UUID가 요청 UUID와 같은지 항상 검증합니다.
 
@@ -256,7 +291,7 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 
 | 입력 | 어디서 | 얼마나 자주 |
 | --- | --- | --- |
-| 의도 (`desired_state`, `intent_applicable`, `intent_revision`, `lifecycle`, `guest_kind`) | 플랫폼 `Manager.list` | `XENOVA_RECOVERY_INTENT_REFRESH`(기본 60초)마다 캐시. `list`·`get`은 플랫폼 잠금을 쥐고 VM 마다 Xen 을 관측하므로 5초마다 부르지 않습니다. **판정 직전에는 그 VM 만 `get`으로 재확인**하므로 캐시가 오래돼도 사용자가 끈 VM 을 재시작하지 않습니다 |
+| 의도 (`desired_state`, `intent_applicable`, `intent_revision`, `lifecycle`, `guest_kind`) | 플랫폼 `Manager intents` (S15P31E110-336) | 매 주기 읽습니다. 저장된 의도·등록만 읽고 Xen·공통 잠금을 쓰지 않습니다. **판정 직전에는 그 VM 만 `get`으로 재확인**합니다. 읽기에 실패하면 마지막으로 읽은 등록은 건강 보고 대상으로만 남기고(보관·삭제로 해석해 retained 를 지우지 않음) 오래된 의도로는 아무것도 판정하지 않습니다: crashed·absent 를 포함한 판정을 보류하고 건강은 `OBSERVATION_UNAVAILABLE`, 열린 복구 episode 도 닫지 않습니다. 다시 읽히면 자동으로 재개합니다. `intents` 를 모르는 옛 Manager(`INVALID_SPEC`)면 경고 뒤 `list`(플랫폼 잠금 + VM 마다 Xen 관측)를 `XENOVA_RECOVERY_INTENT_REFRESH`(기본 60초)마다 읽습니다 |
 | Xen 실행 상태 (도메인 유무·상태·domid) | `xl list` / `xl list -l` (잠금 없음) | 매 주기(5초) |
 | 생존 신호 | dom0 Mosquitto `xenova/v1/vms/+/heartbeat`(agent.heartbeat, Linux)와 `xenova/v1/apps/+/events` 중 `app.heartbeat`(Zephyr 주행 VM, 시나리오 D8) | 구독. 수신 단조 시각만 쓰고 `sent_at` 은 쓰지 않음. retain 플래그가 켜진 수신(구독 직후 브로커가 주는 옛 값)은 무시. agent.heartbeat 는 type·빈 payload·토픽-봉투 vm_id 일치, app.heartbeat 는 type·`state` 허용값·`uptime_s`(0 이상 유한)·app_id 일치를 검사해 맞는 것만 기록 |
 | Zephyr 앱 대상 여부 | 템플릿 카탈로그 capability `app_heartbeat`(Manager `templates`, 의도와 같이 캐시). `true` 앱 펌웨어, `false` starter(Xen 상태만). JSON boolean 만 믿고, 문자열 `"false"` 같은 값이면 그 템플릿의 VM 은 대상 여부 불명(OBSERVATION_UNAVAILABLE) | 선언이 없는 템플릿은 신호를 한 번 받은 뒤 armed 로 다루고, armed 는 `XENOVA_RECOVERY_STATE_DIR/armed.json`(`{"version":1,"armed":{vm_id: app_id},"history_lost":bool,"agent_delivered":[vm_id]}`) 에 남겨 Worker 재시작 뒤에도 유지. 플랫폼 카탈로그는 기존·네트워크 Starter에 `false`를 노출합니다. `true` 선언은 감시 대상이라는 뜻이고, 손실 판정은 아래 "VM 별 수신 이력"이 있어야 합니다 |
@@ -272,8 +307,9 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 | `HEARTBEAT_LOST` | Linux VM 이 `running` 인데 agent.heartbeat 가 `XENOVA_RECOVERY_HEARTBEAT_LOST`(기본 30초, 백엔드 OFFLINE 과 같음, 하한 15초) 동안 없음 |
 | `APP_HEARTBEAT_LOST` | Zephyr VM 이 `running` 인데 app.heartbeat 가 `XENOVA_RECOVERY_APP_HEARTBEAT_LOST`(기본 15초, 하한 3초) 동안 없음. 대상은 템플릿 capability `app_heartbeat` 로 선언된 VM 또는 신호를 한 번이라도 받아 armed 된 VM(영속). 둘 다 아닌 Zephyr(앱 없는 starter 펌웨어)는 Xen 상태로만 봅니다 |
 | 부팅 유예 | 도메인이 새로 보인 뒤(새 domid) 첫 신호를 받기 전까지 `XENOVA_RECOVERY_BOOT_GRACE`(Linux 90초)·`XENOVA_RECOVERY_ZEPHYR_BOOT_GRACE`(30초) 동안 UNKNOWN. 이전 부팅의 신호는 세지 않음. 첫 신호 뒤에는 유예 없이 창으로만 판정 |
-| 관측 경로 | 필터별 **구독 승인(SUBACK)** 과 **실제 수신 증거** 둘 다 봅니다. 연결(CONNACK)만으로는 부족하고, 승인만으로도 부족합니다. Mosquitto 는 읽기 ACL 에 막힌 구독도 SUBACK 성공으로 답하고 전달만 거르기 때문입니다(실보드 10/23 확인: 읽기 규칙 없는 ACL 에서 정확한 토픽·와일드카드 모두 승인 0, 전달 없음). 그래서 승인 뒤 그 채널에서 메시지를 하나라도 받기 전에는, 그리고 승인된 지 한 창(window)이 안 됐으면 그 신호의 손실 판정은 UNKNOWN(건강 OBSERVATION_UNAVAILABLE)이고 승인 뒤 한 창 동안 아무것도 안 오면 경고를 남깁니다. agent 와 app 경로를 따로 봅니다. **브로커·ACL 문제는 VM 장애가 아닙니다.** crashed·absent 는 Xen 관측이라 계속 판정하고, 신호가 신선하면 경로 상태와 무관하게 OK. 한계: VM 이 하나뿐이고 그 에이전트가 Worker 기동 뒤 한 번도 보내지 않으면 "에이전트 미기동"과 "브로커가 안 줌"을 구별할 수 없어 HEARTBEAT_LOST 대신 OBSERVATION_UNAVAILABLE 로 남습니다 |
+| 관측 경로 | 필터별 **구독 승인(SUBACK)** 과 **실제 수신 증거** 둘 다 봅니다. 연결(CONNACK)만으로는 부족하고, 승인만으로도 부족합니다. Mosquitto 는 읽기 ACL 에 막힌 구독도 SUBACK 성공으로 답하고 전달만 거르기 때문입니다(실보드 10/23 확인: 읽기 규칙 없는 ACL 에서 정확한 토픽·와일드카드 모두 승인 0, 전달 없음). 그래서 승인 뒤 그 채널에서 메시지를 하나라도 받기 전에는, 그리고 승인된 지 한 창(window)이 안 됐으면 그 신호의 손실 판정은 UNKNOWN(건강 OBSERVATION_UNAVAILABLE)이고 승인 뒤 한 창 동안 아무것도 안 오면 경고를 남깁니다. agent 와 app 경로를 따로 봅니다. 두 주기 사이에 끊겼다 다시 붙으면 승인이 그대로여도 연결 횟수(`connections`)가 바뀌므로, 끊기기 전 수신은 버리고 재연결 뒤 첫 메시지와 한 창을 다시 기다립니다. **브로커·ACL 문제는 VM 장애가 아닙니다.** crashed·absent 는 Xen 관측이라 계속 판정하고, 신호가 신선하면 경로 상태와 무관하게 OK. 한계: VM 이 하나뿐이고 그 에이전트가 Worker 기동 뒤 한 번도 보내지 않으면 "에이전트 미기동"과 "브로커가 안 줌"을 구별할 수 없어 HEARTBEAT_LOST 대신 OBSERVATION_UNAVAILABLE 로 남습니다 |
 | VM 별 전달 근거 | 채널의 실제 수신(위)은 어느 VM 의 메시지든 되므로 "브로커가 이 채널을 지금 전달한다"는 공통 근거일 뿐입니다. **대상 VM 의 손실 판정은 그 VM 의 수신 이력이 있어야 합니다.** 다른 VM 의 수신으로 대상 VM 을 판정하지 않습니다. 이력이 없는 VM 은 계정·ACL 오류, 배포 누락, 첫 부팅 정체를 구별할 수 없으므로 UNKNOWN(유예 중 STARTING, 그 뒤 OBSERVATION_UNAVAILABLE)입니다. 이력은 손실 판정 자격일 뿐 현재 신호가 아닙니다: 재부팅 뒤 이전 부팅의 신호는 세지 않고, 이력이 있는 VM 은 부팅 유예가 지나도 신호가 없으면 판정합니다(부팅 중 멈춘 VM 복구). 한계: 첫 부팅부터 멈춘 VM 과, host 재부팅(이력이 tmpfs 라 비워짐) 뒤 다시 신호를 보내기 전에 멈춘 VM 은 자동 복구하지 않습니다. 한 번 받은 뒤 그 VM 의 ACL 만 바뀌는 경우는 생존 신호만으로 앱 정지와 구별할 수 없습니다(episode 당 시도 상한으로 묶임). 기록 손상은 이력이 없는 것과 같이 다룹니다 |
+| 공통 경로 (S15P31E110-335) | 채널 증거는 구독 승인 뒤 첫 수신으로 세우고 구독이 끊길 때까지 유지하므로, 나중에 브로커·브리지·ACL 이 막혀 모든 VM 이 함께 조용해지는 것은 알지 못합니다. 그래서 손실 판정 직전에 같은 채널의 **동료 발행자**(대상이 아닌 등록 VM 중 의도 running·Xen running·수신 이력 있음·이번 부팅에 신호를 보낸 VM)를 봅니다. 하나라도 **동료 신선도 창**(`XENOVA_RECOVERY_AGENT_PEER_FRESH` 기본 15초, `XENOVA_RECOVERY_APP_PEER_FRESH` 기본 5초) 안에 신호를 보냈으면 판정하고, 동료가 모두 조용하면 공통 경로를 의심해 보류합니다(`OBSERVATION_UNAVAILABLE`). 이 창은 손실 창보다 짧아야 합니다(손실 창 − 1주기 이하로 검증): 공통 경로가 끊기면 VM 마다 마지막 수신이 최대 한 주기 어긋나므로, 손실 창을 그대로 쓰면 늦게 받은 동료가 신선해 보여 먼저 받은 VM 을 개별 장애로 오판합니다. 동료는 이번 주기 관측의 domid·execution 과 같은 실행에서 받은 신호만 셉니다(재시작한 동료의 이전 실행 신호는 증거가 아님). Zephyr 동료는 현재 binding 의 앱 메시지 중 가장 최근 것을 봅니다(기능 건강은 두 앱 중 오래된 쪽). 동료가 없는 **단독 발행자**는 VM 장애와 공통 경로 장애를 구별할 수 없어 기본은 보류이고, 채널별 정책이 `trust` 일 때만 판정합니다(`XENOVA_RECOVERY_AGENT_SOLE_PUBLISHER`·`XENOVA_RECOVERY_APP_SOLE_PUBLISHER`, 둘 다 기본 `hold`). Linux VM 이 하나뿐인 보드에서 heartbeat 손실 복구를 보이려면 **agent 만** `trust` 로 엽니다. app 을 열면 주행 VM 이 하나만 남은 동안 공통 경로가 끊길 때 마지막 주행 VM 까지 force-restart 할 수 있습니다. crashed·absent 는 이 규칙과 무관합니다 |
 | 대상 불명 | capability 값이 boolean 이 아닌 템플릿의 Zephyr VM 은 앱 펌웨어인지 starter 인지 알 수 없으므로 UNKNOWN(건강 OBSERVATION_UNAVAILABLE). 신호를 받아 armed 되면 보통대로 |
 | armed 기록 손상 | 원본을 이동하지 않고 `armed.json.corrupt` 보존 사본을 확보한 뒤 `history_lost=true` 본 파일로 교체합니다. 저장 실패 때도 손상 원본 또는 격리 흔적으로 Worker 재시작 시 차단을 복원합니다. capability 선언도 armed 기록도 없는 Zephyr VM은 UNKNOWN(건강 OBSERVATION_UNAVAILABLE)이고, 실제 신호를 받으면 해당 VM은 armed되어 기존 규칙으로 판정합니다. 손상은 앱 사망이나 복구 허가가 아닙니다. 파일 삭제로 차단을 해제하지 않습니다 |
 | 장애 아님 | `paused`·`stopping` 은 UNKNOWN(사용자 조작·종료 진행) |
@@ -286,7 +322,7 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 
 건강 스냅샷은 VM 마다 `xenova/v1/recovery/health/{vm_id}`(type `vm.health`, QoS 1, retained)에 `{vm_id, ok, state, desired_state, xen_state, heartbeat_age_s, reason, manager_seq}` 로 내용이 바뀔 때만 냅니다. `state` 는 `HEALTHY`(신호 신선, `ok: true` 는 이때만) / `STARTING`(실행 중이지만 이번 부팅의 신호 전, 유예 중이라도 건강하다고 하지 않음) / `UNHEALTHY`(사유 있음, paused·stopping, 신호 끊김) / `STOPPED`(도메인 없고 의도가 running 아님) / `OBSERVATION_UNAVAILABLE`(구독 미승인 또는 승인 뒤 수신 증거 없음, armed 기록 손상·capability 값 오류로 대상 여부 불명, Worker 종료) 입니다. 내용이 같아도 `XENOVA_RECOVERY_HEALTH_REFRESH`(기본 15초)마다 다시 내고 payload 의 `lease_s`(3주기, 기본 45초)를 함께 보냅니다. **받는 쪽은 마지막 수신 뒤 `lease_s` 가 지나면 관측 불가로 봅니다.** retained 만 믿으면 Worker 가 죽어도 며칠 전 HEALTHY 가 현재로 읽히기 때문입니다. 구독 직후 브로커가 주는 retained 값(retain 플래그, 공용 클라이언트 `Message.retained`)은 임시값이라 `ok` 를 믿지 않고, Worker 가 다시 낸 실시간 값을 받은 뒤 확정합니다. 브로커는 retained 가 저장된 지 얼마나 됐는지 알려주지 않기 때문입니다. 끊긴 동안은 발행하지 않고(큐에 쌓지 않음), paho 가 반환값으로 알리는 실패도 실패로 다룹니다. `manager_seq` 는 내용이 바뀔 때만 오르고 재발행에서는 `heartbeat_age_s` 만 갱신됩니다. VM 이 등록에서 사라지면 빈 payload 로 retained 를 지우고(PUBACK 확인, 실패하면 플랫폼 관측 실패와 무관하게 다음 주기 재시도), Worker 가 정상 종료할 때는 남은 VM 전부를 `OBSERVATION_UNAVAILABLE` 로 바꿔 두며 PUBACK 까지 확인합니다(전체 5초 한도, 못 받으면 경고). `vms/{vm_id}/` 아래 토픽은 봉투 `vm_id` 와 토픽이 같아야 해서(MQTT 계약 2장) VM 이 아닌 발행자는 쓸 수 없어 복구 이벤트(MQTT-12)와 같은 `recovery/` 가지를 씁니다(MQTT-13, 계약 11.1).
 
-설정은 `XENOVA_RECOVERY_INTERVAL`(5), `XENOVA_RECOVERY_STATE_DIR`(/run/xenova/recovery), `XENOVA_RECOVERY_INTENT_REFRESH`(60), `XENOVA_RECOVERY_HEALTH_REFRESH`(15), `XENOVA_RECOVERY_HEARTBEAT_LOST`(30), `XENOVA_RECOVERY_APP_HEARTBEAT_LOST`(15), `XENOVA_RECOVERY_BOOT_GRACE`(90), `XENOVA_RECOVERY_ZEPHYR_BOOT_GRACE`(30), `XENOVA_RECOVERY_ABSENT_GRACE`(60), `XENOVA_RECOVERY_BROKER_HOST/PORT/USERNAME/PASSWORD`(127.0.0.1:1883, 계정 `dom0-server`), `XENOVA_RECOVERY_LOG_LEVEL` 이며, 플랫폼·xl 은 dom0-manager 와 같은 `XENOVA_*`(`XENOVA_DRIVER=platform` 필수)입니다.
+설정은 `XENOVA_RECOVERY_INTERVAL`(5), `XENOVA_RECOVERY_STATE_DIR`(/run/xenova/recovery), `XENOVA_RECOVERY_INTENT_REFRESH`(60), `XENOVA_RECOVERY_HEALTH_REFRESH`(15), `XENOVA_RECOVERY_HEARTBEAT_LOST`(30), `XENOVA_RECOVERY_APP_HEARTBEAT_LOST`(15), `XENOVA_RECOVERY_BOOT_GRACE`(90), `XENOVA_RECOVERY_ZEPHYR_BOOT_GRACE`(30), `XENOVA_RECOVERY_ABSENT_GRACE`(60), `XENOVA_RECOVERY_AGENT_SOLE_PUBLISHER`·`XENOVA_RECOVERY_APP_SOLE_PUBLISHER`(hold|trust, 기본 hold), `XENOVA_RECOVERY_AGENT_PEER_FRESH`(15)·`XENOVA_RECOVERY_APP_PEER_FRESH`(5), `XENOVA_RECOVERY_BROKER_HOST/PORT/USERNAME/PASSWORD`(127.0.0.1:1883, 계정 `dom0-server`), `XENOVA_RECOVERY_LOG_LEVEL` 이며, 플랫폼·xl 은 dom0-manager 와 같은 `XENOVA_*`(`XENOVA_DRIVER=platform` 필수)입니다. 단 HTTP 전용 값(`XENOVA_HOST`·`XENOVA_PORT`·`XENOVA_SERVICE_TOKEN`·`XENOVA_CONSOLE_ENABLED`·`XENOVA_CONSOLE_LOCK_DIR`)은 읽지 않으므로, 같은 env 파일에서 콘솔을 켜도 Worker 는 콘솔 검증(토큰 필수·로컬 dom0)에 걸리지 않습니다.
 
 Yocto의 `xenova-dom0-manager` 패키지는 HTTP 서비스와 Recovery Worker unit을 함께 설치·enable합니다.
 Manager·공용 `xenova_mqtt`·Paho는 Python site-packages에서 로드하며 `/opt` 사본을 사용하지 않습니다.
@@ -316,11 +352,12 @@ Xen을 관측하지 않는 의도 조회가 생기기 전까지 Worker는 60초 
 | --- | --- |
 | 하나의 복구 | VM 마다 열린 복구(`recovery_id`)는 하나. 같은 VM 의 새 판정은 열린 복구에 흡수. `recovery_id` 는 Worker 재시작 뒤에도 `XENOVA_RECOVERY_STATE_DIR/recoveries.json` 에서 이어 감 |
 | 저장 뒤 호출 | 시도(`recovery_attempt_id`·spec)를 원자적으로 저장한 뒤에만 `recover_once(execute=true)` 를 부름. 응답 유실·일시 거절(OPERATION_IN_PROGRESS·HOST_QUIESCING·BOOT_ADMISSION_REQUIRED·OBSERVATION_UNAVAILABLE)·Worker 재시작 뒤에는 `recovery-operation` 으로 같은 attempt 의 journal 을 먼저 보고, 없으면 **같은 spec 을 다시** 보냄. 새 attempt id 는 실패가 확정되고 backoff 가 끝났을 때만 |
-| mode | 도메인 없음 → `start-if-absent`(view 의 `observation_revision`). Linux 실행 중 → `graceful-restart`(정상 종료 실패 뒤 다음 시도를 `force-restart` 로 올리는 것은 `XENOVA_RECOVERY_ESCALATE_TO_FORCE=1` 일 때만. 기본은 끔: 실행 중인 VM 을 파괴하는 동작이라 운영자가 명시적으로 켠다). Zephyr·crashed → `force-restart`(플랫폼 per-VM 승인 없으면 RECOVERY_MODE_UNSUPPORTED 로 최종 실패) |
+| mode | 도메인 없음 → `start-if-absent`(view 의 `observation_revision`). Linux 실행 중 → `graceful-restart`(정상 종료 실패 뒤 다음 시도를 `force-restart` 로 올리는 것은 `XENOVA_RECOVERY_ESCALATE_TO_FORCE=1` 일 때만. 기본은 끔: 실행 중인 VM 을 파괴하는 동작이라 운영자가 명시적으로 켠다). Zephyr·crashed → `force-restart`(플랫폼 per-VM 승인 없으면 RECOVERY_MODE_UNSUPPORTED 로 최종 실패). **force 증거 게이트(S15P31E110-347)**: force 를 고르는 시도는 지금 실행에 대한 지금의 장애 증거가 있을 때만 실행합니다(판정 당시 사유·실행과 비교하지 않음: 판정은 장애 한 건에 한 번이라 바뀐 뒤 영구 보류가 됨). 감시기의 현재 건강이 의도를 읽은 UNHEALTHY 이고 증거가 force 를 정당화해야 합니다: DOMAIN_CRASHED 는 플랫폼 view 도 지금 crashed 여야 하며 최초 사유와 무관하게 인정(heartbeat 손실 뒤 crash 포함, Linux 도 이때 force), APP_HEARTBEAT_LOST 는 Zephyr 만(동료 채널 증거가 있어야 UNHEALTHY), graceful 실패 승격은 실패했던 그 실행이 지금도 돌고 최초 사유와 같은 증거일 때만(실패한 실행을 `graceful_failed_execution_id` 로 저장, 다른 실행에는 옛 실패를 쓰지 않음). force 여부 자체도 현재 view·실행으로 정합니다(Zephyr, 지금 crashed, 같은 실행의 graceful 실패). 실행 대조는 주행 VM 이면 binding execution_id 가 반드시 있고 view 와 같아야 하며, 주행이 아닌 VM 은 관측에 execution_id 가 없어 domid 로 대조합니다(Xen 은 한 host 부팅 안에서 domid 를 다시 쓰지 않음, 제한 정책). 주행 VM(drive config `vm_ids`)은 아래 "Gateway 보호" 로 이 실행의 PROTECTED 를 확인한 뒤에만 시도합니다(Gateway I/O 는 엔진 잠금 밖, 그 뒤 잠금 안에서 다시 확인). drive config 가 없으면 주행 VM 을 알 수 없으므로 Zephyr force 는 모두 보류합니다. 근거가 부족하면 attempt·이벤트 없이 `XENOVA_RECOVERY_TRANSIENT_RETRY` 마다 다시 확인합니다(그때마다 플랫폼 get 한 번). 보류 중에도 사용자 stop 은 취소, HEALTHY 는 재시작 없이 RECOVERED 로 닫힙니다 |
 | 시도 전 재확인 | 실행 슬롯을 얻은 **그 시점에** 플랫폼 `get` 으로 `REGISTERED`·`desired_state running`·`intent_applicable` 를 다시 읽고 `expected_*`(host_boot_id·generation·intent_revision·execution_id)와 deadline 을 채움. 큐에서 기다린 시간이 deadline 을 갉아먹지 않음. 아니면 취소 |
 | 성공 | **플랫폼이 이 시도로 새 Xen 실행을 관측하고 새 `execution_id` 와 함께 completed 를 돌려준 것**(계약 2.5). 생존 신호(heartbeat) 복귀는 감시기의 건강 스냅샷으로만 보고하고, 돌아오지 않는다고 다시 재시작하지 않음(브로커·에이전트 문제로 멀쩡한 VM 을 또 재시작하게 됨). 시도가 완료되기 전에 감시기가 `HEALTHY` 를 내면(사용자 조작·플랫폼 쪽 재시작·신호 복귀) 더 시도하지 않고 `RECOVERED` 로 닫고 `recovery.recovered` 를 냄(completed 아님). `STOPPED` 면 `recovery.cancelled`. 이미 재시도 실패를 낸 시도 뒤(backoff 중)라면 두 이벤트는 장애 단위라 `recovery_attempt_id`·`attempt_duration_ms` 가 null. completed 인데 새 `execution_id` 가 없으면 final failed(RECONCILE_REQUIRED) |
 | 결과를 모르는 시도 | 실행 중·응답 유실·일시 거절 뒤 재전달 대기·Worker 재시작 뒤 복원은 모두 EXECUTING 으로 두고 감시기의 `HEALTHY`·`STOPPED` 로 닫지 않음. 같은 attempt id 로 `recovery-operation`(journal)을 먼저 조회해 완료·실패를 받고, journal 에 없을 때만 지금 건강 상태를 본 뒤(건강하면 재시작하지 않음) 같은 spec 을 다시 보냄. 그 사이 사용자가 끄면 `cancel_requested` 로 저장해 두었다가 플랫폼이 완료했으면 완료로, 아니면 취소로 닫음 |
 | 실패·재시도 | XEN_EXECUTION_FAILED·DEADLINE_EXCEEDED 등은 시도 소비 → `XENOVA_RECOVERY_BACKOFF`(5,15,30초) 뒤 새 attempt id. `XENOVA_RECOVERY_MAX_ATTEMPTS`(3) 초과면 final failed. force 승격(켰을 때만)은 플랫폼이 "정상 종료 실패"를 명시한 코드(RECOVERY_MODE_UNSUPPORTED·DEADLINE_EXCEEDED·정지 대기 만료의 XEN_EXECUTION_FAILED)에서만. 끈 상태의 RECOVERY_MODE_UNSUPPORTED 는 final failed. TARGET_CHANGED·INTENT_MISMATCH 는 재시도하지 않고 감시기의 다음 판단(HEALTHY/STOPPED)을 `XENOVA_RECOVERY_VERIFY_TIMEOUT`(150초)까지 기다린 뒤에야 새 시도. RECONCILE_REQUIRED·IDEMPOTENCY_CONFLICT·정체 모를 예외는 운영자 몫이라 즉시 final failed(force 로 올리지 않음). VM_NOT_FOUND·사용자 stop 은 취소 |
+| Gateway 보호 (S15P31E110-346) | 주행 VM force 직전에 Gateway `purpose=protect` 로 그 실행의 출력을 철회하고 재선택을 막습니다(`recovery/protection.py`, 계약 [gateway-provider-v1](../../../docs/contracts/gateway-provider-v1.md) G1). Gateway `context()` 의 host·owner·generation 과 그 VM 의 현재 binding(실행·의도·lifecycle generation 이 플랫폼 view 와 같아야 함)으로 원 spec 을 만들고, 키(`g1:` 형식, 한 번만 발급)와 spec 을 `recoveries.json` 의 `protection` 에 **저장한 뒤에만** submit 합니다. 응답을 잃으면 같은 키·spec 으로 다시 보냅니다(새 키 0). 거절은 거절 하나로 새 키를 만들지 않습니다: 용량 부족(HISTORY_FULL·HISTORY_BYTES_RESERVED)·바쁨·저장 미확정·다른 보호가 대상을 쥠·모르는 코드는 같은 키를 보존하고 기다리고, 문맥 거절(TARGET_CHANGED·HOST_CHANGED·AUTHORITY_CHANGED)은 Gateway 문맥을 다시 읽어 원 spec 과 실제로 달라졌을 때만 그 키를 버립니다. 계약·설정 거절(REQUEST_WINDOW_EXPIRED·REQUEST_DEADLINE_OUTSIDE_WINDOW·HISTORY_POLICY_REQUIRED·INVALID_INPUT·TARGET_NOT_MANAGED 등)은 키·기한을 바꿔 우회하지 않고 복구를 `PROTECTION_UNAVAILABLE` 최종 실패로 닫습니다(IDEMPOTENCY_CONFLICT 도 최종 실패지만 보호가 있을 수 있어 정산 대상으로 남김). DEADLINE_EXCEEDED 로 끝난 키는 다음 차례에 현재 증거·view 를 다시 판단한 뒤에만 새 요청을 만들고, 복구당 보호 키 수(`protection_requests`)는 `XENOVA_RECOVERY_MAX_ATTEMPTS` 를 넘지 않습니다(넘으면 최종 실패). 응답은 원 spec 과 같은 대상·실행·의도·기한, `acceptance=durable`, `storage_uncertain=false`, `held`·`owner_excluded`·현재 host·대상 일치를 모두 확인합니다. PROTECTED 를 받은 뒤 플랫폼 view 를 다시 읽어 대상·의도·실행·현재 증거와 보호가 그 실행·의도·lifecycle generation 의 것인지 확인한 뒤에만 attempt 를 시작합니다. 다음 시도에서 같은 보호를 다시 쓸 때도 get 으로 지금 상태를 다시 봅니다. 보호를 더 쓰지 않게 되면 정산합니다: 새 실행 binding 이 보이면 finish(복구 완료·다른 경로의 재시작), 원 실행 그대로이고 취소·회복으로 닫혔으면 cancel. 실패로 닫힌 복구는 cancel 하지 않아 고장 난 실행의 재선택 차단을 유지합니다(새 binding 이 생기면 finish). 종결 문맥의 generation 은 그때의 `context()` 값이고 AUTHORITY_CHANGED 면 다시 관측합니다. 정산이 남은 기록은 닫혀도 정리하지 않고 Worker 재시작 뒤에도 이어 갑니다. 이전 host 부팅의 보호는 정산하지 않고 HISTORICAL 로 둡니다(Gateway 는 현재 host 보호만 활성으로 봄, 플랫폼 결정). Gateway 에 그 VM 의 binding 이 없으면(crashed·미합류) 보호를 보내지 않고 보류합니다. 보장 범위는 출력 철회와 재선택 차단이며 차량 물리 정지를 주장하지 않습니다. 설정: `XENOVA_RECOVERY_GATEWAY_SOCKET`(/run/xenova-gateway/control.sock), `XENOVA_RECOVERY_GATEWAY_CALL_BUDGET`(1초, 호출 한 번), `XENOVA_RECOVERY_GATEWAY_PROTECT_DEADLINE`(5초, 시도 기한 안으로 자름. Gateway history 정책의 `retry_ms` 이하). `xenova-gateway-client` 가 없으면 ERROR 를 남기고 주행 VM force 는 보류됩니다 |
 | 단일 실행 | 시작할 때 `XENOVA_RECOVERY_STATE_DIR/worker.lock` 에 non-blocking flock. 다른 Worker 가 쥐고 있으면 종료 코드 3 으로 끝나고 유닛의 `RestartPreventExitStatus=3` 이 재시작을 멈춤 |
 | 실행 스레드 | `recover_once` 는 플랫폼 잠금 안에서 deadline(`XENOVA_RECOVERY_ATTEMPT_DEADLINE` 110초, 상한 120)까지 막힐 수 있어 엔진의 실행 스레드(하나)에서 부름. 감시 루프·건강 발행은 막히지 않고, 관측이 실패한 주기에도 끝난 결과는 회수(`collect`) |
 | fail-safe | `recoveries.json`은 상태별 불변조건(EXECUTING의 원 attempt·spec·mode·시작 시각 등)까지 검증합니다. 손상 원본의 `.corrupt` 사본을 먼저 확보하고 차단 기록을 저장하며, 그 저장이 실패해도 원본/잔존 증거를 정상 최초 부재로 해석하지 않습니다. **이력 상실 시 복구 실행을 차단**하고 판정·건강 관측은 유지합니다. `XENOVA_RECOVERY_POLICY=none`도 실행하지 않습니다. pending 사건이 없는 닫힌 복구는 최근 20건만 보존합니다 |

@@ -5,6 +5,7 @@
  *   v2 rx_bytes_per_s(gauge), network.interface_up·network.carrier(boolean)
  */
 import type { MetricSample, MetricValue } from '../api/types';
+import { unsigned } from './networkRate';
 import { buildLabeledCounterSeries, type DiskIoCounter, type LabeledCounterSeries } from './vmMetrics';
 
 export const NET_RX_BYTES_METRIC = 'net_rx_bytes_total';
@@ -72,7 +73,7 @@ export function buildZephyrByteSeries(samples: readonly MetricSample[]): Network
     )
     .map((sample): ExactObservation => ({
       observedAt: sample.observed_at,
-      uptimeMs: parseUnsigned(sample.network?.observed_uptime_ms),
+      uptimeMs: unsigned(sample.network?.observed_uptime_ms),
       rx: exactCounter(sample, NET_RX_BYTES_METRIC),
       tx: exactCounter(sample, NET_TX_BYTES_METRIC),
     }));
@@ -127,14 +128,8 @@ function exactCounter(sample: MetricSample, name: string): ExactCounter | null {
     metric.labels?.iface ?? '',
     metric.labels?.counter_epoch ?? '',
   ].join('|');
-  const value = parseUnsigned(metric.counter_value);
+  const value = unsigned(metric.counter_value);
   return { key, value, reason: value == null ? displayReason(metric) : null };
-}
-
-/** uint64 십진 문자열만 받는다. 실제 0 은 "0" */
-export function parseUnsigned(value: string | null | undefined): bigint | null {
-  if (typeof value !== 'string' || !/^(0|[1-9]\d*)$/.test(value)) return null;
-  return BigInt(value);
 }
 
 /** Zephyr 직접 계측 RX 바이트 속도(rx_bytes_per_s) 시계열 */

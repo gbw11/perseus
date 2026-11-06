@@ -20,6 +20,7 @@ import {
   type Vm,
   type VmResources,
 } from '../api/types';
+import { mockBoardDown, setMockBoardDown } from './board';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
 import {
   mockKernelHeapSamples,
@@ -46,6 +47,7 @@ let mockPassword = MOCK_PASSWORD;
 
 /** 시험용: 처음 상태로 */
 export function resetMockState(): void {
+  setMockBoardDown(false);
   vms = initialVms();
   pinningByVm = initialPinning();
   tokenSeq = 0;
@@ -168,6 +170,13 @@ function validate(body: Partial<CreateVmRequest>): { field: string; reason: stri
   return errors;
 }
 
+/** mock 보드 끊김(board.ts): 보드에 묻는 API 는 실제 백엔드처럼 502 */
+const boardUnreachable = () =>
+  HttpResponse.json(
+    { code: 'VM_CONTROL_BAD_RESPONSE', message: 'VM 제어 서비스와의 연결 설정이 올바르지 않습니다.' },
+    { status: 502 },
+  );
+
 export const handlers = [
   // ---- 인증 ----
   http.post('*/api/v1/auth/signup', async ({ request }) => {
@@ -225,6 +234,7 @@ export const handlers = [
   http.get('*/api/v1/vms', async ({ request }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
+    if (mockBoardDown()) return boardUnreachable();
     return HttpResponse.json({
       items: vms.map(live),
       observed_at: new Date().toISOString(),
@@ -234,6 +244,7 @@ export const handlers = [
   http.get('*/api/v1/vms/:vmId', async ({ request, params }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
+    if (mockBoardDown()) return boardUnreachable();
     const vm = find(String(params.vmId));
     return vm ? HttpResponse.json(vm as unknown as JsonBodyType) : vmNotFound();
   }),
@@ -241,6 +252,7 @@ export const handlers = [
   http.get('*/api/v1/vms/:vmId/resources', async ({ request, params }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
+    if (mockBoardDown()) return boardUnreachable();
     const vm = find(String(params.vmId));
     return vm ? HttpResponse.json(resourcesOf(vm) as unknown as JsonBodyType) : vmNotFound();
   }),
@@ -520,7 +532,7 @@ export const handlers = [
       } as unknown as JsonBodyType);
     }
     const items = [
-      { pid: 412, name: 'message-board', cpu_percent: 4.2, rss_bytes: 48_234_496 },
+      { pid: 412, name: 'interaction', cpu_percent: 4.2, rss_bytes: 48_234_496 },
       { pid: 388, name: 'xenova-agent', cpu_percent: 1.1, rss_bytes: 21_495_808 },
       { pid: 1, name: 'systemd', cpu_percent: 0.2, rss_bytes: 11_010_048 },
       { pid: 233, name: 'systemd-journald', cpu_percent: 0.1, rss_bytes: 9_437_184 },
@@ -533,7 +545,6 @@ export const handlers = [
     ];
     return HttpResponse.json({
       vm_id: VM_IDS.interaction,
-      boot_id: 'mock-boot-interaction',
       observed_at: new Date().toISOString(),
       stale: false,
       items,
@@ -553,5 +564,21 @@ export const handlers = [
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
     return HttpResponse.json(mockZephyrThreads(String(params.vmId)) as unknown as JsonBodyType);
+  }),
+
+  http.get('*/api/v1/vms/:vmId/telemetry/heartbeat', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const known = Object.values(VM_IDS).some((id) => id === params.vmId);
+    return HttpResponse.json({
+      vm_id: params.vmId,
+      status: known ? 'FRESH' : 'UNKNOWN',
+      publisher_state: known ? 'running' : null,
+      last_collection_success_uptime_ms: known ? '12000' : null,
+      last_collection_success_age_ms: known ? 500 : null,
+      collection_failures_total: known ? 2 : null,
+      received_at: known ? new Date().toISOString() : null,
+      age_ms: known ? 0 : null,
+    });
   }),
 ];

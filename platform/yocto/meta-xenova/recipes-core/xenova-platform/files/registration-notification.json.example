@@ -1,6 +1,0 @@
-{
-  "schema_version": "1.0",
-  "endpoint": "https://registration.example.invalid/api/v1/vms/registrations",
-  "token_file": "/etc/xenova/registration-token.json",
-  "timeout_ms": 2000
-}

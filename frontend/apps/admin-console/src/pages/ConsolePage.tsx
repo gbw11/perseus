@@ -1,7 +1,6 @@
 import { StatusBadge } from '@xenova/ui';
 import { lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router';
-import { ApiError } from '../api/client';
 import { useVms } from '../api/queries';
 import { osLabel, roleOf, sortVms } from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
@@ -9,6 +8,7 @@ import { STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
 import { RuntimeLogsPanel } from '../console/RuntimeLogsPanel';
 import styles from './pages.module.css';
+import { LiveDataAlert } from '../layout/LiveDataAlert';
 
 /** xterm 이 무거워서 이 화면을 열 때만 불러온다 (platform -248 구현) */
 const ConsolePanel = lazy(() =>
@@ -40,11 +40,7 @@ export function ConsolePage() {
         </div>
       </header>
 
-      {vms.error && (
-        <p className={styles.error} role="alert">
-          {vms.error instanceof ApiError ? `${vms.error.message} (${vms.error.code})` : String(vms.error)}
-        </p>
-      )}
+      <LiveDataAlert />
       {vms.isPending && <p className={styles.dim}>불러오는 중…</p>}
 
       <div className={styles.picks} role="tablist" aria-label="콘솔을 열 VM">
@@ -76,7 +72,6 @@ export function ConsolePage() {
               </span>
               <span className={styles.eyebrow}>
                 {role?.short ?? '역할 미지정'} · {osLabel(vm)}
-                {vm.guest_kind === 'zephyr' ? ' · 로그 전용' : ''}
               </span>
             </button>
           );

@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from first_install_fixture import FILES, vm
+from first_install_fixture import vm
 from test_xenova_platform import record, fixture, domain, FakeXen
 from test_xenova_zephyr import bundle
 import xenova_zephyr as zephyr
@@ -74,6 +74,21 @@ class DomainReviewTest(unittest.TestCase):
              patch.object(vm.os, 'execvp') as console, redirect_stdout(self.output):
             vm.main(list(args))
         return console
+
+    def cli_error(self, *args, code='ARTIFACT_INVALID', message=None):
+        self.output.seek(0)
+        self.output.truncate()
+        with self.assertRaises(SystemExit) as failure:
+            self.cli(*args)
+        self.assertEqual(failure.exception.code, 4)
+        response = json.loads(self.output.getvalue())
+        self.assertFalse(response['ok'], response)
+        self.assertIsNone(response['data'])
+        error = response['error']
+        self.assertEqual(error['code'], code, response)
+        if message is not None:
+            self.assertIn(message, error['message'])
+        return error
 
     def add_linux(self):
         other = record('debian-dev')
@@ -143,8 +158,7 @@ class DomainReviewTest(unittest.TestCase):
         self.live(z)
         self.xen.omit_disks = True
         self.xen.rows.append(domain(record('debian-dev'), self.directory / 'root.raw', 2))
-        with self.assertRaisesRegex(vm.PlatformError, 'already attached'):
-            self.cli('start', self.linux['id'])
+        self.cli_error('start', self.linux['id'], message='already attached')
         self.assertFalse(any(c[:2] == ['xl', 'create'] for c in self.xen.calls))
 
     def test_main_unrelated_missing_and_corrupt_assets_do_not_block_target_actions(self):
@@ -179,23 +193,21 @@ class DomainReviewTest(unittest.TestCase):
                 if action != 'start':
                     self.live(self.linux)
                 self.cli(action, self.linux['id'])
-        with self.assertRaises(vm.PlatformError):
-            self.cli('start', z['id'])
+        self.cli_error('start', z['id'], message='firmware')
 
     def test_main_missing_unrelated_linux_disk_does_not_block_target(self):
         other, directory = self.add_linux()
         (directory / 'root.raw').unlink()
         self.cli('start', self.linux['id'])
         self.cli('stop', self.linux['id'])
-        with self.assertRaises(vm.PlatformError):
-            self.cli('start', other['id'])
+        self.cli_error('start', other['id'], message='root.raw')
 
     def test_main_target_boot_assets_required_for_start_config_reboot(self):
         (self.directory / 'Image').unlink()
         self.live(self.linux)
         for action in ('start', 'config', 'reboot'):
-            with self.subTest(action=action), self.assertRaises(vm.PlatformError):
-                self.cli(action, self.linux['id'])
+            with self.subTest(action=action):
+                self.cli_error(action, self.linux['id'], message='Image')
         self.assertFalse(any(c[:2] in (['xl', 'create'], ['xl', 'reboot'], ['xl', 'destroy']) for c in self.xen.calls))
 
     def test_main_broken_target_can_be_stopped_or_inspected_on_console(self):
@@ -213,8 +225,7 @@ class DomainReviewTest(unittest.TestCase):
         self.live(z)
         self.xen.omit_disks = True
         self.cli('console', z['id'])
-        with self.assertRaisesRegex(vm.PlatformError, 'explicit --force'):
-            self.cli('stop', z['id'])
+        self.cli_error('stop', z['id'], message='explicit --force')
         self.cli('stop', z['id'], '--force')
         self.assertFalse(self.xen.rows)
 
@@ -238,8 +249,7 @@ class DomainReviewTest(unittest.TestCase):
         self.live(self.linux, 1)
         self.live(z, 2)
         self.xen.omit_disks = True
-        with self.assertRaisesRegex(vm.PlatformError, 'explicit --force'):
-            self.cli('poweroff')
+        self.cli_error('poweroff', message='explicit --force')
         self.assertFalse(any(c[:2] in (['xl', 'shutdown'], ['xl', 'destroy']) for c in self.xen.calls))
         self.cli('poweroff', '--force')
         self.assertEqual(self.xen.calls[-1], ['systemctl', 'poweroff'])
@@ -251,35 +261,31 @@ class DomainReviewTest(unittest.TestCase):
         for field in ('uuid', 'name', 'mac', 'ipv4'):
             bad = {**other, field: self.linux[field]}
             metadata.write_text(json.dumps(bad))
-            with self.subTest(field=field), self.assertRaisesRegex(vm.PlatformError, 'duplicate'):
-                self.cli('stop', self.linux['id'])
+            with self.subTest(field=field):
+                self.cli_error('stop', self.linux['id'], message='duplicate')
         metadata.write_bytes(original)
         disk = directory / 'root.raw'
         disk.unlink()
         os.link(self.directory / 'root.raw', disk)
-        with self.assertRaisesRegex(vm.PlatformError, 'same writable disk'):
-            self.cli('stop', self.linux['id'])
+        self.cli_error('stop', self.linux['id'], message='same writable disk')
 
     def test_main_registry_only_rejects_unsafe_paths_and_template_disk_alias(self):
         other, directory = self.add_linux()
         disk = directory / 'root.raw'
         disk.unlink()
         disk.symlink_to(self.directory / 'root.raw')
-        with self.assertRaises(vm.PlatformError):
-            self.cli('stop', self.linux['id'])
+        self.cli_error('stop', self.linux['id'])
         disk.unlink()
         disk.write_bytes(b'own disk')
         template = self.base / 'templates' / other['template']
         template.mkdir(parents=True)
         os.link(disk, template / 'root.raw')
-        with self.assertRaisesRegex(vm.PlatformError, 'immutable template'):
-            self.cli('stop', self.linux['id'])
+        self.cli_error('stop', self.linux['id'], message='immutable template')
         (template / 'root.raw').unlink()
         registry = self.base / 'instances'
         registry.rename(self.base / 'actual-instances')
         registry.symlink_to(self.base / 'actual-instances', target_is_directory=True)
-        with self.assertRaises(vm.PlatformError):
-            self.cli('stop', self.linux['id'])
+        self.cli_error('stop', self.linux['id'])
 
     def test_main_status_reports_actual_states_and_unknown_app_readiness(self):
         states = {'r-----': 'running', '-b----': 'blocked', '--p---': 'paused',
@@ -291,14 +297,24 @@ class DomainReviewTest(unittest.TestCase):
                 self.live(self.linux, flags=flags)
                 self.output.seek(0); self.output.truncate()
                 self.cli('status')
-                row = json.loads(self.output.getvalue())['instances'][0]
+                response = json.loads(self.output.getvalue())
+                self.assertTrue(response['ok'], response)
+                row, = response['data']['vms']
                 self.assertEqual(row['xen_state'], expected)
-                self.assertEqual(row['xen_state_flags'], flags)
                 self.assertEqual(row['app_readiness'], 'unknown')
+                # Raw Xen flags are exposed by probe; status lists the normalized state.
+                self.output.seek(0); self.output.truncate()
+                self.cli('probe', self.linux['id'])
+                probe = json.loads(self.output.getvalue())
+                self.assertTrue(probe['ok'], probe)
+                self.assertEqual(probe['data']['observation']['xen_state_flags'], flags)
         self.xen.rows = []
         self.output.seek(0); self.output.truncate()
         self.cli('status')
-        self.assertEqual(json.loads(self.output.getvalue())['instances'][0]['xen_state'], 'stopped')
+        response = json.loads(self.output.getvalue())
+        self.assertTrue(response['ok'], response)
+        row, = response['data']['vms']
+        self.assertEqual(row['xen_state'], 'stopped')
 
     def test_existing_blocked_domain_is_healthy_without_duplicate_create(self):
         self.live(self.linux, flags='-b----')
@@ -311,22 +327,21 @@ class DomainReviewTest(unittest.TestCase):
                              ('---sc-', 'crashed'), ('-----d', 'dying'), ('------', 'unknown')):
             self.xen.rows = []
             self.live(self.linux, flags=flags)
-            with self.subTest(flags=flags), self.assertRaisesRegex(vm.PlatformError, state):
-                self.cli('start', self.linux['id'])
+            with self.subTest(flags=flags):
+                self.cli_error('start', self.linux['id'], message=state)
         self.assertFalse(any(c[:2] in (['xl', 'create'], ['xl', 'destroy'], ['xl', 'unpause']) for c in self.xen.calls))
 
     def test_autostart_main_preserves_blocked_and_failed_actual_states(self):
         other, directory = self.add_linux()
         self.live(self.linux, 1, '-b----')
         self.live(other, 2, '---sc-')
-        real_read = Path.read_text
-        def read(path, *args, **kwargs):
-            if path == Path('/etc/xenova/defaults.json'):
-                return (FILES / 'defaults.json').read_text()
-            return real_read(path, *args, **kwargs)
-        with patch.object(Path, 'read_text', read), self.assertRaisesRegex(vm.PlatformError, 'crashed'):
+        self.p.defaults_path = self.base / 'defaults.json'
+        self.p.defaults_path.write_text(json.dumps({'instances': [self.linux, other]}))
+        with self.assertRaises(SystemExit) as failure:
             self.cli('autostart')
+        self.assertEqual(failure.exception.code, 4)
         results = json.loads((self.p.runtime / 'autostart-results.json').read_text())
+        self.assertEqual(set(results), {self.linux['id'], other['id']})
         self.assertEqual(results[self.linux['id']]['result'], 'blocked')
         self.assertEqual(results[self.linux['id']]['xen_state'], 'blocked')
         self.assertEqual(results[other['id']]['result'], 'failed')
@@ -336,8 +351,8 @@ class DomainReviewTest(unittest.TestCase):
 
     def test_create_result_is_checked_for_paused_domain_without_recovery(self):
         self.xen.states[1] = '--p---'
-        with self.assertRaisesRegex(vm.PlatformError, 'paused'):
-            self.cli('start', self.linux['id'])
+        error = self.cli_error('start', self.linux['id'], code='RECONCILE_REQUIRED', message='paused')
+        self.assertEqual(error['details']['cause']['code'], 'XEN_EXECUTION_FAILED')
         self.assertEqual(len(self.xen.rows), 1)
         self.assertFalse(any(c[:2] in (['xl', 'destroy'], ['xl', 'unpause']) for c in self.xen.calls))
 
@@ -380,13 +395,11 @@ class DomainReviewTest(unittest.TestCase):
             self.xen.rows[0] = copy.deepcopy(self.xen.rows[0])
             self.xen.states[1] = '-b----'
         self.p.sleep = replace
-        with self.assertRaisesRegex(vm.PlatformError, 'incarnation') as failure:
-            self.cli('start', self.linux['id'])
+        error = self.cli_error('start', self.linux['id'], code='RECONCILE_REQUIRED', message='incarnation')
         # create 제출 뒤의 실패는 물리 효과를 취소한 것이 아니다. 원인과 소유
         # journal을 보존하고 같은 요청의 무조건 create 재전송을 막는다.
-        self.assertEqual(failure.exception.error['code'], 'RECONCILE_REQUIRED')
-        self.assertEqual(failure.exception.error['details']['cause']['code'], 'XEN_EXECUTION_FAILED')
-        self.assertTrue(failure.exception.error['details']['accepted'])
+        self.assertEqual(error['details']['cause']['code'], 'XEN_EXECUTION_FAILED')
+        self.assertTrue(error['details']['accepted'])
         self.assertEqual(self.p.execution().run_record(self.linux)['phase'], 'launching')
         self.assertEqual(self.p.execution().requests()[-1]['phase'], 'uncertain')
         self.assertEqual(len([c for c in self.xen.calls if c[:2] == ['xl', 'create']]), 1)
@@ -399,10 +412,8 @@ class DomainReviewTest(unittest.TestCase):
             now[0] += seconds
             self.xen.states[1] = '---sc-'
         self.p.sleep = crash
-        with self.assertRaisesRegex(vm.PlatformError, 'crashed') as failure:
-            self.cli('start', self.linux['id'])
-        self.assertEqual(failure.exception.error['code'], 'RECONCILE_REQUIRED')
-        self.assertEqual(failure.exception.error['details']['cause']['code'], 'XEN_EXECUTION_FAILED')
+        error = self.cli_error('start', self.linux['id'], code='RECONCILE_REQUIRED', message='crashed')
+        self.assertEqual(error['details']['cause']['code'], 'XEN_EXECUTION_FAILED')
         self.assertEqual(self.p.execution().run_record(self.linux)['phase'], 'launching')
         self.assertEqual(self.p.execution().requests()[-1]['phase'], 'uncertain')
         self.assertEqual(len([c for c in self.xen.calls if c[:2] == ['xl', 'create']]), 1)

@@ -3,3 +3,5 @@ dist
 coverage
 package-lock.json
 **/public/mockServiceWorker.js
+# Provider wire fixtures retain their original bytes and provenance hashes.
+apps/admin-console/src/domain/fixtures/manualRam/*.json

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import socket
@@ -16,6 +17,11 @@ from contextlib import redirect_stdout
 import unittest
 from unittest.mock import patch
 
+from first_install_fixture import ROOT
+
+# Exercise the checked-out broker and Agent rather than host-installed copies.
+sys.path[:0] = [str(ROOT / 'platform/deploy/mosquitto/scripts'),
+                str(ROOT / 'platform/services/vm-agent/agent')]
 import xenova_broker as broker
 import xenova_provisioning as provision
 from xenova_execution import ExecutionError

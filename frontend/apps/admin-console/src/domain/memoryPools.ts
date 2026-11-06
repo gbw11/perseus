@@ -55,7 +55,7 @@ export interface MemoryPoolSeries {
 
 interface CounterSnapshot {
   observedAt: string;
-  bootId: string | null;
+  identity: string | null;
   rxPackets: number | null;
   txPackets: number | null;
 }
@@ -72,8 +72,6 @@ const EMPTY_POOL: PoolSnapshot = {
 export function buildMemoryPoolSeries(samples: MetricSample[]): MemoryPoolSeries {
   const ordered = [...samples].sort((a, b) => Date.parse(a.observed_at) - Date.parse(b.observed_at));
   const usage: PoolUsagePoint[] = [];
-  const packetRates: PacketRatePoint[] = [];
-  const counters: CounterSnapshot[] = [];
   let rx = EMPTY_POOL;
   let tx = EMPTY_POOL;
   let lastObservedAt: string | null = null;
@@ -90,22 +88,35 @@ export function buildMemoryPoolSeries(samples: MetricSample[]): MemoryPoolSeries
       tx = poolOf(sample.values, 'net_tx_data');
       usage.push({ observedAt: sample.observed_at, rxPercent: rx.usagePercent, txPercent: tx.usagePercent });
     }
-    if (hasCounterMetric) counters.push(counterSnapshot(sample));
   }
 
+  return { rx, tx, usage, packetRates: buildPacketRateSeries(samples), lastObservedAt };
+}
+
+/** 네트워크 원 표본의 packets/s. 메모리 수집 문맥 없이도 동작하며 신원·카운터 경계를 넘지 않는다. */
+export function buildPacketRateSeries(samples: readonly MetricSample[]): PacketRatePoint[] {
+  const counters = samples
+    .filter(
+      (sample) =>
+        Number.isFinite(Date.parse(sample.observed_at)) &&
+        sample.values.some((value) => value.name.startsWith('network.netfront.')),
+    )
+    .map(counterSnapshot)
+    .sort((a, b) => Date.parse(a.observedAt) - Date.parse(b.observedAt));
+  const packetRates: PacketRatePoint[] = [];
   for (let index = 1; index < counters.length; index += 1) {
     const previous = counters[index - 1]!;
     const current = counters[index]!;
     const seconds = elapsedSeconds(previous.observedAt, current.observedAt);
-    const sameBoot = !previous.bootId || !current.bootId || previous.bootId === current.bootId;
+    const sameSource = current.identity != null && current.identity === previous.identity;
     packetRates.push({
       observedAt: current.observedAt,
-      rxPacketsPerSecond: sameBoot ? rate(previous.rxPackets, current.rxPackets, seconds) : null,
-      txPacketsPerSecond: sameBoot ? rate(previous.txPackets, current.txPackets, seconds) : null,
+      rxPacketsPerSecond: sameSource ? rate(previous.rxPackets, current.rxPackets, seconds) : null,
+      txPacketsPerSecond: sameSource ? rate(previous.txPackets, current.txPackets, seconds) : null,
     });
   }
 
-  return { rx, tx, usage, packetRates, lastObservedAt };
+  return packetRates;
 }
 
 export function bytesToKiB(bytes: number): number {
@@ -145,12 +156,34 @@ function poolOf(values: MetricValue[], region: PoolRegion): PoolSnapshot {
 }
 
 function counterSnapshot(sample: MetricSample): CounterSnapshot {
+  const labels = [MEMORY_POOL_METRICS.rxPackets, MEMORY_POOL_METRICS.txPackets].map((name) => {
+    const label = sample.values.find((value) => value.name === name)?.labels;
+    return [label?.interface ?? label?.iface ?? null, label?.counter_epoch ?? null];
+  });
+  const publisher = sample.telemetry?.publisher_instance_id ?? sample.network?.publisher_instance_id ?? null;
   return {
     observedAt: sample.observed_at,
-    bootId: sample.boot_id ?? null,
-    rxPackets: metricNumber(sample.values, MEMORY_POOL_METRICS.rxPackets),
-    txPackets: metricNumber(sample.values, MEMORY_POOL_METRICS.txPackets),
+    identity:
+      sample.vm_id && sample.boot_id
+        ? JSON.stringify([sample.vm_id, sample.boot_id, publisher, labels])
+        : null,
+    rxPackets: packetCount(sample.values, MEMORY_POOL_METRICS.rxPackets),
+    txPackets: packetCount(sample.values, MEMORY_POOL_METRICS.txPackets),
   };
+}
+
+function packetCount(values: MetricValue[], name: string): number | null {
+  const metric = values.find((value) => value.name === name);
+  if (
+    !metric ||
+    metric.unavailable_reason ||
+    (metric.status != null && metric.status !== 'ok') ||
+    (metric.source_rc != null && metric.source_rc !== 0)
+  )
+    return null;
+  const raw = metric.raw_value ?? metric.counter_value;
+  const count = raw == null ? metric.value : /^(0|[1-9][0-9]*)$/.test(raw) ? Number(raw) : null;
+  return count != null && Number.isSafeInteger(count) && count >= 0 ? count : null;
 }
 
 function metricNumber(values: MetricValue[], name: string, region?: PoolRegion): number | null {

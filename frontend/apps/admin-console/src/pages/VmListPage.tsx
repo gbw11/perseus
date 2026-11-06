@@ -1,7 +1,6 @@
 import { Button, Card, Modal, StatusBadge, useToast } from '@xenova/ui';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router';
-import { ApiError } from '../api/client';
 import { useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
 import { osLabel, sortVms } from '../domain/roles';
@@ -15,6 +14,7 @@ import {
   matchesVmCreation,
   usePendingVmCreations,
 } from './vmCreationProgress';
+import { LiveDataAlert } from '../layout/LiveDataAlert';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
 
@@ -84,11 +84,7 @@ export function VmListPage() {
         <SummaryItem label="ALLOCATED MEMORY" value={`${memory} MiB`} />
       </section>
 
-      {vms.error && (
-        <div className={styles.statePanel} role="alert">
-          {vms.error instanceof ApiError ? `${vms.error.message} (${vms.error.code})` : String(vms.error)}
-        </div>
-      )}
+      <LiveDataAlert />
       {vms.isPending && <div className={styles.statePanel}>VM 목록을 불러오는 중입니다…</div>}
       {vms.data && items.length === 0 && (
         <div className={styles.controlEmpty}>
@@ -112,7 +108,6 @@ export function VmListPage() {
       <div className={styles.controlGrid}>
         {items.map((vm, index) => {
           const accent = VM_ACCENTS[index % VM_ACCENTS.length];
-          const zephyr = vm.guest_kind === 'zephyr';
           const operation = vmOperations.operations[vm.vm_id];
           const operationPending = operation?.status === 'pending';
           const creationPending = isVmCreationPending(vm, pendingCreations);
@@ -164,8 +159,8 @@ export function VmListPage() {
                     </dd>
                   </div>
                   <div className={styles.controlFactWide}>
-                    <dt>연결</dt>
-                    <dd>{zephyr ? 'vchan · dom0 중계' : (vm.ipv4 ?? 'IP 할당 대기')}</dd>
+                    <dt>예약 IPv4</dt>
+                    <dd>{vm.assigned_ipv4 ?? '—'}</dd>
                   </div>
                 </dl>
 

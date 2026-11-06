@@ -38,7 +38,8 @@ public class VmController {
     @GetMapping
     public VmListResponse list() {
         Instant now = clock.instant();
-        return new VmListResponse(vmService.list().stream().map(vm -> withAgentStatus(vm, now)).toList(), now);
+        VmService.VmList list = vmService.listObserved();
+        return new VmListResponse(list.vms().stream().map(vm -> withAgentStatus(vm, now)).toList(), list.observedAt());
     }
 
     // 201 for a new VM, 200 when the same name and spec were already created (retry).

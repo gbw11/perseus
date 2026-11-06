@@ -11,6 +11,7 @@ import { ResourceAdjustmentPanel } from './ResourceAdjustmentPanel';
 import { VcpuPinningPanel } from './VcpuPinningPanel';
 import { VmOperationNotice } from './VmOperationProgress';
 import { useVmOperationProgress } from './useVmOperationProgress';
+import { LiveDataAlert } from '../layout/LiveDataAlert';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
 
@@ -78,7 +79,8 @@ export function ControlVmDetailPage() {
       </header>
 
       {vm.isPending && <div className={styles.statePanel}>VM 관리 정보를 불러오는 중입니다…</div>}
-      {vm.error && (
+      <LiveDataAlert />
+      {vm.error instanceof ApiError && vm.error.status === 404 && (
         <div className={styles.statePanel} role="alert">
           {vm.error instanceof ApiError ? `${vm.error.message} (${vm.error.code})` : String(vm.error)}
         </div>
@@ -100,14 +102,8 @@ export function ControlVmDetailPage() {
                   <strong>{osLabel(vm.data)}</strong>
                 </div>
                 <div className={styles.identityFact}>
-                  <span className={styles.identityLabel}>연결</span>
-                  <span
-                    className={styles.identityStatus}
-                    data-tone={vm.data.guest_kind === 'zephyr' || vm.data.ipv4 ? 'ok' : 'waiting'}
-                  >
-                    <i aria-hidden="true" />
-                    {vm.data.guest_kind === 'zephyr' ? 'vchan · dom0 중계' : (vm.data.ipv4 ?? 'IP 할당 대기')}
-                  </span>
+                  <span className={styles.identityLabel}>예약 IPv4</span>
+                  <strong>{vm.data.assigned_ipv4 ?? '—'}</strong>
                 </div>
                 <div className={styles.identityFact}>
                   <span className={styles.identityLabel}>템플릿</span>

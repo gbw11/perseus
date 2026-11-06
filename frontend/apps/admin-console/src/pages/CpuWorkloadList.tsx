@@ -62,7 +62,7 @@ function ProcessList({ vm }: { vm: Vm }) {
 }
 
 function ThreadList({ vm }: { vm: Vm }) {
-  const threads = useThreads(vm.vm_id, true);
+  const threads = useThreads(vm.vm_id);
   const list = topThreads(threads.data);
   const notes = threadCollectionNotes(threads.data);
   const windowMs = threads.data?.window_ms;

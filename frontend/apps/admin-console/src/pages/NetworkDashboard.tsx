@@ -1,9 +1,9 @@
 import { Card, StatusBadge, type Health } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import type { DriveState } from '../api/drive';
-import { useMetrics } from '../api/queries';
+import { LIVE_POLL_MS, useMetrics } from '../api/queries';
 import type { AgentStatus, Vm } from '../api/types';
-import { buildMemoryPoolSeries, bytesToKiB, poolLevel, type PoolSnapshot } from '../domain/memoryPools';
+import { buildPacketRateSeries, bytesToKiB, poolLevel } from '../domain/memoryPools';
 import {
   buildLinuxNetworkSeries,
   buildRxByteRateSeries,
@@ -15,10 +15,13 @@ import {
   ZEPHYR_INTERFACE_UP_METRIC,
   type InterfaceFlag,
 } from '../domain/networkMetrics';
+import { networkPoolView, type NetworkPool } from '../domain/networkPools';
 import { osLabel, roleOf, sortVms, UNASSIGNED_COLOR } from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import type { DiskIoCounter } from '../domain/vmMetrics';
 import { AGENT_LABEL } from '../format';
+import { LiveDataAlert } from '../layout/LiveDataAlert';
+import { useNow } from '../useNow';
 import { MetricErrorNotice } from './MetricErrorNotice';
 import styles from './pages.module.css';
 import { NetTable, RxTxChart, type NetCell, type NetRow } from './resourceCharts';
@@ -65,6 +68,7 @@ export function NetworkDashboard({
       </header>
 
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
+      <LiveDataAlert />
 
       <div className={styles.memoryVmGrid}>
         {vms.map((vm) =>
@@ -81,15 +85,17 @@ export function NetworkDashboard({
 
 function ZephyrNetworkPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
-  const metrics = useMetrics(vm.vm_id, true, 1, 2000);
+  const metrics = useMetrics(vm.vm_id, true, 1, LIVE_POLL_MS, { keepLastData: true });
+  const now = useNow();
   const samples = metrics.data?.items ?? [];
-  const pools = buildMemoryPoolSeries(samples);
+  // Pool 은 Memory 탭(origin/frontend)과 같은 관측 문맥 규칙, 패킷은 팀원 쪽 buildPacketRateSeries
+  const pools = networkPoolView(samples, now);
+  const packets = buildPacketRateSeries(samples).at(-1);
   const bytes = buildZephyrByteSeries(samples);
   const rxRate = buildRxByteRateSeries(samples);
   // RX 속도는 counter_value 차분을 우선하고, 못 구할 때(첫 표본·세대 바뀜 등)만 플랫폼 계측값을 쓴다
   const rx = withRateFallback(bytes.rx, rxRate.current);
   const ratePoints = mergeRxRateFallback(bytes.rates, rxRate.points);
-  const packets = pools.packetRates.at(-1);
   const interfaceUp = interfaceFlagOf(samples, ZEPHYR_INTERFACE_UP_METRIC);
   const carrier = interfaceFlagOf(samples, ZEPHYR_CARRIER_METRIC);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
@@ -115,7 +121,9 @@ function ZephyrNetworkPanel({ vm, drive }: { vm: Vm; drive: DriveState | null })
         </span>
       }
     >
-      {metrics.error && <MetricErrorNotice />}
+      {metrics.error && (
+        <MetricErrorNotice detail="최근 관측값·이력을 표시하며, Pool 만료 여부는 영역별로 구분합니다." />
+      )}
 
       <NetTable
         label={`${vm.name} 네트워크 수치`}
@@ -166,7 +174,7 @@ function ZephyrNetworkPanel({ vm, drive }: { vm: Vm; drive: DriveState | null })
 
 function LinuxNetworkPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
-  const metrics = useMetrics(vm.vm_id, true);
+  const metrics = useMetrics(vm.vm_id, true, 5, LIVE_POLL_MS, { keepLastData: true });
   const series = buildLinuxNetworkSeries(metrics.data?.items ?? []);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
   const agent = vm.agent_status ?? 'UNKNOWN';
@@ -244,13 +252,17 @@ function packetCell(value: number | null | undefined): NetCell {
     : { number: value.toLocaleString('ko-KR', { maximumFractionDigits: 1 }), unit: '/s' };
 }
 
-/** Pool: % 를 크게, 아래 작게 "사용 / 전체 KiB". 80% 이상 주의, 95% 이상 위험 */
-function poolCell(pool: PoolSnapshot): NetCell {
+/**
+ * Pool: % 를 크게, 아래 작게 "사용 / 전체 KiB". 80% 이상 주의, 95% 이상 위험.
+ * 관측이 만료됐으면 최근 관측값 앞에 "관측 만료" 를 붙인다 (Memory 탭 규칙과 같음)
+ */
+function poolCell(pool: NetworkPool): NetCell {
   if (pool.state !== 'ok') return { number: null, note: pool.reason };
+  const amount = `${kibNumber(pool.usedBytes!)} / ${formatKiB(pool.capacityBytes)}`;
   return {
     number: pool.usagePercent!.toFixed(1),
     unit: '%',
-    note: `${kibNumber(pool.usedBytes!)} / ${formatKiB(pool.capacityBytes)}`,
+    note: pool.expired ? `관측 만료 · ${amount}` : amount,
     level: poolLevel(pool.usagePercent),
   };
 }

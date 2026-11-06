@@ -137,7 +137,7 @@ export function RxTxChart({
     <section className={styles.memoryChartBlock}>
       <header>
         <strong>{title}</strong>
-        <span className={styles.memoryLegend}>
+        <span className={styles.memoryLegend} data-values="">
           <span data-tone="rx">
             <i />
             RX <b>{format(latestValue(points, 'rx'))}</b>

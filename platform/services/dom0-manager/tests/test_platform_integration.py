@@ -267,6 +267,52 @@ def test_real_keyed_stop_is_accepted_while_a_long_operation_holds_the_execution_
     assert len(shutdowns(board)) == 1
 
 
+def reboots(board):
+    return [call for call in board.xen.calls if call[:2] in (["xl", "reboot"], ["xl", "destroy"], ["xl", "shutdown"])]
+
+
+@pytest.mark.parametrize("flags", ["--p---", "---sc-", "---s--", "-----d"])  # paused · crashed · shutdown · dying
+@pytest.mark.parametrize("key", [None, "reboot-not-running"])
+def test_real_reboot_of_a_vm_that_is_not_running_is_409_with_or_without_a_key(client, board, flags, key):
+    """실제 Manager reboot 는 도메인 존재만 본다. 키 유무와 관계없이 실행 중이 아니면 409 이고 물리 명령을 내지 않는다."""
+    board.xen.states = {1: flags}
+    headers = {"Idempotency-Key": key} if key else {}
+    response = client.post(f"/api/v1/vms/{UBUNTU}/reboot", headers=headers)
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == "InvalidState"
+    assert reboots(board) == []
+    assert list((board.data / "control-requests").glob("*.json")) == []  # 의도 수락 기록도 없다
+
+
+def test_real_keyed_reboot_starts_a_new_execution_and_replays_without_repeating(client, board):
+    debian = board.records["debian-dev"]  # 플랫폼이 시작한(관리하는) 실행에서 재부팅한다
+    body = {"vm_id": str(DEBIAN), "name": "debian", "template_id": TEMPLATE_ID, "template_version": TEMPLATE_VERSION,
+            "vcpus": debian["vcpus"], "memory_mib": debian["memory_mib"]}
+    assert client.post("/api/v1/vms", json=body).status_code == 201
+    before = board.manager.call("get", {"vm_id": str(DEBIAN)})["data"]["vm"]
+    assert before["execution_id"]
+    first = client.post(f"/api/v1/vms/{DEBIAN}/reboot", headers={"Idempotency-Key": "reboot-debian-1"})
+    assert first.status_code == 200, first.text
+    original = first.json()
+    assert (original["action"], original["status"], original["accepted"]) == ("reboot", "completed", True) and original["operation_id"]
+    assert [c[:2] for c in reboots(board)] == [["xl", "reboot"]]
+    after = board.manager.call("get", {"vm_id": str(DEBIAN)})["data"]["vm"]
+    assert after["domid"] is not None and after["execution_id"] and after["execution_id"] != before["execution_id"]  # 새 실행
+
+    again = client.post(f"/api/v1/vms/{DEBIAN}/reboot", headers={"Idempotency-Key": "reboot-debian-1"})
+    assert again.status_code == 200, again.text
+    assert again.json()["operation_id"] == original["operation_id"] and len(reboots(board)) == 1  # 재전달은 물리 동작을 반복하지 않는다
+    found = lookup(client, DEBIAN, "reboot-debian-1")
+    assert found.status_code == 200 and (found.json()["action"], found.json()["operation_id"]) == ("reboot", original["operation_id"])
+
+
+def test_real_reboot_of_a_stopped_or_unregistered_vm(client, board):
+    response = client.post(f"/api/v1/vms/{DEBIAN}/reboot", headers={"Idempotency-Key": "reboot-debian"})  # 등록됐지만 꺼짐
+    assert response.status_code == 409, response.text
+    assert client.post(f"/api/v1/vms/{NEW_VM}/reboot").status_code == 404
+    assert reboots(board) == []
+
+
 def test_real_budget_exhausted_submits_nothing(board):
     manager = SerializedManager(board.manager)
     driver = PlatformDriver(manager, Xl(FakeRunner({("xl", "info"): XL_INFO})))
@@ -276,6 +322,48 @@ def test_real_budget_exhausted_submits_nothing(board):
     assert response.status_code == 504, response.text
     assert shutdowns(board) == []
     assert list((board.data / "control-requests").glob("*.json")) == []  # 의도 수락 기록도 없다
+
+def test_real_reads_do_not_wait_for_a_long_mutation_with_read_fork(board):
+    """S15P31E110-333: 같은 프로세스의 긴 변경이 공유 Manager 직렬화와 플랫폼 실행 잠금을 쥔 동안, read_fork 면 목록·상세는
+    실제 Manager.fork() 로 200 이고 남은 예산을 budget_ms·timeout_ms 로 받는다. 변경(키 없는 stop)은 직렬화 대기 끝에 503 이다."""
+    from xenova_runtime import operation_lock
+
+    seen = []
+    original_fork = board.manager.fork
+
+    def fork():
+        forked = original_fork()
+        call = forked.call
+
+        def recorded(action, spec=None, *, execute=False, idempotency_key=None, request_id=None, budget_ms=None):
+            seen.append((action, budget_ms, (spec or {}).get("timeout_ms")))
+            return call(action, spec, execute=execute, idempotency_key=idempotency_key, request_id=request_id, budget_ms=budget_ms)
+
+        forked.call = recorded
+        return forked
+
+    board.manager.fork = fork
+    manager = SerializedManager(board.manager, busy_timeout_s=0.2, read_fork=True)
+    driver = PlatformDriver(manager, Xl(FakeRunner({("xl", "info"): XL_INFO})))
+    client = TestClient(create_app(Settings(driver="platform", log_level="WARNING", response_reserve_s=0), driver=driver,
+                                   provisioner=PlatformProvisioner(manager)))
+    budget = {"X-Request-Budget-Ms": "4000"}
+    assert manager._lock.acquire(timeout=1)  # 긴 create 가 공유 Manager 를 쥐고 있다
+    try:
+        with operation_lock(board.manager.p.runtime):  # 플랫폼 실행 잠금도 쥐고 있다
+            listed = client.get("/api/v1/vms", headers=budget)
+            assert listed.status_code == 200, listed.text
+            assert str(UBUNTU) in {vm["vm_id"] for vm in listed.json()}
+            single = client.get(f"/api/v1/vms/{UBUNTU}", headers=budget)
+            assert single.status_code == 200, single.text
+            stopped = client.post(f"/api/v1/vms/{DEBIAN}/stop")
+            assert stopped.status_code == 503 and stopped.json()["platform_code"] == "OPERATION_IN_PROGRESS"
+    finally:
+        manager._lock.release()
+    assert shutdowns(board) == []
+    assert [action for action, _, _ in seen] == ["list", "get"]  # 변경은 fork 로 가지 않았다
+    assert all(budget_ms is not None and 0 < budget_ms <= 4000 and timeout_ms == budget_ms for _, budget_ms, timeout_ms in seen)
+
 
 @pytest.mark.parametrize("name", ["개발용 Ubuntu", "\u00a0VM", "VM\u3000", "\u2003주행 A VM\u202f"])
 def test_spring_dto_name_uses_actual_manager_metadata_preparer(client, board, name):

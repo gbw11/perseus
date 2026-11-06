@@ -1,18 +1,19 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* Telemetry 2.0 wire model. No RTOS, sockets, allocation or health inference. */
+/* Telemetry 2.1 wire model. No RTOS, sockets, allocation or health inference. */
 #ifndef XENOVA_TELEMETRY_CORE_H
 #define XENOVA_TELEMETRY_CORE_H
 #include <xenova/diagnostics_core.h>
 #include <xenova/resources.h>
 
 #define XT_PAYLOAD_MAX 4096
+#define XT_NETWORK_V1_MAX 1024
 #define XT_EVENT_CAPACITY 32
 #define XT_THREAD_MAX 32
 #define XT_UUID_BYTES 37
 #define XT_STREAMS 5
 enum xt_kind { XT_INVENTORY, XT_HEARTBEAT, XT_MEMORY, XT_NETWORK,
 	XT_PROGRESS, XT_INTERVAL, XT_JITTER, XT_LATENESS, XT_ELAPSED,
-	XT_PUBLISHER, XT_EVENT, XT_THREADS, XT_HISTORY, XT_CPU, XT_POOLS };
+	XT_PUBLISHER, XT_EVENT, XT_THREADS, XT_HISTORY, XT_CPU, XT_POOLS, XT_NETWORK_V1 };
 
 struct xt_identity {
 	char vm_id[37], boot_id[37], publisher_id[37];
@@ -66,7 +67,7 @@ struct xt_publisher {
 	struct xt_inventory inventory;
 	struct xt_counters counters;
 	struct xt_utc utc;
-	uint64_t sequence[XT_STREAMS], sample_sequence;
+	uint64_t sequence[XT_STREAMS], sample_sequence, network_v1_sequence;
 	char task_epoch[37];
 	uint64_t task_origin;
 	bool task_seen;

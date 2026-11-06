@@ -8,7 +8,6 @@ import {
   displayReason,
   interfaceFlagOf,
   mergeRxRateFallback,
-  parseUnsigned,
   withRateFallback,
   ZEPHYR_INTERFACE_UP_METRIC,
 } from './networkMetrics';
@@ -173,13 +172,11 @@ describe('Zephyr RX/TX 바이트 (counter_value)', () => {
     expect(buildZephyrByteSeries([]).rx.reason).toBe('데이터 없음');
   });
 
-  it('uint64 십진 문자열만 받는다', () => {
-    expect(parseUnsigned('0')).toBe(0n);
-    expect(parseUnsigned('18446744073709551615')).toBe(18446744073709551615n);
-    expect(parseUnsigned('-1')).toBeNull();
-    expect(parseUnsigned('01')).toBeNull();
-    expect(parseUnsigned('1.5')).toBeNull();
-    expect(parseUnsigned(null)).toBeNull();
+  it('uint64 범위를 넘거나 십진 정수가 아닌 counter_value 는 읽지 않는다 (networkRate.unsigned)', () => {
+    const at = '2026-11-04T01:00:00.000Z';
+    expect(buildZephyrByteSeries([zephyr(at, '18446744073709551616', '0')]).rx.totalBytes).toBeNull();
+    expect(buildZephyrByteSeries([zephyr(at, '01', '0')]).rx.totalBytes).toBeNull();
+    expect(buildZephyrByteSeries([zephyr(at, '0', '0')]).rx.totalBytes).toBe(0);
   });
 });
 

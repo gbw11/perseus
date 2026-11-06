@@ -16,6 +16,10 @@ import java.util.List;
         indexes = @Index(name = "idx_vm_metric_samples_vm_observed", columnList = "vm_id, observed_at"))
 public class MetricSample {
 
+    public static final String ZEPHYR_TELEMETRY = "zephyr_telemetry";
+    public static final String LINUX_TELEMETRY = "linux_telemetry";
+    public static final String VM_TELEMETRY = "vm_telemetry";
+
     @Id
     @Column(name = "sample_id", length = 36)
     private String sampleId;
@@ -41,7 +45,7 @@ public class MetricSample {
     @Lob
     @Convert(converter = MetricValuesConverter.class)
     @Column(name = "metric_values", columnDefinition = "longtext")
-    private List<MetricValue> values;
+    private MetricSampleData data;
 
     protected MetricSample() {
     }
@@ -55,6 +59,13 @@ public class MetricSample {
             Instant receivedAt,
             Integer windowMs,
             List<MetricValue> values) {
+        this(sampleId, vmId, bootId, source, observedAt, receivedAt, windowMs,
+                new MetricSampleData(values, null, null));
+    }
+
+    public MetricSample(
+            String sampleId, String vmId, String bootId, String source, Instant observedAt,
+            Instant receivedAt, Integer windowMs, MetricSampleData data) {
         this.sampleId = sampleId;
         this.vmId = vmId;
         this.bootId = bootId;
@@ -62,7 +73,7 @@ public class MetricSample {
         this.observedAt = observedAt;
         this.receivedAt = receivedAt;
         this.windowMs = windowMs;
-        this.values = values;
+        this.data = data;
     }
 
     public String getSampleId() {
@@ -94,6 +105,14 @@ public class MetricSample {
     }
 
     public List<MetricValue> getValues() {
-        return values == null ? List.of() : values;
+        return data == null ? List.of() : data.values();
+    }
+
+    public MetricSampleData.NetworkObservation getNetwork() {
+        return data == null ? null : data.network();
+    }
+
+    public MetricSampleData.CpuWindow getCpuWindow() {
+        return data == null ? null : data.cpuWindow();
     }
 }

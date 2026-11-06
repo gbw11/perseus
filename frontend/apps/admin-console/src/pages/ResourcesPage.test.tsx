@@ -1,4 +1,6 @@
-import { render, screen, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render as rtlRender, screen, within } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialVms, VM_IDS } from '../mocks/data';
 import { mockZephyrThreads } from '../mocks/memoryMetrics';
@@ -8,7 +10,8 @@ const state = vi.hoisted(() => ({ metricsError: null as Error | null }));
 
 vi.mock('../layout/DriveContext', () => ({ useDrive: () => ({ drive: null }) }));
 
-vi.mock('../api/queries', async () => {
+vi.mock('../api/queries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/queries')>();
   const data = await import('../mocks/data');
   const memory = await import('../mocks/memoryMetrics');
   const linuxSample = (index: number) => {
@@ -45,6 +48,7 @@ vi.mock('../api/queries', async () => {
     };
   };
   return {
+    ...actual,
     useVms: () => ({ data: { items: data.initialVms() }, isPending: false }),
     useMetrics: (vmId: string) => ({
       data: {
@@ -83,20 +87,27 @@ vi.mock('../api/queries', async () => {
   };
 });
 
+// LiveDataAlert 가 조회 캐시를 구독하므로 QueryClient 안에서 그린다
+const render = (ui: ReactElement) =>
+  rtlRender(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>);
+
 beforeEach(() => {
   state.metricsError = null;
 });
 
 describe('Memory 탭', () => {
-  it('Pool·패킷 그래프를 Network 탭으로 넘긴 뒤에도 Zephyr·Linux 메모리 카드를 그린다', () => {
+  it('RX/TX Pool 요약과 Pool 점유율 그래프는 Network 탭으로 옮기고, 나머지 Memory 구성은 그대로 둔다', () => {
     render(<ResourcesPage view="memory" />);
 
-    expect(screen.getAllByText('메모리 사용률').length).toBeGreaterThanOrEqual(4);
-    expect(screen.getAllByText('커널 heap 기준').length).toBeGreaterThan(0);
-    expect(screen.getByText('디스크 I/O')).toBeInTheDocument();
+    // Network 탭으로 옮긴 것
     expect(screen.queryByText('RX Pool')).not.toBeInTheDocument();
-    expect(screen.queryByText('패킷 처리율')).not.toBeInTheDocument();
+    expect(screen.queryByText('TX Pool')).not.toBeInTheDocument();
     expect(screen.queryByText('Pool 점유율')).not.toBeInTheDocument();
+    expect(screen.queryByText('MQTT 포함 공통 RX/TX 풀')).not.toBeInTheDocument();
+    // origin/frontend Memory 구성 (정리는 별도 이슈)
+    expect(screen.getAllByText('커널 힙 사용률').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('패킷 처리율').length).toBeGreaterThan(0);
+    expect(screen.getByText('디스크 I/O')).toBeInTheDocument();
   });
 });
 
@@ -175,7 +186,7 @@ describe('CPU 탭', () => {
 
     const threads = screen.getByRole('region', { name: 'autonomous 스레드' });
     expect(within(threads).getByText('12개 중 10개 · CPU 높은 순')).toBeInTheDocument();
-    expect(within(threads).getByText('계측 구간 2.0초')).toBeInTheDocument();
+    expect(within(threads).getByText('계측 구간 1.0초')).toBeInTheDocument();
     expect(within(threads).getAllByRole('row')).toHaveLength(11);
     expect(within(threads).getAllByRole('cell')[0]).toHaveTextContent('idle');
     expect(mockZephyrThreads(VM_IDS.autonomous).items).toHaveLength(12);

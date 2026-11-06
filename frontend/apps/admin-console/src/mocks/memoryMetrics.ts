@@ -1,4 +1,4 @@
-import type { MetricSample, MetricValue } from '../api/types';
+import type { MetricSample, MetricValue, ThreadsResponse } from '../api/types';
 import { MEMORY_POOL_METRICS } from '../domain/memoryPools';
 import { VM_IDS } from './data';
 
@@ -11,7 +11,60 @@ const metric = (
   value: number,
   unit: string,
   labels: Record<string, string> | null = null,
-): MetricValue => ({ name, value, unit, labels, unavailable_reason: null });
+): MetricValue => ({
+  name,
+  value,
+  unit,
+  labels,
+  unavailable_reason: null,
+  // v2 정수 원문·수집 상태 (Spring 조회 projection 과 같은 모양)
+  raw_value: Number.isSafeInteger(value) ? String(value) : null,
+  status: 'ok',
+  source_rc: 0,
+});
+
+/** 업타임 기준점. 모든 mock 표본이 같은 부팅·Publisher 실행에서 나온 것처럼 업타임을 이어 준다 */
+const uptimeOf = (observedAt: string, now: number) => Date.parse(observedAt) - (now - 3_600_000);
+
+/**
+ * 메모리 표본의 관측 문맥 (MetricSample.telemetry). Memory·Network 탭의 Pool·heap 계산은
+ * 같은 관측 실행(boot_id·publisher_instance_id)에 속하고 원 관측 시각을 확인할 수 있는 표본만 현재값으로 쓴다.
+ */
+function memoryTelemetry(
+  vmId: string,
+  family: 'memory' | 'memory_regions',
+  observedAt: string,
+  seq: number,
+  now: number,
+): NonNullable<MetricSample['telemetry']> {
+  const uptime = uptimeOf(observedAt, now);
+  return {
+    family,
+    publisher_instance_id: `mock-publisher-${vmId}`,
+    message_seq: String(seq),
+    source_sample_seq: String(seq),
+    observed_uptime_ms: String(uptime),
+    sent_uptime_ms: String(uptime),
+    sent_at: observedAt,
+    utc_quality: 'synchronized',
+    utc_source: 'mock',
+    uncertainty_ms: null,
+    collection: {
+      sample_id: `${family}-${seq}`,
+      start_uptime_ms: String(uptime),
+      end_uptime_ms: String(uptime),
+      elapsed_us: '100',
+      status: 'ok',
+      source_rc: 0,
+    },
+    context: {
+      binding: 'mock',
+      host_boot_id: 'mock-host-boot',
+      execution_id: `mock-exec-${vmId}`,
+      receipt_id: null,
+    },
+  };
+}
 
 function poolValues(region: 'net_rx_data' | 'net_tx_data', usedBytes: number): MetricValue[] {
   const labels = { region };
@@ -45,6 +98,7 @@ export function mockKernelHeapSamples(vmId: string, now = Date.now()): MetricSam
       observed_at: observedAt,
       received_at: observedAt,
       window_ms: HEAP_INTERVAL_MS,
+      telemetry: memoryTelemetry(vmId, 'memory', observedAt, 1_000 + index, now),
       values: [
         metric('memory.kernel_heap.used_bytes', used, 'bytes'),
         metric('memory.kernel_heap.free_bytes', HEAP_ACCOUNTED - used, 'bytes'),
@@ -83,6 +137,7 @@ export function mockMemoryPoolSamples(vmId: string, now = Date.now()): MetricSam
       observed_at: observedAt,
       received_at: observedAt,
       window_ms: INTERVAL_MS,
+      telemetry: memoryTelemetry(vmId, 'memory_regions', observedAt, 2_000 + index, now),
       values: [
         ...poolValues('net_rx_data', rxUsed),
         ...poolValues('net_tx_data', txUsed),
@@ -204,48 +259,25 @@ const MOCK_THREADS: Record<string, [string, number][]> = {
   ],
 };
 
-/** GET /threads mock. Zephyr VM 만 표본이 있고, Linux 는 표본 없음 응답 */
-export function mockZephyrThreads(vmId: string, now = Date.now()) {
+/**
+ * GET /threads mock. 응답 모양은 origin/frontend 의 /threads mock(Zephyr 만 표본, Linux 는 만료 빈 응답)을 따르고,
+ * CPU 탭 상위 10개 목록을 보이려고 스레드 12개와 전체 개수(rows_seen)만 더한다.
+ */
+export function mockZephyrThreads(vmId: string, now = Date.now()): ThreadsResponse {
   const rows = MOCK_THREADS[vmId];
-  if (!rows) {
-    return {
-      vm_id: vmId,
-      boot_id: null,
-      publisher_instance_id: null,
-      sample_seq: null,
-      start_uptime_ms: null,
-      end_uptime_ms: null,
-      window_ms: null,
-      received_at: null,
-      stale: true,
-      threads_status: null,
-      rows_seen: null,
-      rows_returned: null,
-      parts_received: 0,
-      part_count: null,
-      complete: false,
-      conflicting_pages: false,
-      items: [],
-    };
-  }
   return {
     vm_id: vmId,
-    boot_id: `mock-boot-${vmId}`,
-    publisher_instance_id: `mock-publisher-${vmId}`,
-    sample_seq: '120',
-    start_uptime_ms: '598000',
-    end_uptime_ms: '600000',
-    window_ms: 2000,
-    received_at: new Date(now).toISOString(),
-    stale: false,
-    threads_status: 'ok',
-    rows_seen: rows.length,
-    rows_returned: rows.length,
-    parts_received: 1,
-    part_count: 1,
-    complete: true,
+    window_ms: rows ? 1000 : null,
+    received_at: rows ? new Date(now).toISOString() : null,
+    stale: !rows,
+    threads_status: rows ? 'ok' : null,
+    parts_received: rows ? 1 : 0,
+    part_count: rows ? 1 : null,
+    complete: !!rows,
     conflicting_pages: false,
-    items: rows.map(([name, cpu], index) => ({
+    rows_seen: rows ? rows.length : null,
+    rows_returned: rows ? rows.length : null,
+    items: (rows ?? []).map(([name, cpu], index) => ({
       thread_id: `0x${(0x20000000 + index * 0x100).toString(16)}`,
       thread_name: name,
       name_truncated: false,
