@@ -71,9 +71,10 @@ class VerifiedDriveMachine(ControlMachine):
 
     def _bound(self,vm,now,app=None):
         from xenova_mqtt.drive_binding import app_instance
-        if self.authority.protected(vm) or vm in self.untrusted:return False
         row=self.bindings.current(vm,now)
         if not row:return False
+        if self.authority.protected_execution(vm)==row['execution_id']:return False
+        if vm in self.untrusted and row['execution_id']==self.untrusted[vm]['execution_id']:return False
         return all(self.sessions.get((vm,target))==(row['execution_id'],row['boot_id'],app_instance(row,target))
                    for target in (DRIVE_APPS if app is None else (app,)))
 
@@ -123,8 +124,10 @@ class VerifiedDriveMachine(ControlMachine):
             type(payload.get('consecutive_misses')) is not int or payload['consecutive_misses']<5):return []
         command_id=payload.get('command_id')
         if not isinstance(command_id,str) or not command_id or len(command_id)>128 or command_id in self._trust_commands:return []
+        binding=self.bindings.current(vm,t)
+        if binding is None:return []
         self._trust_commands.add(command_id)
-        distrust={'vm_id':vm,'reason':payload['reason'],'command_id':command_id,
+        distrust={'vm_id':vm,'execution_id':binding['execution_id'],'reason':payload['reason'],'command_id':command_id,
                   'observed_monotonic_ms':int(t*1000),'generation':self.generation}
         self.untrusted[vm]=distrust
         self.nodes[vm][AUTONOMOUS].pending=None
@@ -148,7 +151,10 @@ class VerifiedDriveMachine(ControlMachine):
                     0<=now-p.observed<=self.readiness_lease_s)
 
     def _qualified(self,vm,app,now,held=False):
-        return self._ready(vm,app,now,held=held)
+        return vm not in self.untrusted and not self.authority.protected(vm) and self._ready(vm,app,now,held=held)
+
+    def rejoin_ready(self,vm,app,now):
+        return vm in self.untrusted and self.authority.protected(vm) and self._ready(vm,app,now,held=True)
 
     def node_status(self,vm,now):
         app=self.active_app or MANUAL_APP

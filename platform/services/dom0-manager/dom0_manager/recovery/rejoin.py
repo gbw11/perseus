@@ -96,6 +96,7 @@ class RejoinCoordinator:
         self._executor=ThreadPoolExecutor(max_workers=2,thread_name_prefix='drive-rejoin')
         self._futures={};self._due={};self._rows={};self._completed={};self._progress={}
         self._reports=queue.Queue(maxsize=64)
+        self._trust_reports=queue.Queue(maxsize=16)
         self.path=Path(config['receipt_dir'])/'rejoin.json';self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
         if self.path.parent.resolve()!=self.path.parent or self.path.parent.stat().st_uid!=uid or self.path.parent.stat().st_mode&0o077:
             raise ValueError('canonical private receipt directory required')
@@ -185,6 +186,27 @@ class RejoinCoordinator:
         # Paho callback never waits on receipt fsync or authority reads.
         try:self._reports.put_nowait(message)
         except queue.Full:pass  # Dropped evidence expires; it never renews readiness.
+
+    def on_trust(self,message):
+        """Capture a binding-verified vm.trust callback without blocking MQTT."""
+        from xenova_mqtt import topics
+        info=topics.parse(message.topic);payload=message.payload;now=self.clock()
+        row=self.cache.current(info.vm_id,now)
+        if (getattr(message,'retained',False) or message.type!='vm.trust' or info.app_id!='autonomous' or
+            not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED' or
+            payload.get('reason')!='AUTO_DEADLINE_MISS' or type(payload.get('consecutive_misses')) is not int or
+            payload['consecutive_misses']<5 or not isinstance(payload.get('command_id'),str) or
+            not payload['command_id'] or len(payload['command_id'])>128 or row is None):return
+        try:self._trust_reports.put_nowait({'vm_id':info.vm_id,'execution_id':row['execution_id'],
+            'command_id':payload['command_id'],'received_monotonic':message.received_monotonic})
+        except queue.Full:pass
+
+    def trust_events(self):
+        values=[]
+        while len(values)<16:
+            try:values.append(self._trust_reports.get_nowait())
+            except queue.Empty:break
+        return values
 
     def _apply_readiness(self,message):
         from xenova_mqtt import topics

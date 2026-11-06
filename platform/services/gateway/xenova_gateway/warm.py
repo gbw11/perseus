@@ -142,6 +142,10 @@ class WarmDriveMachine(VerifiedDriveMachine):
         return True
 
     def _qualified(self,vm,app,now,held=False):
+        if vm in self.untrusted or self.authority.protected(vm):return False
+        return self._qualification_ready(vm,app,now,held)
+
+    def _qualification_ready(self,vm,app,now,held=False):
         binding=self.bindings.current(vm,self.clock())
         if (binding and binding.get('app_state_models',{}).get(app)=='stateful' and
                 self.states.evidence(vm,app) is None):return False
@@ -151,6 +155,9 @@ class WarmDriveMachine(VerifiedDriveMachine):
         q=self.qualification.get((vm,app))
         return bool(q and self._bound(vm,now,app) and q[0]==self.generation and
             0<=now-q[1]<=self.readiness_lease_s and (not held or now-q[2]>=self.timing.ready_hold_s))
+
+    def rejoin_ready(self,vm,app,now):
+        return vm in self.untrusted and self.authority.protected(vm) and self._qualification_ready(vm,app,now,True)
 
     def _applied(self,vm,app,now):
         return self._qualified(vm,app,now)

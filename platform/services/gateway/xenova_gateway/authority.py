@@ -124,6 +124,7 @@ class AuthorityStore:
         seen=set()
         for row in distrusted:
             canonical(row['vm_id'])
+            canonical(row['execution_id'])
             if row['vm_id'] in seen:raise ValueError('duplicate distrusted VM')
             seen.add(row['vm_id'])
             if (row.get('reason')!='AUTO_DEADLINE_MISS' or not isinstance(row.get('command_id'),str) or
@@ -265,6 +266,11 @@ class AuthorityStore:
     def protected(self,vm_id):
         return any(row['phase']=='PROTECTED' and row['spec']['target_vm']==vm_id
                    for row in self.value.get('protections',[]))
+
+    def protected_execution(self,vm_id):
+        row=next((row for row in self.value.get('protections',[]) if
+                  row['phase']=='PROTECTED' and row['spec']['target_vm']==vm_id),None)
+        return None if row is None else row['spec']['target_execution_id']
 
     def begin_transition(self,request_id,spec,now_ms):
         """Actor entry: persist fixed intent/target/deadline before preparation."""

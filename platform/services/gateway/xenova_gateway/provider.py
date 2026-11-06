@@ -303,9 +303,17 @@ class GatewayProvider:
             raise ProviderError('TARGET_CHANGED')
         if self.m.active_vm == spec['target_vm'] and self.m.output_permitted:
             raise ProviderError('OUTPUT_NOT_PROTECTED')
+        if not cancel and any(item['vm_id']==spec['target_vm'] for item in self.a.value.get('distrusted',[])):
+            app='autonomous' if self.m.mode is Mode.AUTO else 'manual'
+            if not self.m.rejoin_ready(spec['target_vm'],app,self.m.clock()):
+                raise ProviderError('TARGET_NOT_READY')
         ended = {**row, 'phase': 'CANCELLED' if cancel else 'RELEASED', 'completion': dict(context)}
-        self.a.update(protections=[ended if r['request_id']==request_id else r
-                                   for r in self.a.value['protections']])
+        fields={'protections':[ended if r['request_id']==request_id else r
+                               for r in self.a.value['protections']]}
+        if not cancel:
+            fields['distrusted']=[item for item in self.a.value.get('distrusted',[])
+                                  if item['vm_id']!=spec['target_vm']]
+        self.a.update(**fields)
         self.capture_pending.discard(request_id)
         # No preference rollback, generation allocation, automatic resume or
         # freshness renewal. New bindings/calculation/rearm remain necessary.
