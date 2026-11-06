@@ -62,6 +62,38 @@ def _capture_command(args: argparse.Namespace) -> int:
     return report["exit_code"]
 
 
+def _speed(value: str) -> float:
+    try:
+        speed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("speed must be a number") from exc
+    if not math.isfinite(speed) or not 0 <= speed <= 16:
+        raise argparse.ArgumentTypeError("speed must be between 0 and 16; 0 means no waiting")
+    return speed
+
+
+def _replay_command(args: argparse.Namespace) -> int:
+    from .capture_profile import load_profile
+    from .recording.replay import run_replay
+
+    try:
+        profile = load_profile(args.profile).to_dict() if args.profile is not None else None
+        report = run_replay(args.dataset, output=args.output, expected_profile=profile,
+                            speed=args.speed, allow_incomplete=args.allow_incomplete)
+    except (OSError, ValueError) as exc:
+        print(f"replay: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=True, allow_nan=False))
+    else:
+        print(f"Replay {'finished' if report['replay_completed'] else 'incomplete'}: "
+              f"{report['replayed_frames']} frames; source_complete={report['source_complete']}")
+        if report.get("error"):
+            print(f"Error: {report['error']}")
+        print(f"Output: {report['output']}")
+    return report["exit_code"]
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI를 실행하고 종료 코드를 반환한다. argparse 사용 오류는 2다."""
     parser = argparse.ArgumentParser(prog="xenova-vehicle")
@@ -77,10 +109,21 @@ def main(argv: list[str] | None = None) -> int:
                          help="recording duration after startup, default: 30 (0.1..300)")
     capture.add_argument("--output", type=Path, required=True, help="new dataset directory; never overwrite")
     capture.add_argument("--json", action="store_true", help="print one final JSON receipt to stdout")
+    replay = commands.add_parser("replay", help="validate and replay recorded frames without a camera")
+    replay.add_argument("--dataset", type=Path, required=True, help="version1 capture directory")
+    replay.add_argument("--output", type=Path, required=True, help="new diagnostic trace directory")
+    replay.add_argument("--profile", type=Path, help="optionally require the exact embedded capture profile")
+    replay.add_argument("--speed", type=_speed, default=1.0,
+                        help="original receive-time rate, default: 1; 0 means no waiting (0..16)")
+    replay.add_argument("--allow-incomplete", action="store_true",
+                        help="explicitly allow verified indexed frames from an incomplete capture")
+    replay.add_argument("--json", action="store_true", help="print one final JSON replay report")
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
         return _doctor_command(args)
     if args.command == "capture":
         return _capture_command(args)
+    if args.command == "replay":
+        return _replay_command(args)
     parser.error("unsupported command")

@@ -144,7 +144,48 @@ bench-001/
 
 각 stream의 ID와 원 시각을 유지한다. RGB/depth의 같은 숫자 순번을 같은 노출로 간주하지 않으며, timestamp 차이10ms 이내의 후보와 실제 양쪽이 저장된 후보 수를 구분한다. SDK host clock과 Python 단조시각의 비교 표본은 보존하지만 OAK 동기·노출/readout 오차의 실측 bound는 아직 없다. `metric_ready=false`와 `runtime_readiness=not_evaluated`를 유지한다. 원 EEPROM 저장도 차량 장착 보정·active K_rect 수락을 의미하지 않는다.
 
-기본 기록 상한은1GiB, 종료 결과 여유64KiB, 디스크 여유 하한8GiB다. 공간 부족·파일 오류·필수 stream 누락·실제 저장된 동기 후보 없음·강제 종료는 성공이 아니다. 정상 제한 시간 기록 완료는0, 런타임 실패/불완전 기록은1, 인수·설정 오류/기존 출력 경로는2다. 중간에 남은 파일은 삭제하지 않는다. 원본·index의 hash 대조와 불완전 기록 처리는 후속 재생기의 책임이며, 이 기록 형식은 정전 내구성이나 주행 준비를 보증하지 않는다.
+기본 기록 상한은1GiB, 종료 결과 여유64KiB, 디스크 여유 하한8GiB다. 공간 부족·파일 오류·필수 stream 누락·실제 저장된 동기 후보 없음·강제 종료는 성공이 아니다. 정상 제한 시간 기록 완료는0, 런타임 실패/불완전 기록은1, 인수·설정 오류/기존 출력 경로는2다. 중간에 남은 파일은 삭제하지 않는다. 원본·index의 hash 대조와 불완전 기록 처리는 아래 재생기가 담당한다. 이 기록 형식은 정전 내구성이나 주행 준비를 보증하지 않는다.
+
+## 카메라 없는 원본 재생
+
+`replay`는 위 version1 기록을 읽어 RGB NV12·native depth RAW16_LE 원본 bytes를 index 순서대로 재생한다. DepthAI·NumPy·OpenCV 설치나 카메라 연결은 필요 없다. 원 device/SDK/J 시각, stream별 순번, source key와 capture context를 유지하며, 저장 누락을 보간하거나 RGB/depth를 같은 노출로 재정의하지 않는다.
+
+```bash
+xenova-vehicle replay \
+  --dataset "$HOME/xenova-data/captures/bench-001" \
+  --output "$HOME/xenova-data/replays/bench-001-run-001" \
+  --speed 1 --json
+```
+
+`--speed 1`은 원 `received_j_us`의 상대 수신 간격으로 대기한다. 검증 시간은 재생 간격에 포함하지 않는다. `--speed 0`은 대기 없이 읽고, 양수는 최대16배속까지 허용한다. 처리 지연이 생겨도 프레임을 버리거나 다음 목표 시각을 밀지 않으며 지연량을 결과에 남긴다. 원 관측 시각과 재생 경과 시각은 별도 필드다. `--profile FILE`을 추가하면 내장된 수집 프로필과 정확히 일치하는지도 검사한다. 생략 시 manifest의 프로필을 사용한다.
+
+재생 전 모든 indexed payload의 SHA256·길이·형식, 프로필 hash·context, stream별 순번/시각 증가, 원 종료 결과와 기록 통계를 검사한다. 재생 중에도 payload hash와 파일 변경을 다시 확인한다. 첫 사전 검증에서 하나라도 손상되면 프레임을 전달하지 않는다. 입력은 읽기만 하며 출력은 입력과 분리된 새 디렉터리여야 한다. SHA256 검사는 파일 무결성 대조이며 촬영 출처를 인증하는 서명은 아니다.
+
+기본값은 완전한 정상 종료 기록만 허용한다. 중단·종료 결과 부재·마지막 index 줄 잘림·index에 없는 payload는 `--allow-incomplete`를 명시해야 한다. 이때도 newline으로 끝난 검증 가능한 index 행만 사용하고, 버린 꼬리 bytes와 미참조 payload를 결과에 남긴다. 참조 파일 부재·hash 오류·잘못된 행/경로/문맥은 이 옵션으로 허용하지 않는다. 정상 수집에서 명시적으로 센 저장 drop이나 stream 순번 간격은 불완전 종료와 구분해 보고한다. 정전으로 manifest 자체가 손상된 기록을 복원하는 도구는 아니다.
+
+```text
+bench-001-run-001/
+├── replay-result.json   # 원 기록 완전성·hash 검사·재생 완료·통계·오류
+└── events.jsonl         # 전달 순번·원 index metadata·별도 재생 시각
+```
+
+CLI는 영상창 없이 원본을 읽고 진단 trace를 남긴다. 알고리즘에는 아래 API의 `consumer`로 실제 `RawFrame.payload`와 원 metadata를 전달한다. callback은 동기 실행되며 예외가 나면 중단한다. 원본은 NV12/RAW16_LE로 유지하고 화면 표시·색 변환은 consumer의 책임이다.
+
+```python
+from pathlib import Path
+from xenova_vehicle.recording.replay import run_replay
+
+def consume(sample):
+    frame = sample.frame  # stream, payload: bytes, sequence, device_us, sdk_us, received_j_us
+    source = sample.metadata  # 원 index 행 사본; source_key와 clock evidence 포함
+    # 인지 함수에 frame과 source를 전달한다.
+
+report = run_replay(Path("/data/captures/bench-001"), speed=0, consumer=consume)
+```
+
+`replay_completed`는 선택한 입력의 재생 완료, `source_complete`는 원 기록의 완전성이다. 부분 기록 재생을 완료해도 원 기록을 완전하다고 바꾸지 않는다. replay마다 새 `replay_instance`를 발급하고 `input_kind=REPLAY`, `live_authority=false`, `metric_ready=false`를 유지한다. 운영 broker·차량 제어는 열지 않는다.
+
+종료 코드는 재생 완료0, 검증/재생 실패1, 인수·프로필·기존 출력 경로 오류2, Ctrl+C130, SIGTERM143이다. 대기 중에는 최대50ms마다 취소를 확인한다. 이는 동기 consumer나 저장 장치 I/O의 강제중단 기한을 뜻하지 않는다. version1 입력 상한은 payload 합계4GiB, 10,000프레임, index64MiB·행32KiB, manifest2MiB, 원 결과64KiB다. 진단 trace는96MiB로 제한한다. 전체 영상은 메모리에 적재하지 않으며 index metadata는 상한 내에서 보관한다.
 
 ## 테스트
 
@@ -153,4 +194,5 @@ bench-001/
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests/unit -v
 PYTHONPATH=src python -m unittest discover -s tests/integration -v
+PYTHONPATH=src python -m unittest discover -s tests/replay -v
 ```
