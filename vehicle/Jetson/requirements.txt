@@ -1,0 +1,8 @@
+# Jetson Nano B01 / JetPack 4.6.6: private CPython 3.11.18 venv용 설치 후보.
+# 시스템 Python 3.6의 패키지를 교체하지 않는다. Nano 실설치·import 검증은 별도다.
+# 직접 의존성만 고정하며 배포용 전체 해시 lock은 아니다.
+depthai==2.29.0.0
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+paho-mqtt==2.1.0
+protobuf==6.33.6
