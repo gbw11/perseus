@@ -16,6 +16,7 @@ PLATFORM_STOP_WAIT_S = 90.0
 HTTP_ONLY_ENV = (
     "XENOVA_HOST", "XENOVA_PORT", "XENOVA_SERVICE_TOKEN", "XENOVA_CONSOLE_ENABLED", "XENOVA_CONSOLE_LOCK_DIR",
     "XENOVA_REGISTRATION_URL", "VM_REGISTRATION_SERVICE_TOKEN", "XENOVA_REGISTRATION_TIMEOUT", "XENOVA_REGISTRATION_SLOT_DIR",
+    "XENOVA_DOM0_API_DOCS",
 )
 
 
@@ -44,6 +45,9 @@ class Settings:
     # platform 드라이버: 다른 요청이 Manager 를 쓰는 동안 기다릴 최대 초. 넘으면 503 PlatformUnavailable(재시도 가능).
     # 정지가 최대 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다. 조회 드라이버 한도 5초와 맞춘다
     platform_busy_timeout_s: float = 5.0
+    # platform 드라이버: GET /vms·/vms/{id} 가 하위 list·get 에 timeout_ms 로 주는 조회 한도(초). 계약 조회 5초(Spring 대기 6초 안).
+    # 넘으면 하위가 DEADLINE_EXCEEDED → 504 DriverTimeout. 하위 상한이 15초라 0 초과 15 이하만 받는다
+    platform_read_timeout_s: float = 5.0
     # platform 드라이버: 일반 조회(get·list 등)를 직렬화하지 않고 요청별 Manager(fork)로 부른다. 하위가 조회를 공통 실행 잠금 없이
     # 처리하는 설치본을 확인한 뒤에만 켠다(drivers/platform.py 머리말)
     platform_read_fork: bool = False
@@ -54,6 +58,8 @@ class Settings:
     recovery_state_dir: str = "/run/xenova/recovery"
     mock_samples: bool = False
     log_level: str = "INFO"
+    # 개발용. 켜면 /docs·/redoc·/openapi.json 을 연다(기본 끔). 서비스 토큰이 설정돼 있으면 문서 경로도 토큰을 검사한다
+    api_docs: bool = False
     # Separate bounded execution-log database; empty means the log collector is not deployed.
     runtime_log_db: str = ""
     runtime_log_ingest_config: str = ""
@@ -73,6 +79,8 @@ class Settings:
             value = getattr(self, name)
             if not (math.isfinite(value) and value > 0):
                 raise ValueError(f"{name} must be a finite positive number of seconds, got {value!r}")
+        if not (math.isfinite(self.platform_read_timeout_s) and 0.001 <= self.platform_read_timeout_s <= 15.0):
+            raise ValueError(f"platform_read_timeout_s must be 0.001..15 seconds (platform read limit), got {self.platform_read_timeout_s!r}")
         if not (math.isfinite(self.response_reserve_s) and self.response_reserve_s >= 0):
             raise ValueError(f"response_reserve_s must be a finite non-negative number of seconds, got {self.response_reserve_s!r}")
         if self.driver == "platform" and self.shutdown_grace_s != PLATFORM_STOP_WAIT_S:
@@ -115,10 +123,12 @@ class Settings:
             platform_lib=read("XENOVA_PLATFORM_LIB", cls.platform_lib, str),
             platform_busy_timeout_s=read("XENOVA_PLATFORM_BUSY_TIMEOUT", cls.platform_busy_timeout_s, float),
             platform_read_fork=read("XENOVA_PLATFORM_READ_FORK", cls.platform_read_fork, as_bool),
+            platform_read_timeout_s=read("XENOVA_PLATFORM_READ_TIMEOUT", cls.platform_read_timeout_s, float),
             response_reserve_s=read("XENOVA_RESPONSE_RESERVE", cls.response_reserve_s, float),
             recovery_state_dir=read("XENOVA_RECOVERY_STATE_DIR", cls.recovery_state_dir, str),
             mock_samples=read("XENOVA_MOCK_SAMPLES", cls.mock_samples, as_bool),
             log_level=read("XENOVA_LOG_LEVEL", cls.log_level, str).upper(),
+            api_docs=read("XENOVA_DOM0_API_DOCS", cls.api_docs, as_bool),
             runtime_log_db=read("XENOVA_RUNTIME_LOG_DB", cls.runtime_log_db, str),
             runtime_log_ingest_config=read("XENOVA_RUNTIME_LOG_INGEST_CONFIG", cls.runtime_log_ingest_config, str),
             registration_url=read("XENOVA_REGISTRATION_URL", cls.registration_url, str),

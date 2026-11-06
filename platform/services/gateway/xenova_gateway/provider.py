@@ -69,9 +69,11 @@ def validate_records(value):
         integer(row['accepted_generation'], minimum=1, maximum=0xffffffff)
         validate_result(row, spec, row['accepted_generation'])
         if row['phase'] == 'PROTECTED':
-            if spec['target_vm'] in held:
+            # Only one active protection per VM per host boot. An earlier host's PROTECTED row is
+            # history (S15P31E110-346) and the new host may protect the same VM again with a new key.
+            if (row['host_boot_id'], spec['target_vm']) in held:
                 raise ValueError('multiple active protections')
-            held.add(spec['target_vm'])
+            held.add((row['host_boot_id'], spec['target_vm']))
         else:
             end = row['completion']
             uuid(end['host_boot_id']); uuid(end['target_execution_id'])

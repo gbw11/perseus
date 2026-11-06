@@ -86,6 +86,21 @@ def test_render_revision_changes_for_new_run_and_not_for_age_only(settings, stor
     assert policy.presentation(state)["render_revision"] != old
 
 
+def test_heartbeat_sequence_alone_does_not_churn_render_revision(settings, store):
+    policy = DisplayPolicy(settings, store.epoch)
+    state = store.snapshot()
+    for name in ("agent", "app"):
+        state["vms"][0]["sources"][name]["sequence"] = 1
+    state["drive"]["source"]["sequence"] = 1
+    old = policy.presentation(state)["render_revision"]
+    for name in ("agent", "app"):
+        state["vms"][0]["sources"][name]["sequence"] = 2
+    state["drive"]["source"]["sequence"] = 2
+    assert policy.presentation(state)["render_revision"] == old
+    state["vms"][0]["sources"]["agent"]["status"] = "stale"
+    assert policy.presentation(state)["render_revision"] != old
+
+
 def test_closed_renderer_ack_expires_even_when_content_has_not_changed(settings, store):
     policy = DisplayPolicy(settings, store.epoch, clock=store.clock)
     state = store.snapshot()

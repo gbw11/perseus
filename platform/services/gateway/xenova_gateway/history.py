@@ -79,12 +79,16 @@ def candidate(store, now_ms):
     for name in ('transitions', 'protections'):
         kept = []
         for row in store.value.get(name, []):
+            same_host = row['host_boot_id'] == store.host
             active = row['phase'] in ('PROTECTED', 'PREPARING', 'PREPARED')
+            if name == 'protections' and not same_host:
+                # S15P31E110-346: an earlier host's protection no longer blocks reselection
+                # (Authority.protected) and cannot be finished/cancelled, so it is history only.
+                active = False
             spec = row['spec']
             deadline = spec['deadline_ms']
             # A pending committed transition still owns application evidence.
             referenced = row['request_id'] == pending and store.value['phase'] == 'PENDING'
-            same_host = row['host_boot_id'] == store.host
             expired = (not same_host or now_ms >= row.get('retain_until_ms',deadline + policy.retention_ms))
             if active or referenced or not expired:
                 kept.append(row)
