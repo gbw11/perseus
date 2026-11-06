@@ -12,6 +12,7 @@ function renderDashboard(path = '/dashboard/overview') {
           <Route path="overview" element={<p>overview content</p>} />
           <Route path="cpu" element={<p>cpu content</p>} />
           <Route path="memory" element={<p>memory content</p>} />
+          <Route path="network" element={<p>network content</p>} />
           <Route path="console" element={<p>console content</p>} />
         </Route>
       </Routes>
@@ -20,15 +21,30 @@ function renderDashboard(path = '/dashboard/overview') {
 }
 
 describe('DashboardLayout', () => {
-  it('대시보드 4개 탭과 현재 탭을 표시한다', () => {
+  it('대시보드 5개 탭을 Overview · CPU · Memory · Network · Console 순서로 표시한다', () => {
     renderDashboard('/dashboard/memory');
 
-    expect(screen.getByRole('navigation', { name: 'VM Dashboard 메뉴' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'CPU' })).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: 'VM Dashboard 메뉴' });
+    expect(nav).toBeInTheDocument();
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'Overview',
+      'CPU',
+      'Memory',
+      'Network',
+      'Console',
+    ]);
     expect(screen.getByRole('link', { name: 'Memory' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Console' })).toBeInTheDocument();
     expect(screen.getByText('memory content')).toBeInTheDocument();
+  });
+
+  it('Network 탭을 누르면 /dashboard/network 화면으로 이동한다', async () => {
+    const user = userEvent.setup();
+    renderDashboard('/dashboard/memory');
+
+    await user.click(screen.getByRole('link', { name: 'Network' }));
+
+    expect(screen.getByText('network content')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Network' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('탭을 누르면 해당 하위 화면으로 이동한다', async () => {

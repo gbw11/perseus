@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { MetricSample, MetricValue } from '../api/types';
-import { buildMemoryPoolSeries, bytesToKiB, MEMORY_POOL_METRICS } from './memoryPools';
+import {
+  buildMemoryPoolSeries,
+  bytesToKiB,
+  MEMORY_POOL_METRICS,
+  POOL_FAULT_PERCENT,
+  POOL_WARN_PERCENT,
+  poolLevel,
+} from './memoryPools';
 
 const value = (name: string, amount: number, labels: Record<string, string> | null = null): MetricValue => ({
   name,
@@ -76,5 +83,17 @@ describe('Memory Pool telemetry', () => {
     ]);
 
     expect(reset.packetRates.at(-1)).toMatchObject({ rxPacketsPerSecond: null, txPacketsPerSecond: null });
+  });
+});
+
+describe('Pool 경고 단계', () => {
+  it('80% 이상은 주의, 95% 이상은 위험이다', () => {
+    expect(POOL_WARN_PERCENT).toBe(80);
+    expect(POOL_FAULT_PERCENT).toBe(95);
+    expect(poolLevel(79.9)).toBe('ok');
+    expect(poolLevel(80)).toBe('warn');
+    expect(poolLevel(94.9)).toBe('warn');
+    expect(poolLevel(95)).toBe('fault');
+    expect(poolLevel(null)).toBe('ok');
   });
 });

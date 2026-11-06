@@ -9,6 +9,7 @@ import type {
   LoginRequest,
   MetricHistoryResponse,
   ProcessesResponse,
+  ThreadsResponse,
   RouteRequest,
   SignupRequest,
   SignupResponse,
@@ -30,6 +31,7 @@ export const keys = {
   events: (query: string) => ['events', query] as const,
   metrics: (id: string, minutes = 5) => ['vms', id, 'metrics', minutes] as const,
   processes: (id: string) => ['vms', id, 'processes'] as const,
+  threads: (id: string) => ['vms', id, 'threads'] as const,
   displays: ['displays'] as const,
 };
 
@@ -140,6 +142,17 @@ export function useProcesses(vmId: string, enabled: boolean) {
     queryKey: keys.processes(vmId),
     queryFn: ({ signal }) =>
       request<ProcessesResponse>(`/api/v1/vms/${encodeURIComponent(vmId)}/processes`, { signal }),
+    enabled,
+    refetchInterval: POLL_MS,
+  });
+}
+
+/** Zephyr 최근 CPU 표본 한 묶음의 스레드별 사용률 (Telemetry 2.1) */
+export function useThreads(vmId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.threads(vmId),
+    queryFn: ({ signal }) =>
+      request<ThreadsResponse>(`/api/v1/vms/${encodeURIComponent(vmId)}/threads`, { signal }),
     enabled,
     refetchInterval: POLL_MS,
   });

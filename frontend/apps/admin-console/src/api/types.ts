@@ -223,10 +223,22 @@ export const VM_CPU_PERCENT_METRIC = 'cpu_percent_allocated';
 
 export interface MetricValue {
   name: string;
+  /** gauge 와 v2 u64 카운터(숫자). v1 정확 카운터(net_rx/tx_bytes_total)는 null 이고 counter_value 를 쓴다 */
   value: number | null;
   unit: string | null;
   labels: Record<string, string> | null;
   unavailable_reason: string | null;
+  /** uint64 십진 문자열. 정밀도 손실 없이 차분하려면 BigInt 로 다룬다 */
+  counter_value?: string | null;
+  /** 원천 반환 코드. 미측정이면 음수 */
+  source_rc?: number | null;
+}
+
+/** 표본 단위 관측 문맥 (Zephyr 네트워크 카운터). 누적값 차분 간격은 observed_uptime_ms 로 구한다 */
+export interface MetricNetworkObservation {
+  publisher_instance_id: string | null;
+  /** uint64 십진 문자열 */
+  observed_uptime_ms: string | null;
 }
 
 export interface MetricSample {
@@ -238,6 +250,7 @@ export interface MetricSample {
   received_at?: string;
   window_ms?: number | null;
   values: MetricValue[];
+  network?: MetricNetworkObservation | null;
 }
 
 export interface MetricHistoryResponse {
@@ -251,11 +264,57 @@ export interface ProcessInfo {
   rss_bytes: number | null;
 }
 
+export type ProcessCollectionStatus = 'first_sample' | 'ok' | 'partial' | 'read_failed' | 'disabled';
+
+/** Agent 가 프로세스 표본과 함께 보고한 수집 진단. 구형 Agent·과거 행은 null */
+export interface ProcessCollection {
+  status: ProcessCollectionStatus;
+  discovered: number;
+  read_ok: number;
+  vanished: number;
+  failed: number;
+  /** Agent 목록 크기 제한으로 잘렸는지 (API limit 과 무관) */
+  truncated: boolean;
+  error: string | null;
+}
+
 export interface ProcessesResponse {
   vm_id: string;
+  boot_id?: string | null;
   observed_at: string | null;
   stale: boolean;
   items: ProcessInfo[];
+  process_collection?: ProcessCollection | null;
+}
+
+/** GET /api/v1/vms/{id}/threads 의 한 행 (Zephyr 2.1 CPU 표본) */
+export interface ThreadRow {
+  thread_id: string;
+  thread_name: string;
+  name_truncated: boolean;
+  cpu_percent: number | null;
+  unavailable_reason: string | null;
+}
+
+/** 최근 Zephyr CPU 표본 한 묶음. complete 는 페이지 전달 완전성, 수집 잘림은 threads_status=truncated */
+export interface ThreadsResponse {
+  vm_id: string;
+  boot_id: string | null;
+  publisher_instance_id: string | null;
+  sample_seq: string | null;
+  start_uptime_ms: string | null;
+  end_uptime_ms: string | null;
+  window_ms: number | null;
+  received_at: string | null;
+  stale: boolean;
+  threads_status: string | null;
+  rows_seen: number | null;
+  rows_returned: number | null;
+  parts_received: number;
+  part_count: number | null;
+  complete: boolean;
+  conflicting_pages: boolean;
+  items: ThreadRow[];
 }
 
 // ---- 화면 배치 (노션 API 명세 REST-23·REST-24, 백엔드 -129) ----

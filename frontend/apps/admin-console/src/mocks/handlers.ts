@@ -21,7 +21,12 @@ import {
   type VmResources,
 } from '../api/types';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
-import { mockKernelHeapSamples, mockMemoryPoolSamples } from './memoryMetrics';
+import {
+  mockKernelHeapSamples,
+  mockMemoryPoolSamples,
+  mockZephyrNetworkSamples,
+  mockZephyrThreads,
+} from './memoryMetrics';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
@@ -424,7 +429,13 @@ export const handlers = [
     if (!authorized(request)) return unauthorized();
     if (params.vmId === VM_IDS.autonomous || params.vmId === VM_IDS.manual) {
       const vmId = String(params.vmId);
-      return HttpResponse.json({ items: [...mockKernelHeapSamples(vmId), ...mockMemoryPoolSamples(vmId)] });
+      return HttpResponse.json({
+        items: [
+          ...mockKernelHeapSamples(vmId),
+          ...mockMemoryPoolSamples(vmId),
+          ...mockZephyrNetworkSamples(vmId),
+        ],
+      } as unknown as JsonBodyType);
     }
     if (params.vmId !== VM_IDS.interaction) return HttpResponse.json({ items: [] });
     const now = Date.now();
@@ -479,9 +490,16 @@ export const handlers = [
           ]),
           {
             name: 'net_rx_bytes_total',
-            value: 1_200_000 + i * 8_000,
+            value: 1_200_000 + i * 8_000 + Math.round(3_000 * (1 + wave)),
             unit: 'bytes',
-            labels: null,
+            labels: { iface: 'eth0' },
+            unavailable_reason: null,
+          },
+          {
+            name: 'net_tx_bytes_total',
+            value: 640_000 + i * 3_200,
+            unit: 'bytes',
+            labels: { iface: 'eth0' },
             unavailable_reason: null,
           },
         ],
@@ -501,15 +519,39 @@ export const handlers = [
         items: [],
       } as unknown as JsonBodyType);
     }
+    const items = [
+      { pid: 412, name: 'message-board', cpu_percent: 4.2, rss_bytes: 48_234_496 },
+      { pid: 388, name: 'xenova-agent', cpu_percent: 1.1, rss_bytes: 21_495_808 },
+      { pid: 1, name: 'systemd', cpu_percent: 0.2, rss_bytes: 11_010_048 },
+      { pid: 233, name: 'systemd-journald', cpu_percent: 0.1, rss_bytes: 9_437_184 },
+      { pid: 301, name: 'mosquitto_sub', cpu_percent: 0.3, rss_bytes: 3_145_728 },
+      { pid: 455, name: 'chromium', cpu_percent: 2.6, rss_bytes: 98_566_144 },
+      { pid: 456, name: 'chromium-gpu', cpu_percent: 1.8, rss_bytes: 61_865_984 },
+      { pid: 120, name: 'dbus-daemon', cpu_percent: 0.0, rss_bytes: 4_194_304 },
+      { pid: 140, name: 'sshd', cpu_percent: 0.0, rss_bytes: 7_340_032 },
+      { pid: 160, name: 'cron', cpu_percent: null, rss_bytes: 2_097_152 },
+    ];
     return HttpResponse.json({
       vm_id: VM_IDS.interaction,
+      boot_id: 'mock-boot-interaction',
       observed_at: new Date().toISOString(),
       stale: false,
-      items: [
-        { pid: 412, name: 'message-board', cpu_percent: 4.2, rss_bytes: 48_234_496 },
-        { pid: 388, name: 'xenova-agent', cpu_percent: 1.1, rss_bytes: 21_495_808 },
-        { pid: 1, name: 'systemd', cpu_percent: 0.2, rss_bytes: 11_010_048 },
-      ],
+      items,
+      process_collection: {
+        status: 'ok',
+        discovered: 87,
+        read_ok: 87,
+        vanished: 0,
+        failed: 0,
+        truncated: false,
+        error: null,
+      },
     } as unknown as JsonBodyType);
+  }),
+
+  http.get('*/api/v1/vms/:vmId/threads', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    return HttpResponse.json(mockZephyrThreads(String(params.vmId)) as unknown as JsonBodyType);
   }),
 ];

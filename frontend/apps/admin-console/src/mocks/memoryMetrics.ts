@@ -92,3 +92,165 @@ export function mockMemoryPoolSamples(vmId: string, now = Date.now()): MetricSam
     };
   });
 }
+
+const NETWORK_INTERVAL_MS = 2000;
+const NETWORK_SAMPLES = 30;
+
+/**
+ * Zephyr 네트워크 표본(최근 60초, 2초 간격).
+ * - v1 바이트 카운터: value=null, counter_value(uint64 문자열) + 표본 network(publisher·업타임)
+ * - v2 network 계열: rx_bytes_per_s 는 숫자, interface_up·carrier 는 지금 백엔드처럼
+ *   boolean 을 읽지 못해 value=null·unavailable_reason="ok" 로 내려오는 모습을 그대로 흉내 낸다
+ */
+export function mockZephyrNetworkSamples(vmId: string, now = Date.now()): MetricSample[] {
+  const busy = vmId === VM_IDS.autonomous;
+  const bootId = `mock-boot-${vmId}`;
+  const publisher = `mock-publisher-${vmId}`;
+  const labels = { iface: 'eth0', counter_epoch: '1' };
+  // 부팅 후 수십 MiB 를 주고받은 상태에서 시작한다 (2^53 초과 정밀도는 단위 테스트에서 검증)
+  let rx = BigInt(busy ? 96 * 1024 * 1024 : 48 * 1024 * 1024);
+  let tx = BigInt(busy ? 24 * 1024 * 1024 : 12 * 1024 * 1024);
+  const samples: MetricSample[] = [];
+
+  for (let index = 0; index < NETWORK_SAMPLES; index += 1) {
+    const rxStep = BigInt(busy ? 24_000 + (index % 4) * 1_000 : 12_000 + (index % 3) * 500);
+    const txStep = BigInt(busy ? 9_000 : 6_000 + (index % 2) * 400);
+    rx += rxStep;
+    tx += txStep;
+    const observedAt = new Date(now - (NETWORK_SAMPLES - 1 - index) * NETWORK_INTERVAL_MS).toISOString();
+    const uptime = String(600_000 + index * NETWORK_INTERVAL_MS);
+
+    samples.push({
+      sample_id: `net-v1-${vmId}-${index}-${now}`,
+      vm_id: vmId,
+      boot_id: bootId,
+      source: 'zephyr_telemetry',
+      observed_at: observedAt,
+      received_at: observedAt,
+      window_ms: null,
+      network: { publisher_instance_id: publisher, observed_uptime_ms: uptime },
+      values: [
+        {
+          name: 'net_rx_bytes_total',
+          value: null,
+          unit: 'bytes',
+          labels,
+          unavailable_reason: null,
+          counter_value: rx.toString(),
+          source_rc: 0,
+        },
+        {
+          name: 'net_tx_bytes_total',
+          value: null,
+          unit: 'bytes',
+          labels,
+          unavailable_reason: null,
+          counter_value: tx.toString(),
+          source_rc: 0,
+        },
+      ],
+    });
+    samples.push({
+      sample_id: `net-v2-${vmId}-${index}-${now}`,
+      vm_id: vmId,
+      boot_id: bootId,
+      source: 'zephyr_telemetry',
+      observed_at: observedAt,
+      received_at: observedAt,
+      window_ms: NETWORK_INTERVAL_MS,
+      values: [
+        metric('rx_bytes_per_s', Number(rxStep) / (NETWORK_INTERVAL_MS / 1000), 'bytes/s', {
+          interface: 'eth0',
+          counter_epoch: '1',
+        }),
+        {
+          ...metric('network.interface_up', 0, 'bool', { interface: 'eth0' }),
+          value: null,
+          unavailable_reason: 'ok',
+        },
+        {
+          ...metric('network.carrier', 0, 'bool', { interface: 'eth0' }),
+          value: null,
+          unavailable_reason: 'ok',
+        },
+      ],
+    });
+  }
+  return samples;
+}
+
+const MOCK_THREADS: Record<string, [string, number][]> = {
+  [VM_IDS.autonomous]: [
+    ['drive_ctrl', 31.5],
+    ['lidar_rx', 18.2],
+    ['netfront_rx', 9.4],
+    ['telemetry_pub', 4.1],
+    ['shell', 0.6],
+    ['logging', 0.4],
+    ['sysworkq', 1.2],
+    ['idle', 33.8],
+    ['main', 0.3],
+    ['net_mgmt', 0.2],
+    ['tcp_work', 0.3],
+    ['rx_q[0]', 0.0],
+  ],
+  [VM_IDS.manual]: [
+    ['manual_ctrl', 12.0],
+    ['netfront_rx', 3.2],
+    ['telemetry_pub', 2.9],
+    ['idle', 80.1],
+    ['sysworkq', 0.8],
+    ['main', 0.2],
+  ],
+};
+
+/** GET /threads mock. Zephyr VM 만 표본이 있고, Linux 는 표본 없음 응답 */
+export function mockZephyrThreads(vmId: string, now = Date.now()) {
+  const rows = MOCK_THREADS[vmId];
+  if (!rows) {
+    return {
+      vm_id: vmId,
+      boot_id: null,
+      publisher_instance_id: null,
+      sample_seq: null,
+      start_uptime_ms: null,
+      end_uptime_ms: null,
+      window_ms: null,
+      received_at: null,
+      stale: true,
+      threads_status: null,
+      rows_seen: null,
+      rows_returned: null,
+      parts_received: 0,
+      part_count: null,
+      complete: false,
+      conflicting_pages: false,
+      items: [],
+    };
+  }
+  return {
+    vm_id: vmId,
+    boot_id: `mock-boot-${vmId}`,
+    publisher_instance_id: `mock-publisher-${vmId}`,
+    sample_seq: '120',
+    start_uptime_ms: '598000',
+    end_uptime_ms: '600000',
+    window_ms: 2000,
+    received_at: new Date(now).toISOString(),
+    stale: false,
+    threads_status: 'ok',
+    rows_seen: rows.length,
+    rows_returned: rows.length,
+    parts_received: 1,
+    part_count: 1,
+    complete: true,
+    conflicting_pages: false,
+    items: rows.map(([name, cpu], index) => ({
+      thread_id: `0x${(0x20000000 + index * 0x100).toString(16)}`,
+      thread_name: name,
+      name_truncated: false,
+      cpu_percent: cpu,
+      unavailable_reason: null,
+    })),
+  };
+}

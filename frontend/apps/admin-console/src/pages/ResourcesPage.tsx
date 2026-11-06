@@ -10,11 +10,8 @@ import {
   buildZephyrHeapSeries,
   cpuPercentOf,
   linuxFreeMemory,
-  type DiskIoCounter,
 } from '../domain/vmMetrics';
-import { buildMemoryPoolSeries, bytesToKiB, type PoolSnapshot } from '../domain/memoryPools';
 import {
-  ago,
   osLabel,
   ROLES,
   roleOf,
@@ -26,8 +23,12 @@ import {
 } from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import { useDrive } from '../layout/DriveContext';
+import { CpuWorkloadList } from './CpuWorkloadList';
 import { MetricErrorNotice } from './MetricErrorNotice';
+import { NetworkDashboard } from './NetworkDashboard';
 import styles from './pages.module.css';
+import { ByteCounterItem } from './resourceCharts';
+import { chartPoints, formatKiB, formatMiB, formatMiBOrDash, relativeTime } from './resourceFormat';
 
 /**
  * W-06 자원 (화면 정의서 W-06, UI-06) — 초안, 보기 전용. 자원은 VM 을 만들 때 정해지고 도중에 바꾸지 않는다:
@@ -63,7 +64,7 @@ const PINS: Record<Domain, number[]> = { dom0: [0], autonomous: [1], manual: [2]
 const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512, 'message-board': 256 };
 const DOM0_MEMORY_MIB = 1024;
 
-export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all' }) {
+export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'network' | 'all' }) {
   const vms = useVms();
   const { drive } = useDrive();
   const vmFor = (d: Domain) => (d === 'dom0' ? undefined : vmOf(d, vms.data?.items, drive));
@@ -79,6 +80,10 @@ export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all
 
   if (view === 'memory') {
     return <MemoryDashboard items={vms.data?.items} drive={drive} pending={vms.isPending} />;
+  }
+
+  if (view === 'network') {
+    return <NetworkDashboard items={vms.data?.items} drive={drive} pending={vms.isPending} />;
   }
 
   return (
@@ -212,7 +217,7 @@ function MemoryDashboard({
         </div>
         <div className={styles.memoryHeadingMeta}>
           <span>Linux 최근 5분</span>
-          <span>Zephyr heap 최근 5분 · Pool 최근 60초</span>
+          <span>Zephyr 최근 5분</span>
         </div>
       </header>
 
@@ -233,18 +238,12 @@ function MemoryDashboard({
 
 function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
-  const metrics = useMetrics(vm.vm_id, true, 1, 2000);
   const heapMetrics = useMetrics(vm.vm_id, true);
-  const series = buildMemoryPoolSeries(metrics.data?.items ?? []);
   const heap = buildZephyrHeapSeries(heapMetrics.data?.items ?? []);
   const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
-  const lastUpdated = relativeTime(latestTime(series.lastObservedAt, heap.current?.observedAt ?? null));
   const heapCurrent = heap.current;
-  const style = {
-    '--vm-accent': role?.color ?? UNASSIGNED_COLOR,
-    '--rx-accent': 'var(--x-primary)',
-    '--tx-accent': 'var(--x-pool-tx)',
-  } as CSSProperties;
+  const lastUpdated = relativeTime(heapCurrent?.observedAt ?? null);
+  const style = { '--vm-accent': role?.color ?? UNASSIGNED_COLOR } as CSSProperties;
 
   return (
     <Card
@@ -253,7 +252,7 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
       title={
         <span className={styles.memoryVmTitle}>
           <strong>{vm.name}</strong>
-          <small>{role?.short ?? '역할 미지정'} · Zephyr · 커널 heap · 네트워크 데이터 Pool</small>
+          <small>{role?.short ?? '역할 미지정'} · Zephyr · 커널 heap</small>
         </span>
       }
       actions={
@@ -265,7 +264,7 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
         </span>
       }
     >
-      {(metrics.error || heapMetrics.error) && <MetricErrorNotice />}
+      {heapMetrics.error && <MetricErrorNotice />}
 
       <MemoryUsageSummary
         label="메모리 사용률"
@@ -285,143 +284,7 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
         ariaLabel={`${vm.name} 메모리 사용률(커널 heap 기준) 최근 5분 그래프`}
         points={heap.points}
       />
-
-      <div className={styles.poolSummaryGrid}>
-        <PoolSummary label="RX Pool" pool={series.rx} tone="rx" />
-        <PoolSummary label="TX Pool" pool={series.tx} tone="tx" />
-      </div>
-
-      <MemoryChart
-        title="패킷 처리율"
-        unit="packets/s"
-        ariaLabel={`${vm.name} RX TX 패킷 처리율 최근 60초`}
-        points={series.packetRates.map((point) => ({
-          observedAt: point.observedAt,
-          rx: point.rxPacketsPerSecond,
-          tx: point.txPacketsPerSecond,
-        }))}
-      />
-      <MemoryChart
-        title="Pool 점유율"
-        unit="%"
-        ariaLabel={`${vm.name} RX TX Pool 점유율 최근 60초`}
-        max={100}
-        points={series.usage.map((point) => ({
-          observedAt: point.observedAt,
-          rx: point.rxPercent,
-          tx: point.txPercent,
-        }))}
-      />
     </Card>
-  );
-}
-
-function PoolSummary({ label, pool, tone }: { label: string; pool: PoolSnapshot; tone: 'rx' | 'tx' }) {
-  const usable = pool.state === 'ok';
-  return (
-    <section className={styles.poolSummary} data-tone={tone}>
-      <div className={styles.poolSummaryHead}>
-        <span>
-          <i aria-hidden="true" />
-          {label}
-        </span>
-        <strong>{usable ? `${pool.usagePercent!.toFixed(1)}%` : '—'}</strong>
-      </div>
-      <div className={styles.poolAmount}>
-        <strong>{usable ? formatKiB(pool.usedBytes) : '—'}</strong>
-        <span>/ {usable ? formatKiB(pool.capacityBytes) : '—'}</span>
-      </div>
-      <div className={styles.poolFree}>
-        <span>여유</span>
-        <strong>{usable ? formatKiB(pool.freeBytes) : pool.reason}</strong>
-      </div>
-      <div
-        className={styles.poolBar}
-        role="progressbar"
-        aria-label={`${label} 사용률`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={usable ? Math.round(pool.usagePercent!) : undefined}
-      >
-        <i style={{ width: `${usable ? Math.min(100, pool.usagePercent!) : 0}%` }} />
-      </div>
-    </section>
-  );
-}
-
-interface ChartPoint {
-  observedAt: string;
-  rx: number | null;
-  tx: number | null;
-}
-
-function MemoryChart({
-  title,
-  unit,
-  ariaLabel,
-  points,
-  max,
-}: {
-  title: string;
-  unit: string;
-  ariaLabel: string;
-  points: ChartPoint[];
-  max?: number;
-}) {
-  const values = points
-    .flatMap((point) => [point.rx, point.tx])
-    .filter((value): value is number => value != null);
-  const yMax = max ?? Math.max(10, Math.ceil((Math.max(0, ...values) * 1.15) / 10) * 10);
-  const rxPoints = chartPoints(points, 'rx', yMax);
-  const txPoints = chartPoints(points, 'tx', yMax);
-
-  return (
-    <section className={styles.memoryChartBlock}>
-      <header>
-        <strong>{title}</strong>
-        <span className={styles.memoryLegend}>
-          <span data-tone="rx">
-            <i />
-            RX {unit}
-          </span>
-          <span data-tone="tx">
-            <i />
-            TX {unit}
-          </span>
-        </span>
-      </header>
-      <div className={styles.memoryChart}>
-        {rxPoints || txPoints ? (
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={ariaLabel}>
-            {[0, 25, 50, 75, 100].map((value) => (
-              <line
-                key={value}
-                x1="0"
-                x2="100"
-                y1={100 - value}
-                y2={100 - value}
-                className={styles.memoryGridLine}
-              />
-            ))}
-            {rxPoints && (
-              <polyline points={rxPoints} className={styles.memoryRxLine} vectorEffect="non-scaling-stroke" />
-            )}
-            {txPoints && (
-              <polyline points={txPoints} className={styles.memoryTxLine} vectorEffect="non-scaling-stroke" />
-            )}
-          </svg>
-        ) : (
-          <div className={styles.memoryChartEmpty}>데이터 없음</div>
-        )}
-        <span className={styles.memoryChartMax}>
-          {yMax.toFixed(0)} {unit}
-        </span>
-        <div className={styles.memoryChartAxis} aria-hidden="true">
-          <span>60초 전</span>
-          <span>현재</span>
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -574,12 +437,11 @@ function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
 
       <section className={styles.memoryChartBlock} aria-label={`${vm.name} 디스크 I/O`}>
         <header>
-          <strong>디스크 I/O</strong>
-          <span className={styles.memoryBasisNote}>장치 합산 · 같은 부팅 구간에서만 속도 계산</span>
+          <strong title="장치 합산 · 같은 부팅 구간에서만 속도를 계산합니다">디스크 I/O</strong>
         </header>
         <div className={styles.counterGrid}>
-          <DiskIoItem label="읽기" counter={disk.read} />
-          <DiskIoItem label="쓰기" counter={disk.write} />
+          <ByteCounterItem label="읽기" counter={disk.read} />
+          <ByteCounterItem label="쓰기" counter={disk.write} />
         </div>
       </section>
 
@@ -589,22 +451,6 @@ function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
           : 'Linux guest-agent의 memory_used_bytes 표본을 기다리고 있습니다.'}
       </div>
     </Card>
-  );
-}
-
-function DiskIoItem({ label, counter }: { label: string; counter: DiskIoCounter }) {
-  return (
-    <div className={styles.counterItem}>
-      <span>{label} 누적</span>
-      <strong>{counter.totalBytes == null ? '—' : formatBytes(counter.totalBytes)}</strong>
-      <small>
-        {counter.totalBytes == null
-          ? (counter.reason ?? '데이터 없음')
-          : counter.bytesPerSecond == null
-            ? '속도 계산 대기'
-            : `${formatBytes(counter.bytesPerSecond)}/s`}
-      </small>
-    </div>
   );
 }
 
@@ -664,55 +510,6 @@ function UsageChart({
       </div>
     </section>
   );
-}
-
-function chartPoints(points: ChartPoint[], key: 'rx' | 'tx', max: number): string {
-  if (!points.length) return '';
-  const start = Date.parse(points[0]!.observedAt);
-  const end = Date.parse(points.at(-1)!.observedAt);
-  const span = Math.max(1, end - start);
-  return points
-    .map((point) => {
-      const value = point[key];
-      if (value == null) return null;
-      const x = ((Date.parse(point.observedAt) - start) / span) * 100;
-      const y = 100 - (Math.max(0, Math.min(max, value)) / max) * 100;
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .filter((point): point is string => point != null)
-    .join(' ');
-}
-
-function latestTime(a: string | null, b: string | null): string | null {
-  if (!a) return b;
-  if (!b) return a;
-  return Date.parse(a) >= Date.parse(b) ? a : b;
-}
-
-function formatBytes(value: number): string {
-  if (value >= 1024 * 1024 * 1024) return `${(value / 1024 ** 3).toFixed(2)} GiB`;
-  if (value >= 1024 * 1024) return `${(value / 1024 ** 2).toFixed(1)} MiB`;
-  if (value >= 1024) return `${(value / 1024).toFixed(1)} KiB`;
-  return `${Math.round(value)} B`;
-}
-
-function formatMiBOrDash(value: number | null): string {
-  return value == null ? '—' : formatMiB(value);
-}
-
-function formatKiB(value: number | null): string {
-  if (value == null) return '—';
-  return `${bytesToKiB(value).toLocaleString('ko-KR', { maximumFractionDigits: 2, minimumFractionDigits: value ? 2 : 0 })} KiB`;
-}
-
-function formatMiB(value: number): string {
-  return `${(value / (1024 * 1024)).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
-}
-
-function relativeTime(value: string | null): string {
-  if (!value) return '—';
-  const elapsed = Math.max(0, Date.now() - Date.parse(value));
-  return ago(elapsed);
 }
 
 function CpuDashboard({
@@ -819,6 +616,8 @@ function CpuVmChart({ role, vm }: { role: Role | null; vm: Vm }) {
           {metrics.error ? '메트릭 연결 오류' : values.length ? `${values.length} samples` : 'No samples'}
         </span>
       </div>
+
+      <CpuWorkloadList vm={vm} />
     </Card>
   );
 }
