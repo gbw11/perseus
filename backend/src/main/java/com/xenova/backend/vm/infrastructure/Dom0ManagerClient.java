@@ -57,8 +57,10 @@ public class Dom0ManagerClient implements VmControlPort {
         return requireBody(executeQuery(() -> queryClient.get()
                 .uri(builder -> {
                     builder.path(sources ? "/api/v1/logs/sources" : "/api/v1/logs");
-                    filters.forEach((key, value) -> builder.queryParam(key, value));
-                    return builder.build();
+                    // Values go in as URI variables so they are fully encoded: as literal template text a
+                    // '{' broke the build (500) and a '+' reached dom0-manager as a space.
+                    filters.keySet().forEach(key -> builder.queryParam(key, "{" + key + "}"));
+                    return builder.build(filters);
                 })
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
@@ -138,8 +140,8 @@ public class Dom0ManagerClient implements VmControlPort {
         return requireBody(executeQuery(() -> queryClient.get()
                 .uri(builder -> builder
                         .path("/api/v1/vms/{vmId}/control-operations")
-                        .queryParam("request_key", requestKey)
-                        .build(vmId))
+                        .queryParam("request_key", "{requestKey}")
+                        .build(vmId, requestKey))
                 .retrieve()
                 .onStatus(status -> status.isError(), this::handleError)
                 .body(VmControlOperation.class)));

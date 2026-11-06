@@ -255,6 +255,36 @@ class Dom0ManagerClientTest {
         assertThat(operation.status()).isEqualTo("completed");
     }
 
+    // Visible ASCII keys may hold '+', '{' or '&': they must reach dom0-manager unchanged, not as a space,
+    // a broken URI template (500) or an extra parameter.
+    @Test
+    void controlOperationEncodesReservedCharactersInTheRequestKey() {
+        AtomicReference<String> query = new AtomicReference<>();
+        server.createContext("/api/v1/vms/" + VM_ID + "/control-operations", exchange -> {
+            query.set(exchange.getRequestURI().getRawQuery());
+            respond(exchange, 200, controlOperation("completed"));
+        });
+
+        client.findControlOperation(VM_ID, "a+b{c}&d=e");
+
+        assertThat(query.get()).isEqualTo("request_key=a%2Bb%7Bc%7D%26d%3De");
+    }
+
+    @Test
+    void runtimeLogsEncodesFilterValues() {
+        AtomicReference<String> query = new AtomicReference<>();
+        server.createContext("/api/v1/logs", exchange -> {
+            query.set(exchange.getRequestURI().getRawQuery());
+            respond(exchange, 200, """
+                    {"epoch":"one","items":[],"next_cursor":0,"has_more":false,"history_truncated":false}
+                    """);
+        });
+
+        client.runtimeLogs(java.util.Map.of("component", "a+b{x}"), false);
+
+        assertThat(query.get()).isEqualTo("component=a%2Bb%7Bx%7D");
+    }
+
     @Test
     void insufficientResourcesIsMappedToPublicError() {
         server.createContext(
