@@ -69,7 +69,10 @@ def read_record(path):
     if not path.exists() and not path.is_symlink():
         return None
     try:
-        catalog.plain(path.parent, directory=True)
+        # The full canonical file check traverses every parent component too.
+        # Repeating plain(parent) resolves that same chain twice per JSON read.
+        # Keep this check on every read (including publication revalidation): no
+        # path/inode/content cache may hide an atomic replacement or a symlink.
         catalog.plain(path)
         value = json.loads(path.read_text())
     except (OSError, ValueError):
