@@ -128,8 +128,13 @@ public class MqttDriveClient implements SmartLifecycle, MqttCallbackExtended, Dr
 
     @Override
     public void messageArrived(String topic, MqttMessage message) {
-        tracker.accept(topic, message.getPayload(), message.isRetained())
-                .ifPresent(notice -> recorder.execute(() -> eventLogger.record(notice)));
+        // An exception thrown back to Paho closes the connection, so one bad message must not escape.
+        try {
+            tracker.accept(topic, message.getPayload(), message.isRetained())
+                    .ifPresent(notice -> recorder.execute(() -> eventLogger.record(notice)));
+        } catch (RuntimeException exception) {
+            log.warn("Dropped MQTT drive message on {}", topic, exception);
+        }
     }
 
     @Override

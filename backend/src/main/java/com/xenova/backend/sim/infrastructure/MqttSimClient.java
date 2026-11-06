@@ -108,7 +108,12 @@ public class MqttSimClient implements SmartLifecycle, MqttCallbackExtended, SimC
 
     @Override
     public void messageArrived(String topic, MqttMessage message) {
-        tracker.accept(topic, message.getPayload());
+        // An exception thrown back to Paho closes the connection, so one bad message must not escape.
+        try {
+            tracker.accept(topic, message.getPayload());
+        } catch (RuntimeException exception) {
+            log.warn("Dropped MQTT sim message on {}", topic, exception);
+        }
     }
 
     @Override
