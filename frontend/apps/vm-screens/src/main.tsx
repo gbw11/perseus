@@ -5,7 +5,6 @@ import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } fr
 import { DevControls } from './components/DevControls';
 import { DisplayFollower } from './components/DisplayFollower';
 import { ResumeOverlay } from './components/ResumeOverlay';
-import { MonitorPage } from './display/MonitorPage';
 import { DetailPage } from './pages/DetailPage';
 import { SimPage } from './pages/SimPage';
 import { SplitPage } from './pages/SplitPage';
@@ -23,7 +22,16 @@ const legacyPreview = ['console', 'scenario', 'live', 'legacy-live'].includes(im
 
 function ScreenEntry({ detail = false }: { detail?: boolean }) {
   if (legacyPreview) return detail ? <DetailPage /> : <SplitPage />;
-  return <Navigate to={`/display/${detail ? 'monitor-2' : 'monitor-1'}`} replace />;
+  return <ToCombined />;
+}
+
+/**
+ * 옛 모니터 주소(/display/monitor-1·monitor-2 등) → 합친 차량 화면. 모니터 2대 화면은 /display/combined 로 바뀌었다.
+ * 키오스크·수집기가 아직 옛 주소를 열어도 화면이 깨지지 않게 쿼리스트링(토큰 등)은 그대로 넘긴다
+ */
+function ToCombined() {
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: '/display/combined', search }} replace />;
 }
 
 function Root() {
@@ -60,7 +68,7 @@ const router = createBrowserRouter(
       path: '/display/combined',
       lazy: async () => ({ Component: (await import('./display/CombinedPage')).CombinedPage }),
     },
-    { path: '/display/:outputId', element: <MonitorPage /> },
+    { path: '/display/:outputId', element: <ToCombined /> },
     {
       element: <Root />,
       children: [
@@ -68,7 +76,7 @@ const router = createBrowserRouter(
         { path: '/split', element: <ScreenEntry /> },
         { path: '/detail/:app', element: <ScreenEntry detail /> },
         // 화면 배치 view sim (screen_path /sim, 화면 배치 계약 v1.1)
-        { path: '/sim', element: legacyPreview ? <SimPage /> : <Navigate to="/display/monitor-1" replace /> },
+        { path: '/sim', element: legacyPreview ? <SimPage /> : <ToCombined /> },
       ],
     },
   ],

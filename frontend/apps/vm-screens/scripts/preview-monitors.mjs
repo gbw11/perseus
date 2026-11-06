@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 노트북에서 HDMI 모니터 화면 미리보기: 가짜 dom0 수집기(8082) + vm-screens 개발 서버(5174).
- * 열 주소: http://localhost:5174/display/monitor-1 (계기판), /display/monitor-2 (인포테인먼트) — 실제 모니터는 1920×1080.
+ * 열 주소: http://localhost:5174/display/combined (모니터 2대를 합친 차량 화면), /display/mobile — 실제 모니터는 1920×1080.
  * 시나리오: http://127.0.0.1:8082/scenario/<cycle|cruise|obstacle|safe-stop|auto-ready|failover-done|manual|feed-down>
  */
 import { spawn } from 'node:child_process';

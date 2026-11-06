@@ -116,7 +116,7 @@ type XenView = Pick<DisplayVm, 'xen_state' | 'sources'>;
 /**
  * Xen 상태로 이미 정해지는 한 줄 (running 이 아니거나 수신이 끊긴 경우). running·신선하면 null.
  * 수집기는 Xen 조회가 실패해도 마지막 xen_state 를 남기고 sources.xen 만 stale 로 바꾸므로
- * 신선도를 먼저 본다 (policy.decide_vm·MonitorPage 와 같은 순서).
+ * 신선도를 먼저 본다 (수집기 policy.decide_vm 과 같은 순서).
  */
 function xenStatus(vm: XenView): { label: string; tone: AppTone } | null {
   if (vm.sources.xen.status !== 'fresh' || vm.xen_state === null)
