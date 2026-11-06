@@ -15,6 +15,7 @@ SRC_URI += " file://xenova_drive_binding.py file://provision-xenova-telemetry.py
 SRC_URI += " file://xenova_telemetry_support.py file://xenova_telemetry_evidence.py file://xenova-telemetry-support file://xenova-telemetry-clock.service file://xenova-telemetry-clock.timer"
 SRC_URI += "file://xenova-console-evidence.conf file://xenova-telemetry-evidence.service file://xenova-telemetry-evidence.timer"
 SRC_URI += " file://xenova_domain_identity_native.c"
+SRC_URI += " file://xenova_domain_identities_native.c"
 SRC_URI += " file://xenova_guest_profile.py file://xenova_provisioning.py file://xenova_registration.py file://xenova_registration_hook.py file://xenova-world-install"
 inherit systemd
 
@@ -32,11 +33,14 @@ SYSTEMD_SERVICE:${PN} += "xenova-telemetry-evidence.timer"
 do_compile() {
     ${CC} ${CFLAGS} ${LDFLAGS} -std=c11 -Wall -Wextra \
         "${S}/xenova_domain_identity_native.c" -o "${B}/xenova-domain-identity-native" -ldl
+    ${CC} ${CFLAGS} ${LDFLAGS} -std=c11 -Wall -Wextra \
+        "${S}/xenova_domain_identities_native.c" -o "${B}/xenova-domain-identities-native" -ldl
 }
 
 do_install() {
     install -d "${D}${libexecdir}"
     install -m 0755 "${B}/xenova-domain-identity-native" "${D}${libexecdir}/xenova-domain-identity-native"
+    install -m 0755 "${B}/xenova-domain-identities-native" "${D}${libexecdir}/xenova-domain-identities-native"
     install -d "${D}${sbindir}" "${D}${libdir}/xenova" "${D}${sysconfdir}/xenova" \
         "${D}${sysconfdir}/ssh" "${D}${systemd_system_unitdir}" "${D}/srv/xenova"
     install -m 0755 "${S}/verify-xenova-runtime-artifacts.py" "${D}${sbindir}/xenova-verify-artifacts"

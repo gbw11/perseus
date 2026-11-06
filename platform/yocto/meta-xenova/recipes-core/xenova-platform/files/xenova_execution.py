@@ -371,6 +371,35 @@ class Execution:
             refuse("OBSERVATION_UNAVAILABLE", "domain incarnation response is invalid")
         return unique
 
+    def unique_many(self, rows, deadline):
+        """One bounded helper per read phase; no cross-request identity cache."""
+        ids = [row['domid'] for row in rows]
+        if (not 1 <= len(ids) <= 256 or len(set(ids)) != len(ids)
+                or any(type(i) is not int or not 0 < i < 0x7ff0 for i in ids)):
+            refuse('OBSERVATION_UNAVAILABLE', 'invalid identity batch targets')
+        output = self.p.timed_command(['/usr/libexec/xenova-domain-identities-native',
+                                       '--domids', ','.join(map(str, ids))], deadline)
+        try:
+            value = json.loads(output)
+            if (not isinstance(value, dict) or set(value) != {'schema_version', 'items'}
+                    or type(value['schema_version']) is not int or value['schema_version'] != 1
+                    or not isinstance(value['items'], list) or len(value['items']) != len(ids)):
+                raise ValueError()
+            result = {}
+            for item in value['items']:
+                if not isinstance(item, dict) or set(item) != {'domid', 'xen_unique_id', 'state_bits'}:
+                    raise ValueError()
+                domid, unique, state = item['domid'], item['xen_unique_id'], item['state_bits']
+                if (type(domid) is not int or domid not in ids or domid in result
+                        or not isinstance(unique, str) or not re.fullmatch(r'[1-9][0-9]{0,19}', unique)
+                        or int(unique) > 2**64-1 or type(state) is not int
+                        or not 0 < state <= 0xffffffff or not state & 1):
+                    raise ValueError()
+                result[domid] = unique
+            return result
+        except (ValueError, KeyError, TypeError):
+            refuse('OBSERVATION_UNAVAILABLE', 'domain identity batch response is invalid')
+
     def require_launch_available(self, record):
         from xenova_preparation import guard_asset
         guard_asset(self.p, record['uuid'])
@@ -612,9 +641,20 @@ class Execution:
         for record in records:
             rows = self.p.matching(record, domains)
             row = rows[0] if rows else None
-            targets.append((record, row, self.unique(row, deadline) if row else None))
+            targets.append((record, row))
+        present = [row for _, row in targets if row is not None]
+        batch = (_read_context is not None and len(present) > 1
+                 and os.environ.get('XENOVA_IDENTITY_BATCH_READS') == '1')
+        initial = self.unique_many(present, deadline) if batch else None
+        targets = [(record, row, initial[row['domid']] if batch and row else
+                    self.unique(row, deadline) if row else None) for record, row in targets]
         after = self.p.removal_snapshot(deadline)
         absence_verified_ms=int(self.p.clock()*1000) if _read_context is not None else None
+        # The batch is not an atomic Xen snapshot. Keep both full list checks
+        # and both incarnation reads; date all present rows conservatively from
+        # before the final helper starts, never from its delayed completion.
+        final_started_ms = int(self.p.clock()*1000) if batch else None
+        final = self.unique_many(present, deadline) if batch else None
         verified = []
         for record, row, unique in targets:
             expected = (row['domid'], record['uuid'], record['name']) if row else None
@@ -623,13 +663,13 @@ class Execution:
                 actual = (candidates[0]['domid'], candidates[0]['uuid'], candidates[0]['name']) if len(candidates) == 1 else None
                 if len(candidates) > 1 or actual != expected:
                     refuse('TARGET_CHANGED', 'domain changed during observation')
-            if row and self.unique(row, deadline) != unique:
+            if row and (final[row['domid']] if batch else self.unique(row, deadline)) != unique:
                 refuse('TARGET_CHANGED', 'domain incarnation changed during observation')
             if row:
                 row = {**row, 'xen_state':after[row['domid']]['xen_state'],
                        'xen_state_flags':after[row['domid']]['xen_state_flags']}
             if _read_context is not None:
-                _read_context.observed_ms[record['uuid']]=int(self.p.clock()*1000) if row else absence_verified_ms
+                _read_context.observed_ms[record['uuid']]=(final_started_ms if batch else int(self.p.clock()*1000)) if row else absence_verified_ms
             verified.append((record, row, unique))
         if self.p.boot_id_reader() != self.host:
             refuse('TARGET_CHANGED', 'host boot changed during observation')
