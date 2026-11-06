@@ -1,6 +1,7 @@
 package com.xenova.backend.event.application;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import org.slf4j.Logger;
@@ -15,6 +16,7 @@ public class RecoveryEventMessageHandler {
 
     public static final String TOPIC = "xenova/v1/recovery/events";
     static final int MAX_PAYLOAD_BYTES = 64 * 1024;
+    static final String DOM0_SOURCE_ID = "dom0-server";
 
     private static final Logger log = LoggerFactory.getLogger(RecoveryEventMessageHandler.class);
 
@@ -76,13 +78,38 @@ public class RecoveryEventMessageHandler {
             throw new Rejected("PAYLOAD_TOO_LARGE", payload.length + " bytes");
         }
         try {
+            JsonNode root = objectMapper.reader()
+                    .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                    .readTree(payload);
             return objectMapper.readerFor(RecoveryEvent.class)
                     .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-                    .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-                    .readValue(payload);
+                    .readValue(eventObject(root));
         } catch (java.io.IOException | IllegalArgumentException exception) {
             throw new Rejected("PAYLOAD_INVALID", "malformed JSON or field value");
         }
+    }
+
+    // MQTT contract 11: the Worker publishes the event inside the common envelope (source_id dom0-server),
+    // as xenova_mqtt.publish() does. A bare event object is still accepted for older publishers and tests.
+    private static JsonNode eventObject(JsonNode root) {
+        if (root == null || !root.isObject()) {
+            throw new Rejected("PAYLOAD_INVALID", "payload is not a JSON object");
+        }
+        if (!root.has("schema_version") || !root.has("payload")) {
+            return root;
+        }
+        JsonNode event = root.get("payload");
+        if (!event.isObject()) {
+            throw new Rejected("PAYLOAD_INVALID", "envelope payload is not an object");
+        }
+        if (root.hasNonNull("source_id") && !DOM0_SOURCE_ID.equals(root.get("source_id").asText())) {
+            throw new Rejected("SOURCE_INVALID", "unexpected source_id " + root.get("source_id").asText());
+        }
+        if (root.hasNonNull("type") && event.hasNonNull("type")
+                && !root.get("type").asText().equals(event.get("type").asText())) {
+            throw new Rejected("PAYLOAD_INVALID", "envelope type differs from event type");
+        }
+        return event;
     }
 
     private static void validate(RecoveryEvent event) {
