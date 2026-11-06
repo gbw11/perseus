@@ -44,12 +44,29 @@ try:
 except SystemExit as exc:
     assert exc.code == 0
 for name in ('xenova_vehicle.doctor', 'xenova_vehicle._doctor_probe',
-             'depthai', 'cv2', 'numpy'):
+             'xenova_vehicle.runtime.capture', 'xenova_vehicle.oak.device',
+             'xenova_vehicle.recording.writer', 'depthai', 'cv2', 'numpy'):
     assert name not in sys.modules, name
 """
         result = subprocess.run([sys.executable, "-c", code], capture_output=True,
                                 text=True, encoding="utf-8", timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_capture_help_stays_light_and_invalid_options_do_not_create_output(self):
+        result = self.invoke("capture", "--help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--duration-s", result.stdout)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "not-created"
+            for duration in ("nan", "inf", "-1", "301"):
+                result = self.invoke("capture", "--profile", "missing.json", "--output", str(output),
+                                     "--duration-s", duration)
+                self.assertEqual(result.returncode, 2, result.stderr)
+            profile = Path(directory) / "profile.json"
+            profile.write_text('{"schema_version":1}', encoding="utf-8")
+            result = self.invoke("capture", "--profile", str(profile), "--output", str(output))
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse(output.exists())
 
     def test_real_json_command_always_reports_its_scope_and_exit_status(self):
         result = self.invoke("doctor", "--json", "--timeout", "5")

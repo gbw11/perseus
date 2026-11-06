@@ -112,6 +112,39 @@ PYTHONPATH=vehicle/Jetson/src python -m xenova_vehicle doctor --json
 
 일반 패키지 import와 도움말은 진단이나 native import를 실행하지 않는다. 진단 결과는 런타임 준비·주행 허가가 아니며, 공용 장치·DB 락이나 상주 서비스도 만들지 않는다.
 
+## RGB·native depth 벤치 수집
+
+`capture`는 승인한 OAK 한 대의 RGB NV12 640×360과 RIGHT 기준 native depth 640×480을 원본으로 기록한다. 깊이는 little-endian uint16, mm 단위이며0은 invalid다. RGB 정렬·구멍 채우기·빈공간 판정을 하지 않는다. 고정15Hz는 요청값이며 실제 수신률과 누락 수는 결과에서 확인한다.
+
+`profiles/oak-rgb-depth-bench.example.json`을 저장소 밖에 복사하고 `device_mxid`를 실제 승인 장치 ID로 바꾼다. 예시의 `REPLACE_WITH_OAK_MXID`는 실행 시 거절한다. 프로필은 `schema_version=1`, `profile_id=oak-rgb-depth-bench-v1`, `nn_requirement=ABSENT`, `jpeg_enabled=false`인 수집 벤치 전용이다. NN 모델이나 JPEG encoder를 적재하는 운영 그래프와 구분한다.
+
+Jetson의 전용 환경에서 다음과 같이 실행한다. 출력 경로는 새 디렉터리여야 하며 기존 디렉터리는 비어 있어도 덮어쓰지 않는다.
+
+```bash
+~/.local/share/xenova-vehicle/venvs/jp466-py311/bin/xenova-vehicle capture \
+  --profile "$HOME/xenova-config/capture.json" \
+  --duration-s 30 \
+  --output "$HOME/xenova-data/captures/bench-001" \
+  --json
+```
+
+기록 시간은 장치·queue 설정과 초기 시계 표본 확보 뒤부터 센다. 기본 시작 기한90초, 실제 프레임 진전 공백500ms, 종료 기한15초를 벤치 초깃값으로 둔다. 정상 종료가 안 되면 TERM/KILL 각1초 안에서 실제 자식 종료를 확인하고 실패로 보고한다. native hang이나 OS의 미회수 상태에서 자동 재연결하지 않는다. Ctrl+C/SIGTERM도 같은 정리를 거치며 종료 코드는 각각130/143이다. 실제 Nano에서 이 기한을 수락한 것은 아니다.
+
+부모는 가벼운 감시를, A 자식만 SDK·Device·raw bytes를 소유한다. A 안의 단일 writer thread에 최대8개 프레임을 비차단 제출하고 포화 시 drop을 센다. 원본 파일·보정 manifest·index는 writer가 쓰며, 출력 예약/결과 파일은 acquisition 전후의 짧은 별도 I/O 자식에서5초 제한으로 처리한다. 이 I/O 자식과 A는 동시에 실행하지 않는다. Linux 제어 통로는 최대4KiB nonblocking seqpacket이며 raw 이미지를 보내지 않는다. Windows 시험용 stream 대체 통로는 Linux 실기 수락을 대신하지 않는다.
+
+```text
+bench-001/
+├── capture-result.json   # 원 실행 context·기한·종료·통계; 최초에는 complete=false
+├── manifest.json         # 프로필·센서·USB·원 EEPROM/보정·host graph 선언
+├── frames.jsonl          # stream별 원 순번·device/SDK/J 시각·형식·파일 SHA256
+└── frames/
+    └── ...bin            # 손실 없는 NV12/RAW16_LE bytes
+```
+
+각 stream의 ID와 원 시각을 유지한다. RGB/depth의 같은 숫자 순번을 같은 노출로 간주하지 않으며, timestamp 차이10ms 이내의 후보와 실제 양쪽이 저장된 후보 수를 구분한다. SDK host clock과 Python 단조시각의 비교 표본은 보존하지만 OAK 동기·노출/readout 오차의 실측 bound는 아직 없다. `metric_ready=false`와 `runtime_readiness=not_evaluated`를 유지한다. 원 EEPROM 저장도 차량 장착 보정·active K_rect 수락을 의미하지 않는다.
+
+기본 기록 상한은1GiB, 종료 결과 여유64KiB, 디스크 여유 하한8GiB다. 공간 부족·파일 오류·필수 stream 누락·실제 저장된 동기 후보 없음·강제 종료는 성공이 아니다. 정상 제한 시간 기록 완료는0, 런타임 실패/불완전 기록은1, 인수·설정 오류/기존 출력 경로는2다. 중간에 남은 파일은 삭제하지 않는다. 원본·index의 hash 대조와 불완전 기록 처리는 후속 재생기의 책임이며, 이 기록 형식은 정전 내구성이나 주행 준비를 보증하지 않는다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
