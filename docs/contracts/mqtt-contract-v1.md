@@ -121,7 +121,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 | `expected_boot_id` | 필수. 대상 VM 의 현재 boot_id(inventory 나 heartbeat 봉투에서 얻는다). 다르면 `BOOT_MISMATCH` |
 | `expires_at` | 필수. ISO-8601 UTC. 봉투 `sent_at` 보다 늦고 300초 이내여야 한다(`INVALID_COMMAND`). 받은 시각이 이 시각 이후면 `EXPIRED` |
 | `action` | `stress` / `agent_exit` / `auto_delay` / `cpu_stress` / `memory_stress`. 그 밖은 `UNSUPPORTED_ACTION` |
-| `parameters` | 객체. Linux `stress`: `cpu_workers` 0..4, `memory_mib` 0..512, `duration_s` 1..120. `agent_exit`: 빈 객체. Zephyr `auto_delay`: `delay_ms` 1..100, `duration_s` 1..120. `cpu_stress`: `workers` 1..4, `load_percent` 10..100, `duration_s` 1..120. `memory_stress`: `memory_mib` 1..8, `duration_s` 1..120. 모두 정수(bool·실수 불가)이며 명시되지 않은 키는 거절 |
+| `parameters` | 객체. Linux `stress`: `cpu_workers` 0..4, `memory_mib` 0..512, `duration_s` 1..120. `agent_exit`: 빈 객체. Zephyr `auto_delay`: `delay_ms` 1..100, `duration_s` 1..120. `cpu_stress`: 1-vCPU 프로파일이므로 `workers`는 1만 허용하고, `load_percent` 10..100, `duration_s` 1..120. `memory_stress`: `memory_mib` 1..8, `duration_s` 1..120. 모두 정수(bool·실수 불가)이며 명시되지 않은 키는 거절 |
 
 - 시각: 에이전트는 자기 UTC 시계로 만료를 판정한다. `sent_at` 이 에이전트 시계보다 30초 넘게 앞서면 시계를 믿을 수 없다고 보고 `CLOCK_UNTRUSTED` 로 거절한다
 - retained 로 온 명령은 실행하지 않는다(`INVALID_COMMAND`). 명령은 retain 하지 않는다
@@ -141,7 +141,7 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 | `error` | `{code, message}`. 코드: `INVALID_COMMAND`, `UNSUPPORTED_ACTION`, `DEMO_DISABLED`, `BOOT_MISMATCH`, `CLOCK_UNTRUSTED`, `EXPIRED`, `INVALID_PARAMETERS`, `BUSY`, `RESOURCE_UNAVAILABLE`, `STRESS_FAILED`(부하 프로세스가 일찍 죽음), `AGENT_EXITING`(agent_exit 가 stress 를 끝냄, 또는 종료를 기다리는 동안 온 새 명령), `AGENT_STOPPING`(에이전트 정지·재시작으로 끝남), `IDEMPOTENCY_CONFLICT`(같은 `command_id` 의 다른 요청), `STATE_UNAVAILABLE`(명령 기록을 남기거나 읽지 못함) |
 
 - `stress`: `RUNNING` 다음에 `SUCCEEDED` 나 `FAILED` 하나가 온다. 부하는 에이전트와 다른 프로세스에서 내며, 시간이 지나면 남은 부하를 반드시 끝낸다
-- Zephyr `cpu_stress`는 실행 모듈이 연결되기 전까지 `DEMO_DISABLED`로 거절한다. `memory_stress`는 16MiB VM 프로파일의 테스트 펌웨어에서 64KiB system-heap 청크를 목표값까지 할당하고 각 page를 touch한다. 종료 시간, 중단 또는 에이전트 정지 시 모든 청크를 해제한다. 이 값은 고정된 Xen domain RAM 크기를 늘리는 것이 아니라 게스트 내부 heap 사용률을 높인다.
+- Zephyr `cpu_stress`는 주행·MQTT·텔레메트리보다 낮은 우선순위의 단일 스레드가 10ms 주기로 `load_percent`만큼 busy, 나머지는 sleep하여 요청 부하를 근사한다. 높은 우선순위의 제품 작업은 항상 이 스레드를 선점할 수 있으며, 종료 시간·중단·에이전트 정지 시 부하를 끝낸다. `memory_stress`는 16MiB VM 프로파일의 테스트 펌웨어에서 64KiB system-heap 청크를 목표값까지 할당하고 각 page를 touch한다. 종료 시간, 중단 또는 에이전트 정지 시 모든 청크를 해제한다. 이 값은 고정된 Xen domain RAM 크기를 늘리는 것이 아니라 게스트 내부 heap 사용률을 높인다.
 - 자원 신뢰 정책은 diagnostics의 서로 다른 표본만 평가한다. 기본값은 `memory.kernel_heap.used_bytes / (used + free)`가 85% 이상인 표본 5개 연속이며, 두 값은 빌드 설정으로 조정할 수 있다. 조건을 충족하면 drive-v1은 `vm.trust` 이벤트를 `reason=MEMORY_PRESSURE`, 관측 사용률·임계치·연속 표본 수·명령 식별자와 함께 한 번 발행한다. 정상 범위 표본이 관측되면 episode가 해제된다. Gateway는 현재 주행 owner의 binding이 검증된 이벤트만 받아 현재 모드에 필요한 앱 기준으로 기존 owner 차단과 준비된 미러 선정을 한 Authority 변경으로 기록하며, 미러가 없으면 SAFE_STOP으로 전환한다. Recovery Worker는 같은 execution을 `VM_UNTRUSTED`로 고정해 재시작하고, Rejoin Coordinator는 새 execution의 readiness hold가 끝난 뒤 기존 보호를 해제하고 Standby로 합류시킨다.
 - `agent_exit`: 종결 결과는 `ACCEPTED` 하나다. 에이전트는 그 발행의 PUBACK 을 확인한 뒤에만 종료하고 다시 시작하지 않는다. 연결이 없거나 PUBACK 이 늦으면 다른 결과를 내지 않고 기다린다(QoS 1 발행은 늦게라도 전달될 수 있어 실패 결과를 따로 내면 모순된다). 기다리는 동안 새 명령은 `AGENT_EXITING` 으로 거절한다. PUBACK 전에 에이전트가 다시 시작하면 같은 `ACCEPTED` 를 다시 제출하고 확인되면 종료한다. 종료 완료를 기록하지 못하면 종료하지 않고 기록될 때까지 다시 시도한다. 확인 뒤 종료한 에이전트를 사람이 다시 시작했다면 다시 종료하지 않는다. 종료가 실제로 일어났는지는 heartbeat 가 끊기는 것(3장)으로 확인한다. 이후 복구는 Recovery Worker 의 판정을 따른다
 - 결과를 받지 못하면(만료까지) 보낸 쪽은 결과 없음으로 처리한다. 같은 `command_id` 로 다시 보내면 실행 없이 마지막 결과만 돌아온다
