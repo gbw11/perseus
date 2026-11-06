@@ -7,9 +7,9 @@ ESP32 쪽 규칙 (게이트웨이 README "ESP32 시리얼 프레임"):
 - 같은 generation 에서 counter 가 같거나 뒤로 간(8비트 순환으로 128 이상 차이) 프레임은 중복·역전이라 버린다.
 - 유효 프레임이 300 ms 없으면 정지한다 (와치독은 Simulator 가 시각으로 판정).
 
-게이트웨이는 지금 `serial.Serial(port)` 로만 열기 때문에 TCP 로 보내려면
-dom0 에서 `socat pty,link=/tmp/ttyXENOVA,raw,echo=0 tcp:<PC>:7600` 으로 가상 시리얼을 만들거나
-게이트웨이 SerialSink 를 `serial.serial_for_url("socket://<PC>:7600")` 로 바꿔야 한다 (S15P31E110-269, 게이트웨이를 최근 고친 박신영 님 리뷰).
+게이트웨이는 `serial.serial_for_url` 로 열므로 `--serial-port socket://<PC>:7600` 으로 바로 붙는다
+(S15P31E110-269, 게이트웨이 README). socat 가상 시리얼(`socat pty,link=/tmp/ttyXENOVA,raw,echo=0 tcp:<PC>:7600`)은 보조 방법.
+게이트웨이의 write-only(legacy DRIVE·STOP) 프레임만 흉내 낸다. feedback HELLO·COMMAND 프레임은 버린다.
 """
 
 from __future__ import annotations
@@ -27,6 +27,8 @@ log = logging.getLogger("xenova_simulator")
 
 # 0x00 이 한참 안 오면 잡음이라 버린다 (정상 프레임은 16 바이트 이하)
 _MAX_PENDING = MAX_FRAME_BYTES * 4
+# 게이트웨이는 명령·정지 프레임을 20 ms 마다 보낸다. 이만큼 아무것도 안 오면 반쯤 열린 연결로 보고 닫는다
+IDLE_DISCONNECT_S = 2.0
 
 
 @dataclass(frozen=True)
@@ -113,9 +115,18 @@ class FrameReceiver:
 class FrameServer:
     """TCP 로 프레임 바이트를 받는다. 게이트웨이 연결은 한 번에 하나만 읽고, 끊기면 다음 연결을 받는다."""
 
-    def __init__(self, receiver: FrameReceiver, host: str, port: int, *, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        receiver: FrameReceiver,
+        host: str,
+        port: int,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        idle_s: float = IDLE_DISCONNECT_S,
+    ) -> None:
         self._receiver = receiver
         self._clock = clock
+        self._idle_s = idle_s
         self._sock = socket.create_server((host, port))
         self._sock.settimeout(0.2)
         self.address = self._sock.getsockname()[:2]
@@ -150,13 +161,20 @@ class FrameServer:
             log.warning("게이트웨이 시리얼 연결 끊김 (300 ms 뒤 와치독 정지)")
 
     def _read(self, conn: socket.socket) -> None:
+        last = time.monotonic()
         while not self._stop.is_set():
             try:
                 data = conn.recv(4096)
             except TimeoutError:
+                # FIN 없이 사라진 연결(dom0 재부팅·네트워크 단절)에 묶이면 게이트웨이가 다시 붙어도
+                # 읽지 못한다. 게이트웨이는 늘 20 ms 마다 프레임을 내므로 오래 조용하면 끊고 accept 로 돌아간다
+                if time.monotonic() - last > self._idle_s:
+                    log.warning("게이트웨이 시리얼 연결이 %.1f s 동안 조용해 닫음", self._idle_s)
+                    return
                 continue
             except OSError:
                 return
             if not data:
                 return
+            last = time.monotonic()
             self._receiver.feed(data, self._clock())

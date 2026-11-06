@@ -1,4 +1,4 @@
-"""서킷 트랙 (MQTT 계약 v1.4 §11 `sim.world.track`). 관리 콘솔 mock(`admin-console/src/mocks/simEngine.ts` buildTrack)과
+"""서킷 트랙 (MQTT 계약 §12 `sim.world.track`). 관리 콘솔 mock(`admin-console/src/mocks/simEngine.ts` buildTrack)과
 같은 계산이라 화면 탑뷰·출발선·벽이 시뮬레이터와 맞는다.
 
 - 중심선: tracks.json (tracks.ts 에서 tools/export_tracks.py 로 옮김). 약 0.2 m 간격, 닫힌 고리, 진행 방향 순서.
@@ -181,7 +181,7 @@ class Track:
         return min(xs) - margin, min(ys) - margin, max(xs) + margin, max(ys) + margin
 
     def payload(self) -> dict:
-        """sim.world.track (계약 v1.4 §11)."""
+        """sim.world.track (계약 §12)."""
         return {
             "shape": "centerline", "id": self.id, "name": self.name, "real_m": self.real_m,
             "lane_width_m": self.lane_width_m, "curb_m": self.curb_m,

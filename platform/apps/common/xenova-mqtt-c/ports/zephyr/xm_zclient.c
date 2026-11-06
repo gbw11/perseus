@@ -48,6 +48,12 @@ static void sent_at(char out[32])
 
 static void schedule_retry(struct xm_zclient *c)
 {
+	/* mqtt_abort() 는 연결 상태면 MQTT_EVT_DISCONNECT 를 내고, on_event 가 여기를 먼저 부른다.
+	 * 호출한 쪽이 이어서 다시 부르면 대기가 두 번 늘어 1→2→4 초가 아니라 2→8 초가 된다.
+	 * 이미 끊긴 상태로 미래 재시도가 잡혀 있으면 같은 실패이므로 다시 늘리지 않는다 */
+	if (!c->connected && !c->socket_open && k_uptime_get() < c->retry_at_ms) {
+		return;
+	}
 	c->connected = false;
 	c->socket_open = false;
 	c->retry_at_ms = k_uptime_get() + c->backoff_ms;

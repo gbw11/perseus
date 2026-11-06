@@ -102,6 +102,7 @@ static void warm_report(enum drive_task task,const struct drive_result *selected
  int n=xm_app_lifecycle_json(payload,sizeof(payload),generation,++a->check,work->progress,phase,state,reason);
  xm_topic_vm_app_events(topic,sizeof(topic),inputs.vm_id,task==DRIVE_TASK_AUTO?AUTO_APP_ID:MANUAL_APP_ID);
  if(n>0)(void)xd_publish_supervision(topic,payload,a->check,tick,&inputs);
+ else (void)xdiag_error("app-supervision",n); /* 조합 거절(-EINVAL)이 소리 없이 100 ms 보고 공백이 되지 않게 */
  strcpy(a->last_phase,phase);strcpy(a->last_state,state);strcpy(a->last_reason,reason?reason:"");
  a->generation=generation;a->due=tick+100;
 }

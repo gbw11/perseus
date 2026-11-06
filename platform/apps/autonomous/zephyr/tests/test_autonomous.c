@@ -67,8 +67,8 @@ static void test_lane_keeping(void)
 static void arc_perception(float r, float *offset, float *heading)
 {
 	float R = fabsf(r), s = r > 0 ? 1.0f : -1.0f;
-	float y0 = s * (R - sqrtf(R * R - 0.2f * 0.2f)); /* 카메라(후륜 축 0.2 m 앞) 아래 중심선 */
-	float y1 = s * (R - sqrtf(R * R - 0.8f * 0.8f)); /* 카메라 0.6 m 앞 */
+	float y0 = s * (R - sqrtf(fmaxf(0.0f, R * R - 0.2f * 0.2f))); /* 카메라(후륜 축 0.2 m 앞) 아래 중심선 */
+	float y1 = s * (R - sqrtf(fmaxf(0.0f, R * R - 0.8f * 0.8f))); /* 카메라 0.6 m 앞. FMA 축약 시 R = 0.8 에서 음수가 돼 NaN 이 되지 않게 0 으로 자른다 */
 
 	*offset = -y0;
 	*heading = atanf((y1 - y0) / 0.6f);
