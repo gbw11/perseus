@@ -12,7 +12,7 @@ import {
   type VmAction,
 } from '../api/queries';
 import type { Vm } from '../api/types';
-import { AGENT_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
+import { AGENT_LABEL, canStartVm, canStopVm, STATE_HEALTH, STATE_LABEL } from '../format';
 import { clock, describe } from '../domain/events';
 import { MODE_LABEL, osLabel, roleOf } from '../domain/roles';
 import { observedControl, vmAppObservations } from '../domain/driveObservations';
@@ -117,10 +117,10 @@ function LifecycleButtons({ vm }: { vm: Vm }) {
     );
   return (
     <div className={styles.rowActions}>
-      <Button onClick={() => run('start')} disabled={vm.state === 'running'}>
+      <Button onClick={() => run('start')} disabled={!canStartVm(vm.state)}>
         시작
       </Button>
-      <Button variant="secondary" onClick={() => run('stop')} disabled={vm.state !== 'running'}>
+      <Button variant="secondary" onClick={() => run('stop')} disabled={!canStopVm(vm.state)}>
         정지
       </Button>
     </div>

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router';
 import { useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
 import { osLabel, sortVms } from '../domain/roles';
-import { STATE_HEALTH, STATE_LABEL } from '../format';
+import { canStartVm, canStopVm, STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
 import { VmOperationNotice } from './VmOperationProgress';
 import { useVmOperationProgress } from './useVmOperationProgress';
@@ -181,7 +181,7 @@ export function VmListPage() {
                     <Button
                       size="sm"
                       onClick={() => run(vm, 'start')}
-                      disabled={vm.state === 'running' || controlsDisabled}
+                      disabled={!canStartVm(vm.state) || controlsDisabled}
                     >
                       시작
                     </Button>
@@ -189,7 +189,7 @@ export function VmListPage() {
                       size="sm"
                       variant="secondary"
                       onClick={() => run(vm, 'stop')}
-                      disabled={vm.state !== 'running' || controlsDisabled}
+                      disabled={!canStopVm(vm.state) || controlsDisabled}
                     >
                       정지
                     </Button>

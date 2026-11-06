@@ -37,3 +37,11 @@ export function formatElapsedTime(elapsedMs: number): string {
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
+
+/**
+ * VM 관리 API 계약 §5 (start·stop). start 는 stopped 에서만 의미가 있다 — crashed·paused·stopping 은
+ * 409 INVALID_VM_STATE(정지 후 다시 시작), running 은 그대로 반환. stop 은 runtime 유무와 관계없이
+ * dom0 stop 을 부르므로 이미 꺼진 VM 말고는 모두 누를 수 있어야 crashed·paused VM 을 정지 → 시작으로 되살린다.
+ */
+export const canStartVm = (state: VmState): boolean => state === 'stopped';
+export const canStopVm = (state: VmState): boolean => state !== 'stopped';

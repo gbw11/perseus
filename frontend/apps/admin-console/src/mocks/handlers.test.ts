@@ -1,6 +1,6 @@
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ApiError, getSession, refreshSession, request, setSession } from '../api/client';
+import { getSession, refreshSession, request, setSession } from '../api/client';
 import {
   VM_CPU_PERCENT_METRIC,
   type MetricHistoryResponse,
@@ -9,6 +9,7 @@ import {
   type Vm,
   type VmListResponse,
 } from '../api/types';
+import { canStartVm, canStopVm } from '../format';
 import { setMockBoardDown } from './board';
 import { MOCK_PASSWORD, VM_IDS } from './data';
 import { handlers, resetMockState } from './handlers';
@@ -82,14 +83,22 @@ describe('MSW mock API', () => {
     expect(getSession()?.access_token).not.toBe(first.access_token);
   });
 
-  it('정지 → 시작, 같은 상태로 다시 보내면 INVALID_VM_STATE', async () => {
+  it('정지 → 시작, 같은 상태로 다시 보내면 그대로 200 (계약 §5, backend VmService 와 같음)', async () => {
     await login();
     const id = '11111111-1111-4111-8111-111111111111';
     expect((await request<Vm>(`/api/v1/vms/${id}/stop`, { method: 'POST' })).state).toBe('stopped');
-    const again = request(`/api/v1/vms/${id}/stop`, { method: 'POST' });
-    await expect(again).rejects.toBeInstanceOf(ApiError);
-    await expect(again).rejects.toMatchObject({ status: 409, code: 'INVALID_VM_STATE' });
+    expect((await request<Vm>(`/api/v1/vms/${id}/stop`, { method: 'POST' })).state).toBe('stopped');
     expect((await request<Vm>(`/api/v1/vms/${id}/start`, { method: 'POST' })).state).toBe('running');
+    expect((await request<Vm>(`/api/v1/vms/${id}/start`, { method: 'POST' })).state).toBe('running');
+  });
+
+  it('canStartVm·canStopVm — crashed·paused 는 정지만 되고, 정지 뒤 시작한다', () => {
+    expect(canStartVm('stopped')).toBe(true);
+    for (const state of ['running', 'crashed', 'paused', 'stopping'] as const)
+      expect(canStartVm(state)).toBe(false);
+    for (const state of ['running', 'crashed', 'paused', 'stopping'] as const)
+      expect(canStopVm(state)).toBe(true);
+    expect(canStopVm('stopped')).toBe(false);
   });
 
   it('생성은 입력값을 검사하고, 같은 이름은 VM_NAME_CONFLICT', async () => {

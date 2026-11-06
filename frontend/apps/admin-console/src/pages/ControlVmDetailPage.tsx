@@ -5,7 +5,7 @@ import { ApiError } from '../api/client';
 import { useVm, useVmResources, useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
 import { osLabel, sortVms } from '../domain/roles';
-import { AGENT_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
+import { AGENT_LABEL, canStartVm, canStopVm, STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
 import { ResourceAdjustmentPanel } from './ResourceAdjustmentPanel';
 import { VcpuPinningPanel } from './VcpuPinningPanel';
@@ -136,14 +136,14 @@ export function ControlVmDetailPage() {
               <div className={styles.lifecycleActions}>
                 <Button
                   onClick={() => run(vm.data, 'start')}
-                  disabled={vm.data.state === 'running' || operationPending}
+                  disabled={!canStartVm(vm.data.state) || operationPending}
                 >
                   VM 시작
                 </Button>
                 <Button
                   variant="secondary"
                   onClick={() => run(vm.data, 'stop')}
-                  disabled={vm.data.state !== 'running' || operationPending}
+                  disabled={!canStopVm(vm.data.state) || operationPending}
                 >
                   VM 정지
                 </Button>
