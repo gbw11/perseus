@@ -363,6 +363,8 @@ export interface TelemetryHeartbeatResponse {
   last_collection_success_uptime_ms?: string | null;
   last_collection_success_age_ms: number | null;
   collection_failures_total: number | null;
+  /** MQTT 제출 실패 누계 (백엔드 BigInteger) */
+  publish_submit_failures_total?: number | null;
   received_at: string | null;
   age_ms: number | null;
 }

@@ -49,8 +49,15 @@ vi.mock('../api/queries', async (importOriginal) => {
       ],
     };
   };
+  const heartbeat = await import('../mocks/telemetryHeartbeat');
   return {
     ...actual,
+    useTelemetryHeartbeat: (vmId: string) => ({
+      data: heartbeat.mockTelemetryHeartbeat(vmId),
+      error: null,
+      isError: false,
+      isPending: false,
+    }),
     useVms: () => ({ data: { items: data.initialVms() }, isPending: false }),
     useMetrics: (vmId: string) => ({
       data: {
@@ -127,10 +134,12 @@ describe('Network 탭', () => {
     const linux = screen.getByLabelText('interaction 네트워크 수치');
     expect(rowLabels(linux)).toEqual(['속도', '누적']);
 
-    // 표가 카드의 첫 블록이고, 그래프는 그 뒤에 온다
+    // 카드 본문은 상태 줄 → 표 → 그래프 순서
     for (const table of [zephyr, linux]) {
       const block = table.parentElement!;
-      expect(block.parentElement?.firstElementChild).toBe(block);
+      const statusLine = block.parentElement!.firstElementChild!;
+      expect(within(statusLine as HTMLElement).getAllByRole('status').length).toBeGreaterThan(0);
+      expect(statusLine.nextElementSibling).toBe(block);
       const chart = within(block.parentElement!).getAllByText('송수신 속도')[0]!;
       expect(block.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
@@ -147,6 +156,22 @@ describe('Network 탭', () => {
     expect(screen.queryByText('ok')).not.toBeInTheDocument();
     expect(screen.queryByText(/직접 계측|rx_bytes_per_s/)).not.toBeInTheDocument();
     expect(screen.getByText('Agent 연결됨')).toBeInTheDocument();
+
+    // 상태 줄: 제목 줄이 아니라 카드 본문 첫 줄. Zephyr 는 수집 상태 하나, Linux 는 Agent + 수집 상태
+    expect(screen.getByText('수집 중')).toBeInTheDocument();
+    expect(screen.getByText('수집 저하')).toBeInTheDocument();
+    const agentItem = screen.getByText('Agent 연결됨');
+    const stale = screen.getByText('수집기 · 관측 만료');
+    expect(agentItem.parentElement).toBe(stale.parentElement);
+    expect(agentItem.nextElementSibling).toBe(stale);
+    // 제목 줄(역할 배지·마지막 갱신)에는 상태 항목이 없다
+    expect(document.querySelectorAll('[class*="memoryCardActions"]')).toHaveLength(3);
+    for (const item of [agentItem, stale]) {
+      expect(item.closest('[class*="memoryCardActions"]')).toBeNull();
+    }
+    expect(stale).toHaveAttribute('title', expect.stringContaining('수집 실패 누계: 0'));
+    // 알약(StatusBadge)이 아니라 색 점 + 글자
+    expect(stale).toHaveAttribute('data-tone', 'recovering');
   });
 
   it('메트릭 오류면 두 줄 안내를 카드마다 보여 준다', () => {

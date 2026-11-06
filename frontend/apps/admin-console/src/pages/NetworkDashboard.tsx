@@ -1,7 +1,7 @@
-import { Card, StatusBadge, type Health } from '@xenova/ui';
+import { Card, type Health } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import type { DriveState } from '../api/drive';
-import { LIVE_POLL_MS, useMetrics } from '../api/queries';
+import { LIVE_POLL_MS, useMetrics, useTelemetryHeartbeat } from '../api/queries';
 import type { AgentStatus, Vm } from '../api/types';
 import { buildPacketRateSeries, bytesToKiB, poolLevel } from '../domain/memoryPools';
 import {
@@ -17,11 +17,13 @@ import {
 } from '../domain/networkMetrics';
 import { networkPoolView, type NetworkPool } from '../domain/networkPools';
 import { osLabel, roleOf, sortVms, UNASSIGNED_COLOR } from '../domain/roles';
+import { publisherObservation } from '../domain/telemetryPublisher';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import type { DiskIoCounter } from '../domain/vmMetrics';
 import { AGENT_LABEL } from '../format';
 import { LiveDataAlert } from '../layout/LiveDataAlert';
 import { useNow } from '../useNow';
+import { collectorBadgeLabel, collectorTooltip } from './collectorStatus';
 import { MetricErrorNotice } from './MetricErrorNotice';
 import styles from './pages.module.css';
 import { NetTable, RxTxChart, type NetCell, type NetRow } from './resourceCharts';
@@ -107,7 +109,7 @@ function ZephyrNetworkPanel({ vm, drive }: { vm: Vm; drive: DriveState | null })
       className={styles.memoryVmCard}
       style={style}
       title={
-        <span className={styles.memoryVmTitle}>
+        <span className={`${styles.memoryVmTitle} ${styles.netVmTitle}`}>
           <strong>{vm.name}</strong>
           <small>{role?.short ?? '역할 미지정'} · Zephyr · netfront</small>
         </span>
@@ -121,6 +123,9 @@ function ZephyrNetworkPanel({ vm, drive }: { vm: Vm; drive: DriveState | null })
         </span>
       }
     >
+      <div className={styles.netStatusLine}>
+        <CollectorStatus vmId={vm.vm_id} />
+      </div>
       {metrics.error && (
         <MetricErrorNotice detail="최근 관측값·이력을 표시하며, Pool 만료 여부는 영역별로 구분합니다." />
       )}
@@ -185,7 +190,7 @@ function LinuxNetworkPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) 
       className={styles.memoryVmCard}
       style={style}
       title={
-        <span className={styles.memoryVmTitle}>
+        <span className={`${styles.memoryVmTitle} ${styles.netVmTitle}`}>
           <strong>{vm.name}</strong>
           <small>
             {role?.short ?? '역할 미지정'} · {osLabel(vm)}
@@ -194,16 +199,21 @@ function LinuxNetworkPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) 
       }
       actions={
         <span className={styles.memoryCardActions}>
-          <span className={styles.networkCardBadges}>
-            <StatusBadge health={AGENT_HEALTH[agent]} label={`Agent ${AGENT_LABEL[agent]}`} size="sm" />
-            <span className={styles.authority} data-authority={authority.toLowerCase()}>
-              {authority}
-            </span>
+          <span className={styles.authority} data-authority={authority.toLowerCase()}>
+            {authority}
           </span>
           <small>마지막 갱신 {relativeTime(series.observedAt)}</small>
         </span>
       }
     >
+      <div className={styles.netStatusLine}>
+        <StatusItem
+          tone={AGENT_HEALTH[agent]}
+          label={`Agent ${AGENT_LABEL[agent]}`}
+          title="v1 Agent 연결 상태 (heartbeat)"
+        />
+        <CollectorStatus vmId={vm.vm_id} />
+      </div>
       {metrics.error && <MetricErrorNotice />}
       {!metrics.error && !series.observedAt && (
         <div className={styles.memoryNotice}>
@@ -224,6 +234,27 @@ function LinuxNetworkPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) 
       />
     </Card>
   );
+}
+
+/** 카드 제목 아래 상태 줄의 한 항목. 알약 배경 없이 상태 색 점 + 작은 글자 */
+function StatusItem({ tone, label, title }: { tone: Health; label: string; title: string }) {
+  return (
+    <span className={styles.netStatusItem} data-tone={tone} title={title} role="status">
+      <i aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
+/**
+ * 수집 상태. v2 telemetry heartbeat 의 수집기 상태이며 v1 Agent 연결(Linux "Agent …" 항목)과 다르다.
+ * 판단은 VM 상세(PublisherStatus)·Overview 와 같은 publisherObservation 을 쓰고, 자세한 값은 툴팁으로만 보인다
+ */
+function CollectorStatus({ vmId }: { vmId: string }) {
+  const heartbeat = useTelemetryHeartbeat(vmId);
+  const now = useNow();
+  const { report, label, tone } = publisherObservation(vmId, heartbeat);
+  return <StatusItem tone={tone} label={collectorBadgeLabel(label)} title={collectorTooltip(report, now)} />;
 }
 
 /** 속도 / 누적 두 행 */

@@ -3709,13 +3709,51 @@ button.chip:hover:not(.chipOn) {
   }
 }
 
-/* ---- Network 탭 카드 배지 ---- */
-.networkCardBadges {
+/* ---- Network 탭 카드 제목·상태 줄 ---- */
+/* 부제("인터랙션 · Debian 13")는 한 줄. 좁으면 말줄임 */
+.netVmTitle {
+  min-width: 0;
+}
+.netVmTitle small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 제목 아래 얇은 상태 줄. 세 카드 모두 한 줄 높이로 같은 자리에 온다 */
+.netStatusLine {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   align-items: center;
-  gap: var(--x-space-2);
+  gap: var(--x-space-1) var(--x-space-4);
+  min-height: calc(var(--x-text-xs) * 1.5);
+  margin-bottom: var(--x-space-3);
+  font-size: var(--x-text-xs);
+  line-height: 1.5;
+}
+/* 알약 배경 없이 상태 색 점 + 작은 글자. 글자는 본문 색이라 대비가 상태 색과 무관하다 */
+.netStatusItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--x-space-1);
+  color: var(--x-text);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: help;
+}
+.netStatusItem i {
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: var(--x-stopped);
+}
+.netStatusItem[data-tone='ok'] i {
+  background: var(--x-ok);
+}
+.netStatusItem[data-tone='recovering'] i {
+  background: var(--x-recovering);
+}
+.netStatusItem[data-tone='fault'] i {
+  background: var(--x-fault);
 }
 
 /* ---- Network 탭 RX/TX 표 (행 이름 | 간격 | RX 수신 | TX 송신). 숫자는 선과 같은 색, 단위는 작고 흐리게 ---- */
