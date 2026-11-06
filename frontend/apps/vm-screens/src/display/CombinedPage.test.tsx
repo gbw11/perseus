@@ -126,19 +126,26 @@ describe('CombinedPage (모니터 2대를 합친 화면)', () => {
     expect(screen.getByTestId('combined')).toHaveAttribute('data-theme', 'dark');
   });
 
-  it('표시 연결이 끊기면 값을 지우고 알린다', () => {
-    show(driving(), false);
+  it('주행 중 표시 연결이 끊기면 정차 화면으로 돌아가지 않고 값을 지우고 알린다', () => {
+    const { rerender } = show(driving());
+    vi.mocked(useDisplay).mockReturnValue({ presentation: driving(), connected: false, error: '끊김' });
+    rerender(<CombinedPage />);
+    expect(screen.queryByTestId('parked-view')).toBeNull();
     expect(screen.getByRole('alert')).toHaveTextContent('현재 값은 미확인');
     expect(screen.getByTestId('speed-value')).toHaveTextContent('—');
     expect(screen.getByTestId('runtime-value')).toHaveTextContent('—');
     expect(screen.getByLabelText('최대 속도')).toHaveTextContent('—');
   });
 
-  it('제안 필드가 없으면 수신 대기로 둔다', () => {
+  it('트립·속도를 아직 못 받았으면 빈 주행 화면 대신 정차 화면에 둔다', () => {
     show(presentationFixture());
-    expect(screen.getByTestId('speed-value')).toHaveTextContent('—');
-    expect(screen.getByText('주행 시간 수신 대기')).toBeInTheDocument();
-    expect(screen.getByText('트립 수신 대기')).toBeInTheDocument();
+    expect(screen.getByTestId('parked-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('speed-value')).toBeNull();
+  });
+
+  it('처음부터 연결이 안 되면 정차 화면에 둔다', () => {
+    show(driving(), false);
+    expect(screen.getByTestId('parked-view')).toBeInTheDocument();
   });
 });
 
