@@ -6,12 +6,16 @@ Jetson Nano B01과 OAK-D-Lite에서 수집한 관측을 처리해 차선·장애
 
 ```text
 Jetson/
+├── pyproject.toml                  # 패키지·명령 진입점
 ├── requirements/                   # 검증된 설치 버전·해시
 ├── profiles/                       # 수집·재생·운영 설정
 ├── assets/
 │   └── manifests/                  # 모델 출처·해시·입출력·라이선스
 ├── src/
 │   └── xenova_vehicle/
+│       ├── cli.py                  # 명령 분기
+│       ├── doctor.py               # 설치·연결 진단
+│       ├── _doctor_probe.py        # native 진단 격리
 │       ├── runtime/                # 프로세스·스레드·IPC·기동·종료
 │       ├── oak/                    # DepthAI 그래프·수신·원시 시각
 │       ├── perception/             # 차선·구획·깊이·NN 출력 해석
@@ -42,3 +46,35 @@ Jetson/
 - 주차칸 선택·경로 계획·추종과 모드 권한은 RPi 측 책임이다. ESP32 펌웨어는 형제 디렉터리인 `../ESP32/`에서 관리한다.
 
 실제 녹화 데이터·지도 DB·로그·모델 바이너리는 소스 외부의 실행 경로에서 관리한다. 저장소에는 코드·설정 예시·자산 명세와 작은 고정 시험 입력을 관리한다.
+
+## 실행
+
+Python 3.11 이상에서 사용한다. `setuptools>=68`이 준비된 환경에서는 저장소 루트에서 다음과 같이 패키지와 명령 진입점을 설치한다. 별도의 런타임 라이브러리는 자동 설치하지 않는다.
+
+```bash
+python -m pip install --no-deps --no-build-isolation -e vehicle/Jetson
+xenova-vehicle --help
+xenova-vehicle doctor
+xenova-vehicle doctor --json --timeout 10
+```
+
+설치 없이 소스에서 실행할 때는 저장소 루트에서 다음 명령을 사용한다.
+
+```bash
+PYTHONPATH=vehicle/Jetson/src python -m xenova_vehicle doctor --json
+```
+
+`doctor`는 수동 설치·연결 진단 도구다. Python·Nano/L4T·라이브러리 배포판 버전·실제 import 위치와 SDK의 장치 검색 결과를 출력한다. 버전 기준은 상세설계 v1.3의 고정 설치 후보이며, 부족한 구성 요소를 자동 설치하지 않는다. `--timeout`은 native import와 검색 전체의 제한 시간이며 기본10초, 허용 범위0.1~30초다.
+
+종료 코드는 검사 통과0, 실패·미확인1, CLI 사용 오류2다. SDK 장치 검색은 Device를 열지 않으며 OAK-D-Lite 모델·센서·USB 속도·영상 수신·보정·NN 준비를 확인한 것으로 해석하지 않는다. Nano 모델 정보로 carrier B01을 확정하지 않으며, L4T 일치도 JetPack 전체 패키지 설치 검증과 구분한다.
+
+일반 패키지 import와 도움말은 진단이나 native import를 실행하지 않는다. 진단 결과는 런타임 준비·주행 허가가 아니며, 공용 장치·DB 락이나 상주 서비스도 만들지 않는다.
+
+## 테스트
+
+`vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests/unit -v
+PYTHONPATH=src python -m unittest discover -s tests/integration -v
+```
