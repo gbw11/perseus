@@ -167,16 +167,17 @@ public class DriveStateTracker {
     }
 
     private void onVmAppEvent(String vmId, String appId, byte[] payload, long now) {
-        if (payload.length > 1024) {
-            throw new Rejected("PAYLOAD_TOO_LARGE", "scoped app report");
-        }
         JsonNode envelope = read(payload);
         if (envelope == null || !envelope.isObject()) {
             throw new Rejected("PAYLOAD_INVALID", "scoped app envelope is not an object");
         }
         String type = envelope.path("type").asText("");
         if (!"app.lifecycle".equals(type) && !"app.heartbeat".equals(type)) {
-            return;
+            return; // other types on this topic (e.g. app.state.snapshot, up to 8192 bytes) are not ours to judge
+        }
+        // The 1024-byte limit belongs to lifecycle/heartbeat reports (contract §6.1-6.2), not to every type here.
+        if (payload.length > 1024) {
+            throw new Rejected("PAYLOAD_TOO_LARGE", "scoped app report");
         }
         validate(envelope, appId);
         String bootId = text(envelope, "boot_id");
