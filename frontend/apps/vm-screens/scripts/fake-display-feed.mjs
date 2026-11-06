@@ -312,7 +312,8 @@ function build(now) {
     xen_state: xen,
     app_state: appState,
     agent_supported: agent,
-    os: { expected, observed: expected, current_run_verified: true },
+    // 실제 수집기: current_run_verified 는 늘 false, inventory(에이전트)가 없으면 observed=null (display-pipeline-v1 §os)
+    os: { expected, observed: agent ? expected : null, current_run_verified: false },
     sources: {
       xen: fresh(200),
       app: appState === 'ready' ? fresh(300) : stale(4000),
@@ -321,18 +322,22 @@ function build(now) {
     },
     screen_source: { kind: 'status', handle: null },
   });
-  const primaryState = primaryAlive ? 'ready' : primaryXen === 'crashed' ? 'failed' : 'unknown';
+  // 실제 수집기는 Xen 이 running 이 아니면 앱 상태를 판단하지 않는다 (state.py: unknown)
+  const primaryState = primaryAlive ? 'ready' : 'unknown';
   const vms = [
     vm(IDS.primary, 'primary_drive', 1, primaryXen, 'zephyr', primaryState, false),
     vm(IDS.backup, 'backup_drive', 2, 'running', 'zephyr', 'ready', false),
     vm(IDS.interaction, 'interaction', 3, 'running', 'debian', 'ready', true),
   ];
-  const decision = (state) =>
-    state === 'ready'
-      ? { kind: 'app_ready', label: '앱 상태 수신 정상', tone: 'ok' }
-      : state === 'failed'
-        ? { kind: 'app_failed', label: '앱 오류', tone: 'danger' }
-        : { kind: 'app_waiting', label: 'VM 실행 중 · 앱 상태 미확인', tone: 'warning' };
+  // 수집기 policy.decide_vm 과 같은 kind·문구 (Xen 상태가 먼저, 그다음 앱 상태)
+  const decision = (v) =>
+    v.xen_state === 'crashed'
+      ? { kind: 'crashed', label: 'VM 장애', tone: 'danger' }
+      : v.app_state === 'ready'
+        ? { kind: 'status', label: '앱 상태 수신 정상', tone: 'ok' }
+        : v.app_state === 'failed'
+          ? { kind: 'app_error', label: '앱 오류 · VM 실행 중', tone: 'danger' }
+          : { kind: 'app_waiting', label: 'VM 실행 중 · 앱 상태 미확인', tone: 'warning' };
 
   // 트립: 속도 적분. 도착하면 잠시 쉬고 0 으로 돌린 뒤 출발 전 정차부터 다시
   const dt = Math.max(0, Math.min(2, (now - odometer.at) / 1000));
@@ -460,7 +465,7 @@ function build(now) {
         vm_id: IDS.interaction,
       },
     ],
-    decisions: Object.fromEntries(vms.map((v) => [v.vm_id, decision(v.app_state)])),
+    decisions: Object.fromEntries(vms.map((v) => [v.vm_id, decision(v)])),
     state: {
       source_epoch: epoch,
       sequence,
@@ -470,7 +475,7 @@ function build(now) {
       drive: {
         active_vm_id: active,
         mode,
-        ai_status: 'ok',
+        ai_status: 'unknown',
         source: fresh(80),
         authority: {
           selected_vm_id: selected,
