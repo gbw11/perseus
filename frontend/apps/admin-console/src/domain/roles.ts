@@ -93,6 +93,14 @@ export const MODE_HEALTH: Record<DriveMode, Health> = {
 };
 
 /**
+ * 앱 heartbeat 신선 기준 — backend DriveStateTracker HEARTBEAT_FRESH_MS(3000, age <= 3000 이면 fresh)와
+ * domain/driveObservations 와 같은 경계.
+ */
+const HEARTBEAT_FRESH_MS = 3000;
+const heartbeatFresh = (app: DriveApp | undefined) =>
+  app?.heartbeat_ago_ms != null && app.heartbeat_ago_ms <= HEARTBEAT_FRESH_MS;
+
+/**
  * 앱 칸 상태 배지 (화면 정의서 §3 배지 4종).
  * Xen 상태와 동일 UUID의 앱 heartbeat를 구분한다. 미수신은 경고색이며 라벨은 미확인으로 표시한다.
  */
@@ -100,8 +108,7 @@ export function appHealth(_role: Role | null, vm: Vm | undefined, app: DriveApp 
   if (vm && vm.state !== 'running') return STATE_HEALTH[vm.state];
   if (!app) return vm ? 'recovering' : 'stopped';
   if (!vm || app.vm_id !== vm.vm_id) return 'recovering';
-  const fresh = app.heartbeat_ago_ms != null && app.heartbeat_ago_ms < 3000;
-  if (!fresh) return 'recovering';
+  if (!heartbeatFresh(app)) return 'recovering';
   return app.heartbeat_state === 'error' ? 'fault' : 'ok';
 }
 
@@ -109,7 +116,7 @@ export function appHealthLabel(vm: Vm | undefined, app: DriveApp | undefined): s
   if (!vm) return 'VM 역할/등록 미확인';
   if (vm.state !== 'running') return undefined;
   if (app?.vm_id !== vm.vm_id) return '앱 보고 UUID 미확인';
-  if (app?.heartbeat_ago_ms == null || app.heartbeat_ago_ms >= 3000) return '앱 상태 미확인';
+  if (!heartbeatFresh(app)) return '앱 상태 미확인';
   return app.heartbeat_state === 'error' ? '앱 오류' : '앱 보고 수신 · 주행 준비는 별도 확인';
 }
 
@@ -121,7 +128,7 @@ export function controlLabel(role: Role, vm: Vm | undefined, drive: DriveState |
   if (!vmId || !control.active_vm_id || control.received_ago_ms >= 3000) return '활성 구동 VM 미확인';
   if (control.active_vm_id.toLowerCase() === vmId) return '▶ 활성 구동 · 주행 모드는 별도 표시';
   const app = drive.apps[role.app];
-  return app?.vm_id === vmId && app.heartbeat_ago_ms != null && app.heartbeat_ago_ms < 3000
+  return app?.vm_id?.toLowerCase() === vmId && heartbeatFresh(app)
     ? '앱 보고 수신 · 승계 준비는 별도 확인'
     : '앱 상태 미확인';
 }
@@ -133,8 +140,16 @@ export const signed = (value: number | null | undefined, digits = 2, unit = '') 
 export const plain = (value: number | null | undefined, digits = 2, unit = '') =>
   value == null ? '—' : `${value.toFixed(digits)}${unit}`;
 
-export const ago = (ms: number | null | undefined) =>
-  ms == null ? '—' : ms < 1000 ? `${(ms / 1000).toFixed(1)}초 전` : `${Math.round(ms / 1000)}초 전`;
+/** 경과 시간. 1초 미만은 소수 한 자리, 60초 이상은 "N분 전", 60분 이상은 "N시간 N분 전" */
+export const ago = (ms: number | null | undefined): string => {
+  if (ms == null) return '—';
+  if (ms < 1000) return `${(ms / 1000).toFixed(1)}초 전`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}초 전`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}분 전`;
+  return `${Math.floor(minutes / 60)}시간 ${minutes % 60}분 전`;
+};
 
 /** 템플릿 id → "Debian 13" · "Ubuntu 24.04" · "Zephyr" */
 export function osLabel(vm: Pick<Vm, 'guest_kind' | 'template_id'>): string {

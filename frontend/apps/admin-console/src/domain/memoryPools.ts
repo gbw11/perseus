@@ -9,6 +9,19 @@ export const MEMORY_POOL_METRICS = {
 } as const;
 
 export type PoolRegion = 'net_rx_data' | 'net_tx_data';
+
+/** Pool 점유율 주의·위험 기준(%). 이 값 이상이면 화면에서 주의(degraded)·위험(fault) 색으로 보인다 */
+export const POOL_WARN_PERCENT = 80;
+export const POOL_FAULT_PERCENT = 95;
+
+export type PoolLevel = 'ok' | 'warn' | 'fault';
+
+export function poolLevel(percent: number | null): PoolLevel {
+  if (percent == null || !Number.isFinite(percent)) return 'ok';
+  if (percent >= POOL_FAULT_PERCENT) return 'fault';
+  if (percent >= POOL_WARN_PERCENT) return 'warn';
+  return 'ok';
+}
 export type PoolDataState = 'ok' | 'missing' | 'invalid';
 
 export interface PoolSnapshot {

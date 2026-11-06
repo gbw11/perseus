@@ -136,6 +136,36 @@ export interface UpdateVcpusRequest {
 export type VmResourceUpdate =
   { kind: 'memory'; body: UpdateMemoryRequest } | { kind: 'vcpus'; body: UpdateVcpusRequest };
 
+/** POST /api/v1/vms/{id}/stress/cpu — workers 1~4, duration_s 1~120 */
+export interface CpuStressRequest {
+  workers: number;
+  duration_s: number;
+}
+
+/** POST /api/v1/vms/{id}/stress/memory — memory_mib 1~512, duration_s 1~120 */
+export interface MemoryStressRequest {
+  memory_mib: number;
+  duration_s: number;
+}
+
+export type StressRequest =
+  { kind: 'cpu'; body: CpuStressRequest } | { kind: 'memory'; body: MemoryStressRequest };
+
+export type StressType = 'CPU' | 'MEMORY';
+
+/** 202 응답. Agent 에 MQTT agent.command(action=stress)를 보냈다는 뜻이고, 실제 부하는 메트릭으로 확인한다 */
+export interface StressCommand {
+  command_id: string;
+  operation_id: string;
+  vm_id: string;
+  type: StressType;
+  /** CPU 는 워커 수, MEMORY 는 MiB */
+  amount: number;
+  duration_s: number;
+  submitted_at: string;
+  expires_at: string;
+}
+
 /** §2.3 */
 export interface Template {
   template_id: string;
@@ -196,7 +226,9 @@ export type EventType =
   | 'drive.mode.changed'
   | 'drive.fault.detected'
   | 'drive.resume.accepted'
-  | 'drive.resume.cancelled';
+  | 'drive.resume.cancelled'
+  // 콘솔이 모니터 화면 배치를 바꿈 (REST-24, backend EventType.DISPLAY_ROUTE_CHANGED)
+  | 'display.route.changed';
 
 export type EventSeverity = 'INFO' | 'WARNING' | 'ERROR';
 
@@ -363,6 +395,8 @@ export interface TelemetryHeartbeatResponse {
   last_collection_success_uptime_ms?: string | null;
   last_collection_success_age_ms: number | null;
   collection_failures_total: number | null;
+  /** MQTT 제출 실패 누계 (백엔드 BigInteger) */
+  publish_submit_failures_total?: number | null;
   received_at: string | null;
   age_ms: number | null;
 }

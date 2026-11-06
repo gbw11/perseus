@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import type { MetricSample } from '../api/types';
 import {
   APP_MEMORY_REGIONS,
@@ -9,6 +9,7 @@ import {
   type AppMemoryRegion,
 } from '../domain/appMemory';
 import styles from './pages.module.css';
+import { useNow } from '../useNow';
 
 /** 앱 내부 점유와 원 업무 상태를 보여준다. RAM 확보량과 합산하지 않는다. */
 export function AppMemoryPools({
@@ -22,11 +23,8 @@ export function AppMemoryPools({
   samples: MetricSample[];
   children?: ReactNode;
 }) {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+  // 화면 전체가 같이 쓰는 1초 시계 — 같은 카드 안의 "n초 전"이 서로 다른 시계로 계산되지 않게
+  const now = useNow();
   const series = buildAppMemorySeries(samples, vmId, now);
   return (
     <section aria-label={`${vmName} 앱 버퍼 점유`} className={styles.appMemorySection}>

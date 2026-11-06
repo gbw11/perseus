@@ -1,6 +1,6 @@
 import { StatusBadge } from '@xenova/ui';
 import { ROLE, type Presentation } from './model';
-import styles from './monitor.module.css';
+import styles from './notices.module.css';
 
 export function Notices({ p, connected }: { p: Presentation | null; connected: boolean }) {
   const notices =

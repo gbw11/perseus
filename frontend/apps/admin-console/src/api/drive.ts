@@ -137,7 +137,12 @@ export function useAuthedSocket(path: string, onFrame: (frame: Frame) => void) {
       socketRef.current = ws;
       ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', access_token: token }));
       ws.onmessage = (message) => {
-        const frame = JSON.parse(String(message.data)) as Frame;
+        let frame: Frame;
+        try {
+          frame = JSON.parse(String(message.data)) as Frame;
+        } catch {
+          return; // 깨진 프레임 하나로 onmessage 가 예외를 던지지 않게 버린다
+        }
         if (frame.type === 'authenticated') setState('open');
         else frameRef.current(frame);
       };
@@ -146,6 +151,8 @@ export function useAuthedSocket(path: string, onFrame: (frame: Frame) => void) {
         if (stopped) return;
         setState('closed');
         if (event.code === UNAUTHORIZED && !(await refreshSession())) return; // 세션 끝 → 로그인으로
+        // refresh 를 기다리는 사이 화면을 떠났으면 정리(clearTimeout)가 이미 끝났으므로 다시 걸지 않는다
+        if (stopped) return;
         timer = window.setTimeout(connect, RETRY_MS);
       };
     };
@@ -267,6 +274,11 @@ export const KEY_OF: Record<string, DriveKey> = {
   d: 'right',
   ' ': 'brake',
 };
+
+/** KeyboardEvent.key → 계약 키. Shift·CapsLock 으로 대문자가 와도 같은 키로 본다 (W 를 떼면 up 이 풀려야 한다) */
+export function driveKeyOf(key: string): DriveKey | undefined {
+  return KEY_OF[key.length === 1 ? key.toLowerCase() : key];
+}
 
 const ORDER: DriveKey[] = ['up', 'down', 'left', 'right', 'brake'];
 

@@ -13,6 +13,8 @@ import type {
   RouteRequest,
   SignupRequest,
   SignupResponse,
+  StressCommand,
+  StressRequest,
   TelemetryHeartbeatResponse,
   Template,
   ThreadsResponse,
@@ -152,6 +154,16 @@ export function useUpdateVmResource(vmId: string) {
       void client.invalidateQueries({ queryKey: keys.vm(vmId) });
       void client.invalidateQueries({ queryKey: keys.vms });
     },
+  });
+}
+
+export function useStartStress(vmId: string) {
+  return useMutation({
+    mutationFn: ({ kind, body }: StressRequest) =>
+      request<StressCommand>(`/api/v1/vms/${encodeURIComponent(vmId)}/stress/${kind}`, {
+        method: 'POST',
+        body,
+      }),
   });
 }
 
