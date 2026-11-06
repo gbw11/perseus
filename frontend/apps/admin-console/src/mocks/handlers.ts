@@ -9,9 +9,12 @@
 import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import {
   VM_CPU_PERCENT_METRIC,
+  type CpuStressRequest,
   type CreateVmRequest,
   type LoginRequest,
+  type MemoryStressRequest,
   type SignupRequest,
+  type StressCommand,
   type TokenResponse,
   type UpdateMemoryRequest,
   type UpdateVcpuPinningRequest,
@@ -327,6 +330,43 @@ export const handlers = [
     }
     vms = vms.map((item) => (item.vm_id === vm.vm_id ? { ...item, memory_mib: body.memory_mib! } : item));
     return HttpResponse.json(resourcesOf(find(vm.vm_id)!) as unknown as JsonBodyType);
+  }),
+
+  http.post('*/api/v1/vms/:vmId/stress/:kind', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    if (!vm) return vmNotFound();
+    if (vm.guest_kind !== 'linux' || vm.state !== 'running' || vm.agent_status !== 'ONLINE') {
+      return error(409, 'AGENT_UNAVAILABLE', `VM Agent가 온라인 상태가 아닙니다: ${vm.vm_id}`);
+    }
+    const kind = String(params.kind);
+    const body = (await request.json()) as Partial<CpuStressRequest & MemoryStressRequest>;
+    const amount = kind === 'cpu' ? body.workers : body.memory_mib;
+    const max = kind === 'cpu' ? 4 : 512;
+    if (
+      (kind !== 'cpu' && kind !== 'memory') ||
+      !Number.isInteger(amount) ||
+      amount! < 1 ||
+      amount! > max ||
+      !Number.isInteger(body.duration_s) ||
+      body.duration_s! < 1 ||
+      body.duration_s! > 120
+    ) {
+      return error(400, 'VALIDATION_ERROR', '입력값을 확인해 주세요.');
+    }
+    const now = new Date();
+    const command: StressCommand = {
+      command_id: crypto.randomUUID(),
+      operation_id: crypto.randomUUID(),
+      vm_id: vm.vm_id,
+      type: kind === 'cpu' ? 'CPU' : 'MEMORY',
+      amount: amount!,
+      duration_s: body.duration_s!,
+      submitted_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + 30_000).toISOString(),
+    };
+    return HttpResponse.json(command as unknown as JsonBodyType, { status: 202 });
   }),
 
   http.post('*/api/v1/vms', async ({ request }) => {

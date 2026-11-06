@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, within } from '@testing-library/react';
+import { ToastProvider } from '@xenova/ui';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DriveState } from '../api/drive';
@@ -184,13 +185,15 @@ function renderPage(path = '/dashboard/memory') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const page = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/dashboard/overview" element={<DashboardPage />} />
-          <Route path="/dashboard/vms/:vmId" element={<VmDetailPage />} />
-          <Route path="/dashboard/memory" element={<ResourcesPage view="memory" />} />
-        </Routes>
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/dashboard/overview" element={<DashboardPage />} />
+            <Route path="/dashboard/vms/:vmId" element={<VmDetailPage />} />
+            <Route path="/dashboard/memory" element={<ResourcesPage view="memory" />} />
+          </Routes>
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
   return { ...page, client };

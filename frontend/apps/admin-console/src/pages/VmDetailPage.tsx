@@ -12,6 +12,7 @@ import { networkRxKiBPerSecond } from '../domain/networkRate';
 import { cpuPercentOf, metricValue, ZEPHYR_HEAP_USED_METRIC } from '../domain/vmMetrics';
 import { useDrive } from '../layout/DriveContext';
 import { PublisherStatus } from './PublisherStatus';
+import { StressTestPanel } from './StressTestPanel';
 import styles from './pages.module.css';
 
 const ConsolePanel = lazy(() =>
@@ -398,6 +399,8 @@ export function VmDetailPage() {
           >
             <Charts vm={vm.data} />
           </Card>
+
+          {vm.data.guest_kind === 'linux' && <StressTestPanel vm={vm.data} accent={color} />}
 
           <Card title={vm.data.guest_kind === 'zephyr' ? '스레드' : '프로세스'}>
             <ExecutionTable vm={vm.data} />
