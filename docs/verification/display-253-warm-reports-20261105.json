@@ -1,0 +1,885 @@
+{
+  "issue": "S15P31E110-253",
+  "date": "2026-11-05",
+  "base_platform": "4028599",
+  "tested_source_archive_sha256": "c481a629c894c03429d8cc02f9493449dcd58193801d0306a18f25e58633327f",
+  "deployment": "temporary isolated collector; original restored",
+  "mqtt_capture": {
+    "subscribe_only": true,
+    "published_messages": 0,
+    "messages": {
+      "xenova/v1/vms/17cad3c4-b3cd-4b29-8740-e679d0eaebd4/inventory:agent.inventory": {
+        "count": 1,
+        "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+        "app_id": null,
+        "qos": 1,
+        "retained": true,
+        "payload_keys": [
+          "agent_version",
+          "capabilities",
+          "hostname",
+          "interfaces",
+          "kernel_release",
+          "os"
+        ],
+        "last_sequence": 1,
+        "sample": {}
+      },
+      "xenova/v1/vms/5002a22d-63d6-4f7a-9106-193b14499898/apps/autonomous/events:app.lifecycle": {
+        "count": 99,
+        "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+        "app_id": "autonomous",
+        "qos": 0,
+        "retained": false,
+        "payload_keys": [
+          "applied_generation",
+          "check_seq",
+          "phase",
+          "profile",
+          "progress_seq",
+          "readiness",
+          "reason"
+        ],
+        "last_sequence": 45082,
+        "sample": {
+          "readiness": "NOT_READY",
+          "reason": "STATE_PREPARING",
+          "applied_generation": 1,
+          "progress_seq": "0"
+        }
+      },
+      "xenova/v1/vms/5002a22d-63d6-4f7a-9106-193b14499898/apps/manual/events:app.lifecycle": {
+        "count": 99,
+        "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+        "app_id": "manual",
+        "qos": 0,
+        "retained": false,
+        "payload_keys": [
+          "applied_generation",
+          "check_seq",
+          "phase",
+          "profile",
+          "progress_seq",
+          "readiness",
+          "reason"
+        ],
+        "last_sequence": 45078,
+        "sample": {
+          "readiness": "NOT_READY",
+          "reason": "INPUT_UNAVAILABLE",
+          "applied_generation": 1,
+          "progress_seq": "0"
+        }
+      },
+      "xenova/v1/vms/de113a23-d80e-4333-94b8-788babe0e41e/apps/autonomous/events:app.lifecycle": {
+        "count": 99,
+        "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "app_id": "autonomous",
+        "qos": 0,
+        "retained": false,
+        "payload_keys": [
+          "applied_generation",
+          "check_seq",
+          "phase",
+          "profile",
+          "progress_seq",
+          "readiness",
+          "reason"
+        ],
+        "last_sequence": 45164,
+        "sample": {
+          "readiness": "NOT_READY",
+          "reason": "STATE_PREPARING",
+          "applied_generation": 1,
+          "progress_seq": "0"
+        }
+      },
+      "xenova/v1/vms/de113a23-d80e-4333-94b8-788babe0e41e/apps/manual/events:app.lifecycle": {
+        "count": 99,
+        "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "app_id": "manual",
+        "qos": 0,
+        "retained": false,
+        "payload_keys": [
+          "applied_generation",
+          "check_seq",
+          "phase",
+          "profile",
+          "progress_seq",
+          "readiness",
+          "reason"
+        ],
+        "last_sequence": 45164,
+        "sample": {
+          "readiness": "NOT_READY",
+          "reason": "INPUT_UNAVAILABLE",
+          "applied_generation": 1,
+          "progress_seq": "0"
+        }
+      },
+      "xenova/v1/vms/17cad3c4-b3cd-4b29-8740-e679d0eaebd4/heartbeat:agent.heartbeat": {
+        "count": 2,
+        "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+        "app_id": null,
+        "qos": 1,
+        "retained": false,
+        "payload_keys": [],
+        "last_sequence": 901,
+        "sample": {}
+      }
+    },
+    "subscriptions": {
+      "xenova/v1/vms/de113a23-d80e-4333-94b8-788babe0e41e/apps/autonomous/events": [
+        1
+      ],
+      "xenova/v1/vms/de113a23-d80e-4333-94b8-788babe0e41e/apps/manual/events": [
+        1
+      ],
+      "xenova/v1/vms/5002a22d-63d6-4f7a-9106-193b14499898/apps/autonomous/events": [
+        1
+      ],
+      "xenova/v1/vms/5002a22d-63d6-4f7a-9106-193b14499898/apps/manual/events": [
+        1
+      ],
+      "xenova/v1/vms/17cad3c4-b3cd-4b29-8740-e679d0eaebd4/heartbeat": [
+        1
+      ],
+      "xenova/v1/vms/17cad3c4-b3cd-4b29-8740-e679d0eaebd4/inventory": [
+        1
+      ],
+      "xenova/v1/apps/interaction/events": [
+        1
+      ]
+    },
+    "connect": 0,
+    "broker_runtime_check_exit": 0
+  },
+  "receiver_test": {
+    "subscribe_only": true,
+    "published_messages": 0,
+    "direct_xen_queries": 0,
+    "shared_failures": 3,
+    "gateway_failures": 0,
+    "initial_live": true,
+    "disconnected_cleared_current": true,
+    "reconnected_live": true
+  },
+  "before": {
+    "mqtt_connected": true,
+    "subscriptions": {
+      "xenova/v1/vms/17cad3c4-b3cd-4b29-8740-e679d0eaebd4/heartbeat": "granted",
+      "xenova/v1/vms/17cad3c4-b3cd-4b29-8740-e679d0eaebd4/inventory": "granted",
+      "xenova/v1/vms/de113a23-d80e-4333-94b8-788babe0e41e/apps/autonomous/events": "granted",
+      "xenova/v1/vms/de113a23-d80e-4333-94b8-788babe0e41e/apps/manual/events": "granted",
+      "xenova/v1/vms/5002a22d-63d6-4f7a-9106-193b14499898/apps/autonomous/events": "granted",
+      "xenova/v1/vms/5002a22d-63d6-4f7a-9106-193b14499898/apps/manual/events": "granted",
+      "xenova/v1/apps/interaction/events": "granted"
+    },
+    "drive": {
+      "active_vm_id": null,
+      "mode": "SAFE_STOP",
+      "ai_status": "unknown",
+      "source": {
+        "received_at": "2026-11-05T06:56:26.233+00:00",
+        "observed_at": null,
+        "source_id": "gateway.context",
+        "age_ms": 622,
+        "status": "fresh"
+      },
+      "authority": {
+        "selected_vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "selected_mode": "SAFE_STOP",
+        "generation": 1,
+        "phase": "DISARMED",
+        "output_permitted": false,
+        "storage_uncertain": false
+      }
+    },
+    "decisions": {
+      "de113a23-d80e-4333-94b8-788babe0e41e": {
+        "kind": "app_preparing",
+        "label": "앱 보고 수신 · 일부 준비 대기",
+        "tone": "warning"
+      },
+      "5002a22d-63d6-4f7a-9106-193b14499898": {
+        "kind": "app_preparing",
+        "label": "앱 보고 수신 · 일부 준비 대기",
+        "tone": "warning"
+      },
+      "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+        "kind": "app_waiting",
+        "label": "VM 실행 중 · 앱 상태 미확인",
+        "tone": "warning"
+      }
+    },
+    "vms": [
+      {
+        "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "role": "primary_drive",
+        "xen_status": "fresh",
+        "agent_status": "unknown",
+        "agent_sequence": null,
+        "inventory_status": "unknown",
+        "observed_os": null,
+        "apps": {
+          "autonomous": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55991",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "STATE_PREPARING"
+            },
+            "current": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55991",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "STATE_PREPARING"
+            },
+            "source_status": "fresh",
+            "source_sequence": 55936,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          },
+          "manual": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55991",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "INPUT_UNAVAILABLE"
+            },
+            "current": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55991",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "INPUT_UNAVAILABLE"
+            },
+            "source_status": "fresh",
+            "source_sequence": 55935,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          }
+        }
+      },
+      {
+        "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+        "role": "backup_drive",
+        "xen_status": "fresh",
+        "agent_status": "unknown",
+        "agent_sequence": null,
+        "inventory_status": "unknown",
+        "observed_os": null,
+        "apps": {
+          "autonomous": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55884",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "STATE_PREPARING"
+            },
+            "current": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55884",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "STATE_PREPARING"
+            },
+            "source_status": "fresh",
+            "source_sequence": 55837,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          },
+          "manual": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55884",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "INPUT_UNAVAILABLE"
+            },
+            "current": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55884",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "INPUT_UNAVAILABLE"
+            },
+            "source_status": "fresh",
+            "source_sequence": 55832,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          }
+        }
+      },
+      {
+        "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+        "role": "interaction",
+        "xen_status": "fresh",
+        "agent_status": "fresh",
+        "agent_sequence": 1118,
+        "inventory_status": "fresh",
+        "observed_os": "debian",
+        "apps": {
+          "interaction": {
+            "reported": null,
+            "current": null,
+            "source_status": "unknown",
+            "source_sequence": null,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          }
+        }
+      }
+    ]
+  },
+  "disconnected": {
+    "mqtt_connected": false,
+    "subscriptions": {
+      "xenova/v1/vms/17cad3c4-b3cd-4b29-8740-e679d0eaebd4/heartbeat": "unavailable",
+      "xenova/v1/vms/17cad3c4-b3cd-4b29-8740-e679d0eaebd4/inventory": "unavailable",
+      "xenova/v1/vms/de113a23-d80e-4333-94b8-788babe0e41e/apps/autonomous/events": "unavailable",
+      "xenova/v1/vms/de113a23-d80e-4333-94b8-788babe0e41e/apps/manual/events": "unavailable",
+      "xenova/v1/vms/5002a22d-63d6-4f7a-9106-193b14499898/apps/autonomous/events": "unavailable",
+      "xenova/v1/vms/5002a22d-63d6-4f7a-9106-193b14499898/apps/manual/events": "unavailable",
+      "xenova/v1/apps/interaction/events": "unavailable"
+    },
+    "drive": {
+      "active_vm_id": null,
+      "mode": "SAFE_STOP",
+      "ai_status": "unknown",
+      "source": {
+        "received_at": "2026-11-05T06:56:27.522+00:00",
+        "observed_at": null,
+        "source_id": "gateway.context",
+        "age_ms": 79,
+        "status": "fresh"
+      },
+      "authority": {
+        "selected_vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "selected_mode": "SAFE_STOP",
+        "generation": 1,
+        "phase": "DISARMED",
+        "output_permitted": false,
+        "storage_uncertain": false
+      }
+    },
+    "decisions": {
+      "de113a23-d80e-4333-94b8-788babe0e41e": {
+        "kind": "app_source_unavailable",
+        "label": "VM 실행 중 · 앱 보고 수신 경로 미확인",
+        "tone": "warning"
+      },
+      "5002a22d-63d6-4f7a-9106-193b14499898": {
+        "kind": "app_source_unavailable",
+        "label": "VM 실행 중 · 앱 보고 수신 경로 미확인",
+        "tone": "warning"
+      },
+      "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+        "kind": "app_source_unavailable",
+        "label": "VM 실행 중 · 앱 보고 수신 경로 미확인",
+        "tone": "warning"
+      }
+    },
+    "vms": [
+      {
+        "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "role": "primary_drive",
+        "xen_status": "fresh",
+        "agent_status": "unknown",
+        "agent_sequence": null,
+        "inventory_status": "unknown",
+        "observed_os": null,
+        "apps": {
+          "autonomous": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55992",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "STATE_PREPARING"
+            },
+            "current": null,
+            "source_status": "disconnected",
+            "source_sequence": 55937,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          },
+          "manual": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55992",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "INPUT_UNAVAILABLE"
+            },
+            "current": null,
+            "source_status": "disconnected",
+            "source_sequence": 55936,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          }
+        }
+      },
+      {
+        "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+        "role": "backup_drive",
+        "xen_status": "fresh",
+        "agent_status": "unknown",
+        "agent_sequence": null,
+        "inventory_status": "unknown",
+        "observed_os": null,
+        "apps": {
+          "autonomous": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55885",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "STATE_PREPARING"
+            },
+            "current": null,
+            "source_status": "disconnected",
+            "source_sequence": 55838,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          },
+          "manual": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55885",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "INPUT_UNAVAILABLE"
+            },
+            "current": null,
+            "source_status": "disconnected",
+            "source_sequence": 55833,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          }
+        }
+      },
+      {
+        "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+        "role": "interaction",
+        "xen_status": "fresh",
+        "agent_status": "disconnected",
+        "agent_sequence": 1118,
+        "inventory_status": "disconnected",
+        "observed_os": "debian",
+        "apps": {
+          "interaction": {
+            "reported": null,
+            "current": null,
+            "source_status": "unknown",
+            "source_sequence": null,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          }
+        }
+      }
+    ]
+  },
+  "after": {
+    "mqtt_connected": true,
+    "subscriptions": {
+      "xenova/v1/vms/17cad3c4-b3cd-4b29-8740-e679d0eaebd4/heartbeat": "granted",
+      "xenova/v1/vms/17cad3c4-b3cd-4b29-8740-e679d0eaebd4/inventory": "granted",
+      "xenova/v1/vms/de113a23-d80e-4333-94b8-788babe0e41e/apps/autonomous/events": "granted",
+      "xenova/v1/vms/de113a23-d80e-4333-94b8-788babe0e41e/apps/manual/events": "granted",
+      "xenova/v1/vms/5002a22d-63d6-4f7a-9106-193b14499898/apps/autonomous/events": "granted",
+      "xenova/v1/vms/5002a22d-63d6-4f7a-9106-193b14499898/apps/manual/events": "granted",
+      "xenova/v1/apps/interaction/events": "granted"
+    },
+    "drive": {
+      "active_vm_id": null,
+      "mode": "SAFE_STOP",
+      "ai_status": "unknown",
+      "source": {
+        "received_at": "2026-11-05T06:56:36.038+00:00",
+        "observed_at": null,
+        "source_id": "gateway.context",
+        "age_ms": 840,
+        "status": "fresh"
+      },
+      "authority": {
+        "selected_vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "selected_mode": "SAFE_STOP",
+        "generation": 1,
+        "phase": "DISARMED",
+        "output_permitted": false,
+        "storage_uncertain": false
+      }
+    },
+    "decisions": {
+      "de113a23-d80e-4333-94b8-788babe0e41e": {
+        "kind": "app_preparing",
+        "label": "앱 보고 수신 · 일부 준비 대기",
+        "tone": "warning"
+      },
+      "5002a22d-63d6-4f7a-9106-193b14499898": {
+        "kind": "app_preparing",
+        "label": "앱 보고 수신 · 일부 준비 대기",
+        "tone": "warning"
+      },
+      "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+        "kind": "app_waiting",
+        "label": "VM 실행 중 · 앱 상태 미확인",
+        "tone": "warning"
+      }
+    },
+    "vms": [
+      {
+        "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "role": "primary_drive",
+        "xen_status": "fresh",
+        "agent_status": "unknown",
+        "agent_sequence": null,
+        "inventory_status": "unknown",
+        "observed_os": null,
+        "apps": {
+          "autonomous": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "56091",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "STATE_PREPARING"
+            },
+            "current": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "56091",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "STATE_PREPARING"
+            },
+            "source_status": "fresh",
+            "source_sequence": 56036,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          },
+          "manual": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "56091",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "INPUT_UNAVAILABLE"
+            },
+            "current": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "56091",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "INPUT_UNAVAILABLE"
+            },
+            "source_status": "fresh",
+            "source_sequence": 56035,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          }
+        }
+      },
+      {
+        "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+        "role": "backup_drive",
+        "xen_status": "fresh",
+        "agent_status": "unknown",
+        "agent_sequence": null,
+        "inventory_status": "unknown",
+        "observed_os": null,
+        "apps": {
+          "autonomous": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55983",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "STATE_PREPARING"
+            },
+            "current": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55983",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "STATE_PREPARING"
+            },
+            "source_status": "fresh",
+            "source_sequence": 55936,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          },
+          "manual": {
+            "reported": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55983",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "INPUT_UNAVAILABLE"
+            },
+            "current": {
+              "profile": "warm-drive-1",
+              "applied_generation": 1,
+              "check_seq": "55983",
+              "progress_seq": "0",
+              "phase": "WAITING",
+              "readiness": "NOT_READY",
+              "reason": "INPUT_UNAVAILABLE"
+            },
+            "source_status": "fresh",
+            "source_sequence": 55931,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          }
+        }
+      },
+      {
+        "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+        "role": "interaction",
+        "xen_status": "fresh",
+        "agent_status": "fresh",
+        "agent_sequence": 1120,
+        "inventory_status": "disconnected",
+        "observed_os": "debian",
+        "apps": {
+          "interaction": {
+            "reported": null,
+            "current": null,
+            "source_status": "unknown",
+            "source_sequence": null,
+            "calculation_status": "unknown",
+            "execution_verified": false,
+            "authority_verified": false
+          }
+        }
+      }
+    ]
+  },
+  "actual_rest": {
+    "mqtt_connected": true,
+    "drive": {
+      "active_vm_id": null,
+      "mode": "SAFE_STOP",
+      "ai_status": "unknown",
+      "source": {
+        "received_at": "2026-11-05T06:55:21.642+00:00",
+        "observed_at": null,
+        "source_id": "gateway.context",
+        "age_ms": 917,
+        "status": "fresh"
+      },
+      "authority": {
+        "selected_vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "selected_mode": "SAFE_STOP",
+        "generation": 1,
+        "phase": "DISARMED",
+        "output_permitted": false,
+        "storage_uncertain": false
+      }
+    },
+    "decisions": {
+      "de113a23-d80e-4333-94b8-788babe0e41e": {
+        "kind": "app_preparing",
+        "label": "앱 보고 수신 · 일부 준비 대기",
+        "tone": "warning"
+      },
+      "5002a22d-63d6-4f7a-9106-193b14499898": {
+        "kind": "app_preparing",
+        "label": "앱 보고 수신 · 일부 준비 대기",
+        "tone": "warning"
+      },
+      "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+        "kind": "app_waiting",
+        "label": "VM 실행 중 · 앱 상태 미확인",
+        "tone": "warning"
+      }
+    },
+    "vm_ids": [
+      "de113a23-d80e-4333-94b8-788babe0e41e",
+      "5002a22d-63d6-4f7a-9106-193b14499898",
+      "17cad3c4-b3cd-4b29-8740-e679d0eaebd4"
+    ]
+  },
+  "actual_websocket": {
+    "handshake": 101,
+    "snapshots": [
+      {
+        "type": "display.state",
+        "sequence": 3,
+        "mqtt_connected": true,
+        "vm_ids": [
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4"
+        ],
+        "received_lifecycle_apps": 4,
+        "drive_mode": "SAFE_STOP"
+      },
+      {
+        "type": "display.state",
+        "sequence": 4,
+        "mqtt_connected": true,
+        "vm_ids": [
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898",
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4"
+        ],
+        "received_lifecycle_apps": 4,
+        "drive_mode": "SAFE_STOP"
+      }
+    ]
+  },
+  "restoration": {
+    "units": {
+      "xenova-dom0-manager.service": {
+        "Id": "xenova-dom0-manager.service",
+        "ActiveState": "active",
+        "MainPID": "71447"
+      },
+      "xenova-display-feed.service": {
+        "Id": "xenova-display-feed.service",
+        "ActiveState": "inactive",
+        "MainPID": "0"
+      },
+      "mosquitto.service": {
+        "Id": "mosquitto.service",
+        "ActiveState": "active",
+        "MainPID": "820"
+      },
+      "xenova-gateway.service": {
+        "Id": "xenova-gateway.service",
+        "ActiveState": "active",
+        "MainPID": "1487"
+      },
+      "xenova-recovery-worker.service": {
+        "Id": "xenova-recovery-worker.service",
+        "ActiveState": "active",
+        "MainPID": "1489"
+      },
+      "xenova-runtime-log-collector.service": {
+        "Id": "xenova-runtime-log-collector.service",
+        "ActiveState": "active",
+        "MainPID": "516"
+      },
+      "tailscaled.service": {
+        "Id": "tailscaled.service",
+        "ActiveState": "active",
+        "MainPID": "605"
+      }
+    },
+    "original_manager_config_restored": true,
+    "api_attempt_status": [
+      200,
+      "TypeError",
+      200,
+      "TypeError",
+      200,
+      "TypeError"
+    ],
+    "installed_sources_unchanged": true,
+    "trial_process_absent": true,
+    "gateway": {
+      "host_boot_id": "62412d0a-e30e-459b-8269-ca49cbe2aeed",
+      "owner": "de113a23-d80e-4333-94b8-788babe0e41e",
+      "generation": 1,
+      "mode": "SAFE_STOP",
+      "phase": "DISARMED",
+      "output_permitted": false
+    },
+    "temporary_files_removed": true
+  },
+  "final_api": {
+    "api_status": 200,
+    "response_shape": "list",
+    "vms": [
+      {
+        "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+        "id": null,
+        "name": null,
+        "state": "running",
+        "domid": null
+      },
+      {
+        "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "id": null,
+        "name": null,
+        "state": "running",
+        "domid": null
+      },
+      {
+        "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+        "id": null,
+        "name": null,
+        "state": "running",
+        "domid": null
+      }
+    ],
+    "temporary_stage_absent": true,
+    "observation_override_absent": true,
+    "console_enabled": true
+  },
+  "limitations": [
+    "Shared VM observation was intermittently unavailable; original 3s TTL kept and no direct Xen fallback used.",
+    "No AUTO/MANUAL mode switch or vehicle output was requested. Actual lifecycle was NOT_READY, progress_seq=0. READY progress/lease behavior covered by local tests only.",
+    "No current Zephyr OS inventory or Debian interaction app heartbeat was observed.",
+    "Same-sequence retained Debian inventory was not rejuvenated after reconnect; heartbeat did recover.",
+    "Receiver settings were absent on the board; temporary wiring was restored. Normal package/config deployment remains.",
+    "No HDMI renderer, phone, guest console input or physical driving was tested."
+  ]
+}

@@ -43,6 +43,27 @@ def fingerprint(value):
     return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
+def same_read_execution(left, right):
+    """Only live scheduler movement may differ between two verified read samples.
+
+    Never substitute the newer sample or its clock. The caller keeps its own
+    validated observation, and must not replace a newer on-disk observation.
+    Paused/shutdown/dying, identity, intent and admission changes still retry.
+    """
+    if left == right:
+        return True
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    for value in (left, right):
+        flags = value.get('xen_state_flags')
+        if (not isinstance(flags, str) or not re.fullmatch(r'[r-][b-]----', flags)
+                or value.get('xen_state') != vm.xen_state(flags)):
+            return False
+    volatile = {'xen_state', 'xen_state_flags'}
+    return ({k:v for k,v in left.items() if k not in volatile}
+            == {k:v for k,v in right.items() if k not in volatile})
+
+
 def read_record(path):
     """원자 JSON을 검증해 읽는다. host 관측·초기화·저장 없이 부재와 손상을 구분한다."""
     if not path.exists() and not path.is_symlink():
@@ -371,6 +392,35 @@ class Execution:
             refuse("OBSERVATION_UNAVAILABLE", "domain incarnation response is invalid")
         return unique
 
+    def unique_many(self, rows, deadline):
+        """One bounded helper per read phase; no cross-request identity cache."""
+        ids = [row['domid'] for row in rows]
+        if (not 1 <= len(ids) <= 256 or len(set(ids)) != len(ids)
+                or any(type(i) is not int or not 0 < i < 0x7ff0 for i in ids)):
+            refuse('OBSERVATION_UNAVAILABLE', 'invalid identity batch targets')
+        output = self.p.timed_command(['/usr/libexec/xenova-domain-identities-native',
+                                       '--domids', ','.join(map(str, ids))], deadline)
+        try:
+            value = json.loads(output)
+            if (not isinstance(value, dict) or set(value) != {'schema_version', 'items'}
+                    or type(value['schema_version']) is not int or value['schema_version'] != 1
+                    or not isinstance(value['items'], list) or len(value['items']) != len(ids)):
+                raise ValueError()
+            result = {}
+            for item in value['items']:
+                if not isinstance(item, dict) or set(item) != {'domid', 'xen_unique_id', 'state_bits'}:
+                    raise ValueError()
+                domid, unique, state = item['domid'], item['xen_unique_id'], item['state_bits']
+                if (type(domid) is not int or domid not in ids or domid in result
+                        or not isinstance(unique, str) or not re.fullmatch(r'[1-9][0-9]{0,19}', unique)
+                        or int(unique) > 2**64-1 or type(state) is not int
+                        or not 0 < state <= 0xffffffff or not state & 1):
+                    raise ValueError()
+                result[domid] = unique
+            return result
+        except (ValueError, KeyError, TypeError):
+            refuse('OBSERVATION_UNAVAILABLE', 'domain identity batch response is invalid')
+
     def require_launch_available(self, record):
         from xenova_preparation import guard_asset
         guard_asset(self.p, record['uuid'])
@@ -612,9 +662,20 @@ class Execution:
         for record in records:
             rows = self.p.matching(record, domains)
             row = rows[0] if rows else None
-            targets.append((record, row, self.unique(row, deadline) if row else None))
+            targets.append((record, row))
+        present = [row for _, row in targets if row is not None]
+        batch = (_read_context is not None and len(present) > 1
+                 and os.environ.get('XENOVA_IDENTITY_BATCH_READS') == '1')
+        initial = self.unique_many(present, deadline) if batch else None
+        targets = [(record, row, initial[row['domid']] if batch and row else
+                    self.unique(row, deadline) if row else None) for record, row in targets]
         after = self.p.removal_snapshot(deadline)
         absence_verified_ms=int(self.p.clock()*1000) if _read_context is not None else None
+        # The batch is not an atomic Xen snapshot. Keep both full list checks
+        # and both incarnation reads; date all present rows conservatively from
+        # before the final helper starts, never from its delayed completion.
+        final_started_ms = int(self.p.clock()*1000) if batch else None
+        final = self.unique_many(present, deadline) if batch else None
         verified = []
         for record, row, unique in targets:
             expected = (row['domid'], record['uuid'], record['name']) if row else None
@@ -623,13 +684,13 @@ class Execution:
                 actual = (candidates[0]['domid'], candidates[0]['uuid'], candidates[0]['name']) if len(candidates) == 1 else None
                 if len(candidates) > 1 or actual != expected:
                     refuse('TARGET_CHANGED', 'domain changed during observation')
-            if row and self.unique(row, deadline) != unique:
+            if row and (final[row['domid']] if batch else self.unique(row, deadline)) != unique:
                 refuse('TARGET_CHANGED', 'domain incarnation changed during observation')
             if row:
                 row = {**row, 'xen_state':after[row['domid']]['xen_state'],
                        'xen_state_flags':after[row['domid']]['xen_state_flags']}
             if _read_context is not None:
-                _read_context.observed_ms[record['uuid']]=int(self.p.clock()*1000) if row else absence_verified_ms
+                _read_context.observed_ms[record['uuid']]=(final_started_ms if batch else int(self.p.clock()*1000)) if row else absence_verified_ms
             verified.append((record, row, unique))
         if self.p.boot_id_reader() != self.host:
             refuse('TARGET_CHANGED', 'host boot changed during observation')
@@ -646,10 +707,15 @@ class Execution:
                 for record, row, unique in verified}
 
     @traced('execution.publish_observation')
-    def observation_inputs(self, record, lifecycle):
+    def observation_inputs(self, record, lifecycle, *, _common=None):
         """외부 관측과 분리한 원자 JSON 입력. 공유 memo나 새 권위 원본이 아니다."""
+        common = self.observation_common_inputs() if _common is None else _common
         return {'lifecycle':lifecycle,'run':self.run_record(record),'intent':self.intent(record),
-                'admission':self.admission(record),'barrier':self.barrier(),
+                'admission':self.admission(record), **common}
+
+    def observation_common_inputs(self):
+        """한 읽기 회차의 시작 입력만 공유한다. 게시 직전 검증에는 재사용하지 않는다."""
+        return {'barrier':self.barrier(),
                 'shutdown_requested':(self.runtime/'shutdown-requested').exists()}
 
     def publish_observation(self, record, row, unique, deadline, *, _lifecycle=None, _read_context=None):
@@ -687,9 +753,13 @@ class Execution:
                 point=(previous.get('last_attempt_monotonic_ms') if previous.get('last_error') is not None
                        else last.get('monotonic_ms') if last else None)
                 newer=type(point) is int and point>sampled
-                if newer and (not last or last['value']!=observation or previous.get('last_error') is not None):
+                if newer and (not last or not same_read_execution(last['value'], observation)
+                              or previous.get('last_error') is not None):
                     raise ReadChanged()
-            if last is None or fingerprint(last["value"]) != fingerprint(observation):
+            # A delayed read does not publish a new revision. Scheduler-only
+            # differences may be returned with its original clock, not a
+            # fabricated revision newer than the already-published sample.
+            if not newer and (last is None or fingerprint(last["value"]) != fingerprint(observation)):
                 revision += 1
             value = {"schema_version":"1.0", "vm_id":record["uuid"], "host_boot_id":self.host,
                      "observation_revision":revision, "last_success":{"monotonic_ms":sampled,

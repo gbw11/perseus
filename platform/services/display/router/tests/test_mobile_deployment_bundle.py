@@ -80,6 +80,18 @@ def test_combined_install_exposes_mobile_without_changing_boot_or_private_config
     assert not (image / 'etc/xenova/display-mobile-first').exists()
     assert (image / 'usr/share/xenova/display/examples/qemu-bindings.json').is_file()
     assert (image / 'usr/lib/systemd/user/xenova-display-stream.service').is_file()
+    assert (image / 'usr/lib/python3.14/site-packages/xenova_display/display_mode.py').is_file()
+    assert (image / 'usr/share/xenova/display/mobile/display-mode.README.md').is_file()
+    assert not (image / 'run/xenova-display-mode/mobile').exists()
+
+
+@pytest.mark.parametrize('missing', ['guard', 'cli', 'guide'])
+def test_incomplete_terminal_switch_bundle_is_rejected(image, missing):
+    relative = {'guard': 'usr/lib/systemd/system/xenova-display-hdmi.service.d/60-display-mode.conf',
+                'cli': 'usr/lib/python3.14/site-packages/xenova_display/display_mode.py',
+                'guide': 'usr/share/xenova/display/mobile/display-mode.README.md'}[missing]
+    (image / relative).unlink()
+    assert not checker.inspect(image)['artifact_layout_valid']
 
 
 @pytest.mark.parametrize('broken', ['missing-lazy-chunk', 'missing-backtick-chunk', 'old-bundle', 'external-symlink', 'escaping-reference'])
