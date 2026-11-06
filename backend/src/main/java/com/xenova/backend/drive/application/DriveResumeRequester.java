@@ -54,16 +54,17 @@ public class DriveResumeRequester {
 
     // Modes in which the verified gateway takes drive.resume.requested (contract §5.2): AUTO_READY starts the
     // countdown to AUTO, and MANUAL/AUTO use the same request to rearm an output-prohibited (disarmed) mode, unlike
-    // the legacy AUTO_READY-only rule. vehicle.control does not carry output_permitted, so the backend cannot tell
-    // a disarmed MANUAL/AUTO from an armed one; the gateway ignores a request that does not apply.
-    static final Set<String> RESUMABLE_MODES = Set.of("AUTO_READY", "MANUAL", "AUTO");
+    // the legacy AUTO_READY-only rule. SAFE_STOP takes it too: the gateway (verified.on_resume) picks a ready manual
+    // VM and rearms MANUAL. vehicle.control does not carry output_permitted, so the backend cannot tell a disarmed
+    // mode from an armed one; the gateway ignores a request that does not apply (202 means "sent").
+    static final Set<String> RESUMABLE_MODES = Set.of("AUTO_READY", "MANUAL", "AUTO", "SAFE_STOP");
 
     public synchronized void request(String requestedBy) {
         DriveState state = tracker.snapshot();
         DriveState.Control control = freshControl(state, "자율주행 재개를 요청할 수 없습니다.");
         if (!RESUMABLE_MODES.contains(control.mode())) {
             throw new ApiException(HttpStatus.CONFLICT, "NOT_AUTO_READY",
-                    "재개·재무장은 AUTO_READY·MANUAL·AUTO 상태에서만 요청할 수 있습니다. 현재: "
+                    "재개·재무장은 AUTO_READY·MANUAL·AUTO·SAFE_STOP 상태에서만 요청할 수 있습니다. 현재: "
                             + control.mode());
         }
         DriveStateTracker.ControlContext context = context(control, "자율주행 재개를 요청할 수 없습니다.");

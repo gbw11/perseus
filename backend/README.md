@@ -131,7 +131,7 @@ WS  /ws/v1/drive/state       같은 Drive 스냅샷 (첫 프레임 사용자 JWT
 자율주행 재개와 취소는 운영자 콘솔에서 보냅니다 (MQTT 계약 §5.2·§6, v1.7).
 
 ```text
-POST   /api/v1/drive/resume  AUTO_READY 재개 또는 출력 금지된 MANUAL·AUTO 재무장 요청 → console/resume 에 drive.resume.requested (202, SAFE_STOP 등 그 밖의 모드 409 NOT_AUTO_READY)
+POST   /api/v1/drive/resume  AUTO_READY 재개, 출력 금지된 MANUAL·AUTO 재무장, SAFE_STOP 재무장(게이트웨이가 준비된 수동 VM 선택) 요청 → console/resume 에 drive.resume.requested (202 = 보냄, 그 밖의 모드 409 NOT_AUTO_READY)
 DELETE /api/v1/drive/resume  3초 카운트다운 취소 → drive.resume.cancel_requested (202, 카운트다운 없으면 409 NO_RESUME_COUNTDOWN)
 ```
 

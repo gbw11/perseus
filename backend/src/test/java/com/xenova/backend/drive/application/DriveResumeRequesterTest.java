@@ -100,9 +100,10 @@ class DriveResumeRequesterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"MANUAL", "AUTO"})
-    void publishesTheSameRequestToRearmADisarmedManualOrAuto(String mode) {
-        // Contract §5.2 (verified): a disarmed MANUAL/AUTO is rearmed with the same drive.resume.requested.
+    @ValueSource(strings = {"MANUAL", "AUTO", "SAFE_STOP"})
+    void publishesTheSameRequestToRearmADisarmedManualAutoOrSafeStop(String mode) {
+        // Contract §5.2 (verified): a disarmed MANUAL/AUTO, and SAFE_STOP (gateway rearms a ready manual VM),
+        // are rearmed with the same drive.resume.requested.
         control(mode);
         requester(publisher).request("operator");
         assertThat(sent).hasSize(1);
@@ -121,7 +122,7 @@ class DriveResumeRequesterTest {
                     assertThat(e.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
                     assertThat(e.getCode()).isEqualTo("DRIVE_STATE_UNAVAILABLE");
                 });
-        control("SAFE_STOP");
+        control("UNKNOWN_MODE");
         assertThatThrownBy(() -> requester(publisher).request("operator"))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
                     assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);

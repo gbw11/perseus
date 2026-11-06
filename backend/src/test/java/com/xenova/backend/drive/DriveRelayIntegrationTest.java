@@ -226,11 +226,11 @@ class DriveRelayIntegrationTest {
     }
 
     @Test
-    void resumeIsRefusedInSafeStopAndTheCountdownIsRelayed() throws Exception {
+    void resumeIsRefusedOutsideResumableModesAndTheCountdownIsRelayed() throws Exception {
         String token = login();
         await(() -> {
             publish(DriveStateTracker.CONTROL_TOPIC, "dom0-gateway", null, "vehicle.control",
-                    "{\"mode\":\"SAFE_STOP\",\"generation\":30,\"active_app\":null}", 1, true);
+                    "{\"mode\":\"UNKNOWN_MODE\",\"generation\":30,\"active_app\":null}", 1, true);
             var control = tracker.snapshot().control();
             return control != null && control.generation() != null && control.generation() == 30;
         });
