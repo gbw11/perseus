@@ -42,6 +42,13 @@ function useClock() {
   return now;
 }
 
+/** 트립이 출발점을 벗어난 적이 있는지. 한 번 주행한 뒤에는 수신이 끊겨도 정차 화면으로 돌아가지 않는다 */
+function useHasDriven(trip: { distance_m: number } | null) {
+  const [driven, setDriven] = useState(false);
+  if (!driven && trip !== null && trip.distance_m >= 0.05) setDriven(true);
+  return driven;
+}
+
 /** 정차 → 출발: 출발한 뒤 DEPART_MS 동안은 정차 화면에서 바퀴가 구르며 나가는 모습을 보여 준다 */
 function useDeparture(parked: boolean) {
   const [departing, setDeparting] = useState(false);
@@ -111,8 +118,10 @@ export function CombinedPage() {
   const signal = signalAhead(objects);
   const signalStop = signal?.state === 'red' || signal?.state === 'yellow';
   // 출발 전 정차: 트립이 시작점이고 멈춰 있으면 차 외관 화면. 움직이기 시작하면 바퀴가 구르며 나가는 모습을
-  // 잠깐 보여 준 뒤 2분할 주행 화면
-  const parked = trip !== null && trip.distance_m < 0.05 && (speed ?? 0) < 0.02;
+  // 잠깐 보여 준 뒤 2분할 주행 화면. 트립을 아직 못 받았고 주행한 적도 없으면(수집기가 트립을 안 보내는 보드 등)
+  // 빈 주행 화면 대신 정차 화면에 둔다
+  const driven = useHasDriven(trip);
+  const parked = (speed ?? 0) < 0.02 && (trip !== null ? trip.distance_m < 0.05 : !driven);
   const departing = useDeparture(parked);
   const vmStatus = (vm: NonNullable<typeof p>['state']['vms'][number]) => vmLineStatus(p, vm, connected);
   const callouts: ParkedCallout[] = (p?.state.vms ?? []).map((vm) => ({
