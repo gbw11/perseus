@@ -128,7 +128,7 @@ dom0 표시 서비스가 HDMI 두 출력을 차량 화면으로 고정해 내보
 
 | 화면 | 내용 |
 | --- | --- |
-| HDMI 1 (계기판) | 속도·배터리·확정 주행 모드(AUTO·MANUAL·AUTO_READY·SAFE_STOP)·주요 경고. 모드는 게이트웨이의 신선한 표시 상태 보고(`display.drive_state`, 1초)로만 바꾸고, VM 장애만으로 추측하지 않는다 |
+| HDMI 1 (계기판) | 속도·배터리·확정 주행 모드(AUTO·MANUAL·AUTO_READY·SAFE_STOP)·주요 경고. 모드는 표시 수집기가 dom0 게이트웨이 context 를 1초마다 직접 읽은 신선한 값으로만 바꾸고([Gateway 읽기](contracts/display-gateway-read-v1.md)), VM 장애만으로 추측하지 않는다 |
 | HDMI 2 (인포테인먼트) | 네비·음악·확정 주행 모드·현재 켜진 VM·인터랙션 VM 게스트 콘텐츠·오류/작업 알림. 인터랙션 VM 이 죽어도 계기판은 계속 갱신된다 (**격리**) |
 | 관리 콘솔 (노트북 브라우저) | VM 목록·메트릭·이벤트 로그, VM 상세(웹 콘솔), 격리 시연(강제 종료·부하), Simulator 탭(시뮬레이터 구성) |
 
