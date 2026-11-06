@@ -118,7 +118,7 @@ Spring이 자기 레코드와 dom0-manager 응답을 조합해 구성합니다. 
 | `assigned_ipv4` | 플랫폼 등록부에서 Spring에 저장한 예약 IPv4. Linux와 Zephyr 모두 표시하며 저장값이 없으면 `null`. 목록·단건 조회와 역할 변경 응답에서 제공. VM이 정지해도 보이며, 실제 게스트 주소 획득이나 접속 여부는 별도 관측값임 |
 | `template_id`, `template_version` | 생성에 쓴 템플릿. Spring 레코드 |
 | `vcpus`, `memory_mib` | 실행 중이면 dom0-manager가 관측한 값, 꺼져 있으면 Spring 레코드의 값 |
-| `role` | RC카 시나리오에서 이 VM이 맡은 앱. 값은 MQTT 계약의 `app_id`와 같은 `autonomous` / `manual` / `interaction`, 없으면 `null`. 생성 때 지정하거나 `PATCH`로 바꿈. **Spring 레코드에만 있고 dom0-manager 계약에는 없음.** 생성 명세가 아니라서 같은 이름·명세 재시도(200)는 역할이 달라도 기존 VM을 그대로 돌려줌. 같은 역할을 여러 VM이 가져도 막지 않음 |
+| `role` | RC카 시나리오에서 이 VM의 배치 역할. `primary_drive`(주 구동) / `backup_drive`(백업 구동) / `interaction`(인터랙션), 없으면 `null`. MQTT `app_id`가 아니다 — 구동 VM 하나가 `autonomous`·`manual` 앱을 함께 돌릴 수 있으므로 앱 ID로 역할을 정하지 않는다(표시 계약 `display-pipeline-v1.md`의 `role`과 같은 값). 생성 때 지정하거나 `PATCH`로 바꿈. **Spring 레코드에만 있고 dom0-manager 계약에는 없음.** 생성 명세가 아니라서 같은 이름·명세 재시도(200)는 역할이 달라도 기존 VM을 그대로 돌려줌. 같은 역할을 여러 VM이 가져도 막지 않음 |
 
 ### 2.3 템플릿 객체
 
@@ -420,7 +420,7 @@ Recovery Worker가 dom0에 남긴 복구 이벤트(2.5절)를 오래된 순으�
 | `400 InvalidArgument` | `after_event_id`가 UUID 형식이 아니거나 `limit` 범위 밖 |
 | `503 PlatformUnavailable` | dom0의 이벤트 파일을 읽을 수 없음(권한·I/O 오류). 빈 목록으로 숨기지 않는다. 재시도하고 그동안 받은 커서는 그대로 둔다. 파일이 아직 없으면(이벤트 없음·host 재부팅) `200` |
 
-Spring의 페이지 규칙: (1) `gap: true`면 경고(`WARN`)로 `recovery.failed` 유실 가능성을 이벤트 로그에 남기고, (2) 그 응답의 `events`를 정상 처리한 뒤, (3) 다음 요청에는 `oldest_event_id`가 아니라 `next_after_event_id`를 보내며, (4) `events`가 비거나 `next_after_event_id`가 `null`이면 조회를 끝낸다. `oldest_event_id`는 유실 구간 진단용 정보일 뿐 커서로 쓰지 않는다(`after_event_id`는 "그 다음부터"라 다시 보내면 첫 이벤트 이후를 중복 조회한다). dom0는 최근 2,000건을 보관합니다(한도는 복구 정책 S15P31E110-125에서 조정).
+Spring의 페이지 규칙: (1) `gap: true`면 `recovery.failed` 유실 가능성을 서버 로그에 경고(로그 레벨 WARN, 커서와 `oldest_event_id` 포함)로 남기고(콘솔 이벤트 로그에는 기록하지 않음), (2) 그 응답의 `events`를 정상 처리한 뒤, (3) 다음 요청에는 `oldest_event_id`가 아니라 `next_after_event_id`를 보내며, (4) `events`가 비거나 `next_after_event_id`가 `null`이면 조회를 끝낸다. `oldest_event_id`는 유실 구간 진단용 정보일 뿐 커서로 쓰지 않는다(`after_event_id`는 "그 다음부터"라 다시 보내면 첫 이벤트 이후를 중복 조회한다). dom0는 최근 2,000건을 보관합니다(한도는 복구 정책 S15P31E110-125에서 조정).
 
 ### 4.8 `GET /api/v1/vms/{vm_id}/control-operations?request_key=`
 
@@ -532,18 +532,31 @@ Spring의 페이지 규칙: (1) `gap: true`면 경고(`WARN`)로 `recovery.faile
 
 ## 5. Spring 공개 API
 
-프론트에 노출되는 엔드포인트는 아래 7개입니다. `start`는 dom0-manager의 `POST /api/v1/vms` 재호출로 구현합니다.
+프론트에 노출되는 VM 관리 엔드포인트는 아래 8개입니다. `start`는 dom0-manager의 `POST /api/v1/vms` 재호출로 구현합니다.
 
 | 메서드 | 경로 | 성공 응답 | 비고 |
 |---|---|---|---|
 | `GET` | `/api/v1/vms` | `200` `{items: VM[], observed_at}` | 자기 레코드와 조합한 전체 목록. 생성 순 정렬. Spring에 레코드가 없는 도메인은 제외. `state`·`vcpus`·`memory_mib`는 Spring이 들고 있는 마지막 dom0 목록에서 오며 `observed_at`은 그 목록을 dom0-manager에서 받은 시각(아래 런타임 캐시) |
 | `POST` | `/api/v1/vms` | 신규 `201` VM, 동일 명세 재시도 `200` VM | 같은 이름에 다른 명세면 `409 VM_NAME_CONFLICT` |
 | `GET` | `/api/v1/vms/{vm_id}` | `200` VM | — |
-| `PATCH` | `/api/v1/vms/{vm_id}` | `200` VM (조회 응답과 같은 모양) | 본문 `{"role": "manual"}`, `{"role": null}`이면 역할을 지움. 역할만 바꿀 수 있고 dom0-manager를 호출하지 않으며 이벤트도 남기지 않음. 보관된 VM은 `404 VM_NOT_FOUND` |
+| `PATCH` | `/api/v1/vms/{vm_id}` | `200` VM (조회 응답과 같은 모양) | 본문 `{"role": "primary_drive"}`, `{"role": null}`이면 역할을 지움. 역할만 바꿀 수 있고 dom0-manager를 호출하지 않으며 이벤트도 남기지 않음. 보관된 VM은 `404 VM_NOT_FOUND` |
 | `POST` | `/api/v1/vms/{vm_id}/start` | `200` VM | dom0 단건 조회 후 도메인이 없을 때만 create 재호출. 이미 `running`이면 그대로 반환. `crashed`·`paused`·`stopping`이면 `409 INVALID_VM_STATE`로 거부(정지 후 다시 시작). 플랫폼 CLI와 같은 동작이며 자동 복구는 하지 않음 |
 | `POST` | `/api/v1/vms/{vm_id}/stop` | `200` VM (`state: stopped`) | dom0 단건 조회로 정지 전 상태를 읽은 뒤 **runtime 유무와 관계없이** dom0 stop을 호출. 플랫폼이 `desired_state: stopped` 의도를 기록해야 Recovery Worker가 사용자가 끈 VM을 다시 켜지 않는다(1.2절). 이미 꺼져 있었으면 `vm.state.changed` 이벤트만 남기지 않음. dom0는 `204`지만 Spring은 레코드로 VM 객체를 만들어 반환 |
 | `DELETE` | `/api/v1/vms/{vm_id}` | `204` | dom0 retire 성공 뒤 Spring 레코드를 `RETIRED`로 보존하고 v1 목록·단건 조회에서는 숨김 |
 | `GET` | `/api/v1/templates` | `200` 템플릿 배열 | 설정 파일 고정 데이터 (2.3절) |
+
+같은 `/api/v1/vms` 아래의 그 밖의 공개 엔드포인트(위 VM 관리와 별도. 형식의 기준은 각 계약·[백엔드 README](../../backend/README.md)):
+
+| 메서드 | 경로 | 성공 응답 | 비고 |
+|---|---|---|---|
+| `GET` | `/api/v1/vms/{vm_id}/metrics?from=&to=&source=&names=` | `200` `{items: MetricSample[]}` | 메트릭 이력(5장 아래 저장 규칙). 잘못된 `source`·기간은 `422` (`VALIDATION_ERROR`·`TIME_RANGE_INVALID`) |
+| `GET` | `/api/v1/vms/{vm_id}/processes?sort=&limit=` | `200` 최신 프로세스 목록 | `sort` 기본 `cpu_percent`, `limit` 1..20(기본 10). 범위 밖 `422 VALIDATION_ERROR` (MQTT 계약 3장 `processes[]`) |
+| `GET` | `/api/v1/vms/{vm_id}/threads` | `200` Zephyr 스레드 표 | Zephyr Telemetry 의 스레드 창을 조합한 최신 값 |
+| `GET` | `/api/v1/vms/{vm_id}/telemetry/heartbeat` | `200` Publisher 상태 | `status` `FRESH`·`STALE`·`UNKNOWN` (MQTT 계약 3장) |
+| `POST` | `/api/v1/vms/registrations` | 신규 `201`, 기존 `200` `{vm_id, registration: "confirmed"}` | 사용자 JWT 가 아니라 등록 통지 전용 서비스 토큰. 본문 오류 `400 INVALID_REGISTRATION`, 충돌 `409 VM_REGISTRATION_CONFLICT` ([등록 계약](vm-provisioning-v1.md)) |
+| `POST` | `/api/v1/vms/synchronizations` | `200` 동기화 결과 | dom0 등록 목록을 읽어 Spring 레코드를 맞춘다 ([등록 계약](vm-provisioning-v1.md)) |
+
+보고서 `GET /api/v1/reports/os-evidence`, `GET /api/v1/reports/performance` 와 실행 로그 `GET /api/v1/logs`(·`/sources`, [실행 로그 계약](runtime-logs-v1.md))도 같은 JWT 로 연다. Spring 에는 VM `reboot`·`control-operations`·`resources` 공개 엔드포인트가 없다(dom0-manager 4.3.1·4.8·4.10·4.12 는 내부 계약).
 
 모든 공개 API는 `Authorization: Bearer {access_token}`이 필요합니다. 생성·시작·정지·삭제가 성공하면 이벤트(`vm.created`, `vm.state.changed`, `vm.deleted`)가 기록됩니다.
 
@@ -563,7 +576,7 @@ Xen은 VM 상태 변화를 누구에게도 알리지 않으므로, Spring이 dom
 
 사용률은 같은 `vm_id`의 연속 두 표본으로 Spring이 계산합니다. `cpu_percent = 100 × Δcpu_time_s ÷ Δt초 ÷ vcpus`(0~100), 전송률은 `Δbytes ÷ Δt초`. `domid`가 바뀌었거나 누적값이 줄었으면 재시작으로 보고 그 구간의 사용률은 계산하지 않습니다. 에이전트 메트릭(MQTT-03)은 `source = "guest_agent"`로 따로 저장하며 두 계열을 섞어 계산하지 않습니다.
 
-**복구 이벤트의 기록.** Spring은 MQTT-12로 받은 복구 이벤트(2.5절)를 `EventType` `recovery.started` / `recovery.completed` / `recovery.recovered` / `recovery.cancelled` / `recovery.failed`로 기록합니다. `operation_id = recovery_attempt_id`(장애 단위 `recovered`·`cancelled`처럼 `null`이면 `recovery_id`), `occurred_at`은 객체의 값, `payload`는 객체 전체이고, `event_id`가 같은 이벤트는 한 번만 기록합니다. 심각도는 `started`·`completed`·`recovered`·`cancelled` `INFO`, `failed` `WARN`, `failed`이면서 `final`이면 `ERROR`입니다. 복구 실패율은 `final`인 `failed`만 실패로 세고 `recovered`·`cancelled`는 넣지 않습니다. `recovery.completed`의 `recovery_duration_ms`를 성능 지표 `vm_recovery_ms`로 기록하고, 같은 `recovery_id`로 시도들을 묶어 표시합니다. 복구로 바뀐 Xen 상태는 기존 주기 조회가 `vm.state.changed`(`cause: detected`)로 따로 기록하며, `cause`에 복구나 페일오버 값을 추가하지 않습니다. 제어권 전환은 주행 이벤트(`drive.mode.changed`, MQTT 계약 5·6장)로만 남깁니다. Spring은 복구 이벤트를 받아 표시할 뿐 재시작 명령을 내리지 않습니다(1.2절). 재시작 뒤 빠진 구간은 4.7절로 채웁니다.
+**복구 이벤트의 기록.** Spring은 MQTT-12로 받은 복구 이벤트(2.5절)를 `EventType` `recovery.started` / `recovery.completed` / `recovery.recovered` / `recovery.cancelled` / `recovery.failed`로 기록합니다. `operation_id = recovery_attempt_id`(장애 단위 `recovered`·`cancelled`처럼 `null`이면 `recovery_id`), `occurred_at`은 객체의 값, `payload`는 객체 전체이고, `event_id`가 같은 이벤트는 한 번만 기록합니다. 심각도는 `started`·`completed`·`recovered`·`cancelled` `INFO`, `failed` `WARNING`, `failed`이면서 `final`이면 `ERROR`입니다. 복구 실패율은 `final`인 `failed`만 실패로 세고 `recovered`·`cancelled`는 넣지 않습니다. `recovery.completed`의 `recovery_duration_ms`를 성능 지표 `vm_recovery_ms`로 기록하고, 같은 `recovery_id`로 시도들을 묶어 표시합니다. 복구로 바뀐 Xen 상태는 기존 주기 조회가 `vm.state.changed`(`cause: detected`)로 따로 기록하며, `cause`에 복구나 페일오버 값을 추가하지 않습니다. 제어권 전환은 주행 이벤트(`drive.mode.changed`, MQTT 계약 5·6장)로만 남깁니다. Spring은 복구 이벤트를 받아 표시할 뿐 재시작 명령을 내리지 않습니다(1.2절). 재시작 뒤 빠진 구간은 4.7절로 채웁니다.
 
 ---
 
@@ -670,6 +683,13 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | `409` | `VM_NAME_CONFLICT` | 같은 이름의 VM이 다른 명세로 이미 있음 |
 | `409` | `INVALID_VM_STATE` | 시작 요청인데 도메인이 `crashed`·`paused`·`stopping` 상태로 남아 있음 |
 
+입력 오류는 `422 VALIDATION_ERROR` 가 원칙이고(본문 필드 검증과 경로·질의 값의 형식 오류 모두), 구현상 아래 두 곳만 `400` 이다.
+
+| 엔드포인트 | 응답 | 조건 |
+|---|---|---|
+| `GET /api/v1/logs` | `400 VALIDATION_ERROR` (`errors` 없음) | `limit` 1..500 밖, 음수 `after`, 128자를 넘는 `source_id`·`component`, 허용하지 않는 `level`. dom0 로그 조회도 같은 경우 `400 InvalidArgument` 다([실행 로그 계약](runtime-logs-v1.md)). 단 `vm_id` 가 UUID 형식이 아니거나 `after`·`limit` 이 정수가 아니면 공통 처리로 `422 VALIDATION_ERROR` |
+| `POST /api/v1/vms/registrations` | `400 INVALID_REGISTRATION` | 등록 통지 본문 오류 (서비스 간 경로, 5장) |
+
 **dom0-manager 오류 변환** (dom0 본문의 `code`로 판단하며 `detail`은 로그에만 남김)
 
 | dom0 | Spring 공개 |
@@ -706,7 +726,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | `memory_mib` | 템플릿 `min_memory_mib` 이상 ~ 1024 이하 (공통 하한 16). 자원 변경(4.12)은 128~1024 | 템플릿별 하한은 Spring, 템플릿별 범위(`resource_limits`)는 플랫폼 카탈로그가 create 때 검사(벗어나면 `400 InvalidArgument`), 공통 범위는 dom0-manager. 자원 변경의 하한 128 은 플랫폼 `update-resources` 범위 |
 | 배수 제약 | 없음. 화면 입력만 64 단위 | — |
 | `template_id` | 공개 카탈로그 ID·버전을 그대로 전달 | Spring 목록 검사 + 플랫폼의 정확한 ID·버전·해시 검사 |
-| `role` | 선택. `autonomous` / `manual` / `interaction` 또는 `null` (대소문자 구분). 그 밖의 값은 `422 VALIDATION_ERROR` (`field: role`) | Spring 소유 (생성·`PATCH`) |
+| `role` | 선택. `primary_drive` / `backup_drive` / `interaction` 또는 `null` (대소문자 구분). 그 밖의 값(예전 `autonomous`·`manual`·`message-board` 포함)은 `422 VALIDATION_ERROR` (`field: role`) | Spring 소유 (생성·`PATCH`) |
 
 `name`은 create에 그대로 전달해 플랫폼의 기존 `display_name`에 저장합니다. UUID 기반 신원·내부 실행 이름·경로와 구분하며 재시작 요청을 rename으로 해석하지 않습니다.
 
@@ -728,12 +748,12 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 연결 타임아웃 | 2초 |
 | 재시도 간격 | 0.5초 |
 | 응답 대기 — 조회 | 6초 |
-| 응답 대기 — 명령 | 100초 |
+| 응답 대기 — 명령 | 15분 (`DOM0_MANAGER_COMMAND_TIMEOUT`. 웹 프록시 `/api/` 도 15분) |
 | 플랫폼 stop 응답 한도 | 90초 (플랫폼 고정. Manager stop은 대기 시간을 입력받지 않는다) |
 | 전체 예산 — 조회 | 약 15초 |
-| 전체 예산 — 명령 | 약 103초 |
+| 전체 예산 — 명령 | 약 15분 |
 
-플랫폼 stop은 대기 시간을 입력받지 않고(Manager stop 명세는 `vm_id`·`force`뿐) 90초 deadline 하나를 제거 관측까지 공유하므로 Manager 호출은 약 90초 안에 끝납니다. platform 모드의 dom0-manager는 `XENOVA_SHUTDOWN_GRACE`를 90으로만 허용하며 다른 값은 시작 시 설정 오류입니다. `XENOVA_XL_COMMAND_TIMEOUT`은 xl 서브프로세스에만 걸리고 Manager 호출을 제한하지 않습니다. Spring의 명령 응답 대기 100초가 그 위에 있습니다.
+플랫폼 stop은 대기 시간을 입력받지 않고(Manager stop 명세는 `vm_id`·`force`뿐) 90초 deadline 하나를 제거 관측까지 공유하므로 Manager 호출은 약 90초 안에 끝납니다. platform 모드의 dom0-manager는 `XENOVA_SHUTDOWN_GRACE`를 90으로만 허용하며 다른 값은 시작 시 설정 오류입니다. `XENOVA_XL_COMMAND_TIMEOUT`은 xl 서브프로세스에만 걸리고 Manager 호출을 제한하지 않습니다. Spring의 명령 응답 대기(15분)가 그 위에 있습니다. 15분은 정지 90초뿐 아니라 Linux VM 생성(이미지 준비 포함)처럼 오래 걸리는 명령을 끊지 않으려는 값입니다.
 
 명령의 응답 타임아웃에서 재시도하지 않는 이유는 두 가지입니다. 연결이 성립했으므로 dom0-manager가 요청을 이미 받아 처리 중일 수 있고, `xl` 호출은 블로킹 subprocess이며 uvicorn 워커가 1개이므로 재전송한 요청은 처리 중인 요청 뒤에서 대기할 뿐입니다.
 
@@ -772,7 +792,7 @@ FastAPI는 검증 실패 시 기본적으로 `422 HTTPValidationError`를 반환
 | 항목 | 담당 | 내용 |
 |---|---|---|
 | 조회 응답 대기 6초의 기산점 | 백엔드 | 연결 시간 포함 여부. 미포함이면 최악 소요가 16.5초로 예산 15초를 초과하므로 예산 18초 또는 대기 5초로 조정 필요 |
-| 오류 코드 명명 규칙 | 백엔드 | `VALIDATION_ERROR` / `InvalidArgument` 중 한쪽으로 통일 권고 |
+| 오류 코드 명명 규칙 | 백엔드 | `VALIDATION_ERROR` / `InvalidArgument` 중 한쪽으로 통일 권고. 현재 구현은 Spring `422 VALIDATION_ERROR`(로그 조회·등록 통지만 `400`, 8.2), dom0-manager `400 InvalidArgument`(8.1) |
 | OS별 실제 버전 값 | 제어 계층 | 이미지 빌드 시 실측 |
 | 템플릿별 `min_memory_mib` | 플랫폼·백엔드 | 플랫폼 카탈로그 `resource_limits`를 버전별 descriptor로 옮기고(Zephyr는 min=max) Spring 설정이 그 값을 따른다. Zephyr starter 1.0.0은 16 |
 | 서비스 토큰 배포·회전 | 공통 | Spring과 dom0-manager에 같은 Bearer 서비스 토큰을 안전하게 배포하고 회전하는 운영 절차 |
@@ -807,3 +827,4 @@ dom0-manager는 보드의 Tailscale 주소에 바인딩하고 `/healthz`를 포�
 | v1.16 | 2026-10-27 | 정지 요청 추적(S15P31E110-305): stop 의 선택 헤더 `Idempotency-Key` 와 작업 상태 응답 `200`·`202`(4.3.1), 원 작업 조회 `GET /api/v1/vms/{vm_id}/control-operations`(4.8), `/healthz` 를 뺀 전 엔드포인트의 선택 요청 예산 `X-Request-Budget-Ms`(4.9, 잠금 대기·하위 호출·xl·xentop), 오류 본문 `retryable`·`operation`, 오류 코드 `404 OperationNotFound`(8.1). 키·예산이 없는 기존 호출의 응답은 그대로 |
 | v1.17 | 2026-11-02 | Spring 런타임 캐시(S15P31E110-344): `GET /api/v1/vms`·단건 조회는 마지막 dom0 목록으로 답하고 `observed_at`은 그 목록의 관측 시각, 전용 갱신 루프(조회 후 1초), stale-limit 10초 초과 시 직접 조회·실패 시 오류(5장). 필드 변경 없음 |
 | v1.18 | 2026-11-04 | 정지한 Linux VM 의 자원 변경 `PUT /api/v1/vms/{vm_id}/resources`(4.12, S15P31E110-368): 필수 `Idempotency-Key`, 범위 vcpus 1..4·memory_mib 128..1024, 다음 시작부터 적용, 자산·제어 원장 키 조회, `TARGET_CHANGED` 뒤 원 작업 재확인. 재시작(4.2)의 자원 비교 기준을 지금 등록 설정으로 바꾼다. 실행 중 핀·가중치·메모리 변경은 범위 밖 |
+| v1.19 | 2026-11-06 | 구현에 맞춤: `role` 값을 `primary_drive`·`backup_drive`·`interaction` 으로(2.2·5·9장, Spring `VmRole`), 복구 이벤트 심각도 `WARN` → `WARNING`(5장), 재보충 `gap` 은 서버 로그 경고일 뿐 이벤트 로그에 남기지 않음(4.7), Spring VM 관리 엔드포인트 수 7 → 8 과 `/api/v1/vms` 아래 그 밖의 공개 엔드포인트 표(5장), 입력 오류 400 예외(로그 조회·등록 통지, 8.2), Spring 명령 응답 대기 100초 → 15분(10장) |
