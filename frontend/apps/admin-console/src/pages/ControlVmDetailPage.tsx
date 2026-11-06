@@ -5,7 +5,7 @@ import { ApiError } from '../api/client';
 import { useVm, useVmResources, useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
 import { osLabel, sortVms } from '../domain/roles';
-import { AGENT_LABEL, canStartVm, canStopVm, STATE_HEALTH, STATE_LABEL } from '../format';
+import { AGENT_LABEL, canStartVm, canStopVm, STATE_HEALTH, STATE_LABEL, VM_ACTION_LABEL } from '../format';
 import styles from './pages.module.css';
 import { ResourceAdjustmentPanel } from './ResourceAdjustmentPanel';
 import { VcpuPinningPanel } from './VcpuPinningPanel';
@@ -45,10 +45,7 @@ export function ControlVmDetailPage() {
   const run = (target: Vm, kind: VmAction) =>
     vmOperations.run(target, kind, {
       onSuccess: () => {
-        toast.show(
-          `${target.name}: ${kind === 'start' ? '시작' : kind === 'stop' ? '정지' : '삭제'} 요청 완료`,
-          'ok',
-        );
+        toast.show(`${target.name}: ${VM_ACTION_LABEL[kind]} 요청 완료`, 'ok');
         if (kind === 'delete' && mounted.current) navigate('/control');
       },
       onError: (_error, message) => toast.show(message, 'fault', 5000),

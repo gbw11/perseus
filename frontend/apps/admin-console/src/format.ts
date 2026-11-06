@@ -1,4 +1,5 @@
 import type { Health } from '@xenova/ui';
+import type { VmAction } from './api/queries';
 import type { AgentStatus, GuestKind, VmState } from './api/types';
 
 /** VM 관리 API 계약 §3.3 state → 화면 상태 배지 */
@@ -45,3 +46,10 @@ export function formatElapsedTime(elapsedMs: number): string {
  */
 export const canStartVm = (state: VmState): boolean => state === 'stopped';
 export const canStopVm = (state: VmState): boolean => state !== 'stopped';
+
+/** VM 생명주기 요청 이름 (진행 표시·완료 알림이 같이 쓴다) */
+export const VM_ACTION_LABEL: Record<VmAction, string> = {
+  start: '시작',
+  stop: '정지',
+  delete: '삭제',
+};
