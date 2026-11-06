@@ -313,6 +313,14 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 | `obstacles` | array | `[{x, y, w}]` |
 | `stop` | bool | 정지 필요 |
 
+좌표·부호 (v1.8.1 명시. 인지 대역 `platform/apps/perception`, 자율 앱 `autonomous.c`, 시뮬레이터 폐루프 도구, 젯슨 인계(S15P31E110-315)가 이미 이 규칙을 쓴다. 필드·타입은 그대로):
+
+- 원점은 카메라 바로 아래 지면, x 전방·y 왼쪽(오른손 좌표), 단위 m·rad.
+- `lane_offset_m`: 차선 중심에 대한 차의 가로 위치, **+ = 차가 중심보다 왼쪽**.
+- `heading_err_rad`: 차 진행 방향에서 본 0.6 m 앞 차선 중심의 방향, **+ = 차선이 왼쪽으로 돈다** (`steer_rad` + 와 같은 쪽). 곡선의 굽음이 들어간다.
+- `obstacles[]`: `x` 는 장애물이 지면에 닿은 아랫변 가운데까지의 전방 거리, `y` 는 그 가로 위치(왼쪽 +), `w` 는 아랫변 폭. 가까운(x 작은) 순, 최대 8개. 받는 쪽(C `XM_PERCEPTION_MAX_OBSTACLES`)은 앞에서 8개만 쓴다.
+- 자세한 계산과 정지 영역은 [인지 대역 README](../../platform/apps/perception/README.md) "좌표계·단위".
+
 ### 5.5 게이트웨이 수용 규칙
 
 아래는 legacy 수용 규칙이다. verified는 §5.2의 토픽/현재 실행/준비/출력 허가를 함께 적용한다.
@@ -804,6 +812,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.6 (보완) | 2026-11-02 | 12장 WS-06: `sim.command.result` 는 모든 콘솔 연결에 방송, 결과가 REST 202 보다 먼저 올 수 있음을 명시 (구현과 같음, S15P31E110-267). 토픽·payload 는 그대로 |
 | v1.7 | 2026-11-04 | 재개 카운트다운 운영자 취소 (S15P31E110-280): `console/resume` 에 `drive.resume.cancel_requested`(`causation_id`·`expected_generation`·`requested_by`) 추가, `drive.resume.cancelled` reason `operator_cancelled`(모드 유지, 자동 복귀 없음)(5.2 verified, 6장). 6장 표에 그동안 게이트웨이 README 에만 있던 `drive.resume.accepted`·`cancelled` 와 `console/resume` 재개 요청 행을 올림. 기존 토픽·payload·ACL 은 그대로 |
 | v1.8 | 2026-11-04 | 3.2절 데모 명령 규칙 추가 (S15P31E110-123): MQTT-04 payload 필드·범위(`stress` 의 `cpu_workers`·`memory_mib`·`duration_s`), 유효 기간 300초·시계 허용 30초(`CLOCK_UNTRUSTED`), 같은 `command_id`·같은 요청은 재실행 없이 마지막 결과 재전송, 다른 요청은 `IDEMPOTENCY_CONFLICT`, 기록을 남기지 못하면 실행하지 않음(`STATE_UNAVAILABLE`), MQTT-05 상태 흐름과 오류 코드, `agent_exit` 의 종결 결과는 `ACCEPTED` 하나이고 PUBACK 확인 뒤 종료(PUBACK 전 재시작은 이어서 진행), MQTT-05 중복은 백엔드가 `(vm_id, command_id)` 집계 키로 처리(같은 결과 재전달은 무시, `RUNNING` → 종결은 전이, 종결 뒤 다른 종결은 계약 위반). 데모 설정이 꺼진 에이전트는 `DEMO_DISABLED`. 10장 미확정에서 명령 만료 허용 범위 제외 |
+| v1.8.1 | 2026-11-06 | 5.4 `perception.result` 의 좌표·부호(원점·축·`lane_offset_m`·`heading_err_rad` 부호·장애물 기준점·순서·최대 8개)를 구현이 이미 따르는 규칙대로 명시 (S15P31E110-156 후속, -249). 필드·타입·토픽은 그대로 |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의
 QoS 교환은 메시지 전달을 위한 것이며 앱/장치 적용 확인을 대신하지 않는다.
