@@ -302,6 +302,21 @@ report = run_replay(Path("/data/captures/bench-001"), speed=0, consumer=consume)
 
 종료 코드는 재생 완료0, 검증/재생 실패1, 인수·프로필·기존 출력 경로 오류2, Ctrl+C130, SIGTERM143이다. 대기 중에는 최대50ms마다 취소를 확인한다. 이는 동기 consumer나 저장 장치 I/O의 강제중단 기한을 뜻하지 않는다. version1 입력 상한은 payload 합계4GiB, 10,000프레임, index64MiB·행32KiB, manifest2MiB, 원 결과64KiB다. 진단 trace는96MiB로 제한한다. 전체 영상은 메모리에 적재하지 않으며 index metadata는 상한 내에서 보관한다.
 
+## 순수 준비·기한 정책 API
+
+`runtime.lifecycle_policy`는 실행 adapter가 검증한 개별 사실과 정수 J 단조시각(us)을 받아 준비·원 기한을 판단한다. 내부에서 시계·파일·장치·프로세스·네트워크를 열지 않는다. 문서 폴더를 runtime config로 읽지 않으며 기존 벤치 CLI는 이 API를 호출하지 않는다.
+
+- `AbsoluteDeadline.after(event_us, duration_us, now_us=..., cap_us=...)`는 원 사건과 상한으로 한 번 기한을 계산한다. `now >= expires_us`는 만료인 half-open 정책이다. bool/float/음수·u64 overflow·미래 사건은 거절한다.
+- `AStageWatch`는 A의 명시 기동/정리 경로와 원 cold90초·stage15/30/30/15초를 검사한다. 같은 state 재전달은 새 시작이 아니다. `STREAMING`에는 현재 `CaptureWarmup`의 준비 근거가 필요하고, `CLOSED`에는 S가 실제 session 정리·process exit를 확인한 `SessionExitEvidence`가 필요하다. 이 API가 실제 Device/exit 증거를 생성하지 않는다.
+- `LocalSetupWatch`는 M/D의 spawn→HELLO15초만 검사한다. `BindWatch`는 현재 worker·binding hash·원 request ID의 issue/send/ACK를 구분한다. EAGAIN 동안 `sent`를 호출하지 않으며 늦은 송신도 issue+5초를 넘길 수 없다. HELLO 뒤 정상 외부 대기는 cold/setup 기한의 연장이 아니다.
+- `CaptureWarmup`은 queue 설정 뒤 현재 SDK clock barrier보다 새로운 서로 다른 RGB/depth 후보30개를 센다. 전달받은 원 stage 기한도 시작+15초를 넘길 수 없고 더 짧은 상한은 유지한다. A의 첫 STREAMING은 현재 WARMUP의 start/cap에 결박한 준비만 수락한다. 두 stream의 seq 숫자는 달라도 된다. `ParserWarmup`은 현재 capture 준비와 현재 M의 원 BIND_ACK가 모두 생긴 두 번째 원 사건부터15초 안에 정상 paired parser 결과5개를 연속 확인한다. 출력0개도 이 timer가 만료되며, current fresh parser 실패의 input key도 기억해 같은 입력 재시도를 새 성공으로 세지 않는다. empty detection은 정상 parser 결과일 수 있다.
+
+`CaptureScope`의 RawBinding hash는 pipeline/config/calibration/stream/SDK bridge/clock 등을 포함한 검증된 전체 binding을 뜻한다. canonical hash와 개별 증거의 실제 SDK·형식·동기·원 age·lease 검증은 lower adapter 책임이다. 내부 `SourceStamp`와 개별 `CapturePairEvidence`/`ParserEvidence`는 payload나 wire schema가 아니다. kernel은 stream별 마지막 metadata와 유한 count만 보관한다. REPLAY·외국/과거 scope·중복 입력은 준비에 더하지 않고 원 시각을 현재 now로 바꾸지 않는다.
+
+M-only 교체는 같은 capture tracker와 새 mapper/request 문맥의 parser tracker를 사용한다. 실제 source 교체에는 새 scope/tracker가 필요하며 이전 객체를 현재 권위로 사용하지 않는다. 원 clock lease의 정상 갱신·일반 관측은 source 교체가 아니다. parser 준비에는 Pi 임무·PublicationBinding·metric/world 준비가 필요하지 않다. 무작업 WAIT는500ms hang이 아니며, WAIT 상태에서도 실제 parser job이 활성이라면 `active_progress_expired(..., active_job=True)`가 그 활성 작업만 검사한다. NN의 추론률·post-warmup freshness는 이500ms 값으로 정하지 않는다.
+
+REQUIRED의 초기 준비5개만 구현한다. ABSENT는 실제 NN stream이 없는 source scope이며 NN_READY를 발급하지 않는다. OPTIONAL 상세 parser는 `OPTIONAL_PARSER_NOT_IMPLEMENTED`로 표시하고 timer를 시작하지 않는다. `classical_fallback_allowed=True`일 때의 OPTIONAL 정책 허용은 실제 classical/metric 경로 수락이 아니다. warmup 완료는 지속 freshness·정확도·METRIC_READY/WORLD_VALID/DRIVE_PERMITTED가 아니며 해당 권한을 올리는 API는 제공하지 않는다. 실제 worker·IPC·resource guard·재시작 실행은 호출하는 adapter의 별도 책임이다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
