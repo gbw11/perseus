@@ -122,8 +122,8 @@ dom0에서 도는 Python 제어 서비스입니다. Spring 관리 서버가 호�
 ```bash
 cd platform/services/dom0-manager
 python -m pip install -e .[test]
-XENOVA_DRIVER=mock XENOVA_MOCK_SAMPLES=1 python -m dom0_manager
-# → http://127.0.0.1:8081/docs 에서 내부 API 문서 확인
+XENOVA_DRIVER=mock XENOVA_MOCK_SAMPLES=1 XENOVA_DOM0_API_DOCS=1 python -m dom0_manager
+# → http://127.0.0.1:8081/docs 에서 내부 API 문서 확인 (개발용. XENOVA_DOM0_API_DOCS 가 없으면 /docs·/redoc·/openapi.json 은 404)
 ```
 
 ```bash
@@ -155,6 +155,7 @@ curl -i -X POST localhost:8081/api/v1/vms/11111111-1111-4111-8111-111111111111/s
 | `XENOVA_XL_SSH` | (없음) | 설정하면 xl 을 로컬 대신 `ssh -o BatchMode=yes <값> -- xl …`로 부른다(예: `root@100.64.0.1`). 개발 PC에서 xen 조회 모드로 실보드 출력을 계약과 대조할 때만 쓴다. 키 인증 필수 |
 | `XENOVA_SHUTDOWN_GRACE` | `90` | 정상 종료 대기(초). 계약 v1.1: 시간이 지나도 자동 강제 종료하지 않고 실패로 보고. platform 모드는 플랫폼 고정 대기 90 만 허용(다른 값은 시작 거부) |
 | `XENOVA_SERVICE_TOKEN` | (없음) | 설정하면 `/healthz`를 포함한 모든 요청에 `Authorization: Bearer <토큰>`을 요구(401). Tailscale 바인드 배포에서는 필수 |
+| `XENOVA_DOM0_API_DOCS` | `0` | 개발용. `1`이면 `/docs`·`/redoc`·`/openapi.json` 을 연다. 기본은 꺼져 404. 켜도 서비스 토큰이 설정돼 있으면 문서 경로도 Bearer 토큰을 요구한다(예외 없음) |
 | `XENOVA_HOST_CPUS` | `4` | vcpus 상한 기본값. `xl info`의 nr_cpus가 있으면 그 값 우선 |
 | `XENOVA_INSTANCE_ROOT` | `/srv/xenova/instances` | 인스턴스 루트 (xen 모드의 등록 확인용. platform 모드는 Manager의 data 경로를 씀) |
 | `XENOVA_RESPONSE_RESERVE` | `0.5` | 요청 예산(`X-Request-Budget-Ms`)이 있을 때 하위 호출에 넘기기 전에 응답 몫으로 남길 초. 실측 전 임시값, 0 이상 |
@@ -227,14 +228,15 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 | --- | --- | --- |
 | `XENOVA_PLATFORM_LIB` | `/usr/lib/xenova` | `xenova_management` 등 플랫폼 모듈 경로. 여러 개면 OS 경로 구분자로 |
 | `XENOVA_PLATFORM_BUSY_TIMEOUT` | `5` | 다른 요청이 플랫폼 `Manager`를 쓰는 동안 기다릴 최대 초. 넘으면 503 `PlatformUnavailable`(재시도 가능). 정지가 90초 잠금을 쥐는 동안 조회가 스레드풀에 쌓이지 않게 한다 |
+| `XENOVA_PLATFORM_READ_TIMEOUT` | `5` | `GET /vms`·`GET /vms/{id}` 가 하위 `list`·`get` 에 `timeout_ms` 로 주는 조회 한도(초, 0 초과 15 이하). 계약 조회 5초·Spring 대기 6초에 맞춘다. 넘으면 하위 `DEADLINE_EXCEEDED` → 504 `DriverTimeout`. 요청 예산이 더 짧으면 그 값으로 줄인다 |
 | `XENOVA_PLATFORM_READ_FORK` | `0` | `1`이면 일반 조회(get·list 등)를 직렬화하지 않고 호출마다 요청별 `Manager.fork()`로 부른다. 하위가 조회를 공통 실행 잠금 없이 처리하는 설치본을 확인한 뒤에만 켠다. Worker 도 같은 값을 읽는다 |
 
 동작 대응:
 
 | API | 플랫폼 호출 |
 | --- | --- |
-| `GET /vms`, `GET /vms/{id}` | `list` / `get`. `domid`가 있는 항목만 도메인으로 봄. 등록만 된 VM은 목록에 없고 단건은 404 |
-| `POST /vms` | 등록이 없으면 `create`(`idempotency_key=create-<vm_id>`, Spring 발급 `vm_id`를 그대로 전달) → `start` |
+| `GET /vms`, `GET /vms/{id}` | `list` / `get` (`timeout_ms` 기본 5000, `XENOVA_PLATFORM_READ_TIMEOUT`). `domid`가 있는 항목만 도메인으로 봄. 등록만 된 VM은 목록에 없고 단건은 404 |
+| `POST /vms` | 등록이 없으면 `create`(`idempotency_key=create-<vm_id>`, Spring 발급 `vm_id`를 그대로 전달) → `start`. 플랫폼 `VM_NAME_CONFLICT`(다른 VM 과 내부 이름·UUID 예약·MAC 충돌)는 409 `VMNameConflict` 이며 `VMExists`(같은 VM 이 이미 있음)와 다르다 |
 | `POST /vms/{id}/stop` | `stop` (`force=false`, 플랫폼이 최대 90초 대기). 시한 초과는 504. `Idempotency-Key` 가 있으면 아래 "정지 요청 추적" |
 | `POST /vms/{id}/reboot` | `reboot` (`force=false`, 플랫폼이 새 실행까지 최대 90초 대기). 신규 재부팅은 키 유무와 관계없이 먼저 등록(없으면 404)·실행 중(아니면 409)을 확인한다. 키 있으면 같은 키의 원 작업을 먼저 조회해 있으면 재전달로 보고 상태 확인 없이 보낸다(작업 상태 `action: reboot`). 명령 제출 뒤 새 실행 미확인은 503(`RECONCILE_REQUIRED`). 꺼진 VM·비협력 Zephyr 거절은 플랫폼이 `ARTIFACT_INVALID` 문구로만 알려 그 두 문구만 409·501 로 바꾼다(계약 4.10) |
 | `GET /cpu-layout`, `GET /vms/{id}/cpu-layout` | `cpu-layout` (`vm_id?`, `timeout_ms` 기본 5000). 조회 전용. 하위는 `budget_ms` 를 받지 않아 요청 예산은 `timeout_ms` 로만 줄이고, 플랫폼이 operation lock 을 기다리지 않으므로 요청별 Manager(fork)로 부른다. 응답은 공개 필드만 고정 모델로 형식·의미값(presence·allocation·issue code·예약 형식)까지 검증해 옮긴다. 어긋나거나 한 VM 조회가 그 VM 하나가 아니면 503. 관측 중 바뀜(`TARGET_CHANGED`)은 409 가 아니라 503(계약 4.11) |
