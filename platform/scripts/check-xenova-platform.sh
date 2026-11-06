@@ -19,7 +19,7 @@ git diff --check
 [[ "${1:-}" == --metadata ]] || exit 0
 
 WORKSPACE="${YOCTO_WORKSPACE:-$HOME/yocto-workspace}"
-ORIGINAL="${YOCTO_BUILD_DIR:-$WORKSPACE/build-rpi4-xen}"
+ORIGINAL="${YOCTO_BUILD_DIR:-$WORKSPACE/build-rpi4-xenova}"
 bash platform/scripts/setup-yocto.sh --check
 CHECK_DIR="$(mktemp -d /tmp/xenova-platform-static.XXXXXX)"
 printf 'Isolated metadata check: %s\n' "$CHECK_DIR"
