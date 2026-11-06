@@ -10,7 +10,9 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.LongSupplier;
@@ -55,6 +57,10 @@ public class DriveStateTracker {
     private static final int REMEMBERED_APP_RUNS = 8;
     private static final long LIFECYCLE_FRESH_MS = 300;
     private static final long HEARTBEAT_FRESH_MS = 3000;
+    // contract §6: the gateway publishes these on xenova/v1/apps/vehicle/events only.
+    private static final String GATEWAY_APP_ID = "vehicle";
+    private static final Set<String> GATEWAY_EVENT_TYPES = Set.of(
+            "drive.mode.changed", "drive.fault.detected", "drive.resume.accepted", "drive.resume.cancelled");
     private static final Logger log = LoggerFactory.getLogger(DriveStateTracker.class);
 
     private final ObjectMapper objectMapper;
@@ -131,6 +137,15 @@ public class DriveStateTracker {
         String type = envelope.path("type").asText();
         count(topic, type, now);
         if (!acceptSeq(topic, envelope)) {
+            // After a reconnect the broker hands back the retained control we already hold (same seq). It is
+            // still the gateway's current control (contract §5.3), so it belongs to this connection again;
+            // dropping it left control UNKNOWN, manual input cut off and resume 503 until the next mode change.
+            if (retained && CONTROL_TOPIC.equals(topic) && control != null
+                    && control.mqttGeneration != mqttGeneration
+                    && Objects.equals(controlMessageId, text(envelope, "message_id"))) {
+                control = new Stamped(control.body, now, control.publisher, mqttGeneration);
+                version++;
+            }
             return Optional.empty(); // duplicate or reordered (contract §2)
         }
         JsonNode body = envelope.path("payload");
@@ -152,16 +167,17 @@ public class DriveStateTracker {
     }
 
     private void onVmAppEvent(String vmId, String appId, byte[] payload, long now) {
-        if (payload.length > 1024) {
-            throw new Rejected("PAYLOAD_TOO_LARGE", "scoped app report");
-        }
         JsonNode envelope = read(payload);
         if (envelope == null || !envelope.isObject()) {
             throw new Rejected("PAYLOAD_INVALID", "scoped app envelope is not an object");
         }
         String type = envelope.path("type").asText("");
         if (!"app.lifecycle".equals(type) && !"app.heartbeat".equals(type)) {
-            return;
+            return; // other types on this topic (e.g. app.state.snapshot, up to 8192 bytes) are not ours to judge
+        }
+        // The 1024-byte limit belongs to lifecycle/heartbeat reports (contract §6.1-6.2), not to every type here.
+        if (payload.length > 1024) {
+            throw new Rejected("PAYLOAD_TOO_LARGE", "scoped app report");
         }
         validate(envelope, appId);
         String bootId = text(envelope, "boot_id");
@@ -209,6 +225,11 @@ public class DriveStateTracker {
     }
 
     private Optional<DriveNotice> onAppEvent(String appId, String type, JsonNode body, String publisher, long now) {
+        // Mode, fault and resume events come only from the gateway on apps/vehicle/events (contract §6).
+        // From another app's topic they would forge console events or clear the resume countdown.
+        if (GATEWAY_EVENT_TYPES.contains(type) && !GATEWAY_APP_ID.equals(appId)) {
+            throw new Rejected("SOURCE_INVALID", type + " on apps/" + appId + "/events");
+        }
         switch (type) {
             case "drive.command" -> {
                 AppTrack app = app(appId);

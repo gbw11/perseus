@@ -1,5 +1,33 @@
 # dom0 표시 파이프라인 (2~5단계)
 
+## VM별 warm-drive-1 보고 수신 (253)
+
+현재 주행 앱의 `app.lifecycle`은 VM별 autonomous/manual 토픽에서 수신한다.
+두 Zephyr binding에 `report_profile: "warm-drive-1"`을 명시해야 하며, 기본값인
+`verified-drive-1`에서는 수락하지 않는다. [후보 예시](examples/warm-drive-candidate-bindings.json)의
+UUID는 가짜다. 실제 등록 UUID·역할을 대조한 뒤 `scope: "deployment"`로 별도 배치한다.
+warm profile은 기존 `xenova_mqtt.lifecycle.parse`가 설치되어 있어야 시작할 수 있다.
+
+- `apps[app_id].lifecycle.reported`는 마지막 유효 보고, `current`는 현재 유효한 보고다.
+  `source`는 300ms 감독 보고 신선도, `calculation_source`는 실제 작업 진행의 신선도다.
+  순서가 역전된 check/generation/progress는 시간을 갱신하지 않는다. check만 증가해도
+  실제 계산 READY의 300ms 유효기간이 연장되지는 않는다.
+- QUALIFIED는 대기 준비이며 실제 작업·출력 허가가 아니다. NOT_READY는 이유와 함께
+  준비 대기로 표시한다. 기존 `app_state`와 `apps[app_id].source`는 heartbeat 기반
+  호환 필드이므로 heartbeat가 없는 warm 앱은 이 값만으로 생존 여부를 판단하지 않는다.
+- 화면 정책은 현재 warm 보고로 대기·준비·종료·정리 미확정을 구분한다. 활성 VM·모드·출력
+  허가는 기존 Gateway 읽기 경로를 따른다. 앱 보고로 제어 상태를 바꾸지 않는다.
+- 배포 시 Manager와 feed에 같은 `XENOVA_OBSERVATIONS_PATH`를 지정해 검증된 VM 상태를
+  공유한다. feed의 공유 파일 누락·실패·3초 만료 시 별도 Xen 조회로 우회하지 않는다.
+
+[2026-11-05 실제 수신·단절/복귀·API/WS 검증 및 남은 배포 조건](../../../../docs/verification/display-253-warm-reports-20261105.md)을 참조한다.
+
+이후 [정상 서비스 배포·재시작·실제 화면 소비·공유 상태 지연 측정](../../../../docs/verification/display-253-normal-deployment-20261105.md)을 진행했다.
+공유 파일을 사용하는 feed는 250ms마다 변경 여부만 확인하고 새 프레임일 때만 기존 검증기로 읽는다.
+변하지 않은 파일의 관측 시각을 갱신하지 않으므로 기존 3초 만료는 그대로 적용된다.
+일반 읽기 요청의 fork 옵션은 하위 플랫폼의 동시 읽기 지원을 검증한 설치에서만 사용한다.
+아래 측정에서 공유 관측 만료는 완전히 해소되지 않았으므로 보드 전체 성능 수락으로 간주하지 않는다.
+
 ## 휴대폰 통합 표시 UI (350)
 
 빌드된 vm-screens의 `/display/mobile`은 기존 인증된 presentation API를 한 번 조회해
@@ -255,3 +283,11 @@ python -B tests/probe_display_runtime.py --execute --soak-seconds 600 \
 키오스크의 `--prevent-idle-blank`는 전용 차량 화면 세션에서만 사용한다. `xset`으로 기존 screen saver/DPMS 값을 읽고, screen saver timeout과 blanking 및 지원되는 DPMS를 끈 뒤 적용 결과를 확인한다. 일반 종료 시 기존 값을 복원한다. 공유 데스크톱에는 이 옵션을 사용하지 않는다. 강제 종료(SIGKILL)·전원 차단은 복원을 보장하지 않으며, 새 전용 X 서버 세션의 초기 설정을 다시 적용해야 한다. 배포 예시 unit은 이 옵션을 명시한다. 실제 보드의 상시 서비스에는 아직 설치하지 않았다.
 
 `outputs[].width/height`는 X11 원본 캡처 영역이다. 별도의 `stream_width/stream_height`는 기본 1280×720인 전송 JPEG 크기이며 짝수만 허용한다. 원본 전체를 비율 유지 축소하고 검은 여백을 채우므로 영역을 잘라내지 않는다. 스트림 metadata의 `rectangle`은 원본 영역, `width/height`는 인코딩 결과 크기다. MJPEG는 yuvj420p, encoder 1 thread와 단순 filter pipeline 1 thread를 사용한다. encoder의 `-threads`와 filter의 `-filter_threads`는 별도 설정이다([FFmpeg 공식 문서](https://ffmpeg.org/ffmpeg.html)).
+
+## HDMI ↔ 휴대폰 터미널 전환 (351, 2026-11-05)
+
+기본은 HDMI이며 `sudo python3 -m xenova_display.display_mode mobile` 또는
+`sudo python3 -m xenova_display.display_mode hdmi`로 왕복 전환한다.
+`status`는 표시 선택·서비스·렌더러 상태만 조회한다.
+새 runtime guard를 포함한 native 배포가 필요하며 기존 persistent mobile-first 설정은
+운영자가 소유·이관을 확인해야 한다. [준비·실패·재인증·부팅 절차](deploy/mobile/display-mode.README.md)를 따른다.

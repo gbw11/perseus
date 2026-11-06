@@ -1,0 +1,34 @@
+{
+  "units": {
+    "xenova-dom0-manager.service": {
+      "ActiveState": "active",
+      "MainPID": "23275"
+    },
+    "mosquitto.service": {
+      "ActiveState": "active",
+      "MainPID": "820"
+    },
+    "tailscaled.service": {
+      "ActiveState": "active",
+      "MainPID": "605"
+    },
+    "xenova-recovery-worker.service": {
+      "ActiveState": "active",
+      "MainPID": "1489"
+    },
+    "xenova-runtime-log-collector.service": {
+      "ActiveState": "active",
+      "MainPID": "516"
+    },
+    "xenova-display-feed.service": {
+      "ActiveState": "inactive",
+      "MainPID": "0"
+    },
+    "xenova-display-hdmi.service": {
+      "ActiveState": "inactive",
+      "MainPID": "0"
+    }
+  },
+  "boot_id": "62412d0a-e30e-459b-8269-ca49cbe2aeed",
+  "console_config_sha256": "26c38e4b1c34257b7b0ef45116cb9ee9b737e85fd36c7405a49ef0f5f0edcf32"
+}

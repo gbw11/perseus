@@ -9,9 +9,12 @@
 import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import {
   VM_CPU_PERCENT_METRIC,
+  type CpuStressRequest,
   type CreateVmRequest,
   type LoginRequest,
+  type MemoryStressRequest,
   type SignupRequest,
+  type StressCommand,
   type TokenResponse,
   type UpdateMemoryRequest,
   type UpdateVcpuPinningRequest,
@@ -22,7 +25,8 @@ import {
 } from '../api/types';
 import { mockBoardDown, setMockBoardDown } from './board';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
-import { mockKernelHeapSamples, mockMemoryPoolSamples } from './memoryMetrics';
+import { mockKernelHeapSamples, mockMemoryPoolSamples, mockZephyrNetworkSamples } from './memoryMetrics';
+import { mockTelemetryHeartbeat } from './telemetryHeartbeat';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
@@ -328,6 +332,43 @@ export const handlers = [
     return HttpResponse.json(resourcesOf(find(vm.vm_id)!) as unknown as JsonBodyType);
   }),
 
+  http.post('*/api/v1/vms/:vmId/stress/:kind', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    if (!vm) return vmNotFound();
+    if (vm.guest_kind !== 'linux' || vm.state !== 'running' || vm.agent_status !== 'ONLINE') {
+      return error(409, 'AGENT_UNAVAILABLE', `VM Agent가 온라인 상태가 아닙니다: ${vm.vm_id}`);
+    }
+    const kind = String(params.kind);
+    const body = (await request.json()) as Partial<CpuStressRequest & MemoryStressRequest>;
+    const amount = kind === 'cpu' ? body.workers : body.memory_mib;
+    const max = kind === 'cpu' ? 4 : 512;
+    if (
+      (kind !== 'cpu' && kind !== 'memory') ||
+      !Number.isInteger(amount) ||
+      amount! < 1 ||
+      amount! > max ||
+      !Number.isInteger(body.duration_s) ||
+      body.duration_s! < 1 ||
+      body.duration_s! > 120
+    ) {
+      return error(400, 'VALIDATION_ERROR', '입력값을 확인해 주세요.');
+    }
+    const now = new Date();
+    const command: StressCommand = {
+      command_id: crypto.randomUUID(),
+      operation_id: crypto.randomUUID(),
+      vm_id: vm.vm_id,
+      type: kind === 'cpu' ? 'CPU' : 'MEMORY',
+      amount: amount!,
+      duration_s: body.duration_s!,
+      submitted_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + 30_000).toISOString(),
+    };
+    return HttpResponse.json(command as unknown as JsonBodyType, { status: 202 });
+  }),
+
   http.post('*/api/v1/vms', async ({ request }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
@@ -363,9 +404,17 @@ export const handlers = [
     if (!vm) return vmNotFound();
     const action = String(params.action);
     if (action !== 'start' && action !== 'stop') return error(404, 'NOT_FOUND', '없는 동작입니다.');
-    const wanted = action === 'start' ? 'stopped' : 'running';
-    if (live(vm).state !== wanted)
-      return error(409, 'INVALID_VM_STATE', `지금 상태(${vm.state})에서는 할 수 없습니다.`);
+    // 계약 §5: start 는 running 이면 그대로 200, crashed·paused·stopping 이면 409 (정지 후 다시 시작).
+    // stop 은 runtime 유무와 관계없이 동작하고 이미 꺼져 있으면 그대로 200.
+    const state = live(vm).state;
+    if (action === 'start' && state === 'running') return HttpResponse.json(vm as unknown as JsonBodyType);
+    if (action === 'stop' && state === 'stopped') return HttpResponse.json(vm as unknown as JsonBodyType);
+    if (action === 'start' && state !== 'stopped')
+      return error(
+        409,
+        'INVALID_VM_STATE',
+        `지금 상태(${state})에서는 시작할 수 없습니다. 정지 후 다시 시작하세요.`,
+      );
     const next: Vm = { ...vm, state: action === 'start' ? 'running' : 'stopped' };
     vms = vms.map((v) => (v.vm_id === vm.vm_id ? next : v));
     // 주행 시나리오에도 알린다 — 자율주행 VM 을 멈추면 수동주행이 바로 이어받는다 (계약 §5.2)
@@ -436,7 +485,13 @@ export const handlers = [
     if (!authorized(request)) return unauthorized();
     if (params.vmId === VM_IDS.autonomous || params.vmId === VM_IDS.manual) {
       const vmId = String(params.vmId);
-      return HttpResponse.json({ items: [...mockKernelHeapSamples(vmId), ...mockMemoryPoolSamples(vmId)] });
+      return HttpResponse.json({
+        items: [
+          ...mockKernelHeapSamples(vmId),
+          ...mockMemoryPoolSamples(vmId),
+          ...mockZephyrNetworkSamples(vmId),
+        ],
+      } as unknown as JsonBodyType);
     }
     if (params.vmId !== VM_IDS.interaction) return HttpResponse.json({ items: [] });
     const now = Date.now();
@@ -491,7 +546,14 @@ export const handlers = [
           ]),
           {
             name: 'net_rx_bytes_total',
-            value: 1_200_000 + i * 8_000,
+            value: 1_200_000 + i * 8_000 + Math.round(3_000 * (1 + wave)),
+            unit: 'bytes',
+            labels: { iface: 'eth0' },
+            unavailable_reason: null,
+          },
+          {
+            name: 'net_tx_bytes_total',
+            value: 640_000 + i * 3_200,
             unit: 'bytes',
             labels: { iface: 'eth0' },
             unavailable_reason: null,
@@ -556,16 +618,6 @@ export const handlers = [
   http.get('*/api/v1/vms/:vmId/telemetry/heartbeat', async ({ request, params }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
-    const known = Object.values(VM_IDS).some((id) => id === params.vmId);
-    return HttpResponse.json({
-      vm_id: params.vmId,
-      status: known ? 'FRESH' : 'UNKNOWN',
-      publisher_state: known ? 'running' : null,
-      last_collection_success_uptime_ms: known ? '12000' : null,
-      last_collection_success_age_ms: known ? 500 : null,
-      collection_failures_total: known ? 2 : null,
-      received_at: known ? new Date().toISOString() : null,
-      age_ms: known ? 0 : null,
-    });
+    return HttpResponse.json(mockTelemetryHeartbeat(String(params.vmId)));
   }),
 ];

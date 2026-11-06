@@ -17,6 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.vm.infrastructure.Dom0ManagerClient;
 import com.xenova.backend.vm.domain.VmLifecycle;
+import com.xenova.backend.vm.domain.VmControlOperation;
 import com.xenova.backend.vm.domain.VmLaunchSpec;
 import com.xenova.backend.vm.domain.VmRecordRepository;
 import com.xenova.backend.vm.domain.VmRuntime;
@@ -182,6 +183,27 @@ class VmApiIntegrationTest {
                 .andExpect(jsonPath("$.state").value("running"));
         verify(vmControlPort, org.mockito.Mockito.times(2))
                 .launch(org.mockito.ArgumentMatchers.eq(vmId), any(VmLaunchSpec.class));
+    }
+
+    @Test
+    void runningVmCanBeRebooted() throws Exception {
+        String vmId = objectMapper.readTree(createVm("reboot-01", 1, 256)
+                        .andExpect(status().isCreated())
+                        .andReturn().getResponse().getContentAsString())
+                .get("vm_id").asText();
+        when(vmControlPort.requestReboot(vmId, "reboot-1")).thenReturn(new VmControlOperation(
+                vmId, "reboot", "reboot-1", "650e8400-e29b-41d4-a716-446655440000",
+                "pending", true, "accepted", 1L, null, 2L, null, null, null, null, java.util.List.of()));
+
+        mockMvc.perform(post("/api/v1/vms/" + vmId + "/reboot")
+                        .header("Idempotency-Key", "reboot-1")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.vm_id").value(vmId))
+                .andExpect(jsonPath("$.request_key").value("reboot-1"))
+                .andExpect(jsonPath("$.status").value("pending"));
+
+        verify(vmControlPort).requestReboot(vmId, "reboot-1");
     }
 
     @Test

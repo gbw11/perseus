@@ -1,0 +1,82 @@
+{
+  "unit": {
+    "FragmentPath": "/usr/lib/systemd/system/xenova-dom0-manager.service",
+    "DropInPaths": "/usr/lib/systemd/system/xenova-dom0-manager.service.d/30-runtime-logs.conf /etc/systemd/system/xenova-dom0-manager.service.d/90-console-enabled.conf",
+    "MainPID": "23275"
+  },
+  "settings": {
+    "XENOVA_CONSOLE_ENABLED": "1",
+    "XENOVA_CONSOLE_LOCK_DIR": "",
+    "PYTHONPATH": ""
+  },
+  "console_sources": [
+    {
+      "path": "/usr/lib/python3.14/site-packages/dom0_manager/api/console.py",
+      "sha256": "f154ebd80b993131b5d0575c7bde595838b50fc318b29c20f59817719e945fb2",
+      "busy_recheck": true
+    },
+    {
+      "path": "/usr/lib/python3.14/site-packages/dom0_manager/api/console.py",
+      "sha256": "f154ebd80b993131b5d0575c7bde595838b50fc318b29c20f59817719e945fb2",
+      "busy_recheck": true
+    }
+  ],
+  "unit_configuration": [
+    "EnvironmentFile=-/etc/xenova/dom0-manager-token.env",
+    "EnvironmentFile=/etc/xenova/dom0-manager.env",
+    "EnvironmentFile=-/etc/xenova/spring-registration.env",
+    "ExecStart=/usr/bin/python3 -m dom0_manager"
+  ],
+  "proc_exe": "/usr/bin/python3.14",
+  "console_processes": [
+    {
+      "pid": 37260,
+      "args": [
+        "/usr/lib/xen/bin/xenconsole",
+        "1",
+        "--num",
+        "0",
+        "--type",
+        "pv"
+      ]
+    }
+  ],
+  "console_lock_files": [
+    "17cad3c4-b3cd-4b29-8740-e679d0eaebd4.lock",
+    "5002a22d-63d6-4f7a-9106-193b14499898.lock",
+    "de113a23-d80e-4333-94b8-788babe0e41e.lock"
+  ],
+  "lock_holders": [
+    {
+      "file": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4.lock",
+      "holders": [
+        "23275"
+      ]
+    },
+    {
+      "file": "5002a22d-63d6-4f7a-9106-193b14499898.lock",
+      "holders": []
+    },
+    {
+      "file": "de113a23-d80e-4333-94b8-788babe0e41e.lock",
+      "holders": []
+    }
+  ],
+  "guest_addresses": [
+    {
+      "vm_id": null,
+      "name": "zephyr-drive-a",
+      "ipv4": "192.168.77.2"
+    },
+    {
+      "vm_id": null,
+      "name": "debian-dev",
+      "ipv4": "192.168.77.20"
+    },
+    {
+      "vm_id": null,
+      "name": "zephyr-drive-b",
+      "ipv4": "192.168.77.3"
+    }
+  ]
+}

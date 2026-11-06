@@ -4,7 +4,8 @@ const RX_TOTAL = 'net_rx_bytes_total';
 const RX_RATE = 'rx_bytes_per_s';
 const UINT64_MAX = 18_446_744_073_709_551_615n;
 
-function unsigned(value: string | null | undefined): bigint | null {
+/** uint64 십진 문자열만 받는다 (실제 0 은 "0"). Network 탭 counter_value 차분도 함께 쓴다 */
+export function unsigned(value: string | null | undefined): bigint | null {
   if (!value || !/^(0|[1-9][0-9]{0,19})$/.test(value)) return null;
   const parsed = BigInt(value);
   return parsed <= UINT64_MAX ? parsed : null;

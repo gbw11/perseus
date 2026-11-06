@@ -1,8 +1,7 @@
-"""Display-only parsing of the VM-scoped drive report contract.
+"""Display-only VM/app binding checks, with the shared warm lifecycle parser.
 
-The old MQTT library on the 253 branch does not parse VM/app topics. Compare
-both IDs here in addition to its envelope validation. This also works with the
-new shared parser, without upgrading unrelated gateway/Agent code.
+Topic, VM and app IDs must match an explicit display binding. Accepted reports
+remain observations; they do not grant execution identity or driving authority.
 """
 import json
 import math
@@ -17,8 +16,25 @@ def report_app(binding, topic, envelope, *, retained=False, qos=None, wire_size=
     if app_id is None or envelope.get("app_id") != app_id or envelope.get("vm_id") != str(binding.vm_id):
         return None
     kind, payload = envelope["type"], envelope["payload"]
-    if retained or kind not in {"app.heartbeat", "app.readiness"}:
+    if retained or kind not in {"app.heartbeat", "app.readiness", "app.lifecycle"}:
         return None
+    if kind == "app.lifecycle":
+        if binding.report_profile != "warm-drive-1" or binding.app_topic_scope != "vm_scoped":
+            return None
+        if qos is not None and (type(qos) is not int or qos != 0):
+            return None
+        try:
+            if wire_size is None:
+                wire_size = len(json.dumps(envelope, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode())
+            if type(wire_size) is not int or not 0 < wire_size <= 1024:
+                return None
+            from xenova_mqtt.lifecycle import parse
+            parse(payload)
+        except (ImportError, ValueError, TypeError):
+            return None
+        return app_id
+    if kind == "app.readiness" and binding.report_profile == "warm-drive-1":
+        return None  # Never substitute legacy READY for warm supervision.
     if kind == "app.heartbeat":
         if payload.get("state") not in ("active", "standby", "idle", "error"):
             return None

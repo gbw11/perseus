@@ -2,7 +2,7 @@
 
 ## 252 통합 기준 (2026-10-26)
 
-실제 HDMI는 dom0의 `/display/monitor-1`(전체)·`/display/monitor-2`(선택 UUID 상세)이며 로컬 수집기·254 정책을 따른다. `VITE_TELEMETRY` 비움/`display`에서 기존 `/split`·`/detail/:app`은 이 경로로 이동한다. 이 모드는 Spring 주행 Provider나 로그인에 의존하지 않는다. 두 Zephyr는 VM1 주 구동·VM2 백업이며 주행 모드와 구별한다. VM3는 Debian 인터랙션이고 인식은 Jetson 담당이다.
+실제 HDMI 화면은 모니터 2대를 합친 `/display/combined`(2026-11-06부터, 옛 `/display/monitor-1`·`monitor-2` 는 이리로 넘어감)이며 로컬 수집기·254 정책을 따른다. `VITE_TELEMETRY` 비움/`display`에서 기존 `/split`·`/detail/:app`은 이 경로로 이동한다. 이 모드는 Spring 주행 Provider나 로그인에 의존하지 않는다. 두 Zephyr는 VM1 주 구동·VM2 백업이며 주행 모드와 구별한다. VM3는 Debian 인터랙션이고 인식은 Jetson 담당이다.
 
 아래 `/split`·`/detail`·`/sim` 설명은 **명시적 앱 미리보기 모드**(`console`/`scenario`/`live`/`legacy-live`)에 해당한다. 기본을 console mock으로 가정하지 않는다. 외부 Docker screens는 Spring 앱 미리보기를 명시적으로 유지한다. 앱 ID autonomous/manual은 VM의 주·백업 역할과 동의어가 아니다. 실제 HDMI 캡처와 외부 앱 미리보기를 같은 출력 증거로 취급하지 않는다.
 
@@ -190,6 +190,26 @@ cd apps/admin-console && VITE_MOCK=true npx vite --port 5173            # VITE_M
 - 카메라: 세 번째 VM 이 젯슨 카메라 영상을 받아 AI 로 장애물을 감지하고, 감지 박스를 그린 영상을 낸다 — 대시보드 세 번째 VM 카드와 모니터 그 칸·상세에 보인다. 실제는 `/camera/stream.mjpg`(dom0 웹 프록시 → 세 번째 VM, 카메라 계약 `docs/contracts/camera-stream-v1.md`, `VITE_CAMERA_URL` 로 바꿀 수 있음), mock 은 차량 움직임을 따라가는 시험 영상. 감지 결과는 화면용이고 주행 판단에 쓰지 않는다 — 이 VM 을 강제 종료하면 영상만 멈추고 주행은 그대로다
 - 웹 콘솔: VM Dashboard의 [Console] 탭에서 VM 을 골라 [연결]. 웹 터미널 계약 `browser-console-v1` 그대로 — 자동 접속·재접속 없음, [연결 해제] 로 점유를 푼다(platform -248). mock 에서는 가짜 셸(Debian: `help`·`uname -a`·`ps` 등, Zephyr: 부팅 로그만)
 - 모니터: `http://localhost:5173/monitor/split?kiosk=1`, 상세는 `/monitor/detail/<앱>`. 실제로는 dom0 표시 서비스가 콘솔 [화면 배치] 에 따라 키오스크 주소를 바꾼다(화면 배치 계약 `docs/contracts/display-route-v1.md`). mock 에서는 `?display=display-0` 으로 열면 모니터가 표시 서비스 대신 콘솔 mock 배치를 따라간다. 콘솔 탭이 열려 있는 동안 따라갑니다.
+
+### HDMI 차량 화면 노트북 미리보기 (S15P31E110-128)
+
+보드 없이 dom0 표시 수집기 자리에 가짜 수집기(8082)를 붙여 HDMI 화면(`/display/*`)을 노트북에서 만든다.
+
+```bash
+cd apps/vm-screens && npm run preview:monitors     # 가짜 수집기 8082 + vite 5174
+```
+
+| 주소                                     | 화면                                                                                           |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `http://localhost:5174/display/combined` | 모니터 2대를 합친 차량 화면: 출발 전 차 외관 → 출발하면 왼쪽 3D 주행 · 오른쪽 내비 (회사 → 집) |
+| `http://localhost:5174/display/mobile`   | 휴대폰 화면                                                                                    |
+
+옛 모니터 화면(`/display/monitor-1` 계기판·`/display/monitor-2` 인포테인먼트)은 지웠다. 두 주소는 쿼리스트링을 그대로 들고 `/display/combined` 로 넘어간다.
+
+- 테마: 07~19시 밝게, 그 밖에는 어둡게. `?theme=light|dark` 로 고정
+- 가짜 수집기 조작: `http://127.0.0.1:8082/scenario/<cycle|cruise|safe-stop|auto-ready|failover-done|manual|feed-down>`, 경로 위 지점으로 건너뛰기 `/jump/<지도 m>` (전체 3,820 m)
+- 지도·경로·사거리·차로 수는 `src/display/cityMap.ts` 하나에서 정한다 (가짜 수집기도 같은 파일을 읽는다)
+- 차량·Zephyr·주변 값(`state.vehicle` `drive_apps` `drive_limits` `trip` `road` `world`)은 **제안 필드**다. 실제 dom0 수집기는 아직 보내지 않으므로 보드에서는 "수신 대기"로 보인다
 
 ## 규칙
 

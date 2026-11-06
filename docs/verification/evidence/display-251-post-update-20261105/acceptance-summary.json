@@ -1,0 +1,93 @@
+{
+  "date": "2026-11-05",
+  "base_platform": "64bf4e5",
+  "scope": "External browser guest console verification, not app readiness or HDMI/video acceptance",
+  "observed_via": "Browser UI DOM/accessibility observations summarized by the agent, plus direct authenticated API and board process/lock snapshots",
+  "vms": [
+    {
+      "name": "Zephyr A",
+      "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+      "domid": 2,
+      "initial_output_markers": [
+        "Xen HVC inited successfully",
+        "XENOVA netfront connected domid=2",
+        "XD_READY own UUID",
+        "MQTT connection"
+      ],
+      "app_id_in_boot_output": "drive-controller",
+      "initial_console_pid": 27246,
+      "reconnected_console_pid": 29212,
+      "manual_reconnect": true,
+      "new_output_after_reconnect": false,
+      "note": "Idle after clear; connection and new console process remained alive. No guest input sent."
+    },
+    {
+      "name": "Zephyr B",
+      "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+      "domid": 3,
+      "initial_output_markers": [
+        "Xen HVC inited successfully",
+        "XENOVA netfront connected domid=3",
+        "XD_READY own UUID",
+        "MQTT connection"
+      ],
+      "app_id_in_boot_output": "drive-controller",
+      "initial_console_pid": 29815,
+      "manual_reconnect": true,
+      "new_output_after_reconnect": null,
+      "note": "No guest input sent."
+    },
+    {
+      "name": "Debian Interaction",
+      "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+      "domid": 1,
+      "user_confirmed_login_wait": true,
+      "initial_output_markers": [
+        "debian-dev login:"
+      ],
+      "reconnect_login_prompt_observed": true,
+      "initial_console_pid": 37260,
+      "reconnected_console_pid": 39075,
+      "manual_reconnect": true,
+      "note": "Existing frontend automatic Enter allowed after login-wait confirmation; no credentials or commands typed."
+    }
+  ],
+  "duplicate_a_rejected": true,
+  "original_a_survived_duplicate": true,
+  "other_debian_connection_preserved_until_user_disconnected": true,
+  "final_console_process_count": 0,
+  "final_all_lock_holders_empty": true,
+  "console_enabled_persistently": true,
+  "reboot_verification_performed": false,
+  "product_console_source_sha256": "f154ebd80b993131b5d0575c7bde595838b50fc318b29c20f59817719e945fb2",
+  "product_code_changed": false,
+  "new_unit_tests_run": false,
+  "guest_commands_typed": false,
+  "firmware_written": false,
+  "vm_lifecycle_commands_issued": false,
+  "spring_db_changed": false,
+  "network_settings_changed": false,
+  "jira_status_changed": false,
+  "ssh_session_closed": true,
+  "evidence_files": [
+    "console-before.json",
+    "persist_active_console-result.json",
+    "console_live_a-result.json",
+    "console_detached_a-result.json",
+    "console_reconnected_a-result.json",
+    "console_live_b-result.json",
+    "debian_login_state-result.json",
+    "debian-occupied.json",
+    "console_before_debian-result.json",
+    "console_live_debian-result.json",
+    "console_detached_debian-result.json",
+    "console_reconnected_debian-result.json",
+    "console_final-result.json",
+    "services_final-result.json",
+    "api-after-enable.json",
+    "api-debian-no-input.json",
+    "api-final.json",
+    "api-preflight.json",
+    "invalid-auth.json"
+  ]
+}

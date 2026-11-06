@@ -1,0 +1,493 @@
+{
+  "issue": "S15P31E110-373",
+  "date": "2026-11-06",
+  "base_commit": "18904f8",
+  "candidate_scope": "isolated diagnostic process only; normal services unchanged",
+  "passive_baseline": {
+    "duration_s": 60,
+    "samples": 236,
+    "expired_samples": 0,
+    "unavailable_samples": 0,
+    "maximum_age_ms": 2500
+  },
+  "retry_diagnosis": [
+    {
+      "differing_keys": [
+        "xen_state_flags"
+      ],
+      "previous_error_code": null,
+      "candidate": false,
+      "frames": [
+        {
+          "function": "_query",
+          "line": 1869,
+          "module": "xenova_management.py"
+        },
+        {
+          "function": "call",
+          "line": 198,
+          "module": "xenova_trace.py"
+        },
+        {
+          "function": "observe_many",
+          "line": 605,
+          "module": "xenova_execution.py"
+        },
+        {
+          "function": "_observe_many",
+          "line": 678,
+          "module": "xenova_execution.py"
+        },
+        {
+          "function": "publish_observation",
+          "line": 731,
+          "module": "xenova_execution.py"
+        }
+      ]
+    },
+    {
+      "differing_keys": [
+        "xen_state",
+        "xen_state_flags"
+      ],
+      "previous_error_code": null,
+      "candidate": true,
+      "frames": [
+        {
+          "function": "_query",
+          "line": 1869,
+          "module": "xenova_management.py"
+        },
+        {
+          "function": "call",
+          "line": 198,
+          "module": "xenova_trace.py"
+        },
+        {
+          "function": "observe_many",
+          "line": 605,
+          "module": "xenova_execution.py"
+        },
+        {
+          "function": "_observe_many",
+          "line": 678,
+          "module": "xenova_execution.py"
+        },
+        {
+          "function": "publish_observation",
+          "line": 731,
+          "module": "xenova_execution.py"
+        }
+      ]
+    },
+    {
+      "differing_keys": [
+        "xen_state",
+        "xen_state_flags"
+      ],
+      "previous_error_code": null,
+      "candidate": true,
+      "frames": [
+        {
+          "function": "_query",
+          "line": 1869,
+          "module": "xenova_management.py"
+        },
+        {
+          "function": "call",
+          "line": 198,
+          "module": "xenova_trace.py"
+        },
+        {
+          "function": "observe_many",
+          "line": 605,
+          "module": "xenova_execution.py"
+        },
+        {
+          "function": "_observe_many",
+          "line": 678,
+          "module": "xenova_execution.py"
+        },
+        {
+          "function": "publish_observation",
+          "line": 731,
+          "module": "xenova_execution.py"
+        }
+      ]
+    }
+  ],
+  "concurrent_comparison": {
+    "samples": [
+      {
+        "candidate": false,
+        "ok": true,
+        "elapsed_s": 1.9326185019999684,
+        "error_code": null,
+        "rounds": 1
+      },
+      {
+        "candidate": false,
+        "ok": true,
+        "elapsed_s": 2.6695232349993603,
+        "error_code": null,
+        "rounds": 2
+      },
+      {
+        "candidate": true,
+        "ok": true,
+        "elapsed_s": 1.3046599230001448,
+        "error_code": null,
+        "rounds": 1
+      },
+      {
+        "candidate": true,
+        "ok": true,
+        "elapsed_s": 1.4560994560006293,
+        "error_code": null,
+        "rounds": 1
+      },
+      {
+        "candidate": true,
+        "ok": true,
+        "elapsed_s": 1.4821532790001584,
+        "error_code": null,
+        "rounds": 1
+      },
+      {
+        "candidate": true,
+        "ok": true,
+        "elapsed_s": 1.5354332100005195,
+        "error_code": null,
+        "rounds": 1
+      },
+      {
+        "candidate": false,
+        "ok": true,
+        "elapsed_s": 1.3063300630001322,
+        "error_code": null,
+        "rounds": 1
+      },
+      {
+        "candidate": false,
+        "ok": true,
+        "elapsed_s": 1.4412583020002785,
+        "error_code": null,
+        "rounds": 1
+      }
+    ],
+    "retry_stacks": [
+      {
+        "candidate": false,
+        "frames": [
+          {
+            "function": "_query",
+            "line": 1869,
+            "module": "xenova_management.py"
+          },
+          {
+            "function": "call",
+            "line": 198,
+            "module": "xenova_trace.py"
+          },
+          {
+            "function": "observe_many",
+            "line": 605,
+            "module": "xenova_execution.py"
+          },
+          {
+            "function": "_observe_many",
+            "line": 678,
+            "module": "xenova_execution.py"
+          },
+          {
+            "function": "publish_observation",
+            "line": 731,
+            "module": "xenova_execution.py"
+          }
+        ]
+      }
+    ],
+    "scope": "bounded two concurrent read-only diagnostic queries; not browser acceptance"
+  },
+  "single_query_comparison": {
+    "samples": [
+      {
+        "candidate": false,
+        "ok": true,
+        "elapsed_s": 0.822074179000083,
+        "error_code": null,
+        "host_barrier_reads": 6,
+        "rounds": 1,
+        "view_ages_ms": [
+          316,
+          316,
+          316
+        ]
+      },
+      {
+        "candidate": true,
+        "ok": true,
+        "elapsed_s": 0.8742701890000717,
+        "error_code": null,
+        "host_barrier_reads": 4,
+        "rounds": 1,
+        "view_ages_ms": [
+          421,
+          421,
+          421
+        ]
+      },
+      {
+        "candidate": true,
+        "ok": true,
+        "elapsed_s": 0.871271077000074,
+        "error_code": null,
+        "host_barrier_reads": 4,
+        "rounds": 1,
+        "view_ages_ms": [
+          411,
+          411,
+          411
+        ]
+      },
+      {
+        "candidate": false,
+        "ok": true,
+        "elapsed_s": 0.7630469919999996,
+        "error_code": null,
+        "host_barrier_reads": 6,
+        "rounds": 1,
+        "view_ages_ms": [
+          337,
+          337,
+          337
+        ]
+      },
+      {
+        "candidate": false,
+        "ok": true,
+        "elapsed_s": 0.8009338290003143,
+        "error_code": null,
+        "host_barrier_reads": 6,
+        "rounds": 1,
+        "view_ages_ms": [
+          318,
+          318,
+          318
+        ]
+      },
+      {
+        "candidate": true,
+        "ok": true,
+        "elapsed_s": 0.793613078999897,
+        "error_code": null,
+        "host_barrier_reads": 4,
+        "rounds": 1,
+        "view_ages_ms": [
+          383,
+          383,
+          383
+        ]
+      },
+      {
+        "candidate": true,
+        "ok": true,
+        "elapsed_s": 0.6379838989996642,
+        "error_code": null,
+        "host_barrier_reads": 4,
+        "rounds": 1,
+        "view_ages_ms": [
+          290,
+          290,
+          290
+        ]
+      },
+      {
+        "candidate": false,
+        "ok": true,
+        "elapsed_s": 1.1232982110000194,
+        "error_code": null,
+        "host_barrier_reads": 6,
+        "rounds": 1,
+        "view_ages_ms": [
+          606,
+          607,
+          607
+        ]
+      },
+      {
+        "candidate": true,
+        "ok": true,
+        "elapsed_s": 1.0765102979999028,
+        "error_code": null,
+        "host_barrier_reads": 4,
+        "rounds": 1,
+        "view_ages_ms": [
+          391,
+          392,
+          392
+        ]
+      },
+      {
+        "candidate": false,
+        "ok": true,
+        "elapsed_s": 1.6717346669997823,
+        "error_code": null,
+        "host_barrier_reads": 6,
+        "rounds": 1,
+        "view_ages_ms": [
+          954,
+          954,
+          954
+        ]
+      },
+      {
+        "candidate": false,
+        "ok": true,
+        "elapsed_s": 1.3567312569998649,
+        "error_code": null,
+        "host_barrier_reads": 6,
+        "rounds": 1,
+        "view_ages_ms": [
+          712,
+          712,
+          712
+        ]
+      },
+      {
+        "candidate": true,
+        "ok": true,
+        "elapsed_s": 1.2159314300001824,
+        "error_code": null,
+        "host_barrier_reads": 4,
+        "rounds": 1,
+        "view_ages_ms": [
+          492,
+          492,
+          492
+        ]
+      }
+    ],
+    "scope": "isolated process memory only; equal trace instrumentation; no service or disk source changes",
+    "retry_stacks": []
+  },
+  "final_board": {
+    "source_hashes": {
+      "xenova_execution.py": "2abe0fc5f7638cf652e6bd3afb1df56a2352809aeb53419193d88961931ccf04",
+      "xenova_management.py": "eaedf7c76ed276e5487b89dbd5b353baac7463c166915bc20ea890938de07762"
+    },
+    "services": [
+      {
+        "Id": "xenova-dom0-manager.service",
+        "ActiveState": "active",
+        "MainPID": "1537"
+      },
+      {
+        "Id": "xenova-display-feed.service",
+        "ActiveState": "active",
+        "MainPID": "598"
+      },
+      {
+        "Id": "mosquitto.service",
+        "ActiveState": "active",
+        "MainPID": "821"
+      },
+      {
+        "Id": "xenova-gateway.service",
+        "ActiveState": "active",
+        "MainPID": "1504"
+      },
+      {
+        "Id": "xenova-recovery-worker.service",
+        "ActiveState": "active",
+        "MainPID": "1506"
+      },
+      {
+        "Id": "xenova-runtime-log-collector.service",
+        "ActiveState": "active",
+        "MainPID": "514"
+      },
+      {
+        "Id": "tailscaled.service",
+        "ActiveState": "active",
+        "MainPID": "605"
+      }
+    ],
+    "cpu_affinities": [
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 0,
+        "affinity": "0,3"
+      },
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 1,
+        "affinity": "0,3"
+      },
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 2,
+        "affinity": "0,3"
+      },
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 3,
+        "affinity": "0,3"
+      },
+      {
+        "name": "debian-dev",
+        "domid": 1,
+        "vcpu": 0,
+        "affinity": "0,3"
+      },
+      {
+        "name": "zephyr-drive-a",
+        "domid": 2,
+        "vcpu": 0,
+        "affinity": "1"
+      },
+      {
+        "name": "zephyr-drive-b",
+        "domid": 3,
+        "vcpu": 0,
+        "affinity": "2"
+      }
+    ],
+    "shared": {
+      "status": "ok",
+      "age_ms": 965,
+      "vms": [
+        {
+          "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "state": "running"
+        },
+        {
+          "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+          "state": "running"
+        },
+        {
+          "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+          "state": "running"
+        }
+      ]
+    }
+  },
+  "tests": {
+    "passed": 181,
+    "subtests_passed": 28,
+    "deselected": 1,
+    "excluded_baseline_failure": "test_S4_T08_owned_helper_timeout_after_pipe_eof_reaps_child"
+  },
+  "production_deployment_done": false,
+  "two_real_browser_acceptance_done": false,
+  "next_issue": "S15P31E110-374",
+  "board_candidate_excludes_final_revision_guard": true,
+  "final_source_sha256": {
+    "xenova_execution.py": "df36cc87e919dd9985c25a5441cb125380f87759035148b87ba165f5a3224ea7",
+    "xenova_management.py": "6ae93b5aa407a64eb798cd5cd38fe78817510ee89edf3f6459422ad09edb85a4"
+  }
+}
