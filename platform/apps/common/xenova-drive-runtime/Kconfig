@@ -51,6 +51,15 @@ config XENOVA_DRIVE_WORKERS
 	  Local app execution building block. This does not change the verified
 	  MQTT readiness profile or activate warm Standby automatically.
 
+config XENOVA_AUTO_DELAY_INJECTION
+	bool "Test-only AUTO calculation delay injection"
+	depends on XENOVA_DRIVE_WORKERS
+	default n
+	help
+	  Adds a bounded busy-wait after the real AUTO calculation and tracks five
+	  consecutive AUTO deadline misses. This is a demo/test fault injector, not
+	  an operating driving policy, and is excluded from normal builds.
+
 config XENOVA_DRIVE_WARM
 	bool "Explicit warm-drive-1 app lifecycle profile"
 	depends on XENOVA_DRIVE_WORKERS
