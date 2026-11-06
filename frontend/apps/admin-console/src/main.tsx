@@ -55,6 +55,7 @@ const router = createBrowserRouter([
           { path: 'overview', element: <DashboardPage /> },
           { path: 'cpu', element: <ResourcesPage view="cpu" /> },
           { path: 'memory', element: <ResourcesPage view="memory" /> },
+          { path: 'network', element: <ResourcesPage view="network" /> },
           { path: 'console', element: <ConsolePage /> },
         ],
       },

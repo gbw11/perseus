@@ -22,7 +22,7 @@ import {
 } from '../api/types';
 import { mockBoardDown, setMockBoardDown } from './board';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
-import { mockKernelHeapSamples, mockMemoryPoolSamples } from './memoryMetrics';
+import { mockKernelHeapSamples, mockMemoryPoolSamples, mockZephyrNetworkSamples } from './memoryMetrics';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
@@ -444,7 +444,13 @@ export const handlers = [
     if (!authorized(request)) return unauthorized();
     if (params.vmId === VM_IDS.autonomous || params.vmId === VM_IDS.manual) {
       const vmId = String(params.vmId);
-      return HttpResponse.json({ items: [...mockKernelHeapSamples(vmId), ...mockMemoryPoolSamples(vmId)] });
+      return HttpResponse.json({
+        items: [
+          ...mockKernelHeapSamples(vmId),
+          ...mockMemoryPoolSamples(vmId),
+          ...mockZephyrNetworkSamples(vmId),
+        ],
+      } as unknown as JsonBodyType);
     }
     if (params.vmId !== VM_IDS.interaction) return HttpResponse.json({ items: [] });
     const now = Date.now();
@@ -499,7 +505,14 @@ export const handlers = [
           ]),
           {
             name: 'net_rx_bytes_total',
-            value: 1_200_000 + i * 8_000,
+            value: 1_200_000 + i * 8_000 + Math.round(3_000 * (1 + wave)),
+            unit: 'bytes',
+            labels: { iface: 'eth0' },
+            unavailable_reason: null,
+          },
+          {
+            name: 'net_tx_bytes_total',
+            value: 640_000 + i * 3_200,
             unit: 'bytes',
             labels: { iface: 'eth0' },
             unavailable_reason: null,

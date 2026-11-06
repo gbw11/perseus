@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { initialVms } from '../mocks/data';
-import { appHealth, appHealthLabel, appReportOf, controlLabel, ROLES, roleOf, sortVms, vmOf } from './roles';
+import {
+  ago,
+  appHealth,
+  appHealthLabel,
+  appReportOf,
+  controlLabel,
+  ROLES,
+  roleOf,
+  sortVms,
+  vmOf,
+} from './roles';
 
 describe('VM roles from vm.role', () => {
   it('maps the backend role independently of VM name', () => {
@@ -67,5 +77,19 @@ describe('VM roles from vm.role', () => {
     const drive = { apps: { autonomous: report } } as unknown as Parameters<typeof appReportOf>[1];
     expect(appReportOf(backup!, drive)).toBe(report);
     expect(appReportOf(primary!, drive)).toBeUndefined();
+  });
+});
+
+describe('ago', () => {
+  it('60초 이상은 분, 60분 이상은 시간·분으로 쓴다', () => {
+    expect(ago(null)).toBe('—');
+    expect(ago(400)).toBe('0.4초 전');
+    expect(ago(12_000)).toBe('12초 전');
+    expect(ago(59_400)).toBe('59초 전');
+    expect(ago(60_000)).toBe('1분 전');
+    expect(ago(125_000)).toBe('2분 전');
+    expect(ago(59 * 60_000)).toBe('59분 전');
+    expect(ago(60 * 60_000)).toBe('1시간 0분 전');
+    expect(ago(3 * 3_600_000 + 5 * 60_000)).toBe('3시간 5분 전');
   });
 });
