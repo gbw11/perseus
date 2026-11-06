@@ -331,6 +331,20 @@ encoder는 exact builtin JSON tree를 먼저 검사한다. node/container length
 
 두 구조는 thread/lock/clock/sleep/I/O를 만들지 않는다. RX 최대11packet과 TX1packet의 encoded bytes 상한은49152B이며 Python 객체와 소비자가 따로 보유한 사본의 overhead는 별도다. local fence·기한 판정은 큐 상태와 관계없이 상위 actor가 수행해야 한다. 실제 socket/서비스/lease/메모리 회수와 full LocalEnvelope 의미 검증은 이 API가 제공하지 않는다.
 
+## 초기 lifecycle 진술과 수신 정책
+
+`runtime.lifecycle_messages`는 `LifecyclePeer(service_instance, channel_epoch, worker_instance, role, release_sha256)`로 caller가 등록한 현재 child 문맥을 고정한다. `parse_lifecycle(packet, peer, receiver_role)`와 공개 `LifecycleMessage` constructor는 네 kind의 정확 payload·방향·현재 문맥을 검사한다. `receiver_role`은 S 또는 등록 child role이다. S sender는 service UUID, child sender는 worker UUID다. 실제 OS peer 확인은 외부 adapter 책임이다.
+
+이 초기 배포 profile은 LIFECYCLE·revision `"0"`만 사용한다. HELLO는 pinned role/worker/release와 capability_mask `"0"`이 일치해야 한다. HEARTBEAT는 role별 state와 둘 다 null 또는 canonical u64string인 원 progress tuple을 받는다. progress 시각은 원 issued 이후일 수 없다. STOP은 양수 revision·1..32 printable ASCII reason·issued≤drain≤expires를 검사한다. reason은 진단문이다. STOPPED는 exact bool leases_released, A의 bool device_closed 또는 M/D의 null, 전 role의 null checkpoint_job, STOPPED/FAILED status를 받는다. STOPPED 성공 진술에는 leases_released=true 및 A device_closed=true가 필요하며 FAILED는 부분 bool을 유지한다. BIND/BIND_ACK/PROGRESS/FAULT/SLOT/DB_JOB은 이 profile에서 거절한다.
+
+`LifecycleReceiver(peer, receiver_role).receive(packet, now_us=..., cap_us=...)`는 typed/current·원 lifetime을 먼저 검사하고 last-seq를 판정한 뒤 새 사건을 수락한다. issued≤now<expires이며 cap이 있으면 원 expires가 이를 넘을 수 없다. 첫 정상 seq는1 이상 gap을 허용하고 invalid 높은 seq는 상태를 바꾸지 않는다. 마지막 동일 seq·동일 원 bytes는 `DUPLICATE_NO_EFFECT`와 `message=None`, 새 사건은 `ACCEPTED_NEW`와 진술을 반환한다. 동일 seq의 다른 bytes·과거 seq는 거절한다. canonical 재encode로 원 bytes를 교체하지 않는다. 수신 도착 순서로 이 검사를 마친 다음 mailbox 우선처리를 한다.
+
+HELLO는 channel당 한 번이며 HELLO 전 HEARTBEAT는 거절한다. child는 HELLO 전에도 현재 S의 STOP을 받는다. S의 `register_stop_intent(packet, now_us=..., cap_us=...)`는 원 outbound STOP 하나를 고정하며 실제 전송을 뜻하지 않는다. 외부 adapter가 전체 송신 성공을 확인한 뒤 `record_first_sent(packet, event_us, now_us=...)`를 호출한다. event_us는 **성공한 그 송신 시도 직전**의 J lower bound이고 now_us는 성공 뒤 등록 시각이다. EAGAIN/short send에는 등록하지 않는다. 이 API가 실제 send 사실을 생성하거나 독립 검증하지 않는다. 두 등록 모두 S RX highwater를 바꾸지 않으며 원 수명 안의 정확 중복은 False, 다른 raw/first-send 사건은 충돌이다.
+
+원 STOP은 worker/channel 수명 동안 교체·연장할 수 없다. active STOP 뒤 새 HELLO도 거절한다. STOPPED는 HELLO 전이라도 원 STOP의 exact request/revision·현재 문맥·first_sent를 확인하면 받는다. 원 STOP issued≤first_sent≤보고 issued≤now이고 보고 expires≤원 STOP expires가 자동 적용된다. 보고 하나만 수락하며 원 STOP은 보고 뒤에도 유지한다. now≥원 drain은 이미 소진된 drain이고 새 예산이 아니다. 만료 보고를 허용하거나 작업·메모리를 FREE로 바꾸는 예외는 제공하지 않는다. 새 worker/channel은 caller가 새 receiver로 등록한다.
+
+`snapshot`은 frozen 현재 문맥/highwater/HELLO/last packet/원 STOP·first_sent/보고만 보관하며 무한 history가 없다. fields/payload는 사본이다. 단일 owner가 private state를 수정하지 않는 계약으로 쓴다. 내부 clock/sleep/I/O나 서비스 실행은 없다. heartbeat state는 실제 준비·progress 증명이 아니며 A device_closed=true도 producer의 자원 수명 정리 진술이다. 생성 미시도를 명시 확인한 경우를 포함하지만 변수None·constructor 불명으로 true를 추정하면 안 된다. typed STOPPED는 실제 Device.close/process exit/lease 반환·회수 권한을 발급하지 않는다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
