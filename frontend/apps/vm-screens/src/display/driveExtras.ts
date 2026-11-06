@@ -1,4 +1,4 @@
-import type { Presentation, Source } from './model';
+import type { DisplayVm, Presentation, Source } from './model';
 
 /**
  * 계기판용 제안 확장 필드 (dom0 표시 수집기는 아직 보내지 않는다 — 노트북 미리보기 가짜 수집기만 보냄).
@@ -111,15 +111,43 @@ export function driveAppsOf(p: Presentation | null, vmId: string): DriveApps | n
 
 export type AppTone = 'drive' | 'ok' | 'warning' | 'danger' | 'muted';
 
+type XenView = Pick<DisplayVm, 'xen_state' | 'sources'>;
+
+/**
+ * Xen 상태로 이미 정해지는 한 줄 (running 이 아니거나 수신이 끊긴 경우). running·신선하면 null.
+ * 수집기는 Xen 조회가 실패해도 마지막 xen_state 를 남기고 sources.xen 만 stale 로 바꾸므로
+ * 신선도를 먼저 본다 (policy.decide_vm·MonitorPage 와 같은 순서).
+ */
+function xenStatus(vm: XenView): { label: string; tone: AppTone } | null {
+  if (vm.sources.xen.status !== 'fresh' || vm.xen_state === null)
+    return { label: 'VM 상태 미확인', tone: 'muted' };
+  if (vm.xen_state === 'running') return null;
+  if (vm.xen_state === 'crashed') return { label: 'VM 장애', tone: 'danger' };
+  if (vm.xen_state === 'paused') return { label: '일시 정지', tone: 'warning' };
+  if (vm.xen_state === 'stopping') return { label: '종료 중', tone: 'warning' };
+  return { label: 'VM 꺼짐', tone: 'muted' };
+}
+
+/** 합친 차량 화면의 VM 한 줄 — 인포테인먼트는 켜짐 여부만, 주행 VM 은 주행 앱 상태 */
+export function vmLineStatus(
+  p: Presentation | null,
+  vm: XenView & Pick<DisplayVm, 'vm_id' | 'role'>,
+  connected: boolean,
+): { label: string; tone: AppTone } {
+  if (vm.role !== 'interaction') return driveAppStatus(driveAppsOf(p, vm.vm_id), vm, connected);
+  if (!connected) return { label: '연결 미확인', tone: 'muted' };
+  return xenStatus(vm) ?? { label: '인포테인먼트', tone: 'ok' };
+}
+
 /** VM 하나의 주행 앱 상태를 한 줄로 (자율·수동 중 지금 쓰는 쪽 우선) */
 export function driveAppStatus(
   apps: DriveApps | null,
-  xenState: string | null,
+  vm: XenView,
   connected: boolean,
 ): { label: string; tone: AppTone } {
   if (!connected) return { label: '표시 연결 미확인', tone: 'muted' };
-  if (xenState === 'crashed') return { label: 'VM 장애', tone: 'danger' };
-  if (xenState && xenState !== 'running') return { label: 'VM 꺼짐', tone: 'muted' };
+  const xen = xenStatus(vm);
+  if (xen) return xen;
   if (!apps) return { label: '앱 보고 미수신', tone: 'muted' };
   const list = [apps.autonomous, apps.manual].filter((a): a is DriveAppReport => a !== null);
   if (!list.length || list.every((a) => a.source.status !== 'fresh' || !a.heartbeat))

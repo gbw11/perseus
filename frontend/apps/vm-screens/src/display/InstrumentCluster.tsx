@@ -134,7 +134,7 @@ export function InstrumentCluster({
             </div>
             <ul className={styles.apps}>
               {driveVms.map((vm) => {
-                const status = driveAppStatus(driveAppsOf(p, vm.vm_id), vm.xen_state, connected);
+                const status = driveAppStatus(driveAppsOf(p, vm.vm_id), vm, connected);
                 return (
                   <li key={vm.vm_id} data-tone={status.tone} data-testid={`drive-app-${ROLE[vm.role].name}`}>
                     <span className={styles.appName}>
