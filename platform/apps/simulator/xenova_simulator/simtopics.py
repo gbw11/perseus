@@ -14,7 +14,6 @@ world 는 터미널 명령(o, c, e, t)으로 바뀌어도 다시 낸다: 매 주
 from __future__ import annotations
 
 import logging
-import math
 import threading
 import time
 from collections.abc import Callable
@@ -24,7 +23,7 @@ from xenova_mqtt import topics
 
 from . import placement
 from .model import KIND_W, Obstacle
-from .track import load as load_track
+from .sim import _number
 from .track import sources as track_sources
 
 log = logging.getLogger("xenova_simulator")
@@ -36,13 +35,6 @@ MAX_OBSTACLES = 8
 PUSH_MAX_M = 0.5
 CAR_LENGTH_M = placement.CAR_L          # 계약 §12 sim.world.car 기본값 (관리 콘솔 mock CAR_L)
 CAR_WIDTH_M = 2 * placement.CAR_HALF
-
-
-def _number(payload: dict[str, Any], name: str) -> float | None:
-    value = payload.get(name)
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-        return None
-    return float(value)
 
 
 class SimTopics:
@@ -80,8 +72,12 @@ class SimTopics:
         """명령 하나를 적용하고 sim.command.result payload 를 돌려준다."""
         op = payload.get("op") if isinstance(payload.get("op"), str) else ""
         request_id = payload.get("request_id") if isinstance(payload.get("request_id"), str) else ""
-        with self._lock:
-            outcome = self._apply(op, payload)
+        try:
+            with self._lock:
+                outcome = self._apply(op, payload)
+        except Exception:  # 결과가 안 나가면 콘솔은 3 초 뒤 "응답 없음" 만 본다. 거부로 답한다
+            log.exception("sim.command %s 적용 중 예외", op)
+            outcome = ("INVALID", "명령을 적용하지 못했어요")
         if isinstance(outcome, placement.Check):
             code, message, gap, need = outcome.code, outcome.message, outcome.gap_m, outcome.need_m
         else:
