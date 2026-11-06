@@ -42,6 +42,7 @@ topic read xenova/v1/#
 topic read xenova/v2/vms/+/telemetry/+
 topic write xenova/v1/apps/manual/input
 topic write xenova/v1/vms/+/command
+topic write xenova/v1/vms/+/inventory
 topic write xenova/v1/console/resume
 topic write xenova/v1/sim/command
 topic write xenova/v1/probes/#
