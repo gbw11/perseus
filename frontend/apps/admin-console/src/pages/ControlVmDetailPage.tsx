@@ -5,7 +5,7 @@ import { ApiError } from '../api/client';
 import { useVm, useVmResources, useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
 import { osLabel, sortVms } from '../domain/roles';
-import { STATE_HEALTH, STATE_LABEL } from '../format';
+import { AGENT_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
 import styles from './pages.module.css';
 import { ResourceAdjustmentPanel } from './ResourceAdjustmentPanel';
 import { VcpuPinningPanel } from './VcpuPinningPanel';
@@ -14,13 +14,6 @@ import { useVmOperationProgress } from './useVmOperationProgress';
 import { LiveDataAlert } from '../layout/LiveDataAlert';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
-
-const AGENT_LABEL: Record<NonNullable<Vm['agent_status']>, string> = {
-  ONLINE: '온라인',
-  STALE: '갱신 지연',
-  OFFLINE: '오프라인',
-  UNKNOWN: '상태 확인 대기',
-};
 
 function pinningSummary(mappings: { vcpu: number; pcpus: number[] }[]): string {
   if (!mappings.length) return '조회 대기';

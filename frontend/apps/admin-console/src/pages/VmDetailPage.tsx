@@ -12,7 +12,7 @@ import {
   type VmAction,
 } from '../api/queries';
 import type { Vm } from '../api/types';
-import { STATE_HEALTH, STATE_LABEL } from '../format';
+import { AGENT_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
 import { clock, describe } from '../domain/events';
 import { MODE_LABEL, osLabel, roleOf } from '../domain/roles';
 import { observedControl, vmAppObservations } from '../domain/driveObservations';
@@ -542,7 +542,7 @@ export function VmDetailPage() {
                 {vm.data.guest_kind === 'linux' && (
                   <div>
                     <span>Linux Agent 생존 (v1)</span>
-                    <span>{vm.data.agent_status ?? 'UNKNOWN'}</span>
+                    <span>{AGENT_LABEL[vm.data.agent_status ?? 'UNKNOWN']}</span>
                   </div>
                 )}
               </div>
