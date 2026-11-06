@@ -20,6 +20,7 @@ import com.xenova.backend.vm.application.VmService.CreateResult;
 import com.xenova.backend.vm.domain.CreateVmCommand;
 import com.xenova.backend.vm.domain.Vm;
 import com.xenova.backend.vm.domain.VmControlPort;
+import com.xenova.backend.vm.domain.VmControlOperation;
 import com.xenova.backend.vm.domain.VmLaunchSpec;
 import com.xenova.backend.vm.domain.VmLifecycle;
 import com.xenova.backend.vm.domain.VmRecord;
@@ -251,6 +252,40 @@ class VmServiceTest {
     }
 
     @Test
+    void rebootReturnsTheTrackedOperationWithoutWaitingForTheNewExecution() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        VmControlOperation pending = operation("vm-1", "reboot-1", "pending");
+        when(vmControlPort.requestReboot("vm-1", "reboot-1")).thenReturn(pending);
+
+        VmControlOperation result = service.reboot("vm-1", "reboot-1");
+
+        assertThat(result).isEqualTo(pending);
+        verify(vmControlPort).requestReboot("vm-1", "reboot-1");
+        verify(vmControlPort, never()).find("vm-1");
+    }
+
+    @Test
+    void controlOperationReadsTheOriginalRequestWithoutRebootingAgain() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        VmControlOperation completed = operation("vm-1", "reboot-1", "completed");
+        when(vmControlPort.findControlOperation("vm-1", "reboot-1")).thenReturn(completed);
+
+        assertThat(service.controlOperation("vm-1", "reboot-1")).isEqualTo(completed);
+        verify(vmControlPort).findControlOperation("vm-1", "reboot-1");
+        verify(vmControlPort, never()).requestReboot(anyString(), anyString());
+    }
+
+    @Test
+    void rebootRejectsAnInvalidIdempotencyKeyBeforeCallingDom0() {
+        assertThatThrownBy(() -> service.reboot("vm-1", "contains space"))
+                .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(exception.getCode()).isEqualTo("INVALID_ARGUMENT");
+                });
+        verify(vmControlPort, never()).requestReboot(anyString(), anyString());
+    }
+
+    @Test
     void destroyRetiresDomainAndKeepsTheRecordForRestore() {
         VmRecord record = record("vm-1", "alpine-1");
         when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record));
@@ -302,5 +337,11 @@ class VmServiceTest {
 
     private static VmRecord record(String vmId, String name) {
         return new VmRecord(vmId, new CreateVmCommand(name, "alpine", "1.2.0", 1, 256), NOW);
+    }
+
+    private static VmControlOperation operation(String vmId, String requestKey, String status) {
+        return new VmControlOperation(
+                vmId, "reboot", requestKey, UUID.randomUUID().toString(), status, true,
+                status, 1L, UUID.randomUUID().toString(), 2L, null, null, null, null, List.of());
     }
 }

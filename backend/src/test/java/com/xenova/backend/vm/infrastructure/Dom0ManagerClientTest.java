@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.vm.domain.VmLaunchSpec;
+import com.xenova.backend.vm.domain.VmControlOperation;
 import com.xenova.backend.vm.domain.VmRuntime;
 import com.xenova.backend.vm.domain.VmState;
 import com.sun.net.httpserver.HttpExchange;
@@ -216,6 +217,42 @@ class Dom0ManagerClientTest {
         client.stop(VM_ID);
 
         assertThat(requests).hasValue(1);
+    }
+
+    @Test
+    void rebootPostsTheIdempotencyKeyAndReadsThePendingOperation() {
+        AtomicInteger requests = new AtomicInteger();
+        AtomicReference<String> method = new AtomicReference<>();
+        AtomicReference<String> requestKey = new AtomicReference<>();
+
+        server.createContext("/api/v1/vms/" + VM_ID + "/reboot", exchange -> {
+            requests.incrementAndGet();
+            method.set(exchange.getRequestMethod());
+            requestKey.set(exchange.getRequestHeaders().getFirst("Idempotency-Key"));
+            respond(exchange, 202, controlOperation("pending"));
+        });
+
+        VmControlOperation operation = client.requestReboot(VM_ID, "reboot-1");
+
+        assertThat(requests).hasValue(1);
+        assertThat(method.get()).isEqualTo("POST");
+        assertThat(requestKey.get()).isEqualTo("reboot-1");
+        assertThat(operation.status()).isEqualTo("pending");
+        assertThat(operation.requestKey()).isEqualTo("reboot-1");
+    }
+
+    @Test
+    void controlOperationPassesTheRequestKeyAsAQueryParameter() {
+        AtomicReference<String> query = new AtomicReference<>();
+        server.createContext("/api/v1/vms/" + VM_ID + "/control-operations", exchange -> {
+            query.set(exchange.getRequestURI().getQuery());
+            respond(exchange, 200, controlOperation("completed"));
+        });
+
+        VmControlOperation operation = client.findControlOperation(VM_ID, "reboot-1");
+
+        assertThat(query.get()).isEqualTo("request_key=reboot-1");
+        assertThat(operation.status()).isEqualTo("completed");
     }
 
     @Test
@@ -469,6 +506,21 @@ class Dom0ManagerClientTest {
                         exception -> assertThat(exception.getCode())
                                 .isEqualTo("VM_ALREADY_EXISTS"));
         assertThat(requests).hasValue(1);
+    }
+
+    private static String controlOperation(String status) {
+        return """
+                {
+                  "vm_id":"%s",
+                  "action":"reboot",
+                  "request_key":"reboot-1",
+                  "operation_id":"650e8400-e29b-41d4-a716-446655440000",
+                  "status":"%s",
+                  "accepted":true,
+                  "phase":"%s",
+                  "warnings":[]
+                }
+                """.formatted(VM_ID, status, status);
     }
 
     private void sleep(Duration duration) {
