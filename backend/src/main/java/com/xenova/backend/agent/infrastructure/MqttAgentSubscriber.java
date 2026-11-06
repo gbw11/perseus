@@ -1,6 +1,7 @@
 package com.xenova.backend.agent.infrastructure;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
+import com.xenova.backend.agent.application.AgentCommandPublisher;
 import com.xenova.backend.agent.application.TelemetryHeartbeatMessageHandler;
 import com.xenova.backend.agent.application.VmTelemetryMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
@@ -30,7 +31,7 @@ import org.springframework.util.StringUtils;
 @Component
 @ConditionalOnProperty(prefix = "xenova.mqtt", name = "enabled", havingValue = "true")
 @EnableConfigurationProperties(MqttProperties.class)
-public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended {
+public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended, AgentCommandPublisher {
 
     // Heartbeat and inventory use QoS 1, metrics QoS 0 (MQTT-01/02/03). v2 telemetry metrics and heartbeat are QoS 0.
     static final String[] TOPICS = {
@@ -159,7 +160,25 @@ public class MqttAgentSubscriber implements SmartLifecycle, MqttCallbackExtended
 
     @Override
     public void deliveryComplete(IMqttDeliveryToken token) {
-        // This client only subscribes.
+        // agent.command is QoS 1; command-result is the application-level answer.
+    }
+
+    @Override
+    public boolean publish(String topic, byte[] payload, int qos) {
+        MqttClient current = client;
+        if (current == null || !current.isConnected()) {
+            return false;
+        }
+        try {
+            MqttMessage message = new MqttMessage(payload);
+            message.setQos(qos);
+            message.setRetained(false);
+            current.publish(topic, message);
+            return true;
+        } catch (MqttException exception) {
+            log.warn("MQTT agent.command publish to {} failed: {}", topic, exception.getMessage());
+            return false;
+        }
     }
 
     @Override
