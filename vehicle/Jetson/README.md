@@ -2,11 +2,45 @@
 
 Jetson Nano B01과 OAK-D-Lite에서 수집한 관측을 처리해 차선·장애물·지도·주차 후보를 RPi에 제공한다. 구현 언어는 Python이다.
 
+## 확인한 Jetson 환경
+
+2026-11-06 전용 환경 설치 후 SSH 조회 기준이다. 설치·연결 상태가 바뀌면 다시 조회한 날짜와 값으로 갱신한다.
+
+| 항목 | 확인 결과 |
+|---|---|
+| OS / L4T | Ubuntu 18.04.6 / 32.7.6 |
+| 메모리 / 디스크 | 약 4GB / 루트 여유 42G |
+| 시스템 Python·라이브러리 | Python 3.6.9, OpenCV 4.1.1, NumPy 1.13.3 유지 |
+| 앱 Python | 별도 CPython 3.11.18 + 가상환경, pip 26.2.1 |
+| 앱 라이브러리 | DepthAI 2.29.0.0, NumPy 1.26.4, opencv-python-headless 4.10.0.84 |
+| OAK | 일반 사용자 SDK에서 1개 검색, 영상 수신·운영 USB 속도 미검증 |
+| 네트워크 | Wi-Fi 접속 중, Ethernet 통신 미검증 |
+
+glibc는2.27이다. L4T 일치는 JetPack 전체 패키지 설치 확인과 구분한다. 최초 시스템 조회와 별도 환경의 설치·검증 근거는 `Jetson-drive-docs/making-reports/0003-jetson-environment.md`와 `0005-jetson-python311-environment.md`에 보존한다.
+
+## 앱 전용 환경
+
+| 구성 | 경로·버전 |
+|---|---|
+| Python | `~/.local/opt/xenova/python-3.11.18/bin/python3.11` |
+| 가상환경 | `~/.local/share/xenova-vehicle/venvs/jp466-py311` |
+| 앱 TLS | 전용 OpenSSL 3.5.9, 시스템 OpenSSL과 분리 |
+| 통신·직렬화 | paho-mqtt 2.1.0, protobuf 6.33.6 |
+
+Jetson에서는 가상환경의 명령을 직접 실행할 수 있다. 기본 `/usr/bin/python3`는3.6.9를 유지한다.
+
+```bash
+~/.local/share/xenova-vehicle/venvs/jp466-py311/bin/xenova-vehicle doctor
+```
+
+OAK 접근은 `/etc/udev/rules.d/80-xenova-oak.rules`에서 USB VID03e7을 기존 `plugdev` 그룹의 `0660` 권한으로 허용한다. SDK 검색 성공은 장치 부팅·영상·깊이·NN 준비 확인과 구분한다.
+
 ## 디렉터리
 
 ```text
 Jetson/
 ├── pyproject.toml                  # 패키지·명령 진입점
+├── requirements.txt                # Python3.11 대상 런타임 설치 후보
 ├── requirements/                   # 검증된 설치 버전·해시
 ├── profiles/                       # 수집·재생·운영 설정
 ├── assets/
@@ -57,6 +91,14 @@ xenova-vehicle --help
 xenova-vehicle doctor
 xenova-vehicle doctor --json --timeout 10
 ```
+
+카메라·인지·통신용 라이브러리의 고정 설치 목록은 `requirements.txt`에서 관리한다. 이 파일은 별도로 준비한 CPython3.11.18 가상환경용이며 시스템 Python3.6의 패키지를 교체하는 데 사용하지 않는다. 해당 가상환경을 선택한 뒤 저장소 루트에서 설치한다.
+
+```bash
+python -m pip install --only-binary=:all: -r vehicle/Jetson/requirements.txt
+```
+
+현재 파일은 직접 의존성의 버전을 고정한 목록이며 전이 의존성과 파일 해시를 모두 고정한 배포 lock은 아니다. 실행 환경별 설치·import 검증과 실제 wheel 해시는 `making-reports`에서 별도로 관리한다. OpenCV 공급자는 headless 한 종류를 사용하며 CPU wheel을 기준으로 한다.
 
 설치 없이 소스에서 실행할 때는 저장소 루트에서 다음 명령을 사용한다.
 
