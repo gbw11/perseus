@@ -4,19 +4,20 @@ Jetson Nano B01과 OAK-D-Lite에서 수집한 관측을 처리해 차선·장애
 
 ## 확인한 Jetson 환경
 
-2026-11-06 전용 환경 설치 후 SSH 조회 기준이다. 설치·연결 상태가 바뀌면 다시 조회한 날짜와 값으로 갱신한다.
+2026-11-06 전용 환경 설치·실제 OAK 수신 확인 기준이다. 설치·연결 상태가 바뀌면 다시 조회한 날짜와 값으로 갱신한다.
 
 | 항목 | 확인 결과 |
 |---|---|
 | OS / L4T | Ubuntu 18.04.6 / 32.7.6 |
-| 메모리 / 디스크 | 약 4GB / 루트 여유 42G |
+| 메모리 / 디스크 | 약 4GB / 루트 여유 약41GiB |
 | 시스템 Python·라이브러리 | Python 3.6.9, OpenCV 4.1.1, NumPy 1.13.3 유지 |
 | 앱 Python | 별도 CPython 3.11.18 + 가상환경, pip 26.2.1 |
 | 앱 라이브러리 | DepthAI 2.29.0.0, NumPy 1.26.4, opencv-python-headless 4.10.0.84 |
-| OAK | 일반 사용자 SDK에서 1개 검색, 영상 수신·운영 USB 속도 미검증 |
+| OAK | RGB IMX214·mono OV7251×2, NV12 640×360/native depth 640×480 수신·종료 확인 |
+| OAK USB | 실제 동작 HIGH(USB 2.0), USB 3 연결·동시 NN 부하 미검증 |
 | 네트워크 | Wi-Fi 접속 중, Ethernet 통신 미검증 |
 
-glibc는2.27이다. L4T 일치는 JetPack 전체 패키지 설치 확인과 구분한다. 최초 시스템 조회와 별도 환경의 설치·검증 근거는 `Jetson-drive-docs/making-reports/0003-jetson-environment.md`와 `0005-jetson-python311-environment.md`에 보존한다.
+glibc는2.27이다. L4T 일치는 JetPack 전체 패키지 설치 확인과 구분한다. 최초 시스템 조회·전용 환경·실제 수신의 근거는 `Jetson-drive-docs/making-reports/0003-jetson-environment.md`, `0005-jetson-python311-environment.md`, `0008-jetson-oak-capture-validation.md`에 보존한다.
 
 ## 앱 전용 환경
 
@@ -70,6 +71,8 @@ Jetson/
 
 빈 디렉터리의 `.gitkeep`은 Git에서 구조를 보존하기 위한 파일이다.
 
+YOLOP 320×320의 고정 blob·출처·라이선스·입출력 계약과 수동 검사 방법은 [자산 명세](assets/yolop-320x320.md)를 따른다. 대용량 모델 파일은 외부 자산 경로에 두고 Git에는 manifest와 저작권·허가문을 보존한다.
+
 ## 책임과 실행 구조
 
 - 운영 실행은 S(supervisor/I/O), A(acquisition), M(mapper), D(storage)의 네 프로세스를 기준으로 한다. 폴더별로 프로세스를 추가하는 구조가 아니다.
@@ -112,6 +115,193 @@ PYTHONPATH=vehicle/Jetson/src python -m xenova_vehicle doctor --json
 
 일반 패키지 import와 도움말은 진단이나 native import를 실행하지 않는다. 진단 결과는 런타임 준비·주행 허가가 아니며, 공용 장치·DB 락이나 상주 서비스도 만들지 않는다.
 
+## RGB·native depth 벤치 수집
+
+`capture`는 승인한 OAK 한 대의 RGB NV12 640×360과 RIGHT 기준 native depth 640×480을 원본으로 기록한다. 깊이는 little-endian uint16, mm 단위이며0은 invalid다. RGB 정렬·구멍 채우기·빈공간 판정을 하지 않는다. 고정15Hz는 요청값이며 실제 수신률과 누락 수는 결과에서 확인한다.
+
+`profiles/oak-rgb-depth-bench.example.json`을 저장소 밖에 복사하고 `device_mxid`를 실제 승인 장치 ID로 바꾼다. 예시의 `REPLACE_WITH_OAK_MXID`는 실행 시 거절한다. 프로필은 `schema_version=1`, `profile_id=oak-rgb-depth-bench-v1`, `nn_requirement=ABSENT`, `jpeg_enabled=false`인 수집 벤치 전용이다. NN 모델이나 JPEG encoder를 적재하는 운영 그래프와 구분한다.
+
+Jetson의 전용 환경에서 다음과 같이 실행한다. 출력 경로는 새 디렉터리여야 하며 기존 디렉터리는 비어 있어도 덮어쓰지 않는다.
+
+```bash
+~/.local/share/xenova-vehicle/venvs/jp466-py311/bin/xenova-vehicle capture \
+  --profile "$HOME/xenova-config/capture.json" \
+  --duration-s 30 \
+  --output "$HOME/xenova-data/captures/bench-001" \
+  --json
+```
+
+기록 시간은 장치·queue 설정과 초기 시계 표본 확보 뒤부터 센다. 기본 시작 기한90초이며, 각 stream의 첫 입력은 원 시작 기한과 수집 시작+15초 중 빠른 때까지만 기다린다. 입력을 받은 뒤에는 필수 stream별 실제 진전 공백500ms, 종료 기한15초를 벤치 초깃값으로 둔다. RGB만 계속 들어오는 동안 depth가 멈춰도 실패로 처리한다. 저장 drain과 Device close는 같은 전체 종료 예산 안에서 병행한다. 정상 종료가 안 되면 TERM/KILL 각1초 안에서 실제 자식 종료를 확인하고 실패로 보고한다. native hang이나 OS의 미회수 상태에서 자동 재연결하지 않는다. Ctrl+C/SIGTERM도 같은 정리를 거치며 종료 코드는 각각130/143이다. 위 기한은 다른 부하·장면·OS 정체에서의 반환 보장을 뜻하지 않는다.
+
+부모는 가벼운 감시를, A 자식만 SDK·Device·raw bytes를 소유한다. A 안의 단일 writer thread에 최대8개 프레임을 비차단 제출하고 포화 시 drop을 센다. 원본 파일·보정 manifest·index는 writer가 쓰며, 출력 예약/결과 파일은 acquisition 전후의 짧은 별도 I/O 자식에서5초 제한으로 처리한다. 이 I/O 자식과 A는 동시에 실행하지 않는다. Linux 제어 통로는 최대4KiB nonblocking seqpacket이며 raw 이미지를 보내지 않는다. Windows 시험용 stream 대체 통로는 Linux 실기 수락을 대신하지 않는다.
+
+```text
+bench-001/
+├── capture-result.json   # 원 실행 context·기한·종료·통계; 최초에는 complete=false
+├── manifest.json         # 프로필·센서·USB·원 EEPROM/보정·host graph 선언
+├── frames.jsonl          # stream별 원 순번·device/SDK/J 시각·형식·파일 SHA256
+└── frames/
+    └── ...bin            # 손실 없는 NV12/RAW16_LE bytes
+```
+
+각 stream의 ID와 원 시각을 유지한다. RGB/depth의 같은 숫자 순번을 같은 노출로 간주하지 않으며, timestamp 차이10ms 이내의 후보와 실제 양쪽이 저장된 후보 수를 구분한다. SDK host clock과 Python 단조시각의 비교 표본은 보존하지만 OAK 동기·노출/readout 오차의 실측 bound는 아직 없다. `metric_ready=false`와 `runtime_readiness=not_evaluated`를 유지한다. 원 EEPROM 저장도 차량 장착 보정·active K_rect 수락을 의미하지 않는다.
+
+기본 기록 상한은1GiB, 종료 결과 여유64KiB, 디스크 여유 하한8GiB다. 공간 부족·파일 오류·필수 stream 누락·실제 저장된 동기 후보 없음·강제 종료는 성공이 아니다. 정상 제한 시간 기록 완료는0, 런타임 실패/불완전 기록은1, 인수·설정 오류/기존 출력 경로는2다. 중간에 남은 파일은 삭제하지 않는다. 원본·index의 hash 대조와 불완전 기록 처리는 아래 재생기가 담당한다. 이 기록 형식은 정전 내구성이나 주행 준비를 보증하지 않는다.
+
+## YOLOP·RGB·native depth 장치 벤치
+
+`yolop-bench`는 같은 CAM_A video에서 RGB NV12와 BGR letterbox→YOLOP를 만들고, native RIGHT depth도 함께 수신한다. 모델은 [고정 자산 명세](assets/yolop-320x320.md)의 로컬 blob만 사용한다. 자산 검사·원 기동 기한·Device owner·단일 graph 시작을 유지하며 부팅 중 다운로드하지 않는다.
+
+`profiles/oak-yolop-rgb-depth-bench.example.json`을 저장소 밖에 복사하고 승인 MXID와 자산 디렉터리·manifest 경로를 채운다. 상대 경로는 profile 파일 기준이다. no-JPEG/REQUIRED 벤치 전용이며 기존 ABSENT 수집 profile과 섞지 않는다.
+
+```bash
+xenova-vehicle yolop-bench \
+  --profile "$HOME/xenova-config/yolop-bench.json" \
+  --duration-s 30 --output "$HOME/xenova-data/yolop-bench/run-001" --json
+```
+
+부모는 SDK를 import하지 않고 기존 capture와 공통인 spawn 감시·4KiB 제어 통로·실제 자식 종료를 사용한다. A에서 검증 bytes→Blob 등록은 한 session에 한 번이다. RGB/depth host queue8, NN output2, metadata-only passthrough8 및 device 입력1은 nonblocking이다. collector는 stream당 최대1개, 회차16개/4MiB 이하로 복사한다. NN 출력은 원 SDK 객체 수명 안에서 소유 bytes로 만들고, 실제 runtime tensor 이름·dtype·rank/dims·stride·offset·범위·겹침을 검증한다. compiler layout을 대신 넣지 않는다. 활성 FP16 값의 NaN/Inf도 검사한다.
+
+첫 NN layout과 SDK `getLayerFp16` 대조는 별도 `NN_LAYOUT_PROBE`의 원15초 이내에 한 번만 수행하고 추가 복사 비용을 기록한다. 완료 뒤 SDK/J clock barrier를 세워 그전에 소모한 프레임을 벤치 관측으로 재사용하지 않는다. cold startup90초, ASSET_CHECK15초·DEVICE_BOOT30초·PIPELINE_START30초·초기 probe15초는 원 기동 기한과 min이다. 늦게 돌아온 단계도 원 기한을 다시 받지 않는다.
+
+원 RGB와 NN passthrough/output은 동일 pipeline/capture binding, 원 sequence/device/SDK 시각으로 연결한다. ring은 stream별8개/500ms이며 늦은 결과·다른 context·순번 역전·입력 부재를 보고한다. depth는 같은 sequence로 묶지 않고 SDK 시각 차이10ms 이내의 후보만 표시한다. 이 값은 벤치 초깃값이며 metric 동기 오차 수락값이 아니다. RGB/depth 진전 공백500ms와 NN 기한을 분리한다. 기본 NN 첫 결과15초, 이후 수신 및 **검증된 원 입력 pairing 진전** 공백5초다. 다른 stream·heartbeat·미결합 NN 수신은 pairing 기한을 연장하지 않는다.
+
+전체 NN 연속 녹화가 아니라 최대3개의 독립 표본을 저장한다. 정상 대기2개와 실패 예약1개를 가진 A 내부 writer1개가 비차단 제출을 받는다. 기본 저장 상한64MiB(결과 여유64KiB 포함), 여유 공간 하한8GiB다. 결과에 실제 수신·연결/거절 분모, 원 시각, 관측된 수신률 계산용 경과시간, 검사 비용·수집 회차 시간·RSS를 남긴다. NN을 카메라15Hz와 같다고 가정하지 않는다.
+
+```text
+run-001/
+├── yolop-bench-result.json   # 원 기한·종료·관측/NN/pairing·writer 통계
+├── bench-manifest.json      # 자산/graph 선언·원 context·첫 NN layout/golden
+├── samples/0001/
+│   ├── source.json          # 원 RGB/depth/NN 시각·key·실제 runtime tensor metadata
+│   ├── sample-index.json    # 파일별 길이·SHA256
+│   ├── rgb.nv12
+│   ├── depth.raw16le
+│   ├── nn-buffer.bin
+│   └── *.fp16               # 검증된 runtime offset에서 분리한 세 layer
+└── failure/                 # 발생 시 최초 실패의 제한된 미검증 원자료
+```
+
+이 출력은 capture/replay v1 dataset이 아니며 기존 `replay`에 입력하지 않는다. NN 연속 기록·재생은 별도 형식/작업으로 확장한다. 실패 원자료는 `raw_unvalidated=true`이며 정상 tensor나 관측으로 승인하지 않는다. ImageManip pixel equivalence·실제 NN semantic parser·metric 보정은 별도 검증이다. 성공한 장치 벤치도 `nn_ready=false`, `metric_ready=false`, `runtime_readiness=not_evaluated`를 유지한다.
+
+정상 종료0, 런타임/검증/필수 입력 또는 pairing 정체1, 인수·profile·기존 출력 경로 오류2, SIGINT130/SIGTERM143이다. 저장 drain과 Device close를 동일15초 종료 예산에서 병행하고 실제 A 종료 전 새 owner를 시작하지 않는다. 정상적인 기한 종료는 무손실15Hz·트랙 인식 정확도·주행 준비의 수락을 뜻하지 않는다.
+
+최종 결과 파일은 별도 I/O 자식이 임시 파일을 준비한 뒤 부모의 COMMIT/ABORT 결정을 받아 게시한다. 그 결정 전 SIGINT/TERM은 중단 결과를 저장하고, 결정 뒤 도착한 신호는 `final_receipt.too_late_signals`에 기록하며 확정 결과를 뒤집지 않는다. 부모는 I/O 자식의 실제 종료까지 신호와 소유권을 유지한다. 최종화는 I/O5초+회수2초의 원7초 예산에서 한 번만 시도한다. 저장 실패·ACK/실종료 불명은 성공이 아니며, 정전·SIGKILL에 대한 완전 내구성 보장은 아니다.
+
+## YOLOP 선택 진단 표본 재생
+
+`yolop-replay`는 `yolop-bench`가 저장한 선택 표본의 RGB·native depth·NN 원본을 카메라 없이 읽는다. `depthai`·NumPy·OpenCV·네트워크나 원 모델 파일이 필요하지 않다. 최대8개 선택 표본의 재생이며, 전체 주행 시간의 연속 NN 녹화를 뜻하지 않는다.
+
+```bash
+xenova-vehicle yolop-replay \
+  --dataset "$HOME/xenova-data/yolop-bench/run-001" \
+  --output "$HOME/xenova-data/yolop-replay/run-001" --speed 1 --json
+```
+
+모든 선택 표본의 파일·해시·원 문맥·실제 NN layout/FP16·파생 layer slice를 먼저 검사하고, 전달 직전 파일 수명을 다시 확인한다. 원 profile의 Linux 자산 경로는 기록 값으로 보존한다. 과거 실행의 자산 hash는 provenance이며 현재 모델 파일 검사나 장치 readback의 증거로 바꾸지 않는다. index에는 metadata 자체의 외부 서명·hash 결박이 없으므로 모든 metadata를 함께 고친 변조의 진위까지 인증하지 않는다.
+
+기본값은 불완전 기록을 거절한다. `--allow-incomplete`는 온전한 index가 있는 선택 prefix를 허용한다. writer가 마지막에 쓰는 `sample-index.json`이 없는 마지막 꼬리만 제한적으로 제외하며, 이미 index가 있는 표본의 손상·유실·NaN을 건너뛰지 않는다. 실패 원자료와 writer drop도 따로 보고한다. 선택 후보의 drop을 연속 NN frame 손실률로 해석하지 않는다.
+
+정상 꼬리는 RGB→depth→NN buffer→세 layer→source 순서의 prefix여야 하며 마지막 파일만 짧을 수 있다. 깊이 수신 시각은 저장 SDK/J의 단조 인과관계와 RGB bridge에 투영한 가능한 age 구간을 검사한다. 원 depth별 bridge는 저장돼 있지 않아 정확한 depth freshness를 재입증하지 않는다. API와 trace의 `depth_time_qualification`은 이 호환성 검사 한계를 별도로 표시하며 원 metadata는 그대로다.
+
+`--speed 1`은 원 네 stream 수신 J의 최댓값인 bundle availability 간격을 따르고, `--speed 0`은 대기 없이 전달한다. 새 replay instance/timeline과 원 device·SDK·J 시각·순번은 별개다. 출력은 `REPLAY`, `live_authority=false`, `nn_ready=false`, `metric_ready=false`다.
+
+```python
+from pathlib import Path
+from xenova_vehicle.recording.yolop_replay import run_yolop_replay
+
+dataset = Path("/path/to/recorded-yolop-bench")
+
+def consume(sample):
+    rgb_bytes = sample.rgb.payload
+    depth_bytes = sample.depth.payload
+    nn_bytes = sample.nn_output.payload
+    detection_bytes = sample.payloads["det_out.fp16"]
+    original_descriptor = sample.metadata
+
+result = run_yolop_replay(dataset, consumer=consume, speed=0)
+```
+
+API consumer는 소유 bytes와 원 descriptor를 받는다. 새 검사 비용은 재생 진단으로 구분하며 원 `validation_elapsed_us`를 덮어쓰지 않는다. CLI 출력 디렉터리의 `events.jsonl`에는 원 descriptor·payload 길이/hash·재생 timing을, `yolop-replay-result.json`에는 원 기록의 완료 여부와 재생 완료 여부를 따로 남긴다. 마지막 trace close 후에도 API 취소를 확인한다. 결과 저장의 최종 확정 뒤 신호는 API/stdout 전용 `finalization.too_late_signals`로 기록한다. 정상 재생0, 손상/미허용 불완전/실행 오류1, 잘못된 인수·기존 출력 경로2, 확정 전 SIGINT130/SIGTERM143이다.
+
+## RGB·native depth·YOLOP 후보 해석 API
+
+`YolopDecoder`는 위 선택 재생 표본을 BGR/native depth와 검출·road/lane 후보로 바꾼다. 기존에 승인한 NumPy와 OpenCV는 decode 호출에서만 import한다. 카메라·모델·네트워크를 열지 않으며 기본 CLI·doctor·수집 경로에서는 이 decoder를 호출하지 않는다.
+
+```python
+import json
+from pathlib import Path
+from xenova_vehicle.perception.observation import YolopDecoder
+from xenova_vehicle.perception.yolop import YolopPostprocessConfig
+from xenova_vehicle.recording.yolop_replay import run_yolop_replay
+
+dataset = Path("/path/to/recorded-yolop-bench")
+manifest = json.loads((dataset / "bench-manifest.json").read_text())
+decoder = YolopDecoder(manifest, YolopPostprocessConfig(confidence=0.5, iou_threshold=0.3))
+
+def consume(sample):
+    observation = decoder.decode(sample)
+    shared_bgr = observation.rgb.bgr             # uint8 HWC 360x640x3
+    native_z_mm = observation.depth.depth_mm     # readonly <u2 480x640, RIGHT axial Z
+    vehicle_candidates = observation.yolop.detections_source
+    road_candidates = observation.yolop.road.source  # uint8 360x640
+    lane_candidates = observation.yolop.lane.source
+    provenance = observation.provenance
+
+result = run_yolop_replay(dataset, consumer=consume, speed=0)
+```
+
+한 표본에서 NV12→BGR 변환을 한 번 수행하며 소비자들이 반환 결과를 공유한다. BGR은 새 소유 C-packed 배열, depth와 NN layer는 원 소유 bytes를 유지하는 readonly view다. 원 표본·frame·packet을 강하게 참조하므로 SDK 객체 수명에 의존하지 않으며 다음 decode가 이전 결과를 덮어쓰지 않는다. `decode_rgb`/`decode_depth`는 같은 packed RawFrame 계약의 독립 함수로도 쓴다. row padding·형식·길이가 다르면 거절한다. depth0은 invalid/unknown이며 `has_measurement`는 D!=0 표식이다. 이 값으로 RGB 정렬·metric 신뢰도·빈공간을 승인하지 않는다.
+
+YOLOP는 실제 runtime tensor의 offset/stride를 읽고 FP16 det를 FP32로 바꾼 뒤 strict objectness 및 obj×class threshold를 적용한다. confidence0.5/IoU0.3은 임시 시험값이다. class0는 차량 후보이며 콘·박스 등 모든 장애물 class를 뜻하지 않는다. 프로젝트 NMS 정책은 FP32 내부 연산 후 binary64 threshold와 strict IoU 비교, score 내림차순·동점 원 row 오름차순이다. 모든6300행을 보며 pre-topK 없이 최대500개 NMS prefix에서 멈추고 미분류 잔여를 계수한다. 이 비교 상한은 실행시간 보장이 아니며 원 Torchvision kernel parity도 미확인이다. nonpositive 크기 또는 FP32 변환 뒤 접힌 box는 제외하고 센다. 양수의 작은 box에 임의2px 하한을 추가하지 않는다. full NN 좌표 NMS 뒤 content ROI clip/역변환하므로 padding 검출이 다른 후보를 억제한 뒤 source에서 사라질 수 있다.
+
+det의 모든 obj/class와 두 segmentation score는 [0,1]이어야 한다. 범위 밖 유한 값도 전체 decode를 실패시키며 sigmoid/clamp로 수리하지 않는다. 이는 고정 모델의 score 정의역을 보호하는 프로젝트 정책이다. 원 packet은 호출자가 유지한다. NaN/Inf·layout 검사는 NNPacket 경계의 책임이다.
+
+road/lane은 두 channel argmax이며 동점은 첫 channel이다. `argmax_nn`은320×320 원 label, `observed_nn`은 rows70..249만 관측인 별도 bool mask, `content`는180×320이다. padding label은 배경·FREE 관측이 아니다. source mask는 `source[y,x]=argmax_nn[70+y//2,x//2]`로 정확히2배 nearest 복원한다. 박스는 연속 image-edge 좌표로 x_source=2×x_nn, y_source=2×(y_nn−70)을 적용한다. 실제 ImageManip 입력 픽셀이 보존되지 않아 pixel equivalence는 미확인이다.
+
+결과는 원 source/time·context와 model/preprocessing/parser/config identity를 연결한다. `source_metadata`와 provenance는 사본이며 새 `costs_us`가 원 검사 비용을 덮어쓰지 않는다. S03 표본의 결박을 다시 검사하지만 파일 hash는 reader 책임이다. `REPLAY`, `live_authority=false`, `nn_ready=false`, `metric_ready=false`와 원 depth 시간 한계를 유지한다. 후보 mask/box는 차선·주차칸·occupied/free 최종판정이나 차량 제어 권한이 아니다.
+
+## 카메라 없는 원본 재생
+
+`replay`는 위 version1 기록을 읽어 RGB NV12·native depth RAW16_LE 원본 bytes를 index 순서대로 재생한다. DepthAI·NumPy·OpenCV 설치나 카메라 연결은 필요 없다. 원 device/SDK/J 시각, stream별 순번, source key와 capture context를 유지하며, 저장 누락을 보간하거나 RGB/depth를 같은 노출로 재정의하지 않는다.
+
+```bash
+xenova-vehicle replay \
+  --dataset "$HOME/xenova-data/captures/bench-001" \
+  --output "$HOME/xenova-data/replays/bench-001-run-001" \
+  --speed 1 --json
+```
+
+`--speed 1`은 원 `received_j_us`의 상대 수신 간격으로 대기한다. 검증 시간은 재생 간격에 포함하지 않는다. `--speed 0`은 대기 없이 읽고, 양수는 최대16배속까지 허용한다. 처리 지연이 생겨도 프레임을 버리거나 다음 목표 시각을 밀지 않으며 지연량을 결과에 남긴다. 원 관측 시각과 재생 경과 시각은 별도 필드다. `--profile FILE`을 추가하면 내장된 수집 프로필과 정확히 일치하는지도 검사한다. 생략 시 manifest의 프로필을 사용한다.
+
+재생 전 모든 indexed payload의 SHA256·길이·형식, 프로필 hash·context, stream별 순번/시각 증가, 원 종료 결과와 기록 통계를 검사한다. 재생 중에도 payload hash와 파일 변경을 다시 확인한다. 첫 사전 검증에서 하나라도 손상되면 프레임을 전달하지 않는다. 입력은 읽기만 하며 출력은 입력과 분리된 새 디렉터리여야 한다. SHA256 검사는 파일 무결성 대조이며 촬영 출처를 인증하는 서명은 아니다.
+
+기본값은 완전한 정상 종료 기록만 허용한다. 중단·종료 결과 부재·마지막 index 줄 잘림·index에 없는 payload는 `--allow-incomplete`를 명시해야 한다. 이때도 newline으로 끝난 검증 가능한 index 행만 사용하고, 버린 꼬리 bytes와 미참조 payload를 결과에 남긴다. 참조 파일 부재·hash 오류·잘못된 행/경로/문맥은 이 옵션으로 허용하지 않는다. 정상 수집에서 명시적으로 센 저장 drop이나 stream 순번 간격은 불완전 종료와 구분해 보고한다. 정전으로 manifest 자체가 손상된 기록을 복원하는 도구는 아니다.
+
+```text
+bench-001-run-001/
+├── replay-result.json   # 원 기록 완전성·hash 검사·재생 완료·통계·오류
+└── events.jsonl         # 전달 순번·원 index metadata·별도 재생 시각
+```
+
+CLI는 영상창 없이 원본을 읽고 진단 trace를 남긴다. 알고리즘에는 아래 API의 `consumer`로 실제 `RawFrame.payload`와 원 metadata를 전달한다. callback은 동기 실행되며 예외가 나면 중단한다. 원본은 NV12/RAW16_LE로 유지하고 화면 표시·색 변환은 consumer의 책임이다.
+
+```python
+from pathlib import Path
+from xenova_vehicle.recording.replay import run_replay
+
+def consume(sample):
+    frame = sample.frame  # stream, payload: bytes, sequence, device_us, sdk_us, received_j_us
+    source = sample.metadata  # 원 index 행 사본; source_key와 clock evidence 포함
+    # 인지 함수에 frame과 source를 전달한다.
+
+report = run_replay(Path("/data/captures/bench-001"), speed=0, consumer=consume)
+```
+
+`replay_completed`는 선택한 입력의 재생 완료, `source_complete`는 원 기록의 완전성이다. 부분 기록 재생을 완료해도 원 기록을 완전하다고 바꾸지 않는다. replay마다 새 `replay_instance`를 발급하고 `input_kind=REPLAY`, `live_authority=false`, `metric_ready=false`를 유지한다. 운영 broker·차량 제어는 열지 않는다.
+
+종료 코드는 재생 완료0, 검증/재생 실패1, 인수·프로필·기존 출력 경로 오류2, Ctrl+C130, SIGTERM143이다. 대기 중에는 최대50ms마다 취소를 확인한다. 이는 동기 consumer나 저장 장치 I/O의 강제중단 기한을 뜻하지 않는다. version1 입력 상한은 payload 합계4GiB, 10,000프레임, index64MiB·행32KiB, manifest2MiB, 원 결과64KiB다. 진단 trace는96MiB로 제한한다. 전체 영상은 메모리에 적재하지 않으며 index metadata는 상한 내에서 보관한다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
@@ -119,4 +309,5 @@ PYTHONPATH=vehicle/Jetson/src python -m xenova_vehicle doctor --json
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests/unit -v
 PYTHONPATH=src python -m unittest discover -s tests/integration -v
+PYTHONPATH=src python -m unittest discover -s tests/replay -v
 ```

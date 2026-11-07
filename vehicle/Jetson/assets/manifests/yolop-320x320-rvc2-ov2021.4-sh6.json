@@ -1,0 +1,358 @@
+{
+  "schema_version": 1,
+  "asset_id": "yolop-320x320-rvc2-ov2021.4-sh6-v1",
+  "model_family": "YOLOP",
+  "model_zoo_name": "yolop_320x320",
+  "target": {
+    "device": "OAK-D-Lite",
+    "processor": "RVC2 / Myriad X",
+    "depthai": "2.29.0.0"
+  },
+  "source": {
+    "model_zoo_repository": "https://github.com/luxonis/depthai-model-zoo",
+    "model_zoo_revision": "ac2eff9570af531ebd042765655e8940c2573da4",
+    "model_yml_sha256": "c6382c86ead3a204dce4e14057e6e617d1fdc4a1f837bfe8e36626df4ad5ade1",
+    "xml_url": "https://raw.githubusercontent.com/luxonis/depthai-model-zoo/ac2eff9570af531ebd042765655e8940c2573da4/models/yolop_320x320/yolop_320x320.xml",
+    "weights_url": "https://robothub.fra1.cdn.digitaloceanspaces.com/models/yolop_320x320/yolop_320x320.bin",
+    "upstream_repository": "https://github.com/hustvl/YOLOP",
+    "upstream_license_revision": "8d8f68df318c71f01d6f813c024df646c7d1978f",
+    "upstream_checkpoint_sha256": null,
+    "upstream_checkpoint_to_ir_export_revision": null
+  },
+  "licenses": {
+    "declared_model_license": "MIT",
+    "upstream_copyright": "2021 Hust Visual Learning Team",
+    "notices_required": [
+      "YOLOP-LICENSE.txt",
+      "Luxonis-Model-Zoo-LICENSE.txt"
+    ]
+  },
+  "compilation": {
+    "service": "https://blobconverter.luxonis.com/compile",
+    "requested_openvino_version": "2021.4",
+    "server_compiler_build": null,
+    "requested_shaves": 6,
+    "observed_cmx_slices": 6,
+    "advanced_parameters": "-ip U8 -op FP16",
+    "request_config_sha256": "724501fd9f27b41e597171399d660586cac3b1496ce55624fb2783e8974757c6",
+    "request_receipt_sha256": "cb6ecd85de1f70e84cb0d071f56dd186fbd68fec5528f836061e6e1f7163fd52",
+    "runtime_download_allowed": false
+  },
+  "files": [
+    {
+      "name": "Luxonis-Model-Zoo-LICENSE.txt",
+      "role": "model_zoo_license",
+      "bytes": 1084,
+      "sha256": "227c65da2a2303032fa8e53c8cac203b9bf7e7e2abbb86ac974101b2093f3b84"
+    },
+    {
+      "name": "YOLOP-LICENSE.txt",
+      "role": "upstream_license",
+      "bytes": 1082,
+      "sha256": "97acb244135bb2ed8ca578990bc91b670d61d0c5c37fc67b17bdc252d865cd9d"
+    },
+    {
+      "name": "yolop_320x320.bin",
+      "role": "openvino_ir_weights",
+      "bytes": 15872074,
+      "sha256": "43d8c3539605a0cc2e4be5b355c9c2ca0c3544683e1a725cf1071390375d084a"
+    },
+    {
+      "name": "yolop_320x320.xml",
+      "role": "openvino_ir_xml",
+      "bytes": 582488,
+      "sha256": "96586619ad12e863a0747172aa485d1ca7b1d55f9030bb00a7efffb80bfd3e6d"
+    },
+    {
+      "name": "yolop_320x320_openvino_2021.4_6shave.blob",
+      "role": "compiled_blob",
+      "bytes": 15973184,
+      "sha256": "8bc407f90814c6092ce0d76f7ce8cee0aaec68236358113946fe0134a655c437"
+    }
+  ],
+  "input": {
+    "name": "images",
+    "logical_shape_nchw": [
+      1,
+      3,
+      320,
+      320
+    ],
+    "dtype": "uint8",
+    "frame_type": "BGR888p",
+    "color_order": "BGR",
+    "range": [
+      0,
+      255
+    ],
+    "payload_bytes": 307200,
+    "host_normalization": "none; channel reversal and affine normalization are inside IR",
+    "embedded_channel_permutation": [
+      2,
+      1,
+      0
+    ],
+    "embedded_rgb_scale_fp16": [
+      0.017120361328125,
+      0.0175018310546875,
+      0.017425537109375
+    ],
+    "embedded_rgb_bias_fp16": [
+      -2.1171875,
+      -2.03515625,
+      -1.8046875
+    ]
+  },
+  "outputs": [
+    {
+      "name": "det_out",
+      "logical_shape": [
+        1,
+        6300,
+        6
+      ],
+      "dtype": "float16",
+      "byte_order": "little",
+      "payload_bytes": 75600,
+      "row_fields": [
+        "center_x",
+        "center_y",
+        "width",
+        "height",
+        "objectness",
+        "vehicle_class_score"
+      ],
+      "coordinate_units": "320x320 NN image pixels",
+      "interpretation": "decoded proposals; confidence=objectness*vehicle_class_score; xywh to xyxy; host NMS required; not generic obstacles"
+    },
+    {
+      "name": "drive_area_seg",
+      "logical_shape": [
+        1,
+        2,
+        320,
+        320
+      ],
+      "dtype": "float16",
+      "byte_order": "little",
+      "payload_bytes": 409600,
+      "interpretation": "sigmoid scores; argmax over channel axis; 0 background, 1 drivable-area candidate"
+    },
+    {
+      "name": "lane_line_seg",
+      "logical_shape": [
+        1,
+        2,
+        320,
+        320
+      ],
+      "dtype": "float16",
+      "byte_order": "little",
+      "payload_bytes": 409600,
+      "interpretation": "sigmoid scores; argmax over channel axis; 0 background, 1 lane-line candidate"
+    }
+  ],
+  "sdk_blob_metadata": {
+    "sdk_inferred_version": "Version.VERSION_2021_4",
+    "num_shaves": 6,
+    "num_slices": 6,
+    "stage_count": 295,
+    "inputs": {
+      "images": {
+        "name": "images",
+        "dataType": "DataType.U8F",
+        "order": "StorageOrder.NCHW",
+        "dims": [
+          320,
+          320,
+          3,
+          1
+        ],
+        "strides": [],
+        "offset": 0
+      }
+    },
+    "outputs": {
+      "lane_line_seg": {
+        "name": "lane_line_seg",
+        "dataType": "DataType.FP16",
+        "order": "StorageOrder.NCHW",
+        "dims": [
+          320,
+          320,
+          2,
+          1
+        ],
+        "strides": [],
+        "offset": 485248
+      },
+      "drive_area_seg": {
+        "name": "drive_area_seg",
+        "dataType": "DataType.FP16",
+        "order": "StorageOrder.NCHW",
+        "dims": [
+          320,
+          320,
+          2,
+          1
+        ],
+        "strides": [],
+        "offset": 75648
+      },
+      "det_out": {
+        "name": "det_out",
+        "dataType": "DataType.FP16",
+        "order": "StorageOrder.CHW",
+        "dims": [
+          6,
+          6300,
+          1
+        ],
+        "strides": [],
+        "offset": 0
+      }
+    },
+    "host_graph_required_version": "Version.VERSION_2021_4"
+  },
+  "layout_qualification": {
+    "sdk_dims_order": "innermost dimension first; logical reshape is specified separately",
+    "sdk_blob_strides": "not populated by DepthAI2.29 BlobReader; empty is not a contiguity certificate",
+    "runtime_nndata_layout_verified": false,
+    "raw_compiler_output_minimum_bytes": 894848,
+    "logical_output_bytes": 894800,
+    "do_not_pack_outputs_without_offsets": true
+  },
+  "preprocessing_profile": {
+    "id": "yolop-letterbox-640x360-to320-v1",
+    "source_size_wh": [
+      640,
+      360
+    ],
+    "resized_size_wh": [
+      320,
+      180
+    ],
+    "padding_ltrb": [
+      0,
+      70,
+      0,
+      70
+    ],
+    "padding_bgr": [
+      0,
+      0,
+      0
+    ],
+    "scale_xy": [
+      0.5,
+      0.5
+    ],
+    "coordinate_convention": "continuous image-edge coordinates",
+    "source_to_nn": "u_nn=0.5*u_source; v_nn=0.5*v_source+70",
+    "valid_content_roi_xyxy": [
+      0,
+      70,
+      320,
+      250
+    ],
+    "padding_is_observation": false,
+    "status": "project integration choice; ImageManip pixel equivalence not yet measured"
+  },
+  "reference_parser": {
+    "url": "https://github.com/luxonis/oak-examples/blob/5d6f8b8fa55f80c5958dbd7f72733cbffc37a4d4/gen2-yolo/yolop/utils/functions.py",
+    "sha256": "7e15e612b8f32d0140346d23f6c3a726dbbec775e3cbeb63053245e483265bd4",
+    "local_parser_revision": null,
+    "reference_thresholds": {
+      "confidence": 0.5,
+      "nms_iou": 0.3,
+      "qualification": "example settings; not RC-track acceptance values"
+    }
+  },
+  "qualification": {
+    "offline_blob_and_host_graph_verified": true,
+    "on_device_inference_verified": false,
+    "depth_plus_nn_concurrent_verified": false,
+    "rc_track_accuracy_verified": false,
+    "metric_ready": false
+  },
+  "compiler_blob_layout": {
+    "source": {
+      "depthai_core_commit": "d6a37a5ba8ba2ee187fabc9208b813db5f75d4a7",
+      "depthai_blob_format": "https://github.com/luxonis/depthai-core/blob/d6a37a5ba8ba2ee187fabc9208b813db5f75d4a7/src/openvino/BlobFormat.hpp",
+      "depthai_blob_reader": "https://github.com/luxonis/depthai-core/blob/d6a37a5ba8ba2ee187fabc9208b813db5f75d4a7/src/openvino/BlobReader.cpp",
+      "openvino_tag": "2021.4",
+      "openvino_commit": "5cee8bbf29797f4544b343e803de957e9f041f92",
+      "openvino_io_serialization": "https://github.com/openvinotoolkit/openvino/blob/5cee8bbf29797f4544b343e803de957e9f041f92/inference-engine/src/vpu/graph_transformer/src/model/data.cpp",
+      "openvino_const_shape_serialization": "https://github.com/openvinotoolkit/openvino/blob/5cee8bbf29797f4544b343e803de957e9f041f92/inference-engine/src/vpu/graph_transformer/src/backend/serialize.cpp",
+      "openvino_order_and_byte_strides": "https://github.com/openvinotoolkit/openvino/blob/5cee8bbf29797f4544b343e803de957e9f041f92/inference-engine/src/vpu/graph_transformer/src/model/data_desc.cpp"
+    },
+    "header_version": [
+      2021,
+      4
+    ],
+    "input_buffer_bytes": 307200,
+    "output_buffer_bytes": 894848,
+    "inputs": {
+      "images": {
+        "dims_fastest_to_slowest": [
+          320,
+          320,
+          3,
+          1
+        ],
+        "strides_bytes_fastest_to_slowest": [
+          1,
+          320,
+          102400,
+          307200
+        ],
+        "buffer_offset_bytes": 0
+      }
+    },
+    "outputs": {
+      "det_out": {
+        "dims_fastest_to_slowest": [
+          6,
+          6300,
+          1
+        ],
+        "strides_bytes_fastest_to_slowest": [
+          2,
+          12,
+          75600
+        ],
+        "buffer_offset_bytes": 0
+      },
+      "drive_area_seg": {
+        "dims_fastest_to_slowest": [
+          320,
+          320,
+          2,
+          1
+        ],
+        "strides_bytes_fastest_to_slowest": [
+          2,
+          640,
+          204800,
+          409600
+        ],
+        "buffer_offset_bytes": 75648
+      },
+      "lane_line_seg": {
+        "dims_fastest_to_slowest": [
+          320,
+          320,
+          2,
+          1
+        ],
+        "strides_bytes_fastest_to_slowest": [
+          2,
+          640,
+          204800,
+          409600
+        ],
+        "buffer_offset_bytes": 485248
+      }
+    }
+  }
+}

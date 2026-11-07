@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "profile_id": "oak-rgb-depth-bench-v1",
+  "device_mxid": "REPLACE_WITH_OAK_MXID",
+  "nn_requirement": "ABSENT",
+  "jpeg_enabled": false,
+  "fps": 15,
+  "max_bytes": 1073741824,
+  "min_free_bytes": 8589934592,
+  "startup_timeout_s": 90,
+  "stall_timeout_s": 0.5,
+  "close_timeout_s": 15,
+  "sync_tolerance_us": 10000
+}
