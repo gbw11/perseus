@@ -349,9 +349,8 @@ static void test_payloads(void)
 	      "auto delay extra parameter");
 
 	struct xm_resource_stress_command stress;
-	CHECK(xm_resource_stress_command_parse(sp("{\"command_id\":\"cpu-1\",\"expected_boot_id\":\"boot\",\"expires_at\":\"t\",\"action\":\"cpu_stress\",\"parameters\":{\"workers\":2,\"load_percent\":80,\"duration_s\":30}}"),&stress)==0&&stress.action==XM_CPU_STRESS&&stress.workers==2&&stress.load_percent==80,"cpu stress command");
+	CHECK(xm_resource_stress_command_parse(sp("{\"command_id\":\"cpu-1\",\"expected_boot_id\":\"boot\",\"expires_at\":\"t\",\"action\":\"cpu_stress\",\"parameters\":{\"workers\":1,\"load_percent\":80,\"duration_s\":30}}"),&stress)==-ENOTSUP,"cpu stress unsupported");
 	CHECK(xm_resource_stress_command_parse(sp("{\"command_id\":\"mem-1\",\"expected_boot_id\":\"boot\",\"expires_at\":\"t\",\"action\":\"memory_stress\",\"parameters\":{\"memory_mib\":4,\"duration_s\":30}}"),&stress)==0&&stress.action==XM_MEMORY_STRESS&&stress.memory_mib==4,"memory stress command");
-	CHECK(xm_resource_stress_command_parse(sp("{\"command_id\":\"c\",\"expected_boot_id\":\"b\",\"expires_at\":\"t\",\"action\":\"cpu_stress\",\"parameters\":{\"workers\":5,\"load_percent\":80,\"duration_s\":30}}"),&stress)==-ERANGE,"cpu stress bounds");
 	CHECK(xm_resource_stress_command_parse(sp("{\"command_id\":\"c\",\"expected_boot_id\":\"b\",\"expires_at\":\"t\",\"action\":\"memory_stress\",\"parameters\":{\"memory_mib\":4,\"duration_s\":30,\"extra\":1}}"),&stress)==-ERANGE,"memory stress extra parameter");
 	CHECK(xm_resource_stress_command_parse(sp("{\"command_id\":\"c\",\"expected_boot_id\":\"b\",\"expires_at\":\"t\",\"action\":\"memory_stress\",\"parameters\":{\"memory_mib\":9,\"duration_s\":30}}"),&stress)==-ERANGE,"memory stress VM bound");
 	char stress_result[512];

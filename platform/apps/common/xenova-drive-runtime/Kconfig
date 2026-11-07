@@ -66,19 +66,9 @@ config XENOVA_RESOURCE_STRESS_INJECTION
 	depends on XENOVA_AUTO_DELAY_INJECTION
 	default n
 	help
-	  Enables bounded Zephyr VM resource stress commands. CPU stress runs one
-	  low-priority duty-cycle worker because the VM has one vCPU. Memory stress
-	  allocates, touches and later releases 64KiB system-heap chunks. Test
+	  Enables the bounded Zephyr VM memory stress command. It allocates, touches
+	  and later releases 64KiB system-heap chunks. Test
 	  firmware must reserve enough system heap for the configured maximum.
-
-config XENOVA_RESOURCE_STRESS_CPU_PRIORITY
-	int "CPU stress worker preemptive priority"
-	depends on XENOVA_RESOURCE_STRESS_INJECTION
-	range 11 14
-	default 14
-	help
-	  Keep the synthetic CPU load below AUTO, MANUAL, MQTT and telemetry work so
-	  those tasks can preempt it. The worker uses a 10ms duty-cycle period.
 
 config XENOVA_RESOURCE_STRESS_MEMORY_THRESHOLD_PERCENT
 	int "System heap pressure threshold percent"
