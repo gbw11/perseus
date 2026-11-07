@@ -474,6 +474,22 @@ slot당 마지막 `CleanupSummary(fact,opposite=None)` 하나를 보유한다. �
 
 참조 비용은 원 packet≤4096B와 고정 길이 parent·작은 frozen record이며 사본 조회만 작은 tree를 복사한다. SDK view나 큰 frame bytes를 보유하지 않는다. 실제 RSS/주기는 별도 계측 대상이다. sender는 C/E/첫 sequence/raw를 유지하고 E 뒤 새 dispatch를 하지 않는다. 전송 만료·abandon이 실제 반환 사실이나 미확인 ownership을 지우지 않는다. receiver의 exact known/current 또는 미회수 old cleanup은 원 Er와 전송 E 뒤에도 bookkeeping만 가능하다. 실제 peer/registry·공통 sequence/staging·전송·token post/owner exit·STOPPED/REVOKE·SHM 회수는 이 API가 실행하거나 증명하지 않는다.
 
+## 자원 기록과 순수 guard 판정
+
+`runtime.resource_manifest.ResourceManifest(raw_bytes)`는≤8192B ASCII JSON을 읽는 immutable 값이다. `.raw_bytes/.raw_sha256`와 key/Owner 정렬·compact·LF1의 `.canonical_bytes/.canonical_sha256`를 구별한다. `.fields`는 독립 사본이다. `.ref`는 실제 raw SHA/revision/service/resource epoch/runtime을 보유하고 `.runtime/.owners/.cgroup/.resources/.intents/.recovery_episode`는 frozen record와 tuple이다. Native 정수는 exactint이며 wire u64는 canonical decimal string이다. 오류는 ManifestError(ValueError)다.
+
+root11/runtime7·owner≤9·resource12주소·미해결 creation1개를 검사한다. current/retired raw2·DB 물리 inventory≤4·sem 논리6이라는 상한이며 실제 DB segment 수/배치/할당은 이 값이 정하지 않는다. Resource의 KNOWN SHM size는 actual-known positiveu64 기록이고 DB 전체13,651,968B를 단일 arena나 raw2MiB로 강제하지 않는다. canonical kernel SHM 이름의 leading slash와 public SharedMemory name의 실제 mapping은 adapter 책임이다. native manifest tree container depth3/node512(키포함)/key32/semantic string192/list9/dict12/intbits64와 raw/canonical각8192B cap은 manifest에만 적용한다. JSON parser 할당 자체를512nodes라고 보장하는 것은 아니다.
+
+NOT_ATTEMPTED/name null/intent 없음은 불완전 inventory가 아니다. INTENT/UNKNOWN과 null-birth owner는 미완전이며 일반 constructor 실패로 무생성이라고 바꾸지 않는다. `.complete_inventory`는 이 정적 완전성만 뜻한다. CURRENT/RETIRED는 실제 생존 상태가 아니다. child/첫 tracker 가능 경로 전 null-birth 행의 durable ACK·원 intent 기록·실제 결과 기록은 별도 단계다. settled history를 늘리거나 occupied retired 기록을 덮어쓰는 API를 제공하지 않는다. episode는 원 ID와0..5 카운터를 보존하며 `service_attempts`는 초기 group을 포함한 모든 회복 group의 전역 누적이다. 증가·건강 판정·reset은 수행하지 않는다.
+
+`runtime.resource_guard`의 LoadOutcome은 VALID/MISSING/CORRUPT/IO_ERROR를 구별한다. CurrentGuardScope와 OwnerObservation/CgroupObservation/NameObservation, LiveIntentStatement/RuntimeResetStatement/FirstInstallStatement는 원 ref·정확 대상·현재 guard에 결박된 lower 진술이다. record는 frozen이고 집합은 exacttuple이며 cgroup members≤16은 manifest list9와 별도다. 실제 PID/cgroup/name/boot/reset/install을 여기서 조회하거나 검증하지 않는다. UUID/SHA는 실제 proof를 암호학적으로 증명하지 않는다.
+
+`GuardDecision(load,guard,evidence)`와 `evaluate_guard(...)`는 같은 검증으로 kind/reason·원 load/guard/evidence·원 valid predecessor/episode를 보유한다. kind나 unchecked flag를 입력받지 않는다. 구조/타입 오류는 GuardInputError(ValueError), 구조가 맞는 다른 ref/대상·누락·중복·모순은 BLOCKED다. 제공된 진술은 모든 분기에서 결박을 대조하고 실제 필요한 집합은 분기별로 구별한다.
+
+OLD_CLEAN_ELIGIBLE은 같은 full runtime·complete inventory·모든 known owner EXITED·현재 guard birth 외 cgroup 잔존 없음·모든 known name ABSENT를 요구한다. 자기 birth의 EXITED 주장은 거절한다. FRESH_RESET_ELIGIBLE은 old/current boot 불일치와 전용 reset 진술을 요구하며 old incomplete 원본·episode를 보존한다. FIRST_INSTALL_ELIGIBLE은 원 MISSING load_id와 설치 진술·명시 genesis에만 해당한다. CORRUPT/IO_ERROR는 자동 BLOCKED다. LIVE_INTENT_PENDING은 현재 같은 S의 명시 ALIVE/ref/birth/guard nonce와 원 DIRTY/target INTENT에만 해당하는 정보이며 UNKNOWN은 같은 S라도 BLOCKED다. LIVE도 일반 constructor 허가가 아니다.
+
+파일 load/lock/CAS/fsync/S-log ACK·실제 관측/설치 근거 소비·SHM/고정6token/worker/서비스 기동·회복/종료·READY/주행 판단 조건은 별도 gate다. d1은 시계·UUID 생성·명시 파일/시스템 자원 호출을 하지 않고 canonical≤8KiB와 작은 frozen 값/진술만 보유한다. 조회 사본 비용·실제 RSS/주기·native 반환시간은 별도 계측 대상이다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
