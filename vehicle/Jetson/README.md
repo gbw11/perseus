@@ -4,7 +4,7 @@ Jetson Nano B01과 OAK-D-Lite에서 수집한 관측을 처리해 차선·장애
 
 ## 확인한 Jetson 환경
 
-2026-11-06 전용 환경 설치·실제 OAK 수신 확인 기준이다. 설치·연결 상태가 바뀌면 다시 조회한 날짜와 값으로 갱신한다.
+2026-11-07 전용 환경의 실제 OAK 수신·YOLOP 상주 실행 확인 기준이다. 설치·연결 상태가 바뀌면 다시 조회한 날짜와 값으로 갱신한다.
 
 | 항목 | 확인 결과 |
 |---|---|
@@ -14,7 +14,7 @@ Jetson Nano B01과 OAK-D-Lite에서 수집한 관측을 처리해 차선·장애
 | 앱 Python | 별도 CPython 3.11.18 + 가상환경, pip 26.2.1 |
 | 앱 라이브러리 | DepthAI 2.29.0.0, NumPy 1.26.4, opencv-python-headless 4.10.0.84 |
 | OAK | RGB IMX214·mono OV7251×2, NV12 640×360/native depth 640×480 수신·종료 확인 |
-| OAK USB | 실제 동작 HIGH(USB 2.0), USB 3 연결·동시 NN 부하 미검증 |
+| OAK USB | 실제 동작 HIGH(USB 2.0), RGB·깊이·YOLOP 동시 수신 확인, USB 3 연결 미검증 |
 | 네트워크 | Wi-Fi 접속 중, Ethernet 통신 미검증 |
 
 glibc는2.27이다. L4T 일치는 JetPack 전체 패키지 설치 확인과 구분한다. 최초 시스템 조회·전용 환경·실제 수신의 근거는 `Jetson-drive-docs/making-reports/0003-jetson-environment.md`, `0005-jetson-python311-environment.md`, `0008-jetson-oak-capture-validation.md`에 보존한다.
@@ -114,6 +114,32 @@ PYTHONPATH=vehicle/Jetson/src python -m xenova_vehicle doctor --json
 종료 코드는 검사 통과0, 실패·미확인1, CLI 사용 오류2다. SDK 장치 검색은 Device를 열지 않으며 OAK-D-Lite 모델·센서·USB 속도·영상 수신·보정·NN 준비를 확인한 것으로 해석하지 않는다. Nano 모델 정보로 carrier B01을 확정하지 않으며, L4T 일치도 JetPack 전체 패키지 설치 검증과 구분한다.
 
 일반 패키지 import와 도움말은 진단이나 native import를 실행하지 않는다. 진단 결과는 런타임 준비·주행 허가가 아니며, 공용 장치·DB 락이나 상주 서비스도 만들지 않는다.
+
+## RGB·깊이·YOLOP 상주 실행
+
+`runtime`은 Jetson의 Linux·CPython 3.11.18 환경에서 S/A/M/D를 `spawn`으로 실행한다. S-main은 lifecycle·원 기한·lease를, S-log 한 스레드는 자원 기록과 named 자원 생성을 담당한다. A가 OAK Device와 모델을 한 번 적재해 유지하고, M이 받은 owned bytes를 해석하며, D가 SQLite를 독점한다. `doctor`는 이 경로에서 실행하지 않는다.
+
+외부에 복사한 `profiles/oak-yolop-rgb-depth-bench.example.json`의 장치·자산 경로를 실제 값으로 설정하고 `nn_requirement=REQUIRED`, `jpeg_enabled=false`를 사용한다. 다음은 새 설치의 첫 수동 실행 예다. state의 부모 디렉터리는 앱 실행 사용자 소유로 먼저 준비한다. state와 output은 기존 경로를 덮어쓰지 않는다.
+
+```bash
+python -m xenova_vehicle runtime-init --state-dir "$HOME/.local/state/xenova-vehicle/runtime" --json
+python -m xenova_vehicle runtime \
+  --profile /absolute/path/resident-profile.json \
+  --state-dir "$HOME/.local/state/xenova-vehicle/runtime" \
+  --database "$HOME/.local/state/xenova-vehicle/runtime/storage.sqlite3" \
+  --database-open-policy CREATE_IF_ABSENT \
+  --output /absolute/path/new-runtime-log --json
+```
+
+`--duration-s 10`을 지정하면 capture·NN parser·DB의 로컬 준비 후 10초 상주하고 종료한다. 생략하면 SIGINT/SIGTERM까지 유지한다. 기존 DB의 기본 정책은 `EXISTING_ONLY`이며, `CREATE_IF_ABSENT`도 기존 DB를 덮어쓰지 않는다. SDK 로그는 stderr, 최종 결과는 stdout과 `output/runtime-result.json`에 기록한다.
+
+capture 준비는 실제 RGB/depth 30쌍, NN 준비는 M의 fresh parser 결과 5회로 구별한다. Pi 시각·odom·차량 장착 보정·지도와 provenance가 준비되기 전 `metric_ready=false`, `world_valid=false`를 유지한다. 로컬 준비는 주행 허가가 아니다.
+
+장애가 나면 M만, A/M 함께, D만 선택적으로 회복한다. M 회복에서는 A의 Device·모델·RAW arena를 유지하고, A/M 회복은 이전 두 worker의 실제 종료 뒤 RAW만 교체한다. 고정 token 6개와 D는 유지한다. D 회복은 같은 DB UUID와 내구 HWM을 검증하며 새 DB를 만들지 않는다. 회복 중 원 기한과 식별자를 보존하고, 중복 장애나 불명 자원은 전체 서비스를 실패로 닫는다. 회복 횟수는 내구 기록에 누적하며 실제 로컬 준비가 연속 5분 유지되어야 새 episode로 전환한다.
+
+종료할 때 새 grant를 막고 worker의 실제 종료를 확인한 뒤 S가 소유한 SHM을 정리한다. 최종 자원 기록은 `CLEANUP_CANDIDATE`다. 다음 기동은 이전 owner의 실제 종료와 known 이름 부재, 현재 runtime·전용 cgroup을 다시 검증해야 한다. 재실행을 위해 기존 state를 지우거나 초기화하지 않는다.
+
+반복 기동은 [systemd 배포 안내](deploy/systemd/README.md)의 고정 unit/slice에서 `--service-scope systemd`로 실행한다. `--output-root`는 기존 관리 디렉터리 아래 service UUID별 결과를 만들며 `--output`과 함께 지정할 수 없다. `resource-set.json`이 inventory·회복 counter의 정본이고 실행 기록은 해당 invocation을 식별하는 불변 anchor다. 설치 과정과 실제 검증 결과는 `Jetson-drive-docs/making-reports`에서 관리한다.
 
 ## RGB·native depth 벤치 수집
 
@@ -302,9 +328,235 @@ report = run_replay(Path("/data/captures/bench-001"), speed=0, consumer=consume)
 
 종료 코드는 재생 완료0, 검증/재생 실패1, 인수·프로필·기존 출력 경로 오류2, Ctrl+C130, SIGTERM143이다. 대기 중에는 최대50ms마다 취소를 확인한다. 이는 동기 consumer나 저장 장치 I/O의 강제중단 기한을 뜻하지 않는다. version1 입력 상한은 payload 합계4GiB, 10,000프레임, index64MiB·행32KiB, manifest2MiB, 원 결과64KiB다. 진단 trace는96MiB로 제한한다. 전체 영상은 메모리에 적재하지 않으며 index metadata는 상한 내에서 보관한다.
 
+## 순수 준비·기한 정책 API
+
+`runtime.lifecycle_policy`는 실행 adapter가 검증한 개별 사실과 정수 J 단조시각(us)을 받아 준비·원 기한을 판단한다. 내부에서 시계·파일·장치·프로세스·네트워크를 열지 않는다. 문서 폴더를 runtime config로 읽지 않으며 기존 벤치 CLI는 이 API를 호출하지 않는다.
+
+- `AbsoluteDeadline.after(event_us, duration_us, now_us=..., cap_us=...)`는 원 사건과 상한으로 한 번 기한을 계산한다. `now >= expires_us`는 만료인 half-open 정책이다. bool/float/음수·u64 overflow·미래 사건은 거절한다.
+- `AStageWatch`는 A의 명시 기동/정리 경로와 원 cold90초·stage15/30/30/15초를 검사한다. 같은 state 재전달은 새 시작이 아니다. `STREAMING`에는 현재 `CaptureWarmup`의 준비 근거가 필요하고, `CLOSED`에는 S가 실제 session 정리·process exit를 확인한 `SessionExitEvidence`가 필요하다. 이 API가 실제 Device/exit 증거를 생성하지 않는다.
+- `LocalSetupWatch`는 M/D의 spawn→HELLO15초만 검사한다. `BindWatch`는 현재 worker·binding hash·원 request ID의 issue/send/ACK를 구분한다. EAGAIN 동안 `sent`를 호출하지 않으며 늦은 송신도 issue+5초를 넘길 수 없다. HELLO 뒤 정상 외부 대기는 cold/setup 기한의 연장이 아니다.
+- `CaptureWarmup`은 queue 설정 뒤 현재 SDK clock barrier보다 새로운 서로 다른 RGB/depth 후보30개를 센다. 전달받은 원 stage 기한도 시작+15초를 넘길 수 없고 더 짧은 상한은 유지한다. A의 첫 STREAMING은 현재 WARMUP의 start/cap에 결박한 준비만 수락한다. 두 stream의 seq 숫자는 달라도 된다. `ParserWarmup`은 현재 capture 준비와 현재 M의 원 BIND_ACK가 모두 생긴 두 번째 원 사건부터15초 안에 정상 paired parser 결과5개를 연속 확인한다. 출력0개도 이 timer가 만료되며, current fresh parser 실패의 input key도 기억해 같은 입력 재시도를 새 성공으로 세지 않는다. empty detection은 정상 parser 결과일 수 있다.
+
+`CaptureScope`의 RawBinding hash는 pipeline/config/calibration/stream/SDK bridge/clock 등을 포함한 검증된 전체 binding을 뜻한다. canonical hash와 개별 증거의 실제 SDK·형식·동기·원 age·lease 검증은 lower adapter 책임이다. 내부 `SourceStamp`와 개별 `CapturePairEvidence`/`ParserEvidence`는 payload나 wire schema가 아니다. kernel은 stream별 마지막 metadata와 유한 count만 보관한다. REPLAY·외국/과거 scope·중복 입력은 준비에 더하지 않고 원 시각을 현재 now로 바꾸지 않는다.
+
+M-only 교체는 같은 capture tracker와 새 mapper/request 문맥의 parser tracker를 사용한다. 실제 source 교체에는 새 scope/tracker가 필요하며 이전 객체를 현재 권위로 사용하지 않는다. 원 clock lease의 정상 갱신·일반 관측은 source 교체가 아니다. parser 준비에는 Pi 임무·PublicationBinding·metric/world 준비가 필요하지 않다. 무작업 WAIT는500ms hang이 아니며, WAIT 상태에서도 실제 parser job이 활성이라면 `active_progress_expired(..., active_job=True)`가 그 활성 작업만 검사한다. NN의 추론률·post-warmup freshness는 이500ms 값으로 정하지 않는다.
+
+REQUIRED의 초기 준비5개만 구현한다. ABSENT는 실제 NN stream이 없는 source scope이며 NN_READY를 발급하지 않는다. OPTIONAL 상세 parser는 `OPTIONAL_PARSER_NOT_IMPLEMENTED`로 표시하고 timer를 시작하지 않는다. `classical_fallback_allowed=True`일 때의 OPTIONAL 정책 허용은 실제 classical/metric 경로 수락이 아니다. warmup 완료는 지속 freshness·정확도·METRIC_READY/WORLD_VALID/DRIVE_PERMITTED가 아니며 해당 권한을 올리는 API는 제공하지 않는다. 실제 worker·IPC·resource guard·재시작 실행은 호출하는 adapter의 별도 책임이다.
+
+## LocalEnvelope 구조와 유한 대기열
+
+`runtime.local_envelope`의 `decode_structure(raw_bytes)`와 `encode_structure(fields)`는 `StructuralPacket`을 반환한다. 공개 constructor도 같은 검사를 수행한다. exact12 outer key·canonical UUID/u64string·kind/domain·UTF-8 JSON과 상한을 검사한다. payload는 bounded opaque JSON object다. kind별 unknown payload key/type/role·peer·sequence·원 기한·cleanup 허가는 별도 admission 책임이며, 구조 성공으로 작업을 실행하지 않는다.
+
+packet은 최대4096B이고 root object를 depth1, payload object를 depth2로 세어 container depth6까지 허용한다. 모든 깊이의 decoded duplicate key, NaN/Inf·overflow float, lone surrogate, UTF16/BOM·잘못된UTF8·잘림·뒤 데이터·packet 앞뒤 whitespace를 거절한다. 내부 whitespace와 유효한 JSON 지수 표기는 허용하며 원 bytes를 보존한다. `packet.fields`/`packet.payload`는 새 사본이다. 이를 수정해도 큐·TX의 원 bytes는 바뀌지 않는다.
+
+encoder는 exact builtin JSON tree를 먼저 검사한다. node/container length/string character work≤4096, integer bitlength≤13653, container depth≤6와 cycle 검사를 거친 뒤 실제 JSON 문자열 escaping/UTF8·숫자 표현 비용을4096B 예산에 누적한다. `sort_keys=True, ensure_ascii=False, separators=(',',':'), allow_nan=False`로 출력하고 최종 bytecap을 다시 검사한다. 한 호출 동안 입력 tree를 바꾸지 않는 단일 owner 계약이다. decoder는 실제 수신4096B를 기준으로 수락한다. compact 지수 표기의 유한 float가 re-encode 때 길어질 수 있으므로 decode→encode 성공이나 bytes 동일성을 원 packet 보존의 대체물로 쓰지 않는다.
+
+`runtime.mailbox.RxMailbox`는 peer별 general8/latest HEARTBEAT1/terminal2를 보관한다. FAULT/STOP/STOPPED는 terminal이며 `pop()`은 terminal FIFO→general FIFO→heartbeat, 빈 경우None이다. `put(packet)`의 `PutResult`는 ACCEPTED/REPLACED_HEARTBEAT/BUSY_GENERAL/BUSY_TERMINAL을 구분하고 `.accepted`/bool은 접수만 뜻한다. 포화한 class를 덮어쓰거나 다른 class를 침범하지 않는다. heartbeat만 도착 최신 한 개로 교체한다. 실제 peer·sequence admission 뒤 사용하는 staging이며 논리 중복·원 순번 판정을 대신하지 않는다. RX 처리 우선순위는 이미 sequence가 붙은 TX wire 송신 순서와 별개다.
+
+`PendingTx.accept(packet)`은 빈 TX slot에만 접수한다. True는 실제 송신 완료가 아니다. `peek()`은 같은 `PendingTransmission` handle과 원 bytes를 돌려주며 EAGAIN 가정에서 변하지 않는다. 실제 전체 송신 완료 뒤 `finish(expected_handle)`로 현재 접수만 해제한다. 같은 packet을 다시 접수해도 새 handle이므로 옛 finish가 새 pending을 지우지 못한다. terminal/heartbeat도 pending을 교체하지 않는다. wire ACK·원 job 완료·sequence 발급·재시도·만료 삭제 기능은 없다.
+
+두 구조는 thread/lock/clock/sleep/I/O를 만들지 않는다. RX 최대11packet과 TX1packet의 encoded bytes 상한은49152B이며 Python 객체와 소비자가 따로 보유한 사본의 overhead는 별도다. local fence·기한 판정은 큐 상태와 관계없이 상위 actor가 수행해야 한다. 실제 socket/서비스/lease/메모리 회수와 full LocalEnvelope 의미 검증은 이 API가 제공하지 않는다.
+
+## 초기 lifecycle 진술과 수신 정책
+
+`runtime.lifecycle_messages`는 `LifecyclePeer(service_instance, channel_epoch, worker_instance, role, release_sha256)`로 caller가 등록한 현재 child 문맥을 고정한다. `parse_lifecycle(packet, peer, receiver_role)`와 공개 `LifecycleMessage` constructor는 네 kind의 정확 payload·방향·현재 문맥을 검사한다. `receiver_role`은 S 또는 등록 child role이다. S sender는 service UUID, child sender는 worker UUID다. 실제 OS peer 확인은 외부 adapter 책임이다.
+
+이 초기 배포 profile은 LIFECYCLE·revision `"0"`만 사용한다. HELLO는 pinned role/worker/release와 capability_mask `"0"`이 일치해야 한다. HEARTBEAT는 role별 state와 둘 다 null 또는 canonical u64string인 원 progress tuple을 받는다. progress 시각은 원 issued 이후일 수 없다. STOP은 양수 revision·1..32 printable ASCII reason·issued≤drain≤expires를 검사한다. reason은 진단문이다. STOPPED는 exact bool leases_released, A의 bool device_closed 또는 M/D의 null, 전 role의 null checkpoint_job, STOPPED/FAILED status를 받는다. STOPPED 성공 진술에는 leases_released=true 및 A device_closed=true가 필요하며 FAILED는 부분 bool을 유지한다. BIND/BIND_ACK/PROGRESS/FAULT/SLOT/DB_JOB은 이 profile에서 거절한다.
+
+`LifecycleReceiver(peer, receiver_role).receive(packet, now_us=..., cap_us=...)`는 typed/current·원 lifetime을 먼저 검사하고 last-seq를 판정한 뒤 새 사건을 수락한다. issued≤now<expires이며 cap이 있으면 원 expires가 이를 넘을 수 없다. 첫 정상 seq는1 이상 gap을 허용하고 invalid 높은 seq는 상태를 바꾸지 않는다. 마지막 동일 seq·동일 원 bytes는 `DUPLICATE_NO_EFFECT`와 `message=None`, 새 사건은 `ACCEPTED_NEW`와 진술을 반환한다. 동일 seq의 다른 bytes·과거 seq는 거절한다. canonical 재encode로 원 bytes를 교체하지 않는다. 수신 도착 순서로 이 검사를 마친 다음 mailbox 우선처리를 한다.
+
+HELLO는 channel당 한 번이며 HELLO 전 HEARTBEAT는 거절한다. child는 HELLO 전에도 현재 S의 STOP을 받는다. S의 `register_stop_intent(packet, now_us=..., cap_us=...)`는 원 outbound STOP 하나를 고정하며 실제 전송을 뜻하지 않는다. 외부 adapter가 전체 송신 성공을 확인한 뒤 `record_first_sent(packet, event_us, now_us=...)`를 호출한다. event_us는 **성공한 그 송신 시도 직전**의 J lower bound이고 now_us는 성공 뒤 등록 시각이다. EAGAIN/short send에는 등록하지 않는다. 이 API가 실제 send 사실을 생성하거나 독립 검증하지 않는다. 두 등록 모두 S RX highwater를 바꾸지 않으며 원 수명 안의 정확 중복은 False, 다른 raw/first-send 사건은 충돌이다.
+
+원 STOP은 worker/channel 수명 동안 교체·연장할 수 없다. active STOP 뒤 새 HELLO도 거절한다. STOPPED는 HELLO 전이라도 원 STOP의 exact request/revision·현재 문맥·first_sent를 확인하면 받는다. 원 STOP issued≤first_sent≤보고 issued≤now이고 보고 expires≤원 STOP expires가 자동 적용된다. 보고 하나만 수락하며 원 STOP은 보고 뒤에도 유지한다. now≥원 drain은 이미 소진된 drain이고 새 예산이 아니다. 만료 보고를 허용하거나 작업·메모리를 FREE로 바꾸는 예외는 제공하지 않는다. 새 worker/channel은 caller가 새 receiver로 등록한다.
+
+`snapshot`은 frozen 현재 문맥/highwater/HELLO/last packet/원 STOP·first_sent/보고만 보관하며 무한 history가 없다. fields/payload는 사본이다. 단일 owner가 private state를 수정하지 않는 계약으로 쓴다. 내부 clock/sleep/I/O나 서비스 실행은 없다. heartbeat state는 실제 준비·progress 증명이 아니며 A device_closed=true도 producer의 자원 수명 정리 진술이다. 생성 미시도를 명시 확인한 경우를 포함하지만 변수None·constructor 불명으로 true를 추정하면 안 된다. typed STOPPED는 실제 Device.close/process exit/lease 반환·회수 권한을 발급하지 않는다.
+
+## 순번 없는 lifecycle draft와 송신 준비
+
+`runtime.tx_outbox.LifecycleDraft(peer, receiver_role, kind, request_id, issued_us, expires_us, payload, cap_us=None)`는 위 네 kind의 순번 없는 원 진술을 보관한다. receiver_role은 기존 typed profile의 수신 방향이다. caller가 가진 실제 peer/request UUID·원 시각·원 cap을 요구하고 sequence나 임시 UUID를 만들지 않는다. outgoing draft는 issued<expires, expires≤원 cap을 검사한다. 기존 수신 parser의 형식/lifetime 분리는 유지한다. native payload는 exact dict≤5, exact str key/각 문자열≤64, exact str/bool/null의 flat scalar를 검사하면서 작은 소유 사본을 만든 뒤 공유 typed 규칙을 적용한다. subclass/custom value/nested container는 set/hash/복사/serialize 전에 거절한다. 입력 dict의 호출 중 동시변경과 private state 수정은 지원하지 않는다. fields는 sequence 없는 실제11field 사본, payload도 새 사본이며 아직 encoded packet이 아니다.
+
+`TxOutbox(peer, receiver_role)`는 고정 sender/channel/방향의 general8/latest heartbeat1/terminal2와 별도 pending1을 보관한다. 초기 general은 HELLO, terminal은 STOP/STOPPED다. `put(draft, now_us=..., cap_us=None)`은 현재 문맥·원 수명 뒤 현재 queue+pending의 request_id를 검사한다. 같은 ID의 전체 원 fingerprint(kind/peer/방향/request/body/issued/expires/원 cap)가 같으면 DUPLICATE_NO_EFFECT, 다르면 예외다. 새 HB snapshot에는 caller의 실제 새 request ID가 필요하다. 이는 초기 배포 선택이며 향후 여섯 kind의 원 operation 계약에 자동 적용하지 않는다. 중복 검사 뒤 새 HB만 coalesce하고 pending은 바꾸지 않는다. 포화는 BUSY_GENERAL/BUSY_TERMINAL이며 기존 상태를 유지한다. TxPutResult의 accepted/bool은 새 접수·HB 교체만 True이고 중복은 False다. 원 작업 재전송/완료 권한을 뜻하지 않는다.
+
+`prepare(now_us=..., cap_us=None)`는 pending이 있으면 같은 handle/bytes를 PENDING_CURRENT/PENDING_EXPIRED/PENDING_CAP_EXCEEDED와 함께 반환한다. 다른 queue를 몰래 purge하지 않는다. pending이 없으면 최대11개를 읽어 만료/cap drop 목록과 terminal FIFO→general FIFO→HB의 첫 valid 후보를 계획한다. 그 후보의 실제 next sequence로만 기존 b1 encoder를 호출하고, 새 local PendingTx 접수와 결과 구성이 성공하면 purge·후보 제거·pending·counter를 함께 확정한다. 실패하면 계획한 purge까지 상태를 유지한다. 모두 만료/cap 초과이면 EMPTY와 bounded DraftDrop 목록을 반환하며 purge만 확정하고 번호를 소비하지 않는다. future issue는 예외다. 원 issued/expires/cap/body를 수리하거나 새 TTL을 붙이지 않는다.
+
+새 channel의 counter는1부터 모든 kind를 합쳐 증가한다. MAX 발급 뒤 next_sequence=None이며 valid 후보는 SequenceExhausted로 거절하고 계획한 purge도 확정하지 않는다. 모두 만료면 drop만 처리할 수 있다. 이미 준비한 packet을 포기해도 번호를 환불하지 않는다. public seed/reset/resume/자동 channel UUID 발급은 없다. 같은 channel의 중복 outbox 생성과 은퇴한 객체 호출을 막는 전역 registry/routing은 실제 adapter 책임이다.
+
+`finish(expected_handle)`은 외부에서 실제 full send 성공을 확인한 뒤의 bookkeeping이다. 늦은 실제 성공 결과 정리와 새 dispatch 허가는 다르다. `abandon(expected_handle, cause=DiscardCause...)`은 현재 exact handle만 별도 PendingDrop(handle,draft,cause)로 반환하고 내부 holder를 새 빈 객체로 바꾼다. cause는 EXPIRED/CAP_EXCEEDED/FENCED/CANCELLED인 local 포기 진술이며 실제 미송신을 증명하지 않는다. 성공 finish를 호출하지 않고 old/foreign handle은 새 pending을 지우지 못한다. EAGAIN은 같은 pending을 유지한다. 이 API는 transport attempt를 실행하거나 추적하지 않으며 pending handle·같은 μs timestamp를 attempt ID로 쓰지 않는다. 실제 send 결과 반환 전 다른 thread/signal callback의 outbox 변이·포기는 금지한다. short send/성공 불명은 후속 channel fault/retirement 수습 대상이다.
+
+S는 queue 선택 전부터 즉시 local QUIESCING/fence를 적용해야 한다. prepared STOP bytes는 send 전에 b2 원 intent로 등록하고, 등록이 실패하면 송신하지 않는다. 실제 full-send 성공 뒤 성공 시도 직전 lower bound를 first_sent로 등록한다. 등록된 STOP을 local abandon해도 b2 원 latch·S fence·원 cleanup 기한은 유지하며 새 seq/request/expiry로 STOP을 재발급해 우회하지 않는다. full-send 성공 후 등록 시각이 만료됐다고 미송신 포기로 바꾸지 않는다. 이 actor/실제 송신/회수 경로는 현재 API 밖이다.
+
+snapshot은 frozen queue tuple·원 draft·pending handle·counter이며 counts는 사본이다. 현재 held ID 최대12개만 보며 완료·교체·포기 뒤 과거 history는 남기지 않는다. queued encoded bytes는0이고 encoded_held_bytes는 실제 pending bytes만 센다. 고정 네 kind의 작은 scalar/JSON 상한과 별개로 최종 actual-sequence b1 encode는4096B 상한을 유지한다. native Python 객체·소비자 사본 overhead는 별도다. queue 용량·priority 통과는 lifecycle 출력 허가가 아니다. 미송신 HELLO 포기 뒤 HB는 실제 RX가 거절하며, prior HELLO가 있는 STOPPED 뒤 HB 진술의 기존 수신 정책은 유지한다. 실제 OS peer/send/exit/lease/READY·post-success 원 raw 재답 ledger는 제공하지 않는다.
+
+## 한 raw arena의 소유권 원장
+
+`runtime.raw_leases`는 S 단일 owner가 등록한 raw arena 두 slot의 내부 정책이다. 실제 메모리·token·Device·파일·clock을 열거나 UUID를 생성하지 않는다. `Endpoint(channel_epoch, worker_instance)`, `RawScope(service_instance, arena_id, writer, raw_binding_sha256, arena_name, arena_size_bytes=4194304, arena_role="RAW")`로 실제 caller 등록값을 고정한다. 이름은 유한 printable ASCII이고 정확한 OS 이름 profile·실 arena 존재/소유 검증은 별도 단계다. RawBinding SHA 형식 검사가 전체 binding 본문·SDK/보정을 승인하지 않으며 bench NN context hash와도 다르다.
+
+`RawLeaseLedger(scope, reader, publication_sha256=None)`는 현재 A writer와 M reader의 서로 다른 역할 문맥을 보유한다. WriteKey에는 A channel을 포함한 RawScope·slot·generation·write_token, ReadKey에는 원 WriteKey·M endpoint·read_token이 있다. M 문맥을 writer key에 덮어쓰지 않는다. 모든 공개 record는 exact type/UUID/SHA/u64/상한을 검사하는 frozen 값이다. 외부 dict/배열을 보관하지 않고 snapshot도 frozen 두-slot tuple이다. private state 직접 수정이나 호출 중 동시 변이는 지원하지 않는다.
+
+`LeaseRequest(request_id, issued_us, expires_us, cap_us=None)`의 원 수명은 issued≤now<expires이며 cap이 있으면 expires≤cap이다. `reserve_write(slot, request, write_token, now_us=...)`는 FREE에서 generation을 증가시켜 WriteGrant와 WRITING을 예약한다. 초기 generation은0, 첫 grant는1이다. A의 WRITING 또는 READY 교체 ticket은 전체 두 slot에 걸쳐 outstanding 하나다. dequeue·미송신 관측으로 없애지 않는다. `filled(FilledInfo(key, payload_length, descriptor_sha256, completed_us), now_us=...)`는 원 copy 기한 안의 정확한 완료 진술을 READY로 바꾼다. 길이/해시 형식·slot 상한만 검사하며 실제 descriptor/CRC/body·capture age는 검사하지 않는다.
+
+`offer(slot, now_us=...)`는 현재 미claim READY의 FilledInfo를 가진 Offer를 반환한다. read token이나 읽기 권한이 없다. `ReadRequest(offer, reader, request, purpose="PARSER_WARMUP", publication_sha256=None)`와 caller의 실제 read_token을 `acquire(..., now_us=...)`에 주면 원장에 ReadLease와 IN_USE를 먼저 예약한다. ACQUIRED 송신 대기/EAGAIN이어도 새 WRITE·READY 교체를 허용하지 않는다. M의 active read도 하나다. parser는 pub null일 때 Pi/DB/odom/map을 요구하지 않는다. non-null pub는 등록된 SHA와 exact 대조하지만 전체 PublicationBinding 검증이 아니다. METRIC_MAP은 원 capture metadata의 사전 전달·완전 MetricJob 계약이 없어 명시 UnsupportedPurpose이며 상태를 바꾸지 않는다. parser 읽기를 metric 사전 조회로 승격하지 않는다.
+
+정상 FILLED 뒤 독립한 새 parser read는 자기 원 request/time/cap을 사용한다. 이미 끝난 copy 작업의 기한을 상속하지 않는다. c1은 그 content의 sensor freshness를 증명하지 않는다. `write_is_current(grant, now_us=...)`와 `read_is_current(lease, now_us=...)`는 local full record/상태·fence와 실제 granted/reserved 하한부터 원 만료 전까지를 검사한다. 실제 publication token이나 메모리 접근 허가를 대신하지 않는다. 만료·취소·신호·STOPPED 보고만으로 WRITING/IN_USE를 FREE로 만들지 않는다.
+
+`release(ViewReturnFact(lease, views_ended_us, writable_posted_us), now_us=...)`는 lower가 모든 view 종료와 writable post1을 확인했다는 원 lease 전체의 진술을 대조한다. reserved≤views_ended≤writable_posted≤now여야 하며, 정확히 보유한 lease는 원 read 기한 이후·fenced/retired여도 bookkeeping으로 FREE가 된다. constructor가 실제 view 종료/sem_post를 확인하는 것은 아니다. 같은 full key의 바뀐 원 request/완료 fact는 conflict다. 이미 반환한 정확 중복은 DUPLICATE_NO_EFFECT, 보유 밖/다른 key는 UNKNOWN_NO_EFFECT이며 새 FREE/token을 만들지 않는다. old 반환이 새 generation/read_token의 lease를 풀지 못한다.
+
+현재 각 slot의 write/ticket와 최근 replacement 요약에 보유한 A request ID, 현재 read와 최근 반환 요약의 M request ID를 유한 scan한다. 같은 ID의 원 slot/time/cap/token/content가 같으면 원 기록만 돌려주거나 효과0이고, 바뀌면 conflict다. 원 필드를 현재 now로 바꾸지 않는다. 이미 수락한 FILLED의 늦은 정확 중복도 IN_USE/FREE를 READY로 되돌리지 않는다. slot별 현재 write/filled 기록은 FREE에서도 마지막 원본으로 남을 수 있으며 active grant와 다르다. 이전 모든 UUID/결과의 무한 history를 제공하지 않는다.
+
+READY 교체는 `begin_replace(slot, expected_key, request, write_token, now_us=...)`가 미claim을 확인하고 ReplacementTicket을 예약하는 단계부터 시작한다. canonical READY는 유지하지만 ticket 동안 해당 slot의 ACQUIRE/다른 교체를 막는다. planned key는 아직 새 WriteGrant가 아니다. lower가 exact ticket에 대해 ready consume 성공→writable post 성공을 확인한 `ReplacementSyncFact(ticket, ready_consumed_us, writable_posted_us, finished_us)`를 `complete_replace(..., now_us=...)`에 주어야 새 generation/WRITING/grant를 확정한다. c1은 token 작업을 실행하지 않는다. MAX는 외부 작업 전에 거절하고 reset/자동 새 arena를 만들지 않는다.
+
+부분 실패(None/None 또는 consume만 완료)·늦은 fact·source fence·외부 token 작업 뒤 local commit 실패는 ticket/fact를 유지한 sticky fault/fence로 남긴다. 정상 READY로 rollback하거나 writable post를 추가하지 않는다. 정확 중복 fact는 효과0이고 바뀐 terminal fact는 conflict다. 새 grant의 granted_us는 실제 local commit 시각이며 원 request 기한을 늘리지 않는다. `fence(now_us=..., retired=False)`는 사용권만 철회하고 원 소유 기록을 유지한다. fenced arena의 cleanup FREE가 새 write 사용권을 되살리지 않는다.
+
+원장 하나는 현재2slot, slot당 현재 write/filled·최근 cleanup summary 하나, A outstanding write/ticket 하나와 M active read 하나만 보유한다. ticket은 이전 grant/history를 재귀적으로 붙이지 않는다. owner exit 회수·reader 교체·token 정규화·전역 active/최대1 quarantine set 관리자와 새 arena 생성은 미지원이다. 같은 arena에 원장을 새로 만들어 generation을 초기화하는 우회는 실제 adapter가 막아야 한다. SLOT/BIND wire 지원·owned bytes header/descriptor codec·SHM/SemLock·실 exit/lease 회수·metric/READY·이동 권위를 이 순수 API의 통과로 수락하지 않는다.
+
+## 소유한 P0 raw slot의 바이트 검증
+
+`runtime.raw_slot`은 소유한 `bytes`만 받는 순수 codec이다. SDK·파일·시계·UUID 생성·실제 shared memory/token을 호출하지 않는다. `P0Context(write_key, stream_ids, nn_configured)`는 원장의 전체 `WriteKey`와 caller가 이미 승인한 named stream UUID 표의 소유 사본을 보유한다. `stream_ids`는 NN configured면 rgb_video/depth_right/nn_input0/nn_output0 네 개, 아니면 앞 두 개이며 모두 서로 다르다. public 표는 readonly다. 이 subset 검증은 전체 RawBinding 승인·hash 계산이 아니다.
+
+`SlotEncoding(context, native_descriptor, payload)` 또는 `encode_owned(...)`는 descriptor의 bounded 소유 사본을 검사하고 compact sorted ASCII JSON·header·zero metadata slack·원 body를 합친 새 used-slot bytes를 만든다. encoder에는 아직 없는 FILLED 완료 시각이 필요하지 않으며 fake 완료를 생성하지 않는다. 실제 A는 copy/post 뒤 원 완료 시각으로 `FilledInfo`를 별도 생성해야 한다. payload[0]은 slot offset4096이다.
+
+`ExpectedSlot(context, original_filled_info)`는 원 full write key가 같은 FILLED를 고정한다. `PrefixHeader(header128bytes, context)` 또는 `prefix(...)`는 header만 검사해 `.used_length`를 반환한다. descriptor 길이1..3968, body 길이1..2093056, generation 양수 u64이고, prefix는 메모리 읽기 허가나 내용 검증이 아니다. `OwnedSlot(raw, expected, optional_prefix=None)` 또는 `decode_owned(...)`는 **동일 owned bytes의 header부터 다시** 검사한다. 정확4096+L 길이, 선택한 prefix 원128B, 원 FILLED의 length/descriptor SHA·원 received/bridge.after≤completed를 대조한다. 실제 lease/current·slot 선택·ready acquire와 안정된 copy는 caller의 별도 책임이다.
+
+세 결과 constructor도 helper와 같은 검사를 수행하고 unchecked/validated flag는 없다. 결과 `.raw`, `.header`, `.descriptor_bytes`, `.descriptor_sha256`, `.payload_length`는 frozen 값이다. `.descriptor()`는 새 mutable dict/list 사본, `.payload_bytes()`는 gap/tail 포함 사용 body의 새 bytes 사본이다. decoder는 입력된 immutable owned bytes를 참조하고 작은 header/descriptor 사본·bounded JSON tree만 만들며, encoder는 최대2MiB 새 bytes를 만든다. zero-copy SDK/SHM view를 지원하지 않는다. 호출 중 입력 tree의 동시변경이나 private/frozen 상태의 강제 변이는 지원하지 않는다.
+
+header는 `<8sHHI16sQ16s32sIII28s`, magic `XNVRAW1`+NUL/version1/128B/reserved0이다. 정수는 LE standard size, UUID는 RFC4122 `.bytes` 순서다. descriptor CRC/SHA는 slot `[128,128+D)` 원 bytes, payload CRC는 `[4096,4096+L)` 전체이며 `zlib.crc32(span,0)` unsigned32다. slack `[128+D,4096)`는0, 미사용 slot tail은 입력하지 않는다. header 전체를 덮는 CRC는 없고 descriptor SHA는 body를 덮지 않는다. body와 header payload CRC가 일관되게 바뀐 경우를 인증으로 검출하지 않는다.
+
+exact root6은 `version,profile,raw_binding_sha256,streams,planes,nn`이다. version1/profile `p0-yolop-320-v1`이며 각 stream stamp는 `source_key,sdk_us,received_j_us,bridge_sample,sdk_host_j_interval_us,exposure_us,capture_j_interval_us`다. source key는 `[등록 stream UUID,canonical u64 seq string,canonical u64 device_us string]`이다. SDK/J 시각도 u64string이며 서로 다른 clock domain의 숫자를 직접 정렬하지 않는다. bridge가 있으면 원 `{j_before_us,sdk_us,j_after_us}`에서 ±1us 양자화 여유를 포함한 SDK-host J interval을 재계산한다. Jbefore≤Jafter, 수신−Jafter는0..1000000us, 최종 endpoint는 u64다. bridge/파생 interval은 함께 null일 수 있고 capture interval은 null-only다. 노출값은 sensor별 실제 int0..1000000 또는null, NN은 null-only다. 이 구조가 sensor capture·freshness를 증명하지 않는다.
+
+각 plane exact6은 `offset,length,dtype,encoding,shape,strides_bytes`다. RGB는 NV12/u1/345600B/storage[540,640]/stride[640,1]이며 실제 영상640×360이다. depth는 RAW16_LE/<u2/614400B/[480,640]/stride[1280,2], native RIGHT Z mm·0unknown·RGB 미정렬이다. 선택 NN은 u1/NN_STORAGE/실제1..1048576B/[length]/[1]이다. plane offset은 slot-relative≥4096·64B 정렬·서로 비중첩이고 가장 늦은 plane 끝이 정확4096+L다. NN tensor offset은 NN storage-relative·even이며 plane 정렬과 다르다. 실제 arena 주소에는 외부 slot_base가 별도로 더해진다.
+
+NN configured=true여도 개별 `nn=null`은 정상이며 이때 NN plane/input/output stamp는 모두 없다. present NN은 exact `rgb_parent_key,input_key,output_key,layers`이고 실제 각 stamp key 및 RGB/input/output의 원 seq/device/SDK stamp가 일치해야 한다. 네 stream UUID는 독립이고 depth 순번·시각은 강제로 같게 하지 않는다. stream 간 수신 역전도 허용한다. NN SDK stamp를 추론 종료 시각이나 sensor capture로 바꾸지 않는다.
+
+layer는 실제 다차원 runtime det_out `[1,6300,6]`/order801/75600B와 drive_area_seg·lane_line_seg `[1,2,320,320]`/order17185/각409600B만 받는다. 각 exact7은 `name,data_type_code,order_code,dims,strides_bytes,offset,length`, FP16 code0·packed byte stride·고유3name·even/nonoverlap·실 storage 범위를 검사하며 원 배열 순서와 gap/tail을 보존한다. flat rank1은 이 codec에서 미지원이고 기존 NNPacket의 진단용 지원은 유지한다. 활성 FP16 finite 검사는 codec 밖의 기존 NNPacket/adapter 책임이다. CRC가 맞는 NaN의 형식 수락은 parser/NN_READY 성공이 아니다. `nn_output0`→기존 `nn_output` 이름 mapping과 NNPacket의 계측 clock도 이 API에 포함되지 않는다.
+
+native descriptor는 exact dict/list/str/int/None을 한 번 복사하며 container depth(root1)≤5·node512·string/key64 ASCII·intbits64·list4·dict8을 검사한다. scalar leaf depth6은 허용하고 비순환 alias는 출현별로 복사·계수하며 cycle은 거절한다. 이 bound는 descriptor에만 적용하며 context arena_name128이나 nn_configured bool과 혼동하지 않는다. decoder는 parse 전 raw3968B/depth5를 제한하고 tree/typed bound를 추가 적용한다. parse 할당량을512nodes라고 보장하는 것은 아니다. decoded nested duplicate/unknown·BOM·trailing 다른 JSON·float/nonfinite·bool-int·surrogate/비ASCII semantic을 거절한다. 허용 ASCII unicode escape와 내부/앞뒤 JSON whitespace는 원 Dspan/CRC/SHA에 포함하며 strip/re-encode로 교체하지 않는다.
+
+실제 RawBinding/센서·pixel equivalence·freshness·lease/메모리 발행·owner exit·METRIC_MAP 사전 metadata 전달·BIND/SLOT·15Hz/RSS·READY/주행 자격은 별도 계약이다. codec의 layout-only 결과를 이 권한으로 승격하지 않는다.
+
+## RawBinding 값과 정적 RAW BIND/ACK
+
+`runtime.raw_binding.RawBinding(fields)`는 카메라 세션의 exact13필드를 소유한 canonical 값으로 만든다. service_instance/acquisition_worker/pipeline_instance/capture_epoch/stream_instances/sdk_bridge_epoch/device_id/model_id/parser_id/graph_profile_sha256/calibration_bundle/format_table_sha256/clock_epoch만 허용하며 version을 추가하지 않는다. identity6개는 canonical UUID이고 서로 다른 named stream UUID만 유일해야 한다. `.canonical_bytes`/`.sha256`는 frozen 값, `.fields`는 독립 dict/stream map 사본이다. body hash는 canonical 내용에 적용하며 원 packet의 bytes hash와 다르다.
+
+초기 P0는 rgb_video/depth_right 필수, nn_input0/nn_output0 쌍 선택, jpeg 선택이다. IMU는 별도 profile이며 이 타입에서 미지원이다. NN 쌍이 있으면 model/parser SHA 모두 필요하고 없으면 둘 다 null이다. no-video는 JPEG encoder 제외이며 host RGB는 유지한다. 개별 bundle의 NN 결과 부재는 source binding의 NN 설정을 바꾸지 않는다. device_id는 case를 보존한 `[A-Za-z0-9_-]{1,64}`이고 자동 대소문자 변환이나 첫 장치 대체를 하지 않는다.
+
+model_id는 선택 compiled blob **원 bytes SHA256**이다. parser_id는 전처리·후처리·해석·필요 소스/상수·tensor/좌표 정책·실제 설정을 고정한 immutable parser manifest 원 bytes SHA다. graph/format/calibration도 각각 출판된 manifest 원 bytes SHA를 참조한다. 기존 ASSET_ID/PARSER_ID label, reference utils SHA, 단일 소스/config hash는 전체 parser release hash가 아니다. 현재 벤치의 경로/기록 budget 포함 profile hash를 운영 graph asset hash로 재사용하지 않는다. 이번 API는 없는 manifest를 생성하거나 S01의 과거 기록을 소급 변경하지 않는다.
+
+calibration_bundle은 전체 차량 보정 manifest SHA 또는null이다. null은 보정 참조 미제공이며 metric 자격이 없다. nonnull 문법도 파일 존재·실물·leaf·보정 승인을 증명하지 않는다. actual parser/graph/format/calibration asset 출판과 실물 검증은 caller의 별도 gate다.
+
+`RawBindingProfile(device_id, clock_epoch, model_id, parser_id, graph_profile_sha256, format_table_sha256, calibration_bundle, nn_enabled, jpeg_enabled)`는 body와 독립적으로 승인한 참조를 보유하는 frozen 값이다. `.stream_names`는 두 bool에서 유도한 tuple, `.refs`는 asset refs5개의 새 dict다. `.check(binding)`은 device/clock/refs/stream 선택을 exact 대조하고 성공 시None, 실패 시RawBindingError다. body에서 expected를 자동으로 추출하지 않는다.
+
+`runtime.raw_binding_messages.RawBindContext(peer, acquisition, profile)`는 기존 LifecyclePeer(A/M만)와 등록 A Endpoint를 구분한다. A 대상은 worker/channel 모두 A와 같고 M 대상은 각각 A와 달라야 한다. body service는 peer service, acquisition_worker는 언제나 등록 A worker다. M identity는 body hash에 넣지 않아 M-only restart에도 건강한 A의 raw hash를 유지할 수 있다. peer.release_sha256는 BIND wire에 없고 HELLO/실제 bootstrap 등록은 별도다.
+
+`RawBindMessage(packet, context, cap_us=None)`/`parse_raw_bind(...)`는 기존 b1 StructuralPacket의 S→등록 A/M RAW BIND를 검사한다. payload exact3은 binding_revision/binding_sha256/binding이다. outer/payload revision은 같은 positive canonical u64string, SHA는 canonical body SHA다. issued<expires, expires−issued≤5000000us이며 제공한 원 cap 이내여야 한다.
+
+`RawBindAck(packet, original_bind)`/`parse_raw_bind_ack(...)`는 원 BIND를 필수로 받아 해당 A/M→S의 exact5 payload(binding_revision/binding_sha256/accepted/state/reason)를 검사한다. peer/request/revision/hash가 같고 BIND.issued≤ACK.issued<ACK.expires≤BIND.expires다. 다른 sender의 순번이므로 ACK seq가 BIND보다 작아도 된다. accepted는 exactbool이며 true이면 active role state와 null reason, false이면 기존 role 진단 state와 UNSUPPORTED_PROFILE/ASSET_UNAVAILABLE/LOCAL_SETUP_FAILED 중 하나다. positive에서 A의 DRAINING/CLOSING/CLOSED/FAILED 계열과 M의 QUIESCING/STOPPED/FAILED는 제외한다. WAIT/WARMUP/RECOVERING의 형식 수락은 READY나 원 fence 해제가 아니다. 부정 진술도 건강한 A/source를 삭제하지 않는다.
+
+두 wrapper는 원 `.packet`과 `.raw`(packet.raw_bytes), immutable binding/context/원 ID·정수 시각·revision을 보유하며 `.fields`/`.payload`는 새 사본이다. constructor와 helper가 같은 검사를 수행하고 unchecked flag는 없다. RawBindingError(ValueError), RawBindMessageError(RawBindingError)로 오류를 구분한다. body는 exactdict13/streamdict5·container depth2·node64·ASCII string/key64·exactstr/None만 소유 복사하고 canonical2048B 이내로 만든다. scalar leaf depth3은 허용하며 bool/int/list/custom/subclass/cycle은 거절한다. 이 bound를 별도 Profile/Context나 전체 packet에 적용하지 않는다. outer는 기존 b1의 실제4096B/encoding/duplicate/구조 검사를 유지한다.
+
+이 API는 순수 정적 진술 검사다. IO·clock·UUID 생성·actual send/등록 상태/HWM/outbox/BindWatch를 실행하지 않는다. HELLO/현재 revision/first-send·수신 now/공통 sequence·staging/lease 예약·timeout·SLOT/실 공유 메모리·자산 검증·준비/metric 자격은 별도 actor 계약이다. negative ACK를 실제 BindWatch.ack 성공으로 기록하지 않는다.
+
+## 원 시각을 보존하는 정적 SLOT 6종
+
+`runtime.slot_messages`는 REQUEST/GRANT/FILLED/OFFER/ACQUIRE/ACQUIRED만 지원한다. PARSER_WARMUP·null publication의 정적 진술이며 RELEASE/REVOKE/METRIC_MAP/non-null publication은 UnsupportedSlotOperation으로 거절한다. 실제 registry·예약·순번·token·송수신·READY를 만들지 않는다.
+
+`SlotTimeLimits(copy_budget_us, offer_budget_us, read_budget_us)`는 caller가 명시 제공하는 positive u64의 frozen 값이며 read≤150000us다. copy/OFFER의 실제 숫자는 후속 pinned runtime profile이 정한다. 제품 API에는 암묵 예산 기본값이 없다. `WriterSlotContext(bind,scope)`는 A용 원 RawBindMessage와 등록 RawScope만 받고 M BIND를 기다리지 않는다. service/raw SHA/A worker·channel/name/size/role 원본을 보유한다. `ReaderSlotContext(writer,bind)`는 별도 M BIND의 canonical body/hash/RAW revision/service와 acquisition Endpoint 전체를 writer에 대조한다. `.reader`는 M peer에서 얻은 Endpoint다. BIND handshake5초는 안정 RawBinding의 상주 수명이 아니며 SLOT 시각을 그 전송 expiry에 제한하지 않는다. 현재성·fence는 실제 S registry가 소유한다.
+
+`SlotMessage(packet,context,parent=None,*,limits,cap_us=None)`와 `parse_slot_message(...)`는 같은 검사로 원 packet/raw, context/limits/parent, op/request_id/정수 issued_us·expires_us·상속 cap_us와 c1 `.record`를 보유한다. fields/payload는 새 사본이다. parent가 있으면 문맥/limits 전체값을 대조하고 결과에는 원 parent의 context/limits/record를 보존한다. 공개 constructor에 unchecked flag는 없다. SlotMessageError(ValueError)와 그 하위 UnsupportedSlotOperation을 사용한다.
+
+|op|필수 parent|원 ID·시각|c1 record|
+|---|---|---|---|
+|REQUEST|None|Qw/Iw/Ew|LeaseRequest|
+|GRANT|REQUEST|같은Qw/예약G/같은Ew|WriteGrant|
+|FILLED|GRANT|같은Qw/완료보고P/같은Ew|FilledInfo|
+|OFFER|None|독립Qo/원P/정확P+offer budget|Offer|
+|ACQUIRE|OFFER|새Qr/Ir/Er|ReadRequest|
+|ACQUIRED|ACQUIRE|같은Qr/예약Gr/같은Er|ReadLease|
+
+원 구간은 Iw≤G≤P<Ew, P≤Ir<Eo, Ir≤Gr<min(Er,Eo)다. copy/read 요청 폭은 각 원 예산 이내다. Qr는 아는 Qo와 달라야 한다. Qo와 Qw의 구별은 M이 Qw를 모르므로 S의 실제 생성 gate다. Eo 합산의 최종u64 초과는 거절하고 clamp/now 갱신을 하지 않는다. REQUEST/ACQUIRE만 optional exactu64 local cap_us를 c1 LeaseRequest에 보존한다. cap 자체는 wire에 없고 caller 독립 입력이며 다른4op에서 새 cap을 주어 바꿀 수 없다. 이미 끝난 COPY cap이나 BIND 전송 expiry를 OFFER/새 READ에 상속하지 않는다.
+
+payload는 항상 exact13(op/arena_id/slot/generation/write_token/read_token/producer/consumer/raw_binding_sha256/publication_binding_sha256/purpose/payload_length/descriptor_sha256)이다. unused는 missing이 아닌 null이다. REQUEST는 arena/raw/producer만 지정하고 key는 null, GRANT는 slot0/1·positive u64string generation·write UUID, FILLED는 여기에 body length1..2093056·descSHA를 결합한다. OFFER는 원 full writer key/length/SHA와 M consumer를 안내하되 read token/purpose는 null이다. ACQUIRE는 같은 content/M에 PARSER_WARMUP, ACQUIRED만 read UUID를 추가한다. publication은 모두 null이다. slot/length는 exactint이며 bool을 받지 않는다. 원 packet4096B 구조/encoding/duplicate 규칙은 기존 b1을 따른다.
+
+REQUEST/FILLED는 A→S, GRANT는 S→A, OFFER/ACQUIRED는 S→M, ACQUIRE는 M→S다. service/RAW revision/producer/raw SHA/arena와 채널을 등록값과 exact 대조한다. A writer channel을 M channel로 덮지 않으며 별도 S-worker UUID를 만들지 않는다. A/M BIND의 request/seq/발급시각은 달라도 같은 안정 body/hash/revision일 수 있다. M-only restart는 원 writer를 유지하고 새 M만 결합한다.
+
+M은 OFFER에서 P/full key/length/SHA 진술을 처음 받으므로 OFFER에 외부 FI parent를 요구하지 않는다. 실제 S가 원 ledger FI/READY/current M/no replacement pending을 송신 직전 확인해야 한다. 이 wrapper는 과거G·실copy/post를 증명하지 않는다. ACQUIRED의 FI는 원 ACQUIRE 안의 Offer에서만 상속한다. parent chain은 고정 op 전이의 유한 길이이고 과거 작업의 history를 재귀 연결하지 않는다.
+
+안내 Eo가 만료되기 전 Gr에 이미 예약한 read는 Er까지의 기록을 유지한다. Er>Eo도 정상이다. static wrapper는 수신 now를 받지 않는다. 실제 actor는 신규 ACQUIRE를 c1.acquire 전에 now<Eo로 검사하고, 뒤늦게 받은 ACQUIRED 때문에 기존 IN_USE/parent를 삭제하지 않는다. ACQUIRED 전송 포기·만료로 FREE를 만들지 않는다. 신규 FI의 늦은 최초 수신과 이미 수락한 exact duplicate도 실제 수신/원장이 구분한다.
+
+참조 비용은 원 packet≤4096B와 작은 frozen context/limits/c1 값·정해진 parent뿐이며 fields/payload 조회는 작은 사본을 만든다. SDK·clock·UUID 생성·파일·시스템 자원은 호출하지 않는다. 실제 fullsend/BindWatch/공통 RX·TX순번·staging/예약 부분 성공·token·guard/arena/worker·remotecleanup·METRIC pre-read metadata·현재 lease/READY/주행 권한은 후속 gate다. c1 투영이 존재한다는 이유로 실제 허가를 발급하지 않는다.
+
+## 원 ACQUIRED에 연결한 반환 정리
+
+`runtime.slot_cleanup.CleanupTimeLimits(transport_budget_us)`는 caller가 명시한 exact positive u64 전송 예산이다. 제품 기본값은 없다. `ReleaseMessage(packet,original_acquired,*,limits)`와 `parse_release_message(...)`는 exact 원 SlotMessage/ACQUIRED를 parent로 받아 RELEASE 하나만 검사한다. `.packet`/`.raw`는 원 bytes를 보존하고 `.parent`/`.context`는 원 객체 참조, `.limits`/`.request_id`/`.issued_us`/`.expires_us`/`.record`는 정적 값이다. fields/payload는 새 사본이다. 오류는 SlotCleanupError(ValueError)다.
+
+RELEASE payload는 원 ACQUIRED의 exact13 중 op만 RELEASE로 바뀐다. full writer/read key·producer/consumer·RAW hash·null publication·PARSER_WARMUP·length/descriptor SHA와 원 Qr를 유지한다. outer service/channel/revision/kind/domain도 원본과 같고 sender만 원 M worker다. 상대 sender의 ACQUIRED보다 sequence가 클 필요는 없다. 실제 채널 순번 수락은 별도다.
+
+issued=C는 M의 모든 view 종료와 writable post 뒤 최초 완료보고 **진술**이며 expires=C+transport budget exact다. 최종 u64 overflow는 거절한다. C≥원 read 예약시각이며 C>원 Er·cleanup E>원 read cap도 정리 형식으로 정상이다. 원 parent 안의 read cap은 그대로 보유하고 wire 사실로 만들지 않는다. S는 S가 보유한 parent/cap으로 해석하며 M의 native cap과 같다고 가정하지 않는다. wrapper에는 now/context/cap 갱신 인자가 없다.
+
+`runtime.raw_leases.RemoteReturnStatement(lease,completed_us)`는 원 exact ReadLease와 C를 보유하며 reserved≤C만 검사한다. local ViewReturnFact의 view-end/post 두 시각을 C/C로 만들지 않는다. `RawLeaseLedger.release_remote(statement,*,now_us)`는 C≤now를 duplicate/UNKNOWN보다 먼저 검사한다. 기존 `release(ViewReturnFact,*,now_us)`는 exact local 타입과 원 두 시각을 유지한다. 원 Er/fence/retired 뒤에도 정확한 반환 정리는 가능하며 새 읽기나 결과 채택 조건을 발급하지 않는다.
+
+slot당 마지막 `CleanupSummary(fact,opposite=None)` 하나를 보유한다. 반환의 primary는 local/remote 중 먼저 받은 원본이고 optional opposite는 반대 종류 하나만 허용한다. full ReadLease가 같아야 하며 두 사실이 있으면 local writable_posted≤remote C다. post=C는 허용한다. replacement에는 opposite를 붙이지 않는다. history는 최대2facts이며 현재 summary보다 더 오래된 반환은 UNKNOWN일 수 있다.
+
+현재 IN_USE의 첫 정확 반환은 APPLIED로 한 번 FREE가 된다. 첫 반대 종류 보충은 CLEANUP_CORROBORATED(value=None)로 cleanup metadata만 바뀐다. 이미 보유한 exact 재보고는 DUPLICATE_NO_EFFECT로 전체 snapshot이 같다. 같은 종류의 시각/원 lease 변경이나 full request/cap/purpose/pub/content 불일치는 거절한다. gen1의 늦은 보충이 gen2 WRITING/IN_USE/READY replacement pending의 현재 필드·fence를 바꾸지 않는다. acquire의 retained Qr 검사는 local/remote primary의 원 lease를 한 번만 사용한다.
+
+참조 비용은 원 packet≤4096B와 고정 길이 parent·작은 frozen record이며 사본 조회만 작은 tree를 복사한다. SDK view나 큰 frame bytes를 보유하지 않는다. 실제 RSS/주기는 별도 계측 대상이다. sender는 C/E/첫 sequence/raw를 유지하고 E 뒤 새 dispatch를 하지 않는다. 전송 만료·abandon이 실제 반환 사실이나 미확인 ownership을 지우지 않는다. receiver의 exact known/current 또는 미회수 old cleanup은 원 Er와 전송 E 뒤에도 bookkeeping만 가능하다. 실제 peer/registry·공통 sequence/staging·전송·token post/owner exit·STOPPED/REVOKE·SHM 회수는 이 API가 실행하거나 증명하지 않는다.
+
+## 자원 기록과 순수 guard 판정
+
+`runtime.resource_manifest.ResourceManifest(raw_bytes)`는≤8192B ASCII JSON을 읽는 immutable 값이다. `.raw_bytes/.raw_sha256`와 key/Owner 정렬·compact·LF1의 `.canonical_bytes/.canonical_sha256`를 구별한다. `.fields`는 독립 사본이다. `.ref`는 실제 raw SHA/revision/service/resource epoch/runtime을 보유하고 `.runtime/.owners/.cgroup/.resources/.intents/.recovery_episode`는 frozen record와 tuple이다. Native 정수는 exactint이며 wire u64는 canonical decimal string이다. 오류는 ManifestError(ValueError)다.
+
+root11/runtime7·owner≤9·resource12주소·미해결 creation1개를 검사한다. current/retired raw2·DB 물리 inventory≤4·sem 논리6이라는 상한이며 실제 DB segment 수/배치/할당은 이 값이 정하지 않는다. Resource의 KNOWN SHM size는 actual-known positiveu64 기록이고 DB 전체13,651,968B를 단일 arena나 raw2MiB로 강제하지 않는다. canonical kernel SHM 이름의 leading slash와 public SharedMemory name의 실제 mapping은 adapter 책임이다. native manifest tree container depth3/node512(키포함)/key32/semantic string192/list9/dict12/intbits64와 raw/canonical각8192B cap은 manifest에만 적용한다. JSON parser 할당 자체를512nodes라고 보장하는 것은 아니다.
+
+NOT_ATTEMPTED/name null/intent 없음은 불완전 inventory가 아니다. INTENT/UNKNOWN과 null-birth owner는 미완전이며 일반 constructor 실패로 무생성이라고 바꾸지 않는다. `.complete_inventory`는 이 정적 완전성만 뜻한다. CURRENT/RETIRED는 실제 생존 상태가 아니다. child/첫 tracker 가능 경로 전 null-birth 행의 durable ACK·원 intent 기록·실제 결과 기록은 별도 단계다. settled history를 늘리거나 occupied retired 기록을 덮어쓰는 API를 제공하지 않는다. episode는 원 ID와0..5 카운터를 보존하며 `service_attempts`는 초기 group을 포함한 모든 회복 group의 전역 누적이다. 증가·건강 판정·reset은 수행하지 않는다.
+
+`runtime.resource_guard`의 LoadOutcome은 VALID/MISSING/CORRUPT/IO_ERROR를 구별한다. CurrentGuardScope와 OwnerObservation/CgroupObservation/NameObservation, LiveIntentStatement/RuntimeResetStatement/FirstInstallStatement는 원 ref·정확 대상·현재 guard에 결박된 lower 진술이다. record는 frozen이고 집합은 exacttuple이며 cgroup members≤16은 manifest list9와 별도다. 실제 PID/cgroup/name/boot/reset/install을 여기서 조회하거나 검증하지 않는다. UUID/SHA는 실제 proof를 암호학적으로 증명하지 않는다.
+
+`GuardDecision(load,guard,evidence)`와 `evaluate_guard(...)`는 같은 검증으로 kind/reason·원 load/guard/evidence·원 valid predecessor/episode를 보유한다. kind나 unchecked flag를 입력받지 않는다. 구조/타입 오류는 GuardInputError(ValueError), 구조가 맞는 다른 ref/대상·누락·중복·모순은 BLOCKED다. 제공된 진술은 모든 분기에서 결박을 대조하고 실제 필요한 집합은 분기별로 구별한다.
+
+OLD_CLEAN_ELIGIBLE은 같은 full runtime·complete inventory·모든 known owner EXITED·현재 guard birth 외 cgroup 잔존 없음·모든 known name ABSENT를 요구한다. 자기 birth의 EXITED 주장은 거절한다. FRESH_RESET_ELIGIBLE은 old/current boot 불일치와 전용 reset 진술을 요구하며 old incomplete 원본·episode를 보존한다. FIRST_INSTALL_ELIGIBLE은 원 MISSING load_id와 설치 진술·명시 genesis에만 해당한다. CORRUPT/IO_ERROR는 자동 BLOCKED다. LIVE_INTENT_PENDING은 현재 같은 S의 명시 ALIVE/ref/birth/guard nonce와 원 DIRTY/target INTENT에만 해당하는 정보이며 UNKNOWN은 같은 S라도 BLOCKED다. LIVE도 일반 constructor 허가가 아니다.
+
+파일 load/lock/CAS/fsync/S-log ACK·실제 관측/설치 근거 소비·SHM/고정6token/worker/서비스 기동·회복/종료·READY/주행 판단 조건은 별도 gate다. d1은 시계·UUID 생성·명시 파일/시스템 자원 호출을 하지 않고 canonical≤8KiB와 작은 frozen 값/진술만 보유한다. 조회 사본 비용·실제 RSS/주기·native 반환시간은 별도 계측 대상이다.
+
+## 자원 기록의 Linux 동기 저장
+
+`runtime.resource_store.ResourceStore(directory)`는 기존 보호 디렉터리의 `resource-set.json`을 읽고 별도 `resource-set.lock` 아래 교체하는 단일 writer다. Linux 전용이며 directory는 same-euid/group-other write 금지, file은 same-euid/regular/nlink1/exact0600을 요구한다. 상위 경로 신뢰는 호출자 전제다. context manager 또는 명시적 `close()`로 닫고, 취득한 process/thread에서만 사용한다. fork/fd 양도·복제·재진입은 지원하지 않는다. lock 파일은 삭제하거나 교체하지 않는다.
+
+`load()`의 immutable StoreLoad는 원 LoadOutcome과 실제 lock nonce를 보유한다. 같은 fd의 누적8193B 읽기로8KiB 초과를 구분하고 원 raw/ref를 보존한다. manifest leaf ENOENT만 MISSING이며 손상/빈 body는 CORRUPT, 안전한 원본을 얻지 못하면 IO_ERROR다. directory/lock 오류는 StoreError이며 최초 설치 근거가 아니다. 실제 파일 I/O/fsync의 시간 상한은 보장하지 않는다.
+
+`propose(receipt,manifest,request_id)`는 최신 실제 receipt에서 원 제안을 한 건 만든다. StoreProposal의 출처 raw SHA와 실제 저장할 canonical bytes/target ref를 구분한다. 외부 synthetic receipt·새 no-op·다른 pending 제안은 StoreUsageError다. revision/epoch/episode/request ID/임무 기한을 store가 발급하거나 증가시키지 않는다.
+
+`publish(proposal)`와 `reconcile(proposal)`은 원 객체만 받는다. 원 raw CAS 뒤 temp 전체 write/file fsync→replace→directory fsync를 완료하면 DURABLE과 StoreAck를 반환한다. CAS_MISMATCH/UNCONFIRMED에는 ACK가 없다. ACK의 REPLACED와 원 replace 진입 뒤 실제 target 재동기화의 RECONFIRMED를 구분하며, target read-back만으로 ACK하지 않는다. 같은 완료 proposal의 cached ACK 재반환은 원 사실의 반복이며 새 완료나 현재 파일 보증이 아니다. 완료 뒤 다음 제안은 fresh load와 다른 request가 필요하다.
+
+열기/guard 오류는 StoreError(RuntimeError), 경쟁 lock은 StoreBusyError(StoreError), 타입·수명·재진입·원 receipt/proposal 오용은 StoreUsageError(ValueError)다. 이 synchronous adapter는 운영 S-main/CLI/doctor/replay에 연결하지 않는다. 실제 OS owner/name/reset/install proof·S-log 비동기 ACK 수락·자원 생성과 주행 판단 조건은 별도 책임이다.
+
+## 실제 runtime과 known owner 관측
+
+`runtime.process_observation.ProcessObserver(store, service_instance)`는 살아 있는 exact ResourceStore를 빌려 고정 Linux `/proc`·`/dev/shm`을 동기로 관측한다. 생성자는 파일 I/O를 하지 않으며 service_instance는 시작 때 정한 canonical UUID다. 같은 실제 PID·Thread에서만 비재진입 사용하고 fork/복제/양도를 거절한다. borrowed store는 닫지 않는다.
+
+`observe()`의 frozen ObservationBatch는 원 `original_load` L1과 마지막 실제 `latest_load` L2, 실제 nonce에 연결한 `guard`, 원 known owner 전체의 `owners`, monotonic_ns의 `started_ns/completed_ns`를 보유한다. VALID는 두 원 raw/ref가 같고 MISSING은 두 실제 조회가 모두 MISSING이어야 한다. L1/L2는 서로 다른 원 조회이며 후속 propose에는 최신 실제 L2를 사용한다. pending/null birth와 원 incomplete 상태는 보충하지 않는다.
+
+고정 profile은 actual root FD의 fstat·fdinfo mnt_id·정확 mountinfo 행, namespace FD·boot·self birth의 전후 일치, native PID와 같은 Pid/Tgid 및 단일 NSpid/NStgid, hidepid 누락/명시0, 실제 tmpfs backing이다. kernel magic namespace link는 의도적으로 따라가고 일반 proc data에는 NOFOLLOW를 쓴다. 상위 경로·kernel 및 협력 실행을 신뢰하며 privileged 비협력 mount 변경을 제압하는 보안 경계는 아니다.
+
+`runtime.procfs_formats`는 위 관측과 분리한 bounded bytes parser다. stat52필드의 opaque comm은 고정 Linux4.9 profile에서 최대15 raw bytes·내부NUL 없음이며 빈 값·개행·괄호·비UTF8은 허용한다. 그 뒤 suffix에서 원 start_ticks(u64 clock ticks)를 읽는다. stat4096B는 누적 I/O의 상한이며 그 길이의 raw가 유효한 schema라는 뜻은 아니다. boot64B·fdinfo8192B·status65536B·mountinfo1MiB/4096행/행65536B 상한을 검사하고 mount 경로 escape는 tokenization 뒤 한 번만 해제한다. proc st_size0을 빈 body로 보지 않는다.
+
+같은 boot/PID-view에서 같은 원 PID/start_ticks는 Z/X도 ALIVE이며 종료·회수가 확인되지 않았다는 뜻이다. 처음 numeric PID directory open의 ENOENT 또는 온전한 같은PID/다른start_ticks만 원 birth의 EXITED다. 이미 연 directory의 도중 소멸·권한·형식 실패는 UNKNOWN을 빠뜨리지 않고 반환한다. 다른 boot/PID namespace도 UNKNOWN이다. ALIVE는 건강·READY나 다음 순간의 생존을 보장하지 않는다.
+
+타입·PID/Thread·재진입 오용은 ObservationUsageError(ValueError), source/runtime/store 수명·지원 profile·owned FD 반환 불명은 ObservationUnavailable(RuntimeError)다. 관측 FD는 호출 안에서 한 번만 닫고 반납 실패에는 사용 가능한 묶음을 반환하지 않는다. 공개 값의 구조 검사는 실제 OS 출처 증명이 아니다. cgroup COMPLETE·이름 probe·설치/reset 근거·새 기한·정리/생성 허가·S-main 연결은 생산하지 않으며 동기 I/O의 반환시간 상한을 보장하지 않는다.
+
+## 정확한 Linux 자원 이름 관측
+
+`runtime.resource_name_observation.ResourceNameObserver(store, service_instance)`는 같은 borrowed ResourceStore와 startup UUID의 public ProcessObserver 하나를 보유한다. 생성자는 파일 I/O를 하지 않는다. 같은 실제 PID·Thread의 비재진입 호출만 허용하고 producer의 copy/deepcopy/pickle/fork 양도를 거절한다. `observe()`는 원 B0를 얻고 자기 proc/root/namespace FD로 중간 backing을 결박한 뒤, 그 FD를 모두 한 번 반환하고 원 B1을 얻는다. borrowed store를 닫거나 새 guard로 재시도하지 않는다.
+
+frozen `NameObservationBatch(before, after, names)`는 두 원 ObservationBatch와 B0의 원 known_resources 순서대로 된 NameObservation tuple(≤12)을 보유한다. `.original_load/.guard/.started_ns`는 before의 원 객체/값, `.latest_load/.completed_ns`는 after의 원 객체/값이다. 네 실제 load는 모두 VALID·서로 다른 load ID·같은 원 raw/ref/nonce이며 두 guard 값 전체가 같고 B0.completed_ns≤B1.started_ns여야 한다. B1 뒤 추가 load가 없으므로 후속 propose에 `.latest_load` 원 객체를 사용한다. 두 owner outcome은 ALIVE→EXITED처럼 달라도 된다. 결과 생성자의 검사는 순수 값 관계이며 OS proof나 실제 관측 출처를 인증하지 않는다.
+
+중간 FD는 d2b1의 고정 Linux profile과 같은 caps/public parser로 실제 root dev/inode·fdinfo mnt_id·정확 mountinfo 행·namespace/boot/current birth를 시작/끝에 확인한다. 현재 named root를 다시 연 FD의 mount ID도 대조한다. 원 full runtime이 current와 다르면 모든 원 known target은 UNKNOWN이고 leaf lookup은0회지만 중간 현재 profile은 확인한다. VALID+KNOWN0은 원 partial 상태를 유지한 빈 tuple이 가능하며 MISSING/CORRUPT/IO_ERROR는 전체 unavailable이다.
+
+같은 runtime의 SHM leaf는 name[1:], semaphore leaf는 `sem.`+name[1:]다. 정확 leaf에 `os.stat(..., dir_fd=held_root, follow_symlinks=False)` 한 번만 수행한다. 실제 errno ENOENT만 ABSENT, regular는 size/mode/nlink가 달라도 PRESENT, symlink·directory·FIFO 등 다른 type이나 leaf 오류는 UNKNOWN이다. leaf open·payload read·생성·mmap·unlink·token 조작·tracker 등록·전역 scan은 없다. 입력·소유 수명·순수 값 오용은 NameObservationUsageError(ValueError), source/profile/store/owned FD 반환 불명은 NameObservationUnavailable(RuntimeError)다. 개별 UNKNOWN을 원 tuple에서 누락하지 않는다.
+
+이 결과는 현재 Linux backing entry의 관측이며 generic POSIX ABI·creator 인증·남은 mapping/참조의 소멸·완전 inventory나 CLEAN/생성/READY 권한이 아니다. 실제 creator/backing과 owner/cgroup/tracker 장벽을 닫기 전 운영 guard 소비는 미완료다. 동기 I/O의 반환시간 상한을 보장하지 않고 S-main·프레임 loop에 연결하지 않는다.
+
 ## 테스트
 
-`vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
+실행 검증의 기준은 Jetson의 앱 전용 Python이다. PC에서는 편집·구문 검사를 수행하며 WSL에서 같은 시험을 반복할 필요는 없다. 다음은 `vehicle/Jetson`에서 실행하는 표준 라이브러리 테스트다. `tests/hardware`는 실제 장치·보존 state를 사용하는 명시 시험이므로 기본 discovery에 포함하지 않는다.
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests/unit -v
