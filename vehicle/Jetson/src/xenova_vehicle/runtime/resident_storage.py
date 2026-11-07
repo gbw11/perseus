@@ -1,8 +1,7 @@
 """D 단독 SQLite owner의 discovery/binding과 정상 종료를 연결한다.
 
-현재 local schema1은 bootstrap metadata와 빈 checkpoint 표를 지원한다. 실제
-checkpoint payload/복원·range 예약은 아직 처리하지 않는다. 알 수 없는 DB나
-checkpoint가 있는 DB를 빈 새 지도로 바꾸지 않는다. SQLite는 D backend를 열 때만
+schema1의 additive persistence profile로 실제 checkpoint/proof·range를 보존한다.
+알 수 없는 DB나 손상 checkpoint를 빈 새 지도로 바꾸지 않는다. SQLite는 D backend를 열 때만
 import하며 S는 작은 profile·원 discovery 결과의 의미 검사만 재사용한다.
 """
 
@@ -110,8 +109,8 @@ class StorageRecovery:
 
     def __init__(self, previous_profile, previous_bootstrap_body):
         body = _bootstrap_body(previous_bootstrap_body, previous_profile)
-        if body['status'] != 'EMPTY':
-            raise StorageProtocolError('D recovery currently requires an admitted EMPTY bootstrap')
+        if body['status'] not in ('EMPTY','COMPLETE'):
+            raise StorageProtocolError('D recovery requires an admitted actual bootstrap')
         object.__setattr__(self, 'previous_profile', previous_profile)
         object.__setattr__(self, 'original_body', _canonical(body))
 
@@ -203,15 +202,27 @@ def _bootstrap_body(body, profile):
         raise StorageProtocolError('unknown bootstrap status')
     if len(_canonical(body)) > 2048:
         raise StorageProtocolError('bootstrap body exceeds 2048 bytes')
-    if body['status'] == 'EMPTY':
+    if body['status'] in ('EMPTY','COMPLETE'):
         _uuid(body['database_uuid'])
         _highwater(body['allocator_highwater'])
         if (type(body['schema_version']) is not int or body['schema_version'] != 1
-                or not body['allocator_ready'] or body['selected_checkpoint'] is not None):
+                or not body['allocator_ready']):
             raise StorageProtocolError('EMPTY needs actual schema/allocator and no selected checkpoint')
-    elif body['status'] == 'COMPLETE':
-        # 실제 checkpoint payload/closure 검증이 연결되기 전에는 수락 범위를 넓히지 않는다.
-        raise StorageProtocolError('checkpoint bootstrap is not implemented by this runtime profile')
+        if body['status']=='EMPTY':
+            if body['selected_checkpoint'] is not None:raise StorageProtocolError('EMPTY cannot contain a checkpoint')
+        else:
+            reference=body['selected_checkpoint']
+            _keys(reference,'checkpoint_job_id durable_revision manifest_sha256 manifest_length tile_count map_epoch frame_epoch odom_epoch pi_host_boot configuration calibration primitive_sha256 origin_mapper_instance')
+            for name in ('checkpoint_job_id','map_epoch','frame_epoch','odom_epoch','pi_host_boot','origin_mapper_instance'):_uuid(reference[name])
+            _highwater(reference['durable_revision'])
+            for name in ('manifest_sha256','primitive_sha256'):
+                value=reference[name]
+                if type(value) is not str or len(value)!=64 or any(c not in '0123456789abcdef' for c in value):raise StorageProtocolError('checkpoint SHA256')
+            for name in ('configuration','calibration'):
+                value=reference[name]
+                if type(value) is not str or not 1<=len(value)<=64 or any(not 33<=ord(c)<=126 for c in value):raise StorageProtocolError('checkpoint bounded identity')
+            if (type(reference['manifest_length']) is not int or not 0<reference['manifest_length']<=16384
+                    or type(reference['tile_count']) is not int or not 0<=reference['tile_count']<=128):raise StorageProtocolError('checkpoint payload bounds')
     elif (any(body[key] is not None for key in ('database_uuid', 'schema_version', 'allocator_highwater', 'selected_checkpoint'))
           or body['allocator_ready']):
         raise StorageProtocolError('failed discovery cannot supply successful metadata')
@@ -231,8 +242,10 @@ def parse_bootstrap_result(packet, peer, profile, original_discover, *, now_us, 
     body = _bootstrap_body(fields['payload']['body'], profile)
     if body['discovery_nonce'] != original['discovery_nonce']:
         raise StorageProtocolError('bootstrap nonce differs from original discovery')
-    if recovery is not None and body['status'] == 'EMPTY':
+    if recovery is not None and body['status'] in ('EMPTY','COMPLETE'):
         recovery.check_metadata(body)
+        if json.loads(recovery.original_body)['status']=='COMPLETE' and body['status']!='COMPLETE':
+            raise StorageProtocolError('recovery lost previously admitted complete checkpoint')
     return body
 
 
@@ -240,7 +253,7 @@ def storage_binding(peer, profile, bootstrap_body):
     if type(peer) is not LifecyclePeer or peer.role != 'D':
         raise StorageProtocolError('storage binding requires the registered D')
     body = _bootstrap_body(bootstrap_body, profile)
-    if body['status'] != 'EMPTY':
+    if body['status'] not in ('EMPTY','COMPLETE'):
         raise StorageProtocolError('storage binding requires an admitted actual bootstrap')
     return dict(service_instance=peer.service_instance, storage_worker=peer.worker_instance,
                 storage_profile_sha256=profile.sha256, database_uuid=body['database_uuid'], db_schema_version=body['schema_version'])
@@ -390,14 +403,16 @@ class _Database:
             raise
 
     def _validate(self):
+        from ..storage.repository import PersistenceStore
+        from ..storage.contracts import PersistenceCorrupt,PersistenceError,PersistenceUnknown
         connection = self.connection
         if (connection.execute('PRAGMA application_id').fetchone() != (_APPLICATION_ID,)
                 or connection.execute('PRAGMA user_version').fetchone() != (1,)
                 or connection.execute('PRAGMA journal_mode').fetchone() != ('delete',)):
             raise StorageIncompatible('unsupported SQLite format/schema/journal mode')
-        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
-        if tables != {'storage_metadata', 'checkpoints'}:
-            raise StorageIncompatible('unsupported local schema tables')
+        sizes=connection.execute('SELECT length(format_tag),length(database_uuid),length(allocator_highwater) FROM storage_metadata LIMIT 2').fetchall()
+        if len(sizes)!=1 or any(value is None or not 0<value<=cap for value,cap in zip(sizes[0],(64,36,20))):
+            raise StorageIncompatible('invalid bootstrap metadata size')
         metadata = list(connection.execute('SELECT singleton,format_tag,database_uuid,schema_version,allocator_highwater FROM storage_metadata'))
         if len(metadata) != 1 or metadata[0][:2] != (1, _FORMAT) or metadata[0][3] != 1:
             raise StorageIncompatible('invalid singleton DB metadata')
@@ -406,10 +421,12 @@ class _Database:
             _highwater(metadata[0][4])
         except (ValueError, TypeError) as error:
             raise StorageIncompatible('invalid DB UUID or durable highwater') from error
-        if connection.execute('SELECT COUNT(*) FROM checkpoints').fetchone() != (0,):
-            raise StorageIncompatible('checkpoint restore is not implemented; existing records are preserved')
-        if connection.execute('PRAGMA quick_check(1)').fetchone() != ('ok',):
-            raise StorageIncompatible('SQLite integrity check failed')
+        connection.execute('PRAGMA synchronous=FULL')
+        try:
+            self.persistence=PersistenceStore(connection,metadata[0][2],expires_us=self.expires_us)
+            self.selected_checkpoint=self.persistence.latest_complete(expires_us=self.expires_us)
+        except (PersistenceCorrupt,PersistenceError) as error:raise StorageIncompatible(str(error)) from error
+        except PersistenceUnknown as error:raise StorageUnknown(str(error)) from error
         return dict(database_uuid=metadata[0][2], schema_version=1, allocator_highwater=metadata[0][4])
 
     def close(self):
@@ -446,7 +463,7 @@ def storage_main(endpoint, boot):
         raise ValueError('expected immutable storage boot configuration')
     link = ResidentLink(endpoint, boot.peer, 'D', track_sent=True)
     receiver = LifecycleReceiver(boot.peer, 'D')
-    database = None
+    database = jobs = None
     state, stop, failure = 'IDLE', None, None
     original_discover = original_bind = cached_body = None
     pending = []
@@ -494,7 +511,8 @@ def storage_main(endpoint, boot):
             link.flush()
             link.take_sent()
             while pending:
-                if pending[0]['kind'] != 'STOPPED' and j_us() >= pending[0]['expires_us']:
+                cleanup = pending[0]['kind'] == 'STOPPED' or pending[0]['kind'] == 'SLOT' and pending[0]['payload'].get('op') == 'RELEASE'
+                if not cleanup and j_us() >= pending[0]['expires_us']:
                     raise StorageProtocolError('original staged storage reply expired')
                 if link.send(**pending[0]) is None:
                     break
@@ -505,6 +523,31 @@ def storage_main(endpoint, boot):
                     stop = receiver.receive(packet, now_us=j_us()).message
                     state = 'QUIESCING'
                     break
+                if packet.kind == 'DB_JOB' and fields['binding_revision'] != '0':
+                    if jobs is None:
+                        raise StorageProtocolError('DB work requires the actual accepted StorageBinding')
+                    for draft in jobs.handle_db(packet):
+                        send(**draft)
+                    state = jobs.state
+                    progress_sequence += 1
+                    progress_us = j_us()
+                    continue
+                if packet.kind == 'SLOT':
+                    if jobs is None:
+                        raise StorageProtocolError('DB_COPY requires the actual accepted StorageBinding')
+                    for draft in jobs.handle_slot(packet):
+                        send(**draft)
+                    state = jobs.state
+                    progress_sequence += 1
+                    progress_us = j_us()
+                    continue
+                if packet.kind == 'BIND' and fields['binding_domain'] == 'PUBLICATION':
+                    if jobs is None:
+                        raise StorageProtocolError('publication requires the actual accepted StorageBinding')
+                    for draft in jobs.bind_publication(packet):
+                        send(**draft)
+                    state = jobs.state
+                    continue
                 if packet.kind == 'DB_JOB':
                     body = parse_discover(packet, boot.peer, boot.storage_profile, now_us=j_us())
                     if original_discover is not None:
@@ -521,6 +564,8 @@ def storage_main(endpoint, boot):
                             database = _Database(boot.storage_profile, int(fields['expires_j_us']), boot.recovery)
                             report['sqlite_version'] = database.sqlite_version
                             report['database_created'] = database.created
+                            if database.selected_checkpoint is not None:
+                                status = 'COMPLETE'
                         except FileNotFoundError as error:
                             status = 'INCOMPATIBLE' if boot.recovery is not None else 'FAILED'
                             report['error'] = type(error).__name__ + ': ' + str(error)
@@ -540,9 +585,9 @@ def storage_main(endpoint, boot):
                         cached_body = dict(discovery_nonce=body['discovery_nonce'], storage_profile_sha256=boot.storage_profile.sha256,
                             status=status, database_uuid=None, schema_version=None, allocator_highwater=None,
                             allocator_ready=False, selected_checkpoint=None)
-                        if status == 'EMPTY':
-                            cached_body.update(database.metadata, allocator_ready=True)
-                        state = 'IDLE' if status == 'EMPTY' else 'FAILED'
+                        if status in ('EMPTY', 'COMPLETE'):
+                            cached_body.update(database.metadata, allocator_ready=True, selected_checkpoint=database.selected_checkpoint)
+                        state = 'IDLE' if status in ('EMPTY', 'COMPLETE') else 'FAILED'
                         progress_sequence += 1
                         progress_us = completed
                     _bootstrap_body(cached_body, boot.storage_profile)
@@ -558,6 +603,8 @@ def storage_main(endpoint, boot):
                     if fields['payload'] != expected or original_bind is not None:
                         raise StorageProtocolError('storage BIND differs from actual discovery or was already accepted')
                     original_bind = packet
+                    from .storage_jobs import StorageJobs
+                    jobs = StorageJobs(boot.peer, expected['binding'], database, boot.copy_handles)
                     report['bound'] = True
                     ack = send('BIND_ACK', dict(binding_revision='1', binding_sha256=expected['binding_sha256'],
                                accepted=True, state='IDLE', reason=None), domain='STORAGE', revision=1,
@@ -567,6 +614,9 @@ def storage_main(endpoint, boot):
                 else:
                     raise StorageProtocolError('unsupported D control kind')
             now = j_us()
+            if jobs is not None:
+                jobs.expire_unstarted()
+                state = jobs.state
             if stop is None and now - last_heartbeat >= 200_000:
                 send('HEARTBEAT', dict(worker_state=state,
                      last_progress_sequence=None if progress_us is None else str(progress_sequence),
@@ -580,6 +630,14 @@ def storage_main(endpoint, boot):
         failure = error
         report['error'] = type(error).__name__ + ': ' + str(error)
     finally:
+        if jobs is not None:
+            report['copy_leases_acquired'] = jobs.copy_count
+            report['persistence_jobs_completed'] = jobs.completed
+            try:
+                jobs.close()
+            except BaseException as error:
+                failure = failure or error
+                report['error'] = type(error).__name__ + ': ' + str(error)
         if database is not None:
             try:
                 database.close()
