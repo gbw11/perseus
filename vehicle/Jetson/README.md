@@ -429,6 +429,35 @@ calibration_bundle은 전체 차량 보정 manifest SHA 또는null이다. null�
 
 이 API는 순수 정적 진술 검사다. IO·clock·UUID 생성·actual send/등록 상태/HWM/outbox/BindWatch를 실행하지 않는다. HELLO/현재 revision/first-send·수신 now/공통 sequence·staging/lease 예약·timeout·SLOT/실 공유 메모리·자산 검증·준비/metric 자격은 별도 actor 계약이다. negative ACK를 실제 BindWatch.ack 성공으로 기록하지 않는다.
 
+## 원 시각을 보존하는 정적 SLOT 6종
+
+`runtime.slot_messages`는 REQUEST/GRANT/FILLED/OFFER/ACQUIRE/ACQUIRED만 지원한다. PARSER_WARMUP·null publication의 정적 진술이며 RELEASE/REVOKE/METRIC_MAP/non-null publication은 UnsupportedSlotOperation으로 거절한다. 실제 registry·예약·순번·token·송수신·READY를 만들지 않는다.
+
+`SlotTimeLimits(copy_budget_us, offer_budget_us, read_budget_us)`는 caller가 명시 제공하는 positive u64의 frozen 값이며 read≤150000us다. copy/OFFER의 실제 숫자는 후속 pinned runtime profile이 정한다. 제품 API에는 암묵 예산 기본값이 없다. `WriterSlotContext(bind,scope)`는 A용 원 RawBindMessage와 등록 RawScope만 받고 M BIND를 기다리지 않는다. service/raw SHA/A worker·channel/name/size/role 원본을 보유한다. `ReaderSlotContext(writer,bind)`는 별도 M BIND의 canonical body/hash/RAW revision/service와 acquisition Endpoint 전체를 writer에 대조한다. `.reader`는 M peer에서 얻은 Endpoint다. BIND handshake5초는 안정 RawBinding의 상주 수명이 아니며 SLOT 시각을 그 전송 expiry에 제한하지 않는다. 현재성·fence는 실제 S registry가 소유한다.
+
+`SlotMessage(packet,context,parent=None,*,limits,cap_us=None)`와 `parse_slot_message(...)`는 같은 검사로 원 packet/raw, context/limits/parent, op/request_id/정수 issued_us·expires_us·상속 cap_us와 c1 `.record`를 보유한다. fields/payload는 새 사본이다. parent가 있으면 문맥/limits 전체값을 대조하고 결과에는 원 parent의 context/limits/record를 보존한다. 공개 constructor에 unchecked flag는 없다. SlotMessageError(ValueError)와 그 하위 UnsupportedSlotOperation을 사용한다.
+
+|op|필수 parent|원 ID·시각|c1 record|
+|---|---|---|---|
+|REQUEST|None|Qw/Iw/Ew|LeaseRequest|
+|GRANT|REQUEST|같은Qw/예약G/같은Ew|WriteGrant|
+|FILLED|GRANT|같은Qw/완료보고P/같은Ew|FilledInfo|
+|OFFER|None|독립Qo/원P/정확P+offer budget|Offer|
+|ACQUIRE|OFFER|새Qr/Ir/Er|ReadRequest|
+|ACQUIRED|ACQUIRE|같은Qr/예약Gr/같은Er|ReadLease|
+
+원 구간은 Iw≤G≤P<Ew, P≤Ir<Eo, Ir≤Gr<min(Er,Eo)다. copy/read 요청 폭은 각 원 예산 이내다. Qr는 아는 Qo와 달라야 한다. Qo와 Qw의 구별은 M이 Qw를 모르므로 S의 실제 생성 gate다. Eo 합산의 최종u64 초과는 거절하고 clamp/now 갱신을 하지 않는다. REQUEST/ACQUIRE만 optional exactu64 local cap_us를 c1 LeaseRequest에 보존한다. cap 자체는 wire에 없고 caller 독립 입력이며 다른4op에서 새 cap을 주어 바꿀 수 없다. 이미 끝난 COPY cap이나 BIND 전송 expiry를 OFFER/새 READ에 상속하지 않는다.
+
+payload는 항상 exact13(op/arena_id/slot/generation/write_token/read_token/producer/consumer/raw_binding_sha256/publication_binding_sha256/purpose/payload_length/descriptor_sha256)이다. unused는 missing이 아닌 null이다. REQUEST는 arena/raw/producer만 지정하고 key는 null, GRANT는 slot0/1·positive u64string generation·write UUID, FILLED는 여기에 body length1..2093056·descSHA를 결합한다. OFFER는 원 full writer key/length/SHA와 M consumer를 안내하되 read token/purpose는 null이다. ACQUIRE는 같은 content/M에 PARSER_WARMUP, ACQUIRED만 read UUID를 추가한다. publication은 모두 null이다. slot/length는 exactint이며 bool을 받지 않는다. 원 packet4096B 구조/encoding/duplicate 규칙은 기존 b1을 따른다.
+
+REQUEST/FILLED는 A→S, GRANT는 S→A, OFFER/ACQUIRED는 S→M, ACQUIRE는 M→S다. service/RAW revision/producer/raw SHA/arena와 채널을 등록값과 exact 대조한다. A writer channel을 M channel로 덮지 않으며 별도 S-worker UUID를 만들지 않는다. A/M BIND의 request/seq/발급시각은 달라도 같은 안정 body/hash/revision일 수 있다. M-only restart는 원 writer를 유지하고 새 M만 결합한다.
+
+M은 OFFER에서 P/full key/length/SHA 진술을 처음 받으므로 OFFER에 외부 FI parent를 요구하지 않는다. 실제 S가 원 ledger FI/READY/current M/no replacement pending을 송신 직전 확인해야 한다. 이 wrapper는 과거G·실copy/post를 증명하지 않는다. ACQUIRED의 FI는 원 ACQUIRE 안의 Offer에서만 상속한다. parent chain은 고정 op 전이의 유한 길이이고 과거 작업의 history를 재귀 연결하지 않는다.
+
+안내 Eo가 만료되기 전 Gr에 이미 예약한 read는 Er까지의 기록을 유지한다. Er>Eo도 정상이다. static wrapper는 수신 now를 받지 않는다. 실제 actor는 신규 ACQUIRE를 c1.acquire 전에 now<Eo로 검사하고, 뒤늦게 받은 ACQUIRED 때문에 기존 IN_USE/parent를 삭제하지 않는다. ACQUIRED 전송 포기·만료로 FREE를 만들지 않는다. 신규 FI의 늦은 최초 수신과 이미 수락한 exact duplicate도 실제 수신/원장이 구분한다.
+
+참조 비용은 원 packet≤4096B와 작은 frozen context/limits/c1 값·정해진 parent뿐이며 fields/payload 조회는 작은 사본을 만든다. SDK·clock·UUID 생성·파일·시스템 자원은 호출하지 않는다. 실제 fullsend/BindWatch/공통 RX·TX순번·staging/예약 부분 성공·token·guard/arena/worker·remotecleanup·METRIC pre-read metadata·현재 lease/READY/주행 권한은 후속 gate다. c1 투영이 존재한다는 이유로 실제 허가를 발급하지 않는다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
