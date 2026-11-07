@@ -407,6 +407,28 @@ native descriptor는 exact dict/list/str/int/None을 한 번 복사하며 contai
 
 실제 RawBinding/센서·pixel equivalence·freshness·lease/메모리 발행·owner exit·METRIC_MAP 사전 metadata 전달·BIND/SLOT·15Hz/RSS·READY/주행 자격은 별도 계약이다. codec의 layout-only 결과를 이 권한으로 승격하지 않는다.
 
+## RawBinding 값과 정적 RAW BIND/ACK
+
+`runtime.raw_binding.RawBinding(fields)`는 카메라 세션의 exact13필드를 소유한 canonical 값으로 만든다. service_instance/acquisition_worker/pipeline_instance/capture_epoch/stream_instances/sdk_bridge_epoch/device_id/model_id/parser_id/graph_profile_sha256/calibration_bundle/format_table_sha256/clock_epoch만 허용하며 version을 추가하지 않는다. identity6개는 canonical UUID이고 서로 다른 named stream UUID만 유일해야 한다. `.canonical_bytes`/`.sha256`는 frozen 값, `.fields`는 독립 dict/stream map 사본이다. body hash는 canonical 내용에 적용하며 원 packet의 bytes hash와 다르다.
+
+초기 P0는 rgb_video/depth_right 필수, nn_input0/nn_output0 쌍 선택, jpeg 선택이다. IMU는 별도 profile이며 이 타입에서 미지원이다. NN 쌍이 있으면 model/parser SHA 모두 필요하고 없으면 둘 다 null이다. no-video는 JPEG encoder 제외이며 host RGB는 유지한다. 개별 bundle의 NN 결과 부재는 source binding의 NN 설정을 바꾸지 않는다. device_id는 case를 보존한 `[A-Za-z0-9_-]{1,64}`이고 자동 대소문자 변환이나 첫 장치 대체를 하지 않는다.
+
+model_id는 선택 compiled blob **원 bytes SHA256**이다. parser_id는 전처리·후처리·해석·필요 소스/상수·tensor/좌표 정책·실제 설정을 고정한 immutable parser manifest 원 bytes SHA다. graph/format/calibration도 각각 출판된 manifest 원 bytes SHA를 참조한다. 기존 ASSET_ID/PARSER_ID label, reference utils SHA, 단일 소스/config hash는 전체 parser release hash가 아니다. 현재 벤치의 경로/기록 budget 포함 profile hash를 운영 graph asset hash로 재사용하지 않는다. 이번 API는 없는 manifest를 생성하거나 S01의 과거 기록을 소급 변경하지 않는다.
+
+calibration_bundle은 전체 차량 보정 manifest SHA 또는null이다. null은 보정 참조 미제공이며 metric 자격이 없다. nonnull 문법도 파일 존재·실물·leaf·보정 승인을 증명하지 않는다. actual parser/graph/format/calibration asset 출판과 실물 검증은 caller의 별도 gate다.
+
+`RawBindingProfile(device_id, clock_epoch, model_id, parser_id, graph_profile_sha256, format_table_sha256, calibration_bundle, nn_enabled, jpeg_enabled)`는 body와 독립적으로 승인한 참조를 보유하는 frozen 값이다. `.stream_names`는 두 bool에서 유도한 tuple, `.refs`는 asset refs5개의 새 dict다. `.check(binding)`은 device/clock/refs/stream 선택을 exact 대조하고 성공 시None, 실패 시RawBindingError다. body에서 expected를 자동으로 추출하지 않는다.
+
+`runtime.raw_binding_messages.RawBindContext(peer, acquisition, profile)`는 기존 LifecyclePeer(A/M만)와 등록 A Endpoint를 구분한다. A 대상은 worker/channel 모두 A와 같고 M 대상은 각각 A와 달라야 한다. body service는 peer service, acquisition_worker는 언제나 등록 A worker다. M identity는 body hash에 넣지 않아 M-only restart에도 건강한 A의 raw hash를 유지할 수 있다. peer.release_sha256는 BIND wire에 없고 HELLO/실제 bootstrap 등록은 별도다.
+
+`RawBindMessage(packet, context, cap_us=None)`/`parse_raw_bind(...)`는 기존 b1 StructuralPacket의 S→등록 A/M RAW BIND를 검사한다. payload exact3은 binding_revision/binding_sha256/binding이다. outer/payload revision은 같은 positive canonical u64string, SHA는 canonical body SHA다. issued<expires, expires−issued≤5000000us이며 제공한 원 cap 이내여야 한다.
+
+`RawBindAck(packet, original_bind)`/`parse_raw_bind_ack(...)`는 원 BIND를 필수로 받아 해당 A/M→S의 exact5 payload(binding_revision/binding_sha256/accepted/state/reason)를 검사한다. peer/request/revision/hash가 같고 BIND.issued≤ACK.issued<ACK.expires≤BIND.expires다. 다른 sender의 순번이므로 ACK seq가 BIND보다 작아도 된다. accepted는 exactbool이며 true이면 active role state와 null reason, false이면 기존 role 진단 state와 UNSUPPORTED_PROFILE/ASSET_UNAVAILABLE/LOCAL_SETUP_FAILED 중 하나다. positive에서 A의 DRAINING/CLOSING/CLOSED/FAILED 계열과 M의 QUIESCING/STOPPED/FAILED는 제외한다. WAIT/WARMUP/RECOVERING의 형식 수락은 READY나 원 fence 해제가 아니다. 부정 진술도 건강한 A/source를 삭제하지 않는다.
+
+두 wrapper는 원 `.packet`과 `.raw`(packet.raw_bytes), immutable binding/context/원 ID·정수 시각·revision을 보유하며 `.fields`/`.payload`는 새 사본이다. constructor와 helper가 같은 검사를 수행하고 unchecked flag는 없다. RawBindingError(ValueError), RawBindMessageError(RawBindingError)로 오류를 구분한다. body는 exactdict13/streamdict5·container depth2·node64·ASCII string/key64·exactstr/None만 소유 복사하고 canonical2048B 이내로 만든다. scalar leaf depth3은 허용하며 bool/int/list/custom/subclass/cycle은 거절한다. 이 bound를 별도 Profile/Context나 전체 packet에 적용하지 않는다. outer는 기존 b1의 실제4096B/encoding/duplicate/구조 검사를 유지한다.
+
+이 API는 순수 정적 진술 검사다. IO·clock·UUID 생성·actual send/등록 상태/HWM/outbox/BindWatch를 실행하지 않는다. HELLO/현재 revision/first-send·수신 now/공통 sequence·staging/lease 예약·timeout·SLOT/실 공유 메모리·자산 검증·준비/metric 자격은 별도 actor 계약이다. negative ACK를 실제 BindWatch.ack 성공으로 기록하지 않는다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
