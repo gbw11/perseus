@@ -31,6 +31,25 @@ struct drive_result {
  const char *auto_readiness,*manual_readiness,*auto_not_ready,*manual_not_ready;
  struct xdh_health auto_health,manual_health;
 };
+/* One coordinator's bounded repeat-attempt metadata, never a delivery ACK. */
+struct drive_command_context {
+ uint64_t control_revision,connection_revision,lifetime;
+ uint32_t generation;
+ enum drive_mode mode;
+ char app_instance[XM_UUID_LEN+1];
+};
+struct drive_command_gate {
+ struct drive_command_context context;
+ uint64_t check;
+ char reason[65];
+ bool restricted;
+};
+/* First restricted exact-zero result or changed context/reason is immediate.
+ * Same restriction retries at each existing supervisor check. A true return
+ * permits an attempt only: mailbox rejection/TX loss is not cached success.
+ * Valid results (including neutral zero) and uncacheable inputs always pass. */
+bool drive_command_attempt_due(struct drive_command_gate *,const struct drive_command_context *,
+ uint64_t check,const char *reason,float v_mps,float steer_rad);
 void drive_controller_init(struct drive_controller *);
 /* Enable the existing release deadline. Missing resource evidence is advisory;
  * an unverified work clock cannot certify an on-time result. */

@@ -11,8 +11,11 @@
 #include "state_transfer.h"
 #include <xenova/manual_input.h>
 
+/* valid_until_ms and, for binary input only, input_received_ms retain this
+ * epoch until publication. Zero keeps existing adapters in uptime-ms. */
+enum drive_sample_clock { DRIVE_SAMPLE_UPTIME_MS, DRIVE_SAMPLE_COUNTER_MS };
 struct drive_sample { float v_mps,steer_rad,nearest_m; enum auto_reason auto_reason; const char *reason;
- bool binary_input;int64_t input_sequence,input_received_ms,valid_until_ms;
+ bool binary_input;enum drive_sample_clock clock_domain;int64_t input_sequence,input_received_ms,valid_until_ms;
  char map_epoch[37];uint64_t reference_revision,observation_sequence;uint32_t path_generation,tracker_index,maneuver_phase; };
 typedef int (*drive_calculate)(void *context,struct xm_span control,struct xm_span input,
                                int64_t age_ms,struct drive_sample *out);

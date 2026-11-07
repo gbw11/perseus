@@ -28,6 +28,9 @@ void xd_client_stopped(struct xm_zclient *);
 int xd_finish(struct xm_zclient *, int app_result);
 int xd_iteration_begin(void);
 void xd_inputs_copy(struct xd_inputs *);
+/* Coordinator-only raw snapshot result for this iteration. -EBUSY means no
+ * observation; copied inputs still deny work/output and are never cached. */
+int xd_inputs_status(void);
 /* Actual selected-work completion on the fixed release grid. A repeated,
  * pending or idle task cannot advance loop_seq; original input provenance is
  * used for the resulting command, never this poll's newer input timestamp. */

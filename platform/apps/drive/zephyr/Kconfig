@@ -1,3 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 mainmenu "Xenova common A/B drive firmware"
 source "Kconfig.zephyr"
+
+config XENOVA_DRIVE_INPUT_DIAGNOSTICS
+	bool "Bounded input clock/map diagnostics for an explicit trial build"
+	depends on XENOVA_DRIVE_LATTICE && LOG && LOG_MODE_DEFERRED
+	depends on !LOG_BLOCK_IN_THREAD && !LOG_MODE_IMMEDIATE && !LOG_FRONTEND
+	default n
+	help
+	  Attempt at most 16 numeric clock and 8 map records per boot using the
+	  existing deferred logger. Records may be dropped; they are not required
+	  execution evidence. Does not enable native bootstrap or change timing,
+	  identity, source trust, readiness or output authority.
