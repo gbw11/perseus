@@ -1,7 +1,14 @@
 # Gateway 직접 구현·공동 연동
 
 담당: 박신영 / 플랫폼·Gateway. 상태: **G1 실제 로컬 호출·G2 상태 연결·G3 피드백 제공자 구현 / 상대 제품·장치·운영 수락 전**.
-Gateway 자체를 타 담당자에게 위임하지 않는다. 아래가 2026-11-02 현재 작업이며 당시 원문은 이력에 보존한다.
+Gateway 자체를 타 담당자에게 위임하지 않는다. 현재 본문은 2026-11-07 소스와 대조했으며 당시 원문은 이력에 보존한다.
+
+2026-11-07 시연 범위 보완은 코드·로컬 검증과 FW1.0.33 제공까지 진행했다.
+heap 점유 경고와 AUTO 기능 실패를 VM 전체 불신으로 확대하지 않으며, `WORLD_UNAVAILABLE` 한 건만으로 공통 입력 장애를 확정하지 않는다.
+새 실행·준비·보호의 내구 종결 뒤에만 메모리의 불신 상태를 해제한다.
+실보드는 정상 준비 20초 안에 binding·차량 관측이 유지되지 않아 세 장면의 장애 주입 전 중단했다.
+따라서 MANUAL 전환·B AUTO 승계·Worker 복구 후 역방향 승계는 실제 장치 수락으로 표시하지 않는다.
+현재 근거와 남은 선행조건은 [시연 범위 검증](../verification/recovery-scenario-closure-20261030.md#recovery-demo-20261107)을 따른다.
 
 ## 현재 작업과 제공물
 
@@ -12,7 +19,7 @@ Gateway 자체를 타 담당자에게 위임하지 않는다. 아래가 2026-11-
 | DEC-12·18·ARCH-T16·18 / 실제 생산자 공동 수락 전 | Spring/UI 입력 생산자와 MQTT·C 수신 adapter. 실제 session/sample/action·원 나이를 이어야 함 | 같은 MANUAL 승계 유지, AUTO→MANUAL의 현재 중립 뒤 새 조작. 캐시 재발행·generation 교체만으로 새 행동 승인 0 |
 | DEC-13·ARCH-T25·26·38 / G3 제공자 로컬, 실제 장치 전 | `feedback.py`, `odometry.py`, `output_owner.py`, `verified_runner.py`. feedback-1 호환과 명시 feedback-2·원 encoder/장치 시계·Pi 로컬 상태 | 실제 PTY/pyserial의 부분·붙은 frame, CRC·옛 ACK·장치 재부팅·기한·센서 부재. write-only 유지, 타이머/목표 적분의 물리 관측 위장 0 |
 | DEC-19·ARCH-T21~23·32·35 / 실제 planner/path 제공자 연결 | `state_transfer.py`, `drive_link.py`, `drive/planner/engine.c`, `lattice_app.c`. 기존 JSON adapter와 별도 full path binary·실제 적용/target 계산 | 제품 C·실제 MQTT/native A/B. 당시 수락 사본 재사용·권한 종료 뒤 갱신 거절, 새 instance의 실제 준비·정당한 재합류. 실차 수락 별도 |
-| D01/D03·DEC-11·16 / G1 제공자 로컬 완료, Worker 연결 전 | `ipc.py`, `client.py`, `provider.py`, 기존 actor/planning/Authority. 실제 별도 프로세스 submit/get/commit/cancel/finish | 원 key·기한·승인 의미, 내구 수락·지속 exclusion·정상 종결, slow reader/partial/포화·저장 EIO·재시작·peer 검사 |
+| D01/D03·DEC-11·16 / G1 제공자·Worker 호출 코드 제공, 세 시연 종단 미수락 | `ipc.py`, `client.py`, `provider.py`, Worker `recovery/__main__.py`, `protection.py`, 기존 actor/planning/Authority. 실제 별도 프로세스 submit/get/commit/cancel/finish | 원 key·기한·승인 의미, 내구 수락·지속 exclusion·정상 종결, slow reader/partial/포화·저장 EIO·재시작·peer 검사. 정상 준비·전환·회복·재합류의 실제 보드 수락은 별도 |
 
 플랫폼의 [최신 로컬 검증](../verification/recovery-scenario-closure-20261030.md#gateway-provider)과
 [Gateway README](../../platform/services/gateway/README.md)가 제공 근거다.

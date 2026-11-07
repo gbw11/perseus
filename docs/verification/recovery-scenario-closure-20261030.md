@@ -5119,3 +5119,179 @@ Gateway의 나머지 skip은 native state codec 실행 파일 미공급이며, C
 이 통합 후보로 전체 ARM/RPM/이미지를 다시 빌드하거나 보드에 설치하지 않았다.
 앞 절의 FW30 ARM·보드 근거를 새 platform 전체 설치 근거로 바꾸지 않는다.
 READY·주행·메모리 반환·세 부하 조건의 실보드 미수락과 기존 출력 차단·E4 보호는 그대로다.
+
+<a id="recovery-demo-20261107"></a>
+## 장애 범위·재합류·binding 보완 — 2026-11-07
+
+**코드·로컬 검증·ARM 부분 포장·보드 개별 적용과 정리는 마쳤지만, 세 시연의 실보드 수락은 끝내지 못했다.**
+정상 준비의 기존 20초 창에서 binding·차량 관측이 유지되지 않아 실제 장애를 주입하지 않았다.
+Jetson 상실→MANUAL→명시 AUTO 재개, A AUTO 실패→B AUTO→A 재자격, 실제 VM 장애→Worker 복구→Standby→다음 장애를 통과했다고 표시하지 않는다.
+지도 발행은 0건이므로 이번 실보드에서 실제 계산·풀 점유 증가·반환도 입증하지 못했다.
+장기 READY 분석으로 범위를 늘리지 않는 사용자 지시에 따라 미수락을 남겼다.
+
+### 변경과 판단 기준
+
+| 위치 | 무엇을 왜 바꿨는가 | 유지한 보호 |
+|---|---|---|
+| 공통 runtime `io.c`, `Kconfig` | heap 점유율·AUTO deadline 반복을 별도 `vm.trust`로 확대하던 생산 경로를 제거. 실제 `workers` health와 `main`의 앱별 lifecycle을 재사용. 85/5 설정 기호는 과거 `.config` 호환용이며 새 운영 임계값이 아님 | 주입 명령·결과·errno·원 ID/boot/기한, 실제 필수 자원 실패, AUTO/MANUAL 독립성. 오류 종류·희귀 최초 원인 축소 없음 |
+| Worker `rejoin.py`, `worker.py` | FW32 보고를 엄격한 현재 binding/boot/app 검사 후 warning/function으로 보관. 이 두 보고만으로 VM 불신 latch·새 recovery attempt를 만들지 않음 | 실제 Xen 부재/crash·생존 실패, 원 attempt·현재 intent·Gateway 보호·E4. 원 사유/명령/실행 근거 보존 |
+| Gateway `verified.py`, `warm.py`, `provider.py` | A만의 입력 문제와 양쪽 입력 장애를 구분. 현재 준비된 B AUTO 또는 정지 후 정상 MANUAL을 평가. 유효한 새 실행·준비와 보호의 내구 종결 뒤에만 RAM 불신 상태 해제 | 사용자 MANUAL 의도·명시 resume·control 적용·중립 후 새 조작, 저장 실패 시 원 불신/보호 유지, 자동 재무장·Active 반환 없음 |
+| `xenova_drive_binding.py`, `xenova_execution.py`, `xenova_management.py` | 읽기 전용 초기 검증의 admission 대기를 제거. 이어 기존 일괄 관측을 사용해 A/B의 전후 Xen 목록·native identity 조회를 한 회차에서 공유. private `_input_ids`는 대상 외 실행 파일 의존만 줄임 | 전체 registry/tomb 검증 2회, Xen 목록 2회, native identity helper 2회, 최종 admission 1회. strict 타입·현재 run/intent/gate·원 표본 시각·최신 오류 순서 유지. TTL cache·새 전역 잠금 없음 |
+| RejoinCoordinator | 기존 executor에서 due 대상만 묶고 provisioning 전후 guard는 유지. 긴 A 작업이 있어도 남은 lane에서 B만 갱신. 실제 publisher/batch/work가 살아 있으면 종료 완료를 반환하지 않음 | 2개 lane·유한 큐·원 2초 관측 예산·3초 binding lease·필수 receipt 저장 유지. 타 대상의 정상 결과·원 작업을 취소하거나 새 시각으로 꾸미지 않음 |
+
+고정 app pool은 system heap과 다르다. 높은 점유·주입기 자신의 ENOMEM을 앱 필수 pool 실패로 대신하지 않는다.
+map/path의 current 사본·마지막 결과·마지막 search slice는 정당하게 보관될 수 있다.
+입력이 끊겼다는 이유로 used=0이나 예약 RAM의 OS 반환을 요구하지 않으며, 실제 writer/reader 반환과 retained floor·peak를 구분한다.
+
+### 실행한 검증과 남긴 반례
+
+| 묶음 | 실행 결과·범위 |
+|---|---|
+| C/native I/O·workers | 27개 통과. 원 명령·중복·오류·실제 작업 지연과 기능 독립성. I/O의 health/resource 대역을 실제 앱 pool 고갈 증거로 쓰지 않음 |
+| Gateway | 최종 계측 전체 390개 통과·1개 skip. 앞선 3개 실패는 보존. 약 125ms actor 공백의 동일 generation/owner 반례를 HEAD 사본에서도 재현했으며, 최초 비계측 실패의 원인을 단정하지 않음 |
+| Worker | 기존 관련 136개, batch 연결/warm-liveness 113개, 느린 sink 종료 1개, A provisioning/refresh 지연 중 B 갱신 등 후속 16개 통과. 집합이 겹치므로 합산하지 않음 |
+| 하위 조회·실행 | 확장 198개 통과 뒤 대상 입력 제한의 최종 84개 통과. 신규 paired 시험 24개는 무관 run/intent 손상 격리·전체 등록부/대상 손상 거절·원 시각/기한·신원 변경·정상 B 보존을 검사 |
+| 고정 환경 | source checkout의 정책 mode·systemd loader·주입 unit 경로 문제를 소유 fixture에서 보정. 원 실패 기록은 보존. 기존 ARM/QEMU systemd 259.5 ordering 검사 통과. FW33의 QEMU 주행 수락은 아님 |
+| 실보드 준비 | 첫 두 시도는 가상 장치 프로세스 준비 경계에서 종료. 불필요한 world/protobuf 재로딩 제거와 단계별 계측 후, 세 번째는 실제 Gateway까지 실행했지만 실제 readiness 20초를 통과하지 못함 |
+
+세 번째 종료 상태는 `SAFE_STOP`, `output_permitted=false`, A/B binding null이었다.
+앱은 MANUAL `POSE_UNAVAILABLE`, AUTO `STATE_PREPARING`을 보고했다.
+drive link 거절 78건 중 `LINK_BINDING` 70건, 지도 0건이다.
+장치 보고 counter 241과 최신 counter 247이 달랐으며 accepted/applied/physical-stop·VehicleSample은 null이었다.
+이 상태를 장치 적용·물리 정지·앱 정상으로 바꾸지 않았다.
+실제 Worker의 시작 뒤 fresh A/B binding 확인은 약 13.85초였지만 지속 유지 수락이 아니다.
+시험 E4 프로필은 기존에 사용한 `stable_s=60`, `vm_max_attempts=3`이며 소비 0→0, 실제 복구 시도 0건이다. 운영 수치·설정은 바꾸지 않았다.
+
+paired 단독 대조는 Worker 정지·mock Gateway 활성 조건에서 pair 3회가 0.654/0.593/0.664초로 끝났다.
+반면 서비스 활성 추가 병렬 probe는 6건 중 1건만 원 2초 안에 성공했고, 실제 합친 시연도 미수락이다.
+최종 운영 mock 복원 직후 5개 파일 표본에서도 A unavailable·B의 3초 이상 노후 표본을 확인했다.
+따라서 중복 조회 감소와 로컬 보호 검증을 실보드 지속 binding 해결·전체 부하 개선으로 확대하지 않는다.
+
+### 제공물·설치·정리
+
+기준은 `47b7304817eb9d726c7b37a80539d56bb5b5d1af`와 현재 diff다.
+FW1.0.33은 고정 ARM 환경에서 38.849초 빌드했고 strict bundle·target import 10개를 확인했다.
+firmware SHA256은 `8499076633aa0f458c38a2d7717d0acde0caa5b06c2b06edcb78a8b98dd659bc`,
+manifest는 `497e5234ba0b5128a223bc02221b0ef2912189ce7ad9071a04100051c692f3c1`이다.
+기존 recipe의 모듈·native helper 설치 경로를 재사용했으며 정규 RPM·전체 이미지·factory 기본 firmware는 갱신하지 않았다.
+
+보드의 하위 31개·provider 59개를 대조했고 마지막 binding/execution/management/rejoin 4개를 같은 cohort로 교체했다.
+첫 설치 확인의 cold import는 20초 제한으로 rollback됐고, 모듈별 실측은 총 19.59초에 interpreter 시작 시간이 추가됐다.
+설치 확인만 40초로 분리한 재시험은 import 9개·90개 hash·새 서비스 PID·동일 VM 실행 검사를 통과했다.
+이 변경은 관리·제어·VM·Gateway의 실행 기한을 늘리지 않는다.
+
+최종 부분 source는 `source-closed/source-payload-manifest.json`의 141개 파일이며 fingerprint는
+`c9860b80aba3c51e6f2c8b2c4da75dbc4c83fa69af275f1277175906f9aa0969`, archive SHA256은
+`f7815b759d36b663f3d8ec13dfec333c1f073193ff3bfa5c3d18f0a0d87276f7`이다.
+설치한 Coordinator hash는 `b85edb29f2be8b6ea48914f4160d9b10795a64635b734fc51a8e847e907e284d`다.
+
+
+A/B는 FW1.0.33을 유지하고 원 통신 설정 4개의 정확한 원 바이트로 복원한 새 실행이다.
+A는 domid101 / `09417bc5-bfd0-4021-aaa7-c2eb3c84ab48`, B는 domid102 / `30b4bbc5-1a6c-4c57-9269-8dc32a91a2e5`다.
+각 새 실행의 drive·telemetry receipt를 확인했고 Debian domid1의 원 실행은 유지했다.
+CPU 정책 hash·UUID·비밀번호는 유지했다. API/Gateway/Worker는 active이며 Gateway는 mock·SAFE_STOP·출력 차단이다.
+소유 broker·scene·가상 장치 프로세스는 모두 종료했고, 원 설정 대조 뒤 소유 비밀 사본 6개를 제거했다.
+VM helper가 참조할 수 있는 소스·복구용 코드 백업·필수 원장/receipt는 삭제하지 않았다.
+
+정확한 명령·JUnit·소스 manifest·실패와 복원·설치 기록은 로컬
+`Documents/Codex/2026-11-07/recovery-demo-closure/`와 `fault-scope-c/`,
+Gateway의 `spring-stress-board/gateway-*.xml`에 보존했다.
+`final-board-evidence.tar.gz`는 비밀을 제외한 35개 증거를 포함하며 SHA256은
+`843930145e4ff9cb8af9c1bd8342180d2df83d23b0c9071d666a1345e5e6388d`다.
+세 시연의 남은 실제 수락은 정상 binding·차량 관측·준비가 먼저 확보된 뒤에만 진행한다.
+이번에는 실차 출력·EC2·commit/push를 수행하지 않았다.
+
+### 후속: 정상 준비를 요구하지 않는 Spring 세 명령의 실제 주입
+
+사용자 요청에 따라 위의 정상 준비 수락과 분리해, 같은 FW1.0.33 A 실행에
+`cpu_stress`, `memory_stress`, `auto_delay`를 각각 한 번 발행했다.
+위의 지도 0건·장애 주입 0건은 앞선 세 복구 장면의 선행조건 시험 결과이며,
+이번 후속에서는 세 명령을 실제로 수신·실행·종결했다. 세 복구 장면 전체의 수락을 뜻하지 않는다.
+
+| 실제 요청 | 제품 수신부의 결과 | 실제 관측 |
+|---|---|---|
+| `cpu_stress`, workers=1, load_percent=100, duration_s=10 | RUNNING→SUCCEEDED, duration_ms=10018 | `cpu.system.percent` 29개 정상 표본: 첫 14.483%, 최대 100%, 마지막 14.822%. 부하 종료 뒤 사용률 하락 |
+| `memory_stress`, memory_mib=8, duration_s=5 | RUNNING→SUCCEEDED, duration_ms=5007 | `memory.kernel_heap.used_bytes` 0→8,389,632→0. free 9,437,184→1,046,528→9,437,184 bytes. high_water 8,389,632 bytes는 종료·다음 명령 뒤에도 보존 |
+| `auto_delay`, delay_ms=100, duration_s=10 | RUNNING→SUCCEEDED, duration_ms=10003 | 주입 창 수락·종결은 확인. `loop.completed_total`, `loop.in_flight`, `loop.deadline_miss_total`은 모두 0. 실제 AUTO 작업·지연 효과·승계는 입증하지 못함 |
+
+CPU·메모리 부하는 정상 준비 없이도 실제로 작동했다. 메모리 주입의 5초는
+표본에서 할당·반환을 보기 위한 시험값이며 새 운영 교체 기준이 아니다.
+커널 heap 반환을 앱의 고정 map/path/search pool 반환이나 VM RAM의 OS 반환으로 확대하지 않는다.
+AUTO의 실제 지연은 `platform/apps/drive/zephyr/src/workers.c`의 AUTO 작업에서
+`drive_adapter_run_until` 뒤 `drive_auto_delay_apply`가 호출돼야 발생한다.
+이번 수신창의 앱 사건은 AUTO `STATE_PREPARING`, MANUAL `INPUT_UNAVAILABLE`였고,
+명령의 SUCCEEDED를 계산 성공·지연 발생·기능 장애·복구 성공으로 치환하지 않았다.
+
+전송은 기존 `direct_command_trial.py`를 재사용했다. `origin/backend`의 `5667ea6f`
+Spring `AgentStressService`/`AutoDelayService`와 동일한 MQTT-04 envelope·parameters로,
+`xenova/v1/vms/{vm_id}/command`에 QoS1, retain=false, 원 command/operation ID와
+현재 boot를 유지해 각각 한 번 발행했다. 각 PUBACK과 같은 ID의 제품 결과 2개를 회수했다.
+Spring HTTP·인증만 우회했으며 배포된 Spring REST/버튼의 종단 수락은 하지 않았다.
+
+실행 명령은 기존 도구에 공통 `--vm de113a23-d80e-4333-94b8-788babe0e41e --observation-s 25`를 주고,
+각각 `--action cpu_stress --amount 100 --duration-s 10`,
+`--action memory_stress --amount 8 --duration-s 5`,
+`--action auto_delay --amount 100 --duration-s 10`을 사용했다.
+원 command ID는 순서대로 `e5465e7c-1a3b-4579-82d3-f5b94eff3609`,
+`d9f7c8c6-c4e4-446a-a770-975833ec1455`, `c7edcec6-30e3-4c3a-a693-0ff3abb46023`이다.
+
+후속 조회에서도 A domid101/execution `09417bc5-bfd0-4021-aaa7-c2eb3c84ab48`,
+B domid102/execution `30b4bbc5-1a6c-4c57-9269-8dc32a91a2e5`, Debian domid1의 원 실행은 같았다.
+Gateway는 SAFE_STOP·output_permitted=false, API/Gateway/Worker는 active였다.
+새 VM 재시작·승계는 관측하지 않았다. E4 설정·필수 기록을 변경하지 않았고,
+시험 발행 프로세스는 종료했다. 실제 차량 출력·서비스 교체·추가 firmware 설치·commit/push는 하지 않았다.
+
+별도로 확인한 미보완 결함: `xm_payload.c`의 두 명령 parser는 `expires_at` 문자열을
+검사하지만 값은 전달하지 않고, `io.c:receive_fault_command`도 수신 age로 만료를 거절하지 않는다.
+이번 즉시 단발 발행의 성공과 별개인 만료 보호 공백이며, 만료 메시지 시험·제품 수정은 이번에 하지 않았다.
+관측한 원인 구분·원 ID·현재 boot 검사·유한 주입 시간·중복 처리 보호를 삭제하지 않는다.
+
+원 MQTT 결과·Telemetry 표본·실행/서비스 후속 조회·해시는 기존 로컬 증거 폴더의
+`direct-three-commands/`에 보존했다. 정확한 request와 result는 각 `direct-*.json`,
+요약은 `summary.json`, 서비스·host 조회는 `post-command-readback.json`이다.
+
+<a id="auto-delay-map-20261108"></a>
+### 시험 지도 공급 후 실제 AUTO 지연 재시험 — 2026-11-08
+
+**실제 AUTO 계산의 선행조건을 확보하지 못해 계산 중 지연·deadline·승계 수락은 미완료다.**
+이 절은 앞 절의 세 명령 수락·종결 결과와 구별한다. 실제 계산 뒤에 주입하라는 요청에 따라
+이번에는 AUTO 지연 명령을 발행하지 않았고, deadline 계수 0을 정상 계산의 증거로 쓰지 않았다.
+
+사용자가 허용한 Worker/mock Gateway 일시 정지·A/B 시험 통신 설정과 재기동 범위에서,
+FW1.0.33과 기존 64×32/0.1m 시험 지도·장애물·codec·가상 장치·제품 Gateway를 재사용했다.
+기존 자격은 재사용했고 firmware 재빌드·교체, 실제 장치 open, CPU 정책·E4·원장 초기화는 하지 않았다.
+시험 실행은 A domid103/`5615b884-87d3-4743-a4db-4d1da4e23db8`,
+B domid104/`e73ed3e5-6a03-4e48-86ad-d3a2262bd0c1`이었다. 이는 설정 공급을 위한 기동이며 자동 복구가 아니다.
+
+| 시도 | 결과와 해석 |
+|---|---|
+| 첫 실행 | 시험용 가상 장치 프로세스 entry 확인이 3초를 넘어 제품 준비 전에 종료 |
+| `scene-r2` | 프로세스 시작·준비를 기존 총 fixture 준비 20초 안에서 구분. 제품 readiness 20초는 유지. 차량 표본 73건 수신, mapper 만료 거절 215회, 지도 0건. `MANUAL_SELECTED_DISARMED`에서 종료 |
+| `scene-r3` | 시험 mapper만 Gateway의 원 VehicleSample을 직접 소비해 MQTT 관측 대기 구간을 분리. 원 시각·200ms 검사는 유지. 지도 전송 요청/큐 수락 57건. 앱의 실제 수신·채택·계산은 입증하지 못했고 같은 준비 경계에서 종료 |
+
+마지막 시도의 A CPU 정상 표본 11개는 14.880~18.377%(마지막 18.201%),
+B 29개는 14.568~18.121%(마지막 17.706%)였다. AUTO 지연을 발행하지 않았으므로 지연 효과가 아니다.
+두 VM의 `loop.completed_total`, `loop.in_flight`, `loop.deadline_miss_total`은 모두 0이었다.
+앱은 MANUAL `POSE_UNAVAILABLE`, AUTO `STATE_PREPARING`, progress_seq=0을 보고했다.
+마지막 snapshot에는 두 binding이 있었지만, 도중 DriveLink에서 `LINK_BINDING` 45회,
+`LINK_VEHICLE_UNAVAILABLE` 11회, `LINK_STALE` 3회를 거절했다. 일회 관측을 지속 준비로 대신하지 않았다.
+
+Gateway는 `SAFE_STOP/DISARMED`, output_permitted=false를 유지했다. B 승계는 없었다.
+이는 주입 지연에 대한 대응을 입증한 것이 아니라 기존의 준비되지 않은 상태를 보호한 결과다.
+종료 시 공개 protect 요청은 PROTECTED로 회수됐고 actor·IPC·link·binding·가상 장치 종료를 확인했다.
+각 시험 E4의 전후 소비는 0→0이며 원 상태 파일의 실제 부재를 보존했다.
+시험 mapper의 직접 VehicleSample 대조를 실제 Jetson의 MQTT 차량 관측 소비 수락으로 확대하지 않는다.
+
+추가 확인이 필요한 경계는 Gateway 원 차량 표본→DriveLink clock/pose→앱 current_vehicle/준비 채택과
+binding 지속성이다. 제품 검증을 완화하거나 장기 READY 분석·무주입 반복으로 확대하지 않았다.
+정확한 결과·실행 도구·해시는 로컬 `Documents/Codex/2026-11-08/auto-delay-map/`에 보존한다.
+`scene*/scene-delay-result.json`, `environment-result.json`은 실패·정리·E4를 포함하고,
+최종 원 설정·서비스·VM·비밀 사본 정리는 `post-test-readback.json`으로 별도 확인한다.
+제품 코드 추가 수정·EC2·commit/push는 하지 않았다.
+
+복원 후 A는 domid105/`100e0902-5d23-4e45-b4fa-6545e836b657`,
+B는 domid106/`b6611a35-7803-43cf-ab79-b1f2e37f0f51`이며 FW1.0.33을 유지한다.
+원 통신 설정 4개의 정확한 원 바이트·CPU 정책·Debian 원 실행을 확인했다.
+API/Gateway/Worker 모두 active, 운영 Gateway는 mock·SAFE_STOP·출력 차단이다.
+시험 브로커는 returncode=0으로 종료했고 잔존 소유 프로세스는 없었다.
+원 설정 대조 뒤 소유 비밀 사본 6개만 정리했으며 필수 기록·receipt·시험 Authority는 보존했다.
