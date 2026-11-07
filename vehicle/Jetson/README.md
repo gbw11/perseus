@@ -516,6 +516,18 @@ OLD_CLEAN_ELIGIBLE은 같은 full runtime·complete inventory·모든 known owne
 
 타입·PID/Thread·재진입 오용은 ObservationUsageError(ValueError), source/runtime/store 수명·지원 profile·owned FD 반환 불명은 ObservationUnavailable(RuntimeError)다. 관측 FD는 호출 안에서 한 번만 닫고 반납 실패에는 사용 가능한 묶음을 반환하지 않는다. 공개 값의 구조 검사는 실제 OS 출처 증명이 아니다. cgroup COMPLETE·이름 probe·설치/reset 근거·새 기한·정리/생성 허가·S-main 연결은 생산하지 않으며 동기 I/O의 반환시간 상한을 보장하지 않는다.
 
+## 정확한 Linux 자원 이름 관측
+
+`runtime.resource_name_observation.ResourceNameObserver(store, service_instance)`는 같은 borrowed ResourceStore와 startup UUID의 public ProcessObserver 하나를 보유한다. 생성자는 파일 I/O를 하지 않는다. 같은 실제 PID·Thread의 비재진입 호출만 허용하고 producer의 copy/deepcopy/pickle/fork 양도를 거절한다. `observe()`는 원 B0를 얻고 자기 proc/root/namespace FD로 중간 backing을 결박한 뒤, 그 FD를 모두 한 번 반환하고 원 B1을 얻는다. borrowed store를 닫거나 새 guard로 재시도하지 않는다.
+
+frozen `NameObservationBatch(before, after, names)`는 두 원 ObservationBatch와 B0의 원 known_resources 순서대로 된 NameObservation tuple(≤12)을 보유한다. `.original_load/.guard/.started_ns`는 before의 원 객체/값, `.latest_load/.completed_ns`는 after의 원 객체/값이다. 네 실제 load는 모두 VALID·서로 다른 load ID·같은 원 raw/ref/nonce이며 두 guard 값 전체가 같고 B0.completed_ns≤B1.started_ns여야 한다. B1 뒤 추가 load가 없으므로 후속 propose에 `.latest_load` 원 객체를 사용한다. 두 owner outcome은 ALIVE→EXITED처럼 달라도 된다. 결과 생성자의 검사는 순수 값 관계이며 OS proof나 실제 관측 출처를 인증하지 않는다.
+
+중간 FD는 d2b1의 고정 Linux profile과 같은 caps/public parser로 실제 root dev/inode·fdinfo mnt_id·정확 mountinfo 행·namespace/boot/current birth를 시작/끝에 확인한다. 현재 named root를 다시 연 FD의 mount ID도 대조한다. 원 full runtime이 current와 다르면 모든 원 known target은 UNKNOWN이고 leaf lookup은0회지만 중간 현재 profile은 확인한다. VALID+KNOWN0은 원 partial 상태를 유지한 빈 tuple이 가능하며 MISSING/CORRUPT/IO_ERROR는 전체 unavailable이다.
+
+같은 runtime의 SHM leaf는 name[1:], semaphore leaf는 `sem.`+name[1:]다. 정확 leaf에 `os.stat(..., dir_fd=held_root, follow_symlinks=False)` 한 번만 수행한다. 실제 errno ENOENT만 ABSENT, regular는 size/mode/nlink가 달라도 PRESENT, symlink·directory·FIFO 등 다른 type이나 leaf 오류는 UNKNOWN이다. leaf open·payload read·생성·mmap·unlink·token 조작·tracker 등록·전역 scan은 없다. 입력·소유 수명·순수 값 오용은 NameObservationUsageError(ValueError), source/profile/store/owned FD 반환 불명은 NameObservationUnavailable(RuntimeError)다. 개별 UNKNOWN을 원 tuple에서 누락하지 않는다.
+
+이 결과는 현재 Linux backing entry의 관측이며 generic POSIX ABI·creator 인증·남은 mapping/참조의 소멸·완전 inventory나 CLEAN/생성/READY 권한이 아니다. 실제 creator/backing과 owner/cgroup/tracker 장벽을 닫기 전 운영 guard 소비는 미완료다. 동기 I/O의 반환시간 상한을 보장하지 않고 S-main·프레임 loop에 연결하지 않는다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
