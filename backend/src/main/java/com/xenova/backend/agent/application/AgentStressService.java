@@ -4,7 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.agent.domain.AgentHeartbeat;
 import com.xenova.backend.common.error.ApiException;
+import com.xenova.backend.template.domain.GuestKind;
 import com.xenova.backend.vm.application.VmService;
+import com.xenova.backend.vm.domain.Vm;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -62,7 +64,8 @@ public class AgentStressService {
     }
 
     private AgentStressCommand send(String vmId, AgentStressCommand.StressType type, int amount, int durationS) {
-        vmService.get(vmId);
+        Vm vm = vmService.get(vmId);
+        GuestKind guestKind = vm.guestKind();
         Instant now = clock.instant();
         AgentHeartbeat heartbeat = agentDataService.findHeartbeat(vmId).orElseThrow(() -> agentUnavailable(vmId));
         if (agentDataService.statusOf(heartbeat, now) != com.xenova.backend.agent.domain.AgentStatus.ONLINE
@@ -83,7 +86,7 @@ public class AgentStressService {
         command.put("operation_id", operationId);
         command.put("expected_boot_id", heartbeat.getBootId());
         command.put("expires_at", timestamp(expiresAt));
-        command.put("action", "stress");
+        command.put("action", stressAction(guestKind));
         command.put("parameters", parameters);
 
         Map<String, Object> envelope = new LinkedHashMap<>();
@@ -100,6 +103,12 @@ public class AgentStressService {
                     "MQTT 브로커에 연결되어 있지 않아 부하 명령을 보내지 못했습니다.");
         }
         return new AgentStressCommand(commandId, operationId, vmId, type, amount, durationS, now, expiresAt);
+    }
+
+    private static String stressAction(GuestKind guestKind) {
+        return switch (guestKind) {
+            case LINUX, ZEPHYR -> "stress";
+        };
     }
 
     private byte[] serialize(Map<String, Object> envelope) {

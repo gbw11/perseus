@@ -11,7 +11,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.agent.domain.AgentHeartbeat;
 import com.xenova.backend.agent.domain.AgentStatus;
 import com.xenova.backend.common.error.ApiException;
+import com.xenova.backend.template.domain.GuestKind;
 import com.xenova.backend.vm.application.VmService;
+import com.xenova.backend.vm.domain.Vm;
+import com.xenova.backend.vm.domain.VmState;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -34,6 +37,7 @@ class AgentStressServiceTest {
 
     @BeforeEach
     void setUp() {
+        when(vmService.get(VM_ID)).thenReturn(vm(GuestKind.LINUX));
         AgentHeartbeat heartbeat = new AgentHeartbeat(VM_ID);
         heartbeat.update("boot-123", "agent-1", 3, NOW.minusSeconds(1), NOW.minusSeconds(1));
         when(agentDataService.findHeartbeat(VM_ID)).thenReturn(Optional.of(heartbeat));
@@ -77,6 +81,15 @@ class AgentStressServiceTest {
     }
 
     @Test
+    void zephyrGuestKindIsResolvedBeforePublishingStressCommand() {
+        when(vmService.get(VM_ID)).thenReturn(vm(GuestKind.ZEPHYR));
+
+        service.cpu(VM_ID, 1, 10);
+
+        assertThat(sent.get(0).path("payload").path("action").asText()).isEqualTo("stress");
+    }
+
+    @Test
     void offlineAgentIsRejectedBeforePublishing() {
         when(agentDataService.statusOf(any(), any())).thenReturn(AgentStatus.OFFLINE);
 
@@ -96,5 +109,9 @@ class AgentStressServiceTest {
                     assertThat(exception.getCode()).isEqualTo("MQTT_UNAVAILABLE");
                     assertThat(exception.getStatus().value()).isEqualTo(503);
                 });
+    }
+
+    private static Vm vm(GuestKind guestKind) {
+        return new Vm(VM_ID, "stress-target", guestKind, VmState.RUNNING, "template-1", "1.0", 1, 512);
     }
 }
