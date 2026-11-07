@@ -2,10 +2,15 @@
 
 import json
 import logging
+import errno
+import threading
+import time
 from datetime import datetime, timezone
 from uuid import UUID
+from pathlib import Path
 
 import pytest
+from dom0_manager.recovery import status as status_module
 
 from dom0_manager.errors import PlatformUnavailable
 from dom0_manager.models import VmState
@@ -39,6 +44,20 @@ ZEPHYR = UUID("0d950ea2-cc99-49df-9b60-a4ddf2c8e137")
 SETTINGS = RecoverySettings(interval_s=5, heartbeat_lost_s=30, app_heartbeat_lost_s=15, boot_grace_s=90)
 WALL = datetime(2026, 11, 3, 6, 0, tzinfo=timezone.utc)
 SECRET = "s3cret-broker-password"
+BOOT_A = '11111111-1111-4111-8111-111111111111'
+BOOT_B = '22222222-2222-4222-8222-222222222222'
+
+
+@pytest.fixture(autouse=True)
+def host_boot(monkeypatch):
+    monkeypatch.setattr(status_module, '_read_host_boot_id', lambda: BOOT_A)
+
+
+def wait_for(predicate):
+    end = time.monotonic() + 3
+    while not predicate() and time.monotonic() < end:
+        time.sleep(.005)
+    assert predicate()
 
 
 def _obs(vm_id=LINUX, kind="linux", *, desired="running", present=True, expected=None):
@@ -88,6 +107,7 @@ def test_all_paths_available_is_operable_and_the_file_carries_every_field_withou
     assert status["overall"] == OPERABLE and status["hold_reasons"] == []
     written = json.loads((tmp_path / STATUS_FILE).read_text(encoding="utf-8"))
     assert written == status
+    assert written['version'] == 2 and written['host_boot_id'] == BOOT_A
     for field in ("overall", "policy", "broker_configured", "broker_connected", "agent_subscription", "app_subscription",
                   "drive_configured", "gateway_available", "last_successful_tick", "hold_reasons"):
         assert field in written, field
@@ -268,7 +288,229 @@ def test_reader_returns_fresh_status_and_stale_after_the_window(tmp_path):
     assert fresh["overall"] == OPERABLE and fresh["age_s"] == 10.0
     stale = read_status(tmp_path, now=1016.0)  # Worker 가 죽어도 마지막 OPERABLE 을 내세우지 않는다
     assert stale["overall"] == STALE and stale["last"]["overall"] == OPERABLE and stale["age_s"] == 16.0
-    assert read_status(tmp_path, now=10.0)["overall"] == STALE  # 이전 부팅의 단조 시각
+    assert read_status(tmp_path, now=10.0)["overall"] == STALE  # 같은 host라도 미래 표본은 신선하지 않다
+
+
+def test_boot_change_never_compares_old_uptime_and_new_writer_recovers_without_migration(tmp_path):
+    env = Env(tmp_path)
+    original = env.report([_obs()])
+    changed = read_status(tmp_path, now=1001, boot_id=lambda: BOOT_B)
+    assert changed['overall'] == STALE and changed['reason'] == 'host boot changed'
+    assert changed['last'] == original and 'age_s' not in changed
+    restarted = Env(tmp_path, boot_id=lambda: BOOT_B)
+    restarted.clock[0] = 1001
+    restarted.report([_obs()])
+    assert read_status(tmp_path, now=1001, boot_id=lambda: BOOT_B)['overall'] == OPERABLE
+    legacy = {k: v for k, v in original.items() if k != 'host_boot_id'}
+    legacy['version'] = 1
+    (tmp_path/STATUS_FILE).write_text(json.dumps(legacy))
+    assert read_status(tmp_path, now=1001)['overall'] == UNAVAILABLE
+    restarted.report([_obs()])
+    assert read_status(tmp_path, now=1001, boot_id=lambda: BOOT_B)['host_boot_id'] == BOOT_B
+
+
+def test_boot_read_failure_is_unavailable_and_preserves_first_cause_until_recovery(tmp_path):
+    failure = OSError(errno.EIO, 'fixture boot read failure')
+    def unavailable():
+        raise failure
+    env = Env(tmp_path, boot_id=unavailable)
+    assert env.report([_obs()])['overall'] == UNAVAILABLE
+    assert not (tmp_path/STATUS_FILE).exists() and env.reporter.first_error is failure
+    env.reporter._boot_id = lambda: BOOT_A
+    env.report([_obs()])
+    assert read_status(tmp_path, now=1000)['overall'] == OPERABLE
+    assert read_status(tmp_path, now=1000, boot_id=unavailable)['overall'] == UNAVAILABLE
+    assert env.reporter.first_error is failure
+
+
+@pytest.mark.parametrize('sink', ['file', 'gateway', 'log'])
+def test_slow_optional_sink_keeps_watcher_progress_bounded_copies_and_original_lease(tmp_path, monkeypatch, caplog, sink):
+    entered, release = threading.Event(), threading.Event()
+    def gate():
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(3), 'test must release optional sink'
+    gateway = FakeGateway()
+    options = {}
+    if sink == 'gateway':
+        gateway.context = gate
+        options = dict(gateway=GatewayProbe(gateway), drive_vm_ids=[str(ZEPHYR)], gateway_client=True)
+    env = Env(tmp_path, **options)
+    owner = threading.get_ident()
+    def owned(callback):
+        def call(*args):
+            assert threading.get_ident() == owner, 'Watcher/Engine metadata must stay on its owner'
+            return callback(*args)
+        return call
+    for name in ('_connected', '_links', '_publishers', '_intent_known', '_internal'):
+        setattr(env.reporter, name, owned(getattr(env.reporter, name)))
+    env.connected = False
+    watcher = Watcher(SETTINGS, HeartbeatTable(), clock=lambda: env.clock[0])
+    worker = RecoveryWorker(SETTINGS, lambda: [_obs()], watcher, link=LinkState.down,
+                            clock=lambda: env.clock[0], status=env.reporter)
+    original = status_module.os.replace
+    if sink == 'file':
+        def replace(source, target):
+            if Path(target) == env.reporter.path:
+                gate()
+            return original(source, target)
+        monkeypatch.setattr(status_module.os, 'replace', replace)
+    class SlowHandler(logging.Handler):
+        def emit(self, record):
+            gate()
+    handler = SlowHandler()
+    if sink == 'log':
+        status_module.log.addHandler(handler)
+        caplog.set_level(logging.INFO, logger=status_module.__name__)
+    try:
+        worker.run_once()
+        assert entered.wait(1)
+        env.connected = True
+        for _ in range(24):
+            env.clock[0] += 1
+            worker.run_once()
+        env.links['app'] = NOT_GRANTED
+        env.clock[0] += 1
+        worker.run_once()
+        # 제출 후 원 객체를 바꿔도 대기 표본의 내용은 바뀌지 않는다.
+        env.links['app'] = DELIVERING
+        state = env.reporter.sink_snapshot()
+        assert worker.ticks == 26 and state['submitted'] == 26 and state['coalesced'] == 24
+        assert state['pending'] == 1 and state['in_flight'] and state['worker_alive']
+        env.clock[0] += 20
+        release.set()
+        wait_for(lambda: env.reporter.sink_snapshot()['written'] == 2)
+        stale = read_status(tmp_path, now=env.clock[0])
+        assert stale['overall'] == STALE and stale['last']['updated_monotonic'] == 1025
+        assert stale['last']['hold_reasons'] == ['APP_SUBSCRIPTION_NOT_GRANTED']
+        worker.run_once()
+        wait_for(lambda: env.reporter.sink_snapshot()['written'] == 3)
+        assert read_status(tmp_path, now=env.clock[0])['overall'] == OPERABLE
+    finally:
+        release.set()
+        worker.shutdown()
+        status_module.log.removeHandler(handler)
+    assert not env.reporter.sink_snapshot()['worker_alive']
+
+
+@pytest.mark.parametrize('internal', [False, True])
+def test_async_io_or_internal_failure_preserves_cause_and_normal_recovery(tmp_path, monkeypatch, caplog, internal):
+    env = Env(tmp_path)
+    env.report([_obs()])
+    error = TypeError('fixture internal defect') if internal else OSError(errno.ENOSPC, 'fixture full')
+    cause = ValueError('fixture original cause')
+    error.__cause__ = cause
+    original = status_module.os.replace
+    remaining = [2]
+    def replace(source, target):
+        if Path(target) == env.reporter.path and remaining[0]:
+            remaining[0] -= 1
+            raise error
+        return original(source, target)
+    monkeypatch.setattr(status_module.os, 'replace', replace)
+    try:
+        for failure in (1, 2):
+            env.clock[0] += 20
+            env.reporter.submit([_obs()])
+            wait_for(lambda: env.reporter.sink_snapshot()['failures'] == failure)
+            assert read_status(tmp_path, now=env.clock[0])['overall'] == STALE
+        env.reporter.submit([_obs()])
+        wait_for(lambda: env.reporter.sink_snapshot()['written'] == 2)
+        assert read_status(tmp_path, now=env.clock[0])['overall'] == OPERABLE
+        assert env.reporter.first_error is error and env.reporter.first_error.__cause__ is cause
+        marker = 'publication failed' if internal else 'could not be written'
+        assert sum(marker in record.getMessage() for record in caplog.records) == 1
+    finally:
+        assert env.reporter.close()
+
+
+def test_close_reports_live_writer_without_blocking_or_claiming_drain(tmp_path, monkeypatch):
+    env = Env(tmp_path)
+    entered, release = threading.Event(), threading.Event()
+    original = env.reporter._write
+    def write(status):
+        entered.set()
+        assert release.wait(3)
+        return original(status)
+    monkeypatch.setattr(env.reporter, '_write', write)
+    env.reporter.submit([_obs()])
+    try:
+        assert entered.wait(1)
+        assert env.reporter.close() is False
+        assert env.reporter.sink_snapshot()['worker_alive']
+        assert env.reporter.submit([_obs()]) is False
+    finally:
+        release.set()
+        wait_for(lambda: not env.reporter.sink_snapshot()['worker_alive'])
+        assert env.reporter.close()
+
+
+def test_expected_io_failure_does_not_suppress_distinct_internal_causes(tmp_path, monkeypatch, caplog):
+    env = Env(tmp_path)
+    errors = [OSError(errno.ENOSPC, 'fixture full'), TypeError('fixture defect'), KeyError('fixture invariant')]
+    errors[1].__cause__ = ValueError('fixture original internal cause')
+    remaining = list(errors)
+    original = status_module.os.replace
+    def replace(source, target):
+        if Path(target) == env.reporter.path and remaining:
+            raise remaining.pop(0)
+        return original(source, target)
+    monkeypatch.setattr(status_module.os, 'replace', replace)
+    try:
+        for count in range(1, 4):
+            env.reporter.submit([_obs()])
+            wait_for(lambda: env.reporter.sink_snapshot()['failures'] == count)
+        wait_for(lambda: not env.reporter.sink_snapshot()['in_flight'])
+        recorded = [r.exc_info[1] for r in caplog.records if 'publication failed' in r.getMessage()]
+        assert recorded == errors[1:]  # 이미 기록한 I/O 실패로 TypeError·KeyError를 숨기지 않는다.
+        assert env.reporter.first_error is errors[0]
+        assert env.reporter.first_internal_error is errors[1] and env.reporter.last_error is errors[2]
+        env.reporter.submit([_obs()])
+        wait_for(lambda: env.reporter.sink_snapshot()['written'] == 1)
+        assert read_status(tmp_path, now=1000)['overall'] == OPERABLE
+        remaining.append(errors[1])
+        env.reporter.submit([_obs()])
+        wait_for(lambda: env.reporter.sink_snapshot()['failures'] == 4 and not env.reporter.sink_snapshot()['in_flight'])
+        recorded = [r.exc_info[1] for r in caplog.records if 'publication failed' in r.getMessage()]
+        assert recorded == [errors[1], errors[2], errors[1]]  # 정상 회복 뒤 새 발생은 다시 진단한다.
+        env.reporter.submit([_obs()])
+        wait_for(lambda: env.reporter.sink_snapshot()['written'] == 2)
+        assert read_status(tmp_path, now=1000)['overall'] == OPERABLE
+    finally:
+        assert env.reporter.close()
+
+
+def test_optional_sink_failure_cannot_hide_required_recovery_store_failure(tmp_path, monkeypatch):
+    w = make(tmp_path)
+    normal_save = w.store.save
+    w.store.save = lambda records: False
+    w.engine.on_judgment(judgment())
+    env = Env(tmp_path, internal=w.engine.hold_reasons)
+    original = status_module.os.replace
+    def full(source, target):
+        if Path(target) == env.reporter.path:
+            raise OSError(errno.ENOSPC, 'fixture diagnostic sink full')
+        return original(source, target)
+    monkeypatch.setattr(status_module.os, 'replace', full)
+    try:
+        env.reporter.submit([_obs()])
+        wait_for(lambda: env.reporter.sink_snapshot()['failures'] == 1)
+        w.tick()
+        assert w.engine.hold_reasons() == ['RECOVERY_STATE_UNSAVED']
+        assert w.platform.recover_calls() == []
+        w.store.save = normal_save
+        monkeypatch.setattr(status_module.os, 'replace', original)
+        w.tick()
+        assert w.platform.recover_calls() == []  # 이미 정한 transient backoff를 생략하지 않는다.
+        w.advance(5)
+        w.tick()
+        assert len(w.platform.recover_calls()) == 1 and not w.engine.hold_reasons()
+        env.reporter.submit([_obs()])
+        wait_for(lambda: env.reporter.sink_snapshot()['written'] == 1)
+        assert read_status(tmp_path, now=1000)['overall'] == OPERABLE
+    finally:
+        assert env.reporter.close()
+        w.engine.shutdown()
 
 
 def test_reader_reports_missing_unreadable_and_malformed_files_as_unavailable(tmp_path):
@@ -278,7 +520,9 @@ def test_reader_reports_missing_unreadable_and_malformed_files_as_unavailable(tm
     assert "not valid JSON" in read_status(tmp_path, now=0)["reason"]
     env = Env(tmp_path)
     good = env.report([_obs()])
-    for damage in ({"overall": "FINE"}, {"version": 2}, {"updated_monotonic": "soon"}, {"updated_monotonic": -1}, {"stale_after_s": 0},
+    for damage in ({"overall": "FINE"}, {"version": 3}, {"host_boot_id": None}, {"host_boot_id": True},
+                   {"host_boot_id": 'not-a-uuid'}, {"host_boot_id": str(UUID(int=0))},
+                   {"updated_monotonic": "soon"}, {"updated_monotonic": -1}, {"stale_after_s": 0},
                    {"hold_reasons": "none"}, {"hold_reasons": ["X"]}, {"overall": DEGRADED}, {"policy": "failover"},
                    {"broker_connected": "yes"}, {"broker_configured": 1}, {"drive_configured": None}, {"intents_known": "true"},
                    {"agent_subscription": "BOGUS"}, {"app_subscription": None}, {"gateway_available": "up"}, {"gateway_available": True},
@@ -367,12 +611,17 @@ def test_worker_reports_on_every_cycle_and_a_failing_report_does_not_stop_it(tmp
 
     watcher = Watcher(SETTINGS, HeartbeatTable(), AppHeartbeatTable(), clock=lambda: env.clock[0])
     worker = RecoveryWorker(SETTINGS, observer, watcher, link=LinkState.up, clock=lambda: env.clock[0], status=env.reporter)
-    worker.run_once()
-    assert read_status(tmp_path, now=1000.0)["overall"] == OPERABLE
-    observations[0] = None
-    worker.run_once()
-    assert read_status(tmp_path, now=1000.0)["hold_reasons"] == ["OBSERVATION_FAILED"]
-    env.reporter.report = lambda observations: 1 / 0
-    observations[0] = [_obs()]
-    worker.run_once()
-    assert worker.ticks == 2
+    try:
+        worker.run_once()
+        wait_for(lambda: env.reporter.sink_snapshot()['written'] == 1)
+        assert read_status(tmp_path, now=1000.0)["overall"] == OPERABLE
+        observations[0] = None
+        worker.run_once()
+        wait_for(lambda: env.reporter.sink_snapshot()['written'] == 2)
+        assert read_status(tmp_path, now=1000.0)["hold_reasons"] == ["OBSERVATION_FAILED"]
+        env.reporter.submit = lambda observations: 1 / 0
+        observations[0] = [_obs()]
+        worker.run_once()
+        assert worker.ticks == 2
+    finally:
+        worker.shutdown()
