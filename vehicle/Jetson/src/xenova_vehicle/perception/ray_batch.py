@@ -99,8 +99,16 @@ class RayBundleBatch:
         object.__setattr__(self, '_count', count)
         object.__setattr__(self, '_common_source', common)
         object.__setattr__(self, '_sources', sources)
-        accepted = tuple(int(v) for v in np.flatnonzero(flags))
-        accepted_pixels = tuple(tuple(float(v) for v in pixel_values[i]) if present[i] else None for i in accepted)
+        accepted_rows = np.flatnonzero(flags)
+        accepted = tuple(accepted_rows.tolist())
+        selected_pixels = pixel_values[accepted_rows].tolist()
+        selected_present = present[accepted_rows]
+        # scalar 변환은 NumPy C 경로로 옮기되 누락 pixel의 None은 보존한다.
+        if selected_present.all():
+            accepted_pixels = tuple(map(tuple, selected_pixels))
+        else:
+            accepted_pixels = tuple(tuple(pixel) if exists else None
+                for pixel, exists in zip(selected_pixels, selected_present))
         bins = {}
         for index, pixel in enumerate(accepted_pixels):
             if pixel is not None:

@@ -87,6 +87,75 @@ class RayBatchTests(unittest.TestCase):
         self.assertEqual(tuple(empty), ())
         self.assertEqual(empty.accepted_indices, ())
 
+    def test_pixel_inventory_keeps_missing_negative_extreme_values_and_bin_order(self):
+        base = witness_rays()[0]
+        huge = float.fromhex('0x1.fffffffffffffp+1023')
+        points = (None, (-.01, -8.), (0., 0.), (7.999, 8.), (8., 8.), (0., 0.),
+                  (float(2 ** 67), -float(2 ** 70)), (huge, -huge),
+                  (math.nextafter(8., -math.inf), math.nextafter(-8., -math.inf)))
+        rays = tuple(replace(base, pixel=pixel, qualified=i != 4,
+                             source_key=None if i % 2 else ('source', i))
+                     for i, pixel in enumerate(points))
+        batch = RayBundleBatch.from_rays(rays)
+        accepted = tuple(i for i, ray in enumerate(rays) if ray.qualified)
+        pixels = tuple(rays[i].pixel for i in accepted)
+        bins = {}
+        for i, pixel in enumerate(pixels):
+            if pixel is not None:
+                bins.setdefault(tuple(math.floor(v / 8) for v in pixel), []).append(i)
+        self.assertEqual(batch.accepted_indices, accepted)
+        self.assertEqual(batch.accepted_pixels, pixels)
+        self.assertEqual(list(batch.bins.items()), [(k, tuple(v)) for k, v in bins.items()])
+        self.assertEqual(tuple(batch), rays)
+        self.assertTrue(all(type(i) is int for i in batch.accepted_indices))
+        self.assertTrue(all(pixel is None or (type(pixel) is tuple
+            and all(type(v) is float for v in pixel)) for pixel in batch.accepted_pixels))
+        self.assertIsNone(batch.accepted_pixels[0])
+
+    def test_all_present_maximum_rows_preserve_raw_storage_source_and_readonly_views(self):
+        count = 8192
+        origin = np.tile((0., 0., 1.), (count, 1))
+        direction = np.tile((0., 0., -1.), (count, 1))
+        measured, near, far = np.ones(count), np.full(count, .01), np.full(count, 3.)
+        pixels = np.column_stack((np.arange(count) * 16., np.zeros(count)))
+        batch = RayBundleBatch(origin, origin, direction, direction,
+            measured, measured, near, far, True, None, pixels)
+        expected = np.column_stack((origin, origin, direction, direction,
+            measured, measured, near, far, pixels)).astype('<f8').tobytes()
+        self.assertEqual(batch.numbers.tobytes(), expected)
+        self.assertEqual(batch.accepted_indices, tuple(range(count)))
+        self.assertEqual(batch.accepted_pixels, tuple((i * 16., 0.) for i in range(count)))
+        self.assertEqual(batch.bins[(0, 0)], (0,))
+        self.assertEqual(batch.bins[((count - 1) * 2, 0)], (count - 1,))
+        self.assertIsNone(batch[-1].source_key)
+        for array in (batch.numbers, batch.pixels, batch.qualified, batch.pixel_present):
+            with self.assertRaises(ValueError):
+                array.setflags(write=True)
+
+    def test_certificate_preserves_ties_work_empty_allfalse_and_absent_pixels(self):
+        originals = witness_rays()
+        target = (TargetClass(.5, .5, .5, qualified=True),)
+        cell, calibration = (-.01, -.01, .01, .01), profile()
+        variants = (
+            (),
+            tuple(replace(ray, qualified=False, pixel=(48., 48.)) for ray in originals),
+            tuple(replace(ray, pixel=None, source_key=None) for ray in originals),
+            tuple(replace(ray, pixel=(48. if i % 2 else 56., 48.),
+                          qualified=i != 4, source_key=None if i % 2 else ('source', i))
+                  for i, ray in enumerate(originals)),
+        )
+        for rays in variants:
+            batch = RayBundleBatch.from_rays(rays)
+            self.assertEqual(batch.accepted_indices, tuple(i for i, ray in enumerate(rays) if ray.qualified))
+            self.assertEqual(batch.accepted_pixels, tuple(ray.pixel for ray in rays if ray.qualified))
+            for cap in (0, 1, 256):
+                with self.subTest(count=len(rays), cap=cap):
+                    expected = certify_cell(cell, rays, target, calibration, max_ray_tests=cap)
+                    actual = certify_cell(cell, batch, target, calibration, max_ray_tests=cap)
+                    self.assertEqual(actual, expected)
+        self.assertEqual(certify_cell(cell, variants[1], target, calibration).reason,
+                         'NO_ACCEPTED_RAY_BUNDLE')
+
     def test_boundary_rejects_nonfinite_reversed_nonunit_and_invalid_identity(self):
         def columns(count=1):
             return [np.tile((0., 0., 1.), (count, 1)), np.tile((0., 0., 1.), (count, 1)),
