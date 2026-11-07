@@ -383,6 +383,30 @@ READY 교체는 `begin_replace(slot, expected_key, request, write_token, now_us=
 
 원장 하나는 현재2slot, slot당 현재 write/filled·최근 cleanup summary 하나, A outstanding write/ticket 하나와 M active read 하나만 보유한다. ticket은 이전 grant/history를 재귀적으로 붙이지 않는다. owner exit 회수·reader 교체·token 정규화·전역 active/최대1 quarantine set 관리자와 새 arena 생성은 미지원이다. 같은 arena에 원장을 새로 만들어 generation을 초기화하는 우회는 실제 adapter가 막아야 한다. SLOT/BIND wire 지원·owned bytes header/descriptor codec·SHM/SemLock·실 exit/lease 회수·metric/READY·이동 권위를 이 순수 API의 통과로 수락하지 않는다.
 
+## 소유한 P0 raw slot의 바이트 검증
+
+`runtime.raw_slot`은 소유한 `bytes`만 받는 순수 codec이다. SDK·파일·시계·UUID 생성·실제 shared memory/token을 호출하지 않는다. `P0Context(write_key, stream_ids, nn_configured)`는 원장의 전체 `WriteKey`와 caller가 이미 승인한 named stream UUID 표의 소유 사본을 보유한다. `stream_ids`는 NN configured면 rgb_video/depth_right/nn_input0/nn_output0 네 개, 아니면 앞 두 개이며 모두 서로 다르다. public 표는 readonly다. 이 subset 검증은 전체 RawBinding 승인·hash 계산이 아니다.
+
+`SlotEncoding(context, native_descriptor, payload)` 또는 `encode_owned(...)`는 descriptor의 bounded 소유 사본을 검사하고 compact sorted ASCII JSON·header·zero metadata slack·원 body를 합친 새 used-slot bytes를 만든다. encoder에는 아직 없는 FILLED 완료 시각이 필요하지 않으며 fake 완료를 생성하지 않는다. 실제 A는 copy/post 뒤 원 완료 시각으로 `FilledInfo`를 별도 생성해야 한다. payload[0]은 slot offset4096이다.
+
+`ExpectedSlot(context, original_filled_info)`는 원 full write key가 같은 FILLED를 고정한다. `PrefixHeader(header128bytes, context)` 또는 `prefix(...)`는 header만 검사해 `.used_length`를 반환한다. descriptor 길이1..3968, body 길이1..2093056, generation 양수 u64이고, prefix는 메모리 읽기 허가나 내용 검증이 아니다. `OwnedSlot(raw, expected, optional_prefix=None)` 또는 `decode_owned(...)`는 **동일 owned bytes의 header부터 다시** 검사한다. 정확4096+L 길이, 선택한 prefix 원128B, 원 FILLED의 length/descriptor SHA·원 received/bridge.after≤completed를 대조한다. 실제 lease/current·slot 선택·ready acquire와 안정된 copy는 caller의 별도 책임이다.
+
+세 결과 constructor도 helper와 같은 검사를 수행하고 unchecked/validated flag는 없다. 결과 `.raw`, `.header`, `.descriptor_bytes`, `.descriptor_sha256`, `.payload_length`는 frozen 값이다. `.descriptor()`는 새 mutable dict/list 사본, `.payload_bytes()`는 gap/tail 포함 사용 body의 새 bytes 사본이다. decoder는 입력된 immutable owned bytes를 참조하고 작은 header/descriptor 사본·bounded JSON tree만 만들며, encoder는 최대2MiB 새 bytes를 만든다. zero-copy SDK/SHM view를 지원하지 않는다. 호출 중 입력 tree의 동시변경이나 private/frozen 상태의 강제 변이는 지원하지 않는다.
+
+header는 `<8sHHI16sQ16s32sIII28s`, magic `XNVRAW1`+NUL/version1/128B/reserved0이다. 정수는 LE standard size, UUID는 RFC4122 `.bytes` 순서다. descriptor CRC/SHA는 slot `[128,128+D)` 원 bytes, payload CRC는 `[4096,4096+L)` 전체이며 `zlib.crc32(span,0)` unsigned32다. slack `[128+D,4096)`는0, 미사용 slot tail은 입력하지 않는다. header 전체를 덮는 CRC는 없고 descriptor SHA는 body를 덮지 않는다. body와 header payload CRC가 일관되게 바뀐 경우를 인증으로 검출하지 않는다.
+
+exact root6은 `version,profile,raw_binding_sha256,streams,planes,nn`이다. version1/profile `p0-yolop-320-v1`이며 각 stream stamp는 `source_key,sdk_us,received_j_us,bridge_sample,sdk_host_j_interval_us,exposure_us,capture_j_interval_us`다. source key는 `[등록 stream UUID,canonical u64 seq string,canonical u64 device_us string]`이다. SDK/J 시각도 u64string이며 서로 다른 clock domain의 숫자를 직접 정렬하지 않는다. bridge가 있으면 원 `{j_before_us,sdk_us,j_after_us}`에서 ±1us 양자화 여유를 포함한 SDK-host J interval을 재계산한다. Jbefore≤Jafter, 수신−Jafter는0..1000000us, 최종 endpoint는 u64다. bridge/파생 interval은 함께 null일 수 있고 capture interval은 null-only다. 노출값은 sensor별 실제 int0..1000000 또는null, NN은 null-only다. 이 구조가 sensor capture·freshness를 증명하지 않는다.
+
+각 plane exact6은 `offset,length,dtype,encoding,shape,strides_bytes`다. RGB는 NV12/u1/345600B/storage[540,640]/stride[640,1]이며 실제 영상640×360이다. depth는 RAW16_LE/<u2/614400B/[480,640]/stride[1280,2], native RIGHT Z mm·0unknown·RGB 미정렬이다. 선택 NN은 u1/NN_STORAGE/실제1..1048576B/[length]/[1]이다. plane offset은 slot-relative≥4096·64B 정렬·서로 비중첩이고 가장 늦은 plane 끝이 정확4096+L다. NN tensor offset은 NN storage-relative·even이며 plane 정렬과 다르다. 실제 arena 주소에는 외부 slot_base가 별도로 더해진다.
+
+NN configured=true여도 개별 `nn=null`은 정상이며 이때 NN plane/input/output stamp는 모두 없다. present NN은 exact `rgb_parent_key,input_key,output_key,layers`이고 실제 각 stamp key 및 RGB/input/output의 원 seq/device/SDK stamp가 일치해야 한다. 네 stream UUID는 독립이고 depth 순번·시각은 강제로 같게 하지 않는다. stream 간 수신 역전도 허용한다. NN SDK stamp를 추론 종료 시각이나 sensor capture로 바꾸지 않는다.
+
+layer는 실제 다차원 runtime det_out `[1,6300,6]`/order801/75600B와 drive_area_seg·lane_line_seg `[1,2,320,320]`/order17185/각409600B만 받는다. 각 exact7은 `name,data_type_code,order_code,dims,strides_bytes,offset,length`, FP16 code0·packed byte stride·고유3name·even/nonoverlap·실 storage 범위를 검사하며 원 배열 순서와 gap/tail을 보존한다. flat rank1은 이 codec에서 미지원이고 기존 NNPacket의 진단용 지원은 유지한다. 활성 FP16 finite 검사는 codec 밖의 기존 NNPacket/adapter 책임이다. CRC가 맞는 NaN의 형식 수락은 parser/NN_READY 성공이 아니다. `nn_output0`→기존 `nn_output` 이름 mapping과 NNPacket의 계측 clock도 이 API에 포함되지 않는다.
+
+native descriptor는 exact dict/list/str/int/None을 한 번 복사하며 container depth(root1)≤5·node512·string/key64 ASCII·intbits64·list4·dict8을 검사한다. scalar leaf depth6은 허용하고 비순환 alias는 출현별로 복사·계수하며 cycle은 거절한다. 이 bound는 descriptor에만 적용하며 context arena_name128이나 nn_configured bool과 혼동하지 않는다. decoder는 parse 전 raw3968B/depth5를 제한하고 tree/typed bound를 추가 적용한다. parse 할당량을512nodes라고 보장하는 것은 아니다. decoded nested duplicate/unknown·BOM·trailing 다른 JSON·float/nonfinite·bool-int·surrogate/비ASCII semantic을 거절한다. 허용 ASCII unicode escape와 내부/앞뒤 JSON whitespace는 원 Dspan/CRC/SHA에 포함하며 strip/re-encode로 교체하지 않는다.
+
+실제 RawBinding/센서·pixel equivalence·freshness·lease/메모리 발행·owner exit·METRIC_MAP 사전 metadata 전달·BIND/SLOT·15Hz/RSS·READY/주행 자격은 별도 계약이다. codec의 layout-only 결과를 이 권한으로 승격하지 않는다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
