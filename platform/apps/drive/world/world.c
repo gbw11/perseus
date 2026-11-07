@@ -150,9 +150,14 @@ static dw_point boundary(const dw_world *w,size_t k){
 }
 static bool road_simple(const dw_world *w){
  size_t n=w->reference_count,edges=2*n;
- for(size_t k=0;k<n;k++){
-  dw_point a=w->reference[k?k-1:0],b=w->reference[k?k:1];
-  if(cross(a,b,w->left_boundary[k])<=1e-6f||cross(a,b,w->right_boundary[k])>=-1e-6f)return false;
+ if(w->required_features&DW_LANE_MODEL){
+  /* 새 basis는 station 축이며 hard domain의 두 chain은 차선의 좌우 대응점이 아니다. */
+  if(!simple(w->reference,n,false))return false;
+ }else{
+  for(size_t k=0;k<n;k++){
+   dw_point a=w->reference[k?k-1:0],b=w->reference[k?k:1];
+   if(cross(a,b,w->left_boundary[k])<=1e-6f||cross(a,b,w->right_boundary[k])>=-1e-6f)return false;
+  }
  }
  /* Bounded at 128 edges, once per received immutable map, not per tracker. */
  for(size_t i=0;i<edges;i++){

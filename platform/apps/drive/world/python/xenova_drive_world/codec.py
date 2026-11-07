@@ -266,6 +266,9 @@ def _validate_one(message):
         if message.required_features&ROAD_PRIORITY and not any(v&CELL_ROAD for v in message.cell_flags):raise ValueError('missing preferred road')
         new=message.required_features in (11,15)
         if new and message.minor!=2:raise ValueError('world minor2 required')
+        if new:
+            _simple([_xy(p) for p in message.reference])
+            _simple([_xy(p) for p in message.left_boundary]+[_xy(p) for p in reversed(message.right_boundary)],True)
         for field,required in (('lane_model',bool(message.required_features&LANE_MODEL)),
                 ('localization',bool(message.required_features&LOCALIZATION_BOUNDS)),
                 ('parking_set',bool(message.required_features&PARKING_MODEL)),('drivable_permission',new)):
