@@ -55,7 +55,7 @@ retained·같은 progress·역전·과거 실행·과거 crash를 새 표본처�
 | 관측 → 판정 조건 | 기능 영향·허용 행동 | 회복·반복 억제 | 수락 assertion |
 |---|---|---|---|
 | 유효 CPU 구간이 100000: 계상 idle 없음 | `CPU_NO_IDLE` 경고. 실제 계산·기한 정상일 때 READY/명령을 유지 | 다음 유효 구간으로 판단. 90% 등 근거 없는 문턱 없음 | 95% 정상, 100% 경고에서 준비 제한·VM 호출 0 |
-| 유효 heap/pool free=0 | `MEMORY_NO_FREE` 경고. 현재 stateless 계산이 할당을 요구하지 않으면 기능 실패로 확대하지 않음 | 다음 실제 free 관측으로 해제. 누적 과거 ENOMEM을 현재 실패로 사용하지 않음 | 자원 여유 0이어도 on-time MANUAL 유효 |
+| 유효 kernel heap·net RX/TX data pool free=0 | `MEMORY_NO_FREE` 경고. 현재 stateless 계산이 할당을 요구하지 않으면 기능 실패로 확대하지 않음 | 다음 유효 원 표본에서 영역별 재평가. 누적 과거 ENOMEM을 현재 실패로 사용하지 않음 | 자원 여유 0이어도 on-time MANUAL 유효 |
 | CPU/heap 미지원·첫 표본·cache 오래됨·try-lock 경합·목록 잘림 | 보조 관측 경고. 불명 값을 0%/전체 정상으로 만들지 않음 | 새 유효 원 구간을 기다림. 표본 재전달로 age를 갱신하지 않음 | `cpu_valid=false`·local 출력 null, 정상 계산은 유지 |
 | 해당 필수 어댑터가 실제 -ENOMEM/-ENOBUFS 반환 | `RESOURCE_FAILED`, 해당 모드 NOT_READY·결과 0. 기존 `CALCULATION_FAILED`와 local 원 errno 사용 | 다음 실제 계산·입력·상태 준비가 충족돼야 회복 | AUTO 할당 실패 중 정상 MANUAL READY 유지 |
 | 실제 계산 오류·잘못된 출력 | 해당 모드 제한. `OUTPUT_INVALID`는 기존 사유 유지 | 새 실제 완료·출력 검증. heartbeat로 상쇄하지 않음 | 낮은 CPU·정상 통신이어도 오류 결과 선택 불가 |
@@ -63,6 +63,31 @@ retained·같은 progress·역전·과거 실행·과거 crash를 새 표본처�
 | AUTO callback 지연 중 MANUAL은 원 기한 안에 실제 완료 | AUTO 결과·준비만 제한. 정상 MANUAL의 실제 진행·준비는 유지 | 오래된 AUTO 결과로 새 제어를 적용했다고 하지 않음. 기존 serial helper의 과거 반례는 회귀로 보존 | 실제 main에서 AUTO 지연 중 MANUAL 진행, 옛 문맥 거절·원 기한 join 확인 |
 | 필수 작업 미시작·일 없음·종료 중 | 존재/낮은 CPU/대기를 진행 실패로 해석하지 않음 | 현재 lifecycle·작업 기대 조건으로 재평가 | IDLE/NOT_STARTED/STOPPING에 과거 deadline 적용 금지 |
 | 진단 전용 작업의 allocation 실패 | 진단 실패를 남기되 drive 준비를 제한하지 않음 | 진단 작업의 재수집. 새 실행·원 intent 변경 없음 | 동일 ENOMEM도 required=false면 기능 제한 0 |
+
+### 자원별 사전 여유 경고의 현재 범위
+
+`xdh_assess`는 호출마다 새 평가를 만드는 단일 표본 분류기다. 사전 여유 경고의 진입 문턱,
+지속시간, 별도 해제 문턱과 hysteresis는 현재 구현하지 않았다. 기존 200ms collector 주기와
+1초 cache 유효성은 관측의 조건이며 새 경고 정책값이 아니다. 같은 `resource_sample`·원 구간의
+반복 평가나 재전달을 새 지속 위반으로 세지 않으며, 미지원·수집 오류·만료는 정상 회복의 증거가 아니다.
+
+| 영역·단위 | 원 표본·측정창·분모 | 현재 경고 | 지속·해제 상태 | 허용 행동 | 근거와 미검증 범위 |
+|---|---|---|---|---|---|
+| guest UP CPU, milli-percent | 실제 `start_ms/end_ms`의 non-idle/전체 계상. source rc·연속성·cache 나이 확인 | 유효 구간 100000이면 `CPU_NO_IDLE` | 다음 유효 구간으로 재평가. 별도 지속·해제 정책 없음 | 계산·기한이 정상이면 READY/명령 유지, 진단·운영자 확인 | 분류 회귀는 있음. 실제 부하의 사전 여유·지속·해제 조건과 pCPU 부족 판단은 미수락 |
+| kernel system heap, bytes | collector의 원 sample·heap rc·나이. 동일 heap의 allocated/free 범위이며 전체 RAM이 아님 | free=0이면 `MEMORY_NO_FREE` | 다음 유효 free 표본에서 재평가. 별도 해제 문턱 없음 | 실제 필수 할당 실패와 분리해 진단 | 여유 0과 필수 실패의 분리 회귀는 있음. 필요한 할당 크기·부하별 사전 여유는 미확정 |
+| `net_rx_data`·`net_tx_data`, payload bytes | 각 고정 pool의 가용 block과 해당 capacity. 서로 다른 영역·RAM과 합산 금지 | 유효한 해당 영역 free=0이면 `MEMORY_NO_FREE` | 영역별 다음 유효 표본으로 재평가. 지속시간 없음 | 전달 자원 점검. 단독 VM 장애·승계 근거로 쓰지 않음 | pool 범위 계측은 있음. 전달 부하별 사전 여유·지속·해제 조건은 미확정 |
+| `drive_maps`·`drive_paths`·`drive_search_nodes`·`drive_odometry`·MANUAL 소유 영역, bytes/count | 영역별 원 sample·rc·나이. capacity는 payload 단위이고 reserved는 metadata/workspace 포함 | app pool은 현재 `health.c` 경고 분기에 미연결 | 정책 없음. 반환 뒤에도 peak·고갈 누계는 남는 이력 | 계측·소유 반환 점검. 실제 필수 작업 실패는 별도 분기로 판단 | 실제 고갈·반환·peak 유지 회귀는 있음. 계상 정확성을 운영 여유 정책 수락으로 확대하지 않음 |
+| thread stack, bytes | 명시적 scan의 stack 크기와 unused high-water. 현재 SP·사용량이 아님 | stack 여유 문턱은 현재 health 경고에 미연결 | 진입·지속·해제 정책 없음 | 용도별 최대 사용량 확인과 stack 구성 검토 | ARM scan 회귀와 미지원 구분은 있음. 실제 전체 call chain·IRQ 중첩·장기 부하 여유는 미수락 |
+| managed RAM, bytes/영역 비율 | 원 firmware/page 표본의 RAM 영역·free page와 freshness. heap·pool을 중복 합산하지 않음 | managed RAM 비율은 현재 health 경고에 미연결 | 진입·지속·해제 정책 없음 | 영역 범위의 계측·운영자 확인 | allocator 범위·반환 회귀는 있음. VM별 운영 여유 문턱이나 실행 중 VM 종료 근거로 확대하지 않음 |
+
+사전 여유 정책값은 위 영역·분모·원 구간·freshness와 실제 필수 작업의 자원 요구·완료 기한을
+함께 측정한 근거로 정한다. 근거가 부족하면 운영값을 확정하지 않는다. CPU 100%·free 0 또는
+과거 peak·고갈 누계만으로 승계·재시작을 허가하지 않는다. 현재 분기는
+[health.c](../../platform/guests/zephyr/diagnostics/src/health.c), 원 구간·영역은
+[resources_core.c](../../platform/guests/zephyr/diagnostics/src/resources_core.c)와
+[resources.c](../../platform/guests/zephyr/diagnostics/src/resources.c)를 따른다.
+분류 회귀는 [test_health.c](../../platform/guests/zephyr/diagnostics/tests/test_health.c),
+계상·고갈·반환과 stack 측정 범위는 [memory-native](../../platform/apps/drive/tests/memory-native/src/main.c)에서 확인한다.
 
 알고리즘이 반환하지 않으면 해당 계산 소유자는 새 완료·READY를 만들 수 없다. main과
 다른 계산은 계속 동작할 수 있지만, 통신 작업자가 과거 READY/heartbeat를 갱신하지 않는다.

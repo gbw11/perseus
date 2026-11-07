@@ -1221,9 +1221,9 @@ class Platform:
                 with short_lock(self.runtime,'admission'):
                     manager._writable()
                     atomic_write(directory/'instance.json',json.dumps(updated,indent=2)+'\n')
-        print(json.dumps({'action': 'firmware-replace' if execute else 'plan-firmware-replace',
-                          'id': record['id'], 'firmware': info, 'uuid': record['uuid'],
-                          'starts_guest': False}, indent=2))
+        return {'action': 'firmware-replace' if execute else 'plan-firmware-replace',
+                'id': record['id'], 'firmware': info, 'uuid': record['uuid'],
+                'starts_guest': False}
 
     def delete(self, record, *, execute=False, idempotency_key=None):
         """delete는 공통 retire의 보관 별칭이며 영구 삭제를 수행하지 않는다."""
@@ -1343,9 +1343,10 @@ def legacy_command(action, options, *, platform=None):
                 record=p.records(validate_assets=False).get(args.id)
                 if not record or record['uuid']!=identity:raise PlatformError('firmware target changed')
                 lease.guard()
-                p.replace_firmware(record,args.bundle,args.sha256,execute=args.execute,
-                                   _context={'asset_lease':lease,'common_fd':common})
-        return
+                result=p.replace_firmware(record,args.bundle,args.sha256,execute=args.execute,
+                                          _context={'asset_lease':lease,'common_fd':common})
+        # 정식 CLI 결과는 진단 sink와 분리하고 소유권 해제 뒤 호출자가 출력한다.
+        return result
     if args.action == 'diagnose':
         if options.get('details'):
             with operation_lock(p.runtime):

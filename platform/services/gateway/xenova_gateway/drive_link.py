@@ -9,13 +9,14 @@ from pathlib import Path
 from types import SimpleNamespace
 import os
 import queue
+import select
 import socket
 import stat
 import threading
 import time
 from uuid import UUID
 
-from xenova_drive_world import schema,encode,decode,validate,MAX_BYTES
+from xenova_drive_world import schema,encode,decode,validate,MAX_BYTES,PreparedClock
 from xenova_mqtt.drive_binding import app_instance
 from .planning import context
 
@@ -132,7 +133,7 @@ class DriveLinkProvider:
                 reply.clock.trust.odom_epoch=current['odom_epoch']
             # An unavailable/expired mapper clock blocks AUTO world adoption,
             # not the independent Pi vehicle clock or MANUAL input path.
-            self.io.offer(inbound(vm),encode(reply),'clock');self._send_copy(vm)
+            self.io.offer(inbound(vm),PreparedClock(reply),'clock');self._send_copy(vm)
         elif kind=='snapshot':
             if self.trust is None:return self.reject('WORLD_PROFILE_UNAVAILABLE')
             if (m.active_vm!=vm or m.active_app!='autonomous' or not m.output_permitted or
@@ -256,7 +257,11 @@ class DriveLinkIO:
         # At most one clock and one state reply per installed VM plus one
         # vehicle sample. Replacing optional copies never drops a G1 operation.
         if kind not in ('clock','state','vehicle') or topic not in (*map(inbound,self.vms),VEHICLE_TOPIC):raise ValueError('LINK_OUTPUT')
-        with self.lock:self.pending[topic,kind]=bytes(data);self.high_water=max(self.high_water,len(self.pending))
+        if kind=='clock' and (not isinstance(data,PreparedClock) or data.vm not in self.vms or topic!=inbound(data.vm)):
+            raise ValueError('LINK_CLOCK_OUTPUT')
+        with self.lock:
+            self.pending[topic,kind]=data if kind=='clock' else bytes(data)
+            self.high_water=max(self.high_water,len(self.pending))
 
     def take(self):
         try:return self.incoming.get_nowait()
@@ -265,6 +270,26 @@ class DriveLinkIO:
     def start(self):
         if self.thread:raise RuntimeError('LINK_OWNER_EXISTS')
         self.thread=threading.Thread(target=self._run,name='gateway-drive-link',daemon=True);self.thread.start();return self
+
+    def _network_once(self,client,mqtt):
+        # All Paho calls belong to this owner. Its external-loop API avoids
+        # creating a cross-thread wake socket for the same thread to signal.
+        sock=client.socket()
+        if sock is None:return mqtt.MQTT_ERR_NO_CONN
+        try:
+            readable,writable,_=select.select([sock],[sock] if client.want_write() else [],[],.002)
+        except InterruptedError:
+            readable=writable=[]
+        except (OSError,ValueError) as error:
+            if self.first_transport is None:self.first_transport=error
+            return mqtt.MQTT_ERR_CONN_LOST
+        if readable:
+            rc=client.loop_read()
+            if rc not in (mqtt.MQTT_ERR_SUCCESS,mqtt.MQTT_ERR_AGAIN):return rc
+        if writable and client.socket() is sock:
+            rc=client.loop_write()
+            if rc not in (mqtt.MQTT_ERR_SUCCESS,mqtt.MQTT_ERR_AGAIN):return rc
+        return client.loop_misc()
 
     def _run(self):
         import paho.mqtt.client as mqtt
@@ -317,15 +342,26 @@ class DriveLinkIO:
                         self.failed+=1
                         if self.first_transport is None:self.first_transport=exc
                         self.stop.wait(.1);continue
-                rc=client.loop(timeout=.002)
+                rc=self._network_once(client,mqtt)
                 if rc not in (mqtt.MQTT_ERR_SUCCESS,mqtt.MQTT_ERR_AGAIN):
                     self.failed+=1;self.connected=False;reconnect=True
                     if self.stop.wait(.1):break
                     continue
+                # Paho's max_queued_messages applies to QoS>0, not this QoS0
+                # wire. Drain its existing packet before taking another latest
+                # slot, so a slow peer cannot grow Paho's outgoing deque.
+                if client.want_write():continue
                 with self.lock:
                     key=next((k for k in self.pending if k[1]=='clock'),next(iter(self.pending),None))
                     data=self.pending.pop(key) if key else None
                 if data is not None:
+                    if key[1]=='clock':
+                        # Exclude known encode/actor/mailbox time from the
+                        # guest's network uncertainty interval. No protobuf
+                        # parse/encode or actor lock is needed at this boundary.
+                        try:data=data.stamp(int(self.clock()*1e6))
+                        except (ValueError,OverflowError) as error:
+                            self.failed+=1;self._drop('CLOCK_SEND_TIME',error);continue
                     info=client.publish(key[0],data,qos=0,retain=False)
                     if info.rc==mqtt.MQTT_ERR_SUCCESS:self.sent+=1
                     else:self.failed+=1

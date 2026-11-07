@@ -1,10 +1,11 @@
 """A 전용 firmware/usage/DHCP 지연 중 B의 조회·수락·실제 stop 경계를 분리한다."""
+import io
 import json
 import os
 from pathlib import Path
 import threading
 import unittest
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,7 +13,8 @@ import test_xenova_read_progress as reads
 import test_xenova_network_zephyr as network
 import xenova_zephyr as zephyr
 from xenova_execution import short_lock
-from xenova_runtime import PlatformError
+from xenova_runtime import PlatformError, operation_lock
+import xenova_preparation as ownership
 import xenova_vm as vm
 
 
@@ -156,3 +158,69 @@ class CrossBoundaryTest(unittest.TestCase):
             return stack
         self.barrier(case,SimpleNamespace(call=call),'firmware-replace',{},case.linux['uuid'],
                      'X-DWAIT-legacy-firmware',install)
+
+    def test_legacy_firmware_replace_cli_plan_and_execute_emit_one_json(self):
+        case = self.fixture(True)
+        source = network.application_bundle(case.legacy, case.p.data/'cli-replacement')
+        digest = zephyr.sha(source/'firmware.json')
+        original = (case.zdir/'instance.json').read_bytes()
+        for execute in (False, True):
+            with self.subTest(execute=execute):
+                args = ['firmware-replace',case.z['id'],'--bundle',str(source),'--sha256',digest]
+                if execute:args.append('--execute')
+                output = io.StringIO()
+                with patch.object(vm,'Platform',return_value=case.p), redirect_stdout(output):
+                    result = vm.main(args)
+                parsed = json.loads(output.getvalue())
+                self.assertEqual(parsed, result)
+                self.assertEqual(output.getvalue(), json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+                self.assertEqual(parsed['action'], 'firmware-replace' if execute else 'plan-firmware-replace')
+                self.assertEqual(parsed['uuid'], case.zid)
+                self.assertEqual(parsed['id'], case.z['id'])
+                self.assertIs(parsed['starts_guest'], False)
+                self.assertEqual(parsed['firmware']['revision'], digest)
+                current = (case.zdir/'instance.json').read_bytes()
+                if execute:
+                    self.assertEqual(json.loads(current)['active_firmware']['revision'], digest)
+                else:self.assertEqual(current, original)
+        self.assertEqual(case.physical('create'), [])
+
+    def test_legacy_firmware_result_wait_holds_neither_common_nor_target_lease(self):
+        for execute in (False, True):
+            with self.subTest(execute=execute):
+                case = self.fixture(True)
+                source = network.application_bundle(case.legacy, case.p.data/'slow-output-replacement')
+                digest = zephyr.sha(source/'firmware.json')
+                entered, release = threading.Event(), threading.Event()
+                contexts, results, failures = [], [], []
+                class SlowResult(io.StringIO):
+                    def write(self, text):
+                        if text and not entered.is_set():
+                            contexts.append(ownership._current())
+                            entered.set()
+                            if not release.wait(8):raise RuntimeError('result sink barrier not released')
+                        return super().write(text)
+                output = SlowResult()
+                args = ['firmware-replace',case.z['id'],'--bundle',str(source),'--sha256',digest]
+                if execute:args.append('--execute')
+                def cli():
+                    try:results.append(vm.main(args))
+                    except BaseException as error:failures.append(error)
+                with patch.object(vm,'Platform',return_value=case.p), redirect_stdout(output):
+                    worker = threading.Thread(target=cli);worker.start()
+                    try:
+                        self.assertTrue(entered.wait(5), failures)
+                        self.assertTrue(worker.is_alive())
+                        self.assertEqual(contexts, [None])
+                        # 출력이 실제로 막힌 동안 경쟁자가 두 flock을 각각 얻는다.
+                        with operation_lock(case.p.runtime):pass
+                        with ownership.request_output(), ownership.AssetLease(case.p,case.zid,'output-test',None) as lease:
+                            lease.guard()
+                            self.assertIsNotNone(lease.fd)
+                        self.assertTrue(worker.is_alive())
+                    finally:release.set();worker.join(10)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(failures, [])
+                self.assertEqual(len(results), 1)
+                self.assertEqual(json.loads(output.getvalue()), results[0])
+                self.assertEqual(case.physical('create'), [])

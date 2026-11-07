@@ -52,6 +52,24 @@ Pi 제어·차량 상태 연결까지 막는 전역 readiness gate가 아니다.
 - Pi 차량 시각은 mapper trust 없이도 교환한다. 차량의 device/odom epoch·Pi session·표본
   순서·센서 품질·시각 및 pose/steering 오차를 확인한다. 지원되지 않는 측정 steering은 0으로 채우지 않는다.
 
+`ClockReply.pi_receive_us`는 binary 수신자의 원 수신 시각이고, `pi_send_us`는 같은 Pi 단조 시계의
+Paho publish 진입 직전 시각이다. actor의 응답 준비·직렬화·mailbox 대기를 송신 시각으로 사용하지 않는다.
+Gateway는 한 번 검증·직렬화한 불변 응답에서 이 uint64와 protobuf 길이만 갱신한다. probe 신원·순번,
+차량 원 표본·trust 만료는 갱신하지 않는다. 이 경계는 커널 송신 완료·PUBACK·guest 수신을 뜻하지 않으며,
+그 뒤 실제 전달 지연은 guest의 기존 RTT 기반 오차 검사에 남는다. 시각 갱신 실패는 해당 응답을
+`CLOCK_SEND_TIME`으로 제한하고 다음 유효 응답의 정상 진행을 허용한다. wire 버전과 기존 오차 한도는 같다.
+
+DriveLink의 같은 I/O owner는 Paho의 `socket`·`want_write`·`loop_read`·`loop_write`·`loop_misc`로
+bounded select를 처리한다. `loop`/`loop_start`와 혼용하거나 자기 thread를 깨우는 socketpair를
+별도로 만들지 않는다. 이전 packet이 아직 송신 대기 중이면 새 latest 슬롯을 꺼내지 않는다.
+따라서 작은 mailbox의 교체가 QoS 0의 Paho 내부 무제한 대기로 옮겨 가지 않는다. 이 제한은
+G1 원 작업·필수 저장을 폐기하는 정책이 아니며 clock wire·오차·lease 의미도 바꾸지 않는다.
+
+guest의 네 번째 시각은 `link_received()` 진입에서 얻은 같은 µs 시계값이다. 전체 binary payload가
+callback에 도착한 경계이며 protobuf decode·context 조회 뒤 시각이나 소켓 첫 바이트 도착 시각이 아니다.
+원 lease도 이 수신 시각부터 계산한다. 이후 `dl_clock_get()`의 현재 시각·context·만료 확인은 유지한다.
+transport callback의 별도 `received` 인자는 uptime **ms**이므로 이 네 시각에 섞지 않는다.
+
 모든 required field는 실제 존재해야 한다. decode 전 wire 크기와 중복 singular/oneof,
 문자열·repeated 수·부분 frame을 검사하고 decode 후 유한값·배열·의미를 검사한다.
 알 수 없는 optional field는 무시하지만 지원하지 않는 `required_features` bit는 거절한다.

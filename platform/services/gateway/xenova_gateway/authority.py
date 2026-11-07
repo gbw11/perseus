@@ -127,7 +127,7 @@ class AuthorityStore:
             canonical(row['execution_id'])
             if row['vm_id'] in seen:raise ValueError('duplicate distrusted VM')
             seen.add(row['vm_id'])
-            if (row.get('reason')!='AUTO_DEADLINE_MISS' or not isinstance(row.get('command_id'),str) or
+            if (row.get('reason') not in ('AUTO_DEADLINE_MISS','MEMORY_PRESSURE') or not isinstance(row.get('command_id'),str) or
                 not 0<len(row['command_id'])<=128 or type(row.get('generation')) is not int or
                 not 1<=row['generation']<=0xffffffff or type(row.get('observed_monotonic_ms')) is not int or
                 row['observed_monotonic_ms']<0):raise ValueError('distrusted VM record invalid')
@@ -264,7 +264,9 @@ class AuthorityStore:
             return json.loads(json.dumps(row)) if row is not None else None
 
     def protected(self,vm_id):
-        return any(row['phase']=='PROTECTED' and row['spec']['target_vm']==vm_id
+        # 2026-11-02 결정(S15P31E110-346): 현재 host_boot_id 가 만든 보호만 활성 보호다.
+        # 이전 host 의 PROTECTED 는 감사 이력으로만 남고 재선택을 막지 않는다(cancel/finish 는 HOST_CHANGED 로 못 푼다).
+        return any(row['phase']=='PROTECTED' and row['spec']['target_vm']==vm_id and row.get('host_boot_id')==self.host
                    for row in self.value.get('protections',[]))
 
     def protected_execution(self,vm_id):

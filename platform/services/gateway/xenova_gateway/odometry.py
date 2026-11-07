@@ -68,11 +68,11 @@ class VehicleOdometry:
         self.errors={};self.first_error=None;self.latest=None
         self.travel=0.
 
-    def fail(self,code):
+    def fail(self,code,*,invalidate_sample=True):
         # Only finite product reason codes, never per-input state or raw body.
         self.errors[code]=self.errors.get(code,0)+1
         if self.first_error is None:self.first_error=code
-        self.latest=None
+        if invalidate_sample:self.latest=None
         raise OdometryError(code)
 
     def device_session(self,session):
@@ -86,23 +86,50 @@ class VehicleOdometry:
         if self.last_probe is not None and now_us-self.last_probe<self.config.sample_period_ms*1000:return None
         self.pending={k:v for k,v in self.pending.items() if now_us-k<=self.config.maximum_sample_age_us}
         if len(self.pending)>=2:return None
-        self.pending[now_us]=True;self.last_probe=now_us
+        self.pending[now_us]=None;self.last_probe=now_us
         return PROBE.pack(UUID(pi_session).bytes,UUID(self.device).bytes,now_us)
+
+    def mark_submitted(self,echo,sent_us):
+        """Bind the original probe to its first pre-write time, not a send ACK.
+
+        The original echo still owns lookup, uniqueness and expiry. Duplicate
+        marking cannot move the bound; direct users that never mark keep the
+        wider creation-to-receive interval. No failed write rolls this back.
+        """
+        if (type(echo) is not int or type(sent_us) is not int or
+                not 0<=echo<=sent_us<2**64):
+            raise OdometryError('ODOM_PROBE_SUBMISSION')
+        if echo not in self.pending:raise OdometryError('ODOM_PROBE_REFERENCE')
+        if self.pending[echo] is not None:return False
+        if sent_us-echo>self.config.maximum_sample_age_us:
+            del self.pending[echo]
+            return self.fail('ODOM_PROBE_EXPIRED',invalidate_sample=False)
+        self.pending[echo]=sent_us
+        return True
 
     def receive(self,pi_session,payload,now_us):
         try:pi,device,echo,source_us,sample,left,right,quality,steer_mrad,steer_error_mrad=SAMPLE.unpack(payload)
         except struct.error:return self.fail('ODOM_FRAME')
         if str(UUID(bytes=pi))!=pi_session or str(UUID(bytes=device))!=self.device:return self.fail('ODOM_SESSION')
-        if echo not in self.pending or now_us<echo:return self.fail('ODOM_PROBE_REFERENCE')
+        # Reject this probe without renewing or erasing an independently valid
+        # sample. A reversed local clock still revokes that earlier evidence.
+        if echo not in self.pending or now_us<echo:
+            return self.fail('ODOM_PROBE_REFERENCE',invalidate_sample=now_us<echo)
+        sent=self.pending[echo]
+        if sent is not None and now_us<sent:return self.fail('ODOM_PROBE_REFERENCE')
         del self.pending[echo]
-        error=(now_us-echo+1)//2
-        if error>self.config.maximum_clock_error_us:return self.fail('ODOM_CLOCK_UNCERTAIN')
+        if now_us-echo>self.config.maximum_sample_age_us:
+            return self.fail('ODOM_PROBE_EXPIRED',invalidate_sample=False)
+        submitted=echo if sent is None else sent
+        error=(now_us-submitted+1)//2
+        if error>self.config.maximum_clock_error_us:
+            return self.fail('ODOM_CLOCK_UNCERTAIN',invalidate_sample=False)
         if not quality&1 or quality&~7 or quality&6==6 or not sample or not source_us:return self.fail('ODOM_SENSOR_QUALITY')
         if quality&6 and (not steer_error_mrad or abs(steer_mrad)>1400):return self.fail('ODOM_STEERING_QUALITY')
         if not quality&6 and (steer_mrad or steer_error_mrad):return self.fail('ODOM_STEERING_PRESENCE')
         if not -(2**(self.config.encoder_bits-1))<=left<2**(self.config.encoder_bits-1) or not -(2**(self.config.encoder_bits-1))<=right<2**(self.config.encoder_bits-1):
             return self.fail('ODOM_COUNTER_RANGE')
-        pi_us=(echo+now_us)//2
+        pi_us=(submitted+now_us)//2
         current=(sample,source_us,left,right,pi_us)
         x,y,yaw=self.pose;velocity=0.;steering=None
         if self.previous is not None:

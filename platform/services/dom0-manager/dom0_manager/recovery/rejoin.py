@@ -14,6 +14,20 @@ from xenova_mqtt.readiness import parse as parse_readiness
 log=logging.getLogger(__name__)
 CONTEXT=('vm_id','host_boot_id','execution_id','domid','xen_unique_id')
 
+def valid_vm_trust_payload(payload):
+    if not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED':return False
+    command_id=payload.get('command_id')
+    if not isinstance(command_id,str) or not command_id or len(command_id)>128:return False
+    reason=payload.get('reason')
+    if reason=='AUTO_DEADLINE_MISS':return type(payload.get('consecutive_misses')) is int and payload['consecutive_misses']>=5
+    if reason=='MEMORY_PRESSURE':
+        return (payload.get('metric')=='memory.kernel_heap.used_bytes' and
+                type(payload.get('used_percent')) is int and 0<=payload['used_percent']<=100 and
+                type(payload.get('threshold_percent')) is int and 50<=payload['threshold_percent']<=99 and
+                payload['used_percent']>=payload['threshold_percent'] and
+                type(payload.get('consecutive_samples')) is int and payload['consecutive_samples']>=2)
+    return False
+
 class ProductionBootstrap:
     def __init__(self,config,observe,*,uid=0):
         self.config=config;self.observe=observe;self.uid=uid
@@ -95,6 +109,7 @@ class RejoinCoordinator:
         self.cache=BindingCache(self.host,clock=clock);self._lock=threading.RLock();self._stop=threading.Event()
         self._executor=ThreadPoolExecutor(max_workers=2,thread_name_prefix='drive-rejoin')
         self._futures={};self._due={};self._rows={};self._completed={};self._progress={}
+        self._published_rows=None
         self._reports=queue.Queue(maxsize=64)
         self._trust_reports=queue.Queue(maxsize=16)
         self.path=Path(config['receipt_dir'])/'rejoin.json';self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -120,6 +135,16 @@ class RejoinCoordinator:
 
     def _work(self,vm):
         if self._stop.is_set():raise RuntimeError('rejoin stopping')
+        with self._lock:
+            old=self._rows.get(vm,{})
+        refreshed=None;refresh_error=None
+        if (old.get('status')=='observed' and old.get('app_instance_id') and
+                hasattr(self.provision,'refresh')):
+            # Receipt reads have no guest effect. Read them before the fresh
+            # incarnation observation so an unchanged binding needs one full
+            # Xen observation, while new provisioning keeps its before/after guards.
+            try:refreshed=self.provision.refresh(old)
+            except (OSError,ValueError) as exc:refresh_error=exc
         row=self.observe(vm)
         if row['status']!='observed':
             self._record(vm,{'stage':row['status'].upper(),'execution_id':None});return row
@@ -127,12 +152,17 @@ class RejoinCoordinator:
         execution=row['execution_id']
         with self._lock:
             completed=self._completed.get(vm);previous=self.records.get(vm,{})
-            old=self._rows.get(vm,{})
         if row.get('execution_owner_kind')=='recovery' and not (
             (completed and completed['execution_id']==execution and completed['recovery_attempt_id']==row.get('recovery_attempt_id')) or
             (previous.get('execution_id')==execution and previous.get('recovery_attempt_id')==row.get('recovery_attempt_id') and
              previous.get('stage') in ('PROVISIONED','PREPARING','READY_OBSERVED','QUALIFIED_OBSERVED'))):
             return {**row,'status':'provisioning','reason':'ENGINE_COMPLETION_PENDING'}
+        if (old.get('status')=='observed' and old.get('app_instance_id') and
+                all(old.get(k)==row.get(k) for k in CONTEXT)):
+            if refresh_error is not None:raise refresh_error
+            if refreshed is not None:
+                if self._stop.is_set():raise RuntimeError('rejoin stopped after refresh; no binding')
+                return {**row,**refreshed}
         if old.get('execution_id')!=execution or not old.get('app_instance_id'):
             source={'execution_id':execution,'stage':'PROVISIONING',
                 'recovery_attempt_id':row.get('recovery_attempt_id'),'recovery_id':(completed or {}).get('recovery_id')}
@@ -154,22 +184,37 @@ class RejoinCoordinator:
     def pump(self):
         now=self.clock()
         with self._lock:
+            observed=False
             for vm,future in list(self._futures.items()):
                 if not future.done():continue
+                observed=True
+                release_due=self._due.get(vm,now+1)
                 del self._futures[vm];self._due[vm]=now+1
-                try:self._rows[vm]=future.result()
+                try:
+                    self._rows[vm]=future.result()
+                    if self._rows[vm].get('status')=='observed':
+                        self._due[vm]=max(release_due,now)
                 except Exception as exc:
                     self._rows[vm]={'status':'unavailable','reason':type(exc).__name__}
                     log.warning('drive binding unavailable vm=%s cause=%s',vm,type(exc).__name__)
             for vm in self.vm_ids:
                 if not self._stop.is_set() and vm not in self._futures and now>=self._due.get(vm,0):
+                    # Successful probes keep a one-second release cadence. An
+                    # overrun coalesces to one next probe; failures back off above.
+                    self._due[vm]=self.clock()+1
                     self._futures[vm]=self._executor.submit(self._work,vm)
             value={'schema_version':'1.0-drive-bindings','host_boot_id':self.host,
                 'observed_monotonic_ms':int(now*1000),'expires_monotonic_ms':int(now*1000)+3000,
                 'vms':{vm:self._rows.get(vm,{'status':'unavailable'}) for vm in self.vm_ids}}
             try:
-                atomic_json(Path(self.config['binding_file']),value);self.cache.install(value)
-            except (OSError,ValueError):self.cache.invalidate();raise
+                # Pump readiness at 100ms, but publish only new observation rows.
+                # Rewriting unchanged rows cannot extend their 3s lease and used
+                # to repeat serialization/fsync while waiting for Xen observations.
+                if observed or self._published_rows!=value['vms']:
+                    atomic_json(Path(self.config['binding_file']),value);self.cache.install(value)
+                    self._published_rows=value['vms']
+            except (OSError,ValueError):
+                self._published_rows=None;self.cache.invalidate();raise
         for _ in range(64):
             try:message=self._reports.get_nowait()
             except queue.Empty:break
@@ -193,10 +238,7 @@ class RejoinCoordinator:
         info=topics.parse(message.topic);payload=message.payload;now=self.clock()
         row=self.cache.current(info.vm_id,now)
         if (getattr(message,'retained',False) or message.type!='vm.trust' or info.app_id!='autonomous' or
-            not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED' or
-            payload.get('reason')!='AUTO_DEADLINE_MISS' or type(payload.get('consecutive_misses')) is not int or
-            payload['consecutive_misses']<5 or not isinstance(payload.get('command_id'),str) or
-            not payload['command_id'] or len(payload['command_id'])>128 or row is None):return
+            not valid_vm_trust_payload(payload) or row is None):return
         try:self._trust_reports.put_nowait({'vm_id':info.vm_id,'execution_id':row['execution_id'],
             'command_id':payload['command_id'],'received_monotonic':message.received_monotonic})
         except queue.Full:pass

@@ -1,12 +1,14 @@
 """Read-only log API. Console input and log ingestion are deliberately separate."""
 from pathlib import Path
+import asyncio
 import hashlib
 import hmac
 import json
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse
 
 from ..runtime_logs import LogStore
 from ..errors import InvalidArgument, PlatformUnavailable
@@ -68,7 +70,8 @@ async def ingest(request: Request):
     if not config_path:
         raise PlatformUnavailable("log producers are not configured")
     try:
-        configured = json.loads(Path(config_path).read_text(encoding="utf-8"))["sources"]
+        # async 처리기 안이라 파일·SQLite 작업은 스레드로 넘긴다(이벤트 루프를 막으면 콘솔 WebSocket 등 다른 요청이 멈춘다)
+        configured = json.loads(await asyncio.to_thread(Path(config_path).read_text, encoding="utf-8"))["sources"]
     except (OSError, ValueError, KeyError):
         raise PlatformUnavailable("log source configuration unavailable") from None
     source_id = request.headers.get("x-log-source", "")
@@ -77,7 +80,8 @@ async def ingest(request: Request):
     supplied = raw_auth[7:] if raw_auth.startswith("Bearer ") else ""
     expected = credential.get("token_sha256", "") if isinstance(credential, dict) else ""
     if not expected or not supplied or not hmac.compare_digest(hashlib.sha256(supplied.encode()).hexdigest(), expected):
-        raise HTTPException(401, "source authentication required")
+        # 계약: 401 도 Error 스키마 {code, message}. HTTPException 은 {"detail": ...} 로 나가 형식이 어긋난다
+        return JSONResponse(status_code=401, content={"code": "Unauthorized", "message": "source authentication required"})
     if not IDENTIFIER.fullmatch(source_id):
         raise InvalidArgument("invalid source identity")
     body = bytearray()
@@ -114,7 +118,11 @@ async def ingest(request: Request):
             normalized.append({**record, "source_id": source_id, "vm_id": vm_id})
     except (ValueError, KeyError, TypeError, AttributeError):
         raise InvalidArgument("invalid log batch or component is not allowed for this source") from None
-    current = store(request)
-    count = sum(current.append(**record) for record in normalized)
-    current.source(source_id, components, vm_id=vm_id, recorded=bool(records))
+    def write():
+        current = store(request)
+        count = sum(current.append(**record) for record in normalized)
+        current.source(source_id, components, vm_id=vm_id, recorded=bool(records))
+        return count
+
+    count = await asyncio.to_thread(write)
     return {"accepted": count, "duplicates": len(records) - count}

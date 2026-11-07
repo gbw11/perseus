@@ -29,13 +29,43 @@ def test_missing_or_wrong_token_is_401():
     assert c.post("/api/v1/vms", json=create_body()).status_code == 401
 
 
-def test_correct_token_passes_and_docs_stay_public():
+def test_correct_token_passes():
     c = _client("s3cret")
     ok = {"Authorization": "Bearer s3cret"}
     assert c.get("/healthz", headers=ok).status_code == 200
     assert c.post("/api/v1/vms", json=create_body(), headers=ok).status_code == 201
-    assert c.get("/openapi.json").status_code == 200
-    assert c.get("/docs").status_code == 200
+
+
+DOC_PATHS = ("/docs", "/redoc", "/openapi.json")
+
+
+def test_api_docs_are_off_by_default_even_with_a_token():
+    """계약: 모든 엔드포인트가 토큰을 검사한다. 문서 경로는 기본으로 열지 않는다 (2026-11-06 결정)."""
+    for token in ("", "s3cret"):
+        c = _client(token)
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        for path in DOC_PATHS:
+            assert c.get(path, headers=headers).status_code in (401, 404), (token, path)
+            if token:
+                assert c.get(path).status_code == 401, path  # 토큰 없이는 경로 존재 여부도 알 수 없다
+                assert c.get(path, headers=headers).status_code == 404, path
+
+
+def test_dev_api_docs_still_require_the_service_token():
+    app = create_app(Settings(driver="mock", service_token="s3cret", api_docs=True), driver=MockDriver(), provisioner=MockProvisioner())
+    c = TestClient(app)
+    for path in DOC_PATHS:
+        assert c.get(path).status_code == 401, path
+        assert c.get(path, headers={"Authorization": "Bearer s3cret"}).status_code == 200, path
+    assert Settings.from_env({"XENOVA_DRIVER": "mock"}).api_docs is False
+    assert Settings.from_env({"XENOVA_DRIVER": "mock", "XENOVA_DOM0_API_DOCS": "1"}).api_docs is True
+
+
+def test_contract_schema_is_available_without_the_docs_route():
+    """계약 시험은 경로가 아니라 app.openapi() 를 직접 부른다. 경로를 꺼도 스키마는 만들어진다."""
+    app = _client("s3cret").app
+    assert app.openapi_url is None
+    assert "/api/v1/vms" in app.openapi()["paths"]
 
 
 def test_settings_reads_token_from_env():

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import test_xenova_recovery_foundation as foundation
 from xenova_runtime import operation_lock
-from xenova_execution import Execution, short_lock
+from xenova_execution import Execution, ExecutionError, short_lock
 import xenova_execution as execution
 
 
@@ -73,8 +73,13 @@ class ManagementBudgetTest(unittest.TestCase):
         conflicting={**original,'operation_id':foundation.HOST_B}
         execution=self.p.execution()
         execution.write(execution._path(self.p.data,'control-requests',foundation.HOST_B),conflicting)
+        before={path:path.read_bytes() for path in (self.p.data/'control-requests').glob('*.json')}
         self.f.fails(self.lookup('duplicate'),'RECONCILE_REQUIRED')
-        self.assertEqual(len(self.p.execution().requests()),2)
+        with self.assertRaises(ExecutionError) as caught:
+            self.p.execution().requests()
+        self.assertEqual(caught.exception.error['code'],'RECONCILE_REQUIRED')
+        self.assertEqual(len(before),2)
+        self.assertEqual(before,{path:path.read_bytes() for path in before})
 
     def test_incomplete_enumeration_never_confirms_absence_or_unique_key(self):
         self.f.start('existing')
@@ -86,7 +91,7 @@ class ManagementBudgetTest(unittest.TestCase):
             def __iter__(owner):
                 with scandir(root) as entries:yield next(entries)
                 raise OSError('injected EIO after first directory entry')
-        def broken(path):return Partial() if Path(path)==root else scandir(path)
+        def broken(path):return Partial() if isinstance(path,int) or Path(path)==root else scandir(path)
         for key in ('existing','not-found'):
             with patch('xenova_execution.os.scandir',broken):
                 self.f.fails(self.lookup(key),'OBSERVATION_UNAVAILABLE')
@@ -311,7 +316,7 @@ class ManagementBudgetTest(unittest.TestCase):
                         seen.append(entry.name);self.f.ticks+=.2;yield entry
                 raise AssertionError('scan must stop before requesting another entry')
         for key in ('existing','not-found'):
-            with patch('xenova_execution.os.scandir',lambda path:Slow() if Path(path)==root else scandir(path)):
+            with patch('xenova_execution.os.scandir',lambda path:Slow() if isinstance(path,int) or Path(path)==root else scandir(path)):
                 self.f.fails(self.lookup(key,budget=100),'DEADLINE_EXCEEDED')
         self.assertEqual(len(seen),2)
         latest=self.f.ok(self.lookup('existing'))['operation']

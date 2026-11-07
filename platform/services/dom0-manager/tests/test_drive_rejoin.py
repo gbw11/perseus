@@ -20,7 +20,7 @@ from dom0_manager.recovery.state import RecoveryStore,RecoveryStatus
 from dom0_manager.recovery.model import Judgment,FailureReason,HealthState,VmHealth
 from dom0_manager.recovery.protection import GatewayProtection
 from fake_gateway import FakeGateway
-from dom0_manager.recovery.rejoin import RejoinCoordinator,ProductionBootstrap,production
+from dom0_manager.recovery.rejoin import RejoinCoordinator,ProductionBootstrap,production,valid_vm_trust_payload
 from xenova_mqtt import Identity,topics
 from xenova_mqtt.client import Message
 from xenova_mqtt.envelope import build
@@ -31,6 +31,13 @@ sys.path.insert(0,str(ROOT/'platform/tests'))
 import test_xenova_network_zephyr as network
 from xenova_drive_binding import observe
 import xenova_vm
+
+def test_memory_pressure_trust_payload_is_accepted_for_recovery():
+    payload={'trust':'UNTRUSTED','reason':'MEMORY_PRESSURE','metric':'memory.kernel_heap.used_bytes',
+        'used_percent':89,'threshold_percent':85,'consecutive_samples':5,'command_id':'memory-1'}
+    assert valid_vm_trust_payload(payload)
+    assert not valid_vm_trust_payload({**payload,'used_percent':80})
+    assert not valid_vm_trust_payload({**payload,'consecutive_samples':1})
 
 @pytest.fixture
 def fixture():
@@ -176,3 +183,173 @@ def test_missing_mount_is_rejected_before_receipt_creation(tmp_path,monkeypatch)
     monkeypatch.setattr('os.path.ismount',lambda _:False)
     with pytest.raises(ValueError,match='mounted'):production(config,tmp_path/'missing-data')
     assert not (tmp_path/'missing-data').exists()
+
+
+@pytest.mark.parametrize('failure',[None,'receipt','internal','observe','stop','execution','intent'])
+def test_bound_refresh_reads_receipt_before_one_current_incarnation_check(fixture,tmp_path,failure):
+    f=fixture;vm=f.zid;row=observe(f.p,vm);calls=[]
+    identity={'boot_id':str(uuid4()),'app_instance_id':str(uuid4())}
+    class Bootstrap:
+        def refresh(self,value):
+            calls.append('receipt')
+            if failure=='receipt':raise OSError('receipt read failed')
+            if failure=='internal':raise TypeError('receipt implementation defect')
+            return dict(identity)
+        def __call__(self,value):
+            calls.append('provision');return dict(identity)
+    def current(target):
+        calls.append('observe')
+        if failure=='observe':raise xenova_vm.PlatformError('incarnation unavailable')
+        if failure=='stop':return {**row,'status':'stopped'}
+        if failure=='execution':return {**row,'execution_id':str(UUID(int=300))}
+        if failure=='intent':return {**row,'intent_revision':row['intent_revision']+1}
+        return observe(f.p,target)
+    coordinator=RejoinCoordinator({'vm_ids':[vm,str(uuid4())],
+        'receipt_dir':str(tmp_path/'receipts'),'binding_file':str(tmp_path/'bindings.json')},
+        current,Bootstrap(),row['host_boot_id'],uid=os.geteuid())
+    coordinator._rows[vm]={**row,**identity}
+    try:
+        if failure in ('receipt','internal','observe'):
+            error={'receipt':OSError,'internal':TypeError,'observe':xenova_vm.PlatformError}[failure]
+            with pytest.raises(error):coordinator._work(vm)
+            assert calls==(['receipt'] if failure=='internal' else ['receipt','observe'])
+        elif failure=='execution':
+            result=coordinator._work(vm)
+            assert result['execution_id']==str(UUID(int=300))
+            assert calls==['receipt','observe','provision','observe']
+        else:
+            result=coordinator._work(vm)
+            assert calls==['receipt','observe']
+            if failure=='stop':assert result['status']=='stopped' and 'app_instance_id' not in result
+            else:
+                assert result['execution_id']==row['execution_id']
+                assert result['intent_revision']==row['intent_revision']+int(failure=='intent')
+    finally:coordinator.stop()
+
+
+def test_unchanged_binding_is_not_rewritten_or_renewed_and_failed_publish_recovers(fixture,tmp_path,monkeypatch):
+    f=fixture;row=observe(f.p,f.zid);now=[f.ticks];other=str(uuid4())
+    config={'vm_ids':[f.zid,other],'receipt_dir':str(tmp_path/'receipts'),
+            'binding_file':str(tmp_path/'bindings.json')}
+    coordinator=RejoinCoordinator(config,None,None,row['host_boot_id'],clock=lambda:now[0],uid=os.geteuid())
+    coordinator._rows[f.zid]={**row,'boot_id':str(uuid4()),'app_instance_id':str(uuid4())}
+    coordinator._due={f.zid:now[0]+100,other:now[0]+100}
+    import dom0_manager.recovery.rejoin as rejoin
+    writes=[];fail=[False];atomic=rejoin.atomic_json
+    def sink(path,value):
+        writes.append(value)
+        if fail[0]:raise OSError('trial binding sink unavailable')
+        return atomic(path,value)
+    monkeypatch.setattr(rejoin,'atomic_json',sink)
+    try:
+        coordinator.pump();before=Path(config['binding_file']).read_bytes()
+        assert coordinator.cache.current(f.zid) is not None
+        for _ in range(35):now[0]+=.1;coordinator.pump()
+        assert len(writes)==1 and Path(config['binding_file']).read_bytes()==before
+        assert coordinator.cache.current(f.zid) is None  # no timestamp laundering
+        coordinator._rows[f.zid]={**coordinator._rows[f.zid],'observed_monotonic_ms':int(now[0]*1000)}
+        fail[0]=True
+        with pytest.raises(OSError):coordinator.pump()
+        assert coordinator.cache.current(f.zid) is None
+        fail[0]=False;coordinator.pump()
+        assert len(writes)==3 and coordinator.cache.current(f.zid) is not None
+    finally:coordinator.stop()
+
+
+@pytest.mark.parametrize('status',['stopped','absent'])
+def test_same_negative_row_renews_only_after_a_real_observation_finishes(fixture,tmp_path,status):
+    from concurrent.futures import Future
+    f=fixture;now=[f.ticks];other=str(uuid4());host=observe(f.p,f.zid)['host_boot_id']
+    coordinator=RejoinCoordinator({'vm_ids':[f.zid,other],'receipt_dir':str(tmp_path/'receipts'),
+        'binding_file':str(tmp_path/'bindings.json')},None,None,host,clock=lambda:now[0],uid=os.geteuid())
+    coordinator._due={f.zid:now[0]+100,other:now[0]+100}
+    try:
+        for _ in range(6):
+            now[0]+=1
+            future=Future();future.set_result({'vm_id':f.zid,'status':status,'host_boot_id':host})
+            coordinator._futures[f.zid]=future;coordinator.pump()
+            coordinator._due[f.zid]=now[0]+100
+            assert coordinator.cache.observation_status(f.zid)==status
+        now[0]+=3.1;coordinator.pump()
+        assert coordinator.cache.observation_status(f.zid)=='unavailable'
+    finally:coordinator.stop()
+
+
+@pytest.fixture
+def cadence(fixture,tmp_path):
+    """Control executor completion while preserving actual observed binding data."""
+    from concurrent.futures import Future
+    f=fixture;row=observe(f.p,f.zid);now=[f.ticks];other=str(uuid4());calls=[]
+    identity={'boot_id':str(uuid4()),'app_instance_id':str(uuid4())}
+    coordinator=RejoinCoordinator({'vm_ids':[f.zid,other],'receipt_dir':str(tmp_path/'receipts'),
+        'binding_file':str(tmp_path/'bindings.json')},None,None,row['host_boot_id'],
+        clock=lambda:now[0],uid=os.geteuid())
+    coordinator._executor.shutdown(wait=False,cancel_futures=True)
+    class Executor:
+        def submit(self,work,vm):
+            future=Future();calls.append((now[0],vm,future));return future
+        def shutdown(self,**kwargs):
+            for _,_,future in calls:future.cancel()
+    coordinator._executor=Executor();coordinator._due[other]=now[0]+100
+    try:yield SimpleNamespace(coordinator=coordinator,now=now,vm=f.zid,calls=calls,row={**row,**identity})
+    finally:coordinator.stop()
+
+
+def test_successful_probe_keeps_its_release_cadence_and_original_observation(cadence):
+    c=cadence;coordinator=c.coordinator;released=c.now[0]
+    coordinator.pump();assert len(c.calls)==1
+    c.now[0]=released+.2;c.calls[0][2].set_result(c.row);coordinator.pump()
+    assert coordinator._due[c.vm]==pytest.approx(released+1)
+    assert len(c.calls)==1
+    assert coordinator.cache.current(c.vm)['observed_monotonic_ms']==c.row['observed_monotonic_ms']
+    c.now[0]=released+.99;coordinator.pump();assert len(c.calls)==1
+    c.now[0]=released+1;coordinator.pump()
+    assert len(c.calls)==2 and c.calls[1][0]==pytest.approx(released+1)
+    assert coordinator._futures[c.vm] is c.calls[1][2]
+
+
+def test_release_anchor_uses_dispatch_time_after_other_completions(cadence):
+    from concurrent.futures import Future
+    c=cadence;coordinator=c.coordinator;released=c.now[0]
+    other=next(vm for vm in coordinator.vm_ids if vm!=c.vm)
+    future=Future();future.set_result({'vm_id':other,'status':'stopped','host_boot_id':c.row['host_boot_id']})
+    result=future.result
+    def delayed_result():
+        c.now[0]+=.3
+        return result()
+    future.result=delayed_result
+    coordinator._futures[other]=future;coordinator.pump()
+    assert len(c.calls)==1 and c.calls[0][0]==pytest.approx(released+.3)
+    assert coordinator._due[c.vm]==pytest.approx(c.calls[0][0]+1)
+
+
+def test_late_success_coalesces_once_without_overlapping_or_renewing_old_data(cadence):
+    c=cadence;coordinator=c.coordinator;released=c.now[0]
+    coordinator.pump()
+    c.now[0]=released+3.2
+    for _ in range(3):coordinator.pump()
+    assert len(c.calls)==1  # A pending probe owns its lane even after its due time.
+    c.calls[0][2].set_result(c.row);coordinator.pump()
+    assert len(c.calls)==2 and c.calls[1][0]==pytest.approx(c.now[0])
+    assert coordinator.cache.current(c.vm) is None  # Completion cannot renew the original sample.
+    assert coordinator._rows[c.vm]['observed_monotonic_ms']==c.row['observed_monotonic_ms']
+    for _ in range(3):coordinator.pump()
+    assert len(c.calls)==2
+    next_due=c.now[0]+1
+    c.now[0]+=.1;c.calls[1][2].set_result({**c.row,'observed_monotonic_ms':int(c.now[0]*1000)})
+    coordinator.pump()
+    assert len(c.calls)==2 and coordinator._due[c.vm]==pytest.approx(next_due)
+    c.now[0]=next_due;coordinator.pump();assert len(c.calls)==3
+
+
+@pytest.mark.parametrize('outcome',['error','stopped','absent','provisioning'])
+def test_failed_or_nonobserved_probe_keeps_completion_based_backoff(cadence,outcome):
+    c=cadence;coordinator=c.coordinator;released=c.now[0]
+    coordinator.pump();c.now[0]=released+2.3
+    future=c.calls[0][2]
+    if outcome=='error':future.set_exception(OSError('probe unavailable'))
+    else:future.set_result({**c.row,'status':outcome})
+    coordinator.pump()
+    assert len(c.calls)==1 and coordinator._due[c.vm]==pytest.approx(c.now[0]+1)
+    c.now[0]+=.99;coordinator.pump();assert len(c.calls)==1
+    c.now[0]=released+3.3;coordinator.pump();assert len(c.calls)==2

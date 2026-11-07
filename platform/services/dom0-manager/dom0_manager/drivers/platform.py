@@ -56,6 +56,7 @@ from ..errors import (
     OperationNotFound,
     PlatformUnavailable,
     VMExists,
+    VMNameConflict,
     VMNotFound,
 )
 from ..models import ControlOperation, ControlStatus, CpuLayout, ResourceUpdate, VmResources, VmState
@@ -108,6 +109,9 @@ _READ_ACTIONS = frozenset({
 # budget_ms 는 받지 않고 spec timeout_ms(1..15000) 만 받는 조회. 요청 예산은 timeout_ms 로만 줄인다
 _TIMEOUT_ONLY_ACTIONS = frozenset({"cpu-layout"})
 _READ_TIMEOUT_MS = 15_000  # 하위 조회의 기본·상한
+# GET /vms·/vms/{id} 가 하위 list·get 에 주는 조회 한도(계약 4.9 조회 5초, Spring 대기 6초 안). 넘기지 않으면 하위 기본 15초를 쓴다.
+# 하위는 이 한도를 넘기면 DEADLINE_EXCEEDED → 504 DriverTimeout. 설정은 XENOVA_PLATFORM_READ_TIMEOUT(초)
+DEFAULT_LIST_GET_TIMEOUT_MS = 5_000
 
 
 def _accepts_budget(manager: Any) -> bool:
@@ -279,7 +283,8 @@ _CODE_MAP: dict[str, type[Dom0ManagerError]] = {
     "TEMPLATE_VERSION_NOT_FOUND": InvalidArgument,
     "RESOURCE_UNSUPPORTED": InvalidArgument,
     "VM_NOT_FOUND": VMNotFound,
-    "VM_NAME_CONFLICT": VMExists,
+    # 다른 VM 과 내부 이름·UUID 예약·MAC 이 겹침. VMExists(같은 VM 이 이미 있음)로 내면 Spring 이 생성 성공으로 기록한다
+    "VM_NAME_CONFLICT": VMNameConflict,
     "IDEMPOTENCY_CONFLICT": VMExists,
     "IP_CONFLICT": InvalidState,
     "OPERATION_IN_PROGRESS": PlatformUnavailable,  # 다른 플랫폼 작업이 잠금 보유(재시도 가능). 프로세스 안 직렬화 대기 초과도 같은 코드
@@ -585,12 +590,16 @@ class PlatformDriver(Driver):
         *,
         records_loader: RecordsLoader | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        read_timeout_ms: int = DEFAULT_LIST_GET_TIMEOUT_MS,
     ) -> None:
+        if type(read_timeout_ms) is not int or not 0 < read_timeout_ms <= _READ_TIMEOUT_MS:
+            raise ValueError(f"read_timeout_ms must be 1..{_READ_TIMEOUT_MS}, got {read_timeout_ms!r}")
         self.manager = manager
         self._xl = xl
         self._xentop = xentop
         self._records_loader = records_loader
         self._monotonic = monotonic
+        self._read_timeout_ms = read_timeout_ms
 
     # ---- 조회 ----
 
@@ -603,11 +612,14 @@ class PlatformDriver(Driver):
         return data["registration" if vm_id is not None else "registrations"]
 
     def _views(self, lifecycle: str = "REGISTERED") -> list[dict[str, Any]]:
-        data = raise_for_envelope(call_with_budget(self.manager, "list", {"lifecycle": lifecycle}), context="list")
+        # 조회 한도를 하위에 명시한다. 요청 예산이 더 짧으면 call_with_budget 이 그 값으로 줄인다
+        spec = {"lifecycle": lifecycle, "timeout_ms": self._read_timeout_ms}
+        data = raise_for_envelope(call_with_budget(self.manager, "list", spec), context="list")
         return list(data.get("vms") or [])
 
     def _view(self, vm_id: UUID) -> dict[str, Any]:
-        data = raise_for_envelope(call_with_budget(self.manager, "get", {"vm_id": str(vm_id)}), context=f"get {vm_id}")
+        spec = {"vm_id": str(vm_id), "timeout_ms": self._read_timeout_ms}
+        data = raise_for_envelope(call_with_budget(self.manager, "get", spec), context=f"get {vm_id}")
         view = data.get("vm")
         if not view:
             raise VMNotFound(f"vm {vm_id} not registered")

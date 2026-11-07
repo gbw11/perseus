@@ -27,6 +27,7 @@ from .store_files import preserve_corrupt, read_state
 log = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
+BUDGET_SCHEMA_VERSION = 2  # 구형 writer가 예산을 조용히 버리지 못하게 하는 내부 호환 경계.
 MODES = ("start-if-absent", "graceful-restart", "force-restart")
 GUEST_KINDS = ("linux", "zephyr")
 REASONS = frozenset(reason.value for reason in FailureReason)
@@ -63,6 +64,15 @@ def validate_event(event: Any) -> None:
 
 def _finite(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _unique_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f'duplicate recovery state field {key!r}')
+        result[key] = value
+    return result
 
 
 @dataclass
@@ -227,6 +237,9 @@ class RecoveryStore:
         self._path = path
         self.history_lost = False
         self._write_blocked = False
+        self.budget_tracking = False
+        self.budget_baseline_known = True
+        self.vm_budget_used: dict[UUID, int | None] = {}
 
     @property
     def path(self) -> Path | None:
@@ -239,9 +252,22 @@ class RecoveryStore:
             text = read_state(self._path)
             if text is None:
                 return {}
-            data = json.loads(text)
-            if not isinstance(data, dict) or data.get("version") != SCHEMA_VERSION:
-                raise ValueError(f"unsupported schema (expected version {SCHEMA_VERSION})")
+            data = json.loads(text, object_pairs_hook=_unique_fields)
+            if not isinstance(data, dict) or type(data.get('version')) is not int or data['version'] not in (SCHEMA_VERSION, BUDGET_SCHEMA_VERSION):
+                raise ValueError('unsupported recovery schema')
+            self.budget_tracking = data['version'] == BUDGET_SCHEMA_VERSION
+            self.budget_baseline_known = False  # 남은 닫힌 기록만으로 과거 총사용량을 복원할 수 없다.
+            self.vm_budget_used = {}
+            if self.budget_tracking:
+                budget = data.get('vm_budget')
+                if not isinstance(budget, dict) or set(budget) != {'baseline_known', 'used'} or type(budget['baseline_known']) is not bool or not isinstance(budget['used'], dict):
+                    raise ValueError('invalid VM recovery budget')
+                self.budget_baseline_known = budget['baseline_known']
+                for key, used in budget['used'].items():
+                    identity = UUID(key)
+                    if str(identity) != key or identity.int == 0 or (used is not None and (type(used) is not int or used < 0)):
+                        raise ValueError('invalid VM recovery budget entry')
+                    self.vm_budget_used[identity] = used
             raw = data.get("recoveries")
             if not isinstance(raw, list):
                 raise ValueError("'recoveries' must be a list")
@@ -290,10 +316,13 @@ class RecoveryStore:
             log.error("recovery store %s not saved: unresolved state/evidence", self._path)
             return False
         body = {
-            "version": SCHEMA_VERSION,
+            "version": BUDGET_SCHEMA_VERSION if self.budget_tracking else SCHEMA_VERSION,
             "history_lost": self.history_lost,
             "recoveries": [record.to_json() for record in records.values()],
         }
+        if self.budget_tracking:
+            body['vm_budget'] = {'baseline_known': self.budget_baseline_known,
+                                 'used': {str(vm): used for vm, used in self.vm_budget_used.items()}}
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(self._path.suffix + ".tmp")

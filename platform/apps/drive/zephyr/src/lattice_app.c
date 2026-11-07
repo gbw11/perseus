@@ -34,6 +34,31 @@ struct completion {uint64_t sequence,vehicle_sequence,finished_us;size_t tracker
 static struct completion completion;
 static uint64_t exported_completion;
 
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(drive_prepare_diag,LOG_LEVEL_INF);
+/* Planner owner only; distinct stages spend a saturating boot quota.
+ * p: Pi time1, guest time2, proof4, path8, sequence16, expiry32, search snapshot64. */
+struct prep_observation {unsigned present,path,proof;uint64_t rev,seq,pi,guest,until;};
+static unsigned prep_diag_count,prep_diag_seen;
+static void prep_diagnostic(unsigned phase,int rc,int returned,int why,const struct prep_observation *v){
+ if(!phase||phase>16||prep_diag_count>=16||(prep_diag_seen&(1U<<(phase-1))))return;
+ prep_diag_seen|=1U<<(phase-1);unsigned index=++prep_diag_count;
+ LOG_INF("XD_PREP_DIAG n=%u cap=16 phase=%u rc=%d ret=%d why=%d p=%u path=%u proof=%u rev=%llu seq=%llu pi=%llu guest=%llu until=%llu",
+  index,phase,rc,returned,why,v->present|((phase>=2&&phase<=5)?64U:0U),v->path,v->proof,(unsigned long long)v->rev,
+  (unsigned long long)v->seq,(unsigned long long)v->pi,(unsigned long long)v->guest,(unsigned long long)v->until);
+}
+#define PREP_LOCAL struct prep_observation diag={0}
+#define PREP_VALUE(bit,field,value) do{diag.field=(value);diag.present|=(bit);}while(0)
+#define PREP_DIAG(phase,rc,returned,why) prep_diagnostic(phase,rc,returned,why,&diag)
+#define PREP_REQUIRE(phase,call,returned) do{int detail=(call);if(detail){PREP_DIAG(phase,detail,returned,0);return returned;}}while(0)
+#else
+#define PREP_LOCAL
+#define PREP_VALUE(...) ((void)0)
+#define PREP_DIAG(...) ((void)0)
+#define PREP_REQUIRE(phase,call,returned) do{if(call)return returned;}while(0)
+#endif
+
 static int clock_us(void *unused,uint64_t *out){ARG_UNUSED(unused);return xdiag_clock_us(out);}
 static bool cancelled(void *unused){ARG_UNUSED(unused);return atomic_get(&stop)||atomic_get(&planner_stop)||xd_stopping();}
 static bool tracker_cancelled(void *unused){ARG_UNUSED(unused);return atomic_get(&stop)||drive_task_stopping(DRIVE_TASK_AUTO)||xd_stopping();}
@@ -96,6 +121,7 @@ static int automatic(void *unused,struct xm_span control,struct xm_span input,in
  enum de_result rc=de_track(&engine,now,.02f,&command,&vehicle,budget);
  if(rc){out->reason=rc==DE_PATH?lp_reason(command.result):de_reason(rc);return 0;}
  out->v_mps=command.velocity;out->steer_rad=command.steer;out->nearest_m=command.known_distance;
+ out->clock_domain=DRIVE_SAMPLE_COUNTER_MS;
  out->valid_until_ms=valid_until(&clock,&vehicle);out->input_sequence=(int64_t)vehicle.sequence;
  int64_t map_end=((int64_t)command.valid_until_pi_us-clock.upper)/1000;
  if(map_end<out->valid_until_ms)out->valid_until_ms=map_end;
@@ -125,6 +151,7 @@ static int manual(void *unused,struct xm_span control,struct xm_span input,int64
  if(vehicle.velocity_mps*requested<0)requested=0;
  out->v_mps=vehicle.velocity_mps+bounded_float(requested-vehicle.velocity_mps,-lp_selected_config.max_brake*.02f,lp_selected_config.max_accel*.02f);
  if(requested==0)out->v_mps=0; /* request stop, never a physical-stop assertion */
+ out->clock_domain=DRIVE_SAMPLE_COUNTER_MS;
  out->valid_until_ms=valid_until(&clock,&vehicle);return 0;
 }
 void drive_lattice_adapter(struct drive_adapter *adapter,bool is_manual){
@@ -133,13 +160,19 @@ void drive_lattice_adapter(struct drive_adapter *adapter,bool is_manual){
   .qualify=is_manual?manual_qualified:qualified,.manual_input=is_manual};
 }
 static int prepare_current(const dw_state *copy){
- struct dl_clock mapping;uint64_t now;if(dl_clock_get(&mapping,&now))return -EAGAIN;
- uint64_t guest;if(clock_us(NULL,&guest))return -EIO;
+ PREP_LOCAL;
+ struct dl_clock mapping;uint64_t now;PREP_REQUIRE(6,dl_clock_get(&mapping,&now),-EAGAIN);
+ PREP_VALUE(1,pi,now);
+ uint64_t guest;PREP_REQUIRE(7,clock_us(NULL,&guest),-EIO);
+ PREP_VALUE(2,guest,guest);
  struct lp_budget budget={guest+lp_selected_config.planner_budget_us,clock_us,cancelled,NULL,NULL};
  struct de_reference proof;struct de_witness witness;dw_vehicle vehicle;
- enum de_result rc=de_prepare(&engine,now,&proof,&witness,&vehicle,budget);if(rc)return -EAGAIN;
- struct xt_bootstrap boot;if(xd_context_get(&boot))return -EAGAIN;
- struct de_reference ph;const struct lp_path *path;if(de_path_acquire(&engine,&ph,&path))return -EAGAIN;
+ enum de_result rc=de_prepare(&engine,now,&proof,&witness,&vehicle,budget);
+ if(rc){PREP_DIAG(8,rc,-EAGAIN,0);return -EAGAIN;}
+ PREP_VALUE(4,proof,proof.generation);
+ struct xt_bootstrap boot;PREP_REQUIRE(9,xd_context_get(&boot),-EAGAIN);
+ struct de_reference ph;const struct lp_path *path;PREP_REQUIRE(10,de_path_acquire(&engine,&ph,&path),-EAGAIN);
+ PREP_VALUE(8,path,ph.generation);PREP_VALUE(8,rev,path->revision);
  xenova_drive_AppliedState result={0};
  strcpy(result.vm,boot.identity.vm_id);strcpy(result.execution,boot.identity.execution_id);strcpy(result.app_instance,boot.auto_instance_id);
  strcpy(result.host_boot,boot.identity.host_boot_id);strcpy(result.gateway_instance,mapping.gateway);
@@ -151,13 +184,27 @@ static int prepare_current(const dw_state *copy){
  result.has_vehicle_sequence=true;
  result.maneuver_revision=path->maneuver_revision;
  result.rebuilt=copy==NULL;result.applied=ph.generation==proof.generation;
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+ int metadata_rc=k_mutex_lock(&app_metadata,K_NO_WAIT),expiry_rc=0;bool expired=false;
+ if(!metadata_rc){
+#else
  if(!k_mutex_lock(&app_metadata,K_NO_WAIT)){
+#endif
   if(!engine.stopping&&!strcmp(app_instance,boot.auto_instance_id)&&preparation_sequence<UINT64_MAX){
    int64_t bound=((int64_t)witness.valid_until_pi_us-mapping.upper)/1000;
    uint64_t ended=0;
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+   if(bound>0)PREP_VALUE(32,until,(uint64_t)bound*1000);
+   if(bound<=0||(expiry_rc=clock_us(NULL,&ended))||ended>(uint64_t)bound*1000){
+    expired=true;
+#else
    if(bound<=0||clock_us(NULL,&ended)||ended>(uint64_t)bound*1000){
+#endif
     result.applied=false;result.has_reason=true;strcpy(result.reason,"PREPARATION_EVIDENCE_EXPIRED");
    }
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+   if(bound>0&&!expiry_rc)PREP_VALUE(2,guest,ended);
+#endif
    if(!copy&&prepared.generation==proof.generation&&!strcmp(prepared_gateway,mapping.gateway)&&copy_message[0]){
     result.has_copy_message_id=true;strcpy(result.copy_message_id,copy_message);result.state_revision=copy_revision;result.rebuilt=false;
    }
@@ -170,7 +217,16 @@ static int prepare_current(const dw_state *copy){
   k_mutex_unlock(&app_metadata);
  }
  (void)de_path_release(&engine,ph);
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+ if(!result.calculation_sequence){PREP_DIAG(11,metadata_rc,-EAGAIN,0);return -EAGAIN;}
+ PREP_VALUE(16,seq,result.application_sequence);
+ int returned=dl_applied(&result);
+ if(expired)PREP_DIAG(12,expiry_rc,returned,0);
+ PREP_DIAG(returned?13:result.applied?14:15,returned,returned,0);
+ return returned;
+#else
  return result.calculation_sequence?dl_applied(&result):-EAGAIN;
+#endif
 }
 static void reject_state(const dw_state *copy,enum de_result reason){
  struct dl_clock clock;uint64_t now;struct xt_bootstrap boot;
@@ -195,10 +251,20 @@ static void planner(void *a,void *b,void *c){
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
  const dw_state *copy=NULL;int slot=-1;bool applying=false;
  while(!cancelled(NULL)){
-  struct dl_clock mapping;uint64_t now,guest;
+  struct dl_clock mapping;uint64_t now,guest;PREP_LOCAL;
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+  int mapping_rc=dl_clock_get(&mapping,&now),guest_rc=0;
+  if(!mapping_rc){PREP_VALUE(1,pi,now);guest_rc=clock_us(NULL,&guest);}
+  if(mapping_rc||guest_rc){PREP_DIAG(1,mapping_rc?mapping_rc:guest_rc,0,0);k_sleep(K_MSEC(2));continue;}
+#else
   if(dl_clock_get(&mapping,&now)||clock_us(NULL,&guest)){k_sleep(K_MSEC(2));continue;}
+#endif
+  PREP_VALUE(2,guest,guest);PREP_DIAG(16,0,0,0);
   if(engine.planning){
    enum de_result rc=de_plan_slice(&engine,4,now);
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+   if(!engine.planning)PREP_DIAG(rc==DE_OK?5:4,rc,rc,atomic_load(&engine.search_reason));
+#endif
    if(!engine.planning&&rc==DE_OK)(void)prepare_current(NULL);
   }else if(engine.apply_pending){
    enum de_result rc=de_apply_finish(&engine);
@@ -218,6 +284,10 @@ static void planner(void *a,void *b,void *c){
    }else{
     struct lp_budget budget={guest+lp_selected_config.planner_budget_us,clock_us,cancelled,NULL,NULL};
     enum de_result started=de_plan_start(&engine,now,budget);
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+    if(started==DE_OK)PREP_DIAG(3,started,started,atomic_load(&engine.search_reason));
+    else if(started!=DE_WAITING&&started!=DE_BUSY)PREP_DIAG(2,started,started,atomic_load(&engine.search_reason));
+#endif
     if(started==DE_OK&&!engine.planning)(void)prepare_current(NULL);
    }
   }

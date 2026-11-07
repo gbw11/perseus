@@ -10,12 +10,245 @@
 #include <errno.h>
 #include <limits.h>
 
+static struct drive_engine *engine;
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(drive_input_diag, LOG_LEVEL_INF);
+/* State-owner-only microsecond measurements. known is a presence mask, so a
+ * missing clock read is not observed zero. no_reply counts closed probes only.
+ * IDs are the original outgoing probe, never untrusted reply strings. Intent
+ * is not in ClockProbe: the outer query guard covers its current context only.
+ * Slot ownership protects a one-shot shell
+ * copy without waiting or borrowing a product/clock mutex. A row is immutable
+ * while published/claimed; no seqlock read of racing non-atomic C fields. */
+enum {CT_EB=1U,CT_EE=2U,CT_TB=4U,CT_TE=8U,CT_RX=16U,CT_PI=32U,
+ CT_PB=64U,CT_PE=128U,CT_PREV=256U,CT_SETUP=512U,CT_POLL=1024U,
+ CT_GAP=2048U,CT_OTHER=4096U,CT_ENC_RC=8192U,CT_TX_RC=16384U,CT_REPLY_RC=32768U,CT_WIDTH=65536U,CT_ACTIVE=131072U};
+_Static_assert(ATOMIC_INT_LOCK_FREE==2,"diagnostic publication must not use a blocking atomic fallback");
+enum {CT_PROBES,CT_NO_REPLY,CT_UNMATCHED,CT_ENCODE_FAILED,CT_TX_FAILED,CT_RECORDS,CT_SKIPPED,CT_CLOCK_ERRORS,CT_COUNTERS};
+struct ct_row {
+ uint64_t record,sequence,g0,live_sequence,live_g0,reply_sequence,echo_g0;
+ uint64_t eb,ee,tb,te,g3,p1,p2,poll_begin,poll_end,previous_poll_end;
+ uint64_t setup_max,poll_max,gap_max,other_total,other_max;
+ int64_t width;
+ unsigned known,setup_calls,poll_calls,other_calls,phase,match,event,other_kind;
+ int encode_rc,tx_rc,reply_rc,clock_rc,setup_rc,poll_rc,diag_rc;
+ char vm[37],execution[37],app_instance[37];
+};
+struct ct_slot {atomic_uint state;struct ct_row row;};
+struct ct_tx {uint64_t eb,ee,tb,te;unsigned known,kind;int encode_rc;};
+static struct ct_slot ct_slots[8];
+static struct ct_row ct_active,ct_pending;
+static bool ct_open,ct_reply_seen,ct_wire_failed,ct_pending_ready,ct_polling;
+static unsigned ct_first,ct_tail,ct_peak_used;
+static uint64_t ct_peak[2],ct_poll_begin,ct_previous_end;
+static bool ct_poll_begin_valid,ct_previous_end_valid;
+static atomic_uint ct_counts[CT_COUNTERS];
+static atomic_int ct_first_clock_rc;
+static unsigned ct_bump(atomic_uint *value){unsigned n=atomic_load(value);if(n<UINT_MAX)atomic_store(value,++n);return n;}
+static void ct_error(int rc){
+ ct_bump(&ct_counts[CT_CLOCK_ERRORS]);
+ if(!atomic_load(&ct_first_clock_rc))atomic_store(&ct_first_clock_rc,rc);
+ if(ct_open&&!ct_active.diag_rc)ct_active.diag_rc=rc;
+}
+static bool ct_stamp(uint64_t *value){
+ uint64_t now=0;int rc=xdiag_clock_us(&now);if(rc){ct_error(rc);return false;}*value=now;return true;
+}
+static bool ct_span(uint64_t begin,uint64_t end,uint64_t *span){
+ if(end<begin){ct_error(-ERANGE);return false;}*span=end-begin;return true;
+}
+static void ct_increment(unsigned *value){if(*value<UINT_MAX)++*value;}
+static bool ct_store(unsigned index,const struct ct_row *row){
+ unsigned expected=atomic_load_explicit(&ct_slots[index].state,memory_order_acquire);
+ if((expected!=0&&expected!=2)||!atomic_compare_exchange_strong_explicit(&ct_slots[index].state,&expected,1,memory_order_acq_rel,memory_order_acquire)){
+  ct_bump(&ct_counts[CT_SKIPPED]);return false;
+ }
+ ct_slots[index].row=*row;
+ atomic_store_explicit(&ct_slots[index].state,2,memory_order_release);return true;
+}
+#if defined(CONFIG_SHELL)
+static int ct_read(unsigned index,struct ct_row *row){
+ unsigned expected=2;
+ if(!atomic_compare_exchange_strong_explicit(&ct_slots[index].state,&expected,3,memory_order_acq_rel,memory_order_acquire))return expected==0?-ENODATA:-EBUSY;
+ *row=ct_slots[index].row;
+ atomic_store_explicit(&ct_slots[index].state,2,memory_order_release);return 0;
+}
+#endif
+static void ct_publish(struct ct_row *row){
+ if(atomic_load(&ct_counts[CT_RECORDS])==UINT_MAX)return;
+ row->record=ct_bump(&ct_counts[CT_RECORDS]);
+ if(ct_first<2)(void)ct_store(ct_first++,row);
+ (void)ct_store(2+ct_tail,row);ct_tail=(ct_tail+1)%4;
+ if((row->known&CT_WIDTH)&&row->width>=0){
+  unsigned index=ct_peak_used<2?ct_peak_used:(ct_peak[0]<=ct_peak[1]?0:1);
+  if(ct_peak_used<2||(uint64_t)row->width>ct_peak[index]){
+   if(ct_store(6+index,row)){ct_peak[index]=(uint64_t)row->width;if(ct_peak_used<2)ct_peak_used++;}
+  }
+ }
+}
+static void ct_binary_begin(const xenova_drive_DriveLink *value,struct ct_tx *tx){
+ memset(tx,0,sizeof(*tx));
+ tx->kind=value->which_payload==xenova_drive_DriveLink_probe_tag?1:
+  value->which_payload==xenova_drive_DriveLink_applied_tag?2:3;
+ if(tx->kind!=1)return;
+ if(ct_open&&!ct_reply_seen&&!ct_wire_failed)ct_bump(&ct_counts[CT_NO_REPLY]);
+ memset(&ct_active,0,sizeof(ct_active));ct_open=true;ct_reply_seen=ct_wire_failed=false;
+ const xenova_drive_ClockProbe *probe=&value->payload.probe;
+ ct_active.sequence=probe->sequence;ct_active.g0=probe->guest_send_us;
+ ct_active.known=CT_ACTIVE;
+ memcpy(ct_active.vm,probe->vm,sizeof(ct_active.vm));
+ memcpy(ct_active.execution,probe->execution,sizeof(ct_active.execution));
+ memcpy(ct_active.app_instance,probe->app_instance,sizeof(ct_active.app_instance));
+ ct_bump(&ct_counts[CT_PROBES]);
+}
+static void ct_binary_end(const struct ct_tx *tx,int rc){
+ if(!ct_open)return;
+ if(tx->kind==1){
+  ct_active.eb=tx->eb;ct_active.ee=tx->ee;ct_active.tb=tx->tb;ct_active.te=tx->te;
+  ct_active.known|=tx->known;ct_active.encode_rc=tx->encode_rc;ct_active.tx_rc=rc;
+  if(rc){ct_wire_failed=true;ct_bump(&ct_counts[tx->known&CT_TX_RC?CT_TX_FAILED:CT_ENCODE_FAILED]);ct_active.event=tx->known&CT_TX_RC?3:2;ct_publish(&ct_active);}
+ }else{
+  ct_increment(&ct_active.other_calls);uint64_t elapsed;
+  unsigned finish=tx->known&CT_TX_RC?CT_TE:CT_EE;
+  if((tx->known&(CT_EB|finish))==(CT_EB|finish)&&ct_span(tx->eb,finish==CT_TE?tx->te:tx->ee,&elapsed)){
+   ct_active.known|=CT_OTHER;
+   if(UINT64_MAX-ct_active.other_total<elapsed)ct_active.other_total=UINT64_MAX;else ct_active.other_total+=elapsed;
+   if(elapsed>=ct_active.other_max){ct_active.other_max=elapsed;ct_active.other_kind=tx->kind;}
+  }
+ }
+}
+static void ct_reply(unsigned phase,int rc,uint64_t sequence,uint64_t echo,uint64_t live_sequence,uint64_t live_g0,
+ uint64_t p1,uint64_t p2,uint64_t g3,int clock_rc){
+ bool matches=ct_open&&sequence==ct_active.sequence&&echo==ct_active.g0;
+ if(matches){ct_pending=ct_active;ct_reply_seen=true;}else{
+  memset(&ct_pending,0,sizeof(ct_pending));ct_bump(&ct_counts[CT_UNMATCHED]);
+  if(ct_open){ct_pending.sequence=ct_active.sequence;ct_pending.g0=ct_active.g0;ct_pending.known|=CT_ACTIVE;
+   memcpy(ct_pending.vm,ct_active.vm,sizeof(ct_pending.vm));memcpy(ct_pending.execution,ct_active.execution,sizeof(ct_pending.execution));
+   memcpy(ct_pending.app_instance,ct_active.app_instance,sizeof(ct_pending.app_instance));}
+ }
+ ct_pending.event=matches?1:4;ct_pending.phase=phase;ct_pending.reply_rc=rc;ct_pending.clock_rc=clock_rc;
+ ct_pending.reply_sequence=sequence;ct_pending.echo_g0=echo;ct_pending.live_sequence=live_sequence;ct_pending.live_g0=live_g0;
+ ct_pending.p1=p1;ct_pending.p2=p2;ct_pending.g3=g3;ct_pending.known|=CT_PI|CT_REPLY_RC;
+ if(!clock_rc)ct_pending.known|=CT_RX;
+ ct_pending.match=matches?1:0;
+ if(matches&&!clock_rc&&phase>=2&&phase<=5&&g3>=echo&&p2>=p1&&g3-echo<=INT64_MAX&&p2-p1<=INT64_MAX){
+  ct_pending.match|=2;ct_pending.width=(int64_t)(g3-echo)-(int64_t)(p2-p1);ct_pending.known|=CT_WIDTH;
+ }
+ if(ct_polling&&ct_poll_begin_valid){ct_pending.poll_begin=ct_poll_begin;ct_pending.known|=CT_PB;}
+ if(ct_previous_end_valid){ct_pending.previous_poll_end=ct_previous_end;ct_pending.known|=CT_PREV;}
+ ct_pending_ready=true;
+}
+static int ct_poll(struct xm_zclient *client){
+ ct_polling=true;ct_poll_begin_valid=ct_stamp(&ct_poll_begin);
+ if(ct_open&&ct_poll_begin_valid&&ct_previous_end_valid){uint64_t elapsed;
+  if(ct_span(ct_previous_end,ct_poll_begin,&elapsed)){ct_active.known|=CT_GAP;if(elapsed>ct_active.gap_max)ct_active.gap_max=elapsed;}
+ }
+ int rc=xm_zclient_poll(client,0);uint64_t end=0;bool valid=ct_stamp(&end);ct_polling=false;
+ if(ct_open){ct_increment(&ct_active.poll_calls);ct_active.poll_rc=rc;
+  uint64_t elapsed;if(valid&&ct_poll_begin_valid&&ct_span(ct_poll_begin,end,&elapsed)){
+   ct_active.known|=CT_POLL;if(elapsed>ct_active.poll_max)ct_active.poll_max=elapsed;
+  }
+ }
+ if(ct_pending_ready){
+  if(valid){ct_pending.poll_end=end;ct_pending.known|=CT_PE;}
+  if(ct_pending.match&1){ct_pending.poll_max=ct_active.poll_max;ct_pending.poll_calls=ct_active.poll_calls;
+   ct_pending.poll_rc=rc;ct_pending.known|=ct_active.known&(CT_POLL|CT_GAP);ct_pending.diag_rc=ct_active.diag_rc;}
+  ct_publish(&ct_pending);ct_pending_ready=false;
+ }
+ ct_previous_end=end;ct_previous_end_valid=valid;return rc;
+}
+#if defined(CONFIG_SHELL)
+#include <zephyr/shell/shell.h>
+static int ct_shell(const struct shell *shell,size_t argc,char **argv){
+ ARG_UNUSED(argv);if(argc!=1)return -EINVAL;
+ shell_print(shell,"XD_CLOCK_TRANSPORT_META {\"schema\":1,\"slots\":8,\"row_bytes\":%u,\"probes\":%u,\"no_reply\":%u,\"unmatched\":%u,\"encode_failed\":%u,\"publish_failed\":%u,\"records\":%u,\"skipped\":%u,\"extra_clock_errors\":%u,\"first_extra_clock_rc\":%d,\"scope\":\"per-row original observation; outer query context is current only\"}",
+  (unsigned)sizeof(struct ct_row),atomic_load(&ct_counts[CT_PROBES]),atomic_load(&ct_counts[CT_NO_REPLY]),atomic_load(&ct_counts[CT_UNMATCHED]),atomic_load(&ct_counts[CT_ENCODE_FAILED]),atomic_load(&ct_counts[CT_TX_FAILED]),atomic_load(&ct_counts[CT_RECORDS]),atomic_load(&ct_counts[CT_SKIPPED]),atomic_load(&ct_counts[CT_CLOCK_ERRORS]),atomic_load(&ct_first_clock_rc));
+ for(unsigned index=0;index<8;index++){
+  struct ct_row r;int rc=ct_read(index,&r);
+  if(rc){shell_print(shell,"XD_CLOCK_TRANSPORT_ROW {\"slot\":%u,\"status\":\"%s\",\"row\":null}",index,rc==-ENODATA?"empty":"busy");continue;}
+  char width[32];if(r.known&CT_WIDTH)snprintf(width,sizeof(width),"%lld",(long long)r.width);else strcpy(width,"null");
+  shell_print(shell,"XD_CLOCK_TRANSPORT_ROW {\"slot\":%u,\"status\":\"valid\",\"record\":%llu,\"seq\":%llu,\"g0\":%llu,\"live_seq\":%llu,\"live_g0\":%llu,\"reply_seq\":%llu,\"echo\":%llu,\"event\":%u,\"phase\":%u,\"match\":%u,\"p\":%u,\"vm\":\"%.36s\",\"execution\":\"%.36s\",\"app_instance\":\"%.36s\"}",index,(unsigned long long)r.record,(unsigned long long)r.sequence,(unsigned long long)r.g0,(unsigned long long)r.live_sequence,(unsigned long long)r.live_g0,(unsigned long long)r.reply_sequence,(unsigned long long)r.echo_g0,r.event,r.phase,r.match,r.known,r.vm,r.execution,r.app_instance);
+  shell_print(shell,"XD_CLOCK_TRANSPORT_TIME {\"slot\":%u,\"record\":%llu,\"eb\":%llu,\"ee\":%llu,\"tb\":%llu,\"te\":%llu,\"g3\":%llu,\"p1\":%llu,\"p2\":%llu,\"poll_begin\":%llu,\"poll_end\":%llu,\"previous_poll_end\":%llu,\"width\":%s}",index,(unsigned long long)r.record,(unsigned long long)r.eb,(unsigned long long)r.ee,(unsigned long long)r.tb,(unsigned long long)r.te,(unsigned long long)r.g3,(unsigned long long)r.p1,(unsigned long long)r.p2,(unsigned long long)r.poll_begin,(unsigned long long)r.poll_end,(unsigned long long)r.previous_poll_end,width);
+  shell_print(shell,"XD_CLOCK_TRANSPORT_WORK {\"slot\":%u,\"record\":%llu,\"setup_max\":%llu,\"poll_max\":%llu,\"gap_max\":%llu,\"other_total\":%llu,\"other_max\":%llu,\"setup_calls\":%u,\"poll_calls\":%u,\"other_calls\":%u,\"other_kind\":%u,\"encode_rc\":%d,\"tx_rc\":%d,\"reply_rc\":%d,\"clock_rc\":%d,\"setup_rc\":%d,\"poll_rc\":%d,\"diag_rc\":%d}",index,(unsigned long long)r.record,(unsigned long long)r.setup_max,(unsigned long long)r.poll_max,(unsigned long long)r.gap_max,(unsigned long long)r.other_total,(unsigned long long)r.other_max,r.setup_calls,r.poll_calls,r.other_calls,r.other_kind,r.encode_rc,r.tx_rc,r.reply_rc,r.clock_rc,r.setup_rc,r.poll_rc,r.diag_rc);
+ }
+ return 0;
+}
+SHELL_CMD_REGISTER(xenova_clock,NULL,"Read bounded DriveLink clock transport metadata",ct_shell);
+#endif
+#define LINK_POLL(client) ct_poll(client)
+static unsigned clock_diag_count,map_diag_count;
+static unsigned vehicle_diag_count,receive_diag_count,receive_phase_count[5];
+static uint64_t vehicle_phase_count[18];
+static void vehicle_diagnostic(unsigned phase,int rc,int returned,const dw_vehicle *sample,bool mapped,uint64_t now,uint32_t source_error){
+ uint64_t *count=&vehicle_phase_count[phase];if(*count<UINT64_MAX)++*count;
+ /* Preserve room for later distinct causes instead of spending the quota on
+  * the first burst of normal clock acquisition. Counters still saturate. */
+ if(*count!=1||vehicle_diag_count>=16)return;
+ unsigned index=++vehicle_diag_count;
+ LOG_INF("XD_VEHICLE_DIAG n=%u cap=16 phase=%u rc=%d ret=%d sv=%u nv=%u seq=%llu pi=%llu err=%u now=%llu",
+  index,phase,rc,returned,sample?1U:0U,mapped?1U:0U,
+  (unsigned long long)(sample?sample->sequence:0),(unsigned long long)(sample?sample->pi_sample_us:0),
+  sample?source_error:0,(unsigned long long)(mapped?now:0));
+}
+/* Enqueue and link owners share one atomic first-stage/boot quota.
+ * The high byte saturates at8; low bits claim distinct phases exactly once. */
+static atomic_uint applied_diag_state;
+static void applied_diagnostic(unsigned phase,int rc,const xenova_drive_AppliedState *value){
+ if(!phase||phase>8)return;
+ unsigned old=atomic_load(&applied_diag_state),bit=1U<<(phase-1),index;
+ do{
+  if((old>>8)>=8||(old&bit))return;
+  index=(old>>8)+1;
+ }while(!atomic_compare_exchange_weak(&applied_diag_state,&old,((index<<8)|(old&255U)|bit)));
+ LOG_INF("XD_APPLIED_DIAG n=%u cap=8 phase=%u rc=%d p=%u seq=%llu path=%llu applied=%u",
+  index,phase,rc,value?1U:0U,(unsigned long long)(value?value->application_sequence:0),
+  (unsigned long long)(value?value->path_revision:0),value&&value->applied?1U:0U);
+}
+static void receive_diagnostic(unsigned phase,int rc,unsigned before,unsigned after,uint64_t now){
+ if(receive_diag_count>=8||receive_phase_count[phase]>=2)return;
+ unsigned index=++receive_diag_count;++receive_phase_count[phase];
+ LOG_INF("XD_RECEIVE_DIAG n=%u cap=8 phase=%u rc=%d world=%d before=%u after=%u published=%llu now=%llu",
+  index,phase,rc,atomic_load(&engine->last_world_result),before,after,
+  (unsigned long long)engine->maps.published,(unsigned long long)now);
+}
+static void clock_diagnostic(unsigned phase,int rc,uint64_t sequence,uint64_t echo,uint64_t live_sequence,uint64_t t0,
+ uint64_t p1,uint64_t p2,uint64_t t4,int clock_rc){
+ ct_reply(phase,rc,sequence,echo,live_sequence,t0,p1,p2,t4,clock_rc);
+ if(clock_diag_count>=16)return;
+ unsigned index=++clock_diag_count;
+ uint64_t decision=0;int decision_rc=xdiag_clock_us(&decision);
+ LOG_INF("XD_CLOCK_DIAG n=%u cap=16 seq=%llu g0=%llu p1=%llu p2=%llu g3=%llu dec=%llu crc=%d drc=%d rc=%d phase=%u",
+  index,(unsigned long long)sequence,(unsigned long long)t0,
+  (unsigned long long)p1,(unsigned long long)p2,(unsigned long long)t4,
+  (unsigned long long)decision,clock_rc,decision_rc,rc,phase);
+}
+static void map_diagnostic(unsigned phase,int rc,int returned,size_t bytes){
+ if(map_diag_count>=8)return;
+ unsigned index=++map_diag_count;
+ LOG_INF("XD_MAP_DIAG n=%u cap=8 bytes=%u rc=%d ret=%d phase=%u",
+  index,(unsigned)bytes,rc,returned,phase);
+}
+#define CLOCK_DIAG(phase,rc,body,t4,clock_rc) \
+ clock_diagnostic(phase,rc,(body)->probe.sequence,(body)->probe.guest_send_us,probe_sequence,probe_sent, \
+  (body)->pi_receive_us,(body)->pi_send_us,t4,clock_rc)
+#define MAP_DIAG(phase,rc,returned,bytes) map_diagnostic(phase,rc,returned,bytes)
+#define VEHICLE_DIAG(phase,rc,returned,sample,mapped,now,source_error) vehicle_diagnostic(phase,rc,returned,sample,mapped,now,source_error)
+#define APPLIED_DIAG(phase,rc,value) applied_diagnostic(phase,rc,value)
+#else
+#define CLOCK_DIAG(...) ((void)0)
+#define MAP_DIAG(...) ((void)0)
+#define VEHICLE_DIAG(...) ((void)0)
+#define APPLIED_DIAG(...) ((void)0)
+#define LINK_POLL(client) xm_zclient_poll(client,0)
+#endif
+
 #define VEHICLE_TOPIC "xenova/v1/vehicle/state.pb"
 #define WORLD_TOPIC "xenova/v1/world/snapshot.pb"
 extern const struct lp_config lp_selected_config;
 extern const struct lp_assets lp_selected_assets;
-static struct drive_engine *engine;
 static struct xm_zclient map_client,link_client;
+/* Each synchronous polling owner alone changes its callback's adoption gate. */
+static bool map_input_allowed,link_input_allowed;
 static struct xt_bootstrap map_boot,link_boot;
 static uint8_t map_wire[DW_WIRE_MAX],link_wire[DW_WIRE_MAX],send_wire[DW_WIRE_MAX],vehicle_wire[2048];
 static xenova_drive_DriveLink incoming,outgoing;
@@ -66,59 +299,101 @@ int dl_clock_get(struct dl_clock *out,uint64_t *now_pi){
 static int vehicle_received(void *unused,const uint8_t *bytes,size_t count,int64_t received){
  ARG_UNUSED(unused);ARG_UNUSED(received);
  dw_vehicle sample;enum dw_result decoded=dw_vehicle_decode(bytes,count,&sample);
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+ uint32_t source_error=decoded?0:sample.clock_error_us;
+#endif
  struct dl_clock mapping;uint64_t now;
  struct xt_bootstrap boot;
- if(decoded||dl_clock_get(&mapping,&now)||xd_context_get(&boot)||
-   strcmp(sample.host_boot,boot.identity.host_boot_id)||!sample.has_gateway_instance||strcmp(sample.gateway_instance,mapping.gateway)||
-   strcmp(sample.vehicle,mapping.trust.vehicle)||strcmp(sample.odom_epoch,mapping.trust.odom_epoch)||
-   strcmp(sample.calibration,mapping.trust.calibration)||sample.pi_sample_us<=received_vehicle||
-   now<sample.pi_sample_us||now-sample.pi_sample_us+sample.clock_error_us>lp_selected_config.pose_age_us){rejected_vehicles++;return -EPROTO;}
+#define VEHICLE_REJECT(phase,code,returned,value,mapped,at) do { \
+ rejected_vehicles++;VEHICLE_DIAG(phase,code,returned,value,mapped,at,source_error);return returned; } while(0)
+ /* The original short-circuit order and public errno remain unchanged. A
+  * failed decode never lends uninitialized sample fields to diagnostics. */
+ if(decoded)VEHICLE_REJECT(1,decoded,-EPROTO,NULL,false,0);
+ int gate=dl_clock_get(&mapping,&now);
+ if(gate)VEHICLE_REJECT(2,gate,-EPROTO,&sample,false,0);
+ gate=xd_context_get(&boot);
+ if(gate)VEHICLE_REJECT(3,gate,-EPROTO,&sample,true,now);
+ if(strcmp(sample.host_boot,boot.identity.host_boot_id))VEHICLE_REJECT(4,-EPROTO,-EPROTO,&sample,true,now);
+ if(!sample.has_gateway_instance)VEHICLE_REJECT(5,-EPROTO,-EPROTO,&sample,true,now);
+ if(strcmp(sample.gateway_instance,mapping.gateway))VEHICLE_REJECT(6,-EPROTO,-EPROTO,&sample,true,now);
+ if(strcmp(sample.vehicle,mapping.trust.vehicle))VEHICLE_REJECT(7,-EPROTO,-EPROTO,&sample,true,now);
+ if(strcmp(sample.odom_epoch,mapping.trust.odom_epoch))VEHICLE_REJECT(8,-EPROTO,-EPROTO,&sample,true,now);
+ if(strcmp(sample.calibration,mapping.trust.calibration))VEHICLE_REJECT(9,-EPROTO,-EPROTO,&sample,true,now);
+ if(sample.pi_sample_us<=received_vehicle)VEHICLE_REJECT(10,-EPROTO,-EPROTO,&sample,true,now);
+ if(now<sample.pi_sample_us)VEHICLE_REJECT(11,-EPROTO,-EPROTO,&sample,true,now);
+ if(now-sample.pi_sample_us+sample.clock_error_us>lp_selected_config.pose_age_us)
+  VEHICLE_REJECT(12,-EPROTO,-EPROTO,&sample,true,now);
  uint64_t width=(uint64_t)mapping.upper-(uint64_t)mapping.lower;
- if(width>UINT32_MAX-sample.clock_error_us){rejected_vehicles++;return -ERANGE;}
+ if(width>UINT32_MAX-sample.clock_error_us)VEHICLE_REJECT(13,-ERANGE,-ERANGE,&sample,true,now);
  sample.clock_error_us+=(uint32_t)width;
  enum dw_result rc=dw_odom_add(&engine->odometry,&sample);
  if(rc==DW_EPOCH){
   /* A new epoch is already authorized by the current clock/trust reply.
    * Atomic reset invalidates old map anchors; it does not reset AUTO or MANUAL. */
-  rc=dw_odom_reset(&engine->odometry);if(!rc)rc=dw_odom_add(&engine->odometry,&sample);
+  rc=dw_odom_reset(&engine->odometry);
+  if(rc)VEHICLE_REJECT(15,rc,-EAGAIN,&sample,true,now);
+  rc=dw_odom_add(&engine->odometry,&sample);
+  if(rc)VEHICLE_REJECT(16,rc,-EAGAIN,&sample,true,now);
  }
- if(rc){rejected_vehicles++;return -EAGAIN;}
+ if(rc)VEHICLE_REJECT(14,rc,-EAGAIN,&sample,true,now);
+ VEHICLE_DIAG(17,0,0,&sample,true,now,source_error);
  received_vehicle=sample.pi_sample_us;return 0;
+#undef VEHICLE_REJECT
 }
 static int map_received(void *unused,const uint8_t *bytes,size_t count,int64_t received){
  ARG_UNUSED(unused);ARG_UNUSED(received);struct dl_clock mapping;uint64_t now;
- if(dl_clock_get(&mapping,&now)){rejected_maps++;return -EAGAIN;}
+ if(unused&&!*(const bool *)unused){rejected_maps++;return -EAGAIN;}
+ int gate=dl_clock_get(&mapping,&now);
+ if(gate){rejected_maps++;MAP_DIAG(1,gate,-EAGAIN,count);return -EAGAIN;}
  if(memcmp(&engine->maps.trust,&mapping.trust,sizeof(mapping.trust))){
-  if(dw_pool_source(&engine->maps,&mapping.trust)){rejected_maps++;return -EBUSY;}
+  enum dw_result source=dw_pool_source(&engine->maps,&mapping.trust);
+  if(source){rejected_maps++;MAP_DIAG(2,source,-EBUSY,count);return -EBUSY;}
  }
  enum de_result rc=de_world(engine,bytes,count,now);
- if(rc){rejected_maps++;atomic_set(&reason,rc);return -EPROTO;}
- accepted_maps++;return 0;
+ if(rc){rejected_maps++;atomic_set(&reason,rc);MAP_DIAG(3,rc,-EPROTO,count);return -EPROTO;}
+ accepted_maps++;MAP_DIAG(4,0,0,count);return 0;
 }
 static bool same_identity(const struct xt_bootstrap *a,const struct xt_bootstrap *b){
  return !memcmp(&a->identity,&b->identity,sizeof(a->identity));
 }
 static int link_received(void *unused,const uint8_t *bytes,size_t count,int64_t received){
+ /* First accessible receive boundary, before protobuf/context processing.
+  * The transport's received argument is uptime milliseconds, not this us clock.
+  * Record failure without changing decode/context rejection precedence. */
+ uint64_t received_us=0;int clock_rc=xdiag_clock_us(&received_us);
  ARG_UNUSED(unused);ARG_UNUSED(received);
  if(dw_link_decode(bytes,count,&incoming)){rejected_links++;return -EPROTO;}
- struct xt_bootstrap boot;if(xd_context_get(&boot)){rejected_links++;return -EAGAIN;}
+ if(unused&&!*(const bool *)unused){rejected_links++;return -EAGAIN;}
+ struct xt_bootstrap boot;if(xd_context_get(&boot)){
+  rejected_links++;
+  if(incoming.which_payload==xenova_drive_DriveLink_clock_tag)
+   CLOCK_DIAG(7,-EAGAIN,&incoming.payload.clock,received_us,clock_rc);
+  return -EAGAIN;
+ }
  if(incoming.which_payload==xenova_drive_DriveLink_clock_tag){
   const xenova_drive_ClockReply *reply=&incoming.payload.clock;const xenova_drive_ClockProbe *probe=&reply->probe;
-  uint64_t now=clock_us();
+  uint64_t now=clock_rc?0:received_us;
+  if(clock_rc)atomic_set(&reason,DW_TIME);
   if(!probe_sent||probe->sequence!=probe_sequence||probe->guest_send_us!=probe_sent||now<probe_sent||
    strcmp(probe->vm,boot.identity.vm_id)||strcmp(probe->execution,boot.identity.execution_id)||
    strcmp(probe->app_instance,boot.auto_instance_id)||strcmp(reply->host_boot,boot.identity.host_boot_id)||
    reply->pi_receive_us>reply->pi_send_us||reply->pi_send_us>INT64_MAX||now>INT64_MAX||
    strcmp(reply->vehicle.vehicle,lp_selected_config.vehicle)||strcmp(reply->vehicle.calibration,lp_selected_config.calibration)||
-   (reply->has_trust&&(strcmp(reply->trust.configuration,lp_selected_config.id)||strcmp(reply->trust.primitive,lp_selected_assets.sha256)))){rejected_links++;return -EPROTO;}
+   (reply->has_trust&&(strcmp(reply->trust.configuration,lp_selected_config.id)||strcmp(reply->trust.primitive,lp_selected_assets.sha256)))){
+   rejected_links++;CLOCK_DIAG(clock_rc?6:1,-EPROTO,reply,received_us,clock_rc);return -EPROTO;
+  }
   int64_t lower=(int64_t)reply->pi_send_us-(int64_t)now;
   int64_t upper=(int64_t)reply->pi_receive_us-(int64_t)probe_sent;
 #if defined(CONFIG_XENOVA_DRIVE_NATIVE_TEST)
   if(clock_trace_count<16){uint64_t *row=clock_trace[clock_trace_count++];row[0]=probe_sent;row[1]=now;row[2]=reply->pi_receive_us;row[3]=reply->pi_send_us;}
 #endif
-  if(upper<lower||(uint64_t)upper-(uint64_t)lower>lp_selected_config.clock_error_us){rejected_links++;return -ETIME;}
-  if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
-  if(!context_available||strcmp(gateway,reply->gateway_instance)){k_mutex_unlock(&input_context_lock);return -EXDEV;}
+  if(upper<lower||(uint64_t)upper-(uint64_t)lower>lp_selected_config.clock_error_us){
+   rejected_links++;CLOCK_DIAG(2,-ETIME,reply,received_us,clock_rc);return -ETIME;
+  }
+  if(k_mutex_lock(&input_context_lock,K_NO_WAIT)){CLOCK_DIAG(3,-EBUSY,reply,received_us,clock_rc);return -EBUSY;}
+  if(!context_available||strcmp(gateway,reply->gateway_instance)){
+   k_mutex_unlock(&input_context_lock);CLOCK_DIAG(4,-EXDEV,reply,received_us,clock_rc);return -EXDEV;
+  }
   struct dl_clock *out=&current_clock;memset(out,0,sizeof(*out));out->lower=lower;out->upper=upper;
   out->expires_guest=now+lp_selected_config.clock_lease_us;strcpy(out->gateway,gateway);
   const xenova_drive_WorldTrust *t=&reply->trust;struct dw_trust *d=&out->trust;
@@ -127,7 +402,8 @@ static int link_received(void *unused,const uint8_t *bytes,size_t count,int64_t 
   strcpy(d->configuration,t->configuration);strcpy(d->calibration,reply->vehicle.calibration);strcpy(d->primitive,t->primitive);
   strcpy(d->clock.epoch,t->clock_epoch);d->clock.lower_offset_us=t->lower_offset_us;d->clock.upper_offset_us=t->upper_offset_us;
   d->clock.expires_pi_us=t->expires_pi_us;d->clock.max_error_us=MIN(t->max_error_us,lp_selected_config.clock_error_us);d->max_live_age_us=lp_selected_config.live_age_us;
-  clock_available=true;k_mutex_unlock(&input_context_lock);probe_sent=0;return 0;
+  clock_available=true;k_mutex_unlock(&input_context_lock);
+  CLOCK_DIAG(5,0,reply,received_us,clock_rc);probe_sent=0;return 0;
  }
  if(incoming.which_payload==xenova_drive_DriveLink_accepted_tag){
   struct dl_clock mapping;uint64_t now;const xenova_drive_AcceptedState *copy=&incoming.payload.accepted;
@@ -145,22 +421,47 @@ int dl_state_take(const dw_state **out){
 }
 void dl_state_release(int slot){if(slot>=0&&slot<2)(void)atomic_cas(&copies[slot].state,3,0);}
 int dl_applied(const xenova_drive_AppliedState *value){
- if(stopped())return -ESHUTDOWN;
- if(k_mutex_lock(&applied_lock,K_NO_WAIT))return -EBUSY;
- applied=*value;application_pending=true;k_mutex_unlock(&applied_lock);return 0;
+ if(stopped()){APPLIED_DIAG(1,-ESHUTDOWN,value);return -ESHUTDOWN;}
+ if(k_mutex_lock(&applied_lock,K_NO_WAIT)){APPLIED_DIAG(1,-EBUSY,value);return -EBUSY;}
+ applied=*value;application_pending=true;k_mutex_unlock(&applied_lock);
+ APPLIED_DIAG(2,0,value);return 0;
 }
 static int binary_publish(struct xm_zclient *client,const char *topic,const xenova_drive_DriveLink *value){
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+ struct ct_tx tx;ct_binary_begin(value,&tx);
+#endif
  pb_ostream_t stream=pb_ostream_from_buffer(send_wire,sizeof(send_wire));
- if(!pb_encode(&stream,xenova_drive_DriveLink_fields,value))return -EMSGSIZE;
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+ if(ct_stamp(&tx.eb))tx.known|=CT_EB;
+#endif
+ if(!pb_encode(&stream,xenova_drive_DriveLink_fields,value)){
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+  if(ct_stamp(&tx.ee))tx.known|=CT_EE;
+  tx.encode_rc=-EMSGSIZE;tx.known|=CT_ENC_RC;ct_binary_end(&tx,-EMSGSIZE);
+#endif
+  return -EMSGSIZE;
+ }
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+ if(ct_stamp(&tx.ee))tx.known|=CT_EE;
+ tx.known|=CT_ENC_RC;
+#endif
  struct mqtt_publish_param p={0};p.message.topic.topic.utf8=(const uint8_t *)topic;p.message.topic.topic.size=strlen(topic);
  p.message.topic.qos=MQTT_QOS_0_AT_MOST_ONCE;p.message.payload.data=send_wire;p.message.payload.len=stream.bytes_written;
 #if defined(CONFIG_XENOVA_MQTT_BOUNDED_IO)
  client->socket_io.deadline_ms=k_uptime_get()+CONFIG_XENOVA_MQTT_IO_MS;
 #endif
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+ if(ct_stamp(&tx.tb))tx.known|=CT_TB;
+ int rc=mqtt_publish(&client->mqtt,&p);
+ if(ct_stamp(&tx.te))tx.known|=CT_TE;
+ tx.known|=CT_TX_RC;ct_binary_end(&tx,rc);return rc;
+#else
  return mqtt_publish(&client->mqtt,&p);
+#endif
 }
-static int setup(struct xm_zclient *client,struct xt_bootstrap *saved,bool world){
- struct xt_bootstrap boot;int rc=xd_context_get(&boot);if(rc)return rc;
+static int setup(struct xm_zclient *client,struct xt_bootstrap *saved,bool world,bool *source_unavailable){
+ *source_unavailable=false;
+ struct xt_bootstrap boot;int rc=xd_context_get(&boot);if(rc){*source_unavailable=true;return rc;}
  if(world&&(!boot.world_broker_ipv4[0]||strcmp(boot.world_profile,lp_selected_config.id)))return -ENODATA;
  if(saved->identity.vm_id[0]&&same_identity(saved,&boot)&&
    (!world||(!strcmp(saved->world_broker_ipv4,boot.world_broker_ipv4)&&saved->world_port==boot.world_port&&
@@ -176,24 +477,57 @@ static int setup(struct xm_zclient *client,struct xt_bootstrap *saved,bool world
  snprintf(client->client_id_buf,sizeof(client->client_id_buf),"%s-%s-%.8s",saved->identity.vm_id,world?"world":"state",saved->identity.publisher_id);
  client->client_id.size=strlen(client->client_id_buf);
  client->mqtt.client_id=client->client_id;
- if(world)client->binary=(struct xm_zbinary){WORLD_TOPIC,map_wire,sizeof(map_wire),map_received,NULL};
+ if(world)client->binary=(struct xm_zbinary){WORLD_TOPIC,map_wire,sizeof(map_wire),map_received,&map_input_allowed};
  else{
   snprintf(in_topic,sizeof(in_topic),"xenova/v1/vms/%s/drive/link/in",saved->identity.vm_id);
   snprintf(out_topic,sizeof(out_topic),"xenova/v1/vms/%s/drive/link/out",saved->identity.vm_id);
-  client->binary=(struct xm_zbinary){in_topic,link_wire,sizeof(link_wire),link_received,NULL};
+  client->binary=(struct xm_zbinary){in_topic,link_wire,sizeof(link_wire),link_received,&link_input_allowed};
  }
  rc=xm_zclient_subscribe(client,world?WORLD_TOPIC:in_topic,0);
  if(rc){xm_zclient_close(client);saved->identity.vm_id[0]=0;}
  return rc;
 }
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+static int ct_setup(struct xm_zclient *client,struct xt_bootstrap *saved,bool world,bool *source_unavailable){
+ uint64_t begin=0,end=0;bool before=ct_stamp(&begin);
+ int rc=setup(client,saved,world,source_unavailable);bool after=ct_stamp(&end);
+ if(ct_open){ct_increment(&ct_active.setup_calls);ct_active.setup_rc=rc;uint64_t elapsed;
+  if(before&&after&&ct_span(begin,end,&elapsed)){ct_active.known|=CT_SETUP;if(elapsed>ct_active.setup_max)ct_active.setup_max=elapsed;}
+ }
+ return rc;
+}
+#define LINK_SETUP(client,saved,world,unavailable) ct_setup(client,saved,world,unavailable)
+#else
+#define LINK_SETUP(client,saved,world,unavailable) setup(client,saved,world,unavailable)
+#endif
 static void maps(void *a,void *b,void *c){
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
  while(!stopped()){
-  if(!setup(&map_client,&map_boot,true))(void)xm_zclient_poll(&map_client,0);
+  bool was_open=map_client.socket_open,source_unavailable;
+  map_input_allowed=false;
+  int prepared=setup(&map_client,&map_boot,true,&source_unavailable);
+  map_input_allowed=!prepared;
+  /* Drain an existing transport without reconnecting or accepting app data.
+   * Only the exact first context-read failure permits this limited pump. */
+  if(!prepared||(source_unavailable&&was_open&&!stopped()))(void)xm_zclient_poll(&map_client,0);
   struct dl_clock mapping;uint64_t now;
-  if(!dl_clock_get(&mapping,&now))(void)de_receive_poll(engine,now);
+  if(!prepared&&!dl_clock_get(&mapping,&now)){
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+   unsigned before=(engine->receive_pending?1U:0U)|(engine->receive_awaiting?2U:0U);
+   uint64_t published=engine->maps.published;
+   enum de_result rc=de_receive_poll(engine,now);
+   if(before){
+    unsigned after=(engine->receive_pending?1U:0U)|(engine->receive_awaiting?2U:0U);
+    unsigned phase=published!=engine->maps.published?2U:after&2U?1U:after&1U?4U:3U;
+    receive_diagnostic(phase,rc,before,after,now);
+   }
+#else
+   (void)de_receive_poll(engine,now);
+#endif
+  }
   k_sleep(K_MSEC(2));
  }
+ map_input_allowed=false;
  xm_zclient_close(&map_client);
  while(de_receive_drain(engine)==DE_BUSY)k_sleep(K_MSEC(1));
  memset(&map_boot,0,sizeof(map_boot));
@@ -201,8 +535,13 @@ static void maps(void *a,void *b,void *c){
 static void state(void *a,void *b,void *c){
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
  while(!stopped()){
-  if(!setup(&link_client,&link_boot,false)){
-   (void)xm_zclient_poll(&link_client,0);uint64_t now=clock_us();
+  bool was_open=link_client.socket_open,source_unavailable;
+  link_input_allowed=false;
+  int prepared=LINK_SETUP(&link_client,&link_boot,false,&source_unavailable);
+  link_input_allowed=!prepared;
+  if(prepared&&source_unavailable&&was_open&&!stopped())(void)LINK_POLL(&link_client);
+  if(!prepared){
+   (void)LINK_POLL(&link_client);uint64_t now=clock_us();
    if(link_client.connected&&now>=next_probe){
     struct xt_bootstrap boot;
     if(!xd_context_get(&boot)&&probe_sequence<UINT64_MAX){
@@ -218,7 +557,12 @@ static void state(void *a,void *b,void *c){
     if(send){memset(&outgoing,0,sizeof(outgoing));outgoing.major=1;outgoing.which_payload=xenova_drive_DriveLink_applied_tag;
      outgoing.payload.applied=applied;application_pending=false;}
     k_mutex_unlock(&applied_lock);
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+    if(send){int published=binary_publish(&link_client,out_topic,&outgoing);
+     APPLIED_DIAG(published?3:4,published,&outgoing.payload.applied);}
+#else
     if(send)(void)binary_publish(&link_client,out_topic,&outgoing);
+#endif
    }
    if(link_client.connected&&now>=next_snapshot){
     memset(&outgoing,0,sizeof(outgoing));outgoing.major=1;outgoing.which_payload=xenova_drive_DriveLink_snapshot_tag;
@@ -228,6 +572,11 @@ static void state(void *a,void *b,void *c){
   }
   k_sleep(K_MSEC(2));
  }
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+ if(ct_open&&!ct_reply_seen&&!ct_wire_failed)ct_bump(&ct_counts[CT_NO_REPLY]);
+ ct_open=false;
+#endif
+ link_input_allowed=false;
  xm_zclient_close(&link_client);memset(&link_boot,0,sizeof(link_boot));
 }
 int dl_start(struct drive_engine *value){
@@ -252,6 +601,18 @@ int dl_join(int64_t deadline){
 }
 const char *dl_status(void){return atomic_get(&reason)?"INPUT_OBSERVATION_FAILED":accepted_maps?"INPUT_AVAILABLE":"WORLD_UNAVAILABLE";}
 void dl_report(void){
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+ LOG_INF("XD_VEHICLE_COUNTS group=1 p1=%llu p2=%llu p3=%llu p4=%llu p5=%llu p6=%llu p7=%llu p8=%llu p9=%llu",
+  (unsigned long long)vehicle_phase_count[1],(unsigned long long)vehicle_phase_count[2],
+  (unsigned long long)vehicle_phase_count[3],(unsigned long long)vehicle_phase_count[4],
+  (unsigned long long)vehicle_phase_count[5],(unsigned long long)vehicle_phase_count[6],
+  (unsigned long long)vehicle_phase_count[7],(unsigned long long)vehicle_phase_count[8],(unsigned long long)vehicle_phase_count[9]);
+ LOG_INF("XD_VEHICLE_COUNTS group=2 p10=%llu p11=%llu p12=%llu p13=%llu p14=%llu p15=%llu p16=%llu p17=%llu",
+  (unsigned long long)vehicle_phase_count[10],(unsigned long long)vehicle_phase_count[11],
+  (unsigned long long)vehicle_phase_count[12],(unsigned long long)vehicle_phase_count[13],
+  (unsigned long long)vehicle_phase_count[14],(unsigned long long)vehicle_phase_count[15],
+  (unsigned long long)vehicle_phase_count[16],(unsigned long long)vehicle_phase_count[17]);
+#endif
  printf("XD_WORLD {\"accepted_maps\":%llu,\"rejected_maps\":%llu,\"rejected_links\":%llu,\"rejected_vehicles\":%llu,\"clock\":%d,\"context\":%d,\"vehicle_us\":%llu,\"map_reason\":\"%s\"}\n",
   (unsigned long long)accepted_maps,(unsigned long long)rejected_maps,(unsigned long long)rejected_links,
   (unsigned long long)rejected_vehicles,clock_available,context_available,(unsigned long long)received_vehicle,
