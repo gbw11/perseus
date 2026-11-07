@@ -258,6 +258,20 @@ class ViewReturnFact:
 
 
 @dataclass(frozen=True)
+class RemoteReturnStatement:
+    """등록 peer의 post 뒤 완료보고 진술. local 두 시각이나 실제 token 관측을 만들지 않는다."""
+
+    lease: ReadLease
+    completed_us: int
+
+    def __post_init__(self):
+        _exact(self.lease, ReadLease)
+        _u64(self.completed_us)
+        if self.completed_us < self.lease.reserved_us:
+            _fail('remote completion must follow the original reservation')
+
+
+@dataclass(frozen=True)
 class ReplacementTicket:
     """원장이 보유한 접수 identity다. planned key는 아직 WriteGrant가 아니다."""
 
@@ -314,6 +328,7 @@ class SlotState(Enum):
 
 class LeaseStatus(Enum):
     APPLIED = 'APPLIED'
+    CLEANUP_CORROBORATED = 'CLEANUP_CORROBORATED'
     DUPLICATE_NO_EFFECT = 'DUPLICATE_NO_EFFECT'
     UNKNOWN_NO_EFFECT = 'UNKNOWN_NO_EFFECT'
     REPLACEMENT_FAILED = 'REPLACEMENT_FAILED'
@@ -341,11 +356,33 @@ class PendingReplacement:
 
 @dataclass(frozen=True)
 class CleanupSummary:
-    fact: ViewReturnFact | ReplacementSyncFact
+    """마지막 정리1개. 반환은 먼저 받은 사실과 반대 종류1개만 보유한다."""
+
+    fact: ViewReturnFact | RemoteReturnStatement | ReplacementSyncFact
+    opposite: ViewReturnFact | RemoteReturnStatement | None = None
 
     def __post_init__(self):
-        if type(self.fact) is not ViewReturnFact and type(self.fact) is not ReplacementSyncFact:
+        kind = type(self.fact)
+        if kind is not ViewReturnFact and kind is not RemoteReturnStatement and kind is not ReplacementSyncFact:
             _fail('unsupported bounded cleanup summary')
+        if self.opposite is None:
+            return
+        if kind is ReplacementSyncFact:
+            _fail('replacement cleanup cannot have an opposite return statement')
+        _exact(self.opposite, RemoteReturnStatement if kind is ViewReturnFact else ViewReturnFact)
+        if self.fact.lease != self.opposite.lease:
+            _fail('local and remote returns differ from the full original lease')
+        local = self.fact if kind is ViewReturnFact else self.opposite
+        remote = self.opposite if kind is ViewReturnFact else self.fact
+        if local.writable_posted_us > remote.completed_us:
+            _fail('remote report precedes the observed local writable post')
+
+
+def _cleanup_return_lease(summary):
+    # 반대 사실은 같은 원 lease이므로 history에 두 번 넣지 않는다.
+    if summary is not None and type(summary.fact) is not ReplacementSyncFact:
+        return summary.fact.lease
+    return None
 
 
 @dataclass(frozen=True)
@@ -435,6 +472,8 @@ class LeaseResult:
 
     def __post_init__(self):
         _exact(self.status, LeaseStatus)
+        if self.status is LeaseStatus.CLEANUP_CORROBORATED and self.value is not None:
+            _fail('cleanup corroboration carries no new lease or operation value')
         if self.value is not None and not any(type(self.value) is t for t in (
                 WriteGrant, ReadLease, ReplacementTicket, PendingReplacement)):
             _fail('unsupported result record')
@@ -560,8 +599,9 @@ class RawLeaseLedger:
         self._open()
         for existing in self._slots:
             retained = (() if existing.read is None else (existing.read,))
-            if existing.cleanup is not None and type(existing.cleanup.fact) is ViewReturnFact:
-                retained += (existing.cleanup.fact.lease,)
+            returned = _cleanup_return_lease(existing.cleanup)
+            if returned is not None:
+                retained += (returned,)
             for lease in retained:
                 if lease.read_request.request.request_id == request.request.request_id:
                     if lease.read_request != request or lease.key.read_token != read_token:
@@ -594,15 +634,33 @@ class RawLeaseLedger:
                 and grant.granted_us <= now_us < grant.request.expires_us)
 
     def release(self, fact, *, now_us):
+        """실제 lower의 local 두 시각을 받는다. 만료/fence도 반환 정리를 막지 않는다."""
         _exact(fact, ViewReturnFact)
+        return self._release_return(fact, fact.writable_posted_us, now_us)
+
+    def release_remote(self, statement, *, now_us):
+        """원격 완료 진술의 bookkeeping. peer·전송·실제 post 승인은 외부 actor 책임이다."""
+        _exact(statement, RemoteReturnStatement)
+        return self._release_return(statement, statement.completed_us, now_us)
+
+    def _release_return(self, fact, event_us, now_us):
         slot = self._write_key(fact.lease.key.write_key)
-        _event(fact.writable_posted_us, now_us)
-        if slot.cleanup is not None and type(slot.cleanup.fact) is ViewReturnFact:
-            previous = slot.cleanup.fact
-            if previous.lease.key == fact.lease.key:
-                if previous != fact:
-                    _fail('same returned lease has a different original completion fact')
-                return LeaseResult(LeaseStatus.DUPLICATE_NO_EFFECT)
+        _event(event_us, now_us)
+        previous_lease = _cleanup_return_lease(slot.cleanup)
+        if previous_lease is not None and previous_lease.key == fact.lease.key:
+            if previous_lease != fact.lease:
+                _fail('same returned key has a different full original lease')
+            for previous in (slot.cleanup.fact, slot.cleanup.opposite):
+                if type(previous) is type(fact):
+                    if previous != fact:
+                        _fail('same returned lease has a different original completion fact')
+                    return LeaseResult(LeaseStatus.DUPLICATE_NO_EFFECT)
+            # 첫 반대 종류 보충만 허용한다. 현재 generation/소유/교체 상태는 그대로다.
+            summary = CleanupSummary(slot.cleanup.fact, fact)
+            updated = replace(slot, cleanup=summary)
+            result = LeaseResult(LeaseStatus.CLEANUP_CORROBORATED)
+            self._commit_slot(fact.lease.key.write_key.slot, updated)
+            return result
         if slot.read is not None and slot.read.key == fact.lease.key and slot.read != fact.lease:
             _fail('same read key has a different original request/context')
         if slot.state is not SlotState.IN_USE or slot.read != fact.lease:

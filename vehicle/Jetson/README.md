@@ -458,6 +458,22 @@ M은 OFFER에서 P/full key/length/SHA 진술을 처음 받으므로 OFFER에 �
 
 참조 비용은 원 packet≤4096B와 작은 frozen context/limits/c1 값·정해진 parent뿐이며 fields/payload 조회는 작은 사본을 만든다. SDK·clock·UUID 생성·파일·시스템 자원은 호출하지 않는다. 실제 fullsend/BindWatch/공통 RX·TX순번·staging/예약 부분 성공·token·guard/arena/worker·remotecleanup·METRIC pre-read metadata·현재 lease/READY/주행 권한은 후속 gate다. c1 투영이 존재한다는 이유로 실제 허가를 발급하지 않는다.
 
+## 원 ACQUIRED에 연결한 반환 정리
+
+`runtime.slot_cleanup.CleanupTimeLimits(transport_budget_us)`는 caller가 명시한 exact positive u64 전송 예산이다. 제품 기본값은 없다. `ReleaseMessage(packet,original_acquired,*,limits)`와 `parse_release_message(...)`는 exact 원 SlotMessage/ACQUIRED를 parent로 받아 RELEASE 하나만 검사한다. `.packet`/`.raw`는 원 bytes를 보존하고 `.parent`/`.context`는 원 객체 참조, `.limits`/`.request_id`/`.issued_us`/`.expires_us`/`.record`는 정적 값이다. fields/payload는 새 사본이다. 오류는 SlotCleanupError(ValueError)다.
+
+RELEASE payload는 원 ACQUIRED의 exact13 중 op만 RELEASE로 바뀐다. full writer/read key·producer/consumer·RAW hash·null publication·PARSER_WARMUP·length/descriptor SHA와 원 Qr를 유지한다. outer service/channel/revision/kind/domain도 원본과 같고 sender만 원 M worker다. 상대 sender의 ACQUIRED보다 sequence가 클 필요는 없다. 실제 채널 순번 수락은 별도다.
+
+issued=C는 M의 모든 view 종료와 writable post 뒤 최초 완료보고 **진술**이며 expires=C+transport budget exact다. 최종 u64 overflow는 거절한다. C≥원 read 예약시각이며 C>원 Er·cleanup E>원 read cap도 정리 형식으로 정상이다. 원 parent 안의 read cap은 그대로 보유하고 wire 사실로 만들지 않는다. S는 S가 보유한 parent/cap으로 해석하며 M의 native cap과 같다고 가정하지 않는다. wrapper에는 now/context/cap 갱신 인자가 없다.
+
+`runtime.raw_leases.RemoteReturnStatement(lease,completed_us)`는 원 exact ReadLease와 C를 보유하며 reserved≤C만 검사한다. local ViewReturnFact의 view-end/post 두 시각을 C/C로 만들지 않는다. `RawLeaseLedger.release_remote(statement,*,now_us)`는 C≤now를 duplicate/UNKNOWN보다 먼저 검사한다. 기존 `release(ViewReturnFact,*,now_us)`는 exact local 타입과 원 두 시각을 유지한다. 원 Er/fence/retired 뒤에도 정확한 반환 정리는 가능하며 새 읽기나 결과 채택 조건을 발급하지 않는다.
+
+slot당 마지막 `CleanupSummary(fact,opposite=None)` 하나를 보유한다. 반환의 primary는 local/remote 중 먼저 받은 원본이고 optional opposite는 반대 종류 하나만 허용한다. full ReadLease가 같아야 하며 두 사실이 있으면 local writable_posted≤remote C다. post=C는 허용한다. replacement에는 opposite를 붙이지 않는다. history는 최대2facts이며 현재 summary보다 더 오래된 반환은 UNKNOWN일 수 있다.
+
+현재 IN_USE의 첫 정확 반환은 APPLIED로 한 번 FREE가 된다. 첫 반대 종류 보충은 CLEANUP_CORROBORATED(value=None)로 cleanup metadata만 바뀐다. 이미 보유한 exact 재보고는 DUPLICATE_NO_EFFECT로 전체 snapshot이 같다. 같은 종류의 시각/원 lease 변경이나 full request/cap/purpose/pub/content 불일치는 거절한다. gen1의 늦은 보충이 gen2 WRITING/IN_USE/READY replacement pending의 현재 필드·fence를 바꾸지 않는다. acquire의 retained Qr 검사는 local/remote primary의 원 lease를 한 번만 사용한다.
+
+참조 비용은 원 packet≤4096B와 고정 길이 parent·작은 frozen record이며 사본 조회만 작은 tree를 복사한다. SDK view나 큰 frame bytes를 보유하지 않는다. 실제 RSS/주기는 별도 계측 대상이다. sender는 C/E/첫 sequence/raw를 유지하고 E 뒤 새 dispatch를 하지 않는다. 전송 만료·abandon이 실제 반환 사실이나 미확인 ownership을 지우지 않는다. receiver의 exact known/current 또는 미회수 old cleanup은 원 Er와 전송 E 뒤에도 bookkeeping만 가능하다. 실제 peer/registry·공통 sequence/staging·전송·token post/owner exit·STOPPED/REVOKE·SHM 회수는 이 API가 실행하거나 증명하지 않는다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
