@@ -502,6 +502,20 @@ OLD_CLEAN_ELIGIBLE은 같은 full runtime·complete inventory·모든 known owne
 
 열기/guard 오류는 StoreError(RuntimeError), 경쟁 lock은 StoreBusyError(StoreError), 타입·수명·재진입·원 receipt/proposal 오용은 StoreUsageError(ValueError)다. 이 synchronous adapter는 운영 S-main/CLI/doctor/replay에 연결하지 않는다. 실제 OS owner/name/reset/install proof·S-log 비동기 ACK 수락·자원 생성과 주행 판단 조건은 별도 책임이다.
 
+## 실제 runtime과 known owner 관측
+
+`runtime.process_observation.ProcessObserver(store, service_instance)`는 살아 있는 exact ResourceStore를 빌려 고정 Linux `/proc`·`/dev/shm`을 동기로 관측한다. 생성자는 파일 I/O를 하지 않으며 service_instance는 시작 때 정한 canonical UUID다. 같은 실제 PID·Thread에서만 비재진입 사용하고 fork/복제/양도를 거절한다. borrowed store는 닫지 않는다.
+
+`observe()`의 frozen ObservationBatch는 원 `original_load` L1과 마지막 실제 `latest_load` L2, 실제 nonce에 연결한 `guard`, 원 known owner 전체의 `owners`, monotonic_ns의 `started_ns/completed_ns`를 보유한다. VALID는 두 원 raw/ref가 같고 MISSING은 두 실제 조회가 모두 MISSING이어야 한다. L1/L2는 서로 다른 원 조회이며 후속 propose에는 최신 실제 L2를 사용한다. pending/null birth와 원 incomplete 상태는 보충하지 않는다.
+
+고정 profile은 actual root FD의 fstat·fdinfo mnt_id·정확 mountinfo 행, namespace FD·boot·self birth의 전후 일치, native PID와 같은 Pid/Tgid 및 단일 NSpid/NStgid, hidepid 누락/명시0, 실제 tmpfs backing이다. kernel magic namespace link는 의도적으로 따라가고 일반 proc data에는 NOFOLLOW를 쓴다. 상위 경로·kernel 및 협력 실행을 신뢰하며 privileged 비협력 mount 변경을 제압하는 보안 경계는 아니다.
+
+`runtime.procfs_formats`는 위 관측과 분리한 bounded bytes parser다. stat52필드의 opaque comm은 고정 Linux4.9 profile에서 최대15 raw bytes·내부NUL 없음이며 빈 값·개행·괄호·비UTF8은 허용한다. 그 뒤 suffix에서 원 start_ticks(u64 clock ticks)를 읽는다. stat4096B는 누적 I/O의 상한이며 그 길이의 raw가 유효한 schema라는 뜻은 아니다. boot64B·fdinfo8192B·status65536B·mountinfo1MiB/4096행/행65536B 상한을 검사하고 mount 경로 escape는 tokenization 뒤 한 번만 해제한다. proc st_size0을 빈 body로 보지 않는다.
+
+같은 boot/PID-view에서 같은 원 PID/start_ticks는 Z/X도 ALIVE이며 종료·회수가 확인되지 않았다는 뜻이다. 처음 numeric PID directory open의 ENOENT 또는 온전한 같은PID/다른start_ticks만 원 birth의 EXITED다. 이미 연 directory의 도중 소멸·권한·형식 실패는 UNKNOWN을 빠뜨리지 않고 반환한다. 다른 boot/PID namespace도 UNKNOWN이다. ALIVE는 건강·READY나 다음 순간의 생존을 보장하지 않는다.
+
+타입·PID/Thread·재진입 오용은 ObservationUsageError(ValueError), source/runtime/store 수명·지원 profile·owned FD 반환 불명은 ObservationUnavailable(RuntimeError)다. 관측 FD는 호출 안에서 한 번만 닫고 반납 실패에는 사용 가능한 묶음을 반환하지 않는다. 공개 값의 구조 검사는 실제 OS 출처 증명이 아니다. cgroup COMPLETE·이름 probe·설치/reset 근거·새 기한·정리/생성 허가·S-main 연결은 생산하지 않으며 동기 I/O의 반환시간 상한을 보장하지 않는다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
