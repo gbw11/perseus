@@ -118,7 +118,9 @@ PYTHONPATH=vehicle/Jetson/src python -m xenova_vehicle doctor --json
 
 ## RGB·깊이·YOLOP 상주 실행
 
-`runtime`은 Jetson의 Linux·CPython 3.11.18 환경에서 S/A/M/D를 `spawn`으로 실행한다. S-main은 lifecycle·원 기한·lease를, S-log 한 스레드는 자원 기록과 named 자원 생성을 담당한다. A가 OAK Device와 모델을 한 번 적재해 유지하고, M이 받은 owned bytes를 해석하며, D가 SQLite를 독점한다. `doctor`는 이 경로에서 실행하지 않는다.
+`runtime`은 Jetson의 Linux·CPython 3.11.18 환경에서 S/A/M/D를 `spawn`으로 실행한다. S-main은 lifecycle·원 기한·lease를, S-log 한 스레드는 자원 기록과 named 자원 생성을 담당한다. A가 OAK Device와 모델을 한 번 적재해 유지하고 D가 SQLite를 독점한다. M-main은 제어와 raw lease 반환을, non-daemon M-compute 하나는 owned bytes의 해석과 후보 지도를 소유한다. `doctor`는 이 경로에서 실행하지 않는다.
+
+M의 계산 대기는 최신 RAW1개·NN1개, 활성 계산1개, phase 사건8개·불변 결과1개로 제한한다. NN 해석 완료와 지도 계산 완료는 별도로 보고한다. 원 입력 만료는 결과 채택을 막고 후보만 취소하며 기존 채택 지도는 보존한다. STOP 뒤 계산 thread가 실제 종료되지 않으면 정상 회수로 보고하지 않고 S의 process 종료·reap 절차를 따른다.
 
 외부에 복사한 `profiles/oak-yolop-rgb-depth-bench.example.json`의 장치·자산 경로를 실제 값으로 설정하고 `nn_requirement=REQUIRED`, `jpeg_enabled=false`를 사용한다. 다음은 새 설치의 첫 수동 실행 예다. state의 부모 디렉터리는 앱 실행 사용자 소유로 먼저 준비한다. state와 output은 기존 경로를 덮어쓰지 않는다.
 

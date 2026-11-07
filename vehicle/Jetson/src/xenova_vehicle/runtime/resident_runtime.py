@@ -96,6 +96,7 @@ class _Worker:
     kill_sent_us: int | None = None
     parse_started_us: int | None = None
     parse_sequence: int | None = None
+    compute_watch: object = None
 
 
 class _Runtime:
@@ -409,6 +410,17 @@ class _Runtime:
         if not completed <= issued <= now or not self.stopping and now >= expires:
             raise ValueError('progress changed its original completion or lifetime')
         validate_state(role, payload['state'])
+        from .mapper_progress import STAGES,MapperJobWatch
+        if role=='M' and payload['stage'] in STAGES:
+            host=self.workers['M']
+            if host.bind_ack is None:
+                raise RuntimeError('mapper job has no current admitted raw binding')
+            if host.compute_watch is None:
+                host.compute_watch=MapperJobWatch()
+            source=None if payload['source_sequence'] is None else _decimal(payload['source_sequence'])
+            host.compute_watch.observe(fields['request_id'],payload['stage'],source,completed,
+                                       payload['reason'],now_us=now)
+            return
         allowed = {'A': {'ASSET_VALID', 'DEVICE_BOOTED', 'GRAPH_STARTED', 'CAPTURE_PAIR', 'CAPTURE_READY', 'RAW_PUBLISHED', 'SESSION_CLOSED'},
                    'M': {'PARSER_STARTED', 'NN_READY', 'PARSER_COMPLETED'}, 'D': set()}
         if payload['stage'] not in allowed[role]:
@@ -686,6 +698,9 @@ class _Runtime:
                 continue
             if host.parse_started_us is not None and now - host.parse_started_us >= 500_000:
                 self.recovery.fail('M', 'actual active parser job stalled')
+                continue
+            if role=='M' and host.compute_watch is not None and host.compute_watch.stalled(now):
+                self.recovery.fail('M', 'original mapper job expired without actual stage progress')
                 continue
             idle_watch = (role == 'A' and self.capture_ready_us is not None
                           or role == 'M' and host.bind_ack is not None

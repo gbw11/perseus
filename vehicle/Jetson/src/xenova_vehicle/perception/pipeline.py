@@ -202,10 +202,24 @@ class PerceptionPipeline:
                 error,'strip:'+str(strip.local_id),capture))
         return FrozenReference(revision,self.calibration.sha256,tuple(segments))
 
-    def process(self, observation, *, now_us=None, pose=None):
+    def process(self, observation, *, now_us=None, pose=None, checkpoint=None, completed_clock=None):
+        """원 관측을 처리한다. 선택 clock은 입력과 같은 domain의 실제 완료시각이다.
+
+        checkpoint는 계산 owner의 취소/진전 callback이다. 부분 상태를 변경하므로
+        취소 가능한 운영 호출은 독립 후보 core에서 실행한 뒤 현재성을 확인해 채택한다.
+        callback/clock을 생략한 offline 입력은 원 명시 시각을 그대로 사용한다.
+        """
         from .depth import analyze_depth
         from .free_space import certify_cell
         import numpy as np
+        if checkpoint is not None and not callable(checkpoint):
+            raise ValueError('checkpoint must be a callable or None')
+        if completed_clock is not None and not callable(completed_clock):
+            raise ValueError('completion clock must be a callable or None')
+        def step(phase):
+            if checkpoint is not None:
+                checkpoint(phase)
+        step(None)
         started=perf_counter_ns()
         if type(observation) is not PerceptionInput or observation.calibration_id!=self.calibration.sha256:
             raise ValueError('observation calibration mismatch')
@@ -272,12 +286,14 @@ class PerceptionPipeline:
                 alignment_invalid=True
                 pose=None
         input_done=perf_counter_ns()
+        step('INPUT_COMPLETED')
         evidence=None
         if depth_new:
             evidence=analyze_depth(observation.depth.array(),self.calibration.right,self.calibration.plane,
                 stamp=observation.depth.stamp,calibration_id=self.calibration.sha256,
                 input_kind=observation.kind,profile=self.calibration,config=self.profile.depth)
         depth_done=perf_counter_ns()
+        step('DEPTH_COMPLETED')
         if rgb_new:
             self._last_rgb_key,self._last_capture=observation.rgb.stamp.key,capture
             self._last_rgb=observation.rgb.array()
@@ -290,6 +306,7 @@ class PerceptionPipeline:
             # 현재 기하를 보존하며 지도/정합의 새 관측이나 시각을 발급하지 않는다.
             self._last_road=assist_road(self._last_road,self._last_neural,self.calibration)
         tape_done=perf_counter_ns()
+        step('TAPE_COMPLETED')
         registration=None
         geometry_qualified=(self.calibration.metric_qualified and self.calibration.time_qualified
                             and observation.capture_interval is not None)
@@ -324,6 +341,7 @@ class PerceptionPipeline:
         if rgb_new or depth_new:
             self._domain(pose,grid)
         registration_done=perf_counter_ns()
+        step('REGISTRATION_COMPLETED')
         if evidence is not None:
             from .point_batch import PointBoundsBatch
             if type(evidence.hit_boxes) is PointBoundsBatch:
@@ -340,6 +358,7 @@ class PerceptionPipeline:
                 origin=transform_point(origin,(p.x,p.y,p.yaw))
             grid.add_hits(boxes,observation.depth.stamp,view_id=observation.depth.stamp.stream_id,origin_xy=origin)
         hits_done=perf_counter_ns()
+        step('HITS_COMPLETED')
         certificates=[]
         remaining=self.profile.max_free_ray_tests
         depth_age=None if observation.depth is None else observation.depth.stamp.age_us(now_us,observation.rgb.stamp.clock_id)
@@ -368,6 +387,7 @@ class PerceptionPipeline:
             attempted=0
             scanned=0
             while attempted<self.profile.max_free_cells and scanned<count and remaining>0:
+                step(None)
                 index=order[self._free_cursor%count]
                 self._free_cursor=(self._free_cursor+1)%count
                 scanned+=1
@@ -393,7 +413,15 @@ class PerceptionPipeline:
                     grid.add_free(((col,row),),observation.depth.stamp,view_id=observation.depth.stamp.stream_id,
                         origin_xy=origin,certificate_complete=True)
         free_done=perf_counter_ns()
+        step('FREE_COMPLETED')
+        if completed_clock is not None:
+            completed_us=completed_clock()
+            if type(completed_us) is not int or not now_us<=completed_us<2**64:
+                raise ValueError('completion must follow processing in the original clock domain')
+            now_us=completed_us
+            self._last_now=completed_us
         snapshot=grid.snapshot(now_us,clock_id=observation.rgb.stamp.clock_id)
+        step('SNAPSHOT_COMPLETED')
         ended=perf_counter_ns()
         summary=dict(schema_version=1,kind=observation.kind,calibration_id=self.calibration.sha256,
             capture_id=capture,tape_capture_id=self._last_capture,rgb_source_key=observation.rgb.stamp.key,
