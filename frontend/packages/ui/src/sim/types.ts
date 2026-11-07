@@ -48,6 +48,20 @@ export interface CircuitTrack {
   wall_left_m: number[];
   wall_right_m: number[];
   start_index: number;
+  /** 실측 전 시험 코스의 명시 지면·선·차량·카메라 가정. 기존 서킷에는 없다. */
+  layout?: {
+    bounds: [number, number, number, number];
+    lane_count: 2;
+    /** 후륜축 기준 x/y/yaw, 세계 좌표는 y 위쪽. */
+    start_pose: [number, number, number];
+    paved_areas: [number, number][][];
+    paint_lines: [number, number][][];
+    parking_slots: { id: string; outline: [number, number][] }[];
+    obstacle_seeds: { id: string; kind: 'cone'; x: number; y: number; w: number; h: number }[];
+    vehicle: { length_m: number; width_m: number; wheelbase_m: number; min_turn_radius_m: number };
+    camera: { height_m: number; pitch_rad: number; hfov_rad: number; mount_x_m: number };
+    assumptions: string;
+  };
 }
 
 export type SimTrack = EllipseTrack | CircuitTrack;

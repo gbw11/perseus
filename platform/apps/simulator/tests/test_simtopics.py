@@ -82,7 +82,7 @@ def test_world_is_retained_once_until_something_changes(setup):
     assert kw == {"qos": 1, "retain": True}
     assert world["revision"] == 1
     assert world["track"]["id"] == "spielberg" and world["track"]["shape"] == "centerline"
-    assert len(world["tracks"]) == 10 and world["car"] == {"length_m": 0.42, "width_m": 0.2}
+    assert len(world["tracks"]) == 16 and world["car"] == {"length_m": 0.42, "width_m": 0.2}
     assert world["obstacles"] == [] and world["estop"] is False
     sim.add_obstacle_ahead(2.0, "box")  # 터미널 명령도 world 를 바꾼다
     st.publish()

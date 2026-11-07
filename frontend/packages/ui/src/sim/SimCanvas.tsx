@@ -60,7 +60,9 @@ export function CircuitTop({
     const m = /^var\((--[\w-]+)\)$/.exec(carColor.trim());
     const color = m ? getComputedStyle(ctx.canvas).getPropertyValue(m[1]!).trim() || '#2dd4bf' : carColor;
     drawTop(ctx, W, H, g, {
-      pose: p ? extrapolate(p, now - clock.current.at, world.time_scale) : null,
+      pose: p
+        ? extrapolate(p, now - clock.current.at, world.time_scale, world.track.layout?.vehicle.wheelbase_m)
+        : null,
       obstacles: world.obstacles,
       trail,
       carColor: color,
@@ -186,7 +188,7 @@ export function CircuitPov({ pose, world, boxes = false, quality = 'high', fps =
   const ref = useCanvasLoop((ctx, W, H, now) => {
     const p = clock.current.pose ?? pose;
     drawPov(ctx, W, H, circuitOf(world.track), {
-      pose: extrapolate(p, now - clock.current.at, world.time_scale),
+      pose: extrapolate(p, now - clock.current.at, world.time_scale, world.track.layout?.vehicle.wheelbase_m),
       obstacles: world.obstacles,
       lightsOn: p.race?.phase === 'lights' ? p.race.lights_on : 0,
       boxes,

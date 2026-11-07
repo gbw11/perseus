@@ -54,6 +54,47 @@ function background(g: Circuit, W: number, H: number, v: TopView): HTMLCanvasEle
     });
     c.closePath();
   };
+  if (g.track.layout) {
+    c.fillStyle = '#101216';
+    c.fillRect(0, 0, W, H);
+    for (let i = 0; i < g.N; i++) {
+      const j = (i + 1) % g.N;
+      poly([at(g, i, g.road), at(g, j, g.road), at(g, j, -g.road), at(g, i, -g.road)]);
+      c.fillStyle = '#24282f';
+      c.fill();
+    }
+    // Divider는 도로 전체의 가운데다. 주차 연결부를 도로 폭으로 합치지 않는다.
+    const line = (points: [number, number][]) => {
+      c.beginPath();
+      points.forEach(([x, y], i) => {
+        const p = w2s(v, x, y);
+        if (i) c.lineTo(...p);
+        else c.moveTo(...p);
+      });
+      c.stroke();
+    };
+    c.lineJoin = 'round';
+    c.lineCap = 'butt';
+    c.strokeStyle = '#f1f3f5';
+    c.lineWidth = Math.max(1, 0.025 * v.s);
+    for (const side of [-1, 1]) {
+      const edge = g.C.map((_, i) => at(g, i, side * g.road));
+      line([...edge, edge[0]!]);
+    }
+    // 연결부 지면이 기존 도로 경계를 덮어 주차 입구를 연다.
+    for (const area of g.track.layout.paved_areas) {
+      poly(area);
+      c.fillStyle = '#24282f';
+      c.fill();
+    }
+    for (const points of g.track.layout.paint_lines) line(points);
+    c.setLineDash([0.25 * v.s, 0.25 * v.s]);
+    line([...g.C, g.C[0]!]);
+    c.setLineDash([]);
+    line([at(g, g.start, -g.road), at(g, g.start, g.road)]);
+    bgCache.set(g, { W, H, canvas });
+    return canvas;
+  }
   const path = (off: number) => {
     c.beginPath();
     for (let i = 0; i <= g.N; i++) {
@@ -261,7 +302,9 @@ export function drawTop(ctx: CanvasRenderingContext2D, W: number, H: number, g: 
     ctx.restore();
   }
   if (!pose) return;
-  const [u, vv] = w2s(v, pose.x, pose.y);
+  // 새 코스 pose는 후륜축이며 차체는 대칭 overhang 시험 가정을 쓴다.
+  const center = g.track.layout ? g.track.layout.vehicle.wheelbase_m / 2 : 0;
+  const [u, vv] = w2s(v, pose.x + center * Math.cos(pose.yaw), pose.y + center * Math.sin(pose.yaw));
   const ring = Math.max(14, 0.32 * v.s) * (1 + 0.12 * Math.sin(performance.now() / 250));
   ctx.beginPath();
   ctx.arc(u, vv, ring, 0, Math.PI * 2);
@@ -272,8 +315,8 @@ export function drawTop(ctx: CanvasRenderingContext2D, W: number, H: number, g: 
   ctx.translate(u, vv);
   ctx.rotate(-pose.yaw);
   // 좁은 칸에서도 보이게 최소 크기 (넓으면 판정과 같은 실제 크기)
-  const L = Math.max(car.length_m * v.s, 18);
-  const Wd = Math.max(car.width_m * v.s, 9);
+  const L = g.track.layout ? car.length_m * v.s : Math.max(car.length_m * v.s, 18);
+  const Wd = g.track.layout ? car.width_m * v.s : Math.max(car.width_m * v.s, 9);
   ctx.fillStyle = carColor;
   ctx.beginPath();
   ctx.moveTo(L / 2, Wd * 0.25);

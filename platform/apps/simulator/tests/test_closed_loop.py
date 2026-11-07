@@ -41,3 +41,14 @@ def test_stops_before_obstacle_on_straight():
     r = closed_loop.run(12.0, obstacle_ahead_m=2.0)
     assert r.stopped_gap_m is not None and r.stopped_gap_m >= 0.3
     assert r.reasons.get("obstacle_stop", 0) > 0
+
+
+def test_existing_single_lane_harness_does_not_claim_demo_validation():
+    with pytest.raises(ValueError, match="단일 차로"):
+        closed_loop.run(1, settings=SimSettings(track_id="jetson-demo", camera_listen=None))
+
+
+def test_all_tracks_regression_keeps_legacy_profile_scope():
+    assert len(closed_loop.supported_track_ids()) == 10
+    assert "spielberg" in closed_loop.supported_track_ids()
+    assert "jetson-demo" not in closed_loop.supported_track_ids()

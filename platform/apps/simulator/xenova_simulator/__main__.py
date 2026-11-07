@@ -67,7 +67,7 @@ def describe(sim: Simulator) -> str:
     flags = [name for name, on in status["flags"].items() if on]
     line = (
         f"track={sim.track.id} x={v.x:+.2f} y={v.y:+.2f} heading={math.degrees(v.heading_rad):+.0f}° "
-        f"lane={off:+.3f}m {sim.track.surface(i, off)} lap={progress:.1f}/{sim.track.lap_m:.1f}m "
+        f"lane={off:+.3f}m {sim.track.surface_at(v.x, v.y, i)} lap={progress:.1f}/{sim.track.lap_m:.1f}m "
         f"wheel={v.wheel_rpm:+.0f}rpm enc={v.encoder_count} v={sim.measured_v_mps:+.2f}m/s "
         f"steer={v.steer_rad:+.3f}rad gen={sim.applied_generation} flags={','.join(flags) or '-'} "
         f"obstacles={len(v.obstacles)}"

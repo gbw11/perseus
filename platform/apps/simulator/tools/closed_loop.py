@@ -95,6 +95,8 @@ def run(seconds: float, *, obstacle_ahead_m: float | None = None, settings: SimS
     """seconds 동안(또는 laps_target 바퀴를 채울 때까지) 돈다."""
     s = settings or SimSettings(camera_listen=None)
     track = load_track(s.track_id)
+    if track.layout:
+        raise ValueError("이 단일 차로 폐루프 도구는 Jetson 두 차로·주차 코스를 검증하지 않습니다")
     cfg = AutoCfg()
     renderer = Renderer(s.camera)
     detector = Detector(PerceptionSettings(lane_width_m=track.lane_width_m))
@@ -160,17 +162,22 @@ def run(seconds: float, *, obstacle_ahead_m: float | None = None, settings: SimS
                       stopped_gap, reasons)
 
 
+def supported_track_ids() -> list[str]:
+    """기존 단일 차로 인지·제어 profile을 사용하는 회귀 코스만 반환한다."""
+    return [track_id for track_id in track_ids() if load_track(track_id).layout is None]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="카메라 → 인지 → 자율 계산 → 시리얼 프레임 → 바퀴 폐루프 리허설")
     parser.add_argument("--seconds", type=float, default=60.0)
     parser.add_argument("--obstacle", type=float, help="출발선에서 이만큼 앞(m)에 장애물")
-    parser.add_argument("--track", default=SimSettings.track_id, choices=track_ids())
-    parser.add_argument("--all-tracks", action="store_true", help="10개 트랙 모두")
+    parser.add_argument("--track", default=SimSettings.track_id, choices=supported_track_ids())
+    parser.add_argument("--all-tracks", action="store_true", help="기존 단일 차로 서킷 10개 회귀")
     parser.add_argument("--laps", type=float, help="이만큼 돌면 멈춘다 (--seconds 는 상한)")
     a = parser.parse_args(argv)
     seconds = a.seconds if a.laps is None else max(a.seconds, 3600.0)
     failed = 0
-    for track_id in (track_ids() if a.all_tracks else [a.track]):
+    for track_id in (supported_track_ids() if a.all_tracks else [a.track]):
         r = run(seconds, obstacle_ahead_m=a.obstacle, laps_target=a.laps,
                 settings=SimSettings(camera_listen=None, track_id=track_id))
         failed += r.out_of_lane_ticks > 0 or r.body_out_ticks > 0

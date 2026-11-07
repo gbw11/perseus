@@ -31,7 +31,7 @@ from typing import Any
 
 from xenova_mqtt import topics
 
-from .config import SimSettings
+from .config import SimSettings, settings_for_track
 from .frames import FrameReceiver
 from .model import Obstacle, Vehicle
 from .race import Race
@@ -73,14 +73,16 @@ class Simulator:
         rng: Callable[[], float] = random.random,
     ) -> None:
         self._client = client
-        self._settings = settings
+        self._base_settings = settings
+        self.track = load_track(settings.track_id)
+        self._settings = settings_for_track(settings, self.track)
         self._clock = clock
         self._lock = threading.Lock()
         self._pose_lock = threading.Lock()
         # (vm_id, app_id) → 마지막 drive.command. legacy 토픽은 vm_id ""
         self._commands: dict[tuple[str, str], Command] = {}
         self.frames = frames if frames is not None else (FrameReceiver() if settings.input == "frames" else None)
-        self.vehicle = Vehicle(settings)
+        self.vehicle = Vehicle(self._settings)
         self.estop = False
         self.watchdog = False
         self.applied_generation = 0
@@ -91,13 +93,23 @@ class Simulator:
         self.measured_v_mps = 0.0
         self.published = 0
         self._auto_id = 0
-        self.track = load_track(settings.track_id)
         self.track_index: int | None = None   # 가까운 중심선 점 (다음 찾기의 시작점)
         self.active_app: str | None = None     # 이번 주기 활성 앱 (mqtt 입력만 안다)
         self.race = Race(clock, rng=rng, lights=settings.start_lights)
+        self._seed_obstacles()
         self.reset_to_start()
 
     # --- 트랙·장애물 ---
+
+    @property
+    def settings(self) -> SimSettings:
+        """현재 코스에 적용된 모의 차량·카메라 설정."""
+        return self._settings
+
+    def _seed_obstacles(self) -> None:
+        # 저작된 초기 시험 배치다. 운영자 배치 검사의 통과·회피 성공을 뜻하지 않는다.
+        layout = self.track.layout
+        self.vehicle.obstacles = [Obstacle(**seed) for seed in layout["obstacle_seeds"]] if layout else []
 
     def reset_to_start(self) -> None:
         """출발선 위에서 진행 방향을 보고 서고, 출발 신호를 처음부터 (계약 §12 race.start)."""
@@ -111,7 +123,9 @@ class Simulator:
         track = load_track(track_id)
         with self._pose_lock:
             self.track = track
-            self.vehicle.obstacles = []
+            self._settings = settings_for_track(self._base_settings, track)
+            self.vehicle.settings = self._settings
+            self._seed_obstacles()
         self.reset_to_start()
 
     def add_obstacle_ahead(self, distance_m: float, kind: str = "cone") -> Obstacle:
@@ -266,7 +280,7 @@ class Simulator:
             v0 = self.vehicle.v_mps
             self.vehicle.step(target_v, target_steer, dt)
             i, off, _ = self.track_frame()
-            if self.track.surface(i, off) != "road":
+            if self.track.surface_at(self.vehicle.x, self.vehicle.y, i) != "road":
                 self._offroad_drag(v0, dt)
             self.race.update(i, self.track.start_index, self.track.N, manual=manual, forward=forward)
         # 마감 시각을 누적한다. "지난 발행 후 50 ms 이상" 으로 재면 물리 주기(10 ms) 오차로 60 ms 간격이 섞여 17 Hz 가 된다

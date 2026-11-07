@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 # MQTT 계약 v1.1 5.4: vehicle.status 는 게이트웨이가 source_id dom0-gateway 로 낸다
 SOURCE_ID = "dom0-gateway"
@@ -130,3 +130,22 @@ def parse_address(text: str) -> tuple[str, int]:
     if not sep or not host or not port.isdigit() or not 0 <= int(port) <= 65535:
         raise ValueError(f"address must be host:port, got {text!r}")
     return host, int(port)
+
+
+def camera_for_layout(camera: CameraSpec, layout: dict | None) -> CameraSpec:
+    """새 시험 코스의 잠정 extrinsic/FOV만 적용하고 출력 해상도는 보존한다."""
+    if not layout:
+        return camera
+    return replace(camera, **layout["camera"])
+
+
+def settings_for_track(settings: SimSettings, track) -> SimSettings:
+    """기존 서킷 설정을 보존하며 Jetson 코스의 미실측 차량 가정을 적용한다."""
+    if not track.layout:
+        return replace(settings, track_id=track.id)
+    vehicle = track.layout["vehicle"]
+    wheelbase = vehicle["wheelbase_m"]
+    drivetrain = replace(settings.drivetrain,
+                         max_steer_rad=math.atan(wheelbase / vehicle["min_turn_radius_m"]))
+    return replace(settings, track_id=track.id, wheelbase_m=wheelbase, drivetrain=drivetrain,
+                   camera=camera_for_layout(settings.camera, track.layout))

@@ -13,8 +13,9 @@ T = load("spielberg")
 
 
 def test_ten_tracks_from_the_console_mock():
-    assert track_ids() == ["spielberg", "monza", "silverstone", "spa", "melbourne",
-                           "hungaroring", "catalunya", "mexico", "bahrain", "interlagos"]
+    assert track_ids()[:10] == ["spielberg", "monza", "silverstone", "spa", "melbourne",
+                                "hungaroring", "catalunya", "mexico", "bahrain", "interlagos"]
+    assert track_ids()[10:] == ["jetson-demo", "jetson-r45", "jetson-r55", "jetson-r65", "jetson-r75", "jetson-r80"]
     assert len(sources()["spa"].centerline) == 681  # 계약 v1.4: 가장 긴 스파 681점
 
 

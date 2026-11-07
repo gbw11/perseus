@@ -49,7 +49,7 @@ const CROWD = ['#38bdf8', '#a78bfa', '#ef4444', '#f59e0b', '#8b919d', '#4edea3',
 const cache = new Map<string, Circuit>();
 
 export function circuitOf(track: CircuitTrack): Circuit {
-  const key = `${track.id}:${track.centerline.length}:${track.wall_left_m[0]}:${track.wall_right_m[0]}`;
+  const key = `${track.id}:${track.centerline.length}:${track.wall_left_m[0]}:${track.wall_right_m[0]}:${JSON.stringify(track.layout ?? null)}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const built = build(track);
@@ -113,12 +113,19 @@ function build(track: CircuitTrack): Circuit {
   const lap = SL[N - 1]! + Math.hypot(C[0]![0] - C[N - 1]![0], C[0]![1] - C[N - 1]![1]);
   const xs = C.map((p) => p[0]);
   const ys = C.map((p) => p[1]);
-  const box = {
-    x0: Math.min(...xs) - 1.6,
-    x1: Math.max(...xs) + 1.6,
-    y0: Math.min(...ys) - 1.6,
-    y1: Math.max(...ys) + 1.6,
-  };
+  const box = track.layout
+    ? {
+        x0: track.layout.bounds[0],
+        y0: track.layout.bounds[1],
+        x1: track.layout.bounds[2],
+        y1: track.layout.bounds[3],
+      }
+    : {
+        x0: Math.min(...xs) - 1.6,
+        x1: Math.max(...xs) + 1.6,
+        y0: Math.min(...ys) - 1.6,
+        y1: Math.max(...ys) + 1.6,
+      };
   const g: Circuit = {
     track,
     C,
@@ -129,7 +136,7 @@ function build(track: CircuitTrack): Circuit {
     corner,
     SL,
     lap,
-    scale: track.real_m / lap,
+    scale: track.layout ? 1 : track.real_m / lap,
     WL: track.wall_left_m,
     WR: track.wall_right_m,
     road: track.lane_width_m / 2 + track.curb_m,
@@ -140,6 +147,9 @@ function build(track: CircuitTrack): Circuit {
     deco: [],
     box,
   };
+
+  // 물리 시험 코스에는 경주장 장식과 자동 runoff를 만들지 않는다.
+  if (track.layout) return g;
 
   // 관중석: 출발 직선(코너 없이 가장 긴 구간) 오른쪽, 다른 트랙 구간 벽에 닿지 않을 만큼만
   let bestLen = 0;

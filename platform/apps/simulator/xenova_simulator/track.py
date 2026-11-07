@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
@@ -32,12 +33,16 @@ class TrackSource:
     name: str
     real_m: int
     centerline: tuple[tuple[float, float], ...]
+    lane_width_m: float = LANE_WIDTH_M
+    curb_m: float = CURB_M
+    layout: dict | None = None
 
 
 @lru_cache(maxsize=1)
 def sources() -> dict[str, TrackSource]:
     data = json.loads(resources.files(__package__).joinpath("tracks.json").read_text(encoding="utf-8"))
-    return {t["id"]: TrackSource(t["id"], t["name"], t["real_m"], tuple((float(x), float(y)) for x, y in t["centerline"]))
+    return {t["id"]: TrackSource(t["id"], t["name"], t["real_m"], tuple((float(x), float(y)) for x, y in t["centerline"]),
+                                t.get("lane_width_m", LANE_WIDTH_M), t.get("curb_m", CURB_M), t.get("layout"))
             for t in data["tracks"]}
 
 
@@ -49,12 +54,64 @@ def _round_mm(v: float) -> float:
     return math.floor(v * 1000 + 0.5) / 1000  # JS Math.round 과 같은 반올림
 
 
+def _cross(a, b, p) -> float:
+    return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+
+
+def _area(polygon) -> float:
+    return .5 * sum(a[0] * b[1] - b[0] * a[1]
+                    for a, b in zip(polygon, polygon[1:] + polygon[:1]))
+
+
+def point_in_polygon(x: float, y: float, polygon) -> bool:
+    """단순 polygon 내부와 경계를 포함한다. 좌표 단위는 metre이다."""
+    inside = False
+    for a, b in zip(polygon, polygon[1:] + polygon[:1]):
+        on_segment = (abs(_cross(a, b, (x, y))) <= 1e-10
+                      and min(a[0], b[0]) - 1e-10 <= x <= max(a[0], b[0]) + 1e-10
+                      and min(a[1], b[1]) - 1e-10 <= y <= max(a[1], b[1]) + 1e-10)
+        if on_segment:
+            return True
+        if (a[1] > y) != (b[1] > y) and x < a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]):
+            inside = not inside
+    return inside
+
+
+def _clip_halfplane(polygon, a, b, side):
+    result = []
+    for start, end in zip(polygon, polygon[1:] + polygon[:1]):
+        ds, de = side * _cross(a, b, start), side * _cross(a, b, end)
+        start_inside, end_inside = ds >= -1e-10, de >= -1e-10
+        if start_inside != end_inside:
+            t = ds / (ds - de)
+            result.append((start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t))
+        if end_inside:
+            result.append(end)
+    return result
+
+
+def _subtract_convex(subject, clip):
+    """볼록 clip을 빼고 남은 볼록 조각들. 네 꼭짓점만 확인하는 hole 누락을 피한다."""
+    remaining, outside = subject, []
+    side = 1 if _area(clip) > 0 else -1
+    for a, b in zip(clip, clip[1:] + clip[:1]):
+        piece = _clip_halfplane(remaining, a, b, -side)
+        if len(piece) >= 3 and abs(_area(piece)) > 1e-10:
+            outside.append(piece)
+        remaining = _clip_halfplane(remaining, a, b, side)
+        if len(remaining) < 3:
+            break
+    return outside
+
+
 class Track:
     """한 서킷의 기하. 물리·시험은 float 로, 카메라는 raster(카메라 모듈)로 쓴다."""
 
     def __init__(self, src: TrackSource) -> None:
         self.id, self.name, self.real_m = src.id, src.name, src.real_m
-        self.lane_width_m, self.curb_m, self.road_m = LANE_WIDTH_M, CURB_M, ROAD_M
+        self.lane_width_m, self.curb_m = src.lane_width_m, src.curb_m
+        self.road_m = self.lane_width_m / 2 + self.curb_m
+        self.layout = deepcopy(src.layout)
         C = self.C = [tuple(p) for p in src.centerline]
         N = self.N = len(C)
         tan = []
@@ -67,7 +124,8 @@ class Track:
         turn = []
         for i in range(N):
             a, b = tan[(i - 3) % N], tan[(i + 3) % N]
-            turn.append(math.atan2(a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1]) / 1.2)
+            ds = sum(math.dist(C[(i + d) % N], C[(i + d + 1) % N]) for d in range(-3, 3)) if self.layout else 1.2
+            turn.append(math.atan2(a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1]) / ds)
         self.turn = turn
         self.corner = [max(abs(turn[(i + d) % N]) for d in range(-6, 7)) > 0.35 for i in range(N)]
         SL = [0.0]
@@ -75,6 +133,16 @@ class Track:
             SL.append(SL[-1] + math.hypot(C[i][0] - C[i - 1][0], C[i][1] - C[i - 1][1]))
         self.SL = SL
         self.lap_m = SL[-1] + math.hypot(C[0][0] - C[-1][0], C[0][1] - C[-1][1])
+
+        if self.layout:
+            self.start_index = 0
+            self.wall_left_m = [self.road_m + _APRON] * N
+            self.wall_right_m = [self.road_m + _APRON] * N
+            self._paved_polygons = [
+                [self.at(i, -self.road_m), self.at((i + 1) % N, -self.road_m),
+                 self.at((i + 1) % N, self.road_m), self.at(i, self.road_m)] for i in range(N)
+            ] + [[tuple(p) for p in polygon] for polygon in self.layout["paved_areas"]]
+            return
 
         best_len = best_start = 0
         for i in range(N):
@@ -103,7 +171,7 @@ class Track:
                 g += 0.02
             g_end = g
             gs = np.array(steps)
-            offsets = ROAD_M + gs + 0.05
+            offsets = self.road_m + gs + 0.05
             pts = np.array(C)
             even = np.arange(0, N, 2)
             out = []
@@ -125,7 +193,7 @@ class Track:
                     t = turn[(i + d) % N]
                     if (t > 0) - (t < 0) == sd:
                         k = max(k, abs(t))
-                out.append(max(_APRON, 0.75 / k - ROAD_M) if k > 0.05 else 9.0)
+                out.append(max(_APRON, 0.75 / k - self.road_m) if k > 0.05 else 9.0)
             return out
 
         w = smooth([want(i) for i in range(N)], 6)
@@ -133,7 +201,7 @@ class Track:
         def fin(r: list[float], cap: list[float]) -> list[float]:
             m = [min(w[i], r[i], cap[i]) for i in range(N)]
             lo = [min(m[(i + d) % N] for d in range(-3, 4)) for i in range(N)]
-            return [_round_mm(ROAD_M + max(_APRON, v)) for v in smooth(lo, 2)]
+            return [_round_mm(self.road_m + max(_APRON, v)) for v in smooth(lo, 2)]
 
         self.wall_left_m = fin(room(1), inner(1))
         self.wall_right_m = fin(room(-1), inner(-1))
@@ -159,15 +227,54 @@ class Track:
     def wall(self, i: int, off: float) -> float:
         return self.wall_left_m[i] if off > 0 else self.wall_right_m[i]
 
+    def paved_at(self, x: float, y: float) -> bool:
+        """도로 strip과 주차 apron/slot의 합집합. 새 데모만 polygon geometry를 쓴다."""
+        if self.layout:
+            return any(point_in_polygon(x, y, polygon) for polygon in self._paved_polygons)
+        _, off, _ = self.frame(x, y)
+        return abs(off) <= self.road_m
+
+    def polygon_is_paved(self, polygon) -> bool:
+        """볼록 footprint 전체가 포장 합집합에 포함되는지 검사한다.
+
+        데모 도로 quad와 paved_areas는 볼록 polygon이다. 면적 1e-10 m² 이하의
+        부동소수점 잔여 조각만 경계 접촉으로 취급한다. 점 표본이나 실제 기동 검증은 아니다.
+        """
+        if not self.layout:
+            return all(self.paved_at(*p) for p in polygon)
+        remaining = [list(polygon)]
+        for paved in self._paved_polygons:
+            remaining = [piece for subject in remaining for piece in _subtract_convex(subject, paved)]
+            if not remaining:
+                return True
+        return not remaining
+
+    def box_is_paved(self, x: float, y: float, width: float, height: float | None = None) -> bool:
+        """장애물의 축정렬 사각형 전체 포함. width/height는 metre이다."""
+        h = width if height is None else height
+        return self.polygon_is_paved([(x - width / 2, y - h / 2), (x + width / 2, y - h / 2),
+                                     (x + width / 2, y + h / 2), (x - width / 2, y + h / 2)])
+
+    def surface_at(self, x: float, y: float, hint: int | None = None) -> str:
+        """실좌표 노면. apron도 road이며 중심선 투영으로 slot 위치를 잃지 않는다."""
+        if self.layout:
+            return "road" if self.paved_at(x, y) else "grass"
+        i, off, _ = self.frame(x, y, hint)
+        return self.surface(i, off)
+
     def surface(self, i: int, off: float) -> str:
         """차 중심 노면 (계약 v1.4 sim.pose.surface). 코너 바깥쪽은 흙, 나머지는 잔디."""
-        if abs(off) <= ROAD_M:
+        if self.layout:
+            return self.surface_at(*self.at(i, off))
+        if abs(off) <= self.road_m:
             return "road"
         outside = -((self.turn[i] > 0) - (self.turn[i] < 0)) or 1
         return "dirt" if self.corner[i] and ((off > 0) - (off < 0)) == outside else "grass"
 
     def start_pose(self) -> tuple[float, float, float]:
         """출발선 위, 진행 방향을 본다. (x, y, heading)."""
+        if self.layout:
+            return tuple(self.layout["start_pose"])
         i = self.start_index
         return self.C[i][0], self.C[i][1], math.atan2(self.tan[i][1], self.tan[i][0])
 
@@ -178,17 +285,24 @@ class Track:
 
     def bounds(self, margin: float) -> tuple[float, float, float, float]:
         xs, ys = [p[0] for p in self.C], [p[1] for p in self.C]
-        return min(xs) - margin, min(ys) - margin, max(xs) + margin, max(ys) + margin
+        box = min(xs) - margin, min(ys) - margin, max(xs) + margin, max(ys) + margin
+        if self.layout:
+            lx0, ly0, lx1, ly1 = self.layout["bounds"]
+            return min(box[0], lx0), min(box[1], ly0), max(box[2], lx1), max(box[3], ly1)
+        return box
 
     def payload(self) -> dict:
         """sim.world.track (계약 v1.4 §11)."""
-        return {
+        result = {
             "shape": "centerline", "id": self.id, "name": self.name, "real_m": self.real_m,
             "lane_width_m": self.lane_width_m, "curb_m": self.curb_m,
-            "centerline": [[round(x, 3), round(y, 3)] for x, y in self.C],
+            "centerline": [list(p) for p in self.C] if self.layout else [[round(x, 3), round(y, 3)] for x, y in self.C],
             "wall_left_m": self.wall_left_m, "wall_right_m": self.wall_right_m,
             "start_index": self.start_index,
         }
+        if self.layout:
+            result["layout"] = deepcopy(self.layout)
+        return result
 
 
 @lru_cache(maxsize=16)

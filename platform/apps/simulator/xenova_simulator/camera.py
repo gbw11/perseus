@@ -28,7 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import cv2
 import numpy as np
 
-from .config import CameraSpec
+from .config import CameraSpec, camera_for_layout
 from .model import Obstacle
 from .track import Track
 
@@ -61,9 +61,13 @@ class OffsetMap:
     off: np.ndarray
     wall: np.ndarray
     dirt: np.ndarray
+    paved: np.ndarray | None = None
+    paint: np.ndarray | None = None
+    divider: np.ndarray | None = None
+    edge_opening: np.ndarray | None = None
 
 
-def build_offset_map(track: Track, res: float) -> OffsetMap:
+def build_offset_map(track: Track, res: float, line_width: float = 0.025) -> OffsetMap:
     margin = max(max(track.wall_left_m), max(track.wall_right_m)) + 1.0
     x0, y0, x1, y1 = track.bounds(margin)
     w, h = int(math.ceil((x1 - x0) / res)) + 1, int(math.ceil((y1 - y0) / res)) + 1
@@ -103,7 +107,30 @@ def build_offset_map(track: Track, res: float) -> OffsetMap:
     wall = np.where(off > 0, np.array(track.wall_left_m)[i], np.array(track.wall_right_m)[i])
     outside = np.where(np.array(track.turn)[i] > 0, -1.0, 1.0)
     dirt = np.array(track.corner)[i] & (np.sign(off) == outside)
-    return OffsetMap(x0, y0, res, off.astype(np.float32), wall.astype(np.float32), dirt.astype(np.uint8))
+    result = OffsetMap(x0, y0, res, off.astype(np.float32), wall.astype(np.float32), dirt.astype(np.uint8))
+    if track.layout:
+        # 주차 바닥은 도로 경계를 열고, 흰 선은 그 위에 다시 그린다.
+        result.paved = np.zeros((h, w), np.uint8)
+        result.paint = np.zeros((h, w), np.uint8)
+
+        def pixels(points):
+            return np.rint((np.asarray(points) - (x0, y0)) / res).astype(np.int32)
+
+        for polygon in track.layout["paved_areas"]:
+            cv2.fillPoly(result.paved, [pixels(polygon)], 1)
+        # 도로 안쪽으로 칠한 edge tape도 입구에서 완전히 지운다. 주행 영역은 확장하지 않는다.
+        result.edge_opening = cv2.dilate(result.paved, np.ones((3, 3), np.uint8))
+        thickness = max(1, round(line_width / res))
+        for points in track.layout["paint_lines"]:
+            cv2.polylines(result.paint, [pixels(points)], False, 1, thickness)
+        start = np.asarray(track.C[track.start_index])
+        normal = np.asarray(track.nor[track.start_index]) * track.lane_width_m / 2
+        cv2.polylines(result.paint, [pixels([start - normal, start + normal])], False, 1, thickness)
+        along = (np.asarray(track.SL)[i]
+                 + (px - np.asarray(track.C)[i, 0]) * np.asarray(track.tan)[i, 0]
+                 + (py - np.asarray(track.C)[i, 1]) * np.asarray(track.tan)[i, 1])
+        result.divider = ((np.abs(off) <= line_width / 2) & (np.mod(along, 0.5) < 0.25)).astype(np.uint8)
+    return result
 
 
 class Renderer:
@@ -126,13 +153,14 @@ class Renderer:
         self.ground &= self.gx <= spec.max_range_m
         self.sky = down <= _MIN_DOWN
         self._maps: dict[str, OffsetMap] = {}
+        self._course_renderers: dict[CameraSpec, Renderer] = {}
         self._lock = threading.Lock()
 
     def offset_map(self, track: Track) -> OffsetMap:
         with self._lock:
             m = self._maps.get(track.id)
             if m is None:
-                m = self._maps[track.id] = build_offset_map(track, self.spec.raster_m)
+                m = self._maps[track.id] = build_offset_map(track, self.spec.raster_m, self.spec.line_width_m)
             return m
 
     def camera_position(self, x: float, y: float, heading: float) -> tuple[float, float]:
@@ -141,6 +169,12 @@ class Renderer:
         return x + m * math.cos(heading), y + m * math.sin(heading)
 
     def render(self, track: Track, x: float, y: float, heading: float, obstacles: Sequence[Obstacle] = ()) -> np.ndarray:
+        spec = camera_for_layout(self.spec, track.layout)
+        if spec != self.spec:
+            renderer = self._course_renderers.get(spec)
+            if renderer is None:
+                renderer = self._course_renderers[spec] = Renderer(spec)
+            return renderer.render(track, x, y, heading, obstacles)
         cam_x, cam_y = self.camera_position(x, y, heading)
         c, s = math.cos(heading), math.sin(heading)
         m = self.offset_map(track)
@@ -162,6 +196,15 @@ class Renderer:
         image[g & (off <= track.road_m)] = CURB
         image[g & (off <= half)] = ASPHALT
         image[g & (off <= half) & (off >= half - line)] = LINE
+        if m.paved is not None:
+            def sampled(mask):
+                return g & (cv2.remap(mask, mx, my, cv2.INTER_NEAREST,
+                                     borderMode=cv2.BORDER_CONSTANT, borderValue=0) > 0)
+
+            image[sampled(m.edge_opening) & (off <= half)] = ASPHALT
+            image[sampled(m.paved)] = ASPHALT
+            image[sampled(m.divider)] = LINE
+            image[sampled(m.paint)] = LINE
 
         # 먼 장애물부터 그려 가까운 것이 가린다
         for o in sorted(obstacles, key=lambda o: -math.hypot(o.x - cam_x, o.y - cam_y)):

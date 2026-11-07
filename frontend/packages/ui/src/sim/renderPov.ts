@@ -146,24 +146,31 @@ function drawSky(
  */
 export function drawPov(g: CanvasRenderingContext2D, W: number, H: number, c: Circuit, scene: PovScene) {
   const { pose, obstacles, lightsOn, boxes: showBoxes, quality } = scene;
-  const high = quality === 'high';
-  const F = W / 2 / Math.tan(HALF_FOV);
+  const layout = c.track.layout;
+  const camera = layout?.camera;
+  const high = quality === 'high' && !layout;
+  const pitch = camera?.pitch_rad ?? PITCH;
+  const cameraHeight = camera?.height_m ?? CH;
+  const F = W / 2 / Math.tan(camera ? camera.hfov_rad / 2 : HALF_FOV);
   const cx = W / 2;
-  const cy = H * 0.44;
-  const horizon = cy - F * Math.tan(PITCH);
-  drawSky(g, W, H, cx, F, horizon, pose.yaw, high);
+  const cy = H * (layout ? 0.5 : 0.44);
+  const horizon = cy - F * Math.tan(pitch);
+  if (layout) {
+    g.fillStyle = '#101216';
+    g.fillRect(0, 0, W, H);
+  } else drawSky(g, W, H, cx, F, horizon, pose.yaw, high);
   const cs = Math.cos(pose.yaw);
   const sn = Math.sin(pose.yaw);
-  const camx = pose.x + 0.12 * cs;
-  const camy = pose.y + 0.12 * sn;
-  const cP = Math.cos(PITCH);
-  const sP = Math.sin(PITCH);
+  const camx = pose.x + (camera?.mount_x_m ?? 0.12) * cs;
+  const camy = pose.y + (camera?.mount_x_m ?? 0.12) * sn;
+  const cP = Math.cos(pitch);
+  const sP = Math.sin(pitch);
   const cam = (x: number, y: number, h = 0): Cam => {
     const dx = x - camx;
     const dy = y - camy;
     const f = dx * cs + dy * sn;
     const l = -dx * sn + dy * cs;
-    const up = h - CH;
+    const up = h - cameraHeight;
     return { z: f * cP - up * sP, l, dn: -up * cP - f * sP, f };
   };
   const toScreen = (p: Cam) => ({ u: cx - (F * p.l) / p.z, v: cy + (F * p.dn) / p.z, z: p.z });
@@ -210,7 +217,62 @@ export function drawPov(g: CanvasRenderingContext2D, W: number, H: number, c: Ci
   const depth = (q: Cam[]) => q.reduce((a, p) => a + p.f, 0) / q.length;
 
   const items: Item[] = [];
-  for (let i = 0; i < c.N; i++) {
+  if (layout) {
+    // 같은 지면과 테이프를 원근 투영하며 실물 stereo coverage를 대신하지 않는다.
+    for (let i = 0; i < c.N; i++) {
+      clipDraw(quad(i, (i + 1) % c.N, c.road, c.road, -c.road, -c.road), '#24282f');
+    }
+    const tape = (points: [number, number][]) => {
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1]!;
+        const b = points[i]!;
+        const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (!length) continue;
+        const nx = ((b[1] - a[1]) / length) * 0.0125;
+        const ny = (-(b[0] - a[0]) / length) * 0.0125;
+        clipDraw(
+          [
+            cam(a[0] + nx, a[1] + ny, 0.001),
+            cam(b[0] + nx, b[1] + ny, 0.001),
+            cam(b[0] - nx, b[1] - ny, 0.001),
+            cam(a[0] - nx, a[1] - ny, 0.001),
+          ],
+          '#f1f3f5',
+        );
+      }
+    };
+    for (const side of [-1, 1]) {
+      const edge = c.C.map((_, i) => at(c, i, side * c.road));
+      tape([...edge, edge[0]!]);
+    }
+    // 연결부 지면은 도로 경계를 덮고, 주차 테이프는 그 위에 놓는다.
+    for (const area of layout.paved_areas)
+      clipDraw(
+        area.map(([x, y]) => cam(x, y)),
+        '#24282f',
+      );
+    for (const line of layout.paint_lines) tape(line);
+    for (let i = 0; i < c.N; i++) {
+      const a = c.C[i]!;
+      const b = c.C[(i + 1) % c.N]!;
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const start = c.SL[i]!;
+      const end = start + length;
+      const point = (s: number): [number, number] => [
+        a[0] + ((b[0] - a[0]) * (s - start)) / length,
+        a[1] + ((b[1] - a[1]) * (s - start)) / length,
+      ];
+      // 샘플 간격과 무관하게25cm 경계에서 파선을 자른다.
+      for (let s = start; s < end - 1e-10;) {
+        const phase = Math.floor((s + 1e-10) / 0.25);
+        const next = Math.min(end, (phase + 1) * 0.25);
+        if (phase % 2 === 0) tape([point(s), point(next)]);
+        s = next;
+      }
+    }
+    tape([at(c, c.start, -c.road), at(c, c.start, c.road)]);
+  }
+  for (let i = 0; !layout && i < c.N; i++) {
     const j = (i + 1) % c.N;
     const road = quad(i, j, c.laneW / 2, c.laneW / 2, -c.laneW / 2, -c.laneW / 2);
     if (!visible(road) && !visible(quad(i, j, c.WL[i]!, c.WL[j]!, -c.WR[j]!, -c.WR[i]!))) continue;
@@ -273,7 +335,7 @@ export function drawPov(g: CanvasRenderingContext2D, W: number, H: number, c: Ci
     }
   }
   // 출발 신호 다리: 출발선 위 들보와 빨간 불 다섯 개
-  {
+  if (!layout) {
     const i = c.start;
     const L = c.WL[i]! + 0.04;
     const R = -c.WR[i]! - 0.04;
@@ -370,7 +432,8 @@ export function drawPov(g: CanvasRenderingContext2D, W: number, H: number, c: Ci
   for (const o of obstacles) {
     const kind = o.kind ?? 'cone';
     const b = proj(o.x, o.y);
-    const t = proj(o.x, o.y, OBSTACLE_H[kind]);
+    const height = layout?.obstacle_seeds.find((seed) => seed.id === o.id)?.h ?? OBSTACLE_H[kind];
+    const t = proj(o.x, o.y, height);
     if (!b || !t) continue;
     items.push({
       z: cam(o.x, o.y).f - 0.003,

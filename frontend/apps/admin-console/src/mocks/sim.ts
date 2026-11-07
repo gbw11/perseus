@@ -21,10 +21,10 @@ import {
   perceive,
   physics,
   surfaceAt,
+  steerLimit,
   trackFrame,
   wrapS,
-  CAR_HALF,
-  CAR_L,
+  vehicleOf,
   type Car,
   type Kind,
   type Obstacle,
@@ -98,7 +98,7 @@ function trackOf(id: string): Track {
   }
   return T;
 }
-const scaleOf = (T: Track) => T.real_m / T.LAP;
+const scaleOf = (T: Track) => (T.layout ? 1 : T.real_m / T.LAP);
 
 function newRace(now: number): Race {
   return {
@@ -116,7 +116,11 @@ function newRace(now: number): Race {
   };
 }
 
-const gridCar = (T: Track): Car => carAtS(T, T.SL[T.S0]! - 0.35, 0);
+const gridCar = (T: Track): Car => {
+  if (!T.layout) return carAtS(T, T.SL[T.S0]! - 0.35, 0);
+  const [x, y, yaw] = T.layout.start_pose;
+  return { ...carAtS(T, T.SL[T.S0]!, 0), x, y, yaw, idx: trackFrame(T, x, y).i };
+};
 
 export function initialSim(now: number, trackId = TRACKS[0]!.id): SimState {
   const T = trackOf(trackId);
@@ -130,9 +134,17 @@ export function initialSim(now: number, trackId = TRACKS[0]!.id): SimState {
     time: 0,
     planTarget: null,
     seq: 0,
-    nextDemoAt: now + DEMO_EVERY_MS,
+    nextDemoAt: T.layout ? Infinity : now + DEMO_EVERY_MS,
     lateral: 0,
   };
+  if (T.layout) {
+    s.obstacles = T.layout.obstacle_seeds.map((o) => {
+      const f = trackFrame(T, o.x, o.y);
+      return { id: o.id, kind: o.kind, x: o.x, y: o.y, i: f.i, off: f.off, s: f.s };
+    });
+    s.seq = s.obstacles.length;
+    return s;
+  }
   // 처음 화면: 출발 뒤 장애물 셋 (지나갈 수 있는 자리에만)
   for (const [di, off, kind] of [
     [60, 0.05, 'cone'],
@@ -267,10 +279,12 @@ function reshuffle(s: SimState) {
   s.revision++;
 }
 
-const esp32Blocks = (p: ReturnType<typeof perceive>) =>
+const esp32Blocks = (T: Track, p: ReturnType<typeof perceive>) =>
   p.seen.some(
     (o) =>
-      o.ahead > 0 && o.ahead < CAR_L / 2 + o.w / 2 + 0.25 && Math.abs(o.lat - p.off) < o.w / 2 + CAR_HALF,
+      o.ahead > 0 &&
+      o.ahead < vehicleOf(T).length_m / 2 + o.w / 2 + 0.25 &&
+      Math.abs(o.lat - p.off) < o.w / 2 + vehicleOf(T).width_m / 2,
   );
 
 /**
@@ -302,7 +316,7 @@ export function advance(
     if (race.phase === 'go') reshuffle(s);
   }
   if (driver === 'manual' && keys.length) s.lastKeyAt = now;
-  const total = dt * SIM_TIME_SCALE;
+  const total = dt * (T.layout ? 1 : SIM_TIME_SCALE);
   for (let t = 0; t < total - 1e-9; t += SUBSTEP) {
     const h = Math.min(SUBSTEP, total - t);
     s.time += h;
@@ -326,9 +340,9 @@ export function advance(
         tv = car.v > 0.02 ? 0 : -REV_V; // 달리는 중이면 브레이크, 서 있으면 후진
       // 놓으면 천천히 — 다만 한동안 아무 키도 안 눌렀으면(인계 직후) 수동 앱의 정지 명령(v=0)대로 선다
       else decel = now - (s.lastKeyAt ?? -1e9) < 2000 ? COAST : BRAKE;
-      const steerMax = 0.21 * (1 - 0.45 * Math.min(1, Math.abs(car.v) / MAX_V));
+      const steerMax = T.layout ? steerLimit(T) : 0.21 * (1 - 0.45 * Math.min(1, Math.abs(car.v) / MAX_V));
       ts = (keys.includes('left') ? steerMax : 0) - (keys.includes('right') ? steerMax : 0);
-      if (tv > 0 && esp32Blocks(p)) tv = 0; // ESP32 근거리 감지 — 바로 앞 장애물이면 전진 차단
+      if (tv > 0 && esp32Blocks(T, p)) tv = 0; // ESP32 근거리 감지 — 바로 앞 장애물이면 전진 차단
     } else s.planTarget = null;
     if (s.estop) {
       tv = 0;
@@ -354,7 +368,7 @@ export function advance(
 
 /** 차 바로 앞 근거리 감지에 장애물이 걸렸나 (vehicle.status flags.obstacle 흉내) */
 export function sensing(s: SimState): boolean {
-  return esp32Blocks(perceive(s.T, { ...s.car }, s.obstacles));
+  return esp32Blocks(s.T, perceive(s.T, { ...s.car }, s.obstacles));
 }
 
 /** 앞쪽 인식 거리(4 m) 안 장애물 수 — 인지 대역 obstacle_count 흉내 */
@@ -377,12 +391,13 @@ function trackOfPayload(T: Track): SimWorld['track'] {
       id: T.id,
       name: T.name,
       real_m: T.real_m,
-      lane_width_m: 0.6,
-      curb_m: 0.06,
-      centerline: T.C.map(([x, y]): [number, number] => [r3(x), r3(y)]),
+      lane_width_m: T.laneW,
+      curb_m: T.curb,
+      centerline: T.C.map(([x, y]): [number, number] => (T.layout ? [x, y] : [r3(x), r3(y)])),
       wall_left_m: T.WL,
       wall_right_m: T.WR,
       start_index: T.S0,
+      ...(T.layout ? { layout: T.layout } : {}),
     };
     trackPayload.set(T.id, p);
   }
@@ -400,8 +415,8 @@ export function snapshotOf(s: SimState): SimSnapshot {
         revision: s.revision,
         track: trackOfPayload(T),
         tracks: TRACKS.map((t) => ({ id: t.id, name: t.name, real_m: t.real_m })),
-        car: { length_m: CAR_L, width_m: CAR_HALF * 2 },
-        time_scale: SIM_TIME_SCALE,
+        car: { length_m: vehicleOf(T).length_m, width_m: vehicleOf(T).width_m },
+        time_scale: T.layout ? 1 : SIM_TIME_SCALE,
         obstacles: s.obstacles.map((o) => ({
           id: o.id,
           kind: o.kind,
@@ -420,7 +435,7 @@ export function snapshotOf(s: SimState): SimSnapshot {
     v_mps: r4(car.v),
     steer_rad: r4(car.steer),
     world_revision: s.revision,
-    surface: surfaceAt(T, f.i, f.off),
+    surface: surfaceAt(T, f.i, f.off, car.x, car.y),
     race: {
       phase: race.phase,
       lights_on: race.phase === 'lights' ? race.lights : 0,

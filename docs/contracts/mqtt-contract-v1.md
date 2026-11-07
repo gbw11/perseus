@@ -667,7 +667,7 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 
 - 발행자 `source_id`: 시뮬레이터 `simulator`, 백엔드 `dom0-server` (계정 `backend`, 수동 입력·재개 요청과 같음). 봉투·seq 규칙은 2장과 같다.
 - 좌표는 **트랙 고정 좌표**다 (5.4 `perception.result` 의 차량 기준 좌표와 다르다). x·y(m), `yaw` = +x 에서 반시계 rad.
-- 값은 모두 **모의 단위**(m, m/s)다. 화면은 트랙의 `real_m` ÷ 중심선 한 바퀴 길이(약 51)를 곱해 실제 서킷 단위(km, km/h)로 보인다.
+- 값은 모두 **모의 단위**(m, m/s)다. 기존 실제 서킷은 화면에서 `real_m` ÷ 중심선 한 바퀴 길이를 곱해 실제 서킷 단위(km, km/h)로 보인다. 아래 `track.layout`이 있는 Jetson 시험 코스는 이미 m 단위이므로 화면 배율은 1이다.
 
 **`sim.pose`**
 
@@ -700,8 +700,8 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | --- | --- | --- |
 | `revision` | uint32 | 트랙·장애물·E-stop 이 바뀔 때마다 1 오른다. 시작 1. 시뮬레이터가 다시 시작하면 1 부터 다시 세므로, 받는 쪽은 revision 이 줄어도 새 실행으로 보고 받는다. 시뮬레이터는 정상 종료할 때 retained 를 지운다 |
 | `track` | object | 지금 트랙. 아래 표 |
-| `tracks` | array | 고를 수 있는 트랙 `[{id, name, real_m}]`. 10개: `spielberg`·`monza`·`silverstone`·`spa`·`melbourne`·`hungaroring`·`catalunya`·`mexico`·`bahrain`·`interlagos`. 시작은 `spielberg` |
-| `car` | object | `{length_m, width_m}` 판정에 쓰는 차 몸 크기. `0.42`·`0.20` |
+| `tracks` | array | 고를 수 있는 트랙 `[{id, name, real_m}]`. 기존 서킷 10개에 아래 Jetson 시험 코스 6개를 추가한다. 기본 시작은 계속 `spielberg` |
+| `car` | object | `{length_m, width_m}` 현재 코스의 판정에 쓰는 차 몸 크기. 기존 서킷은 `0.42`·`0.20`, Jetson 시험 코스는 `0.30`·`0.22` |
 | `time_scale` | float | 시뮬레이터 시간 배율 (1 = 실제 시간). 화면이 위치 사이를 이어 그릴 때 곱한다 |
 | `obstacles` | array | `[{id, kind, x, y, w}]` — 종류·가운데 위치(m)·폭(m). 최대 8개 |
 | `estop` | bool | 시연용 E-stop 이 걸려 있음 (`vehicle.status.flags.estop` 도 같이 true) |
@@ -712,14 +712,37 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | --- | --- | --- |
 | `shape` | string | `centerline` |
 | `id`, `name` | string | 트랙 id·화면 이름 |
-| `real_m` | uint32 | 실제 서킷 한 바퀴 길이 (m). 화면 단위 변환에 쓴다 |
-| `lane_width_m`, `curb_m` | float | 차선 폭 `0.6`, 연석 폭 `0.06`. 연석 끝까지 아스팔트 |
-| `centerline` | array | `[[x, y], …]` 차선 중심선, 약 0.2 m 간격, 닫힌 고리 (진행 방향 순서). 트랙마다 413 ~ 681점 |
+| `real_m` | uint32 | 기존 서킷의 실제 한 바퀴 길이(m). Jetson 시험 코스에서는 모의 중심선 길이를 반올림한 표시용 근삿값이며 화면 배율 계산에 쓰지 않는다 |
+| `lane_width_m`, `curb_m` | float | 기존 서킷은 도로 폭 `0.6`, 연석 폭 `0.06`. Jetson 시험 코스는 같은 방향 두 차로의 **전체 도로 폭** `0.8`(각 `0.4`), 연석 `0` |
+| `centerline` | array | `[[x, y], …]`, 닫힌 고리의 진행 방향 순서. 기존 서킷은 차로 중심선, 약 0.2 m 간격·413 ~ 681점·소수 3자리. Jetson 시험 코스는 두 차로 사이의 분리선, 약 0.05 m 간격·소수 6자리의 공유 생성 좌표 |
 | `wall_left_m`, `wall_right_m` | array | 점마다 중심선에서 왼쪽·오른쪽 벽까지 거리 (m). 연석 밖 ~ 벽 = 잔디·흙. 출발 직선은 잔디 없이 바로 벽, 코너 근처는 보통의 두 배 |
 | `start_index` | uint32 | 출발선이 있는 `centerline` 점 |
+| `layout` | object, 선택 | Jetson 시험 코스의 지면·표시선·초기 배치와 잠정 차량·카메라 가정. 기존 서킷 10개에는 없다. 아래 표 |
 
-- 트랙 모양 출처: TUM racetrack-database (LGPL-3.0, © OpenStreetMap contributors) 중심선을 1/50 로 줄이고 반경 0.8 m 미만 코너만 다듬었다. 벽 거리는 시뮬레이터가 계산해 넣는다 — 받는 쪽은 그대로 쓴다. 관리 콘솔 mock 과 같은 계산이다.
-- `sim.world` 는 가장 긴 스파 기준 약 30 KB (1장 64 KB 이하).
+- 기존 10개는 `spielberg`·`monza`·`silverstone`·`spa`·`melbourne`·`hungaroring`·`catalunya`·`mexico`·`bahrain`·`interlagos`다. TUM racetrack-database (LGPL-3.0, © OpenStreetMap contributors) 중심선을 1/50로 줄이고 반경 0.8 m 미만 코너만 다듬었다. 기존 중심선·벽·payload 값과 기본 `spielberg`는 유지한다.
+- 추가 코스는 `jetson-demo`·`jetson-r45`·`jetson-r55`·`jetson-r65`·`jetson-r75`·`jetson-r80`이다. 기본 표시명은 `Jetson 기본 코스 (R60cm)`, 비교 표시명은 `Jetson 비교 코스 (R45cm)`처럼 해당 반경을 cm로 쓴다. 코스 ID는 그대로 유지한다. 표시명의 반경은 **안쪽 차로 중심 반경**이며 기본 `jetson-demo`는 0.60 m다. 모든 시험 코스 차량의 최소 회전반경 가정 0.55 m와 구분한다. 여섯 코스 모두 도로 외곽 4.3 m × 2.8 m, world 범위 4.5 m × 3 m를 고정하고 반경에 따라 직선 길이를 바꾼다. R100은 이 높이에 들어가지 않아 제외하고 R75를 제공한다.
+- `sim.world`는 기존 스파 기준 약 30 KB이며, 새 선택 필드를 포함해 **공통 봉투를 직렬화한 UTF-8 전체가 65,536 bytes 이하**여야 한다. backend는 `world`를 그대로 중계하므로 새 `layout` 때문에 별도 backend DTO를 추가하지 않는다. 선택 필드가 없으면 기존 코스 렌더와 모델을 사용한다.
+
+`track.layout` (좌표 m, x 오른쪽·y 위쪽, yaw는 +x에서 반시계 rad)
+
+| 필드 | 타입 | 의미 |
+| --- | --- | --- |
+| `bounds` | `[x0, y0, x1, y1]` | 화면·카메라의 world 범위. 여섯 코스 모두 `[0, 0, 4.5, 3]`, 도로 외곽 4.3 m × 2.8 m |
+| `lane_count` | uint32 | `2`. 두 차로 모두 중심선 점의 시계 방향 순서를 따른다 |
+| `start_pose` | `[x, y, yaw]` | 여섯 코스 공통 후륜축 초기·다시 출발 pose `[2.81, 0.7, pi]`. 출발선 중심은 `[2.56, 0.5]`이며 앞범퍼를 그 선에 맞춘다. 후륜축부터 앞범퍼까지 0.25 m인 잠정 차체 기준 |
+| `paved_areas` | polygon array | `[[[x,y], ...], ...]`. 기본 도로에 추가하는 연결 마당과 주차칸 지면. 이 합집합은 모의 노면·수동 진입·배치 검사 영역이지 AUTO 이동 권한이나 주차 가능성 증명이 아니다 |
+| `paint_lines` | polyline array | `[[[x,y], ...], ...]`. 주차 표시선·연결선. 열린 점열은 자동으로 닫지 않는다. 각 주차칸은 첫 점을 끝에 반복해 네 변을 닫아 표시하며, 입구선은 도색이므로 통행면은 유지한다 |
+| `parking_slots` | object array | `[{id, outline:[[x,y], ...]}]`. 표시용 `P1`, `P2` 각 0.4 m × 0.6 m. 모든 코스의 전체 x 범위는 2.7부터 3.5다. R45/R55/R60/R65는 y=1.1부터 1.7, R75/R80은 도로와 겹치지 않도록 y=1.2부터 1.8에 둔다. 자율주차 임무·목표를 발급하지 않는다 |
+| `obstacle_seeds` | object array | `[{id, kind, x, y, w, h}]`. 여섯 코스 공통 `A` 중심 `[1.92, 0.7]`, `B` 중심 `[1.4, 0.3]`, `kind="cone"`, 폭·높이 각 0.18 m. 현재 장애물은 `world.obstacles`가 원본이며 seed는 배치 검사 통과 결과가 아니다 |
+| `vehicle` | object | `{length_m:0.30, width_m:0.22, wheelbase_m:0.20, min_turn_radius_m:0.55}`. 앞뒤 axle overhang은 대칭 0.05 m로 둔 미실측 모델 |
+| `camera` | object | `{height_m:0.12, pitch_rad:pi/12, hfov_rad:69*pi/180, mount_x_m:0.20}`. 후륜축 기준 전방 mount, 양의 pitch는 아래 숙임. 카메라 출력 해상도는 기존 설정 유지 |
+| `assumptions` | string | geometry·차량·카메라가 실측 전 가정이며 회피·주차 기동은 검증하지 않았다는 설명 |
+
+새 코스를 선택하면 해당 차량·카메라 profile과 초기 seed를 적용하고, 기존 서킷으로 돌아가면 원 profile로 복원한다. 초기 실행과 `track.select`는 seed를 배치하지만 장애물을 치운 뒤 `race.start`만 실행해 seed를 복구하지는 않는다. 이 확장은 같은 방향 두 차로와 주차장 표현·수동 진입을 위한 것이며, 장애물 회피 완주·자율주차·실제 MANUAL/AUTO 전환·A/B 교체 성공을 증명하지 않는다.
+
+초기 grid에서 출발선과 후륜축 pose를 구분한다. 대칭 axle overhang 0.05 m 가정에서 후륜축부터 앞범퍼까지는 0.25 m다. 출발선에 맞춘 앞범퍼와 첫 콘의 가까운 면 사이 x 간격은 0.55 m, 후륜축부터는 0.80 m다. 이는 제동·회피 가능성을 검증한 간격이 아니다.
+
+반경 R에 대해 긴 직선은 `3.1 - 2*R`, 짧은 직선은 `1.6 - 2*R` m다. 기본 R60은 1.9 m·0.4 m로 형상과 배치를 유지한다. R80은 짧은 직선 0 m인 stadium 형태의 한계이며 음수 직선이 필요한 반경은 생성하지 않는다. 비교 조건을 맞추기 위해 다른 반경 코스의 출발선·초기 pose·장애물도 위 공통 좌표로 통일한다. 연결 마당은 y=0.885부터 각 주차 입구까지 이어지고 하단 직선의 안쪽 경계 y=0.9는 유지한다. 오른쪽 연결선의 도로 쪽 끝점은 각 코스의 실제 안쪽 코너 경계에 맞추며 마당 포장 범위는 바꾸지 않는다. 주차 입구 왼쪽 끝 x=2.7은 왼쪽 진행 기준으로 앞범퍼 뒤 0.14 m, 카메라 뒤 0.09 m다. 입구가 차체 전체 뒤에 있다는 뜻은 아니다.
 
 **`sim.command`**
 
@@ -730,18 +753,19 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | `obstacle.remove` | `obstacle_id` | 치우기 |
 | `estop` | `engaged` (bool) | E-stop 걸기·풀기 |
 | `push` | `dy_m` | 차를 진행 방향 기준 옆으로 옮긴다 (+ 왼쪽, \|dy_m\| ≤ 0.5). 자율주행이 차선으로 돌아오는지 보이는 시연용 |
-| `track.select` | `track_id` | 트랙 바꾸기. 장애물을 모두 치우고 차를 출발선에 세운다. 출발 신호도 처음부터 |
+| `track.select` | `track_id` | 트랙 바꾸기. 기존 장애물을 치우고 새 코스의 초기 seed가 있으면 적용한 뒤 출발선에 세운다. 출발 신호도 처음부터 |
 | `race.start` | — | 다시 출발. 차를 출발선에 세우고 출발 신호·랩 기록(지난·최고·부정 출발)을 처음부터 |
 
 - 모든 명령에 `request_id`(string)를 넣는다. 시뮬레이터는 명령마다 MQTT-18 `sim.command.result` 를 한 번 낸다. 적용되면 `sim.world`(revision +1)도 다시 낸다 — `push`·`race.start` 는 `sim.pose` 에만 보인다.
 - 모르는 `op`·범위 밖 값은 `ok: false`, `code: INVALID` 로 답한다 (9번째 장애물, \|dy_m\| > 0.5, 없는 `track_id`, 없는 `obstacle_id`).
-- **배치 검사** (`obstacle.add`·`obstacle.move`, 관리 콘솔 mock checkPlacement 와 같은 식·순서). 앞에서부터 처음 걸린 것으로 거부한다. 옮기기는 옛 자리를 빼고 본다.
+- **기존 서킷 10개의 배치 검사** (`obstacle.add`·`obstacle.move`, 관리 콘솔 mock checkPlacement와 같은 식·순서). 앞에서부터 처음 걸린 것으로 거부한다. 옮기기는 옛 자리를 빼고 본다.
   1. `OUT_OF_TRACK`: 장애물이 벽 밖으로 조금이라도 나감 (\|옆 거리\| > 벽 − 폭/2)
   2. `ON_CAR`: 차 몸(길이 0.42·폭 0.20)과 겹침
   3. `NO_GAP`: 장애물 앞뒤(차 길이 + 폭)를 3 cm 마다 보아, 가장 넓은 틈(벽~장애물~벽)이 0.26 m(차 폭 0.20 + 양쪽 0.03) 보다 좁음. `gap_m`·`need_m` 을 채운다
   4. `TOO_DENSE`: 틈은 있지만, 기준 회피 주행(mock 의 자율 규칙: 인지 4 m → 틈 고르기 → pure pursuit·속도 계획)을 장애물 묶음 4.8 m 앞에서 출발시켜 보면 서거나 닿음
   5. `TOO_CLOSE`: 출발 뒤(`race.phase` = `go`)이고 차 바로 앞(−0.3 ~ 4.8 m)이라, 지금 차 상태로 4 를 돌려 봐도 못 지나감
 - 4·5 의 기준 회피 주행은 화면 판정용이다. 지금 자율 앱은 장애물을 피하지 않고 앞에서 선다.
+- **`layout`이 있는 Jetson 시험 코스**는 장애물의 축정렬 전체 box(`w` × `w`)가 기본 도로와 `paved_areas`의 합집합에 포함되는지 검사해 `OUT_OF_TRACK`, 현재 0.30 m × 0.22 m 차체와 겹치면 `ON_CAR`로 거절한다. 네 corner만 안에 있는 것으로 포함을 판정하지 않는다. 기존 단일 서킷용 `NO_GAP`·`TOO_DENSE`·`TOO_CLOSE` 회피 trial은 이 코스에 적용하지 않는다. 배치 수락은 놓을 수 있는 모의 지면이라는 뜻이며 차량이 피하거나 주차할 수 있다는 결과가 아니다. 초기 seed도 이 검사나 회피 trial의 통과 증거로 취급하지 않는다.
 
 **`sim.command.result`** (MQTT-18)
 

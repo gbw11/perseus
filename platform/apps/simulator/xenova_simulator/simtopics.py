@@ -168,7 +168,8 @@ class SimTopics:
             "revision": self.revision,
             "track": sim.track.payload(),
             "tracks": [{"id": t.id, "name": t.name, "real_m": t.real_m} for t in map(load_track, track_ids())],
-            "car": {"length_m": CAR_LENGTH_M, "width_m": CAR_WIDTH_M},
+            "car": ({key: sim.track.layout["vehicle"][key] for key in ("length_m", "width_m")}
+                    if sim.track.layout else {"length_m": CAR_LENGTH_M, "width_m": CAR_WIDTH_M}),
             "time_scale": 1.0,
             "obstacles": [{"id": o.id, "kind": o.kind, "x": round(o.x, 4), "y": round(o.y, 4), "w": round(o.w, 4)}
                           for o in sim.vehicle.obstacles],
@@ -182,7 +183,7 @@ class SimTopics:
         return {
             "x": round(v.x, 4), "y": round(v.y, 4), "yaw": round(v.heading_rad, 4),
             "v_mps": round(v.v_mps, 4), "steer_rad": round(v.steer_rad, 4),
-            "world_revision": self.revision, "surface": sim.track.surface(i, off),
+            "world_revision": self.revision, "surface": sim.track.surface_at(v.x, v.y, i),
             "race": sim.race.payload(),
         }
 

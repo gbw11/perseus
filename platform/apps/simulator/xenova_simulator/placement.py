@@ -23,7 +23,7 @@ from dataclasses import dataclass, field, replace
 from functools import lru_cache
 
 from .model import KIND_W
-from .track import ROAD_M, Track
+from .track import Track
 
 # ---- 크기·속도 (simEngine.ts 와 같음) ----
 CAR_HALF = 0.1
@@ -258,7 +258,7 @@ def _decide(T: Track, p: _Perception, prev_t: float | None) -> _Decision:
                 lim = (max(_reach(D) * 1.6 + 0.06, (D - 0.25) / 0.8) if keep else _reach(D)) + 0.015
                 if mv > lim:
                     ok = False
-                cost += (mv + 0.3 * abs(x) + 1.5 * max(0.0, abs(x) + CAR_HALF - ROAD_M)
+                cost += (mv + 0.3 * abs(x) + 1.5 * max(0.0, abs(x) + CAR_HALF - T.road_m)
                          + 2 * max(0.0, mv / lim - 0.5)
                          + (0.5 * abs(x - prev_t) if k == 0 and prev_t is not None else 0.0))
                 pv = x
@@ -297,14 +297,43 @@ def _control(T: Track, st: Car, p: _Perception, d: _Decision) -> tuple[float, fl
     if d.first_ahead is not None:
         tv = min(tv, math.sqrt(AVOID_V ** 2 + 2 * BRAKE_PLAN * max(0.0, d.first_ahead - 0.6)))
     tv *= 1 - (0.25 * abs(ts)) / 0.45
-    if max(abs(p.off), abs(d.target)) + CAR_HALF > ROAD_M:
+    if max(abs(p.off), abs(d.target)) + CAR_HALF > T.road_m:
         tv = min(tv, SLOW_V)
     return tv, ts
 
 
 def touching(T: Track, st: Car, items: list[Item]) -> bool:
+    if T.layout:
+        body = car_polygon(T, st)
+        for o in items:
+            half = o.w / 2
+            box = [(o.x - half, o.y - half), (o.x + half, o.y - half),
+                   (o.x + half, o.y + half), (o.x - half, o.y + half)]
+            if _polygons_touch(body, box):
+                return True
+        return False
     _, off, s = T.frame(st.x, st.y, st.idx)
     return any(abs(wrap_s(T, o.s - s)) < CAR_L / 2 + o.w / 2 and abs(o.off - off) < CAR_HALF + o.w / 2 for o in items)
+
+
+def car_polygon(T: Track, st: Car) -> list[tuple[float, float]]:
+    """데모 차체: rear-axle pose에서 wb/2 앞을 중심으로 대칭 overhang을 가정한다."""
+    vehicle = T.layout["vehicle"] if T.layout else {"length_m": CAR_L, "width_m": CAR_HALF * 2, "wheelbase_m": 0.0}
+    c, s = math.cos(st.yaw), math.sin(st.yaw)
+    cx, cy = st.x + vehicle["wheelbase_m"] * c / 2, st.y + vehicle["wheelbase_m"] * s / 2
+    length, half = vehicle["length_m"] / 2, vehicle["width_m"] / 2
+    return [(cx + x * c - y * s, cy + x * s + y * c)
+            for x, y in ((-length, -half), (length, -half), (length, half), (-length, half))]
+
+
+def _polygons_touch(a, b) -> bool:
+    for polygon in (a, b):
+        for p, q in zip(polygon, polygon[1:] + polygon[:1]):
+            nx, ny = -(q[1] - p[1]), q[0] - p[0]
+            pa, pb = [x * nx + y * ny for x, y in a], [x * nx + y * ny for x, y in b]
+            if max(pa) < min(pb) - 1e-10 or max(pb) < min(pa) - 1e-10:
+                return False
+    return True
 
 
 def _physics(T: Track, st: Car, tv: float, ts: float, dt: float, items: list[Item]) -> None:
@@ -322,7 +351,7 @@ def _physics(T: Track, st: Car, tv: float, ts: float, dt: float, items: list[Ite
     i, off, _ = T.frame(st.x, st.y, st.idx)
     sd = _sign(off) or 1
     lim = _wall(T, i, sd) - CAR_HALF
-    if abs(off) > ROAD_M and st.v > SLOW_V:
+    if abs(off) > T.road_m and st.v > SLOW_V:
         st.v = max(SLOW_V, st.v - 1.2 * dt)
     if abs(off) > lim:
         back = off - sd * lim
@@ -376,10 +405,15 @@ def check(T: Track, items: list[Item], o: Item, car: Car, running: bool) -> Chec
     """놓아도 되면 None. items 는 o 를 넣은(옮긴) 뒤의 목록, car 는 지금 차, running 은 출발 뒤(race go)인가."""
     w = o.w
     scale = T.real_m / T.lap_m
-    if abs(o.off) > _wall(T, o.i, _sign(o.off) or 1) - w / 2:
+    outside = not T.box_is_paved(o.x, o.y, w) if T.layout else abs(o.off) > _wall(T, o.i, _sign(o.off) or 1) - w / 2
+    if outside:
         return Check("OUT_OF_TRACK", "벽 밖에는 놓을 수 없어요")
     if touching(T, car, [o]):
         return Check("ON_CAR", "차와 겹치는 자리예요")
+    if T.layout:
+        # 기존 회피 trial은 .26 m wheelbase의 단일 서킷용이다. 포장/차체 배치 검사와
+        # 새 두 차로·주차장의 실제 회피/주차 기동 수락을 섞지 않는다.
+        return None
     ds = -(CAR_L / 2 + w / 2)
     while ds <= CAR_L / 2 + w / 2 + 1e-6:
         gap = widest_gap(T, items, o.s + ds)

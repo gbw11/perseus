@@ -3,9 +3,9 @@ import type { SimPose } from './types';
 
 /**
  * 위치는 10 Hz 로 오지만 화면은 매끄럽게 — 마지막 위치에서 속도·조향으로 조금 이어 그린다 (최대 0.3초).
- * time_scale 은 시뮬레이터 시간 배율 (1 = 실제 시간).
+ * time_scale 은 시뮬레이터 시간 배율 (1 = 실제 시간). wheelbase는 pose 기준 차량의 축거다.
  */
-export function extrapolate(pose: SimPose, elapsedMs: number, timeScale = 1): SimPose {
+export function extrapolate(pose: SimPose, elapsedMs: number, timeScale = 1, wheelbase = 0.26): SimPose {
   const total = (Math.min(300, Math.max(0, elapsedMs)) / 1000) * timeScale;
   let { x, y, yaw } = pose;
   const steps = 4;
@@ -13,7 +13,7 @@ export function extrapolate(pose: SimPose, elapsedMs: number, timeScale = 1): Si
   for (let k = 0; k < steps; k++) {
     x += pose.v_mps * Math.cos(yaw) * dt;
     y += pose.v_mps * Math.sin(yaw) * dt;
-    yaw += (pose.v_mps / 0.26) * Math.tan(pose.steer_rad) * dt;
+    yaw += (pose.v_mps / wheelbase) * Math.tan(pose.steer_rad) * dt;
   }
   return { ...pose, x, y, yaw };
 }

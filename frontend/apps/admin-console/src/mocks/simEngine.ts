@@ -50,7 +50,22 @@ export interface Track {
   WR: number[];
   S0: number;
   vProf: number[];
+  laneW: number;
+  curb: number;
+  road: number;
+  layout?: TrackSource['layout'];
 }
+
+/** 새 시험 코스에서만 쓰는 잠정 차량 profile. 기존 서킷의 수치는 유지한다. */
+export const vehicleOf = (T: Track) =>
+  T.layout?.vehicle ?? {
+    length_m: CAR_L,
+    width_m: CAR_HALF * 2,
+    wheelbase_m: 0.26,
+    min_turn_radius_m: 0.26 / Math.tan(0.45),
+  };
+export const steerLimit = (T: Track) =>
+  T.layout ? Math.atan(T.layout.vehicle.wheelbase_m / T.layout.vehicle.min_turn_radius_m) : 0.45;
 
 export interface Car {
   x: number;
@@ -90,7 +105,16 @@ export function buildTrack(src: TrackSource): Track {
   const turn = C.map((_, i) => {
     const a = tan[(i - 3 + N) % N]!;
     const b = tan[(i + 3) % N]!;
-    return Math.atan2(a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1]) / 1.2;
+    let length = 1.2;
+    if (src.layout) {
+      length = 0;
+      for (let d = -3; d < 3; d++) {
+        const p = C[(i + d + N) % N]!;
+        const q = C[(i + d + 1 + N) % N]!;
+        length += Math.hypot(q[0] - p[0], q[1] - p[1]);
+      }
+    }
+    return Math.atan2(a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1]) / Math.max(1e-9, length);
   });
   const corner = turn.map((_, i) => {
     let m = 0;
@@ -111,7 +135,10 @@ export function buildTrack(src: TrackSource): Track {
       bestStart = i;
     }
   }
-  const S0 = (bestStart + Math.floor(bestLen * 0.3)) % N;
+  const S0 = src.layout ? 0 : (src.start_index ?? (bestStart + Math.floor(bestLen * 0.3)) % N);
+  const laneW = src.lane_width_m ?? LW;
+  const curb = src.curb_m ?? CURB;
+  const road = laneW / 2 + curb;
   const straight: [number, number] = [(bestStart + 4) % N, (bestStart + bestLen - 4) % N];
   const at = (i: number, off: number): [number, number] => [
     C[i]![0] + nor[i]![0] * off,
@@ -164,8 +191,8 @@ export function buildTrack(src: TrackSource): Track {
     });
     return smooth(lo, 2).map((v) => Math.round((ROAD + Math.max(APRON, v)) * 1000) / 1000);
   };
-  const WL = fin(room(1), inner(1));
-  const WR = fin(room(-1), inner(-1));
+  const WL = src.layout ? C.map(() => road + 0.03) : fin(room(1), inner(1));
+  const WR = src.layout ? C.map(() => road + 0.03) : fin(room(-1), inner(-1));
   // 자율 속도 계획: 코너 √(A_LAT/곡률) 을 넘지 않게, 그 앞에서 BRAKE_PLAN 으로 미리 줄인다
   const vc = turn.map((k) => Math.min(MAX_V, Math.sqrt(A_LAT / Math.max(0.02, Math.abs(k)))));
   const vProf = [...vc];
@@ -191,7 +218,90 @@ export function buildTrack(src: TrackSource): Track {
     WR,
     S0,
     vProf,
+    laneW,
+    curb,
+    road,
+    layout: src.layout,
   };
+}
+
+type Point = [number, number];
+const signedArea = (p: Point[]) =>
+  p.reduce((s, a, i) => {
+    const b = p[(i + 1) % p.length]!;
+    return s + a[0] * b[1] - a[1] * b[0];
+  }, 0) / 2;
+const pavedCache = new WeakMap<Track, Point[][]>();
+function pavedPolygons(T: Track): Point[][] {
+  const cached = pavedCache.get(T);
+  if (cached) return cached;
+  const polygons: Point[][] = T.C.map((_, i) => {
+    const j = (i + 1) % T.N;
+    return [atT(T, i, T.road), atT(T, j, T.road), atT(T, j, -T.road), atT(T, i, -T.road)];
+  });
+  polygons.push(...(T.layout?.paved_areas ?? []));
+  pavedCache.set(T, polygons);
+  return polygons;
+}
+const edgeSide = (p: Point, a: Point, b: Point) =>
+  (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+function clipHalf(poly: Point[], a: Point, b: Point, sign: number): Point[] {
+  const result: Point[] = [];
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i]!;
+    const q = poly[(i + 1) % poly.length]!;
+    const fp = sign * edgeSide(p, a, b);
+    const fq = sign * edgeSide(q, a, b);
+    const pInside = fp >= -1e-10;
+    const qInside = fq >= -1e-10;
+    if (pInside) result.push(p);
+    if (pInside !== qInside) {
+      const t = fp / (fp - fq);
+      result.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]);
+    }
+  }
+  return result;
+}
+
+/** Convex 지면 polygon 합집합에서 사각형 전체를 뺀다. 모서리 네 점만 검사하지 않는다. */
+export function boxIsPaved(T: Track, x: number, y: number, width: number, height = width, yaw = 0): boolean {
+  const cs = Math.cos(yaw);
+  const sn = Math.sin(yaw);
+  let remaining: Point[][] = [
+    [
+      [-width / 2, -height / 2],
+      [width / 2, -height / 2],
+      [width / 2, height / 2],
+      [-width / 2, height / 2],
+    ].map(([a, b]) => [x + a! * cs - b! * sn, y + a! * sn + b! * cs] as Point),
+  ];
+  for (const clip of pavedPolygons(T)) {
+    const sign = Math.sign(signedArea(clip));
+    if (!sign) continue;
+    const next: Point[][] = [];
+    for (const part of remaining) {
+      let inside = part;
+      for (let i = 0; i < clip.length && inside.length; i++) {
+        const a = clip[i]!;
+        const b = clip[(i + 1) % clip.length]!;
+        const outside = clipHalf(inside, a, b, -sign);
+        if (Math.abs(signedArea(outside)) > 1e-10) next.push(outside);
+        inside = clipHalf(inside, a, b, sign);
+      }
+    }
+    remaining = next;
+    if (remaining.reduce((sum, p) => sum + Math.abs(signedArea(p)), 0) <= 1e-10) return true;
+  }
+  return false;
+}
+
+export function pavedAt(T: Track, x: number, y: number): boolean {
+  return pavedPolygons(T).some((poly) => {
+    const sign = Math.sign(signedArea(poly));
+    return (
+      sign !== 0 && poly.every((a, i) => sign * edgeSide([x, y], a, poly[(i + 1) % poly.length]!) >= -1e-10)
+    );
+  });
 }
 
 // ---- 기하 도우미 ----
@@ -235,8 +345,15 @@ export function trackFrame(T: Track, x: number, y: number, hint?: number) {
   const dy = y - T.C[i]![1];
   return { i, off: dx * T.nor[i]![0] + dy * T.nor[i]![1], s: sAt(T, x, y, i) };
 }
-export function surfaceAt(T: Track, i: number, off: number): 'road' | 'grass' | 'dirt' {
-  if (Math.abs(off) <= ROAD) return 'road';
+export function surfaceAt(
+  T: Track,
+  i: number,
+  off: number,
+  x?: number,
+  y?: number,
+): 'road' | 'grass' | 'dirt' {
+  if (T.layout && x != null && y != null) return pavedAt(T, x, y) ? 'road' : 'grass';
+  if (Math.abs(off) <= T.road) return 'road';
   return T.corner[i] && Math.sign(off) === (-Math.sign(T.turn[i]!) || 1) ? 'dirt' : 'grass';
 }
 export function carAtS(T: Track, s: number, v: number): Car {
@@ -282,22 +399,24 @@ export function perceive(T: Track, st: Car, list: Obstacle[]): Perception {
   for (const o of list) {
     const ahead = wrapS(T, o.s - sc);
     const w = KIND_W[o.kind];
-    if (ahead > -(CAR_L / 2 + w / 2 + 0.05) && ahead < LOOK_M + 0.6) seen.push({ o, ahead, lat: o.off, w });
+    if (ahead > -(vehicleOf(T).length_m / 2 + w / 2 + 0.05) && ahead < LOOK_M + 0.6)
+      seen.push({ o, ahead, lat: o.off, w });
   }
   seen.sort((a, b) => a.ahead - b.ahead);
   return { off, i, s: sc, seen };
 }
 
 function freeLanes(T: Track, obs: Seen[]): [number, number][] {
+  const carHalf = vehicleOf(T).width_m / 2;
   let hiL = 9;
   let loR = -9;
   for (const s of obs) {
-    hiL = Math.min(hiL, T.WL[s.o.i]! - CAR_HALF - SAFE);
-    loR = Math.max(loR, -T.WR[s.o.i]! + CAR_HALF + SAFE);
+    hiL = Math.min(hiL, T.WL[s.o.i]! - carHalf - SAFE);
+    loR = Math.max(loR, -T.WR[s.o.i]! + carHalf + SAFE);
   }
   let free: [number, number][] = [[loR, hiL]];
   for (const s of obs) {
-    const clr = s.w / 2 + CAR_HALF + SAFE;
+    const clr = s.w / 2 + carHalf + SAFE;
     const lo = s.lat - clr;
     const hi = s.lat + clr;
     const next: [number, number][] = [];
@@ -318,14 +437,17 @@ const reach = (D: number) => Math.max(0, (D - 0.6) / 1.1);
 
 /** 판단: 장애물을 묶고, 묶음마다 어느 틈으로 갈지 조합 중 실제로 옮겨 갈 수 있는 것 (시나리오 §4-2) */
 export function decide(T: Track, p: Perception, prevT: number | null): Decision {
+  const carHalf = vehicleOf(T).width_m / 2;
+  const carLength = vehicleOf(T).length_m;
+  const cruise = T.layout ? -T.laneW / 4 : 0;
   const vis = p.seen.filter((s) => s.ahead < LOOK_M);
-  if (!vis.length) return { mode: 'cruise', target: 0 };
+  if (!vis.length) return { mode: 'cruise', target: cruise };
   const groups: { items: Seen[]; lo: number; hi: number; lanes: [number, number][] }[] = [];
   for (const s of vis) {
     const g = groups[groups.length - 1];
     const lo = s.ahead - s.w / 2;
     const hi = s.ahead + s.w / 2;
-    if (g && lo - g.hi < CAR_L) {
+    if (g && lo - g.hi < carLength) {
       g.items.push(s);
       g.hi = Math.max(g.hi, hi);
     } else groups.push({ items: [s], lo, hi, lanes: [] });
@@ -336,8 +458,8 @@ export function decide(T: Track, p: Perception, prevT: number | null): Decision 
       return [a + e, b - e];
     });
   const first = groups[0]!;
-  const passing = first.lo < CAR_L / 2;
-  const blocking = first.items.filter((s) => Math.abs(s.lat - p.off) < s.w / 2 + CAR_HALF + SAFE);
+  const passing = first.lo < carLength / 2;
+  const blocking = first.items.filter((s) => Math.abs(s.lat - p.off) < s.w / 2 + carHalf + SAFE);
   let combos: [number, number][][] = [[]];
   for (const g of groups) {
     const next: [number, number][][] = [];
@@ -345,7 +467,7 @@ export function decide(T: Track, p: Perception, prevT: number | null): Decision 
     combos = next.slice(0, 400);
   }
   const roomOf = (k: number) =>
-    k === 0 ? (passing ? 0 : first.lo - CAR_L / 2) : groups[k]!.lo - groups[k - 1]!.hi - CAR_L;
+    k === 0 ? (passing ? 0 : first.lo - carLength / 2) : groups[k]!.lo - groups[k - 1]!.hi - carLength;
   const clampIn = (x: number, [a, b]: [number, number]) => Math.min(b, Math.max(a, x));
   let best: { cost: number; path: number[] } | null = null;
   for (const lanes of combos) {
@@ -370,8 +492,8 @@ export function decide(T: Track, p: Perception, prevT: number | null): Decision 
         if (mv > lim) ok = false;
         cost +=
           mv +
-          0.3 * Math.abs(x) +
-          1.5 * Math.max(0, Math.abs(x) + CAR_HALF - ROAD) +
+          0.3 * Math.abs(x - cruise) +
+          1.5 * Math.max(0, Math.abs(x) + carHalf - T.road) +
           2 * Math.max(0, mv / lim - 0.5) +
           (k === 0 && prevT != null ? 0.5 * Math.abs(x - prevT) : 0);
         pv = x;
@@ -384,14 +506,14 @@ export function decide(T: Track, p: Perception, prevT: number | null): Decision 
   if (!passing) {
     const lane = first.lanes.find(([a, b]) => t >= a - 1e-9 && t <= b + 1e-9);
     if (lane) {
-      const c = Math.min(lane[1], Math.max(lane[0], 0));
+      const c = Math.min(lane[1], Math.max(lane[0], cruise));
       if (Math.abs(c - t) < 0.02 || groups.length === 1)
         t = Math.abs(c - p.off) <= Math.abs(t - p.off) + 0.05 ? c : t;
     }
   }
   const busy = blocking.length > 0 || best.path.some((x) => Math.abs(x - p.off) > 0.03);
   return {
-    mode: blocking.length || Math.abs(t) > 0.03 ? 'avoid' : 'cruise',
+    mode: blocking.length || Math.abs(t - cruise) > 0.03 ? 'avoid' : 'cruise',
     target: t,
     firstAhead: busy ? first.lo : null,
   };
@@ -400,10 +522,15 @@ export function decide(T: Track, p: Perception, prevT: number | null): Decision 
 /** 조향 (pure pursuit, 평소 0.8 m 앞·회피 중 0.4 m 앞) + 속도 계획 */
 export function control(T: Track, st: Car, p: Perception, d: Decision) {
   const avoid = d.mode !== 'cruise';
-  const [tx, ty] = atT(T, (p.i + (avoid ? 2 : 4)) % T.N, d.target);
+  const targetIndex = T.layout ? idxAtS(T, p.s + (avoid ? 0.4 : 0.6)) : (p.i + (avoid ? 2 : 4)) % T.N;
+  const [tx, ty] = atT(T, targetIndex, d.target);
   const ld = Math.max(0.3, Math.hypot(tx - st.x, ty - st.y));
   const alpha = Math.atan2(ty - st.y, tx - st.x) - st.yaw;
-  const ts = Math.max(-0.45, Math.min(0.45, Math.atan2(2 * 0.26 * Math.sin(alpha), ld)));
+  const limit = steerLimit(T);
+  const ts = Math.max(
+    -limit,
+    Math.min(limit, Math.atan2(2 * vehicleOf(T).wheelbase_m * Math.sin(alpha), ld)),
+  );
   if (d.mode === 'stop') {
     const f = d.blocking?.[0];
     return { tv: f && f.ahead > STOP_M + 0.4 ? AVOID_V * 0.5 : 0, ts };
@@ -413,12 +540,32 @@ export function control(T: Track, st: Car, p: Perception, d: Decision) {
   if (d.mode === 'avoid') tv = Math.min(tv, AVOID_V);
   if (d.firstAhead != null)
     tv = Math.min(tv, Math.sqrt(AVOID_V ** 2 + 2 * BRAKE_PLAN * Math.max(0, d.firstAhead - 0.6)));
-  tv *= 1 - (0.25 * Math.abs(ts)) / 0.45;
-  if (Math.max(Math.abs(p.off), Math.abs(d.target)) + CAR_HALF > ROAD) tv = Math.min(tv, SLOW_V);
+  tv *= 1 - (0.25 * Math.abs(ts)) / limit;
+  if (Math.max(Math.abs(p.off), Math.abs(d.target)) + vehicleOf(T).width_m / 2 > T.road)
+    tv = Math.min(tv, SLOW_V);
   return { tv, ts };
 }
 
 export function touching(T: Track, st: Car, list: Obstacle[]): boolean {
+  if (T.layout) {
+    const vehicle = vehicleOf(T);
+    const cs = Math.cos(st.yaw);
+    const sn = Math.sin(st.yaw);
+    const cx = st.x + (vehicle.wheelbase_m / 2) * cs;
+    const cy = st.y + (vehicle.wheelbase_m / 2) * sn;
+    return list.some((o) => {
+      const w = KIND_W[o.kind];
+      const dx = o.x - cx;
+      const dy = o.y - cy;
+      // 회전 차체와 축정렬 장애물의 네 SAT 축을 검사한다.
+      return (
+        Math.abs(dx) < w / 2 + (Math.abs(cs) * vehicle.length_m) / 2 + (Math.abs(sn) * vehicle.width_m) / 2 &&
+        Math.abs(dy) < w / 2 + (Math.abs(sn) * vehicle.length_m) / 2 + (Math.abs(cs) * vehicle.width_m) / 2 &&
+        Math.abs(dx * cs + dy * sn) < vehicle.length_m / 2 + (w / 2) * (Math.abs(cs) + Math.abs(sn)) &&
+        Math.abs(-dx * sn + dy * cs) < vehicle.width_m / 2 + (w / 2) * (Math.abs(cs) + Math.abs(sn))
+      );
+    });
+  }
   const q = trackFrame(T, st.x, st.y, st.idx);
   return list.some((o) => {
     const w = KIND_W[o.kind];
@@ -443,15 +590,27 @@ export function physics(
   const dv = tv - st.v;
   if (dv > 0) st.v += Math.min(dv, (st.v < -0.01 ? BRAKE : ACC(st.v)) * dt);
   else st.v -= Math.min(-dv, (st.v > 0.01 ? decel : ACC_REV) * dt);
-  st.steer += Math.max(-3 * dt, Math.min(3 * dt, ts - st.steer));
+  const targetSteer = Math.max(-steerLimit(T), Math.min(steerLimit(T), ts));
+  st.steer += Math.max(-3 * dt, Math.min(3 * dt, targetSteer - st.steer));
   st.x += st.v * Math.cos(st.yaw) * dt;
   st.y += st.v * Math.sin(st.yaw) * dt;
-  st.yaw += (st.v / 0.26) * Math.tan(st.steer) * dt;
+  st.yaw += (st.v / vehicleOf(T).wheelbase_m) * Math.tan(st.steer) * dt;
   const q = trackFrame(T, st.x, st.y, st.idx);
   const sd = Math.sign(q.off) || 1;
-  const lim = wallOf(T, q.i, sd) - CAR_HALF;
-  if (Math.abs(q.off) > ROAD && st.v > SLOW_V) st.v = Math.max(SLOW_V, st.v - 1.2 * dt);
-  if (Math.abs(q.off) > lim) {
+  const lim = wallOf(T, q.i, sd) - vehicleOf(T).width_m / 2;
+  if (T.layout) {
+    const vehicle = vehicleOf(T);
+    const cx = st.x + (vehicle.wheelbase_m / 2) * Math.cos(st.yaw);
+    const cy = st.y + (vehicle.wheelbase_m / 2) * Math.sin(st.yaw);
+    if (!boxIsPaved(T, cx, cy, vehicle.length_m, vehicle.width_m, st.yaw)) {
+      st.x = px;
+      st.y = py;
+      st.yaw = pyaw;
+      st.v = 0;
+      st.wallAt = time;
+    }
+  } else if (Math.abs(q.off) > T.road && st.v > SLOW_V) st.v = Math.max(SLOW_V, st.v - 1.2 * dt);
+  if (!T.layout && Math.abs(q.off) > lim) {
     const back = q.off - sd * lim;
     st.x -= T.nor[q.i]![0] * back;
     st.y -= T.nor[q.i]![1] * back;
@@ -522,6 +681,12 @@ export function checkPlacement(
   scale: number,
 ): Check | null {
   const w = KIND_W[o.kind];
+  if (T.layout) {
+    if (!boxIsPaved(T, o.x, o.y, w)) return { code: 'OUT_OF_TRACK', message: '지면 밖에는 놓을 수 없어요' };
+    if (touching(T, car, [o])) return { code: 'ON_CAR', message: '차가 있는 자리에는 놓을 수 없어요' };
+    // 이전 서킷 trial은 주차 apron의 경로 가능성을 판정하지 않는다.
+    return null;
+  }
   if (Math.abs(o.off) > wallOf(T, o.i, Math.sign(o.off) || 1) - w / 2)
     return { code: 'OUT_OF_TRACK', message: '벽 바깥에는 놓을 수 없어요' };
   if (touching(T, car, [o])) return { code: 'ON_CAR', message: '차가 있는 자리에는 놓을 수 없어요' };
