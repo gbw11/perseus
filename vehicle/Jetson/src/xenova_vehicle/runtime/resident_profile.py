@@ -44,7 +44,7 @@ def parser_manifest_sha256():
     return _sha(parser_manifest())
 
 
-def runtime_artifacts(profile):
+def runtime_artifacts(profile, perception_profile_bytes=None):
     """같은 명시 profile과 local source에서 canonical 참조 및 출판할 원 manifest를 돌려준다.
 
     model_id는 승인 blob의 기대 SHA다. 실제 모델 bytes와 SDK Blob 검사는 A가
@@ -59,10 +59,24 @@ def runtime_artifacts(profile):
     formats = canonical(dict(version=1, profile_id=PROFILE, slot_bytes=SLOT_BYTES,
         header_bytes=HEADER_BYTES, metadata_bytes=METADATA_BYTES, max_nn_bytes=MAX_NN_BYTES,
         sources=_sources(('runtime/raw_slot.py', 'runtime/resident_samples.py'))))
+    calibration_bundle=None
+    manifests={'parser-manifest.json': parser, 'graph-profile-manifest.json': graph,
+               'format-table-manifest.json': formats}
+    if perception_profile_bytes is not None:
+        from ..perception.calibration import CalibrationProfile,canonical as calibration_canonical
+        if type(perception_profile_bytes) is not bytes or not 1<=len(perception_profile_bytes)<=65536:
+            raise ValueError('pinned perception calibration exceeds its bound')
+        calibration=CalibrationProfile.from_dict(json.loads(perception_profile_bytes))
+        if calibration.kind=='SYNTHETIC':
+            raise ValueError('live runtime cannot use a synthetic calibration profile')
+        raw=calibration_canonical(calibration.to_dict())
+        if len(raw)>65536:
+            raise ValueError('canonical perception calibration exceeds its bound')
+        manifests['perception-calibration.json']=raw
+        calibration_bundle=calibration.sha256
     return dict(release_sha256=release_sha256(), model_id=BLOB_SHA256, parser_id=_sha(parser),
-                graph_profile_sha256=_sha(graph), format_table_sha256=_sha(formats), calibration_bundle=None,
-                manifests={'parser-manifest.json': parser, 'graph-profile-manifest.json': graph,
-                           'format-table-manifest.json': formats})
+                graph_profile_sha256=_sha(graph), format_table_sha256=_sha(formats), calibration_bundle=calibration_bundle,
+                manifests=manifests)
 
 
 def publish_runtime_artifacts(directory, artifacts):

@@ -16,3 +16,6 @@ xenova-vehicle = "xenova_vehicle.cli:main"
 where = ["src"]
 include = ["xenova_vehicle*"]
 namespaces = false
+
+[tool.setuptools.package-data]
+"xenova_vehicle.simulation" = ["fixtures/*.json"]

@@ -99,7 +99,8 @@ class _Worker:
 
 
 class _Runtime:
-    def __init__(self, profile, state_directory, storage_profile, output, duration_s, service_scope=None, output_root=False):
+    def __init__(self, profile, state_directory, storage_profile, output, duration_s, service_scope=None, output_root=False,
+                 perception_profile_bytes=None):
         self.profile, self.state_directory = profile, str(Path(state_directory).expanduser().absolute())
         self.storage_profile, self.output, self.duration_s = storage_profile, Path(output).expanduser().absolute(), duration_s
         self.context = multiprocessing.get_context('spawn')
@@ -108,6 +109,7 @@ class _Runtime:
         if output_root:
             self.output = self.output / self.service
         self.service_scope = service_scope
+        self.perception_profile_bytes=perception_profile_bytes
         self.storage_recovery = None
         self.identities = {r: (_identifier(), _identifier()) for r in ('A', 'M', 'D')}
         self.began = j_us()
@@ -155,7 +157,7 @@ class _Runtime:
     def _prepare(self):
         self.output.mkdir(mode=0o700)
         self.output_owned = True
-        artifacts = runtime_artifacts(self.profile)
+        artifacts = runtime_artifacts(self.profile,self.perception_profile_bytes)
         artifacts['published'] = publish_runtime_artifacts(self.output / 'artifacts', artifacts)
         return artifacts
 
@@ -267,7 +269,7 @@ class _Runtime:
             **{k: self.artifacts[k] for k in ('model_id', 'parser_id', 'graph_profile_sha256', 'calibration_bundle', 'format_table_sha256')})
         self.binding = RawBinding(value)
         self.raw_profile = RawBindingProfile(value['device_id'], value['clock_epoch'], value['model_id'],
-            value['parser_id'], value['graph_profile_sha256'], value['format_table_sha256'], None, True, False)
+            value['parser_id'], value['graph_profile_sha256'], value['format_table_sha256'], value['calibration_bundle'], True, False)
         self.scope = RawScope(self.service, self.handles.raw.arena_id,
             Endpoint(self.identities['A'][1], self.identities['A'][0]), self.binding.sha256,
             self.handles.raw.name, self.handles.raw.size_bytes)
@@ -287,7 +289,8 @@ class _Runtime:
         else:
             boot = WorkerBoot(peer, self.profile, self.scope, self.raw_profile, self.handles.raw_tokens,
                 deadline_us, str(self.output / role / worker_id),
-                writer_bind=self.workers['A'].bind if role == 'M' else None)
+                writer_bind=self.workers['A'].bind if role == 'M' else None,
+                perception_profile_bytes=self.artifacts['manifests'].get('perception-calibration.json'))
         process = self.context.Process(name='xenova-' + role, target=_worker_entry, args=(child, boot), daemon=False)
         try:
             spawned = j_us()
@@ -780,13 +783,15 @@ class _Runtime:
         return result
 
 
-def run_runtime(profile, state_directory, storage_profile, output, *, duration_s=None, service_scope=None, output_root=False):
+def run_runtime(profile, state_directory, storage_profile, output, *, duration_s=None, service_scope=None, output_root=False,
+                perception_profile_bytes=None):
     """명시 profile/state/DB의 상주 실행. duration=None은 operator stop까지 유지한다."""
     if type(storage_profile) is not StorageProfile:
         raise ValueError('runtime requires an explicit storage profile')
     if duration_s is not None and (type(duration_s) not in (int, float) or not 0.1 <= duration_s <= 300):
         raise ValueError('optional runtime duration must be in 0.1..300 seconds')
-    runtime = _Runtime(profile, state_directory, storage_profile, output, duration_s, service_scope, output_root)
+    runtime = _Runtime(profile, state_directory, storage_profile, output, duration_s, service_scope, output_root,
+                       perception_profile_bytes)
     thread_environment = ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS')
     old_environment = {name: os.environ.get(name) for name in thread_environment}
     for name in thread_environment:

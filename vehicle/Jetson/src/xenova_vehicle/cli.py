@@ -148,6 +148,24 @@ def _runtime_init_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _perception_bench_command(args: argparse.Namespace) -> int:
+    from .perception.bench import run_perception_bench
+
+    try:
+        report=run_perception_bench(args.output,source=args.source,dataset=args.dataset,
+            calibration_path=args.calibration,frames=args.frames,oracle_pose=args.oracle_pose,
+            allow_incomplete=args.allow_incomplete)
+    except (OSError,ValueError,RuntimeError) as exc:
+        print(f'perception-bench: {exc}',file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(report,ensure_ascii=True,allow_nan=False))
+    else:
+        print(f"Perception diagnostics {'completed' if report['complete'] else 'incomplete'}: {report['output']}")
+        print('Diagnostic results only; metric/world/control authority remains false')
+    return report['exit_code']
+
+
 def _runtime_command(args: argparse.Namespace) -> int:
     from .yolop_profile import load_yolop_profile
     from .runtime.resident_runtime import run_runtime
@@ -160,8 +178,15 @@ def _runtime_command(args: argparse.Namespace) -> int:
         if args.service_scope is not None:
             from .runtime.service_scope import SystemdServiceScope
             service_scope = SystemdServiceScope()
+        perception_bytes=None
+        if args.perception_profile is not None:
+            with args.perception_profile.open('rb') as source:
+                perception_bytes=source.read(65537)
+            if not 1<=len(perception_bytes)<=65536:
+                raise ValueError('perception calibration must fit in 64KiB')
         report = run_runtime(profile, args.state_dir, storage, args.output or args.output_root,
-            duration_s=args.duration_s, service_scope=service_scope, output_root=args.output_root is not None)
+            duration_s=args.duration_s, service_scope=service_scope, output_root=args.output_root is not None,
+            perception_profile_bytes=perception_bytes)
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"runtime: {exc}", file=sys.stderr)
         return 2
@@ -232,6 +257,16 @@ def main(argv: list[str] | None = None) -> int:
     runtime.add_argument("--service-scope", choices=("systemd",), help="require actual fixed systemd service/slice execution and restart guard")
     runtime.add_argument("--duration-s", type=_duration, default=None, help="optional 0.1..300 second residence after local readiness; default until stop")
     runtime.add_argument("--json", action="store_true", help="print one final normal-flow receipt")
+    runtime.add_argument('--perception-profile',type=Path,help='explicit physical/provisional calibration for owned-copy local-map processing')
+    perception=commands.add_parser('perception-bench',help='offline sensor-to-local-map diagnostics; no control authority')
+    perception.add_argument('--source',choices=('synthetic','yolop-replay'),default='synthetic',help='explicit sensor provenance')
+    perception.add_argument('--dataset',type=Path,help='existing paired synthetic or validated YOLOP diagnostic recording')
+    perception.add_argument('--calibration',type=Path,help='external calibration bundle; required for physical replay')
+    perception.add_argument('--output',type=Path,required=True,help='new diagnostic directory; never overwrite')
+    perception.add_argument('--frames',type=int,default=4,help='bounded frames to generate/process, 1..256')
+    perception.add_argument('--oracle-pose',action='store_true',help='explicit synthetic evaluation oracle; never physical odom acceptance')
+    perception.add_argument('--allow-incomplete',action='store_true',help='allow verified indexed prefix; never corrupted indexed payload')
+    perception.add_argument('--json',action='store_true',help='print one final diagnostic report')
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
@@ -248,4 +283,6 @@ def main(argv: list[str] | None = None) -> int:
         return _runtime_init_command(args)
     if args.command == "runtime":
         return _runtime_command(args)
+    if args.command == 'perception-bench':
+        return _perception_bench_command(args)
     parser.error("unsupported command")

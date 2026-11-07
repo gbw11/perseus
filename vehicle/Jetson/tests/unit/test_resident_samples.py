@@ -140,6 +140,33 @@ class ResidentSamplesTests(unittest.TestCase):
         self.assertIsNone(assembler.latest(1200))
         self.assertEqual(assembler.tracker.candidate_pairs, 0)
 
+    def test_new_rgb_depth_is_not_held_by_old_nn_and_late_nn_is_still_published(self):
+        binding,original=sample()
+        assembler=CaptureAssembler(binding,10000,1000)
+        assembler.bridge.update(dict(j_before_us=1000,sdk_us=1000,j_after_us=1002))
+        for item in (original.rgb,original.depth,original.nn_input,original.nn_output):
+            assembler.observe(item)
+        first=assembler.latest(1200)
+        self.assertIsNotNone(first.nn_output)
+        assembler.mark_published(first)
+        self.assertIsNone(assembler.latest(1200))
+        def advance(item):
+            return replace(item,sequence=item.sequence+1,device_us=item.device_us+10_000,
+                           sdk_us=item.sdk_us+10_000,received_j_us=item.received_j_us+10_000)
+        rgb,depth,nn_input,nn_output=map(advance,(original.rgb,original.depth,original.nn_input,original.nn_output))
+        assembler.observe(rgb); assembler.observe(depth)
+        raw=assembler.latest(11_200)
+        self.assertIs(raw.rgb,rgb)
+        self.assertIsNone(raw.nn_output)
+        assembler.mark_published(raw)
+        self.assertIsNone(assembler.latest(11_200))
+        assembler.observe(nn_input); assembler.observe(nn_output)
+        late=assembler.latest(11_200)
+        self.assertIs(late.rgb,rgb)
+        self.assertIs(late.nn_output,nn_output)
+        assembler.mark_published(late)
+        self.assertIsNone(assembler.latest(11_200))
+
 
 class ResidentControlDraftTests(unittest.TestCase):
     """busy는 원 완료 사실/기한을 갱신하지 않으며 STOP은 새 수락을 막는다."""

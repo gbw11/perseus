@@ -134,6 +134,8 @@ class CaptureAssembler:
         self.raw = {'rgb_video': deque(maxlen=8), 'depth_right': deque(maxlen=8)}
         self.clocks = OrderedDict()
         self.latest_capture = self.latest_nn = None
+        self._published_rgb = self._published_nn = -1
+        self._last_publication_kind = 'capture'
 
     @staticmethod
     def _key(item):
@@ -172,7 +174,25 @@ class CaptureAssembler:
         return pairs
 
     def latest(self, now_us):
+        """새 raw와 늦은 NN을 유한하게 교대한다. 이전 NN이 새 RGB/depth를 막지 않는다."""
         self.association.expire(now_us)
-        if self.latest_nn is not None and self.latest_nn.fresh(now_us):
-            return self.latest_nn
-        return self.latest_capture if self.latest_capture is not None and self.latest_capture.fresh(now_us) else None
+        capture=self.latest_capture
+        neural=self.latest_nn
+        capture_new=capture is not None and capture.rgb.sequence>self._published_rgb and capture.fresh(now_us)
+        neural_new=neural is not None and neural.nn_output.sequence>self._published_nn and neural.fresh(now_us)
+        if neural_new and (not capture_new or self._last_publication_kind!='nn'):
+            return neural
+        if capture_new:
+            return capture
+        return neural if neural_new else None
+
+    def mark_published(self, sample):
+        """실제 FILLED 게시 뒤 호출한다. 선택/요청만으로 HWM을 올리지 않는다."""
+        if type(sample) is not CaptureSample:
+            raise ValueError('publication requires the original CaptureSample')
+        self._published_rgb=max(self._published_rgb,sample.rgb.sequence)
+        if sample.nn_output is not None:
+            self._published_nn=max(self._published_nn,sample.nn_output.sequence)
+            self._last_publication_kind='nn'
+        else:
+            self._last_publication_kind='capture'

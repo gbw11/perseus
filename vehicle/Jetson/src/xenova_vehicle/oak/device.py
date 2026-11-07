@@ -197,6 +197,9 @@ class OakSource:
         raw = bytes(self._device.readCalibrationRaw())
         if not raw or len(raw) > 65_536:
             raise ValueError("invalid raw EEPROM length")
+        from .calibration_snapshot import snapshot_factory
+        factory=snapshot_factory(calibration,dai,eeprom_raw=raw,device_id=self._device.getMxId(),
+                                 graph_profile=graph,sensors=sensors)
         on_stage("PIPELINE_START")
         if self._device.startPipeline(pipeline) is not True:
             raise RuntimeError("startPipeline did not confirm success")
@@ -209,13 +212,11 @@ class OakSource:
                 "sensor_mode_support": "inventory_and_output_shape_only; target_acceptance_pending",
                 "calibration": {"eeprom": eeprom, "eeprom_raw_hex": raw.hex(),
                                 "eeprom_raw_sha256": hashlib.sha256(raw).hexdigest(),
-                                "right_rectification_rotation": calibration.getStereoRightRectificationRotation(),
-                                "baseline_cm": calibration.getBaselineDistance(
-                                    dai.CameraBoardSocket.CAM_C, dai.CameraBoardSocket.CAM_B, False),
-                                "right_to_rgb_extrinsics_cm": calibration.getCameraExtrinsics(
-                                    dai.CameraBoardSocket.CAM_C, dai.CameraBoardSocket.CAM_A, False),
+                                "right_rectification_rotation": factory['stored_right_rectification_rotation'],
+                                "baseline_cm": factory['calibrated_baseline_cm'],
+                                "right_to_rgb_extrinsics_cm": factory['calibrated_right_to_rgb_extrinsics_cm'],
                                 "active_rectified_intrinsics": None,
-                                "metric_calibration_status": "not_evaluated"},
+                                "metric_calibration_status": "not_evaluated", "factory_snapshot":factory},
                 "graph_declaration": graph, "runtime_config_readback": "not_evaluated",
                 "queues": {"host_size": 8, "host_blocking": False,
                            "device_xlink_size": 1, "device_xlink_blocking": False},

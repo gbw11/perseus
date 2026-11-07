@@ -9,12 +9,14 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import sys
 import time
 import uuid
 
 from ..yolop_profile import YolopBenchProfile
 from .lifecycle_messages import LifecycleMessage, LifecyclePeer
 from .lifecycle_policy import AbsoluteDeadline, CapturePairEvidence, CaptureScope, CaptureWarmup, SourceStamp
+from .local_envelope import StructuralPacket
 from .raw_binding import RawBindingProfile
 from .raw_binding_messages import RawBindAck, RawBindContext, RawBindMessage
 from .raw_leases import RawScope
@@ -40,6 +42,7 @@ class WorkerBoot:
     writer_bind: RawBindMessage | None = None
     slot_limits: SlotTimeLimits = SlotTimeLimits(150_000, 500_000, 150_000)
     cleanup_limits: CleanupTimeLimits = CleanupTimeLimits(1_000_000)
+    perception_profile_bytes: bytes | None = None
 
     def __post_init__(self):
         for value, expected in ((self.peer, LifecyclePeer), (self.profile, YolopBenchProfile),
@@ -55,6 +58,9 @@ class WorkerBoot:
             raise ValueError('invalid resident worker scope/deadline')
         if self.peer.role == 'M' and type(self.writer_bind) is not RawBindMessage:
             raise ValueError('M needs the original A BIND, not a synthesized writer context')
+        if self.perception_profile_bytes is not None and (type(self.perception_profile_bytes) is not bytes
+                or not 1<=len(self.perception_profile_bytes)<=65536):
+            raise ValueError('pinned perception calibration exceeds its bound')
 
 
 class _StopWork(Exception):
@@ -120,7 +126,7 @@ def _hold_device_lease(device_id):
 class _Actor:
     def __init__(self, endpoint, boot):
         from .resident_profile import runtime_artifacts
-        actual = runtime_artifacts(boot.profile)
+        actual = runtime_artifacts(boot.profile,boot.perception_profile_bytes)
         if (actual['release_sha256'] != boot.peer.release_sha256
                 or any(actual[name] != value for name, value in boot.raw_profile.refs.items())
                 or boot.profile.device_mxid != boot.raw_profile.device_id):
@@ -140,6 +146,7 @@ class _Actor:
         self.ack = None
         self.ack_sent = None
         self.last_filled_sent = None
+        self.last_actual_sent = None
         self.deferred = deque()
         self._hello()
 
@@ -150,8 +157,9 @@ class _Actor:
         self.drain_sent()
 
     def drain_sent(self):
-        # 송신 완료 queue는32개 상한이다. 보유할 사실은 ACK 한 개뿐이다.
+        # 송신 완료 queue는32개 상한이다. ACK/FILLED와 마지막 실제 송신만 보유한다.
         for sent in self.link.take_sent():
+            self.last_actual_sent = sent
             if self.ack is not None and sent.packet is self.ack.packet:
                 self.ack_sent = sent
             if sent.packet.kind == 'SLOT' and sent.packet.payload.get('op') == 'FILLED':
@@ -176,6 +184,7 @@ class _Actor:
         self.last_progress = packet.fields['message_sequence'], str(completed)
         self.progress_count += 1
         self.drain_sent()
+        return packet
 
     def _receive(self):
         packets = self.link.poll()
@@ -263,6 +272,39 @@ class _Actor:
     def required_slot(self, payload, *, request_id, issued, expires):
         return self.send_required('SLOT', payload, domain='RAW', revision=self.bind.binding_revision,
                                   request_id=request_id, issued_us=issued, expires_us=expires)
+
+    def await_sent(self, packet, *, cap_us=None):
+        """원 packet의 실제 full-send를 기다린다. queue 수락이나 빈 pending을 완료로 보지 않는다.
+
+        STOP/EOF는 CPU 진입을 막고, 다른 수신은 기존 유한 FIFO에 보존한다.
+        cleanup과 active parser의 원 기한은 재시도/heartbeat로 갱신하지 않는다.
+        """
+        if type(packet) is not StructuralPacket:
+            raise ValueError('actual send wait requires the original structural packet')
+        deadline = int(packet.fields['expires_j_us'])
+        if cap_us is not None:
+            if type(cap_us) is not int or not 0 <= cap_us < 2**64:
+                raise ValueError('actual send cap must be an original uint64 deadline')
+            deadline = min(deadline, cap_us)
+        while True:
+            self.drain_sent()
+            packets = self._receive()
+            if len(self.deferred) + len(packets) > 8:
+                raise RuntimeError('bounded worker control backlog is full during actual send wait')
+            self.deferred.extend(packets)
+            if self.stop is not None:
+                raise _StopWork()
+            actual = self.last_actual_sent
+            if actual is not None and actual.packet is packet:
+                if actual.completed_us >= deadline:
+                    raise TimeoutError('required packet actual send missed its original deadline')
+                return actual
+            if j_us() >= deadline:
+                raise TimeoutError('required packet remained unsent at its original deadline')
+            self.link.flush()
+            self.drain_sent()
+            if self.last_actual_sent is None or self.last_actual_sent.packet is not packet:
+                time.sleep(0.002)
 
     def save(self, filename, value):
         path = Path(self.boot.diagnostic_directory)
@@ -460,6 +502,7 @@ def acquisition_main(endpoint, boot):
                 published += 1
                 actor.progress('RAW_PUBLISHED', pending_sample.rgb.sequence, completed=info.completed_us)
                 last_published = pending_sample.key
+                assembler.mark_published(pending_sample)
                 request = pending_sample = None
             actor.drain_sent()
             if write_paused and paused_ack is None and (last_filled is None or actor.last_filled_sent is last_filled):
@@ -529,6 +572,7 @@ def mapper_main(endpoint, boot):
     cv2.setNumThreads(1)
     actor = _Actor(endpoint, boot)
     reader = None
+    perception = None
     failed = False
     try:
         bind = actor.await_bind()
@@ -540,6 +584,9 @@ def mapper_main(endpoint, boot):
         from .resident_profile import parser_manifest_sha256
         if parser_manifest_sha256() != boot.raw_profile.parser_id:
             raise ValueError('actual local parser manifest differs from the accepted binding')
+        if boot.perception_profile_bytes is not None:
+            from .resident_perception import ResidentPerception
+            perception=ResidentPerception(boot.perception_profile_bytes,bind.binding)
 
         reader = RawArenaReader(boot.raw_scope, boot.raw_tokens)
         # S가 CAPTURE_READY 후 발급한 원 ACK 시각이다. 첫 NN 수신/heartbeat로 갱신하지 않는다.
@@ -586,44 +633,50 @@ def mapper_main(endpoint, boot):
                     release = actor.required_slot(payload, request_id=acquired.request_id, issued=completed,
                         expires=completed + boot.cleanup_limits.transport_budget_us)
                     ReleaseMessage(release, acquired, limits=boot.cleanup_limits)
+                    actor.await_sent(release)
                     acquire = None
                     sample = decode_sample_slot(owned, bind.binding)
                     owned = None
-                    # RGB/depth 전용 또는 이미 stale인 입력은 NN parser 시도가 아니다.
-                    # 느린 NN 사이의 capture가 기존 성공 횟수나 원15초 기한을 바꾸지 않는다.
-                    if sample.nn_output is None or not sample.fresh(j_us()):
+                    # NN이 없는 RGB/depth도 동일 owned-copy 경계 뒤 인지 코어에 전달한다.
+                    # NN 준비 횟수/원 기한은 fresh NN을 실제 해석한 경우만 갱신한다.
+                    if not sample.fresh(j_us()):
                         continue
-                    stamp = _source_stamp(sample.nn_input, bind.binding.fields['stream_instances']['nn_input0'])
-                    if not stamp.advances(previous):
-                        continue
-                    started = j_us()
-                    actor.progress('PARSER_STARTED', stamp.sequence, completed=started)
-                    candidates = yolop.decode_yolop(sample.nn_output)
-                    rgb = decode_rgb(sample.rgb)
-                    depth = decode_depth(sample.depth)
-                    completed = j_us()
-                    if completed - started >= 500_000:
-                        raise TimeoutError('active parser exceeded 500ms progress deadline')
-                    if not sample.fresh(completed):
-                        streak = 0 if not ready else streak
-                        actor.progress('PARSER_COMPLETED', stamp.sequence, completed=completed,
-                                       reason='STALE_INPUT')
-                        continue
-                    previous = stamp
-                    streak += 1
-                    last_completion = completed
-                    if not ready and streak >= 5:
-                        if parser_deadline.expired(completed):
-                            raise TimeoutError('parser completion missed original readiness deadline')
-                        ready = True
-                        actor.state = 'WAIT_CLOCK'
-                        actor.progress('NN_READY', stamp.sequence, completed=completed,
-                                       reason='METRIC_NOT_READY')
-                    else:
-                        actor.progress('PARSER_COMPLETED', stamp.sequence, completed=completed,
-                                       reason='METRIC_NOT_READY')
-                    # 후보는 이번 owned 원본에만 결박한다. 아직 metric/world 소비자는 없다.
-                    candidates = rgb = depth = sample = None
+                    candidates=None
+                    if sample.nn_output is not None:
+                        stamp = _source_stamp(sample.nn_input, bind.binding.fields['stream_instances']['nn_input0'])
+                        if stamp.advances(previous):
+                            started=j_us()
+                            started_packet=actor.progress('PARSER_STARTED',stamp.sequence,completed=started)
+                            actor.await_sent(started_packet,cap_us=started+500_000)
+                            candidates=yolop.decode_yolop(sample.nn_output)
+                            # 보정 미선택 때도 기존 RGB/depth decoder 검사를 유지한다.
+                            if perception is None:
+                                rgb=decode_rgb(sample.rgb)
+                                depth=decode_depth(sample.depth)
+                                rgb=depth=None
+                            completed=j_us()
+                            if completed-started>=500_000:
+                                raise TimeoutError('active parser exceeded 500ms progress deadline')
+                            if not sample.fresh(completed):
+                                streak=0 if not ready else streak
+                                actor.progress('PARSER_COMPLETED',stamp.sequence,completed=completed,reason='STALE_INPUT')
+                                continue
+                            previous=stamp
+                            streak+=1
+                            last_completion=completed
+                            if not ready and streak>=5:
+                                if parser_deadline.expired(completed):
+                                    raise TimeoutError('parser completion missed original readiness deadline')
+                                ready=True
+                                actor.state='WAIT_CLOCK'
+                                actor.progress('NN_READY',stamp.sequence,completed=completed,reason='METRIC_NOT_READY')
+                            else:
+                                actor.progress('PARSER_COMPLETED',stamp.sequence,completed=completed,reason='METRIC_NOT_READY')
+                    if perception is not None and sample.fresh(j_us()):
+                        # copy_owned가 view와 native token을 먼저 반환했고 RELEASE도 전송했다.
+                        # 이 호출은 SDK/arena/view를 빌리지 않으며 주행 권한을 만들지 않는다.
+                        perception.consume(sample,now_us=j_us(),nn_candidates=candidates)
+                    candidates=sample=None
                 else:
                     raise ValueError('unsupported M SLOT operation')
             if acquire is not None and j_us() >= acquire.expires_us:
@@ -645,6 +698,11 @@ def mapper_main(endpoint, boot):
             pass
     finally:
         actor.state = 'QUIESCING'
+        if perception is not None and perception.latest_summary is not None:
+            try:
+                actor.save('perception-summary.json',dict(processed=perception.processed,latest=perception.latest_summary))
+            except (OSError,ValueError) as error:
+                print('PERCEPTION_DIAGNOSTIC_FAILED '+type(error).__name__,file=sys.stderr)
         if reader is not None:
             try:
                 reader.close()
