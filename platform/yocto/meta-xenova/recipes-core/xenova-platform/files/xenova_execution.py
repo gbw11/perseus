@@ -600,6 +600,11 @@ class Execution:
     @traced('execution.observe')
     def observe(self, record, deadline, *, _read_context=None, identity_only=False):
         """실패를 보존하고 두 목록/unique_id를 대조한다. 실패는 부재가 아니다."""
+        # Binding reads also run concurrently with Manager's verified reads.
+        # Order their failures by when observation began, not when a delayed
+        # helper finally failed. Keep the failing caller's error unchanged.
+        started_ms = (_read_context.started_ms if _read_context is not None else
+                      int(self.p.clock()*1000) if identity_only else None)
         try:
             if _read_context is None and not identity_only:
                 return self._observe(record, deadline)
@@ -613,8 +618,7 @@ class Execution:
             expired=_read_context is not None and self.p.clock()>=deadline
             failure = ExecutionError('DEADLINE_EXCEEDED' if expired else "OBSERVATION_UNAVAILABLE", "Xen observation could not be verified",
                                      details={"cause_type":type(error).__name__})
-        if _read_context is None:self.note_probe_error(record['uuid'],failure.error)
-        else:self.note_probe_error(record['uuid'],failure.error,_started_ms=_read_context.started_ms)
+        self.note_probe_error(record['uuid'], failure.error, _started_ms=started_ms)
         failure.observation_error_handled = True
         raise failure
 
