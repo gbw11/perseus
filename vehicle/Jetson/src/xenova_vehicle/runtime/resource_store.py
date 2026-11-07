@@ -210,6 +210,11 @@ class ResourceStore:
         """원 lock 수명의 진단 식별자. 문자열 자체는 살아 있는 lock의 증거가 아니다."""
         return self._nonce
 
+    @property
+    def directory(self):
+        """생성 때 고정한 보호 경로. 실제 owner/latest/namespace 확인은 propose가 수행한다."""
+        return self._directory
+
     def _check_directory(self, value):
         if not stat.S_ISDIR(value.st_mode) or value.st_uid != self._euid or value.st_mode & 0o022:
             raise StoreError('untrusted directory type, owner or mode')

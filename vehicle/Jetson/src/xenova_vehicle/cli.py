@@ -134,6 +134,42 @@ def _yolop_replay_command(args: argparse.Namespace) -> int:
     return report["exit_code"]
 
 
+def _runtime_init_command(args: argparse.Namespace) -> int:
+    from .runtime.runtime_bootstrap import initialize_runtime_state
+
+    try:
+        report = initialize_runtime_state(args.state_dir)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"runtime-init: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(report, ensure_ascii=True, allow_nan=False) if args.json
+          else f"Initialized protected runtime state: {args.state_dir}")
+    return 0
+
+
+def _runtime_command(args: argparse.Namespace) -> int:
+    from .yolop_profile import load_yolop_profile
+    from .runtime.resident_runtime import run_runtime
+    from .runtime.resident_storage import StorageProfile
+
+    try:
+        profile = load_yolop_profile(args.profile)
+        storage = StorageProfile(str(args.database.expanduser().absolute()), args.database_open_policy)
+        report = run_runtime(profile, args.state_dir, storage, args.output, duration_s=args.duration_s)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"runtime: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=True, allow_nan=False))
+    else:
+        print(f"Resident runtime {'completed' if report['complete'] else 'incomplete'}: {report['reason']}")
+        print(f"Capture: {report['capture_ready']}; parser: {report['nn_ready']}; storage: {report['storage_ready']}")
+        print(f"Metric/world: waiting; output: {args.output}")
+        if report.get('error'):
+            print(f"Error: {report['error']}")
+    return report['exit_code']
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI를 실행하고 종료 코드를 반환한다. argparse 사용 오류는 2다."""
     parser = argparse.ArgumentParser(prog="xenova-vehicle")
@@ -169,6 +205,18 @@ def main(argv: list[str] | None = None) -> int:
     yolop_replay.add_argument("--speed", type=_speed, default=1.0, help="original bundle availability rate; 0 means no waiting")
     yolop_replay.add_argument("--allow-incomplete", action="store_true", help="allow an intact indexed prefix; never skip corrupt indexed samples")
     yolop_replay.add_argument("--json", action="store_true", help="print one final diagnostic replay receipt")
+    runtime_init = commands.add_parser("runtime-init", help="explicitly initialize a new protected runtime state directory")
+    runtime_init.add_argument("--state-dir", type=Path, required=True, help="new directory; existing state is never overwritten")
+    runtime_init.add_argument("--json", action="store_true", help="print the installation record")
+    runtime = commands.add_parser("runtime", help="run resident OAK acquisition, parser and storage; metric/world wait for external inputs")
+    runtime.add_argument("--profile", type=Path, required=True, help="explicit REQUIRED YOLOP graph/asset profile")
+    runtime.add_argument("--state-dir", type=Path, required=True, help="protected state created by runtime-init")
+    runtime.add_argument("--database", type=Path, required=True, help="explicit SQLite path owned by D")
+    runtime.add_argument("--database-open-policy", choices=("EXISTING_ONLY", "CREATE_IF_ABSENT"), default="EXISTING_ONLY",
+                         help="existing database by default; explicit first creation is opt-in")
+    runtime.add_argument("--output", type=Path, required=True, help="new runtime diagnostic directory")
+    runtime.add_argument("--duration-s", type=_duration, default=None, help="optional 0.1..300 second residence after local readiness; default until stop")
+    runtime.add_argument("--json", action="store_true", help="print one final normal-flow receipt")
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
@@ -181,4 +229,8 @@ def main(argv: list[str] | None = None) -> int:
         return _replay_command(args)
     if args.command == "yolop-replay":
         return _yolop_replay_command(args)
+    if args.command == "runtime-init":
+        return _runtime_init_command(args)
+    if args.command == "runtime":
+        return _runtime_command(args)
     parser.error("unsupported command")

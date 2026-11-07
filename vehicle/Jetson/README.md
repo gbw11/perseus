@@ -4,7 +4,7 @@ Jetson Nano B01과 OAK-D-Lite에서 수집한 관측을 처리해 차선·장애
 
 ## 확인한 Jetson 환경
 
-2026-11-06 전용 환경 설치·실제 OAK 수신 확인 기준이다. 설치·연결 상태가 바뀌면 다시 조회한 날짜와 값으로 갱신한다.
+2026-11-07 전용 환경의 실제 OAK 수신·YOLOP 상주 실행 확인 기준이다. 설치·연결 상태가 바뀌면 다시 조회한 날짜와 값으로 갱신한다.
 
 | 항목 | 확인 결과 |
 |---|---|
@@ -14,7 +14,7 @@ Jetson Nano B01과 OAK-D-Lite에서 수집한 관측을 처리해 차선·장애
 | 앱 Python | 별도 CPython 3.11.18 + 가상환경, pip 26.2.1 |
 | 앱 라이브러리 | DepthAI 2.29.0.0, NumPy 1.26.4, opencv-python-headless 4.10.0.84 |
 | OAK | RGB IMX214·mono OV7251×2, NV12 640×360/native depth 640×480 수신·종료 확인 |
-| OAK USB | 실제 동작 HIGH(USB 2.0), USB 3 연결·동시 NN 부하 미검증 |
+| OAK USB | 실제 동작 HIGH(USB 2.0), RGB·깊이·YOLOP 동시 수신 확인, USB 3 연결 미검증 |
 | 네트워크 | Wi-Fi 접속 중, Ethernet 통신 미검증 |
 
 glibc는2.27이다. L4T 일치는 JetPack 전체 패키지 설치 확인과 구분한다. 최초 시스템 조회·전용 환경·실제 수신의 근거는 `Jetson-drive-docs/making-reports/0003-jetson-environment.md`, `0005-jetson-python311-environment.md`, `0008-jetson-oak-capture-validation.md`에 보존한다.
@@ -114,6 +114,28 @@ PYTHONPATH=vehicle/Jetson/src python -m xenova_vehicle doctor --json
 종료 코드는 검사 통과0, 실패·미확인1, CLI 사용 오류2다. SDK 장치 검색은 Device를 열지 않으며 OAK-D-Lite 모델·센서·USB 속도·영상 수신·보정·NN 준비를 확인한 것으로 해석하지 않는다. Nano 모델 정보로 carrier B01을 확정하지 않으며, L4T 일치도 JetPack 전체 패키지 설치 검증과 구분한다.
 
 일반 패키지 import와 도움말은 진단이나 native import를 실행하지 않는다. 진단 결과는 런타임 준비·주행 허가가 아니며, 공용 장치·DB 락이나 상주 서비스도 만들지 않는다.
+
+## RGB·깊이·YOLOP 상주 실행
+
+`runtime`은 Jetson의 Linux·CPython 3.11.18 환경에서 S/A/M/D를 `spawn`으로 실행한다. S-main은 lifecycle·원 기한·lease를, S-log 한 스레드는 자원 기록과 named 자원 생성을 담당한다. A가 OAK Device와 모델을 한 번 적재해 유지하고, M이 받은 owned bytes를 해석하며, D가 SQLite를 독점한다. `doctor`는 이 경로에서 실행하지 않는다.
+
+외부에 복사한 `profiles/oak-yolop-rgb-depth-bench.example.json`의 장치·자산 경로를 실제 값으로 설정하고 `nn_requirement=REQUIRED`, `jpeg_enabled=false`를 사용한다. 다음은 새 설치의 첫 실행 예다. state와 output은 기존 경로를 덮어쓰지 않는다.
+
+```bash
+python -m xenova_vehicle runtime-init --state-dir "$HOME/.local/state/xenova-vehicle/runtime" --json
+python -m xenova_vehicle runtime \
+  --profile /absolute/path/resident-profile.json \
+  --state-dir "$HOME/.local/state/xenova-vehicle/runtime" \
+  --database "$HOME/.local/state/xenova-vehicle/runtime/storage.sqlite3" \
+  --database-open-policy CREATE_IF_ABSENT \
+  --output /absolute/path/new-runtime-log --json
+```
+
+`--duration-s 10`을 지정하면 capture·NN parser·DB의 로컬 준비 후 10초 상주하고 종료한다. 생략하면 SIGINT/SIGTERM까지 유지한다. 기존 DB의 기본 정책은 `EXISTING_ONLY`이며, `CREATE_IF_ABSENT`도 기존 DB를 덮어쓰지 않는다. SDK 로그는 stderr, 최종 결과는 stdout과 `output/runtime-result.json`에 기록한다.
+
+capture 준비는 실제 RGB/depth 30쌍, NN 준비는 M의 fresh parser 결과 5회로 구별한다. Pi 시각·odom·차량 장착 보정·지도와 provenance가 준비되기 전 `metric_ready=false`, `world_valid=false`를 유지한다. 로컬 준비는 주행 허가가 아니다.
+
+종료할 때 새 grant를 막고 worker의 실제 종료를 확인한 뒤 S가 소유한 SHM을 정리한다. 최종 자원 기록은 `CLEANUP_CANDIDATE`다. 현재 명령은 최초 정상 실행 범위이며, 기존 state의 자동 재기동·worker별 장애 복구·서비스 cgroup 배포는 아직 지원하지 않는다. 재실행을 위해 기존 state를 지우거나 새 경로로 우회하지 않는다. 설치·검증 절차와 실행 결과는 `Jetson-drive-docs/making-reports/0029-normal-runtime-flow.md`에서 관리한다.
 
 ## RGB·native depth 벤치 수집
 
