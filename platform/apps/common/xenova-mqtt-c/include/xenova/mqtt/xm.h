@@ -217,20 +217,6 @@ int xm_auto_delay_command_parse(struct xm_span payload, struct xm_auto_delay_com
 int xm_auto_delay_result_json(char *out, size_t n, const struct xm_auto_delay_command *command,
 			      const char *status, uint64_t duration_ms, const char *error_code);
 
-enum xm_resource_stress_action {
-	XM_MEMORY_STRESS,
-};
-struct xm_resource_stress_command {
-	char command_id[129], operation_id[129], expected_boot_id[XM_UUID_LEN + 1];
-	enum xm_resource_stress_action action;
-	uint32_t memory_mib, duration_s;
-};
-/* Returns -ENOTSUP when the payload is a well-formed command for another action. */
-int xm_resource_stress_command_parse(struct xm_span payload, struct xm_resource_stress_command *out);
-int xm_resource_stress_result_json(char *out, size_t n,
-				   const struct xm_resource_stress_command *command,
-				   const char *status, uint64_t duration_ms, const char *error_code);
-
 #ifdef __cplusplus
 }
 #endif

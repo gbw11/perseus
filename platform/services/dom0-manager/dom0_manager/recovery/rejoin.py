@@ -18,15 +18,8 @@ def valid_vm_trust_payload(payload):
     if not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED':return False
     command_id=payload.get('command_id')
     if not isinstance(command_id,str) or not command_id or len(command_id)>128:return False
-    reason=payload.get('reason')
-    if reason=='AUTO_DEADLINE_MISS':return type(payload.get('consecutive_misses')) is int and payload['consecutive_misses']>=5
-    if reason=='MEMORY_PRESSURE':
-        return (payload.get('metric')=='memory.kernel_heap.used_bytes' and
-                type(payload.get('used_percent')) is int and 0<=payload['used_percent']<=100 and
-                type(payload.get('threshold_percent')) is int and 50<=payload['threshold_percent']<=99 and
-                payload['used_percent']>=payload['threshold_percent'] and
-                type(payload.get('consecutive_samples')) is int and payload['consecutive_samples']>=2)
-    return False
+    return (payload.get('reason')=='AUTO_DEADLINE_MISS' and
+            type(payload.get('consecutive_misses')) is int and payload['consecutive_misses']>=5)
 
 class ProductionBootstrap:
     def __init__(self,config,observe,*,uid=0):

@@ -198,25 +198,6 @@ def test_vm_untrusted_without_prepared_mirror_enters_safe_stop(tmp_path):
     assert w.m.mode is Mode.SAFE_STOP and w.m.active_vm==A and not w.m.output_permitted
     assert any(isinstance(action,ForwardStop) for action in actions)
 
-def test_memory_pressure_atomically_selects_mirror_and_rejects_bad_evidence(tmp_path):
-    w=World(tmp_path/'authority');w.arm();old=w.m.generation
-    payload={'trust':'UNTRUSTED','reason':'MEMORY_PRESSURE','metric':'memory.kernel_heap.used_bytes',
-        'used_percent':89,'threshold_percent':85,'consecutive_samples':5,'command_id':'memory-1'}
-    actions=w.m.on_vm_untrusted(A,'autonomous',payload,w.t)
-    assert w.m.active_vm==B and w.m.generation==old+1 and not w.m.output_permitted
-    assert w.auth.value['distrusted'][0]['reason']=='MEMORY_PRESSURE'
-    assert any(isinstance(action,PublishControl) for action in actions)
-    invalid={**payload,'command_id':'memory-invalid','used_percent':80}
-    assert w.m.on_vm_untrusted(B,'autonomous',invalid,w.t)==[]
-
-def test_memory_pressure_switches_manual_owner_using_manual_mirror_readiness(tmp_path):
-    w=World(tmp_path/'authority',mode='MANUAL');w.arm();old=w.m.generation
-    payload={'trust':'UNTRUSTED','reason':'MEMORY_PRESSURE','metric':'memory.kernel_heap.used_bytes',
-        'used_percent':90,'threshold_percent':85,'consecutive_samples':5,'command_id':'memory-manual'}
-    actions=w.m.on_vm_untrusted(A,'autonomous',payload,w.t)
-    assert w.m.active_vm==B and w.m.mode is Mode.MANUAL and w.m.generation==old+1
-    assert any(isinstance(action,PublishControl) for action in actions)
-
 class Client:
     connected=True;connections=1
     def __init__(self):self.handlers={};self.published=[];self.status='acknowledged'

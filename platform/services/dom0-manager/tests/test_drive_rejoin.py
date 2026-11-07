@@ -32,13 +32,6 @@ import test_xenova_network_zephyr as network
 from xenova_drive_binding import observe
 import xenova_vm
 
-def test_memory_pressure_trust_payload_is_accepted_for_recovery():
-    payload={'trust':'UNTRUSTED','reason':'MEMORY_PRESSURE','metric':'memory.kernel_heap.used_bytes',
-        'used_percent':89,'threshold_percent':85,'consecutive_samples':5,'command_id':'memory-1'}
-    assert valid_vm_trust_payload(payload)
-    assert not valid_vm_trust_payload({**payload,'used_percent':80})
-    assert not valid_vm_trust_payload({**payload,'consecutive_samples':1})
-
 @pytest.fixture
 def fixture():
     f=network.NetworkPlatformTest('runTest');f.setUp()
