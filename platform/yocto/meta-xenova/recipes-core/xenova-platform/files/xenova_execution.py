@@ -758,11 +758,12 @@ class Execution:
         return self._observe_many([record], deadline)[record['uuid']]
 
     @traced('execution.observe_many')
-    def observe_many(self, records, deadline, *, _lifecycles=None, _read_context=None):
+    def observe_many(self, records, deadline, *, _lifecycles=None, _read_context=None, _identity_batch=False):
         """명시 목록 조회의 전체 예산과 두 목록을 공유한다. 부분 성공은 반환하지 않는다."""
         records = list(records)
         try:
-            return self._observe_many(records, deadline, _lifecycles=_lifecycles,_read_context=_read_context)
+            return self._observe_many(records, deadline, _lifecycles=_lifecycles,_read_context=_read_context,
+                                      _identity_batch=_identity_batch)
         except ExecutionError as error:
             failure = error
         except vm.DomainIdentityError as error:
@@ -777,7 +778,8 @@ class Execution:
         failure.observation_error_handled = True
         raise failure
 
-    def _observe_many(self, records, deadline, *, _lifecycles=None, _read_context=None, identity_only=False):
+    def _observe_many(self, records, deadline, *, _lifecycles=None, _read_context=None, identity_only=False,
+                      _identity_batch=False):
         if not records:
             return {}
         # 기존 내부 호출의 명시 수명 근거를 검증한다. 일반 조회는 별도 ReadContext를 사용하며,
@@ -803,8 +805,8 @@ class Execution:
             row = rows[0] if rows else None
             targets.append((record, row))
         present = [row for _, row in targets if row is not None]
-        batch = (_read_context is not None and len(present) > 1
-                 and os.environ.get('XENOVA_IDENTITY_BATCH_READS') == '1')
+        batch = (_read_context is not None and bool(present) and
+                 (_identity_batch or len(present) > 1 and os.environ.get('XENOVA_IDENTITY_BATCH_READS') == '1'))
         initial = self.unique_many(present, deadline) if batch else None
         targets = [(record, row, initial[row['domid']] if batch and row else
                     self.unique(row, deadline) if row else None) for record, row in targets]
