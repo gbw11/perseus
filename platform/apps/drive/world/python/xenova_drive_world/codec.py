@@ -70,6 +70,99 @@ def encode(message):
     if len(data)>MAX_BYTES:raise ValueError('wire size cap')
     return data
 
+
+def _clock_uint(value):
+    if type(value) is not int or not 0<=value<1<<64:raise ValueError('clock uint64 required')
+    data=bytearray()
+    while value>127:data.append((value&127)|128);value>>=7
+    data.append(value)
+    return bytes(data)
+
+
+def _clock_layout(data):
+    """Locate only the two variable-width boundaries in canonical Clock wire.
+
+    encode() already validated the message. This bounded lexical walk avoids a
+    second protobuf decode/encode when the I/O owner stamps its send boundary.
+    """
+    def uint(at,end):
+        number=0
+        for n in range(10):
+            if at>=end:raise ValueError('partial clock varint')
+            byte=data[at];at+=1
+            if n==9 and byte&254:raise ValueError('overflow clock varint')
+            number|=(byte&127)<<(7*n)
+            if not byte&128:return number,at
+        raise ValueError('overflow clock varint')
+    def fields(at,end):
+        while at<end:
+            tag,at=uint(at,end);number,kind=tag>>3,tag&7
+            if not 0<number<=0x1fffffff:raise ValueError('clock field number')
+            size_at=at
+            if kind==0:
+                value,after=uint(at,end)
+                yield number,kind,size_at,at,after,value
+            else:
+                if kind==2:size,at=uint(at,end)
+                elif kind==1:size=8
+                elif kind==5:size=4
+                else:raise ValueError('clock wire type')
+                after=at+size
+                if after>end:raise ValueError('partial clock field')
+                yield number,kind,size_at,at,after,None
+            at=after
+    clock=None
+    for number,kind,size_at,start,end,_ in fields(0,len(data)):
+        if number==3:
+            if kind!=2 or clock is not None:raise ValueError('clock reply wire')
+            clock=(size_at,start,end)
+    if clock is None:raise ValueError('clock reply wire')
+    size_at,start,end=clock;sent=None;received=None
+    for number,kind,_,value_at,after,value in fields(start,end):
+        if number in (4,5):
+            if kind!=0:raise ValueError('clock timestamp wire')
+            if number==4:
+                if received is not None:raise ValueError('duplicate clock receive')
+                received=value
+            else:
+                if sent is not None:raise ValueError('duplicate clock send')
+                sent=(value_at,after,value)
+    if received is None or sent is None:raise ValueError('clock timestamps missing')
+    if sent[2]<received:raise ValueError('clock send before receive')
+    return size_at,start,end,sent[0],sent[1],received
+
+
+class PreparedClock(bytes):
+    """Immutable, validated ClockReply snapshot awaiting its I/O send stamp.
+
+    Only pi_send_us and protobuf length varints change at publish entry. Probe,
+    identity, vehicle observation and trust expiry remain the original evidence.
+    This is a submission timestamp, not TCP completion, PUBACK or guest receipt.
+    """
+    def __new__(cls,message):
+        if not isinstance(message,schema.DriveLink) or message.WhichOneof('payload')!='clock':
+            raise ValueError('clock reply required')
+        data=encode(message)
+        result=bytes.__new__(cls,data)
+        object.__setattr__(result,'_layout',_clock_layout(data))
+        object.__setattr__(result,'vm',message.clock.probe.vm)
+        return result
+
+    def __setattr__(self,name,value):raise AttributeError('prepared clock is immutable')
+    def __delattr__(self,name):raise AttributeError('prepared clock is immutable')
+
+    def stamp(self,send_us):
+        """Bounded varint splice; no full message validation or codec at send."""
+        value=_clock_uint(send_us)
+        size_at,start,end,value_at,after,received=self._layout
+        if send_us<received:raise ValueError('clock send before receive')
+        size=end-start+len(value)-(after-value_at)
+        length=_clock_uint(size)
+        total=len(self)+len(length)-(start-size_at)+len(value)-(after-value_at)
+        if total>MAX_BYTES:raise ValueError('wire size cap')
+        return b''.join((self[:size_at],length,self[start:value_at],value,self[after:]))
+
+
 def decode(data,message_type=schema.WorldSnapshot):
     if not isinstance(data,bytes) or len(data)>MAX_BYTES:raise ValueError('bounded bytes required')
     _audit(data,message_type.DESCRIPTOR)
