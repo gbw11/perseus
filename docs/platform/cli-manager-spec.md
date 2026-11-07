@@ -544,6 +544,14 @@ xenova-vm get "$VM_ID" --json
 
 `get`에서 `desired_state=running`와 실제 `domid`를 확인한다. `control-operation --operation-id`로 원 결과를 조회한다. Xen 시작 성공은 앱 준비나 운행 허가가 아니다. CPU 정책 활성 시 `cpu-layout`의 host.ready·실제 마스크도 확인한다. CPU 관련 오류와 불완전 실행 기록은 [CPU 계약](#cpu-contract)을 따른다.
 
+같은 `start` key를 재전달하면 만료된 미결합 실행도 확인할 수 있다. 원 host·VM·사용자 의도·
+lifecycle·실행 owner·구성·CPU 문맥이 같고, 원 기한 만료 뒤 Xen 부재 두 회와 해당 실행의 정확한
+소유 scope 종료가 확인된 경우에만 원 작업을 `failed`로 종결한다. 원 `XEN_EXECUTION_FAILED` 또는
+`DEADLINE_EXCEEDED`와 최초 cause·key·operation·기한을 보존하며 새 create/stop/kill은 제출하지 않는다.
+같은 key의 이후 재전달도 원 실패를 반환한다. 후속 기동은 현재 의도·신원·자원 조건을 다시 확인한
+별도의 명시 요청이다. scope가 살아 있거나 근거가 없고, 실행/의도/구성이 바뀌었거나 저장이 미확정이면
+기존 보호를 유지한다. `control-operation` 조회 자체는 이 종결을 수행하지 않는다.
+
 **Manager 매핑:** `start / {vm_id}`.
 
 [명령어 색인으로](#command-index)
@@ -1144,12 +1152,21 @@ CPU 재배치나 새 attempt·operation·실행 신원·물리 deadline 발급�
 | stopping/그 단계 uncertain, `stop_submission`에 미제출 또는 synchronous 반환 근거, 같은 종료 대상·현재 상태·소유 scope 확인 | 미제출이면 `not_submitted`, 종료 후 부재면 `stopped_without_replacement`; 둘 다 failed |
 | 실제 managed 새 실행이 이 attempt의 owner·실행·구성·완료된 CPU 검증에 연결 | `launch_observed`; 기존 완료 요건으로 completed, 앱 준비는 unknown |
 | 해당 owner의 `launch_aborted_before_submit=true`, stopped 실행 기록·실제 부재 확인 | `not_submitted`; failed |
+| 원 기한이 만료된 미결합 launch, 현재 부재·동일 원 문맥·정확한 실행 scope의 무잔존 확인 | `stopped_without_replacement`; 원 실패를 보존해 failed. 실행 기록도 같은 원 attempt에 결합해 stopped로 종결 |
 | 종료/launch 실행자 잔존·구형 기록에 반환 근거 없음·새 실행 인과 미확인·관측 실패 | 차단 유지. 기한 경과·PID 부재·잠금 획득·domain 부재 하나만으로 종결하지 않음 |
 
 `stop_submission`은 원 호출 경계를 저장한 근거다. `not-submitted`를 먼저 내구 저장하고,
 호출 전에 `submitted`, synchronous 호출 반환 뒤 `returned`를 저장한다. 구형 기록에
 이 근거를 사후 추측해 채우지 않는다. process scope 확인은 observe-only이며 신호도 보내지 않는다.
 현재 실행·의도가 달라졌다면 과거 시도를 그 실행에 적용하지 않는다.
+
+만료한 미결합 launch의 종결에는 두 번의 현재 부재 관측, 원 host·의도·등록·CPU 정책과
+원 operation/run의 재검증, 정확한 VM/execution scope의 observe-only 무잔존 확인이 모두 필요하다.
+이 명령이 남은 domain이나 helper를 정지시키지는 않는다. 미확정 runtime 표지→원 attempt 실패→
+runtime stopped 순서로 필수 저장하고, 중간 중단은 같은 원 attempt의 명시 재호출로 회수한다.
+제출 뒤 실패를 `launch_aborted_before_submit`로 꾸미거나 원 기한·hash를 바꾸지 않는다.
+단일 저장 실패 때는 같은 실행의 미확정 표지를 복원한다. 복원 저장도 실패하면 두 원인을 구분한
+`RECONCILE_REQUIRED`이며, 저장소가 회복된 뒤 원 결과를 다시 확인해야 한다.
 
 **실행 예시**
 
@@ -3852,6 +3869,8 @@ Manager action·envelope·기존 실행 신원과 복구 완료의 의미는 유
 | stopped_monotonic_ms | 종료 기록에 추가되는 시각 |
 | process_scope | 해당 실행의 dom0 지속 프로세스를 소유한 systemd scope. 구형 실행·격리 미사용 경로에는 없거나 null. Xen domain 자체가 아님 |
 | launch_aborted_before_submit | true이면 최종 guard 거절 뒤 동일 launch와 domain 부재를 확인해 제출 전 종결했다는 근거. 제출 뒤 효과 미확정에는 쓰지 않음 |
+| recovery_reconciliation | 만료한 미결합 복구 launch의 명시 종결에 사용하는 내부 원 attempt 참조. 수습 중단 뒤 같은 원 기록을 회수하는 근거이며 새 실행·기한·권한이 아님 |
+| control_reconciliation | 만료·부재·소유 scope 종료가 확인된 원 사용자 start의 종결 참조. `uncertain → 원 작업 failed 내구 저장 → stopped`의 중단을 같은 key로 수습하기 위한 내부 metadata이며 새 기동 권한이 아님 |
 | cpu_policy | configured·policy_revision·정책의 canonical SHA256·allocation·desired_hard_affinity. instance.json 해시와 별도 문맥 |
 | cpu_verification / cpu_error | 생성 후 CPU 검증 실패 시 incomplete와 원 오류. observed 실행 신원은 유지 |
 

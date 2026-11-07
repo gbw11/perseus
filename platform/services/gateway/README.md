@@ -26,6 +26,17 @@ Jetson 연결 대기로 묶지 않는다. 이 파일의 시험값을 운영 설�
 기존 차량 출력 한계·ACK 기한·현재 session 검증은 그대로다. 새 MANUAL의 실제 정지 확인,
 같은 운전자 MANUAL A/B 연속, 사용자 `manual_hold`, 명시 AUTO 복귀를 구분한다.
 
+feedback-2는 원 probe echo와 첫 serial 제출 시각을 구분한다. packet 준비 대기를 실제
+장치 왕복 오차에 합치지 않되, 첫 제출 뒤 write·수신 지연과 원 probe 보존 기한은 유지한다.
+송신 전/회수 시 원 기한 만료는 `ODOM_PROBE_EXPIRED`, 실제 왕복 불확실성은
+`ODOM_CLOCK_UNCERTAIN`이다. 장치의 probe 수신 뒤 표본 래치와 실제 MCU 수락 조건은
+[정식 계약](../../../docs/contracts/gateway-provider-v1.md#명시-선택-feedback-2와-pi-로컬-odometry)에 있다.
+DriveLink MQTT는 같은 owner의 공인 외부 event loop를 사용하며, 송신 정체 중에는 기존
+packet과 latest 슬롯만 보관한다. 설치·import 통과가 보드의 지연 한도 충족을 뜻하지는 않는다.
+native POSIX serial의 owner 경로는 기존 readiness 뒤 한 번 읽어 pyserial 내부의 중복 select를
+줄인다. idle/HUP·부분 frame·첫 실패·read 완료 시각·STOP/종료 우선순위는 유지한다.
+직접 `poll()`의 공개 취소와 socket URL/custom backend는 기존 pyserial 경로를 사용한다.
+
 이력은 `--history-policy <private-file>`의 `retry_ms`와 `retention_ms`를 명시 공급할 때
 정당하게 종결하고 보존 약속·참조를 해소한 기록만 새 내구 수락에서 정리한다.
 `GatewayClient.history()`는 읽기 전용이다. `new_request_id(host_boot_id)`는 최초 송신 전에

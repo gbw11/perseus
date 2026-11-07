@@ -302,7 +302,7 @@ XENOVA_DRIVER=platform XENOVA_PLATFORM_LIB=/usr/lib/xenova XENOVA_SERVICE_TOKEN=
 
 ## Recovery Worker (heartbeat 감시기)
 
-자동 복구 주체는 제어 계층입니다(VM API 계약 1.2절). `python -m dom0_manager.recovery`는 dom0-manager HTTP 와 **별도 프로세스·별도 systemd 유닛**(`deploy/xenova-recovery-worker.service`, `After=xenova-vms.service mosquitto.service`, `Before=xenova-host-admission.service`, PartOf 없음)으로 돌며 **VM 재시작이 필요한지**만 판정합니다. 재시작 실행·재시도·backoff 는 복구 정책 엔진(S15P31E110-125)이 판정 큐를 소비해 수행합니다. 차량 제어권 전환은 게이트웨이의 일이며 여기서 보지 않습니다.
+자동 복구 주체는 제어 계층입니다(VM API 계약 1.2절). `python -m dom0_manager.recovery`는 dom0-manager HTTP 와 **별도 프로세스·별도 systemd 유닛**(`deploy/xenova-recovery-worker.service`, `After=xenova-vms.service mosquitto.service`, `Before=xenova-host-admission.service`, PartOf 없음)으로 돌며 **VM 재시작이 필요한지**만 판정합니다. 재시작 실행·재시도·backoff 는 복구 정책 엔진(S15P31E110-125)이 감시기의 판정을 직접 받아 수행합니다. 차량 제어권 전환은 게이트웨이의 일이며 여기서 보지 않습니다.
 
 입력 세 가지와 읽는 방법:
 
@@ -382,12 +382,70 @@ Xen을 관측하지 않는 의도 조회가 생기기 전까지 Worker는 60초 
 
 아직 없는 것: 실보드 검증(플랫폼 `force_restart_vm_ids` 승인과 Mosquitto 배포 뒤), `probe` 로 Xen 관측 불가를 가리는 것, Worker 자가진단 상태를 HTTP 로 내보내는 것(백엔드와 계약 합의 뒤 `GET /api/v1/recovery/status`, 지금은 아래 상태 파일과 로그).
 
+### E4 안정 구간과 VM별 누적 복구 예산
+
+기존 episode별 `max_attempts`·backoff·원 attempt/deadline은 유지합니다. E4는 아래 두 환경값을 **함께 명시할 때만**
+활성화하며 운영 기본 숫자는 없습니다. 빈 값·반쪽 설정·비유한 시간·잘못된 상한은 설정 오류입니다.
+
+| 설정 | 단위와 조건 |
+|---|---|
+| `XENOVA_RECOVERY_STABLE_S` | 연속 정상 근거가 필요한 초. 양의 유한 수 |
+| `XENOVA_RECOVERY_VM_MAX_ATTEMPTS` | 마지막 안정 확인 이후 VM별 새 논리 attempt 상한. 양의 정수이며 기존 episode 상한 이상 |
+
+값은 Worker 정책 공통이고 사용량·보류·안정 확인은 VM별입니다. 둘 다 생략하면 기존 episode별 제한만 동작하며
+E4가 활성화됐다고 표시하지 않습니다. 시험값은 `tests/test_recovery_budget.py:PROFILE`에만 있고 활성 env/unit은 변경하지 않습니다.
+
+`RecoveryEngine._task_attempt`는 새 attempt와 누적 사용량을 **같은 RecoveryStore 저장으로 확인한 뒤** 플랫폼을 부릅니다.
+같은 attempt의 조회·재전달·응답 유실·Worker 재시작은 추가 차감하지 않습니다. 새 episode·새 execution·다른 장애 사유·
+사용자 stop만으로 누계를 지우지 않습니다. 소진되면 새 자동 VM 복구를 보류하며, 원 결과 회수·필수 사건 저장·
+Gateway 출력 보호/정산은 계속합니다. 시간 경과만으로 고장 난 VM을 다시 시도하거나 force 승인을 확대하지 않습니다.
+
+`Watcher.stability_samples`는 이번 주기의 유효 의도·실행·기존 신호만 넘깁니다. 같은 heartbeat의 재조회로는 안정 시간이
+늘지 않습니다. 여러 앱은 모두의 원 수신 시각이 진행한 범위만 인정합니다. 관측 실패·문맥 변경·기존 신호/건강 lease를
+넘는 관측 공백은 연속성을 끊습니다. `WAITING/QUALIFIED` Standby는 실제 계산·합성 heartbeat 없이 감독 진행으로 확인하고,
+입력 부재·준비 미충족을 새 VM 장애로 만들지 않습니다. 신호 없는 starter의 근거는 Xen 실행 관측까지입니다.
+
+안정 구간을 채워도 **저장이 실패하면 기존 사용량을 유지**합니다. 정상 기록 후 다음 새 장애에는 예산을 다시 쓸 수 있습니다.
+실행 중·결과 미확정인 원 attempt에는 먼저 환급하지 않습니다. 복구 `COMPLETED`, 현재 건강, 앱 준비·재합류·출력 허가는 별개입니다.
+`engine.budget_status(vm_id)`는 소유 프로세스/시험용 내부 조회로 configured·used·limit·hold_reason·stable_for_s·durable을
+제공합니다. 실제 재부팅 횟수나 공개 HTTP endpoint가 아닙니다. 상태 파일에는 아래 보류 사유를 추가하며 원 오류를 덮지 않습니다.
+
+누계는 닫힌 recovery 20개 보존과 별개인 **VM당 계수 하나**입니다. 새 attempt와 안정 회복 전이에만 기존 필수 저장에 결합하고,
+매 주기 추가 fsync·이력 재검색을 하지 않습니다. 명시적 등록 부재/영구 제거 응답은 계수를 정리하지만 retire·stop은 지우지 않습니다.
+기본 `/run`에서는 같은 host 부팅의 Worker 재시작까지 보존합니다. 재부팅 뒤 tmpfs 보존·이관은 별도 운영 결정입니다.
+별도 영속 경로를 썼다면 계수는 읽되 관측하지 못한 시간과 다른 부팅의 단조 시각을 안정 근거로 쓰지 않습니다.
+
+내부 저장은 기존 1을 읽고, E4 추적을 시작하면 예산을 포함한 2를 씁니다. 과거 1의 남은 기록만으로 총사용량을 복원하지 않고
+`UNKNOWN`으로 보류한 뒤 충분한 정상 관측으로 기준을 확정합니다. 과거 원 attempt의 결과 회수는 그대로 가능합니다.
+2를 읽은 새 코드는 제한을 비활성화해도 계수를 보존·추적합니다. 구형 writer와 같은 저장소를 동시에 쓰면 안 되므로
+Engine·state·policy·budget·Watcher/Worker를 한 설치 후보로 교체해야 합니다. 호출자는 내부 버전을 선택하거나 변환하지 않습니다.
+
 ### Worker 자가진단 상태 (S15P31E110-354)
 
-Worker 는 매 주기 복구 경로를 점검해 `XENOVA_RECOVERY_STATE_DIR/worker-status.json` 을 원자적으로 교체합니다(임시 파일 → `os.replace`). 계정이 없거나 ACL·의도 조회·Gateway 가 막혀도 Worker 는 멈추지 않습니다. MQTT 가 막혀도 Xen crashed·absent 판정은 계속되고, 보류되는 것은 heartbeat·app heartbeat 손실 판정입니다. 상태가 바뀔 때만 한 번 로그합니다(DEGRADED 는 ERROR, OPERABLE 로 돌아오면 INFO).
+Worker는 매 주기 자신의 실행 문맥에서 작은 상태 표본을 만들고, 전용 부가 실행자가
+`XENOVA_RECOVERY_STATE_DIR/worker-status.json`을 원자적으로 교체합니다(임시 파일 → `os.replace`).
+Gateway 진단 조회와 상태 전환 로그도 이 실행자에서 처리합니다. 계정이 없거나 ACL·의도 조회·Gateway가
+막혀도 Worker는 계속 진행합니다. MQTT가 막히면 heartbeat·app heartbeat 손실 판정은 보류하지만
+Xen crashed·absent 판정은 계속합니다. 상태가 바뀔 때만 한 번 로그합니다(DEGRADED는 ERROR, 정상 복귀는 INFO).
+
+저장 중인 표본 1개와 최신 대기 표본 1개만 보관합니다. 포화 시 대기 표본을 교체하며,
+저장 시각으로 원 `updated_monotonic`을 갱신하지 않습니다. 느린 저장이 끝나도 원 표본이 오래됐으면 STALE입니다.
+`StatusReporter.sink_snapshot()`은 프로세스 내 제출·교체·기록·실패 수와 pending/in-flight/실행자 잔존을
+제공합니다. 최초·마지막 예외와 최초 내부 결함을 각각 하나씩 원 cause와 함께 보존합니다.
+연속된 같은 종류·위치·cause 종류의 내부 결함만 중복 stack 기록을 억제하며, 정상 발행 뒤 다시 발생하면 기록합니다.
+종료 drain은 최대 0.25초이며
+`close() == False`는 실행자가 남았다는 뜻입니다. 부가 실행자의 성공 정리로 표시하지 않습니다.
+필수 복구 journal·pending event·Gateway Authority는 이 교체 슬롯이나 폐기 대상에 들어가지 않습니다.
+기존 일반 로그의 공유 handler나 모든 CPU/I/O 간섭까지 제거하는 보장은 아닙니다.
+
+기본 Worker는 판단 원문을 별도 큐에 중복 보관하지 않고 `judgments_total`만 셉니다.
+Engine에는 각 판단을 직접 전달하고, 명시적인 진단 소비자만 `judgments=Queue(maxsize=N)`을 사용할 수 있습니다.
+이 사본은 포화 시 기다리지 않으며 손실 수는 `judgments_dropped`에 남깁니다. `run_once()`의 이번 판단 목록과
+Engine의 필수 수락/저장은 유지합니다. `policy=none`의 중복 로그 억제 ID는 해당 닫힌 record의 보존 수명을 따릅니다.
 
 | 필드 | 뜻 |
 |---|---|
+| `version`, `host_boot_id` | 상태 파일 버전 2, 이 표본을 만든 host boot UUID. 복구 journal·MQTT 버전과는 별개 |
 | `overall` | `OPERABLE`(필요한 관측·복구 경로 정상) / `DEGRADED`(`hold_reasons` 가 하나 이상) / `DISABLED`(`XENOVA_RECOVERY_POLICY=none`, 이유가 있어도 우선) |
 | `policy`, `broker_configured`, `drive_configured` | 시작 시 정적 점검. `broker_configured` 는 사용자명·비밀번호가 **둘 다** 있는지만 적고 값은 넣지 않습니다 |
 | `broker_connected`, `agent_subscription`, `app_subscription` | 매 주기 동적 점검. 구독은 `NOT_GRANTED` / `WAITING`(승인 뒤 한 창 전) / `DELIVERING`(승인 뒤 실제 수신) / `SILENT`(승인 뒤 한 창 동안 아무것도 못 받음) |
@@ -411,9 +469,20 @@ Worker 는 매 주기 복구 경로를 점검해 `XENOVA_RECOVERY_STATE_DIR/work
 | `RECOVERY_HISTORY_LOST` | `recoveries.json` 손상·읽기 실패로 이력 상실 | 모든 복구 실행 |
 | `RECOVERY_STATE_UNSAVED` | 복구 상태 저장 실패(다음 주기 재시도) | 새 이벤트 발행(상태가 저장되기 전에는 내지 않음) |
 | `RECOVERY_EVENTS_PENDING` | outbox(`recovery-events.jsonl`)에 못 옮긴 이벤트가 레코드에 남음 | Spring 수신과 4.7 재보충 |
+| `RECOVERY_BUDGET_UNKNOWN` | 과거 저장소에 VM 누적 사용량의 근거가 없음 | 해당 VM의 새 자동 시도. 원 attempt 회수는 계속 |
+| `RECOVERY_BUDGET_EXHAUSTED` | VM 누계가 명시한 상한 이상 | 해당 VM의 새 자동 시도. 안정 확인·기존 명시 수습 뒤 회복 |
+| `RECOVERY_BUDGET_CONTEXT_UNAVAILABLE` | 현재 host boot 확인 불가 | 새 시도·안정 예산 갱신. 원 결과 회수·보호는 유지 |
 | `ARMED_HISTORY_LOST` | `armed.json` 손상 | capability 선언이 없는 Zephyr VM 의 판정(신호를 받으면 풀림) |
 
-읽는 쪽은 `dom0_manager.recovery.status.read_status(state_dir)` 입니다. 모든 필드의 타입·허용값(`policy`, 구독 상태, `hold_reasons` 코드 목록, 시각 형식, `pid`)과 필드 사이 조건(정책과 DISABLED, 이유와 OPERABLE/DEGRADED, 계정·연결 값과 해당 이유, `intents_known` 과 관측·의도 이유, drive 설정이 없으면 `gateway_available: null`)을 검사하고 하나라도 어긋나면 `UNAVAILABLE` 입니다. Worker 가 죽으면 파일은 마지막 값으로 남으므로 `updated_monotonic` 이 `stale_after_s` 보다 오래됐거나 미래(이전 부팅)이면 `STALE`(마지막 값은 `last` 에), 파일이 없거나 읽지 못하거나 모양이 어긋나면 `UNAVAILABLE` 입니다. `/healthz`(FastAPI·Xen 생존)에는 섞지 않습니다.
+읽는 쪽은 `dom0_manager.recovery.status.read_status(state_dir)`입니다. 필드 타입·허용값과 기존 필드 사이
+정합성을 검사한 뒤 현재 host boot를 확인합니다. boot가 다르면 STALE이며 서로 다른 부팅의 단조 시각을
+빼서 나이를 만들지 않습니다. 같은 boot에서만 `updated_monotonic`의 미래/만료를 STALE로 판정합니다.
+STALE의 원 표본은 `last`에 남깁니다. 파일 부재·손상·현재 boot 확인 실패는 UNAVAILABLE입니다.
+host 근거가 없는 과거 버전 1도 현재 정상으로 인정하지 않습니다. 새 Worker의 정상 표본이 버전 2로
+교체하며, 운영 원장 변환이나 호출자의 버전 선택은 필요하지 않습니다. writer가 boot를 읽지 못하면
+원 실패를 보존하고 새 정상 파일을 쓰지 않습니다. 읽기가 회복되면 다음 표본부터 다시 발행합니다.
+기본 `/run`과 달리 영속 `STATE_DIR`을 선택해도 이전 부팅 파일을 현재 정상으로 쓰지 않는 규칙입니다.
+이 상태를 `/healthz`(FastAPI·Xen 생존)나 복구 실행/차량 출력의 허가에 섞지 않습니다.
 
 ### Worker 상태 파일과 사건 기록
 
