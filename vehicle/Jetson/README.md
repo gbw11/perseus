@@ -361,6 +361,28 @@ S는 queue 선택 전부터 즉시 local QUIESCING/fence를 적용해야 한다.
 
 snapshot은 frozen queue tuple·원 draft·pending handle·counter이며 counts는 사본이다. 현재 held ID 최대12개만 보며 완료·교체·포기 뒤 과거 history는 남기지 않는다. queued encoded bytes는0이고 encoded_held_bytes는 실제 pending bytes만 센다. 고정 네 kind의 작은 scalar/JSON 상한과 별개로 최종 actual-sequence b1 encode는4096B 상한을 유지한다. native Python 객체·소비자 사본 overhead는 별도다. queue 용량·priority 통과는 lifecycle 출력 허가가 아니다. 미송신 HELLO 포기 뒤 HB는 실제 RX가 거절하며, prior HELLO가 있는 STOPPED 뒤 HB 진술의 기존 수신 정책은 유지한다. 실제 OS peer/send/exit/lease/READY·post-success 원 raw 재답 ledger는 제공하지 않는다.
 
+## 한 raw arena의 소유권 원장
+
+`runtime.raw_leases`는 S 단일 owner가 등록한 raw arena 두 slot의 내부 정책이다. 실제 메모리·token·Device·파일·clock을 열거나 UUID를 생성하지 않는다. `Endpoint(channel_epoch, worker_instance)`, `RawScope(service_instance, arena_id, writer, raw_binding_sha256, arena_name, arena_size_bytes=4194304, arena_role="RAW")`로 실제 caller 등록값을 고정한다. 이름은 유한 printable ASCII이고 정확한 OS 이름 profile·실 arena 존재/소유 검증은 별도 단계다. RawBinding SHA 형식 검사가 전체 binding 본문·SDK/보정을 승인하지 않으며 bench NN context hash와도 다르다.
+
+`RawLeaseLedger(scope, reader, publication_sha256=None)`는 현재 A writer와 M reader의 서로 다른 역할 문맥을 보유한다. WriteKey에는 A channel을 포함한 RawScope·slot·generation·write_token, ReadKey에는 원 WriteKey·M endpoint·read_token이 있다. M 문맥을 writer key에 덮어쓰지 않는다. 모든 공개 record는 exact type/UUID/SHA/u64/상한을 검사하는 frozen 값이다. 외부 dict/배열을 보관하지 않고 snapshot도 frozen 두-slot tuple이다. private state 직접 수정이나 호출 중 동시 변이는 지원하지 않는다.
+
+`LeaseRequest(request_id, issued_us, expires_us, cap_us=None)`의 원 수명은 issued≤now<expires이며 cap이 있으면 expires≤cap이다. `reserve_write(slot, request, write_token, now_us=...)`는 FREE에서 generation을 증가시켜 WriteGrant와 WRITING을 예약한다. 초기 generation은0, 첫 grant는1이다. A의 WRITING 또는 READY 교체 ticket은 전체 두 slot에 걸쳐 outstanding 하나다. dequeue·미송신 관측으로 없애지 않는다. `filled(FilledInfo(key, payload_length, descriptor_sha256, completed_us), now_us=...)`는 원 copy 기한 안의 정확한 완료 진술을 READY로 바꾼다. 길이/해시 형식·slot 상한만 검사하며 실제 descriptor/CRC/body·capture age는 검사하지 않는다.
+
+`offer(slot, now_us=...)`는 현재 미claim READY의 FilledInfo를 가진 Offer를 반환한다. read token이나 읽기 권한이 없다. `ReadRequest(offer, reader, request, purpose="PARSER_WARMUP", publication_sha256=None)`와 caller의 실제 read_token을 `acquire(..., now_us=...)`에 주면 원장에 ReadLease와 IN_USE를 먼저 예약한다. ACQUIRED 송신 대기/EAGAIN이어도 새 WRITE·READY 교체를 허용하지 않는다. M의 active read도 하나다. parser는 pub null일 때 Pi/DB/odom/map을 요구하지 않는다. non-null pub는 등록된 SHA와 exact 대조하지만 전체 PublicationBinding 검증이 아니다. METRIC_MAP은 원 capture metadata의 사전 전달·완전 MetricJob 계약이 없어 명시 UnsupportedPurpose이며 상태를 바꾸지 않는다. parser 읽기를 metric 사전 조회로 승격하지 않는다.
+
+정상 FILLED 뒤 독립한 새 parser read는 자기 원 request/time/cap을 사용한다. 이미 끝난 copy 작업의 기한을 상속하지 않는다. c1은 그 content의 sensor freshness를 증명하지 않는다. `write_is_current(grant, now_us=...)`와 `read_is_current(lease, now_us=...)`는 local full record/상태·fence와 실제 granted/reserved 하한부터 원 만료 전까지를 검사한다. 실제 publication token이나 메모리 접근 허가를 대신하지 않는다. 만료·취소·신호·STOPPED 보고만으로 WRITING/IN_USE를 FREE로 만들지 않는다.
+
+`release(ViewReturnFact(lease, views_ended_us, writable_posted_us), now_us=...)`는 lower가 모든 view 종료와 writable post1을 확인했다는 원 lease 전체의 진술을 대조한다. reserved≤views_ended≤writable_posted≤now여야 하며, 정확히 보유한 lease는 원 read 기한 이후·fenced/retired여도 bookkeeping으로 FREE가 된다. constructor가 실제 view 종료/sem_post를 확인하는 것은 아니다. 같은 full key의 바뀐 원 request/완료 fact는 conflict다. 이미 반환한 정확 중복은 DUPLICATE_NO_EFFECT, 보유 밖/다른 key는 UNKNOWN_NO_EFFECT이며 새 FREE/token을 만들지 않는다. old 반환이 새 generation/read_token의 lease를 풀지 못한다.
+
+현재 각 slot의 write/ticket와 최근 replacement 요약에 보유한 A request ID, 현재 read와 최근 반환 요약의 M request ID를 유한 scan한다. 같은 ID의 원 slot/time/cap/token/content가 같으면 원 기록만 돌려주거나 효과0이고, 바뀌면 conflict다. 원 필드를 현재 now로 바꾸지 않는다. 이미 수락한 FILLED의 늦은 정확 중복도 IN_USE/FREE를 READY로 되돌리지 않는다. slot별 현재 write/filled 기록은 FREE에서도 마지막 원본으로 남을 수 있으며 active grant와 다르다. 이전 모든 UUID/결과의 무한 history를 제공하지 않는다.
+
+READY 교체는 `begin_replace(slot, expected_key, request, write_token, now_us=...)`가 미claim을 확인하고 ReplacementTicket을 예약하는 단계부터 시작한다. canonical READY는 유지하지만 ticket 동안 해당 slot의 ACQUIRE/다른 교체를 막는다. planned key는 아직 새 WriteGrant가 아니다. lower가 exact ticket에 대해 ready consume 성공→writable post 성공을 확인한 `ReplacementSyncFact(ticket, ready_consumed_us, writable_posted_us, finished_us)`를 `complete_replace(..., now_us=...)`에 주어야 새 generation/WRITING/grant를 확정한다. c1은 token 작업을 실행하지 않는다. MAX는 외부 작업 전에 거절하고 reset/자동 새 arena를 만들지 않는다.
+
+부분 실패(None/None 또는 consume만 완료)·늦은 fact·source fence·외부 token 작업 뒤 local commit 실패는 ticket/fact를 유지한 sticky fault/fence로 남긴다. 정상 READY로 rollback하거나 writable post를 추가하지 않는다. 정확 중복 fact는 효과0이고 바뀐 terminal fact는 conflict다. 새 grant의 granted_us는 실제 local commit 시각이며 원 request 기한을 늘리지 않는다. `fence(now_us=..., retired=False)`는 사용권만 철회하고 원 소유 기록을 유지한다. fenced arena의 cleanup FREE가 새 write 사용권을 되살리지 않는다.
+
+원장 하나는 현재2slot, slot당 현재 write/filled·최근 cleanup summary 하나, A outstanding write/ticket 하나와 M active read 하나만 보유한다. ticket은 이전 grant/history를 재귀적으로 붙이지 않는다. owner exit 회수·reader 교체·token 정규화·전역 active/최대1 quarantine set 관리자와 새 arena 생성은 미지원이다. 같은 arena에 원장을 새로 만들어 generation을 초기화하는 우회는 실제 adapter가 막아야 한다. SLOT/BIND wire 지원·owned bytes header/descriptor codec·SHM/SemLock·실 exit/lease 회수·metric/READY·이동 권위를 이 순수 API의 통과로 수락하지 않는다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
