@@ -139,6 +139,8 @@ export type VmResourceUpdate =
 /** POST /api/v1/vms/{id}/stress/cpu — workers 1~4, duration_s 1~120 */
 export interface CpuStressRequest {
   workers: number;
+  /** Zephyr는 단일 vCPU 안에서 이 duty cycle만큼 CPU를 점유한다. */
+  load_percent?: number;
   duration_s: number;
 }
 
@@ -161,9 +163,31 @@ export interface StressCommand {
   type: StressType;
   /** CPU 는 워커 수, MEMORY 는 MiB */
   amount: number;
+  load_percent?: number | null;
   duration_s: number;
   submitted_at: string;
   expires_at: string;
+}
+
+/** POST /api/v1/vms/{id}/faults/auto-delay — Zephyr 주행 연산에 지연을 주는 데모 명령 */
+export interface AutoDelayRequest {
+  delay_ms: number;
+  duration_s: number;
+}
+
+export interface AutoDelayCommand extends Omit<StressCommand, 'type'> {
+  type: 'AUTO_DELAY';
+  delay_ms: number;
+}
+
+export type CommandState = 'PENDING' | 'ACCEPTED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'REJECTED';
+
+export interface CommandStatusResponse {
+  command_id: string;
+  vm_id: string;
+  status: CommandState;
+  message?: string | null;
+  updated_at: string;
 }
 
 /** §2.3 */
