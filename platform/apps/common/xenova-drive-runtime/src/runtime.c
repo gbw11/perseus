@@ -89,6 +89,7 @@ static struct row rows[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
 static struct xd_delivery deliveries[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
 #endif
 static struct xd_inputs cycle_inputs;
+static int cycle_inputs_status;
 static const struct xd_received *command_input=&cycle_inputs.input;
 static int64_t command_valid_until;
 static struct xd_candidate candidate;
@@ -352,6 +353,7 @@ int xd_iteration_begin(void)
 	current.iteration_begin = now_us();
  command_input=&cycle_inputs.input;command_valid_until=0;
 	int rc = xd_io_snapshot(&cycle_inputs);
+	cycle_inputs_status = rc;
 	if (rc) {
 		/* Do not wait or mix generations. Missing input follows the existing
 		 * algorithm's idle/stop rules; a busy snapshot is not fresh data. */
@@ -361,6 +363,7 @@ int xd_iteration_begin(void)
 	return current.iteration_begin == UINT64_MAX ? -EIO : 0;
 }
 void xd_inputs_copy(struct xd_inputs *out) { if (out) { *out = cycle_inputs; } }
+int xd_inputs_status(void) { return cycle_inputs_status; }
 int xd_publish_completed(const char *topic,const char *type,const char *payload,
  uint64_t progress,int64_t produced_ms,const struct xd_inputs *source)
 {

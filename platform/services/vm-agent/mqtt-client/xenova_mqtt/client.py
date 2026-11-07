@@ -423,6 +423,8 @@ class XenovaClient:
             self._receive_guard=guard
 
     def _on_message(self, client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
+        # Paho callback 진입 시각을 보존해 검증·guard 대기를 새 신선도로 빌리지 않는다.
+        received_monotonic = time.monotonic()
         if not msg.payload:
             return  # retained 삭제 알림
         if len(msg.payload) > policy.MAX_BYTES:
@@ -461,7 +463,8 @@ class XenovaClient:
             log.debug("버림 %s: seq %s 중복·역전", msg.topic, envelope.get("seq"))
             return
 
-        message = Message(msg.topic, envelope, retained=bool(getattr(msg, "retain", False)))
+        message = Message(msg.topic, envelope, received_monotonic=received_monotonic,
+                          retained=bool(getattr(msg, "retain", False)))
         with self._lock:
             self._latest[msg.topic] = message
             handlers = [

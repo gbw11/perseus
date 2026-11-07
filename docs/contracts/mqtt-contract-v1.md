@@ -23,6 +23,12 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 | 크기 | 메시지 64 KB 이하. 주행 토픽(`drive.command`, `vehicle/*`)은 1 KB 이하 |
 | 세션 | clean session. 오프라인 큐에 기대지 않는다 |
 
+Python 공통 클라이언트의 내부 `Message.received_monotonic`은 Paho 수신 콜백에 진입한
+단조 시각이다. JSON·신원·중복 검사나 handler 대기를 마친 시각으로 갱신하지 않는다.
+현재 실행의 신원·권한은 검사 시점에 별도로 확인한다. 이 값은 봉투에 추가한 필드가 아니며,
+콜백 전에 생긴 Paho·TCP·브로커 대기나 발행자의 원 입력 나이를 측정하지 않는다.
+`sent_at`과 다른 장치의 단조 시각을 빼서 그 구간을 채우지 않는다.
+
 ## 2. 공통 봉투
 
 공통 봉투를 사용한다. Spring의 `AgentEnvelope`와 `AgentMessageHandler`는 Linux 에이전트 메시지를 검사한다. Zephyr MQTT-03의 시각·누적값 처리 조건은 3.1절을 따른다.

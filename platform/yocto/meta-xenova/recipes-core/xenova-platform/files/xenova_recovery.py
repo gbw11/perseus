@@ -199,7 +199,15 @@ class Recovery:
                    details={'operation_id':op['operation_id'], 'reason':'HOST_BOOT_CHANGED'})
         if self.p.clock() >= deadline:
             refuse('DEADLINE_EXCEEDED', 'recovery reconciliation budget expired')
-        if op['phase'] in ('completed', 'failed'):
+        marker = {'operation_id':op['operation_id'], 'recovery_attempt_id':identity,
+                  'deadline_monotonic_ms':spec['deadline_monotonic_ms']}
+        pending_run = self.e.run_record({'uuid':spec['vm_id']})
+        resume_disposal = bool(op['phase']=='failed' and pending_run
+            and pending_run.get('owner')=={'kind':'recovery','recovery_attempt_id':identity}
+            and pending_run.get('recovery_reconciliation')==marker
+            and pending_run.get('phase') in ('uncertain','stopped')
+            and (op.get('reconciliation') or {}).get('outcome')=='stopped_without_replacement')
+        if op['phase'] in ('completed', 'failed') and not resume_disposal:
             if execute and op.get('reconciliation'):
                 # 이전 replace 뒤 parent fsync 응답을 잃었을 수도 있어 같은 결과를 재확정한다.
                 self.e.write(self.path(identity), op)
@@ -209,12 +217,13 @@ class Recovery:
         run = self.e.run_record(record)
         intent = self.e.intent(record)
         snapshot = {'record':fingerprint(record), 'run':run, 'intent':intent}
-        phase = op['phase']
+        phase = 'uncertain' if resume_disposal else op['phase']
         failed_phase = (op.get('error') or {}).get('details', {}).get('failed_phase')
         stopping = phase == 'stopping' or phase == 'uncertain' and failed_phase == 'stopping'
         owner = {'kind':'recovery', 'recovery_attempt_id':identity}
         checks = {'cpu_policy':self.p.cpu().context(record) == op.get('cpu_policy', {'configured':False})}
         outcome = None
+        dispose_launch = False
         if phase in ('accepted', 'removed'):
             # 이 phase 이후의 create는 먼저 launching을 내구 저장해야 한다.
             checks['no_unresolved_launch'] = not run or run.get('phase') not in ('launching', 'uncertain')
@@ -247,6 +256,17 @@ class Recovery:
             elif run and run.get('owner') == owner and run.get('launch_aborted_before_submit') is True:
                 checks['correlated_execution'] = observed['presence'] == 'absent' and run.get('phase') == 'stopped'
                 outcome = 'not_submitted'
+            elif (run and run.get('owner')==owner and self.p.process_isolation
+                    and observed['presence']=='absent'
+                    and (run.get('phase') in ('launching','uncertain') or resume_disposal)):
+                from xenova_guest_process import scope_name
+                checks['correlated_execution'] = True
+                checks['expired_launch'] = self.p.clock()*1000 >= spec['deadline_monotonic_ms']
+                checks['owned_launch_scope'] = run.get('process_scope') == scope_name(spec['vm_id'],run['execution_id'])
+                # Absence alone cannot release an interrupted create. The existing
+                # observe-only cleanup below must also prove its exact scope empty.
+                outcome = 'stopped_without_replacement'
+                dispose_launch = True
         else:
             checks['supported_phase'] = False
         if outcome != 'launch_observed' and observed['presence'] == 'absent' and self.p.process_isolation:
@@ -290,9 +310,17 @@ class Recovery:
                 refuse('TARGET_CHANGED', 'original attempt, intent or execution changed before durable confirmation')
             if self.p.clock() >= deadline:
                 refuse('DEADLINE_EXCEEDED', 'recovery reconciliation guard budget expired')
+            prior = op.get('reconciliation') or {}
             op['reconciliation'] = {**result, 'status':'confirmed', 'executed':True,
-                                    'original_phase':phase, 'original_error':op.get('error')}
+                                    'original_phase':prior.get('original_phase',phase),
+                                    'original_error':prior.get('original_error',op.get('error'))}
             try:
+                if dispose_launch:
+                    # Keep the runtime launch gate closed until the original
+                    # terminal record is durable. A cut between writes is resumed
+                    # only by this explicit reconcile, never a new create.
+                    pending_run = {**run, 'phase':'uncertain', 'recovery_reconciliation':marker}
+                    self.e.write(self.e._path(self.p.runtime,'executions',record['uuid']),pending_run)
                 if outcome == 'launch_observed':
                     self.complete(op, final)
                 else:
@@ -304,9 +332,28 @@ class Recovery:
                         'next_action':'observe_current_intent_before_any_new_request'}}
                     op['result'] = None
                     self.save(op, 'failed')
+                if dispose_launch:
+                    self.e.write(self.e._path(self.p.runtime,'executions',record['uuid']),
+                                 {**pending_run,'phase':'stopped','stopped_monotonic_ms':int(self.p.clock()*1000)})
             except OSError as error:
+                rollback = None
+                if dispose_launch:
+                    try:
+                        # replace may have succeeded before its directory fsync
+                        # failed. Retain the pending gate while still owning the
+                        # admission lock; never restore a different execution.
+                        current = self.e.run_record(record)
+                        if (current and current.get('execution_id')==run['execution_id']
+                                and current.get('owner')==owner
+                                and current.get('recovery_reconciliation')==marker):
+                            self.e.write(self.e._path(self.p.runtime,'executions',record['uuid']),pending_run)
+                    except (PlatformError,OSError,ValueError) as restore_error:
+                        rollback = {'cause_type':type(restore_error).__name__,
+                                    'errno':getattr(restore_error,'errno',None)}
                 refuse('RECONCILE_REQUIRED', 'reconciliation durability not confirmed; inspect same original attempt',
-                       details={'operation_id':op['operation_id'], 'recovery_attempt_id':identity})
+                       details={'operation_id':op['operation_id'], 'recovery_attempt_id':identity,
+                                'storage_cause_type':type(error).__name__, 'storage_errno':getattr(error,'errno',None),
+                                **({'rollback_error':rollback} if rollback else {})})
         return {'attempt':op, 'reconciliation':op['reconciliation'], 'original_result':op.get('result')}
 
     def expire_prelaunch(self, op):

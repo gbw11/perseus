@@ -1,14 +1,14 @@
 # Recovery Worker·Engine 후속 구현 요청
 
 담당: Worker·Engine. 상태: **6-A 인계 준비 / D01·D03의 정책·제품 연결 수락 전**.
-2026-11-02 현재 지시다. 기존 ID와 [상세 근거](2026-10-27-recovery-health-ctrl.md)는 유지한다.
+2026-11-02 인계에 2026-11-06 E4 국소 후속을 반영했다. 기존 ID와 [상세 근거](2026-10-27-recovery-health-ctrl.md)는 유지한다.
 
 ## 현재 담당자가 할 일
 
 ### D01-W01·W02 / D03-W01·W02 — 제공된 VM별 자격과 적용 프로필 연결
 
 플랫폼은 일반 create와 factory UUID 계획 뒤 자격 공급을 연결했다.
-[제공 API·상태·실행 예제](../contracts/vm-provisioning-v1.md)를 사용한다. Worker 제품 코드는 이번에 수정하지 않았다.
+[제공 API·상태·실행 예제](../contracts/vm-provisioning-v1.md)와 아래 Worker 소비 구현을 사용한다.
 설치된 `/usr/lib/xenova/xenova_provisioning.py`의 `credential_file(data, vm_id, channel)`은
 root 전용 설정 Path를 반환하며 발급·reload하지 않는다. `channel`은 telemetry 또는 drive다.
 
@@ -51,21 +51,24 @@ CLI는 `xenova-vm intents --json`, 단건은 `xenova-vm intents UUID --json`이�
 intent_lifecycle_generation·generation과 이름/guest_kind/template 식별을 소비한다.
 intent가 없으면 unknown/null/applicable=false다. autostart나 실제 running으로 보충하지 않는다.
 
-수정 위치는 `recovery/observe.py:PlatformObserver._refresh_intents`의 현재 `list` 호출이다.
-의도 수집만 전환하고 `__call__`의 별도 Xen 목록, `confirm`의 현재 재확인, rejoin binding과
-recover_once 직전의 원 host/실행/의도/기한 guard는 유지한다. 실패한 조회를 빈 목록이나
-과거 cache의 현재 의도로 바꾸지 않는다. 이 응답은 복구 승인 토큰이 아니다.
+`recovery/observe.py:PlatformObserver._refresh_intents`는 이미 `intents`를 기본으로 사용한다.
+이를 모르는 구형 하위가 `INVALID_SPEC`을 반환할 때만 `list`로 전환하며, 그 뒤에는 기존 refresh 주기를 따른다.
+`__call__`의 별도 Xen 목록, `confirm`의 현재 재확인, rejoin binding과 recover_once 직전의
+원 host/실행/의도/기한 guard는 유지한다. 조회 실패 뒤 남긴 cache는 표시용이며 현재 의도로
+승격하지 않는다. 이 응답은 복구 승인 토큰이 아니다.
 
-`drivers/platform.py:SerializedManager.call/fork`, `_BUDGET_ACTIONS/call_with_budget`도 연결 대상이다.
-공유 inner를 직접 동시에 호출하지 말고 요청별 fork와 잔여 budget 전달을 사용한다.
-현 제품 wrapper는 새 action의 독립 호출·budget 지원을 아직 완료하지 않았다.
+`drivers/platform.py`의 `_READ_ACTIONS`, `_BUDGET_ACTIONS`, `_TIMEOUT_ACTIONS`에도 `intents`가 포함돼 있다.
+`SerializedManager.call/fork`는 지원 하위에서 `read_fork`를 켠 경우 요청별 fork로 읽기를 실행하고,
+`call_with_budget`는 요청 예산이 있을 때 남은 budget/timeout만 전달한다.
+실제 설치본의 fork 지원·설정과 호출 예산을 확인한다. 공유 inner를 여러 thread에서 직접 호출하지 않는다.
 get/list/probe/execution-context는 하위에서 같은 관측 엔진·제한 슬롯을 사용한다.
 templates/recovery-operation/원 key 조회도 긴 물리 실행 잠금 밖이며, 상위 mutex 대기는 별도다.
 
 담당 수락은 정상 D/U/Z·factory 조회→metadata 오류/동시 stop·retire→정상 회복이다.
 긴 A restore 중 B intents/현재 조회/key 조회·실제 stop 완료를 함께 확인한다.
 하위 시험은 `test_xenova_query_consistency.py`와 `test_xenova_lifecycle_ownership.py`의 CLI barrier다.
-이번에는 Worker 제품을 수정하지 않았다. 담당 연결·운영 수락은 미완료다.
+기본 소비 코드를 다시 만들지 말고 실제 로드 모듈·설정과 위 정상/실패 수락을 확인한다.
+이번 보드 예산 시험과 정책·운영 수락은 아직 진행 중이다.
 
 ### D03 — 제공된 Gateway client를 복구 단계에 연결
 
@@ -74,13 +77,22 @@ templates/recovery-operation/원 key 조회도 긴 물리 실행 잠금 밖이�
 설치 패키지는 `xenova-gateway-client`, 기본 endpoint는 `/run/xenova-gateway/control.sock`이다.
 현재 root Worker/Gateway 배치에서 같은 host·namespace의 private socket에 접근한다. Authority 파일이나 shell 출력은 읽지 않는다.
 [실제 호출·결과 계약](../contracts/gateway-provider-v1.md)과 [실행·실패 시험 근거](../verification/recovery-scenario-closure-20261030.md#gateway-provider)를 따른다.
-현재 후속 후보는 `cdcb619`+`feat/platform/gateway-history-driving-app`의 diff/manifest다.
-과거 G1 제공 후보 `8e3232a`의 근거는 보존하며 실제 운영 설치·Worker 연결은 아직 수행하지 않았다.
+검토 시작 기준은 HEAD `5d05101efd39c457cb78a05b473952bc38e7a317`과 당시 미커밋 diff였다.
+현재 인계 소스는 `feat/platform/recovery-drive-runtime-hardening`의 작업별 커밋이다.
+보드 B의1.0.30 유지, 운영 Python 설치와 시험 사본의 차이, 미완료 READY·부하 시험은
+[최신 중단 기록](../verification/recovery-scenario-closure-20261030.md#r65-pause-20261107)으로 구분한다.
+실제 시험 사본·로드 경로와 미완료는 [보드 예산 시험 연결표](../verification/recovery-scenario-closure-20261030.md#budget-board-followup-20261106)에 연결한다.
+과거 G1 후보 `8e3232a`는 [당시 제공자 검증](../verification/recovery-scenario-closure-20261030.md#gateway-provider)에,
+`cdcb619`와 `feat/platform/gateway-history-driving-app`은 [이력·주행앱 착수 기록](../verification/recovery-scenario-closure-20261030.md#history-driving-app)에 보존한다.
+과거 실보드 결과는 당시 후보의 근거이며 이번 후보의 설치·정책·종단 수락을 대신하지 않는다.
 
-Worker 담당자는 `recovery/engine.py:_task_attempt`의 **Manager recover_once 호출 전**에 보호 단계를 연결한다.
-긴 복구 executor 안에서 원 요청을 보존하고 submit/get을 각각 유한 budget으로 호출한다.
-`_task_replay`는 응답 유실 뒤 같은 Gateway key를 조회하고 `_on_result`는 접수·보호·복구 결과를 따로 소비해야 한다.
-주 판단 루프를 전환 완료 polling으로 막지 않는다. 기존 attempt/대상/의도·부모 기한에서 Gateway spec을 만들고 최초 송신 전에 보존한다.
+`recovery/__main__.py:main`은 drive 설정이 있을 때 `ClientPort.production`과 `GatewayProtection`을 만들고
+`RecoveryEngine`에 주입한다. 설정이나 client가 없으면 주행 VM force를 보호 성공으로 간주하지 않고 보류한다.
+`engine.py:_task_attempt/_protect`는 **주행 VM의 Manager force 복구 호출 전** 원 보호 요청을 저장하고,
+복구 executor에서 submit/get을 유한 budget으로 호출한다. `_task_replay`는 원 attempt 결과를 회수하고
+`_on_result`는 새 execution을 확인해 복구 완료를 기록한다. 주 판단 루프에서 전환 완료를 polling하지 않는다.
+이 연결은 이미 소스에 제공되므로 같은 로직을 다시 만들지 말고 실제 설정·설치본으로 수락한다.
+Gateway spec은 기존 attempt/대상/의도·부모 기한에 결합하며 최초 송신 전에 보존한다.
 시간 포함 key를 선택한 설치에서는 `from xenova_gateway.client import new_request_id`를 사용해
 최초 송신 전에 `new_request_id(host_boot_id)`를 한 번 호출하고 원 attempt에 저장한다.
 client의 submit/get은 key·기한·generation을 재발급하지 않는다. 다른 실행/승인으로 spec을 덮지 않는다.
@@ -96,9 +108,11 @@ client의 submit/get은 key·기한·generation을 재발급하지 않는다. �
 그 다음에도 Manager의 현재 intent/execution·원 deadline·소유·force guard를 통과해야 한다.
 한 번의 get을 영구 복구 허가로 보관하지 않는다. Gateway가 해당 VM의 재선택을 차단한 동안만 보호 근거가 유지된다.
 
-복구가 새 execution으로 완료되면 `rejoin.py:RejoinCoordinator.completed/pump`의 현재 Bootstrap→binding과 연결해
-`finish(request_id, {host_boot_id, expected_generation, target_execution_id})`로 보호를 종결한다.
-복구 전 정당한 취소라면 같은 원 execution을 확인해 `cancel`한다. 종결 승인 경합은 AUTHORITY_CHANGED로 재판단한다.
+`RecoveryWorker.run_once`는 Engine의 완료 실행을 `rejoin.py:RejoinCoordinator.completed/pump`에 넘겨
+현재 Bootstrap→binding으로 연결한다. Engine의 `_task_settle`과 `GatewayProtection.settle`은 새 실행 binding을
+확인하면 `finish(request_id, {host_boot_id, expected_generation, target_execution_id})`를 호출한다.
+원 실행 그대로이고 복구가 정당하게 취소·회복으로 끝났으면 `cancel`하며, 실패로 닫힌 실행은 임의로 해제하지 않는다.
+종결 승인 경합은 AUTHORITY_CHANGED로 다시 확인한다.
 cancel/finish는 재무장·자동 AUTO 복귀가 아니며 새 binding·계산과 기존 재합류/명시 재개 조건은 계속 필요하다.
 계획 정비는 `purpose=handoff`의 submit→준비→commit→앱/필요 장치 결과로 별도 연결한다. 준비 실패 시 정상 A를 유지한다.
 
@@ -112,14 +126,14 @@ BUSY_NOT_ACCEPTED는 그 메시지의 queue 미접수이며 과거 같은 key �
 앱/Xen/output fixture를 사용하며 Gateway actor·Authority·UDS/client는 제품 코드다. 실제 Worker/VM 제어 완료를 뜻하지 않는다.
 Worker 담당 수락은 보호→원 Manager 복구→새 binding→finish의 정상 진행과 user stop·응답 유실·host/실행 교체·늦은 취소를 짝지어야 한다.
 
-아래 위치는 `platform/services/dom0-manager/dom0_manager/` 기준이다. 제품 코드는 플랫폼에서 대신 수정하지 않는다.
+아래 위치는 `platform/services/dom0-manager/dom0_manager/` 기준이다. 제공 코드와 남은 설치·정책·종단 수락을 구분한다.
 
 | ID·상태 | 수정 위치·무엇을 왜 고치는가 | 정상 수락·실패 보호 |
 |---|---|---|
-| D01-W01·W02 / 담당 구현 전 | `recovery/observe.py:PlatformObserver.__call__/_refresh_intents/_merge`, `watcher.py:_judge/_signal_age`, `heartbeats.py`. broker 연결과 대상 VM·현재 실행·신호 전달을 분리한다. 관측 실패 후 남은 intent cache는 현재 복구 허가가 아니다 | 정상 관측→첫 무수신/Agent만 장애/앱 정체/공통 broker 단절→회복을 구분. 다른 VM 수신으로 승인·관측 실패의 빈 목록/VM 사망 변환·오래된 stop 덮기 0 |
-| D01-W03·W04 / 정책 결정·구현 전 | `recovery/engine.py:_check_watcher/_attempt_failed/_close`, `policy.py`. 유효 자원·실제 기능 진행에서 행동 범위를 정하고 Linux 로컬 감독과 VM 복구 경합, 안정 구간·episode 회복·반복 예산을 연결한다 | 정상 기능 보존, 경고/로컬 수습/VM 복구를 구별. 잠깐 HEALTHY 후 예산 무제한 초기화·공통 경로 장애의 재시작 폭주·자동 force 0 |
+| D01-W01·W02 / 기본 소비 제공·설치 수락 전 | `recovery/observe.py:PlatformObserver.__call__/_refresh_intents/_merge`, `watcher.py:_judge/_signal_age`, `heartbeats.py`. 기본 intents·구형 list fallback과 broker/대상 실행/전달 구분은 제공된다. 관측 실패 후 남은 intent cache는 현재 복구 허가가 아니다 | 정상 관측→첫 무수신/Agent만 장애/앱 정체/공통 broker 단절→회복을 구분. 다른 VM 수신으로 승인·관측 실패의 빈 목록/VM 사망 변환·오래된 stop 덮기 0 |
+| D01-W03·W04 / 정책 수치·종단 수락 전 | E4 안정 구간·VM 누적 예산은 `engine.py:_update_stability/_task_attempt`, `policy.py`, `budget.py`, `state.py`에 제공한다. 소유 Debian의 실제 Xen/Agent/Worker/Store 보드 시험은 [후속 근거](../verification/recovery-scenario-closure-20261030.md#budget-board-observations-20261106)에 연결한다. [계약](../../platform/services/dom0-manager/README.md#e4-안정-구간과-vm별-누적-복구-예산)에 따라 승인된 두 값을 공급하고 설치 후보를 맞춘다. Linux 로컬 감독과 VM 복구 경합·행동 범위 결정은 별도 남는다 | 정상 기능 보존, 경고/로컬 수습/VM 복구 구별. 반복 장애·같은 attempt·Worker 재시작·저장 실패·정상 안정 회복을 제공 시험에 연결하고 실제 설치본으로 수락. 자동 force 0 |
 | D01-W05 / 저장·배포 공동 수락 전 | `recovery/state.py:RecoveryStore`, `engine.py:_commit/_flush_pending/_retry_pending`, `mqtt.py` 사건 경계. 실제 작은 state/pending/events의 S01/S02 보호와 같은 event ID를 유지한다 | 같은-host 재시작 후 pending 재전달·손상 차단·필수 저장 실패의 성공 승격 0. 새 host의 옛 단조 기한/실행 사용 0 |
-| D03-W01·W02 / 후속 소비 전 | `engine.py:_task_replay/_on_result`, `recovery/rejoin.py:ProductionBootstrap`, `RejoinCoordinator.completed/pump`. 원 attempt·receipt의 늦은 확정과 수습 결과를 기존 provisioning→binding 흐름으로 회수한다 | 새 attempt/key/deadline·재주입 0. 같은 applied receipt와 정당한 새 실행은 정상 합류하고 저장 미확정·옛 host/신원은 보류 |
+| D03-W01·W02 / 원 결과·보호 정산 제공·설치 수락 전 | `__main__.py`, `engine.py:_task_attempt/_task_replay/_on_result/_task_settle`, `protection.py`, `recovery/rejoin.py:ProductionBootstrap`, `RejoinCoordinator.completed/pump`. 원 attempt 회수·Gateway 보호·새 binding 뒤 finish/정당한 cancel은 제공된다 | 새 attempt/key/deadline·재주입 0. 같은 applied receipt와 정당한 새 실행은 정상 합류하고 저장 미확정·옛 host/신원은 보류 |
 | D03-W03·W04 / 공동 수락 전 | 위 Engine/Coordinator와 readiness 소비. 기능 회복·episode 종결·Standby 재합류를 별도로 판단한다 | 복구 새 execution이 정상 후보로 합류하고 기존 Active 유지. Manager completed·Gateway COMMITTED·PUBACK을 장치 적용/출력 허가로 바꾸지 않음 |
 
 ## 플랫폼 제공물과 지원 조건
@@ -159,12 +173,23 @@ MANUAL 명시 선택의 `manual_hold`와 기존 resume/countdown은 사용자 �
 
 ## 선행조건·공동 결정
 
-Worker–Gateway의 로컬 전송은 위 client/UDS로 제공된다. 남은 것은 Worker의 원 attempt 저장·단계 소비·현재 Manager guard와
-정당한 finish/cancel 연결이다. 내부 submit_transition을 별도 프로세스에서 부르거나 Authority 파일을 보호 ACK로 쓰지 않는다.
-Worker 정책·실제 설치본과 이 제공물을 함께 연결하는 7번 종단 수락은 대기한다. 일반 관측·원 결과 회수는 별도로 진행한다.
+Worker–Gateway의 client/UDS와 원 attempt 저장·보호 단계 소비·현재 Manager guard·정당한 finish/cancel은 소스에 연결돼 있다.
+남은 것은 실제 로드 모듈·drive/자격 설정과 원 기록의 대응, 정책 수치 및 정상/실패/회복의 설치·종단 수락이다.
+진행 중인 보드 예산 시험을 전체 7번 수락으로 표시하지 않는다. 일반 관측·원 결과 회수는 별도로 진행한다.
+내부 submit_transition을 별도 프로세스에서 부르거나 Authority 파일을 보호 ACK로 쓰지 않는다.
 
 Agent/앱의 실제 필수 작업·idle·서비스 수명·로컬 감독 wire는 Linux/앱·Worker·계약 담당이 정한다.
-안정 구간·episode 간 예산의 수치는 Worker 정책 담당의 근거가 필요하다. 기존 단일 recovery 상한을 임의로 늘리지 않는다.
+안정 구간·VM 누적 예산의 수치는 Worker·플랫폼/운영 담당의 실측과 승인이 필요하다. `XENOVA_RECOVERY_STABLE_S`와
+`XENOVA_RECOVERY_VM_MAX_ATTEMPTS`는 함께 명시할 때만 동작하고 운영 fallback은 없다. 기존 단일 recovery 상한은 유지한다.
+제공 후보의 [E4 로컬/ARM/포장 근거](../verification/recovery-scenario-closure-20261030.md#worker-budget-closure-20261106)와
+[실보드 예산 입력표](../verification/recovery-scenario-closure-20261030.md#budget-board-followup-20261106)와
+[실측·실패·후속 보완](../verification/recovery-scenario-closure-20261030.md#budget-board-observations-20261106)을 사용한다.
+추가 [병렬 binding·장치 수신 계측](../verification/recovery-scenario-closure-20261030.md#parallel-binding-feedback-20261106)은
+현재 조회 기한을 A/B가 공유하지 않도록 보완하고 같은 관측 안의 중복 읽기를 줄인 후보다.
+관측 실패·만료는 계속 binding을 제한한다. ARM/native pool 반환 근거를 보드 지도 계산·정상 합류 수락으로
+대신하거나, 실제 수신 없이 앱 신호·READY·현재 복구 허가를 만들지 않는다.
+담당 회신에는 승인한 프로필의 근거·실제 로드 후보/설정·반복 장애/소진/원 replay/Worker 재시작/정상 회복 결과를 남긴다.
+시험 PROFILE의 숫자를 운영값으로 복사하거나, 새 설정 때문에 공개 journal 버전·HTTP endpoint 선택을 요구하지 않는다.
 기본 `/run/xenova/recovery`의 host 재부팅 보존은 별도 결정이며 영속 경로·SQLite 이관을 이번에 승인하지 않았다.
 
 ## 수락·담당 회신
@@ -211,7 +236,7 @@ CPU 정책 2.0·새 incarnation 검증은 그대로다. 이번에 Worker 제품�
 |---|---|---|---|
 | 승인된 최소 연결, 로컬 완료 | `recovery/rejoin.py`, `mqtt.py`, `heartbeats.py`, `watcher.py`, `observe.py`, `model.py` | warm-drive-1의 앱별 신원·실제 감독·대기 소비. 두 앱 각각의 근거 요구, 기능 제한과 VM 장애 분리. Engine/예산 정책은 유지 | `tests/test_warm_liveness.py`, `test_drive_rejoin.py`의 실제 Engine/Manager/receipt와 외부 Xen/Store 대역. [후속 검증](../verification/zephyr-drive-foundation-20261029.md#후속-앱별-수명과-warm-준비-연결) |
 | D01-W01·W02, 기존 대기 | `watcher.py:Watcher`와 `_judge`, `model.py`·건강 입력 | 대상별 전달 자격·원 실행·자원/실제 진행/기능 상태를 판정에 연결. 다른 VM 수신·CPU% 하나로 장애 확정하지 않음 | 기존 D01 반례와 원 요청의 assertion 유지. 지원되지 않는 계측을 정상 0으로 치환하지 않음 |
-| D01-W03·W04·E4, 기존 대기/확장 | `engine.py`, `policy.py`, 로컬 수습과의 연결부 | 경고·앱 수습·VM 복구를 분리. 안정 구간·episode 회복·반복 예산의 정책과 소진 후 수습을 명시 | 로컬 재초기화와 중복 물리 복구 0, 불충분한 잠깐 정상으로 예산 무제한 초기화 0. 숫자는 원천·실측·운용 정책으로 합의 |
+| D01-W03·W04·E4, E4 로컬 제공/운영 수락 전 | `engine.py`, `policy.py`, `budget.py`, `state.py`, `Watcher.stability_samples` | 원 COMPLETED·현재 건강·연속 안정·예산 회복을 분리. VM별 새 논리 시도만 공동 저장으로 차감하고 원 replay는 추가 차감 0. 소진 중 원 회수·출력 보호 유지 | `test_recovery_budget.py`의 실제 Worker/저장·독립 프로세스·느린 상태 sink·Standby 회귀를 재사용. 운영 수치는 후속 보드 측정으로 합의. 앱 로컬 재초기화 정책은 별도 |
 | D03-W01~W04, 기존 대기 | `engine.py`의 원 attempt 재확인, `rejoin.py` | 원 operation·deadline·receipt의 뒤늦은 확정 결과를 받아 새 실행 provisioning→바인딩→Standby 준비로 연결 | 조회가 새 물리 실행/기한 발급 0. Manager completed를 앱 재합류·출력 허가로 바꾸지 않음 |
 | D01-W05·A1/E1·D4·G2, 후속 | 기존 요청의 판정·저장·배포 지점 | 최초 무수신, 공통 기반 오류, 기록 보존·host 재시작을 별도 정책/배포 수락으로 정리 | 관측 불가와 실제 장애 구분. 손상 이력·저장 실패를 최초 빈 상태로 오인하지 않으며 S01/S02 보존 |
 
@@ -222,7 +247,7 @@ CPU 정책 2.0·새 incarnation 검증은 그대로다. 이번에 Worker 제품�
 | 기존 ID·시나리오 | 실제 위치·권고 | 구체적인 수락 |
 |---|---|---|
 | D01-W01·W02, A1·E1·D2 | `watcher.py:_judge/_signal_age`, `observe.py`, `heartbeats.py`에서 첫 무수신·전달 불가·기능 제한·보고자 장애를 구별. 현재 실행의 provisioning·경로 확인과 유한한 시작 실패 판정을 연결 | 처음부터 신호 없음이 영구 정상/무조건 VM 재시작으로 바뀌지 않음. 보고자만 장애/앱 정상, 대기 정상/계산 정체를 각각 주입 |
-| D01-W03·W04, E4·D4·DO2 | `engine.py:_check_watcher/_attempt_failed/_close`, `policy.py`에서 안정 구간과 episode 간 예산·회복 조건을 명시. 현재 3회는 한 recovery의 상한이며 새 episode 반복의 상한이 아님 | 잠깐의 HEALTHY로 누적 제한이 초기화되지 않음. 공통 경로 장애 중 개별 VM 복구 폭주 0. 값은 정책 소유자가 근거와 함께 확정 |
+| D01-W03·W04, E4·D4·DO2 | E4의 VM별 누적 예산·안정 회복은 제공 계약으로 연결한다. 기존 episode 상한·공통 경로 보류는 유지. 기간 단위 전역 상한(DO2)·운영 값과 보드 수락은 별도 결정 | 잠깐 HEALTHY·새 episode·새 execution·Worker 재시작으로 예산 초기화 0. 실제 새 시도·소진 후 보호·원 결과 회수와 연속 안정 뒤 회복을 설치본에서 수락. 전역 상한을 제공했다고 표시하지 않음 |
 | D03-W01~W04, F5·H1 | 원 attempt의 하위 reconcile 확정 결과를 Engine/Coordinator에 반영. 활성 VM 복구 전 출력 보호와 계획 정비의 인계 완료를 구분 | COMMITTED/PUBACK을 새 앱 출력·장치 정지로 치환하지 않음. 정상 owner의 준비 실패 시 계획 정비 보류. 복구 후 새 execution이 Standby로 재합류하고 기존 Active 유지 |
 | D01-W05, G2·AO3 | 기본 `/run/xenova/recovery`의 host 재부팅 보존 정책을 별도 확정. S01/S02의 같은-host 재시작 보호와 구별 | 새 host에서 옛 단조 기한/실행/예산을 현재 것으로 재사용하지 않음. 손상/조회 실패를 최초 빈 상태로 숨기지 않음. 경로 변경·이관은 별도 승인 |
 

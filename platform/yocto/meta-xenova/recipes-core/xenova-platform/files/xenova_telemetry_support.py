@@ -136,32 +136,112 @@ def clock_response(context, request, sample):
     return {**sample,'unix_ms':str(sample['unix_ms']),'nonce':request['nonce'],'host_boot_id':context['host_boot_id'],
             'execution_id':context['execution_id']}
 
+def _clock_request(raw, execution_id):
+    value=json.loads(raw)
+    if (not isinstance(value,dict) or set(value)!={'nonce','execution_id'}
+            or value['execution_id']!=execution_id or not isinstance(value['nonce'],str)
+            or not re.fullmatch('[0-9]{1,20}',value['nonce'])):
+        raise ValueError('clock request context invalid')
+    return value
+
+def _clock_answered(raw, request, context):
+    """기존 wire 응답의 재전달만 확인한다. 현재 실행이나 새 UTC 품질의 승인이 아니다."""
+    from xenova_vm import UUID
+    if raw is None or raw==b'':return False
+    value=json.loads(raw)
+    # guest clock.c의 xt_utc_update와 같은 UTC/오차/drift/source 범위다.
+    # 오차와 drift의 0은 유효하지만 Unix epoch 0은 허용 범위 밖이다.
+    if (not isinstance(value,dict) or set(value)!={'nonce','host_boot_id','execution_id',
+            'unix_ms','source_error_ms','drift_ppm','source'}
+            or not isinstance(value['nonce'],str) or not re.fullmatch('[0-9]{1,20}',value['nonce'])
+            or any(not isinstance(value[k],str) or not UUID.fullmatch(value[k])
+                   for k in ('host_boot_id','execution_id'))
+            or not isinstance(value['unix_ms'],str) or not re.fullmatch('[0-9]{1,20}',value['unix_ms'])
+            or not 1577836800000<=int(value['unix_ms'])<=4102444800000
+            or type(value['source_error_ms']) is not int or not 0<=value['source_error_ms']<=10000
+            or type(value['drift_ppm']) is not int or not 0<=value['drift_ppm']<=1000
+            or not isinstance(value['source'],str) or '\0' in value['source']
+            or not 0<len(value['source'].encode('utf-8'))<=31):
+        raise ValueError('clock response invalid')
+    return (value['nonce']==request['nonce'] and
+            all(value[k]==context[k] for k in ('host_boot_id','execution_id')))
+
 def clock_once():
+    """Store의 미응답 요청만 관측한다. 실행 파일은 읽기 경로를 찾는 힌트다.
+
+    idle/기존 응답은 새 실행의 확인이나 UTC lease 갱신을 뜻하지 않는다.
+    쓰기는 원 관측과 transaction의 현재 요청·신원·기한 검사를 모두 거친다.
+    """
     from xenova_vm import Platform,storage_check
     from xenova_drive_binding import observe
+    from xenova_execution import ReadChanged,fingerprint
     from provision_xenova_telemetry import XenStore
     storage_check()
     platform=Platform();end=platform.clock()+6
+    platform.response_deadline=end
+    execution=platform.execution()
+    def check():
+        if platform.clock()>=end:raise TimeoutError('clock response deadline')
+        if platform.boot_id_reader()!=execution.host:raise ReadChanged()
     store=XenStore();handled=0
     try:
         for record in platform.records(validate_assets=False).values():
             if record.get('guest_kind')!='zephyr' or platform.clock()>=end:continue
-            context=observe(platform,record['uuid'],timeout_s=min(1,end-platform.clock()))
+            check()
+            hint=execution.run_record(record)
+            context=None
+            if (not hint or hint.get('host_boot_id')!=execution.host or hint.get('phase')!='observed'
+                    or type(hint.get('domid')) is not int or hint['domid']<=0):
+                # Missing/past execution hints retain the original observation's
+                # stopped/absent/error classification; they are not idle proof.
+                context=observe(platform,record['uuid'],timeout_s=min(1,end-platform.clock()))
+                if context['status']!='observed':continue
+                hint=execution.run_record(record)
+                if (not hint or hint.get('host_boot_id')!=execution.host or hint.get('phase')!='observed'
+                        or type(hint.get('domid')) is not int or hint['domid']<=0):raise ReadChanged()
+            parent=f"/local/domain/{hint['domid']}/data/xenova-telemetry/clock"
+            raw=store.read(0,parent+'/request')
+            check()
+            if fingerprint(execution.run_record(record))!=fingerprint(hint):raise ReadChanged()
+            if raw is None or raw==b'':continue
+            request=_clock_request(raw,hint['execution_id'])
+            answered=_clock_answered(store.read(0,parent+'/response'),request,hint)
+            check()
+            if fingerprint(execution.run_record(record))!=fingerprint(hint):raise ReadChanged()
+            if answered:continue
+            if context is None:context=observe(platform,record['uuid'],timeout_s=min(1,end-platform.clock()))
             if context['status']!='observed':continue
-            parent=f"/local/domain/{context['domid']}/data/xenova-telemetry/clock"
+            keys=('vm_id','host_boot_id','execution_id','domid','xen_unique_id')
+            if fingerprint([context[k] for k in keys])!=fingerprint([hint.get(k) for k in keys]):raise ReadChanged()
+            def current():
+                check()
+                if fingerprint(execution.run_record(record))!=fingerprint(hint):raise ReadChanged()
+                intent=execution.intent(record)
+                if (not intent or intent['desired_state']!='running'
+                        or intent['intent_revision']!=context['intent_revision']
+                        or intent['lifecycle_generation']!=context['lifecycle_generation']):raise ReadChanged()
+                execution.gate()
+            current()
             tx=store.lib.xs_transaction_start(store.handle)
             if not tx:raise OSError('clock transaction unavailable')
             open_tx=True
             try:
-                raw=store.read(tx,parent+'/request')
-                if not raw:continue
+                present=store.read(tx,parent+'/request')
+                if present is None or present==b'':raise ReadChanged()
+                current_request=_clock_request(present,context['execution_id'])
+                if current_request!=request:raise ReadChanged()
+                request=current_request
                 own=store.read(tx,f"/local/domain/{context['domid']}/vm")
                 if own!=('/vm/'+record['uuid']).encode():raise ValueError('clock target changed')
-                answer=clock_response(context,json.loads(raw),clock_sample())
+                answered=_clock_answered(store.read(tx,parent+'/response'),request,context)
+                current()
+                if answered:continue
+                answer=clock_response(context,request,clock_sample())
                 wire=json.dumps(answer,separators=(',',':')).encode()
+                current()
                 if not store.lib.xs_write(store.handle,tx,(parent+'/response').encode(),wire,len(wire)):
                     raise OSError('clock response write failed')
-                if platform.clock()>=end:raise TimeoutError('clock response deadline')
+                current()
                 if not store.lib.xs_transaction_end(store.handle,tx,False):raise OSError('clock commit uncertain')
                 open_tx=False;handled+=1
             finally:
@@ -171,7 +251,7 @@ def clock_once():
 
 def main(argv=None):
     import argparse
-    from xenova_vm import storage_check
+    from xenova_vm import PlatformError,storage_check
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('action',choices=('console-environment','clock-once','capture-once','evidence-capture','evidence-list'))
     p.add_argument('--source',type=Path);p.add_argument('--receipt',type=Path)
@@ -206,7 +286,23 @@ def main(argv=None):
         position=capture(a.source,a.archive,receipt,cursor=cursor)
         atomic_write(a.cursor,json.dumps(position)+'\n',0o600)
         print(json.dumps(position));return 0
+    except PlatformError as error:
+        if a.action!='clock-once':raise
+        detail=getattr(error,'error',{})
+        if detail.get('code'):
+            message=''.join(c if c.isprintable() else ' ' for c in detail['message'])[:256]
+        elif str(error) in ('managed live execution required',
+                            'execution binding changed during observation',
+                            'binding target not registered'):
+            message=str(error)
+        else:
+            # An unknown platform failure may contain helper output. Preserve
+            # its original exception instead of collapsing its reason or body.
+            raise
+        print(json.dumps({'ok':False,'error':type(error).__name__,'code':detail.get('code'),
+            'message':message,'stage':a.action}),file=__import__('sys').stderr);return 1
     except (OSError,ValueError,KeyError) as error:
+        if a.action=='clock-once' and isinstance(error,KeyError):raise
         # No raw request, environment or credential values in public diagnostics.
         print(json.dumps({'ok':False,'error':type(error).__name__,'errno':getattr(error,'errno',None),
             'stage':a.action}),file=__import__('sys').stderr);return 1
