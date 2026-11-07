@@ -9,8 +9,8 @@
 - 명령 제출 성공은 `202 Accepted`이며, 응답의 `command_id`로 상태를 조회한다.
 - 백엔드는 MQTT 발행 전에 명령을 `PENDING`으로 저장한다. 발행에 실패하면 해당 행을 제거하고
   `503 MQTT_UNAVAILABLE`을 반환한다.
-- Linux는 v1 Agent heartbeat, Zephyr는 v2 telemetry heartbeat가 신선하고 `boot_id`가 있어야 한다.
-  없거나 만료되면 `409 AGENT_UNAVAILABLE`이다.
+- Linux 부하 명령은 v1 Agent heartbeat가 신선하고 `boot_id`가 있어야 한다.
+  없거나 만료되면 `409 AGENT_UNAVAILABLE`이다. Zephyr 연산 지연은 v2 telemetry heartbeat를 사용한다.
 - MQTT 토픽은 `xenova/v1/vms/{vm_id}/command`, QoS 1, retain=false다.
 
 ## 2. CPU 부하
@@ -24,13 +24,13 @@ Content-Type: application/json
 {"workers":1,"load_percent":80,"duration_s":30}
 ```
 
-| 필드 | 범위 | Linux | Zephyr |
-| --- | --- | --- | --- |
-| `workers` | 1..4 | `stress.parameters.cpu_workers` | 반드시 1, `cpu_stress.parameters.workers` |
-| `load_percent` | 10..100, 선택 | 사용하지 않으며 응답은 null | 필수, duty cycle |
-| `duration_s` | 1..120 | 실행 시간 | 실행 시간 |
+| 필드 | 범위 | Linux |
+| --- | --- | --- |
+| `workers` | 1..4 | `stress.parameters.cpu_workers` |
+| `load_percent` | 10..100, 선택 | 호환성을 위해 입력은 받지만 사용하지 않으며 응답은 null |
+| `duration_s` | 1..120 | 실행 시간 |
 
-Zephyr에서 `workers != 1` 또는 `load_percent` 누락은 `400 INVALID_STRESS_PARAMETERS`다.
+Zephyr VM은 `400 UNSUPPORTED_GUEST_KIND`이며 `/faults/auto-delay`를 사용한다.
 
 ## 3. 메모리 부하
 
@@ -43,9 +43,8 @@ Content-Type: application/json
 {"memory_mib":8,"duration_s":30}
 ```
 
-- Linux: `memory_mib` 1..512, MQTT action `stress`.
-- Zephyr: `memory_mib` 1..8, MQTT action `memory_stress`. 8을 넘으면
-  `400 INVALID_STRESS_PARAMETERS`다.
+- Linux 전용이며 `memory_mib`는 1..512, MQTT action은 `stress`다.
+- Zephyr VM은 `400 UNSUPPORTED_GUEST_KIND`이며 `/faults/auto-delay`를 사용한다.
 
 ## 4. Zephyr AUTO 연산 지연
 
@@ -66,7 +65,7 @@ Content-Type: application/json
 ## 5. 제출 응답
 
 CPU·메모리 응답은 다음 형식이다. `amount`는 CPU에서는 workers, 메모리에서는 MiB다.
-Zephyr CPU만 `load_percent`가 채워진다.
+Linux Agent 계약에는 duty cycle이 없으므로 `load_percent`는 null이다.
 
 ```json
 {
@@ -75,7 +74,7 @@ Zephyr CPU만 `load_percent`가 채워진다.
   "vm_id": "...",
   "type": "CPU",
   "amount": 1,
-  "load_percent": 80,
+  "load_percent": null,
   "duration_s": 30,
   "submitted_at": "2026-11-07T06:00:00Z",
   "expires_at": "2026-11-07T06:00:30Z"
@@ -100,7 +99,7 @@ GET /api/v1/vms/{vmId}/commands/{commandId}
   "started_at": "2026-11-07T06:00:01Z",
   "finished_at": null,
   "duration_ms": null,
-  "result": {"workers":1,"load_percent":80,"duration_s":30},
+  "result": {"cpu_workers":1,"memory_mib":0,"duration_s":30},
   "error": null,
   "received_at": "2026-11-07T06:00:01Z",
   "contract_violation": false,
