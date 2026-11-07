@@ -12,6 +12,11 @@
 #define DW_MAP_SLOTS 3
 #define DW_ODOM_SLOTS 128
 #define DW_ROAD_PRIORITY 1u
+#define DW_LANE_MODEL 2u
+#define DW_PARKING_MODEL 4u
+#define DW_LOCALIZATION_BOUNDS 8u
+#define DW_WORLD_FEATURES 15u
+#define DW_STATE_FEATURES 7u
 #define DW_CELL_ROAD 8u
 typedef xenova_drive_Pose dw_pose;
 typedef xenova_drive_Point dw_point;
@@ -41,6 +46,11 @@ enum dw_result dw_decode(const uint8_t *,size_t,const struct dw_trust *,uint64_t
 enum dw_result dw_vehicle_decode(const uint8_t *,size_t,dw_vehicle *);
 enum dw_result dw_state_decode(const uint8_t *,size_t,dw_state *);
 enum dw_result dw_link_decode(const uint8_t *,size_t,xenova_drive_DriveLink *);
+/* Typed 입구도 wire와 같은 구조 경계를 검사한다. 현재 권위·시간 수락은 호출자 책임이다. */
+enum dw_result dw_state_validate(const dw_state *);
+enum dw_result dw_mission_grant_validate(const xenova_drive_MissionGrant *);
+enum dw_result dw_budget_request_validate(const xenova_drive_MissionBudgetRequest *);
+enum dw_result dw_budget_reply_validate(const xenova_drive_MissionBudgetReply *);
 enum dw_result dw_world_validate(const dw_world *,const struct dw_trust *,uint64_t,uint64_t *);
 /* Current Pi upper time versus the original observation lower time. Tightening
  * a guest/Pi clock interval never renews age or requires an estimated receive

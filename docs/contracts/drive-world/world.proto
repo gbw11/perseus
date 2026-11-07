@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Provider contract 1.0. Required presence is deliberate; zero is not omission.
+// Shared provider profiles: legacy drive-world-1 and drive-parking-2.
+// World remains major1/minor2 with features11/15 for drive-parking-2.
+// DriveState/DriveLink use major2; nested major1 messages retain their versions.
+// Required presence is deliberate; zero is not omission or motion authority.
 syntax = "proto2";
 package xenova.drive;
 
@@ -51,6 +54,12 @@ message WorldSnapshot {
   required bool complete = 33;
   required bool truncated = 34;
   required uint32 inflation_policy = 35; // 0: raw occupied cells; Pi adds footprint/margin.
+  optional LaneModel lane_model = 36;
+  repeated ParkingSlot parking_slots = 37;
+  optional bytes drivable_permission = 38;
+  optional MapLocalization localization = 39;
+  optional SceneAdmissionRef scene = 40;
+  optional ParkingSetMeta parking_set = 41;
 }
 message VehicleSample {
   required uint32 major = 1;
@@ -108,6 +117,10 @@ message DriveState {
   // this reference revision. Absence is not proof of passage.
   optional uint64 merge_passed_reference_revision = 27;
   optional uint32 world_features = 28; // absent: legacy map semantics (0)
+  optional uint32 state_features = 29; // drive-parking-2 requires semantic mask7.
+  optional MissionExecution mission = 30;
+  repeated GearSegment segments = 31;
+  optional DirectionGateRef direction_gate = 32;
 }
 // Separate Pi state connection. These bounded management/state messages are
 // not part of the small command/control JSON socket or the Jetson map client.
@@ -142,6 +155,7 @@ message ClockReply {
   required uint64 pi_send_us = 5;
   optional WorldTrust trust = 6;
   required VehicleSample vehicle = 7;
+  optional MissionGrant current_mission = 8;
 }
 message AcceptedState {
   required string host_boot = 1;
@@ -180,5 +194,296 @@ message DriveLink {
     DriveState snapshot = 4;
     AcceptedState accepted = 5;
     AppliedState applied = 6;
+    MissionGrant mission_grant = 7;
+    MissionBudgetRequest budget_request = 8;
+    MissionBudgetReply budget_reply = 9;
   }
+}
+
+message LaneGeometry {
+  required fixed32 lane_id = 1;
+  repeated Point centerline = 2;
+  required uint32 travel_direction = 3; // 1: polyline forward only.
+  required float position_bound_m = 4;
+  required float heading_bound_rad = 5;
+  required uint64 revision = 6;
+  required fixed32 adjacent_lane_id = 7;
+  required bytes point_state = 8; // 0 observed,1 inferred; exactly centerline count.
+}
+message LaneModel {
+  repeated LaneGeometry lanes = 1; // Exactly2, sharing divider station indices.
+  repeated Point divider = 2;
+  required bytes crossing = 3; // 0 forbidden,1 allowed; divider_count-1.
+  required bytes divider_state = 4;
+  required uint64 revision = 5;
+  required float divider_position_bound_m = 6;
+  required float divider_heading_bound_rad = 7;
+}
+message ParkingSlot {
+  required fixed32 slot_id = 1;
+  required uint64 geometry_revision = 2;
+  required uint32 geometry_state = 3;
+  required uint32 occupancy_state = 4;
+  repeated Point corners = 5;
+  required uint32 entry_edge = 6;
+  optional Pose reverse_goal = 7;
+  optional Pose forward_goal = 8;
+  required float position_bound_m = 9;
+  required float heading_bound_rad = 10;
+  required uint32 geometry_age_ms = 11;
+  required uint32 clearance_age_ms = 12;
+  required uint64 evidence_sequence = 13;
+  required bool geometry_complete = 14;
+  required uint32 occupancy_reason = 15;
+  required uint32 source_kinds = 16;
+  required uint64 occupancy_revision = 17;
+  required float usable_width_m = 18;
+  required float usable_depth_m = 19;
+  required fixed32 approach_lane_id = 20;
+  required uint32 goal_mask = 21;
+}
+message ParkingSetMeta {
+  required uint64 revision = 1;
+  required bool complete = 2;
+  required uint32 track_count_in_roi = 3;
+  required bool capacity_limited = 4;
+  required uint64 evidence_sequence = 5;
+  required uint32 state = 6;
+}
+message MapLocalization {
+  required uint64 registration_revision = 1;
+  required float anchor_position_bound_m = 2;
+  required float anchor_heading_bound_rad = 3;
+  required float geometry_position_bound_m = 4;
+  required float geometry_heading_bound_rad = 5;
+  required uint64 observed_mapper_us = 6;
+  required uint32 valid_for_us = 7;
+  required float position_drift_bound_mps = 8;
+  required float heading_drift_bound_rps = 9;
+  required uint32 quality = 10; // 1 unique/admitted;0 never enables movement.
+  required uint32 timestamp_error_us = 11;
+}
+message SceneAdmissionRef {
+  required bytes admission_id = 1; // Exact UUID16, not an ASCII UUID string.
+  required uint64 admission_revision = 2;
+  required bytes survey_id = 3;
+  required uint64 survey_revision = 4;
+  required uint32 policy = 5;
+  required bytes coverage_profile_sha256 = 6;
+  required bool allow_restore_after_mapper_restart = 7;
+}
+message MissionExecution {
+  required bytes mission_id = 1;
+  required uint64 mission_revision = 2;
+  required uint32 kind = 3; // 0none,1lane,2parking; no implicit movement permission.
+  required uint32 phase = 4;
+  required uint32 result = 5;
+  required bytes operator_request_nonce = 6;
+  optional fixed32 slot_id = 7;
+  optional uint64 slot_revision = 8;
+  optional Pose goal = 9;
+  optional uint64 goal_revision = 10;
+  required uint64 mission_deadline_pi_us = 11;
+  required uint64 cancel_fence_revision = 12;
+  required uint32 active_segment = 13;
+  repeated Point selected_slot_polygon = 14;
+  optional float goal_position_bound_m = 15;
+  optional float goal_heading_bound_rad = 16;
+  required bytes scene_admission_id = 17;
+  required uint64 scene_admission_revision = 18;
+  required uint32 strategy = 19;
+  required uint64 execution_deadline_pi_us = 20;
+  required uint32 correction_attempts_used = 21;
+  required float execution_travel_m = 22;
+  required uint64 grant_revision = 23;
+  required float search_travel_m = 24;
+  required uint64 search_deadline_pi_us = 25;
+}
+message GearSegment {
+  required uint32 first_index = 1;
+  required uint32 last_index = 2;
+  required sint32 signed_direction = 3;
+}
+message DirectionGateRef {
+  required uint64 gate_revision = 1;
+  required uint64 stop_command_sequence = 2;
+  required uint32 state = 3;
+  required sint32 requested_direction = 4;
+}
+message MissionGrant {
+  required uint32 major = 1;
+  required string vehicle = 2;
+  required bytes pi_host_boot = 3;
+  required bytes gateway_instance = 4;
+  required bytes owner_vm = 5;
+  required bytes owner_execution = 6;
+  required bytes app_instance = 7;
+  required uint32 control_generation = 8;
+  required bytes mission_id = 9;
+  required uint64 mission_revision = 10;
+  required uint64 grant_revision = 11;
+  required uint32 kind = 12;
+  required uint32 strategy = 13;
+  required bytes operator_request_nonce = 14;
+  required uint64 issued_pi_us = 15;
+  required uint64 mission_deadline_pi_us = 16;
+  required uint64 cancel_fence_revision = 17;
+  required bytes scene_admission_id = 18;
+  required uint64 scene_revision = 19;
+  required string configuration = 20;
+  required string calibration = 21;
+  required bytes primitive = 22;
+  required uint64 execution_deadline_pi_us = 23;
+  required uint32 correction_attempts_used = 24;
+  required float execution_travel_m = 25;
+  required float max_execution_travel_m = 26;
+  required bool admitted = 27;
+  required uint64 search_deadline_pi_us = 28;
+  required float search_travel_m = 29;
+  required float max_search_travel_m = 30;
+  optional bytes locked_goal_sha256 = 31;
+}
+message MissionBudgetRequest {
+  required uint32 major = 1;
+  required bytes request_nonce = 2;
+  required bytes mission_id = 3;
+  required uint64 mission_revision = 4;
+  required uint32 control_generation = 5;
+  required uint64 expected_grant_revision = 6;
+  required uint32 action = 7;
+  required fixed32 slot_id = 8;
+  required uint64 slot_revision = 9;
+  required uint64 goal_revision = 10;
+  required uint64 plan_revision = 11;
+  required bytes plan_sha256 = 12;
+  required bytes selected_goal_sha256 = 13;
+  required bytes scene_admission_id = 14;
+  required uint64 scene_revision = 15;
+  required uint64 completed_guest_us = 16;
+  required uint64 valid_until_pi_us = 17;
+}
+message MissionBudgetReply {
+  required uint32 major = 1;
+  required bytes request_nonce = 2;
+  required bytes request_sha256 = 3;
+  required uint32 result = 4;
+  required uint32 reason = 5;
+  optional MissionGrant grant = 6;
+}
+message MapperClockProbe {
+  required uint32 major = 1;
+  required string vehicle = 2;
+  required string device = 3;
+  required string pi_host_boot = 4;
+  required string pi_client_instance = 5;
+  required uint64 probe_seq = 6;
+  required bytes nonce = 7; // Appendix A6's nonce16 denotes exact16 bytes.
+  required uint64 pi_send_us = 8;
+  optional string expected_mapper_boot = 9;
+  optional string expected_mapper_instance = 10;
+  optional string expected_clock_epoch = 11;
+  required uint64 admission_revision = 12;
+}
+message MapperClockReply {
+  required uint32 major = 1;
+  required string pi_host_boot = 2;
+  required string pi_client_instance = 3;
+  required uint64 probe_seq = 4;
+  required bytes nonce = 5;
+  required uint64 pi_send_us = 6;
+  required string device = 7;
+  required string mapper_boot = 8;
+  required string mapper_instance = 9;
+  required string clock_epoch = 10;
+  required string map_epoch = 11;
+  required string frame_epoch = 12;
+  required string odom_epoch = 13;
+  required string configuration = 14;
+  required string calibration = 15;
+  required string primitive = 16;
+  required uint64 j2 = 17;
+  required uint64 j3 = 18;
+  optional SurveySummary survey_summary = 19;
+}
+message SceneGrant {
+  required uint32 major = 1;
+  required string vehicle = 2;
+  required string pi_host_boot = 3;
+  required string gateway_instance = 4;
+  required uint64 source_admission_revision = 5;
+  // Appendix A6 fixes the type/tag; scene follows WorldSnapshot's field name.
+  required SceneAdmissionRef scene = 6;
+  required string mapper_device = 7;
+  required string map_epoch = 8;
+  required string frame_epoch = 9;
+  required string odom_epoch = 10;
+  required string configuration = 11;
+  required string calibration = 12;
+  required string primitive = 13;
+  required uint64 issued_pi_us = 14;
+  required uint64 valid_until_pi_us = 15;
+  required uint32 lifecycle_state = 16;
+  required bytes request_nonce = 17;
+  required uint64 survey_deadline_pi_us = 18;
+  required uint32 max_observation_stations = 19;
+  required uint32 purpose = 20;
+  optional bytes frozen_evidence_sha256 = 21;
+  required uint64 frozen_survey_revision = 22;
+  required uint64 frozen_hazard_revision = 23;
+  optional bytes restore_checkpoint_sha256 = 24;
+  required uint64 lifecycle_revision = 25;
+}
+message SurveySummary {
+  required uint32 major = 1;
+  required bytes request_nonce = 2;
+  required bytes survey_id = 3;
+  required uint64 survey_revision = 4;
+  required uint32 status = 5;
+  required uint64 world_sequence = 6;
+  required uint64 evidence_sequence = 7;
+  required uint64 started_peer_us = 8;
+  required uint64 last_observed_peer_us = 9;
+  required uint64 completed_peer_us = 10;
+  required uint32 positive_cell_count = 11;
+  required uint32 observed_slot_count = 12;
+  required uint32 required_sensor_mask = 13;
+  required uint32 valid_sensor_mask = 14;
+  required bytes evidence_sha256 = 15;
+  required bytes coverage_profile_sha256 = 16;
+  required uint32 observation_station_count = 17;
+  required uint64 hazard_revision = 18;
+  required uint64 alignment_revision = 19;
+  required float anchor_position_bound_m = 20;
+  required float anchor_heading_bound_rad = 21;
+  required uint32 evidence_flags = 22;
+  required uint32 failure_flags = 23;
+  required uint32 timestamp_error_us = 24;
+}
+message TofObservation {
+  required uint32 major = 1;
+  required string vehicle = 2;
+  required string host_boot = 3;
+  required string gateway_instance = 4;
+  required string pi_session = 5;
+  required string device_session = 6;
+  required uint32 sensor_id = 7;
+  required uint64 source_sample = 8;
+  required uint64 source_us = 9;
+  required uint64 pi_sample_us = 10;
+  required uint32 clock_error_us = 11;
+  required uint32 sensor_time_error_us = 12;
+  required string calibration = 13;
+  required uint32 sensor_config_revision = 14;
+  required uint32 rows = 15;
+  required uint32 cols = 16;
+  required bytes distance_mm_le = 17;
+  required bytes status = 18;
+  required bytes quality = 19;
+  required uint32 frame_status = 20;
+  required fixed32 source_crc32 = 21;
+  required string clock_epoch = 22;
+  required uint64 clock_seq = 23;
+  required bool complete = 24;
+  required bytes sensor_instance = 25;
+  required uint32 sensor_generation = 26;
 }

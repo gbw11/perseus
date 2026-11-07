@@ -41,7 +41,37 @@ static bool road_edge_cuts_box(dw_point a,dw_point b,float x,float y,float cs,fl
 static bool blocked(const dw_world *w,size_t i,const struct lp_config *c) {
  unsigned flags=w->cell_flags.bytes[i];const uint8_t *p=w->age_le32.bytes+4*i;
  uint32_t age=(uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
- return !(flags&1)||(flags&4)||(!(flags&2)&&(double)age+c->live_age_us/1000>c->cell_age_ms)||w->occupancy.bytes[i]>=70;
+ bool denied=(w->required_features&DW_LANE_MODEL)&&
+  (!w->has_drivable_permission||i/8>=w->drivable_permission.size||!(w->drivable_permission.bytes[i/8]&(1u<<(i%8))));
+ return denied||!(flags&1)||(flags&4)||(!(flags&2)&&(double)age+c->live_age_us/1000>c->cell_age_ms)||w->occupancy.bytes[i]>=70;
+}
+void lp_state_import(struct lp_path *path,const dw_state *state){
+ path->execution=(struct lp_execution){.present=true,.features=state->state_features,.mission=state->mission,
+  .segments_count=state->segments_count,.has_direction_gate=state->has_direction_gate,.direction_gate=state->direction_gate};
+ memcpy(path->execution.segments,state->segments,state->segments_count*sizeof(state->segments[0]));
+}
+void lp_state_export(const struct lp_path *path,dw_state *state){
+ state->major=2;state->has_state_features=true;state->state_features=DW_STATE_FEATURES;state->has_mission=true;
+ if(path->execution.present){
+  state->state_features=path->execution.features;state->mission=path->execution.mission;
+  state->segments_count=path->execution.segments_count;
+  memcpy(state->segments,path->execution.segments,state->segments_count*sizeof(state->segments[0]));
+  state->has_direction_gate=path->execution.has_direction_gate;state->direction_gate=path->execution.direction_gate;
+ }else{
+  /* 순수 planner의 미승인 후보. LANE 임무나 권위를 독자 생성하지 않는다. */
+  memset(&state->mission,0,sizeof(state->mission));
+  state->mission.mission_id.size=state->mission.operator_request_nonce.size=state->mission.scene_admission_id.size=16;
+  state->segments_count=0;state->has_direction_gate=false;
+  bool moving=false;for(size_t i=0;i<path->count;i++)moving|=path->points[i].velocity_mps!=0;
+  if(moving&&path->count>=2){state->segments_count=1;state->segments[0]=(xenova_drive_GearSegment){0,(uint32_t)path->count-1,1};}
+ }
+}
+bool lp_mission_matches(const struct lp_path *path,const xenova_drive_MissionGrant *g){
+ const struct lp_execution *e=&path->execution;const xenova_drive_MissionExecution *m=&e->mission;
+ return e->present&&e->features==DW_STATE_FEATURES&&g&&g->admitted&&g->kind==1&&m->kind==1&&m->phase==10&&
+  m->mission_revision==g->mission_revision&&m->grant_revision==g->grant_revision&&m->cancel_fence_revision==g->cancel_fence_revision&&
+  !memcmp(m->mission_id.bytes,g->mission_id.bytes,16)&&!memcmp(m->scene_admission_id.bytes,g->scene_admission_id.bytes,16)&&
+  m->scene_admission_revision==g->scene_revision;
 }
 void lp_index_build(struct lp_collision_index *index,const dw_world *w,const struct lp_config *c) {
  memset(index,0,sizeof(*index));index->world=w;index->sequence=w->sequence;
@@ -578,6 +608,8 @@ enum lp_result lp_advance(struct lp_search *s,unsigned expansions,struct lp_path
 }
 enum lp_result lp_validate_path(const struct lp_path *p,const dw_world *w,const struct lp_config *c,
  struct lp_metrics *m,const struct lp_budget *b) {
+ if(p->execution.present)for(size_t i=0;i<p->execution.segments_count;i++)
+  if(p->execution.segments[i].signed_direction!=1)return LP_INPUT; /* 후진 계산은 후속 planner의 명시 구현까지 거절한다. */
  if(p->world_features!=w->required_features||p->count<2||p->count>LP_PATH||strcmp(p->frame,w->frame_epoch)||strcmp(p->odom,w->odom_epoch)||
     strcmp(p->configuration,w->configuration)||strcmp(p->reference,w->reference_id))return LP_INPUT;
  for(size_t k=0;k<p->count;k++) {

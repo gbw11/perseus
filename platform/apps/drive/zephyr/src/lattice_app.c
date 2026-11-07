@@ -51,6 +51,12 @@ static int64_t valid_until(const struct dl_clock *clock,const dw_vehicle *vehicl
  int64_t end=(pi-clock->upper)/1000;
  return end<(int64_t)(clock->expires_guest/1000)?end:(int64_t)(clock->expires_guest/1000);
 }
+static int mission_profile(bool *required){
+ struct dw_handle handle;const struct dw_snapshot *map;
+ if(dw_acquire(&engine.maps,&handle,&map))return -EAGAIN;
+ *required=(map->world.required_features&DW_LANE_MODEL)!=0;
+ return dw_release(&engine.maps,handle)?-EAGAIN:0;
+}
 static const char *qualified(const void *unused,struct xm_span input,int64_t age){
  ARG_UNUSED(unused);ARG_UNUSED(input);ARG_UNUSED(age);
  if(engine.stopping)return "STATE_PREPARING";
@@ -67,10 +73,12 @@ static const char *qualified(const void *unused,struct xm_span input,int64_t age
  }
  struct dw_handle mh;const struct dw_snapshot *map;const char *reason="WORLD_UNAVAILABLE";
  if(!dw_acquire(&engine.maps,&mh,&map)){
-  dw_pose pose;
+  dw_pose pose;xenova_drive_MissionGrant mission;bool required=(map->world.required_features&DW_LANE_MODEL)!=0;
   if(dw_snapshot_time(map,now,(uint64_t)lp_selected_config.live_age_us,NULL))reason="OBSERVATION_EXPIRED";
   else if(dw_current_pose(&map->world,&engine.odometry,now,lp_selected_config.pose_age_us,&pose,NULL))reason="POSE_UNAVAILABLE";
   else if(strcmp(path->frame,map->world.frame_epoch)||strcmp(path->odom,map->world.odom_epoch)||strcmp(path->configuration,map->world.configuration)||strcmp(path->reference,map->world.reference_id))reason="CONTEXT_CHANGED";
+  else if(required&&(dl_mission_get(&mission,now)||!mission.admitted||mission.kind!=1))reason="MISSION_UNAVAILABLE";
+  else if(required&&!lp_mission_matches(path,&mission))reason="MISSION_CONTEXT_CHANGED";
   else reason=applied?NULL:"STATE_PREPARING";
   (void)dw_release(&engine.maps,mh);
  }
@@ -97,8 +105,11 @@ static int automatic(void *unused,struct xm_span control,struct xm_span input,in
  struct dl_clock clock;uint64_t now;dw_vehicle vehicle;
  out->binary_input=true;
  if(current_vehicle(&clock,&now,&vehicle)){out->reason="POSE_UNAVAILABLE";return 0;}
+ bool required;if(mission_profile(&required)){out->reason="WORLD_UNAVAILABLE";return 0;}
+ xenova_drive_MissionGrant mission;if(required&&dl_mission_for_local(&mission,now)){out->reason="MISSION_UNAVAILABLE";return 0;}
  struct lp_budget budget={deadline,clock_us,tracker_cancelled,NULL,NULL};struct lp_command command;
- enum de_result rc=de_track(&engine,now,.02f,&command,&vehicle,budget);
+ enum de_result rc=required?de_track_mission(&engine,&mission,now,.02f,&command,&vehicle,budget):
+  de_track(&engine,now,.02f,&command,&vehicle,budget);
  if(rc){out->reason=rc==DE_PATH?lp_reason(command.result):de_reason(rc);return 0;}
  out->v_mps=command.velocity;out->steer_rad=command.steer;out->nearest_m=command.known_distance;
  out->valid_until_ms=valid_until(&clock,&vehicle);out->input_sequence=(int64_t)vehicle.sequence;
@@ -202,6 +213,9 @@ static void planner(void *a,void *b,void *c){
  while(!cancelled(NULL)){
   struct dl_clock mapping;uint64_t now,guest;
   if(dl_clock_get(&mapping,&now)||clock_us(NULL,&guest)){k_sleep(K_MSEC(2));continue;}
+  xenova_drive_MissionGrant mission;bool required;
+  if(mission_profile(&required)||!required||dl_mission_get(&mission,now))(void)de_mission(&engine,NULL,now);
+  else (void)de_mission(&engine,&mission,now);
   if(engine.planning){
    enum de_result rc=de_plan_slice(&engine,4,now);
    if(!engine.planning&&rc==DE_OK)(void)prepare_current(NULL);
@@ -330,8 +344,11 @@ int drive_lattice_snapshot(dw_state *out){
  work=completion;generation=current_generation;revision=snapshot_revision+1;k_mutex_unlock(&app_metadata);
  struct de_reference h;const struct lp_path *path;if(de_path_acquire(&engine,&h,&path))return -EBUSY;
  int rc=-EAGAIN;
- if(h.generation==work.path_generation){
-  memset(out,0,sizeof(*out));out->major=1;strcpy(out->source_vm,boot.identity.vm_id);strcpy(out->source_execution,boot.identity.execution_id);
+ struct dl_clock mapping;uint64_t pi_now;xenova_drive_MissionGrant mission;
+ bool required=(path->world_features&DW_LANE_MODEL)!=0;
+ bool mission_ok=!required||(!dl_clock_get(&mapping,&pi_now)&&!dl_mission_for_local(&mission,pi_now)&&lp_mission_matches(path,&mission));
+ if(h.generation==work.path_generation&&mission_ok){
+  memset(out,0,sizeof(*out));lp_state_export(path,out);strcpy(out->source_vm,boot.identity.vm_id);strcpy(out->source_execution,boot.identity.execution_id);
   strcpy(out->source_app_instance,boot.auto_instance_id);out->source_generation=generation;out->state_revision=revision;
   strcpy(out->frame_epoch,path->frame);strcpy(out->odom_epoch,path->odom);strcpy(out->configuration,path->configuration);
   strcpy(out->calibration,lp_selected_config.calibration);strcpy(out->primitive,lp_selected_assets.sha256);strcpy(out->reference_id,path->reference);
