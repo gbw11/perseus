@@ -200,10 +200,10 @@ static size_t message_cap(const pb_msgdesc_t *desc){
  if(desc==xenova_drive_ParkingSlot_fields)return 256;
  if(desc==xenova_drive_MapLocalization_fields||desc==xenova_drive_SceneAdmissionRef_fields)return 96;
  if(desc==xenova_drive_ParkingSetMeta_fields)return 64;
- if(desc==xenova_drive_MissionBudgetRequest_fields||desc==xenova_drive_MapperClockProbe_fields)return 512;
+ if(desc==xenova_drive_MissionBudgetRequest_fields)return 512;
  if(desc==xenova_drive_MissionBudgetReply_fields)return 1536;
  if(desc==xenova_drive_SurveySummary_fields)return 288;
- if(desc==xenova_drive_MissionGrant_fields||desc==xenova_drive_MapperClockReply_fields||
+ if(desc==xenova_drive_MissionGrant_fields||desc==xenova_drive_MapperClockProbe_fields||desc==xenova_drive_MapperClockReply_fields||
     desc==xenova_drive_SceneGrant_fields||desc==xenova_drive_TofObservation_fields)return 1024;
  return DW_WIRE_MAX;
 }
@@ -542,6 +542,41 @@ enum dw_result dw_pool_source(struct dw_pool *p,const struct dw_trust *t) {
  if(!lock(p))return DW_BUSY;
  if(p->source_revision==UINT32_MAX){unlock(p);return DW_NO_SPACE;}
  p->trust=*t;p->authorized=true;p->source_revision++;unlock(p);return DW_OK;
+}
+static bool trust_id(const char *value,size_t capacity){
+ return value[0]&&memchr(value,0,capacity)!=NULL;
+}
+static enum dw_result trust_valid(const struct dw_trust *t){
+ if(!t)return DW_SOURCE;
+ if(!trust_id(t->vehicle,sizeof(t->vehicle))||!trust_id(t->mapper_boot,sizeof(t->mapper_boot))||
+    !trust_id(t->mapper_instance,sizeof(t->mapper_instance))||!trust_id(t->map_epoch,sizeof(t->map_epoch))||
+    !trust_id(t->frame_epoch,sizeof(t->frame_epoch))||!trust_id(t->odom_epoch,sizeof(t->odom_epoch))||
+    !trust_id(t->configuration,sizeof(t->configuration))||!trust_id(t->calibration,sizeof(t->calibration))||
+    !trust_id(t->primitive,sizeof(t->primitive))||!trust_id(t->clock.epoch,sizeof(t->clock.epoch)))return DW_SOURCE;
+ if(!t->max_live_age_us||t->max_live_age_us>INT64_MAX)return DW_CONFIGURATION;
+ if(!t->clock.expires_pi_us||t->clock.expires_pi_us>INT64_MAX||
+    t->clock.lower_offset_us>t->clock.upper_offset_us||
+    (uint64_t)t->clock.upper_offset_us-(uint64_t)t->clock.lower_offset_us>t->clock.max_error_us)return DW_TIME;
+ return DW_OK;
+}
+static bool same_source(const struct dw_trust *a,const struct dw_trust *b){
+ /* 구조체 padding과 각 문자열의 NUL 뒤 bytes는 신원이 아니다. */
+ return !strcmp(a->vehicle,b->vehicle)&&!strcmp(a->mapper_boot,b->mapper_boot)&&
+  !strcmp(a->mapper_instance,b->mapper_instance)&&!strcmp(a->map_epoch,b->map_epoch)&&
+  !strcmp(a->frame_epoch,b->frame_epoch)&&!strcmp(a->odom_epoch,b->odom_epoch)&&
+  !strcmp(a->configuration,b->configuration)&&!strcmp(a->calibration,b->calibration)&&
+  !strcmp(a->primitive,b->primitive)&&!strcmp(a->clock.epoch,b->clock.epoch)&&
+  a->max_live_age_us==b->max_live_age_us&&a->clock.max_error_us==b->clock.max_error_us;
+}
+enum dw_result dw_pool_refresh(struct dw_pool *p,const struct dw_trust *t){
+ if(!p)return DW_SOURCE;
+ enum dw_result rc=trust_valid(t);if(rc)return rc;
+ if(!lock(p))return DW_BUSY;
+ /* force API로 설치된 과거 trust도 bounded 문자열인지 확인한 뒤 비교한다. */
+ bool unchanged=p->authorized&&!trust_valid(&p->trust)&&same_source(&p->trust,t);
+ if(!unchanged&&p->source_revision==UINT32_MAX){unlock(p);return DW_NO_SPACE;}
+ p->trust=*t;p->authorized=true;if(!unchanged)p->source_revision++;
+ unlock(p);return DW_OK;
 }
 static bool handle(struct dw_pool *p,struct dw_handle h) { return h.slot<DW_MAP_SLOTS&&p->slots[h.slot].generation==h.generation; }
 enum dw_result dw_reserve(struct dw_pool *p,struct dw_handle *h,struct dw_snapshot **out) {

@@ -23,7 +23,7 @@ _REPEATED_CAPS={'DriveState.path':512,'DriveState.segments':3,'LaneModel.lanes':
 _MESSAGE_CAPS={'WorldSnapshot':32768,'DriveState':32768,'DriveLink':32768,'LaneModel':1408,
     'ParkingSlot':256,'MapLocalization':96,'SceneAdmissionRef':96,'ParkingSetMeta':64,
     'MissionGrant':1024,'MissionBudgetRequest':512,'MissionBudgetReply':1536,
-    'MapperClockProbe':512,'MapperClockReply':1024,'SurveySummary':288,'SceneGrant':1024,
+    'MapperClockProbe':1024,'MapperClockReply':1024,'SurveySummary':288,'SceneGrant':1024,
     'TofObservation':1024}
 
 
@@ -350,7 +350,21 @@ def _validate_one(message):
         if (message.result not in (1,2,3,4,5) or message.reason>10 or message.HasField('grant')!=(message.result==1)
                 or message.HasField('grant') and message.grant.kind!=2):
             raise ValueError('budget reply result/grant')
-    elif name=='MapperClockProbe':_positive(message,'probe_seq','pi_send_us')
+    elif name=='MapperClockProbe':
+        _positive(message,'probe_seq','pi_send_us')
+        if message.HasField('mapper_trust'):
+            trust=message.mapper_trust
+            if not message.admission_revision or trust.vehicle!=message.vehicle:
+                raise ValueError('returned mapper trust lacks original admitted vehicle/source')
+            for expected,actual in (('expected_mapper_boot','mapper_boot'),
+                    ('expected_mapper_instance','mapper_instance'),('expected_clock_epoch','clock_epoch')):
+                if message.HasField(expected) and getattr(message,expected)!=getattr(trust,actual):
+                    raise ValueError('returned mapper trust differs from expected peer')
+    elif name=='WorldTrust':
+        if (message.lower_offset_us>message.upper_offset_us or not message.max_error_us
+                or message.upper_offset_us-message.lower_offset_us>message.max_error_us):
+            raise ValueError('mapper trust offset interval exceeds original error budget')
+        _positive(message,'expires_pi_us')
     elif name=='MapperClockReply':
         _positive(message,'probe_seq','pi_send_us','j2','j3')
         if message.j2>message.j3:raise ValueError('mapper clock order')
