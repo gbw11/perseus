@@ -490,6 +490,18 @@ OLD_CLEAN_ELIGIBLE은 같은 full runtime·complete inventory·모든 known owne
 
 파일 load/lock/CAS/fsync/S-log ACK·실제 관측/설치 근거 소비·SHM/고정6token/worker/서비스 기동·회복/종료·READY/주행 판단 조건은 별도 gate다. d1은 시계·UUID 생성·명시 파일/시스템 자원 호출을 하지 않고 canonical≤8KiB와 작은 frozen 값/진술만 보유한다. 조회 사본 비용·실제 RSS/주기·native 반환시간은 별도 계측 대상이다.
 
+## 자원 기록의 Linux 동기 저장
+
+`runtime.resource_store.ResourceStore(directory)`는 기존 보호 디렉터리의 `resource-set.json`을 읽고 별도 `resource-set.lock` 아래 교체하는 단일 writer다. Linux 전용이며 directory는 same-euid/group-other write 금지, file은 same-euid/regular/nlink1/exact0600을 요구한다. 상위 경로 신뢰는 호출자 전제다. context manager 또는 명시적 `close()`로 닫고, 취득한 process/thread에서만 사용한다. fork/fd 양도·복제·재진입은 지원하지 않는다. lock 파일은 삭제하거나 교체하지 않는다.
+
+`load()`의 immutable StoreLoad는 원 LoadOutcome과 실제 lock nonce를 보유한다. 같은 fd의 누적8193B 읽기로8KiB 초과를 구분하고 원 raw/ref를 보존한다. manifest leaf ENOENT만 MISSING이며 손상/빈 body는 CORRUPT, 안전한 원본을 얻지 못하면 IO_ERROR다. directory/lock 오류는 StoreError이며 최초 설치 근거가 아니다. 실제 파일 I/O/fsync의 시간 상한은 보장하지 않는다.
+
+`propose(receipt,manifest,request_id)`는 최신 실제 receipt에서 원 제안을 한 건 만든다. StoreProposal의 출처 raw SHA와 실제 저장할 canonical bytes/target ref를 구분한다. 외부 synthetic receipt·새 no-op·다른 pending 제안은 StoreUsageError다. revision/epoch/episode/request ID/임무 기한을 store가 발급하거나 증가시키지 않는다.
+
+`publish(proposal)`와 `reconcile(proposal)`은 원 객체만 받는다. 원 raw CAS 뒤 temp 전체 write/file fsync→replace→directory fsync를 완료하면 DURABLE과 StoreAck를 반환한다. CAS_MISMATCH/UNCONFIRMED에는 ACK가 없다. ACK의 REPLACED와 원 replace 진입 뒤 실제 target 재동기화의 RECONFIRMED를 구분하며, target read-back만으로 ACK하지 않는다. 같은 완료 proposal의 cached ACK 재반환은 원 사실의 반복이며 새 완료나 현재 파일 보증이 아니다. 완료 뒤 다음 제안은 fresh load와 다른 request가 필요하다.
+
+열기/guard 오류는 StoreError(RuntimeError), 경쟁 lock은 StoreBusyError(StoreError), 타입·수명·재진입·원 receipt/proposal 오용은 StoreUsageError(ValueError)다. 이 synchronous adapter는 운영 S-main/CLI/doctor/replay에 연결하지 않는다. 실제 OS owner/name/reset/install proof·S-log 비동기 ACK 수락·자원 생성과 주행 판단 조건은 별도 책임이다.
+
 ## 테스트
 
 `vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
