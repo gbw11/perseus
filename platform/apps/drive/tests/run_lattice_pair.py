@@ -49,21 +49,26 @@ class Vehicle:
         self.device=str(uuid4());self.x=.3;self.y=1.6;self.yaw=0.;self.v=0.;self.steer=0.
         self.target=(0.,0.);self.left=0.;self.right=0.;self.last_command=0.;self.sample=0
         self.commands=0;self.drives=0;self.trace=[];self.lock=threading.Lock()
-        self.next_trace=0.
+        self.next_trace=0.;self._last_advance=None;self._last_odom_us=None
+    def _advance(self):
+        """Advance the physical state to this actual observation, including idle time."""
+        now=time.monotonic();dt=0. if self._last_advance is None else now-self._last_advance
+        self._last_advance=now
+        target=self.target if now-self.last_command<.15 else (0.,self.steer)
+        self.v+=max(-dt,min(dt,target[0]-self.v));self.steer+=max(-1.5*dt,min(1.5*dt,target[1]-self.steer))
+        ds=self.v*dt;turn=ds*math.tan(self.steer)/.25
+        self.x+=ds*math.cos(self.yaw+turn/2);self.y+=ds*math.sin(self.yaw+turn/2);self.yaw+=turn
+        self.left+=(ds-turn*.1)/.00005;self.right+=(ds+turn*.1)/.00005
+        if now>=self.next_trace and len(self.trace)<40000:
+            self.trace.append((now,self.x,self.y,self.yaw,self.v,self.steer));self.next_trace=now+.01
+        return now
     def run(self):
-        parser=Framer();last=time.monotonic()
+        parser=Framer();self._last_advance=time.monotonic()
         while not self.stop.wait(.002):
-            now=time.monotonic();dt=now-last;last=now
-            target=self.target if now-self.last_command<.15 else (0.,self.steer)
-            self.v+=max(-dt,min(dt,target[0]-self.v));self.steer+=max(-1.5*dt,min(1.5*dt,target[1]-self.steer))
-            ds=self.v*dt;turn=ds*math.tan(self.steer)/.25
-            self.x+=ds*math.cos(self.yaw+turn/2);self.y+=ds*math.sin(self.yaw+turn/2);self.yaw+=turn
-            self.left+=(ds-turn*.1)/.00005;self.right+=(ds+turn*.1)/.00005
-            if now>=self.next_trace and len(self.trace)<40000:
-                self.trace.append((now,self.x,self.y,self.yaw,self.v,self.steer));self.next_trace=now+.01
+            self._advance()
             try:data=os.read(self.fd,4096)
             except BlockingIOError:continue
-            for kind,payload in parser.feed(data):
+            for kind,payload in parser.frames(data):
                 if kind==HELLO:
                     version,pi=HELLO_PAYLOAD.unpack(payload)
                     os.write(self.fd,hello_ack(str(UUID(bytes=pi)),self.device,
@@ -71,6 +76,7 @@ class Vehicle:
                 elif kind==COMMAND:
                     pi,device,sequence=COMMAND_PREFIX.unpack_from(payload);frame=command_decode(payload[COMMAND_PREFIX.size:])
                     assert str(UUID(bytes=device))==self.device
+                    now=self._advance()
                     self.commands+=1;self.last_command=now
                     if isinstance(frame,DriveFrame):self.target=(frame.v_mps,frame.steer_rad);self.drives+=int(frame.v_mps>0)
                     else:self.target=(0.,self.steer)
@@ -78,9 +84,13 @@ class Vehicle:
                     os.write(self.fd,report(str(UUID(bytes=pi)),self.device,sequence,frame,2,self.sample,
                         velocity_mmps=round(self.v*1000),steering_mrad=round(self.steer*1000),stationary=abs(self.v)<.001))
                 elif kind==ODOM_PROBE:
-                    pi,device,echo=PROBE.unpack(payload);self.sample+=1
+                    pi,device,echo=PROBE.unpack(payload);now=self._advance()
                     # The fixture's device clock deliberately has another origin.
-                    os.write(self.fd,packet(ODOM_REPORT,SAMPLE.pack(pi,device,echo,int(now*1e6)+7000000,
+                    source_us=int(now*1e6)+7000000
+                    # A coarse clock cannot manufacture a new encoder sample.
+                    if self._last_odom_us is not None and source_us<=self._last_odom_us:continue
+                    self._last_odom_us=source_us;self.sample+=1
+                    os.write(self.fd,packet(ODOM_REPORT,SAMPLE.pack(pi,device,echo,source_us,
                         self.sample,round(self.left),round(self.right),5,round(self.steer*1000),5)))
 
 
