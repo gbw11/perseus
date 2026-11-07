@@ -325,7 +325,15 @@ class PerceptionPipeline:
             self._domain(pose,grid)
         registration_done=perf_counter_ns()
         if evidence is not None:
-            boxes=tuple(self._xy_bounds(b,pose) for b in evidence.hit_boxes)
+            from .point_batch import PointBoundsBatch
+            if type(evidence.hit_boxes) is PointBoundsBatch:
+                boxes=evidence.hit_boxes
+                if pose is not None:
+                    p=pose.sample
+                    boxes=boxes.transformed_xy((p.x,p.y,p.yaw),position_error_m=p.position_error_m,
+                                               yaw_error_rad=p.yaw_error_rad)
+            else:
+                boxes=tuple(self._xy_bounds(b,pose) for b in evidence.hit_boxes)
             origin=self.calibration.right.translation[:2]
             if pose is not None:
                 p=pose.sample
