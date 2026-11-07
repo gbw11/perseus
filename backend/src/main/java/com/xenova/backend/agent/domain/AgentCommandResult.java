@@ -40,14 +40,16 @@ public class AgentCommandResult {
     @Column(name = "boot_id", nullable = false, length = 64)
     private String bootId;
 
-    @Column(name = "agent_instance_id", nullable = false, length = 64)
+    @Column(name = "agent_instance_id", length = 64)
     private String agentInstanceId;
 
-    @Column(name = "message_id", nullable = false, length = 128)
+    @Column(name = "message_id", length = 128)
     private String messageId;
 
-    @Column(nullable = false)
-    private long seq;
+    private Long seq;
+
+    @Column(name = "submitted_at")
+    private Instant submittedAt;
 
     @Column(name = "started_at")
     private Instant startedAt;
@@ -82,9 +84,24 @@ public class AgentCommandResult {
         apply(report);
     }
 
+    public AgentCommandResult(
+            String vmId, String commandId, String operationId, String bootId, Instant submittedAt) {
+        this.vmId = vmId;
+        this.commandId = commandId;
+        this.operationId = operationId;
+        this.status = AgentCommandStatus.PENDING;
+        this.bootId = bootId;
+        this.submittedAt = submittedAt;
+        this.receivedAt = submittedAt;
+    }
+
     public Observation observe(AgentCommandResultReport report) {
         if (sameResult(report)) {
             return Observation.DUPLICATE;
+        }
+        if (status == AgentCommandStatus.PENDING && Objects.equals(operationId, report.operationId())) {
+            apply(report);
+            return Observation.UPDATED;
         }
         if (status == AgentCommandStatus.RUNNING
                 && (report.status() == AgentCommandStatus.SUCCEEDED || report.status() == AgentCommandStatus.FAILED)
@@ -148,6 +165,10 @@ public class AgentCommandResult {
 
     public Instant getStartedAt() {
         return startedAt;
+    }
+
+    public Instant getSubmittedAt() {
+        return submittedAt;
     }
 
     public Instant getFinishedAt() {

@@ -1,6 +1,7 @@
 package com.xenova.backend.agent.domain;
 
 public enum AgentCommandStatus {
+    PENDING,
     ACCEPTED,
     RUNNING,
     SUCCEEDED,
@@ -8,6 +9,6 @@ public enum AgentCommandStatus {
     REJECTED;
 
     public boolean terminal() {
-        return this != RUNNING;
+        return this != PENDING && this != RUNNING;
     }
 }

@@ -30,6 +30,7 @@ public class AgentStressService {
     private final VmService vmService;
     private final AgentDataService agentDataService;
     private final TelemetryHeartbeatStore telemetryHeartbeatStore;
+    private final AgentCommandResultStore commandResultStore;
     private final Supplier<AgentCommandPublisher> publisher;
     private final ObjectMapper objectMapper;
     private final Clock clock;
@@ -39,22 +40,26 @@ public class AgentStressService {
             VmService vmService,
             AgentDataService agentDataService,
             TelemetryHeartbeatStore telemetryHeartbeatStore,
+            AgentCommandResultStore commandResultStore,
             ObjectProvider<AgentCommandPublisher> publisher,
             ObjectMapper objectMapper,
             Clock clock) {
-        this(vmService, agentDataService, telemetryHeartbeatStore, publisher::getIfAvailable, objectMapper, clock);
+        this(vmService, agentDataService, telemetryHeartbeatStore, commandResultStore,
+                publisher::getIfAvailable, objectMapper, clock);
     }
 
     AgentStressService(
             VmService vmService,
             AgentDataService agentDataService,
             TelemetryHeartbeatStore telemetryHeartbeatStore,
+            AgentCommandResultStore commandResultStore,
             Supplier<AgentCommandPublisher> publisher,
             ObjectMapper objectMapper,
             Clock clock) {
         this.vmService = vmService;
         this.agentDataService = agentDataService;
         this.telemetryHeartbeatStore = telemetryHeartbeatStore;
+        this.commandResultStore = commandResultStore;
         this.publisher = publisher;
         this.objectMapper = objectMapper;
         this.clock = clock;
@@ -96,8 +101,11 @@ public class AgentStressService {
         envelope.put("sent_at", timestamp(now));
         envelope.put("payload", command);
 
+        byte[] message = serialize(envelope);
+        commandResultStore.recordPending(vmId, commandId, operationId, bootId, now);
         AgentCommandPublisher target = publisher.get();
-        if (target == null || !target.publish("xenova/v1/vms/" + vmId + "/command", serialize(envelope), 1)) {
+        if (target == null || !target.publish("xenova/v1/vms/" + vmId + "/command", message, 1)) {
+            commandResultStore.discardPending(vmId, commandId);
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "MQTT_UNAVAILABLE",
                     "MQTT 브로커에 연결되어 있지 않아 부하 명령을 보내지 못했습니다.");
         }

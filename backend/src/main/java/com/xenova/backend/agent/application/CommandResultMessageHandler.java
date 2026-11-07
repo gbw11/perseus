@@ -108,6 +108,7 @@ public class CommandResultMessageHandler {
     private static void validateStatus(
             AgentCommandStatus status, Long durationMs, JsonNode result, JsonNode error) {
         boolean valid = switch (status) {
+            case PENDING -> false;
             case ACCEPTED -> durationMs == null && error == null;
             case RUNNING -> durationMs == null && result != null && error == null;
             case SUCCEEDED -> durationMs != null && result != null && error == null;

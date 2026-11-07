@@ -4,6 +4,9 @@ import com.xenova.backend.agent.domain.AgentCommandResult;
 import com.xenova.backend.agent.domain.AgentCommandResult.Observation;
 import com.xenova.backend.agent.domain.AgentCommandResultReport;
 import com.xenova.backend.agent.domain.AgentCommandResultRepository;
+import com.xenova.backend.agent.domain.AgentCommandStatus;
+import java.time.Instant;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,5 +27,25 @@ public class AgentCommandResultStore {
             return Observation.UPDATED;
         }
         return existing.observe(report);
+    }
+
+    @Transactional
+    public void recordPending(
+            String vmId, String commandId, String operationId, String bootId, Instant submittedAt) {
+        repository.findByVmIdAndCommandId(vmId, commandId)
+                .orElseGet(() -> repository.save(
+                        new AgentCommandResult(vmId, commandId, operationId, bootId, submittedAt)));
+    }
+
+    @Transactional
+    public void discardPending(String vmId, String commandId) {
+        repository.findByVmIdAndCommandId(vmId, commandId)
+                .filter(result -> result.getStatus() == AgentCommandStatus.PENDING)
+                .ifPresent(result -> repository.deleteByVmIdAndCommandId(vmId, commandId));
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<AgentCommandResult> find(String vmId, String commandId) {
+        return repository.findByVmIdAndCommandId(vmId, commandId);
     }
 }

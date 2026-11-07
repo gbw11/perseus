@@ -26,8 +26,8 @@ class CommandResultMessageHandlerIntegrationTest {
 
     private final Map<String, AgentCommandResult> rows = new LinkedHashMap<>();
     private final AgentCommandResultRepository repository = mock(AgentCommandResultRepository.class);
-    private final CommandResultMessageHandler handler = new CommandResultMessageHandler(
-            new ObjectMapper(), new AgentCommandResultStore(repository));
+    private final AgentCommandResultStore store = new AgentCommandResultStore(repository);
+    private final CommandResultMessageHandler handler = new CommandResultMessageHandler(new ObjectMapper(), store);
 
     @BeforeEach
     void cleanUp() {
@@ -43,6 +43,7 @@ class CommandResultMessageHandlerIntegrationTest {
 
     @Test
     void storesRunningThenTerminalResultAndIgnoresRedelivery() {
+        store.recordPending(VM_ID, COMMAND_ID, "operation-1", "boot-1", RECEIVED_AT.minusSeconds(1));
         byte[] running = envelope("message-1", 1, "RUNNING", null, null);
         assertThat(handle(running)).isEqualTo(Result.ACCEPTED);
         assertThat(handle(running)).isEqualTo(Result.IGNORED);
@@ -53,6 +54,7 @@ class CommandResultMessageHandlerIntegrationTest {
         AgentCommandResult stored = stored();
         assertThat(stored.getStatus()).isEqualTo(AgentCommandStatus.SUCCEEDED);
         assertThat(stored.getDurationMs()).isEqualTo(30_000L);
+        assertThat(stored.getSubmittedAt()).isEqualTo(RECEIVED_AT.minusSeconds(1));
         assertThat(stored.getResultJson()).contains("cpu_workers", "duration_s");
         assertThat(stored.isContractViolation()).isFalse();
     }

@@ -3,6 +3,9 @@ package com.xenova.backend.agent.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -28,6 +31,7 @@ class AutoDelayServiceTest {
 
     private final VmService vmService = mock(VmService.class);
     private final TelemetryHeartbeatStore telemetryHeartbeatStore = mock(TelemetryHeartbeatStore.class);
+    private final AgentCommandResultStore commandResultStore = mock(AgentCommandResultStore.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<JsonNode> sent = new ArrayList<>();
     private AutoDelayService service;
@@ -36,7 +40,8 @@ class AutoDelayServiceTest {
     void setUp() {
         when(vmService.get(VM_ID)).thenReturn(vm(GuestKind.ZEPHYR));
         when(telemetryHeartbeatStore.view(VM_ID)).thenReturn(freshHeartbeat());
-        service = new AutoDelayService(vmService, telemetryHeartbeatStore, () -> (topic, payload, qos) -> {
+        service = new AutoDelayService(vmService, telemetryHeartbeatStore, commandResultStore,
+                () -> (topic, payload, qos) -> {
             assertThat(topic).isEqualTo("xenova/v1/vms/" + VM_ID + "/command");
             assertThat(qos).isEqualTo(1);
             try {
@@ -63,6 +68,8 @@ class AutoDelayServiceTest {
         assertThat(payload.path("parameters").path("delay_ms").asInt()).isEqualTo(50);
         assertThat(payload.path("parameters").path("duration_s").asInt()).isEqualTo(30);
         assertThat(result.delayMs()).isEqualTo(50);
+        verify(commandResultStore).recordPending(
+                eq(VM_ID), eq(result.commandId()), eq(result.operationId()), eq("zephyr-boot"), eq(NOW));
     }
 
     @Test
@@ -88,12 +95,14 @@ class AutoDelayServiceTest {
 
     @Test
     void reportsUnavailableBroker() {
-        service = new AutoDelayService(vmService, telemetryHeartbeatStore, () -> null, objectMapper,
+        service = new AutoDelayService(vmService, telemetryHeartbeatStore, commandResultStore,
+                () -> null, objectMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.send(VM_ID, 50, 30))
                 .isInstanceOfSatisfying(ApiException.class,
                         exception -> assertThat(exception.getCode()).isEqualTo("MQTT_UNAVAILABLE"));
+        verify(commandResultStore).discardPending(eq(VM_ID), any());
     }
 
     private static Vm vm(GuestKind guestKind) {

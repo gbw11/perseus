@@ -3,7 +3,9 @@ package com.xenova.backend.agent.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,6 +35,7 @@ class AgentStressServiceTest {
     private final VmService vmService = mock(VmService.class);
     private final AgentDataService agentDataService = mock(AgentDataService.class);
     private final TelemetryHeartbeatStore telemetryHeartbeatStore = mock(TelemetryHeartbeatStore.class);
+    private final AgentCommandResultStore commandResultStore = mock(AgentCommandResultStore.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<JsonNode> sent = new ArrayList<>();
     private AgentStressService service;
@@ -44,7 +47,7 @@ class AgentStressServiceTest {
         heartbeat.update("boot-123", "agent-1", 3, NOW.minusSeconds(1), NOW.minusSeconds(1));
         when(agentDataService.findHeartbeat(VM_ID)).thenReturn(Optional.of(heartbeat));
         when(agentDataService.statusOf(any(), any())).thenReturn(AgentStatus.ONLINE);
-        service = new AgentStressService(vmService, agentDataService, telemetryHeartbeatStore,
+        service = new AgentStressService(vmService, agentDataService, telemetryHeartbeatStore, commandResultStore,
                 () -> (topic, payload, qos) -> {
             assertThat(topic).isEqualTo("xenova/v1/vms/" + VM_ID + "/command");
             assertThat(qos).isEqualTo(1);
@@ -72,6 +75,8 @@ class AgentStressServiceTest {
         assertThat(payload.path("parameters").path("memory_mib").asInt()).isZero();
         assertThat(payload.path("parameters").path("duration_s").asInt()).isEqualTo(30);
         assertThat(result.loadPercent()).isNull();
+        verify(commandResultStore).recordPending(
+                eq(VM_ID), eq(result.commandId()), eq(result.operationId()), eq("boot-123"), eq(NOW));
     }
 
     @Test
@@ -153,7 +158,8 @@ class AgentStressServiceTest {
 
     @Test
     void unavailableBrokerReturnsServiceUnavailable() {
-        service = new AgentStressService(vmService, agentDataService, telemetryHeartbeatStore, () -> null, objectMapper,
+        service = new AgentStressService(vmService, agentDataService, telemetryHeartbeatStore, commandResultStore,
+                () -> null, objectMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.memory(VM_ID, 64, 10))
@@ -161,6 +167,7 @@ class AgentStressServiceTest {
                     assertThat(exception.getCode()).isEqualTo("MQTT_UNAVAILABLE");
                     assertThat(exception.getStatus().value()).isEqualTo(503);
                 });
+        verify(commandResultStore).discardPending(eq(VM_ID), any());
     }
 
     private static Vm vm(GuestKind guestKind) {
