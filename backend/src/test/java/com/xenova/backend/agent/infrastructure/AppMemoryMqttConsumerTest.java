@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.xenova.backend.agent.application.AgentDataService;
 import com.xenova.backend.agent.application.AgentMessageHandler;
+import com.xenova.backend.agent.application.CommandResultMessageHandler;
 import com.xenova.backend.agent.application.TelemetryHeartbeatMessageHandler;
 import com.xenova.backend.agent.application.VmTelemetryMessageHandler;
 import com.xenova.backend.agent.domain.AgentHeartbeatRepository;
@@ -86,6 +87,7 @@ class AppMemoryMqttConsumerTest {
         MqttAgentSubscriber subscriber = new MqttAgentSubscriber(
                 new MqttProperties(true, url, "app-memory-product-subscriber", null, null, Duration.ofSeconds(1)),
                 mock(AgentMessageHandler.class), ingest, mock(TelemetryHeartbeatMessageHandler.class),
+                mock(CommandResultMessageHandler.class),
                 mock(RecoveryEventMessageHandler.class), backfill, CLOCK);
         MqttClient producer = null;
         try {

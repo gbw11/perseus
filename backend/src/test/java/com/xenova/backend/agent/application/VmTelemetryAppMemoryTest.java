@@ -94,7 +94,8 @@ class VmTelemetryAppMemoryTest {
     @Test
     void capturedBoardRegionsTraverseReceiverStorageAndExistingHttpRoute() throws Exception {
         MqttAgentSubscriber receiver = new MqttAgentSubscriber(mock(MqttProperties.class), mock(AgentMessageHandler.class),
-                handler, mock(TelemetryHeartbeatMessageHandler.class), mock(RecoveryEventMessageHandler.class),
+                handler, mock(TelemetryHeartbeatMessageHandler.class), mock(CommandResultMessageHandler.class),
+                mock(RecoveryEventMessageHandler.class),
                 mock(RecoveryEventBackfillService.class), CLOCK);
         for (String region : List.of("drive_maps", "drive_paths", "drive_search_nodes", "drive_odometry")) {
             ObjectNode message = fixture("board-app-memory-" + region + ".json");
