@@ -17,7 +17,8 @@ import uuid
 
 from .procfs_formats import parse_boot_id, parse_fdinfo, parse_mountinfo
 from .raw_leases import (ARENA_BYTES, SLOT_BYTES, FilledInfo, RawScope, ReadLease,
-                         ViewReturnFact, WriteGrant)
+                         RawOwnerExitBarrier, RawOwnerExitEvidence, RawRecoveryBarrier,
+                         RawRecoveryEvidence, ViewReturnFact, WriteGrant)
 from .raw_slot import ExpectedSlot, SlotEncoding, decode_owned, prefix
 from .resource_manifest import ResourceManifest, ResourceRecord
 from .resource_store import StoreAck
@@ -114,6 +115,22 @@ class NativeHandles:
     db_tokens: tuple
 
 
+@dataclass(frozen=True)
+class RetiredArenaCleanup:
+    """S가 원 retired mapping을 닫고 정확 이름 부재를 확인한 실제 완료 값."""
+
+    operation_id: str
+    resource: ResourceRecord
+    completed_us: int
+
+    def __post_init__(self):
+        _identifier(self.operation_id)
+        _exact(self.resource, ResourceRecord)
+        if (self.resource.slot != 'RAW_RETIRED' or self.resource.state != 'KNOWN'
+                or type(self.completed_us) is not int or not 0 <= self.completed_us <= 2**64 - 1):
+            raise NativeResourceError('invalid retired cleanup identity')
+
+
 class NativeResources:
     """S의 native 소유자. create_one은 단일 INTENT ACK, spawn_handles는 KNOWN ACK다.
 
@@ -133,6 +150,31 @@ class NativeResources:
         self._tokens = {}
         self._closed = False
         self._cleanup_error = None
+        self._recovery_error = None
+        self._raw_attempt = None
+        self._normalization = None
+        self._retirement = None
+        self._retired_cleanup_error = None
+
+    @property
+    def creation_attempted(self):
+        """현재 owner가 실제 constructor에 진입했는지 보존한다. guard 허가 자체는 아니다."""
+        if os.getpid() != self._pid:
+            raise NativeResourceError('native inventory belongs to another process')
+        return bool(self._attempted or self._raw_attempt is not None or self._created or self._shms or self._tokens)
+
+    def _healthy(self):
+        if self._recovery_error is not None:
+            raise NativeResourceError('native recovery remains failed') from self._recovery_error
+
+    def _close_root(self, fd, *, retired=False):
+        try:
+            os.close(fd)
+        except OSError as error:
+            self._recovery_error = error
+            if retired:
+                self._retired_cleanup_error = error
+            raise NativeResourceError('native backing descriptor close was not confirmed') from error
 
     def _manifest(self, ack):
         _exact(ack, StoreAck)
@@ -176,19 +218,33 @@ class NativeResources:
     def create_one(self, intent_ack):
         """constructor 진입 전 원 ACK를 검사한다. 실패한 slot은 재시도하지 않는다."""
         manifest = self._manifest(intent_ack)
+        self._healthy()
         if len(manifest.intents) != 1:
             raise NativeResourceError('creation requires exactly one pending intent')
         intent = manifest.intents[0]
         if manifest.resource(intent.slot).state != 'INTENT':
             raise NativeResourceError('UNKNOWN inventory cannot retry a constructor')
-        if intent.slot in self._attempted:
+        if intent.slot != 'RAW_CURRENT' and intent.slot in self._attempted:
             raise NativeResourceError('constructor was already attempted for this slot')
         if intent.slot not in ('RAW_CURRENT', 'DB_COPY_0') + TOKEN_SLOTS:
             raise NativeResourceError('only one raw/copy arena and fixed6 tokens are supported')
+        if intent.slot == 'RAW_CURRENT':
+            if 'RAW_CURRENT' in self._shms or 'RAW_RETIRED' in self._shms:
+                raise NativeResourceError('current or unresolved retired arena still exists')
+            if manifest.resource('RAW_RETIRED').state != 'NOT_ATTEMPTED':
+                raise NativeResourceError('new raw creation requires durable cleared retired inventory')
+            if self._raw_attempt is not None:
+                previous_id, previous_revision = self._raw_attempt
+                if (intent.planned_object_id == previous_id or manifest.revision <= previous_revision
+                        or self._retirement is None or self._retirement[2] is None):
+                    raise NativeResourceError('new physical raw attempt lacks completed retirement')
         _creator_profile()
         root_fd = self._root(manifest.runtime)
         try:
-            self._attempted.add(intent.slot)
+            if intent.slot == 'RAW_CURRENT':
+                self._raw_attempt = (intent.planned_object_id, manifest.revision)
+            else:
+                self._attempted.add(intent.slot)
             if intent.slot in TOKEN_SLOTS:
                 sem = self._ctx.Semaphore(1 if intent.slot.endswith('WRITABLE') else 0)
                 self._tokens[intent.slot] = sem
@@ -226,12 +282,14 @@ class NativeResources:
             self._created[intent.slot] = record
             return record
         except Exception as error:
+            self._recovery_error = error
             raise NativeResourceError('creation entered or failed; retain unresolved DIRTY inventory') from error
         finally:
-            os.close(root_fd)
+            self._close_root(root_fd)
 
     def spawn_handles(self, final_known_ack):
         manifest = self._manifest(final_known_ack)
+        self._healthy()
         needed = ('RAW_CURRENT', 'DB_COPY_0') + TOKEN_SLOTS
         if (manifest.intents or any(slot not in self._created or manifest.resource(slot) != self._created[slot]
                                     for slot in needed)):
@@ -243,6 +301,126 @@ class NativeResources:
                                     self._tokens['RAW_' + str(i) + '_READY']) for i in (0, 1)),
                              (self._tokens['DB_WRITABLE'], self._tokens['DB_READY']))
 
+    def normalize_raw(self, current_ack, operation_id, barrier):
+        """원 PAUSED+M reap 또는 A/M reap 뒤만 호출한다. 그 실제 근거는 S가 검증한다.
+
+        동일 operation과 원문에는 원 evidence만 돌려주며 token을 다시 만지지 않는다.
+        각 token은 최대1개만 drain하고 두 번째가 있으면 복구를 sticky 실패로 닫는다.
+        """
+        manifest = self._manifest(current_ack)
+        _identifier(operation_id)
+        if type(barrier) not in (RawRecoveryBarrier, RawOwnerExitBarrier):
+            raise NativeResourceError('exact raw recovery barrier is required')
+        fingerprint = (manifest.ref, barrier)
+        previous = self._normalization
+        if previous is not None and previous[0] == operation_id:
+            if previous[1] != fingerprint:
+                raise NativeResourceError('normalization operation changed its original fields')
+            self._healthy()
+            return previous[2]
+        self._healthy()
+        if previous is not None and manifest.revision <= previous[1][0].revision:
+            raise NativeResourceError('normalization requires a newer durable recovery revision')
+        raw = self._created.get('RAW_CURRENT')
+        scope = barrier.scope
+        if (manifest.intents or raw is None or manifest.resource('RAW_CURRENT') != raw
+                or 'RAW_RETIRED' in self._shms
+                or scope.service_instance != manifest.service_instance or scope.arena_id != raw.object_id
+                or scope.arena_name != raw.name or scope.arena_size_bytes != raw.size_bytes
+                or any(manifest.resource(slot) != self._created.get(slot) for slot in TOKEN_SLOTS)):
+            raise NativeResourceError('recovery barrier differs from durable current raw/token inventory')
+        event_times = ((barrier.paused_us, barrier.old_reader_exited_us)
+                       if type(barrier) is RawRecoveryBarrier else
+                       (barrier.writer_exited_us, barrier.reader_exited_us))
+        if _now() < max(event_times):
+            raise NativeResourceError('quiescence evidence is in the future')
+        root_fd = self._root(manifest.runtime)
+        try:
+            for slot in TOKEN_SLOTS[:4]:
+                token = self._tokens[slot]
+                token.acquire(False)
+                if token.acquire(False):
+                    raise NativeResourceError('publication token count exceeds one')
+            self._tokens['RAW_0_WRITABLE'].release()
+            self._tokens['RAW_1_WRITABLE'].release()
+            self._check_root(root_fd, manifest.runtime)
+            evidence_type = RawRecoveryEvidence if type(barrier) is RawRecoveryBarrier else RawOwnerExitEvidence
+            evidence = evidence_type(barrier, operation_id, _now())
+            self._normalization = (operation_id, fingerprint, evidence)
+            return evidence
+        except Exception as error:
+            self._recovery_error = error
+            raise NativeResourceError('raw token normalization failed; no repeat or new arena is permitted') from error
+        finally:
+            self._close_root(root_fd)
+
+    def retire_raw(self, retired_ack, operation_id):
+        """원 A/M actual reap과 owner-exit 정규화 뒤의 retired ACK만 처리한다.
+
+        DB arena/token은 유지한다. close/unlink를 재시도하지 않으며 실패한 retired
+        set은 최대1개로 보존해 다음 물리 arena 할당을 막는다.
+        """
+        manifest = self._manifest(retired_ack)
+        _identifier(operation_id)
+        previous = self._retirement
+        if previous is not None and previous[0] == operation_id:
+            if previous[1] != manifest.ref:
+                raise NativeResourceError('retirement operation changed original ACK')
+            self._healthy()
+            return previous[2]
+        self._healthy()
+        current = self._created.get('RAW_CURRENT')
+        retired = manifest.resource('RAW_RETIRED')
+        source = retired_ack.proposal.expected.outcome.manifest
+        normalized = None if self._normalization is None else self._normalization[2]
+        if (current is None or source is None or source.resource('RAW_CURRENT') != current
+                or manifest.resource('RAW_CURRENT').state != 'NOT_ATTEMPTED' or manifest.intents
+                or retired != ResourceRecord('RAW_RETIRED', 'KNOWN', current.name,
+                                             current.object_id, current.size_bytes)
+                or 'RAW_RETIRED' in self._shms or type(normalized) is not RawOwnerExitEvidence
+                or normalized.barrier.scope.arena_id != current.object_id
+                or self._normalization[1][0].revision > source.revision):
+            raise NativeResourceError('retirement lacks exact original raw and owner-exit normalization')
+        shm = self._shms.pop('RAW_CURRENT')
+        self._shms['RAW_RETIRED'] = shm
+        self._created.pop('RAW_CURRENT')
+        self._created['RAW_RETIRED'] = retired
+        self._retirement = (operation_id, manifest.ref, None)
+        errors = []
+        root_fd = None
+        try:
+            root_fd = self._root(manifest.runtime)
+            entry = os.stat(retired.name[1:], dir_fd=root_fd, follow_symlinks=False)
+            if _identity(entry) != _identity(os.fstat(shm._fd)):
+                raise NativeResourceError('retired exact name no longer identifies owned mapping')
+            try:
+                shm.close()
+            except Exception as error:
+                errors.append(error)
+            try:
+                shm.unlink()
+            except Exception as error:
+                errors.append(error)
+            if errors:
+                raise errors[0]
+            try:
+                os.stat(retired.name[1:], dir_fd=root_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise NativeResourceError('retired backing name remains present')
+            self._check_root(root_fd, manifest.runtime)
+            result = RetiredArenaCleanup(operation_id, retired, _now())
+            self._shms.pop('RAW_RETIRED')
+            self._retirement = (operation_id, manifest.ref, result)
+            return result
+        except Exception as error:
+            self._retired_cleanup_error = self._recovery_error = error
+            raise NativeResourceError('retired cleanup remains unknown; additional allocation is forbidden') from error
+        finally:
+            if root_fd is not None:
+                self._close_root(root_fd, retired=True)
+
     def close_after_children(self):
         """SHM만 S가 unlink한다. 첫 실패는 sticky이며 반복 호출이 성공으로 바꾸지 않는다."""
         if os.getpid() != self._pid:
@@ -252,8 +430,10 @@ class NativeResources:
                 raise NativeResourceError('native cleanup was not fully confirmed') from self._cleanup_error
             return
         self._closed = True
-        errors = []
-        for shm in self._shms.values():
+        errors = [] if self._retired_cleanup_error is None else [self._retired_cleanup_error]
+        for slot, shm in self._shms.items():
+            if slot == 'RAW_RETIRED' and self._retired_cleanup_error is not None:
+                continue
             try:
                 shm.close()
             except Exception as error:

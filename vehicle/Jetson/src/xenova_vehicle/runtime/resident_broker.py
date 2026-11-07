@@ -6,11 +6,14 @@ OFFER는 읽기 권한이 아니다. ACQUIRE를 원장에 먼저 예약하고 �
 
 from collections import Counter, deque
 from dataclasses import dataclass
+import hashlib
 import uuid
 
 from .raw_binding_messages import RawBindMessage
 from .local_envelope import StructuralPacket
-from .raw_leases import Endpoint, LeaseStatus, RawLeaseLedger, RawScope, ReplacementSyncFact, SlotState
+from .raw_leases import (Endpoint, LeaseStatus, RawLeaseLedger, RawRecoveryBarrier,
+                         RawRecoveryEvidence, RawScope, ReplacementSyncFact, SlotState)
+from .raw_recovery import RawControlMessage
 from .resident_transport import j_us
 from .slot_cleanup import CleanupTimeLimits, ReleaseMessage
 from .slot_messages import PAYLOAD_FIELDS, ReaderSlotContext, SlotMessage, SlotTimeLimits, WriterSlotContext
@@ -31,7 +34,7 @@ class _Draft:
 
 
 class ResidentRawBroker:
-    """고정 A/M과2slot 전용. reader 교체·owner exit 회복·metric read는 제공하지 않는다."""
+    """같은 A와2slot의 예약. 실제 pause/exit/정규화 뒤 M incarnation만 교체할 수 있다."""
 
     def __init__(self, writer_bind, scope, reader, raw_tokens, *,
                  limits=SlotTimeLimits(150_000, 500_000, 150_000),
@@ -55,6 +58,77 @@ class ResidentRawBroker:
         self._active_offer = None
         self._reads = [deque(maxlen=2), deque(maxlen=2)]
         self._counts = Counter()
+        self._quiescing = False
+        self._paused = None
+        self._last_reader_recovery = None
+
+    def begin_pause(self):
+        """미승인 REQUEST는 취소하고 기존 예약 GRANT만 배출한다. Device pause는 아직 아니다."""
+        if self._ledger.snapshot.fenced:
+            raise BrokerError('a fenced arena cannot enter reader-only recovery')
+        if self._quiescing:
+            return False
+        self._quiescing = True
+        self._paused = None
+        if self._writer_draft is None:
+            self._request = None
+        if self._reader_draft is not None and self._reader_draft.op == 'OFFER':
+            self._reader_draft = None
+        self._active_offer = None
+        return True
+
+    @property
+    def pause_ready(self):
+        return self._quiescing and self._writer_draft is None
+
+    def accept_paused(self, packet, original_pause, *, first_sent_us, now_us):
+        if not self.pause_ready or type(original_pause) is not RawControlMessage or original_pause.op != 'PAUSE':
+            raise BrokerError('PAUSED requires an original selected PAUSE after prior GRANT drafts')
+        message = RawControlMessage(packet, self.writer.bind, original_pause)
+        message.check_live(now_us)
+        self._now(first_sent_us)
+        if not original_pause.issued_us <= first_sent_us <= message.issued_us:
+            raise BrokerError('PAUSED predates actual original PAUSE send')
+        if any(s.state is SlotState.WRITING or s.pending is not None for s in self._ledger.snapshot.slots):
+            raise BrokerError('producer PAUSED before its preceding writes were completed')
+        if self._paused is not None and self._paused.raw != message.raw:
+            raise BrokerError('original producer PAUSED statement cannot change')
+        self._paused = message
+        return message
+
+    def recovery_barrier(self, old_reader_exited_us):
+        if self._paused is None:
+            raise BrokerError('actual producer PAUSED statement is absent')
+        return RawRecoveryBarrier(self.writer.scope, self.reader, self._paused.pause_request_id,
+            hashlib.sha256(self._paused.raw).hexdigest(), self._paused.issued_us, old_reader_exited_us)
+
+    def rebind_reader(self, reader, evidence, *, now_us):
+        self._now(now_us)
+        if type(reader) is not Endpoint or type(evidence) is not RawRecoveryEvidence:
+            raise BrokerError('expected actual reader incarnation and raw normalization evidence')
+        if self._last_reader_recovery == (reader, evidence):
+            return False
+        if not self._quiescing or self._paused is None or type(evidence) is not RawRecoveryEvidence:
+            raise BrokerError('reader recovery requires actual pause/exit/normalization evidence')
+        if evidence.barrier != self.recovery_barrier(evidence.barrier.old_reader_exited_us):
+            raise BrokerError('normalization differs from original producer pause and reader')
+        changed = self._ledger.rebind_reader(reader, evidence, now_us=now_us)
+        if changed:
+            self.reader = reader
+            self.reader_context = None
+            self._request = self._writer_draft = self._reader_draft = None
+            self._offers, self._previous_offers = [None, None], [None, None]
+            self._active_offer = None
+            self._counts['reader_recoveries'] += 1
+            self._last_reader_recovery = reader, evidence
+        return changed
+
+    def resume(self):
+        """S가 원 PAUSED에 대한 RESUME를 선택한 뒤 호출한다. 자체 전송/시간 갱신은 없다."""
+        if not self._quiescing or self._paused is None or self.reader_context is None:
+            raise BrokerError('resume requires recovered and rebound reader plus original pause')
+        self._quiescing = False
+        self._paused = None
 
     def bind_reader(self, reader_bind):
         """S가 원 M ACK의 actual send/current 검사를 마친 뒤 stable 원 BIND를 결합한다."""
@@ -90,6 +164,9 @@ class ResidentRawBroker:
         op = payload.get('op')
         if role == 'A' and op == 'REQUEST':
             message = SlotMessage(packet, self.writer, limits=self.limits)
+            if self._quiescing:
+                self._counts['requests_paused'] += 1
+                return None
             self._live(message, now_us)
             if self._ledger.snapshot.fenced:
                 raise BrokerError('new write request after fence')
@@ -117,6 +194,9 @@ class ResidentRawBroker:
         if role != 'M' or self.reader_context is None:
             raise BrokerError('unsupported role/op or M RAW BIND is absent')
         if op == 'ACQUIRE':
+            if self._quiescing:
+                self._counts['acquires_paused'] += 1
+                return None
             slot = payload.get('slot')
             if type(slot) is not int or slot not in (0, 1):
                 raise BrokerError('ACQUIRE has no registered slot')
@@ -269,14 +349,15 @@ class ResidentRawBroker:
             return selected
         if self._active_offer is not None and now_us >= self._active_offer.expires_us:
             self._active_offer = None
-        self._reserve_writer(now_us)
+        if not self._quiescing:
+            self._reserve_writer(now_us)
         if self._writer_draft is not None:
             packet, done = self._send(self._writer_draft, writer_link, self.writer, now_us)
             if packet is not None:
                 selected.append(packet)
             if done:
                 self._writer_draft = None
-        if self.reader_context is None or reader_link is None:
+        if self._quiescing or self.reader_context is None or reader_link is None:
             return selected
         if self._reader_draft is None and self._active_offer is None:
             slots = self._ledger.snapshot.slots
@@ -309,6 +390,7 @@ class ResidentRawBroker:
     def snapshot(self):
         state = self._ledger.snapshot
         return dict(fenced=state.fenced, fault=None if state.fault is None else state.fault.value,
+            write_paused=self._quiescing, producer_paused=self._paused is not None,
             reader_bound=self.reader_context is not None,
             slots=[dict(state=s.state.value, generation=s.generation, replacement=s.pending is not None)
                    for s in state.slots], write_request_pending=self._request is not None,

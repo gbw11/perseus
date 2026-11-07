@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 import sys
 
@@ -155,7 +156,12 @@ def _runtime_command(args: argparse.Namespace) -> int:
     try:
         profile = load_yolop_profile(args.profile)
         storage = StorageProfile(str(args.database.expanduser().absolute()), args.database_open_policy)
-        report = run_runtime(profile, args.state_dir, storage, args.output, duration_s=args.duration_s)
+        service_scope = None
+        if args.service_scope is not None:
+            from .runtime.service_scope import SystemdServiceScope
+            service_scope = SystemdServiceScope()
+        report = run_runtime(profile, args.state_dir, storage, args.output or args.output_root,
+            duration_s=args.duration_s, service_scope=service_scope, output_root=args.output_root is not None)
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"runtime: {exc}", file=sys.stderr)
         return 2
@@ -167,6 +173,12 @@ def _runtime_command(args: argparse.Namespace) -> int:
         print(f"Metric/world: waiting; output: {args.output}")
         if report.get('error'):
             print(f"Error: {report['error']}")
+    if report.get('requires_service_reap'):
+        # 미회수 owner를 CPython의 암묵 join으로 계속 기다리지 않고 외부 service manager에 넘긴다.
+        # resource 기록은 DIRTY로 남기고 다음 guard가 미종료·잔존 이름을 다시 확인한다.
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(report['exit_code'])
     return report['exit_code']
 
 
@@ -214,7 +226,10 @@ def main(argv: list[str] | None = None) -> int:
     runtime.add_argument("--database", type=Path, required=True, help="explicit SQLite path owned by D")
     runtime.add_argument("--database-open-policy", choices=("EXISTING_ONLY", "CREATE_IF_ABSENT"), default="EXISTING_ONLY",
                          help="existing database by default; explicit first creation is opt-in")
-    runtime.add_argument("--output", type=Path, required=True, help="new runtime diagnostic directory")
+    runtime_output = runtime.add_mutually_exclusive_group(required=True)
+    runtime_output.add_argument("--output", type=Path, help="new runtime diagnostic directory")
+    runtime_output.add_argument("--output-root", type=Path, help="existing managed root; create one private directory per service UUID")
+    runtime.add_argument("--service-scope", choices=("systemd",), help="require actual fixed systemd service/slice execution and restart guard")
     runtime.add_argument("--duration-s", type=_duration, default=None, help="optional 0.1..300 second residence after local readiness; default until stop")
     runtime.add_argument("--json", action="store_true", help="print one final normal-flow receipt")
     args = parser.parse_args(argv)

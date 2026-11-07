@@ -2,8 +2,9 @@
 
 등록·완료 fact는 caller가 검증한 범위가 있는 합성 정책 입력이다. constructor의 형식
 검사가 실제 OS 관측을 만들지 않는다. 단일 owner는 외부 동기 token 작업이 돌아오기 전
-다른 thread/signal callback에서 이 원장을 변이하지 않는다. METRIC_MAP·reader 교체와
-owner exit 회수/정규화·전역 quarantine manager는 미지원이다.
+다른 thread/signal callback에서 이 원장을 변이하지 않는다. METRIC_MAP과
+전역 quarantine manager는 미지원이다. reader 교체는 실제 caller가 결박한
+old reader 실종료·A pause·token 정규화 사실이 모두 있는 별도 경계에서만 허용한다.
 """
 
 from dataclasses import dataclass, replace
@@ -117,6 +118,72 @@ class RawScope:
             _fail('initial raw arena is exactly two 2MiB slots')
         if type(self.arena_role) is not str or self.arena_role != 'RAW':
             _fail('initial ledger supports raw arena role only')
+
+
+@dataclass(frozen=True)
+class RawRecoveryBarrier:
+    """caller의 원 PAUSED/old M 실종료 사실. 형식 검사가 OS 증명을 만들지는 않는다."""
+
+    scope: RawScope
+    old_reader: Endpoint
+    pause_request_id: str
+    pause_ack_sha256: str
+    paused_us: int
+    old_reader_exited_us: int
+
+    def __post_init__(self):
+        _exact(self.scope, RawScope)
+        _exact(self.old_reader, Endpoint)
+        _uuid(self.pause_request_id)
+        _sha(self.pause_ack_sha256)
+        _u64(self.paused_us)
+        _u64(self.old_reader_exited_us)
+
+
+@dataclass(frozen=True)
+class RawOwnerExitBarrier:
+    """A/M이 모두 실제 종료된 arena의 정규화 전제. 새 arena grant 자체는 아니다."""
+
+    scope: RawScope
+    writer_exited_us: int
+    reader_exited_us: int
+
+    def __post_init__(self):
+        _exact(self.scope, RawScope)
+        _u64(self.writer_exited_us)
+        _u64(self.reader_exited_us)
+
+
+@dataclass(frozen=True)
+class RawRecoveryEvidence:
+    """동일 원 barrier에서 실제 token 정규화가 끝난 한 operation의 완료 사실."""
+
+    barrier: RawRecoveryBarrier
+    operation_id: str
+    normalized_us: int
+
+    def __post_init__(self):
+        _exact(self.barrier, RawRecoveryBarrier)
+        _uuid(self.operation_id)
+        _u64(self.normalized_us)
+        if max(self.barrier.paused_us, self.barrier.old_reader_exited_us) > self.normalized_us:
+            _fail('normalization precedes actual quiescence facts')
+
+
+@dataclass(frozen=True)
+class RawOwnerExitEvidence:
+    """A/M 실제 종료 뒤 token 정규화 사실. M-only pause 사실로 바꾸어 쓰지 않는다."""
+
+    barrier: RawOwnerExitBarrier
+    operation_id: str
+    normalized_us: int
+
+    def __post_init__(self):
+        _exact(self.barrier, RawOwnerExitBarrier)
+        _uuid(self.operation_id)
+        _u64(self.normalized_us)
+        if max(self.barrier.writer_exited_us, self.barrier.reader_exited_us) > self.normalized_us:
+            _fail('normalization precedes actual owner exits')
 
 
 @dataclass(frozen=True)
@@ -490,6 +557,7 @@ class RawLeaseLedger:
         self._scope, self._reader, self._publication = scope, reader, publication_sha256
         self._slots = (SlotSnapshot(), SlotSnapshot())
         self._fenced, self._retired, self._fault, self._fenced_us = False, False, None, None
+        self._last_recovery = None
 
     @property
     def snapshot(self):
@@ -740,6 +808,31 @@ class RawLeaseLedger:
                                     now_us, original_slot=slot)
             raise
         return result
+
+    def rebind_reader(self, reader, evidence, *, now_us):
+        """정규화된 quiescent slot을 같은 generation의 FREE로 바꾼다. token post는 하지 않는다."""
+        _exact(reader, Endpoint)
+        _exact(evidence, RawRecoveryEvidence)
+        _exact(evidence.barrier, RawRecoveryBarrier)
+        _event(evidence.normalized_us, now_us)
+        self._open()
+        if self._last_recovery == (reader, evidence):
+            return False
+        barrier = evidence.barrier
+        if (barrier.scope != self._scope or barrier.old_reader != self._reader
+                or reader.worker_instance == self._reader.worker_instance
+                or reader.channel_epoch == self._reader.channel_epoch):
+            _fail('reader recovery differs from original scope/old reader/new incarnation')
+        if any(s.state is SlotState.WRITING or s.pending is not None for s in self._slots):
+            _fail('producer is not quiescent for reader recovery')
+        if self._last_recovery is not None and self._last_recovery[1].barrier.pause_request_id == barrier.pause_request_id:
+            _fail('a pause recovery cannot be reinterpreted or renewed')
+        if any(s.filled is not None and s.filled.completed_us > barrier.paused_us for s in self._slots):
+            _fail('content completion follows the original producer pause')
+        self._slots = tuple(replace(s, state=SlotState.FREE, read=None, pending=None) for s in self._slots)
+        self._reader = reader
+        self._last_recovery = reader, evidence
+        return True
 
     def fence(self, *, now_us, retired=False):
         """사용권만 sticky 철회한다. WRITING/IN_USE/실 token 회수나 새 baseline 생성은 없다."""

@@ -119,7 +119,7 @@ PYTHONPATH=vehicle/Jetson/src python -m xenova_vehicle doctor --json
 
 `runtime`은 Jetson의 Linux·CPython 3.11.18 환경에서 S/A/M/D를 `spawn`으로 실행한다. S-main은 lifecycle·원 기한·lease를, S-log 한 스레드는 자원 기록과 named 자원 생성을 담당한다. A가 OAK Device와 모델을 한 번 적재해 유지하고, M이 받은 owned bytes를 해석하며, D가 SQLite를 독점한다. `doctor`는 이 경로에서 실행하지 않는다.
 
-외부에 복사한 `profiles/oak-yolop-rgb-depth-bench.example.json`의 장치·자산 경로를 실제 값으로 설정하고 `nn_requirement=REQUIRED`, `jpeg_enabled=false`를 사용한다. 다음은 새 설치의 첫 실행 예다. state와 output은 기존 경로를 덮어쓰지 않는다.
+외부에 복사한 `profiles/oak-yolop-rgb-depth-bench.example.json`의 장치·자산 경로를 실제 값으로 설정하고 `nn_requirement=REQUIRED`, `jpeg_enabled=false`를 사용한다. 다음은 새 설치의 첫 수동 실행 예다. state의 부모 디렉터리는 앱 실행 사용자 소유로 먼저 준비한다. state와 output은 기존 경로를 덮어쓰지 않는다.
 
 ```bash
 python -m xenova_vehicle runtime-init --state-dir "$HOME/.local/state/xenova-vehicle/runtime" --json
@@ -135,7 +135,11 @@ python -m xenova_vehicle runtime \
 
 capture 준비는 실제 RGB/depth 30쌍, NN 준비는 M의 fresh parser 결과 5회로 구별한다. Pi 시각·odom·차량 장착 보정·지도와 provenance가 준비되기 전 `metric_ready=false`, `world_valid=false`를 유지한다. 로컬 준비는 주행 허가가 아니다.
 
-종료할 때 새 grant를 막고 worker의 실제 종료를 확인한 뒤 S가 소유한 SHM을 정리한다. 최종 자원 기록은 `CLEANUP_CANDIDATE`다. 현재 명령은 최초 정상 실행 범위이며, 기존 state의 자동 재기동·worker별 장애 복구·서비스 cgroup 배포는 아직 지원하지 않는다. 재실행을 위해 기존 state를 지우거나 새 경로로 우회하지 않는다. 설치·검증 절차와 실행 결과는 `Jetson-drive-docs/making-reports/0029-normal-runtime-flow.md`에서 관리한다.
+장애가 나면 M만, A/M 함께, D만 선택적으로 회복한다. M 회복에서는 A의 Device·모델·RAW arena를 유지하고, A/M 회복은 이전 두 worker의 실제 종료 뒤 RAW만 교체한다. 고정 token 6개와 D는 유지한다. D 회복은 같은 DB UUID와 내구 HWM을 검증하며 새 DB를 만들지 않는다. 회복 중 원 기한과 식별자를 보존하고, 중복 장애나 불명 자원은 전체 서비스를 실패로 닫는다. 회복 횟수는 내구 기록에 누적하며 실제 로컬 준비가 연속 5분 유지되어야 새 episode로 전환한다.
+
+종료할 때 새 grant를 막고 worker의 실제 종료를 확인한 뒤 S가 소유한 SHM을 정리한다. 최종 자원 기록은 `CLEANUP_CANDIDATE`다. 다음 기동은 이전 owner의 실제 종료와 known 이름 부재, 현재 runtime·전용 cgroup을 다시 검증해야 한다. 재실행을 위해 기존 state를 지우거나 초기화하지 않는다.
+
+반복 기동은 [systemd 배포 안내](deploy/systemd/README.md)의 고정 unit/slice에서 `--service-scope systemd`로 실행한다. `--output-root`는 기존 관리 디렉터리 아래 service UUID별 결과를 만들며 `--output`과 함께 지정할 수 없다. `resource-set.json`이 inventory·회복 counter의 정본이고 실행 기록은 해당 invocation을 식별하는 불변 anchor다. 설치 과정과 실제 검증 결과는 `Jetson-drive-docs/making-reports`에서 관리한다.
 
 ## RGB·native depth 벤치 수집
 
@@ -552,7 +556,7 @@ frozen `NameObservationBatch(before, after, names)`는 두 원 ObservationBatch�
 
 ## 테스트
 
-`vehicle/Jetson`에서 표준 라이브러리 테스트를 실행한다.
+실행 검증의 기준은 Jetson의 앱 전용 Python이다. PC에서는 편집·구문 검사를 수행하며 WSL에서 같은 시험을 반복할 필요는 없다. 다음은 `vehicle/Jetson`에서 실행하는 표준 라이브러리 테스트다. `tests/hardware`는 실제 장치·보존 state를 사용하는 명시 시험이므로 기본 discovery에 포함하지 않는다.
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests/unit -v

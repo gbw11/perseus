@@ -97,18 +97,64 @@ class StorageProfile:
 
 
 @dataclass(frozen=True)
+class StorageRecovery:
+    """S가 이미 수락한 EMPTY 원 metadata와 복구 open 정책을 함께 고정한다.
+
+    값 constructor 자체가 이전 D의 출처를 증명하지는 않는다. parent는 현재
+    peer/nonce/기한을 통과한 원 bootstrap body를 넘긴다. 파일 소실 때 생성하거나
+    다른 UUID/작은 HWM을 채택하는 경로를 producer와 consumer 양쪽에서 닫는다.
+    """
+
+    previous_profile: StorageProfile
+    original_body: bytes
+
+    def __init__(self, previous_profile, previous_bootstrap_body):
+        body = _bootstrap_body(previous_bootstrap_body, previous_profile)
+        if body['status'] != 'EMPTY':
+            raise StorageProtocolError('D recovery currently requires an admitted EMPTY bootstrap')
+        object.__setattr__(self, 'previous_profile', previous_profile)
+        object.__setattr__(self, 'original_body', _canonical(body))
+
+    @property
+    def profile(self):
+        old = self.previous_profile
+        return StorageProfile(old.database_path, 'EXISTING_ONLY', old.schema_version, old.selection_policy)
+
+    @property
+    def database_uuid(self):
+        return json.loads(self.original_body)['database_uuid']
+
+    @property
+    def minimum_allocator_highwater(self):
+        return json.loads(self.original_body)['allocator_highwater']
+
+    def check_metadata(self, metadata):
+        """실제 producer 조회 또는 검증된 response 값의 동일 DB·비감소 head만 검사한다."""
+        if (metadata['database_uuid'] != self.database_uuid
+                or _highwater(metadata['allocator_highwater']) < _highwater(self.minimum_allocator_highwater)):
+            raise StorageProtocolError('recovery DB identity changed or durable highwater regressed')
+
+
+def _recovery_profile(profile, recovery):
+    if recovery is not None and (type(recovery) is not StorageRecovery or profile != recovery.profile):
+        raise StorageProtocolError('D recovery requires its pinned EXISTING_ONLY profile')
+
+
+@dataclass(frozen=True)
 class StorageBoot:
     peer: LifecyclePeer
     startup_deadline_us: int
     storage_profile: StorageProfile
     copy_handles: object = None
     diagnostic_directory: str | None = None
+    recovery: StorageRecovery | None = None
 
     def __post_init__(self):
         if type(self.peer) is not LifecyclePeer or self.peer.role != 'D' or type(self.storage_profile) is not StorageProfile:
             raise ValueError('expected registered D and storage profile')
         if type(self.startup_deadline_us) is not int or not 0 <= self.startup_deadline_us <= 2**64 - 1:
             raise ValueError('startup deadline must be u64 microseconds')
+        _recovery_profile(self.storage_profile, self.recovery)
 
 
 def discovery_payload(profile, nonce):
@@ -172,7 +218,8 @@ def _bootstrap_body(body, profile):
     return body
 
 
-def parse_bootstrap_result(packet, peer, profile, original_discover, *, now_us):
+def parse_bootstrap_result(packet, peer, profile, original_discover, *, now_us, recovery=None):
+    _recovery_profile(profile, recovery)
     original = parse_discover(original_discover, peer, profile, now_us=now_us)
     fields = _packet(packet, peer, 'DB_JOB', 0, child_sender=True)
     _keys(fields['payload'], 'op body')
@@ -184,6 +231,8 @@ def parse_bootstrap_result(packet, peer, profile, original_discover, *, now_us):
     body = _bootstrap_body(fields['payload']['body'], profile)
     if body['discovery_nonce'] != original['discovery_nonce']:
         raise StorageProtocolError('bootstrap nonce differs from original discovery')
+    if recovery is not None and body['status'] == 'EMPTY':
+        recovery.check_metadata(body)
     return body
 
 
@@ -232,7 +281,7 @@ def parse_storage_bind_ack(packet, peer, original_bind, *, now_us):
 class _Database:
     """D 내부의 실제 writer. 기존 파일은 검증하기 전 schema/pragma로 고치지 않는다."""
 
-    def __init__(self, profile, expires_us):
+    def __init__(self, profile, expires_us, recovery=None):
         import fcntl
         import sqlite3
 
@@ -243,6 +292,7 @@ class _Database:
         self.created = False
         self.fcntl = fcntl
         try:
+            _recovery_profile(profile, recovery)
             parent = Path(profile.database_path).parent
             parent_stat = parent.lstat()
             if not stat.S_ISDIR(parent_stat.st_mode) or parent_stat.st_uid != os.geteuid() or parent_stat.st_mode & 0o022:
@@ -279,6 +329,11 @@ class _Database:
                 finally:
                     os.close(directory)
             self.metadata = self._validate()
+            if recovery is not None:
+                try:
+                    recovery.check_metadata(self.metadata)
+                except StorageProtocolError as error:
+                    raise StorageIncompatible('existing DB no longer matches the admitted recovery identity/head') from error
             self.connection.execute('PRAGMA synchronous=FULL')
             if self.connection.execute('PRAGMA synchronous').fetchone() != (2,):
                 raise StorageUnknown('SQLite FULL synchronous setting was not retained')
@@ -379,7 +434,7 @@ def _diagnostic(boot, value):
     if boot.diagnostic_directory is None:
         return
     directory = Path(boot.diagnostic_directory)
-    directory.mkdir(mode=0o700, exist_ok=True)
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     target = directory / ('storage-' + boot.peer.worker_instance + '.json')
     with target.open('xb') as output:
         output.write(_canonical(value) + b'\n')
@@ -401,6 +456,10 @@ def storage_main(endpoint, boot):
                   profile_sha256=boot.storage_profile.sha256, sqlite_version=None, database_created=False,
                   database_closed=True, owner_lock_closed=True, error=None, discoveries=0, bound=False,
                   stopped_report_sent=False, copy_leases_acquired=0)
+    if boot.recovery is not None:
+        report['recovery'] = dict(database_uuid=boot.recovery.database_uuid,
+            minimum_allocator_highwater=boot.recovery.minimum_allocator_highwater,
+            previous_profile_sha256=boot.recovery.previous_profile.sha256)
 
     def send(kind, payload, **kwargs):
         if kwargs.get('request_id') is None:
@@ -459,9 +518,13 @@ def storage_main(endpoint, boot):
                         status = 'EMPTY'
                         try:
                             report['database_closed'] = report['owner_lock_closed'] = False
-                            database = _Database(boot.storage_profile, int(fields['expires_j_us']))
+                            database = _Database(boot.storage_profile, int(fields['expires_j_us']), boot.recovery)
                             report['sqlite_version'] = database.sqlite_version
                             report['database_created'] = database.created
+                        except FileNotFoundError as error:
+                            status = 'INCOMPATIBLE' if boot.recovery is not None else 'FAILED'
+                            report['error'] = type(error).__name__ + ': ' + str(error)
+                            report['database_closed'] = report['owner_lock_closed'] = getattr(error, 'cleanup_confirmed', False)
                         except StorageIncompatible as error:
                             status, report['error'] = 'INCOMPATIBLE', str(error)
                             report['database_closed'] = report['owner_lock_closed'] = getattr(error, 'cleanup_confirmed', False)
@@ -552,6 +615,13 @@ def storage_main(endpoint, boot):
                 failure = failure or error
         report['transport_counts'] = dict(link.counts)
         link.close()
-        _diagnostic(boot, report)
+        try:
+            _diagnostic(boot, report)
+        except (OSError, ValueError) as error:
+            # 진단 저장 실패가 실제 DB/lock 정리와 STOPPED 성공을 뒤집지 않는다.
+            try:
+                os.write(2, ('D_DIAGNOSTIC_FAILED ' + type(error).__name__[:48] + '\n').encode('ascii', 'replace'))
+            except OSError:
+                pass
     if failure is not None:
         raise failure

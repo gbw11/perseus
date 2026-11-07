@@ -33,8 +33,8 @@ from .resident_storage import (StorageBoot, StorageProfile, binding_payload, dis
                                parse_bootstrap_result, parse_storage_bind_ack, storage_binding, storage_main)
 from .resident_transport import ResidentLink, j_us
 from .resident_workers import WorkerBoot, acquisition_main, mapper_main
+from .resident_recovery import ResidentRecovery
 from .resource_manifest import ResourceManifest
-from .runtime_bootstrap import consume_first_install
 
 
 def _identifier():
@@ -90,14 +90,25 @@ class _Worker:
     pid: int | None = None
     exitcode: int | None = None
     failed_pending: object = None
+    startup_deadline_us: int = 0
+    stop_draft: object = None
+    term_sent_us: int | None = None
+    kill_sent_us: int | None = None
+    parse_started_us: int | None = None
+    parse_sequence: int | None = None
 
 
 class _Runtime:
-    def __init__(self, profile, state_directory, storage_profile, output, duration_s):
+    def __init__(self, profile, state_directory, storage_profile, output, duration_s, service_scope=None, output_root=False):
         self.profile, self.state_directory = profile, str(Path(state_directory).expanduser().absolute())
         self.storage_profile, self.output, self.duration_s = storage_profile, Path(output).expanduser().absolute(), duration_s
         self.context = multiprocessing.get_context('spawn')
         self.service, self.epoch, self.bootstrap_request = _identifier(), _identifier(), _identifier()
+        self.clock_epoch = _identifier()
+        if output_root:
+            self.output = self.output / self.service
+        self.service_scope = service_scope
+        self.storage_recovery = None
         self.identities = {r: (_identifier(), _identifier()) for r in ('A', 'M', 'D')}
         self.began = j_us()
         self.startup_deadline = self.began + 90_000_000
@@ -107,15 +118,16 @@ class _Runtime:
         self.binding = self.raw_profile = self.scope = self.broker = None
         self.native = NativeResources(self.context)
         self.log = AsyncResourceLog(self.state_directory, self.service, native=self.native,
-            prepare=self._prepare,
-            bootstrap=lambda store, batch: consume_first_install(store, batch,
-                resource_epoch=self.epoch, request_id=self.bootstrap_request))
+            prepare=self._prepare, bootstrap=self._admit_runtime, publication=self._record_publication,
+            bootstrap_with_request=True)
+        self.admission = None
         self.log_pending = None
         self.allocations = deque(('RAW_CURRENT', 'DB_COPY_0') + TOKEN_SLOTS)
         self.allocating = self.allocation_deadline = None
         self.phase = 'PREPARE'
         self.capture_ready_us = self.nn_ready_us = self.storage_ready_us = None
         self.last_capture_us = self.parser_deadline = self.resident_started_us = None
+        self.last_fresh_parser_us = None
         self.progress = {}
         self.stopping = self.stop_us = self.stop_reason = None
         self.failure = None
@@ -128,6 +140,17 @@ class _Runtime:
         self.log_stop_requested = False
         self.output_owned = False
         self.events = deque(maxlen=64)
+        self.recovery = ResidentRecovery(self)
+
+    def _admit_runtime(self, store, batch, request):
+        from .runtime_admission import consume_runtime_state
+        return consume_runtime_state(store, batch, resource_epoch=self.epoch,
+            request_id=request.request_id, issued_us=request.issued_us, expires_us=request.expires_us,
+            service_scope=self.service_scope, native_owner=self.native)
+
+    def _record_publication(self, store, ack, receipt):
+        from .runtime_admission import record_runtime_publication
+        record_runtime_publication(store, ack, receipt, service_scope=self.service_scope)
 
     def _prepare(self):
         self.output.mkdir(mode=0o700)
@@ -143,8 +166,8 @@ class _Runtime:
         if self.log_pending is not None:
             return False
         now = j_us()
-        end = min(now + (15_000_000 if operation == 'PREPARE' else 5_000_000),
-                  self.stop_us + 25_000_000 if self.stopping else self.startup_deadline,
+        end = min(now + (15_000_000 if operation in ('PREPARE', 'BOOTSTRAP') else 5_000_000),
+                  self.stop_us + 25_000_000 if self.stopping else self.recovery.operation_cap,
                   cap_us if cap_us is not None else 2**64 - 1)
         if now >= end:
             raise TimeoutError('original resource operation budget elapsed')
@@ -195,10 +218,14 @@ class _Runtime:
             self.manifest, self.latest_ack = completion.receipt.outcome.manifest, completion.ack
         if self.stopping and purpose not in ('NATIVE_CLOSE', 'CANDIDATE'):
             return
+        if purpose.startswith('RECOVERY_'):
+            self.recovery.completed(purpose, completion)
+            return
         if purpose == 'PREPARE':
             self.artifacts = completion.value
             self._request('BOOTSTRAP', 'BOOTSTRAP', request_id=self.bootstrap_request)
         elif purpose == 'BOOTSTRAP':
+            self.admission = completion.value
             self.phase = 'ALLOCATING'
         elif purpose == 'INTENT':
             self._request('CREATE', 'CREATE', intent_ack=self.latest_ack, cap_us=self.allocation_deadline)
@@ -236,7 +263,7 @@ class _Runtime:
         streams = {name: _identifier() for name in ('rgb_video', 'depth_right', 'nn_input0', 'nn_output0')}
         value = dict(service_instance=self.service, acquisition_worker=self.identities['A'][0],
             pipeline_instance=_identifier(), capture_epoch=_identifier(), stream_instances=streams,
-            sdk_bridge_epoch=_identifier(), clock_epoch=_identifier(), device_id=self.profile.device_mxid,
+            sdk_bridge_epoch=_identifier(), clock_epoch=self.clock_epoch, device_id=self.profile.device_mxid,
             **{k: self.artifacts[k] for k in ('model_id', 'parser_id', 'graph_profile_sha256', 'calibration_bundle', 'format_table_sha256')})
         self.binding = RawBinding(value)
         self.raw_profile = RawBindingProfile(value['device_id'], value['clock_epoch'], value['model_id'],
@@ -245,7 +272,8 @@ class _Runtime:
             Endpoint(self.identities['A'][1], self.identities['A'][0]), self.binding.sha256,
             self.handles.raw.name, self.handles.raw.size_bytes)
 
-    def _spawn(self, role):
+    def _spawn(self, role, *, deadline_us=None):
+        deadline_us = self.recovery.operation_cap if deadline_us is None else deadline_us
         worker_id, epoch = self.identities[role]
         peer = LifecyclePeer(self.service, epoch, worker_id, role, self.artifacts['release_sha256'])
         parent, child = control_pair()
@@ -253,11 +281,12 @@ class _Runtime:
             endpoint.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65_536)
             endpoint.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65_536)
         if role == 'D':
-            boot = StorageBoot(peer, self.startup_deadline, self.storage_profile,
-                copy_handles=(self.handles.db_copy, self.handles.db_tokens), diagnostic_directory=str(self.output / role))
+            boot = StorageBoot(peer, deadline_us, self.storage_profile,
+                copy_handles=(self.handles.db_copy, self.handles.db_tokens),
+                diagnostic_directory=str(self.output / role / worker_id), recovery=self.storage_recovery)
         else:
             boot = WorkerBoot(peer, self.profile, self.scope, self.raw_profile, self.handles.raw_tokens,
-                self.startup_deadline, str(self.output / role),
+                deadline_us, str(self.output / role / worker_id),
                 writer_bind=self.workers['A'].bind if role == 'M' else None)
         process = self.context.Process(name='xenova-' + role, target=_worker_entry, args=(child, boot), daemon=False)
         try:
@@ -271,7 +300,7 @@ class _Runtime:
         link = ResidentLink(parent, peer, 'S', track_sent=True)
         host = _Worker(peer, process, link, LifecycleReceiver(peer, 'S'), spawned,
                        LocalSetupWatch(role, worker_id, spawned, now_us=j_us()) if role != 'A' else None,
-                       held=deque(maxlen=8))
+                       held=deque(maxlen=8), startup_deadline_us=deadline_us)
         self.workers[role] = host
         host.pid = process.pid
         self.selector.register(parent, selectors.EVENT_READ, ('control', role))
@@ -283,16 +312,21 @@ class _Runtime:
 
     def _dispatch(self, role, packet):
         host, now = self.workers[role], j_us()
-        if self.stopping:
+        if self.stopping or self.recovery.suppressed(role, host):
             if packet.kind == 'STOPPED':
                 received = host.receiver.receive(packet, now_us=now)
                 if received.message is not None:
                     host.stopped = received.message
                     self.event('STOPPED', role=role, payload=received.message.payload)
-            elif packet.kind == 'SLOT' and packet.payload.get('op') == 'RELEASE' and self.broker is not None:
+            elif (packet.kind == 'SLOT' and self.broker is not None
+                  and (packet.payload.get('op') == 'RELEASE'
+                       or not self.stopping and packet.payload.get('op') == 'FILLED')):
                 self.broker.receive(role, packet, now_us=now)
             elif packet.kind == 'PROGRESS' and packet.payload.get('stage') == 'SESSION_CLOSED':
                 self._progress(role, packet, now)
+            return
+        if packet.kind == 'RAW_CONTROL':
+            self.recovery.receive_control(role, packet)
             return
         if not host.admitted:
             if len(host.held) == 8:
@@ -337,13 +371,15 @@ class _Runtime:
                 host.bind_ack = ack
                 if role == 'M':
                     self.broker.bind_reader(host.bind)
-                    self.parser_deadline = min(self.startup_deadline,
+                    self.parser_deadline = min(host.startup_deadline_us,
                         max(self.capture_ready_us, ack.issued_us) + 15_000_000)
             self.event('BIND_ACK', role=role)
         elif packet.kind == 'DB_JOB' and role == 'D':
-            host.bootstrap = parse_bootstrap_result(packet, host.peer, self.storage_profile, host.discovery, now_us=now)
+            host.bootstrap = parse_bootstrap_result(packet, host.peer, self.storage_profile, host.discovery,
+                                                   now_us=now, recovery=self.storage_recovery)
             if host.bootstrap['status'] != 'EMPTY':
-                raise RuntimeError('storage bootstrap is unavailable: ' + host.bootstrap['status'])
+                self.recovery.fail('D', 'storage bootstrap is unavailable: ' + host.bootstrap['status'], retryable=False)
+                return
             self.event('STORAGE_BOOTSTRAP', database_uuid=host.bootstrap['database_uuid'], status='EMPTY')
         elif packet.kind == 'PROGRESS':
             self._progress(role, packet, now)
@@ -353,7 +389,11 @@ class _Runtime:
             fields = packet.payload
             if set(fields) != {'domain', 'code', 'last_source_sequence', 'retry_class', 'origin_context_sha256'}:
                 raise ValueError('FAULT has unsupported fields')
-            raise RuntimeError('worker ' + role + ' fault: ' + str(fields['code']))
+            if (fields['origin_context_sha256'] != self.binding.sha256 or fields['domain'] != 'RAW'
+                    or fields['retry_class'] not in ('NO_RETRY', 'RESTART_CAMERA', 'RESTART_MAPPER')):
+                raise ValueError('FAULT differs from current RAW context or supported retry policy')
+            self.recovery.fail(role, 'worker ' + role + ' fault: ' + str(fields['code']),
+                               retryable=fields['retry_class'] != 'NO_RETRY')
         else:
             raise ValueError('unsupported resident worker statement')
 
@@ -367,7 +407,7 @@ class _Runtime:
             raise ValueError('progress changed its original completion or lifetime')
         validate_state(role, payload['state'])
         allowed = {'A': {'ASSET_VALID', 'DEVICE_BOOTED', 'GRAPH_STARTED', 'CAPTURE_PAIR', 'CAPTURE_READY', 'RAW_PUBLISHED', 'SESSION_CLOSED'},
-                   'M': {'NN_READY', 'PARSER_COMPLETED'}, 'D': set()}
+                   'M': {'PARSER_STARTED', 'NN_READY', 'PARSER_COMPLETED'}, 'D': set()}
         if payload['stage'] not in allowed[role]:
             raise ValueError('unsupported producer stage')
         sequence = None if payload['source_sequence'] is None else _decimal(payload['source_sequence'])
@@ -378,6 +418,19 @@ class _Runtime:
         if payload['stage'] not in ('ASSET_VALID', 'DEVICE_BOOTED', 'GRAPH_STARTED', 'SESSION_CLOSED') and self.workers[role].bind_ack is None:
             raise RuntimeError('current data readiness has no accepted binding')
         self.progress[key] = dict(sequence=sequence, completed_us=completed, state=payload['state'])
+        if role == 'M':
+            host = self.workers['M']
+            if payload['stage'] == 'PARSER_STARTED':
+                if sequence is None or host.parse_started_us is not None:
+                    raise RuntimeError('parser start has no new distinct active job')
+                host.parse_started_us, host.parse_sequence = completed, sequence
+            else:
+                if (host.parse_started_us is None or host.parse_sequence != sequence
+                        or completed < host.parse_started_us):
+                    raise RuntimeError('parser completion has no original active start')
+                host.parse_started_us = host.parse_sequence = None
+                if payload['reason'] != 'STALE_INPUT':
+                    self.last_fresh_parser_us = completed
         if key == ('A', 'CAPTURE_PAIR'):
             self.last_capture_us = completed
         elif key == ('A', 'CAPTURE_READY'):
@@ -395,7 +448,7 @@ class _Runtime:
         durations = {'ASSET_CHECK': 15_000_000, 'DEVICE_BOOT': 30_000_000,
                      'PIPELINE_START': 30_000_000, 'WARMUP': 15_000_000}
         if state in durations:
-            deadline = min(self.startup_deadline, event_us + durations[state])
+            deadline = min(self.workers['A'].startup_deadline_us, event_us + durations[state])
             self.a_phase_deadlines[state] = min(self.a_phase_deadlines.get(state, deadline), deadline)
             self.a_phase = state
         elif state == 'STREAMING':
@@ -403,6 +456,7 @@ class _Runtime:
 
     def _sent(self, host):
         for sent in host.link.take_sent():
+            self.recovery.sent(host, sent)
             if sent.packet.kind == 'BIND':
                 host.bind_sent = sent
             elif sent.packet.kind == 'STOP':
@@ -410,7 +464,7 @@ class _Runtime:
 
     def _bind(self, role):
         host = self.workers[role]
-        if not host.hello or host.bind is not None or not host.admitted:
+        if not host.hello or host.bind is not None or not host.admitted or self.recovery.suppressed(role, host):
             return
         if role == 'M' and self.capture_ready_us is None or role == 'D' and host.bootstrap is None:
             return
@@ -419,12 +473,12 @@ class _Runtime:
             payload = (binding_payload(storage_binding(host.peer, self.storage_profile, host.bootstrap)) if role == 'D'
                 else dict(binding_revision='1', binding_sha256=self.binding.sha256, binding=self.binding.fields))
             host.bind_draft = dict(kind='BIND', payload=payload, domain='STORAGE' if role == 'D' else 'RAW',
-                revision=1, request_id=_identifier(), issued_us=now, expires_us=min(now + 5_000_000, self.startup_deadline))
+                revision=1, request_id=_identifier(), issued_us=now, expires_us=min(now + 5_000_000, host.startup_deadline_us))
         packet = host.link.send(**host.bind_draft)
         if packet is None:
             return
         host.bind = (packet if role == 'D' else RawBindMessage(packet,
-            RawBindContext(host.peer, self.scope.writer, self.raw_profile), cap_us=self.startup_deadline))
+            RawBindContext(host.peer, self.scope.writer, self.raw_profile), cap_us=host.startup_deadline_us))
         if role == 'A':
             self.broker = ResidentRawBroker(host.bind, self.scope,
                 Endpoint(self.identities['M'][1], self.identities['M'][0]), self.handles.raw_tokens)
@@ -444,27 +498,29 @@ class _Runtime:
             except Exception as error:
                 self._close_link(role, error)
                 continue
-            if self.stopping:
+            if self.stopping or self.recovery.suppressed(role, host):
                 continue
             if role == 'D' and host.hello and host.discovery is None:
                 now = j_us()
                 packet = host.link.send('DB_JOB', discovery_payload(self.storage_profile, _identifier()), domain='STORAGE',
-                    revision=0, issued_us=now, expires_us=min(now + 5_000_000, self.startup_deadline))
+                    revision=0, issued_us=now, expires_us=min(now + 5_000_000, host.startup_deadline_us))
                 if packet is not None:
                     host.discovery = packet
             self._bind(role)
-        if not self.stopping and 'A' in self.workers and self.workers['A'].bind is not None and 'M' not in self.workers:
+        if (not self.stopping and 'A' in self.workers and self.workers['A'].bind is not None and 'M' not in self.workers
+                and (self.recovery.active is None or self.recovery.active.kind == 'AM'
+                     and self.recovery.active.phase in ('WAIT_READY', 'RESUME', 'WAIT_PARSER'))):
             self._spawn('M')
-        if self.broker is not None and not self.stopping:
+        if self.broker is not None and 'A' in self.workers and not self.stopping:
             self.broker.pump(self.workers['A'].link,
                 self.workers['M'].link if 'M' in self.workers and self.workers['M'].bind_ack is not None else None,
                 now_us=j_us())
 
     def _close_link(self, role, error):
         host = self.workers[role]
-        expected = self.stopping and isinstance(error, EOFError)
+        expected = (self.stopping or self.recovery.suppressed(role, host)) and isinstance(error, EOFError)
         if not expected:
-            self.stop('control_failed', error)
+            self.recovery.fail(role, str(error), retryable=host.hello)
         if not host.eof:
             try:
                 self.selector.unregister(host.link.endpoint)
@@ -511,16 +567,19 @@ class _Runtime:
             self.broker.fence(self.stop_us)
         self.event('QUIESCING', reason=reason)
 
-    def _stop_workers(self):
-        for role, host in self.workers.items():
-            if host.reaped:
-                continue
+    def _stop_one(self, host, began_us, reason):
+        """동일 원 cleanup 안에서 STOP→TERM1초→KILL/reap1초를 진행한다."""
+        if host.reaped:
+            return
+        role, now = host.peer.role, j_us()
+        if not host.eof:
             try:
-                if host.stop is None and not host.eof:
-                    now = j_us()
-                    packet = host.link.send('STOP', dict(stop_revision='1', reason=self.stop_reason,
-                        drain_deadline_j_us=str(self.stop_us + 25_000_000)), request_id=_identifier(),
-                        issued_us=now, expires_us=self.stop_us + 25_000_000)
+                if host.stop_draft is None:
+                    host.stop_draft = dict(kind='STOP', payload=dict(stop_revision='1', reason=reason,
+                        drain_deadline_j_us=str(began_us + 20_000_000)), request_id=_identifier(),
+                        issued_us=now, expires_us=began_us + 20_000_000)
+                if host.stop is None and now < host.stop_draft['expires_us']:
+                    packet = host.link.send(**host.stop_draft)
                     if packet is not None:
                         host.stop = packet
                         host.receiver.register_stop_intent(packet, now_us=j_us())
@@ -528,13 +587,32 @@ class _Runtime:
                 self._sent(host)
             except Exception as error:
                 self._close_link(role, error)
+        grace = {'A': 15_000_000, 'M': 2_000_000, 'D': 5_000_000}[role]
+        if host.term_sent_us is None and now >= began_us + grace:
+            try:
+                host.process.terminate()
+            except ProcessLookupError:
+                pass
+            host.term_sent_us = now
+            self.event('TERM_SENT', role=role, pid=host.pid)
+        if host.term_sent_us is not None and host.kill_sent_us is None and now >= host.term_sent_us + 1_000_000:
+            try:
+                host.process.kill()
+            except ProcessLookupError:
+                pass
+            host.kill_sent_us = now
+            self.event('KILL_SENT', role=role, pid=host.pid)
+
+    def _stop_workers(self):
+        for host in tuple(self.workers.values()):
+            self._stop_one(host, self.stop_us, self.stop_reason)
 
     def _observe_exit(self, role):
         host = self.workers[role]
         if host.exited_us is None:
             host.exited_us = j_us()
-            if not self.stopping:
-                self.stop('worker_exit', RuntimeError('worker ' + role + ' exited before requested shutdown'))
+            if not self.stopping and not self.recovery.suppressed(role, host):
+                self.recovery.fail(role, 'worker ' + role + ' exited before requested shutdown', retryable=host.hello)
         # owner 등록 전 reap으로 PID가 재사용되지 않게 birth 조회 동안 sentinel만 기록한다.
         if self.log_pending is not None and self.log_pending[2] == 'BIRTHS':
             return
@@ -550,6 +628,8 @@ class _Runtime:
             if host.process.exitcode is not None:
                 host.exitcode = host.process.exitcode
                 host.reaped = True
+                if self.stopping and host.exitcode != 0 and self.failure is None:
+                    self.failure = role + ' exited with code ' + str(host.exitcode) + ' during shutdown'
                 self.selector.unregister(host.process.sentinel)
                 self.event('PROCESS_EXIT', role=role, exitcode=host.exitcode)
                 host.process.close()
@@ -587,26 +667,43 @@ class _Runtime:
             if now - self.stop_us >= 25_000_000:
                 raise TimeoutError('normal shutdown budget elapsed; owners are not confirmed reclaimed')
             return
-        if self.resident_started_us is None and now >= self.startup_deadline:
+        if self.resident_started_us is None and self.recovery.active is None and now >= self.startup_deadline:
             raise TimeoutError('original total startup budget elapsed')
-        for role, host in self.workers.items():
+        for role, host in tuple(self.workers.items()):
+            if self.recovery.suppressed(role, host):
+                continue
             if host.local_watch is not None and host.local_watch.poll(now):
-                raise TimeoutError(role + ' original local setup budget elapsed')
+                self.recovery.fail(role, role + ' original local setup budget elapsed', retryable=False)
+                continue
             if host.bind_draft is not None and host.bind_ack is None and now >= host.bind_draft['expires_us']:
-                raise TimeoutError(role + ' original binding budget elapsed')
+                self.recovery.fail(role, role + ' original binding budget elapsed', retryable=False)
+                continue
             if role == 'D' and host.discovery is not None and host.bootstrap is None and now >= _decimal(host.discovery.fields['expires_j_us']):
-                raise TimeoutError('original D discovery budget elapsed')
+                self.recovery.fail('D', 'original D discovery budget elapsed')
+                continue
+            if host.parse_started_us is not None and now - host.parse_started_us >= 500_000:
+                self.recovery.fail('M', 'actual active parser job stalled')
+                continue
+            idle_watch = (role == 'A' and self.capture_ready_us is not None
+                          or role == 'M' and host.bind_ack is not None
+                          or role == 'D' and self.storage_ready_us is not None)
+            if idle_watch and host.last_heartbeat_us is not None and now - host.last_heartbeat_us >= 1_000_000:
+                self.recovery.fail(role, role + ' current control progress stalled')
         if self.a_phase in self.a_phase_deadlines and now >= self.a_phase_deadlines[self.a_phase]:
-            raise TimeoutError('original A ' + self.a_phase + ' budget elapsed')
+            self.recovery.fail('A', 'original A ' + self.a_phase + ' budget elapsed')
         if self.capture_ready_us is not None and self.last_capture_us is not None and now - self.last_capture_us >= 500_000:
-            raise TimeoutError('actual capture pair progress stalled')
+            self.recovery.fail('A', 'actual capture pair progress stalled')
         if self.parser_deadline is not None and self.nn_ready_us is None and now >= self.parser_deadline:
-            raise TimeoutError('original M parser readiness budget elapsed')
+            self.recovery.fail('M', 'original M parser readiness budget elapsed')
+        if (self.nn_ready_us is not None and self.last_fresh_parser_us is not None
+                and now - self.last_fresh_parser_us >= 5_000_000):
+            self.recovery.fail('A', 'required fresh NN output/parser completion stalled')
         if self.capture_ready_us is not None and self.nn_ready_us is not None and self.storage_ready_us is not None:
             if self.resident_started_us is None:
                 self.resident_started_us = now
                 self.event('RESIDENT_LOCAL_READY', metric_ready=False, world_valid=False)
-            if self.duration_s is not None and now - self.resident_started_us >= int(self.duration_s * 1_000_000):
+            if (self.recovery.active is None and self.duration_s is not None
+                    and now - self.resident_started_us >= int(self.duration_s * 1_000_000)):
                 self.stop('duration_elapsed')
 
     def run(self, signal_value):
@@ -625,6 +722,8 @@ class _Runtime:
                             break
                     else:
                         self._advance()
+                        self.recovery.step()
+                        self.recovery.healthy()
                     for key, _ in self.selector.select(0.01):
                         kind, role = key.data
                         if kind == 'exit':
@@ -652,11 +751,12 @@ class _Runtime:
             self.log.request_stop()
         stopped = all(host.reaped and host.exitcode == 0 and host.stopped is not None
                       and host.stopped.payload['status'] == 'STOPPED' for host in self.workers.values())
-        complete = (self.resident_started_us is not None and stopped and self.native_closed
+        complete = (self.resident_started_us is not None and self.recovery.active is None and stopped and self.native_closed
                     and self.candidate_written and not self.log.is_alive and self.log.terminal_error is None and self.failure is None)
         result = dict(schema_version=1, scope='NORMAL_RESIDENT_CAPTURE_PARSER_STORAGE_NOT_DRIVING', complete=complete,
             exit_code=0 if complete else 1, service_instance=self.service, resource_epoch=self.epoch,
             release_sha256=None if self.artifacts is None else self.artifacts['release_sha256'],
+            admission_kind=None if self.admission is None else self.admission.decision.kind,
             raw_binding=None if self.binding is None else dict(sha256=self.binding.sha256, fields=self.binding.fields),
             parent_native_modules={name: name in sys.modules for name in ('depthai', 'numpy', 'cv2', 'sqlite3')},
             reason=self.stop_reason, error=self.failure, error_trace=self.failure_trace, metric_ready=False, world_valid=False,
@@ -666,6 +766,8 @@ class _Runtime:
             resource_state=None if self.manifest is None else self.manifest.state,
             log_exited=not self.log.is_alive, log_error=self.log.terminal_error,
             resource_cleanup_confirmed=self.native_closed, all_worker_exits_confirmed=stopped,
+            requires_service_reap=self.log.is_alive or any(not host.reaped for host in self.workers.values()),
+            recoveries=list(self.recovery.receipts),
             supervisor_exit_confirmed=False, resource_tracker_exit_confirmed=False,
             resident_started_j_us=None if self.resident_started_us is None else str(self.resident_started_us),
             ended_j_us=str(j_us()), events=list(self.events),
@@ -678,13 +780,13 @@ class _Runtime:
         return result
 
 
-def run_runtime(profile, state_directory, storage_profile, output, *, duration_s=None):
+def run_runtime(profile, state_directory, storage_profile, output, *, duration_s=None, service_scope=None, output_root=False):
     """명시 profile/state/DB의 상주 실행. duration=None은 operator stop까지 유지한다."""
     if type(storage_profile) is not StorageProfile:
         raise ValueError('runtime requires an explicit storage profile')
     if duration_s is not None and (type(duration_s) not in (int, float) or not 0.1 <= duration_s <= 300):
         raise ValueError('optional runtime duration must be in 0.1..300 seconds')
-    runtime = _Runtime(profile, state_directory, storage_profile, output, duration_s)
+    runtime = _Runtime(profile, state_directory, storage_profile, output, duration_s, service_scope, output_root)
     thread_environment = ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS')
     old_environment = {name: os.environ.get(name) for name in thread_environment}
     for name in thread_environment:

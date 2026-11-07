@@ -18,6 +18,7 @@ from .lifecycle_policy import AbsoluteDeadline, CapturePairEvidence, CaptureScop
 from .raw_binding import RawBindingProfile
 from .raw_binding_messages import RawBindAck, RawBindContext, RawBindMessage
 from .raw_leases import RawScope
+from .raw_recovery import RawControlMessage, control_payload
 from .raw_slot import ExpectedSlot, P0Context
 from .resident_samples import CaptureAssembler, decode_sample_slot, encode_sample
 from .resident_transport import ResidentLink, j_us
@@ -58,6 +59,26 @@ class WorkerBoot:
 
 class _StopWork(Exception):
     pass
+
+
+def _exception_message(error, limit=1024):
+    """원 args의 유한 텍스트만 남긴다. SDK payload repr/임의 __str__를 호출하지 않는다."""
+    parts = []
+    truncated = len(error.args) > 4
+    for value in error.args[:4]:
+        if type(value) is str:
+            text = value[:limit]
+            truncated = truncated or len(value) > limit
+        elif type(value) in (bool, float) or value is None:
+            text = str(value)
+        elif type(value) is int and value.bit_length() <= 128:
+            text = str(value)
+        else:
+            text = '<' + type(value).__name__[:64] + ' argument omitted>'
+            truncated = True
+        parts.append(text)
+    message = ' | '.join(parts)
+    return message[:limit], truncated or len(message) > limit
 
 
 def _hold_device_lease(device_id):
@@ -118,6 +139,7 @@ class _Actor:
         self.bind = None
         self.ack = None
         self.ack_sent = None
+        self.last_filled_sent = None
         self.deferred = deque()
         self._hello()
 
@@ -132,6 +154,8 @@ class _Actor:
         for sent in self.link.take_sent():
             if self.ack is not None and sent.packet is self.ack.packet:
                 self.ack_sent = sent
+            if sent.packet.kind == 'SLOT' and sent.packet.payload.get('op') == 'FILLED':
+                self.last_filled_sent = sent.packet
 
     def heartbeat(self, force=False):
         now = j_us()
@@ -250,11 +274,25 @@ class _Actor:
             target.write(raw)
 
     def fault(self, error):
+        configuration = (isinstance(error, ValueError) and self.state in
+                         ('STARTING', 'WAIT_INPUT', 'ASSET_CHECK', 'DEVICE_BOOT', 'PIPELINE_START'))
         self.failure = type(error).__name__
+        message, truncated = _exception_message(error)
+        try:
+            self.save('failure.json', dict(schema_version=1, role=self.boot.peer.role,
+                worker_instance=self.boot.peer.worker_instance, service_instance=self.boot.peer.service_instance,
+                raw_binding_sha256=self.boot.raw_scope.raw_binding_sha256, phase=self.state,
+                observed_j_us=str(j_us()), exception_type=self.failure[:96], message=message,
+                message_truncated=truncated, message_basis='bounded_exception_args_without_payload_repr'))
+        except Exception as diagnostic_error:
+            # 진단 I/O 실패가 원 FAULT의 분류·전송을 대체하지 않게 한다.
+            self.failure_diagnostic_error = type(diagnostic_error).__name__[:96]
         self.state = 'FAILED'
         self.drain_sent()
-        self.link.send('FAULT', dict(domain='RAW', code='RESIDENT_FAILED', last_source_sequence=None,
-            retry_class='RESTART_SERVICE', origin_context_sha256=self.boot.raw_scope.raw_binding_sha256))
+        self.link.send('FAULT', dict(domain='RAW', code='CONFIG_INVALID' if configuration else 'RESIDENT_FAILED',
+            last_source_sequence=None, retry_class='NO_RETRY' if configuration else
+                'RESTART_CAMERA' if self.boot.peer.role == 'A' else 'RESTART_MAPPER',
+            origin_context_sha256=self.boot.raw_scope.raw_binding_sha256))
         self.drain_sent()
 
     def finish(self):
@@ -346,6 +384,8 @@ def acquisition_main(endpoint, boot):
         last_published = None
         capture_reported = False
         published = 0
+        pause = paused_ack = last_filled = None
+        write_paused = False
         while True:
             incoming = actor.poll()
             now = j_us()
@@ -380,6 +420,26 @@ def acquisition_main(endpoint, boot):
             if last_nn is not None and now - last_nn >= int(boot.profile.nn_stall_timeout_s * 1_000_000):
                 raise TimeoutError('actual NN output stream stalled')
             for packet in incoming:
+                if packet.kind == 'RAW_CONTROL':
+                    op = packet.payload.get('op')
+                    if op == 'PAUSE':
+                        message = RawControlMessage(packet, bind)
+                        message.check_live(j_us())
+                        if pause is not None:
+                            raise ValueError('active producer PAUSE cannot be replaced')
+                        pause, write_paused = message, True
+                        # 앞선 GRANT는 같은 channel에서 먼저 처리됐다. 남은 미승인 요청만 취소한다.
+                        request = pending_sample = None
+                    elif op == 'RESUME':
+                        if paused_ack is None:
+                            raise ValueError('RESUME requires original actual PAUSED statement')
+                        message = RawControlMessage(packet, bind, paused_ack)
+                        message.check_live(j_us())
+                        pause = paused_ack = None
+                        write_paused = False
+                    else:
+                        raise ValueError('unsupported producer raw control')
+                    continue
                 if packet.kind != 'SLOT' or packet.payload.get('op') != 'GRANT' or request is None:
                     raise ValueError('unexpected A control statement')
                 grant = SlotMessage(packet, context, request, limits=boot.slot_limits)
@@ -396,14 +456,23 @@ def acquisition_main(endpoint, boot):
                 out = actor.required_slot(payload, request_id=grant.request_id, issued=info.completed_us,
                                  expires=grant.expires_us)
                 SlotMessage(out, context, grant, limits=boot.slot_limits)
+                last_filled = out
                 published += 1
                 actor.progress('RAW_PUBLISHED', pending_sample.rgb.sequence, completed=info.completed_us)
                 last_published = pending_sample.key
                 request = pending_sample = None
-            if request is not None and j_us() >= request.expires_us:
+            actor.drain_sent()
+            if write_paused and paused_ack is None and (last_filled is None or actor.last_filled_sent is last_filled):
+                complete = j_us()
+                reply = actor.send_required('RAW_CONTROL', control_payload('PAUSED', bind, pause.request_id),
+                    domain='RAW', revision=bind.binding_revision, request_id=pause.request_id,
+                    issued_us=complete, expires_us=pause.expires_us)
+                paused_ack = RawControlMessage(reply, bind, pause)
+            if not write_paused and request is not None and j_us() >= request.expires_us:
                 raise TimeoutError('original copy request expired without GRANT')
             sample = assembler.latest(j_us())
-            if capture_reported and request is None and sample is not None and sample.key != last_published:
+            if (not write_paused and capture_reported and request is None
+                    and sample is not None and sample.key != last_published):
                 issued = j_us()
                 packet = actor.slot(_request_payload(boot.raw_scope), request_id=str(uuid.uuid4()),
                     issued=issued, expires=issued + boot.slot_limits.copy_budget_us)
@@ -528,6 +597,7 @@ def mapper_main(endpoint, boot):
                     if not stamp.advances(previous):
                         continue
                     started = j_us()
+                    actor.progress('PARSER_STARTED', stamp.sequence, completed=started)
                     candidates = yolop.decode_yolop(sample.nn_output)
                     rgb = decode_rgb(sample.rgb)
                     depth = decode_depth(sample.depth)
@@ -536,6 +606,8 @@ def mapper_main(endpoint, boot):
                         raise TimeoutError('active parser exceeded 500ms progress deadline')
                     if not sample.fresh(completed):
                         streak = 0 if not ready else streak
+                        actor.progress('PARSER_COMPLETED', stamp.sequence, completed=completed,
+                                       reason='STALE_INPUT')
                         continue
                     previous = stamp
                     streak += 1

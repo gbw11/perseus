@@ -17,7 +17,7 @@ MAX_DEPTH = 6
 MAX_NODES = MAX_PACKET_BYTES
 # 4096자리 십진수가 필요로 하는 bit 수보다 크며 str() work는 약4111자리 이하다.
 MAX_INTEGER_BITS = MAX_PACKET_BYTES * 10 // 3
-KINDS = frozenset("HELLO BIND BIND_ACK PROGRESS HEARTBEAT SLOT DB_JOB FAULT STOP STOPPED".split())
+KINDS = frozenset("HELLO BIND BIND_ACK PROGRESS HEARTBEAT SLOT RAW_CONTROL DB_JOB FAULT STOP STOPPED".split())
 DOMAINS = frozenset("RAW PUBLICATION STORAGE LIFECYCLE".split())
 OUTER_KEYS = frozenset("version service_instance channel_epoch sender_instance message_sequence kind binding_domain binding_revision request_id issued_j_us expires_j_us payload".split())
 

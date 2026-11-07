@@ -15,13 +15,14 @@ import uuid
 
 from .process_observation import ProcessObserver
 from .procfs_formats import parse_proc_stat
+from .raw_leases import RawOwnerExitBarrier, RawRecoveryBarrier
 from .resource_manifest import ManifestRef, OwnerRecord, ResourceManifest
 from .resource_name_observation import ResourceNameObserver
 from .resource_store import ResourceStore, StoreAck, StoreLoad, StoreResult
 
 
 OPERATIONS = frozenset(('PREPARE', 'OBSERVE', 'NAMES', 'BOOTSTRAP', 'WRITE',
-                        'CREATE', 'HANDLES', 'CLEANUP', 'BIRTHS'))
+                        'CREATE', 'HANDLES', 'CLEANUP', 'BIRTHS', 'NORMALIZE_RAW', 'RETIRE_RAW'))
 
 
 class ResourceLogError(RuntimeError):
@@ -54,6 +55,7 @@ class ResourceLogRequest:
     expected_ref: ManifestRef | None = None
     intent_ack: StoreAck | None = None
     birth_pids: tuple = ()
+    recovery_barrier: object = None
 
     def __post_init__(self):
         _uuid(self.request_id)
@@ -69,11 +71,16 @@ class ResourceLogRequest:
                 raise ValueError('expected actual original manifest ref or MISSING null')
         elif self.manifest is not None or self.expected_ref is not None:
             raise ValueError('only WRITE accepts source ref and manifest')
-        if self.operation in ('CREATE', 'HANDLES'):
+        if self.operation in ('CREATE', 'HANDLES', 'NORMALIZE_RAW', 'RETIRE_RAW'):
             if type(self.intent_ack) is not StoreAck:
-                raise ValueError('native creation/handles require original StoreAck')
+                raise ValueError('native operation requires original StoreAck')
         elif self.intent_ack is not None:
-            raise ValueError('only CREATE/HANDLES accept a native ACK')
+            raise ValueError('operation does not accept a native ACK')
+        if self.operation == 'NORMALIZE_RAW':
+            if type(self.recovery_barrier) not in (RawRecoveryBarrier, RawOwnerExitBarrier):
+                raise ValueError('normalization requires exact quiescence barrier')
+        elif self.recovery_barrier is not None:
+            raise ValueError('only NORMALIZE_RAW accepts a recovery barrier')
         if type(self.birth_pids) is not tuple or len(self.birth_pids) > 3:
             raise ValueError('bounded immutable A/M/D birth targets are required')
         if self.operation != 'BIRTHS' and self.birth_pids:
@@ -137,18 +144,23 @@ class AsyncResourceLog:
     close(timeout)는 syscall을 중단하지 못하므로 timeout이면 명시 오류를 반환한다.
     """
 
-    def __init__(self, directory, service_instance, *, prepare=None, bootstrap=None, native=None):
+    def __init__(self, directory, service_instance, *, prepare=None, bootstrap=None, native=None,
+                 publication=None, bootstrap_with_request=False):
         if type(directory) is not str:
             raise ValueError('directory must be an exact absolute string')
         _uuid(service_instance)
-        for callback in (prepare, bootstrap):
+        for callback in (prepare, bootstrap, publication):
             if callback is not None and not callable(callback):
                 raise ValueError('callbacks must be callable or null')
         self._directory = directory
         self._service = service_instance
         self._prepare = prepare
         self._bootstrap = bootstrap
+        if type(bootstrap_with_request) is not bool:
+            raise ValueError('bootstrap request callback mode must be bool')
+        self._bootstrap_with_request = bootstrap_with_request
         self._native = native
+        self._publication = publication
         self._requests = queue.Queue(maxsize=1)
         self._completed = queue.Queue(maxsize=1)
         self._stop = threading.Event()
@@ -169,9 +181,9 @@ class AsyncResourceLog:
         return self
 
     def submit(self, request_id, operation, *, issued_us, expires_us, manifest=None, expected_ref=None,
-               intent_ack=None, birth_pids=()):
+               intent_ack=None, birth_pids=(), recovery_barrier=None):
         request = ResourceLogRequest(request_id, operation, issued_us, expires_us, manifest,
-                                     expected_ref, intent_ack, birth_pids)
+                                     expected_ref, intent_ack, birth_pids, recovery_barrier)
         with self._state_lock:
             if not self._started or self._closed:
                 raise ResourceLogError('S-log is not active')
@@ -315,7 +327,8 @@ class AsyncResourceLog:
                         if self._bootstrap is None:
                             raise ResourceLogError('BOOTSTRAP callback is not configured')
                         batch = ProcessObserver(store, self._service).observe()
-                        value = self._bootstrap(store, batch)
+                        value = (self._bootstrap(store, batch, request) if self._bootstrap_with_request
+                                 else self._bootstrap(store, batch))
                         proposal = value.proposal
                         if proposal.request_id != request.request_id:
                             raise ResourceLogError('bootstrap proposal differs from original request ID')
@@ -323,7 +336,7 @@ class AsyncResourceLog:
                         if not request.issued_us <= _now() < request.expires_us:
                             raise ResourceLogError('bootstrap consumed marker after original deadline')
                         store_result = store.publish(proposal)
-                    elif request.operation in ('CREATE', 'HANDLES'):
+                    elif request.operation in ('CREATE', 'HANDLES', 'NORMALIZE_RAW', 'RETIRE_RAW'):
                         if self._native is None:
                             raise ResourceLogError('native owner is not configured')
                         receipt = store.load()
@@ -335,6 +348,11 @@ class AsyncResourceLog:
                         if request.operation == 'CREATE':
                             value = self._native.create_one(request.intent_ack)
                             owner_births, receipt = self._births(store, ())
+                        elif request.operation == 'NORMALIZE_RAW':
+                            value = self._native.normalize_raw(request.intent_ack, request.request_id,
+                                                                request.recovery_barrier)
+                        elif request.operation == 'RETIRE_RAW':
+                            value = self._native.retire_raw(request.intent_ack, request.request_id)
                         else:
                             value = self._native.spawn_handles(request.intent_ack)
                     elif request.operation == 'BIRTHS':
@@ -356,11 +374,13 @@ class AsyncResourceLog:
                             value = store_result
                         ack = store_result.ack
                         if store_result.kind == 'DURABLE':
-                            pending_write = None
                             receipt = store.load()
                             if (receipt.outcome.kind != 'VALID'
                                     or receipt.outcome.manifest.ref != ack.target_ref):
                                 raise ResourceLogError('durable target changed before actual post-load')
+                            if self._publication is not None:
+                                self._publication(store, ack, receipt)
+                            pending_write = None
                 except Exception as error:
                     error_text = type(error).__name__ + ': ' + str(error)[:320]
                     if request.operation == 'BOOTSTRAP' and pending_write is None and ack is None:

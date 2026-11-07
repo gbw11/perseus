@@ -7,10 +7,12 @@ import unittest
 from unittest.mock import patch
 
 from resource_guard_fixtures import encode, identifier, manifest
+from raw_lease_fixtures import scope
 from xenova_vehicle.runtime import async_resource_log as log
 from xenova_vehicle.runtime.resource_guard import LoadOutcome
 from xenova_vehicle.runtime.resource_manifest import ResourceManifest
 from xenova_vehicle.runtime.resource_store import StoreAck, StoreLoad, StoreProposal, StoreResult
+from xenova_vehicle.runtime.raw_leases import RawOwnerExitBarrier, RawOwnerExitEvidence
 
 
 class FakeStore:
@@ -196,6 +198,79 @@ class AsyncResourceLogTests(unittest.TestCase):
             completed.timely(True)
         with self.assertRaises(ValueError):
             log.ResourceLogRequest(identifier(2401), 'WRITE', 100, 150)
+
+    def current_ack(self):
+        m = manifest()
+        original = StoreLoad(identifier(2500), LoadOutcome(identifier(2501), 'VALID', m))
+        target = ResourceManifest(m.canonical_bytes)
+        proposal = StoreProposal(identifier(2502), original.lock_nonce, original, m,
+                                 m.raw_sha256, target.raw_bytes, target.ref)
+        return StoreAck(proposal, 'REPLACED')
+
+    def test_recovery_native_commands_use_original_ack_and_operation_uuid(self):
+        calls = []
+        class Native:
+            def normalize_raw(self, original_ack, operation_id, barrier):
+                calls.append(('normalize', original_ack, operation_id, barrier))
+                return RawOwnerExitEvidence(barrier, operation_id, time.monotonic_ns() // 1000)
+
+            def retire_raw(self, original_ack, operation_id):
+                calls.append(('retire', original_ack, operation_id))
+                return 'retired-fixture'
+
+        actor = self.actor(native=Native())
+        original_ack = self.current_ack()
+        barrier = RawOwnerExitBarrier(scope(), 100, 200)
+        result = self.submit(actor, 'NORMALIZE_RAW', number=2510,
+                             intent_ack=original_ack, recovery_barrier=barrier)
+        self.assertIsNone(result.error)
+        self.assertIs(result.value.barrier, barrier)
+        self.assertEqual(calls[0], ('normalize', original_ack, identifier(2510), barrier))
+        retired = self.submit(actor, 'RETIRE_RAW', number=2511, intent_ack=original_ack)
+        self.assertEqual(retired.value, 'retired-fixture')
+        self.assertEqual(calls[1], ('retire', original_ack, identifier(2511)))
+
+    def test_unconfirmed_publication_blocks_recovery_but_cleanup_keeps_original_pending(self):
+        calls = []
+        class Native:
+            def normalize_raw(self, *args):
+                calls.append('normalize')
+
+            def close_after_children(self):
+                calls.append('cleanup')
+
+        FakeStore.unconfirmed = True
+        actor = self.actor(native=Native())
+        old = manifest()
+        fields = old.fields
+        fields['revision'] = '2'
+        target = ResourceManifest(encode(fields))
+        now = time.monotonic_ns() // 1000
+        original_args = dict(issued_us=now, expires_us=now + 5000000,
+                              manifest=target, expected_ref=old.ref)
+        self.assertTrue(actor.submit(identifier(2520), 'WRITE', **original_args))
+        self.assertEqual(self.result(actor).value.kind, 'UNCONFIRMED')
+        blocked = self.submit(actor, 'NORMALIZE_RAW', number=2521, intent_ack=self.current_ack(),
+                              recovery_barrier=RawOwnerExitBarrier(scope(), 100, 200))
+        self.assertIsNotNone(blocked.error)
+        cleaned = self.submit(actor, 'CLEANUP', number=2522)
+        self.assertIsNone(cleaned.error)
+        self.assertEqual(calls, ['cleanup'])
+        self.assertTrue(actor.submit(identifier(2520), 'WRITE', **original_args))
+        self.assertEqual(self.result(actor).value.kind, 'DURABLE')
+        self.assertEqual(len(FakeStore.instances[0].proposals), 1)
+
+    def test_recovery_barrier_is_exact_and_only_normalize_accepts_it(self):
+        original_ack = self.current_ack()
+        barrier = RawOwnerExitBarrier(scope(), 100, 200)
+        request = log.ResourceLogRequest(identifier(2530), 'NORMALIZE_RAW', 100, 300,
+                                         intent_ack=original_ack, recovery_barrier=barrier)
+        self.assertIs(request.recovery_barrier, barrier)
+        with self.assertRaises(ValueError):
+            log.ResourceLogRequest(identifier(2531), 'NORMALIZE_RAW', 100, 300, intent_ack=original_ack)
+        with self.assertRaises(ValueError):
+            log.ResourceLogRequest(identifier(2532), 'RETIRE_RAW', 100, 300,
+                                    intent_ack=original_ack, recovery_barrier=barrier)
 
 
 if __name__ == '__main__':

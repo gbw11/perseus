@@ -1,8 +1,9 @@
-"""명시 설치 기록의 실제 생성·한 번 소비. MISSING을 생성 허가로 바꾸지 않는다.
+"""명시 설치의 한 번 소비와 고정 보호 상태 파일의 원 bytes CAS·내구 저장.
 
 설치 명령은 새 보호 directory만 만든다. 상주 S-log는 원 MISSING 조회와 현재
-runtime에 맞는 READY 기록을 CONSUMED로 내구 저장한 뒤 초기 DIRTY를 제안한다.
-소비 뒤 실패한 설치를 자동 복원하거나 과거 catalogue/cgroup을 승인하지 않는다.
+runtime의 초기 DIRTY 원 proposal에 READY 기록을 결박해 CONSUMED로 저장한다.
+MISSING 자체는 허가가 아니며 소비 실패의 자동 복원이나 과거 자원 승격은 하지 않는다.
+실행 기록과 handover 진단의 의미·native 증거는 admission/scope가 소유한다.
 """
 
 from dataclasses import asdict, dataclass
@@ -14,12 +15,15 @@ import uuid
 
 from .process_observation import ObservationBatch, ProcessObserver
 from .resource_guard import FirstInstallStatement, GuardDecision, GuardEvidence, evaluate_guard
-from .resource_manifest import RecoveryEpisode, ResourceManifest, SLOTS
+from .resource_manifest import CgroupIdentity, RecoveryEpisode, ResourceManifest, SLOTS
 from .resource_store import ResourceStore, StoreProposal
 
 
 MARKER = 'bootstrap-admission.json'
 MARKER_CAP = 4096
+EXECUTION_RECORD = 'execution-record.json'
+LEGACY_HANDOVER = 'legacy-scope-handover.json'
+_RECORD_CAPS = {MARKER: MARKER_CAP, EXECUTION_RECORD: 16_384, LEGACY_HANDOVER: 8192}
 
 
 class BootstrapUnavailable(RuntimeError):
@@ -53,34 +57,39 @@ class _Directory:
                 or _identity(opened) != _identity(self.original)):
             raise BootstrapUnavailable('protected installation directory changed')
 
-    def read(self):
-        descriptor = os.open(MARKER, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=self.fd)
+    def read(self, record_name=MARKER):
+        if record_name not in _RECORD_CAPS:
+            raise BootstrapUnavailable('unsupported protected state record')
+        cap = _RECORD_CAPS[record_name]
+        descriptor = os.open(record_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=self.fd)
         try:
             before = os.fstat(descriptor)
             if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
                     or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1):
                 raise BootstrapUnavailable('installation marker is not an owned protected regular file')
             raw = bytearray()
-            while len(raw) <= MARKER_CAP:
-                part = os.read(descriptor, MARKER_CAP + 1 - len(raw))
+            while len(raw) <= cap:
+                part = os.read(descriptor, cap + 1 - len(raw))
                 if not part:
                     break
                 raw.extend(part)
             after = os.fstat(descriptor)
-            named = os.stat(MARKER, dir_fd=self.fd, follow_symlinks=False)
+            named = os.stat(record_name, dir_fd=self.fd, follow_symlinks=False)
             fingerprint = lambda s: (_identity(s), s.st_size, s.st_mtime_ns, s.st_ctime_ns, s.st_mode, s.st_nlink)
-            if len(raw) > MARKER_CAP or fingerprint(before) != fingerprint(after) or fingerprint(before) != fingerprint(named):
+            if len(raw) > cap or fingerprint(before) != fingerprint(after) or fingerprint(before) != fingerprint(named):
                 raise BootstrapUnavailable('installation marker changed during read')
             self.check()
             return bytes(raw), before
         finally:
             os.close(descriptor)
 
-    def write(self, value, *, expected=None):
+    def write(self, value, *, expected=None, record_name=MARKER):
+        if record_name not in _RECORD_CAPS:
+            raise BootstrapUnavailable('unsupported protected state record')
         raw = _bytes(value)
-        if len(raw) > MARKER_CAP:
+        if len(raw) > _RECORD_CAPS[record_name]:
             raise BootstrapUnavailable('installation marker exceeds its bound')
-        name = MARKER if expected is None else '.bootstrap.' + str(uuid.uuid4()) + '.tmp'
+        name = record_name if expected is None else '.bootstrap.' + str(uuid.uuid4()) + '.tmp'
         descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                              0o600, dir_fd=self.fd)
         owned = None
@@ -95,10 +104,10 @@ class _Directory:
             os.fsync(descriptor)
             self.check()
             if expected is not None:
-                current, _ = self.read()
+                current, _ = self.read(record_name)
                 if current != expected:
                     raise BootstrapUnavailable('installation consumption predecessor changed')
-                os.replace(name, MARKER, src_dir_fd=self.fd, dst_dir_fd=self.fd)
+                os.replace(name, record_name, src_dir_fd=self.fd, dst_dir_fd=self.fd)
             os.fsync(self.fd)
         finally:
             os.close(descriptor)
@@ -172,7 +181,7 @@ class BootstrapAdmission:
     proposal: StoreProposal
 
 
-def consume_first_install(store, observation, *, resource_epoch, request_id):
+def consume_first_install(store, observation, *, resource_epoch, request_id, cgroup_identity=None):
     """S-log에서 원 조회와 실제 설치 기록을 한 번 소비하고 초기 DIRTY target을 돌려준다.
 
     실제 owner/latest 제안을 먼저 결박한 뒤 marker를 소비한다. 반환한 동일 원
@@ -183,6 +192,8 @@ def consume_first_install(store, observation, *, resource_epoch, request_id):
         raise BootstrapUnavailable('bootstrap requires the actual owning store and observation')
     if observation.original_load.outcome.kind != 'MISSING' or observation.latest_load.outcome.kind != 'MISSING':
         raise BootstrapUnavailable('existing catalogue requires old-resource recovery admission')
+    if cgroup_identity is not None and type(cgroup_identity) is not CgroupIdentity:
+        raise BootstrapUnavailable('expected actual execution-scope identity')
     root = _Directory(store.directory)
     try:
         original, _ = root.read()
@@ -209,7 +220,8 @@ def consume_first_install(store, observation, *, resource_epoch, request_id):
             service_instance=observation.guard.service_instance, resource_epoch=resource_epoch, revision='1', state='DIRTY',
             owners=[dict(role='S', phase='CURRENT', pid=observation.guard.birth.pid, start_ticks=str(observation.guard.birth.start_ticks))]
                    + [dict(role=role, phase='CURRENT', pid=None, start_ticks=None) for role in ('A', 'M', 'D', 'TRACKER')],
-            cgroup=_cgroup_identity(),
+            cgroup=(_cgroup_identity() if cgroup_identity is None else dict(mode=cgroup_identity.mode,
+                    path=cgroup_identity.path, device=str(cgroup_identity.device), inode=str(cgroup_identity.inode))),
             resources={slot: dict(state='NOT_ATTEMPTED', name=None, object_id=None, size_bytes=None) for slot in SLOTS},
             intents=[], recovery_episode=dict(episode_id=genesis.episode_id, service_attempts=1, role_attempts=dict(A=1, M=1, D=1)))
         target = ResourceManifest(_bytes(fields))
@@ -225,5 +237,36 @@ def consume_first_install(store, observation, *, resource_epoch, request_id):
         if decision.kind != 'FIRST_INSTALL_ELIGIBLE':
             raise BootstrapUnavailable('actual first installation was not admitted')
         return BootstrapAdmission(target, decision, value['installation_id'], proposal)
+    finally:
+        root.close()
+
+
+def read_execution_record(directory):
+    """보호된 고정 execution record의 실제 bytes. 해석과 원 ref 검사는 admission이 맡는다."""
+    root = _Directory(directory)
+    try:
+        return root.read(EXECUTION_RECORD)[0]
+    finally:
+        root.close()
+
+
+def write_execution_record(directory, value, *, expected=None):
+    """원 bytes CAS와 file/directory fsync 뒤만 반환한다. 임의 basename은 받지 않는다."""
+    root = _Directory(directory)
+    try:
+        root.write(value, expected=expected, record_name=EXECUTION_RECORD)
+    finally:
+        root.close()
+
+
+def write_legacy_handover(directory, value):
+    """held native FD 준비의 진단 signal만 기록한다. 이 파일은 admission proof가 아니다."""
+    root = _Directory(directory)
+    try:
+        try:
+            previous = root.read(LEGACY_HANDOVER)[0]
+        except FileNotFoundError:
+            previous = None
+        root.write(value, expected=previous, record_name=LEGACY_HANDOVER)
     finally:
         root.close()
