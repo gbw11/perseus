@@ -10,6 +10,7 @@ import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import {
   VM_CPU_PERCENT_METRIC,
   type CpuStressRequest,
+  type AutoDelayRequest,
   type CreateVmRequest,
   type LoginRequest,
   type MemoryStressRequest,
@@ -43,6 +44,7 @@ let refreshGranted = false;
 let mockUsername = MOCK_USER.username;
 let mockNickname = MOCK_USER.nickname;
 let mockPassword = MOCK_PASSWORD;
+const demoCommands = new Map<string, { vmId: string; createdAt: number }>();
 
 /** 시험용: 처음 상태로 */
 export function resetMockState(): void {
@@ -55,6 +57,7 @@ export function resetMockState(): void {
   mockUsername = MOCK_USER.username;
   mockNickname = MOCK_USER.nickname;
   mockPassword = MOCK_PASSWORD;
+  demoCommands.clear();
 }
 
 function initialPinning(): Map<string, VcpuPinning[]> {
@@ -337,18 +340,23 @@ export const handlers = [
     if (!authorized(request)) return unauthorized();
     const vm = find(String(params.vmId));
     if (!vm) return vmNotFound();
-    if (vm.guest_kind !== 'linux' || vm.state !== 'running' || vm.agent_status !== 'ONLINE') {
+    if (vm.state !== 'running' || (vm.guest_kind === 'linux' && vm.agent_status !== 'ONLINE')) {
       return error(409, 'AGENT_UNAVAILABLE', `VM Agent가 온라인 상태가 아닙니다: ${vm.vm_id}`);
     }
     const kind = String(params.kind);
     const body = (await request.json()) as Partial<CpuStressRequest & MemoryStressRequest>;
     const amount = kind === 'cpu' ? body.workers : body.memory_mib;
-    const max = kind === 'cpu' ? 4 : 512;
+    const max = kind === 'cpu' ? (vm.guest_kind === 'zephyr' ? 1 : 4) : vm.guest_kind === 'zephyr' ? 8 : 512;
+    const loadValid =
+      vm.guest_kind !== 'zephyr' ||
+      kind !== 'cpu' ||
+      (Number.isInteger(body.load_percent) && body.load_percent! >= 10 && body.load_percent! <= 100);
     if (
       (kind !== 'cpu' && kind !== 'memory') ||
       !Number.isInteger(amount) ||
       amount! < 1 ||
       amount! > max ||
+      !loadValid ||
       !Number.isInteger(body.duration_s) ||
       body.duration_s! < 1 ||
       body.duration_s! > 120
@@ -362,11 +370,66 @@ export const handlers = [
       vm_id: vm.vm_id,
       type: kind === 'cpu' ? 'CPU' : 'MEMORY',
       amount: amount!,
+      load_percent: body.load_percent ?? null,
       duration_s: body.duration_s!,
       submitted_at: now.toISOString(),
       expires_at: new Date(now.getTime() + 30_000).toISOString(),
     };
+    demoCommands.set(command.command_id, { vmId: vm.vm_id, createdAt: Date.now() });
     return HttpResponse.json(command as unknown as JsonBodyType, { status: 202 });
+  }),
+
+  http.post('*/api/v1/vms/:vmId/faults/auto-delay', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    if (!vm) return vmNotFound();
+    if (vm.guest_kind !== 'zephyr' || vm.state !== 'running')
+      return error(409, 'COMMAND_UNAVAILABLE', '실행 중인 Zephyr VM이 아닙니다.');
+    const body = (await request.json()) as Partial<AutoDelayRequest>;
+    if (
+      !Number.isInteger(body.delay_ms) ||
+      body.delay_ms! < 1 ||
+      body.delay_ms! > 100 ||
+      !Number.isInteger(body.duration_s) ||
+      body.duration_s! < 1 ||
+      body.duration_s! > 120
+    ) {
+      return error(400, 'VALIDATION_ERROR', '입력값을 확인해 주세요.');
+    }
+    const now = new Date();
+    const commandId = crypto.randomUUID();
+    demoCommands.set(commandId, { vmId: vm.vm_id, createdAt: Date.now() });
+    return HttpResponse.json(
+      {
+        command_id: commandId,
+        operation_id: crypto.randomUUID(),
+        vm_id: vm.vm_id,
+        type: 'AUTO_DELAY',
+        amount: body.delay_ms,
+        delay_ms: body.delay_ms,
+        duration_s: body.duration_s,
+        submitted_at: now.toISOString(),
+        expires_at: new Date(now.getTime() + 30_000).toISOString(),
+      },
+      { status: 202 },
+    );
+  }),
+
+  http.get('*/api/v1/vms/:vmId/commands/:commandId', async ({ request, params }) => {
+    await delay(80);
+    if (!authorized(request)) return unauthorized();
+    const item = demoCommands.get(String(params.commandId));
+    if (!item || item.vmId !== params.vmId)
+      return error(404, 'COMMAND_NOT_FOUND', '명령을 찾을 수 없습니다.');
+    const elapsed = Date.now() - item.createdAt;
+    return HttpResponse.json({
+      command_id: params.commandId,
+      vm_id: params.vmId,
+      status: elapsed > 2200 ? 'SUCCEEDED' : elapsed > 600 ? 'RUNNING' : 'ACCEPTED',
+      message: elapsed > 2200 ? '명령 실행이 완료되었습니다.' : 'VM에서 명령을 실행하고 있습니다.',
+      updated_at: new Date().toISOString(),
+    });
   }),
 
   http.post('*/api/v1/vms', async ({ request }) => {
