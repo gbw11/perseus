@@ -3,15 +3,21 @@ package com.xenova.backend.agent.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.agent.domain.AgentHeartbeat;
 import com.xenova.backend.agent.domain.AgentStatus;
+import com.xenova.backend.agent.domain.TelemetryHeartbeat;
 import com.xenova.backend.common.error.ApiException;
+import com.xenova.backend.template.domain.GuestKind;
 import com.xenova.backend.vm.application.VmService;
+import com.xenova.backend.vm.domain.Vm;
+import com.xenova.backend.vm.domain.VmState;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -28,17 +34,21 @@ class AgentStressServiceTest {
 
     private final VmService vmService = mock(VmService.class);
     private final AgentDataService agentDataService = mock(AgentDataService.class);
+    private final TelemetryHeartbeatStore telemetryHeartbeatStore = mock(TelemetryHeartbeatStore.class);
+    private final AgentCommandResultStore commandResultStore = mock(AgentCommandResultStore.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<JsonNode> sent = new ArrayList<>();
     private AgentStressService service;
 
     @BeforeEach
     void setUp() {
+        when(vmService.get(VM_ID)).thenReturn(vm(GuestKind.LINUX));
         AgentHeartbeat heartbeat = new AgentHeartbeat(VM_ID);
         heartbeat.update("boot-123", "agent-1", 3, NOW.minusSeconds(1), NOW.minusSeconds(1));
         when(agentDataService.findHeartbeat(VM_ID)).thenReturn(Optional.of(heartbeat));
         when(agentDataService.statusOf(any(), any())).thenReturn(AgentStatus.ONLINE);
-        service = new AgentStressService(vmService, agentDataService, () -> (topic, payload, qos) -> {
+        service = new AgentStressService(vmService, agentDataService, telemetryHeartbeatStore, commandResultStore,
+                () -> (topic, payload, qos) -> {
             assertThat(topic).isEqualTo("xenova/v1/vms/" + VM_ID + "/command");
             assertThat(qos).isEqualTo(1);
             try {
@@ -47,12 +57,12 @@ class AgentStressServiceTest {
                 throw new IllegalStateException(exception);
             }
             return true;
-        }, objectMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+                }, objectMapper, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
     void cpuEndpointMapsOnlyCpuLoadIntoStressCommand() {
-        AgentStressCommand result = service.cpu(VM_ID, 2, 30);
+        AgentStressCommand result = service.cpu(VM_ID, 2, null, 30);
 
         JsonNode envelope = sent.get(0);
         assertThat(envelope.path("type").asText()).isEqualTo("agent.command");
@@ -64,6 +74,9 @@ class AgentStressServiceTest {
         assertThat(payload.path("parameters").path("cpu_workers").asInt()).isEqualTo(2);
         assertThat(payload.path("parameters").path("memory_mib").asInt()).isZero();
         assertThat(payload.path("parameters").path("duration_s").asInt()).isEqualTo(30);
+        assertThat(result.loadPercent()).isNull();
+        verify(commandResultStore).recordPending(
+                eq(VM_ID), eq(result.commandId()), eq(result.operationId()), eq("boot-123"), eq(NOW));
     }
 
     @Test
@@ -77,10 +90,67 @@ class AgentStressServiceTest {
     }
 
     @Test
+    void zephyrCpuUsesTelemetryBootAndCpuStressContract() {
+        when(vmService.get(VM_ID)).thenReturn(vm(GuestKind.ZEPHYR));
+        when(telemetryHeartbeatStore.view(VM_ID)).thenReturn(freshTelemetryHeartbeat());
+
+        AgentStressCommand result = service.cpu(VM_ID, 1, 80, 10);
+
+        JsonNode payload = sent.get(0).path("payload");
+        assertThat(payload.path("expected_boot_id").asText()).isEqualTo("zephyr-boot");
+        assertThat(payload.path("action").asText()).isEqualTo("cpu_stress");
+        assertThat(payload.path("parameters").fieldNames())
+                .toIterable().containsExactly("workers", "load_percent", "duration_s");
+        assertThat(payload.path("parameters").path("workers").asInt()).isEqualTo(1);
+        assertThat(payload.path("parameters").path("load_percent").asInt()).isEqualTo(80);
+        assertThat(result.loadPercent()).isEqualTo(80);
+    }
+
+    @Test
+    void zephyrMemoryUsesMemoryStressContract() {
+        when(vmService.get(VM_ID)).thenReturn(vm(GuestKind.ZEPHYR));
+        when(telemetryHeartbeatStore.view(VM_ID)).thenReturn(freshTelemetryHeartbeat());
+
+        AgentStressCommand result = service.memory(VM_ID, 8, 20);
+
+        JsonNode payload = sent.get(0).path("payload");
+        assertThat(payload.path("action").asText()).isEqualTo("memory_stress");
+        assertThat(payload.path("parameters").fieldNames())
+                .toIterable().containsExactly("memory_mib", "duration_s");
+        assertThat(result.loadPercent()).isNull();
+    }
+
+    @Test
+    void zephyrCpuRequiresOneWorkerAndLoadPercent() {
+        when(vmService.get(VM_ID)).thenReturn(vm(GuestKind.ZEPHYR));
+        when(telemetryHeartbeatStore.view(VM_ID)).thenReturn(freshTelemetryHeartbeat());
+
+        assertThatThrownBy(() -> service.cpu(VM_ID, 2, 80, 10))
+                .isInstanceOfSatisfying(ApiException.class,
+                        exception -> assertThat(exception.getCode()).isEqualTo("INVALID_STRESS_PARAMETERS"));
+        assertThatThrownBy(() -> service.cpu(VM_ID, 1, null, 10))
+                .isInstanceOfSatisfying(ApiException.class,
+                        exception -> assertThat(exception.getCode()).isEqualTo("INVALID_STRESS_PARAMETERS"));
+        assertThat(sent).isEmpty();
+    }
+
+    @Test
+    void staleZephyrTelemetryIsRejectedBeforePublishing() {
+        when(vmService.get(VM_ID)).thenReturn(vm(GuestKind.ZEPHYR));
+        when(telemetryHeartbeatStore.view(VM_ID)).thenReturn(
+                new TelemetryHeartbeatStore.View(TelemetryHeartbeatStore.Status.STALE, null, 7_000L));
+
+        assertThatThrownBy(() -> service.cpu(VM_ID, 1, 80, 10))
+                .isInstanceOfSatisfying(ApiException.class,
+                        exception -> assertThat(exception.getCode()).isEqualTo("AGENT_UNAVAILABLE"));
+        assertThat(sent).isEmpty();
+    }
+
+    @Test
     void offlineAgentIsRejectedBeforePublishing() {
         when(agentDataService.statusOf(any(), any())).thenReturn(AgentStatus.OFFLINE);
 
-        assertThatThrownBy(() -> service.cpu(VM_ID, 1, 10))
+        assertThatThrownBy(() -> service.cpu(VM_ID, 1, null, 10))
                 .isInstanceOfSatisfying(ApiException.class,
                         exception -> assertThat(exception.getCode()).isEqualTo("AGENT_UNAVAILABLE"));
         assertThat(sent).isEmpty();
@@ -88,7 +158,8 @@ class AgentStressServiceTest {
 
     @Test
     void unavailableBrokerReturnsServiceUnavailable() {
-        service = new AgentStressService(vmService, agentDataService, () -> null, objectMapper,
+        service = new AgentStressService(vmService, agentDataService, telemetryHeartbeatStore, commandResultStore,
+                () -> null, objectMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.memory(VM_ID, 64, 10))
@@ -96,5 +167,16 @@ class AgentStressServiceTest {
                     assertThat(exception.getCode()).isEqualTo("MQTT_UNAVAILABLE");
                     assertThat(exception.getStatus().value()).isEqualTo(503);
                 });
+        verify(commandResultStore).discardPending(eq(VM_ID), any());
+    }
+
+    private static Vm vm(GuestKind guestKind) {
+        return new Vm(VM_ID, "stress-target", guestKind, VmState.RUNNING, "template-1", "1.0", 1, 512);
+    }
+
+    private static TelemetryHeartbeatStore.View freshTelemetryHeartbeat() {
+        TelemetryHeartbeat.Report heartbeat = new TelemetryHeartbeat.Report(
+                "zephyr-boot", "publisher-1", "1", "1000", "running", "1000", "0", "0", "1", NOW);
+        return new TelemetryHeartbeatStore.View(TelemetryHeartbeatStore.Status.FRESH, heartbeat, 0L);
     }
 }

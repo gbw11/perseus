@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
+import com.xenova.backend.agent.application.CommandResultMessageHandler;
 import com.xenova.backend.agent.application.TelemetryHeartbeatMessageHandler;
 import com.xenova.backend.agent.application.VmTelemetryMessageHandler;
 import com.xenova.backend.event.application.RecoveryEventMessageHandler;
@@ -25,6 +26,7 @@ class MqttAgentSubscriberTest {
     private AgentMessageHandler agentHandler;
     private VmTelemetryMessageHandler telemetryHandler;
     private TelemetryHeartbeatMessageHandler heartbeatHandler;
+    private CommandResultMessageHandler commandResultHandler;
     private RecoveryEventMessageHandler recoveryHandler;
     private RecoveryEventBackfillService backfillService;
     private MqttAgentSubscriber subscriber;
@@ -34,12 +36,14 @@ class MqttAgentSubscriberTest {
         agentHandler = mock(AgentMessageHandler.class);
         telemetryHandler = mock(VmTelemetryMessageHandler.class);
         heartbeatHandler = mock(TelemetryHeartbeatMessageHandler.class);
+        commandResultHandler = mock(CommandResultMessageHandler.class);
         recoveryHandler = mock(RecoveryEventMessageHandler.class);
         backfillService = mock(RecoveryEventBackfillService.class);
         MqttProperties properties = new MqttProperties(
                 true, "tcp://127.0.0.1:1883", "test-client", null, null, Duration.ofSeconds(1));
         subscriber = new MqttAgentSubscriber(
-                properties, agentHandler, telemetryHandler, heartbeatHandler, recoveryHandler, backfillService,
+                properties, agentHandler, telemetryHandler, heartbeatHandler, commandResultHandler,
+                recoveryHandler, backfillService,
                 Clock.fixed(RECEIVED_AT, ZoneOffset.UTC));
     }
 
@@ -99,6 +103,22 @@ class MqttAgentSubscriberTest {
         assertThat(MqttAgentSubscriber.TOPICS).hasSameSizeAs(MqttAgentSubscriber.QOS);
         assertThat(MqttAgentSubscriber.QOS[index]).isZero();
         verify(heartbeatHandler).handle(topic, payload, true, RECEIVED_AT);
+        verifyNoInteractions(agentHandler, telemetryHandler, recoveryHandler);
+    }
+
+    @Test
+    void routesCommandResultWithRetainFlagAndQosOne() {
+        String topic = "xenova/v1/vms/vm-1/command-result";
+        byte[] payload = "result".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        MqttMessage message = new MqttMessage(payload);
+        message.setRetained(false);
+
+        subscriber.messageArrived(topic, message);
+
+        int index = java.util.Arrays.asList(MqttAgentSubscriber.TOPICS).indexOf(CommandResultMessageHandler.TOPIC);
+        assertThat(MqttAgentSubscriber.TOPICS).hasSameSizeAs(MqttAgentSubscriber.QOS);
+        assertThat(MqttAgentSubscriber.QOS[index]).isEqualTo(1);
+        verify(commandResultHandler).handle(topic, payload, false, RECEIVED_AT);
         verifyNoInteractions(agentHandler, telemetryHandler, recoveryHandler);
     }
 
