@@ -64,14 +64,15 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 
 ## 3. VM 에이전트·자원 지표 토픽
 
-각 VM의 에이전트와 백엔드가 주고받는다. heartbeat·inventory·metrics 수신은 백엔드에 구현돼 있고, 명령(04·05)은 설계 초안이다.
+각 VM의 에이전트/drive-v1과 백엔드가 주고받는다. heartbeat·inventory·metrics와 명령 결과 수신,
+Linux·Zephyr 명령 발행은 백엔드에 구현돼 있다.
 
 | ID | 토픽 | `type` | 방향 | QoS | retain | payload |
 | --- | --- | --- | --- | --- | --- | --- |
 | MQTT-01 | `xenova/v1/vms/{vm_id}/heartbeat` | `agent.heartbeat` | 에이전트 → 백엔드 | 1 | X | `{}` (봉투만) |
 | MQTT-02 | `xenova/v1/vms/{vm_id}/inventory` | `agent.inventory` | 에이전트 → 백엔드 | 1 | **O** | `os{id, version_id, pretty_name}`, `kernel_release`, `hostname`, `interfaces[{name, mac, addresses[{address, family}]}]`, `agent_version`, `capabilities{commands[], metrics[]}` |
 | MQTT-03 | `xenova/v1/vms/{vm_id}/metrics` | `agent.metrics` | Linux Agent·Zephyr Publisher → 백엔드 | 0 | X | 공통 `window_ms`·`values[]`. Linux는 `processes[]`·`process_collection`, Zephyr는 `observed_uptime_ms`(3.1절) |
-| MQTT-04 | `xenova/v1/vms/{vm_id}/command` | `agent.command` | 백엔드 → 에이전트 | 1 | X | `command_id`, `operation_id`, `expected_boot_id`, `expires_at`, `action`(`stress`/`agent_exit`), `parameters` |
+| MQTT-04 | `xenova/v1/vms/{vm_id}/command` | `agent.command` | 백엔드 → 에이전트/drive-v1 | 1 | X | `command_id`, `operation_id`, `expected_boot_id`, `expires_at`, `action`(`stress`/`agent_exit`/`auto_delay`/`cpu_stress`/`memory_stress`), `parameters` |
 | MQTT-05 | `xenova/v1/vms/{vm_id}/command-result` | `agent.command_result` | 에이전트 → 백엔드 | 1 | X | `command_id`, `operation_id`, `status`(`ACCEPTED`/`RUNNING`/`SUCCEEDED`/`FAILED`/`REJECTED`), `started_at`, `finished_at`, `duration_ms`, `result`, `error` |
 
 - inventory는 retained다. 최초 기동과 OS·네트워크 정보가 바뀔 때 전체를 다시 보낸다. retained 메시지는 마지막 보고일 뿐 지금 `ONLINE`이라는 증거가 아니다. VM을 삭제하면 백엔드가 그 VM의 retained inventory를 지운다.
