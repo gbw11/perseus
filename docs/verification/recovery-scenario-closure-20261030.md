@@ -5083,3 +5083,39 @@ FW30은 고정 ARM·불변 포장과 보드 선택을 확인했으나 진단용 
 현재 저장소의 기본 profile과 정확히 같은 전체 이미지 수락은 아니다. FW31은 정확한 FW30에
 기존 유한 부하 시험 모듈을 연결한 로컬 native/ARM 포장 후보이며, A/B pair에 설치하거나
 정상·A만 지연·공통 입력 한계 조건을 실행하지 않았다. 기본 lock의1.0.8 선택은 유지한다.
+
+<a id="mr-integration-20261107"></a>
+### 커밋·platform 통합 검증 — 2026-11-07
+
+실보드 중단 뒤 사용자의 커밋·push·MR 요청에 따라 작업을 원인별로 나눴다.
+이전 브랜치에 섞인 다른 파트의 develop 커밋은 포함하지 않고,
+`origin/platform`의 `91733c2f5db630791427696f4c4d40089003520d`에서
+`feat/platform/recovery-drive-runtime-hardening`을 만들었다. 기존 작업은 로컬
+`backup/platform/integration-followup-20261107`에 보존했다.
+
+통합 후보 `6b29348a2f196579879618adbd05942787bfcbee`에서 다음을 다시 실행했다.
+Worker 충돌은 platform의 `external_reason`·`external_execution_id`와 이번 안정 구간 관측을
+함께 보존했고, `xenova_execution.py` 충돌은 원 기록 검증을 설명하는 주석을 보존했다.
+platform의 실행 신원 batch 조회·scheduler 상태 재검증과 이번 FD 기반 원 요청 검사·
+현재 호출 안의 검증 재사용·만료 수습 함수가 각각 원본과 같은 AST임을 대조했다.
+
+| 로컬 실행 범위 | 결과와 제한 |
+|---|---|
+| Worker budget/status/worker/engine/watcher/rejoin | 306개 통과. VM_UNTRUSTED의 실행별 고정·새 실행 초기화와 E4 보호를 함께 확인 |
+| Manager·수습·원 요청·binding·clock와 platform의 신규 조회 회귀 | 354개 통과, 자식 프로세스의 `first_install_contract` import 1건 실패. 시험 PYTHONPATH에 `platform/first-install`을 추가한 해당 재시험은 통과. 제품 변경 없음 |
+| Gateway 전체 | 378개 통과·1개 skip·1개 실패. `test_memory_pressure_switches_manual_owner_using_manual_mirror_readiness`는 target `91733c2f`의 Gateway·MQTT·world 소스 사본에서도 같은 assertion으로 실패. 이번 통합의 새 회귀로 분류하지 않으며 미해결로 보존 |
+| MQTT 전체 | 174개 통과·4개 skip. 별도 broker/container 설정이 필요한 시험은 실행하지 않음 |
+| 실제 main·입력 시각·transport barrier·차량 진단·가상 차량 표본 | 143개 통과·1개 skip. 진단 비활성 `.text`의 이전 소스 대조는 해당 원본 경로 미공급으로 skip |
+| C controller·health·manual/preparation·codec·state transfer | 기존 고정 CMake 3.31.6·GCC 13.3으로 빌드, CTest 6/6 통과 |
+| 실제 netfront ring | ASAN/UBSAN 및 O2 각각 47개 사례와 70,000회 wrap 통과. 실제 공간 부족·손상 검출 보호 유지 |
+
+Gateway의 나머지 skip은 native state codec 실행 파일 미공급이며, CTest의 state-transfer
+통과와 별도 사실이다. 기존 SDK·시험 의존성을 재사용했고 새 의존성을 설치하지 않았다.
+실행 명령·JUnit·stdout/stderr·비교 사본은 로컬
+`Documents/Codex/2026-11-06/board-resume-evening/mr-integration-checks/`에 보존했다.
+`run_mr_integration_checks.py`의 그룹별 pytest와 `native-validation.json`에 정확한 입력·
+도구·해시를 기록했다. 이 절은 위 후보 이후 문서만 추가한 기록이다.
+
+이 통합 후보로 전체 ARM/RPM/이미지를 다시 빌드하거나 보드에 설치하지 않았다.
+앞 절의 FW30 ARM·보드 근거를 새 platform 전체 설치 근거로 바꾸지 않는다.
+READY·주행·메모리 반환·세 부하 조건의 실보드 미수락과 기존 출력 차단·E4 보호는 그대로다.
