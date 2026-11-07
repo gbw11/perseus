@@ -71,6 +71,7 @@ class AgentStressServiceTest {
         assertThat(payload.path("parameters").path("cpu_workers").asInt()).isEqualTo(2);
         assertThat(payload.path("parameters").path("memory_mib").asInt()).isZero();
         assertThat(payload.path("parameters").path("duration_s").asInt()).isEqualTo(30);
+        assertThat(result.loadPercent()).isNull();
     }
 
     @Test
@@ -88,7 +89,7 @@ class AgentStressServiceTest {
         when(vmService.get(VM_ID)).thenReturn(vm(GuestKind.ZEPHYR));
         when(telemetryHeartbeatStore.view(VM_ID)).thenReturn(freshTelemetryHeartbeat());
 
-        service.cpu(VM_ID, 1, 80, 10);
+        AgentStressCommand result = service.cpu(VM_ID, 1, 80, 10);
 
         JsonNode payload = sent.get(0).path("payload");
         assertThat(payload.path("expected_boot_id").asText()).isEqualTo("zephyr-boot");
@@ -97,6 +98,7 @@ class AgentStressServiceTest {
                 .toIterable().containsExactly("workers", "load_percent", "duration_s");
         assertThat(payload.path("parameters").path("workers").asInt()).isEqualTo(1);
         assertThat(payload.path("parameters").path("load_percent").asInt()).isEqualTo(80);
+        assertThat(result.loadPercent()).isEqualTo(80);
     }
 
     @Test
@@ -104,12 +106,13 @@ class AgentStressServiceTest {
         when(vmService.get(VM_ID)).thenReturn(vm(GuestKind.ZEPHYR));
         when(telemetryHeartbeatStore.view(VM_ID)).thenReturn(freshTelemetryHeartbeat());
 
-        service.memory(VM_ID, 8, 20);
+        AgentStressCommand result = service.memory(VM_ID, 8, 20);
 
         JsonNode payload = sent.get(0).path("payload");
         assertThat(payload.path("action").asText()).isEqualTo("memory_stress");
         assertThat(payload.path("parameters").fieldNames())
                 .toIterable().containsExactly("memory_mib", "duration_s");
+        assertThat(result.loadPercent()).isNull();
     }
 
     @Test

@@ -101,7 +101,10 @@ public class AgentStressService {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "MQTT_UNAVAILABLE",
                     "MQTT 브로커에 연결되어 있지 않아 부하 명령을 보내지 못했습니다.");
         }
-        return new AgentStressCommand(commandId, operationId, vmId, type, amount, durationS, now, expiresAt);
+        Integer appliedLoadPercent = guestKind == GuestKind.ZEPHYR
+                && type == AgentStressCommand.StressType.CPU ? loadPercent : null;
+        return new AgentStressCommand(
+                commandId, operationId, vmId, type, amount, appliedLoadPercent, durationS, now, expiresAt);
     }
 
     private String currentBootId(String vmId, GuestKind guestKind, Instant now) {
