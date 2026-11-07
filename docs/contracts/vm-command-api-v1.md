@@ -62,7 +62,22 @@ Content-Type: application/json
 - Zephyr VM 전용이며 MQTT action은 `auto_delay`다.
 - Linux VM은 `400 UNSUPPORTED_GUEST_KIND`다.
 
-## 5. 제출 응답
+## 5. Linux Agent 종료
+
+```http
+POST /api/v1/vms/{vmId}/faults/agent-exit
+```
+
+- 요청 본문은 없다.
+- Linux VM 전용이며 MQTT action은 `agent_exit`, parameters는 빈 객체다.
+- Agent heartbeat가 온라인이고 `boot_id`가 있어야 한다.
+- Zephyr VM은 `400 UNSUPPORTED_GUEST_KIND`다.
+- 대상 Agent에서 `XENOVA_AGENT_DEMO_COMMANDS=1`이어야 실제 종료된다. 비활성화 상태이면
+  명령 결과가 `REJECTED`와 `DEMO_DISABLED`로 저장된다.
+- Agent는 `ACCEPTED` 결과의 MQTT PUBACK을 확인한 뒤 종료한다. 이후 heartbeat 손실은 플랫폼
+  Recovery Worker의 자동복구 판정 대상이다.
+
+## 6. 제출 응답
 
 CPU·메모리 응답은 다음 형식이다. `amount`는 CPU에서는 workers, 메모리에서는 MiB다.
 Linux Agent 계약에는 duty cycle이 없으므로 `load_percent`는 null이다.
@@ -82,8 +97,9 @@ Linux Agent 계약에는 duty cycle이 없으므로 `load_percent`는 null이다
 ```
 
 `auto-delay` 응답은 `type`, `amount`, `load_percent` 대신 `delay_ms`를 제공한다.
+`agent-exit` 응답은 추적용 `command_id`, `operation_id`, `vm_id`, `submitted_at`, `expires_at`을 제공한다.
 
-## 6. 명령 상태 조회
+## 7. 명령 상태 조회
 
 ```http
 GET /api/v1/vms/{vmId}/commands/{commandId}

@@ -261,6 +261,7 @@ Linux VM의 CPU·메모리 부하, Zephyr AUTO 연산 지연, 명령 상태 조�
 POST /api/v1/vms/{vmId}/stress/cpu
 POST /api/v1/vms/{vmId}/stress/memory
 POST /api/v1/vms/{vmId}/faults/auto-delay
+POST /api/v1/vms/{vmId}/faults/agent-exit
 GET  /api/v1/vms/{vmId}/commands/{commandId}
 ```
 
