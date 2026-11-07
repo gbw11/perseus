@@ -32,7 +32,7 @@ import test_xenova_network_zephyr as network
 from xenova_drive_binding import observe
 import xenova_vm
 
-def test_memory_pressure_trust_payload_is_accepted_for_recovery():
+def test_legacy_memory_pressure_wire_is_readable_without_granting_recovery():
     payload={'trust':'UNTRUSTED','reason':'MEMORY_PRESSURE','metric':'memory.kernel_heap.used_bytes',
         'used_percent':89,'threshold_percent':85,'consecutive_samples':5,'command_id':'memory-1'}
     assert valid_vm_trust_payload(payload)
@@ -306,6 +306,59 @@ def test_successful_probe_keeps_its_release_cadence_and_original_observation(cad
     c.now[0]=released+1;coordinator.pump()
     assert len(c.calls)==2 and c.calls[1][0]==pytest.approx(released+1)
     assert coordinator._futures[c.vm] is c.calls[1][2]
+
+
+@pytest.mark.parametrize('reason,scope', [('MEMORY_PRESSURE','warning'),('AUTO_DEADLINE_MISS','function')])
+def test_fw32_advisory_keeps_original_evidence_without_vm_recovery(cadence,reason,scope):
+    c=cadence;coordinator=c.coordinator
+    coordinator.cache.install({'schema_version':'1.0-drive-bindings','host_boot_id':coordinator.host,
+        'observed_monotonic_ms':int(c.now[0]*1000),'expires_monotonic_ms':int(c.now[0]*1000)+3000,
+        'vms':{c.vm:c.row}})
+    payload={'trust':'UNTRUSTED','reason':reason,'command_id':'original-command'}
+    if reason=='MEMORY_PRESSURE':payload.update(metric='memory.kernel_heap.used_bytes',used_percent=88,
+        threshold_percent=85,consecutive_samples=5)
+    else:payload['consecutive_misses']=5
+    envelope=build(Identity(vm_id=c.vm,app_id='autonomous',boot_id=c.row['boot_id'],
+        agent_instance_id=c.row['app_instance_id']),'vm.trust',payload,1)
+    message=Message(topics.vm_app_events(c.vm,'autonomous'),envelope,c.now[0])
+    coordinator.on_trust(message)
+    assert coordinator.trust_events()==[{'vm_id':c.vm,'execution_id':c.row['execution_id'],
+        'command_id':'original-command','scope':scope,'reason':reason,'received_monotonic':c.now[0]}]
+    diagnostic=coordinator.legacy_fault_reports()[0]
+    assert diagnostic['reason']==reason and diagnostic['scope']==scope and diagnostic['reports']==1
+    assert diagnostic['evidence']=={key:value for key,value in payload.items() if key not in ('reason','command_id')}
+    diagnostic['evidence'].clear()
+    assert coordinator.legacy_fault_reports()[0]['evidence']['trust']=='UNTRUSTED'
+    # QoS duplicates and new command IDs cannot allocate unbounded diagnostic state.
+    for _ in range(80):coordinator.on_trust(message)
+    assert len(coordinator.legacy_fault_reports())==1
+    assert coordinator.legacy_fault_reports()[0]['reports']==81
+    assert all(event['scope']!='vm' for event in coordinator.trust_events())
+    before=coordinator.legacy_fault_reports()
+    for changed in ({'boot_id':str(uuid4())},{'agent_instance_id':str(uuid4())}):
+        coordinator.on_trust(Message(message.topic,{**envelope,**changed},c.now[0]))
+    coordinator.on_trust(Message(message.topic,envelope,c.now[0],retained=True))
+    c.now[0]+=3.1;coordinator.on_trust(Message(message.topic,envelope,c.now[0]))
+    assert coordinator.legacy_fault_reports()==before
+
+
+def test_legacy_advisory_cannot_mix_two_binding_snapshots(cadence,monkeypatch):
+    c=cadence;coordinator=c.coordinator
+    def snapshot(row):return {'schema_version':'1.0-drive-bindings','host_boot_id':coordinator.host,
+        'observed_monotonic_ms':int(c.now[0]*1000),'expires_monotonic_ms':int(c.now[0]*1000)+3000,'vms':{c.vm:row}}
+    coordinator.cache.install(snapshot(c.row))
+    replacement={**c.row,'execution_id':str(uuid4()),'boot_id':str(uuid4()),'app_instance_id':str(uuid4())}
+    current=coordinator.cache.current;swapped=[False]
+    def overlap(*args,**kwargs):
+        old=current(*args,**kwargs)
+        if not swapped[0]:swapped[0]=True;coordinator.cache.install(snapshot(replacement))
+        return old
+    monkeypatch.setattr(coordinator.cache,'current',overlap)
+    envelope=build(Identity(vm_id=c.vm,app_id='autonomous',boot_id=replacement['boot_id'],
+        agent_instance_id=replacement['app_instance_id']),'vm.trust',
+        {'trust':'UNTRUSTED','reason':'AUTO_DEADLINE_MISS','consecutive_misses':5,'command_id':'new-boot'},1)
+    coordinator.on_trust(Message(topics.vm_app_events(c.vm,'autonomous'),envelope,c.now[0]))
+    assert coordinator.legacy_fault_reports()==[] and coordinator.trust_events()==[]
 
 
 def test_release_anchor_uses_dispatch_time_after_other_completions(cadence):

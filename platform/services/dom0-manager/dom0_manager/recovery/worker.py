@@ -74,6 +74,7 @@ class RecoveryWorker:
         if self._rejoin is not None:
             current={str(obs.vm_id):obs for obs in observations}
             for event in self._rejoin.trust_events():
+                if event.get('scope')!='vm':continue
                 obs=current.get(event['vm_id'])
                 judgment=None if obs is None else self._watcher.report_untrusted(
                     obs,event['execution_id'],now)
