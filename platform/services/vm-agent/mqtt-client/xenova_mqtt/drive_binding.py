@@ -47,7 +47,15 @@ def private_json(path: Path,uid: int=0) -> dict:
     return value
 
 class BindingCache:
-    """Read-only memory copy. Failure/expiry revokes acceptance, never invents a session."""
+    """Published observations for the fixed GIL-enabled CPython target.
+
+    Writers serialize cloning/replacement; readers capture one private snapshot
+    without waiting for that work. Published trees must never be mutated.
+    Returned rows copy the three defined app maps; trusted callers must treat
+    other nested values as read-only. An overlapping reader may finish from an
+    earlier snapshot, not acquire a revocation barrier or output permission.
+    This is not a publication guarantee for free-threaded Python runtimes.
+    """
     def __init__(self,host_boot_id: str,*,clock=time.monotonic):
         self.host_boot_id=canonical(host_boot_id);self.clock=clock
         self._lock=threading.Lock();self._value=None;self.error='BINDING_UNAVAILABLE'
@@ -111,24 +119,22 @@ class BindingCache:
 
     def current(self,vm: str,now: float | None=None) -> dict | None:
         now=self.clock() if now is None else now
-        with self._lock:
-            v=self._value
-            if v is None or not v['observed_monotonic_ms']<=int(now*1000)<=v['expires_monotonic_ms']:return None
-            row=v['vms'].get(vm)
-            if not (row and row['status']=='observed' and 0<=int(now*1000)-row['observed_monotonic_ms']<=3000):return None
-            return {**row,**({'app_instances':dict(row['app_instances'])} if 'app_instances' in row else {}),
-                    **({'app_status':dict(row['app_status'])} if 'app_status' in row else {}),
-                    **({'app_state_models':dict(row['app_state_models'])} if 'app_state_models' in row else {})}
+        v=self._value
+        if v is None or not v['observed_monotonic_ms']<=int(now*1000)<=v['expires_monotonic_ms']:return None
+        row=v['vms'].get(vm)
+        if not (row and row['status']=='observed' and 0<=int(now*1000)-row['observed_monotonic_ms']<=3000):return None
+        return {**row,**({'app_instances':dict(row['app_instances'])} if 'app_instances' in row else {}),
+                **({'app_status':dict(row['app_status'])} if 'app_status' in row else {}),
+                **({'app_state_models':dict(row['app_state_models'])} if 'app_state_models' in row else {})}
 
     def observation_status(self,vm: str,now: float | None=None) -> str:
         """A bounded cache fact for reference retirement, never execution
         permission. Missing/stale/failed observation remains unavailable."""
         now=self.clock() if now is None else now
-        with self._lock:
-            value=self._value
-            if value is None or not value['observed_monotonic_ms']<=int(now*1000)<=value['expires_monotonic_ms']:
-                return 'unavailable'
-            return value['vms'].get(vm,{}).get('status','unavailable')
+        value=self._value
+        if value is None or not value['observed_monotonic_ms']<=int(now*1000)<=value['expires_monotonic_ms']:
+            return 'unavailable'
+        return value['vms'].get(vm,{}).get('status','unavailable')
 
     def accepts(self,vm: str,boot: str,instance: str,now: float | None=None,*,app: str | None=None) -> bool:
         row=self.current(vm,now)
