@@ -4,6 +4,10 @@ import { useState } from 'react';
 import { request, setSession } from './client';
 import type {
   CreateVmRequest,
+  AgentExitCommand,
+  AutoDelayCommand,
+  AutoDelayRequest,
+  CommandStatusResponse,
   Display,
   DisplayListResponse,
   EventListResponse,
@@ -37,6 +41,7 @@ export const keys = {
   processes: (id: string) => ['vms', id, 'processes'] as const,
   threads: (id: string) => ['vms', id, 'threads'] as const,
   telemetryHeartbeat: (id: string) => ['vms', id, 'telemetry-heartbeat'] as const,
+  command: (id: string, commandId: string) => ['vms', id, 'commands', commandId] as const,
   displays: ['displays'] as const,
 };
 
@@ -164,6 +169,46 @@ export function useStartStress(vmId: string) {
         method: 'POST',
         body,
       }),
+  });
+}
+
+export function useStartAutoDelay(vmId: string) {
+  return useMutation({
+    mutationFn: (body: AutoDelayRequest) =>
+      request<AutoDelayCommand>(`/api/v1/vms/${encodeURIComponent(vmId)}/faults/auto-delay`, {
+        method: 'POST',
+        body,
+      }),
+  });
+}
+
+export function useStartAgentExit(vmId: string) {
+  return useMutation({
+    mutationFn: () =>
+      request<AgentExitCommand>(`/api/v1/vms/${encodeURIComponent(vmId)}/faults/agent-exit`, {
+        method: 'POST',
+      }),
+  });
+}
+
+export function useCommandStatus(vmId: string, commandId: string | null, acceptedIsTerminal = false) {
+  return useQuery({
+    queryKey: keys.command(vmId, commandId ?? ''),
+    queryFn: ({ signal }) =>
+      request<CommandStatusResponse>(
+        `/api/v1/vms/${encodeURIComponent(vmId)}/commands/${encodeURIComponent(commandId!)}`,
+        { signal },
+      ),
+    enabled: Boolean(vmId && commandId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'SUCCEEDED' ||
+        status === 'FAILED' ||
+        status === 'REJECTED' ||
+        (acceptedIsTerminal && status === 'ACCEPTED')
+        ? false
+        : 1000;
+    },
   });
 }
 

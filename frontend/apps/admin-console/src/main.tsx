@@ -18,6 +18,7 @@ import { ResourcesPage } from './pages/ResourcesPage';
 import { ScreensPage } from './pages/ScreensPage';
 import { SignupPage } from './pages/SignupPage';
 import { ShowcasePage } from './pages/ShowcasePage';
+import { SimulatorStressLab } from './pages/SimulatorStressLab';
 import { VmCreatePage } from './pages/VmCreatePage';
 import { VmDetailPage } from './pages/VmDetailPage';
 import { VmListPage } from './pages/VmListPage';
@@ -65,6 +66,7 @@ const router = createBrowserRouter([
       { path: '/control/vms/new', element: <VmCreatePage /> },
       { path: '/control/vms/:vmId', element: <ControlVmDetailPage /> },
       { path: '/simulator', element: <DemoPage /> },
+      { path: '/simulator/stress', element: <SimulatorStressLab /> },
       // 실차가 안 될 때 쓰는 예비 대시보드 (주·백업 VM 카드 + 시뮬레이터). 메뉴에는 없다
       { path: '/legacy/dashboard', element: <LegacyDashboardPage /> },
 
