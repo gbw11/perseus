@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "kind": "PROVISIONAL",
+  "rgb": {
+    "width": 640, "height": 360,
+    "k": [[500, 0, 319.5], [0, 500, 179.5], [0, 0, 1]],
+    "rotation": [[0, -0.25881904510252074, 0.9659258262890683], [-1, 0, 0], [0, -0.9659258262890683, -0.25881904510252074]],
+    "translation": [0.20, 0, 0.12],
+    "roi": [0, 0, 640, 360],
+    "rectification": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    "distortion": [], "pixel_error": 0.5,
+    "ray_error_rad": 0, "translation_error_m": 0, "rotation_error_rad": 0,
+    "qualified": false, "remap_qualified": false, "near_m": 0.15, "far_m": 3
+  },
+  "right": {
+    "width": 640, "height": 480,
+    "k": [[500, 0, 319.5], [0, 500, 239.5], [0, 0, 1]],
+    "rotation": [[0, -0.25881904510252074, 0.9659258262890683], [-1, 0, 0], [0, -0.9659258262890683, -0.25881904510252074]],
+    "translation": [0.20, -0.0375, 0.12],
+    "roi": [0, 0, 640, 480],
+    "rectification": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    "distortion": [], "pixel_error": 0.5,
+    "ray_error_rad": 0, "translation_error_m": 0, "rotation_error_rad": 0,
+    "qualified": false, "remap_qualified": false, "near_m": 0.15, "far_m": 3
+  },
+  "plane": {"normal": [0, 0, 1], "offset": 0, "normal_error_rad": 0, "offset_error_m": 0, "qualified": false},
+  "support_polygon": [[-2, -3], [6, -3], [6, 3], [-2, 3]],
+  "body": {"length": 0.30, "width": 0.22, "wheelbase": 0.20, "front": 0.25, "rear": 0.05},
+  "provenance": {
+    "status": "UNMEASURED_PLACEHOLDER_DO_NOT_DRIVE",
+    "eeprom_status": "NOT_BOUND_TO_ACTUAL_DEVICE",
+    "intrinsics_mount_plane_body": "NOMINAL_DIAGNOSTIC_EXAMPLE_NOT_CALIBRATED",
+    "zero_error_fields": "UNACCEPTED_NOT_ZERO_PHYSICAL_ERROR"
+  },
+  "first_surface_qualified": false,
+  "time_qualified": false,
+  "minimum_target_qualified": false,
+  "depth_error_m": 0,
+  "depth_relative_error": 0,
+  "vehicle_bundle_sha256": null,
+  "external_leaves": {}
+}

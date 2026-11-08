@@ -55,6 +55,7 @@ Jetson/
 │       ├── oak/                    # DepthAI 그래프·수신·원시 시각
 │       ├── perception/             # 차선·구획·깊이·NN 출력 해석
 │       ├── mapping/                # 점유 지도·위치 정합·후보 ID
+│       ├── simulation/             # 개발용 합성 RGB·RIGHT depth 입력·기록
 │       ├── storage/                # SQLite·checkpoint·복원
 │       ├── transport/              # Pi 통신·codec 어댑터·영상 제공
 │       └── recording/              # 관측 기록·파일 입력·재생
@@ -286,6 +287,30 @@ det의 모든 obj/class와 두 segmentation score는 [0,1]이어야 한다. 범�
 road/lane은 두 channel argmax이며 동점은 첫 channel이다. `argmax_nn`은320×320 원 label, `observed_nn`은 rows70..249만 관측인 별도 bool mask, `content`는180×320이다. padding label은 배경·FREE 관측이 아니다. source mask는 `source[y,x]=argmax_nn[70+y//2,x//2]`로 정확히2배 nearest 복원한다. 박스는 연속 image-edge 좌표로 x_source=2×x_nn, y_source=2×(y_nn−70)을 적용한다. 실제 ImageManip 입력 픽셀이 보존되지 않아 pixel equivalence는 미확인이다.
 
 결과는 원 source/time·context와 model/preprocessing/parser/config identity를 연결한다. `source_metadata`와 provenance는 사본이며 새 `costs_us`가 원 검사 비용을 덮어쓰지 않는다. S03 표본의 결박을 다시 검사하지만 파일 hash는 reader 책임이다. `REPLAY`, `live_authority=false`, `nn_ready=false`, `metric_ready=false`와 원 depth 시간 한계를 유지한다. 후보 mask/box는 차선·주차칸·occupied/free 최종판정이나 차량 제어 권한이 아니다.
+
+## 관측·국소 지도 진단
+
+`PerceptionPipeline`은 live owned-copy, 검증된 YOLOP 기록, 합성 관측에서 같은 테이프·깊이·국소 지도 코어를 사용한다. RGB·RIGHT depth·NN의 원 source key와 시각은 별도로 유지한다. 늦게 도착한 NN은 같은 RGB의 보조 후보만 갱신하며 지도 관측 시각을 새로 만들지 않는다.
+
+테이프는 폭·가림·FOV·교차점을 포함한 strip graph와 두 차로 가설을 만든다. NN road/lane mask와 차량 box는 보조 후보이며 모호한 기하를 승인하지 않는다. 지도는 support·통행 정책·점유·원 관측 나이를 별도 층으로 보존한다. depth0·도로색·만료한 occupied를 FREE로 바꾸지 않는다. FREE에는 수락된 표적 모델의 모든 충돌 가능 배치를 배제하는 ray certificate가 필요하다.
+
+코어의 FREE 실행은 원 capture 구간 폭이0인 합성 관측으로 제한한다. 실제 노출 중 이동을 원 ray origin/direction에 결박하지 않은 경로는 `CAPTURE_TUBE_NOT_IMPLEMENTED`, 원 시각 미상은 `CAPTURE_TIME_UNKNOWN`을 남긴다. cell의 pose 오차 팽창만으로 이동 중 관측의 FREE를 승인하지 않는다.
+
+보정 profile은 active RGB/RIGHT K·R·ROI, 카메라→차체 변환, 평면·차체·오차·시각 수락을 구분한다. factory EEPROM은 원 사실로 기록하며 active 보정을 자동 확정하지 않는다. [미실측 profile 예시](profiles/perception-provisional.example.json)는 장착값을 가정한 진단 입력이다.
+
+```bash
+xenova-vehicle perception-bench --source synthetic \
+  --frames 2 --output /path/to/new-perception-bench --json
+
+xenova-vehicle perception-bench --source yolop-replay \
+  --dataset /path/to/recorded-yolop-bench \
+  --calibration /path/to/physical-calibration.json \
+  --frames 2 --output /path/to/new-replay-diagnostics --json
+```
+
+출력은 원본 쌍·hash 검증, 단계별 JSONL, 유한 PNG overlay/map과 완료 receipt다. 합성 GT는 별도 oracle 파일이며 기본 코어에는 전달하지 않는다. `--oracle-pose`는 합성 평가에서만 명시적으로 사용한다. odometry가 없으면 각 capture의 frame-local 지도로 처리한다. 연속 지도 정합은 이전 frozen reference와 원 odometry 구간만 사용하고, 모호하거나 오차 범위를 벗어난 관측은 기존 지도를 갱신하지 않는다.
+
+운영 `runtime`에 `--perception-profile /path/to/physical-calibration.json`을 명시하면 S가 보정 bytes/hash를 고정하고 M이 raw token 반환 뒤 공통 코어를 호출한다. 프로필을 생략하면 해당 코어를 활성화하지 않는다. 실물 시각·보정·표적 수락이 없는 경로는 `HIT_ONLY/UNKNOWN` 진단이며 주행 허가를 발급하지 않는다. 운영 import·기동은 `simulation`·`perception-bench`·`doctor`를 호출하거나 기다리지 않는다.
 
 ## 카메라 없는 원본 재생
 
