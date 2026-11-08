@@ -304,3 +304,70 @@ def create_guest_data_app(feed, guest_token):
         return Response(result.body, media_type="application/json")
 
     return app
+
+
+class GuestRelayConfig(BaseModel):
+    """/etc/xenova/guest-display.json (411). Token values live in separate private files."""
+    model_config = ConfigDict(extra="forbid")
+    guest: GuestSource
+    guest_stream_token_file: str = Field(min_length=2, max_length=4096, pattern=r"^/")
+    relay_token_file: str = Field(min_length=2, max_length=4096, pattern=r"^/")
+    guest_data_token_file: str = Field(min_length=2, max_length=4096, pattern=r"^/")
+    relay_port: int = Field(default=8084, ge=1, le=65535)
+    data_bind: ipaddress.IPv4Address = ipaddress.IPv4Address("192.168.77.1")
+    data_port: int = Field(default=8085, ge=1, le=65535)
+    feed_port: int = Field(default=8082, ge=1, le=65535)
+
+    @model_validator(mode="after")
+    def bridge_only(self):
+        if not self.data_bind.is_private or self.data_bind.is_unspecified or self.data_bind.is_loopback:
+            raise ValueError("guest data path binds to dom0's Xen bridge address only")
+        if len({self.relay_port, self.data_port, self.feed_port}) != 3:
+            raise ValueError("relay, guest data and feed ports must differ")
+        return self
+
+
+def main(argv=None):
+    import argparse
+    from contextlib import nullcontext
+    import os
+    from pathlib import Path
+    import signal
+    import uvicorn
+    from .frame_presenter import read_secret
+    from .mobile_upstream import LocalFeed
+    from .stream import StreamServer
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", default="/etc/xenova/guest-display.json")
+    args = parser.parse_args(argv)
+    config = GuestRelayConfig.model_validate_json(Path(args.config).read_text(encoding="utf-8"))
+    receiver = GuestFrameReceiver(config.guest, read_secret(config.guest_stream_token_file))
+    relay = create_relay_app(receiver, read_secret(config.relay_token_file))
+    data = create_guest_data_app(LocalFeed(os.environ.get("XENOVA_DISPLAY_TOKEN", ""), port=config.feed_port),
+                                 read_secret(config.guest_data_token_file))
+    # Relay: dom0-local consumers only. Guest data: dom0's Xen bridge address only.
+    relay_server = StreamServer(uvicorn.Config(relay, host="127.0.0.1", port=config.relay_port, workers=1,
+                                               log_level="warning", access_log=False, timeout_graceful_shutdown=5))
+    data_server = uvicorn.Server(uvicorn.Config(data, host=str(config.data_bind), port=config.data_port, workers=1,
+                                                log_level="warning", access_log=False))
+
+    servers = (relay_server, data_server)
+    for server in servers:
+        # One handler stops both listeners; uvicorn's per-server capture would stop only one.
+        server.capture_signals = nullcontext
+        server.install_signal_handlers = lambda: None
+
+    async def serve():
+        loop = asyncio.get_running_loop()
+        def stop():
+            for server in servers: server.should_exit = True
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, stop)
+        await asyncio.gather(*(server.serve() for server in servers))
+    asyncio.run(serve())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

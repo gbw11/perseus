@@ -88,7 +88,7 @@ relay 127.0.0.1:<port> /streams/display.mjpeg  (relay token)
 ## 7. 후속 작업 (일반 작업, 각 ≤ 5 SP)
 
 1. **표시 domU 이미지·실행 구성** — Xvfb/Xorg dummy, Chromium kiosk, ffmpeg, `guest_sender` unit, 토큰 배포. 게스트 템플릿 담당 협의 포함.
-2. **dom0 HDMI 프레임 출력기 + 모드 전환 연동** — `display_mode`의 HDMI 준비 판정을 "domU 프레임 live + 출력기 표시"로, mobile 모드를 프레임 중계로.
+2. **dom0 HDMI 프레임 출력기** — [S15P31E110-411](https://ssafy.atlassian.net/browse/S15P31E110-411)에서 로컬 구현·검증 완료 ([검증](../verification/display-411-hdmi-frame-output-20261108.md)). 기존 HDMI 세션의 kiosk가 `renderer: guest_frames`일 때 Chromium 대신 `frame_presenter`를 실행한다. 상태 파일 형식이 같아 `display_mode`는 그대로 동작한다. 남은 것: 보드 실물 확인, HDMI 1대 판정(379/380/390), mobile 모드의 프레임 중계.
 3. **guest data relay 배포** — `192.168.77.1` bind, 출발지 제한 규칙, 토큰 발급·회전.
 4. **실보드 B안 검증** — HDMI 1대 / S24 각각 CPU·RAM(dom0·domU 따로), fps, 표시 지연, 끊김·domU 재시작·모드 전환 복귀, 10분 연속.
 
