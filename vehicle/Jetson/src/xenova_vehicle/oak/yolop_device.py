@@ -12,15 +12,19 @@ import struct
 import time
 
 from .device import OakSource, _pipeline, _us
+from .jpeg import MAX_JPEG_BYTES, sdk_jpeg
 from .yolop_asset import ASSET_ID, load_yolop_asset, validated_sdk_blob
 
 
-def compact_yolop_graph(pipeline, asset_receipt: dict, fps: int) -> dict:
+def compact_yolop_graph(pipeline, asset_receipt: dict, fps: int, *, jpeg_enabled=False) -> dict:
     """실제 node/connection만 읽는다. serializeToJson·properties·asset storage는 접근하지 않는다.
 
     고정 SDK의 전체 graph JSON에는 모델 바이트까지 담기므로 이를 만든 뒤 잘라내는
     방식도 사용하지 않는다. 설정은 host 선언이며 device 설정 readback이 아니다.
     """
+    if type(jpeg_enabled) is not bool:
+        raise ValueError('JPEG graph option must be an explicit bool')
+
     def text(value, name):
         if type(value) is not str or len(value) > 128:
             raise ValueError(f"invalid compact graph {name}")
@@ -56,7 +60,7 @@ def compact_yolop_graph(pipeline, asset_receipt: dict, fps: int) -> dict:
             if item["output_id"] not in ids or item["input_id"] not in ids:
                 raise ValueError("compact graph connection references an absent node")
             connections.append(item)
-    return {"scope": "compact_host_node_connection_declaration", "asset_storage_included": False,
+    result = {"scope": "compact_host_node_connection_declaration", "asset_storage_included": False,
             "device_config_readback": False,
             "nodes": sorted(nodes, key=lambda node: node["id"]),
             "connections": sorted(connections, key=lambda item: (item["output_id"], item["output_group"],
@@ -71,13 +75,23 @@ def compact_yolop_graph(pipeline, asset_receipt: dict, fps: int) -> dict:
                                          "content_size_wh": [320, 180], "padding_ltrb": [0, 70, 0, 70],
                                          "padding_bgr": [0, 0, 0], "inference_threads": 1}},
             "asset": {key: asset_receipt[key] for key in ("asset_id", "blob_sha256", "blob_bytes")}}
+    if jpeg_enabled:
+        result['declared_settings']['jpeg'] = {
+            'encoder': 'VideoEncoder', 'profile': 'MJPEG', 'fps_requested': fps,
+            'size_wh': [640, 360], 'input_type': 'NV12', 'output_type': 'BITSTREAM',
+            'input_source': 'same_CAM_A_video_as_rgb_video', 'pool_frames': 2,
+            'max_output_frame_bytes': MAX_JPEG_BYTES,
+            'input_queue_size': 1, 'input_queue_blocking': False, 'xlink_metadata_only': False}
+    return result
 
 
 class YolopOakSource(OakSource):
     """A가 넘긴 immutable context와 검증 asset을 한 session 동안 유지한다."""
 
-    def __init__(self, profile, *, context_key: str):
+    def __init__(self, profile, *, context_key: str, jpeg_enabled=False):
         super().__init__(profile)
+        if type(jpeg_enabled) is not bool:
+            raise ValueError('JPEG enable option must be an explicit bool')
         if (type(context_key) is not str or len(context_key) != 64
                 or any(char not in "0123456789abcdef" for char in context_key)):
             raise ValueError("YOLOP context_key must be the parent's canonical SHA256")
@@ -89,6 +103,20 @@ class YolopOakSource(OakSource):
         self._golden_done = False
         self._nn_failure = None
         self._nn_failure_captured = False
+        self._jpeg_enabled = jpeg_enabled
+        self._last_jpeg = None
+        self._jpeg_drop_count = 0
+
+    @property
+    def jpeg_enabled(self):
+        return self._jpeg_enabled
+
+    @property
+    def jpeg_drop_count(self):
+        return self._jpeg_drop_count
+
+    def _drop_jpeg(self):
+        self._jpeg_drop_count = min(2**63 - 1, self._jpeg_drop_count + 1)
 
     def take_failure_diagnostic(self) -> dict | None:
         """최초 NN 변환 실패의 소유 bytes/metadata를 한 번 넘기고 소스 참조를 놓는다."""
@@ -223,6 +251,20 @@ class YolopOakSource(OakSource):
                 xout.input.setQueueSize(1)
                 xout.input.setBlocking(False)
                 output.link(xout.input)
+            if self._jpeg_enabled:
+                encoder = pipeline.create(dai.node.VideoEncoder)
+                encoder.setDefaultProfilePreset(self.profile.fps, dai.VideoEncoderProperties.Profile.MJPEG)
+                encoder.setNumFramesPool(2)
+                encoder.setMaxOutputFrameSize(MAX_JPEG_BYTES)
+                encoder.input.setQueueSize(1)
+                encoder.input.setBlocking(False)
+                color.video.link(encoder.input)
+                jpeg_out = pipeline.create(dai.node.XLinkOut)
+                jpeg_out.setStreamName('jpeg')
+                jpeg_out.setMetadataOnly(False)
+                jpeg_out.input.setQueueSize(1)
+                jpeg_out.input.setBlocking(False)
+                encoder.bitstream.link(jpeg_out.input)
             required = str(pipeline.getRequiredOpenVINOVersion())
             expected = self._asset.manifest["sdk_blob_metadata"]["host_graph_required_version"]
             if required != expected or pipeline.getOpenVINOVersion() != dai.OpenVINO.Version.VERSION_2021_4:
@@ -231,12 +273,17 @@ class YolopOakSource(OakSource):
         return _pipeline(dai, self.profile.fps, graph_extension=extend)
 
     def _queue_sizes(self) -> dict[str, int]:
-        return {"rgb_video": 8, "depth_right": 8, "nn_input": 8, "nn_output": 2}
+        sizes = {"rgb_video": 8, "depth_right": 8, "nn_input": 8, "nn_output": 2}
+        if self._jpeg_enabled:
+            sizes['jpeg'] = 1
+        return sizes
 
     def _graph_declaration(self, pipeline) -> dict:
-        return compact_yolop_graph(pipeline, self._asset.receipt, self.profile.fps)
+        return compact_yolop_graph(pipeline, self._asset.receipt, self.profile.fps, jpeg_enabled=self._jpeg_enabled)
 
     def _decorate_receipt(self, receipt: dict) -> dict:
+        if self._jpeg_enabled:
+            receipt['jpeg_enabled'] = True
         receipt.update({"nn_requirement": "REQUIRED", "nn_context_key": self.context_key,
                         "nn_ready": False, "model_id": ASSET_ID,
                         "pipeline_start_count": 1,
@@ -296,18 +343,37 @@ class YolopOakSource(OakSource):
         return result
 
     def poll(self) -> list:
-        """4 stream에서 하나씩만 복사한다. SDK 객체·view는 이 호출 밖으로 빌려주지 않는다."""
+        """기존4 stream과 선택 JPEG에서 하나씩 복사한다. JPEG 오류는 영상만 버린다."""
         from .yolop_frames import sdk_nn_input, sdk_nn_packet
 
         result = []
         copied = 0
         for stream, queue in self._queues.items():
-            message = queue.tryGet()
+            try:
+                message = queue.tryGet()
+            except Exception:
+                if stream != 'jpeg':
+                    raise
+                self._drop_jpeg()
+                continue
             if message is None:
                 continue
             if stream in ("rgb_video", "depth_right"):
                 frame = self._frame(stream, message)
-            else:
+            elif stream == 'jpeg':
+                try:
+                    frame = sdk_jpeg(message, time.monotonic_ns() // 1000,
+                        bitstream_type=self._dai.ImgFrame.Type.BITSTREAM,
+                        exposure_offset=self._dai.CameraExposureOffset.END,
+                        copy_budget_bytes=min(MAX_JPEG_BYTES, max(0, 4 * 1024**2 - copied)))
+                    current = (frame.sequence, frame.device_us, frame.sdk_us)
+                    if self._last_jpeg is not None and any(a <= b for a, b in zip(current, self._last_jpeg)):
+                        raise ValueError('non-increasing original JPEG metadata')
+                except Exception:
+                    self._drop_jpeg()
+                    continue
+                self._last_jpeg = current
+            elif stream in ('nn_input', 'nn_output'):
                 now = time.monotonic_ns() // 1000
                 convert = sdk_nn_input if stream == "nn_input" else sdk_nn_packet
                 try:
@@ -332,6 +398,8 @@ class YolopOakSource(OakSource):
                 if stream == "nn_output" and not self._golden_done:
                     frame = replace(frame, golden=self._sdk_golden(frame, message))
                     self._golden_done = True
+            else:
+                raise ValueError('unsupported YOLOP collector stream')
             copied += len(getattr(frame, "payload", b""))
             if copied > 4 * 1024**2:
                 raise ValueError("YOLOP collector exceeded bounded copy budget")
