@@ -23,6 +23,7 @@ import { observedControl, vmAppObservations } from '../domain/driveObservations'
 import { clock, describe } from '../domain/events';
 import { publisherObservation } from '../domain/telemetryPublisher';
 import { buildManagedRamSeries, managedRamReason } from '../domain/managedRam';
+import { APP_MEMORY_REGIONS, buildAppMemorySeries, formatAppBytes } from '../domain/appMemory';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import {
   ago,
@@ -585,6 +586,7 @@ function VmOverviewCard({
   const cpu = latest(samples, cpuPercentOf);
   const ram = linux ? null : buildManagedRamSeries(samples, vm.vm_id, now);
   const ramDisplay = ram?.recentObservation ?? ram?.current;
+  const appMemory = linux ? null : appMemoryLayers(samples, vm.vm_id, ramDisplay?.totalBytes, now);
   const memory = linux
     ? latest(samples, (sample) => memoryPercentOf(sample, vm))
     : ramDisplay?.status === 'ok'
@@ -636,6 +638,7 @@ function VmOverviewCard({
           label="Memory"
           value={memory}
           precision={linux ? 0 : 3}
+          layers={appMemory}
           unavailable={
             metrics.isError
               ? '메트릭 조회 불가'
@@ -649,7 +652,9 @@ function VmOverviewCard({
           detail={
             linux
               ? `${vm.memory_mib} MiB allocated`
-              : `정적 예약 포함${ram?.lastObservationAt == null ? '' : ` · ${ago(Math.max(0, now - ram.lastObservationAt))}`}`
+              : appMemory
+                ? `버퍼 사용 ${appMemory.usedLabel} · 예약 ${appMemory.reservedLabel}`
+                : `정적 예약 포함${ram?.lastObservationAt == null ? '' : ` · ${ago(Math.max(0, now - ram.lastObservationAt))}`}`
           }
         />
       </div>
@@ -695,12 +700,14 @@ function OverviewMetricBar({
   precision = 0,
   unavailable,
   detail,
+  layers,
 }: {
   label: string;
   value: number | null;
   precision?: number;
   unavailable: string | null;
   detail?: string;
+  layers?: MemoryLayers | null;
 }) {
   const safeValue = value == null ? 0 : Math.max(0, Math.min(100, value));
   return (
@@ -710,14 +717,67 @@ function OverviewMetricBar({
         <strong>{value == null ? '—' : `${value.toFixed(precision)}%`}</strong>
       </div>
       <div
-        className={styles.metricTrack}
-        aria-label={`${label} ${value == null ? '데이터 없음' : `${value.toFixed(precision)}%`}`}
+        className={`${styles.metricTrack} ${layers ? styles.segmentedMetricTrack : ''}`}
+        aria-label={
+          layers
+            ? `${label} ${value!.toFixed(precision)}%, 앱 버퍼 사용 ${layers.usedLabel}, 예약 ${layers.reservedLabel}`
+            : `${label} ${value == null ? '데이터 없음' : `${value.toFixed(precision)}%`}`
+        }
       >
-        <i style={{ width: `${safeValue}%` }} />
+        {layers ? (
+          <>
+            <i className={styles.committedSegment} style={{ width: `${safeValue}%` }} />
+            <i className={styles.reservedSegment} style={{ width: `${layers.reservedPercent}%` }} />
+            <i className={styles.usedSegment} style={{ width: `${layers.usedPercent}%` }} />
+          </>
+        ) : (
+          <i style={{ width: `${safeValue}%` }} />
+        )}
       </div>
       <small>{unavailable ?? detail ?? '\u00a0'}</small>
     </div>
   );
+}
+
+interface MemoryLayers {
+  usedPercent: number;
+  reservedPercent: number;
+  usedLabel: string;
+  reservedLabel: string;
+}
+
+function appMemoryLayers(
+  samples: Parameters<typeof buildAppMemorySeries>[0],
+  vmId: string,
+  totalBytes: string | null | undefined,
+  now: number,
+): MemoryLayers | null {
+  if (!totalBytes || !/^\d+$/.test(totalBytes)) return null;
+  const total = BigInt(totalBytes);
+  if (total <= 0n) return null;
+  const series = buildAppMemorySeries(samples, vmId, now);
+  let used = 0n;
+  let reserved = 0n;
+  for (const { id } of APP_MEMORY_REGIONS) {
+    const current = series[id].current;
+    if (
+      current.state !== 'ok' ||
+      current.stale ||
+      current.used_bytes == null ||
+      current.reserved_bytes == null
+    )
+      return null;
+    used += current.used_bytes;
+    reserved += current.reserved_bytes;
+  }
+  if (used > reserved || reserved > total) return null;
+  const percent = (bytes: bigint) => Number((bytes * 100_000n) / total) / 1000;
+  return {
+    usedPercent: percent(used),
+    reservedPercent: percent(reserved),
+    usedLabel: formatAppBytes(used),
+    reservedLabel: formatAppBytes(reserved),
+  };
 }
 
 function overviewAppSignal(
