@@ -4,9 +4,13 @@
 
 ## 1. 결정
 
-차량 화면은 **B안**으로 간다. 표시 담당 domU가 화면 앱을 실행하고 **픽셀 렌더링까지** 한다. dom0는 완성된 프레임을 **받아서 HDMI 1대에 내보내거나 휴대폰(S24)으로 중계**만 한다.
+표시 선택지는 **둘 중 하나**다: **HDMI 모니터 1대** 또는 **휴대폰(S24)이 직접 렌더링**. 계기판·인포테인먼트는 선택한 단말의 한 화면에 함께 둔다.
 
-- 출력은 HDMI 모니터 1대 **또는** S24 1대. 물리 HDMI 2대로 되돌리지 않는다.
+**HDMI 선택지는 B안으로 간다.** 표시 담당 domU가 화면 앱을 실행하고 **픽셀 렌더링까지** 한다. dom0는 완성된 프레임을 **받아서 HDMI 1대에 내보내기만** 한다.
+
+**휴대폰 선택지는 지금처럼 폰 브라우저가 직접 렌더링한다.** dom0가 영상을 중계하는 대상이 아니다 (기존 349·350·383·386 경로 유지).
+
+- HDMI는 1대만 쓴다. 물리 HDMI 2대로 되돌리지 않는다.
 - HDMI 기본 기동과 터미널 `status/mobile/hdmi` 왕복 전환은 유지한다.
 - 상태 수집을 domU에 새로 만들지 않는다. domU는 dom0의 기존 표시 데이터를 **읽기 전용**으로만 받는다.
 - 374(공유 VM 관측 freshness)는 별개 문제다. 구조를 바꿨다는 이유로 완료 처리하지 않는다.
@@ -19,8 +23,8 @@
 | 픽셀 렌더링 | HDMI: dom0 Chromium(X11 `:5`) / 휴대폰: 폰 브라우저 | **표시 domU** (Xvfb 또는 Xorg dummy 위 Chromium) |
 | 화면 데이터 원본 | dom0 표시 feed `127.0.0.1:8082` | 같음. domU는 dom0 **guest data relay**로 읽기 전용 접근 |
 | HDMI 출력 | dom0 Chromium 창을 직접 표시 | dom0가 domU 프레임을 받아 표시 (프레임 출력기 — 후속) |
-| 휴대폰 | 폰이 HTML/JS를 받아 직접 렌더링 | 폰은 dom0가 중계한 **완성 프레임**을 표시 |
-| dom0에 남는 일 | 수집·정책·웹 자산·렌더링·(시연 영상 캡처) | 수집·정책·프레임 수신 검증·HDMI 표시·폰 중계 |
+| 휴대폰 | 폰이 HTML/JS를 받아 직접 렌더링 | **그대로** (B안 대상 아님) |
+| dom0에 남는 일 | 수집·정책·웹 자산·렌더링·(시연 영상 캡처) | 수집·정책·프레임 수신 검증·HDMI 표시 (폰 모드는 기존 데이터·자산 제공) |
 | 경계 | 서비스 토큰은 dom0 loopback 안 | 같음. domU에는 **별도 guest 토큰**만 |
 
 ## 3. B안 구성
@@ -38,8 +42,9 @@ GuestFrameReceiver  ◀── guest stream token ──  guest_sender: x11grab �
    │ latest frame 1장
    ▼
 relay 127.0.0.1:<port> /streams/display.mjpeg  (relay token)
-   ├─ HDMI 1대 프레임 출력기            (후속)
-   └─ 휴대폰 중계 (mobile_access 세션)  (후속)
+   └─ HDMI 1대 프레임 출력기  (411)
+
+휴대폰 선택지: 기존 mobile_access가 폰에 데이터·웹 자산을 주고 폰 브라우저가 직접 그린다 (변경 없음).
 ```
 
 방향: **dom0가 domU에 접속해서 당겨온다(pull).** domU는 dom0 내부 서비스에 쓰기 권한이 없고, dom0는 domU가 보낸 것을 그대로 믿지 않는다.
@@ -67,7 +72,7 @@ relay 127.0.0.1:<port> /streams/display.mjpeg  (relay token)
 - **토큰 3개를 분리한다.** 어느 것도 응답·로그·argv에 나오지 않는다.
   1. guest stream token — dom0가 domU 프레임을 당길 때.
   2. guest data token — domU가 표시 데이터 한 경로를 읽을 때.
-  3. relay token — dom0 내부 소비자(HDMI 출력기·폰 중계)가 프레임을 읽을 때.
+  3. relay token — dom0 내부 소비자(HDMI 프레임 출력기)가 프레임을 읽을 때.
   기존 feed의 service token은 dom0 밖으로 나가지 않는다 (`LocalFeed`가 dom0 안에서 붙인다).
 - **네트워크.** `xenbr0`는 물리 NIC가 없는 격리 브리지다. 다만 모든 domU(Zephyr 포함)가 같은 브리지에 있고, dom0에 방화벽 규칙이 없다. 지금은 토큰이 유일한 문이다. 후속으로 `192.168.77.1:<data port>`는 출발지 `192.168.77.20`만 허용하는 nftables 규칙을 제안한다 (배포 담당과 협의).
 
@@ -81,16 +86,17 @@ relay 127.0.0.1:<port> /streams/display.mjpeg  (relay token)
 | domU 이미지 | 템플릿 recipe 패키지는 `python3-paho-mqtt`만 허용, overlay로 systemd unit 추가 불가 (`template_recipe.py`) | GUI·ffmpeg·unit 추가에 템플릿 코드 변경 필요 → **게스트 템플릿 담당과 협의** |
 | Xen 그래픽 장치 | 모든 cfg에 `vfb/vkb/vdispl` 없음. 게스트·dom0 커널의 `XEN_FBDEV_FRONTEND`/`DRM_XEN_FRONTEND` 여부 미확인. QEMU VNC는 `-vnc none`만 검증됨 | 그래서 **Xen PV 화면 장치 대신 네트워크 MJPEG**를 택했다. PV 장치 경로는 커널 설정 확인 전에는 쓰지 않는다 |
 | dom0 HDMI 표시 | dom0에 chromium-x11, Xorg, openbox, ffmpeg(x11grab)는 있음. mpv·gstreamer 없음 | HDMI 프레임 출력기 후보: (a) 기존 kiosk Chromium이 MJPEG 표시 — 쉬우나 무거움, (b) TurboJPEG 디코드 + X11 MIT-SHM 출력 — 기존 `native_jpeg`/`native_x11` 재사용, 가벼움. **(b) 권장**, 후속에서 측정 후 결정 |
-| 휴대폰 | 지금 Jira 250·350·379·381 설명은 "휴대폰 직접 렌더링, 영상 인코딩 필수 아님" 기준 | B안에서는 폰이 프레임을 받는다. 해당 티켓 완료 조건을 B안 기준으로 고쳐야 한다 (사용자 확인 후) |
+| 휴대폰 | 휴대폰 선택지는 폰 직접 렌더링 (Jira 250·350·379·381의 현행 조건과 같음) | B안 프레임 경로를 휴대폰에 쓰지 않는다. 해당 티켓 조건은 그대로 둔다 |
+| HDMI 1대 판정 | [S15P31E110-412](https://ssafy.atlassian.net/browse/S15P31E110-412)에서 출력 1개(`monitor-1`) 구성 지원 (`RuntimeConfig`·`display_mode`·kiosk `page`) | 보드 실물 확인은 380/390 |
 | 입력 | 이번 범위는 표시만 | 폰/HDMI에서 화면 조작(터치)이 필요하면 별도 입력 경로 설계가 필요 |
 | 11/10 데모 | 지금 보드는 현재 경로(dom0 렌더링)로 동작 | B안은 domU 이미지·배포가 남아 있어 데모 전 전환은 위험. 데모는 현재 경로 유지를 권장 |
 
 ## 7. 후속 작업 (일반 작업, 각 ≤ 5 SP)
 
-1. **표시 domU 이미지·실행 구성** — Xvfb/Xorg dummy, Chromium kiosk, ffmpeg, `guest_sender` unit, 토큰 배포. 게스트 템플릿 담당 협의 포함.
-2. **dom0 HDMI 프레임 출력기** — [S15P31E110-411](https://ssafy.atlassian.net/browse/S15P31E110-411)에서 로컬 구현·검증 완료 ([검증](../verification/display-411-hdmi-frame-output-20261108.md)). 기존 HDMI 세션의 kiosk가 `renderer: guest_frames`일 때 Chromium 대신 `frame_presenter`를 실행한다. 상태 파일 형식이 같아 `display_mode`는 그대로 동작한다. 남은 것: 보드 실물 확인, HDMI 1대 판정(379/380/390), mobile 모드의 프레임 중계.
+1. **표시 domU 실행 구성** — [S15P31E110-413](https://ssafy.atlassian.net/browse/S15P31E110-413)에서 domU 쪽 구성(화면 앱 서버·Xvfb/Chromium 세션·송신 unit) 완료 ([검증](../verification/display-413-domu-runtime-20261109.md)). 남은 것: 게스트 템플릿 반영([요청서](../requests/2026-11-09-display-domu-renderer-platform.md)), VM3 메모리 결정.
+2. **dom0 HDMI 프레임 출력기** — [S15P31E110-411](https://ssafy.atlassian.net/browse/S15P31E110-411)에서 로컬 구현·검증 완료 ([검증](../verification/display-411-hdmi-frame-output-20261108.md)). 기존 HDMI 세션의 kiosk가 `renderer: guest_frames`일 때 Chromium 대신 `frame_presenter`를 실행한다. 상태 파일 형식이 같아 `display_mode`는 그대로 동작한다. 남은 것: 보드 실물 확인. HDMI 1대 구성은 412에서 반영.
 3. **guest data relay 배포** — `192.168.77.1` bind, 출발지 제한 규칙, 토큰 발급·회전.
-4. **실보드 B안 검증** — HDMI 1대 / S24 각각 CPU·RAM(dom0·domU 따로), fps, 표시 지연, 끊김·domU 재시작·모드 전환 복귀, 10분 연속.
+4. **실보드 B안 검증 (HDMI 1대)** — CPU·RAM(dom0·domU 따로), fps, 표시 지연, 끊김·domU 재시작·HDMI↔휴대폰 모드 전환 복귀, 10분 연속. 휴대폰 직접 렌더링 검증은 기존 352·392·393 그대로.
 
 ## 8. 검증
 
