@@ -81,6 +81,7 @@ class DriveLinkProvider:
         self.application_order={}
         self.world_failure=None
         self.missions=MissionLinkPort(io.vms) if mission_port is None else mission_port
+        self._scene=None
         io.configure(runner.authority.host,self.instance)
 
     def reject(self,reason):
@@ -134,6 +135,37 @@ class DriveLinkProvider:
         grant=decode(raw,schema.MissionGrant)
         return grant if self._grant_context_matches(grant) else None
 
+    def clear_scene(self):
+        """현재 전송 사본만 철회한다. 원 grant/HWM/임무 기록이나 기한을 새로 만들지 않는다."""
+        self._scene=None
+        clear=getattr(self.io,'clear_scene',None)
+        if clear is not None:clear()
+
+    def publish_scene(self,raw):
+        """실제 Scene owner가 선택한 원 grant를 두 VM의 기존 state 연결에 전달한다."""
+        if type(raw) is not bytes or len(raw)>1024:raise ValueError('LINK_SCENE_SIZE')
+        grant=decode(raw,schema.SceneGrant);m=self.runner.machine
+        if (m is None or grant.pi_host_boot!=m.authority.host or grant.gateway_instance!=self.instance
+                or not grant.issued_pi_us<=int(self.runner._clock()*1e6)<grant.valid_until_pi_us):
+            return self.reject('SCENE_CONTEXT')
+        if self.trust is not None and any(getattr(grant,key)!=getattr(self.trust,key) for key in
+                ('vehicle','map_epoch','frame_epoch','odom_epoch','configuration','calibration','primitive')):
+            return self.reject('SCENE_SOURCE')
+        value=schema.DriveLink(major=2);value.scene_grant.CopyFrom(grant)
+        wire=encode(value);self._scene=raw,wire
+        for vm in self.io.vms:self.io.offer(inbound(vm),wire,'scene')
+        return True
+
+    def _send_scene(self,vm):
+        if self._scene is None:return
+        grant=decode(self._scene[0],schema.SceneGrant)
+        runtime=getattr(self.runner,'scene_runtime',None)
+        now=int(self.runner._clock()*1e6)
+        if (now>=grant.valid_until_pi_us or runtime is None
+                or grant.lifecycle_state==2 and runtime.motion_grant(now) is None):
+            self.clear_scene();return
+        self.io.offer(inbound(vm),self._scene[1],'scene')
+
     def publish_mission(self,grant):
         """Actor delivery after the durable issuer's commit; this method issues no authority.
 
@@ -144,6 +176,10 @@ class DriveLinkProvider:
         candidate=schema.MissionGrant();candidate.CopyFrom(grant);candidate.DiscardUnknownFields()
         grant=candidate;validate(grant)
         if not self._grant_context_matches(grant):return self.reject('MISSION_CONTEXT')
+        runtime=getattr(self.runner,'scene_runtime',None)
+        if (grant.scene_admission_id!=bytes(16) and
+                (runtime is None or not runtime.mission_allowed(grant,int(self.runner._clock()*1e6)))):
+            return self.reject('MISSION_SCENE_AUTHORITY')
         canonical=encode(grant)
         for vm in self.io.vms:
             old=self.missions.current_grant(vm)
@@ -223,7 +259,7 @@ class DriveLinkProvider:
             if mission is not None:reply.clock.current_mission.CopyFrom(mission)
             # An unavailable/expired mapper clock blocks AUTO world adoption,
             # not the independent Pi vehicle clock or MANUAL input path.
-            self.io.offer(inbound(vm),PreparedClock(reply),'clock');self._send_copy(vm)
+            self.io.offer(inbound(vm),PreparedClock(reply),'clock');self._send_scene(vm);self._send_copy(vm)
         elif kind=='snapshot':
             if self.trust is None:return self.reject('WORLD_PROFILE_UNAVAILABLE')
             if (m.active_vm!=vm or m.active_app!='autonomous' or not m.output_permitted or
@@ -237,6 +273,10 @@ class DriveLinkProvider:
                 mission=self._current_mission(vm)
                 if mission is None or not self._state_mission_matches(body,mission):
                     return self.reject('STATE_MISSION_CONTEXT')
+                runtime=getattr(self.runner,'scene_runtime',None)
+                if (mission.scene_admission_id!=bytes(16) and
+                        (runtime is None or not runtime.mission_allowed(mission,int(now*1e6)))):
+                    return self.reject('STATE_SCENE_AUTHORITY')
             try:identity=str(UUID(body.message_id))
             except ValueError:return self.reject('STATE_MESSAGE_ID')
             old=self.copies.get(identity)
@@ -363,9 +403,9 @@ class DriveLinkIO:
 
     def offer(self,topic,data,kind):
         if len(data)>MAX_BYTES:raise ValueError('LINK_BYTES')
-        # One clock/state/grant/budget reply per VM and one vehicle sample.
+        # One clock/state/grant/budget/scene reply per VM and one vehicle sample.
         # These bounded binary replies never replace a G1 operation.
-        if (kind not in ('clock','state','grant','budget','vehicle') or
+        if (kind not in ('clock','state','grant','budget','scene','vehicle') or
                 (topic!=VEHICLE_TOPIC if kind=='vehicle' else topic not in tuple(map(inbound,self.vms)))):
             raise ValueError('LINK_OUTPUT')
         if kind=='clock' and (not isinstance(data,PreparedClock) or data.vm not in self.vms or topic!=inbound(data.vm)):
@@ -373,6 +413,12 @@ class DriveLinkIO:
         with self.lock:
             self.pending[topic,kind]=data if kind=='clock' else bytes(data)
             self.high_water=max(self.high_water,len(self.pending))
+
+    def clear_scene(self):
+        """아직 선택되지 않은 scene mailbox만 비운다. I/O가 이미 고른 bytes의 기한은 불변이다."""
+        with self.lock:
+            for key in tuple(self.pending):
+                if key[1]=='scene':del self.pending[key]
 
     def take(self):
         try:return self.incoming.get_nowait()

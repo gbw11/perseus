@@ -133,8 +133,13 @@ class SceneAuthorityTests(unittest.TestCase):
 
     def test_revoke_fences_before_pending_commit_fsync_and_late_ack_cannot_readmit(self):
         self.freeze(); original=self.owner.take_journal(); before=self.store.value['current_scene']
+        parent=decode(self.owner.grant_bytes,schema.SceneGrant)
+        proposed=decode(self.owner._grant,schema.SceneGrant)
         req=request('scene.revoke',22,1036000,dict(scene_id=uid(30)))
         self.owner.revoke(req,source_admission_revision=2,now_us=1036000,cancel_fence=1)
+        expected=schema.SceneGrant();expected.CopyFrom(parent)
+        expected.lifecycle_state=3;expected.lifecycle_revision=proposed.lifecycle_revision+1
+        self.assertEqual(self.owner.negative_bytes,encode(expected))
         self.assertEqual(self.events[-1],'REVOKED'); self.assertFalse(self.owner.eligible)
         self.assertEqual(self.store.value['current_scene'],before)
         ack=execute_scene_journal(self.store,original,clock_us=lambda:1037000)
@@ -143,6 +148,11 @@ class SceneAuthorityTests(unittest.TestCase):
         self.store.update(generation=2)
         revoked=self.durable(1038000)
         self.assertEqual(decode(revoked,schema.SceneGrant).lifecycle_state,3); self.assertFalse(self.owner.eligible)
+        self.assertEqual(revoked,encode(expected))
+        row=self.store.value['current_scene']['requests'][-1]
+        self.assertEqual((row['nonce'],row['fingerprint'],row['source_admission_revision']),
+            (req.nonce,req.fingerprint,2))
+        self.assertNotEqual(decode(revoked,schema.SceneGrant).request_nonce,UUID(req.nonce).bytes)
 
     def test_unknown_commit_keeps_original_hold_and_request(self):
         self.freeze(); proposal=self.owner.take_journal()

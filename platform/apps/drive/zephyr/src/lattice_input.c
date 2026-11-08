@@ -327,10 +327,30 @@ static int cache_grant(const xenova_drive_MissionGrant *grant,const struct xt_bo
  current_mission=*grant;memcpy(mission_wire,grant_candidate,stream.bytes_written);mission_wire_size=stream.bytes_written;
  mission_available=true;return 0;
 }
+static int cache_scene(const xenova_drive_SceneGrant *grant,const struct xt_bootstrap *boot){
+ if(!engine)return -EAGAIN;
+ if(dw_scene_grant_validate(grant))return -EPROTO;
+ if(!context_available||!clock_available||strcmp(grant->pi_host_boot,boot->identity.host_boot_id)||
+    strcmp(grant->gateway_instance,gateway)||strcmp(grant->vehicle,lp_selected_config.vehicle)||
+    strcmp(grant->configuration,lp_selected_config.id)||strcmp(grant->calibration,lp_selected_config.calibration)||
+    strcmp(grant->primitive,lp_selected_assets.sha256))return -EXDEV;
+ uint64_t guest=clock_us();
+ if(!guest||guest>INT64_MAX||guest>current_clock.expires_guest||
+    (current_clock.upper>0&&(uint64_t)current_clock.upper>INT64_MAX-guest)||
+    (int64_t)guest+current_clock.upper<0)return -EAGAIN;
+ uint64_t now=(uint64_t)((int64_t)guest+current_clock.upper);
+ enum dw_result source=dw_pool_refresh(&engine->maps,&current_clock.trust);
+ if(source)return source==DW_BUSY?-EBUSY:-EPROTO;
+ enum dw_result accepted=dw_pool_scene(&engine->maps,grant,now);
+ return accepted==DW_OK||accepted==DW_STALE?0:accepted==DW_BUSY?-EBUSY:-EPROTO;
+}
 void dl_context(const struct xd_inputs *inputs){
  if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return;
  bool valid=inputs->connected&&!inputs->control.error&&!strcmp(inputs->control.sender,"dom0-gateway")&&inputs->control.instance[0];
- if(!valid||strcmp(gateway,inputs->control.instance)){clock_available=false;mission_available=false;mission_wire_size=0;gateway[0]=0;}
+ if(!valid||strcmp(gateway,inputs->control.instance)){
+  clock_available=false;mission_available=false;mission_wire_size=0;gateway[0]=0;
+  if(engine)dw_scene_fence(&engine->maps);
+ }
  context_available=valid;
  if(valid)strcpy(gateway,inputs->control.instance);
  struct xm_vehicle_control control;control_generation=0;active_vm[0]=0;
@@ -507,6 +527,7 @@ static int link_received(void *unused,const uint8_t *bytes,size_t count,int64_t 
   }
   if(reply->has_current_mission){int granted=cache_grant(&reply->current_mission,&boot);if(granted&&granted!=-ESTALE){k_mutex_unlock(&input_context_lock);return granted;}}
   else mission_available=false;
+  bool had_clock=clock_available;struct dw_trust previous_source=current_clock.trust;
   struct dl_clock *out=&current_clock;memset(out,0,sizeof(*out));out->lower=lower;out->upper=upper;
   out->expires_guest=now+lp_selected_config.clock_lease_us;strcpy(out->gateway,gateway);
   const xenova_drive_WorldTrust *t=&reply->trust;struct dw_trust *d=&out->trust;
@@ -515,8 +536,20 @@ static int link_received(void *unused,const uint8_t *bytes,size_t count,int64_t 
   strcpy(d->configuration,t->configuration);strcpy(d->calibration,reply->vehicle.calibration);strcpy(d->primitive,t->primitive);
   strcpy(d->clock.epoch,t->clock_epoch);d->clock.lower_offset_us=t->lower_offset_us;d->clock.upper_offset_us=t->upper_offset_us;
   d->clock.expires_pi_us=t->expires_pi_us;d->clock.max_error_us=MIN(t->max_error_us,lp_selected_config.clock_error_us);d->max_live_age_us=lp_selected_config.live_age_us;
+  /* Same-source time renewal preserves the Scene generation. Missing/changed
+   * source cannot keep retained output alive until another map arrives. */
+  if(engine){
+   enum dw_result refreshed=reply->has_trust?dw_pool_refresh(&engine->maps,d):DW_SOURCE;
+   bool same_pending=refreshed==DW_BUSY&&had_clock&&dw_trust_same_source(&previous_source,d);
+   if(refreshed&&!same_pending)dw_scene_fence(&engine->maps);
+  }
   clock_available=true;k_mutex_unlock(&input_context_lock);
   CLOCK_DIAG(5,0,reply,received_us,clock_rc);probe_sent=0;return 0;
+ }
+ if(incoming.which_payload==xenova_drive_DriveLink_scene_grant_tag){
+  if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
+  int rc=cache_scene(&incoming.payload.scene_grant,&boot);
+  k_mutex_unlock(&input_context_lock);return rc;
  }
  if(incoming.which_payload==xenova_drive_DriveLink_mission_grant_tag){
   if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;

@@ -99,7 +99,11 @@ static const char *qualified(const void *unused,struct xm_span input,int64_t age
  struct dw_handle mh;const struct dw_snapshot *map;const char *reason="WORLD_UNAVAILABLE";
  if(!dw_acquire(&engine.maps,&mh,&map)){
   dw_pose pose;xenova_drive_MissionGrant mission;bool required=(map->world.required_features&DW_LANE_MODEL)!=0;
+  uint64_t scene_generation=0;
   if(dw_snapshot_time(map,now,(uint64_t)lp_selected_config.live_age_us,NULL))reason="OBSERVATION_EXPIRED";
+  else if(dw_scene_time(&engine.maps,&map->world,now,NULL,&scene_generation)||
+          dw_scene_generation(&engine.maps,engine.paths[ph.slot].scene_generation,now,NULL)||
+          (scene_generation&&engine.paths[ph.slot].scene_generation!=scene_generation))reason="SCENE_UNAVAILABLE";
   else if(dw_current_pose(&map->world,&engine.odometry,now,lp_selected_config.pose_age_us,&pose,NULL))reason="POSE_UNAVAILABLE";
   else if(strcmp(path->frame,map->world.frame_epoch)||strcmp(path->odom,map->world.odom_epoch)||strcmp(path->configuration,map->world.configuration)||strcmp(path->reference,map->world.reference_id))reason="CONTEXT_CHANGED";
   else if(required&&(dl_mission_get(&mission,now)||!mission.admitted||mission.kind!=1))reason="MISSION_UNAVAILABLE";
@@ -281,7 +285,7 @@ static void planner(void *a,void *b,void *c){
 #endif
    if(!engine.planning&&rc==DE_OK)(void)prepare_current(NULL);
   }else if(engine.apply_pending){
-   enum de_result rc=de_apply_finish(&engine);
+   enum de_result rc=de_apply_finish(&engine,now);
     if(rc!=DE_BUSY){if(rc==DE_OK)(void)prepare_current(copy);else if(rejected(rc))reject_state(copy,rc);dl_state_release(slot);slot=-1;copy=NULL;applying=false;}
   }else{
    if(slot<0)slot=dl_state_take(&copy);
@@ -311,7 +315,7 @@ static void planner(void *a,void *b,void *c){
  }
  de_stop(&engine);
  while(engine.planning)(void)de_plan_slice(&engine,1,0);
- while(engine.apply_pending)(void)de_apply_finish(&engine);
+ while(engine.apply_pending)(void)de_apply_finish(&engine,0);
  if(slot>=0)dl_state_release(slot);
 }
 static int planner_start(void){
