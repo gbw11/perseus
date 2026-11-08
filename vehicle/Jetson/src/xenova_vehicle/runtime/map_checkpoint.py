@@ -772,11 +772,11 @@ class MapCheckpointCollector:
             state['alignment_clock']=self._alignment_clock
         state.update(self._subsystem_state)
         if subsystem_state is not None:
-            if type(subsystem_state) is not dict or set(subsystem_state)-{'lane_catalog','parking_catalog','road_basis'}:
+            if type(subsystem_state) is not dict or set(subsystem_state)-{'lane_catalog','parking_catalog','road_basis','hazard'}:
                 raise MapCheckpointNotReady('unknown mapper subsystem state')
             for key,value in subsystem_state.items():
                 if type(value) is not dict or value.get('profile')!={'lane_catalog':'lane-catalog-state-1',
-                        'parking_catalog':'parking-catalog-state-1','road_basis':'road-basis-1'}[key]:
+                        'parking_catalog':'parking-catalog-state-1','road_basis':'road-basis-1','hazard':'mapper-hazard-state-1'}[key]:
                     raise MapCheckpointNotReady('unsupported original subsystem profile')
                 state[key]=value
         metadata,pages=encode_mapper_state(state)
@@ -901,6 +901,7 @@ class SourceComplete:
     evidence: EvidenceTable
     state: bytes | None
     page_receipts: tuple
+    original_commit: object = None
 
     def __new__(cls):raise MapCheckpointNotReady('SourceComplete requires actual decoded complete LOAD pages')
 
@@ -910,10 +911,16 @@ class SourceComplete:
         return head if head.current(request.job,context_sha256,now_us) else None
 
     @classmethod
-    def _assembled(cls,ref,job,manifest,tiles,evidence,state,receipts):
+    def _assembled(cls,ref,job,manifest,tiles,evidence,state,receipts,original_commit=None):
+        if original_commit is not None:
+            from ..storage.records import CheckpointCommitOrigin
+            if type(original_commit) is not CheckpointCommitOrigin:
+                raise MapCheckpointNotReady('exact original checkpoint commit descriptor required')
+            original_commit.validate(job,manifest,ref)
         result=object.__new__(cls)
         for name,value in dict(checkpoint_ref=ref,original_job=job,manifest=manifest,tiles=tiles,evidence=evidence,
-                state=None if state is None else canonical(state),page_receipts=receipts).items():object.__setattr__(result,name,value)
+                state=None if state is None else canonical(state),page_receipts=receipts,
+                original_commit=original_commit).items():object.__setattr__(result,name,value)
         return result
 
 
@@ -947,7 +954,7 @@ class CheckpointPages:
             raise MapCheckpointNotReady('original selected ref/current restore context required')
         self.ref,self.context=checkpoint_ref,current_context;self._next=0;self._pages=[];self._tiles={};self._records={};self._contexts={}
         self._mode,self._load_scope=_load_scope(current_context,checkpoint_ref)
-        self._manifest=self._original=self._catalog=None;self._complete=None
+        self._manifest=self._original=self._catalog=self._original_commit=None;self._complete=None
 
     def accept(self,loaded,*,now_us):
         if self._complete is not None:raise MapCheckpointNotReady('complete source cannot consume another page')
@@ -968,7 +975,7 @@ class CheckpointPages:
                      ('configuration','configuration'),('calibration','calibration'),('primitive_sha256','primitive_sha256'),('origin_mapper_instance','origin_mapper_instance')))
                 or tuple(t.reference for t in payload.tiles)!=refs[self._next:self._next+32]
                 or self._manifest is not None and (payload.manifest!=self._manifest or loaded.original_job!=self._original
-                    or payload.evidence.catalog_bytes!=self._catalog)):
+                    or payload.evidence.catalog_bytes!=self._catalog or loaded.original_commit!=self._original_commit)):
             raise MapCheckpointNotReady('page differs from selected complete manifest/catalog/original job')
         records=dict(self._records);contexts=dict(self._contexts);tiles=dict(self._tiles)
         for item in payload.evidence.provenance:
@@ -997,6 +1004,7 @@ class CheckpointPages:
                     if cell[2]&record.source_mask!=cell[2] or cell[7:10]!=(record.pi_lower,record.pi_upper,record.observation_sequence):
                         raise MapCheckpointNotReady('loaded cell differs from actual immutable source/time')
         self._manifest,self._original,self._catalog=payload.manifest,loaded.original_job,payload.evidence.catalog_bytes
+        self._original_commit=loaded.original_commit
         self._records,self._contexts,self._tiles=records,contexts,tiles
         self._next+=len(payload.tiles);self._pages.append((loaded.request,loaded.completed_us,now_us,loaded.heads))
         if self._next!=len(refs):return None
@@ -1004,7 +1012,7 @@ class CheckpointPages:
             payload.evidence.catalog,payload.evidence.reservations,payload.evidence.catalog_highwaters)
         state,_=decode_mapper_state(json_bytes(payload.manifest,16384)['scene'],evidence.contexts)
         self._complete=SourceComplete._assembled(self.ref,self._original,self._manifest,tuple(tiles[r] for r in refs),
-            evidence,state,tuple(self._pages))
+            evidence,state,tuple(self._pages),self._original_commit)
         return self._complete
 
 
@@ -1028,7 +1036,7 @@ def restore_pipeline(pipeline,complete,current_scope):
         'reference_provenance','alignment_provenance'}
     fields.add('map_from_odom_identity')
     fields.add('tile_revision_highwater')
-    if type(state) is not dict or set(state)-{'lane_catalog','parking_catalog','road_basis','alignment_clock','atlas'}!=fields:raise MapCheckpointNotReady('unsupported exact mapper pipeline state')
+    if type(state) is not dict or set(state)-{'lane_catalog','parking_catalog','road_basis','alignment_clock','atlas','hazard'}!=fields:raise MapCheckpointNotReady('unsupported exact mapper pipeline state')
     context=StorageContext.from_fields(state['storage_context'])
     if (state['profile']!='mapper-pipeline-state-1' or context!=complete.original_job.context
             or any(getattr(context,name)!=getattr(current,name) for name in ('database_uuid','map_epoch','frame_epoch','odom_epoch','pi_host_boot','configuration','calibration','primitive_sha256'))

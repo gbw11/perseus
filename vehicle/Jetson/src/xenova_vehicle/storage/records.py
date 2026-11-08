@@ -10,8 +10,8 @@ import math
 import struct
 import zlib
 
-from .contracts import (CatalogHeadSnapshot,CatalogReservation,LoadRequest,MAX_U63,PersistenceError,StorageJob,
-                        canonical,digest,json_bytes,uint,uuid)
+from .contracts import (CatalogHeadSnapshot,CatalogReservation,CommitReceipt,LoadRequest,MAX_U63,PersistenceError,StorageJob,
+                        canonical,digest,json_bytes,selected_checkpoint_reference,uint,uuid)
 
 
 TILE_BYTES=64*64*64
@@ -288,6 +288,92 @@ class CheckpointPayload:
             raise PersistenceError('scene commit nonce differs from original checkpoint job')
 
 
+def _commit_tile_reference(value):
+    if type(value) is not tuple or len(value)!=4:raise PersistenceError('original copy tile reference required')
+    x,y,revision,key=value
+    if any(type(v) is not int or not -(1<<31)<=v<(1<<31) for v in (x,y)):
+        raise PersistenceError('original copy tile coordinate required')
+    uint(revision,positive=True);digest(key)
+    return value
+
+
+@dataclass(frozen=True,slots=True)
+class CheckpointCommitOrigin:
+    """D가 원 저장 payload로 검산한 역사적 CP descriptor. LOAD/current 사용권은 아니다.
+
+    원 evidence hash와 복사한 tile의 순서를 보존한다. 페이지/합친 closure의 SHA는 원
+    CP SHA가 아니며 committed_j_us도 새 LOAD 완료/현재 source 시각으로 바꾸지 않는다.
+    """
+    receipt: CommitReceipt
+    evidence_sha256: str
+    copy_tiles: tuple
+
+    def __post_init__(self):
+        if type(self.receipt) is not CommitReceipt or self.receipt.status!='COMMITTED':
+            raise PersistenceError('original stored COMMITTED receipt required')
+        digest(self.evidence_sha256)
+        if type(self.copy_tiles) is not tuple or len(self.copy_tiles)>32:
+            raise PersistenceError('original copy permits at most32 tile references')
+        for value in self.copy_tiles:_commit_tile_reference(value)
+        if len({value[:2] for value in self.copy_tiles})!=len(self.copy_tiles):
+            raise PersistenceError('unique original ordered copy tiles required')
+
+    @property
+    def fields(self):
+        return dict(profile='checkpoint-commit-origin-1',receipt=self.receipt.fields,
+            evidence_sha256=self.evidence_sha256,copy_tiles=[list(value) for value in self.copy_tiles])
+
+    @property
+    def bytes(self):return canonical(self.fields)
+
+    @classmethod
+    def from_fields(cls,value):
+        if (type(value) is not dict or set(value)!= {'profile','receipt','evidence_sha256','copy_tiles'}
+                or value['profile']!='checkpoint-commit-origin-1' or type(value['copy_tiles']) is not list
+                or len(value['copy_tiles'])>32 or any(type(item) is not list for item in value['copy_tiles'])):
+            raise PersistenceError('exact versioned original checkpoint descriptor required')
+        return cls(CommitReceipt.from_fields(value['receipt']),value['evidence_sha256'],
+            tuple(tuple(item) for item in value['copy_tiles']))
+
+    def payload_sha256(self,manifest):
+        """원 manifest/evidence/copy 순서의 SHA다. 원 evidence 전체를 LOAD했다는 주장은 아니다."""
+        json_bytes(manifest,16384)
+        return sha256(canonical(dict(manifest_sha256=sha256(manifest).hexdigest(),
+            evidence_sha256=self.evidence_sha256,copy_tiles=self.copy_tiles))).hexdigest()
+
+    def validate(self,original_job,manifest,selected_checkpoint_ref):
+        """원 job/ref/receipt/commit stamp를 검산하고 원 전체 CP SHA를 반환한다."""
+        if type(original_job) is not StorageJob:raise PersistenceError('original checkpoint job required')
+        reference=selected_checkpoint_reference(selected_checkpoint_ref);value=json_bytes(manifest,16384)
+        names={'profile','intent','context_sha256','tiles','catalog_sha256','scene','durable_cutoff_pi_us'}
+        if (type(value) is not dict or set(value)!=names or value['profile']!='xenova-checkpoint-1'
+                or value['intent']!='CHECKPOINT' or value['context_sha256']!=original_job.context.sha256
+                or type(value['tiles']) is not list or len(value['tiles'])>128
+                or any(type(item) is not list for item in value['tiles'])
+                or value['scene'] is not None and type(value['scene']) is not dict):
+            raise PersistenceError('original checkpoint manifest/source required')
+        digest(value['catalog_sha256']);uint(value['durable_cutoff_pi_us'],positive=True)
+        refs=tuple(_commit_tile_reference(tuple(item)) for item in value['tiles'])
+        if (refs!=tuple(sorted(refs)) or len({item[:2] for item in refs})!=len(refs)
+                or any(item not in refs for item in self.copy_tiles)):
+            raise PersistenceError('original ordered copy differs from complete manifest')
+        context=original_job.context;receipt=self.receipt
+        if ((receipt.database_uuid,receipt.job_id,receipt.origin_context_sha256)!=(context.database_uuid,original_job.job_id,context.sha256)
+                or reference['checkpoint_job_id']!=original_job.job_id or int(reference['durable_revision'])!=receipt.durable_revision
+                or reference['manifest_length']!=len(manifest) or reference['manifest_sha256']!=sha256(manifest).hexdigest()
+                or reference['tile_count']!=len(refs)
+                or any(reference[name]!=getattr(context,name) for name in ('map_epoch','frame_epoch','odom_epoch','pi_host_boot',
+                    'configuration','calibration','primitive_sha256','origin_mapper_instance'))
+                or not original_job.issued_us<=receipt.committed_j_us<original_job.expires_us
+                or original_job.scene_commit_nonce is not None and (value['scene'] is None
+                    or value['scene'].get('scene_commit_nonce')!=original_job.scene_commit_nonce)):
+            raise PersistenceError('original checkpoint commit receipt/ref/lifetime mismatch')
+        payload_sha256=self.payload_sha256(manifest)
+        if receipt.job_digest!=sha256(canonical(dict(job=original_job.fields,payload_sha256=payload_sha256))).hexdigest():
+            raise PersistenceError('original checkpoint full payload/job digest mismatch')
+        return payload_sha256
+
+
 @dataclass(frozen=True,slots=True,weakref_slot=True)
 class LoadedCheckpoint:
     request: LoadRequest
@@ -296,6 +382,7 @@ class LoadedCheckpoint:
     payload: CheckpointPayload
     heads: CatalogHeadSnapshot
     completed_us: int
+    original_commit: CheckpointCommitOrigin | None=None
 
     def __post_init__(self):
         if (type(self.request) is not LoadRequest or type(self.original_job) is not StorageJob
@@ -305,6 +392,9 @@ class LoadedCheckpoint:
         reference=json_bytes(self.checkpoint_ref,2048)
         if (reference.get('manifest_sha256')!=sha256(self.payload.manifest).hexdigest()
                 or reference.get('checkpoint_job_id')!=self.original_job.job_id):raise PersistenceError('loaded manifest/reference mismatch')
+        if self.original_commit is not None:
+            if type(self.original_commit) is not CheckpointCommitOrigin:raise PersistenceError('typed original checkpoint commit required')
+            self.original_commit.validate(self.original_job,self.payload.manifest,self.checkpoint_ref)
 
     def current(self,request,context_sha256,now_us):
         return (type(request) is LoadRequest and self.request==request

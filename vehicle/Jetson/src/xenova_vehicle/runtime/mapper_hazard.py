@@ -6,16 +6,19 @@ rolling에서는 창 밖 occupied도 전역 bitset에 남긴다. 시각·scene �
 atlas 복원 승인을 만들지 않는다.
 """
 
-from dataclasses import dataclass, replace
+from base64 import b64encode
+from dataclasses import asdict, dataclass, replace
+from hashlib import sha256
 from threading import get_ident
 
 from .mapper_mapping import MappingFrameDraft
 from .map_checkpoint import FrameEvidence, SourceComplete
 from ..mapping.local_map import EvidenceGrid, GridSpec, OCCUPIED, FREE
-from ..mapping.map_lattice import GridWindow
+from ..mapping.map_lattice import GridWindow, MapLattice, read_atlas_window
 from ..perception.pipeline import PerceptionResult
-from ..storage.contracts import uint
+from ..storage.contracts import StorageContext, canonical, json_bytes, uint, digest
 from ..storage.geometry_scope import CatalogGeometryScope
+from ..storage.mapper_state import validate_hazard_state
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +136,45 @@ class HazardDraft:
         return None if self.snapshot is None else self.snapshot.revision
 
 
+@dataclass(frozen=True, slots=True)
+class _RetainedHazard:
+    """현재 관측이 없는 원 내구 baseline. old source/J/clock은 실행 상태에 넣지 않는다."""
+    revision: int
+    geometry_scope: bytes
+    method_sha256: str
+    frame_id: str
+    calibration_id: str
+    spec: GridSpec
+    window: GridWindow | None
+    tiles: tuple
+
+
+def _fixed_tile(snapshot):
+    body=bytearray(512)
+    for index in range(snapshot.spec.width*snapshot.spec.height):
+        if snapshot.occupied[index//8] & (1 << (index%8)):
+            row,col=divmod(index,snapshot.spec.width);position=row*64+col
+            body[position//8] |= 1 << (position%8)
+    return (((0,0),bytes(body)),) if any(body) else ()
+
+
+def _retained_snapshot(retained,grid,geometry):
+    """원 bitset의 현재 창만 투영한다. source None은 내부 계산용이며 외부 snapshot이 아니다."""
+    window=grid.rolling_window;stored=dict(retained.tiles)
+    bits=bytearray((grid.spec.width*grid.spec.height+7)//8)
+    for index in range(grid.spec.width*grid.spec.height):
+        row,col=divmod(index,grid.spec.width)
+        if window is None:key,position=(0,0),row*64+col
+        else:
+            x=window.offset_xy[0]+col;y=window.offset_xy[1]+row
+            tx,c=divmod(x,64);ty,r=divmod(y,64);key,position=(tx,ty),r*64+c
+        body=stored.get(key)
+        if body is not None and body[position//8] & (1 << (position%8)):
+            bits[index//8] |= 1 << (index%8)
+    return HazardSnapshot(retained.revision,geometry,grid.spec,bytes(bits),(None,None),
+        retained.tiles if window is not None else (),window)
+
+
 class MapperHazard:
     """prepare/accept/cancel만 소유한다. 취소해도 이미 필요한 scene 철회는 되돌리지 않는다."""
     def __init__(self, *, complete=None):
@@ -143,6 +185,7 @@ class MapperHazard:
         self._complete = complete
         self._revision_floor = 0
         self._visible = None
+        self._retained = None
 
     def _owner(self):
         if get_ident() != self._thread: raise RuntimeError('hazard belongs to the original compute owner')
@@ -161,10 +204,79 @@ class MapperHazard:
             raise ValueError('original complete source changed')
         self._complete = complete
 
-    def restore_complete(self, complete):
-        """원 CP hazard/selected tiles→fixed RAW state 대응 검산 전에는 역사 baseline을 발급하지 않는다."""
+    def state_fields(self,pipeline,context,method_manifest_sha256):
+        """같은 accepted MAP의 원 occupied/floor만 고정한다. CP queue/인코딩은 호출자 책임이다."""
+        self._owner();digest(method_manifest_sha256)
+        from ..perception.pipeline import PerceptionPipeline
+        snapshot=self.snapshot
+        if (type(pipeline) is not PerceptionPipeline or type(context) is not StorageContext
+                or snapshot is None or self._staged is not None):
+            raise ValueError('accepted hazard and actual current pipeline/context required')
+        grid=pipeline.grid;window=grid.rolling_window
+        geometry=(CatalogGeometryScope.from_context(context,'SLOT').bytes,method_manifest_sha256,
+            grid.frame_id,grid.calibration_id,grid.clock_id,grid.kind,
+            grid.spec if window is None else ('ROLLING',window.lattice))
+        if (snapshot.geometry!=geometry or snapshot.spec!=grid.spec or snapshot.window!=window
+                or grid.calibration_id!=pipeline.calibration.sha256 or grid.frame_id!='odom:'+context.odom_epoch
+                or grid.kind!='LIVE' or not 2<=grid.spec.width<=64 or not 2<=grid.spec.height<=64):
+            raise ValueError('hazard export differs from accepted map/method/lattice')
+        tiles=_fixed_tile(snapshot) if window is None else snapshot.global_occupied
+        value=dict(profile='mapper-hazard-state-1',revision=max(self._revision_floor,snapshot.revision),
+            method_manifest_sha256=method_manifest_sha256,
+            tiles=[[x,y,b64encode(body).decode('ascii')] for (x,y),body in tiles])
+        outer=dict(profile='mapper-pipeline-state-1',spec=asdict(grid.spec))
+        if window is not None:
+            from ..mapping.map_lattice import atlas_state_fields
+            outer['atlas']=atlas_state_fields(window,pipeline._rolling_policy)
+        validate_hazard_state(value,state=json_bytes(canonical(outer),512*1024))
+        return {'hazard':value}
+
+    def restore_complete(self, complete, *, pipeline, scope, now_us):
+        """원 CP bitset을 보관한다. 첫 실제 두 source 진전 전에는 current snapshot이 없다."""
+        self._owner();uint(now_us)
+        from .scene import SceneEvidenceScope
+        from ..perception.pipeline import PerceptionPipeline
+        if (type(complete) is not SourceComplete or type(scope) is not SceneEvidenceScope or type(pipeline) is not PerceptionPipeline
+                or getattr(pipeline,'_restored_checkpoint_ref',None)!=complete.checkpoint_ref):
+            raise ValueError('actual complete-restored pipeline and approved scope required')
+        if self._retained is not None and self._complete is complete:
+            current=CatalogGeometryScope.from_context(scope.context,'SLOT').bytes
+            if (self._retained.geometry_scope!=current or self._retained.method_sha256!=scope.method_manifest_sha256
+                    or self._retained.calibration_id!=pipeline.calibration.sha256):
+                raise ValueError('retained restore owner scope changed')
+            return True
         self.require_restore(complete)
-        return self._reject(complete, 'RESTORE_NOT_READY')
+        scope.complete_restore_head(complete,now_us=now_us)
+        if complete.state is None:return False
+        state=json_bytes(complete.state,512*1024)
+        if 'hazard' not in state:return False
+        revision,method,tiles=validate_hazard_state(state['hazard'],state=state)
+        old=StorageContext.from_fields(state['storage_context']);grid=pipeline.grid
+        if (old!=complete.original_job.context or scope.calibration!=pipeline.calibration
+                or method!=scope.method_manifest_sha256 or state['kind']!='LIVE' or grid.kind!='LIVE'
+                or state['calibration_id']!=pipeline.calibration.sha256 or grid.calibration_id!=state['calibration_id']
+                or state['frame_id']!='odom:'+scope.context.odom_epoch or grid.frame_id!=state['frame_id']
+                or state['pipeline_profile_sha256']!=sha256(canonical(asdict(pipeline.profile))).hexdigest()):
+            raise ValueError('retained hazard map/calibration/method/profile differs')
+        spec=dict(state['spec']);spec['origin_xy']=tuple(spec['origin_xy']);spec=GridSpec(**spec)
+        window=None
+        if 'atlas' in state:
+            window=read_atlas_window(state['atlas'],spec,policy=pipeline._rolling_policy)
+            if window.lattice!=MapLattice.from_spec(pipeline.profile.grid) or grid.rolling_window!=window:
+                raise ValueError('retained hazard immutable rolling lattice differs')
+        elif grid.rolling_window is not None or spec!=pipeline.profile.grid:
+            raise ValueError('retained fixed hazard grid differs')
+        if grid.spec!=spec or any(bool(getattr(grid,name).any()) for name in
+                ('state','observed_us','time_known','unordered_hit','hit_available_us','hit_origin','conflict')) or grid.hit_view:
+            raise ValueError('restored LIVE must remain unknown with no current measurements')
+        scene=json_bytes(complete.manifest,16384)['scene']
+        if type(scene) is dict and 'hazard_revision' in scene and scene['hazard_revision']!=revision:
+            raise ValueError('original frozen scene and hazard revision differ')
+        retained=_RetainedHazard(revision,CatalogGeometryScope.from_context(scope.context,'SLOT').bytes,
+            method,state['frame_id'],state['calibration_id'],spec,window,tiles)
+        self._retained=retained;self._revision_floor=revision
+        # complete와 baseline은 owner 수명 동안 유지한다. final accept lock에서 큰 사본을 해제하지 않는다.
+        return True
 
     def _reject(self, original, reason):
         candidate = HazardDraft(original, False, reason, self.snapshot, False, False, True)
@@ -175,7 +287,7 @@ class MapperHazard:
         """원 실제 처리시각을 받는다. unsafe 후보는 반드시 caller가 즉시 scene 철회해야 한다."""
         self._owner()
         if self._staged is not None: raise ValueError('one original hazard candidate is unresolved')
-        if self._complete is not None: return self._reject(mapping, 'RESTORE_NOT_READY')
+        if self._complete is not None and self._retained is None: return self._reject(mapping, 'RESTORE_NOT_READY')
         try:
             uint(now_us)
             if (type(mapping) is not MappingFrameDraft or not mapping.ready or type(mapping.result) is not PerceptionResult
@@ -205,6 +317,15 @@ class MapperHazard:
                     or grid.clock_id != raw['clock_epoch']):
                 return self._reject(mapping, 'GEOMETRY_NOT_READY')
             previous = self.snapshot
+            binding_retained=previous is None and self._retained is not None
+            if binding_retained:
+                retained=self._retained
+                if (geometry[0]!=retained.geometry_scope or frame.scope.method_manifest_sha256!=retained.method_sha256 or grid.frame_id!=retained.frame_id
+                        or grid.calibration_id!=retained.calibration_id
+                        or (window is None)!=(retained.window is None)
+                        or (grid.spec!=retained.spec if window is None else window.lattice!=retained.window.lattice)):
+                    return self._reject(mapping,'RETAINED_GEOMETRY_CHANGED')
+                previous=_retained_snapshot(retained,grid,geometry)
             if previous is not None and previous.geometry != geometry:
                 return self._reject(mapping, 'GEOMETRY_CHANGED')
             stamps = (frame.observation.rgb.stamp, frame.observation.depth.stamp)
@@ -229,6 +350,7 @@ class MapperHazard:
                 if old is None and not is_new:
                     return self._reject(mapping, 'NO_INITIAL_SOURCE_PROGRESS')
                 advanced.append(is_new); sources.append(stamp if is_new else old)
+            if binding_retained and not all(advanced):return self._reject(mapping,'NO_INITIAL_SOURCE_PROGRESS')
             import numpy as np
             state = grid.state
             if (type(state) is not np.ndarray or state.dtype != np.dtype('u1')

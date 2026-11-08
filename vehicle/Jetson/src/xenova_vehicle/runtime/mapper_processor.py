@@ -150,18 +150,28 @@ class ResidentMapperProcessor:
 
     def _scene_checkpoint_arguments(self):
         """증분 CP에 원 동결 base 계보를 보존한다. 새 scene/셀 시각을 발급하지 않는다."""
-        if self._scene is None:return {}
+        arguments={}
+        hazard=self._hazard_checkpoint_state()
+        if hazard:arguments['subsystem_state']=hazard
+        if self._scene is None:return arguments
         frozen=self._scene.scene._frozen
-        if frozen is None or frozen.receipt is None:return {}
+        if frozen is None or frozen.receipt is None:return arguments
         from ..storage.contracts import json_bytes
         from xenova_drive_world import decode,schema
-        value=json_bytes(frozen.request.payload.manifest,16384)['scene']
-        if value is None:return {}
+        value=json_bytes(frozen.manifest,16384)['scene']
+        if value is None:return arguments
         grant=decode(self._scene.scene.grant_bytes,schema.SceneGrant)
         scene=dict(value);scene.pop('mapper_state',None)
         if grant.HasField('frozen_evidence_sha256'):
             scene['base_evidence_sha256']=grant.frozen_evidence_sha256.hex()
-        return dict(scene=scene)
+        arguments['scene']=scene
+        return arguments
+
+    def _hazard_checkpoint_state(self):
+        """동일 compute owner의 채택 map과 보수 occupied/floor만 원 CP에 보존한다."""
+        if (self._hazard is None or self._hazard.snapshot is None or self._mapping is None
+                or self._mapping._pipeline is None or self._mapping.context is None):return {}
+        return self._hazard.state_fields(self._mapping._pipeline,self._mapping.context,self._config.sha256)
 
     def _queue_scene_freeze(self,now):
         """원 Pi commit nonce의 CP 하나만 준비한다. 큰 사본/검산은 maintenance 밖으로 새지 않는다."""
@@ -191,12 +201,13 @@ class ResidentMapperProcessor:
         job=StorageJob(owner._context,str(uuid4()),now,expires,str(UUID(bytes=grant.request_nonce)))
         snapshot=request=None;described=False
         try:
+            hazard_state=self._hazard_checkpoint_state()
             snapshot=owner.collector.snapshot(owner._pipeline,job,now_us=now,
-                subsystem_state=owner.catalogs.state_fields(),include_unchanged=True)
+                subsystem_state=dict(owner.catalogs.state_fields(),**hazard_state),include_unchanged=True)
             refs=owner.collector.current_tile_references(owner._pipeline,snapshot)
             descriptor=coordinator.freeze_scene(job,current_tile_references=refs,current_hazard_revision=hazard,now_j_us=now)
             described=True
-            request=owner.queue_checkpoint(job,now_us=now,scene=descriptor)
+            request=owner.queue_checkpoint(job,now_us=now,scene=descriptor,subsystem_state=hazard_state)
             coordinator.adopt_freeze(request,current_tile_references=refs,current_hazard_revision=hazard,
                 now_j_us=self.clock(),all_tiles=snapshot.full_tiles(),mapper_state=snapshot.mapper_state_ref)
         except (SceneError,MappingNotReady,CatalogNotReady,MapCheckpointNotReady,PersistenceError):
@@ -335,6 +346,11 @@ class ResidentMapperProcessor:
             if self._mapping is not None and inputs.pose is not None and restore_issue is None:
                 self._mapping_draft=self._mapping.prepare_frame(item,candidate.pipeline,observation,inputs,sensors,self.clock())
                 adopt_metric=self._mapping_draft.ready;mapping_reason=self._mapping_draft.reason
+                if adopt_metric and self._durable_source is not None and config.survey is not None:
+                    from .mapper_hazard import MapperHazard
+                    if self._hazard is None:self._hazard=MapperHazard(complete=self._durable_source)
+                    self._hazard.restore_complete(self._durable_source,pipeline=candidate.pipeline,
+                        scope=self._mapping_draft.frame.scope,now_us=self.clock())
                 if not adopt_metric:self._cancel_mapping_draft()
         diagnostic_only=inputs.pose is None or restore_issue is not None or mapping_enabled and not adopt_metric
         if diagnostic_only:
@@ -428,7 +444,8 @@ class ResidentMapperProcessor:
             else:
                 self._scene.hazard(hazard.revision,now_j_us=now)
                 self._scene_draft=self._scene.prepare_frame(draft,draft.result,sensors,
-                    world_sequence=sequence,hazard_revision=hazard.revision,now_j_us=now)
+                    world_sequence=sequence,hazard_revision=hazard.revision,now_j_us=now,
+                    restore_source=self._durable_source)
                 self._scene_status=self._scene_draft.reason
         except SceneError:
             self._scene.revoke('ALIGNMENT',now_j_us=now);self._scene_status='SCENE_FRAME_NOT_READY'

@@ -206,7 +206,7 @@ class SceneCoordinator:
         if scope.context!=self.scene.context or scope is not old:
             self.scene.context=scope.context;self.scene.evidence_scope=scope;self._version+=1
 
-    def prepare_frame(self,mapping,result,sensors,*,world_sequence,hazard_revision,now_j_us):
+    def prepare_frame(self,mapping,result,sensors,*,world_sequence,hazard_revision,now_j_us,restore_source=None):
         """실제 finalized Mapping draft의 새 RGB만 소비한다. D offer는 하지 않는다."""
         from .mapper_mapping import MappingFrameDraft
         self._owner();uint(now_j_us)
@@ -248,6 +248,11 @@ class SceneCoordinator:
                     except ValueError:station=None;reason='OBSERVED_STATION_NOT_READY'
         # decode/시계 환산은 compute prepare에서 끝낸다. 최종 lock은 이 원 절대기한만 본다.
         grant,trust=candidate._now(now_j_us)
+        if (restore_source is not None and observed and station is not None
+                and grant.purpose==1 and grant.lifecycle_state==1 and candidate._frozen is None):
+            try:candidate.restore_complete(restore_source,observation,now_j_us=now_j_us)
+            except ValueError:reason='RESTORE_NOT_READY'
+            else:reason='RESTORE_READY'
         expires=min(mapping.original_job.expires_us,candidate._lease.expires_pi_us-trust.upper_offset_us,
             grant.valid_until_pi_us-trust.upper_offset_us)
         if grant.lifecycle_state in (0,1) or grant.purpose:

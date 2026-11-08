@@ -45,7 +45,10 @@ def encode_mapper_state(state):
     from .records import ContextRecord
     raw=canonical(state)
     if not 0<len(raw)<=STATE_CAP:raise PersistenceError('mapper state exceeds bounded metadata capacity')
-    if type(state) is dict and 'atlas' in state:_validate_atlas_state(json_bytes(raw,STATE_CAP))
+    if type(state) is dict and ('atlas' in state or 'hazard' in state):
+        checked=json_bytes(raw,STATE_CAP);_validate_atlas_state(checked)
+        # outer spec의 tuple 정규화와 달리 hazard는 exact native JSON 문법을 지킨다.
+        if 'hazard' in state:validate_hazard_state(state['hazard'],state=checked)
     compressed=zlib.compress(raw,6)
     if len(compressed)>CHUNK_BYTES*MAX_PAGES:raise PersistenceError('mapper-state compressed page capacity exceeded')
     key=sha256(raw).hexdigest();count=(len(compressed)+CHUNK_BYTES-1)//CHUNK_BYTES
@@ -92,6 +95,7 @@ def decode_mapper_state(scene,contexts):
     except zlib.error as error:raise PersistenceError('corrupt mapper-state compressed bytes') from error
     state=json_bytes(raw,STATE_CAP)
     _validate_atlas_state(state)
+    if type(state) is dict and 'hazard' in state:validate_hazard_state(state['hazard'],state=state)
     return state,tuple(selected)
 
 
@@ -136,6 +140,60 @@ def _validate_atlas_state(state):
     except (OverflowError,ValueError) as error:raise PersistenceError('atlas origin arithmetic is not finite') from error
     if any(not math.isfinite(value) for value in expected) or origin!=expected:
         raise PersistenceError('atlas ROI origin differs from the immutable shared lattice')
+
+
+def validate_hazard_state(value,*,state):
+    """원 occupied와 발급 revision만 해석한다. LIVE/source/시계/Scene 권한은 없다.
+
+    좌표는 같은 META의 spec/atlas에 종속한다. fixed는64칸 stride의(0,0)
+    tile 하나이며 ROI 밖 bit는0이다. 반환 body는 canonical base64의 소유 bytes다.
+    """
+    names={'profile','revision','method_manifest_sha256','tiles'}
+    if (type(state) is not dict or type(state.get('profile')) is not str
+            or state['profile']!='mapper-pipeline-state-1' or type(value) is not dict
+            or any(type(key) is not str for key in value) or set(value)!=names
+            or type(value['profile']) is not str or value['profile']!='mapper-hazard-state-1'):
+        raise PersistenceError('unsupported exact hazard metadata profile')
+    revision=uint(value['revision'],positive=True);digest(value['method_manifest_sha256'])
+    def finite(number):
+        if type(number) not in (int,float):return False
+        if type(number) is int and not -(1<<63)<number<1<<63:return False
+        return math.isfinite(number)
+    spec=state.get('spec')
+    if (type(spec) is not dict or set(spec)!={'width','height','resolution_m','origin_xy'}
+            or any(type(key) is not str for key in spec)):
+        raise PersistenceError('original hazard grid spec required')
+    for name in ('width','height'):
+        if type(spec[name]) is not int or not 2<=spec[name]<=64:
+            raise PersistenceError('hazard grid must fit2..64 cells per side')
+    resolution=spec['resolution_m'];origin=spec['origin_xy']
+    if (not finite(resolution) or not .005<=resolution<=1
+            or type(origin) is not list or len(origin)!=2
+            or any(not finite(v) for v in origin)):
+        raise PersistenceError('finite original hazard grid coordinates required')
+    rolling='atlas' in state
+    if rolling:_validate_atlas_state(state)
+    rows=value['tiles']
+    if type(rows) is not list or len(rows)>128:raise PersistenceError('hazard tile capacity128 exceeded')
+    result=[];previous=None
+    for row in rows:
+        if (type(row) is not list or len(row)!=3 or any(type(v) is not int or not -(1<<31)<=v<1<<31 for v in row[:2])
+                or type(row[2]) is not str or len(row[2])!=684):
+            raise PersistenceError('bounded int32 hazard tile and512-byte base64 body required')
+        key=tuple(row[:2])
+        if previous is not None and key<=previous:raise PersistenceError('hazard tiles must be sorted and unique')
+        try:body=b64decode(row[2],validate=True)
+        except (ValueError,TypeError) as error:raise PersistenceError('invalid hazard bitset encoding') from error
+        if len(body)!=512 or b64encode(body).decode('ascii')!=row[2] or not any(body):
+            raise PersistenceError('canonical nonempty512-byte hazard bitset required')
+        if not rolling:
+            if key!=(0,0):raise PersistenceError('fixed hazard has only the original zero tile')
+            for y in range(64):
+                bits=int.from_bytes(body[y*8:y*8+8],'little')
+                if (bits if y>=spec['height'] else bits>>spec['width']):
+                    raise PersistenceError('fixed hazard bit lies outside the original grid')
+        result.append((key,body));previous=key
+    return revision,value['method_manifest_sha256'],tuple(result)
 
 
 def _road_basis_roots(value):
@@ -195,6 +253,7 @@ def mapper_state_roots(state):
     if state is None:return ()
     if type(state) is not dict:raise PersistenceError('mapper state must preserve an exact object')
     _validate_atlas_state(state)
+    if 'hazard' in state:validate_hazard_state(state['hazard'],state=state)
     if state.get('profile')!='mapper-pipeline-state-1':
         if {'reference_provenance','alignment_provenance'}&set(state):raise PersistenceError('unknown metadata proof-root profile')
         roots=[]

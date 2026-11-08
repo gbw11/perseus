@@ -244,6 +244,8 @@ class MapperMapping:
         if self._scope is not None and self._scope._tof!=tuple(sources):old=(*old,self._scope)
         scope=SceneEvidenceScope(context,self.raw,self.calibration,self.profile.sha256,
             tof_sources=tuple(sources),historical_scopes=old)
+        if self.catalogs is not None:
+            scope=scope.with_parking_method(self.catalogs._accepted.parking.method)
         if self._complete is not None and not self._restore_done:
             scope=scope.with_complete_history(self._complete,now_us=now_us)
         return scope
@@ -283,6 +285,8 @@ class MapperMapping:
             method_manifest_sha256=self.profile.sha256,input_kind='LIVE',calibration_profile=self.calibration,
             parking_aisles=self.profile.parking_aisles,aisle_lane_indices=self._roles,crossing=self._crossing,
             lane_profile=self.profile.pipeline.registration)
+        scope=scope.with_parking_method(catalogs._accepted.parking.method)
+        collector.rebind_scope(scope)
         if self._complete is not None:scope=catalogs.restore_complete(self._complete,current_scope=scope,now_us=now_us);collector.rebind_scope(scope)
         self.collector,self.catalogs,self._scope=collector,catalogs,scope
         if self.profile.rolling_roi is not None and self._complete is None:
