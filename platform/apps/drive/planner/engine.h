@@ -33,6 +33,7 @@ struct drive_engine {
  struct de_witness last_track_world;
  bool maneuver_active;dw_pose maneuver_goal;int maneuver_direction;uint64_t maneuver_revision;
  uint64_t merge_passed_reference_revision;
+ bool has_grant; xenova_drive_MissionGrant grant,planning_grant;
  char maneuver_frame[37],maneuver_odom[37],maneuver_configuration[65],maneuver_reference[65];
  atomic_int search_reason,last_state_result,last_world_result;struct lp_budget budget;
  unsigned search_outcomes[LP_CLOCK+1];enum lp_result first_search_failure;
@@ -50,9 +51,13 @@ enum de_result de_receive_drain(struct drive_engine *);
  * exact odom anchor. One pending slot, original age; no second decode. */
 enum de_result de_receive_poll(struct drive_engine *,uint64_t now_pi_us);
 enum de_result de_vehicle(struct drive_engine *,const dw_vehicle *);
+/* planner 단일 owner. Link가 확인한 원 receipt만 저장하며 권위 자체를 만들지 않는다. */
+enum de_result de_mission(struct drive_engine *,const xenova_drive_MissionGrant *,uint64_t now_pi_us);
 enum de_result de_plan_start(struct drive_engine *,uint64_t,struct lp_budget);
 enum de_result de_plan_slice(struct drive_engine *,unsigned,uint64_t now_pi_us);
 enum de_result de_track(struct drive_engine *,uint64_t,float,struct lp_command *,dw_vehicle *,struct lp_budget);
+enum de_result de_track_mission(struct drive_engine *,const xenova_drive_MissionGrant *,uint64_t,float,
+ struct lp_command *,dw_vehicle *,struct lp_budget);
 /* Actual one-off Standby calculation, with a private tracker. It cannot
  * increment the selected runtime loop or mutate the Active tracker. */
 enum de_result de_prepare(struct drive_engine *,uint64_t,struct de_reference *,struct de_witness *,dw_vehicle *,struct lp_budget);

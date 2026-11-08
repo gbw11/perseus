@@ -46,6 +46,7 @@ class GatewaySettings:
     odometry_config: str | None = None
     world_trust: str | None = None
     drive_link: bool = False
+    mapper_uplink_profile: str | None = None
 
 
 def _env(env: Mapping[str, str], name: str) -> str | None:
@@ -83,6 +84,8 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
     p.add_argument('--odometry-config',default=_env(env,'ODOMETRY_CONFIG'))
     p.add_argument('--world-trust',default=_env(env,'WORLD_TRUST'),help='approved source/clock profile for binary lattice app input')
     p.add_argument('--drive-link',action='store_true',default=_env(env,'DRIVE_LINK')=='1',help='enable independent binary Pi vehicle/state input')
+    p.add_argument('--mapper-uplink-profile',default=_env(env,'MAPPER_UPLINK_PROFILE'),
+                   help='opt-in private J broker/approved mapper clock profile; requires warm feedback-2')
     p.add_argument('--feedback-timeout-ms',type=int,default=_env(env,'FEEDBACK_TIMEOUT_MS'))
     p.add_argument('--history-policy',default=_env(env,'HISTORY_POLICY'),help='approved private retry/retention policy JSON')
     p.add_argument("--initialize-control-state",action="store_true",help="확인한 최초 설치에서만 정지 상태 원본을 생성")
@@ -92,7 +95,8 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
         p.error('feedback-1 requires warm serial profile and an approved feedback timeout')
     if a.serial_profile=='feedback-2' and not a.odometry_config:p.error('feedback-2 requires explicit odometry configuration')
     if a.odometry_config and a.serial_profile!='feedback-2':p.error('odometry configuration requires feedback-2')
-    if (a.world_trust or a.drive_link) and (a.profile!='warm' or a.serial_profile!='feedback-2'):p.error('binary app input requires warm feedback-2')
+    if (a.world_trust or a.drive_link or a.mapper_uplink_profile) and (a.profile!='warm' or a.serial_profile!='feedback-2'):p.error('binary app input requires warm feedback-2')
+    if a.world_trust and a.mapper_uplink_profile:p.error('static world trust and actual mapper clock owner are separate profiles')
     if a.sink=='serial' and not a.vehicle_limits:p.error('serial output requires --vehicle-limits')
     if a.profile in ("verified","warm") and not (a.vm_a and a.vm_b):p.error("verified/warm profile requires --vm-a and --vm-b")
     if a.profile=="legacy" and (a.vm_a or a.vm_b or a.initialize_control_state):p.error("legacy profile is for separate apps; no paired authority fallback")
@@ -119,5 +123,6 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
         history_policy=a.history_policy,
         odometry_config=a.odometry_config,
         world_trust=a.world_trust,
-        drive_link=a.drive_link or a.world_trust is not None,
+        drive_link=a.drive_link or a.world_trust is not None or a.mapper_uplink_profile is not None,
+        mapper_uplink_profile=a.mapper_uplink_profile,
     )

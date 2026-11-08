@@ -23,6 +23,7 @@ RUNTIME=r'''
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdatomic.h>
+#include <xenova/mqtt/xm.h>
 #define ARG_UNUSED(x) (void)(x)
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define K_NO_WAIT 0
@@ -30,7 +31,6 @@ RUNTIME=r'''
 #define K_THREAD_STACK_SIZEOF(x) sizeof(x)
 #define K_THREAD_STACK_DEFINE(name,n) static unsigned char name[n]
 #define K_MUTEX_DEFINE(name) struct k_mutex name
-#define XM_TOPIC_MAX 160
 #define MQTT_QOS_0_AT_MOST_ONCE 0
 typedef long atomic_t;
 static inline long atomic_get(atomic_t *v){return *v;}
@@ -40,7 +40,8 @@ struct k_mutex {int unused;};struct k_thread {int unused;};
 struct test_identity {char vm_id[37],boot_id[37],host_boot_id[37],execution_id[37],publisher_id[37];};
 struct xt_bootstrap {struct test_identity identity;char auto_instance_id[37],world_broker_ipv4[32],broker_ipv4[32],
  world_profile[65],world_username[65],world_password[65],username[65],password[65];int world_port,port;};
-struct xd_inputs {bool connected;struct {int error;char sender[65],instance[37];} control;};
+struct xd_inputs {bool connected;struct {int error;char sender[65],instance[37];
+ char payload[XM_MAX_DRIVING_BYTES+1];size_t length;} control;};
 struct xm_zbinary {const char *topic;uint8_t *buffer;size_t capacity;
  int (*receive)(void *,const uint8_t *,size_t,int64_t);void *context;};
 struct mqtt_utf8 {const uint8_t *utf8;size_t size;};
@@ -97,7 +98,7 @@ static const char instance[]="33333333-3333-4333-8333-333333333333";
 static const char host[]="44444444-4444-4444-8444-444444444444";
 static const char gateway_id[]="55555555-5555-4555-8555-555555555555";
 const struct lp_config lp_selected_config={.id="lattice-lab-1",.vehicle="rc-test-1",.calibration="encoder-lab-1",
- .clock_error_us=20000,.clock_lease_us=500000};
+ .live_age_us=300000,.clock_error_us=20000,.clock_lease_us=500000};
 const struct lp_assets lp_selected_assets={.sha256="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"};
 int xdiag_clock_us(uint64_t *out){clock_calls++;if(clock_calls==clock_fail_call)return -EIO;*out=fake_now;return 0;}
 int xd_context_get(struct xt_bootstrap *out){
@@ -201,8 +202,8 @@ int main(int argc,char **argv){
 '''
 
 
-def reply():
-    body=schema.DriveLink(major=1).clock
+def reply(*,map_trust=False):
+    body=schema.DriveLink(major=2).clock
     body.probe.CopyFrom(schema.ClockProbe(vm='11111111-1111-4111-8111-111111111111',
         execution='22222222-2222-4222-8222-222222222222',app_instance='33333333-3333-4333-8333-333333333333',sequence=1,guest_send_us=1000000))
     body.host_boot='44444444-4444-4444-8444-444444444444';body.gateway_instance='55555555-5555-4555-8555-555555555555'
@@ -212,7 +213,32 @@ def reply():
         sequence=1,source_sample=1,source_us=1000000,pi_sample_us=6000000,clock_error_us=500,left_ticks=0,right_ticks=0,
         odom_pose=schema.Pose(x=0,y=0,yaw=0),velocity_mps=0,position_error_m=.003,heading_error_rad=.003,
         quality=3,calibration='encoder-lab-1'))
-    value=schema.DriveLink(major=1);value.clock.CopyFrom(body);return value
+    if map_trust:
+        # Explicit map-gate fixture; retain the original clock-only reply elsewhere.
+        body.trust.CopyFrom(schema.WorldTrust(vehicle=body.vehicle.vehicle,
+            mapper_boot='11111111-1111-4111-8111-111111111111',
+            mapper_instance='22222222-2222-4222-8222-222222222222',
+            map_epoch='33333333-3333-4333-8333-333333333333',
+            frame_epoch='44444444-4444-4444-8444-444444444444',
+            odom_epoch=body.vehicle.odom_epoch,configuration='lattice-lab-1',
+            calibration=body.vehicle.calibration,primitive='a'*64,
+            clock_epoch='66666666-6666-4666-8666-666666666666',
+            lower_offset_us=0,upper_offset_us=0,
+            expires_pi_us=body.pi_send_us+500000,max_error_us=20000))
+    value=schema.DriveLink(major=2);value.clock.CopyFrom(body);return value
+
+
+def complete_state2_metadata(state):
+    """기존 clock/transport fixture의 전진 NONE 후보를 새 공용 형태로 완성한다."""
+    state.state_features=7
+    state.mission.CopyFrom(schema.MissionExecution(mission_id=bytes(16),mission_revision=0,kind=0,phase=0,
+        result=0,operator_request_nonce=bytes(16),mission_deadline_pi_us=0,cancel_fence_revision=0,
+        active_segment=0,scene_admission_id=bytes(16),scene_admission_revision=0,strategy=0,
+        execution_deadline_pi_us=0,correction_attempts_used=0,execution_travel_m=0.,grant_revision=0,
+        search_travel_m=0.,search_deadline_pi_us=0))
+    state.segments.add(first_index=0,last_index=1,signed_direction=1)
+    state.direction_gate.CopyFrom(schema.DirectionGateRef(gate_revision=0,stop_command_sequence=0,
+        state=0,requested_direction=0))
 
 
 @pytest.fixture(scope='module',params=[False,True],ids=['diagnostics-off','diagnostics-on'])
@@ -223,17 +249,18 @@ def native(request,tmp_path_factory):
     (include/'xenova/drive_context.h').write_text('#include <xenova/drive_runtime.h>\n')
     (include/'zephyr/sys/atomic.h').write_text('#include <xenova/drive_runtime.h>\n')
     (include/'zephyr/logging/log.h').write_text('#define LOG_LEVEL_INF 3\n#define LOG_MODULE_REGISTER(...)\n#define LOG_INF(...) do { if(!test_log_filtered) test_log(__VA_ARGS__); } while(0)\n')
-    source=directory/'input.c';source.write_text(HARNESS);world=HOME/'world';binary=directory/'input-clock'
+    source=directory/'input.c';source.write_text(HARNESS);mqtt=HOME.parent/'common/xenova-mqtt-c';world=HOME/'world';binary=directory/'input-clock'
     args=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',
         '-Wl,--gc-sections','-Wl,--wrap=dw_link_decode','-fsanitize=undefined',
         *(['-DCONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS=1'] if request.param else []),
-        *['-I'+str(p) for p in (include,HOME/'zephyr/src',HOME/'planner',world,world/'generated',world/'nanopb')],
-        str(source),str(world/'world.c'),str(world/'generated/world.pb.c'),
+        *['-I'+str(p) for p in (include,HOME/'zephyr/src',HOME/'planner',world,world/'generated',world/'nanopb',mqtt/'include',mqtt/'third_party/jsmn')],
+        str(source),str(world/'world.c'),str(world/'generated/world.pb.c'),*[str(p) for p in sorted((mqtt/'src').glob('*.c'))],
         *[str(world/'nanopb'/name) for name in ('pb_common.c','pb_decode.c','pb_encode.c')],'-lm','-o',str(binary)]
     build=subprocess.run(args,capture_output=True,text=True)
     assert build.returncode==0,build.stderr
     def run(scenario='normal',value=None,wire=None):
-        path=directory/'input.bin';path.write_bytes(wire if wire is not None else encode(value if value is not None else reply()))
+        map_trust=scenario in ('cap','drop','filtered','map-world-failure','map-source-busy')
+        path=directory/'input.bin';path.write_bytes(wire if wire is not None else encode(value if value is not None else reply(map_trust=map_trust)))
         result=subprocess.run([str(binary),str(path),scenario],capture_output=True,text=True,check=True)
         assert not result.stderr
         return json.loads(result.stdout)
@@ -283,10 +310,10 @@ def test_invalid_wire_preserves_protocol_error_even_when_entry_clock_failed(nati
 
 
 def test_nonclock_reply_keeps_its_existing_current_clock_guard_when_entry_read_fails(native):
-    enabled,run=native;original=reply();value=schema.DriveLink(major=1)
+    enabled,run=native;original=reply();value=schema.DriveLink(major=2)
     value.accepted.host_boot=original.clock.host_boot;value.accepted.gateway_instance=original.clock.gateway_instance
     state=value.accepted.state
-    state.CopyFrom(schema.DriveState(major=1,source_vm=original.clock.probe.vm,
+    state.CopyFrom(schema.DriveState(major=2,source_vm=original.clock.probe.vm,
         source_execution=original.clock.probe.execution,source_app_instance=original.clock.probe.app_instance,
         source_generation=1,state_revision=1,frame_epoch=original.clock.vehicle.odom_epoch,
         odom_epoch=original.clock.vehicle.odom_epoch,configuration='lattice-lab-1',primitive='a'*64,
@@ -295,6 +322,7 @@ def test_nonclock_reply_keeps_its_existing_current_clock_guard_when_entry_read_f
         tracker_index=0,complete=True,message_id='88888888-8888-4888-8888-888888888888',
         calibration='encoder-lab-1',map_epoch=original.clock.vehicle.odom_epoch,observation_seq=1))
     for x in (0.,1.):state.path.add(pose=schema.Pose(x=x,y=1,yaw=0),steering_rad=0,velocity_mps=.1)
+    complete_state2_metadata(state)
     result=run('nonclock-entry-failure',value=value)
     assert result['rc']==0 and result['reason']==0 and result['accepted']==1
     assert result['expiry']==1510000 and result['expired_guard']==-11

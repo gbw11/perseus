@@ -121,11 +121,26 @@ int engine_apply(void *e,const uint8_t *bytes,size_t n,uint64_t now){
  struct lp_budget b={clock+10000000,clock_us,NULL,NULL,NULL};
  enum de_result result=de_apply(e,s,now,b);free(s);return result;
 }
+int engine_grant(void *e,const uint8_t *bytes,size_t n,uint64_t now){
+ xenova_drive_DriveLink *link=calloc(1,sizeof(*link));if(!link)return -1;
+ enum dw_result rc=dw_link_decode(bytes,n,link);
+ int result=rc?100+(int)rc:link->which_payload!=xenova_drive_DriveLink_mission_grant_tag?DE_STATE:
+  (int)de_mission(e,&link->payload.mission_grant,now);
+ free(link);return result;
+}
+int engine_track_grant(void *e,const uint8_t *bytes,size_t n,uint64_t now,float *out){
+ xenova_drive_DriveLink *link=calloc(1,sizeof(*link));if(!link)return -1;
+ enum dw_result decoded=dw_link_decode(bytes,n,link);uint64_t clock;
+ if(decoded||link->which_payload!=xenova_drive_DriveLink_mission_grant_tag||clock_us(NULL,&clock)){free(link);return DE_STATE;}
+ struct lp_command command;dw_vehicle vehicle;struct lp_budget budget={clock+1000000,clock_us,NULL,NULL,NULL};
+ enum de_result rc=de_track_mission(e,&link->payload.mission_grant,now,.02f,&command,&vehicle,budget);
+ out[0]=command.velocity;out[1]=command.steer;free(link);return rc;
+}
 int engine_state(void *pointer,uint8_t *out,size_t cap){
  struct drive_engine *e=pointer;struct de_reference h;const struct lp_path *p;
  if(de_path_acquire(e,&h,&p))return -1;
  dw_state *s=calloc(1,sizeof(*s));if(!s){de_path_release(e,h);return -1;}
- s->major=1;strcpy(s->source_vm,"77777777-7777-4777-8777-777777777777");
+ lp_state_export(p,s);strcpy(s->source_vm,"77777777-7777-4777-8777-777777777777");
  strcpy(s->source_execution,"88888888-8888-4888-8888-888888888888");strcpy(s->source_app_instance,"99999999-9999-4999-8999-999999999999");
  s->source_generation=1;s->state_revision=1;strcpy(s->frame_epoch,p->frame);strcpy(s->odom_epoch,p->odom);
  strcpy(s->configuration,p->configuration);strcpy(s->primitive,e->assets->sha256);strcpy(s->reference_id,p->reference);
