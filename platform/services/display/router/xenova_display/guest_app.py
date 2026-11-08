@@ -1,12 +1,16 @@
-"""413 Plan B, display-domU side: serve the vehicle screen app and forward its one data read.
+"""Display-domU side: serve the vehicle screen app and forward its one data read.
 
-Chromium in the display domU opens http://127.0.0.1:<app_port><page>. This
-server returns the built vm-screens files and forwards exactly one request,
-GET /api/v1/display/presentation, to dom0's read-only guest data path (410)
-with the guest data token. The page never sees a token. State collection and
-screen decisions stay in dom0; the domU only draws.
+Plan A (414, current): the web UI lives in the display domU (VM3). dom0's
+Chromium kiosk opens http://<VM3 bridge IP>:<app_port><page> and renders it on
+HDMI, so `bind` is VM3's bridge address and `allowed_clients` is dom0 only.
+Plan B (413, shelved): Chromium inside the domU opens it on loopback.
 
-Standard library only (runs in a minimal Debian guest). Loopback bind only.
+Either way this server returns the built vm-screens files and forwards exactly
+one request, GET /api/v1/display/presentation, to dom0's read-only guest data
+path (410) with the guest data token. The page never sees a token. State
+collection and screen decisions stay in dom0.
+
+Standard library only (runs in a minimal Debian guest, no extra packages).
 """
 from __future__ import annotations
 
@@ -36,11 +40,22 @@ def load_config(path, *, allow_loopback_data=False):
     """/etc/xenova/guest-display-domu.json, shared by guest_app and guest_session."""
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     allowed = {"web_root", "app_port", "data_host", "data_port", "data_token_file", "page",
-               "display", "width", "height", "chromium"}
+               "display", "width", "height", "chromium", "bind", "allowed_clients"}
     if not isinstance(raw, dict) or set(raw) - allowed:
         raise ValueError("unknown guest display setting")
     c = {"app_port": 8086, "data_port": 8085, "page": "/display/mobile", "display": ":0",
-         "width": 1280, "height": 720, "chromium": "/usr/bin/chromium", **raw}
+         "width": 1280, "height": 720, "chromium": "/usr/bin/chromium",
+         "bind": "127.0.0.1", "allowed_clients": ["127.0.0.1"], **raw}
+    bind = ipaddress.IPv4Address(c["bind"])
+    if bind.is_unspecified or bind.is_multicast or not (bind.is_private or bind.is_loopback):
+        raise ValueError("bind to loopback or this guest's private Xen bridge address only")
+    clients = c["allowed_clients"]
+    if not isinstance(clients, list) or not 1 <= len(clients) <= 4:
+        raise ValueError("allowed_clients must list 1-4 addresses")
+    clients = [ipaddress.IPv4Address(a) for a in clients]
+    if any(a.is_unspecified or a.is_multicast or not (a.is_private or a.is_loopback) for a in clients):
+        raise ValueError("allowed_clients must be private addresses (dom0 for Plan A)")
+    c["bind"], c["allowed_clients"] = str(bind), [str(a) for a in clients]
     web_root = Path(c["web_root"])
     if not web_root.is_absolute() or not (web_root / "index.html").is_file():
         raise ValueError("web_root must be an absolute vm-screens build with index.html")
@@ -94,9 +109,10 @@ class DataSource:
                 except Exception: pass
 
 
-def make_handler(web_root, data):
+def make_handler(web_root, data, allowed_clients=("127.0.0.1",)):
     index = web_root / "index.html"
     assets = (web_root / "assets").resolve()
+    allowed = frozenset(allowed_clients)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "xenova-guest-display-app"
@@ -119,6 +135,9 @@ def make_handler(web_root, data):
             self.send(status, json.dumps({"code": code}).encode(), "application/json")
 
         def do_GET(self):
+            # Plan A: only dom0's kiosk may read the screen or its data through this guest.
+            if self.client_address[0] not in allowed:
+                return self.code(403, "Forbidden")
             path = self.path
             if path in PAGES:
                 return self.send(200, index.read_bytes(), "text/html; charset=utf-8")
@@ -150,8 +169,9 @@ class AppServer(ThreadingHTTPServer):
 
 def serve(config, token, *, connect=http.client.HTTPConnection):
     data = DataSource(config["data_host"], config["data_port"], token, connect=connect)
-    # Loopback only: Chromium in this domU is the single client.
-    return AppServer(("127.0.0.1", config["app_port"]), make_handler(config["web_root"], data))
+    # Plan A: bind this guest's bridge address, allow dom0 only. Plan B: loopback only.
+    handler = make_handler(config["web_root"], data, config.get("allowed_clients", ["127.0.0.1"]))
+    return AppServer((config.get("bind", "127.0.0.1"), config["app_port"]), handler)
 
 
 def main(argv=None):

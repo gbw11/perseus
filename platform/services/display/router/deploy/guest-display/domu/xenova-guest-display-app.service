@@ -1,5 +1,5 @@
 [Unit]
-Description=Xenova display domU screen app (vm-screens files + one read-only data path to dom0)
+Description=Xenova display domU web UI for dom0's HDMI kiosk (vm-screens files + one read-only data path to dom0)
 After=network-online.target
 Wants=network-online.target
 PartOf=xenova-guest-display.target
@@ -9,6 +9,8 @@ ConditionPathExists=/etc/xenova/guest-display-domu.json
 Type=simple
 User=xenova-display
 Group=xenova-display
+# Python modules installed under /opt/xenova/display-guest (no pip, stdlib only).
+Environment=PYTHONPATH=/opt/xenova/display-guest
 ExecStart=/usr/bin/python3 -m xenova_display.guest_app --config /etc/xenova/guest-display-domu.json
 Restart=on-failure
 RestartSec=3

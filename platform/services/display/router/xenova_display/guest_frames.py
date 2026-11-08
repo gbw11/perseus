@@ -308,11 +308,15 @@ def create_guest_data_app(feed, guest_token):
 
 
 class GuestRelayConfig(BaseModel):
-    """/etc/xenova/guest-display.json (411). Token values live in separate private files."""
+    """/etc/xenova/guest-display.json (411). Token values live in separate private files.
+
+    414 Plan A: `guest: null` runs only the read-only guest data path (VM3 serves the
+    web UI, dom0 Chromium renders it); no frame relay, no stream/relay tokens.
+    """
     model_config = ConfigDict(extra="forbid")
-    guest: GuestSource
-    guest_stream_token_file: str = Field(min_length=2, max_length=4096, pattern=r"^/")
-    relay_token_file: str = Field(min_length=2, max_length=4096, pattern=r"^/")
+    guest: GuestSource | None = None
+    guest_stream_token_file: str | None = Field(default=None, min_length=2, max_length=4096, pattern=r"^/")
+    relay_token_file: str | None = Field(default=None, min_length=2, max_length=4096, pattern=r"^/")
     guest_data_token_file: str = Field(min_length=2, max_length=4096, pattern=r"^/")
     relay_port: int = Field(default=8084, ge=1, le=65535)
     data_bind: ipaddress.IPv4Address = ipaddress.IPv4Address("192.168.77.1")
@@ -325,6 +329,8 @@ class GuestRelayConfig(BaseModel):
             raise ValueError("guest data path binds to dom0's Xen bridge address only")
         if len({self.relay_port, self.data_port, self.feed_port}) != 3:
             raise ValueError("relay, guest data and feed ports must differ")
+        if self.guest is not None and not (self.guest_stream_token_file and self.relay_token_file):
+            raise ValueError("the frame relay (Plan B) needs stream and relay token files")
         return self
 
 
@@ -343,17 +349,17 @@ def main(argv=None):
     parser.add_argument("--config", default="/etc/xenova/guest-display.json")
     args = parser.parse_args(argv)
     config = GuestRelayConfig.model_validate_json(Path(args.config).read_text(encoding="utf-8"))
-    receiver = GuestFrameReceiver(config.guest, read_secret(config.guest_stream_token_file))
-    relay = create_relay_app(receiver, read_secret(config.relay_token_file))
     data = create_guest_data_app(LocalFeed(os.environ.get("XENOVA_DISPLAY_TOKEN", ""), port=config.feed_port),
                                  read_secret(config.guest_data_token_file))
-    # Relay: dom0-local consumers only. Guest data: dom0's Xen bridge address only.
-    relay_server = StreamServer(uvicorn.Config(relay, host="127.0.0.1", port=config.relay_port, workers=1,
-                                               log_level="warning", access_log=False, timeout_graceful_shutdown=5))
+    # Guest data: dom0's Xen bridge address only.
     data_server = uvicorn.Server(uvicorn.Config(data, host=str(config.data_bind), port=config.data_port, workers=1,
                                                 log_level="warning", access_log=False))
-
-    servers = (relay_server, data_server)
+    servers = [data_server]
+    if config.guest is not None:  # Plan B frame relay: dom0-local consumers only.
+        receiver = GuestFrameReceiver(config.guest, read_secret(config.guest_stream_token_file))
+        relay = create_relay_app(receiver, read_secret(config.relay_token_file))
+        servers.append(StreamServer(uvicorn.Config(relay, host="127.0.0.1", port=config.relay_port, workers=1,
+                                                   log_level="warning", access_log=False, timeout_graceful_shutdown=5)))
     for server in servers:
         # One handler stops both listeners; uvicorn's per-server capture would stop only one.
         server.capture_signals = nullcontext
