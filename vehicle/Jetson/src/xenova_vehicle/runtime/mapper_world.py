@@ -163,12 +163,14 @@ def _current(draft, state, basis, context, source, calibration, sensors, vehicle
 
 
 def build_mapping_world(draft, catalog_state, basis, *, context, source, calibration,
-                        sensors, current_vehicle, clock_lease, sequence, completed_j_us, published_j_us):
+                        sensors, current_vehicle, clock_lease, sequence, completed_j_us, published_j_us,
+                        scene_draft=None,hazard_draft=None,atlas_owner=None):
     """원 채택 후보를 build_world에 전달한다. None은 원 자료/기한/표현의 NOT_READY다.
 
     sensors는 같은 compute 회차의 실제 admission owner다. 외부 source 교체 여부와
     sequence의 단조 채택은 caller가 최종 lock에서 다시 판단한다. 자기 시각을 읽거나
-    원 source/정합 기한을 갱신하지 않는다. retained-static은 scene 소비 연결 전까지 없다.
+    원 source/정합 기한을 갱신하지 않는다. retained-static은 원 freeze와 현재 Scene 후보를
+    추가 검산한 별도 snapshot에서만 표현하며 LIVE grid는 변경하지 않는다.
     """
     if catalog_state is None or basis is None or context is None or current_vehicle is None:
         return None
@@ -181,6 +183,12 @@ def build_mapping_world(draft, catalog_state, basis, *, context, source, calibra
     try:
         result, snapshot, model, capture, alignment = _current(draft, catalog_state, basis, context, source,
             calibration, sensors, current_vehicle, clock_lease, published_j_us)
+        retained=None
+        if scene_draft is not None:
+            from .retained_world import project_retained_grid
+            retained=project_retained_grid(draft,scene_draft=scene_draft,hazard_draft=hazard_draft,
+                source=source,clock_lease=clock_lease,published_j_us=published_j_us,atlas_owner=atlas_owner)
+            if retained is not None:snapshot=retained.snapshot
         snapshot_us = result.summary['now_us']
         _need(capture[1] <= snapshot_us <= completed_j_us <= published_j_us)
         mapped = alignment.apply(PoseEstimate(current_vehicle.pose_sample,
@@ -216,16 +224,20 @@ def build_mapping_world(draft, catalog_state, basis, *, context, source, calibra
             position_drift_bound_mps=_f32_up(alignment.position_drift_mps),
             heading_drift_bound_rps=_f32_up(alignment.yaw_drift_rps), quality=1,
             timestamp_error_us=max((capture[1]-capture[0]+1)//2, (interval[1]-interval[0]+1)//2)))
+        if retained is not None:
+            from xenova_drive_world import decode
+            value.scene.CopyFrom(decode(retained.scene_ref,schema.SceneAdmissionRef))
         bound = WorldSource.from_calibration('LIVE', snapshot['frame_id'], context.frame_epoch,
             snapshot['clock_id'], calibration, capture, snapshot_us, wire_clock_epoch=source['clock_epoch'])
-        built = build_world(snapshot, value, source=bound, preferred_road=mask)
+        static=None if retained is None else retained.static_retained
+        built = build_world(snapshot, value, source=bound, preferred_road=mask,static_retained=static)
         inventory = catalog_state.view.parking
         if inventory is not None:
             _need(inventory.context == context and inventory.input_kind == 'LIVE'
                   and inventory.source_clock == snapshot['clock_id'])
             # 원 publication 후보의 geometry/age/UNKNOWN/cap을 다시 산출하지 않는다.
             value = inventory.apply(built.message())
-            built = build_world(snapshot, value, source=bound, preferred_road=mask)
+            built = build_world(snapshot, value, source=bound, preferred_road=mask,static_retained=static)
         _need(b''.join(struct.pack('<ff', p.x, p.y) for p in built.message().reference) == basis.points_f32)
         return built
     except (_NotReady, ValueError, KeyError, OverflowError):

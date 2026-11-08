@@ -10,6 +10,7 @@ LIVE의 cache clean은 내구성/FREE 자격이 아니다. 관련 EVIDENCE가 di
 logical key 전체 eviction도 금지한다. LIVE/EVIDENCE의 의미상 완전 대응은 caller 책임이다.
 """
 
+from contextlib import contextmanager
 from dataclasses import dataclass,field
 from hashlib import sha256
 from threading import get_ident
@@ -342,6 +343,37 @@ class AtlasPool:
         self._owners[serial]=_WeakOwner(handle,reference,identity);self._owner_index[identity]=serial
         for original in canonical:self._pins[original.serial]=self._pins.get(original.serial,0)+1
         self._generation+=1;return handle
+
+    @contextmanager
+    def borrow_owner(self,owner,original_pin,refs):
+        """이미 등록된 실제 owner의 EVIDENCE만 빌린다. 새 lease/generation은 없다.
+
+        owner는 범위 끝까지 강하게 보존한다. 반환 reader와 원 bytes는 범위 밖에서
+        보관/사용하지 않는다. 현재 ref로 치환하거나 새 pin을 등록하는 포트가 아니다.
+        """
+        self._owner()
+        if (type(original_pin) is not AtlasOwnerPin or original_pin._owner is not self._token
+                or (registered:=self._owners.get(original_pin.serial)) is None
+                or registered.handle is not original_pin or registered.reference() is not owner
+                or registered.identity!=id(owner)):
+            raise AtlasError('actual registered original owner pin required')
+        if type(refs) is not tuple or len(refs)>128:raise AtlasError('bounded original archive refs required')
+        blocks={}
+        for original in refs:
+            if (type(original) is not AtlasRef or original.kind!='EVIDENCE64'
+                    or not any(original is known for known in original_pin.refs) or original.serial in blocks):
+                raise AtlasError('unique original EVIDENCE subset of registered owner pin required')
+            blocks[original.serial]=self._block(original)
+        strong_owner=owner;thread=self._thread;active=True
+        def reader(original):
+            if get_ident()!=thread:raise RuntimeError('atlas borrow belongs to its original compute owner')
+            if not active:raise AtlasError('original owner borrow has ended')
+            block=blocks.get(original.serial) if type(original) is AtlasRef else None
+            if block is None or block.ref is not original:raise AtlasError('original borrowed archive ref required')
+            return block.payload
+        try:yield reader
+        finally:
+            active=False;blocks.clear();del strong_owner
 
     def preflight_owner(self,owner,refs,*,delta=None):
         """단일 owner가 accept 직전 pin의 통상 실패를 검산한다. 등록/해제는 하지 않는다."""

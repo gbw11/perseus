@@ -44,6 +44,7 @@ class ResidentMapperProcessor:
         self._latest_source_inputs=None;self._scene_row=self._scene_delivery=None
         self._scene_summary_sent=None;self._scene_freeze_request=None
         self._scene_freeze_attempt=None
+        self._scene_restore_archive=None
         self.clock=clock
         if checkpoint_interval_us is not None:
             from ..storage.contracts import uint
@@ -111,6 +112,35 @@ class ResidentMapperProcessor:
     def _maintain_scene(self):
         """원 operator/clock/DB terminal을 compute에서 소비한다. 현재 관측이나 승인을 만들지 않는다."""
         if self._config is None or self._config.survey is None:return
+        from .scene import SceneError
+        from .mapper_sensor_state import _row
+        from ..storage.contracts import json_bytes
+        from xenova_drive_world import decode,schema
+        now=self.clock();row=self._mapping_context_port.read_scene()
+        try:
+            if row is not None and row is not self._scene_row:
+                delivery=_row(json_bytes(row,2048))
+                if delivery[1]>now:raise SceneError('future original SceneGrant delivery')
+                self._scene_delivery=delivery;self._scene_row=row
+            if self._scene is not None and row is not None:
+                raw=self._scene_delivery[0];grant=decode(raw,schema.SceneGrant)
+                if grant.lifecycle_state in (3,4):
+                    inputs=self._latest_source_inputs
+                    lease=None if inputs is None else inputs.clock_lease
+                    if self._scene.maintenance(raw,lease,now_j_us=now):
+                        self._scene_status=self._scene.scene.blocked_reason or 'REVOKED'
+                        return
+                    # 옛 nonce의 부정 사건은 현재 복원을 취소하지 않는다. 현재 Scene의
+                    # 실제 원 lease/만료는 별도로 확인하며 새 기한을 부여하지 않는다.
+                    try:self._scene.scene._now(now)
+                    except SceneError:
+                        self._scene.revoke('CLOCK',now_j_us=now);self._scene_status='WAIT_SCENE_CLOCK'
+                    else:self._scene_status='STALE_SCENE_NEGATIVE'
+                    return
+        except (ValueError,TypeError,OverflowError):
+            self._scene_status='SCENE_INPUT_NOT_READY'
+            if self._scene is not None:self._scene.revoke('SOURCE',now_j_us=now)
+            return
         if self._mapping is None or self._mapping.evidence_scope is None:
             self._scene_status='WAIT_MAPPING_SCOPE';return
         inputs=self._latest_source_inputs;scope=self._mapping.evidence_scope
@@ -118,21 +148,13 @@ class ResidentMapperProcessor:
             self._scene_status='WAIT_SCENE_CLOCK'
             if self._scene is not None:self._scene.revoke('CLOCK',now_j_us=self.clock())
             return
-        row=self._mapping_context_port.read_scene()
         if row is None:
             self._scene_status='WAIT_SCENE_GRANT'
             if self._scene is not None:self._scene.revoke('SOURCE',now_j_us=self.clock())
             return
         from .mapper_scene import SceneCoordinator
-        from .scene import SceneError
         now=self.clock()
         try:
-            if row is not self._scene_row:
-                from .mapper_sensor_state import _row
-                from ..storage.contracts import json_bytes
-                delivery=_row(json_bytes(row,2048))
-                if delivery[1]>now:raise SceneError('future original SceneGrant delivery')
-                self._scene_delivery=delivery;self._scene_row=row
             if scope.context is not self._mapping_context_port.read():
                 self._scene_status='WAIT_SCENE_PUBLICATION';return
             if self._scene is None:
@@ -180,6 +202,8 @@ class ResidentMapperProcessor:
         from .mapper_mapping import MappingNotReady
         from .mapper_catalogs import CatalogNotReady
         from .map_checkpoint import MapCheckpointNotReady
+        from .mapper_atlas import MapperAtlasNotReady
+        from ..mapping.atlas import AtlasResource
         from ..storage.contracts import StorageJob,PersistenceError
         from uuid import UUID,uuid4
         owner=self._mapping;coordinator=self._scene
@@ -208,9 +232,13 @@ class ResidentMapperProcessor:
             descriptor=coordinator.freeze_scene(job,current_tile_references=refs,current_hazard_revision=hazard,now_j_us=now)
             described=True
             request=owner.queue_checkpoint(job,now_us=now,scene=descriptor,subsystem_state=hazard_state)
+            archive=(None if snapshot.atlas_owner is None else
+                snapshot.atlas_owner.retain_scene(snapshot.atlas_snapshot,request))
             coordinator.adopt_freeze(request,current_tile_references=refs,current_hazard_revision=hazard,
-                now_j_us=self.clock(),all_tiles=snapshot.full_tiles(),mapper_state=snapshot.mapper_state_ref)
-        except (SceneError,MappingNotReady,CatalogNotReady,MapCheckpointNotReady,PersistenceError):
+                now_j_us=self.clock(),all_tiles=snapshot.full_tiles(),mapper_state=snapshot.mapper_state_ref,
+                archive=archive)
+        except (SceneError,MappingNotReady,CatalogNotReady,MapCheckpointNotReady,PersistenceError,
+                MapperAtlasNotReady,AtlasResource):
             if request is not None:
                 owner.cancel_unoffered_checkpoint(request,now_us=self.clock())
                 if described:coordinator.abort_freeze(request,now_j_us=self.clock())
@@ -351,6 +379,12 @@ class ResidentMapperProcessor:
                     if self._hazard is None:self._hazard=MapperHazard(complete=self._durable_source)
                     self._hazard.restore_complete(self._durable_source,pipeline=candidate.pipeline,
                         scope=self._mapping_draft.frame.scope,now_us=self.clock())
+                    if self._scene_restore_archive is None and self._mapping._atlas is not None:
+                        from .mapper_atlas import MapperAtlasNotReady
+                        from ..mapping.atlas import AtlasResource
+                        try:self._scene_restore_archive=self._mapping._atlas.archive_from_complete(self._durable_source,
+                            current_scope=self._mapping_draft.frame.scope,now_us=self.clock())
+                        except (MapperAtlasNotReady,AtlasResource,ValueError):pass
                 if not adopt_metric:self._cancel_mapping_draft()
         diagnostic_only=inputs.pose is None or restore_issue is not None or mapping_enabled and not adopt_metric
         if diagnostic_only:
@@ -395,7 +429,7 @@ class ResidentMapperProcessor:
             storage_schedule='DISABLED' if self._storage_schedule is None else self._storage_schedule.status)
         return summary,sensors,diagnostic,restore_attempt,adopt_metric
 
-    def _world_report(self,sensors):
+    def _world_report(self,sensors,frame_state=None):
         """원 실제 기하 후보에서만 작성한다. hash/encode/시각 읽기는 최종 채택 lock 밖이다."""
         if self._publication_port is None:return None,'DISABLED'
         if self._frame_sequence>=2**63-1:return None,'SEQUENCE_EXHAUSTED'
@@ -412,12 +446,16 @@ class ResidentMapperProcessor:
         completed=self.clock();published=self.clock()
         built=build_mapping_world(draft,state,basis,context=draft.context,source=inputs.source,
             calibration=draft.pipeline.calibration,sensors=sensors.sensors,current_vehicle=inputs.vehicle,
-            clock_lease=lease,sequence=self._frame_sequence+1,completed_j_us=completed,published_j_us=published)
+            clock_lease=lease,sequence=self._frame_sequence+1,completed_j_us=completed,published_j_us=published,
+            scene_draft=None if frame_state is None else frame_state.scene,
+            hazard_draft=None if frame_state is None else frame_state.hazard,atlas_owner=self._mapping._atlas)
         if built is None:return None,'WORLD_NOT_READY'
         alignment=draft.pipeline._alignment
         trust=decode(lease.trust_bytes,schema.WorldTrust)
         expires=min(draft.original_job.expires_us,alignment.observed_j_interval[0]+alignment.valid_for_us,
             lease.expires_pi_us-trust.upper_offset_us)
+        if frame_state is not None and frame_state.scene is not None:
+            expires=min(expires,frame_state.scene.expires_j_us)
         if not published<expires<2**63:return None,'WORLD_EXPIRED'
         try:
             report=PublicationReport(draft.context,'WORLD_CANDIDATE',built.payload,published,expires,
@@ -445,7 +483,7 @@ class ResidentMapperProcessor:
                 self._scene.hazard(hazard.revision,now_j_us=now)
                 self._scene_draft=self._scene.prepare_frame(draft,draft.result,sensors,
                     world_sequence=sequence,hazard_revision=hazard.revision,now_j_us=now,
-                    restore_source=self._durable_source)
+                    restore_source=self._durable_source,restore_archive=self._scene_restore_archive)
                 self._scene_status=self._scene_draft.reason
         except SceneError:
             self._scene.revoke('ALIGNMENT',now_j_us=now);self._scene_status='SCENE_FRAME_NOT_READY'
@@ -483,7 +521,7 @@ class ResidentMapperProcessor:
             frame_state=self._prepare_frame_state(sensors)
             report=None
             if self._publication_port is not None:
-                report,world_reason=self._world_report(sensors)
+                report,world_reason=self._world_report(sensors,frame_state)
                 summary=dict(summary,world_candidate_ready=report is not None,world_candidate_reason=world_reason)
             if self._config is not None and self._config.survey is not None:
                 summary=dict(summary,scene_status=self._scene_status,

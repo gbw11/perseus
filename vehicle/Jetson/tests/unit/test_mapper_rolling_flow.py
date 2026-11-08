@@ -227,6 +227,8 @@ class MapperRollingFlowTests(unittest.TestCase):
         self.assertIs(collector.grant.request, original)
         self.assertIs(f.mapping._range_request, original)
         self.assertEqual(collector.scope.context, changed)
+        self.assertTrue(any(scope.context==f.context for scope in collector.scope._historical))
+        self.assertIsNotNone(collector.scope._parking_methods)
         self.assertEqual(collector._next, cursor)
         self.assertEqual(self.grid_values(grid), before_grid)
         self.assertEqual(self.pool_values(owner), before_pool)

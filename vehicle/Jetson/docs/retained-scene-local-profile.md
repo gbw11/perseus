@@ -102,9 +102,48 @@ catalog revision/entry, 원 provenance ID와 parent mask union·Pi 구간/순번
 RGB-only로 바꾸지 않으며 depth 포함 과거 aggregate를 HISTORY 기하 예외로 수락하지 않는다.
 현재 조사 창의 freshness와 양성 FREE/필수 sensor mask는 기존 Scene closure가 따로 검사한다.
 
-## 별도 연결 범위
+## World 후보의 보존 FREE
 
-이 저장·의미 포트는 전체 retained World 생산/소비가 아니다. 실제 full frozen EVIDENCE의 유한
-소유권, 현재 SceneRef/원 expiry와 World의 결박, Pi/Gateway/VM의 grant 전달·철회/계획 fence,
-ToF 없는 주행·회피·후진 주차 양성 흐름은 각각 실제 통합 검증이 필요하다. 구현 경과와 실행
-결과는 저장소 README 대신 외부 making-reports에 남긴다.
+실제 FrozenSurvey/RestoredSurvey의 원 receipt/full CP SHA와 현재 관측의 SceneDraft·HazardDraft를
+같은 MappingFrameDraft에 결박한다. 현재 ADMITTED grant의 full SceneAdmissionRef는 publication의
+표준 protobuf JSON과 exact 비교한다. 현재 source·원 ClockLease·hazard revision·Scene/관측/정합/
+원 MapperInput 만료도 유지한다. 실제 운영 World의 LIVE/localization gate는 별도로 통과해야 한다.
+
+rolling은 사전 등록된 원 SceneAtlasArchive의 현재 창 최대4tile만 scoped borrow한다. fixed는
+원 전체 tile 사본4개 이하 또는 실제 restored Complete의 동일 작은 inventory를 사용한다.
+원 META/spec/lattice/정책·map/Pi 문맥을 대조하고 실제 원 CELL의 valid FREE만 투영한다.
+
+현재 RAW OCCUPIED·conflict·unordered hit 또는 현재 local/global hazard는 만료 뒤에도 보존
+FREE로 덮지 않는다. 사용할 수 있는 fresh LIVE FREE는 그대로 둔다. 보존 FREE는 별도 readonly
+후보 snapshot에서 state/support/permission과 static flag를 표현하며 실제 LIVE grid는 바꾸지
+않는다. 통행 근거는 원 whole-cell FREE 증거와 현재 Scene 승인이다. 현재 카메라가 뒤를 새로
+관측했다고 해석하지 않는다. UNKNOWN·기하 보간만으로 FREE를 추가하지 않는다.
+
+보존 age는 원 CELL.pi_lower와 현재 승인 lease가 환산한 publication의 Pi 상한으로 보수 ceil-ms를
+계산하고 uint32에서 포화한다. 실제 기존 J age가 있으면 낮추지 않는다. 미확인 J sentinel을
+실제 나이라고 해석하지 않으며 과거 Pi를 새 J 관측 시각으로 만들지 않는다. 원 SceneRef는
+World에 그대로 복사하고, 최종 채택은 원 Scene version/절대 만료를 다시 확인한다.
+
+## 조사와 ADMITTED의 수명
+
+원180초/RESTORE_CHECK 조사 deadline과 station24는 조사 상태0/1에 적용한다. 감독 아래 sampled
+이동10m 상한은 purpose0 조사에만 누적한다. ADMITTED 상태2는 원 valid_until(승인된 최대4시간),
+현재 clock·관측/정합·MapperInput 수명을 유지하며 조사 station을 추가하지 않는다. RGB/map
+관측은 원 시각·순번 증가와 기존 freshness/pose bracket을 검사한다. 정지 창의 실제 Vehicle
+sample max gap은 계속 별도 검산하며 RGB 처리 간격에 그 수치를 적용하지 않는다.
+
+## 원 key의 부정 사건
+
+등록 source/Pi/Gateway와 이미 수락한 원 grant key가 정확한 terminal3/4만 current ClockLease
+부재·revision 전진과 독립적으로 철회할 수 있다. 원 full SceneRef/nonce/source admission
+revision/issued/valid_until/purpose/frozen SHA/나머지 필드는 같고 lifecycle state/revision만
+변한다. 낮은 revision·다른 nonce·다른 원 key의 부정 사건은 새 복원을 취소하지 않는다.
+
+JIO는 최종 lock에서 source token과 당시 실제 known head를 다시 대조하고 원 bytes를 기존
+SOURCE_SCENE으로 전달한다. Mapper는 기존 Scene의 원 key만 철회하며 lease/기한을 새로
+만들지 않는다. 최신 positive grant는 현재 실제 lease의 source admission revision과 반드시
+같아야 한다. 정상 numerical clock 갱신과 의미상 source revision 전환은 구분한다.
+
+Pi/Gateway/VM의 실제 grant 전달·C 소비/계획 fence, actual Processor/전체 video 상주 흐름,
+장시간 incremental CP cutoff, ToF 없는 cold-start·회피·후진 주차 및 물리 성능 검증은 별도
+통합 대상이다. 구현 경과와 실행 결과는 저장소 README 대신 외부 making-reports에 남긴다.

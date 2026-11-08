@@ -206,7 +206,8 @@ class SceneCoordinator:
         if scope.context!=self.scene.context or scope is not old:
             self.scene.context=scope.context;self.scene.evidence_scope=scope;self._version+=1
 
-    def prepare_frame(self,mapping,result,sensors,*,world_sequence,hazard_revision,now_j_us,restore_source=None):
+    def prepare_frame(self,mapping,result,sensors,*,world_sequence,hazard_revision,now_j_us,
+                      restore_source=None,restore_archive=None):
         """실제 finalized Mapping draft의 새 RGB만 소비한다. D offer는 하지 않는다."""
         from .mapper_mapping import MappingFrameDraft
         self._owner();uint(now_j_us)
@@ -215,6 +216,7 @@ class SceneCoordinator:
             raise SceneError('one actual finalized Mapping draft/result/SensorState required')
         candidate=copy(self.scene);observed=False;station=None;reason='NEW_RGB_NOT_READY'
         if mapping.ready and mapping.context==candidate.context and mapping.frame is not None:
+            candidate.renew_clock(mapping.frame.clock_lease,now_j_us=now_j_us)
             capture=mapping.frame.observation;raw=mapping.inputs.pose;pipeline=mapping.pipeline
             summary=result.summary;alignment=pipeline._alignment;reference=pipeline.reference;fit=result.registration
             scope=mapping.frame.scope;approved=candidate.evidence_scope
@@ -241,7 +243,7 @@ class SceneCoordinator:
                 observation=SurveyObservation(capture.rgb.stamp,fitted,fit,world_sequence,hazard_revision,capture.kind,raw,alignment)
                 observed=candidate.observe(observation,now_j_us=now_j_us)
                 reason='OBSERVED' if observed else 'DUPLICATE_RGB'
-                if observed:
+                if observed and candidate._now(now_j_us)[0].lifecycle_state in (0,1):
                     try:
                         station=SceneStationWitness.from_frame(sensors,observation,candidate.context,candidate.profile,now_j_us=now_j_us)
                         candidate.station(station,now_j_us=now_j_us)
@@ -250,12 +252,12 @@ class SceneCoordinator:
         grant,trust=candidate._now(now_j_us)
         if (restore_source is not None and observed and station is not None
                 and grant.purpose==1 and grant.lifecycle_state==1 and candidate._frozen is None):
-            try:candidate.restore_complete(restore_source,observation,now_j_us=now_j_us)
+            try:candidate.restore_complete(restore_source,observation,now_j_us=now_j_us,archive=restore_archive)
             except ValueError:reason='RESTORE_NOT_READY'
             else:reason='RESTORE_READY'
         expires=min(mapping.original_job.expires_us,candidate._lease.expires_pi_us-trust.upper_offset_us,
             grant.valid_until_pi_us-trust.upper_offset_us)
-        if grant.lifecycle_state in (0,1) or grant.purpose:
+        if grant.lifecycle_state in (0,1):
             expires=min(expires,grant.survey_deadline_pi_us-trust.upper_offset_us)
         if candidate._observation is not None:
             original=candidate._observation
@@ -295,7 +297,8 @@ class SceneCoordinator:
         self._last_terminal=SceneFreezeTerminal(job,None,now_j_us,False,StorageAbort('CANCELLED'))
         self.scene.revoke('STORAGE',now_j_us=now_j_us)
 
-    def adopt_freeze(self,request,*,current_tile_references,current_hazard_revision,now_j_us,all_tiles=None,mapper_state=None):
+    def adopt_freeze(self,request,*,current_tile_references,current_hazard_revision,now_j_us,
+                     all_tiles=None,mapper_state=None,archive=None):
         self._owner()
         if (type(request) is not CheckpointRequest or request.job is not self._freeze_job
                 or self._freeze_request is not None or self._freeze_terminal):raise SceneError('same original queued freeze request required')
@@ -303,7 +306,8 @@ class SceneCoordinator:
             current_hazard_revision=current_hazard_revision,now_j_us=now_j_us)
         if canonical(descriptor)!=self._descriptor:raise SceneError('original freeze descriptor changed before adoption')
         self.scene.adopt_freeze(request,current_tile_references=current_tile_references,
-            current_hazard_revision=current_hazard_revision,now_j_us=now_j_us,all_tiles=all_tiles,mapper_state=mapper_state)
+            current_hazard_revision=current_hazard_revision,now_j_us=now_j_us,
+            all_tiles=all_tiles,mapper_state=mapper_state,archive=archive)
         self._freeze_request=request;return request
 
     def complete_freeze(self,request,receipt,*,now_j_us):

@@ -65,6 +65,17 @@ tile bytes를 보존할 수 있다. 이 원 객체를 weak-owner pin으로 등�
 유지 단계에서 한다. GC를 현재 COMMITTED/Scene 승인으로 바꾸지 않는다. 객체가 오래 남으면
 실제 pool도 계속 차지하며 RESOURCE를 우회하지 않는다. weakref 등록 전 객체를 내보내지 않는다.
 
+Scene의 원 full128 참조는 CP request의 copy32 pin과 별개 `SceneAtlasArchive` owner로
+고정한다. carrier는 원 job/manifest/CP SHA·full wire refs·pool refs만 보유하고 본문 사본을
+만들지 않는다. 활성 CP/FROZEN 또는 검산한 원 Complete의 bootstrap pin에서만 등록하며,
+이미 준비한 frame 후보 뒤에 최초 등록하지 않는다. CP 완료는 Scene archive 해제가 아니다.
+
+현재 World 계산은 원 archive pin의 scoped borrow로 현재 창 최대4tile만 읽는다. 실제
+owner/pin/token/ref를 검사하고 범위 동안 owner를 강하게 보존한다. 소유권이 이미 고정되어
+새 lease·generation·dirty 상태를 바꾸지 않는다. 일반 READ lease의 generation 규칙은
+유지한다. 반환 reader/본문은 scope 밖에서 사용·보관하지 않는다. 이 구분으로 staged
+AtlasDelta를 읽기 작업이 무효화하지 않으면서 실제 보관 bytes도 계속 계수한다.
+
 ## proof와 저장
 
 전체 atlas를 cell별 Python dict로 펼치지 않는다. packed EVIDENCE를 보존하고 현재 ROI의

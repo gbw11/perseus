@@ -20,6 +20,7 @@ from ..storage.contracts import uuid,uint,json_bytes,StorageContext
 from ..storage.records import TileVersion,LoadedCheckpoint
 from ..storage.port import CheckpointRequest
 from .atlas_proof import AtlasProofWindow
+from .atlas_archive import SceneAtlasArchive
 
 
 class MapperAtlasNotReady(RuntimeError):
@@ -136,7 +137,8 @@ class MapperAtlas:
         self.map_epoch,self.policy=map_epoch,rolling_policy;self.pool=AtlasPool(reserved_workspace_bytes=reserved_workspace_bytes)
         self._thread=get_ident();self._token=object();self._generation=0;self._tile_hwm=tile_revision_highwater
         self._metadata={};self._selected={};self._roots=();self._unresolved={};self._frame=self._checkpoint=self._retiring=None
-        self._installing=self._restore_failed=False;self._bootstrap_owner=None;self._install_receipt=None
+        self._installing=self._restore_failed=False;self._bootstrap_owner=self._bootstrap_pin=None;self._install_receipt=None
+        self._archives={}
 
     @classmethod
     def from_complete(cls,complete,*,pipeline,current_scope,selected_bootstrap,now_us,reserved_workspace_bytes):
@@ -204,7 +206,7 @@ class MapperAtlas:
             if tuple(sorted(item.reference for item in owner._selected.values()))!=tuple(tile.reference for tile in complete.tiles):
                 raise MapperAtlasNotReady('installed original complete reference set changed')
             owner._roots=_root_union(owner._metadata)
-            owner.pool.retain_owner(complete,tuple(all_refs))
+            owner._bootstrap_pin=owner.pool.retain_owner(complete,tuple(all_refs))
             owner._bootstrap_owner=complete
             owner._install_receipt=AtlasInstallReceipt(len(complete.tiles),input_bytes,input_bytes,reserved_workspace_bytes,
                 input_bytes+reserved_workspace_bytes,head)
@@ -487,6 +489,100 @@ class MapperAtlas:
                     for actual,expected in zip(tiles,copies))):
             raise MapperAtlasNotReady('original checkpoint request changed the retained tile body ownership')
         return self.pool.retain_owner(original_request,self._checkpoint.copy_refs)
+
+    def _register_archive(self,job,checkpoint_sha256,checkpoint_digest,manifest_sha256,checkpoint_ref,refs):
+        if self._frame is not None:raise MapperAtlasNotReady('archive registration must precede original frame staging')
+        if not refs or len(refs)>128:raise MapperAtlasNotReady('nonempty original scene archive permits at most128 tiles')
+        available={original.serial:original for original in self.pool.retained_refs('EVIDENCE64')}
+        if any(available.get(original.serial) is not original or (item:=self._metadata.get(original.serial)) is None
+                or item.pool_ref is not original for original in refs):
+            raise MapperAtlasNotReady('original retained archive refs/metadata unavailable')
+        refs=tuple(sorted(refs,key=lambda original:self._metadata[original.serial].reference))
+        references=tuple(self._metadata[original.serial].reference for original in refs)
+        self._archives={key:value for key,value in self._archives.items() if value() is not None}
+        key=(job.job_id,checkpoint_digest,checkpoint_ref)
+        known=self._archives.get(key);known=None if known is None else known()
+        if known is not None:
+            if (known.tile_references!=references or known.checkpoint_job!=job or known.checkpoint_sha256!=checkpoint_sha256
+                    or known.manifest_sha256!=manifest_sha256 or len(known.pool_refs)!=len(refs)
+                    or any(a is not b for a,b in zip(known.pool_refs,refs))):
+                raise MapperAtlasNotReady('same original scene archive changed source or refs')
+            return known
+        if len(self._archives)>=16:raise AtlasResource('SCENE_ARCHIVES')
+        archive=SceneAtlasArchive._prepared(map_epoch=self.map_epoch,lattice=self.window.lattice,checkpoint_job=job,
+            checkpoint_sha256=checkpoint_sha256,checkpoint_digest=checkpoint_digest,manifest_sha256=manifest_sha256,
+            checkpoint_ref=checkpoint_ref,tile_references=references,pool_refs=refs,owner=self._token)
+        pin=self.pool.retain_owner(archive,refs)
+        object.__setattr__(archive,'pin',pin);self._archives[key]=weakref(archive)
+        return archive
+
+    def retain_scene(self,snapshot,actual_request):
+        """활성 원 CP/FROZEN의 full refs를 독립 carrier로 pin한다. commit/Scene 승인은 없다."""
+        self._owner()
+        if self._frame is not None:raise MapperAtlasNotReady('archive registration must precede original frame staging')
+        copies=self._snapshot_tiles(snapshot)
+        if (type(actual_request) is not CheckpointRequest or actual_request.job.context.map_epoch!=self.map_epoch
+                or actual_request.payload.tile_references!=snapshot.tile_references
+                or len(actual_request.payload.tiles)!=len(copies)
+                or any(a.reference!=b.reference or a.payload is not b.payload for a,b in zip(actual_request.payload.tiles,copies))):
+            raise MapperAtlasNotReady('actual original checkpoint request/copy ownership required')
+        if self._checkpoint.frozen_lease is None:raise MapperAtlasNotReady('original full FROZEN lease required')
+        refs=self._checkpoint.full_refs
+        for original in refs:self.pool.payload(original,lease=self._checkpoint.frozen_lease)
+        from hashlib import sha256
+        return self._register_archive(actual_request.job,actual_request.payload.sha256,actual_request.digest,
+            sha256(actual_request.payload.manifest).hexdigest(),None,refs)
+
+    def archive_from_complete(self,complete,*,current_scope,now_us):
+        """검산된 원 bootstrap Complete의 옛 pinned refs만 사용한다. current ref를 대입하지 않는다."""
+        from .map_checkpoint import SourceComplete
+        from .scene import SceneEvidenceScope
+        from hashlib import sha256
+        self._owner();uint(now_us)
+        if self._frame is not None:raise MapperAtlasNotReady('archive registration must precede original frame staging')
+        if (type(complete) is not SourceComplete or complete is not self._bootstrap_owner
+                or type(current_scope) is not SceneEvidenceScope or current_scope.context.map_epoch!=self.map_epoch
+                or complete.original_commit is None or self._bootstrap_pin is None):
+            raise MapperAtlasNotReady('actual installed original complete/commit/bootstrap pin required')
+        current_scope.complete_restore_head(complete,now_us=now_us)
+        checkpoint_sha256=complete.original_commit.validate(complete.original_job,complete.manifest,complete.checkpoint_ref)
+        refs=self._bootstrap_pin.refs;originals={tile.reference:tile for tile in complete.tiles}
+        if len(refs)!=len(originals):raise MapperAtlasNotReady('original complete bootstrap inventory differs')
+        try:
+            with self.pool.borrow_owner(complete,self._bootstrap_pin,refs) as reader:
+                for original in refs:
+                    item=self._metadata.get(original.serial)
+                    tile=None if item is None else originals.get(item.reference)
+                    if (tile is None or item.pool_ref is not original or item.crc32!=tile.crc32
+                            or tuple(item.iter_roots())!=tile.provenance_ids or reader(original) is not tile.payload):
+                        raise MapperAtlasNotReady('original complete body/ref/root ownership differs')
+        except AtlasError as error:raise MapperAtlasNotReady('original complete bootstrap pin unavailable') from error
+        return self._register_archive(complete.original_job,checkpoint_sha256,complete.original_commit.receipt.job_digest,
+            sha256(complete.manifest).hexdigest(),complete.checkpoint_ref,refs)
+
+    @contextmanager
+    def read_archive(self,archive,window):
+        """등록된 원 full archive 중 현재 창 최대4tile만 빌린다. staged generation을 바꾸지 않는다."""
+        self._owner();self._window(window)
+        if (type(archive) is not SceneAtlasArchive or archive._owner is not self._token
+                or archive.map_epoch!=self.map_epoch or archive.lattice!=window.lattice):
+            raise MapperAtlasNotReady('original scene archive of this map/lattice required')
+        entries={original.key:original for original in archive.pool_refs}
+        keys=tuple((piece.tile_x,piece.tile_y) for piece in window.pieces())
+        refs=tuple(entries[key] for key in keys if key in entries);active=True;thread=self._thread
+        try:
+            with self.pool.borrow_owner(archive,archive.pin,refs) as fetch:
+                def reader(tx,ty):
+                    if get_ident()!=thread:raise RuntimeError('archive read belongs to its original compute owner')
+                    if not active:raise MapperAtlasNotReady('original archive read has ended')
+                    key=(tx,ty)
+                    if type(tx) is not int or type(ty) is not int or key not in keys:
+                        raise MapperAtlasNotReady('tile is outside original archive read window')
+                    original=entries.get(key)
+                    return None if original is None else fetch(original)
+                yield reader
+        except AtlasError as error:raise MapperAtlasNotReady('original registered archive pin/ref unavailable') from error
+        finally:active=False
 
     def drain_owner_releases(self):
         """GC callback은 token만 남긴다. 실제 pool 회수/원 roots 갱신은 compute에서 한다."""

@@ -241,7 +241,8 @@ class MapperMapping:
                                  item[1].coverage_qualified,item[1].time_qualified))):
                     sources.append((item[0],item[1],evidence.sensor_instance,evidence.sensor_generation))
         old=() if self._scope is None else self._scope._historical
-        if self._scope is not None and self._scope._tof!=tuple(sources):old=(*old,self._scope)
+        if self._scope is not None and (self._scope._tof!=tuple(sources) or self._scope.context!=context):
+            old=(*old,self._scope)
         scope=SceneEvidenceScope(context,self.raw,self.calibration,self.profile.sha256,
             tof_sources=tuple(sources),historical_scopes=old)
         if self.catalogs is not None:

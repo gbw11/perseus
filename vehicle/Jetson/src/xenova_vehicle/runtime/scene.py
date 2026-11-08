@@ -47,6 +47,16 @@ def _number(value):
     return value
 
 
+def _check_archive(archive,job,manifest,checkpoint_sha256,checkpoint_digest,references):
+    if archive is None:return
+    from .atlas_archive import SceneAtlasArchive
+    if (type(archive) is not SceneAtlasArchive or archive.checkpoint_job!=job
+            or archive.map_epoch!=job.context.map_epoch or archive.checkpoint_sha256!=checkpoint_sha256
+            or archive.checkpoint_digest!=checkpoint_digest or archive.manifest_sha256!=sha256(manifest).hexdigest()
+            or archive.tile_references!=references):
+        raise SceneError('original full scene archive differs from actual checkpoint')
+
+
 @dataclass(frozen=True)
 class SurveyProfile:
     """설치에서 승인하는 값. station 기준이나 sensor 존재를 operator가 바꾸지 않는다."""
@@ -105,6 +115,8 @@ class FrozenSurvey:
     hazard_revision: int
     grant_revision: int
     receipt: CommitReceipt | None = None
+    archive: 'SceneAtlasArchive | None' = None
+    fixed_tiles: tuple = ()
 
     @property
     def checkpoint_sha256(self):return self.request.payload.sha256
@@ -120,6 +132,7 @@ class RestoredSurvey:
     summary: bytes
     hazard_revision: int
     grant_revision: int
+    archive: 'SceneAtlasArchive | None' = None
 
     @property
     def receipt(self):return self.complete.original_commit.receipt
@@ -502,6 +515,8 @@ class MapperScene:
         uint(now)
         if self._grant is None or self._lease is None: raise SceneError('no scene grant/clock')
         s, _, decode = _codec(); grant = decode(self._grant, s.SceneGrant)
+        if grant.lifecycle_state not in (3,4) and grant.source_admission_revision != self._lease.source_revision:
+            self.revoke('SOURCE'); raise SceneError('positive scene source admission revision changed')
         trust = decode(self._lease.trust_bytes, s.WorldTrust)
         if now + trust.upper_offset_us >= min(grant.valid_until_pi_us, self._lease.expires_pi_us):
             self.revoke('TIMEOUT'); raise SceneError('scene or original clock lease expired')
@@ -510,6 +525,16 @@ class MapperScene:
     def receive_grant(self, raw, lease, *, now_j_us):
         from xenova_drive_world.mapper_clock import ClockLease
         s, encode, decode = _codec(); grant = decode(raw, s.SceneGrant)
+        if grant.lifecycle_state in (3,4):
+            from .source_identity import known_scene_negative
+            uint(now_j_us)
+            if not known_scene_negative(raw,self._grant,source=self.source,
+                    pi_host_boot=self.context.pi_host_boot,gateway_instance=self.gateway_instance):
+                return False
+            if raw == self._grant:return True
+            self._grant=raw
+            self.revoke('REVOKED',now_j_us=now_j_us)
+            return True
         if type(lease) is not ClockLease or lease.source != self.source or lease.pi_host_boot != self.context.pi_host_boot:
             self.revoke('SOURCE'); raise SceneError('scene requires current original source clock lease')
         for name in ('vehicle', 'map_epoch', 'frame_epoch', 'odom_epoch', 'configuration', 'calibration', 'primitive'):
@@ -584,10 +609,11 @@ class MapperScene:
                     <= stamp.captured_us[1] <= raw.captured_us[1] <= raw.bracket_us[1]):
             raise SceneError('observation time/pose/source provenance mismatch')
         lo, hi = raw.captured_us
+        collecting=grant.lifecycle_state in (0,1)
         if (now_j_us < stamp.available_us or now_j_us-lo > p.observation_max_age_us or
-                (not grant.purpose and (lo+trust.lower_offset_us < self._begin_pi
+                (collecting and not grant.purpose and (lo+trust.lower_offset_us < self._begin_pi
                     or hi+trust.upper_offset_us > self._begin_pi+SURVEY_US)) or
-                (grant.purpose and (self._validation_start_j is None or lo < self._validation_start_j
+                (collecting and grant.purpose and (self._validation_start_j is None or lo < self._validation_start_j
                     or hi+trust.upper_offset_us >= grant.survey_deadline_pi_us))):
             raise SceneError('original survey observation outside collection/freshness window')
         if (registration.status != 'BOUNDED' or registration.complete is not True or not registration.feasible
@@ -613,11 +639,15 @@ class MapperScene:
         self.hazard(observation.hazard_revision,now_j_us=now_j_us)
         if self._last_pose is not None:
             old = self._last_pose
-            if not old.at_us < sample.at_us <= old.at_us+p.max_pose_gap_us:
-                self.revoke('SOURCE'); raise SceneError('survey pose stream gap/order')
-            self._travel += math.hypot(sample.x-old.x, sample.y-old.y)+sample.position_error_m+old.position_error_m
-            if self._travel > 10.:
-                self.revoke('RESOURCE'); raise SceneError('survey supervised travel exceeds10m')
+            # Vehicle 정지창의 gap 상한은 station 검증이 소유한다. RGB 처리율과 같지 않다.
+            if not old.at_us < sample.at_us:
+                self.revoke('SOURCE'); raise SceneError('map capture pose order regressed')
+            if collecting and not grant.purpose:
+                travel=self._travel+math.hypot(sample.x-old.x,sample.y-old.y)+sample.position_error_m+old.position_error_m
+                if not math.isfinite(travel) or travel>10.:
+                    self.revoke('RESOURCE'); raise SceneError('survey supervised travel exceeds10m')
+                # 기존 감독 sampled displacement 정책이다. 실제 전체 주행거리 인증은 아니다.
+                self._travel=travel
         self._last_pose = sample; self._observation = observation
         if self._started_j is None: self._started_j = lo
         if grant.lifecycle_state == 0:
@@ -635,7 +665,8 @@ class MapperScene:
         return True
 
     def station(self, poses, *, now_j_us):
-        self._now(now_j_us); p = self.profile
+        grant,_=self._now(now_j_us); p = self.profile
+        if grant.lifecycle_state not in (0,1):return False
         # 운영 경로는 원 SensorState 등록 객체를 재검산하는 typed witness만 받는다.
         from .mapper_scene import SceneStationWitness
         if type(poses) is SceneStationWitness:
@@ -664,6 +695,8 @@ class MapperScene:
         return self._station_record(last,fields,p)
 
     def _station_record(self,last,fields,p):
+        s,_,decode=_codec()
+        if self._grant is None or decode(self._grant,s.SceneGrant).lifecycle_state not in (0,1):return False
         if self._validation_start_j is not None and fields['started_us']<self._validation_start_j:
             raise SceneError('restore stationary window predates validation start')
         if any(math.hypot(last.x-old.x,last.y-old.y)-last.position_error_m-old.position_error_m<p.station_distance_m
@@ -846,7 +879,7 @@ class MapperScene:
         return json_bytes(canonical(scene),16384)
 
     def adopt_freeze(self,request,*,current_tile_references,current_hazard_revision,now_j_us,
-                     all_tiles=None,mapper_state=None):
+                     all_tiles=None,mapper_state=None,archive=None):
         """Catalog가 이미 고정한 동일 원 CP만 수락한다. 요청을 재생성하지 않는다.
 
         all_tiles는 실제 snapshot의 full128 사본이며 wire copy32 cap과 별개다.
@@ -867,6 +900,10 @@ class MapperScene:
         request.payload.validate_job(request.job)
         positive,valid_mask,slots=self._inspect(request.payload,begin_pi=self._begin_pi,
             end_pi=self._begin_pi+SURVEY_US,all_tiles=all_tiles)
+        _check_archive(archive,request.job,request.payload.manifest,request.payload.sha256,
+            request.digest,request.payload.tile_references)
+        full_tiles=request.payload.tiles if all_tiles is None else all_tiles
+        fixed_tiles=full_tiles if archive is None and len(full_tiles)<=4 else ()
         grant,_=self._now(now_j_us);observation=self._observation;payload=request.payload
         self._attempts += 1
         s, encode, _ = _codec(); lo,hi = observation.raw_pose.captured_us
@@ -881,7 +918,8 @@ class MapperScene:
             anchor_position_bound_m=observation.registration.position_error_m,
             anchor_heading_bound_rad=observation.registration.yaw_error_rad,evidence_flags=31,failure_flags=0,
             timestamp_error_us=(hi-lo+1)//2)
-        self._frozen = FrozenSurvey(request,encode(summary),self._hazard,grant.lifecycle_revision)
+        self._frozen = FrozenSurvey(request,encode(summary),self._hazard,grant.lifecycle_revision,
+            archive=archive,fixed_tiles=fixed_tiles)
         self._summary = None; self._eligible = False; self._blocked = 'FREEZE_PENDING'; return request
 
     def prepare_freeze(self,job,tiles,evidence,*,current_tile_references,current_hazard_revision,now_j_us,
@@ -910,7 +948,8 @@ class MapperScene:
         summary = original_summary
         summary.completed_peer_us = now_j_us
         self._summary = encode(summary)
-        self._frozen = FrozenSurvey(request,self._summary,frozen.hazard_revision,frozen.grant_revision,receipt)
+        self._frozen = FrozenSurvey(request,self._summary,frozen.hazard_revision,frozen.grant_revision,receipt,
+            frozen.archive,frozen.fixed_tiles)
         return True
 
     def restore_ready(self, loaded, original_receipt, observation, *, now_j_us):
@@ -924,7 +963,7 @@ class MapperScene:
         if complete is None:raise SceneError('all original selected checkpoint pages required')
         return self.restore_complete(complete,observation,now_j_us=now_j_us)
 
-    def restore_complete(self, complete, observation, *, now_j_us):
+    def restore_complete(self, complete, observation, *, now_j_us,archive=None):
         """전체 실제 LOAD·원 transaction·새 관측을 결박한다. 원 CP/셀의 시각은 갱신하지 않는다."""
         from .map_checkpoint import SourceComplete
         grant, trust = self._now(now_j_us)
@@ -936,6 +975,8 @@ class MapperScene:
         original_sha=complete.original_commit.validate(complete.original_job,complete.manifest,complete.checkpoint_ref)
         if original_sha!=grant.restore_checkpoint_sha256.hex():
             raise SceneError('restore grant selected a different original full checkpoint SHA')
+        _check_archive(archive,complete.original_job,complete.manifest,original_sha,
+            complete.original_commit.receipt.job_digest,tuple(tile.reference for tile in complete.tiles))
         old=complete.original_job;receipt=complete.original_commit.receipt
         if any(getattr(old.context,name) != getattr(self.context,name) for name in
                ('database_uuid','map_epoch','frame_epoch','odom_epoch','pi_host_boot','configuration','calibration','primitive_sha256')):
@@ -971,7 +1012,7 @@ class MapperScene:
             anchor_heading_bound_rad=observation.registration.yaw_error_rad,evidence_flags=63,failure_flags=0,
             timestamp_error_us=(hi-lo+1)//2)
         self._summary = encode(summary)
-        self._frozen = RestoredSurvey(complete,self._summary,self._hazard,grant.lifecycle_revision)
+        self._frozen = RestoredSurvey(complete,self._summary,self._hazard,grant.lifecycle_revision,archive)
         return self._summary
 
     def summary_bytes(self, *, now_j_us):
