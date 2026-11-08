@@ -9,7 +9,7 @@ enum de_result { DE_OK,DE_BUSY,DE_INPUT,DE_WAITING,DE_MAP,DE_POSE,DE_PATH,
  DE_EXPIRED,DE_CHANGED,DE_STATE,DE_LIMIT,DE_CANCELLED,DE_CLOCK,DE_FRAME,DE_CONFIGURATION,DE_REFERENCE };
 /* Tracker, supervisor, state exporter and one planner preparation probe. */
 #define DE_READERS 4
-struct de_path_slot {struct lp_path path;atomic_uint generation,leases[DE_READERS];bool writing;};
+struct de_path_slot {struct lp_path path;atomic_uint generation,leases[DE_READERS];bool writing;uint64_t scene_generation;};
 struct de_reference {unsigned slot;uint32_t generation,lease;};
 struct de_witness {uint64_t reference_revision,observation_sequence,valid_until_pi_us;char map_epoch[37];};
 struct drive_engine {
@@ -21,6 +21,8 @@ struct drive_engine {
  struct de_path_slot paths[DE_PATH_SLOTS];atomic_flag lock;
  const struct lp_config *config;const struct lp_assets *assets;
  struct lp_search search;struct lp_tracker tracker;struct lp_metrics tracking,planned;
+ struct tr_intent task;struct tr_basis basis;
+ struct lp_tracker progress_snapshot;uint32_t progress_generation;uint64_t planning_vehicle_pi_us;
  struct dw_handle planning_map;const struct dw_snapshot *planning_snapshot;
  struct de_reference planning_path;bool planning,plan_finalized,plan_valid;atomic_bool stopping,path_invalidated;int current;
  uint32_t epoch,next_generation,next_lease;uint64_t path_revision;
@@ -33,7 +35,7 @@ struct drive_engine {
  struct de_witness last_track_world;
  bool maneuver_active;dw_pose maneuver_goal;int maneuver_direction;uint64_t maneuver_revision;
  uint64_t merge_passed_reference_revision;
- bool has_grant; xenova_drive_MissionGrant grant,planning_grant;
+ bool has_grant,planning_has_grant; xenova_drive_MissionGrant grant,planning_grant;
  char maneuver_frame[37],maneuver_odom[37],maneuver_configuration[65],maneuver_reference[65];
  atomic_int search_reason,last_state_result,last_world_result;struct lp_budget budget;
  unsigned search_outcomes[LP_CLOCK+1];enum lp_result first_search_failure;
@@ -65,7 +67,8 @@ enum de_result de_prepare(struct drive_engine *,uint64_t,struct de_reference *,s
  * actual tracker calculation are required before publication, not PUBACK. */
 enum de_result de_apply(struct drive_engine *,const dw_state *,uint64_t,struct lp_budget);
 /* Same planner owner polls after BUSY; does not decode/validate again. */
-enum de_result de_apply_finish(struct drive_engine *);
+/* Fresh Pi upper time is required when a pending Scene-derived candidate commits. */
+enum de_result de_apply_finish(struct drive_engine *,uint64_t now_pi_us);
 enum de_result de_path_acquire(struct drive_engine *,struct de_reference *,const struct lp_path **);
 enum de_result de_path_release(struct drive_engine *,struct de_reference);
 /* Stop is a request. The planner owner must finish cancellation and release its

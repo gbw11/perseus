@@ -11,9 +11,16 @@
 #include "state_transfer.h"
 #include <xenova/manual_input.h>
 
+/* valid_until_ms and, for binary input only, input_received_ms retain this
+ * epoch until publication. Zero keeps existing adapters in uptime-ms. */
+enum drive_sample_clock { DRIVE_SAMPLE_UPTIME_MS, DRIVE_SAMPLE_COUNTER_MS };
 struct drive_sample { float v_mps,steer_rad,nearest_m; enum auto_reason auto_reason; const char *reason;
- bool binary_input;int64_t input_sequence,input_received_ms,valid_until_ms;
- char map_epoch[37];uint64_t reference_revision,observation_sequence;uint32_t path_generation,tracker_index,maneuver_phase; };
+ bool binary_input;enum drive_sample_clock clock_domain;int64_t input_sequence,input_received_ms,valid_until_ms;
+ char map_epoch[37];uint64_t reference_revision,observation_sequence;uint32_t path_generation,tracker_index,maneuver_phase;
+ /* 현대 command는 원 계산 snapshot에 추가한다. 위 legacy clock/source prefix는 유지한다. */
+ bool modern_command,gate_required,hold_steer;int requested_direction;
+ struct xm_drive_command3 command;uint64_t valid_until_guest_us,phase_until_pi_us;
+ unsigned segment_index,cusp_index; };
 typedef int (*drive_calculate)(void *context,struct xm_span control,struct xm_span input,
                                int64_t age_ms,struct drive_sample *out);
 /* Bounded validation of immutable configuration/input, no work progress or I/O. */

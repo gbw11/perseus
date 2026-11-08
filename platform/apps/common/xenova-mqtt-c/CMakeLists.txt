@@ -13,6 +13,7 @@ set(XM_CORE_SOURCES
     src/xm_envelope.c
     src/xm_seq.c
     src/xm_payload.c
+    src/xm_manual.c
 )
 
 add_library(xenova_mqtt_core STATIC ${XM_CORE_SOURCES})

@@ -248,7 +248,8 @@ def test_pi_vehicle_clock_is_independent_of_absent_or_expired_mapper_clock(tmp_p
         if source_trust is not None:assert response.trust.expires_pi_us==1
 
 
-def test_binary_oversize_header_is_bounded_and_same_owner_reconnects():
+@pytest.mark.parametrize('first_failure',['oversize','eof'])
+def test_binary_oversize_header_is_bounded_and_same_owner_reconnects(first_failure):
     """Actual TCP/Paho receive path, no allocation of the advertised body."""
     import socket
     import struct
@@ -275,8 +276,9 @@ def test_binary_oversize_header_is_bounded_and_same_owner_reconnects():
         try:
             with server.accept()[0] as first:
                 first.settimeout(2);packet(first);first.sendall(b'\x20\x02\x00\x00')
-                first.sendall(b'\x30'+remaining(MAX_BYTES+257))
-                stop.wait(.2)
+                if first_failure=='oversize':
+                    first.sendall(b'\x30'+remaining(MAX_BYTES+257))
+                    stop.wait(.2)
             with server.accept()[0] as second:
                 second.settimeout(2);packet(second);second.sendall(b'\x20\x02\x00\x00')
                 topic=outbound(A).encode();body=struct.pack('!H',len(topic))+topic+encode(message)
@@ -287,7 +289,8 @@ def test_binary_oversize_header_is_bounded_and_same_owner_reconnects():
     try:
         until(lambda:io.received==1)
         item=io.take();assert item[0]==A and item[1]==message
-        assert io.oversize>=1 and io.drop_reasons['OVERSIZE']>=1
+        if first_failure=='oversize':assert io.oversize>=1 and io.drop_reasons['OVERSIZE']>=1
+        else:assert io.failed>=1 and io.oversize==0
         assert io.incoming.maxsize==4 and io.failure is None
     finally:
         stop.set();io.close();worker.join(4);server.close()

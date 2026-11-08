@@ -1,0 +1,376 @@
+{
+  "issue": "S15P31E110-379",
+  "date": "2026-11-08",
+  "platform_commit": "73709a34",
+  "scope": "SSH read-only runtime readiness audit; no video performance acceptance",
+  "acceptance_complete": false,
+  "machine": "aarch64",
+  "kernel": "6.18.33-v8",
+  "os": {
+    "ID": "xenova",
+    "VERSION": "6.0.4 (wrynose)",
+    "VERSION_ID": "6.0.4",
+    "PRETTY_NAME": "Xenova 6.0.4 (wrynose)"
+  },
+  "versions": {
+    "xset": "1.2.5",
+    "Xorg": "1.21.1.24",
+    "chromium": "152.0.7977.82",
+    "ffmpeg": "8.0.3",
+    "python": "3.14.7",
+    "turbojpeg_release": null
+  },
+  "turbojpeg_probe": {
+    "lookup": "libturbojpeg.so.0",
+    "scope": "load library and create/destroy compressor only; no image or frame",
+    "symbols": {
+      "tjInitCompress": true,
+      "tjBufSize": true,
+      "tjAlloc": true,
+      "tjCompress2": true,
+      "tjFree": true,
+      "tjDestroy": true
+    },
+    "compressor_created": true,
+    "destroy_exit": 0
+  },
+  "source_comparison": [
+    {
+      "module": "main.py",
+      "installed_sha256": "9af24d62e5c2d918fe034be6cb7cb1b9001f7f30a2f2ca99a907b0c485b18724",
+      "platform_sha256": "9af24d62e5c2d918fe034be6cb7cb1b9001f7f30a2f2ca99a907b0c485b18724",
+      "matches_platform": true
+    },
+    {
+      "module": "outputs.py",
+      "installed_sha256": "67830627effbb7b6804305156cc0c5e99420449f7c53504889f1dfa91cef3680",
+      "platform_sha256": "67830627effbb7b6804305156cc0c5e99420449f7c53504889f1dfa91cef3680",
+      "matches_platform": true
+    },
+    {
+      "module": "kiosk.py",
+      "installed_sha256": "426e7fab103795abf9965507f623ba732d1441baaced642894576a3db62b609d",
+      "platform_sha256": "426e7fab103795abf9965507f623ba732d1441baaced642894576a3db62b609d",
+      "matches_platform": true
+    },
+    {
+      "module": "native_session.py",
+      "installed_sha256": "a668660a335486afc17a2a1bb1b4cd91ba2a93d61bf0a1d26bda3f062c11fca3",
+      "platform_sha256": "a668660a335486afc17a2a1bb1b4cd91ba2a93d61bf0a1d26bda3f062c11fca3",
+      "matches_platform": true
+    },
+    {
+      "module": "native_capture.py",
+      "installed_sha256": "f74e0e55af9485c49abc456f49e4f163fa6f00bac7cf70f88b1159c33e8695df",
+      "platform_sha256": "f74e0e55af9485c49abc456f49e4f163fa6f00bac7cf70f88b1159c33e8695df",
+      "matches_platform": true
+    },
+    {
+      "module": "native_jpeg.py",
+      "installed_sha256": "b3dddb513e14b267a216a2cb06c4940dbe93d180c52bfde935bd583619f2d3a2",
+      "platform_sha256": "b3dddb513e14b267a216a2cb06c4940dbe93d180c52bfde935bd583619f2d3a2",
+      "matches_platform": true
+    },
+    {
+      "module": "native_x11.py",
+      "installed_sha256": "de0e96c876ca74e2b208741a8781529c1038ebea4e63bae35d19f209a1a76e82",
+      "platform_sha256": "de0e96c876ca74e2b208741a8781529c1038ebea4e63bae35d19f209a1a76e82",
+      "matches_platform": true
+    },
+    {
+      "module": "runtime_status.py",
+      "installed_sha256": "e40b5f43366e0a49786f136020b6b632f3a1596eaaf8240ce30a898d7d8a5b2c",
+      "platform_sha256": "e40b5f43366e0a49786f136020b6b632f3a1596eaaf8240ce30a898d7d8a5b2c",
+      "matches_platform": true
+    },
+    {
+      "module": "stream.py",
+      "installed_sha256": "b309cd38cb030f52cce12221d9fc3181fe7a7bc97131edbfe7195c42bcb83470",
+      "platform_sha256": "b309cd38cb030f52cce12221d9fc3181fe7a7bc97131edbfe7195c42bcb83470",
+      "matches_platform": true
+    },
+    {
+      "module": "display_mode.py",
+      "installed_sha256": "4bc3dda919eb41a1ea385112f2082d869d09a2b60b2de35577948a9009c4e32f",
+      "platform_sha256": "4bc3dda919eb41a1ea385112f2082d869d09a2b60b2de35577948a9009c4e32f",
+      "matches_platform": true
+    }
+  ],
+  "graphics": {
+    "paths": {
+      "/sys/class/drm": {
+        "exists": true,
+        "entries": [
+          "version"
+        ]
+      },
+      "/dev/dri": {
+        "exists": false,
+        "entries": []
+      },
+      "/tmp/.X11-unix": {
+        "exists": true,
+        "entries": []
+      }
+    },
+    "builtin": [
+      "kernel/drivers/gpu/drm/drm.ko",
+      "kernel/drivers/gpu/drm/drm_panel_orientation_quirks.ko",
+      "kernel/drivers/gpu/drm/drm_exec.ko",
+      "kernel/drivers/gpu/drm/drm_dma_helper.ko",
+      "kernel/drivers/gpu/drm/drm_shmem_helper.ko",
+      "kernel/drivers/gpu/drm/drm_kms_helper.ko",
+      "kernel/drivers/gpu/drm/drm_mipi_dsi.ko",
+      "kernel/drivers/gpu/drm/clients/drm_client_lib.ko",
+      "kernel/drivers/gpu/drm/display/drm_display_helper.ko",
+      "kernel/drivers/gpu/drm/vc4/vc4.ko"
+    ],
+    "boot_config": {
+      "/boot/config.txt": [
+        "dtoverlay=vc4-kms-v3d"
+      ]
+    },
+    "hdmi_conditions": {
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "ConditionResult": "no",
+      "AssertResult": "no",
+      "MainPID": "0",
+      "Result": "success"
+    },
+    "listeners": [
+      "LISTEN 0      2048                                127.0.0.1:8082       0.0.0.0:*   "
+    ]
+  },
+  "config_presence": {
+    "/etc/xenova/display-runtime.json": {
+      "exists": false
+    },
+    "/etc/xenova/display-Xorg.conf": {
+      "exists": false
+    },
+    "/etc/xenova/display-kiosk.env": {
+      "exists": false
+    },
+    "/etc/xenova/display-bindings.json": {
+      "exists": true,
+      "uid": 0,
+      "mode": "0o600"
+    },
+    "/etc/xenova/display.env": {
+      "exists": true,
+      "uid": 0,
+      "mode": "0o600"
+    }
+  },
+  "initial_units": [
+    {
+      "Id": "xenova-display.target",
+      "LoadState": "loaded",
+      "ActiveState": "active",
+      "SubState": "active",
+      "FragmentPath": "/usr/lib/systemd/system/xenova-display.target",
+      "UnitFileState": "enabled"
+    },
+    {
+      "Id": "xenova-display-feed.service",
+      "LoadState": "loaded",
+      "ActiveState": "active",
+      "SubState": "running",
+      "FragmentPath": "/usr/lib/systemd/system/xenova-display-feed.service",
+      "UnitFileState": "enabled",
+      "MainPID": "591163",
+      "Result": "success",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-display-hdmi.service",
+      "LoadState": "loaded",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "FragmentPath": "/usr/lib/systemd/system/xenova-display-hdmi.service",
+      "UnitFileState": "static",
+      "MainPID": "0",
+      "Result": "success",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-display-kiosk.service",
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "FragmentPath": "",
+      "UnitFileState": "",
+      "MainPID": "0",
+      "Result": "success",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-display-stream.service",
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "FragmentPath": "",
+      "UnitFileState": "",
+      "MainPID": "0",
+      "Result": "success",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-graphics.service",
+      "LoadState": "not-found",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "FragmentPath": "",
+      "UnitFileState": "",
+      "MainPID": "0",
+      "Result": "success",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-display-mobile.service",
+      "LoadState": "loaded",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "FragmentPath": "/usr/lib/systemd/system/xenova-display-mobile.service",
+      "UnitFileState": "disabled",
+      "MainPID": "0",
+      "Result": "success",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-dom0-manager.service",
+      "LoadState": "loaded",
+      "ActiveState": "active",
+      "SubState": "running",
+      "FragmentPath": "/usr/lib/systemd/system/xenova-dom0-manager.service",
+      "UnitFileState": "enabled",
+      "MainPID": "826360",
+      "Result": "success",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-gateway.service",
+      "LoadState": "loaded",
+      "ActiveState": "active",
+      "SubState": "running",
+      "FragmentPath": "/usr/lib/systemd/system/xenova-gateway.service",
+      "UnitFileState": "disabled",
+      "MainPID": "856290",
+      "Result": "success",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-recovery-worker.service",
+      "LoadState": "loaded",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "FragmentPath": "/usr/lib/systemd/system/xenova-recovery-worker.service",
+      "UnitFileState": "enabled",
+      "MainPID": "0",
+      "Result": "success",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "mosquitto.service",
+      "LoadState": "loaded",
+      "ActiveState": "active",
+      "SubState": "running",
+      "FragmentPath": "/etc/systemd/system/mosquitto.service",
+      "UnitFileState": "enabled",
+      "MainPID": "833",
+      "Result": "success",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "tailscaled.service",
+      "LoadState": "loaded",
+      "ActiveState": "active",
+      "SubState": "running",
+      "FragmentPath": "/usr/lib/systemd/system/tailscaled.service",
+      "UnitFileState": "enabled",
+      "MainPID": "599",
+      "Result": "success",
+      "NRestarts": "0"
+    }
+  ],
+  "final_units": [
+    {
+      "Id": "xenova-display-feed.service",
+      "ActiveState": "active",
+      "SubState": "running",
+      "MainPID": "591163",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-display-hdmi.service",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "MainPID": "0",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-dom0-manager.service",
+      "ActiveState": "active",
+      "SubState": "running",
+      "MainPID": "826360",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-gateway.service",
+      "ActiveState": "active",
+      "SubState": "running",
+      "MainPID": "858989",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "xenova-recovery-worker.service",
+      "ActiveState": "inactive",
+      "SubState": "dead",
+      "MainPID": "0",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "mosquitto.service",
+      "ActiveState": "active",
+      "SubState": "running",
+      "MainPID": "833",
+      "NRestarts": "0"
+    },
+    {
+      "Id": "tailscaled.service",
+      "ActiveState": "active",
+      "SubState": "running",
+      "MainPID": "599",
+      "NRestarts": "0"
+    }
+  ],
+  "same_boot": true,
+  "metrics": {
+    "video_latency_p95_ms": null,
+    "combined_jpeg_mbps": null,
+    "sender_encoder_cpu_cores": null,
+    "stream_ram_growth": null
+  },
+  "targets": {
+    "width": 1280,
+    "height": 720,
+    "latency_p95_ms_max": 500,
+    "combined_jpeg_mbps_max": 8,
+    "sender_encoder_cpu_cores_max": 1
+  },
+  "actions": {
+    "remote_file_changes": false,
+    "service_restarts": false,
+    "installs": false,
+    "ssh_policy_changes": false,
+    "capture_started": false
+  },
+  "limitations": [
+    "No HDMI monitors connected during audit",
+    "No X11 or capture process running",
+    "Exact image build commit unavailable",
+    "TurboJPEG load/init/destroy only; no frame encoding",
+    "Gateway PID changed between observations; cause not established by this audit"
+  ]
+}

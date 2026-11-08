@@ -211,6 +211,15 @@ status: ACCEPTED=1/APPLIED=2/REJECTED=3/FAULT=4. flags: velocity=1/steering=2/st
 새 장치 session은 이전 명령/ACK를 무효화하고 fault로 출력 철회한다. 새 Pi 프로세스도 새 session으로 handshake한다.
 역전/중복·다른 session·원 명령 불일치·기한 지난 ACK는 현재성을 갱신하지 않는다.
 handshake/apply timeout·fault는 출력 차단/STOP에 연결되고 명시 재시작/기존 재무장 없이 DRIVE를 복구하지 않는다.
+ACK는 비차단 read 완료 직후의 보수적 수신 시각으로 만료를 검사한다. 같은 read에서 완성한 frame은
+그 시각을 쓰고 partial frame은 완성된 다음 read 시각을 쓴다. poll 시작 시각이나 이후 decode 시각으로
+바꾸지 않는다. 기한 내 받은 적용 사실과 현재 age 유효성은 별도이며, 새 명령·fault·관측 만료는 계속
+현재 view를 제한한다. RX는 최대4096바이트
+안에서 검증된 frame부터 순차 적용하며, POSIX 장치 소유자는 수신 준비와 새 STOP 통지로 깨어난다.
+고정 native POSIX backend의 소유 경로는 기존 readiness 뒤 최대4096바이트를 한 번 읽는다.
+idle의 빈 읽기와 HUP는 같은 owner가 확인한 readable 근거로 구별한다. STOP/만료/종료가 RX보다
+우선하며, 이 경로의 취소는 기존 owner wake를 사용한다. 직접 `poll()`의 pyserial `cancel_read()`와
+URL/custom backend는 기존 public read 경로를 유지한다. 이 구분은 wire·ACK 기한을 바꾸지 않는다.
 accepted는 적용이 아니고 applied는 물리 정지가 아니다. physical_stop은 해당 STOP에 대응하는 지원 stationary 보고가 있어야 값이 생긴다.
 
 parser/RX/TX는 같은 device owner에서 처리한다. 1회 RX 최대 4096바이트, pending command 최대 32, 적용 사건 queue 최대 64다.
@@ -229,6 +238,24 @@ feedback-1 명령/ACK frame은 유지하고 HELLO/ACK의 version을 2로 명시�
 ODOMETRY=32를 추가로 요구한다. 구형 firmware에 자동으로 새 프레임을 보내지 않는다.
 기존 COBS/CRC·single serial owner·부분 frame 상한을 그대로 사용한다.
 
+명령의 `DEVICE_APPLY_TIMEOUT`은 출력 차단과 원 실패에 계속 남는다. 이 사유만 있을 때는
+동일 device/Pi session의 독립 encoder probe·표본 수집을 계속한다. 기존 시각·순서·품질·연속성·만료
+검사를 통과한 `vehicle_sample`만 제공하며 명령의 accepted/applied/physical_stop을 복구하지 않는다.
+장치 재시작·link 상실·다른 fault는 센서 관측을 계속 차단한다. 유효 센서 수신은 재무장·DRIVE 허가가 아니다.
+장치 소유자가 지연된 경우에도 `OutputOwner.device_view`는 게시된 원 표본 시각과 기존 age 한도로
+차량 표본과 명령 관측의 현재성만 다시 제한한다. 원 snapshot을 변경하거나 owner lock·새 관측을 요구하지 않는다.
+
+새 probe의 `ODOM_CLOCK_UNCERTAIN`, 원 probe의 `ODOM_PROBE_EXPIRED`, 미래 시각이 아닌
+미등록·이미 소비한 echo의 `ODOM_PROBE_REFERENCE`는 그 packet만 거절한다. 이미 채택한 동일
+session/epoch의 정상 표본은 원 `pi_sample_us`·`clock_error_us`와 기존 age 안에서만 보관한다.
+거절 오류·counter·최초 원인·pending 소비는 유지하며, 원 표본의 시각·sequence·epoch·기한을
+갱신하거나 같은 표본을 새 진행으로 재발행하지 않는다. 원 나이를 넘으면 조회는 계속 null이다.
+동일 `ODOM_PROBE_REFERENCE`라도 음수 RTT·시계 역전은 기존 표본을 즉시 실효시킨다.
+기존 검증 순서에서 판정한 세션·frame·품질·counter·순서·geometry 오류, 장치 session 교체와
+연속성 gap의 epoch reset, 장치/link fault도 기존 즉시 실효를 유지한다. 앞단에서 거절한 packet의
+뒤쪽 필드를 새로 검사해 다른 사유로 바꾸지 않는다. 이 제공자 수명 규칙은 새 wire·운영 숫자를
+추가하지 않으며 [원 유효 표본 수명 시험](../../platform/services/gateway/tests/test_odometry_last_valid_lifetime.py)으로 확인한다.
+
 | ID | payload (같은 little-endian·UUID 규칙) |
 |---|---|
 | ODOM_PROBE `0x0f04` | pi_session:uuid, device_session:uuid, pi_send_us:u64 |
@@ -237,6 +264,18 @@ ODOMETRY=32를 추가로 요구한다. 구형 firmware에 자동으로 새 프�
 device_sample_us는 실제 encoder 표본의 장치 시각이다. 원 probe의 Pi send/receive 구간으로
 시계 오차를 제한하고 장치 시각과 Pi 시각을 직접 빼지 않는다. source_sample은 같은 device
 session에서 증가하며 cumulative encoder는 회신 송신 횟수나 명령 적분값이 아니다.
+장치는 해당 probe를 수신한 뒤 encoder 표본을 생성하거나 래치하고, 그 원 관측 시각을
+device_sample_us로 보낸다. probe 전에 만든 cache 표본을 새 관측처럼 회신하면 이 시계
+구간의 전제가 성립하지 않는다. Pi가 그 전제를 모든 frame에서 독립적으로 증명하는 것은
+아니므로 실제 MCU의 수신 dispatcher·센서 래치 수락에서 확인해야 한다.
+
+wire의 pi_send_us·echoed_pi_send_us와 bytes는 유지한다. 이 값은 원 probe의 참조로 그대로
+echo하며, Pi는 완성된 frame을 처음 serial 제출하기 직전의 시각을 기존 pending에 한 번만
+별도로 고정한다. RTT 오차와 Pi 중점은 이 첫 제출부터 실제 read 완료까지의 구간을 사용한다.
+중복 mark·부분 write·EIO로 첫 시각을 갱신하거나 미제출로 되돌리지 않는다. 원 echo 기준
+pending 보존 한도도 유지하며, 송신 전 또는 회수 때 그 한도를 넘으면 ODOM_PROBE_EXPIRED다.
+첫 제출 뒤 실제 왕복이 긴 경우의 ODOM_CLOCK_UNCERTAIN과 구분한다. 이 변경은 새 장치
+framing·session·기한·운영 허용치를 추가하지 않는다.
 quality bit encoder=1은 필수, steering measured=2/estimated=4는 동시에 켤 수 없다.
 steering을 제공하면 양의 오차 범위도 제공한다. 센서 미지원의 0을 실제 측정 0으로 표시하지 않는다.
 

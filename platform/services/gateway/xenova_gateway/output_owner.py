@@ -4,6 +4,8 @@ No second serial writer is created. Blocked physical I/O remains a device limit;
 the live owner is never replaced or closed before its termination is confirmed.
 """
 from dataclasses import replace
+import os
+import select
 import threading
 import time
 
@@ -64,8 +66,37 @@ class OutputOwner:
         self._device_view={'feedback_supported':False,'ready':True,'fault':None,
                            'accepted':None,'applied':None,'physical_stop':None}
         if self.device is not None:self._device_view=dict(self.device.snapshot)
+        self._feedback_timeout=getattr(self.device,'timeout',None)
+        sensor=getattr(self.device,'odometry',None)
+        self._vehicle_maximum_age_us=getattr(getattr(sensor,'config',None),'maximum_sample_age_us',None)
+        self._read_fd=getattr(self.device,'_write_fd',None) if os.name=='posix' else None
+        self._owned_poll=getattr(self.device,'_poll_owned',None)
+        self._wake_read,self._wake_write=(os.pipe2(os.O_NONBLOCK|os.O_CLOEXEC)
+            if self._read_fd is not None else (None,None))
         self.thread = threading.Thread(target=self._loop, name='gateway-device-owner', daemon=True)
-        self.thread.start()
+        try:self.thread.start()
+        except BaseException:
+            self._close_wakeup();raise
+
+    def _wake(self):
+        self.condition.notify()
+        if self._wake_write is not None:
+            try:os.write(self._wake_write,b'\0')
+            except BlockingIOError:pass  # A full finite pipe already carries a wakeup.
+
+    def _wait_io(self,delay):
+        """One serial owner waits for RX or a new STOP; no second reader/writer."""
+        ready,_,_=select.select([self._wake_read,self._read_fd],[],[],delay)
+        if self._wake_read in ready:
+            try:os.read(self._wake_read,4096)
+            except BlockingIOError:pass
+        return self._read_fd in ready
+
+    def _close_wakeup(self):
+        with self.condition:
+            for fd in (self._wake_read,self._wake_write):
+                if fd is not None:os.close(fd)
+            self._wake_read=self._wake_write=None
 
     def _write(self, frame, now):
         self.counter = (self.counter+1) & 0xff
@@ -80,7 +111,20 @@ class OutputOwner:
             self._device_view = dict(self.device.snapshot)
         return SubmissionReceipt(count,frame,getattr(count,'metadata',None))
 
-    def device_view(self):return dict(self._device_view)
+    def device_view(self):
+        # Recheck only the immutable published sample and fixed age budgets.
+        # A delayed owner must not lend its last snapshot fresh validity.
+        view=dict(self._device_view);now=self.clock()
+        observed=view.get('observed_monotonic')
+        if self._feedback_timeout is not None and observed is not None and not 0<=now-observed<=self._feedback_timeout:
+            for key in ('accepted','applied','physical_stop','reported_velocity_mps','reported_steering_rad'):
+                view[key]=None
+        sample=view.get('vehicle_sample')
+        if sample is not None and self._vehicle_maximum_age_us is not None:
+            age=int(now*1000000)-sample['pi_sample_us']
+            if age<0 or age+sample['clock_error_us']>self._vehicle_maximum_age_us:
+                view['vehicle_sample']=None
+        return view
 
     def drive_ready_at(self,frame):
         if self.first_failure is not None:return 0.
@@ -100,6 +144,8 @@ class OutputOwner:
             raise SinkError('device owner fault; new DRIVE prohibited') from self.first_failure
         if isinstance(frame, DriveFrame) and not 0 <= self.clock()-now < self.timeout:
             raise SinkError('expired actor submission')
+        if isinstance(frame,DriveFrame) and frame.expires_pi_us is not None and int(self.clock()*1e6)>=frame.expires_pi_us:
+            raise SinkError('original command expired')
         event = threading.Event()
         result = []
         cancelled=threading.Event()
@@ -116,7 +162,7 @@ class OutputOwner:
                     self.pending=item
                 else:raise SinkError('device owner unavailable/busy')
             else:self.pending=item
-            self.condition.notify()
+            self._wake()
         return item, event, result, cancelled
 
     def submit_stop(self, frame, now):
@@ -139,7 +185,7 @@ class OutputOwner:
                     stop=(StopFrame(frame.generation,0,STOP_SAFE_STOP),self.clock(),
                           threading.Event(),[],threading.Event())
                     if self.pending is item or self.pending is None:self.pending=stop
-                    self.condition.notify()
+                    self._wake()
             if isinstance(frame, StopFrame):
                 raise PendingStop(StopSubmission(event, result, self.thread))
             raise SinkError('device submission outcome unconfirmed')
@@ -147,20 +193,35 @@ class OutputOwner:
             raise SinkError('owned serial submission failed') from result[0]
         return result[0]
 
-    def _poll_device(self):
+    def _poll_device(self,*,read_ready=False):
         try:
-            self.device.poll(self.clock())
+            if self._read_fd is not None and self._owned_poll is not None:
+                self._owned_poll(self.clock(),read_ready=read_ready)
+            else:self.device.poll(self.clock())
             self._device_view = dict(self.device.snapshot)
         except (OSError, SinkError) as exc:
             if self.first_failure is None:
                 self.first_failure = exc
+            # HUP stays readable. Return to bounded timed checks after link
+            # failure rather than spinning on that permanently ready fd.
+            self._read_fd=None
+            failed=getattr(self.device,'link_failed',None)
+            if failed is not None:
+                failed()
+                self._device_view=dict(self.device.snapshot)
             self._device_view = {**self._device_view, 'ready': False, 'fault': 'DEVICE_LINK_UNAVAILABLE',
                                  'accepted': None, 'applied': None, 'physical_stop': None}
+            if 'vehicle_sample' in self._device_view:self._device_view['vehicle_sample']=None
 
     def _loop(self):
         poll_due = self.device is not None
+        read_ready = False
         try:
             while True:
+                # Consume the previous wait's hint even if a cancelled command
+                # or higher-priority STOP makes this iteration skip RX.
+                observed_ready=read_ready;read_ready=False
+                wait_io=False
                 with self.condition:
                     now = self.clock()
                     expired = self.expiry is not None and now >= self.expiry
@@ -172,7 +233,8 @@ class OutputOwner:
                     elif item is not None:
                         self.pending = None
                         frame, submitted, event, result, cancelled = item
-                        if isinstance(frame, DriveFrame) and (cancelled.is_set() or not 0 <= now-submitted < self.timeout):
+                        if isinstance(frame, DriveFrame) and (cancelled.is_set() or not 0 <= now-submitted < self.timeout or
+                                frame.expires_pi_us is not None and int(now*1e6)>=frame.expires_pi_us):
                             result.append(SinkError('queued command expired')); event.set(); continue
                     elif self.closing:
                         if isinstance(self.last, DriveFrame):
@@ -183,17 +245,25 @@ class OutputOwner:
                         frame = None
                     else:
                         delay = .01 if self.expiry is None else max(.0001, min(.01, self.expiry-now))
-                        self.condition.wait(delay)
-                        poll_due = self.device is not None
-                        continue
+                        if self._read_fd is None:
+                            self.condition.wait(delay)
+                            poll_due = self.device is not None
+                            continue
+                        wait_io=True
+                if wait_io:
+                    read_ready=bool(self._wait_io(delay))
+                    poll_due=True
+                    continue
+                # A hint belongs to this one poll, not a later timer/write.
+                # Queued STOP/expiry still wins over RX and discards the hint.
                 if frame is None:
-                    self._poll_device()
+                    self._poll_device(read_ready=observed_ready)
                     poll_due = False
                     continue
                 try:
                     receipt = self._write(frame, now)
                     if isinstance(frame, DriveFrame):
-                        self.expiry = submitted+self.timeout
+                        self.expiry = min(submitted+self.timeout,frame.expires_pi_us/1e6) if frame.expires_pi_us is not None else submitted+self.timeout
                     else:
                         self.expiry = None
                     outcome = receipt
@@ -213,12 +283,13 @@ class OutputOwner:
                     self._poll_device()
                     poll_due = False
         finally:
+            self._close_wakeup()
             self.sink.close()
 
     def close(self):
         with self.condition:
             self.closing = True
-            self.condition.notify()
+            self._wake()
         self.thread.join(.5)
         if self.thread.is_alive():
             raise SinkError('device owner termination unconfirmed')

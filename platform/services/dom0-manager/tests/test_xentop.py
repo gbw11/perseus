@@ -402,3 +402,9 @@ def test_rpi4_board_capture_parses_every_domain_and_device_line():
     assert stats.unavailable == {}
     zephyr_stats = row_to_stats(zephyr, vm_id=ZEPHYR, domid=2, sampled_at=SAMPLED)
     assert (zephyr_stats.memory_mib, zephyr_stats.disk_rd_bytes, zephyr_stats.unavailable) == (16, None, {"disk_rd_bytes": "NO_DEVICE", "disk_wr_bytes": "NO_DEVICE"})
+
+
+def test_xen_driver_without_xentop_is_platform_unavailable_not_501():
+    """계약 4.6: xentop 을 실행할 수 없으면 503 PlatformUnavailable (platform 드라이버와 같은 의미)."""
+    with pytest.raises(PlatformUnavailable):
+        XenDriver(Xl(FakeRunner({}))).collect_stats()

@@ -4,6 +4,55 @@
 
 #include "xm_internal.h"
 
+static int parse_object(struct xm_json *j, struct xm_span payload);
+
+static int command_text(const struct xm_json *j,int obj,const char *key,char *out,size_t n,bool optional)
+{
+	int token=xm_json_get(j,obj,key);
+	if(token<0)return optional?0:-EINVAL;
+	if(!xm_json_is_string(j,token)||xm_json_span(j,token).len==0||xm_span_copy(out,n,xm_json_span(j,token))<0)return -EINVAL;
+	return 0;
+}
+
+int xm_auto_delay_command_parse(struct xm_span payload,struct xm_auto_delay_command *out)
+{
+	struct xm_json j;int64_t delay,duration;char expires[40],action[16];
+	if(!out||parse_object(&j,payload))return -EINVAL;
+	memset(out,0,sizeof(*out));
+	/* command_id, expected_boot_id, expires_at, action, parameters plus the
+	 * optional operation_id are the only accepted fields. */
+	if(j.tok[0].size<5||j.tok[0].size>6||
+	   command_text(&j,0,"command_id",out->command_id,sizeof(out->command_id),false)||
+	   command_text(&j,0,"operation_id",out->operation_id,sizeof(out->operation_id),true)||
+	   command_text(&j,0,"expected_boot_id",out->expected_boot_id,sizeof(out->expected_boot_id),false)||
+	   command_text(&j,0,"expires_at",expires,sizeof(expires),false)||
+	   command_text(&j,0,"action",action,sizeof(action),false)||strcmp(action,"auto_delay"))return -EINVAL;
+	int parameters=xm_json_get(&j,0,"parameters");
+	if(!xm_json_is_object(&j,parameters)||j.tok[parameters].size!=2||
+	   xm_json_int(&j,xm_json_get(&j,parameters,"delay_ms"),&delay)||
+	   xm_json_int(&j,xm_json_get(&j,parameters,"duration_s"),&duration)||
+	   delay<1||delay>100||duration<1||duration>120)return -ERANGE;
+	out->delay_ms=(uint32_t)delay;out->duration_s=(uint32_t)duration;return 0;
+}
+
+int xm_auto_delay_result_json(char *out,size_t n,const struct xm_auto_delay_command *c,
+			      const char *status,uint64_t duration_ms,const char *error)
+{
+	if(!out||!c||!status)return -EINVAL;
+	size_t pos=0;int rc=0;
+	rc|=xm_put(out,n,&pos,"{\"command_id\":");rc|=xm_put_json_string(out,n,&pos,c->command_id);
+	rc|=xm_put(out,n,&pos,",\"operation_id\":");rc|=c->operation_id[0]?xm_put_json_string(out,n,&pos,c->operation_id):xm_put(out,n,&pos,"null");
+	rc|=xm_put(out,n,&pos,",\"status\":");rc|=xm_put_json_string(out,n,&pos,status);
+	rc|=xm_put(out,n,&pos,",\"started_at\":null,\"finished_at\":null,\"duration_ms\":");
+	rc|=duration_ms?xm_put_uint(out,n,&pos,duration_ms):xm_put(out,n,&pos,"null");
+	rc|=xm_put(out,n,&pos,",\"result\":{\"delay_ms\":");rc|=xm_put_uint(out,n,&pos,c->delay_ms);
+	rc|=xm_put(out,n,&pos,",\"duration_s\":");rc|=xm_put_uint(out,n,&pos,c->duration_s);
+	rc|=xm_put(out,n,&pos,"},\"error\":");
+	if(error){rc|=xm_put(out,n,&pos,"{\"code\":");rc|=xm_put_json_string(out,n,&pos,error);rc|=xm_put(out,n,&pos,",\"message\":");rc|=xm_put_json_string(out,n,&pos,error);rc|=xm_put(out,n,&pos,"}");}
+	else rc|=xm_put(out,n,&pos,"null");
+	rc|=xm_put(out,n,&pos,"}");return rc?-ENOSPC:(int)pos;
+}
+
 int xm_drive_command_json(char *out, size_t n, uint32_t generation, float v_mps, float steer_rad)
 {
 	size_t pos = 0;

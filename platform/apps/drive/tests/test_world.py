@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import struct
 import subprocess
 import sys
 
@@ -43,18 +44,20 @@ def test_frozen_protoc_golden_to_python_and_nanopb(probe):
     wire=bytes.fromhex(vector['wire_hex'])
     import hashlib
     assert hashlib.sha256(wire).hexdigest()==vector['sha256']
-    message=decode(wire)
+    # Preserve the old bytes as a historical retained vector, not a new LIVE input.
+    message=schema.WorldSnapshot();message.ParseFromString(wire)
     assert (message.width,message.height,message.sequence)==(4,4,2)
     assert message.occupancy==bytes(16) and message.cell_flags==bytes([3])*16
-    assert message.age_le32==b'\x80\xee\x36\x00'*16
-    assert encode(message)==wire
-    # 보존한 protoc golden은 당시 primitive revision이다. 새 생성기 산출물의
-    # 호환성을 임의 허용하지 않고 현재 asset 참조만 바꾼 정상 입력과 짝지어 확인한다.
-    assert product(probe,wire)['result']==('OK' if message.primitive==fixture.PRIMITIVE else 'CONFIGURATION')
+    assert message.age_le32==bytes.fromhex('80ee3600')*16
+    with pytest.raises(ValueError):decode(wire)
+    with pytest.raises(ValueError):encode(message)
+    assert product(probe,wire)['result']==('VERSION' if message.primitive==fixture.PRIMITIVE else 'CONFIGURATION')
     message.primitive=fixture.PRIMITIVE
-    assert product(probe,encode(message))['result']=='OK'
-    with pytest.raises(ValueError):decode(wire+b'\x08\x01')
-    assert product(probe,wire+b'\x08\x01')['result']=='DECODE'
+    assert product(probe,message.SerializeToString(deterministic=True))['result']=='VERSION'
+    live=fixture.world(width=4,height=4,sequence=2)
+    assert product(probe,encode(live))['result']=='OK'
+    with pytest.raises(ValueError):decode(wire+bytes.fromhex('0801'))
+    assert product(probe,wire+bytes.fromhex('0801'))['result']=='DECODE'
 
 
 @pytest.mark.parametrize('field,value,reason',[
@@ -113,6 +116,33 @@ def test_road_shape_rejects_crossing_or_wrong_side_then_accepts_recovery(probe):
     value=fixture.world();value.left_boundary[3].CopyFrom(value.left_boundary[2])
     assert product(probe,encode(value))['result']=='GEOMETRY'
     assert product(probe,encode(fixture.world()))['result']=='OK'
+
+
+def modern_world():
+    """독립적인 두 lane/whole-cell permission/원 localization lease 양성 입력."""
+    from xenova_drive_world import mark_road
+    value=fixture.world()
+    mark_road(value,[schema.Point(x=p.x,y=2.4) for p in value.reference],
+                    [schema.Point(x=p.x,y=.8) for p in value.reference])
+    value.minor=2;value.required_features=11
+    count=value.width*value.height
+    value.cell_flags=bytes([9])*count;value.age_le32=struct.pack('<I',0)*count
+    value.drivable_permission=bytes([255])*(count//8)
+    model=value.lane_model
+    model.revision=1;model.divider_position_bound_m=.001;model.divider_heading_bound_rad=.001
+    for x in (0.,2.,4.,6.):model.divider.add(x=x,y=1.6)
+    model.crossing=bytes([1,1,1]);model.divider_state=bytes(4)
+    for identifier,y in ((1,1.2),(2,2.0)):
+        lane=model.lanes.add(lane_id=identifier,travel_direction=1,position_bound_m=.001,
+            heading_bound_rad=.001,revision=1,adjacent_lane_id=3-identifier,point_state=bytes(4))
+        for x in (0.,2.,4.,6.):lane.centerline.add(x=x,y=y)
+    value.localization.CopyFrom(schema.MapLocalization(registration_revision=1,
+        anchor_position_bound_m=.001,anchor_heading_bound_rad=.001,
+        geometry_position_bound_m=.001,geometry_heading_bound_rad=.001,
+        observed_mapper_us=value.observed_us,valid_for_us=1000000,
+        position_drift_bound_mps=.001,heading_drift_bound_rps=.001,quality=1,timestamp_error_us=10))
+    return value
+
 
 
 def parking_world(*,width=64,height=32):

@@ -53,7 +53,7 @@ from uuid import UUID, uuid4
 from ..errors import Dom0ManagerError
 from ..models import VmState
 from .arming import ArmingState, ArmingStore
-from .config import RecoverySettings
+from .config import HEALTH_LEASE_PERIODS, RecoverySettings
 from .heartbeats import AppHeartbeatTable, HeartbeatTable
 from .model import FailureReason, HealthState, Judgment, VmHealth, VmObservation
 from .mqtt import LinkState
@@ -83,6 +83,9 @@ class _Track:
     app_armed: bool = False  # Zephyr: app.heartbeat 를 받은 적이 있다 (ArmingStore 로 영속)
     held: str | None = None  # 손실 판정을 보류한 이유(silent: 동료도 모두 조용, sole: 동료 없음). 바뀔 때만 로그한다
     health: VmHealth | None = None
+    external_reason: FailureReason | None = None
+    external_execution_id: str | None = None
+    observation: VmObservation | None = None  # 판정 직전 confirm까지 반영해 이 health와 같은 문맥을 보존한다.
 
 
 class Watcher:
@@ -120,6 +123,7 @@ class Watcher:
         self._link_warned: dict[str, bool] = {AGENT: False, APP: False}
         self._removed: list[UUID] = []  # 지난 removed_vm_ids() 이후 등록에서 사라진 VM
         self._observed: dict[UUID, VmObservation] = {}  # 이번 주기의 관측. 동료 발행자를 고르는 데 쓴다
+        self._sampled_at: float | None = None
         if self._armed or self._agent_delivered:
             log.info("restored delivery history from %s: %d Zephyr VM(s), %d Linux VM(s)",
                      arming.path if arming else "-", len(self._armed), len(self._agent_delivered))
@@ -130,6 +134,7 @@ class Watcher:
 
     def tick(self, observations: list[VmObservation], now: float | None = None, *, link: LinkState | None = None) -> list[Judgment]:
         now = self._clock() if now is None else now
+        self._sampled_at = now
         self._track_link(LinkState.up() if link is None else link, now)
         self._observed = {obs.vm_id: obs for obs in observations}
         # 판정보다 먼저 모든 VM 의 실행 세대(domid·execution)를 갱신한다. 동료 증거를 고를 때 뒤에 평가될 VM 의 이전 실행 상태를 쓰지 않게 한다
@@ -169,6 +174,7 @@ class Watcher:
             else:
                 track.current_reason = None  # 유예·관측 불가: 사유는 비우고 episode 는 유지
             track.health = self._health(track, obs, verdict, reason, signal_age, now)
+            track.observation = obs
         for vm_id in list(self._tracks):
             if vm_id not in seen:  # 등록이 사라진(보관·삭제) VM
                 del self._tracks[vm_id]
@@ -181,6 +187,30 @@ class Watcher:
                 if (had_app or had_agent) and self._arming is not None:
                     self._save_armed()
         return judgments
+
+    def report_untrusted(self,obs: VmObservation,execution_id: str,now: float | None=None) -> Judgment | None:
+        """Latch a verified Gateway fault to this exact execution.
+
+        Fresh heartbeat cannot clear a functional trust failure. Only a new
+        managed execution clears the latch in _track_domain.
+        """
+        now=self._clock() if now is None else now
+        if (not obs.eligible or not obs.present or obs.guest_kind!='zephyr' or
+            not execution_id or obs.execution_id!=execution_id):return None
+        track=self._tracks.setdefault(obs.vm_id,_Track());self._track_domain(track,obs,now)
+        if track.external_execution_id not in (None,execution_id):return None
+        track.external_reason=FailureReason.VM_UNTRUSTED;track.external_execution_id=execution_id
+        if track.episode is None:
+            track.episode=Judgment(self._new_id(),obs.vm_id,FailureReason.VM_UNTRUSTED,now,obs.guest_kind,
+                obs.desired_state,obs.intent_revision,obs.domid,obs.xen_state,self._signal_age(track,obs,now))
+            result=track.episode
+        else:result=None
+        track.current_reason=FailureReason.VM_UNTRUSTED
+        track.health=VmHealth(obs.vm_id,HealthState.UNHEALTHY,obs.desired_state,
+            obs.xen_state.value if obs.xen_state else None,None,FailureReason.VM_UNTRUSTED,
+            1 if track.health is None else track.health.manager_seq+1,intent_known=obs.intent_known,
+            domid=obs.domid,execution_id=obs.execution_id)
+        return result
 
     def _evaluate(self, track: _Track, obs: VmObservation, now: float) -> tuple[Verdict, FailureReason | None, float | None]:
         self._track_domain(track, obs, now)
@@ -296,6 +326,7 @@ class Watcher:
                 track.execution_id=obs.execution_id
                 track.domain_since = now
                 track.signaled = False
+                track.external_reason=None;track.external_execution_id=None
             track.absent_since = None
         else:
             if track.absent_since is None:
@@ -373,6 +404,8 @@ class Watcher:
             return Verdict.FAILED, FailureReason.DOMAIN_CRASHED
         if obs.xen_state != VmState.running:
             return Verdict.UNKNOWN, None  # paused·stopping 은 장애가 아니지만 건강하지도 않다
+        if track.external_reason and track.external_execution_id==obs.execution_id:
+            return Verdict.FAILED,track.external_reason
         if obs.execution_binding_available is False:return Verdict.UNKNOWN,None
         if obs.expected_app_instances is not None:
             pair=self._app_heartbeats.supervision_pair(obs.vm_id,obs.expected_app_boot_id,obs.expected_app_instances)
@@ -521,6 +554,52 @@ class Watcher:
     def health(self, vm_id: UUID) -> VmHealth | None:
         track = self._tracks.get(vm_id)
         return track.health if track else None
+
+    def stability_samples(self):
+        """현재 정상 관측의 작은 E4 근거. 새 Xen/Store 조회나 건강 증명용 계산을 만들지 않는다."""
+        from .budget import StabilitySample
+        now = self._sampled_at
+        result = {}
+        if now is None:
+            return result
+        lease = self._settings.health_refresh_s * HEALTH_LEASE_PERIODS
+        for vm_id, track in self._tracks.items():
+            obs = track.observation
+            if obs is None:
+                continue
+            health = track.health if track else None
+            if (health is None or health.state != HealthState.HEALTHY or not obs.eligible or not obs.intent_known
+                    or type(obs.intent_revision) is not int or obs.intent_revision < 0
+                    or health.domid != obs.domid or health.execution_id != obs.execution_id
+                    or obs.execution_binding_available is False
+                    or (obs.execution_binding_available is True and not obs.execution_id)):
+                continue
+            context = (obs.guest_kind, obs.lifecycle, obs.intent_revision, obs.domid, obs.execution_id,
+                       obs.expected_app_boot_id, obs.expected_app_instance_id,
+                       tuple(sorted((obs.expected_app_instances or {}).items())))
+            liveness = self._liveness(track, obs)
+            if liveness is None:
+                progress = (now,)  # starter는 앱 정상 대신 새로운 Xen 실행 관측까지만 증명한다.
+                window = lease
+            else:
+                channel, window, _, _ = liveness
+                if obs.expected_app_instances is not None:
+                    pair = self._app_heartbeats.supervision_pair(vm_id, obs.expected_app_boot_id, obs.expected_app_instances)
+                    if pair is None:
+                        continue
+                    progress = tuple(value.received_monotonic for value in pair)
+                else:
+                    beat = self._heartbeats.last(vm_id) if channel == AGENT else self._app_heartbeats.last(vm_id)
+                    if beat is None:
+                        continue
+                    context += (beat.boot_id, getattr(beat, 'instance_id', None))
+                    progress = (beat.received_monotonic,)
+            if any(value > now for value in progress):
+                continue
+            until = min(now + lease, min(progress) + window)
+            if until > now:
+                result[vm_id] = StabilitySample(context, now, until, progress)
+        return result
 
     def healths(self) -> list[VmHealth]:
         return [t.health for t in self._tracks.values() if t.health is not None]

@@ -119,13 +119,28 @@ class AuthorityStore:
         for request in value['requests']:canonical(request)
         if not isinstance(value['reason'],str) or len(value['reason'])>128:raise ValueError('invalid authority reason')
         if 'manual_hold' in value and type(value['manual_hold']) is not bool:raise ValueError('invalid manual selection')
+        distrusted=value.get('distrusted',[])
+        if not isinstance(distrusted,list) or len(distrusted)>2:raise ValueError('distrusted VM state invalid')
+        seen=set()
+        for row in distrusted:
+            canonical(row['vm_id'])
+            canonical(row['execution_id'])
+            if row['vm_id'] in seen:raise ValueError('duplicate distrusted VM')
+            seen.add(row['vm_id'])
+            # MEMORY_PRESSURE is read-only compatibility for durable records
+            # written by older firmware; new wire evidence no longer accepts it.
+            if (row.get('reason') not in ('AUTO_DEADLINE_MISS','MEMORY_PRESSURE') or not isinstance(row.get('command_id'),str) or
+                not 0<len(row['command_id'])<=128 or type(row.get('generation')) is not int or
+                not 1<=row['generation']<=0xffffffff or type(row.get('observed_monotonic_ms')) is not int or
+                row['observed_monotonic_ms']<0):raise ValueError('distrusted VM record invalid')
         pending=value['pending']
         if pending is not None:
             canonical(pending['host_boot_id'])
             if (type(pending['generation']) is not int or pending['generation']!=value['generation'] or type(pending['deadline_ms']) is not int or
                 pending['deadline_ms']<0 or type(pending['arm_after_apply']) is not bool):raise ValueError('pending context invalid')
         if value['phase']=='PENDING' and pending is None:raise ValueError('pending deadline required')
-        if value.get('manual_input_profile') not in (None,'manual-session-1'):raise ValueError('manual input profile')
+        if value.get('manual_input_profile') not in (None,'manual-session-1','manual-input-2','manual-input-3'):
+            raise ValueError('manual input profile')
         if pending and ('manual_policy' in pending or 'manual_session' in pending):
             canonical(pending['manual_session'])
             if pending['manual_policy'] not in ('CONTINUE_SESSION','NEUTRAL_THEN_ACTION'):raise ValueError('manual policy')
@@ -183,6 +198,8 @@ class AuthorityStore:
                 validate_result(row,submitted,row.get('committed_generation'))
         from .provider import validate_records
         validate_records(value)
+        from .operator_contract import validate_store
+        validate_store(value)
 
     def save(self,value):
         self.validate(value)
@@ -218,17 +235,25 @@ class AuthorityStore:
         with self._lock:
             value={**self.value,**fields};return self.save(value)
 
-    def issue(self,mode: Mode,owner: str,reason: str,now: float,timeout: float,*,arm: bool,manual=None):
+    def issue(self,mode: Mode,owner: str,reason: str,now: float,timeout: float,*,arm: bool,manual=None,distrust=None):
+        return self.update(**self.issue_fields(mode,owner,reason,now,timeout,arm=arm,manual=manual,distrust=distrust))
+
+    def issue_fields(self,mode: Mode,owner: str,reason: str,now: float,timeout: float,*,arm: bool,manual=None,distrust=None):
+        """원 issue와 같은 변경안. operator journal은 이 값과 mission/원장을 한 번 저장한다."""
         if self.error:raise AuthorityError(self.error)
         canonical(owner)
         if mode is not Mode.SAFE_STOP and self.protected(owner):
             raise AuthorityError('target execution remains protected')
         if self.value['generation']==0xffffffff:raise AuthorityError('generation exhausted; no wrap/reset')
         generation=self.value['generation']+1
-        return self.update(generation=generation,mode=mode.value,owner=owner,reason=reason,phase='PENDING',
+        fields={}
+        if distrust is not None:
+            rows=[row for row in self.value.get('distrusted',[]) if row['vm_id']!=distrust['vm_id']]
+            fields['distrusted']=[*rows,distrust]
+        return dict(generation=generation,mode=mode.value,owner=owner,reason=reason,phase='PENDING',
             manual_hold=False if mode is Mode.AUTO else self.value.get('manual_hold',False),
             pending={'generation':generation,'host_boot_id':self.host,'deadline_ms':int((now+timeout)*1000),
-                     'arm_after_apply':arm,**(manual or {})},requests=[])
+                     'arm_after_apply':arm,**(manual or {})},requests=[],**fields)
 
     def consume_request(self,message_id: str,expected_generation: int):
         canonical(message_id)
@@ -248,8 +273,15 @@ class AuthorityStore:
             return json.loads(json.dumps(row)) if row is not None else None
 
     def protected(self,vm_id):
-        return any(row['phase']=='PROTECTED' and row['spec']['target_vm']==vm_id
+        # 2026-11-02 결정(S15P31E110-346): 현재 host_boot_id 가 만든 보호만 활성 보호다.
+        # 이전 host 의 PROTECTED 는 감사 이력으로만 남고 재선택을 막지 않는다(cancel/finish 는 HOST_CHANGED 로 못 푼다).
+        return any(row['phase']=='PROTECTED' and row['spec']['target_vm']==vm_id and row.get('host_boot_id')==self.host
                    for row in self.value.get('protections',[]))
+
+    def protected_execution(self,vm_id):
+        row=next((row for row in self.value.get('protections',[]) if
+                  row['phase']=='PROTECTED' and row['spec']['target_vm']==vm_id),None)
+        return None if row is None else row['spec']['target_execution_id']
 
     def begin_transition(self,request_id,spec,now_ms):
         """Actor entry: persist fixed intent/target/deadline before preparation."""

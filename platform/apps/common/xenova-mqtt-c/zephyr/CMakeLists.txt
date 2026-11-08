@@ -10,6 +10,7 @@ if(CONFIG_XENOVA_MQTT)
     ${XM_DIR}/src/xm_envelope.c
     ${XM_DIR}/src/xm_seq.c
     ${XM_DIR}/src/xm_payload.c
+    ${XM_DIR}/src/xm_manual.c
     ${XM_DIR}/ports/zephyr/xm_zclient.c
   )
   zephyr_include_directories(${XM_DIR}/include ${XM_DIR}/ports/zephyr)

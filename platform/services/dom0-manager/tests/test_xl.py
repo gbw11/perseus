@@ -133,6 +133,13 @@ def test_xen_driver_lists_domains_without_dom0_and_uses_uuid_as_vm_id():
     assert all(timeout == 5 for _, timeout in runner.calls)
 
 
+def test_xen_driver_skips_a_domain_that_vanished_between_list_and_list_long():
+    long_without_debian = json.dumps([entry for entry in json.loads(XL_LIST_LONG) if entry["domid"] != 4])
+    runner = FakeRunner({("xl", "list"): XL_LIST, ("xl", "list", "-l"): long_without_debian})
+    domains = XenDriver(Xl(runner, query_timeout_s=5)).list_domains()
+    assert [d.vm_id for d in domains] == [ALPINE]
+
+
 def test_xen_driver_health_false_on_timeout_or_failure():
     timed_out = XenDriver(Xl(_healthy_runner(fail={("xl", "info"): DriverTimeout("xl info timed out")})))
     assert timed_out.health() is False

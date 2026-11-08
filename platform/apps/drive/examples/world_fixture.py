@@ -1,4 +1,4 @@
-"""Explicit local fixture producer, not a Jetson mapper or an operating profile."""
+"""Explicit synthetic live-only fixture; not a mapper, retained survey or operating profile."""
 import argparse
 import json
 from pathlib import Path
@@ -31,8 +31,8 @@ def world(*,width=64,height=32,sequence=1):
         value.right_boundary.add(x=x,y=.2)
     count=width*height
     value.occupancy=bytes(count)
-    value.cell_flags=bytes([3])*count
-    value.age_le32=struct.pack('<I',3600000)*count # retained cells are not fake fresh observations.
+    value.cell_flags=bytes([1])*count
+    value.age_le32=struct.pack('<I',0)*count # Explicit current synthetic LIVE observations.
     return value
 
 def main():

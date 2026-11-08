@@ -7,7 +7,7 @@
 
 실제 domU의 보고와 Xen 실행 관측을 dom0에서 수신·구분해 외부 REST/WebSocket과 HDMI용 표시 데이터 양쪽이 소비하게 한다. 250번에서 작성한 표시 수집기를 재사용한다. 외부 페이지 라우팅, 실제 주행·미러링·승계 엔진, 새 xl console 점유를 수집 기능으로 추가하지 않는다.
 
-VM1은 Zephyr 주 구동, VM2는 같은 Zephyr의 백업·미러링, VM3는 Debian 인터랙션이다. 자동/수동 모드와 활성 VM은 별개이며 실제 권위 제어 상태는 표시 전용 `display.drive_state` 계약을 따른다. 구형 앱 이름을 현재 차량 역할로 추론하지 않는다.
+VM1은 Zephyr 주 구동, VM2는 같은 Zephyr의 백업·미러링, VM3는 Debian 인터랙션이다. 자동/수동 모드와 활성 VM은 별개이며 실제 권위 제어 상태는 [Gateway 읽기 계약](../contracts/display-gateway-read-v1.md)을 따른다(2026-11-06, 이전 `display.drive_state` 토픽은 폐기). 구형 앱 이름을 현재 차량 역할로 추론하지 않는다.
 
 ## 확인한 구현과 공백
 

@@ -86,6 +86,21 @@ def test_render_revision_changes_for_new_run_and_not_for_age_only(settings, stor
     assert policy.presentation(state)["render_revision"] != old
 
 
+def test_heartbeat_sequence_alone_does_not_churn_render_revision(settings, store):
+    policy = DisplayPolicy(settings, store.epoch)
+    state = store.snapshot()
+    for name in ("agent", "app"):
+        state["vms"][0]["sources"][name]["sequence"] = 1
+    state["drive"]["source"]["sequence"] = 1
+    old = policy.presentation(state)["render_revision"]
+    for name in ("agent", "app"):
+        state["vms"][0]["sources"][name]["sequence"] = 2
+    state["drive"]["source"]["sequence"] = 2
+    assert policy.presentation(state)["render_revision"] == old
+    state["vms"][0]["sources"]["agent"]["status"] = "stale"
+    assert policy.presentation(state)["render_revision"] != old
+
+
 def test_closed_renderer_ack_expires_even_when_content_has_not_changed(settings, store):
     policy = DisplayPolicy(settings, store.epoch, clock=store.clock)
     state = store.snapshot()
@@ -117,7 +132,9 @@ def test_browser_cookie_cannot_change_policy_or_reveal_service_state(settings, s
         assert "HttpOnly" in session.headers["set-cookie"]
         assert "test-only-token" not in session.headers["set-cookie"]
         assert client.get("/display/monitor-1").status_code == 200
+        assert client.get("/display/combined").status_code == 200
         assert client.get("/display/mobile").status_code == 200
+        assert client.get("/display/unknown").status_code == 401
         p = client.get("/api/v1/display/presentation").json()
         assert [o["output_id"] for o in p["outputs"]] == ["monitor-1", "monitor-2"]
         assert "test-only-token" not in str(p)
