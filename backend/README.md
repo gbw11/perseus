@@ -254,13 +254,14 @@ DELETE /api/v1/drive/resume  3초 카운트다운 취소 → drive.resume.cancel
 
 ## VM 부하·장애 주입 명령
 
-Linux와 Zephyr VM의 CPU·메모리 부하, Zephyr AUTO 연산 지연, 명령 상태 조회 계약은
+Linux VM의 CPU·메모리 부하, Zephyr AUTO 연산 지연, 명령 상태 조회 계약은
 [VM 명령 API v1](../docs/contracts/vm-command-api-v1.md)을 따릅니다.
 
 ```text
 POST /api/v1/vms/{vmId}/stress/cpu
 POST /api/v1/vms/{vmId}/stress/memory
 POST /api/v1/vms/{vmId}/faults/auto-delay
+POST /api/v1/vms/{vmId}/faults/agent-exit
 GET  /api/v1/vms/{vmId}/commands/{commandId}
 ```
 

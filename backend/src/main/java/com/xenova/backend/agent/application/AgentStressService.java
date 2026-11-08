@@ -3,7 +3,6 @@ package com.xenova.backend.agent.application;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenova.backend.agent.domain.AgentHeartbeat;
-import com.xenova.backend.agent.domain.TelemetryHeartbeat;
 import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.template.domain.GuestKind;
 import com.xenova.backend.vm.application.VmService;
@@ -29,7 +28,6 @@ public class AgentStressService {
 
     private final VmService vmService;
     private final AgentDataService agentDataService;
-    private final TelemetryHeartbeatStore telemetryHeartbeatStore;
     private final AgentCommandResultStore commandResultStore;
     private final Supplier<AgentCommandPublisher> publisher;
     private final ObjectMapper objectMapper;
@@ -39,26 +37,23 @@ public class AgentStressService {
     public AgentStressService(
             VmService vmService,
             AgentDataService agentDataService,
-            TelemetryHeartbeatStore telemetryHeartbeatStore,
             AgentCommandResultStore commandResultStore,
             ObjectProvider<AgentCommandPublisher> publisher,
             ObjectMapper objectMapper,
             Clock clock) {
-        this(vmService, agentDataService, telemetryHeartbeatStore, commandResultStore,
+        this(vmService, agentDataService, commandResultStore,
                 publisher::getIfAvailable, objectMapper, clock);
     }
 
     AgentStressService(
             VmService vmService,
             AgentDataService agentDataService,
-            TelemetryHeartbeatStore telemetryHeartbeatStore,
             AgentCommandResultStore commandResultStore,
             Supplier<AgentCommandPublisher> publisher,
             ObjectMapper objectMapper,
             Clock clock) {
         this.vmService = vmService;
         this.agentDataService = agentDataService;
-        this.telemetryHeartbeatStore = telemetryHeartbeatStore;
         this.commandResultStore = commandResultStore;
         this.publisher = publisher;
         this.objectMapper = objectMapper;
@@ -77,20 +72,23 @@ public class AgentStressService {
             String vmId, AgentStressCommand.StressType type, int amount, Integer loadPercent, int durationS) {
         Vm vm = vmService.get(vmId);
         GuestKind guestKind = vm.guestKind();
+        if (guestKind != GuestKind.LINUX) {
+            throw unsupportedGuestKind();
+        }
         Instant now = clock.instant();
-        String bootId = currentBootId(vmId, guestKind, now);
+        String bootId = currentBootId(vmId, now);
 
         String commandId = UUID.randomUUID().toString();
         String operationId = UUID.randomUUID().toString();
         Instant expiresAt = now.plusSeconds(COMMAND_TTL_SECONDS);
-        Map<String, Object> parameters = parameters(guestKind, type, amount, loadPercent, durationS);
+        Map<String, Object> parameters = parameters(type, amount, durationS);
 
         Map<String, Object> command = new LinkedHashMap<>();
         command.put("command_id", commandId);
         command.put("operation_id", operationId);
         command.put("expected_boot_id", bootId);
         command.put("expires_at", timestamp(expiresAt));
-        command.put("action", action(guestKind, type));
+        command.put("action", "stress");
         command.put("parameters", parameters);
 
         Map<String, Object> envelope = new LinkedHashMap<>();
@@ -109,32 +107,18 @@ public class AgentStressService {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "MQTT_UNAVAILABLE",
                     "MQTT 브로커에 연결되어 있지 않아 부하 명령을 보내지 못했습니다.");
         }
-        Integer appliedLoadPercent = guestKind == GuestKind.ZEPHYR
-                && type == AgentStressCommand.StressType.CPU ? loadPercent : null;
         return new AgentStressCommand(
-                commandId, operationId, vmId, type, amount, appliedLoadPercent, durationS, now, expiresAt);
+                commandId, operationId, vmId, type, amount, null, durationS, now, expiresAt);
     }
 
-    private String currentBootId(String vmId, GuestKind guestKind, Instant now) {
-        return switch (guestKind) {
-            case LINUX -> {
-                AgentHeartbeat heartbeat = agentDataService.findHeartbeat(vmId)
-                        .orElseThrow(() -> agentUnavailable(vmId));
-                if (agentDataService.statusOf(heartbeat, now)
-                        != com.xenova.backend.agent.domain.AgentStatus.ONLINE) {
-                    throw agentUnavailable(vmId);
-                }
-                yield requireBootId(vmId, heartbeat.getBootId());
-            }
-            case ZEPHYR -> {
-                TelemetryHeartbeatStore.View view = telemetryHeartbeatStore.view(vmId);
-                TelemetryHeartbeat.Report heartbeat = view.heartbeat();
-                if (view.status() != TelemetryHeartbeatStore.Status.FRESH || heartbeat == null) {
-                    throw agentUnavailable(vmId);
-                }
-                yield requireBootId(vmId, heartbeat.bootId());
-            }
-        };
+    private String currentBootId(String vmId, Instant now) {
+        AgentHeartbeat heartbeat = agentDataService.findHeartbeat(vmId)
+                .orElseThrow(() -> agentUnavailable(vmId));
+        if (agentDataService.statusOf(heartbeat, now)
+                != com.xenova.backend.agent.domain.AgentStatus.ONLINE) {
+            throw agentUnavailable(vmId);
+        }
+        return requireBootId(vmId, heartbeat.getBootId());
     }
 
     private static String requireBootId(String vmId, String bootId) {
@@ -144,42 +128,23 @@ public class AgentStressService {
         return bootId;
     }
 
-    private static String action(GuestKind guestKind, AgentStressCommand.StressType type) {
-        return switch (guestKind) {
-            case LINUX -> "stress";
-            case ZEPHYR -> type == AgentStressCommand.StressType.CPU ? "cpu_stress" : "memory_stress";
-        };
-    }
-
     private static Map<String, Object> parameters(
-            GuestKind guestKind, AgentStressCommand.StressType type, int amount, Integer loadPercent, int durationS) {
+            AgentStressCommand.StressType type, int amount, int durationS) {
         Map<String, Object> parameters = new LinkedHashMap<>();
-        if (guestKind == GuestKind.LINUX) {
-            parameters.put("cpu_workers", type == AgentStressCommand.StressType.CPU ? amount : 0);
-            parameters.put("memory_mib", type == AgentStressCommand.StressType.MEMORY ? amount : 0);
-        } else if (type == AgentStressCommand.StressType.CPU) {
-            if (amount != 1 || loadPercent == null) {
-                throw invalidParameters("Zephyr CPU 부하는 workers=1과 load_percent가 필요합니다.");
-            }
-            parameters.put("workers", amount);
-            parameters.put("load_percent", loadPercent);
-        } else {
-            if (amount > 8) {
-                throw invalidParameters("Zephyr 메모리 부하는 1~8 MiB만 지원합니다.");
-            }
-            parameters.put("memory_mib", amount);
-        }
+        parameters.put("cpu_workers", type == AgentStressCommand.StressType.CPU ? amount : 0);
+        parameters.put("memory_mib", type == AgentStressCommand.StressType.MEMORY ? amount : 0);
         parameters.put("duration_s", durationS);
         return parameters;
     }
 
-    private static ApiException invalidParameters(String message) {
-        return new ApiException(HttpStatus.BAD_REQUEST, "INVALID_STRESS_PARAMETERS", message);
+    private static ApiException unsupportedGuestKind() {
+        return new ApiException(HttpStatus.BAD_REQUEST, "UNSUPPORTED_GUEST_KIND",
+                "CPU·메모리 부하는 Linux VM에서만 지원합니다. Zephyr VM은 AUTO 연산 지연을 사용해야 합니다.");
     }
 
     private static ApiException agentUnavailable(String vmId) {
         return new ApiException(HttpStatus.CONFLICT, "AGENT_UNAVAILABLE",
-                "VM Agent 또는 Zephyr telemetry publisher가 온라인 상태가 아닙니다: " + vmId);
+                "VM Agent가 온라인 상태가 아닙니다: " + vmId);
     }
 
     private byte[] serialize(Map<String, Object> envelope) {
