@@ -138,7 +138,7 @@ class PerceptionFlowTests(unittest.TestCase):
             rgb=replace(observation.rgb,stamp=replace(observation.rgb.stamp,captured_us=(0,100),available_us=100)),
             depth=replace(observation.depth,stamp=replace(observation.depth.stamp,captured_us=(0,100),available_us=100)))
         unbound=PerceptionPipeline(camera.calibration,profile,targets=self.targets).process(extended)
-        self.assertEqual(unbound.summary['free_temporal_status'], 'CAPTURE_TUBE_NOT_IMPLEMENTED')
+        self.assertEqual(unbound.summary['free_temporal_status'], 'MOTION_UNQUALIFIED')
         self.assertEqual(unbound.summary['map_counts']['free'], 0)
         self.assertFalse(unbound.summary['free_certificates'])
 

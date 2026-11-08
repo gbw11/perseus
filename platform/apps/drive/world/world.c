@@ -48,6 +48,15 @@ static bool simple(const dw_point *points,size_t count,bool closed){
  }
  return true;
 }
+static bool open_basis(const dw_point *points,size_t count){
+ if(!simple(points,count,false)||hypotf(points[0].x-points[count-1].x,points[0].y-points[count-1].y)<1e-6f)return false;
+ for(size_t i=1;i+1<count;i++){
+  dw_point a=points[i-1],b=points[i],c=points[i+1];
+  /* 인접 edge는 단순성 검사에서 공유 endpoint를 허용하지만 구간 되돌림은 station을 중복시킨다. */
+  if(fabsf(cross(a,b,c))<1e-6f&&((b.x-a.x)*(c.x-b.x)+(b.y-a.y)*(c.y-b.y))<0)return false;
+ }
+ return true;
+}
 static bool convex4(const dw_point *points){
  if(!simple(points,4,true))return false;
  bool positive=true,negative=true;
@@ -150,9 +159,14 @@ static dw_point boundary(const dw_world *w,size_t k){
 }
 static bool road_simple(const dw_world *w){
  size_t n=w->reference_count,edges=2*n;
- for(size_t k=0;k<n;k++){
-  dw_point a=w->reference[k?k-1:0],b=w->reference[k?k:1];
-  if(cross(a,b,w->left_boundary[k])<=1e-6f||cross(a,b,w->right_boundary[k])>=-1e-6f)return false;
+ if(w->required_features&DW_LANE_MODEL){
+  /* 새 basis는 station 축이며 hard domain의 두 chain은 차선의 좌우 대응점이 아니다. */
+  if(!open_basis(w->reference,n))return false;
+ }else{
+  for(size_t k=0;k<n;k++){
+   dw_point a=w->reference[k?k-1:0],b=w->reference[k?k:1];
+   if(cross(a,b,w->left_boundary[k])<=1e-6f||cross(a,b,w->right_boundary[k])>=-1e-6f)return false;
+  }
  }
  /* Bounded at 128 edges, once per received immutable map, not per tracker. */
  for(size_t i=0;i<edges;i++){
@@ -200,10 +214,10 @@ static size_t message_cap(const pb_msgdesc_t *desc){
  if(desc==xenova_drive_ParkingSlot_fields)return 256;
  if(desc==xenova_drive_MapLocalization_fields||desc==xenova_drive_SceneAdmissionRef_fields)return 96;
  if(desc==xenova_drive_ParkingSetMeta_fields)return 64;
- if(desc==xenova_drive_MissionBudgetRequest_fields||desc==xenova_drive_MapperClockProbe_fields)return 512;
+ if(desc==xenova_drive_MissionBudgetRequest_fields)return 512;
  if(desc==xenova_drive_MissionBudgetReply_fields)return 1536;
  if(desc==xenova_drive_SurveySummary_fields)return 288;
- if(desc==xenova_drive_MissionGrant_fields||desc==xenova_drive_MapperClockReply_fields||
+ if(desc==xenova_drive_MissionGrant_fields||desc==xenova_drive_MapperClockProbe_fields||desc==xenova_drive_MapperClockReply_fields||
     desc==xenova_drive_SceneGrant_fields||desc==xenova_drive_TofObservation_fields)return 1024;
  return DW_WIRE_MAX;
 }
@@ -542,6 +556,41 @@ enum dw_result dw_pool_source(struct dw_pool *p,const struct dw_trust *t) {
  if(!lock(p))return DW_BUSY;
  if(p->source_revision==UINT32_MAX){unlock(p);return DW_NO_SPACE;}
  p->trust=*t;p->authorized=true;p->source_revision++;unlock(p);return DW_OK;
+}
+static bool trust_id(const char *value,size_t capacity){
+ return value[0]&&memchr(value,0,capacity)!=NULL;
+}
+static enum dw_result trust_valid(const struct dw_trust *t){
+ if(!t)return DW_SOURCE;
+ if(!trust_id(t->vehicle,sizeof(t->vehicle))||!trust_id(t->mapper_boot,sizeof(t->mapper_boot))||
+    !trust_id(t->mapper_instance,sizeof(t->mapper_instance))||!trust_id(t->map_epoch,sizeof(t->map_epoch))||
+    !trust_id(t->frame_epoch,sizeof(t->frame_epoch))||!trust_id(t->odom_epoch,sizeof(t->odom_epoch))||
+    !trust_id(t->configuration,sizeof(t->configuration))||!trust_id(t->calibration,sizeof(t->calibration))||
+    !trust_id(t->primitive,sizeof(t->primitive))||!trust_id(t->clock.epoch,sizeof(t->clock.epoch)))return DW_SOURCE;
+ if(!t->max_live_age_us||t->max_live_age_us>INT64_MAX)return DW_CONFIGURATION;
+ if(!t->clock.expires_pi_us||t->clock.expires_pi_us>INT64_MAX||
+    t->clock.lower_offset_us>t->clock.upper_offset_us||
+    (uint64_t)t->clock.upper_offset_us-(uint64_t)t->clock.lower_offset_us>t->clock.max_error_us)return DW_TIME;
+ return DW_OK;
+}
+static bool same_source(const struct dw_trust *a,const struct dw_trust *b){
+ /* 구조체 padding과 각 문자열의 NUL 뒤 bytes는 신원이 아니다. */
+ return !strcmp(a->vehicle,b->vehicle)&&!strcmp(a->mapper_boot,b->mapper_boot)&&
+  !strcmp(a->mapper_instance,b->mapper_instance)&&!strcmp(a->map_epoch,b->map_epoch)&&
+  !strcmp(a->frame_epoch,b->frame_epoch)&&!strcmp(a->odom_epoch,b->odom_epoch)&&
+  !strcmp(a->configuration,b->configuration)&&!strcmp(a->calibration,b->calibration)&&
+  !strcmp(a->primitive,b->primitive)&&!strcmp(a->clock.epoch,b->clock.epoch)&&
+  a->max_live_age_us==b->max_live_age_us&&a->clock.max_error_us==b->clock.max_error_us;
+}
+enum dw_result dw_pool_refresh(struct dw_pool *p,const struct dw_trust *t){
+ if(!p)return DW_SOURCE;
+ enum dw_result rc=trust_valid(t);if(rc)return rc;
+ if(!lock(p))return DW_BUSY;
+ /* force API로 설치된 과거 trust도 bounded 문자열인지 확인한 뒤 비교한다. */
+ bool unchanged=p->authorized&&!trust_valid(&p->trust)&&same_source(&p->trust,t);
+ if(!unchanged&&p->source_revision==UINT32_MAX){unlock(p);return DW_NO_SPACE;}
+ p->trust=*t;p->authorized=true;if(!unchanged)p->source_revision++;
+ unlock(p);return DW_OK;
 }
 static bool handle(struct dw_pool *p,struct dw_handle h) { return h.slot<DW_MAP_SLOTS&&p->slots[h.slot].generation==h.generation; }
 enum dw_result dw_reserve(struct dw_pool *p,struct dw_handle *h,struct dw_snapshot **out) {

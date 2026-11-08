@@ -21,7 +21,7 @@ from xenova_vehicle.mapping.local_map import EvidenceGrid, GridSpec
 from xenova_vehicle.mapping.registration import PoseBox
 from xenova_vehicle.runtime.parking_bridge import ParkingBridge, MetricEvidence, ParkingNotReady
 from xenova_vehicle.storage.contracts import (StorageContext, StorageJob, CatalogReservation,
-    LoadRequest, CommitReceipt, canonical)
+    LoadRequest, CommitReceipt, canonical, json_bytes)
 from xenova_vehicle.storage.records import EvidenceTable, CheckpointPayload
 from xenova_vehicle.storage.repository import PersistenceStore
 
@@ -72,6 +72,21 @@ class ParkingBridgeTests(unittest.TestCase):
     def job(self):
         return StorageJob(self.context, str(uuid4()), self.clock(), self.clock() + 5_000_000)
 
+    def assert_original_method_closure(self, evidence):
+        contexts = {c.sha256: c for c in evidence.contexts}
+        for context in evidence.contexts:
+            fields = json_bytes(context.payload, 4096)
+            if fields['body'].get('profile') != 'parking-originals-1':
+                continue
+            originals = fields['body']
+            self.assertIn(originals['method_context_sha256'], contexts)
+            method = json_bytes(contexts[originals['method_context_sha256']].payload, 4096)
+            self.assertEqual(method['kind'], 'METRIC')
+            self.assertEqual(method['body']['profile'], 'parking-method-1')
+            self.assertEqual(method['body']['storage_context_sha256'], originals['storage_context_sha256'])
+        self.assertLessEqual(len(contexts), 64)
+        return contexts
+
     def result(self, original=None):
         original = source() if original is None else original
         stamp = original.stamp
@@ -118,6 +133,7 @@ class ParkingBridgeTests(unittest.TestCase):
         self.context = publication_context(self.context); self.bridge = self.new_bridge(); self.allocate()
         old_context = self.context; old_method = self.bridge.method
         old_job = self.job(); original_cp = self.bridge.build_checkpoint(old_job, now_us=self.clock(), durable_cutoff_pi_us=200)
+        self.assert_original_method_closure(original_cp.payload.evidence)
         old_receipt = self.store.commit(old_job, original_cp.payload, current_context_sha256=old_context.sha256)
         self.assertTrue(self.bridge.accept_checkpoint(original_cp, old_receipt, now_us=self.clock()))
         track = self.bridge.catalog.tracks[0]; accepted = self.bridge.catalog.accepted_range
@@ -125,6 +141,7 @@ class ParkingBridgeTests(unittest.TestCase):
         unused = self.bridge.catalog.available_ids
         newer = publication_context(old_context, revision=2, scene=dict(admission_id=str(uuid4()), revision='1'))
         self.assertTrue(self.bridge.replace_publication_context(newer, now_us=self.clock()))
+        self.assertIs(self.bridge._contexts[old_method.sha256], old_method)
         self.assertIs(self.bridge.catalog.tracks[0], track)
         self.assertIs(self.bridge.catalog.accepted_range, accepted)
         self.assertIs(accepted.job.context, old_context)
@@ -153,12 +170,22 @@ class ParkingBridgeTests(unittest.TestCase):
             now_us=self.clock(), metric_evidence=metric).geometry_updated)
         self.assertEqual(tuple(t.slot_id for t in self.bridge.catalog.tracks), (1, 2))
         self.assertEqual(self.bridge.catalog.available_ids, unused - 1)
+        # scene-only 전환 뒤 pruning도 과거 originals의 실제 method 원문을 유지한다.
+        self.bridge._prune()
+        self.assertIs(self.bridge._contexts[old_method.sha256], old_method)
         cp = self.bridge.build_checkpoint(self.job(), now_us=self.clock(), durable_cutoff_pi_us=50_200)
+        self.assert_original_method_closure(cp.payload.evidence)
         self.assertIn(old_method.payload, {c.payload for c in cp.payload.evidence.contexts})
         self.assertIn(self.bridge.method.payload, {c.payload for c in cp.payload.evidence.contexts})
         receipt = self.store.commit(cp.job, cp.payload, current_context_sha256=newer.sha256)
         self.assertEqual(receipt.status, 'COMMITTED')
         self.assertTrue(self.bridge.accept_checkpoint(cp, receipt, now_us=self.clock()))
+        reference = self.store.latest_complete(expires_us=self.clock() + 5_000_000)
+        loaded = self.store.load(LoadRequest(self.job(), canonical(reference),
+            canonical(dict(kind='CHECKPOINT_PAGE', cursor=0))), current_context_sha256=newer.sha256)
+        loaded_contexts = self.assert_original_method_closure(loaded.payload.evidence)
+        self.assertEqual(loaded_contexts[old_method.sha256].payload, old_method.payload)
+        self.assertEqual(loaded_contexts[self.bridge.method.sha256].payload, self.bridge.method.payload)
         row = self.db.connection.execute('SELECT context_sha256,job_id FROM catalog_ranges WHERE kind=? AND start_id=?', ('SLOT', 1)).fetchone()
         self.assertEqual(row, (old_context.sha256, accepted.job.job_id))
         self.assertEqual(self.db.connection.execute('SELECT COUNT(DISTINCT stable_id) FROM catalog_versions WHERE kind=?', ('SLOT',)).fetchone()[0], 2)
@@ -203,12 +230,17 @@ class ParkingBridgeTests(unittest.TestCase):
         self.assertIs(self.bridge.build_checkpoint(self.job(), now_us=self.clock(), durable_cutoff_pi_us=200), request)
         self.assertTrue(all(len(c.payload) <= 4096 for c in request.payload.evidence.contexts))
         self.assertTrue(any(p.parents for p in request.payload.evidence.provenance))
+        contexts = self.assert_original_method_closure(request.payload.evidence)
+        self.assertEqual(contexts[self.bridge.method.sha256].payload, self.bridge.method.payload)
+        self.assertNotIn('c' * 64, contexts)  # method_manifest_sha256는 asset이며 context edge가 아니다.
         receipt = self.store.commit(job, request.payload, current_context_sha256=self.context.sha256)
         self.assertEqual(receipt.status, 'COMMITTED')
         self.assertTrue(self.bridge.accept_checkpoint(request, receipt, now_us=self.clock()))
         reference = self.store.latest_complete(expires_us=self.clock() + 5_000_000)
         load_job = self.job(); load = LoadRequest(load_job, canonical(reference), canonical(dict(kind='CHECKPOINT_PAGE', cursor=0)))
         result = self.store.load(load, current_context_sha256=self.context.sha256)
+        loaded_contexts = self.assert_original_method_closure(result.payload.evidence)
+        self.assertEqual(loaded_contexts[self.bridge.method.sha256].payload, self.bridge.method.payload)
         restored = self.new_bridge(); restored.restore(result, now_us=self.clock())
         track = restored.catalog.tracks[0]
         self.assertEqual(track.slot_id, original.slot_id)

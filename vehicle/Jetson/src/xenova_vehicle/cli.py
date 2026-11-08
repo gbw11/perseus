@@ -184,9 +184,17 @@ def _runtime_command(args: argparse.Namespace) -> int:
                 perception_bytes=source.read(65537)
             if not 1<=len(perception_bytes)<=65536:
                 raise ValueError('perception calibration must fit in 64KiB')
+        jio_profile=None
+        if args.jio_profile is not None:
+            from .transport.jio_profile import JetsonJioProfile
+            jio_profile=JetsonJioProfile.load(args.jio_profile)
+        mapper_bytes=None
+        if args.mapper_profile is not None:
+            with args.mapper_profile.open('rb') as source:mapper_bytes=source.read(65537)
+            if not 1<=len(mapper_bytes)<=65536:raise ValueError('mapper configuration must fit in64KiB')
         report = run_runtime(profile, args.state_dir, storage, args.output or args.output_root,
             duration_s=args.duration_s, service_scope=service_scope, output_root=args.output_root is not None,
-            perception_profile_bytes=perception_bytes)
+            perception_profile_bytes=perception_bytes,jio_profile=jio_profile,mapper_profile_bytes=mapper_bytes)
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"runtime: {exc}", file=sys.stderr)
         return 2
@@ -258,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
     runtime.add_argument("--duration-s", type=_duration, default=None, help="optional 0.1..300 second residence after local readiness; default until stop")
     runtime.add_argument("--json", action="store_true", help="print one final normal-flow receipt")
     runtime.add_argument('--perception-profile',type=Path,help='explicit physical/provisional calibration for owned-copy local-map processing')
+    runtime.add_argument('--jio-profile',type=Path,help='optional owner-only MQTT/source policy profile for original Pi inputs and world publication')
+    runtime.add_argument('--mapper-profile',type=Path,help='optional explicit local mapper schema1 for capture timing, sensors, geometry and stopping bounds')
     perception=commands.add_parser('perception-bench',help='offline sensor-to-local-map diagnostics; no control authority')
     perception.add_argument('--source',choices=('synthetic','yolop-replay'),default='synthetic',help='explicit sensor provenance')
     perception.add_argument('--dataset',type=Path,help='existing paired synthetic or validated YOLOP diagnostic recording')

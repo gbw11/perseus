@@ -122,6 +122,16 @@ PYTHONPATH=vehicle/Jetson/src python -m xenova_vehicle doctor --json
 
 M의 계산 대기는 최신 RAW1개·NN1개, 활성 계산1개, phase 사건8개·불변 결과1개로 제한한다. NN 해석 완료와 지도 계산 완료는 별도로 보고한다. 원 입력 만료는 결과 채택을 막고 후보만 취소하며 기존 채택 지도는 보존한다. STOP 뒤 계산 thread가 실제 종료되지 않으면 정상 회수로 보고하지 않고 S의 process 종료·reap 절차를 따른다.
 
+`--jio-profile /absolute/path/private-jio.json`을 선택하면 S-jio 하나가 Pi의 원 Vehicle·clock·ToF·Scene을 직접 수신한다. 파일은 실행 사용자 소유의 owner-only JSON이며 exact 설치 필드는 [mapper 계약](../../docs/contracts/drive-world/mapper-clock-and-source.md)과 `JetsonJioProfile`에 정의한다. `--perception-profile`의 local SHA와 명시한 전체 차량 bundle 관계가 맞아야 한다. profile을 생략하면 MQTT owner를 만들지 않는다. source identity와 시계 연결은 metric/주행 승인을 뜻하지 않는다.
+
+`--mapper-profile /absolute/path/mapper.json`은 카메라 보정과 별도의 선택형 local schema1 설정이다. 기존 인지·센서 타입의 timing/age/motion/통행 영역/표적/주차 통로/제동 상한을 명시하며, S-log가 canonical bytes와 SHA를 고정해 M에 전달한다. local mapper SHA·local calibration SHA·차량 configuration ID·전체 차량 보정 bundle은 각각 대조한다. 이 옵션은 `--perception-profile`과 `--jio-profile`을 함께 사용한다. 미정 timing이나 false qualification은 자동으로 채우지 않으며, clock/전체 capture pose가 없으면 기존 지도는 보존하고 별도 frame-local 진단을 사용한다.
+
+선택 항목 `catalog_policy`는 `{"crossing_allowed": true, "aisle_lane_indices": [0]}` 형태다. 횡단 허용은 설치 도로의 명시 규칙이며 관측한 divider segment에만 적용한다. 통로별 index는 관측 divider 방향의 왼쪽 차로0·오른쪽 차로1이며 `parking_aisles`와 같은 순서/개수다. 실제 lane ID는 D의 원 내구 예약 뒤 결박하므로 이 정책을 쓸 때 각 aisle의 `approach_lane_id`는0이어야 한다. 생략/null은 미설정이며 자동 횡단·주차 역할을 추정하지 않는다. 이 설정은 FREE/기하/센서 자격이나 추진 승인을 대신하지 않는다.
+
+선택 항목 `survey`는 `SurveyProfile`의 12개 필드를 모두 명시한다. 원 coverage profile SHA·필수 센서 mask·셀 용량·정지 관측 창과 간격·이동/회전 오차·pose 간격·anchor 오차·관측 최대 나이·입력 종류를 설정하며 `input_kind`는 `LIVE`만 허용한다. 생략/null이면 조사 기능을 만들지 않는다. 설정만으로 Scene을 승인하지 않으며 실제 Pi grant, 원 시계·정합·정지 창·FREE 증거와 D commit을 별도로 대조한다.
+
+M-compute는 같은 최종 문맥에서 지도·hazard·Scene 후보를 채택한 뒤 World와 조사 요약을 종류별 최신1개 포트로 M-main에 넘긴다. 최종 채택 lock에서는 준비된 참조만 바꾸며 encode·hash·DB·송신은 수행하지 않는다. M-main과 S는 원 bytes·grant SHA·절대 기한을 유지한다. clock 손실이나 Scene 철회는 원 지도·RAW binding·내구 ID를 초기화하지 않으며, 오래된 후보의 전송이나 정적 지도 사용권을 새로 승인하지 않는다.
+
 외부에 복사한 `profiles/oak-yolop-rgb-depth-bench.example.json`의 장치·자산 경로를 실제 값으로 설정하고 `nn_requirement=REQUIRED`, `jpeg_enabled=false`를 사용한다. 다음은 새 설치의 첫 수동 실행 예다. state의 부모 디렉터리는 앱 실행 사용자 소유로 먼저 준비한다. state와 output은 기존 경로를 덮어쓰지 않는다.
 
 ```bash

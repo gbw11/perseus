@@ -149,6 +149,10 @@ class MapperStorageClient:
             self.dispatch = None; self._writer = self._reader = self._encode = None; self.state = 'IDLE'
             self._load_ready_bytes = None
         if self.dispatch is None:
+            head=self.mailbox.main_peek()
+            if head is not None and type(head.request) is LoadRequest and head.request.purpose=='BOOTSTRAP_RESTORE':
+                # S의 원 selected-ref entry만 시작한다. explicit adopt 전 PREPARE를 재발행하지 않는다.
+                return
             selected = self.mailbox.main_take(current_context_sha256=current_context_sha256, now_us=now)
             if selected is None:
                 return

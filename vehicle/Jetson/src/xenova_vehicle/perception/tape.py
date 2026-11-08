@@ -7,9 +7,11 @@ calibration·통행권·FREE·stable ID를 만들지 않는다. NumPy/OpenCV는 
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 import math
+import struct
 from typing import Any
 
 from .inputs import FrameStamp
+from .geometry import timing_start, timing_finish
 
 
 ENDPOINT_KINDS = frozenset(('physical_junction', 'observed_paint_end', 'FOV_clip', 'occluded', 'predicted'))
@@ -164,25 +166,38 @@ class TapeGraph:
             strips=[asdict(s) for s in self.strips], junctions=[asdict(j) for j in self.junctions], work=dict(self.work))
 
 
-def _neighbors(np, image):
-    p = np.pad(image, 1)
-    return (p[:-2, 1:-1], p[:-2, 2:], p[1:-1, 2:], p[2:, 2:],
-            p[2:, 1:-1], p[2:, :-2], p[1:-1, :-2], p[:-2, :-2])
+def _thin_tables():
+    tables=[]
+    for step in (0,1):
+        flags=[]
+        for code in range(256):
+            p=tuple(bool(code & (1<<i)) for i in range(8))
+            transitions=sum(not p[i] and p[(i+1)%8] for i in range(8))
+            corner=(not (p[0] and p[2] and p[4]) and not (p[2] and p[4] and p[6]) if step==0 else
+                    not (p[0] and p[2] and p[6]) and not (p[0] and p[4] and p[6]))
+            flags.append(2<=sum(p)<=6 and transitions==1 and corner)
+        tables.append(bytes(flags))
+    return tuple(tables)
+
+
+# 원 N,NE,E,SE,S,SW,W,NW 순서. 캐시는 LUT512B+kernel36B이며 frame 배열은 보유하지 않는다.
+_THIN_REMOVE=_thin_tables()
+_THIN_KERNEL=struct.pack('<9f',128,1,2,64,0,4,32,16,8)
 
 
 def _thin(np, mask, limit):
+    """원 bool mask의 Zhang-Suen predicate/반복 한도를 정수 이웃 코드로 평가한다."""
+    import cv2
     image = mask.copy()
+    if not image.size and limit>0:return image,True,1
+    kernel=np.frombuffer(_THIN_KERNEL,dtype='<f4').reshape(3,3)
+    lookup=tuple(np.frombuffer(table,dtype=np.bool_) for table in _THIN_REMOVE)
     for iteration in range(limit):
         changed = False
         for step in (0, 1):
-            p = _neighbors(np, image)
-            count = sum(v.astype(np.uint8) for v in p)
-            transitions = sum((~p[i] & p[(i + 1) % 8]).astype(np.uint8) for i in range(8))
-            if step == 0:
-                corner = ~(p[0] & p[2] & p[4]) & ~(p[2] & p[4] & p[6])
-            else:
-                corner = ~(p[0] & p[2] & p[6]) & ~(p[0] & p[4] & p[6])
-            remove = image & (count >= 2) & (count <= 6) & (transitions == 1) & corner
+            # 0/1×정수 kernel의 합은0..255라 float32 합과 CV_16S 변환도 정수로 exact하다.
+            codes=cv2.filter2D(image.astype(np.uint8),cv2.CV_16S,kernel,borderType=cv2.BORDER_CONSTANT)
+            remove = image & lookup[step][codes]
             if np.any(remove):
                 image[remove] = False
                 changed = True
@@ -211,7 +226,7 @@ def _birdview_map(camera, plane, profile):
 
 
 def _trace(np, cv2, skeleton, valid, occluded, band, projection_error, projection_xy, profile, work):
-    pixels = {tuple(int(v) for v in p) for p in np.argwhere(skeleton)}
+    pixels = set(map(tuple,np.argwhere(skeleton).tolist()))
     adjacency = {p: tuple((p[0] + dy, p[1] + dx) for dy, dx in
         ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
         if (p[0] + dy, p[1] + dx) in pixels) for p in pixels}
@@ -435,8 +450,9 @@ def _trace(np, cv2, skeleton, valid, occluded, band, projection_error, projectio
     return strips, junctions, complete
 
 
-def extract_tape(bgr, camera, plane, profile=TapeProfile(), *, stamp=None, occlusion_mask=None, nn_candidates=None):
+def extract_tape(bgr, camera, plane, profile=TapeProfile(), *, stamp=None, occlusion_mask=None, nn_candidates=None, diagnostics=None):
     """원 RGB만으로 white-band 후보를 만들고 가림/경계 tip을 보존한다. NN은 mask gate가 아니다."""
+    timing=timing_start(diagnostics,'tape.birdview_remap')
     if type(profile) is not TapeProfile or stamp is not None and type(stamp) is not FrameStamp:
         raise ValueError('expected tape profile and optional original FrameStamp')
     import numpy as np
@@ -458,6 +474,8 @@ def extract_tape(bgr, camera, plane, profile=TapeProfile(), *, stamp=None, occlu
         footprint = cv2.dilate((occlusion_mask != 0).astype(np.uint8), np.ones((3, 3), np.uint8))
         occ = cv2.remap(footprint, u, v,
                         cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=0) != 0
+    timing_finish(diagnostics,timing)
+    timing=timing_start(diagnostics,'tape.mask')
     hsv = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)
     white = valid & ~occ & (hsv[..., 1] <= profile.saturation_max) & (hsv[..., 2] >= profile.value_min)
     work = dict(grid_cells=int(white.size), components=0, component_cells=0, thin_iterations=0,
@@ -501,7 +519,10 @@ def extract_tape(bgr, camera, plane, profile=TapeProfile(), *, stamp=None, occlu
         white[censored] = False
         occ |= censored
         reasons.append('WIDE_WHITE_SURFACE_CENSORED')
+    timing_finish(diagnostics,timing)
+    timing=timing_start(diagnostics,'tape.skeleton')
     skeleton, converged, work['thin_iterations'] = _thin(np, white, profile.max_thin_iterations)
+    timing_finish(diagnostics,timing)
     if not converged:
         complete = False
         reasons.append('THINNING_CAP')
@@ -511,6 +532,7 @@ def extract_tape(bgr, camera, plane, profile=TapeProfile(), *, stamp=None, occlu
         reasons.append('GRAPH_PIXEL_CAP')
         strips, junctions = [], ()
     else:
+        timing=timing_start(diagnostics,'tape.projection')
         projection_error = np.zeros(valid.shape, dtype=np.float64)
         projection_xy = np.zeros(valid.shape + (2,), dtype=np.float64)
         near_invalid = cv2.dilate((~valid).astype(np.uint8), np.ones((3, 3), np.uint8)) != 0
@@ -519,7 +541,7 @@ def extract_tape(bgr, camera, plane, profile=TapeProfile(), *, stamp=None, occlu
         if len(rows):
             work['projection_batches'] = 1
             lower, upper, bounded = project_ground_bounds_many(u[rows, columns], v[rows, columns],
-                camera, plane, pixel_error=camera.pixel_error + 1.0)
+                camera, plane, pixel_error=camera.pixel_error + 1.0,diagnostics=diagnostics)
             nominal = np.column_stack((profile.x_min_m + rows * profile.cell_m,
                                        profile.y_min_m + columns * profile.cell_m))
             pad = np.maximum(np.abs(lower[:, :2] - nominal), np.abs(upper[:, :2] - nominal))
@@ -537,8 +559,11 @@ def extract_tape(bgr, camera, plane, profile=TapeProfile(), *, stamp=None, occlu
             rejected_rows, rejected_columns = rows[~bounded | limited], columns[~bounded | limited]
             skeleton[rejected_rows, rejected_columns] = False
             valid[rejected_rows, rejected_columns] = False
+        timing_finish(diagnostics,timing)
+        timing=timing_start(diagnostics,'tape.graph')
         strips, junctions, trace_complete = _trace(np, cv2, skeleton, valid, occ, white, projection_error,
                                                   projection_xy, profile, work)
+        timing_finish(diagnostics,timing)
         if not trace_complete:
             complete = False
             for key, reason in (('trace_cap_exhausted', 'TRACE_WORK_CAP'),

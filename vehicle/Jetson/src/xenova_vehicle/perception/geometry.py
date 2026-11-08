@@ -7,8 +7,64 @@ OpenCV를 쓰지만 미구현 연속 역왜곡 bound를 corner 표본으로 대�
 from dataclasses import dataclass
 import math
 from numbers import Real
+from time import perf_counter_ns
 
 from .calibration import CameraModel, Plane, number as _native_number
+
+
+TIMING_PHASES = frozenset(('depth.prepare','depth.validity','depth.projection','depth.height_classify',
+    'depth.selection','depth.selected_reclassify','depth.hit_batch','depth.ray_geometry','depth.ray_batch',
+    'tape.birdview_remap','tape.mask','tape.skeleton','tape.projection','tape.graph',
+    'geometry.ground_prepare','geometry.ground_ray_intervals','geometry.ground_intersection',
+    'geometry.axial_prepare','geometry.axial_ray_intervals','geometry.axial_range'))
+
+
+class TimingDiagnostics:
+    """명시한 bench 호출의 elapsed 진단. 측정/수신/완료 source 시각으로 쓰지 않는다.
+
+    단일 compute owner용이며 phase allowlist와 총 start 횟수<=1024로 제한한다.
+    이벤트 목록 대신 유한 합계만 보관한다. depth/tape 외곽과 geometry 안쪽 시간은
+    겹칠 수 있는 inclusive 값이므로 서로 더해 전체 지연으로 해석하지 않는다.
+    프레임마다 새 collector를 사용하거나 진행 중 token이 없을 때 reset한다.
+    """
+
+    def __init__(self, max_calls=256):
+        if type(max_calls) is not int or not 1<=max_calls<=1024:
+            raise ValueError('diagnostic timing max_calls must be in1..1024')
+        self.max_calls=max_calls; self._active={}; self._phases={}; self._started=0; self._completed=0; self._dropped=0
+
+    def start(self, phase):
+        if type(phase) is not str or phase not in TIMING_PHASES: raise ValueError('unknown diagnostic timing phase')
+        if self._started==self.max_calls:
+            self._dropped=min((1<<63)-1,self._dropped+1); return None
+        self._started+=1; token=self._started; self._active[token]=(phase,perf_counter_ns()); return token
+
+    def finish(self, token):
+        if token is None: return
+        if type(token) is not int or token not in self._active: raise ValueError('unknown/finished diagnostic timing token')
+        phase,begin=self._active.pop(token); elapsed=perf_counter_ns()-begin
+        if elapsed<0: raise RuntimeError('perf_counter_ns regressed')
+        count,total=self._phases.get(phase,(0,0)); self._phases[phase]=(count+1,total+elapsed); self._completed+=1
+
+    def snapshot(self):
+        return dict(clock='perf_counter_ns',source_time=False,inclusive=True,max_calls=self.max_calls,
+            started_calls=self._started,completed_calls=self._completed,incomplete_calls=len(self._active),
+            dropped_calls=self._dropped,phases={name:dict(calls=count,elapsed_ns=elapsed,elapsed_us=elapsed//1000)
+                for name,(count,elapsed) in sorted(self._phases.items())})
+
+    def reset(self):
+        if self._active: raise ValueError('diagnostic timing still has active calls')
+        self._phases.clear(); self._started=self._completed=self._dropped=0
+
+
+def timing_start(diagnostics, phase):
+    if diagnostics is None: return None
+    if type(diagnostics) is not TimingDiagnostics: raise ValueError('expected optional TimingDiagnostics')
+    return diagnostics.start(phase)
+
+
+def timing_finish(diagnostics, token):
+    if diagnostics is not None: diagnostics.finish(token)
 
 
 def number(value):
@@ -505,12 +561,13 @@ def _ground_homography_boxes(u, v, error, coefficients):
     return np.minimum.reduce(lows), np.maximum.reduce(highs)
 
 
-def project_ground_bounds_many(u, v, camera, plane, *, pixel_error=None):
+def project_ground_bounds_many(u, v, camera, plane, *, pixel_error=None, diagnostics=None):
     """연속 ground box의 batch `(lower, upper, valid)`. 마지막 축은 base XYZ다.
 
     최대65536 출력이며 내부 작업은8192개씩 한다. 미지원 distortion/수평선/ROI와
     비유한 좌표는 valid=False, 숫자 placeholder는0이다. 수락 여부는 caller가 보존한다.
     """
+    timing=timing_start(diagnostics,'geometry.ground_prepare')
     import numpy as np
     plane = _plane(plane)
     error = camera.pixel_error if pixel_error is None else number(pixel_error)
@@ -531,9 +588,13 @@ def project_ground_bounds_many(u, v, camera, plane, *, pixel_error=None):
     fixed = (not any(camera.distortion) and not camera.ray_error_rad and not camera.rotation_error_rad
              and not camera.translation_error_m and not plane.normal_error_rad and not plane.offset_error_m)
     coefficients = _ground_homography_coefficients(camera, plane) if fixed else None
+    timing_finish(diagnostics,timing)
     for start in range(0, u.size, 8192):
         end = min(start + 8192, u.size)
+        timing=timing_start(diagnostics,'geometry.ground_ray_intervals')
         q, valid = _ray_intervals_batch(flat_u[start:end], flat_v[start:end], camera, error)
+        timing_finish(diagnostics,timing)
+        timing=timing_start(diagnostics,'geometry.ground_intersection')
         denominator = (0., 0.)
         for n, ray in zip(normal, q):
             denominator = _badd(denominator, _bmul(n, ray))
@@ -548,19 +609,21 @@ def project_ground_bounds_many(u, v, camera, plane, *, pixel_error=None):
         valid &= np.isfinite(lo).all(axis=-1) & np.isfinite(hi).all(axis=-1) & (lo <= hi).all(axis=-1)
         lower[start:end], upper[start:end] = np.where(valid[:, None], lo, 0.), np.where(valid[:, None], hi, 0.)
         accepted[start:end] = valid
+        timing_finish(diagnostics,timing)
     outputs = lower.reshape(shape + (3,)), upper.reshape(shape + (3,)), accepted.reshape(shape)
     for output in outputs:
         output.setflags(write=False)
     return outputs
 
 
-def axial_ray_bounds_many(u, v, z_mm, camera, *, depth_error_m=0., pixel_error=None):
+def axial_ray_bounds_many(u, v, z_mm, camera, *, depth_error_m=0., pixel_error=None, diagnostics=None):
     """batch ray의 `(originLo,originHi,dirLo,dirHi,rangeLo,rangeHi,near,far,valid)`.
 
     XYZ 배열의 마지막 축은3, 나머지는 broadcast shape다. 모든 range/near/far는
     radial m이며 입력만 axial mm다. 실제 unit sphere와의 [-1,1] 교집합을 유지한다.
     미지원/비유한/0포함/clip 실패는 valid=False이며 placeholder0을 증거로 쓰지 않는다.
     """
+    timing=timing_start(diagnostics,'geometry.axial_prepare')
     import numpy as np
     error = camera.pixel_error if pixel_error is None else number(pixel_error)
     if error < 0:
@@ -572,9 +635,13 @@ def axial_ray_bounds_many(u, v, z_mm, camera, *, depth_error_m=0., pixel_error=N
     range_lo, range_hi, near, far = (np.zeros(u.size) for _ in range(4))
     accepted = np.zeros(u.size, dtype=bool)
     origin = tuple(_baround(t, camera.translation_error_m) for t in camera.translation)
+    timing_finish(diagnostics,timing)
     for start in range(0, u.size, 8192):
         end = min(start + 8192, u.size)
+        timing=timing_start(diagnostics,'geometry.axial_ray_intervals')
         q, valid = _ray_intervals_batch(u[start:end], v[start:end], camera, error)
+        timing_finish(diagnostics,timing)
+        timing=timing_start(diagnostics,'geometry.axial_range')
         z, dz = z_mm[start:end] * .001, errors[start:end]
         axial = _baround(z, dz)
         norm = _bnorm(q)
@@ -594,6 +661,7 @@ def axial_ray_bounds_many(u, v, z_mm, camera, *, depth_error_m=0., pixel_error=N
         direction_lo[start:end], direction_hi[start:end] = np.where(valid[:, None], lo, 0.), np.where(valid[:, None], hi, 0.)
         range_lo[start:end], range_hi[start:end] = np.where(valid, radial[0], 0.), np.where(valid, radial[1], 0.)
         near[start:end], far[start:end], accepted[start:end] = np.where(valid, close, 0.), np.where(valid, distant, 0.), valid
+        timing_finish(diagnostics,timing)
     outputs = tuple(x.reshape(shape + ((3,) if x.ndim == 2 else ())) for x in
         (lower, upper, direction_lo, direction_hi, range_lo, range_hi, near, far, accepted))
     for output in outputs:

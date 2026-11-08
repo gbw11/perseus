@@ -1,6 +1,8 @@
 # 주행 입력과 실제 path 인계 — drive-world-1
 
 이 디렉터리의 `world.proto`가 Python/Gateway와 C/Zephyr의 공통 원본이다.
+Pi가 수락한 mapper 시계 구간의 반환과 S/M identity 제안은
+[mapper clock·source 계약](mapper-clock-and-source.md)을 따른다.
 운영 차량 값은 이 schema에 넣지 않는다. `lattice-lab-1`은 합성 Ackermann 차량과
 시험 지도를 위한 프로필이며 실제 차량의 보정·성능·안전 수락을 대신하지 않는다.
 현재 후보의 시험 수준은 [후속 보고](../../verification/recovery-scenario-closure-20261030.md#history-driving-app)에 구분한다.
@@ -29,6 +31,13 @@ Pi 제어·차량 상태 연결까지 막는 전역 readiness gate가 아니다.
 - 좌표는 metre/radian, rear axle 기준 SE(2) pose다. grid cell은 origin pose에서
   `resolution_m` 간격의 사각형이며 원점 회전도 적용한다. reference·좌/우 boundary는
   같은 frame의 순서 있는 점이다. 뒤집힌 경계·중복 segment·자기 교차를 정상 도로로 채택하지 않는다.
+- features11/15의 `reference`는 방향과 원점이 고정된 열린 도로 station basis다.
+  `left_boundary + reverse(right_boundary)`는 주차 apron을 포함할 수 있는 별도 global hard
+  domain의 단순 폐곡선이다. 같은 점 개수는 wire 배열의 제약이며 각 boundary 점이 같은
+  reference station의 차선 좌우점이라는 뜻은 아니다. 차로 중심·divider·crossing은
+  LaneModel을 사용하며, global outer의 평균으로 생성하지 않는다. basis의 원 prefix는
+  유지하고 실제 끝 연장만 reference revision을 올린다. 차로 선택·관측/ROI 변화로 원점과
+  prefix를 바꾸지 않는다. legacy0/1의 reference별 좌우 방향 검사는 유지한다.
 - 최대 grid는 64×64, road 배열은 각각 2~64점이다. occupancy는 0~100 또는 255(unknown),
   flag bit는 valid=1/static-retained=2/expired=4, age는 cell별 little-endian uint32 ms다.
   unknown/만료/무효 셀은 통행 가능으로 바꾸지 않는다. 보관 셀의 오래된 원 age와 새 관측의

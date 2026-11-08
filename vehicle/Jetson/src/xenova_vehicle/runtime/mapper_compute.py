@@ -12,6 +12,7 @@ processor는 candidate와 accepted 상태를 분리하고 최종 checkpoint 뒤�
 선택 cancelled(input,reason)도 같은 thread에서 호출한다. ordinary expiry는 accepted
 상태를 버리지 않는다. source 교체만 새 factory를 직렬 호출하며 새 권한은 만들지 않는다.
 선택 accepted(input)는 최종 값/원 기한/세대 검사 뒤 lock 안에서 참조 하나만 교환한다.
+accepted_at(input, checked_j_us)가 있으면 같은 최종 검사 시각을 전달하고 우선 호출한다.
 이 hook 안에서는 I/O·복사·대기·재진입을 금지한다. heavy 작업은 geometry 안에서 끝낸다.
 """
 
@@ -296,14 +297,15 @@ class MapperCompute:
     결과를 fence하고 원 호출이 끝난 뒤에만 새 factory를 직렬 호출한다.
     """
 
-    def __init__(self, processor_factory, *, source_generation, clock=_j_us):
-        if not callable(processor_factory) or not callable(clock):
+    def __init__(self, processor_factory, *, source_generation, clock=_j_us,maintenance=None,adoption_lock=None):
+        if not callable(processor_factory) or not callable(clock) or maintenance is not None and not callable(maintenance):
             raise MapperComputeError('factory and original monotonic clock are required')
         self._factory, self._clock = processor_factory, clock
+        self._maintenance=maintenance
         self._generation = _generation(source_generation)
         self._serial = 1
         self._owner = threading.current_thread()
-        self._condition = threading.Condition()
+        self._condition = threading.Condition(adoption_lock)
         self._pending = {'RAW': None, 'NN': None}
         self._last_kind = 'NN'
         self._active = None
@@ -558,8 +560,20 @@ class MapperCompute:
         processor_serial = None
         while True:
             with self._condition:
-                while not self._stopping and not any(self._pending.values()):
+                if self._stopping:return
+            if self._maintenance is not None:
+                try:
+                    # CP encode/hash도 이 compute owner에서만 한다. 원 job 없는 유지 작업은
+                    # 카메라 입력/NN 준비/지도 계산의 진도나 완료 사건으로 세지 않는다.
+                    self._maintenance()
+                except BaseException as error:
+                    with self._condition:
+                        self._terminal_error='MAINTENANCE_'+type(error).__name__
+                    return
+            with self._condition:
+                if not self._stopping and not any(self._pending.values()):
                     self._condition.wait(.02)
+                    continue
                 if self._stopping:
                     return
                 desired = 'RAW' if self._last_kind == 'NN' else 'NN'
@@ -609,9 +623,12 @@ class MapperCompute:
                 with self._condition:
                     # bytes 검사 뒤 실제 마지막 원 시각을 읽는다. accepted는 cheap 참조 swap만 한다.
                     completed = self._check(active)
-                    callback = getattr(processor, 'accepted', None)
+                    callback = getattr(processor, 'accepted_at', None)
                     if callback is not None:
-                        callback(item)
+                        callback(item,completed)
+                    else:
+                        callback = getattr(processor, 'accepted', None)
+                        if callback is not None:callback(item)
                     self._counts['result_replaced'] += int(self._result is not None)
                     self._result = MapperResult(item.job_id, item.source_generation, serial, item.source_key,
                         active['started'], completed, item.expires_us, True, value)

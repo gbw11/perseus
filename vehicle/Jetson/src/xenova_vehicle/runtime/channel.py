@@ -12,8 +12,16 @@ def control_pair() -> tuple[socket.socket, socket.socket]:
     """Linux는 seqpacket, 로컬 Windows 검증은 길이 framing을 쓴다."""
     kind = socket.SOCK_SEQPACKET if sys.platform == "linux" else socket.SOCK_STREAM
     pair = socket.socketpair(type=kind)
-    for endpoint in pair:
-        endpoint.setblocking(False)
+    try:
+        for endpoint in pair:
+            endpoint.setblocking(False)
+    except BaseException:
+        for endpoint in pair:
+            try:
+                endpoint.close()
+            except OSError:
+                pass
+        raise
     return pair
 
 

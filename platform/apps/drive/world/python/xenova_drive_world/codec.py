@@ -23,7 +23,7 @@ _REPEATED_CAPS={'DriveState.path':512,'DriveState.segments':3,'LaneModel.lanes':
 _MESSAGE_CAPS={'WorldSnapshot':32768,'DriveState':32768,'DriveLink':32768,'LaneModel':1408,
     'ParkingSlot':256,'MapLocalization':96,'SceneAdmissionRef':96,'ParkingSetMeta':64,
     'MissionGrant':1024,'MissionBudgetRequest':512,'MissionBudgetReply':1536,
-    'MapperClockProbe':512,'MapperClockReply':1024,'SurveySummary':288,'SceneGrant':1024,
+    'MapperClockProbe':1024,'MapperClockReply':1024,'SurveySummary':288,'SceneGrant':1024,
     'TofObservation':1024}
 
 
@@ -92,6 +92,14 @@ def _simple(points,closed=False):
         for j in range(i+2,len(edges)):
             if closed and i==0 and j==len(edges)-1:continue
             if _intersects(a,b,*edges[j]):raise ValueError('self-intersecting geometry')
+
+
+def _open_basis(points):
+    _simple(points)
+    if math.dist(points[0],points[-1])<1e-6:raise ValueError('closed road basis')
+    for a,b,c in zip(points,points[1:],points[2:]):
+        if abs(_cross(a,b,c))<1e-6 and (b[0]-a[0])*(c[0]-b[0])+(b[1]-a[1])*(c[1]-b[1])<0:
+            raise ValueError('adjacent road basis retraces a station')
 
 
 def _convex(points):
@@ -266,6 +274,9 @@ def _validate_one(message):
         if message.required_features&ROAD_PRIORITY and not any(v&CELL_ROAD for v in message.cell_flags):raise ValueError('missing preferred road')
         new=message.required_features in (11,15)
         if new and message.minor!=2:raise ValueError('world minor2 required')
+        if new:
+            _open_basis([_xy(p) for p in message.reference])
+            _simple([_xy(p) for p in message.left_boundary]+[_xy(p) for p in reversed(message.right_boundary)],True)
         for field,required in (('lane_model',bool(message.required_features&LANE_MODEL)),
                 ('localization',bool(message.required_features&LOCALIZATION_BOUNDS)),
                 ('parking_set',bool(message.required_features&PARKING_MODEL)),('drivable_permission',new)):
@@ -350,7 +361,21 @@ def _validate_one(message):
         if (message.result not in (1,2,3,4,5) or message.reason>10 or message.HasField('grant')!=(message.result==1)
                 or message.HasField('grant') and message.grant.kind!=2):
             raise ValueError('budget reply result/grant')
-    elif name=='MapperClockProbe':_positive(message,'probe_seq','pi_send_us')
+    elif name=='MapperClockProbe':
+        _positive(message,'probe_seq','pi_send_us')
+        if message.HasField('mapper_trust'):
+            trust=message.mapper_trust
+            if not message.admission_revision or trust.vehicle!=message.vehicle:
+                raise ValueError('returned mapper trust lacks original admitted vehicle/source')
+            for expected,actual in (('expected_mapper_boot','mapper_boot'),
+                    ('expected_mapper_instance','mapper_instance'),('expected_clock_epoch','clock_epoch')):
+                if message.HasField(expected) and getattr(message,expected)!=getattr(trust,actual):
+                    raise ValueError('returned mapper trust differs from expected peer')
+    elif name=='WorldTrust':
+        if (message.lower_offset_us>message.upper_offset_us or not message.max_error_us
+                or message.upper_offset_us-message.lower_offset_us>message.max_error_us):
+            raise ValueError('mapper trust offset interval exceeds original error budget')
+        _positive(message,'expires_pi_us')
     elif name=='MapperClockReply':
         _positive(message,'probe_seq','pi_send_us','j2','j3')
         if message.j2>message.j3:raise ValueError('mapper clock order')

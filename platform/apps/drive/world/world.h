@@ -60,6 +60,11 @@ void dw_pool_init(struct dw_pool *);
 /* Authenticated connection/configuration owner only. Does not discard the last
  * map or renew its observations; outstanding older writers cannot publish. */
 enum dw_result dw_pool_source(struct dw_pool *,const struct dw_trust *);
+/* 인증된 입력 owner의 갱신. 같은 source/clock epoch/정책이면 time lease만
+ * 교체하며 held slot의 revision, 관측 시각, 원 만료를 갱신하지 않는다.
+ * 다른 source/정책은 dw_pool_source와 같이 fence한다. 현재 시각의 lease
+ * 수락과 clock drift 일관성은 호출자의 책임이며 이 함수는 구조만 검사한다. */
+enum dw_result dw_pool_refresh(struct dw_pool *,const struct dw_trust *);
 enum dw_result dw_memory_read(struct dw_pool *,struct dw_memory *);
 enum dw_result dw_odom_memory_read(struct dw_odometry *,struct dw_memory *);
 enum dw_result dw_reserve(struct dw_pool *,struct dw_handle *,struct dw_snapshot **);

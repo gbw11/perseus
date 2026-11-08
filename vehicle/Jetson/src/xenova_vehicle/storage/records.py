@@ -245,6 +245,9 @@ class CheckpointPayload:
         if type(self.tiles) is not tuple or len(self.tiles)>32 or any(type(tile) is not TileVersion for tile in self.tiles):
             raise PersistenceError('checkpoint copy permits at most32 tile versions')
         if type(self.evidence) is not EvidenceTable:raise PersistenceError('exact evidence table required')
+        if value['scene'] is not None and 'mapper_state' in value['scene']:
+            from .mapper_state import decode_mapper_state
+            decode_mapper_state(value['scene'],self.evidence.contexts)
         refs=value['tiles']
         if type(refs) is not list or len(refs)>128:raise PersistenceError('checkpoint manifest tile cap')
         references=[]

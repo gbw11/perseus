@@ -69,6 +69,27 @@ class SourceGate:
         return True
 
 
+@dataclass(frozen=True)
+class GridMutation:
+    """실제 mutation의 불변 mask. affected와 원 source를 쓴 셀은 서로 다를 수 있다."""
+    kind: str
+    stamp: FrameStamp
+    shape: tuple
+    affected_mask: bytes
+    source_written_mask: bytes
+
+    def __post_init__(self):
+        if (self.kind not in ('HIT','FREE') or type(self.stamp) is not FrameStamp or type(self.shape) is not tuple
+                or len(self.shape)!=2 or any(type(v) is not int or not 1<=v<=128 for v in self.shape)):
+            raise ValueError('bounded original grid mutation required')
+        size=self.shape[0]*self.shape[1]
+        if any(type(mask) is not bytes or len(mask)!=size or max(mask,default=0)>1
+               for mask in (self.affected_mask,self.source_written_mask)):
+            raise ValueError('mutation mask must preserve exact whole-cell bytes')
+        if any(written and not affected for affected,written in zip(self.affected_mask,self.source_written_mask)):
+            raise ValueError('source cannot be written outside the actual affected cells')
+
+
 class EvidenceGrid:
     """하나의 고정 frame/보정/clock에 묶인 grid. atlas/DB/wire 권한은 만들지 않는다."""
 
@@ -126,8 +147,9 @@ class EvidenceGrid:
         r1 = min(self.spec.height-1,math.floor((y1-oy)/r))
         return tuple((c,row) for row in range(r0,r1+1) for c in range(c0,c1+1))
 
-    def add_hits(self, boxes_xy, stamp, *, view_id, origin_xy):
+    def add_hits(self, boxes_xy, stamp, *, view_id, origin_xy, observer=None):
         import numpy as np
+        if observer is not None and not callable(observer):raise ValueError('grid observer must be callable')
         observed = self._time(stamp)
         if type(view_id) is not str or len(view_id)>128 or len(origin_xy)!=2 or any(not math.isfinite(v) for v in origin_xy):
             raise ValueError('hit view identity/origin missing')
@@ -157,6 +179,8 @@ class EvidenceGrid:
         if count:
             self.revision += 1
             self.applied_hits += count
+            if observer is not None:
+                observer(GridMutation('HIT',stamp,self.state.shape,touched.tobytes(),updated.tobytes()))
         return count
 
     def _hit_mask(self, boxes_xy):
@@ -195,12 +219,16 @@ class EvidenceGrid:
         np.cumsum(difference, axis=1, dtype=dtype, out=difference)
         return difference[:-1, :-1] > 0
 
-    def add_free(self, cells, stamp, *, view_id, origin_xy, certificate_complete):
+    def add_free(self, cells, stamp, *, view_id, origin_xy, certificate_complete, observer=None):
         """호출자가 검산한 whole-cell certificate만 받는다. 원 time을 보존한다."""
         observed = self._time(stamp)
+        if observer is not None and not callable(observer):raise ValueError('grid observer must be callable')
         if not certificate_complete or observed is None:
             return 0
         applied = 0
+        if observer is not None:
+            import numpy as np
+            written=np.zeros(self.state.shape,dtype=np.bool_)
         for col,row in cells:
             self.spec.bounds(col,row)
             if not (self.support[row,col] and self.permission[row,col]):
@@ -221,9 +249,13 @@ class EvidenceGrid:
             self.conflict[row,col] = False
             self.hit_view.pop(row*self.spec.width+col,None)
             applied += 1
+            if observer is not None:written[row,col]=True
         if applied:
             self.revision += 1
             self.applied_free += applied
+            if observer is not None:
+                mask=written.tobytes()
+                observer(GridMutation('FREE',stamp,self.state.shape,mask,mask))
         return applied
 
     def snapshot(self, now_us, *, clock_id):

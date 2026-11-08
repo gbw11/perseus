@@ -11,13 +11,68 @@ import math
 from .calibration import CalibrationProfile, CameraModel, Plane, number
 from .ray_batch import RayBundleBatch
 from .point_batch import PointBoundsBatch
-from .geometry import axial_ray_bounds_many
+from .geometry import axial_ray_bounds_many, timing_start, timing_finish
 from .inputs import FrameStamp
 
 
 BLOCK_PIXELS = 8192
 # 최대2개 모델의 width1280+height720+matrix9+translation3+normal3 float64 bytes만 캐시한다.
 COEFFICIENT_CACHE_BYTES = 2 * (1280 + 720 + 9 + 3 + 3) * 8
+# 단일 compute owner의 고정 camera 하나다. 두 float64 열만 bytes로 보관한다.
+# P0 상시4.6875MiB, freeze 때 한 열 추가7.03125MiB(배열 header/작업 block 별도).
+# 원 선택 index2개+floor bool은 P0 최대2,764,800B여서 캐시와 동시7,680,000B다.
+# 조회의 valid index 임시는 최대32KiB다. norm/q_error 결과 block은 원 경로와 같다.
+# 생성의 1D 계수는 최대8,960B이며 기존 계수 캐시32,240B/원 block/입출력/RSS는 별도다.
+NOMINAL_CACHE_BYTES = 640 * 480 * 2 * 8
+NOMINAL_CACHE_FREEZE_PEAK_BYTES = 640 * 480 * 3 * 8
+_NOMINAL_CACHE = {}
+
+
+def _nominal_terms(camera):
+    """원 norm/q_error 산술을 고정 pixel에 한 번 계산한다. depth/plane/source는 저장하지 않는다.
+
+    frozen CameraModel의 native tuple hash를 쓴다. 새 camera 계산 전에 원 entry를
+    내보내며 최대640x480 밖은 원 block 경로를 유지한다. 반환 view의 소유 bytes는
+    write flag를 복원할 수 없다. 동시에 실행 중인 caller의 사본/RSS 한계는 별도다.
+    """
+    if type(camera) is not CameraModel:
+        raise ValueError('nominal cache requires exact immutable camera')
+    if camera.width > 640 or camera.height > 480:
+        return None
+    import numpy as np
+    cached = _NOMINAL_CACHE.get(camera)
+    if cached is None:
+        _NOMINAL_CACHE.clear()
+        k = camera.k; total = camera.width * camera.height
+        centered_x = np.arange(camera.width, dtype=np.float64) - k[0][2]
+        row_qy = (np.arange(camera.height, dtype=np.float64) - k[1][2]) / k[1][1]
+        pixel_q_error = math.hypot(camera.pixel_error / k[1][1],
+            camera.pixel_error / k[0][0] + abs(k[0][1]) * camera.pixel_error / (k[0][0] * k[1][1]))
+        delta = 2 * math.sin(camera.ray_error_rad / 2)
+        norm = np.empty(total, dtype=np.float64)
+        with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+            for start in range(0, total, BLOCK_PIXELS):
+                indices = np.arange(start, min(start + BLOCK_PIXELS, total), dtype=np.int32)
+                yy, xx = indices // camera.width, indices % camera.width
+                qy = row_qy[yy]
+                qx = (centered_x[xx] - k[0][1] * qy) / k[0][0]
+                q = np.stack((qx, qy, np.ones_like(qx)), axis=-1)
+                norm[start:start + len(indices)] = np.sqrt((q * q).sum(axis=-1))
+            del indices, yy, xx, qx, qy, q
+            norm_bytes = norm.tobytes(); del norm
+            norm = np.frombuffer(norm_bytes, dtype=np.float64)
+            q_error = np.empty(total, dtype=np.float64)
+            for start in range(0, total, BLOCK_PIXELS):
+                values = norm[start:start + BLOCK_PIXELS]
+                min_hz = 1 / (values + pixel_q_error) - delta
+                q_error[start:start + len(values)] = pixel_q_error + np.where(min_hz > 0,
+                    delta * (1 + values + pixel_q_error) / min_hz, np.inf)
+            del values, min_hz
+            error_bytes = q_error.tobytes(); del q_error
+        cached = norm_bytes, error_bytes
+        # entry 수 자체도1개다. 부분 계산/예외 상태는 publish하지 않는다.
+        _NOMINAL_CACHE.clear(); _NOMINAL_CACHE[camera] = cached
+    return tuple(np.frombuffer(value, dtype=np.float64) for value in cached)
 
 
 @lru_cache(maxsize=2)
@@ -134,12 +189,14 @@ def _stratified(indices, floors, maximum, width):
 
 
 def analyze_depth(depth_mm, camera, plane, *, stamp=None, calibration_id=None,
-                  input_kind='LIVE', profile=None, config=DepthConfig()):
+                  input_kind='LIVE', profile=None, config=DepthConfig(), diagnostics=None):
     """전체 nominal 분류는 8192픽셀 block, hit/patch는 명시 cap의 immutable 기록이다.
 
-    전체 float grid를 보관하지 않는다. 출력 선택용 int32 index 두 개는 각 1/pixel
-    이하이고 선택 뒤 해제한다. 입력/출력 소유 메모리와 실제 RSS 수락은 별도다.
+    고정 camera의 norm/q_error 두 열만 최대4.6875MiB 캐시한다. 출력 선택용
+    int32 index 두 개와 floor bool은 최대9B/pixel이며 선택 뒤 해제한다.
+    입력/출력 소유 메모리와 실제 RSS 수락은 별도다.
     """
+    timing=timing_start(diagnostics,'depth.prepare')
     import numpy as np
     if type(camera) is not CameraModel or type(plane) is not Plane or type(config) is not DepthConfig:
         raise ValueError('depth requires exact camera/plane/config')
@@ -168,9 +225,12 @@ def analyze_depth(depth_mm, camera, plane, *, stamp=None, calibration_id=None,
     pixel_q_error, delta, rotation_delta, plane_delta, normal_l1 = stored[5:]
     absolute = config.extra_depth_error_m + (0. if profile is None else profile.depth_error_m)
     relative = config.extra_relative_error + (0. if profile is None else profile.depth_relative_error)
+    nominal = _nominal_terms(camera)
+    timing_finish(diagnostics,timing)
 
     def classify(indices):
         # 최대 BLOCK_PIXELS개의 작업 배열만 유지한다. bbox radius는 축별 pad다.
+        timing=timing_start(diagnostics,'depth.validity')
         with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
             yy, xx = indices // camera.width, indices % camera.width
             values = flat_depth[indices]
@@ -180,19 +240,27 @@ def analyze_depth(depth_mm, camera, plane, *, stamp=None, calibration_id=None,
                      & (xx >= a) & (xx < c) & (yy >= b) & (yy < d))
             # invalid 원 행의 분모는 보존하되 기하 계산은 실제 valid index에만 한다.
             locations = np.flatnonzero(valid)
+            timing_finish(diagnostics,timing)
+            timing=timing_start(diagnostics,'depth.projection')
             z = z[locations]
             qy = row_qy[yy[locations]]
             qx = (centered_x[xx[locations]] - k[0][1] * qy) / k[0][0]
             q = np.stack((qx, qy, np.ones_like(qx)), axis=-1)
             points = z[:, None] * (q @ transform) + translation
-            norm = np.sqrt((q * q).sum(axis=-1))
-            min_hz = 1 / (norm + pixel_q_error) - delta
-            q_error = pixel_q_error + np.where(min_hz > 0,
-                delta * (1 + norm + pixel_q_error) / min_hz, np.inf)
+            if nominal is None:
+                norm = np.sqrt((q * q).sum(axis=-1))
+                min_hz = 1 / (norm + pixel_q_error) - delta
+                q_error = pixel_q_error + np.where(min_hz > 0,
+                    delta * (1 + norm + pixel_q_error) / min_hz, np.inf)
+            else:
+                norm = nominal[0][indices[locations]]
+                q_error = nominal[1][indices[locations]]
             z_error = absolute + relative * z
             radius = ((z + z_error) * q_error + z_error * norm
                 + rotation_delta * (z + z_error) * (norm + q_error)
                 + camera.translation_error_m + 1e-9)
+            timing_finish(diagnostics,timing)
+            timing=timing_start(diagnostics,'depth.height_classify')
             heights = points @ normal + plane.offset
             h_error = radius * normal_l1 + plane.offset_error_m + 1e-9
             # 축별 translation/error box의 L2 반경은 sqrt(3)*radius 이하다.
@@ -204,6 +272,7 @@ def analyze_depth(depth_mm, camera, plane, *, stamp=None, calibration_id=None,
                     & (heights - h_error <= config.obstacle_max_height_m))
             floor, hits = np.zeros(len(indices), dtype=bool), np.zeros(len(indices), dtype=bool)
             floor[locations], hits[locations] = floor_values, hit_values
+        timing_finish(diagnostics,timing)
         return points, radius, valid, floor, hits
 
     metric = (profile is not None and profile.metric_qualified and camera.qualified and plane.qualified
@@ -229,29 +298,39 @@ def analyze_depth(depth_mm, camera, plane, *, stamp=None, calibration_id=None,
             patch_indices[patch_count:patch_count + current_patches] = indices[chosen]
             patch_floors[patch_count:patch_count + current_patches] = floor[chosen]
             patch_count += current_patches
+    timing=timing_start(diagnostics,'depth.selection')
     chosen_hits = _selected(hit_indices[:hit_count], config.max_hit_boxes)
     selected = _stratified(patch_indices[:patch_count], patch_floors[:patch_count], config.max_patches, camera.width)
     del hit_indices, patch_indices, patch_floors, points, radii, valid, floor, hits, indices
+    timing_finish(diagnostics,timing)
 
     hit_boxes = ()
     for start in range(0, len(chosen_hits), BLOCK_PIXELS):
+        timing=timing_start(diagnostics,'depth.selected_reclassify')
         points, radii, valid, floor, hits = classify(chosen_hits[start:start + BLOCK_PIXELS])
+        timing_finish(diagnostics,timing)
+        timing=timing_start(diagnostics,'depth.hit_batch')
         lower, upper = np.nextafter(points - radii[:, None], -np.inf), np.nextafter(points + radii[:, None], np.inf)
         hit_boxes = PointBoundsBatch(lower, upper, bool(metric), None if stamp is None else stamp.key)
         del points, radii, valid, floor, hits
+        timing_finish(diagnostics,timing)
     patches = ()
     source_key = None if stamp is None else stamp.key
     for start in range(0, len(selected), BLOCK_PIXELS):
         indices = selected[start:start + BLOCK_PIXELS]
         values = flat_depth[indices].astype(np.float64)
+        timing=timing_start(diagnostics,'depth.ray_geometry')
         bounds = axial_ray_bounds_many(indices % camera.width, indices // camera.width, values, camera,
-            depth_error_m=absolute + relative * values * .001)
+            depth_error_m=absolute + relative * values * .001,diagnostics=diagnostics)
+        timing_finish(diagnostics,timing)
         origin_lo, origin_hi, direction_lo, direction_hi, range_lo, range_hi, near, far, valid = bounds
+        timing=timing_start(diagnostics,'depth.ray_batch')
         if np.any(valid):
             # 원 행 순서와 bounds를 유지하며 전체 scalar DTO 생성을 피한다.
             pixels = np.column_stack((indices[valid] % camera.width, indices[valid] // camera.width))
             patches = RayBundleBatch(origin_lo[valid], origin_hi[valid], direction_lo[valid], direction_hi[valid],
                 range_lo[valid], range_hi[valid], near[valid], far[valid], bool(free), source_key, pixels)
+        timing_finish(diagnostics,timing)
     return DepthEvidence(stamp, calibration_id, input_kind, hit_boxes, patches,
         valid_count, floor_count, total - floor_count - len(hit_boxes), total - valid_count,
         hit_count - len(hit_boxes), valid_count - len(patches), bool(metric),

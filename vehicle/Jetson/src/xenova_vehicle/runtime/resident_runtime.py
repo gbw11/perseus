@@ -28,6 +28,7 @@ from .raw_binding import RawBinding, RawBindingProfile
 from .raw_binding_messages import RawBindAck, RawBindContext, RawBindMessage
 from .raw_leases import ARENA_BYTES, Endpoint, RawScope
 from .resident_broker import ResidentRawBroker
+from .resident_db import DbOutbound, ResidentDbBroker
 from .resident_profile import canonical, publish_runtime_artifacts, runtime_artifacts
 from .resident_storage import (StorageBoot, StorageProfile, binding_payload, discovery_payload,
                                parse_bootstrap_result, parse_storage_bind_ack, storage_binding, storage_main)
@@ -97,11 +98,12 @@ class _Worker:
     parse_started_us: int | None = None
     parse_sequence: int | None = None
     compute_watch: object = None
+    source: object = None
 
 
 class _Runtime:
     def __init__(self, profile, state_directory, storage_profile, output, duration_s, service_scope=None, output_root=False,
-                 perception_profile_bytes=None):
+                 perception_profile_bytes=None,jio_profile=None,mapper_profile_bytes=None):
         self.profile, self.state_directory = profile, str(Path(state_directory).expanduser().absolute())
         self.storage_profile, self.output, self.duration_s = storage_profile, Path(output).expanduser().absolute(), duration_s
         self.context = multiprocessing.get_context('spawn')
@@ -111,6 +113,17 @@ class _Runtime:
             self.output = self.output / self.service
         self.service_scope = service_scope
         self.perception_profile_bytes=perception_profile_bytes
+        self.jio_profile=jio_profile
+        self.mapper_profile_bytes=mapper_profile_bytes
+        if mapper_profile_bytes is not None and jio_profile is None:
+            raise ValueError('operational mapper configuration requires the explicit JIO/source policy')
+        if jio_profile is not None:
+            from ..perception.calibration import CalibrationProfile
+            if perception_profile_bytes is None:raise ValueError('JIO needs the explicit pinned camera calibration profile')
+            import json
+            jio_profile.source_policy.check_profile(CalibrationProfile.from_dict(json.loads(perception_profile_bytes)))
+        self.jio=None
+        self.source_revision=0
         self.storage_recovery = None
         self.identities = {r: (_identifier(), _identifier()) for r in ('A', 'M', 'D')}
         self.began = j_us()
@@ -119,6 +132,12 @@ class _Runtime:
         self.workers, self.birth_pending, self.birth_admitting = {}, set(), set()
         self.manifest = self.latest_ack = self.artifacts = self.handles = None
         self.binding = self.raw_profile = self.scope = self.broker = None
+        self.db_broker = self.db_copy_cleanup = None
+        self.db_outbox = deque()
+        self.db_selected = {}
+        self.db_last_progress_us = None
+        self.db_recovery_operation = None
+        self.publication_context = None
         self.native = NativeResources(self.context)
         self.log = AsyncResourceLog(self.state_directory, self.service, native=self.native,
             prepare=self._prepare, bootstrap=self._admit_runtime, publication=self._record_publication,
@@ -158,7 +177,16 @@ class _Runtime:
     def _prepare(self):
         self.output.mkdir(mode=0o700)
         self.output_owned = True
-        artifacts = runtime_artifacts(self.profile,self.perception_profile_bytes)
+        artifacts = runtime_artifacts(self.profile,self.perception_profile_bytes,self.mapper_profile_bytes)
+        if self.mapper_profile_bytes is not None:
+            from .mapper_profile import MapperProfile
+            from ..perception.calibration import CalibrationProfile
+            import json
+            calibration=CalibrationProfile.from_dict(json.loads(artifacts['manifests']['perception-calibration.json']))
+            self.jio_profile.source_policy.check_profile(calibration)
+            MapperProfile.from_bytes(artifacts['manifests']['mapper-profile.json']).check(calibration,
+                vehicle_configuration=self.jio_profile.source_policy.configuration,
+                vehicle_calibration=self.jio_profile.source_policy.calibration)
         artifacts['published'] = publish_runtime_artifacts(self.output / 'artifacts', artifacts)
         return artifacts
 
@@ -279,40 +307,191 @@ class _Runtime:
         deadline_us = self.recovery.operation_cap if deadline_us is None else deadline_us
         worker_id, epoch = self.identities[role]
         peer = LifecyclePeer(self.service, epoch, worker_id, role, self.artifacts['release_sha256'])
-        parent, child = control_pair()
-        for endpoint in (parent, child):
-            endpoint.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65_536)
-            endpoint.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65_536)
-        if role == 'D':
-            boot = StorageBoot(peer, deadline_us, self.storage_profile,
-                copy_handles=(self.handles.db_copy, self.handles.db_tokens),
-                diagnostic_directory=str(self.output / role / worker_id), recovery=self.storage_recovery)
-        else:
-            boot = WorkerBoot(peer, self.profile, self.scope, self.raw_profile, self.handles.raw_tokens,
-                deadline_us, str(self.output / role / worker_id),
-                writer_bind=self.workers['A'].bind if role == 'M' else None,
-                perception_profile_bytes=self.artifacts['manifests'].get('perception-calibration.json'))
-        process = self.context.Process(name='xenova-' + role, target=_worker_entry, args=(child, boot), daemon=False)
+        parent=child=data_parent=data_child=data_peer=None
+        mapper_instance=process=host=None
+        tracked=False
         try:
-            spawned = j_us()
+            parent,child=control_pair()
+            if role=='M' and self.jio_profile is not None:
+                from .data_channel import DataPeer,data_pair
+                data_parent,data_child=data_pair()
+                data_peer=DataPeer(self.service,worker_id,_identifier())
+                mapper_instance=_identifier()
+            for endpoint in (parent,child):
+                endpoint.setsockopt(socket.SOL_SOCKET,socket.SO_SNDBUF,65_536)
+                endpoint.setsockopt(socket.SOL_SOCKET,socket.SO_RCVBUF,65_536)
+            if role=='D':
+                boot=StorageBoot(peer,deadline_us,self.storage_profile,
+                    copy_handles=(self.handles.db_copy,self.handles.db_tokens),
+                    diagnostic_directory=str(self.output/role/worker_id),recovery=self.storage_recovery)
+            else:
+                boot=WorkerBoot(peer,self.profile,self.scope,self.raw_profile,self.handles.raw_tokens,
+                    deadline_us,str(self.output/role/worker_id),
+                    writer_bind=self.workers['A'].bind if role=='M' else None,
+                    perception_profile_bytes=self.artifacts['manifests'].get('perception-calibration.json'),
+                    copy_handles=(self.handles.db_copy,self.handles.db_tokens) if role=='M' else None,
+                    initial_storage_material=self.storage_material() if role=='M' else None,
+                    data_endpoint=data_child,data_peer=data_peer,mapper_instance=mapper_instance,
+                    source_policy=None if data_child is None else self.jio_profile.source_policy,
+                    mapper_device=None if data_child is None else self.jio_profile.device,
+                    clock_policy=None if data_child is None else self.jio_profile.clock_policy,
+                    mapper_profile_bytes=self.artifacts['manifests'].get('mapper-profile.json') if role=='M' else None,
+                    mapper_profile_sha256=self.artifacts.get('mapper_profile_sha256') if role=='M' else None)
+            source_owner=None
+            if data_parent is not None:
+                from .data_channel import DataLink
+                from .source_runtime import SupervisorSource
+                source_owner=SupervisorSource(DataLink(data_parent,data_peer,'S'),self.binding,self.jio,
+                    mapper_instance=mapper_instance,mapper_boot=self.manifest.runtime.boot_id,
+                    clock_epoch=self.clock_epoch,revision_floor=self.source_revision,clock=j_us)
+            process=self.context.Process(name='xenova-'+role,target=_worker_entry,args=(child,boot),daemon=False)
+            link=ResidentLink(parent,peer,'S',track_sent=True)
+            spawned=j_us()
+            host=_Worker(peer,process,link,LifecycleReceiver(peer,'S'),spawned,
+                LocalSetupWatch(role,worker_id,spawned,now_us=j_us()) if role!='A' else None,
+                held=deque(maxlen=8),startup_deadline_us=deadline_us,source=source_owner)
+            # 사용자 공간 구성 실패는 실제 child를 만들기 전에 모두 드러낸다.
             process.start()
+            self.workers[role]=host;tracked=True
+            host.pid=process.pid
+            self.birth_pending.add(role)
+            if data_parent is not None:
+                self.selector.register(data_parent,selectors.EVENT_READ,('source',role))
+            self.selector.register(parent,selectors.EVENT_READ,('control',role))
+            self.selector.register(process.sentinel,selectors.EVENT_READ,('exit',role))
+            self.event('SPAWN',role=role,pid=host.pid,
+                send_buffer=parent.getsockopt(socket.SOL_SOCKET,socket.SO_SNDBUF),
+                receive_buffer=parent.getsockopt(socket.SOL_SOCKET,socket.SO_RCVBUF))
         except BaseException:
-            parent.close()
+            # start 예외라도 실제 Popen/PID가 있으면 원 owner를 버리거나 종료를 발명하지 않는다.
+            if not tracked and host is not None and process.pid is not None:
+                host.pid=process.pid;self.workers[role]=host;tracked=True
+                self.birth_pending.add(role)
+            if not tracked:
+                for endpoint in (parent,data_parent):
+                    if endpoint is not None:
+                        try:endpoint.close()
+                        except OSError:self.failure=self.failure or 'pre-spawn endpoint close failed'
+                if process is not None:
+                    try:process.close()
+                    except (OSError,ValueError):pass
             raise
         finally:
-            child.close()
-        link = ResidentLink(parent, peer, 'S', track_sent=True)
-        host = _Worker(peer, process, link, LifecycleReceiver(peer, 'S'), spawned,
-                       LocalSetupWatch(role, worker_id, spawned, now_us=j_us()) if role != 'A' else None,
-                       held=deque(maxlen=8), startup_deadline_us=deadline_us)
-        self.workers[role] = host
-        host.pid = process.pid
-        self.selector.register(parent, selectors.EVENT_READ, ('control', role))
-        self.selector.register(process.sentinel, selectors.EVENT_READ, ('exit', role))
-        self.birth_pending.add(role)
-        self.event('SPAWN', role=role, pid=process.pid,
-                   send_buffer=parent.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF),
-                   receive_buffer=parent.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF))
+            # 실제 spawn 뒤에도 부모의 child-side 사본만 닫는다. parent는 tracked host가 소유한다.
+            for endpoint in (child,data_child):
+                if endpoint is not None:
+                    try:endpoint.close()
+                    except OSError:self.failure=self.failure or 'child-side endpoint close failed'
+
+    def storage_material(self):
+        """실제 D discovery/BIND가 끝난 작은 원본만 반환한다. EMPTY에서 catalog head를 만들지 않는다."""
+        host=self.workers.get('D')
+        if (host is None or self.recovery.suppressed('D',host) or host.bind_ack is None or host.bootstrap is None
+                or host.bootstrap['status'] not in ('EMPTY','COMPLETE')):
+            return None
+        snapshot=dict(host.bootstrap)
+        if snapshot['selected_checkpoint'] is not None:snapshot['selected_checkpoint']=dict(snapshot['selected_checkpoint'])
+        return (storage_binding(host.peer,self.storage_profile,host.bootstrap),snapshot)
+
+    def set_publication(self,binding,storage_context):
+        """source actor가 수락한 원 binding/context를 결합한다. Pi clock/odom/scene 사용권 생성은 아니다."""
+        from ..storage.contracts import StorageContext,canonical as context_canonical
+        self._ensure_db_broker()
+        if self.db_broker is None or type(storage_context) is not StorageContext:
+            raise RuntimeError('publication needs the actual current storage context')
+        if (storage_context.database_uuid!=self.db_broker.binding['database_uuid']
+                or storage_context.source_binding!=context_canonical(binding)
+                or storage_context.mapper_worker!=self.workers['M'].peer.worker_instance
+                or storage_context.origin_mapper_instance!=binding['mapper_instance']
+                or any(getattr(storage_context,name)!=binding[name] for name in ('map_epoch','frame_epoch','odom_epoch','configuration','calibration'))
+                or storage_context.primitive_sha256!=binding['primitive'] or binding['raw_binding_sha256']!=self.binding.sha256):
+            raise RuntimeError('publication context differs from admitted original source')
+        self.publication_context=storage_context
+        self._queue_db(self.db_broker.set_publication(binding,storage_context.sha256,
+            geometry_origin=storage_context.geometry_origin_fields))
+
+    def request_storage_bootstrap_load(self,request):
+        """COMPLETE의 원 selected ref에 한정해 pre-publication LOAD를 시작한다."""
+        from ..storage.contracts import LoadRequest,json_bytes
+        self._ensure_db_broker();material=self.storage_material()
+        if (self.db_broker is None or material is None or material[1]['status']!='COMPLETE' or type(request) is not LoadRequest
+                or json_bytes(request.checkpoint_ref,2048)!=material[1]['selected_checkpoint']):
+            raise RuntimeError('bootstrap restore needs the actual selected complete checkpoint')
+        if self.db_broker.pending is not None or self.db_broker.aborted is not None:return False
+        self._queue_db(self.db_broker.request_bootstrap_load(request))
+        return True
+
+    def _queue_db(self,drafts):
+        for draft in drafts:
+            if type(draft) is not DbOutbound:raise RuntimeError('unsupported DB draft')
+            if draft in self.db_outbox:continue
+            if len(self.db_outbox)>=8:raise RuntimeError('bounded DB control staging is full')
+            self.db_outbox.append(draft)
+
+    def _ensure_db_broker(self):
+        material=self.storage_material();mapper=self.workers.get('M');storage=self.workers.get('D')
+        if material is None or mapper is None or not mapper.admitted or storage.eof:return
+        binding,_=material
+        if self.db_broker is None:
+            self.db_broker=ResidentDbBroker(storage.peer,mapper.peer,binding,self.handles.db_copy)
+            return
+        if self.db_broker.mapper!=Endpoint(mapper.peer.channel_epoch,mapper.peer.worker_instance):
+            attempt=self.recovery.active;old=None if attempt is None else attempt.old.get('M')
+            if old is None or not old.reaped:raise RuntimeError('DB mapper replacement requires actual old-M reap')
+            self.db_broker.replace_mapper(mapper.peer);self.publication_context=None
+        if self.db_broker.storage!=Endpoint(storage.peer.channel_epoch,storage.peer.worker_instance):
+            attempt=self.recovery.active;old=None if attempt is None else attempt.old.get('D')
+            if old is None or not old.reaped:raise RuntimeError('DB storage replacement requires actual old-D reap')
+            self._queue_db(self.db_broker.rebind_storage(storage.peer,binding))
+
+    def _drive_db(self):
+        self._ensure_db_broker()
+        if self.db_broker is None:return
+        attempt=self.recovery.active
+        if attempt is not None and self.db_recovery_operation!=attempt.operation_id:
+            self.db_recovery_operation=attempt.operation_id
+            self.db_broker.fence('RECOVERY_'+attempt.kind)
+        self._queue_db(self.db_broker.tick())
+        for _ in range(len(self.db_outbox)):
+            draft=self.db_outbox.popleft()
+            if not self.db_broker.dispatchable(draft):
+                self._queue_db(self.db_broker.abandon_unselected(draft))
+                continue
+            host=self.workers.get(draft.role)
+            if host is None or host.eof:
+                self.db_outbox.append(draft);continue
+            packet=host.link.send(**draft.kwargs)
+            if packet is None:
+                self.db_outbox.append(draft);continue
+            self.db_broker.note_selected(draft,packet)
+            key=(host.peer.channel_epoch,packet.fields['message_sequence'])
+            if len(self.db_selected)>=8:raise RuntimeError('bounded selected DB send records are full')
+            self.db_selected[key]=draft
+            self._sent(host)
+        lease=self.db_broker.cleanup_ready
+        if lease is not None:
+            if self.db_copy_cleanup is None:
+                from .storage_copy import CopyArena
+                self.db_copy_cleanup=CopyArena(self.handles.db_copy,self.handles.db_tokens,None,self.service)
+            returned=self.db_copy_cleanup.discard_ready(lease)
+            self._queue_db(self.db_broker.note_discarded(returned))
+        notice=self.db_broker.take_aborted()
+        if notice is not None:
+            mapper=self.workers.get('M')
+            if mapper is not None and mapper.source is not None and notice.mapper.worker_instance==mapper.peer.worker_instance:
+                mapper.source.offer_abort(notice)
+            else:
+                self.event('DB_ABORT_HISTORY',request_id=notice.request_id,origin_context_sha256=notice.origin_context_sha256)
+
+    def _dispatch_db(self,role,packet):
+        if self.db_broker is None:raise RuntimeError('post-bootstrap DB statement has no actual current broker')
+        drafts=self.db_broker.receive_mapper(packet) if role=='M' else self.db_broker.receive_storage(packet)
+        self._queue_db(drafts)
+        if role=='D':
+            self.db_last_progress_us=j_us()
+            if (not self.stopping and packet.kind=='DB_JOB' and packet.payload.get('op')=='RESULT'
+                    and packet.payload['body']['status']=='UNKNOWN'):
+                self.recovery.fail('D','D persistence transaction outcome is unknown; original history must be queried')
 
     def _dispatch(self, role, packet):
         host, now = self.workers[role], j_us()
@@ -322,7 +501,13 @@ class _Runtime:
                 if received.message is not None:
                     host.stopped = received.message
                     self.event('STOPPED', role=role, payload=received.message.payload)
-            elif (packet.kind == 'SLOT' and self.broker is not None
+            elif (packet.kind == 'SLOT' and packet.fields['binding_domain']=='STORAGE'
+                  and packet.payload.get('op')=='RELEASE' and self.db_broker is not None):
+                self._dispatch_db(role,packet)
+            elif (packet.kind=='DB_JOB' and packet.fields['binding_domain']=='STORAGE' and packet.fields['binding_revision']=='1'
+                  and packet.payload.get('op') in ('READY','RESULT','RANGE_RESULT') and self.db_broker is not None):
+                self._dispatch_db(role,packet)
+            elif (packet.kind == 'SLOT' and packet.fields['binding_domain']=='RAW' and self.broker is not None
                   and (packet.payload.get('op') == 'RELEASE'
                        or not self.stopping and packet.payload.get('op') == 'FILLED')):
                 self.broker.receive(role, packet, now_us=now)
@@ -353,12 +538,19 @@ class _Runtime:
                 host.last_heartbeat_us = message.issued_us
                 if role == 'A':
                     self._a_stage(message.payload['worker_state'], message.issued_us)
+                elif role=='D' and message.payload['worker_state']=='FAILED':
+                    self.recovery.fail('D','D reported a failed persistence owner')
             else:
                 host.stopped = message
                 self.event('STOPPED', role=role, payload=message.payload)
             return
         if not host.hello:
             raise RuntimeError('worker data arrived before accepted HELLO')
+        if ((packet.kind=='DB_JOB' and packet.fields['binding_revision']!='0')
+                or packet.kind=='SLOT' and packet.fields['binding_domain']=='STORAGE'
+                or packet.kind=='BIND_ACK' and packet.fields['binding_domain']=='PUBLICATION'):
+            self._dispatch_db(role,packet)
+            return
         if packet.kind == 'BIND_ACK':
             if host.bind is None or host.bind_sent is None:
                 raise RuntimeError('BIND_ACK has no original successful send')
@@ -381,10 +573,10 @@ class _Runtime:
         elif packet.kind == 'DB_JOB' and role == 'D':
             host.bootstrap = parse_bootstrap_result(packet, host.peer, self.storage_profile, host.discovery,
                                                    now_us=now, recovery=self.storage_recovery)
-            if host.bootstrap['status'] != 'EMPTY':
+            if host.bootstrap['status'] not in ('EMPTY','COMPLETE'):
                 self.recovery.fail('D', 'storage bootstrap is unavailable: ' + host.bootstrap['status'], retryable=False)
                 return
-            self.event('STORAGE_BOOTSTRAP', database_uuid=host.bootstrap['database_uuid'], status='EMPTY')
+            self.event('STORAGE_BOOTSTRAP', database_uuid=host.bootstrap['database_uuid'], status=host.bootstrap['status'])
         elif packet.kind == 'PROGRESS':
             self._progress(role, packet, now)
         elif packet.kind == 'SLOT' and self.broker is not None:
@@ -472,7 +664,10 @@ class _Runtime:
     def _sent(self, host):
         for sent in host.link.take_sent():
             self.recovery.sent(host, sent)
-            if sent.packet.kind == 'BIND':
+            draft=self.db_selected.pop((host.peer.channel_epoch,sent.packet.fields['message_sequence']),None)
+            if draft is not None:
+                self.db_broker.note_sent(draft,sent.packet,sent.completed_us)
+            if sent.packet.kind == 'BIND' and sent.packet.fields['binding_domain']!='PUBLICATION':
                 host.bind_sent = sent
             elif sent.packet.kind == 'STOP':
                 host.receiver.record_first_sent(sent.packet, sent.started_us, now_us=j_us())
@@ -530,11 +725,38 @@ class _Runtime:
             self.broker.pump(self.workers['A'].link,
                 self.workers['M'].link if 'M' in self.workers and self.workers['M'].bind_ack is not None else None,
                 now_us=j_us())
+        self._drive_db()
+        self._drive_source()
+
+    def _drive_source(self):
+        host=self.workers.get('M')
+        if (host is None or host.source is None or host.eof or self.stopping
+                or self.recovery.suppressed('M',host)):
+            return
+        try:
+            host.source.pump(self.storage_material(),bind_ready=host.bind_ack is not None,
+                             on_publication=self.set_publication,on_bootstrap_load=self.request_storage_bootstrap_load,
+                             bootstrap_completion=lambda:None if self.db_broker is None else self.db_broker.last_completion)
+            self.source_revision=max(self.source_revision,host.source.owner.revision)
+        except Exception as error:
+            self._close_source(host)
+            self.recovery.fail('M','M source channel: '+str(error))
+
+    def _close_source(self,host):
+        if host.source is None:return
+        if self.workers.get('M') is host and self.jio is not None:
+            self.jio.fence_source()
+        self.source_revision=max(self.source_revision,host.source.owner.revision)
+        try:self.selector.unregister(host.source.link.endpoint)
+        except (KeyError,OSError,ValueError):pass
+        host.source.close();host.source=None
 
     def _close_link(self, role, error):
         host = self.workers[role]
+        if role=='M':self._close_source(host)
         expected = (self.stopping or self.recovery.suppressed(role, host)) and isinstance(error, EOFError)
         if not expected:
+            if self.db_broker is not None:self.db_broker.fence('CONTROL_CLOSED_'+role)
             self.recovery.fail(role, str(error), retryable=host.hello)
         if not host.eof:
             try:
@@ -580,6 +802,7 @@ class _Runtime:
             self.failure_trace = traceback.format_exc(limit=8)
         if self.broker is not None:
             self.broker.fence(self.stop_us)
+        if self.db_broker is not None:self.db_broker.fence('STOP')
         self.event('QUIESCING', reason=reason)
 
     def _stop_one(self, host, began_us, reason):
@@ -641,6 +864,7 @@ class _Runtime:
                     self._close_link(role, error)
             host.process.join(timeout=0)
             if host.process.exitcode is not None:
+                self._close_source(host)
                 host.exitcode = host.process.exitcode
                 host.reaped = True
                 if self.stopping and host.exitcode != 0 and self.failure is None:
@@ -654,6 +878,8 @@ class _Runtime:
         if any(not host.reaped or not host.eof for host in self.workers.values()) or self.log_pending is not None:
             return False
         if not self.native_closed:
+            if self.db_copy_cleanup is not None:
+                self.db_copy_cleanup.close();self.db_copy_cleanup=None
             if self.cleanup_failed:
                 if not self.log_stop_requested:
                     self.log.request_stop()
@@ -684,6 +910,13 @@ class _Runtime:
             return
         if self.resident_started_us is None and self.recovery.active is None and now >= self.startup_deadline:
             raise TimeoutError('original total startup budget elapsed')
+        db_deadline=None if self.db_broker is None else self.db_broker.pending_deadline_us
+        if db_deadline is not None and now>=db_deadline and self.recovery.active is None:
+            self.db_broker.fence('DB_JOB_TIMEOUT')
+            self.recovery.fail('D','original five-second D job expired; historical outcome requires lookup')
+        if (self.db_broker is not None and self.db_broker.bind_draft is not None
+                and now>=self.db_broker.bind_draft.expires_us and self.recovery.active is None):
+            self.recovery.fail('D','original D publication binding budget elapsed')
         for role, host in tuple(self.workers.items()):
             if self.recovery.suppressed(role, host):
                 continue
@@ -705,7 +938,11 @@ class _Runtime:
             idle_watch = (role == 'A' and self.capture_ready_us is not None
                           or role == 'M' and host.bind_ack is not None
                           or role == 'D' and self.storage_ready_us is not None)
-            if idle_watch and host.last_heartbeat_us is not None and now - host.last_heartbeat_us >= 1_000_000:
+            heartbeat_lower=host.last_heartbeat_us
+            if role=='D' and self.db_last_progress_us is not None:
+                heartbeat_lower=max(heartbeat_lower or 0,self.db_last_progress_us)
+            active_d=role=='D' and db_deadline is not None and now<db_deadline
+            if idle_watch and not active_d and heartbeat_lower is not None and now-heartbeat_lower>=1_000_000:
                 self.recovery.fail(role, role + ' current control progress stalled')
         if self.a_phase in self.a_phase_deadlines and now >= self.a_phase_deadlines[self.a_phase]:
             self.recovery.fail('A', 'original A ' + self.a_phase + ' budget elapsed')
@@ -715,7 +952,9 @@ class _Runtime:
             self.recovery.fail('M', 'original M parser readiness budget elapsed')
         if (self.nn_ready_us is not None and self.last_fresh_parser_us is not None
                 and now - self.last_fresh_parser_us >= 5_000_000):
-            self.recovery.fail('A', 'required fresh NN output/parser completion stalled')
+            # A는 자신의 실제 NN output 정체를 별도로 감시한다. M 계산/해석 정체만으로
+            # 정상인 OAK 세션과 적재 모델을 다시 열지 않는다.
+            self.recovery.fail('M', 'required fresh NN parser completion stalled')
         if self.capture_ready_us is not None and self.nn_ready_us is not None and self.storage_ready_us is not None:
             if self.resident_started_us is None:
                 self.resident_started_us = now
@@ -725,9 +964,13 @@ class _Runtime:
                 self.stop('duration_elapsed')
 
     def run(self, signal_value):
-        self.log.start()
-        self._request('PREPARE', 'PREPARE')
         try:
+            if self.jio_profile is not None:
+                from ..transport.jetson_jio import JetsonJio
+                self.jio=JetsonJio(self.jio_profile)
+                self.jio.start()
+            self.log.start()
+            self._request('PREPARE', 'PREPARE')
             while True:
                 try:
                     self._complete_log()
@@ -764,9 +1007,22 @@ class _Runtime:
                     self.stop('runtime_failed', error)
         finally:
             for host in self.workers.values():
-                host.link.close()
-            self.selector.close()
-            self.log.request_stop()
+                try:self._close_source(host)
+                except Exception as error:self.failure=self.failure or 'source close: '+type(error).__name__
+                try:host.link.close()
+                except Exception as error:self.failure=self.failure or 'control close: '+type(error).__name__
+            if self.jio is not None:
+                try:
+                    self.jio.stop()
+                    if not self.jio.join(1.):
+                        self.failure=self.failure or 'S-jio owner is still alive after bounded join'
+                except Exception as error:self.failure=self.failure or 'S-jio close: '+type(error).__name__
+            try:self.selector.close()
+            finally:
+                self.log.request_stop()
+                if self.log.is_alive:
+                    try:self.log.close(timeout=1.)
+                    except Exception as error:self.failure=self.failure or 'S-log close: '+type(error).__name__
         stopped = all(host.reaped and host.exitcode == 0 and host.stopped is not None
                       and host.stopped.payload['status'] == 'STOPPED' for host in self.workers.values())
         complete = (self.resident_started_us is not None and self.recovery.active is None and stopped and self.native_closed
@@ -784,12 +1040,15 @@ class _Runtime:
             resource_state=None if self.manifest is None else self.manifest.state,
             log_exited=not self.log.is_alive, log_error=self.log.terminal_error,
             resource_cleanup_confirmed=self.native_closed, all_worker_exits_confirmed=stopped,
-            requires_service_reap=self.log.is_alive or any(not host.reaped for host in self.workers.values()),
+            requires_service_reap=(self.log.is_alive or any(not host.reaped for host in self.workers.values())
+                or self.jio is not None and self.jio.snapshot()['alive']),
             recoveries=list(self.recovery.receipts),
             supervisor_exit_confirmed=False, resource_tracker_exit_confirmed=False,
             resident_started_j_us=None if self.resident_started_us is None else str(self.resident_started_us),
             ended_j_us=str(j_us()), events=list(self.events),
             raw_broker=None if self.broker is None else self.broker.summary(),
+            db_broker=None if self.db_broker is None else self.db_broker.summary(),
+            jio=None if self.jio is None else self.jio.snapshot(),
             workers={role: dict(pid=host.pid, worker_instance=host.peer.worker_instance,
                 channel_epoch=host.peer.channel_epoch, reaped=host.reaped, exitcode=host.exitcode,
                 stopped=None if host.stopped is None else host.stopped.payload,
@@ -799,14 +1058,14 @@ class _Runtime:
 
 
 def run_runtime(profile, state_directory, storage_profile, output, *, duration_s=None, service_scope=None, output_root=False,
-                perception_profile_bytes=None):
+                perception_profile_bytes=None,jio_profile=None,mapper_profile_bytes=None):
     """명시 profile/state/DB의 상주 실행. duration=None은 operator stop까지 유지한다."""
     if type(storage_profile) is not StorageProfile:
         raise ValueError('runtime requires an explicit storage profile')
     if duration_s is not None and (type(duration_s) not in (int, float) or not 0.1 <= duration_s <= 300):
         raise ValueError('optional runtime duration must be in 0.1..300 seconds')
     runtime = _Runtime(profile, state_directory, storage_profile, output, duration_s, service_scope, output_root,
-                       perception_profile_bytes)
+                       perception_profile_bytes,jio_profile,mapper_profile_bytes)
     thread_environment = ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS')
     old_environment = {name: os.environ.get(name) for name in thread_environment}
     for name in thread_environment:

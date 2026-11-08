@@ -494,6 +494,10 @@ typedef struct _xenova_drive_MapperClockProbe {
     bool has_expected_clock_epoch;
     char expected_clock_epoch[37];
     uint64_t admission_revision;
+    /* Pi clock owner returns a previously accepted immutable J/Pi lease.
+ This is absent during initial probes; it does not report the current P4. */
+    bool has_mapper_trust;
+    xenova_drive_WorldTrust mapper_trust;
 } xenova_drive_MapperClockProbe;
 
 typedef PB_BYTES_ARRAY_T(16) xenova_drive_SceneGrant_request_nonce_t;
@@ -648,7 +652,7 @@ extern "C" {
 #define xenova_drive_MissionGrant_init_default   {0, "", {0, {0}}, {0, {0}}, {0, {0}}, {0, {0}}, {0, {0}}, 0, {0, {0}}, 0, 0, 0, 0, {0, {0}}, 0, 0, 0, {0, {0}}, 0, "", "", {0, {0}}, 0, 0, 0, 0, 0, 0, 0, 0, false, {0, {0}}}
 #define xenova_drive_MissionBudgetRequest_init_default {0, {0, {0}}, {0, {0}}, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, {0, {0}}, {0, {0}}, 0, 0, 0}
 #define xenova_drive_MissionBudgetReply_init_default {0, {0, {0}}, {0, {0}}, 0, 0, false, xenova_drive_MissionGrant_init_default}
-#define xenova_drive_MapperClockProbe_init_default {0, "", "", "", "", 0, {0, {0}}, 0, false, "", false, "", false, "", 0}
+#define xenova_drive_MapperClockProbe_init_default {0, "", "", "", "", 0, {0, {0}}, 0, false, "", false, "", false, "", 0, false, xenova_drive_WorldTrust_init_default}
 #define xenova_drive_MapperClockReply_init_default {0, "", "", 0, {0, {0}}, 0, "", "", "", "", "", "", "", "", "", "", 0, 0, false, xenova_drive_SurveySummary_init_default}
 #define xenova_drive_SceneGrant_init_default     {0, "", "", "", 0, xenova_drive_SceneAdmissionRef_init_default, "", "", "", "", "", "", "", 0, 0, 0, {0, {0}}, 0, 0, 0, false, {0, {0}}, 0, 0, false, {0, {0}}, 0}
 #define xenova_drive_SurveySummary_init_default  {0, {0, {0}}, {0, {0}}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, {0, {0}}, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -677,7 +681,7 @@ extern "C" {
 #define xenova_drive_MissionGrant_init_zero      {0, "", {0, {0}}, {0, {0}}, {0, {0}}, {0, {0}}, {0, {0}}, 0, {0, {0}}, 0, 0, 0, 0, {0, {0}}, 0, 0, 0, {0, {0}}, 0, "", "", {0, {0}}, 0, 0, 0, 0, 0, 0, 0, 0, false, {0, {0}}}
 #define xenova_drive_MissionBudgetRequest_init_zero {0, {0, {0}}, {0, {0}}, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, {0, {0}}, {0, {0}}, 0, 0, 0}
 #define xenova_drive_MissionBudgetReply_init_zero {0, {0, {0}}, {0, {0}}, 0, 0, false, xenova_drive_MissionGrant_init_zero}
-#define xenova_drive_MapperClockProbe_init_zero  {0, "", "", "", "", 0, {0, {0}}, 0, false, "", false, "", false, "", 0}
+#define xenova_drive_MapperClockProbe_init_zero  {0, "", "", "", "", 0, {0, {0}}, 0, false, "", false, "", false, "", 0, false, xenova_drive_WorldTrust_init_zero}
 #define xenova_drive_MapperClockReply_init_zero  {0, "", "", 0, {0, {0}}, 0, "", "", "", "", "", "", "", "", "", "", 0, 0, false, xenova_drive_SurveySummary_init_zero}
 #define xenova_drive_SceneGrant_init_zero        {0, "", "", "", 0, xenova_drive_SceneAdmissionRef_init_zero, "", "", "", "", "", "", "", 0, 0, 0, {0, {0}}, 0, 0, 0, false, {0, {0}}, 0, 0, false, {0, {0}}, 0}
 #define xenova_drive_SurveySummary_init_zero     {0, {0, {0}}, {0, {0}}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, {0}}, {0, {0}}, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -1007,6 +1011,7 @@ extern "C" {
 #define xenova_drive_MapperClockProbe_expected_mapper_instance_tag 10
 #define xenova_drive_MapperClockProbe_expected_clock_epoch_tag 11
 #define xenova_drive_MapperClockProbe_admission_revision_tag 12
+#define xenova_drive_MapperClockProbe_mapper_trust_tag 13
 #define xenova_drive_SceneGrant_major_tag        1
 #define xenova_drive_SceneGrant_vehicle_tag      2
 #define xenova_drive_SceneGrant_pi_host_boot_tag 3
@@ -1561,9 +1566,11 @@ X(a, STATIC,   REQUIRED, UINT64,   pi_send_us,        8) \
 X(a, STATIC,   OPTIONAL, STRING,   expected_mapper_boot,   9) \
 X(a, STATIC,   OPTIONAL, STRING,   expected_mapper_instance,  10) \
 X(a, STATIC,   OPTIONAL, STRING,   expected_clock_epoch,  11) \
-X(a, STATIC,   REQUIRED, UINT64,   admission_revision,  12)
+X(a, STATIC,   REQUIRED, UINT64,   admission_revision,  12) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  mapper_trust,     13)
 #define xenova_drive_MapperClockProbe_CALLBACK NULL
 #define xenova_drive_MapperClockProbe_DEFAULT NULL
+#define xenova_drive_MapperClockProbe_mapper_trust_MSGTYPE xenova_drive_WorldTrust
 
 #define xenova_drive_MapperClockReply_FIELDLIST(X, a) \
 X(a, STATIC,   REQUIRED, UINT32,   major,             1) \
@@ -1751,7 +1758,7 @@ extern const pb_msgdesc_t xenova_drive_TofObservation_msg;
 #define xenova_drive_LaneGeometry_size           455
 #define xenova_drive_LaneModel_size              1388
 #define xenova_drive_MapLocalization_size        70
-#define xenova_drive_MapperClockProbe_size       379
+#define xenova_drive_MapperClockProbe_size       913
 #define xenova_drive_MapperClockReply_size       914
 #define xenova_drive_MissionBudgetReply_size     639
 #define xenova_drive_MissionBudgetRequest_size   235

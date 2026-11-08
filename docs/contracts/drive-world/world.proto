@@ -383,6 +383,9 @@ message MapperClockProbe {
   optional string expected_mapper_instance = 10;
   optional string expected_clock_epoch = 11;
   required uint64 admission_revision = 12;
+  // Pi clock owner returns a previously accepted immutable J/Pi lease.
+  // This is absent during initial probes; it does not report the current P4.
+  optional WorldTrust mapper_trust = 13;
 }
 message MapperClockReply {
   required uint32 major = 1;

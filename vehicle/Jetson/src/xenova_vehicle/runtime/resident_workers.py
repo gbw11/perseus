@@ -43,6 +43,16 @@ class WorkerBoot:
     slot_limits: SlotTimeLimits = SlotTimeLimits(150_000, 500_000, 150_000)
     cleanup_limits: CleanupTimeLimits = CleanupTimeLimits(1_000_000)
     perception_profile_bytes: bytes | None = None
+    copy_handles: tuple | None = None
+    initial_storage_material: tuple | None = None
+    data_endpoint: object = None
+    data_peer: object = None
+    mapper_instance: str | None = None
+    source_policy: object = None
+    mapper_device: str | None = None
+    clock_policy: object = None
+    mapper_profile_bytes: bytes | None = None
+    mapper_profile_sha256: str | None = None
 
     def __post_init__(self):
         for value, expected in ((self.peer, LifecyclePeer), (self.profile, YolopBenchProfile),
@@ -61,6 +71,10 @@ class WorkerBoot:
         if self.perception_profile_bytes is not None and (type(self.perception_profile_bytes) is not bytes
                 or not 1<=len(self.perception_profile_bytes)<=65536):
             raise ValueError('pinned perception calibration exceeds its bound')
+        if self.mapper_profile_bytes is not None and (self.peer.role!='M' or self.data_endpoint is None
+                or type(self.mapper_profile_bytes) is not bytes or not 1<=len(self.mapper_profile_bytes)<=65536
+                or type(self.mapper_profile_sha256) is not str or len(self.mapper_profile_sha256)!=64):
+            raise ValueError('operational mapper needs the pinned profile and actual registered source channel')
 
 
 class _StopWork(Exception):
@@ -126,11 +140,13 @@ def _hold_device_lease(device_id):
 class _Actor:
     def __init__(self, endpoint, boot):
         from .resident_profile import runtime_artifacts
-        actual = runtime_artifacts(boot.profile,boot.perception_profile_bytes)
+        actual = runtime_artifacts(boot.profile,boot.perception_profile_bytes,getattr(boot,'mapper_profile_bytes',None))
         if (actual['release_sha256'] != boot.peer.release_sha256
                 or any(actual[name] != value for name, value in boot.raw_profile.refs.items())
                 or boot.profile.device_mxid != boot.raw_profile.device_id):
             raise ValueError('actual local release/profile manifests differ from registered boot')
+        if actual['mapper_profile_sha256']!=getattr(boot,'mapper_profile_sha256',None):
+            raise ValueError('actual mapper configuration differs from its original S-log pin')
         self.boot = boot
         self.link = ResidentLink(endpoint, boot.peer, boot.peer.role, track_sent=True)
         self.state = 'STARTING'
@@ -148,6 +164,7 @@ class _Actor:
         self.last_filled_sent = None
         self.last_actual_sent = None
         self.deferred = deque()
+        self.sent_observer=None
         self._hello()
 
     def _hello(self):
@@ -159,6 +176,7 @@ class _Actor:
     def drain_sent(self):
         # 송신 완료 queue는32개 상한이다. ACK/FILLED와 마지막 실제 송신만 보유한다.
         for sent in self.link.take_sent():
+            if self.sent_observer is not None:self.sent_observer(sent)
             self.last_actual_sent = sent
             if self.ack is not None and sent.packet is self.ack.packet:
                 self.ack_sent = sent
@@ -573,6 +591,11 @@ def mapper_main(endpoint, boot):
     actor = _Actor(endpoint, boot)
     reader = None
     compute = control = None
+    source=None
+    storage_client=storage_mailbox=None
+    bootstrap=None;bootstrap_request=None
+    mapping_port=publication_port=None;mapping_material=mapping_context=mapping_scene=None
+    processor_ref=[None]
     failed = False
     try:
         bind = actor.await_bind()
@@ -590,16 +613,91 @@ def mapper_main(endpoint, boot):
         parser_deadline = AbsoluteDeadline.after(actor.ack.issued_us, 15_000_000, now_us=j_us(),
                                                 cap_us=boot.startup_deadline_us)
         actor.state = 'WARMUP'
-        compute=MapperCompute(lambda generation:ResidentMapperProcessor(
-            boot.perception_profile_bytes,bind.binding),source_generation=bind.binding.sha256)
+        if boot.copy_handles is not None:
+            from .mapper_storage import MapperStorageMailbox
+            from .mapper_storage_client import MapperStorageClient
+            storage_mailbox=MapperStorageMailbox(bind.binding.sha256)
+            storage_client=MapperStorageClient(actor,storage_mailbox,boot.copy_handles)
+            actor.sent_observer=storage_client.note_sent
+        if boot.data_endpoint is not None:
+            from .data_channel import DataLink
+            from .source_runtime import MapperSource
+            source=MapperSource(DataLink(boot.data_endpoint,boot.data_peer,'M'),bind.binding,
+                boot.source_policy,mapper_instance=boot.mapper_instance,device=boot.mapper_device,clock=j_us)
+        if source is not None and storage_mailbox is not None:
+            from .mapper_bootstrap import MapperBootstrap
+            from .mapper_mapping import MappingContextPort
+            from .mapper_publication import MapperPublicationPort
+            mapping_port=MappingContextPort()
+            publication_port=MapperPublicationPort(mapping_port)
+            bootstrap=MapperBootstrap(storage_mailbox,mapper_worker=boot.peer.worker_instance,
+                mapper_instance=boot.mapper_instance,cap_us=boot.startup_deadline_us,clock_us=j_us)
+        def processor_factory(generation):
+            processor=ResidentMapperProcessor(boot.perception_profile_bytes,bind.binding,
+                mapper_profile_bytes=boot.mapper_profile_bytes,source_policy=boot.source_policy,clock_policy=boot.clock_policy,
+                mapper_worker=boot.peer.worker_instance,mapper_instance=boot.mapper_instance,
+                mapping_context_port=mapping_port,mapping_mailbox=storage_mailbox if mapping_port is not None else None,
+                publication_port=publication_port,
+                # 설계의 후보2초 dirty batch다. 실물 저장 지연/부하에 따라 검증·조정할 값이다.
+                checkpoint_interval_us=2_000_000 if mapping_port is not None else None)
+            processor_ref[0]=processor
+            return processor if bootstrap is None else bootstrap.attach_processor(processor)
+        def maintenance():
+            storage_mailbox.compute_encode_pending(current_context_sha256=storage_mailbox.context_sha256,
+                now_us=j_us(),clock_us=j_us)
+            if bootstrap is not None:bootstrap.compute_step()
+            if processor_ref[0] is not None:processor_ref[0].maintenance()
+        compute=MapperCompute(processor_factory,source_generation=bind.binding.sha256,
+            maintenance=None if storage_mailbox is None else maintenance,
+            adoption_lock=None if mapping_port is None else mapping_port.adoption_lock)
         compute.start()
         control=MapperControl(actor,compute,parser_deadline,
             nn_stall_us=int(boot.profile.nn_stall_timeout_s*1_000_000))
         acquire = None
         while True:
             incoming = actor.poll()
+            if source is not None:source.pump()
+            if mapping_port is not None:
+                if source.material is not None and source.material is not mapping_material:
+                    from .mapper_bootstrap import material_bytes
+                    mapping_port.publish(source.storage_context,material=material_bytes(source.material))
+                    mapping_material=source.material
+                elif source.storage_context is not mapping_context:
+                    mapping_port.publish(source.storage_context)
+                mapping_context=source.storage_context
+                if source.scene is not mapping_scene:
+                    from ..storage.contracts import canonical
+                    mapping_port.publish_scene(None if source.scene is None else canonical(source.scene))
+                    mapping_scene=source.scene
+            if bootstrap is not None and source.publication is None and source.material is not None:
+                bootstrap.offer_material(source.material)
+            if storage_client is not None:
+                if source is not None:
+                    for notice in source.take_aborts():storage_client.receive_abort(notice)
+                if source is not None and source.context_sha256 is not None:
+                    storage_mailbox.fence(source.context_sha256,now_us=j_us())
+                storage_client.pump(current_context_sha256=storage_mailbox.context_sha256)
+            if bootstrap is not None:
+                if bootstrap.failure is not None:raise RuntimeError('bootstrap material: '+bootstrap.failure)
+                if bootstrap_request is None:bootstrap_request=bootstrap.take_request()
+                if bootstrap_request is not None and storage_client.dispatch is None:
+                    if storage_client.adopt_bootstrap_load(current_context_sha256=bootstrap_request.job.context.sha256):
+                        source.offer_bootstrap_load(bootstrap_request);bootstrap_request=None
+                report=bootstrap.take_complete()
+                if report is not None:source.accept_bootstrap(report)
             control.tick()
+            if publication_port is not None:
+                for kind in ('SURVEY_SUMMARY','WORLD_CANDIDATE'):
+                    report=publication_port.peek(kind,now_us=j_us())
+                    if report is None:continue
+                    options=dict(publication_sha256=report.publication_sha256,
+                        issued_us=report.issued_us,expires_us=report.expires_us)
+                    if kind=='SURVEY_SUMMARY':
+                        accepted=source.offer_survey_summary(report.raw,grant_sha256=report.grant_sha256,**options)
+                    else:accepted=source.offer_world(report.raw,**options)
+                    if accepted:publication_port.acknowledge(report)
             for packet in incoming:
+                if storage_client is not None and storage_client.receive(packet):continue
                 if packet.kind != 'SLOT':
                     raise ValueError('unexpected M control statement')
                 if packet.payload.get('op') == 'OFFER':
@@ -642,7 +740,8 @@ def mapper_main(endpoint, boot):
                               for clock in sample.clocks.values())
                     expires=min(2**64-1,lower+500_000)
                     item=MapperInput(str(uuid.uuid4()),bind.binding.sha256,sample,expires,
-                        parser_cap_us=None if control.ready else parser_deadline.expires_us)
+                        parser_cap_us=None if control.ready else parser_deadline.expires_us,
+                        context_bytes=b'' if source is None else source.context_bytes())
                     # 실제 native 반환과 RELEASE 송신이 끝난 owned bytes만 넘긴다.
                     compute.submit(item)
                     item=sample=None
@@ -663,6 +762,7 @@ def mapper_main(endpoint, boot):
             pass
     finally:
         actor.state = 'QUIESCING'
+        if bootstrap is not None:bootstrap.cancel('STOP')
         if compute is not None:
             compute.request_stop()
             remaining=(2. if actor.stop is None else
@@ -683,6 +783,16 @@ def mapper_main(endpoint, boot):
             except Exception as error:
                 actor.failure = type(error).__name__
                 failed = True
+        if source is not None:source.close()
+        if storage_client is not None:
+            try:
+                state=storage_client.snapshot()
+                if state['ownership_pinned'] or state['native_held']:
+                    actor.leases_released=False;actor.failure=actor.failure or 'STORAGE_OWNERSHIP_PINNED';failed=True
+                storage_client.close()
+            except Exception as error:
+                actor.failure=type(error).__name__;actor.leases_released=False;failed=True
+            finally:actor.sent_observer=None
         try:
             actor.finish()
         except Exception:
