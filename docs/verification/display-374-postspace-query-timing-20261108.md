@@ -61,7 +61,7 @@ API 정상 복귀 후 기존 Manager의 `execute=False` 목록 조회를 별도 
 - `platform.registry` 2회: 약 0.152초.
 - `execution.publish_observation` 라벨 6개 합계 약 0.256초.
 
-중첩 span의 inclusive 시간을 합쳐 전체 시간을 만들지 않는다. 소스에서 `observation_inputs`와 `publish_observation`이 같은 trace 라벨을 쓰는 것을 확인했다. **라벨 6개를 실제 파일 쓰기 6회나 불필요한 중복 게시라고 해석하지 않는다.** 실제 관측된 storage atomic write는 3회다. 신원/실행 검증을 생략하거나 팀원 코드를 임의로 바꾸지 않았다.
+중첩 span의 inclusive 시간을 합쳐 전체 시간을 만들지 않는다. 후속 소스/로컬 호출 대조로 정정: `execution.publish_observation` 라벨은 `observation_inputs`에 붙어 있고 실제 `publish_observation`에는 별도 trace decorator가 없다. 따라서 6개 라벨은 VM 3대의 초기 입력 읽기와 게시 직전 입력 재검증을 나타낸다. **라벨 6개를 실제 파일 쓰기 6회나 불필요한 중복 게시라고 해석하지 않는다.** 실제 관측된 storage atomic write는 3회다. 신원/실행 검증을 생략하거나 팀원 코드를 임의로 바꾸지 않았다.
 
 이 자료는 최적화할 세부 구간을 찾는 출발점이다. 장시간 조회 회차의 내부 검증·입력 읽기·외부 명령 비용을 같은 회차에 연결해 확인해야 한다. 정상 표본의 trace만으로 특정 검증을 제거할 근거는 없다.
 
