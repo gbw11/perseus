@@ -146,6 +146,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 from .keyboard_server import KeyboardServer
                 profile=OperatorProfile.load(settings.operator_profile)
                 runner.manual_profile=profile.manual;runner.guest_clock_policy=profile.guest_clock
+                runner.episode_support=profile.episode_support
+                runner.planner_parameters=profile.planner_parameters
                 runner.keyboard_profile_directory=profile.keyboard_profile_directory
                 runner.configure_operator()
                 operator_ipc=GatewayServer(runner,lease,settings.operator_socket,contract=operator_contract,

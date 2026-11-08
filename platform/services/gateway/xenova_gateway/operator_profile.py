@@ -1,5 +1,7 @@
 """명시 opt-in 설치 정책. 수치를 하드코딩하거나 실측 수락으로 가장하지 않는다."""
-from dataclasses import dataclass,asdict
+from dataclasses import dataclass,asdict,field
+import json
+from types import MappingProxyType
 import os
 from pathlib import Path
 import stat
@@ -10,7 +12,7 @@ from .feedback3 import Feedback3Profile
 from .scene_authority import StationaryPolicy
 
 
-def private_profile(path,fields,*,uid=0):
+def private_profile(path,fields,*,uid=0,optional=()):
     from .ipc_contract import decode
     target=Path(path)
     if not target.is_absolute() or target.resolve()!=target:raise ValueError('canonical installed policy path')
@@ -20,7 +22,8 @@ def private_profile(path,fields,*,uid=0):
         if not stat.S_ISREG(info.st_mode) or info.st_uid!=uid or info.st_mode&0o077 or info.st_nlink!=1 or info.st_size>8192:
             raise ValueError('private owned single-link bounded policy')
         value=decode(stream.read(8193))
-    if type(value) is not dict or set(value)!=set(fields):raise ValueError('exact installed policy fields')
+    if (type(value) is not dict or not set(fields)<=set(value)
+            or not set(value)<=set(fields)|set(optional)):raise ValueError('exact installed policy fields')
     return value
 
 
@@ -31,10 +34,14 @@ class OperatorProfile:
     keyboard_profile_directory: str
     planner_manifest: str
     planner_asset_sha256: str
+    episode_support: bool = False
+    planner_parameters: object = field(default=None,init=False,repr=False,compare=False)
 
     @classmethod
     def load(cls,path,*,uid=0):
-        value=private_profile(path,cls.__dataclass_fields__,uid=uid)
+        fields={name for name,item in cls.__dataclass_fields__.items() if item.init}
+        value=private_profile(path,fields-{'episode_support'},uid=uid,optional=('episode_support',))
+        if type(value.get('episode_support',False)) is not bool:raise ValueError('explicit episode installation approval')
         if set(value['manual'])!=set(ManualProfile.__dataclass_fields__) or set(value['guest_clock'])!=set(GuestClockPolicy.__dataclass_fields__):
             raise ValueError('exact manual/guest policy')
         directory=Path(value['keyboard_profile_directory'])
@@ -50,7 +57,10 @@ class OperatorProfile:
         guest=GuestClockPolicy(**value['guest_clock'])
         from xenova_drive_world.planner_profile import verify_manifest
         verify_manifest(raw,value['planner_asset_sha256'],asdict(guest))
-        return cls(ManualProfile(**value['manual']),guest,str(directory),str(manifest),value['planner_asset_sha256'])
+        result=cls(ManualProfile(**value['manual']),guest,str(directory),str(manifest),value['planner_asset_sha256'],
+            value.get('episode_support',False))
+        object.__setattr__(result,'planner_parameters',MappingProxyType(json.loads(raw)['profile']))
+        return result
 
 
 def load_feedback3(path,*,uid=0):
