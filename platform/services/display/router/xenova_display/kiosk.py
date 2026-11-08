@@ -106,7 +106,7 @@ class Kiosk:
         args = ["--ozone-platform=x11", "--force-device-scale-factor=1", "--no-first-run",
                 f"--window-position={output.x},{output.y}", f"--window-size={output.width},{output.height}",
                 "--disable-translate", "--disable-features=Translate", "--lang=ko-KR",
-                f"--app={self.config.feed_origin}/display/{output.output_id}"]
+                f"--app={self.config.feed_origin}{output.page_path}"]
         if self.config.backend == "x11": args.append("--kiosk")
         if self.test_no_sandbox: args.append("--no-sandbox")
         # Chromium never receives the service token via argv, extra headers or page JS.
@@ -139,7 +139,7 @@ class Kiosk:
         self.pages[output.output_id] = page
         for other in list(context.pages):
             if other is not page: await other.close()
-        await page.goto(f"{self.config.feed_origin}/display/{output.output_id}", timeout=15000)
+        await page.goto(f"{self.config.feed_origin}{output.page_path}", timeout=15000)
         cdp = await context.new_cdp_session(page)
         window = await cdp.send("Browser.getWindowForTarget")
         await cdp.send("Browser.setWindowBounds", {"windowId": window["windowId"], "bounds": {"windowState":"normal"}})

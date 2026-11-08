@@ -1,0 +1,29 @@
+[Unit]
+Description=Xenova display domU screen (Xvfb + Chromium kiosk on the local screen app)
+Requires=xenova-guest-display-app.service
+After=xenova-guest-display-app.service
+PartOf=xenova-guest-display.target
+ConditionPathExists=/etc/xenova/guest-display-domu.json
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=xenova-display
+Group=xenova-display
+# Chromium needs a writable HOME/runtime dir; keep both private to this service.
+StateDirectory=xenova-guest-display
+RuntimeDirectory=xenova-guest-display
+Environment=HOME=/var/lib/xenova-guest-display XDG_RUNTIME_DIR=/run/xenova-guest-display
+ExecStart=/usr/bin/python3 -m xenova_display.guest_session --config /etc/xenova/guest-display-domu.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=xenova-guest-display.target

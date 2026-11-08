@@ -1,4 +1,8 @@
-"""Explicit X11 connector mapping. Virtual rectangles are opt-in test configuration."""
+"""Explicit X11 connector mapping. Virtual rectangles are opt-in test configuration.
+
+412: one HDMI output (monitor-1) is the current target. The previous
+two-output layout (monitor-1 + monitor-2) stays valid for existing configs.
+"""
 from __future__ import annotations
 
 import argparse
@@ -22,6 +26,14 @@ class Output(BaseModel):
     height: int = Field(default=720, ge=480, le=1080)
     x: int = Field(ge=0, le=3840)
     y: int = Field(default=0, ge=0, le=2160)
+    # Screen the HDMI kiosk opens. Only pages the local feed serves; default is
+    # /display/<output_id>. With one HDMI, e.g. the phone-style combined screen
+    # can be shown in landscape (412).
+    page: Literal["/display/monitor-1", "/display/monitor-2", "/display/combined", "/display/mobile"] | None = None
+
+    @property
+    def page_path(self):
+        return self.page or f"/display/{self.output_id}"
 
 
 class RuntimeConfig(BaseModel):
@@ -29,7 +41,7 @@ class RuntimeConfig(BaseModel):
     backend: Literal["x11", "virtual_x11"] = "x11"
     display: str = Field(default=":0", pattern=r"^:[0-9]+(?:\.[0-9]+)?$")
     feed_origin: str = "http://127.0.0.1:8082"
-    outputs: list[Output] = Field(min_length=2, max_length=2)
+    outputs: list[Output] = Field(min_length=1, max_length=2)
     fps: int = Field(default=5, ge=1, le=15)
     stream_width: int = Field(default=1280, ge=640, le=1920, multiple_of=2)
     stream_height: int = Field(default=720, ge=480, le=1080, multiple_of=2)
@@ -64,15 +76,16 @@ class RuntimeConfig(BaseModel):
                 raise ValueError('native encoder requires an absolute library path')
             if any((o.width,o.height)!=(self.stream_width,self.stream_height) for o in self.outputs):
                 raise ValueError('native encoder requires matching source/stream dimensions; use FFmpeg for scaling')
-        if {o.output_id for o in self.outputs} != {"monitor-1", "monitor-2"}:
-            raise ValueError("two unique logical outputs required")
-        if len({o.connector for o in self.outputs}) != 2:
+        if sorted(o.output_id for o in self.outputs) not in (["monitor-1"], ["monitor-1", "monitor-2"]):
+            raise ValueError("one HDMI output (monitor-1) or the two unique legacy outputs required")
+        if len({o.connector for o in self.outputs}) != len(self.outputs):
             raise ValueError("connector reuse is forbidden")
         if self.backend == "x11" and any(o.edid_sha256 is None for o in self.outputs):
             raise ValueError("physical connectors require install-time EDID hashes")
-        a, b = self.outputs
-        if max(a.x, b.x) < min(a.x+a.width, b.x+b.width) and max(a.y, b.y) < min(a.y+a.height, b.y+b.height):
-            raise ValueError("output rectangles must not overlap")
+        if len(self.outputs) == 2:
+            a, b = self.outputs
+            if max(a.x, b.x) < min(a.x+a.width, b.x+b.width) and max(a.y, b.y) < min(a.y+a.height, b.y+b.height):
+                raise ValueError("output rectangles must not overlap")
         origin = urlparse(self.feed_origin)
         if origin.scheme not in {"http", "https"} or origin.hostname not in {"127.0.0.1", "localhost", "::1"}:
             raise ValueError("local feed origin required")
@@ -138,7 +151,7 @@ class X11Layout:
             text = self.command(["--query"])
             size = re.search(r"current (\d+) x (\d+)", text)
             if not size or any(o.x+o.width > int(size[1]) or o.y+o.height > int(size[2]) for o in self.config.outputs):
-                raise RuntimeError("virtual root is smaller than the two test rectangles")
+                raise RuntimeError("virtual root is smaller than the configured test rectangles")
             return {o.output_id: {"status": "mapped", "physical_verified": False} for o in self.config.outputs}
         rows = self.inspect()
         states, args = {}, []

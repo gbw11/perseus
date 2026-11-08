@@ -1,0 +1,22 @@
+{
+  "backend": "x11",
+  "display": ":5",
+  "feed_origin": "http://127.0.0.1:8082",
+  "renderer": "guest_frames",
+  "guest_relay_port": 8084,
+  "guest_relay_token_file": "/etc/xenova/guest-display/relay.token",
+  "frame_decoder": "turbojpeg",
+  "native_jpeg_library": "/opt/xenova-stream/RELEASE/native/libturbojpeg.so.0.2.0",
+  "guest_stale_ms": 2000,
+  "outputs": [
+    {
+      "output_id": "monitor-1",
+      "connector": "HDMI-1",
+      "edid_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 720
+    }
+  ]
+}

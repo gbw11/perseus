@@ -1,0 +1,92 @@
+{
+  "issue": "S15P31E110-374",
+  "date": "2026-11-08",
+  "analysis_base": "a42c4cee",
+  "latest_platform_observed": "8e5a4944",
+  "scope": "local source and existing board evidence analysis only; no board access or runtime module edits",
+  "confirmed_trace_attribution": {
+    "observation_inputs": {
+      "line": 855,
+      "trace_labels": [
+        "execution.publish_observation"
+      ]
+    },
+    "publish_observation": {
+      "line": 866,
+      "trace_labels": []
+    }
+  },
+  "local_structural_check": {
+    "scope": "local Linux fixture; two VMs; Xen simulated; structural call attribution, not board performance or acceptance",
+    "queries": [
+      {
+        "query": 0,
+        "vm_count": 2,
+        "counts": {
+          "canonical_path_check": 34,
+          "host_barrier_read": 3,
+          "observation_inputs": 4,
+          "actual_publish_observation": 2,
+          "final_validate_one": 2
+        },
+        "trace_label_calls": 4,
+        "request_owned_trace_available_before_return": true,
+        "batch_helper_calls": 2,
+        "xl_list_calls": 2,
+        "no_raw_arguments_exported": true
+      },
+      {
+        "query": 1,
+        "vm_count": 2,
+        "counts": {
+          "canonical_path_check": 34,
+          "host_barrier_read": 3,
+          "observation_inputs": 4,
+          "actual_publish_observation": 2,
+          "final_validate_one": 2
+        },
+        "trace_label_calls": 4,
+        "request_owned_trace_available_before_return": true,
+        "batch_helper_calls": 2,
+        "xl_list_calls": 2,
+        "no_raw_arguments_exported": true
+      }
+    ],
+    "no_repository_runtime_module_changed": true
+  },
+  "guard_tests": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "specific_sample_budget": {
+    "old_age_plus_wait_plus_next_query_plus_publication_s": 3.314886692998698,
+    "reduction_needed_for_this_sample_s": 0.314886692998698,
+    "next_query_upper_bound_in_this_sample_s": 2.1695972539891955,
+    "not_global_latency_target": true
+  },
+  "recommended_first_step": {
+    "owner": "own dom0-manager SerializedManager read-fork adapter + optional observation diagnostics",
+    "method": "read exact request fork last_trace immediately after that call; preserve default-off and bounded summary; not shared inner.last_trace and not another Manager call",
+    "validated_existing_api_available": true,
+    "implementation_performed": false,
+    "claimed_speedup": null
+  },
+  "optimization_candidates_requiring_further_evidence": [
+    "execution input canonical-path and JSON reads inside one guard",
+    "registry two-pass cost while preserving complete change detection",
+    "Xen command cost while retaining two lists and both incarnation checks"
+  ],
+  "not_safe_shortcuts": [
+    "reuse initial inputs across publication validation",
+    "remove second list or incarnation check",
+    "renew observed timestamp on publish",
+    "extend 3-second TTL",
+    "add more pollers as assumed optimization"
+  ],
+  "board_changed": false,
+  "team_runtime_modules_modified": false,
+  "jira_status_changed": false,
+  "remaining": "same long query trace and candidate benchmark before any runtime optimization"
+}
