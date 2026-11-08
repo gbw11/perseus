@@ -1,6 +1,7 @@
 """새 Linux 템플릿에 display domU 계정과 Plan A Python 모듈을 준비한다."""
 import hashlib
 from pathlib import Path
+import re
 import subprocess
 
 from prepare_rootfs import inside
@@ -9,7 +10,8 @@ from prepare_rootfs import inside
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE = ROOT / "platform/services/display/router/xenova_display"
 MODULES = ("__init__.py", "capture_limits.py", "mjpeg.py", "guest_sender.py", "guest_app.py")
-POLICY = {"account": "xenova-display", "python_modules": list(MODULES)}
+POLICY = {"account": "xenova-display", "python_modules": list(MODULES),
+          "web_assets": "external-vm-screens-dist"}
 ACCOUNT = "xenova-display"
 HOME = "/nonexistent"
 SHELL = "/usr/sbin/nologin"
@@ -26,6 +28,55 @@ def source_files():
     if any(path.is_symlink() or not path.is_file() or path.resolve() != path for path in files):
         raise ValueError("display guest Python input must be a canonical regular file")
     return files
+
+
+def install_web_assets(root, source, revision):
+    """검증한 vm-screens dist를 복사하고 재현 가능한 파일·트리 해시를 반환한다."""
+    if source is None:
+        raise ValueError("display web assets require a canonical dist directory and git revision")
+    source = Path(source)
+    if (not source.is_absolute() or source.is_symlink() or not source.is_dir()
+            or source.resolve() != source or not re.fullmatch(r"[0-9a-f]{7,40}", revision or "")):
+        raise ValueError("display web assets require a canonical dist directory and git revision")
+    index = source / "index.html"
+    assets = source / "assets"
+    if not index.is_file() or index.is_symlink() or not assets.is_dir() or assets.is_symlink():
+        raise ValueError("display web assets require index.html and assets directory")
+    files = []
+    total = 0
+    for path in sorted(source.rglob("*")):
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            raise ValueError("display web assets may contain regular files and directories only")
+        if path.is_file():
+            relative = path.relative_to(source)
+            if len(relative.parts) > 8 or len(str(relative)) > 240:
+                raise ValueError("display web asset path is too deep or long")
+            size = path.stat().st_size
+            total += size
+            if size > 8 * 1024 * 1024 or total > 64 * 1024 * 1024:
+                raise ValueError("display web assets exceed the image size limit")
+            files.append((relative, path, size))
+    if not files or not any(relative.parts[0] == "assets" for relative, _, _ in files):
+        raise ValueError("display web assets directory is empty")
+    destination = inside(root, "opt/xenova/display-web")
+    if destination.exists():
+        raise ValueError("display web destination already exists")
+    destination.mkdir(parents=True, mode=0o755)
+    manifest = {}
+    tree = hashlib.sha256()
+    for relative, path, size in files:
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.parent.chmod(0o755)
+        data = path.read_bytes()
+        target.write_bytes(data)
+        target.chmod(0o644)
+        digest = hashlib.sha256(data).hexdigest()
+        name = relative.as_posix()
+        manifest[name] = {"sha256": digest, "bytes": size}
+        tree.update(name.encode() + b"\0" + digest.encode() + b"\0" + str(size).encode() + b"\n")
+    return {"root": "/opt/xenova/display-web", "revision": revision,
+            "tree_sha256": tree.hexdigest(), "bytes": total, "files": manifest}
 
 
 def _records(root, relative):
@@ -54,7 +105,7 @@ def verify(root):
             "password_locked": True}
 
 
-def prepare(root, policy, *, command=subprocess.run):
+def prepare(root, policy, *, web_assets=None, web_revision=None, command=subprocess.run):
     """새 템플릿에 계정을 만들고 고정한 Plan A Python 모듈을 설치한다."""
     validate_policy(policy)
     root = Path(root)
@@ -83,5 +134,6 @@ def prepare(root, policy, *, command=subprocess.run):
         target.write_bytes(data)
         target.chmod(0o644)
         installed[source.name] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+    web = install_web_assets(root, web_assets, web_revision)
     return {"account": account, "python_root": "/opt/xenova/display-guest",
-            "python_modules": installed}
+            "python_modules": installed, "web": web}

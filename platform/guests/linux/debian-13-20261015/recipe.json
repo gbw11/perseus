@@ -22,6 +22,7 @@
       "mjpeg.py",
       "guest_sender.py",
       "guest_app.py"
-    ]
+    ],
+    "web_assets": "external-vm-screens-dist"
   }
 }

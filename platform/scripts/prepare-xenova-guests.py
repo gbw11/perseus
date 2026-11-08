@@ -184,7 +184,10 @@ def make_template(args, source):
         prepare_template(root)
         display_guest = None
         if 'guest_display' in preparation['recipe']:
-            display_guest = guest_display_template.prepare(root, preparation['recipe']['guest_display'])
+            display_guest = guest_display_template.prepare(
+                root, preparation['recipe']['guest_display'],
+                web_assets=getattr(args, 'display_web_assets', None),
+                web_revision=getattr(args, 'display_web_revision', None))
         # chroot 내 /dev, /proc, /sys는 작업 루트에만 마운트한다.
         for fs, relative in [('proc', 'proc'), ('sysfs', 'sys'), ('devtmpfs', 'dev')]:
             target = inside(root, relative)
@@ -255,6 +258,10 @@ def main(argv=None):
     template.add_argument('--output', type=Path, required=True)
     template.add_argument('--size-gib', type=int, default=8)
     template.add_argument('--recipe', type=Path, help='editable recipe.json; defaults to the selected Linux profile')
+    template.add_argument('--display-web-assets', type=Path,
+                          help='canonical vm-screens dist directory required by display guest recipes')
+    template.add_argument('--display-web-revision',
+                          help='7-40 lowercase hex frontend commit recorded with display web assets')
     instance = sub.add_parser('instance')
     instance.add_argument('--data-root', type=Path, required=True)
     instance.add_argument('--id', required=True)
