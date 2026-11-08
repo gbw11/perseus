@@ -6,6 +6,12 @@
 후속 실제 planner·binary 인계의 제공 범위와 검증 수준은
 [drive-world-1](drive-world/README.md) 및 [현재 보고](../verification/recovery-scenario-closure-20261030.md#history-driving-app)를 따른다.
 
+2026-11-09 신규 ESP32 연결 목표는 별도 [feedback-3 계약](gateway-feedback-3.md)이다.
+원4시각/INSTALL ACK·원 absolute cutoff·STOP/HOLD와 측정 조향 품질을 정의하며
+[고정 vector](vectors/gateway-feedback-3.json)·[actual codec 시험](../../platform/services/gateway/tests/test_feedback3_vectors.py)을 제공한다.
+현재 ToF serial payload 수신·MCU 구현·실물 수락은 미완료다. 아래 G3의 feedback-1/2 원문과
+기존 vector는 구형 장치의 명시 호환 선택으로 보존하고 자동 승격·downgrade하지 않는다.
+
 ## G1 설치와 호출
 
 `xenova-gateway-client` RPM은 `xenova_gateway/__init__.py`, `client.py`, `ipc_contract.py`와 표준 라이브러리 의존성만 설치한다.

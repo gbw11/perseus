@@ -1,0 +1,1749 @@
+{
+  "schema": "gateway-feedback-3-vectors-1",
+  "profile": "feedback-3",
+  "kind": "fixture-only",
+  "scope": "Independent stdlib bytes; product encode/decode comparison tests authored but not run on host; no MCU or physical evidence",
+  "fixtures": {
+    "identity": "Fixed virtual UUIDs only, not deployed sessions",
+    "hash_domain": "SHA256 of explicit fixture-only UTF-8 labels, never actual firmware/config attestation",
+    "vehicle_config_label": "xenova.feedback3.fixture-only.vehicle-config.v1",
+    "firmware_label": "xenova.feedback3.fixture-only.firmware-identity.v1",
+    "tof_calibration_label": "xenova.feedback3.fixture-only.tof-calibration.v1",
+    "physical_defaults": false,
+    "p4_pi_receive_us": 1000220,
+    "codec_fixture_timestamp_error_us": 10,
+    "codec_fixture_drift_ppm": 0,
+    "codec_fixture_j_cutoff_us": 70
+  },
+  "layouts": [
+    {
+      "symbol": "HELLO3",
+      "name": "HELLO",
+      "id": 3840,
+      "id_hex": "0x0f00",
+      "direction": "Pi → MCU",
+      "origin": "current_product_struct",
+      "format": "<B16s32s",
+      "payload_bytes": 49,
+      "raw_bytes": 54,
+      "maximum_encoded_bytes_with_delimiter": 56,
+      "fields": [
+        {
+          "name": "version",
+          "format": "B",
+          "offset": 0,
+          "bytes": 1,
+          "unit": "version",
+          "validation": "정확히 3"
+        },
+        {
+          "name": "pi_session",
+          "format": "16s",
+          "offset": 1,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "Pi serial adapter 기동마다 새 UUID; echo 필수"
+        },
+        {
+          "name": "vehicle_config_sha256",
+          "format": "32s",
+          "offset": 17,
+          "bytes": 32,
+          "unit": "등록 config digest 원 32B",
+          "validation": "ACK와 설치 profile에 exact; canonical hash domain 미정"
+        }
+      ]
+    },
+    {
+      "symbol": "ACK3",
+      "name": "HELLO_ACK",
+      "id": 3841,
+      "id_hex": "0x0f01",
+      "direction": "MCU → Pi",
+      "origin": "current_product_struct",
+      "format": "<B16s16sH32s32sB",
+      "payload_bytes": 100,
+      "raw_bytes": 105,
+      "maximum_encoded_bytes_with_delimiter": 107,
+      "fields": [
+        {
+          "name": "version",
+          "format": "B",
+          "offset": 0,
+          "bytes": 1,
+          "unit": "version",
+          "validation": "정확히 3"
+        },
+        {
+          "name": "pi_session",
+          "format": "16s",
+          "offset": 1,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "원 HELLO echo"
+        },
+        {
+          "name": "device_boot_session",
+          "format": "16s",
+          "offset": 17,
+          "bytes": 16,
+          "unit": "UUID",
+          "validation": "NIL 금지; 부팅마다 새 identity; 같은 Pi 연결 중 변경은 fault"
+        },
+        {
+          "name": "capabilities",
+          "format": "H",
+          "offset": 33,
+          "bytes": 2,
+          "unit": "bit mask",
+          "validation": "(caps & 0x01f7)==0x01f7; HOLD_STEER 추가 0x0400"
+        },
+        {
+          "name": "vehicle_config_sha256",
+          "format": "32s",
+          "offset": 35,
+          "bytes": 32,
+          "unit": "digest 원 32B",
+          "validation": "원 HELLO 및 Pi 등록값 exact"
+        },
+        {
+          "name": "firmware_sha256",
+          "format": "32s",
+          "offset": 67,
+          "bytes": 32,
+          "unit": "등록 firmware digest 원 32B",
+          "validation": "Pi 등록값 exact; flash attestation으로 해석 금지"
+        },
+        {
+          "name": "encoder_bits",
+          "format": "B",
+          "offset": 99,
+          "bytes": 1,
+          "unit": "signed cumulative counter 폭",
+          "validation": "32 또는 64; Pi OdometryConfig와 exact"
+        }
+      ]
+    },
+    {
+      "symbol": "PROBE3",
+      "name": "CLOCK_PROBE",
+      "id": 3856,
+      "id_hex": "0x0f10",
+      "direction": "Pi → MCU",
+      "origin": "current_product_struct",
+      "format": "<16s16sQQ",
+      "payload_bytes": 48,
+      "raw_bytes": 53,
+      "maximum_encoded_bytes_with_delimiter": 55,
+      "fields": [
+        {
+          "name": "pi_session",
+          "format": "16s",
+          "offset": 0,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "현재 session"
+        },
+        {
+          "name": "device_session",
+          "format": "16s",
+          "offset": 16,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "현재 boot session"
+        },
+        {
+          "name": "probe_sequence",
+          "format": "Q",
+          "offset": 32,
+          "bytes": 8,
+          "unit": "원 probe ID",
+          "validation": "wire u64; 정상 source는 1..2^63-1, wrap 재사용 금지"
+        },
+        {
+          "name": "p1_pi_send_us",
+          "format": "Q",
+          "offset": 40,
+          "bytes": 8,
+          "unit": "Pi CLOCK_MONOTONIC 계열 us; wall-clock/guest 시각 아님",
+          "validation": "원 probe 작성/송신 기준; 재송신/회신 도착으로 변경 금지"
+        }
+      ]
+    },
+    {
+      "symbol": "CLOCK3",
+      "name": "CLOCK_REPLY",
+      "id": 3857,
+      "id_hex": "0x0f11",
+      "direction": "MCU → Pi",
+      "origin": "current_product_struct",
+      "format": "<16s16sQQQQQQqqBiH",
+      "payload_bytes": 103,
+      "raw_bytes": 108,
+      "maximum_encoded_bytes_with_delimiter": 110,
+      "fields": [
+        {
+          "name": "pi_session",
+          "format": "16s",
+          "offset": 0,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "원 probe exact"
+        },
+        {
+          "name": "device_session",
+          "format": "16s",
+          "offset": 16,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "원 probe exact"
+        },
+        {
+          "name": "probe_sequence",
+          "format": "Q",
+          "offset": 32,
+          "bytes": 8,
+          "unit": "원 probe ID",
+          "validation": "현재 outstanding와 exact; <2^63"
+        },
+        {
+          "name": "p1_pi_send_us",
+          "format": "Q",
+          "offset": 40,
+          "bytes": 8,
+          "unit": "Pi CLOCK_MONOTONIC 계열 us; wall-clock/guest 시각 아님",
+          "validation": "원 p1 echo; 현재 outstanding와 exact; <2^63"
+        },
+        {
+          "name": "d2_device_receive_us",
+          "format": "Q",
+          "offset": 48,
+          "bytes": 8,
+          "unit": "같은 device_boot_session의 단조 us; 재부팅 시 새 session",
+          "validation": "0<d2<=latch<=d3; <2^63"
+        },
+        {
+          "name": "latch_device_us",
+          "format": "Q",
+          "offset": 56,
+          "bytes": 8,
+          "unit": "같은 device_boot_session의 단조 us; 재부팅 시 새 session",
+          "validation": "실제 양 encoder/조향 표본 latch; <2^63"
+        },
+        {
+          "name": "d3_device_send_us",
+          "format": "Q",
+          "offset": 64,
+          "bytes": 8,
+          "unit": "같은 device_boot_session의 단조 us; 재부팅 시 새 session",
+          "validation": "원 reply 실제 송신 기준; <2^63"
+        },
+        {
+          "name": "source_sample",
+          "format": "Q",
+          "offset": 72,
+          "bytes": 8,
+          "unit": "실제 센서 표본 순번",
+          "validation": "wire u64; 정상 source는 1..2^63-1, wrap 재사용 금지"
+        },
+        {
+          "name": "cumulative_left_ticks",
+          "format": "q",
+          "offset": 80,
+          "bytes": 8,
+          "unit": "signed ticks",
+          "validation": "encoder_bits signed 범위; 명령 적분값 금지"
+        },
+        {
+          "name": "cumulative_right_ticks",
+          "format": "q",
+          "offset": 88,
+          "bytes": 8,
+          "unit": "signed ticks",
+          "validation": "encoder_bits signed 범위; 누계·wrap 규칙 동일"
+        },
+        {
+          "name": "quality",
+          "format": "B",
+          "offset": 96,
+          "bytes": 1,
+          "unit": "encoder/steering quality bits",
+          "validation": "1 필수, unknown bit 금지; measured2/estimated4 동시 금지"
+        },
+        {
+          "name": "steering_mrad",
+          "format": "i",
+          "offset": 97,
+          "bytes": 4,
+          "unit": "signed mrad",
+          "validation": "quality2/4이면 |value|<=1400; 없으면 정확히 0"
+        },
+        {
+          "name": "steering_error_mrad",
+          "format": "H",
+          "offset": 101,
+          "bytes": 2,
+          "unit": "보수 오차 mrad",
+          "validation": "quality2/4이면 1..65535; 없으면 정확히 0"
+        }
+      ]
+    },
+    {
+      "symbol": "INSTALL3",
+      "name": "CLOCK_INSTALL",
+      "id": 3858,
+      "id_hex": "0x0f12",
+      "direction": "Pi → MCU",
+      "origin": "current_product_struct",
+      "format": "<16s16s16sQQQqqQQ",
+      "payload_bytes": 104,
+      "raw_bytes": 109,
+      "maximum_encoded_bytes_with_delimiter": 111,
+      "fields": [
+        {
+          "name": "pi_session",
+          "format": "16s",
+          "offset": 0,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "현재 session"
+        },
+        {
+          "name": "device_session",
+          "format": "16s",
+          "offset": 16,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "현재 boot session"
+        },
+        {
+          "name": "clock_epoch",
+          "format": "16s",
+          "offset": 32,
+          "bytes": 16,
+          "unit": "Pi serial clock UUID",
+          "validation": "현재 adapter epoch; 새 service epoch와 혼합 금지"
+        },
+        {
+          "name": "clock_sequence",
+          "format": "Q",
+          "offset": 48,
+          "bytes": 8,
+          "unit": "lease revision",
+          "validation": "wire u64; 정상 source는 1..2^63-1, wrap 재사용 금지"
+        },
+        {
+          "name": "probe_sequence",
+          "format": "Q",
+          "offset": 56,
+          "bytes": 8,
+          "unit": "원 probe ID",
+          "validation": "해당 실제 CLOCK_REPLY와 exact"
+        },
+        {
+          "name": "reference_pi_us",
+          "format": "Q",
+          "offset": 64,
+          "bytes": 8,
+          "unit": "Pi CLOCK_MONOTONIC 계열 us; wall-clock/guest 시각 아님",
+          "validation": "Pi의 원 p4 receive 시각"
+        },
+        {
+          "name": "lower_offset_us",
+          "format": "q",
+          "offset": 72,
+          "bytes": 8,
+          "unit": "Pi−device offset 하한 us",
+          "validation": "signed; lower<=upper, profile 폭 한도"
+        },
+        {
+          "name": "upper_offset_us",
+          "format": "q",
+          "offset": 80,
+          "bytes": 8,
+          "unit": "Pi−device offset 상한 us",
+          "validation": "signed; MCU 동작 허가시간 자체가 아님"
+        },
+        {
+          "name": "valid_until_pi_us",
+          "format": "Q",
+          "offset": 88,
+          "bytes": 8,
+          "unit": "Pi CLOCK_MONOTONIC 계열 us; wall-clock/guest 시각 아님",
+          "validation": "원 p1+lease_us; ACK 도착으로 연장 금지"
+        },
+        {
+          "name": "cutoff_device_us",
+          "format": "Q",
+          "offset": 96,
+          "bytes": 8,
+          "unit": "같은 device_boot_session의 단조 us; 재부팅 시 새 session",
+          "validation": "원 계산 absolute cutoff; d3보다 커야 함"
+        }
+      ]
+    },
+    {
+      "symbol": "CLOCK_ACK3",
+      "name": "CLOCK_ACK",
+      "id": 3859,
+      "id_hex": "0x0f13",
+      "direction": "MCU → Pi",
+      "origin": "current_product_struct",
+      "format": "<16s16s16sQQBHQQ",
+      "payload_bytes": 83,
+      "raw_bytes": 88,
+      "maximum_encoded_bytes_with_delimiter": 90,
+      "fields": [
+        {
+          "name": "pi_session",
+          "format": "16s",
+          "offset": 0,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "원 INSTALL exact"
+        },
+        {
+          "name": "device_session",
+          "format": "16s",
+          "offset": 16,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "원 INSTALL exact"
+        },
+        {
+          "name": "clock_epoch",
+          "format": "16s",
+          "offset": 32,
+          "bytes": 16,
+          "unit": "원 epoch",
+          "validation": "현재 epoch exact"
+        },
+        {
+          "name": "clock_sequence",
+          "format": "Q",
+          "offset": 48,
+          "bytes": 8,
+          "unit": "원 lease revision",
+          "validation": "Pi 저장 lease 존재"
+        },
+        {
+          "name": "probe_sequence",
+          "format": "Q",
+          "offset": 56,
+          "bytes": 8,
+          "unit": "원 probe ID",
+          "validation": "해당 lease exact"
+        },
+        {
+          "name": "status",
+          "format": "B",
+          "offset": 64,
+          "bytes": 1,
+          "unit": "1 INSTALLED / 3 REJECTED",
+          "validation": "Pi 성공 수락은1만; 설계의 실패status3은usable로 승격0"
+        },
+        {
+          "name": "reason",
+          "format": "H",
+          "offset": 65,
+          "bytes": 2,
+          "unit": "공통 reason enum",
+          "validation": "성공 0; 설계 부록B 공통0..20 참조"
+        },
+        {
+          "name": "device_now_us",
+          "format": "Q",
+          "offset": 67,
+          "bytes": 8,
+          "unit": "같은 device_boot_session의 단조 us; 재부팅 시 새 session",
+          "validation": "원 ACK 시각; Pi는 device_now<원 cutoff 검산"
+        },
+        {
+          "name": "cutoff_device_us",
+          "format": "Q",
+          "offset": 75,
+          "bytes": 8,
+          "unit": "같은 device_boot_session의 단조 us; 재부팅 시 새 session",
+          "validation": "원 INSTALL cutoff exact; Pi receive<원 Pi E 필수"
+        }
+      ]
+    },
+    {
+      "symbol": "SENSOR3",
+      "name": "SENSOR",
+      "id": 3861,
+      "id_hex": "0x0f15",
+      "direction": "MCU → Pi",
+      "origin": "current_product_struct",
+      "format": "<16s16sQQqqBiH16sQ",
+      "payload_bytes": 95,
+      "raw_bytes": 100,
+      "maximum_encoded_bytes_with_delimiter": 102,
+      "fields": [
+        {
+          "name": "pi_session",
+          "format": "16s",
+          "offset": 0,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "현재 session"
+        },
+        {
+          "name": "device_session",
+          "format": "16s",
+          "offset": 16,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "현재 boot session"
+        },
+        {
+          "name": "source_sample",
+          "format": "Q",
+          "offset": 32,
+          "bytes": 8,
+          "unit": "실제 센서 표본 순번",
+          "validation": "wire u64; 정상 source는 1..2^63-1, wrap 재사용 금지"
+        },
+        {
+          "name": "source_device_us",
+          "format": "Q",
+          "offset": 40,
+          "bytes": 8,
+          "unit": "같은 device_boot_session의 단조 us; 재부팅 시 새 session",
+          "validation": "실제 latch 시각; 1..2^63-1"
+        },
+        {
+          "name": "cumulative_left_ticks",
+          "format": "q",
+          "offset": 48,
+          "bytes": 8,
+          "unit": "signed ticks",
+          "validation": "encoder_bits signed 범위"
+        },
+        {
+          "name": "cumulative_right_ticks",
+          "format": "q",
+          "offset": 56,
+          "bytes": 8,
+          "unit": "signed ticks",
+          "validation": "encoder_bits signed 범위"
+        },
+        {
+          "name": "quality",
+          "format": "B",
+          "offset": 64,
+          "bytes": 1,
+          "unit": "sensor quality bits",
+          "validation": "CLOCK_REPLY와 같은 1/2/4 규칙"
+        },
+        {
+          "name": "steering_mrad",
+          "format": "i",
+          "offset": 65,
+          "bytes": 4,
+          "unit": "signed mrad",
+          "validation": "quality2/4이면 |value|<=1400; 없으면0"
+        },
+        {
+          "name": "steering_error_mrad",
+          "format": "H",
+          "offset": 69,
+          "bytes": 2,
+          "unit": "보수 오차 mrad",
+          "validation": "quality2/4이면 양수; 없으면0"
+        },
+        {
+          "name": "clock_epoch",
+          "format": "16s",
+          "offset": 71,
+          "bytes": 16,
+          "unit": "원 installed epoch",
+          "validation": "현재 epoch exact"
+        },
+        {
+          "name": "clock_sequence",
+          "format": "Q",
+          "offset": 87,
+          "bytes": 8,
+          "unit": "원 installed lease",
+          "validation": "Pi에 ACK된 lease 존재; 원 E 유효"
+        }
+      ]
+    },
+    {
+      "symbol": "COMMAND3",
+      "name": "COMMAND",
+      "id": 273,
+      "id_hex": "0x0111",
+      "direction": "Pi → MCU",
+      "origin": "current_product_struct",
+      "format": "<16s16sQ16sQQQQIBBQhhBB",
+      "payload_bytes": 108,
+      "raw_bytes": 113,
+      "maximum_encoded_bytes_with_delimiter": 115,
+      "fields": [
+        {
+          "name": "pi_session",
+          "format": "16s",
+          "offset": 0,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "현재 session"
+        },
+        {
+          "name": "device_session",
+          "format": "16s",
+          "offset": 16,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "현재 boot session"
+        },
+        {
+          "name": "command_sequence",
+          "format": "Q",
+          "offset": 32,
+          "bytes": 8,
+          "unit": "비순환 명령 ID",
+          "validation": "1..2^63-1; u8 counter와 다른 exact key"
+        },
+        {
+          "name": "clock_epoch",
+          "format": "16s",
+          "offset": 40,
+          "bytes": 16,
+          "unit": "원 lease epoch",
+          "validation": "DRIVE/HOLD exact installed; STOP NIL"
+        },
+        {
+          "name": "clock_sequence",
+          "format": "Q",
+          "offset": 56,
+          "bytes": 8,
+          "unit": "원 lease revision",
+          "validation": "DRIVE/HOLD exact installed; STOP0"
+        },
+        {
+          "name": "issued_pi_us",
+          "format": "Q",
+          "offset": 64,
+          "bytes": 8,
+          "unit": "Pi CLOCK_MONOTONIC 계열 us; wall-clock/guest 시각 아님",
+          "validation": "DRIVE/HOLD 원 issued; STOP0"
+        },
+        {
+          "name": "expires_pi_us",
+          "format": "Q",
+          "offset": 72,
+          "bytes": 8,
+          "unit": "Pi CLOCK_MONOTONIC 계열 us; wall-clock/guest 시각 아님",
+          "validation": "issued<E<=issued+100000us; 원 lease E 이하; STOP0"
+        },
+        {
+          "name": "cutoff_device_us",
+          "format": "Q",
+          "offset": 80,
+          "bytes": 8,
+          "unit": "같은 device_boot_session의 단조 us; 재부팅 시 새 session",
+          "validation": "DRIVE/HOLD absolute deadline; STOP0"
+        },
+        {
+          "name": "generation",
+          "format": "I",
+          "offset": 88,
+          "bytes": 4,
+          "unit": "Pi 제어 generation",
+          "validation": "u32; 보고 exact echo; VM ID 아님"
+        },
+        {
+          "name": "counter",
+          "format": "B",
+          "offset": 92,
+          "bytes": 1,
+          "unit": "모든 출력 공통 u8 counter",
+          "validation": "0..255 순환; 중복/현재성의 유일 key로 사용 금지"
+        },
+        {
+          "name": "command_kind",
+          "format": "B",
+          "offset": 93,
+          "bytes": 1,
+          "unit": "1 DRIVE / 2 STOP / 3 HOLD_STEER",
+          "validation": "그 외 미정·수락 금지"
+        },
+        {
+          "name": "stop_command_sequence",
+          "format": "Q",
+          "offset": 94,
+          "bytes": 8,
+          "unit": "원 STOP pin ID",
+          "validation": "DRIVE/HOLD는 실제 APPLIED된 원 STOP; STOP0"
+        },
+        {
+          "name": "velocity_mmps",
+          "format": "h",
+          "offset": 102,
+          "bytes": 2,
+          "unit": "signed mm/s",
+          "validation": "i16 wire; HOLD/STOP0; 차량 승인한도 별도 적용"
+        },
+        {
+          "name": "steering_mrad",
+          "format": "h",
+          "offset": 104,
+          "bytes": 2,
+          "unit": "signed mrad",
+          "validation": "i16 wire; STOP0; HOLD는 정지 조향 목표"
+        },
+        {
+          "name": "reason",
+          "format": "B",
+          "offset": 106,
+          "bytes": 1,
+          "unit": "COMMAND reason0..10",
+          "validation": "설계 enum 아래 참조; 현 producer는 모든 kind에서0"
+        },
+        {
+          "name": "reserved",
+          "format": "B",
+          "offset": 107,
+          "bytes": 1,
+          "unit": "reserved",
+          "validation": "계약0만; 현 producer0/STOP evidence0 강제"
+        }
+      ]
+    },
+    {
+      "symbol": "FEEDBACK3",
+      "name": "REPORT",
+      "id": 3860,
+      "id_hex": "0x0f14",
+      "direction": "MCU → Pi",
+      "origin": "current_product_struct",
+      "format": "<16s16sQIBBBQQQBiiB16sQQQH",
+      "payload_bytes": 123,
+      "raw_bytes": 128,
+      "maximum_encoded_bytes_with_delimiter": 130,
+      "fields": [
+        {
+          "name": "pi_session",
+          "format": "16s",
+          "offset": 0,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "원 COMMAND exact"
+        },
+        {
+          "name": "device_session",
+          "format": "16s",
+          "offset": 16,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "원 COMMAND exact"
+        },
+        {
+          "name": "command_sequence",
+          "format": "Q",
+          "offset": 32,
+          "bytes": 8,
+          "unit": "원 명령 ID",
+          "validation": "pending 또는 원 STOP pin exact; unsolicited FAULT만0"
+        },
+        {
+          "name": "generation",
+          "format": "I",
+          "offset": 40,
+          "bytes": 4,
+          "unit": "원 generation",
+          "validation": "원 COMMAND exact"
+        },
+        {
+          "name": "counter",
+          "format": "B",
+          "offset": 44,
+          "bytes": 1,
+          "unit": "원 u8 counter",
+          "validation": "원 COMMAND exact"
+        },
+        {
+          "name": "command_kind",
+          "format": "B",
+          "offset": 45,
+          "bytes": 1,
+          "unit": "원 kind",
+          "validation": "원 COMMAND exact; unsolicited FAULT만0"
+        },
+        {
+          "name": "status",
+          "format": "B",
+          "offset": 46,
+          "bytes": 1,
+          "unit": "1 ACCEPTED /2 APPLIED /3 REJECTED /4 FAULT",
+          "validation": "다른 status 거절; ACCEPTED와 APPLIED 구분"
+        },
+        {
+          "name": "report_sequence",
+          "format": "Q",
+          "offset": 47,
+          "bytes": 8,
+          "unit": "device-session 보고 순번",
+          "validation": "Pi HWM보다 커야 함; <=HWM은 duplicate ignore"
+        },
+        {
+          "name": "source_sample",
+          "format": "Q",
+          "offset": 55,
+          "bytes": 8,
+          "unit": "해당 사실과 연결된 실제 표본",
+          "validation": "정지 증거는 양수·원 Vehicle 마지막 표본 exact"
+        },
+        {
+          "name": "source_device_us",
+          "format": "Q",
+          "offset": 63,
+          "bytes": 8,
+          "unit": "같은 device_boot_session의 단조 us; 재부팅 시 새 session",
+          "validation": "정지 증거는 양수·원 Vehicle 마지막 latch exact"
+        },
+        {
+          "name": "flags",
+          "format": "B",
+          "offset": 71,
+          "bytes": 1,
+          "unit": "measurement presence bits",
+          "validation": "velocity1/steering2/stationary4; unknown bit 거절"
+        },
+        {
+          "name": "velocity_mmps",
+          "format": "i",
+          "offset": 72,
+          "bytes": 4,
+          "unit": "보고 m/s ×1000",
+          "validation": "flag1 없으면0; setpoint를 실측으로 위장 금지"
+        },
+        {
+          "name": "steering_mrad",
+          "format": "i",
+          "offset": 76,
+          "bytes": 4,
+          "unit": "보고 rad ×1000",
+          "validation": "flag2 없으면0; SENSOR quality와 별도"
+        },
+        {
+          "name": "stationary",
+          "format": "B",
+          "offset": 80,
+          "bytes": 1,
+          "unit": "0/1",
+          "validation": "APPLIED STOP+flag4에서만 physical_stop 후보; 단독 정지증명 아님"
+        },
+        {
+          "name": "clock_epoch",
+          "format": "16s",
+          "offset": 81,
+          "bytes": 16,
+          "unit": "원 command epoch",
+          "validation": "원 COMMAND exact; clockless STOP NIL"
+        },
+        {
+          "name": "clock_sequence",
+          "format": "Q",
+          "offset": 97,
+          "bytes": 8,
+          "unit": "원 command lease",
+          "validation": "원 COMMAND exact; STOP0"
+        },
+        {
+          "name": "cutoff_device_us",
+          "format": "Q",
+          "offset": 105,
+          "bytes": 8,
+          "unit": "같은 device_boot_session의 단조 us; 재부팅 시 새 session",
+          "validation": "원 COMMAND exact; STOP0"
+        },
+        {
+          "name": "stop_command_sequence",
+          "format": "Q",
+          "offset": 113,
+          "bytes": 8,
+          "unit": "원 STOP reference",
+          "validation": "원 COMMAND exact; STOP0"
+        },
+        {
+          "name": "reason",
+          "format": "H",
+          "offset": 121,
+          "bytes": 2,
+          "unit": "공통 reason0..20",
+          "validation": "설계 enum 아래 참조; 성공0, 실패 원 이유 보존"
+        }
+      ]
+    },
+    {
+      "symbol": "TOF_FRAGMENT3_DESIGN",
+      "name": "TOF_FRAGMENT3",
+      "id": 3862,
+      "id_hex": "0x0f16",
+      "direction": "MCU → Pi (설계됨 / 현 adapter 미통합)",
+      "origin": "external_design_only_no_current_serial_decoder",
+      "format": "<16s16sQQI16sQB16sII32sBBBBBBHI64s",
+      "payload_bytes": 209,
+      "raw_bytes": 214,
+      "maximum_encoded_bytes_with_delimiter": 216,
+      "fields": [
+        {
+          "name": "pi_session",
+          "format": "16s",
+          "offset": 0,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "현재 session"
+        },
+        {
+          "name": "device_session",
+          "format": "16s",
+          "offset": 16,
+          "bytes": 16,
+          "unit": "RFC UUID 16B; 현재 Pi/device와 exact",
+          "validation": "현재 motor device boot session"
+        },
+        {
+          "name": "source_sample",
+          "format": "Q",
+          "offset": 32,
+          "bytes": 8,
+          "unit": "ToF instance별 원 관측 순번",
+          "validation": "wire u64; 정상 source는 1..2^63-1, wrap 재사용 금지"
+        },
+        {
+          "name": "device_sample_us",
+          "format": "Q",
+          "offset": 40,
+          "bytes": 8,
+          "unit": "같은 device_boot_session의 단조 us; 재부팅 시 새 session",
+          "validation": "ToF 적분/취득구간 대표 시각; encoder latch 재사용 금지"
+        },
+        {
+          "name": "sample_time_error_us",
+          "format": "I",
+          "offset": 48,
+          "bytes": 4,
+          "unit": "원 시각 보수 오차 us",
+          "validation": "전체 적분+IRQ/I2C취득 불확실성 구간 포함"
+        },
+        {
+          "name": "clock_epoch",
+          "format": "16s",
+          "offset": 52,
+          "bytes": 16,
+          "unit": "원 clock epoch",
+          "validation": "현재 mapped clock 참조"
+        },
+        {
+          "name": "clock_sequence",
+          "format": "Q",
+          "offset": 68,
+          "bytes": 8,
+          "unit": "원 lease revision",
+          "validation": "wire u64; 정상 source는 1..2^63-1, wrap 재사용 금지"
+        },
+        {
+          "name": "sensor_id",
+          "format": "B",
+          "offset": 76,
+          "bytes": 1,
+          "unit": "등록 센서 index",
+          "validation": "0 또는1"
+        },
+        {
+          "name": "sensor_instance",
+          "format": "16s",
+          "offset": 77,
+          "bytes": 16,
+          "unit": "ToF 재초기화 UUID",
+          "validation": "NIL 금지; sensor reset마다 새 UUID"
+        },
+        {
+          "name": "sensor_generation",
+          "format": "I",
+          "offset": 93,
+          "bytes": 4,
+          "unit": "ToF reset generation",
+          "validation": "1..2^32-1; wrap 금지; 같은gen/다른instance conflict"
+        },
+        {
+          "name": "sensor_config_revision",
+          "format": "I",
+          "offset": 97,
+          "bytes": 4,
+          "unit": "등록 sensor profile revision",
+          "validation": "원 calibration/source profile exact"
+        },
+        {
+          "name": "sensor_calibration_sha256",
+          "format": "32s",
+          "offset": 101,
+          "bytes": 32,
+          "unit": "등록 digest 원32B",
+          "validation": "원 sensor profile exact"
+        },
+        {
+          "name": "rows",
+          "format": "B",
+          "offset": 133,
+          "bytes": 1,
+          "unit": "grid rows",
+          "validation": "8만"
+        },
+        {
+          "name": "cols",
+          "format": "B",
+          "offset": 134,
+          "bytes": 1,
+          "unit": "grid cols",
+          "validation": "8만"
+        },
+        {
+          "name": "fragment_index",
+          "format": "B",
+          "offset": 135,
+          "bytes": 1,
+          "unit": "조각 index",
+          "validation": "0..3"
+        },
+        {
+          "name": "fragment_count",
+          "format": "B",
+          "offset": 136,
+          "bytes": 1,
+          "unit": "전체 조각 수",
+          "validation": "4만"
+        },
+        {
+          "name": "zone_first",
+          "format": "B",
+          "offset": 137,
+          "bytes": 1,
+          "unit": "첫 zone index",
+          "validation": "16*fragment_index"
+        },
+        {
+          "name": "zone_count",
+          "format": "B",
+          "offset": 138,
+          "bytes": 1,
+          "unit": "조각 내 zone 수",
+          "validation": "16만"
+        },
+        {
+          "name": "frame_status",
+          "format": "H",
+          "offset": 139,
+          "bytes": 2,
+          "unit": "bitmask",
+          "validation": "SENSOR_OK1/TIMING_VALID2/TARGET_REDUCTION_APPLIED4; 그 외0"
+        },
+        {
+          "name": "sample_crc32",
+          "format": "I",
+          "offset": 141,
+          "bytes": 4,
+          "unit": "원 전체 관측 CRC32",
+          "validation": "393B canonical body CRC32/IEEE; 아래 정확 범위"
+        },
+        {
+          "name": "zones",
+          "format": "64s",
+          "offset": 145,
+          "bytes": 64,
+          "unit": "16×(distance:u16/status:u8/quality:u8)",
+          "validation": "row-major; 각4B nested layout 아래 참조"
+        }
+      ]
+    }
+  ],
+  "frames": [
+    {
+      "name": "hello3",
+      "symbol": "HELLO3",
+      "id": 3840,
+      "origin": "current_product_struct",
+      "fields": {
+        "version": 3,
+        "pi_session": "12345678123442348234123456789001",
+        "vehicle_config_sha256": "a69571050d9704a1821622fd3ee5e4199b3c849dd6818fac91ca897cca2f7686"
+      },
+      "payload_hex": "0312345678123442348234123456789001a69571050d9704a1821622fd3ee5e4199b3c849dd6818fac91ca897cca2f7686",
+      "raw_hex": "000f310312345678123442348234123456789001a69571050d9704a1821622fd3ee5e4199b3c849dd6818fac91ca897cca2f76864683",
+      "wire_hex": "01360f310312345678123442348234123456789001a69571050d9704a1821622fd3ee5e4199b3c849dd6818fac91ca897cca2f7686468300"
+    },
+    {
+      "name": "hello_ack3",
+      "symbol": "ACK3",
+      "id": 3841,
+      "origin": "current_product_struct",
+      "fields": {
+        "version": 3,
+        "pi_session": "12345678123442348234123456789001",
+        "device_boot_session": "12345678123442348234123456789002",
+        "capabilities": 1535,
+        "vehicle_config_sha256": "a69571050d9704a1821622fd3ee5e4199b3c849dd6818fac91ca897cca2f7686",
+        "firmware_sha256": "f0515a437aab05623c53a81a62adb7c821a3519660edf27d8c09f0eed9dcf5a6",
+        "encoder_bits": 32
+      },
+      "payload_hex": "031234567812344234823412345678900112345678123442348234123456789002ff05a69571050d9704a1821622fd3ee5e4199b3c849dd6818fac91ca897cca2f7686f0515a437aab05623c53a81a62adb7c821a3519660edf27d8c09f0eed9dcf5a620",
+      "raw_hex": "010f64031234567812344234823412345678900112345678123442348234123456789002ff05a69571050d9704a1821622fd3ee5e4199b3c849dd6818fac91ca897cca2f7686f0515a437aab05623c53a81a62adb7c821a3519660edf27d8c09f0eed9dcf5a620b4cd",
+      "wire_hex": "6a010f64031234567812344234823412345678900112345678123442348234123456789002ff05a69571050d9704a1821622fd3ee5e4199b3c849dd6818fac91ca897cca2f7686f0515a437aab05623c53a81a62adb7c821a3519660edf27d8c09f0eed9dcf5a620b4cd00"
+    },
+    {
+      "name": "clock_probe3",
+      "symbol": "PROBE3",
+      "id": 3856,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "probe_sequence": 5,
+        "p1_pi_send_us": 1000000
+      },
+      "payload_hex": "1234567812344234823412345678900112345678123442348234123456789002050000000000000040420f0000000000",
+      "raw_hex": "100f301234567812344234823412345678900112345678123442348234123456789002050000000000000040420f000000000071e4",
+      "wire_hex": "25100f301234567812344234823412345678900112345678123442348234123456789002050101010101010440420f010101010371e400"
+    },
+    {
+      "name": "clock_reply3",
+      "symbol": "CLOCK3",
+      "id": 3857,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "probe_sequence": 5,
+        "p1_pi_send_us": 1000000,
+        "d2_device_receive_us": 9000120,
+        "latch_device_us": 9000130,
+        "d3_device_send_us": 9000140,
+        "source_sample": 41,
+        "cumulative_left_ticks": 1000,
+        "cumulative_right_ticks": 1000,
+        "quality": 3,
+        "steering_mrad": 0,
+        "steering_error_mrad": 7
+      },
+      "payload_hex": "1234567812344234823412345678900112345678123442348234123456789002050000000000000040420f0000000000b854890000000000c254890000000000cc548900000000002900000000000000e803000000000000e80300000000000003000000000700",
+      "raw_hex": "110f671234567812344234823412345678900112345678123442348234123456789002050000000000000040420f0000000000b854890000000000c254890000000000cc548900000000002900000000000000e803000000000000e80300000000000003000000000700df5f",
+      "wire_hex": "25110f671234567812344234823412345678900112345678123442348234123456789002050101010101010440420f0101010104b854890101010104c254890101010104cc548901010101022901010101010103e803010101010103e80301010101010203010101020703df5f00"
+    },
+    {
+      "name": "clock_install3",
+      "symbol": "INSTALL3",
+      "id": 3858,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "probe_sequence": 5,
+        "reference_pi_us": 1000220,
+        "lower_offset_us": -8000140,
+        "upper_offset_us": -7999900,
+        "valid_until_pi_us": 2000000,
+        "cutoff_device_us": 9999830
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900212345678123442348234123456789003030000000000000005000000000000001c430f000000000074ed85ffffffffff64ee85ffffffffff80841e0000000000d695980000000000",
+      "raw_hex": "120f68123456781234423482341234567890011234567812344234823412345678900212345678123442348234123456789003030000000000000005000000000000001c430f000000000074ed85ffffffffff64ee85ffffffffff80841e0000000000d6959800000000005b15",
+      "wire_hex": "35120f68123456781234423482341234567890011234567812344234823412345678900212345678123442348234123456789003030101010101010205010101010101041c430f010101011474ed85ffffffffff64ee85ffffffffff80841e0101010104d6959801010101035b1500"
+    },
+    {
+      "name": "clock_ack3",
+      "symbol": "CLOCK_ACK3",
+      "id": 3859,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "probe_sequence": 5,
+        "status": 1,
+        "reason": 0,
+        "device_now_us": 9000240,
+        "cutoff_device_us": 9999830
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900212345678123442348234123456789003030000000000000005000000000000000100003055890000000000d695980000000000",
+      "raw_hex": "130f53123456781234423482341234567890011234567812344234823412345678900212345678123442348234123456789003030000000000000005000000000000000100003055890000000000d695980000000000b71d",
+      "wire_hex": "35130f53123456781234423482341234567890011234567812344234823412345678900212345678123442348234123456789003030101010101010205010101010101020101043055890101010104d695980101010103b71d00"
+    },
+    {
+      "name": "sensor_measured",
+      "symbol": "SENSOR3",
+      "id": 3861,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "source_sample": 42,
+        "source_device_us": 9020130,
+        "cumulative_left_ticks": 1001,
+        "cumulative_right_ticks": 1001,
+        "quality": 3,
+        "steering_mrad": 120,
+        "steering_error_mrad": 7,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3
+      },
+      "payload_hex": "12345678123442348234123456789001123456781234423482341234567890022a00000000000000e2a2890000000000e903000000000000e90300000000000003780000000700123456781234423482341234567890030300000000000000",
+      "raw_hex": "150f5f12345678123442348234123456789001123456781234423482341234567890022a00000000000000e2a2890000000000e903000000000000e90300000000000003780000000700123456781234423482341234567890030300000000000000fd02",
+      "wire_hex": "25150f5f12345678123442348234123456789001123456781234423482341234567890022a01010101010104e2a2890101010103e903010101010103e90301010101010303780101020712123456781234423482341234567890030301010101010103fd0200"
+    },
+    {
+      "name": "sensor_estimated",
+      "symbol": "SENSOR3",
+      "id": 3861,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "source_sample": 42,
+        "source_device_us": 9020130,
+        "cumulative_left_ticks": 1001,
+        "cumulative_right_ticks": 1001,
+        "quality": 5,
+        "steering_mrad": -120,
+        "steering_error_mrad": 9,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3
+      },
+      "payload_hex": "12345678123442348234123456789001123456781234423482341234567890022a00000000000000e2a2890000000000e903000000000000e9030000000000000588ffffff0900123456781234423482341234567890030300000000000000",
+      "raw_hex": "150f5f12345678123442348234123456789001123456781234423482341234567890022a00000000000000e2a2890000000000e903000000000000e9030000000000000588ffffff09001234567812344234823412345678900303000000000000009f0d",
+      "wire_hex": "25150f5f12345678123442348234123456789001123456781234423482341234567890022a01010101010104e2a2890101010103e903010101010103e9030101010101070588ffffff09121234567812344234823412345678900303010101010101039f0d00"
+    },
+    {
+      "name": "sensor_encoder_only",
+      "symbol": "SENSOR3",
+      "id": 3861,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "source_sample": 42,
+        "source_device_us": 9020130,
+        "cumulative_left_ticks": 1001,
+        "cumulative_right_ticks": 1001,
+        "quality": 1,
+        "steering_mrad": 0,
+        "steering_error_mrad": 0,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3
+      },
+      "payload_hex": "12345678123442348234123456789001123456781234423482341234567890022a00000000000000e2a2890000000000e903000000000000e90300000000000001000000000000123456781234423482341234567890030300000000000000",
+      "raw_hex": "150f5f12345678123442348234123456789001123456781234423482341234567890022a00000000000000e2a2890000000000e903000000000000e9030000000000000100000000000012345678123442348234123456789003030000000000000081f6",
+      "wire_hex": "25150f5f12345678123442348234123456789001123456781234423482341234567890022a01010101010104e2a2890101010103e903010101010103e9030101010101020101010101011212345678123442348234123456789003030101010101010381f600"
+    },
+    {
+      "name": "sensor_signed32_wrap",
+      "symbol": "SENSOR3",
+      "id": 3861,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "source_sample": 43,
+        "source_device_us": 9040130,
+        "cumulative_left_ticks": -2147483648,
+        "cumulative_right_ticks": -2147483648,
+        "quality": 3,
+        "steering_mrad": 0,
+        "steering_error_mrad": 7,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3
+      },
+      "payload_hex": "12345678123442348234123456789001123456781234423482341234567890022b0000000000000002f189000000000000000080ffffffff00000080ffffffff03000000000700123456781234423482341234567890030300000000000000",
+      "raw_hex": "150f5f12345678123442348234123456789001123456781234423482341234567890022b0000000000000002f189000000000000000080ffffffff00000080ffffffff030000000007001234567812344234823412345678900303000000000000006f88",
+      "wire_hex": "25150f5f12345678123442348234123456789001123456781234423482341234567890022b0101010101010402f189010101010101010680ffffffff01010780ffffffff030101010207121234567812344234823412345678900303010101010101036f8800"
+    },
+    {
+      "name": "command_stop",
+      "symbol": "COMMAND3",
+      "id": 273,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "command_sequence": 100,
+        "clock_epoch": "00000000000000000000000000000000",
+        "clock_sequence": 0,
+        "issued_pi_us": 0,
+        "expires_pi_us": 0,
+        "cutoff_device_us": 0,
+        "generation": 42,
+        "counter": 254,
+        "command_kind": 2,
+        "stop_command_sequence": 0,
+        "velocity_mmps": 0,
+        "steering_mrad": 0,
+        "reason": 0,
+        "reserved": 0
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900264000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a000000fe020000000000000000000000000000",
+      "raw_hex": "11016c123456781234423482341234567890011234567812344234823412345678900264000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a000000fe0200000000000000000000000000005144",
+      "wire_hex": "2511016c123456781234423482341234567890011234567812344234823412345678900264010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101022a010103fe020101010101010101010101010103514400"
+    },
+    {
+      "name": "command_forward",
+      "symbol": "COMMAND3",
+      "id": 273,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "command_sequence": 101,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "issued_pi_us": 1000300,
+        "expires_pi_us": 1090300,
+        "cutoff_device_us": 9090130,
+        "generation": 42,
+        "counter": 255,
+        "command_kind": 1,
+        "stop_command_sequence": 100,
+        "velocity_mmps": 250,
+        "steering_mrad": -175,
+        "reason": 0,
+        "reserved": 0
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900265000000000000001234567812344234823412345678900303000000000000006c430f0000000000fca210000000000052b48a00000000002a000000ff016400000000000000fa0051ff0000",
+      "raw_hex": "11016c123456781234423482341234567890011234567812344234823412345678900265000000000000001234567812344234823412345678900303000000000000006c430f0000000000fca210000000000052b48a00000000002a000000ff016400000000000000fa0051ff0000bc81",
+      "wire_hex": "2511016c123456781234423482341234567890011234567812344234823412345678900265010101010101121234567812344234823412345678900303010101010101046c430f0101010104fca210010101010452b48a01010101022a010104ff016401010101010102fa0351ff0103bc8100"
+    },
+    {
+      "name": "command_reverse",
+      "symbol": "COMMAND3",
+      "id": 273,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "command_sequence": 102,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "issued_pi_us": 1000300,
+        "expires_pi_us": 1090300,
+        "cutoff_device_us": 9090130,
+        "generation": 42,
+        "counter": 0,
+        "command_kind": 1,
+        "stop_command_sequence": 100,
+        "velocity_mmps": -200,
+        "steering_mrad": 190,
+        "reason": 0,
+        "reserved": 0
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900266000000000000001234567812344234823412345678900303000000000000006c430f0000000000fca210000000000052b48a00000000002a0000000001640000000000000038ffbe000000",
+      "raw_hex": "11016c123456781234423482341234567890011234567812344234823412345678900266000000000000001234567812344234823412345678900303000000000000006c430f0000000000fca210000000000052b48a00000000002a0000000001640000000000000038ffbe000000fcda",
+      "wire_hex": "2511016c123456781234423482341234567890011234567812344234823412345678900266010101010101121234567812344234823412345678900303010101010101046c430f0101010104fca210010101010452b48a01010101022a0101010301640101010101010438ffbe010103fcda00"
+    },
+    {
+      "name": "command_hold_steer",
+      "symbol": "COMMAND3",
+      "id": 273,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "command_sequence": 103,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "issued_pi_us": 1000300,
+        "expires_pi_us": 1090300,
+        "cutoff_device_us": 9090130,
+        "generation": 42,
+        "counter": 1,
+        "command_kind": 3,
+        "stop_command_sequence": 100,
+        "velocity_mmps": 0,
+        "steering_mrad": 120,
+        "reason": 0,
+        "reserved": 0
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900267000000000000001234567812344234823412345678900303000000000000006c430f0000000000fca210000000000052b48a00000000002a00000001036400000000000000000078000000",
+      "raw_hex": "11016c123456781234423482341234567890011234567812344234823412345678900267000000000000001234567812344234823412345678900303000000000000006c430f0000000000fca210000000000052b48a00000000002a000000010364000000000000000000780000002132",
+      "wire_hex": "2511016c123456781234423482341234567890011234567812344234823412345678900267010101010101121234567812344234823412345678900303010101010101046c430f0101010104fca210010101010452b48a01010101022a01010401036401010101010101010278010103213200"
+    },
+    {
+      "name": "report_accepted",
+      "symbol": "FEEDBACK3",
+      "id": 3860,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "command_sequence": 101,
+        "generation": 42,
+        "counter": 255,
+        "command_kind": 1,
+        "status": 1,
+        "report_sequence": 71,
+        "source_sample": 42,
+        "source_device_us": 9020130,
+        "flags": 3,
+        "velocity_mmps": 250,
+        "steering_mrad": -175,
+        "stationary": 0,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "cutoff_device_us": 9090130,
+        "stop_command_sequence": 100,
+        "reason": 0
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900265000000000000002a000000ff010147000000000000002a00000000000000e2a289000000000003fa00000051ffffff0012345678123442348234123456789003030000000000000052b48a000000000064000000000000000000",
+      "raw_hex": "140f7b123456781234423482341234567890011234567812344234823412345678900265000000000000002a000000ff010147000000000000002a00000000000000e2a289000000000003fa00000051ffffff0012345678123442348234123456789003030000000000000052b48a000000000064000000000000000000f774",
+      "wire_hex": "25140f7b123456781234423482341234567890011234567812344234823412345678900265010101010101022a010105ff010147010101010101022a01010101010104e2a289010101010303fa01010551ffffff1212345678123442348234123456789003030101010101010452b48a010101010264010101010101010103f77400"
+    },
+    {
+      "name": "report_applied_stop",
+      "symbol": "FEEDBACK3",
+      "id": 3860,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "command_sequence": 100,
+        "generation": 42,
+        "counter": 254,
+        "command_kind": 2,
+        "status": 2,
+        "report_sequence": 72,
+        "source_sample": 43,
+        "source_device_us": 9040130,
+        "flags": 7,
+        "velocity_mmps": 0,
+        "steering_mrad": 0,
+        "stationary": 1,
+        "clock_epoch": "00000000000000000000000000000000",
+        "clock_sequence": 0,
+        "cutoff_device_us": 0,
+        "stop_command_sequence": 0,
+        "reason": 0
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900264000000000000002a000000fe020248000000000000002b0000000000000002f189000000000007000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "raw_hex": "140f7b123456781234423482341234567890011234567812344234823412345678900264000000000000002a000000fe020248000000000000002b0000000000000002f1890000000000070000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000007295",
+      "wire_hex": "25140f7b123456781234423482341234567890011234567812344234823412345678900264010101010101022a010105fe020248010101010101022b0101010101010402f189010101010207010101010101010201010101010101010101010101010101010101010101010101010101010101010101010101010101010103729500"
+    },
+    {
+      "name": "report_rejected",
+      "symbol": "FEEDBACK3",
+      "id": 3860,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "command_sequence": 101,
+        "generation": 42,
+        "counter": 255,
+        "command_kind": 1,
+        "status": 3,
+        "report_sequence": 73,
+        "source_sample": 43,
+        "source_device_us": 9040130,
+        "flags": 0,
+        "velocity_mmps": 0,
+        "steering_mrad": 0,
+        "stationary": 0,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "cutoff_device_us": 9090130,
+        "stop_command_sequence": 100,
+        "reason": 8
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900265000000000000002a000000ff010349000000000000002b0000000000000002f18900000000000000000000000000000012345678123442348234123456789003030000000000000052b48a000000000064000000000000000800",
+      "raw_hex": "140f7b123456781234423482341234567890011234567812344234823412345678900265000000000000002a000000ff010349000000000000002b0000000000000002f18900000000000000000000000000000012345678123442348234123456789003030000000000000052b48a000000000064000000000000000800b039",
+      "wire_hex": "25140f7b123456781234423482341234567890011234567812344234823412345678900265010101010101022a010105ff010349010101010101022b0101010101010402f18901010101010101010101010101011212345678123442348234123456789003030101010101010452b48a010101010264010101010101020803b03900"
+    },
+    {
+      "name": "report_fault",
+      "symbol": "FEEDBACK3",
+      "id": 3860,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "command_sequence": 101,
+        "generation": 42,
+        "counter": 255,
+        "command_kind": 1,
+        "status": 4,
+        "report_sequence": 74,
+        "source_sample": 43,
+        "source_device_us": 9040130,
+        "flags": 0,
+        "velocity_mmps": 0,
+        "steering_mrad": 0,
+        "stationary": 0,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "cutoff_device_us": 9090130,
+        "stop_command_sequence": 100,
+        "reason": 11
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900265000000000000002a000000ff01044a000000000000002b0000000000000002f18900000000000000000000000000000012345678123442348234123456789003030000000000000052b48a000000000064000000000000000b00",
+      "raw_hex": "140f7b123456781234423482341234567890011234567812344234823412345678900265000000000000002a000000ff01044a000000000000002b0000000000000002f18900000000000000000000000000000012345678123442348234123456789003030000000000000052b48a000000000064000000000000000b000898",
+      "wire_hex": "25140f7b123456781234423482341234567890011234567812344234823412345678900265010101010101022a010105ff01044a010101010101022b0101010101010402f18901010101010101010101010101011212345678123442348234123456789003030101010101010452b48a010101010264010101010101020b03089800"
+    },
+    {
+      "name": "report_unsolicited_fault",
+      "symbol": "FEEDBACK3",
+      "id": 3860,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "command_sequence": 0,
+        "generation": 42,
+        "counter": 0,
+        "command_kind": 0,
+        "status": 4,
+        "report_sequence": 75,
+        "source_sample": 44,
+        "source_device_us": 9060130,
+        "flags": 0,
+        "velocity_mmps": 0,
+        "steering_mrad": 0,
+        "stationary": 0,
+        "clock_epoch": "00000000000000000000000000000000",
+        "clock_sequence": 0,
+        "cutoff_device_us": 0,
+        "stop_command_sequence": 0,
+        "reason": 14
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900200000000000000002a0000000000044b000000000000002c00000000000000223f8a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e00",
+      "raw_hex": "140f7b123456781234423482341234567890011234567812344234823412345678900200000000000000002a0000000000044b000000000000002c00000000000000223f8a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e004924",
+      "wire_hex": "24140f7b123456781234423482341234567890011234567812344234823412345678900201010101010101022a0101010103044b010101010101022c01010101010104223f8a010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101020e03492400"
+    },
+    {
+      "name": "report_unknown_measurements",
+      "symbol": "FEEDBACK3",
+      "id": 3860,
+      "origin": "current_product_struct",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "command_sequence": 102,
+        "generation": 42,
+        "counter": 0,
+        "command_kind": 1,
+        "status": 2,
+        "report_sequence": 76,
+        "source_sample": 44,
+        "source_device_us": 9060130,
+        "flags": 0,
+        "velocity_mmps": 0,
+        "steering_mrad": 0,
+        "stationary": 0,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "cutoff_device_us": 9090130,
+        "stop_command_sequence": 100,
+        "reason": 0
+      },
+      "payload_hex": "123456781234423482341234567890011234567812344234823412345678900266000000000000002a0000000001024c000000000000002c00000000000000223f8a00000000000000000000000000000012345678123442348234123456789003030000000000000052b48a000000000064000000000000000000",
+      "raw_hex": "140f7b123456781234423482341234567890011234567812344234823412345678900266000000000000002a0000000001024c000000000000002c00000000000000223f8a00000000000000000000000000000012345678123442348234123456789003030000000000000052b48a0000000000640000000000000000006fd1",
+      "wire_hex": "25140f7b123456781234423482341234567890011234567812344234823412345678900266010101010101022a0101010401024c010101010101022c01010101010104223f8a01010101010101010101010101011212345678123442348234123456789003030101010101010452b48a0101010102640101010101010101036fd100"
+    },
+    {
+      "name": "design_tof_fragment_0",
+      "symbol": "TOF_FRAGMENT3_DESIGN",
+      "id": 3862,
+      "origin": "external_design_only_no_current_serial_decoder",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "source_sample": 1,
+        "device_sample_us": 9050130,
+        "sample_time_error_us": 15000,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "sensor_id": 0,
+        "sensor_instance": "12345678123442348234123456789004",
+        "sensor_generation": 1,
+        "sensor_config_revision": 1,
+        "sensor_calibration_sha256": "f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf",
+        "rows": 8,
+        "cols": 8,
+        "fragment_index": 0,
+        "fragment_count": 4,
+        "zone_first": 0,
+        "zone_count": 16,
+        "frame_status": 7,
+        "sample_crc32": 3649649769,
+        "zones": "000000009101010b9201010b9301010b9401010b9501010b9601010b9701011b9801010b9901010b9a01010b000000009c01010b9d01010b9e01011b9f01010b"
+      },
+      "payload_hex": "1234567812344234823412345678900112345678123442348234123456789002010000000000000012188a0000000000983a000012345678123442348234123456789003030000000000000000123456781234423482341234567890040100000001000000f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf0808000400100700693c89d9000000009101010b9201010b9301010b9401010b9501010b9601010b9701011b9801010b9901010b9a01010b000000009c01010b9d01010b9e01011b9f01010b",
+      "raw_hex": "160fd11234567812344234823412345678900112345678123442348234123456789002010000000000000012188a0000000000983a000012345678123442348234123456789003030000000000000000123456781234423482341234567890040100000001000000f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf0808000400100700693c89d9000000009101010b9201010b9301010b9401010b9501010b9601010b9701011b9801010b9901010b9a01010b000000009c01010b9d01010b9e01011b9f01010b4c11",
+      "wire_hex": "25160fd11234567812344234823412345678900112345678123442348234123456789002010101010101010412188a0101010103983a011212345678123442348234123456789003030101010101010112123456781234423482341234567890040101010201010123f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf0808020403100705693c89d9010101299101010b9201010b9301010b9401010b9501010b9601010b9701011b9801010b9901010b9a01010b010101139c01010b9d01010b9e01011b9f01010b4c1100"
+    },
+    {
+      "name": "design_tof_fragment_1",
+      "symbol": "TOF_FRAGMENT3_DESIGN",
+      "id": 3862,
+      "origin": "external_design_only_no_current_serial_decoder",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "source_sample": 1,
+        "device_sample_us": 9050130,
+        "sample_time_error_us": 15000,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "sensor_id": 0,
+        "sensor_instance": "12345678123442348234123456789004",
+        "sensor_generation": 1,
+        "sensor_config_revision": 1,
+        "sensor_calibration_sha256": "f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf",
+        "rows": 8,
+        "cols": 8,
+        "fragment_index": 1,
+        "fragment_count": 4,
+        "zone_first": 16,
+        "zone_count": 16,
+        "frame_status": 7,
+        "sample_crc32": 3649649769,
+        "zones": "a001010ba101010ba201010ba301010ba401010ba501011b00000000a701010ba801010ba901010baa01010bab01010bac01011bad01010bae01010baf01010b"
+      },
+      "payload_hex": "1234567812344234823412345678900112345678123442348234123456789002010000000000000012188a0000000000983a000012345678123442348234123456789003030000000000000000123456781234423482341234567890040100000001000000f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf0808010410100700693c89d9a001010ba101010ba201010ba301010ba401010ba501011b00000000a701010ba801010ba901010baa01010bab01010bac01011bad01010bae01010baf01010b",
+      "raw_hex": "160fd11234567812344234823412345678900112345678123442348234123456789002010000000000000012188a0000000000983a000012345678123442348234123456789003030000000000000000123456781234423482341234567890040100000001000000f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf0808010410100700693c89d9a001010ba101010ba201010ba301010ba401010ba501011b00000000a701010ba801010ba901010baa01010bab01010bac01011bad01010bae01010baf01010b9778",
+      "wire_hex": "25160fd11234567812344234823412345678900112345678123442348234123456789002010101010101010412188a0101010103983a011212345678123442348234123456789003030101010101010112123456781234423482341234567890040101010201010128f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf080801041010071d693c89d9a001010ba101010ba201010ba301010ba401010ba501011b01010127a701010ba801010ba901010baa01010bab01010bac01011bad01010bae01010baf01010b977800"
+    },
+    {
+      "name": "design_tof_fragment_2",
+      "symbol": "TOF_FRAGMENT3_DESIGN",
+      "id": 3862,
+      "origin": "external_design_only_no_current_serial_decoder",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "source_sample": 1,
+        "device_sample_us": 9050130,
+        "sample_time_error_us": 15000,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "sensor_id": 0,
+        "sensor_instance": "12345678123442348234123456789004",
+        "sensor_generation": 1,
+        "sensor_config_revision": 1,
+        "sensor_calibration_sha256": "f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf",
+        "rows": 8,
+        "cols": 8,
+        "fragment_index": 2,
+        "fragment_count": 4,
+        "zone_first": 32,
+        "zone_count": 16,
+        "frame_status": 7,
+        "sample_crc32": 3649649769,
+        "zones": "b001010b00000000b201010bb301011bb401010bb501010bb601010bb701010bb801010bb901010bba01011bbb01010b00000000bd01010bbe01010bbf01010b"
+      },
+      "payload_hex": "1234567812344234823412345678900112345678123442348234123456789002010000000000000012188a0000000000983a000012345678123442348234123456789003030000000000000000123456781234423482341234567890040100000001000000f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf0808020420100700693c89d9b001010b00000000b201010bb301011bb401010bb501010bb601010bb701010bb801010bb901010bba01011bbb01010b00000000bd01010bbe01010bbf01010b",
+      "raw_hex": "160fd11234567812344234823412345678900112345678123442348234123456789002010000000000000012188a0000000000983a000012345678123442348234123456789003030000000000000000123456781234423482341234567890040100000001000000f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf0808020420100700693c89d9b001010b00000000b201010bb301011bb401010bb501010bb601010bb701010bb801010bb901010bba01011bbb01010b00000000bd01010bbe01010bbf01010bde29",
+      "wire_hex": "25160fd11234567812344234823412345678900112345678123442348234123456789002010101010101010412188a0101010103983a011212345678123442348234123456789003030101010101010112123456781234423482341234567890040101010201010128f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf0808020420100709693c89d9b001010b01010129b201010bb301011bb401010bb501010bb601010bb701010bb801010bb901010bba01011bbb01010b0101010fbd01010bbe01010bbf01010bde2900"
+    },
+    {
+      "name": "design_tof_fragment_3",
+      "symbol": "TOF_FRAGMENT3_DESIGN",
+      "id": 3862,
+      "origin": "external_design_only_no_current_serial_decoder",
+      "fields": {
+        "pi_session": "12345678123442348234123456789001",
+        "device_session": "12345678123442348234123456789002",
+        "source_sample": 1,
+        "device_sample_us": 9050130,
+        "sample_time_error_us": 15000,
+        "clock_epoch": "12345678123442348234123456789003",
+        "clock_sequence": 3,
+        "sensor_id": 0,
+        "sensor_instance": "12345678123442348234123456789004",
+        "sensor_generation": 1,
+        "sensor_config_revision": 1,
+        "sensor_calibration_sha256": "f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf",
+        "rows": 8,
+        "cols": 8,
+        "fragment_index": 3,
+        "fragment_count": 4,
+        "zone_first": 48,
+        "zone_count": 16,
+        "frame_status": 7,
+        "sample_crc32": 3649649769,
+        "zones": "c001010bc101011bc201010bc301010bc401010bc501010bc601010b00000000c801011bc901010bca01010bcb01010bcc01010bcd01010bce01010bcf01011b"
+      },
+      "payload_hex": "1234567812344234823412345678900112345678123442348234123456789002010000000000000012188a0000000000983a000012345678123442348234123456789003030000000000000000123456781234423482341234567890040100000001000000f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf0808030430100700693c89d9c001010bc101011bc201010bc301010bc401010bc501010bc601010b00000000c801011bc901010bca01010bcb01010bcc01010bcd01010bce01010bcf01011b",
+      "raw_hex": "160fd11234567812344234823412345678900112345678123442348234123456789002010000000000000012188a0000000000983a000012345678123442348234123456789003030000000000000000123456781234423482341234567890040100000001000000f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf0808030430100700693c89d9c001010bc101011bc201010bc301010bc401010bc501010bc601010b00000000c801011bc901010bca01010bcb01010bcc01010bcd01010bce01010bcf01011b9367",
+      "wire_hex": "25160fd11234567812344234823412345678900112345678123442348234123456789002010101010101010412188a0101010103983a011212345678123442348234123456789003030101010101010112123456781234423482341234567890040101010201010128f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf0808030430100721693c89d9c001010bc101011bc201010bc301010bc401010bc501010bc601010b01010123c801011bc901010bca01010bcb01010bcc01010bcd01010bce01010bcf01011b936700"
+    }
+  ],
+  "malformed": [
+    {
+      "name": "bad_cobs",
+      "wire_hex": "050100",
+      "error": "serial COBS"
+    },
+    {
+      "name": "bad_crc",
+      "wire_hex": "2511016c123456781234423482341234567890011234567812344234823412345678900265010101010101121234567812344234823412345678900303010101010101046c430f0101010104fca210010101010452b48a01010101022a010104ff016401010101010102fa0351ff0103bd8100",
+      "error": "serial length/CRC"
+    },
+    {
+      "name": "bad_length",
+      "wire_hex": "2511016b123456781234423482341234567890011234567812344234823412345678900265010101010101121234567812344234823412345678900303010101010101046c430f0101010104fca210010101010452b48a01010101022a010104ff016401010101010102fa0351ff0103cec100",
+      "error": "serial length/CRC"
+    },
+    {
+      "name": "missing_delimiter",
+      "wire_hex": "2511016c123456781234423482341234567890011234567812344234823412345678900265010101010101121234567812344234823412345678900303010101010101046c430f0101010104fca210010101010452b48a01010101022a010104ff016401010101010102fa0351ff0103bc81",
+      "error": "serial boundary/size"
+    },
+    {
+      "name": "oversize",
+      "wire_hex": "0101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010100",
+      "error": "serial boundary/size"
+    },
+    {
+      "name": "short_raw",
+      "wire_hex": "03010200",
+      "error": "short serial frame"
+    }
+  ],
+  "crc16_check": {
+    "ascii": "123456789",
+    "expected_hex": "29b1"
+  },
+  "cobs_checks": [
+    {
+      "raw_hex": "",
+      "encoded_hex": "01"
+    },
+    {
+      "raw_hex": "00",
+      "encoded_hex": "0101"
+    },
+    {
+      "raw_hex": "000100",
+      "encoded_hex": "01020101"
+    },
+    {
+      "raw_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "encoded_hex": "01ff0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfe02ff"
+    },
+    {
+      "raw_hex": "0101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101",
+      "encoded_hex": "ff010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101"
+    }
+  ],
+  "tof_design_only": {
+    "id": 3862,
+    "payload_bytes": 209,
+    "crc32_body_bytes": 393,
+    "whole_crc_body_hex": "1234567812344234823412345678900112345678123442348234123456789002010000000000000012188a0000000000983a000012345678123442348234123456789003030000000000000000123456781234423482341234567890040100000001000000f5e8492969457e4d08a7ef1e3de1e675983126c42a9ed6b348ea69e9e2ea75bf08080700000000009101010b9201010b9301010b9401010b9501010b9601010b9701011b9801010b9901010b9a01010b000000009c01010b9d01010b9e01011b9f01010ba001010ba101010ba201010ba301010ba401010ba501011b00000000a701010ba801010ba901010baa01010bab01010bac01011bad01010bae01010baf01010bb001010b00000000b201010bb301011bb401010bb501010bb601010bb701010bb801010bb901010bba01011bbb01010b00000000bd01010bbe01010bbf01010bc001010bc101011bc201010bc301010bc401010bc501010bc601010b00000000c801011bc901010bca01010bcb01010bcc01010bcd01010bce01010bcf01011b",
+    "sample_crc32": 3649649769,
+    "current_serial_payload_decoder": false,
+    "capability_required": 512
+  }
+}
