@@ -150,6 +150,9 @@ class SceneEvidenceScope:
 
     source owner가 가진 원 RawBinding/CalibrationProfile/PiGeometryOrigin을 받는다.
     tof_sources는 (외부 leaf 이름, actual TofLeaf, 실제 sensor_instance, generation)다.
+    approved_tof_assets는 역사 descriptor 검증 전용 (외부 이름, TofLeaf) 목록이다.
+    None이면 검증된 현재 tof_sources에서만 도출하며, 명시 ()는 승인 자산 없음이다.
+    자산 목록만으로 현재 sensor incarnation이나 새 TOF context를 만들지 않는다.
     historical_scopes는 caller가 명시적으로 선택한 원 scope만 허용한다. 단순 bool이나
     context SHA만으로 다른 source를 승인하지 않는다. 알려지지 않은 옛 method body는
     그대로 NOT_READY이며 기존 ParkingBridge body도 자동 승인하지 않는다.
@@ -159,10 +162,12 @@ class SceneEvidenceScope:
     calibration: CalibrationProfile
     method_manifest_sha256: str
     _tof: tuple
+    approved_tof_assets: tuple
     _historical: tuple
     _parking_methods: object
 
-    def __init__(self,context,raw_binding,calibration,method_manifest_sha256,*,tof_sources=(),historical_scopes=()):
+    def __init__(self,context,raw_binding,calibration,method_manifest_sha256,*,tof_sources=(),
+                 approved_tof_assets=None,historical_scopes=()):
         if (type(context) is not StorageContext or type(raw_binding) is not RawBinding
                 or type(calibration) is not CalibrationProfile or context.geometry_origin is None):
             raise SceneError('EVIDENCE_SCOPE_NOT_READY: actual raw/calibration/Pi origin required')
@@ -188,15 +193,27 @@ class SceneEvidenceScope:
             if type(instance) is not str or str(UUID(instance))!=instance or not UUID(instance).int:
                 raise SceneError('actual sensor incarnation required')
             uint(generation,positive=True); sensors.add(leaf.sensor_id)
+        assets=tuple((name,leaf) for name,leaf,_,_ in tof_sources) if approved_tof_assets is None else approved_tof_assets
+        if type(assets) is not tuple or len(assets)>2:
+            raise SceneError('bounded approved ToF asset inventory required')
+        sensors=set();names=set()
+        for item in assets:
+            if type(item) is not tuple or len(item)!=2:raise SceneError('exact approved ToF asset entry required')
+            name,leaf=item
+            if (type(name) is not str or type(leaf) is not TofLeaf or external.get(name)!=leaf.sha256
+                    or name in names or leaf.sensor_id in sensors):
+                raise SceneError('actual approved ToF leaf/configuration required')
+            sensors.add(leaf.sensor_id);names.add(name)
         for old in historical_scopes:
             if (old.calibration.sha256!=calibration.sha256 or old.method_manifest_sha256!=method_manifest_sha256
                     or old.context.geometry_origin!=context.geometry_origin or any(getattr(old.context,name)!=getattr(context,name)
                         for name in ('database_uuid','map_epoch','frame_epoch','odom_epoch','configuration','calibration','primitive_sha256'))
                     or any(old.raw_binding.fields[name]!=raw_binding.fields[name] for name in
-                        ('device_id','model_id','parser_id','graph_profile_sha256','calibration_bundle','format_table_sha256'))):
+                        ('device_id','model_id','parser_id','graph_profile_sha256','calibration_bundle','format_table_sha256'))
+                    or any((name,leaf) not in assets for name,leaf,_,_ in old._tof)):
                 raise SceneError('historical source geometry/asset/Pi session differs')
         for name,value in dict(context=context,raw_binding=raw_binding,calibration=calibration,
-                method_manifest_sha256=method_manifest_sha256,_tof=tof_sources,_historical=historical_scopes,
+                method_manifest_sha256=method_manifest_sha256,_tof=tof_sources,approved_tof_assets=assets,_historical=historical_scopes,
                 _parking_methods=None).items():
             object.__setattr__(self,name,value)
 
@@ -344,6 +361,27 @@ class SceneEvidenceScope:
                 raise SceneError('actual final head is below original issued catalog IDs')
         return request,head
 
+    def _historical_tof_source(self,stored):
+        """승인 자산과 원 descriptor를 대조한다. 현재 incarnation은 생성하지 않는다."""
+        if type(stored) is not dict or set(stored)!={'name','sensor_id','sensor_instance','sensor_generation',
+                'leaf_sha256','sensor_config_revision','driver_profile_sha256','distance_convention'}:
+            raise SceneError('exact historical ToF source descriptor required')
+        instance=stored['sensor_instance']
+        try:
+            uint(stored['sensor_id']);uint(stored['sensor_config_revision'],positive=True)
+            uint(stored['sensor_generation'],positive=True)
+            if type(instance) is not str or str(UUID(instance))!=instance or not UUID(instance).int:
+                raise ValueError('actual historical sensor incarnation required')
+        except ValueError as error:raise SceneError('invalid original ToF source identity/revision') from error
+        selected=next((item for item in self.approved_tof_assets
+            if item[0]==stored['name'] and item[1].sensor_id==stored['sensor_id']),None)
+        if selected is None:raise SceneError('historical ToF leaf is outside approved asset inventory')
+        name,leaf=selected
+        if (stored['leaf_sha256'],stored['sensor_config_revision'],stored['driver_profile_sha256'],stored['distance_convention'])!=(
+                leaf.sha256,leaf.sensor_config_revision,leaf.driver_profile_sha256,leaf.distance_convention):
+            raise SceneError('historical ToF leaf/configuration differs from approved asset')
+        return name,leaf,instance,stored['sensor_generation']
+
     def with_complete_history(self,complete,*,now_us):
         """실제 참조된 source 문맥만 역사 의미로 수락한다. 현재 scene/metric 권위는 아니다."""
         self.complete_restore_head(complete,now_us=now_us)
@@ -353,6 +391,8 @@ class SceneEvidenceScope:
         for key in sorted(referenced):
             record=by_sha[key];value=json_bytes(record.payload,4096);body=value['body']
             if body.get('profile')!='scene-source-context-1':continue
+            # 현재/명시 history와 이미 일치하더라도 명시 zero inventory를 우회하지 않는다.
+            tof=() if body.get('tof') is None else (self._historical_tof_source(body['tof']),)
             try:self._record_scope(record)
             except SceneError:pass
             else:continue
@@ -363,23 +403,12 @@ class SceneEvidenceScope:
                     or body['method_manifest_sha256']!=self.method_manifest_sha256
                     or body['input_kind']!=self.calibration.kind or body['coordinate']!='MAP_X_FORWARD_Y_LEFT_REAR_AXLE'):
                 raise SceneError('historical source method/local calibration is not approved')
-            context=StorageContext.from_fields(body['storage_context']);raw=RawBinding(body['raw_binding']);tof=()
-            if body['tof'] is not None:
-                stored=body['tof']
-                if type(stored) is not dict or set(stored)!={'name','sensor_id','sensor_instance','sensor_generation',
-                        'leaf_sha256','sensor_config_revision','driver_profile_sha256','distance_convention'}:
-                    raise SceneError('exact historical ToF source descriptor required')
-                selected=next((item for item in self._tof if item[0]==stored['name'] and item[1].sensor_id==stored['sensor_id']),None)
-                if selected is None:raise SceneError('actual approved ToF leaf is unavailable')
-                name,leaf,_,_=selected
-                if (stored['leaf_sha256'],stored['sensor_config_revision'],stored['driver_profile_sha256'],stored['distance_convention'])!=(
-                        leaf.sha256,leaf.sensor_config_revision,leaf.driver_profile_sha256,leaf.distance_convention):
-                    raise SceneError('historical ToF leaf/configuration differs from approved asset')
-                tof=((name,leaf,stored['sensor_instance'],stored['sensor_generation']),)
-            old=SceneEvidenceScope(context,raw,self.calibration,self.method_manifest_sha256,tof_sources=tof)
+            context=StorageContext.from_fields(body['storage_context']);raw=RawBinding(body['raw_binding'])
+            old=SceneEvidenceScope(context,raw,self.calibration,self.method_manifest_sha256,
+                tof_sources=tof,approved_tof_assets=self.approved_tof_assets)
             # 기존 constructor가 실제 origin/asset 호환성을 모두 검사한다.
             SceneEvidenceScope(self.context,self.raw_binding,self.calibration,self.method_manifest_sha256,
-                tof_sources=self._tof,historical_scopes=(old,))
+                tof_sources=self._tof,approved_tof_assets=self.approved_tof_assets,historical_scopes=(old,))
             prototype=json_bytes(old.context_record(value['kind'],sensor_id=None if not tof else tof[0][1].sensor_id).payload,4096)
             if prototype!=value:raise SceneError('historical source context is not its original exact grammar')
             marker=(old.context.bytes,old.raw_binding.sha256,canonical(old._tof_fields()))
@@ -387,7 +416,7 @@ class SceneEvidenceScope:
                 if len(historical)>=64:raise SceneError('historical source scope capacity exceeded')
                 historical.append(old);keys.add(marker)
         result=SceneEvidenceScope(self.context,self.raw_binding,self.calibration,self.method_manifest_sha256,
-            tof_sources=self._tof,historical_scopes=tuple(historical))
+            tof_sources=self._tof,approved_tof_assets=self.approved_tof_assets,historical_scopes=tuple(historical))
         if self._parking_methods is not None:
             object.__setattr__(result,'_parking_methods',self._parking_methods)
         for record in complete.evidence.provenance:
@@ -846,6 +875,71 @@ class MapperScene:
         if slots > 64: raise SceneError('summary slot capacity exceeded')
         return positive, valid_mask, slots
 
+    def descendant_scene(self,snapshot,*,frame,now_j_us):
+        """실제 채택 사본의 Pi cutoff로 새 증분 descriptor만 만든다.
+
+        최초 frozen manifest/기한/셀 시각은 변경하지 않는다. snapshot의 실제 소유권과
+        generation/refs는 호출하는 Mapping owner가 검사한다. 이 포트는 사용권 발급이 아니다.
+        """
+        from .map_checkpoint import MapSnapshot,FrameEvidence
+        from xenova_drive_world.mapper_clock import ClockLease
+        grant,trust=self._now(now_j_us);frozen=self._frozen;scope=self.evidence_scope
+        if (not self._eligible or grant.lifecycle_state!=2 or frozen is None or frozen.receipt is None
+                or type(snapshot) is not MapSnapshot or type(frame) is not FrameEvidence
+                or snapshot.job.context!=self.context or snapshot.job.scene_commit_nonce is not None
+                or not snapshot.job.current(self.context.sha256,now_j_us) or scope is None
+                or frame.scope.context!=self.context or frame.scope.raw_binding!=scope.raw_binding
+                or frame.scope.calibration.sha256!=scope.calibration.sha256
+                or frame.scope.method_manifest_sha256!=scope.method_manifest_sha256
+                or frame.source_kind!='CAMERA' or type(frame.clock_lease) is not ClockLease or frame.clock_lease.source!=self.source
+                or frame.clock_lease.pi_host_boot!=self.context.pi_host_boot):
+            raise SceneError('current ADMITTED source and actual original checkpoint frame required')
+        observation=self._observation
+        expected=grant.restore_checkpoint_sha256 if grant.purpose else grant.frozen_evidence_sha256
+        if (observation is None or frame.observation.kind!=observation.input_kind or observation.stamp!=frame.observation.rgb.stamp
+                or observation.raw_pose.captured_us!=frame.observation.capture_interval
+                or not frame.accepted_us<=now_j_us or now_j_us-observation.raw_pose.captured_us[0]>self.profile.observation_max_age_us
+                or not observation.accepted_alignment.valid_at(now_j_us)
+                or frozen.checkpoint_sha256!=expected.hex() or self._hazard!=frozen.hazard_revision
+                or self._hazard!=grant.frozen_hazard_revision or observation.hazard_revision!=self._hazard
+                or frame.pi_interval!=frame.clock_lease.j_interval_to_pi(frame.observation.capture_interval,frame.accepted_us)):
+            raise SceneError('descendant checkpoint lost original observation/clock/hazard/base')
+        value=json_bytes(frozen.manifest,16384)['scene']
+        if (type(value) is not dict or value.get('profile')!='controlled-survey-1'
+                or value.get('admission_id')!=grant.scene.admission_id.hex()
+                or value.get('survey_id')!=grant.scene.survey_id.hex()
+                or value.get('survey_revision')!=grant.frozen_survey_revision
+                or value.get('begin_pi_us')!=grant.issued_pi_us
+                or value.get('coverage_profile_sha256')!=self.profile.coverage_profile_sha256):
+            raise SceneError('descendant checkpoint changed original survey lineage')
+        records={record.provenance_id:record for record in snapshot.evidence.provenance}
+        contexts={item.sha256:item for item in snapshot.evidence.contexts}
+        # 실제 pose 보간의 오른쪽 Vehicle은 RGB보다 늦을 수 있다. 원 부모 hull도 포함한다.
+        approved_upper=frame.pi_interval[1]
+        for parent in (*frame.parents,*frame.ancestry):
+            if records.get(parent.provenance_id)!=parent:
+                raise SceneError('current original frame parent is absent from checkpoint')
+            if parent.source_mask&16:approved_upper=max(approved_upper,parent.pi_upper)
+        for record in records.values():
+            context=contexts.get(record.context_sha256)
+            if (context is None or PROVENANCE.unpack(record.payload)[5]!=UUID(self.context.pi_host_boot).bytes
+                    or any(parent not in records for parent in record.parents)):
+                raise SceneError('descendant original provenance/context closure differs')
+            actual,_=scope.record_sources(record,context,evidence=snapshot.evidence)
+            for parent in record.parents:actual|=records[parent].source_mask
+            if record.source_mask&actual!=record.source_mask:
+                raise SceneError('descendant source mask has no original registered witness')
+        cutoff=uint(snapshot.durable_cutoff_pi_us,positive=True)
+        if (cutoff<frame.pi_interval[1] or cutoff>approved_upper
+                or any(record.pi_upper>cutoff for record in records.values())
+                or cutoff<value['begin_pi_us'] or cutoff>=grant.valid_until_pi_us
+                or cutoff>uint(now_j_us+trust.upper_offset_us)):
+            raise SceneError('descendant cutoff exceeds actual approved evidence/original lifetime')
+        scene=dict(value);scene.pop('mapper_state',None)
+        scene['collection_end_pi_us']=cutoff
+        scene['base_evidence_sha256']=grant.frozen_evidence_sha256.hex()
+        return scene
+
     def freeze_scene(self, job, *, current_tile_references, current_hazard_revision, now_j_us):
         """원 operator job의 순수 descriptor다. CP 생성/offer/ID 소비는 하지 않는다."""
         grant, trust = self._now(now_j_us)
@@ -989,6 +1083,14 @@ class MapperScene:
                 or original_sha != grant.frozen_evidence_sha256.hex()
                    and scene.get('base_evidence_sha256') != grant.frozen_evidence_sha256.hex()):
             raise SceneError('checkpoint does not close over original frozen base')
+        if scene.get('base_evidence_sha256') is not None:
+            end=uint(scene.get('collection_end_pi_us'),positive=True)
+            manifest=json_bytes(complete.manifest,16384)
+            if (scene.get('begin_pi_us')!=grant.issued_pi_us or end!=manifest['durable_cutoff_pi_us']
+                    or end<scene['begin_pi_us'] or end>=grant.valid_until_pi_us
+                    or end>uint(now_j_us+trust.upper_offset_us)
+                    or scene.get('hazard_revision')!=grant.frozen_hazard_revision):
+                raise SceneError('descendant checkpoint cutoff/clock/hazard differs from original grant')
         # 이 사본의 SHA는 원 CP SHA가 아니다. inspect만 기존 bounded payload 포트로 전달한다.
         inspection=CheckpointPayload(complete.manifest,complete.tiles[:32],complete.evidence)
         positive, mask, slots = self._inspect(inspection,begin_pi=scene['begin_pi_us'],

@@ -244,7 +244,7 @@ class MapperMapping:
         if self._scope is not None and (self._scope._tof!=tuple(sources) or self._scope.context!=context):
             old=(*old,self._scope)
         scope=SceneEvidenceScope(context,self.raw,self.calibration,self.profile.sha256,
-            tof_sources=tuple(sources),historical_scopes=old)
+            tof_sources=tuple(sources),approved_tof_assets=self.profile.sensors.tof_sources,historical_scopes=old)
         if self.catalogs is not None:
             scope=scope.with_parking_method(self.catalogs._accepted.parking.method)
         if self._complete is not None and not self._restore_done:
@@ -575,9 +575,11 @@ class MapperMapping:
         if draft.collector is not None:self._cursor_floor=max(self._cursor_floor,draft.collector._next)
         self._staged=None
 
-    def queue_checkpoint(self,job,*,now_us,scene=None,subsystem_state=None):
-        """명시 원 job으로 확정 상태를 고정한다. 이 함수는 D offer/fsync를 하지 않는다."""
+    def queue_checkpoint(self,job,*,now_us,scene=None,subsystem_state=None,scene_at_snapshot=None):
+        """D offer/fsync 없이 원 job을 고정한다. local callback은 snapshot 뒤 최초 encode 전에만 호출한다."""
         self._owner();uint(now_us)
+        if scene_at_snapshot is not None and (scene is not None or not callable(scene_at_snapshot)):
+            raise ValueError('choose static scene or one local snapshot callback')
         if (not self.ready or self._pipeline is None or self._staged is not None or self._pending is not None
                 or self.mailbox.main_peek() is not None or type(job) is not StorageJob or job.context is not self._context):
             raise MappingNotReady('accepted source/map and one original current checkpoint job required')
@@ -588,7 +590,19 @@ class MapperMapping:
             if type(subsystem_state) is not dict or set(subsystem_state)&set(state):raise ValueError('independent original subsystem state required')
             state.update(subsystem_state)
         if not self._head_ready:
-            request=self.collector.capture(self._pipeline,job,now_us=now_us,scene=scene,subsystem_state=state)
+            snapshot=None
+            try:
+                if scene_at_snapshot is not None:
+                    snapshot=self.collector.snapshot(self._pipeline,job,now_us=now_us,subsystem_state=state)
+                    self.collector.current_tile_references(self._pipeline,snapshot)
+                    try:scene=scene_at_snapshot(snapshot)
+                    except ValueError as error:raise MappingNotReady('original Scene snapshot validation failed') from error
+                    if type(scene) is not dict or 'mapper_state' in scene:raise MappingNotReady('local Scene callback must preserve snapshot ownership')
+                request=self.collector.capture(self._pipeline,job,now_us=now_us,scene=scene,subsystem_state=state)
+            except BaseException:
+                if snapshot is not None and self.collector._pending is None and self.collector._draft_snapshot is snapshot:
+                    self.collector.discard_snapshot(snapshot)
+                raise
             self._pending=MappingPending('CHECKPOINT',request)
         else:
             metadata={} if scene is None else dict(scene)
@@ -597,6 +611,12 @@ class MapperMapping:
             metadata['mapper_state']=snapshot.mapper_state_ref
             request=None
             try:
+                if scene_at_snapshot is not None:
+                    self.collector.current_tile_references(self._pipeline,snapshot)
+                    try:metadata=scene_at_snapshot(snapshot)
+                    except ValueError as error:raise MappingNotReady('original Scene snapshot validation failed') from error
+                    if type(metadata) is not dict or 'mapper_state' in metadata:raise MappingNotReady('local Scene callback must preserve snapshot ownership')
+                    metadata=dict(metadata,mapper_state=snapshot.mapper_state_ref)
                 request=self.catalogs.prepare_checkpoint(job,base_evidence=snapshot.evidence,now_us=now_us,
                     tiles=snapshot.tiles,tile_references=snapshot.tile_references,
                     durable_cutoff_pi_us=snapshot.durable_cutoff_pi_us,scene=metadata)

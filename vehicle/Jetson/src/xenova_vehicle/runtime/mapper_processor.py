@@ -178,22 +178,30 @@ class ResidentMapperProcessor:
         if self._scene is None:return arguments
         frozen=self._scene.scene._frozen
         if frozen is None or frozen.receipt is None:return arguments
-        from ..storage.contracts import json_bytes
         from xenova_drive_world import decode,schema
-        value=json_bytes(frozen.manifest,16384)['scene']
-        if value is None:return arguments
         grant=decode(self._scene.scene.grant_bytes,schema.SceneGrant)
-        scene=dict(value);scene.pop('mapper_state',None)
-        if grant.HasField('frozen_evidence_sha256'):
-            scene['base_evidence_sha256']=grant.frozen_evidence_sha256.hex()
-        arguments['scene']=scene
+        # 철회된 frozen은 역사 owner로 남을 수 있다. 일반 geometry CP는 계속 허용한다.
+        if not self._scene.scene.eligible or grant.lifecycle_state!=2:return arguments
+        coordinator=self._scene;original_grant=coordinator.scene.grant_bytes;context=self._mapping._context
+        def descriptor(snapshot):
+            from .scene import SceneError
+            owner=self._mapping
+            if (self._scene is not coordinator or coordinator.scene.grant_bytes!=original_grant
+                    or owner._context is not context or owner.context_port.read() is not context
+                    or snapshot is not owner.collector._draft_snapshot or snapshot.job.context is not context):
+                raise SceneError('original Scene/publication changed during checkpoint capture')
+            owner.collector.current_tile_references(owner._pipeline,snapshot)
+            if self._hazard is None or self._hazard.snapshot is None or self._hazard.snapshot.revision!=coordinator.scene._hazard:
+                raise SceneError('current accepted hazard differs from Scene snapshot')
+            return coordinator.scene.descendant_scene(snapshot,frame=owner.collector._last,now_j_us=self.clock())
+        arguments['scene_at_snapshot']=descriptor
         return arguments
 
     def _hazard_checkpoint_state(self):
         """동일 compute owner의 채택 map과 보수 occupied/floor만 원 CP에 보존한다."""
         if (self._hazard is None or self._hazard.snapshot is None or self._mapping is None
-                or self._mapping._pipeline is None or self._mapping.context is None):return {}
-        return self._hazard.state_fields(self._mapping._pipeline,self._mapping.context,self._config.sha256)
+                or self._mapping._pipeline is None or self._mapping._context is None):return {}
+        return self._hazard.state_fields(self._mapping._pipeline,self._mapping._context,self._config.sha256)
 
     def _queue_scene_freeze(self,now):
         """원 Pi commit nonce의 CP 하나만 준비한다. 큰 사본/검산은 maintenance 밖으로 새지 않는다."""
@@ -280,11 +288,11 @@ class ResidentMapperProcessor:
             sha256(context.source_binding).hexdigest(),snapshot.grant_sha256)
         if self._publication_port.offer(report):self._scene_summary_sent=key
 
-    def queue_mapping_checkpoint(self,job,*,now_us=None,scene=None,subsystem_state=None):
+    def queue_mapping_checkpoint(self,job,*,now_us=None,scene=None,subsystem_state=None,scene_at_snapshot=None):
         """명시 원 job을 compute 유지 단계에서 고정한다. 호출 자체는 외부 D offer가 아니다."""
         if self._mapping is None:raise RuntimeError('actual mapping controller is not initialized')
         return self._mapping.queue_checkpoint(job,now_us=self.clock() if now_us is None else now_us,
-            scene=scene,subsystem_state=subsystem_state)
+            scene=scene,subsystem_state=subsystem_state,scene_at_snapshot=scene_at_snapshot)
 
     def queue_mapping_head_load(self,job):
         if self._mapping is None:raise RuntimeError('actual mapping controller is not initialized')
@@ -343,7 +351,7 @@ class ResidentMapperProcessor:
                               leaves[value.sensor_id][1].first_surface_qualified,
                               leaves[value.sensor_id][1].coverage_qualified,leaves[value.sensor_id][1].time_qualified)))
             scope=SceneEvidenceScope(context,self._binding,candidate.calibration,self._config.sha256,
-                tof_sources=sources)
+                tof_sources=sources,approved_tof_assets=self._config.sensors.tof_sources)
             scope=scope.with_complete_history(source,now_us=self.clock())
             restore_pipeline(candidate.pipeline,source,scope)
         except (MapCheckpointNotReady,SceneError):
